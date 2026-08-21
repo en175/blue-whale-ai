@@ -153,15 +153,15 @@ function extractPrompt(md) {
   return [pick('完整提示词'), pick('负面要求')].filter(Boolean).join('\n\n');
 }
 
-/** 图片卡构造器：title=文件夹-编号，content 默认 文件夹-提示词-编号.md */
-const pic = (folder, n, files, contentFile) => ({
+/** 图片卡构造器（IKA64P 产品校准）：一文件夹一卡，三张编号结果图堆叠（与视频卡同），content 取第一份提示词 */
+const picSet = (folder, files, contentFile) => ({
   tag: 'picture',
-  title: `${folder}-${n}`,
-  content: `图片/${folder}/${contentFile ?? `${folder}-提示词-${n}.md`}`,
+  title: folder,
+  content: `图片/${folder}/${contentFile ?? `${folder}-提示词-01.md`}`,
   images: files.map((f) => `图片/${folder}/${f}`),
 });
 
-/** manifest：25 卡（视频 8 + 图片 17），images 顺序即展示序 */
+/** manifest：14 卡（视频 8 一文件夹一卡 + 图片 6 一文件夹一卡），images 顺序即展示序 */
 const manifest = [
   // ── 视频标签：一文件夹一卡 ──
   { tag: 'video', title: '3c-键盘', content: '视频/3c-键盘/3c-键盘-提示词.md', images: ['视频/3c-键盘/3c-键盘-参考图-01.jpg', '视频/3c-键盘/3c-键盘-参考图-02.jpeg', '视频/3c-键盘/3c-键盘-参考图-03.jpeg'], video: '视频/3c-键盘/3c-键盘-视频.mp4' },
@@ -172,24 +172,13 @@ const manifest = [
   { tag: 'video', title: '美妆-香水', content: '视频/美妆-香水/美妆-香水-提示词.md', images: ['视频/美妆-香水/美妆-香水-参考图-01.png', '视频/美妆-香水/美妆-香水-参考图-02.jpg', '视频/美妆-香水/美妆-香水-参考图-03.jpg', '视频/美妆-香水/美妆-香水-参考图-04.jpg'], video: '视频/美妆-香水/美妆-香水-视频.mp4' },
   { tag: 'video', title: '腾讯视频号-黄桃', content: '视频/腾讯视频号-黄桃/腾讯视频号-黄桃-提示词.md', images: ['视频/腾讯视频号-黄桃/腾讯视频号-黄桃-封面-01-人物手持黄桃.jpg', '视频/腾讯视频号-黄桃/腾讯视频号-黄桃-封面-02-盘中黄桃静物.jpg', '视频/腾讯视频号-黄桃/腾讯视频号-黄桃-封面-03-近景展示黄桃.jpg'], video: '视频/腾讯视频号-黄桃/腾讯视频号-黄桃-视频.mp4' },
   { tag: 'video', title: '食物-塔可', content: '视频/食物-塔可/食物-塔可-提示词.md', images: ['视频/食物-塔可/食物-塔可-参考图-01.png', '视频/食物-塔可/食物-塔可-参考图-02.jpg', '视频/食物-塔可/食物-塔可-参考图-03.jpg'], video: '视频/食物-塔可/食物-塔可-视频.mp4' },
-  // ── 图片标签：一提示词一卡 ──
-  pic('YouTube缩略图', '01', ['YouTube缩略图-参考图-01.jpeg']),
-  pic('YouTube缩略图', '02', ['YouTube缩略图-参考图-02.jpeg']),
-  pic('YouTube缩略图', '03', ['YouTube缩略图-参考图-03.jpeg']),
-  pic('为这款产品设计包装', '01', ['为这款产品设计包装-商品图.jpeg', '为这款产品设计包装-参考图-01.jpeg']),
-  pic('为这款产品设计包装', '02', ['为这款产品设计包装-商品图.jpeg', '为这款产品设计包装-参考图-02.jpeg']),
-  pic('为这款产品设计包装', '03', ['为这款产品设计包装-商品图.jpeg', '为这款产品设计包装-参考图-03.jpeg']),
-  pic('创作现代品牌logo', '01', ['创作现代品牌logo-参考图-01.jpeg']),
-  pic('创作现代品牌logo', '02', ['创作现代品牌logo-参考图-02.jpeg']),
-  pic('创作现代品牌logo', '03', ['创作现代品牌logo-参考图-03.jpeg']),
-  pic('商品详情页', '01', ['商品详情页-手表商品图.jpeg', '商品详情页-详情页-01.jpeg']),
-  pic('商品详情页', '02', ['商品详情页-手表商品图.jpeg', '商品详情页-详情页-02.jpeg']),
-  pic('商品详情页', '03', ['商品详情页-手表商品图.jpeg', '商品详情页-详情页-03.jpeg']),
-  pic('营销活动海报', '01', ['营销活动海报-01.jpeg']),
-  pic('营销活动海报', '02', ['营销活动海报-02.jpeg']),
-  pic('营销活动海报', '03', ['营销活动海报-03.jpeg']),
-  pic('高级产品主图-石斛原浆', '商品', ['高级产品主图-石斛原浆-商品原图.jpeg', '高级产品主图-石斛原浆-产品图-01.jpeg'], '高级产品主图-石斛原浆-商品提示词.md'),
-  pic('高级产品主图-石斛原浆', '01', ['高级产品主图-石斛原浆-商品原图.jpeg', '高级产品主图-石斛原浆-产品图-02.jpeg', '高级产品主图-石斛原浆-产品图-03.jpeg'], '高级产品主图-石斛原浆-提示词-01.md'),
+  // ── 图片标签：一文件夹一卡（产品校准：六组三图堆叠） ──
+  picSet('YouTube缩略图', ['YouTube缩略图-参考图-01.jpeg', 'YouTube缩略图-参考图-02.jpeg', 'YouTube缩略图-参考图-03.jpeg']),
+  picSet('为这款产品设计包装', ['为这款产品设计包装-参考图-01.jpeg', '为这款产品设计包装-参考图-02.jpeg', '为这款产品设计包装-参考图-03.jpeg']),
+  picSet('创作现代品牌logo', ['创作现代品牌logo-参考图-01.jpeg', '创作现代品牌logo-参考图-02.jpeg', '创作现代品牌logo-参考图-03.jpeg']),
+  picSet('商品详情页', ['商品详情页-详情页-01.jpeg', '商品详情页-详情页-02.jpeg', '商品详情页-详情页-03.jpeg']),
+  picSet('营销活动海报', ['营销活动海报-01.jpeg', '营销活动海报-02.jpeg', '营销活动海报-03.jpeg']),
+  picSet('高级产品主图-石斛原浆', ['高级产品主图-石斛原浆-产品图-01.jpeg', '高级产品主图-石斛原浆-产品图-02.jpeg', '高级产品主图-石斛原浆-产品图-03.jpeg']),
 ];
 
 // sort_order：manifest 顺序按标签内 0..N-1 预排（重跑跳过不影响既有排序）
@@ -208,6 +197,15 @@ async function main() {
   }
   const existing = DRY_RUN ? [] : await api('GET', '/api/admin/templates');
   const existingKeys = new Set(existing.map((c) => `${c.tag_code}|${c.title}`));
+
+  // 产品校准收敛：picture 标签下不在 manifest 的残留旧卡软删（幂等可重跑）
+  if (!DRY_RUN) {
+    const pictureTitles = new Set(manifest.filter((c) => c.tag === 'picture').map((c) => c.title));
+    for (const c of existing.filter((x) => x.tag_code === 'picture' && !pictureTitles.has(x.title))) {
+      await api('DELETE', `/api/admin/templates/${c.id}`);
+      console.log(`软删旧卡: ${c.title}`);
+    }
+  }
 
   for (const card of manifest) {
     const files = [...card.images, ...(card.video ? [card.video] : [])];
