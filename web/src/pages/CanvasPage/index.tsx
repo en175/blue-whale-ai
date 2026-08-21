@@ -246,6 +246,7 @@ export default function CanvasPage() {
           },
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
+          onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean }>; detail?: string }) => handleProductChange(id, patch),
         };
         break;
       case 'assetNode':
@@ -257,6 +258,7 @@ export default function CanvasPage() {
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onGenerateImage: () => actionsRef.current.openImageDialog(),
           onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
+          onCardChange: (id: string, patch: { refs?: { id: string; src: string }[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
           // 生成卡节点水合后补动作回调（引用到 dock / 给 Agent）
           generationCard: base.data?.generationCard
             ? {
@@ -1252,6 +1254,8 @@ export default function CanvasPage() {
           setProductNodes((prev) => prev.filter((n) => n.id !== id));
         },
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+        onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
+        onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean }>; detail?: string }) => handleProductChange(id, patch),
       },
     };
     setProductNodes((prev) => [...prev, node]);
@@ -1272,12 +1276,56 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onGenerateImage: () => actionsRef.current.openImageDialog(),
         onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
+        onCardChange: (id: string, patch: { refs?: { id: string; src: string }[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
       },
     };
     setAssetNodes((prev) => [...prev, node]);
   };
 
   /* ============ 保存到共享资产 ============ */
+
+  /** 商品内容变更同步（组件内 images/detail 是 local state，需回写 node.data，否则右键保存读到空值） */
+  const handleProductChange = (
+    nodeId: string,
+    patch: { images?: Array<{ id: string; src: string; enabled: boolean }>; detail?: string },
+  ) => {
+    setProductNodes((prev) =>
+      prev.map((n) =>
+        n.id === nodeId
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                ...(patch.images !== undefined ? { images: patch.images } : {}),
+                ...(patch.detail !== undefined ? { detail: patch.detail } : {}),
+              },
+            }
+          : n,
+      ),
+    );
+  };
+
+  /** 资产卡内容变更同步（组件内 refs/desc/voice 是 local state，需回写 node.data，否则右键保存读到空值） */
+  const handleCardChange = (
+    nodeId: string,
+    patch: { refs?: { id: string; src: string }[]; desc?: string; voice?: { name: string; src: string } | null },
+  ) => {
+    setAssetNodes((prev) =>
+      prev.map((n) =>
+        n.id === nodeId
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                ...(patch.refs !== undefined ? { initialRefs: patch.refs } : {}),
+                ...(patch.desc !== undefined ? { initialDesc: patch.desc } : {}),
+                ...(patch.voice !== undefined ? { voice: patch.voice } : {}),
+              },
+            }
+          : n,
+      ),
+    );
+  };
 
   /** 通用保存请求 + toast 反馈 */
   const doSaveSharedAsset = async (req: SaveSharedAssetRequest, successMsg: string) => {
@@ -1418,7 +1466,10 @@ export default function CanvasPage() {
     try {
       switch (item.assetType) {
         case 'media': {
-          // 媒体：用共享资产的 URL + id 创建节点，assetId 用于后续保存
+          // 媒体：用共享资产快照 URL 创建节点。
+          // 注意：item.id 是 shared_assets 表 ID，不是 assets 源素材 ID，
+          // 不能写入 assetId（否则再次保存时 sourceAssetId 无效 → 后端 100202）。
+          // 快照不含源素材 ID，故此处不设 assetId，保存时走「请先上传素材」提示。
           const snapshot = item.snapshot as { url: string };
           const kind = item.kind as 'image' | 'video' | 'audio';
           const mediaType = kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'image';
@@ -1430,7 +1481,6 @@ export default function CanvasPage() {
               src: snapshot.url,
               fileName: item.name || `资产-${Date.now()}`,
               mediaType,
-              assetId: item.id, // 共享资产 ID，用于再次保存时识别
               toolMode,
               onDelete: (id: string) => {
                 setMediaNodes((prev) => prev.filter((n) => n.id !== id));
@@ -1471,6 +1521,7 @@ export default function CanvasPage() {
               onAddToChat: (id: string) => actionsRef.current.addToChat(id),
               onGenerateImage: () => actionsRef.current.openImageDialog(),
               onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
+              onCardChange: (id: string, patch: { refs?: { id: string; src: string }[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
             },
           };
           if (snapshot.voice) {
@@ -1500,6 +1551,7 @@ export default function CanvasPage() {
               },
               onAddToChat: (id: string) => actionsRef.current.addToChat(id),
               onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
+              onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean }>; detail?: string }) => handleProductChange(id, patch),
             },
           };
           setProductNodes((prev) => [...prev, node]);

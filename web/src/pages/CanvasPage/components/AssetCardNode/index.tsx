@@ -45,10 +45,14 @@ interface AssetCardNodeData {
   initialRefs?: { id: string; src: string }[];
   /** 水合初始描述文本 */
   initialDesc?: string;
+  /** 水合初始音色（角色卡，共享资产加回画布时注入） */
+  voice?: { name: string; src: string };
   onDelete?: (id: string) => void;
   onAddToChat?: (id: string) => void;
   /** 保存到共享资产 */
   onSaveToAssets?: (id: string) => void;
+  /** 卡片内容变更同步回父组件（参考图/描述/音色），保证右键保存时能读到最新值 */
+  onCardChange?: (id: string, patch: { refs?: { id: string; src: string }[]; desc?: string; voice?: { name: string; src: string } | null }) => void;
   /** 生成图片：唤起底部图片对话框 */
   onGenerateImage?: () => void;
   /** Agent 生成卡数据（kind=generation） */
@@ -67,7 +71,9 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
   const [refs, setRefs] = useState<{ id: string; src: string }[]>(data.initialRefs ?? []);
   const [desc, setDesc] = useState(data.initialDesc ?? '');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [voiceRefs, setVoiceRefs] = useState<{ id: string; src: string; name: string; duration: number }[]>([]);
+  const [voiceRefs, setVoiceRefs] = useState<{ id: string; src: string; name: string; duration: number }[]>(
+    data.voice ? [{ id: `voice-hydrated-${id}`, src: data.voice.src, name: data.voice.name, duration: 0 }] : [],
+  );
   const fileRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLInputElement>(null);
   /** 生成卡双击编辑：当前编辑中的字段 + 草稿值 */
@@ -76,6 +82,17 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
 
   const isSelect = data.toolMode === 'select';
   const isGeneration = (data.kind ?? 'custom') === 'generation';
+
+  // 卡片内容变更同步回父组件 node.data（右键保存到共享资产时读取最新值）
+  // 注意：voiceRefs 为空时不发送 voice 字段，避免覆盖后端水合的音色数据
+  useEffect(() => {
+    data.onCardChange?.(id, {
+      refs,
+      desc,
+      ...(voiceRefs.length > 0 ? { voice: { name: voiceRefs[0].name, src: voiceRefs[0].src } } : {}),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refs, desc, voiceRefs, id]);
 
   // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
   useEffect(() => {

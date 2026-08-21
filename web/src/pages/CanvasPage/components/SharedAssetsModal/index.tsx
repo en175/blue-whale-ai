@@ -19,7 +19,7 @@ import {
   Trash2,
   ExternalLink,
   Loader2,
-  AlertCircle,
+  Inbox,
 } from 'lucide-react';
 import {
   fetchSharedAssetList,
@@ -29,6 +29,11 @@ import {
   type SharedAssetType,
   type SharedAssetKind,
   type SharedAssetListQuery,
+  type SharedAssetMediaSnapshot,
+  type SharedAssetCardSnapshot,
+  type SharedAssetGoodsSnapshot,
+  type SharedAssetTextSnapshot,
+  type SharedAssetSceneSnapshot,
 } from '@/api/sharedAssets';
 import { isApiError } from '@/api/http';
 import styles from './index.module.css';
@@ -43,14 +48,13 @@ const TABS: { key: string; label: string; assetType?: SharedAssetType; kind?: Sh
 ];
 
 /** 资产子类型下拉（card 种类筛选） */
-type CardKind = 'style' | 'character' | 'object' | 'environment' | 'custom';
-const CARD_KINDS: CardKind[] = ['style', 'character', 'object', 'environment', 'custom'];
+type CardKind = 'style' | 'character' | 'object' | 'environment';
+const CARD_KINDS: CardKind[] = ['style', 'character', 'object', 'environment'];
 const CARD_KIND_LABEL: Record<CardKind, string> = {
   style: '风格',
   character: '角色',
   object: '物体',
   environment: '环境',
-  custom: '自定义',
 };
 
 /** 类型 → 渐变封面（无缩略图时的占位） */
@@ -118,11 +122,13 @@ function titleFromAsset(item: SharedAssetView): string {
 
 /** 构建封面 URL */
 function coverUrl(item: SharedAssetView): string | undefined {
-  if (item.thumbnailUrl) return item.thumbnailUrl;
   if (item.assetType === 'media') {
+    // 仅图片类型可作 <img> 封面；视频/音频的 thumbnailUrl 是媒体文件本身，不能当图片渲染
+    if (item.kind !== 'image') return undefined;
     const snap = item.snapshot as { url: string };
-    return snap.url;
+    return item.thumbnailUrl ?? snap.url;
   }
+  if (item.thumbnailUrl) return item.thumbnailUrl;
   if (item.assetType === 'card') {
     const snap = item.snapshot as { referenceImages?: Array<{ src: string }> };
     return snap.referenceImages?.[0]?.src;
@@ -171,6 +177,8 @@ export default function SharedAssetsModal({
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [addItemId, setAddItemId] = useState<string | null>(null);
+  /** 预览弹窗当前资产 */
+  const [previewItem, setPreviewItem] = useState<AssetListItem | null>(null);
 
   /** 构建查询参数 */
   const buildQuery = useCallback((): SharedAssetListQuery => {
@@ -287,13 +295,20 @@ export default function SharedAssetsModal({
     }
   };
 
-  /** 卡片点击（添加到画布） */
+  /** 卡片点击：图片/卡片直接添加到画布，其他类型打开预览 */
   const handleCardClick = (item: AssetListItem) => {
     if (item.deleting || addItemId) return;
-    handleAddToCanvas(item);
+    const directAdd =
+      (item.assetType === 'media' && item.kind === 'image') || item.assetType === 'card';
+    if (directAdd) {
+      handleAddToCanvas(item);
+      return;
+    }
+    setPreviewItem(item);
   };
 
   return createPortal(
+    <>
     <div className={styles.overlay} onClick={onClose}>
       <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
         {/* 头部 */}
@@ -384,13 +399,22 @@ export default function SharedAssetsModal({
         <div className={styles.gridWrap}>
           {loading ? (
             <div className={styles.empty}>
-              <Loader2 size={24} className={styles.loadingIcon} />
+              <Loader2 size={22} className={styles.loadingIcon} />
               <span>加载中...</span>
             </div>
           ) : filteredItems.length === 0 ? (
             <div className={styles.empty}>
-              <AlertCircle size={24} />
-              <span>暂无共享资产</span>
+              <div className={styles.emptyIconBox}>
+                <Inbox size={28} strokeWidth={1.5} />
+              </div>
+              <p className={styles.emptyTitle}>
+                {keyword.trim() ? '未找到匹配的资产' : '暂无共享资产'}
+              </p>
+              <p className={styles.emptyHint}>
+                {keyword.trim()
+                  ? '换个关键词试试'
+                  : '在画布中右键节点，选择「保存到共享资产」即可添加'}
+              </p>
             </div>
           ) : (
             <>
@@ -407,19 +431,32 @@ export default function SharedAssetsModal({
                       onClick={() => handleCardClick(item)}
                     >
                       <div className={styles.thumbBox}>
-                        {cUrl ? (
+                        {item.assetType === 'media' && item.kind === 'video' ? (
+                          <>
+                            <video
+                              className={styles.coverImg}
+                              src={`${(item.snapshot as SharedAssetMediaSnapshot).url}#t=0.1`}
+                              preload="metadata"
+                              muted
+                              playsInline
+                            />
+                            <div className={styles.videoOverlay}>
+                              <Video size={28} strokeWidth={1.5} />
+                            </div>
+                          </>
+                        ) : cUrl ? (
                           <img
                             className={styles.coverImg}
                             src={cUrl}
                             alt={titleFromAsset(item)}
                             loading="lazy"
-                            onClick={(e) => e.stopPropagation()}
                           />
                         ) : (
                           <div
                             className={styles.cover}
                             style={{ background: `linear-gradient(135deg, ${gradient.from}, ${gradient.to})` }}
                           >
+                            <Icon size={36} strokeWidth={1.5} className={styles.coverIcon} />
                             <span>{titleFromAsset(item)}</span>
                           </div>
                         )}
@@ -485,7 +522,121 @@ export default function SharedAssetsModal({
           )}
         </div>
       </div>
-    </div>,
+    </div>
+    {/* 预览弹窗 */}
+    {previewItem && (
+      <div className={styles.previewOverlay} onClick={() => setPreviewItem(null)}>
+        <div className={styles.previewPanel} onClick={(e) => e.stopPropagation()}>
+          <div className={styles.previewHead}>
+            <div className={styles.previewTitle}>
+              <span>{titleFromAsset(previewItem)}</span>
+              <span className={styles.badge}>{badgeText(previewItem)}</span>
+            </div>
+            <div className={styles.previewActions}>
+              <button
+                className={styles.addBtn}
+                onClick={() => {
+                  const it = previewItem;
+                  setPreviewItem(null);
+                  handleAddToCanvas(it);
+                }}
+              >
+                <Plus size={14} strokeWidth={2} />
+                <span>添加到画布</span>
+              </button>
+              <button className={styles.closeBtn} onClick={() => setPreviewItem(null)} title="关闭">
+                <X size={16} strokeWidth={2} />
+              </button>
+            </div>
+          </div>
+          <div className={styles.previewBody}>
+            <PreviewContent item={previewItem} />
+          </div>
+        </div>
+      </div>
+    )}
+    </>,
     document.body,
   );
+}
+
+/** 预览内容：按资产类型渲染 */
+function PreviewContent({ item }: { item: SharedAssetView }) {
+  switch (item.assetType) {
+    case 'media': {
+      const snap = item.snapshot as SharedAssetMediaSnapshot;
+      if (item.kind === 'video') {
+        return <video className={styles.previewMedia} src={snap.url} controls />;
+      }
+      if (item.kind === 'audio') {
+        return (
+          <div className={styles.previewAudioBox}>
+            <AudioLines size={48} strokeWidth={1.5} className={styles.previewAudioIcon} />
+            <p className={styles.previewAudioName}>{titleFromAsset(item)}</p>
+            <audio className={styles.previewAudio} src={snap.url} controls />
+          </div>
+        );
+      }
+      return <img className={styles.previewMedia} src={snap.url} alt={titleFromAsset(item)} />;
+    }
+    case 'card': {
+      const snap = item.snapshot as SharedAssetCardSnapshot;
+      return (
+        <div className={styles.previewCard}>
+          {snap.referenceImages?.length > 0 && (
+            <div className={styles.previewImgGrid}>
+              {snap.referenceImages.map((img) => (
+                <img key={img.id} className={styles.previewImgItem} src={img.src} alt="参考图" />
+              ))}
+            </div>
+          )}
+          {snap.description && <p className={styles.previewDesc}>{snap.description}</p>}
+          {snap.voice && (
+            <div className={styles.previewVoice}>
+              <span className={styles.previewVoiceName}>音色：{snap.voice.name}</span>
+              <audio className={styles.previewAudio} src={snap.voice.src} controls />
+            </div>
+          )}
+        </div>
+      );
+    }
+    case 'goods': {
+      const snap = item.snapshot as SharedAssetGoodsSnapshot;
+      return (
+        <div className={styles.previewCard}>
+          <h3 className={styles.previewGoodsName}>{snap.name}</h3>
+          {snap.images?.length > 0 && (
+            <div className={styles.previewImgGrid}>
+              {snap.images.map((img) => (
+                <img key={img.id} className={styles.previewImgItem} src={img.src} alt={snap.name} />
+              ))}
+            </div>
+          )}
+          {snap.detail && <p className={styles.previewDesc}>{snap.detail}</p>}
+        </div>
+      );
+    }
+    case 'text': {
+      const snap = item.snapshot as SharedAssetTextSnapshot;
+      return (
+        <div
+          className={styles.previewText}
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: snap.html }}
+        />
+      );
+    }
+    case 'scene': {
+      const snap = item.snapshot as SharedAssetSceneSnapshot;
+      return (
+        <div className={styles.previewCard}>
+          <h3 className={styles.previewGoodsName}>{snap.title}</h3>
+          {snap.summary && <p className={styles.previewDesc}>{snap.summary}</p>}
+          <pre className={styles.previewText}>{snap.contentMarkdown}</pre>
+        </div>
+      );
+    }
+    default:
+      return null;
+  }
 }

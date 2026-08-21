@@ -26,6 +26,8 @@ interface ProductNodeData {
   onAddToChat?: (id: string) => void;
   /** 保存到共享资产 */
   onSaveToAssets?: (id: string) => void;
+  /** 商品内容变更同步回父组件（图片/详情），保证右键保存时能读到最新值 */
+  onProductChange?: (id: string, patch: { images?: ProductImage[]; detail?: string }) => void;
 }
 
 const MAX_IMAGES = 8;
@@ -37,6 +39,12 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
   const fileRef = useRef<HTMLInputElement>(null);
 
   const isSelect = data.toolMode === 'select';
+
+  // 商品内容变更同步回父组件 node.data（右键保存到共享资产时读取最新值）
+  useEffect(() => {
+    data.onProductChange?.(id, { images, detail });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [images, detail, id]);
 
   // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
   useEffect(() => {
@@ -170,7 +178,7 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
               onDrop={handleDrop}
             >
               <Upload size={18} strokeWidth={2} />
-              <span>拖入或点击添加商品图</span>
+              <span>点击添加商品图</span>
             </div>
           )}
           <input
