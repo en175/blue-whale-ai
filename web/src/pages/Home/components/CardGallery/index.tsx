@@ -121,7 +121,7 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
   const [activeTag, setActiveTag] = useState('');
   const [records, setRecords] = useState<TemplateRecord[]>([]);
 
-  // 加载画廊标签；失败保留兜底列表
+  // 加载画廊标签；失败保留兜底列表并落到兜底首标签（IKA64P 修复：避免空 activeTag 导致卡片永久空白）
   useEffect(() => {
     fetchTemplateTags()
       .then((list) => {
@@ -131,7 +131,7 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
           list.some((t) => t.tag_code === prev) ? prev : list[0].tag_code
         );
       })
-      .catch(() => undefined);
+      .catch(() => setActiveTag((prev) => prev || FALLBACK_TAGS[0].tag_code));
   }, []);
 
   // 加载当前标签下的卡片列表（默认 page=1, size=50；IKA64P：标签未定时不发请求）
