@@ -1018,7 +1018,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                   ? '仍在处理中，已超过 1 分钟无新内容。若无响应可取消后重试。'
                   : '已超过 1 分钟未收到运行状态，可重新连接会话恢复最新状态。'}
               </span>
-              {runningRunId && <span className={styles.longRunMeta}>run {runningRunId}</span>}
+              {/* run id 是内部主键，不进用户界面。用户报障时只需说明是哪个会话、大约何时；
+                  服务端按 agent_runs 的 (session_id, created_at) 索引反查具体 Run（IKA3M7）。 */}
               {!runningRunId && (
                 <button className={styles.cancelBtn} onClick={reconnectSession}>重新连接</button>
               )}
