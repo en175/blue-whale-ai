@@ -671,19 +671,34 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /**
    * ESC 取消本次回答（IKA4PH）。取消入口统一在发送侧，ESC 是那颗按钮的键盘等价物。
    *
-   * 只在有运行时挂载，不留一个常驻的全局监听；判定见 `shouldCancelOnKey`。
+   * 只在本轮还没结束时挂载，不留一个常驻的全局监听；判定见 `shouldCancelOnKey`。
+   *
+   * 条件是 `streaming || runningRunId !== null` 而不只是后者：消息发出到拿到 runId 之间
+   * `runningRunId` 还是 null，而那几秒正是用户最想按 ESC 的时候。取消已改为会话级
+   * （IKACCL），不需要 runId 就能发出去。
    */
+  const cancellable = streaming || runningRunId !== null;
   useEffect(() => {
-    if (runningRunId === null) return;
+    if (!cancellable) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      const targetTagName = (e.target as HTMLElement | null)?.tagName;
-      if (shouldCancelOnKey({ key: e.key, defaultPrevented: e.defaultPrevented, targetTagName })) {
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      if (
+        shouldCancelOnKey({
+          key: e.key,
+          defaultPrevented: e.defaultPrevented,
+          targetTagName: target?.tagName,
+          isEditable: target?.isContentEditable ?? false,
+          inOverlay: Boolean(target?.closest('[role="dialog"], [aria-modal="true"]')),
+          // 主输入框是 contentEditable，要把它从「可编辑一律让路」里单独挑出来。
+          isMainComposer: Boolean(target?.closest('[data-agent-composer]')),
+        })
+      ) {
         stopRun();
       }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [runningRunId, stopRun]);
+  }, [cancellable, stopRun]);
 
   /** 新消息/流式文本自动滚动到底部 */
   useEffect(() => {
@@ -1212,7 +1227,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         {retryUnavailable && (
           <div className={styles.chatErrorHint}>当前后端未提供重试接口；请开启新对话或联系管理员升级服务。</div>
         )}
-        <div className={styles.inputBox}>
+        {/* data-agent-composer：ESC 判定用它把主输入框从「可编辑区域一律让路」里挑出来，
+            主输入框是 Lexical 的 contentEditable，而发送后焦点通常正停在这里。 */}
+        <div className={styles.inputBox} data-agent-composer>
           <ChipTextEditor
             ref={chipEditorRef}
             placeholder="描述你的想法，使用 @ 引用素材"
@@ -1307,7 +1324,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                 <RotateCw size={14} strokeWidth={2} />
               </button>
             )}
-            {runningRunId !== null ? (
+            {/* 消息一发出即为停止形态：中间不再有一段按钮灰着、什么都按不了的窗口（IKACCL）。 */}
+            {cancellable ? (
               <button
                 className={`${styles.sendBtn} ${styles.stopBtnActive}`}
                 onClick={stopRun}

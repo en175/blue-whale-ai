@@ -32,8 +32,40 @@ describe('shouldCancelOnKey', () => {
     expect(shouldCancelOnKey({ key: 'Escape', defaultPrevented: true, targetTagName: 'DIV' })).toBe(false);
   });
 
-  it('拿不到目标标签时按可取消处理，而不是静默失效', () => {
-    // 宁可多取消一次（用户还能重发），也不要让快捷键在某些浏览器上莫名其妙不工作。
-    expect(shouldCancelOnKey({ key: 'Escape', defaultPrevented: false, targetTagName: undefined })).toBe(true);
+  it('拿不到目标标签时让路，而不是接管', () => {
+    // 默认值翻过来了（IKACCL）：监听挂在 document 上，能收到页面任何地方的 ESC，而这条
+    // 快捷键的破坏力不对称——少取消一次用户再按一下就是了，多取消一次是一整轮回答没了。
+    expect(shouldCancelOnKey({ key: 'Escape', defaultPrevented: false, targetTagName: undefined })).toBe(false);
+  });
+
+  it('弹层里的 ESC 归弹层，不顺手停掉背后的回答', () => {
+    expect(
+      shouldCancelOnKey({ key: 'Escape', defaultPrevented: false, targetTagName: 'DIV', inOverlay: true }),
+    ).toBe(false);
+    // 即使目标就是主输入框，只要它在弹层里，也归弹层。
+    expect(
+      shouldCancelOnKey({
+        key: 'Escape',
+        defaultPrevented: false,
+        targetTagName: 'DIV',
+        inOverlay: true,
+        isMainComposer: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('别处的 contentEditable 让路，主输入框不让', () => {
+    expect(
+      shouldCancelOnKey({ key: 'Escape', defaultPrevented: false, targetTagName: 'DIV', isEditable: true }),
+    ).toBe(false);
+    expect(
+      shouldCancelOnKey({
+        key: 'Escape',
+        defaultPrevented: false,
+        targetTagName: 'DIV',
+        isEditable: true,
+        isMainComposer: true,
+      }),
+    ).toBe(true);
   });
 });

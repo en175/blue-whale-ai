@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   deleteSession: vi.fn(),
   fetchSessionSnapshot: vi.fn(),
   sendSessionMessage: vi.fn(),
+  cancelSession: vi.fn(),
   cancelSessionRun: vi.fn(),
   retrySessionRun: vi.fn(),
   fetchRequirementUnderstandings: vi.fn(),
@@ -422,6 +423,38 @@ describe('useAgentSession 运行计时', () => {
    * 回执回来时 Run 已经是终态（幂等命中、或排队即失败）。这一轮确实结束了，但它**发生过**，
    * 所以要按终态报账。此前这里把起点和终局一起清掉，结果是用户发了一句话，屏幕上什么都没有。
    */
+  /**
+   * IKACCL。停止本轮走会话级取消，所以它在「消息已发出、runId 还没回来」的那几秒也必须能发出去。
+   * 此前 stopRun 的守卫要求 runningRef 有值，那几秒里按了没有任何反应。
+   */
+  it('停止本轮不要求先拿到 runId，发出去就能取消', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    const pending = deferred<unknown>();
+    mocks.sendSessionMessage.mockReturnValue(pending.promise);
+    mocks.cancelSession.mockResolvedValue({});
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      void latest.sendMessage('帮我生成一张插画');
+    });
+    // 请求还在途中：runId 尚未回来，但用户已经在等了。
+    expect(latest.runningRunId).toBeNull();
+    expect(latest.streaming).toBe(true);
+
+    await act(async () => {
+      latest.stopRun();
+    });
+
+    expect(mocks.cancelSession).toHaveBeenCalledWith('project-1', 'session-1');
+    expect(mocks.cancelSessionRun).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pending.resolve({});
+      await pending.promise;
+    });
+  });
+
   it('回执直接是终态时报终局，而不是让状态行整条消失', async () => {
     mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
     mocks.sendSessionMessage.mockResolvedValue({ run: { run_id: 'run-already-done', status: 'failed' } });

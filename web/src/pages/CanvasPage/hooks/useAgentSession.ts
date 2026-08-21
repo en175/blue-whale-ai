@@ -16,6 +16,7 @@ import {
   deleteSession,
   fetchSessionSnapshot,
   sendSessionMessage,
+  cancelSession,
   cancelSessionRun,
   retrySessionRun,
   fetchRequirementUnderstandings,
@@ -53,6 +54,7 @@ const api = {
   deleteSession,
   fetchSessionSnapshot,
   sendSessionMessage,
+  cancelSession,
   cancelSessionRun,
   retrySessionRun,
   fetchRequirementUnderstandings,
@@ -983,11 +985,16 @@ export function useAgentSession(projectId: string) {
   );
 
   /** 停止当前运行 POST runs/:runId/cancel（终态由事件流推送） */
+  /**
+   * 停止本轮回答（IKACCL）。
+   *
+   * 走会话级取消，不需要 runId——从点发送到拿到 runId 之间正是用户最想按取消的几秒，
+   * 而那几秒里 runId 还不存在。守卫因此只要求会话在，不要求 Run 在。
+   */
   const stopRun = useCallback(() => {
     const sid = sessionIdRef.current;
-    const runId = runningRef.current;
-    if (!projectId || !sid || !runId) return;
-    api.cancelSessionRun(projectId, sid, runId).catch((e) => {
+    if (!projectId || !sid) return;
+    api.cancelSession(projectId, sid).catch((e) => {
       console.warn('停止 Agent 运行失败:', e);
       runningRef.current = null;
       streamingRef.current = false;
@@ -1000,7 +1007,7 @@ export function useAgentSession(projectId: string) {
   const retryRun = useCallback(() => {
     const sid = sessionIdRef.current;
     if (!projectId || !sid || failedRunId === null) return;
-    api.retrySessionRun(projectId, sid, failedRunId)
+    api.retrySessionRun(projectId, failedRunId)
       .then(() => {
         setFailedRunId(null);
         setStreaming(true);

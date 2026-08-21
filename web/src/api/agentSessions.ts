@@ -259,34 +259,58 @@ export function sendSessionMessage(
   );
 }
 
-/** 取消运行 POST /projects/:id/sessions/:sid/runs/:runId/cancel */
-export function cancelSessionRun(
-  projectId: string,
-  sessionId: string,
-  runId: string,
-): Promise<unknown> {
+/**
+ * 取消本会话当前在做的事 POST /projects/:id/sessions/:sid/cancel（IKACCL）
+ *
+ * 会话级而非 Run 级：从点发送到拿到 runId 之间没有 id 可用，而那正是用户最想按取消的几秒。
+ * 「当前哪个 Run 活着」是服务端的知识，不该要求客户端先持有它才能取消。
+ *
+ * 服务端会一并丢弃排在后面还没调度的输入——否则取消完那个 Run，队列里的输入会立刻被
+ * 捞起来建新 Run，用户以为停住了却又跑起来。
+ *
+ * 幂等：没有在跑的东西时返回成功而非 404。
+ */
+export function cancelSession(projectId: string, sessionId: string): Promise<unknown> {
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/cancel`,
+    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/cancel`,
     {
       method: 'POST',
       headers: { 'Idempotency-Key': newIdempotencyKey() },
-      body: '{}',
+      body: JSON.stringify({ action_id: newIdempotencyKey() }),
     },
   );
 }
 
-/** 重试运行 POST /projects/:id/sessions/:sid/runs/:runId/retry（仅失败运行可重试） */
-export function retrySessionRun(
-  projectId: string,
-  sessionId: string,
-  runId: string,
-): Promise<{ run?: SessionRun } & Record<string, unknown>> {
+/**
+ * 取消指定运行 POST /projects/:id/runs/:runId/cancel
+ *
+ * 路径**不含** /sessions/:sid：agent 的 Run 级路由挂在 /projects/:pid 之下、与 sessions 平级
+ * （见 agent-rest-api-v1.md）。此前这里多写了一段 sessions 前缀，请求永远匹配不到路由；
+ * body 也只有 `{}`，缺 `action_id`，即便路径对了也会被 422 拒掉。
+ * 结果是取消按钮从来没有真正生效过——UI 变了形态，请求却打在 404 上。
+ */
+export function cancelSessionRun(projectId: string, runId: string): Promise<unknown> {
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/retry`,
+    `/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/cancel`,
     {
       method: 'POST',
       headers: { 'Idempotency-Key': newIdempotencyKey() },
-      body: '{}',
+      body: JSON.stringify({ action_id: newIdempotencyKey() }),
+    },
+  );
+}
+
+/** 重试运行 POST /projects/:id/runs/:runId/retry（仅失败运行可重试）。路径与 body 同上，此前同样两处都错。 */
+export function retrySessionRun(
+  projectId: string,
+  runId: string,
+): Promise<{ run?: SessionRun } & Record<string, unknown>> {
+  return sessionRequest(
+    `/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/retry`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': newIdempotencyKey() },
+      body: JSON.stringify({ action_id: newIdempotencyKey() }),
     },
   );
 }
