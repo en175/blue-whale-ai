@@ -52,6 +52,14 @@ export interface RunStatusInput {
   finishedAt: number | null;
   /** 流式期间已收到的正文。按它估算输出 token。 */
   streamedText: string;
+  /**
+   * 结束那一刻冻下来的估算 token 数。
+   *
+   * 终态一到，正文就被 settleStream/discardStream 清走了，`streamedText` 随之变空——
+   * 没有这个兜底，本轮真实用量还没送到（或 agent 侧尚未上线）时，token 那一段会在
+   * 回答结束的瞬间凭空消失，而它恰恰是"这一轮的账"里用户最想看的一半。
+   */
+  estimatedOutputTokensAtFinish: number | null;
   /** 终态的真实用量；有它就不再用估算值。 */
   tokenUsage: RunTokenUsage | null;
   /** 上下文占用；null 表示本轮没报。 */
@@ -186,6 +194,9 @@ function tokensOf(input: RunStatusInput): RunStatusTokens | null {
   // 真实值优先。它只在终态才有，一旦有了就不该再让估算值把它盖掉。
   if (input.tokenUsage) return { output: input.tokenUsage.output_tokens, estimated: false };
   if (input.streamedText.length > 0) return { output: estimateOutputTokens(input.streamedText), estimated: true };
+  // 终态兜底：正文已被清走，用结束时冻下来的数继续报，而不是让这一段消失。
+  const frozen = input.estimatedOutputTokensAtFinish;
+  if (frozen !== null && frozen > 0) return { output: frozen, estimated: true };
   return null;
 }
 

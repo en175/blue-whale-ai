@@ -64,12 +64,32 @@ export function Markdown({ text }: { text: string }) {
   );
 }
 
-/** 每种语气对应的样式类。终态两种分开：完成是收尾，失败要能一眼看出来。 */
-const RUN_STATUS_TONE_CLASS: Record<RunStatus['tone'], string> = {
+/**
+ * 每个阶段的符号与样式。
+ *
+ * 按 **phase** 而不是 tone 分派：tone 只有四档，`completed` 和 `cancelled` 同为 `done`，
+ * 用它分派会让「已完成」和「已取消」长得一模一样、只差两个字。而这两件事用户的反应完全
+ * 不同——一个是拿结果，一个是想知道自己刚才停掉的是哪一轮——必须一眼分得开。
+ *
+ * 进行中的三态共用脉动的 `✶`：它们本来就是同一件事的连续过程，靠文案和语气区分即可，
+ * 把符号也拆开反而会让运行中的界面一直在跳。
+ */
+const RUN_STATUS_MARK: Record<RunStatus['phase'], string> = {
+  dispatching: '✶',
+  working: '✶',
+  stalled: '✶',
+  completed: '✻',
+  cancelled: '⊘',
+  failed: '✕',
+};
+
+const RUN_STATUS_PHASE_CLASS: Record<RunStatus['phase'], string> = {
+  dispatching: '',
   working: '',
   stalled: styles.runStatusStalled ?? '',
-  done: styles.runStatusDone ?? '',
-  error: styles.runStatusError ?? '',
+  completed: styles.runStatusDone ?? '',
+  cancelled: styles.runStatusCancelled ?? '',
+  failed: styles.runStatusError ?? '',
 };
 
 /**
@@ -114,23 +134,27 @@ function RunStatusLine({
     outcome: outcome?.outcome ?? null,
     finishedAt: outcome?.finishedAt ?? null,
     streamedText,
+    estimatedOutputTokensAtFinish: outcome?.estimatedOutputTokens ?? null,
     tokenUsage: outcome?.tokenUsage ?? null,
     contextCapacity: outcome?.contextCapacity ?? null,
   });
   if (!status) return null;
 
-  const contextPercent = status.context ? Math.round(status.context.ratio * 100) : null;
+  const context = status.context;
+  const contextPercent = context ? Math.round(context.ratio * 100) : null;
   return (
     <div
-      className={`${styles.runStatus} ${RUN_STATUS_TONE_CLASS[status.tone]}`}
+      className={`${styles.runStatus} ${RUN_STATUS_PHASE_CLASS[status.phase]}`}
       role="status"
       aria-live="polite"
     >
       <span className={styles.runStatusMark} aria-hidden="true">
-        {status.settled ? '✻' : '✶'}
+        {RUN_STATUS_MARK[status.phase]}
       </span>
       <span>{status.label}</span>
-      <span className={styles.runStatusMeta}>
+      {/* 运行中把这一段对读屏遮起来：秒数每秒变一次，`aria-live` 会把它一遍遍念出来，
+          盖过真正有信息量的状态文案。终态时放开，此时它只念一次，正是这一轮的账。 */}
+      <span className={styles.runStatusMeta} aria-hidden={!status.settled}>
         {formatElapsed(status.seconds)}
         {status.tokens && (
           <>
@@ -143,16 +167,19 @@ function RunStatusLine({
             </span>
           </>
         )}
-        {contextPercent !== null && status.context && (
+        {context !== null && contextPercent !== null && (
           <>
             {' · '}
-            <span
-              title={`上下文 ${status.context.usedTokens} / ${status.context.maxTokens} tokens${
-                status.context.compacted ? '（本轮压缩过历史）' : ''
-              }`}
-            >
-              上下文 {contextPercent}%{status.context.compacted ? ' ⤺' : ''}
+            <span title={`上下文 ${context.usedTokens} / ${context.maxTokens} tokens`}>
+              上下文 {contextPercent}%
             </span>
+            {/* 压缩过历史要给可见文案：此前只追加一个 ⤺，说明埋在 title 里，触屏根本没有
+                hover，等于没有提示。而"早先的对话已被摘要"直接影响用户对模型记得什么的预期。 */}
+            {context.compacted && (
+              <span className={styles.runStatusCompacted} title="上下文接近上限，较早的对话已被摘要压缩">
+                {' · '}已压缩历史
+              </span>
+            )}
           </>
         )}
       </span>

@@ -33,7 +33,7 @@ import { cardsFromRevision } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
 import { newIdempotencyKey } from '@/api/jobs';
 import { deriveAgentPhase, type DerivedAgentPhase } from './agentSessionState';
-import { parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
+import { estimateOutputTokens, parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
 import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusLine';
 
 /** 一轮结束后的结账信息，供常驻状态行报账（IKA4PG）。 */
@@ -42,6 +42,8 @@ export interface TurnOutcome {
   finishedAt: number;
   tokenUsage: RunTokenUsage | null;
   contextCapacity: RunContextCapacity | null;
+  /** 结束那一刻按已收到正文估的输出 token。真实用量到达前由它顶着，见 runStatusLine。 */
+  estimatedOutputTokens: number | null;
 }
 
 /** 数据源：真实 /api/agent/v1（经 BFF 代理到独立 agent 服务）。本地开发需起 backend:3100 + agent + SSH 隧道，见 bw-test-env。 */
@@ -605,6 +607,9 @@ export function useAgentSession(projectId: string) {
           finishedAt: Date.now(),
           tokenUsage: parseRunTokenUsage(run.token_usage),
           contextCapacity: parseRunContextCapacity(run.context_capacity),
+          // 必须赶在 settleStream/discardStream 之前取：它们下一行就把正文清空了。
+          // 取 accRef 而不是 streamingText——前者是收到的全部，后者只是逐字动画已经露出的部分。
+          estimatedOutputTokens: estimateOutputTokens(accRef.current),
         });
         // 终态一到就撤掉预览：这一刻起权威是校验过的卡片，让半成品留在屏幕上只会让人误以为能用。
         setPartialCard(null);
@@ -916,9 +921,10 @@ export function useAgentSession(projectId: string) {
             setTurnOutcome({
               outcome: terminalOutcomeOf(run.status),
               finishedAt: Date.now(),
-              // 回执的 SessionRun 上没有这两个字段，真实数字随后由事件流补。
+              // 回执的 SessionRun 上没有这些字段，真实数字随后由事件流补。
               tokenUsage: null,
               contextCapacity: null,
+              estimatedOutputTokens: null,
             });
             runningRef.current = null;
             setRunningRunId(null);

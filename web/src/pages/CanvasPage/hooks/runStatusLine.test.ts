@@ -21,6 +21,7 @@ const base = {
   outcome: null,
   finishedAt: null,
   streamedText: '',
+  estimatedOutputTokensAtFinish: null,
   tokenUsage: null,
   contextCapacity: null,
 } as const;
@@ -107,6 +108,30 @@ describe('deriveRunStatus', () => {
 
     it('一个字都还没收到时不显示 token 那一段', () => {
       expect(deriveRunStatus(base)?.tokens).toBeNull();
+    });
+
+    it('终态正文被清走后，用结束时冻下来的估算值继续报，不让这一段凭空消失', () => {
+      // 真实用量还没送到（或 agent 侧尚未上线）时走的就是这条。
+      const status = deriveRunStatus({
+        ...base,
+        outcome: 'completed',
+        finishedAt: 1_051_000,
+        streamedText: '',
+        estimatedOutputTokensAtFinish: 388,
+      });
+      expect(status?.tokens).toEqual({ output: 388, estimated: true });
+    });
+
+    it('真实用量优先于冻结的估算值', () => {
+      const status = deriveRunStatus({
+        ...base,
+        outcome: 'completed',
+        finishedAt: 1_051_000,
+        streamedText: '',
+        estimatedOutputTokensAtFinish: 388,
+        tokenUsage: { input_tokens: 1, cached_input_tokens: null, output_tokens: 412, reasoning_tokens: null },
+      });
+      expect(status?.tokens).toEqual({ output: 412, estimated: false });
     });
 
     it('真实用量一到就盖掉估算值', () => {

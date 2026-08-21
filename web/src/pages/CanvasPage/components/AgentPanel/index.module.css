@@ -1422,16 +1422,38 @@
   animation: none;
 }
 
+/* 已取消：用户自己停的，不是出错。语气比完成更淡，符号换成 ⊘——这两态若只差两个字，
+   用户回头看不出刚才停掉的是哪一轮。 */
+.runStatusCancelled {
+  color: var(--color-text-tertiary, #7d8288);
+}
+
+.runStatusCancelled .runStatusMark {
+  color: var(--color-text-tertiary, #7d8288);
+  opacity: 0.6;
+  animation: none;
+}
+
+/* 失败：整行都要带上语气，只染一个符号在一屏灰字里根本看不见。 */
+.runStatusError {
+  color: var(--color-error, #ef6a6a);
+}
+
 .runStatusError .runStatusMark {
   color: var(--color-error, #ef6a6a);
   animation: none;
 }
 
+/* 压缩提示：可见文案而非埋在 title 里的箭头，触屏没有 hover。 */
+.runStatusCompacted {
+  color: #e8a33d;
+}
+
 /* 耗时与 token。等宽数字，否则秒数每跳一次整行都在抖。 */
+/* 等宽数字继承自 .runStatus，这里不重复声明。 */
 .runStatusMeta {
   margin-left: auto;
   color: var(--color-text-tertiary, #7d8288);
-  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
