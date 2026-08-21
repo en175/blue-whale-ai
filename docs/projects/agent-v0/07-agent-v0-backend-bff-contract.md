@@ -31,14 +31,12 @@ web 前端 (/api/agent/v1/*)
 
 本地联调：agent 服务本地起在 4111 时，`AGENT_SERVICE_BASE_URL` 无需改动；测试站部署时按实际地址设置。
 
-## 4. 前端数据源切换
+## 4. 前端数据源
 
-前端 `useAgentSession` 按 `VITE_AGENT_MOCK` 切换数据源：
+前端 `useAgentSession` 始终走真实接口 `/api/agent/v1/*`（经本 BFF 代理到独立 agent 服务）：
 
-- dev 默认 **mock**（`agentSessions.mock.ts` 回放原型流程）——后端 `/api/agent/v1` 未接 agent 服务时交互可独立验证
-- `VITE_AGENT_MOCK=0` 走 **真实接口** `/api/agent/v1/*`（经本 BFF 代理）
-
-S4 落地后，真实链路可用；mock 保留用于 agent 服务未部署时的前端交互开发。
+- 无 mock 分支（`agentSessions.mock.ts` 与 `VITE_AGENT_MOCK` 已随 IK9VSA 删除，构建产物不含假数据回放）
+- 本地联调需起 backend:3100 + agent 服务 + SSH 隧道（见 bw-test-env）；agent 服务未起时 `/api/agent/v1/*` 返回 502，前端会话初始化失败、Agent 面板不加载
 
 ## 5. 素材契约（现状）
 
@@ -56,3 +54,8 @@ S4 落地后，真实链路可用；mock 保留用于 agent 服务未部署时�
 
 - 生成卡产物协议：`PromptCardRevision`（任务卡）vs 新 `generation_card`（分镜提示词卡）——IK9DWX-W1 拍板后映射
 - 生成卡→dock 是否需要后端专用承接端点（当前复用 generation-jobs）
+- **路由形状不对齐（2026-08-19 发现，未解决）**：本文档 §2 列的前端调用路径带 `projects/:projectId/` 一层（如
+  `/api/agent/v1/projects/:projectId/sessions`），但 blue-whale-agent 服务当前的 HTTP 路由是裸
+  `/v1/sessions`、`/v1/sessions/:id`……完全没有 project 段。`AgentV1ProxyController` 保留前缀全量转发，
+  这层形状差异会让代理请求在 agent 侧 404。不是简单的前缀转换能补上的，需要决定：agent 侧加 `/projects/:id/`
+  这层，还是本文档改成配合 agent 现有的扁平路由形状。当晚未处理，只记录。

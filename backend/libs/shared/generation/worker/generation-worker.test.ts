@@ -97,15 +97,13 @@ describe("processNextJob 音频分支（IK9ILQ）", () => {
       height: null,
     });
     const createAsset = vi.fn().mockResolvedValue("a1");
-    const completeJob = vi.fn().mockResolvedValue(true);
-    const settleReservation = vi.fn().mockResolvedValue(true);
+    const completeJobAndSettle = vi.fn().mockResolvedValue(true);
     const appendLog = vi.fn().mockResolvedValue(undefined);
     const repo = {
       claimNextJob,
       findImageCapability,
       createAsset,
-      completeJob,
-      settleReservation,
+      completeJobAndSettle,
       appendLog,
     } as unknown as WorkerRepo;
 
@@ -147,7 +145,7 @@ describe("processNextJob 音频分支（IK9ILQ）", () => {
         fencingToken: 5,
       }),
     );
-    expect(completeJob).toHaveBeenCalledWith(
+    expect(completeJobAndSettle).toHaveBeenCalledWith(
       expect.objectContaining({
         jobId: "j1",
         assetIds: ["a1"],
@@ -155,14 +153,268 @@ describe("processNextJob 音频分支（IK9ILQ）", () => {
         fencingToken: 5,
       }),
     );
-    // IK9ILQ：音频实扣 = readConsumeQuota(10) → quotaToFen(10) = 100n。
-    expect(settleReservation).toHaveBeenCalledWith(
+    // IK9ILQ：音频实扣 = readConsumeQuota(10) → quotaToFen(10) = 100n（单事务结算）。
+    expect(completeJobAndSettle).toHaveBeenCalledWith(
       expect.objectContaining({
-        jobId: "j1",
         actualAmountFen: 100n,
-        workerId: "worker-1",
-        fencingToken: 5,
       }),
+    );
+  });
+});
+
+describe("processNextJob 图片实扣取证（IK9VZ0）", () => {
+  it("实扣取证失败（流水查不到）必须告警，而非静默落 0", async () => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j-img",
+      project_id: "p1",
+      user_id: "u1",
+      type: "image",
+      input: {
+        prompt: "一只猫",
+        model_id: "m1",
+        provider_credential: "<sealed>",
+      },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 7,
+    });
+    const findImageCapability = vi.fn().mockResolvedValue({
+      model_id: "m1",
+      api_size: null,
+      width: 512,
+      height: 512,
+    });
+    const createAsset = vi.fn().mockResolvedValue("a1");
+    const completeJobAndSettle = vi.fn().mockResolvedValue(true);
+    const appendLog = vi.fn().mockResolvedValue(undefined);
+    const repo = {
+      claimNextJob,
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      findImageCapability,
+      createAsset,
+      completeJobAndSettle,
+      appendLog,
+    } as unknown as WorkerRepo;
+
+    const createImageProvider = vi.fn().mockReturnValue({
+      generate: vi.fn().mockResolvedValue([
+        {
+          url: "https://img.test/a.png",
+          width: 512,
+          height: 512,
+          requestId: "req-1",
+        },
+      ]),
+    });
+    const storage = {
+      prepareUpload: vi.fn().mockResolvedValue({
+        storageKey: "k",
+        publicUrl: "https://pub/a.png",
+        uploadUrl: "https://up/a.png",
+        headers: {},
+        expiresIn: 60,
+      }),
+      makePublic: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Pick<AssetUploadStorage, "prepareUpload" | "makePublic">;
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: { get: () => "image/png" },
+        arrayBuffer: async () => new ArrayBuffer(16),
+      })
+      .mockResolvedValueOnce({ ok: true });
+    const warnLogs: string[] = [];
+
+    const jobId = await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider,
+      createAudioProvider: vi.fn(),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      mediaStorage: storage,
+      fetchImpl,
+      // 流水查不到 → 取证失败
+      readConsumeQuota: vi.fn().mockResolvedValue(null),
+      quotaToFen: vi.fn().mockReturnValue(123n),
+      warn: (msg: string) => warnLogs.push(msg),
+    });
+
+    expect(jobId).toBe("j-img");
+    // 取证失败必须告警（含 actual_amount_fen 落 0 语义），不再静默
+    expect(warnLogs.some((l) => l.includes("actual_amount_fen") && l.includes("0"))).toBe(true);
+    // 仍正常完成 job，actual 落 0（不传 actualAmountFen，单事务结算）
+    expect(completeJobAndSettle).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: "j-img", assetIds: ["a1"] }),
+    );
+    expect(completeJobAndSettle).not.toHaveBeenCalledWith(
+      expect.objectContaining({ actualAmountFen: expect.anything() }),
+    );
+  });
+
+  it("失败但 new-api 流水显示已扣 → warn 告警 + failJob 写 releaseNote=refund_unverified", async () => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j-img-fail",
+      project_id: "p1",
+      user_id: "u1",
+      type: "image",
+      input: {
+        prompt: "一只猫",
+        model_id: "m1",
+        provider_credential: "<sealed>",
+      },
+      expected_output_count: 1,
+      retry_count: 3,
+      fencingToken: 8,
+    });
+    const findImageCapability = vi.fn().mockResolvedValue({
+      model_id: "m1",
+      api_size: null,
+      width: 512,
+      height: 512,
+    });
+    const failJob = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimNextJob,
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      findImageCapability,
+      failJob,
+    } as unknown as WorkerRepo;
+    const createImageProvider = vi.fn().mockReturnValue({
+      generate: vi.fn().mockResolvedValue([
+        {
+          url: "https://img.test/a.png",
+          width: 512,
+          height: 512,
+          requestId: "req-1",
+        },
+      ]),
+    });
+    const warnLogs: string[] = [];
+
+    await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider,
+      createAudioProvider: vi.fn(),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      // 下载失败 → 任务失败（generate 已发出请求，requestId 有证据）
+      fetchImpl: vi.fn().mockRejectedValue(new Error("download failed")),
+      readConsumeQuota: vi.fn().mockResolvedValue(1000),
+      quotaToFen: vi.fn().mockReturnValue(100n),
+      warn: (msg: string) => warnLogs.push(msg),
+    });
+
+    // 失败但流水显示已扣 → 必须告警
+    expect(warnLogs.some((l) => l.includes("已扣"))).toBe(true);
+    // releaseNote = refund_unverified（可能已扣，需人工核对退款）
+    expect(failJob).toHaveBeenCalledWith(
+      expect.objectContaining({ releaseNote: "refund_unverified" }),
+    );
+  });
+
+  it("取证查询异常 → 不得记 refund_confirmed（审计结论写反风险，IK9VZ0 C2）", async () => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j-img-c2",
+      project_id: "p1",
+      user_id: "u1",
+      type: "image",
+      input: {
+        prompt: "一只猫",
+        model_id: "m1",
+        provider_credential: "<sealed>",
+      },
+      expected_output_count: 1,
+      retry_count: 3,
+      fencingToken: 9,
+    });
+    const findImageCapability = vi.fn().mockResolvedValue({
+      model_id: "m1",
+      api_size: null,
+      width: 512,
+      height: 512,
+    });
+    const failJob = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimNextJob,
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      findImageCapability,
+      failJob,
+    } as unknown as WorkerRepo;
+    const createImageProvider = vi.fn().mockReturnValue({
+      generate: vi.fn().mockResolvedValue([
+        { url: "https://img.test/a.png", width: 512, height: 512, requestId: "req-1" },
+      ]),
+    });
+    const warnLogs: string[] = [];
+
+    await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider,
+      createAudioProvider: vi.fn(),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      fetchImpl: vi.fn().mockRejectedValue(new Error("download failed")),
+      // 取证查询抛错（如 new-api 宕机）→ 无法确认退款
+      readConsumeQuota: vi.fn().mockRejectedValue(new Error("upstream down")),
+      quotaToFen: vi.fn().mockReturnValue(100n),
+      warn: (msg: string) => warnLogs.push(msg),
+    });
+
+    // C2：查询异常必须 refund_unverified，绝不能 refund_confirmed（与注释意图相反）
+    expect(failJob).toHaveBeenCalledWith(
+      expect.objectContaining({ releaseNote: "refund_unverified" }),
+    );
+    expect(failJob).not.toHaveBeenCalledWith(
+      expect.objectContaining({ releaseNote: "refund_confirmed" }),
+    );
+  });
+
+  it("无 request_id 证据失败 → 默认 releaseNote=refund_unverified（需求 4 每次失败必留痕）", async () => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j-img-noev",
+      project_id: "p1",
+      user_id: "u1",
+      type: "image",
+      input: {
+        prompt: "一只猫",
+        model_id: "m1",
+        provider_credential: "<sealed>",
+      },
+      expected_output_count: 1,
+      retry_count: 3,
+      fencingToken: 10,
+    });
+    const findImageCapability = vi.fn().mockResolvedValue({
+      model_id: "m1",
+      api_size: null,
+      width: 512,
+      height: 512,
+    });
+    const failJob = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimNextJob,
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      findImageCapability,
+      failJob,
+    } as unknown as WorkerRepo;
+    const createImageProvider = vi.fn().mockReturnValue({
+      // generate 抛错 → 未产生任何 request_id 证据
+      generate: vi.fn().mockRejectedValue(new Error("provider boom")),
+    });
+
+    await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider,
+      createAudioProvider: vi.fn(),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      readConsumeQuota: vi.fn().mockResolvedValue(null),
+      quotaToFen: vi.fn().mockReturnValue(100n),
+    });
+
+    expect(failJob).toHaveBeenCalledWith(
+      expect.objectContaining({ releaseNote: "refund_unverified" }),
     );
   });
 });

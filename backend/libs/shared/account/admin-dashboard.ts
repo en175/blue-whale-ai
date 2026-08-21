@@ -1,4 +1,5 @@
 import { AccountService } from "./account.service.js";
+import { quotaToCredits } from "@lib/shared/credits/credits.js";
 import {
   mapAdminOrder,
   mapConsumeRecord,
@@ -40,7 +41,7 @@ export async function collectDashboardStats(
     account.listAdminLogs(token, userId, { page: 1, pageSize: 5 }),
   ]);
 
-  let todayRecharge = 0;
+  let todayRechargeQuota = 0;
   let todayRechargeCount = 0;
   let pendingOrders = 0;
   const recentRecharges: AdminOrder[] = [];
@@ -62,7 +63,8 @@ export async function collectDashboardStats(
         pageHasTarget = true;
       }
       if ((row.create_time ?? 0) >= todayStartSec) {
-        todayRecharge += row.amount ?? 0;
+        // IK9VZ0 M1：先累加 quota 原值，最后一次换算为积分——避免逐行取整漂移。
+        todayRechargeQuota += row.amount ?? 0;
         todayRechargeCount++;
         pageHasTarget = true;
       }
@@ -73,9 +75,11 @@ export async function collectDashboardStats(
 
   return {
     totalUsers: usersPage.total,
-    todayRecharge,
+    // IK9VZ0：quota 汇总一次换算为积分（今日充值）。
+    todayRecharge: quotaToCredits(todayRechargeQuota),
     todayRechargeCount,
-    todaySpend: logStat.quota,
+    // IK9VZ0：logStat.quota 为 quota 量纲，今日消费展示统一换算为积分。
+    todaySpend: quotaToCredits(logStat.quota),
     pendingOrders,
     recentRecharges,
     recentConsumes: recentLogs.items.map(mapConsumeRecord),

@@ -2,6 +2,10 @@ import { createLogger, timedProviderCall } from "@blue-whale/core/logging";
 
 const logger = createLogger("generation-runtime");
 
+/** IK9VZ0：视频实扣与预留偏差告警阈值（50%）。估算口径粗糙（groupRatio 硬编码 1 等），
+ *  第一版放宽仅告警不阻断，待对账数据积累后再收紧。 */
+const VIDEO_QUOTA_DEVIATION_THRESHOLD = 0.5;
+
 /** 视频 provider（new_api_video）调用计时打点（IK7G9Y），共享实现见 core。 */
 function timedVideoProviderCall<T>(
   operation: "submit" | "poll",
@@ -19,6 +23,8 @@ export type VideoJobClaim = {
   cancelRequested: boolean;
   workerId: string;
   fencingToken: number;
+  /** IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null/undefined）。 */
+  reservedAmountFen?: bigint | null;
 };
 
 export type VideoWorkerInputAsset = {
@@ -109,6 +115,8 @@ export interface VideoJobRunnerRepo {
     fencingToken: number;
     code: string;
     message: string;
+    /** IK9VZ0：退款校验结果（refund_confirmed / refund_unverified），落 release_note。 */
+    releaseNote?: string;
   }): Promise<boolean>;
   cancelVideoBeforeDispatch(input: {
     jobId: string;
@@ -145,6 +153,8 @@ export async function runVideoJobStep(deps: {
   scheduleNext?: (jobId: string, delayMs: number) => Promise<void>;
   /** IK7G9X：把 new-api quota 换算成分(fen)。缺省不换算（publish 时 actual 落 0 兜底）。 */
   quotaToFen?: (quota: number) => bigint | undefined;
+  /** IK9VZ0：实扣取证失败（task quota 缺失）告警回调（接入 logger）。缺省不注入 = 旧行为静默。 */
+  warn?: (message: string) => void;
 }): Promise<string | null> {
   const claim = deps.jobId
     ? await deps.repo.claimVideoJobById(deps.jobId, deps.workerId)
@@ -214,6 +224,32 @@ export async function runVideoJobStep(deps: {
       await fail(deps.repo, claim, "invalid_input", "视频尺寸无效");
       return claim.id;
     }
+    // IK7G9X：视频实扣金额 = new-api 任务 quota 换算成分。
+    // IK9VZ0：① quota 缺失必须告警，不再静默落 0（视频无 request_id → 流水回退通道）；
+    //         ② 终态 quota 与预留（reserved_amount_fen）偏差超阈值二次校验告警（不阻断）。
+    let actualAmountFen: bigint | undefined;
+    if (deps.quotaToFen && observation.quota !== undefined) {
+      actualAmountFen = deps.quotaToFen(observation.quota);
+      if (
+        claim.reservedAmountFen !== undefined &&
+        claim.reservedAmountFen !== null &&
+        claim.reservedAmountFen > 0n &&
+        actualAmountFen !== undefined
+      ) {
+        const diffRatio =
+          Number(actualAmountFen - claim.reservedAmountFen) /
+          Number(claim.reservedAmountFen);
+        if (Math.abs(diffRatio) > VIDEO_QUOTA_DEVIATION_THRESHOLD) {
+          deps.warn?.(
+            `[cost] job ${claim.id} 视频实扣与预留偏差超阈值：reserved=${claim.reservedAmountFen}fen actual=${actualAmountFen}fen（偏差 ${Math.round(Math.abs(diffRatio) * 100)}%），需人工核对`,
+          );
+        }
+      }
+    } else {
+      deps.warn?.(
+        `[cost] job ${claim.id} 视频实扣取证失败：task quota 缺失，actual_amount_fen 将落 0`,
+      );
+    }
     const published = await deps.repo.publishVideoResult({
       ...claimIdentity(claim),
       projectId: claim.projectId,
@@ -221,10 +257,7 @@ export async function runVideoJobStep(deps: {
       ...stored,
       ...dimensions,
       duration: Number(claim.input.duration ?? inputParams?.duration),
-      // IK7G9X：视频实扣金额 = new-api 任务 quota 换算成分；quota 缺失或换算失败则省略（落 0）。
-      ...(deps.quotaToFen && observation.quota !== undefined
-        ? { actualAmountFen: deps.quotaToFen(observation.quota) }
-        : {}),
+      ...(actualAmountFen !== undefined ? { actualAmountFen } : {}),
     });
     if (published) {
       logger.metric({
@@ -265,7 +298,14 @@ async function fail(
   // IK9Q1B：无论状态迁移是否成功都留痕。此前只有迁移成功才打 metric，
   // 出现「DB 已 failed 但 worker 无任何日志」的排查黑洞（job 985）。
   logger.warn(`video job 失败 jobId=${claim.id} code=${code} message=${message}`);
-  const failed = await repo.failVideoJob({ ...claimIdentity(claim), code, message });
+  // IK9VZ0 I5：视频无 request_id → 消费流水回退通道；release_note 按是否已向 new-api 提交区分：
+  // 已提交（providerTaskId 存在，可能已扣）→ refund_unverified；未提交（派发前失败）→ refund_confirmed。
+  const failed = await repo.failVideoJob({
+    ...claimIdentity(claim),
+    code,
+    message,
+    releaseNote: claim.providerTaskId ? "refund_unverified" : "refund_confirmed",
+  });
   if (failed) {
     logger.metric({
       event: "task_finished",

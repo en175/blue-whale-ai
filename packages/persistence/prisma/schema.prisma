@@ -74,6 +74,31 @@ model assets {
   @@index([user_id], map: "idx_user_id")
 }
 
+/// 画布共享资产（IK9QKP）：用户主动保存、跨项目可复用的自包含快照库。
+/// 两层类型对齐画布节点结构：asset_type = 节点大类（card/media/goods/scene/text），
+/// kind = 节点判别字段（card 的 data.kind / media 的 data.mediaType；goods/scene/text 为 NULL）。
+/// snapshot 统一存各类型全部数据（自包含，不依赖来源表）；name/thumbnail_url 为列表查询冗余列。
+/// dedup_key 幂等去重：媒体 url sha256、卡片 类型+描述 sha256、商品 名称 sha256、场景 内容 sha256、文本 NULL。
+model shared_assets {
+  id            BigInt   @id @default(autoincrement())
+  user_id       BigInt
+  asset_type    String   @db.VarChar(16)
+  kind          String?  @db.VarChar(16)
+  name          String   @db.VarChar(255)
+  thumbnail_url String?  @db.VarChar(512)
+  snapshot      Json
+  dedup_key     String?  @db.VarChar(128)
+  status        String   @default("normal") @db.VarChar(16)
+  gmt_create    DateTime @default(now()) @db.DateTime(0)
+  gmt_modified  DateTime @default(now()) @db.DateTime(0)
+  version       Int      @default(0)
+  is_delete     Int      @default(0) @db.TinyInt
+
+  @@unique([user_id, dedup_key], map: "uk_shared_user_dedup")
+  @@index([user_id, asset_type, kind, is_delete], map: "idx_shared_user_type")
+  @@index([user_id, gmt_create], map: "idx_shared_user_created")
+}
+
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model canvas {
   id            BigInt   @id @default(autoincrement())
@@ -697,6 +722,8 @@ model cost_reservations {
   reserved_amount_fen   BigInt
   actual_amount_fen     BigInt?
   status                String   @db.VarChar(32)
+  /** IK9VZ0：释放原因/退款校验结果（如 "refund_confirmed" 已确认无扣费 / "refund_unverified" 未校验或可能已扣）。 */
+  release_note          String?  @db.VarChar(255)
   price_catalog_version String   @db.VarChar(64)
   exchange_rate_version String   @db.VarChar(64)
   model_policy_version  String   @db.VarChar(64)
@@ -707,6 +734,29 @@ model cost_reservations {
   is_delete             Int      @default(0) @db.TinyInt
 
   @@unique([generation_job_id], map: "uk_cost_reservation_job")
+}
+
+/// IK9VZ0：多退少补结算审计（蓝鲸端只记账，执行在 new-api）：new-api 结算结果的接收记录。
+/// 幂等：batch_no 整批唯一（uk_adj_batch）；(generation_job_id, action_type) 单项唯一（uk_adj_job_action，
+/// 仅对有 job 归属的调整生效；MySQL 唯一索引对 NULL 不生效，无 job 的调整靠整批幂等兜底）。
+model cost_adjustments {
+  id                BigInt   @id @default(autoincrement())
+  batch_no          String   @db.VarChar(64)
+  generation_job_id BigInt?
+  user_id           BigInt
+  project_id        BigInt?
+  action_type       String   @db.VarChar(32) // "refund" | "supplement"（退/补）
+  amount_fen        BigInt
+  reason            String   @db.VarChar(255)
+  status            String   @db.VarChar(32) // "applied" | "duplicate"
+  new_api_snapshot  String?  @db.Text
+  gmt_create        DateTime @default(now()) @db.DateTime(0)
+  gmt_modified      DateTime @default(now()) @db.DateTime(0)
+  version           Int      @default(0)
+  is_delete         Int      @default(0) @db.TinyInt
+
+  @@unique([batch_no], map: "uk_adj_batch")
+  @@unique([generation_job_id, action_type], map: "uk_adj_job_action")
 }
 
 /// 生成任务操作日志（append-only，追溯还原）：每次状态变更 / provider 调用记一行。

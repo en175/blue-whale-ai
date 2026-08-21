@@ -277,12 +277,17 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
           }
         }
         // IK7G9X：失败即释放预留（reserved → released，实扣 0）。
+        // IK9VZ0：releaseNote 记录退款校验结果（refund_confirmed / refund_unverified）。
         await tx.cost_reservations.updateMany({
           where: {
             generation_job_id: BigInt(input.jobId),
             status: "reserved",
           },
-          data: { status: "released", actual_amount_fen: 0n },
+          data: {
+            status: "released",
+            actual_amount_fen: 0n,
+            ...(input.releaseNote ? { release_note: input.releaseNote } : {}),
+          },
         });
         return true;
       });
@@ -311,12 +316,17 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
         });
         if (updated.count !== 1) return false;
         // IK7G9X：派发前取消即释放预留（reserved → released，实扣 0）。
+        // IK9VZ0：派发前取消未向 new-api 提交，确认无扣费 → release_note = refund_confirmed。
         await tx.cost_reservations.updateMany({
           where: {
             generation_job_id: BigInt(input.jobId),
             status: "reserved",
           },
-          data: { status: "released", actual_amount_fen: 0n },
+          data: {
+            status: "released",
+            actual_amount_fen: 0n,
+            release_note: "refund_confirmed",
+          },
         });
         return true;
       });

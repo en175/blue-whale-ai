@@ -240,6 +240,16 @@ test("classifies operational scripts without product acceptance", async () => {
       reasons: ["operations tooling changed"],
     },
   );
+
+  // IK9VZ0：对账脚本归 operations 分类（只读运维工具）。
+  assert.deepEqual(
+    classifyChanges(["scripts/reconcile-cost-reservations.mjs"], { stage: "pr" }),
+    {
+      tier: "scoped",
+      areas: ["operations"],
+      reasons: ["operations tooling changed"],
+    },
+  );
 });
 
 test("rejects unknown executable paths instead of escalating to full", async () => {

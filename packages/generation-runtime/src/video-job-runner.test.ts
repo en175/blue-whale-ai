@@ -402,6 +402,10 @@ describe("video job runner recovery", () => {
     expect(repo.failVideoJob).toHaveBeenCalledWith(
       expect.objectContaining({ code: "invalid_video_inputs" }),
     );
+    // IK9VZ0 I5：派发前失败（未提交，无 providerTaskId）→ release_note = refund_confirmed
+    expect(repo.failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ releaseNote: "refund_confirmed" }),
+    );
   });
 
   it("persists the provider task id so another worker can resume polling", async () => {
@@ -709,4 +713,146 @@ describe("video job runner recovery", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+});
+
+describe("video job runner 实扣取证（IK9VZ0）", () => {
+  it("task quota 缺失 → warn 告警（不再静默落 0），publish 仍正常完成", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const warns: string[] = [];
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "305",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "鲸鱼游动",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: "upstream-quota-missing",
+        cancelRequested: false,
+        workerId: "worker-quota",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn().mockResolvedValue(true),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+    const provider = {
+      submit: vi.fn(),
+      poll: vi.fn().mockResolvedValue({
+        status: "succeeded",
+        progress: 100,
+        url: "https://provider.test/video.mp4",
+        // 无 quota 字段：取证失败场景
+        error: null,
+      }),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-quota",
+      jobId: "305",
+      createProvider: () => provider,
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: {
+        persist: vi.fn().mockResolvedValue({
+          url: "https://bucket.test/r.mp4",
+          storageKey: "k",
+          mime: "video/mp4",
+          size: 1,
+        }),
+      },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+      quotaToFen: (quota) => BigInt(quota),
+      warn: (msg: string) => warns.push(msg),
+    });
+
+    // quota 缺失必须告警（含 actual_amount_fen 落 0 语义）
+    expect(warns.some((l) => l.includes("actual_amount_fen") && l.includes("0"))).toBe(true);
+    // publish 正常完成，actual 落 0（不传 actualAmountFen）
+    expect(repo.publishVideoResult).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: "305", url: "https://bucket.test/r.mp4" }),
+    );
+    expect(repo.publishVideoResult).not.toHaveBeenCalledWith(
+      expect.objectContaining({ actualAmountFen: expect.anything() }),
+    );
+  });
+
+  it("终态 quota 与预留偏差超阈值 → warn 二次校验告警（不阻断 publish）", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const warns: string[] = [];
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "306",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "鲸鱼游动",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: "upstream-dev",
+        cancelRequested: false,
+        workerId: "worker-dev",
+        fencingToken: 1,
+        // 预留 1000 fen（quota 换算基准）
+        reservedAmountFen: 1000n,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn().mockResolvedValue(true),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+    const provider = {
+      submit: vi.fn(),
+      poll: vi.fn().mockResolvedValue({
+        status: "succeeded",
+        progress: 100,
+        url: "https://provider.test/video.mp4",
+        // quota=3000 → actualFen 3000n，reserved 1000n → 偏差 200% > 50% 阈值
+        quota: 3000,
+        error: null,
+      }),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-dev",
+      jobId: "306",
+      createProvider: () => provider,
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: {
+        persist: vi.fn().mockResolvedValue({
+          url: "https://bucket.test/r.mp4",
+          storageKey: "k",
+          mime: "video/mp4",
+          size: 1,
+        }),
+      },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+      quotaToFen: (quota) => BigInt(quota),
+      warn: (msg: string) => warns.push(msg),
+    });
+
+    // 偏差超阈值必须告警
+    expect(warns.some((l) => l.includes("偏差超阈值"))).toBe(true);
+    // 不阻断：publish 携带实扣金额
+    expect(repo.publishVideoResult).toHaveBeenCalledWith(
+      expect.objectContaining({ actualAmountFen: 3000n }),
+    );
+  });
 });

@@ -105,6 +105,14 @@ export {
   type PendingUploadAsset,
 } from "./asset-repo.js";
 export {
+  createSharedAssetRepo,
+  type SharedAssetRepo,
+  type SharedAssetRow,
+  type SharedAssetCreateInput,
+  type SharedAssetListFilter,
+  type SharedAssetPage,
+} from "./shared-asset-repo.js";
+export {
   createSkillRepo,
   normalizeNameKey,
   SkillAddConflictError,
@@ -185,6 +193,10 @@ export {
   type SceneCardResourceResult,
   type DeleteSceneCardResourceInput,
   type DeleteSceneCardResourceResult,
+  type SceneCardSharedSnapshotSource,
+  type FindOwnedSceneCardWithPresetResult,
+  type CopySceneCardToProjectInput,
+  type CopySceneCardToProjectResult,
 } from "./scene-card-resource-repo.js";
 export {
   createStoryboardPreviewRepo,
@@ -216,3 +228,9 @@ export {
   type OperationLogFilter,
   type CreateOperationLogInput,
 } from "./operation-log-repo.js";
+export {
+  createCostAdjustmentRepo,
+  alignReservationBySettlement,
+  type CostAdjustmentItemInput,
+  type CostAdjustmentBatchInput,
+} from "./cost-adjustment-repo.js";

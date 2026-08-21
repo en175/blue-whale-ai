@@ -20,7 +20,6 @@ import {
   fetchSkillLibrary,
   addLibrarySkill,
   fetchMySkills,
-  setMySkillAuto,
   deletePersonalSkill,
   createPersonalSkill,
   formatPersonalSkill,
@@ -31,6 +30,8 @@ import { isApiError } from '@/api/http';
 interface SkillModalProps {
   open: boolean;
   onClose: () => void;
+  /** 用户点击「直接使用」：宿主决定去向（AgentPanel 置一次性强制技能 / Home 跳画布携带技能意图） */
+  onUseSkill?: (skill: SkillRecord) => void;
 }
 
 /** 每页数量 */
@@ -66,7 +67,7 @@ description:
 ---
 `;
 
-export default function SkillModal({ open, onClose }: SkillModalProps) {
+export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProps) {
   const [tab, setTab] = useState<'mine' | 'library' | 'create'>('library');
 
   /* ---- 技能库状态 ---- */
@@ -198,18 +199,6 @@ export default function SkillModal({ open, onClose }: SkillModalProps) {
     setLibraryList((prev) => prev.map((r) => (r.creative_skill_id === id ? { ...r, added: true } : r)));
     addLibrarySkill(id).catch((e) => {
       setLibraryList((prev) => prev.map((r) => (r.creative_skill_id === id ? { ...r, added: false } : r)));
-      window.alert(errMsg(e));
-    });
-  };
-
-  /** 切换自动开关（PATCH，乐观更新失败回滚） */
-  const toggleAuto = (s: SkillRecord) => {
-    if (!s.creative_skill_id) return;
-    const id = s.creative_skill_id;
-    const next = !s.auto;
-    setMySkills((prev) => prev.map((r) => (r.creative_skill_id === id ? { ...r, auto: next } : r)));
-    setMySkillAuto(id, next).catch((e) => {
-      setMySkills((prev) => prev.map((r) => (r.creative_skill_id === id ? { ...r, auto: !next } : r)));
       window.alert(errMsg(e));
     });
   };
@@ -364,7 +353,11 @@ export default function SkillModal({ open, onClose }: SkillModalProps) {
                       <p className={styles.cardDesc} title={s.description ?? ''}>{s.description ?? ''}</p>
                       <div className={styles.cardFooter}>
                         <span className={styles.cardMeta}>{s.usage_count ?? 0} 人使用 @Blue Whale</span>
-                        <button className={styles.cardAction}>
+                        <button
+                          className={styles.cardAction}
+                          onClick={() => s.creative_skill_id && onUseSkill?.(s)}
+                          title={s.creative_skill_id ? '直接使用（强制激活该技能）' : '该技能暂不可直接使用'}
+                        >
                           <AtSign size={12} strokeWidth={2} />
                           <span>直接使用</span>
                         </button>
@@ -412,7 +405,11 @@ export default function SkillModal({ open, onClose }: SkillModalProps) {
                       </div>
                       <p className={styles.cardDesc} title={s.description ?? ''}>{s.description ?? ''}</p>
                       <div className={`${styles.cardFooter} ${styles.cardFooterEnd}`}>
-                        <button className={styles.cardAction}>
+                        <button
+                          className={styles.cardAction}
+                          onClick={() => s.creative_skill_id && onUseSkill?.(s)}
+                          title={s.creative_skill_id ? '直接使用（强制激活该技能）' : '该技能暂不可直接使用'}
+                        >
                           <AtSign size={12} strokeWidth={2} />
                           <span>直接使用</span>
                         </button>

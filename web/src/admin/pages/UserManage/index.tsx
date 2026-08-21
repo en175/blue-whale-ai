@@ -41,14 +41,14 @@ const parseDetail = (raw: string): { reason?: string; value?: number } => {
   }
 };
 
-/** 余额区间选项（本地筛选） */
+/** 余额区间选项（本地筛选，单位：积分——管理端展示口径 quota/50000，IK9VZ0 已按积分重标定） */
 const RANGE_OPTIONS = [
   { key: 'all', label: '全部余额', min: -Infinity, max: Infinity },
-  { key: '0-1000', label: '0 — 1,000', min: 0, max: 1000 },
-  { key: '1000-5000', label: '1,000 — 5,000', min: 1000, max: 5000 },
-  { key: '5000-10000', label: '5,000 — 10,000', min: 5000, max: 10000 },
-  { key: '10000-50000', label: '10,000 — 50,000', min: 10000, max: 50000 },
-  { key: 'gt50000', label: '> 50,000', min: 50000, max: Infinity },
+  { key: '0-100', label: '0 — 100', min: 0, max: 100 },
+  { key: '100-500', label: '100 — 500', min: 100, max: 500 },
+  { key: '500-2000', label: '500 — 2,000', min: 500, max: 2000 },
+  { key: '2000-10000', label: '2,000 — 10,000', min: 2000, max: 10000 },
+  { key: 'gt10000', label: '> 10,000', min: 10000, max: Infinity },
   { key: 'custom', label: '自定义区间', min: 0, max: 0 },
 ];
 

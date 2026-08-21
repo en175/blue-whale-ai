@@ -131,6 +131,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   const [showLogin, setShowLogin] = useState(false);
   /** 登录成功后需带入画布的草稿 */
   const pendingText = useRef('');
+  /** 登录成功后需带入画布的「直接使用」技能 ID（首页选技能 → 画布武装为下一条消息的 forced skill） */
+  const pendingSkill = useRef('');
 
   /** 外部注入草稿（画廊卡片点击）：仅 ts 变化时覆盖输入框 */
   useEffect(() => {
@@ -371,6 +373,17 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     goCanvasWithText(text);
   };
 
+  /** 跳转画布页并携带「直接使用」技能意图（经 location.state 注入 Agent 弹框，武装为下一条消息的 forced skill） */
+  const goCanvasWithSkill = (skillId: string) => {
+    setShowSkillModal(false);
+    if (!user) {
+      pendingSkill.current = skillId;
+      setShowLogin(true);
+      return;
+    }
+    navigate('/canvas', { state: { skillId } });
+  };
+
   const handleSend = () => {
     const text = inputValue.trim();
     if (!text) return;
@@ -383,11 +396,17 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     dispatchByTab(text);
   };
 
-  /** 关闭登录框：登录成功则携带原草稿按当前 tab 跳转画布 */
+  /** 关闭登录框：登录成功则携带原草稿按当前 tab /技能意图跳转画布 */
   const handleLoginClose = () => {
     setShowLogin(false);
     const text = pendingText.current;
     pendingText.current = '';
+    const skillId = pendingSkill.current;
+    pendingSkill.current = '';
+    if (skillId && getCurrentUser()) {
+      goCanvasWithSkill(skillId);
+      return;
+    }
     if (text && getCurrentUser()) dispatchByTab(text);
   };
 
@@ -1080,6 +1099,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       <SkillModal
         open={showSkillModal}
         onClose={() => setShowSkillModal(false)}
+        onUseSkill={(s) => {
+          if (s.creative_skill_id) goCanvasWithSkill(s.creative_skill_id);
+        }}
       />
 
       {/* 未登录拦截弹窗 */}

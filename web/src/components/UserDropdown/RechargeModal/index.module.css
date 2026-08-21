@@ -115,19 +115,24 @@
   background-color: #3e63c4;
 }
 
-/* 选中：整体蓝色描边 */
+/* 选中：蓝色描边 + 浅蓝背景 + 阴影（明显区分选中态） */
 .planSelected {
   border-color: #3e63c4;
+  background-color: #1e2a4a;
+  box-shadow: 0 0 0 1px #3e63c4 inset;
 }
 
 .planSelected:hover {
   border-color: #3e63c4;
+  background-color: #1e2a4a;
 }
 
-.planName {
-  font-size: var(--font-size-md);
-  font-weight: 600;
+/* 卡片主标题：到账积分（大字），替代旧的 name 展示（历史 quota 数字命名会误导） */
+.planTitle {
+  font-size: 24px;
+  font-weight: 700;
   color: #fff;
+  line-height: 1.2;
 }
 
 .recBadge {
@@ -141,9 +146,26 @@
   border-radius: 6px;
 }
 
-.planPoints {
-  font-size: var(--font-size-md);
-  color: #ccc;
+/* 已选角标（右上角，与推荐角标互斥位置：推荐在上方、已选在右下） */
+.selectedBadge {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background-color: #3e63c4;
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+/* 充值计价说明（标题下） */
+.unitHint {
+  font-size: var(--font-size-sm);
+  color: #888;
+  margin-top: -8px;
 }
 
 .planPriceRow {
@@ -219,9 +241,10 @@
   color: #3e8efc;
 }
 
-.emptyBold {
-  color: #ccc;
-  font-weight: 600;
+/* 未选套餐时左侧提示（简洁小字，与按钮区分） */
+.emptyHintText {
+  color: #999;
+  font-size: var(--font-size-sm);
 }
 
 .barLeft {
@@ -324,6 +347,17 @@
 }
 
 .confirmBtnPaying:hover {
+  background-color: #2a2a2a;
+}
+
+/* 未选套餐/支付中：禁用态（与支付中同视觉，可区分于可用态） */
+.confirmBtnDisabled {
+  background-color: #2a2a2a;
+  color: #777;
+  cursor: not-allowed;
+}
+
+.confirmBtnDisabled:hover {
   background-color: #2a2a2a;
 }
 
