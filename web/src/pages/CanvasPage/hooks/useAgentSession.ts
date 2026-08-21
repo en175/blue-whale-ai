@@ -994,12 +994,18 @@ export function useAgentSession(projectId: string) {
   const stopRun = useCallback(() => {
     const sid = sessionIdRef.current;
     if (!projectId || !sid) return;
+    setChatError(null);
     api.cancelSession(projectId, sid).catch((e) => {
       console.warn('停止 Agent 运行失败:', e);
-      runningRef.current = null;
-      streamingRef.current = false;
-      setRunningRunId(null);
-      setStreaming(false);
+      // 刻意**不**把本地状态清成「已停止」。
+      //
+      // 原来的写法在失败分支里清了 runningRunId 与 streaming，于是取消请求失败的样子和成功
+      // 一模一样：按钮变回箭头，界面说停了，而后端那一轮还在跑。取消的路径写错打在 404 上
+      // 整整这么久没被发现，正是因为这里替它圆了场。
+      //
+      // 这一轮到底停没停，权威在事件流：真停了会有终态事件，没停就该继续显示在跑。
+      // 本地能做的只有把失败说出来。
+      setChatError('停止失败，这一轮可能仍在运行；可稍后重试或刷新页面。');
     });
   }, [projectId]);
 

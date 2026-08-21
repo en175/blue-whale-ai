@@ -455,6 +455,38 @@ describe('useAgentSession 运行计时', () => {
     });
   });
 
+  /**
+   * 取消失败时不许把界面清成「已停止」。
+   *
+   * 原来的写法正是这样，于是取消请求打在 404 上的样子和成功一模一样——按钮变回箭头、
+   * 界面说停了、后端那一轮照跑。取消路径写错这么久没被发现，就是因为这里替它圆了场。
+   */
+  it('停止失败时说出来，而不是把界面清成已停止', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.cancelSession.mockRejectedValue(new Error('404 route not found'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        id: 'e-run-started',
+        type: 'run.started',
+        data: { run_id: 'run-live', run: { run_id: 'run-live', status: 'running' } },
+      } as never);
+    });
+    expect(latest.runningRunId).toBe('run-live');
+
+    await act(async () => {
+      latest.stopRun();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(latest.chatError).toBeTruthy());
+    // 权威在事件流：没收到终态就还在跑，本地不能替它宣布停了。
+    // （`streaming` 由发送侧置位，run.started 不动它，所以这里看的是 runningRunId。）
+    expect(latest.runningRunId).toBe('run-live');
+  });
+
   it('回执直接是终态时报终局，而不是让状态行整条消失', async () => {
     mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
     mocks.sendSessionMessage.mockResolvedValue({ run: { run_id: 'run-already-done', status: 'failed' } });
