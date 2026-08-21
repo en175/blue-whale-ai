@@ -98,19 +98,19 @@ function GalleryCard({ record, onClick }: { record: TemplateRecord; onClick?: ()
             <span className={styles.playIcon}>▶</span>
           </div>
         )}
-        {/* 悬停视频（IKA64P 校准）：在中间主图位置播放，保留左右堆叠探出 */}
-        {hovered && record.video && (
-          <video
-            className={styles.hoverVideo}
-            src={record.video}
-            autoPlay
-            muted
-            loop
-            playsInline
-            disablePictureInPicture
-          />
-        )}
       </div>
+      {/* 悬停视频：铺满整张卡片（覆盖标题与图片区域） */}
+      {hovered && record.video && (
+        <video
+          className={styles.hoverVideo}
+          src={record.video}
+          autoPlay
+          muted
+          loop
+          playsInline
+          disablePictureInPicture
+        />
+      )}
     </div>
   );
 }

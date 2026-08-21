@@ -100,16 +100,14 @@
   overflow: hidden;
 }
 
-/* ---- 悬停视频（IKA64P 校准）：与中间主图 stackTop 同几何，圆角，盖在堆叠顶层 ---- */
+/* ---- 悬停视频（铺满整张卡片，含标题区域） ---- */
 .hoverVideo {
   position: absolute;
-  top: 8%;
-  bottom: 8%;
-  left: 20%;
-  width: 60%;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  border-radius: var(--radius-lg);
-  z-index: 4;
+  z-index: 5;
 }
 
 /* ---- 照片堆叠：三张重叠，第二张在最上方，第一/三张在底部左右探出 ---- */
