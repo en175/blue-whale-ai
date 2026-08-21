@@ -306,6 +306,8 @@ export interface AdminTemplateTag {
   tag_code: string;
   /** 标签显示名称，可改名 */
   label: string;
+  /** 可见性（IKA64P）：1 首页可见 / 0 隐藏 */
+  visible: number;
 }
 
 /** GET /api/admin/template-tags 获取全部标签（按 sort_order 升序），用于筛选条与表单下拉 */
@@ -319,6 +321,14 @@ export function renameAdminTemplateTag(tag_code: string, label: string) {
     method: 'PUT',
     body: JSON.stringify({ tag_code, label }),
   });
+}
+
+/** PUT /api/admin/template-tags/visibility 标签隐藏开关（IKA64P，首页即时生效） */
+export function setTemplateTagVisibility(tag_code: string, visible: number) {
+  return apiRequest<{ tag_code: string; visible: number }>(
+    '/api/admin/template-tags/visibility',
+    { method: 'PUT', body: JSON.stringify({ tag_code, visible }) },
+  );
 }
 
 /** 模板媒体上传 presign 返回 */
