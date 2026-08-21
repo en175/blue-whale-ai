@@ -5,6 +5,11 @@ import { capabilityDigestFromModelCapability } from "./capability-digest.js";
  *  对齐 Java GenerationModelCapabilityService.listCapabilities：查启用项 + DTO 整形。
  *  wire 字段 snake_case（Jackson SNAKE_CASE）。 */
 
+/** 参考图数量缺省上限：与网关（blue-whale-api maxImageEditImages=10）/ 火山方舟
+ *  Seedream 4.0/5.0（10 张复合编辑）对齐（IKA72G）。后端创建校验与 generation worker
+ *  共用此常量兜底；模型能力行显式配置 features.max_reference_images 时以其为准。 */
+export const DEFAULT_MAX_REFERENCE_IMAGES = 10;
+
 export interface ModelSizeOption {
   id: string;
   label: string;
@@ -115,8 +120,10 @@ function toFeatures(json: unknown): ModelFeatures {
   return {
     reference_image: f.referenceImage === true || f.reference_image === true,
     // IK6PA5：缺省不能兜底 0——前端 atReferenceLimit = referenceCount >= max_reference_images
-    // 在 0 上限时恒 true，上传入口被静默禁用。缺省 4 与前端 DEFAULT_MAX_REFERENCE_IMAGES 对齐。
-    max_reference_images: f.maxReferenceImages ?? f.max_reference_images ?? 4,
+    // 在 0 上限时恒 true，上传入口被静默禁用。
+    // IKA72G：缺省从 4 上调为 10，与网关/ARK 多图上限一致（后端创建校验/worker 同源）。
+    max_reference_images:
+      f.maxReferenceImages ?? f.max_reference_images ?? DEFAULT_MAX_REFERENCE_IMAGES,
     watermark: f.watermark === true,
     quantity_max: f.quantityMax ?? f.quantity_max ?? 1,
     sequential_image_generation:

@@ -193,8 +193,9 @@ export async function applyImageGenerateInTransaction(
     web_search: false,
     sequential_image_generation: false,
   };
+  // IKA72G：图片任务参考图统一 input_asset_ids 字段（与创建校验/worker 对齐）。
   if (referenceAssetIds.length > 0) {
-    jobInput.reference_asset_ids = referenceAssetIds;
+    jobInput.input_asset_ids = referenceAssetIds;
   }
   const actionIdentity = createHash("sha256")
     .update(

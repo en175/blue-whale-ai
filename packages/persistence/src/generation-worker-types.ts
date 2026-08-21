@@ -18,6 +18,8 @@ export interface ImageCapabilitySnapshot {
   api_size: string | null;
   width: number | null;
   height: number | null;
+  /** 参考图数量上限（features.max_reference_images 归一化；缺省与网关/ARK 一致的 10，IKA72G）。 */
+  max_reference_images: number;
 }
 
 export interface WorkerInputAsset {

@@ -1,4 +1,7 @@
-import type { WorkerRepo } from "@blue-whale/persistence";
+import {
+  DEFAULT_MAX_REFERENCE_IMAGES,
+  type WorkerRepo,
+} from "@blue-whale/persistence";
 import type { AssetUploadStorage } from "@lib/shared/assets/upload.js";
 import sharp from "sharp";
 
@@ -152,8 +155,12 @@ async function processClaimedJob(
     return job.id;
   }
 
-  const referenceIds = Array.isArray(input.reference_asset_ids)
-    ? input.reference_asset_ids
+  // IKA72G：字段语义统一——图片参考图 = input_asset_ids（与创建校验/前端契约对齐），
+  // 视频普通参考素材 = reference_asset_ids（首尾帧走 first/last_frame_asset_id 不受此限）。
+  const referenceField =
+    job.type === "image" ? "input_asset_ids" : "reference_asset_ids";
+  const referenceIds = Array.isArray(input[referenceField])
+    ? input[referenceField]
         .filter(
           (id): id is string | number =>
             typeof id === "string" || typeof id === "number",
@@ -165,9 +172,31 @@ async function processClaimedJob(
     await failClaimed("unsupported_input", "音频生成一期不支持参考素材");
     return job.id;
   }
-  const maxReferenceCount = job.type === "image" ? 4 : 1;
+  // IKA72G：图片参考图上限读取模型能力配置（features.max_reference_images），与创建校验同源；
+  // 能力行缺失回退与网关/ARK 一致的常量 10。video 走 RocketMQ video-job-runner（9 图 + 3 视频，
+  // 创建预检 12 一致），本 worker 旧版单图视频分支维持 1 张并输出真实上限文案。
+  let imageCapability: Awaited<
+    ReturnType<WorkerRepo["findImageCapability"]>
+  > | null = null;
+  let maxReferenceCount = 1;
+  if (job.type === "image") {
+    const sizeId = typeof input.size === "string" ? input.size : null;
+    imageCapability = await repo.findImageCapability(modelId, sizeId);
+    if (!imageCapability) {
+      await failClaimed(
+        "model_unavailable",
+        `未开通或不受支持的模型: ${modelId}`,
+      );
+      return job.id;
+    }
+    maxReferenceCount =
+      imageCapability.max_reference_images ?? DEFAULT_MAX_REFERENCE_IMAGES;
+  }
   if (referenceIds.length > maxReferenceCount) {
-    await failClaimed("unsupported_input", "当前模型仅支持一张参考图");
+    await failClaimed(
+      "unsupported_input",
+      `当前模型最多支持 ${maxReferenceCount} 张参考图`,
+    );
     return job.id;
   }
   const sourceAssets =
@@ -316,8 +345,8 @@ async function processClaimedJob(
     const provider = createImageProvider(providerToken);
     providerTokenRef = providerToken;
 
-    const sizeId = typeof input.size === "string" ? input.size : null;
-    const cap = await repo.findImageCapability(modelId, sizeId);
+    // IKA72G：capability 已在参考图上限校验处按同一 sizeId 取回，这里直接复用（避免重复查询）。
+    const cap = imageCapability;
     if (!cap) {
       await failClaimed(
         "model_unavailable",
