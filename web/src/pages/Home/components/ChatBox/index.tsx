@@ -492,14 +492,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   const videoMaxImages =
     videoMode === 'firstlast'
       ? 2
-      : (selectedVideoModel?.features?.max_reference_images ?? 5);
+      : (selectedVideoModel?.features?.max_reference_images ?? 10);
   const videoImagesFull = videoRefImageCount >= videoMaxImages;
   const videoVideosFull = videoRefVideoCount >= MAX_VIDEOS;
   /** 首尾帧模式必须恰好 2 张图片（不多不少、不含视频），否则禁止发送 */
   const firstlastInvalid =
     videoMode === 'firstlast' &&
     !(refFiles.length === 2 && refFiles.every((r) => r.file.type.startsWith('image/')));
-  const imageMaxImages = selectedImageModel?.features?.max_reference_images ?? 5;
+  const imageMaxImages = selectedImageModel?.features?.max_reference_images ?? 10;
 
   // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
   const handleRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {

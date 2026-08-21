@@ -31,7 +31,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
-  height: 200px;
+  /* IKA715：固定高度改为最小高度，内容（预览行/配置面板）增多时自然增高，不再裁切底部控件 */
+  min-height: 200px;
   box-sizing: border-box;
   transition: border-color var(--transition-fast);
 }
@@ -52,6 +53,8 @@
   gap: var(--spacing-sm);
 }
 
+/* IKA715：预览行保持换行；卡片高度自适应（.inputBox min-height），
+ * 参考图增多时整卡自然增高，底部控件不被覆盖。不加 overflow，避免裁切 sourceMenu 弹出层。 */
 .previewRow {
   display: flex;
   flex-wrap: wrap;

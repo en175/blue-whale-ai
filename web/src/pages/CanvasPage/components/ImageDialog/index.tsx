@@ -17,8 +17,8 @@ import {
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import styles from './index.module.css';
 
-/** 接口失败时参考图上限回退值 */
-const FALLBACK_MAX_IMAGES = 5;
+/** 接口失败时参考图上限回退值（IKA715：与后端/网关缺省 10 对齐） */
+const FALLBACK_MAX_IMAGES = 10;
 
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
 const MAX_INPUT = 500;
