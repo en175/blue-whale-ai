@@ -213,40 +213,32 @@ export function deriveRunStatus(input: RunStatusInput): RunStatus | null {
   const tokens = tokensOf(input);
   const context = contextOf(input.contextCapacity);
 
+  // 三个分支只在 phase / label / tone / settled 上分岔，其余四项恒等。写成共用底座 + 分岔项，
+  // 免得加一个字段要在三处各补一遍，而漏掉一处不会有任何编译提示。
+  const common = { seconds, tokens, context };
+
   if (outcome !== null) {
     return {
+      ...common,
       phase: outcome,
       label: TERMINAL_LABEL[outcome],
-      seconds,
       tone: TERMINAL_TONE[outcome],
       settled: true,
-      tokens,
-      context,
     };
   }
 
   // 还没拿到 runId：请求在途，此时既没有节点也没有正文，但表已经在走了，不能空着。
   if (!hasRunId) {
-    return {
-      phase: 'dispatching',
-      label: DISPATCHING_LABEL,
-      seconds,
-      tone: 'working',
-      settled: false,
-      tokens,
-      context,
-    };
+    return { ...common, phase: 'dispatching', label: DISPATCHING_LABEL, tone: 'working', settled: false };
   }
 
   return {
+    ...common,
     phase: stalled ? 'stalled' : 'working',
     label: activity ?? INITIAL_LABEL,
-    seconds,
     // stalled 时 UI 换一种语气，但**不会**因此隐藏状态行。
     tone: stalled ? 'stalled' : 'working',
     settled: false,
-    tokens,
-    context,
   };
 }
 

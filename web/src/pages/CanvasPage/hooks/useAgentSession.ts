@@ -196,6 +196,34 @@ export function useAgentSession(projectId: string) {
    * turnStartedAt 一旦置空，状态行就没有起点可算了。
    */
   const [turnOutcome, setTurnOutcome] = useState<TurnOutcome | null>(null);
+  /**
+   * 起点与终局是同一件事的两半——「本轮的账」——所以对它们的改动一律走下面三个动作，
+   * 不再各自裸调 setter。
+   *
+   * 理由是具体的：这两个状态此前在六处成对出现，其中一处只清了起点，结果是发送失败后
+   * 上一轮的终局残留在屏幕上；另一处两个都清了，结果是回执直接终态时状态行整条消失。
+   * 两个 bug 是同一种形状——改了一半。做成原子动作后这种写法就写不出来了。
+   */
+  const beginTurn = useCallback(() => {
+    setTurnStartedAt(Date.now());
+    setTurnOutcome(null);
+  }, []);
+  /** 本轮结束，留下这一轮的账。刻意不动 turnStartedAt：没有起点就算不出耗时。 */
+  const settleTurn = useCallback((outcome: TurnOutcome) => {
+    setTurnOutcome(outcome);
+  }, []);
+  /**
+   * 刷新或重连后本地没有提交时刻，用事件自带的服务端时间补一个起点。
+   * 只在还没有起点时生效——本地打的点更早（提交那一刻），不该被服务端的排队时间往后推。
+   */
+  const adoptTurnStart = useCallback((at: number) => {
+    setTurnStartedAt((cur) => cur ?? at);
+  }, []);
+  /** 这一轮当作没发生过（未开始、被计费门接管、或整个会话被换掉）。 */
+  const clearTurn = useCallback(() => {
+    setTurnStartedAt(null);
+    setTurnOutcome(null);
+  }, []);
   /** 正在写入的生成卡预览（prompt_card.partial.v1）。只用于展示，终态卡片到达即让位。 */
   const [partialCard, setPartialCard] = useState<PartialCardPreview | null>(null);
   /** 运行活跃但长期无产出事件（delta/思考步）的兜底提示标志：超阈值仍无终态时给用户可诊断信息，不无限「处理中」 */
@@ -536,7 +564,7 @@ export function useAgentSession(projectId: string) {
         // 刷新或重连后本地没有提交时刻，用事件自己的服务端时间补上，
         // 否则重进页面秒数会从 0 重新数，等了两分钟的用户看到"3s"。
         const queuedAt = Date.parse(str(data.occurred_at));
-        setTurnStartedAt((cur) => cur ?? (Number.isNaN(queuedAt) ? Date.now() : queuedAt));
+        adoptTurnStart(Number.isNaN(queuedAt) ? Date.now() : queuedAt);
         runningRef.current = runId;
         setRunningRunId(runId);
         // 新一轮开始：清掉上一轮思考与待确认卡，等 run.activity / proposed 事件重建（含自动排队的下一轮）
@@ -580,8 +608,7 @@ export function useAgentSession(projectId: string) {
         discardStream();
         // 计费门是暂停不是终态，且下方 paymentRequiredMessage 会给出明确说明与处理入口。
         // 让状态行继续读秒会显得还在跑，报终局又不属实，因此这一段交给那条提示独占。
-        setTurnStartedAt(null);
-        setTurnOutcome(null);
+        clearTurn();
         setPartialCard(null);
         runningRef.current = runId || null;
         setRunningRunId(runId || null);
@@ -602,7 +629,7 @@ export function useAgentSession(projectId: string) {
         if (runId) terminalRunIdsRef.current.add(runId);
         // turnStartedAt 刻意保留：状态行结束后要留下来报这一轮的账（耗时与 token），清掉它
         // 就没有起点可算了。下一轮 sendMessage 会重新置位。
-        setTurnOutcome({
+        settleTurn({
           outcome: terminalOutcomeOf(t.slice('run.'.length)),
           finishedAt: Date.now(),
           tokenUsage: parseRunTokenUsage(run.token_usage),
@@ -675,7 +702,7 @@ export function useAgentSession(projectId: string) {
         return;
       }
     },
-    [confirmUser, discardStream, pumpReveal, refreshSessions, settleStream, upsertAssistant, projectId],
+    [confirmUser, discardStream, pumpReveal, refreshSessions, settleStream, upsertAssistant, projectId, adoptTurnStart, settleTurn, clearTurn],
   );
 
   /** 复位本地对话态（切换会话/新对话） */
@@ -696,8 +723,7 @@ export function useAgentSession(projectId: string) {
     setRunningRunId(null);
     runningRef.current = null;
     setFailedRunId(null);
-    setTurnStartedAt(null);
-    setTurnOutcome(null);
+    clearTurn();
     setThinkingSteps([]);
     setPartialCard(null);
     setChatError(null);
@@ -709,7 +735,7 @@ export function useAgentSession(projectId: string) {
     setSendError(null);
     setPaymentRequiredMessage(null);
     terminalRunIdsRef.current.clear();
-  }, [stopReveal]);
+  }, [stopReveal, clearTurn]);
 
   /** 连接到指定会话：水合快照 + 订阅事件流（先解绑旧订阅，防止串话到上一个会话） */
   const connectSession = useCallback(
@@ -894,8 +920,7 @@ export function useAgentSession(projectId: string) {
       streamingRef.current = true;
       setStreaming(true);
       // 提交即开表。请求还没发出去、Run 还没排上队，用户也已经在等了，这段时间必须算进去。
-      setTurnStartedAt(Date.now());
-      setTurnOutcome(null);
+      beginTurn();
       try {
         const connectionEpoch = connectionEpochRef.current;
         const ack = await api.sendSessionMessage(projectId, sid, text, { forcedCreativeSkillId: forcedSkillId });
@@ -918,7 +943,7 @@ export function useAgentSession(projectId: string) {
             // 回执回来时 Run 已经是终态（幂等命中、或排队即失败）：这仍然是一轮结束，
             // 该按终态报账，而不是把状态行整条抹掉。清掉起点等于让刚提交的那一轮
             // 在屏幕上凭空消失——用户看到的是自己发了一句话然后什么都没发生。
-            setTurnOutcome({
+            settleTurn({
               outcome: terminalOutcomeOf(run.status),
               finishedAt: Date.now(),
               // 回执的 SessionRun 上没有这些字段，真实数字随后由事件流补。
@@ -942,8 +967,7 @@ export function useAgentSession(projectId: string) {
         // 这里刻意清空而不是写终局：请求就没发出去，这一轮从未开始，乐观消息也回滚了。
         // 屏幕并不沉默——下面的 sendError 会明确说发送失败且输入已保留，此时再挂一条
         // 「未能完成 0s」只是把同一件事说两遍。「地板」要托的是静默，不是已有提示的场合。
-        setTurnStartedAt(null);
-        setTurnOutcome(null);
+        clearTurn();
         setMessages((prev) => prev.filter((message) => message.id !== optimisticId));
         if (isApiError(e) && e.code === 'capability_required') {
           setSendError('当前环境未配置 Agent 运行能力券，请联系管理员配置后重试；输入内容已保留。');
@@ -955,7 +979,7 @@ export function useAgentSession(projectId: string) {
         return false;
       }
     },
-    [confirmUser, projectId, ensureSession],
+    [confirmUser, projectId, ensureSession, beginTurn, settleTurn, clearTurn],
   );
 
   /** 停止当前运行 POST runs/:runId/cancel（终态由事件流推送） */

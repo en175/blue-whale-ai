@@ -7,12 +7,9 @@ import { describe, expect, it } from 'vitest';
 import { shouldCancelOnKey } from './cancelShortcut';
 
 describe('shouldCancelOnKey', () => {
-  it('ESC 取消本次回答', () => {
-    expect(shouldCancelOnKey({ key: 'Escape', defaultPrevented: false, targetTagName: 'DIV' })).toBe(true);
-  });
-
-  it('焦点在主输入框时也要能取消——那是发送后焦点最常待的地方', () => {
-    // Lexical 的 contentEditable 是 div，不是 input。
+  it('ESC 取消本次回答，焦点在主输入框里也算', () => {
+    // 主输入框是 Lexical 的 contentEditable，标签是 div 而不是 input——所以它既不在
+    // 下面那条让路名单里，也正是发送后焦点最常待的地方，这一条同时锁住这两件事。
     expect(shouldCancelOnKey({ key: 'Escape', defaultPrevented: false, targetTagName: 'DIV' })).toBe(true);
   });
 
