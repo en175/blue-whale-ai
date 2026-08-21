@@ -139,8 +139,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   const videoCount = refFiles.filter((f) => f.type === 'video').length;
   /** 首尾帧模式必须恰好 2 张图片（不多不少、不含视频），否则禁止发送 */
   const keyframeInvalid = isKeyframe && (imageCount !== 2 || videoCount > 0);
-  /** 图片上限：首尾帧模式固定 2（首帧+尾帧），其余采用接口定义的 max_reference_images（失败回退 5） */
-  const maxImages = isKeyframe ? 2 : (currentModel?.features?.max_reference_images ?? 5);
+  /** 图片上限：首尾帧模式固定 2（首帧+尾帧），其余采用接口定义的 max_reference_images（IKA715：失败回退 10，与后端/网关一致） */
+  const maxImages = isKeyframe ? 2 : (currentModel?.features?.max_reference_images ?? 10);
 
   /** 时长刻度（min..max 逐 step） */
   const ticks: number[] = [];

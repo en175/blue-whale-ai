@@ -53,18 +53,6 @@ const CARD_KIND_LABEL: Record<CardKind, string> = {
   custom: '自定义',
 };
 
-/** 类型 → 图标 */
-const TYPE_ICON: Record<string, typeof ImageIcon> = {
-  card: ImageIcon,
-  media: ImageIcon,
-  goods: Box,
-  scene: BarChart3,
-  text: Type,
-  image: ImageIcon,
-  video: Video,
-  audio: AudioLines,
-};
-
 /** 类型 → 渐变封面（无缩略图时的占位） */
 const TYPE_GRADIENT: Record<string, { from: string; to: string }> = {
   card: { from: '#5b2a86', to: '#8e2f66' },
@@ -409,7 +397,6 @@ export default function SharedAssetsModal({
               <div className={styles.grid}>
                 {filteredItems.map((item) => {
                   const lookupKey = item.assetType === 'media' ? (item.kind ?? 'media') : item.assetType;
-                  const Icon = TYPE_ICON[lookupKey] || TYPE_ICON[item.assetType] || ImageIcon;
                   const cUrl = coverUrl(item);
                   const gradient = TYPE_GRADIENT[lookupKey] || TYPE_GRADIENT[item.assetType] || TYPE_GRADIENT.card;
                   const isAdding = addItemId === item.id;
