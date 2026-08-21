@@ -12,9 +12,7 @@ import {
   Video,
   AudioLines,
   Type,
-  Mountain,
   Box,
-  FileText,
   BarChart3,
   ChevronDown,
   Plus,
@@ -34,18 +32,17 @@ export interface SharedProduct {
 }
 
 /** 资产子类型（资产 tab 下拉筛选） */
-type AssetSub = 'style' | 'character' | 'object' | 'environment' | 'custom';
+type AssetSub = 'style' | 'character' | 'object' | 'environment';
 
 const SUB_LABEL: Record<AssetSub, string> = {
   style: '风格',
   character: '角色',
   object: '物体',
   environment: '环境',
-  custom: '自定义',
 };
 
 /** 资产条目类型 */
-type AssetType = 'asset' | 'image' | 'video' | 'audio' | 'text' | 'scene' | 'goods' | 'other';
+type AssetType = 'asset' | 'image' | 'video' | 'audio' | 'text' | 'goods';
 
 interface AssetItem {
   id: string;
@@ -71,13 +68,11 @@ const ASSET_ITEMS: AssetItem[] = [
   { id: 'a5', type: 'asset', sub: 'object', title: '复古相机', date: '2026-07-22', cover: { text: '物体 · 相机', from: '#6b6b1f', to: '#4a5a1e' } },
   { id: 'a6', type: 'asset', sub: 'environment', title: '山顶日出', date: '2026-07-20', cover: { text: '环境 · 日出', from: '#7a4a1f', to: '#5a5a1e' } },
   { id: 'a7', type: 'asset', sub: 'environment', title: '地下实验室', date: '2026-07-18' },
-  { id: 'a8', type: 'asset', sub: 'custom', title: '品牌规范备注', date: '2026-07-15' },
   { id: 'i1', type: 'image', title: '商品主图 A', date: '2026-07-29' },
   { id: 'i2', type: 'image', title: '赛博朋克街景', date: '2026-07-26', cover: { text: '图片 · 街景', from: '#31307a', to: '#6b2f8e' } },
   { id: 'v1', type: 'video', title: '产品宣传片 15s', date: '2026-07-27' },
   { id: 'au1', type: 'audio', title: '品牌音效 jingle', date: '2026-07-24' },
   { id: 't1', type: 'text', title: '直播带货话术', date: '2026-07-23' },
-  { id: 's1', type: 'scene', title: '露营黄昏场景', date: '2026-07-21', cover: { text: '场景 · 露营', from: '#7a3a1f', to: '#5a4a1e' } },
   {
     id: 'g1',
     type: 'goods',
@@ -102,7 +97,6 @@ const ASSET_ITEMS: AssetItem[] = [
       detail: '品类:榨汁杯\n核心参数:350ml·15000 转/分',
     },
   },
-  { id: 'o1', type: 'other', title: '品牌 VI 手册', date: '2026-07-16' },
 ];
 
 const TABS: { key: string; label: string }[] = [
@@ -112,9 +106,7 @@ const TABS: { key: string; label: string }[] = [
   { key: 'video', label: '视频' },
   { key: 'audio', label: '音频' },
   { key: 'text', label: '文本' },
-  { key: 'scene', label: '场景' },
   { key: 'goods', label: '商品' },
-  { key: 'other', label: '其他' },
 ];
 
 /** 类型 → 占位图标（无封面时） */
@@ -124,9 +116,7 @@ const TYPE_ICON: Record<AssetType, typeof ImageIcon> = {
   video: Video,
   audio: AudioLines,
   text: Type,
-  scene: Mountain,
   goods: Box,
-  other: FileText,
 };
 
 /** 类型 → 徽章文案 */

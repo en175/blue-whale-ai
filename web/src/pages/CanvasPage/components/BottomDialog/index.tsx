@@ -13,6 +13,8 @@ import {
   SlidersHorizontal,
   Play,
   ArrowUp,
+  Upload,
+  MousePointerClick,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import ChipTextEditor, { type ChipTextEditorHandle, type ChipRef } from '../ChipTextEditor';
@@ -49,22 +51,32 @@ export interface VideoGenOptions {
   mode: string;
 }
 
-/** 参考素材项（file 仅本地上传有值；画布带入的节点图片只有 preview URL） */
+/** 参考素材项（file 仅本地上传有值；画布带入的节点图片只有 preview URL，assetId 已有则直接复用） */
 export interface BottomRefItem {
   file?: File;
   preview: string;
   type: 'image' | 'video';
+  /** 已有资产 ID（画布节点带入时携带，发送时免重复上传） */
+  assetId?: string | number;
 }
 
 interface BottomDialogProps {
   onClose: () => void;
-  onSend: (text: string, opts: VideoGenOptions) => void;
+  onSend: (text: string, opts: VideoGenOptions, refs: BottomRefItem[]) => void;
   /** 初始参考素材（节点「生成视频」带入被点节点图片） */
   initialRefs?: BottomRefItem[];
   /** 初始生成卡引用胶囊（Agent 生成卡「引用到 dock」带入，累计不覆盖，可多张） */
   initialCards?: ChipRef[];
   /** 初始自由文本（视频节点「重新编辑」带入原提示词） */
   initialText?: string;
+  /** 到节点选择：进入画布节点选取模式（image 图片节点 / video 视频节点） */
+  onPickFromCanvas?: (kind: 'image' | 'video') => void;
+  /** 画布选取模式进行中（image/video，对应按钮高亮提示） */
+  pickMode?: 'image' | 'video' | null;
+  /** 画布节点选取结果（ts 驱动注入参考视频） */
+  externalPick?: { ts: number; item: BottomRefItem } | null;
+  /** 画布节点选取结果（ts 驱动注入参考图片） */
+  externalImagePick?: { ts: number; item: BottomRefItem } | null;
 }
 
 /** 宽高比图标：按比例绘制小矩形 */
@@ -76,7 +88,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText, onPickFromCanvas, pickMode, externalPick, externalImagePick }: BottomDialogProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供生成按钮启用态判断 */
@@ -94,6 +106,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   const [duration, setDuration] = useState(10);
   const [modelOpen, setModelOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
+  /** 上传按钮弹菜单（image/video 各自独立，避免同时弹出）：上传 / 到节点选择 */
+  const [sourceMenuOpen, setSourceMenuOpen] = useState<'image' | 'video' | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const anyInputRef = useRef<HTMLInputElement>(null);
@@ -124,6 +138,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   const isKeyframe = selectedMode === 'keyframe';
   const imageCount = refFiles.filter((f) => f.type === 'image').length;
   const videoCount = refFiles.filter((f) => f.type === 'video').length;
+  /** 首尾帧模式必须恰好 2 张图片（不多不少、不含视频），否则禁止发送 */
+  const keyframeInvalid = isKeyframe && (imageCount !== 2 || videoCount > 0);
   /** 图片上限：首尾帧模式固定 2（首帧+尾帧），其余采用接口定义的 max_reference_images（失败回退 5） */
   const maxImages = isKeyframe ? 2 : (currentModel?.features?.max_reference_images ?? 5);
 
@@ -161,6 +177,33 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
       chipEditorRef.current?.setText(initialText);
     }
   }, [initialText]);
+
+  // 画布节点选取结果注入参考视频（去重 + 上限保护；首尾帧模式不收视频）
+  useEffect(() => {
+    if (!externalPick) return;
+    if (isKeyframe) return;
+    const item = externalPick.item;
+    setRefFiles((prev) => {
+      const vidCount = prev.filter((f) => f.type === 'video').length;
+      if (vidCount >= MAX_VIDEOS) return prev;
+      if (prev.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview)) return prev;
+      return [...prev, item];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalPick]);
+
+  // 画布节点选取结果注入参考图片（去重 + 上限保护；首尾帧模式同样适用）
+  useEffect(() => {
+    if (!externalImagePick) return;
+    const item = externalImagePick.item;
+    setRefFiles((prev) => {
+      const imgCount = prev.filter((f) => f.type === 'image').length;
+      if (imgCount >= maxImages) return prev;
+      if (prev.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview)) return prev;
+      return [...prev, item];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalImagePick]);
 
   // 只插入 initialCards 里「上次还没插过」的新增部分：对话框不因追加引用而重挂载，
   // 已输入的自由文字不会被清空；ref 记录已插入数量，同时防 StrictMode 开发态 effect 双调用重复插入
@@ -316,7 +359,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
       resolution: size?.api_value ?? '720p',
       duration,
       mode: selectedMode,
-    });
+    }, refFiles);
     chipEditorRef.current?.clear();
   };
 
@@ -455,11 +498,38 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
             </div>
           );
         })}
-        {/* 图片上传按钮 */}
+        {/* 图片上传按钮（弹菜单：图片上传 / 到节点选择） */}
         {imageCount < maxImages && (
-          <button className={styles.mediaBtn} onClick={handleImageClick} title={`上传图片（最多 ${maxImages} 张）`}>
-            <Image size={18} strokeWidth={2} />
-          </button>
+          <div className={styles.sourceWrap}>
+            <button
+              className={`${styles.mediaBtn} ${pickMode === 'image' ? styles.mediaBtnPicking : ''}`}
+              onClick={() => setSourceMenuOpen((v) => (v === 'image' ? null : 'image'))}
+              title="图片上传 / 到节点选择"
+            >
+              <Image size={18} strokeWidth={2} />
+            </button>
+            {sourceMenuOpen === 'image' && (
+              <>
+                <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(null)} />
+                <div className={styles.sourceMenu}>
+                  <button
+                    className={styles.sourceMenuItem}
+                    onClick={() => { setSourceMenuOpen(null); handleImageClick(); }}
+                  >
+                    <Upload size={14} strokeWidth={2} />
+                    <span>图片上传</span>
+                  </button>
+                  <button
+                    className={styles.sourceMenuItem}
+                    onClick={() => { setSourceMenuOpen(null); onPickFromCanvas?.('image'); }}
+                  >
+                    <MousePointerClick size={14} strokeWidth={2} />
+                    <span>到节点选择</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         )}
 
         {/* 分隔点 */}
@@ -482,16 +552,39 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
             </div>
           );
         })}
-        {/* 视频上传按钮 */}
+        {/* 视频上传按钮（弹菜单：视频上传 / 到节点选择） */}
         {(isKeyframe || videoCount < MAX_VIDEOS) && (
-          <button
-            className={styles.mediaBtn}
-            onClick={handleVideoClick}
-            title={isKeyframe ? '首尾帧模式不支持视频' : `上传视频（最多 ${MAX_VIDEOS} 个）`}
-            disabled={isKeyframe}
-          >
-            <Video size={18} strokeWidth={2} />
-          </button>
+          <div className={styles.sourceWrap}>
+            <button
+              className={`${styles.mediaBtn} ${pickMode === 'video' ? styles.mediaBtnPicking : ''}`}
+              onClick={() => setSourceMenuOpen((v) => (v === 'video' ? null : 'video'))}
+              title={isKeyframe ? '首尾帧模式不支持视频' : '视频上传 / 到节点选择'}
+              disabled={isKeyframe}
+            >
+              <Video size={18} strokeWidth={2} />
+            </button>
+            {sourceMenuOpen === 'video' && !isKeyframe && (
+              <>
+                <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(null)} />
+                <div className={styles.sourceMenu}>
+                  <button
+                    className={styles.sourceMenuItem}
+                    onClick={() => { setSourceMenuOpen(null); handleVideoClick(); }}
+                  >
+                    <Upload size={14} strokeWidth={2} />
+                    <span>视频上传</span>
+                  </button>
+                  <button
+                    className={styles.sourceMenuItem}
+                    onClick={() => { setSourceMenuOpen(null); onPickFromCanvas?.('video'); }}
+                  >
+                    <MousePointerClick size={14} strokeWidth={2} />
+                    <span>到节点选择</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         )}
 
         {/* 计数 */}
@@ -660,10 +753,10 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
             <span>15 生成</span>
           </span>
           <button
-            className={`${styles.sendBtn} ${composedText.trim() ? styles.sendBtnActive : ''}`}
+            className={`${styles.sendBtn} ${composedText.trim() && !keyframeInvalid ? styles.sendBtnActive : ''}`}
             onClick={handleSend}
-            disabled={!composedText.trim()}
-            title="发送"
+            disabled={!composedText.trim() || keyframeInvalid}
+            title={keyframeInvalid ? '首尾帧模式需恰好 2 张图片' : '发送'}
           >
             <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
           </button>

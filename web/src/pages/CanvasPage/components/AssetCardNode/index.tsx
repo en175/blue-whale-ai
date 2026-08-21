@@ -5,7 +5,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { AtSign, Upload, WandSparkles, Info, Music } from 'lucide-react';
+import { AtSign, Upload, WandSparkles, Info, Music, X } from 'lucide-react';
 import type { GenerationCardBlock } from '@/api/agentSessions';
 import styles from './index.module.css';
 
@@ -21,6 +21,9 @@ const KIND_META: Record<AssetCardKind, { title: string; placeholder: string }> =
   custom: { title: 'Custom', placeholder: '添加此资产的备注或细节...' },
   generation: { title: '生成卡', placeholder: '分镜提示词生成卡' },
 };
+
+/** 临时隐藏：资产卡（风格/角色/物体/环境/自定义）顶部 @ 操作条，会后恢复（改回 false） */
+const HIDE_ASSET_TOP_BAR = true;
 
 /** Agent 生成卡数据（kind=generation 时承载，落画布后从节点选引用）
  * 字段复用会话层的 GenerationCardBlock（唯一形状定义），此处只加节点专属的回调；
@@ -50,6 +53,11 @@ interface AssetCardNodeData {
   generationCard?: GenerationCardNodeData;
 }
 
+/** 资产卡图片/音频限制常量 */
+const MAX_IMAGE_REFS = 9;
+const MAX_VOICE_FILES = 3;
+const MAX_VOICE_DURATION = 15; // 秒
+
 export default function AssetCardNode({ id, data, selected }: NodeProps & { data: AssetCardNodeData; selected?: boolean }) {
   // 水合容错：持久化的 kind 可能不在五种枚举内（旧数据/脏数据），降级为 custom 避免 KIND_META 落空
   const kind: AssetCardKind = data.kind && data.kind in KIND_META ? data.kind : 'custom';
@@ -57,7 +65,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
   const [refs, setRefs] = useState<{ id: string; src: string }[]>(data.initialRefs ?? []);
   const [desc, setDesc] = useState(data.initialDesc ?? '');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [voiceName, setVoiceName] = useState('');
+  const [voiceRefs, setVoiceRefs] = useState<{ id: string; src: string; name: string; duration: number }[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLInputElement>(null);
   /** 生成卡双击编辑：当前编辑中的字段 + 草稿值 */
@@ -98,12 +106,69 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     data.onAddToChat?.(id);
   }, [data, id]);
 
-  /** 添加参考图（点击选择或拖入，仅 image/*） */
+  /** 添加参考图（点击选择或拖入，仅 image/*，最多 MAX_IMAGE_REFS 张） */
   const addFiles = (files: FileList | File[]) => {
     const imgs = Array.from(files)
       .filter((f) => f.type.startsWith('image/'))
       .map((f, i) => ({ id: `ref-${Date.now()}-${i}`, src: URL.createObjectURL(f) }));
-    if (imgs.length > 0) setRefs((prev) => [...prev, ...imgs]);
+    if (imgs.length === 0) return;
+    setRefs((prev) => {
+      const remaining = MAX_IMAGE_REFS - prev.length;
+      if (remaining <= 0) return prev;
+      const toAdd = imgs.slice(0, remaining);
+      return [...prev, ...toAdd];
+    });
+  };
+
+  /** 删除单张参考图 */
+  const removeRef = (refId: string) => {
+    setRefs((prev) => {
+      const target = prev.find((r) => r.id === refId);
+      if (target?.src.startsWith('blob:')) URL.revokeObjectURL(target.src);
+      return prev.filter((r) => r.id !== refId);
+    });
+  };
+
+  /** 添加音色音频（最多 MAX_VOICE_FILES 段，每段不超过 MAX_VOICE_DURATION 秒） */
+  const addVoiceFiles = async (files: FileList | File[]) => {
+    const audioFiles = Array.from(files).filter((f) => f.type.startsWith('audio/'));
+    if (audioFiles.length === 0) return;
+    const remaining = MAX_VOICE_FILES - voiceRefs.length;
+    if (remaining <= 0) return;
+    const toProcess = audioFiles.slice(0, remaining);
+
+    const results: { id: string; src: string; name: string; duration: number }[] = [];
+    for (const f of toProcess) {
+      const src = URL.createObjectURL(f);
+      const duration = await new Promise<number>((resolve) => {
+        const audio = new Audio();
+        audio.preload = 'metadata';
+        audio.onloadedmetadata = () => {
+          resolve(audio.duration);
+          audio.src = '';
+        };
+        audio.onerror = () => {
+          resolve(0);
+          audio.src = '';
+        };
+        audio.src = src;
+      });
+      if (duration <= MAX_VOICE_DURATION) {
+        results.push({ id: `voice-${Date.now()}-${results.length}`, src, name: f.name, duration });
+      } else {
+        URL.revokeObjectURL(src);
+      }
+    }
+    if (results.length > 0) setVoiceRefs((prev) => [...prev, ...results]);
+  };
+
+  /** 删除单段音色 */
+  const removeVoiceRef = (voiceId: string) => {
+    setVoiceRefs((prev) => {
+      const target = prev.find((r) => r.id === voiceId);
+      if (target?.src.startsWith('blob:')) URL.revokeObjectURL(target.src);
+      return prev.filter((r) => r.id !== voiceId);
+    });
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -139,17 +204,20 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
         <Handle type="target" position={Position.Left} style={{ background: '#666', width: 10, height: 10, border: '2px solid #444' }} />
       )}
 
-      {/* 悬停/选中时顶部操作条：添加到对话（与商品节点一致） */}
-      <div className={`${styles.topBar} ${selected ? styles.topBarVisible : ''}`}>
-        <span className={styles.topLabel}>
-          <AtSign size={14} strokeWidth={2} />
-          <span>{meta.title}</span>
-        </span>
-        <button className={`${styles.addToChatBtn} nodrag`} onClick={handleAddToChat}>
-          <AtSign size={14} strokeWidth={2} />
-          <span>添加到对话</span>
-        </button>
-      </div>
+      {/* 悬停/选中时顶部操作条：添加到对话（与商品节点一致）
+          资产卡临时隐藏（HIDE_ASSET_TOP_BAR，会后恢复），生成卡不受影响 */}
+      {(isGeneration || !HIDE_ASSET_TOP_BAR) && (
+        <div className={`${styles.topBar} ${selected ? styles.topBarVisible : ''}`}>
+          <span className={styles.topLabel}>
+            <AtSign size={14} strokeWidth={2} />
+            <span>{meta.title}</span>
+          </span>
+          <button className={`${styles.addToChatBtn} nodrag`} onClick={handleAddToChat}>
+            <AtSign size={14} strokeWidth={2} />
+            <span>添加到对话</span>
+          </button>
+        </div>
+      )}
 
       <div
         className={styles.card}
@@ -329,11 +397,29 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
               placeholder={meta.placeholder}
               rows={1}
             />
+            {refs.length > 0 && (
+              <div className={styles.refGrid}>
+                {refs.map((ref) => (
+                  <div key={ref.id} className={styles.refThumb}>
+                    <img src={ref.src} alt="参考图" className={styles.refThumbImg} />
+                    <button
+                      className={styles.refRemove}
+                      onClick={() => removeRef(ref.id)}
+                      title="移除"
+                    >
+                      <X size={10} strokeWidth={2.5} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className={styles.btnRow}>
-              <button className={styles.actionBtn} onClick={() => fileRef.current?.click()}>
-                <Upload size={15} strokeWidth={2} />
-                <span>添加图片</span>
-              </button>
+              {refs.length < MAX_IMAGE_REFS && (
+                <button className={styles.actionBtn} onClick={() => fileRef.current?.click()}>
+                  <Upload size={15} strokeWidth={2} />
+                  <span>添加图片</span>
+                </button>
+              )}
               <button className={styles.actionBtn} onClick={() => data.onGenerateImage?.()}>
                 <WandSparkles size={15} strokeWidth={2} />
                 <span>生成图片</span>
@@ -341,7 +427,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
             </div>
             <span className={styles.refRow}>
               <Info size={13} strokeWidth={2} />
-              <span>{refs.length} 张参考图</span>
+              <span>{refs.length}/{MAX_IMAGE_REFS} 张参考图</span>
             </span>
           </div>
           )}
@@ -364,24 +450,49 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
                 <Music size={14} strokeWidth={2} />
                 <span>音色</span>
               </div>
+              {voiceRefs.length > 0 && (
+                <div className={styles.voiceList}>
+                  {voiceRefs.map((v) => (
+                    <div key={v.id} className={styles.voicePlayer}>
+                      <audio
+                        className={styles.voiceAudio}
+                        src={v.src}
+                        controls
+                        preload="metadata"
+                      />
+                      <button
+                        className={styles.voiceRemove}
+                        onClick={() => removeVoiceRef(v.id)}
+                        title="移除音色"
+                      >
+                        <X size={12} strokeWidth={2.5} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className={styles.voiceDrop}>
                 <span className={styles.voiceHint}>
-                  {voiceName || '从画布拖入音频'}
+                  {voiceRefs.length > 0 ? `已上传 ${voiceRefs.length} 段` : '从画布拖入音频'}
                 </span>
-                <button className={styles.actionBtn} onClick={() => audioRef.current?.click()}>
-                  <Upload size={15} strokeWidth={2} />
-                  <span>上传音色音频</span>
-                </button>
-                <span className={styles.voiceTip}>2–15.2 秒 · 建议 ≤ 5 秒</span>
+                {voiceRefs.length < MAX_VOICE_FILES && (
+                  <button className={styles.actionBtn} onClick={() => audioRef.current?.click()}>
+                    <Upload size={15} strokeWidth={2} />
+                    <span>上传音色音频</span>
+                  </button>
+                )}
+                <span className={styles.voiceTip}>
+                  {voiceRefs.length}/{MAX_VOICE_FILES} 段 · 每段 ≤ {MAX_VOICE_DURATION} 秒
+                </span>
               </div>
               <input
                 ref={audioRef}
                 type="file"
-                accept="audio/*,image/*"
+                accept="audio/*"
+                multiple
                 className={styles.hiddenInput}
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) setVoiceName(f.name);
+                  if (e.target.files) addVoiceFiles(e.target.files);
                   e.target.value = '';
                 }}
               />

@@ -469,13 +469,14 @@
   font-weight: 500;
 }
 
-/* ---- Toast 提示 ---- */
+/* ---- Toast 提示（统一灰色边框，不用红色） ---- */
 .toast {
   position: absolute;
   top: -52px;
   left: 50%;
   transform: translateX(-50%);
   background: rgba(50, 50, 50, 0.95);
+  border: 1px solid var(--color-border-secondary);
   color: #fff;
   padding: 8px 16px;
   border-radius: 8px;
@@ -743,4 +744,60 @@
   display: block;
   border: 1.5px solid currentColor;
   border-radius: 3px;
+}
+
+/* ---- 「视频上传 / 到节点选择」弹菜单（与图片对话框一致） ---- */
+.sourceWrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* 菜单打开时的透明遮罩：点击外部关闭 */
+.menuOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  background: transparent;
+}
+
+.sourceMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 128px;
+  background-color: #262626;
+  border: 1px solid #363636;
+  border-radius: 10px;
+  padding: var(--spacing-xs);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.sourceMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.sourceMenuItem:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* 画布选取模式进行中：视频按钮高亮 */
+.mediaBtnPicking {
+  color: var(--color-accent-text, #4c6ef5);
+  border: 1px dashed var(--color-accent-text, #4c6ef5);
 }

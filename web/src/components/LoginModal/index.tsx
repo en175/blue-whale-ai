@@ -1,10 +1,16 @@
 /* ============================================
- * LoginModal 登录弹窗：账号密码 + 协议勾选 + 创建账号
+ * LoginModal 登录弹窗：登录 / 注册双模式
  * ============================================ */
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
-import { loginWithPassword, fetchMe, toSessionUser } from '@/api/auth';
+import {
+  loginWithPassword,
+  registerWithPassword,
+  fetchMe,
+  toSessionUser,
+  type LoginData,
+} from '@/api/auth';
 import { fetchAdminSession } from '@/api/admin';
 import { isApiError } from '@/api/http';
 import { useAuthStore, type SessionUser } from '@/stores/auth';
@@ -13,48 +19,88 @@ import styles from './index.module.css';
 
 interface LoginModalProps {
   onClose: () => void;
+  /** 初始模式：'login' 登录 | 'register' 注册 */
+  initialMode?: 'login' | 'register';
 }
 
-export default function LoginModal({ onClose }: LoginModalProps) {
+type Mode = 'login' | 'register';
+
+export default function LoginModal({ onClose, initialMode = 'login' }: LoginModalProps) {
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [email, setEmail] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const valid = username.trim().length > 0 && password.length > 0 && agreed;
+  /* ---------- 表单校验 ---------- */
+  const loginValid = username.trim().length > 0 && password.length > 0 && agreed;
+  const registerValid =
+    username.trim().length >= 3 &&
+    password.length >= 6 &&
+    password === confirmPwd &&
+    agreed;
 
-  const submit = async () => {
-    if (!valid || loading) return;
+  /* ---------- 登录/注册共用：登录态写入 ---------- */
+  const applyAuth = async (login: LoginData) => {
+    const me = await fetchMe().catch(() => null);
+    const user: SessionUser = me
+      ? toSessionUser(me)
+      : {
+          userId: login.user_id,
+          username: login.username,
+          email: login.email,
+          phone: login.phone,
+          hasPassword: login.has_password,
+          isAdmin: false,
+        };
+    useAuthStore.getState().applyLogin(login, user);
+    fetchAdminSession()
+      .then((session) => updateUser({ isAdmin: session.isAdmin }))
+      .catch(() => undefined);
+    onClose();
+  };
+
+  /* ---------- 登录提交 ---------- */
+  const submitLogin = async () => {
+    if (!loginValid || loading) return;
     setLoading(true);
     setError('');
     try {
       const login = await loginWithPassword(username.trim(), password);
-      // 登录成功后拉取 /api/me 补全角色信息，失败时降级用登录返回
-      const me = await fetchMe().catch(() => null);
-      const user: SessionUser = me
-        ? toSessionUser(me)
-        : {
-            userId: login.user_id,
-            username: login.username,
-            email: login.email,
-            phone: login.phone,
-            hasPassword: login.has_password,
-            isAdmin: false,
-          };
-      // 登录响应完整信息（token/refresh/expires/is_new_user）+ 用户信息写入全局状态存储
-      useAuthStore.getState().applyLogin(login, user);
-      // 登录提交后调 /api/admin/session 确认管理员身份，结果写回会话（非管理员/失败保持原状）
-      fetchAdminSession()
-        .then((session) => updateUser({ isAdmin: session.isAdmin }))
-        .catch(() => undefined);
-      onClose();
+      await applyAuth(login);
     } catch (e) {
       setError(isApiError(e) ? e.message : '登录失败，请稍后重试');
     } finally {
       setLoading(false);
     }
+  };
+
+  /* ---------- 注册提交 ---------- */
+  const submitRegister = async () => {
+    if (!registerValid || loading) return;
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const login = await registerWithPassword(username.trim(), password, email.trim() || undefined);
+      setSuccess('注册成功，正在登录…');
+      await applyAuth(login);
+    } catch (e) {
+      setError(isApiError(e) ? e.message : '注册失败，请稍后重试');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /* ---------- 切换模式时清空状态 ---------- */
+  const switchMode = (target: Mode) => {
+    setMode(target);
+    setError('');
+    setSuccess('');
   };
 
   return createPortal(
@@ -65,62 +111,138 @@ export default function LoginModal({ onClose }: LoginModalProps) {
           <X size={18} strokeWidth={2} />
         </button>
 
-        <h2 className={styles.title}>登录</h2>
+        {/* 标题（根据模式切换） */}
+        <h2 className={styles.title}>{mode === 'login' ? '登录' : '创建账号'}</h2>
 
-        {/* 账号 / 密码 */}
-        <input
-          className={styles.input}
-          placeholder="请输入账号"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          autoFocus
-        />
-        <input
-          className={styles.input}
-          type="password"
-          placeholder="请输入密码"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submit();
-          }}
-        />
+        {mode === 'login' ? (
+          /* ========== 登录表单 ========== */
+          <>
+            <input
+              className={styles.input}
+              placeholder="请输入账号"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoFocus
+            />
+            <input
+              className={styles.input}
+              type="password"
+              placeholder="请输入密码"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitLogin();
+              }}
+            />
 
-        {error && <div className={styles.error}>{error}</div>}
+            {error && <div className={styles.error}>{error}</div>}
 
-        {/* 协议勾选 */}
-        <label className={styles.agreeRow}>
-          <input
-            type="checkbox"
-            className={styles.checkbox}
-            checked={agreed}
-            onChange={(e) => setAgreed(e.target.checked)}
-          />
-          <span className={styles.agreeText}>
-            我已阅读并同意
-            <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
-              《用户协议》
-            </a>
-            和
-            <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
-              《隐私政策》
-            </a>
-          </span>
-        </label>
+            <label className={styles.agreeRow}>
+              <input
+                type="checkbox"
+                className={styles.checkbox}
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+              />
+              <span className={styles.agreeText}>
+                我已阅读并同意
+                <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
+                  《用户协议》
+                </a>
+                和
+                <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
+                  《隐私政策》
+                </a>
+              </span>
+            </label>
 
-        {/* 登录按钮 */}
-        <button className={styles.submitBtn} disabled={!valid || loading} onClick={submit}>
-          {loading ? '登录中…' : '登录'}
-        </button>
+            <button
+              className={styles.submitBtn}
+              disabled={!loginValid || loading}
+              onClick={submitLogin}
+            >
+              {loading ? '登录中…' : '登录'}
+            </button>
 
-        {/* 创建账号 */}
-        <button
-          className={styles.createBtn}
-          onClick={() => setNotice('注册通道即将开放，敬请期待')}
-        >
-          创建账号
-        </button>
-        {notice && <div className={styles.notice}>{notice}</div>}
+            {/* 创建账号（带灰色边框） */}
+            <button
+              className={styles.createBtn}
+              onClick={() => switchMode('register')}
+            >
+              创建账号
+            </button>
+          </>
+        ) : (
+          /* ========== 注册表单 ========== */
+          <>
+            <input
+              className={styles.input}
+              placeholder="账号（至少3位）"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoFocus
+            />
+            <input
+              className={styles.input}
+              type="password"
+              placeholder="密码（至少6位）"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <input
+              className={styles.input}
+              type="password"
+              placeholder="确认密码"
+              value={confirmPwd}
+              onChange={(e) => setConfirmPwd(e.target.value)}
+            />
+            <input
+              className={styles.input}
+              type="email"
+              placeholder="邮箱（选填）"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+
+            {error && <div className={styles.error}>{error}</div>}
+            {success && <div className={styles.success}>{success}</div>}
+
+            <label className={styles.agreeRow}>
+              <input
+                type="checkbox"
+                className={styles.checkbox}
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+              />
+              <span className={styles.agreeText}>
+                我已阅读并同意
+                <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
+                  《用户协议》
+                </a>
+                和
+                <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
+                  《隐私政策》
+                </a>
+              </span>
+            </label>
+
+            <button
+              className={styles.submitBtn}
+              disabled={!registerValid || loading}
+              onClick={submitRegister}
+            >
+              {loading ? '注册中…' : '注册'}
+            </button>
+
+            {/* 返回登录 */}
+            <button
+              className={styles.createBtn}
+              onClick={() => switchMode('login')}
+            >
+              已有账号？返回登录
+            </button>
+          </>
+        )}
       </div>
     </div>,
     document.body

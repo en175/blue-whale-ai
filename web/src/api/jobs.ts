@@ -65,12 +65,12 @@ export interface CreateJobPayload {
   /** 期望生成数量 */
   expected_output_count: number;
   parameters: ImageJobParameters | VideoJobParameters | AudioJobParameters;
-  /** 首帧资产ID（仅 video） */
-  first_frame_asset_id?: number;
-  /** 尾帧资产ID（仅 video） */
-  last_frame_asset_id?: number;
-  /** 参考资产ID列表（仅 video） */
-  reference_asset_ids?: number[];
+  /** 首帧资产ID（仅 video，图片；后端兼容字符串） */
+  first_frame_asset_id?: number | string;
+  /** 尾帧资产ID（仅 video，图片；须与首帧同传，后端兼容字符串） */
+  last_frame_asset_id?: number | string;
+  /** 参考资产ID列表（仅 video，图片/视频；后端兼容字符串） */
+  reference_asset_ids?: (number | string)[];
 }
 
 /** 创建/重试任务返回 */

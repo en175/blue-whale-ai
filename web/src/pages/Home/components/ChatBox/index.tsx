@@ -9,6 +9,7 @@ import LoginModal from '@/components/LoginModal';
 import { getCurrentUser, subscribe } from '@/utils/auth';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { setGenHandoff } from '@/utils/gen-handoff';
 
 /** 选项卡定义 */
 const tabItems = [
@@ -326,6 +327,50 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     navigate('/canvas', { state: { agentText: text } });
   };
 
+  /** 按当前 tab 分发：智能体→Agent 对话；AI视频/AI图片→画布直接生成节点并唤起对应对话框 */
+  const dispatchByTab = (text: string) => {
+    if (activeTab === 'video') {
+      setGenHandoff({
+        kind: 'video',
+        text,
+        modelId: videoModel,
+        aspectRatio,
+        resolution,
+        duration,
+        refs: refFiles.map((r) => ({
+          preview: r.preview,
+          type: r.file.type.startsWith('video/') ? ('video' as const) : ('image' as const),
+          file: r.file,
+        })),
+      });
+      setInputValue('');
+      setRefFiles([]);
+      navigate('/canvas', { state: { genKind: 'video' } });
+      return;
+    }
+    if (activeTab === 'image') {
+      setGenHandoff({
+        kind: 'image',
+        text,
+        modelId: imageModel,
+        size: imageResolution,
+        ratio: imageAspectRatio,
+        files: imageRefFiles.map((r) => ({
+          id: `home-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          url: r.preview,
+          type: 'image' as const,
+          name: r.file.name,
+          file: r.file,
+        })),
+      });
+      setInputValue('');
+      setImageRefFiles([]);
+      navigate('/canvas', { state: { genKind: 'image' } });
+      return;
+    }
+    goCanvasWithText(text);
+  };
+
   const handleSend = () => {
     const text = inputValue.trim();
     if (!text) return;
@@ -335,15 +380,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       setShowLogin(true);
       return;
     }
-    goCanvasWithText(text);
+    dispatchByTab(text);
   };
 
-  /** 关闭登录框：登录成功则携带原草稿跳转画布 */
+  /** 关闭登录框：登录成功则携带原草稿按当前 tab 跳转画布 */
   const handleLoginClose = () => {
     setShowLogin(false);
     const text = pendingText.current;
     pendingText.current = '';
-    if (text && getCurrentUser()) goCanvasWithText(text);
+    if (text && getCurrentUser()) dispatchByTab(text);
   };
 
   /** + 上传：点击直接选取图片/视频/音频（上限 9 个），按文件类型归类 */
@@ -431,6 +476,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       : (selectedVideoModel?.features?.max_reference_images ?? 5);
   const videoImagesFull = videoRefImageCount >= videoMaxImages;
   const videoVideosFull = videoRefVideoCount >= MAX_VIDEOS;
+  /** 首尾帧模式必须恰好 2 张图片（不多不少、不含视频），否则禁止发送 */
+  const firstlastInvalid =
+    videoMode === 'firstlast' &&
+    !(refFiles.length === 2 && refFiles.every((r) => r.file.type.startsWith('image/')));
   const imageMaxImages = selectedImageModel?.features?.max_reference_images ?? 5;
 
   // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
@@ -703,9 +752,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                   <span className={styles.tokenCount}>9</span>
                 </div>
                 <button
-                  className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
+                  className={`${styles.sendBtn} ${inputValue.trim() && !firstlastInvalid ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
-                  disabled={!inputValue.trim()}
+                  disabled={!inputValue.trim() || firstlastInvalid}
+                  title={firstlastInvalid ? '首尾帧模式需恰好 2 张图片' : '发送'}
                 >
                   <ChevronUp size={18} strokeWidth={2.5} />
                 </button>

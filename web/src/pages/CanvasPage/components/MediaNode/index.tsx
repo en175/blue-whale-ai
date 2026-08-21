@@ -10,7 +10,7 @@ import styles from './index.module.css';
 interface MediaNodeData {
   src?: string;
   fileName?: string;
-  mediaType?: 'image' | 'video';
+  mediaType?: 'image' | 'video' | 'audio';
   toolMode?: 'drag' | 'select';
   isFirst?: boolean;
   /** 关联生成任务ID（生成中的占位节点）。后端返回字符串，兼容 number 历史形态。 */
@@ -110,8 +110,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleDownload = useCallback(() => data.onDownload?.(id), [data, id]);
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
 
-  const Icon = data.mediaType === 'video' ? Video : Image;
-  const label = data.mediaType === 'video' ? '视频' : '图片';
+  const Icon = data.mediaType === 'video' ? Video : data.mediaType === 'audio' ? AudioLines : Image;
+  const label = data.mediaType === 'video' ? '视频' : data.mediaType === 'audio' ? '音频' : '图片';
   const isGenerating = data.genStatus === 'generating';
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
 
@@ -194,6 +194,15 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
                   重试
                 </button>
               )}
+            </div>
+          ) : data.mediaType === 'audio' ? (
+            <div className={styles.audioBox}>
+              <audio
+                className={styles.mediaAudio}
+                src={data.src}
+                controls
+                preload="metadata"
+              />
             </div>
           ) : data.mediaType === 'video' ? (
             <video

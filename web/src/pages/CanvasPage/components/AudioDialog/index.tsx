@@ -1,13 +1,17 @@
 /* ============================================
  * AudioDialog 音频生成底部对话框：纯文本描述 + 真实模型（fetchGenerationModels('audio')）
+ * 参考音频：本地上传 / 到节点选择（后端音频任务一期不支持参考素材参数，暂只带入展示，待后端支持后接线）
  * ============================================ */
-import { useEffect, useState } from 'react';
-import { X, AudioLines, ChevronDown, Sparkles, Music, ArrowUp } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { X, AudioLines, ChevronDown, Sparkles, Music, ArrowUp, Upload, MousePointerClick } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import styles from './index.module.css';
 
 /** 输入框字数上限 */
 const MAX_INPUT = 500;
+
+/** 参考音频上限（本地上传 + 节点选取合计） */
+const MAX_AUDIO_REFS = 3;
 
 /** 参考素材类型（保留给 MusicDialog 共享类型） */
 type RefKind = 'audio' | 'image';
@@ -34,14 +38,25 @@ interface AudioDialogProps {
   onSend: (text: string, modelId: string) => void;
   /** 底部模式切换 → AI 音乐对话框 */
   onSwitchToMusic?: () => void;
+  /** 到节点选择：进入画布音频节点选取模式 */
+  onPickFromCanvas?: () => void;
+  /** 画布选取模式进行中（参考按钮高亮提示） */
+  pickMode?: boolean;
+  /** 画布节点选取结果（ts 驱动注入参考音频） */
+  externalPick?: { ts: number; item: { id: string; src: string; name: string; assetId?: string | number } } | null;
 }
 
-export default function AudioDialog({ onClose, onSend }: AudioDialogProps) {
+export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMode, externalPick }: AudioDialogProps) {
   const [text, setText] = useState('');
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [modelId, setModelId] = useState<string>('');
   const [modelOpen, setModelOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
+  /** 参考音频列表（本地上传 + 节点选取） */
+  const [refs, setRefs] = useState<AudioRefItem[]>([]);
+  /** 参考按钮弹菜单：音频上传 / 到节点选择 */
+  const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchGenerationModels('audio')
@@ -51,6 +66,44 @@ export default function AudioDialog({ onClose, onSend }: AudioDialogProps) {
       })
       .catch(() => setModels([]));
   }, []);
+
+  /** 本地音频上传（按上限截断） */
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []).filter((f) => f.type.startsWith('audio/'));
+    e.target.value = '';
+    if (!files.length) return;
+    setRefs((prev) => {
+      const room = Math.max(0, MAX_AUDIO_REFS - prev.length);
+      const add: AudioRefItem[] = files.slice(0, room).map((f, i) => ({
+        id: `local-${Date.now()}-${i}`,
+        kind: 'audio',
+        name: f.name,
+        src: URL.createObjectURL(f),
+        source: 'local',
+      }));
+      return [...prev, ...add];
+    });
+  };
+
+  // 画布节点选取结果注入参考音频（去重 + 上限保护）
+  useEffect(() => {
+    if (!externalPick) return;
+    const item = externalPick.item;
+    setRefs((prev) => {
+      if (prev.length >= MAX_AUDIO_REFS) return prev;
+      if (prev.some((r) => r.id === item.id || r.src === item.src)) return prev;
+      return [...prev, { id: item.id, kind: 'audio', name: item.name, src: item.src, source: 'canvas' }];
+    });
+  }, [externalPick]);
+
+  /** 删除参考（仅本地上传的 objectURL 需要释放） */
+  const removeRef = (id: string) => {
+    setRefs((prev) => {
+      const target = prev.find((r) => r.id === id);
+      if (target?.source === 'local') URL.revokeObjectURL(target.src);
+      return prev.filter((r) => r.id !== id);
+    });
+  };
 
   const currentModel = models.find((m) => m.model_id === modelId);
 
@@ -73,6 +126,65 @@ export default function AudioDialog({ onClose, onSend }: AudioDialogProps) {
       <button className={styles.closeBtn} onClick={onClose} title="关闭">
         <X size={16} strokeWidth={2} />
       </button>
+
+      {/* 顶部参考行：参考音频预览 + 添加按钮（菜单：音频上传 / 到节点选择） */}
+      <div className={styles.topRow}>
+        {refs.map((r) => (
+          <div key={r.id} className={styles.audioChip} title={r.name}>
+            <span className={styles.audioChipIcon}>
+              <AudioLines size={14} strokeWidth={2} />
+            </span>
+            <span className={styles.audioChipName}>{r.name}</span>
+            <button className={styles.audioChipRemove} onClick={() => removeRef(r.id)} title="移除">
+              <X size={10} strokeWidth={2.5} />
+            </button>
+          </div>
+        ))}
+        {refs.length < MAX_AUDIO_REFS && (
+          <div className={styles.refWrap}>
+            <button
+              className={`${styles.refBtn} ${pickMode ? styles.refBtnPicking : ''}`}
+              onClick={() => setSourceMenuOpen((v) => !v)}
+              title="音频上传 / 到节点选择"
+            >
+              <AudioLines size={18} strokeWidth={2} />
+            </button>
+            {sourceMenuOpen && (
+              <>
+                <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(false)} />
+                <div className={styles.sourcePopup}>
+                  <button
+                    className={styles.sourceItem}
+                    onClick={() => { setSourceMenuOpen(false); fileInputRef.current?.click(); }}
+                  >
+                    <Upload size={14} strokeWidth={2} />
+                    <span>音频上传</span>
+                  </button>
+                  <button
+                    className={styles.sourceItem}
+                    onClick={() => { setSourceMenuOpen(false); onPickFromCanvas?.(); }}
+                  >
+                    <MousePointerClick size={14} strokeWidth={2} />
+                    <span>到节点选择</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        <span className={styles.refHint}>参考音频（可选）</span>
+        {refs.length > 0 && (
+          <span className={styles.refCount}>{refs.length}/{MAX_AUDIO_REFS}</span>
+        )}
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="audio/*"
+        multiple
+        className={styles.hiddenInput}
+        onChange={handleUpload}
+      />
 
       {/* 输入框 */}
       <textarea

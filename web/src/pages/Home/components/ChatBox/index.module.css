@@ -409,7 +409,7 @@
   white-space: nowrap;
 }
 
-/* 校验轻提示：顶部居中弹出，自动消失，不占据布局 */
+/* 校验轻提示：顶部居中弹出，自动消失，不占据布局（边框统一灰色，不用红色） */
 .toast {
   position: fixed;
   top: 24px;
@@ -418,7 +418,7 @@
   padding: 10px 20px;
   border-radius: var(--radius-md);
   background-color: rgba(20, 20, 20, 0.92);
-  border: 1px solid var(--color-error);
+  border: 1px solid var(--color-border-secondary);
   color: var(--color-text-primary);
   font-size: var(--font-size-md);
   box-shadow: var(--shadow-md);

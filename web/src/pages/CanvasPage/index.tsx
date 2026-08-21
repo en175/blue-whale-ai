@@ -34,6 +34,7 @@ import {
   type AudioJobParameters,
 } from '@/api/jobs';
 import { uploadAssetFile } from '@/utils/upload';
+import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import styles from './index.module.css';
 
@@ -51,10 +52,18 @@ export default function CanvasPage() {
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [showBottomDialog, setShowBottomDialog] = useState(false);
   const [showImageDialog, setShowImageDialog] = useState(false);
-  /** 图片对话框「到节点选择」：画布图片节点选取模式 */
-  const [imagePickMode, setImagePickMode] = useState(false);
+  /** 「到节点选择」：画布节点选取模式（image/video/audio 对应三个底部对话框） */
+  const [pickMode, setPickMode] = useState<'image' | 'video' | 'audio' | null>(null);
+  /** 选取发起对话框（决定选取结果注入哪个对话框；视频对话框可同时选图片/视频节点） */
+  const [pickTarget, setPickTarget] = useState<'image' | 'video' | 'audio' | null>(null);
   /** 画布节点选取结果（ts 驱动注入图片对话框） */
   const [imagePickResult, setImagePickResult] = useState<{ ts: number; file: UploadedFile } | null>(null);
+  /** 画布节点选取结果（ts 驱动注入视频对话框参考） */
+  const [videoPickResult, setVideoPickResult] = useState<{ ts: number; item: BottomRefItem } | null>(null);
+  /** 画布节点选取结果（ts 驱动注入视频对话框参考图片） */
+  const [videoDlgImagePickResult, setVideoDlgImagePickResult] = useState<{ ts: number; item: BottomRefItem } | null>(null);
+  /** 画布节点选取结果（ts 驱动注入音频对话框参考） */
+  const [audioPickResult, setAudioPickResult] = useState<{ ts: number; item: { id: string; src: string; name: string; assetId?: string | number } } | null>(null);
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
   const [showEdges, setShowEdges] = useState(true);
@@ -81,6 +90,36 @@ export default function CanvasPage() {
   const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; cards?: ChipRef[]; text?: string } | null>(null);
   /** 节点工具条打开音频对话框的重挂载 key */
   const [audioSeed, setAudioSeed] = useState<{ ts: number } | null>(null);
+  /** 首页 AI视频/AI图片 生成交接：消费后置入此 ref，待项目就绪触发创建任务 */
+  const pendingGenRef = useRef<GenHandoff | null>(null);
+  /** 首页 AI视频/AI图片 发送带入：唤起对应底部对话框并填充内容，同时立即尝试触发生成（等于带入后直接发送） */
+  useEffect(() => {
+    const state = location.state as { genKind?: 'video' | 'image' } | null;
+    if (!state?.genKind) return;
+    const handoff = takeGenHandoff();
+    if (!handoff) {
+      // 刷新/直开页面：交接数据已失效，仅清导航状态
+      navigate(location.pathname + location.search, { replace: true, state: null });
+      return;
+    }
+    if (handoff.kind === 'video') {
+      setVideoSeed({ ts: Date.now(), refs: handoff.refs, text: handoff.text });
+      setShowBottomDialog(true);
+      setShowImageDialog(false);
+      setShowAudioDialog(false);
+      setShowMusicDialog(false);
+    } else {
+      setImageSeed({ ts: Date.now(), text: handoff.text, files: handoff.files });
+      setShowImageDialog(true);
+      setShowBottomDialog(false);
+      setShowAudioDialog(false);
+      setShowMusicDialog(false);
+    }
+    pendingGenRef.current = handoff;
+    // 项目已就绪则立即创建生成节点；未就绪由 currentId 变化后的 effect 重试
+    actionsRef.current.firePendingGen?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, location.pathname, location.search, navigate]);
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
   /** FlowCanvas 注册的出生点取数函数（视口中心 flow 坐标），注册前回退原点附近 */
@@ -529,6 +568,7 @@ export default function CanvasPage() {
     genVideo: (_id: string) => {},
     genAudio: (_id: string) => {},
     download: (_id: string) => {},
+    firePendingGen: () => {},
   });
   actionsRef.current = { ...actionsRef.current, duplicate: handleDuplicateNode, addToChat: handleAddToChatNode };
 
@@ -540,32 +580,66 @@ export default function CanvasPage() {
     setShowMusicDialog(false);
   };
 
-  /** 画布节点单击：选取模式下点击图片节点带入图片对话框，其他节点取消选取 */
+  /** 画布节点单击：选取模式下点击对应类型节点带入对话框，其他节点取消选取 */
   const handleCanvasNodeClick = (node: Node) => {
-    if (!imagePickMode) return;
+    if (!pickMode || !pickTarget) return;
     const data = (node.data ?? {}) as Record<string, unknown>;
-    const pickable =
+    const isReadyMedia =
       node.type === 'mediaNode' &&
-      data.mediaType !== 'video' &&
       typeof data.src === 'string' &&
       !data.genStatus;
-    if (pickable) {
-      setImagePickResult({
+    if (pickMode === 'image' && isReadyMedia && data.mediaType !== 'video') {
+      if (pickTarget === 'video') {
+        // 视频对话框发起的图片节点选取 → 注入其参考图片
+        setVideoDlgImagePickResult({
+          ts: Date.now(),
+          item: {
+            preview: data.src as string,
+            type: 'image',
+            assetId: data.assetId as string | number | undefined,
+          },
+        });
+      } else {
+        setImagePickResult({
+          ts: Date.now(),
+          file: {
+            id: `node-${node.id}`,
+            url: data.src as string,
+            type: 'image',
+            name: (data.fileName as string) || node.id,
+            assetId: data.assetId as string | number | undefined,
+          },
+        });
+      }
+    } else if (pickMode === 'video' && isReadyMedia && data.mediaType === 'video') {
+      setVideoPickResult({
         ts: Date.now(),
-        file: {
+        item: {
+          preview: data.src as string,
+          type: 'video',
+          assetId: data.assetId as string | number | undefined,
+        },
+      });
+    } else if (pickMode === 'audio' && isReadyMedia && data.mediaType === 'audio') {
+      setAudioPickResult({
+        ts: Date.now(),
+        item: {
           id: `node-${node.id}`,
-          url: data.src as string,
-          type: 'image',
+          src: data.src as string,
           name: (data.fileName as string) || node.id,
           assetId: data.assetId as string | number | undefined,
         },
       });
     }
-    setImagePickMode(false);
+    setPickMode(null);
+    setPickTarget(null);
   };
 
   /** 画布空白处单击：取消节点选取模式 */
-  const handleCanvasPaneClick = () => setImagePickMode(false);
+  const handleCanvasPaneClick = () => {
+    setPickMode(null);
+    setPickTarget(null);
+  };
 
   /** 节点拖拽结束：同步新坐标到父组件 state，触发自动保存 */
   const handleNodeDragStop = (node: Node) => {
@@ -748,11 +822,16 @@ export default function CanvasPage() {
         .then((detail) => {
           if (!mediaNodesRef.current.some((n) => n.id === nodeId)) return; // 节点已删除
           if (detail.status === 'succeeded') {
+            const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+            const originalType = node?.data?.mediaType;
+            const assetType = detail.asset?.type;
             patchMediaNode(nodeId, {
               genStatus: undefined,
               progress: 100,
               src: detail.asset?.url ?? '',
-              mediaType: detail.asset?.type ?? 'image',
+              mediaType: (assetType === 'audio' || assetType === 'video' || assetType === 'image')
+                ? assetType
+                : (originalType ?? 'image'),
               fileName: `生成-${jobId}`,
               assetId: detail.asset?.id,
             });
@@ -780,11 +859,17 @@ export default function CanvasPage() {
     tick();
   };
 
-  /** 创建生成任务：立即上画布「生成中」占位节点，创建成功后启动轮询 */
+  /** 创建生成任务：立即上画布「生成中」占位节点，创建成功后启动轮询。
+   *  videoRefs 仅 video：首尾帧（图片）或普通参考素材（图/视频）assetId，与 input_asset_ids 互斥 */
   const startGenerationJob = (
     type: 'image' | 'video' | 'audio',
     parameters: ImageJobParameters | VideoJobParameters | AudioJobParameters,
     inputAssetIds?: string[],
+    videoRefs?: {
+      firstFrameAssetId?: string;
+      lastFrameAssetId?: string;
+      referenceAssetIds?: string[];
+    },
   ) => {
     if (!currentId) {
       console.warn('未选中项目，无法创建生成任务');
@@ -823,6 +908,11 @@ export default function CanvasPage() {
         expected_output_count: 1,
         parameters,
         input_asset_ids: inputAssetIds,
+        first_frame_asset_id: videoRefs?.firstFrameAssetId,
+        last_frame_asset_id: videoRefs?.lastFrameAssetId,
+        reference_asset_ids: videoRefs?.referenceAssetIds?.length
+          ? videoRefs.referenceAssetIds
+          : undefined,
       })
         .then((created) => {
           patchMediaNode(nodeId, { jobId: created.generation_job_id });
@@ -905,7 +995,7 @@ export default function CanvasPage() {
       // 视频节点：打开视频对话框（底部窗口）
       setVideoSeed({
         ts: Date.now(),
-        refs: [{ preview: ref.src, type: ref.type }],
+        refs: [{ preview: ref.src, type: ref.type, assetId: ref.assetId }],
         text: ref.prompt,
       });
       setShowBottomDialog(true);
@@ -1035,15 +1125,44 @@ export default function CanvasPage() {
   };
 
   /** 底部对话框发送 */
-  /** 视频对话发送：创建视频生成任务 */
-  const handleDialogSend = (text: string, opts: VideoGenOptions) => {
-    startGenerationJob('video', {
+  /** 视频对话发送：参考素材上传取 assetId → 创建视频生成任务。
+   *  首尾帧模式传 first/last_frame_asset_id（对话框已校验恰好 2 张图，第 1 张首帧、第 2 张尾帧）；
+   *  其余模式图片/视频混合走 reference_asset_ids */
+  const handleDialogSend = async (text: string, opts: VideoGenOptions, refs: BottomRefItem[]) => {
+    const parameters: VideoJobParameters = {
       prompt: text,
       model_id: opts.modelId,
       aspect_ratio: opts.aspectRatio,
       resolution: opts.resolution,
       duration: opts.duration,
-    });
+    };
+    if (!refs.length) {
+      startGenerationJob('video', parameters);
+      return;
+    }
+    const ids: (string | null)[] = [];
+    for (const r of refs) {
+      ids.push(await resolveRefAssetId({ file: r.file, url: r.preview, name: `ref-${r.type}`, type: r.type, assetId: r.assetId }));
+    }
+    if (opts.mode === 'keyframe') {
+      const [first, last] = ids;
+      if (!first || !last) {
+        console.warn('首尾帧素材上传失败，任务未创建');
+        return;
+      }
+      startGenerationJob('video', parameters, undefined, {
+        firstFrameAssetId: first,
+        lastFrameAssetId: last,
+      });
+      return;
+    }
+    const referenceAssetIds = ids.filter((id): id is string => id !== null);
+    startGenerationJob(
+      'video',
+      parameters,
+      undefined,
+      referenceAssetIds.length > 0 ? { referenceAssetIds } : undefined,
+    );
   };
 
   /** 扩展工具菜单选择：资产库/商品等预留联调入口（音频按钮已改为直开对话框） */
@@ -1243,6 +1362,27 @@ export default function CanvasPage() {
     }
   };
 
+  /** 参考素材 → assetId：优先复用已有 assetId，其次上传原始 File，否则从 URL 下载后上传 */
+  const resolveRefAssetId = async (item: {
+    file?: File;
+    url: string;
+    name: string;
+    type: 'image' | 'video';
+    assetId?: string | number;
+  }): Promise<string | null> => {
+    if (item.assetId) return String(item.assetId);
+    let fileToUpload: File | null = item.file ?? null;
+    if (!fileToUpload && /^https?:/.test(item.url)) {
+      fileToUpload = await fetchUrlAsFile(
+        item.url,
+        item.name,
+        item.type === 'video' ? 'video/mp4' : 'image/*',
+      );
+    }
+    if (!fileToUpload) return null;
+    return uploadFileToAsset(fileToUpload, item.type);
+  };
+
   /** 图片对话发送：上传参考图 → 创建图片生成任务 */
   const handleImageDialogSend = async (
     text: string,
@@ -1280,6 +1420,70 @@ export default function CanvasPage() {
       size,
     }, inputAssetIds.length > 0 ? inputAssetIds : undefined);
   };
+
+  /** 触发首页生成交接：创建生成任务落节点（等于底部对话框按下发送），幂等——触发后即清 pending */
+  const firePendingGen = () => {
+    const handoff = pendingGenRef.current;
+    if (!handoff) return;
+    if (!currentId) return; // 项目未就绪：等 currentId 变化后由 effect 重试
+    pendingGenRef.current = null;
+    if (handoff.kind === 'video') {
+      // 参考素材（图/视频）上传取 assetId → reference_asset_ids（首页无首尾帧模式）
+      (async () => {
+        const parameters: VideoJobParameters = {
+          prompt: handoff.text,
+          model_id: handoff.modelId,
+          aspect_ratio: handoff.aspectRatio,
+          resolution: handoff.resolution,
+          duration: handoff.duration,
+        };
+        if (!handoff.refs.length) {
+          startGenerationJob('video', parameters);
+          return;
+        }
+        const referenceAssetIds: string[] = [];
+        for (const r of handoff.refs) {
+          const assetId = await resolveRefAssetId({
+            file: r.file,
+            url: r.preview,
+            name: `ref-${r.type}`,
+            type: r.type,
+          });
+          if (assetId) referenceAssetIds.push(assetId);
+        }
+        startGenerationJob(
+          'video',
+          parameters,
+          undefined,
+          referenceAssetIds.length > 0 ? { referenceAssetIds } : undefined,
+        );
+      })();
+    } else {
+      // 图片：参考图先上传取 assetId，再创建任务（同 handleImageDialogSend）
+      (async () => {
+        const inputAssetIds: string[] = [];
+        for (const f of handoff.files) {
+          const assetId = await uploadFileToAsset(f.file, 'image');
+          if (assetId) inputAssetIds.push(assetId);
+        }
+        startGenerationJob('image', {
+          prompt: handoff.text,
+          model_id: handoff.modelId,
+          aspect_ratio: handoff.ratio,
+          size: handoff.size,
+        }, inputAssetIds.length > 0 ? inputAssetIds : undefined);
+      })();
+    }
+    // 触发后清导航状态（消费时不提前清，避免 location 变化重跑消费 effect 重复注入对话框）
+    navigate(location.pathname + location.search, { replace: true, state: null });
+  };
+  actionsRef.current.firePendingGen = firePendingGen;
+
+  /** 项目就绪后触发首页生成交接（消费时 currentId 已有值则已被消费 effect 立即触发，此处幂等重试） */
+  useEffect(() => {
+    actionsRef.current.firePendingGen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId]);
 
   return (
     <div className={styles.canvasPage}>
@@ -1329,6 +1533,8 @@ export default function CanvasPage() {
           onUploadFile={handleUploadFile}
           onToggleVideoDialog={() => {
             setVideoSeed(null);
+            setPickMode(null);
+            setPickTarget(null);
             setShowBottomDialog((prev) => !prev);
             setShowImageDialog(false);
             setShowAudioDialog(false);
@@ -1336,7 +1542,8 @@ export default function CanvasPage() {
           }}
           onToggleImageDialog={() => {
             setImageSeed(null);
-            setImagePickMode(false);
+            setPickMode(null);
+            setPickTarget(null);
             setShowImageDialog((prev) => !prev);
             setShowBottomDialog(false);
             setShowAudioDialog(false);
@@ -1344,6 +1551,8 @@ export default function CanvasPage() {
           }}
           onToggleAudioDialog={() => {
             setAudioSeed(null);
+            setPickMode(null);
+            setPickTarget(null);
             setShowAudioDialog((prev) => !prev);
             setShowBottomDialog(false);
             setShowImageDialog(false);
@@ -1397,8 +1606,12 @@ export default function CanvasPage() {
             initialRefs={videoSeed?.refs}
             initialCards={videoSeed?.cards}
             initialText={videoSeed?.text}
-            onClose={() => setShowBottomDialog(false)}
+            onClose={() => { setShowBottomDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleDialogSend}
+            onPickFromCanvas={(kind) => { setPickMode(kind); setPickTarget('video'); }}
+            pickMode={pickTarget === 'video' && pickMode !== 'audio' ? pickMode : null}
+            externalPick={videoPickResult}
+            externalImagePick={videoDlgImagePickResult}
           />
         )}
         {/* 底部图片对话框 */}
@@ -1407,18 +1620,20 @@ export default function CanvasPage() {
             key={imageSeed?.ts ?? 0}
             initialText={imageSeed?.text}
             initialFiles={imageSeed?.files}
-            onClose={() => { setShowImageDialog(false); setImagePickMode(false); }}
+            onClose={() => { setShowImageDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleImageDialogSend}
-            onPickFromCanvas={() => setImagePickMode(true)}
-            pickMode={imagePickMode}
+            onPickFromCanvas={() => { setPickMode('image'); setPickTarget('image'); }}
+            pickMode={pickMode === 'image'}
             externalPick={imagePickResult}
           />
         )}
 
         {/* 节点选取模式提示条 */}
-        {imagePickMode && showImageDialog && (
+        {pickMode && pickTarget && (showImageDialog || showBottomDialog || showAudioDialog) && (
           <div className={styles.pickHint}>
-            到节点选择：点击画布中的图片节点带入参考图，点击空白处取消
+            {pickMode === 'image' && '到节点选择：点击画布中的图片节点带入参考图，点击空白处取消'}
+            {pickMode === 'video' && '到节点选择：点击画布中的视频节点带入参考视频，点击空白处取消'}
+            {pickMode === 'audio' && '到节点选择：点击画布中的音频节点带入参考音频，点击空白处取消'}
           </div>
         )}
 
@@ -1426,12 +1641,15 @@ export default function CanvasPage() {
         {showAudioDialog && (
           <AudioDialog
             key={audioSeed?.ts ?? 0}
-            onClose={() => setShowAudioDialog(false)}
+            onClose={() => { setShowAudioDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleAudioDialogSend}
             onSwitchToMusic={() => {
               setShowAudioDialog(false);
               setShowMusicDialog(true);
             }}
+            onPickFromCanvas={() => { setPickMode('audio'); setPickTarget('audio'); }}
+            pickMode={pickMode === 'audio'}
+            externalPick={audioPickResult}
           />
         )}
 

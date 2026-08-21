@@ -64,6 +64,16 @@ export function loginWithPassword(username: string, password: string) {
   });
 }
 
+/** 账号密码注册 */
+export function registerWithPassword(username: string, password: string, email?: string) {
+  const body: Record<string, string> = { username, password };
+  if (email) body.email = email;
+  return apiRequest<LoginData>('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 /** 获取当前登录用户信息 */
 export function fetchMe() {
   return apiRequest<MeData>('/api/me');
