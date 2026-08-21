@@ -29,6 +29,41 @@ export type DeleteSceneCardResourceResult =
   | { kind: "version_conflict"; current_version: number }
   | { kind: "idempotency_conflict" };
 
+/** 共享资产场景卡快照的源（IK9QKP）：内容 + 生成预设，归属校验后取用。 */
+export interface SceneCardSharedSnapshotSource {
+  title: string;
+  summary: string | null;
+  content_markdown: string;
+  generation_preset: {
+    parameters: unknown;
+    reference_mode: string;
+    reference_assets: unknown[];
+    capability_snapshot_version: unknown;
+  } | null;
+}
+
+export type FindOwnedSceneCardWithPresetResult =
+  | { kind: "found"; scene_card: SceneCardSharedSnapshotSource }
+  | { kind: "not_found" };
+
+export interface CopySceneCardToProjectInput {
+  userId: string;
+  projectId: string;
+  title: string;
+  summary: string | null;
+  content_markdown: string;
+  generation_preset: {
+    parameters: unknown;
+    reference_mode: string;
+    reference_assets: unknown[];
+    capability_snapshot_version: unknown;
+  } | null;
+}
+
+export type CopySceneCardToProjectResult =
+  | { kind: "copied"; scene_card_id: string }
+  | { kind: "project_not_found" };
+
 export interface SceneCardResourceRepo {
   getSceneCardResource(
     userId: string,
@@ -37,6 +72,15 @@ export interface SceneCardResourceRepo {
   deleteSceneCardResource(
     input: DeleteSceneCardResourceInput,
   ): Promise<DeleteSceneCardResourceResult>;
+  /** 共享资产场景卡保存用：取归属用户项目下的场景卡内容 + 生成预设（快照源）。 */
+  findOwnedSceneCardWithPreset(
+    userId: string,
+    sceneCardId: string,
+  ): Promise<FindOwnedSceneCardWithPresetResult>;
+  /** 共享资产场景卡添加回画布用：在目标项目复制 scene_cards + generation_presets。 */
+  copySceneCardToProject(
+    input: CopySceneCardToProjectInput,
+  ): Promise<CopySceneCardToProjectResult>;
 }
 
 const DELETE_OPERATION = "scene_card.delete";
@@ -155,6 +199,90 @@ export function createSceneCardResourceRepo(
       return transactionWithUniqueRetry(prisma, (tx) =>
         deleteInTransaction(tx, input),
       );
+    },
+    async findOwnedSceneCardWithPreset(userId, sceneCardId) {
+      const sceneCard = await prisma.scene_cards.findFirst({
+        where: { id: BigInt(sceneCardId), is_delete: 0 },
+        select: {
+          id: true,
+          project_id: true,
+          title: true,
+          summary: true,
+          content_markdown: true,
+        },
+      });
+      if (!sceneCard) return { kind: "not_found" };
+      const project = await prisma.project.findFirst({
+        where: {
+          id: sceneCard.project_id,
+          owner_id: BigInt(userId),
+          is_delete: 0,
+        },
+        select: { id: true },
+      });
+      if (!project) return { kind: "not_found" };
+      const preset = await prisma.scene_card_generation_presets.findFirst({
+        where: { scene_card_id: sceneCard.id, is_delete: 0 },
+        select: {
+          parameters: true,
+          reference_mode: true,
+          reference_assets: true,
+          capability_snapshot_version: true,
+        },
+      });
+      return {
+        kind: "found",
+        scene_card: {
+          title: sceneCard.title,
+          summary: sceneCard.summary,
+          content_markdown: sceneCard.content_markdown,
+          generation_preset: preset
+            ? {
+                parameters: preset.parameters,
+                reference_mode: preset.reference_mode,
+                reference_assets: preset.reference_assets as unknown[],
+                capability_snapshot_version: preset.capability_snapshot_version,
+              }
+            : null,
+        },
+      };
+    },
+    async copySceneCardToProject(input) {
+      return prisma.$transaction(async (tx) => {
+        const project = await tx.project.findFirst({
+          where: {
+            id: BigInt(input.projectId),
+            owner_id: BigInt(input.userId),
+            is_delete: 0,
+          },
+          select: { id: true },
+        });
+        if (!project) return { kind: "project_not_found" };
+        const sceneCard = await tx.scene_cards.create({
+          data: {
+            project_id: BigInt(input.projectId),
+            title: input.title,
+            summary: input.summary,
+            content_markdown: input.content_markdown,
+          },
+          select: { id: true },
+        });
+        if (input.generation_preset) {
+          await tx.scene_card_generation_presets.create({
+            data: {
+              scene_card_id: sceneCard.id,
+              project_id: BigInt(input.projectId),
+              parameters: input.generation_preset.parameters as Prisma.InputJsonValue,
+              reference_mode: input.generation_preset.reference_mode,
+              reference_assets: input.generation_preset
+                .reference_assets as Prisma.InputJsonValue,
+              capability_snapshot_version: input.generation_preset
+                .capability_snapshot_version as Prisma.InputJsonValue,
+            },
+          });
+        }
+        return { kind: "copied", scene_card_id: sceneCard.id.toString() };
+      });
     },
   };
 }
