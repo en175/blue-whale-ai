@@ -22,6 +22,11 @@ export class TemplateAdminService {
     return this.repo.renameTag(tagCode, label);
   }
 
+  /** IKA64P：标签隐藏开关 */
+  setTagVisibility(tagCode: string, visible: number) {
+    return this.repo.setTagVisibility(tagCode, visible);
+  }
+
   listCards(tagCode?: string) {
     return this.repo.listCards(tagCode);
   }
