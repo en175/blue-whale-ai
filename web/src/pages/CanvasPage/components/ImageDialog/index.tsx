@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Sparkles,
   Maximize2,
+  Minimize2,
   SlidersHorizontal,
   ArrowUp,
   Upload,
@@ -89,6 +90,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const [selectedResolution, setSelectedResolution] = useState(FALLBACK_RESOLUTIONS[0].key);
   const [selectedRatio, setSelectedRatio] = useState('16:9');
   const [showConfig, setShowConfig] = useState(false);
+  /** 放大态：输入区高度占屏幕 2/3；收起回底部默认高度 */
+  const [expanded, setExpanded] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [resOpen, setResOpen] = useState(false);
   const [files, setFiles] = useState<UploadedFile[]>(initialFiles ?? []);
@@ -221,7 +224,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   };
 
   return (
-    <div className={styles.dialog}>
+    <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
       {/* 配置面板（可展开/收起） */}
       {showConfig && (
         <div className={styles.configPanel}>
@@ -374,8 +377,12 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           </div>
 
           <div className={styles.topActions}>
-            <button className={styles.iconBtn} title="展开">
-              <Maximize2 size={14} strokeWidth={2} />
+            <button
+              className={styles.iconBtn}
+              onClick={() => setExpanded((v) => !v)}
+              title={expanded ? '收起' : '展开'}
+            >
+              {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
             </button>
             <button className={styles.iconBtn} onClick={onClose} title="关闭">
               <X size={14} strokeWidth={2} />

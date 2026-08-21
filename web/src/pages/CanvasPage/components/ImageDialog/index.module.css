@@ -22,6 +22,16 @@
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
+/* 放大态：输入区高度占屏幕 2/3，仍锚定底部展示 */
+.dialogExpanded {
+  height: 66.66vh;
+}
+
+.dialogExpanded .inputBox {
+  flex: 1;
+  min-height: 0;
+}
+
 /* ---- 输入卡片（单一表面） ---- */
 .inputBox {
   background-color: #1e1e1e;

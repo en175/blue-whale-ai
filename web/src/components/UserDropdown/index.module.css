@@ -11,24 +11,26 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 40px;
+  height: 32px;
   padding: 0 var(--spacing-sm) 0 4px;
   border-radius: var(--radius-md);
-  background-color: var(--color-bg-tertiary);
+  background-color: rgba(26, 26, 26, 0.9);
   border: 1px solid var(--color-border-primary);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   color: var(--color-text-primary);
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
 .trigger:hover {
-  background-color: var(--color-bg-hover);
+  background-color: rgba(40, 40, 40, 0.95);
   border-color: var(--color-border-hover);
 }
 
 .triggerAvatar {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-sm);
   background-color: var(--color-bg-active);
   display: flex;

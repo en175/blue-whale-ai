@@ -3,7 +3,7 @@
  * 参考音频：本地上传 / 到节点选择（后端音频任务一期不支持参考素材参数，暂只带入展示，待后端支持后接线）
  * ============================================ */
 import { useEffect, useRef, useState } from 'react';
-import { X, AudioLines, ChevronDown, Sparkles, Music, ArrowUp, Upload, MousePointerClick } from 'lucide-react';
+import { X, AudioLines, ChevronDown, Sparkles, Music, ArrowUp, Upload, MousePointerClick, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import styles from './index.module.css';
 
@@ -56,6 +56,8 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
   const [refs, setRefs] = useState<AudioRefItem[]>([]);
   /** 参考按钮弹菜单：音频上传 / 到节点选择 */
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
+  /** 放大态：输入区高度占屏幕 2/3；收起回底部默认高度 */
+  const [expanded, setExpanded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -121,11 +123,20 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
   };
 
   return (
-    <div className={styles.dialog}>
-      {/* 关闭按钮 */}
-      <button className={styles.closeBtn} onClick={onClose} title="关闭">
-        <X size={16} strokeWidth={2} />
-      </button>
+    <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
+      {/* 右上角操作：放大/收起 + 关闭 */}
+      <div className={styles.topActions}>
+        <button
+          className={styles.iconBtn}
+          onClick={() => setExpanded((v) => !v)}
+          title={expanded ? '收起' : '展开'}
+        >
+          {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
+        </button>
+        <button className={styles.iconBtn} onClick={onClose} title="关闭">
+          <X size={16} strokeWidth={2} />
+        </button>
+      </div>
 
       {/* 顶部参考行：参考音频预览 + 添加按钮（菜单：音频上传 / 到节点选择） */}
       <div className={styles.topRow}>

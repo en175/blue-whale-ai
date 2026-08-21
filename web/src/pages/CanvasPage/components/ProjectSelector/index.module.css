@@ -14,17 +14,19 @@
   justify-content: space-between;
   gap: var(--spacing-sm);
   width: 280px;
-  height: 40px;
+  height: 32px;
   padding: 0 var(--spacing-md);
   border-radius: var(--radius-md);
-  background-color: var(--color-bg-tertiary);
+  background-color: rgba(26, 26, 26, 0.9);
   border: 1px solid var(--color-border-primary);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
 .trigger:hover {
-  background-color: var(--color-bg-hover);
+  background-color: rgba(40, 40, 40, 0.95);
   border-color: var(--color-border-hover);
 }
 

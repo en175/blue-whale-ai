@@ -29,11 +29,22 @@
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
-/* ---- 关闭按钮 ---- */
-.closeBtn {
+/* 放大态：输入区高度占屏幕 2/3，仍锚定底部展示 */
+.dialogExpanded {
+  height: 66.66vh;
+}
+
+/* ---- 右上角操作（放大/收起 + 关闭） ---- */
+.topActions {
   position: absolute;
   top: var(--spacing-sm);
   right: var(--spacing-sm);
+  display: flex;
+  gap: var(--spacing-xs);
+  z-index: 1;
+}
+
+.iconBtn {
   width: 28px;
   height: 28px;
   border-radius: var(--radius-sm);
@@ -45,10 +56,9 @@
   border: none;
   cursor: pointer;
   transition: all var(--transition-fast);
-  z-index: 1;
 }
 
-.closeBtn:hover {
+.iconBtn:hover {
   color: var(--color-text-primary);
   background-color: var(--color-bg-hover);
 }

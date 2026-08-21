@@ -8,6 +8,7 @@ import {
   BackgroundVariant,
   MiniMap,
   useReactFlow,
+  useViewport,
   type Node,
   type Edge,
   useNodesState,
@@ -72,6 +73,11 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const { setCenter, setViewport, screenToFlowPosition } = useReactFlow();
   const onViewportChangeRef = useRef(onViewportChange);
   onViewportChangeRef.current = onViewportChange;
+
+  /** 波点缩放补偿：屏幕点半径 = size × zoom，取 size = 1/zoom 使屏幕点径恒定约 2px，
+   * 缩小视图（如 58%）时波点依然清晰可见 */
+  const { zoom } = useViewport();
+  const dotSize = Math.max(0.4, Math.min(4, 1 / zoom));
 
   /** 向父级注册出生点取数函数：屏幕视觉中心 → flow 坐标 */
   useEffect(() => {
@@ -283,8 +289,8 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         <Background
           variant={BackgroundVariant.Dots}
           gap={24}
-          size={1.5}
-          color="#3a3a3a"
+          size={dotSize}
+          color="#4d4d4d"
         />
         {showMiniMap && (
           <MiniMap

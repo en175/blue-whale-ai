@@ -14,6 +14,8 @@ import {
   ArrowUp,
   Upload,
   MousePointerClick,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import ChipTextEditor, { type ChipTextEditorHandle, type ChipRef } from '../ChipTextEditor';
@@ -98,6 +100,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   const [selectedMode, setSelectedMode] = useState(modeOptions[0].key);
   const [modeOpen, setModeOpen] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
+  /** 放大态：输入区高度占屏幕 2/3；收起回底部默认高度 */
+  const [expanded, setExpanded] = useState(false);
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedSize, setSelectedSize] = useState('');
@@ -363,11 +367,20 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   };
 
   return (
-    <div className={styles.dialog}>
-      {/* 关闭按钮 */}
-      <button className={styles.closeBtn} onClick={onClose} title="关闭">
-        <X size={16} strokeWidth={2} />
-      </button>
+    <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
+      {/* 右上角操作：放大/收起 + 关闭 */}
+      <div className={styles.topActions}>
+        <button
+          className={styles.iconBtn}
+          onClick={() => setExpanded((v) => !v)}
+          title={expanded ? '收起' : '展开'}
+        >
+          {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
+        </button>
+        <button className={styles.iconBtn} onClick={onClose} title="关闭">
+          <X size={16} strokeWidth={2} />
+        </button>
+      </div>
 
       {/* 配置面板（展开悬浮于底栏上方） */}
       {showConfig && (

@@ -93,6 +93,9 @@ const imageResolutions = [
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
 const MAX_VIDEOS = 3;
 
+/** 输入框字数上限（与画布对话框一致） */
+const MAX_INPUT = 1000;
+
 /** 宽高比图标 - 根据比例渲染对应形状的 SVG 矩形 */
 const ratioDims: Record<string, [number, number]> = {
   '21:9': [24, 10],
@@ -136,7 +139,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
 
   /** 外部注入草稿（画廊卡片点击）：仅 ts 变化时覆盖输入框 */
   useEffect(() => {
-    if (draft?.ts) setInputValue(draft.text);
+    if (draft?.ts) setInputValue(draft.text.slice(0, MAX_INPUT));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft?.ts]);
   const [showUpload, setShowUpload] = useState(false);
@@ -618,7 +621,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                 className={styles.textarea}
                 placeholder={`通过直接控制提示词快速生成单段片段。\n上传参考：图片最多 ${videoMaxImages} 张 / 视频最多 ${MAX_VIDEOS} 个；首尾帧模式可上传首帧与尾帧参考。`}
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
+                maxLength={MAX_INPUT}
                 onKeyDown={handleKeyDown}
                 rows={2}
               />
@@ -819,7 +823,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                 className={styles.textarea}
                 placeholder={'从文字与参考图生成 AI 图片。\n描述你想生成的图片，已上传的参考将引导风格与细节。'}
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
+                maxLength={MAX_INPUT}
                 onKeyDown={handleKeyDown}
                 rows={2}
               />
@@ -941,7 +946,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
               className={styles.textarea}
               placeholder="描述你想制作的视频，微电影、产品广告、社媒视频等都可支持。适合 1-5 分钟视频。"
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
+              onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
+              maxLength={MAX_INPUT}
               onKeyDown={handleKeyDown}
               rows={3}
             />

@@ -1,6 +1,7 @@
 /* ============================================
  * CanvasHeader 画布页顶栏：项目名/积分/Agent 入口
  * ============================================ */
+import { useNavigate } from 'react-router-dom';
 import { Coins, Bot } from 'lucide-react';
 import UserDropdown from '@/components/UserDropdown';
 import ProjectSelector, { type CanvasProject } from '../ProjectSelector';
@@ -27,11 +28,19 @@ export default function CanvasHeader({
   onNewProject,
   onToggleAgent,
 }: CanvasHeaderProps) {
+  const navigate = useNavigate();
+
   return (
     <header className={styles.header}>
-      {/* 左侧：Logo + 项目选择器 */}
+      {/* 左侧：Logo（点击返回首页） + 项目选择器 */}
       <div className={styles.left}>
-        <img src="/blue_whale.svg" alt="Blue Whale" className={styles.logo} />
+        <button
+          className={styles.logoBtn}
+          onClick={() => navigate('/')}
+          title="返回首页"
+        >
+          <img src="/blue_whale.svg" alt="Blue Whale" className={styles.logo} />
+        </button>
         <ProjectSelector
           projects={projects}
           currentId={currentProjectId}
