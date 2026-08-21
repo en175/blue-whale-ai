@@ -19,6 +19,18 @@ export class SceneCardResourceService {
     return this.repo.getSceneCardResource(userId, sceneCardId);
   }
 
+  findOwnedSceneCardWithPreset(userId: string, sceneCardId: string) {
+    return this.repo.findOwnedSceneCardWithPreset(userId, sceneCardId);
+  }
+
+  copySceneCardToProject(
+    input: Parameters<
+      ReturnType<typeof createSceneCardResourceRepo>["copySceneCardToProject"]
+    >[0],
+  ) {
+    return this.repo.copySceneCardToProject(input);
+  }
+
   deleteSceneCardResource(
     input: Parameters<
       ReturnType<typeof createSceneCardResourceRepo>["deleteSceneCardResource"]

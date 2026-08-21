@@ -20,6 +20,11 @@ export const PLAN_APPLICATION_QUOTA_INSUFFICIENT_CODE = 100405; // 余额不足�
 export const SCENE_CARD_VERSION_CONFLICT_CODE = 100406; // base 版本与当前 SceneCard/Preset 版本不一致
 // 计划应用覆盖分支（IK67HA / T12）：100406 已被 T13 占用，T12 target_stale 用 100407
 export const PLAN_APPLICATION_TARGET_STALE_CODE = 100407; // 覆盖目标场景卡已变化（版本/删除/越权），需生成新计划
+// 画布共享资产（IK9QKP）：E6 空参数卡片不可保存（无参考图且无描述，须补全其一）
+export const SHARED_ASSET_EMPTY_CARD_CODE = 100408;
+// 共享资产类型不支持（判别联合兜底，防枚举漂移/越权传值）。
+// 100409 已被 generation retry 的 IDEMPOTENCY_CONFLICT_CODE 占用，勿复用。
+export const SHARED_ASSET_TYPE_UNSUPPORTED_CODE = 100410;
 
 export interface ResultEnvelope<T> {
   code: number;

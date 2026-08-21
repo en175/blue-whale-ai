@@ -14,6 +14,7 @@ import { OperationLogModule } from "@lib/shared/operation-log/operation-log.modu
 import { PrismaModule } from "@lib/shared/prisma/prisma.module.js";
 import { ProjectModule } from "@lib/shared/project/project.module.js";
 import { SceneCardModule } from "@lib/shared/scene-card/scene-card.module.js";
+import { SharedAssetsModule } from "@lib/shared/shared-assets/shared-assets.module.js";
 import { SkillModule } from "@lib/shared/skills/skills.module.js";
 import { SnapshotModule } from "@lib/shared/snapshot/snapshot.module.js";
 import { TemplateModule } from "@lib/shared/template/template.module.js";
@@ -31,6 +32,7 @@ import { ProjectAssetsModule } from "./api/project-assets/project-assets.module.
 import { ProjectsApiModule } from "./api/projects/projects.module.js";
 import { RechargeModule } from "./api/recharge/recharge.module.js";
 import { SceneCardsApiModule } from "./api/scene-cards/scene-cards.module.js";
+import { SharedAssetsApiModule } from "./api/shared-assets/shared-assets.module.js";
 import { SkillsApiModule } from "./api/skills/skills.module.js";
 import { AgentTemplatesModule } from "./api/templates/templates.module.js";
 import { TextApiModule } from "./api/text/text.module.js";
@@ -54,6 +56,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     GenerationModule,
     SkillModule,
     SceneCardModule,
+    SharedAssetsModule,
     SnapshotModule,
     AuthModule,
     AccountApiModule,
@@ -69,6 +72,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     ProjectAssetsModule,
     SkillsApiModule,
     SceneCardsApiModule,
+    SharedAssetsApiModule,
     AgentTemplatesModule,
     TextApiModule,
     AgentV1Module,
