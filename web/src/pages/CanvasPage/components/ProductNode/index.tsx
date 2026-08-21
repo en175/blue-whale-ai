@@ -5,7 +5,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { AtSign, Upload, X, ChevronDown, Link2, Box } from 'lucide-react';
+import { AtSign, Upload, X, Box } from 'lucide-react';
 import styles from './index.module.css';
 
 /** 商品图项 */
@@ -24,18 +24,15 @@ interface ProductNodeData {
   isFirst?: boolean;
   onDelete?: (id: string) => void;
   onAddToChat?: (id: string) => void;
+  /** 保存到共享资产 */
+  onSaveToAssets?: (id: string) => void;
 }
 
 const MAX_IMAGES = 8;
 
-/** 链接导入支持的平台 */
-const PLATFORMS = ['抖', '淘', '猫', '京', '亚'];
-
 export default function ProductNode({ id, data, selected }: NodeProps & { data: ProductNodeData }) {
   const [images, setImages] = useState<ProductImage[]>(data.images ?? []);
   const [detail, setDetail] = useState(data.detail ?? '');
-  const [linkOpen, setLinkOpen] = useState(true);
-  const [link, setLink] = useState('');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -65,6 +62,19 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
     setContextMenu(null);
     data.onDelete?.(id);
   }, [data, id]);
+
+  /** 添加到 Agent 聊天 */
+  const handleAddToChat = useCallback(() => {
+    setContextMenu(null);
+    data.onAddToChat?.(id);
+  }, [data, id]);
+
+  /** 保存到共享资产 */
+  const handleSaveToAssets = useCallback(() => {
+    setContextMenu(null);
+    data.onSaveToAssets?.(id);
+  }, [data, id]);
+
   const enabledCount = images.filter((i) => i.enabled).length;
 
   /** 本地图片文件 → 缩略图（仅 image/*，上限 8） */
@@ -79,14 +89,6 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
-  };
-
-  /** 链接导入：将 URL 作为商品图加入（mock，未经后端抓取） */
-  const handleImport = () => {
-    const url = link.trim();
-    if (!url) return;
-    setImages((prev) => [...prev, { id: `link-${Date.now()}`, src: url, enabled: true }].slice(0, MAX_IMAGES));
-    setLink('');
   };
 
   return (
@@ -192,48 +194,6 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
             placeholder="商品名称、品类、核心参数、卖点、目标人群..."
             rows={6}
           />
-
-          <div className={styles.divider} />
-
-          {/* 从商品链接导入 */}
-          <button className={styles.linkToggle} onClick={() => setLinkOpen((v) => !v)}>
-            <ChevronDown
-              size={12}
-              strokeWidth={2}
-              className={`${styles.linkArrow} ${linkOpen ? '' : styles.linkArrowClosed}`}
-            />
-            <Link2 size={12} strokeWidth={2} />
-            <span>从商品链接导入</span>
-          </button>
-          {linkOpen && (
-            <div className={styles.linkRow}>
-              <div className={styles.linkField}>
-                {!link && (
-                  <span className={styles.linkPlaceholder}>
-                    <span>支持</span>
-                    {PLATFORMS.map((p) => (
-                      <i key={p}>{p}</i>
-                    ))}
-                  </span>
-                )}
-                <input
-                  className={`${styles.linkInput} nodrag`}
-                  value={link}
-                  onChange={(e) => setLink(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleImport();
-                  }}
-                />
-              </div>
-              <button
-                className={styles.importBtn}
-                disabled={!link.trim()}
-                onClick={handleImport}
-              >
-                导入
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -247,6 +207,12 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
             style={{ top: contextMenu.y, left: contextMenu.x }}
             onMouseDown={(e) => e.stopPropagation()}
           >
+            <button className={styles.contextItem} onClick={handleAddToChat}>
+              <span>添加到聊天</span>
+            </button>
+            <button className={styles.contextItem} onClick={handleSaveToAssets}>
+              <span>保存到共享资产</span>
+            </button>
             <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
               <span>删除</span>
             </button>
