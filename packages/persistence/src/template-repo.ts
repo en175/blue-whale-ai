@@ -9,6 +9,14 @@ export interface TemplateTagView {
   label: string;
 }
 
+/** 管理端标签视图（IKA64P：含可见性，隐藏标签一并返回） */
+export interface TemplateTagAdminView {
+  tag_code: string;
+  label: string;
+  /** 1 首页可见 / 0 隐藏 */
+  visible: number;
+}
+
 export interface TemplateCardView {
   title: string;
   video: string | null;
@@ -29,18 +37,32 @@ export interface TemplateCardPage {
 
 export interface TemplateRepo {
   pageByTagCode(tagCode: string, current: number, size: number): Promise<TemplateCardPage>;
-  /** 首页标签列表（IK764F 起读 DB template_tag 表，按 sort_order 升序） */
+  /** 首页标签列表（IK764F 起读 DB template_tag 表，按 sort_order 升序；IKA64P 起仅可见） */
   listTags(): Promise<TemplateTagView[]>;
+  /** 管理端标签列表（IKA64P：含隐藏，按 sort_order 升序） */
+  listAllTags(): Promise<TemplateTagAdminView[]>;
 }
 
 export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
   return {
     async listTags() {
       const tags = await prisma.template_tag.findMany({
-        where: { is_delete: 0 },
+        where: { is_delete: 0, visible: 1 },
         orderBy: { sort_order: "asc" },
       });
       return tags.map((t) => ({ tag_code: t.tag_code, label: t.label }));
+    },
+
+    async listAllTags() {
+      const tags = await prisma.template_tag.findMany({
+        where: { is_delete: 0 },
+        orderBy: { sort_order: "asc" },
+      });
+      return tags.map((t) => ({
+        tag_code: t.tag_code,
+        label: t.label,
+        visible: t.visible,
+      }));
     },
 
     async pageByTagCode(tagCode, current, size) {

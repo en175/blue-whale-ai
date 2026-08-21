@@ -57,6 +57,8 @@ export interface TemplateCardInput {
 
 export interface TemplateAdminRepo {
   renameTag(tagCode: string, label: string): Promise<boolean>;
+  /** IKA64P：标签隐藏开关（visible 0/1），返回是否命中标签 */
+  setTagVisibility(tagCode: string, visible: number): Promise<boolean>;
   listCards(tagCode?: string): Promise<AdminTemplateCardView[]>;
   getCard(id: bigint): Promise<AdminTemplateCardView | null>;
   createCard(input: TemplateCardInput): Promise<string>;
@@ -128,6 +130,14 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
       const result = await prisma.template_tag.updateMany({
         where: { tag_code: tagCode, is_delete: 0 },
         data: { label, update_time: new Date() },
+      });
+      return result.count > 0;
+    },
+
+    async setTagVisibility(tagCode, visible) {
+      const result = await prisma.template_tag.updateMany({
+        where: { tag_code: tagCode, is_delete: 0 },
+        data: { visible, update_time: new Date() },
       });
       return result.count > 0;
     },
