@@ -369,7 +369,7 @@ test("classifies web source changes as scoped web verification", async () => {
   });
 });
 
-test("builds web typecheck and lint checks for web verification", async () => {
+test("builds web typecheck, lint and vitest checks for web verification", async () => {
   const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
 
   assert.deepEqual(
@@ -385,6 +385,7 @@ test("builds web typecheck and lint checks for web verification", async () => {
       ["git", "diff", "--check", "origin/master...HEAD"],
       ["node", "web/node_modules/typescript/bin/tsc", "-b", "web/tsconfig.json", "--pretty", "false"],
       ["npm", "--prefix", "web", "run", "lint"],
+      ["npm", "--prefix", "web", "run", "test", "--", "--changed", "origin/master", "--passWithNoTests"],
     ],
   );
 });

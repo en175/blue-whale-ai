@@ -50,8 +50,8 @@ export interface RunStatusInput {
   outcome: RunOutcome | null;
   /** 终态发生的时刻。终态后秒数必须冻在这里，不能继续走。 */
   finishedAt: number | null;
-  /** 流式期间已收到的正文字符数，用于估算输出 token。 */
-  streamedChars: number;
+  /** 流式期间已收到的正文。按它估算输出 token。 */
+  streamedText: string;
   /** 终态的真实用量；有它就不再用估算值。 */
   tokenUsage: RunTokenUsage | null;
   /** 上下文占用；null 表示本轮没报。 */
@@ -112,17 +112,64 @@ const TERMINAL_TONE: Record<RunOutcome, RunStatus['tone']> = {
  * 数字是估的，但这一段的作用本就是**活性信号**：用户要判断的是"它还在动吗"，不是
  * "到底几个 token"。终态一到就换成服务端的真实值。
  */
-export function estimateOutputTokens(chars: string | number): number {
-  if (typeof chars === 'number') return Math.max(0, Math.round(chars / 2));
+export function estimateOutputTokens(text: string): number {
   let cjk = 0;
   let rest = 0;
-  for (const ch of chars) {
+  for (const ch of text) {
     const code = ch.codePointAt(0) ?? 0;
     if (code >= 0x2e80 && code <= 0x9fff) cjk += 1;
     else if (code >= 0xf900 && code <= 0xfaff) cjk += 1;
     else rest += 1;
   }
   return cjk + Math.ceil(rest / 4);
+}
+
+/**
+ * 服务端送来的字段的入口校验。
+ *
+ * 这两个契约都定义在 agent 仓，本仓无从验证，所以这里**不信任形状**：真实数据是经 BFF
+ * 代理过来的一段 JSON，字段少一个、类型换一种，前端都不会有任何编译期提示。
+ *
+ * 形状不对就整段当「没报」，而不是让坏值往下走。裸 `as` 的代价是具体的：
+ * `formatTokens(undefined)` 会输出 `"NaNk"`，`Math.max(0, undefined)` 会让上下文条
+ * 渲染成「上下文 NaN%」——一个缺失的 token 段用户看得懂，一个 NaN 看不懂。
+ */
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+export function parseRunTokenUsage(value: unknown): RunTokenUsage | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const input = finiteNumber(raw.input_tokens);
+  const output = finiteNumber(raw.output_tokens);
+  // 这两项是这段展示的主体，任一缺失就没什么可报的了。
+  if (input === null || output === null) return null;
+  return {
+    input_tokens: input,
+    // cached / reasoning 允许为 null，且 null 与 0 含义不同（未上报 vs 未命中），
+    // 所以校验失败时也落到 null，不能兜成 0——那会让 KV cache 诊断得出相反结论。
+    cached_input_tokens: finiteNumber(raw.cached_input_tokens),
+    output_tokens: output,
+    reasoning_tokens: finiteNumber(raw.reasoning_tokens),
+  };
+}
+
+export function parseRunContextCapacity(value: unknown): RunContextCapacity | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const used = finiteNumber(raw.used_input_tokens);
+  const max = finiteNumber(raw.configured_max_tokens);
+  const ratio = finiteNumber(raw.ratio);
+  // max 为 0 会让分母失去意义，占用条画不出来，一并当没报。
+  if (used === null || max === null || ratio === null || max <= 0) return null;
+  return {
+    used_input_tokens: used,
+    configured_max_tokens: max,
+    ratio,
+    // 未知取值一律按「没压缩过」处理：误报压缩过比漏报更容易让人误判上下文状况。
+    compaction_state: raw.compaction_state === 'compacted' ? 'compacted' : 'none',
+  };
 }
 
 function contextOf(capacity: RunContextCapacity | null): RunStatusContext | null {
@@ -138,7 +185,7 @@ function contextOf(capacity: RunContextCapacity | null): RunStatusContext | null
 function tokensOf(input: RunStatusInput): RunStatusTokens | null {
   // 真实值优先。它只在终态才有，一旦有了就不该再让估算值把它盖掉。
   if (input.tokenUsage) return { output: input.tokenUsage.output_tokens, estimated: false };
-  if (input.streamedChars > 0) return { output: estimateOutputTokens(input.streamedChars), estimated: true };
+  if (input.streamedText.length > 0) return { output: estimateOutputTokens(input.streamedText), estimated: true };
   return null;
 }
 

@@ -85,14 +85,14 @@ function RunStatusLine({
   stalled,
   hasRunId,
   outcome,
-  streamedChars,
+  streamedText,
 }: {
   startedAt: number | null;
   activity: string | null;
   stalled: boolean;
   hasRunId: boolean;
   outcome: TurnOutcome | null;
-  streamedChars: number;
+  streamedText: string;
 }) {
   const [now, setNow] = useState(() => Date.now());
   const settled = outcome !== null;
@@ -113,7 +113,7 @@ function RunStatusLine({
     hasRunId,
     outcome: outcome?.outcome ?? null,
     finishedAt: outcome?.finishedAt ?? null,
-    streamedChars,
+    streamedText,
     tokenUsage: outcome?.tokenUsage ?? null,
     contextCapacity: outcome?.contextCapacity ?? null,
   });
@@ -469,6 +469,19 @@ const quickQuestions = [
     prompt: '我想做一个品牌视觉方案，先帮我头脑风暴几个创意方向。',
   },
 ];
+
+/**
+ * 状态条只讲**会话**状态，不讲 Run 进度。
+ *
+ * 下面这几个阶段是 Run 生命周期的投影（`processing` / `generating_cards` 就是
+ * `deriveAgentPhase` 里 `running || streaming` 的两个分支，`failed` 是它的终局），
+ * 而这一段已经由输入框上方的 `RunStatusLine` 独占——那条状态行同时给出耗时与 token，
+ * 信息严格多于这里的一行标签。两者同屏出现时是同一件事说两遍，IKA4PG 要消除的正是它。
+ *
+ * 其余阶段（等待补充、等待确认、卡已就绪、已进入画布……）描述的是"轮到谁了"，
+ * 状态行不覆盖，保留。
+ */
+const RUN_OWNED_PHASES = new Set<AgentPhase>(['processing', 'generating_cards', 'failed']);
 
 /** 侧边栏状态文案（对齐 04-侧边栏规范 §7 用户感知） */
 const phaseLabels: Record<AgentPhase, string> = {
@@ -980,7 +993,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         /* 对话消息流 */
         <div className={styles.messageList} ref={listRef}>
           {/* 侧边栏状态条（S5：状态机用户可见反馈） */}
-          {messages.length > 0 && agentPhase !== 'idle' && (
+          {messages.length > 0 && agentPhase !== 'idle' && !RUN_OWNED_PHASES.has(agentPhase) && (
             <div className={`${styles.phaseBar} ${styles[`phase_${agentPhase}`] ?? ''}`}>
               <span className={styles.phaseDot} />
               {phaseLabels[agentPhase]}
@@ -1151,7 +1164,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           stalled={longRunning}
           hasRunId={runningRunId !== null}
           outcome={turnOutcome}
-          streamedChars={streamingText.length}
+          streamedText={streamingText}
         />
         {forcedSkill && (
           <div className={styles.armedSkill}>

@@ -412,7 +412,42 @@ describe('useAgentSession 运行计时', () => {
       await latest.sendMessage('帮我生成一张插画');
     });
 
+    // 请求没发出去，这一轮从未开始，所以是清空而不是报终局——屏幕并不沉默，sendError 在说话。
     expect(latest.turnStartedAt).toBeNull();
+    expect(latest.turnOutcome).toBeNull();
+    expect(latest.sendError).not.toBeNull();
+  });
+
+  /**
+   * 回执回来时 Run 已经是终态（幂等命中、或排队即失败）。这一轮确实结束了，但它**发生过**，
+   * 所以要按终态报账。此前这里把起点和终局一起清掉，结果是用户发了一句话，屏幕上什么都没有。
+   */
+  it('回执直接是终态时报终局，而不是让状态行整条消失', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.sendSessionMessage.mockResolvedValue({ run: { run_id: 'run-already-done', status: 'failed' } });
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+
+    expect(latest.turnStartedAt).not.toBeNull();
+    expect(latest.turnOutcome?.outcome).toBe('failed');
+    expect(latest.turnOutcome?.finishedAt).toBeGreaterThan(0);
+  });
+
+  it('回执直接是 stopped 时算「已取消」，不给用户失败的语气', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.sendSessionMessage.mockResolvedValue({ run: { run_id: 'run-stopped', status: 'stopped' } });
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+
+    expect(latest.turnOutcome?.outcome).toBe('cancelled');
   });
 
   /**

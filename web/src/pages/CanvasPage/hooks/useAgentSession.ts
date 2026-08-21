@@ -33,6 +33,7 @@ import { cardsFromRevision } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
 import { newIdempotencyKey } from '@/api/jobs';
 import { deriveAgentPhase, type DerivedAgentPhase } from './agentSessionState';
+import { parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
 import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusLine';
 
 /** 一轮结束后的结账信息，供常驻状态行报账（IKA4PG）。 */
@@ -77,6 +78,21 @@ export interface ChatMessage {
 export type AgentPhase = DerivedAgentPhase;
 
 /** 运行终态集合（status_changed/run.* 终态判定） */
+/**
+ * run 状态 → 状态行终局。
+ *
+ * 事件流按事件名给（`run.cancelled`），发送回执按 `run.status` 给（`cancelled`），两边
+ * 落到同一张表，避免加一种终态要改两处而其中一处被忘掉。
+ *
+ * `stopped` 归入「已取消」：那是用户自己按的停止，不该看到失败的语气。
+ * `outcome_unknown` 归入失败：对用户而言「不知道」和「失败」一样需要重试。
+ */
+function terminalOutcomeOf(status: string): RunOutcome {
+  if (status === 'completed' || status === 'succeeded') return 'completed';
+  if (status === 'cancelled' || status === 'canceled' || status === 'stopped') return 'cancelled';
+  return 'failed';
+}
+
 const TERMINAL_STATUS = [
   'completed',
   'succeeded',
@@ -560,6 +576,8 @@ export function useAgentSession(projectId: string) {
         const reason = (payload.reason ?? {}) as Record<string, unknown>;
         const runId = str(run.run_id ?? data.run_id);
         discardStream();
+        // 计费门是暂停不是终态，且下方 paymentRequiredMessage 会给出明确说明与处理入口。
+        // 让状态行继续读秒会显得还在跑，报终局又不属实，因此这一段交给那条提示独占。
         setTurnStartedAt(null);
         setTurnOutcome(null);
         setPartialCard(null);
@@ -583,10 +601,10 @@ export function useAgentSession(projectId: string) {
         // turnStartedAt 刻意保留：状态行结束后要留下来报这一轮的账（耗时与 token），清掉它
         // 就没有起点可算了。下一轮 sendMessage 会重新置位。
         setTurnOutcome({
-          outcome: t === 'run.completed' ? 'completed' : t === 'run.cancelled' || t === 'run.stopped' ? 'cancelled' : 'failed',
+          outcome: terminalOutcomeOf(t.slice('run.'.length)),
           finishedAt: Date.now(),
-          tokenUsage: (run.token_usage as RunTokenUsage | null) ?? null,
-          contextCapacity: (run.context_capacity as RunContextCapacity | null) ?? null,
+          tokenUsage: parseRunTokenUsage(run.token_usage),
+          contextCapacity: parseRunContextCapacity(run.context_capacity),
         });
         // 终态一到就撤掉预览：这一刻起权威是校验过的卡片，让半成品留在屏幕上只会让人误以为能用。
         setPartialCard(null);
@@ -892,8 +910,16 @@ export function useAgentSession(projectId: string) {
             terminalRunIdsRef.current.add(run.run_id);
             streamingRef.current = false;
             setStreaming(false);
-            setTurnStartedAt(null);
-            setTurnOutcome(null);
+            // 回执回来时 Run 已经是终态（幂等命中、或排队即失败）：这仍然是一轮结束，
+            // 该按终态报账，而不是把状态行整条抹掉。清掉起点等于让刚提交的那一轮
+            // 在屏幕上凭空消失——用户看到的是自己发了一句话然后什么都没发生。
+            setTurnOutcome({
+              outcome: terminalOutcomeOf(run.status),
+              finishedAt: Date.now(),
+              // 回执的 SessionRun 上没有这两个字段，真实数字随后由事件流补。
+              tokenUsage: null,
+              contextCapacity: null,
+            });
             runningRef.current = null;
             setRunningRunId(null);
             if (['failed', 'outcome_unknown'].includes(run.status)) setFailedRunId(run.run_id);
@@ -907,7 +933,11 @@ export function useAgentSession(projectId: string) {
         console.warn('Agent 消息发送失败:', e);
         streamingRef.current = false;
         setStreaming(false);
+        // 这里刻意清空而不是写终局：请求就没发出去，这一轮从未开始，乐观消息也回滚了。
+        // 屏幕并不沉默——下面的 sendError 会明确说发送失败且输入已保留，此时再挂一条
+        // 「未能完成 0s」只是把同一件事说两遍。「地板」要托的是静默，不是已有提示的场合。
         setTurnStartedAt(null);
+        setTurnOutcome(null);
         setMessages((prev) => prev.filter((message) => message.id !== optimisticId));
         if (isApiError(e) && e.code === 'capability_required') {
           setSendError('当前环境未配置 Agent 运行能力券，请联系管理员配置后重试；输入内容已保留。');

@@ -175,6 +175,11 @@ function appendAreaCommands(commands, areas, base) {
     commands.push(
       ["node", "web/node_modules/typescript/bin/tsc", "-b", "web/tsconfig.json", "--pretty", "false"],
       ["npm", "--prefix", "web", "run", "lint"],
+      // docs/agents/testing-strategy.md 的 scoped/web 一行写的是「Web typecheck + Web Vitest --changed」，
+      // 这一条此前缺失，web 下的单测从来没有被门禁执行过。
+      // --passWithNoTests：web 变更常常只动 CSS 或页面壳，模块图上够不到任何测试；
+      // 那种情况该放行，而不是把「没有相关测试」报成失败。
+      ["npm", "--prefix", "web", "run", "test", "--", "--changed", base, "--passWithNoTests"],
     );
   }
   if (areas.includes("governance")) {
