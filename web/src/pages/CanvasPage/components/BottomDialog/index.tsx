@@ -35,7 +35,7 @@ const FALLBACK_DURATION = { min: 4, max: 15, step: 1 };
 const MAX_VIDEOS = 3;
 
 /** 输入框字数上限 */
-const MAX_INPUT = 500;
+const MAX_INPUT = 1000;
 
 /** 视频生成参数（发送时传给画布创建生成任务） */
 export interface VideoGenOptions {

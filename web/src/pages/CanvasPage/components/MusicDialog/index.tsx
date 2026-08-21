@@ -8,7 +8,7 @@ import type { AudioRefItem, CanvasPickItem } from '../AudioDialog';
 import styles from './index.module.css';
 
 /** 输入框字数上限 */
-const MAX_INPUT = 500;
+const MAX_INPUT = 1000;
 
 /** AI 音乐生成附加参数 */
 export interface MusicGenOptions {
