@@ -415,7 +415,13 @@ describe('useAgentSession 运行计时', () => {
     expect(latest.turnStartedAt).toBeNull();
   });
 
-  it('终态停表', async () => {
+  /**
+   * 终态停表的机制在 IKA4PG 变了。原来靠清空 turnStartedAt，状态行随之消失；现在状态行要
+   * 留下来报这一轮的账，起点必须保住，改由 turnOutcome.finishedAt 冻结耗时。
+   *
+   * 表停没停这件事本身没变，所以这条测试跟着换的是断言的对象，不是断言的意图。
+   */
+  it('终态停表：保住起点，用终态时刻冻结耗时', async () => {
     mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
     await renderHookHarness();
     await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
@@ -423,16 +429,77 @@ describe('useAgentSession 运行计时', () => {
       await latest.sendMessage('帮我生成一张插画');
     });
     expect(latest.turnStartedAt).not.toBeNull();
+    expect(latest.turnOutcome).toBeNull();
 
     await act(async () => {
       eventHandlers.at(-1)?.({
         type: 'run.completed',
         id: 'completed-1',
-        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+        data: {
+          run_id: 'run-1',
+          payload: {
+            run: {
+              run_id: 'run-1',
+              status: 'completed',
+              token_usage: {
+                input_tokens: 30_000,
+                cached_input_tokens: 28_500,
+                output_tokens: 412,
+                reasoning_tokens: null,
+              },
+              context_capacity: {
+                used_input_tokens: 30_000,
+                configured_max_tokens: 120_000,
+                ratio: 0.25,
+                compaction_state: 'none',
+              },
+            },
+          },
+        },
       });
     });
 
-    expect(latest.turnStartedAt).toBeNull();
+    // 起点保留，否则状态行没有基准可算耗时。
+    expect(latest.turnStartedAt).not.toBeNull();
+    expect(latest.turnOutcome?.outcome).toBe('completed');
+    expect(latest.turnOutcome?.finishedAt).toBeGreaterThan(0);
+    // 服务端送来的真实用量要能穿过来，状态行才能把流式期间的估算值换掉（IKACDN）。
+    expect(latest.turnOutcome?.tokenUsage?.output_tokens).toBe(412);
+    expect(latest.turnOutcome?.tokenUsage?.reasoning_tokens).toBeNull();
+    expect(latest.turnOutcome?.contextCapacity?.ratio).toBe(0.25);
+  });
+
+  it('取消与失败各自记成对应的终局，不都算作完成', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.cancelled',
+        id: 'cancelled-1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'cancelled' } } },
+      });
+    });
+    expect(latest.turnOutcome?.outcome).toBe('cancelled');
+
+    await act(async () => {
+      await latest.sendMessage('再来一张');
+    });
+    // 新一轮开始就把上一轮的账清掉，否则状态行会拿旧结果冒充这一轮。
+    expect(latest.turnOutcome).toBeNull();
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.failed',
+        id: 'failed-1',
+        data: { run_id: 'run-2', payload: { run: { run_id: 'run-2', status: 'failed' } } },
+      });
+    });
+    expect(latest.turnOutcome?.outcome).toBe('failed');
   });
 
   it('刷新重连时用事件自己的服务端时间，不从零重数', async () => {

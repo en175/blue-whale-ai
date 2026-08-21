@@ -1412,8 +1412,27 @@
   animation: none;
 }
 
-.runStatusElapsed {
+/* 终态：这一轮的账，不是进度。压低存在感但不移除——用户回头还要看这轮花了多久。 */
+.runStatusDone {
   color: var(--color-text-tertiary, #7d8288);
+}
+
+.runStatusDone .runStatusMark {
+  color: var(--color-text-tertiary, #7d8288);
+  animation: none;
+}
+
+.runStatusError .runStatusMark {
+  color: var(--color-error, #ef6a6a);
+  animation: none;
+}
+
+/* 耗时与 token。等宽数字，否则秒数每跳一次整行都在抖。 */
+.runStatusMeta {
+  margin-left: auto;
+  color: var(--color-text-tertiary, #7d8288);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 @keyframes runStatusPulse {

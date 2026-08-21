@@ -20,8 +20,8 @@ import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
 import { isApiError } from '@/api/http';
 import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
-import { useAgentSession, type ChatMessage, type AgentPhase } from '../../hooks/useAgentSession';
-import { deriveRunStatus } from '../../hooks/runStatusLine';
+import { useAgentSession, type ChatMessage, type AgentPhase, type TurnOutcome } from '../../hooks/useAgentSession';
+import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
 import type { SessionContentBlock, GenerationCardBlock } from '@/api/agentSessions';
 import SkillModal from '@/pages/Home/components/SkillModal';
@@ -64,32 +64,98 @@ export function Markdown({ text }: { text: string }) {
   );
 }
 
+/** 每种语气对应的样式类。终态两种分开：完成是收尾，失败要能一眼看出来。 */
+const RUN_STATUS_TONE_CLASS: Record<RunStatus['tone'], string> = {
+  working: '',
+  stalled: styles.runStatusStalled ?? '',
+  done: styles.runStatusDone ?? '',
+  error: styles.runStatusError ?? '',
+};
+
 /**
- * 运行中的常驻状态行。这是"屏幕上什么都没有"的地板：提交那一刻就出现，秒数一直走，
- * 直到终态才消失。它不等模型吐字、不等产卡成功、事件流断了也照走——上面那些更好看的
- * 东西都可能失效，这条不能。文案取自 run.activity 的可见节点白名单。
+ * 常驻状态行。这是"屏幕上什么都没有"的地板：提交那一刻就出现，秒数一直走，事件流断了
+ * 也照走——上面那些更好看的东西（思考链、卡片逐段长出来）都可能失效，这条不能。
+ *
+ * IKA4PG 起它不再随终态消失，而是留下来报这一轮的账（耗时、token），下一轮开始才被替换。
+ * 判断一次运行是不是卡死靠的就是"秒数还在走吗、token 还在变吗"，两者都必须持续可见。
  */
-function RunStatusLine({ startedAt, activity, stalled }: { startedAt: number | null; activity: string | null; stalled: boolean }) {
+function RunStatusLine({
+  startedAt,
+  activity,
+  stalled,
+  hasRunId,
+  outcome,
+  streamedChars,
+}: {
+  startedAt: number | null;
+  activity: string | null;
+  stalled: boolean;
+  hasRunId: boolean;
+  outcome: TurnOutcome | null;
+  streamedChars: number;
+}) {
   const [now, setNow] = useState(() => Date.now());
+  const settled = outcome !== null;
   useEffect(() => {
-    if (startedAt === null) return;
+    // 终态后不再每秒重渲染：秒数已经冻住了，继续跑定时器只是白烧一次渲染。
+    if (startedAt === null || settled) return;
     // 先立刻对齐一次，避免刚挂载时沿用上一轮的旧时间戳。
     setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [startedAt]);
+  }, [startedAt, settled]);
 
-  const status = deriveRunStatus({ activeSince: startedAt, now, activity, stalled });
+  const status = deriveRunStatus({
+    activeSince: startedAt,
+    now,
+    activity,
+    stalled,
+    hasRunId,
+    outcome: outcome?.outcome ?? null,
+    finishedAt: outcome?.finishedAt ?? null,
+    streamedChars,
+    tokenUsage: outcome?.tokenUsage ?? null,
+    contextCapacity: outcome?.contextCapacity ?? null,
+  });
   if (!status) return null;
+
+  const contextPercent = status.context ? Math.round(status.context.ratio * 100) : null;
   return (
     <div
-      className={`${styles.runStatus} ${status.tone === 'stalled' ? styles.runStatusStalled : ''}`}
+      className={`${styles.runStatus} ${RUN_STATUS_TONE_CLASS[status.tone]}`}
       role="status"
       aria-live="polite"
     >
-      <span className={styles.runStatusMark} aria-hidden="true">✶</span>
+      <span className={styles.runStatusMark} aria-hidden="true">
+        {status.settled ? '✻' : '✶'}
+      </span>
       <span>{status.label}</span>
-      <span className={styles.runStatusElapsed}>({status.seconds}s)</span>
+      <span className={styles.runStatusMeta}>
+        {formatElapsed(status.seconds)}
+        {status.tokens && (
+          <>
+            {' · '}
+            {/* 流式期间这个数是按字符估的：模型只在结束时报真实用量，中途没有增量。
+                它的作用是活性信号——用户要判断的是"它还在动吗"，不是精确值。 */}
+            <span title={status.tokens.estimated ? '流式期间为估算值，结束后显示实际用量' : '本轮实际输出用量'}>
+              ↓ {formatTokens(status.tokens.output)}
+              {status.tokens.estimated ? '≈' : ''}
+            </span>
+          </>
+        )}
+        {contextPercent !== null && status.context && (
+          <>
+            {' · '}
+            <span
+              title={`上下文 ${status.context.usedTokens} / ${status.context.maxTokens} tokens${
+                status.context.compacted ? '（本轮压缩过历史）' : ''
+              }`}
+            >
+              上下文 {contextPercent}%{status.context.compacted ? ' ⤺' : ''}
+            </span>
+          </>
+        )}
+      </span>
     </div>
   );
 }
@@ -457,6 +523,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     failedRunId,
     thinkingSteps,
     turnStartedAt,
+    turnOutcome,
     partialCard,
     longRunning,
     chatError,
@@ -1082,6 +1149,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           startedAt={turnStartedAt}
           activity={thinkingSteps.at(-1) ?? null}
           stalled={longRunning}
+          hasRunId={runningRunId !== null}
+          outcome={turnOutcome}
+          streamedChars={streamingText.length}
         />
         {forcedSkill && (
           <div className={styles.armedSkill}>

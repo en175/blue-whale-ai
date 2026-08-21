@@ -33,6 +33,15 @@ import { cardsFromRevision } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
 import { newIdempotencyKey } from '@/api/jobs';
 import { deriveAgentPhase, type DerivedAgentPhase } from './agentSessionState';
+import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusLine';
+
+/** 一轮结束后的结账信息，供常驻状态行报账（IKA4PG）。 */
+export interface TurnOutcome {
+  outcome: RunOutcome;
+  finishedAt: number;
+  tokenUsage: RunTokenUsage | null;
+  contextCapacity: RunContextCapacity | null;
+}
 
 /** 数据源：真实 /api/agent/v1（经 BFF 代理到独立 agent 服务）。本地开发需起 backend:3100 + agent + SSH 隧道，见 bw-test-env。 */
 const api = {
@@ -162,6 +171,13 @@ export function useAgentSession(projectId: string) {
    * 这样"提交后什么都没有"的那几秒也有秒数在走。见 runStatusLine.ts。
    */
   const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
+  /**
+   * 上一轮的结账信息（IKA4PG）。终态到达时填，下一轮开始时清。
+   *
+   * 状态行不再随终态消失，而是留下来报这一轮的账，所以「跑完了」这件事必须有地方记：
+   * turnStartedAt 一旦置空，状态行就没有起点可算了。
+   */
+  const [turnOutcome, setTurnOutcome] = useState<TurnOutcome | null>(null);
   /** 正在写入的生成卡预览（prompt_card.partial.v1）。只用于展示，终态卡片到达即让位。 */
   const [partialCard, setPartialCard] = useState<PartialCardPreview | null>(null);
   /** 运行活跃但长期无产出事件（delta/思考步）的兜底提示标志：超阈值仍无终态时给用户可诊断信息，不无限「处理中」 */
@@ -545,6 +561,7 @@ export function useAgentSession(projectId: string) {
         const runId = str(run.run_id ?? data.run_id);
         discardStream();
         setTurnStartedAt(null);
+        setTurnOutcome(null);
         setPartialCard(null);
         runningRef.current = runId || null;
         setRunningRunId(runId || null);
@@ -563,7 +580,14 @@ export function useAgentSession(projectId: string) {
         const run = (payload.run ?? {}) as Record<string, unknown>;
         const runId = str(run.run_id ?? data.run_id);
         if (runId) terminalRunIdsRef.current.add(runId);
-        setTurnStartedAt(null);
+        // turnStartedAt 刻意保留：状态行结束后要留下来报这一轮的账（耗时与 token），清掉它
+        // 就没有起点可算了。下一轮 sendMessage 会重新置位。
+        setTurnOutcome({
+          outcome: t === 'run.completed' ? 'completed' : t === 'run.cancelled' || t === 'run.stopped' ? 'cancelled' : 'failed',
+          finishedAt: Date.now(),
+          tokenUsage: (run.token_usage as RunTokenUsage | null) ?? null,
+          contextCapacity: (run.context_capacity as RunContextCapacity | null) ?? null,
+        });
         // 终态一到就撤掉预览：这一刻起权威是校验过的卡片，让半成品留在屏幕上只会让人误以为能用。
         setPartialCard(null);
         if (t === 'run.completed') settleStream(runId);
@@ -650,6 +674,7 @@ export function useAgentSession(projectId: string) {
     runningRef.current = null;
     setFailedRunId(null);
     setTurnStartedAt(null);
+    setTurnOutcome(null);
     setThinkingSteps([]);
     setPartialCard(null);
     setChatError(null);
@@ -847,6 +872,7 @@ export function useAgentSession(projectId: string) {
       setStreaming(true);
       // 提交即开表。请求还没发出去、Run 还没排上队，用户也已经在等了，这段时间必须算进去。
       setTurnStartedAt(Date.now());
+      setTurnOutcome(null);
       try {
         const connectionEpoch = connectionEpochRef.current;
         const ack = await api.sendSessionMessage(projectId, sid, text, { forcedCreativeSkillId: forcedSkillId });
@@ -867,6 +893,7 @@ export function useAgentSession(projectId: string) {
             streamingRef.current = false;
             setStreaming(false);
             setTurnStartedAt(null);
+            setTurnOutcome(null);
             runningRef.current = null;
             setRunningRunId(null);
             if (['failed', 'outcome_unknown'].includes(run.status)) setFailedRunId(run.run_id);
@@ -1047,6 +1074,7 @@ export function useAgentSession(projectId: string) {
     failedRunId,
     thinkingSteps,
     turnStartedAt,
+    turnOutcome,
     partialCard,
     longRunning,
     chatError,
