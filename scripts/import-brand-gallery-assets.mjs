@@ -10,42 +10,138 @@
  *       node scripts/import-brand-gallery-assets.mjs            实际入库（同标题卡片跳过，幂等）
  * ============================================ */
 import { readFile, stat } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 const BASE = process.env.BLUEWHALE_API_BASE ?? 'http://localhost:3000';
 const TOKEN = process.env.BLUEWHALE_ADMIN_TOKEN ?? '';
 const ROOT = process.env.BRAND_GALLERY_ROOT ?? 'E:\\IDEA_Programme\\new\\品牌素材\\视频库图库';
 const DRY_RUN = process.argv.includes('--dry-run');
 
-async function api(method, p, body) {
-  const res = await fetch(`${BASE}${p}`, {
-    method,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const json = await res.json().catch(() => null);
-  if (!res.ok || json?.success !== true) {
+async function api(method, p, body, opts = {}) {
+  const retry503 = opts.retry503 !== false;
+  let lastErr;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    let res;
+    try {
+      res = await fetch(`${BASE}${p}`, {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch (e) {
+      lastErr = e;
+      if (attempt < 4) { console.log(`API ${p} 网络失败（第 ${attempt} 次），3s 后重试…`); await new Promise((r) => setTimeout(r, 3000)); continue; }
+      throw e;
+    }
+    const json = await res.json().catch(() => null);
+    if (res.ok && json?.success === true) return json.data;
+    const transient = res.status === 502 || res.status === 504 || (res.status === 503 && retry503);
+    if (transient && attempt < 4) {
+      console.log(`API ${p} ${res.status}（第 ${attempt} 次），3s 后重试…`);
+      await new Promise((r) => setTimeout(r, 3000));
+      continue;
+    }
     throw new Error(`${method} ${p} 失败（${res.status}）: ${json?.message ?? json?.msg ?? res.statusText}`);
   }
-  return json.data;
+  throw lastErr ?? new Error(`API ${p} 失败`);
 }
 
 const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.mp4': 'video/mp4' };
 
-/** 三步上传：presign → PUT 直传 TOS → complete 得公网 URL */
-async function uploadMedia(file) {
+/** IKA64P 联调兼容：后端未配 TOS（presign 503）时，脚本用本地 .env 凭据直连 TOS 上传并设公共读。
+ *  键前缀/公网 URL 拼法与后端 tos-storage.ts 完全一致（admin/templates/<type>/<uuid>.<ext>）。 */
+function loadTosConfig() {
+  const vars = {};
+  try {
+    for (const line of readFileSync(path.join(SCRIPT_DIR, '..', '.env'), 'utf8').split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Z0-9_]+)=(.*)\s*$/);
+      if (m) vars[m[1]] = m[2];
+    }
+  } catch { /* 无 .env 时纯环境变量模式 */ }
+  const get = (k) => process.env[k] ?? vars[k];
+  const cfg = {
+    accessKeyId: get('VOLC_ACCESS_KEY_ID'),
+    secretAccessKey: get('VOLC_SECRET_ACCESS_KEY'),
+    endpoint: (get('VOLC_TOS_ENDPOINT') ?? '').replace(/^https?:\/\//, '').replace(/\/$/, ''),
+    bucket: get('VOLC_TOS_BUCKET'),
+    region: get('VOLC_TOS_REGION'),
+  };
+  return Object.values(cfg).every(Boolean) ? cfg : null;
+}
+
+let tosHandle = null;
+function getTos() {
+  if (tosHandle) return tosHandle;
+  const cfg = loadTosConfig();
+  if (!cfg) throw new Error('TOS 直连配置缺失：.env 与环境均无 VOLC_* 变量');
+  const req = createRequire(path.join(SCRIPT_DIR, '..', 'backend', 'package.json'));
+  const { TosClient } = req('@volcengine/tos-sdk');
+  tosHandle = {
+    cfg,
+    client: new TosClient({
+      accessKeyId: cfg.accessKeyId,
+      accessKeySecret: cfg.secretAccessKey,
+      endpoint: cfg.endpoint,
+      region: cfg.region,
+    }),
+  };
+  return tosHandle;
+}
+
+async function directUploadMedia(file) {
+  const buf = await readFile(file);
+  const ext = path.extname(file).toLowerCase();
+  const mime = MIME[ext];
+  const type = mime === 'video/mp4' ? 'video' : 'image';
+  const { client, cfg } = getTos();
+  const key = `admin/templates/${type}/${randomUUID().replace(/-/g, '')}${ext}`;
+  const uploadUrl = await client.getPreSignedUrl({ bucket: cfg.bucket, key, method: 'PUT', expires: 600 });
+  const put = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': mime }, body: buf });
+  if (!put.ok) throw new Error(`TOS 直传失败（HTTP ${put.status}）: ${file}`);
+  await client.putObjectAcl({ bucket: cfg.bucket, key, acl: 'public-read' });
+  return `https://${cfg.bucket}.${cfg.endpoint}/${key}`;
+}
+
+/** 三步上传：presign → PUT 直传 TOS → complete 得公网 URL；后端未配 TOS（503）时自动降级直连 */
+async function presignUploadMedia(file) {
   const buf = await readFile(file);
   const ext = path.extname(file).toLowerCase();
   const mime = MIME[ext];
   if (!mime) throw new Error(`不支持的资产格式: ${file}`);
   const type = mime === 'video/mp4' ? 'video' : 'image';
-  const presign = await api('POST', '/api/admin/templates/uploads/presign', { type, mime, size: buf.length });
+  const presign = await api('POST', '/api/admin/templates/uploads/presign', { type, mime, size: buf.length }, { retry503: false });
   const put = await fetch(presign.upload_url, { method: 'PUT', headers: presign.headers, body: buf });
   if (!put.ok) throw new Error(`直传失败（HTTP ${put.status}）: ${file}`);
   const done = await api('POST', '/api/admin/templates/uploads/complete', {
     type, mime, size: buf.length, storage_key: presign.storage_key,
   });
   return done.url;
+}
+
+async function uploadMedia(file) {
+  try {
+    return await presignUploadMedia(file);
+  } catch (e) {
+    if (!String(e?.message ?? '').includes('503')) throw e;
+    console.log(`presign 503，降级 TOS 直连: ${path.basename(file)}`);
+  }
+  let lastErr;
+  for (let i = 1; i <= 3; i++) {
+    try {
+      return await directUploadMedia(file);
+    } catch (e) {
+      lastErr = e;
+      console.log(`直连第 ${i} 次失败（${e?.code ?? e?.message}），2s 后重试…`);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  throw lastErr;
 }
 
 /** 提取 md 的「完整提示词」+「负面要求」两节正文 */
