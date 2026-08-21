@@ -3,7 +3,7 @@
  * ============================================ */
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
-import { ArrowLeft, Map as MapIcon, Link, Link2Off } from 'lucide-react';
+import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
@@ -12,7 +12,7 @@ import type { ChipRef } from './components/ChipTextEditor';
 import ImageDialog, { type UploadedFile } from './components/ImageDialog';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
-import SharedAssetsModal, { type SharedProduct } from './components/SharedAssetsModal';
+import SharedAssetsModal from './components/SharedAssetsModal';
 import type { AssetCardKind } from './components/AssetCardNode';
 import type { CanvasProject } from './components/ProjectSelector';
 import FlowCanvas from './components/Canvas';
@@ -33,6 +33,11 @@ import {
   type VideoJobParameters,
   type AudioJobParameters,
 } from '@/api/jobs';
+import {
+  saveSharedAsset,
+  type SaveSharedAssetRequest,
+  type SharedAssetView,
+} from '@/api/sharedAssets';
 import { uploadAssetFile } from '@/utils/upload';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
@@ -68,6 +73,15 @@ export default function CanvasPage() {
   const [showMusicDialog, setShowMusicDialog] = useState(false);
   const [showEdges, setShowEdges] = useState(true);
   const [uploadedNodes] = useState<Node[]>([]);
+  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'warn'; msg: string } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  /** 显示 toast 提示 */
+  const showToast = useCallback((type: 'success' | 'error' | 'warn', msg: string) => {
+    setToast({ type, msg });
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 2500);
+  }, []);
   const [textNodes, setTextNodes] = useState<Node[]>([]);
   const [mediaNodes, setMediaNodes] = useState<Node[]>([]);
   const [productNodes, setProductNodes] = useState<Node[]>([]);
@@ -203,6 +217,7 @@ export default function CanvasPage() {
           },
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+          onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
         };
         break;
       case 'mediaNode':
@@ -220,6 +235,7 @@ export default function CanvasPage() {
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
+          onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
         };
         break;
       case 'productNode':
@@ -229,6 +245,7 @@ export default function CanvasPage() {
             setProductNodes((prev) => prev.filter((n) => n.id !== id));
           },
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+          onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
         };
         break;
       case 'assetNode':
@@ -239,6 +256,7 @@ export default function CanvasPage() {
           },
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onGenerateImage: () => actionsRef.current.openImageDialog(),
+          onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
           // 生成卡节点水合后补动作回调（引用到 dock / 给 Agent）
           generationCard: base.data?.generationCard
             ? {
@@ -283,7 +301,7 @@ export default function CanvasPage() {
   };
 
   /** 解析后端节点引用的资产（data/顶层的 asset_id、reference_asset_ids 或直接内嵌 url） */
-  const resolveAssetRef = (node: Node): { url: string; type: string } | null => {
+  const resolveAssetRef = (node: Node): { url: string; type: string; assetId?: string } | null => {
     const data = (node.data ?? {}) as Record<string, unknown>;
     const raw = node as unknown as Record<string, unknown>;
     const candidates: unknown[] = [
@@ -291,13 +309,17 @@ export default function CanvasPage() {
       raw.asset_id,
       data.assetId,
       raw.assetId,
+      data.assetID,
+      raw.assetID,
+      data.sourceAssetId,
+      raw.sourceAssetId,
       Array.isArray(data.reference_asset_ids) ? data.reference_asset_ids[0] : undefined,
       Array.isArray(raw.reference_asset_ids) ? raw.reference_asset_ids[0] : undefined,
     ];
     for (const c of candidates) {
       if (c == null) continue;
       const asset = snapshotAssets[String(c)];
-      if (asset?.access_url) return { url: asset.access_url, type: asset.type };
+      if (asset?.access_url) return { url: asset.access_url, type: asset.type, assetId: String(c) };
     }
     const direct = (data.src ?? data.url ?? raw.url ?? raw.src) as unknown;
     if (typeof direct === 'string' && direct) return { url: direct, type: '' };
@@ -381,6 +403,7 @@ export default function CanvasPage() {
         mediaType: ref.type === 'video' ? 'video' : 'image',
         fileName: `参考 ${node.id}`,
         prompt: typeof prompt === 'string' ? prompt : undefined,
+        assetId: ref.assetId,
       },
     };
   };
@@ -497,6 +520,7 @@ export default function CanvasPage() {
         },
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+        onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
       },
     };
     setTextNodes((prev) => [...prev, newNode]);
@@ -504,13 +528,13 @@ export default function CanvasPage() {
 
   /** 复制节点到旁边 */
   const handleDuplicateNode = (id: string) => {
-    const t = textNodes.find((n) => n.id === id);
+    const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
       const copy: Node = { ...t, id: `text-${Date.now()}`, position: { x: t.position.x + 40, y: t.position.y + 40 }, data: { ...t.data } };
       setTextNodes((prev) => [...prev, copy]);
       return;
     }
-    const m = mediaNodes.find((n) => n.id === id);
+    const m = mediaNodesRef.current.find((n) => n.id === id);
     if (m) {
       const copy: Node = { ...m, id: `media-${Date.now()}`, position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
       setMediaNodes((prev) => [...prev, copy]);
@@ -519,27 +543,27 @@ export default function CanvasPage() {
 
   /** 添加节点内容到 Agent 聊天 */
   const handleAddToChatNode = (id: string) => {
-    const p = productNodes.find((n) => n.id === id);
+    const p = productNodesRef.current.find((n) => n.id === id);
     if (p) {
       setAgentContext({ text: `@${(p.data?.name as string) || '商品'} `, ts: Date.now() });
       setShowAgent(true);
       return;
     }
-    const t = textNodes.find((n) => n.id === id);
+    const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
       const text = ((t.data?.html as string) || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
       setAgentContext({ text: text || '文本节点', ts: Date.now() });
       setShowAgent(true);
       return;
     }
-    const m = mediaNodes.find((n) => n.id === id);
+    const m = mediaNodesRef.current.find((n) => n.id === id);
     if (m) {
       const type = m.data?.mediaType === 'video' ? '视频' : '图片';
       setAgentContext({ text: `[${type}] ${m.data?.fileName || ''}`, ts: Date.now() });
       setShowAgent(true);
       return;
     }
-    const a = assetNodes.find((n) => n.id === id);
+    const a = assetNodesRef.current.find((n) => n.id === id);
     if (a) {
       const gc = a.data?.generationCard as { shotTitle?: string } | undefined;
       const kindTitle: Record<string, string> = {
@@ -766,10 +790,9 @@ export default function CanvasPage() {
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
+          onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
         },
       });
-
-      // 后台上传登记：成功换永久 URL，失败保留本地预览
       uploadAssetFile(file, { projectId: currentId || undefined })
         .then((done) => {
           setMediaNodes((prev) =>
@@ -793,6 +816,15 @@ export default function CanvasPage() {
   /** 媒体节点最新列表（轮询中判断节点是否仍存在） */
   const mediaNodesRef = useRef<Node[]>([]);
   mediaNodesRef.current = mediaNodes;
+  /** 文本节点最新列表（避免闭包陈旧） */
+  const textNodesRef = useRef<Node[]>([]);
+  textNodesRef.current = textNodes;
+  /** 资产卡节点最新列表（避免闭包陈旧） */
+  const assetNodesRef = useRef<Node[]>([]);
+  assetNodesRef.current = assetNodes;
+  /** 商品节点最新列表（避免闭包陈旧） */
+  const productNodesRef = useRef<Node[]>([]);
+  productNodesRef.current = productNodes;
   /** 生成节点轮询定时器（节点 id → timer） */
   const jobTimersRef = useRef<Map<string, number>>(new Map<string, number>());
 
@@ -899,6 +931,7 @@ export default function CanvasPage() {
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onDownload: (id: string) => actionsRef.current.download(id),
+        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
       },
     };
     setMediaNodes((prev) => [...prev, node]);
@@ -1238,65 +1271,278 @@ export default function CanvasPage() {
         },
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onGenerateImage: () => actionsRef.current.openImageDialog(),
+        onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
       },
     };
     setAssetNodes((prev) => [...prev, node]);
   };
 
-  /** 共享资产→真实资产添加到项目：复制到当前项目并生成媒体节点（返回是否成功） */
-  const handleAddSharedAsset = async (assetId: number): Promise<boolean> => {
-    if (!currentId) return false;
+  /* ============ 保存到共享资产 ============ */
+
+  /** 通用保存请求 + toast 反馈 */
+  const doSaveSharedAsset = async (req: SaveSharedAssetRequest, successMsg: string) => {
+    console.log('[SaveAssets] doSaveSharedAsset 请求', req);
     try {
-      const copied = await copyAssetToProject(currentId, assetId);
-      const node: Node = {
-        id: `media-${Date.now()}`,
-        type: 'mediaNode',
-        position: spawnPosition(),
-        data: {
-          src: copied.url,
-          fileName: copied.url.split('/').filter(Boolean).pop() ?? `资产 ${copied.id}`,
-          mediaType: copied.type === 'video' ? 'video' : 'image',
-          assetId: copied.id,
-          toolMode,
-          onDelete: (id: string) => {
-            setMediaNodes((prev) => prev.filter((n) => n.id !== id));
-          },
-          onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-          onReEdit: (id: string) => actionsRef.current.reEdit(id),
-          onGenImage: (id: string) => actionsRef.current.genImage(id),
-          onGenVideo: (id: string) => actionsRef.current.genVideo(id),
-          onGenAudio: (id: string) => actionsRef.current.genAudio(id),
-          onDownload: (id: string) => actionsRef.current.download(id),
-        },
-      };
-      setMediaNodes((prev) => [...prev, node]);
-      return true;
+      const result = await saveSharedAsset(req);
+      console.log('[SaveAssets] 保存结果', result);
+      if (result.created) {
+        showToast('success', successMsg);
+      } else {
+        showToast('warn', '该素材已在共享资产中');
+      }
+      return result;
     } catch (e) {
-      console.warn('复制资产到项目失败:', e);
-      return false;
+      console.warn('[SaveAssets] 保存失败', e);
+      if (isApiError(e)) {
+        // 100408: 卡片无参考图且无描述
+        if (e.code === 100408) {
+          showToast('error', '请先为卡片补充参考图或描述');
+        } else {
+          showToast('error', e.message || '保存失败');
+        }
+      } else {
+        showToast('error', '保存失败，请重试');
+      }
+      return null;
     }
   };
 
-  /** 共享资产→商品添加到画布：生成商品节点 */
-  const handleAddProduct = (p: SharedProduct) => {
-    const node: Node = {
-      id: `product-${Date.now()}`,
-      type: 'productNode',
-      position: spawnPosition(),
-      data: {
-        name: p.title,
-        detail: p.detail,
-        images: [],
-        toolMode,
-        onDelete: (id: string) => {
-          setProductNodes((prev) => prev.filter((n) => n.id !== id));
-        },
-        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+  /** 媒体节点保存到共享资产（画布右键 → 保存到共享资产） */
+  const handleSaveMediaToAssets = async (nodeId: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    if (!node) {
+      console.warn('[SaveAssets] 未找到媒体节点', nodeId);
+      showToast('error', '节点不存在');
+      return;
+    }
+    const nd = node.data as Record<string, unknown>;
+    const mediaType = (nd.mediaType || nd.type) as 'image' | 'video' | 'audio' | undefined;
+    const assetId = nd.assetId ?? nd.asset_id ?? nd.assetID;
+    const fileName = (nd.fileName || nd.name) as string | undefined;
+    const src = nd.src as string | undefined;
+    console.log('[SaveAssets] handleSaveMediaToAssets', { nodeId, assetId, mediaType, src });
+    if (!assetId) {
+      console.warn('[SaveAssets] 无 assetId，无法保存', { nodeId, data: nd });
+      showToast('error', '请先上传素材后再保存');
+      return;
+    }
+    if (!mediaType) {
+      console.warn('[SaveAssets] 无 mediaType，无法保存', { nodeId, data: nd });
+      showToast('error', '节点类型异常，无法保存');
+      return;
+    }
+    const name = fileName || `媒体-${mediaType}`;
+    await doSaveSharedAsset(
+      {
+        assetType: 'media',
+        kind: mediaType,
+        sourceAssetId: String(assetId),
+        name,
       },
+      `已保存「${name}」到共享资产`,
+    );
+  };
+
+  /** 文本节点保存到共享资产 */
+  const handleSaveTextToAssets = async (nodeId: string) => {
+    const node = textNodesRef.current.find((n) => n.id === nodeId);
+    if (!node) return;
+    const html = (node.data?.html as string) || '';
+    if (!html) {
+      showToast('error', '文本内容为空，无法保存');
+      return;
+    }
+    await doSaveSharedAsset(
+      { assetType: 'text', snapshot: { html } },
+      '已保存文本到共享资产',
+    );
+  };
+
+  /** 资产卡节点保存到共享资产 */
+  const handleSaveCardToAssets = async (nodeId: string) => {
+    const node = assetNodesRef.current.find((n) => n.id === nodeId);
+    if (!node) return;
+    const data = node.data as {
+      kind: AssetCardKind;
+      initialRefs?: Array<{ id: string; src: string }>;
+      initialDesc?: string;
+      voice?: { name: string; src: string };
     };
-    setProductNodes((prev) => [...prev, node]);
-    setShowAssetsModal(false);
+    // 仅保存可识别的卡片类型
+    if (data.kind === 'generation' || !data.kind) {
+      showToast('error', '生成卡暂不支持保存到共享资产');
+      return;
+    }
+    const refs = data.initialRefs ?? [];
+    const desc = data.initialDesc ?? '';
+    if (refs.length === 0 && !desc) {
+      showToast('error', '请先为卡片补充参考图或描述');
+      return;
+    }
+    await doSaveSharedAsset(
+      {
+        assetType: 'card',
+        kind: data.kind as 'style' | 'character' | 'object' | 'environment' | 'custom',
+        snapshot: {
+          referenceImages: refs,
+          description: desc,
+          ...(data.kind === 'character' && data.voice ? { voice: data.voice } : {}),
+        },
+      },
+      `已保存「${({ style: '风格卡', character: '角色卡', object: '物体卡', environment: '环境卡', custom: '自定义卡' } as const)[data.kind]}」到共享资产`,
+    );
+  };
+
+  /** 商品节点保存到共享资产 */
+  const handleSaveGoodsToAssets = async (nodeId: string) => {
+    const node = productNodesRef.current.find((n) => n.id === nodeId);
+    if (!node) return;
+    const data = node.data as { name?: string; detail?: string; images?: Array<{ id: string; src: string; enabled: boolean }> };
+    const name = data.name || '商品';
+    await doSaveSharedAsset(
+      {
+        assetType: 'goods',
+        snapshot: {
+          name,
+          detail: data.detail || '',
+          images: (data.images || []).map((img) => ({ id: img.id, src: img.src, enabled: img.enabled })),
+        },
+      },
+      `已保存「${name}」到共享资产`,
+    );
+  };
+
+  /** 共享资产添加回画布：按 assetType 构造对应节点 */
+  const handleAddSharedAsset = async (item: SharedAssetView): Promise<boolean> => {
+    if (!currentId) return false;
+    try {
+      switch (item.assetType) {
+        case 'media': {
+          // 媒体：用共享资产的 URL + id 创建节点，assetId 用于后续保存
+          const snapshot = item.snapshot as { url: string };
+          const kind = item.kind as 'image' | 'video' | 'audio';
+          const mediaType = kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'image';
+          const node: Node = {
+            id: `media-${Date.now()}`,
+            type: 'mediaNode',
+            position: spawnPosition(),
+            data: {
+              src: snapshot.url,
+              fileName: item.name || `资产-${Date.now()}`,
+              mediaType,
+              assetId: item.id, // 共享资产 ID，用于再次保存时识别
+              toolMode,
+              onDelete: (id: string) => {
+                setMediaNodes((prev) => prev.filter((n) => n.id !== id));
+              },
+              onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+              onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+              onReEdit: (id: string) => actionsRef.current.reEdit(id),
+              onGenImage: (id: string) => actionsRef.current.genImage(id),
+              onGenVideo: (id: string) => actionsRef.current.genVideo(id),
+              onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+              onDownload: (id: string) => actionsRef.current.download(id),
+              onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
+            },
+          };
+          setMediaNodes((prev) => [...prev, node]);
+          return true;
+        }
+        case 'card': {
+          // 卡片：构造资产卡节点
+          const snapshot = item.snapshot as {
+            referenceImages: Array<{ id: string; src: string }>;
+            description?: string;
+            voice?: { name: string; src: string };
+          };
+          const kind = item.kind as AssetCardKind;
+          const node: Node = {
+            id: `asset-${Date.now()}`,
+            type: 'assetNode',
+            position: spawnPosition(),
+            data: {
+              kind,
+              initialRefs: snapshot.referenceImages,
+              initialDesc: snapshot.description,
+              toolMode,
+              onDelete: (id: string) => {
+                setAssetNodes((prev) => prev.filter((n) => n.id !== id));
+              },
+              onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+              onGenerateImage: () => actionsRef.current.openImageDialog(),
+              onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
+            },
+          };
+          if (snapshot.voice) {
+            (node.data as Record<string, unknown>).voice = snapshot.voice;
+          }
+          setAssetNodes((prev) => [...prev, node]);
+          return true;
+        }
+        case 'goods': {
+          // 商品：构造商品节点
+          const snapshot = item.snapshot as {
+            name: string;
+            detail?: string;
+            images: Array<{ id: string; src: string; enabled?: boolean }>;
+          };
+          const node: Node = {
+            id: `product-${Date.now()}`,
+            type: 'productNode',
+            position: spawnPosition(),
+            data: {
+              name: snapshot.name,
+              detail: snapshot.detail || '',
+              images: snapshot.images.map((img) => ({ ...img, enabled: img.enabled ?? true })),
+              toolMode,
+              onDelete: (id: string) => {
+                setProductNodes((prev) => prev.filter((n) => n.id !== id));
+              },
+              onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+              onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
+            },
+          };
+          setProductNodes((prev) => [...prev, node]);
+          return true;
+        }
+        case 'text': {
+          // 文本：构造文本节点
+          const snapshot = item.snapshot as { html: string };
+          const node: Node = {
+            id: `text-${Date.now()}`,
+            type: 'textNode',
+            position: spawnPosition(),
+            data: {
+              html: snapshot.html,
+              toolMode,
+              onDelete: (id: string) => {
+                setTextNodes((prev) => prev.filter((n) => n.id !== id));
+              },
+              onChange: (id: string, html: string) => {
+                setTextNodes((prev) =>
+                  prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n))
+                );
+              },
+              onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+              onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+              onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
+            },
+          };
+          setTextNodes((prev) => [...prev, node]);
+          return true;
+        }
+        case 'scene': {
+          // 场景卡：调用 add-to-project 接口获取 sceneCardId
+          showToast('warn', '场景卡需通过场景卡面板添加');
+          return false;
+        }
+        default:
+          return false;
+      }
+    } catch (e) {
+      console.warn('添加共享资产到画布失败:', e);
+      return false;
+    }
   };
 
   /** 画布媒体节点 → 音频对话框「从画布选择」数据源 */
@@ -1684,10 +1930,44 @@ export default function CanvasPage() {
       {showAssetsModal && (
         <SharedAssetsModal
           onClose={() => setShowAssetsModal(false)}
-          onAddProduct={handleAddProduct}
-          onAddAsset={handleAddSharedAsset}
+          projectId={currentId}
+          onAddItem={(item) => handleAddSharedAsset(item).then((ok) => {
+            if (ok) setShowAssetsModal(false);
+            return ok;
+          })}
+          onToast={showToast}
         />
       )}
+
+      {/* Toast 提示 */}
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          top: '24px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '10px 20px',
+          borderRadius: '8px',
+          background: toast.type === 'success' ? '#1a3a1a' : toast.type === 'error' ? '#3a1a1a' : '#3a3a1a',
+          color: '#fff',
+          fontSize: '14px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+          border: `1px solid ${toast.type === 'success' ? '#2d7a2d' : toast.type === 'error' ? '#7a2d2d' : '#7a5a2d'}`,
+          animation: 'toastIn 0.2s ease',
+        }}>
+          {toast.type === 'success' && <CheckCircle size={16} />}
+          {toast.type === 'error' && <XCircle size={16} />}
+          {toast.type === 'warn' && <AlertTriangle size={16} />}
+          <span>{toast.msg}</span>
+        </div>
+      )}
+      <style>{`
+        @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+      `}</style>
     </div>
   );
 }

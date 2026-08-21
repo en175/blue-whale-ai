@@ -98,6 +98,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   /** 保存到共享资产 */
   const handleSaveToAssets = useCallback(() => {
     setContextMenu(null);
+    console.log('[MediaNode] 保存到共享资产', { nodeId: id, hasCallback: !!data.onSaveToAssets, assetId: data.assetId, mediaType: data.mediaType });
     data.onSaveToAssets?.(id);
   }, [data, id]);
 

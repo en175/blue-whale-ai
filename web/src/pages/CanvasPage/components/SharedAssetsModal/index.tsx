@@ -1,13 +1,13 @@
 /* ============================================
- * SharedAssetsModal 共享资产弹框：tab 切换筛选 + 搜索 + 选择模式；
- * 选中商品弹出详情弹窗，可添加到画布（生成商品节点）
+ * SharedAssetsModal 共享资产弹框：真实 API 联调版
+ * 列表：GET /api/shared-assets（双维过滤 + 分页）
+ * 操作：添加回画布 / 删除 / 场景卡加入项目
  * ============================================ */
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
   Search,
-  MoreHorizontal,
   Image as ImageIcon,
   Video,
   AudioLines,
@@ -16,213 +16,293 @@ import {
   BarChart3,
   ChevronDown,
   Plus,
-  AtSign,
+  Trash2,
+  ExternalLink,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
-import { fetchAllAssets, type AssetRecord } from '@/api/assets';
+import {
+  fetchSharedAssetList,
+  removeSharedAsset,
+  addSceneToProject,
+  type SharedAssetView,
+  type SharedAssetType,
+  type SharedAssetKind,
+  type SharedAssetListQuery,
+} from '@/api/sharedAssets';
+import { isApiError } from '@/api/http';
 import styles from './index.module.css';
 
-/** 商品资产（添加到画布的数据） */
-export interface SharedProduct {
-  id: string;
-  title: string;
-  /** 一句话描述 */
-  desc: string;
-  /** 商品详情初始文本 */
-  detail: string;
-}
+/** Tab 定义（对齐现有画布卡片类型） */
+const TABS: { key: string; label: string; assetType?: SharedAssetType; kind?: SharedAssetKind; icon: typeof ImageIcon }[] = [
+  { key: 'image', label: '图片', assetType: 'media', kind: 'image', icon: ImageIcon },
+  { key: 'video', label: '视频', assetType: 'media', kind: 'video', icon: Video },
+  { key: 'audio', label: '音频', assetType: 'media', kind: 'audio', icon: AudioLines },
+  { key: 'text', label: '文本', assetType: 'text', icon: Type },
+  { key: 'goods', label: '商品', assetType: 'goods', icon: Box },
+];
 
-/** 资产子类型（资产 tab 下拉筛选） */
-type AssetSub = 'style' | 'character' | 'object' | 'environment';
-
-const SUB_LABEL: Record<AssetSub, string> = {
+/** 资产子类型下拉（card 种类筛选） */
+type CardKind = 'style' | 'character' | 'object' | 'environment' | 'custom';
+const CARD_KINDS: CardKind[] = ['style', 'character', 'object', 'environment', 'custom'];
+const CARD_KIND_LABEL: Record<CardKind, string> = {
   style: '风格',
   character: '角色',
   object: '物体',
   environment: '环境',
+  custom: '自定义',
 };
 
-/** 资产条目类型 */
-type AssetType = 'asset' | 'image' | 'video' | 'audio' | 'text' | 'goods';
-
-interface AssetItem {
-  id: string;
-  type: AssetType;
-  sub?: AssetSub;
-  title: string;
-  date: string;
-  /** 封面渐变（无封面时显示占位图标） */
-  cover?: { text: string; from: string; to: string };
-  /** 真实图片封面 URL（接口资产） */
-  coverUrl?: string;
-  /** 接口资产ID（复制到项目时使用） */
-  realId?: number;
-  product?: SharedProduct;
-}
-
-/** mock 数据（待资产接口联调替换） */
-const ASSET_ITEMS: AssetItem[] = [
-  { id: 'a1', type: 'asset', sub: 'style', title: '赛博朋克霓虹', date: '2026-07-30', cover: { text: '风格 · 赛博朋克', from: '#5b2a86', to: '#8e2f66' } },
-  { id: 'a2', type: 'asset', sub: 'style', title: '水彩手绘', date: '2026-07-28' },
-  { id: 'a3', type: 'asset', sub: 'character', title: 'Apollo', date: '2026-07-30', cover: { text: '角色 · Apollo', from: '#6b6b1f', to: '#3f5a1e' } },
-  { id: 'a4', type: 'asset', sub: 'character', title: '旁白老者', date: '2026-07-25' },
-  { id: 'a5', type: 'asset', sub: 'object', title: '复古相机', date: '2026-07-22', cover: { text: '物体 · 相机', from: '#6b6b1f', to: '#4a5a1e' } },
-  { id: 'a6', type: 'asset', sub: 'environment', title: '山顶日出', date: '2026-07-20', cover: { text: '环境 · 日出', from: '#7a4a1f', to: '#5a5a1e' } },
-  { id: 'a7', type: 'asset', sub: 'environment', title: '地下实验室', date: '2026-07-18' },
-  { id: 'i1', type: 'image', title: '商品主图 A', date: '2026-07-29' },
-  { id: 'i2', type: 'image', title: '赛博朋克街景', date: '2026-07-26', cover: { text: '图片 · 街景', from: '#31307a', to: '#6b2f8e' } },
-  { id: 'v1', type: 'video', title: '产品宣传片 15s', date: '2026-07-27' },
-  { id: 'au1', type: 'audio', title: '品牌音效 jingle', date: '2026-07-24' },
-  { id: 't1', type: 'text', title: '直播带货话术', date: '2026-07-23' },
-  {
-    id: 'g1',
-    type: 'goods',
-    title: '露营氛围灯',
-    date: '2026-07-19',
-    product: {
-      id: 'g1',
-      title: '露营氛围灯',
-      desc: '暖光多档调光露营灯',
-      detail: '品类:露营灯\n核心参数:1200lm·Type-C 充电',
-    },
-  },
-  {
-    id: 'g2',
-    type: 'goods',
-    title: '便携榨汁杯',
-    date: '2026-07-17',
-    product: {
-      id: 'g2',
-      title: '便携榨汁杯',
-      desc: '350ml 随身榨汁杯',
-      detail: '品类:榨汁杯\n核心参数:350ml·15000 转/分',
-    },
-  },
-];
-
-const TABS: { key: string; label: string }[] = [
-  { key: 'all', label: '全部' },
-  { key: 'asset', label: '资产' },
-  { key: 'image', label: '图片' },
-  { key: 'video', label: '视频' },
-  { key: 'audio', label: '音频' },
-  { key: 'text', label: '文本' },
-  { key: 'goods', label: '商品' },
-];
-
-/** 类型 → 占位图标（无封面时） */
-const TYPE_ICON: Record<AssetType, typeof ImageIcon> = {
-  asset: ImageIcon,
+/** 类型 → 图标 */
+const TYPE_ICON: Record<string, typeof ImageIcon> = {
+  card: ImageIcon,
+  media: ImageIcon,
+  goods: Box,
+  scene: BarChart3,
+  text: Type,
   image: ImageIcon,
   video: Video,
   audio: AudioLines,
-  text: Type,
-  goods: Box,
 };
 
-/** 类型 → 徽章文案 */
-const typeBadge = (it: AssetItem) => (it.type === 'asset' && it.sub ? SUB_LABEL[it.sub] : TABS.find((t) => t.key === it.type)?.label ?? it.type);
+/** 类型 → 渐变封面（无缩略图时的占位） */
+const TYPE_GRADIENT: Record<string, { from: string; to: string }> = {
+  card: { from: '#5b2a86', to: '#8e2f66' },
+  media: { from: '#31307a', to: '#6b2f8e' },
+  goods: { from: '#7a4a1f', to: '#5a5a1e' },
+  scene: { from: '#1f4a5a', to: '#1e5a3a' },
+  text: { from: '#4a3a5a', to: '#3a4a6a' },
+  image: { from: '#31307a', to: '#6b2f8e' },
+  video: { from: '#3a1f5a', to: '#5a2f8e' },
+  audio: { from: '#1f3a5a', to: '#2f5a6b' },
+};
 
-/** 接口资产 URL → 卡片标题（取末段文件名，失败回退类型名） */
-function titleFromUrl(url: string, fallback: string): string {
-  try {
-    const seg = decodeURIComponent(url.split('/').filter(Boolean).pop() ?? '');
-    if (seg) return seg;
-  } catch {
-    /* URL 异常时回退 */
-  }
-  return fallback;
+/** 完整列表项（含后端数据 + UI 状态） */
+interface AssetListItem extends SharedAssetView {
+  /** 是否正在删除 */
+  deleting?: boolean;
 }
 
-/** 接口资产记录 → 卡片条目 */
-function toAssetItem(r: AssetRecord): AssetItem {
-  const label = r.type === 'image' ? '图片' : r.type === 'video' ? '视频' : '音频';
-  return {
-    id: `real-${r.id}`,
-    type: r.type,
-    title: titleFromUrl(r.url, `${label} ${String(r.id).slice(-4)}`),
-    date: (r.created_at || '').slice(0, 10),
-    coverUrl: r.type === 'image' ? r.url : undefined,
-    realId: typeof r.id === 'number' ? r.id : Number(r.id) || undefined,
-  };
-}
+/** Toast 回调类型 */
+type ToastFn = (type: 'success' | 'error' | 'warn', msg: string) => void;
 
 interface SharedAssetsModalProps {
   onClose: () => void;
-  /** 添加到画布（生成商品节点） */
-  onAddProduct: (product: SharedProduct) => void;
-  /** 真实资产添加到项目（复制到当前项目并上画布），返回 Promise 供卡片反馈 */
-  onAddAsset?: (assetId: number) => Promise<boolean> | void;
+  /** 当前项目 ID（场景卡 add-to-project 需要） */
+  projectId: string;
+  /** 添加资产到画布（由父组件实现具体节点构造） */
+  onAddItem: (item: SharedAssetView) => Promise<boolean>;
+  /** Toast 提示回调 */
+  onToast: ToastFn;
 }
 
-export default function SharedAssetsModal({ onClose, onAddProduct, onAddAsset }: SharedAssetsModalProps) {
-  const [tab, setTab] = useState('asset');
-  const [subFilter, setSubFilter] = useState<AssetSub | 'all'>('all');
-  const [subOpen, setSubOpen] = useState(false);
-  const [keyword, setKeyword] = useState('');
-  const [selectMode, setSelectMode] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [picked, setPicked] = useState<AssetItem | null>(null);
-  const [realItems, setRealItems] = useState<AssetItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  /** 复制中的资产卡片 id（防重复点击） */
-  const [copyingId, setCopyingId] = useState<string | null>(null);
-
-  // 拉取真实资产（图片/视频/音频），失败静默回退 mock
-  useEffect(() => {
-    let alive = true;
-    fetchAllAssets('')
-      .then((list) => {
-        if (alive) setRealItems(list.map(toAssetItem));
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  /** tab + 子类型 + 搜索 过滤（真实资产 + mock 合并） */
-  const items = useMemo(() => {
-    const kw = keyword.trim();
-    const all = [...realItems, ...ASSET_ITEMS];
-    return all.filter((it) => {
-      if (tab === 'asset') {
-        if (it.type !== 'asset') return false;
-        if (subFilter !== 'all' && it.sub !== subFilter) return false;
-      } else if (tab !== 'all' && it.type !== tab) {
-        return false;
+/** 构建标题（从快照提取） */
+function titleFromAsset(item: SharedAssetView): string {
+  if (item.name) return item.name;
+  switch (item.assetType) {
+    case 'card': {
+      const snap = item.snapshot as { description?: string };
+      return snap.description || '卡片';
+    }
+    case 'media': {
+      const snap = item.snapshot as { url: string };
+      try {
+        const seg = decodeURIComponent(snap.url.split('/').filter(Boolean).pop() ?? '');
+        return seg || '媒体';
+      } catch {
+        return '媒体';
       }
-      if (kw && !it.title.includes(kw)) return false;
-      return true;
-    });
-  }, [tab, subFilter, keyword, realItems]);
+    }
+    case 'goods': {
+      const snap = item.snapshot as { name: string };
+      return snap.name || '商品';
+    }
+    case 'text':
+      return '文本';
+    case 'scene': {
+      const snap = item.snapshot as { title: string };
+      return snap.title || '场景卡';
+    }
+    default:
+      return '共享资产';
+  }
+}
 
-  /** 卡片点击：选择模式→勾选；商品→详情弹窗；真实资产→复制到项目 */
-  const handleCardClick = (it: AssetItem) => {
-    if (selectMode) {
-      setSelected((prev) => {
-        const next = new Set(prev);
-        if (next.has(it.id)) next.delete(it.id);
-        else next.add(it.id);
-        return next;
-      });
+/** 构建封面 URL */
+function coverUrl(item: SharedAssetView): string | undefined {
+  if (item.thumbnailUrl) return item.thumbnailUrl;
+  if (item.assetType === 'media') {
+    const snap = item.snapshot as { url: string };
+    return snap.url;
+  }
+  if (item.assetType === 'card') {
+    const snap = item.snapshot as { referenceImages?: Array<{ src: string }> };
+    return snap.referenceImages?.[0]?.src;
+  }
+  if (item.assetType === 'goods') {
+    const snap = item.snapshot as { images?: Array<{ src: string; enabled?: boolean }> };
+    return snap.images?.find((img) => img.enabled !== false)?.src || snap.images?.[0]?.src;
+  }
+  return undefined;
+}
+
+/** 构建徽章文案 */
+function badgeText(item: SharedAssetView): string {
+  if (item.kind) {
+    if (item.assetType === 'card') return CARD_KIND_LABEL[item.kind as CardKind] || item.kind;
+    if (item.assetType === 'media') {
+      if (item.kind === 'image') return '图片';
+      if (item.kind === 'video') return '视频';
+      if (item.kind === 'audio') return '音频';
+    }
+  }
+  // 查找对应 tab label
+  const tabKey = item.assetType === 'media'
+    ? (item.kind === 'video' ? 'video' : item.kind === 'audio' ? 'audio' : 'image')
+    : item.assetType === 'text' ? 'text'
+    : item.assetType === 'goods' ? 'goods'
+    : '';
+  return TABS.find((t) => t.key === tabKey)?.label ?? item.assetType;
+}
+
+export default function SharedAssetsModal({
+  onClose,
+  projectId,
+  onAddItem,
+  onToast,
+}: SharedAssetsModalProps) {
+  const [tab, setTab] = useState('image');
+  /** 资产子类型筛选（'all' 表示不筛选 card 种类，使用主 Tab 过滤） */
+  const [cardFilter, setCardFilter] = useState<CardKind | 'all'>('all');
+  const [cardOpen, setCardOpen] = useState(false);
+  const [keyword, setKeyword] = useState('');
+  const [items, setItems] = useState<AssetListItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [addItemId, setAddItemId] = useState<string | null>(null);
+
+  /** 构建查询参数 */
+  const buildQuery = useCallback((): SharedAssetListQuery => {
+    const q: SharedAssetListQuery = { page: 1, size: 50 };
+    if (cardFilter !== 'all') {
+      // 资产子类型筛选：只查 card 类型 + 指定 kind
+      q.assetType = 'card';
+      q.kind = cardFilter;
+    } else {
+      // 主 Tab 筛选
+      const tabDef = TABS.find((t) => t.key === tab);
+      if (tabDef?.assetType) q.assetType = tabDef.assetType;
+      if (tabDef?.kind) q.kind = tabDef.kind;
+    }
+    return q;
+  }, [tab, cardFilter]);
+
+  /** 加载列表 */
+  const loadList = useCallback(async (reset = false) => {
+    if (reset) setLoading(true);
+    try {
+      const q = buildQuery();
+      q.page = reset ? 1 : page;
+      const data = await fetchSharedAssetList(q);
+      if (reset) {
+        setItems(data.records as AssetListItem[]);
+        setTotal(data.total);
+      } else {
+        setItems((prev) => [...prev, ...(data.records as AssetListItem[])]);
+        setTotal(data.total);
+      }
+      setHasMore(data.current * data.size < data.total);
+    } catch {
+      onToast('error', '加载共享资产失败');
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [buildQuery, page, onToast]);
+
+  /** tab 或筛选变化时重新加载 */
+  useEffect(() => {
+    setPage(1);
+    loadList(true);
+  }, [tab, cardFilter, loadList]);
+
+  /** 搜索过滤（前端本地过滤） */
+  const filteredItems = useMemo(() => {
+    const kw = keyword.trim().toLowerCase();
+    if (!kw) return items;
+    return items.filter((it) => {
+      const title = titleFromAsset(it).toLowerCase();
+      return title.includes(kw) || (it.name && it.name.toLowerCase().includes(kw));
+    });
+  }, [items, keyword]);
+
+  /** 加载更多 */
+  const handleLoadMore = () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    setPage((p) => {
+      const next = p + 1;
+      // 用 setTimeout 避免 state 闭包问题
+      setTimeout(() => loadList(false), 0);
+      return next;
+    });
+  };
+
+  /** 删除共享资产 */
+  const handleDelete = async (id: string) => {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, deleting: true } : it)));
+    try {
+      await removeSharedAsset(id);
+      setItems((prev) => prev.filter((it) => it.id !== id));
+      onToast('success', '已删除共享资产');
+    } catch (e) {
+      setItems((prev) => prev.map((it) => (it.id === id ? { ...it, deleting: false } : it)));
+      if (isApiError(e)) onToast('error', e.message || '删除失败');
+      else onToast('error', '删除失败');
+    }
+  };
+
+  /** 添加到画布 */
+  const handleAddToCanvas = async (item: AssetListItem) => {
+    if (addItemId) return;
+    // 场景卡需要走 add-to-project 接口
+    if (item.assetType === 'scene') {
+      if (!projectId) {
+        onToast('error', '请先选择项目');
+        return;
+      }
+      setAddItemId(item.id);
+      try {
+        const result = await addSceneToProject(item.id, projectId);
+        // 成功后通知父组件创建 scene_card 节点
+        onToast('success', `场景卡已添加（ID: ${result.sceneCardId}）`);
+        onClose();
+      } catch (e) {
+        if (isApiError(e)) onToast('error', e.message || '添加失败');
+        else onToast('error', '添加失败');
+      } finally {
+        setAddItemId(null);
+      }
       return;
     }
-    if (it.type === 'goods' && it.product) {
-      setPicked(it);
-      return;
+    // 其他类型走统一 onAddItem
+    setAddItemId(item.id);
+    try {
+      await onAddItem(item);
+    } catch {
+      onToast('error', '添加到画布失败');
+    } finally {
+      setAddItemId(null);
     }
-    // 真实资产：复制到当前项目（失败保留弹框，成功后关闭）
-    if (it.realId !== undefined && onAddAsset && copyingId === null) {
-      setCopyingId(it.id);
-      Promise.resolve(onAddAsset(it.realId))
-        .then((ok) => {
-          if (ok) onClose();
-        })
-        .finally(() => setCopyingId(null));
-    }
+  };
+
+  /** 卡片点击（添加到画布） */
+  const handleCardClick = (item: AssetListItem) => {
+    if (item.deleting || addItemId) return;
+    handleAddToCanvas(item);
   };
 
   return createPortal(
@@ -242,55 +322,61 @@ export default function SharedAssetsModal({ onClose, onAddProduct, onAddAsset }:
         {/* tabs + 搜索 */}
         <div className={styles.tabRow}>
           <div className={styles.tabs}>
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                className={`${styles.tab} ${tab === t.key ? styles.tabActive : ''}`}
-                onClick={() => {
-                  setTab(t.key);
-                  setSubOpen(false);
-                }}
-              >
-                <span>{t.label}</span>
-                {t.key === 'asset' && tab === 'asset' && (
-                  <ChevronDown
-                    size={12}
-                    strokeWidth={2}
-                    className={`${styles.tabArrow} ${subOpen ? styles.tabArrowUp : ''}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSubOpen((v) => !v);
-                    }}
-                  />
-                )}
-              </button>
-            ))}
-            {/* 资产子类型下拉 */}
-            {tab === 'asset' && subOpen && (
+            {/* 资产子类型下拉（独立筛选 card 种类，放在最前面） */}
+            <button
+              className={`${styles.tab} ${styles.tabActive}`}
+              onClick={() => setCardOpen((v) => !v)}
+            >
+              <ImageIcon size={14} strokeWidth={2} />
+              <span>资产</span>
+              <ChevronDown
+                size={12}
+                strokeWidth={2}
+                className={`${styles.tabArrow} ${cardOpen ? styles.tabArrowUp : ''}`}
+              />
+            </button>
+            {cardOpen && (
               <div className={styles.subDropdown}>
                 <button
-                  className={`${styles.subOption} ${subFilter === 'all' ? styles.subOptionActive : ''}`}
+                  className={`${styles.subOption} ${cardFilter === 'all' ? styles.subOptionActive : ''}`}
                   onClick={() => {
-                    setSubFilter('all');
-                    setSubOpen(false);
+                    setCardFilter('all');
+                    setCardOpen(false);
                   }}
                 >
                   全部资产
                 </button>
-                {(Object.keys(SUB_LABEL) as AssetSub[]).map((s) => (
+                {CARD_KINDS.map((s) => (
                   <button
                     key={s}
-                    className={`${styles.subOption} ${subFilter === s ? styles.subOptionActive : ''}`}
+                    className={`${styles.subOption} ${cardFilter === s ? styles.subOptionActive : ''}`}
                     onClick={() => {
-                      setSubFilter(s);
-                      setSubOpen(false);
+                      setCardFilter(s);
+                      setCardOpen(false);
                     }}
                   >
-                    {SUB_LABEL[s]}
+                    {CARD_KIND_LABEL[s]}
                   </button>
                 ))}
               </div>
             )}
+            {TABS.map((t) => {
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.key}
+                  className={`${styles.tab} ${tab === t.key && cardFilter === 'all' ? styles.tabActive : ''}`}
+                  onClick={() => {
+                    setTab(t.key);
+                    setCardFilter('all');
+                    setCardOpen(false);
+                  }}
+                >
+                  <Icon size={14} strokeWidth={2} />
+                  <span>{t.label}</span>
+                </button>
+              );
+            })}
           </div>
 
           <div className={styles.tabRight}>
@@ -303,125 +389,116 @@ export default function SharedAssetsModal({ onClose, onAddProduct, onAddAsset }:
                 onChange={(e) => setKeyword(e.target.value)}
               />
             </div>
-            <button
-              className={`${styles.selectBtn} ${selectMode ? styles.selectBtnActive : ''}`}
-              onClick={() => {
-                setSelectMode((v) => !v);
-                setSelected(new Set());
-              }}
-            >
-              选择
-            </button>
           </div>
         </div>
 
         {/* 资产网格 */}
         <div className={styles.gridWrap}>
-          {loading && realItems.length === 0 ? (
-            <div className={styles.empty}>加载中...</div>
-          ) : items.length === 0 ? (
-            <div className={styles.empty}>无匹配资产</div>
-          ) : (
-            <div className={styles.grid}>
-              {items.map((it) => {
-                const Icon = TYPE_ICON[it.type];
-                return (
-                  <div
-                    key={it.id}
-                    className={`${styles.card} ${selected.has(it.id) ? styles.cardSelected : ''}`}
-                    onClick={() => handleCardClick(it)}
-                  >
-                    <div className={styles.thumbBox}>
-                      {it.coverUrl ? (
-                        <img className={styles.coverImg} src={it.coverUrl} alt={it.title} loading="lazy" />
-                      ) : it.cover ? (
-                        <div
-                          className={styles.cover}
-                          style={{ background: `linear-gradient(135deg, ${it.cover.from}, ${it.cover.to})` }}
-                        >
-                          <span>{it.cover.text}</span>
-                        </div>
-                      ) : (
-                        <Icon size={22} strokeWidth={1.5} className={styles.thumbIcon} />
-                      )}
-                    </div>
-                    <div className={styles.cardTitle}>{it.title}</div>
-                    <div className={styles.cardMeta}>
-                      <span className={styles.badge}>{typeBadge(it)}</span>
-                      <span className={styles.date}>{it.date}</span>
-                      <button
-                        className={styles.moreBtn}
-                        onClick={(e) => e.stopPropagation()}
-                        title="更多"
-                      >
-                        <MoreHorizontal size={14} strokeWidth={2} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+          {loading ? (
+            <div className={styles.empty}>
+              <Loader2 size={24} className={styles.loadingIcon} />
+              <span>加载中...</span>
             </div>
+          ) : filteredItems.length === 0 ? (
+            <div className={styles.empty}>
+              <AlertCircle size={24} />
+              <span>暂无共享资产</span>
+            </div>
+          ) : (
+            <>
+              <div className={styles.grid}>
+                {filteredItems.map((item) => {
+                  const lookupKey = item.assetType === 'media' ? (item.kind ?? 'media') : item.assetType;
+                  const Icon = TYPE_ICON[lookupKey] || TYPE_ICON[item.assetType] || ImageIcon;
+                  const cUrl = coverUrl(item);
+                  const gradient = TYPE_GRADIENT[lookupKey] || TYPE_GRADIENT[item.assetType] || TYPE_GRADIENT.card;
+                  const isAdding = addItemId === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      className={`${styles.card} ${isAdding ? styles.cardSelected : ''}`}
+                      onClick={() => handleCardClick(item)}
+                    >
+                      <div className={styles.thumbBox}>
+                        {cUrl ? (
+                          <img
+                            className={styles.coverImg}
+                            src={cUrl}
+                            alt={titleFromAsset(item)}
+                            loading="lazy"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        ) : (
+                          <div
+                            className={styles.cover}
+                            style={{ background: `linear-gradient(135deg, ${gradient.from}, ${gradient.to})` }}
+                          >
+                            <span>{titleFromAsset(item)}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className={styles.cardTitle}>{titleFromAsset(item)}</div>
+                      <div className={styles.cardMeta}>
+                        <span className={styles.badge}>{badgeText(item)}</span>
+                        <span className={styles.date}>{(item.createdAt || '').slice(0, 10)}</span>
+                        {/* 删除按钮 */}
+                        <button
+                          className={styles.moreBtn}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (item.deleting) return;
+                            handleDelete(item.id);
+                          }}
+                          title="删除"
+                        >
+                          {item.deleting ? (
+                            <Loader2 size={12} strokeWidth={2} className={styles.loadingIcon} />
+                          ) : (
+                            <Trash2 size={12} strokeWidth={2} />
+                          )}
+                        </button>
+                        {/* 添加按钮 */}
+                        <button
+                          className={styles.moreBtn}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isAdding) return;
+                            handleAddToCanvas(item);
+                          }}
+                          title={isAdding ? '添加中...' : '添加到画布'}
+                        >
+                          {isAdding ? (
+                            <Loader2 size={12} strokeWidth={2} className={styles.loadingIcon} />
+                          ) : (
+                            <Plus size={12} strokeWidth={2} />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* 加载更多 */}
+              {hasMore && (
+                <div className={styles.loadMore}>
+                  <button
+                    className={styles.loadMoreBtn}
+                    onClick={handleLoadMore}
+                    disabled={loadingMore}
+                  >
+                    {loadingMore ? <Loader2 size={14} /> : <ExternalLink size={14} />}
+                    <span>加载更多</span>
+                  </button>
+                </div>
+              )}
+              {total > 0 && !loading && (
+                <div className={styles.totalHint}>共 {total} 项</div>
+              )}
+            </>
           )}
         </div>
       </div>
-
-      {/* 商品详情弹窗 */}
-      {picked?.product && (
-        <ProductPickModal
-          product={picked.product}
-          onClose={() => setPicked(null)}
-          onAdd={() => {
-            const p = picked.product;
-            setPicked(null);
-            if (p) onAddProduct(p);
-          }}
-        />
-      )}
     </div>,
     document.body,
-  );
-}
-
-/* ============ 商品选择弹窗（添加到画布） ============ */
-function ProductPickModal({
-  product,
-  onClose,
-  onAdd,
-}: {
-  product: SharedProduct;
-  onClose: () => void;
-  onAdd: () => void;
-}) {
-  return (
-    <div className={styles.pickOverlay} onClick={onClose}>
-      <div className={styles.pickPanel} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.pickHead}>
-          <div className={styles.pickTitle}>
-            <Box size={16} strokeWidth={2} />
-            <span>商品</span>
-          </div>
-          <button className={styles.closeBtn} onClick={onClose} title="关闭">
-            <X size={16} strokeWidth={2} />
-          </button>
-        </div>
-
-        <div className={styles.pickCard}>
-          <div className={styles.pickNameRow}>
-            <span className={styles.pickAt}>
-              <AtSign size={14} strokeWidth={2} />
-            </span>
-            <span className={styles.pickName}>{product.title}</span>
-          </div>
-          <div className={styles.pickDesc}>{product.desc}</div>
-        </div>
-
-        <div className={styles.pickFoot}>
-          <button className={styles.addBtn} onClick={onAdd}>
-            <Plus size={14} strokeWidth={2} />
-            <span>添加到画布</span>
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }

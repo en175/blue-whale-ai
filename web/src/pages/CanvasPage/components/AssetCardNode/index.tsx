@@ -47,6 +47,8 @@ interface AssetCardNodeData {
   initialDesc?: string;
   onDelete?: (id: string) => void;
   onAddToChat?: (id: string) => void;
+  /** 保存到共享资产 */
+  onSaveToAssets?: (id: string) => void;
   /** 生成图片：唤起底部图片对话框 */
   onGenerateImage?: () => void;
   /** Agent 生成卡数据（kind=generation） */
@@ -104,6 +106,12 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
   const handleAddToChat = useCallback(() => {
     setContextMenu(null);
     data.onAddToChat?.(id);
+  }, [data, id]);
+
+  /** 保存到共享资产 */
+  const handleSaveToAssets = useCallback(() => {
+    setContextMenu(null);
+    data.onSaveToAssets?.(id);
   }, [data, id]);
 
   /** 添加参考图（点击选择或拖入，仅 image/*，最多 MAX_IMAGE_REFS 张） */
@@ -513,6 +521,9 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
           >
             <button className={styles.contextItem} onClick={handleAddToChat}>
               <span>添加到聊天</span>
+            </button>
+            <button className={styles.contextItem} onClick={handleSaveToAssets}>
+              <span>保存到共享资产</span>
             </button>
             <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
               <span>删除</span>
