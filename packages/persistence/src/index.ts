@@ -140,6 +140,7 @@ export {
   createTemplateRepo,
   type TemplateRepo,
   type TemplateTagView,
+  type TemplateTagAdminView,
   type TemplateCardView,
   type TemplateCardPage,
 } from "./template-repo.js";

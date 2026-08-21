@@ -4,7 +4,7 @@
  * ============================================ */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, X, Pencil, Trash2, ChevronUp, ChevronDown, Film, Image as ImageIcon, Upload } from 'lucide-react';
+import { Plus, X, Pencil, Trash2, ChevronUp, ChevronDown, Film, Image as ImageIcon, Upload, Eye, EyeOff } from 'lucide-react';
 import {
   fetchTemplateCards,
   createTemplateCard,
@@ -13,6 +13,7 @@ import {
   moveTemplateCard,
   fetchAdminTemplateTags,
   renameAdminTemplateTag,
+  setTemplateTagVisibility,
   presignTemplateMedia,
   completeTemplateMedia,
   type TemplateCard,
@@ -83,6 +84,17 @@ export default function TemplateManage() {
     setRenameCode(null);
   };
 
+  /** 标签隐藏开关（IKA64P）：PUT /api/admin/template-tags/visibility，成功后本地同步 */
+  const toggleVisibility = async (code: string, next: number) => {
+    setActionError('');
+    try {
+      await setTemplateTagVisibility(code, next);
+      setTags((prev) => prev.map((t) => (t.tag_code === code ? { ...t, visible: next } : t)));
+    } catch (e) {
+      setActionError(isApiError(e) ? e.message : '切换失败，请稍后重试');
+    }
+  };
+
   /** 新建/编辑提交：POST/PUT /api/admin/templates，成功后刷新列表 */
   const handleSubmit = async (data: TemplateCardPayload, id?: string) => {
     setActionError('');
@@ -139,10 +151,11 @@ export default function TemplateManage() {
         {tags.map((t) => (
           <span className={styles.tabGroup} key={t.tag_code}>
             <button
-              className={`${styles.tab} ${activeTab === t.tag_code ? styles.tabActive : ''}`}
+              className={`${styles.tab} ${activeTab === t.tag_code ? styles.tabActive : ''} ${t.visible === 0 ? styles.tabHidden : ''}`}
               onClick={() => setActiveTab(t.tag_code)}
             >
               {t.label}
+              {t.visible === 0 && <span className={styles.tabHiddenMark}>已隐藏</span>}
             </button>
             <button
               className={styles.tabEdit}
@@ -150,6 +163,13 @@ export default function TemplateManage() {
               onClick={() => setRenameCode(t.tag_code)}
             >
               <Pencil size={13} strokeWidth={2} />
+            </button>
+            <button
+              className={styles.tabEdit}
+              title={t.visible === 1 ? '隐藏该标签（首页不可见）' : '显示该标签（首页可见）'}
+              onClick={() => toggleVisibility(t.tag_code, t.visible === 1 ? 0 : 1)}
+            >
+              {t.visible === 1 ? <Eye size={13} strokeWidth={2} /> : <EyeOff size={13} strokeWidth={2} />}
             </button>
           </span>
         ))}

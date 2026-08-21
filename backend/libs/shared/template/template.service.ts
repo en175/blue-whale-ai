@@ -20,6 +20,11 @@ export class TemplateService {
     return this.repo.listTags();
   }
 
+  /** IKA64P：管理端全量标签（含隐藏） */
+  listAllTags() {
+    return this.repo.listAllTags();
+  }
+
   pageByTagCode(tagCode: string, current: number, size: number) {
     return this.repo.pageByTagCode(tagCode, current, size);
   }

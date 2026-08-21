@@ -488,3 +488,14 @@
   color: #666;
   cursor: not-allowed;
 }
+
+/* IKA64P：隐藏标签置灰 + 「已隐藏」标记 */
+.tabHidden {
+  opacity: 0.45;
+}
+
+.tabHiddenMark {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #767d88;
+}

@@ -575,12 +575,13 @@ CREATE TABLE `template_card_image` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable（IK764F：首页模板标签，原硬编码枚举落库；tag_code 与顺序固定，仅 label 可改名）
+-- CreateTable（IK764F：首页模板标签，原硬编码枚举落库；tag_code 与顺序固定，仅 label 可改名；IKA64P：visible 可见性开关）
 CREATE TABLE `template_tag` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `tag_code` VARCHAR(64) NOT NULL,
     `label` VARCHAR(128) NOT NULL,
     `sort_order` INTEGER NOT NULL DEFAULT 0,
+    `visible` TINYINT NOT NULL DEFAULT 1,
     `create_time` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `update_time` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `is_delete` TINYINT NOT NULL DEFAULT 0,
@@ -589,13 +590,15 @@ CREATE TABLE `template_tag` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- SeedData（IK764F：与 lib/templates/template-tags.ts 兜底枚举对齐）
-INSERT INTO `template_tag` (`tag_code`, `label`, `sort_order`) VALUES
-    ('marketing', '营销视频', 0),
-    ('short', '微短片', 1),
-    ('replicate', '视频复刻', 2),
-    ('social', '社媒视频', 3),
-    ('image', '图片设计', 4);
+-- SeedData（IK764F：与兜底枚举对齐；IKA64P：原五栏隐藏，新增视频/图片两栏）
+INSERT INTO `template_tag` (`tag_code`, `label`, `sort_order`, `visible`) VALUES
+    ('marketing', '营销视频', 0, 0),
+    ('short', '微短片', 1, 0),
+    ('replicate', '视频复刻', 2, 0),
+    ('social', '社媒视频', 3, 0),
+    ('image', '图片设计', 4, 0),
+    ('video', '视频', 5, 1),
+    ('picture', '图片', 6, 1);
 
 -- CreateTable
 CREATE TABLE `user_skill` (

@@ -28,6 +28,8 @@ const TAG_ICON_BY_CODE: Record<string, LucideIcon> = {
   social: Share2,
   image: Palette,
   design: Palette,
+  video: Clapperboard,
+  picture: Palette,
 };
 
 const TAG_ICON_BY_LABEL: Record<string, LucideIcon> = {
@@ -43,13 +45,10 @@ const DEFAULT_TAG_ICON = Sparkles;
 const iconForTag = (tag: TemplateTag): LucideIcon =>
   TAG_ICON_BY_CODE[tag.tag_code] ?? TAG_ICON_BY_LABEL[tag.label] ?? DEFAULT_TAG_ICON;
 
-/** 接口失败时的兜底标签 */
+/** 接口失败时的兜底标签（IKA64P：双栏） */
 const FALLBACK_TAGS: TemplateTag[] = [
-  { tag_code: 'marketing', label: '营销视频' },
-  { tag_code: 'short', label: '微短片' },
-  { tag_code: 'replicate', label: '视频复刻' },
-  { tag_code: 'social', label: '社媒视频' },
-  { tag_code: 'image', label: '图片设计' },
+  { tag_code: 'video', label: '视频' },
+  { tag_code: 'picture', label: '图片' },
 ];
 
 /** layout 样式映射：wide 为当前默认卡片样式，social 为竖版卡片，其他布局后续扩展 */
@@ -118,10 +117,11 @@ function GalleryCard({ record, onClick }: { record: TemplateRecord; onClick?: ()
 
 export default function CardGallery({ onCardClick }: { onCardClick?: (text: string) => void }) {
   const [tags, setTags] = useState<TemplateTag[]>(FALLBACK_TAGS);
-  const [activeTag, setActiveTag] = useState('short');
+  /** IKA64P：初始空值，加载后取接口返回首个可见标签 */
+  const [activeTag, setActiveTag] = useState('');
   const [records, setRecords] = useState<TemplateRecord[]>([]);
 
-  // 加载画廊标签；失败保留兜底列表
+  // 加载画廊标签；失败保留兜底列表并落到兜底首标签（IKA64P 修复：避免空 activeTag 导致卡片永久空白）
   useEffect(() => {
     fetchTemplateTags()
       .then((list) => {
@@ -131,11 +131,12 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
           list.some((t) => t.tag_code === prev) ? prev : list[0].tag_code
         );
       })
-      .catch(() => undefined);
+      .catch(() => setActiveTag((prev) => prev || FALLBACK_TAGS[0].tag_code));
   }, []);
 
-  // 加载当前标签下的卡片列表（默认 page=1, size=50）
+  // 加载当前标签下的卡片列表（默认 page=1, size=50；IKA64P：标签未定时不发请求）
   useEffect(() => {
+    if (!activeTag) return;
     let alive = true;
     fetchTemplatePage(activeTag)
       .then((page) => {
@@ -168,8 +169,8 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
         })}
       </div>
 
-      {/* 卡片网格 */}
-      <div className={styles.cardGrid}>
+      {/* 卡片网格（IKA64P：图片栏 3+3 排布） */}
+      <div className={`${styles.cardGrid} ${activeTag === 'picture' ? styles.cardGridThree : ''}`}>
         {records.map((record, idx) => (
           <GalleryCard
             key={`${record.title}-${idx}`}

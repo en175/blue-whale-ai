@@ -27,7 +27,7 @@ import {
   type PresignTemplateUploadInput,
 } from "@lib/shared/template/template-upload.js";
 import {
-  listTemplateTags,
+  listAllTemplateTags,
   parseBigId,
   parseMoveDirection,
   parseTemplateCardForm,
@@ -72,9 +72,9 @@ export class AdminTemplatesController {
 
   @Post()
   async create(@Body() body: Record<string, unknown>) {
-    const tags = await this.template.listTags();
+    const tags = await this.template.listAllTags();
     const validTagCodes = new Set(
-      (tags.length > 0 ? tags : listTemplateTags()).map((t) => t.tag_code),
+      (tags.length > 0 ? tags : listAllTemplateTags()).map((t) => t.tag_code),
     );
     const parsed = parseTemplateCardForm(body ?? {}, validTagCodes);
     if (!parsed.ok) throw new AdminException(400, parsed.error);
@@ -97,9 +97,9 @@ export class AdminTemplatesController {
     try {
       const before = await this.templateAdmin.getCard(id);
       if (!before) throw new AdminException(404, "卡片不存在");
-      const tags = await this.template.listTags();
+      const tags = await this.template.listAllTags();
       const validTagCodes = new Set(
-        (tags.length > 0 ? tags : listTemplateTags()).map((t) => t.tag_code),
+        (tags.length > 0 ? tags : listAllTemplateTags()).map((t) => t.tag_code),
       );
       const parsed = parseTemplateCardForm(body ?? {}, validTagCodes);
       if (!parsed.ok) throw new AdminException(400, parsed.error);

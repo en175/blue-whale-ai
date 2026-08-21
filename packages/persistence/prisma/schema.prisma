@@ -565,6 +565,7 @@ model template_tag {
   tag_code    String   @db.VarChar(64)
   label       String   @db.VarChar(128)
   sort_order  Int      @default(0)
+  visible     Int      @default(1) @db.TinyInt
   create_time DateTime @default(now()) @db.DateTime(0)
   update_time DateTime @default(now()) @db.DateTime(0)
   is_delete   Int      @default(0) @db.TinyInt

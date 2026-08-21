@@ -175,22 +175,39 @@ export interface TemplateTag {
   tag_code: string;
   label: string;
   sort_order: number;
+  /** 1 首页可见 / 0 隐藏（IKA64P：与 DB visible 列对齐的兜底快照） */
+  visible: 0 | 1;
 }
 
 const TEMPLATE_TAGS: readonly TemplateTag[] = [
-  { tag_code: "marketing", label: "营销视频", sort_order: 0 },
-  { tag_code: "short", label: "微短片", sort_order: 1 },
-  { tag_code: "replicate", label: "视频复刻", sort_order: 2 },
-  { tag_code: "social", label: "社媒视频", sort_order: 3 },
-  { tag_code: "image", label: "图片设计", sort_order: 4 },
+  { tag_code: "marketing", label: "营销视频", sort_order: 0, visible: 0 },
+  { tag_code: "short", label: "微短片", sort_order: 1, visible: 0 },
+  { tag_code: "replicate", label: "视频复刻", sort_order: 2, visible: 0 },
+  { tag_code: "social", label: "社媒视频", sort_order: 3, visible: 0 },
+  { tag_code: "image", label: "图片设计", sort_order: 4, visible: 0 },
+  { tag_code: "video", label: "视频", sort_order: 5, visible: 1 },
+  { tag_code: "picture", label: "图片", sort_order: 6, visible: 1 },
 ];
 
 export function isValidTagCode(tagCode: string): boolean {
   return TEMPLATE_TAGS.some((t) => t.tag_code === tagCode);
 }
 
+/** 公开接口兜底（IKA64P）：仅可见标签 */
 export function listTemplateTags(): { tag_code: string; label: string }[] {
   return [...TEMPLATE_TAGS]
+    .filter((t) => t.visible === 1)
     .sort((a, b) => a.sort_order - b.sort_order)
     .map(({ tag_code, label }) => ({ tag_code, label }));
+}
+
+/** 管理端兜底（IKA64P）：全量标签含 visible */
+export function listAllTemplateTags(): {
+  tag_code: string;
+  label: string;
+  visible: number;
+}[] {
+  return [...TEMPLATE_TAGS]
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map(({ tag_code, label, visible }) => ({ tag_code, label, visible }));
 }
