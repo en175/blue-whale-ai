@@ -774,12 +774,8 @@
   font-size: 0.9em;
 }
 
-/* 运行中：取消运行按钮（右对齐） */
-.cancelRow {
-  display: flex;
-  justify-content: flex-end;
-}
-
+/* 次要动作按钮（超时提示里的「重新连接」）。原先运行中的「取消运行」也用它，
+   现已收归发送侧（IKA4PH）。 */
 .cancelBtn {
   padding: 8px 16px;
   border-radius: var(--radius-md);

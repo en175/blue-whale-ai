@@ -27,6 +27,7 @@ import type { SessionContentBlock, GenerationCardBlock } from '@/api/agentSessio
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
+import { shouldCancelOnKey } from './cancelShortcut';
 import { getPanelLayout } from './layout';
 
 /**
@@ -560,6 +561,23 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     };
   }, [runningRunId]);
 
+  /**
+   * ESC 取消本次回答（IKA4PH）。取消入口统一在发送侧，ESC 是那颗按钮的键盘等价物。
+   *
+   * 只在有运行时挂载，不留一个常驻的全局监听；判定见 `shouldCancelOnKey`。
+   */
+  useEffect(() => {
+    if (runningRunId === null) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const targetTagName = (e.target as HTMLElement | null)?.tagName;
+      if (shouldCancelOnKey({ key: e.key, defaultPrevented: e.defaultPrevented, targetTagName })) {
+        stopRun();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [runningRunId, stopRun]);
+
   /** 新消息/流式文本自动滚动到底部 */
   useEffect(() => {
     const el = listRef.current;
@@ -1025,11 +1043,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               )}
             </div>
           )}
-          {runningRunId !== null && (
-            <div className={styles.cancelRow}>
-              <button className={styles.cancelBtn} onClick={stopRun}>取消运行</button>
-            </div>
-          )}
+          {/* 取消运行的入口统一在发送侧（发送按钮变停止按钮 + ESC），这里不再重复一个（IKA4PH）。 */}
         </div>
       )}
 
@@ -1187,7 +1201,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               <button
                 className={`${styles.sendBtn} ${styles.stopBtnActive}`}
                 onClick={stopRun}
-                title="停止运行"
+                title="停止运行（ESC）"
+                aria-label="停止运行，快捷键 ESC"
               >
                 <Square size={12} fill="#fff" strokeWidth={0} />
               </button>
