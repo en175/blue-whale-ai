@@ -169,8 +169,8 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
         })}
       </div>
 
-      {/* 卡片网格 */}
-      <div className={styles.cardGrid}>
+      {/* 卡片网格（IKA64P：图片栏 3+3 排布） */}
+      <div className={`${styles.cardGrid} ${activeTag === 'picture' ? styles.cardGridThree : ''}`}>
         {records.map((record, idx) => (
           <GalleryCard
             key={`${record.title}-${idx}`}
