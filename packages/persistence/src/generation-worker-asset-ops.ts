@@ -3,6 +3,7 @@
 import type {PrismaClient} from "@prisma/client";
 
 import {appendProjectEvent} from "./product-event-repo.js";
+import {DEFAULT_MAX_REFERENCE_IMAGES} from "./model-capability-repo.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
 export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "resolveInputAssets" | "findImageCapability" | "createAsset"> {
@@ -76,7 +77,21 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
           height = (match.height as number) ?? null;
         }
       }
-      return { model_id: cap.model_id, api_size: apiSize, width, height };
+      const features = (cap.features ?? {}) as {
+        maxReferenceImages?: number;
+        max_reference_images?: number;
+      };
+      // IKA72G：能力快照带参考图上限（与创建校验同源；缺省与网关/ARK 一致的 10）。
+      return {
+        model_id: cap.model_id,
+        api_size: apiSize,
+        width,
+        height,
+        max_reference_images:
+          features.maxReferenceImages ??
+          features.max_reference_images ??
+          DEFAULT_MAX_REFERENCE_IMAGES,
+      };
     },
 
     async createAsset(input) {

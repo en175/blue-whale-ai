@@ -80,6 +80,7 @@ export {
 } from "./agent-run-repo.js";
 export {
   createModelCapabilityRepo,
+  DEFAULT_MAX_REFERENCE_IMAGES,
   type ModelCapabilityRepo,
   type ModelCapabilityView,
   type ModelSizeOption,

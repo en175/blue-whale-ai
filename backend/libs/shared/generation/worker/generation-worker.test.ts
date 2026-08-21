@@ -418,3 +418,241 @@ describe("processNextJob 图片实扣取证（IK9VZ0）", () => {
     );
   });
 });
+
+// IKA72G：图片参考图上限读取能力配置（features.max_reference_images）、字段统一 input_asset_ids、
+// 失败文案输出真实上限。video 旧版单图分支维持 1 张并输出真实上限文案。
+describe("processNextJob 图片参考图上限与字段语义（IKA72G）", () => {
+  function imageJobWithRefs(
+    refIds: (string | number)[],
+    maxReferenceImages?: number,
+  ) {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j-img-refs",
+      project_id: "p1",
+      user_id: "u1",
+      type: "image",
+      input: {
+        prompt: "一只猫",
+        model_id: "m1",
+        provider_credential: "<sealed>",
+        input_asset_ids: refIds,
+      },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 11,
+    });
+    const findImageCapability = vi.fn().mockResolvedValue({
+      model_id: "m1",
+      api_size: null,
+      width: 512,
+      height: 512,
+      ...(maxReferenceImages !== undefined
+        ? { max_reference_images: maxReferenceImages }
+        : {}),
+    });
+    return { claimNextJob, findImageCapability };
+  }
+
+  it("5 张参考图 + 能力 10 → 从 input_asset_ids 解析素材并成功出图", async () => {
+    const { claimNextJob, findImageCapability } = imageJobWithRefs(
+      ["101", "102", "103", "104", "105"],
+      10,
+    );
+    const resolveInputAssets = vi.fn().mockResolvedValue(
+      ["101", "102", "103", "104", "105"].map((id) => ({
+        id,
+        type: "image",
+        url: `https://asset/${id}.png`,
+        mime: "image/png",
+        size: 1,
+        width: 512,
+        height: 512,
+        duration: null,
+      })),
+    );
+    const createAsset = vi.fn().mockResolvedValue("a1");
+    const completeJobAndSettle = vi.fn().mockResolvedValue(true);
+    const appendLog = vi.fn().mockResolvedValue(undefined);
+    const repo = {
+      claimNextJob,
+      resolveInputAssets,
+      findImageCapability,
+      createAsset,
+      completeJobAndSettle,
+      appendLog,
+    } as unknown as WorkerRepo;
+    const generate = vi.fn().mockResolvedValue([
+      { url: "https://img.test/a.png", width: 512, height: 512, requestId: "req-1" },
+    ]);
+    const createImageProvider = vi.fn().mockReturnValue({ generate });
+
+    const jobId = await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider,
+      createAudioProvider: vi.fn(),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      fetchImpl: vi.fn().mockResolvedValue({
+        ok: true,
+        blob: async () => new Blob(["x"], { type: "image/png" }),
+      }),
+    });
+
+    expect(jobId).toBe("j-img-refs");
+    // 字段语义：worker 从 input_asset_ids 读取参考图（不再读 reference_asset_ids）
+    expect(resolveInputAssets).toHaveBeenCalledWith(
+      ["101", "102", "103", "104", "105"],
+      "u1",
+      "p1",
+    );
+    const providerArg = generate.mock.calls[0]![0] as {
+      sourceImages?: unknown[];
+    };
+    expect(providerArg.sourceImages).toHaveLength(5);
+    expect(completeJobAndSettle).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: "j-img-refs", assetIds: ["a1"] }),
+    );
+  });
+
+  it("11 张参考图 > 能力 10 → 失败，文案含真实上限", async () => {
+    const { claimNextJob, findImageCapability } = imageJobWithRefs(
+      Array.from({ length: 11 }, (_, i) => i + 1),
+      10,
+    );
+    const failJob = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimNextJob,
+      findImageCapability,
+      failJob,
+    } as unknown as WorkerRepo;
+
+    await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider: vi.fn(),
+      createAudioProvider: vi.fn(),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+    });
+
+    expect(failJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorCode: "unsupported_input",
+        errorMessage: "当前模型最多支持 10 张参考图",
+      }),
+    );
+  });
+
+  it("能力配置更小（3）→ 4 张参考图失败，文案含 3", async () => {
+    const { claimNextJob, findImageCapability } = imageJobWithRefs(
+      [1, 2, 3, 4],
+      3,
+    );
+    const failJob = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimNextJob,
+      findImageCapability,
+      failJob,
+    } as unknown as WorkerRepo;
+
+    await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider: vi.fn(),
+      createAudioProvider: vi.fn(),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+    });
+
+    expect(failJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorMessage: "当前模型最多支持 3 张参考图",
+      }),
+    );
+  });
+
+  it("能力快照缺失 max_reference_images → 回退常量 10（10 张通过）", async () => {
+    const { claimNextJob, findImageCapability } = imageJobWithRefs(
+      Array.from({ length: 10 }, (_, i) => i + 1),
+    );
+    const resolveInputAssets = vi.fn().mockResolvedValue(
+      Array.from({ length: 10 }, (_, i) => ({
+        id: String(i + 1),
+        type: "image",
+        url: `https://asset/${i + 1}.png`,
+        mime: "image/png",
+        size: 1,
+        width: 512,
+        height: 512,
+        duration: null,
+      })),
+    );
+    const createAsset = vi.fn().mockResolvedValue("a1");
+    const completeJobAndSettle = vi.fn().mockResolvedValue(true);
+    const appendLog = vi.fn().mockResolvedValue(undefined);
+    const repo = {
+      claimNextJob,
+      resolveInputAssets,
+      findImageCapability,
+      createAsset,
+      completeJobAndSettle,
+      appendLog,
+    } as unknown as WorkerRepo;
+
+    const jobId = await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider: vi.fn().mockReturnValue({
+        generate: vi.fn().mockResolvedValue([
+          { url: "https://img.test/a.png", width: 512, height: 512, requestId: "req-1" },
+        ]),
+      }),
+      createAudioProvider: vi.fn(),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      fetchImpl: vi.fn().mockResolvedValue({
+        ok: true,
+        blob: async () => new Blob(["x"], { type: "image/png" }),
+      }),
+    });
+
+    expect(jobId).toBe("j-img-refs");
+    expect(completeJobAndSettle).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: "j-img-refs" }),
+    );
+  });
+
+  it("video 任务带 2 张 reference_asset_ids → 旧版单图分支失败，文案含 1（video 走 RocketMQ 不受影响）", async () => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j-video-refs",
+      project_id: "p1",
+      user_id: "u1",
+      type: "video",
+      input: {
+        prompt: "海边",
+        model_id: "seedance-2.0",
+        reference_asset_ids: ["11", "12"],
+      },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 12,
+    });
+    const failJob = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimNextJob,
+      failJob,
+    } as unknown as WorkerRepo;
+
+    await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider: vi.fn(),
+      createAudioProvider: vi.fn(),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+    });
+
+    expect(failJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorCode: "unsupported_input",
+        errorMessage: "当前模型最多支持 1 张参考图",
+      }),
+    );
+  });
+});

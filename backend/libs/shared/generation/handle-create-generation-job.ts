@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 
 import { fail, ok } from "@blue-whale/contracts";
-import type {
-  CreateJobInput,
-  GenerationCommandRepo,
-  ModelCapabilityRepo,
-  ProjectRepo,
+import {
+  DEFAULT_MAX_REFERENCE_IMAGES,
+  type CreateJobInput,
+  type GenerationCommandRepo,
+  type ModelCapabilityRepo,
+  type ProjectRepo,
 } from "@blue-whale/persistence";
 
 import type { GenerationCostEstimator } from "./cost-estimator.js";
@@ -87,16 +88,20 @@ function validate(body: CreateGenerationJobBody): string | null {
     return "expected_output_count 须为 1-4";
   if ((type === "video" || type === "audio") && count !== 1)
     return "视频/音频生成仅支持一个输出";
+  // IKA72G：音频一期不支持任何参考素材——reference_asset_ids 与 input_asset_ids 一并显式拒绝，
+  // 避免统一字段语义后 input_asset_ids 被静默忽略。
   if (
     type === "audio" &&
-    Array.isArray(body.reference_asset_ids) &&
-    body.reference_asset_ids.length > 0
+    ((Array.isArray(body.reference_asset_ids) &&
+      body.reference_asset_ids.length > 0) ||
+      (Array.isArray(body.input_asset_ids) && body.input_asset_ids.length > 0))
   )
     return "音频生成一期不支持参考素材";
   const inputAssetIds = Array.isArray(body.input_asset_ids)
     ? body.input_asset_ids
     : [];
-  if (type === "image" && inputAssetIds.length > 4) return "参考图最多 4 张";
+  // IKA72G：image 参考图上限由 handler 读取模型能力配置（features.max_reference_images）后校验，
+  // 不再在此写死 4。
   if (type === "video") {
     const firstFrameAssetId = assetId(body.first_frame_asset_id);
     const lastFrameAssetId = assetId(body.last_frame_asset_id);
@@ -180,6 +185,29 @@ export async function handleCreateGenerationJob(
     return fail(400, "model_id 不在可用模型白名单或已停用");
   }
 
+  // IKA72G：参考图上限读取模型能力配置（features.max_reference_images），与 worker/网关同一来源；
+  // 能力行缺失时回退到与网关（maxImageEditImages）/ARK（Seedream 10 张复合编辑）一致的常量 10。
+  const capability = whitelist.find((m) => m.model_id === resolvedModelId);
+  const maxReferenceImages =
+    capability?.features?.max_reference_images ?? DEFAULT_MAX_REFERENCE_IMAGES;
+
+  // 参考图字段语义统一（IKA72G）：image 参考图 = input_asset_ids（与前端契约/worker 对齐），
+  // video 普通参考素材 = reference_asset_ids；首尾帧走独立字段 first/last_frame_asset_id 不受此限。
+  const explicitReferenceIds = assetIds(body.reference_asset_ids);
+  const firstFrameAssetId = assetId(body.first_frame_asset_id);
+  const lastFrameAssetId = assetId(body.last_frame_asset_id);
+  const hasExplicitFrame =
+    firstFrameAssetId !== null || lastFrameAssetId !== null;
+  const referenceAssetIds =
+    body.reference_asset_ids !== undefined
+      ? uniqueAssetIds(explicitReferenceIds)
+      : hasExplicitFrame
+        ? []
+        : inputAssetIds;
+  if (type === "image" && referenceAssetIds.length > maxReferenceImages) {
+    return fail(400, `参考图最多 ${maxReferenceImages} 张`);
+  }
+
   let input: Record<string, unknown>;
   if (type === "audio") {
     input = { prompt: params.prompt, model_id: resolvedModelId };
@@ -195,30 +223,21 @@ export async function handleCreateGenerationJob(
     input.web_search = params.web_search === true;
     input.sequential_image_generation =
       params.sequential_image_generation === true;
+    // IKA72G：image 参考图统一落 input_asset_ids（worker 读取同字段）。
+    if (referenceAssetIds.length > 0) input.input_asset_ids = referenceAssetIds;
   } else if (type === "video") {
     if (isStr(params.resolution)) input.resolution = params.resolution;
     if (params.duration !== undefined) input.duration = params.duration;
+    if (firstFrameAssetId) input.first_frame_asset_id = firstFrameAssetId;
+    if (lastFrameAssetId) input.last_frame_asset_id = lastFrameAssetId;
+    if (referenceAssetIds.length > 0)
+      input.reference_asset_ids = referenceAssetIds;
   }
   // 图片与视频一致：sk token 密封进 job.input.provider_credential，处理时由 worker 解出。
   // 这样进程内即时调度与重启后的恢复扫描共用同一套凭据来源。
   if (internal.providerCredential) {
     input.provider_credential = internal.providerCredential;
   }
-  const explicitReferenceIds = assetIds(body.reference_asset_ids);
-  const firstFrameAssetId = assetId(body.first_frame_asset_id);
-  const lastFrameAssetId = assetId(body.last_frame_asset_id);
-  const hasExplicitFrame =
-    firstFrameAssetId !== null || lastFrameAssetId !== null;
-  const referenceAssetIds =
-    body.reference_asset_ids !== undefined
-      ? uniqueAssetIds(explicitReferenceIds)
-      : hasExplicitFrame
-        ? []
-        : inputAssetIds;
-  if (firstFrameAssetId) input.first_frame_asset_id = firstFrameAssetId;
-  if (lastFrameAssetId) input.last_frame_asset_id = lastFrameAssetId;
-  if (referenceAssetIds.length > 0)
-    input.reference_asset_ids = referenceAssetIds;
   input.expected_output_count = expectedOutputCount;
 
   const actionSeed = `${projectId}\0${idempotencyKey ?? ""}\0${Date.now()}`;

@@ -121,7 +121,7 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     expect(a.digest).toBe(b.digest);
   });
 
-  it("features 缺 max_reference_images 时兜底 4（对齐前端 DEFAULT_MAX_REFERENCE_IMAGES，IK6PA5）", async () => {
+  it("features 缺 max_reference_images 时兜底 10（与网关/ARK 上限对齐，IKA72G）", async () => {
     const { repo } = repoWith([
       buildRow({ features: { reference_image: true, watermark: true, quantity_max: 4 } }),
     ]);
@@ -129,7 +129,7 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     const [view] = await repo.listEnabledByType("image");
 
     expect(view.features.reference_image).toBe(true);
-    expect(view.features.max_reference_images).toBe(4);
+    expect(view.features.max_reference_images).toBe(10);
   });
 
   it("显式配置 max_reference_images 时原样透出（不被兜底覆盖，IK6PA5）", async () => {
@@ -159,13 +159,13 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     expect(view.features.max_reference_images).toBe(6);
   });
 
-  it("features 为 NULL 时兜底 4 且 reference_image 为 false（IK6PA5）", async () => {
+  it("features 为 NULL 时兜底 10 且 reference_image 为 false（IK6PA5 / IKA72G）", async () => {
     const { repo } = repoWith([buildRow({ features: null })]);
 
     const [view] = await repo.listEnabledByType("image");
 
     expect(view.features.reference_image).toBe(false);
-    expect(view.features.max_reference_images).toBe(4);
+    expect(view.features.max_reference_images).toBe(10);
   });
 });
 
