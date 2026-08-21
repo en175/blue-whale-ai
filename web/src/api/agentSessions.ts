@@ -8,6 +8,7 @@
 import { readSseResponse, type SseEvent } from './events';
 import { ApiError } from './http';
 import { newIdempotencyKey } from './jobs';
+import { agentPath, agentUrl } from './agentRoutes';
 import { getAccessToken, setSession } from '@/utils/auth';
 
 export type { SseEvent };
@@ -197,14 +198,14 @@ const snapshotPending = new Map<string, Promise<SessionSnapshot>>();
 
 /** 会话列表 GET /projects/:id/sessions */
 export function listSessions(projectId: string): Promise<{ items: SessionRecord[] }> {
-  return sessionRequest(`/projects/${encodeURIComponent(projectId)}/sessions`);
+  return sessionRequest(agentPath('list_sessions', projectId));
 }
 
 /** 创建会话 POST /projects/:id/sessions（context 自动绑定 blue_whale_project） */
 export function createSession(projectId: string): Promise<SessionRecord> {
   const existed = ensurePending.get(projectId);
   if (existed) return existed;
-  const p = sessionRequest<SessionRecord>(`/projects/${encodeURIComponent(projectId)}/sessions`, {
+  const p = sessionRequest<SessionRecord>(agentPath('create_session', projectId), {
     method: 'POST',
     headers: { 'Idempotency-Key': newIdempotencyKey() },
     body: '{}',
@@ -219,7 +220,7 @@ export function fetchSessionSnapshot(projectId: string, sessionId: string): Prom
   const existed = snapshotPending.get(key);
   if (existed) return existed;
   const p = sessionRequest<SessionSnapshot>(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/snapshot`,
+    agentPath('session_snapshot', projectId, { session_id: sessionId }),
   ).finally(() => snapshotPending.delete(key));
   snapshotPending.set(key, p);
   return p;
@@ -228,7 +229,7 @@ export function fetchSessionSnapshot(projectId: string, sessionId: string): Prom
 /** 删除会话 DELETE /projects/:id/sessions/:sid（历史会话下拉「删除」，需二次确认） */
 export function deleteSession(projectId: string, sessionId: string): Promise<unknown> {
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}`,
+    agentPath('delete_session', projectId, { session_id: sessionId }),
     { method: 'DELETE' },
   );
 }
@@ -246,7 +247,7 @@ export function sendSessionMessage(
 ): Promise<SessionMessageAck> {
   const { forcedCreativeSkillId, signal } = options ?? {};
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
+    agentPath('send_message', projectId, { session_id: sessionId }),
     {
       method: 'POST',
       headers: { 'Idempotency-Key': newIdempotencyKey() },
@@ -272,7 +273,7 @@ export function sendSessionMessage(
  */
 export function cancelSession(projectId: string, sessionId: string): Promise<unknown> {
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/cancel`,
+    agentPath('cancel_session', projectId, { session_id: sessionId }),
     {
       method: 'POST',
       headers: { 'Idempotency-Key': newIdempotencyKey() },
@@ -291,7 +292,7 @@ export function cancelSession(projectId: string, sessionId: string): Promise<unk
  */
 export function cancelSessionRun(projectId: string, runId: string): Promise<unknown> {
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/cancel`,
+    agentPath('cancel_run', projectId, { run_id: runId }),
     {
       method: 'POST',
       headers: { 'Idempotency-Key': newIdempotencyKey() },
@@ -306,7 +307,7 @@ export function retrySessionRun(
   runId: string,
 ): Promise<{ run?: SessionRun } & Record<string, unknown>> {
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/retry`,
+    agentPath('retry_run', projectId, { run_id: runId }),
     {
       method: 'POST',
       headers: { 'Idempotency-Key': newIdempotencyKey() },
@@ -339,7 +340,7 @@ export function fetchRequirementUnderstandings(
   sessionId: string,
 ): Promise<{ items: RequirementUnderstanding[] }> {
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/requirement-understandings`,
+    agentPath('list_requirement_understandings', projectId, { session_id: sessionId }),
   );
 }
 
@@ -352,7 +353,7 @@ export function confirmRequirementUnderstanding(
   actionId: string,
 ): Promise<{ understanding: RequirementUnderstanding }> {
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/requirement-understandings/${encodeURIComponent(understandingId)}/versions/${version}/actions/confirm`,
+    agentPath('confirm_requirement_understanding', projectId, { session_id: sessionId, understanding_id: understandingId, version }),
     {
       method: 'POST',
       headers: { 'Idempotency-Key': newIdempotencyKey() },
@@ -371,7 +372,7 @@ export function correctRequirementUnderstanding(
   acceptedSummary: string,
 ): Promise<{ understanding: RequirementUnderstanding }> {
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/requirement-understandings/${encodeURIComponent(understandingId)}/versions/${version}/actions/correct`,
+    agentPath('correct_requirement_understanding', projectId, { session_id: sessionId, understanding_id: understandingId, version }),
     {
       method: 'POST',
       headers: { 'Idempotency-Key': newIdempotencyKey() },
@@ -435,7 +436,7 @@ function ensureHub(projectId: string, sessionId: string, initialCursor: string):
   };
   hubs.set(key, hub);
 
-  const base = `/api/agent/v1/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/events`;
+  const base = agentUrl('session_events', projectId, { session_id: sessionId });
 
   const scheduleRetry = () => {
     if (hub.dead || hub.retryTimer) return;
