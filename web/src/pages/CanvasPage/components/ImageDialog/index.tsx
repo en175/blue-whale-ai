@@ -21,7 +21,7 @@ import styles from './index.module.css';
 const FALLBACK_MAX_IMAGES = 5;
 
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
-const MAX_INPUT = 500;
+const MAX_INPUT = 1000;
 
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
 const MAX_VIDEOS = 3;

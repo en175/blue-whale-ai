@@ -20,7 +20,7 @@ import type { Node, Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { quotaToPoints, fetchMe, toSessionUser } from '@/api/auth';
 import { fetchProjects, createProject, renameProject, deleteProject, copyAssetToProject } from '@/api/projects';
-import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetType } from '@/api/assets';
+import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, type AssetType } from '@/api/assets';
 import { saveCanvasDoc, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
 import type { GenerationCardBlock } from '@/api/agentSessions';
@@ -1369,14 +1369,25 @@ export default function CanvasPage() {
     const fileName = (nd.fileName || nd.name) as string | undefined;
     const src = nd.src as string | undefined;
     console.log('[SaveAssets] handleSaveMediaToAssets', { nodeId, assetId, mediaType, src });
-    if (!assetId) {
-      console.warn('[SaveAssets] 无 assetId，无法保存', { nodeId, data: nd });
-      showToast('error', '请先上传素材后再保存');
-      return;
-    }
     if (!mediaType) {
       console.warn('[SaveAssets] 无 mediaType，无法保存', { nodeId, data: nd });
       showToast('error', '节点类型异常，无法保存');
+      return;
+    }
+    let sourceAssetId = assetId ? String(assetId) : '';
+    if (!sourceAssetId && src) {
+      // 共享资产加回画布的节点无 assetId：按 URL 反查资产库拿源素材 ID
+      try {
+        const records = await fetchAllAssets(mediaType);
+        const hit = records.find((r) => r.url === src);
+        if (hit) sourceAssetId = String(hit.id);
+      } catch (err) {
+        console.warn('[SaveAssets] 按 URL 反查资产失败', err);
+      }
+    }
+    if (!sourceAssetId) {
+      console.warn('[SaveAssets] 无 assetId，无法保存', { nodeId, data: nd });
+      showToast('error', '请先上传素材后再保存');
       return;
     }
     const name = fileName || `媒体-${mediaType}`;
@@ -1384,7 +1395,7 @@ export default function CanvasPage() {
       {
         assetType: 'media',
         kind: mediaType,
-        sourceAssetId: String(assetId),
+        sourceAssetId,
         name,
       },
       `已保存「${name}」到共享资产`,

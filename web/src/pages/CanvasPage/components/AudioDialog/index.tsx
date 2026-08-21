@@ -8,7 +8,7 @@ import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import styles from './index.module.css';
 
 /** 输入框字数上限 */
-const MAX_INPUT = 500;
+const MAX_INPUT = 1000;
 
 /** 参考音频上限（本地上传 + 节点选取合计） */
 const MAX_AUDIO_REFS = 3;
