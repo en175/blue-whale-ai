@@ -30,6 +30,12 @@ import type { SessionContentBlock, GenerationCardBlock } from '@/api/agentSessio
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
+import {
+  EMPTY_COMPOSED,
+  composedIsEmpty,
+  resolveComposed,
+  type ComposedValue,
+} from '../ChipTextEditor/composed';
 import { shouldCancelOnKey } from './cancelShortcut';
 import { getPanelLayout } from './layout';
 import AssetChip from '../AssetChip';
@@ -636,7 +642,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供发送按钮启用态判断 */
-  const [composedText, setComposedText] = useState('');
+  /** 输入框内容的结构化形态：胶囊在编辑期是指针，只在发送时解引用（IKAFSX）。 */
+  const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
+  const canSend = !composedIsEmpty(composed);
   const [selectedModel, setSelectedModel] = useState(models[0].key);
   const [modelOpen, setModelOpen] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -971,10 +979,10 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     setForcedSkill(null);
   };
 
-  /** 发送消息：composedText 已把胶囊替换成完整 prompt 并跟自由输入拼接好；
+  /** 发送消息：**解引用发生在这一刻**——编辑期胶囊一直是指针，此处才换成完整 prompt；
    * 若已武装「直接使用」技能，本条消息携带 forced_creative_skill_id 强制激活后清除 */
   const handleSend = async () => {
-    const content = composedText.trim();
+    const content = resolveComposed(composed).trim();
     if (!content || runningRunId !== null || streaming) return;
     // 先清空再发。等 POST 回来才清，用户已经看到自己的气泡上屏、输入框里原文却还在，
     // 极易重复点发送。失败时把原文回填，一个字都不丢。
@@ -1364,7 +1372,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           <ChipTextEditor
             ref={chipEditorRef}
             placeholder="描述你的想法，使用 @ 引用素材"
-            onChangeText={setComposedText}
+            onChange={setComposed}
             onSend={handleSend}
           />
 
@@ -1467,12 +1475,12 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               </button>
             ) : (
               <button
-                className={`${styles.sendBtn} ${composedText.trim() ? styles.sendBtnActive : ''}`}
+                className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}
                 onClick={handleSend}
                 /* 不再拿 sessionId 当门槛：刷新后要先「取项目 → 列会话 → 连会话」几个来回，
                  * 这段时间按钮是灰的，用户以为面板必须整页加载完才能用。而 sendMessage 早就会在
                  * 会话还没建好时自己补一个（ensureSession），这道门挡的是一条本来就走得通的路。 */
-                disabled={!composedText.trim() || streaming}
+                disabled={!canSend || streaming}
                 title={
                   streaming
                     ? '等待运行状态；超时后可重新连接'
