@@ -35,6 +35,18 @@ export interface SessionContentBlock {
   card?: GenerationCardBlock;
 }
 
+/** 生成卡里的一条素材引用（IKAFSQ）。
+ *
+ * 从前这里只留下一个 `@名称` 字符串，`asset_id` 与 `media_type` 在翻译时被丢掉了——于是
+ * 拿不到缩略图、做不了悬浮预览，素材改名或删除也只会静默失效。引用要成立，得带着身份。 */
+export interface GenerationCardAssetRef {
+  /** 资产库里的素材 id：缩略图与预览由它查出来 */
+  assetId: string;
+  /** 展示名（不带 @ 前缀，前缀是展示层的事） */
+  label: string;
+  mediaType: 'image' | 'video';
+}
+
 /** 生成卡：单镜头分镜提示词卡（S2 渲染，S3 手动应用） */
 export interface GenerationCardBlock {
   /** 卡片标题 / 镜头编号，如「镜头 1」 */
@@ -45,10 +57,20 @@ export interface GenerationCardBlock {
   visual: string;
   /** 分镜提示词 */
   prompt: string;
-  /** 素材引用（@名称） */
+  /** 素材引用（@名称）。保留给旧数据与纯文本场景；有身份的引用走 assetRefItems。 */
   assetRefs?: string[];
+  /** 带身份的素材引用：胶囊靠它渲染缩略图与悬浮预览 */
+  assetRefItems?: GenerationCardAssetRef[];
   /** 卡片唯一标识（应用动作追踪） */
   cardId?: string;
+  /** 镜号（协议里的 `shot_no`，schema 强制 1..N 连续）→ 卡头的 `#3` */
+  shotNo?: number;
+  /** 本批次形态：image / video → 卡头的 `SCENE` 徽标 */
+  targetMedia?: 'image' | 'video';
+  /** 画幅，如 `16:9`（`generation_suggestions.aspect_ratio`） */
+  aspectRatio?: string;
+  /** 单镜时长秒数原值（`duration_seconds`）。与 timeRange 并存：那个是累加出的区间，这个是本镜自己的长度。 */
+  durationSeconds?: number;
 }
 
 /** 会话记录（列表/创建返回） */

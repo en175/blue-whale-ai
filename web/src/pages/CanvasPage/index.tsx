@@ -1109,6 +1109,25 @@ export default function CanvasPage() {
   actionsRef.current.download = handleNodeDownload;
 
   /** Agent 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent） */
+  /**
+   * 画布上现存的生成卡节点对应的 cardId 集合（IKAFSQ）。
+   *
+   * 「这张卡应用过没有」不再是侧边栏自己维护的一份状态，而是从画布查出来的事实。侧边栏那份
+   * 内存 `useState` 刷新即清空（绿勾全掉），而且画布上把节点删了它也不知道——两处必然对不上。
+   * 改成派生之后，删节点自动退回「＋ 手动应用」、刷新自动恢复，都不需要额外的同步代码。
+   *
+   * cardId 随 payload 一起铺进了 `data.generationCard`，而 `serializeNodes` 会把节点存进画布
+   * 文档，所以这个事实本来就是持久化的，只是过去没人读。
+   */
+  const appliedCardIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const node of assetNodes) {
+      const card = (node.data as { generationCard?: { cardId?: unknown } } | undefined)?.generationCard;
+      if (typeof card?.cardId === 'string' && card.cardId) ids.add(card.cardId);
+    }
+    return ids;
+  }, [assetNodes]);
+
   const handleAgentCardApply = (payload: GenerationCardBlock) => {
     const node: Node = {
       id: `gencard-${Date.now()}`,
@@ -1985,6 +2004,7 @@ export default function CanvasPage() {
           inputVersion={agentContext?.ts ?? 0}
           projectId={currentId || undefined}
           onApplyToDock={handleAgentCardApply}
+          appliedCardIds={appliedCardIds}
           initialSkillId={agentContext?.skillId ?? ''}
         />
       )}

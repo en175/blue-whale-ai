@@ -17,6 +17,7 @@
     "check:agent-routes": "node scripts/check-agent-routes.mjs"
   },
   "dependencies": {
+    "@floating-ui/react": "^0.27.20",
     "@icon-park/react": "^1.4.2",
     "@lexical/react": "^0.49.0",
     "@xyflow/react": "^12.11.2",
