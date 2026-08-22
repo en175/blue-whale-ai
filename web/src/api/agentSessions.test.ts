@@ -43,6 +43,37 @@ describe('agentSessions API contract', () => {
     });
   });
 
+  /** IKA4Q5：agent 的错误体是 `{ error: { code, message } }`（见 agent 侧 http/app.ts 的 jsonError），
+   *  BFF 逐字节透传。只读平铺形状的话，agent 的每个错误码在浏览器里都读不到，一律退化成
+   *  「请求失败（409）」，调用方就没法把「已经确认过了」和真正的失败分开。 */
+  it('reads the agent error envelope, not just the flat backend one', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 'session_phase_mismatch',
+              message: 'This Agent Session is not awaiting a requirement-understanding confirmation',
+              retryable: false,
+              trace_id: 'trace-1',
+              details: {},
+            },
+          }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    const request = confirmRequirementUnderstanding('project-1', 'session-1', 'understanding-1', 1, 'action-1');
+
+    await expect(request).rejects.toMatchObject({
+      status: 409,
+      code: 'session_phase_mismatch',
+      message: 'This Agent Session is not awaiting a requirement-understanding confirmation',
+    });
+  });
+
   it('sends a selected creative skill only on the intended message', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({}), {

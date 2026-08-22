@@ -161,6 +161,32 @@ export interface SessionMessageAck {
 
 /* ============ 基础请求 ============ */
 
+/**
+ * 从错误响应体里取出 code 与 message。
+ *
+ * 这条链上有两种错误形状，必须都读得懂：
+ * - **agent 原样透传**：`{ error: { code, message, retryable, trace_id } }`——嵌套在 `error` 下
+ *   （agent 侧 `http/app.ts` 的 `jsonError`），BFF 代理是逐字节透传的，不重新包封
+ * - **蓝鲸后端自己的**：`{ code, msg, data }`——平铺
+ *
+ * 之前只读平铺形状，于是 agent 的每一个错误码在浏览器里都读不到，一律降级成「请求失败（409）」。
+ * 调用方想按 code 分支（例如把「已经确认过了」与真正的失败区分开）就无从下手。
+ */
+function describeFailure(
+  record: Record<string, unknown> | undefined,
+  status: number,
+): { message: string; code: number | string } {
+  const nested = record?.error;
+  const source = nested && typeof nested === 'object' ? (nested as Record<string, unknown>) : record;
+  const message =
+    (typeof source?.msg === 'string' && source.msg ? source.msg : undefined) ??
+    (typeof source?.message === 'string' && source.message ? source.message : undefined) ??
+    `请求失败（${status}）`;
+  const code =
+    typeof source?.code === 'string' || typeof source?.code === 'number' ? source.code : status;
+  return { message, code };
+}
+
 /** 会话维度裸 JSON 请求（401 清会话；非 2xx 抛 ApiError，供调用方按 status/code 分支） */
 async function sessionRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getAccessToken();
@@ -182,17 +208,10 @@ async function sessionRequest<T>(path: string, init?: RequestInit): Promise<T> {
     }
   }
   const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : undefined;
+  const failure = res.ok ? null : describeFailure(record, res.status);
   // Agent 的 capability_required 也使用 401，但它表示缺少 per-Run 能力券，不是用户登录失效。
-  if (res.status === 401 && record?.code !== 'capability_required') setSession(null, null);
-  if (!res.ok) {
-    const message =
-      (typeof record?.msg === 'string' ? record.msg : undefined) ??
-      (typeof record?.message === 'string' ? record.message : undefined) ??
-      `请求失败（${res.status}）`;
-    const code =
-      typeof record?.code === 'string' || typeof record?.code === 'number' ? record.code : res.status;
-    throw new ApiError(res.status, message, code);
-  }
+  if (res.status === 401 && failure?.code !== 'capability_required') setSession(null, null);
+  if (failure) throw new ApiError(res.status, failure.message, failure.code);
   return body as T;
 }
 

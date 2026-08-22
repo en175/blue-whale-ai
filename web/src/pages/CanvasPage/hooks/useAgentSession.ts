@@ -158,6 +158,40 @@ const projectMessage = (m: SessionMessage): ChatMessage => ({
 });
 
 /**
+ * 确认门操作失败时该怎么对待这个错误。
+ *
+ * `settled` 是关键的一类：会话早已 `phase=open`、这一版理解早已 `accepted`——**用户想要的结果
+ * 已经达成了**，只是这张卡没来得及收起来（多标签页、事件晚到、或模型在 Run 内自己确认过）。
+ * 把它当失败报出去，用户会以为没确认成功而反复点，而每一次都注定 409。所以这一类直接收卡，
+ * 按成功处理。
+ *
+ * 其余情况给出各自的原因，不再一律「请重试」——重试对 `stale` / `gone` 这两类永远不会成功。
+ */
+export function classifyConfirmFailure(
+  error: unknown,
+  action: 'confirm' | 'correct',
+): { kind: 'settled' } | { kind: 'stale' | 'gone' | 'unknown'; message: string } {
+  const code = isApiError(error) ? error.code : '';
+  switch (code) {
+    // 会话不在确认阶段 / 这一版不再等待确认——两者都意味着「已经定下来了」
+    case 'session_phase_mismatch':
+    case 'requirement_understanding_not_pending':
+      return { kind: 'settled' };
+    case 'requirement_understanding_not_found':
+      return { kind: 'stale', message: '这条需求理解已失效，等 Agent 重新提议后再操作。' };
+    case 'session_not_found':
+      return { kind: 'gone', message: '会话已不存在，请新建对话。' };
+    default:
+      return {
+        kind: 'unknown',
+        message: isApiError(error)
+          ? `${action === 'confirm' ? '确认' : '修改'}失败：${error.message}`
+          : `${action === 'confirm' ? '确认' : '修改'}失败，请重试`,
+      };
+  }
+}
+
+/**
  * 画布 Agent 对话钩子（session 维度）
  * @param projectId 当前项目ID（空串时不初始化）
  */
@@ -562,6 +596,21 @@ export function useAgentSession(projectId: string) {
       if (t === 'requirement_understanding.proposed.v1') {
         const understanding = (payload.understanding ?? null) as RequirementUnderstanding | null;
         setPendingUnderstanding(understanding);
+        setConfirmError(null);
+        confirmationPendingRef.current = false;
+        setConfirmationPending(false);
+        return;
+      }
+
+      /* ---- 需求理解已被确认：收起确认卡 ----
+       * 确认有三条来路，只有第一条经过本地的 confirmUnderstanding：
+       *   ① 用户点这张卡上的「确认」按钮
+       *   ② 用户用自然语言说「确认」，agent 侧 confirmRequirementUnderstandingMessage 认下来
+       *   ③ 模型在 Run 内自己调 confirm_requirement_understanding 工具（冻结门要求先确认再产卡）
+       * ②③ 只以本事件到达。不处理它，卡就一直挂在屏幕上，而会话早已 phase=open、
+       * understanding 早已 accepted——用户再点那个按钮必然 409，看到的就是「确认失败，请重试」。 */
+      if (t === 'requirement_understanding.accepted.v1') {
+        setPendingUnderstanding(null);
         setConfirmError(null);
         confirmationPendingRef.current = false;
         setConfirmationPending(false);
@@ -1104,8 +1153,14 @@ export function useAgentSession(projectId: string) {
       if (connectionEpochRef.current === epoch) setPendingUnderstanding(null);
       return true;
     } catch (e) {
+      const verdict = classifyConfirmFailure(e, 'confirm');
+      if (verdict.kind === 'settled') {
+        // 已经确认过了：用户要的结果已达成，收卡即可，不该报错让他再点一次。
+        if (connectionEpochRef.current === epoch) setPendingUnderstanding(null);
+        return true;
+      }
       console.warn('确认需求理解失败:', e);
-      if (connectionEpochRef.current === epoch) setConfirmError('确认失败，请重试');
+      if (connectionEpochRef.current === epoch) setConfirmError(verdict.message);
       return false;
     } finally {
       if (connectionEpochRef.current === epoch) {
@@ -1140,8 +1195,14 @@ export function useAgentSession(projectId: string) {
       if (connectionEpochRef.current === epoch) setPendingUnderstanding(null);
       return true;
     } catch (e) {
+      const verdict = classifyConfirmFailure(e, 'correct');
+      if (verdict.kind === 'settled') {
+        // 这一版已经定下来了，改不动了；收卡，让用户直接对新一轮说话，而不是卡在一张死卡上。
+        if (connectionEpochRef.current === epoch) setPendingUnderstanding(null);
+        return true;
+      }
       console.warn('修改需求理解失败:', e);
-      if (connectionEpochRef.current === epoch) setConfirmError('修改失败，请重试');
+      if (connectionEpochRef.current === epoch) setConfirmError(verdict.message);
       return false;
     } finally {
       if (connectionEpochRef.current === epoch) {
