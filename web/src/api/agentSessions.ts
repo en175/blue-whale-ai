@@ -19,8 +19,14 @@ export type { SseEvent };
 export interface SessionContentBlock {
   type: string;
   text?: string;
-  /** 思考过程块（可折叠展示）：steps 为顺序步骤文案 */
-  thinking?: { steps?: string[] };
+  /**
+   * 思考过程块（可折叠展示）。
+   *
+   * `steps` 是服务端选的模板文案，`reasoning` 是模型自己的原话（assistant.reasoning.delta，
+   * IKA3M6）。两个字段分开，因为可信度不一样：模板是我们的承诺，思考是模型随口说的。
+   * `reasoning` 只活在当前会话的内存里——服务端不持久化它，刷新页面就没有了。
+   */
+  thinking?: { steps?: string[]; reasoning?: string };
   /**
    * 产卡之前的每一步都走自然语言：追问、需求理解总结与确认都是助手的正文文字，
    * 不再有 understanding / clarify 结构化块。生成卡是唯一的结构化交付物。

@@ -971,6 +971,22 @@
   line-height: 1.6;
 }
 
+/* 模型自己的思考原文（IKA3M6）。比步骤更淡、更小，并保留换行——它是原样转发的草稿，
+   长且零散，排版上要一眼看出它和上面那些服务端文案不是一回事。
+   限高加滚动：4000 字的思考不该把回复顶出视口。 */
+.thinkingReasoning {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border-secondary);
+  font-size: var(--font-size-sm);
+  color: #a8abb0;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
 /* ---- 生成卡组操作按钮 ---- */
 .cardBtn {
   padding: 7px 12px;

@@ -149,6 +149,64 @@ describe('useAgentSession 思考过程归属', () => {
     });
   }
 
+  it('模型的思考原文流进思考区，且不混进正文（IKA3M6）', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    for (const [id, text] of [
+      ['r1', '先确认画幅——'],
+      ['r2', '横版和竖版差别很大'],
+    ]) {
+      await act(async () => {
+        eventHandlers.at(-1)?.({
+          type: 'assistant.reasoning.delta',
+          id,
+          data: { run_id: 'run-1', payload: { stream_id: 'reasoning_run-1', text } },
+        });
+      });
+    }
+
+    // 拼接成一段连续的原文——它是流式吐出来的，不是一条条步骤。
+    expect(latest.reasoningText).toBe('先确认画幅——横版和竖版差别很大');
+    // 而且没有污染正文：思考不是回答。
+    expect(latest.streamingText).toBe('');
+    expect(latest.thinkingSteps).toEqual([]);
+  });
+
+  it('终态时思考原文随消息一起固化，运行中的思考区清空', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'assistant.reasoning.delta',
+        id: 'r1',
+        data: { run_id: 'run-1', payload: { stream_id: 'reasoning_run-1', text: '我拿不准要不要问画幅' } },
+      });
+    });
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'assistant.delta',
+        id: 'd1',
+        data: { run_id: 'run-1', payload: { stream_id: 'assistant_run_run-1', text: '这张图用在哪儿？' } },
+      });
+    });
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.completed',
+        id: 'c1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+      });
+    });
+
+    expect(latest.messages.at(-1)!.blocks).toEqual([
+      { type: 'thinking', thinking: { steps: [], reasoning: '我拿不准要不要问画幅' } },
+      { type: 'text', text: '这张图用在哪儿？' },
+    ]);
+    expect(latest.reasoningText).toBe('');
+  });
+
   it('终态时思考固化进那条助手消息、位于正文之前，全局思考区清空', async () => {
     await runTurnWithThinking();
 

@@ -187,6 +187,18 @@ export function useAgentSession(projectId: string) {
   const thinkingStepsRef = useRef<string[]>([]);
   thinkingStepsRef.current = thinkingSteps;
   /**
+   * 模型自己的思考原文（assistant.reasoning.delta 累积）。
+   *
+   * 和上面那些步骤是两回事：那些是服务端选的模板，这是模型自己的话。分开存也分开渲染，
+   * 因为它们的可信度不一样——模板是我们的承诺，思考是模型随口说的，混在一起看不出区别。
+   *
+   * 它存在的理由是首字之前那段空白：实测中位轮次要 8.4 秒才出第一个字，而那段时间里模型
+   * 一直在思考。丢帧是合法的（服务端尽力而为），所以这里只做追加，不做完整性校验。
+   */
+  const [reasoningText, setReasoningText] = useState('');
+  const reasoningTextRef = useRef('');
+  reasoningTextRef.current = reasoningText;
+  /**
    * 本轮开始的时刻。状态行的地板：提交那一刻就打点，不等 run.queued、不等模型吐字，
    * 这样"提交后什么都没有"的那几秒也有秒数在走。见 runStatusLine.ts。
    */
@@ -400,13 +412,17 @@ export function useAgentSession(projectId: string) {
     // 思考随消息走：固化成消息里的第一个块（正文之前），全局思考区随即清空。
     // 不这么做的话，回复一进 messages，全局思考块就落到它下面去了——正是被反复报过的那个观感。
     const steps = thinkingStepsRef.current;
+    const reasoning = reasoningTextRef.current;
     setMessages((prev) => {
       if (prev.some((m) => m.role === 'assistant' && (m.content === text || m.id.includes(runId)))) {
         return prev;
       }
       const blocks: SessionContentBlock[] =
-        steps.length > 0
-          ? [{ type: 'thinking', thinking: { steps } }, { type: 'text', text }]
+        steps.length > 0 || reasoning
+          ? [
+              { type: 'thinking', thinking: { steps, ...(reasoning ? { reasoning } : {}) } },
+              { type: 'text', text },
+            ]
           : [];
       return [
         ...prev,
@@ -421,6 +437,7 @@ export function useAgentSession(projectId: string) {
       ];
     });
     if (steps.length > 0) setThinkingSteps([]);
+    if (reasoning) setReasoningText('');
   }, [stopReveal]);
 
   /** 失败/取消/不确定终态不能把 provisional delta 固化成正式助手消息。 */
@@ -523,6 +540,15 @@ export function useAgentSession(projectId: string) {
         return;
       }
 
+      /* ---- 模型自己的思考原文（assistant.reasoning.delta，IKA3M6）：填掉首字之前那段空白 ---- */
+      if (t === 'assistant.reasoning.delta') {
+        const chunk = str(payload.text);
+        if (!chunk) return;
+        setReasoningText((prev) => prev + chunk);
+        setProgressTick((p) => p + 1);
+        return;
+      }
+
       /* ---- 运行中渐进思考（run.activity：W2 U7 实时思考面，payload {stage,summary,progress}） ---- */
       if (t === 'run.activity') {
         const summary = str(payload.summary);
@@ -571,6 +597,7 @@ export function useAgentSession(projectId: string) {
         setRunningRunId(runId);
         // 新一轮开始：清掉上一轮思考与待确认卡，等 run.activity / proposed 事件重建（含自动排队的下一轮）
         setThinkingSteps([]);
+        setReasoningText('');
         setPartialCard(null);
         setPendingUnderstanding(null);
         setRetryUnavailable(false);
@@ -727,6 +754,7 @@ export function useAgentSession(projectId: string) {
     setFailedRunId(null);
     clearTurn();
     setThinkingSteps([]);
+    setReasoningText('');
     setPartialCard(null);
     setChatError(null);
     setPendingUnderstanding(null);
@@ -1146,6 +1174,7 @@ export function useAgentSession(projectId: string) {
     runningRunId,
     failedRunId,
     thinkingSteps,
+    reasoningText,
     turnStartedAt,
     turnOutcome,
     partialCard,

@@ -218,10 +218,24 @@ function CardPreview({ preview }: { preview: PartialCardPreview | null }) {
   );
 }
 
-/** 可折叠思考过程：小字展示当前步骤，默认收起 */
-function ThinkingBlock({ steps, defaultOpen = false }: { steps: string[]; defaultOpen?: boolean }) {
+/**
+ * 可折叠思考过程：小字展示，默认收起。
+ *
+ * 两种内容，来源不同所以分开渲染：`steps` 是服务端选的模板文案，`reasoning` 是模型自己的
+ * 原话（IKA3M6）。原话排在步骤下面——它更长、更零散，也更可能出现自我否定和内部名词，
+ * 不该抢在"它现在在干什么"前面。
+ */
+function ThinkingBlock({
+  steps,
+  reasoning,
+  defaultOpen = false,
+}: {
+  steps: string[];
+  reasoning?: string;
+  defaultOpen?: boolean;
+}) {
   const [open, setOpen] = useState(defaultOpen);
-  if (steps.length === 0) return null;
+  if (steps.length === 0 && !reasoning) return null;
   return (
     <div className={styles.thinkingBlock}>
       <button
@@ -238,6 +252,7 @@ function ThinkingBlock({ steps, defaultOpen = false }: { steps: string[]; defaul
           {steps.map((s, i) => (
             <div key={i} className={styles.thinkingStep}>{s}</div>
           ))}
+          {reasoning && <div className={styles.thinkingReasoning}>{reasoning}</div>}
         </div>
       )}
     </div>
@@ -430,8 +445,10 @@ function AssistantMessageBody({
   return (
     <>
       {blocks.map((b, i) => {
-        if (b.type === 'thinking' && b.thinking?.steps) {
-          return <ThinkingBlock key={i} steps={b.thinking.steps} />;
+        if (b.type === 'thinking' && (b.thinking?.steps || b.thinking?.reasoning)) {
+          return (
+            <ThinkingBlock key={i} steps={b.thinking.steps ?? []} reasoning={b.thinking.reasoning} />
+          );
         }
         if (b.type === 'card' && b.card) {
           const cardId = b.card.cardId ?? b.card.shotTitle;
@@ -562,6 +579,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     runningRunId,
     failedRunId,
     thinkingSteps,
+    reasoningText,
     turnStartedAt,
     turnOutcome,
     partialCard,
@@ -1058,10 +1076,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               </div>
             ),
           )}
-          {/* Agent 的思考过程（run.activity 实时步 + reasoning_trace 终态链）；有步即展示，运行中/终态后都可回看 */}
-          {thinkingSteps.length > 0 && (
+          {/* Agent 的思考过程：run.activity 实时步 + reasoning_trace 终态链 + 模型原话（IKA3M6）。
+              运行中默认展开——那段等待正是它要填的，收起来就等于还是白屏。 */}
+          {(thinkingSteps.length > 0 || reasoningText) && (
             <div className={styles.assistantBlock}>
-              <ThinkingBlock steps={thinkingSteps} />
+              <ThinkingBlock steps={thinkingSteps} reasoning={reasoningText} defaultOpen={Boolean(reasoningText)} />
             </div>
           )}
           {/* Agent 运行中的实时流式文本（assistant.delta 累积投影） */}
