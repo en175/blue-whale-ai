@@ -205,6 +205,8 @@ export function useAgentSession(projectId: string) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   /** 当前项目下的历史会话列表（新→旧，供历史会话下拉使用） */
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  /** 删除失败的那一行 + 原因：错误就显示在那一行上，下拉不关闭，用户能原地重试 */
+  const [deleteError, setDeleteError] = useState<{ sessionId: string; message: string } | null>(null);
   /** 当前会话的事件订阅取消函数（切换会话时先解绑旧的，防串话） */
   const unsubRef = useRef<(() => void) | null>(null);
   /** 流式文本（assistant.delta 累积投影） */
@@ -943,9 +945,11 @@ export function useAgentSession(projectId: string) {
   );
 
   /** 删除历史会话（下拉「删除」二次确认后调用）：删的是当前会话则回退到列表中下一个，全删光则新建一个 */
+  /** 删除会话。失败必须让用户看见：只 console.warn 的话，界面上就是「点了什么都没发生」。 */
   const deleteSessionById = useCallback(
     (targetId: string) => {
       if (!projectId) return;
+      setDeleteError((prev) => (prev?.sessionId === targetId ? null : prev));
       api.deleteSession(projectId, targetId)
         .then(async () => {
           const sessionsEpoch = sessionsEpochRef.current + 1;
@@ -957,10 +961,19 @@ export function useAgentSession(projectId: string) {
           const next = items?.[0] ?? (await api.createSession(projectId));
           await connectSession(next);
         })
-        .catch((e) => console.warn('删除会话失败:', e));
+        .catch((e) => {
+          console.warn('删除会话失败:', e);
+          setDeleteError({
+            sessionId: targetId,
+            message: isApiError(e) ? `删除失败：${e.message}` : '删除失败，请重试',
+          });
+        });
     },
     [projectId, resetLocal, connectSession],
   );
+
+  /** 关掉某个会话行上的删除错误（用户重试或收起菜单时） */
+  const dismissDeleteError = useCallback(() => setDeleteError(null), []);
 
   /** 发送消息：乐观上屏 + POST 提交（回复经事件流 assistant.delta 投影） */
   const sendMessage = useCallback(
@@ -1257,6 +1270,8 @@ export function useAgentSession(projectId: string) {
     reconnectSession,
     switchSession,
     deleteSession: deleteSessionById,
+    deleteError,
+    dismissDeleteError,
     refreshSessions,
   };
 }

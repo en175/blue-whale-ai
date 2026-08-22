@@ -176,6 +176,30 @@ describe('agentSessions API contract', () => {
       expect(fetchMock.mock.calls[0]?.[0]).toBe(expected);
     });
 
+    /** IKAFQ6：agent 侧 `idempotentMutation` 对**每一个**写操作都硬性要求 Idempotency-Key，缺则
+     *  直接 400 idempotency_key_required。deleteSession 曾是八个写操作里唯一漏掉的那个，于是这个
+     *  删除功能从上线起一次都没成功过，而前端只 console.warn，界面上表现为「点了什么都没发生」。
+     *  这条测试遍历全部写操作，防止同类遗漏再次发生。 */
+    const writeCases: [string, () => Promise<unknown>][] = [
+      ['创建会话', () => createSession('p1')],
+      ['删除会话', () => deleteSession('p1', 's1')],
+      ['发送消息', () => sendSessionMessage('p1', 's1', 'hi')],
+      ['会话级取消', () => cancelSession('p1', 's1')],
+      ['Run 级取消', () => cancelSessionRun('p1', 'r1')],
+      ['Run 级重试', () => retrySessionRun('p1', 'r1')],
+      ['确认需求理解', () => confirmRequirementUnderstanding('p1', 's1', 'u1', 2, 'a1')],
+      ['修改需求理解', () => correctRequirementUnderstanding('p1', 's1', 'u1', 2, 'a1', '改过的理解')],
+    ];
+
+    it.each(writeCases)('%s 带上了 Idempotency-Key——agent 缺它一律 400', async (_name, call) => {
+      const fetchMock = captureFetch();
+      await call();
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      expect(init?.method).not.toBe('GET');
+      expect(headers['Idempotency-Key']).toBeTruthy();
+    });
+
     it('带 action_id 的三个端点都真的带上了——服务端缺它会 422', async () => {
       for (const call of [
         () => cancelSession('p1', 's1'),

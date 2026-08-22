@@ -81,26 +81,7 @@
 }
 
 /* 新对话按钮 */
-.newChatBtn {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  padding: 6px var(--spacing-md);
-  border-radius: var(--radius-full);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-tertiary);
-  border: none;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.newChatBtn:hover {
-  background-color: var(--color-bg-hover);
-}
-
-/* ---- 历史会话下拉 ---- */
+/* ---- 会话切换器（IKAFQ6）：标题即入口，「新对话」在菜单顶部 ---- */
 .historyWrap {
   position: relative;
 }
@@ -146,11 +127,34 @@
   animation: popupFadeIn 0.15s ease;
 }
 
-.historyDropdownTitle {
+/* 菜单顶部的主操作：新建对话。放这里是合并两个控件的代价——新建从一击变两击，
+   换来第一行少一个控件（给 IKAFPC 的积分胶囊腾位）且当前会话标题常驻可见。 */
+.historyNewItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);
   font-weight: 600;
-  color: var(--color-text-tertiary);
-  padding: var(--spacing-xs) var(--spacing-md) var(--spacing-sm);
+  color: var(--color-text-primary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: all var(--transition-fast);
+}
+
+.historyNewItem:hover {
+  background-color: var(--color-bg-hover);
+}
+
+.historyDivider {
+  height: 1px;
+  margin: var(--spacing-xs) 0;
+  background-color: var(--color-border-primary);
 }
 
 .historyEmpty {
@@ -177,6 +181,9 @@
 }
 
 .historyItemLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex: 1;
   min-width: 0;
   padding: var(--spacing-sm) 0 var(--spacing-sm) var(--spacing-md);
@@ -186,14 +193,61 @@
   border: none;
   cursor: pointer;
   text-align: left;
+  font-family: inherit;
+}
+
+.historyItemText {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* 当前会话的选中标记：合并后菜单同时承担「切换」与「这是哪一个」两件事，需要一眼看出当前项 */
+.historyItemCheck {
+  flex-shrink: 0;
+  color: var(--color-accent-text);
+}
+
 .historyItemActive .historyItemLabel {
   color: var(--color-accent-text);
   font-weight: 500;
+}
+
+/* ---- 删除失败：错误显示在出错的那一行上，下拉不关闭，可原地重试 ---- */
+.historyItemFailed {
+  background-color: rgba(229, 72, 77, 0.1);
+}
+
+.historyItemError {
+  flex: 1;
+  min-width: 0;
+  padding: var(--spacing-sm) 0 var(--spacing-sm) var(--spacing-md);
+  font-size: var(--font-size-sm);
+  color: #e5484d;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.historyItemRetry {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin-right: var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #e5484d;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.historyItemRetry:hover {
+  background-color: rgba(229, 72, 77, 0.18);
 }
 
 .historyItemDelete {

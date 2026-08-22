@@ -251,11 +251,15 @@ export function fetchSessionSnapshot(projectId: string, sessionId: string): Prom
   return p;
 }
 
-/** 删除会话 DELETE /projects/:id/sessions/:sid（历史会话下拉「删除」，需二次确认） */
+/** 删除会话 DELETE /projects/:id/sessions/:sid（历史会话下拉「删除」，需二次确认）
+ *
+ * Idempotency-Key 是 agent 侧对**所有**写操作的硬要求（`http/app.ts` 的 idempotentMutation
+ * 缺则直接 400 idempotency_key_required），删除也不例外——之前这里漏了，于是这个删除从上线起
+ * 一次都没成功过。 */
 export function deleteSession(projectId: string, sessionId: string): Promise<unknown> {
   return sessionRequest(
     agentPath('delete_session', projectId, { session_id: sessionId }),
-    { method: 'DELETE' },
+    { method: 'DELETE', headers: { 'Idempotency-Key': newIdempotencyKey() } },
   );
 }
 

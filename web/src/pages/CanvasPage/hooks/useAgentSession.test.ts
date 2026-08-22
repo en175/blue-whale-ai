@@ -1188,3 +1188,63 @@ describe('classifyConfirmFailure', () => {
     });
   });
 });
+
+/** IKAFQ6：删除失败过去只 console.warn，用户看到的是「点了什么都没发生」。 */
+describe('useAgentSession 删除会话', () => {
+  it('删除失败时把原因挂到那一行上，不再静默', async () => {
+    mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1' }, { session_id: 'session-2' }] });
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.deleteSession.mockRejectedValue(new ApiError(409, '会话正在运行中', 'session_busy'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.sessionId).toBe('session-1'));
+
+    await act(async () => {
+      latest.deleteSession('session-2');
+    });
+
+    await vi.waitFor(() => expect(latest.deleteError).not.toBeNull());
+    expect(latest.deleteError).toEqual({ sessionId: 'session-2', message: '删除失败：会话正在运行中' });
+    // 会话没被移出列表——它其实还在
+    expect(latest.sessions.map((s) => s.session_id)).toContain('session-2');
+  });
+
+  it('重试同一行时先清掉上一次的错误，避免旧提示挂着不走', async () => {
+    mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1' }, { session_id: 'session-2' }] });
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.deleteSession.mockRejectedValueOnce(new ApiError(500, '上游炸了', 'internal_error'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.sessionId).toBe('session-1'));
+
+    await act(async () => {
+      latest.deleteSession('session-2');
+    });
+    await vi.waitFor(() => expect(latest.deleteError?.sessionId).toBe('session-2'));
+
+    mocks.deleteSession.mockResolvedValue({});
+    mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1' }] });
+    await act(async () => {
+      latest.deleteSession('session-2');
+    });
+
+    await vi.waitFor(() => expect(latest.deleteError).toBeNull());
+    await vi.waitFor(() => expect(latest.sessions.map((s) => s.session_id)).toEqual(['session-1']));
+  });
+
+  it('dismissDeleteError 收起提示', async () => {
+    mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1' }, { session_id: 'session-2' }] });
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.deleteSession.mockRejectedValue(new ApiError(500, 'x', 'internal_error'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.sessionId).toBe('session-1'));
+
+    await act(async () => {
+      latest.deleteSession('session-2');
+    });
+    await vi.waitFor(() => expect(latest.deleteError).not.toBeNull());
+
+    await act(async () => {
+      latest.dismissDeleteError();
+    });
+    expect(latest.deleteError).toBeNull();
+  });
+});

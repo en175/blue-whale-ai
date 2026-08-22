@@ -13,7 +13,9 @@ import {
   PictureInPicture2,
   BookText,
   Coins,
-  History,
+  MessageSquare,
+  Check,
+  RotateCcw,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -601,6 +603,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     reconnectSession,
     switchSession,
     deleteSession,
+    deleteError,
+    dismissDeleteError,
     refreshSessions,
   } = useAgentSession(projectId ?? '');
   /** 历史会话下拉展开态 */
@@ -796,13 +800,17 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     if (!historyOpen && !modelOpen && !showUpload) return;
     const handleDocMouseDown = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (historyRef.current && !historyRef.current.contains(target)) setHistoryOpen(false);
+      if (historyRef.current && !historyRef.current.contains(target)) {
+        setHistoryOpen(false);
+        // 菜单收起时一并丢掉删除错误：留着它，下次打开会看到一条早已过期的红字。
+        dismissDeleteError();
+      }
       if (modelRef.current && !modelRef.current.contains(target)) setModelOpen(false);
       if (uploadRef.current && !uploadRef.current.contains(target)) setShowUpload(false);
     };
     document.addEventListener('mousedown', handleDocMouseDown);
     return () => document.removeEventListener('mousedown', handleDocMouseDown);
-  }, [historyOpen, modelOpen, showUpload]);
+  }, [historyOpen, modelOpen, showUpload, dismissDeleteError]);
 
   /** 鼠标按下头部开始拖动（仅浮动模式下可拖） */
   const handleDragStart = useCallback(
@@ -951,10 +959,10 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       {/* 头部标题栏（拖动区域） */}
       <div className={`${styles.panelHeader} ${floating ? styles.panelHeaderFloating : ''}`}>
         <div className={styles.headerLeft}>
-          <button className={styles.newChatBtn} onClick={handleNewChat} title="开启新对话">
-            <Plus size={14} strokeWidth={2.5} />
-            <span>新对话</span>
-          </button>
+          {/* 会话切换器（IKAFQ6）：标题本身就是唯一入口，「新对话」收进菜单顶部。
+           *  合并的动因是第一行要腾位置（IKAFPC 的积分胶囊要进来），代价是新建从一击变两击。
+           *  选 menu button 而非 split button 的依据见工单：项目内通常四五个会话，切换比新建频繁，
+           *  没有强默认动作；而且 split button 的标签位被「新对话」占死后，当前会话标题就没地方放了。 */}
           <div className={styles.historyWrap} ref={historyRef}>
             <button
               className={`${styles.historyBtn} ${historyOpen ? styles.iconBtnActive : ''}`}
@@ -962,10 +970,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                 const next = !historyOpen;
                 setHistoryOpen(next);
                 if (next) refreshSessions();
+                else dismissDeleteError();
               }}
-              title="历史会话"
+              title="切换会话 / 新建对话"
             >
-              <History size={14} strokeWidth={2} />
+              <MessageSquare size={14} strokeWidth={2} />
               {/* 当前会话标题：标题异步生成完成（session.updated）后就地更新，不再永远是「新对话」 */}
               <span className={styles.historyBtnTitle}>
                 {sessions.find((s) => s.session_id === sessionId)?.title || '新对话'}
@@ -974,38 +983,69 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
             </button>
             {historyOpen && (
               <div className={styles.historyDropdown}>
-                <div className={styles.historyDropdownTitle}>历史会话</div>
+                <button type="button" className={styles.historyNewItem} onClick={handleNewChat}>
+                  <Plus size={14} strokeWidth={2.5} />
+                  <span>新对话</span>
+                </button>
+                <div className={styles.historyDivider} />
                 {sessions.length === 0 ? (
                   <div className={styles.historyEmpty}>暂无历史会话</div>
                 ) : (
-                  sessions.map((s) => (
-                    <div
-                      key={s.session_id}
-                      className={`${styles.historyItem} ${s.session_id === sessionId ? styles.historyItemActive : ''}`}
-                    >
-                      <button
-                        type="button"
-                        className={styles.historyItemLabel}
-                        onClick={() => {
-                          switchSession(s.session_id);
-                          setHistoryOpen(false);
-                        }}
+                  sessions.map((s) => {
+                    const failed = deleteError?.sessionId === s.session_id ? deleteError : null;
+                    return (
+                      <div
+                        key={s.session_id}
+                        className={`${styles.historyItem} ${s.session_id === sessionId ? styles.historyItemActive : ''} ${failed ? styles.historyItemFailed : ''}`}
                       >
-                        {s.title || '新对话'}
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.historyItemDelete}
-                        title="删除会话"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteTarget({ id: s.session_id, title: s.title || '新对话' });
-                        }}
-                      >
-                        <X size={12} strokeWidth={2} />
-                      </button>
-                    </div>
-                  ))
+                        {failed ? (
+                          <>
+                            {/* 删除失败就在这一行说清楚，下拉不关闭——用户能原地重试。
+                             *  全局 toast 做不到这点：它弹出来时下拉已经收了，出错的行和提示是分离的。 */}
+                            <span className={styles.historyItemError} title={failed.message}>
+                              {failed.message}
+                            </span>
+                            <button
+                              type="button"
+                              className={styles.historyItemRetry}
+                              title="重试删除"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteSession(s.session_id);
+                              }}
+                            >
+                              <RotateCcw size={12} strokeWidth={2} />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className={styles.historyItemLabel}
+                              onClick={() => {
+                                switchSession(s.session_id);
+                                setHistoryOpen(false);
+                              }}
+                            >
+                              {s.session_id === sessionId && <Check size={12} strokeWidth={2.5} className={styles.historyItemCheck} />}
+                              <span className={styles.historyItemText}>{s.title || '新对话'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.historyItemDelete}
+                              title="删除会话"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteTarget({ id: s.session_id, title: s.title || '新对话' });
+                              }}
+                            >
+                              <X size={12} strokeWidth={2} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             )}
