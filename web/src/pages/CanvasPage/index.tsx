@@ -1841,6 +1841,7 @@ export default function CanvasPage() {
           viewport={doc?.viewport}
           onViewportChange={setViewport}
           registerSpawnPosition={registerSpawnPosition}
+          hideZoomControl={showAgent}
           onNodeDragStop={handleNodeDragStop}
           onNodeClick={handleCanvasNodeClick}
           onPaneClick={handleCanvasPaneClick}
