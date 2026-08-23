@@ -6,7 +6,7 @@
  * 所以真正的解法不是多一张表，而是让手写路径这件事从代码里消失，由下面的源码守卫盯着。
  */
 import { describe, expect, it } from 'vitest';
-import { AGENT_ROUTES, agentPath, agentUrl } from './agentRoutes';
+import { AGENT_ROUTES, agentMethod, agentPath, agentUrl } from './agentRoutes';
 
 describe('agentUrl', () => {
   it('按清单拼地址，并补上 BFF 命名空间与 project 前缀', () => {
@@ -37,6 +37,29 @@ describe('agentUrl', () => {
 
   it('agentPath 去掉命名空间，交给 sessionRequest 补', () => {
     expect(agentPath('cancel_run', 'p1', { run_id: 'r1' })).toBe('/projects/p1/runs/r1/cancel');
+  });
+});
+
+describe('agentMethod', () => {
+  it('动词也来自清单，不再各调用点自己硬写（审查 W·A9）', () => {
+    expect(agentMethod('list_sessions')).toBe('GET');
+    expect(agentMethod('create_session')).toBe('POST');
+    expect(agentMethod('delete_session')).toBe('DELETE');
+  });
+
+  it('路由名不存在照样抛，和 agentUrl 一个脾气', () => {
+    expect(() => agentMethod('no_such_route')).toThrow(/未知的 agent 路由/);
+  });
+});
+
+describe('源码守卫：不许再手写 HTTP 动词', () => {
+  it('agentSessions.ts 里没有硬写的 method 字面量', async () => {
+    // 地址和动词是同一份契约的两半。此前只守住了地址：agent 把某条路由从 POST 改成 PATCH，
+    // 清单副本跟着更新、check:agent-routes 照样绿、地址一字不差，而每一次调用 405。
+    const source = await import('./agentSessions.ts?raw').then((m) => m.default as string);
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+    const hardCoded = [...code.matchAll(/method:\s*'(GET|POST|PUT|PATCH|DELETE)'/g)].map((m) => m[0]);
+    expect(hardCoded).toEqual([]);
   });
 });
 

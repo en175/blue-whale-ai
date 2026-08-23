@@ -27,6 +27,14 @@ import { agentServiceBaseUrl, agentServiceToken, agentTenantId } from "./agent-s
 const WINDOW_SLACK_SECONDS = 300;
 /** 翻页上限：一个会话的 Run 数有限，10 页 × 100 条足够；超出会如实标记 truncated。 */
 const MAX_LOG_PAGES = 10;
+/**
+ * 求和这一段的时间预算（毫秒）。
+ *
+ * 上面 fetchRuns 已经占了最多 10 秒，加上这 15 秒，单个请求的上游 I/O 封顶 25 秒——
+ * 忙账户被迫翻满 10 页时，浏览器早就超时走人，而 handler 还在烧上游调用（审查 W·A13）。
+ * 到点就认账：给一个下界并标 truncated，让前端说「至少花了这么多」，而不是把连接挂死。
+ */
+const SUM_BUDGET_MS = 15_000;
 
 interface AgentRunView {
   run_id?: unknown;
@@ -96,8 +104,14 @@ export class AgentSessionCreditsController {
 
     const starts = runs.map((run) => secondsOf(run.created_at)).filter((s): s is number => s !== null);
     const ends = runs.map((run) => secondsOf(run.finished_at)).filter((s): s is number => s !== null);
-    const window: { startTimestamp?: number; endTimestamp?: number; maxPages: number } = {
+    const window: {
+      startTimestamp?: number;
+      endTimestamp?: number;
+      maxPages: number;
+      budgetMs: number;
+    } = {
       maxPages: MAX_LOG_PAGES,
+      budgetMs: SUM_BUDGET_MS,
     };
     if (starts.length > 0) window.startTimestamp = Math.min(...starts) - WINDOW_SLACK_SECONDS;
     // 还在跑的 Run 没有 finished_at：此时不设上界，否则会把正在产生的账单挡在窗外。

@@ -48,7 +48,7 @@ function createFakeAgent(behaviour: () => AgentBehaviour) {
 interface SumCall {
   token: string;
   capabilityIds: readonly string[];
-  window?: { startTimestamp?: number; endTimestamp?: number; maxPages?: number };
+  window?: { startTimestamp?: number; endTimestamp?: number; maxPages?: number; budgetMs?: number };
 }
 
 /** 记下求和调用，并按需给出结果——时间窗推导只能从这里观测。 */
@@ -350,6 +350,7 @@ describe("AgentSessionCreditsController", () => {
       await controller.sessionCredits("s1", "p1", USER, BEARER);
       expect(account.calls[0]?.window).toEqual({
         maxPages: 10,
+        budgetMs: 15_000,
         startTimestamp: startSeconds - SLACK,
         endTimestamp: endSeconds + SLACK,
       });
@@ -373,6 +374,7 @@ describe("AgentSessionCreditsController", () => {
       await controller.sessionCredits("s1", "p1", USER, BEARER);
       expect(account.calls[0]?.window).toEqual({
         maxPages: 10,
+        budgetMs: 15_000,
         startTimestamp: startSeconds - SLACK,
       });
       expect(account.calls[0]?.window).not.toHaveProperty("endTimestamp");
@@ -411,7 +413,7 @@ describe("AgentSessionCreditsController", () => {
       );
 
       await controller.sessionCredits("s1", "p1", USER, BEARER);
-      expect(account.calls[0]?.window).toEqual({ maxPages: 10 });
+      expect(account.calls[0]?.window).toEqual({ maxPages: 10, budgetMs: 15_000 });
     });
   });
 });

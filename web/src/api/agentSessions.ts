@@ -8,7 +8,7 @@
 import { readSseResponse, type SseEvent } from './events';
 import { ApiError, apiRequest } from './http';
 import { newIdempotencyKey } from './jobs';
-import { agentPath, agentUrl } from './agentRoutes';
+import { agentPath, agentUrl, agentMethod } from './agentRoutes';
 import { getAccessToken, setSession } from '@/utils/auth';
 
 export type { SseEvent };
@@ -263,7 +263,7 @@ export function createSession(projectId: string): Promise<SessionRecord> {
   const existed = ensurePending.get(projectId);
   if (existed) return existed;
   const p = sessionRequest<SessionRecord>(agentPath('create_session', projectId), {
-    method: 'POST',
+    method: agentMethod('create_session'),
     headers: { 'Idempotency-Key': newIdempotencyKey() },
     body: '{}',
   }).finally(() => ensurePending.delete(projectId));
@@ -291,7 +291,7 @@ export function fetchSessionSnapshot(projectId: string, sessionId: string): Prom
 export function deleteSession(projectId: string, sessionId: string): Promise<unknown> {
   return sessionRequest(
     agentPath('delete_session', projectId, { session_id: sessionId }),
-    { method: 'DELETE', headers: { 'Idempotency-Key': newIdempotencyKey() } },
+    { method: agentMethod('delete_session'), headers: { 'Idempotency-Key': newIdempotencyKey() } },
   );
 }
 
@@ -310,7 +310,7 @@ export function sendSessionMessage(
   return sessionRequest(
     agentPath('send_message', projectId, { session_id: sessionId }),
     {
-      method: 'POST',
+      method: agentMethod('send_message'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
       body: JSON.stringify({
         content: [{ type: 'text', text }],
@@ -336,7 +336,7 @@ export function cancelSession(projectId: string, sessionId: string): Promise<unk
   return sessionRequest(
     agentPath('cancel_session', projectId, { session_id: sessionId }),
     {
-      method: 'POST',
+      method: agentMethod('cancel_session'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
       body: JSON.stringify({ action_id: newIdempotencyKey() }),
     },
@@ -355,7 +355,7 @@ export function cancelSessionRun(projectId: string, runId: string): Promise<unkn
   return sessionRequest(
     agentPath('cancel_run', projectId, { run_id: runId }),
     {
-      method: 'POST',
+      method: agentMethod('cancel_run'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
       body: JSON.stringify({ action_id: newIdempotencyKey() }),
     },
@@ -370,7 +370,7 @@ export function retrySessionRun(
   return sessionRequest(
     agentPath('retry_run', projectId, { run_id: runId }),
     {
-      method: 'POST',
+      method: agentMethod('retry_run'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
       body: JSON.stringify({ action_id: newIdempotencyKey() }),
     },
@@ -416,7 +416,7 @@ export function confirmRequirementUnderstanding(
   return sessionRequest(
     agentPath('confirm_requirement_understanding', projectId, { session_id: sessionId, understanding_id: understandingId, version }),
     {
-      method: 'POST',
+      method: agentMethod('confirm_requirement_understanding'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
       body: JSON.stringify({ action_id: actionId }),
     },
@@ -435,7 +435,7 @@ export function correctRequirementUnderstanding(
   return sessionRequest(
     agentPath('correct_requirement_understanding', projectId, { session_id: sessionId, understanding_id: understandingId, version }),
     {
-      method: 'POST',
+      method: agentMethod('correct_requirement_understanding'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
       body: JSON.stringify({ action_id: actionId, accepted_summary: acceptedSummary }),
     },

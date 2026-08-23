@@ -489,6 +489,28 @@ function GenerationCard({
 
 /** 助手消息：按结构化块渲染（text/thinking/card），无块时回退纯文本；追问与需求理解确认都走自然语言（grillme 式），不用结构化卡
  * 生成卡组支持「手动应用整组」「取消」（04 §5.2 用户动作），组内单卡仍可各自应用/双击编辑 */
+/**
+ * 一个内容块的 React key。
+ *
+ * 此前用的是数组下标（审查 W·A18）。`attachCards` 每次水合都会**先剥掉已有的 card 块再整体
+ * 追加**：`blocks: [...kept, ...blocks]`。于是同一个下标上的卡片可能被换成另一张，而
+ * key 和组件类型都没变——React 保住组件实例，`GenerationCard` 里的 `edited` / `editingField` /
+ * `draftValue` 三份草稿原样留在原地，用户正在编辑的那几个字提交到了另一张卡上。
+ *
+ * 卡片按自己的身份做 key；其余块按**同类型内的序号**——这样插入一张卡不会让后面的文字块
+ * 整体位移一格。服务端的 content 数组没有块级 id，同类型序号是这里能拿到的最稳的东西。
+ */
+function blockKey(block: SessionContentBlock, ordinals: Record<string, number>): string {
+  if (block.type === 'card' && block.card) {
+    const id = block.card.cardId ?? block.card.shotTitle;
+    if (id) return `card:${id}`;
+  }
+  const kind = block.type ?? 'text';
+  const n = (ordinals[kind] = (ordinals[kind] ?? 0) + 1);
+  return `${kind}:${n}`;
+}
+
+
 function AssistantMessageBody({
   message,
   onCardApply,
@@ -507,6 +529,8 @@ function AssistantMessageBody({
   cancelledMessageIds: Set<string>;
 }) {
   const blocks = message.blocks ?? [];
+  // 每次渲染新起一份计数，`blockKey` 边走边填。
+  const blockOrdinals: Record<string, number> = {};
   const structured = blocks.filter((b) => b.type !== 'text');
   // 有结构化块 → 按块渲染；无 → 纯文本 markdown
   if (structured.length === 0) return <Markdown text={message.content} />;
@@ -516,17 +540,18 @@ function AssistantMessageBody({
   const showGroupActions = cardBlocks.length > 1 && !groupCancelled && unappliedCards.length > 0;
   return (
     <>
-      {blocks.map((b, i) => {
+      {blocks.map((b) => {
+        const key = blockKey(b, blockOrdinals);
         if (b.type === 'thinking' && (b.thinking?.steps || b.thinking?.reasoning)) {
           return (
-            <ThinkingBlock key={i} steps={b.thinking.steps ?? []} reasoning={b.thinking.reasoning} />
+            <ThinkingBlock key={key} steps={b.thinking.steps ?? []} reasoning={b.thinking.reasoning} />
           );
         }
         if (b.type === 'card' && b.card) {
           const cardId = b.card.cardId ?? b.card.shotTitle;
           return (
             <GenerationCard
-              key={i}
+              key={key}
               card={b.card}
               onApply={(patch) => onCardApply(b.card!, patch)}
               disabled={disabled}
@@ -535,7 +560,7 @@ function AssistantMessageBody({
             />
           );
         }
-        if (b.text) return <Markdown key={i} text={b.text} />;
+        if (b.text) return <Markdown key={key} text={b.text} />;
         return null;
       })}
       {showGroupActions && (
@@ -593,6 +618,14 @@ const quickQuestions = [
  * 上游账单是 post-billing 才落库的，滞后从几百毫秒到十几秒都见过；此前只等 2.5 秒就放弃，
  * 于是常态是「胶囊显示 0」。总共约 23 秒，覆盖绝大多数滞后，又不会一直挂着请求。
  */
+/**
+ * 判定「用户还在看最新内容」的容差（像素）。
+ *
+ * 取一屏的零头而不是 0：流式期间内容在长，浏览器的滚动位置与新内容之间总有几个像素的
+ * 差；卡到 0 会让自动滚底在真正该生效的时候失灵。
+ */
+const STICK_TO_BOTTOM_PX = 80;
+
 const CREDITS_RETRY_DELAYS = [2500, 6000, 15000] as const;
 
 const DEFAULT_POSITION = { x: 0, y: 0 };
@@ -815,10 +848,21 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [cancellable, stopRun]);
 
-  /** 新消息/流式文本自动滚动到底部 */
+  /**
+   * 新消息 / 流式文本自动滚到底部——**但用户已经往上翻了就别拽他回来**（审查 W·A26）。
+   *
+   * 依赖里有 `streamingText`，而它每来一个 delta 就变一次。此前这里是无条件赋值，于是
+   * 流式期间想回看上文，每秒被拽回底部好几次，等于回看不了。
+   *
+   * 判据是「离底部还有多远」而不是一个显式的『用户滚动过』标志：后者要挂 scroll 监听、
+   * 要分辨程序滚动与人手滚动，而这里真正要问的问题只有一个——他还在看最新的内容吗。
+   */
   useEffect(() => {
     const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom > STICK_TO_BOTTOM_PX) return;
+    el.scrollTop = el.scrollHeight;
   }, [messages, streamingText, runningRunId]);
 
   /** 初始化位置：屏幕右侧；首次挂载也走统一安全边界，窄视口不会横向溢出。 */

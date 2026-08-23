@@ -438,6 +438,22 @@
    比 min-height——那种比法的胜负取决于两个 CSS 模块谁先被打包，不该由顺序决定。 */
 .composerEditable {
   flex: 1;
+  /* 输入区能往上长，但要长到哪儿为止（审查 W·A22）。
+   *
+   * 上面 .inputBox 那句"min-height 而不是 height——粘长文本时要能往上长"放行了增长，
+   * 却没人给它封顶：整条 composer 链路一个 max-height 都没有，而 .inputArea 是
+   * flex-shrink: 0、面板是 overflow: hidden。粘约 2000 字进去，.messageList（flex: 1）
+   * 被压向零，发送 / 停止 / 模型选择 / 上传整条工具栏被裁到面板边缘之下。
+   *
+   * 封顶放在**会滚的那一层**，而不是 .inputBox 上：.inputBox 的父级 .inputArea 是
+   * auto 高度，百分比 max-height 在那里会退化成 none，写了也是空转。
+   *
+   * 14.4em ≈ 8 行（font-size-md 13px × line-height 1.8）。用 em 不用 vh：同一个界面在
+   * 半屏与全屏下该长得一样（与 .panel 宽度用固定值同一条理由）。超出的自己滚，
+   * 工具栏因此始终贴在输入框底边。 */
+  min-height: 0;
+  max-height: 14.4em;
+  overflow-y: auto;
 }
 
 .inputBox:focus-within {

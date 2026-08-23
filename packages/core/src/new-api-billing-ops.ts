@@ -251,13 +251,28 @@ export function createNewApiBillingOps(request: NewApiRequest) {
     async sumRunCapabilityQuota(
       token: string,
       capabilityIds: readonly string[],
-      window: { startTimestamp?: number; endTimestamp?: number; maxPages?: number } = {},
+      window: {
+        startTimestamp?: number;
+        endTimestamp?: number;
+        maxPages?: number;
+        /** 整个求和的时间上限（毫秒），到点就停并标 truncated。缺省 20 秒。 */
+        budgetMs?: number;
+      } = {},
     ): Promise<NewApiCapabilityQuotaResult> {
       const wanted = new Set(capabilityIds.filter((id) => typeof id === "string" && id.length > 0));
       if (wanted.size === 0) return { quota: 0, matched: 0, truncated: false };
 
       const pageSize = 100;
       const maxPages = Math.max(1, Math.trunc(window.maxPages ?? 10));
+      // 整体预算（审查 W·A13）。
+      //
+      // 翻页是串行的，每次 request() 自带 10 秒超时：10 页最坏就是约 100 秒，而调用方
+      // （BFF 的查账端点）自己前面还有一次 10 秒的 fetchRuns。忙账户（dock 一直在出图，
+      // /api/log/self 被刷屏）会被迫走满 10 页——那时浏览器早就超时走人了，而 handler
+      // 还在烧上游调用，**每一轮结束都来一遍**。
+      //
+      // 20 秒之内还没数完就认账：给一个下界并标 truncated，比把连接挂死强。
+      const deadline = Date.now() + Math.max(1_000, Math.trunc(window.budgetMs ?? 20_000));
       const range = [
         window.startTimestamp ? `&start_timestamp=${Math.trunc(window.startTimestamp)}` : "",
         window.endTimestamp ? `&end_timestamp=${Math.trunc(window.endTimestamp)}` : "",
@@ -267,6 +282,10 @@ export function createNewApiBillingOps(request: NewApiRequest) {
       let matched = 0;
       let truncated = false;
       for (let page = 1; page <= maxPages; page += 1) {
+        if (Date.now() >= deadline) {
+          truncated = true;
+          break;
+        }
         const response = await request<NewApiEnvelope>(
           `/api/log/self?p=${page}&page_size=${pageSize}&type=2${range}`,
           { method: "GET" },
@@ -284,6 +303,11 @@ export function createNewApiBillingOps(request: NewApiRequest) {
         if (page === maxPages) truncated = true;
       }
       return { quota, matched, truncated };
+
+      // **不要加「券号全部命中就提前退出」。** 审查（W·A13）建议过这一条，它是错的：
+      // 一张能力券对应一次 Run，而一次 Run 会调好几次模型，因此**同一个券号有多条账单**，
+      // 且可能跨页。见到每个券号各一次就收手，求和会少算——那比慢更糟，因为它不会被标成
+      // truncated，用户看到的是一个笃定的错数。
     },
 
     /** IK7G9X：按 request_id 精确取一条消费流水（quota 单位与余额一致）。

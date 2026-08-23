@@ -51,6 +51,22 @@ export function agentUrl(
   return `${NAMESPACE}/projects/${encodeURIComponent(projectId)}${tail}`;
 }
 
+/**
+ * 这条路由的 HTTP 动词，取自清单。
+ *
+ * 清单里一直带着 `method`，但**从来没有人读它**——各调用点自己硬写 `{ method: 'POST' }`
+ * （审查 W·A9）。于是守卫只覆盖了地址的一半：agent 把某条路由从 POST 改成 PATCH，
+ * 清单副本跟着更新、`check:agent-routes` 照样绿、`agentUrl` 拼出来的地址一字不差，
+ * 而每一次调用 405。地址和动词是同一份契约的两半，不该只有一半有人守。
+ *
+ * 与 `agentUrl` 同样在路由名不存在时抛：错就该在第一次调用时炸开。
+ */
+export function agentMethod(name: string): string {
+  const route = AGENT_ROUTES.find((entry) => entry.name === name);
+  if (!route) throw new Error(`未知的 agent 路由：${name}`);
+  return route.method;
+}
+
 /** 只要相对 agent 的那一段（`sessionRequest` 自带 `/api/agent/v1` 前缀）。 */
 export function agentPath(
   name: string,

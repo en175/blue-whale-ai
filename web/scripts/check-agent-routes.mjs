@@ -30,7 +30,12 @@ const local = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/api/agent-rest-routes.v1.json'), 'utf8'),
 );
 
-const response = await fetch(new URL('/v1/routes', base), {
+// 保留 base 上的路径前缀（审查 W·A11）。
+// `new URL('/v1/routes', base)` 里那个前导斜杠是**绝对路径**，会把 base 的路径整段丢掉：
+// AGENT_BASE_URL=https://host/agent 会去探 https://host/v1/routes。
+// 反向代理下 agent 挂在子路径上是常见部署形态，那时这个脚本探的是一个不存在的地址。
+const routesUrl = new URL(`${base.replace(/\/+$/, '')}/v1/routes`);
+const response = await fetch(routesUrl, {
   headers: token ? { authorization: `Bearer ${token}` } : {},
 });
 if (!response.ok) {
