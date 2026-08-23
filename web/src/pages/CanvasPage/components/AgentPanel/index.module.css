@@ -4,10 +4,13 @@
 
 .panel {
   position: absolute;
-  width: clamp(280px, 26vw, 420px);
+  /* 宽度是**固定值**，不跟视口走（IKAGZC）。原来是 clamp(280px, 26vw, 420px)：半屏时
+     26vw 会把面板挤窄，同一个界面在不同窗口下长得不一样。窄屏由 max-width 兜底。 */
+  width: 420px;
   max-width: calc(100% - 16px);
   min-width: 0;
-  height: calc(100% - var(--header-height) - 32px);
+  /* 一直延伸到底：原来底部留了 32px，面板下方空一截。只扣掉顶部的 header 与 8px 间距。 */
+  height: calc(100% - var(--header-height) - 8px);
   background-color: #1e1e1e;
   border: 1px solid var(--color-border-primary);
   border-radius: 16px;
@@ -373,7 +376,8 @@
 }
 
 .inputBox {
-  background-color: #2a2a2a;
+  /* 比面板底色（#1e1e1e）更深一档，让输入区从面板里"沉"下去（IKAGZC）。 */
+  background-color: #161616;
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-md);
   padding: var(--spacing-sm) var(--spacing-md);
@@ -502,17 +506,15 @@
   position: relative;
 }
 
+/* 图标按钮：平时不显示模型名称，只留一个盒子（IKAGZC）。 */
 .modelBtn {
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 30px;
-  padding: 0 var(--spacing-sm);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  max-width: 120px;
   justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: var(--radius-sm);
   color: var(--color-text-primary);
   background: transparent;
   border: 1px solid var(--color-border-secondary);
@@ -520,23 +522,15 @@
   transition: all var(--transition-fast);
 }
 
-.modelLabel {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .modelBtn:hover {
   color: var(--color-text-primary);
   border-color: var(--color-border-hover);
 }
 
-.modelArrow {
-  transition: transform var(--transition-fast);
-}
-
-.modelArrowUp {
-  transform: rotate(180deg);
+/* 菜单展开时按钮保持点亮，否则图标按钮没有名称，用户看不出哪个控件开着。 */
+.modelBtnActive {
+  background-color: var(--color-bg-active);
+  border-color: var(--color-border-hover);
 }
 
 .modelDropdown {
@@ -1666,6 +1660,12 @@
 }
 
 /* ---- 本会话累计消耗积分胶囊（IKAFPC） ---- */
+/* 数字未落定时也占住宽度，避免落定那一刻把同行元素推一下（IKAGZC）。 */
+.creditValue {
+  min-width: 1.6em;
+  text-align: right;
+}
+
 .creditPill {
   display: inline-flex;
   align-items: center;

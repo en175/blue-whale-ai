@@ -17,6 +17,7 @@ import {
   Check,
   CheckCircle2,
   RotateCcw,
+  Package,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -38,6 +39,9 @@ import {
 } from '../ChipTextEditor/composed';
 import { shouldCancelOnKey } from './cancelShortcut';
 import { getPanelLayout } from './layout';
+
+/** 面板与视口边缘的固定间距。刻意不用视口百分比：同一个界面在半屏与全屏下应当长得一样（IKAGZC）。 */
+const PANEL_EDGE_GAP = 8;
 import AssetChip from '../AssetChip';
 
 /** 父组件没传已应用集合时的空集。提到模块级是为了保持引用稳定，避免每次渲染都造一个新 Set。 */
@@ -831,9 +835,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           pageHeight: page.clientHeight,
           headerHeight: headerH,
           panelWidth: rect.width,
-          panelHeight: page.clientHeight - headerH - page.clientHeight * 0.08,
-          desiredX: page.clientWidth * (1 - 0.015) - rect.width,
-          desiredY: headerH + page.clientHeight * 0.01,
+          // 撑满可用高度，由 layout.ts 的固定 PANEL_MARGIN 收边。原来减的是 8% 视口高度，
+          // 那让面板在不同窗口下高矮不一，而且底部永远空一截（IKAGZC）。
+          panelHeight: page.clientHeight - headerH,
+          desiredX: page.clientWidth - PANEL_EDGE_GAP - rect.width,
+          desiredY: headerH + PANEL_EDGE_GAP,
         });
         setPosition({ x: layout.x, y: layout.y });
         setPanelHeight(layout.height);
@@ -873,9 +879,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         pageHeight: page.clientHeight,
         headerHeight: headerH,
         panelWidth: rect.width,
-        panelHeight: page.clientHeight - headerH - page.clientHeight * 0.08,
-        desiredX: page.clientWidth * (1 - 0.015) - rect.width,
-        desiredY: headerH + page.clientHeight * 0.01,
+        // 撑满可用高度，由 layout.ts 的固定 PANEL_MARGIN 收边。原来减的是 8% 视口高度，
+          // 那让面板在不同窗口下高矮不一，而且底部永远空一截（IKAGZC）。
+          panelHeight: page.clientHeight - headerH,
+        desiredX: page.clientWidth - PANEL_EDGE_GAP - rect.width,
+        desiredY: headerH + PANEL_EDGE_GAP,
       });
       setPosition({ x: layout.x, y: layout.y });
       setPanelHeight(layout.height);
@@ -1080,18 +1088,23 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       {/* 头部标题栏（拖动区域） */}
       <div className={`${styles.panelHeader} ${floating ? styles.panelHeaderFloating : ''}`}>
         <div className={styles.headerLeft}>
-          {/* 本会话累计消耗积分（IKAFPC）。常驻，悬浮出口径说明。
-           *  查不到时整个胶囊不渲染——显示 0 会让用户以为这一轮免费，而「不知道」和「没花钱」
-           *  是两回事。 */}
-          {sessionCredits !== null && (
-            <span
-              className={styles.creditPill}
-              title={`目前 Agent 对话累计消耗积分：${sessionCredits} 积分`}
-            >
-              <Coins size={12} strokeWidth={2} />
-              <span>{sessionCredits}</span>
+          {/* 本会话累计消耗积分（IKAFPC / IKAGZC）。
+           *  **位置从一开始就占住**：原来写成「查到了才渲染」，于是面板打开后胶囊凭空冒出来，
+           *  还把右边的会话切换器推一下——用户看到的是一次白等。数字未落定时显示占位符，
+           *  仍然不显示 0：「不知道」和「没花钱」是两回事，后者会让人以为这一轮免费。 */}
+          <span
+            className={styles.creditPill}
+            title={
+              sessionCredits === null
+                ? '正在统计本次对话累计消耗积分'
+                : `目前 Agent 对话累计消耗积分：${sessionCredits} 积分`
+            }
+          >
+            <Coins size={12} strokeWidth={2} />
+            <span className={styles.creditValue}>
+              {sessionCredits === null ? '—' : sessionCredits}
             </span>
-          )}
+          </span>
           {/* 会话切换器（IKAFQ6）：标题本身就是唯一入口，「新对话」收进菜单顶部。
            *  合并的动因是第一行要腾位置（IKAFPC 的积分胶囊要进来），代价是新建从一击变两击。
            *  选 menu button 而非 split button 的依据见工单：项目内通常四五个会话，切换比新建频繁，
@@ -1468,17 +1481,14 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           <div className={styles.toolbarRight}>
             <div className={styles.modelWrap} ref={modelRef}>
               <button
-                className={styles.modelBtn}
+                className={`${styles.modelBtn} ${modelOpen ? styles.modelBtnActive : ''}`}
+                title={currentModel?.label ? `Agent 模型：${currentModel.label}` : '选择 Agent 模型'}
+                aria-label={currentModel?.label ? `Agent 模型：${currentModel.label}` : '选择 Agent 模型'}
                 onClick={() => setModelOpen(!modelOpen)}
               >
-                <span className={styles.modelLabel}>
-                  {currentModel?.label ?? '选择模型'}
-                </span>
-                <ChevronDown
-                  size={12}
-                  strokeWidth={2}
-                  className={`${styles.modelArrow} ${modelOpen ? styles.modelArrowUp : ''}`}
-                />
+                {/* 平时只露一个盒子图标：模型名称在这一行没有常驻价值，点开菜单里才需要看见
+                 *  （IKAGZC）。title 兜住「当前是哪个模型」这个信息，不占版面。 */}
+                <Package size={16} strokeWidth={2} />
               </button>
               {modelOpen && (
                 <div className={styles.modelDropdown}>
