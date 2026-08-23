@@ -3,7 +3,8 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SseEvent, SessionSnapshot } from '@/api/agentSessions';
-import { useAgentSession } from './useAgentSession';
+import { ApiError } from '@/api/http';
+import { classifyConfirmFailure, useAgentSession } from './useAgentSession';
 
 const mocks = vi.hoisted(() => ({
   listSessions: vi.fn(),
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   deleteSession: vi.fn(),
   fetchSessionSnapshot: vi.fn(),
   sendSessionMessage: vi.fn(),
+  cancelSession: vi.fn(),
   cancelSessionRun: vi.fn(),
   retrySessionRun: vi.fn(),
   fetchRequirementUnderstandings: vi.fn(),
@@ -147,6 +149,64 @@ describe('useAgentSession 思考过程归属', () => {
       });
     });
   }
+
+  it('模型的思考原文流进思考区，且不混进正文（IKA3M6）', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    for (const [id, text] of [
+      ['r1', '先确认画幅——'],
+      ['r2', '横版和竖版差别很大'],
+    ]) {
+      await act(async () => {
+        eventHandlers.at(-1)?.({
+          type: 'assistant.reasoning.delta',
+          id,
+          data: { run_id: 'run-1', payload: { stream_id: 'reasoning_run-1', text } },
+        });
+      });
+    }
+
+    // 拼接成一段连续的原文——它是流式吐出来的，不是一条条步骤。
+    expect(latest.reasoningText).toBe('先确认画幅——横版和竖版差别很大');
+    // 而且没有污染正文：思考不是回答。
+    expect(latest.streamingText).toBe('');
+    expect(latest.thinkingSteps).toEqual([]);
+  });
+
+  it('终态时思考原文随消息一起固化，运行中的思考区清空', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'assistant.reasoning.delta',
+        id: 'r1',
+        data: { run_id: 'run-1', payload: { stream_id: 'reasoning_run-1', text: '我拿不准要不要问画幅' } },
+      });
+    });
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'assistant.delta',
+        id: 'd1',
+        data: { run_id: 'run-1', payload: { stream_id: 'assistant_run_run-1', text: '这张图用在哪儿？' } },
+      });
+    });
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.completed',
+        id: 'c1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+      });
+    });
+
+    expect(latest.messages.at(-1)!.blocks).toEqual([
+      { type: 'thinking', thinking: { steps: [], reasoning: '我拿不准要不要问画幅' } },
+      { type: 'text', text: '这张图用在哪儿？' },
+    ]);
+    expect(latest.reasoningText).toBe('');
+  });
 
   it('终态时思考固化进那条助手消息、位于正文之前，全局思考区清空', async () => {
     await runTurnWithThinking();
@@ -402,6 +462,42 @@ describe('useAgentSession 运行计时', () => {
     });
   });
 
+  // 刷新或切回旧会话时，这一轮早就结束了，不会再有任何事件把起点补回来。而用户回看一个
+  // 会话时想知道的恰恰是「上一轮花了多久」，这份账一直躺在快照的 latest_terminal_run 里。
+  it('刷新后从快照把上一轮的账立回来，而不是让状态行整条消失', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue({
+      ...snapshot('session-1', 'ready'),
+      latest_terminal_run: {
+        run_id: 'run-done',
+        status: 'completed',
+        created_at: '2026-08-23T02:00:00.000Z',
+        finished_at: '2026-08-23T02:04:11.000Z',
+        token_usage: { input_tokens: 1200, cached_input_tokens: 0, output_tokens: 340, reasoning_tokens: 0 },
+      },
+    });
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.turnStartedAt).not.toBeNull());
+
+    // 起点取 created_at 而不是 started_at：状态行量的是用户等了多久，排队那段也算。
+    expect(latest.turnStartedAt).toBe(Date.parse('2026-08-23T02:00:00.000Z'));
+    expect(latest.turnOutcome?.outcome).toBe('completed');
+    expect(latest.turnOutcome?.finishedAt).toBe(Date.parse('2026-08-23T02:04:11.000Z'));
+    expect(latest.turnOutcome?.tokenUsage?.output_tokens).toBe(340);
+  });
+
+  // 没有时间就没有耗时。宁可不显示，也不要显示一个算错的数——那比空着更难发现。
+  it('快照里的历史轮次没有时间时不显示状态行', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue({
+      ...snapshot('session-1', 'ready'),
+      latest_terminal_run: { run_id: 'run-old', status: 'completed' },
+    });
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    expect(latest.turnStartedAt).toBeNull();
+    expect(latest.turnOutcome).toBeNull();
+  });
+
   it('提交失败就停表，不能让计时器对着一个不存在的运行一直走', async () => {
     mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
     mocks.sendSessionMessage.mockRejectedValue(new Error('network down'));
@@ -412,10 +508,115 @@ describe('useAgentSession 运行计时', () => {
       await latest.sendMessage('帮我生成一张插画');
     });
 
+    // 请求没发出去，这一轮从未开始，所以是清空而不是报终局——屏幕并不沉默，sendError 在说话。
     expect(latest.turnStartedAt).toBeNull();
+    expect(latest.turnOutcome).toBeNull();
+    expect(latest.sendError).not.toBeNull();
   });
 
-  it('终态停表', async () => {
+  /**
+   * 回执回来时 Run 已经是终态（幂等命中、或排队即失败）。这一轮确实结束了，但它**发生过**，
+   * 所以要按终态报账。此前这里把起点和终局一起清掉，结果是用户发了一句话，屏幕上什么都没有。
+   */
+  /**
+   * IKACCL。停止本轮走会话级取消，所以它在「消息已发出、runId 还没回来」的那几秒也必须能发出去。
+   * 此前 stopRun 的守卫要求 runningRef 有值，那几秒里按了没有任何反应。
+   */
+  it('停止本轮不要求先拿到 runId，发出去就能取消', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    const pending = deferred<unknown>();
+    mocks.sendSessionMessage.mockReturnValue(pending.promise);
+    mocks.cancelSession.mockResolvedValue({});
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      void latest.sendMessage('帮我生成一张插画');
+    });
+    // 请求还在途中：runId 尚未回来，但用户已经在等了。
+    expect(latest.runningRunId).toBeNull();
+    expect(latest.streaming).toBe(true);
+
+    await act(async () => {
+      latest.stopRun();
+    });
+
+    expect(mocks.cancelSession).toHaveBeenCalledWith('project-1', 'session-1');
+    expect(mocks.cancelSessionRun).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pending.resolve({});
+      await pending.promise;
+    });
+  });
+
+  /**
+   * 取消失败时不许把界面清成「已停止」。
+   *
+   * 原来的写法正是这样，于是取消请求打在 404 上的样子和成功一模一样——按钮变回箭头、
+   * 界面说停了、后端那一轮照跑。取消路径写错这么久没被发现，就是因为这里替它圆了场。
+   */
+  it('停止失败时说出来，而不是把界面清成已停止', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.cancelSession.mockRejectedValue(new Error('404 route not found'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        id: 'e-run-started',
+        type: 'run.started',
+        data: { run_id: 'run-live', run: { run_id: 'run-live', status: 'running' } },
+      } as never);
+    });
+    expect(latest.runningRunId).toBe('run-live');
+
+    await act(async () => {
+      latest.stopRun();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(latest.chatError).toBeTruthy());
+    // 权威在事件流：没收到终态就还在跑，本地不能替它宣布停了。
+    // （`streaming` 由发送侧置位，run.started 不动它，所以这里看的是 runningRunId。）
+    expect(latest.runningRunId).toBe('run-live');
+  });
+
+  it('回执直接是终态时报终局，而不是让状态行整条消失', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.sendSessionMessage.mockResolvedValue({ run: { run_id: 'run-already-done', status: 'failed' } });
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+
+    expect(latest.turnStartedAt).not.toBeNull();
+    expect(latest.turnOutcome?.outcome).toBe('failed');
+    expect(latest.turnOutcome?.finishedAt).toBeGreaterThan(0);
+  });
+
+  it('回执直接是 stopped 时算「已取消」，不给用户失败的语气', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.sendSessionMessage.mockResolvedValue({ run: { run_id: 'run-stopped', status: 'stopped' } });
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+
+    expect(latest.turnOutcome?.outcome).toBe('cancelled');
+  });
+
+  /**
+   * 终态停表的机制在 IKA4PG 变了。原来靠清空 turnStartedAt，状态行随之消失；现在状态行要
+   * 留下来报这一轮的账，起点必须保住，改由 turnOutcome.finishedAt 冻结耗时。
+   *
+   * 表停没停这件事本身没变，所以这条测试跟着换的是断言的对象，不是断言的意图。
+   */
+  it('终态停表：保住起点，用终态时刻冻结耗时', async () => {
     mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
     await renderHookHarness();
     await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
@@ -423,16 +624,77 @@ describe('useAgentSession 运行计时', () => {
       await latest.sendMessage('帮我生成一张插画');
     });
     expect(latest.turnStartedAt).not.toBeNull();
+    expect(latest.turnOutcome).toBeNull();
 
     await act(async () => {
       eventHandlers.at(-1)?.({
         type: 'run.completed',
         id: 'completed-1',
-        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+        data: {
+          run_id: 'run-1',
+          payload: {
+            run: {
+              run_id: 'run-1',
+              status: 'completed',
+              token_usage: {
+                input_tokens: 30_000,
+                cached_input_tokens: 28_500,
+                output_tokens: 412,
+                reasoning_tokens: null,
+              },
+              context_capacity: {
+                used_input_tokens: 30_000,
+                configured_max_tokens: 120_000,
+                ratio: 0.25,
+                compaction_state: 'none',
+              },
+            },
+          },
+        },
       });
     });
 
-    expect(latest.turnStartedAt).toBeNull();
+    // 起点保留，否则状态行没有基准可算耗时。
+    expect(latest.turnStartedAt).not.toBeNull();
+    expect(latest.turnOutcome?.outcome).toBe('completed');
+    expect(latest.turnOutcome?.finishedAt).toBeGreaterThan(0);
+    // 服务端送来的真实用量要能穿过来，状态行才能把流式期间的估算值换掉（IKACDN）。
+    expect(latest.turnOutcome?.tokenUsage?.output_tokens).toBe(412);
+    expect(latest.turnOutcome?.tokenUsage?.reasoning_tokens).toBeNull();
+    expect(latest.turnOutcome?.contextCapacity?.ratio).toBe(0.25);
+  });
+
+  it('取消与失败各自记成对应的终局，不都算作完成', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    await act(async () => {
+      await latest.sendMessage('帮我生成一张插画');
+    });
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.cancelled',
+        id: 'cancelled-1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'cancelled' } } },
+      });
+    });
+    expect(latest.turnOutcome?.outcome).toBe('cancelled');
+
+    await act(async () => {
+      await latest.sendMessage('再来一张');
+    });
+    // 新一轮开始就把上一轮的账清掉，否则状态行会拿旧结果冒充这一轮。
+    expect(latest.turnOutcome).toBeNull();
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'run.failed',
+        id: 'failed-1',
+        data: { run_id: 'run-2', payload: { run: { run_id: 'run-2', status: 'failed' } } },
+      });
+    });
+    expect(latest.turnOutcome?.outcome).toBe('failed');
   });
 
   it('刷新重连时用事件自己的服务端时间，不从零重数', async () => {
@@ -619,6 +881,124 @@ describe('useAgentSession concurrency guards', () => {
     expect(latest.confirmationPending).toBe(false);
   });
 
+  /** IKA4Q5：确认有三条来路，只有点按钮那条经过本地。模型在 Run 内自己调确认工具时，
+   *  唯一的信号就是这个事件；不收卡的话用户再点必然 409，看到「确认失败，请重试」。 */
+  it('清掉确认卡，当理解是被别处确认的（模型在 Run 内确认 / 自然语言确认）', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'requirement_understanding.proposed.v1',
+        id: 'event-1',
+        data: {
+          payload: {
+            understanding: {
+              understanding_id: 'understanding-1',
+              version: 1,
+              proposed_summary: 'summary',
+              status: 'awaiting_confirmation',
+            },
+          },
+        },
+      });
+    });
+    expect(latest.pendingUnderstanding?.understanding_id).toBe('understanding-1');
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'requirement_understanding.accepted.v1',
+        id: 'event-2',
+        data: {
+          payload: {
+            understanding: {
+              understanding_id: 'understanding-1',
+              version: 1,
+              proposed_summary: 'summary',
+              status: 'accepted',
+            },
+          },
+        },
+      });
+    });
+
+    expect(latest.pendingUnderstanding).toBeNull();
+    expect(latest.confirmError).toBeNull();
+    expect(latest.confirmationPending).toBe(false);
+  });
+
+  it('把「已经确认过了」当成成功：收卡、不报错', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
+    mocks.confirmRequirementUnderstanding.mockRejectedValue(
+      new ApiError(409, 'This Agent Session is not awaiting a requirement-understanding confirmation', 'session_phase_mismatch'),
+    );
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'requirement_understanding.proposed.v1',
+        id: 'event-1',
+        data: {
+          payload: {
+            understanding: {
+              understanding_id: 'understanding-1',
+              version: 1,
+              proposed_summary: 'summary',
+              status: 'awaiting_confirmation',
+            },
+          },
+        },
+      });
+    });
+
+    let outcome: boolean | undefined;
+    await act(async () => {
+      outcome = await latest.confirmUnderstanding();
+    });
+
+    expect(outcome).toBe(true);
+    expect(latest.pendingUnderstanding).toBeNull();
+    expect(latest.confirmError).toBeNull();
+  });
+
+  it('真失败时说出原因，而不是笼统的「请重试」', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
+    mocks.confirmRequirementUnderstanding.mockRejectedValue(
+      new ApiError(404, 'Requirement understanding not found', 'requirement_understanding_not_found'),
+    );
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    await act(async () => {
+      eventHandlers.at(-1)?.({
+        type: 'requirement_understanding.proposed.v1',
+        id: 'event-1',
+        data: {
+          payload: {
+            understanding: {
+              understanding_id: 'understanding-1',
+              version: 1,
+              proposed_summary: 'summary',
+              status: 'awaiting_confirmation',
+            },
+          },
+        },
+      });
+    });
+
+    let outcome: boolean | undefined;
+    await act(async () => {
+      outcome = await latest.confirmUnderstanding();
+    });
+
+    expect(outcome).toBe(false);
+    expect(latest.confirmError).toBe('这条需求理解已失效，等 Agent 重新提议后再操作。');
+    // 卡片留着：这一类不是「已经成了」，收掉会让用户以为确认过了
+    expect(latest.pendingUnderstanding).not.toBeNull();
+  });
+
   it('rejects an empty correction with a visible error', async () => {
     mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
     await renderHookHarness();
@@ -709,7 +1089,7 @@ describe('useAgentSession concurrency guards', () => {
     expect(latest.runningRunId).toBeNull();
   });
 
-  it('shows payment_required as an actionable blocked state instead of processing', async () => {
+  it('surfaces payment_required as an actionable blocked state', async () => {
     mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
     await renderHookHarness();
     await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
@@ -727,7 +1107,6 @@ describe('useAgentSession concurrency guards', () => {
       });
     });
 
-    expect(latest.agentPhase).toBe('payment_required');
     expect(latest.paymentRequiredMessage).toBe('余额不足，充值后可继续本次任务。');
     expect(latest.streaming).toBe(false);
     expect(latest.runningRunId).toBe('run-payment');
@@ -806,5 +1185,101 @@ describe('useAgentSession 生成卡水合', () => {
   it('生成卡事件早于 run.completed 到达时同样挂上卡片', async () => {
     await replay('committed-first');
     await vi.waitFor(() => expect(cardBlocks()).toHaveLength(1));
+  });
+});
+
+describe('classifyConfirmFailure', () => {
+  it('把两种「已经定下来了」的 409 判为 settled', () => {
+    for (const code of ['session_phase_mismatch', 'requirement_understanding_not_pending']) {
+      expect(classifyConfirmFailure(new ApiError(409, 'whatever', code), 'confirm')).toEqual({ kind: 'settled' });
+    }
+  });
+
+  it('对失效与消失分别给出可行动的说法', () => {
+    expect(
+      classifyConfirmFailure(new ApiError(404, 'x', 'requirement_understanding_not_found'), 'confirm'),
+    ).toEqual({ kind: 'stale', message: '这条需求理解已失效，等 Agent 重新提议后再操作。' });
+    expect(classifyConfirmFailure(new ApiError(404, 'x', 'session_not_found'), 'confirm')).toEqual({
+      kind: 'gone',
+      message: '会话已不存在，请新建对话。',
+    });
+  });
+
+  it('未知错误带上服务端原话，并区分确认与修改', () => {
+    expect(classifyConfirmFailure(new ApiError(500, '上游炸了', 'internal_error'), 'confirm')).toEqual({
+      kind: 'unknown',
+      message: '确认失败：上游炸了',
+    });
+    expect(classifyConfirmFailure(new ApiError(500, '上游炸了', 'internal_error'), 'correct')).toEqual({
+      kind: 'unknown',
+      message: '修改失败：上游炸了',
+    });
+  });
+
+  it('非 ApiError（断网等）退回通用文案', () => {
+    expect(classifyConfirmFailure(new TypeError('Failed to fetch'), 'confirm')).toEqual({
+      kind: 'unknown',
+      message: '确认失败，请重试',
+    });
+  });
+});
+
+/** IKAFQ6：删除失败过去只 console.warn，用户看到的是「点了什么都没发生」。 */
+describe('useAgentSession 删除会话', () => {
+  it('删除失败时把原因挂到那一行上，不再静默', async () => {
+    mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1' }, { session_id: 'session-2' }] });
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.deleteSession.mockRejectedValue(new ApiError(409, '会话正在运行中', 'session_busy'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.sessionId).toBe('session-1'));
+
+    await act(async () => {
+      latest.deleteSession('session-2');
+    });
+
+    await vi.waitFor(() => expect(latest.deleteError).not.toBeNull());
+    expect(latest.deleteError).toEqual({ sessionId: 'session-2', message: '删除失败：会话正在运行中' });
+    // 会话没被移出列表——它其实还在
+    expect(latest.sessions.map((s) => s.session_id)).toContain('session-2');
+  });
+
+  it('重试同一行时先清掉上一次的错误，避免旧提示挂着不走', async () => {
+    mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1' }, { session_id: 'session-2' }] });
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.deleteSession.mockRejectedValueOnce(new ApiError(500, '上游炸了', 'internal_error'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.sessionId).toBe('session-1'));
+
+    await act(async () => {
+      latest.deleteSession('session-2');
+    });
+    await vi.waitFor(() => expect(latest.deleteError?.sessionId).toBe('session-2'));
+
+    mocks.deleteSession.mockResolvedValue({});
+    mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1' }] });
+    await act(async () => {
+      latest.deleteSession('session-2');
+    });
+
+    await vi.waitFor(() => expect(latest.deleteError).toBeNull());
+    await vi.waitFor(() => expect(latest.sessions.map((s) => s.session_id)).toEqual(['session-1']));
+  });
+
+  it('dismissDeleteError 收起提示', async () => {
+    mocks.listSessions.mockResolvedValue({ items: [{ session_id: 'session-1' }, { session_id: 'session-2' }] });
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    mocks.deleteSession.mockRejectedValue(new ApiError(500, 'x', 'internal_error'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.sessionId).toBe('session-1'));
+
+    await act(async () => {
+      latest.deleteSession('session-2');
+    });
+    await vi.waitFor(() => expect(latest.deleteError).not.toBeNull());
+
+    await act(async () => {
+      latest.dismissDeleteError();
+    });
+    expect(latest.deleteError).toBeNull();
   });
 });

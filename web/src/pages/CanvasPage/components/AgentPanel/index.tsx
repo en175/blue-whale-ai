@@ -13,21 +13,36 @@ import {
   PictureInPicture2,
   BookText,
   Coins,
-  History,
+  MessageSquare,
+  Check,
+  CheckCircle2,
+  RotateCcw,
+  Package,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
 import { isApiError } from '@/api/http';
 import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
-import { useAgentSession, type ChatMessage, type AgentPhase } from '../../hooks/useAgentSession';
-import { deriveRunStatus } from '../../hooks/runStatusLine';
+import { useAgentSession, type ChatMessage, type TurnOutcome } from '../../hooks/useAgentSession';
+import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
-import type { SessionContentBlock, GenerationCardBlock } from '@/api/agentSessions';
+import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock } from '@/api/agentSessions';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
-import { getPanelLayout } from './layout';
+import {
+  EMPTY_COMPOSED,
+  composedIsEmpty,
+  resolveComposed,
+  type ComposedValue,
+} from '../ChipTextEditor/composed';
+import AssetChip from '../AssetChip';
+import { shouldCancelOnKey } from './cancelShortcut';
+import { dockedPanelLayout, freePanelLayout, type PanelMetrics } from './layout';
+
+/** 父组件没传已应用集合时的空集。提到模块级是为了保持引用稳定，避免每次渲染都造一个新 Set。 */
+const EMPTY_APPLIED_IDS: ReadonlySet<string> = new Set<string>();
 
 /**
  * Agent 回复的 Markdown 渲染。
@@ -64,31 +79,126 @@ export function Markdown({ text }: { text: string }) {
 }
 
 /**
- * 运行中的常驻状态行。这是"屏幕上什么都没有"的地板：提交那一刻就出现，秒数一直走，
- * 直到终态才消失。它不等模型吐字、不等产卡成功、事件流断了也照走——上面那些更好看的
- * 东西都可能失效，这条不能。文案取自 run.activity 的可见节点白名单。
+ * 每个阶段的符号与样式。
+ *
+ * 按 **phase** 而不是 tone 分派：tone 只有四档，`completed` 和 `cancelled` 同为 `done`，
+ * 用它分派会让「已完成」和「已取消」长得一模一样、只差两个字。而这两件事用户的反应完全
+ * 不同——一个是拿结果，一个是想知道自己刚才停掉的是哪一轮——必须一眼分得开。
+ *
+ * 进行中的三态共用脉动的 `✶`：它们本来就是同一件事的连续过程，靠文案和语气区分即可，
+ * 把符号也拆开反而会让运行中的界面一直在跳。
  */
-function RunStatusLine({ startedAt, activity, stalled }: { startedAt: number | null; activity: string | null; stalled: boolean }) {
+const RUN_STATUS_MARK: Record<RunStatus['phase'], string> = {
+  dispatching: '✶',
+  working: '✶',
+  stalled: '✶',
+  completed: '✻',
+  cancelled: '⊘',
+  failed: '✕',
+};
+
+const RUN_STATUS_PHASE_CLASS: Record<RunStatus['phase'], string> = {
+  dispatching: '',
+  working: '',
+  stalled: styles.runStatusStalled ?? '',
+  completed: styles.runStatusDone ?? '',
+  cancelled: styles.runStatusCancelled ?? '',
+  failed: styles.runStatusError ?? '',
+};
+
+/**
+ * 常驻状态行。这是"屏幕上什么都没有"的地板：提交那一刻就出现，秒数一直走，事件流断了
+ * 也照走——上面那些更好看的东西（思考链、卡片逐段长出来）都可能失效，这条不能。
+ *
+ * IKA4PG 起它不再随终态消失，而是留下来报这一轮的账（耗时、token），下一轮开始才被替换。
+ * 判断一次运行是不是卡死靠的就是"秒数还在走吗、token 还在变吗"，两者都必须持续可见。
+ */
+function RunStatusLine({
+  startedAt,
+  activity,
+  stalled,
+  hasRunId,
+  outcome,
+  streamedText,
+}: {
+  startedAt: number | null;
+  activity: string | null;
+  stalled: boolean;
+  hasRunId: boolean;
+  outcome: TurnOutcome | null;
+  streamedText: string;
+}) {
   const [now, setNow] = useState(() => Date.now());
+  const settled = outcome !== null;
   useEffect(() => {
-    if (startedAt === null) return;
+    // 终态后不再每秒重渲染：秒数已经冻住了，继续跑定时器只是白烧一次渲染。
+    if (startedAt === null || settled) return;
     // 先立刻对齐一次，避免刚挂载时沿用上一轮的旧时间戳。
     setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [startedAt]);
+  }, [startedAt, settled]);
 
-  const status = deriveRunStatus({ activeSince: startedAt, now, activity, stalled });
+  const status = deriveRunStatus({
+    activeSince: startedAt,
+    now,
+    activity,
+    stalled,
+    hasRunId,
+    outcome: outcome?.outcome ?? null,
+    finishedAt: outcome?.finishedAt ?? null,
+    streamedText,
+    estimatedOutputTokensAtFinish: outcome?.estimatedOutputTokens ?? null,
+    tokenUsage: outcome?.tokenUsage ?? null,
+    contextCapacity: outcome?.contextCapacity ?? null,
+  });
   if (!status) return null;
+
+  const context = status.context;
+  const contextPercent = context ? Math.round(context.ratio * 100) : null;
   return (
     <div
-      className={`${styles.runStatus} ${status.tone === 'stalled' ? styles.runStatusStalled : ''}`}
+      className={`${styles.runStatus} ${RUN_STATUS_PHASE_CLASS[status.phase]}`}
       role="status"
       aria-live="polite"
     >
-      <span className={styles.runStatusMark} aria-hidden="true">✶</span>
+      <span className={styles.runStatusMark} aria-hidden="true">
+        {RUN_STATUS_MARK[status.phase]}
+      </span>
       <span>{status.label}</span>
-      <span className={styles.runStatusElapsed}>({status.seconds}s)</span>
+      {/* 运行中把这一段对读屏遮起来：秒数每秒变一次，`aria-live` 会把它一遍遍念出来，
+          盖过真正有信息量的状态文案。终态时放开，此时它只念一次，正是这一轮的账。 */}
+      <span className={styles.runStatusMeta} aria-hidden={!status.settled}>
+        {/* 秒数、token、上下文各自可缺，分隔符因此只能在**前面已经有东西**时才出——
+            否则终态缺 finishedAt（秒数为 null）时，这一行会以一个孤零零的「 · 」开头。 */}
+        {status.seconds !== null && formatElapsed(status.seconds)}
+        {status.tokens && (
+          <>
+            {status.seconds !== null && ' · '}
+            {/* 流式期间这个数是按字符估的：模型只在结束时报真实用量，中途没有增量。
+                它的作用是活性信号——用户要判断的是"它还在动吗"，不是精确值。 */}
+            <span title={status.tokens.estimated ? '流式期间为估算值，结束后显示实际用量' : '本轮实际输出用量'}>
+              ↓ {formatTokens(status.tokens.output)}
+              {status.tokens.estimated ? '≈' : ''}
+            </span>
+          </>
+        )}
+        {context !== null && contextPercent !== null && (
+          <>
+            {(status.seconds !== null || status.tokens !== null) && ' · '}
+            <span title={`上下文 ${context.usedTokens} / ${context.maxTokens} tokens`}>
+              上下文 {contextPercent}%
+            </span>
+            {/* 压缩过历史要给可见文案：此前只追加一个 ⤺，说明埋在 title 里，触屏根本没有
+                hover，等于没有提示。而"早先的对话已被摘要"直接影响用户对模型记得什么的预期。 */}
+            {context.compacted && (
+              <span className={styles.runStatusCompacted} title="上下文接近上限，较早的对话已被摘要压缩">
+                {' · '}已压缩历史
+              </span>
+            )}
+          </>
+        )}
+      </span>
     </div>
   );
 }
@@ -124,10 +234,24 @@ function CardPreview({ preview }: { preview: PartialCardPreview | null }) {
   );
 }
 
-/** 可折叠思考过程：小字展示当前步骤，默认收起 */
-function ThinkingBlock({ steps, defaultOpen = false }: { steps: string[]; defaultOpen?: boolean }) {
+/**
+ * 可折叠思考过程：小字展示，默认收起。
+ *
+ * 两种内容，来源不同所以分开渲染：`steps` 是服务端选的模板文案，`reasoning` 是模型自己的
+ * 原话（IKA3M6）。原话排在步骤下面——它更长、更零散，也更可能出现自我否定和内部名词，
+ * 不该抢在"它现在在干什么"前面。
+ */
+function ThinkingBlock({
+  steps,
+  reasoning,
+  defaultOpen = false,
+}: {
+  steps: string[];
+  reasoning?: string;
+  defaultOpen?: boolean;
+}) {
   const [open, setOpen] = useState(defaultOpen);
-  if (steps.length === 0) return null;
+  if (steps.length === 0 && !reasoning) return null;
   return (
     <div className={styles.thinkingBlock}>
       <button
@@ -144,6 +268,7 @@ function ThinkingBlock({ steps, defaultOpen = false }: { steps: string[]; defaul
           {steps.map((s, i) => (
             <div key={i} className={styles.thinkingStep}>{s}</div>
           ))}
+          {reasoning && <div className={styles.thinkingReasoning}>{reasoning}</div>}
         </div>
       )}
     </div>
@@ -169,6 +294,9 @@ function GenerationCard({
   const [edited, setEdited] = useState<{ shotTitle?: string; visual?: string; prompt?: string }>({});
   const [editingField, setEditingField] = useState<'shotTitle' | 'visual' | 'prompt' | null>(null);
   const [draftValue, setDraftValue] = useState('');
+  /** 折叠态：**新产出的卡默认展开**（已确认）。纯视图状态，不持久化——刷新后重新展开是对的，
+   *  用户回到这一屏是来看内容的，不是来接着上次的折叠姿势的。 */
+  const [collapsed, setCollapsed] = useState(false);
 
   const shotTitle = edited.shotTitle ?? card.shotTitle;
   const visual = edited.visual ?? card.visual;
@@ -195,6 +323,50 @@ function GenerationCard({
 
   return (
     <div className={`${styles.generationCard} ${cancelled ? styles.generationCardCancelled : ''}`}>
+      {/* 卡头元信息栏（IKAFSQ）：左侧徽标 / 右侧 #N + 主动作 + 折叠。
+       *  三个徽标全部按数据渲染，缺失即不渲染——图片批次没有时长是正常的，不该占位。 */}
+      <div className={styles.shotMeta}>
+        <div className={styles.shotBadges}>
+          {card.targetMedia && (
+            <span className={styles.shotKind}>{card.targetMedia === 'video' ? 'SCENE' : 'IMAGE'}</span>
+          )}
+          {typeof card.durationSeconds === 'number' && (
+            <span className={styles.shotBadge}>~{card.durationSeconds}s</span>
+          )}
+          {card.aspectRatio && <span className={styles.shotBadge}>{card.aspectRatio}</span>}
+        </div>
+        <div className={styles.shotMetaRight}>
+          {/* 镜号直接用协议里的 shot_no：一个 Session 只有一组卡，schema 强制 1..N 连续，
+           *  重编是整组替换，所以这个编号不存在歧义。 */}
+          {typeof card.shotNo === 'number' && <span className={styles.shotNo}>#{card.shotNo}</span>}
+          {applied ? (
+            <span className={styles.shotAppliedMark} title="已进入画布">
+              <CheckCircle2 size={16} strokeWidth={2.2} />
+            </span>
+          ) : cancelled ? (
+            <span className={styles.shotCancelled}>已取消</span>
+          ) : (
+            <button
+              type="button"
+              className={styles.shotApplyBtn}
+              onClick={() => onApply(edited)}
+              disabled={disabled}
+            >
+              <Plus size={13} strokeWidth={2.5} />
+              <span>手动应用</span>
+            </button>
+          )}
+          <button
+            type="button"
+            className={styles.shotCollapse}
+            title={collapsed ? '展开' : '收起'}
+            aria-expanded={!collapsed}
+            onClick={() => setCollapsed((v) => !v)}
+          >
+            {collapsed ? <ChevronDown size={14} strokeWidth={2} /> : <ChevronUp size={14} strokeWidth={2} />}
+          </button>
+        </div>
+      </div>
       <div className={styles.shotHeader}>
         {editingField === 'shotTitle' ? (
           <input
@@ -214,21 +386,12 @@ function GenerationCard({
             {!applied && card.timeRange && <span className={styles.shotTime}> · {card.timeRange}</span>}
           </span>
         )}
-        {applied ? (
-          <span className={styles.shotApplied}>已进入画布</span>
-        ) : cancelled ? (
-          <span className={styles.shotCancelled}>已取消</span>
-        ) : (
-          <button
-            type="button"
-            className={`${styles.cardBtn} ${styles.cardBtnPrimary} ${styles.shotApplyBtn}`}
-            onClick={() => onApply(edited)}
-            disabled={disabled}
-          >
-            应用到画布
-          </button>
-        )}
       </div>
+      {/* 折叠态到此为止：卡头一行 + 标题一行，与竞品一致。
+       *  标题就是那句话——协议里每镜各有自己的 title，产卡 Skill 已被要求写成能概括本镜核心
+       *  的十字左右短句（不是「镜头 3」这类废话），所以不需要另开一个摘要字段。 */}
+      {collapsed ? null : (
+      <>
       {editingField === 'visual' ? (
         <div className={styles.shotField}>
           <span className={styles.shotFieldLabel}>画面</span>
@@ -293,21 +456,61 @@ function GenerationCard({
           </div>
         )
       )}
-      {card.assetRefs && card.assetRefs.length > 0 && (
+      {/* 素材引用：有身份的走胶囊（缩略图 + 悬浮预览），只有旧数据才退回纯文字。
+       *  不内联进正文——正文是纯文本、asset_bindings 是无位置的平列表，内联需要模型在正文里
+       *  写位置标记，那是引用体系的整体设计，不在本单。 */}
+      {card.assetRefItems && card.assetRefItems.length > 0 ? (
         <div className={styles.shotRefs}>
-          {card.assetRefs.map((r) => (
-            <span key={r} className={styles.shotRef}>{r}</span>
+          {card.assetRefItems.map((ref, i) => (
+            <AssetChip
+              key={`${ref.assetId}-${i}`}
+              assetId={ref.assetId}
+              label={ref.label}
+              mediaType={ref.mediaType}
+            />
           ))}
         </div>
+      ) : (
+        card.assetRefs && card.assetRefs.length > 0 && (
+          <div className={styles.shotRefs}>
+            {card.assetRefs.map((r) => (
+              <span key={r} className={styles.shotRef}>{r}</span>
+            ))}
+          </div>
+        )
       )}
-      {applied && <div className={styles.appliedHint}>生成卡已进入画布</div>}
+      {/* 「已进入画布」不再另起一条提示条：卡头那个绿勾已经说明白了，两处说同一件事是冗余。 */}
       {!applied && cancelled && <div className={styles.cancelledHint}>已取消，不会应用到画布</div>}
+      </>
+      )}
     </div>
   );
 }
 
 /** 助手消息：按结构化块渲染（text/thinking/card），无块时回退纯文本；追问与需求理解确认都走自然语言（grillme 式），不用结构化卡
  * 生成卡组支持「手动应用整组」「取消」（04 §5.2 用户动作），组内单卡仍可各自应用/双击编辑 */
+/**
+ * 一个内容块的 React key。
+ *
+ * 此前用的是数组下标（审查 W·A18）。`attachCards` 每次水合都会**先剥掉已有的 card 块再整体
+ * 追加**：`blocks: [...kept, ...blocks]`。于是同一个下标上的卡片可能被换成另一张，而
+ * key 和组件类型都没变——React 保住组件实例，`GenerationCard` 里的 `edited` / `editingField` /
+ * `draftValue` 三份草稿原样留在原地，用户正在编辑的那几个字提交到了另一张卡上。
+ *
+ * 卡片按自己的身份做 key；其余块按**同类型内的序号**——这样插入一张卡不会让后面的文字块
+ * 整体位移一格。服务端的 content 数组没有块级 id，同类型序号是这里能拿到的最稳的东西。
+ */
+function blockKey(block: SessionContentBlock, ordinals: Record<string, number>): string {
+  if (block.type === 'card' && block.card) {
+    const id = block.card.cardId ?? block.card.shotTitle;
+    if (id) return `card:${id}`;
+  }
+  const kind = block.type ?? 'text';
+  const n = (ordinals[kind] = (ordinals[kind] ?? 0) + 1);
+  return `${kind}:${n}`;
+}
+
+
 function AssistantMessageBody({
   message,
   onCardApply,
@@ -322,10 +525,12 @@ function AssistantMessageBody({
   onApplyAllCards: (cards: NonNullable<SessionContentBlock['card']>[]) => void;
   onCancelCardGroup: (messageId: string) => void;
   disabled: boolean;
-  appliedCardIds: Set<string>;
+  appliedCardIds: ReadonlySet<string>;
   cancelledMessageIds: Set<string>;
 }) {
   const blocks = message.blocks ?? [];
+  // 每次渲染新起一份计数，`blockKey` 边走边填。
+  const blockOrdinals: Record<string, number> = {};
   const structured = blocks.filter((b) => b.type !== 'text');
   // 有结构化块 → 按块渲染；无 → 纯文本 markdown
   if (structured.length === 0) return <Markdown text={message.content} />;
@@ -335,15 +540,18 @@ function AssistantMessageBody({
   const showGroupActions = cardBlocks.length > 1 && !groupCancelled && unappliedCards.length > 0;
   return (
     <>
-      {blocks.map((b, i) => {
-        if (b.type === 'thinking' && b.thinking?.steps) {
-          return <ThinkingBlock key={i} steps={b.thinking.steps} />;
+      {blocks.map((b) => {
+        const key = blockKey(b, blockOrdinals);
+        if (b.type === 'thinking' && (b.thinking?.steps || b.thinking?.reasoning)) {
+          return (
+            <ThinkingBlock key={key} steps={b.thinking.steps ?? []} reasoning={b.thinking.reasoning} />
+          );
         }
         if (b.type === 'card' && b.card) {
           const cardId = b.card.cardId ?? b.card.shotTitle;
           return (
             <GenerationCard
-              key={i}
+              key={key}
               card={b.card}
               onApply={(patch) => onCardApply(b.card!, patch)}
               disabled={disabled}
@@ -352,7 +560,7 @@ function AssistantMessageBody({
             />
           );
         }
-        if (b.text) return <Markdown key={i} text={b.text} />;
+        if (b.text) return <Markdown key={key} text={b.text} />;
         return null;
       })}
       {showGroupActions && (
@@ -403,21 +611,23 @@ const quickQuestions = [
   },
 ];
 
-/** 侧边栏状态文案（对齐 04-侧边栏规范 §7 用户感知） */
-const phaseLabels: Record<AgentPhase, string> = {
-  idle: '等待输入',
-  processing: 'Agent 处理中',
-  awaiting_input: '等待你补充',
-  awaiting_confirm: '等待你确认需求理解',
-  generating_cards: '正在整理分镜提示词',
-  cards_ready: '生成卡已就绪',
-  applying: '正在应用到画布',
-  applied: '已进入画布',
-  payment_required: '运行授权或余额不足',
-  failed: '处理失败',
-};
-
 /** 默认位置（页面中间偏右） */
+/**
+ * 拉不到确切积分时的退避重试间隔（毫秒）。
+ *
+ * 上游账单是 post-billing 才落库的，滞后从几百毫秒到十几秒都见过；此前只等 2.5 秒就放弃，
+ * 于是常态是「胶囊显示 0」。总共约 23 秒，覆盖绝大多数滞后，又不会一直挂着请求。
+ */
+/**
+ * 判定「用户还在看最新内容」的容差（像素）。
+ *
+ * 取一屏的零头而不是 0：流式期间内容在长，浏览器的滚动位置与新内容之间总有几个像素的
+ * 差；卡到 0 会让自动滚底在真正该生效的时候失灵。
+ */
+const STICK_TO_BOTTOM_PX = 80;
+
+const CREDITS_RETRY_DELAYS = [2500, 6000, 15000] as const;
+
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
 interface AgentPanelProps {
@@ -431,15 +641,36 @@ interface AgentPanelProps {
   projectId?: string;
   /** 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent）；载荷是会话层唯一的生成卡形状，不再另开一份 */
   onApplyToDock?: (payload: GenerationCardBlock) => void;
+  /**
+   * 画布上现存的生成卡节点所对应的 cardId 集合（IKAFSQ）。
+   *
+   * 「已应用」不是一个要在这里维护的开关，而是一个**查出来的事实**：画布上存不存在带这个
+   * cardId 的节点。从画布派生之后三件事自动成立，都不需要额外代码：
+   *   · 用户在画布上删掉那个节点 → 卡自动变回「＋ 手动应用」
+   *   · 刷新页面 → 画布本来就持久化，状态天然正确（从前是内存 useState，刷新即全掉）
+   *   · 不可能出现「卡说已应用、画布上没有」这类两个状态打架的情况
+   */
+  appliedCardIds?: ReadonlySet<string>;
   /** 首页「直接使用」技能 → 画布导航携带的强制技能 ID：挂载后武装为下一条消息的 forced skill */
   initialSkillId?: string;
 }
 
-export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, initialSkillId }: AgentPanelProps) {
+export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId }: AgentPanelProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供发送按钮启用态判断 */
-  const [composedText, setComposedText] = useState('');
+  /**
+   * 本会话累计消耗积分（IKAFPC）。
+   *
+   * 数字在**一轮结束后**才跳，不做流式实时滚动：上游要计费完成才出账，实时只能靠估，
+   * 而这是钱的数字——宁可慢一拍，不给假数。取数失败时保留上一次已知值，不显示 0：
+   * 「查不到」和「真没花钱」是两回事，后者会让用户以为这一轮免费。
+   */
+  const [sessionCredits, setSessionCredits] = useState<number | null>(null);
+
+  /** 输入框内容的结构化形态：胶囊在编辑期是指针，只在发送时解引用（IKAFSX）。 */
+  const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
+  const canSend = !composedIsEmpty(composed);
   const [selectedModel, setSelectedModel] = useState(models[0].key);
   const [modelOpen, setModelOpen] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -455,7 +686,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     runningRunId,
     failedRunId,
     thinkingSteps,
+    reasoningText,
     turnStartedAt,
+    turnOutcome,
     partialCard,
     longRunning,
     chatError,
@@ -467,7 +700,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     retryUnavailable,
     sendError,
     paymentRequiredMessage,
-    agentPhase,
     sendMessage,
     stopRun,
     retryRun,
@@ -475,6 +707,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     reconnectSession,
     switchSession,
     deleteSession,
+    deleteError,
+    dismissDeleteError,
     refreshSessions,
   } = useAgentSession(projectId ?? '');
   /** 历史会话下拉展开态 */
@@ -493,8 +727,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const [recs, setRecs] = useState<RunSkillRecommendation[]>([]);
   /** 已点 Use 的推荐技能ID（仅用户点 Use 可激活） */
   const [usedSkillIds, setUsedSkillIds] = useState<Set<string>>(new Set());
-  /** 已手动应用、落成画布节点的生成卡 ID（标记「已应用」）。dock 是那个节点之后可选的下游动作，不是这一步的去处 */
-  const [appliedCardIds, setAppliedCardIds] = useState<Set<string>>(new Set());
+  /** 画布上现存的生成卡节点 cardId 集合。父组件没给（例如测试）时按空集处理——空集意味着
+   *  「都没应用过」，是安全的一侧：宁可让用户多按一次，也不要把没进画布的卡显示成绿勾。 */
+  const appliedIds = appliedCardIds ?? EMPTY_APPLIED_IDS;
   /** 已「取消」的生成卡组（按消息ID标记，组内未应用的卡不再可操作） */
   const [cancelledMessageIds, setCancelledMessageIds] = useState<Set<string>>(new Set());
   /** 「直接使用」武装的强制技能（下一条消息发送时携带 forced_creative_skill_id，发送后清除）；name 供指示条展示 */
@@ -509,6 +744,27 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const [panelHeight, setPanelHeight] = useState<number | undefined>(undefined);
   const panelRef = useRef<HTMLDivElement>(null);
   const dragState = useRef({ dragging: false, startX: 0, startY: 0, origX: 0, origY: 0 });
+
+  /**
+   * 量一次面板与它的父容器，初始化 / 缩窗 / 拖拽三处共用同一组输入。
+   *
+   * 此前这段 DOM 读取在四个调用点各写了一遍，量法还略有出入（有的先取 header 再取 rect，
+   * 有的反过来）。量测和决策分开之后，「怎么算布局」只剩 layout.ts 一处（审查 W·S8）。
+   * DOM 尚未就绪时返回 null，由调用方决定跳过还是照常收尾。
+   */
+  const measurePanel = useCallback((): PanelMetrics | null => {
+    const el = panelRef.current;
+    const page = el?.parentElement;
+    if (!el || !page) return null;
+    const rect = el.getBoundingClientRect();
+    return {
+      pageWidth: page.clientWidth,
+      pageHeight: page.clientHeight,
+      headerHeight: page.querySelector('header')?.getBoundingClientRect().height ?? 0,
+      panelWidth: rect.width,
+      panelHeight: rect.height,
+    };
+  }, []);
 
   const currentModel = models.find((m) => m.key === selectedModel);
 
@@ -560,91 +816,157 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     };
   }, [runningRunId]);
 
-  /** 新消息/流式文本自动滚动到底部 */
+  /**
+   * ESC 取消本次回答（IKA4PH）。取消入口统一在发送侧，ESC 是那颗按钮的键盘等价物。
+   *
+   * 只在本轮还没结束时挂载，不留一个常驻的全局监听；判定见 `shouldCancelOnKey`。
+   *
+   * 条件是 `streaming || runningRunId !== null` 而不只是后者：消息发出到拿到 runId 之间
+   * `runningRunId` 还是 null，而那几秒正是用户最想按 ESC 的时候。取消已改为会话级
+   * （IKACCL），不需要 runId 就能发出去。
+   */
+  const cancellable = streaming || runningRunId !== null;
+  useEffect(() => {
+    if (!cancellable) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      if (
+        shouldCancelOnKey({
+          key: e.key,
+          defaultPrevented: e.defaultPrevented,
+          targetTagName: target?.tagName,
+          isEditable: target?.isContentEditable ?? false,
+          inOverlay: Boolean(target?.closest('[role="dialog"], [aria-modal="true"]')),
+          // 主输入框是 contentEditable，要把它从「可编辑一律让路」里单独挑出来。
+          isMainComposer: Boolean(target?.closest('[data-agent-composer]')),
+        })
+      ) {
+        stopRun();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [cancellable, stopRun]);
+
+  /**
+   * 新消息 / 流式文本自动滚到底部——**但用户已经往上翻了就别拽他回来**（审查 W·A26）。
+   *
+   * 依赖里有 `streamingText`，而它每来一个 delta 就变一次。此前这里是无条件赋值，于是
+   * 流式期间想回看上文，每秒被拽回底部好几次，等于回看不了。
+   *
+   * 判据是「离底部还有多远」而不是一个显式的『用户滚动过』标志：后者要挂 scroll 监听、
+   * 要分辨程序滚动与人手滚动，而这里真正要问的问题只有一个——他还在看最新的内容吗。
+   */
   useEffect(() => {
     const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom > STICK_TO_BOTTOM_PX) return;
+    el.scrollTop = el.scrollHeight;
   }, [messages, streamingText, runningRunId]);
 
   /** 初始化位置：屏幕右侧；首次挂载也走统一安全边界，窄视口不会横向溢出。 */
   useEffect(() => {
-    if (!initialized && panelRef.current) {
-      const el = panelRef.current;
-      const page = el.parentElement;
-      if (page) {
-        const rect = el.getBoundingClientRect();
-        const header = page.querySelector('header');
-        const headerH = header?.getBoundingClientRect().height ?? 0;
-        const layout = getPanelLayout({
-          pageWidth: page.clientWidth,
-          pageHeight: page.clientHeight,
-          headerHeight: headerH,
-          panelWidth: rect.width,
-          panelHeight: page.clientHeight - headerH - page.clientHeight * 0.08,
-          desiredX: page.clientWidth * (1 - 0.015) - rect.width,
-          desiredY: headerH + page.clientHeight * 0.01,
-        });
-        setPosition({ x: layout.x, y: layout.y });
-        setPanelHeight(layout.height);
-      }
-      setInitialized(true);
+    if (initialized) return;
+    const metrics = measurePanel();
+    if (metrics) {
+      const layout = dockedPanelLayout(metrics);
+      setPosition({ x: layout.x, y: layout.y });
+      setPanelHeight(layout.height);
     }
-  }, [initialized]);
+    setInitialized(true);
+  }, [initialized, measurePanel]);
 
   /** 窗口缩放自适应：固定/浮动模式共用同一坐标与高度边界。 */
   useEffect(() => {
     const handleResize = () => {
-      const el = panelRef.current;
-      const page = el?.parentElement;
-      if (!el || !page) return;
-      const header = page.querySelector('header');
-      const headerH = header?.getBoundingClientRect().height ?? 0;
-      const rect = el.getBoundingClientRect();
+      const metrics = measurePanel();
+      if (!metrics) return;
+      // 浮动模式沿用上次位置，只把它收回可视区
       if (floating) {
         setPosition((prev) => {
-          const layout = getPanelLayout({
-            pageWidth: page.clientWidth,
-            pageHeight: page.clientHeight,
-            headerHeight: headerH,
-            panelWidth: rect.width,
-            panelHeight: rect.height,
-            desiredX: prev.x,
-            desiredY: prev.y,
-          });
+          const layout = freePanelLayout(metrics, prev.x, prev.y);
           setPanelHeight(layout.height);
           return { x: layout.x, y: layout.y };
         });
         return;
       }
-      // 固定模式：保持初始比例（右 1.5%、上 1%、下 7%），避免缩窗后被推出可视区
-      const layout = getPanelLayout({
-        pageWidth: page.clientWidth,
-        pageHeight: page.clientHeight,
-        headerHeight: headerH,
-        panelWidth: rect.width,
-        panelHeight: page.clientHeight - headerH - page.clientHeight * 0.08,
-        desiredX: page.clientWidth * (1 - 0.015) - rect.width,
-        desiredY: headerH + page.clientHeight * 0.01,
-      });
+      // 固定模式：贴右上角、撑满可用高度，避免缩窗后被推出可视区（IKAGZC）
+      const layout = dockedPanelLayout(metrics);
       setPosition({ x: layout.x, y: layout.y });
       setPanelHeight(layout.height);
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [floating]);
+  }, [floating, measurePanel]);
+
+  /**
+   * 拉本会话累计消耗积分：切会话时拉一次，每轮结束后再拉一次。
+   *
+   * 不在流式期间轮询——上游计费完成才出账，中途拉只会拿到上一轮的数，白费请求。
+   * 失败保留上一次已知值：`setSessionCredits` 只在拿到确切数时调用。
+   */
+  useEffect(() => {
+    if (!projectId || !sessionId) {
+      setSessionCredits(null);
+      return;
+    }
+    let cancelled = false;
+    let timer: number | undefined;
+
+    /**
+     * 计费日志是 post-billing 才写的，可能比流结束晚好几秒；agent 那边回写券号也可能整体滞后。
+     * 此前只补拉一次（2.5 秒），第二次还是查不到就把 0 写进胶囊——**把「不知道」显示成了
+     * 「没花钱」**（审查 W·P1）。改成退避重试，并且全程不拿一个假数去覆盖已知值。
+     */
+    const load = async (attempt = 0): Promise<void> => {
+      let result: Awaited<ReturnType<typeof fetchSessionCredits>> | null = null;
+      try {
+        result = await fetchSessionCredits(projectId, sessionId);
+      } catch (e) {
+        console.warn('拉取会话累计积分失败:', e);
+      }
+      if (cancelled) return;
+
+      // 确切：既查得到，也不处在「账单还没写进上游」的空窗里。
+      if (result && result.credits !== null && !(result.matched === 0 && result.runCount > 0)) {
+        setSessionCredits(result.credits);
+        return;
+      }
+
+      const delay = CREDITS_RETRY_DELAYS[attempt];
+      if (delay === undefined) {
+        // 退避用尽。有数就认这个数（宁可慢一拍，也好过一直空着）；`credits` 是 null 就保留
+        // 上一次已知值——胶囊显示「—」而不是「0」，这正是工单要的。
+        if (result?.credits != null) setSessionCredits(result.credits);
+        return;
+      }
+      timer = window.setTimeout(() => void load(attempt + 1), delay);
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [projectId, sessionId, turnOutcome]);
 
   /** 下拉（历史会话 / 模型选择 / 上传菜单）外部点击自动收起（点击面板其他区域或页面任意处） */
   useEffect(() => {
     if (!historyOpen && !modelOpen && !showUpload) return;
     const handleDocMouseDown = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (historyRef.current && !historyRef.current.contains(target)) setHistoryOpen(false);
+      if (historyRef.current && !historyRef.current.contains(target)) {
+        setHistoryOpen(false);
+        // 菜单收起时一并丢掉删除错误：留着它，下次打开会看到一条早已过期的红字。
+        dismissDeleteError();
+      }
       if (modelRef.current && !modelRef.current.contains(target)) setModelOpen(false);
       if (uploadRef.current && !uploadRef.current.contains(target)) setShowUpload(false);
     };
     document.addEventListener('mousedown', handleDocMouseDown);
     return () => document.removeEventListener('mousedown', handleDocMouseDown);
-  }, [historyOpen, modelOpen, showUpload]);
+  }, [historyOpen, modelOpen, showUpload, dismissDeleteError]);
 
   /** 鼠标按下头部开始拖动（仅浮动模式下可拖） */
   const handleDragStart = useCallback(
@@ -675,23 +997,12 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       if (!ds.dragging) return;
       const dx = e.clientX - ds.startX;
       const dy = e.clientY - ds.startY;
-      const el = panelRef.current;
-      const page = el?.parentElement;
-      if (!el || !page) return;
-      const headerH = page.querySelector('header')?.getBoundingClientRect().height ?? 0;
-      const rect = el.getBoundingClientRect();
-      const layout = getPanelLayout({
-        pageWidth: page.clientWidth,
-        pageHeight: page.clientHeight,
-        headerHeight: headerH,
-        panelWidth: rect.width,
-        panelHeight: rect.height,
-        desiredX: ds.origX + dx,
-        desiredY: ds.origY + dy,
-      });
+      const metrics = measurePanel();
+      if (!metrics) return;
+      const layout = freePanelLayout(metrics, ds.origX + dx, ds.origY + dy);
       setPosition({ x: layout.x, y: layout.y });
     },
-    [],
+    [measurePanel],
   );
 
   /** 鼠标释放 */
@@ -733,10 +1044,10 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     setForcedSkill(null);
   };
 
-  /** 发送消息：composedText 已把胶囊替换成完整 prompt 并跟自由输入拼接好；
+  /** 发送消息：**解引用发生在这一刻**——编辑期胶囊一直是指针，此处才换成完整 prompt；
    * 若已武装「直接使用」技能，本条消息携带 forced_creative_skill_id 强制激活后清除 */
   const handleSend = async () => {
-    const content = composedText.trim();
+    const content = resolveComposed(composed).trim();
     if (!content || runningRunId !== null || streaming) return;
     // 先清空再发。等 POST 回来才清，用户已经看到自己的气泡上屏、输入框里原文却还在，
     // 极易重复点发送。失败时把原文回填，一个字都不丢。
@@ -757,7 +1068,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   ) => {
     if (runningRunId !== null || streaming) return;
     const cardId = card.cardId ?? card.shotTitle;
-    setAppliedCardIds((prev) => new Set(prev).add(cardId));
+    // 不在这里记「已应用」：那个事实由画布上有没有这个节点决定，落节点之后自然就成立了。
     const payload: GenerationCardBlock = { ...card, ...patch, cardId };
     onApplyToDock?.(payload);
   };
@@ -793,10 +1104,29 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       {/* 头部标题栏（拖动区域） */}
       <div className={`${styles.panelHeader} ${floating ? styles.panelHeaderFloating : ''}`}>
         <div className={styles.headerLeft}>
-          <button className={styles.newChatBtn} onClick={handleNewChat} title="开启新对话">
-            <Plus size={14} strokeWidth={2.5} />
-            <span>新对话</span>
-          </button>
+          {/* 本会话累计消耗积分（IKAFPC / IKAGZC）。
+           *  **位置从一开始就占住**：原来写成「查到了才渲染」，于是面板打开后胶囊凭空冒出来，
+           *  还把右边的会话切换器推一下——用户看到的是一次白等。数字未落定时显示占位符，
+           *  仍然不显示 0：「不知道」和「没花钱」是两回事，后者会让人以为这一轮免费。 */}
+          <span
+            className={styles.creditPill}
+            title={
+              sessionCredits === null
+                ? '正在统计本次对话累计消耗积分'
+                : `目前 Agent 对话累计消耗积分：${sessionCredits} 积分`
+            }
+          >
+            <Coins size={12} strokeWidth={2} />
+            <span className={styles.creditValue}>
+              {sessionCredits === null ? '—' : sessionCredits}
+            </span>
+          </span>
+        </div>
+        <div className={styles.headerCenter}>
+          {/* 会话切换器（IKAFQ6）：标题本身就是唯一入口，「新对话」收进菜单顶部。
+           *  合并的动因是第一行要腾位置（IKAFPC 的积分胶囊要进来），代价是新建从一击变两击。
+           *  选 menu button 而非 split button 的依据见工单：项目内通常四五个会话，切换比新建频繁，
+           *  没有强默认动作；而且 split button 的标签位被「新对话」占死后，当前会话标题就没地方放了。 */}
           <div className={styles.historyWrap} ref={historyRef}>
             <button
               className={`${styles.historyBtn} ${historyOpen ? styles.iconBtnActive : ''}`}
@@ -804,10 +1134,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                 const next = !historyOpen;
                 setHistoryOpen(next);
                 if (next) refreshSessions();
+                else dismissDeleteError();
               }}
-              title="历史会话"
+              title="切换会话 / 新建对话"
             >
-              <History size={14} strokeWidth={2} />
+              <MessageSquare size={14} strokeWidth={2} />
               {/* 当前会话标题：标题异步生成完成（session.updated）后就地更新，不再永远是「新对话」 */}
               <span className={styles.historyBtnTitle}>
                 {sessions.find((s) => s.session_id === sessionId)?.title || '新对话'}
@@ -816,38 +1147,69 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
             </button>
             {historyOpen && (
               <div className={styles.historyDropdown}>
-                <div className={styles.historyDropdownTitle}>历史会话</div>
+                <button type="button" className={styles.historyNewItem} onClick={handleNewChat}>
+                  <Plus size={14} strokeWidth={2.5} />
+                  <span>新对话</span>
+                </button>
+                <div className={styles.historyDivider} />
                 {sessions.length === 0 ? (
                   <div className={styles.historyEmpty}>暂无历史会话</div>
                 ) : (
-                  sessions.map((s) => (
-                    <div
-                      key={s.session_id}
-                      className={`${styles.historyItem} ${s.session_id === sessionId ? styles.historyItemActive : ''}`}
-                    >
-                      <button
-                        type="button"
-                        className={styles.historyItemLabel}
-                        onClick={() => {
-                          switchSession(s.session_id);
-                          setHistoryOpen(false);
-                        }}
+                  sessions.map((s) => {
+                    const failed = deleteError?.sessionId === s.session_id ? deleteError : null;
+                    return (
+                      <div
+                        key={s.session_id}
+                        className={`${styles.historyItem} ${s.session_id === sessionId ? styles.historyItemActive : ''} ${failed ? styles.historyItemFailed : ''}`}
                       >
-                        {s.title || '新对话'}
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.historyItemDelete}
-                        title="删除会话"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteTarget({ id: s.session_id, title: s.title || '新对话' });
-                        }}
-                      >
-                        <X size={12} strokeWidth={2} />
-                      </button>
-                    </div>
-                  ))
+                        {failed ? (
+                          <>
+                            {/* 删除失败就在这一行说清楚，下拉不关闭——用户能原地重试。
+                             *  全局 toast 做不到这点：它弹出来时下拉已经收了，出错的行和提示是分离的。 */}
+                            <span className={styles.historyItemError} title={failed.message}>
+                              {failed.message}
+                            </span>
+                            <button
+                              type="button"
+                              className={styles.historyItemRetry}
+                              title="重试删除"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteSession(s.session_id);
+                              }}
+                            >
+                              <RotateCcw size={12} strokeWidth={2} />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className={styles.historyItemLabel}
+                              onClick={() => {
+                                switchSession(s.session_id);
+                                setHistoryOpen(false);
+                              }}
+                            >
+                              {s.session_id === sessionId && <Check size={12} strokeWidth={2.5} className={styles.historyItemCheck} />}
+                              <span className={styles.historyItemText}>{s.title || '新对话'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.historyItemDelete}
+                              title="删除会话"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteTarget({ id: s.session_id, title: s.title || '新对话' });
+                              }}
+                            >
+                              <X size={12} strokeWidth={2} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             )}
@@ -894,13 +1256,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       ) : (
         /* 对话消息流 */
         <div className={styles.messageList} ref={listRef}>
-          {/* 侧边栏状态条（S5：状态机用户可见反馈） */}
-          {messages.length > 0 && agentPhase !== 'idle' && (
-            <div className={`${styles.phaseBar} ${styles[`phase_${agentPhase}`] ?? ''}`}>
-              <span className={styles.phaseDot} />
-              {phaseLabels[agentPhase]}
-            </div>
-          )}
           {messages.map((m) =>
             m.role === 'user' ? (
               <div key={m.id} className={styles.userBubble}>{m.content}</div>
@@ -912,16 +1267,17 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                   onApplyAllCards={handleApplyAllCards}
                   onCancelCardGroup={handleCancelCardGroup}
                   disabled={runningRunId !== null || streaming}
-                  appliedCardIds={appliedCardIds}
+                  appliedCardIds={appliedIds}
                   cancelledMessageIds={cancelledMessageIds}
                 />
               </div>
             ),
           )}
-          {/* Agent 的思考过程（run.activity 实时步 + reasoning_trace 终态链）；有步即展示，运行中/终态后都可回看 */}
-          {thinkingSteps.length > 0 && (
+          {/* Agent 的思考过程：run.activity 实时步 + reasoning_trace 终态链 + 模型原话（IKA3M6）。
+              运行中默认展开——那段等待正是它要填的，收起来就等于还是白屏。 */}
+          {(thinkingSteps.length > 0 || reasoningText) && (
             <div className={styles.assistantBlock}>
-              <ThinkingBlock steps={thinkingSteps} />
+              <ThinkingBlock steps={thinkingSteps} reasoning={reasoningText} defaultOpen={Boolean(reasoningText)} />
             </div>
           )}
           {/* Agent 运行中的实时流式文本（assistant.delta 累积投影） */}
@@ -1018,17 +1374,14 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                   ? '仍在处理中，已超过 1 分钟无新内容。若无响应可取消后重试。'
                   : '已超过 1 分钟未收到运行状态，可重新连接会话恢复最新状态。'}
               </span>
-              {runningRunId && <span className={styles.longRunMeta}>run {runningRunId}</span>}
+              {/* run id 是内部主键，不进用户界面。用户报障时只需说明是哪个会话、大约何时；
+                  服务端按 agent_runs 的 (session_id, created_at) 索引反查具体 Run（IKA3M7）。 */}
               {!runningRunId && (
                 <button className={styles.cancelBtn} onClick={reconnectSession}>重新连接</button>
               )}
             </div>
           )}
-          {runningRunId !== null && (
-            <div className={styles.cancelRow}>
-              <button className={styles.cancelBtn} onClick={stopRun}>取消运行</button>
-            </div>
-          )}
+          {/* 取消运行的入口统一在发送侧（发送按钮变停止按钮 + ESC），这里不再重复一个（IKA4PH）。 */}
         </div>
       )}
 
@@ -1067,6 +1420,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           startedAt={turnStartedAt}
           activity={thinkingSteps.at(-1) ?? null}
           stalled={longRunning}
+          hasRunId={runningRunId !== null}
+          outcome={turnOutcome}
+          streamedText={streamingText}
         />
         {forcedSkill && (
           <div className={styles.armedSkill}>
@@ -1087,13 +1443,20 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         {retryUnavailable && (
           <div className={styles.chatErrorHint}>当前后端未提供重试接口；请开启新对话或联系管理员升级服务。</div>
         )}
-        <div className={styles.inputBox}>
-          <ChipTextEditor
-            ref={chipEditorRef}
-            placeholder="描述你的想法，使用 @ 引用素材"
-            onChangeText={setComposedText}
-            onSend={handleSend}
-          />
+        {/* data-agent-composer：ESC 判定用它把主输入框从「可编辑区域一律让路」里挑出来，
+            主输入框是 Lexical 的 contentEditable，而发送后焦点通常正停在这里。 */}
+        <div className={styles.inputBox} data-agent-composer>
+          {/* 这一层负责把编辑区撑到工具栏上沿：ChipTextEditor 自己的 wrapper 是 block，
+           *  撑高的责任只能落在它外面。见 .composerSlot。 */}
+          <div className={styles.composerSlot}>
+            <ChipTextEditor
+              ref={chipEditorRef}
+              placeholder="描述你的想法，使用 @ 引用素材"
+              onChange={setComposed}
+              onSend={handleSend}
+              className={styles.composerEditable}
+            />
+          </div>
 
           {/* 底部工具栏 */}
           <div className={styles.inputToolbar}>
@@ -1134,17 +1497,14 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           <div className={styles.toolbarRight}>
             <div className={styles.modelWrap} ref={modelRef}>
               <button
-                className={styles.modelBtn}
+                className={`${styles.modelBtn} ${modelOpen ? styles.modelBtnActive : ''}`}
+                title={currentModel?.label ? `Agent 模型：${currentModel.label}` : '选择 Agent 模型'}
+                aria-label={currentModel?.label ? `Agent 模型：${currentModel.label}` : '选择 Agent 模型'}
                 onClick={() => setModelOpen(!modelOpen)}
               >
-                <span className={styles.modelLabel}>
-                  {currentModel?.label ?? '选择模型'}
-                </span>
-                <ChevronDown
-                  size={12}
-                  strokeWidth={2}
-                  className={`${styles.modelArrow} ${modelOpen ? styles.modelArrowUp : ''}`}
-                />
+                {/* 平时只露一个盒子图标：模型名称在这一行没有常驻价值，点开菜单里才需要看见
+                 *  （IKAGZC）。title 兜住「当前是哪个模型」这个信息，不占版面。 */}
+                <Package size={16} strokeWidth={2} />
               </button>
               {modelOpen && (
                 <div className={styles.modelDropdown}>
@@ -1182,22 +1542,24 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                 <RotateCw size={14} strokeWidth={2} />
               </button>
             )}
-            {runningRunId !== null ? (
+            {/* 消息一发出即为停止形态：中间不再有一段按钮灰着、什么都按不了的窗口（IKACCL）。 */}
+            {cancellable ? (
               <button
                 className={`${styles.sendBtn} ${styles.stopBtnActive}`}
                 onClick={stopRun}
-                title="停止运行"
+                title="停止运行（ESC）"
+                aria-label="停止运行，快捷键 ESC"
               >
                 <Square size={12} fill="#fff" strokeWidth={0} />
               </button>
             ) : (
               <button
-                className={`${styles.sendBtn} ${composedText.trim() ? styles.sendBtnActive : ''}`}
+                className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}
                 onClick={handleSend}
                 /* 不再拿 sessionId 当门槛：刷新后要先「取项目 → 列会话 → 连会话」几个来回，
                  * 这段时间按钮是灰的，用户以为面板必须整页加载完才能用。而 sendMessage 早就会在
                  * 会话还没建好时自己补一个（ensureSession），这道门挡的是一条本来就走得通的路。 */
-                disabled={!composedText.trim() || streaming}
+                disabled={!canSend || streaming}
                 title={
                   streaming
                     ? '等待运行状态；超时后可重新连接'

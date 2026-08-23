@@ -65,6 +65,63 @@ function createRepository({ flakyRuleTest = false } = {}) {
   return directory;
 }
 
+test("classifies backend BFF sources as scoped/backend", async () => {
+  // 整棵 backend/ 树此前没有任何归类规则：NODE_SOURCE 只认 `^(?:apps|packages)/`，
+  // 于是改 BFF 的 controller 落进「未归类」，门禁一条 backend 的 typecheck 或测试都不跑。
+  const { classifyChanges, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+
+  const classification = classifyChanges([
+    "backend/apps/blue-whale/src/api/agent/agent-session-credits.controller.ts",
+    "backend/libs/shared/account/account.service.ts",
+  ]);
+  assert.equal(classification.tier, "scoped");
+  assert.deepEqual(classification.areas, ["backend"]);
+
+  const commands = buildVerificationPlan(classification, { base: "BASE" });
+  const flattened = commands.map((command) => command.join(" "));
+  assert.ok(
+    flattened.some((command) => command.includes("backend/tsconfig.json")),
+    "backend 有自己的 tsconfig（@lib/* 别名），根 tsc -b 覆盖不到它",
+  );
+  assert.ok(
+    flattened.some((command) => command.includes("vitest run backend")),
+    "backend 的测试必须真的被跑到",
+  );
+});
+
+test("classifies the agent route manifest copy as web, not unclassified", async () => {
+  // web/src/api/agent-rest-routes.v1.json 是 agent 路由清单的副本，agentRoutes.test.ts 正在断言它。
+  // WEB_SOURCE 原来只认 ts|tsx|css，改了副本却不跑 web 测试，等于没有守卫。
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  const classification = classifyChanges(["web/src/api/agent-rest-routes.v1.json"]);
+  assert.equal(classification.tier, "scoped");
+  assert.deepEqual(classification.areas, ["web"]);
+});
+
+test("no path in a mixed real-world change set falls through unclassified", async () => {
+  // 兜底那条分支不会失败，只会把 reason 写成「change scope is not classified」并照常放行——
+  // 所以「有没有漏网」必须由这条测试盯着，而不是靠人读 reason。
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  const files = [
+    "backend/apps/blue-whale/src/api/agent/agent-v1.module.ts",
+    "web/package.json",
+    "web/package-lock.json",
+    "web/.env.test",
+    "web/src/api/agent-rest-routes.v1.json",
+    "web/scripts/check-agent-routes.mjs",
+    "packages/core/src/new-api-billing-ops.ts",
+  ];
+  for (const file of files) {
+    const reasons = classifyChanges([file]).reasons ?? [];
+    assert.ok(
+      !reasons.some((reason) => /not classified/.test(reason)),
+      `${file} 未归类：门禁不会为它跑任何定向验证`,
+    );
+  }
+});
+
 test("classifies Markdown-only changes as documentation verification", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
@@ -261,6 +318,40 @@ test("rejects unknown executable paths instead of escalating to full", async () 
   );
 });
 
+// IKACK2：`web/scripts/` 是本轮新开的目录，此前没有任何规则覆盖，于是它命中 EXECUTABLE_FILE
+// 却分不了类，`--stage pr` 必抛 UNCLASSIFIED_PATH。补分类而不是放宽那条规矩——「归不了类就停下」
+// 本身是对的，缺的是这一条归属。
+test("classifies web tooling scripts as web", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(["web/scripts/check-agent-routes.mjs"], { stage: "pr" }),
+    {
+      tier: "scoped",
+      areas: ["web"],
+      reasons: ["known source paths changed"],
+    },
+  );
+
+  // 与 web 源码同区：一起改时不该分裂出第二个 area。
+  assert.deepEqual(
+    classifyChanges(["web/scripts/check-agent-routes.mjs", "web/src/api/agentRoutes.ts"], {
+      stage: "pr",
+    }),
+    {
+      tier: "scoped",
+      areas: ["web"],
+      reasons: ["known source paths changed"],
+    },
+  );
+
+  // 归类只覆盖 web 自己的脚本目录，不是「凡叫 scripts 就放行」。
+  assert.throws(
+    () => classifyChanges(["web/tools/some-new-tool.mjs"], { stage: "pr" }),
+    /UNCLASSIFIED_PATH: web\/tools\/some-new-tool\.mjs/,
+  );
+});
+
 test("keeps governance checks when a governance change also hits high-impact paths", async () => {
   const { buildVerificationPlan, classifyChanges } = await import(
     "../scripts/verification-policy.mjs"
@@ -369,7 +460,7 @@ test("classifies web source changes as scoped web verification", async () => {
   });
 });
 
-test("builds web typecheck and lint checks for web verification", async () => {
+test("builds web typecheck, lint and vitest checks for web verification", async () => {
   const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
 
   assert.deepEqual(
@@ -385,6 +476,7 @@ test("builds web typecheck and lint checks for web verification", async () => {
       ["git", "diff", "--check", "origin/master...HEAD"],
       ["node", "web/node_modules/typescript/bin/tsc", "-b", "web/tsconfig.json", "--pretty", "false"],
       ["npm", "--prefix", "web", "run", "lint"],
+      ["npm", "--prefix", "web", "run", "test", "--", "--changed", "origin/master", "--passWithNoTests"],
     ],
   );
 });

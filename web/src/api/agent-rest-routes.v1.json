@@ -1,0 +1,127 @@
+{
+  "$comment": "Generated from src/http/routes.ts (IKACK2). Do not edit by hand — run pnpm contract:routes. routes.test.ts fails if this drifts.",
+  "version": 1,
+  "base_path": "/v1/projects/{project_id}",
+  "routes": [
+    {
+      "name": "list_sessions",
+      "method": "GET",
+      "path": "/sessions"
+    },
+    {
+      "name": "create_session",
+      "method": "POST",
+      "path": "/sessions"
+    },
+    {
+      "name": "get_session",
+      "method": "GET",
+      "path": "/sessions/{session_id}"
+    },
+    {
+      "name": "update_session",
+      "method": "PATCH",
+      "path": "/sessions/{session_id}"
+    },
+    {
+      "name": "delete_session",
+      "method": "DELETE",
+      "path": "/sessions/{session_id}"
+    },
+    {
+      "name": "archive_session",
+      "method": "POST",
+      "path": "/sessions/{session_id}/archive"
+    },
+    {
+      "name": "restore_session",
+      "method": "POST",
+      "path": "/sessions/{session_id}/restore"
+    },
+    {
+      "name": "cancel_session",
+      "method": "POST",
+      "path": "/sessions/{session_id}/cancel"
+    },
+    {
+      "name": "session_snapshot",
+      "method": "GET",
+      "path": "/sessions/{session_id}/snapshot"
+    },
+    {
+      "name": "session_events",
+      "method": "GET",
+      "path": "/sessions/{session_id}/events"
+    },
+    {
+      "name": "session_messages",
+      "method": "GET",
+      "path": "/sessions/{session_id}/messages"
+    },
+    {
+      "name": "send_message",
+      "method": "POST",
+      "path": "/sessions/{session_id}/messages"
+    },
+    {
+      "name": "session_runs",
+      "method": "GET",
+      "path": "/sessions/{session_id}/runs"
+    },
+    {
+      "name": "analyze_assets",
+      "method": "POST",
+      "path": "/sessions/{session_id}/asset-analyses"
+    },
+    {
+      "name": "confirm_asset_analysis",
+      "method": "POST",
+      "path": "/sessions/{session_id}/asset-analyses/{analysis_id}/versions/{version}/actions/confirm"
+    },
+    {
+      "name": "correct_asset_analysis",
+      "method": "POST",
+      "path": "/sessions/{session_id}/asset-analyses/{analysis_id}/versions/{version}/actions/correct"
+    },
+    {
+      "name": "list_requirement_understandings",
+      "method": "GET",
+      "path": "/sessions/{session_id}/requirement-understandings"
+    },
+    {
+      "name": "confirm_requirement_understanding",
+      "method": "POST",
+      "path": "/sessions/{session_id}/requirement-understandings/{understanding_id}/versions/{version}/actions/confirm"
+    },
+    {
+      "name": "correct_requirement_understanding",
+      "method": "POST",
+      "path": "/sessions/{session_id}/requirement-understandings/{understanding_id}/versions/{version}/actions/correct"
+    },
+    {
+      "name": "get_run",
+      "method": "GET",
+      "path": "/runs/{run_id}"
+    },
+    {
+      "name": "cancel_run",
+      "method": "POST",
+      "path": "/runs/{run_id}/cancel"
+    },
+    {
+      "name": "retry_run",
+      "method": "POST",
+      "path": "/runs/{run_id}/retry"
+    },
+    {
+      "name": "resume_run",
+      "method": "POST",
+      "path": "/runs/{run_id}/resume"
+    },
+    {
+      "name": "skip_run",
+      "method": "POST",
+      "path": "/runs/{run_id}/skip"
+    }
+  ]
+}

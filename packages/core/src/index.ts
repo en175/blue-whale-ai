@@ -59,6 +59,7 @@ export {
   type NewApiAdminManageUserInput,
   type NewApiAdminTopUpRow,
   type NewApiAdminUserRow,
+  type NewApiCapabilityQuotaResult,
   type NewApiLogRow,
   type NewApiLogStat,
   type NewApiPageInfo,

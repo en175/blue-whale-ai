@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { newNodeId } from './nodeId';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
@@ -506,7 +507,7 @@ export default function CanvasPage() {
   /** 创建文本节点 */
   const handleAddTextNode = () => {
     const newNode: Node = {
-      id: `text-${Date.now()}`,
+      id: newNodeId('text'),
       type: 'textNode',
       position: spawnPosition(),
       data: {
@@ -532,13 +533,13 @@ export default function CanvasPage() {
   const handleDuplicateNode = (id: string) => {
     const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
-      const copy: Node = { ...t, id: `text-${Date.now()}`, position: { x: t.position.x + 40, y: t.position.y + 40 }, data: { ...t.data } };
+      const copy: Node = { ...t, id: newNodeId('text'), position: { x: t.position.x + 40, y: t.position.y + 40 }, data: { ...t.data } };
       setTextNodes((prev) => [...prev, copy]);
       return;
     }
     const m = mediaNodesRef.current.find((n) => n.id === id);
     if (m) {
-      const copy: Node = { ...m, id: `media-${Date.now()}`, position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
+      const copy: Node = { ...m, id: newNodeId('media'), position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
       setMediaNodes((prev) => [...prev, copy]);
     }
   };
@@ -764,7 +765,7 @@ export default function CanvasPage() {
         console.warn(`[${file.name}] 超过 ${Math.round(limit / 1024 / 1024)}MB 上限，已跳过`);
         return;
       }
-      const nodeId = `media-${Date.now()}-${i}`;
+      const nodeId = newNodeId('media');
       const localSrc = URL.createObjectURL(file);
 
       newNodes.push({
@@ -909,7 +910,7 @@ export default function CanvasPage() {
       console.warn('未选中项目，无法创建生成任务');
       return;
     }
-    const nodeId = `media-gen-${Date.now()}`;
+    const nodeId = newNodeId('media-gen');
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
@@ -1109,9 +1110,28 @@ export default function CanvasPage() {
   actionsRef.current.download = handleNodeDownload;
 
   /** Agent 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent） */
+  /**
+   * 画布上现存的生成卡节点对应的 cardId 集合（IKAFSQ）。
+   *
+   * 「这张卡应用过没有」不再是侧边栏自己维护的一份状态，而是从画布查出来的事实。侧边栏那份
+   * 内存 `useState` 刷新即清空（绿勾全掉），而且画布上把节点删了它也不知道——两处必然对不上。
+   * 改成派生之后，删节点自动退回「＋ 手动应用」、刷新自动恢复，都不需要额外的同步代码。
+   *
+   * cardId 随 payload 一起铺进了 `data.generationCard`，而 `serializeNodes` 会把节点存进画布
+   * 文档，所以这个事实本来就是持久化的，只是过去没人读。
+   */
+  const appliedCardIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const node of assetNodes) {
+      const card = (node.data as { generationCard?: { cardId?: unknown } } | undefined)?.generationCard;
+      if (typeof card?.cardId === 'string' && card.cardId) ids.add(card.cardId);
+    }
+    return ids;
+  }, [assetNodes]);
+
   const handleAgentCardApply = (payload: GenerationCardBlock) => {
     const node: Node = {
-      id: `gencard-${Date.now()}`,
+      id: newNodeId('gencard'),
       type: 'assetNode',
       position: spawnPosition(),
       data: {
@@ -1242,7 +1262,7 @@ export default function CanvasPage() {
   const handleCreateProduct = () => {
     productSeq.current += 1;
     const node: Node = {
-      id: `product-${Date.now()}`,
+      id: newNodeId('product'),
       type: 'productNode',
       position: spawnPosition(),
       data: {
@@ -1264,7 +1284,7 @@ export default function CanvasPage() {
   /** 新建资产卡节点（工具栏 资产库 → 风格卡/角色卡/物体卡/环境卡/自定义卡） */
   const handleCreateAssetCard = (kind: AssetCardKind) => {
     const node: Node = {
-      id: `asset-${kind}-${Date.now()}`,
+      id: newNodeId(`asset-${kind}`),
       type: 'assetNode',
       position: spawnPosition(),
       data: {
@@ -1485,7 +1505,7 @@ export default function CanvasPage() {
           const kind = item.kind as 'image' | 'video' | 'audio';
           const mediaType = kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'image';
           const node: Node = {
-            id: `media-${Date.now()}`,
+            id: newNodeId('media'),
             type: 'mediaNode',
             position: spawnPosition(),
             data: {
@@ -1518,7 +1538,7 @@ export default function CanvasPage() {
           };
           const kind = item.kind as AssetCardKind;
           const node: Node = {
-            id: `asset-${Date.now()}`,
+            id: newNodeId('asset'),
             type: 'assetNode',
             position: spawnPosition(),
             data: {
@@ -1549,7 +1569,7 @@ export default function CanvasPage() {
             images: Array<{ id: string; src: string; enabled?: boolean }>;
           };
           const node: Node = {
-            id: `product-${Date.now()}`,
+            id: newNodeId('product'),
             type: 'productNode',
             position: spawnPosition(),
             data: {
@@ -1572,7 +1592,7 @@ export default function CanvasPage() {
           // 文本：构造文本节点
           const snapshot = item.snapshot as { html: string };
           const node: Node = {
-            id: `text-${Date.now()}`,
+            id: newNodeId('text'),
             type: 'textNode',
             position: spawnPosition(),
             data: {
@@ -1822,6 +1842,7 @@ export default function CanvasPage() {
           viewport={doc?.viewport}
           onViewportChange={setViewport}
           registerSpawnPosition={registerSpawnPosition}
+          hideZoomControl={showAgent}
           onNodeDragStop={handleNodeDragStop}
           onNodeClick={handleCanvasNodeClick}
           onPaneClick={handleCanvasPaneClick}
@@ -1985,6 +2006,7 @@ export default function CanvasPage() {
           inputVersion={agentContext?.ts ?? 0}
           projectId={currentId || undefined}
           onApplyToDock={handleAgentCardApply}
+          appliedCardIds={appliedCardIds}
           initialSkillId={agentContext?.skillId ?? ''}
         />
       )}

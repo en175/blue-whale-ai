@@ -54,11 +54,13 @@ interface FlowCanvasProps {
   onNodeClick?: (node: Node) => void;
   /** 画布空白处单击 */
   onPaneClick?: () => void;
+  /** 隐藏右下角缩放控件。Agent 面板打开时它正好压在面板的发送按钮上（IKAGZC）。 */
+  hideZoomControl?: boolean;
   /** 注册出生点取数函数（当前视口中心的 flow 坐标），供父级创建节点时落在用户可见区域 */
   registerSpawnPosition?: (fn: () => { x: number; y: number }) => void;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl }: FlowCanvasProps) {
   const isDrag = toolMode === 'drag';
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -303,12 +305,12 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
           />
         )}
       </ReactFlow>
-      <ZoomControl />
+      {!hideZoomControl && <ZoomControl />}
     </div>
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -327,6 +329,7 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
         registerSpawnPosition={registerSpawnPosition}
+        hideZoomControl={hideZoomControl}
       />
     </ReactFlowProvider>
   );
