@@ -54,14 +54,41 @@ describe('清单副本', () => {
   });
 });
 
+/**
+ * 例外名单：这两条是**故意**手写的，其余一律不许。
+ *
+ * 改成白名单制是因为旧写法漏了（审查 W·S14）：那条正则只认 `/projects/…` 开头的模板，
+ * 而 `fetchSessionCredits` 手写的是 `/api/agent/billing/sessions/…`，就从旁边溜过去了。
+ * 守卫要能拦住"下一条"，就不能只认已知的那一种形状。
+ */
+const ALLOWED_HAND_WRITTEN = [
+  // 命名空间前缀，不含具体路由——具体路由由 agentPath() 从清单构造后拼进来。
+  '/api/agent/v1${path}',
+  // BFF 自己的端点。agent 服务手里没有用户凭证，查账这件事只能在 BFF 做，因此它不在
+  // agent 路由清单里，也不该在。**新增 BFF 端点必须在这里留名**，否则这条测试会红。
+  '/api/agent/billing/',
+];
+
 describe('源码守卫：不许再手写 agent 接口地址', () => {
-  it('agentSessions.ts 里没有手写的 /projects/ 路径', async () => {
+  it('agentSessions.ts 里除白名单外没有手写的接口地址', async () => {
     const source = await import('./agentSessions.ts?raw').then((m) => m.default as string);
-    // 只看以路径开头的模板字符串——注释里出现 /projects/ 是文档，不是拼地址。
-    // sessionRequest 内部那一处 `/api/agent/v1${path}` 是命名空间前缀，不含具体路由，予以放行。
-    const handWritten = [...source.matchAll(/`\/(?:projects|api\/agent\/v1\/projects)\/[^`\n]*`/g)].map(
-      (m) => m[0],
+    // 先剥掉注释：文档里写 `/api/agent/billing/*` 是在说明，不是在拼地址。
+    const code = source
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^[ \t]*\/\/.*$/gm, '');
+    // 任何以 /api/agent 或 /projects 开头的路径模板都要过这道关，不再只认 /projects/。
+    const literals = [...code.matchAll(/`(\/(?:api\/agent|projects)\/[^`\n]*)`/g)].map((m) => m[1]!);
+    const handWritten = literals.filter(
+      (path) => !ALLOWED_HAND_WRITTEN.some((allowed) => path.startsWith(allowed)),
     );
     expect(handWritten).toEqual([]);
+  });
+
+  it('放宽后的正则确实认得出漏网的那一种——否则这道关等于没有', () => {
+    // 用旧写法漏掉的那条真实路径做样本：白名单一旦删掉，它必须被拦下。
+    const sample = 'return apiRequest(`/api/agent/billing/sessions/${id}?project_id=${p}`);';
+    const literals = [...sample.matchAll(/`(\/(?:api\/agent|projects)\/[^`\n]*)`/g)].map((m) => m[1]!);
+    expect(literals).toHaveLength(1);
+    expect(literals.filter((path) => !['/api/agent/v1${path}'].some((a) => path.startsWith(a)))).toHaveLength(1);
   });
 });
