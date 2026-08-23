@@ -3,7 +3,29 @@
 import {NewApiError} from "./new-api-transport.js";
 import type {NewApiEnvelope, NewApiRequest} from "./new-api-transport.js";
 import {parseTopUpRecord} from "./new-api-types.js";
-import type {NewApiPricingItem, NewApiPricingResult, NewApiRechargeAgreement, NewApiRechargeOrderResult, NewApiRechargeOrderStatus, NewApiRechargeTiersResult, NewApiTopUpListResult, NewApiTopUpOrderResult, NewApiTopUpRecord, NewApiUserLogListResult, NewApiUserLogRecord} from "./new-api-types.js";
+import type {NewApiCapabilityQuotaResult, NewApiPricingItem, NewApiPricingResult, NewApiRechargeAgreement, NewApiRechargeOrderResult, NewApiRechargeOrderStatus, NewApiRechargeTiersResult, NewApiTopUpListResult, NewApiTopUpOrderResult, NewApiTopUpRecord, NewApiUserLogListResult, NewApiUserLogRecord} from "./new-api-types.js";
+
+/**
+ * 从一条账单的 `other` 字段里读出能力券号。
+ *
+ * new-api 那边写的是 JSON 字符串（`service/log_info_generate.go`：走能力券计费时写入
+ * `billing_authority` 与 `run_capability_id`）。这里刻意宽容：解析失败、不是对象、字段缺失，
+ * 一律当成「这笔账不属于任何券」——它多半就是出图出片那类不走券的消费，**丢掉是对的**。
+ */
+function readRunCapabilityId(other: unknown): string {
+  const raw = typeof other === "string" ? safeParse(other) : other;
+  if (!raw || typeof raw !== "object") return "";
+  const id = (raw as Record<string, unknown>).run_capability_id;
+  return typeof id === "string" ? id : "";
+}
+
+function safeParse(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
 
 export function createNewApiBillingOps(request: NewApiRequest) {
   return {
@@ -214,6 +236,54 @@ export function createNewApiBillingOps(request: NewApiRequest) {
         items,
         total: typeof data.total === "number" ? data.total : 0,
       };
+    },
+
+    /**
+     * IKAFPC：把一组能力券号对应的实际消费加起来。
+     *
+     * 走的是**用户自己的凭证**（`/api/log/self` 是 AccountTokenOrUserAuth），不需要管理员权限，
+     * 也不需要 new-api 侧任何改动——`other.run_capability_id` 是它本来就在写的字段，用户侧查询
+     * 里也保留着（`formatUserLogs` 只剥 admin_info / audit_info / stream_status）。
+     *
+     * 时间窗只用来**收敛翻页**，不参与归属判定：归属完全由券号决定，所以窗口开大一点只是多翻
+     * 几页，绝不会把别人的账算进来。
+     */
+    async sumRunCapabilityQuota(
+      token: string,
+      capabilityIds: readonly string[],
+      window: { startTimestamp?: number; endTimestamp?: number; maxPages?: number } = {},
+    ): Promise<NewApiCapabilityQuotaResult> {
+      const wanted = new Set(capabilityIds.filter((id) => typeof id === "string" && id.length > 0));
+      if (wanted.size === 0) return { quota: 0, matched: 0, truncated: false };
+
+      const pageSize = 100;
+      const maxPages = Math.max(1, Math.trunc(window.maxPages ?? 10));
+      const range = [
+        window.startTimestamp ? `&start_timestamp=${Math.trunc(window.startTimestamp)}` : "",
+        window.endTimestamp ? `&end_timestamp=${Math.trunc(window.endTimestamp)}` : "",
+      ].join("");
+
+      let quota = 0;
+      let matched = 0;
+      let truncated = false;
+      for (let page = 1; page <= maxPages; page += 1) {
+        const response = await request<NewApiEnvelope>(
+          `/api/log/self?p=${page}&page_size=${pageSize}&type=2${range}`,
+          { method: "GET" },
+          token,
+        );
+        const data = (response.data ?? {}) as { items?: unknown; total?: unknown };
+        const rawItems = Array.isArray(data.items) ? (data.items as Array<Record<string, unknown>>) : [];
+        for (const raw of rawItems) {
+          if (!wanted.has(readRunCapabilityId(raw.other))) continue;
+          matched += 1;
+          quota += Number(raw.quota ?? 0);
+        }
+        if (rawItems.length < pageSize) break;
+        // 还有下一页却已经到上限：如实标记，别让调用方把一个下界当成确切账。
+        if (page === maxPages) truncated = true;
+      }
+      return { quota, matched, truncated };
     },
 
     /** IK7G9X：按 request_id 精确取一条消费流水（quota 单位与余额一致）。

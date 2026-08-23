@@ -6,7 +6,7 @@
  * - 事件流为共享连接（引用计数）：StrictMode 双挂载/多处订阅不重复建连
  * ============================================ */
 import { readSseResponse, type SseEvent } from './events';
-import { ApiError } from './http';
+import { ApiError, apiRequest } from './http';
 import { newIdempotencyKey } from './jobs';
 import { agentPath, agentUrl } from './agentRoutes';
 import { getAccessToken, setSession } from '@/utils/auth';
@@ -584,4 +584,28 @@ export function subscribeSessionEvents(
       hubs.delete(`${projectId}:${sessionId}`);
     }, IDLE_CLOSE_DELAY);
   };
+}
+
+/* ============ 本会话累计消耗积分（IKAFPC） ============ */
+
+/** 本会话累计消耗。`truncated` 为真时 credits 是下界而非确切值。 */
+export interface SessionCredits {
+  credits: number;
+  quota: number;
+  /** 命中的账单条数：0 且 run_count>0 说明账还没写进上游，不是真的没花钱 */
+  matched: number;
+  run_count: number;
+  truncated: boolean;
+}
+
+/**
+ * 取本会话累计消耗积分。
+ *
+ * 走 `/api/agent/billing/*` 而非 `/api/agent/v1/*`：后者是到 agent 服务的透传代理，
+ * 这个端点的活儿（拿用户凭证去上游查账、按券号筛）只能在 BFF 做，agent 手里没有用户凭证。
+ */
+export function fetchSessionCredits(projectId: string, sessionId: string): Promise<SessionCredits> {
+  return apiRequest<SessionCredits>(
+    `/api/agent/billing/sessions/${encodeURIComponent(sessionId)}?project_id=${encodeURIComponent(projectId)}`,
+  );
 }

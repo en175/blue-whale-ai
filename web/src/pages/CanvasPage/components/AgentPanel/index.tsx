@@ -26,7 +26,7 @@ import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api
 import { useAgentSession, type ChatMessage, type AgentPhase, type TurnOutcome } from '../../hooks/useAgentSession';
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
-import type { SessionContentBlock, GenerationCardBlock } from '@/api/agentSessions';
+import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock } from '@/api/agentSessions';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
@@ -642,6 +642,15 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供发送按钮启用态判断 */
+  /**
+   * 本会话累计消耗积分（IKAFPC）。
+   *
+   * 数字在**一轮结束后**才跳，不做流式实时滚动：上游要计费完成才出账，实时只能靠估，
+   * 而这是钱的数字——宁可慢一拍，不给假数。取数失败时保留上一次已知值，不显示 0：
+   * 「查不到」和「真没花钱」是两回事，后者会让用户以为这一轮免费。
+   */
+  const [sessionCredits, setSessionCredits] = useState<number | null>(null);
+
   /** 输入框内容的结构化形态：胶囊在编辑期是指针，只在发送时解引用（IKAFSX）。 */
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
   const canSend = !composedIsEmpty(composed);
@@ -875,6 +884,38 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     return () => window.removeEventListener('resize', handleResize);
   }, [floating]);
 
+  /**
+   * 拉本会话累计消耗积分：切会话时拉一次，每轮结束后再拉一次。
+   *
+   * 不在流式期间轮询——上游计费完成才出账，中途拉只会拿到上一轮的数，白费请求。
+   * 失败保留上一次已知值：`setSessionCredits` 只在成功时调用。
+   */
+  useEffect(() => {
+    if (!projectId || !sessionId) {
+      setSessionCredits(null);
+      return;
+    }
+    let cancelled = false;
+    // 计费日志是 post-billing 才写的，可能比流结束晚一点：失败或颗粒为 0 时补一次。
+    const load = async (attempt = 0): Promise<void> => {
+      try {
+        const result = await fetchSessionCredits(projectId, sessionId);
+        if (cancelled) return;
+        if (result.matched === 0 && result.run_count > 0 && attempt === 0) {
+          window.setTimeout(() => void load(1), 2500);
+          return;
+        }
+        setSessionCredits(result.credits);
+      } catch (e) {
+        console.warn('拉取会话累计积分失败:', e);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, sessionId, turnOutcome]);
+
   /** 下拉（历史会话 / 模型选择 / 上传菜单）外部点击自动收起（点击面板其他区域或页面任意处） */
   useEffect(() => {
     if (!historyOpen && !modelOpen && !showUpload) return;
@@ -1039,6 +1080,18 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       {/* 头部标题栏（拖动区域） */}
       <div className={`${styles.panelHeader} ${floating ? styles.panelHeaderFloating : ''}`}>
         <div className={styles.headerLeft}>
+          {/* 本会话累计消耗积分（IKAFPC）。常驻，悬浮出口径说明。
+           *  查不到时整个胶囊不渲染——显示 0 会让用户以为这一轮免费，而「不知道」和「没花钱」
+           *  是两回事。 */}
+          {sessionCredits !== null && (
+            <span
+              className={styles.creditPill}
+              title={`目前 Agent 对话累计消耗积分：${sessionCredits} 积分`}
+            >
+              <Coins size={12} strokeWidth={2} />
+              <span>{sessionCredits}</span>
+            </span>
+          )}
           {/* 会话切换器（IKAFQ6）：标题本身就是唯一入口，「新对话」收进菜单顶部。
            *  合并的动因是第一行要腾位置（IKAFPC 的积分胶囊要进来），代价是新建从一击变两击。
            *  选 menu button 而非 split button 的依据见工单：项目内通常四五个会话，切换比新建频繁，

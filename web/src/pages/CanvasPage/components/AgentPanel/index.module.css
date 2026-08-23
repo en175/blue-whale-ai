@@ -1664,3 +1664,18 @@
   margin-left: 1px;
   animation: runStatusPulse 1s steps(2, start) infinite;
 }
+
+/* ---- 本会话累计消耗积分胶囊（IKAFPC） ---- */
+.creditPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
