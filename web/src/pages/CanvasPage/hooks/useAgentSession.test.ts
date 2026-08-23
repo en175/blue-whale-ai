@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SseEvent, SessionSnapshot } from '@/api/agentSessions';
 import { ApiError } from '@/api/http';
-import { classifyConfirmFailure, useAgentSession } from './useAgentSession';
+import { useAgentSession } from './useAgentSession';
 
 const mocks = vi.hoisted(() => ({
   listSessions: vi.fn(),
@@ -15,9 +15,6 @@ const mocks = vi.hoisted(() => ({
   cancelSession: vi.fn(),
   cancelSessionRun: vi.fn(),
   retrySessionRun: vi.fn(),
-  fetchRequirementUnderstandings: vi.fn(),
-  confirmRequirementUnderstanding: vi.fn(),
-  correctRequirementUnderstanding: vi.fn(),
   subscribeSessionEvents: vi.fn(),
 }));
 
@@ -103,9 +100,6 @@ beforeEach(() => {
   mocks.sendSessionMessage.mockResolvedValue({});
   mocks.cancelSessionRun.mockResolvedValue({});
   mocks.retrySessionRun.mockResolvedValue({});
-  mocks.fetchRequirementUnderstandings.mockResolvedValue({ items: [] });
-  mocks.confirmRequirementUnderstanding.mockResolvedValue({});
-  mocks.correctRequirementUnderstanding.mockResolvedValue({});
   mocks.subscribeSessionEvents.mockImplementation(
     (_projectId: string, _sessionId: string, _cursor: string, handler: (event: SseEvent) => void) => {
       eventHandlers.push(handler);
@@ -842,192 +836,6 @@ describe('useAgentSession concurrency guards', () => {
     expect(latest.messages.map((message) => message.content)).toEqual(['new session']);
   });
 
-  it('submits a confirmation only once while the first request is pending', async () => {
-    const confirmation = deferred<unknown>();
-    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
-    mocks.confirmRequirementUnderstanding.mockReturnValue(confirmation.promise);
-    await renderHookHarness();
-    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
-
-    await act(async () => {
-      eventHandlers.at(-1)?.({
-        type: 'requirement_understanding.proposed.v1',
-        id: 'event-1',
-        data: {
-          payload: {
-            understanding: {
-              understanding_id: 'understanding-1',
-              version: 1,
-              proposed_summary: 'summary',
-              status: 'awaiting_confirmation',
-            },
-          },
-        },
-      });
-    });
-
-    act(() => {
-      void latest.confirmUnderstanding();
-      void latest.confirmUnderstanding();
-    });
-
-    expect(mocks.confirmRequirementUnderstanding).toHaveBeenCalledOnce();
-    expect(latest.confirmationPending).toBe(true);
-
-    await act(async () => {
-      confirmation.resolve({});
-      await confirmation.promise;
-    });
-    expect(latest.confirmationPending).toBe(false);
-  });
-
-  /** IKA4Q5：确认有三条来路，只有点按钮那条经过本地。模型在 Run 内自己调确认工具时，
-   *  唯一的信号就是这个事件；不收卡的话用户再点必然 409，看到「确认失败，请重试」。 */
-  it('清掉确认卡，当理解是被别处确认的（模型在 Run 内确认 / 自然语言确认）', async () => {
-    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
-    await renderHookHarness();
-    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
-
-    await act(async () => {
-      eventHandlers.at(-1)?.({
-        type: 'requirement_understanding.proposed.v1',
-        id: 'event-1',
-        data: {
-          payload: {
-            understanding: {
-              understanding_id: 'understanding-1',
-              version: 1,
-              proposed_summary: 'summary',
-              status: 'awaiting_confirmation',
-            },
-          },
-        },
-      });
-    });
-    expect(latest.pendingUnderstanding?.understanding_id).toBe('understanding-1');
-
-    await act(async () => {
-      eventHandlers.at(-1)?.({
-        type: 'requirement_understanding.accepted.v1',
-        id: 'event-2',
-        data: {
-          payload: {
-            understanding: {
-              understanding_id: 'understanding-1',
-              version: 1,
-              proposed_summary: 'summary',
-              status: 'accepted',
-            },
-          },
-        },
-      });
-    });
-
-    expect(latest.pendingUnderstanding).toBeNull();
-    expect(latest.confirmError).toBeNull();
-    expect(latest.confirmationPending).toBe(false);
-  });
-
-  it('把「已经确认过了」当成成功：收卡、不报错', async () => {
-    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
-    mocks.confirmRequirementUnderstanding.mockRejectedValue(
-      new ApiError(409, 'This Agent Session is not awaiting a requirement-understanding confirmation', 'session_phase_mismatch'),
-    );
-    await renderHookHarness();
-    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
-
-    await act(async () => {
-      eventHandlers.at(-1)?.({
-        type: 'requirement_understanding.proposed.v1',
-        id: 'event-1',
-        data: {
-          payload: {
-            understanding: {
-              understanding_id: 'understanding-1',
-              version: 1,
-              proposed_summary: 'summary',
-              status: 'awaiting_confirmation',
-            },
-          },
-        },
-      });
-    });
-
-    let outcome: boolean | undefined;
-    await act(async () => {
-      outcome = await latest.confirmUnderstanding();
-    });
-
-    expect(outcome).toBe(true);
-    expect(latest.pendingUnderstanding).toBeNull();
-    expect(latest.confirmError).toBeNull();
-  });
-
-  it('真失败时说出原因，而不是笼统的「请重试」', async () => {
-    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
-    mocks.confirmRequirementUnderstanding.mockRejectedValue(
-      new ApiError(404, 'Requirement understanding not found', 'requirement_understanding_not_found'),
-    );
-    await renderHookHarness();
-    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
-
-    await act(async () => {
-      eventHandlers.at(-1)?.({
-        type: 'requirement_understanding.proposed.v1',
-        id: 'event-1',
-        data: {
-          payload: {
-            understanding: {
-              understanding_id: 'understanding-1',
-              version: 1,
-              proposed_summary: 'summary',
-              status: 'awaiting_confirmation',
-            },
-          },
-        },
-      });
-    });
-
-    let outcome: boolean | undefined;
-    await act(async () => {
-      outcome = await latest.confirmUnderstanding();
-    });
-
-    expect(outcome).toBe(false);
-    expect(latest.confirmError).toBe('这条需求理解已失效，等 Agent 重新提议后再操作。');
-    // 卡片留着：这一类不是「已经成了」，收掉会让用户以为确认过了
-    expect(latest.pendingUnderstanding).not.toBeNull();
-  });
-
-  it('rejects an empty correction with a visible error', async () => {
-    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
-    await renderHookHarness();
-    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
-    await act(async () => {
-      eventHandlers.at(-1)?.({
-        type: 'requirement_understanding.proposed.v1',
-        id: 'event-1',
-        data: {
-          payload: {
-            understanding: {
-              understanding_id: 'understanding-1',
-              version: 1,
-              proposed_summary: 'summary',
-              status: 'awaiting_confirmation',
-            },
-          },
-        },
-      });
-    });
-
-    await act(async () => {
-      await latest.correctUnderstanding('   ');
-    });
-
-    expect(mocks.correctRequirementUnderstanding).not.toHaveBeenCalled();
-    expect(latest.confirmError).toBe('请输入修改后的需求理解');
-  });
-
   it('uses the message acknowledgement run when SSE state events are delayed', async () => {
     mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
     mocks.sendSessionMessage.mockResolvedValue({ run: { run_id: 'run-from-ack', status: 'queued' } });
@@ -1185,42 +993,6 @@ describe('useAgentSession 生成卡水合', () => {
   it('生成卡事件早于 run.completed 到达时同样挂上卡片', async () => {
     await replay('committed-first');
     await vi.waitFor(() => expect(cardBlocks()).toHaveLength(1));
-  });
-});
-
-describe('classifyConfirmFailure', () => {
-  it('把两种「已经定下来了」的 409 判为 settled', () => {
-    for (const code of ['session_phase_mismatch', 'requirement_understanding_not_pending']) {
-      expect(classifyConfirmFailure(new ApiError(409, 'whatever', code), 'confirm')).toEqual({ kind: 'settled' });
-    }
-  });
-
-  it('对失效与消失分别给出可行动的说法', () => {
-    expect(
-      classifyConfirmFailure(new ApiError(404, 'x', 'requirement_understanding_not_found'), 'confirm'),
-    ).toEqual({ kind: 'stale', message: '这条需求理解已失效，等 Agent 重新提议后再操作。' });
-    expect(classifyConfirmFailure(new ApiError(404, 'x', 'session_not_found'), 'confirm')).toEqual({
-      kind: 'gone',
-      message: '会话已不存在，请新建对话。',
-    });
-  });
-
-  it('未知错误带上服务端原话，并区分确认与修改', () => {
-    expect(classifyConfirmFailure(new ApiError(500, '上游炸了', 'internal_error'), 'confirm')).toEqual({
-      kind: 'unknown',
-      message: '确认失败：上游炸了',
-    });
-    expect(classifyConfirmFailure(new ApiError(500, '上游炸了', 'internal_error'), 'correct')).toEqual({
-      kind: 'unknown',
-      message: '修改失败：上游炸了',
-    });
-  });
-
-  it('非 ApiError（断网等）退回通用文案', () => {
-    expect(classifyConfirmFailure(new TypeError('Failed to fetch'), 'confirm')).toEqual({
-      kind: 'unknown',
-      message: '确认失败，请重试',
-    });
   });
 });
 
