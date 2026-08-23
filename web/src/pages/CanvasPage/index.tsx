@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { newNodeId } from './nodeId';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
@@ -506,7 +507,7 @@ export default function CanvasPage() {
   /** 创建文本节点 */
   const handleAddTextNode = () => {
     const newNode: Node = {
-      id: `text-${Date.now()}`,
+      id: newNodeId('text'),
       type: 'textNode',
       position: spawnPosition(),
       data: {
@@ -532,13 +533,13 @@ export default function CanvasPage() {
   const handleDuplicateNode = (id: string) => {
     const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
-      const copy: Node = { ...t, id: `text-${Date.now()}`, position: { x: t.position.x + 40, y: t.position.y + 40 }, data: { ...t.data } };
+      const copy: Node = { ...t, id: newNodeId('text'), position: { x: t.position.x + 40, y: t.position.y + 40 }, data: { ...t.data } };
       setTextNodes((prev) => [...prev, copy]);
       return;
     }
     const m = mediaNodesRef.current.find((n) => n.id === id);
     if (m) {
-      const copy: Node = { ...m, id: `media-${Date.now()}`, position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
+      const copy: Node = { ...m, id: newNodeId('media'), position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
       setMediaNodes((prev) => [...prev, copy]);
     }
   };
@@ -764,7 +765,7 @@ export default function CanvasPage() {
         console.warn(`[${file.name}] 超过 ${Math.round(limit / 1024 / 1024)}MB 上限，已跳过`);
         return;
       }
-      const nodeId = `media-${Date.now()}-${i}`;
+      const nodeId = newNodeId('media');
       const localSrc = URL.createObjectURL(file);
 
       newNodes.push({
@@ -909,7 +910,7 @@ export default function CanvasPage() {
       console.warn('未选中项目，无法创建生成任务');
       return;
     }
-    const nodeId = `media-gen-${Date.now()}`;
+    const nodeId = newNodeId('media-gen');
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
@@ -1130,7 +1131,7 @@ export default function CanvasPage() {
 
   const handleAgentCardApply = (payload: GenerationCardBlock) => {
     const node: Node = {
-      id: `gencard-${Date.now()}`,
+      id: newNodeId('gencard'),
       type: 'assetNode',
       position: spawnPosition(),
       data: {
@@ -1261,7 +1262,7 @@ export default function CanvasPage() {
   const handleCreateProduct = () => {
     productSeq.current += 1;
     const node: Node = {
-      id: `product-${Date.now()}`,
+      id: newNodeId('product'),
       type: 'productNode',
       position: spawnPosition(),
       data: {
@@ -1283,7 +1284,7 @@ export default function CanvasPage() {
   /** 新建资产卡节点（工具栏 资产库 → 风格卡/角色卡/物体卡/环境卡/自定义卡） */
   const handleCreateAssetCard = (kind: AssetCardKind) => {
     const node: Node = {
-      id: `asset-${kind}-${Date.now()}`,
+      id: newNodeId(`asset-${kind}`),
       type: 'assetNode',
       position: spawnPosition(),
       data: {
@@ -1504,7 +1505,7 @@ export default function CanvasPage() {
           const kind = item.kind as 'image' | 'video' | 'audio';
           const mediaType = kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'image';
           const node: Node = {
-            id: `media-${Date.now()}`,
+            id: newNodeId('media'),
             type: 'mediaNode',
             position: spawnPosition(),
             data: {
@@ -1537,7 +1538,7 @@ export default function CanvasPage() {
           };
           const kind = item.kind as AssetCardKind;
           const node: Node = {
-            id: `asset-${Date.now()}`,
+            id: newNodeId('asset'),
             type: 'assetNode',
             position: spawnPosition(),
             data: {
@@ -1568,7 +1569,7 @@ export default function CanvasPage() {
             images: Array<{ id: string; src: string; enabled?: boolean }>;
           };
           const node: Node = {
-            id: `product-${Date.now()}`,
+            id: newNodeId('product'),
             type: 'productNode',
             position: spawnPosition(),
             data: {
@@ -1591,7 +1592,7 @@ export default function CanvasPage() {
           // 文本：构造文本节点
           const snapshot = item.snapshot as { html: string };
           const node: Node = {
-            id: `text-${Date.now()}`,
+            id: newNodeId('text'),
             type: 'textNode',
             position: spawnPosition(),
             data: {

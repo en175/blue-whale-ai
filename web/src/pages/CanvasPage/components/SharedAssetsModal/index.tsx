@@ -322,7 +322,13 @@ export default function SharedAssetsModal({
   return createPortal(
     <>
     <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
+      {/* ESC 守卫靠这两个属性识别弹层，见 ConfirmModal 里的说明（审查 W·A3）。 */}
+      <div
+        className={styles.panel}
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* 头部 */}
         <div className={styles.head}>
           <div className={styles.headTitle}>

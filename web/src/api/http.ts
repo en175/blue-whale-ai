@@ -10,6 +10,19 @@ import { getAccessToken, setSession } from '@/utils/auth';
 /** 接口路径前缀 */
 export const API_PREFIX = '/api';
 
+/**
+ * agent 计费查账端点。**它的 401 不代表本地登录失效，因此豁免自动登出**（审查 W·A12）。
+ *
+ * 这条链路是：浏览器 → BFF `/api/agent/billing/*` → new-api `/api/log/self`。BFF 把上游的
+ * 状态码原样透传，异常过滤器也不改。于是上游一次计费打嗝（sk token 被拒、限流、维护）
+ * 就变成本地 `setSession(null, null)`——**对话进行中用户被静默登出**，而积分那段代码只
+ * `console.warn`，界面上毫无提示，用户要到下次跳转才发现。
+ *
+ * 上游的计费状态码不该被洗成 BFF 自己的鉴权状态。查不到账的正确表现是胶囊显示「—」，
+ * 那条路已经通了（IKAFPC / 审查 W·P1）。
+ */
+const AGENT_BILLING_PREFIX = `${API_PREFIX}/agent/billing/`;
+
 /** 真实后端地址（代理目标，来自 .env.[mode] 的 VITE_API_BASE_URL），仅用于控制台日志 */
 const BACKEND_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -55,10 +68,13 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(path, { ...init, headers });
 
   // 凭证失效：清空本地会话（auth 类接口除外，避免登录失败误清；
-  // admin/session 对非管理员返回 401 属正常业务结果，同样豁免）
+  // admin/session 对非管理员返回 401 属正常业务结果，同样豁免；
+  // agent 计费查账把**上游 new-api 的状态码原样透传**，那个 401 说的是"上游拒了这张
+  // sk token"，不是"你在蓝鲸的登录失效了"——见下方 BILLING_PREFIX 的说明）
   if (
     res.status === 401 &&
     !path.startsWith(`${API_PREFIX}/auth/`) &&
+    !path.startsWith(AGENT_BILLING_PREFIX) &&
     path !== `${API_PREFIX}/admin/session`
   ) {
     setSession(null, null);

@@ -17,13 +17,24 @@ interface AssetLookupCache {
 
 let cache: AssetLookupCache | null = null;
 let inFlight: Promise<AssetLookupCache> | null = null;
+/**
+ * 上一次**尝试**取数的时刻——成功与失败都记。
+ *
+ * 此前只有 `cache.loadedAt`，而它只在成功时才写。首次取数失败 → `cache` 恒为 null →
+ * 补拉守卫 `if (cache && …)` 永远进不去 → **重试永远触发不了**，已渲染的每个胶囊
+ * 永久降级成纯文字，直到组件重挂载（审查 W·A24）。
+ *
+ * 失败也记时刻，节流才对失败同样生效；否则失败之后每次 render 都会再拉一遍全量资产库。
+ */
+let lastAttemptAt = 0;
 
 /** 订阅者：缓存刷新后要让挂着的胶囊重新查一次，否则它们会一直停在「查不到」。 */
 const subscribers = new Set<() => void>();
 
-async function loadAssetLookup(force: boolean): Promise<AssetLookupCache> {
+async function loadAssetLookup(force: boolean): Promise<AssetLookupCache | null> {
   if (!force && cache) return cache;
   if (inFlight) return inFlight;
+  lastAttemptAt = Date.now();
   inFlight = (async () => {
     try {
       const records = await fetchAllAssets('');
@@ -36,7 +47,16 @@ async function loadAssetLookup(force: boolean): Promise<AssetLookupCache> {
       inFlight = null;
     }
   })();
-  const loaded = await inFlight;
+  let loaded: AssetLookupCache | null = null;
+  try {
+    loaded = await inFlight;
+  } catch (e) {
+    // 取数失败不是异常情况，是这个模块要处理的常态之一：胶囊降级成纯文字，
+    // 下一次落空时按节流再试。此前这里没有 catch，两个 `void loadAssetLookup(...)`
+    // 调用点因此每次失败都留下一个 unhandled promise rejection。
+    console.warn('[AssetChip] 资产索引取数失败，胶囊暂时降级为纯文字:', e);
+  }
+  // 失败也要通知：订阅者据此重新走一遍查询，把「加载中」落定成「查不到」。
   subscribers.forEach((notify) => notify());
   return loaded;
 }
@@ -65,7 +85,9 @@ export function useAssetLookup(): (assetId: string | undefined) => AssetRecord |
     if (!assetId) return undefined;
     const hit = cache?.byId.get(assetId);
     if (hit) return hit;
-    if (cache && Date.now() - cache.loadedAt > STALE_AFTER_MS) void loadAssetLookup(true);
+    // 节流看的是**上一次尝试**，不是上一次成功——否则首次失败之后 cache 恒为 null，
+    // 这个守卫永远进不去，胶囊就永久停在「查不到」（审查 W·A24）。
+    if (Date.now() - lastAttemptAt > STALE_AFTER_MS) void loadAssetLookup(true);
     return undefined;
   }, []);
 }
