@@ -198,8 +198,19 @@ function attachCards(messages: ChatMessage[], records: PromptCardRecord[] | unde
     let idx = runId ? next.findIndex((m) => m.role === 'assistant' && m.sourceRunId === runId) : -1;
     if (idx < 0) idx = next.map((m) => m.role).lastIndexOf('assistant');
     if (idx < 0) continue;
-    // 幂等：同一批次可能因重连再次水合，已挂过就整体替换而不是追加
-    const kept = (next[idx]!.blocks ?? []).filter((b) => b.type !== 'card');
+    // 幂等：同一批次可能因重连再次水合，**只替换这一批**，别把别的批次一起抹掉（审查 W·A7）。
+    //
+    // 此前这里剥的是全部 card 块。配上下面那个 lastIndexOf 兜底——没有匹配到
+    // authoring_run_id 的记录统统解析到同一个下标——两批卡片进来只有后一批留下。
+    // 让重挂载安全的那个幂等过滤，正好也是让多批附加有损的原因。
+    //
+    // cardId 是 `${revision_id}#${shot_no}`，前缀就是这一批的身份：按前缀剥，
+    // 剥掉的恰好是自己上一次挂的那些。
+    const revisionId = record.active_revision?.revision_id;
+    const mine = revisionId ? `${revisionId}#` : null;
+    const kept = (next[idx]!.blocks ?? []).filter(
+      (b) => b.type !== 'card' || (mine !== null && !(b.card?.cardId ?? '').startsWith(mine)),
+    );
     next[idx] = { ...next[idx]!, blocks: [...kept, ...blocks] };
   }
   return next;
