@@ -7,7 +7,7 @@
   padding: 2px 8px 2px 2px;
   margin: 0 2px;
   border: 1px solid var(--color-border-secondary);
-  border-radius: var(--radius-full, 999px);
+  border-radius: var(--radius-full);
   background-color: var(--color-bg-tertiary);
   vertical-align: middle;
   white-space: nowrap;
@@ -22,7 +22,7 @@
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-  border-radius: var(--radius-full, 999px);
+  border-radius: var(--radius-full);
   object-fit: cover;
   background-color: var(--color-bg-secondary);
 }
@@ -32,7 +32,7 @@
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-  border-radius: var(--radius-full, 999px);
+  border-radius: var(--radius-full);
   background-color: var(--color-bg-secondary);
 }
 
@@ -67,14 +67,16 @@
 
 /* ---- 悬浮预览 ---- */
 .preview {
-  z-index: 60;
+  /* 走 FloatingPortal 渲染进 body，#root 不产生层叠上下文，因此直接和侧栏（100）竞争。
+     原来写死的 60 压不住它。悬浮预览是 tooltip 语义，用同一档。 */
+  z-index: var(--z-tooltip);
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 8px;
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-md);
-  background-color: #2a2a2a;
+  background-color: var(--color-bg-active);
   box-shadow: var(--shadow-lg);
 }
 

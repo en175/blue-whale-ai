@@ -34,6 +34,17 @@
   --color-error: #fa5252;
   --color-info: #339af0;
 
+  /* Agent 面板的强调色。
+     刻意不跟全局主题蓝：面板里「动手」这一类语义——把生成卡应用到画布、这一轮正在跑——
+     共用它，而蓝在面板内已经被选中态和链接占着，再用会混。
+     此前这个绿散在 .cardBtnPrimary 里写死，状态点那边则误写成
+     `var(--color-accent-primary, #d5f06a)`——主题色 token 是有定义的（蓝），
+     兜底永远走不到，于是本该同一语义的两处一蓝一绿。 */
+  --color-accent-agent: #d5f06a;
+  --color-accent-agent-hover: #c7e05c;
+  /* 落在强调绿上的前景色。绿是亮色，必须配深色文字。 */
+  --color-accent-agent-ink: #111111;
+
   /* ---- 尺寸系统 ---- */
   --sidebar-width: 80px;
   --sidebar-icon-size: 26px;
