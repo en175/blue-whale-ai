@@ -5,8 +5,9 @@
 .panel {
   position: absolute;
   /* 宽度是**固定值**，不跟视口走（IKAGZC）。原来是 clamp(280px, 26vw, 420px)：半屏时
-     26vw 会把面板挤窄，同一个界面在不同窗口下长得不一样。窄屏由 max-width 兜底。 */
-  width: 420px;
+     26vw 会把面板挤窄，同一个界面在不同窗口下长得不一样。窄屏由 max-width 兜底。
+     468 = 边框 1×2 + 输入区左右各 4px + 输入框 458。对齐参照物的实测值。 */
+  width: 468px;
   max-width: calc(100% - 16px);
   min-width: 0;
   /* 一直延伸到底：原来底部留了 32px，面板下方空一截。只扣掉顶部的 header 与 8px 间距。 */
@@ -40,10 +41,15 @@
 
 /* ---- 头部标题栏 ---- */
 .panelHeader {
-  display: flex;
+  /* 三栏而不是 space-between：标题要相对**面板**居中，不是在剩余空间里居中。
+     两侧 1fr 等宽，中间 auto，标题因此不受左边积分胶囊与右边两个图标的宽度差影响。
+     min-width: 0 不能省，否则标题的 text-overflow: ellipsis 失效（flex/grid 子项默认
+     min-width: auto，撑得下多宽就多宽）。 */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
-  padding: var(--spacing-md) var(--spacing-lg);
+  padding: 6px;
+  gap: 8px;
   border-bottom: 1px solid var(--color-border-primary);
   flex-shrink: 0;
   user-select: none;
@@ -62,6 +68,15 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
+  min-width: 0;
+}
+
+/* 居中那一格：会话标题。它自己带下拉，所以留一个定位上下文给菜单。 */
+.headerCenter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
 }
 
 .agentBadge {
@@ -276,7 +291,9 @@
 .headerRight {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--spacing-xs);
+  min-width: 0;
 }
 
 .iconBtn {
@@ -371,7 +388,8 @@
 /* ---- 输入区域 ---- */
 .inputArea {
   margin-top: auto;
-  padding: var(--spacing-sm) var(--spacing-md) var(--spacing-md);
+  /* 左右各 4px：面板内容 466 − 8 = 输入框 458。上沿不留白，状态行自己带下边距。 */
+  padding: 0 4px 4px;
   flex-shrink: 0;
 }
 
@@ -382,6 +400,44 @@
   border-radius: var(--radius-md);
   padding: var(--spacing-sm) var(--spacing-md);
   transition: border-color var(--transition-fast);
+  /* 目标尺寸 458 × 104：宽度由 .inputArea 的左右 4px 决定，高度在这里兜底。
+     min-height 而不是 height——粘长文本时要能往上长，不能把内容压掉。
+     border-box 让 104 是连边框在内的实际高度。 */
+  box-sizing: border-box;
+  min-height: 104px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 编辑区吃掉输入框里除工具栏以外的全部高度，工具栏因此贴在底边。
+ *
+ * 此前这里靠两条规则，两条都是空转：`.editorWrapper { height: 100% }` 的父级只有
+ * min-height，百分比高度没有确定的包含块，退化成 auto；`.composerEditable { flex: 1 }`
+ * 的父级 `.editorWrapper` 是 display: block，flex 属性在 block 容器里没有意义。
+ * 结果是编辑区停在 24px，工具栏紧随其后，底下空掉 33px。
+ *
+ * 现在由这一层出面：它是 flex item（flex: 1 拿到确定高度），又是 flex container
+ * （让编辑器 wrapper 撑满）。ChipTextEditor 一行不用改——它 dock 栏也在用，那边是另一套尺寸。
+ * `min-height: 0` 不能省：flex item 默认 min-height: auto，长文本会把输入框顶破。 */
+.composerSlot {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.composerSlot > :first-child {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 可点区域就是整块，而不是只有第一行：光标落在下半部分也能开始打字。
+   写 flex 而不是 min-height，免得和 ChipTextEditor 里同名同特异性的 .editable
+   比 min-height——那种比法的胜负取决于两个 CSS 模块谁先被打包，不该由顺序决定。 */
+.composerEditable {
+  flex: 1;
 }
 
 .inputBox:focus-within {
@@ -672,19 +728,29 @@
 .messageList {
   flex: 1;
   overflow-y: auto;
-  padding: var(--spacing-lg);
+  /* 8px 12px + 12px 滚动条槽 = 生成卡外宽 468 − 2 − 24 − 12 = 430。 */
+  padding: 8px 12px;
+  /* 槽位常驻。macOS 默认是覆盖式滚动条，不占宽度——不写这一行，卡片在 Mac 上是 442、
+     在 Windows 上是 430，同一份代码两个宽度。宽度进了卡片的计算式，不能由平台决定。 */
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-lg);
+  gap: 8px;
+}
+
+/* 槽宽 12px：全局是 6px，差的这 6px 会让生成卡变成 436。
+   它参与卡片宽度的计算，不是纯装饰，所以在这里锁死。 */
+.messageList::-webkit-scrollbar {
+  width: 12px;
 }
 
 /* 用户气泡：右对齐深灰圆角 */
 .userBubble {
   align-self: flex-end;
-  max-width: 85%;
+  max-width: 82%;
   background-color: #2f2f2f;
-  border-radius: 12px;
-  padding: 10px 14px;
+  border-radius: 18px;
+  padding: 8px 14px;
   font-size: var(--font-size-md);
   line-height: 1.5;
   color: var(--color-text-primary);
@@ -694,19 +760,29 @@
 
 /* Agent 回复：左对齐 markdown 文本块 */
 .assistantBlock {
-  align-self: flex-start;
-  max-width: 95%;
+  /* 容器撑满消息流：生成卡要占满 430，正文气泡自己在 .md 上收到 92%。
+     原来这一层是 95%，卡片再乘 94%，两次收缩叠起来卡只有 385。 */
+  align-self: stretch;
+  max-width: 100%;
   color: #d6d6d6;
   font-size: var(--font-size-md);
-  line-height: 1.6;
+  line-height: 21px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   word-break: break-word;
 }
 
 /* Markdown 正文（react-markdown 输出真实元素，按标签选中即可） */
 .md {
+  /* 正文气泡：左对齐、92% 宽、左下角收成 2px 的尖角。
+     几何在这一层而不是 .assistantBlock——那一层现在要撑满宽度给生成卡用。 */
+  align-self: flex-start;
+  max-width: 92%;
+  padding: 8px 10px;
+  border-radius: 12px 12px 12px 2px;
+  font-size: var(--font-size-md);
+  line-height: 21px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1073,13 +1149,14 @@
   border: 1px solid var(--color-border-secondary);
   background-color: #242425;
   border-radius: 12px;
-  padding: 12px 14px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* 不占满整个对话宽度，居中留出呼吸感 */
-  width: 94%;
-  margin: 0 auto;
+  /* 撑满消息流宽度（430）。原来是 94% + 居中，叠上父层的 95% 后只剩 385。 */
+  width: 100%;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 /* 定高的是字段值而不是整张卡：整卡滚动会把底部的「应用到画布」一起卷走，
@@ -1098,7 +1175,7 @@
 }
 
 .shotTitle {
-  font-size: var(--font-size-md);
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -1113,8 +1190,8 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: var(--font-size-md);
-  line-height: 1.7;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--color-text-secondary);
   word-break: break-word;
 }
@@ -1201,17 +1278,21 @@
 
 /* 形态徽标：大写字母 + 字距，和右边的参数徽标区分开——它是这批卡「是什么」，不是参数。 */
 .shotKind {
-  font-size: var(--font-size-sm);
+  /* 10px 是跟同排的 ~15s / 16:9 对齐推的，参照物这一枚走的是 class，dump 里读不到实测值。 */
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--color-text-tertiary);
 }
 
 .shotBadge {
-  padding: 1px 7px;
+  padding: 1px 6px;
   border-radius: var(--radius-sm);
   background-color: var(--color-bg-tertiary);
-  font-size: var(--font-size-sm);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  line-height: 1.4;
   color: var(--color-text-secondary);
   white-space: nowrap;
 }
@@ -1335,51 +1416,6 @@
 .cardGroupCancelBtn:disabled {
   cursor: not-allowed;
   opacity: 0.5;
-}
-
-/* ---- 侧边栏状态条（S5） ---- */
-.phaseBar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  align-self: flex-start;
-  padding: 4px 12px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-border-secondary);
-  background-color: var(--color-bg-tertiary);
-  font-size: var(--font-size-md);
-  color: var(--color-text-secondary);
-}
-
-.phaseDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background-color: var(--color-accent-primary, #d5f06a);
-}
-
-.phase_processing .phaseDot,
-.phase_generating_cards .phaseDot,
-.phase_applying .phaseDot {
-  animation: phasePulse 1.2s ease-in-out infinite;
-}
-
-.phase_awaiting_confirm .phaseDot,
-.phase_awaiting_input .phaseDot {
-  background-color: #f5c26b;
-}
-
-.phase_applied .phaseDot {
-  background-color: #7ee4a7;
-}
-
-.phase_failed .phaseDot {
-  background-color: #ef6a6a;
-}
-
-@keyframes phasePulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
 }
 
 /* ---- 「直接使用」技能已武装指示 ---- */

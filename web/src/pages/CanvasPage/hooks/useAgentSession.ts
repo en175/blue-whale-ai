@@ -25,6 +25,7 @@ import {
   subscribeSessionEvents,
   type SessionMessage,
   type SessionRecord,
+  type SessionRun,
   type SessionContentBlock,
   type SseEvent,
   type PromptCardRecord,
@@ -40,7 +41,9 @@ import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusL
 /** 一轮结束后的结账信息，供常驻状态行报账（IKA4PG）。 */
 export interface TurnOutcome {
   outcome: RunOutcome;
-  finishedAt: number;
+  /** 终态时刻。从快照恢复的历史轮次可能没有（Run 异常终止时 finished_at 为空），
+   *  此时状态行退回当前时间：数字略大，但好过让一条已结束的状态行继续读秒。 */
+  finishedAt: number | null;
   tokenUsage: RunTokenUsage | null;
   contextCapacity: RunContextCapacity | null;
   /** 结束那一刻按已收到正文估的输出 token。真实用量到达前由它顶着，见 runStatusLine。 */
@@ -81,7 +84,6 @@ export interface ChatMessage {
 /** 侧边栏用户可见状态（对齐 04-侧边栏规范 §7） */
 export type AgentPhase = DerivedAgentPhase;
 
-/** 运行终态集合（status_changed/run.* 终态判定） */
 /**
  * run 状态 → 状态行终局。
  *
@@ -97,6 +99,38 @@ function terminalOutcomeOf(status: string): RunOutcome {
   return 'failed';
 }
 
+/** ISO 时间 → 毫秒时间戳；缺失或不可解析返回 null（调用方自己决定怎么兜底）。 */
+function msOf(value: unknown): number | null {
+  if (typeof value !== 'string' || !value) return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * 把快照里那条已经结束的 Run 翻成状态行要的「上一轮的账」。
+ *
+ * 起点取 `created_at` 而不是 `started_at`：状态行量的是**用户等了多久**，而排队、记忆投影、
+ * 领券这些都发生在 `started_at` 之前，用后者会把这段等待抹掉。没有起点就返回 null——
+ * 宁可不显示，也不要显示一个算错的耗时。
+ */
+function parseSettledTurn(run: SessionRun): { startedAt: number; outcome: TurnOutcome } | null {
+  const startedAt = msOf(run.created_at) ?? msOf(run.started_at);
+  if (startedAt === null) return null;
+  return {
+    startedAt,
+    outcome: {
+      outcome: terminalOutcomeOf(run.status),
+      finishedAt: msOf(run.finished_at),
+      tokenUsage: parseRunTokenUsage(run.token_usage),
+      contextCapacity: parseRunContextCapacity(run.context_capacity),
+      // 正文早已固化成消息，流式缓冲是空的：这里没有可估的东西，也不该去估。
+      // 真实用量缺失时状态行自己会把 token 那一段省掉。
+      estimatedOutputTokens: null,
+    },
+  };
+}
+
+/** 运行终态集合（status_changed / run.* 终态判定） */
 const TERMINAL_STATUS = [
   'completed',
   'succeeded',
@@ -268,6 +302,23 @@ export function useAgentSession(projectId: string) {
    */
   const adoptTurnStart = useCallback((at: number) => {
     setTurnStartedAt((cur) => cur ?? at);
+  }, []);
+  /**
+   * 从历史里把已经结束的那一轮重新立起来（刷新 / 切回一个旧会话）。
+   *
+   * 起点与终局此前是纯内存态：切会话被 `clearTurn` 抹掉，刷新则只有**还活着**的运行能靠
+   * `run.queued` 事件补回起点——已经跑完的那一轮不会再发事件，于是状态行整条消失。
+   * 而用户回看一个会话时想知道的恰恰是"上一轮花了多久、多少 token"，这份账本来就在
+   * 快照的 `latest_terminal_run` 里躺着。
+   *
+   * 只在没有起点时生效：活着的运行由事件流负责，历史不该把它盖掉。
+   */
+  const adoptSettledTurn = useCallback((startedAt: number, outcome: TurnOutcome) => {
+    setTurnStartedAt((cur) => {
+      if (cur !== null) return cur;
+      setTurnOutcome(outcome);
+      return startedAt;
+    });
   }, []);
   /** 这一轮当作没发生过（未开始、被计费门接管、或整个会话被换掉）。 */
   const clearTurn = useCallback(() => {
@@ -859,11 +910,15 @@ export function useAgentSession(projectId: string) {
           runningRef.current = snap.active_run.run_id;
           setStreaming(true);
         }
-      } else if (
-        snap.latest_terminal_run?.run_id &&
-        ['failed', 'outcome_unknown'].includes(snap.latest_terminal_run.status)
-      ) {
-        setFailedRunId(snap.latest_terminal_run.run_id);
+      } else if (snap.latest_terminal_run?.run_id) {
+        if (['failed', 'outcome_unknown'].includes(snap.latest_terminal_run.status)) {
+          setFailedRunId(snap.latest_terminal_run.run_id);
+        }
+        // 上一轮的账：起点用入队时刻（用户等待是从提交开始算的，不是从模型开始跑算的），
+        // 终局用运行状态。两端时间缺一不可——没有起点就算不出耗时，没有终点秒数会一直走，
+        // 一条早已结束的状态行看起来像还在跑。
+        const settled = parseSettledTurn(snap.latest_terminal_run);
+        if (settled) adoptSettledTurn(settled.startedAt, settled.outcome);
       }
       if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return false;
       unsubRef.current = api.subscribeSessionEvents(
@@ -877,7 +932,7 @@ export function useAgentSession(projectId: string) {
       );
       return true;
     },
-    [projectId, handleEvent],
+    [projectId, handleEvent, adoptSettledTurn],
   );
 
   /**
@@ -944,8 +999,12 @@ export function useAgentSession(projectId: string) {
     [projectId, resetLocal, connectSession],
   );
 
-  /** 删除历史会话（下拉「删除」二次确认后调用）：删的是当前会话则回退到列表中下一个，全删光则新建一个 */
-  /** 删除会话。失败必须让用户看见：只 console.warn 的话，界面上就是「点了什么都没发生」。 */
+  /**
+   * 删除历史会话（下拉「删除」二次确认后调用）。
+   *
+   * 删的是当前会话则回退到列表中下一个，全删光则新建一个。
+   * 失败必须让用户看见：只 console.warn 的话，界面上就是「点了什么都没发生」。
+   */
   const deleteSessionById = useCallback(
     (targetId: string) => {
       if (!projectId) return;
@@ -1074,7 +1133,6 @@ export function useAgentSession(projectId: string) {
     [confirmUser, projectId, ensureSession, beginTurn, settleTurn, clearTurn],
   );
 
-  /** 停止当前运行 POST runs/:runId/cancel（终态由事件流推送） */
   /**
    * 停止本轮回答（IKACCL）。
    *

@@ -462,6 +462,42 @@ describe('useAgentSession 运行计时', () => {
     });
   });
 
+  // 刷新或切回旧会话时，这一轮早就结束了，不会再有任何事件把起点补回来。而用户回看一个
+  // 会话时想知道的恰恰是「上一轮花了多久」，这份账一直躺在快照的 latest_terminal_run 里。
+  it('刷新后从快照把上一轮的账立回来，而不是让状态行整条消失', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue({
+      ...snapshot('session-1', 'ready'),
+      latest_terminal_run: {
+        run_id: 'run-done',
+        status: 'completed',
+        created_at: '2026-08-23T02:00:00.000Z',
+        finished_at: '2026-08-23T02:04:11.000Z',
+        token_usage: { input_tokens: 1200, cached_input_tokens: 0, output_tokens: 340, reasoning_tokens: 0 },
+      },
+    });
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.turnStartedAt).not.toBeNull());
+
+    // 起点取 created_at 而不是 started_at：状态行量的是用户等了多久，排队那段也算。
+    expect(latest.turnStartedAt).toBe(Date.parse('2026-08-23T02:00:00.000Z'));
+    expect(latest.turnOutcome?.outcome).toBe('completed');
+    expect(latest.turnOutcome?.finishedAt).toBe(Date.parse('2026-08-23T02:04:11.000Z'));
+    expect(latest.turnOutcome?.tokenUsage?.output_tokens).toBe(340);
+  });
+
+  // 没有时间就没有耗时。宁可不显示，也不要显示一个算错的数——那比空着更难发现。
+  it('快照里的历史轮次没有时间时不显示状态行', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue({
+      ...snapshot('session-1', 'ready'),
+      latest_terminal_run: { run_id: 'run-old', status: 'completed' },
+    });
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+
+    expect(latest.turnStartedAt).toBeNull();
+    expect(latest.turnOutcome).toBeNull();
+  });
+
   it('提交失败就停表，不能让计时器对着一个不存在的运行一直走', async () => {
     mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
     mocks.sendSessionMessage.mockRejectedValue(new Error('network down'));

@@ -24,7 +24,7 @@ import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
 import { isApiError } from '@/api/http';
 import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
-import { useAgentSession, type ChatMessage, type AgentPhase, type TurnOutcome } from '../../hooks/useAgentSession';
+import { useAgentSession, type ChatMessage, type TurnOutcome } from '../../hooks/useAgentSession';
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
 import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock } from '@/api/agentSessions';
@@ -37,12 +37,12 @@ import {
   resolveComposed,
   type ComposedValue,
 } from '../ChipTextEditor/composed';
+import AssetChip from '../AssetChip';
 import { shouldCancelOnKey } from './cancelShortcut';
 import { getPanelLayout } from './layout';
 
 /** 面板与视口边缘的固定间距。刻意不用视口百分比：同一个界面在半屏与全屏下应当长得一样（IKAGZC）。 */
 const PANEL_EDGE_GAP = 8;
-import AssetChip from '../AssetChip';
 
 /** 父组件没传已应用集合时的空集。提到模块级是为了保持引用稳定，避免每次渲染都造一个新 Set。 */
 const EMPTY_APPLIED_IDS: ReadonlySet<string> = new Set<string>();
@@ -587,33 +587,6 @@ const quickQuestions = [
   },
 ];
 
-/**
- * 状态条只讲**会话**状态，不讲 Run 进度。
- *
- * 下面这几个阶段是 Run 生命周期的投影（`processing` / `generating_cards` 就是
- * `deriveAgentPhase` 里 `running || streaming` 的两个分支，`failed` 是它的终局），
- * 而这一段已经由输入框上方的 `RunStatusLine` 独占——那条状态行同时给出耗时与 token，
- * 信息严格多于这里的一行标签。两者同屏出现时是同一件事说两遍，IKA4PG 要消除的正是它。
- *
- * 其余阶段（等待补充、等待确认、卡已就绪、已进入画布……）描述的是"轮到谁了"，
- * 状态行不覆盖，保留。
- */
-const RUN_OWNED_PHASES = new Set<AgentPhase>(['processing', 'generating_cards', 'failed']);
-
-/** 侧边栏状态文案（对齐 04-侧边栏规范 §7 用户感知） */
-const phaseLabels: Record<AgentPhase, string> = {
-  idle: '等待输入',
-  processing: 'Agent 处理中',
-  awaiting_input: '等待你补充',
-  awaiting_confirm: '等待你确认需求理解',
-  generating_cards: '正在整理分镜提示词',
-  cards_ready: '生成卡已就绪',
-  applying: '正在应用到画布',
-  applied: '已进入画布',
-  payment_required: '运行授权或余额不足',
-  failed: '处理失败',
-};
-
 /** 默认位置（页面中间偏右） */
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
@@ -687,7 +660,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     retryUnavailable,
     sendError,
     paymentRequiredMessage,
-    agentPhase,
     sendMessage,
     stopRun,
     retryRun,
@@ -873,15 +845,15 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         });
         return;
       }
-      // 固定模式：保持初始比例（右 1.5%、上 1%、下 7%），避免缩窗后被推出可视区
+      // 固定模式：贴右上角、撑满可用高度，避免缩窗后被推出可视区（IKAGZC）
       const layout = getPanelLayout({
         pageWidth: page.clientWidth,
         pageHeight: page.clientHeight,
         headerHeight: headerH,
         panelWidth: rect.width,
         // 撑满可用高度，由 layout.ts 的固定 PANEL_MARGIN 收边。原来减的是 8% 视口高度，
-          // 那让面板在不同窗口下高矮不一，而且底部永远空一截（IKAGZC）。
-          panelHeight: page.clientHeight - headerH,
+        // 那让面板在不同窗口下高矮不一，而且底部永远空一截（IKAGZC）。
+        panelHeight: page.clientHeight - headerH,
         desiredX: page.clientWidth - PANEL_EDGE_GAP - rect.width,
         desiredY: headerH + PANEL_EDGE_GAP,
       });
@@ -909,7 +881,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       try {
         const result = await fetchSessionCredits(projectId, sessionId);
         if (cancelled) return;
-        if (result.matched === 0 && result.run_count > 0 && attempt === 0) {
+        if (result.matched === 0 && result.runCount > 0 && attempt === 0) {
           window.setTimeout(() => void load(1), 2500);
           return;
         }
@@ -1105,6 +1077,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               {sessionCredits === null ? '—' : sessionCredits}
             </span>
           </span>
+        </div>
+        <div className={styles.headerCenter}>
           {/* 会话切换器（IKAFQ6）：标题本身就是唯一入口，「新对话」收进菜单顶部。
            *  合并的动因是第一行要腾位置（IKAFPC 的积分胶囊要进来），代价是新建从一击变两击。
            *  选 menu button 而非 split button 的依据见工单：项目内通常四五个会话，切换比新建频繁，
@@ -1238,13 +1212,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       ) : (
         /* 对话消息流 */
         <div className={styles.messageList} ref={listRef}>
-          {/* 侧边栏状态条（S5：状态机用户可见反馈） */}
-          {messages.length > 0 && agentPhase !== 'idle' && !RUN_OWNED_PHASES.has(agentPhase) && (
-            <div className={`${styles.phaseBar} ${styles[`phase_${agentPhase}`] ?? ''}`}>
-              <span className={styles.phaseDot} />
-              {phaseLabels[agentPhase]}
-            </div>
-          )}
           {messages.map((m) =>
             m.role === 'user' ? (
               <div key={m.id} className={styles.userBubble}>{m.content}</div>
@@ -1435,12 +1402,17 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         {/* data-agent-composer：ESC 判定用它把主输入框从「可编辑区域一律让路」里挑出来，
             主输入框是 Lexical 的 contentEditable，而发送后焦点通常正停在这里。 */}
         <div className={styles.inputBox} data-agent-composer>
-          <ChipTextEditor
-            ref={chipEditorRef}
-            placeholder="描述你的想法，使用 @ 引用素材"
-            onChange={setComposed}
-            onSend={handleSend}
-          />
+          {/* 这一层负责把编辑区撑到工具栏上沿：ChipTextEditor 自己的 wrapper 是 block，
+           *  撑高的责任只能落在它外面。见 .composerSlot。 */}
+          <div className={styles.composerSlot}>
+            <ChipTextEditor
+              ref={chipEditorRef}
+              placeholder="描述你的想法，使用 @ 引用素材"
+              onChange={setComposed}
+              onSend={handleSend}
+              className={styles.composerEditable}
+            />
+          </div>
 
           {/* 底部工具栏 */}
           <div className={styles.inputToolbar}>

@@ -98,13 +98,23 @@ export interface SessionMessage {
   created_at?: string;
 }
 
-/** 运行记录（事件内嵌） */
+/** 运行记录（事件内嵌 / 快照内嵌）。
+ *
+ * 时间与用量字段 agent 一直在送（`runView` 的原样投影），只是此前这里没声明，于是
+ * 刷新后没人去读——输入框上方那条"这一轮花了多久、多少 token"的状态行因此一刷新就消失。 */
 export interface SessionRun {
   run_id: string;
   session_id?: string;
   status: string;
   failure?: { code?: string; message?: string } | null;
   trace_id?: string | null;
+  /** 入队时刻（ISO）。状态行的起点：它量的是用户从提交到拿到结果等了多久，不是模型跑了多久。 */
+  created_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  /** 终态真实用量；缺失时状态行退回按字符数估算。 */
+  token_usage?: unknown;
+  context_capacity?: unknown;
 }
 
 /* ---- 生成卡批次（agent 侧 Prompt Card Revision Schema V3 的原样投影） ----
@@ -592,9 +602,9 @@ export function subscribeSessionEvents(
 export interface SessionCredits {
   credits: number;
   quota: number;
-  /** 命中的账单条数：0 且 run_count>0 说明账还没写进上游，不是真的没花钱 */
+  /** 命中的账单条数：0 且 runCount>0 说明账还没写进上游，不是真的没花钱 */
   matched: number;
-  run_count: number;
+  runCount: number;
   truncated: boolean;
 }
 

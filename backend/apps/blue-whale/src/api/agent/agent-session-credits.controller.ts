@@ -84,7 +84,7 @@ export class AgentSessionCreditsController {
 
     // 一张券都没有：这个会话还没真正跑过模型，是实打实的 0，不是查不到。
     if (capabilityIds.length === 0) {
-      return ok({ credits: 0, quota: 0, matched: 0, run_count: runs.length, truncated: false });
+      return ok({ credits: 0, quota: 0, matched: 0, runCount: runs.length, truncated: false });
     }
 
     const starts = runs.map((run) => secondsOf(run.created_at)).filter((s): s is number => s !== null);
@@ -103,7 +103,7 @@ export class AgentSessionCreditsController {
       credits: quotaToCredits(summed.quota),
       quota: summed.quota,
       matched: summed.matched,
-      run_count: runs.length,
+      runCount: runs.length,
       // 翻页到顶时 quota 是下界而非确切值，如实告诉前端，别把偏小的数说成确切花费。
       truncated: summed.truncated,
     });
