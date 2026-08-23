@@ -24,7 +24,8 @@ export interface SessionContentBlock {
    *
    * `steps` 是服务端选的模板文案，`reasoning` 是模型自己的原话（assistant.reasoning.delta，
    * IKA3M6）。两个字段分开，因为可信度不一样：模板是我们的承诺，思考是模型随口说的。
-   * `reasoning` 只活在当前会话的内存里——服务端不持久化它，刷新页面就没有了。
+   * 两截都落库（IKAI1A）：服务端在助手消息里就带上这个块，刷新之后思考还在。老 Run 没有
+   * 落库过原话，它们只会有 `steps` 那一半——那是如实的，那些原话确实已经不存在了。
    */
   thinking?: { steps?: string[]; reasoning?: string };
   /**

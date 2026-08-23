@@ -398,8 +398,9 @@ export function useAgentSession(projectId: string) {
   const upsertAssistant = useCallback((msg: SessionMessage) => {
     const content = textOf(msg.content);
     const blocks = msg.content ?? [];
-    // 服务端正式消息不带 thinking 块（思考链走 reasoning_trace）。整体替换 blocks 会把
-    // 终态时刚固化进消息的思考抹掉，所以本地已有而来件没有时，把它保在最前面。
+    // IKAI1A 之后服务端正式消息**带** thinking 块了，来件通常自带思考，走上面那条路。
+    // 这个兜底仍然留着：来件不带时（老 Run 没有落库的原话、或投影还没跟上），整体替换
+    // blocks 会把终态时刚固化进消息的思考抹掉，所以本地已有而来件没有时，把它保在最前面。
     const keepThinking = (existing: ChatMessage | undefined): SessionContentBlock[] => {
       if (blocks.some((b) => b.type === 'thinking')) return blocks;
       const prior = existing?.blocks?.filter((b) => b.type === 'thinking') ?? [];

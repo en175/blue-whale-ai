@@ -215,6 +215,46 @@ describe('useAgentSession 思考过程归属', () => {
   });
 
   /**
+   * IKAI1A：刷新之后思考还在。
+   *
+   * 真机上刷新一次，耗时和 token 都回来了、思考整段消失——因为那个块一直是前端本地拼的，
+   * 服务端消息里没有它。服务端补上之后，这条守的是前端**别把它丢掉**：快照带回来的 thinking
+   * 块要原样进 blocks，正文不能把它挤掉，也不能被 textOf 当成正文的一部分念出来。
+   */
+  it('快照里带回来的思考块原样立起来，不混进正文（IKAI1A）', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue({
+      session: { session_id: 'session-1', phase: 'open' },
+      messages: [
+        {
+          message_id: 'msg_assistant_run-9',
+          sequence: 2,
+          role: 'assistant',
+          source_run_id: 'run-9',
+          content: [
+            {
+              type: 'thinking',
+              thinking: { steps: ['根据对话继续澄清创作方向'], reasoning: '十五秒太短，得砍到三个镜头' },
+            },
+            { type: 'text', text: '先定几件事：' },
+          ],
+        },
+      ],
+      event_cursor: 'cursor-1',
+    } as unknown as SessionSnapshot);
+
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.messages).toHaveLength(1));
+
+    const message = latest.messages[0]!;
+    expect(message.blocks?.[0]).toEqual({
+      type: 'thinking',
+      thinking: { steps: ['根据对话继续澄清创作方向'], reasoning: '十五秒太短，得砍到三个镜头' },
+    });
+    // 思考不是正文：正文投影里一个字都不该有它。
+    expect(message.content).toBe('先定几件事：');
+  });
+
+  /**
    * IKAI16：终态链到达时，模型原话必须原样留在块里。
    *
    * 这是真机上「思考过程有的时候还是空的」的成因。上面两条用例都停在 run.completed，
