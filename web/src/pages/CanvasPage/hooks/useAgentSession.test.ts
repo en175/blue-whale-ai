@@ -1089,7 +1089,7 @@ describe('useAgentSession concurrency guards', () => {
     expect(latest.runningRunId).toBeNull();
   });
 
-  it('shows payment_required as an actionable blocked state instead of processing', async () => {
+  it('surfaces payment_required as an actionable blocked state', async () => {
     mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
     await renderHookHarness();
     await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
@@ -1107,7 +1107,6 @@ describe('useAgentSession concurrency guards', () => {
       });
     });
 
-    expect(latest.agentPhase).toBe('payment_required');
     expect(latest.paymentRequiredMessage).toBe('余额不足，充值后可继续本次任务。');
     expect(latest.streaming).toBe(false);
     expect(latest.runningRunId).toBe('run-payment');

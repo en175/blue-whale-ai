@@ -7,7 +7,7 @@
  * - assistant.delta → 流式文本投影；run.completed → 助手消息固化
  * - run.failed → 重试；取消运行走 runs/:runId/cancel
  * ============================================ */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { advanceReveal, hasPendingReveal } from './streamPacing';
 import { toPartialCardPreview, type PartialCardPreview } from './partialCardPreview';
 import {
@@ -34,7 +34,6 @@ import {
 import { cardsFromRevision } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
 import { newIdempotencyKey } from '@/api/jobs';
-import { deriveAgentPhase, type DerivedAgentPhase } from './agentSessionState';
 import { estimateOutputTokens, parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
 import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusLine';
 
@@ -80,9 +79,6 @@ export interface ChatMessage {
   /** 本地乐观上屏、尚未被服务端事件确认 */
   optimistic?: boolean;
 }
-
-/** 侧边栏用户可见状态（对齐 04-侧边栏规范 §7） */
-export type AgentPhase = DerivedAgentPhase;
 
 /**
  * run 状态 → 状态行终局。
@@ -232,9 +228,6 @@ export function classifyConfirmFailure(
 export function useAgentSession(projectId: string) {
   /** 正式对话消息（快照水合 + 事件投影） */
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  /** 服务端会话阶段（awaiting_understanding_confirmation 等）。确认门走自然语言之后，
-   * 「正在等你确认」只能由服务端告知，前端无从从消息里推断。 */
-  const [sessionPhase, setSessionPhase] = useState<string>('');
   /** 当前会话ID */
   const [sessionId, setSessionId] = useState<string | null>(null);
   /** 当前项目下的历史会话列表（新→旧，供历史会话下拉使用） */
@@ -573,7 +566,6 @@ export function useAgentSession(projectId: string) {
           const snap = await api.fetchSessionSnapshot(projectId, sid);
           if (sessionIdRef.current !== sid) return; // 期间切走了会话，丢弃
           setMessages((prev) => attachCards(prev, snap.prompt_cards));
-          if (snap.session?.phase) setSessionPhase(snap.session.phase);
         } catch (e) {
           console.warn('回查生成卡失败:', e);
         }
@@ -787,8 +779,6 @@ export function useAgentSession(projectId: string) {
         });
         const assistantMsg = payload.assistant_message as SessionMessage | undefined;
         if (assistantMsg?.message_id) upsertAssistant(assistantMsg);
-        const phase = str(payload.session_phase);
-        if (phase) setSessionPhase(phase);
         // 会话标题由 agent 服务异步生成（title_generation_failed 时保持 null）：run 终态后
         // 刷新一次历史会话列表，让自动标题/失败兜底无需重开下拉即可在下拉里可见
         refreshSessions();
@@ -847,7 +837,6 @@ export function useAgentSession(projectId: string) {
     accRef.current = '';
     streamRunRef.current = '';
     cardRunsRef.current.clear();
-    setSessionPhase('');
     setMessages([]);
     setStreamingText('');
     setStreaming(false);
@@ -882,7 +871,6 @@ export function useAgentSession(projectId: string) {
       if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return false;
       // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
       setMessages(attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards));
-      setSessionPhase(snap.session?.phase ?? '');
       setChatError(null);
       // 确认门恢复：snapshot 不带待确认 understanding，等待确认阶段单独拉一次
       if (snap.session?.phase === 'awaiting_understanding_confirmation') {
@@ -1283,20 +1271,6 @@ export function useAgentSession(projectId: string) {
     }
   }, [projectId, pendingUnderstanding]);
 
-  /** 侧边栏状态机推导：最新助手消息的内容块类型 + 运行态 → 用户可见状态 */
-  const agentPhase = useMemo<AgentPhase>(
-    () =>
-      deriveAgentPhase({
-        messages,
-        running: runningRunId !== null,
-        streaming,
-        failed: failedRunId !== null,
-        sessionPhase,
-        paymentRequired: paymentRequiredMessage !== null,
-      }),
-    [messages, runningRunId, streaming, failedRunId, sessionPhase, paymentRequiredMessage],
-  );
-
   return {
     messages,
     sessionId,
@@ -1320,7 +1294,6 @@ export function useAgentSession(projectId: string) {
     retryUnavailable,
     sendError,
     paymentRequiredMessage,
-    agentPhase,
     sendMessage,
     stopRun,
     retryRun,
