@@ -82,7 +82,10 @@ export class AgentSessionCreditsController {
       .map((run) => run.capability_id)
       .filter((id): id is string => typeof id === "string" && id.length > 0);
 
-    // 一张券都没有：这个会话还没真正跑过模型，是实打实的 0，不是查不到。
+    // 一张券都没有。**不要读成「这个会话没花过钱」**——它同样可能是 agent 没把领到的券号写下来
+    // （IKAFPC 修复前每一条 Run 的 capability_id 都是 NULL，而那些 Run 全都真的调过模型）。
+    // 本层没有能力分辨这两者，所以不替调用方下结论：credits 给 0，同时把 runCount 如实带上，
+    // 由调用方按 `matched === 0 && runCount > 0` 判定「查不到」而不是「真是 0」。
     if (capabilityIds.length === 0) {
       return ok({ credits: 0, quota: 0, matched: 0, runCount: runs.length, truncated: false });
     }
@@ -135,7 +138,17 @@ export class AgentSessionCreditsController {
     if (response.status === 404) throw new NewApiError("会话不存在", 404, "session_not_found");
     if (!response.ok) throw new NewApiError("读取会话运行记录失败", 502, "agent_error");
 
-    const body = (await response.json()) as { items?: unknown };
-    return Array.isArray(body.items) ? (body.items as AgentRunView[]) : [];
+    // 解析也要护栏：agent 挂在会把错误页当 200 返的代理后面时，`response.json()` 会抛，
+    // 而上面那个 try 只罩住 fetch——抛出去就是一个不透明的 500，而不是这里明摆着想给的 502。
+    let body: { items?: unknown } | null;
+    try {
+      body = (await response.json()) as { items?: unknown } | null;
+    } catch (error) {
+      logger.error(
+        `[agent/billing] agent 响应不是 JSON: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw new NewApiError("读取会话运行记录失败", 502, "agent_error");
+    }
+    return Array.isArray(body?.items) ? (body.items as AgentRunView[]) : [];
   }
 }
