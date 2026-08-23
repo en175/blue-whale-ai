@@ -214,6 +214,67 @@ describe('useAgentSession 思考过程归属', () => {
     expect(latest.thinkingSteps).toEqual([]);
   });
 
+  /**
+   * IKAI16：终态链到达时，模型原话必须原样留在块里。
+   *
+   * 这是真机上「思考过程有的时候还是空的」的成因。上面两条用例都停在 run.completed，
+   * 从不发 `reasoning_trace.updated.v1`——而真实的一轮**总会**发它，就在 run.completed 之后。
+   * 那条事件只带模板步骤，旧实现拿它整块替换，于是刚固化进去的 reasoning 被抹成 undefined，
+   * 用户看到的只剩一行「根据对话继续澄清创作方向」。缺口不在实现里，在测试的收尾处。
+   */
+  it('终态链到达后，模型原话仍在块里，没有被模板步骤挤掉（IKAI16）', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    const emit = (event: unknown) => eventHandlers.at(-1)?.(event as never);
+
+    // 逐帧发：真实 SSE 每条事件是各自的回调，React 会在其间刷新。
+    // 挤进同一个 act 会被批处理，reasoningTextRef 还没更新就走到固化那一步。
+    await act(async () => {
+      emit({
+        type: 'assistant.reasoning.delta',
+        id: 'r1',
+        data: { run_id: 'run-1', payload: { stream_id: 'reasoning_run-1', text: '十五秒太短，得砍到三个镜头' } },
+      });
+    });
+    await act(async () => {
+      emit({
+        type: 'assistant.delta',
+        id: 'd1',
+        data: { run_id: 'run-1', payload: { stream_id: 'assistant_run_run-1', text: '先定几件事：' } },
+      });
+    });
+    await act(async () => {
+      emit({
+        type: 'run.completed',
+        id: 'c1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+      });
+    });
+
+    // 终态权威链随后到达——它只有模板步骤这一半。
+    await act(async () => {
+      emit({
+        type: 'reasoning_trace.updated.v1',
+        id: 't1',
+        data: {
+          run_id: 'run-1',
+          payload: {
+            reasoning_trace: { steps: [{ kind: 'response', summary: '根据对话继续澄清创作方向' }] },
+          },
+        },
+      });
+    });
+
+    expect(latest.messages.at(-1)!.blocks).toEqual([
+      {
+        type: 'thinking',
+        thinking: { steps: ['根据对话继续澄清创作方向'], reasoning: '十五秒太短，得砍到三个镜头' },
+      },
+      { type: 'text', text: '先定几件事：' },
+    ]);
+  });
+
   it('终态后到达的最终思考链替换消息内的块，而不是缀到对话末尾', async () => {
     await runTurnWithThinking();
 

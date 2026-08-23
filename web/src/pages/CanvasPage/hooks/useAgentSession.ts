@@ -610,10 +610,23 @@ export function useAgentSession(projectId: string) {
             );
             if (idx < 0) return prev;
             const target = prev[idx];
-            const rest = (target.blocks ?? []).filter((b) => b.type !== 'thinking');
+            const blocks = target.blocks ?? [];
+            const rest = blocks.filter((b) => b.type !== 'thinking');
             const body = rest.length > 0 ? rest : target.content ? [{ type: 'text', text: target.content }] : [];
+            // 模型原话必须原样接过来（IKAI16）。这里此前写的是 `thinking: { steps }`：
+            // 终态链只带模板步骤，一替换就把 commitStream 刚固化进去的 `reasoning` 抹成 undefined。
+            // 而这条事件**总是**在 run.completed 之后到达，所以那不是偶发——模型自己的话只在
+            // 等待期间存在，等待一结束就被自己人删掉，用户看到的就只剩一行「根据对话继续澄清创作方向」。
+            // 权威的只有 steps 这一半：另一半的唯一来源是 assistant.reasoning.delta，终态链里没有它。
+            const priorReasoning = blocks.find((b) => b.type === 'thinking')?.thinking?.reasoning;
             const next = [...prev];
-            next[idx] = { ...target, blocks: [{ type: 'thinking', thinking: { steps } }, ...body] };
+            next[idx] = {
+              ...target,
+              blocks: [
+                { type: 'thinking', thinking: { steps, ...(priorReasoning ? { reasoning: priorReasoning } : {}) } },
+                ...body,
+              ],
+            };
             return next;
           });
         } else {
