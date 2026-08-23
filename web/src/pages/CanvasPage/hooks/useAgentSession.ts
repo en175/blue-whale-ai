@@ -19,9 +19,6 @@ import {
   cancelSession,
   cancelSessionRun,
   retrySessionRun,
-  fetchRequirementUnderstandings,
-  confirmRequirementUnderstanding,
-  correctRequirementUnderstanding,
   subscribeSessionEvents,
   type SessionMessage,
   type SessionRecord,
@@ -29,11 +26,9 @@ import {
   type SessionContentBlock,
   type SseEvent,
   type PromptCardRecord,
-  type RequirementUnderstanding,
 } from '@/api/agentSessions';
 import { cardsFromRevision } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
-import { newIdempotencyKey } from '@/api/jobs';
 import { estimateOutputTokens, parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
 import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusLine';
 
@@ -59,9 +54,6 @@ const api = {
   cancelSession,
   cancelSessionRun,
   retrySessionRun,
-  fetchRequirementUnderstandings,
-  confirmRequirementUnderstanding,
-  correctRequirementUnderstanding,
   subscribeSessionEvents,
 };
 
@@ -227,40 +219,6 @@ const projectMessage = (m: SessionMessage): ChatMessage => ({
 });
 
 /**
- * 确认门操作失败时该怎么对待这个错误。
- *
- * `settled` 是关键的一类：会话早已 `phase=open`、这一版理解早已 `accepted`——**用户想要的结果
- * 已经达成了**，只是这张卡没来得及收起来（多标签页、事件晚到、或模型在 Run 内自己确认过）。
- * 把它当失败报出去，用户会以为没确认成功而反复点，而每一次都注定 409。所以这一类直接收卡，
- * 按成功处理。
- *
- * 其余情况给出各自的原因，不再一律「请重试」——重试对 `stale` / `gone` 这两类永远不会成功。
- */
-export function classifyConfirmFailure(
-  error: unknown,
-  action: 'confirm' | 'correct',
-): { kind: 'settled' } | { kind: 'stale' | 'gone' | 'unknown'; message: string } {
-  const code = isApiError(error) ? error.code : '';
-  switch (code) {
-    // 会话不在确认阶段 / 这一版不再等待确认——两者都意味着「已经定下来了」
-    case 'session_phase_mismatch':
-    case 'requirement_understanding_not_pending':
-      return { kind: 'settled' };
-    case 'requirement_understanding_not_found':
-      return { kind: 'stale', message: '这条需求理解已失效，等 Agent 重新提议后再操作。' };
-    case 'session_not_found':
-      return { kind: 'gone', message: '会话已不存在，请新建对话。' };
-    default:
-      return {
-        kind: 'unknown',
-        message: isApiError(error)
-          ? `${action === 'confirm' ? '确认' : '修改'}失败：${error.message}`
-          : `${action === 'confirm' ? '确认' : '修改'}失败，请重试`,
-      };
-  }
-}
-
-/**
  * 画布 Agent 对话钩子（session 维度）
  * @param projectId 当前项目ID（空串时不初始化）
  */
@@ -392,12 +350,6 @@ export function useAgentSession(projectId: string) {
   const [progressTick, setProgressTick] = useState(0);
   /** 「新对话」失败提示：创建/连接新会话失败时展示，成功/切换后清除（不静默吞掉） */
   const [chatError, setChatError] = useState<string | null>(null);
-  /** 待确认需求理解（确认门结构化 UI 数据源；proposed 事件 set，确认/修改/新 run/切会话清除） */
-  const [pendingUnderstanding, setPendingUnderstanding] = useState<RequirementUnderstanding | null>(null);
-  /** 确认/修改动作失败提示 */
-  const [confirmError, setConfirmError] = useState<string | null>(null);
-  /** 确认/修改请求在途：同步 ref 防同一渲染帧双击，state 驱动按钮禁用 */
-  const [confirmationPending, setConfirmationPending] = useState(false);
   /** 重试接口不可用标志（后端 404 时置位：重试按钮禁用并说明原因，不做静默降级；新 run/新消息清除） */
   const [retryUnavailable, setRetryUnavailable] = useState(false);
   /** 消息提交失败（含 capability/payment 阻断）的用户可见提示 */
@@ -424,8 +376,6 @@ export function useAgentSession(projectId: string) {
   sessionIdRef.current = sessionId;
   /** 每次连接/复位递增；所有异步快照、水合和创建回调只允许当前代写入状态。 */
   const connectionEpochRef = useRef(0);
-  /** 确认动作同步防重入；React state 尚未刷新时也只能发一次 action_id。 */
-  const confirmationPendingRef = useRef(false);
   /** 历史列表请求代次；session.updated 会使更早的列表响应失效，避免标题回滚。 */
   const sessionsEpochRef = useRef(0);
   /** 已观察到终态的 Run，防 REST ack 晚于 SSE 终态时把它重新标成运行中。 */
@@ -448,8 +398,9 @@ export function useAgentSession(projectId: string) {
   const upsertAssistant = useCallback((msg: SessionMessage) => {
     const content = textOf(msg.content);
     const blocks = msg.content ?? [];
-    // 服务端正式消息不带 thinking 块（思考链走 reasoning_trace）。整体替换 blocks 会把
-    // 终态时刚固化进消息的思考抹掉，所以本地已有而来件没有时，把它保在最前面。
+    // IKAI1A 之后服务端正式消息**带** thinking 块了，来件通常自带思考，走上面那条路。
+    // 这个兜底仍然留着：来件不带时（老 Run 没有落库的原话、或投影还没跟上），整体替换
+    // blocks 会把终态时刚固化进消息的思考抹掉，所以本地已有而来件没有时，把它保在最前面。
     const keepThinking = (existing: ChatMessage | undefined): SessionContentBlock[] => {
       if (blocks.some((b) => b.type === 'thinking')) return blocks;
       const prior = existing?.blocks?.filter((b) => b.type === 'thinking') ?? [];
@@ -660,10 +611,23 @@ export function useAgentSession(projectId: string) {
             );
             if (idx < 0) return prev;
             const target = prev[idx];
-            const rest = (target.blocks ?? []).filter((b) => b.type !== 'thinking');
+            const blocks = target.blocks ?? [];
+            const rest = blocks.filter((b) => b.type !== 'thinking');
             const body = rest.length > 0 ? rest : target.content ? [{ type: 'text', text: target.content }] : [];
+            // 模型原话必须原样接过来（IKAI16）。这里此前写的是 `thinking: { steps }`：
+            // 终态链只带模板步骤，一替换就把 commitStream 刚固化进去的 `reasoning` 抹成 undefined。
+            // 而这条事件**总是**在 run.completed 之后到达，所以那不是偶发——模型自己的话只在
+            // 等待期间存在，等待一结束就被自己人删掉，用户看到的就只剩一行「根据对话继续澄清创作方向」。
+            // 权威的只有 steps 这一半：另一半的唯一来源是 assistant.reasoning.delta，终态链里没有它。
+            const priorReasoning = blocks.find((b) => b.type === 'thinking')?.thinking?.reasoning;
             const next = [...prev];
-            next[idx] = { ...target, blocks: [{ type: 'thinking', thinking: { steps } }, ...body] };
+            next[idx] = {
+              ...target,
+              blocks: [
+                { type: 'thinking', thinking: { steps, ...(priorReasoning ? { reasoning: priorReasoning } : {}) } },
+                ...body,
+              ],
+            };
             return next;
           });
         } else {
@@ -703,30 +667,19 @@ export function useAgentSession(projectId: string) {
         return;
       }
 
-      /* ---- 需求理解确认提案（确认门结构化 UI）：payload.understanding 为 requirementUnderstandingView ---- */
-      if (t === 'requirement_understanding.proposed.v1') {
-        const understanding = (payload.understanding ?? null) as RequirementUnderstanding | null;
-        setPendingUnderstanding(understanding);
-        setConfirmError(null);
-        confirmationPendingRef.current = false;
-        setConfirmationPending(false);
-        return;
-      }
-
-      /* ---- 需求理解已被确认：收起确认卡 ----
-       * 确认有三条来路，只有第一条经过本地的 confirmUnderstanding：
-       *   ① 用户点这张卡上的「确认」按钮
-       *   ② 用户用自然语言说「确认」，agent 侧 confirmRequirementUnderstandingMessage 认下来
-       *   ③ 模型在 Run 内自己调 confirm_requirement_understanding 工具（冻结门要求先确认再产卡）
-       * ②③ 只以本事件到达。不处理它，卡就一直挂在屏幕上，而会话早已 phase=open、
-       * understanding 早已 accepted——用户再点那个按钮必然 409，看到的就是「确认失败，请重试」。 */
-      if (t === 'requirement_understanding.accepted.v1') {
-        setPendingUnderstanding(null);
-        setConfirmError(null);
-        confirmationPendingRef.current = false;
-        setConfirmationPending(false);
-        return;
-      }
+      /* ---- 需求理解的提出与接纳：不再有 UI 形态（IKAI14） ----
+       * `requirement_understanding.proposed.v1` / `.accepted.v1` 两条事件服务端仍然发，前端
+       * **故意**不为它们渲染任何东西。这里原先长着一张带「确认需求理解 / 修改」按钮的确认卡，
+       * 那是实现时自己长出来的，不是需求——最初的设想就是普通自然语言交互，竞品也没有这一步。
+       *
+       * 而且那张卡是坏的：它调的 `ui_action` 通道在 Run 之外，服务端只落库、开门、发事件，
+       * 不调度下一轮，所以点完确认卡片收起、然后什么都不发生。另外两条通道（自然语言白名单、
+       * 模型自判工具）都发生在 Run 内部，确认完同一轮就产卡——本来就是对的那两条。
+       *
+       * 现在理解摘要只走正文：模型本来就把它写在回复里。后端那道「没确认不产卡」的拦截仍然在，
+       * 它拦的是「需求真的不够时别按假设产卡」，与有没有按钮无关。
+       *
+       * 要恢复 UI 的话请先回到 IKAI14 看这个决定的前因，不要因为「事件没人处理」就加回来。 */
 
       /* ---- 用户消息确认 ---- */
       if (t === 'message.accepted') {
@@ -755,11 +708,10 @@ export function useAgentSession(projectId: string) {
         adoptTurnStart(Number.isNaN(queuedAt) ? Date.now() : queuedAt);
         runningRef.current = runId;
         setRunningRunId(runId);
-        // 新一轮开始：清掉上一轮思考与待确认卡，等 run.activity / proposed 事件重建（含自动排队的下一轮）
+        // 新一轮开始：清掉上一轮思考，等 run.activity 事件重建（含自动排队的下一轮）
         setThinkingSteps([]);
         setReasoningText('');
         setPartialCard(null);
-        setPendingUnderstanding(null);
         setRetryUnavailable(false);
         setPaymentRequiredMessage(null);
         return;
@@ -914,10 +866,6 @@ export function useAgentSession(projectId: string) {
     setReasoningText('');
     setPartialCard(null);
     setChatError(null);
-    setPendingUnderstanding(null);
-    setConfirmError(null);
-    confirmationPendingRef.current = false;
-    setConfirmationPending(false);
     setRetryUnavailable(false);
     setSendError(null);
     setPaymentRequiredMessage(null);
@@ -955,19 +903,6 @@ export function useAgentSession(projectId: string) {
       // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
       setMessages(attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards));
       setChatError(null);
-      // 确认门恢复：snapshot 不带待确认 understanding，等待确认阶段单独拉一次
-      if (snap.session?.phase === 'awaiting_understanding_confirmation') {
-        api.fetchRequirementUnderstandings(projectId, session.session_id)
-          .then(({ items }) => {
-            if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return;
-            const pending = (items ?? []).find((u) => u.status === 'awaiting_confirmation');
-            if (pending) {
-              setPendingUnderstanding(pending);
-              setConfirmError(null);
-            }
-          })
-          .catch((e) => console.warn('拉取待确认需求理解失败:', e));
-      }
       // 已经是终态的 active_run 归到「上一轮的账」那条路去（审查 W·A4）。
       //
       // 此前这里是 `if (active_run) {…} else if (latest_terminal_run) {…}`：active_run 存在
@@ -1312,79 +1247,6 @@ export function useAgentSession(projectId: string) {
     });
   }, [projectId, resetLocal, connectSession]);
 
-  /** 确认需求理解（ui_action confirm 通道）：提交后由事件流驱动后续生成；成功即收起确认卡 */
-  const confirmUnderstanding = useCallback(async (): Promise<boolean> => {
-    const u = pendingUnderstanding;
-    const sid = sessionIdRef.current;
-    if (!projectId || !sid || !u || confirmationPendingRef.current) return false;
-    const epoch = connectionEpochRef.current;
-    confirmationPendingRef.current = true;
-    setConfirmationPending(true);
-    setConfirmError(null);
-    try {
-      await api.confirmRequirementUnderstanding(projectId, sid, u.understanding_id, u.version, newIdempotencyKey());
-      if (connectionEpochRef.current === epoch) setPendingUnderstanding(null);
-      return true;
-    } catch (e) {
-      const verdict = classifyConfirmFailure(e, 'confirm');
-      if (verdict.kind === 'settled') {
-        // 已经确认过了：用户要的结果已达成，收卡即可，不该报错让他再点一次。
-        if (connectionEpochRef.current === epoch) setPendingUnderstanding(null);
-        return true;
-      }
-      console.warn('确认需求理解失败:', e);
-      if (connectionEpochRef.current === epoch) setConfirmError(verdict.message);
-      return false;
-    } finally {
-      if (connectionEpochRef.current === epoch) {
-        confirmationPendingRef.current = false;
-        setConfirmationPending(false);
-      }
-    }
-  }, [projectId, pendingUnderstanding]);
-
-  /** 修改需求理解（ui_action correct 通道）：以用户替换文本重新提议，提交后由事件流驱动下一轮 */
-  const correctUnderstanding = useCallback(async (acceptedSummary: string): Promise<boolean> => {
-    const u = pendingUnderstanding;
-    const sid = sessionIdRef.current;
-    if (!acceptedSummary.trim()) {
-      setConfirmError('请输入修改后的需求理解');
-      return false;
-    }
-    if (!projectId || !sid || !u || confirmationPendingRef.current) return false;
-    const epoch = connectionEpochRef.current;
-    confirmationPendingRef.current = true;
-    setConfirmationPending(true);
-    setConfirmError(null);
-    try {
-      await api.correctRequirementUnderstanding(
-        projectId,
-        sid,
-        u.understanding_id,
-        u.version,
-        newIdempotencyKey(),
-        acceptedSummary.trim(),
-      );
-      if (connectionEpochRef.current === epoch) setPendingUnderstanding(null);
-      return true;
-    } catch (e) {
-      const verdict = classifyConfirmFailure(e, 'correct');
-      if (verdict.kind === 'settled') {
-        // 这一版已经定下来了，改不动了；收卡，让用户直接对新一轮说话，而不是卡在一张死卡上。
-        if (connectionEpochRef.current === epoch) setPendingUnderstanding(null);
-        return true;
-      }
-      console.warn('修改需求理解失败:', e);
-      if (connectionEpochRef.current === epoch) setConfirmError(verdict.message);
-      return false;
-    } finally {
-      if (connectionEpochRef.current === epoch) {
-        confirmationPendingRef.current = false;
-        setConfirmationPending(false);
-      }
-    }
-  }, [projectId, pendingUnderstanding]);
-
   return {
     messages,
     sessionId,
@@ -1400,11 +1262,6 @@ export function useAgentSession(projectId: string) {
     partialCard,
     longRunning,
     chatError,
-    pendingUnderstanding,
-    confirmError,
-    confirmationPending,
-    confirmUnderstanding,
-    correctUnderstanding,
     retryUnavailable,
     sendError,
     paymentRequiredMessage,

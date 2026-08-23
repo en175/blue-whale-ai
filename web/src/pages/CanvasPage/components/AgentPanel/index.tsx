@@ -692,11 +692,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     partialCard,
     longRunning,
     chatError,
-    pendingUnderstanding,
-    confirmError,
-    confirmationPending,
-    confirmUnderstanding,
-    correctUnderstanding,
     retryUnavailable,
     sendError,
     paymentRequiredMessage,
@@ -735,8 +730,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 「直接使用」武装的强制技能（下一条消息发送时携带 forced_creative_skill_id，发送后清除）；name 供指示条展示 */
   const [forcedSkill, setForcedSkill] = useState<{ id: string; name: string } | null>(null);
   /** 确认门「修改」编辑态：展开文本编辑，提交 correct 动作 */
-  const [editingSummary, setEditingSummary] = useState(false);
-  const [summaryDraft, setSummaryDraft] = useState('');
 
   /* ---- 拖动状态 ---- */
   const [position, setPosition] = useState(DEFAULT_POSITION);
@@ -1288,85 +1281,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           )}
           {/* 产卡逐版预览（IKA3GF）：在正文之后、成品卡将要出现的位置 */}
           <CardPreview preview={partialCard} />
-          {/* 确认门结构化 UI：需求理解提案已到、等待用户确认/修改（04 §4，动作依附当前内容下） */}
-          {pendingUnderstanding && (
-            <div className={styles.confirmGate}>
-              <div className={styles.confirmTitle}>需求理解确认</div>
-              {editingSummary ? (
-                <>
-                  <textarea
-                    className={styles.confirmEditTextarea}
-                    value={summaryDraft}
-                    autoFocus
-                    rows={3}
-                    onChange={(e) => setSummaryDraft(e.target.value)}
-                  />
-                  {confirmError && <div className={styles.confirmError}>{confirmError}</div>}
-                  <div className={styles.confirmActions}>
-                    <button
-                      type="button"
-                      className={`${styles.confirmBtn} ${styles.confirmBtnPrimary}`}
-                      onClick={async () => {
-                        if (await correctUnderstanding(summaryDraft)) setEditingSummary(false);
-                      }}
-                      disabled={runningRunId !== null || streaming || confirmationPending || !summaryDraft.trim()}
-                    >
-                      {confirmationPending ? '提交中…' : '提交修改'}
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.confirmBtn}
-                      onClick={() => setEditingSummary(false)}
-                      disabled={confirmationPending}
-                    >
-                      取消
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className={styles.confirmSummary}>{pendingUnderstanding.proposed_summary}</div>
-                  {pendingUnderstanding.proposed_options?.length ? (
-                    <div className={styles.confirmOptions}>
-                      {pendingUnderstanding.proposed_options.map((opt) => (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          className={styles.confirmOption}
-                          onClick={() => void correctUnderstanding(opt.label)}
-                          disabled={runningRunId !== null || streaming || confirmationPending}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                  {confirmError && <div className={styles.confirmError}>{confirmError}</div>}
-                  <div className={styles.confirmActions}>
-                    <button
-                      type="button"
-                      className={`${styles.confirmBtn} ${styles.confirmBtnPrimary}`}
-                      onClick={() => void confirmUnderstanding()}
-                      disabled={runningRunId !== null || streaming || confirmationPending}
-                    >
-                      {confirmationPending ? '提交中…' : '确认需求理解'}
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.confirmBtn}
-                      onClick={() => {
-                        setSummaryDraft(pendingUnderstanding.proposed_summary);
-                        setEditingSummary(true);
-                      }}
-                      disabled={runningRunId !== null || streaming || confirmationPending}
-                    >
-                      修改
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
           {longRunning && (
             <div className={styles.longRunHint}>
               <span>

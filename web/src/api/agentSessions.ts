@@ -24,7 +24,8 @@ export interface SessionContentBlock {
    *
    * `steps` 是服务端选的模板文案，`reasoning` 是模型自己的原话（assistant.reasoning.delta，
    * IKA3M6）。两个字段分开，因为可信度不一样：模板是我们的承诺，思考是模型随口说的。
-   * `reasoning` 只活在当前会话的内存里——服务端不持久化它，刷新页面就没有了。
+   * 两截都落库（IKAI1A）：服务端在助手消息里就带上这个块，刷新之后思考还在。老 Run 没有
+   * 落库过原话，它们只会有 `steps` 那一半——那是如实的，那些原话确实已经不存在了。
    */
   thinking?: { steps?: string[]; reasoning?: string };
   /**
@@ -377,70 +378,11 @@ export function retrySessionRun(
   );
 }
 
-/* ============ 需求理解确认门（ui_action 通道） ============ */
-
-/** 需求理解投影（agent requirementUnderstandingView；确认门结构化 UI 数据源） */
-export interface RequirementUnderstanding {
-  understanding_id: string;
-  version: number;
-  session_id?: string;
-  proposed_by_run_id?: string;
-  target_media?: 'image' | 'video';
-  proposed_summary: string;
-  proposed_options?: { id: string; label: string }[];
-  status: string;
-  accepted_summary?: string | null;
-  confirmed_at?: string | null;
-  created_at?: string;
-  updated_at?: string;
-}
-
-/** 待确认需求理解列表 GET .../requirement-understandings（确认门恢复水合用） */
-export function fetchRequirementUnderstandings(
-  projectId: string,
-  sessionId: string,
-): Promise<{ items: RequirementUnderstanding[] }> {
-  return sessionRequest(
-    agentPath('list_requirement_understandings', projectId, { session_id: sessionId }),
-  );
-}
-
-/** 确认需求理解 POST .../requirement-understandings/:id/versions/:v/actions/confirm（ui_action 通道） */
-export function confirmRequirementUnderstanding(
-  projectId: string,
-  sessionId: string,
-  understandingId: string,
-  version: number,
-  actionId: string,
-): Promise<{ understanding: RequirementUnderstanding }> {
-  return sessionRequest(
-    agentPath('confirm_requirement_understanding', projectId, { session_id: sessionId, understanding_id: understandingId, version }),
-    {
-      method: agentMethod('confirm_requirement_understanding'),
-      headers: { 'Idempotency-Key': newIdempotencyKey() },
-      body: JSON.stringify({ action_id: actionId }),
-    },
-  );
-}
-
-/** 修改需求理解 POST .../actions/correct（以用户替换文本重新提议，需 action_id + accepted_summary） */
-export function correctRequirementUnderstanding(
-  projectId: string,
-  sessionId: string,
-  understandingId: string,
-  version: number,
-  actionId: string,
-  acceptedSummary: string,
-): Promise<{ understanding: RequirementUnderstanding }> {
-  return sessionRequest(
-    agentPath('correct_requirement_understanding', projectId, { session_id: sessionId, understanding_id: understandingId, version }),
-    {
-      method: agentMethod('correct_requirement_understanding'),
-      headers: { 'Idempotency-Key': newIdempotencyKey() },
-      body: JSON.stringify({ action_id: actionId, accepted_summary: acceptedSummary }),
-    },
-  );
-}
+/* 需求理解的三个客户端封装（列表 / confirm / correct）在 IKAI14 随确认门 UI 一并删除。
+ *
+ * agent 侧的端点仍然在，路由清单里也仍然有——后端那一层是刻意保留的。删的是**前端调用方**：
+ * 确认这件事回到对话里由模型判断，浏览器不再自己发确认动作。留着三个没有调用方的封装，
+ * 只会让下一个人以为那条路还活着。要恢复的话，从 AGENT_ROUTES 里的对应路由重新写即可。 */
 
 /* ============ 事件流（共享连接，引用计数） ============ */
 

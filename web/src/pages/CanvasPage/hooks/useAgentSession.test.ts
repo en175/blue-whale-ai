@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SseEvent, SessionSnapshot } from '@/api/agentSessions';
 import { ApiError } from '@/api/http';
-import { classifyConfirmFailure, useAgentSession } from './useAgentSession';
+import { useAgentSession } from './useAgentSession';
 
 const mocks = vi.hoisted(() => ({
   listSessions: vi.fn(),
@@ -15,9 +15,6 @@ const mocks = vi.hoisted(() => ({
   cancelSession: vi.fn(),
   cancelSessionRun: vi.fn(),
   retrySessionRun: vi.fn(),
-  fetchRequirementUnderstandings: vi.fn(),
-  confirmRequirementUnderstanding: vi.fn(),
-  correctRequirementUnderstanding: vi.fn(),
   subscribeSessionEvents: vi.fn(),
 }));
 
@@ -103,9 +100,6 @@ beforeEach(() => {
   mocks.sendSessionMessage.mockResolvedValue({});
   mocks.cancelSessionRun.mockResolvedValue({});
   mocks.retrySessionRun.mockResolvedValue({});
-  mocks.fetchRequirementUnderstandings.mockResolvedValue({ items: [] });
-  mocks.confirmRequirementUnderstanding.mockResolvedValue({});
-  mocks.correctRequirementUnderstanding.mockResolvedValue({});
   mocks.subscribeSessionEvents.mockImplementation(
     (_projectId: string, _sessionId: string, _cursor: string, handler: (event: SseEvent) => void) => {
       eventHandlers.push(handler);
@@ -218,6 +212,107 @@ describe('useAgentSession 思考过程归属', () => {
       { type: 'text', text: '这是回复正文' },
     ]);
     expect(latest.thinkingSteps).toEqual([]);
+  });
+
+  /**
+   * IKAI1A：刷新之后思考还在。
+   *
+   * 真机上刷新一次，耗时和 token 都回来了、思考整段消失——因为那个块一直是前端本地拼的，
+   * 服务端消息里没有它。服务端补上之后，这条守的是前端**别把它丢掉**：快照带回来的 thinking
+   * 块要原样进 blocks，正文不能把它挤掉，也不能被 textOf 当成正文的一部分念出来。
+   */
+  it('快照里带回来的思考块原样立起来，不混进正文（IKAI1A）', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue({
+      session: { session_id: 'session-1', phase: 'open' },
+      messages: [
+        {
+          message_id: 'msg_assistant_run-9',
+          sequence: 2,
+          role: 'assistant',
+          source_run_id: 'run-9',
+          content: [
+            {
+              type: 'thinking',
+              thinking: { steps: ['根据对话继续澄清创作方向'], reasoning: '十五秒太短，得砍到三个镜头' },
+            },
+            { type: 'text', text: '先定几件事：' },
+          ],
+        },
+      ],
+      event_cursor: 'cursor-1',
+    } as unknown as SessionSnapshot);
+
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.messages).toHaveLength(1));
+
+    const message = latest.messages[0]!;
+    expect(message.blocks?.[0]).toEqual({
+      type: 'thinking',
+      thinking: { steps: ['根据对话继续澄清创作方向'], reasoning: '十五秒太短，得砍到三个镜头' },
+    });
+    // 思考不是正文：正文投影里一个字都不该有它。
+    expect(message.content).toBe('先定几件事：');
+  });
+
+  /**
+   * IKAI16：终态链到达时，模型原话必须原样留在块里。
+   *
+   * 这是真机上「思考过程有的时候还是空的」的成因。上面两条用例都停在 run.completed，
+   * 从不发 `reasoning_trace.updated.v1`——而真实的一轮**总会**发它，就在 run.completed 之后。
+   * 那条事件只带模板步骤，旧实现拿它整块替换，于是刚固化进去的 reasoning 被抹成 undefined，
+   * 用户看到的只剩一行「根据对话继续澄清创作方向」。缺口不在实现里，在测试的收尾处。
+   */
+  it('终态链到达后，模型原话仍在块里，没有被模板步骤挤掉（IKAI16）', async () => {
+    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
+    await renderHookHarness();
+    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
+    const emit = (event: unknown) => eventHandlers.at(-1)?.(event as never);
+
+    // 逐帧发：真实 SSE 每条事件是各自的回调，React 会在其间刷新。
+    // 挤进同一个 act 会被批处理，reasoningTextRef 还没更新就走到固化那一步。
+    await act(async () => {
+      emit({
+        type: 'assistant.reasoning.delta',
+        id: 'r1',
+        data: { run_id: 'run-1', payload: { stream_id: 'reasoning_run-1', text: '十五秒太短，得砍到三个镜头' } },
+      });
+    });
+    await act(async () => {
+      emit({
+        type: 'assistant.delta',
+        id: 'd1',
+        data: { run_id: 'run-1', payload: { stream_id: 'assistant_run_run-1', text: '先定几件事：' } },
+      });
+    });
+    await act(async () => {
+      emit({
+        type: 'run.completed',
+        id: 'c1',
+        data: { run_id: 'run-1', payload: { run: { run_id: 'run-1', status: 'completed' } } },
+      });
+    });
+
+    // 终态权威链随后到达——它只有模板步骤这一半。
+    await act(async () => {
+      emit({
+        type: 'reasoning_trace.updated.v1',
+        id: 't1',
+        data: {
+          run_id: 'run-1',
+          payload: {
+            reasoning_trace: { steps: [{ kind: 'response', summary: '根据对话继续澄清创作方向' }] },
+          },
+        },
+      });
+    });
+
+    expect(latest.messages.at(-1)!.blocks).toEqual([
+      {
+        type: 'thinking',
+        thinking: { steps: ['根据对话继续澄清创作方向'], reasoning: '十五秒太短，得砍到三个镜头' },
+      },
+      { type: 'text', text: '先定几件事：' },
+    ]);
   });
 
   it('终态后到达的最终思考链替换消息内的块，而不是缀到对话末尾', async () => {
@@ -842,192 +937,6 @@ describe('useAgentSession concurrency guards', () => {
     expect(latest.messages.map((message) => message.content)).toEqual(['new session']);
   });
 
-  it('submits a confirmation only once while the first request is pending', async () => {
-    const confirmation = deferred<unknown>();
-    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
-    mocks.confirmRequirementUnderstanding.mockReturnValue(confirmation.promise);
-    await renderHookHarness();
-    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
-
-    await act(async () => {
-      eventHandlers.at(-1)?.({
-        type: 'requirement_understanding.proposed.v1',
-        id: 'event-1',
-        data: {
-          payload: {
-            understanding: {
-              understanding_id: 'understanding-1',
-              version: 1,
-              proposed_summary: 'summary',
-              status: 'awaiting_confirmation',
-            },
-          },
-        },
-      });
-    });
-
-    act(() => {
-      void latest.confirmUnderstanding();
-      void latest.confirmUnderstanding();
-    });
-
-    expect(mocks.confirmRequirementUnderstanding).toHaveBeenCalledOnce();
-    expect(latest.confirmationPending).toBe(true);
-
-    await act(async () => {
-      confirmation.resolve({});
-      await confirmation.promise;
-    });
-    expect(latest.confirmationPending).toBe(false);
-  });
-
-  /** IKA4Q5：确认有三条来路，只有点按钮那条经过本地。模型在 Run 内自己调确认工具时，
-   *  唯一的信号就是这个事件；不收卡的话用户再点必然 409，看到「确认失败，请重试」。 */
-  it('清掉确认卡，当理解是被别处确认的（模型在 Run 内确认 / 自然语言确认）', async () => {
-    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
-    await renderHookHarness();
-    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
-
-    await act(async () => {
-      eventHandlers.at(-1)?.({
-        type: 'requirement_understanding.proposed.v1',
-        id: 'event-1',
-        data: {
-          payload: {
-            understanding: {
-              understanding_id: 'understanding-1',
-              version: 1,
-              proposed_summary: 'summary',
-              status: 'awaiting_confirmation',
-            },
-          },
-        },
-      });
-    });
-    expect(latest.pendingUnderstanding?.understanding_id).toBe('understanding-1');
-
-    await act(async () => {
-      eventHandlers.at(-1)?.({
-        type: 'requirement_understanding.accepted.v1',
-        id: 'event-2',
-        data: {
-          payload: {
-            understanding: {
-              understanding_id: 'understanding-1',
-              version: 1,
-              proposed_summary: 'summary',
-              status: 'accepted',
-            },
-          },
-        },
-      });
-    });
-
-    expect(latest.pendingUnderstanding).toBeNull();
-    expect(latest.confirmError).toBeNull();
-    expect(latest.confirmationPending).toBe(false);
-  });
-
-  it('把「已经确认过了」当成成功：收卡、不报错', async () => {
-    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
-    mocks.confirmRequirementUnderstanding.mockRejectedValue(
-      new ApiError(409, 'This Agent Session is not awaiting a requirement-understanding confirmation', 'session_phase_mismatch'),
-    );
-    await renderHookHarness();
-    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
-
-    await act(async () => {
-      eventHandlers.at(-1)?.({
-        type: 'requirement_understanding.proposed.v1',
-        id: 'event-1',
-        data: {
-          payload: {
-            understanding: {
-              understanding_id: 'understanding-1',
-              version: 1,
-              proposed_summary: 'summary',
-              status: 'awaiting_confirmation',
-            },
-          },
-        },
-      });
-    });
-
-    let outcome: boolean | undefined;
-    await act(async () => {
-      outcome = await latest.confirmUnderstanding();
-    });
-
-    expect(outcome).toBe(true);
-    expect(latest.pendingUnderstanding).toBeNull();
-    expect(latest.confirmError).toBeNull();
-  });
-
-  it('真失败时说出原因，而不是笼统的「请重试」', async () => {
-    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
-    mocks.confirmRequirementUnderstanding.mockRejectedValue(
-      new ApiError(404, 'Requirement understanding not found', 'requirement_understanding_not_found'),
-    );
-    await renderHookHarness();
-    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
-
-    await act(async () => {
-      eventHandlers.at(-1)?.({
-        type: 'requirement_understanding.proposed.v1',
-        id: 'event-1',
-        data: {
-          payload: {
-            understanding: {
-              understanding_id: 'understanding-1',
-              version: 1,
-              proposed_summary: 'summary',
-              status: 'awaiting_confirmation',
-            },
-          },
-        },
-      });
-    });
-
-    let outcome: boolean | undefined;
-    await act(async () => {
-      outcome = await latest.confirmUnderstanding();
-    });
-
-    expect(outcome).toBe(false);
-    expect(latest.confirmError).toBe('这条需求理解已失效，等 Agent 重新提议后再操作。');
-    // 卡片留着：这一类不是「已经成了」，收掉会让用户以为确认过了
-    expect(latest.pendingUnderstanding).not.toBeNull();
-  });
-
-  it('rejects an empty correction with a visible error', async () => {
-    mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'please confirm'));
-    await renderHookHarness();
-    await vi.waitFor(() => expect(eventHandlers.length).toBeGreaterThan(0));
-    await act(async () => {
-      eventHandlers.at(-1)?.({
-        type: 'requirement_understanding.proposed.v1',
-        id: 'event-1',
-        data: {
-          payload: {
-            understanding: {
-              understanding_id: 'understanding-1',
-              version: 1,
-              proposed_summary: 'summary',
-              status: 'awaiting_confirmation',
-            },
-          },
-        },
-      });
-    });
-
-    await act(async () => {
-      await latest.correctUnderstanding('   ');
-    });
-
-    expect(mocks.correctRequirementUnderstanding).not.toHaveBeenCalled();
-    expect(latest.confirmError).toBe('请输入修改后的需求理解');
-  });
-
   it('uses the message acknowledgement run when SSE state events are delayed', async () => {
     mocks.fetchSessionSnapshot.mockResolvedValue(snapshot('session-1', 'ready'));
     mocks.sendSessionMessage.mockResolvedValue({ run: { run_id: 'run-from-ack', status: 'queued' } });
@@ -1185,42 +1094,6 @@ describe('useAgentSession 生成卡水合', () => {
   it('生成卡事件早于 run.completed 到达时同样挂上卡片', async () => {
     await replay('committed-first');
     await vi.waitFor(() => expect(cardBlocks()).toHaveLength(1));
-  });
-});
-
-describe('classifyConfirmFailure', () => {
-  it('把两种「已经定下来了」的 409 判为 settled', () => {
-    for (const code of ['session_phase_mismatch', 'requirement_understanding_not_pending']) {
-      expect(classifyConfirmFailure(new ApiError(409, 'whatever', code), 'confirm')).toEqual({ kind: 'settled' });
-    }
-  });
-
-  it('对失效与消失分别给出可行动的说法', () => {
-    expect(
-      classifyConfirmFailure(new ApiError(404, 'x', 'requirement_understanding_not_found'), 'confirm'),
-    ).toEqual({ kind: 'stale', message: '这条需求理解已失效，等 Agent 重新提议后再操作。' });
-    expect(classifyConfirmFailure(new ApiError(404, 'x', 'session_not_found'), 'confirm')).toEqual({
-      kind: 'gone',
-      message: '会话已不存在，请新建对话。',
-    });
-  });
-
-  it('未知错误带上服务端原话，并区分确认与修改', () => {
-    expect(classifyConfirmFailure(new ApiError(500, '上游炸了', 'internal_error'), 'confirm')).toEqual({
-      kind: 'unknown',
-      message: '确认失败：上游炸了',
-    });
-    expect(classifyConfirmFailure(new ApiError(500, '上游炸了', 'internal_error'), 'correct')).toEqual({
-      kind: 'unknown',
-      message: '修改失败：上游炸了',
-    });
-  });
-
-  it('非 ApiError（断网等）退回通用文案', () => {
-    expect(classifyConfirmFailure(new TypeError('Failed to fetch'), 'confirm')).toEqual({
-      kind: 'unknown',
-      message: '确认失败，请重试',
-    });
   });
 });
 

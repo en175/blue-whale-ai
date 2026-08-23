@@ -4,11 +4,8 @@ import { ApiError } from './http';
 import {
   cancelSession,
   cancelSessionRun,
-  confirmRequirementUnderstanding,
-  correctRequirementUnderstanding,
   createSession,
   deleteSession,
-  fetchRequirementUnderstandings,
   fetchSessionSnapshot,
   listSessions,
   retrySessionRun,
@@ -65,7 +62,7 @@ describe('agentSessions API contract', () => {
       ),
     );
 
-    const request = confirmRequirementUnderstanding('project-1', 'session-1', 'understanding-1', 1, 'action-1');
+    const request = cancelSession('project-1', 'session-1');
 
     await expect(request).rejects.toMatchObject({
       status: 409,
@@ -153,21 +150,6 @@ describe('agentSessions API contract', () => {
       // 下面两条**不在** /sessions 里面：Run 级路由与 sessions 平级。此前正是这里错的。
       ['Run 级取消', () => cancelSessionRun('p1', 'r1'), `${P}/runs/r1/cancel`],
       ['Run 级重试', () => retrySessionRun('p1', 'r1'), `${P}/runs/r1/retry`],
-      [
-        '需求理解列表',
-        () => fetchRequirementUnderstandings('p1', 's1'),
-        `${P}/sessions/s1/requirement-understandings`,
-      ],
-      [
-        '确认需求理解',
-        () => confirmRequirementUnderstanding('p1', 's1', 'u1', 2, 'a1'),
-        `${P}/sessions/s1/requirement-understandings/u1/versions/2/actions/confirm`,
-      ],
-      [
-        '修改需求理解',
-        () => correctRequirementUnderstanding('p1', 's1', 'u1', 2, 'a1', '改过的理解'),
-        `${P}/sessions/s1/requirement-understandings/u1/versions/2/actions/correct`,
-      ],
     ];
 
     it.each(cases)('%s 打在 %s', async (_name, call, expected) => {
@@ -187,8 +169,6 @@ describe('agentSessions API contract', () => {
       ['会话级取消', () => cancelSession('p1', 's1')],
       ['Run 级取消', () => cancelSessionRun('p1', 'r1')],
       ['Run 级重试', () => retrySessionRun('p1', 'r1')],
-      ['确认需求理解', () => confirmRequirementUnderstanding('p1', 's1', 'u1', 2, 'a1')],
-      ['修改需求理解', () => correctRequirementUnderstanding('p1', 's1', 'u1', 2, 'a1', '改过的理解')],
     ];
 
     it.each(writeCases)('%s 带上了 Idempotency-Key——agent 缺它一律 400', async (_name, call) => {
