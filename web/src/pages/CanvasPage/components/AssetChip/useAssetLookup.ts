@@ -41,11 +41,6 @@ async function loadAssetLookup(force: boolean): Promise<AssetLookupCache> {
   return loaded;
 }
 
-/** 测试用：清空模块级缓存，免得用例之间互相串。 */
-export function resetAssetLookupForTests(): void {
-  cache = null;
-  inFlight = null;
-}
 
 /**
  * 返回一个 `assetId → 资产记录` 的查询函数。

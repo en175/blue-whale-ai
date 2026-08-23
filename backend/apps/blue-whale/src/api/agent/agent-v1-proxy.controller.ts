@@ -10,6 +10,7 @@ import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+import { agentServiceBaseUrl, agentServiceToken, agentTenantId } from "./agent-service-env.js";
 
 /**
  * 建连超时：只约束「拿到上游响应头」这一段。
@@ -28,18 +29,6 @@ function positiveInt(raw: string | undefined, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-/** 上游 agent 服务地址（独立 blue-whale-agent 服务）。缺省 localhost:4111。 */
-function agentServiceBaseUrl(): string {
-  return process.env.AGENT_SERVICE_BASE_URL?.trim() || "http://localhost:4111";
-}
-/** agent 服务凭证（agent trustedContext 校验 `Bearer ${AGENT_SERVICE_TOKEN}`），与 agent 侧 .env 保持一致。 */
-function agentServiceToken(): string {
-  return process.env.AGENT_SERVICE_TOKEN?.trim() || "";
-}
-/** 蓝鲸为单租户产品：tenant 是固定标签；agent 侧按 (tenant, principal) 隔离。 */
-function agentTenantId(): string {
-  return process.env.AGENT_TENANT_ID?.trim() || "default";
-}
 function connectTimeoutMs(): number {
   return positiveInt(process.env.AGENT_UPSTREAM_CONNECT_TIMEOUT_MS, DEFAULT_CONNECT_TIMEOUT_MS);
 }

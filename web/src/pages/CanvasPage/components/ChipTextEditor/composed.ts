@@ -57,14 +57,3 @@ export function resolveComposed(value: ComposedValue): string {
     .join('');
 }
 
-/** 编辑期展示用的文本：胶囊按短标签计入，用于占位提示等场景，**不能用于提交**。 */
-export function composedPreviewText(value: ComposedValue): string {
-  return value.segments
-    .map((segment) => (segment.kind === 'text' ? segment.value : segment.ref.label))
-    .join('');
-}
-
-/** 纯文本构造（外部预填文案走这条，没有引用）。 */
-export function composedFromText(text: string): ComposedValue {
-  return text ? { segments: [{ kind: 'text', value: text }] } : EMPTY_COMPOSED;
-}

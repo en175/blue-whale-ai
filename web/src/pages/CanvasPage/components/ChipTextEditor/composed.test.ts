@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_COMPOSED,
-  composedFromText,
   composedIsEmpty,
   composedLength,
-  composedPreviewText,
   resolveComposed,
   type ComposedValue,
 } from './composed';
+
+/**
+ * 纯文本构造。
+ *
+ * 本来是 composed.ts 的导出，但生产代码从来没用过它——只有这个文件在用（审查 W·S11）。
+ * 一个只服务于测试的构造器就该住在测试里。
+ */
+function fromText(text: string): ComposedValue {
+  return text ? { segments: [{ kind: 'text', value: text }] } : EMPTY_COMPOSED;
+}
 
 /** 一张长卡：正是它把字数额度吃光、触发截断、让胶囊被抹掉的。 */
 const LONG_PROMPT = 'x'.repeat(3000);
@@ -29,7 +37,7 @@ describe('composedLength', () => {
   });
 
   it('纯文字就是字符数', () => {
-    expect(composedLength(composedFromText('一二三'))).toBe(3);
+    expect(composedLength(fromText('一二三'))).toBe(3);
     expect(composedLength(EMPTY_COMPOSED)).toBe(0);
   });
 
@@ -50,7 +58,7 @@ describe('resolveComposed', () => {
   });
 
   it('没有胶囊时就是原文', () => {
-    expect(resolveComposed(composedFromText('直接出图'))).toBe('直接出图');
+    expect(resolveComposed(fromText('直接出图'))).toBe('直接出图');
   });
 
   it('空内容解出空串', () => {
@@ -58,15 +66,9 @@ describe('resolveComposed', () => {
   });
 });
 
-describe('composedPreviewText', () => {
-  it('编辑期展示用短标签，不展开全文', () => {
-    expect(composedPreviewText(withChip())).toBe('参考 镜头 3 重做一版');
-  });
-});
-
 describe('composedIsEmpty', () => {
   it('纯空白算空', () => {
-    expect(composedIsEmpty(composedFromText('   \n  '))).toBe(true);
+    expect(composedIsEmpty(fromText('   \n  '))).toBe(true);
     expect(composedIsEmpty(EMPTY_COMPOSED)).toBe(true);
   });
 
@@ -77,12 +79,12 @@ describe('composedIsEmpty', () => {
   });
 
   it('有实字就不算空', () => {
-    expect(composedIsEmpty(composedFromText(' 出图 '))).toBe(false);
+    expect(composedIsEmpty(fromText(' 出图 '))).toBe(false);
   });
 });
 
-describe('composedFromText', () => {
+describe('fromText（测试辅助）', () => {
   it('空串给出空值而不是一个空文本片段', () => {
-    expect(composedFromText('')).toEqual(EMPTY_COMPOSED);
+    expect(fromText('')).toEqual(EMPTY_COMPOSED);
   });
 });

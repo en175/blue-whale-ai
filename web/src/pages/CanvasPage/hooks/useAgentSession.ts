@@ -81,18 +81,49 @@ export interface ChatMessage {
 }
 
 /**
- * run 状态 → 状态行终局。
+ * Run 状态这一个字符串域的唯一分类表。
  *
- * 事件流按事件名给（`run.cancelled`），发送回执按 `run.status` 给（`cancelled`），两边
- * 落到同一张表，避免加一种终态要改两处而其中一处被忘掉。
+ * 三个来源写法各不相同：事件流按事件名给（`run.cancelled`），发送回执与快照按 `run.status`
+ * 给（`cancelled`）。全部落到这一张表，加一种终态只改这里。
  *
  * `stopped` 归入「已取消」：那是用户自己按的停止，不该看到失败的语气。
  * `outcome_unknown` 归入失败：对用户而言「不知道」和「失败」一样需要重试。
+ *
+ * 此前这套判断散在四处——这张表、一个 if 链、外加两份写死的
+ * `['failed','outcome_unknown'].includes(...)`（审查 W·S15）。
+ */
+const RUN_STATUS_OUTCOME: Readonly<Record<string, RunOutcome>> = {
+  completed: 'completed',
+  succeeded: 'completed',
+  cancelled: 'cancelled',
+  canceled: 'cancelled',
+  stopped: 'cancelled',
+  failed: 'failed',
+  outcome_unknown: 'failed',
+};
+
+/** 这个状态是否已经是终态。表里有就是终态——表本身就是终态清单。 */
+function isTerminalStatus(status: string): boolean {
+  return Object.hasOwn(RUN_STATUS_OUTCOME, status);
+}
+
+/**
+ * run 状态 → 状态行终局。
+ *
+ * 表外的状态一律按失败处理：认不出的终态对用户的意义和「不知道」一样，都需要重试入口。
  */
 function terminalOutcomeOf(status: string): RunOutcome {
-  if (status === 'completed' || status === 'succeeded') return 'completed';
-  if (status === 'cancelled' || status === 'canceled' || status === 'stopped') return 'cancelled';
-  return 'failed';
+  return RUN_STATUS_OUTCOME[status] ?? 'failed';
+}
+
+/**
+ * 这一轮是否需要给用户一个重试入口。
+ *
+ * 只对终态成立——还在跑的时候谈不上重试。此前两处写的是
+ * `['failed','outcome_unknown'].includes(status)`，靠调用点恰好都在终态分支里才没出错。
+ */
+function needsRetry(status: string): boolean {
+  return isTerminalStatus(status) && terminalOutcomeOf(status) === 'failed';
 }
 
 /** ISO 时间 → 毫秒时间戳；缺失或不可解析返回 null（调用方自己决定怎么兜底）。 */
@@ -125,17 +156,6 @@ function parseSettledTurn(run: SessionRun): { startedAt: number; outcome: TurnOu
     },
   };
 }
-
-/** 运行终态集合（status_changed / run.* 终态判定） */
-const TERMINAL_STATUS = [
-  'completed',
-  'succeeded',
-  'failed',
-  'cancelled',
-  'canceled',
-  'stopped',
-  'outcome_unknown',
-];
 
 /** 运行中无产出事件的兜底提示阈值（毫秒）：超过该时长仍无 delta/思考/终态，提示用户可诊断信息，不无限「处理中」 */
 const LONG_RUN_HINT_MS = 60_000;
@@ -893,13 +913,13 @@ export function useAgentSession(projectId: string) {
           setPaymentRequiredMessage(
             snap.active_run.failure?.message || '运行授权或余额不足，请处理后继续，或取消本次运行。',
           );
-        } else if (!TERMINAL_STATUS.includes(snap.active_run.status)) {
+        } else if (!isTerminalStatus(snap.active_run.status)) {
           setRunningRunId(snap.active_run.run_id);
           runningRef.current = snap.active_run.run_id;
           setStreaming(true);
         }
       } else if (snap.latest_terminal_run?.run_id) {
-        if (['failed', 'outcome_unknown'].includes(snap.latest_terminal_run.status)) {
+        if (needsRetry(snap.latest_terminal_run.status)) {
           setFailedRunId(snap.latest_terminal_run.run_id);
         }
         // 上一轮的账：起点用入队时刻（用户等待是从提交开始算的，不是从模型开始跑算的），
@@ -1075,7 +1095,7 @@ export function useAgentSession(projectId: string) {
             setPaymentRequiredMessage(
               run.failure?.message || '运行授权或余额不足，请处理后继续，或取消本次运行。',
             );
-          } else if (TERMINAL_STATUS.includes(run.status)) {
+          } else if (isTerminalStatus(run.status)) {
             terminalRunIdsRef.current.add(run.run_id);
             streamingRef.current = false;
             setStreaming(false);
@@ -1092,7 +1112,7 @@ export function useAgentSession(projectId: string) {
             });
             runningRef.current = null;
             setRunningRunId(null);
-            if (['failed', 'outcome_unknown'].includes(run.status)) setFailedRunId(run.run_id);
+            if (needsRetry(run.status)) setFailedRunId(run.run_id);
           } else {
             runningRef.current = run.run_id;
             setRunningRunId(run.run_id);

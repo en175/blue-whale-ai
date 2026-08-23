@@ -21,6 +21,7 @@ import { quotaToCredits } from "@lib/shared/credits/credits.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+import { agentServiceBaseUrl, agentServiceToken, agentTenantId } from "./agent-service-env.js";
 
 /** 查账时间窗在 Run 起止两端各放宽的秒数。窗口只用于收敛翻页，放宽不影响归属判定。 */
 const WINDOW_SLACK_SECONDS = 300;
@@ -34,15 +35,6 @@ interface AgentRunView {
   finished_at?: unknown;
 }
 
-function agentServiceBaseUrl(): string {
-  return process.env.AGENT_SERVICE_BASE_URL?.trim() || "http://localhost:4111";
-}
-function agentServiceToken(): string {
-  return process.env.AGENT_SERVICE_TOKEN?.trim() || "";
-}
-function agentTenantId(): string {
-  return process.env.AGENT_TENANT_ID?.trim() || "default";
-}
 
 /** ISO 时间 → 秒级时间戳；缺失或不可解析返回 null（调用方自行决定怎么兜底）。 */
 function secondsOf(value: unknown): number | null {

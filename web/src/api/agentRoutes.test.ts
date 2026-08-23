@@ -6,7 +6,7 @@
  * 所以真正的解法不是多一张表，而是让手写路径这件事从代码里消失，由下面的源码守卫盯着。
  */
 import { describe, expect, it } from 'vitest';
-import { AGENT_ROUTES, AGENT_ROUTES_VERSION, agentPath, agentUrl } from './agentRoutes';
+import { AGENT_ROUTES, agentPath, agentUrl } from './agentRoutes';
 
 describe('agentUrl', () => {
   it('按清单拼地址，并补上 BFF 命名空间与 project 前缀', () => {
@@ -41,8 +41,7 @@ describe('agentUrl', () => {
 });
 
 describe('清单副本', () => {
-  it('带着它是从哪个版本拷来的', () => {
-    expect(AGENT_ROUTES_VERSION).toBeGreaterThan(0);
+  it('不是空表——清单没读进来时下面每一条断言都会假通过', () => {
     expect(AGENT_ROUTES.length).toBeGreaterThan(0);
   });
 

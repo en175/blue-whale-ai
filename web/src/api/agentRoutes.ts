@@ -16,13 +16,13 @@
  */
 import contract from './agent-rest-routes.v1.json';
 
-export interface AgentRestRoute {
+/** 清单里一条路由的形状。只给 AGENT_ROUTES 标类型，不对外——外部只该按路由名取地址。 */
+interface AgentRestRoute {
   name: string;
   method: string;
   path: string;
 }
 
-export const AGENT_ROUTES_VERSION: number = contract.version;
 export const AGENT_ROUTES: AgentRestRoute[] = contract.routes;
 
 /** BFF 命名空间。agent 侧收到的是剥掉这一段之后的路径。 */
