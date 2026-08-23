@@ -57,3 +57,20 @@ export function resolveComposed(value: ComposedValue): string {
     .join('');
 }
 
+/**
+ * 块级节点之间的分隔符。
+ *
+ * 这个值不是随手挑的，它必须等于 Lexical 拼纯文本时用的那一个，否则「编辑器里看到的」
+ * 和「送给模型的」会不一样。Lexical 的原文（`lexical/dist/Lexical.dev.mjs`）：
+ *
+ * ```js
+ * const DOUBLE_LINE_BREAK = '\n\n';                    // :120
+ * // ElementNode.getTextContent()                       // :13070
+ * $isElementNode(child) && i !== childrenLength - 1 && !child.isInline()
+ *   → textContent += DOUBLE_LINE_BREAK;
+ * ```
+ *
+ * IKAFSX 把编辑器出口从 `string` 换成片段序列时，这条分隔规则一度被写成单个 `\n`
+ * ——用户在 dock 里敲三段文字点生成，送出去的 prompt 每个段落就少一个换行（审查 W·P3）。
+ */
+export const BLOCK_SEPARATOR = '\n\n';

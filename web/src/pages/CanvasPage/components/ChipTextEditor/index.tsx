@@ -21,10 +21,10 @@ import {
   COMMAND_PRIORITY_LOW,
   KEY_ENTER_COMMAND,
   type LexicalEditor,
-  type LexicalNode,
 } from 'lexical';
-import { ChipNode, $createChipNode, $isChipNode } from './ChipNode';
-import { EMPTY_COMPOSED, type ComposedSegment, type ComposedValue } from './composed';
+import { ChipNode, $createChipNode } from './ChipNode';
+import { type ComposedValue } from './composed';
+import { readComposed } from './readComposed';
 import styles from './index.module.css';
 
 export interface ChipRef {
@@ -57,36 +57,6 @@ interface ChipTextEditorProps {
   onChange: (value: ComposedValue) => void;
   onSend: () => void;
   className?: string;
-}
-
-/** 把 Lexical 的节点树读成片段序列。相邻文本节点合并，免得计数与解引用被节点边界干扰。 */
-function readComposed(): ComposedValue {
-  const segments: ComposedSegment[] = [];
-  const pushText = (value: string) => {
-    if (!value) return;
-    const last = segments[segments.length - 1];
-    if (last?.kind === 'text') last.value += value;
-    else segments.push({ kind: 'text', value });
-  };
-  const walk = (node: LexicalNode) => {
-    if ($isChipNode(node)) {
-      segments.push({ kind: 'ref', ref: node.toRef() });
-      return;
-    }
-    if ($isElementNode(node)) {
-      const children = node.getChildren();
-      children.forEach(walk);
-      return;
-    }
-    pushText(node.getTextContent());
-  };
-  const root = $getRoot();
-  root.getChildren().forEach((child, index) => {
-    // 段落之间补回换行：Lexical 的块级结构在纯文本里就是 \n，丢了会把多段粘成一段。
-    if (index > 0) pushText('\n');
-    walk(child);
-  });
-  return segments.length > 0 ? { segments } : EMPTY_COMPOSED;
 }
 
 function onError(error: Error) {
