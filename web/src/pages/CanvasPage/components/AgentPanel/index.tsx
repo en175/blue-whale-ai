@@ -169,10 +169,12 @@ function RunStatusLine({
       {/* 运行中把这一段对读屏遮起来：秒数每秒变一次，`aria-live` 会把它一遍遍念出来，
           盖过真正有信息量的状态文案。终态时放开，此时它只念一次，正是这一轮的账。 */}
       <span className={styles.runStatusMeta} aria-hidden={!status.settled}>
-        {formatElapsed(status.seconds)}
+        {/* 秒数、token、上下文各自可缺，分隔符因此只能在**前面已经有东西**时才出——
+            否则终态缺 finishedAt（秒数为 null）时，这一行会以一个孤零零的「 · 」开头。 */}
+        {status.seconds !== null && formatElapsed(status.seconds)}
         {status.tokens && (
           <>
-            {' · '}
+            {status.seconds !== null && ' · '}
             {/* 流式期间这个数是按字符估的：模型只在结束时报真实用量，中途没有增量。
                 它的作用是活性信号——用户要判断的是"它还在动吗"，不是精确值。 */}
             <span title={status.tokens.estimated ? '流式期间为估算值，结束后显示实际用量' : '本轮实际输出用量'}>
@@ -183,7 +185,7 @@ function RunStatusLine({
         )}
         {context !== null && contextPercent !== null && (
           <>
-            {' · '}
+            {(status.seconds !== null || status.tokens !== null) && ' · '}
             <span title={`上下文 ${context.usedTokens} / ${context.maxTokens} tokens`}>
               上下文 {contextPercent}%
             </span>

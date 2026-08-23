@@ -157,6 +157,14 @@ function parseSettledTurn(run: SessionRun): { startedAt: number; outcome: TurnOu
   };
 }
 
+/**
+ * 删除已经报过错的哨兵。
+ *
+ * 用它把「删除本身失败」和「删完之后的善后失败」分成两条 catch——两者对用户是不同的话，
+ * 前者「删除失败，可以重试」，后者「已经删掉了，只是没连上」。
+ */
+const DELETE_ALREADY_REPORTED = Symbol('delete-already-reported');
+
 /** 运行中无产出事件的兜底提示阈值（毫秒）：超过该时长仍无 delta/思考/终态，提示用户可诊断信息，不无限「处理中」 */
 const LONG_RUN_HINT_MS = 60_000;
 
@@ -301,19 +309,44 @@ export function useAgentSession(projectId: string) {
    * 上一轮的终局残留在屏幕上；另一处两个都清了，结果是回执直接终态时状态行整条消失。
    * 两个 bug 是同一种形状——改了一半。做成原子动作后这种写法就写不出来了。
    */
+  /**
+   * `turnOutcome` 的同步镜像。
+   *
+   * 事件处理器要判断「上一轮的账还挂着吗」，而它的依赖数组里没有 turnOutcome（挂进去会让
+   * 整个处理器每轮重建）。ref 在下面几个原子动作里**同步**更新——不用 useEffect 同步，
+   * 因为终态事件与紧随其后的新一轮开始事件之间可能没有一次渲染，effect 太晚。
+   */
+  const turnOutcomeRef = useRef<TurnOutcome | null>(null);
   const beginTurn = useCallback(() => {
     setTurnStartedAt(Date.now());
+    turnOutcomeRef.current = null;
     setTurnOutcome(null);
   }, []);
   /** 本轮结束，留下这一轮的账。刻意不动 turnStartedAt：没有起点就算不出耗时。 */
   const settleTurn = useCallback((outcome: TurnOutcome) => {
+    turnOutcomeRef.current = outcome;
     setTurnOutcome(outcome);
   }, []);
   /**
-   * 刷新或重连后本地没有提交时刻，用事件自带的服务端时间补一个起点。
-   * 只在还没有起点时生效——本地打的点更早（提交那一刻），不该被服务端的排队时间往后推。
+   * 新一轮的开始事件到达（`run.queued` / `run.started`）。
+   *
+   * 两种情形，必须分开处理——此前只做了前一种，于是有了审查 W·A1：
+   *
+   * 1. **本轮已经开表**（sendMessage 走的路）：什么都不做。本地打的点更早（提交那一刻），
+   *    不该被服务端的排队时间往后推。
+   * 2. **上一轮的终局还挂在屏幕上，却来了新一轮的开始**：重试、自动排队的下一轮、
+   *    另一个标签页发起的 run——这三条路都不经过 sendMessage，因此谁都没清过 turnOutcome。
+   *    结果是整轮显示上一轮的判决（「未能完成 12s」），秒数和 token 双双冻结，
+   *    而这个文件的 docblock 说这条状态行是**活性信号**，绝不能死掉。
+   *    此时用服务端时间重新起表——本地没有提交时刻可用。
    */
   const adoptTurnStart = useCallback((at: number) => {
+    if (turnOutcomeRef.current !== null) {
+      turnOutcomeRef.current = null;
+      setTurnOutcome(null);
+      setTurnStartedAt(at);
+      return;
+    }
     setTurnStartedAt((cur) => cur ?? at);
   }, []);
   /**
@@ -329,6 +362,7 @@ export function useAgentSession(projectId: string) {
   const adoptSettledTurn = useCallback((startedAt: number, outcome: TurnOutcome) => {
     setTurnStartedAt((cur) => {
       if (cur !== null) return cur;
+      turnOutcomeRef.current = outcome;
       setTurnOutcome(outcome);
       return startedAt;
     });
@@ -336,6 +370,7 @@ export function useAgentSession(projectId: string) {
   /** 这一轮当作没发生过（未开始、被计费门接管、或整个会话被换掉）。 */
   const clearTurn = useCallback(() => {
     setTurnStartedAt(null);
+    turnOutcomeRef.current = null;
     setTurnOutcome(null);
   }, []);
   /** 正在写入的生成卡预览（prompt_card.partial.v1）。只用于展示，终态卡片到达即让位。 */
@@ -885,9 +920,26 @@ export function useAgentSession(projectId: string) {
       connectionEpochRef.current = epoch;
       unsubRef.current?.();
       unsubRef.current = null;
+      const previousSessionId = sessionIdRef.current;
       sessionIdRef.current = session.session_id;
       setSessionId(session.session_id);
-      const snap = await api.fetchSessionSnapshot(projectId, session.session_id);
+      let snap: Awaited<ReturnType<typeof api.fetchSessionSnapshot>>;
+      try {
+        snap = await api.fetchSessionSnapshot(projectId, session.session_id);
+      } catch (e) {
+        // 快照失败必须把会话 id 退回去（审查 W·A2）。
+        //
+        // 这个 id 是 `ensureSession` 的短路条件：留着它，用户关掉错误横幅继续发消息时
+        // ensureSession 会直接返回，POST 也会成功、乐观气泡照常出现、streaming 置真——
+        // **而 SSE 处理器根本没挂上**（抛出发生在 subscribeSessionEvents 之前）。
+        // 于是没有 delta、没有终态，永远等不到回复，只能等 60 秒的兜底提示。
+        // 退回去之后，下一次发送会重新走完整的连接流程，一次网络抖动不再是死局。
+        if (connectionEpochRef.current === epoch && sessionIdRef.current === session.session_id) {
+          sessionIdRef.current = previousSessionId;
+          setSessionId(previousSessionId);
+        }
+        throw e;
+      }
       if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return false;
       // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
       setMessages(attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards));
@@ -905,27 +957,40 @@ export function useAgentSession(projectId: string) {
           })
           .catch((e) => console.warn('拉取待确认需求理解失败:', e));
       }
-      if (snap.active_run?.run_id) {
-        if (snap.active_run.status === 'payment_required') {
-          setRunningRunId(snap.active_run.run_id);
-          runningRef.current = snap.active_run.run_id;
+      // 已经是终态的 active_run 归到「上一轮的账」那条路去（审查 W·A4）。
+      //
+      // 此前这里是 `if (active_run) {…} else if (latest_terminal_run) {…}`：active_run 存在
+      // 但已终态时，内层三个分支一个都不匹配，外层的 else if 又被跳过——**重试按钮和状态行
+      // 同时消失**，而那正是这段代码要恢复的两样东西。下面那行 `!isTerminalStatus(...)` 说明
+      // 作者认为这种情况可达，只是没给它出路。
+      const liveRun =
+        snap.active_run?.run_id && !isTerminalStatus(snap.active_run.status) ? snap.active_run : null;
+      const settledRun = liveRun
+        ? null
+        : (snap.active_run?.run_id && isTerminalStatus(snap.active_run.status)
+            ? snap.active_run
+            : snap.latest_terminal_run) ?? null;
+      if (liveRun?.run_id) {
+        if (liveRun.status === 'payment_required') {
+          setRunningRunId(liveRun.run_id);
+          runningRef.current = liveRun.run_id;
           setStreaming(false);
           setPaymentRequiredMessage(
-            snap.active_run.failure?.message || '运行授权或余额不足，请处理后继续，或取消本次运行。',
+            liveRun.failure?.message || '运行授权或余额不足，请处理后继续，或取消本次运行。',
           );
-        } else if (!isTerminalStatus(snap.active_run.status)) {
-          setRunningRunId(snap.active_run.run_id);
-          runningRef.current = snap.active_run.run_id;
+        } else {
+          setRunningRunId(liveRun.run_id);
+          runningRef.current = liveRun.run_id;
           setStreaming(true);
         }
-      } else if (snap.latest_terminal_run?.run_id) {
-        if (needsRetry(snap.latest_terminal_run.status)) {
-          setFailedRunId(snap.latest_terminal_run.run_id);
+      } else if (settledRun?.run_id) {
+        if (needsRetry(settledRun.status)) {
+          setFailedRunId(settledRun.run_id);
         }
         // 上一轮的账：起点用入队时刻（用户等待是从提交开始算的，不是从模型开始跑算的），
         // 终局用运行状态。两端时间缺一不可——没有起点就算不出耗时，没有终点秒数会一直走，
         // 一条早已结束的状态行看起来像还在跑。
-        const settled = parseSettledTurn(snap.latest_terminal_run);
+        const settled = parseSettledTurn(settledRun);
         if (settled) adoptSettledTurn(settled.startedAt, settled.outcome);
       }
       if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return false;
@@ -1018,6 +1083,20 @@ export function useAgentSession(projectId: string) {
       if (!projectId) return;
       setDeleteError((prev) => (prev?.sessionId === targetId ? null : prev));
       api.deleteSession(projectId, targetId)
+        .catch((e) => {
+          // 只有**删除本身**失败才报「删除失败」（审查 W·A6）。
+          //
+          // 此前 .catch 罩住了整个 .then 体，连同后面的 listSessions / createSession /
+          // connectSession。删成功但重连失败时，resetLocal() 已经把面板清空了，用户却看到
+          // 一条红色「删除失败」钉在一个**已经不存在的会话**行上，然后去重试一个必然 404
+          // 的删除。善后失败是另一回事，走 chatError 那条路说「会话已删除，但重新连接失败」。
+          console.warn('删除会话失败:', e);
+          setDeleteError({
+            sessionId: targetId,
+            message: isApiError(e) ? `删除失败：${e.message}` : '删除失败，请重试',
+          });
+          throw DELETE_ALREADY_REPORTED;
+        })
         .then(async () => {
           const sessionsEpoch = sessionsEpochRef.current + 1;
           sessionsEpochRef.current = sessionsEpoch;
@@ -1029,11 +1108,10 @@ export function useAgentSession(projectId: string) {
           await connectSession(next);
         })
         .catch((e) => {
-          console.warn('删除会话失败:', e);
-          setDeleteError({
-            sessionId: targetId,
-            message: isApiError(e) ? `删除失败：${e.message}` : '删除失败，请重试',
-          });
+          if (e === DELETE_ALREADY_REPORTED) return;
+          // 删除成功了，善后没成功。别把这说成删除失败——那会把用户送去重试一个 404。
+          console.warn('删除后重新连接失败:', e);
+          setChatError('会话已删除，但重新连接失败，请刷新页面');
         });
     },
     [projectId, resetLocal, connectSession],
@@ -1090,6 +1168,11 @@ export function useAgentSession(projectId: string) {
           if (run.status === 'payment_required') {
             streamingRef.current = false;
             setStreaming(false);
+            // 与 SSE 那条 payment_required 路径保持一致（审查 W·A8）。
+            // 那边的理由写在原处：计费门是暂停不是终态，让状态行继续读秒会显得还在跑，
+            // 报终局又不属实，所以这一段交给下面的 paymentRequiredMessage 独占。
+            // 同一件事走两条路进来，不该一条清表一条不清。
+            clearTurn();
             runningRef.current = run.run_id;
             setRunningRunId(run.run_id);
             setPaymentRequiredMessage(

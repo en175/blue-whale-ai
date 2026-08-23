@@ -90,10 +90,34 @@ describe('deriveRunStatus', () => {
       });
     });
 
-    it('刷新后拿不到 finishedAt 也不会读秒——已结束的东西继续跳数看起来像还在跑', () => {
+    it('终态却没有 finishedAt：不显示秒数，也不拿 now 顶替（审查 W·A5）', () => {
+      // 原来这里退回 `now`，注释预算的是「数字略大」。实际不是略大：`now` 在 settled 时
+      // 就不再推进了（面板挂载那一刻冻住的值），打开一个三天前异常终止的会话，
+      // 状态行会写「已完成 4320m」。而缺 finishedAt 恰恰在异常终止的 Run 上最常见。
       const status = deriveRunStatus({ ...base, outcome: 'completed', finishedAt: null, now: 1_030_000 });
       expect(status?.settled).toBe(true);
-      expect(status?.seconds).toBe(30);
+      expect(status?.seconds).toBeNull();
+    });
+
+    it('三天前异常终止的会话，不会被算成「已完成 4320m」', () => {
+      const threeDays = 3 * 24 * 60 * 60 * 1000;
+      const status = deriveRunStatus({
+        ...base,
+        outcome: 'failed',
+        finishedAt: null,
+        now: base.activeSince! + threeDays,
+      });
+      expect(status?.seconds).toBeNull();
+    });
+
+    it('有 finishedAt 就冻在那一刻，与 now 无关', () => {
+      const status = deriveRunStatus({
+        ...base,
+        outcome: 'completed',
+        finishedAt: 1_012_000,
+        now: 9_999_999,
+      });
+      expect(status?.seconds).toBe(12);
     });
   });
 

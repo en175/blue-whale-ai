@@ -85,7 +85,11 @@ export interface RunStatusContext {
 export interface RunStatus {
   phase: RunPhase;
   label: string;
-  seconds: number;
+  /**
+   * 本轮耗时（秒）。**终态却没有结束时刻时为 null，UI 据此不渲染秒数那一段**——
+   * 与 `tokens` 同一个约定：拿不到就不显示，不要编一个。
+   */
+  seconds: number | null;
   tone: 'working' | 'stalled' | 'done' | 'error';
   /** 终态为 true：此时展示的是这一轮的账，不是进度。 */
   settled: boolean;
@@ -205,11 +209,15 @@ export function deriveRunStatus(input: RunStatusInput): RunStatus | null {
   // 从来没跑过才什么都不显示。跑完了要留下来报账，那正是 IKA4PG 要的。
   if (activeSince === null) return null;
 
-  // 终态后秒数冻结。没有 finishedAt（比如刷新后从快照恢复）就退回当前时间，宁可数字略大，
-  // 也不要让一条已经结束的状态行继续读秒——那看起来像还在跑。
-  const until = outcome !== null ? (finishedAt ?? now) : now;
+  // 终态后秒数冻结在 finishedAt。
+  //
+  // **终态却没有 finishedAt 时不显示秒数**（审查 W·A5）。此前这里退回 `now`，注释预算的是
+  // 「数字略大」——实际差了好几天：`now` 在 settled 时不再推进，它是面板挂载那一刻
+  // `useState(() => Date.now())` 冻住的值，于是打开一个三天前异常终止的会话，
+  // 状态行显示「已完成 4320m」。而缺 finishedAt 恰恰在**异常终止**的 Run 上最常见。
+  const until = outcome !== null ? finishedAt : now;
   // 起点可能来自事件里的服务端时间，和浏览器时钟未必一致；时钟偏差不该让计时器倒着走。
-  const seconds = Math.max(0, Math.floor((until - activeSince) / 1000));
+  const seconds = until === null ? null : Math.max(0, Math.floor((until - activeSince) / 1000));
   const tokens = tokensOf(input);
   const context = contextOf(input.contextCapacity);
 
