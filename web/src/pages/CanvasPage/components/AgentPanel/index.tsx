@@ -39,10 +39,7 @@ import {
 } from '../ChipTextEditor/composed';
 import AssetChip from '../AssetChip';
 import { shouldCancelOnKey } from './cancelShortcut';
-import { getPanelLayout } from './layout';
-
-/** 面板与视口边缘的固定间距。刻意不用视口百分比：同一个界面在半屏与全屏下应当长得一样（IKAGZC）。 */
-const PANEL_EDGE_GAP = 8;
+import { dockedPanelLayout, freePanelLayout, type PanelMetrics } from './layout';
 
 /** 父组件没传已应用集合时的空集。提到模块级是为了保持引用稳定，避免每次渲染都造一个新 Set。 */
 const EMPTY_APPLIED_IDS: ReadonlySet<string> = new Set<string>();
@@ -705,6 +702,27 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const panelRef = useRef<HTMLDivElement>(null);
   const dragState = useRef({ dragging: false, startX: 0, startY: 0, origX: 0, origY: 0 });
 
+  /**
+   * 量一次面板与它的父容器，初始化 / 缩窗 / 拖拽三处共用同一组输入。
+   *
+   * 此前这段 DOM 读取在四个调用点各写了一遍，量法还略有出入（有的先取 header 再取 rect，
+   * 有的反过来）。量测和决策分开之后，「怎么算布局」只剩 layout.ts 一处（审查 W·S8）。
+   * DOM 尚未就绪时返回 null，由调用方决定跳过还是照常收尾。
+   */
+  const measurePanel = useCallback((): PanelMetrics | null => {
+    const el = panelRef.current;
+    const page = el?.parentElement;
+    if (!el || !page) return null;
+    const rect = el.getBoundingClientRect();
+    return {
+      pageWidth: page.clientWidth,
+      pageHeight: page.clientHeight,
+      headerHeight: page.querySelector('header')?.getBoundingClientRect().height ?? 0,
+      panelWidth: rect.width,
+      panelHeight: rect.height,
+    };
+  }, []);
+
   const currentModel = models.find((m) => m.key === selectedModel);
 
   /** 外部注入 @ 引用/生成卡：仅在版本真正变化时触发一次；生成卡追加胶囊（可多次叠加），普通引用整体替换文本
@@ -795,74 +813,38 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
   /** 初始化位置：屏幕右侧；首次挂载也走统一安全边界，窄视口不会横向溢出。 */
   useEffect(() => {
-    if (!initialized && panelRef.current) {
-      const el = panelRef.current;
-      const page = el.parentElement;
-      if (page) {
-        const rect = el.getBoundingClientRect();
-        const header = page.querySelector('header');
-        const headerH = header?.getBoundingClientRect().height ?? 0;
-        const layout = getPanelLayout({
-          pageWidth: page.clientWidth,
-          pageHeight: page.clientHeight,
-          headerHeight: headerH,
-          panelWidth: rect.width,
-          // 撑满可用高度，由 layout.ts 的固定 PANEL_MARGIN 收边。原来减的是 8% 视口高度，
-          // 那让面板在不同窗口下高矮不一，而且底部永远空一截（IKAGZC）。
-          panelHeight: page.clientHeight - headerH,
-          desiredX: page.clientWidth - PANEL_EDGE_GAP - rect.width,
-          desiredY: headerH + PANEL_EDGE_GAP,
-        });
-        setPosition({ x: layout.x, y: layout.y });
-        setPanelHeight(layout.height);
-      }
-      setInitialized(true);
+    if (initialized) return;
+    const metrics = measurePanel();
+    if (metrics) {
+      const layout = dockedPanelLayout(metrics);
+      setPosition({ x: layout.x, y: layout.y });
+      setPanelHeight(layout.height);
     }
-  }, [initialized]);
+    setInitialized(true);
+  }, [initialized, measurePanel]);
 
   /** 窗口缩放自适应：固定/浮动模式共用同一坐标与高度边界。 */
   useEffect(() => {
     const handleResize = () => {
-      const el = panelRef.current;
-      const page = el?.parentElement;
-      if (!el || !page) return;
-      const header = page.querySelector('header');
-      const headerH = header?.getBoundingClientRect().height ?? 0;
-      const rect = el.getBoundingClientRect();
+      const metrics = measurePanel();
+      if (!metrics) return;
+      // 浮动模式沿用上次位置，只把它收回可视区
       if (floating) {
         setPosition((prev) => {
-          const layout = getPanelLayout({
-            pageWidth: page.clientWidth,
-            pageHeight: page.clientHeight,
-            headerHeight: headerH,
-            panelWidth: rect.width,
-            panelHeight: rect.height,
-            desiredX: prev.x,
-            desiredY: prev.y,
-          });
+          const layout = freePanelLayout(metrics, prev.x, prev.y);
           setPanelHeight(layout.height);
           return { x: layout.x, y: layout.y };
         });
         return;
       }
       // 固定模式：贴右上角、撑满可用高度，避免缩窗后被推出可视区（IKAGZC）
-      const layout = getPanelLayout({
-        pageWidth: page.clientWidth,
-        pageHeight: page.clientHeight,
-        headerHeight: headerH,
-        panelWidth: rect.width,
-        // 撑满可用高度，由 layout.ts 的固定 PANEL_MARGIN 收边。原来减的是 8% 视口高度，
-        // 那让面板在不同窗口下高矮不一，而且底部永远空一截（IKAGZC）。
-        panelHeight: page.clientHeight - headerH,
-        desiredX: page.clientWidth - PANEL_EDGE_GAP - rect.width,
-        desiredY: headerH + PANEL_EDGE_GAP,
-      });
+      const layout = dockedPanelLayout(metrics);
       setPosition({ x: layout.x, y: layout.y });
       setPanelHeight(layout.height);
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [floating]);
+  }, [floating, measurePanel]);
 
   /**
    * 拉本会话累计消耗积分：切会话时拉一次，每轮结束后再拉一次。
@@ -942,23 +924,12 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       if (!ds.dragging) return;
       const dx = e.clientX - ds.startX;
       const dy = e.clientY - ds.startY;
-      const el = panelRef.current;
-      const page = el?.parentElement;
-      if (!el || !page) return;
-      const headerH = page.querySelector('header')?.getBoundingClientRect().height ?? 0;
-      const rect = el.getBoundingClientRect();
-      const layout = getPanelLayout({
-        pageWidth: page.clientWidth,
-        pageHeight: page.clientHeight,
-        headerHeight: headerH,
-        panelWidth: rect.width,
-        panelHeight: rect.height,
-        desiredX: ds.origX + dx,
-        desiredY: ds.origY + dy,
-      });
+      const metrics = measurePanel();
+      if (!metrics) return;
+      const layout = freePanelLayout(metrics, ds.origX + dx, ds.origY + dy);
       setPosition({ x: layout.x, y: layout.y });
     },
-    [],
+    [measurePanel],
   );
 
   /** 鼠标释放 */
