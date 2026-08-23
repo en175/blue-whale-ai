@@ -1,6 +1,11 @@
 const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg|js|css)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md)$/i;
 const NODE_SOURCE = /^(?:apps|packages)\/[^/]+\/(?:src|tests?)\/.*\.(?:ts|tsx)$/;
 const WEB_SOURCE = /^web\/src\/.*\.(?:ts|tsx|css)$/;
+// web 自己的工具脚本（契约核对、构建辅助等）。归 web 而不是 operations：它们的题材是 web 的契约，
+// 对应的定向验证就是 web 那套（typecheck + lint + vitest）——`check-agent-routes.mjs` 要守的
+// `web/src/api/agent-rest-routes.v1.json`，正是 `web/src/api/agentRoutes.test.ts` 在断言的东西。
+// 归 operations 会去跑 `scripts/tests` 下的 Python 单测，与这里毫无关系。
+const WEB_TOOLING_FILE = /^web\/scripts\/.*\.(?:mjs|cjs|js)$/;
 const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.(?:claude|codex)\/hooks\/|\.zcode\/config\.json|scripts\/(?:check-hook-closed-loop|check-hook-contracts|cleanup-release-branch|cleanup-task-worktree|commit-spec-on-master|commit-task-for-review|gitee-resolve-ids|install-kimi-hooks|list-task-worktrees|manage-agent-authorization|merge-task-to-local-master|pr-update-evidence|probe-codex-write-hook|publish-review-package|publish-task-branch|query-hook-audit|setup-hooks|start-task-worktree|sync-codex-skill|sync-superpowers-skills|sync-task-from-origin|sync-write-rules-skill|sync_recovery|test-hooks|verification-policy|verify-change-scope|verify-pr-update)\.|scripts\/lib\/|scripts\/tests\/)/;
 const OPERATIONS_FILE = /^scripts\/(?:check-schema-charset|check-target-environment-retirement|ensure-graphify-worktree|fix-ik7grv-replace-slot-backfill|reconcile-cost-reservations|run-ik50gb-c-testsite-probe|run-real-canary|tunnel-testsite-db)\./;
 const PRODUCT_IMPACT_FILE = /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|packages\/contracts\/|packages\/persistence\/(?:prisma\/migrations|schema)\/|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
@@ -18,7 +23,7 @@ function hasProductImpact(file, documentationOnlyFiles) {
 
 function sourceArea(file) {
   if (NODE_SOURCE.test(file)) return "node";
-  if (WEB_SOURCE.test(file)) return "web";
+  if (WEB_SOURCE.test(file) || WEB_TOOLING_FILE.test(file)) return "web";
   if (CONTROL_PLANE_FILE.test(file)) return "control-plane";
   if (OPERATIONS_FILE.test(file)) return "operations";
   if (SKILL_SCRIPT_FILE.test(file)) return "operations";

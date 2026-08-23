@@ -261,6 +261,40 @@ test("rejects unknown executable paths instead of escalating to full", async () 
   );
 });
 
+// IKACK2：`web/scripts/` 是本轮新开的目录，此前没有任何规则覆盖，于是它命中 EXECUTABLE_FILE
+// 却分不了类，`--stage pr` 必抛 UNCLASSIFIED_PATH。补分类而不是放宽那条规矩——「归不了类就停下」
+// 本身是对的，缺的是这一条归属。
+test("classifies web tooling scripts as web", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  assert.deepEqual(
+    classifyChanges(["web/scripts/check-agent-routes.mjs"], { stage: "pr" }),
+    {
+      tier: "scoped",
+      areas: ["web"],
+      reasons: ["known source paths changed"],
+    },
+  );
+
+  // 与 web 源码同区：一起改时不该分裂出第二个 area。
+  assert.deepEqual(
+    classifyChanges(["web/scripts/check-agent-routes.mjs", "web/src/api/agentRoutes.ts"], {
+      stage: "pr",
+    }),
+    {
+      tier: "scoped",
+      areas: ["web"],
+      reasons: ["known source paths changed"],
+    },
+  );
+
+  // 归类只覆盖 web 自己的脚本目录，不是「凡叫 scripts 就放行」。
+  assert.throws(
+    () => classifyChanges(["web/tools/some-new-tool.mjs"], { stage: "pr" }),
+    /UNCLASSIFIED_PATH: web\/tools\/some-new-tool\.mjs/,
+  );
+});
+
 test("keeps governance checks when a governance change also hits high-impact paths", async () => {
   const { buildVerificationPlan, classifyChanges } = await import(
     "../scripts/verification-policy.mjs"
