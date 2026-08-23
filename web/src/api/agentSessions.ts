@@ -598,10 +598,20 @@ export function subscribeSessionEvents(
 
 /* ============ 本会话累计消耗积分（IKAFPC） ============ */
 
-/** 本会话累计消耗。`truncated` 为真时 credits 是下界而非确切值。 */
+/**
+ * 本会话累计消耗。
+ *
+ * 三种「不是确切值」的情况分别有自己的字段，不要混：
+ * - `credits === null`：**查不到**。有 Run 却一张能力券都没记下（多半是 agent 版本还没带上
+ *   回写 `capability_id` 的那次改动）。这与「真的花了 0」是两回事，**不许显示成 0**。
+ * - `matched === 0 && runCount > 0`：券号有，但上游账单还没写进去。计费日志是 post-billing
+ *   才落库的，等一会儿再拉就有了。
+ * - `truncated`：数是**下界**而非确切值（翻页到顶，或只有一部分 Run 留下了券号）。
+ */
 export interface SessionCredits {
-  credits: number;
-  quota: number;
+  /** null = 查不到，不是 0。 */
+  credits: number | null;
+  quota: number | null;
   /** 命中的账单条数：0 且 runCount>0 说明账还没写进上游，不是真的没花钱 */
   matched: number;
   runCount: number;

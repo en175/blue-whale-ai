@@ -75,11 +75,23 @@ export class AgentSessionCreditsController {
       .filter((id): id is string => typeof id === "string" && id.length > 0);
 
     // 一张券都没有。**不要读成「这个会话没花过钱」**——它同样可能是 agent 没把领到的券号写下来
-    // （IKAFPC 修复前每一条 Run 的 capability_id 都是 NULL，而那些 Run 全都真的调过模型）。
-    // 本层没有能力分辨这两者，所以不替调用方下结论：credits 给 0，同时把 runCount 如实带上，
-    // 由调用方按 `matched === 0 && runCount > 0` 判定「查不到」而不是「真是 0」。
+    // （IKAFPC 修复前每一条 Run 的 capability_id 都是 NULL，而那些 Run 全都真的调过模型；
+    // 部署上只要 agent 还没带上 runView 暴露 capability_id 的那次改动，这里就恒为空）。
+    //
+    // 本层没有能力分辨这两者，所以**不编一个数**：`credits: null` 就是「不知道」。
+    // 此前这里返回 `credits: 0` 并在注释里断言那是实打实的 0——它无从知道这件事，
+    // 而 `truncated: false` 还主动为这个错误答案背书（审查 W·P1）。工单原话：
+    // 「nullable 是有意义的：取数失败 / 尚未回填 / 老数据，与『真的花了 0』是两回事，不许默认成 0。」
     if (capabilityIds.length === 0) {
-      return ok({ credits: 0, quota: 0, matched: 0, runCount: runs.length, truncated: false });
+      // 一个 Run 都没有，才是货真价实的 0——那时候确实什么都没发生。
+      const genuinelyZero = runs.length === 0;
+      return ok({
+        credits: genuinelyZero ? 0 : null,
+        quota: genuinelyZero ? 0 : null,
+        matched: 0,
+        runCount: runs.length,
+        truncated: false,
+      });
     }
 
     const starts = runs.map((run) => secondsOf(run.created_at)).filter((s): s is number => s !== null);
@@ -94,13 +106,16 @@ export class AgentSessionCreditsController {
     }
 
     const summed = await this.account.sumRunCapabilityQuota(token, capabilityIds, window);
+    // 只有一部分 Run 留下了券号（新老 Run 混在同一个会话里就会这样）：剩下那些的花费查不到，
+    // 求和必然偏小。这与翻页到顶是同一种失真，走同一个字段告诉前端。
+    const partiallyAttributed = capabilityIds.length < runs.length;
     return ok({
       credits: quotaToCredits(summed.quota),
       quota: summed.quota,
       matched: summed.matched,
       runCount: runs.length,
       // 翻页到顶时 quota 是下界而非确切值，如实告诉前端，别把偏小的数说成确切花费。
-      truncated: summed.truncated,
+      truncated: summed.truncated || partiallyAttributed,
     });
   }
 

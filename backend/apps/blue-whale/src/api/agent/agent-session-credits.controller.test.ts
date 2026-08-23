@@ -192,8 +192,8 @@ describe("AgentSessionCreditsController", () => {
 
   describe("一张券都查不到时", () => {
     // 这一条是积分恒为 0 那个缺陷的正面：本层分辨不了「没花钱」和「券号没落库」，
-    // 所以它不下结论，而是把 runCount 如实交出去让调用方判。
-    it("credits 给 0，但 runCount 如实带上，让调用方能分辨「查不到」与「真是 0」", async () => {
+    // 所以它**不编一个数**——credits 给 null，由调用方决定显示什么（审查 W·P1）。
+    it("有 Run 却一张券都没有 → credits 是 null，不是 0", async () => {
       behaviour = {
         kind: "runs",
         items: [
@@ -209,17 +209,38 @@ describe("AgentSessionCreditsController", () => {
 
       const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
       expect(data).toEqual({
-        credits: 0,
-        quota: 0,
+        credits: null,
+        quota: null,
         matched: 0,
         runCount: 2,
+        // 「不知道」不是「下界」。truncated 有它自己的意思，不能拿来给一个空答案背书。
         truncated: false,
       });
       // 没有券号就没有可查的东西，不该去翻上游账单
       expect(account.calls).toEqual([]);
     });
 
-    it("一条 Run 都没有时 runCount 也是 0——这才是真的没花钱", async () => {
+    // agent 侧回写 capability_id 的那次改动没部署时，就是这个形状（审查 W·P2）。
+    // 前端因此会显示「—」并退避重试，而不是一个笃定的 0。
+    it("agent 版本还没带上券号回写时，整个会话都是 null 而不是 0", async () => {
+      behaviour = {
+        kind: "runs",
+        items: Array.from({ length: 5 }, (_, i) => ({
+          run_id: `r${i}`,
+          created_at: "2026-08-23T07:00:00Z",
+        })),
+      };
+      const account = createAccount({ quota: 0, matched: 0, truncated: false });
+      const controller = new AgentSessionCreditsController(
+        createProject(true) as never,
+        account.service as never,
+      );
+
+      const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
+      expect(data).toMatchObject({ credits: null, quota: null, runCount: 5 });
+    });
+
+    it("一条 Run 都没有时才是真的 0——那时候确实什么都没发生", async () => {
       behaviour = { kind: "runs", items: [] };
       const account = createAccount({ quota: 0, matched: 0, truncated: false });
       const controller = new AgentSessionCreditsController(
@@ -228,7 +249,7 @@ describe("AgentSessionCreditsController", () => {
       );
 
       const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
-      expect(data).toMatchObject({ credits: 0, matched: 0, runCount: 0 });
+      expect(data).toMatchObject({ credits: 0, quota: 0, matched: 0, runCount: 0 });
     });
   });
 
@@ -270,6 +291,26 @@ describe("AgentSessionCreditsController", () => {
 
       await controller.sessionCredits("s1", "p1", USER, BEARER);
       expect(account.calls[0]?.capabilityIds).toEqual(["cap-b"]);
+    });
+
+    it("只有一部分 Run 留下券号时标 truncated——求和必然偏小，不能说成确切花费", async () => {
+      behaviour = {
+        kind: "runs",
+        items: [
+          { run_id: "r1", capability_id: "cap-a", created_at: "2026-08-23T07:00:00Z", finished_at: "2026-08-23T07:00:30Z" },
+          // 老 Run，券号没落库。它花的钱查不回来，但它确实花过。
+          { run_id: "r2", capability_id: null, created_at: "2026-08-23T07:01:00Z", finished_at: "2026-08-23T07:01:20Z" },
+        ],
+      };
+      const account = createAccount({ quota: 50_000, matched: 1, truncated: false });
+      const controller = new AgentSessionCreditsController(
+        createProject(true) as never,
+        account.service as never,
+      );
+
+      const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
+      // 上游自己没截断，但我们知道只查了 2 个 Run 里的 1 个。
+      expect(data).toMatchObject({ credits: 1, matched: 1, runCount: 2, truncated: true });
     });
 
     it("truncated 原样透传——翻页到顶时 credits 是下界，不能说成确切花费", async () => {

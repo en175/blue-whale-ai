@@ -585,6 +585,14 @@ const quickQuestions = [
 ];
 
 /** 默认位置（页面中间偏右） */
+/**
+ * 拉不到确切积分时的退避重试间隔（毫秒）。
+ *
+ * 上游账单是 post-billing 才落库的，滞后从几百毫秒到十几秒都见过；此前只等 2.5 秒就放弃，
+ * 于是常态是「胶囊显示 0」。总共约 23 秒，覆盖绝大多数滞后，又不会一直挂着请求。
+ */
+const CREDITS_RETRY_DELAYS = [2500, 6000, 15000] as const;
+
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
 interface AgentPanelProps {
@@ -850,7 +858,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
    * 拉本会话累计消耗积分：切会话时拉一次，每轮结束后再拉一次。
    *
    * 不在流式期间轮询——上游计费完成才出账，中途拉只会拿到上一轮的数，白费请求。
-   * 失败保留上一次已知值：`setSessionCredits` 只在成功时调用。
+   * 失败保留上一次已知值：`setSessionCredits` 只在拿到确切数时调用。
    */
   useEffect(() => {
     if (!projectId || !sessionId) {
@@ -858,23 +866,42 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       return;
     }
     let cancelled = false;
-    // 计费日志是 post-billing 才写的，可能比流结束晚一点：失败或颗粒为 0 时补一次。
+    let timer: number | undefined;
+
+    /**
+     * 计费日志是 post-billing 才写的，可能比流结束晚好几秒；agent 那边回写券号也可能整体滞后。
+     * 此前只补拉一次（2.5 秒），第二次还是查不到就把 0 写进胶囊——**把「不知道」显示成了
+     * 「没花钱」**（审查 W·P1）。改成退避重试，并且全程不拿一个假数去覆盖已知值。
+     */
     const load = async (attempt = 0): Promise<void> => {
+      let result: Awaited<ReturnType<typeof fetchSessionCredits>> | null = null;
       try {
-        const result = await fetchSessionCredits(projectId, sessionId);
-        if (cancelled) return;
-        if (result.matched === 0 && result.runCount > 0 && attempt === 0) {
-          window.setTimeout(() => void load(1), 2500);
-          return;
-        }
-        setSessionCredits(result.credits);
+        result = await fetchSessionCredits(projectId, sessionId);
       } catch (e) {
         console.warn('拉取会话累计积分失败:', e);
       }
+      if (cancelled) return;
+
+      // 确切：既查得到，也不处在「账单还没写进上游」的空窗里。
+      if (result && result.credits !== null && !(result.matched === 0 && result.runCount > 0)) {
+        setSessionCredits(result.credits);
+        return;
+      }
+
+      const delay = CREDITS_RETRY_DELAYS[attempt];
+      if (delay === undefined) {
+        // 退避用尽。有数就认这个数（宁可慢一拍，也好过一直空着）；`credits` 是 null 就保留
+        // 上一次已知值——胶囊显示「—」而不是「0」，这正是工单要的。
+        if (result?.credits != null) setSessionCredits(result.credits);
+        return;
+      }
+      timer = window.setTimeout(() => void load(attempt + 1), delay);
     };
+
     void load();
     return () => {
       cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [projectId, sessionId, turnOutcome]);
 
