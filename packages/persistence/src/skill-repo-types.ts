@@ -1,6 +1,7 @@
 // IK74V8：Skill 资产仓储的视图类型、业务错误与仓储接口（从 skill-repo.ts 拆出）。
 
-export type SkillLibraryCategory = "all" | "film" | "marketing" | "other";
+// IKA64P：分类放开为自由文本（后台维护），'all' 表示不过滤
+export type SkillLibraryCategory = string;
 export type SkillLibrarySort = "featured" | "most_used" | "newest";
 export type SkillLibraryLang = "zh" | "en";
 
@@ -105,6 +106,8 @@ export interface SkillRepo {
       pageSize: number;
     },
   ): Promise<SkillPage<SkillLibraryView>>;
+  /** IKA64P：官方技能全文（active version body，剥 frontmatter 正文） */
+  getOfficialContent(creativeId: string): Promise<string | null>;
   listMine(
     userId: string,
     q: { pageNum: number; pageSize: number },

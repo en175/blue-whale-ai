@@ -156,6 +156,12 @@ export {
   type MoveResult,
 } from "./template-admin-repo.js";
 export {
+  createSkillAdminRepo,
+  type SkillAdminRepo,
+  type AdminSkillView,
+  type AdminSkillCategoryView,
+} from "./skill-admin-repo.js";
+export {
   createUserRepo,
   type UserRepo,
   type UserInfoView,
