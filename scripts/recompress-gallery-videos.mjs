@@ -93,13 +93,23 @@ function getTos() {
 async function directUploadVideo(file) {
   const buf = await readFile(file);
   const ext = path.extname(file).toLowerCase();
-  const { client, cfg } = getTos();
-  const key = `admin/templates/video/${randomUUID().replace(/-/g, '')}${ext}`;
-  const uploadUrl = await client.getPreSignedUrl({ bucket: cfg.bucket, key, method: 'PUT', expires: 600 });
-  const put = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'video/mp4' }, body: buf });
-  if (!put.ok) throw new Error(`TOS 直传失败（HTTP ${put.status}）: ${file}`);
-  await client.putObjectAcl({ bucket: cfg.bucket, key, acl: 'public-read' });
-  return `https://${cfg.bucket}.${cfg.endpoint}/${key}`;
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const { client, cfg } = getTos();
+      const key = `admin/templates/video/${randomUUID().replace(/-/g, '')}${ext}`;
+      const uploadUrl = await client.getPreSignedUrl({ bucket: cfg.bucket, key, method: 'PUT', expires: 600 });
+      const put = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'video/mp4' }, body: buf });
+      if (!put.ok) throw new Error(`TOS 直传失败（HTTP ${put.status}）: ${file}`);
+      await client.putObjectAcl({ bucket: cfg.bucket, key, acl: 'public-read' });
+      return `https://${cfg.bucket}.${cfg.endpoint}/${key}`;
+    } catch (e) {
+      lastErr = e;
+      console.log(`直连第 ${attempt} 次失败（${e?.code ?? e?.message}），2s 后重试…`);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  throw lastErr;
 }
 
 function compress(src, out) {
@@ -134,8 +144,14 @@ async function verify(out) {
 async function main() {
   if (!TOKEN) { console.error('缺少 BLUEWHALE_ADMIN_TOKEN'); process.exit(1); }
   const cards = await api('GET', '/api/admin/templates?tagCode=video');
-  const rollback = {};
+  // 回退清单增量写：已有记录不覆盖（保证重跑时旧 URL 仍是最初原始版）
+  const rollback = existsSync(ROLLBACK_FILE) ? JSON.parse(readFileSync(ROLLBACK_FILE, 'utf8')) : {};
   for (const card of cards) {
+    const oldUrl = card.video_url;
+    if (rollback[card.title] && rollback[card.title] !== oldUrl) {
+      console.log(`跳过（已压缩更新）: ${card.title}`);
+      continue;
+    }
     const src = path.join(ROOT, '视频', card.title, `${card.title}-视频.mp4`);
     if (!existsSync(src)) throw new Error(`源视频缺失: ${src}`);
     const out = path.join(tmpdir(), `bw-recompress-${randomUUID()}.mp4`);
@@ -145,7 +161,7 @@ async function main() {
     console.log(`压缩: ${card.title} → ${(st.size / 1024 / 1024).toFixed(2)}MB`);
     if (DRY_RUN) continue;
     const url = await directUploadVideo(out);
-    rollback[card.title] = card.video_url;
+    if (!rollback[card.title]) rollback[card.title] = oldUrl;
     await api('PUT', `/api/admin/templates/${card.id}`, {
       title: card.title,
       tag_code: card.tag_code,
@@ -155,12 +171,10 @@ async function main() {
       video_url: url,
       images: card.images.map((i) => ({ id: i.id, image_url: i.image_url })),
     });
+    await writeFile(ROLLBACK_FILE, JSON.stringify(rollback, null, 2), 'utf8');
     console.log(`更新: ${card.title} -> ${url}`);
   }
-  if (!DRY_RUN) {
-    await writeFile(ROLLBACK_FILE, JSON.stringify(rollback, null, 2), 'utf8');
-    console.log(`回退清单已写: ${ROLLBACK_FILE}`);
-  }
+  if (!DRY_RUN) console.log(`回退清单: ${ROLLBACK_FILE}`);
   console.log(DRY_RUN ? 'dry-run 完成，未上传未更新。' : '压缩更新完成。');
 }
 
