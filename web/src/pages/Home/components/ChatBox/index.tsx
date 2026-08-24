@@ -11,6 +11,7 @@ import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { type SkillRecord } from '@/api/skills';
 import { setGenHandoff } from '@/utils/gen-handoff';
+import { classifyRefOverflow } from '@/utils/ref-overflow';
 
 /** 选项卡定义 */
 const tabItems = [
@@ -529,8 +530,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
         file,
         preview: URL.createObjectURL(file),
       }));
+    const overflow = classifyRefOverflow({
+      selectedImages: files.filter((f) => f.type.startsWith('image/')).length,
+      selectedVideos: files.filter((f) => f.type.startsWith('video/')).length,
+      acceptedImages: newFiles.filter((f) => f.file.type.startsWith('image/')).length,
+      acceptedVideos: newFiles.filter((f) => f.file.type.startsWith('video/')).length,
+    });
+    if (overflow === 'image') showToast(`参考图最多 ${videoMaxImages} 张，请减少图片`);
+    else if (overflow === 'video') showToast('参考视频最多 3 个');
     setRefFiles((prev) => [...prev, ...newFiles]);
-    // 重置 input 以便重复选择相同文件
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
