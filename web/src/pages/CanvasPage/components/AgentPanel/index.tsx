@@ -653,9 +653,11 @@ interface AgentPanelProps {
   appliedCardIds?: ReadonlySet<string>;
   /** 首页「直接使用」技能 → 画布导航携带的强制技能 ID：挂载后武装为下一条消息的 forced skill */
   initialSkillId?: string;
+  /** 媒体块：从画布节点「添加到对话」时携带的图片/视频/音频元数据 */
+  mediaBlocks?: import('@/api/agentSessions').SessionContentBlock[];
 }
 
-export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId }: AgentPanelProps) {
+export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, mediaBlocks: initialMediaBlocks }: AgentPanelProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供发送按钮启用态判断 */
@@ -670,7 +672,14 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
   /** 输入框内容的结构化形态：胶囊在编辑期是指针，只在发送时解引用（IKAFSX）。 */
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
-  const canSend = !composedIsEmpty(composed);
+  /** 媒体块引用（避免 effect 时序竞争，用 ref 同步管理） */
+  const pendingMediaBlocksRef = useRef<import('@/api/agentSessions').SessionContentBlock[]>([]);
+  // 同步 ref 到 state（触发 UI 重新渲染）
+  const [pendingMediaBlocksState, setPendingMediaBlocksState] = useState<import('@/api/agentSessions').SessionContentBlock[]>([]);
+  const syncMediaBlocks = () => {
+    setPendingMediaBlocksState([...pendingMediaBlocksRef.current]);
+  };
+  const canSend = !composedIsEmpty(composed) || pendingMediaBlocksState.length > 0;
   const [selectedModel, setSelectedModel] = useState(models[0].key);
   const [modelOpen, setModelOpen] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -764,6 +773,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 外部注入 @ 引用/生成卡：仅在版本真正变化时触发一次；生成卡追加胶囊（可多次叠加），普通引用整体替换文本
    * ref 记录已处理的 version，防 StrictMode 开发态 effect 双调用导致重复插入 */
   const lastInputVersionRef = useRef(0);
+  /** 上一次 composed 中的 chip IDs（用于检测 chip 是否被删除） */
+  const prevChipIdsRef = useRef<Set<string>>(new Set());
+  
   useEffect(() => {
     if (!inputVersion || inputVersion === lastInputVersionRef.current) return;
     lastInputVersionRef.current = inputVersion;
@@ -776,8 +788,38 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     } else {
       chipEditorRef.current?.setText(initialInput ?? '');
     }
+    // 注入媒体块到 ref
+    console.log('[AgentPanel] 注入媒体块:', initialMediaBlocks?.length, 'blocks', initialMediaBlocks);
+    if (initialMediaBlocks && initialMediaBlocks.length > 0) {
+      pendingMediaBlocksRef.current = [...pendingMediaBlocksRef.current, ...initialMediaBlocks];
+      syncMediaBlocks();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputVersion]);
+
+  /** chip 与媒体块双向同步：仅当 chip 被删除时才过滤对应 blocks（输入文字不触发） */
+  useEffect(() => {
+    const chipIds = new Set(
+      composed.segments
+        .filter((s): s is { kind: 'ref'; ref: { id: string; label: string; prompt: string } } => s.kind === 'ref')
+        .map((s) => s.ref.id),
+    );
+    
+    // 检测是否有 chip 被删除（对比上一次的 chip IDs）
+    const prevIds = prevChipIdsRef.current;
+    const chipsRemoved = [...prevIds].some((id) => !chipIds.has(id));
+    
+    if (chipsRemoved && pendingMediaBlocksRef.current.length > 0) {
+      // 有 chip 被删除 → 过滤对应的 blocks
+      const filtered = pendingMediaBlocksRef.current.filter((b) => !b.chip_id || chipIds.has(b.chip_id));
+      pendingMediaBlocksRef.current = filtered;
+      syncMediaBlocks();
+      console.log('[AgentPanel] chip 删除同步, 剩余 blocks:', filtered.length);
+    }
+    
+    // 更新记录
+    prevChipIdsRef.current = chipIds;
+  }, [composed]);
 
   /** 首页「直接使用」技能导航进来：武装为下一条消息的强制技能（StrictMode 双挂载只武装一次） */
   const lastSkillIdRef = useRef('');
@@ -1031,7 +1073,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 使用推荐技能：标记已激活，并把技能意图追加为一条消息提交给 Agent（顺带清掉「直接使用」武装，避免双技能叠加） */
   const handleUseSkill = async (r: RunSkillRecommendation) => {
     if (usedSkillIds.has(r.creative_skill_id) || runningRunId !== null || streaming) return;
-    const accepted = await sendMessage(`使用「${r.name}」技能继续创作`, r.creative_skill_id);
+    const accepted = await sendMessage([{ type: 'text', text: `使用「${r.name}」技能继续创作` }], r.creative_skill_id);
     if (!accepted) return;
     setUsedSkillIds((prev) => new Set(prev).add(r.creative_skill_id));
     setForcedSkill(null);
@@ -1040,16 +1082,29 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 发送消息：**解引用发生在这一刻**——编辑期胶囊一直是指针，此处才换成完整 prompt；
    * 若已武装「直接使用」技能，本条消息携带 forced_creative_skill_id 强制激活后清除 */
   const handleSend = async () => {
-    const content = resolveComposed(composed).trim();
-    if (!content || runningRunId !== null || streaming) return;
-    // 先清空再发。等 POST 回来才清，用户已经看到自己的气泡上屏、输入框里原文却还在，
-    // 极易重复点发送。失败时把原文回填，一个字都不丢。
+    const text = resolveComposed(composed).trim();
+    const mediaBlocks = pendingMediaBlocksRef.current;
+    if (!text && mediaBlocks.length === 0) return;
+    if (runningRunId !== null || streaming) return;
+
+    // content 只放文本，媒体数据单独包装在 resource_ref 中
+    const textContent: import('@/api/agentSessions').SessionContentBlock[] = [];
+    if (text) {
+      textContent.push({ type: 'text', text });
+    }
+    console.log('[AgentPanel] 发送 text:', JSON.stringify(textContent), 'resource_ref:', JSON.stringify(mediaBlocks));
+
+    // 先清空再发
     chipEditorRef.current?.clear();
+    pendingMediaBlocksRef.current = [];
+    syncMediaBlocks();
     const armed = forcedSkill;
     setForcedSkill(null);
-    const accepted = await sendMessage(content, armed?.id);
+    const accepted = await sendMessage(textContent, armed?.id, mediaBlocks);
     if (!accepted) {
-      chipEditorRef.current?.setText(content);
+      chipEditorRef.current?.setText(text);
+      pendingMediaBlocksRef.current = [...mediaBlocks];
+      syncMediaBlocks();
       setForcedSkill(armed);
     }
   };

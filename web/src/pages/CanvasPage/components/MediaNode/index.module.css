@@ -92,6 +92,19 @@
   white-space: nowrap;
 }
 
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mediaMeta {
+  font-size: 10px;
+  color: #999;
+  white-space: nowrap;
+}
+
 /* 媒体容器 */
 .mediaContainer {
   display: flex;

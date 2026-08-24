@@ -1068,9 +1068,14 @@ export function useAgentSession(projectId: string) {
 
   /** 发送消息：乐观上屏 + POST 提交（回复经事件流 assistant.delta 投影） */
   const sendMessage = useCallback(
-    async (content: string, forcedSkillId?: string): Promise<boolean> => {
-      const text = content.trim();
-      if (!text) return false;
+    async (content: import('@/api/agentSessions').SessionContentBlock[], forcedSkillId?: string, resourceRef?: import('@/api/agentSessions').SessionContentBlock[]): Promise<boolean> => {
+      // 从 content 中分离出文本块作为 content，媒体块包装进 resource_ref
+      const textBlocks = content
+        .filter((b) => b.type === 'text')
+        .filter((b) => (b.text ?? '').trim().length > 0);
+      // 如果没有显式传入 resourceRef，则从 content 中自动提取非文本块
+      const finalResourceRef = resourceRef ?? content.filter((b) => b.type !== 'text');
+      if (textBlocks.length === 0 && finalResourceRef.length === 0) return false;
       if (!projectId) return false;
       // 会话没建起来（初始化失败、或还没跑完）就当场补一个，而不是把用户堵在门外。
       let sid = sessionIdRef.current;
@@ -1090,12 +1095,14 @@ export function useAgentSession(projectId: string) {
       if (runningRef.current !== null || streamingRef.current) return false;
       const optimisticId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setSendError(null);
+      // 乐观上屏：用户侧气泡显示文本内容
+      const displayText = textBlocks.map((b) => b.text ?? '').join(' ');
       setMessages((prev) => [
         ...prev,
         {
           id: optimisticId,
           role: 'user' as const,
-          content: text,
+          content: displayText || '[媒体消息]',
           sequence_no: Number.MAX_SAFE_INTEGER,
           optimistic: true,
         },
@@ -1106,7 +1113,10 @@ export function useAgentSession(projectId: string) {
       beginTurn();
       try {
         const connectionEpoch = connectionEpochRef.current;
-        const ack = await api.sendSessionMessage(projectId, sid, text, { forcedCreativeSkillId: forcedSkillId });
+        const ack = await api.sendSessionMessage(projectId, sid, textBlocks, {
+          forcedCreativeSkillId: forcedSkillId,
+          resourceRef: finalResourceRef,
+        });
         if (connectionEpochRef.current !== connectionEpoch || sessionIdRef.current !== sid) return true;
         if (ack.message?.message_id) confirmUser(ack.message);
         const run = ack.run;

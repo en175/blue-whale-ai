@@ -15,6 +15,8 @@ export interface ProductImage {
   src: string;
   /** 是否启用（计入 已启用 n/8） */
   enabled: boolean;
+  /** 媒体类型：'image' | 'video'，默认 image */
+  type?: 'image' | 'video';
 }
 
 interface ProductNodeData {
@@ -130,21 +132,22 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
 
   const enabledCount = images.filter((i) => i.enabled).length;
 
-  /** 添加商品图（点击选择或拖入，仅 image/*，上限 8 张）
+  /** 添加商品图（点击选择或拖入，支持 image/* 和 video/*，上限 8 张）
    * 先创建本地 blob 预览立即上画布，再异步调用 uploadAssetFile() 三步上传，
    * 成功后替换为永久 URL（与左侧工具栏加号上传逻辑一致） */
   const addFiles = (files: FileList | File[]) => {
-    const newImgs: { id: string; src: string; file: File }[] = [];
+    const newImgs: { id: string; src: string; file: File; type: 'image' | 'video' }[] = [];
     Array.from(files)
-      .filter((f) => f.type.startsWith('image/'))
+      .filter((f) => f.type.startsWith('image/') || f.type.startsWith('video/'))
       .forEach((f, i) => {
         const imgId = `img-${Date.now()}-${i}`;
-        newImgs.push({ id: imgId, src: URL.createObjectURL(f), file: f });
+        const mediaType: 'image' | 'video' = f.type.startsWith('video/') ? 'video' : 'image';
+        newImgs.push({ id: imgId, src: URL.createObjectURL(f), file: f, type: mediaType });
       });
     if (newImgs.length === 0) return;
 
     setImages((prev) => {
-      const combined = [...prev, ...newImgs.map(({ id, src }) => ({ id, src, enabled: true }))];
+      const combined = [...prev, ...newImgs.map(({ id, src, type }) => ({ id, src, enabled: true, type }))];
       const trimmed = combined.slice(0, MAX_IMAGES);
       // 为被截断的文件释放 blob URL（用户看不到）
       if (combined.length > MAX_IMAGES) {
@@ -174,7 +177,8 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
             prev.map((img) => {
               if (img.id !== imgId) return img;
               if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
-              return { ...img, src: done.url || img.src };
+              const mediaType: 'image' | 'video' = done.type === 'video' ? 'video' : 'image';
+              return { ...img, src: done.url || img.src, type: mediaType };
             }),
           );
         })
@@ -249,7 +253,11 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
                   }
                   title={img.enabled ? '点击停用' : '点击启用'}
                 >
-                  <img src={img.src} alt="" draggable={false} />
+                  {img.type === 'video' ? (
+                    <video src={img.src} draggable={false} muted playsInline />
+                  ) : (
+                    <img src={img.src} alt="" draggable={false} />
+                  )}
                   <button
                     className={styles.thumbRemove}
                     onClick={(e) => {
@@ -318,7 +326,7 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
           <input
             ref={fileRef}
             type="file"
-            accept="image/*"
+            accept="image/*,video/*"
             multiple
             className={styles.hiddenInput}
             onChange={(e) => {
