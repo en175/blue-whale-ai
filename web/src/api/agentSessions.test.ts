@@ -92,6 +92,81 @@ describe('agentSessions API contract', () => {
     });
   });
 
+  it('carries attachments as asset_ref parts alongside the text (IKAL46)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 202, headers: { 'Content-Type': 'application/json' } }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendSessionMessage('project-1', 'session-1', '看看这两张', {
+      assets: [
+        { asset_id: '123', media_type: 'image', display_label: '海边人像.png' },
+        { asset_id: '456', media_type: 'video' },
+      ],
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({
+      content: [
+        { type: 'text', text: '看看这两张' },
+        { type: 'asset_ref', asset_id: '123', media_type: 'image', display_label: '海边人像.png' },
+        { type: 'asset_ref', asset_id: '456', media_type: 'video' },
+      ],
+    });
+  });
+
+  it('sends media_type on every asset_ref, because that is what establishes the Grant (IKAL46)', async () => {
+    // 只给 `asset_id` 的裸引用会被 agent 原样 round-trip 但**不建立 Session Asset Grant**，
+    // 于是模型根本读不到这张图——表现为「图发出去了，Agent 说看不见」。`media_type` 是那条
+    // 判据，这里锁死它一定在。
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 202, headers: { 'Content-Type': 'application/json' } }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendSessionMessage('project-1', 'session-1', '', {
+      assets: [{ asset_id: '123', media_type: 'image' }],
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as { content: Array<Record<string, unknown>> };
+    for (const part of body.content.filter(p => p.type === 'asset_ref')) {
+      expect(part.media_type).toBeTruthy();
+    }
+  });
+
+  it('omits the text part entirely for an attachment-only message (IKAL46)', async () => {
+    // 上传一张图、一个字不打就发。此前这里会发出 `text: ''`，agent 侧投影为空 → 400。
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 202, headers: { 'Content-Type': 'application/json' } }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendSessionMessage('project-1', 'session-1', '   ', {
+      assets: [{ asset_id: '123', media_type: 'image', display_label: '图.png' }],
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({
+      content: [{ type: 'asset_ref', asset_id: '123', media_type: 'image', display_label: '图.png' }],
+    });
+  });
+
+  it('keeps access material out of the message body', async () => {
+    // 消息体只携带身份。签名 URL / 对象键 / 字节是短时访问材料，永远不进消息。
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 202, headers: { 'Content-Type': 'application/json' } }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendSessionMessage('project-1', 'session-1', '看看', {
+      assets: [{ asset_id: '123', media_type: 'image', display_label: '图.png' }],
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(String(init.body)).not.toMatch(/https?:|storage_key|upload_url|signature/);
+  });
+
   it('does not log the user out when a 401 represents a missing Run capability', async () => {
     setSession('token-1', {
       userId: 1,

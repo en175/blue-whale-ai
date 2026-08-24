@@ -419,6 +419,68 @@
  * 现在由这一层出面：它是 flex item（flex: 1 拿到确定高度），又是 flex container
  * （让编辑器 wrapper 撑满）。ChipTextEditor 一行不用改——它 dock 栏也在用，那边是另一套尺寸。
  * `min-height: 0` 不能省：flex item 默认 min-height: auto，长文本会把输入框顶破。 */
+/* ---- 待发素材（IKAL46）----
+   刻意做成朴素文本 chip：胶囊组件由专门的前端同学交付，这里只把接口打通并给出最简呈现。
+   flex-shrink: 0 —— 附件行不参与压缩，否则粘长文本时它会被挤没，用户以为附件掉了。 */
+.attachmentRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  flex-shrink: 0;
+  margin-bottom: var(--spacing-xs);
+}
+
+.attachmentChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background-color: #1e1e1e;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--color-text-secondary);
+}
+
+.attachmentFailed {
+  border-color: var(--color-danger, #e5484d);
+  color: var(--color-danger, #e5484d);
+}
+
+/* 文件名可以很长，截断的是它，不是整行 */
+.attachmentName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.attachmentHint {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.attachmentRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.attachmentRemove:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
 .composerSlot {
   flex: 1;
   min-height: 0;

@@ -507,6 +507,57 @@ describe('useAgentSession 会话自举', () => {
     expect(latest.sendError).toBeNull();
   });
 
+  it('只带附件、一个字不打也能发出去（IKAL46）', async () => {
+    // 上传一张图然后直接发，是用户对附件做的第一个动作。此前 sendMessage 第一行就是
+    // `if (!text) return false`，这条消息在前端就被拦死了，根本走不到网络。
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.sessionId).toBe('session-1'));
+
+    let sent = false;
+    await act(async () => {
+      sent = await latest.sendMessage('', undefined, [
+        { asset_id: '123', media_type: 'image', display_label: '海边人像.png' },
+      ]);
+    });
+
+    expect(sent).toBe(true);
+    expect(mocks.sendSessionMessage).toHaveBeenCalledWith(
+      'project-1',
+      'session-1',
+      '',
+      expect.objectContaining({
+        assets: [{ asset_id: '123', media_type: 'image', display_label: '海边人像.png' }],
+      }),
+    );
+  });
+
+  it('既没文字也没附件才算空消息', async () => {
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.sessionId).toBe('session-1'));
+
+    let sent = true;
+    await act(async () => {
+      sent = await latest.sendMessage('   ');
+    });
+
+    expect(sent).toBe(false);
+    expect(mocks.sendSessionMessage).not.toHaveBeenCalled();
+  });
+
+  it('乐观气泡按服务端的投影规则渲染附件，避免回执一到就跳字（IKAL46）', async () => {
+    await renderHookHarness();
+    await vi.waitFor(() => expect(latest.sessionId).toBe('session-1'));
+
+    await act(async () => {
+      await latest.sendMessage('看看这个', undefined, [
+        { asset_id: '123', media_type: 'image', display_label: '海边人像.png' },
+      ]);
+    });
+
+    const optimistic = latest.messages.find(message => message.role === 'user' && message.optimistic);
+    expect(optimistic?.content).toBe('看看这个\n[图片：海边人像.png]');
+  });
+
   it('补建也失败时给出可操作的提示，并保留输入', async () => {
     mocks.listSessions.mockRejectedValue(new Error('network down'));
     await renderHookHarness();

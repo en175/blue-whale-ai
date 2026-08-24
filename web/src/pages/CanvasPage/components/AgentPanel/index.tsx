@@ -27,7 +27,8 @@ import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api
 import { useAgentSession, type ChatMessage, type TurnOutcome } from '../../hooks/useAgentSession';
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
-import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock } from '@/api/agentSessions';
+import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock, type OutboundAssetRef } from '@/api/agentSessions';
+import { uploadAssetFile, fileToAssetType } from '@/utils/upload';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
@@ -658,6 +659,20 @@ const SHOW_SESSION_CREDIT_PILL: boolean = false;
 
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
+/** 一条待发素材的本地状态（IKAL46）。
+ *
+ * `uploading` 期间不可发送——此刻还没有 `asset_id`，发出去的引用不成立。`failed` 保留在列表
+ * 里并显示原因：用户刚选完文件，静默消失会让他以为图已经带上了。 */
+interface PendingAttachment {
+  /** 本地行键，与 asset_id 无关：上传完成前根本没有 asset_id */
+  key: string;
+  name: string;
+  mediaType: 'image' | 'video';
+  status: 'uploading' | 'ready' | 'failed';
+  assetId?: string;
+  error?: string;
+}
+
 interface AgentPanelProps {
   onClose: () => void;
   initialInput?: string;
@@ -698,7 +713,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
   /** 输入框内容的结构化形态：胶囊在编辑期是指针，只在发送时解引用（IKAFSX）。 */
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
-  const canSend = !composedIsEmpty(composed);
+  const composerHasText = !composedIsEmpty(composed);
   const [selectedModel, setSelectedModel] = useState(models[0].key);
   const [modelOpen, setModelOpen] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -746,6 +761,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const modelRef = useRef<HTMLDivElement>(null);
   /** 上传菜单容器 ref（外部点击自动收起判定） */
   const uploadRef = useRef<HTMLDivElement>(null);
+  /** 本条消息待携带的素材：选中即开始上传，发送时才变成 `asset_ref` 部件（IKAL46）。
+   *  这里刻意不做胶囊 UI——胶囊组件由专门的前端同学交付，此处只维护接口与最简可用的呈现。 */
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  /* 「上传图片」/「上传视频」此前走同一个 handler、accept 也不分，两个菜单项完全等价。
+   * 现在各自把 accept 收窄到对应类型（真实 media_type 仍按文件 MIME 判定）。 */
   /** 当前 Run 的技能推荐列表（推荐区域展示） */
   const [recs, setRecs] = useState<RunSkillRecommendation[]>([]);
   /** 已点 Use 的推荐技能ID（仅用户点 Use 可激活） */
@@ -1069,18 +1089,35 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
   /** 发送消息：**解引用发生在这一刻**——编辑期胶囊一直是指针，此处才换成完整 prompt；
    * 若已武装「直接使用」技能，本条消息携带 forced_creative_skill_id 强制激活后清除 */
+  /** 还在上传的附件会挡住发送：此刻它还没有 asset_id，带出去的引用不成立。 */
+  const uploadingAttachment = attachments.some((item) => item.status === 'uploading');
+  const readyAssets: OutboundAssetRef[] = attachments.flatMap((item) =>
+    item.status === 'ready' && item.assetId
+      ? [{ asset_id: item.assetId, media_type: item.mediaType, display_label: item.name }]
+      : [],
+  );
+
+  /** 能不能发：有文字、或有已就绪的附件；上传途中一律挡住（IKAL46）。 */
+  const canSend = (composerHasText || readyAssets.length > 0) && !uploadingAttachment;
+
   const handleSend = async () => {
     const content = resolveComposed(composed).trim();
-    if (!content || runningRunId !== null || streaming) return;
+    // 只带附件、一个字不打也能发（IKAL46）：这是用户对附件做的第一个动作。
+    if ((!content && readyAssets.length === 0) || uploadingAttachment) return;
+    if (runningRunId !== null || streaming) return;
     // 先清空再发。等 POST 回来才清，用户已经看到自己的气泡上屏、输入框里原文却还在，
     // 极易重复点发送。失败时把原文回填，一个字都不丢。
     chipEditorRef.current?.clear();
     const armed = forcedSkill;
+    const sentAttachments = attachments;
     setForcedSkill(null);
-    const accepted = await sendMessage(content, armed?.id);
+    setAttachments([]);
+    const accepted = await sendMessage(content, armed?.id, readyAssets);
     if (!accepted) {
       chipEditorRef.current?.setText(content);
       setForcedSkill(armed);
+      // 附件一并回填：重传一次的代价远大于把已经拿到的 asset_id 留在手上。
+      setAttachments(sentAttachments);
     }
   };
 
@@ -1112,10 +1149,58 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     setShowUpload(!showUpload);
   };
 
-  const handleFileSelect = () => {
-    fileInputRef.current?.click();
+  /** 选「上传图片」/「上传视频」：把 accept 收窄到对应类型再开文件选择器。 */
+  const handleFileSelect = (kind: 'image' | 'video') => {
+    const input = fileInputRef.current;
+    if (input) {
+      input.accept = kind === 'image' ? 'image/*' : 'video/*';
+      input.click();
+    }
     setShowUpload(false);
   };
+
+  /** 选中文件即开始上传：先插一条 `uploading` 行，拿到 asset_id 后就地改成 `ready`。
+   *  上传发生在选择那一刻而不是发送那一刻——否则用户点了发送还要干等一次网络往返。
+   *
+   *  media_type 按文件的真实 MIME 判定，不按用户点的是哪个按钮：两者不一致时（在「上传图片」
+   *  里挑了个视频，某些平台允许）真实类型才是对的，报错也要报得准。asset_ref 只认 image/video，
+   *  音频当场拒掉而不是传上去再失败。 */
+  const handleFilesChosen = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const chosen = Array.from(event.target.files ?? []);
+    // 同一个文件连选两次也要能触发 change，否则第二次静默无反应。
+    event.target.value = '';
+    for (const file of chosen) {
+      const key = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const detected = fileToAssetType(file);
+      if (detected !== 'image' && detected !== 'video') {
+        setAttachments((prev) => [
+          ...prev,
+          { key, name: file.name, mediaType: 'image', status: 'failed', error: '只支持图片或视频' },
+        ]);
+        continue;
+      }
+      setAttachments((prev) => [...prev, { key, name: file.name, mediaType: detected, status: 'uploading' }]);
+      try {
+        const uploaded = await uploadAssetFile(file, { projectId: projectId ?? undefined });
+        setAttachments((prev) =>
+          prev.map((item) =>
+            item.key === key ? { ...item, status: 'ready' as const, assetId: uploaded.asset_id } : item,
+          ),
+        );
+      } catch (e) {
+        setAttachments((prev) =>
+          prev.map((item) =>
+            item.key === key
+              ? { ...item, status: 'failed' as const, error: e instanceof Error ? e.message : '上传失败' }
+              : item,
+          ),
+        );
+      }
+    }
+  };
+
+  const removeAttachment = (key: string) =>
+    setAttachments((prev) => prev.filter((item) => item.key !== key));
 
   return (
     <div
@@ -1396,6 +1481,35 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         <div className={styles.inputBox} data-agent-composer>
           {/* 这一层负责把编辑区撑到工具栏上沿：ChipTextEditor 自己的 wrapper 是 block，
            *  撑高的责任只能落在它外面。见 .composerSlot。 */}
+          {/* 待发素材（IKAL46）。刻意保持纯文本行：胶囊组件由专门的前端同学交付，
+            *  这里只负责把接口打通并给出最简可用的呈现。 */}
+          {attachments.length > 0 && (
+            <div className={styles.attachmentRow}>
+              {attachments.map((item) => (
+                <span
+                  key={item.key}
+                  className={`${styles.attachmentChip} ${item.status === 'failed' ? styles.attachmentFailed : ''}`}
+                  title={item.status === 'failed' ? item.error : item.name}
+                >
+                  <span className={styles.attachmentName}>
+                    {item.mediaType === 'video' ? '视频' : '图片'}：{item.name}
+                  </span>
+                  {item.status === 'uploading' && <span className={styles.attachmentHint}>上传中…</span>}
+                  {item.status === 'failed' && (
+                    <span className={styles.attachmentHint}>{item.error ?? '上传失败'}</span>
+                  )}
+                  <button
+                    className={styles.attachmentRemove}
+                    onClick={() => removeAttachment(item.key)}
+                    title="移除"
+                    aria-label={`移除 ${item.name}`}
+                  >
+                    <X size={11} strokeWidth={2.5} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <div className={styles.composerSlot}>
             <ChipTextEditor
               ref={chipEditorRef}
@@ -1420,15 +1534,17 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               </button>
               {showUpload && (
                 <div className={styles.uploadPopup}>
-                  <button onClick={handleFileSelect}>上传图片</button>
-                  <button onClick={handleFileSelect}>上传视频</button>
+                  <button onClick={() => handleFileSelect('image')}>上传图片</button>
+                  <button onClick={() => handleFileSelect('video')}>上传视频</button>
                 </div>
               )}
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 accept="image/*,video/*"
                 className={styles.hiddenInput}
+                onChange={handleFilesChosen}
               />
             </div>
 
@@ -1511,7 +1627,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                 title={
                   streaming
                     ? '等待运行状态；超时后可重新连接'
-                    : '发送'
+                    : uploadingAttachment
+                      ? '素材上传中，稍候即可发送'
+                      : '发送'
                 }
               >
                 <ArrowUp size={15} fill="#fff" strokeWidth={0} />

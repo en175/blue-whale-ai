@@ -297,23 +297,50 @@ export function deleteSession(projectId: string, sessionId: string): Promise<unk
 
 /* ============ 消息与运行控制 ============ */
 
+/** 随消息发出的素材引用（IKAL46）。
+ *
+ * 这就是胶囊契约的 `asset_ref` 接口本身。`media_type` 是「这是一条完整引用」的判据——agent
+ * 侧据此建立 Session Asset Grant；只给 `asset_id` 的裸引用会被原样 round-trip 但不建立授权，
+ * 于是模型读不到这张图。`display_label` 是会话内可见的短标签，仅用于展示与文本投影。
+ *
+ * 这里只传身份，不传任何访问材料：签名 URL、对象键、字节都不进消息体。 */
+export interface OutboundAssetRef {
+  asset_id: string;
+  media_type: 'image' | 'video';
+  display_label?: string;
+}
+
 /** 发送消息 POST /projects/:id/sessions/:sid/messages（回复经事件流 assistant.delta 下发）
  * options.forcedCreativeSkillId：一次性 Use——为该消息创建的目标 Run 强制激活该 Skill
- * （激活契约 §2：可缺省；缺省即普通消息，wire 字段名 forced_creative_skill_id）。 */
+ * （激活契约 §2：可缺省；缺省即普通消息，wire 字段名 forced_creative_skill_id）。
+ * options.assets：本条消息携带的素材引用，追加为 `asset_ref` 部件（IKAL46）。
+ *
+ * 纯附件消息（一个字不打、只带图）是合法的：`content` 里可以没有 text 部件。agent 侧会把
+ * 引用投影成 `[图片：文件名]` 之类的占位符，不再以「投影为空」判定消息无效。 */
 export function sendSessionMessage(
   projectId: string,
   sessionId: string,
   text: string,
-  options?: { forcedCreativeSkillId?: string; signal?: AbortSignal },
+  options?: { forcedCreativeSkillId?: string; assets?: OutboundAssetRef[]; signal?: AbortSignal },
 ): Promise<SessionMessageAck> {
-  const { forcedCreativeSkillId, signal } = options ?? {};
+  const { forcedCreativeSkillId, assets, signal } = options ?? {};
+  const trimmed = text.trim();
+  const content = [
+    ...(trimmed ? [{ type: 'text', text: trimmed }] : []),
+    ...(assets ?? []).map(asset => ({
+      type: 'asset_ref',
+      asset_id: asset.asset_id,
+      media_type: asset.media_type,
+      ...(asset.display_label ? { display_label: asset.display_label } : {}),
+    })),
+  ];
   return sessionRequest(
     agentPath('send_message', projectId, { session_id: sessionId }),
     {
       method: agentMethod('send_message'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
       body: JSON.stringify({
-        content: [{ type: 'text', text }],
+        content,
         ...(forcedCreativeSkillId ? { forced_creative_skill_id: forcedCreativeSkillId } : {}),
       }),
       signal,

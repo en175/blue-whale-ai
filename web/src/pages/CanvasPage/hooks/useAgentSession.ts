@@ -26,6 +26,7 @@ import {
   type SessionContentBlock,
   type SseEvent,
   type PromptCardRecord,
+  type OutboundAssetRef,
 } from '@/api/agentSessions';
 import { cardsFromRevision } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
@@ -1068,9 +1069,15 @@ export function useAgentSession(projectId: string) {
 
   /** 发送消息：乐观上屏 + POST 提交（回复经事件流 assistant.delta 投影） */
   const sendMessage = useCallback(
-    async (content: string, forcedSkillId?: string): Promise<boolean> => {
+    async (
+      content: string,
+      forcedSkillId?: string,
+      assets?: OutboundAssetRef[],
+    ): Promise<boolean> => {
       const text = content.trim();
-      if (!text) return false;
+      // 纯附件消息是合法的：上传一张图、一个字不打就发，是用户对附件做的第一个动作（IKAL46）。
+      // 空文本且无附件才是真的没内容。
+      if (!text && !assets?.length) return false;
       if (!projectId) return false;
       // 会话没建起来（初始化失败、或还没跑完）就当场补一个，而不是把用户堵在门外。
       let sid = sessionIdRef.current;
@@ -1090,12 +1097,21 @@ export function useAgentSession(projectId: string) {
       if (runningRef.current !== null || streamingRef.current) return false;
       const optimisticId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setSendError(null);
+      // 乐观气泡要和服务端的文本投影长得一样，否则回执一到就会「跳字」。agent 侧把引用投影成
+      // `[图片：标签]`，这里用同一套规则先渲染出来。
+      const optimisticText = [
+        ...(text ? [text] : []),
+        ...(assets ?? []).map(asset => {
+          const kind = asset.media_type === 'video' ? '视频' : '图片';
+          return asset.display_label ? `[${kind}：${asset.display_label}]` : `[${kind}]`;
+        }),
+      ].join('\n');
       setMessages((prev) => [
         ...prev,
         {
           id: optimisticId,
           role: 'user' as const,
-          content: text,
+          content: optimisticText,
           sequence_no: Number.MAX_SAFE_INTEGER,
           optimistic: true,
         },
@@ -1106,7 +1122,10 @@ export function useAgentSession(projectId: string) {
       beginTurn();
       try {
         const connectionEpoch = connectionEpochRef.current;
-        const ack = await api.sendSessionMessage(projectId, sid, text, { forcedCreativeSkillId: forcedSkillId });
+        const ack = await api.sendSessionMessage(projectId, sid, text, {
+          forcedCreativeSkillId: forcedSkillId,
+          ...(assets?.length ? { assets } : {}),
+        });
         if (connectionEpochRef.current !== connectionEpoch || sessionIdRef.current !== sid) return true;
         if (ack.message?.message_id) confirmUser(ack.message);
         const run = ack.run;
