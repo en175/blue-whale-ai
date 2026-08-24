@@ -138,6 +138,14 @@ export class SkillsController {
     return handleAddSkill(user.userId, id, this.skills);
   }
 
+  /** IKA64P：官方技能全文（「直接使用」填入首页对话框） */
+  @Get("library/:id/content")
+  async libraryContent(@Param("id") id: string) {
+    const content = await this.skills.getOfficialContent(id);
+    if (content === null) return fail(404, "技能不存在或无正文");
+    return ok({ content });
+  }
+
   @Delete("mine/:id")
   async removeMine(
     @CurrentUser() user: AuthenticatedUser,

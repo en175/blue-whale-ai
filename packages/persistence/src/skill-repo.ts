@@ -129,6 +129,19 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
       };
     },
 
+    async getOfficialContent(creativeId) {
+      const row = await prisma.creative_skill.findFirst({
+        where: { creative_skill_id: creativeId, asset_domain: "official" },
+        select: { active_version_id: true },
+      });
+      if (!row?.active_version_id) return null;
+      const ver = await prisma.creative_skill_version.findFirst({
+        where: { creative_skill_version_id: row.active_version_id },
+        select: { body: true },
+      });
+      return ver?.body ?? null;
+    },
+
     async listMine(userId, q) {
       // 官方引用全量（按 user_skill.gmt_create desc），合并个人技能后统一按时间倒序、内存切片分页。
       const rels = await prisma.user_skill.findMany({

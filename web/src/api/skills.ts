@@ -64,6 +64,11 @@ export function addLibrarySkill(id: string) {
   return http.post<null>(`/api/agent/skills/library/${encodeURIComponent(id)}/add`);
 }
 
+/** 官方技能全文 GET /api/agent/skills/library/:id/content（IKA64P：直接使用填入对话框） */
+export function fetchSkillContent(id: string) {
+  return http.get<{ content: string }>(`/api/agent/skills/library/${encodeURIComponent(id)}/content`);
+}
+
 /** 我的技能列表 POST /api/agent/skills/mine */
 export function fetchMySkills(pageNum: number, pageSize = 50) {
   return http.post<SkillPage<SkillRecord>>('/api/agent/skills/mine', { pageNum, pageSize });

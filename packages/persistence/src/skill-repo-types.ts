@@ -106,6 +106,8 @@ export interface SkillRepo {
       pageSize: number;
     },
   ): Promise<SkillPage<SkillLibraryView>>;
+  /** IKA64P：官方技能全文（active version body，剥 frontmatter 正文） */
+  getOfficialContent(creativeId: string): Promise<string | null>;
   listMine(
     userId: string,
     q: { pageNum: number; pageSize: number },

@@ -9,6 +9,8 @@ import LoginModal from '@/components/LoginModal';
 import { getCurrentUser, subscribe } from '@/utils/auth';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { fetchSkillContent, fetchPersonalSkill, type SkillRecord } from '@/api/skills';
+import { isApiError } from '@/api/http';
 import { setGenHandoff } from '@/utils/gen-handoff';
 
 /** 选项卡定义 */
@@ -134,8 +136,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   const [showLogin, setShowLogin] = useState(false);
   /** 登录成功后需带入画布的草稿 */
   const pendingText = useRef('');
-  /** 登录成功后需带入画布的「直接使用」技能 ID（首页选技能 → 画布武装为下一条消息的 forced skill） */
-  const pendingSkill = useRef('');
+  /** 登录成功后需填入对话框的「直接使用」技能（IKA64P） */
+  const pendingSkill = useRef<SkillRecord | null>(null);
 
   /** 外部注入草稿（画廊卡片点击）：仅 ts 变化时覆盖输入框 */
   useEffect(() => {
@@ -376,15 +378,24 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     goCanvasWithText(text);
   };
 
-  /** 跳转画布页并携带「直接使用」技能意图（经 location.state 注入 Agent 弹框，武装为下一条消息的 forced skill） */
-  const goCanvasWithSkill = (skillId: string) => {
+  /** IKA64P：「直接使用」= 关闭弹窗并把技能全文填入首页对话框（不再跳画布） */
+  const applySkillToInput = async (skill: SkillRecord) => {
     setShowSkillModal(false);
     if (!user) {
-      pendingSkill.current = skillId;
+      pendingSkill.current = skill;
       setShowLogin(true);
       return;
     }
-    navigate('/canvas', { state: { skillId } });
+    if (!skill.creative_skill_id) return;
+    try {
+      const data =
+        skill.asset_domain === 'personal'
+          ? await fetchPersonalSkill(skill.creative_skill_id)
+          : await fetchSkillContent(skill.creative_skill_id);
+      setInputValue((data.content ?? '').slice(0, MAX_INPUT));
+    } catch (e) {
+      window.alert(isApiError(e) ? e.message : '获取技能内容失败');
+    }
   };
 
   const handleSend = () => {
@@ -399,15 +410,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     dispatchByTab(text);
   };
 
-  /** 关闭登录框：登录成功则携带原草稿按当前 tab /技能意图跳转画布 */
+  /** 关闭登录框：登录成功则携带原草稿按当前 tab /技能填入对话框 */
   const handleLoginClose = () => {
     setShowLogin(false);
     const text = pendingText.current;
     pendingText.current = '';
-    const skillId = pendingSkill.current;
-    pendingSkill.current = '';
-    if (skillId && getCurrentUser()) {
-      goCanvasWithSkill(skillId);
+    const skill = pendingSkill.current;
+    pendingSkill.current = null;
+    if (skill && getCurrentUser()) {
+      void applySkillToInput(skill);
       return;
     }
     if (text && getCurrentUser()) dispatchByTab(text);
@@ -1105,9 +1116,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       <SkillModal
         open={showSkillModal}
         onClose={() => setShowSkillModal(false)}
-        onUseSkill={(s) => {
-          if (s.creative_skill_id) goCanvasWithSkill(s.creative_skill_id);
-        }}
+        onUseSkill={(s) => void applySkillToInput(s)}
       />
 
       {/* 未登录拦截弹窗 */}
