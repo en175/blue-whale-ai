@@ -255,7 +255,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   const handleVideoClick = () => {
     if (isKeyframe) return;
     if (videoCount < MAX_VIDEOS) videoInputRef.current?.click();
-    else showToast('参考视频最多 3 个');
+    else showToast(`参考视频最多 ${MAX_VIDEOS} 个`);
   };
 
   /** 通用上传（底部加号；首尾帧模式仅收图片且限 2 张） */
@@ -347,7 +347,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
       acceptedVideos: acceptedVids,
     });
     if (overflow === 'image') showToast(`参考图最多 ${maxImages} 张，请减少图片`);
-    else if (overflow === 'video') showToast('参考视频最多 3 个');
+    else if (overflow === 'video') showToast(`参考视频最多 ${MAX_VIDEOS} 个`);
     if (!list.length) return;
     const startIdx = refFiles.length;
     const newItems: BottomRefItem[] = list.map((file) => ({
