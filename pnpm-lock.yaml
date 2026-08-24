@@ -74,6 +74,9 @@ importers:
       class-validator:
         specifier: ^0.14.2
         version: 0.14.4
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1(supports-color@7.2.0)
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -1885,6 +1888,7 @@ packages:
   eslint@9.39.5:
     resolution: {integrity: sha512-DgZS62aPLXKlnxILS/AYCoRvHaZeXceIzlXPkkGGzJWSow1aEk0lbTlxUSlyjC8jcaKxAdOnTDz+o1JFSBsyjw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -4437,7 +4441,7 @@ snapshots:
 
   cliui@8.0.1:
     dependencies:
-      string-width: 4.2.0
+      string-width: 4.2.3
       strip-ansi: 6.0.1
       wrap-ansi: 7.0.0
 

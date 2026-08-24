@@ -34,6 +34,10 @@ export interface SessionContentBlock {
    */
   /** 生成卡块（分镜提示词，按 04-侧边栏规范 §5.1） */
   card?: GenerationCardBlock;
+  /** `asset_ref` 部件透传下来的字段（IKAL46）。仅身份与标签，不含任何访问材料。 */
+  asset_id?: string;
+  media_type?: 'image' | 'video';
+  display_label?: string;
 }
 
 /** 生成卡里的一条素材引用（IKAFSQ）。

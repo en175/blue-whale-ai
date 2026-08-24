@@ -1112,6 +1112,13 @@ export function useAgentSession(projectId: string) {
           id: optimisticId,
           role: 'user' as const,
           content: optimisticText,
+          // 乐观气泡也带上素材引用（IKAL46）：否则图要等服务端回执才出现，看着像「发完就没了」。
+          blocks: (assets ?? []).map((asset) => ({
+            type: 'asset_ref',
+            asset_id: asset.asset_id,
+            media_type: asset.media_type,
+            ...(asset.display_label ? { display_label: asset.display_label } : {}),
+          })),
           sequence_no: Number.MAX_SAFE_INTEGER,
           optimistic: true,
         },

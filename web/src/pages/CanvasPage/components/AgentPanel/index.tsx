@@ -28,7 +28,9 @@ import { useAgentSession, type ChatMessage, type TurnOutcome } from '../../hooks
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
 import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock, type OutboundAssetRef } from '@/api/agentSessions';
-import { uploadAssetFile, fileToAssetType } from '@/utils/upload';
+import { uploadAssetFile } from '@/utils/upload';
+import { planAttachment } from './attachments';
+import { MessageAssetPreview, rememberAssetUrl } from './MessageAssetPreview';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
@@ -1171,17 +1173,21 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     event.target.value = '';
     for (const file of chosen) {
       const key = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const detected = fileToAssetType(file);
-      if (detected !== 'image' && detected !== 'video') {
+      const plan = planAttachment(file, projectId);
+      if (!plan.ok) {
         setAttachments((prev) => [
           ...prev,
-          { key, name: file.name, mediaType: 'image', status: 'failed', error: '只支持图片或视频' },
+          { key, name: file.name, mediaType: 'image', status: 'failed', error: plan.error },
         ]);
         continue;
       }
-      setAttachments((prev) => [...prev, { key, name: file.name, mediaType: detected, status: 'uploading' }]);
+      setAttachments((prev) => [...prev, { key, name: file.name, mediaType: plan.mediaType, status: 'uploading' }]);
       try {
-        const uploaded = await uploadAssetFile(file, { projectId: projectId ?? undefined });
+        // projectId 到这里一定有值（planAttachment 已挡）。素材必须落在**会话所在项目**里，
+        // 否则 Agent 复核归属查不到，识别会以「资源不存在」整条失败。
+        const uploaded = await uploadAssetFile(file, { projectId });
+        // 登记 id → url，刚发出的那张图不必再反查一次素材库。
+        rememberAssetUrl(uploaded.asset_id, uploaded.url);
         setAttachments((prev) =>
           prev.map((item) =>
             item.key === key ? { ...item, status: 'ready' as const, assetId: uploaded.asset_id } : item,
@@ -1370,7 +1376,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         <div className={styles.messageList} ref={listRef}>
           {messages.map((m) =>
             m.role === 'user' ? (
-              <div key={m.id} className={styles.userBubble}>{m.content}</div>
+              <div key={m.id} className={styles.userBubble}>
+                  {m.content}
+                  {/* 素材引用的临时渲染（IKAL46）：胶囊到位后删掉 MessageAssetPreview 这一处即可。 */}
+                  <MessageAssetPreview blocks={m.blocks} />
+                </div>
             ) : (
               <div key={m.id} className={styles.assistantBlock}>
                 <AssistantMessageBody
@@ -1534,8 +1544,12 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               </button>
               {showUpload && (
                 <div className={styles.uploadPopup}>
-                  <button onClick={() => handleFileSelect('image')}>上传图片</button>
-                  <button onClick={() => handleFileSelect('video')}>上传视频</button>
+                  <button onClick={() => handleFileSelect('image')} disabled={!projectId}>
+                    上传图片
+                  </button>
+                  <button onClick={() => handleFileSelect('video')} disabled={!projectId}>
+                    上传视频
+                  </button>
                 </div>
               )}
               <input
