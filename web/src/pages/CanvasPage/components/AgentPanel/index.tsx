@@ -628,6 +628,18 @@ const STICK_TO_BOTTOM_PX = 80;
 
 const CREDITS_RETRY_DELAYS = [2500, 6000, 15000] as const;
 
+/**
+ * 是否显示左上角的本会话累计积分胶囊（IKAP6O）。
+ *
+ * 产品决定先不展示。**隐藏的是显示，不是计费**——扣费链路、`fetchSessionCredits` 与整段
+ * 退避重试逻辑一概保留，只是拉取与渲染都挂在这个开关上：关着就不发那三轮请求（没有展示方，
+ * 拉了也没人看），改回 `true` 即恢复原样，不需要动其它任何一行。
+ *
+ * 类型显式写成 `boolean` 而不是让它收窄成字面量 `false`，否则下面的 `if (!…) return`
+ * 会被当成恒真条件、胶囊那段 JSX 会被当成永不可达。
+ */
+const SHOW_SESSION_CREDIT_PILL: boolean = false;
+
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
 interface AgentPanelProps {
@@ -900,6 +912,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
    * 失败保留上一次已知值：`setSessionCredits` 只在拿到确切数时调用。
    */
   useEffect(() => {
+    // 胶囊隐藏时不拉账单（IKAP6O）：没有展示方，退避重试只是白发三轮请求。
+    if (!SHOW_SESSION_CREDIT_PILL) return;
     if (!projectId || !sessionId) {
       setSessionCredits(null);
       return;
@@ -1097,23 +1111,27 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       {/* 头部标题栏（拖动区域） */}
       <div className={`${styles.panelHeader} ${floating ? styles.panelHeaderFloating : ''}`}>
         <div className={styles.headerLeft}>
-          {/* 本会话累计消耗积分（IKAFPC / IKAGZC）。
+          {/* 本会话累计消耗积分（IKAFPC / IKAGZC），现由 IKAP6O 隐藏。
+           *  头部是 `1fr auto 1fr` 三栏网格，左格空着标题依然相对面板居中，所以这里整段不渲染
+           *  也不会把中间的会话切换器推偏。
            *  **位置从一开始就占住**：原来写成「查到了才渲染」，于是面板打开后胶囊凭空冒出来，
            *  还把右边的会话切换器推一下——用户看到的是一次白等。数字未落定时显示占位符，
            *  仍然不显示 0：「不知道」和「没花钱」是两回事，后者会让人以为这一轮免费。 */}
-          <span
-            className={styles.creditPill}
-            title={
-              sessionCredits === null
-                ? '正在统计本次对话累计消耗积分'
-                : `目前 Agent 对话累计消耗积分：${sessionCredits} 积分`
-            }
-          >
-            <Coins size={12} strokeWidth={2} />
-            <span className={styles.creditValue}>
-              {sessionCredits === null ? '—' : sessionCredits}
+          {SHOW_SESSION_CREDIT_PILL && (
+            <span
+              className={styles.creditPill}
+              title={
+                sessionCredits === null
+                  ? '正在统计本次对话累计消耗积分'
+                  : `目前 Agent 对话累计消耗积分：${sessionCredits} 积分`
+              }
+            >
+              <Coins size={12} strokeWidth={2} />
+              <span className={styles.creditValue}>
+                {sessionCredits === null ? '—' : sessionCredits}
+              </span>
             </span>
-          </span>
+          )}
         </div>
         <div className={styles.headerCenter}>
           {/* 会话切换器（IKAFQ6）：标题本身就是唯一入口，「新对话」收进菜单顶部。
