@@ -22,6 +22,7 @@ import {
   addLibrarySkill,
   fetchMySkills,
   deletePersonalSkill,
+  removeMySkill,
   createPersonalSkill,
   formatPersonalSkill,
   type SkillRecord,
@@ -205,10 +206,14 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     const id = s.creative_skill_id;
     // 乐观更新，失败回滚
     setLibraryList((prev) => prev.map((r) => (r.creative_skill_id === id ? { ...r, added: true } : r)));
-    addLibrarySkill(id).catch((e) => {
-      setLibraryList((prev) => prev.map((r) => (r.creative_skill_id === id ? { ...r, added: false } : r)));
-      window.alert(errMsg(e));
-    });
+    addLibrarySkill(id)
+      .then(() => {
+        mineLoadedRef.current = false; // 切回「我的技能」时重新拉取，避免旧缓存不显示新加的技能
+      })
+      .catch((e) => {
+        setLibraryList((prev) => prev.map((r) => (r.creative_skill_id === id ? { ...r, added: false } : r)));
+        window.alert(errMsg(e));
+      });
   };
 
   /** 删除个人技能（永久删除，需确认） */
@@ -217,6 +222,16 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     const id = s.creative_skill_id;
     if (!window.confirm(`确认删除个人技能「${s.name ?? ''}」？删除后不可恢复。`)) return;
     deletePersonalSkill(id)
+      .then(() => setMySkills((prev) => prev.filter((r) => r.creative_skill_id !== id)))
+      .catch((e) => window.alert(errMsg(e)));
+  };
+
+  /** 从「我的技能」移除官方技能（仅解除引用，需确认） */
+  const handleRemoveOfficial = (s: SkillRecord) => {
+    if (!s.creative_skill_id) return;
+    const id = s.creative_skill_id;
+    if (!window.confirm(`确认从「我的技能」移除「${s.name ?? ''}」？`)) return;
+    removeMySkill(id)
       .then(() => setMySkills((prev) => prev.filter((r) => r.creative_skill_id !== id)))
       .catch((e) => window.alert(errMsg(e)));
   };
@@ -407,6 +422,15 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
                       <div className={styles.cardTitleRow}>
                         <h4 className={styles.cardTitle}>{s.name ?? ''}</h4>
                         {s.asset_domain === 'official' && <span className={styles.officialTag}>官方</span>}
+                        {s.asset_domain === 'official' && (
+                          <button
+                            className={styles.cardAction}
+                            onClick={() => handleRemoveOfficial(s)}
+                            title="从我的技能移除"
+                          >
+                            <span>移除</span>
+                          </button>
+                        )}
                         {s.asset_domain === 'personal' && (
                           <button
                             className={styles.cardAction}
