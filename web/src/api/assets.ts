@@ -77,10 +77,17 @@ export function fetchUploadPresign(params: { type: AssetType; mime: string; size
   });
 }
 
-/** PUT 直传文件到预签名 URL（不经 http 层，原样携带返回头） */
+/** PUT 直传文件到预签名 URL（不经 http 层，原样携带返回头）
+ * 开发模式下通过 Vite /__tos-upload 代理转发，避免 TOS CORS 限制 */
 export async function putToPresignedUrl(presign: PresignData, file: File) {
   if (!presign.upload_url) throw new Error('预签名上传地址为空');
-  const res = await fetch(presign.upload_url, {
+
+  // Dev 模式：走 Vite dev server 代理同域转发到 TOS，绕过浏览器 CORS
+  const uploadUrl = import.meta.env.DEV
+    ? `/__tos-upload?url=${encodeURIComponent(presign.upload_url)}`
+    : presign.upload_url;
+
+  const res = await fetch(uploadUrl, {
     method: 'PUT',
     headers: presign.headers,
     body: file,
