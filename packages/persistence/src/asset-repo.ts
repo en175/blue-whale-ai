@@ -13,6 +13,10 @@ export interface AssetView {
   duration: number | null;
   source: string | null;
   created_at: string | null;
+  size: number | null;
+  generation_job_id: string | null;
+  project_id: string | null;
+  mime: string | null;
 }
 
 export interface AssetPage {
@@ -202,6 +206,11 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           duration: assetDurationSeconds(a.duration, a.duration_ms),
           source: a.source ?? null,
           created_at: a.gmt_create?.toISOString() ?? null,
+          size: a.size == null ? null : Number(a.size),
+          generation_job_id:
+            a.generation_job_id == null ? null : a.generation_job_id.toString(),
+          project_id: a.project_id == null ? null : a.project_id.toString(),
+          mime: a.mime ?? null,
         })),
         total,
         size: filter.size,
@@ -291,6 +300,11 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         duration: assetDurationSeconds(row.duration, row.duration_ms),
         source: row.source ?? null,
         created_at: row.gmt_create?.toISOString() ?? null,
+        size: row.size == null ? null : Number(row.size),
+        generation_job_id:
+          row.generation_job_id == null ? null : row.generation_job_id.toString(),
+        project_id: row.project_id == null ? null : row.project_id.toString(),
+        mime: row.mime ?? null,
       };
     },
     async createPendingUpload(input) {
