@@ -143,7 +143,6 @@ export interface PromptCardShot {
 export interface PromptCardAssetProvenance {
   asset_ref_id: string;
   asset_id: string;
-  asset_version: string;
   media_type: 'image' | 'video';
   display_label: string;
   accepted_summary?: string;

@@ -17,7 +17,6 @@ function provenance(overrides: Partial<PromptCardAssetProvenance> = {}): PromptC
   return {
     asset_ref_id: 'ref-1',
     asset_id: 'asset-100',
-    asset_version: 'v1',
     media_type: 'image',
     display_label: '宙斯',
     ...overrides,

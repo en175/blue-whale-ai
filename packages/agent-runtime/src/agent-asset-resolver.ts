@@ -5,18 +5,17 @@ const decimalIdSchema = z.string().regex(/^[1-9][0-9]*$/);
 /**
  * Asset resolve 请求。
  *
- * `asset_version` 是**过渡期兼容字段：接受但完全忽略**（IKASSI 第二步）。内容版本校验已撤除
- * ——蓝鲸素材不可变，换一张图就是一个新的 `asset_id`，没有任何路径改写已有素材的字节，所以
- * 这道校验拦不住它设计要拦的事；而它的指纹一旦因元数据回填而改变，全部历史授权会一起变成
- * 「资源不存在」。
+ * 内容版本校验已整体撤除（IKASSI）：蓝鲸素材不可变——换一张图就是一个新的 `asset_id`，没有
+ * 任何路径改写已有素材的字节，所以这道校验拦不住它设计要拦的事；而它的指纹一旦因元数据回填而
+ * 改变，全部历史授权会一起变成「资源不存在」。归属是唯一的门。
  *
- * 之所以保留而不是直接删掉：schema 是 `.strict()` 的，旧版 Agent 仍在发送这个字段，删掉会让
- * 它们全部 400。等 Agent 侧停止发送并稳定后，再单独提一次把它删干净。
+ * schema 是 `.strict()` 的，而 `asset_version` 已从这里删除：Agent 侧同一轮迭代里已停止发送
+ * （IKASSI 第三步），且入站 `asset_ref` 此前从无生产者，这个端点在这条路径上没有线上流量，
+ * 因此不需要再留一个只会掩盖版本不一致的兼容字段。
  */
 export const agentAssetResolveRequestSchema = z
   .object({
     asset_id: decimalIdSchema,
-    asset_version: z.string().min(1).max(191).optional(),
   })
   .strict();
 
