@@ -6,6 +6,7 @@ import { useRef, useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { AtSign, Upload, X, Box } from 'lucide-react';
+import { uploadAssetFile } from '@/utils/upload';
 import styles from './index.module.css';
 
 /** 商品图项 */
@@ -37,6 +38,8 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
   const [detail, setDetail] = useState(data.detail ?? '');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  /** 待上传映射：imageId → { file, cancelled }，用于异步上传完成后替换 src，删除时取消 */
+  const pendingUploadsRef = useRef<Map<string, { file: File; cancelled: boolean }>>(new Map());
 
   const isSelect = data.toolMode === 'select';
 
@@ -57,6 +60,18 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
       document.removeEventListener('contextmenu', close, true);
     };
   }, [contextMenu]);
+
+  // 卸载时取消所有待上传任务、释放 blob URL
+  useEffect(() => {
+    return () => {
+      pendingUploadsRef.current.forEach((p) => { p.cancelled = true; });
+      pendingUploadsRef.current.clear();
+      images.forEach((img) => {
+        if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** 右键菜单（与 MediaNode 一致，无右上角 ×） */
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -85,13 +100,61 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
 
   const enabledCount = images.filter((i) => i.enabled).length;
 
-  /** 本地图片文件 → 缩略图（仅 image/*，上限 8） */
+  /** 添加商品图（点击选择或拖入，仅 image/*，上限 8 张）
+   * 先创建本地 blob 预览立即上画布，再异步调用 uploadAssetFile() 三步上传，
+   * 成功后替换为永久 URL（与左侧工具栏加号上传逻辑一致） */
   const addFiles = (files: FileList | File[]) => {
-    const imgs: ProductImage[] = Array.from(files)
+    const newImgs: { id: string; src: string; file: File }[] = [];
+    Array.from(files)
       .filter((f) => f.type.startsWith('image/'))
-      .map((f, i) => ({ id: `img-${Date.now()}-${i}`, src: URL.createObjectURL(f), enabled: true }));
-    if (imgs.length === 0) return;
-    setImages((prev) => [...prev, ...imgs].slice(0, MAX_IMAGES));
+      .forEach((f, i) => {
+        const imgId = `img-${Date.now()}-${i}`;
+        newImgs.push({ id: imgId, src: URL.createObjectURL(f), file: f });
+      });
+    if (newImgs.length === 0) return;
+
+    setImages((prev) => {
+      const combined = [...prev, ...newImgs.map(({ id, src }) => ({ id, src, enabled: true }))];
+      const trimmed = combined.slice(0, MAX_IMAGES);
+      // 为被截断的文件释放 blob URL（用户看不到）
+      if (combined.length > MAX_IMAGES) {
+        combined.slice(MAX_IMAGES).forEach((i) => {
+          if (i.src.startsWith('blob:')) URL.revokeObjectURL(i.src);
+        });
+        // 同时取消被截断文件的待上传
+        newImgs.slice(MAX_IMAGES - prev.length).forEach(({ id }) => {
+          const entry = pendingUploadsRef.current.get(id);
+          if (entry) { entry.cancelled = true; pendingUploadsRef.current.delete(id); }
+        });
+      }
+      return trimmed;
+    });
+
+    // 异步上传每个文件并替换永久 URL
+    newImgs.forEach(({ id: imgId, file }) => {
+      pendingUploadsRef.current.set(imgId, { file, cancelled: false });
+
+      uploadAssetFile(file)
+        .then((done) => {
+          const entry = pendingUploadsRef.current.get(imgId);
+          if (!entry || entry.cancelled) return;
+          pendingUploadsRef.current.delete(imgId);
+
+          setImages((prev) =>
+            prev.map((img) => {
+              if (img.id !== imgId) return img;
+              if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+              return { ...img, src: done.url || img.src };
+            }),
+          );
+        })
+        .catch((err) => {
+          const entry = pendingUploadsRef.current.get(imgId);
+          if (!entry || entry.cancelled) return;
+          pendingUploadsRef.current.delete(imgId);
+          console.warn(`[商品] 图片上传失败（${file.name}），保留本地预览:`, err);
+        });
+    });
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -158,7 +221,14 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
                     className={styles.thumbRemove}
                     onClick={(e) => {
                       e.stopPropagation();
-                      setImages((prev) => prev.filter((p) => p.id !== img.id));
+                      // 取消未完成的上传、释放 blob URL
+                      const pending = pendingUploadsRef.current.get(img.id);
+                      if (pending) { pending.cancelled = true; pendingUploadsRef.current.delete(img.id); }
+                      setImages((prev) => {
+                        const target = prev.find((p) => p.id === img.id);
+                        if (target?.src.startsWith('blob:')) URL.revokeObjectURL(target.src);
+                        return prev.filter((p) => p.id !== img.id);
+                      });
                     }}
                     title="移除"
                   >

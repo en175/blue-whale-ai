@@ -7,6 +7,8 @@ import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { AtSign, Upload, WandSparkles, Info, Music, X } from 'lucide-react';
 import type { GenerationCardBlock } from '@/api/agentSessions';
+import { uploadAssetFile } from '@/utils/upload';
+import type { UploadCompleteData } from '@/api/assets';
 import styles from './index.module.css';
 
 /** 资产卡类型（generation 为 Agent 生成卡落画布形态） */
@@ -76,6 +78,8 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
   );
   const fileRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLInputElement>(null);
+  /** 待上传映射：refId → { file, cancelled }，用于异步上传完成后替换 src，删除时取消 */
+  const pendingUploadsRef = useRef<Map<string, { file: File; cancelled: boolean }>>(new Map());
   /** 生成卡双击编辑：当前编辑中的字段 + 草稿值 */
   const [editingField, setEditingField] = useState<'shotTitle' | 'visual' | 'prompt' | null>(null);
   const [draftValue, setDraftValue] = useState('');
@@ -106,6 +110,21 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     };
   }, [contextMenu]);
 
+  // 卸载时取消所有待上传任务、释放 blob URL
+  useEffect(() => {
+    return () => {
+      pendingUploadsRef.current.forEach((p) => { p.cancelled = true; });
+      pendingUploadsRef.current.clear();
+      refs.forEach((r) => {
+        if (r.src.startsWith('blob:')) URL.revokeObjectURL(r.src);
+      });
+      voiceRefs.forEach((v) => {
+        if (v.src.startsWith('blob:')) URL.revokeObjectURL(v.src);
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /** 右键菜单（与 MediaNode 一致，无右上角 ×） */
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (data.toolMode !== 'select') return;
@@ -131,22 +150,67 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     data.onSaveToAssets?.(id);
   }, [data, id]);
 
-  /** 添加参考图（点击选择或拖入，仅 image/*，最多 MAX_IMAGE_REFS 张） */
+  /** 添加参考图（点击选择或拖入，仅 image/*，最多 MAX_IMAGE_REFS 张）
+   * 先创建本地 blob 预览立即上画布，再异步调用 uploadAssetFile() 三步上传，
+   * 成功后替换为永久 URL（与左侧工具栏加号上传逻辑一致） */
   const addFiles = (files: FileList | File[]) => {
-    const imgs = Array.from(files)
+    const imgs: { id: string; src: string; file: File }[] = [];
+    Array.from(files)
       .filter((f) => f.type.startsWith('image/'))
-      .map((f, i) => ({ id: `ref-${Date.now()}-${i}`, src: URL.createObjectURL(f) }));
+      .forEach((f, i) => {
+        const refId = `ref-${Date.now()}-${i}`;
+        imgs.push({ id: refId, src: URL.createObjectURL(f), file: f });
+      });
     if (imgs.length === 0) return;
+
+    // 先创建本地预览引用（不含 file 字段）
+    const newRefs = imgs.map(({ id, src }) => ({ id, src }));
     setRefs((prev) => {
       const remaining = MAX_IMAGE_REFS - prev.length;
       if (remaining <= 0) return prev;
-      const toAdd = imgs.slice(0, remaining);
+      const toAdd = newRefs.slice(0, remaining);
+      // 为被截断的文件释放 blob URL（用户看不到）
+      imgs.slice(remaining).forEach(({ src }) => URL.revokeObjectURL(src));
       return [...prev, ...toAdd];
+    });
+
+    // 立即上画布后，异步上传每个文件并替换永久 URL
+    imgs.slice(0, MAX_IMAGE_REFS).forEach(({ id: refId, file }) => {
+      // 记录待上传状态，便于删除时取消
+      pendingUploadsRef.current.set(refId, { file, cancelled: false });
+
+      uploadAssetFile(file)
+        .then((done: UploadCompleteData) => {
+          const entry = pendingUploadsRef.current.get(refId);
+          if (!entry || entry.cancelled) return;
+          pendingUploadsRef.current.delete(refId);
+
+          setRefs((prev) =>
+            prev.map((r) => {
+              if (r.id !== refId) return r;
+              // 释放本地 blob，替换为永久 URL
+              if (r.src.startsWith('blob:')) URL.revokeObjectURL(r.src);
+              return { ...r, src: done.url || r.src };
+            }),
+          );
+        })
+        .catch((err) => {
+          const entry = pendingUploadsRef.current.get(refId);
+          if (!entry || entry.cancelled) return;
+          pendingUploadsRef.current.delete(refId);
+          console.warn(`[资产卡] 参考图上传失败（${file.name}），保留本地预览:`, err);
+        });
     });
   };
 
-  /** 删除单张参考图 */
+  /** 删除单张参考图（同时取消未完成的上传、释放 blob URL） */
   const removeRef = (refId: string) => {
+    // 标记取消：若正在上传，完成时会跳过更新
+    const pending = pendingUploadsRef.current.get(refId);
+    if (pending) {
+      pending.cancelled = true;
+      pendingUploadsRef.current.delete(refId);
+    }
     setRefs((prev) => {
       const target = prev.find((r) => r.id === refId);
       if (target?.src.startsWith('blob:')) URL.revokeObjectURL(target.src);
