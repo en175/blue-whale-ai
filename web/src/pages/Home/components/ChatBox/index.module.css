@@ -557,3 +557,33 @@
   color: var(--color-text-primary);
   background-color: var(--color-bg-hover);
 }
+
+/* IKA64P：直接使用武装的技能气泡 */
+.armedSkill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: var(--spacing-sm);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-accent-hover);
+  background: rgba(76, 110, 245, 0.08);
+  border: 1px solid rgba(76, 110, 245, 0.35);
+}
+
+.armedSkillClear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.armedSkillClear:hover {
+  background: rgba(76, 110, 245, 0.15);
+}
