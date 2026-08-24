@@ -354,14 +354,20 @@ function stripInternalFields(block: SessionContentBlock): Record<string, unknown
 
 /** 发送消息 POST /projects/:id/sessions/:sid/messages（回复经事件流 assistant.delta 下发）
  * options.forcedCreativeSkillId：一次性 Use——为该消息创建的目标 Run 强制激活该 Skill
- * （激活契约 §2：可缺省；缺省即普通消息，wire 字段名 forced_creative_skill_id）。 */
+ * （激活契约 §2：可缺省；缺省即普通消息，wire 字段名 forced_creative_skill_id）。
+ * options.skillRef：技能引用 { type, skill_id, name }，与 resource_ref 同级。 */
 export function sendSessionMessage(
   projectId: string,
   sessionId: string,
   content: SessionContentBlock[],
-  options?: { forcedCreativeSkillId?: string; signal?: AbortSignal; resourceRef?: SessionContentBlock[] },
+  options?: {
+    forcedCreativeSkillId?: string;
+    signal?: AbortSignal;
+    resourceRef?: SessionContentBlock[];
+    skillRef?: { type: string; skill_id: string; name: string };
+  },
 ): Promise<SessionMessageAck> {
-  const { forcedCreativeSkillId: forcedSkillId, signal, resourceRef } = options ?? {};
+  const { forcedCreativeSkillId: forcedSkillId, signal, resourceRef, skillRef } = options ?? {};
   const body: Record<string, unknown> = { content };
   if (resourceRef && resourceRef.length > 0) {
     // resource_ref 剔除 chip_id、name、type 等前端内部字段
@@ -369,6 +375,9 @@ export function sendSessionMessage(
   }
   if (forcedSkillId) {
     body.forced_creative_skill_id = forcedSkillId;
+  }
+  if (skillRef) {
+    body.skill_ref = skillRef;
   }
   console.log('[Agent] sendSessionMessage 请求参数:', body);
   return sessionRequest(

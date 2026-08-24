@@ -618,14 +618,6 @@ const quickQuestions = [
  * 上游账单是 post-billing 才落库的，滞后从几百毫秒到十几秒都见过；此前只等 2.5 秒就放弃，
  * 于是常态是「胶囊显示 0」。总共约 23 秒，覆盖绝大多数滞后，又不会一直挂着请求。
  */
-/**
- * 判定「用户还在看最新内容」的容差（像素）。
- *
- * 取一屏的零头而不是 0：流式期间内容在长，浏览器的滚动位置与新内容之间总有几个像素的
- * 差；卡到 0 会让自动滚底在真正该生效的时候失灵。
- */
-const STICK_TO_BOTTOM_PX = 80;
-
 const CREDITS_RETRY_DELAYS = [2500, 6000, 15000] as const;
 
 const DEFAULT_POSITION = { x: 0, y: 0 };
@@ -884,19 +876,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   }, [cancellable, stopRun]);
 
   /**
-   * 新消息 / 流式文本自动滚到底部——**但用户已经往上翻了就别拽他回来**（审查 W·A26）。
-   *
-   * 依赖里有 `streamingText`，而它每来一个 delta 就变一次。此前这里是无条件赋值，于是
-   * 流式期间想回看上文，每秒被拽回底部好几次，等于回看不了。
-   *
-   * 判据是「离底部还有多远」而不是一个显式的『用户滚动过』标志：后者要挂 scroll 监听、
-   * 要分辨程序滚动与人手滚动，而这里真正要问的问题只有一个——他还在看最新的内容吗。
+   * 新消息 / 流式文本 / 进入页面：滚动条始终拉到最底部，展示最新消息。
    */
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distanceFromBottom > STICK_TO_BOTTOM_PX) return;
     el.scrollTop = el.scrollHeight;
   }, [messages, streamingText, runningRunId]);
 
@@ -1073,7 +1057,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 使用推荐技能：标记已激活，并把技能意图追加为一条消息提交给 Agent（顺带清掉「直接使用」武装，避免双技能叠加） */
   const handleUseSkill = async (r: RunSkillRecommendation) => {
     if (usedSkillIds.has(r.creative_skill_id) || runningRunId !== null || streaming) return;
-    const accepted = await sendMessage([{ type: 'text', text: `使用「${r.name}」技能继续创作` }], r.creative_skill_id);
+    const accepted = await sendMessage([{ type: 'text', text: `使用「${r.name}」技能继续创作` }], r.creative_skill_id, undefined, r.name, `使用「${r.name}」技能继续创作`);
     if (!accepted) return;
     setUsedSkillIds((prev) => new Set(prev).add(r.creative_skill_id));
     setForcedSkill(null);
@@ -1082,15 +1066,27 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 发送消息：**解引用发生在这一刻**——编辑期胶囊一直是指针，此处才换成完整 prompt；
    * 若已武装「直接使用」技能，本条消息携带 forced_creative_skill_id 强制激活后清除 */
   const handleSend = async () => {
-    const text = resolveComposed(composed).trim();
+    const fullText = resolveComposed(composed).trim();
     const mediaBlocks = pendingMediaBlocksRef.current;
-    if (!text && mediaBlocks.length === 0) return;
+    if (!fullText && mediaBlocks.length === 0) return;
     if (runningRunId !== null || streaming) return;
 
-    // content 只放文本，媒体数据单独包装在 resource_ref 中
+    // 从 composed 中提取用户输入的纯文字（不含 chip prompt）
+    const userText = composed.segments
+      .filter((s) => s.kind === 'text')
+      .map((s) => s.value)
+      .join('')
+      .trim();
+
+    // 从 composed 中提取 @ 卡片气泡（与输入框展示一致）
+    const chips = composed.segments
+      .filter((s) => s.kind === 'ref')
+      .map((s) => ({ id: s.ref.id, label: s.ref.label }));
+
+    // content 只放用户实际输入的文字；chip 与 skill 一样仅作气泡展示，数据走 resource_ref
     const textContent: import('@/api/agentSessions').SessionContentBlock[] = [];
-    if (text) {
-      textContent.push({ type: 'text', text });
+    if (userText) {
+      textContent.push({ type: 'text', text: userText });
     }
     console.log('[AgentPanel] 发送 text:', JSON.stringify(textContent), 'resource_ref:', JSON.stringify(mediaBlocks));
 
@@ -1100,9 +1096,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     syncMediaBlocks();
     const armed = forcedSkill;
     setForcedSkill(null);
-    const accepted = await sendMessage(textContent, armed?.id, mediaBlocks);
+    const accepted = await sendMessage(textContent, armed?.id, mediaBlocks, armed?.name, userText, chips);
     if (!accepted) {
-      chipEditorRef.current?.setText(text);
+      chipEditorRef.current?.setText(userText);
       pendingMediaBlocksRef.current = [...mediaBlocks];
       syncMediaBlocks();
       setForcedSkill(armed);
@@ -1306,7 +1302,24 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         <div className={styles.messageList} ref={listRef}>
           {messages.map((m) =>
             m.role === 'user' ? (
-              <div key={m.id} className={styles.userBubble}>{m.content}</div>
+              <div key={m.id} className={styles.userBubble}>
+                {/* Skill 标记（无气泡，仅文字+图标） */}
+                {m.skill_ref && (
+                  <div className={styles.userSkillChip}>
+                    <BookText size={13} strokeWidth={2} />
+                    <span>{m.skill_ref.name}</span>
+                  </div>
+                )}
+                {/* @卡片气泡（与输入框中的气泡一致） */}
+                {m.chips?.map((c) => (
+                  <div key={`chip-${c.id}`} className={styles.userMediaChip}>
+                    <span className={styles.userMediaChipAt}>@</span>
+                    <span>{c.label}</span>
+                  </div>
+                ))}
+                {/* 文字内容 */}
+                {m.content && <span>{m.content}</span>}
+              </div>
             ) : (
               <div key={m.id} className={styles.assistantBlock}>
                 <AssistantMessageBody
@@ -1393,19 +1406,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           outcome={turnOutcome}
           streamedText={streamingText}
         />
-        {forcedSkill && (
-          <div className={styles.armedSkill}>
-            <span>技能「{forcedSkill.name}」已就绪，发送后生效</span>
-            <button
-              type="button"
-              className={styles.armedSkillClear}
-              onClick={() => setForcedSkill(null)}
-              title="取消技能"
-            >
-              <X size={12} strokeWidth={2} />
-            </button>
-          </div>
-        )}
         {chatError && <div className={styles.chatErrorHint}>{chatError}</div>}
         {sendError && <div className={styles.chatErrorHint}>{sendError}</div>}
         {paymentRequiredMessage && <div className={styles.chatErrorHint}>{paymentRequiredMessage}</div>}
@@ -1415,6 +1415,22 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         {/* data-agent-composer：ESC 判定用它把主输入框从「可编辑区域一律让路」里挑出来，
             主输入框是 Lexical 的 contentEditable，而发送后焦点通常正停在这里。 */}
         <div className={styles.inputBox} data-agent-composer>
+          {/* 技能气泡：位于输入框内侧，chip 上方 */}
+          {forcedSkill && (
+            <div className={styles.skillBubble}>
+              <BookText size={13} strokeWidth={2} className={styles.skillBubbleIcon} />
+              <span className={styles.skillBubbleLabel}>{forcedSkill.name}</span>
+              <button
+                type="button"
+                className={styles.skillBubbleRemove}
+                onClick={() => setForcedSkill(null)}
+                title="取消技能"
+              >
+                <X size={12} strokeWidth={2} />
+              </button>
+            </div>
+          )}
+
           {/* 这一层负责把编辑区撑到工具栏上沿：ChipTextEditor 自己的 wrapper 是 block，
            *  撑高的责任只能落在它外面。见 .composerSlot。 */}
           <div className={styles.composerSlot}>

@@ -70,6 +70,12 @@ export interface ChatMessage {
   sourceRunId?: string;
   /** 本地乐观上屏、尚未被服务端事件确认 */
   optimistic?: boolean;
+  /** 用户消息携带的技能引用（用于气泡渲染） */
+  skill_ref?: { type: string; skill_id: string; name: string };
+  /** 用户消息携带的媒体资源引用（用于气泡渲染 chip） */
+  resource_ref?: import('@/api/agentSessions').SessionContentBlock[];
+  /** 输入框中 @ 的卡片气泡（与输入框展示一致，仅用于渲染） */
+  chips?: { id: string; label: string }[];
 }
 
 /**
@@ -449,7 +455,16 @@ export function useAgentSession(projectId: string) {
       for (let i = prev.length - 1; i >= 0; i--) {
         if (prev[i].optimistic && prev[i].role === 'user') {
           const next = [...prev];
-          next[i] = { id: msg.message_id, role: 'user', content, sequence_no: msg.sequence };
+          // 保留乐观消息中携带的 skill_ref、resource_ref、chips（这些字段不会从服务端返回）
+          next[i] = {
+            id: msg.message_id,
+            role: 'user',
+            content,
+            sequence_no: msg.sequence,
+            skill_ref: prev[i].skill_ref,
+            resource_ref: prev[i].resource_ref,
+            chips: prev[i].chips,
+          };
           return next;
         }
       }
@@ -1068,7 +1083,7 @@ export function useAgentSession(projectId: string) {
 
   /** 发送消息：乐观上屏 + POST 提交（回复经事件流 assistant.delta 投影） */
   const sendMessage = useCallback(
-    async (content: import('@/api/agentSessions').SessionContentBlock[], forcedSkillId?: string, resourceRef?: import('@/api/agentSessions').SessionContentBlock[]): Promise<boolean> => {
+    async (content: import('@/api/agentSessions').SessionContentBlock[], forcedSkillId?: string, resourceRef?: import('@/api/agentSessions').SessionContentBlock[], skillName?: string, userText?: string, chips?: { id: string; label: string }[]): Promise<boolean> => {
       // 从 content 中分离出文本块作为 content，媒体块包装进 resource_ref
       const textBlocks = content
         .filter((b) => b.type === 'text')
@@ -1095,16 +1110,19 @@ export function useAgentSession(projectId: string) {
       if (runningRef.current !== null || streamingRef.current) return false;
       const optimisticId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setSendError(null);
-      // 乐观上屏：用户侧气泡显示文本内容
-      const displayText = textBlocks.map((b) => b.text ?? '').join(' ');
+      // 乐观上屏：用户侧气泡显示**用户实际输入的文字**（不含 chip prompt），chip 单独展示为气泡
+      const skillRef = forcedSkillId ? { type: '全部', skill_id: forcedSkillId, name: skillName ?? '' } : undefined;
       setMessages((prev) => [
         ...prev,
         {
           id: optimisticId,
           role: 'user' as const,
-          content: displayText || '[媒体消息]',
+          content: userText ?? '',
           sequence_no: Number.MAX_SAFE_INTEGER,
           optimistic: true,
+          skill_ref: skillRef,
+          resource_ref: finalResourceRef.length > 0 ? finalResourceRef : undefined,
+          chips: chips && chips.length > 0 ? chips : undefined,
         },
       ]);
       streamingRef.current = true;
@@ -1116,6 +1134,7 @@ export function useAgentSession(projectId: string) {
         const ack = await api.sendSessionMessage(projectId, sid, textBlocks, {
           forcedCreativeSkillId: forcedSkillId,
           resourceRef: finalResourceRef,
+          skillRef,
         });
         if (connectionEpochRef.current !== connectionEpoch || sessionIdRef.current !== sid) return true;
         if (ack.message?.message_id) confirmUser(ack.message);
