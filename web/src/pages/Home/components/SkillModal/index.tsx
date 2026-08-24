@@ -18,6 +18,7 @@ import {
 import styles from './index.module.css';
 import {
   fetchSkillLibrary,
+  fetchSkillCategories,
   addLibrarySkill,
   fetchMySkills,
   deletePersonalSkill,
@@ -39,6 +40,13 @@ const PAGE_SIZE = 50;
 
 /** 语言：默认按 navigator.language 检测 */
 const LANG: 'zh' | 'en' = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+
+/** 旧分类码中文映射（IKA64P：数据库存量旧码前端映射显示，新分类原样） */
+const LEGACY_CATEGORY_LABELS: Record<string, string> = {
+  film: '影视',
+  marketing: '营销',
+  other: '其他',
+};
 
 /** 排序选项（key 对应接口 sort 参数） */
 const sortOptions = [
@@ -67,6 +75,9 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState<(typeof sortOptions)[number]['key']>('featured');
   const [sortOpen, setSortOpen] = useState(false);
+  /** IKA64P：动态分类（全部默认 + 后台维护），加载失败仅保留全部 */
+  const [category, setCategory] = useState('all');
+  const [categoryList, setCategoryList] = useState<string[]>([]);
   const [libraryList, setLibraryList] = useState<SkillRecord[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryHasMore, setLibraryHasMore] = useState(true);
@@ -109,6 +120,12 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     minePageRef.current = 1;
     setMySkills([]);
     setMineHasMore(true);
+    fetchSkillCategories()
+      .then((list) => {
+        setCategoryList(list);
+        setCategory((prev) => (prev !== 'all' && !list.includes(prev) ? 'all' : prev));
+      })
+      .catch(() => setCategoryList([]));
   }, [open]);
 
   /** 加载技能库指定页（append=true 追加，否则重置） */
@@ -120,6 +137,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
           pageNum,
           pageSize: PAGE_SIZE,
           keyword: searchQuery.trim() || undefined,
+          category,
           sort: sortKey,
           lang: LANG,
         });
@@ -134,7 +152,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
         setLibraryLoading(false);
       }
     },
-    [searchQuery, sortKey],
+    [searchQuery, category, sortKey],
   );
 
   /** 筛选/排序/搜索变化时重新拉取第一页 */
@@ -317,6 +335,24 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className={styles.catRow}>
+              <button
+                className={`${styles.catChip} ${category === 'all' ? styles.catChipActive : ''}`}
+                onClick={() => setCategory('all')}
+              >
+                全部
+              </button>
+              {categoryList.map((c) => (
+                <button
+                  key={c}
+                  className={`${styles.catChip} ${category === c ? styles.catChipActive : ''}`}
+                  onClick={() => setCategory(c)}
+                >
+                  {LEGACY_CATEGORY_LABELS[c] ?? c}
+                </button>
+              ))}
             </div>
 
             <div ref={libGridRef} className={styles.cardGrid} onScroll={handleLibraryScroll}>

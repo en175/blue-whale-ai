@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/commo
 import { fail, ok } from "@blue-whale/contracts";
 import type { SkillLibraryView, SkillMineView } from "@blue-whale/persistence";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { SkillAdminService } from "@lib/shared/skills/skill-admin.service.js";
 import { SkillService } from "@lib/shared/skills/skills.service.js";
 import {
   createSkillFormatDeps,
@@ -17,9 +18,9 @@ import {
 } from "@lib/shared/skills/skill-writes.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
-const LIBRARY_CATEGORIES = new Set(["all", "film", "marketing", "other"]);
 const LIBRARY_SORTS = new Set(["featured", "most_used", "newest"]);
 const LIBRARY_LANGS = new Set(["zh", "en"]);
+const CATEGORY_MAX = 32;
 
 function pickLibraryView(s: SkillLibraryView): SkillLibraryView {
   return {
@@ -51,7 +52,17 @@ function pickMineView(s: SkillMineView): SkillMineView {
 
 @Controller("agent/skills")
 export class SkillsController {
-  constructor(private readonly skills: SkillService) {}
+  constructor(
+    private readonly skills: SkillService,
+    private readonly skillAdmin: SkillAdminService,
+  ) {}
+
+  /** IKA64P：用户侧分类列表（后台维护的现有分类，旧码由前端映射中文） */
+  @Get("categories")
+  async categories() {
+    const cats = await this.skillAdmin.listCategories();
+    return ok(cats.map((c) => c.name));
+  }
 
   @Post("library")
   async library(
@@ -59,14 +70,20 @@ export class SkillsController {
     @Body()
     body: {
       keyword?: string;
-      category?: "all" | "film" | "marketing" | "other";
+      category?: string;
       sort?: "featured" | "most_used" | "newest";
       lang?: "zh" | "en";
       pageNum?: number;
       pageSize?: number;
     },
   ) {
-    if (body.category !== undefined && !LIBRARY_CATEGORIES.has(body.category)) {
+    const category =
+      typeof body.category === "string" ? body.category.trim() : undefined;
+    if (
+      category !== undefined &&
+      category !== "all" &&
+      (category.length < 1 || category.length > CATEGORY_MAX)
+    ) {
       return fail(400, "category 参数非法");
     }
     if (body.sort !== undefined && !LIBRARY_SORTS.has(body.sort)) {
@@ -77,14 +94,14 @@ export class SkillsController {
     }
     const filter: {
       keyword?: string;
-      category?: "all" | "film" | "marketing" | "other";
+      category?: string;
       sort?: "featured" | "most_used" | "newest";
       lang?: "zh" | "en";
       pageNum: number;
       pageSize: number;
     } = { pageNum: body.pageNum ?? 1, pageSize: body.pageSize ?? 50 };
     if (body.keyword !== undefined) filter.keyword = body.keyword;
-    if (body.category !== undefined) filter.category = body.category;
+    if (category !== undefined) filter.category = category;
     if (body.sort !== undefined) filter.sort = body.sort;
     if (body.lang !== undefined) filter.lang = body.lang;
     const page = await this.skills.listLibrary(user.userId, filter);

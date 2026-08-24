@@ -41,8 +41,8 @@ export interface LibraryQuery {
   pageNum: number;
   pageSize?: number;
   keyword?: string;
-  /** all 全部 / film 影视 / marketing 营销 / other 其他 */
-  category?: 'all' | 'film' | 'marketing' | 'other';
+  /** all 全部 / 其余为后台维护的分类名（IKA64P） */
+  category?: string;
   /** featured 精选 / most_used 最多使用 / newest 最新发布 */
   sort?: 'featured' | 'most_used' | 'newest';
   /** zh 中文 / en 英文 */
@@ -52,6 +52,11 @@ export interface LibraryQuery {
 /** 浏览技能库 POST /api/agent/skills/library */
 export function fetchSkillLibrary(query: LibraryQuery) {
   return http.post<SkillPage<SkillRecord>>('/api/agent/skills/library', query);
+}
+
+/** 用户侧分类列表 GET /api/agent/skills/categories（IKA64P：后台维护的现有分类） */
+export function fetchSkillCategories() {
+  return http.get<string[]>('/api/agent/skills/categories');
 }
 
 /** 添加官方技能到「我的技能」 POST /api/agent/skills/library/:id/add */
