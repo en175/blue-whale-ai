@@ -537,8 +537,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       acceptedVideos: newFiles.filter((f) => f.file.type.startsWith('video/')).length,
     });
     if (overflow === 'image') showToast(`参考图最多 ${videoMaxImages} 张，请减少图片`);
-    else if (overflow === 'video') showToast('参考视频最多 3 个');
+    else if (overflow === 'video') showToast(`参考视频最多 ${MAX_VIDEOS} 个`);
     setRefFiles((prev) => [...prev, ...newFiles]);
+    // 重置 input 以便重复选择相同文件
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
