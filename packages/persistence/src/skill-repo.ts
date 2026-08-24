@@ -142,6 +142,54 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
       return ver?.body ?? null;
     },
 
+    /** IKA64P：官方技能缺 creative 身份映射时补录（幂等，跳过已有映射/无正文行）。
+     *  与 createPersonalSkill 同契约：digest=sha256(body)，display_version=1.0.0。 */
+    async backfillOfficialAssets() {
+      const rows = await prisma.skill.findMany({
+        where: { source: "official", is_delete: 0 },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          content: true,
+        },
+      });
+      let created = 0;
+      for (const row of rows) {
+        const existing = await prisma.creative_skill.findFirst({
+          where: { source_skill_id: row.id, asset_domain: "official" },
+          select: { id: true },
+        });
+        if (existing) continue;
+        const body = (row.content ?? "").trim() || (row.description ?? "").trim();
+        if (!body) continue;
+        const creativeSkillId = await generateCreativeSkillId(prisma, row.name);
+        const digest = `sha256:${createHash("sha256").update(body).digest("hex")}`;
+        const versionId = randomUUID();
+        await prisma.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(
+            `INSERT INTO creative_skill (creative_skill_id, name, description, owner_user_id, asset_domain, name_key, source_skill_id, active_version_id) VALUES (?, ?, ?, 0, 'official', ?, ?, ?)`,
+            creativeSkillId,
+            row.name,
+            row.description,
+            normalizeNameKey(row.name),
+            row.id,
+            versionId,
+          );
+          await tx.$executeRawUnsafe(
+            `INSERT INTO creative_skill_version (creative_skill_version_id, creative_skill_id, display_version, body, content_digest, resource_digest) VALUES (?, ?, '1.0.0', ?, ?, ?)`,
+            versionId,
+            creativeSkillId,
+            body,
+            digest,
+            digest,
+          );
+        });
+        created++;
+      }
+      return created;
+    },
+
     async listMine(userId, q) {
       // 官方引用全量（按 user_skill.gmt_create desc），合并个人技能后统一按时间倒序、内存切片分页。
       const rels = await prisma.user_skill.findMany({

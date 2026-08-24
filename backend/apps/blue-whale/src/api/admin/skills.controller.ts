@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Post,
   Put,
   UseGuards,
 } from "@nestjs/common";
@@ -42,6 +43,17 @@ export class AdminSkillsController {
   async categories() {
     try {
       return { success: true, data: await this.skillAdmin.listCategories() };
+    } catch (error) {
+      throw toAdminError(error);
+    }
+  }
+
+  /** IKA64P：补录官方技能 creative 身份映射（幂等；添加/直接使用依赖） */
+  @Post("backfill")
+  async backfill() {
+    try {
+      const created = await this.skillAdmin.backfillOfficialAssets();
+      return { success: true, data: { created } };
     } catch (error) {
       throw toAdminError(error);
     }

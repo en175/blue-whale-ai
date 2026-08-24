@@ -108,6 +108,8 @@ export interface SkillRepo {
   ): Promise<SkillPage<SkillLibraryView>>;
   /** IKA64P：官方技能全文（active version body，剥 frontmatter 正文） */
   getOfficialContent(creativeId: string): Promise<string | null>;
+  /** IKA64P：为缺失身份映射的官方技能补录 creative_skill + version 行，返回创建数 */
+  backfillOfficialAssets(): Promise<number>;
   listMine(
     userId: string,
     q: { pageNum: number; pageSize: number },

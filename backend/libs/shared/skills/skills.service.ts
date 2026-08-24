@@ -27,6 +27,11 @@ export class SkillService {
     return this.repo.getOfficialContent(creativeId);
   }
 
+  /** IKA64P：补录官方资产身份映射 */
+  backfillOfficialAssets() {
+    return this.repo.backfillOfficialAssets();
+  }
+
   listMine(
     userId: string,
     filter: Parameters<ReturnType<typeof createSkillRepo>["listMine"]>[1],
