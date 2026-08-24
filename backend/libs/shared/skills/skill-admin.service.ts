@@ -34,6 +34,10 @@ export class SkillAdminService {
     return this.repo.assignCategory(ids, category);
   }
 
+  backfillOfficialAssets() {
+    return this.repo.backfillOfficialAssets();
+  }
+
   renameCategory(from: string, to: string) {
     return this.repo.renameCategory(from, to);
   }
