@@ -8,6 +8,8 @@ import { fetchAllAssets, deleteAsset, UPLOAD_SIZE_LIMIT, type AssetRecord, type 
 import { isApiError } from '@/api/http';
 import { uploadAssetFile, fileToAssetType } from '@/utils/upload';
 import { AssetMedia } from '@/components/AssetMedia';
+import assetMediaStyles from '@/components/AssetMedia/index.module.css';
+import AssetDetailModal from '@/components/AssetDetailModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import styles from './index.module.css';
 
@@ -35,6 +37,7 @@ export default function Assets() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<AssetRecord | null>(null);
+  const [detailTarget, setDetailTarget] = useState<AssetRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [actionError, setActionError] = useState('');
@@ -186,15 +189,19 @@ export default function Assets() {
           {!loading &&
             !loadError &&
             displayAssets.map((asset) => (
-              <div key={String(asset.id)} className={styles.card}>
+              <div
+                key={String(asset.id)}
+                className={styles.card}
+                onClick={() => setDetailTarget(asset)}
+              >
                 {/* 预览区域：AssetMedia 统一处理 loading/loaded/error 三态 */}
                 <div className={styles.thumbnail}>
                   {asset.url ? (
                     <AssetMedia asset={asset} />
                   ) : (
-                    <div className={styles.mediaError}>
+                    <div className={assetMediaStyles.mediaError}>
                       <AlertCircle size={28} />
-                      <span className={styles.mediaErrorText}>资源不可用</span>
+                      <span className={assetMediaStyles.mediaErrorText}>资源不可用</span>
                     </div>
                   )}
                   {/* 类型标签 */}
@@ -229,6 +236,9 @@ export default function Assets() {
         onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {/* 资产详情弹窗 */}
+      <AssetDetailModal asset={detailTarget} onClose={() => setDetailTarget(null)} />
     </div>
   );
 }

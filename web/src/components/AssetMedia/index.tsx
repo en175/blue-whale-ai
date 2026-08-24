@@ -101,7 +101,7 @@ export function AssetMedia({ asset }: { asset: AssetRecord }) {
 }
 
 /** 检测是否为 Safari 浏览器（不包含 Chrome/Chromium/Edge 等基于 Safari 的浏览器） */
-export function isSafariBrowser(): boolean {
+function isSafariBrowser(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent;
   // Safari 的特征：包含 Safari 但不包含 Chrome/Chromium/Edge/OPR
