@@ -30,6 +30,10 @@ export class SkillAdminService {
     return this.repo.setCategory(id, category);
   }
 
+  assignCategory(ids: bigint[], category: string) {
+    return this.repo.assignCategory(ids, category);
+  }
+
   renameCategory(from: string, to: string) {
     return this.repo.renameCategory(from, to);
   }

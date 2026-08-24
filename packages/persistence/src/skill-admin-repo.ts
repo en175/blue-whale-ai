@@ -20,6 +20,8 @@ export interface SkillAdminRepo {
   listOfficialSkills(): Promise<AdminSkillView[]>;
   listCategories(): Promise<AdminSkillCategoryView[]>;
   setCategory(id: bigint, category: string): Promise<boolean>;
+  /** IKA64P 效率优化：批量归类，返回命中数 */
+  assignCategory(ids: bigint[], category: string): Promise<number>;
   renameCategory(from: string, to: string): Promise<number>;
   clearCategory(name: string): Promise<number>;
 }
@@ -63,6 +65,14 @@ export function createSkillAdminRepo(prisma: PrismaClient): SkillAdminRepo {
         data: { category },
       });
       return result.count > 0;
+    },
+
+    async assignCategory(ids, category) {
+      const result = await prisma.skill.updateMany({
+        where: { id: { in: ids }, source: "official", is_delete: 0 },
+        data: { category },
+      });
+      return result.count;
     },
 
     async renameCategory(from, to) {

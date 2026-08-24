@@ -47,6 +47,30 @@ export class AdminSkillsController {
     }
   }
 
+  /** IKA64P 效率优化：批量归类（新分类随归类创建） */
+  @Put("assign")
+  async assign(@Body() body: Record<string, unknown>) {
+    const category =
+      typeof body.category === "string" ? body.category.trim() : "";
+    if (!category || category.length > CATEGORY_MAX) {
+      throw new AdminException(400, `分类名须为 1–${CATEGORY_MAX} 字符`);
+    }
+    const idsRaw = Array.isArray(body.ids) ? body.ids : [];
+    const ids: bigint[] = [];
+    for (const v of idsRaw) {
+      const id = typeof v === "string" ? parseBigId(v) : null;
+      if (!id) throw new AdminException(400, "ids 含无效 id");
+      ids.push(id);
+    }
+    if (ids.length === 0) throw new AdminException(400, "ids 不能为空");
+    try {
+      const count = await this.skillAdmin.assignCategory(ids, category);
+      return { success: true, data: { count } };
+    } catch (error) {
+      throw toAdminError(error);
+    }
+  }
+
   @Put("categories/rename")
   async rename(@Body() body: Record<string, unknown>) {
     const from = typeof body.from === "string" ? body.from.trim() : "";

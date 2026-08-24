@@ -396,6 +396,14 @@ export function setAdminSkillCategory(id: string, category: string) {
   });
 }
 
+/** PUT /api/admin/skills/assign 批量归类（IKA64P 效率优化） */
+export function assignAdminSkillsCategory(ids: string[], category: string) {
+  return apiRequest<{ count: number }>('/api/admin/skills/assign', {
+    method: 'PUT',
+    body: JSON.stringify({ ids, category }),
+  });
+}
+
 /** PUT /api/admin/skills/categories/rename 分类批量改名 */
 export function renameAdminSkillCategory(from: string, to: string) {
   return apiRequest<{ count: number }>('/api/admin/skills/categories/rename', {

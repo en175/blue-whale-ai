@@ -29,6 +29,16 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
     expect(await createSkillAdminRepo(prisma).setCategory(99n, "x")).toBe(false);
   });
 
+  it("assignCategory 批量归类并带 official+存活过滤", async () => {
+    const prisma = mockPrisma({ updateMany: vi.fn().mockResolvedValue({ count: 2 }) });
+    const n = await createSkillAdminRepo(prisma).assignCategory([1n, 2n], "short_video");
+    expect(n).toBe(2);
+    expect(prisma.skill.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [1n, 2n] }, source: "official", is_delete: 0 },
+      data: { category: "short_video" },
+    });
+  });
+
   it("renameCategory 批量替换分类值", async () => {
     const prisma = mockPrisma({ updateMany: vi.fn().mockResolvedValue({ count: 2 }) });
     const n = await createSkillAdminRepo(prisma).renameCategory("film", "film_tv");
