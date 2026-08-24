@@ -40,14 +40,6 @@ const PAGE_SIZE = 50;
 /** 语言：默认按 navigator.language 检测 */
 const LANG: 'zh' | 'en' = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
 
-/** 分类选项（key 对应接口 category 参数） */
-const categories = [
-  { key: 'all', label: '全部' },
-  { key: 'film', label: '影视' },
-  { key: 'marketing', label: '营销' },
-  { key: 'other', label: '其他' },
-] as const;
-
 /** 排序选项（key 对应接口 sort 参数） */
 const sortOptions = [
   { key: 'featured', label: '精选' },
@@ -75,7 +67,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState<(typeof sortOptions)[number]['key']>('featured');
   const [sortOpen, setSortOpen] = useState(false);
-  const [category, setCategory] = useState<(typeof categories)[number]['key']>('all');
   const [libraryList, setLibraryList] = useState<SkillRecord[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryHasMore, setLibraryHasMore] = useState(true);
@@ -129,7 +120,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
           pageNum,
           pageSize: PAGE_SIZE,
           keyword: searchQuery.trim() || undefined,
-          category,
           sort: sortKey,
           lang: LANG,
         });
@@ -144,7 +134,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
         setLibraryLoading(false);
       }
     },
-    [searchQuery, category, sortKey],
+    [searchQuery, sortKey],
   );
 
   /** 筛选/排序/搜索变化时重新拉取第一页 */
@@ -327,18 +317,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
                   </div>
                 )}
               </div>
-            </div>
-
-            <div className={styles.catRow}>
-              {categories.map((c) => (
-                <button
-                  key={c.key}
-                  className={`${styles.catChip} ${c.key === category ? styles.catChipActive : ''}`}
-                  onClick={() => setCategory(c.key)}
-                >
-                  {c.label}
-                </button>
-              ))}
             </div>
 
             <div ref={libGridRef} className={styles.cardGrid} onScroll={handleLibraryScroll}>
