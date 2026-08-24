@@ -562,3 +562,24 @@ describe("SkillRepo.checkPersonalNameAvailable / createPersonalSkill 名称校�
     expect(page.records[0]).toMatchObject({ skill_code: "cn01" });
   });
 });
+
+describe("SkillRepo — getOfficialContent（IKA64P 直接使用填全文）", () => {
+  it("解析 active version body", async () => {
+    const prisma = {
+      creative_skill: {
+        findFirst: vi.fn().mockResolvedValue({ active_version_id: "v1" }),
+      },
+      creative_skill_version: {
+        findFirst: vi.fn().mockResolvedValue({ body: "技能正文" }),
+      },
+    } as unknown as PrismaClient;
+    expect(await createSkillRepo(prisma).getOfficialContent("cs1")).toBe("技能正文");
+  });
+
+  it("无 active version 返回 null", async () => {
+    const prisma = {
+      creative_skill: { findFirst: vi.fn().mockResolvedValue(null) },
+    } as unknown as PrismaClient;
+    expect(await createSkillRepo(prisma).getOfficialContent("cs1")).toBeNull();
+  });
+});
