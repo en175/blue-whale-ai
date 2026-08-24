@@ -1,0 +1,127 @@
+/* ============================================
+ * AssetDetailModal 资产详情弹窗样式（对齐 ConfirmModal 遮罩模式）
+ * ============================================ */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+  animation: overlayFadeIn 0.2s ease;
+}
+
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.modal {
+  width: 560px;
+  max-width: 92vw;
+  max-height: 85vh;
+  background-color: #1a1a1a;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-xl);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalSlideIn 0.25s ease;
+}
+
+@keyframes modalSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-md);
+}
+
+.title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.closeBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  transition: all var(--transition-fast);
+}
+
+.closeBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.preview {
+  width: 100%;
+  height: 320px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background-color: var(--color-bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 弹窗预览用 contain（Assets 网格缩略图是 cover），优先级高于 AssetMedia 内部 .media */
+.preview :global(img),
+.preview :global(video) {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.previewEmpty {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-md);
+}
+
+.fields {
+  margin: var(--spacing-lg) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  overflow-y: auto;
+}
+
+.fieldRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-md);
+}
+
+.fieldLabel {
+  flex: 0 0 72px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+.fieldValue {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  word-break: break-all;
+}
