@@ -9,8 +9,7 @@ import LoginModal from '@/components/LoginModal';
 import { getCurrentUser, subscribe } from '@/utils/auth';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { fetchSkillContent, fetchPersonalSkill, type SkillRecord } from '@/api/skills';
-import { isApiError } from '@/api/http';
+import { type SkillRecord } from '@/api/skills';
 import { setGenHandoff } from '@/utils/gen-handoff';
 
 /** 选项卡定义 */
@@ -138,6 +137,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   const pendingText = useRef('');
   /** 登录成功后需填入对话框的「直接使用」技能（IKA64P） */
   const pendingSkill = useRef<SkillRecord | null>(null);
+  /** IKA64P：「直接使用」武装的技能气泡（发送时随消息作为强制技能生效） */
+  const [armedSkill, setArmedSkill] = useState<{ id: string; name: string } | null>(null);
 
   /** 外部注入草稿（画廊卡片点击）：仅 ts 变化时覆盖输入框 */
   useEffect(() => {
@@ -328,10 +329,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  /** 跳转画布页并携带草稿（经 location.state 注入 Agent 弹框） */
-  const goCanvasWithText = (text: string) => {
+  /** 跳转画布页并携带草稿（经 location.state 注入 Agent 弹框）与武装技能 */
+  const goCanvasWithText = (text: string, skillId?: string) => {
     setInputValue('');
-    navigate('/canvas', { state: { agentText: text } });
+    if (skillId) setArmedSkill(null); // 携带后清除气泡
+    navigate('/canvas', { state: { agentText: text, skillId: skillId ?? '' } });
   };
 
   /** 按当前 tab 分发：智能体→Agent 对话；AI视频/AI图片→画布直接生成节点并唤起对应对话框 */
@@ -375,11 +377,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       navigate('/canvas', { state: { genKind: 'image' } });
       return;
     }
-    goCanvasWithText(text);
+    goCanvasWithText(text, armedSkill?.id);
   };
 
-  /** IKA64P：「直接使用」= 关闭弹窗并把技能全文填入首页对话框（不再跳画布） */
-  const applySkillToInput = async (skill: SkillRecord) => {
+  /** IKA64P：「直接使用」= 关闭弹窗并武装技能气泡（不再填全文；发送时随消息作为强制技能生效） */
+  const handleUseSkill = (skill: SkillRecord) => {
     setShowSkillModal(false);
     if (!user) {
       pendingSkill.current = skill;
@@ -387,15 +389,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       return;
     }
     if (!skill.creative_skill_id) return;
-    try {
-      const data =
-        skill.asset_domain === 'personal'
-          ? await fetchPersonalSkill(skill.creative_skill_id)
-          : await fetchSkillContent(skill.creative_skill_id);
-      setInputValue((data.content ?? '').slice(0, MAX_INPUT));
-    } catch (e) {
-      window.alert(isApiError(e) ? e.message : '获取技能内容失败');
-    }
+    setArmedSkill({ id: skill.creative_skill_id, name: skill.name ?? '' });
   };
 
   const handleSend = () => {
@@ -418,7 +412,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     const skill = pendingSkill.current;
     pendingSkill.current = null;
     if (skill && getCurrentUser()) {
-      void applySkillToInput(skill);
+      handleUseSkill(skill);
       return;
     }
     if (text && getCurrentUser()) dispatchByTab(text);
@@ -952,6 +946,22 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
         ) : (
           /* ========== 视频智能体 原有布局 ========== */
           <>
+            {/* IKA64P：直接使用武装的技能气泡（发送时随消息作为强制技能生效） */}
+            {armedSkill && (
+              <div className={styles.armedSkill}>
+                <Sparkles size={12} strokeWidth={2} />
+                <span>技能「{armedSkill.name}」已就绪，发送后生效</span>
+                <button
+                  type="button"
+                  className={styles.armedSkillClear}
+                  onClick={() => setArmedSkill(null)}
+                  title="取消技能"
+                >
+                  <X size={12} strokeWidth={2} />
+                </button>
+              </div>
+            )}
+
             {/* 输入框 */}
             <textarea
               className={styles.textarea}
@@ -1116,7 +1126,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       <SkillModal
         open={showSkillModal}
         onClose={() => setShowSkillModal(false)}
-        onUseSkill={(s) => void applySkillToInput(s)}
+        onUseSkill={(s) => handleUseSkill(s)}
       />
 
       {/* 未登录拦截弹窗 */}
