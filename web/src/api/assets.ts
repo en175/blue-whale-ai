@@ -24,6 +24,14 @@ export interface AssetRecord {
   source: string;
   /** 创建时间（ISO 8601），不直接展示 */
   created_at: string;
+  /** 文件大小（字节），null 表示未知 */
+  size: number | null;
+  /** AI 生成溯源：关联生成任务 ID，非生成资产为 null */
+  generation_job_id: string | null;
+  /** 所属项目 ID，非项目资产为 null */
+  project_id: string | null;
+  /** MIME 类型，null 表示未知 */
+  mime: string | null;
 }
 
 /** 分页包络 */
