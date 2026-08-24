@@ -13,6 +13,7 @@ import {
   ReceiptText,
   FileText,
   Settings,
+  Sparkles,
 } from 'lucide-react';
 import { getCurrentUser, subscribe, updateUser } from '@/utils/auth';
 import { fetchAdminSession } from '@/api/admin';
@@ -23,6 +24,7 @@ const navItems = [
   { to: '/admin', end: true, label: '仪表盘', icon: LayoutDashboard },
   { to: '/admin/recharge-plans', end: false, label: '充值档位', icon: Layers },
   { to: '/admin/templates', end: false, label: '模板管理', icon: LayoutTemplate },
+  { to: '/admin/skills', end: false, label: '技能管理', icon: Sparkles },
   { to: '/admin/models', end: false, label: '模型列表', icon: Boxes },
   { to: '/admin/users', end: false, label: '用户管理', icon: Users },
   { to: '/admin/orders', end: false, label: '订单管理', icon: ReceiptText },
