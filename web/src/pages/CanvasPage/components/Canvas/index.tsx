@@ -58,9 +58,13 @@ interface FlowCanvasProps {
   hideZoomControl?: boolean;
   /** 注册出生点取数函数（当前视口中心的 flow 坐标），供父级创建节点时落在用户可见区域 */
   registerSpawnPosition?: (fn: () => { x: number; y: number }) => void;
+  /** 商品卡 ts 驱动注入结果 */
+  productPickResult?: { ts: number; productId: string; image: { id: string; src: string; enabled: boolean } } | null;
+  /** 资产卡 ts 驱动注入结果 */
+  assetPickResult?: { ts: number; assetId: string; ref: { id: string; src: string } } | null;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
   const isDrag = toolMode === 'drag';
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -197,6 +201,36 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     productIdsRef.current = newIds;
   }, [productNodes, setNodes]);
 
+  /** 注入商品卡选取结果（ts 驱动，仅传递 productPickResult，图片注入由 ProductNode 本地完成） */
+  useEffect(() => {
+    if (!productPickResult) return;
+    const { productId, ts, image } = productPickResult;
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (node.type !== 'productNode' || node.id !== productId) return node;
+        return {
+          ...node,
+          data: { ...node.data, productPickResult: { ts, productId, image } },
+        };
+      }),
+    );
+  }, [productPickResult, setNodes]);
+
+  /** 注入资产卡选取结果（ts 驱动） */
+  useEffect(() => {
+    if (!assetPickResult) return;
+    const { assetId, ts, ref } = assetPickResult;
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (node.type !== 'assetNode' || node.id !== assetId) return node;
+        return {
+          ...node,
+          data: { ...node.data, assetPickResult: { ts, assetId, ref } },
+        };
+      }),
+    );
+  }, [assetPickResult, setNodes]);
+
   /** 合并资产卡节点（新增追加；外部删除同步移除） */
   useEffect(() => {
     const newIds = new Set(assetNodes.map((n) => n.id));
@@ -310,7 +344,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -330,6 +364,8 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         onPaneClick={onPaneClick}
         registerSpawnPosition={registerSpawnPosition}
         hideZoomControl={hideZoomControl}
+        productPickResult={productPickResult}
+        assetPickResult={assetPickResult}
       />
     </ReactFlowProvider>
   );
