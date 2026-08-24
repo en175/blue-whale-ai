@@ -1552,8 +1552,10 @@
 
 /* 耗时与 token。等宽数字，否则秒数每跳一次整行都在抖。 */
 /* 等宽数字继承自 .runStatus，这里不重复声明。 */
+/* 统计紧跟状态词，读作「已完成 (20s · ↓ 1.9k · 上下文 12%)」（IKALN7）。
+   此前这里是 `margin-left: auto`，把整串数字顶到状态栏最右端，中间留一大片空白——状态和它
+   自己的账看着像两件不相干的东西。去掉 auto 后由 `.runStatus` 的 `gap: 8px` 隔开即可。 */
 .runStatusMeta {
-  margin-left: auto;
   color: var(--color-text-tertiary);
   white-space: nowrap;
 }

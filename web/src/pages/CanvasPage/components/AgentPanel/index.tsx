@@ -156,6 +156,15 @@ function RunStatusLine({
 
   const context = status.context;
   const contextPercent = context ? Math.round(context.ratio * 100) : null;
+  /**
+   * 这一行有没有账可报（IKALN7）。
+   *
+   * 统计现在包在括号里紧跟状态词，所以「三项全缺」不能再靠一个空 span 蒙混过去——那会渲染出
+   * 一对孤零零的 `()`。秒数、token、上下文各自都可缺（终态缺 finishedAt、非流式轮次没有
+   * token、拿不到容量时没有上下文），三者皆无时整段不渲染。
+   */
+  const hasMeta =
+    status.seconds !== null || status.tokens !== null || (context !== null && contextPercent !== null);
   return (
     <div
       className={`${styles.runStatus} ${RUN_STATUS_PHASE_CLASS[status.phase]}`}
@@ -168,37 +177,44 @@ function RunStatusLine({
       <span>{status.label}</span>
       {/* 运行中把这一段对读屏遮起来：秒数每秒变一次，`aria-live` 会把它一遍遍念出来，
           盖过真正有信息量的状态文案。终态时放开，此时它只念一次，正是这一轮的账。 */}
-      <span className={styles.runStatusMeta} aria-hidden={!status.settled}>
-        {/* 秒数、token、上下文各自可缺，分隔符因此只能在**前面已经有东西**时才出——
-            否则终态缺 finishedAt（秒数为 null）时，这一行会以一个孤零零的「 · 」开头。 */}
-        {status.seconds !== null && formatElapsed(status.seconds)}
-        {status.tokens && (
-          <>
-            {status.seconds !== null && ' · '}
-            {/* 流式期间这个数是按字符估的：模型只在结束时报真实用量，中途没有增量。
-                它的作用是活性信号——用户要判断的是"它还在动吗"，不是精确值。 */}
-            <span title={status.tokens.estimated ? '流式期间为估算值，结束后显示实际用量' : '本轮实际输出用量'}>
-              ↓ {formatTokens(status.tokens.output)}
-              {status.tokens.estimated ? '≈' : ''}
-            </span>
-          </>
-        )}
-        {context !== null && contextPercent !== null && (
-          <>
-            {(status.seconds !== null || status.tokens !== null) && ' · '}
-            <span title={`上下文 ${context.usedTokens} / ${context.maxTokens} tokens`}>
-              上下文 {contextPercent}%
-            </span>
-            {/* 压缩过历史要给可见文案：此前只追加一个 ⤺，说明埋在 title 里，触屏根本没有
-                hover，等于没有提示。而"早先的对话已被摘要"直接影响用户对模型记得什么的预期。 */}
-            {context.compacted && (
-              <span className={styles.runStatusCompacted} title="上下文接近上限，较早的对话已被摘要压缩">
-                {' · '}已压缩历史
+      {hasMeta && (
+        <span className={styles.runStatusMeta} aria-hidden={!status.settled}>
+          {/* 统计包在括号里紧跟状态词（IKALN7），整体读作「已完成 (20s · ↓ 1.9k · 上下文 12%)」。
+              此前 `.runStatusMeta` 带 `margin-left: auto`，把这一串顶到状态栏最右端，和左边的
+              状态文案看着像两件不相干的东西；括号 + 取消 auto 之后它们是一个整体。 */}
+          {'('}
+          {/* 秒数、token、上下文各自可缺，分隔符因此只能在**前面已经有东西**时才出——
+              否则终态缺 finishedAt（秒数为 null）时，这一行会以一个孤零零的「 · 」开头。 */}
+          {status.seconds !== null && formatElapsed(status.seconds)}
+          {status.tokens && (
+            <>
+              {status.seconds !== null && ' · '}
+              {/* 流式期间这个数是按字符估的：模型只在结束时报真实用量，中途没有增量。
+                  它的作用是活性信号——用户要判断的是"它还在动吗"，不是精确值。 */}
+              <span title={status.tokens.estimated ? '流式期间为估算值，结束后显示实际用量' : '本轮实际输出用量'}>
+                ↓ {formatTokens(status.tokens.output)}
+                {status.tokens.estimated ? '≈' : ''}
               </span>
-            )}
-          </>
-        )}
-      </span>
+            </>
+          )}
+          {context !== null && contextPercent !== null && (
+            <>
+              {(status.seconds !== null || status.tokens !== null) && ' · '}
+              <span title={`上下文 ${context.usedTokens} / ${context.maxTokens} tokens`}>
+                上下文 {contextPercent}%
+              </span>
+              {/* 压缩过历史要给可见文案：此前只追加一个 ⤺，说明埋在 title 里，触屏根本没有
+                  hover，等于没有提示。而"早先的对话已被摘要"直接影响用户对模型记得什么的预期。 */}
+              {context.compacted && (
+                <span className={styles.runStatusCompacted} title="上下文接近上限，较早的对话已被摘要压缩">
+                  {' · '}已压缩历史
+                </span>
+              )}
+            </>
+          )}
+          {')'}
+        </span>
+      )}
     </div>
   );
 }
