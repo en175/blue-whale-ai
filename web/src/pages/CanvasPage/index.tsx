@@ -566,21 +566,24 @@ export default function CanvasPage() {
   const handleAddToChatNode = (id: string) => {
     const p = productNodesRef.current.find((n) => n.id === id);
     if (p) {
-      setAgentContext({ text: `@${(p.data?.name as string) || '商品'} `, ts: Date.now() });
+      const name = (p.data?.name as string) || '商品';
+      setAgentContext({ text: `@${name}`, label: name, ts: Date.now() });
       setShowAgent(true);
       return;
     }
     const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
       const text = ((t.data?.html as string) || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-      setAgentContext({ text: text || '文本节点', ts: Date.now() });
+      const label = text || '文本节点';
+      setAgentContext({ text: label, label, ts: Date.now() });
       setShowAgent(true);
       return;
     }
     const m = mediaNodesRef.current.find((n) => n.id === id);
     if (m) {
       const type = m.data?.mediaType === 'video' ? '视频' : '图片';
-      setAgentContext({ text: `[${type}] ${m.data?.fileName || ''}`, ts: Date.now() });
+      const label = `[${type}] ${m.data?.fileName || ''}`;
+      setAgentContext({ text: label, label, ts: Date.now() });
       setShowAgent(true);
       return;
     }
@@ -596,7 +599,7 @@ export default function CanvasPage() {
         generation: '生成卡',
       };
       const name = gc?.shotTitle || kindTitle[(a.data?.kind as string) ?? 'custom'] || '资产卡';
-      setAgentContext({ text: `@${name} `, ts: Date.now() });
+      setAgentContext({ text: `@${name}`, label: name, ts: Date.now() });
       setShowAgent(true);
     }
   };

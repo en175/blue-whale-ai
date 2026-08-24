@@ -213,6 +213,10 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
           <Box size={14} strokeWidth={2} />
           <span>商品</span>
         </span>
+        <button className={`${styles.addToChatBtn} nodrag`} onClick={handleAddToChat}>
+          <AtSign size={14} strokeWidth={2} />
+          <span>添加到对话</span>
+        </button>
       </div>
 
       <div className={styles.card}>

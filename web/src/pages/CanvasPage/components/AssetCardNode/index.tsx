@@ -25,7 +25,7 @@ const KIND_META: Record<AssetCardKind, { title: string; placeholder: string }> =
 };
 
 /** 临时隐藏：资产卡（风格/角色/物体/环境/自定义）顶部 @ 操作条，会后恢复（改回 false） */
-const HIDE_ASSET_TOP_BAR = true;
+const HIDE_ASSET_TOP_BAR = false;
 
 /** Agent 生成卡数据（kind=generation 时承载，落画布后从节点选引用）
  * 字段复用会话层的 GenerationCardBlock（唯一形状定义），此处只加节点专属的回调；
