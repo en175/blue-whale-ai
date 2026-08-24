@@ -8,6 +8,7 @@ import {
   BackgroundVariant,
   MiniMap,
   useReactFlow,
+  useViewport,
   type Node,
   type Edge,
   useNodesState,
@@ -53,11 +54,17 @@ interface FlowCanvasProps {
   onNodeClick?: (node: Node) => void;
   /** 画布空白处单击 */
   onPaneClick?: () => void;
+  /** 隐藏右下角缩放控件。Agent 面板打开时它正好压在面板的发送按钮上（IKAGZC）。 */
+  hideZoomControl?: boolean;
   /** 注册出生点取数函数（当前视口中心的 flow 坐标），供父级创建节点时落在用户可见区域 */
   registerSpawnPosition?: (fn: () => { x: number; y: number }) => void;
+  /** 商品卡 ts 驱动注入结果 */
+  productPickResult?: { ts: number; productId: string; image: { id: string; src: string; enabled: boolean } } | null;
+  /** 资产卡 ts 驱动注入结果 */
+  assetPickResult?: { ts: number; assetId: string; ref: { id: string; src: string } } | null;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
   const isDrag = toolMode === 'drag';
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -72,6 +79,11 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const { setCenter, setViewport, screenToFlowPosition } = useReactFlow();
   const onViewportChangeRef = useRef(onViewportChange);
   onViewportChangeRef.current = onViewportChange;
+
+  /** 波点缩放补偿：屏幕点半径 = size × zoom，取 size = 1/zoom 使屏幕点径恒定约 2px，
+   * 缩小视图（如 58%）时波点依然清晰可见 */
+  const { zoom } = useViewport();
+  const dotSize = Math.max(0.4, Math.min(4, 1 / zoom));
 
   /** 向父级注册出生点取数函数：屏幕视觉中心 → flow 坐标 */
   useEffect(() => {
@@ -189,6 +201,36 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     productIdsRef.current = newIds;
   }, [productNodes, setNodes]);
 
+  /** 注入商品卡选取结果（ts 驱动，仅传递 productPickResult，图片注入由 ProductNode 本地完成） */
+  useEffect(() => {
+    if (!productPickResult) return;
+    const { productId, ts, image } = productPickResult;
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (node.type !== 'productNode' || node.id !== productId) return node;
+        return {
+          ...node,
+          data: { ...node.data, productPickResult: { ts, productId, image } },
+        };
+      }),
+    );
+  }, [productPickResult, setNodes]);
+
+  /** 注入资产卡选取结果（ts 驱动） */
+  useEffect(() => {
+    if (!assetPickResult) return;
+    const { assetId, ts, ref } = assetPickResult;
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (node.type !== 'assetNode' || node.id !== assetId) return node;
+        return {
+          ...node,
+          data: { ...node.data, assetPickResult: { ts, assetId, ref } },
+        };
+      }),
+    );
+  }, [assetPickResult, setNodes]);
+
   /** 合并资产卡节点（新增追加；外部删除同步移除） */
   useEffect(() => {
     const newIds = new Set(assetNodes.map((n) => n.id));
@@ -283,8 +325,8 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         <Background
           variant={BackgroundVariant.Dots}
           gap={24}
-          size={1.5}
-          color="#3a3a3a"
+          size={dotSize}
+          color="#4d4d4d"
         />
         {showMiniMap && (
           <MiniMap
@@ -297,12 +339,12 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
           />
         )}
       </ReactFlow>
-      <ZoomControl />
+      {!hideZoomControl && <ZoomControl />}
     </div>
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -321,6 +363,9 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
         registerSpawnPosition={registerSpawnPosition}
+        hideZoomControl={hideZoomControl}
+        productPickResult={productPickResult}
+        assetPickResult={assetPickResult}
       />
     </ReactFlowProvider>
   );

@@ -23,6 +23,8 @@ import {
   type LexicalEditor,
 } from 'lexical';
 import { ChipNode, $createChipNode } from './ChipNode';
+import { type ComposedValue } from './composed';
+import { readComposed } from './readComposed';
 import styles from './index.module.css';
 
 export interface ChipRef {
@@ -46,8 +48,13 @@ export interface ChipTextEditorHandle {
 
 interface ChipTextEditorProps {
   placeholder: string;
-  /** 每次内容变化：text 已把胶囊替换成完整 prompt，供发送/禁用态判断 */
-  onChangeText: (text: string) => void;
+  /**
+   * 每次内容变化，给出**结构化**的内容：纯文字与引用交替的片段序列。
+   *
+   * 刻意不再给拍扁的字符串（IKAFSX）：胶囊在编辑期是指针，解引用只发生在提交那一刻，
+   * 由调用方自己在 send 时调 `resolveComposed`。字数统计、禁用态判断都从片段派生。
+   */
+  onChange: (value: ComposedValue) => void;
   onSend: () => void;
   className?: string;
 }
@@ -87,7 +94,7 @@ function EnterKeyPlugin({ onSend }: { onSend: () => void }) {
 }
 
 const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(function ChipTextEditor(
-  { placeholder, onChangeText, onSend, className },
+  { placeholder, onChange, onSend, className },
   ref,
 ) {
   const editorRef = useRef<LexicalEditor | null>(null);
@@ -148,7 +155,7 @@ const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(fun
       <OnChangePlugin
         onChange={(editorState) => {
           editorState.read(() => {
-            onChangeText($getRoot().getTextContent());
+            onChange(readComposed());
           });
         }}
       />

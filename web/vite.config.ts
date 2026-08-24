@@ -1,8 +1,90 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
 const __dirname = import.meta.dirname;
+
+/**
+ * TOS 上传代理插件：将 /__tos-upload?url=<encoded_tos_url> 转发到真实 TOS 地址
+ * 开发模式下避免浏览器 CORS 限制
+ */
+function tosUploadProxy(): Plugin {
+  const ROUTE = '/__tos-upload'
+  return {
+    name: 'tos-upload-proxy',
+    configureServer(server) {
+      console.log('[Vite] TOS 上传代理中间件已注册:', ROUTE)
+      server.middlewares.use(ROUTE, async (req, res) => {
+        try {
+          const reqUrl = new URL(req.url ?? '/', 'http://localhost')
+          const targetUrl = reqUrl.searchParams.get('url')
+          if (!targetUrl) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Missing url parameter' }))
+            return
+          }
+
+          const target = new URL(targetUrl)
+          console.log('[TOS Proxy]', req.method, '→', target.host + target.pathname + '?' + target.search.substring(0, 80) + '...')
+
+          // 收集请求体
+          const chunks: Buffer[] = []
+          for await (const chunk of req) {
+            chunks.push(chunk as Buffer)
+          }
+          const bodyBuf = Buffer.concat(chunks)
+
+          // 构建转发请求头
+          const forwardHeaders: Record<string, string> = {}
+          for (const [key, value] of Object.entries(req.headers)) {
+            const lk = key.toLowerCase()
+            if (
+              ['host', 'connection', 'origin', 'referer', 'content-length', 'accept-encoding',
+               'sec-fetch-dest', 'sec-fetch-mode', 'sec-fetch-site', 'sec-ch-ua',
+               'sec-ch-ua-mobile', 'sec-ch-ua-platform'].includes(lk)
+            ) {
+              continue
+            }
+            if (value) {
+              forwardHeaders[key] = Array.isArray(value) ? value[0] : value
+            }
+          }
+          forwardHeaders['host'] = target.host
+          if (bodyBuf.length > 0) {
+            forwardHeaders['content-length'] = String(bodyBuf.length)
+          }
+
+          console.log('[TOS Proxy] 转发头:', Object.keys(forwardHeaders).join(', '))
+
+          const forwardRes = await fetch(targetUrl, {
+            method: req.method,
+            headers: forwardHeaders,
+            body: bodyBuf.length > 0 ? bodyBuf : undefined,
+            redirect: 'manual',
+          })
+
+          const respText = await forwardRes.text()
+          console.log('[TOS Proxy] TOS 响应:', forwardRes.status, respText.substring(0, 200))
+
+          const respHeaders: Record<string, string> = {}
+          forwardRes.headers.forEach((value, key) => {
+            if (!['transfer-encoding', 'connection', 'accept-ranges'].includes(key.toLowerCase())) {
+              respHeaders[key] = value
+            }
+          })
+          res.writeHead(forwardRes.status, respHeaders)
+          res.end(respText)
+        } catch (err) {
+          console.error('[TOS Proxy] middleware error:', err)
+          if (!res.headersSent) {
+            res.writeHead(502, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'TOS proxy error', message: (err instanceof Error ? err.message : String(err)) }))
+          }
+        }
+      })
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -10,7 +92,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
 
   return {
-    plugins: [react()],
+    plugins: [react(), tosUploadProxy()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),

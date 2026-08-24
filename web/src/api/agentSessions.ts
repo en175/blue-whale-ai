@@ -6,8 +6,9 @@
  * - 事件流为共享连接（引用计数）：StrictMode 双挂载/多处订阅不重复建连
  * ============================================ */
 import { readSseResponse, type SseEvent } from './events';
-import { ApiError } from './http';
+import { ApiError, apiRequest } from './http';
 import { newIdempotencyKey } from './jobs';
+import { agentPath, agentUrl, agentMethod } from './agentRoutes';
 import { getAccessToken, setSession } from '@/utils/auth';
 
 export type { SseEvent };
@@ -18,14 +19,33 @@ export type { SseEvent };
 export interface SessionContentBlock {
   type: string;
   text?: string;
-  /** 思考过程块（可折叠展示）：steps 为顺序步骤文案 */
-  thinking?: { steps?: string[] };
+  /**
+   * 思考过程块（可折叠展示）。
+   *
+   * `steps` 是服务端选的模板文案，`reasoning` 是模型自己的原话（assistant.reasoning.delta，
+   * IKA3M6）。两个字段分开，因为可信度不一样：模板是我们的承诺，思考是模型随口说的。
+   * 两截都落库（IKAI1A）：服务端在助手消息里就带上这个块，刷新之后思考还在。老 Run 没有
+   * 落库过原话，它们只会有 `steps` 那一半——那是如实的，那些原话确实已经不存在了。
+   */
+  thinking?: { steps?: string[]; reasoning?: string };
   /**
    * 产卡之前的每一步都走自然语言：追问、需求理解总结与确认都是助手的正文文字，
    * 不再有 understanding / clarify 结构化块。生成卡是唯一的结构化交付物。
    */
   /** 生成卡块（分镜提示词，按 04-侧边栏规范 §5.1） */
   card?: GenerationCardBlock;
+}
+
+/** 生成卡里的一条素材引用（IKAFSQ）。
+ *
+ * 从前这里只留下一个 `@名称` 字符串，`asset_id` 与 `media_type` 在翻译时被丢掉了——于是
+ * 拿不到缩略图、做不了悬浮预览，素材改名或删除也只会静默失效。引用要成立，得带着身份。 */
+export interface GenerationCardAssetRef {
+  /** 资产库里的素材 id：缩略图与预览由它查出来 */
+  assetId: string;
+  /** 展示名（不带 @ 前缀，前缀是展示层的事） */
+  label: string;
+  mediaType: 'image' | 'video';
 }
 
 /** 生成卡：单镜头分镜提示词卡（S2 渲染，S3 手动应用） */
@@ -38,10 +58,20 @@ export interface GenerationCardBlock {
   visual: string;
   /** 分镜提示词 */
   prompt: string;
-  /** 素材引用（@名称） */
+  /** 素材引用（@名称）。保留给旧数据与纯文本场景；有身份的引用走 assetRefItems。 */
   assetRefs?: string[];
+  /** 带身份的素材引用：胶囊靠它渲染缩略图与悬浮预览 */
+  assetRefItems?: GenerationCardAssetRef[];
   /** 卡片唯一标识（应用动作追踪） */
   cardId?: string;
+  /** 镜号（协议里的 `shot_no`，schema 强制 1..N 连续）→ 卡头的 `#3` */
+  shotNo?: number;
+  /** 本批次形态：image / video → 卡头的 `SCENE` 徽标 */
+  targetMedia?: 'image' | 'video';
+  /** 画幅，如 `16:9`（`generation_suggestions.aspect_ratio`） */
+  aspectRatio?: string;
+  /** 单镜时长秒数原值（`duration_seconds`）。与 timeRange 并存：那个是累加出的区间，这个是本镜自己的长度。 */
+  durationSeconds?: number;
 }
 
 /** 会话记录（列表/创建返回） */
@@ -69,13 +99,23 @@ export interface SessionMessage {
   created_at?: string;
 }
 
-/** 运行记录（事件内嵌） */
+/** 运行记录（事件内嵌 / 快照内嵌）。
+ *
+ * 时间与用量字段 agent 一直在送（`runView` 的原样投影），只是此前这里没声明，于是
+ * 刷新后没人去读——输入框上方那条"这一轮花了多久、多少 token"的状态行因此一刷新就消失。 */
 export interface SessionRun {
   run_id: string;
   session_id?: string;
   status: string;
   failure?: { code?: string; message?: string } | null;
   trace_id?: string | null;
+  /** 入队时刻（ISO）。状态行的起点：它量的是用户从提交到拿到结果等了多久，不是模型跑了多久。 */
+  created_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  /** 终态真实用量；缺失时状态行退回按字符数估算。 */
+  token_usage?: unknown;
+  context_capacity?: unknown;
 }
 
 /* ---- 生成卡批次（agent 侧 Prompt Card Revision Schema V3 的原样投影） ----
@@ -154,6 +194,32 @@ export interface SessionMessageAck {
 
 /* ============ 基础请求 ============ */
 
+/**
+ * 从错误响应体里取出 code 与 message。
+ *
+ * 这条链上有两种错误形状，必须都读得懂：
+ * - **agent 原样透传**：`{ error: { code, message, retryable, trace_id } }`——嵌套在 `error` 下
+ *   （agent 侧 `http/app.ts` 的 `jsonError`），BFF 代理是逐字节透传的，不重新包封
+ * - **蓝鲸后端自己的**：`{ code, msg, data }`——平铺
+ *
+ * 之前只读平铺形状，于是 agent 的每一个错误码在浏览器里都读不到，一律降级成「请求失败（409）」。
+ * 调用方想按 code 分支（例如把「已经确认过了」与真正的失败区分开）就无从下手。
+ */
+function describeFailure(
+  record: Record<string, unknown> | undefined,
+  status: number,
+): { message: string; code: number | string } {
+  const nested = record?.error;
+  const source = nested && typeof nested === 'object' ? (nested as Record<string, unknown>) : record;
+  const message =
+    (typeof source?.msg === 'string' && source.msg ? source.msg : undefined) ??
+    (typeof source?.message === 'string' && source.message ? source.message : undefined) ??
+    `请求失败（${status}）`;
+  const code =
+    typeof source?.code === 'string' || typeof source?.code === 'number' ? source.code : status;
+  return { message, code };
+}
+
 /** 会话维度裸 JSON 请求（401 清会话；非 2xx 抛 ApiError，供调用方按 status/code 分支） */
 async function sessionRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getAccessToken();
@@ -175,17 +241,10 @@ async function sessionRequest<T>(path: string, init?: RequestInit): Promise<T> {
     }
   }
   const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : undefined;
+  const failure = res.ok ? null : describeFailure(record, res.status);
   // Agent 的 capability_required 也使用 401，但它表示缺少 per-Run 能力券，不是用户登录失效。
-  if (res.status === 401 && record?.code !== 'capability_required') setSession(null, null);
-  if (!res.ok) {
-    const message =
-      (typeof record?.msg === 'string' ? record.msg : undefined) ??
-      (typeof record?.message === 'string' ? record.message : undefined) ??
-      `请求失败（${res.status}）`;
-    const code =
-      typeof record?.code === 'string' || typeof record?.code === 'number' ? record.code : res.status;
-    throw new ApiError(res.status, message, code);
-  }
+  if (res.status === 401 && failure?.code !== 'capability_required') setSession(null, null);
+  if (failure) throw new ApiError(res.status, failure.message, failure.code);
   return body as T;
 }
 
@@ -197,15 +256,15 @@ const snapshotPending = new Map<string, Promise<SessionSnapshot>>();
 
 /** 会话列表 GET /projects/:id/sessions */
 export function listSessions(projectId: string): Promise<{ items: SessionRecord[] }> {
-  return sessionRequest(`/projects/${encodeURIComponent(projectId)}/sessions`);
+  return sessionRequest(agentPath('list_sessions', projectId));
 }
 
 /** 创建会话 POST /projects/:id/sessions（context 自动绑定 blue_whale_project） */
 export function createSession(projectId: string): Promise<SessionRecord> {
   const existed = ensurePending.get(projectId);
   if (existed) return existed;
-  const p = sessionRequest<SessionRecord>(`/projects/${encodeURIComponent(projectId)}/sessions`, {
-    method: 'POST',
+  const p = sessionRequest<SessionRecord>(agentPath('create_session', projectId), {
+    method: agentMethod('create_session'),
     headers: { 'Idempotency-Key': newIdempotencyKey() },
     body: '{}',
   }).finally(() => ensurePending.delete(projectId));
@@ -219,17 +278,21 @@ export function fetchSessionSnapshot(projectId: string, sessionId: string): Prom
   const existed = snapshotPending.get(key);
   if (existed) return existed;
   const p = sessionRequest<SessionSnapshot>(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/snapshot`,
+    agentPath('session_snapshot', projectId, { session_id: sessionId }),
   ).finally(() => snapshotPending.delete(key));
   snapshotPending.set(key, p);
   return p;
 }
 
-/** 删除会话 DELETE /projects/:id/sessions/:sid（历史会话下拉「删除」，需二次确认） */
+/** 删除会话 DELETE /projects/:id/sessions/:sid（历史会话下拉「删除」，需二次确认）
+ *
+ * Idempotency-Key 是 agent 侧对**所有**写操作的硬要求（`http/app.ts` 的 idempotentMutation
+ * 缺则直接 400 idempotency_key_required），删除也不例外——之前这里漏了，于是这个删除从上线起
+ * 一次都没成功过。 */
 export function deleteSession(projectId: string, sessionId: string): Promise<unknown> {
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}`,
-    { method: 'DELETE' },
+    agentPath('delete_session', projectId, { session_id: sessionId }),
+    { method: agentMethod('delete_session'), headers: { 'Idempotency-Key': newIdempotencyKey() } },
   );
 }
 
@@ -246,9 +309,9 @@ export function sendSessionMessage(
 ): Promise<SessionMessageAck> {
   const { forcedCreativeSkillId, signal } = options ?? {};
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
+    agentPath('send_message', projectId, { session_id: sessionId }),
     {
-      method: 'POST',
+      method: agentMethod('send_message'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
       body: JSON.stringify({
         content: [{ type: 'text', text }],
@@ -259,102 +322,67 @@ export function sendSessionMessage(
   );
 }
 
-/** 取消运行 POST /projects/:id/sessions/:sid/runs/:runId/cancel */
-export function cancelSessionRun(
-  projectId: string,
-  sessionId: string,
-  runId: string,
-): Promise<unknown> {
+/**
+ * 取消本会话当前在做的事 POST /projects/:id/sessions/:sid/cancel（IKACCL）
+ *
+ * 会话级而非 Run 级：从点发送到拿到 runId 之间没有 id 可用，而那正是用户最想按取消的几秒。
+ * 「当前哪个 Run 活着」是服务端的知识，不该要求客户端先持有它才能取消。
+ *
+ * 服务端会一并丢弃排在后面还没调度的输入——否则取消完那个 Run，队列里的输入会立刻被
+ * 捞起来建新 Run，用户以为停住了却又跑起来。
+ *
+ * 幂等：没有在跑的东西时返回成功而非 404。
+ */
+export function cancelSession(projectId: string, sessionId: string): Promise<unknown> {
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/cancel`,
+    agentPath('cancel_session', projectId, { session_id: sessionId }),
     {
-      method: 'POST',
+      method: agentMethod('cancel_session'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
-      body: '{}',
+      body: JSON.stringify({ action_id: newIdempotencyKey() }),
     },
   );
 }
 
-/** 重试运行 POST /projects/:id/sessions/:sid/runs/:runId/retry（仅失败运行可重试） */
+/**
+ * 取消指定运行 POST /projects/:id/runs/:runId/cancel
+ *
+ * 路径**不含** /sessions/:sid：agent 的 Run 级路由挂在 /projects/:pid 之下、与 sessions 平级
+ * （见 agent-rest-api-v1.md）。此前这里多写了一段 sessions 前缀，请求永远匹配不到路由；
+ * body 也只有 `{}`，缺 `action_id`，即便路径对了也会被 422 拒掉。
+ * 结果是取消按钮从来没有真正生效过——UI 变了形态，请求却打在 404 上。
+ */
+export function cancelSessionRun(projectId: string, runId: string): Promise<unknown> {
+  return sessionRequest(
+    agentPath('cancel_run', projectId, { run_id: runId }),
+    {
+      method: agentMethod('cancel_run'),
+      headers: { 'Idempotency-Key': newIdempotencyKey() },
+      body: JSON.stringify({ action_id: newIdempotencyKey() }),
+    },
+  );
+}
+
+/** 重试运行 POST /projects/:id/runs/:runId/retry（仅失败运行可重试）。路径与 body 同上，此前同样两处都错。 */
 export function retrySessionRun(
   projectId: string,
-  sessionId: string,
   runId: string,
 ): Promise<{ run?: SessionRun } & Record<string, unknown>> {
   return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/retry`,
+    agentPath('retry_run', projectId, { run_id: runId }),
     {
-      method: 'POST',
+      method: agentMethod('retry_run'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
-      body: '{}',
+      body: JSON.stringify({ action_id: newIdempotencyKey() }),
     },
   );
 }
 
-/* ============ 需求理解确认门（ui_action 通道） ============ */
-
-/** 需求理解投影（agent requirementUnderstandingView；确认门结构化 UI 数据源） */
-export interface RequirementUnderstanding {
-  understanding_id: string;
-  version: number;
-  session_id?: string;
-  proposed_by_run_id?: string;
-  target_media?: 'image' | 'video';
-  proposed_summary: string;
-  proposed_options?: { id: string; label: string }[];
-  status: string;
-  accepted_summary?: string | null;
-  confirmed_at?: string | null;
-  created_at?: string;
-  updated_at?: string;
-}
-
-/** 待确认需求理解列表 GET .../requirement-understandings（确认门恢复水合用） */
-export function fetchRequirementUnderstandings(
-  projectId: string,
-  sessionId: string,
-): Promise<{ items: RequirementUnderstanding[] }> {
-  return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/requirement-understandings`,
-  );
-}
-
-/** 确认需求理解 POST .../requirement-understandings/:id/versions/:v/actions/confirm（ui_action 通道） */
-export function confirmRequirementUnderstanding(
-  projectId: string,
-  sessionId: string,
-  understandingId: string,
-  version: number,
-  actionId: string,
-): Promise<{ understanding: RequirementUnderstanding }> {
-  return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/requirement-understandings/${encodeURIComponent(understandingId)}/versions/${version}/actions/confirm`,
-    {
-      method: 'POST',
-      headers: { 'Idempotency-Key': newIdempotencyKey() },
-      body: JSON.stringify({ action_id: actionId }),
-    },
-  );
-}
-
-/** 修改需求理解 POST .../actions/correct（以用户替换文本重新提议，需 action_id + accepted_summary） */
-export function correctRequirementUnderstanding(
-  projectId: string,
-  sessionId: string,
-  understandingId: string,
-  version: number,
-  actionId: string,
-  acceptedSummary: string,
-): Promise<{ understanding: RequirementUnderstanding }> {
-  return sessionRequest(
-    `/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/requirement-understandings/${encodeURIComponent(understandingId)}/versions/${version}/actions/correct`,
-    {
-      method: 'POST',
-      headers: { 'Idempotency-Key': newIdempotencyKey() },
-      body: JSON.stringify({ action_id: actionId, accepted_summary: acceptedSummary }),
-    },
-  );
-}
+/* 需求理解的三个客户端封装（列表 / confirm / correct）在 IKAI14 随确认门 UI 一并删除。
+ *
+ * agent 侧的端点仍然在，路由清单里也仍然有——后端那一层是刻意保留的。删的是**前端调用方**：
+ * 确认这件事回到对话里由模型判断，浏览器不再自己发确认动作。留着三个没有调用方的封装，
+ * 只会让下一个人以为那条路还活着。要恢复的话，从 AGENT_ROUTES 里的对应路由重新写即可。 */
 
 /* ============ 事件流（共享连接，引用计数） ============ */
 
@@ -411,7 +439,7 @@ function ensureHub(projectId: string, sessionId: string, initialCursor: string):
   };
   hubs.set(key, hub);
 
-  const base = `/api/agent/v1/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/events`;
+  const base = agentUrl('session_events', projectId, { session_id: sessionId });
 
   const scheduleRetry = () => {
     if (hub.dead || hub.retryTimer) return;
@@ -508,4 +536,38 @@ export function subscribeSessionEvents(
       hubs.delete(`${projectId}:${sessionId}`);
     }, IDLE_CLOSE_DELAY);
   };
+}
+
+/* ============ 本会话累计消耗积分（IKAFPC） ============ */
+
+/**
+ * 本会话累计消耗。
+ *
+ * 三种「不是确切值」的情况分别有自己的字段，不要混：
+ * - `credits === null`：**查不到**。有 Run 却一张能力券都没记下（多半是 agent 版本还没带上
+ *   回写 `capability_id` 的那次改动）。这与「真的花了 0」是两回事，**不许显示成 0**。
+ * - `matched === 0 && runCount > 0`：券号有，但上游账单还没写进去。计费日志是 post-billing
+ *   才落库的，等一会儿再拉就有了。
+ * - `truncated`：数是**下界**而非确切值（翻页到顶，或只有一部分 Run 留下了券号）。
+ */
+export interface SessionCredits {
+  /** null = 查不到，不是 0。 */
+  credits: number | null;
+  quota: number | null;
+  /** 命中的账单条数：0 且 runCount>0 说明账还没写进上游，不是真的没花钱 */
+  matched: number;
+  runCount: number;
+  truncated: boolean;
+}
+
+/**
+ * 取本会话累计消耗积分。
+ *
+ * 走 `/api/agent/billing/*` 而非 `/api/agent/v1/*`：后者是到 agent 服务的透传代理，
+ * 这个端点的活儿（拿用户凭证去上游查账、按券号筛）只能在 BFF 做，agent 手里没有用户凭证。
+ */
+export function fetchSessionCredits(projectId: string, sessionId: string): Promise<SessionCredits> {
+  return apiRequest<SessionCredits>(
+    `/api/agent/billing/sessions/${encodeURIComponent(sessionId)}?project_id=${encodeURIComponent(projectId)}`,
+  );
 }

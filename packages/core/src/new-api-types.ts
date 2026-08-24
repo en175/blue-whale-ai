@@ -205,6 +205,29 @@ export interface NewApiUserLogListResult {
   total: number;
 }
 
+/**
+ * IKAFPC：按能力券号汇总的消费。
+ *
+ * **归属只认券号，不认时间窗。** new-api 只有「用户」这一个维度，没有会话与项目；同一个账号
+ * 完全可能同时跑两个 Agent 会话，也完全可能一边对话一边在 dock 栏出图。按「用户 + 时间窗」
+ * 求和会把这些账全算进来。而 new-api 已经把 `other.run_capability_id` 写进了每一笔走能力券的
+ * 账单，一张券对应一次 Run，逐笔精确——出图出片不走能力券链路，账单上根本没有这个字段，
+ * 天然被排除。
+ */
+export interface NewApiCapabilityQuotaResult {
+  /** 汇总到的 quota 总额（未换算成积分；换算是展示层的事）。 */
+  quota: number;
+  /** 命中的账单条数，用于判断「真的是 0」还是「一条都没查到」。 */
+  matched: number;
+  /**
+   * 是否因为翻页上限而提前收手。
+   *
+   * true 时 `quota` 是下界而非确切值——**调用方不得把它当成最终账**，否则会在用户面前把
+   * 一个偏小的数字说成确切花费。
+   */
+  truncated: boolean;
+}
+
 /** IK7G9X：模型定价目录条目（GET /api/pricing 的 data 数组元素子集）。 */
 export interface NewApiPricingItem {
   modelName: string;

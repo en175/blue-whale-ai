@@ -7,6 +7,8 @@ import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { AtSign, Upload, WandSparkles, Info, Music, X } from 'lucide-react';
 import type { GenerationCardBlock } from '@/api/agentSessions';
+import { uploadAssetFile } from '@/utils/upload';
+import type { UploadCompleteData } from '@/api/assets';
 import styles from './index.module.css';
 
 /** 资产卡类型（generation 为 Agent 生成卡落画布形态） */
@@ -55,6 +57,8 @@ interface AssetCardNodeData {
   onCardChange?: (id: string, patch: { refs?: { id: string; src: string }[]; desc?: string; voice?: { name: string; src: string } | null }) => void;
   /** 生成图片：唤起底部图片对话框 */
   onGenerateImage?: () => void;
+  /** 触发画布节点选取模式（父级实现） */
+  onPickFromCanvas?: (id: string) => void;
   /** Agent 生成卡数据（kind=generation） */
   generationCard?: GenerationCardNodeData;
 }
@@ -71,11 +75,14 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
   const [refs, setRefs] = useState<{ id: string; src: string }[]>(data.initialRefs ?? []);
   const [desc, setDesc] = useState(data.initialDesc ?? '');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [addMenu, setAddMenu] = useState(false);
   const [voiceRefs, setVoiceRefs] = useState<{ id: string; src: string; name: string; duration: number }[]>(
     data.voice ? [{ id: `voice-hydrated-${id}`, src: data.voice.src, name: data.voice.name, duration: 0 }] : [],
   );
   const fileRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLInputElement>(null);
+  /** 待上传映射：refId → { file, cancelled }，用于异步上传完成后替换 src，删除时取消 */
+  const pendingUploadsRef = useRef<Map<string, { file: File; cancelled: boolean }>>(new Map());
   /** 生成卡双击编辑：当前编辑中的字段 + 草稿值 */
   const [editingField, setEditingField] = useState<'shotTitle' | 'visual' | 'prompt' | null>(null);
   const [draftValue, setDraftValue] = useState('');
@@ -94,6 +101,18 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refs, desc, voiceRefs, id]);
 
+  /** ts 驱动注入：响应画布「到节点选择」结果，将选中的图片带入 */
+  useEffect(() => {
+    const pickResult = (data as { assetPickResult?: { ts: number; assetId: string; ref: { id: string; src: string } } }).assetPickResult;
+    if (!pickResult || pickResult.assetId !== id) return;
+    setRefs((prev) => {
+      if (prev.length >= MAX_IMAGE_REFS) return prev;
+      if (prev.some((r) => r.id === pickResult.ref.id)) return prev;
+      return [...prev, pickResult.ref];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [(data as { assetPickResult?: { ts: number } }).assetPickResult?.ts]);
+
   // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
   useEffect(() => {
     if (!contextMenu) return;
@@ -105,6 +124,31 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
       document.removeEventListener('contextmenu', close, true);
     };
   }, [contextMenu]);
+
+  // 点击其他区域关闭添加菜单
+  useEffect(() => {
+    if (!addMenu) return;
+    const close = () => setAddMenu(false);
+    document.addEventListener('click', close);
+    return () => {
+      document.removeEventListener('click', close);
+    };
+  }, [addMenu]);
+
+  // 卸载时取消所有待上传任务、释放 blob URL
+  useEffect(() => {
+    return () => {
+      pendingUploadsRef.current.forEach((p) => { p.cancelled = true; });
+      pendingUploadsRef.current.clear();
+      refs.forEach((r) => {
+        if (r.src.startsWith('blob:')) URL.revokeObjectURL(r.src);
+      });
+      voiceRefs.forEach((v) => {
+        if (v.src.startsWith('blob:')) URL.revokeObjectURL(v.src);
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** 右键菜单（与 MediaNode 一致，无右上角 ×） */
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -131,22 +175,67 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     data.onSaveToAssets?.(id);
   }, [data, id]);
 
-  /** 添加参考图（点击选择或拖入，仅 image/*，最多 MAX_IMAGE_REFS 张） */
+  /** 添加参考图（点击选择或拖入，仅 image/*，最多 MAX_IMAGE_REFS 张）
+   * 先创建本地 blob 预览立即上画布，再异步调用 uploadAssetFile() 三步上传，
+   * 成功后替换为永久 URL（与左侧工具栏加号上传逻辑一致） */
   const addFiles = (files: FileList | File[]) => {
-    const imgs = Array.from(files)
+    const imgs: { id: string; src: string; file: File }[] = [];
+    Array.from(files)
       .filter((f) => f.type.startsWith('image/'))
-      .map((f, i) => ({ id: `ref-${Date.now()}-${i}`, src: URL.createObjectURL(f) }));
+      .forEach((f, i) => {
+        const refId = `ref-${Date.now()}-${i}`;
+        imgs.push({ id: refId, src: URL.createObjectURL(f), file: f });
+      });
     if (imgs.length === 0) return;
+
+    // 先创建本地预览引用（不含 file 字段）
+    const newRefs = imgs.map(({ id, src }) => ({ id, src }));
     setRefs((prev) => {
       const remaining = MAX_IMAGE_REFS - prev.length;
       if (remaining <= 0) return prev;
-      const toAdd = imgs.slice(0, remaining);
+      const toAdd = newRefs.slice(0, remaining);
+      // 为被截断的文件释放 blob URL（用户看不到）
+      imgs.slice(remaining).forEach(({ src }) => URL.revokeObjectURL(src));
       return [...prev, ...toAdd];
+    });
+
+    // 立即上画布后，异步上传每个文件并替换永久 URL
+    imgs.slice(0, MAX_IMAGE_REFS).forEach(({ id: refId, file }) => {
+      // 记录待上传状态，便于删除时取消
+      pendingUploadsRef.current.set(refId, { file, cancelled: false });
+
+      uploadAssetFile(file)
+        .then((done: UploadCompleteData) => {
+          const entry = pendingUploadsRef.current.get(refId);
+          if (!entry || entry.cancelled) return;
+          pendingUploadsRef.current.delete(refId);
+
+          setRefs((prev) =>
+            prev.map((r) => {
+              if (r.id !== refId) return r;
+              // 释放本地 blob，替换为永久 URL
+              if (r.src.startsWith('blob:')) URL.revokeObjectURL(r.src);
+              return { ...r, src: done.url || r.src };
+            }),
+          );
+        })
+        .catch((err) => {
+          const entry = pendingUploadsRef.current.get(refId);
+          if (!entry || entry.cancelled) return;
+          pendingUploadsRef.current.delete(refId);
+          console.warn(`[资产卡] 参考图上传失败（${file.name}），保留本地预览:`, err);
+        });
     });
   };
 
-  /** 删除单张参考图 */
+  /** 删除单张参考图（同时取消未完成的上传、释放 blob URL） */
   const removeRef = (refId: string) => {
+    // 标记取消：若正在上传，完成时会跳过更新
+    const pending = pendingUploadsRef.current.get(refId);
+    if (pending) {
+      pending.cancelled = true;
+      pendingUploadsRef.current.delete(refId);
+    }
     setRefs((prev) => {
       const target = prev.find((r) => r.id === refId);
       if (target?.src.startsWith('blob:')) URL.revokeObjectURL(target.src);
@@ -439,10 +528,92 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
             )}
             <div className={styles.btnRow}>
               {refs.length < MAX_IMAGE_REFS && (
-                <button className={styles.actionBtn} onClick={() => fileRef.current?.click()}>
-                  <Upload size={15} strokeWidth={2} />
-                  <span>添加图片</span>
-                </button>
+                <div style={{ position: 'relative' }}>
+                  <button
+                    className={styles.actionBtn}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setAddMenu(!addMenu);
+                    }}
+                  >
+                    <Upload size={15} strokeWidth={2} />
+                    <span>添加图片</span>
+                  </button>
+                  {addMenu && (
+                    <div
+                      className={styles.addMenu}
+                      style={{
+                        position: 'absolute',
+                        bottom: 'calc(100% + 6px)',
+                        left: 0,
+                        backgroundColor: '#2a2a2a',
+                        border: '1px solid var(--color-border-primary)',
+                        borderRadius: '10px',
+                        padding: '6px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '2px',
+                        zIndex: 100,
+                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+                        minWidth: '120px',
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          fileRef.current?.click();
+                          setAddMenu(false);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '8px 10px',
+                          background: 'transparent',
+                          border: 'none',
+                          borderRadius: '6px',
+                          color: 'var(--color-text-primary)',
+                          fontSize: 'var(--font-size-sm)',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          width: '100%',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      >
+                        <Upload size={16} strokeWidth={2} />
+                        <span>图片上传</span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          data.onPickFromCanvas?.(id);
+                          setAddMenu(false);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '8px 10px',
+                          background: 'transparent',
+                          border: 'none',
+                          borderRadius: '6px',
+                          color: 'var(--color-text-primary)',
+                          fontSize: 'var(--font-size-sm)',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          width: '100%',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      >
+                        <span style={{ fontSize: '16px' }}>✨</span>
+                        <span>到节点选择</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
               <button className={styles.actionBtn} onClick={() => data.onGenerateImage?.()}>
                 <WandSparkles size={15} strokeWidth={2} />

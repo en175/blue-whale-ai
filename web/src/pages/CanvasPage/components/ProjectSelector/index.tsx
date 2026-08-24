@@ -162,8 +162,11 @@ export default function ProjectSelector({
       {/* 删除确认弹窗 */}
       {deleteTarget && (
         <div className={styles.modalOverlay} onClick={() => setDeleteTarget(null)}>
+          {/* ESC 守卫靠这两个属性识别弹层，见 ConfirmModal 里的说明（审查 W·A3）。 */}
           <div
             className={styles.modal}
+            role="dialog"
+            aria-modal="true"
             onClick={(e) => e.stopPropagation()}
           >
             <h4 className={styles.modalTitle}>删除项目</h4>

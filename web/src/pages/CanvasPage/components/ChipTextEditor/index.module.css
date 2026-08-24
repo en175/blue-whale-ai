@@ -38,7 +38,7 @@
   padding: 2px 8px 2px 6px;
   margin: 0 2px;
   border: 1px solid var(--color-border-secondary);
-  border-radius: var(--radius-full, 999px);
+  border-radius: var(--radius-full);
   background-color: var(--color-bg-tertiary);
   vertical-align: middle;
   white-space: nowrap;

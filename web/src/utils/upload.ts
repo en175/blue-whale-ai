@@ -70,9 +70,15 @@ export async function uploadAssetFile(
   const type = fileToAssetType(file);
   if (!type) throw new Error(`不支持的文件类型：${file.name}`);
   const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size });
+  console.log('[upload] presign 返回:', {
+    storage_key: presign.storage_key,
+    upload_url: presign.upload_url?.substring(0, 100) + '...',
+    headers: presign.headers,
+    expires_in: presign.expires_in,
+  });
   await putToPresignedUrl(presign, file);
   const meta = await probeMediaMeta(file, type);
-  return completeUpload({
+  const result = await completeUpload({
     type,
     mime: file.type,
     size: file.size,
@@ -80,4 +86,6 @@ export async function uploadAssetFile(
     project_id: opts?.projectId,
     ...meta,
   });
+  console.log('[upload] complete 返回:', { url: result.url, asset_id: result.asset_id });
+  return result;
 }

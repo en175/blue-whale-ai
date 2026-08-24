@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { newNodeId } from './nodeId';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
@@ -19,7 +20,7 @@ import FlowCanvas from './components/Canvas';
 import type { Node, Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { quotaToPoints, fetchMe, toSessionUser } from '@/api/auth';
-import { fetchProjects, createProject, renameProject, deleteProject, copyAssetToProject } from '@/api/projects';
+import { fetchProjects, createProject, renameProject, deleteProject,  } from '@/api/projects';
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, type AssetType } from '@/api/assets';
 import { saveCanvasDoc, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
@@ -57,10 +58,14 @@ export default function CanvasPage() {
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [showBottomDialog, setShowBottomDialog] = useState(false);
   const [showImageDialog, setShowImageDialog] = useState(false);
-  /** 「到节点选择」：画布节点选取模式（image/video/audio 对应三个底部对话框） */
-  const [pickMode, setPickMode] = useState<'image' | 'video' | 'audio' | null>(null);
+  /** 「到节点选择」：画布节点选取模式（image/video/audio 对应三个底部对话框；product 商品卡选图） */
+  const [pickMode, setPickMode] = useState<'image' | 'video' | 'audio' | 'product' | 'asset' | null>(null);
   /** 选取发起对话框（决定选取结果注入哪个对话框；视频对话框可同时选图片/视频节点） */
-  const [pickTarget, setPickTarget] = useState<'image' | 'video' | 'audio' | null>(null);
+  const [pickTarget, setPickTarget] = useState<'image' | 'video' | 'audio' | 'product' | 'asset' | null>(null);
+  /** 商品卡选取目标节点ID（选中的图片注入哪个商品卡） */
+  const [pickProductId, setPickProductId] = useState<string | null>(null);
+  /** 资产卡选取目标节点ID（选中的图片注入哪个资产卡） */
+  const [pickAssetId, setPickAssetId] = useState<string | null>(null);
   /** 画布节点选取结果（ts 驱动注入图片对话框） */
   const [imagePickResult, setImagePickResult] = useState<{ ts: number; file: UploadedFile } | null>(null);
   /** 画布节点选取结果（ts 驱动注入视频对话框参考） */
@@ -69,6 +74,10 @@ export default function CanvasPage() {
   const [videoDlgImagePickResult, setVideoDlgImagePickResult] = useState<{ ts: number; item: BottomRefItem } | null>(null);
   /** 画布节点选取结果（ts 驱动注入音频对话框参考） */
   const [audioPickResult, setAudioPickResult] = useState<{ ts: number; item: { id: string; src: string; name: string; assetId?: string | number } } | null>(null);
+  /** 画布节点选取结果（ts 驱动注入商品卡） */
+  const [productPickResult, setProductPickResult] = useState<{ ts: number; productId: string; image: { id: string; src: string; enabled: boolean } } | null>(null);
+  /** 画布节点选取结果（ts 驱动注入资产卡） */
+  const [assetPickResult, setAssetPickResult] = useState<{ ts: number; assetId: string; ref: { id: string; src: string } } | null>(null);
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
   const [showEdges, setShowEdges] = useState(true);
@@ -247,6 +256,11 @@ export default function CanvasPage() {
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
           onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean }>; detail?: string }) => handleProductChange(id, patch),
+          onPickFromCanvas: (id: string) => {
+            setPickMode('product');
+            setPickTarget('product');
+            setPickProductId(id);
+          },
         };
         break;
       case 'assetNode':
@@ -259,6 +273,11 @@ export default function CanvasPage() {
           onGenerateImage: () => actionsRef.current.openImageDialog(),
           onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
           onCardChange: (id: string, patch: { refs?: { id: string; src: string }[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
+          onPickFromCanvas: (id: string) => {
+            setPickMode('asset');
+            setPickTarget('asset');
+            setPickAssetId(id);
+          },
           // 生成卡节点水合后补动作回调（引用到 dock / 给 Agent）
           generationCard: base.data?.generationCard
             ? {
@@ -506,7 +525,7 @@ export default function CanvasPage() {
   /** 创建文本节点 */
   const handleAddTextNode = () => {
     const newNode: Node = {
-      id: `text-${Date.now()}`,
+      id: newNodeId('text'),
       type: 'textNode',
       position: spawnPosition(),
       data: {
@@ -532,13 +551,13 @@ export default function CanvasPage() {
   const handleDuplicateNode = (id: string) => {
     const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
-      const copy: Node = { ...t, id: `text-${Date.now()}`, position: { x: t.position.x + 40, y: t.position.y + 40 }, data: { ...t.data } };
+      const copy: Node = { ...t, id: newNodeId('text'), position: { x: t.position.x + 40, y: t.position.y + 40 }, data: { ...t.data } };
       setTextNodes((prev) => [...prev, copy]);
       return;
     }
     const m = mediaNodesRef.current.find((n) => n.id === id);
     if (m) {
-      const copy: Node = { ...m, id: `media-${Date.now()}`, position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
+      const copy: Node = { ...m, id: newNodeId('media'), position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
       setMediaNodes((prev) => [...prev, copy]);
     }
   };
@@ -656,15 +675,40 @@ export default function CanvasPage() {
           assetId: data.assetId as string | number | undefined,
         },
       });
+    } else if (pickMode === 'product' && isReadyMedia && data.mediaType !== 'video') {
+      // 商品卡发起的图片节点选取 → ts 驱动注入目标商品卡
+      const targetId = pickProductId;
+      if (targetId) {
+        const newImage = {
+          id: `node-${node.id}-${Date.now()}`,
+          src: data.src as string,
+          enabled: true,
+        };
+        setProductPickResult({ ts: Date.now(), productId: targetId, image: newImage });
+      }
+    } else if (pickMode === 'asset' && isReadyMedia && data.mediaType !== 'video') {
+      // 资产卡发起的图片节点选取 → ts 驱动注入目标资产卡
+      const targetId = pickAssetId;
+      if (targetId) {
+        const newRef = {
+          id: `node-${node.id}-${Date.now()}`,
+          src: data.src as string,
+        };
+        setAssetPickResult({ ts: Date.now(), assetId: targetId, ref: newRef });
+      }
     }
     setPickMode(null);
     setPickTarget(null);
+    setPickProductId(null);
+    setPickAssetId(null);
   };
 
   /** 画布空白处单击：取消节点选取模式 */
   const handleCanvasPaneClick = () => {
     setPickMode(null);
     setPickTarget(null);
+    setPickProductId(null);
+    setPickAssetId(null);
   };
 
   /** 节点拖拽结束：同步新坐标到父组件 state，触发自动保存 */
@@ -764,7 +808,7 @@ export default function CanvasPage() {
         console.warn(`[${file.name}] 超过 ${Math.round(limit / 1024 / 1024)}MB 上限，已跳过`);
         return;
       }
-      const nodeId = `media-${Date.now()}-${i}`;
+      const nodeId = newNodeId('media');
       const localSrc = URL.createObjectURL(file);
 
       newNodes.push({
@@ -909,7 +953,7 @@ export default function CanvasPage() {
       console.warn('未选中项目，无法创建生成任务');
       return;
     }
-    const nodeId = `media-gen-${Date.now()}`;
+    const nodeId = newNodeId('media-gen');
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
@@ -1109,9 +1153,28 @@ export default function CanvasPage() {
   actionsRef.current.download = handleNodeDownload;
 
   /** Agent 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent） */
+  /**
+   * 画布上现存的生成卡节点对应的 cardId 集合（IKAFSQ）。
+   *
+   * 「这张卡应用过没有」不再是侧边栏自己维护的一份状态，而是从画布查出来的事实。侧边栏那份
+   * 内存 `useState` 刷新即清空（绿勾全掉），而且画布上把节点删了它也不知道——两处必然对不上。
+   * 改成派生之后，删节点自动退回「＋ 手动应用」、刷新自动恢复，都不需要额外的同步代码。
+   *
+   * cardId 随 payload 一起铺进了 `data.generationCard`，而 `serializeNodes` 会把节点存进画布
+   * 文档，所以这个事实本来就是持久化的，只是过去没人读。
+   */
+  const appliedCardIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const node of assetNodes) {
+      const card = (node.data as { generationCard?: { cardId?: unknown } } | undefined)?.generationCard;
+      if (typeof card?.cardId === 'string' && card.cardId) ids.add(card.cardId);
+    }
+    return ids;
+  }, [assetNodes]);
+
   const handleAgentCardApply = (payload: GenerationCardBlock) => {
     const node: Node = {
-      id: `gencard-${Date.now()}`,
+      id: newNodeId('gencard'),
       type: 'assetNode',
       position: spawnPosition(),
       data: {
@@ -1242,7 +1305,7 @@ export default function CanvasPage() {
   const handleCreateProduct = () => {
     productSeq.current += 1;
     const node: Node = {
-      id: `product-${Date.now()}`,
+      id: newNodeId('product'),
       type: 'productNode',
       position: spawnPosition(),
       data: {
@@ -1256,6 +1319,11 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
         onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean }>; detail?: string }) => handleProductChange(id, patch),
+        onPickFromCanvas: (id: string) => {
+          setPickMode('product');
+          setPickTarget('product');
+          setPickProductId(id);
+        },
       },
     };
     setProductNodes((prev) => [...prev, node]);
@@ -1264,7 +1332,7 @@ export default function CanvasPage() {
   /** 新建资产卡节点（工具栏 资产库 → 风格卡/角色卡/物体卡/环境卡/自定义卡） */
   const handleCreateAssetCard = (kind: AssetCardKind) => {
     const node: Node = {
-      id: `asset-${kind}-${Date.now()}`,
+      id: newNodeId(`asset-${kind}`),
       type: 'assetNode',
       position: spawnPosition(),
       data: {
@@ -1277,6 +1345,11 @@ export default function CanvasPage() {
         onGenerateImage: () => actionsRef.current.openImageDialog(),
         onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
         onCardChange: (id: string, patch: { refs?: { id: string; src: string }[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
+        onPickFromCanvas: (id: string) => {
+          setPickMode('asset');
+          setPickTarget('asset');
+          setPickAssetId(id);
+        },
       },
     };
     setAssetNodes((prev) => [...prev, node]);
@@ -1485,7 +1558,7 @@ export default function CanvasPage() {
           const kind = item.kind as 'image' | 'video' | 'audio';
           const mediaType = kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'image';
           const node: Node = {
-            id: `media-${Date.now()}`,
+            id: newNodeId('media'),
             type: 'mediaNode',
             position: spawnPosition(),
             data: {
@@ -1518,7 +1591,7 @@ export default function CanvasPage() {
           };
           const kind = item.kind as AssetCardKind;
           const node: Node = {
-            id: `asset-${Date.now()}`,
+            id: newNodeId('asset'),
             type: 'assetNode',
             position: spawnPosition(),
             data: {
@@ -1533,6 +1606,11 @@ export default function CanvasPage() {
               onGenerateImage: () => actionsRef.current.openImageDialog(),
               onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
               onCardChange: (id: string, patch: { refs?: { id: string; src: string }[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
+              onPickFromCanvas: (id: string) => {
+                setPickMode('asset');
+                setPickTarget('asset');
+                setPickAssetId(id);
+              },
             },
           };
           if (snapshot.voice) {
@@ -1549,7 +1627,7 @@ export default function CanvasPage() {
             images: Array<{ id: string; src: string; enabled?: boolean }>;
           };
           const node: Node = {
-            id: `product-${Date.now()}`,
+            id: newNodeId('product'),
             type: 'productNode',
             position: spawnPosition(),
             data: {
@@ -1563,6 +1641,11 @@ export default function CanvasPage() {
               onAddToChat: (id: string) => actionsRef.current.addToChat(id),
               onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
               onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean }>; detail?: string }) => handleProductChange(id, patch),
+              onPickFromCanvas: (id: string) => {
+                setPickMode('product');
+                setPickTarget('product');
+                setPickProductId(id);
+              },
             },
           };
           setProductNodes((prev) => [...prev, node]);
@@ -1572,7 +1655,7 @@ export default function CanvasPage() {
           // 文本：构造文本节点
           const snapshot = item.snapshot as { html: string };
           const node: Node = {
-            id: `text-${Date.now()}`,
+            id: newNodeId('text'),
             type: 'textNode',
             position: spawnPosition(),
             data: {
@@ -1822,9 +1905,12 @@ export default function CanvasPage() {
           viewport={doc?.viewport}
           onViewportChange={setViewport}
           registerSpawnPosition={registerSpawnPosition}
+          hideZoomControl={showAgent}
           onNodeDragStop={handleNodeDragStop}
           onNodeClick={handleCanvasNodeClick}
           onPaneClick={handleCanvasPaneClick}
+          productPickResult={productPickResult}
+          assetPickResult={assetPickResult}
           onDeleteNode={(id) => {
             setTextNodes((prev) => prev.filter((n) => n.id !== id));
             setMediaNodes((prev) => {
@@ -1918,7 +2004,7 @@ export default function CanvasPage() {
             onClose={() => { setShowBottomDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleDialogSend}
             onPickFromCanvas={(kind) => { setPickMode(kind); setPickTarget('video'); }}
-            pickMode={pickTarget === 'video' && pickMode !== 'audio' ? pickMode : null}
+            pickMode={pickTarget === 'video' && pickMode !== 'audio' && pickMode !== 'product' && pickMode !== 'asset' ? pickMode : null}
             externalPick={videoPickResult}
             externalImagePick={videoDlgImagePickResult}
           />
@@ -1938,11 +2024,13 @@ export default function CanvasPage() {
         )}
 
         {/* 节点选取模式提示条 */}
-        {pickMode && pickTarget && (showImageDialog || showBottomDialog || showAudioDialog) && (
+        {pickMode && pickTarget && (showImageDialog || showBottomDialog || showAudioDialog || pickMode === 'product' || pickMode === 'asset') && (
           <div className={styles.pickHint}>
             {pickMode === 'image' && '到节点选择：点击画布中的图片节点带入参考图，点击空白处取消'}
             {pickMode === 'video' && '到节点选择：点击画布中的视频节点带入参考视频，点击空白处取消'}
             {pickMode === 'audio' && '到节点选择：点击画布中的音频节点带入参考音频，点击空白处取消'}
+            {pickMode === 'product' && '到节点选择：点击画布中的图片节点带入商品图，点击空白处取消'}
+            {pickMode === 'asset' && '到节点选择：点击画布中的图片节点带入参考图，点击空白处取消'}
           </div>
         )}
 
@@ -1985,6 +2073,7 @@ export default function CanvasPage() {
           inputVersion={agentContext?.ts ?? 0}
           projectId={currentId || undefined}
           onApplyToDock={handleAgentCardApply}
+          appliedCardIds={appliedCardIds}
           initialSkillId={agentContext?.skillId ?? ''}
         />
       )}

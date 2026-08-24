@@ -14,9 +14,18 @@ import {
   ArrowUp,
   Upload,
   MousePointerClick,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import ChipTextEditor, { type ChipTextEditorHandle, type ChipRef } from '../ChipTextEditor';
+import {
+  EMPTY_COMPOSED,
+  composedIsEmpty,
+  composedLength,
+  resolveComposed,
+  type ComposedValue,
+} from '../ChipTextEditor/composed';
 import styles from './index.module.css';
 
 /** 模式选项 */
@@ -91,13 +100,19 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   /** 富文本输入框（可多次插入生成卡引用胶囊，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供生成按钮启用态判断 */
-  const [composedText, setComposedText] = useState('');
+  /** 输入框内容的结构化形态（IKAFSX）：胶囊是指针，解引用只发生在发送那一刻。 */
+  const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
+  /** 计数口径：文字按字符数，一个胶囊算 1 个单位——不按它背后那几千字算。 */
+  const composedCount = composedLength(composed);
+  const canSend = !composedIsEmpty(composed);
   const [refFiles, setRefFiles] = useState<BottomRefItem[]>(initialRefs ?? []);
   /** 视频文件时长（秒），key 为 refFiles 索引 */
   const [videoDurations, setVideoDurations] = useState<Record<number, number>>({});
   const [selectedMode, setSelectedMode] = useState(modeOptions[0].key);
   const [modeOpen, setModeOpen] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
+  /** 放大态：输入区高度占屏幕 2/3；收起回底部默认高度 */
+  const [expanded, setExpanded] = useState(false);
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedSize, setSelectedSize] = useState('');
@@ -332,9 +347,10 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     });
   };
 
-  /** 发送：composedText 已把胶囊替换成完整 prompt 并跟自由输入拼接好（携带模型/宽高比/清晰度/时长） */
+  /** 发送：**解引用发生在这一刻**——编辑期胶囊一直是指针，此处才换成完整 prompt
+   *  （携带模型/宽高比/清晰度/时长） */
   const handleSend = () => {
-    const text = composedText.trim();
+    const text = resolveComposed(composed).trim();
     if (!text) return;
     if (!currentModel) {
       console.warn('视频模型能力加载中，请稍后重试');
@@ -363,11 +379,20 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   };
 
   return (
-    <div className={styles.dialog}>
-      {/* 关闭按钮 */}
-      <button className={styles.closeBtn} onClick={onClose} title="关闭">
-        <X size={16} strokeWidth={2} />
-      </button>
+    <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
+      {/* 右上角操作：放大/收起 + 关闭 */}
+      <div className={styles.topActions}>
+        <button
+          className={styles.iconBtn}
+          onClick={() => setExpanded((v) => !v)}
+          title={expanded ? '收起' : '展开'}
+        >
+          {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
+        </button>
+        <button className={styles.iconBtn} onClick={onClose} title="关闭">
+          <X size={16} strokeWidth={2} />
+        </button>
+      </div>
 
       {/* 配置面板（展开悬浮于底栏上方） */}
       {showConfig && (
@@ -654,24 +679,19 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         <ChipTextEditor
           ref={chipEditorRef}
           placeholder="上传 3-10 秒视频，结合文本或图片编辑，@ 插入已添加资源。"
-          onChangeText={(text) => {
-            if (text.length > MAX_INPUT) {
-              const truncated = text.slice(0, MAX_INPUT);
-              setComposedText(truncated);
-              // 同步截断编辑器内容，防止继续超出
-              chipEditorRef.current?.setText(truncated);
-            } else {
-              setComposedText(text);
-            }
-          }}
+          // 超限只提示、不动内容（IKAFSX）。原来这里会 `setText(truncated)`——那是「用纯文本
+          // 整体替换编辑器内容」，**所有胶囊当场湮灭、正文被从中间腰斩**，丢的远不止超出的部分。
+          // 而这个 1000 本身也是凭空定的：后端不校验 prompt 长度，模型能力接口里也没有这个字段。
+          // 拿到模型真实上限之前，它只是个提示，不足以据此删改用户内容。
+          onChange={setComposed}
           onSend={handleSend}
           className={styles.editorArea}
         />
       </div>
 
       {/* 字数统计 */}
-      <div className={`${styles.charCount} ${composedText.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
-        {composedText.length}/{MAX_INPUT}
+      <div className={`${styles.charCount} ${composedCount >= MAX_INPUT ? styles.charCountWarn : ''}`}>
+        {composedCount}/{MAX_INPUT}
       </div>
 
       {/* 底部状态栏 */}
@@ -752,9 +772,9 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
             <span>15 生成</span>
           </span>
           <button
-            className={`${styles.sendBtn} ${composedText.trim() && !keyframeInvalid ? styles.sendBtnActive : ''}`}
+            className={`${styles.sendBtn} ${canSend && !keyframeInvalid ? styles.sendBtnActive : ''}`}
             onClick={handleSend}
-            disabled={!composedText.trim() || keyframeInvalid}
+            disabled={!canSend || keyframeInvalid}
             title={keyframeInvalid ? '首尾帧模式需恰好 2 张图片' : '发送'}
           >
             <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
