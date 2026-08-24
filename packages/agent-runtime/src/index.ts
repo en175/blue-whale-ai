@@ -45,7 +45,6 @@ export {
 export {
   agentAssetResolveRequestSchema,
   agentAssetResolveResultSchema,
-  deriveAssetContentVersion,
   resolveAgentAsset,
   type AgentAssetResolveOutcome,
   type AgentAssetResolveRejection,

@@ -73,10 +73,7 @@ export class InternalAgentAssetsController {
       },
     );
     if (outcome.kind === "ok") return outcome.value;
-    if (
-      outcome.reason === "asset_inaccessible" ||
-      outcome.reason === "asset_version_mismatch"
-    ) {
+    if (outcome.reason === "asset_inaccessible") {
       throw new NewApiError("资源不存在", 404, "asset_not_found");
     }
     if (outcome.reason === "asset_metadata_unavailable") {
