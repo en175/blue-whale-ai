@@ -22,6 +22,11 @@ export class SkillService {
     return this.repo.listLibrary(userId, filter);
   }
 
+  /** IKA64P：官方技能全文 */
+  getOfficialContent(creativeId: string) {
+    return this.repo.getOfficialContent(creativeId);
+  }
+
   listMine(
     userId: string,
     filter: Parameters<ReturnType<typeof createSkillRepo>["listMine"]>[1],
