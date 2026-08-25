@@ -257,35 +257,14 @@ describe("ConversationRepo.acceptMessage — 接纳与技能冻结", () => {
         status: "queued",
         run_pin: expect.objectContaining({
           manifest_digest: bundledAgentRuntimeManifest.manifest_digest,
-          auto_creative_skill_candidates: [
-            expect.objectContaining({
-              creative_skill_id: "official.poster",
-              resource_digest: skillDigest,
-            }),
-          ],
-          // 无 forced 且候选非空 → 服务端确定性激活排序后首个候选（§16.2）。
-          activated_creative_skill_versions: [
-            expect.objectContaining({
-              creative_skill_id: "official.poster",
-              source: "auto",
-              reason: {
-                type: "agent_match",
-                detail: { matched_fields: ["conversation_messages"] },
-              },
-            }),
-          ],
+          // 技能只在用户显式点选时生效（IKB1WA）：user_skill.auto=1 也不再
+          // 产生候选，更不会被服务端自动激活。
+          auto_creative_skill_candidates: [],
+          activated_creative_skill_versions: [],
         }),
       }),
     });
-    expect(tx.creative_skill_activation.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        creative_skill_id: "official.poster",
-        user_id: 100n,
-        agent_run_id: "9",
-        skill_version: 1,
-        activation_source: "auto",
-      }),
-    });
+    expect(tx.creative_skill_activation.create).not.toHaveBeenCalled();
     expect(tx.command_idempotency.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         project_id: 42n,
@@ -294,12 +273,8 @@ describe("ConversationRepo.acceptMessage — 接纳与技能冻结", () => {
         accepted_cursor: expect.any(BigInt),
       }),
     });
-    expect(tx.creative_skill.findMany).toHaveBeenCalledWith({
-      where: expect.objectContaining({
-        asset_domain: "official",
-        owner_user_id: 0n,
-      }),
-    });
+    // 候选查询本身已下线，不再打 creative_skill 表找 auto 技能。
+    expect(tx.creative_skill.findMany).not.toHaveBeenCalled();
   });
 
   it("freezes one authorized forced Skill and records its activation in the transaction", async () => {
@@ -417,7 +392,7 @@ describe("ConversationRepo.acceptMessage — 接纳与技能冻结", () => {
     });
   });
 
-  it("个人技能 auto_match=1 进入候选并被确定性激活（§16.2）", async () => {
+  it("个人技能 auto_match=1 也不进入候选、不被激活（IKB1WA）", async () => {
     const skillBody = "# My Storyboard";
     const skillDigest = `sha256:${createHash("sha256").update(skillBody).digest("hex")}`;
     const tx = {
@@ -511,43 +486,20 @@ describe("ConversationRepo.acceptMessage — 接纳与技能冻结", () => {
     });
 
     expect(result.kind).toBe("accepted");
-    // 个人本体开关查询带 owner 与 auto_match 谓词（§16.1）。
-    expect(tx.creative_skill.findMany).toHaveBeenCalledWith({
-      where: expect.objectContaining({
-        asset_domain: "personal",
-        owner_user_id: 100n,
-        auto_match: 1,
-      }),
-    });
+    // 个人本体开关不再被查询，也不再产出候选与激活埋点。
+    expect(tx.creative_skill.findMany).not.toHaveBeenCalled();
     expect(tx.agent_runs.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         run_pin: expect.objectContaining({
-          auto_creative_skill_candidates: [
-            expect.objectContaining({
-              creative_skill_id: "personal.storyboard",
-              display_version: "2.1.0",
-            }),
-          ],
-          activated_creative_skill_versions: [
-            expect.objectContaining({
-              creative_skill_id: "personal.storyboard",
-              source: "auto",
-            }),
-          ],
+          auto_creative_skill_candidates: [],
+          activated_creative_skill_versions: [],
         }),
       }),
     });
-    // 版本事实：埋点记当次固定版本 2.1.0 的 major 号（§16.2）。
-    expect(tx.creative_skill_activation.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        creative_skill_id: "personal.storyboard",
-        activation_source: "auto",
-        skill_version: 2,
-      }),
-    });
+    expect(tx.creative_skill_activation.create).not.toHaveBeenCalled();
   });
 
-  it("多个 auto 候选只确定性激活一个（creative_skill_id 排序首个），埋点仅一行", async () => {
+  it("官方与个人 auto 开关全开，仍不激活任何技能（IKB1WA）", async () => {
     const bodyA = "# Skill A";
     const digestA = `sha256:${createHash("sha256").update(bodyA).digest("hex")}`;
     const bodyB = "# Skill B";
@@ -666,21 +618,9 @@ describe("ConversationRepo.acceptMessage — 接纳与技能冻结", () => {
     expect(result.kind).toBe("accepted");
     const runCreate = tx.agent_runs.create.mock.calls[0][0];
     const pin = runCreate.data.run_pin;
-    // 候选池含两个（官方 ∪ 个人），激活恰为排序首个 official.a_skill。
-    expect(pin.auto_creative_skill_candidates).toHaveLength(2);
-    expect(pin.activated_creative_skill_versions).toHaveLength(1);
-    expect(pin.activated_creative_skill_versions[0]).toEqual(
-      expect.objectContaining({
-        creative_skill_id: "official.a_skill",
-        source: "auto",
-      }),
-    );
-    expect(tx.creative_skill_activation.create).toHaveBeenCalledTimes(1);
-    expect(tx.creative_skill_activation.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        creative_skill_id: "official.a_skill",
-        activation_source: "auto",
-      }),
-    });
+    // 两侧开关全开，候选与激活仍恒为空——只有显式点选才让技能生效。
+    expect(pin.auto_creative_skill_candidates).toHaveLength(0);
+    expect(pin.activated_creative_skill_versions).toHaveLength(0);
+    expect(tx.creative_skill_activation.create).not.toHaveBeenCalled();
   });
 });
