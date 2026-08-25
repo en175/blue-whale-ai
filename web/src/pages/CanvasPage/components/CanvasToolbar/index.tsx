@@ -147,7 +147,8 @@ export default function CanvasToolbar({
         <button
           className={`${styles.toolBtn} ${openMenu === key ? styles.toolBtnActive : ''}`}
           onClick={() => toggleMenu(key)}
-          title={def.title}
+          data-tooltip={def.title}
+          aria-label={def.title}
         >
           <Icon size={20} strokeWidth={2} />
         </button>
@@ -181,7 +182,8 @@ export default function CanvasToolbar({
       <button
         className={`${styles.toolBtn} ${mode === 'drag' ? styles.toolBtnActive : ''}`}
         onClick={() => onModeChange(mode === 'drag' ? 'select' : 'drag')}
-        title={mode === 'drag' ? '切换为选择' : '切换为拖动'}
+        data-tooltip={mode === 'drag' ? '切换为选择' : '切换为拖动'}
+        aria-label={mode === 'drag' ? '切换为选择' : '切换为拖动'}
       >
         {mode === 'drag' ? (
           <Hand size={20} strokeWidth={2} />
@@ -191,7 +193,7 @@ export default function CanvasToolbar({
       </button>
 
       {/* 加号上传 */}
-      <button className={styles.toolBtn} onClick={handleAddClick} title="上传素材">
+      <button className={styles.toolBtn} onClick={handleAddClick} data-tooltip="上传素材" aria-label="上传素材">
         <Plus size={20} strokeWidth={2} />
       </button>
       <input
@@ -210,7 +212,8 @@ export default function CanvasToolbar({
       <button
         className={`${styles.toolBtn} ${showImageDialog ? styles.toolBtnActive : ''}`}
         onClick={onToggleImageDialog}
-        title="图片对话"
+        data-tooltip="图片对话"
+        aria-label="图片对话"
       >
         <ImagePlus size={20} strokeWidth={2} />
       </button>
@@ -219,7 +222,8 @@ export default function CanvasToolbar({
       <button
         className={`${styles.toolBtn} ${showVideoDialog ? styles.toolBtnActive : ''}`}
         onClick={onToggleVideoDialog}
-        title="视频对话"
+        data-tooltip="视频对话"
+        aria-label="视频对话"
       >
         <Video size={20} strokeWidth={2} />
       </button>
@@ -228,13 +232,14 @@ export default function CanvasToolbar({
       <button
         className={`${styles.toolBtn} ${showAudioDialog ? styles.toolBtnActive : ''}`}
         onClick={onToggleAudioDialog}
-        title="音频生成"
+        data-tooltip="音频生成"
+        aria-label="音频生成"
       >
         <AudioLines size={20} strokeWidth={2} />
       </button>
 
       {/* 文本 */}
-      <button className={styles.toolBtn} onClick={onAddTextNode} title="添加文本">
+      <button className={styles.toolBtn} onClick={onAddTextNode} data-tooltip="添加文本" aria-label="添加文本">
         <Type size={20} strokeWidth={2} />
       </button>
 

@@ -23,6 +23,12 @@
   overflow: hidden;
 }
 
+/* 浮动模式：缩小宽度与高度，居中展示 */
+.panelFloating {
+  width: 360px;
+  max-height: 70vh;
+}
+
 /* 拖动指示图标 */
 .dragIndicator {
   width: 28px;

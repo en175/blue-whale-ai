@@ -89,7 +89,7 @@ export default function UserDropdown() {
     setOpen(false);
     setLoggingOut(true);
     await logout().catch(() => undefined);
-    setSession(null, null);
+    setSession(null);
     setLoggingOut(false);
   };
 

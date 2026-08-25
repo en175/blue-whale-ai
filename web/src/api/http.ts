@@ -2,10 +2,10 @@
  * http 统一请求封装：兼容后端两种响应包络
  * - 用户侧：{code:200, msg, data}
  * - 后台侧：{success:true, data}
- * - 自动附加 Bearer token；非 auth 接口 401 时清空本地会话
+ * - 登录态走 HttpOnly 会话 cookie（浏览器自动携带，JS 不附加令牌）；非 auth 接口 401 时清空本地会话
  * - 开发期 /api 前缀由 vite 代理转发到测试环境
  * ============================================ */
-import { getAccessToken, setSession } from '@/utils/auth';
+import { setSession } from '@/utils/auth';
 
 /** 接口路径前缀 */
 export const API_PREFIX = '/api';
@@ -15,7 +15,7 @@ export const API_PREFIX = '/api';
  *
  * 这条链路是：浏览器 → BFF `/api/agent/billing/*` → new-api `/api/log/self`。BFF 把上游的
  * 状态码原样透传，异常过滤器也不改。于是上游一次计费打嗝（sk token 被拒、限流、维护）
- * 就变成本地 `setSession(null, null)`——**对话进行中用户被静默登出**，而积分那段代码只
+ * 就变成本地 `setSession(null)`——**对话进行中用户被静默登出**，而积分那段代码只
  * `console.warn`，界面上毫无提示，用户要到下次跳转才发现。
  *
  * 上游的计费状态码不该被洗成 BFF 自己的鉴权状态。查不到账的正确表现是胶囊显示「—」，
@@ -52,7 +52,7 @@ interface Envelope<T> {
   data: T | null;
 }
 
-/** 基础 fetch：附加 Content-Type 与 Authorization，处理 401 会话失效 */
+/** 基础 fetch：附加 Content-Type（登录态走 HttpOnly cookie），处理 401 会话失效 */
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   // 开发模式控制台打印真实后端完整路径（代理目标 + 请求路径）
   if (import.meta.env.DEV) {
@@ -62,8 +62,7 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
 
   const headers = new Headers(init?.headers);
   if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  const token = getAccessToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  // 登录态走 HttpOnly 会话 cookie，浏览器自动携带，JS 不附加任何令牌头。
 
   const res = await fetch(path, { ...init, headers });
 
@@ -77,7 +76,7 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
     !path.startsWith(AGENT_BILLING_PREFIX) &&
     path !== `${API_PREFIX}/admin/session`
   ) {
-    setSession(null, null);
+    setSession(null);
   }
   return res;
 }

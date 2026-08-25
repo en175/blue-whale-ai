@@ -38,6 +38,53 @@
   background-color: var(--color-bg-hover);
 }
 
+/* 自定义 tooltip：鼠标悬停立即显示，替代浏览器原生 title 延迟 */
+.toolBtn[data-tooltip] {
+  position: relative;
+}
+
+.toolBtn[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 14px);
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  padding: 6px 10px;
+  background-color: rgba(20, 20, 20, 0.95);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 100;
+}
+
+/* 左侧小三角箭头 */
+.toolBtn[data-tooltip]::before {
+  content: '';
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+  border: 5px solid transparent;
+  border-right-color: rgba(20, 20, 20, 0.95);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 100;
+}
+
+.toolBtn:hover[data-tooltip]::after,
+.toolBtn:hover[data-tooltip]::before {
+  opacity: 1;
+}
+
 .toolBtnActive {
   color: var(--color-text-primary);
   background-color: var(--color-bg-hover);

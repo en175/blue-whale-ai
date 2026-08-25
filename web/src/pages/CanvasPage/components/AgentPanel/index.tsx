@@ -1051,6 +1051,25 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     return () => window.removeEventListener('resize', handleResize);
   }, [floating, measurePanel]);
 
+  /** 切换到浮动模式时居中；切回固定模式时回到画布右侧初始位置 */
+  useEffect(() => {
+    const metrics = measurePanel();
+    if (!metrics) return;
+    if (floating) {
+      // 浮动模式：缩宽、居中
+      const centerX = (metrics.pageWidth - metrics.panelWidth) / 2;
+      const centerY = (metrics.pageHeight - metrics.panelHeight) / 2;
+      const layout = freePanelLayout(metrics, centerX, centerY);
+      setPosition({ x: layout.x, y: layout.y });
+    } else {
+      // 固定模式：贴右上角、撑满可用高度
+      const layout = dockedPanelLayout(metrics);
+      setPosition({ x: layout.x, y: layout.y });
+      setPanelHeight(layout.height);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floating]);
+
   /**
    * 拉本会话累计消耗积分：切会话时拉一次，每轮结束后再拉一次。
    *
@@ -1319,7 +1338,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     for (const file of chosen) {
       const key = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const plan = planAttachment(file, projectId);
-      if (!plan.ok) {
+      if (plan.ok === false) {
         setAttachments((prev) => [
           ...prev,
           { key, name: file.name, mediaType: 'image', status: 'failed', error: plan.error },
@@ -1356,7 +1375,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   return (
     <div
       ref={panelRef}
-      className={styles.panel}
+      className={`${styles.panel} ${floating ? styles.panelFloating : ''}`}
       style={initialized ? { left: position.x, top: position.y, height: panelHeight, transform: 'none' } : undefined}
       onMouseDown={handleDragStart}
     >

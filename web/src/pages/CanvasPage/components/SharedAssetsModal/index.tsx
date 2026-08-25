@@ -49,6 +49,7 @@ const TABS: { key: string; label: string; assetType?: SharedAssetType; kind?: Sh
 
 /** 资产子类型下拉（card 种类筛选） */
 type CardKind = 'style' | 'character' | 'object' | 'environment';
+type CardFilter = 'all' | 'all-assets' | CardKind;
 const CARD_KINDS: CardKind[] = ['style', 'character', 'object', 'environment'];
 const CARD_KIND_LABEL: Record<CardKind, string> = {
   style: '风格',
@@ -98,6 +99,10 @@ interface SharedAssetsModalProps {
   onAddItem: (item: SharedAssetView) => Promise<boolean>;
   /** Toast 提示回调 */
   onToast: ToastFn;
+  /** 初始 tab（用于指定打开时显示的分类） */
+  defaultTab?: string;
+  /** 初始资产筛选（'all-assets' 展示全部资产，或具体 CardKind） */
+  defaultCardFilter?: CardFilter;
 }
 
 /** 构建标题（从快照提取） */
@@ -176,10 +181,12 @@ export default function SharedAssetsModal({
   projectId,
   onAddItem,
   onToast,
+  defaultTab,
+  defaultCardFilter,
 }: SharedAssetsModalProps) {
-  const [tab, setTab] = useState('image');
-  /** 资产子类型筛选（'all' 表示不筛选 card 种类，使用主 Tab 过滤） */
-  const [cardFilter, setCardFilter] = useState<CardKind | 'all'>('all');
+  const [tab, setTab] = useState(defaultTab ?? 'image');
+  /** 资产子类型筛选（'all' 表示主 Tab 筛选；'all-assets' 表示查询所有资产；具体 CardKind 查询 card + kind） */
+  const [cardFilter, setCardFilter] = useState<CardFilter>(defaultCardFilter ?? 'all');
   const [cardOpen, setCardOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [items, setItems] = useState<AssetListItem[]>([]);
@@ -195,7 +202,9 @@ export default function SharedAssetsModal({
   /** 构建查询参数 */
   const buildQuery = useCallback((): SharedAssetListQuery => {
     const q: SharedAssetListQuery = { page: 1, size: 50 };
-    if (cardFilter !== 'all') {
+    if (cardFilter === 'all-assets') {
+      // 全部资产：不加任何过滤条件，查询所有类型
+    } else if (cardFilter !== 'all') {
       // 资产子类型筛选：只查 card 类型 + 指定 kind
       q.assetType = 'card';
       q.kind = cardFilter;
@@ -345,7 +354,7 @@ export default function SharedAssetsModal({
           <div className={styles.tabs}>
             {/* 资产子类型下拉（独立筛选 card 种类，放在最前面） */}
             <button
-              className={`${styles.tab} ${styles.tabActive}`}
+              className={`${styles.tab} ${cardFilter !== 'all' ? styles.tabActive : ''}`}
               onClick={() => setCardOpen((v) => !v)}
             >
               <ImageIcon size={14} strokeWidth={2} />
@@ -359,9 +368,9 @@ export default function SharedAssetsModal({
             {cardOpen && (
               <div className={styles.subDropdown}>
                 <button
-                  className={`${styles.subOption} ${cardFilter === 'all' ? styles.subOptionActive : ''}`}
+                  className={`${styles.subOption} ${cardFilter === 'all-assets' ? styles.subOptionActive : ''}`}
                   onClick={() => {
-                    setCardFilter('all');
+                    setCardFilter('all-assets');
                     setCardOpen(false);
                   }}
                 >

@@ -1,10 +1,14 @@
 import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { NewApiError } from "@blue-whale/core";
-import type { Request } from "express";
+import type { Request, Response } from "express";
 import { AccountService } from "@lib/shared/account/account.service.js";
+import { SessionService } from "@lib/shared/session/session.service.js";
+import {
+  SESSION_COOKIE_NAME,
+  sessionCookieOptions,
+} from "@lib/shared/session/cookie.js";
 import { toAuthError } from "@lib/shared/errors/auth-error.js";
-import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
 import { IS_PUBLIC_KEY } from "@lib/infra/decorators/public.decorator.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
@@ -13,10 +17,18 @@ const ENABLED_STATUS = 1;
 
 type RequestWithUser = Request & { user: AuthenticatedUser };
 
+/**
+ * 全局守卫（ADR-0062 #19 凭证分层）：浏览器登录态走 HttpOnly 会话 cookie
+ * （`bw_session`），BFF 本地校验会话后把真实 `sk-...` 回注请求头，下游业务接口
+ * 继续以 `Bearer sk-...` 自解析、代打 new-api，无需逐处改动。
+ * - 每次鉴权刷新 cookie maxAge，与 Redis 7 天滑动 TTL 对齐（活跃用户不踢）
+ * - role/status 超 ROLE_STATUS_RECHECK_MS 回源 new-api 复核，账户禁用/降权近实时生效
+ */
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
+    private readonly sessions: SessionService,
     private readonly account: AccountService,
   ) {}
 
@@ -28,30 +40,56 @@ export class AuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<Request>();
-    const token = parseBearerToken(request.headers.authorization);
+    const response = context.switchToHttp().getResponse<Response>();
+    const token = request.cookies?.[SESSION_COOKIE_NAME];
     if (!token) {
       throw new NewApiError("缺少登录凭证", 401, "unauthorized");
     }
 
-    let identity;
+    let session;
     try {
-      identity = await this.account.resolveTokenIdentity(token);
+      session = await this.sessions.resolveSession(token);
     } catch (error) {
-      throw toAuthError(error);
+      if (error instanceof NewApiError) throw toAuthError(error);
+      throw new NewApiError("会话服务暂不可用", 503, "session_service_error");
+    }
+    if (!session) {
+      throw new NewApiError("登录已过期，请重新登录", 401, "unauthorized");
     }
 
-    if (!Number.isInteger(identity.userId) || identity.userId <= 0) {
-      throw new NewApiError("账户服务响应异常", 502, "invalid_identity");
+    // role/status 定期复核（账户禁用/降权近实时生效；new-api 不可达时沿用缓存身份，不阻断请求）
+    if (session.needsRecheck) {
+      try {
+        const identity = await this.account.resolveTokenIdentity(session.sk);
+        session = {
+          ...session,
+          role: identity.role,
+          status: identity.status,
+          needsRecheck: false,
+        };
+        await this.sessions.updateSessionIdentity(token, {
+          role: identity.role,
+          status: identity.status,
+        });
+      } catch {
+        // 上游不可达：沿用缓存 role/status
+      }
     }
-    if (identity.status !== ENABLED_STATUS) {
+    if (session.status !== ENABLED_STATUS) {
       throw new NewApiError("账户已停用", 403, "account_disabled");
     }
 
+    // 滑动续期：刷新 HttpOnly cookie maxAge，与 Redis TTL 对齐（活跃用户不被 7 天硬踢）
+    response.cookie(SESSION_COOKIE_NAME, token, sessionCookieOptions());
+
+    // 回注真实 sk-，下游 `parseBearerToken` 拿到上游执行凭证代打 new-api（浏览器永不接触）。
+    request.headers.authorization = `Bearer ${session.sk}`;
     (request as RequestWithUser).user = {
-      userId: String(identity.userId),
+      userId: String(session.userId),
       status: "enabled",
-      isAdmin: identity.role >= ADMIN_ROLE_THRESHOLD,
-      username: identity.username,
+      isAdmin: session.role >= ADMIN_ROLE_THRESHOLD,
+      username: session.username,
+      email: session.email,
     };
     return true;
   }

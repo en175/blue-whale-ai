@@ -96,6 +96,8 @@ export default function CanvasPage() {
   const [productNodes, setProductNodes] = useState<Node[]>([]);
   const [assetNodes, setAssetNodes] = useState<Node[]>([]);
   const [showAssetsModal, setShowAssetsModal] = useState(false);
+  const [assetsModalDefaultTab, setAssetsModalDefaultTab] = useState<string | undefined>(undefined);
+  const [assetsModalDefaultFilter, setAssetsModalDefaultFilter] = useState<string | undefined>(undefined);
   /** label 有值时是生成卡引用（侧边栏渲染成胶囊）；无 label 是普通 @ 文本预填；mediaBlocks 携带媒体元数据 */
   const [agentContext, setAgentContext] = useState<{
     text: string;
@@ -1522,6 +1524,8 @@ export default function CanvasPage() {
     //   return;
     // }
     if (menu === 'assets' && item === 'shared') {
+      setAssetsModalDefaultTab(undefined);
+      setAssetsModalDefaultFilter('all-assets');
       setShowAssetsModal(true);
       return;
     }
@@ -1535,6 +1539,8 @@ export default function CanvasPage() {
       return;
     }
     if (menu === 'goods' && item === 'import') {
+      setAssetsModalDefaultTab('goods');
+      setAssetsModalDefaultFilter(undefined);
       setShowAssetsModal(true);
       return;
     }
@@ -1646,11 +1652,7 @@ export default function CanvasPage() {
     try {
       const result = await saveSharedAsset(req);
       console.log('[SaveAssets] 保存结果', result);
-      if (result.created) {
-        showToast('success', successMsg);
-      } else {
-        showToast('warn', '该素材已在共享资产中');
-      }
+      showToast('success', successMsg);
       return result;
     } catch (e) {
       console.warn('[SaveAssets] 保存失败', e);
@@ -2331,6 +2333,8 @@ export default function CanvasPage() {
             return ok;
           })}
           onToast={showToast}
+          defaultTab={assetsModalDefaultTab}
+          defaultCardFilter={assetsModalDefaultFilter as any}
         />
       )}
 
