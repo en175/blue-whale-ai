@@ -42,7 +42,9 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 ## 操作约定
 
 - **创建**：`create_enterprise_issue(enterprise_id, title, description, project_id=..., program_id=...)`。根 issue 的 `project_id`（仓库）和 `program_id`（项目）都**必传**且非 0——缺任一则 hook 硬拦（见上「定位」）。标签不能在 create 落——企业私有仓库 `labels` 静默忽略，紧跟一次 `update_enterprise_issue(label_ids=...)` 补。**创建后必须 `get_enterprise_issue_detail` 回读确认 `description` 非空**——错名参数（如把描述传到 `body`）被静默忽略，已踩坑建成空描述工单（IK5THP）；回读验证是防静默忽略的通用要求，PR / Release 创建后同样适用；入参名以工具 schema 为准，不凭印象。
-- **创建子 issue（交 Agent）**：先 `get_enterprise_issue_detail(parent_ident)` 读父项，子项继承 `parent_id`/`project_id`/`program_id`，但 `issue_type_id` **一律用「任务」(1292680)**——子工单一律任务型，不继承父需求型（2026-08-25 定规）。**标题命名：`【<前端|后端>】<任务标题>`**（例：`【后端】画布视频节点提取音频（media_extract）`）——`前端|后端` 标明改动归属端。create 后 `update_enterprise_issue` 补 `ready-for-agent` label_ids，再 `list_enterprise_issues(project_id=parent.project_id, search=new_ident)` 反查；查不到 = 发布失败，不交 Agent。
+- **创建子 issue（交 Agent）**：先 `get_enterprise_issue_detail(parent_ident)` 读父项，子项继承 `parent_id`/`project_id`/`program_id`，但 `issue_type_id` **一律用「任务」(1292680)**——子工单一律任务型，不继承父需求型（2026-08-25 定规）。**标题命名：`【<前端|后端>】<任务标题>`**（例：`【后端】画布视频节点提取音频（media_extract）`）——`前端|后端` 标明改动归属端。跨端改动拆成前端/后端两个子任务，不建「子需求」。create 后 `update_enterprise_issue` 补 `ready-for-agent` label_ids，再 `list_enterprise_issues(project_id=parent.project_id, search=new_ident)` 反查；查不到 = 发布失败，不交 Agent。
+  - **子任务，不是子需求**（2026-08-25 定规）：技术侧在产品建的需求工单下记录自己的工作时，只能建**任务**（`issue_type_id=1292680`），绝不能建「需求」型子项。需求（含技术维护母工单 IKAZIG 这类需求型父项）由产品/人关闭，Agent **只完成自己的子任务**，不得把父需求置为已完成/关闭。
+  - **父工单正文的标题前缀（如「改造/维护/优化/修复」）不覆盖本条**：若父项要求分类前缀，仍以「端」为标题前缀（`【前端】/【后端】`），分类写进 body；不要为了迁就父项格式把 `issue_type` 改成需求型。
 - **读取**：`get_enterprise_issue_detail` 取详情；`list_enterprise_issue_comments(enterprise_id, issue_id)` 取评论。
 - **列出**：`list_enterprise_issues`，`state` 过滤（open/closed/rejected/progressing），`label_ids` 过滤（数字 ID）。
 - **评论**：`comment_enterprise_issue(enterprise_id, issue_id, body)`。
