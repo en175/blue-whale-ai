@@ -68,6 +68,8 @@ describe("new-api client —— 账户与错误映射", () => {
       userId: 8,
       username: "new-user",
       email: "new@example.com",
+      role: 1,
+      status: 1,
     });
     await expect(client.resolveTokenIdentity("sk-register")).resolves.toEqual({
       userId: 8,

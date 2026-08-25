@@ -39,12 +39,55 @@ describe("resolveAgentAsset", () => {
       value: {
         asset_id: "123",
         media_type: "image",
-        mime_type: "image/png",
+        // 图片签的是给模型读的降采样版本，那一版是 JPEG（IKAZC2）。报原始的 image/png 会让
+        // 下游按错误的类型处理——mime_type 与 read_url 说的必须是同一份字节。
+        mime_type: "image/jpeg",
+        // 仍是原图大小：媒体策略用它守素材本身是否荒唐，不是守本次传输量。
         size_bytes: 1_048_576,
         duration_seconds: null,
         read_url: "https://assets.example.test/read?signature=secret",
         expires_at: "2026-08-17T08:00:00.000Z",
       },
+    });
+  });
+
+  /**
+   * IKAZC2：图片要签成给模型读的降采样版本。
+   *
+   * 线上那次失败是这样发生的：8.27MB 的 PNG 交给 AI SDK，SDK 因为 provider 未声明支持该 URL
+   * 而自己下载、base64 内联，约 11MB 的请求体被链路上的 body 上限挡下，用户看到「读不到图」。
+   * 抬高上限只是把墙往后挪，所以改成从源头就不送那么大。
+   */
+  describe("给模型读的降采样版本", () => {
+    it("图片带上 forModelReading，让存储适配器出降采样版", async () => {
+      const current = deps();
+      await resolveAgentAsset({ asset_id: "123" }, { userId: "7", projectId: "9" }, current);
+      expect(current.sign).toHaveBeenCalledWith("uploads/7/image/immutable.png", {
+        forModelReading: true,
+      });
+    });
+
+    it("视频不降采样——图片处理参数对它不适用，且它走的是另一条理解链路", async () => {
+      const current = deps({
+        findAccessible: vi.fn().mockResolvedValue({
+          ...asset,
+          type: "video",
+          mime: "video/mp4",
+          storage_key: "uploads/7/video/clip.mp4",
+          duration_seconds: 12,
+        }),
+      });
+      const outcome = await resolveAgentAsset(
+        { asset_id: "123" },
+        { userId: "7", projectId: "9" },
+        current,
+      );
+
+      expect(current.sign).toHaveBeenCalledWith("uploads/7/video/clip.mp4", {
+        forModelReading: false,
+      });
+      // 视频的 mime 原样交出，不能被图片那条转码规则顺手改掉。
+      expect(outcome).toMatchObject({ kind: "ok", value: { mime_type: "video/mp4" } });
     });
   });
 

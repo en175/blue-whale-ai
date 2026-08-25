@@ -1,0 +1,180 @@
+import { Injectable, OnModuleDestroy } from "@nestjs/common";
+import { createHash, randomBytes } from "node:crypto";
+import { Redis, type RedisOptions } from "ioredis";
+import {
+  loadGenerationCredentialSecret,
+  openGenerationCredential,
+  sealGenerationCredential,
+} from "@blue-whale/core";
+
+/** 会话 7 天滑动过期（Redis TTL）。 */
+const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+/** role/status 距上次复核超过该时长则回源 new-api 复核（账户禁用/降权近实时生效）。 */
+const ROLE_STATUS_RECHECK_MS = 5 * 60 * 1000;
+
+export interface ResolvedSession {
+  userId: number;
+  username: string;
+  role: number;
+  status: number;
+  email: string | null;
+  /** 解密后的上游执行凭证（sk-），AuthGuard 回注请求头代打 new-api。 */
+  sk: string;
+  /** role/status 是否已过期、需要回源 new-api 复核。 */
+  needsRecheck: boolean;
+}
+
+/** Redis 连接：显式 REDIS_HOST/PORT/DB/PASSWORD 优先，缺失回退解析 REDIS_CONN_STRING（与 video-queue 同源）。
+ *  生产环境两者皆缺 → 启动即抛（fail-fast，避免静默连本地 Redis 污染会话）。 */
+function redisConnectionOptions(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): RedisOptions {
+  let { REDIS_HOST, REDIS_PORT, REDIS_DB, REDIS_PASSWORD } = env;
+  if (!REDIS_HOST && env.REDIS_CONN_STRING) {
+    try {
+      const u = new URL(env.REDIS_CONN_STRING);
+      REDIS_HOST = u.hostname;
+      REDIS_PORT = u.port;
+      REDIS_DB = u.pathname.replace(/^\//, "");
+      if (u.password) REDIS_PASSWORD = decodeURIComponent(u.password);
+    } catch {
+      // 解析失败走默认 127.0.0.1
+    }
+  }
+  if (env.NODE_ENV === "production" && !REDIS_HOST) {
+    throw new Error("REDIS_HOST / REDIS_CONN_STRING 必填（生产环境会话依赖 Redis）");
+  }
+  return {
+    host: REDIS_HOST ?? "127.0.0.1",
+    port: Number.parseInt(REDIS_PORT ?? "6379", 10),
+    db: Number.parseInt(REDIS_DB ?? "0", 10),
+    ...(REDIS_PASSWORD ? { password: REDIS_PASSWORD } : {}),
+    maxRetriesPerRequest: 1,
+    enableOfflineQueue: false,
+    connectTimeout: 5_000,
+    keepAlive: 30_000,
+  };
+}
+
+type SessionPayload = {
+  userId: number;
+  username: string;
+  role: number;
+  status: number;
+  email: string | null;
+  /** AES-256-GCM 密封后的上游 sk-（明文不入 Redis）。 */
+  sealedSk: string;
+  /** role/status 最近一次回源 new-api 复核的时间戳（ms）。 */
+  verifiedAt: number;
+};
+
+/**
+ * 登录态会话（ADR-0062 #19 凭证分层）。浏览器只持 HttpOnly 会话 cookie 里的 `sess_` 令牌，
+ * 会话映射存 Redis（7 天滑动 TTL），上游 sk- 密封后随会话存放，仅在内存解密供 BFF 代打 new-api。
+ */
+@Injectable()
+export class SessionService implements OnModuleDestroy {
+  private readonly redis: Redis;
+
+  constructor() {
+    this.redis = new Redis(redisConnectionOptions());
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.redis.quit();
+  }
+
+  private key(token: string): string {
+    return `session:${createHash("sha256").update(token).digest("hex")}`;
+  }
+
+  /** 密封 sk- 并写会话，返回下发给浏览器的会话令牌（明文不入 Redis）。 */
+  async createSession(input: {
+    userId: number;
+    username: string;
+    role: number;
+    status: number;
+    email: string | null;
+    sk: string;
+  }): Promise<string> {
+    const token = `sess_${randomBytes(32).toString("base64url")}`;
+    const payload: SessionPayload = {
+      userId: input.userId,
+      username: input.username,
+      role: input.role,
+      status: input.status,
+      email: input.email,
+      sealedSk: sealGenerationCredential(
+        input.sk,
+        loadGenerationCredentialSecret(),
+      ),
+      verifiedAt: Date.now(),
+    };
+    await this.redis.set(
+      this.key(token),
+      JSON.stringify(payload),
+      "EX",
+      SESSION_TTL_SECONDS,
+    );
+    return token;
+  }
+
+  /** 校验并解析会话；不存在或已过期返回 null。每次访问滑动续期 7 天。 */
+  async resolveSession(token: string): Promise<ResolvedSession | null> {
+    const key = this.key(token);
+    const raw = await this.redis.get(key);
+    if (!raw) return null;
+    let data: SessionPayload;
+    try {
+      data = JSON.parse(raw) as SessionPayload;
+    } catch {
+      await this.redis.del(key);
+      return null;
+    }
+    await this.redis.expire(key, SESSION_TTL_SECONDS);
+    let sk: string;
+    try {
+      sk = openGenerationCredential(
+        data.sealedSk,
+        loadGenerationCredentialSecret(),
+      );
+    } catch {
+      // 密封凭证损坏/密钥轮换：会话不可用，删除并要求重新登录（而非 503）。
+      await this.redis.del(key);
+      return null;
+    }
+    return {
+      userId: data.userId,
+      username: data.username,
+      role: data.role,
+      status: data.status,
+      email: data.email,
+      sk,
+      needsRecheck: Date.now() - data.verifiedAt > ROLE_STATUS_RECHECK_MS,
+    };
+  }
+
+  /** 复核后回写 role/status 与 verifiedAt（AuthGuard 每 ROLE_STATUS_RECHECK_MS 触发）。 */
+  async updateSessionIdentity(
+    token: string,
+    input: { role: number; status: number },
+  ): Promise<void> {
+    const key = this.key(token);
+    const raw = await this.redis.get(key);
+    if (!raw) return;
+    try {
+      const data = JSON.parse(raw) as SessionPayload;
+      data.role = input.role;
+      data.status = input.status;
+      data.verifiedAt = Date.now();
+      await this.redis.set(key, JSON.stringify(data), "EX", SESSION_TTL_SECONDS);
+    } catch {
+      // 解析失败静默忽略：下次 resolve 仍会触发复核
+    }
+  }
+
+  /** 登出吊销：删除会话（上游 sk- 不动，普通登出与凭证轮换分离，ADR-0062 #10/#19）。 */
+  async revoke(token: string): Promise<void> {
+    await this.redis.del(this.key(token));
+  }
+}

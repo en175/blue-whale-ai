@@ -3,7 +3,6 @@
  * 删除为 HTTP 204 无响应体，走原生 fetch（不经 apiRequest JSON 解析）
  * ============================================ */
 import { apiRequest } from './http';
-import { getAccessToken } from '@/utils/auth';
 import { newIdempotencyKey } from './jobs';
 
 /** 场景卡信息 */
@@ -85,9 +84,8 @@ export function regenerateSceneCard(
  */
 export async function deleteSceneCard(sceneCardId: number | string): Promise<void> {
   const path = `/api/scene-cards/${sceneCardId}`;
-  const token = getAccessToken();
+  // 登录态走 HttpOnly 会话 cookie，浏览器自动携带
   const headers: Record<string, string> = {};
-  if (token) headers.Authorization = `Bearer ${token}`;
 
   let etag = 'missing';
   try {

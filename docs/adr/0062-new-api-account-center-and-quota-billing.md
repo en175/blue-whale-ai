@@ -82,6 +82,23 @@ new-api 的账户和 quota 分离，会产生双重身份、双重余额和生�
     RootAuth 管理接口保留 root 凭证。`GET /api/token/identity` 复用账户层校验，BFF 登录态
     不因额度耗尽失效。
 
+19. **登录态凭证分层——浏览器终结凭证，sk- 密封于 BFF**（2026-08-25）。item 4 的 MVP 方案 A（浏览器
+    localStorage 保存 `sk-xxx`）终止。浏览器不再持有任何上游执行凭证，改为持有 BFF 签发的不透明登录会话。
+    - **凭证分层**：`sk-xxx` 是 new-api 上游执行凭证，仅由 BFF 在登录/注册响应时获取，经 AES-256-GCM
+      密封后持久化绑定 User（复用 item 11 的密封机制），不再下发浏览器；浏览器只持有 BFF 签发的短期
+      会话凭证，BFF 本地校验会话（Redis/DB），不再每请求调用 `/api/token/identity`——item 12 的
+      60 秒 Token 摘要缓存随之退役，账户安全/管理操作仍实时过 new-api。
+    - **会话语义**：会话 7 天滑动续期，活跃自动延长、7 天不活跃过期；登出吊销会话但不撤销上游默认 Key
+      （普通登出与凭证轮换继续分离，item 10 的轮换语义保留），后台 GenerationJob 不受影响。
+    - **扣费路径不变**：relay 扣费仍由 BFF/worker 用密封的 `sk-xxx` 调 new-api `/v1/*` 执行
+      （item 3、11 不变），浏览器不再接触任何能扣费的凭证。
+    - **存量处理**：不做历史补建或静默迁移；发布后浏览器持旧 `sk-xxx` 的请求按无会话 401 处理，
+      User 重新登录建立会话即可。
+    - **API Key 出口**：外部 API Key 的按需发放与吊销由独立开放平台（blue-whale-api）承接，
+      蓝鲸普通浏览器永不持 key（item 6 的「不展示 API Key 管理入口」不变）。
+    - **取代**：item 4 的 localStorage 下发、item 10 的「logout 仅清浏览器本地」、item 12 的
+      每请求上游身份解析。
+
 ## 连锁影响
 
 - ADR-0060 的 Node `users` / `user_credits` / JWT 账本实现不再落地；已存在的旧基线文档仅作为历史记录保留。

@@ -1,6 +1,6 @@
 /* ============================================
  * events 公共工具：SSE 响应解析（fetch + ReadableStream）
- * EventSource 不支持自定义请求头（Authorization），统一改用 fetch 读取流
+ * EventSource 不支持自定义请求头，统一改用 fetch 读取流（登录态走 HttpOnly cookie）
  * 事件块以空行分隔，块内 event:/data:/id: 行解析为 SseEvent
  * ============================================ */
 

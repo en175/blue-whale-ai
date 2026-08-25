@@ -13,7 +13,7 @@ export interface AdminSessionData {
   isAdmin: boolean;
 }
 
-/** 实时校验当前登录用户是否为管理员（Bearer token） */
+/** 实时校验当前登录用户是否为管理员（登录态走 HttpOnly cookie） */
 export function fetchAdminSession() {
   return http.get<AdminSessionData>('/api/admin/session');
 }
