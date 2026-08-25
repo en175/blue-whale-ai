@@ -80,6 +80,8 @@ export interface SessionContentBlock {
   display_label?: string;
   /** 资源文本描述（如商品卡的商品详情） */
   resource_text?: string;
+  /** 生成卡胶囊指向的镜号：`resource_id` 是 revision，配上它才定位到具体那一镜。 */
+  shot_no?: number;
 }
 
 /** 生成卡里的一条素材引用（IKAFSQ）。
