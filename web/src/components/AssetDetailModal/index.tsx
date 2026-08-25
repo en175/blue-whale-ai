@@ -20,29 +20,26 @@ interface AssetDetailModalProps {
 }
 
 export default function AssetDetailModal({ asset, onClose }: AssetDetailModalProps) {
+  /** 详情行：值为空的字段不展示（如图片无时长、音频无尺寸、上传资产无生成模型） */
   const rows = useMemo(() => {
     if (!asset) return [];
-    return [
+    const list: { label: string; value: string }[] = [
       { label: '类型', value: typeLabel[asset.type] ?? asset.type },
       { label: '来源', value: sourceLabel(asset.source) },
-      {
-        label: '尺寸',
-        value:
-          asset.width != null && asset.height != null
-            ? `${asset.width} × ${asset.height} px`
-            : '—',
-      },
-      {
-        label: '时长',
-        value:
-          asset.type === 'audio' || asset.type === 'video'
-            ? formatDuration(asset.duration)
-            : '—',
-      },
-      { label: '创建时间', value: formatDate(asset.created_at) },
-      { label: '文件大小', value: formatSize(asset.size) },
-      { label: '生成模型', value: asset.model || '—' },
     ];
+    if (asset.width != null && asset.height != null) {
+      list.push({ label: '尺寸', value: `${asset.width} × ${asset.height} px` });
+    }
+    if (
+      (asset.type === 'audio' || asset.type === 'video') &&
+      asset.duration != null
+    ) {
+      list.push({ label: '时长', value: formatDuration(asset.duration) });
+    }
+    if (asset.created_at) list.push({ label: '创建时间', value: formatDate(asset.created_at) });
+    if (asset.size != null) list.push({ label: '文件大小', value: formatSize(asset.size) });
+    if (asset.model) list.push({ label: '生成模型', value: asset.model });
+    return list;
   }, [asset]);
 
   if (!asset) return null;

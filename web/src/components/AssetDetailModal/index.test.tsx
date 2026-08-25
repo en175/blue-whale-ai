@@ -60,6 +60,13 @@ describe('AssetDetailModal', () => {
     expect(el.textContent).not.toContain('"created_at"');
   });
 
+  it('图片（duration 为 null）不显示时长行，上传资产不显示生成模型行', async () => {
+    const el = await render(makeAsset());
+    // 图片无时长 → 时长行隐藏；上传资产 model 为 null → 生成模型行隐藏
+    expect(el.textContent).not.toContain('时长');
+    expect(el.textContent).not.toContain('生成模型');
+  });
+
   it('generated 来源显示「AI 生成」，生成模型展示展示名', async () => {
     const el = await render(
       makeAsset({ source: 'generated', model: 'Seedance 2.0 标准版' }),
@@ -68,11 +75,21 @@ describe('AssetDetailModal', () => {
     expect(el.textContent).toContain('Seedance 2.0 标准版');
   });
 
-  it('上传资产（无生成任务）生成模型显示「—」', async () => {
-    const el = await render(makeAsset());
-    // 上传资产 model 为 null → 生成模型行显示 —
-    expect(el.textContent).toContain('生成模型');
-    expect(el.textContent).toContain('—');
+  it('音频（宽高为 null）不显示尺寸行，显示时长', async () => {
+    const el = await render(
+      makeAsset({ type: 'audio', width: null, height: null, duration: 95 }),
+    );
+    expect(el.textContent).toContain('时长');
+    expect(el.textContent).toContain('01:35');
+    expect(el.textContent).not.toContain('px');
+  });
+
+  it('视频显示时长行', async () => {
+    const el = await render(
+      makeAsset({ type: 'video', width: 1280, height: 720, duration: 6 }),
+    );
+    expect(el.textContent).toContain('时长');
+    expect(el.textContent).toContain('00:06');
   });
 
   it('点击遮罩触发 onClose', async () => {
