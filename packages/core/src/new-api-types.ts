@@ -27,6 +27,10 @@ export interface NewApiLoginResult {
   userId: number | null;
   username: string | null;
   email?: string | null;
+  /** new-api 用户角色（≥10 管理员）；缺省按普通用户 1 处理。 */
+  role: number;
+  /** new-api 用户状态（1 启用）；缺省按启用处理。 */
+  status: number;
 }
 
 export interface NewApiAccountCapabilities {

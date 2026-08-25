@@ -9,7 +9,7 @@ import { readSseResponse, type SseEvent } from './events';
 import { ApiError, apiRequest } from './http';
 import { newIdempotencyKey } from './jobs';
 import { agentPath, agentUrl, agentMethod } from './agentRoutes';
-import { getAccessToken, setSession } from '@/utils/auth';
+import { setSession } from '@/utils/auth';
 
 export type { SseEvent };
 
@@ -276,13 +276,11 @@ function describeFailure(
 
 /** 会话维度裸 JSON 请求（401 清会话；非 2xx 抛 ApiError，供调用方按 status/code 分支） */
 async function sessionRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getAccessToken();
   const res = await fetch(`/api/agent/v1${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
       ...(init?.headers ?? {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
   const text = await res.text();
@@ -297,7 +295,7 @@ async function sessionRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : undefined;
   const failure = res.ok ? null : describeFailure(record, res.status);
   // Agent 的 capability_required 也使用 401，但它表示缺少 per-Run 能力券，不是用户登录失效。
-  if (res.status === 401 && failure?.code !== 'capability_required') setSession(null, null);
+  if (res.status === 401 && failure?.code !== 'capability_required') setSession(null);
   if (failure) throw new ApiError(res.status, failure.message, failure.code);
   return body as T;
 }
@@ -655,9 +653,8 @@ function ensureHub(projectId: string, sessionId: string, initialCursor: string):
       hub.idleTimer = window.setTimeout(() => attempt.abort(), IDLE_TIMEOUT);
     };
     try {
+      // 登录态走 HttpOnly 会话 cookie，浏览器自动携带
       const headers: Record<string, string> = { Accept: 'text/event-stream' };
-      const token = getAccessToken();
-      if (token) headers.Authorization = `Bearer ${token}`;
       const after = hub.cursor ? `?after=${encodeURIComponent(hub.cursor)}` : '';
       armIdleWatchdog();
       const res = await fetch(`${base}${after}`, { headers, signal: attempt.signal });

@@ -47,11 +47,21 @@ export function createNewApiAccountOps(request: NewApiRequest) {
           response,
         );
       }
+      const role =
+        typeof data.role === "number" && Number.isInteger(data.role)
+          ? data.role
+          : 1;
+      const status =
+        typeof data.status === "number" && Number.isInteger(data.status)
+          ? data.status
+          : 1;
       return {
         token: data.token,
         userId,
         username: data.username,
         email: typeof data.email === "string" ? data.email : null,
+        role,
+        status,
       };
     },
 
@@ -99,6 +109,8 @@ export function createNewApiAccountOps(request: NewApiRequest) {
         user_id?: unknown;
         username?: unknown;
         email?: unknown;
+        role?: unknown;
+        status?: unknown;
       };
       const token = data.token;
       const userId = positiveInteger(data.user_id ?? data.id);
@@ -115,11 +127,21 @@ export function createNewApiAccountOps(request: NewApiRequest) {
           response,
         );
       }
+      const role =
+        typeof data.role === "number" && Number.isInteger(data.role)
+          ? data.role
+          : 1;
+      const status =
+        typeof data.status === "number" && Number.isInteger(data.status)
+          ? data.status
+          : 1;
       return {
         token,
         userId,
         username: data.username,
         email: typeof data.email === "string" ? data.email : null,
+        role,
+        status,
       };
     },
 

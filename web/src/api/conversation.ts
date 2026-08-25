@@ -7,7 +7,7 @@
  * ============================================ */
 import { apiRequest } from './http';
 import { newIdempotencyKey } from './jobs';
-import { getAccessToken, setSession } from '@/utils/auth';
+import { setSession } from '@/utils/auth';
 
 /** @提及项（发送时可携带） */
 export interface MentionPayload {
@@ -90,7 +90,6 @@ export async function sendConversationMessage(
   onFrame?: (frame: MessageStreamFrame) => void,
   signal?: AbortSignal,
 ): Promise<SendMessageData | null> {
-  const token = getAccessToken();
   const res = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/conversation/messages`,
     {
@@ -98,14 +97,13 @@ export async function sendConversationMessage(
       headers: {
         'Idempotency-Key': newIdempotencyKey(),
         'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ client_message_id: newClientMessageId(), ...payload }),
       signal,
     },
   );
   // 凭证失效：清空本地会话（与 http 层行为一致）
-  if (res.status === 401) setSession(null, null);
+  if (res.status === 401) setSession(null);
 
   const contentType = res.headers.get('content-type') ?? '';
   if (contentType.includes('application/json')) {
@@ -212,13 +210,11 @@ export interface PlanApplyData {
 }
 
 /** 应用计划消息 POST /api/projects/:id/plan-messages/:messageId/apply
- * 鉴权使用 sk- 开头的新 API token（额度预检/凭证密封），请求体为空字符串 */
+ * 登录态走 HttpOnly 会话 cookie（后端回注 sk- 做额度预检/凭证密封），请求体为空字符串 */
 export async function applyPlanMessage(
   projectId: string,
   messageId: number | string,
-  skToken?: string,
 ): Promise<PlanApplyData> {
-  const token = skToken ?? getAccessToken() ?? '';
   const res = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/plan-messages/${messageId}/apply`,
     {
@@ -226,7 +222,6 @@ export async function applyPlanMessage(
       headers: {
         'Idempotency-Key': newIdempotencyKey(),
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
       },
       body: '""',
     },

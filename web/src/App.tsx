@@ -5,14 +5,15 @@ import { useEffect } from 'react';
 import { RouterProvider } from 'react-router-dom';
 import router from '@/router';
 import { fetchMe, toSessionUser } from '@/api/auth';
-import { getAccessToken, updateUser } from '@/utils/auth';
+import { updateUser } from '@/utils/auth';
 
 let meSyncStarted = false;
 
 function App() {
-  // 启动时已有登录态则拉 /api/me 刷新最新用户信息（is_admin 控制系统设置入口）
+  // 启动即经 HttpOnly 会话 cookie 拉 /api/me 恢复登录态（is_admin 控制系统设置入口）；
+  // 未登录时后端返回 401，http 层清空本地会话，此处静默即可
   useEffect(() => {
-    if (meSyncStarted || !getAccessToken()) return;
+    if (meSyncStarted) return;
     meSyncStarted = true;
     fetchMe()
       .then((me) => updateUser(toSessionUser(me)))
