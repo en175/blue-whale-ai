@@ -15,12 +15,21 @@ const KNOWN_CODES = new Set([
   "unsupported_video_inputs",
   "provider_credential_missing",
   "invalid_input",
+  // IKARDY：媒体提取（视频→音频）
+  "video_has_no_audio_track",
+  "video_download_failed",
+  "video_too_large",
+  "extract_failed",
+  "upload_failed",
+  "enqueue_failed",
+  "source_asset_unavailable",
+  "media_extract_failed",
 ]);
 
 function fallbackCode(type: string): string {
-  return type === "video"
-    ? "video_generation_failed"
-    : "image_generation_failed";
+  if (type === "video") return "video_generation_failed";
+  if (type === "media_extract") return "media_extract_failed";
+  return "image_generation_failed";
 }
 
 function messageFor(code: string, type: string): string {
@@ -61,7 +70,25 @@ function messageFor(code: string, type: string): string {
       return "生成服务凭证未配置";
     case "invalid_input":
       return "输入参数无效";
+    // IKARDY：媒体提取
+    case "video_has_no_audio_track":
+      return "视频没有音轨";
+    case "video_download_failed":
+      return "视频下载失败";
+    case "video_too_large":
+      return "视频超过大小上限";
+    case "extract_failed":
+      return "音频提取失败";
+    case "upload_failed":
+      return "音频上传失败";
+    case "enqueue_failed":
+      return "任务入队失败";
+    case "source_asset_unavailable":
+      return "源视频资产不可用";
+    case "media_extract_failed":
+      return "音频提取失败";
     default:
+      if (type === "media_extract") return "音频提取失败";
       return type === "video"
         ? "视频生成失败"
         : type === "audio"
