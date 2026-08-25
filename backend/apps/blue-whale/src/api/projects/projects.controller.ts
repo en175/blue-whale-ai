@@ -58,9 +58,26 @@ export class ProjectsController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() body: { name?: unknown },
   ) {
+    // 名称为空时由 repo 生成默认名（当前日期时间，PRD E5）
     const name = typeof body.name === "string" ? body.name.trim() : "";
-    if (!name) return fail(FAILURE_CODE, "项目名不能为空");
     return ok(await this.project.create(user.userId, name));
+  }
+
+  /** 批量删除：一次删除多个项目并级联删关联资产；部分失败返回失败项（PRD E14）。 */
+  @Post("batch-delete")
+  async batchDelete(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: { ids?: unknown },
+  ) {
+    const rawIds = Array.isArray(body.ids) ? body.ids : [];
+    const ids = rawIds
+      .filter((x): x is string => typeof x === "string")
+      .map((x) => x.trim())
+      .filter((x) => x.length > 0);
+    if (ids.length === 0 || ids.length !== rawIds.length) {
+      return fail(FAILURE_CODE, "ids 参数不合法");
+    }
+    return ok(await this.project.batchDelete(user.userId, ids));
   }
 
   @Get(":id")
