@@ -42,7 +42,7 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 ## 操作约定
 
 - **创建**：`create_enterprise_issue(enterprise_id, title, description, project_id=..., program_id=...)`。根 issue 的 `project_id`（仓库）和 `program_id`（项目）都**必传**且非 0——缺任一则 hook 硬拦（见上「定位」）。标签不能在 create 落——企业私有仓库 `labels` 静默忽略，紧跟一次 `update_enterprise_issue(label_ids=...)` 补。**创建后必须 `get_enterprise_issue_detail` 回读确认 `description` 非空**——错名参数（如把描述传到 `body`）被静默忽略，已踩坑建成空描述工单（IK5THP）；回读验证是防静默忽略的通用要求，PR / Release 创建后同样适用；入参名以工具 schema 为准，不凭印象。
-- **创建子 issue（交 Agent）**：先 `get_enterprise_issue_detail(parent_ident)` 读父项，子项继承 `parent_id`/`project_id`/`program_id`/`issue_type_id`。**标题命名：`【<前端|后端>】<任务标题>`**（例：`【后端】画布视频节点提取音频（media_extract）`）——`前端|后端` 标明改动归属端。create 后 `update_enterprise_issue` 补 `ready-for-agent` label_ids，再 `list_enterprise_issues(project_id=parent.project_id, search=new_ident)` 反查；查不到 = 发布失败，不交 Agent。
+- **创建子 issue（交 Agent）**：先 `get_enterprise_issue_detail(parent_ident)` 读父项，子项继承 `parent_id`/`project_id`/`program_id`，但 `issue_type_id` **一律用「任务」(1292680)**——子工单一律任务型，不继承父需求型（2026-08-25 定规）。**标题命名：`【<前端|后端>】<任务标题>`**（例：`【后端】画布视频节点提取音频（media_extract）`）——`前端|后端` 标明改动归属端。create 后 `update_enterprise_issue` 补 `ready-for-agent` label_ids，再 `list_enterprise_issues(project_id=parent.project_id, search=new_ident)` 反查；查不到 = 发布失败，不交 Agent。
 - **读取**：`get_enterprise_issue_detail` 取详情；`list_enterprise_issue_comments(enterprise_id, issue_id)` 取评论。
 - **列出**：`list_enterprise_issues`，`state` 过滤（open/closed/rejected/progressing），`label_ids` 过滤（数字 ID）。
 - **评论**：`comment_enterprise_issue(enterprise_id, issue_id, body)`。
@@ -110,7 +110,7 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 
 - **标签命名（Gitee 不支持冒号）**：`/wayfinder` 文本写 `wayfinder:map` / `wayfinder:<type>`（GitHub 习惯），Gitee 实测不支持冒号，本仓用连字符——map 标签 `wayfinder-map`；type 标签 `wayfinder-<type>` ∈ `wayfinder-research` / `wayfinder-prototype` / `wayfinder-grilling` / `wayfinder-task`。先在 Gitee「标签管理」建齐 5 个。
 - **Map**：`create_enterprise_issue(title=<map 名>, project_id=<仓库 id>, program_id=<项目 id>)`，紧跟 `update_enterprise_issue(label_ids=<wayfinder-map 数字 id>)`（labels 静默忽略）。body 填 Destination / Notes / Decisions-so-far / Not yet specified / Out of scope（模板见 `/wayfinder` SKILL.md）。
-- **Child ticket**：`create_enterprise_issue(parent_id=<map issue id>, project_id=<继承 map>, program_id=<继承 map>, issue_type_id=<继承 map>)`，紧跟 `update_enterprise_issue(label_ids=<对应 type 标签数字 id>)`。`<type>` ∈ research / prototype / grilling / task。继承流程见上「创建子 issue」。
+- **Child ticket**：`create_enterprise_issue(parent_id=<map issue id>, project_id=<继承 map>, program_id=<继承 map>, issue_type_id=<任务 1292680>)`，紧跟 `update_enterprise_issue(label_ids=<对应 type 标签数字 id>)`。`<type>` ∈ research / prototype / grilling / task。继承流程见上「创建子 issue」。
 - **Blocking**：Gitee MCP 无 native dependencies——`create_enterprise_issue` 的 `link_issue_id`（创建时传入，无 update 对等项）只建弱关联（UI 可见，非阻塞）。回退 body 约定：ticket body 顶部写 `Blocked by: <标题> (<ident>)`，每行一个。unblocked 当且仅当每个 blocker `state == "closed"`（逐个 `get_enterprise_issue_detail` 查）。`link_issue_id` 可选辅助：创建子 ticket 时传 `link_issue_id=<blocker ident>`。
 - **Frontier query**：`list_enterprise_issues(project_id=<map project_id>, state="open")`，客户端筛 `parent.id == <map issue id>`（list 无 parent_id 参数）；剔除有 `assignee`（已认领）+ body 含未闭环 `Blocked by:` 的；按创建顺序取首个。
 - **Claim**：`update_enterprise_issue(issue_id=<ticket>, assignee_id=<自己 user id>)`。user id 用 `list_enterprise_members` 查。开放未分配 = 未认领。**实质工作前先 claim**，避并发抢同一 ticket。

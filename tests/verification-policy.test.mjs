@@ -25,6 +25,22 @@ function childEnvironment() {
   return environment;
 }
 
+// Windows 上 node spawnSync(shell:false) 无法执行 .cmd/.bash shim（pnpm 是 pnpm.cmd）。
+// 给假 pnpm 所在的 bin 补一个 pnpm.cmd，委托 Git Bash 的 bash 跑同目录的 bash 假脚本，并透传退出码。
+// 注意必须多行写 if errorlevel（单行 `& if errorlevel 1` 链不会在 bash 后取到 errorlevel）。
+function installPnpmCmdShim(bin) {
+  if (process.platform !== "win32") return;
+  writeFileSync(
+    join(bin, "pnpm.cmd"),
+    "@echo off\r\nbash \"%~dp0pnpm\" %*\r\nif errorlevel 1 exit /b 1\r\nexit /b 0\r\n",
+  );
+}
+
+// PATH 拼接：Windows 用 `;`（cmd.exe/CreateProcess），POSIX 用 `:`。走 CLI（node→cmd）的 fixture 必须用本函数。
+function withFakePnpmOnPath(fakeBin) {
+  return `${fakeBin}${process.platform === "win32" ? ";" : ":"}${process.env.PATH}`;
+}
+
 function git(cwd, ...args) {
   return execFileSync("git", args, {
     cwd,
@@ -182,16 +198,16 @@ test("classifies the testing strategy itself as verification governance", async 
   });
 });
 
-test("keeps unclassified skill Markdown scoped at completion but full at PR stage", async () => {
+test("classifies skill Markdown as documentation (docs) at completion and PR stage", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.deepEqual(classifyChanges([".claude/skills/tdd/SKILL.md"]), {
-    tier: "scoped",
-    reasons: ["change scope is not classified"],
+    tier: "docs",
+    reasons: ["only documentation files changed"],
   });
   assert.deepEqual(classifyChanges([".claude/skills/tdd/SKILL.md"], { stage: "pr" }), {
-    tier: "full",
-    reasons: ["unclassified PR scope requires full verification"],
+    tier: "docs",
+    reasons: ["only documentation files changed"],
   });
 });
 
@@ -1022,9 +1038,10 @@ test("captures full verification stage timings in the receipt", () => {
       ].join("\n"),
     );
     chmodSync(fakePnpm, 0o755);
+    installPnpmCmdShim(fakeBin);
     const environment = {
       ...childEnvironment(),
-      PATH: `${fakeBin}:${process.env.PATH}`,
+      PATH: withFakePnpmOnPath(fakeBin),
     };
 
     const run = spawnSync(
@@ -1160,6 +1177,7 @@ test("does not apply an earlier retry reason to a later failing command", () => 
       ["#!/usr/bin/env bash", `printf 'call\\n' >>"${calls}"`, "exit 1", ""].join("\n"),
     );
     chmodSync(fakePnpm, 0o755);
+    installPnpmCmdShim(fakeBin);
     const retriedRun = spawnSync(
       process.execPath,
       [
@@ -1178,7 +1196,7 @@ test("does not apply an earlier retry reason to a later failing command", () => 
       {
         cwd: repository,
         encoding: "utf8",
-        env: { ...childEnvironment(), PATH: `${fakeBin}:${process.env.PATH}` },
+        env: { ...childEnvironment(), PATH: withFakePnpmOnPath(fakeBin) },
       },
     );
 
@@ -1284,9 +1302,10 @@ test("publishing reuses a scoped completion receipt for ordinary code changes", 
     const fakePnpm = join(fakeBin, "pnpm");
     writeFileSync(fakePnpm, ["#!/usr/bin/env bash", "exit 0", ""].join("\n"));
     chmodSync(fakePnpm, 0o755);
+    installPnpmCmdShim(fakeBin);
     const environment = {
       ...childEnvironment(),
-      PATH: `${fakeBin}:${process.env.PATH}`,
+      PATH: withFakePnpmOnPath(fakeBin),
     };
 
     const completion = spawnSync(
