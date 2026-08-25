@@ -17,6 +17,7 @@ export interface AssetView {
   generation_job_id: string | null;
   project_id: string | null;
   mime: string | null;
+  model: string | null;
 }
 
 export interface AssetPage {
@@ -164,6 +165,51 @@ function toUploadAsset(row: {
   };
 }
 
+/** 按 assets 行批量解析生成模型展示名：jobId → model_label（无展示名回退 model_id）。
+ *  model_id 取任务 input 的顶层 model_id 或 parameters.model_id（场景卡等路径）。 */
+async function resolveAssetModels(
+  prisma: PrismaClient,
+  rows: { generation_job_id: bigint | null }[],
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const jobIds = rows
+    .map((a) => a.generation_job_id)
+    .filter((id): id is bigint => id != null);
+  if (jobIds.length === 0) return result;
+
+  const jobs = await prisma.generation_jobs.findMany({
+    where: { id: { in: jobIds } },
+    select: { id: true, input: true },
+  });
+  const modelIdByJob = new Map<string, string>();
+  const modelIds = new Set<string>();
+  for (const job of jobs) {
+    const input = job.input as
+      | { model_id?: string; parameters?: { model_id?: string } }
+      | null
+      | undefined;
+    const modelId = input?.model_id ?? input?.parameters?.model_id;
+    if (modelId) {
+      modelIdByJob.set(job.id.toString(), modelId);
+      modelIds.add(modelId);
+    }
+  }
+  if (modelIds.size === 0) return result;
+
+  const caps = await prisma.generation_model_capability.findMany({
+    where: { model_id: { in: [...modelIds] }, enabled: true, is_delete: false },
+    select: { model_id: true, model_label: true },
+  });
+  const labelByModel = new Map<string, string>();
+  for (const cap of caps) {
+    if (!labelByModel.has(cap.model_id)) labelByModel.set(cap.model_id, cap.model_label);
+  }
+  for (const [jobId, modelId] of modelIdByJob) {
+    result.set(jobId, labelByModel.get(modelId) ?? modelId);
+  }
+  return result;
+}
+
 export function createAssetRepo(prisma: PrismaClient): AssetRepo {
   return {
     async softDeleteOwned(assetId, userId) {
@@ -196,6 +242,9 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           take: filter.size,
         }),
       ]);
+      // 生成模型溯源：按 generation_job_id 批量回查任务 input 的 model_id，再查能力表展示名。
+      // 兜底顺序：展示名 → model_id → null（上传资产/任务无模型/查询失败均落到 null 或回退）。
+      const modelByJobId = await resolveAssetModels(prisma, rows);
       return {
         records: rows.map((a) => ({
           id: a.id.toString(),
@@ -211,6 +260,10 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
             a.generation_job_id == null ? null : a.generation_job_id.toString(),
           project_id: a.project_id == null ? null : a.project_id.toString(),
           mime: a.mime ?? null,
+          model:
+            a.generation_job_id == null
+              ? null
+              : (modelByJobId.get(a.generation_job_id.toString()) ?? null),
         })),
         total,
         size: filter.size,
@@ -305,6 +358,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           row.generation_job_id == null ? null : row.generation_job_id.toString(),
         project_id: row.project_id == null ? null : row.project_id.toString(),
         mime: row.mime ?? null,
+        model: null,
       };
     },
     async createPendingUpload(input) {
