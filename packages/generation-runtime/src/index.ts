@@ -30,3 +30,13 @@ export {
   type VideoTaskProvider,
   type VideoWorkerInputAsset,
 } from "./video-job-runner.js";
+export {
+  MediaExtractError,
+  runMediaExtractStep,
+  type MediaExtractClaim,
+  type MediaExtractDownloader,
+  type MediaExtractRunnerRepo,
+  type MediaExtractUploader,
+  type MediaExtractWorker,
+  type RunMediaExtractStepDeps,
+} from "./media-extract-runner.js";

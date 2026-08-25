@@ -6,7 +6,7 @@ import {appendProjectEvent} from "./product-event-repo.js";
 import {DEFAULT_MAX_REFERENCE_IMAGES} from "./model-capability-repo.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
-export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "resolveInputAssets" | "findImageCapability" | "createAsset"> {
+export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "resolveInputAssets" | "resolveMediaExtractSource" | "findImageCapability" | "createAsset"> {
   return {
     async resolveInputAssets(assetIds, userId, projectId) {
       if (assetIds.length === 0) return [];
@@ -51,6 +51,22 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
             ]
           : [];
       });
+    },
+
+    async resolveMediaExtractSource(assetId, userId, projectId) {
+      // IKARDY：源视频资产解析——返回 storageKey + 公网 url 供下载（资产 public-read）；归属 = 同项目或共享 + 同用户。
+      const row = await prisma.assets.findFirst({
+        where: {
+          id: BigInt(assetId),
+          user_id: BigInt(userId),
+          OR: [{ project_id: BigInt(projectId) }, { project_id: BigInt(0) }],
+          status: "normal",
+          is_delete: false,
+        },
+        select: { storage_key: true, url: true, mime: true, type: true },
+      });
+      if (!row || !row.storage_key) return null;
+      return { storageKey: row.storage_key, mime: row.mime, url: row.url };
     },
 
     async findImageCapability(modelId, sizeId) {

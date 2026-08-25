@@ -46,6 +46,16 @@ export interface ClaimedVideoJob {
   reservedAmountFen: bigint | null;
 }
 
+/** 媒体提取（视频→音频）短步骤认领行投影（IKARDY）。免费工具：无 provider/cost/预留。 */
+export interface ClaimedMediaExtractJob {
+  id: string;
+  projectId: string;
+  userId: string;
+  input: Record<string, unknown>;
+  workerId: string;
+  fencingToken: number;
+}
+
 export interface WorkerRepo {
   /** 按任务和归属用户精确认领 queued 任务，供 request-scoped sk token 调度。 */
   claimJobById(
@@ -115,12 +125,67 @@ export interface WorkerRepo {
     workerId: string;
     fencingToken: number;
   }): Promise<boolean>;
+  /** 按 RocketMQ 消息中的 DB jobId 领取一个待提取的媒体提取短步骤（type=media_extract，IKARDY）。 */
+  claimMediaExtractJobById(
+    jobId: string,
+    workerId: string,
+  ): Promise<ClaimedMediaExtractJob | null>;
+  /** 媒体提取进度回写（0-99，IKARDY）。守卫失败（stale worker）返回 false。 */
+  updateMediaExtractProgress(input: {
+    jobId: string;
+    workerId: string;
+    fencingToken: number;
+    progress: number;
+  }): Promise<boolean>;
+  /** 媒体提取成功：置 succeeded + 建 audio 资产 + output_asset_ids + 项目事件（IKARDY）。 */
+  publishMediaExtractResult(input: {
+    jobId: string;
+    projectId: string;
+    userId: string;
+    workerId: string;
+    fencingToken: number;
+    url: string;
+    storageKey: string;
+    mime: string;
+    size: number;
+    duration: number | null;
+  }): Promise<boolean>;
+  /** 媒体提取失败：置 failed + error + 日志（IKARDY）。免费工具，无预留释放。 */
+  failMediaExtractJob(input: {
+    jobId: string;
+    workerId: string;
+    fencingToken: number;
+    code: string;
+    message: string;
+  }): Promise<boolean>;
+  /** 提取成功：把画布占位节点更新为最终音频节点（IKARDY）。 */
+  updateMediaExtractNodeToAudio(input: {
+    jobId: string;
+    projectId: string;
+    url: string;
+    mime: string;
+    size: number;
+    duration: number | null;
+  }): Promise<boolean>;
+  /** 提取失败：把画布占位节点置 failed（IKARDY）。 */
+  failMediaExtractNode(input: {
+    jobId: string;
+    projectId: string;
+    code: string;
+    message: string;
+  }): Promise<boolean>;
   /** 按任务归属解析输入素材；返回顺序与 assetIds 一致。 */
   resolveInputAssets(
     assetIds: string[],
     userId: string,
     projectId: string,
   ): Promise<WorkerInputAsset[]>;
+  /** 媒体提取源解析：按 id+user+project 取 storageKey/mime/公网 url（IKARDY）。无 storage_key 返回 null。 */
+  resolveMediaExtractSource(
+    assetId: string,
+    userId: string,
+    projectId: string,
+  ): Promise<{ storageKey: string; mime: string | null; url: string } | null>;
   /** 按 model_id 查启用能力，取 size 白名单里匹配 sizeId 的 api 值/宽高。 */
   findImageCapability(
     modelId: string,

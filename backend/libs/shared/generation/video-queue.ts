@@ -1,7 +1,10 @@
 import { Producer } from "rocketmq-client-nodejs";
 import { Queue, type ConnectionOptions, type JobsOptions } from "bullmq";
 
-import { VIDEO_GENERATION_QUEUE } from "./queue.constants.js";
+import {
+  MEDIA_EXTRACT_TAG,
+  VIDEO_GENERATION_QUEUE,
+} from "./queue.constants.js";
 
 export type VideoQueueProducer = {
   enqueue(jobId: string, options?: { delayMs?: number }): Promise<void>;
@@ -42,9 +45,10 @@ export function loadRedisConnection(
   };
 }
 
-/** BullMQ 适配器：把 Queue 包成 VideoQueueProducer 端口（VIDEO_QUEUE_DRIVER=bullmq 回退路径）。 */
+/** BullMQ 适配器：把 Queue 包成 VideoQueueProducer 端口（VIDEO_QUEUE_DRIVER=bullmq 回退路径）。jobName 区分任务类型（step=视频 / extract=媒体提取）。 */
 export function createVideoQueueProducer(
   queue: QueuePort,
+  jobName = "step",
   now: () => number = Date.now,
 ): VideoQueueProducer {
   return {
@@ -52,7 +56,7 @@ export function createVideoQueueProducer(
       const delay = Math.max(0, options.delayMs ?? 0);
       const runAt = now() + delay;
       await queue.add(
-        "step",
+        jobName,
         { jobId },
         {
           jobId: `video-${jobId}-${runAt}`,
@@ -174,6 +178,27 @@ export async function enqueueVideoGenerationJob(
     return;
   }
   await createVideoQueueProducer(getQueue()).enqueue(jobId, options);
+}
+
+/** 媒体提取（视频→音频）job 入队（IKARDY）：复用视频 topic/queue，用独立 tag/jobName「extract」区分任务类型。 */
+export async function enqueueMediaExtractJob(
+  jobId: string,
+  options?: { delayMs?: number },
+): Promise<void> {
+  const driver = process.env.VIDEO_QUEUE_DRIVER ?? "rocketmq";
+  if (driver === "rocketmq") {
+    const config = loadRocketMqConfig();
+    const producer = await getStartedRocketMqProducer(config);
+    await createRocketMqVideoProducer(producer, {
+      topic: config.topic,
+      tag: MEDIA_EXTRACT_TAG,
+    }).enqueue(jobId, options);
+    return;
+  }
+  await createVideoQueueProducer(getQueue(), MEDIA_EXTRACT_TAG).enqueue(
+    jobId,
+    options,
+  );
 }
 
 export async function closeVideoGenerationQueue(): Promise<void> {
