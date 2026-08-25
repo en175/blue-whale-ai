@@ -1,5 +1,16 @@
 import { randomUUID as nodeRandomUUID } from "node:crypto";
 import { TosClient } from "@volcengine/tos-sdk";
+
+/**
+ * 给模型读图时的 TOS 图片处理参数（IKAZC2）。
+ *
+ * `l_1568` 限长边而不是限宽或高——竖图横图一视同仁；`format,jpg` 是因为 PNG 对照片类内容
+ * 是最坏的编码（那张 8MB 的图正是 PNG）；`q_85` 是肉眼无损与体积的常规折中。
+ *
+ * 1568 对齐主流视觉模型的处理分辨率上限。调这个数之前先确认模型侧真的能吃下更大的，否则
+ * 只是把钱花在会被对方丢掉的像素上。
+ */
+const MODEL_READING_IMAGE_PROCESS = "image/resize,l_1568/format,jpg/quality,q_85";
 import type { AssetUploadStorage } from "./upload.js";
 import type { AssetReader, AssetSigner } from "./ports.js";
 
@@ -99,12 +110,24 @@ export function createTosStorage(config: TosStorageConfig): {
        * 表现成「读不到图」。同一个文件里的上传 PUT 预签名一直走 SDK 且一直可用，没有理由让
        * 读取这一侧单独手写一套 SigV4。
        */
-      async sign(storageKey) {
+      async sign(storageKey, options) {
         const url = await client.getPreSignedUrl({
           bucket: config.bucket,
           key: storageKey,
           method: "GET",
           expires: ttlSeconds,
+          // 给模型读的图在 CDN 侧就降采样（IKAZC2）。
+          //
+          // 实测同一张 2140×2668 的 PNG：原图 8,666,873 字节，加上这段处理参数之后
+          // 453,691 字节——小 19 倍。而模型侧看到的信息量没有损失：视觉模型有自己的处理
+          // 分辨率上限，长边 1568 已经到顶，再大的像素在它那边也会被丢掉，只是白付 token、
+          // 带宽和延迟。
+          //
+          // 必须**签进去**而不是拼在 URL 后面：这是 TOS4 query 签名，事后追加任何参数都会
+          // 被判 SignatureDoesNotMatch。SDK 的 `query` 入参会把它算进规范请求。
+          ...(options?.forModelReading
+            ? { query: { "x-tos-process": MODEL_READING_IMAGE_PROCESS } }
+            : {}),
         });
         return { url, expiresAt: new Date(Date.now() + ttlSeconds * 1000) };
       },

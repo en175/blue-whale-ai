@@ -64,6 +64,7 @@ export interface AgentAssetResolverDeps {
   ): Promise<AgentReadableAsset | null>;
   sign(
     storageKey: string,
+    options?: { forModelReading?: boolean },
   ): Promise<{ url: string; expiresAt: Date }>;
 }
 
@@ -91,9 +92,19 @@ export async function resolveAgentAsset(
     return { kind: "rejected", reason: "asset_metadata_unavailable" };
   }
 
+  // 图片签成给模型读的降采样版本（IKAZC2）。
+  //
+  // 本端点解析出来的 `read_url` 只有一个消费方——agent 的 production-asset-analyzer，它把
+  // URL 交给 AI SDK。SDK 在 provider 未声明支持该 URL 时会自己下载、base64 内联，于是一张
+  // 8.27MB 的 PNG 变成约 11MB 请求体，被链路上任意一道 body 上限挡下，用户看到的是「读不到图」。
+  //
+  // 抬高那些上限只是把墙往后挪，下一张更大的图照样撞。降采样是从源头不再需要撞。
+  //
+  // 视频不动：TOS 的图片处理不适用，且视频走的是另一条理解链路。
+  const forModelReading = asset.type === "image";
   let signed: Awaited<ReturnType<AgentAssetResolverDeps["sign"]>>;
   try {
-    signed = await deps.sign(asset.storage_key);
+    signed = await deps.sign(asset.storage_key, { forModelReading });
   } catch {
     return { kind: "rejected", reason: "storage_access_unavailable" };
   }
@@ -101,7 +112,11 @@ export async function resolveAgentAsset(
   const parsed = agentAssetResolveResultSchema.safeParse({
     asset_id: request.asset_id,
     media_type: asset.type,
-    mime_type: asset.mime,
+    // 降采样时一并转成了 JPEG，所以这里报的必须是转码后的类型。仍报 `image/png` 会让下游
+    // 按错误的类型处理——`mime_type` 是随 `read_url` 一起交出去的，两者说的得是同一份字节。
+    mime_type: forModelReading ? "image/jpeg" : asset.mime,
+    // 仍报原图大小：媒体策略用它守「这张素材是否荒唐」（图片上限 10MB，vendor_doc 依据），
+    // 那是关于素材的判断，不是关于本次传输量的。换成降采样后的字节会让这道闸失去意义。
     size_bytes: Number(asset.size),
     duration_seconds: asset.duration_seconds,
     read_url: signed.url,
