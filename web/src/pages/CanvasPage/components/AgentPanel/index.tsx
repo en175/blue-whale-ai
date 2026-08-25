@@ -282,6 +282,24 @@ function ThinkingBlock({
   const [override, setOverride] = useState<boolean | null>(null);
   const open = override ?? autoOpen;
   const setOpen = (next: boolean) => setOverride(next);
+
+  /**
+   * 思考原话自己就是一个滚动容器（`.thinkingReasoning` 上有 `max-height: 220px; overflow-y: auto`），
+   * 所以外层消息列表滚到底对它没有任何作用——文字是在那个 220px 的盒子里往下长的，盒子外面的
+   * 高度一点没变。要跟上流式输出，得滚这个盒子本身。
+   *
+   * `stick` 记的是「用户此刻是不是贴着底」，在 onScroll 里更新而不是在 effect 里现算：
+   * 追加发生之后再量，距离底部早就被新内容撑开了，怎么算都是「已经离底」，于是永远不滚。
+   * 用户往上翻看前文时 stick 变 false，不把他拽回来；翻回底部又变 true，继续跟。
+   */
+  const reasoningRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(true);
+  useEffect(() => {
+    const el = reasoningRef.current;
+    if (!el || !open || !stickRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [reasoning, open]);
+
   if (steps.length === 0 && !reasoning) return null;
   return (
     <div className={styles.thinkingBlock}>
@@ -299,7 +317,18 @@ function ThinkingBlock({
           {steps.map((s, i) => (
             <div key={i} className={styles.thinkingStep}>{s}</div>
           ))}
-          {reasoning && <div className={styles.thinkingReasoning}>{reasoning}</div>}
+          {reasoning && (
+            <div
+              ref={reasoningRef}
+              className={styles.thinkingReasoning}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+              }}
+            >
+              {reasoning}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -940,9 +969,10 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /**
    * 新消息 / 流式文本 / 流式思考 / 进入页面：滚动条始终拉到最底部，展示最新内容。
    *
-   * 思考那两项此前不在依赖里。后果只在"正文还没出现"那段时间显形：思考确实在一个字一个字
-   * 地流（`assistant.reasoning.delta`），块也展开着，但视图停在原处不动——用户盯着的永远
-   * 是最先到的那几行，越流越看不到新的。那段等待正是思考要填的，填了却看不见等于没填。
+   * 思考那两项此前不在依赖里，于是新增的步骤不会把列表带到底。
+   *
+   * 注意这里管不到思考原话的滚动：`.thinkingReasoning` 自带 `max-height` 与 `overflow-y`，
+   * 是独立的滚动容器，外层滚到底对它无效。那一段由 ThinkingBlock 自己滚（见其中的注释）。
    */
   useEffect(() => {
     const el = listRef.current;
