@@ -34,4 +34,8 @@ export class ProjectService {
   delete(id: string, ownerId: string) {
     return this.repo.delete(id, ownerId);
   }
+
+  batchDelete(ownerId: string, ids: string[]) {
+    return this.repo.batchDelete(ownerId, ids);
+  }
 }
