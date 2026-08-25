@@ -53,6 +53,8 @@ interface MediaNodeData {
   onGenAudio?: (id: string) => void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
+  /** 查看媒体资产详情 */
+  onShowDetails?: (id: string) => void;
 }
 
 export default function MediaNode({ id, data, selected }: NodeProps & { data: MediaNodeData; selected?: boolean }) {
@@ -120,6 +122,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
   const handleDownload = useCallback(() => data.onDownload?.(id), [data, id]);
+  const handleShowDetails = useCallback(() => data.onShowDetails?.(id), [data, id]);
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
 
   const Icon = data.mediaType === 'video' ? Video : data.mediaType === 'audio' ? AudioLines : Image;
@@ -151,7 +154,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <span>生成视频</span>
           </button>
           <span className={styles.toolDivider} />
-          <button className={styles.toolBtn} title="详情（预留）">
+          <button className={styles.toolBtn} onClick={handleShowDetails} title="详情">
             <Info size={14} strokeWidth={2} />
           </button>
           <button className={styles.toolBtn} onClick={handleDownload} title="下载">

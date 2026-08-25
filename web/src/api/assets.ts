@@ -54,6 +54,11 @@ export function deleteAsset(id: AssetRecord['id']) {
   return apiRequest<null>(`/api/assets/${id}`, { method: 'DELETE' });
 }
 
+/** GET /api/assets/:assetId — 获取单个资产详情。 */
+export function fetchAssetDetail(id: AssetRecord['id']) {
+  return apiRequest<AssetRecord>(`/api/assets/${encodeURIComponent(String(id))}`);
+}
+
 /** 上传大小上限（字节）：image 20MB / video 200MB / audio 25MB */
 export const UPLOAD_SIZE_LIMIT: Record<AssetType, number> = {
   image: 20 * 1024 * 1024,

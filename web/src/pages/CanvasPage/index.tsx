@@ -21,7 +21,8 @@ import type { Node, Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { quotaToPoints, fetchMe, toSessionUser } from '@/api/auth';
 import { fetchProjects, createProject, renameProject, deleteProject,  } from '@/api/projects';
-import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, type AssetType } from '@/api/assets';
+import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, type AssetRecord, type AssetType } from '@/api/assets';
+import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { saveCanvasDoc, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
 import type { GenerationCardBlock, SessionContentBlock } from '@/api/agentSessions';
@@ -98,6 +99,9 @@ export default function CanvasPage() {
   const [showAssetsModal, setShowAssetsModal] = useState(false);
   const [assetsModalDefaultTab, setAssetsModalDefaultTab] = useState<string | undefined>(undefined);
   const [assetsModalDefaultFilter, setAssetsModalDefaultFilter] = useState<string | undefined>(undefined);
+  const [assetDetailTarget, setAssetDetailTarget] = useState<AssetRecord | null>(null);
+  const [assetDetailLoading, setAssetDetailLoading] = useState(false);
+  const assetDetailRequestIdRef = useRef(0);
   /** label 有值时是生成卡引用（侧边栏渲染成胶囊）；无 label 是普通 @ 文本预填；mediaBlocks 携带媒体元数据 */
   const [agentContext, setAgentContext] = useState<{
     text: string;
@@ -253,6 +257,7 @@ export default function CanvasPage() {
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
+          onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
         };
         break;
@@ -837,6 +842,7 @@ export default function CanvasPage() {
     genVideo: (_id: string) => {},
     genAudio: (_id: string) => {},
     download: (_id: string) => {},
+    showDetails: (_id: string) => {},
     firePendingGen: () => {},
   });
   actionsRef.current = { ...actionsRef.current, duplicate: handleDuplicateNode, addToChat: handleAddToChatNode };
@@ -1064,6 +1070,7 @@ export default function CanvasPage() {
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
+          onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
         },
       });
@@ -1219,6 +1226,7 @@ export default function CanvasPage() {
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onDownload: (id: string) => actionsRef.current.download(id),
+        onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
       },
     };
@@ -1388,11 +1396,65 @@ export default function CanvasPage() {
     }
   };
 
+  /** 查看媒体详情：先展示节点快照，再按 assetId 补全完整资产字段。 */
+  const handleNodeShowDetails = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    const data = (node?.data ?? {}) as Record<string, unknown>;
+    const type = data.mediaType;
+    const url = data.src;
+    if (!node || (type !== 'image' && type !== 'video' && type !== 'audio') || typeof url !== 'string') {
+      showToast('warn', '当前媒体暂无可展示的详情');
+      return;
+    }
+
+    const assetId = data.assetId ?? data.asset_id ?? data.assetID;
+    const fallbackAsset: AssetRecord = {
+      id: typeof assetId === 'string' || typeof assetId === 'number' ? assetId : node.id,
+      type,
+      url,
+      width: typeof data.width === 'number' ? data.width : null,
+      height: typeof data.height === 'number' ? data.height : null,
+      duration: typeof data.duration === 'number' ? data.duration : null,
+      size: typeof data.size === 'number' ? data.size : null,
+      source: null,
+      model: null,
+      created_at: null,
+    };
+
+    setAssetDetailTarget(fallbackAsset);
+    const requestId = ++assetDetailRequestIdRef.current;
+    if (typeof assetId !== 'string' && typeof assetId !== 'number') {
+      setAssetDetailLoading(false);
+      return;
+    }
+    setAssetDetailLoading(true);
+
+    void fetchAssetDetail(assetId)
+      .then((asset) => {
+        // 请求结束前用户可能关闭或切换到其他资产，避免用旧响应覆盖当前弹框。
+        if (requestId !== assetDetailRequestIdRef.current) return;
+        setAssetDetailTarget((current) =>
+          current && String(current.id) === String(fallbackAsset.id) ? asset : current,
+        );
+        setAssetDetailLoading(false);
+      })
+      .catch(() => {
+        if (requestId === assetDetailRequestIdRef.current) setAssetDetailLoading(false);
+      });
+  };
+
+  const handleCloseAssetDetail = () => {
+    assetDetailRequestIdRef.current += 1;
+    setAssetDetailTarget(null);
+    setAssetDetailLoading(false);
+  };
+
   actionsRef.current.reEdit = handleNodeReEdit;
   actionsRef.current.genImage = handleNodeGenImage;
   actionsRef.current.genVideo = handleNodeGenVideo;
   actionsRef.current.genAudio = handleNodeGenAudio;
   actionsRef.current.download = handleNodeDownload;
+  actionsRef.current.showDetails = handleNodeShowDetails;
 
   /** Agent 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent） */
   /**
@@ -1818,6 +1880,7 @@ export default function CanvasPage() {
               onGenVideo: (id: string) => actionsRef.current.genVideo(id),
               onGenAudio: (id: string) => actionsRef.current.genAudio(id),
               onDownload: (id: string) => actionsRef.current.download(id),
+              onShowDetails: (id: string) => actionsRef.current.showDetails(id),
               onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
             },
           };
@@ -2131,6 +2194,12 @@ export default function CanvasPage() {
         onDeleteProject={handleDelete}
         onNewProject={handleNewProject}
         onToggleAgent={() => setShowAgent(!showAgent)}
+      />
+
+      <AssetDetailModal
+        asset={assetDetailTarget}
+        loading={assetDetailLoading}
+        onClose={handleCloseAssetDetail}
       />
 
       {/* 画布区域 */}
