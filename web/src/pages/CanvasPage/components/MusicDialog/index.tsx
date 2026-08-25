@@ -363,10 +363,6 @@ export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAu
         </div>
 
         <div className={styles.barRight}>
-          <span className={styles.costText}>
-            <Sparkles size={14} strokeWidth={2} />
-            <span>模拟生成</span>
-          </span>
           <button
             className={`${styles.sendBtn} ${text.trim() ? styles.sendBtnActive : ''}`}
             disabled={!text.trim()}

@@ -3,7 +3,7 @@
  * ============================================ */
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ChevronUp, ChevronDown, Music, Sparkles, BookOpen, X } from 'lucide-react';
+import { Plus, ChevronUp, ChevronDown, Music, Sparkles, BookOpen, BookText, X } from 'lucide-react';
 import SkillModal from '../SkillModal';
 import LoginModal from '@/components/LoginModal';
 import { getCurrentUser, subscribe } from '@/utils/auth';
@@ -335,10 +335,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   }, []);
 
   /** 跳转画布页并携带草稿（经 location.state 注入 Agent 弹框）与武装技能 */
-  const goCanvasWithText = (text: string, skillId?: string) => {
+  const goCanvasWithText = (text: string, skillId?: string, skillName?: string) => {
     setInputValue('');
     if (skillId) setArmedSkill(null); // 携带后清除气泡
-    navigate('/canvas', { state: { agentText: text, skillId: skillId ?? '' } });
+    navigate('/canvas', { state: { agentText: text, skillId: skillId ?? '', skillName: skillName ?? '' } });
   };
 
   /** 按当前 tab 分发：智能体→Agent 对话；AI视频/AI图片→画布直接生成节点并唤起对应对话框 */
@@ -382,7 +382,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       navigate('/canvas', { state: { genKind: 'image' } });
       return;
     }
-    goCanvasWithText(text, armedSkill?.id);
+    goCanvasWithText(text, armedSkill?.id, armedSkill?.name);
   };
 
   /** IKA64P：「直接使用」= 关闭弹窗并武装技能气泡（不再填全文；发送时随消息作为强制技能生效） */
@@ -832,10 +832,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
 
               <div className={styles.videoParamsRight}>
                 <span className={styles.tryUnlimited}>或尝试无限</span>
-                <div className={styles.tokenBadge}>
-                  <Sparkles size={14} color="#a0a0a0" strokeWidth={2} />
-                  <span className={styles.tokenCount}>9</span>
-                </div>
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() && !firstlastInvalid ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
@@ -990,10 +986,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
               </div>
 
               <div className={styles.videoParamsRight}>
-                <div className={styles.imageStrengthBadge}>
-                  <Sparkles size={14} strokeWidth={2} />
-                  <span>+ {imageStrength}</span>
-                </div>
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
@@ -1007,11 +999,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
         ) : (
           /* ========== 视频智能体 原有布局 ========== */
           <>
-            {/* IKA64P：直接使用武装的技能气泡（发送时随消息作为强制技能生效） */}
+            {/* IKA64P：直接使用武装的技能气泡（与画布 Agent 风格一致） */}
             {armedSkill && (
               <div className={styles.armedSkill}>
-                <Sparkles size={12} strokeWidth={2} />
-                <span>技能「{armedSkill.name}」已就绪，发送后生效</span>
+                <BookText size={13} strokeWidth={2} />
+                <span>技能</span>
                 <button
                   type="button"
                   className={styles.armedSkillClear}
@@ -1167,12 +1159,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                       ))}
                     </div>
                   )}
-                </div>
-
-                {/* Token 用量 */}
-                <div className={styles.tokenBadge}>
-                  <Sparkles size={14} color="#a0a0a0" strokeWidth={2} />
-                  <span className={styles.tokenCount}>9</span>
                 </div>
 
                 {/* 发送按钮 */}

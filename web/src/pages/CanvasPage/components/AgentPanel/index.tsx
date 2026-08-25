@@ -645,11 +645,13 @@ interface AgentPanelProps {
   appliedCardIds?: ReadonlySet<string>;
   /** 首页「直接使用」技能 → 画布导航携带的强制技能 ID：挂载后武装为下一条消息的 forced skill */
   initialSkillId?: string;
+  /** 首页「直接使用」技能 → 画布导航携带的强制技能名称：气泡显示用 */
+  initialSkillName?: string;
   /** 媒体块：从画布节点「添加到对话」时携带的图片/视频/音频元数据 */
   mediaBlocks?: import('@/api/agentSessions').SessionContentBlock[];
 }
 
-export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, mediaBlocks: initialMediaBlocks }: AgentPanelProps) {
+export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks }: AgentPanelProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供发送按钮启用态判断 */
@@ -818,7 +820,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   useEffect(() => {
     if (!initialSkillId || initialSkillId === lastSkillIdRef.current) return;
     lastSkillIdRef.current = initialSkillId;
-    setForcedSkill({ id: initialSkillId, name: '已选技能' });
+    setForcedSkill({ id: initialSkillId, name: initialSkillName || '已选技能' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSkillId]);
 
@@ -1147,25 +1149,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     >
       {/* 头部标题栏（拖动区域） */}
       <div className={`${styles.panelHeader} ${floating ? styles.panelHeaderFloating : ''}`}>
-        <div className={styles.headerLeft}>
-          {/* 本会话累计消耗积分（IKAFPC / IKAGZC）。
-           *  **位置从一开始就占住**：原来写成「查到了才渲染」，于是面板打开后胶囊凭空冒出来，
-           *  还把右边的会话切换器推一下——用户看到的是一次白等。数字未落定时显示占位符，
-           *  仍然不显示 0：「不知道」和「没花钱」是两回事，后者会让人以为这一轮免费。 */}
-          <span
-            className={styles.creditPill}
-            title={
-              sessionCredits === null
-                ? '正在统计本次对话累计消耗积分'
-                : `目前 Agent 对话累计消耗积分：${sessionCredits} 积分`
-            }
-          >
-            <Coins size={12} strokeWidth={2} />
-            <span className={styles.creditValue}>
-              {sessionCredits === null ? '—' : sessionCredits}
-            </span>
-          </span>
-        </div>
         <div className={styles.headerCenter}>
           {/* 会话切换器（IKAFQ6）：标题本身就是唯一入口，「新对话」收进菜单顶部。
            *  合并的动因是第一行要腾位置（IKAFPC 的积分胶囊要进来），代价是新建从一击变两击。
