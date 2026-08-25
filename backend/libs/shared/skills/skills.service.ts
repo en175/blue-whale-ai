@@ -55,26 +55,6 @@ export class SkillService {
     return this.repo.findAssetDomainInfo(creativeSkillId);
   }
 
-  updateAutoByCreativeSkillId(
-    userId: string,
-    creativeSkillId: string,
-    auto: boolean,
-  ) {
-    return this.repo.updateAutoByCreativeSkillId(userId, creativeSkillId, auto);
-  }
-
-  updatePersonalAutoByCreativeSkillId(
-    userId: string,
-    creativeSkillId: string,
-    auto: boolean,
-  ) {
-    return this.repo.updatePersonalAutoByCreativeSkillId(
-      userId,
-      creativeSkillId,
-      auto,
-    );
-  }
-
   createPersonalSkill(
     userId: string,
     input: Parameters<ReturnType<typeof createSkillRepo>["createPersonalSkill"]>[1],

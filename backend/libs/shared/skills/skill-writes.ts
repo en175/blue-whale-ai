@@ -62,41 +62,6 @@ export async function handleRemoveSkill(
   return ok();
 }
 
-export async function handleUpdateSkillAuto(
-  userId: string,
-  creativeSkillId: string,
-  auto: boolean,
-  skills: SkillService,
-) {
-  const invalid = validateCreativeSkillId(creativeSkillId);
-  if (invalid) return invalid;
-  const info = await skills.findAssetDomainInfo(creativeSkillId);
-  if (!info) {
-    return fail(DATA_NOT_EXIST_CODE, `Skill 不存在: ${creativeSkillId}`);
-  }
-  if (info.asset_domain === "personal") {
-    if (info.owner_user_id !== userId) {
-      return fail(DATA_NOT_EXIST_CODE, `Skill 不存在: ${creativeSkillId}`);
-    }
-    const hit = await skills.updatePersonalAutoByCreativeSkillId(
-      userId,
-      creativeSkillId,
-      auto,
-    );
-    if (!hit) {
-      return fail(DATA_NOT_EXIST_CODE, `Skill 不存在: ${creativeSkillId}`);
-    }
-    return ok();
-  }
-  const hit = await skills.updateAutoByCreativeSkillId(
-    userId,
-    creativeSkillId,
-    auto,
-  );
-  if (!hit) return fail(DATA_NOT_EXIST_CODE, "未添加该 Skill，无法设置 auto");
-  return ok();
-}
-
 export async function handleCreateSkill(
   userId: string,
   content: string,
@@ -115,7 +80,6 @@ export async function handleCreateSkill(
     });
     return ok({
       creative_skill_id: result.creative_skill_id,
-      auto: false,
       name: result.name,
       description: result.description,
       cover_url: null,

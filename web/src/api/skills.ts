@@ -24,8 +24,6 @@ export interface SkillRecord {
   category?: 'film' | 'marketing' | 'other';
   /** 使用人数（技能库返回） */
   usage_count?: number;
-  /** 是否自动激活（我的技能返回） */
-  auto?: boolean;
 }
 
 /** 分页包络 */
@@ -77,11 +75,6 @@ export function fetchMySkills(pageNum: number, pageSize = 50) {
 /** 从「我的技能」移除（仅解除引用） DELETE /api/agent/skills/mine/:id */
 export function removeMySkill(id: string) {
   return http.del<null>(`/api/agent/skills/mine/${encodeURIComponent(id)}`);
-}
-
-/** 切换技能自动激活 PATCH /api/agent/skills/mine/:id */
-export function setMySkillAuto(id: string, auto: boolean) {
-  return http.patch<null>(`/api/agent/skills/mine/${encodeURIComponent(id)}`, { auto });
 }
 
 /** 创建个人技能 POST /api/agent/skills/personal（提交完整 SKILL.md 文本含 frontmatter） */

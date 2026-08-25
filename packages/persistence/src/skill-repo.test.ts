@@ -553,7 +553,7 @@ describe("SkillRepo.checkPersonalNameAvailable / createPersonalSkill 名称校�
       },
       user_skill: {
         count: vi.fn().mockResolvedValue(1),
-        findMany: vi.fn().mockResolvedValue([{ skill_id: 1n, auto: 1 }]),
+        findMany: vi.fn().mockResolvedValue([{ skill_id: 1n }]),
       },
       $queryRawUnsafe: vi.fn().mockResolvedValue([]),
     } as unknown as PrismaClient;
