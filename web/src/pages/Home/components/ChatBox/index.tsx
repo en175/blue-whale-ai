@@ -625,15 +625,19 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                     </span>
                   </div>
                 ))}
-                {!(videoImagesFull && videoVideosFull) && (
-                  <div
-                    className={styles.refCard}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Plus size={16} strokeWidth={2} />
-                    <span>参考</span>
-                  </div>
-                )}
+                <div
+                  className={styles.refCard}
+                  onClick={() => {
+                    if (videoImagesFull && videoVideosFull) {
+                      showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${MAX_VIDEOS} 个）`);
+                      return;
+                    }
+                    fileInputRef.current?.click();
+                  }}
+                >
+                  <Plus size={16} strokeWidth={2} />
+                  <span>参考</span>
+                </div>
               </div>
               {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
               <textarea
@@ -827,15 +831,19 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                     </span>
                   </div>
                 ))}
-                {imageRefFiles.length < imageMaxImages && (
-                  <div
-                    className={styles.refCard}
-                    onClick={() => imageFileInputRef.current?.click()}
-                  >
-                    <Plus size={16} strokeWidth={2} />
-                    <span>图片</span>
-                  </div>
-                )}
+                <div
+                  className={styles.refCard}
+                  onClick={() => {
+                    if (imageRefFiles.length >= imageMaxImages) {
+                      showToast(`参考图已到上限（${imageMaxImages} 张）`);
+                      return;
+                    }
+                    imageFileInputRef.current?.click();
+                  }}
+                >
+                  <Plus size={16} strokeWidth={2} />
+                  <span>图片</span>
+                </div>
               </div>
               {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
               <textarea
@@ -1027,7 +1035,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                 <div className={styles.uploadWrap} ref={uploadRef}>
                   <button
                     className={styles.iconBtn}
-                    onClick={() => agentFileInputRef.current?.click()}
+                    onClick={() => {
+                      if (agentFiles.length >= MAX_AGENT_FILES) {
+                        showToast(`附件已到上限（${MAX_AGENT_FILES} 个）`);
+                        return;
+                      }
+                      agentFileInputRef.current?.click();
+                    }}
                     onMouseEnter={() => setShowUpload(true)}
                     onMouseLeave={() => setShowUpload(false)}
                   >
