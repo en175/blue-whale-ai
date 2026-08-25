@@ -155,9 +155,18 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         >(
           // 优先 active version，没有 active 指针时退到最新一版——个人技能建出来时
           // active_version_id 可能还没回填（同 findPersonalContent 的取法）。
-          `SELECT cs.creative_skill_id, cs.name, cs.description, cs.asset_domain, v.body
+          // 中文名在 skill.name_zh（官方目录 108/108 都有），creative_skill.name 是英文标题式
+          // （`Ugc Ads Video`）。用户在技能库里看到的、点的都是中文名，agent 回头说「用了哪条」
+          // 时必须是同一个名字，否则用户对不上。个人技能没有目录行，退回 creative_skill.name
+          // ——那本来就是用户自己起的名。
+          `SELECT cs.creative_skill_id,
+                  COALESCE(NULLIF(s.name_zh, ''), cs.name) AS name,
+                  cs.description,
+                  cs.asset_domain,
+                  v.body
              FROM creative_skill cs
              JOIN creative_skill_version v ON v.creative_skill_id = cs.creative_skill_id
+             LEFT JOIN skill s ON s.id = cs.source_skill_id AND s.is_delete = 0
             WHERE cs.creative_skill_id = ?
               AND (cs.asset_domain = 'official'
                    OR (cs.asset_domain = 'personal' AND cs.owner_user_id = ?))
