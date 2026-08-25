@@ -14,7 +14,7 @@
 | 入口 | 仅资产库页面（`/assets`）资产卡片点击 |
 | 弹窗内容 | 该资产数据的完整字段（JSON 是弹窗背后的数据携带结构） |
 | 展示形态 | 媒体预览 + 可读字段，**不给用户看原始 JSON** |
-| 可读字段 | 类型 / 来源 / 尺寸 / 时长 / 创建时间 / 文件大小 |
+| 可读字段 | 类型 / 来源 / 尺寸 / 时长 / 创建时间 / 文件大小 / **生成模型**（2026-08-24 补充：前端同事字段需求） |
 | 后端 | 方案 A：扩展列表接口返回字段（含 generation_job_id 等溯源信息作为数据底座） |
 
 ## 2. 现状数据模型
@@ -27,6 +27,8 @@
 
 `source` 取值：`uploaded`（用户上传）、`generated`（AI 生成产物，关联 `generation_job_id` 可溯源到生成任务）。
 
+生成模型溯源链：`assets.generation_job_id` → `generation_jobs.input.model_id`（Json，顶层或 `parameters.model_id`）→ `generation_model_capability.model_label`（展示名，无则回退 model_id）。
+
 ## 3. 架构
 
 ```
@@ -38,7 +40,7 @@ Assets/index.tsx  setDetailTarget(asset)   ← 内存数据，零额外请求
    ▼
 AssetDetailModal（新组件）
    ├── 媒体预览区（图片/视频可播放/音频带控件）
-   └── 可读字段区（类型/来源/尺寸/时长/创建时间/文件大小）
+   └── 可读字段区（类型/来源/尺寸/时长/创建时间/文件大小/生成模型）
    │
    ▼
 数据底座 = 后端列表接口扩展字段（size + generation_job_id 等）
@@ -60,6 +62,7 @@ AssetDetailModal（新组件）
   - 时长：格式化 `mm:ss`（视频/音频，图片显示 —）
   - 创建时间：`created_at` 本地化（`toLocaleString`）
   - 文件大小：`size` → KB/MB 格式化；null 显示 —
+  - 生成模型：`model` 展示名（无则回退 model_id）；非生成/未知显示 —
 
 ### 4.2 修改 `web/src/pages/Assets/index.tsx`
 
@@ -75,17 +78,19 @@ size: number | null;              // 文件大小字节（后端新增返回）
 generation_job_id: string | null; // AI 生成溯源（数据底座）
 project_id: string | null;        // 所属项目（数据底座）
 mime: string | null;              // MIME（数据底座）
+model: string | null;             // 生成模型展示名（无则回退 model_id），非生成/未知为 null
 ```
 
 ## 5. 后端改动
 
 ### 5.1 修改 `packages/persistence/src/asset-repo.ts`
 
-- `AssetView` 接口增加 `size`、`generation_job_id`、`project_id`、`mime` 字段。
+- `AssetView` 接口增加 `size`、`generation_job_id`、`project_id`、`mime`、`model` 字段。
 - `listByUser` 的 records map 补充上述字段：
   - `size`：BigInt → `Number(a.size)`（文件上限 200MB，远低于 `Number.MAX_SAFE_INTEGER`，number 安全）。
   - `generation_job_id` / `project_id`：BigInt → `String(...)`；null 透传。
   - `mime`：字符串直传。
+  - `model`：新增 `resolveAssetModels` 辅助——按 `generation_job_id` 批量回查 `generation_jobs.input`（取顶层 `model_id` 或 `parameters.model_id`），再查 `generation_model_capability.model_label`（`enabled && !is_delete`）；无展示名回退 `model_id`；无生成任务/无模型 → null。
 - `backend/apps/blue-whale/src/api/assets/assets.controller.ts` 无需改动（`ok()` 直通）。
 
 ### 5.2 待核实点
