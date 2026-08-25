@@ -48,8 +48,8 @@ export interface SessionContentBlock {
   node_id?: string;
   /** 资产库 ID */
   asset_id?: string;
-  /** 来源：card-ref 卡片参考图、card-image 商品图、card-voice 角色音色、node 独立节点 */
-  source?: 'card-ref' | 'card-image' | 'card-voice' | 'node';
+  /** 来源：card-ref 卡片参考图、card-image 商品图、card-voice 角色音色、card-generation 生成卡、node 独立节点 */
+  source?: 'card-ref' | 'card-image' | 'card-voice' | 'card-generation' | 'node';
   /** 资源来源类型：区分从哪种卡片/节点带出的媒体数据 */
   resource_type?:
     | '图片'       // 独立图片节点

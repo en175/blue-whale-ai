@@ -640,7 +640,7 @@ export default function CanvasPage() {
       }
     }
 
-    // AssetCardNode: 参考图/视频 + 音色
+    // AssetCardNode: 参考图/视频 + 音色 + 生成卡
     if (node.type === 'assetNode') {
       // 根据 kind 确定 resource_type
       const kind = (d.kind as string) ?? 'custom';
@@ -652,6 +652,67 @@ export default function CanvasPage() {
         kind === 'generation' ? '生成卡' :
         '自定义卡';
 
+      // 生成卡：从 generationCard 中提取元数据
+      if (kind === 'generation') {
+        const gc = d.generationCard as {
+          shotTitle?: string;
+          visual?: string;
+          prompt?: string;
+          timeRange?: string;
+          durationSeconds?: number;
+          aspectRatio?: string;
+          targetMedia?: 'image' | 'video';
+          shotNo?: number;
+          assetRefItems?: { assetId: string; label: string; mediaType: 'image' | 'video' }[];
+        } | undefined;
+
+        if (gc) {
+          const displayLabel = gc.shotTitle || '生成卡';
+          // 构建生成卡元数据文本
+          const metaParts: string[] = [];
+          if (gc.shotTitle) metaParts.push(`标题：${gc.shotTitle}`);
+          if (gc.visual) metaParts.push(`画面：${gc.visual}`);
+          if (gc.prompt) metaParts.push(`提示词：${gc.prompt}`);
+          if (gc.timeRange) metaParts.push(`时长：${gc.timeRange}`);
+          if (gc.aspectRatio) metaParts.push(`画幅：${gc.aspectRatio}`);
+          if (gc.targetMedia) metaParts.push(`类型：${gc.targetMedia === 'video' ? '视频' : '图片'}`);
+          const resourceText = metaParts.join('\n');
+
+          // 生成卡本身作为一个 block 传递元数据
+          blocks.push({
+            type: 'text',
+            name: displayLabel,
+            node_id: node.id,
+            source: 'card-generation',
+            resource_type: '生成卡',
+            chip_id: chipId,
+            resource_id: node.id,
+            media_type: gc.targetMedia ?? 'image',
+            display_label: displayLabel,
+            resource_text: resourceText,
+          });
+
+          // 如果有素材引用，也添加素材 block
+          if (gc.assetRefItems && gc.assetRefItems.length > 0) {
+            for (const ref of gc.assetRefItems) {
+              blocks.push({
+                type: ref.mediaType,
+                name: ref.label || '素材',
+                node_id: node.id,
+                asset_id: ref.assetId,
+                source: 'card-ref',
+                resource_type: '生成卡',
+                chip_id: chipId,
+                resource_id: node.id,
+                media_type: ref.mediaType,
+                display_label: ref.label || '素材',
+              });
+            }
+          }
+        }
+      }
+
+      // 参考图/视频（风格/角色/物体/环境/自定义卡）
       const refs = (d.refs ?? d.initialRefs) as { id: string; src: string; type?: 'image' | 'video' }[] | undefined;
       if (refs && refs.length > 0) {
         for (const ref of refs) {
@@ -672,6 +733,8 @@ export default function CanvasPage() {
           });
         }
       }
+
+      // 音色（角色卡）
       const voice = d.voice as { name: string; src: string } | undefined;
       if (voice?.src) {
         const displayLabel = voice.name || '音色';
