@@ -254,29 +254,41 @@ function CardPreview({ preview }: { preview: PartialCardPreview | null }) {
 }
 
 /**
- * 可折叠思考过程：小字展示，默认收起。
+ * 可折叠思考过程：小字展示。
  *
  * 两种内容，来源不同所以分开渲染：`steps` 是服务端选的模板文案，`reasoning` 是模型自己的
  * 原话（IKA3M6）。原话排在步骤下面——它更长、更零散，也更可能出现自我否定和内部名词，
  * 不该抢在"它现在在干什么"前面。
+ *
+ * ## 开合归谁管
+ *
+ * `autoOpen` 是**随状态变化的默认值**，不是初始值。此前这里是 `useState(defaultOpen)`：
+ * 初始值只在挂载那一刻读一次，而这个块几乎总是先由 `run.activity` 的步骤挂载（那时还没有
+ * 思考原话，`defaultOpen` 是 false），等原话流进来时组件早就挂上了，于是"运行中默认展开"
+ * 这条从来没生效过——思考一直在流，用户一个字也看不见。
+ *
+ * 用户点过就以用户为准（`override`），没点过就跟着 `autoOpen` 走。这样运行中自动展开、
+ * 正文一出现自动收起，而任何时候用户都能把它按回自己想要的样子。
  */
 function ThinkingBlock({
   steps,
   reasoning,
-  defaultOpen = false,
+  autoOpen = false,
 }: {
   steps: string[];
   reasoning?: string;
-  defaultOpen?: boolean;
+  autoOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [override, setOverride] = useState<boolean | null>(null);
+  const open = override ?? autoOpen;
+  const setOpen = (next: boolean) => setOverride(next);
   if (steps.length === 0 && !reasoning) return null;
   return (
     <div className={styles.thinkingBlock}>
       <button
         type="button"
         className={styles.thinkingToggle}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(!open)}
         aria-expanded={open}
       >
         <span>思考过程</span>
@@ -926,13 +938,17 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   }, [cancellable, stopRun]);
 
   /**
-   * 新消息 / 流式文本 / 进入页面：滚动条始终拉到最底部，展示最新消息。
+   * 新消息 / 流式文本 / 流式思考 / 进入页面：滚动条始终拉到最底部，展示最新内容。
+   *
+   * 思考那两项此前不在依赖里。后果只在"正文还没出现"那段时间显形：思考确实在一个字一个字
+   * 地流（`assistant.reasoning.delta`），块也展开着，但视图停在原处不动——用户盯着的永远
+   * 是最先到的那几行，越流越看不到新的。那段等待正是思考要填的，填了却看不见等于没填。
    */
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, streamingText, runningRunId]);
+  }, [messages, streamingText, reasoningText, thinkingSteps, runningRunId]);
 
   /** 初始化位置：屏幕右侧；首次挂载也走统一安全边界，窄视口不会横向溢出。 */
   useEffect(() => {
@@ -1472,10 +1488,18 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
             ),
           )}
           {/* Agent 的思考过程：run.activity 实时步 + reasoning_trace 终态链 + 模型原话（IKA3M6）。
-              运行中默认展开——那段等待正是它要填的，收起来就等于还是白屏。 */}
+              **正文出现之前展开，正文一出现就收起。** 那段等待正是它要填的，收起来就等于还是
+              白屏；而正文一开始写，思考就退居次要——它已经完成了自己的作用，再占着屏幕只会
+              把用户真正要读的东西挤下去。用户点过就以用户为准。
+              key 挂 runId：换一轮就是新的一次思考，上一轮用户手动收起过不该带到下一轮。 */}
           {(thinkingSteps.length > 0 || reasoningText) && (
             <div className={styles.assistantBlock}>
-              <ThinkingBlock steps={thinkingSteps} reasoning={reasoningText} defaultOpen={Boolean(reasoningText)} />
+              <ThinkingBlock
+                key={runningRunId ?? 'idle'}
+                steps={thinkingSteps}
+                reasoning={reasoningText}
+                autoOpen={!streamingText}
+              />
             </div>
           )}
           {/* Agent 运行中的实时流式文本（assistant.delta 累积投影） */}
