@@ -6,7 +6,6 @@ import {
   X,
   Plus,
   ChevronDown,
-  Sparkles,
   Maximize2,
   Minimize2,
   SlidersHorizontal,

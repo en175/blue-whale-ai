@@ -3,7 +3,7 @@
  * 歌词（纯伴奏开启时不可填）+ 倍速；底部模式可切换回音频生成对话框
  * ============================================ */
 import { useRef, useState } from 'react';
-import { X, AudioLines, Upload, Move, ChevronDown, Sparkles, Music, ArrowUp } from 'lucide-react';
+import { X, AudioLines, Upload, Move, ChevronDown, Music, ArrowUp } from 'lucide-react';
 import type { AudioRefItem, CanvasPickItem } from '../AudioDialog';
 import styles from './index.module.css';
 

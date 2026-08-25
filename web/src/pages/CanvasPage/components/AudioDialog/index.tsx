@@ -3,7 +3,7 @@
  * 参考音频：本地上传 / 到节点选择（后端音频任务一期不支持参考素材参数，暂只带入展示，待后端支持后接线）
  * ============================================ */
 import { useEffect, useRef, useState } from 'react';
-import { X, AudioLines, ChevronDown, Sparkles, Music, ArrowUp, Upload, MousePointerClick, Maximize2, Minimize2 } from 'lucide-react';
+import { X, AudioLines, ChevronDown, Music, ArrowUp, Upload, MousePointerClick, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import styles from './index.module.css';
 

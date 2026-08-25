@@ -662,7 +662,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
    * 而这是钱的数字——宁可慢一拍，不给假数。取数失败时保留上一次已知值，不显示 0：
    * 「查不到」和「真没花钱」是两回事，后者会让用户以为这一轮免费。
    */
-  const [sessionCredits, setSessionCredits] = useState<number | null>(null);
+  const [, setSessionCredits] = useState<number | null>(null);
 
   /** 输入框内容的结构化形态：胶囊在编辑期是指针，只在发送时解引用（IKAFSX）。 */
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);

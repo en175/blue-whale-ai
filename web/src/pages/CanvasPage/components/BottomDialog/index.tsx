@@ -8,7 +8,6 @@ import {
   X,
   Image,
   Video,
-  Sparkles,
   SlidersHorizontal,
   Play,
   ArrowUp,

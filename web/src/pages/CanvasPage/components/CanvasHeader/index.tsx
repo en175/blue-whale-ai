@@ -2,7 +2,7 @@
  * CanvasHeader 画布页顶栏：项目名/积分/Agent 入口
  * ============================================ */
 import { useNavigate } from 'react-router-dom';
-import { Coins, Bot } from 'lucide-react';
+import { Bot } from 'lucide-react';
 import UserDropdown from '@/components/UserDropdown';
 import ProjectSelector, { type CanvasProject } from '../ProjectSelector';
 import styles from './index.module.css';
@@ -10,7 +10,7 @@ import styles from './index.module.css';
 interface CanvasHeaderProps {
   projects: CanvasProject[];
   currentProjectId: string;
-  balance: string;
+  balance?: string;
   onSelectProject: (id: string) => void;
   onRenameProject: (id: string, newName: string) => void;
   onDeleteProject: (id: string) => void;
@@ -21,7 +21,6 @@ interface CanvasHeaderProps {
 export default function CanvasHeader({
   projects,
   currentProjectId,
-  balance,
   onSelectProject,
   onRenameProject,
   onDeleteProject,

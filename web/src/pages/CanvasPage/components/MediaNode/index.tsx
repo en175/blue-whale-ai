@@ -119,7 +119,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleReEdit = useCallback(() => data.onReEdit?.(id), [data, id]);
   const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
-  const handleGenAudio = useCallback(() => data.onGenAudio?.(id), [data, id]);
   const handleDownload = useCallback(() => data.onDownload?.(id), [data, id]);
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
 

@@ -3,7 +3,7 @@
  * ============================================ */
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ChevronUp, ChevronDown, Music, Sparkles, BookOpen, BookText, X } from 'lucide-react';
+import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X } from 'lucide-react';
 import SkillModal from '../SkillModal';
 import LoginModal from '@/components/LoginModal';
 import { getCurrentUser, subscribe } from '@/utils/auth';
@@ -194,7 +194,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   const [imageModel, setImageModel] = useState('seedream5lite');
   const [imageAspectRatio, setImageAspectRatio] = useState('16:9');
   const [imageResolution, setImageResolution] = useState('2K');
-  const [imageStrength] = useState(0.8);
   const [showImgModelDrop, setShowImgModelDrop] = useState(false);
   const [showImgRatioDrop, setShowImgRatioDrop] = useState(false);
   const [showImgResDrop, setShowImgResDrop] = useState(false);
