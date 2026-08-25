@@ -156,3 +156,139 @@ describe("createAssetRepo.listByUser", () => {
     );
   });
 });
+
+describe("createAssetRepo.findOwnedById", () => {
+  it("命中返回完整 AssetView，含 model 溯源展示名（字段与列表一致）", async () => {
+    const row = {
+      id: 42n,
+      type: "image",
+      url: "https://tos.test/a.png",
+      width: 800,
+      height: 600,
+      duration: null,
+      duration_ms: null,
+      source: "generated",
+      gmt_create: new Date("2026-08-01T00:00:00.000Z"),
+      size: BigInt(5242880),
+      generation_job_id: 7n,
+      project_id: 55n,
+      mime: "image/png",
+    };
+    const prisma = {
+      assets: {
+        findFirst: vi.fn().mockResolvedValue(row),
+      },
+      generation_jobs: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 7n, input: { prompt: "海浪", model_id: "seedance-2.0" } },
+        ]),
+      },
+      generation_model_capability: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([
+            { model_id: "seedance-2.0", model_label: "Seedance 2.0 标准版" },
+          ]),
+      },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const asset = await repo.findOwnedById("42", "9");
+
+    expect(asset).toMatchObject({
+      id: "42",
+      type: "image",
+      url: "https://tos.test/a.png",
+      width: 800,
+      height: 600,
+      source: "generated",
+      created_at: "2026-08-01T00:00:00.000Z",
+      size: 5242880,
+      generation_job_id: "7",
+      project_id: "55",
+      mime: "image/png",
+      model: "Seedance 2.0 标准版",
+    });
+  });
+
+  it("归属校验：查询条件含 id + user_id + is_delete，不命中返回 null", async () => {
+    const assets = {
+      findFirst: vi.fn().mockResolvedValue(null),
+    };
+    const prisma = {
+      assets,
+      generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const asset = await repo.findOwnedById("999", "9");
+
+    expect(asset).toBeNull();
+    expect(assets.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: BigInt(999), user_id: BigInt(9), is_delete: false },
+      }),
+    );
+  });
+
+  it("上传资产无生成任务 → model 为 null", async () => {
+    const row = {
+      id: 1n,
+      type: "image",
+      url: "https://tos.test/upload.png",
+      width: null,
+      height: null,
+      duration: null,
+      duration_ms: null,
+      source: "uploaded",
+      gmt_create: new Date("2026-08-01T00:00:00.000Z"),
+      size: null,
+      generation_job_id: null,
+      project_id: 0n,
+      mime: "image/png",
+    };
+    const prisma = {
+      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const asset = await repo.findOwnedById("1", "9");
+
+    expect(asset).toMatchObject({ id: "1", source: "uploaded", model: null });
+  });
+
+  it("生成任务有 model_id 但能力表无展示名 → model 回退 model_id", async () => {
+    const row = {
+      id: 3n,
+      type: "image",
+      url: "https://tos.test/gen2.png",
+      width: null,
+      height: null,
+      duration: null,
+      duration_ms: null,
+      source: "generated",
+      gmt_create: new Date("2026-08-03T00:00:00.000Z"),
+      size: null,
+      generation_job_id: 9n,
+      project_id: 0n,
+      mime: "image/png",
+    };
+    const prisma = {
+      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      generation_jobs: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 9n, input: { prompt: "y", model_id: "unknown-model" } },
+        ]),
+      },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const asset = await repo.findOwnedById("3", "9");
+
+    expect(asset).toMatchObject({ id: "3", model: "unknown-model" });
+  });
+});

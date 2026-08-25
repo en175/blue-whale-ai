@@ -21,6 +21,16 @@ export class AssetsController {
     return ok(await this.assets.listByUser(user.userId, filter));
   }
 
+  /** 单个资产详情（画布/资产库弹窗用）：命中返回完整 AssetView，不归属/不存在 → 100301。 */
+  @Get(":assetId")
+  async getOne(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("assetId") assetId: string,
+  ) {
+    const asset = await this.assets.findOwnedById(assetId, user.userId);
+    return asset ? ok(asset) : fail(100301, "资源不存在");
+  }
+
   @Delete(":assetId")
   async remove(
     @CurrentUser() user: AuthenticatedUser,
