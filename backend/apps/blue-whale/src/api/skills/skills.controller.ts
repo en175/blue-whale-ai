@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
 import { fail, ok } from "@blue-whale/contracts";
 import type { SkillLibraryView, SkillMineView } from "@blue-whale/persistence";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
@@ -14,7 +14,6 @@ import {
   handleDeletePersonalSkill,
   handleGetPersonalSkill,
   handleRemoveSkill,
-  handleUpdateSkillAuto,
 } from "@lib/shared/skills/skill-writes.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
@@ -40,7 +39,6 @@ function pickLibraryView(s: SkillLibraryView): SkillLibraryView {
 function pickMineView(s: SkillMineView): SkillMineView {
   return {
     creative_skill_id: s.creative_skill_id,
-    auto: s.auto,
     name: s.name,
     description: s.description,
     cover_url: s.cover_url,
@@ -152,16 +150,6 @@ export class SkillsController {
     @Param("id") id: string,
   ) {
     return handleRemoveSkill(user.userId, id, this.skills);
-  }
-
-  @Patch("mine/:id")
-  async updateAuto(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("id") id: string,
-    @Body() body: { auto?: unknown },
-  ) {
-    const auto = body.auto === true;
-    return handleUpdateSkillAuto(user.userId, id, auto, this.skills);
   }
 
   @Post("personal")

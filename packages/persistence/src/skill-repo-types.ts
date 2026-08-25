@@ -29,7 +29,6 @@ export interface SkillLibraryView {
 
 export interface SkillMineView {
   creative_skill_id: string | null;
-  auto: boolean;
   name: string | null;
   description: string | null;
   cover_url: string | null;
@@ -146,19 +145,6 @@ export interface SkillRepo {
   removeReferenceByCreativeSkillId(
     userId: string,
     creativeSkillId: string,
-  ): Promise<boolean>;
-  /** 以 creative_skill_id 改 auto 开关（仅未删行）；未 resolve 到返回 false。 */
-  updateAutoByCreativeSkillId(
-    userId: string,
-    creativeSkillId: string,
-    auto: boolean,
-  ): Promise<boolean>;
-  /** 个人技能本体 auto_match 开关（契约 §16.1，IK60X2）：
-   *  asset_domain='personal' + owner 谓词保护，0 命中返回 false（不泄露存在性）。 */
-  updatePersonalAutoByCreativeSkillId(
-    userId: string,
-    creativeSkillId: string,
-    auto: boolean,
   ): Promise<boolean>;
   /** owner 查看个人技能正文（契约 §13.1，IK60WZ）：owner + personal 谓词
    *  JOIN 版本行取最新 body；非 owner/官方域/未知 → null（不泄露存在性），读路径容错。 */

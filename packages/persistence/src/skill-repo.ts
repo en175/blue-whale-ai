@@ -187,7 +187,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
       const rels = await prisma.user_skill.findMany({
         where: { user_id: BigInt(userId), is_delete: 0 },
         orderBy: { gmt_create: "desc" },
-        select: { skill_id: true, auto: true, gmt_create: true },
+        select: { skill_id: true, gmt_create: true },
       });
 
       // 批量 join skill 快照（排除 content），再批量 creative 映射。
@@ -212,7 +212,6 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
           creative_skill_id: s
             ? (creativeIds.get(s.id.toString()) ?? null)
             : null,
-          auto: r.auto === 1,
           name: s?.name ?? null,
           description: s?.description ?? null,
           cover_url: s?.cover_url ?? null,
@@ -222,18 +221,17 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
           sort_time: r.gmt_create,
         };
       });
-      // 个人技能按 gmt_create desc 取回（含 auto_match 本体开关，契约 §16.1）
+      // 个人技能按 gmt_create desc 取回。
       let personal: (SkillMineView & { sort_time: Date })[] = [];
       try {
         const personalRows = await prisma.$queryRawUnsafe<
-          { creative_skill_id: string; name: string; description: string | null; auto_match: number; gmt_create: Date }[]
+          { creative_skill_id: string; name: string; description: string | null; gmt_create: Date }[]
         >(
-          `SELECT creative_skill_id, name, description, auto_match, gmt_create FROM creative_skill WHERE owner_user_id = ? AND asset_domain = 'personal' ORDER BY gmt_create DESC`,
+          `SELECT creative_skill_id, name, description, gmt_create FROM creative_skill WHERE owner_user_id = ? AND asset_domain = 'personal' ORDER BY gmt_create DESC`,
           BigInt(userId),
         );
         personal = personalRows.map((p) => ({
           creative_skill_id: p.creative_skill_id,
-          auto: p.auto_match === 1,
           name: p.name,
           description: p.description,
           cover_url: null,
@@ -323,33 +321,6 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
       const r = await prisma.user_skill.updateMany({
         where: { user_id: BigInt(userId), skill_id: BigInt(skillId), is_delete: 0 },
         data: { is_delete: 1 },
-      });
-      return r.count > 0;
-    },
-
-    async updateAutoByCreativeSkillId(userId, creativeSkillId, auto) {
-      const skillId = await resolveOfficialSourceSkillId(
-        prisma,
-        creativeSkillId,
-      );
-      if (skillId === null) return false;
-      const r = await prisma.user_skill.updateMany({
-        where: { user_id: BigInt(userId), skill_id: BigInt(skillId), is_delete: 0 },
-        data: { auto: auto ? 1 : 0 },
-      });
-      return r.count > 0;
-    },
-
-    async updatePersonalAutoByCreativeSkillId(userId, creativeSkillId, auto) {
-      // 个人本体开关（契约 §16.1）：asset_domain='personal' + owner 谓词保护，
-      // 跨用户/官方域/未知 ID 均 0 命中 → false（不泄露存在性，§7）。
-      const r = await prisma.creative_skill.updateMany({
-        where: {
-          creative_skill_id: creativeSkillId,
-          asset_domain: "personal",
-          owner_user_id: BigInt(userId),
-        },
-        data: { auto_match: auto ? 1 : 0 },
       });
       return r.count > 0;
     },

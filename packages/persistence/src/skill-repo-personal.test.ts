@@ -21,7 +21,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
             creative_skill_id: "my_personal",
             name: "我的技能",
             description: "个人资产",
-            auto_match: 1,
             gmt_create: new Date("2026-01-01T00:00:00Z"),
           },
         ]);
@@ -33,7 +32,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     const userSkillFindMany = vi
       .fn()
       .mockResolvedValue([
-        { skill_id: 3n, auto: 1, gmt_create: new Date("2026-02-01T00:00:00Z") },
+        { skill_id: 3n, gmt_create: new Date("2026-02-01T00:00:00Z") },
       ]);
     const prisma = {
       user_skill: { findMany: userSkillFindMany },
@@ -66,7 +65,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     expect(page.records).toEqual([
       {
         creative_skill_id: "deep_writing",
-        auto: true,
         name: "深度写作",
         description: "写作助手",
         cover_url: "https://x/cover.png",
@@ -76,7 +74,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
       },
       {
         creative_skill_id: "my_personal",
-        auto: true,
         name: "我的技能",
         description: "个人资产",
         cover_url: null,
@@ -89,13 +86,9 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     expect(userSkillFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ orderBy: { gmt_create: "desc" } }),
     );
-    // 个人技能查询带 owner 谓词与 auto_match 透传（§16.1）：他人的个人技能不会进入结果。
+    // 个人技能查询带 owner 谓词（§16.1）：他人的个人技能不会进入结果。
     expect(queryRawUnsafe).toHaveBeenCalledWith(
       expect.stringContaining("owner_user_id = ?"),
-      9n,
-    );
-    expect(queryRawUnsafe).toHaveBeenCalledWith(
-      expect.stringContaining("auto_match"),
       9n,
     );
   });
@@ -115,7 +108,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     expect(page.records).toEqual([
       {
         creative_skill_id: "my_personal",
-        auto: true,
         name: "我的技能",
         description: "个人资产",
         cover_url: null,
@@ -243,7 +235,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     const executeRawUnsafe = vi.fn().mockRejectedValue(new Error("table missing"));
     const prisma = {
       user_skill: {
-        findMany: vi.fn().mockResolvedValue([{ skill_id: 3n, auto: 0 }]),
+        findMany: vi.fn().mockResolvedValue([{ skill_id: 3n }]),
       },
       skill: {
         findMany: vi.fn().mockResolvedValue([
