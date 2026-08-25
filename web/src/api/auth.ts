@@ -4,11 +4,8 @@
 import { apiRequest } from './http';
 import type { SessionUser } from '@/utils/auth';
 
-/** POST /api/auth/login 返回 */
+/** POST /api/auth/login 返回（登录态走 HttpOnly 会话 cookie，响应不含任何令牌） */
 export interface LoginData {
-  access_token: string;
-  refresh_token: string;
-  expires_in: number;
   user_id: number;
   username: string;
   email: string;
