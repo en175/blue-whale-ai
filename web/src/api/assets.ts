@@ -20,20 +20,14 @@ export interface AssetRecord {
   height: number | null;
   /** 视频/音频时长（秒），图片为 null */
   duration: number | null;
+  /** 文件大小（字节）；旧响应可能暂未返回 */
+  size?: number | null;
   /** 资产来源，uploaded 表示用户上传 */
-  source: string;
-  /** 创建时间（ISO 8601），不直接展示 */
-  created_at: string;
-  /** 文件大小（字节），null 表示未知 */
-  size: number | null;
-  /** AI 生成溯源：关联生成任务 ID，非生成资产为 null */
-  generation_job_id: string | null;
-  /** 所属项目 ID，非项目资产为 null */
-  project_id: string | null;
-  /** MIME 类型，null 表示未知 */
-  mime: string | null;
-  /** 生成模型（展示名，无则回退 model_id）；非生成资产/未知为 null */
+  source: string | null;
+  /** 生成资产使用的模型；上传资产为 null */
   model: string | null;
+  /** 创建时间（ISO 8601） */
+  created_at: string | null;
 }
 
 /** 分页包络 */
@@ -176,6 +170,17 @@ const pendingAll = new Map<string, Promise<AssetRecord[]>>();
 /** 并发分页拉取（每页一个请求，并发 6 个） */
 const ASSET_FETCH_CONCURRENCY = 6;
 
+/** 分页数据偶有重叠时按资产 ID 去重，避免重复渲染同一张资产卡片。 */
+function uniqueAssetRecords(records: AssetRecord[]): AssetRecord[] {
+  const seenIds = new Set<string>();
+  return records.filter((record) => {
+    const id = String(record.id);
+    if (seenIds.has(id)) return false;
+    seenIds.add(id);
+    return true;
+  });
+}
+
 export function fetchAllAssets(type: AssetType | '') {
   const key = type || 'all';
   let pending = pendingAll.get(key);
@@ -183,7 +188,7 @@ export function fetchAllAssets(type: AssetType | '') {
     pending = (async () => {
       const first = await fetchAssetPage(type, 1);
       const pages = Math.max(1, Math.ceil(first.total / first.size));
-      if (pages <= 1) return first.records;
+      if (pages <= 1) return uniqueAssetRecords(first.records);
       const restPages = Array.from({ length: pages - 1 }, (_, i) => i + 2);
       const restResults = await concurrentFetch(
         restPages,
@@ -191,7 +196,7 @@ export function fetchAllAssets(type: AssetType | '') {
         ASSET_FETCH_CONCURRENCY,
       );
       const restRecords = restResults.flatMap((r) => (r ? r.records : []));
-      return [...first.records, ...restRecords];
+      return uniqueAssetRecords([...first.records, ...restRecords]);
     })().finally(() => {
       pendingAll.delete(key);
     });

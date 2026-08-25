@@ -769,7 +769,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const lastInputVersionRef = useRef(0);
   /** 上一次 composed 中的 chip IDs（用于检测 chip 是否被删除） */
   const prevChipIdsRef = useRef<Set<string>>(new Set());
-  
+
   useEffect(() => {
     if (!inputVersion || inputVersion === lastInputVersionRef.current) return;
     lastInputVersionRef.current = inputVersion;
@@ -798,11 +798,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         .filter((s): s is { kind: 'ref'; ref: { id: string; label: string; prompt: string } } => s.kind === 'ref')
         .map((s) => s.ref.id),
     );
-    
+
     // 检测是否有 chip 被删除（对比上一次的 chip IDs）
     const prevIds = prevChipIdsRef.current;
     const chipsRemoved = [...prevIds].some((id) => !chipIds.has(id));
-    
+
     if (chipsRemoved && pendingMediaBlocksRef.current.length > 0) {
       // 有 chip 被删除 → 过滤对应的 blocks
       const filtered = pendingMediaBlocksRef.current.filter((b) => !b.chip_id || chipIds.has(b.chip_id));
@@ -810,7 +810,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       syncMediaBlocks();
       console.log('[AgentPanel] chip 删除同步, 剩余 blocks:', filtered.length);
     }
-    
+
     // 更新记录
     prevChipIdsRef.current = chipIds;
   }, [composed]);
