@@ -1,6 +1,6 @@
 {
   "$comment": "Generated from src/http/routes.ts (IKACK2). Do not edit by hand — run pnpm contract:routes. routes.test.ts fails if this drifts.",
-  "version": 1,
+  "version": 2,
   "base_path": "/v1/projects/{project_id}",
   "routes": [
     {
@@ -42,6 +42,11 @@
       "name": "cancel_session",
       "method": "POST",
       "path": "/sessions/{session_id}/cancel"
+    },
+    {
+      "name": "set_session_creative_skills",
+      "method": "PUT",
+      "path": "/sessions/{session_id}/creative-skills"
     },
     {
       "name": "session_snapshot",

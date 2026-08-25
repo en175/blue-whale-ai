@@ -664,22 +664,21 @@ export default function CanvasPage() {
           aspectRatio?: string;
           targetMedia?: 'image' | 'video';
           shotNo?: number;
+          /** `${revision_id}#${shot_no}`，由 api/promptCardMapping.ts 拼出，随节点持久化。 */
+          cardId?: string;
           assetRefItems?: { assetId: string; label: string; mediaType: 'image' | 'video' }[];
         } | undefined;
 
         if (gc) {
           const displayLabel = gc.shotTitle || '生成卡';
-          // 构建生成卡元数据文本
-          const metaParts: string[] = [];
-          if (gc.shotTitle) metaParts.push(`标题：${gc.shotTitle}`);
-          if (gc.visual) metaParts.push(`画面：${gc.visual}`);
-          if (gc.prompt) metaParts.push(`提示词：${gc.prompt}`);
-          if (gc.timeRange) metaParts.push(`时长：${gc.timeRange}`);
-          if (gc.aspectRatio) metaParts.push(`画幅：${gc.aspectRatio}`);
-          if (gc.targetMedia) metaParts.push(`类型：${gc.targetMedia === 'video' ? '视频' : '图片'}`);
-          const resourceText = metaParts.join('\n');
-
-          // 生成卡本身作为一个 block 传递元数据
+          // 生成卡胶囊：只带身份，正文由 agent 按 id 从自己的库里解析（胶囊契约 §5）。
+          //
+          // 这张卡本来就是 agent 发的，落在它的 prompt_card_revisions 里；节点上存着的
+          // `cardId` 是 `${revision_id}#${shot_no}` 的复合形式（见 api/promptCardMapping.ts），
+          // 拆开就是可解析的身份。此前这里填的是画布节点 id（`gencard-1724…`），agent 库里
+          // 查不到，同时把整卡正文塞进 `resource_text` 夹带过去——那是「胶囊是指针不是全文」
+          // （IKA5I8）反过来做。
+          const [cardRevisionId] = (gc.cardId ?? '').split('#');
           blocks.push({
             type: 'text',
             name: displayLabel,
@@ -687,10 +686,12 @@ export default function CanvasPage() {
             source: 'card-generation',
             resource_type: '生成卡',
             chip_id: chipId,
-            resource_id: node.id,
+            // 拿不到 revision id 时退回节点 id：解析不到，但气泡还在、标签还在，
+            // 用户不会觉得自己 @ 的东西凭空消失。
+            resource_id: cardRevisionId || node.id,
+            ...(typeof gc.shotNo === 'number' ? { shot_no: gc.shotNo } : {}),
             media_type: gc.targetMedia ?? 'image',
             display_label: displayLabel,
-            resource_text: resourceText,
           });
 
           // 如果有素材引用，也添加素材 block

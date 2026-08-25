@@ -2,6 +2,7 @@
  * upload 工具：presign → PUT 直传 → complete 三步上传封装
  * ============================================ */
 import {
+  UPLOAD_SIZE_LIMIT,
   fetchUploadPresign,
   putToPresignedUrl,
   completeUpload,
@@ -62,13 +63,20 @@ export function fileToAssetType(file: File): AssetType | null {
   return null;
 }
 
-/** 单文件三步上传：返回 complete 登记结果（含永久 url） */
+/** 单文件三步上传：返回 complete 登记结果（含永久 url）
+ *
+ * 体积超限在发请求之前就挡掉（IKAL46）：presign 那一侧也会拒，但那要等一次网络往返，而且回来
+ * 的是通用错误码，用户看不出是文件太大。本地先判一次，报得准也报得快。 */
 export async function uploadAssetFile(
   file: File,
   opts?: { projectId?: string },
 ): Promise<UploadCompleteData> {
   const type = fileToAssetType(file);
   if (!type) throw new Error(`不支持的文件类型：${file.name}`);
+  const limit = UPLOAD_SIZE_LIMIT[type];
+  if (file.size > limit) {
+    throw new Error(`文件超过 ${Math.floor(limit / 1024 / 1024)}MB 上限`);
+  }
   const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size });
   console.log('[upload] presign 返回:', {
     storage_key: presign.storage_key,

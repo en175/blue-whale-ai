@@ -46,7 +46,13 @@ export interface SessionContentBlock {
   name?: string;
   /** 画布节点 ID */
   node_id?: string;
-  /** 资产库 ID */
+  /**
+   * 资产库 ID。**有它和没它，模型看到的东西不一样**（IKAL46）。
+   *
+   * 带 `asset_id` 的块序列化成 `asset_ref` 部件，agent 据此建立 Session Asset Grant，
+   * 模型能真的读到这张图/这段视频；不带的块只能序列化成 `resource_ref`，模型拿到的是
+   * 一个占位标签。所以上传来的素材务必带上它，不要只留 `url`。
+   */
   asset_id?: string;
   /** 来源：card-ref 卡片参考图、card-image 商品图、card-voice 角色音色、card-generation 生成卡、node 独立节点 */
   source?: 'card-ref' | 'card-image' | 'card-voice' | 'card-generation' | 'node';
@@ -74,6 +80,8 @@ export interface SessionContentBlock {
   display_label?: string;
   /** 资源文本描述（如商品卡的商品详情） */
   resource_text?: string;
+  /** 生成卡胶囊指向的镜号：`resource_id` 是 revision，配上它才定位到具体那一镜。 */
+  shot_no?: number;
 }
 
 /** 生成卡里的一条素材引用（IKAFSQ）。
@@ -122,6 +130,13 @@ export interface SessionRecord {
   phase?: string;
   lifecycle?: string;
   active_run_id?: string | null;
+  /**
+   * 本会话已载入的创作套路（`creative_skill_id`，0028）。
+   *
+   * 会话级而不是逐条消息：用户点「直接使用」表达的是「接下来按这个来」，所以载入一次之后
+   * 每一轮都注入，直到显式取消。只有 id——名称在技能目录里，前端本来就有那一份。
+   */
+  active_creative_skill_ids?: string[];
   created_at?: string;
   updated_at?: string;
   etag?: string;
@@ -183,7 +198,6 @@ export interface PromptCardShot {
 export interface PromptCardAssetProvenance {
   asset_ref_id: string;
   asset_id: string;
-  asset_version: string;
   media_type: 'image' | 'video';
   display_label: string;
   accepted_summary?: string;
@@ -338,7 +352,27 @@ export function deleteSession(projectId: string, sessionId: string): Promise<unk
 
 /* ============ 消息与运行控制 ============ */
 
-/** 需要在传输时剔除的前端内部字段 */
+/** 本地上传完成、准备随消息发出的素材引用（IKAL46）。
+ *
+ * `media_type` 是「这是一条完整引用」的判据——agent 侧据此建立 Session Asset Grant；只给
+ * `asset_id` 的裸引用会被原样 round-trip 但不建立授权，于是模型读不到这张图。
+ *
+ * 这里只传身份，不传任何访问材料：签名 URL、对象键、字节都不进消息体。 */
+export interface OutboundAssetRef {
+  asset_id: string;
+  media_type: 'image' | 'video';
+  display_label?: string;
+}
+
+/** 随消息发出的技能引用（胶囊契约 §3）。 */
+export interface OutboundSkillRef {
+  skill_id: string;
+  name: string;
+  /** 技能库里的分类（如「全部」）。展示用，不是契约判别字段。 */
+  type?: string;
+}
+
+/** 前端内部字段，不上线：要么是渲染态，要么是 agent 侧不认识的噪音。 */
 const TRANSPORT_STRIP_FIELDS = ['chip_id', 'name', 'type', 'mime', 'duration'] as const;
 
 /** 从 SessionContentBlock 中剔除前端内部字段，得到传给后端的纯数据 */
@@ -352,10 +386,73 @@ function stripInternalFields(block: SessionContentBlock): Record<string, unknown
   return result;
 }
 
+/**
+ * 画布侧的中文资源分类 → 契约里的 `resource_type`。
+ *
+ * 两者不是一个东西，此前被当成了一个：画布用「商品卡 / 图片 / 音频」这类中文分类做渲染分支，
+ * 契约的 `resource_type` 只有 `asset` 与 `card` 两个值，是 agent 的判别字段。中文分类照旧
+ * 随包带过去（挂在 `resource_kind` 上，agent 原样 round-trip），但判别位必须是契约那两个。
+ */
+const RESOURCE_KIND_TO_CONTRACT: Record<string, 'asset' | 'card'> = {
+  图片: 'asset',
+  视频: 'asset',
+  音频: 'asset',
+  商品卡: 'card',
+  风格卡: 'card',
+  角色卡: 'card',
+  物体卡: 'card',
+  环境卡: 'card',
+  自定义卡: 'card',
+  生成卡: 'card',
+};
+
+/**
+ * 把一个画布媒体块序列化成契约里的引用部件。
+ *
+ * 分两路，差别是**模型到底能不能读到内容**：
+ *
+ * - 有资产库身份（`asset_id` + image/video）→ `asset_ref`。agent 据此建立 Session Asset
+ *   Grant，模型经受控理解真的读到这张图。音频走不了这条路——agent 的 asset_ref 校验只认
+ *   image / video，塞 audio 进去整条消息会被 400 掉。
+ * - 其余（画布节点、各种卡）→ `resource_ref`。模型当下只看到一个占位标签，完整内容由 agent
+ *   按 id 解析（契约 §5）。
+ *
+ * 没有任何可用 id 的块直接丢掉：`resource_ref` 缺 `resource_id` 会让 agent 400，一个渲染
+ * 残块不值得把用户整条消息打掉。
+ */
+function toReferencePart(block: SessionContentBlock): Record<string, unknown> | null {
+  const rest = stripInternalFields(block);
+  if (block.asset_id && (block.media_type === 'image' || block.media_type === 'video')) {
+    return { ...rest, type: 'asset_ref', asset_id: block.asset_id, media_type: block.media_type };
+  }
+  const resourceId = block.resource_id || block.node_id || block.asset_id;
+  if (!resourceId) return null;
+  const kind = block.resource_type;
+  return {
+    ...rest,
+    type: 'resource_ref',
+    resource_type: kind ? RESOURCE_KIND_TO_CONTRACT[kind] ?? 'card' : 'asset',
+    resource_id: resourceId,
+    ...(kind ? { resource_kind: kind } : {}),
+  };
+}
+
 /** 发送消息 POST /projects/:id/sessions/:sid/messages（回复经事件流 assistant.delta 下发）
- * options.forcedCreativeSkillId：一次性 Use——为该消息创建的目标 Run 强制激活该 Skill
- * （激活契约 §2：可缺省；缺省即普通消息，wire 字段名 forced_creative_skill_id）。
- * options.skillRef：技能引用 { type, skill_id, name }，与 resource_ref 同级。 */
+ *
+ * **胶囊一律进 `content` 数组**，不走并列的顶层字段。这不是风格问题：agent 的
+ * `parseInboundParts` 只读 `input.content`，顶层的 `resource_ref` / `skill_ref` 会被静默
+ * 丢弃——实测过，带图带技能发过去，落库的 content 只剩那条 text；而一个字不打只带胶囊时，
+ * `content` 为空，整条消息直接 400。契约 §4 与 §5 说的就是这两件事。
+ *
+ * options.resourceRef：本条消息携带的画布媒体 / 卡片，序列化为 `asset_ref` 或 `resource_ref`
+ * 部件（见 {@link toReferencePart}）。
+ * options.skillRef：用户点选的创作套路，序列化为 `skill_ref` 部件（契约 §3）。
+ * options.forcedCreativeSkillId：同一件事的老写法（顶层 `forced_creative_skill_id`）。契约 §4
+ * 已把它标为废弃，这里仍然一起发，只为不依赖 agent 与 web 的上线先后；agent 侧以 `skill_ref`
+ * 优先。两端都发布后删掉这个参数。
+ *
+ * 纯附件消息（一个字不打、只带图）是合法的：`content` 里可以没有 text 部件，agent 会把引用
+ * 投影成 `[图片：标签]` 之类的占位符。 */
 export function sendSessionMessage(
   projectId: string,
   sessionId: string,
@@ -364,22 +461,21 @@ export function sendSessionMessage(
     forcedCreativeSkillId?: string;
     signal?: AbortSignal;
     resourceRef?: SessionContentBlock[];
-    skillRef?: { type: string; skill_id: string; name: string };
+    skillRef?: OutboundSkillRef;
   },
 ): Promise<SessionMessageAck> {
   const { forcedCreativeSkillId: forcedSkillId, signal, resourceRef, skillRef } = options ?? {};
-  const body: Record<string, unknown> = { content };
-  if (resourceRef && resourceRef.length > 0) {
-    // resource_ref 剔除 chip_id、name、type 等前端内部字段
-    body.resource_ref = resourceRef.map((b) => stripInternalFields(b));
-  }
+  const parts: Record<string, unknown>[] = [
+    ...content
+      .filter(block => block.type === 'text' && (block.text ?? '').trim().length > 0)
+      .map(block => ({ type: 'text', text: (block.text ?? '').trim() })),
+    ...(resourceRef ?? []).map(toReferencePart).filter((part): part is Record<string, unknown> => part !== null),
+    ...(skillRef ? [{ type: 'skill_ref', skill_id: skillRef.skill_id, name: skillRef.name }] : []),
+  ];
+  const body: Record<string, unknown> = { content: parts };
   if (forcedSkillId) {
     body.forced_creative_skill_id = forcedSkillId;
   }
-  if (skillRef) {
-    body.skill_ref = skillRef;
-  }
-  console.log('[Agent] sendSessionMessage 请求参数:', body);
   return sessionRequest(
     agentPath('send_message', projectId, { session_id: sessionId }),
     {
@@ -409,6 +505,32 @@ export function cancelSession(projectId: string, sessionId: string): Promise<unk
       method: agentMethod('cancel_session'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
       body: JSON.stringify({ action_id: newIdempotencyKey() }),
+    },
+  );
+}
+
+/**
+ * 整份替换会话已载入的创作套路 PUT /projects/:id/sessions/:sid/creative-skills（0028）。
+ *
+ * 载入与取消是同一条路由：空数组即全部取消。发整份而不是增删单条，因为界面手里本来就有
+ * 完整的一份（它正在渲染那排胶囊），发整份是幂等的，也不存在「一个端删掉、另一个端又加
+ * 回来」这种只有增量接口才有的中间态。
+ *
+ * `etag` 走 If-Match，与本服务其余会话写操作一致。会话每次变化都经 `session.updated` 事件
+ * 带回新的 etag，所以界面手里的那个总是最新的；真撞上并发改动时 412，重读再来。
+ */
+export function setSessionCreativeSkills(
+  projectId: string,
+  sessionId: string,
+  creativeSkillIds: string[],
+  etag: string,
+): Promise<SessionRecord> {
+  return sessionRequest(
+    agentPath('set_session_creative_skills', projectId, { session_id: sessionId }),
+    {
+      method: agentMethod('set_session_creative_skills'),
+      headers: { 'Idempotency-Key': newIdempotencyKey(), 'If-Match': etag },
+      body: JSON.stringify({ creative_skill_ids: creativeSkillIds }),
     },
   );
 }

@@ -1,12 +1,21 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 
 const decimalIdSchema = z.string().regex(/^[1-9][0-9]*$/);
 
+/**
+ * Asset resolve 请求。
+ *
+ * 内容版本校验已整体撤除（IKASSI）：蓝鲸素材不可变——换一张图就是一个新的 `asset_id`，没有
+ * 任何路径改写已有素材的字节，所以这道校验拦不住它设计要拦的事；而它的指纹一旦因元数据回填而
+ * 改变，全部历史授权会一起变成「资源不存在」。归属是唯一的门。
+ *
+ * schema 是 `.strict()` 的，而 `asset_version` 已从这里删除：Agent 侧同一轮迭代里已停止发送
+ * （IKASSI 第三步），且入站 `asset_ref` 此前从无生产者，这个端点在这条路径上没有线上流量，
+ * 因此不需要再留一个只会掩盖版本不一致的兼容字段。
+ */
 export const agentAssetResolveRequestSchema = z
   .object({
     asset_id: decimalIdSchema,
-    asset_version: z.string().min(1).max(191),
   })
   .strict();
 
@@ -17,7 +26,6 @@ export type AgentAssetResolveRequest = z.infer<
 export const agentAssetResolveResultSchema = z
   .object({
     asset_id: decimalIdSchema,
-    asset_version: z.string().min(1).max(191),
     media_type: z.enum(["image", "video"]),
     mime_type: z.string().min(1),
     size_bytes: z.number().int().nonnegative(),
@@ -33,7 +41,6 @@ export type AgentAssetResolveResult = z.infer<
 
 export interface AgentReadableAsset {
   storage_key: string | null;
-  content_sha256: string | null;
   type: string;
   mime: string | null;
   size: bigint | null;
@@ -42,7 +49,6 @@ export interface AgentReadableAsset {
 
 export type AgentAssetResolveRejection =
   | "asset_inaccessible"
-  | "asset_version_mismatch"
   | "asset_metadata_unavailable"
   | "storage_access_unavailable";
 
@@ -61,22 +67,6 @@ export interface AgentAssetResolverDeps {
   ): Promise<{ url: string; expiresAt: Date }>;
 }
 
-/**
- * Derives an opaque fingerprint from immutable storage identity and stable content facts.
- * A recorded SHA-256 strengthens the identity when available, but old Assets remain resolvable.
- */
-export function deriveAssetContentVersion(asset: AgentReadableAsset): string {
-  const canonical = JSON.stringify({
-    storage_key: asset.storage_key,
-    content_sha256: asset.content_sha256,
-    type: asset.type,
-    mime: asset.mime,
-    size: asset.size?.toString() ?? null,
-    duration_seconds: asset.duration_seconds,
-  });
-  return `av1_${createHash("sha256").update(canonical).digest("base64url")}`;
-}
-
 /** Resolves one currently-owned Asset into transient, read-only model input. */
 export async function resolveAgentAsset(
   request: AgentAssetResolveRequest,
@@ -89,11 +79,6 @@ export async function resolveAgentAsset(
     owner.userId,
   );
   if (!asset) return { kind: "rejected", reason: "asset_inaccessible" };
-
-  const currentVersion = deriveAssetContentVersion(asset);
-  if (currentVersion !== request.asset_version) {
-    return { kind: "rejected", reason: "asset_version_mismatch" };
-  }
 
   if (
     !asset.storage_key ||
@@ -115,7 +100,6 @@ export async function resolveAgentAsset(
 
   const parsed = agentAssetResolveResultSchema.safeParse({
     asset_id: request.asset_id,
-    asset_version: currentVersion,
     media_type: asset.type,
     mime_type: asset.mime,
     size_bytes: Number(asset.size),

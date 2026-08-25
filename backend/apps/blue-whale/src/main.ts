@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import express from "express";
 import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
@@ -19,6 +20,15 @@ async function bootstrap(): Promise<void> {
 
   // 前端 apiFetch 走 /api/... 前缀（对齐 blue_whale_web/app/api 路由）。
   app.setGlobalPrefix("api");
+
+  // Agent 多模态透传（IKAL46）：读图/读视频时 Mastra 会把素材下载后以 base64 内联进
+  // chat/completions 请求体，一张 8MB 的图编码后就有 ~11MB。这条内部代理必须放到与
+  // Agent 侧媒体策略 `requestBodyMaxBytes`（64MB）一致的上限，否则请求在 body-parser
+  // 就被 PayloadTooLargeError 挡下，表现为模型网关 500、Agent 侧「读不到图」。
+  //
+  // 只对这一条内部路由放开，而不是抬高全局上限——其余端点没有理由接收几十 MB 的体。
+  // 必须注册在全局 1MB 解析器之前：先命中的解析器填好 req.body，后面的会跳过。
+  app.use("/api/internal/agent-model", express.json({ limit: "64mb" }));
 
   // 对齐原 BFF：文生文透传上限 1MB（TEXT_MAX_BODY_BYTES）；框架默认 100kb 会先于
   // 控制器内的 OpenAI 形 413 拦截，导致 100kb–1MB 体返回错误响应形态。

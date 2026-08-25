@@ -35,9 +35,11 @@ export interface AssetListFilter {
 
 /** access/content/Agent resolve 端点需要的内部投影：验归属后读受控元数据。
  *  对齐 Java ProjectAssetAccessService/ProjectAssetContentService 的 Asset 取用字段。 */
+/** Agent 读取素材时需要的字段集合。
+ *  不含 `content_sha256`：它此前只为 `deriveAssetContentVersion` 而取，内容版本校验已撤除
+ *  （IKASSI）。而且按下方 `AssetSourceFields` 的注释，部署表 `assets` 本就没有这一列。 */
 export interface AssetInternal {
   storage_key: string | null;
-  content_sha256: string | null;
   type: string;
   mime: string | null;
   size: bigint | null;
@@ -281,7 +283,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         },
         select: {
           storage_key: true,
-          content_sha256: true,
           type: true,
           mime: true,
           size: true,
@@ -292,7 +293,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       return row
         ? {
             storage_key: row.storage_key,
-            content_sha256: row.content_sha256,
             type: row.type,
             mime: row.mime,
             size: row.size,

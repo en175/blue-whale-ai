@@ -108,6 +108,26 @@ export interface SkillRepo {
   ): Promise<SkillPage<SkillLibraryView>>;
   /** IKA64P：官方技能全文（active version body，剥 frontmatter 正文） */
   getOfficialContent(creativeId: string): Promise<string | null>;
+  /** Agent 按 creative_skill_id 解析一条可用技能（IKALMC / IKAP6P）。
+   *
+   *  用户点选的套路要真的注入产卡调用，agent 就得拿到正文。此前 agent 读的是自己镜像里
+   *  捆绑的一份 108 文件副本，那份的 id 是 `custom-ecom-tvc-product-ad` 这种 slug，与本表的
+   *  `tvc_product_ad` 对不上——实测 0/108 命中，于是每一次「直接使用」都判「不认识这条」。
+   *  权威库只有这一份，agent 必须来这里取。
+   *
+   *  官方域对所有人可见；个人域只对 owner 可见，跨用户 0 命中（不泄露存在性，同
+   *  findPersonalContent）。返回 body 是本方法的存在理由，与「content/body 永不出库」那条
+   *  面向 wire 的规矩不冲突：调用方是服务间内部端点，不是浏览器。 */
+  findAgentSkill(
+    creativeSkillId: string,
+    requestingUserId: string,
+  ): Promise<{
+    creative_skill_id: string;
+    name: string;
+    description: string | null;
+    asset_domain: string;
+    body: string;
+  } | null>;
   listMine(
     userId: string,
     q: { pageNum: number; pageSize: number },

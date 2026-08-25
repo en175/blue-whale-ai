@@ -23,11 +23,14 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
 import { isApiError } from '@/api/http';
-import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
+import { fetchMySkills, fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
 import { useAgentSession, type ChatMessage, type TurnOutcome } from '../../hooks/useAgentSession';
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
-import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock } from '@/api/agentSessions';
+import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock, type OutboundAssetRef } from '@/api/agentSessions';
+import { uploadAssetFile } from '@/utils/upload';
+import { planAttachment } from './attachments';
+import { MessageAssetPreview, rememberAssetUrl } from './MessageAssetPreview';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
@@ -156,6 +159,15 @@ function RunStatusLine({
 
   const context = status.context;
   const contextPercent = context ? Math.round(context.ratio * 100) : null;
+  /**
+   * 这一行有没有账可报（IKALN7）。
+   *
+   * 统计现在包在括号里紧跟状态词，所以「三项全缺」不能再靠一个空 span 蒙混过去——那会渲染出
+   * 一对孤零零的 `()`。秒数、token、上下文各自都可缺（终态缺 finishedAt、非流式轮次没有
+   * token、拿不到容量时没有上下文），三者皆无时整段不渲染。
+   */
+  const hasMeta =
+    status.seconds !== null || status.tokens !== null || (context !== null && contextPercent !== null);
   return (
     <div
       className={`${styles.runStatus} ${RUN_STATUS_PHASE_CLASS[status.phase]}`}
@@ -168,37 +180,44 @@ function RunStatusLine({
       <span>{status.label}</span>
       {/* 运行中把这一段对读屏遮起来：秒数每秒变一次，`aria-live` 会把它一遍遍念出来，
           盖过真正有信息量的状态文案。终态时放开，此时它只念一次，正是这一轮的账。 */}
-      <span className={styles.runStatusMeta} aria-hidden={!status.settled}>
-        {/* 秒数、token、上下文各自可缺，分隔符因此只能在**前面已经有东西**时才出——
-            否则终态缺 finishedAt（秒数为 null）时，这一行会以一个孤零零的「 · 」开头。 */}
-        {status.seconds !== null && formatElapsed(status.seconds)}
-        {status.tokens && (
-          <>
-            {status.seconds !== null && ' · '}
-            {/* 流式期间这个数是按字符估的：模型只在结束时报真实用量，中途没有增量。
-                它的作用是活性信号——用户要判断的是"它还在动吗"，不是精确值。 */}
-            <span title={status.tokens.estimated ? '流式期间为估算值，结束后显示实际用量' : '本轮实际输出用量'}>
-              ↓ {formatTokens(status.tokens.output)}
-              {status.tokens.estimated ? '≈' : ''}
-            </span>
-          </>
-        )}
-        {context !== null && contextPercent !== null && (
-          <>
-            {(status.seconds !== null || status.tokens !== null) && ' · '}
-            <span title={`上下文 ${context.usedTokens} / ${context.maxTokens} tokens`}>
-              上下文 {contextPercent}%
-            </span>
-            {/* 压缩过历史要给可见文案：此前只追加一个 ⤺，说明埋在 title 里，触屏根本没有
-                hover，等于没有提示。而"早先的对话已被摘要"直接影响用户对模型记得什么的预期。 */}
-            {context.compacted && (
-              <span className={styles.runStatusCompacted} title="上下文接近上限，较早的对话已被摘要压缩">
-                {' · '}已压缩历史
+      {hasMeta && (
+        <span className={styles.runStatusMeta} aria-hidden={!status.settled}>
+          {/* 统计包在括号里紧跟状态词（IKALN7），整体读作「已完成 (20s · ↓ 1.9k · 上下文 12%)」。
+              此前 `.runStatusMeta` 带 `margin-left: auto`，把这一串顶到状态栏最右端，和左边的
+              状态文案看着像两件不相干的东西；括号 + 取消 auto 之后它们是一个整体。 */}
+          {'('}
+          {/* 秒数、token、上下文各自可缺，分隔符因此只能在**前面已经有东西**时才出——
+              否则终态缺 finishedAt（秒数为 null）时，这一行会以一个孤零零的「 · 」开头。 */}
+          {status.seconds !== null && formatElapsed(status.seconds)}
+          {status.tokens && (
+            <>
+              {status.seconds !== null && ' · '}
+              {/* 流式期间这个数是按字符估的：模型只在结束时报真实用量，中途没有增量。
+                  它的作用是活性信号——用户要判断的是"它还在动吗"，不是精确值。 */}
+              <span title={status.tokens.estimated ? '流式期间为估算值，结束后显示实际用量' : '本轮实际输出用量'}>
+                ↓ {formatTokens(status.tokens.output)}
+                {status.tokens.estimated ? '≈' : ''}
               </span>
-            )}
-          </>
-        )}
-      </span>
+            </>
+          )}
+          {context !== null && contextPercent !== null && (
+            <>
+              {(status.seconds !== null || status.tokens !== null) && ' · '}
+              <span title={`上下文 ${context.usedTokens} / ${context.maxTokens} tokens`}>
+                上下文 {contextPercent}%
+              </span>
+              {/* 压缩过历史要给可见文案：此前只追加一个 ⤺，说明埋在 title 里，触屏根本没有
+                  hover，等于没有提示。而"早先的对话已被摘要"直接影响用户对模型记得什么的预期。 */}
+              {context.compacted && (
+                <span className={styles.runStatusCompacted} title="上下文接近上限，较早的对话已被摘要压缩">
+                  {' · '}已压缩历史
+                </span>
+              )}
+            </>
+          )}
+          {')'}
+        </span>
+      )}
     </div>
   );
 }
@@ -235,29 +254,59 @@ function CardPreview({ preview }: { preview: PartialCardPreview | null }) {
 }
 
 /**
- * 可折叠思考过程：小字展示，默认收起。
+ * 可折叠思考过程：小字展示。
  *
  * 两种内容，来源不同所以分开渲染：`steps` 是服务端选的模板文案，`reasoning` 是模型自己的
  * 原话（IKA3M6）。原话排在步骤下面——它更长、更零散，也更可能出现自我否定和内部名词，
  * 不该抢在"它现在在干什么"前面。
+ *
+ * ## 开合归谁管
+ *
+ * `autoOpen` 是**随状态变化的默认值**，不是初始值。此前这里是 `useState(defaultOpen)`：
+ * 初始值只在挂载那一刻读一次，而这个块几乎总是先由 `run.activity` 的步骤挂载（那时还没有
+ * 思考原话，`defaultOpen` 是 false），等原话流进来时组件早就挂上了，于是"运行中默认展开"
+ * 这条从来没生效过——思考一直在流，用户一个字也看不见。
+ *
+ * 用户点过就以用户为准（`override`），没点过就跟着 `autoOpen` 走。这样运行中自动展开、
+ * 正文一出现自动收起，而任何时候用户都能把它按回自己想要的样子。
  */
 function ThinkingBlock({
   steps,
   reasoning,
-  defaultOpen = false,
+  autoOpen = false,
 }: {
   steps: string[];
   reasoning?: string;
-  defaultOpen?: boolean;
+  autoOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [override, setOverride] = useState<boolean | null>(null);
+  const open = override ?? autoOpen;
+  const setOpen = (next: boolean) => setOverride(next);
+
+  /**
+   * 思考原话自己就是一个滚动容器（`.thinkingReasoning` 上有 `max-height: 220px; overflow-y: auto`），
+   * 所以外层消息列表滚到底对它没有任何作用——文字是在那个 220px 的盒子里往下长的，盒子外面的
+   * 高度一点没变。要跟上流式输出，得滚这个盒子本身。
+   *
+   * `stick` 记的是「用户此刻是不是贴着底」，在 onScroll 里更新而不是在 effect 里现算：
+   * 追加发生之后再量，距离底部早就被新内容撑开了，怎么算都是「已经离底」，于是永远不滚。
+   * 用户往上翻看前文时 stick 变 false，不把他拽回来；翻回底部又变 true，继续跟。
+   */
+  const reasoningRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(true);
+  useEffect(() => {
+    const el = reasoningRef.current;
+    if (!el || !open || !stickRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [reasoning, open]);
+
   if (steps.length === 0 && !reasoning) return null;
   return (
     <div className={styles.thinkingBlock}>
       <button
         type="button"
         className={styles.thinkingToggle}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(!open)}
         aria-expanded={open}
       >
         <span>思考过程</span>
@@ -268,7 +317,18 @@ function ThinkingBlock({
           {steps.map((s, i) => (
             <div key={i} className={styles.thinkingStep}>{s}</div>
           ))}
-          {reasoning && <div className={styles.thinkingReasoning}>{reasoning}</div>}
+          {reasoning && (
+            <div
+              ref={reasoningRef}
+              className={styles.thinkingReasoning}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+              }}
+            >
+              {reasoning}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -620,7 +680,33 @@ const quickQuestions = [
  */
 const CREDITS_RETRY_DELAYS = [2500, 6000, 15000] as const;
 
+/**
+ * 是否显示左上角的本会话累计积分胶囊（IKAP6O）。
+ *
+ * 产品决定先不展示。**隐藏的是显示，不是计费**——扣费链路、`fetchSessionCredits` 与整段
+ * 退避重试逻辑一概保留，只是拉取与渲染都挂在这个开关上：关着就不发那三轮请求（没有展示方，
+ * 拉了也没人看），改回 `true` 即恢复原样，不需要动其它任何一行。
+ *
+ * 类型显式写成 `boolean` 而不是让它收窄成字面量 `false`，否则下面的 `if (!…) return`
+ * 会被当成恒真条件、胶囊那段 JSX 会被当成永不可达。
+ */
+const SHOW_SESSION_CREDIT_PILL: boolean = false;
+
 const DEFAULT_POSITION = { x: 0, y: 0 };
+
+/** 一条待发素材的本地状态（IKAL46）。
+ *
+ * `uploading` 期间不可发送——此刻还没有 `asset_id`，发出去的引用不成立。`failed` 保留在列表
+ * 里并显示原因：用户刚选完文件，静默消失会让他以为图已经带上了。 */
+interface PendingAttachment {
+  /** 本地行键，与 asset_id 无关：上传完成前根本没有 asset_id */
+  key: string;
+  name: string;
+  mediaType: 'image' | 'video';
+  status: 'uploading' | 'ready' | 'failed';
+  assetId?: string;
+  error?: string;
+}
 
 interface AgentPanelProps {
   onClose: () => void;
@@ -662,18 +748,18 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
    * 而这是钱的数字——宁可慢一拍，不给假数。取数失败时保留上一次已知值，不显示 0：
    * 「查不到」和「真没花钱」是两回事，后者会让用户以为这一轮免费。
    */
-  const [, setSessionCredits] = useState<number | null>(null);
+  const [sessionCredits, setSessionCredits] = useState<number | null>(null);
 
   /** 输入框内容的结构化形态：胶囊在编辑期是指针，只在发送时解引用（IKAFSX）。 */
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
-  /** 媒体块引用（避免 effect 时序竞争，用 ref 同步管理） */
+  const composerHasText = !composedIsEmpty(composed);
+  /** 画布 @ 进来的媒体块（避免 effect 时序竞争，用 ref 同步管理） */
   const pendingMediaBlocksRef = useRef<import('@/api/agentSessions').SessionContentBlock[]>([]);
   // 同步 ref 到 state（触发 UI 重新渲染）
   const [pendingMediaBlocksState, setPendingMediaBlocksState] = useState<import('@/api/agentSessions').SessionContentBlock[]>([]);
   const syncMediaBlocks = () => {
     setPendingMediaBlocksState([...pendingMediaBlocksRef.current]);
   };
-  const canSend = !composedIsEmpty(composed) || pendingMediaBlocksState.length > 0;
   const [selectedModel, setSelectedModel] = useState(models[0].key);
   const [modelOpen, setModelOpen] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -684,6 +770,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     messages,
     sessionId,
     sessions,
+    activeSkillIds,
+    changeActiveSkills,
     streamingText,
     streaming,
     runningRunId,
@@ -721,6 +809,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const modelRef = useRef<HTMLDivElement>(null);
   /** 上传菜单容器 ref（外部点击自动收起判定） */
   const uploadRef = useRef<HTMLDivElement>(null);
+  /** 本条消息待携带的素材：选中即开始上传，发送时才变成 `asset_ref` 部件（IKAL46）。
+   *  这里刻意不做胶囊 UI——胶囊组件由专门的前端同学交付，此处只维护接口与最简可用的呈现。 */
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  /* 「上传图片」/「上传视频」此前走同一个 handler、accept 也不分，两个菜单项完全等价。
+   * 现在各自把 accept 收窄到对应类型（真实 media_type 仍按文件 MIME 判定）。 */
   /** 当前 Run 的技能推荐列表（推荐区域展示） */
   const [recs, setRecs] = useState<RunSkillRecommendation[]>([]);
   /** 已点 Use 的推荐技能ID（仅用户点 Use 可激活） */
@@ -730,8 +823,18 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const appliedIds = appliedCardIds ?? EMPTY_APPLIED_IDS;
   /** 已「取消」的生成卡组（按消息ID标记，组内未应用的卡不再可操作） */
   const [cancelledMessageIds, setCancelledMessageIds] = useState<Set<string>>(new Set());
-  /** 「直接使用」武装的强制技能（下一条消息发送时携带 forced_creative_skill_id，发送后清除）；name 供指示条展示 */
+  /**
+   * 「直接使用」刚点上、**还没发出去**的那一条。发出去之后它就载入了会话，由
+   * `activeSkillIds` 接手（0028）——所以这里只是一个未提交的选择，不是当前状态。
+   */
   const [forcedSkill, setForcedSkill] = useState<{ id: string; name: string } | null>(null);
+  /**
+   * 套路 id → 中文名。会话上只存 id，名字在技能目录里。
+   *
+   * 用户在本次会话里点过的那条名字我们当场就知道；刷新之后不知道，所以补一次「我的技能」
+   * ——用户正是从那里点的「直接使用」。查不到就退回显示 id，不显示空胶囊。
+   */
+  const [skillNames, setSkillNames] = useState<Record<string, string>>({});
   /** 确认门「修改」编辑态：展开文本编辑，提交 correct 动作 */
 
   /* ---- 拖动状态 ---- */
@@ -824,6 +927,28 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSkillId]);
 
+  /** 会话上有 id 但本地不知道名字（多半是刷新之后）：补一次「我的技能」把名字填上。 */
+  useEffect(() => {
+    const unknown = activeSkillIds.filter((id) => !skillNames[id]);
+    if (unknown.length === 0) return;
+    let alive = true;
+    fetchMySkills(1, 50)
+      .then((page) => {
+        if (!alive) return;
+        const found: Record<string, string> = {};
+        for (const record of page?.records ?? []) {
+          if (record.creative_skill_id && record.name) found[record.creative_skill_id] = record.name;
+        }
+        if (Object.keys(found).length > 0) setSkillNames((prev) => ({ ...found, ...prev }));
+      })
+      .catch((e) => console.warn('解析创作套路名称失败:', e));
+    return () => {
+      alive = false;
+    };
+    // skillNames 有意不进依赖：它由这个 effect 自己写，进依赖就是一个自触发循环。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSkillIds]);
+
   /** 运行开始后拉取 Run 级技能推荐（GET /api/agent/runs/:runId/creative-skill-recommendations）
    * 后端未部署该接口（404）时静默隐藏推荐区域 */
   useEffect(() => {
@@ -878,13 +1003,18 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   }, [cancellable, stopRun]);
 
   /**
-   * 新消息 / 流式文本 / 进入页面：滚动条始终拉到最底部，展示最新消息。
+   * 新消息 / 流式文本 / 流式思考 / 进入页面：滚动条始终拉到最底部，展示最新内容。
+   *
+   * 思考那两项此前不在依赖里，于是新增的步骤不会把列表带到底。
+   *
+   * 注意这里管不到思考原话的滚动：`.thinkingReasoning` 自带 `max-height` 与 `overflow-y`，
+   * 是独立的滚动容器，外层滚到底对它无效。那一段由 ThinkingBlock 自己滚（见其中的注释）。
    */
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, streamingText, runningRunId]);
+  }, [messages, streamingText, reasoningText, thinkingSteps, runningRunId]);
 
   /** 初始化位置：屏幕右侧；首次挂载也走统一安全边界，窄视口不会横向溢出。 */
   useEffect(() => {
@@ -928,6 +1058,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
    * 失败保留上一次已知值：`setSessionCredits` 只在拿到确切数时调用。
    */
   useEffect(() => {
+    // 胶囊隐藏时不拉账单（IKAP6O）：没有展示方，退避重试只是白发三轮请求。
+    if (!SHOW_SESSION_CREDIT_PILL) return;
     if (!projectId || !sessionId) {
       setSessionCredits(null);
       return;
@@ -1059,6 +1191,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 使用推荐技能：标记已激活，并把技能意图追加为一条消息提交给 Agent（顺带清掉「直接使用」武装，避免双技能叠加） */
   const handleUseSkill = async (r: RunSkillRecommendation) => {
     if (usedSkillIds.has(r.creative_skill_id) || runningRunId !== null || streaming) return;
+    setSkillNames((prev) => ({ ...prev, [r.creative_skill_id]: r.name }));
     const accepted = await sendMessage([{ type: 'text', text: `使用「${r.name}」技能继续创作` }], r.creative_skill_id, undefined, r.name, `使用「${r.name}」技能继续创作`);
     if (!accepted) return;
     setUsedSkillIds((prev) => new Set(prev).add(r.creative_skill_id));
@@ -1067,10 +1200,33 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
   /** 发送消息：**解引用发生在这一刻**——编辑期胶囊一直是指针，此处才换成完整 prompt；
    * 若已武装「直接使用」技能，本条消息携带 forced_creative_skill_id 强制激活后清除 */
+  /** 还在上传的附件会挡住发送：此刻它还没有 asset_id，带出去的引用不成立。 */
+  const uploadingAttachment = attachments.some((item) => item.status === 'uploading');
+  const readyAssets: OutboundAssetRef[] = attachments.flatMap((item) =>
+    item.status === 'ready' && item.assetId
+      ? [{ asset_id: item.assetId, media_type: item.mediaType, display_label: item.name }]
+      : [],
+  );
+
+  /** 能不能发：有文字、或有已就绪的附件；上传途中一律挡住（IKAL46）。 */
+  const canSend =
+    (composerHasText || readyAssets.length > 0 || pendingMediaBlocksState.length > 0) && !uploadingAttachment;
+
   const handleSend = async () => {
     const fullText = resolveComposed(composed).trim();
-    const mediaBlocks = pendingMediaBlocksRef.current;
+    // 胶囊有两个来源，发送时必须合成一条序列：画布 @ 进来的节点/卡片，和本地上传的素材。
+    // 后者带资产库身份，序列化成 `asset_ref`（agent 会建 Grant，模型真读得到）；前者只有
+    // 画布 id，序列化成 `resource_ref`（模型先看到占位标签）。见 agentSessions.toReferencePart。
+    const uploadedBlocks: import('@/api/agentSessions').SessionContentBlock[] = readyAssets.map((asset) => ({
+      type: 'asset_ref',
+      asset_id: asset.asset_id,
+      media_type: asset.media_type,
+      ...(asset.display_label ? { display_label: asset.display_label } : {}),
+    }));
+    const mediaBlocks = [...pendingMediaBlocksRef.current, ...uploadedBlocks];
+    // 只带附件、一个字不打也能发（IKAL46）：这是用户对附件做的第一个动作。
     if (!fullText && mediaBlocks.length === 0) return;
+    if (uploadingAttachment) return;
     if (runningRunId !== null || streaming) return;
 
     // 从 composed 中提取用户输入的纯文字（不含 chip prompt）
@@ -1085,25 +1241,30 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       .filter((s) => s.kind === 'ref')
       .map((s) => ({ id: s.ref.id, label: s.ref.label }));
 
-    // content 只放用户实际输入的文字；chip 与 skill 一样仅作气泡展示，数据走 resource_ref
+    // content 只放用户实际输入的文字；胶囊由 resourceRef 那一路序列化成部件
     const textContent: import('@/api/agentSessions').SessionContentBlock[] = [];
     if (userText) {
       textContent.push({ type: 'text', text: userText });
     }
-    console.log('[AgentPanel] 发送 text:', JSON.stringify(textContent), 'resource_ref:', JSON.stringify(mediaBlocks));
 
-    // 先清空再发
+    // 先清空再发。等 POST 回来才清，用户已经看到自己的气泡上屏、输入框里原文却还在，
+    // 极易重复点发送。失败时把原文回填，一个字都不丢。
     chipEditorRef.current?.clear();
     pendingMediaBlocksRef.current = [];
     syncMediaBlocks();
     const armed = forcedSkill;
+    if (armed) setSkillNames((prev) => ({ ...prev, [armed.id]: armed.name }));
+    const sentAttachments = attachments;
     setForcedSkill(null);
+    setAttachments([]);
     const accepted = await sendMessage(textContent, armed?.id, mediaBlocks, armed?.name, userText, chips);
     if (!accepted) {
       chipEditorRef.current?.setText(userText);
       pendingMediaBlocksRef.current = [...mediaBlocks];
       syncMediaBlocks();
       setForcedSkill(armed);
+      // 附件一并回填：重传一次的代价远大于把已经拿到的 asset_id 留在手上。
+      setAttachments(sentAttachments);
     }
   };
 
@@ -1135,10 +1296,62 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     setShowUpload(!showUpload);
   };
 
-  const handleFileSelect = () => {
-    fileInputRef.current?.click();
+  /** 选「上传图片」/「上传视频」：把 accept 收窄到对应类型再开文件选择器。 */
+  const handleFileSelect = (kind: 'image' | 'video') => {
+    const input = fileInputRef.current;
+    if (input) {
+      input.accept = kind === 'image' ? 'image/*' : 'video/*';
+      input.click();
+    }
     setShowUpload(false);
   };
+
+  /** 选中文件即开始上传：先插一条 `uploading` 行，拿到 asset_id 后就地改成 `ready`。
+   *  上传发生在选择那一刻而不是发送那一刻——否则用户点了发送还要干等一次网络往返。
+   *
+   *  media_type 按文件的真实 MIME 判定，不按用户点的是哪个按钮：两者不一致时（在「上传图片」
+   *  里挑了个视频，某些平台允许）真实类型才是对的，报错也要报得准。asset_ref 只认 image/video，
+   *  音频当场拒掉而不是传上去再失败。 */
+  const handleFilesChosen = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const chosen = Array.from(event.target.files ?? []);
+    // 同一个文件连选两次也要能触发 change，否则第二次静默无反应。
+    event.target.value = '';
+    for (const file of chosen) {
+      const key = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const plan = planAttachment(file, projectId);
+      if (!plan.ok) {
+        setAttachments((prev) => [
+          ...prev,
+          { key, name: file.name, mediaType: 'image', status: 'failed', error: plan.error },
+        ]);
+        continue;
+      }
+      setAttachments((prev) => [...prev, { key, name: file.name, mediaType: plan.mediaType, status: 'uploading' }]);
+      try {
+        // projectId 到这里一定有值（planAttachment 已挡）。素材必须落在**会话所在项目**里，
+        // 否则 Agent 复核归属查不到，识别会以「资源不存在」整条失败。
+        const uploaded = await uploadAssetFile(file, { projectId });
+        // 登记 id → url，刚发出的那张图不必再反查一次素材库。
+        rememberAssetUrl(uploaded.asset_id, uploaded.url);
+        setAttachments((prev) =>
+          prev.map((item) =>
+            item.key === key ? { ...item, status: 'ready' as const, assetId: uploaded.asset_id } : item,
+          ),
+        );
+      } catch (e) {
+        setAttachments((prev) =>
+          prev.map((item) =>
+            item.key === key
+              ? { ...item, status: 'failed' as const, error: e instanceof Error ? e.message : '上传失败' }
+              : item,
+          ),
+        );
+      }
+    }
+  };
+
+  const removeAttachment = (key: string) =>
+    setAttachments((prev) => prev.filter((item) => item.key !== key));
 
   return (
     <div
@@ -1149,6 +1362,29 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     >
       {/* 头部标题栏（拖动区域） */}
       <div className={`${styles.panelHeader} ${floating ? styles.panelHeaderFloating : ''}`}>
+        <div className={styles.headerLeft}>
+          {/* 本会话累计消耗积分（IKAFPC / IKAGZC），现由 IKAP6O 隐藏。
+           *  头部是 `1fr auto 1fr` 三栏网格，左格空着标题依然相对面板居中，所以这里整段不渲染
+           *  也不会把中间的会话切换器推偏。
+           *  **位置从一开始就占住**：原来写成「查到了才渲染」，于是面板打开后胶囊凭空冒出来，
+           *  还把右边的会话切换器推一下——用户看到的是一次白等。数字未落定时显示占位符，
+           *  仍然不显示 0：「不知道」和「没花钱」是两回事，后者会让人以为这一轮免费。 */}
+          {SHOW_SESSION_CREDIT_PILL && (
+            <span
+              className={styles.creditPill}
+              title={
+                sessionCredits === null
+                  ? '正在统计本次对话累计消耗积分'
+                  : `目前 Agent 对话累计消耗积分：${sessionCredits} 积分`
+              }
+            >
+              <Coins size={12} strokeWidth={2} />
+              <span className={styles.creditValue}>
+                {sessionCredits === null ? '—' : sessionCredits}
+              </span>
+            </span>
+          )}
+        </div>
         <div className={styles.headerCenter}>
           {/* 会话切换器（IKAFQ6）：标题本身就是唯一入口，「新对话」收进菜单顶部。
            *  合并的动因是第一行要腾位置（IKAFPC 的积分胶囊要进来），代价是新建从一击变两击。
@@ -1302,6 +1538,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                 ))}
                 {/* 文字内容 */}
                 {m.content && <span>{m.content}</span>}
+                {/* 上传素材的临时渲染（IKAL46）：统一胶囊组件到位后删掉 MessageAssetPreview 即可。 */}
+                <MessageAssetPreview blocks={m.blocks} />
               </div>
             ) : (
               <div key={m.id} className={styles.assistantBlock}>
@@ -1318,10 +1556,18 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
             ),
           )}
           {/* Agent 的思考过程：run.activity 实时步 + reasoning_trace 终态链 + 模型原话（IKA3M6）。
-              运行中默认展开——那段等待正是它要填的，收起来就等于还是白屏。 */}
+              **正文出现之前展开，正文一出现就收起。** 那段等待正是它要填的，收起来就等于还是
+              白屏；而正文一开始写，思考就退居次要——它已经完成了自己的作用，再占着屏幕只会
+              把用户真正要读的东西挤下去。用户点过就以用户为准。
+              key 挂 runId：换一轮就是新的一次思考，上一轮用户手动收起过不该带到下一轮。 */}
           {(thinkingSteps.length > 0 || reasoningText) && (
             <div className={styles.assistantBlock}>
-              <ThinkingBlock steps={thinkingSteps} reasoning={reasoningText} defaultOpen={Boolean(reasoningText)} />
+              <ThinkingBlock
+                key={runningRunId ?? 'idle'}
+                steps={thinkingSteps}
+                reasoning={reasoningText}
+                autoOpen={!streamingText}
+              />
             </div>
           )}
           {/* Agent 运行中的实时流式文本（assistant.delta 累积投影） */}
@@ -1398,24 +1644,77 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         {/* data-agent-composer：ESC 判定用它把主输入框从「可编辑区域一律让路」里挑出来，
             主输入框是 Lexical 的 contentEditable，而发送后焦点通常正停在这里。 */}
         <div className={styles.inputBox} data-agent-composer>
-          {/* 技能气泡：位于输入框内侧，chip 上方 */}
-          {forcedSkill && (
-            <div className={styles.skillBubble}>
-              <BookText size={13} strokeWidth={2} className={styles.skillBubbleIcon} />
-              <span className={styles.skillBubbleLabel}>{forcedSkill.name}</span>
-              <button
-                type="button"
-                className={styles.skillBubbleRemove}
-                onClick={() => setForcedSkill(null)}
-                title="取消技能"
-              >
-                <X size={12} strokeWidth={2} />
-              </button>
+          {/* 技能气泡：位于输入框内侧，chip 上方。
+            *
+            * 这一排就是「本会话现在挂着哪几条创作套路」（0028）。载入一次就一直在，每一轮都
+            * 注入，直到点掉这里的 ×；新开对话是空的。`forcedSkill` 是刚点上还没发出去的那条，
+            * 发出去之后由会话接手，所以两者显示成同一排、行为略有不同：前者的 × 只是撤销
+            * 这次选择，后者的 × 是真的从会话上取消。 */}
+          {(activeSkillIds.length > 0 || forcedSkill) && (
+            <div className={styles.skillBubbleRow}>
+              {activeSkillIds.map((id) => (
+                <div key={id} className={styles.skillBubble}>
+                  <BookText size={13} strokeWidth={2} className={styles.skillBubbleIcon} />
+                  <span className={styles.skillBubbleLabel}>{skillNames[id] ?? id}</span>
+                  <button
+                    type="button"
+                    className={styles.skillBubbleRemove}
+                    onClick={() => void changeActiveSkills(activeSkillIds.filter((entry) => entry !== id))}
+                    title="取消这条创作套路"
+                  >
+                    <X size={12} strokeWidth={2} />
+                  </button>
+                </div>
+              ))}
+              {/* 已经在会话上的不再重复显示一遍——那会让用户以为挂了两条。 */}
+              {forcedSkill && !activeSkillIds.includes(forcedSkill.id) && (
+                <div className={styles.skillBubble}>
+                  <BookText size={13} strokeWidth={2} className={styles.skillBubbleIcon} />
+                  <span className={styles.skillBubbleLabel}>{forcedSkill.name}</span>
+                  <button
+                    type="button"
+                    className={styles.skillBubbleRemove}
+                    onClick={() => setForcedSkill(null)}
+                    title="取消技能"
+                  >
+                    <X size={12} strokeWidth={2} />
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
           {/* 这一层负责把编辑区撑到工具栏上沿：ChipTextEditor 自己的 wrapper 是 block，
            *  撑高的责任只能落在它外面。见 .composerSlot。 */}
+          {/* 待发素材（IKAL46）。刻意保持纯文本行：胶囊组件由专门的前端同学交付，
+            *  这里只负责把接口打通并给出最简可用的呈现。 */}
+          {attachments.length > 0 && (
+            <div className={styles.attachmentRow}>
+              {attachments.map((item) => (
+                <span
+                  key={item.key}
+                  className={`${styles.attachmentChip} ${item.status === 'failed' ? styles.attachmentFailed : ''}`}
+                  title={item.status === 'failed' ? item.error : item.name}
+                >
+                  <span className={styles.attachmentName}>
+                    {item.mediaType === 'video' ? '视频' : '图片'}：{item.name}
+                  </span>
+                  {item.status === 'uploading' && <span className={styles.attachmentHint}>上传中…</span>}
+                  {item.status === 'failed' && (
+                    <span className={styles.attachmentHint}>{item.error ?? '上传失败'}</span>
+                  )}
+                  <button
+                    className={styles.attachmentRemove}
+                    onClick={() => removeAttachment(item.key)}
+                    title="移除"
+                    aria-label={`移除 ${item.name}`}
+                  >
+                    <X size={11} strokeWidth={2.5} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <div className={styles.composerSlot}>
             <ChipTextEditor
               ref={chipEditorRef}
@@ -1440,15 +1739,21 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               </button>
               {showUpload && (
                 <div className={styles.uploadPopup}>
-                  <button onClick={handleFileSelect}>上传图片</button>
-                  <button onClick={handleFileSelect}>上传视频</button>
+                  <button onClick={() => handleFileSelect('image')} disabled={!projectId}>
+                    上传图片
+                  </button>
+                  <button onClick={() => handleFileSelect('video')} disabled={!projectId}>
+                    上传视频
+                  </button>
                 </div>
               )}
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 accept="image/*,video/*"
                 className={styles.hiddenInput}
+                onChange={handleFilesChosen}
               />
             </div>
 
@@ -1531,7 +1836,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                 title={
                   streaming
                     ? '等待运行状态；超时后可重新连接'
-                    : '发送'
+                    : uploadingAttachment
+                      ? '素材上传中，稍候即可发送'
+                      : '发送'
                 }
               >
                 <ArrowUp size={15} fill="#fff" strokeWidth={0} />

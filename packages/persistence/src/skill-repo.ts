@@ -142,6 +142,46 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
       return ver?.body ?? null;
     },
 
+    async findAgentSkill(creativeSkillId, requestingUserId) {
+      try {
+        const rows = await prisma.$queryRawUnsafe<
+          {
+            creative_skill_id: string;
+            name: string;
+            description: string | null;
+            asset_domain: string;
+            body: string;
+          }[]
+        >(
+          // 优先 active version，没有 active 指针时退到最新一版——个人技能建出来时
+          // active_version_id 可能还没回填（同 findPersonalContent 的取法）。
+          // 中文名在 skill.name_zh（官方目录 108/108 都有），creative_skill.name 是英文标题式
+          // （`Ugc Ads Video`）。用户在技能库里看到的、点的都是中文名，agent 回头说「用了哪条」
+          // 时必须是同一个名字，否则用户对不上。个人技能没有目录行，退回 creative_skill.name
+          // ——那本来就是用户自己起的名。
+          `SELECT cs.creative_skill_id,
+                  COALESCE(NULLIF(s.name_zh, ''), cs.name) AS name,
+                  cs.description,
+                  cs.asset_domain,
+                  v.body
+             FROM creative_skill cs
+             JOIN creative_skill_version v ON v.creative_skill_id = cs.creative_skill_id
+             LEFT JOIN skill s ON s.id = cs.source_skill_id AND s.is_delete = 0
+            WHERE cs.creative_skill_id = ?
+              AND (cs.asset_domain = 'official'
+                   OR (cs.asset_domain = 'personal' AND cs.owner_user_id = ?))
+            ORDER BY (v.creative_skill_version_id = cs.active_version_id) DESC, v.id DESC
+            LIMIT 1`,
+          creativeSkillId,
+          BigInt(requestingUserId),
+        );
+        return rows[0] ?? null;
+      } catch {
+        // 读路径容错，与本文件其余读方法一致：解析不到就是没有，不阻塞产卡主路径。
+        return null;
+      }
+    },
+
     async listMine(userId, q) {
       // 官方引用全量（按 user_skill.gmt_create desc），合并个人技能后统一按时间倒序、内存切片分页。
       const rels = await prisma.user_skill.findMany({

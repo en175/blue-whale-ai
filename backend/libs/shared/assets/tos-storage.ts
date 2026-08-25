@@ -1,5 +1,4 @@
 import { randomUUID as nodeRandomUUID } from "node:crypto";
-import { buildTosPresignedGetUrl } from "@blue-whale/core";
 import { TosClient } from "@volcengine/tos-sdk";
 import type { AssetUploadStorage } from "./upload.js";
 import type { AssetReader, AssetSigner } from "./ports.js";
@@ -18,7 +17,7 @@ interface TosUploadClient {
   getPreSignedUrl(input: {
     bucket: string;
     key: string;
-    method: "PUT";
+    method: "GET" | "PUT";
     expires: number;
   }): string | Promise<string>;
   headObject(input: { bucket: string; key: string }): Promise<{
@@ -91,29 +90,34 @@ export function createTosStorage(config: TosStorageConfig): {
 
   return {
     signer: {
+      /**
+       * 读取用的预签名 GET URL —— 走官方 SDK（IKAL46）。
+       *
+       * 这里原本调的是手写的 `buildTosPresignedGetUrl`。那份实现自己的注释就写着「本环境未对接
+       * 真实 TOS 做端到端校验」，而 2026-08-25 第一次真跑就被 TOS 以
+       * `SignatureDoesNotMatch` 403 拒绝：素材授权建好了、URL 也签出来了，模型侧一下载就失败，
+       * 表现成「读不到图」。同一个文件里的上传 PUT 预签名一直走 SDK 且一直可用，没有理由让
+       * 读取这一侧单独手写一套 SigV4。
+       */
       async sign(storageKey) {
-        const { url, expiresAt } = buildTosPresignedGetUrl({
-          endpoint,
+        const url = await client.getPreSignedUrl({
           bucket: config.bucket,
-          region: config.region,
-          ak: config.accessKeyId,
-          sk: config.secretAccessKey,
           key: storageKey,
-          expiresInSeconds: ttlSeconds,
+          method: "GET",
+          expires: ttlSeconds,
         });
-        return { url, expiresAt };
+        return { url, expiresAt: new Date(Date.now() + ttlSeconds * 1000) };
       },
     },
     reader: {
       async read(storageKey) {
-        const { url } = buildTosPresignedGetUrl({
-          endpoint,
+        // 与上面的 signer 同因换成官方 SDK（IKAL46）：手写签名被 TOS 拒为
+        // SignatureDoesNotMatch，这条读路径迟早会踩到同一颗雷。
+        const url = await client.getPreSignedUrl({
           bucket: config.bucket,
-          region: config.region,
-          ak: config.accessKeyId,
-          sk: config.secretAccessKey,
           key: storageKey,
-          expiresInSeconds: 60,
+          method: "GET",
+          expires: 60,
         });
         const res = await fetch(url);
         if (!res.ok) {
