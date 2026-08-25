@@ -134,4 +134,25 @@ describe("createAssetRepo.listByUser", () => {
     expect(page.records[1].model).toBeNull(); // 任务 input 无 model_id
     expect(page.records[2].model).toBe("unknown-model"); // 无展示名回退 model_id
   });
+
+  it("分页稳定：orderBy 含 id 兜底，避免 gmt_create 秒级并列导致跨页重复", async () => {
+    const assets = {
+      count: vi.fn().mockResolvedValue(120),
+      findMany: vi.fn().mockResolvedValue([]),
+    };
+    const prisma = {
+      assets,
+      generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    await repo.listByUser("9", { page: 2, size: 60 });
+
+    expect(assets.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+      }),
+    );
+  });
 });

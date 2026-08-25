@@ -237,7 +237,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         prisma.assets.count({ where }),
         prisma.assets.findMany({
           where,
-          orderBy: { gmt_create: "desc" },
+          orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
           skip: (filter.page - 1) * filter.size,
           take: filter.size,
         }),
