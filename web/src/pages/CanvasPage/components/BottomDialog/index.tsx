@@ -765,12 +765,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
           </button>
         </div>
 
-        {/* 右侧：消耗 + 发送 */}
+        {/* 右侧：发送 */}
         <div className={styles.barRight}>
-          <span className={styles.costText}>
-            <Sparkles size={14} strokeWidth={2} />
-            <span>15 生成</span>
-          </span>
           <button
             className={`${styles.sendBtn} ${canSend && !keyframeInvalid ? styles.sendBtnActive : ''}`}
             onClick={handleSend}

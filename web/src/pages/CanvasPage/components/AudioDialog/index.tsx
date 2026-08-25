@@ -273,10 +273,6 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
         </div>
 
         <div className={styles.barRight}>
-          <span className={styles.costText}>
-            <Sparkles size={14} strokeWidth={2} />
-            <span>生成</span>
-          </span>
           <button
             className={`${styles.sendBtn} ${text.trim() && modelId ? styles.sendBtnActive : ''}`}
             disabled={!text.trim() || !modelId}

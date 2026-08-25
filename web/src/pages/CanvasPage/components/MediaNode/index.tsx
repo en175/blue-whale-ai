@@ -151,10 +151,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <Video size={14} strokeWidth={2} />
             <span>生成视频</span>
           </button>
-          <button className={styles.toolBtn} onClick={handleGenAudio} title="带入图片，打开音频对话框">
-            <AudioLines size={14} strokeWidth={2} />
-            <span>生成音频</span>
-          </button>
           <span className={styles.toolDivider} />
           <button className={styles.toolBtn} title="详情（预留）">
             <Info size={14} strokeWidth={2} />

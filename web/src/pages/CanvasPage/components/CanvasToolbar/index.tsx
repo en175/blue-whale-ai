@@ -1,7 +1,7 @@
 /* ============================================
  * CanvasToolbar 画布左侧工具栏：节点创建、对话窗口与扩展工具菜单入口
  * ============================================ */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Hand,
   MousePointer2,
@@ -98,7 +98,20 @@ export default function CanvasToolbar({
   onMenuSelect,
 }: CanvasToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const [openMenu, setOpenMenu] = useState<ToolMenuKey | null>(null);
+
+  /** 点击外部关闭弹出菜单 */
+  useEffect(() => {
+    if (!openMenu) return;
+    const handleDocClick = (e: MouseEvent) => {
+      if (toolbarRef.current && !toolbarRef.current.contains(e.target as Node)) {
+        setOpenMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handleDocClick);
+    return () => document.removeEventListener('mousedown', handleDocClick);
+  }, [openMenu]);
 
   /** 点击加号上传 */
   const handleAddClick = () => {
@@ -160,7 +173,7 @@ export default function CanvasToolbar({
   };
 
   return (
-    <div className={styles.toolbar}>
+    <div ref={toolbarRef} className={styles.toolbar}>
       {/* 菜单打开时点击外部收起 */}
       {openMenu && <div className={styles.menuOverlay} onClick={() => setOpenMenu(null)} />}
 

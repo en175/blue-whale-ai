@@ -51,14 +51,8 @@ export default function CanvasHeader({
         />
       </div>
 
-      {/* 右侧：余额 + 用户信息 + Agent */}
+      {/* 右侧：用户信息 + Agent */}
       <div className={styles.right}>
-        {/* 余额展示 */}
-        <div className={styles.balance}>
-          <Coins size={15} strokeWidth={2} className={styles.balanceIcon} />
-          <span className={styles.balanceValue}>{balance}</span>
-        </div>
-
         {/* 用户信息 */}
         <UserDropdown />
 
