@@ -41,6 +41,7 @@ export default function AssetDetailModal({ asset, onClose }: AssetDetailModalPro
       },
       { label: '创建时间', value: formatDate(asset.created_at) },
       { label: '文件大小', value: formatSize(asset.size) },
+      { label: '生成模型', value: asset.model || '—' },
     ];
   }, [asset]);
 

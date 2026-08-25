@@ -32,6 +32,8 @@ export interface AssetRecord {
   project_id: string | null;
   /** MIME 类型，null 表示未知 */
   mime: string | null;
+  /** 生成模型（展示名，无则回退 model_id）；非生成资产/未知为 null */
+  model: string | null;
 }
 
 /** 分页包络 */

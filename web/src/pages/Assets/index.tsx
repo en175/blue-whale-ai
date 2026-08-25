@@ -108,6 +108,7 @@ export default function Assets() {
             generation_job_id: null,
             project_id: null,
             mime: done.mime ?? null,
+            model: null,
           },
           ...prev,
         ]);
