@@ -731,11 +731,13 @@ interface AgentPanelProps {
   appliedCardIds?: ReadonlySet<string>;
   /** 首页「直接使用」技能 → 画布导航携带的强制技能 ID：挂载后武装为下一条消息的 forced skill */
   initialSkillId?: string;
+  /** 首页「直接使用」技能 → 画布导航携带的强制技能名称：气泡显示用 */
+  initialSkillName?: string;
   /** 媒体块：从画布节点「添加到对话」时携带的图片/视频/音频元数据 */
   mediaBlocks?: import('@/api/agentSessions').SessionContentBlock[];
 }
 
-export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, mediaBlocks: initialMediaBlocks }: AgentPanelProps) {
+export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks }: AgentPanelProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供发送按钮启用态判断 */
@@ -870,7 +872,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const lastInputVersionRef = useRef(0);
   /** 上一次 composed 中的 chip IDs（用于检测 chip 是否被删除） */
   const prevChipIdsRef = useRef<Set<string>>(new Set());
-  
+
   useEffect(() => {
     if (!inputVersion || inputVersion === lastInputVersionRef.current) return;
     lastInputVersionRef.current = inputVersion;
@@ -899,11 +901,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         .filter((s): s is { kind: 'ref'; ref: { id: string; label: string; prompt: string } } => s.kind === 'ref')
         .map((s) => s.ref.id),
     );
-    
+
     // 检测是否有 chip 被删除（对比上一次的 chip IDs）
     const prevIds = prevChipIdsRef.current;
     const chipsRemoved = [...prevIds].some((id) => !chipIds.has(id));
-    
+
     if (chipsRemoved && pendingMediaBlocksRef.current.length > 0) {
       // 有 chip 被删除 → 过滤对应的 blocks
       const filtered = pendingMediaBlocksRef.current.filter((b) => !b.chip_id || chipIds.has(b.chip_id));
@@ -911,7 +913,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       syncMediaBlocks();
       console.log('[AgentPanel] chip 删除同步, 剩余 blocks:', filtered.length);
     }
-    
+
     // 更新记录
     prevChipIdsRef.current = chipIds;
   }, [composed]);
@@ -921,7 +923,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   useEffect(() => {
     if (!initialSkillId || initialSkillId === lastSkillIdRef.current) return;
     lastSkillIdRef.current = initialSkillId;
-    setForcedSkill({ id: initialSkillId, name: '已选技能' });
+    setForcedSkill({ id: initialSkillId, name: initialSkillName || '已选技能' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSkillId]);
 

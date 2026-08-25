@@ -6,7 +6,6 @@ import {
   X,
   Plus,
   ChevronDown,
-  Sparkles,
   Maximize2,
   Minimize2,
   SlidersHorizontal,
@@ -442,12 +441,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
             </button>
           </div>
 
-          {/* 右侧：消耗展示 + 发送按钮 */}
+          {/* 右侧：发送按钮 */}
           <div className={styles.barRight}>
-            <span className={styles.costText}>
-              <Sparkles size={14} strokeWidth={2} />
-              <span>0.2 生成</span>
-            </span>
             <button
               className={`${styles.sendBtn} ${inputValue.trim() && !uploading ? styles.sendBtnActive : ''}`}
               onClick={handleSend}

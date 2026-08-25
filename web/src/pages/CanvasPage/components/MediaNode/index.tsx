@@ -119,7 +119,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleReEdit = useCallback(() => data.onReEdit?.(id), [data, id]);
   const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
-  const handleGenAudio = useCallback(() => data.onGenAudio?.(id), [data, id]);
   const handleDownload = useCallback(() => data.onDownload?.(id), [data, id]);
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
 
@@ -150,10 +149,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           <button className={styles.toolBtn} onClick={handleGenVideo} title="带入图片，打开视频对话框">
             <Video size={14} strokeWidth={2} />
             <span>生成视频</span>
-          </button>
-          <button className={styles.toolBtn} onClick={handleGenAudio} title="带入图片，打开音频对话框">
-            <AudioLines size={14} strokeWidth={2} />
-            <span>生成音频</span>
           </button>
           <span className={styles.toolDivider} />
           <button className={styles.toolBtn} title="详情（预留）">

@@ -108,6 +108,11 @@
   font-size: var(--font-size-md);
 }
 
+.cardSkeleton {
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-lg);
+}
+
 /* ---- 资产卡片 ---- */
 .card {
   background-color: var(--color-bg-card);
@@ -122,6 +127,11 @@
   border-color: var(--color-border-hover);
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--color-border-hover);
+  outline-offset: 2px;
 }
 
 /* ---- 缩略图区域 ---- */
@@ -152,6 +162,14 @@
 /* 音频播放器居中 */
 .audioPlayer {
   width: 88%;
+}
+
+/* 卡片本身负责打开详情，缩略图里的媒体控件不单独消费点击。 */
+.thumbnail .media,
+.thumbnail .videoContainer,
+.thumbnail .audioPlayer,
+.thumbnail .playIcon {
+  pointer-events: none;
 }
 
 /* 卡片右上角删除按钮：悬停显现 */

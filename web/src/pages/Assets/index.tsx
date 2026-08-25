@@ -8,6 +8,8 @@ import { fetchAllAssets, deleteAsset, UPLOAD_SIZE_LIMIT, type AssetRecord, type 
 import { isApiError } from '@/api/http';
 import { uploadAssetFile, fileToAssetType } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
+import Skeleton from '@/components/Skeleton';
+import AssetDetailModal from './components/AssetDetailModal';
 import styles from './index.module.css';
 
 /** 筛选类型：all 表示不传 type */
@@ -237,6 +239,7 @@ export default function Assets() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<AssetRecord | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<AssetRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [actionError, setActionError] = useState('');
@@ -301,7 +304,9 @@ export default function Assets() {
             width: done.width || null,
             height: done.height || null,
             duration: done.duration,
+            size: file.size,
             source: 'uploaded',
+            model: null,
             created_at: new Date().toISOString(),
           },
           ...prev,
@@ -375,7 +380,10 @@ export default function Assets() {
 
         {/* 资产网格（2-5 列自适应） */}
         <div className={styles.grid}>
-          {loading && <div className={styles.empty}>加载中…</div>}
+          {loading &&
+            Array.from({ length: 10 }, (_, index) => (
+              <Skeleton key={index} className={styles.cardSkeleton} />
+            ))}
           {!loading && loadError && <div className={styles.empty}>{loadError}</div>}
           {!loading && !loadError && displayAssets.length === 0 && (
             <div className={styles.empty}>暂无资产，点击"上传素材"添加</div>
@@ -384,7 +392,20 @@ export default function Assets() {
           {!loading &&
             !loadError &&
             displayAssets.map((asset) => (
-              <div key={String(asset.id)} className={styles.card}>
+              <div
+                key={String(asset.id)}
+                className={styles.card}
+                role="button"
+                tabIndex={0}
+                aria-label={`查看${typeLabel[asset.type]}资产详情`}
+                onClick={() => setPreviewTarget(asset)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setPreviewTarget(asset);
+                  }
+                }}
+              >
                 {/* 预览区域：AssetMedia 统一处理 loading/loaded/error 三态 */}
                 <div className={styles.thumbnail}>
                   {asset.url ? (
@@ -413,6 +434,8 @@ export default function Assets() {
             ))}
         </div>
       </div>
+
+      <AssetDetailModal asset={previewTarget} onClose={() => setPreviewTarget(null)} />
 
       {/* 删除确认弹窗 */}
       <ConfirmModal

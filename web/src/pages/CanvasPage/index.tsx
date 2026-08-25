@@ -80,7 +80,7 @@ export default function CanvasPage() {
   const [assetPickResult, setAssetPickResult] = useState<{ ts: number; assetId: string; ref: { id: string; src: string; type?: 'image' | 'video' } } | null>(null);
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
-  const [showEdges, setShowEdges] = useState(true);
+  const [showEdges, setShowEdges] = useState(false);
   const [uploadedNodes] = useState<Node[]>([]);
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'warn'; msg: string } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
@@ -101,15 +101,16 @@ export default function CanvasPage() {
     text: string;
     label?: string;
     skillId?: string;
+    skillName?: string;
     ts: number;
     mediaBlocks?: SessionContentBlock[];
   } | null>(null);
 
   /** 首页发送框携带草稿跳转：打开 Agent 弹框并注入输入框，随后清除导航状态避免刷新重复注入 */
   useEffect(() => {
-    const state = location.state as { agentText?: string; skillId?: string } | null;
+    const state = location.state as { agentText?: string; skillId?: string; skillName?: string } | null;
     if (!state?.agentText && !state?.skillId) return;
-    setAgentContext({ text: state.agentText ?? '', skillId: state.skillId ?? '', ts: Date.now() });
+    setAgentContext({ text: state.agentText ?? '', skillId: state.skillId ?? '', skillName: state.skillName ?? '', ts: Date.now() });
     setShowAgent(true);
     navigate(location.pathname + location.search, { replace: true, state: null });
   }, [location.state, location.pathname, location.search, navigate]);
@@ -2219,6 +2220,7 @@ export default function CanvasPage() {
             className={`${styles.mapBtn} ${showEdges ? styles.mapBtnActive : ''}`}
             onClick={() => setShowEdges(!showEdges)}
             title={showEdges ? '隐藏连线' : '显示连线'}
+            style={{ display: 'none' }}
           >
             {showEdges ? <Link size={14} strokeWidth={2} /> : <Link2Off size={14} strokeWidth={2} />}
           </button>
@@ -2314,6 +2316,7 @@ export default function CanvasPage() {
           onApplyToDock={handleAgentCardApply}
           appliedCardIds={appliedCardIds}
           initialSkillId={agentContext?.skillId ?? ''}
+          initialSkillName={agentContext?.skillName ?? ''}
           mediaBlocks={agentContext?.mediaBlocks}
         />
       )}
