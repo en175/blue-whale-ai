@@ -74,7 +74,7 @@
 
 ## 6. ffmpeg
 
-- 依赖：`ffmpeg-static`（打进 generation-worker 镜像，零系统依赖）。
+- 依赖：`ffmpeg-static` 打包二进制。Docker 构建设 `FFMPEG_BINARIES_URL=https://registry.npmmirror.com/-/binary/ffmpeg-static`，postinstall 从 npmmirror 镜像下载（避免 GitHub 超时）；本地 `pnpm install` 已下载本地二进制。
 - 命令：`ffmpeg -i <in> -vn -acodec libmp3lame -b:a 192k -y -progress pipe:1 -nostats <out.mp3>`。
 - 时长：解析 ffmpeg stderr 的 `Duration: HH:MM:SS.xx`。
 - 进度：解析 `-progress` 输出的 `out_time_ms` / 时长 → 百分比。
