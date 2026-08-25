@@ -30,6 +30,10 @@ export class AssetService {
     return this.repo.findOwnedSource(sourceAssetId, userId);
   }
 
+  findOwnedById(assetId: string, userId: string) {
+    return this.repo.findOwnedById(assetId, userId);
+  }
+
   findCommittedUpload(userId: string, storageKey: string) {
     return this.repo.findCommittedUpload(userId, storageKey);
   }

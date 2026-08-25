@@ -88,6 +88,8 @@ export interface AssetRepo {
     sourceAssetId: string,
     userId: string,
   ): Promise<AssetSourceFields | null>;
+  /** 取当前用户自己的单个资产详情（画布/资产库弹窗用）；不存在/不归属/已删 → null。 */
+  findOwnedById(assetId: string, userId: string): Promise<AssetView | null>;
   /** 在目标项目落下资产副本行（与源共享 storage_key 物理对象），返回新副本视图。 */
   insertCopy(
     projectId: string,
@@ -212,8 +214,60 @@ async function resolveAssetModels(
   return result;
 }
 
+/** assets 行 → 对外视图（AssetView）。列表与单查共用的字段映射，行为必须一致。 */
+function toAssetView(
+  a: {
+    id: bigint;
+    type: string;
+    url: string;
+    width: number | null;
+    height: number | null;
+    duration: number | null;
+    duration_ms: number | null;
+    source: string | null;
+    gmt_create: Date | null;
+    size: bigint | null;
+    generation_job_id: bigint | null;
+    project_id: bigint | null;
+    mime: string | null;
+  },
+  modelByJobId: Map<string, string>,
+): AssetView {
+  return {
+    id: a.id.toString(),
+    type: a.type,
+    url: a.url,
+    width: a.width,
+    height: a.height,
+    duration: assetDurationSeconds(a.duration, a.duration_ms),
+    source: a.source ?? null,
+    created_at: a.gmt_create?.toISOString() ?? null,
+    size: a.size == null ? null : Number(a.size),
+    generation_job_id:
+      a.generation_job_id == null ? null : a.generation_job_id.toString(),
+    project_id: a.project_id == null ? null : a.project_id.toString(),
+    mime: a.mime ?? null,
+    model:
+      a.generation_job_id == null
+        ? null
+        : (modelByJobId.get(a.generation_job_id.toString()) ?? null),
+  };
+}
+
 export function createAssetRepo(prisma: PrismaClient): AssetRepo {
   return {
+    async findOwnedById(assetId, userId) {
+      const row = await prisma.assets.findFirst({
+        where: {
+          id: BigInt(assetId),
+          user_id: BigInt(userId),
+          is_delete: false,
+        },
+      });
+      if (!row) return null;
+      const modelByJobId = await resolveAssetModels(prisma, [row]);
+      return toAssetView(row, modelByJobId);
+    },
     async softDeleteOwned(assetId, userId) {
       const result = await prisma.assets.updateMany({
         where: {
@@ -248,25 +302,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       // 兜底顺序：展示名 → model_id → null（上传资产/任务无模型/查询失败均落到 null 或回退）。
       const modelByJobId = await resolveAssetModels(prisma, rows);
       return {
-        records: rows.map((a) => ({
-          id: a.id.toString(),
-          type: a.type,
-          url: a.url,
-          width: a.width,
-          height: a.height,
-          duration: assetDurationSeconds(a.duration, a.duration_ms),
-          source: a.source ?? null,
-          created_at: a.gmt_create?.toISOString() ?? null,
-          size: a.size == null ? null : Number(a.size),
-          generation_job_id:
-            a.generation_job_id == null ? null : a.generation_job_id.toString(),
-          project_id: a.project_id == null ? null : a.project_id.toString(),
-          mime: a.mime ?? null,
-          model:
-            a.generation_job_id == null
-              ? null
-              : (modelByJobId.get(a.generation_job_id.toString()) ?? null),
-        })),
+        records: rows.map((a) => toAssetView(a, modelByJobId)),
         total,
         size: filter.size,
         current: filter.page,
