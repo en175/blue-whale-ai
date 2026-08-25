@@ -1652,11 +1652,7 @@ export default function CanvasPage() {
     try {
       const result = await saveSharedAsset(req);
       console.log('[SaveAssets] 保存结果', result);
-      if (result.created) {
-        showToast('success', successMsg);
-      } else {
-        showToast('warn', '该素材已在共享资产中');
-      }
+      showToast('success', successMsg);
       return result;
     } catch (e) {
       console.warn('[SaveAssets] 保存失败', e);
