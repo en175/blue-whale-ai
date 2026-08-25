@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { sendSessionMessage } from './agentSessions';
+import { sendSessionMessage, setSessionCreativeSkills } from './agentSessions';
 
 /**
  * 胶囊怎么上线的回归护栏（契约 docs/blueprint/capsule-contract-v1.md）。
@@ -112,5 +112,54 @@ describe('胶囊上线格式', () => {
     const body = read();
     expect(body.forced_creative_skill_id).toBe('sk_042');
     expect(body.content).toContainEqual({ type: 'skill_ref', skill_id: 'sk_042', name: '古风插画' });
+  });
+});
+
+/**
+ * 会话已载入的创作套路（0028）。
+ *
+ * 与胶囊同一类护栏，理由也一样：这条路由的动词是 PUT、必须带 If-Match 与 Idempotency-Key，
+ * 少任何一样 agent 都会拒——405 / 400 / 400 三种不同的失败，而在界面上都长成「点了没反应」。
+ */
+describe('会话创作套路上线格式', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function captureRequest() {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ session_id: 's1', active_creative_skill_ids: ['tvc_product_ad'] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    return () => {
+      const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+      return { url, init, body: JSON.parse(init.body as string) };
+    };
+  }
+
+  it('PUT 到会话的 creative-skills，带 If-Match 与 Idempotency-Key', async () => {
+    const read = captureRequest();
+    await setSessionCreativeSkills('p1', 's1', ['tvc_product_ad'], 'W/"session-7"');
+    const { url, init, body } = read();
+
+    expect(url).toBe('/api/agent/v1/projects/p1/sessions/s1/creative-skills');
+    expect(init.method).toBe('PUT');
+    const headers = init.headers as Record<string, string>;
+    expect(headers['If-Match']).toBe('W/"session-7"');
+    expect(headers['Idempotency-Key']).toBeTruthy();
+    expect(body).toEqual({ creative_skill_ids: ['tvc_product_ad'] });
+  });
+
+  it('取消就是发空数组——载入与取消是同一条路由', async () => {
+    const read = captureRequest();
+    await setSessionCreativeSkills('p1', 's1', [], 'W/"session-8"');
+    expect(read().body).toEqual({ creative_skill_ids: [] });
+  });
+
+  it('一次可以发多条，顺序原样保留', async () => {
+    const read = captureRequest();
+    await setSessionCreativeSkills('p1', 's1', ['tvc_product_ad', 'ugc_ads_video'], 'W/"session-9"');
+    expect(read().body).toEqual({ creative_skill_ids: ['tvc_product_ad', 'ugc_ads_video'] });
   });
 });

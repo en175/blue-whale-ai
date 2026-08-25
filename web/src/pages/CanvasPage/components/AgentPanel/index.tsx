@@ -23,7 +23,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
 import { isApiError } from '@/api/http';
-import { fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
+import { fetchMySkills, fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
 import { useAgentSession, type ChatMessage, type TurnOutcome } from '../../hooks/useAgentSession';
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
@@ -768,6 +768,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     messages,
     sessionId,
     sessions,
+    activeSkillIds,
+    changeActiveSkills,
     streamingText,
     streaming,
     runningRunId,
@@ -819,8 +821,18 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const appliedIds = appliedCardIds ?? EMPTY_APPLIED_IDS;
   /** 已「取消」的生成卡组（按消息ID标记，组内未应用的卡不再可操作） */
   const [cancelledMessageIds, setCancelledMessageIds] = useState<Set<string>>(new Set());
-  /** 「直接使用」武装的强制技能（下一条消息发送时携带 forced_creative_skill_id，发送后清除）；name 供指示条展示 */
+  /**
+   * 「直接使用」刚点上、**还没发出去**的那一条。发出去之后它就载入了会话，由
+   * `activeSkillIds` 接手（0028）——所以这里只是一个未提交的选择，不是当前状态。
+   */
   const [forcedSkill, setForcedSkill] = useState<{ id: string; name: string } | null>(null);
+  /**
+   * 套路 id → 中文名。会话上只存 id，名字在技能目录里。
+   *
+   * 用户在本次会话里点过的那条名字我们当场就知道；刷新之后不知道，所以补一次「我的技能」
+   * ——用户正是从那里点的「直接使用」。查不到就退回显示 id，不显示空胶囊。
+   */
+  const [skillNames, setSkillNames] = useState<Record<string, string>>({});
   /** 确认门「修改」编辑态：展开文本编辑，提交 correct 动作 */
 
   /* ---- 拖动状态 ---- */
@@ -912,6 +924,28 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     setForcedSkill({ id: initialSkillId, name: '已选技能' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSkillId]);
+
+  /** 会话上有 id 但本地不知道名字（多半是刷新之后）：补一次「我的技能」把名字填上。 */
+  useEffect(() => {
+    const unknown = activeSkillIds.filter((id) => !skillNames[id]);
+    if (unknown.length === 0) return;
+    let alive = true;
+    fetchMySkills(1, 50)
+      .then((page) => {
+        if (!alive) return;
+        const found: Record<string, string> = {};
+        for (const record of page?.records ?? []) {
+          if (record.creative_skill_id && record.name) found[record.creative_skill_id] = record.name;
+        }
+        if (Object.keys(found).length > 0) setSkillNames((prev) => ({ ...found, ...prev }));
+      })
+      .catch((e) => console.warn('解析创作套路名称失败:', e));
+    return () => {
+      alive = false;
+    };
+    // skillNames 有意不进依赖：它由这个 effect 自己写，进依赖就是一个自触发循环。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSkillIds]);
 
   /** 运行开始后拉取 Run 级技能推荐（GET /api/agent/runs/:runId/creative-skill-recommendations）
    * 后端未部署该接口（404）时静默隐藏推荐区域 */
@@ -1155,6 +1189,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 使用推荐技能：标记已激活，并把技能意图追加为一条消息提交给 Agent（顺带清掉「直接使用」武装，避免双技能叠加） */
   const handleUseSkill = async (r: RunSkillRecommendation) => {
     if (usedSkillIds.has(r.creative_skill_id) || runningRunId !== null || streaming) return;
+    setSkillNames((prev) => ({ ...prev, [r.creative_skill_id]: r.name }));
     const accepted = await sendMessage([{ type: 'text', text: `使用「${r.name}」技能继续创作` }], r.creative_skill_id, undefined, r.name, `使用「${r.name}」技能继续创作`);
     if (!accepted) return;
     setUsedSkillIds((prev) => new Set(prev).add(r.creative_skill_id));
@@ -1216,6 +1251,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     pendingMediaBlocksRef.current = [];
     syncMediaBlocks();
     const armed = forcedSkill;
+    if (armed) setSkillNames((prev) => ({ ...prev, [armed.id]: armed.name }));
     const sentAttachments = attachments;
     setForcedSkill(null);
     setAttachments([]);
@@ -1606,19 +1642,43 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         {/* data-agent-composer：ESC 判定用它把主输入框从「可编辑区域一律让路」里挑出来，
             主输入框是 Lexical 的 contentEditable，而发送后焦点通常正停在这里。 */}
         <div className={styles.inputBox} data-agent-composer>
-          {/* 技能气泡：位于输入框内侧，chip 上方 */}
-          {forcedSkill && (
-            <div className={styles.skillBubble}>
-              <BookText size={13} strokeWidth={2} className={styles.skillBubbleIcon} />
-              <span className={styles.skillBubbleLabel}>{forcedSkill.name}</span>
-              <button
-                type="button"
-                className={styles.skillBubbleRemove}
-                onClick={() => setForcedSkill(null)}
-                title="取消技能"
-              >
-                <X size={12} strokeWidth={2} />
-              </button>
+          {/* 技能气泡：位于输入框内侧，chip 上方。
+            *
+            * 这一排就是「本会话现在挂着哪几条创作套路」（0028）。载入一次就一直在，每一轮都
+            * 注入，直到点掉这里的 ×；新开对话是空的。`forcedSkill` 是刚点上还没发出去的那条，
+            * 发出去之后由会话接手，所以两者显示成同一排、行为略有不同：前者的 × 只是撤销
+            * 这次选择，后者的 × 是真的从会话上取消。 */}
+          {(activeSkillIds.length > 0 || forcedSkill) && (
+            <div className={styles.skillBubbleRow}>
+              {activeSkillIds.map((id) => (
+                <div key={id} className={styles.skillBubble}>
+                  <BookText size={13} strokeWidth={2} className={styles.skillBubbleIcon} />
+                  <span className={styles.skillBubbleLabel}>{skillNames[id] ?? id}</span>
+                  <button
+                    type="button"
+                    className={styles.skillBubbleRemove}
+                    onClick={() => void changeActiveSkills(activeSkillIds.filter((entry) => entry !== id))}
+                    title="取消这条创作套路"
+                  >
+                    <X size={12} strokeWidth={2} />
+                  </button>
+                </div>
+              ))}
+              {/* 已经在会话上的不再重复显示一遍——那会让用户以为挂了两条。 */}
+              {forcedSkill && !activeSkillIds.includes(forcedSkill.id) && (
+                <div className={styles.skillBubble}>
+                  <BookText size={13} strokeWidth={2} className={styles.skillBubbleIcon} />
+                  <span className={styles.skillBubbleLabel}>{forcedSkill.name}</span>
+                  <button
+                    type="button"
+                    className={styles.skillBubbleRemove}
+                    onClick={() => setForcedSkill(null)}
+                    title="取消技能"
+                  >
+                    <X size={12} strokeWidth={2} />
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

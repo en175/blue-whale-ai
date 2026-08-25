@@ -16,6 +16,7 @@ import {
   deleteSession,
   fetchSessionSnapshot,
   sendSessionMessage,
+  setSessionCreativeSkills,
   cancelSession,
   cancelSessionRun,
   retrySessionRun,
@@ -54,6 +55,7 @@ const api = {
   cancelSession,
   cancelSessionRun,
   retrySessionRun,
+  setSessionCreativeSkills,
   subscribeSessionEvents,
 };
 
@@ -233,6 +235,16 @@ export function useAgentSession(projectId: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   /** 当前会话ID */
   const [sessionId, setSessionId] = useState<string | null>(null);
+  /**
+   * 会话已载入的创作套路，以及会话当前的 etag（0028）。
+   *
+   * 一起放：改这排胶囊要带 If-Match，而 etag 每次会话变化都会变。分开存会出现「id 是新的、
+   * etag 是旧的」，PUT 直接 412——那是一个只在多改几次之后才现形的 bug。
+   */
+  const [activeSkills, setActiveSkills] = useState<{ ids: string[]; etag: string | null }>({
+    ids: [],
+    etag: null,
+  });
   /** 当前项目下的历史会话列表（新→旧，供历史会话下拉使用） */
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   /** 删除失败的那一行 + 原因：错误就显示在那一行上，下拉不关闭，用户能原地重试 */
@@ -842,6 +854,11 @@ export function useAgentSession(projectId: string) {
       if (t === 'session.updated') {
         const s = (payload.session ?? null) as SessionRecord | null;
         if (s?.session_id) {
+          // 胶囊与 etag 跟着会话走。同一个会话在另一个标签页里被改过，这里也就跟着变了——
+          // 这正是把状态放在会话上而不是放在这个组件里换来的东西。
+          if (s.session_id === sessionIdRef.current) {
+            setActiveSkills({ ids: s.active_creative_skill_ids ?? [], etag: s.etag ?? null });
+          }
           sessionsEpochRef.current += 1;
           // upsert 而不是 map：刚创建的会话往往还没进本地列表（列表是上一次拉的），
           // 只 map 的话这条标题更新直接丢掉——头部标题会一直停在「新对话」。
@@ -870,6 +887,8 @@ export function useAgentSession(projectId: string) {
     accRef.current = '';
     streamRunRef.current = '';
     cardRunsRef.current.clear();
+    // 新开对话不带套路：这正是「会话级」的另一半——载入只在这一个会话里有效（0028）。
+    setActiveSkills({ ids: [], etag: null });
     setMessages([]);
     setStreamingText('');
     setStreaming(false);
@@ -917,6 +936,11 @@ export function useAgentSession(projectId: string) {
       if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return false;
       // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
       setMessages(attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards));
+      // 刷新之后那排胶囊还在：这是会话级载入相对「前端自己记着」的全部意义（0028）。
+      setActiveSkills({
+        ids: snap.session?.active_creative_skill_ids ?? [],
+        etag: snap.session?.etag ?? null,
+      });
       setChatError(null);
       // 已经是终态的 active_run 归到「上一轮的账」那条路去（审查 W·A4）。
       //
@@ -1287,10 +1311,36 @@ export function useAgentSession(projectId: string) {
     });
   }, [projectId, resetLocal, connectSession]);
 
+  /**
+   * 改会话已载入的创作套路（0028）。整份替换，空数组即全部取消。
+   *
+   * 不做乐观更新：写回来的会话视图就带着新的 ids 与 etag，`session.updated` 事件也会到，
+   * 两条路都会刷新本地状态。乐观更新在这里只会制造一个「界面上没了、库里还在」的窗口。
+   */
+  const changeActiveSkills = useCallback(
+    async (ids: string[]) => {
+      const sid = sessionIdRef.current;
+      if (!projectId || !sid || !activeSkills.etag) return false;
+      try {
+        const session = await api.setSessionCreativeSkills(projectId, sid, ids, activeSkills.etag);
+        setActiveSkills({ ids: session.active_creative_skill_ids ?? [], etag: session.etag ?? null });
+        return true;
+      } catch (e) {
+        // 412 是并发改动：另一个端刚改过，本地这份 etag 过期了。重读会话再让用户重来一次，
+        // 比静默失败或强行覆盖都好——强行覆盖会把另一个端刚做的事抹掉。
+        console.warn('修改会话创作套路失败:', e);
+        return false;
+      }
+    },
+    [projectId, activeSkills.etag],
+  );
+
   return {
     messages,
     sessionId,
     sessions,
+    activeSkillIds: activeSkills.ids,
+    changeActiveSkills,
     streamingText,
     streaming,
     runningRunId,

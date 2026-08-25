@@ -1546,6 +1546,16 @@
 }
 
 /* ---- 技能气泡（输入框内侧，chip 上方，比 chip 略大） ---- */
+
+/* 一个会话可以同时挂多条创作套路（0028），所以这里是一排而不是一个：
+   横向排、放不下就换行，胶囊自己的 margin-bottom 负责行间距。 */
+.skillBubbleRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+
 .skillBubble {
   display: flex;
   align-items: center;

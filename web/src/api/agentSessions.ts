@@ -130,6 +130,13 @@ export interface SessionRecord {
   phase?: string;
   lifecycle?: string;
   active_run_id?: string | null;
+  /**
+   * 本会话已载入的创作套路（`creative_skill_id`，0028）。
+   *
+   * 会话级而不是逐条消息：用户点「直接使用」表达的是「接下来按这个来」，所以载入一次之后
+   * 每一轮都注入，直到显式取消。只有 id——名称在技能目录里，前端本来就有那一份。
+   */
+  active_creative_skill_ids?: string[];
   created_at?: string;
   updated_at?: string;
   etag?: string;
@@ -498,6 +505,32 @@ export function cancelSession(projectId: string, sessionId: string): Promise<unk
       method: agentMethod('cancel_session'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
       body: JSON.stringify({ action_id: newIdempotencyKey() }),
+    },
+  );
+}
+
+/**
+ * 整份替换会话已载入的创作套路 PUT /projects/:id/sessions/:sid/creative-skills（0028）。
+ *
+ * 载入与取消是同一条路由：空数组即全部取消。发整份而不是增删单条，因为界面手里本来就有
+ * 完整的一份（它正在渲染那排胶囊），发整份是幂等的，也不存在「一个端删掉、另一个端又加
+ * 回来」这种只有增量接口才有的中间态。
+ *
+ * `etag` 走 If-Match，与本服务其余会话写操作一致。会话每次变化都经 `session.updated` 事件
+ * 带回新的 etag，所以界面手里的那个总是最新的；真撞上并发改动时 412，重读再来。
+ */
+export function setSessionCreativeSkills(
+  projectId: string,
+  sessionId: string,
+  creativeSkillIds: string[],
+  etag: string,
+): Promise<SessionRecord> {
+  return sessionRequest(
+    agentPath('set_session_creative_skills', projectId, { session_id: sessionId }),
+    {
+      method: agentMethod('set_session_creative_skills'),
+      headers: { 'Idempotency-Key': newIdempotencyKey(), 'If-Match': etag },
+      body: JSON.stringify({ creative_skill_ids: creativeSkillIds }),
     },
   );
 }
