@@ -95,6 +95,9 @@ const imageResolutions = [
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
 const MAX_VIDEOS = 3;
 
+/** 视频智能体 tab 附件最大上传数量（图片/视频/音频混合，接口未下发，前端统一 9） */
+const MAX_AGENT_FILES = 9;
+
 /** 输入框字数上限（与画布对话框一致） */
 const MAX_INPUT = 1000;
 
@@ -419,10 +422,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     if (text && getCurrentUser()) dispatchByTab(text);
   };
 
-  /** + 上传：点击直接选取图片/视频/音频（上限 9 个），按文件类型归类 */
+  /** + 上传：点击直接选取图片/视频/音频（上限 MAX_AGENT_FILES 个），按文件类型归类；超限 toast */
   const handleAgentFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    const items = files.slice(0, Math.max(0, 9 - agentFiles.length)).map((file) => ({
+    const items = files.slice(0, Math.max(0, MAX_AGENT_FILES - agentFiles.length)).map((file) => ({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       url: URL.createObjectURL(file),
       kind: file.type.startsWith('image/')
@@ -432,6 +435,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
           : ('audio' as const),
       name: file.name,
     }));
+    if (files.length > items.length) showToast(`附件最多 ${MAX_AGENT_FILES} 个`);
     setAgentFiles((prev) => [...prev, ...items]);
     e.target.value = '';
   };
@@ -552,7 +556,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     });
   };
 
-  // 处理AI图片参考文件上传（按接口上限截断）
+  // 处理AI图片参考文件上传（按接口上限截断，超限 toast）
   const handleImageRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     const remaining = Math.max(0, imageMaxImages - imageRefFiles.length);
@@ -560,6 +564,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       file,
       preview: URL.createObjectURL(file),
     }));
+    if (files.length > newFiles.length) showToast(`参考图最多 ${imageMaxImages} 张，请减少图片`);
     setImageRefFiles((prev) => [...prev, ...newFiles]);
     if (imageFileInputRef.current) imageFileInputRef.current.value = '';
   };
