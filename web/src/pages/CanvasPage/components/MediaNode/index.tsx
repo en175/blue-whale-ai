@@ -23,6 +23,18 @@ interface MediaNodeData {
   errorText?: string;
   /** 生成时的提示词（「重新编辑」带回图片对话框） */
   prompt?: string;
+  /** 资产 ID（上传完成后存储） */
+  assetId?: string;
+  /** MIME 类型（上传完成后存储，如 "image/jpeg"） */
+  mime?: string;
+  /** 媒体宽度（图片/视频，像素） */
+  width?: number;
+  /** 媒体高度（图片/视频，像素） */
+  height?: number;
+  /** 时长秒（视频/音频） */
+  duration?: number;
+  /** 文件大小字节 */
+  size?: number;
   onDelete?: (id: string) => void;
   onDuplicate?: (id: string) => void;
   onAddToChat?: (id: string) => void;
@@ -107,7 +119,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleReEdit = useCallback(() => data.onReEdit?.(id), [data, id]);
   const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
-  const handleGenAudio = useCallback(() => data.onGenAudio?.(id), [data, id]);
   const handleDownload = useCallback(() => data.onDownload?.(id), [data, id]);
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
 
@@ -139,10 +150,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <Video size={14} strokeWidth={2} />
             <span>生成视频</span>
           </button>
-          <button className={styles.toolBtn} onClick={handleGenAudio} title="带入图片，打开音频对话框">
-            <AudioLines size={14} strokeWidth={2} />
-            <span>生成音频</span>
-          </button>
           <span className={styles.toolDivider} />
           <button className={styles.toolBtn} title="详情（预留）">
             <Info size={14} strokeWidth={2} />
@@ -162,9 +169,24 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <Icon size={13} strokeWidth={2} color="#888" />
             <span className={styles.label}>{label}</span>
           </div>
-          <span className={styles.fileName}>
-            {data.fileName || ''}
-          </span>
+          <div className={styles.headerRight}>
+            <span className={styles.fileName}>
+              {data.fileName || ''}
+            </span>
+            {!isGenerating && !isGenDone && (
+              <span className={styles.mediaMeta}>
+                {data.mediaType !== 'audio' && data.width && data.height
+                  ? `${data.width}×${data.height}`
+                  : ''}
+                {typeof data.duration === 'number' && data.duration > 0
+                  ? ` ${Math.round(data.duration)}s`
+                  : ''}
+                {typeof data.size === 'number'
+                  ? ` ${(data.size / 1024 / 1024).toFixed(1)}MB`
+                  : ''}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* 与图片节点一致：任意位置按下均可拖动（视频控件保留点击交互） */}

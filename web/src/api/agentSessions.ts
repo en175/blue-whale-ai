@@ -34,6 +34,46 @@ export interface SessionContentBlock {
    */
   /** 生成卡块（分镜提示词，按 04-侧边栏规范 §5.1） */
   card?: GenerationCardBlock;
+
+  // ---- 媒体类型扩展（image / video / audio） ----
+  /** 永久访问 URL（上传完成后获得） */
+  url?: string;
+  /** MIME 类型，如 "image/jpeg" */
+  mime?: string;
+  /** 时长秒（视频/音频） */
+  duration?: number;
+  /** 展示名/文件名 */
+  name?: string;
+  /** 画布节点 ID */
+  node_id?: string;
+  /** 资产库 ID */
+  asset_id?: string;
+  /** 来源：card-ref 卡片参考图、card-image 商品图、card-voice 角色音色、card-generation 生成卡、node 独立节点 */
+  source?: 'card-ref' | 'card-image' | 'card-voice' | 'card-generation' | 'node';
+  /** 资源来源类型：区分从哪种卡片/节点带出的媒体数据 */
+  resource_type?:
+    | '图片'       // 独立图片节点
+    | '视频'       // 独立视频节点
+    | '音频'       // 独立音频节点
+    | '商品卡'     // 商品卡
+    | '风格卡'     // 风格卡
+    | '角色卡'     // 角色卡
+    | '物体卡'     // 物体卡
+    | '环境卡'     // 环境卡
+    | '自定义卡'   // 自定义卡
+    | '生成卡';    // 生成卡
+  /** 关联的 chip ID（用于删除 chip 时同步移除媒体数据） */
+  chip_id?: string;
+
+  // ---- 封装参数（给后端消费的统一字段） ----
+  /** 资源 ID，对应画布节点 id */
+  resource_id?: string;
+  /** 媒体类型：image / video / audio */
+  media_type?: 'image' | 'video' | 'audio';
+  /** 展示标签（对外展示的名称） */
+  display_label?: string;
+  /** 资源文本描述（如商品卡的商品详情） */
+  resource_text?: string;
 }
 
 /** 生成卡里的一条素材引用（IKAFSQ）。
@@ -298,25 +338,54 @@ export function deleteSession(projectId: string, sessionId: string): Promise<unk
 
 /* ============ 消息与运行控制 ============ */
 
+/** 需要在传输时剔除的前端内部字段 */
+const TRANSPORT_STRIP_FIELDS = ['chip_id', 'name', 'type', 'mime', 'duration'] as const;
+
+/** 从 SessionContentBlock 中剔除前端内部字段，得到传给后端的纯数据 */
+function stripInternalFields(block: SessionContentBlock): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(block)) {
+    if (!TRANSPORT_STRIP_FIELDS.includes(key as typeof TRANSPORT_STRIP_FIELDS[number])) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 /** 发送消息 POST /projects/:id/sessions/:sid/messages（回复经事件流 assistant.delta 下发）
  * options.forcedCreativeSkillId：一次性 Use——为该消息创建的目标 Run 强制激活该 Skill
- * （激活契约 §2：可缺省；缺省即普通消息，wire 字段名 forced_creative_skill_id）。 */
+ * （激活契约 §2：可缺省；缺省即普通消息，wire 字段名 forced_creative_skill_id）。
+ * options.skillRef：技能引用 { type, skill_id, name }，与 resource_ref 同级。 */
 export function sendSessionMessage(
   projectId: string,
   sessionId: string,
-  text: string,
-  options?: { forcedCreativeSkillId?: string; signal?: AbortSignal },
+  content: SessionContentBlock[],
+  options?: {
+    forcedCreativeSkillId?: string;
+    signal?: AbortSignal;
+    resourceRef?: SessionContentBlock[];
+    skillRef?: { type: string; skill_id: string; name: string };
+  },
 ): Promise<SessionMessageAck> {
-  const { forcedCreativeSkillId, signal } = options ?? {};
+  const { forcedCreativeSkillId: forcedSkillId, signal, resourceRef, skillRef } = options ?? {};
+  const body: Record<string, unknown> = { content };
+  if (resourceRef && resourceRef.length > 0) {
+    // resource_ref 剔除 chip_id、name、type 等前端内部字段
+    body.resource_ref = resourceRef.map((b) => stripInternalFields(b));
+  }
+  if (forcedSkillId) {
+    body.forced_creative_skill_id = forcedSkillId;
+  }
+  if (skillRef) {
+    body.skill_ref = skillRef;
+  }
+  console.log('[Agent] sendSessionMessage 请求参数:', body);
   return sessionRequest(
     agentPath('send_message', projectId, { session_id: sessionId }),
     {
       method: agentMethod('send_message'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
-      body: JSON.stringify({
-        content: [{ type: 'text', text }],
-        ...(forcedCreativeSkillId ? { forced_creative_skill_id: forcedCreativeSkillId } : {}),
-      }),
+      body: JSON.stringify(body),
       signal,
     },
   );

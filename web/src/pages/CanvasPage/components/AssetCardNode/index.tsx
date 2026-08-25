@@ -25,7 +25,7 @@ const KIND_META: Record<AssetCardKind, { title: string; placeholder: string }> =
 };
 
 /** 临时隐藏：资产卡（风格/角色/物体/环境/自定义）顶部 @ 操作条，会后恢复（改回 false） */
-const HIDE_ASSET_TOP_BAR = true;
+const HIDE_ASSET_TOP_BAR = false;
 
 /** Agent 生成卡数据（kind=generation 时承载，落画布后从节点选引用）
  * 字段复用会话层的 GenerationCardBlock（唯一形状定义），此处只加节点专属的回调；
@@ -44,17 +44,17 @@ interface AssetCardNodeData {
   toolMode?: 'drag' | 'select';
   isFirst?: boolean;
   /** 水合初始参考图（后端 reference 节点的 references 解析而来） */
-  initialRefs?: { id: string; src: string }[];
+  initialRefs?: { id: string; src: string; type?: 'image' | 'video' }[];
   /** 水合初始描述文本 */
   initialDesc?: string;
   /** 水合初始音色（角色卡，共享资产加回画布时注入） */
-  voice?: { name: string; src: string };
+  voice?: { name: string; src: string; type?: 'audio' };
   onDelete?: (id: string) => void;
   onAddToChat?: (id: string) => void;
   /** 保存到共享资产 */
   onSaveToAssets?: (id: string) => void;
   /** 卡片内容变更同步回父组件（参考图/描述/音色），保证右键保存时能读到最新值 */
-  onCardChange?: (id: string, patch: { refs?: { id: string; src: string }[]; desc?: string; voice?: { name: string; src: string } | null }) => void;
+  onCardChange?: (id: string, patch: { refs?: { id: string; src: string; type?: 'image' | 'video' }[]; desc?: string; voice?: { name: string; src: string } | null }) => void;
   /** 生成图片：唤起底部图片对话框 */
   onGenerateImage?: () => void;
   /** 触发画布节点选取模式（父级实现） */
@@ -72,7 +72,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
   // 水合容错：持久化的 kind 可能不在五种枚举内（旧数据/脏数据），降级为 custom 避免 KIND_META 落空
   const kind: AssetCardKind = data.kind && data.kind in KIND_META ? data.kind : 'custom';
   const meta = KIND_META[kind];
-  const [refs, setRefs] = useState<{ id: string; src: string }[]>(data.initialRefs ?? []);
+  const [refs, setRefs] = useState<{ id: string; src: string; type?: 'image' | 'video' }[]>(data.initialRefs ?? []);
   const [desc, setDesc] = useState(data.initialDesc ?? '');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [addMenu, setAddMenu] = useState(false);
@@ -175,21 +175,22 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     data.onSaveToAssets?.(id);
   }, [data, id]);
 
-  /** 添加参考图（点击选择或拖入，仅 image/*，最多 MAX_IMAGE_REFS 张）
+  /** 添加参考图/视频（点击选择或拖入，支持 image/* 和 video/*，最多 MAX_IMAGE_REFS 张）
    * 先创建本地 blob 预览立即上画布，再异步调用 uploadAssetFile() 三步上传，
    * 成功后替换为永久 URL（与左侧工具栏加号上传逻辑一致） */
   const addFiles = (files: FileList | File[]) => {
-    const imgs: { id: string; src: string; file: File }[] = [];
+    const imgs: { id: string; src: string; file: File; type: 'image' | 'video' }[] = [];
     Array.from(files)
-      .filter((f) => f.type.startsWith('image/'))
+      .filter((f) => f.type.startsWith('image/') || f.type.startsWith('video/'))
       .forEach((f, i) => {
         const refId = `ref-${Date.now()}-${i}`;
-        imgs.push({ id: refId, src: URL.createObjectURL(f), file: f });
+        const mediaType: 'image' | 'video' = f.type.startsWith('video/') ? 'video' : 'image';
+        imgs.push({ id: refId, src: URL.createObjectURL(f), file: f, type: mediaType });
       });
     if (imgs.length === 0) return;
 
     // 先创建本地预览引用（不含 file 字段）
-    const newRefs = imgs.map(({ id, src }) => ({ id, src }));
+    const newRefs = imgs.map(({ id, src, type }) => ({ id, src, type }));
     setRefs((prev) => {
       const remaining = MAX_IMAGE_REFS - prev.length;
       if (remaining <= 0) return prev;
@@ -215,7 +216,8 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
               if (r.id !== refId) return r;
               // 释放本地 blob，替换为永久 URL
               if (r.src.startsWith('blob:')) URL.revokeObjectURL(r.src);
-              return { ...r, src: done.url || r.src };
+              const mediaType: 'image' | 'video' = done.type === 'video' ? 'video' : 'image';
+              return { ...r, src: done.url || r.src, type: mediaType };
             }),
           );
         })
@@ -514,7 +516,11 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
               <div className={styles.refGrid}>
                 {refs.map((ref) => (
                   <div key={ref.id} className={styles.refThumb}>
-                    <img src={ref.src} alt="参考图" className={styles.refThumbImg} />
+                    {ref.type === 'video' ? (
+                      <video src={ref.src} className={styles.refThumbImg} muted playsInline />
+                    ) : (
+                      <img src={ref.src} alt="参考图" className={styles.refThumbImg} />
+                    )}
                     <button
                       className={styles.refRemove}
                       onClick={() => removeRef(ref.id)}
@@ -629,7 +635,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
           <input
             ref={fileRef}
             type="file"
-            accept="image/*"
+            accept="image/*,video/*"
             multiple
             className={styles.hiddenInput}
             onChange={(e) => {

@@ -21,7 +21,7 @@ async function loadReservationFen(
   }
 }
 
-export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "claimJobById" | "claimNextJob" | "listDueVideoJobIds" | "claimVideoJobById" | "resetStalledImageJobs" | "claimNextImageJob" | "claimNextInProcessJob" | "requeueImageJobForRetry" | "claimNextVideoJob"> {
+export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "claimJobById" | "claimNextJob" | "listDueVideoJobIds" | "claimVideoJobById" | "claimMediaExtractJobById" | "resetStalledImageJobs" | "claimNextImageJob" | "claimNextInProcessJob" | "requeueImageJobForRetry" | "claimNextVideoJob"> {
   // 与拆分前一致：每次创建仓储时读一次 IMAGE_JOB_LEASE_SECONDS。
   const LEASE_SECONDS = imageJobLeaseSeconds();
 
@@ -194,6 +194,63 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
         fencingToken: Number(candidate.fencing_token + 1n),
         // IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null）。
         reservedAmountFen: await loadReservationFen(prisma, candidate.id),
+      };
+    },
+
+    async claimMediaExtractJobById(jobId, workerId) {
+      // IKARDY：媒体提取短步骤，镜像 claimVideoJobById 的 CAS 领取；type=media_extract 不限 source。
+      const now = new Date();
+      const candidate = await prisma.generation_jobs.findFirst({
+        where: {
+          id: BigInt(jobId),
+          type: "media_extract",
+          is_delete: false,
+          next_action_at: { lte: now },
+          OR: [
+            { status: "queued" },
+            {
+              status: "processing",
+              OR: [
+                { lease_expires_at: null },
+                { lease_expires_at: { lt: now } },
+              ],
+            },
+          ],
+        },
+        orderBy: { id: "asc" },
+      });
+      if (!candidate) return null;
+
+      const lease = new Date(now.getTime() + LEASE_SECONDS * 1000);
+      const claimed = await prisma.generation_jobs.updateMany({
+        where: {
+          id: candidate.id,
+          fencing_token: candidate.fencing_token,
+          status: candidate.status,
+        },
+        data: {
+          status: "processing",
+          lease_owner: workerId,
+          lease_expires_at: lease,
+          last_polled_at: now,
+          fencing_token: { increment: 1 },
+          version: { increment: 1 },
+        },
+      });
+      if (claimed.count === 0) return null;
+
+      return {
+        id: candidate.id.toString(),
+        projectId: candidate.project_id?.toString() ?? "0",
+        userId: candidate.user_id.toString(),
+        input:
+          candidate.input &&
+          typeof candidate.input === "object" &&
+          !Array.isArray(candidate.input)
+            ? (candidate.input as Record<string, unknown>)
+            : {},
+        workerId,
+        fencingToken: Number(candidate.fencing_token + 1n),
       };
     },
 

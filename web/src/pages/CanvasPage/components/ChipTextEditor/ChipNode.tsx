@@ -12,7 +12,7 @@ import {
   $getNodeByKey,
 } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { Sparkles, X } from 'lucide-react';
+import { AtSign, X } from 'lucide-react';
 import styles from './index.module.css';
 
 export type SerializedChipNode = Spread<
@@ -30,7 +30,7 @@ function ChipComponent({ nodeKey, label }: { nodeKey: NodeKey; label: string }) 
   };
   return (
     <span className={styles.chip} contentEditable={false}>
-      <Sparkles size={12} strokeWidth={2} className={styles.chipIcon} />
+      <AtSign size={12} strokeWidth={2} className={styles.chipIcon} />
       <span className={styles.chipLabel}>{label}</span>
       <button
         type="button"

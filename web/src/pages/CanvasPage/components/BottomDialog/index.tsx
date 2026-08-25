@@ -8,7 +8,6 @@ import {
   X,
   Image,
   Video,
-  Sparkles,
   SlidersHorizontal,
   Play,
   ArrowUp,
@@ -18,6 +17,7 @@ import {
   Minimize2,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { classifyRefOverflow } from '@/utils/ref-overflow';
 import ChipTextEditor, { type ChipTextEditorHandle, type ChipRef } from '../ChipTextEditor';
 import {
   EMPTY_COMPOSED,
@@ -210,9 +210,14 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   useEffect(() => {
     if (!externalImagePick) return;
     const item = externalImagePick.item;
+    const imgCount = refFiles.filter((f) => f.type === 'image').length;
+    if (imgCount >= maxImages) {
+      showToast(`参考图最多 ${maxImages} 张，请减少图片`);
+      return;
+    }
     setRefFiles((prev) => {
-      const imgCount = prev.filter((f) => f.type === 'image').length;
-      if (imgCount >= maxImages) return prev;
+      const imgCnt = prev.filter((f) => f.type === 'image').length;
+      if (imgCnt >= maxImages) return prev;
       if (prev.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview)) return prev;
       return [...prev, item];
     });
@@ -239,15 +244,17 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** 上传图片（首尾帧模式限 2 张） */
+  /** 上传图片（首尾帧模式限 2 张；达上限 toast） */
   const handleImageClick = () => {
     if (imageCount < maxImages) imageInputRef.current?.click();
+    else showToast(`参考图最多 ${maxImages} 张，请减少图片`);
   };
 
-  /** 上传视频（首尾帧模式禁用；达上限时按钮已隐藏） */
+  /** 上传视频（首尾帧模式禁用；达上限 toast） */
   const handleVideoClick = () => {
     if (isKeyframe) return;
     if (videoCount < MAX_VIDEOS) videoInputRef.current?.click();
+    else showToast(`参考视频最多 ${MAX_VIDEOS} 个`);
   };
 
   /** 通用上传（底部加号；首尾帧模式仅收图片且限 2 张） */
@@ -330,6 +337,16 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
                   return false;
                 });
           })();
+    const acceptedImgs = list.filter((f) => f.type.startsWith('image/')).length;
+    const acceptedVids = list.filter((f) => f.type.startsWith('video/')).length;
+    const overflow = classifyRefOverflow({
+      selectedImages: all.filter((f) => f.type.startsWith('image/')).length,
+      selectedVideos: all.filter((f) => f.type.startsWith('video/')).length,
+      acceptedImages: acceptedImgs,
+      acceptedVideos: acceptedVids,
+    });
+    if (overflow === 'image') showToast(`参考图最多 ${maxImages} 张，请减少图片`);
+    else if (overflow === 'video') showToast(`参考视频最多 ${MAX_VIDEOS} 个`);
     if (!list.length) return;
     const startIdx = refFiles.length;
     const newItems: BottomRefItem[] = list.map((file) => ({
@@ -765,12 +782,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
           </button>
         </div>
 
-        {/* 右侧：消耗 + 发送 */}
+        {/* 右侧：发送 */}
         <div className={styles.barRight}>
-          <span className={styles.costText}>
-            <Sparkles size={14} strokeWidth={2} />
-            <span>15 生成</span>
-          </span>
           <button
             className={`${styles.sendBtn} ${canSend && !keyframeInvalid ? styles.sendBtnActive : ''}`}
             onClick={handleSend}
