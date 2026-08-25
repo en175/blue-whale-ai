@@ -18,7 +18,7 @@
 1. **独立端点，不复用 GenerationJob 成本/配额管线**：新增 `POST /projects/:pid/media-extractions`，只建任务 + 入队，返回 `{ job_id }`；轮询复用现有 `GET /jobs/:id`（通用返回 `{status, progress, asset}`，前端 `pollJob` 零新代码）。
 2. **复用 `generation_jobs` 表，新增 type=`media_extract`，0 表迁移**：`type` 为无枚举 VARCHAR，直接可存；入参放 `input` JSON，进度放 `progress`，结果放 `output_asset_ids`，失败放 `error`，领用防重用现有 `lease_owner/lease_expires_at/fencing_token`。免费工具，不做配额预留/实扣。
 3. **复用视频 MQ topic，新增 tag `media_extract`**：RocketMQ 同 topic 新 tag（BullMQ 回退 job name `media_extract`），与任务类型一致，`generation-worker` 新增第二个 `SimpleConsumer`（consumer group `generation-extract-worker`），不新增部署单元。**多视频并行**：消费者经信号量并发派发提取任务（**默认 2**，对齐当前容器 2 核部署；`MEDIA_EXTRACT_CONCURRENCY` 可调 1-16），每个任务独立 ffmpeg 进程吃一个核——ffmpeg 单视频抽音轨多线程无效（mp3 编码单线程），进程级并行才是吃多核的正解。默认值取固定 2 而非动态读核数：`os.availableParallelism()` 在容器未设 CPU 限额时会误读宿主机核数导致超订，固定值更确定。
-4. **ffmpeg 专用计算**：`ffmpeg-static` 打进 generation-worker，子进程抽 `-vn -b:a 192k` mp3，解析时长与进度；无音轨明确失败 `video_has_no_audio_track`，不产空资产。符合 ADR-0068 专用计算边界，不引入第二套领域规则/Product API。
+4. **ffmpeg 专用计算**：`ffmpeg-static` 打包二进制，子进程抽 `-vn -b:a 192k` mp3，解析时长与进度；无音轨明确失败 `video_has_no_audio_track`，不产空资产。符合 ADR-0068 专用计算边界，不引入第二套领域规则/Product API。**构建避开 GitHub**：Docker 设 `FFMPEG_BINARIES_URL=https://registry.npmmirror.com/-/binary/ffmpeg-static`，postinstall 从 npmmirror 镜像下载二进制（国内构建 GitHub 超时）。
 5. **入参用 `source_asset_id` 而非裸 URL**：后端按资产 id 做项目归属校验，规避 SSRF 与越权。**下载走资产公网 URL**（资产 public-read，URL 来自 DB 资产记录非用户输入）——手写 TOS SigV4 预签名（`buildTosPresignedGetUrl`）对真实 TOS 返回 403（该实现从未做过真实 TOS 端到端校验），故媒体提取下载不依赖预签名。
 
 ## 被否方案
@@ -32,5 +32,5 @@
 
 - 新增一个免费媒体工具端点；`generation_jobs` 新增 `media_extract` 类型值，对恢复扫描（按 type 选）天然隔离，不影响 image/video/audio 生成路径。
 - 0 表结构迁移；`media_extract` 不进 `generation_model_capability`（非模型能力），不计入生成用量统计。
-- generation-worker 主机需打包 ffmpeg-static（约几十 MB 二进制）；提取为 CPU 密集短步骤，与视频/图片 worker 同进程隔离边界。
+- generation-worker 镜像打包 ffmpeg-static 二进制（Docker 构建设 `FFMPEG_BINARIES_URL` 从 npmmirror 镜像下载，避免 GitHub 超时）；提取为 CPU 密集短步骤，与视频/图片 worker 同进程隔离边界。
 - 前端新增「提取音频」工具栏入口与占位节点复用 `pollJob`；进度为 `progress` 百分比，阶段文案由前端按百分比派生。
