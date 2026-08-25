@@ -129,6 +129,8 @@ function execute(command, { asJson }) {
     : null;
   const stageLog = stageDirectory ? join(stageDirectory, "stages.jsonl") : null;
   const result = spawnSync(command[0], command.slice(1), {
+    // Windows 上 spawnSync 无法直接执行 .cmd/.bat（pnpm 是 pnpm.cmd），走 cmd.exe 才可解析
+    shell: process.platform === "win32",
     encoding: "utf8",
     env: stageLog
       ? { ...process.env, BW_VERIFICATION_STAGE_LOG: stageLog }
