@@ -34,10 +34,52 @@ export interface SessionContentBlock {
    */
   /** 生成卡块（分镜提示词，按 04-侧边栏规范 §5.1） */
   card?: GenerationCardBlock;
-  /** `asset_ref` 部件透传下来的字段（IKAL46）。仅身份与标签，不含任何访问材料。 */
+
+  // ---- 媒体类型扩展（image / video / audio） ----
+  /** 永久访问 URL（上传完成后获得） */
+  url?: string;
+  /** MIME 类型，如 "image/jpeg" */
+  mime?: string;
+  /** 时长秒（视频/音频） */
+  duration?: number;
+  /** 展示名/文件名 */
+  name?: string;
+  /** 画布节点 ID */
+  node_id?: string;
+  /**
+   * 资产库 ID。**有它和没它，模型看到的东西不一样**（IKAL46）。
+   *
+   * 带 `asset_id` 的块序列化成 `asset_ref` 部件，agent 据此建立 Session Asset Grant，
+   * 模型能真的读到这张图/这段视频；不带的块只能序列化成 `resource_ref`，模型拿到的是
+   * 一个占位标签。所以上传来的素材务必带上它，不要只留 `url`。
+   */
   asset_id?: string;
-  media_type?: 'image' | 'video';
+  /** 来源：card-ref 卡片参考图、card-image 商品图、card-voice 角色音色、card-generation 生成卡、node 独立节点 */
+  source?: 'card-ref' | 'card-image' | 'card-voice' | 'card-generation' | 'node';
+  /** 资源来源类型：区分从哪种卡片/节点带出的媒体数据 */
+  resource_type?:
+    | '图片'       // 独立图片节点
+    | '视频'       // 独立视频节点
+    | '音频'       // 独立音频节点
+    | '商品卡'     // 商品卡
+    | '风格卡'     // 风格卡
+    | '角色卡'     // 角色卡
+    | '物体卡'     // 物体卡
+    | '环境卡'     // 环境卡
+    | '自定义卡'   // 自定义卡
+    | '生成卡';    // 生成卡
+  /** 关联的 chip ID（用于删除 chip 时同步移除媒体数据） */
+  chip_id?: string;
+
+  // ---- 封装参数（给后端消费的统一字段） ----
+  /** 资源 ID，对应画布节点 id */
+  resource_id?: string;
+  /** 媒体类型：image / video / audio */
+  media_type?: 'image' | 'video' | 'audio';
+  /** 展示标签（对外展示的名称） */
   display_label?: string;
+  /** 资源文本描述（如商品卡的商品详情） */
+  resource_text?: string;
 }
 
 /** 生成卡里的一条素材引用（IKAFSQ）。
@@ -301,11 +343,10 @@ export function deleteSession(projectId: string, sessionId: string): Promise<unk
 
 /* ============ 消息与运行控制 ============ */
 
-/** 随消息发出的素材引用（IKAL46）。
+/** 本地上传完成、准备随消息发出的素材引用（IKAL46）。
  *
- * 这就是胶囊契约的 `asset_ref` 接口本身。`media_type` 是「这是一条完整引用」的判据——agent
- * 侧据此建立 Session Asset Grant；只给 `asset_id` 的裸引用会被原样 round-trip 但不建立授权，
- * 于是模型读不到这张图。`display_label` 是会话内可见的短标签，仅用于展示与文本投影。
+ * `media_type` 是「这是一条完整引用」的判据——agent 侧据此建立 Session Asset Grant；只给
+ * `asset_id` 的裸引用会被原样 round-trip 但不建立授权，于是模型读不到这张图。
  *
  * 这里只传身份，不传任何访问材料：签名 URL、对象键、字节都不进消息体。 */
 export interface OutboundAssetRef {
@@ -314,39 +355,124 @@ export interface OutboundAssetRef {
   display_label?: string;
 }
 
-/** 发送消息 POST /projects/:id/sessions/:sid/messages（回复经事件流 assistant.delta 下发）
- * options.forcedCreativeSkillId：一次性 Use——为该消息创建的目标 Run 强制激活该 Skill
- * （激活契约 §2：可缺省；缺省即普通消息，wire 字段名 forced_creative_skill_id）。
- * options.assets：本条消息携带的素材引用，追加为 `asset_ref` 部件（IKAL46）。
+/** 随消息发出的技能引用（胶囊契约 §3）。 */
+export interface OutboundSkillRef {
+  skill_id: string;
+  name: string;
+  /** 技能库里的分类（如「全部」）。展示用，不是契约判别字段。 */
+  type?: string;
+}
+
+/** 前端内部字段，不上线：要么是渲染态，要么是 agent 侧不认识的噪音。 */
+const TRANSPORT_STRIP_FIELDS = ['chip_id', 'name', 'type', 'mime', 'duration'] as const;
+
+/** 从 SessionContentBlock 中剔除前端内部字段，得到传给后端的纯数据 */
+function stripInternalFields(block: SessionContentBlock): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(block)) {
+    if (!TRANSPORT_STRIP_FIELDS.includes(key as typeof TRANSPORT_STRIP_FIELDS[number])) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/**
+ * 画布侧的中文资源分类 → 契约里的 `resource_type`。
  *
- * 纯附件消息（一个字不打、只带图）是合法的：`content` 里可以没有 text 部件。agent 侧会把
- * 引用投影成 `[图片：文件名]` 之类的占位符，不再以「投影为空」判定消息无效。 */
+ * 两者不是一个东西，此前被当成了一个：画布用「商品卡 / 图片 / 音频」这类中文分类做渲染分支，
+ * 契约的 `resource_type` 只有 `asset` 与 `card` 两个值，是 agent 的判别字段。中文分类照旧
+ * 随包带过去（挂在 `resource_kind` 上，agent 原样 round-trip），但判别位必须是契约那两个。
+ */
+const RESOURCE_KIND_TO_CONTRACT: Record<string, 'asset' | 'card'> = {
+  图片: 'asset',
+  视频: 'asset',
+  音频: 'asset',
+  商品卡: 'card',
+  风格卡: 'card',
+  角色卡: 'card',
+  物体卡: 'card',
+  环境卡: 'card',
+  自定义卡: 'card',
+  生成卡: 'card',
+};
+
+/**
+ * 把一个画布媒体块序列化成契约里的引用部件。
+ *
+ * 分两路，差别是**模型到底能不能读到内容**：
+ *
+ * - 有资产库身份（`asset_id` + image/video）→ `asset_ref`。agent 据此建立 Session Asset
+ *   Grant，模型经受控理解真的读到这张图。音频走不了这条路——agent 的 asset_ref 校验只认
+ *   image / video，塞 audio 进去整条消息会被 400 掉。
+ * - 其余（画布节点、各种卡）→ `resource_ref`。模型当下只看到一个占位标签，完整内容由 agent
+ *   按 id 解析（契约 §5）。
+ *
+ * 没有任何可用 id 的块直接丢掉：`resource_ref` 缺 `resource_id` 会让 agent 400，一个渲染
+ * 残块不值得把用户整条消息打掉。
+ */
+function toReferencePart(block: SessionContentBlock): Record<string, unknown> | null {
+  const rest = stripInternalFields(block);
+  if (block.asset_id && (block.media_type === 'image' || block.media_type === 'video')) {
+    return { ...rest, type: 'asset_ref', asset_id: block.asset_id, media_type: block.media_type };
+  }
+  const resourceId = block.resource_id || block.node_id || block.asset_id;
+  if (!resourceId) return null;
+  const kind = block.resource_type;
+  return {
+    ...rest,
+    type: 'resource_ref',
+    resource_type: kind ? RESOURCE_KIND_TO_CONTRACT[kind] ?? 'card' : 'asset',
+    resource_id: resourceId,
+    ...(kind ? { resource_kind: kind } : {}),
+  };
+}
+
+/** 发送消息 POST /projects/:id/sessions/:sid/messages（回复经事件流 assistant.delta 下发）
+ *
+ * **胶囊一律进 `content` 数组**，不走并列的顶层字段。这不是风格问题：agent 的
+ * `parseInboundParts` 只读 `input.content`，顶层的 `resource_ref` / `skill_ref` 会被静默
+ * 丢弃——实测过，带图带技能发过去，落库的 content 只剩那条 text；而一个字不打只带胶囊时，
+ * `content` 为空，整条消息直接 400。契约 §4 与 §5 说的就是这两件事。
+ *
+ * options.resourceRef：本条消息携带的画布媒体 / 卡片，序列化为 `asset_ref` 或 `resource_ref`
+ * 部件（见 {@link toReferencePart}）。
+ * options.skillRef：用户点选的创作套路，序列化为 `skill_ref` 部件（契约 §3）。
+ * options.forcedCreativeSkillId：同一件事的老写法（顶层 `forced_creative_skill_id`）。契约 §4
+ * 已把它标为废弃，这里仍然一起发，只为不依赖 agent 与 web 的上线先后；agent 侧以 `skill_ref`
+ * 优先。两端都发布后删掉这个参数。
+ *
+ * 纯附件消息（一个字不打、只带图）是合法的：`content` 里可以没有 text 部件，agent 会把引用
+ * 投影成 `[图片：标签]` 之类的占位符。 */
 export function sendSessionMessage(
   projectId: string,
   sessionId: string,
-  text: string,
-  options?: { forcedCreativeSkillId?: string; assets?: OutboundAssetRef[]; signal?: AbortSignal },
+  content: SessionContentBlock[],
+  options?: {
+    forcedCreativeSkillId?: string;
+    signal?: AbortSignal;
+    resourceRef?: SessionContentBlock[];
+    skillRef?: OutboundSkillRef;
+  },
 ): Promise<SessionMessageAck> {
-  const { forcedCreativeSkillId, assets, signal } = options ?? {};
-  const trimmed = text.trim();
-  const content = [
-    ...(trimmed ? [{ type: 'text', text: trimmed }] : []),
-    ...(assets ?? []).map(asset => ({
-      type: 'asset_ref',
-      asset_id: asset.asset_id,
-      media_type: asset.media_type,
-      ...(asset.display_label ? { display_label: asset.display_label } : {}),
-    })),
+  const { forcedCreativeSkillId: forcedSkillId, signal, resourceRef, skillRef } = options ?? {};
+  const parts: Record<string, unknown>[] = [
+    ...content
+      .filter(block => block.type === 'text' && (block.text ?? '').trim().length > 0)
+      .map(block => ({ type: 'text', text: (block.text ?? '').trim() })),
+    ...(resourceRef ?? []).map(toReferencePart).filter((part): part is Record<string, unknown> => part !== null),
+    ...(skillRef ? [{ type: 'skill_ref', skill_id: skillRef.skill_id, name: skillRef.name }] : []),
   ];
+  const body: Record<string, unknown> = { content: parts };
+  if (forcedSkillId) {
+    body.forced_creative_skill_id = forcedSkillId;
+  }
   return sessionRequest(
     agentPath('send_message', projectId, { session_id: sessionId }),
     {
       method: agentMethod('send_message'),
       headers: { 'Idempotency-Key': newIdempotencyKey() },
-      body: JSON.stringify({
-        content,
-        ...(forcedCreativeSkillId ? { forced_creative_skill_id: forcedCreativeSkillId } : {}),
-      }),
+      body: JSON.stringify(body),
       signal,
     },
   );

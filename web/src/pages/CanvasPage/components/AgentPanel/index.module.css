@@ -834,6 +834,55 @@
   color: var(--color-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 用户气泡中的 skill 标记（不带气泡样式，仅文字） */
+.userSkillChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 用户气泡中的媒体 chip（@卡片气泡样式，与输入框一致） */
+.userMediaChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* chip 内的 @ 符号 */
+.userMediaChipAt {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+/* 用户气泡中的文字内容 */
+.userBubble > span:last-child {
+  flex: 1 0 100%;
 }
 
 /* Agent 回复：左对齐 markdown 文本块 */
@@ -1496,34 +1545,53 @@
   opacity: 0.5;
 }
 
-/* ---- 「直接使用」技能已武装指示 ---- */
-.armedSkill {
+/* ---- 技能气泡（输入框内侧，chip 上方，比 chip 略大） ---- */
+.skillBubble {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: var(--spacing-sm);
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  color: var(--color-accent-hover);
-  background: rgba(76, 110, 245, 0.08);
-  border: 1px solid rgba(76, 110, 245, 0.35);
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  width: fit-content;
+  max-width: 100%;
 }
 
-.armedSkillClear {
+.skillBubbleIcon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.skillBubbleLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.skillBubbleRemove {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
+  width: 18px;
+  height: 18px;
   border: none;
   background: transparent;
-  color: inherit;
+  color: var(--color-text-muted);
   cursor: pointer;
-  border-radius: var(--radius-sm);
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.armedSkillClear:hover {
-  background: rgba(76, 110, 245, 0.15);
+.skillBubbleRemove:hover {
+  background: var(--color-hover);
+  color: var(--color-text-primary);
 }
 
 /* ---- 运行中无产出兜底提示 ---- */

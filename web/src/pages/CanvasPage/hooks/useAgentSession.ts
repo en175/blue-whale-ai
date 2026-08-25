@@ -26,7 +26,6 @@ import {
   type SessionContentBlock,
   type SseEvent,
   type PromptCardRecord,
-  type OutboundAssetRef,
 } from '@/api/agentSessions';
 import { cardsFromRevision } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
@@ -71,6 +70,12 @@ export interface ChatMessage {
   sourceRunId?: string;
   /** 本地乐观上屏、尚未被服务端事件确认 */
   optimistic?: boolean;
+  /** 用户消息携带的技能引用（用于气泡渲染） */
+  skill_ref?: import('@/api/agentSessions').OutboundSkillRef;
+  /** 用户消息携带的媒体资源引用（用于气泡渲染 chip） */
+  resource_ref?: import('@/api/agentSessions').SessionContentBlock[];
+  /** 输入框中 @ 的卡片气泡（与输入框展示一致，仅用于渲染） */
+  chips?: { id: string; label: string }[];
 }
 
 /**
@@ -450,7 +455,16 @@ export function useAgentSession(projectId: string) {
       for (let i = prev.length - 1; i >= 0; i--) {
         if (prev[i].optimistic && prev[i].role === 'user') {
           const next = [...prev];
-          next[i] = { id: msg.message_id, role: 'user', content, sequence_no: msg.sequence };
+          // 保留乐观消息中携带的 skill_ref、resource_ref、chips（这些字段不会从服务端返回）
+          next[i] = {
+            id: msg.message_id,
+            role: 'user',
+            content,
+            sequence_no: msg.sequence,
+            skill_ref: prev[i].skill_ref,
+            resource_ref: prev[i].resource_ref,
+            chips: prev[i].chips,
+          };
           return next;
         }
       }
@@ -1070,14 +1084,21 @@ export function useAgentSession(projectId: string) {
   /** 发送消息：乐观上屏 + POST 提交（回复经事件流 assistant.delta 投影） */
   const sendMessage = useCallback(
     async (
-      content: string,
+      content: import('@/api/agentSessions').SessionContentBlock[],
       forcedSkillId?: string,
-      assets?: OutboundAssetRef[],
+      resourceRef?: import('@/api/agentSessions').SessionContentBlock[],
+      skillName?: string,
+      userText?: string,
+      chips?: { id: string; label: string }[],
     ): Promise<boolean> => {
-      const text = content.trim();
+      const textBlocks = content
+        .filter((b) => b.type === 'text')
+        .filter((b) => (b.text ?? '').trim().length > 0);
+      // 没有显式传入就从 content 里捞非文本块，调用方少传一个参数也不会把胶囊漏掉。
+      const finalResourceRef = resourceRef ?? content.filter((b) => b.type !== 'text');
       // 纯附件消息是合法的：上传一张图、一个字不打就发，是用户对附件做的第一个动作（IKAL46）。
-      // 空文本且无附件才是真的没内容。
-      if (!text && !assets?.length) return false;
+      // 文本与胶囊都空才是真的没内容。
+      if (textBlocks.length === 0 && finalResourceRef.length === 0) return false;
       if (!projectId) return false;
       // 会话没建起来（初始化失败、或还没跑完）就当场补一个，而不是把用户堵在门外。
       let sid = sessionIdRef.current;
@@ -1097,30 +1118,22 @@ export function useAgentSession(projectId: string) {
       if (runningRef.current !== null || streamingRef.current) return false;
       const optimisticId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setSendError(null);
-      // 乐观气泡要和服务端的文本投影长得一样，否则回执一到就会「跳字」。agent 侧把引用投影成
-      // `[图片：标签]`，这里用同一套规则先渲染出来。
-      const optimisticText = [
-        ...(text ? [text] : []),
-        ...(assets ?? []).map(asset => {
-          const kind = asset.media_type === 'video' ? '视频' : '图片';
-          return asset.display_label ? `[${kind}：${asset.display_label}]` : `[${kind}]`;
-        }),
-      ].join('\n');
+      // 乐观上屏：用户侧气泡显示**用户实际输入的文字**（不含 chip prompt），胶囊各自单独渲染。
+      const skillRef = forcedSkillId ? { skill_id: forcedSkillId, name: skillName ?? '' } : undefined;
       setMessages((prev) => [
         ...prev,
         {
           id: optimisticId,
           role: 'user' as const,
-          content: optimisticText,
+          content: userText ?? '',
           // 乐观气泡也带上素材引用（IKAL46）：否则图要等服务端回执才出现，看着像「发完就没了」。
-          blocks: (assets ?? []).map((asset) => ({
-            type: 'asset_ref',
-            asset_id: asset.asset_id,
-            media_type: asset.media_type,
-            ...(asset.display_label ? { display_label: asset.display_label } : {}),
-          })),
+          // 只有 `asset_ref` 块会被 MessageAssetPreview 挑出来渲染缩略图，画布节点块由 chips 负责。
+          blocks: finalResourceRef,
           sequence_no: Number.MAX_SAFE_INTEGER,
           optimistic: true,
+          skill_ref: skillRef,
+          resource_ref: finalResourceRef.length > 0 ? finalResourceRef : undefined,
+          chips: chips && chips.length > 0 ? chips : undefined,
         },
       ]);
       streamingRef.current = true;
@@ -1129,9 +1142,10 @@ export function useAgentSession(projectId: string) {
       beginTurn();
       try {
         const connectionEpoch = connectionEpochRef.current;
-        const ack = await api.sendSessionMessage(projectId, sid, text, {
+        const ack = await api.sendSessionMessage(projectId, sid, textBlocks, {
           forcedCreativeSkillId: forcedSkillId,
-          ...(assets?.length ? { assets } : {}),
+          resourceRef: finalResourceRef,
+          skillRef,
         });
         if (connectionEpochRef.current !== connectionEpoch || sessionIdRef.current !== sid) return true;
         if (ack.message?.message_id) confirmUser(ack.message);

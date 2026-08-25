@@ -11,6 +11,7 @@ import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { type SkillRecord } from '@/api/skills';
 import { setGenHandoff } from '@/utils/gen-handoff';
+import { classifyRefOverflow } from '@/utils/ref-overflow';
 
 /** 选项卡定义 */
 const tabItems = [
@@ -93,6 +94,10 @@ const imageResolutions = [
 
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
 const MAX_VIDEOS = 3;
+
+/** 智能体 tab 附件分类型上限：视频/音频固定 3（图片随创作模型能力，见组件内 agentMaxImages） */
+const MAX_AGENT_VIDEOS = 3;
+const MAX_AGENT_AUDIO = 3;
 
 /** 输入框字数上限（与画布对话框一致） */
 const MAX_INPUT = 1000;
@@ -418,19 +423,48 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     if (text && getCurrentUser()) dispatchByTab(text);
   };
 
-  /** + 上传：点击直接选取图片/视频/音频（上限 9 个），按文件类型归类 */
+  /** + 上传：点击直接选取图片/视频/音频（分类型上限：图片随创作模型能力、视频/音频固定 3），超限按类型 toast */
   const handleAgentFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    const items = files.slice(0, Math.max(0, 9 - agentFiles.length)).map((file) => ({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      url: URL.createObjectURL(file),
-      kind: file.type.startsWith('image/')
-        ? ('image' as const)
-        : file.type.startsWith('video/')
-          ? ('video' as const)
-          : ('audio' as const),
-      name: file.name,
-    }));
+    let imgRoom = Math.max(0, agentMaxImages - agentImageCount);
+    let vidRoom = Math.max(0, MAX_AGENT_VIDEOS - agentVideoCount);
+    let audRoom = Math.max(0, MAX_AGENT_AUDIO - agentAudioCount);
+    const items = files
+      .filter((file) => {
+        if (file.type.startsWith('image/')) {
+          if (imgRoom <= 0) return false;
+          imgRoom -= 1;
+          return true;
+        }
+        if (file.type.startsWith('video/')) {
+          if (vidRoom <= 0) return false;
+          vidRoom -= 1;
+          return true;
+        }
+        if (audRoom <= 0) return false;
+        audRoom -= 1;
+        return true;
+      })
+      .map((file) => ({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        url: URL.createObjectURL(file),
+        kind: file.type.startsWith('image/')
+          ? ('image' as const)
+          : file.type.startsWith('video/')
+            ? ('video' as const)
+            : ('audio' as const),
+        name: file.name,
+      }));
+    const droppedImages =
+      files.filter((f) => f.type.startsWith('image/')).length - items.filter((i) => i.kind === 'image').length;
+    const droppedVideos =
+      files.filter((f) => f.type.startsWith('video/')).length - items.filter((i) => i.kind === 'video').length;
+    const droppedAudio =
+      files.filter((f) => !f.type.startsWith('image/') && !f.type.startsWith('video/')).length -
+      items.filter((i) => i.kind === 'audio').length;
+    if (droppedImages > 0) showToast(`附件图片最多 ${agentMaxImages} 张`);
+    else if (droppedVideos > 0) showToast(`附件视频最多 ${MAX_AGENT_VIDEOS} 个`);
+    else if (droppedAudio > 0) showToast(`附件音频最多 ${MAX_AGENT_AUDIO} 个`);
     setAgentFiles((prev) => [...prev, ...items]);
     e.target.value = '';
   };
@@ -495,6 +529,16 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
 
   // 上传上限（与画布弹窗同规则）：图片数走接口 max_reference_images（首尾帧固定 2），视频最多 3
   const selectedVideoModel = videoModelList.find((m) => m.model_id === videoModel);
+  /** 智能体 tab 附件分类型上限：图片随所选创作模型（video capability）读接口 max_reference_images，失败回退 9；视频/音频固定 3 */
+  const selectedCreationModel = videoModelList.find((m) => m.model_id === creationModel);
+  const agentMaxImages = selectedCreationModel?.features?.max_reference_images ?? 9;
+  const agentImageCount = agentFiles.filter((f) => f.kind === 'image').length;
+  const agentVideoCount = agentFiles.filter((f) => f.kind === 'video').length;
+  const agentAudioCount = agentFiles.filter((f) => f.kind === 'audio').length;
+  const agentAllFull =
+    agentImageCount >= agentMaxImages &&
+    agentVideoCount >= MAX_AGENT_VIDEOS &&
+    agentAudioCount >= MAX_AGENT_AUDIO;
   const videoRefImageCount = refFiles.filter((r) => r.file.type.startsWith('image/')).length;
   const videoRefVideoCount = refFiles.filter((r) => r.file.type.startsWith('video/')).length;
   const videoMaxImages =
@@ -529,6 +573,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
         file,
         preview: URL.createObjectURL(file),
       }));
+    const overflow = classifyRefOverflow({
+      selectedImages: files.filter((f) => f.type.startsWith('image/')).length,
+      selectedVideos: files.filter((f) => f.type.startsWith('video/')).length,
+      acceptedImages: newFiles.filter((f) => f.file.type.startsWith('image/')).length,
+      acceptedVideos: newFiles.filter((f) => f.file.type.startsWith('video/')).length,
+    });
+    if (overflow === 'image') showToast(`参考图最多 ${videoMaxImages} 张，请减少图片`);
+    else if (overflow === 'video') showToast(`参考视频最多 ${MAX_VIDEOS} 个`);
     setRefFiles((prev) => [...prev, ...newFiles]);
     // 重置 input 以便重复选择相同文件
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -543,7 +595,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     });
   };
 
-  // 处理AI图片参考文件上传（按接口上限截断）
+  // 处理AI图片参考文件上传（按接口上限截断，超限 toast）
   const handleImageRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     const remaining = Math.max(0, imageMaxImages - imageRefFiles.length);
@@ -551,6 +603,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       file,
       preview: URL.createObjectURL(file),
     }));
+    if (files.length > newFiles.length) showToast(`参考图最多 ${imageMaxImages} 张，请减少图片`);
     setImageRefFiles((prev) => [...prev, ...newFiles]);
     if (imageFileInputRef.current) imageFileInputRef.current.value = '';
   };
@@ -611,15 +664,19 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                     </span>
                   </div>
                 ))}
-                {!(videoImagesFull && videoVideosFull) && (
-                  <div
-                    className={styles.refCard}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Plus size={16} strokeWidth={2} />
-                    <span>参考</span>
-                  </div>
-                )}
+                <div
+                  className={styles.refCard}
+                  onClick={() => {
+                    if (videoImagesFull && videoVideosFull) {
+                      showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${MAX_VIDEOS} 个）`);
+                      return;
+                    }
+                    fileInputRef.current?.click();
+                  }}
+                >
+                  <Plus size={16} strokeWidth={2} />
+                  <span>参考</span>
+                </div>
               </div>
               {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
               <textarea
@@ -813,15 +870,19 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                     </span>
                   </div>
                 ))}
-                {imageRefFiles.length < imageMaxImages && (
-                  <div
-                    className={styles.refCard}
-                    onClick={() => imageFileInputRef.current?.click()}
-                  >
-                    <Plus size={16} strokeWidth={2} />
-                    <span>图片</span>
-                  </div>
-                )}
+                <div
+                  className={styles.refCard}
+                  onClick={() => {
+                    if (imageRefFiles.length >= imageMaxImages) {
+                      showToast(`参考图已到上限（${imageMaxImages} 张）`);
+                      return;
+                    }
+                    imageFileInputRef.current?.click();
+                  }}
+                >
+                  <Plus size={16} strokeWidth={2} />
+                  <span>图片</span>
+                </div>
               </div>
               {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
               <textarea
@@ -1013,7 +1074,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                 <div className={styles.uploadWrap} ref={uploadRef}>
                   <button
                     className={styles.iconBtn}
-                    onClick={() => agentFileInputRef.current?.click()}
+                    onClick={() => {
+                      if (agentAllFull) {
+                        showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${MAX_AGENT_VIDEOS} 个 / 音频 ${MAX_AGENT_AUDIO} 个）`);
+                        return;
+                      }
+                      agentFileInputRef.current?.click();
+                    }}
                     onMouseEnter={() => setShowUpload(true)}
                     onMouseLeave={() => setShowUpload(false)}
                   >

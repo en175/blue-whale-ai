@@ -637,14 +637,6 @@ const quickQuestions = [
  * 上游账单是 post-billing 才落库的，滞后从几百毫秒到十几秒都见过；此前只等 2.5 秒就放弃，
  * 于是常态是「胶囊显示 0」。总共约 23 秒，覆盖绝大多数滞后，又不会一直挂着请求。
  */
-/**
- * 判定「用户还在看最新内容」的容差（像素）。
- *
- * 取一屏的零头而不是 0：流式期间内容在长，浏览器的滚动位置与新内容之间总有几个像素的
- * 差；卡到 0 会让自动滚底在真正该生效的时候失灵。
- */
-const STICK_TO_BOTTOM_PX = 80;
-
 const CREDITS_RETRY_DELAYS = [2500, 6000, 15000] as const;
 
 /**
@@ -698,9 +690,11 @@ interface AgentPanelProps {
   appliedCardIds?: ReadonlySet<string>;
   /** 首页「直接使用」技能 → 画布导航携带的强制技能 ID：挂载后武装为下一条消息的 forced skill */
   initialSkillId?: string;
+  /** 媒体块：从画布节点「添加到对话」时携带的图片/视频/音频元数据 */
+  mediaBlocks?: import('@/api/agentSessions').SessionContentBlock[];
 }
 
-export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId }: AgentPanelProps) {
+export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, mediaBlocks: initialMediaBlocks }: AgentPanelProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供发送按钮启用态判断 */
@@ -716,6 +710,13 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 输入框内容的结构化形态：胶囊在编辑期是指针，只在发送时解引用（IKAFSX）。 */
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
   const composerHasText = !composedIsEmpty(composed);
+  /** 画布 @ 进来的媒体块（避免 effect 时序竞争，用 ref 同步管理） */
+  const pendingMediaBlocksRef = useRef<import('@/api/agentSessions').SessionContentBlock[]>([]);
+  // 同步 ref 到 state（触发 UI 重新渲染）
+  const [pendingMediaBlocksState, setPendingMediaBlocksState] = useState<import('@/api/agentSessions').SessionContentBlock[]>([]);
+  const syncMediaBlocks = () => {
+    setPendingMediaBlocksState([...pendingMediaBlocksRef.current]);
+  };
   const [selectedModel, setSelectedModel] = useState(models[0].key);
   const [modelOpen, setModelOpen] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -814,6 +815,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 外部注入 @ 引用/生成卡：仅在版本真正变化时触发一次；生成卡追加胶囊（可多次叠加），普通引用整体替换文本
    * ref 记录已处理的 version，防 StrictMode 开发态 effect 双调用导致重复插入 */
   const lastInputVersionRef = useRef(0);
+  /** 上一次 composed 中的 chip IDs（用于检测 chip 是否被删除） */
+  const prevChipIdsRef = useRef<Set<string>>(new Set());
+  
   useEffect(() => {
     if (!inputVersion || inputVersion === lastInputVersionRef.current) return;
     lastInputVersionRef.current = inputVersion;
@@ -826,8 +830,38 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     } else {
       chipEditorRef.current?.setText(initialInput ?? '');
     }
+    // 注入媒体块到 ref
+    console.log('[AgentPanel] 注入媒体块:', initialMediaBlocks?.length, 'blocks', initialMediaBlocks);
+    if (initialMediaBlocks && initialMediaBlocks.length > 0) {
+      pendingMediaBlocksRef.current = [...pendingMediaBlocksRef.current, ...initialMediaBlocks];
+      syncMediaBlocks();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputVersion]);
+
+  /** chip 与媒体块双向同步：仅当 chip 被删除时才过滤对应 blocks（输入文字不触发） */
+  useEffect(() => {
+    const chipIds = new Set(
+      composed.segments
+        .filter((s): s is { kind: 'ref'; ref: { id: string; label: string; prompt: string } } => s.kind === 'ref')
+        .map((s) => s.ref.id),
+    );
+    
+    // 检测是否有 chip 被删除（对比上一次的 chip IDs）
+    const prevIds = prevChipIdsRef.current;
+    const chipsRemoved = [...prevIds].some((id) => !chipIds.has(id));
+    
+    if (chipsRemoved && pendingMediaBlocksRef.current.length > 0) {
+      // 有 chip 被删除 → 过滤对应的 blocks
+      const filtered = pendingMediaBlocksRef.current.filter((b) => !b.chip_id || chipIds.has(b.chip_id));
+      pendingMediaBlocksRef.current = filtered;
+      syncMediaBlocks();
+      console.log('[AgentPanel] chip 删除同步, 剩余 blocks:', filtered.length);
+    }
+    
+    // 更新记录
+    prevChipIdsRef.current = chipIds;
+  }, [composed]);
 
   /** 首页「直接使用」技能导航进来：武装为下一条消息的强制技能（StrictMode 双挂载只武装一次） */
   const lastSkillIdRef = useRef('');
@@ -892,19 +926,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   }, [cancellable, stopRun]);
 
   /**
-   * 新消息 / 流式文本自动滚到底部——**但用户已经往上翻了就别拽他回来**（审查 W·A26）。
-   *
-   * 依赖里有 `streamingText`，而它每来一个 delta 就变一次。此前这里是无条件赋值，于是
-   * 流式期间想回看上文，每秒被拽回底部好几次，等于回看不了。
-   *
-   * 判据是「离底部还有多远」而不是一个显式的『用户滚动过』标志：后者要挂 scroll 监听、
-   * 要分辨程序滚动与人手滚动，而这里真正要问的问题只有一个——他还在看最新的内容吗。
+   * 新消息 / 流式文本 / 进入页面：滚动条始终拉到最底部，展示最新消息。
    */
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distanceFromBottom > STICK_TO_BOTTOM_PX) return;
     el.scrollTop = el.scrollHeight;
   }, [messages, streamingText, runningRunId]);
 
@@ -1083,7 +1109,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 使用推荐技能：标记已激活，并把技能意图追加为一条消息提交给 Agent（顺带清掉「直接使用」武装，避免双技能叠加） */
   const handleUseSkill = async (r: RunSkillRecommendation) => {
     if (usedSkillIds.has(r.creative_skill_id) || runningRunId !== null || streaming) return;
-    const accepted = await sendMessage(`使用「${r.name}」技能继续创作`, r.creative_skill_id);
+    const accepted = await sendMessage([{ type: 'text', text: `使用「${r.name}」技能继续创作` }], r.creative_skill_id, undefined, r.name, `使用「${r.name}」技能继续创作`);
     if (!accepted) return;
     setUsedSkillIds((prev) => new Set(prev).add(r.creative_skill_id));
     setForcedSkill(null);
@@ -1100,23 +1126,58 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   );
 
   /** 能不能发：有文字、或有已就绪的附件；上传途中一律挡住（IKAL46）。 */
-  const canSend = (composerHasText || readyAssets.length > 0) && !uploadingAttachment;
+  const canSend =
+    (composerHasText || readyAssets.length > 0 || pendingMediaBlocksState.length > 0) && !uploadingAttachment;
 
   const handleSend = async () => {
-    const content = resolveComposed(composed).trim();
+    const fullText = resolveComposed(composed).trim();
+    // 胶囊有两个来源，发送时必须合成一条序列：画布 @ 进来的节点/卡片，和本地上传的素材。
+    // 后者带资产库身份，序列化成 `asset_ref`（agent 会建 Grant，模型真读得到）；前者只有
+    // 画布 id，序列化成 `resource_ref`（模型先看到占位标签）。见 agentSessions.toReferencePart。
+    const uploadedBlocks: import('@/api/agentSessions').SessionContentBlock[] = readyAssets.map((asset) => ({
+      type: 'asset_ref',
+      asset_id: asset.asset_id,
+      media_type: asset.media_type,
+      ...(asset.display_label ? { display_label: asset.display_label } : {}),
+    }));
+    const mediaBlocks = [...pendingMediaBlocksRef.current, ...uploadedBlocks];
     // 只带附件、一个字不打也能发（IKAL46）：这是用户对附件做的第一个动作。
-    if ((!content && readyAssets.length === 0) || uploadingAttachment) return;
+    if (!fullText && mediaBlocks.length === 0) return;
+    if (uploadingAttachment) return;
     if (runningRunId !== null || streaming) return;
+
+    // 从 composed 中提取用户输入的纯文字（不含 chip prompt）
+    const userText = composed.segments
+      .filter((s) => s.kind === 'text')
+      .map((s) => s.value)
+      .join('')
+      .trim();
+
+    // 从 composed 中提取 @ 卡片气泡（与输入框展示一致）
+    const chips = composed.segments
+      .filter((s) => s.kind === 'ref')
+      .map((s) => ({ id: s.ref.id, label: s.ref.label }));
+
+    // content 只放用户实际输入的文字；胶囊由 resourceRef 那一路序列化成部件
+    const textContent: import('@/api/agentSessions').SessionContentBlock[] = [];
+    if (userText) {
+      textContent.push({ type: 'text', text: userText });
+    }
+
     // 先清空再发。等 POST 回来才清，用户已经看到自己的气泡上屏、输入框里原文却还在，
     // 极易重复点发送。失败时把原文回填，一个字都不丢。
     chipEditorRef.current?.clear();
+    pendingMediaBlocksRef.current = [];
+    syncMediaBlocks();
     const armed = forcedSkill;
     const sentAttachments = attachments;
     setForcedSkill(null);
     setAttachments([]);
-    const accepted = await sendMessage(content, armed?.id, readyAssets);
+    const accepted = await sendMessage(textContent, armed?.id, mediaBlocks, armed?.name, userText, chips);
     if (!accepted) {
-      chipEditorRef.current?.setText(content);
+      chipEditorRef.current?.setText(userText);
+      pendingMediaBlocksRef.current = [...mediaBlocks];
+      syncMediaBlocks();
       setForcedSkill(armed);
       // 附件一并回填：重传一次的代价远大于把已经拿到的 asset_id 留在手上。
       setAttachments(sentAttachments);
@@ -1377,10 +1438,25 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           {messages.map((m) =>
             m.role === 'user' ? (
               <div key={m.id} className={styles.userBubble}>
-                  {m.content}
-                  {/* 素材引用的临时渲染（IKAL46）：胶囊到位后删掉 MessageAssetPreview 这一处即可。 */}
-                  <MessageAssetPreview blocks={m.blocks} />
-                </div>
+                {/* Skill 标记（无气泡，仅文字+图标） */}
+                {m.skill_ref && (
+                  <div className={styles.userSkillChip}>
+                    <BookText size={13} strokeWidth={2} />
+                    <span>{m.skill_ref.name}</span>
+                  </div>
+                )}
+                {/* @卡片气泡（与输入框中的气泡一致） */}
+                {m.chips?.map((c) => (
+                  <div key={`chip-${c.id}`} className={styles.userMediaChip}>
+                    <span className={styles.userMediaChipAt}>@</span>
+                    <span>{c.label}</span>
+                  </div>
+                ))}
+                {/* 文字内容 */}
+                {m.content && <span>{m.content}</span>}
+                {/* 上传素材的临时渲染（IKAL46）：统一胶囊组件到位后删掉 MessageAssetPreview 即可。 */}
+                <MessageAssetPreview blocks={m.blocks} />
+              </div>
             ) : (
               <div key={m.id} className={styles.assistantBlock}>
                 <AssistantMessageBody
@@ -1467,19 +1543,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           outcome={turnOutcome}
           streamedText={streamingText}
         />
-        {forcedSkill && (
-          <div className={styles.armedSkill}>
-            <span>技能「{forcedSkill.name}」已就绪，发送后生效</span>
-            <button
-              type="button"
-              className={styles.armedSkillClear}
-              onClick={() => setForcedSkill(null)}
-              title="取消技能"
-            >
-              <X size={12} strokeWidth={2} />
-            </button>
-          </div>
-        )}
         {chatError && <div className={styles.chatErrorHint}>{chatError}</div>}
         {sendError && <div className={styles.chatErrorHint}>{sendError}</div>}
         {paymentRequiredMessage && <div className={styles.chatErrorHint}>{paymentRequiredMessage}</div>}
@@ -1489,6 +1552,22 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         {/* data-agent-composer：ESC 判定用它把主输入框从「可编辑区域一律让路」里挑出来，
             主输入框是 Lexical 的 contentEditable，而发送后焦点通常正停在这里。 */}
         <div className={styles.inputBox} data-agent-composer>
+          {/* 技能气泡：位于输入框内侧，chip 上方 */}
+          {forcedSkill && (
+            <div className={styles.skillBubble}>
+              <BookText size={13} strokeWidth={2} className={styles.skillBubbleIcon} />
+              <span className={styles.skillBubbleLabel}>{forcedSkill.name}</span>
+              <button
+                type="button"
+                className={styles.skillBubbleRemove}
+                onClick={() => setForcedSkill(null)}
+                title="取消技能"
+              >
+                <X size={12} strokeWidth={2} />
+              </button>
+            </div>
+          )}
+
           {/* 这一层负责把编辑区撑到工具栏上沿：ChipTextEditor 自己的 wrapper 是 block，
            *  撑高的责任只能落在它外面。见 .composerSlot。 */}
           {/* 待发素材（IKAL46）。刻意保持纯文本行：胶囊组件由专门的前端同学交付，
