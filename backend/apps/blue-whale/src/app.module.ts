@@ -22,6 +22,7 @@ import { TopupTierModule } from "@lib/shared/topup-tier/topup-tier.module.js";
 import { AccountApiModule } from "./api/account/account.module.js";
 import { AdminModule } from "./api/admin/admin.module.js";
 import { AgentAssetsModule } from "./api/agent-assets/agent-assets.module.js";
+import { AgentSkillsModule } from "./api/agent-skills/agent-skills.module.js";
 import { AssetsApiModule } from "./api/assets/assets.module.js";
 import { AuthModule } from "./api/auth/auth.module.js";
 import { CanvasApiModule } from "./api/canvases/canvases.module.js";
@@ -62,6 +63,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     AccountApiModule,
     AssetsApiModule,
     AgentAssetsModule,
+    AgentSkillsModule,
     GenerationApiModule,
     RechargeModule,
     UsageModule,

@@ -27,6 +27,11 @@ export class SkillService {
     return this.repo.getOfficialContent(creativeId);
   }
 
+  /** Agent 按 creative_skill_id 解析一条可用技能（IKALMC / IKAP6P）：官方 + 名下个人。 */
+  findAgentSkill(creativeSkillId: string, requestingUserId: string) {
+    return this.repo.findAgentSkill(creativeSkillId, requestingUserId);
+  }
+
   listMine(
     userId: string,
     filter: Parameters<ReturnType<typeof createSkillRepo>["listMine"]>[1],

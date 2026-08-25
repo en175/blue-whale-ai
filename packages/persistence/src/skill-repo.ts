@@ -142,6 +142,37 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
       return ver?.body ?? null;
     },
 
+    async findAgentSkill(creativeSkillId, requestingUserId) {
+      try {
+        const rows = await prisma.$queryRawUnsafe<
+          {
+            creative_skill_id: string;
+            name: string;
+            description: string | null;
+            asset_domain: string;
+            body: string;
+          }[]
+        >(
+          // 优先 active version，没有 active 指针时退到最新一版——个人技能建出来时
+          // active_version_id 可能还没回填（同 findPersonalContent 的取法）。
+          `SELECT cs.creative_skill_id, cs.name, cs.description, cs.asset_domain, v.body
+             FROM creative_skill cs
+             JOIN creative_skill_version v ON v.creative_skill_id = cs.creative_skill_id
+            WHERE cs.creative_skill_id = ?
+              AND (cs.asset_domain = 'official'
+                   OR (cs.asset_domain = 'personal' AND cs.owner_user_id = ?))
+            ORDER BY (v.creative_skill_version_id = cs.active_version_id) DESC, v.id DESC
+            LIMIT 1`,
+          creativeSkillId,
+          BigInt(requestingUserId),
+        );
+        return rows[0] ?? null;
+      } catch {
+        // 读路径容错，与本文件其余读方法一致：解析不到就是没有，不阻塞产卡主路径。
+        return null;
+      }
+    },
+
     async listMine(userId, q) {
       // 官方引用全量（按 user_skill.gmt_create desc），合并个人技能后统一按时间倒序、内存切片分页。
       const rels = await prisma.user_skill.findMany({
