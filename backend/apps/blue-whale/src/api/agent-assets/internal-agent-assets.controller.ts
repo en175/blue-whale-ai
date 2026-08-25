@@ -69,7 +69,7 @@ export class InternalAgentAssetsController {
       {
         findAccessible: (ownerProjectId, assetId, ownerUserId) =>
           this.assets.findAccessible(ownerProjectId, assetId, ownerUserId),
-        sign: storageKey => signer.sign(storageKey),
+        sign: (storageKey, options) => signer.sign(storageKey, options),
       },
     );
     if (outcome.kind === "ok") return outcome.value;
