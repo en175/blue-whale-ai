@@ -95,9 +95,6 @@ const imageResolutions = [
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
 const MAX_VIDEOS = 3;
 
-/** 视频智能体 tab 附件最大上传数量（图片/视频/音频混合，接口未下发，前端统一 9） */
-const MAX_AGENT_FILES = 9;
-
 /** 输入框字数上限（与画布对话框一致） */
 const MAX_INPUT = 1000;
 
@@ -422,10 +419,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     if (text && getCurrentUser()) dispatchByTab(text);
   };
 
-  /** + 上传：点击直接选取图片/视频/音频（上限 MAX_AGENT_FILES 个），按文件类型归类；超限 toast */
+  /** + 上传：点击直接选取图片/视频/音频（上限 agentMaxFiles 个，随创作模型能力），按文件类型归类；超限 toast */
   const handleAgentFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    const items = files.slice(0, Math.max(0, MAX_AGENT_FILES - agentFiles.length)).map((file) => ({
+    const items = files.slice(0, Math.max(0, agentMaxFiles - agentFiles.length)).map((file) => ({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       url: URL.createObjectURL(file),
       kind: file.type.startsWith('image/')
@@ -435,7 +432,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
           : ('audio' as const),
       name: file.name,
     }));
-    if (files.length > items.length) showToast(`附件最多 ${MAX_AGENT_FILES} 个`);
+    if (files.length > items.length) showToast(`附件最多 ${agentMaxFiles} 个`);
     setAgentFiles((prev) => [...prev, ...items]);
     e.target.value = '';
   };
@@ -500,6 +497,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
 
   // 上传上限（与画布弹窗同规则）：图片数走接口 max_reference_images（首尾帧固定 2），视频最多 3
   const selectedVideoModel = videoModelList.find((m) => m.model_id === videoModel);
+  /** 智能体 tab 附件上限：随所选创作模型（video capability）读接口 max_reference_images，失败回退 9 */
+  const selectedCreationModel = videoModelList.find((m) => m.model_id === creationModel);
+  const agentMaxFiles = selectedCreationModel?.features?.max_reference_images ?? 9;
   const videoRefImageCount = refFiles.filter((r) => r.file.type.startsWith('image/')).length;
   const videoRefVideoCount = refFiles.filter((r) => r.file.type.startsWith('video/')).length;
   const videoMaxImages =
@@ -1036,8 +1036,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                   <button
                     className={styles.iconBtn}
                     onClick={() => {
-                      if (agentFiles.length >= MAX_AGENT_FILES) {
-                        showToast(`附件已到上限（${MAX_AGENT_FILES} 个）`);
+                      if (agentFiles.length >= agentMaxFiles) {
+                        showToast(`附件已到上限（${agentMaxFiles} 个）`);
                         return;
                       }
                       agentFileInputRef.current?.click();
