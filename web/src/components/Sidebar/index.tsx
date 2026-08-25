@@ -12,7 +12,7 @@ import styles from './index.module.css';
 const menuItems = [
   { key: 'home', label: '首页', icon: Home, path: '/' },
   { key: 'projects', label: '项目', icon: FolderOpen, path: '/projects' },
-  { key: 'assets', label: '资产', icon: Image, path: '/assets' },
+  { key: 'assets', label: '资产', icon: Image, path: '/library' },
   { key: 'canvas', label: '画布', icon: Layout, path: '/canvas' },
 ];
 
