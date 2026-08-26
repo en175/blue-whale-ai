@@ -1,0 +1,6 @@
+interface:
+  display_name: "Frontend delivery"
+  short_description: "Explicit frontend bugfix delivery workflow"
+  default_prompt: "Use $frontend-delivery to handle this frontend Bugfix Issue."
+policy:
+  allow_implicit_invocation: false
