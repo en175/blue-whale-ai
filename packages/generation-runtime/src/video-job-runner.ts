@@ -632,7 +632,7 @@ function uniqueAssetIds(ids: Array<string | null>): string[] {
   }, []);
 }
 
-const MATERIAL_ID_PATTERN = /^Asset-.{1,128}$/;
+const MATERIAL_ID_PATTERN = /^[Aa]sset-.{1,128}$/;
 
 function readMaterialId(value: unknown): string | null {
   if (value === undefined || value === null) return null;

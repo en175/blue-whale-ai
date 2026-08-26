@@ -115,7 +115,7 @@
 ```json
 { "GroupId": "group-xxx", "URL": "https://....jpg", "Name": "素材1", "AssetType": "Image" }
 ```
-`Result`：`{ "Id": "Asset-..." }`。素材创建后**异步注册**，状态见 `GetAsset`/`ListAssets`。
+`Result`：`{ "Id": "asset-..." }`。素材创建后**异步注册**，状态见 `GetAsset`/`ListAssets`。
 
 > **前端上传分离两段**：先走既有 Asset 上传管道拿到公网 URL，再 `CreateAsset` 传该 URL；**不要**把本地文件直接发这里。
 
@@ -138,7 +138,7 @@
 ### 3.3 获取素材详情 `GetAsset`
 
 ```json
-{ "Id": "Asset-xxx" }
+{ "Id": "asset-xxx" }
 ```
 `Result`：素材完整信息（含 `Status`、`URL`、`Error.Code` / `Error.Message`）。
 
@@ -150,13 +150,13 @@
 | Name | string | 否（新名称） |
 
 ```json
-{ "Id": "Asset-xxx", "Name": "新名称" }
+{ "Id": "asset-xxx", "Name": "新名称" }
 ```
 
 ### 3.5 删除素材 `DeleteAsset`
 
 ```json
-{ "Id": "Asset-xxx" }
+{ "Id": "asset-xxx" }
 ```
 `Result`：空对象 `{}`。
 
@@ -220,9 +220,9 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| first_frame_material_id | string | 首帧素材库素材 id（`Asset-` 前缀） |
-| last_frame_material_id | string | 尾帧素材库素材 id（`Asset-` 前缀），必须与首帧同用 |
-| reference_materials | object[] | 普通参考素材：`[{ id: "Asset-...", type: "image" \| "video" }]` |
+| first_frame_material_id | string | 首帧素材库素材 id（`asset-` 前缀） |
+| last_frame_material_id | string | 尾帧素材库素材 id（`asset-` 前缀），必须与首帧同用 |
+| reference_materials | object[] | 普通参考素材：`[{ id: "asset-...", type: "image" \| "video" }]` |
 
 ```json
 {
@@ -230,19 +230,19 @@
   "parameters": { "prompt": "...", "model_id": "seedance-2", "aspect_ratio": "16:9",
                   "resolution": "720p", "duration": 8 },
   "reference_materials": [
-    { "id": "Asset-xxx", "type": "image" },
-    { "id": "Asset-yyy", "type": "video" }
+    { "id": "asset-xxx", "type": "image" },
+    { "id": "asset-yyy", "type": "video" }
   ]
 }
 ```
 
 **规则**：
 - 仅 `type:"video"`；图片/音频生成带素材库引用 → 失败。
-- id 仅做格式校验（`Asset-` 前缀、1-128 字符）；**存在性/状态/物理约束由上游强校验**，异步翻译失败。
+- id 仅做格式校验（`asset-` 前缀、1-128 字符）；**存在性/状态/物理约束由上游强校验**，异步翻译失败。
 - 素材库首帧/尾帧与**本地 Asset** 首尾帧/参考按**并集互斥**：帧（任一类）不能与普通参考并存；同一帧位 asset 与 material 只能二选一；尾帧必须与首帧同用。
 - `reference_materials` 计数上限 12；细分上限（图≤9/视频≤3）由执行端校验。
 
-> **`asset://` 双义隔离**：素材库引用在生成时由 Worker 转成 `asset://<素材ID>` 载体交给火山，与画布内部 mention 协议的 `asset://<mention_id>` **互不串用**。前端只需传素材库 id（`Asset-` 前缀），无需关心 `asset://` 组装。
+> **`asset://` 双义隔离**：素材库引用在生成时由 Worker 转成 `asset://<素材ID>` 载体交给火山，与画布内部 mention 协议的 `asset://<mention_id>` **互不串用**。前端只需传素材库 id（`asset-` 前缀），无需关心 `asset://` 组装。
 
 ---
 
@@ -295,7 +295,7 @@
 4. **URL 公网可达**：素材 URL 必须公网可访问；否则注册失败。
 5. **两段式上传**：先 Asset 管道拿公网 URL，再 `CreateAsset`。
 6. **CallbackURL 勿传**：真人会话 `CallbackURL` 由后端剥离，前端不接收回调。
-7. **账号维度隔离**：素材库按登录账号隔离；`Asset-` id 仅在**同一账号**下对生成任务有效。
+7. **账号维度隔离**：素材库按登录账号隔离；`asset-` id 仅在**同一账号**下对生成任务有效。
 8. **零本地表**：素材库无本地镜像，前端列表/详情状态全部以素材库接口为准。
 
 ---
@@ -304,12 +304,12 @@
 
 **虚拟人像 → 生成**：
 1. `ListAssetGroups(GroupType:"AIGC")` 找到/`CreateAssetGroup` 建虚拟素材组 → 得 `group-...`
-2. 已有公网图 URL → `CreateAsset(GroupId, URL, Name, AssetType:"Image")` → 得 `Asset-...`
-3. `ListAssets/GetAsset` 轮询该 `Asset-...` 到 `Status:"Active"`
-4. `POST /api/projects/:projectId/generation-jobs`（视频）带 `reference_materials:[{id:"Asset-...", type:"image"}]` 或首帧 `first_frame_material_id`
+2. 已有公网图 URL → `CreateAsset(GroupId, URL, Name, AssetType:"Image")` → 得 `asset-...`
+3. `ListAssets/GetAsset` 轮询该 `asset-...` 到 `Status:"Active"`
+4. `POST /api/projects/:projectId/generation-jobs`（视频）带 `reference_materials:[{id:"asset-...", type:"image"}]` 或首帧 `first_frame_material_id`
 
 **真人素材 → 生成**：
 1. `CreateVisualValidateSession` → `H5Link` + `BytedToken`
 2. 真人刷脸 → 轮询 `GetVisualValidateResult(BytedToken)` 到 `GroupId` 非空
 3. `CreateAsset(GroupId, URL, ..., AssetType:"Image")`
-4. （同虚拟人像）视频生成任务引用该 `Asset-...`
+4. （同虚拟人像）视频生成任务引用该 `asset-...`
