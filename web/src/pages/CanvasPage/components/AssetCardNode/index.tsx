@@ -27,6 +27,9 @@ const KIND_META: Record<AssetCardKind, { title: string; placeholder: string }> =
 /** 临时隐藏：资产卡（风格/角色/物体/环境/自定义）顶部 @ 操作条，会后恢复（改回 false） */
 const HIDE_ASSET_TOP_BAR = false;
 
+/** React Flow 约定：节点内滚动容器加此类，滚轮只滚内容、不触发画布缩放 */
+const NOWHEEL = 'nowheel';
+
 /** Agent 生成卡数据（kind=generation 时承载，落画布后从节点选引用）
  * 字段复用会话层的 GenerationCardBlock（唯一形状定义），此处只加节点专属的回调；
  * 各字段仍是 Partial——节点可能由旧数据/后端水合出不完整的卡 */
@@ -355,8 +358,9 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
           style={isSelect || isGeneration ? undefined : { pointerEvents: 'none' }}
         >
           {isGeneration && data.generationCard ? (
-            /* Agent 生成卡落画布形态：展示卡内容 + 引用到 dock / 给 Agent */
-            <div className={styles.body}>
+            /* Agent 生成卡落画布形态：展示卡内容 + 引用到 dock / 给 Agent。
+               nowheel：卡内滚轮不交给 React Flow 做画布缩放（IKBAAH） */
+            <div className={`${styles.body} ${NOWHEEL}`} onWheel={(e) => e.stopPropagation()}>
               <div className={styles.gcHeader}>
                 {editingField === 'shotTitle' ? (
                   <input
@@ -392,7 +396,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
                   <span className={styles.gcLabel}>画面</span>
                   <textarea
                     ref={autoResizeTextarea}
-                    className={`${styles.gcEditTextarea} nodrag`}
+                    className={`${styles.gcEditTextarea} nodrag ${NOWHEEL}`}
                     value={draftValue}
                     autoFocus
                     rows={1}
@@ -415,7 +419,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
                   <div className={styles.gcField}>
                     <span className={styles.gcLabel}>画面</span>
                     <span
-                      className={styles.gcValue}
+                      className={`${styles.gcValue} ${NOWHEEL}`}
                       title="双击编辑"
                       onDoubleClick={(e) => {
                         e.stopPropagation();
@@ -432,7 +436,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
                   <span className={styles.gcLabel}>提示词</span>
                   <textarea
                     ref={autoResizeTextarea}
-                    className={`${styles.gcEditTextarea} nodrag`}
+                    className={`${styles.gcEditTextarea} nodrag ${NOWHEEL}`}
                     value={draftValue}
                     autoFocus
                     rows={1}
@@ -455,7 +459,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
                   <div className={styles.gcField}>
                     <span className={styles.gcLabel}>提示词</span>
                     <span
-                      className={styles.gcValue}
+                      className={`${styles.gcValue} ${NOWHEEL}`}
                       title="双击编辑"
                       onDoubleClick={(e) => {
                         e.stopPropagation();

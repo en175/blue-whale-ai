@@ -423,7 +423,7 @@
   line-height: 1.6;
   font-family: inherit;
   resize: none;
-  overflow: hidden;
+  overflow-y: auto;
   outline: none;
 }
 
