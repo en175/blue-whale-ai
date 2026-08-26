@@ -528,4 +528,37 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
     expect(result.msg).toBe("参考素材库引用无效");
     expect(createJob).not.toHaveBeenCalled();
   });
+
+  it("素材库引用小写 asset- 前缀（上游真实格式）→ 200", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        reference_materials: [{ id: "asset-20260820153209-6c9z8", type: "image" }],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.reference_materials).toEqual([
+      { id: "asset-20260820153209-6c9z8", type: "image" },
+    ]);
+  });
+
+  it("素材库首帧小写 asset- 前缀 → 200，input 落小写", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, first_frame_material_id: "asset-face-1" },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.first_frame_material_id).toBe("asset-face-1");
+  });
 });
