@@ -576,36 +576,30 @@ function blockKey(block: SessionContentBlock, ordinals: Record<string, number>):
  * 一轮一条动作行（IKB93G）：常驻在对话流里、可展开，把「它在做」从「它在想」（ThinkingBlock）
  * 里拿出来。数据是服务端的按轮台账（IKB926），刷新后随消息部件回来，不是内存态。
  *
- * 支点：**零调用 + 需求阶段渲染成警示态**。「没调用」和「调用了但很快」在界面上必须长得
- * 不一样——IKB89I 那次 13 秒静默轮就是这行要检出的对象。零调用且不在需求阶段的闲聊轮
- * 不渲染：一行「什么都没做」在那儿只是噪声。
+ * **只有真调了工具的轮次才渲染**（2026-08-26 真机裁定）：网格追问轮本来就零调用，给每一轮
+ * 亮警示是把正常当异常——用户一屏黄色。零调用记录仍然完整落库，那是运维的检出原语，不是
+ * 用户的。失败/被拒的动作渲染警示态：产卡被门拒不再只是「卡了一下」。
+ *
+ * 「还差 N 项」不展示（record 里仍带）：计数来自需求理解版本表，而落库靠观察者攒够 token
+ * 才触发，短问答轮会滞后好几轮——一个几轮不动的数字比没有数字更糟。
  */
 function ActionRow({ record }: { record: NonNullable<SessionContentBlock['run_actions']> }) {
   const [open, setOpen] = useState(false);
-  const zeroCall = record.actions.length === 0;
-  if (zeroCall && !record.requirement_stage) return null;
+  if (record.actions.length === 0) return null;
   const seconds = (ms: number) => (ms >= 100 ? `${(ms / 1000).toFixed(1)}s` : '');
-  const outstanding =
-    record.requirement_stage && record.outstanding_count != null && record.outstanding_count > 0
-      ? `还差 ${record.outstanding_count} 项`
-      : '';
-  const summary = zeroCall
-    ? ['本轮未调用工具', outstanding].filter(Boolean).join(' · ')
-    : [...record.actions.map((a) => a.summary.replace(/^正在/, '')), outstanding].filter(Boolean).join(' · ');
+  const summary = record.actions.map((a) => a.summary.replace(/^正在/, '')).join(' · ');
   const failed = record.actions.some((a) => a.status !== 'ok');
-  const warn = zeroCall || failed;
   const statusLabel = { ok: '', failed: '失败', rejected: '被拒' } as const;
   return (
-    <div className={`${styles.actionRow} ${warn ? styles.actionRowWarn : ''}`}>
+    <div className={`${styles.actionRow} ${failed ? styles.actionRowWarn : ''}`}>
       <button type="button" className={styles.actionRowHead} onClick={() => setOpen(!open)} aria-expanded={open}>
-        {warn ? <AlertTriangle size={12} strokeWidth={2.5} /> : <Cog size={12} strokeWidth={2.5} />}
+        {failed ? <AlertTriangle size={12} strokeWidth={2.5} /> : <Cog size={12} strokeWidth={2.5} />}
         <span className={styles.actionRowSummary}>{summary}</span>
         <span className={styles.actionRowMs}>{seconds(record.total_ms)}</span>
         {open ? <ChevronUp size={12} strokeWidth={2.5} /> : <ChevronDown size={12} strokeWidth={2.5} />}
       </button>
       {open && (
         <div className={styles.actionRowBody}>
-          {zeroCall && <div className={styles.actionRowItem}>这一轮没有调用任何工具。</div>}
           {record.actions.map((a, i) => (
             <div key={i}>
               <div className={styles.actionRowItem}>
@@ -623,7 +617,6 @@ function ActionRow({ record }: { record: NonNullable<SessionContentBlock['run_ac
               ))}
             </div>
           ))}
-          {outstanding && <div className={styles.actionRowItem}>{`需求收集中，${outstanding}`}</div>}
         </div>
       )}
     </div>
