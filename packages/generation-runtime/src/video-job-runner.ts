@@ -43,6 +43,16 @@ export type VideoReference = {
   url: string;
 };
 
+/**
+ * 素材库引用（MaterialReference）：视频生成输入里对上游素材库素材的引用。
+ * 零本地落表：类型由调用方在创建任务时声明，Worker 只做格式校验并转成
+ * `asset://<素材ID>` 载体交给网关；存在性/状态/物理约束由上游强校验。
+ */
+export type MaterialReference = {
+  id: string;
+  type: "image" | "video";
+};
+
 export type StoredVideo = {
   url: string;
   storageKey: string | null;
@@ -352,10 +362,26 @@ async function buildSubmitRequest(
   const firstFrameAssetId = readAssetId(claim.input.first_frame_asset_id);
   const lastFrameAssetId = readAssetId(claim.input.last_frame_asset_id);
   const referenceAssetIds = uniqueAssetIds(readAssetIds(claim.input.reference_asset_ids));
-  if (lastFrameAssetId && !firstFrameAssetId) {
+  // 素材库引用：零本地表、不进 resolveInputAssets；模式互斥/尾帧配对与本地 Asset 按并集计算。
+  const firstFrameMaterialId = readMaterialId(claim.input.first_frame_material_id);
+  const lastFrameMaterialId = readMaterialId(claim.input.last_frame_material_id);
+  const referenceMaterials = uniqueMaterialRefs(
+    readMaterialRefs(claim.input.reference_materials),
+  );
+  if (firstFrameAssetId !== null && firstFrameMaterialId !== null) {
+    throw new VideoInputError("invalid_video_inputs", "首帧只能指定一个来源");
+  }
+  if (lastFrameAssetId !== null && lastFrameMaterialId !== null) {
+    throw new VideoInputError("invalid_video_inputs", "尾帧只能指定一个来源");
+  }
+  const hasFirstFrame = firstFrameAssetId !== null || firstFrameMaterialId !== null;
+  const hasLastFrame = lastFrameAssetId !== null || lastFrameMaterialId !== null;
+  const hasReferences =
+    referenceAssetIds.length > 0 || referenceMaterials.length > 0;
+  if (hasLastFrame && !hasFirstFrame) {
     throw new VideoInputError("invalid_video_inputs", "尾帧必须与首帧一起使用");
   }
-  if ((firstFrameAssetId || lastFrameAssetId) && referenceAssetIds.length > 0) {
+  if ((hasFirstFrame || hasLastFrame) && hasReferences) {
     throw new VideoInputError(
       "invalid_video_inputs",
       "首尾帧模式不能与普通参考素材混用",
@@ -396,7 +422,7 @@ async function buildSubmitRequest(
     }
     return asset;
   });
-  const references = validateReferences(model, referenceAssets);
+  const references = validateReferences(model, referenceAssets, referenceMaterials);
   const resolution =
     typeof claim.input.resolution === "string"
       ? claim.input.resolution
@@ -410,6 +436,14 @@ async function buildSubmitRequest(
         ? params.aspect_ratio
         : "";
 
+  // 帧来源二选一：本地 Asset 解析出的 TOS URL，或素材库 asset:// URI（火山原生载体）。
+  const firstFrameImage =
+    firstFrame?.url ??
+    (firstFrameMaterialId !== null ? `asset://${firstFrameMaterialId}` : undefined);
+  const lastFrameImage =
+    lastFrame?.url ??
+    (lastFrameMaterialId !== null ? `asset://${lastFrameMaterialId}` : undefined);
+
   return {
     model,
     prompt,
@@ -417,8 +451,8 @@ async function buildSubmitRequest(
     ...dimensions,
     resolution,
     ratio,
-    ...(firstFrame ? { firstFrameImage: firstFrame.url } : {}),
-    ...(lastFrame ? { lastFrameImage: lastFrame.url } : {}),
+    ...(firstFrameImage ? { firstFrameImage } : {}),
+    ...(lastFrameImage ? { lastFrameImage } : {}),
     references,
   };
 }
@@ -438,6 +472,7 @@ const REFERENCE_VIDEO_MIMES = new Set(["video/mp4", "video/quicktime"]);
 function validateReferences(
   model: string,
   assets: VideoWorkerInputAsset[],
+  materials: MaterialReference[],
 ): VideoReference[] {
   let imageCount = 0;
   let videoCount = 0;
@@ -460,6 +495,17 @@ function validateReferences(
     }
     return { type: "video", url: asset.url };
   });
+
+  // 素材库引用：并入图/视频数量并集与 Seedance 2.0 约束；
+  // 时长/大小/分辨率等物理校验只作用于本地 Asset（素材库素材由上游强校验）。
+  for (const material of materials) {
+    if (material.type === "image") {
+      imageCount += 1;
+    } else {
+      videoCount += 1;
+    }
+    references.push({ type: material.type, url: `asset://${material.id}` });
+  }
 
   if (imageCount > MAX_REFERENCE_IMAGES || videoCount > MAX_REFERENCE_VIDEOS) {
     throw new VideoInputError(
@@ -582,6 +628,45 @@ function readAssetIds(value: unknown): string[] {
 function uniqueAssetIds(ids: Array<string | null>): string[] {
   return ids.reduce<string[]>((result, id) => {
     if (id && !result.includes(id)) result.push(id);
+    return result;
+  }, []);
+}
+
+const MATERIAL_ID_PATTERN = /^Asset-.{1,128}$/;
+
+function readMaterialId(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string" && MATERIAL_ID_PATTERN.test(value)) return value;
+  throw new VideoInputError("invalid_video_inputs", "素材库引用 ID 无效");
+}
+
+function readMaterialRefs(value: unknown): MaterialReference[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new VideoInputError("invalid_video_inputs", "素材库参考素材无效");
+  }
+  return value.map((candidate) => {
+    if (typeof candidate !== "object" || candidate === null) {
+      throw new VideoInputError("invalid_video_inputs", "素材库参考素材无效");
+    }
+    const { id, type } = candidate as { id?: unknown; type?: unknown };
+    const materialId = readMaterialId(id);
+    if (materialId === null) {
+      throw new VideoInputError("invalid_video_inputs", "素材库引用 ID 无效");
+    }
+    if (type !== "image" && type !== "video") {
+      throw new VideoInputError(
+        "invalid_video_inputs",
+        "素材库参考素材类型无效",
+      );
+    }
+    return { id: materialId, type };
+  });
+}
+
+function uniqueMaterialRefs(refs: MaterialReference[]): MaterialReference[] {
+  return refs.reduce<MaterialReference[]>((result, ref) => {
+    if (!result.some((r) => r.id === ref.id)) result.push(ref);
     return result;
   }, []);
 }

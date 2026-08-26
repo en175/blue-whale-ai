@@ -856,3 +856,204 @@ describe("video job runner 实扣取证（IK9VZ0）", () => {
     );
   });
 });
+
+describe("video job runner material library references", () => {
+  it("passes the material reference of an asset library in reference_material directives as asset://", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "upstream-material-refs", status: "queued" });
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "305",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "参考素材库图片",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          reference_materials: [
+            { id: "Asset-img-1", type: "image" },
+            { id: "Asset-vid-2", type: "video" },
+          ],
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-material-refs",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-material-refs",
+      jobId: "305",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    // 素材库引用不查库（resolveInputAssets 空），转 asset:// 载体。
+    expect(repo.resolveInputAssets).toHaveBeenCalledWith([], "9", "55");
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        references: [
+          { type: "image", url: "asset://Asset-img-1" },
+          { type: "video", url: "asset://Asset-vid-2" },
+        ],
+      }),
+    );
+  });
+
+  it("material library first frame yields asset:// firstFrameImage", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "upstream-material-ff", status: "queued" });
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "306",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "真人首帧",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          first_frame_material_id: "Asset-face-1",
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-material-ff",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-material-ff",
+      jobId: "306",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        firstFrameImage: "asset://Asset-face-1",
+        references: [],
+      }),
+    );
+  });
+
+  it("frame mode cannot coexist with material references", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn();
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "307",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "首帧与参考并存",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          first_frame_asset_id: "11",
+          reference_materials: [{ id: "Asset-img-1", type: "image" }],
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-material-mix",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn(),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn().mockResolvedValue(true),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-material-mix",
+      jobId: "307",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+    });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(repo.failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "invalid_video_inputs" }),
+    );
+  });
+
+  it("a frame slot can only source from one of asset or material", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn();
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "308",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "首帧双来源",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          first_frame_asset_id: "11",
+          first_frame_material_id: "Asset-face-1",
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-material-dual",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn(),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn().mockResolvedValue(true),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-material-dual",
+      jobId: "308",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+    });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(repo.failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "invalid_video_inputs" }),
+    );
+  });
+});

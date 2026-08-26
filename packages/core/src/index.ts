@@ -67,6 +67,11 @@ export {
   type NewApiPricingResult,
 } from "./new-api-client.js";
 export {
+  createMaterialLibraryClient,
+  type MaterialLibraryClient,
+  type MaterialLibraryResponse,
+} from "./material-library-client.js";
+export {
   loadGenerationCostConfig,
   quotaToFen,
   buildCostVersions,
