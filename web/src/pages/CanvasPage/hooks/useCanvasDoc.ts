@@ -48,16 +48,16 @@ export function useCanvasDoc(projectId: string) {
   const [assets, setAssets] = useState<Record<string, SnapshotAsset>>({});
   const [loading, setLoading] = useState(false);
 
-  /** 拉取快照并水合；保存版本冲突（412）时调用方可手动重新加载 */
-  const load = useCallback(() => {
+  /** 拉取快照并水合；手动刷新时保留现有画布，避免节点短暂清空。返回本次读到的节点，供调用方在 React 提交前判断注入结果。 */
+  const load = useCallback((preserveCurrent = false): Promise<Node[]> => {
     if (!projectId) {
       setDoc(null);
       setAssets({});
-      return;
+      return Promise.resolve([]);
     }
-    setDoc(null);
+    if (!preserveCurrent) setDoc(null);
     setLoading(true);
-    fetchProjectSnapshot(projectId)
+    return fetchProjectSnapshot(projectId)
       .then(async (snap) => {
         setAssets(snap.assets ?? {});
         const canvas = snap.canvas;
@@ -81,20 +81,24 @@ export function useCanvasDoc(projectId: string) {
               console.info('[canvas] canvases 回退结果:', { version: rec.version, nodeCount: rec.nodes.length });
             }
             setDoc(rec);
+            return rec.nodes;
           } catch {
-            setDoc(EMPTY_DOC);
+            if (!preserveCurrent) setDoc(EMPTY_DOC);
+            return [];
           }
-          return;
         }
+        const nodes = parseNodes(canvas.nodes);
         setDoc({
           id: null,
           version: canvas.version ?? null,
           viewport: safeParse<Viewport>(canvas.viewport, EMPTY_DOC.viewport),
-          nodes: parseNodes(canvas.nodes),
+          nodes,
         });
+        return nodes;
       })
       .catch(() => {
-        setDoc(EMPTY_DOC);
+        if (!preserveCurrent) setDoc(EMPTY_DOC);
+        return [];
       })
       .finally(() => {
         setLoading(false);
@@ -106,5 +110,7 @@ export function useCanvasDoc(projectId: string) {
     load();
   }, [load]);
 
-  return { doc, assets, loading, refetch: load };
+  const refetch = useCallback(() => load(true), [load]);
+
+  return { doc, assets, loading, refetch };
 }

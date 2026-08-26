@@ -4,8 +4,11 @@
  * ============================================ */
 import { apiRequest } from './http';
 
-/** 生成类型 */
-export type JobType = 'image' | 'video' | 'audio';
+/** 可由普通生成端点创建的任务类型 */
+export type GenerationJobType = 'image' | 'video' | 'audio';
+
+/** 通用任务查询可能返回媒体提取任务。 */
+export type JobType = GenerationJobType | 'media_extract';
 
 /** 任务状态：queued/processing 为进行中，succeeded/failed/cancelled 为终态 */
 export type JobStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'cancelled';
@@ -17,7 +20,7 @@ export interface JobAsset {
   /** 产物访问 URL */
   url: string;
   /** 产物类型 */
-  type: JobType;
+  type: GenerationJobType;
   width?: number | null;
   height?: number | null;
 }
@@ -59,7 +62,7 @@ export interface AudioJobParameters {
 
 /** POST /api/projects/:id/generation-jobs 请求体 */
 export interface CreateJobPayload {
-  type: JobType;
+  type: GenerationJobType;
   /** 输入参考资产ID列表（仅 image） */
   input_asset_ids?: (string | number)[];
   /** 期望生成数量 */
@@ -79,6 +82,18 @@ export interface JobCreatedData {
   generation_job_id: string;
   /** 事件游标（服务端事件序号） */
   cursor: number;
+}
+
+/** POST /api/projects/:id/media-extractions 请求体。当前后端仅支持 MP3 整段提取。 */
+export interface CreateMediaExtractionPayload {
+  source_asset_id: string | number;
+  output_format?: 'mp3';
+}
+
+/** 创建媒体提取任务返回。 */
+export interface MediaExtractionCreatedData {
+  job_id: string;
+  status: 'queued';
 }
 
 /** GET /api/jobs/:id 返回 */
@@ -138,6 +153,20 @@ export function createGenerationJob(
     {
       method: 'POST',
       headers: { 'Idempotency-Key': newIdempotencyKey() },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+/** 视频整段提取音频；音频占位节点及最终节点由后端写入画布快照。 */
+export function createMediaExtraction(
+  projectId: string,
+  payload: CreateMediaExtractionPayload,
+): Promise<MediaExtractionCreatedData> {
+  return apiRequest<MediaExtractionCreatedData>(
+    `/api/projects/${encodeURIComponent(projectId)}/media-extractions`,
+    {
+      method: 'POST',
       body: JSON.stringify(payload),
     },
   );

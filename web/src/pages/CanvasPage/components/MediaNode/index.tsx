@@ -5,6 +5,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign } from 'lucide-react';
+import { isMediaExtractNodeId } from '../../mediaExtract';
 import styles from './index.module.css';
 
 interface MediaNodeData {
@@ -24,7 +25,7 @@ interface MediaNodeData {
   /** 生成时的提示词（「重新编辑」带回图片对话框） */
   prompt?: string;
   /** 资产 ID（上传完成后存储） */
-  assetId?: string;
+  assetId?: string | number;
   /** MIME 类型（上传完成后存储，如 "image/jpeg"） */
   mime?: string;
   /** 媒体宽度（图片/视频，像素） */
@@ -51,6 +52,8 @@ interface MediaNodeData {
   onGenVideo?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
+  /** 视频整段提取音频；音频节点由后端注入画布。 */
+  onExtractAudio?: (id: string) => Promise<void> | void;
   /** 下载媒体文件 */
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */
@@ -59,6 +62,7 @@ interface MediaNodeData {
 
 export default function MediaNode({ id, data, selected }: NodeProps & { data: MediaNodeData; selected?: boolean }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [isExtractSubmitting, setIsExtractSubmitting] = useState(false);
 
   const isSelect = data.toolMode === 'select';
 
@@ -121,6 +125,15 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleReEdit = useCallback(() => data.onReEdit?.(id), [data, id]);
   const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
+  const handleExtractAudio = useCallback(async () => {
+    if (isExtractSubmitting || data.assetId == null || !data.onExtractAudio) return;
+    setIsExtractSubmitting(true);
+    try {
+      await data.onExtractAudio(id);
+    } finally {
+      setIsExtractSubmitting(false);
+    }
+  }, [data, id, isExtractSubmitting]);
   const handleDownload = useCallback(() => data.onDownload?.(id), [data, id]);
   const handleShowDetails = useCallback(() => data.onShowDetails?.(id), [data, id]);
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
@@ -129,6 +142,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const label = data.mediaType === 'video' ? '视频' : data.mediaType === 'audio' ? '音频' : '图片';
   const isGenerating = data.genStatus === 'generating';
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
+  const isMediaExtraction = isMediaExtractNodeId(id);
 
   return (
     <div className={styles.wrapper} onContextMenu={handleContextMenu}>
@@ -153,6 +167,17 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <Video size={14} strokeWidth={2} />
             <span>生成视频</span>
           </button>
+          {data.mediaType === 'video' && (
+            <button
+              className={styles.toolBtn}
+              onClick={() => void handleExtractAudio()}
+              disabled={data.assetId == null || isExtractSubmitting}
+              title={data.assetId == null ? '当前视频尚未关联资产，无法提取音频' : '提取视频中的完整音轨'}
+            >
+              <AudioLines size={14} strokeWidth={2} />
+              <span>{isExtractSubmitting ? '提交中…' : '提取音频'}</span>
+            </button>
+          )}
           <span className={styles.toolDivider} />
           <button className={styles.toolBtn} onClick={handleShowDetails} title="详情">
             <Info size={14} strokeWidth={2} />
@@ -199,23 +224,30 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <div className={styles.genBox}>
               <div className={styles.genSpinner} />
               <span className={styles.genText}>
-                正在生成{typeof data.progress === 'number' ? ` ${data.progress}%` : '…'}
+                {isMediaExtraction ? '正在提取音频' : '正在生成'}
+                {typeof data.progress === 'number' ? ` ${data.progress}%` : '…'}
               </span>
               <div className={styles.progressTrack}>
                 <div className={styles.progressFill} style={{ width: `${data.progress ?? 0}%` }} />
               </div>
-              <button className={styles.genBtn} onClick={() => data.onCancelJob?.(id)}>
-                取消生成
-              </button>
+              {!isMediaExtraction && (
+                <button className={styles.genBtn} onClick={() => data.onCancelJob?.(id)}>
+                  取消生成
+                </button>
+              )}
             </div>
           ) : isGenDone ? (
             /* 失败/已取消：错误提示 + 重试 */
             <div className={styles.genBox}>
               <span className={styles.genFailText}>
-                {data.genStatus === 'cancelled' ? '已取消生成' : '生成失败'}
+                {data.genStatus === 'cancelled'
+                  ? '已取消生成'
+                  : isMediaExtraction
+                    ? '音频提取失败'
+                    : '生成失败'}
               </span>
               {data.errorText && <span className={styles.genError}>{data.errorText}</span>}
-              {data.genStatus === 'failed' && (
+              {data.genStatus === 'failed' && !isMediaExtraction && (
                 <button className={styles.genBtn} onClick={() => data.onRetryJob?.(id)}>
                   重试
                 </button>

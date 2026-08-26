@@ -5,6 +5,12 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { newNodeId } from './nodeId';
+import {
+  isMediaExtractNodeId,
+  mediaExtractNodeId,
+  mediaExtractTerminalPatch,
+  snapshotHasMediaExtractNode,
+} from './mediaExtract';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
@@ -31,6 +37,7 @@ import {
   cancelGenerationJob,
   retryGenerationJob,
   fetchJobStatus,
+  createMediaExtraction,
   type ImageJobParameters,
   type VideoJobParameters,
   type AudioJobParameters,
@@ -256,6 +263,7 @@ export default function CanvasPage() {
           onGenImage: (id: string) => actionsRef.current.genImage(id),
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+          onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -511,7 +519,8 @@ export default function CanvasPage() {
       .filter(
         (n) =>
           n.data.genStatus === 'generating' &&
-          (typeof n.data.jobId === 'number' || typeof n.data.jobId === 'string'),
+          (typeof n.data.jobId === 'number' || typeof n.data.jobId === 'string') &&
+          !settledExtractNodesRef.current.has(n.id),
       )
       .forEach((n) => pollJobRef.current(n.id, n.data.jobId as number | string));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -841,6 +850,7 @@ export default function CanvasPage() {
     genImage: (_id: string) => {},
     genVideo: (_id: string) => {},
     genAudio: (_id: string) => {},
+    extractAudio: async (_id: string) => {},
     download: (_id: string) => {},
     showDetails: (_id: string) => {},
     firePendingGen: () => {},
@@ -1069,6 +1079,7 @@ export default function CanvasPage() {
           onGenImage: (id: string) => actionsRef.current.genImage(id),
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+          onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -1120,6 +1131,8 @@ export default function CanvasPage() {
   productNodesRef.current = productNodes;
   /** 生成节点轮询定时器（节点 id → timer） */
   const jobTimersRef = useRef<Map<string, number>>(new Map<string, number>());
+  /** 已本地收敛的提取节点：快照若仍停留在 generating，水合不得再开轮询。 */
+  const settledExtractNodesRef = useRef<Set<string>>(new Set());
 
   // 卸载时清理全部轮询
   useEffect(() => {
@@ -1142,11 +1155,27 @@ export default function CanvasPage() {
 
   /** 轮询任务状态直至终态：succeeded 挂载产物 / failed 展示错误 / cancelled 收敛 */
   const pollJob = (nodeId: string, jobId: number | string) => {
+    const existing = jobTimersRef.current.get(nodeId);
+    if (existing) window.clearTimeout(existing);
     const tick = () => {
       fetchJobStatus(jobId)
         .then((detail) => {
           if (!mediaNodesRef.current.some((n) => n.id === nodeId)) return; // 节点已删除
+          if (isMediaExtractNodeId(nodeId)) {
+            const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+            const extractPatch = mediaExtractTerminalPatch(
+              detail,
+              typeof node?.data?.fileName === 'string' ? node.data.fileName : undefined,
+            );
+            if (extractPatch) {
+              jobTimersRef.current.delete(nodeId);
+              settledExtractNodesRef.current.add(nodeId);
+              patchMediaNode(nodeId, extractPatch);
+              return;
+            }
+          }
           if (detail.status === 'succeeded') {
+            jobTimersRef.current.delete(nodeId);
             const node = mediaNodesRef.current.find((n) => n.id === nodeId);
             const originalType = node?.data?.mediaType;
             const assetType = detail.asset?.type;
@@ -1165,6 +1194,7 @@ export default function CanvasPage() {
             return;
           }
           if (detail.status === 'failed') {
+            jobTimersRef.current.delete(nodeId);
             patchMediaNode(nodeId, {
               genStatus: 'failed',
               errorText: detail.error?.message ?? '',
@@ -1172,6 +1202,7 @@ export default function CanvasPage() {
             return;
           }
           if (detail.status === 'cancelled') {
+            jobTimersRef.current.delete(nodeId);
             patchMediaNode(nodeId, { genStatus: 'cancelled' });
             return;
           }
@@ -1225,6 +1256,7 @@ export default function CanvasPage() {
         onGenImage: (id: string) => actionsRef.current.genImage(id),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+        onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
@@ -1376,6 +1408,35 @@ export default function CanvasPage() {
     setShowMusicDialog(false);
   };
 
+  /** 视频整段提取音频：后端创建任务并注入音频节点；前端用返回的 job_id 轮询，终态本地收敛。 */
+  const handleNodeExtractAudio = async (id: string) => {
+    const node = mediaNodesRef.current.find((item) => item.id === id);
+    const assetId = node?.data?.assetId as string | number | undefined;
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法提取音频');
+      return;
+    }
+    if (node?.data?.mediaType !== 'video' || assetId == null) {
+      showToast('warn', '当前视频尚未关联资产，无法提取音频');
+      return;
+    }
+
+    try {
+      const created = await createMediaExtraction(currentId, {
+        source_asset_id: assetId,
+        output_format: 'mp3',
+      });
+      const nodes = await refetch();
+      if (!snapshotHasMediaExtractNode(nodes, created.job_id)) {
+        showToast('warn', '提取任务已创建，但画布节点尚未出现，请刷新画布');
+        return;
+      }
+      pollJob(mediaExtractNodeId(created.job_id), created.job_id);
+    } catch (error) {
+      showToast('error', isApiError(error) ? error.message : '音频提取任务创建失败');
+    }
+  };
+
   /** 下载：优先 fetch blob 触发下载，跨域失败回退新标签页打开 */
   const handleNodeDownload = async (id: string) => {
     const ref = nodeRefOf(id);
@@ -1453,6 +1514,7 @@ export default function CanvasPage() {
   actionsRef.current.genImage = handleNodeGenImage;
   actionsRef.current.genVideo = handleNodeGenVideo;
   actionsRef.current.genAudio = handleNodeGenAudio;
+  actionsRef.current.extractAudio = handleNodeExtractAudio;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
 
@@ -1879,6 +1941,7 @@ export default function CanvasPage() {
               onGenImage: (id: string) => actionsRef.current.genImage(id),
               onGenVideo: (id: string) => actionsRef.current.genVideo(id),
               onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+              onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
               onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
