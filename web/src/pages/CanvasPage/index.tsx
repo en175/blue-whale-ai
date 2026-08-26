@@ -20,6 +20,8 @@ import ImageDialog, { type UploadedFile } from './components/ImageDialog';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
+import CharacterLibraryModal from './components/CharacterLibraryModal';
+import type { MaterialAsset } from '@/api/material';
 import type { AssetCardKind } from './components/AssetCardNode';
 import type { CanvasProject } from './components/ProjectSelector';
 import FlowCanvas from './components/Canvas';
@@ -86,6 +88,10 @@ export default function CanvasPage() {
   const [productPickResult, setProductPickResult] = useState<{ ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video' } } | null>(null);
   /** 画布节点选取结果（ts 驱动注入资产卡） */
   const [assetPickResult, setAssetPickResult] = useState<{ ts: number; assetId: string; ref: { id: string; src: string; type?: 'image' | 'video' } } | null>(null);
+  /** 角色库弹窗状态 */
+  const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
+  /** 角色库发起目标（决定选中结果注入哪个对话框） */
+  const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'video' | 'asset' | null>(null);
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
   const [showEdges, setShowEdges] = useState(false);
@@ -299,6 +305,11 @@ export default function CanvasPage() {
             setPickMode('asset');
             setPickTarget('asset');
             setPickAssetId(id);
+          },
+          onOpenCharacterLibrary: (id: string) => {
+            setPickAssetId(id);
+            setCharacterLibraryTarget('asset');
+            setShowCharacterLibrary(true);
           },
           // 生成卡节点水合后补动作回调（引用到 dock / 给 Agent）
           generationCard: base.data?.generationCard
@@ -1218,7 +1229,8 @@ export default function CanvasPage() {
   };
 
   /** 创建生成任务：立即上画布「生成中」占位节点，创建成功后启动轮询。
-   *  videoRefs 仅 video：首尾帧（图片）或普通参考素材（图/视频）assetId，与 input_asset_ids 互斥 */
+   *  videoRefs 仅 video：首尾帧（图片）或普通参考素材（图/视频）assetId/materialId，与 input_asset_ids 互斥。
+   *  素材库引用（Asset- 前缀）走 *_material_id / reference_materials；同一帧位 asset 与 material 互斥 */
   const startGenerationJob = (
     type: 'image' | 'video' | 'audio',
     parameters: ImageJobParameters | VideoJobParameters | AudioJobParameters,
@@ -1227,6 +1239,9 @@ export default function CanvasPage() {
       firstFrameAssetId?: string;
       lastFrameAssetId?: string;
       referenceAssetIds?: string[];
+      firstFrameMaterialId?: string;
+      lastFrameMaterialId?: string;
+      referenceMaterials?: Array<{ id: string; type: 'image' | 'video' }>;
     },
   ) => {
     if (!currentId) {
@@ -1273,6 +1288,11 @@ export default function CanvasPage() {
         last_frame_asset_id: videoRefs?.lastFrameAssetId,
         reference_asset_ids: videoRefs?.referenceAssetIds?.length
           ? videoRefs.referenceAssetIds
+          : undefined,
+        first_frame_material_id: videoRefs?.firstFrameMaterialId,
+        last_frame_material_id: videoRefs?.lastFrameMaterialId,
+        reference_materials: videoRefs?.referenceMaterials?.length
+          ? videoRefs.referenceMaterials
           : undefined,
       })
         .then((created) => {
@@ -1604,28 +1624,47 @@ export default function CanvasPage() {
       startGenerationJob('video', parameters);
       return;
     }
-    const ids: (string | null)[] = [];
+    // 解析引用：Asset- 前缀 = 素材库素材（走 *_material_id/reference_materials）；
+    // 其余（本地 Asset id / 本地上传）走 asset 字段。两类不可混用于同一帧位（后端 400）。
+    const resolved: Array<{ assetId: string | null; materialId: string | null; type: 'image' | 'video' }> = [];
     for (const r of refs) {
-      ids.push(await resolveRefAssetId({ file: r.file, url: r.preview, name: `ref-${r.type}`, type: r.type, assetId: r.assetId }));
+      if (typeof r.assetId === 'string' && /^Asset-/.test(r.assetId)) {
+        resolved.push({ assetId: null, materialId: r.assetId, type: r.type });
+        continue;
+      }
+      const id = await resolveRefAssetId({ file: r.file, url: r.preview, name: `ref-${r.type}`, type: r.type, assetId: r.assetId });
+      resolved.push({ assetId: id, materialId: null, type: r.type });
     }
     if (opts.mode === 'keyframe') {
-      const [first, last] = ids;
-      if (!first || !last) {
+      const [first, last] = resolved;
+      if (!first || !last || (!first.assetId && !first.materialId) || (!last.assetId && !last.materialId)) {
         console.warn('首尾帧素材上传失败，任务未创建');
         return;
       }
       startGenerationJob('video', parameters, undefined, {
-        firstFrameAssetId: first,
-        lastFrameAssetId: last,
+        firstFrameAssetId: first.assetId ?? undefined,
+        lastFrameAssetId: last.assetId ?? undefined,
+        firstFrameMaterialId: first.materialId ?? undefined,
+        lastFrameMaterialId: last.materialId ?? undefined,
       });
       return;
     }
-    const referenceAssetIds = ids.filter((id): id is string => id !== null);
+    const referenceAssetIds = resolved
+      .filter((r): r is { assetId: string; materialId: null; type: 'image' | 'video' } => r.assetId !== null)
+      .map((r) => r.assetId);
+    const referenceMaterials = resolved
+      .filter((r): r is { assetId: null; materialId: string; type: 'image' | 'video' } => r.materialId !== null)
+      .map((r) => ({ id: r.materialId, type: r.type }));
     startGenerationJob(
       'video',
       parameters,
       undefined,
-      referenceAssetIds.length > 0 ? { referenceAssetIds } : undefined,
+      referenceAssetIds.length > 0 || referenceMaterials.length > 0
+        ? {
+            ...(referenceAssetIds.length > 0 ? { referenceAssetIds } : {}),
+            ...(referenceMaterials.length > 0 ? { referenceMaterials } : {}),
+          }
+        : undefined,
     );
   };
 
@@ -1719,6 +1758,11 @@ export default function CanvasPage() {
           setPickMode('asset');
           setPickTarget('asset');
           setPickAssetId(id);
+        },
+        onOpenCharacterLibrary: (id: string) => {
+          setPickAssetId(id);
+          setCharacterLibraryTarget('asset');
+          setShowCharacterLibrary(true);
         },
       },
     };
@@ -1978,6 +2022,11 @@ export default function CanvasPage() {
                 setPickMode('asset');
                 setPickTarget('asset');
                 setPickAssetId(id);
+              },
+              onOpenCharacterLibrary: (id: string) => {
+                setPickAssetId(id);
+                setCharacterLibraryTarget('asset');
+                setShowCharacterLibrary(true);
               },
             },
           };
@@ -2382,6 +2431,7 @@ export default function CanvasPage() {
             pickMode={pickTarget === 'video' && pickMode !== 'audio' && pickMode !== 'product' && pickMode !== 'asset' ? pickMode : null}
             externalPick={videoPickResult}
             externalImagePick={videoDlgImagePickResult}
+            onOpenCharacterLibrary={() => { setCharacterLibraryTarget('video'); setShowCharacterLibrary(true); }}
           />
         )}
         {/* 底部图片对话框 */}
@@ -2395,6 +2445,7 @@ export default function CanvasPage() {
             onPickFromCanvas={() => { setPickMode('image'); setPickTarget('image'); }}
             pickMode={pickMode === 'image'}
             externalPick={imagePickResult}
+            onOpenCharacterLibrary={() => { setCharacterLibraryTarget('image'); setShowCharacterLibrary(true); }}
           />
         )}
 
@@ -2467,6 +2518,49 @@ export default function CanvasPage() {
           onToast={showToast}
           defaultTab={assetsModalDefaultTab}
           defaultCardFilter={assetsModalDefaultFilter as any}
+        />
+      )}
+
+      {/* 角色库弹框 */}
+      {showCharacterLibrary && (
+        <CharacterLibraryModal
+          onClose={() => { setShowCharacterLibrary(false); setCharacterLibraryTarget(null); }}
+          onSelect={(asset: MaterialAsset) => {
+            // 选中后注入到对应对话框
+            const ts = Date.now();
+            if (characterLibraryTarget === 'image') {
+              setImagePickResult({
+                ts,
+                file: {
+                  id: `char-${ts}`,
+                  url: asset.URL,
+                  type: 'image',
+                  name: `角色-${asset.Name}`,
+                },
+              });
+            } else if (characterLibraryTarget === 'video') {
+              // 视频对话框注入图片参考
+              setVideoDlgImagePickResult({
+                ts,
+                item: {
+                  preview: asset.URL,
+                  type: 'image',
+                  assetId: asset.Id,
+                },
+              });
+            } else if (characterLibraryTarget === 'asset') {
+              // 角色卡添加参考图
+              setAssetPickResult({
+                ts,
+                assetId: pickAssetId ?? '',
+                ref: {
+                  id: `char-${ts}`,
+                  src: asset.URL,
+                  type: 'image',
+                },
+              });
+            }
+          }}
         />
       )}
 

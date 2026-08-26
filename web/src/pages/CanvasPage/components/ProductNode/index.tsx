@@ -5,7 +5,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { AtSign, Upload, X, Box, Image } from 'lucide-react';
+import { AtSign, Upload, X, Box, MousePointerClick } from 'lucide-react';
 import { uploadAssetFile } from '@/utils/upload';
 import styles from './index.module.css';
 
@@ -317,7 +317,7 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
                   enterPickMode();
                 }}
               >
-                <Image size={16} strokeWidth={2} />
+                <MousePointerClick size={16} strokeWidth={2} />
                 <span>到节点选择</span>
               </button>
             </div>

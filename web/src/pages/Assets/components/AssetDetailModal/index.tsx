@@ -30,7 +30,7 @@ function AssetPreview({ asset }: { asset: AssetRecord }) {
     return <div className={styles.previewEmpty}>媒体文件不可用</div>;
   }
 
-  if (asset.type === 'image') {
+  if (asset.type === 'image' || asset.type === 'character') {
     return (
       <div
         className={`${styles.previewFrame} ${styles.imagePreviewFrame}`}
@@ -108,7 +108,7 @@ export default function AssetDetailModal({ asset, loading = false, onClose }: As
           <aside className={styles.detailsPane}>
             <div className={styles.detailsHeader}>
               <span className={styles.typeBadge}>
-                {asset.type === 'image' ? '图片' : asset.type === 'video' ? '视频' : '音频'}
+                {asset.type === 'image' ? '图片' : asset.type === 'video' ? '视频' : asset.type === 'audio' ? '音频' : '虚拟人'}
               </span>
               <button className={styles.closeButton} type="button" onClick={onClose} aria-label="关闭">
                 <X size={18} strokeWidth={2} />

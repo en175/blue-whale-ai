@@ -4,7 +4,7 @@
 import { apiRequest } from './http';
 
 /** 资产类型 */
-export type AssetType = 'image' | 'video' | 'audio';
+export type AssetType = 'image' | 'video' | 'audio' | 'character';
 
 /** GET /api/assets 返回项 */
 export interface AssetRecord {
@@ -64,6 +64,7 @@ export const UPLOAD_SIZE_LIMIT: Record<AssetType, number> = {
   image: 20 * 1024 * 1024,
   video: 200 * 1024 * 1024,
   audio: 25 * 1024 * 1024,
+  character: 20 * 1024 * 1024,
 };
 
 /** POST /api/agent/assets/uploads/presign 返回 */

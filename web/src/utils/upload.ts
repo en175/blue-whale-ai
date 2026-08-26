@@ -16,7 +16,7 @@ export function probeMediaMeta(
   type: AssetType
 ): Promise<{ width?: number; height?: number; duration?: number }> {
   return new Promise((resolve) => {
-    if (type === 'image') {
+    if (type === 'image' || type === 'character') {
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {

@@ -74,6 +74,12 @@ export interface CreateJobPayload {
   last_frame_asset_id?: number | string;
   /** 参考资产ID列表（仅 video，图片/视频；后端兼容字符串） */
   reference_asset_ids?: (number | string)[];
+  /** 首帧素材库素材ID（仅 video，Asset- 前缀；与 first_frame_asset_id 同帧位互斥） */
+  first_frame_material_id?: string;
+  /** 尾帧素材库素材ID（仅 video，Asset- 前缀；须与首帧同传） */
+  last_frame_material_id?: string;
+  /** 素材库参考素材（仅 video）：[{ id: "Asset-xxx", type: "image" | "video" }]；与首尾帧模式互斥 */
+  reference_materials?: Array<{ id: string; type: 'image' | 'video' }>;
 }
 
 /** 创建/重试任务返回 */

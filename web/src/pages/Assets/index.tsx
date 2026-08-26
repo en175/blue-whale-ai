@@ -4,12 +4,13 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Upload, Play, Trash2, RotateCw, AlertCircle, Loader2 } from 'lucide-react';
-import { fetchAllAssets, deleteAsset, UPLOAD_SIZE_LIMIT, type AssetRecord, type AssetType } from '@/api/assets';
+import { fetchAllAssets, deleteAsset, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
 import { isApiError } from '@/api/http';
-import { uploadAssetFile, fileToAssetType } from '@/utils/upload';
+import { fileToAssetType } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
 import Skeleton from '@/components/Skeleton';
 import AssetDetailModal from './components/AssetDetailModal';
+import CharacterLibrary from './components/CharacterLibrary';
 import styles from './index.module.css';
 
 /** 筛选类型：all 表示不传 type */
@@ -21,6 +22,7 @@ const filterTabs: { key: FilterKey; label: string }[] = [
   { key: 'image', label: '图片' },
   { key: 'video', label: '视频' },
   { key: 'audio', label: '音频' },
+  { key: 'character', label: '虚拟人' },
 ];
 
 /** 类型标签文字 */
@@ -28,6 +30,7 @@ const typeLabel: Record<AssetType, string> = {
   image: '图片',
   video: '视频',
   audio: '音频',
+  character: '虚拟人',
 };
 
 /** 媒体加载状态 */
@@ -91,7 +94,7 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       )}
 
       {/* 实际媒体元素 */}
-      {asset.type === 'image' && asset.url && (
+      {(asset.type === 'image' || asset.type === 'character') && asset.url && (
         <img
           className={styles.media}
           src={mediaSrc}
@@ -246,7 +249,9 @@ export default function Assets() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 筛选切换时全量拉取（size=60，按 total 自动分页）
+  // 虚拟人视图由 CharacterLibrary 组件自行管理数据，不在此拉取
   useEffect(() => {
+    if (activeFilter === 'character') return;
     let alive = true;
     setLoading(true);
     setLoadError('');
@@ -265,7 +270,9 @@ export default function Assets() {
     };
   }, [activeFilter]);
 
-  /** 上传素材：presign 获取预签名 URL → PUT 直传对象存储（complete 登记接口待联调） */
+  const isCharacterView = activeFilter === 'character';
+
+  /** 上传素材：presign 获取预签名 URL → PUT 直传对象存储 → complete 登记 */
   const handleUpload = () => {
     if (!uploading) fileInputRef.current?.click();
   };
@@ -282,7 +289,10 @@ export default function Assets() {
     const errors: string[] = [];
 
     for (const file of list) {
-      const type = fileToAssetType(file);
+      // 虚拟人视图下，上传类型固定为 character
+      const forceCharacter = activeFilter === 'character';
+      const type: AssetType = forceCharacter ? 'character' : (fileToAssetType(file) as AssetType);
+
       if (!type) {
         errors.push(`不支持的文件类型：${file.name}`);
         continue;
@@ -292,10 +302,23 @@ export default function Assets() {
         errors.push(`${file.name} 超过 ${limitMb}MB 上限`);
         continue;
       }
+      // 虚拟人视图只接受图片
+      if (forceCharacter && !file.type.startsWith('image/')) {
+        errors.push(`${file.name}：虚拟人仅支持上传图片`);
+        continue;
+      }
       try {
-        // presign → PUT 直传 → complete 登记（共享工具）
-        const done = await uploadAssetFile(file);
-        // 登记成功：新资产插入列表顶部（url 为空时降级本地预览）
+        // 三步上传：presign → PUT → complete
+        const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size });
+        await putToPresignedUrl(presign, file);
+        const done = await completeUpload({
+          type,
+          mime: file.type,
+          size: file.size,
+          storage_key: presign.storage_key,
+          ...(forceCharacter ? {} : {}),
+        });
+        // 登记成功：新资产插入列表顶部
         setAssets((prev) => [
           {
             id: done.asset_id,
@@ -362,7 +385,11 @@ export default function Assets() {
             <div className={styles.divider} />
 
             {/* 上传按钮 */}
-            <button className={styles.uploadBtn} onClick={handleUpload} disabled={uploading}>
+            <button
+              className={styles.uploadBtn}
+              onClick={handleUpload}
+              disabled={uploading}
+            >
               <Upload size={16} strokeWidth={2} />
               <span>{uploading ? '上传中…' : '上传素材'}</span>
             </button>
@@ -378,61 +405,66 @@ export default function Assets() {
           </div>
         </div>
 
-        {/* 资产网格（2-5 列自适应） */}
-        <div className={styles.grid}>
-          {loading &&
-            Array.from({ length: 10 }, (_, index) => (
-              <Skeleton key={index} className={styles.cardSkeleton} />
-            ))}
-          {!loading && loadError && <div className={styles.empty}>{loadError}</div>}
-          {!loading && !loadError && displayAssets.length === 0 && (
-            <div className={styles.empty}>暂无资产，点击"上传素材"添加</div>
-          )}
+        {/* 虚拟人视图：独立的分组 + 素材管理 */}
+        {isCharacterView ? (
+          <CharacterLibrary />
+        ) : (
+          /* 资产网格（2-5 列自适应） */
+          <div className={styles.grid}>
+            {loading &&
+              Array.from({ length: 10 }, (_, index) => (
+                <Skeleton key={index} className={styles.cardSkeleton} />
+              ))}
+            {!loading && loadError && <div className={styles.empty}>{loadError}</div>}
+            {!loading && !loadError && displayAssets.length === 0 && (
+              <div className={styles.empty}>暂无资产，点击"上传素材"添加</div>
+            )}
 
-          {!loading &&
-            !loadError &&
-            displayAssets.map((asset) => (
-              <div
-                key={String(asset.id)}
-                className={styles.card}
-                role="button"
-                tabIndex={0}
-                aria-label={`查看${typeLabel[asset.type]}资产详情`}
-                onClick={() => setPreviewTarget(asset)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    setPreviewTarget(asset);
-                  }
-                }}
-              >
-                {/* 预览区域：AssetMedia 统一处理 loading/loaded/error 三态 */}
-                <div className={styles.thumbnail}>
-                  {asset.url ? (
-                    <AssetMedia asset={asset} />
-                  ) : (
-                    <div className={styles.mediaError}>
-                      <AlertCircle size={28} />
-                      <span className={styles.mediaErrorText}>资源不可用</span>
-                    </div>
-                  )}
-                  {/* 类型标签 */}
-                  <span className={styles.typeBadge}>{typeLabel[asset.type]}</span>
-                  {/* 右上角删除按钮 */}
-                  <button
-                    className={styles.deleteBtn}
-                    title="删除资产"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleteTarget(asset);
-                    }}
-                  >
-                    <Trash2 size={14} strokeWidth={2} />
-                  </button>
+            {!loading &&
+              !loadError &&
+              displayAssets.map((asset) => (
+                <div
+                  key={String(asset.id)}
+                  className={styles.card}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`查看${typeLabel[asset.type]}资产详情`}
+                  onClick={() => setPreviewTarget(asset)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setPreviewTarget(asset);
+                    }
+                  }}
+                >
+                  {/* 预览区域：AssetMedia 统一处理 loading/loaded/error 三态 */}
+                  <div className={styles.thumbnail}>
+                    {asset.url ? (
+                      <AssetMedia asset={asset} />
+                    ) : (
+                      <div className={styles.mediaError}>
+                        <AlertCircle size={28} />
+                        <span className={styles.mediaErrorText}>资源不可用</span>
+                      </div>
+                    )}
+                    {/* 类型标签 */}
+                    <span className={styles.typeBadge}>{typeLabel[asset.type]}</span>
+                    {/* 右上角删除按钮 */}
+                    <button
+                      className={styles.deleteBtn}
+                      title="删除资产"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget(asset);
+                      }}
+                    >
+                      <Trash2 size={14} strokeWidth={2} />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
-        </div>
+              ))}
+          </div>
+        )}
       </div>
 
       <AssetDetailModal asset={previewTarget} onClose={() => setPreviewTarget(null)} />

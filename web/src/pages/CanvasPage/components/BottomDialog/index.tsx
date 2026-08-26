@@ -15,6 +15,7 @@ import {
   MousePointerClick,
   Maximize2,
   Minimize2,
+  User,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { classifyRefOverflow } from '@/utils/ref-overflow';
@@ -85,6 +86,8 @@ interface BottomDialogProps {
   externalPick?: { ts: number; item: BottomRefItem } | null;
   /** 画布节点选取结果（ts 驱动注入参考图片） */
   externalImagePick?: { ts: number; item: BottomRefItem } | null;
+  /** 打开角色库弹窗 */
+  onOpenCharacterLibrary?: () => void;
 }
 
 /** 宽高比图标：按比例绘制小矩形 */
@@ -96,7 +99,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText, onPickFromCanvas, pickMode, externalPick, externalImagePick }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText, onPickFromCanvas, pickMode, externalPick, externalImagePick, onOpenCharacterLibrary }: BottomDialogProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供生成按钮启用态判断 */
@@ -567,6 +570,13 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
                     <MousePointerClick size={14} strokeWidth={2} />
                     <span>到节点选择</span>
                   </button>
+                  <button
+                    className={styles.sourceMenuItem}
+                    onClick={() => { setSourceMenuOpen(null); onOpenCharacterLibrary?.(); }}
+                  >
+                    <User size={14} strokeWidth={2} />
+                    <span>角色库</span>
+                  </button>
                 </div>
               </>
             )}
@@ -621,6 +631,13 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
                   >
                     <MousePointerClick size={14} strokeWidth={2} />
                     <span>到节点选择</span>
+                  </button>
+                  <button
+                    className={styles.sourceMenuItem}
+                    onClick={() => { setSourceMenuOpen(null); onOpenCharacterLibrary?.(); }}
+                  >
+                    <User size={14} strokeWidth={2} />
+                    <span>角色库</span>
                   </button>
                 </div>
               </>

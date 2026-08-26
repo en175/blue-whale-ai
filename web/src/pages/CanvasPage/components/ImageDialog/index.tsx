@@ -13,6 +13,7 @@ import {
   Upload,
   MousePointerClick,
   Image as ImageIcon,
+  User,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import styles from './index.module.css';
@@ -71,6 +72,8 @@ interface ImageDialogProps {
   pickMode?: boolean;
   /** 画布节点选取结果（ts 驱动注入参考素材） */
   externalPick?: { ts: number; file: UploadedFile } | null;
+  /** 打开角色库弹窗 */
+  onOpenCharacterLibrary?: () => void;
 }
 
 /** 宽高比图标：按比例绘制小矩形 */
@@ -82,7 +85,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, onPickFromCanvas, pickMode, externalPick }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, onPickFromCanvas, pickMode, externalPick, onOpenCharacterLibrary }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [selectedModel, setSelectedModel] = useState(FALLBACK_MODELS[0].key);
@@ -351,6 +354,13 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                     >
                       <MousePointerClick size={14} strokeWidth={2} />
                       <span>到节点选择</span>
+                    </button>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(false); onOpenCharacterLibrary?.(); }}
+                    >
+                      <User size={14} strokeWidth={2} />
+                      <span>角色库</span>
                     </button>
                   </div>
                 </>
