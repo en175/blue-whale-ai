@@ -1816,3 +1816,85 @@
   line-height: 18px;
   opacity: 0.8;
 }
+
+/* ============================================
+ * 动作行（IKB93G）：一轮一条、常驻、可展开。
+ * 视觉重量低于普通消息：一行、一个图标、一句淡色话。
+ * ============================================ */
+.actionRow {
+  border-left: 2px solid #3d4a3f;
+  padding: 3px 0 3px 12px;
+  margin-bottom: 4px;
+}
+
+.actionRowWarn {
+  border-left-color: #6b5a2e;
+}
+
+.actionRowWarn .actionRowHead {
+  color: #c9a85c;
+}
+
+.actionRowHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: #8fa392;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.actionRowHead:hover {
+  color: var(--color-text-primary);
+}
+
+.actionRowSummary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actionRowMs {
+  flex-shrink: 0;
+  color: #6f7377;
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.actionRowBody {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.actionRowItem {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+  color: #92959a;
+  line-height: 1.6;
+}
+
+.actionRowSubstep {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding-left: 14px;
+  font-size: var(--font-size-sm);
+  color: #74777c;
+  line-height: 1.6;
+}
+
+.actionRowStatus {
+  color: #c9705c;
+}

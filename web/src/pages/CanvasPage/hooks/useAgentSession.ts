@@ -664,6 +664,38 @@ export function useAgentSession(projectId: string) {
         return;
       }
 
+      /* ---- 按轮动作台账（run_actions.updated.v1，IKB926/IKB93G）：挂到本轮助手消息上 ----
+       * run.completed 之后到达。落库版随刷新从消息部件回来；这条事件负责「不用刷新就出现」。
+       * 挂不到消息（非 completed 终态）就丢弃——快照仍是恢复权威。 */
+      if (t === 'run_actions.updated.v1') {
+        const record = payload.run_actions as import('@/api/agentSessions').RunActionsRecord | undefined;
+        const actionsRunId = str(data.run_id);
+        if (!record || !actionsRunId) return;
+        setMessages((prev) => {
+          const idx = prev.findIndex(
+            (m) => m.role === 'assistant' && (m.sourceRunId === actionsRunId || m.id.includes(actionsRunId)),
+          );
+          if (idx < 0) return prev;
+          const target = prev[idx];
+          const blocks = (target.blocks ?? []).filter((b) => b.type !== 'run_actions');
+          // 位置约定与服务端一致：思考之下、正文之上——先看它做了什么，再读它说了什么。
+          const thinkingCount = blocks.filter((b) => b.type === 'thinking').length;
+          const body = blocks.length > 0 ? blocks : target.content ? [{ type: 'text', text: target.content }] : [];
+          const next = [...prev];
+          next[idx] = {
+            ...target,
+            blocks: [
+              ...body.slice(0, thinkingCount),
+              { type: 'run_actions', run_actions: record },
+              ...body.slice(thinkingCount),
+            ],
+          };
+          return next;
+        });
+        setProgressTick((p) => p + 1);
+        return;
+      }
+
       /* ---- 产卡过程中的逐版预览（prompt_card.partial.v1，加法事件；IKA3GF） ----
        * payload.payload 是模型正在写、尚未校验的对象：字段会缺、类型会不对。映射函数是全函数，
        * 任何形状都不会抛。能落到画布上的卡片只有终态那一张，这里纯展示。 */

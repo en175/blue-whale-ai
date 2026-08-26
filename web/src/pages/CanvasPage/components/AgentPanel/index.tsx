@@ -18,6 +18,8 @@ import {
   CheckCircle2,
   RotateCcw,
   Package,
+  Cog,
+  AlertTriangle,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -570,6 +572,57 @@ function blockKey(block: SessionContentBlock, ordinals: Record<string, number>):
 }
 
 
+/**
+ * 一轮一条动作行（IKB93G）：常驻在对话流里、可展开，把「它在做」从「它在想」（ThinkingBlock）
+ * 里拿出来。数据是服务端的按轮台账（IKB926），刷新后随消息部件回来，不是内存态。
+ *
+ * **只有真调了工具的轮次才渲染**（2026-08-26 真机裁定）：网格追问轮本来就零调用，给每一轮
+ * 亮警示是把正常当异常——用户一屏黄色。零调用记录仍然完整落库，那是运维的检出原语，不是
+ * 用户的。失败/被拒的动作渲染警示态：产卡被门拒不再只是「卡了一下」。
+ *
+ * 「还差 N 项」不展示（record 里仍带）：计数来自需求理解版本表，而落库靠观察者攒够 token
+ * 才触发，短问答轮会滞后好几轮——一个几轮不动的数字比没有数字更糟。
+ */
+function ActionRow({ record }: { record: NonNullable<SessionContentBlock['run_actions']> }) {
+  const [open, setOpen] = useState(false);
+  if (record.actions.length === 0) return null;
+  const seconds = (ms: number) => (ms >= 100 ? `${(ms / 1000).toFixed(1)}s` : '');
+  const summary = record.actions.map((a) => a.summary.replace(/^正在/, '')).join(' · ');
+  const failed = record.actions.some((a) => a.status !== 'ok');
+  const statusLabel = { ok: '', failed: '失败', rejected: '被拒' } as const;
+  return (
+    <div className={`${styles.actionRow} ${failed ? styles.actionRowWarn : ''}`}>
+      <button type="button" className={styles.actionRowHead} onClick={() => setOpen(!open)} aria-expanded={open}>
+        {failed ? <AlertTriangle size={12} strokeWidth={2.5} /> : <Cog size={12} strokeWidth={2.5} />}
+        <span className={styles.actionRowSummary}>{summary}</span>
+        <span className={styles.actionRowMs}>{seconds(record.total_ms)}</span>
+        {open ? <ChevronUp size={12} strokeWidth={2.5} /> : <ChevronDown size={12} strokeWidth={2.5} />}
+      </button>
+      {open && (
+        <div className={styles.actionRowBody}>
+          {record.actions.map((a, i) => (
+            <div key={i}>
+              <div className={styles.actionRowItem}>
+                <span>
+                  {a.summary}
+                  {a.status !== 'ok' && <span className={styles.actionRowStatus}>（{statusLabel[a.status]}）</span>}
+                </span>
+                <span className={styles.actionRowMs}>{a.ended_ms != null ? seconds(a.ended_ms - a.started_ms) : ''}</span>
+              </div>
+              {a.substeps?.map((s, j) => (
+                <div key={j} className={styles.actionRowSubstep}>
+                  <span>{s.summary}</span>
+                  <span className={styles.actionRowMs}>{s.ended_ms != null ? seconds(s.ended_ms - s.started_ms) : ''}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AssistantMessageBody({
   message,
   onCardApply,
@@ -605,6 +658,9 @@ function AssistantMessageBody({
           return (
             <ThinkingBlock key={key} steps={b.thinking.steps ?? []} reasoning={b.thinking.reasoning} />
           );
+        }
+        if (b.type === 'run_actions' && b.run_actions) {
+          return <ActionRow key={key} record={b.run_actions} />;
         }
         if (b.type === 'card' && b.card) {
           const cardId = b.card.cardId ?? b.card.shotTitle;

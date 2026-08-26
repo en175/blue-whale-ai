@@ -331,9 +331,11 @@ export default function CanvasPage() {
                   setShowMusicDialog(false);
                   void apply;
                 },
-                onSendToAgent: (prompt: string, shotTitle?: string) => {
-                  setAgentContext({ text: prompt, label: shotTitle, ts: Date.now() });
-                  setShowAgent(true);
+                onSendToAgent: () => {
+                  // 给 Agent：走与节点工具栏同一条 @ 链路（collectMediaBlocks → 胶囊）。
+                  // 旧写法只塞 label 不采块，chip 上屏了、消息里却没有胶囊，agent 只收到
+                  // 光杆文字（IKBBKP 的根因）。
+                  actionsRef.current.addToChat(node.id);
                 },
                 onUpdate: (patch: Partial<Pick<GenerationCardBlock, 'shotTitle' | 'visual' | 'prompt'>>) => {
                   setAssetNodes((prev) =>
@@ -1596,10 +1598,11 @@ export default function CanvasPage() {
             setShowMusicDialog(false);
             void apply;
           },
-          onSendToAgent: (prompt: string, shotTitle?: string) => {
-            // 给 Agent：以引用胶囊形式注入侧边栏输入框
-            setAgentContext({ text: prompt, label: shotTitle, ts: Date.now() });
-            setShowAgent(true);
+          onSendToAgent: () => {
+            // 给 Agent：走与节点工具栏同一条 @ 链路（collectMediaBlocks → 胶囊）。
+            // 旧写法只塞 label 不采块，chip 上屏了、消息里却没有胶囊，agent 只收到
+            // 光杆文字（IKBBKP 的根因）。
+            actionsRef.current.addToChat(node.id);
           },
           onUpdate: (patch: Record<string, unknown>) => {
             setAssetNodes((prev) =>
