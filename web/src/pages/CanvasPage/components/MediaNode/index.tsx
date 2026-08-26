@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
+import { mediaNodeToolbarVisibility } from './toolbarVisibility';
 import styles from './index.module.css';
 
 interface MediaNodeData {
@@ -140,6 +141,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   const Icon = data.mediaType === 'video' ? Video : data.mediaType === 'audio' ? AudioLines : Image;
   const label = data.mediaType === 'video' ? '视频' : data.mediaType === 'audio' ? '音频' : '图片';
+  const toolbar = mediaNodeToolbarVisibility(data.mediaType);
   const isGenerating = data.genStatus === 'generating';
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
   const isMediaExtraction = isMediaExtractNodeId(id);
@@ -157,16 +159,18 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <RefreshCcw size={14} strokeWidth={2} />
             <span>重新编辑</span>
           </button>
-          {data.mediaType !== 'video' && (
+          {toolbar.genImage && (
             <button className={styles.toolBtn} onClick={handleGenImage} title="带入图片，打开图片对话框">
               <Sparkles size={14} strokeWidth={2} />
               <span>生成图片</span>
             </button>
           )}
-          <button className={styles.toolBtn} onClick={handleGenVideo} title="带入图片，打开视频对话框">
-            <Video size={14} strokeWidth={2} />
-            <span>生成视频</span>
-          </button>
+          {toolbar.genVideo && (
+            <button className={styles.toolBtn} onClick={handleGenVideo} title="带入图片，打开视频对话框">
+              <Video size={14} strokeWidth={2} />
+              <span>生成视频</span>
+            </button>
+          )}
           {data.mediaType === 'video' && (
             <button
               className={styles.toolBtn}
@@ -185,9 +189,11 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           <button className={styles.toolBtn} onClick={handleDownload} title="下载">
             <Download size={14} strokeWidth={2} />
           </button>
-          <button className={styles.toolBtn} onClick={handleMention} title="添加到 Agent 聊天">
-            <AtSign size={14} strokeWidth={2} />
-          </button>
+          {toolbar.mention && (
+            <button className={styles.toolBtn} onClick={handleMention} title="添加到 Agent 聊天">
+              <AtSign size={14} strokeWidth={2} />
+            </button>
+          )}
         </div>
       )}
 
