@@ -16,9 +16,30 @@ export type { SseEvent };
 /* ============ 类型 ============ */
 
 /** 消息正文块 */
+/** 一轮的真实执行台账（IKB926，`run_actions` 块/事件的载荷）。服务端产出，客户端只读。 */
+export interface RunActionsRecord {
+  actions: {
+    tool: string;
+    /** 服务端模板句；入参永不出现（PRD §4.2）。 */
+    summary: string;
+    started_ms: number;
+    ended_ms: number | null;
+    /** rejected = 被业务门挡下（如产卡被 freeze 门拒），failed = 真失败。 */
+    status: 'ok' | 'failed' | 'rejected';
+    substeps?: { id: string; summary: string; started_ms: number; ended_ms: number | null }[];
+  }[];
+  total_ms: number;
+  /** 本轮结束时会话是否仍在需求收集阶段。 */
+  requirement_stage: boolean;
+  /** 需求阶段「还差几项」；非需求阶段为 null。 */
+  outstanding_count: number | null;
+}
+
 export interface SessionContentBlock {
   type: string;
   text?: string;
+  /** 本轮动作台账块（IKB93G 的动作行由它渲染；服务端消息部件 `run_actions` 原样透传）。 */
+  run_actions?: RunActionsRecord;
   /**
    * 思考过程块（可折叠展示）。
    *
