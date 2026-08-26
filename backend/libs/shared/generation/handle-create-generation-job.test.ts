@@ -269,3 +269,263 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
     expect(failCreate).not.toHaveBeenCalled();
   });
 });
+
+// 素材库引用（MaterialReference）：仅视频生成；格式校验 + 与本地 Asset 引用按并集互斥/配对。
+function buildVideoDeps() {
+  const findOwnedById = vi.fn().mockResolvedValue({
+    id: "1",
+    name: "项目",
+    thumb: null,
+    created_at: "2026-08-18T00:00:00.000Z",
+  });
+  const listEnabledByType = vi.fn().mockResolvedValue([
+    { model_id: "doubao-seedance-2-0-260128" },
+  ]);
+  const createJob = vi.fn().mockResolvedValue({
+    generation_job_id: "1",
+    cursor: 1,
+  });
+  const deps = {
+    projects: { findOwnedById },
+    models: { listEnabledByType },
+    command: { createJob },
+  } as unknown as HandlerDeps;
+  return { deps, createJob };
+}
+
+const VIDEO_BODY = {
+  type: "video",
+  expected_output_count: 1,
+  parameters: {
+    prompt: "人物走过街角",
+    model_id: "seedance-2",
+    aspect_ratio: "16:9",
+    resolution: "720p",
+    duration: 8,
+  },
+};
+
+describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () => {
+  it("视频 + reference_materials（图+视频混合）→ 200，job.input 冻结素材引用快照", async () => {
+    const { deps, createJob } = buildVideoDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        reference_materials: [
+          { id: "Asset-img-1", type: "image" },
+          { id: "Asset-vid-2", type: "video" },
+        ],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.reference_materials).toEqual([
+      { id: "Asset-img-1", type: "image" },
+      { id: "Asset-vid-2", type: "video" },
+    ]);
+    expect(cmdArg.input.first_frame_material_id).toBeUndefined();
+  });
+
+  it("视频 + 素材库首帧 → 200，input 落 first_frame_material_id", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, first_frame_material_id: "Asset-ff-1" },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.first_frame_material_id).toBe("Asset-ff-1");
+  });
+
+  it("非 video（图片）带素材库引用 → 400 素材库引用仅支持视频生成", async () => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        type: "image",
+        expected_output_count: 1,
+        parameters: {
+          prompt: "海边日落",
+          model_id: "seedream-5.0",
+          aspect_ratio: "1:1",
+        },
+        reference_materials: [{ id: "Asset-img-1", type: "image" }],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("素材库引用仅支持视频生成");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("素材库首尾帧与素材库普通参考并存 → 400 首尾帧模式不能与普通参考素材混用", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        first_frame_material_id: "Asset-ff-1",
+        reference_materials: [{ id: "Asset-img-2", type: "image" }],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("首尾帧模式不能与普通参考素材混用");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("素材库尾帧无首帧 → 400 尾帧必须与首帧一起使用", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, last_frame_material_id: "Asset-lf-1" },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("尾帧必须与首帧一起使用");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("同一帧位 asset 与 material 并存 → 400 首帧只能指定一个来源", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        first_frame_asset_id: "1",
+        first_frame_material_id: "Asset-ff-1",
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("首帧只能指定一个来源");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("asset 首帧与素材库普通参考并存 → 400 首尾帧模式不能与普通参考素材混用", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        first_frame_asset_id: "1",
+        reference_materials: [{ id: "Asset-img-2", type: "image" }],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("首尾帧模式不能与普通参考素材混用");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("素材库首帧与 asset 普通参考并存 → 400 首尾帧模式不能与普通参考素材混用", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        first_frame_material_id: "Asset-ff-1",
+        reference_asset_ids: ["5"],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("首尾帧模式不能与普通参考素材混用");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("素材库引用重复 ID 去重 → 200，input 只保留一份", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        reference_materials: [
+          { id: "Asset-img-1", type: "image" },
+          { id: "Asset-img-1", type: "image" },
+        ],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.reference_materials).toEqual([
+      { id: "Asset-img-1", type: "image" },
+    ]);
+  });
+
+  it("素材库参考超 12 个 → 400 参考素材最多 12 个", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const refs = Array.from({ length: 13 }, (_, i) => ({
+      id: `Asset-ref-${i}`,
+      type: "image" as const,
+    }));
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, reference_materials: refs },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考素材最多 12 个");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("素材库引用 ID 非法（非 Asset- 前缀）→ 400 参考素材库引用无效", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        reference_materials: [{ id: "plain-id", type: "image" }],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考素材库引用无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("素材库引用 type 非法 → 400 参考素材库引用无效", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        reference_materials: [{ id: "Asset-img-1", type: "audio" }],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考素材库引用无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+});

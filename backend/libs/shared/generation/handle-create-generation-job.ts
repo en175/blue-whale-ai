@@ -33,8 +33,49 @@ export interface CreateGenerationJobBody {
   first_frame_asset_id?: unknown;
   last_frame_asset_id?: unknown;
   reference_asset_ids?: unknown;
+  /** 素材库引用（MaterialReference）：上游素材库素材 ID（Asset- 前缀），仅视频生成。 */
+  first_frame_material_id?: unknown;
+  last_frame_material_id?: unknown;
+  /** 元素 { id: "Asset-xxx", type: "image" | "video" }；素材零落表，类型由调用方声明。 */
+  reference_materials?: unknown;
   parameters?: unknown;
   expected_output_count?: unknown;
+}
+
+/** 素材库引用（MaterialReference）：仅格式校验（Asset- 前缀），存在性/状态由上游强校验。 */
+export interface MaterialReferenceInput {
+  id: string;
+  type: "image" | "video";
+}
+
+const MATERIAL_ID_PATTERN = /^Asset-.{1,128}$/;
+
+function materialId(v: unknown): string | null {
+  return typeof v === "string" && MATERIAL_ID_PATTERN.test(v) ? v : null;
+}
+
+/** 解析 reference_materials；未传返回 []，格式非法返回 null（整体拒绝）。 */
+function materialRefs(v: unknown): MaterialReferenceInput[] | null {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) return null;
+  const refs: MaterialReferenceInput[] = [];
+  for (const item of v) {
+    if (typeof item !== "object" || item === null) return null;
+    const { id, type } = item as { id?: unknown; type?: unknown };
+    if (materialId(id) === null) return null;
+    if (type !== "image" && type !== "video") return null;
+    refs.push({ id: id as string, type });
+  }
+  return refs;
+}
+
+function uniqueMaterialRefs(
+  refs: MaterialReferenceInput[],
+): MaterialReferenceInput[] {
+  return refs.reduce<MaterialReferenceInput[]>((result, ref) => {
+    if (!result.some((r) => r.id === ref.id)) result.push(ref);
+    return result;
+  }, []);
 }
 
 function isStr(v: unknown): v is string {
@@ -139,6 +180,52 @@ function validate(body: CreateGenerationJobBody): string | null {
     if (!hasExplicitInputs && inputAssetIds.length > 1)
       return "视频生成仅支持 0 或 1 个参考图";
   }
+  // 素材库引用（MaterialReference）：仅视频生成可用；格式校验 + 与本地 Asset 引用按并集互斥/配对。
+  if (type !== "video") {
+    if (
+      body.first_frame_material_id !== undefined ||
+      body.last_frame_material_id !== undefined ||
+      body.reference_materials !== undefined
+    ) {
+      return "素材库引用仅支持视频生成";
+    }
+  } else {
+    const firstFrameAssetId2 = assetId(body.first_frame_asset_id);
+    const lastFrameAssetId2 = assetId(body.last_frame_asset_id);
+    const firstFrameMaterialId = materialId(body.first_frame_material_id);
+    const lastFrameMaterialId = materialId(body.last_frame_material_id);
+    if (
+      body.first_frame_material_id !== undefined &&
+      firstFrameMaterialId === null
+    )
+      return "首帧素材库引用无效";
+    if (body.last_frame_material_id !== undefined && lastFrameMaterialId === null)
+      return "尾帧素材库引用无效";
+    if (firstFrameAssetId2 !== null && firstFrameMaterialId !== null)
+      return "首帧只能指定一个来源";
+    if (lastFrameAssetId2 !== null && lastFrameMaterialId !== null)
+      return "尾帧只能指定一个来源";
+    if (lastFrameMaterialId !== null && firstFrameMaterialId === null)
+      return "尾帧必须与首帧一起使用";
+    const refs = materialRefs(body.reference_materials);
+    if (refs === null) return "参考素材库引用无效";
+    const uniqueRefs = uniqueMaterialRefs(refs);
+    // 模式互斥按并集（asset ∨ material）：帧（首/尾帧任一类）与普通参考（asset refs ∨ material refs）
+    // 不可并存；跨来源组合在创建即拒绝，不再拖到 Worker 执行时才失败。
+    const hasFrameSource =
+      firstFrameAssetId2 !== null ||
+      lastFrameAssetId2 !== null ||
+      firstFrameMaterialId !== null ||
+      lastFrameMaterialId !== null;
+    const hasRefSource =
+      assetIds(body.reference_asset_ids).length > 0 || uniqueRefs.length > 0;
+    if (hasFrameSource && hasRefSource) {
+      return "首尾帧模式不能与普通参考素材混用";
+    }
+    if (body.reference_materials !== undefined && uniqueRefs.length > 12) {
+      return "参考素材最多 12 个";
+    }
+  }
   return null;
 }
 
@@ -232,6 +319,16 @@ export async function handleCreateGenerationJob(
     if (lastFrameAssetId) input.last_frame_asset_id = lastFrameAssetId;
     if (referenceAssetIds.length > 0)
       input.reference_asset_ids = referenceAssetIds;
+    // 素材库引用：冻结进 input 快照（仅 video）。零本地表，Worker 执行时转 asset:// 载体。
+    const firstFrameMaterialId = materialId(body.first_frame_material_id);
+    const lastFrameMaterialId = materialId(body.last_frame_material_id);
+    const materialRefsResolved = uniqueMaterialRefs(
+      materialRefs(body.reference_materials) ?? [],
+    );
+    if (firstFrameMaterialId) input.first_frame_material_id = firstFrameMaterialId;
+    if (lastFrameMaterialId) input.last_frame_material_id = lastFrameMaterialId;
+    if (materialRefsResolved.length > 0)
+      input.reference_materials = materialRefsResolved;
   }
   // 图片与视频一致：sk token 密封进 job.input.provider_credential，处理时由 worker 解出。
   // 这样进程内即时调度与重启后的恢复扫描共用同一套凭据来源。

@@ -411,6 +411,54 @@ Agent 每次开始推进时，基于本轮 UserMessage 的有序引用事实、�
 _Avoid_: AgentRun 的可变上下文包；恢复时重新读取最新版；权限撤销后继续消费快照；浏览器生成的权限证明；
 把权限证据当永久授权
 
+### 素材库（Material Library）
+
+> 素材库是上游网关（blue-whale-api，new-api 二开）对外提供的**共享、单租户**素材资源能力，
+> 透明反向代理 ai-tokenhub 素材库 API（火山 ARK 兼容接口）。指标与术语与网关仓同源；
+> 本仓只对接，不改上游。素材库概念**必须带「素材库 / 素材组」前缀**，本仓裸「素材」仍指 Asset。
+
+**素材库（material library）**:
+网关对外暴露的素材资源能力集；凭证（AK/SK）配置在网关侧，下游客户端不持有。本仓产品经
+`POST /api/material/{Action}` 透传调用，归属与状态以网关/上游为权威，本地零落表。
+_Avoid_: 渠道（它不提供模型请求）、本仓落库镜像、把素材库素材当成 Product Fact
+
+**素材组（material group）**:
+按「真人主体/虚拟人像」划分的资源集合，上游称 seedance asset group；一个真人素材组只对应
+一个真人主体。素材 ID 形如 `group-...`。
+_Avoid_: 素材库（组是其中的一个集合）、Project、Canvas 概念
+
+**真人素材组（LivenessFace group）**:
+需真人通过火山 H5 刷脸认证才能启用的素材组；认证经 `CreateVisualValidateSession` 发起，
+本产品可通过透传 API 创建会话拿 H5Link、轮询 `GetVisualValidateResult` 领组，认证数据与
+回调全由网关维护，**不暴露自定义 CallbackURL**。
+_Avoid_: 人脸组、把认证会话数据处理成本仓产品事实
+
+**虚拟素材组（AIGC group）**:
+同步创建即用、无需认证的素材组（`CreateAssetGroup`，`GroupType: AIGC`）。
+_Avoid_: 虚拟组、真人素材组
+
+**素材（material）**:
+素材组下的单个图片/视频/音频；生成任务以 `asset://<素材ID>` 引用它，经 `ListAssets` 按组查询。
+素材 ID 形如 `Asset-...`。
+_Avoid_: 文件、附件、Asset（本仓的 Project 文件单元）
+
+**素材状态**:
+`Active`（就绪）、`Processing`（处理中）、`Failed`（失败）。状态以上游为准，本地不镜像。
+_Avoid_: 状态码、本仓持久化状态
+
+**素材引用（MaterialReference）**:
+视频生成输入里对素材库素材的引用；创建生成任务时由调用方声明 `{ id, type: "image"|"video" }`
+（素材零落表，类型无处可查，只能随请求携带），Worker 转成 `asset://<素材ID>` 载体交给生成
+供应商。只做格式校验（`Asset-` 前缀），存在性/状态/物理约束由上游强校验。
+它是 `generation_jobs.input` 冻结的引用快照，不是独立生命周期资源。
+_Avoid_: PlanMessage 的 `asset://<mention_id>`（那是内部正文引用协议）、把素材引用当 AssetMention
+
+**`asset://` 双义隔离**:
+`asset://<mention_id>` 只出现在 PlanMessage 正文，是服务端解析的内部素材引用协议；
+`asset://<素材ID>` 只出现在提交给生成供应商的请求（`metadata.content` 的 `url` 字段），是
+火山 ARK 原生素材载体。两者同形不同义、永不互串；本期只接后者（生成链路），不碰前者。
+_Avoid_: 把素材库素材引用写进 PlanMessage 正文、把 PlanMessage mention 协议原样发给供应商
+
 **GenerationJob（生成任务）**:
 一次持久化的图片或视频后台任务。任务归属于 Project，页面刷新、浏览器关闭或服务重启后，
 已接纳状态与结果仍可恢复；同一请求或供应商回调重放不得产生重复任务、结果或费用。

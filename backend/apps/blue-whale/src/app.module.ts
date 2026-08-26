@@ -30,6 +30,7 @@ import { CanvasApiModule } from "./api/canvases/canvases.module.js";
 import { GenerationApiModule } from "./api/generation/generation.module.js";
 import { HealthModule } from "./api/health/health.module.js";
 import { JobsApiModule } from "./api/jobs/jobs.module.js";
+import { MaterialApiModule } from "./api/material/material.module.js";
 import { MediaExtractionsApiModule } from "./api/media-extractions/media-extractions.module.js";
 import { ProjectAssetsModule } from "./api/project-assets/project-assets.module.js";
 import { ProjectsApiModule } from "./api/projects/projects.module.js";
@@ -73,6 +74,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     AdminModule,
     JobsApiModule,
     CanvasApiModule,
+    MaterialApiModule,
     MediaExtractionsApiModule,
     ProjectsApiModule,
     ProjectAssetsModule,
