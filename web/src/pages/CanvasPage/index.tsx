@@ -1050,36 +1050,39 @@ export default function CanvasPage() {
     }
   };
 
-  /** 上传文件生成媒体节点：本地预览立即上画布，后台三步上传登记，成功后换永久 URL */
-  const handleUploadFile = (files: File[]) => {
-    const newNodes: Node[] = [];
+  /**
+   * 单文件落到画布：本地预览立即可见，后台三步上传成功后换永久 URL。
+   * 工具栏多选和 Agent 侧边栏「+」（IKBA6C）共用这一条，避免会话附件与画布各传一次。
+   */
+  const placeFileOnCanvas = (file: File, offsetIndex = 0): Promise<{ asset_id: string; url: string }> => {
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+    if (!isImage && !isVideo) {
+      return Promise.reject(new Error('只支持图片或视频'));
+    }
+    const limit = UPLOAD_SIZE_LIMIT[isImage ? 'image' : 'video'];
+    if (file.size > limit) {
+      return Promise.reject(new Error(`文件超过 ${Math.round(limit / 1024 / 1024)}MB 上限`));
+    }
+    const nodeId = newNodeId('media');
+    const localSrc = URL.createObjectURL(file);
     const center = spawnPosRef.current();
-    files.forEach((file, i) => {
-      const isImage = file.type.startsWith('image/');
-      const isVideo = file.type.startsWith('video/');
-      if (!isImage && !isVideo) return;
-      const limit = UPLOAD_SIZE_LIMIT[isImage ? 'image' : 'video'];
-      if (file.size > limit) {
-        console.warn(`[${file.name}] 超过 ${Math.round(limit / 1024 / 1024)}MB 上限，已跳过`);
-        return;
-      }
-      const nodeId = newNodeId('media');
-      const localSrc = URL.createObjectURL(file);
-
-      newNodes.push({
+    setMediaNodes((prev) => [
+      ...prev,
+      {
         id: nodeId,
         type: 'mediaNode',
-        position: { x: Math.round(center.x + i * 280), y: Math.round(center.y + Math.random() * 100) },
+        position: { x: Math.round(center.x + offsetIndex * 280), y: Math.round(center.y + Math.random() * 100) },
         data: {
           src: localSrc,
           fileName: file.name,
           mediaType: isVideo ? 'video' : 'image',
           toolMode,
           onDelete: (id: string) => {
-            setMediaNodes((prev) => {
-              const node = prev.find((n) => n.id === id);
+            setMediaNodes((current) => {
+              const node = current.find((n) => n.id === id);
               if (node?.data?.src) URL.revokeObjectURL(node.data.src as string);
-              return prev.filter((n) => n.id !== id);
+              return current.filter((n) => n.id !== id);
             });
           },
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),
@@ -1095,35 +1098,44 @@ export default function CanvasPage() {
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
         },
+      },
+    ]);
+    return uploadAssetFile(file, { projectId: currentId || undefined })
+      .then((done) => {
+        setMediaNodes((prev) =>
+          prev.map((n) => {
+            if (n.id !== nodeId) return n;
+            URL.revokeObjectURL(localSrc);
+            return {
+              ...n,
+              data: {
+                ...n.data,
+                src: done.url || localSrc,
+                assetId: done.asset_id,
+                mime: done.mime,
+                width: done.width,
+                height: done.height,
+                duration: done.duration ?? undefined,
+                size: done.size,
+              },
+            };
+          }),
+        );
+        return { asset_id: done.asset_id, url: done.url };
+      })
+      .catch((err) => {
+        console.warn(`画布上传登记失败（${file.name}），保留本地预览:`, err);
+        throw err instanceof Error ? err : new Error('上传失败');
       });
-      uploadAssetFile(file, { projectId: currentId || undefined })
-        .then((done) => {
-          setMediaNodes((prev) =>
-            prev.map((n) => {
-              if (n.id !== nodeId) return n;
-              URL.revokeObjectURL(localSrc);
-              return {
-                ...n,
-                data: {
-                  ...n.data,
-                  src: done.url || localSrc,
-                  assetId: done.asset_id,
-                  mime: done.mime,
-                  width: done.width,
-                  height: done.height,
-                  duration: done.duration ?? undefined,
-                  size: done.size,
-                },
-              };
-            }),
-          );
-        })
-        .catch((err) => {
-          console.warn(`画布上传登记失败（${file.name}），保留本地预览:`, err);
-        });
-    });
+  };
 
-    if (newNodes.length > 0) setMediaNodes((prev) => [...prev, ...newNodes]);
+  /** 上传文件生成媒体节点：本地预览立即上画布，后台三步上传登记，成功后换永久 URL */
+  const handleUploadFile = (files: File[]) => {
+    files.forEach((file, i) => {
+      void placeFileOnCanvas(file, i).catch(() => {
+        /* 工具栏路径保持原语义：失败时节点仍留本地预览，错误已在 placeFileOnCanvas 里 warn */
+      });
+    });
   };
 
   /* ============ 生成任务编排：创建 → 占位节点 → 轮询 → 产物挂载 ============ */
@@ -2505,6 +2517,7 @@ export default function CanvasPage() {
           initialSkillId={agentContext?.skillId ?? ''}
           initialSkillName={agentContext?.skillName ?? ''}
           mediaBlocks={agentContext?.mediaBlocks}
+          onPlaceFileOnCanvas={placeFileOnCanvas}
         />
       )}
 

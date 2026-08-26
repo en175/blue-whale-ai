@@ -28,8 +28,7 @@ import { useAgentSession, type ChatMessage, type TurnOutcome } from '../../hooks
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
 import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock, type OutboundAssetRef } from '@/api/agentSessions';
-import { uploadAssetFile } from '@/utils/upload';
-import { planAttachment } from './attachments';
+import { commitSidebarAttachment, planAttachment, type SidebarCanvasUpload } from './attachments';
 import { MessageAssetPreview, rememberAssetUrl } from './MessageAssetPreview';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -735,9 +734,14 @@ interface AgentPanelProps {
   initialSkillName?: string;
   /** 媒体块：从画布节点「添加到对话」时携带的图片/视频/音频元数据 */
   mediaBlocks?: import('@/api/agentSessions').SessionContentBlock[];
+  /**
+   * 侧边栏「+」上传必须走这条路（IKBA6C）：立即在画布落媒体节点，并完成同一份三步上传。
+   * 只登记会话附件、不落画布，就是这次缺陷。
+   */
+  onPlaceFileOnCanvas: (file: File) => Promise<SidebarCanvasUpload>;
 }
 
-export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks }: AgentPanelProps) {
+export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas }: AgentPanelProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供发送按钮启用态判断 */
@@ -1328,6 +1332,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 选中文件即开始上传：先插一条 `uploading` 行，拿到 asset_id 后就地改成 `ready`。
    *  上传发生在选择那一刻而不是发送那一刻——否则用户点了发送还要干等一次网络往返。
    *
+   *  同一份文件必须同时落到画布（IKBA6C）：`commitSidebarAttachment` 只走
+   *  `onPlaceFileOnCanvas`，不再单独 `uploadAssetFile`，避免会话附件与画布各传一次。
+   *
    *  media_type 按文件的真实 MIME 判定，不按用户点的是哪个按钮：两者不一致时（在「上传图片」
    *  里挑了个视频，某些平台允许）真实类型才是对的，报错也要报得准。asset_ref 只认 image/video，
    *  音频当场拒掉而不是传上去再失败。 */
@@ -1346,26 +1353,21 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         continue;
       }
       setAttachments((prev) => [...prev, { key, name: file.name, mediaType: plan.mediaType, status: 'uploading' }]);
-      try {
-        // projectId 到这里一定有值（planAttachment 已挡）。素材必须落在**会话所在项目**里，
-        // 否则 Agent 复核归属查不到，识别会以「资源不存在」整条失败。
-        const uploaded = await uploadAssetFile(file, { projectId });
-        // 登记 id → url，刚发出的那张图不必再反查一次素材库。
-        rememberAssetUrl(uploaded.asset_id, uploaded.url);
+      const result = await commitSidebarAttachment(file, projectId, onPlaceFileOnCanvas);
+      if (result.ok === false) {
         setAttachments((prev) =>
           prev.map((item) =>
-            item.key === key ? { ...item, status: 'ready' as const, assetId: uploaded.asset_id } : item,
+            item.key === key ? { ...item, status: 'failed' as const, error: result.error } : item,
           ),
         );
-      } catch (e) {
-        setAttachments((prev) =>
-          prev.map((item) =>
-            item.key === key
-              ? { ...item, status: 'failed' as const, error: e instanceof Error ? e.message : '上传失败' }
-              : item,
-          ),
-        );
+        continue;
       }
+      rememberAssetUrl(result.uploaded.asset_id, result.uploaded.url);
+      setAttachments((prev) =>
+        prev.map((item) =>
+          item.key === key ? { ...item, status: 'ready' as const, assetId: result.uploaded.asset_id } : item,
+        ),
+      );
     }
   };
 

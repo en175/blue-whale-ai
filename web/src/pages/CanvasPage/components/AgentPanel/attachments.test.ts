@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest';
-import { planAttachment } from './attachments';
+import { describe, expect, it, vi } from 'vitest';
+import { commitSidebarAttachment, planAttachment } from './attachments';
 
 const png = () => new File([''], 'a.png', { type: 'image/png' });
 
@@ -29,5 +29,49 @@ describe('planAttachment', () => {
         error: '当前没有项目，无法上传素材',
       });
     }
+  });
+});
+
+describe('commitSidebarAttachment', () => {
+  const uploaded = { asset_id: 'asset-1', url: 'https://cdn.example/a.png' };
+
+  it('places a valid file on the canvas instead of uploading only into the session (IKBA6C)', async () => {
+    const placeOnCanvasAndUpload = vi.fn(async (file: File) => {
+      expect(file.name).toBe('a.png');
+      return uploaded;
+    });
+    await expect(commitSidebarAttachment(png(), '163', placeOnCanvasAndUpload)).resolves.toEqual({
+      ok: true,
+      mediaType: 'image',
+      uploaded,
+    });
+    expect(placeOnCanvasAndUpload).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not touch the canvas when the file is rejected', async () => {
+    const placeOnCanvasAndUpload = vi.fn();
+    await expect(
+      commitSidebarAttachment(new File([''], 'a.pdf', { type: 'application/pdf' }), '163', placeOnCanvasAndUpload),
+    ).resolves.toMatchObject({ ok: false, error: '只支持图片或视频' });
+    expect(placeOnCanvasAndUpload).not.toHaveBeenCalled();
+  });
+
+  it('does not touch the canvas when there is no project', async () => {
+    const placeOnCanvasAndUpload = vi.fn();
+    await expect(commitSidebarAttachment(png(), undefined, placeOnCanvasAndUpload)).resolves.toEqual({
+      ok: false,
+      error: '当前没有项目，无法上传素材',
+    });
+    expect(placeOnCanvasAndUpload).not.toHaveBeenCalled();
+  });
+
+  it('surfaces canvas-upload failures without claiming the attachment is ready', async () => {
+    const placeOnCanvasAndUpload = vi.fn(async () => {
+      throw new Error('画布上传登记失败');
+    });
+    await expect(commitSidebarAttachment(png(), '163', placeOnCanvasAndUpload)).resolves.toEqual({
+      ok: false,
+      error: '画布上传登记失败',
+    });
   });
 });

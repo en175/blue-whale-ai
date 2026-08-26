@@ -12,6 +12,12 @@ export type AttachmentPlan =
   | { ok: true; mediaType: 'image' | 'video' }
   | { ok: false; error: string };
 
+/** 侧边栏上传落画布后需要的最小结果：会话附件只认 asset_id，预览靠 url。 */
+export type SidebarCanvasUpload = {
+  asset_id: string;
+  url: string;
+};
+
 export function planAttachment(file: File, projectId: string | undefined): AttachmentPlan {
   // 类型按真实 MIME 判定，不按用户点的是哪个菜单项。
   const detected = fileToAssetType(file);
@@ -22,4 +28,29 @@ export function planAttachment(file: File, projectId: string | undefined): Attac
     return { ok: false, error: '当前没有项目，无法上传素材' };
   }
   return { ok: true, mediaType: detected };
+}
+
+/**
+ * 侧边栏「+」选中文件后的提交契约（IKBA6C）。
+ *
+ * 能带上的文件必须走 `placeOnCanvasAndUpload`：先在画布落媒体节点（本地预览立即可见），
+ * 再完成同一份三步上传。只登记会话附件、不落画布，就是这次缺陷本身。
+ * 判定失败则根本不碰画布。
+ */
+export async function commitSidebarAttachment(
+  file: File,
+  projectId: string | undefined,
+  placeOnCanvasAndUpload: (file: File) => Promise<SidebarCanvasUpload>,
+): Promise<
+  | { ok: true; mediaType: 'image' | 'video'; uploaded: SidebarCanvasUpload }
+  | { ok: false; error: string }
+> {
+  const plan = planAttachment(file, projectId);
+  if (plan.ok === false) return plan;
+  try {
+    const uploaded = await placeOnCanvasAndUpload(file);
+    return { ok: true, mediaType: plan.mediaType, uploaded };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '上传失败' };
+  }
 }
