@@ -48,7 +48,9 @@ export interface MaterialReferenceInput {
   type: "image" | "video";
 }
 
-const MATERIAL_ID_PATTERN = /^Asset-.{1,128}$/;
+// 素材库 ID 实测存在小写 asset- 前缀（如 asset-20260820153209-6c9z8），大小写不敏感校验；
+// 本地 Asset id 为纯数字（BigInt），前缀判定不冲突。
+const MATERIAL_ID_PATTERN = /^asset-.{1,128}$/i;
 
 function materialId(v: unknown): string | null {
   return typeof v === "string" && MATERIAL_ID_PATTERN.test(v) ? v : null;

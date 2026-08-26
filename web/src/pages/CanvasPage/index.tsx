@@ -1628,7 +1628,9 @@ export default function CanvasPage() {
     // 其余（本地 Asset id / 本地上传）走 asset 字段。两类不可混用于同一帧位（后端 400）。
     const resolved: Array<{ assetId: string | null; materialId: string | null; type: 'image' | 'video' }> = [];
     for (const r of refs) {
-      if (typeof r.assetId === 'string' && /^Asset-/.test(r.assetId)) {
+      // 素材库 ID 实测为小写 asset- 前缀（如 asset-20260820153209-6c9z8），大小写不敏感判定；
+      // 本地 Asset id 为纯数字（BigInt），不冲突。
+      if (typeof r.assetId === 'string' && /^asset-/i.test(r.assetId)) {
         resolved.push({ assetId: null, materialId: r.assetId, type: r.type });
         continue;
       }
