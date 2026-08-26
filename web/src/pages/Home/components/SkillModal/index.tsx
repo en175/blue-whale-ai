@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   X,
-  Plus,
+  // Plus, // 隐藏「创建技能」入口（2026-08-26 需求：仅隐藏按钮保留代码，恢复时一并解注释）
   Search,
   ChevronDown,
   Store,
@@ -291,6 +291,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
               <Store size={15} strokeWidth={2} />
               <span>技能库</span>
             </button>
+            {/* 隐藏「创建技能」入口（2026-08-26 需求：仅隐藏按钮保留代码，恢复时一并解注释）
             <button
               className={`${styles.tab} ${tab === 'create' ? styles.tabActive : ''}`}
               onClick={() => setTab('create')}
@@ -298,6 +299,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
               <Plus size={15} strokeWidth={2} />
               <span>创建技能</span>
             </button>
+            */}
           </div>
           <button className={styles.closeBtn} onClick={onClose} title="关闭">
             <X size={16} strokeWidth={2} />
