@@ -16,6 +16,7 @@ import { isApiError } from '@/api/http';
 import { useAuthStore, type SessionUser } from '@/stores/auth';
 import { updateUser } from '@/utils/auth';
 import styles from './index.module.css';
+import { isRegisterPasswordValid } from './password';
 
 interface LoginModalProps {
   onClose: () => void;
@@ -38,9 +39,10 @@ export default function LoginModal({ onClose, initialMode = 'login' }: LoginModa
 
   /* ---------- 表单校验 ---------- */
   const loginValid = username.trim().length > 0 && password.length > 0 && agreed;
+  const passwordRuleError = mode === 'register' && password.length > 0 && !isRegisterPasswordValid(password);
   const registerValid =
     username.trim().length >= 3 &&
-    password.length >= 6 &&
+    isRegisterPasswordValid(password) &&
     password === confirmPwd &&
     agreed;
 
@@ -185,10 +187,17 @@ export default function LoginModal({ onClose, initialMode = 'login' }: LoginModa
             <input
               className={styles.input}
               type="password"
-              placeholder="密码（至少6位）"
+              placeholder="密码（9-20位）"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              aria-invalid={passwordRuleError}
+              aria-describedby={passwordRuleError ? 'register-password-error' : undefined}
             />
+            {passwordRuleError && (
+              <div id="register-password-error" className={styles.error}>
+                密码长度需为 9-20 个字符
+              </div>
+            )}
             <input
               className={styles.input}
               type="password"

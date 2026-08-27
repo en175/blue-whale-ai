@@ -28,6 +28,7 @@ import MediaNode from '../MediaNode';
 import ProductNode from '../ProductNode';
 import AssetCardNode from '../AssetCardNode';
 import CustomEdge from '../CustomEdge';
+import { canvasDeleteKeyAction, deleteSelectedCanvasNodes } from './keyboardDelete';
 import styles from './index.module.css';
 
 const initialNodes: Node[] = [];
@@ -268,27 +269,29 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     });
   }, [nodes, toolMode, setNodes]);
 
-  /** 删除节点 */
-  useEffect(() => {
-    // onDeleteNode 通过 data.onDelete 传入 TextNode
-  }, [onDeleteNode]);
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const onDeleteNodeRef = useRef(onDeleteNode);
+  onDeleteNodeRef.current = onDeleteNode;
 
-  /** 全局拦截 Delete/Backspace/Enter 键删除行为 */
+  /** Delete/Backspace 删除选中节点；Enter 继续拦截（输入框/编辑器内保持原语义） */
   useEffect(() => {
-    const BLOCKED_KEYS = ['Delete', 'Backspace', 'Enter'];
     const handler = (e: KeyboardEvent) => {
-      if (!BLOCKED_KEYS.includes(e.key)) return;
-      const target = e.target as HTMLElement;
-      // 输入框/编辑器内允许正常使用这些键
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return;
-      }
+      const action = canvasDeleteKeyAction(e.key, e.target);
+      if (action === 'ignore') return;
       e.preventDefault();
       e.stopPropagation();
+      if (action !== 'delete-selected') return;
+
+      const ids = deleteSelectedCanvasNodes(nodesRef.current, onDeleteNodeRef.current);
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+      setNodes((prev) => prev.filter((node) => !idSet.has(node.id)));
+      setEdges((prev) => prev.filter((edge) => !idSet.has(edge.source) && !idSet.has(edge.target)));
     };
     document.addEventListener('keydown', handler, true);
     return () => document.removeEventListener('keydown', handler, true);
-  }, []);
+  }, [setNodes, setEdges]);
 
   return (
     <div className={`${styles.canvasContainer} ${isDrag ? styles.dragMode : ''}`}>
