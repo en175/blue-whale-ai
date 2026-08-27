@@ -76,9 +76,10 @@ export function fetchMe() {
   return apiRequest<MeData>('/api/me');
 }
 
-/** 获取积分配额 */
-export function fetchQuota() {
-  return apiRequest<UsageTokenData>('/api/usage/token');
+/** 获取积分配额。fresh 时带时间戳，避免与在途 GET 去重/缓存命中支付前的 0。 */
+export function fetchQuota(options?: { fresh?: boolean }) {
+  const path = options?.fresh ? `/api/usage/token?_=${Date.now()}` : '/api/usage/token';
+  return apiRequest<UsageTokenData>(path);
 }
 
 /** 退出登录 */

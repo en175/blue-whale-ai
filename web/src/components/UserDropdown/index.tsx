@@ -17,6 +17,7 @@ import styles from './index.module.css';
 import { getCurrentUser, subscribe, isAdmin, updateUser, setSession } from '@/utils/auth';
 import { logout, fetchQuota, updateUsername, quotaToPoints } from '@/api/auth';
 import { useAuthStore } from '@/stores/auth';
+import { useRechargeUiStore } from '@/stores/recharge';
 import ProfileModal from './ProfileModal';
 import AccountModal from './AccountModal';
 import RechargeModal from './RechargeModal';
@@ -34,7 +35,9 @@ export default function UserDropdown() {
   const [open, setOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
-  const [showRecharge, setShowRecharge] = useState(false);
+  const showRecharge = useRechargeUiStore((s) => s.open);
+  const openRecharge = useRechargeUiStore((s) => s.openRecharge);
+  const closeRecharge = useRechargeUiStore((s) => s.closeRecharge);
   const [showLogin, setShowLogin] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const quota = useAuthStore((s) => s.quota);
@@ -87,6 +90,7 @@ export default function UserDropdown() {
   // 退出登录：调用退出接口后清空会话
   const handleLogout = async () => {
     setOpen(false);
+    closeRecharge();
     setLoggingOut(true);
     await logout().catch(() => undefined);
     setSession(null);
@@ -155,7 +159,7 @@ export default function UserDropdown() {
                     setOpen(false);
                     if (item.key === 'profile') setShowProfile(true);
                     if (item.key === 'account') setShowAccount(true);
-                    if (item.key === 'recharge') setShowRecharge(true);
+                    if (item.key === 'recharge') openRecharge();
                     if (item.key === 'settings') navigate('/admin');
                   }}
                 >
@@ -201,11 +205,11 @@ export default function UserDropdown() {
           phone={user.phone}
           balance={quota === null ? null : quota / 50000}
           onClose={() => setShowAccount(false)}
-          onOpenRecharge={() => setShowRecharge(true)}
+          onOpenRecharge={openRecharge}
         />
       )}
-      {/* 积分充值弹窗 */}
-      {showRecharge && <RechargeModal onClose={() => setShowRecharge(false)} />}
+      {/* 积分充值弹窗（用户菜单与生成前余额拦截共用） */}
+      {showRecharge && <RechargeModal onClose={closeRecharge} />}
     </div>
   );
 }

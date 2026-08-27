@@ -33,6 +33,7 @@ import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUploa
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { saveCanvasDoc, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
+import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
 import type { GenerationCardBlock, SessionContentBlock } from '@/api/agentSessions';
 import {
   createGenerationJob,
@@ -1109,6 +1110,7 @@ export default function CanvasPage() {
       console.warn('未选中项目，无法创建生成任务');
       return;
     }
+    if (blockIfQuotaInsufficient()) return;
     const nodeId = newNodeId('media-gen');
     const node: Node = {
       id: nodeId,
@@ -1161,6 +1163,10 @@ export default function CanvasPage() {
           pollJob(nodeId, created.generation_job_id);
         })
         .catch((e) => {
+          if (openRechargeForQuotaError(e)) {
+            setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+            return;
+          }
           patchMediaNode(nodeId, {
             genStatus: 'failed',
             errorText: isApiError(e) ? e.message : '创建任务失败',
@@ -1199,6 +1205,7 @@ export default function CanvasPage() {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const jobId = node?.data?.jobId as number | string | undefined;
     if (!currentId || !jobId) return;
+    if (blockIfQuotaInsufficient()) return;
     patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
     try {
       retryGenerationJob(currentId, jobId)
@@ -1207,6 +1214,13 @@ export default function CanvasPage() {
           pollJob(nodeId, created.generation_job_id);
         })
         .catch((e) => {
+          if (openRechargeForQuotaError(e)) {
+            patchMediaNode(nodeId, {
+              genStatus: 'failed',
+              errorText: isApiError(e) ? e.message : '余额不足',
+            });
+            return;
+          }
           patchMediaNode(nodeId, {
             genStatus: 'failed',
             errorText: isApiError(e) ? e.message : '重试失败',

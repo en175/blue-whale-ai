@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import styles from './index.module.css';
-import { fetchQuota, quotaToPoints } from '@/api/auth';
+import { quotaToPoints } from '@/api/auth';
 import {
   cancelRechargeOrder,
   createRechargeOrder,
@@ -26,6 +26,7 @@ import {
   type RechargeTier,
 } from '@/api/recharge';
 import { useAuthStore } from '@/stores/auth';
+import { refreshQuotaAfterPayment, syncQuotaFromUsageToken } from '@/utils/refreshQuota';
 
 interface RechargeModalProps {
   onClose: () => void;
@@ -70,7 +71,6 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   const [agreement, setAgreement] = useState<{ title: string; content: string } | null>(null);
 
   const quota = useAuthStore((s) => s.quota);
-  const setQuota = useAuthStore((s) => s.setQuota);
 
   const selected = tiers.find((t) => t.id === selectedId) ?? null;
   const paying = phase === 'creating' || phase === 'waiting';
@@ -94,25 +94,32 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     };
   }, []);
 
-  // 待支付态轮询订单状态（3s）；paid 后同步最新余额
+  // 待支付态轮询订单状态（立即一次 + 每 3s）；paid 后强制刷新 /api/usage/token
   useEffect(() => {
     if (phase !== 'waiting' || !order) return;
-    const timer = setInterval(() => {
+    let alive = true;
+    const tick = () => {
       fetchRechargeOrderStatus(order.trade_no)
         .then((st) => {
+          if (!alive) return;
           if (st.status === 'paid') {
             setPhase('paid');
-            fetchQuota()
-              .then((d) => setQuota(d.quota))
-              .catch(() => undefined);
+            void refreshQuotaAfterPayment({
+              previousQuota: useAuthStore.getState().quota,
+            });
           } else if (st.status === 'expired' || st.status === 'failed') {
             setPhase(st.status);
           }
         })
-        .catch(() => undefined); // 单次轮询失败忽略，等下一轮
-    }, 3000);
-    return () => clearInterval(timer);
-  }, [phase, order, setQuota]);
+        .catch(() => undefined);
+    };
+    tick();
+    const timer = setInterval(tick, 3000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [phase, order]);
 
   /** 确认支付 / 重新支付：创建订单并展示真实二维码 */
   const handleConfirm = () => {
@@ -130,10 +137,13 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
       });
   };
 
-  /** 关闭：未支付订单调用取消（幂等 no-op）后退出 */
+  /** 关闭：未支付订单调用取消（幂等 no-op）；支付中/已支付再拉一次余额，避免顶栏仍为 0 */
   const handleClose = () => {
     if (order && phase === 'waiting') {
       cancelRechargeOrder(order.trade_no).catch(() => undefined);
+    }
+    if (phase === 'paid' || phase === 'waiting') {
+      void syncQuotaFromUsageToken();
     }
     onClose();
   };
