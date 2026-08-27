@@ -231,6 +231,15 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     saveSelection();
   }, [saveSelection]);
 
+  /** 粘贴清洗：将富文本转为纯文本 */
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    document.execCommand('insertText', false, text);
+    saveSelection();
+    syncContent();
+  }, [saveSelection, syncContent]);
+
   /** 编辑器键盘操作后保存选区并同步 */
   const handleEditorKeyUp = useCallback(() => {
     saveSelection();
@@ -356,6 +365,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           }}
           onMouseUp={handleEditorMouseUp}
           onKeyUp={handleEditorKeyUp}
+          onPaste={handlePaste}
           data-placeholder="输入内容..."
         />
       </div>
