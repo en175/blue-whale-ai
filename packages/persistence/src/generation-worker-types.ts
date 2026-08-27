@@ -42,6 +42,8 @@ export interface ClaimedVideoJob {
   cancelRequested: boolean;
   workerId: string;
   fencingToken: number;
+  /** 已轮询次数（rescheduleVideoPoll 累计）。IKBBXH：轮询上限判定用。 */
+  pollCount: number;
   /** IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null）。 */
   reservedAmountFen: bigint | null;
 }

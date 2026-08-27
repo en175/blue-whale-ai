@@ -6,6 +6,9 @@ import {
   VIDEO_GENERATION_QUEUE,
 } from "./queue.constants.js";
 
+/** IKBBXH：RocketMQ producer 延时下限（ms）。topic 只收 DELAY 消息，delay≤0 也落到该值，保证消息判为 DELAY。 */
+export const VIDEO_MIN_DELAY_MS = 1_000;
+
 export type VideoQueueProducer = {
   enqueue(jobId: string, options?: { delayMs?: number }): Promise<void>;
 };
@@ -45,7 +48,9 @@ export function loadRedisConnection(
   };
 }
 
-/** BullMQ 适配器：把 Queue 包成 VideoQueueProducer 端口（VIDEO_QUEUE_DRIVER=bullmq 回退路径）。jobName 区分任务类型（step=视频 / extract=媒体提取）。 */
+/** BullMQ 适配器：把 Queue 包成 VideoQueueProducer 端口（VIDEO_QUEUE_DRIVER=bullmq 回退路径）。jobName 区分任务类型（step=视频 / extract=媒体提取）。
+ *  注：BullMQ/Redis 无「只收 DELAY」的 topic 约束，delay=0 即即时任务——只有 RocketMQ 路径（createRocketMqVideoProducer）
+ *  需要 ≥VIDEO_MIN_DELAY_MS 的延时下限来保证消息判为 DELAY，勿把此下限搬到 BullMQ 适配器。 */
 export function createVideoQueueProducer(
   queue: QueuePort,
   jobName = "step",
@@ -108,7 +113,7 @@ export function createRocketMqVideoProducer(
         topic: config.topic,
         tag: config.tag,
         body: Buffer.from(JSON.stringify({ jobId })),
-        ...(delay > 0 ? { delay } : {}),
+        delay: delay > 0 ? delay : VIDEO_MIN_DELAY_MS,
       });
     },
   };

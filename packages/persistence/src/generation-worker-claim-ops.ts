@@ -5,6 +5,9 @@ import type {PrismaClient} from "@prisma/client";
 import {CLAIMABLE_JOB_SOURCES, imageJobLeaseSeconds} from "./generation-worker-internals.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
+/** IKBBXH：recovery 兜底只捞创建 RECOVERY_MAX_AGE_MS 内的任务，避免卡死任务被 60s 循环无限重放。 */
+const RECOVERY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 /** IK9VZ0：视频实扣二次校验用——读 job 当前预留金额（fen）。查询失败/无预留 → null，不阻塞认领。 */
 async function loadReservationFen(
   prisma: PrismaClient,
@@ -117,6 +120,8 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
           type: "video",
           source: { in: ["bottom_dock", "plan_apply", "plan", "scene_card"] },
           is_delete: false,
+          // IKBBXH：recovery 兜底只捞创建 1 天内的任务，避免卡死任务被 60s 循环无限重放。
+          gmt_create: { gt: new Date(now.getTime() - RECOVERY_MAX_AGE_MS) },
           next_action_at: { lte: now },
           OR: [
             { status: "queued" },
@@ -192,6 +197,8 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
         cancelRequested: candidate.cancel_requested_at !== null,
         workerId,
         fencingToken: Number(candidate.fencing_token + 1n),
+        /** IKBBXH：轮询次数（rescheduleVideoPoll 累计），供轮询上限判定。 */
+        pollCount: Number(candidate.poll_count ?? 0),
         // IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null）。
         reservedAmountFen: await loadReservationFen(prisma, candidate.id),
       };
@@ -385,6 +392,8 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
         cancelRequested: candidate.cancel_requested_at !== null,
         workerId,
         fencingToken: Number(candidate.fencing_token + 1n),
+        /** IKBBXH：轮询次数（rescheduleVideoPoll 累计），供轮询上限判定。 */
+        pollCount: Number(candidate.poll_count ?? 0),
         // IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null）。
         reservedAmountFen: await loadReservationFen(prisma, candidate.id),
       };
