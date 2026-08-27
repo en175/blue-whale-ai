@@ -425,7 +425,8 @@ export default function Assets() {
   return (
     <div className={styles.page}>
       <div className={styles.container}>
-        {/* 顶部标题栏 */}
+        {/* 顶部标题栏：虚拟人像库详情视图下隐藏 */}
+        {!(isCharacterView && characterDetailGroupId) && (
         <div className={styles.header}>
           <h1 className={styles.pageTitle}>资产库</h1>
           <div className={styles.headerActions}>
@@ -451,6 +452,7 @@ export default function Assets() {
             />
           </div>
         </div>
+        )}
 
         {/* 虚拟人视图：独立的分组 + 素材管理 */}
         {isCharacterView ? (
