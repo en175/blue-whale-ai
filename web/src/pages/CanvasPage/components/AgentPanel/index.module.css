@@ -1798,61 +1798,10 @@
 }
 
 /* ---- 消息气泡里的素材引用（IKAL46 · 临时）----
-   胶囊组件到位后连同 MessageAssetPreview.tsx 一起删掉。 */
+   图片胶囊已抽到 ImageMentionChip；这里只留视频 @ 胶囊与无 URL 降级。 */
 .messageAssets {
   /* 素材引用属于用户消息的同一条 flex 流，不能自成一行。 */
   display: contents;
-}
-
-.messageAsset {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  max-width: 200px;
-  padding: 3px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-primary);
-  cursor: zoom-in;
-}
-
-.messageAssetThumb {
-  flex: 0 0 15px;
-  width: 15px;
-  height: 15px;
-  border-radius: var(--radius-sm);
-  object-fit: cover;
-  display: block;
-}
-
-.messageAssetLabel {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: inherit;
-  font: inherit;
-}
-
-.messageAssetPreview {
-  display: block;
-  z-index: 10000;
-  width: min(150px, 60vw);
-  padding: 0;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.messageAssetPreview img {
-  display: block;
-  width: 100%;
-  max-height: min(150px, 60vh);
-  border-radius: var(--radius-sm);
-  object-fit: contain;
 }
 
 .messageAssetFallback {

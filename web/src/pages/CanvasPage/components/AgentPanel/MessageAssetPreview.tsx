@@ -1,18 +1,7 @@
 import { useEffect, useState } from 'react';
-import {
-  FloatingPortal,
-  autoUpdate,
-  flip,
-  offset,
-  safePolygon,
-  shift,
-  useFloating,
-  useFocus,
-  useHover,
-  useInteractions,
-} from '@floating-ui/react';
 import { fetchAllAssets } from '@/api/assets';
 import type { SessionContentBlock } from '@/api/agentSessions';
+import { ImageMentionChip } from '../ImageMentionChip';
 import styles from './index.module.css';
 
 /**
@@ -51,48 +40,6 @@ function ensureAssetUrls(): Promise<void> {
       });
   }
   return listPromise;
-}
-
-function MessageImageAsset({ url, label }: { url: string; label: string }) {
-  const [open, setOpen] = useState(false);
-  const { refs, floatingStyles, context } = useFloating({
-    open,
-    onOpenChange: setOpen,
-    placement: 'top-end',
-    whileElementsMounted: autoUpdate,
-    middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 })],
-  });
-  const hover = useHover(context, { delay: { open: 100, close: 80 }, handleClose: safePolygon() });
-  const focus = useFocus(context);
-  const { getReferenceProps, getFloatingProps } = useInteractions([hover, focus]);
-
-  return (
-    <>
-      <button
-        ref={refs.setReference}
-        type="button"
-        className={styles.messageAsset}
-        aria-label={`查看原图：${label}`}
-        {...getReferenceProps()}
-      >
-        <img className={styles.messageAssetThumb} src={url} alt={label} />
-        <span className={styles.messageAssetLabel} title={label}>{label}</span>
-      </button>
-      {open && (
-        <FloatingPortal>
-          <span
-            ref={refs.setFloating}
-            className={styles.messageAssetPreview}
-            style={floatingStyles}
-            role="tooltip"
-            {...getFloatingProps()}
-          >
-            <img src={url} alt={label} />
-          </span>
-        </FloatingPortal>
-      )}
-    </>
-  );
 }
 
 export function MessageAssetPreview({
@@ -152,7 +99,7 @@ export function MessageAssetPreview({
           );
         }
         if (ref.url) {
-          return <MessageImageAsset key={ref.key} url={ref.url} label={ref.label} />;
+          return <ImageMentionChip key={ref.key} url={ref.url} label={ref.label} />;
         }
         return (
           <span key={ref.key} className={styles.messageAssetFallback} title={ref.label}>

@@ -31,6 +31,7 @@ import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '..
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
 import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock, type OutboundAssetRef } from '@/api/agentSessions';
 import { commitSidebarAttachment, planAttachment, type SidebarCanvasUpload } from './attachments';
+import { composerImagePreview } from './composerImagePreview';
 import { MessageAssetPreview, rememberAssetUrl } from './MessageAssetPreview';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -945,10 +946,12 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     if (!inputVersion || inputVersion === lastInputVersionRef.current) return;
     lastInputVersionRef.current = inputVersion;
     if (initialCardLabel) {
+      const imagePreview = composerImagePreview(initialMediaBlocks);
       chipEditorRef.current?.insertChip({
         id: String(inputVersion),
-        label: initialCardLabel,
+        label: imagePreview?.label ?? initialCardLabel,
         prompt: initialInput ?? '',
+        ...(imagePreview ? { imageUrl: imagePreview.url } : {}),
       });
     } else {
       chipEditorRef.current?.setText(initialInput ?? '');
