@@ -468,8 +468,8 @@ export default function Assets() {
               ))}
             {!loading && loadError && <div className={styles.empty}>{loadError}</div>}
 
-            {!loading && !loadError && (
-              /* 第一个位置：上传素材卡片 */
+            {!loading && !loadError && activeFilter !== 'all' && (
+              /* 第一个位置：上传素材卡片（仅非"全部"tab 显示） */
               <div
                 className={`${styles.card} ${styles.uploadCard}`}
                 onClick={handleUpload}
