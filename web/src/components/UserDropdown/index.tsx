@@ -93,10 +93,18 @@ export default function UserDropdown() {
     setLoggingOut(false);
   };
 
-  // 保存昵称：后端接口暂未实现时降级为本地更新
-  const handleSaveNickname = async (name: string) => {
-    await updateUsername(name).catch(() => undefined);
-    updateUser({ username: name });
+  // 保存昵称：优先后端 API，失败提示错误且不更新本地
+  const [nicknameError, setNicknameError] = useState('');
+  const handleSaveNickname = async (name: string): Promise<boolean> => {
+    setNicknameError('');
+    try {
+      await updateUsername(name);
+      updateUser({ username: name });
+      return true;
+    } catch {
+      setNicknameError('修改昵称失败，请重试');
+      return false;
+    }
   };
 
   return (
@@ -189,8 +197,10 @@ export default function UserDropdown() {
         <ProfileModal
           nickname={user.username}
           phone={user.phone}
-          onClose={() => setShowProfile(false)}
+          onClose={() => { setNicknameError(''); setShowProfile(false); }}
           onSave={handleSaveNickname}
+          error={nicknameError}
+          onErrorClear={() => setNicknameError('')}
         />
       )}
       {/* 账号信息弹窗 */}

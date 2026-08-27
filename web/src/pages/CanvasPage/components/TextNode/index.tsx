@@ -5,6 +5,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Palette } from 'lucide-react';
+import { sanitizeHtml } from '@/utils/sanitize';
 import styles from './index.module.css';
 
 interface TextNodeData {
@@ -52,7 +53,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   // 仅在首次挂载时设置初始 HTML
   useEffect(() => {
     if (!initializedRef.current && editorRef.current) {
-      editorRef.current.innerHTML = data.html || data.text || '';
+      editorRef.current.innerHTML = sanitizeHtml(data.html || data.text || '');
       initializedRef.current = true;
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -100,9 +101,9 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
   }, []);
 
-  /** 同步内容到父组件 */
+  /** 同步内容到父组件（净化后保存，防止 XSS 持久化） */
   const syncContent = useCallback(() => {
-    const html = editorRef.current?.innerHTML || '';
+    const html = sanitizeHtml(editorRef.current?.innerHTML || '');
     data.onChange?.(id, html);
   }, [data, id]);
 

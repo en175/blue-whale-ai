@@ -176,3 +176,26 @@
 .saveBtnActive:hover {
   background-color: #555;
 }
+
+/* ---- 错误提示 ---- */
+.errorMsg {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background-color: rgba(245, 63, 63, 0.12);
+  border: 1px solid rgba(245, 63, 63, 0.3);
+  color: #f56363;
+  font-size: var(--font-size-sm);
+}
+
+/* ---- 保存中 spinner ---- */
+.spinner {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 4px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

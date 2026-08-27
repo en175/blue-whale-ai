@@ -86,7 +86,7 @@ export function logout() {
   return apiRequest<null>('/api/auth/logout', { method: 'POST' });
 }
 
-/** 修改用户名（后端暂未实现时调用方降级为本地更新） */
+/** 修改用户名（后端暂未实现，保留接口定义供未来对接） */
 export function updateUsername(username: string) {
   return apiRequest<unknown>('/api/user/username', {
     method: 'PUT',

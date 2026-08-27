@@ -36,6 +36,7 @@ import {
   type SharedAssetSceneSnapshot,
 } from '@/api/sharedAssets';
 import { isApiError } from '@/api/http';
+import { sanitizeHtml } from '@/utils/sanitize';
 import styles from './index.module.css';
 
 /** Tab 定义（对齐现有画布卡片类型） */
@@ -650,7 +651,7 @@ function PreviewContent({ item }: { item: SharedAssetView }) {
         <div
           className={styles.previewText}
           // eslint-disable-next-line react/no-danger
-          dangerouslySetInnerHTML={{ __html: snap.html }}
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(snap.html) }}
         />
       );
     }
