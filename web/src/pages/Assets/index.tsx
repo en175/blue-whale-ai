@@ -442,17 +442,19 @@ export default function Assets() {
             ))}
 
             {actionError && <span className={styles.actionError}>{actionError}</span>}
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept={isCharacterView && characterDetailGroupId ? 'image/*' : 'image/*,video/*,audio/*'}
-              className={styles.hiddenInput}
-              onChange={handleFileChange}
-            />
           </div>
         </div>
         )}
+
+        {/* 隐藏的文件上传 input：始终渲染，详情视图也能触发 */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={isCharacterView && characterDetailGroupId ? 'image/*' : 'image/*,video/*,audio/*'}
+          className={styles.hiddenInput}
+          onChange={handleFileChange}
+        />
 
         {/* 虚拟人视图：独立的分组 + 素材管理 */}
         {isCharacterView ? (
