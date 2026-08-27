@@ -148,6 +148,33 @@
   outline-offset: 2px;
 }
 
+/* ---- 上传素材卡片 ---- */
+.uploadCard {
+  display: flex;
+  flex-direction: column;
+}
+
+.uploadCard .uploadThumb {
+  flex-direction: column;
+  gap: 10px;
+  color: var(--color-text-tertiary);
+  background-color: var(--color-bg-secondary);
+  border: 2px dashed var(--color-border-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.uploadCard:hover .uploadThumb {
+  border-color: var(--color-text-primary);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.uploadCard .uploadThumb span {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
 /* ---- 缩略图区域 ---- */
 .thumbnail {
   position: relative;
