@@ -424,7 +424,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
             <input
               ref={fileInputRef}
               type="file"
-              accept={imagesFull ? 'video/*' : videosFull ? 'image/*' : 'image/*,video/*'}
+              accept="image/*"
               multiple
               className={styles.hiddenInput}
               onChange={handleFileSelect}
