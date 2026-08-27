@@ -111,3 +111,6 @@ dist/
 # CLAUDE.md 早已声明「不提交 .claude/settings.local.json」，但此前只忽略了 .qoder
 # 同名文件，导致该文件长期 untracked，把 start-task-worktree.sh 的「工作区干净」前置卡住。
 .claude/settings.local.json
+
+# 本地启动凭据（含密钥，勿提交）
+.env.local
