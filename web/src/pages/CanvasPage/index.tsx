@@ -2358,6 +2358,8 @@ export default function CanvasPage() {
               if (node?.data?.src) URL.revokeObjectURL(node.data.src as string);
               return prev.filter((n) => n.id !== id);
             });
+            setProductNodes((prev) => prev.filter((n) => n.id !== id));
+            setAssetNodes((prev) => prev.filter((n) => n.id !== id));
           }}
         />
 
