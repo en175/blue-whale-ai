@@ -1,0 +1,72 @@
+/** 首页时长滑条取值，与原 range input 的 4–15、步进 1 保持一致。 */
+export const HOME_DURATION_MIN = 4;
+export const HOME_DURATION_MAX = 15;
+export const HOME_DURATION_STEP = 1;
+
+/** 略欠阻尼弹簧：拖动时滑块滞后于指针，松手后带一点惯性贴合目标。 */
+export const SPRING_STIFFNESS = 110;
+export const SPRING_DAMPING = 16;
+
+export function clampDuration(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+export function snapDuration(value: number, min: number, max: number, step: number): number {
+  const clamped = clampDuration(value, min, max);
+  if (!(step > 0)) return Math.round(clamped);
+  const snapped = min + Math.round((clamped - min) / step) * step;
+  return clampDuration(Number(snapped.toFixed(6)), min, max);
+}
+
+export function ratioFromValue(value: number, min: number, max: number): number {
+  if (max <= min) return 0;
+  return clampDuration((value - min) / (max - min), 0, 1);
+}
+
+export function valueFromRatio(ratio: number, min: number, max: number): number {
+  return min + clampDuration(ratio, 0, 1) * (max - min);
+}
+
+export function valueFromPointer(
+  clientX: number,
+  trackLeft: number,
+  trackWidth: number,
+  min: number,
+  max: number,
+): number {
+  if (!(trackWidth > 0)) return min;
+  return valueFromRatio((clientX - trackLeft) / trackWidth, min, max);
+}
+
+export function parseDurationInput(
+  raw: string,
+  min: number,
+  max: number,
+  step: number,
+): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) return null;
+  return snapDuration(parsed, min, max, step);
+}
+
+export function stepSpring(
+  position: number,
+  velocity: number,
+  target: number,
+  dtSeconds: number,
+  stiffness = SPRING_STIFFNESS,
+  damping = SPRING_DAMPING,
+): { position: number; velocity: number } {
+  const dt = Math.min(Math.max(dtSeconds, 0), 0.032);
+  if (dt === 0) return { position, velocity };
+  const accel = -stiffness * (position - target) - damping * velocity;
+  const nextVelocity = velocity + accel * dt;
+  return { position: position + nextVelocity * dt, velocity: nextVelocity };
+}
+
+export function springSettled(position: number, velocity: number, target: number): boolean {
+  return Math.abs(position - target) < 0.0008 && Math.abs(velocity) < 0.02;
+}
