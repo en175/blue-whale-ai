@@ -63,14 +63,14 @@ function GroupCard({
   onDelete: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const bottomMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!menuOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
+      const target = e.target as Node;
+      if (bottomMenuRef.current && bottomMenuRef.current.contains(target)) return;
+      setMenuOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -87,19 +87,24 @@ function GroupCard({
         ) : (
           <FolderOpen className={styles.folderIcon} strokeWidth={1} />
         )}
-        <button
-          className={styles.groupViewBtn}
-          onClick={(e) => { e.stopPropagation(); onView(); }}
-        >
-          查看
-        </button>
-        <div className={styles.groupMenuBtn} ref={menuRef}>
-          <MoreVertical
-            size={16}
+        {/* 底部信息栏（覆盖在图片上） */}
+        <div className={styles.groupInfo}>
+          <div className={styles.groupInfoLeft}>
+            <span className={styles.groupName} title={group.Name}>{group.Name}</span>
+            <span className={styles.groupCount}>{assets.length} 个素材</span>
+          </div>
+        </div>
+        {/* 右下角三点按钮 */}
+        <div className={styles.groupBottomActions} ref={bottomMenuRef}>
+          <button
+            className={styles.groupBottomMenuBtn}
             onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
-          />
+            title="更多操作"
+          >
+            <MoreVertical size={14} />
+          </button>
           {menuOpen && (
-            <div className={styles.dropdownMenu} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.dropdownMenu} onClick={(e) => e.stopPropagation()} style={{ bottom: '32px', top: 'auto' }}>
               <button className={styles.dropdownItem} onClick={() => { setMenuOpen(false); onRename(); }}>
                 <Edit3 size={14} /> 重命名
               </button>
@@ -109,10 +114,6 @@ function GroupCard({
             </div>
           )}
         </div>
-      </div>
-      <div className={styles.groupInfo}>
-        <span className={styles.groupName} title={group.Name}>{group.Name}</span>
-        <span className={styles.groupCount}>{assets.length} 个素材</span>
       </div>
     </div>
   );

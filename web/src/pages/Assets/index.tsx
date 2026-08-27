@@ -5,6 +5,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Upload, Play, Trash2, RotateCw, AlertCircle, Loader2 } from 'lucide-react';
 import { fetchAllAssets, deleteAsset, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
+import { createAsset as createMaterialAsset } from '@/api/material';
+import { uploadAssetFile } from '@/utils/upload';
 import { isApiError } from '@/api/http';
 import { fileToAssetType } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -22,7 +24,7 @@ const filterTabs: { key: FilterKey; label: string }[] = [
   { key: 'image', label: '图片' },
   { key: 'video', label: '视频' },
   { key: 'audio', label: '音频' },
-  { key: 'character', label: '虚拟人' },
+  { key: 'character', label: '虚拟人像' },
 ];
 
 /** 类型标签文字 */
@@ -30,7 +32,7 @@ const typeLabel: Record<AssetType, string> = {
   image: '图片',
   video: '视频',
   audio: '音频',
-  character: '虚拟人',
+  character: '虚拟人像',
 };
 
 /** 媒体加载状态 */
@@ -236,8 +238,26 @@ function VideoThumb({
   );
 }
 
+/** localStorage key for persisting the last selected filter tab */
+const ACTIVE_FILTER_STORAGE_KEY = 'assets.activeFilter';
+
+/** 从 localStorage 读取上次选中的 tab，无记录或非法值回退到 'all' */
+const readStoredFilter = (): FilterKey => {
+  if (typeof window === 'undefined') return 'all';
+  try {
+    const v = window.localStorage.getItem(ACTIVE_FILTER_STORAGE_KEY);
+    if (v && filterTabs.some((t) => t.key === v)) return v as FilterKey;
+  } catch { /* ignore */ }
+  return 'all';
+};
+
 export default function Assets() {
-  const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
+  const [activeFilter, setActiveFilterState] = useState<FilterKey>(readStoredFilter);
+  /** 包装 setter：同步写入 localStorage，刷新后仍记住上次选中 */
+  const setActiveFilter = useCallback((next: FilterKey) => {
+    setActiveFilterState(next);
+    try { window.localStorage.setItem(ACTIVE_FILTER_STORAGE_KEY, next); } catch { /* ignore */ }
+  }, []);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -246,6 +266,10 @@ export default function Assets() {
   const [deleting, setDeleting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [actionError, setActionError] = useState('');
+  /** 虚拟人分组详情视图中当前分组 ID（null = 不在详情视图） */
+  const [characterDetailGroupId, setCharacterDetailGroupId] = useState<string | null>(null);
+  /** 虚拟人分组详情刷新触发器（上传后 +1 触发 CharacterLibrary 重新拉取） */
+  const [characterRefreshTick, setCharacterRefreshTick] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 筛选切换时全量拉取（size=60，按 total 自动分页）
@@ -272,9 +296,17 @@ export default function Assets() {
 
   const isCharacterView = activeFilter === 'character';
 
+  /** 上传按钮是否禁用：
+   *  - 全部 tab 或 虚拟人 tab（分组列表）：禁用
+   *  - 虚拟人分组详情视图：启用（素材库上传）
+   *  - 其他 tab（图片/视频/音频）：启用（普通上传）
+   */
+  const uploadDisabled = (activeFilter === 'all') || (isCharacterView && characterDetailGroupId === null);
+
   /** 上传素材：presign 获取预签名 URL → PUT 直传对象存储 → complete 登记 */
   const handleUpload = () => {
-    if (!uploading) fileInputRef.current?.click();
+    if (uploading || uploadDisabled) return;
+    fileInputRef.current?.click();
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -284,6 +316,40 @@ export default function Assets() {
     // 先清空 input 以支持重复上传同一文件
     if (fileInputRef.current) fileInputRef.current.value = '';
 
+    // 虚拟人分组详情视图：走素材库 API
+    if (isCharacterView && characterDetailGroupId) {
+      setUploading(true);
+      setActionError('');
+      const errors: string[] = [];
+
+      for (const file of list) {
+        if (!file.type.startsWith('image/')) {
+          errors.push(`${file.name}：仅支持图片`);
+          continue;
+        }
+        try {
+          // Step 1: 上传到 Asset 管道拿公网 URL
+          const uploadResult = await uploadAssetFile(file);
+          // Step 2: 调用素材库 CreateAsset
+          await createMaterialAsset({
+            GroupId: characterDetailGroupId,
+            URL: uploadResult.url,
+            Name: file.name,
+            AssetType: 'Image',
+          });
+        } catch (err) {
+          errors.push(isApiError(err) ? `${file.name}：${err.message}` : `上传失败：${file.name}`);
+        }
+      }
+
+      if (errors.length) setActionError(errors.join('；'));
+      setUploading(false);
+      // 触发 CharacterLibrary 刷新
+      setCharacterRefreshTick((t) => t + 1);
+      return;
+    }
+
+    // 普通资产视图（图片/视频/音频）
     setUploading(true);
     setActionError('');
     const errors: string[] = [];
@@ -386,9 +452,10 @@ export default function Assets() {
 
             {/* 上传按钮 */}
             <button
-              className={styles.uploadBtn}
+              className={`${styles.uploadBtn} ${uploadDisabled ? styles.uploadBtnDisabled : ''}`}
               onClick={handleUpload}
-              disabled={uploading}
+              disabled={uploading || uploadDisabled}
+              title={uploadDisabled ? (activeFilter === 'all' ? '全部视图不可上传，请选择具体分类' : '请进入分组后再上传') : ''}
             >
               <Upload size={16} strokeWidth={2} />
               <span>{uploading ? '上传中…' : '上传素材'}</span>
@@ -398,7 +465,7 @@ export default function Assets() {
               ref={fileInputRef}
               type="file"
               multiple
-              accept="image/*,video/*,audio/*"
+              accept={isCharacterView && characterDetailGroupId ? 'image/*' : 'image/*,video/*,audio/*'}
               className={styles.hiddenInput}
               onChange={handleFileChange}
             />
@@ -407,7 +474,10 @@ export default function Assets() {
 
         {/* 虚拟人视图：独立的分组 + 素材管理 */}
         {isCharacterView ? (
-          <CharacterLibrary />
+          <CharacterLibrary
+            key={characterRefreshTick}
+            onDetailViewChange={(inDetail, groupId) => setCharacterDetailGroupId(inDetail ? groupId : null)}
+          />
         ) : (
           /* 资产网格（2-5 列自适应） */
           <div className={styles.grid}>

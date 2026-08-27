@@ -94,6 +94,14 @@
   pointer-events: none;
 }
 
+.uploadBtnDisabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background-color: transparent !important;
+  color: rgba(255, 255, 255, 0.4) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
 .hiddenInput {
   display: none;
 }

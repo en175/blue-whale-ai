@@ -5,20 +5,18 @@
  * 上传流程：uploadAssetFile（3 步）→ 拿公网 URL → createAsset
  * ============================================ */
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
-import { Plus, FolderOpen, MoreVertical, Trash2, Edit3, ArrowLeft, Upload } from 'lucide-react';
+import { Plus, FolderOpen, MoreVertical, Trash2, Edit3, ArrowLeft } from 'lucide-react';
 import {
   createAssetGroup,
   listAssetGroups,
   deleteAssetGroup,
   listAssets,
-  createAsset,
   updateAssetGroup,
   deleteAsset as deleteMaterialAsset,
   type MaterialGroup,
   type MaterialAsset,
   type GroupType,
 } from '@/api/material';
-import { uploadAssetFile } from '@/utils/upload';
 import { isApiError } from '@/api/http';
 import styles from './index.module.css';
 
@@ -39,14 +37,14 @@ function GroupCard({
   onDelete: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const bottomMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!menuOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
+      const target = e.target as Node;
+      if (bottomMenuRef.current && bottomMenuRef.current.contains(target)) return;
+      setMenuOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -63,32 +61,33 @@ function GroupCard({
         ) : (
           <FolderOpen className={styles.folderIcon} strokeWidth={1} />
         )}
-        <button
-          className={styles.groupViewBtn}
-          onClick={(e) => { e.stopPropagation(); onView(); }}
-        >
-          查看
-        </button>
-        <div className={styles.groupMenuBtn} ref={menuRef}>
-          <MoreVertical
-            size={16}
+        {/* 底部信息栏（覆盖在图片上） */}
+        <div className={styles.groupInfo}>
+          <div className={styles.groupInfoLeft}>
+            <span className={styles.groupName} title={group.Name}>{group.Name}</span>
+            <span className={styles.groupCount}>{assets.length} 个素材</span>
+          </div>
+        </div>
+        {/* 右下角三点按钮 */}
+        <div className={styles.groupBottomActions} ref={bottomMenuRef}>
+          <button
+            className={styles.groupBottomMenuBtn}
             onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
-          />
+            title="更多操作"
+          >
+            <MoreVertical size={14} />
+          </button>
           {menuOpen && (
-            <div className={styles.dropdownMenu} onClick={(e) => e.stopPropagation()}>
-              <button className={styles.dropdownItem} onClick={onRename}>
+            <div className={styles.dropdownMenu} onClick={(e) => e.stopPropagation()} style={{ bottom: '32px', top: 'auto' }}>
+              <button className={styles.dropdownItem} onClick={() => { setMenuOpen(false); onRename(); }}>
                 <Edit3 size={14} /> 重命名
               </button>
-              <button className={`${styles.dropdownItem} ${styles.dropdownItemDanger}`} onClick={onDelete}>
+              <button className={`${styles.dropdownItem} ${styles.dropdownItemDanger}`} onClick={() => { setMenuOpen(false); onDelete(); }}>
                 <Trash2 size={14} /> 删除
               </button>
             </div>
           )}
         </div>
-      </div>
-      <div className={styles.groupInfo}>
-        <span className={styles.groupName} title={group.Name}>{group.Name}</span>
-        <span className={styles.groupCount}>{assets.length} 个素材</span>
       </div>
     </div>
   );
@@ -164,50 +163,16 @@ function GroupDetail({
   group,
   assets,
   onBack,
-  onRefresh,
   onRename,
   onDeleteAsset,
 }: {
   group: MaterialGroup;
   assets: MaterialAsset[];
   onBack: () => void;
-  onRefresh: () => void;
   onRename: () => void;
   onDeleteAsset: (assetId: string) => void;
 }) {
   const [previewAsset, setPreviewAsset] = useState<MaterialAsset | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleUpload = useCallback(async (files: FileList) => {
-    if (uploading) return;
-    setUploading(true);
-    setUploadError('');
-
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith('image/')) {
-        setUploadError(`${file.name}：仅支持图片`);
-        continue;
-      }
-      try {
-        // Step 1: 上传到 Asset 管道拿公网 URL
-        const uploadResult = await uploadAssetFile(file);
-        // Step 2: 调用素材库 CreateAsset
-        await createAsset({
-          GroupId: group.Id,
-          URL: uploadResult.url,
-          Name: file.name,
-          AssetType: 'Image',
-        });
-        // Step 3: 刷新列表
-        onRefresh();
-      } catch (err) {
-        setUploadError(isApiError(err) ? `${file.name}：${err.message}` : `上传失败：${file.name}`);
-      }
-    }
-    setUploading(false);
-  }, [uploading, group.Id, onRefresh]);
 
   return (
     <div className={styles.detailView}>
@@ -217,31 +182,14 @@ function GroupDetail({
         </button>
         <span className={styles.detailTitle}>{group.Name}</span>
         <div className={styles.detailActions}>
-          <button className={styles.uploadBtn} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-            <Upload size={14} /> {uploading ? '上传中...' : '上传素材'}
-          </button>
           <button className={styles.modalCancelBtn} onClick={onRename}>
             <Edit3 size={14} /> 重命名
           </button>
         </div>
       </div>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        style={{ display: 'none' }}
-        onChange={(e) => {
-          if (e.target.files && e.target.files.length > 0) {
-            handleUpload(e.target.files);
-            e.target.value = '';
-          }
-        }}
-      />
-
-      {uploadError && <div className={styles.errorMsg}>{uploadError}</div>}
 
       {assets.length === 0 ? (
-        <div className={styles.empty}>该分组暂无素材，点击「上传素材」添加</div>
+        <div className={styles.empty}>该分组暂无素材，请点击右上角「上传素材」添加</div>
       ) : (
         <div className={styles.assetGrid}>
           {assets.map((asset) => (
@@ -293,7 +241,7 @@ function GroupDetail({
 /* ============================================
  * 主组件：虚拟人库（资产库页面）
  * ============================================ */
-export default function CharacterLibrary() {
+export default function CharacterLibrary({ onDetailViewChange }: { onDetailViewChange?: (inDetail: boolean, groupId: string | null) => void }) {
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [groupAssets, setGroupAssets] = useState<Map<string, MaterialAsset[]>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -376,6 +324,11 @@ export default function CharacterLibrary() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processingGroupIds.join(','), refreshGroupAssets]);
 
+  /** 通知父组件是否在分组详情视图（控制外层上传按钮置灰 + 上传目标 groupId） */
+  useEffect(() => {
+    onDetailViewChange?.(detailGroupId !== null, detailGroupId);
+  }, [detailGroupId, onDetailViewChange]);
+
   /* ---- 分组操作 ---- */
 
   const handleCreateGroup = async (name: string) => {
@@ -456,7 +409,6 @@ export default function CharacterLibrary() {
           group={detailGroup}
           assets={detailAssets}
           onBack={() => setDetailGroupId(null)}
-          onRefresh={() => refreshGroupAssets(detailGroup.Id)}
           onRename={() => setRenameTarget(detailGroup)}
           onDeleteAsset={handleDeleteAsset}
         />
