@@ -75,6 +75,9 @@ export default function UserDropdown() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // 保存昵称：优先后端 API，失败提示错误且不更新本地
+  const [nicknameError, setNicknameError] = useState('');
+
   // 未登录：展示「登录」按钮，点击弹出登录弹窗
   if (!user) {
     return (
@@ -97,8 +100,6 @@ export default function UserDropdown() {
     setLoggingOut(false);
   };
 
-  // 保存昵称：优先后端 API，失败提示错误且不更新本地
-  const [nicknameError, setNicknameError] = useState('');
   const handleSaveNickname = async (name: string): Promise<boolean> => {
     setNicknameError('');
     try {
@@ -212,7 +213,6 @@ export default function UserDropdown() {
         <AccountModal
           userId={user.userId}
           nickname={user.username}
-          phone={user.phone}
           balance={quota === null ? null : quota / 50000}
           onClose={() => setShowAccount(false)}
           onOpenRecharge={openRecharge}

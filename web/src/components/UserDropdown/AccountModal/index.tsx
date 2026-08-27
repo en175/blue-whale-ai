@@ -1,5 +1,5 @@
 /* ============================================
- * AccountModal 账号信息弹窗：ID/昵称/换绑手机/修改密码/充值与账户记录入口
+ * AccountModal 账号信息弹窗：ID/昵称/修改密码/充值与账户记录入口
  * ============================================ */
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -7,12 +7,10 @@ import { X } from 'lucide-react';
 import styles from './index.module.css';
 import PasswordModal from '../PasswordModal';
 import AccountRecordsModal from '../AccountRecordsModal';
-import RebindPhoneModal from '../RebindPhoneModal';
 
 interface AccountModalProps {
   userId: number;
   nickname: string;
-  phone: string;
   balance: number | null;
   onClose: () => void;
   onOpenRecharge: () => void;
@@ -21,14 +19,12 @@ interface AccountModalProps {
 export default function AccountModal({
   userId,
   nickname,
-  phone,
   balance,
   onClose,
   onOpenRecharge,
 }: AccountModalProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [showRecords, setShowRecords] = useState(false);
-  const [showRebind, setShowRebind] = useState(false);
 
   return createPortal(
     <div className={styles.overlay} onClick={onClose}>
@@ -48,17 +44,6 @@ export default function AccountModal({
         <div className={styles.row}>
           <span className={styles.label}>昵称</span>
           <span className={styles.value}>{nickname}</span>
-        </div>
-
-        {/* 手机号 */}
-        <div className={styles.row}>
-          <span className={styles.label}>手机号</span>
-          <div className={styles.rowRight}>
-            <span className={styles.value}>{phone || '—'}</span>
-            <button className={styles.link} onClick={() => setShowRebind(true)}>
-              换绑
-            </button>
-          </div>
         </div>
 
         {/* 密码 */}
@@ -93,8 +78,6 @@ export default function AccountModal({
       {showPassword && <PasswordModal onClose={() => setShowPassword(false)} />}
       {/* 账户记录弹窗 */}
       {showRecords && <AccountRecordsModal onClose={() => setShowRecords(false)} />}
-      {/* 换绑手机号弹窗 */}
-      {showRebind && <RebindPhoneModal onClose={() => setShowRebind(false)} />}
     </div>,
     document.body
   );
