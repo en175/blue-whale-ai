@@ -44,6 +44,7 @@ import {
   type VideoJobParameters,
   type AudioJobParameters,
 } from '@/api/jobs';
+import { removeCancelledGenerationNode } from './generationPolling';
 import {
   saveSharedAsset,
   type SaveSharedAssetRequest,
@@ -1156,6 +1157,8 @@ export default function CanvasPage() {
   productNodesRef.current = productNodes;
   /** 生成节点轮询定时器（节点 id → timer） */
   const jobTimersRef = useRef<Map<string, number>>(new Map<string, number>());
+  /** 取消接口已确认成功的节点：忽略仍在飞行中的旧轮询响应。 */
+  const locallyRemovedGenerationNodesRef = useRef<Set<string>>(new Set());
   /** 已本地收敛的提取节点：快照若仍停留在 generating，水合不得再开轮询。 */
   const settledExtractNodesRef = useRef<Set<string>>(new Set());
 
@@ -1186,6 +1189,10 @@ export default function CanvasPage() {
       fetchJobStatus(jobId)
         .then((detail) => {
           if (!mediaNodesRef.current.some((n) => n.id === nodeId)) return; // 节点已删除
+          if (locallyRemovedGenerationNodesRef.current.has(nodeId)) {
+            jobTimersRef.current.delete(nodeId);
+            return;
+          }
           if (isMediaExtractNodeId(nodeId)) {
             const node = mediaNodesRef.current.find((n) => n.id === nodeId);
             const extractPatch = mediaExtractTerminalPatch(
@@ -1228,7 +1235,7 @@ export default function CanvasPage() {
           }
           if (detail.status === 'cancelled') {
             jobTimersRef.current.delete(nodeId);
-            patchMediaNode(nodeId, { genStatus: 'cancelled' });
+            setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
             return;
           }
           patchMediaNode(nodeId, { progress: detail.progress });
@@ -1328,14 +1335,23 @@ export default function CanvasPage() {
     }
   };
 
-  /** 取消生成：POST cancel（状态由轮询收敛为 cancelled） */
+  /** 取消生成：接口确认后立即移除卡片，避免测试站状态延迟造成持续轮询。 */
   const handleCancelJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const jobId = node?.data?.jobId as number | string | undefined;
-    if (!currentId || !jobId) return;
-    cancelGenerationJob(currentId, jobId).catch((e) => {
-      console.warn('取消生成失败:', e);
-    });
+    if (!currentId || jobId == null) return;
+    void cancelGenerationJob(currentId, jobId)
+      .then(() => {
+        locallyRemovedGenerationNodesRef.current.add(nodeId);
+        removeCancelledGenerationNode(
+          nodeId,
+          jobTimersRef.current,
+          (id) => setMediaNodes((prev) => prev.filter((n) => n.id !== id)),
+        );
+      })
+      .catch((e) => {
+        console.warn('取消生成失败:', e);
+      });
   };
 
   /** 重试失败任务：retry 接口创建新任务，节点回到生成中 */
