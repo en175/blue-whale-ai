@@ -32,6 +32,7 @@ import { cardsFromRevision } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
 import { estimateOutputTokens, parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
 import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusLine';
+import { mergeConfirmedUser, projectMessage, textOf } from './userMessageProjection';
 
 /** 一轮结束后的结账信息，供常驻状态行报账（IKA4PG）。 */
 export interface TurnOutcome {
@@ -172,12 +173,6 @@ const LONG_RUN_HINT_MS = 60_000;
 const str = (v: unknown): string =>
   typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '';
 
-/** content 块数组拼为纯文本 */
-const textOf = (blocks: SessionMessage['content'] | undefined): string =>
-  (blocks ?? [])
-    .map((b) => (typeof b?.text === 'string' ? b.text : ''))
-    .join('');
-
 /**
  * 把生成卡挂到产出它的那条助手消息上。
  *
@@ -215,16 +210,6 @@ function attachCards(messages: ChatMessage[], records: PromptCardRecord[] | unde
   }
   return next;
 }
-
-/** 快照消息 → UI 消息 */
-const projectMessage = (m: SessionMessage): ChatMessage => ({
-  id: m.message_id,
-  role: m.role === 'user' ? 'user' : 'assistant',
-  content: textOf(m.content),
-  blocks: m.content ?? [],
-  sequence_no: m.sequence,
-  ...(m.source_run_id ? { sourceRunId: m.source_run_id } : {}),
-});
 
 /**
  * 画布 Agent 对话钩子（session 维度）
@@ -460,28 +445,7 @@ export function useAgentSession(projectId: string) {
 
   /** 确认用户消息：替换乐观气泡（无 client 关联字段，兜底最近一条乐观用户消息） */
   const confirmUser = useCallback((msg: SessionMessage) => {
-    const content = textOf(msg.content);
-    setMessages((prev) => {
-      const idx = prev.findIndex((m) => m.id === msg.message_id);
-      if (idx >= 0) return prev; // 幂等
-      for (let i = prev.length - 1; i >= 0; i--) {
-        if (prev[i].optimistic && prev[i].role === 'user') {
-          const next = [...prev];
-          // 保留乐观消息中携带的 skill_ref、resource_ref、chips（这些字段不会从服务端返回）
-          next[i] = {
-            id: msg.message_id,
-            role: 'user',
-            content,
-            sequence_no: msg.sequence,
-            skill_ref: prev[i].skill_ref,
-            resource_ref: prev[i].resource_ref,
-            chips: prev[i].chips,
-          };
-          return next;
-        }
-      }
-      return [...prev, { id: msg.message_id, role: 'user' as const, content, sequence_no: msg.sequence }];
-    });
+    setMessages((prev) => mergeConfirmedUser(prev, msg));
   }, []);
 
   /** 停掉匀速露出的循环（终态、丢弃、切会话都要停，否则会对着空缓冲空转） */

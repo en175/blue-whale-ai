@@ -797,6 +797,14 @@ interface AgentPanelProps {
   onPlaceFileOnCanvas: (file: File) => Promise<SidebarCanvasUpload>;
 }
 
+/** 图片已有“缩略图 + 文件名”呈现，不再重复渲染成 `@` 文字提及。 */
+function hasInlineImageMention(blocks: SessionContentBlock[] | undefined, chipId: string): boolean {
+  return (blocks ?? []).some((block) => {
+    if ((block.media_type !== 'image' && block.type !== 'image') || (!block.url && !block.asset_id)) return false;
+    return [block.chip_id, block.asset_id, block.resource_id, block.node_id].includes(chipId);
+  });
+}
+
 export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas }: AgentPanelProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
@@ -1606,17 +1614,17 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                     <span>{m.skill_ref.name}</span>
                   </div>
                 )}
+                {/* 图片提及先于正文：缩略图 → 文件名 → 用户文字。 */}
+                <MessageAssetPreview blocks={m.blocks} chips={m.chips} />
                 {/* @卡片气泡（与输入框中的气泡一致） */}
-                {m.chips?.map((c) => (
+                {m.chips?.filter((c) => !hasInlineImageMention(m.blocks, c.id)).map((c) => (
                   <div key={`chip-${c.id}`} className={styles.userMediaChip}>
                     <span className={styles.userMediaChipAt}>@</span>
-                    <span>{c.label}</span>
+                    <span className={styles.userMediaChipLabel}>{c.label}</span>
                   </div>
                 ))}
                 {/* 文字内容 */}
-                {m.content && <span>{m.content}</span>}
-                {/* 上传素材的临时渲染（IKAL46）：统一胶囊组件到位后删掉 MessageAssetPreview 即可。 */}
-                <MessageAssetPreview blocks={m.blocks} />
+                {m.content && <span className={styles.userMessageText}>{m.content}</span>}
               </div>
             ) : (
               <div key={m.id} className={styles.assistantBlock}>

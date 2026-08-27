@@ -17,6 +17,8 @@ export interface ProductImage {
   enabled: boolean;
   /** 媒体类型：'image' | 'video'，默认 image */
   type?: 'image' | 'video';
+  /** 上传完成后的资产库身份，@ 提及时发给 Agent */
+  assetId?: string;
 }
 
 interface ProductNodeData {
@@ -178,7 +180,7 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
               if (img.id !== imgId) return img;
               if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
               const mediaType: 'image' | 'video' = done.type === 'video' ? 'video' : 'image';
-              return { ...img, src: done.url || img.src, type: mediaType };
+              return { ...img, src: done.url || img.src, type: mediaType, assetId: done.asset_id };
             }),
           );
         })
