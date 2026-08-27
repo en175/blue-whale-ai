@@ -4,13 +4,14 @@ import type { Producer } from "rocketmq-client-nodejs";
 import {
   createRocketMqVideoProducer,
   loadRocketMqConfig,
+  VIDEO_MIN_DELAY_MS,
 } from "./video-queue.js";
 
 describe("createRocketMqVideoProducer", () => {
   const send = vi.fn();
   const rmqProducer = { send } as unknown as Pick<Producer, "send">;
 
-  it("即时消息：send 携带 topic/tag/body，不带 delay", async () => {
+  it("默认入队也带 1s 延时（统一 DELAY，topic 只收 DELAY）", async () => {
     const producer = createRocketMqVideoProducer(rmqProducer, {
       topic: "generation-video",
       tag: "step",
@@ -20,6 +21,7 @@ describe("createRocketMqVideoProducer", () => {
       topic: "generation-video",
       tag: "step",
       body: Buffer.from(JSON.stringify({ jobId: "42" })),
+      delay: VIDEO_MIN_DELAY_MS,
     });
   });
 
@@ -37,14 +39,14 @@ describe("createRocketMqVideoProducer", () => {
     });
   });
 
-  it("delayMs=0 不传 delay（避免延迟投递语义）", async () => {
+  it("delayMs=0 落到 1s 下限延时（仍是 DELAY）", async () => {
     const producer = createRocketMqVideoProducer(rmqProducer, {
       topic: "t",
       tag: "step",
     });
     await producer.enqueue("44", { delayMs: 0 });
     const arg = send.mock.calls.at(-1)![0] as Record<string, unknown>;
-    expect(arg).not.toHaveProperty("delay");
+    expect(arg).toHaveProperty("delay", VIDEO_MIN_DELAY_MS);
   });
 });
 

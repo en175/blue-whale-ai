@@ -6,10 +6,13 @@ import {appendProjectEvent} from "./product-event-repo.js";
 import {syncRecordSummary} from "./generation-worker-internals.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
+/** IKBBXH：视频轮询内循环步调（ms）。须与 generation-runtime 的 VIDEO_POLL_INTERVAL_MS 保持一致。 */
+const VIDEO_POLL_INTERVAL_MS = 5_000;
+
 export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "markVideoSubmitted" | "rescheduleVideoPoll" | "publishVideoResult" | "failVideoJob" | "cancelVideoBeforeDispatch"> {
   return {
     async markVideoSubmitted(input) {
-      const nextPollAt = new Date(Date.now() + 2_000);
+      const nextPollAt = new Date(Date.now() + VIDEO_POLL_INTERVAL_MS);
       const updated = await prisma.generation_jobs.updateMany({
         where: {
           id: BigInt(input.jobId),
@@ -32,7 +35,7 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
     },
 
     async rescheduleVideoPoll(input) {
-      const nextPollAt = new Date(Date.now() + 2_000);
+      const nextPollAt = new Date(Date.now() + VIDEO_POLL_INTERVAL_MS);
       const updated = await prisma.generation_jobs.updateMany({
         where: {
           id: BigInt(input.jobId),

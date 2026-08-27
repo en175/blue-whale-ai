@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { MAX_VIDEO_POLLS, VIDEO_POLL_INTERVAL_MS } from "./video-job-runner.js";
+
 type JobState = {
   status: "queued" | "processing" | "succeeded";
   providerTaskId: string | null;
@@ -526,7 +528,7 @@ describe("video job runner recovery", () => {
     expect(provider.poll).not.toHaveBeenCalled();
     expect(repo.claimVideoJobById).toHaveBeenCalledWith("300", "worker-1");
     expect(repo.claimNextVideoJob).not.toHaveBeenCalled();
-    expect(scheduleNext).toHaveBeenCalledWith("300", 2_000);
+    expect(scheduleNext).toHaveBeenCalledWith("300", VIDEO_POLL_INTERVAL_MS);
 
     await runVideoJobStep({
       repo,
@@ -607,7 +609,57 @@ describe("video job runner recovery", () => {
     expect(repo.rescheduleVideoPoll).toHaveBeenCalledWith(
       expect.objectContaining({ jobId: "300", progress: 30 }),
     );
-    expect(scheduleNext).toHaveBeenCalledWith("300", 2_000);
+    expect(scheduleNext).toHaveBeenCalledWith("300", VIDEO_POLL_INTERVAL_MS);
+  });
+
+  it("fails a never-settling provider task when poll count exceeds the cap", async () => {
+    const scheduleNext = vi.fn().mockResolvedValue(undefined);
+    const failVideoJob = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "300",
+        projectId: "55",
+        userId: "9",
+        input: { provider_credential: "sealed-token" },
+        providerTaskId: "upstream-1",
+        cancelRequested: false,
+        workerId: "worker-1",
+        fencingToken: 1,
+        pollCount: MAX_VIDEO_POLLS,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn(),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob,
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-1",
+      jobId: "300",
+      createProvider: () => ({
+        submit: vi.fn(),
+        poll: vi.fn().mockResolvedValue({
+          status: "processing",
+          progress: 30,
+          url: null,
+          error: null,
+        }),
+      }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext,
+    });
+
+    expect(failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: "300", code: "provider_timeout" }),
+    );
+    expect(repo.rescheduleVideoPoll).not.toHaveBeenCalled();
+    expect(scheduleNext).not.toHaveBeenCalled();
   });
 
   it("rejects inaccessible or cross-user input assets before any provider call", async () => {

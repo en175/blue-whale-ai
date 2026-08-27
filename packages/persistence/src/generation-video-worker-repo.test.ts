@@ -44,6 +44,7 @@ describe("generation video worker repo", () => {
         take: 100,
         where: expect.objectContaining({
           type: "video",
+          gmt_create: { gt: expect.any(Date) },
           next_action_at: expect.any(Object),
         }),
       }),
@@ -85,6 +86,8 @@ describe("generation video worker repo", () => {
       cancelRequested: false,
       workerId: "worker-2",
       fencingToken: 5,
+      // IKBBXH：mock 未提供 poll_count → 轮询次数兜底 0
+      pollCount: 0,
       // IK9VZ0：mock 未提供 cost_reservations → 预留查询兜底 null
       reservedAmountFen: null,
     });

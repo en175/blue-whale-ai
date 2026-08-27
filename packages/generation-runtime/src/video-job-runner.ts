@@ -6,6 +6,11 @@ const logger = createLogger("generation-runtime");
  *  第一版放宽仅告警不阻断，待对账数据积累后再收紧。 */
 const VIDEO_QUOTA_DEVIATION_THRESHOLD = 0.5;
 
+/** IKBBXH：视频轮询内循环步调（ms），与 persistence 的 nextPollAt 提前量保持一致。 */
+export const VIDEO_POLL_INTERVAL_MS = 5_000;
+/** IKBBXH：视频轮询超限即判 provider_timeout 失败，防永不终态任务被 5s 循环无限轮询（720 次 ≈ 60 分钟）。 */
+export const MAX_VIDEO_POLLS = 720;
+
 /** 视频 provider（new_api_video）调用计时打点（IK7G9Y），共享实现见 core。 */
 function timedVideoProviderCall<T>(
   operation: "submit" | "poll",
@@ -23,6 +28,8 @@ export type VideoJobClaim = {
   cancelRequested: boolean;
   workerId: string;
   fencingToken: number;
+  /** 已轮询次数（rescheduleVideoPoll 累计）。IKBBXH：轮询上限判定用。 */
+  pollCount: number;
   /** IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null/undefined）。 */
   reservedAmountFen?: bigint | null;
 };
@@ -191,7 +198,7 @@ export async function runVideoJobStep(deps: {
         ...claimIdentity(claim),
         providerTaskId: submitted.taskId,
       });
-      if (updated) await deps.scheduleNext?.(claim.id, 2_000);
+      if (updated) await deps.scheduleNext?.(claim.id, VIDEO_POLL_INTERVAL_MS);
       return claim.id;
     }
 
@@ -201,11 +208,21 @@ export async function runVideoJobStep(deps: {
       logger.debug(
         `video job 轮询中 jobId=${claim.id} status=${observation.status} progress=${observation.progress}`,
       );
+      // IKBBXH：轮询次数达上限仍未终态 → 判 provider_timeout 失败，防永不终态任务无限轮询。
+      if ((claim.pollCount ?? 0) >= MAX_VIDEO_POLLS) {
+        await fail(
+          deps.repo,
+          claim,
+          "provider_timeout",
+          `视频生成轮询超时（超过 ${MAX_VIDEO_POLLS} 次）`,
+        );
+        return claim.id;
+      }
       const updated = await deps.repo.rescheduleVideoPoll({
         ...claimIdentity(claim),
         progress: observation.progress,
       });
-      if (updated) await deps.scheduleNext?.(claim.id, 2_000);
+      if (updated) await deps.scheduleNext?.(claim.id, VIDEO_POLL_INTERVAL_MS);
       return claim.id;
     }
     if (observation.status === "failed") {
