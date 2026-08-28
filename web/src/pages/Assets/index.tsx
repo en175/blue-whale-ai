@@ -309,15 +309,19 @@ export default function Assets() {
     // 先清空 input 以支持重复上传同一文件
     if (fileInputRef.current) fileInputRef.current.value = '';
 
-    // 虚拟人分组详情视图：走素材库 API
+    // 虚拟人分组详情视图：走素材库 API（支持图片+视频）
     if (isCharacterView && characterDetailGroupId) {
       setUploading(true);
       setActionError('');
       const errors: string[] = [];
 
       for (const file of list) {
-        if (!file.type.startsWith('image/')) {
-          errors.push(`${file.name}：仅支持图片`);
+        // 支持图片和视频
+        let assetType: 'Image' | 'Video' | 'Audio';
+        if (file.type.startsWith('image/')) assetType = 'Image';
+        else if (file.type.startsWith('video/')) assetType = 'Video';
+        else {
+          errors.push(`${file.name}：仅支持图片和视频`);
           continue;
         }
         try {
@@ -328,7 +332,7 @@ export default function Assets() {
             GroupId: characterDetailGroupId,
             URL: uploadResult.url,
             Name: file.name,
-            AssetType: 'Image',
+            AssetType: assetType,
           });
         } catch (err) {
           errors.push(isApiError(err) ? `${file.name}：${err.message}` : `上传失败：${file.name}`);
@@ -354,6 +358,12 @@ export default function Assets() {
 
       if (!type) {
         errors.push(`不支持的文件类型：${file.name}`);
+        continue;
+      }
+      // tab 筛选下的类型约束：选中特定 tab 时只允许对应类型（同时校验 MIME 和扩展名）
+      if (!forceCharacter && activeFilter !== 'all' && activeFilter !== type) {
+        const ext = file.name.split('.').pop()?.toLowerCase() || '';
+        errors.push(`${file.name}：当前「${filterTabs.find((t) => t.key === activeFilter)?.label}」tab 不支持 .${ext || '?'} 格式`);
         continue;
       }
       const limitMb = Math.round(UPLOAD_SIZE_LIMIT[type] / 1024 / 1024);
@@ -451,7 +461,13 @@ export default function Assets() {
           ref={fileInputRef}
           type="file"
           multiple
-          accept={isCharacterView && characterDetailGroupId ? 'image/*' : 'image/*,video/*,audio/*'}
+          accept={(() => {
+            if (isCharacterView && characterDetailGroupId) return '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm';
+            if (activeFilter === 'image') return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp';
+            if (activeFilter === 'video') return '.mp4,.webm,.mov,.avi,.mkv';
+            if (activeFilter === 'audio') return '.mp3,.wav,.ogg,.m4a,.aac,.flac';
+            return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.mp4,.webm,.mov,.avi,.mkv,.mp3,.wav,.ogg,.m4a,.aac,.flac';
+          })()}
           className={styles.hiddenInput}
           onChange={handleFileChange}
         />

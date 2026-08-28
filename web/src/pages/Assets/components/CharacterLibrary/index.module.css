@@ -91,6 +91,13 @@
   object-fit: cover;
 }
 
+.groupCover video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
 .groupCover .folderIcon {
   width: 56px;
   height: 56px;
@@ -173,6 +180,34 @@
 
 .groupBottomMenuBtn:hover {
   background-color: rgba(255, 255, 255, 0.25);
+}
+
+/* 右下角删除按钮（替代三点菜单） */
+.groupDeleteBtn {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background-color: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  opacity: 0;
+  transition: opacity var(--transition-fast), background-color var(--transition-fast);
+  z-index: 4;
+}
+
+.groupCard:hover .groupDeleteBtn {
+  opacity: 1;
+}
+
+.groupDeleteBtn:hover {
+  background-color: var(--color-error);
 }
 
 /* ---- 空状态 ---- */
@@ -289,6 +324,27 @@
   object-fit: cover;
 }
 
+.assetThumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.videoBadge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
 /* 上传素材卡片样式 */
 .uploadThumb {
   flex-direction: column;
@@ -313,7 +369,7 @@
 
 .assetDeleteBtn {
   position: absolute;
-  top: var(--spacing-sm);
+  bottom: var(--spacing-sm);
   right: var(--spacing-sm);
   width: 28px;
   height: 28px;
@@ -542,98 +598,146 @@
   font-size: var(--font-size-sm);
 }
 
-/* ---- 预览弹窗（带缩放） ---- */
-.previewContainer {
+/* ---- 素材详情弹窗（样式对齐 AssetDetailModal） ---- */
+.detailOverlay {
   position: fixed;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: rgba(0, 0, 0, 0.85);
-  z-index: var(--z-modal);
-  overflow: hidden;
-}
-
-.previewImage {
-  max-width: 70vw;
-  max-height: 70vh;
-  object-fit: contain;
-  transition: transform 0.15s ease-out;
-  transform-origin: center center;
-  border-radius: var(--radius-md);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
-}
-
-.previewCloseBtn {
-  position: absolute;
-  top: 24px;
-  right: 24px;
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background-color: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  border: none;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  z-index: 10;
-}
-
-.previewCloseBtn:hover {
-  background-color: rgba(255, 255, 255, 0.25);
-}
-
-.previewContainer.previewDragging {
-  cursor: grabbing;
-  user-select: none;
-}
-
-.previewContainer.previewDragging .previewImage {
-  transition: none;
-}
-
-.previewZoomControls {
-  position: absolute;
-  bottom: 32px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
   background-color: rgba(0, 0, 0, 0.6);
-  border-radius: 24px;
-  backdrop-filter: blur(8px);
-  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
 }
 
-.previewZoomControls button {
+.detailLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr);
+  width: min(960px, 92vw);
+  min-height: 420px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background-color: var(--color-bg-secondary);
+}
+
+.detailPreviewPane {
+  min-width: 0;
+  min-height: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xl);
+  overflow: hidden;
+  background-color: #090909;
+}
+
+.detailMedia {
+  display: block;
+  max-width: 100%;
+  max-height: min(55vh, 560px);
+  object-fit: contain;
+  border-radius: var(--radius-md);
+}
+
+.detailEmpty {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-md);
+}
+
+.detailPane {
+  padding: var(--spacing-xl);
+  border-left: 1px solid var(--color-border-primary);
+  background-color: var(--color-bg-card);
+}
+
+.detailHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-xl);
+}
+
+.detailTypeBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-active);
+  border: 1px solid var(--color-border-secondary);
+}
+
+.detailCloseBtn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
   width: 32px;
   height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background-color: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  margin: -4px -4px 0 0;
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
   border: none;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all var(--transition-fast);
 }
 
-.previewZoomControls button:hover {
-  background-color: rgba(255, 255, 255, 0.2);
+.detailCloseBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-active);
 }
 
-.previewZoomLevel {
-  min-width: 48px;
-  text-align: center;
+.detailList {
+  display: flex;
+  flex-direction: column;
+}
+
+.detailItem {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg) 0;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.detailItem:first-child {
+  padding-top: 0;
+}
+
+.detailItem:last-child {
+  border-bottom: none;
+}
+
+.detailItem dt {
+  color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);
-  color: #fff;
-  font-weight: 500;
+}
+
+.detailItem dd {
+  min-width: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .detailLayout {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .detailPreviewPane {
+    min-height: 280px;
+  }
+
+  .detailPane {
+    border-top: 1px solid var(--color-border-primary);
+    border-left: none;
+  }
 }
 
 /* ---- 加载骨架屏 ---- */

@@ -1,6 +1,8 @@
 /* ============================================
  * ConfirmModal 通用确认弹窗（项目/资产等删除确认共用）
+ * 使用 React Portal 渲染到 document.body，避免被父级 stacking context 遮挡
  * ============================================ */
+import { createPortal } from 'react-dom';
 import styles from './index.module.css';
 
 interface ConfirmModalProps {
@@ -24,7 +26,7 @@ export default function ConfirmModal({
 }: ConfirmModalProps) {
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div className={styles.overlay} onClick={onCancel}>
       {/* role/aria-modal 不只是无障碍标注，它们是 AgentPanel 那个 ESC 守卫的**唯一识别依据**
           （`closest('[role="dialog"], [aria-modal="true"]')`）。此前整个 web/src 里没有任何
@@ -59,6 +61,7 @@ export default function ConfirmModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
