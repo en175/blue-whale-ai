@@ -46,6 +46,9 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
     asset.type === 'video' && isSafari ? 'waiting' : 'loading',
   );
   const [reloadKey, setReloadKey] = useState(0);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  const mediaSrc = `${asset.url}${asset.url.includes('?') ? '&' : '?'}_reload=${reloadKey}`;
 
   // URL 或 reloadKey 变化时重置为 loading（视频通过 VideoThumb 的 onLoaded/onError 驱动状态）
   useEffect(() => {
@@ -53,6 +56,15 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       setState('loading');
     }
   }, [asset.url, reloadKey, asset.type]);
+
+  // 缓存图片竞态兜底：load 事件可能在 onLoad 处理器就绪前已派发，
+  // 此时 img.complete 为 true 但 state 仍是 loading，遮罩永远不会消失
+  useEffect(() => {
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth > 0) {
+      setState('loaded');
+    }
+  }, [mediaSrc]);
 
   const handleReload = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -64,8 +76,6 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       setState('loading');
     }
   }, [asset.type, isSafari]);
-
-  const mediaSrc = `${asset.url}${asset.url.includes('?') ? '&' : '?'}_reload=${reloadKey}`;
 
   return (
     <>
@@ -98,6 +108,7 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       {/* 实际媒体元素 */}
       {(asset.type === 'image' || asset.type === 'character') && asset.url && (
         <img
+          ref={imgRef}
           className={styles.media}
           src={mediaSrc}
           alt=""
