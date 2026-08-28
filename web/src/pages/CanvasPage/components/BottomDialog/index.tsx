@@ -34,6 +34,7 @@ import styles from './index.module.css';
 const modeOptions = [
   { key: 'all', label: '全能参考' },
   { key: 'keyframe', label: '首尾帧' },
+  { key: 'text2video', label: '图生视频' },
 ];
 
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
@@ -51,7 +52,7 @@ export interface VideoGenOptions {
   resolution: string;
   /** 时长（秒） */
   duration: number;
-  /** 参考模式：all 全能参考 / keyframe 首尾帧 */
+  /** 参考模式：all 全能参考 / keyframe 首尾帧 / text2video 图生视频 */
   mode: string;
 }
 
@@ -98,7 +99,7 @@ export interface VideoGenSeedParams {
   resolution?: string;
   /** 时长（秒） */
   duration?: number;
-  /** 参考模式：all 全能参考 / keyframe 首尾帧 */
+  /** 参考模式：all 全能参考 / keyframe 首尾帧 / text2video 图生视频 */
   mode?: string;
 }
 
