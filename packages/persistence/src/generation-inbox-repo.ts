@@ -278,7 +278,8 @@ export function createGenerationInboxRepo(
           }),
           tx.assets.updateMany({
             where: { project_id: inbox.id },
-            data: { is_delete: true },
+            // 级联软删同样盖 deleted_at，否则延迟 GC 永远扫不到这批资产（IKBMDM F1）。
+            data: { is_delete: true, deleted_at: new Date() },
           }),
           tx.canvas.updateMany({
             where: { project_id: inbox.id },

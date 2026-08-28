@@ -191,7 +191,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     expect(result).toBe(true);
     expect(assetsUpdateMany).toHaveBeenCalledWith({
       where: { project_id: 42n, is_delete: false },
-      data: { is_delete: true },
+      data: { is_delete: true, deleted_at: expect.any(Date) },
     });
     expect(projectUpdate).toHaveBeenCalledWith({
       where: { id: 42n },
@@ -238,7 +238,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     expect(result).toEqual({ succeeded: ["1", "2"], failed: ["99"] });
     expect(assetsUpdateMany).toHaveBeenCalledWith({
       where: { project_id: { in: [1n, 2n] }, is_delete: false },
-      data: { is_delete: true },
+      data: { is_delete: true, deleted_at: expect.any(Date) },
     });
     expect(projectUpdateMany).toHaveBeenCalledWith({
       where: { id: { in: [1n, 2n] } },
