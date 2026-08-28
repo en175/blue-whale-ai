@@ -2,6 +2,7 @@ import { Producer } from "rocketmq-client-nodejs";
 import { Queue, type ConnectionOptions, type JobsOptions } from "bullmq";
 
 import {
+  IMAGE_GENERATION_TAG,
   MEDIA_EXTRACT_TAG,
   VIDEO_GENERATION_QUEUE,
 } from "./queue.constants.js";
@@ -201,6 +202,27 @@ export async function enqueueMediaExtractJob(
     return;
   }
   await createVideoQueueProducer(getQueue(), MEDIA_EXTRACT_TAG).enqueue(
+    jobId,
+    options,
+  );
+}
+
+/** 图片生成 job 入队（IKBGKA）：复用视频 topic/queue，用独立 tag「image」区分任务类型。 */
+export async function enqueueImageGenerationJob(
+  jobId: string,
+  options?: { delayMs?: number },
+): Promise<void> {
+  const driver = process.env.VIDEO_QUEUE_DRIVER ?? "rocketmq";
+  if (driver === "rocketmq") {
+    const config = loadRocketMqConfig();
+    const producer = await getStartedRocketMqProducer(config);
+    await createRocketMqVideoProducer(producer, {
+      topic: config.topic,
+      tag: IMAGE_GENERATION_TAG,
+    }).enqueue(jobId, options);
+    return;
+  }
+  await createVideoQueueProducer(getQueue(), IMAGE_GENERATION_TAG).enqueue(
     jobId,
     options,
   );

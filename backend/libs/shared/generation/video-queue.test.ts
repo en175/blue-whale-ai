@@ -1,11 +1,32 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Producer } from "rocketmq-client-nodejs";
 
+import { IMAGE_GENERATION_TAG } from "./queue.constants.js";
 import {
   createRocketMqVideoProducer,
   loadRocketMqConfig,
   VIDEO_MIN_DELAY_MS,
 } from "./video-queue.js";
+
+/** IKBGKA：enqueueImageGenerationJob 用独立 tag=image，与视频 step 隔离。 */
+describe("createRocketMqVideoProducer image tag", () => {
+  const send = vi.fn();
+  const rmqProducer = { send } as unknown as Pick<Producer, "send">;
+
+  it("图片入队带 image tag", async () => {
+    const producer = createRocketMqVideoProducer(rmqProducer, {
+      topic: "generation-video",
+      tag: IMAGE_GENERATION_TAG,
+    });
+    await producer.enqueue("301");
+    expect(send).toHaveBeenCalledWith({
+      topic: "generation-video",
+      tag: "image",
+      body: Buffer.from(JSON.stringify({ jobId: "301" })),
+      delay: VIDEO_MIN_DELAY_MS,
+    });
+  });
+});
 
 describe("createRocketMqVideoProducer", () => {
   const send = vi.fn();

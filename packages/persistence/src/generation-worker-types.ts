@@ -72,13 +72,21 @@ export interface WorkerRepo {
     jobId: string,
     workerId: string,
   ): Promise<ClaimedVideoJob | null>;
+  /** 图片 MQ 消费端按 RocketMQ 消息 jobId 领取单个图片 job（IKBGKA）；type="image"，无 request userId。 */
+  claimImageJobById(
+    jobId: string,
+    workerId: string,
+  ): Promise<ClaimedJob | null>;
   /** Redis 消息丢失或 Worker 重启后的低频补偿扫描。 */
   listDueVideoJobIds(limit: number): Promise<string[]>;
+  /** IKBGKA：图片到点/孤儿 job 低频补入队扫描（镜像 listDueVideoJobIds；type=image）。 */
+  listDueImageJobIds(limit: number): Promise<string[]>;
   /** 重置图片任务中租约过期仍 processing 的孤儿任务 → queued，供恢复扫描接回。 */
   resetStalledImageJobs(): Promise<number>;
   /** 认领一个到点的图片 queued 任务（next_action_at<=now），置 processing + lease。无则 null。 */
   claimNextImageJob(workerId: string): Promise<ClaimedJob | null>;
-  /** 认领一个到点的进程内任务(image 或 audio),置 processing + lease。无则 null。 */
+  /** 认领一个到点的音频 queued 任务（next_action_at<=now），置 processing + lease。
+   *  IKBGKA（review 2 轮）：图片已迁 MQ，本进程内认领仅剩音频。无则 null。 */
   claimNextInProcessJob(workerId: string): Promise<ClaimedJob | null>;
   /** 瞬时失败重试：processing → queued + 推迟 next_action_at + retry_count++。仅 processing 态可回退。 */
   requeueImageJobForRetry(jobId: string, nextActionAt: Date): Promise<boolean>;
