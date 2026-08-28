@@ -14,9 +14,9 @@ import {
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
-import BottomDialog, { type VideoGenOptions, type BottomRefItem } from './components/BottomDialog';
+import BottomDialog, { type VideoGenOptions, type BottomRefItem, type VideoGenSeedParams } from './components/BottomDialog';
 import type { ChipRef } from './components/ChipTextEditor';
-import ImageDialog, { type UploadedFile } from './components/ImageDialog';
+import ImageDialog, { type UploadedFile, type ImageGenSeedParams } from './components/ImageDialog';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
@@ -53,6 +53,7 @@ import {
 } from '@/api/sharedAssets';
 import { uploadAssetFile } from '@/utils/upload';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
+import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
 import styles from './index.module.css';
@@ -128,18 +129,54 @@ export default function CanvasPage() {
     mediaBlocks?: SessionContentBlock[];
   } | null>(null);
 
-  /** 首页发送框携带草稿跳转：打开 Agent 弹框并注入输入框，随后清除导航状态避免刷新重复注入 */
+  /** 首页发送框携带草稿跳转：打开 Agent 弹框并注入输入框，随后清除导航状态避免刷新重复注入。
+   *  智能体附件（首页 + 上传的图/视频）经模块变量 handoff 带入：此处上传得 assetId 构造
+   *  asset_ref 媒体块挂进 agentContext.mediaBlocks，复用 AgentPanel 既有的注入链路。 */
   useEffect(() => {
     const state = location.state as { agentText?: string; skillId?: string; skillName?: string } | null;
     if (!state?.agentText && !state?.skillId) return;
-    setAgentContext({ text: state.agentText ?? '', skillId: state.skillId ?? '', skillName: state.skillName ?? '', ts: Date.now() });
-    setShowAgent(true);
-    navigate(location.pathname + location.search, { replace: true, state: null });
+    const attachments = takeAgentHandoff();
+    const inject = async () => {
+      let mediaBlocks: SessionContentBlock[] | undefined;
+      if (attachments && attachments.length > 0) {
+        const blocks: SessionContentBlock[] = [];
+        for (const item of attachments) {
+          const assetId = await uploadFileToAsset(item.file, item.kind);
+          if (assetId) {
+            blocks.push({
+              type: item.kind,
+              url: item.preview,
+              name: item.name,
+              media_type: item.kind,
+              display_label: item.name,
+              asset_id: assetId,
+            });
+          } else {
+            console.warn('首页附件上传失败，已跳过:', item.name);
+          }
+          URL.revokeObjectURL(item.preview);
+        }
+        mediaBlocks = blocks.length > 0 ? blocks : undefined;
+      }
+      setAgentContext({
+        text: state.agentText ?? '',
+        skillId: state.skillId ?? '',
+        skillName: state.skillName ?? '',
+        ts: Date.now(),
+        mediaBlocks,
+      });
+      setShowAgent(true);
+      navigate(location.pathname + location.search, { replace: true, state: null });
+    };
+    void inject();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, location.pathname, location.search, navigate]);
-  /** 节点工具条带入图片对话框的初始值（ts 作为 key 强制重挂载以注入初始值） */
-  const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[] } | null>(null);
-  /** 节点工具条带入视频对话框的初始参考；cards 是「引用到 dock」累计的生成卡胶囊，不因再次点击覆盖 */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; cards?: ChipRef[]; text?: string } | null>(null);
+  /** 节点工具条带入图片对话框的初始值（ts 作为 key 强制重挂载以注入初始值）；
+   *  params 是首页 AI图片 带入的生成参数（选中首页所选模型/清晰度/宽高比） */
+  const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[]; params?: ImageGenSeedParams } | null>(null);
+  /** 节点工具条带入视频对话框的初始参考；cards 是「引用到 dock」累计的生成卡胶囊，不因再次点击覆盖；
+   *  params 是首页 AI视频 带入的生成参数（选中首页所选模型/比例/清晰度/时长/模式） */
+  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; cards?: ChipRef[]; text?: string; params?: VideoGenSeedParams } | null>(null);
   /** 节点工具条打开音频对话框的重挂载 key */
   const [audioSeed, setAudioSeed] = useState<{ ts: number } | null>(null);
   /** 首页 AI视频/AI图片 生成交接：消费后置入此 ref，待项目就绪触发创建任务 */
@@ -155,13 +192,29 @@ export default function CanvasPage() {
       return;
     }
     if (handoff.kind === 'video') {
-      setVideoSeed({ ts: Date.now(), refs: handoff.refs, text: handoff.text });
+      setVideoSeed({
+        ts: Date.now(),
+        refs: handoff.refs,
+        text: handoff.text,
+        params: {
+          modelId: handoff.modelId,
+          aspectRatio: handoff.aspectRatio,
+          resolution: handoff.resolution,
+          duration: handoff.duration,
+          mode: handoff.mode,
+        },
+      });
       setShowBottomDialog(true);
       setShowImageDialog(false);
       setShowAudioDialog(false);
       setShowMusicDialog(false);
     } else {
-      setImageSeed({ ts: Date.now(), text: handoff.text, files: handoff.files });
+      setImageSeed({
+        ts: Date.now(),
+        text: handoff.text,
+        files: handoff.files,
+        params: { modelId: handoff.modelId, ratio: handoff.ratio, size: handoff.size },
+      });
       setShowImageDialog(true);
       setShowBottomDialog(false);
       setShowAudioDialog(false);
@@ -2124,7 +2177,8 @@ export default function CanvasPage() {
     if (!currentId) return; // 项目未就绪：等 currentId 变化后由 effect 重试
     pendingGenRef.current = null;
     if (handoff.kind === 'video') {
-      // 参考素材（图/视频）上传取 assetId → reference_asset_ids（首页无首尾帧模式）
+      // 参考素材（图/视频）上传取 assetId：首尾帧模式走 first/lastFrameAssetId（首页已校验恰好 2 张图），
+      // 其余模式走 reference_asset_ids
       (async () => {
         const parameters: VideoJobParameters = {
           prompt: handoff.text,
@@ -2137,6 +2191,25 @@ export default function CanvasPage() {
           startGenerationJob('video', parameters);
           return;
         }
+        if (handoff.mode === 'keyframe') {
+          const [first, last] = handoff.refs;
+          const firstAssetId = first ? await resolveRefAssetId({
+            file: first.file, url: first.preview, name: 'ref-image', type: first.type,
+          }) : null;
+          const lastAssetId = last ? await resolveRefAssetId({
+            file: last.file, url: last.preview, name: 'ref-image', type: last.type,
+          }) : null;
+          // preview 的释放由 seed 进的底部对话框在卸载时负责（提前 revoke 会让缩略图失效）
+          if (!firstAssetId || !lastAssetId) {
+            console.warn('首尾帧素材上传失败，任务未创建');
+            return;
+          }
+          startGenerationJob('video', parameters, undefined, {
+            firstFrameAssetId: firstAssetId,
+            lastFrameAssetId: lastAssetId,
+          });
+          return;
+        }
         const referenceAssetIds: string[] = [];
         for (const r of handoff.refs) {
           const assetId = await resolveRefAssetId({
@@ -2147,6 +2220,7 @@ export default function CanvasPage() {
           });
           if (assetId) referenceAssetIds.push(assetId);
         }
+        // preview 的释放由 seed 进的底部对话框在卸载时负责（提前 revoke 会让缩略图失效）
         startGenerationJob(
           'video',
           parameters,
@@ -2162,6 +2236,7 @@ export default function CanvasPage() {
           const assetId = await uploadFileToAsset(f.file, 'image');
           if (assetId) inputAssetIds.push(assetId);
         }
+        // url 的释放由 seed 进的图片对话框在卸载时负责（提前 revoke 会让缩略图失效）
         startGenerationJob('image', {
           prompt: handoff.text,
           model_id: handoff.modelId,
@@ -2314,6 +2389,7 @@ export default function CanvasPage() {
             initialRefs={videoSeed?.refs}
             initialCards={videoSeed?.cards}
             initialText={videoSeed?.text}
+            initialParams={videoSeed?.params}
             onClose={() => { setShowBottomDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleDialogSend}
             onPickFromCanvas={(kind) => { setPickMode(kind); setPickTarget('video'); }}
@@ -2329,6 +2405,7 @@ export default function CanvasPage() {
             key={imageSeed?.ts ?? 0}
             initialText={imageSeed?.text}
             initialFiles={imageSeed?.files}
+            initialParams={imageSeed?.params}
             onClose={() => { setShowImageDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleImageDialogSend}
             onPickFromCanvas={() => { setPickMode('image'); setPickTarget('image'); }}

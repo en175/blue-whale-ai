@@ -25,6 +25,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
 import { isApiError } from '@/api/http';
+import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { fetchMySkills, fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
 import { useAgentSession, type ChatMessage, type TurnOutcome } from '../../hooks/useAgentSession';
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
@@ -703,14 +704,6 @@ function AssistantMessageBody({
   );
 }
 
-/** 可选模型列表 */
-const models = [
-  { key: 'minimax-m3', label: 'MiniMax-M3', cost: '1x' },
-  { key: 'deepseek-v4-pro', label: 'DeepSeek-V4-Pro', cost: '1x' },
-  { key: 'deepseek-v4-flash', label: 'DeepSeek-V4-Flash', cost: '1x' },
-  { key: 'qwen3.8-max', label: 'Qwen3.8-Max', cost: '1x' },
-];
-
 /** 快捷问题 */
 const quickQuestions = [
   {
@@ -829,7 +822,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const syncMediaBlocks = () => {
     setPendingMediaBlocksState([...pendingMediaBlocksRef.current]);
   };
-  const [selectedModel, setSelectedModel] = useState(models[0].key);
+  /** Agent 模型列表：全部取自接口（fetchGenerationModels text capability），无本地写死兜底 */
+  const [modelList, setModelList] = useState<GenerationModel[]>([]);
+  const [selectedModel, setSelectedModel] = useState('');
   const [modelOpen, setModelOpen] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [showSkillModal, setShowSkillModal] = useState(false);
@@ -934,7 +929,17 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     };
   }, []);
 
-  const currentModel = models.find((m) => m.key === selectedModel);
+  const currentModel = modelList.find((m) => m.model_id === selectedModel);
+
+  // 加载 Agent（text capability）模型列表：接口为唯一数据源，加载完默认选中第一个
+  useEffect(() => {
+    fetchGenerationModels('text')
+      .then((list) => {
+        setModelList(list);
+        if (list.length) setSelectedModel((prev) => prev || list[0].model_id);
+      })
+      .catch(() => undefined);
+  }, []);
 
   /** 外部注入 @ 引用/生成卡：仅在版本真正变化时触发一次；生成卡追加胶囊（可多次叠加），普通引用整体替换文本
    * ref 记录已处理的 version，防 StrictMode 开发态 effect 双调用导致重复插入 */
@@ -1859,8 +1864,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
             <div className={styles.modelWrap} ref={modelRef}>
               <button
                 className={`${styles.modelBtn} ${modelOpen ? styles.modelBtnActive : ''}`}
-                title={currentModel?.label ? `Agent 模型：${currentModel.label}` : '选择 Agent 模型'}
-                aria-label={currentModel?.label ? `Agent 模型：${currentModel.label}` : '选择 Agent 模型'}
+                title={currentModel?.model_label ? `Agent 模型：${currentModel.model_label}` : '选择 Agent 模型'}
+                aria-label={currentModel?.model_label ? `Agent 模型：${currentModel.model_label}` : '选择 Agent 模型'}
                 onClick={() => setModelOpen(!modelOpen)}
               >
                 {/* 平时只露一个盒子图标：模型名称在这一行没有常驻价值，点开菜单里才需要看见
@@ -1873,20 +1878,16 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                     <span className={styles.modelDropdownTitle}>Agent 模型</span>
                     <span className={styles.modelDropdownDesc}>选择驱动 Agent 的模型。</span>
                   </div>
-                  {models.map((m) => (
+                  {modelList.map((m) => (
                     <button
-                      key={m.key}
-                      className={`${styles.modelOption} ${m.key === selectedModel ? styles.modelOptionActive : ''}`}
+                      key={m.model_id}
+                      className={`${styles.modelOption} ${m.model_id === selectedModel ? styles.modelOptionActive : ''}`}
                       onClick={() => {
-                        setSelectedModel(m.key);
+                        setSelectedModel(m.model_id);
                         setModelOpen(false);
                       }}
                     >
-                      <span>{m.label}</span>
-                      <span className={styles.modelCost}>
-                        <Coins size={12} strokeWidth={2} />
-                        消耗 {m.cost}
-                      </span>
+                      <span>{m.model_label}</span>
                     </button>
                   ))}
                 </div>

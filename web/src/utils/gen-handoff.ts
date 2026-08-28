@@ -20,7 +20,7 @@ export interface GenFileItem {
   file: File;
 }
 
-/** AI视频交接：文本 + 生成参数 + 参考素材 */
+/** AI视频交接：文本 + 生成参数 + 参考素材 + 模式 */
 export interface VideoGenHandoff {
   kind: 'video';
   text: string;
@@ -28,6 +28,9 @@ export interface VideoGenHandoff {
   aspectRatio: string;
   resolution: string;
   duration: number;
+  /** 画布侧模式（首页键映射：omni/text2video → all，firstlast → keyframe）；
+   *  keyframe 时 refs 为恰好 2 张图（首页已校验），走首尾帧提交 */
+  mode: 'all' | 'keyframe';
   refs: GenRefItem[];
 }
 

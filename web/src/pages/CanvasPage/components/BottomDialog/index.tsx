@@ -35,12 +35,6 @@ const modeOptions = [
   { key: 'keyframe', label: '首尾帧' },
 ];
 
-/** 宽高比选项（接口失败回退） */
-const FALLBACK_RATIOS = ['16:9', '9:16', '1:1'];
-
-/** 时长范围（接口失败回退） */
-const FALLBACK_DURATION = { min: 4, max: 15, step: 1 };
-
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
 const MAX_VIDEOS = 3;
 
@@ -78,6 +72,8 @@ interface BottomDialogProps {
   initialCards?: ChipRef[];
   /** 初始自由文本（视频节点「重新编辑」带入原提示词） */
   initialText?: string;
+  /** 初始生成参数（首页 AI视频 带入：选中首页所选的模型/比例/清晰度/时长/模式） */
+  initialParams?: VideoGenSeedParams;
   /** 到节点选择：进入画布节点选取模式（image 图片节点 / video 视频节点） */
   onPickFromCanvas?: (kind: 'image' | 'video') => void;
   /** 画布选取模式进行中（image/video，对应按钮高亮提示） */
@@ -90,6 +86,21 @@ interface BottomDialogProps {
   onOpenCharacterLibrary?: () => void;
 }
 
+/** 首页带入的初始生成参数（resolution 传 api_value 如 720p，模型列表加载后反查档位 id；
+ *  各字段经模型能力校验后应用，不在能力内的项回退模型默认值） */
+export interface VideoGenSeedParams {
+  /** 模型ID */
+  modelId?: string;
+  /** 宽高比（如 16:9） */
+  aspectRatio?: string;
+  /** 分辨率 api_value（如 720p） */
+  resolution?: string;
+  /** 时长（秒） */
+  duration?: number;
+  /** 参考模式：all 全能参考 / keyframe 首尾帧 */
+  mode?: string;
+}
+
 /** 宽高比图标：按比例绘制小矩形 */
 function RatioIcon({ ratio }: { ratio: string }) {
   const [w, h] = ratio.split(':').map(Number);
@@ -99,7 +110,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText, onPickFromCanvas, pickMode, externalPick, externalImagePick, onOpenCharacterLibrary }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText, initialParams, onPickFromCanvas, pickMode, externalPick, externalImagePick, onOpenCharacterLibrary }: BottomDialogProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供生成按钮启用态判断 */
@@ -119,8 +130,9 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedSize, setSelectedSize] = useState('');
-  const [selectedRatio, setSelectedRatio] = useState('16:9');
-  const [duration, setDuration] = useState(10);
+  /** 比例/时长初始为空/0：接口加载完成后 applyModelDefaults 套用所选模型默认值 */
+  const [selectedRatio, setSelectedRatio] = useState('');
+  const [duration, setDuration] = useState(0);
   const [modelOpen, setModelOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
   /** 上传按钮弹菜单（image/video 各自独立，避免同时弹出）：上传 / 到节点选择 */
@@ -140,15 +152,14 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
 
   const currentModel = modelList.find((m) => m.model_id === selectedModel) ?? null;
   const modelOptions = modelList.map((m) => ({ key: m.model_id, label: m.model_label }));
+  /** 能力选项全部取自接口（无本地写死兜底）：模型列表未加载完时为空 */
   const sizeOptions = currentModel?.supported_sizes?.length
     ? currentModel.supported_sizes.map((s) => ({ key: s.id, label: s.label }))
-    : [{ key: '720p', label: '720p' }];
-  const ratioOptions = currentModel?.supported_aspect_ratios?.length
-    ? currentModel.supported_aspect_ratios
-    : FALLBACK_RATIOS;
-  const durationRange = currentModel?.supported_durations ?? FALLBACK_DURATION;
+    : [];
+  const ratioOptions = currentModel?.supported_aspect_ratios ?? [];
+  const durationRange = currentModel?.supported_durations ?? null;
   const currentSizeLabel =
-    sizeOptions.find((s) => s.key === selectedSize)?.label ?? selectedSize ?? '720p';
+    sizeOptions.find((s) => s.key === selectedSize)?.label ?? selectedSize;
   const currentMode = modeOptions.find((m) => m.key === selectedMode);
 
   /** 首尾帧模式：仅允许上传 2 张图片（首帧+尾帧），禁止视频 */
@@ -157,12 +168,14 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   const videoCount = refFiles.filter((f) => f.type === 'video').length;
   /** 首尾帧模式必须恰好 2 张图片（不多不少、不含视频），否则禁止发送 */
   const keyframeInvalid = isKeyframe && (imageCount !== 2 || videoCount > 0);
-  /** 图片上限：首尾帧模式固定 2（首帧+尾帧），其余采用接口定义的 max_reference_images（IKA715：失败回退 10，与后端/网关一致） */
-  const maxImages = isKeyframe ? 2 : (currentModel?.features?.max_reference_images ?? 10);
+  /** 图片上限：首尾帧模式固定 2（首帧+尾帧），其余采用接口定义的 max_reference_images（模型能力未加载完时为 0，上传入口隐藏） */
+  const maxImages = isKeyframe ? 2 : (currentModel?.features?.max_reference_images ?? 0);
 
-  /** 时长刻度（min..max 逐 step） */
+  /** 时长刻度（min..max 逐 step；模型能力未加载时无刻度） */
   const ticks: number[] = [];
-  for (let v = durationRange.min; v <= durationRange.max; v += durationRange.step) ticks.push(v);
+  if (durationRange) {
+    for (let v = durationRange.min; v <= durationRange.max; v += durationRange.step) ticks.push(v);
+  }
 
   /** 选中模型后应用其默认清晰度/宽高比/时长 */
   const applyModelDefaults = (m: GenerationModel) => {
@@ -236,16 +249,53 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     newCards.forEach((card) => chipEditorRef.current?.insertChip(card));
   }, [initialCards]);
 
-  // 加载视频模型能力列表
+  // 加载视频模型能力列表：优先选中首页带入的模型，参数逐项按模型能力校验后应用
   useEffect(() => {
     fetchGenerationModels('video')
       .then((list) => {
         setModelList(list);
-        if (list.length) applyModelDefaults(list[0]);
+        if (!list.length) return;
+        const target =
+          (initialParams?.modelId && list.find((m) => m.model_id === initialParams.modelId)) ||
+          list[0];
+        applyModelDefaults(target);
+        // 首页带入参数覆盖默认值（逐项经模型能力校验，不合法项保持该模型默认值）
+        if (initialParams) {
+          if (initialParams.aspectRatio && target.supported_aspect_ratios.includes(initialParams.aspectRatio)) {
+            setSelectedRatio(initialParams.aspectRatio);
+          }
+          if (initialParams.resolution) {
+            const size = target.supported_sizes.find(
+              (s) => s.api_value === initialParams.resolution || s.id === initialParams.resolution,
+            );
+            if (size) setSelectedSize(size.id);
+          }
+          if (typeof initialParams.duration === 'number' && target.supported_durations) {
+            const d = target.supported_durations;
+            setDuration(Math.min(Math.max(initialParams.duration, d.min), d.max));
+          }
+          if (initialParams.mode && modeOptions.some((o) => o.key === initialParams.mode)) {
+            setSelectedMode(initialParams.mode);
+          }
+        }
       })
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 卸载时释放本地 objectURL（首页 seed 与本地上传；画布节点带入无 file 不释放）。
+  // 首页交接的 preview 也由这里负责：firePendingGen 提交任务后不再提前 revoke，
+  // 否则对话框里还在显示的缩略图当场失效。
+  const refFilesRef = useRef(refFiles);
+  refFilesRef.current = refFiles;
+  useEffect(
+    () => () => {
+      refFilesRef.current.forEach((f) => {
+        if (f.file) URL.revokeObjectURL(f.preview);
+      });
+    },
+    [],
+  );
 
   /** 上传图片（首尾帧模式限 2 张；达上限 toast） */
   const handleImageClick = () => {
@@ -388,10 +438,14 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
       }
     }
     const size = currentModel.supported_sizes.find((s) => s.id === selectedSize);
+    if (!size) {
+      console.warn('视频模型清晰度能力缺失，请稍后重试');
+      return;
+    }
     onSend(text, {
       modelId: currentModel.model_id,
       aspectRatio: selectedRatio,
-      resolution: size?.api_value ?? '720p',
+      resolution: size.api_value,
       duration,
       mode: selectedMode,
     }, refFiles);
@@ -487,29 +541,33 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
             </div>
           </div>
 
-          {/* 时长滑杆 */}
-          <div className={styles.durationHead}>
-            <span className={styles.configLabel}>时长</span>
-            <span className={styles.durationValue}>{duration}s</span>
-          </div>
-          <input
-            type="range"
-            className={styles.durationSlider}
-            min={durationRange.min}
-            max={durationRange.max}
-            step={durationRange.step}
-            value={duration}
-            onChange={(e) => setDuration(Number(e.target.value))}
-          />
-          <div className={styles.durationTicks}>
-            {ticks.map((v) => (
-              <span key={v} className={`${styles.tick} ${v === duration ? styles.tickActive : ''}`} />
-            ))}
-          </div>
-          <div className={styles.durationRange}>
-            <span>{durationRange.min}s</span>
-            <span>{durationRange.max}s</span>
-          </div>
+          {/* 时长滑杆（模型能力未加载完时不渲染） */}
+          {durationRange && (
+            <>
+              <div className={styles.durationHead}>
+                <span className={styles.configLabel}>时长</span>
+                <span className={styles.durationValue}>{duration}s</span>
+              </div>
+              <input
+                type="range"
+                className={styles.durationSlider}
+                min={durationRange.min}
+                max={durationRange.max}
+                step={durationRange.step}
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value))}
+              />
+              <div className={styles.durationTicks}>
+                {ticks.map((v) => (
+                  <span key={v} className={`${styles.tick} ${v === duration ? styles.tickActive : ''}`} />
+                ))}
+              </div>
+              <div className={styles.durationRange}>
+                <span>{durationRange.min}s</span>
+                <span>{durationRange.max}s</span>
+              </div>
+            </>
+          )}
 
           {/* 宽高比 */}
           <span className={styles.configLabel}>宽高比</span>
@@ -648,7 +706,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         {/* 计数 */}
         {refFiles.length > 0 && (
           <span className={styles.fileCount}>
-            {isKeyframe ? `${imageCount}/2` : `${refFiles.length}/15`}
+            {isKeyframe ? `${imageCount}/2` : `${refFiles.length}/${maxImages + MAX_VIDEOS}`}
           </span>
         )}
       </div>
@@ -789,7 +847,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
           {/* 配置信息（点击展开配置面板） */}
           <button className={styles.configBtn} onClick={() => setShowConfig(!showConfig)}>
             <SlidersHorizontal size={14} strokeWidth={2} />
-            <span>{currentModel?.model_label ?? 'Seedance 2.0'}</span>
+            <span>{currentModel?.model_label ?? '选择模型'}</span>
             <span className={styles.barDivider}>|</span>
             <span>{selectedRatio}</span>
             <span className={styles.barDivider}>|</span>
