@@ -10,6 +10,7 @@ import { getCurrentUser, subscribe } from '@/utils/auth';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { type SkillRecord } from '@/api/skills';
+import { createProject } from '@/api/projects';
 import { setGenHandoff } from '@/utils/gen-handoff';
 import { setAgentHandoff } from '@/utils/agent-handoff';
 import { classifyRefOverflow } from '@/utils/ref-overflow';
@@ -38,6 +39,23 @@ const MAX_AGENT_AUDIO = 3;
 
 /** 输入框字数上限（与画布对话框一致） */
 const MAX_INPUT = 1000;
+
+/** 生成时间戳项目名（与画布新建项目命名一致） */
+function makeProjectName(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 创建新项目并跳转画布（失败时降级为直接跳转） */
+async function navigateToNewProject(navigate: ReturnType<typeof useNavigate>, state: unknown) {
+  try {
+    const created = await createProject(makeProjectName());
+    navigate(`/canvas?project=${created.id}`, { state });
+  } catch {
+    navigate('/canvas', { state });
+  }
+}
 
 /** 宽高比图标 - 根据比例渲染对应形状的 SVG 矩形 */
 const ratioDims: Record<string, [number, number]> = {
@@ -327,7 +345,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       }
       setAgentFiles([]);
     }
-    navigate('/canvas', { state: { agentText: text, skillId: skillId ?? '', skillName: skillName ?? '' } });
+    navigateToNewProject(navigate, { agentText: text, skillId: skillId ?? '', skillName: skillName ?? '' });
   };
 
   /** 按当前 tab 分发：智能体→Agent 对话；AI视频/AI图片→画布直接生成节点并唤起对应对话框 */
@@ -356,7 +374,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       });
       setInputValue('');
       setRefFiles([]);
-      navigate('/canvas', { state: { genKind: 'video' } });
+      navigateToNewProject(navigate, { genKind: 'video' });
       return;
     }
     if (activeTab === 'image') {
@@ -380,7 +398,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       });
       setInputValue('');
       setImageRefFiles([]);
-      navigate('/canvas', { state: { genKind: 'image' } });
+      navigateToNewProject(navigate, { genKind: 'image' });
       return;
     }
     goCanvasWithText(text, armedSkill?.id, armedSkill?.name);
