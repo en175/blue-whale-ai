@@ -3,9 +3,7 @@
  * 对接真实后端：拉档位 → 创建订单 → 渲染真实支付码 → 轮询支付结果
  * ============================================ */
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
 import {
-  X,
   Check,
   CreditCard,
   Smartphone,
@@ -14,6 +12,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import Modal from '@/components/Modal';
 import styles from './index.module.css';
 import { quotaToPoints } from '@/api/auth';
 import {
@@ -67,6 +66,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [order, setOrder] = useState<RechargeOrder | null>(null);
   const [orderError, setOrderError] = useState('');
+  const [cancelling, setCancelling] = useState(false);
   const [showAgreement, setShowAgreement] = useState(false);
   const [agreement, setAgreement] = useState<{ title: string; content: string } | null>(null);
 
@@ -148,6 +148,22 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     onClose();
   };
 
+  /** 取消当前订单并留在充值弹窗内，以便用户重新选择或再次支付。 */
+  const handleCancelPayment = async () => {
+    if (!order || phase !== 'waiting' || cancelling) return;
+    setCancelling(true);
+    setOrderError('');
+    try {
+      await cancelRechargeOrder(order.trade_no);
+      setOrder(null);
+      setPhase('idle');
+    } catch (e) {
+      setOrderError(e instanceof Error ? e.message : '取消支付失败，请稍后重试');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   /** 打开协议弹窗：首次从后端拉取 */
   const handleOpenAgreement = () => {
     setShowAgreement(true);
@@ -169,17 +185,19 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
           ? '重新支付'
           : `确认支付 ¥${fmtPrice(selected.price)}`;
 
-  return createPortal(
-    <div className={styles.overlay} onClick={handleClose}>
-      <div
-        className={`${styles.modal} ${showQrPanel ? styles.modalPaying : ''}`}
-        onClick={(e) => e.stopPropagation()}
+  return (
+    <>
+      <Modal
+        open
+        footer={null}
+        onCancel={handleClose}
+        width={showQrPanel ? 'min(1600px, calc(100vw - 48px))' : 'min(1200px, calc(100vw - 48px))'}
+        ariaLabel="积分充值"
+        classNames={{
+          container: styles.modal,
+          body: styles.body,
+        }}
       >
-        {/* 关闭按钮 */}
-        <button className={styles.closeBtn} onClick={handleClose} title="关闭">
-          <X size={16} strokeWidth={2} />
-        </button>
-
         <div className={styles.content}>
           {/* 左侧主区域 */}
           <div className={styles.main}>
@@ -197,7 +215,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                 <span className={styles.emptyBold}>{tiersError}</span>
               </div>
             ) : (
-              <div className={styles.planRow}>
+              <div className={`${styles.planRow} ${showQrPanel ? styles.planRowPaying : ''}`}>
                 {tiers.map((t) => {
                   const discount = fmtDiscount(t.discount);
                   return (
@@ -339,6 +357,14 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                     <span />
                   </div>
                   <span className={styles.waiting}>等待支付结果...</span>
+                  <button
+                    className={styles.cancelPaymentButton}
+                    type="button"
+                    onClick={handleCancelPayment}
+                    disabled={cancelling}
+                  >
+                    {cancelling ? '取消中…' : '取消支付'}
+                  </button>
                 </>
               )}
 
@@ -383,37 +409,21 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
             《充值协议》
           </a>
         </div>
-      </div>
+      </Modal>
 
-      {/* 充值协议弹窗（后端内容） */}
-      {showAgreement && (
-        <div
-          className={styles.agreementOverlay}
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowAgreement(false);
-          }}
-        >
-          <div className={styles.agreementModal} onClick={(e) => e.stopPropagation()}>
-            <button
-              className={styles.closeBtn}
-              onClick={() => setShowAgreement(false)}
-              title="关闭"
-            >
-              <X size={16} strokeWidth={2} />
-            </button>
-            <h2 className={styles.agreementTitle}>
-              {agreement?.title ?? '充值协议'}
-            </h2>
-            <div className={styles.agreementBody}>
-              <p className={styles.agreementText}>
-                {agreement ? agreement.content : '协议加载中…'}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>,
-    document.body
+      <Modal
+        open={showAgreement}
+        title={agreement?.title ?? '充值协议'}
+        footer={null}
+        onCancel={() => setShowAgreement(false)}
+        width="min(560px, calc(100vw - 48px))"
+        zIndex={130}
+        classNames={{ body: styles.agreementBody }}
+      >
+        <p className={styles.agreementText}>
+          {agreement ? agreement.content : '协议加载中…'}
+        </p>
+      </Modal>
+    </>
   );
 }
