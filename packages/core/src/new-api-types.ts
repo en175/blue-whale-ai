@@ -22,6 +22,14 @@ export interface NewApiRegisterInput {
   verificationCode?: string;
 }
 
+/** PUT /api/user/self 改密入参（IKBRCK）。网关侧为多用途更新接口：
+ *  只改密码必须同时传 original_password + password，否则被当作其他字段更新而静默不生效。
+ *  originalPassword = 原密码；newPassword = 新密码（8–20 位，网关事实源）。 */
+export interface NewApiChangePasswordInput {
+  originalPassword: string;
+  newPassword: string;
+}
+
 export interface NewApiLoginResult {
   token: string;
   userId: number | null;

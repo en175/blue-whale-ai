@@ -1,4 +1,8 @@
 export {
+  changePasswordRequestSchema,
+  type ChangePasswordRequest,
+} from "./change-password.js";
+export {
   readinessResponseSchema,
   type ReadinessResponse,
 } from "./readiness.js";

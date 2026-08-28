@@ -263,4 +263,58 @@ describe("new-api client —— 账户与错误映射", () => {
       }),
     );
   });
+
+  it("changePassword PUTs /api/user/self with original_password + password and Bearer token", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        const url = String(input);
+        requests.push({ url, init });
+        if (url.endsWith("/api/user/self")) {
+          return jsonResponse({ success: true, message: "" });
+        }
+        throw new Error(`unexpected url: ${url}`);
+      },
+    });
+
+    await expect(
+      client.changePassword(
+        { originalPassword: "OldPass123", newPassword: "NewPass456" },
+        "sk-login",
+      ),
+    ).resolves.toBeUndefined();
+
+    const req = requests[0];
+    if (!req) throw new Error("no request captured");
+    expect(req.url).toBe("http://new-api.test/api/user/self");
+    expect(req.init.method).toBe("PUT");
+    expect(new Headers(req.init.headers).get("Authorization")).toBe(
+      "Bearer sk-login",
+    );
+    expect(JSON.parse(String(req.init.body))).toEqual({
+      original_password: "OldPass123",
+      password: "NewPass456",
+    });
+  });
+
+  it("changePassword surfaces gateway business failures via NewApiError", async () => {
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async () =>
+        jsonResponse({ success: false, message: "原密码错误" }, 200),
+    });
+
+    await expect(
+      client.changePassword(
+        { originalPassword: "wrong", newPassword: "NewPass456" },
+        "sk-login",
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<NewApiError>>({
+        status: 200,
+        message: "原密码错误",
+      }),
+    );
+  });
 });
