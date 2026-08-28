@@ -1,9 +1,8 @@
 /* ============================================
  * LoginModal 登录弹窗：登录 / 注册双模式
+ * 外壳走共用 Modal（Portal / 遮罩 / ESC / 关闭），表单与鉴权逻辑保持不变
  * ============================================ */
 import { useState } from 'react';
-import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
 import {
   loginWithPassword,
   registerWithPassword,
@@ -13,6 +12,7 @@ import {
 } from '@/api/auth';
 import { fetchAdminSession } from '@/api/admin';
 import { isApiError } from '@/api/http';
+import Modal from '@/components/Modal';
 import { useAuthStore, type SessionUser } from '@/stores/auth';
 import { updateUser } from '@/utils/auth';
 import styles from './index.module.css';
@@ -36,6 +36,7 @@ export default function LoginModal({ onClose, initialMode = 'login' }: LoginModa
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const heading = mode === 'login' ? '登录' : '创建账号';
 
   /* ---------- 表单校验 ---------- */
   const loginValid = username.trim().length > 0 && password.length > 0 && agreed;
@@ -105,155 +106,163 @@ export default function LoginModal({ onClose, initialMode = 'login' }: LoginModa
     setSuccess('');
   };
 
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        {/* 关闭 */}
-        <button className={styles.closeBtn} onClick={onClose} title="关闭">
-          <X size={18} strokeWidth={2} />
-        </button>
+  return (
+    <Modal
+      open
+      footer={null}
+      onCancel={onClose}
+      width="min(620px, calc(100vw - 48px))"
+      ariaLabel={heading}
+      classNames={{
+        container: styles.modal,
+        body: styles.body,
+      }}
+      styles={{
+        container: { padding: 0 },
+        mask: {
+          backgroundColor: 'rgba(0, 0, 0, 0.72)',
+          backdropFilter: 'blur(4px)',
+        },
+      }}
+    >
+      <h2 className={styles.title}>{heading}</h2>
 
-        {/* 标题（根据模式切换） */}
-        <h2 className={styles.title}>{mode === 'login' ? '登录' : '创建账号'}</h2>
+      {mode === 'login' ? (
+        /* ========== 登录表单 ========== */
+        <>
+          <input
+            className={styles.input}
+            placeholder="请输入账号"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoFocus
+          />
+          <input
+            className={styles.input}
+            type="password"
+            placeholder="请输入密码"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submitLogin();
+            }}
+          />
 
-        {mode === 'login' ? (
-          /* ========== 登录表单 ========== */
-          <>
+          {error && <div className={styles.error}>{error}</div>}
+
+          <label className={styles.agreeRow}>
             <input
-              className={styles.input}
-              placeholder="请输入账号"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoFocus
+              type="checkbox"
+              className={styles.checkbox}
+              checked={agreed}
+              onChange={(e) => setAgreed(e.target.checked)}
             />
+            <span className={styles.agreeText}>
+              我已阅读并同意
+              <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
+                《用户协议》
+              </a>
+              和
+              <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
+                《隐私政策》
+              </a>
+            </span>
+          </label>
+
+          <button
+            className={styles.submitBtn}
+            disabled={!loginValid || loading}
+            onClick={submitLogin}
+          >
+            {loading ? '登录中…' : '登录'}
+          </button>
+
+          {/* 创建账号（带灰色边框） */}
+          <button
+            className={styles.createBtn}
+            onClick={() => switchMode('register')}
+          >
+            创建账号
+          </button>
+        </>
+      ) : (
+        /* ========== 注册表单 ========== */
+        <>
+          <input
+            className={styles.input}
+            placeholder="账号（至少3位）"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoFocus
+          />
+          <input
+            className={styles.input}
+            type="password"
+            placeholder="密码（9-20位）"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            aria-invalid={passwordRuleError}
+            aria-describedby={passwordRuleError ? 'register-password-error' : undefined}
+          />
+          {passwordRuleError && (
+            <div id="register-password-error" className={styles.error}>
+              密码长度需为 9-20 个字符
+            </div>
+          )}
+          <input
+            className={styles.input}
+            type="password"
+            placeholder="确认密码"
+            value={confirmPwd}
+            onChange={(e) => setConfirmPwd(e.target.value)}
+          />
+          <input
+            className={styles.input}
+            type="email"
+            placeholder="邮箱（选填）"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+
+          {error && <div className={styles.error}>{error}</div>}
+          {success && <div className={styles.success}>{success}</div>}
+
+          <label className={styles.agreeRow}>
             <input
-              className={styles.input}
-              type="password"
-              placeholder="请输入密码"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submitLogin();
-              }}
+              type="checkbox"
+              className={styles.checkbox}
+              checked={agreed}
+              onChange={(e) => setAgreed(e.target.checked)}
             />
+            <span className={styles.agreeText}>
+              我已阅读并同意
+              <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
+                《用户协议》
+              </a>
+              和
+              <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
+                《隐私政策》
+              </a>
+            </span>
+          </label>
 
-            {error && <div className={styles.error}>{error}</div>}
+          <button
+            className={styles.submitBtn}
+            disabled={!registerValid || loading}
+            onClick={submitRegister}
+          >
+            {loading ? '注册中…' : '注册'}
+          </button>
 
-            <label className={styles.agreeRow}>
-              <input
-                type="checkbox"
-                className={styles.checkbox}
-                checked={agreed}
-                onChange={(e) => setAgreed(e.target.checked)}
-              />
-              <span className={styles.agreeText}>
-                我已阅读并同意
-                <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
-                  《用户协议》
-                </a>
-                和
-                <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
-                  《隐私政策》
-                </a>
-              </span>
-            </label>
-
-            <button
-              className={styles.submitBtn}
-              disabled={!loginValid || loading}
-              onClick={submitLogin}
-            >
-              {loading ? '登录中…' : '登录'}
-            </button>
-
-            {/* 创建账号（带灰色边框） */}
-            <button
-              className={styles.createBtn}
-              onClick={() => switchMode('register')}
-            >
-              创建账号
-            </button>
-          </>
-        ) : (
-          /* ========== 注册表单 ========== */
-          <>
-            <input
-              className={styles.input}
-              placeholder="账号（至少3位）"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoFocus
-            />
-            <input
-              className={styles.input}
-              type="password"
-              placeholder="密码（9-20位）"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              aria-invalid={passwordRuleError}
-              aria-describedby={passwordRuleError ? 'register-password-error' : undefined}
-            />
-            {passwordRuleError && (
-              <div id="register-password-error" className={styles.error}>
-                密码长度需为 9-20 个字符
-              </div>
-            )}
-            <input
-              className={styles.input}
-              type="password"
-              placeholder="确认密码"
-              value={confirmPwd}
-              onChange={(e) => setConfirmPwd(e.target.value)}
-            />
-            <input
-              className={styles.input}
-              type="email"
-              placeholder="邮箱（选填）"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-
-            {error && <div className={styles.error}>{error}</div>}
-            {success && <div className={styles.success}>{success}</div>}
-
-            <label className={styles.agreeRow}>
-              <input
-                type="checkbox"
-                className={styles.checkbox}
-                checked={agreed}
-                onChange={(e) => setAgreed(e.target.checked)}
-              />
-              <span className={styles.agreeText}>
-                我已阅读并同意
-                <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
-                  《用户协议》
-                </a>
-                和
-                <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
-                  《隐私政策》
-                </a>
-              </span>
-            </label>
-
-            <button
-              className={styles.submitBtn}
-              disabled={!registerValid || loading}
-              onClick={submitRegister}
-            >
-              {loading ? '注册中…' : '注册'}
-            </button>
-
-            {/* 返回登录 */}
-            <button
-              className={styles.createBtn}
-              onClick={() => switchMode('login')}
-            >
-              已有账号？返回登录
-            </button>
-          </>
-        )}
-      </div>
-    </div>,
-    document.body
+          {/* 返回登录 */}
+          <button
+            className={styles.createBtn}
+            onClick={() => switchMode('login')}
+          >
+            已有账号？返回登录
+          </button>
+        </>
+      )}
+    </Modal>
   );
 }

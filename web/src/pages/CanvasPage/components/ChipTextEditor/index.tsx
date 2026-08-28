@@ -34,6 +34,8 @@ export interface ChipRef {
   label: string;
   /** 发送时替换胶囊位置的完整内容 */
   prompt: string;
+  /** 画布图片提及的原图地址。有值时渲染缩略图胶囊（小图）+ 悬浮大图，与对话历史一致。 */
+  imageUrl?: string;
 }
 
 export interface ChipTextEditorHandle {
@@ -108,7 +110,7 @@ const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(fun
         const first = root.getFirstChild();
         const paragraph = first && $isElementNode(first) ? first : $createParagraphNode();
         if (paragraph !== first) root.append(paragraph);
-        const chipNode = $createChipNode(chip.id, chip.label, chip.prompt);
+        const chipNode = $createChipNode(chip.id, chip.label, chip.prompt, chip.imageUrl);
         const spaceNode = $createTextNode(' ');
         paragraph.append(chipNode, spaceNode);
         spaceNode.selectEnd();

@@ -19,7 +19,7 @@
   background-color: #161616;
   border: 1px solid #2a2a2a;
   border-radius: 16px;
-  padding: 40px;
+  padding: 48px 44px 40px;
   box-sizing: border-box;
   transition: width 0.2s ease;
 }
@@ -53,7 +53,7 @@
 
 .content {
   display: flex;
-  gap: 28px;
+  gap: 40px;
   align-items: stretch;
 }
 
@@ -65,14 +65,14 @@
 }
 
 .title {
-  margin: 0 0 24px;
+  margin: 0 0 10px;
   font-size: var(--font-size-xl);
   font-weight: 700;
   color: #fff;
 }
 
 .subtitle {
-  margin: 0 0 16px;
+  margin: 0;
   font-size: var(--font-size-md);
   color: #ccc;
 }
@@ -81,7 +81,7 @@
 .planRow {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 16px;
+  gap: 20px;
 }
 
 .planCard {
@@ -89,8 +89,8 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
-  padding: 20px;
+  gap: 12px;
+  padding: 24px 20px 22px;
   background-color: #1c1c1c;
   border: 1px solid #2a2a2a;
   border-radius: 12px;
@@ -165,7 +165,7 @@
 .unitHint {
   font-size: var(--font-size-sm);
   color: #888;
-  margin-top: -8px;
+  margin: 8px 0 32px;
 }
 
 .planPriceRow {
@@ -196,8 +196,8 @@
 .perkList {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 14px;
+  gap: 12px;
+  margin-top: 8px;
 }
 
 .perkItem {
@@ -215,16 +215,16 @@
 
 /* ---- 底部结算栏 ---- */
 .bottomBar {
-  margin-top: 48px;
-  padding: 16px 20px;
+  margin-top: 36px;
+  padding: 20px 24px;
   background-color: #1e1e1e;
   border: 1px solid #2a2a2a;
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  min-height: 44px;
+  gap: 24px;
+  min-height: 52px;
 }
 
 .emptyHint {
@@ -367,11 +367,11 @@
   flex-shrink: 0;
   border: 1px solid #2a2a2a;
   border-radius: 12px;
-  padding: 32px 24px;
+  padding: 36px 28px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   box-sizing: border-box;
 }
 
@@ -476,7 +476,7 @@
 
 /* ---- 协议 ---- */
 .agreement {
-  margin-top: 28px;
+  margin-top: 24px;
   display: flex;
   align-items: center;
   justify-content: center;

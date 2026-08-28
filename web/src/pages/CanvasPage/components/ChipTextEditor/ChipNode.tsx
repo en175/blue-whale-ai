@@ -13,14 +13,23 @@ import {
 } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { AtSign, X } from 'lucide-react';
+import { ImageMentionChip } from '../ImageMentionChip';
 import styles from './index.module.css';
 
 export type SerializedChipNode = Spread<
-  { refId: string; label: string; prompt: string },
+  { refId: string; label: string; prompt: string; imageUrl?: string },
   SerializedLexicalNode
 >;
 
-function ChipComponent({ nodeKey, label }: { nodeKey: NodeKey; label: string }) {
+function ChipComponent({
+  nodeKey,
+  label,
+  imageUrl,
+}: {
+  nodeKey: NodeKey;
+  label: string;
+  imageUrl?: string;
+}) {
   const [editor] = useLexicalComposerContext();
   const handleRemove = () => {
     editor.update(() => {
@@ -28,6 +37,9 @@ function ChipComponent({ nodeKey, label }: { nodeKey: NodeKey; label: string }) 
       node?.remove();
     });
   };
+  if (imageUrl) {
+    return <ImageMentionChip url={imageUrl} label={label} onRemove={handleRemove} />;
+  }
   return (
     <span className={styles.chip} contentEditable={false}>
       <AtSign size={12} strokeWidth={2} className={styles.chipIcon} />
@@ -49,20 +61,22 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
   __refId: string;
   __label: string;
   __prompt: string;
+  __imageUrl: string | undefined;
 
   static getType(): string {
     return 'chip';
   }
 
   static clone(node: ChipNode): ChipNode {
-    return new ChipNode(node.__refId, node.__label, node.__prompt, node.__key);
+    return new ChipNode(node.__refId, node.__label, node.__prompt, node.__key, node.__imageUrl);
   }
 
-  constructor(refId: string, label: string, prompt: string, key?: NodeKey) {
+  constructor(refId: string, label: string, prompt: string, key?: NodeKey, imageUrl?: string) {
     super(key);
     this.__refId = refId;
     this.__label = label;
     this.__prompt = prompt;
+    this.__imageUrl = imageUrl;
   }
 
   createDOM(): HTMLElement {
@@ -107,20 +121,32 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
       refId: this.__refId,
       label: this.__label,
       prompt: this.__prompt,
+      ...(this.__imageUrl ? { imageUrl: this.__imageUrl } : {}),
     };
   }
 
   static importJSON(serialized: SerializedChipNode): ChipNode {
-    return $createChipNode(serialized.refId, serialized.label, serialized.prompt);
+    return $createChipNode(serialized.refId, serialized.label, serialized.prompt, serialized.imageUrl);
   }
 
   decorate(): JSX.Element {
-    return <ChipComponent nodeKey={this.getKey()} label={this.__label} />;
+    return (
+      <ChipComponent
+        nodeKey={this.getKey()}
+        label={this.__label}
+        imageUrl={this.__imageUrl}
+      />
+    );
   }
 }
 
-export function $createChipNode(refId: string, label: string, prompt: string): ChipNode {
-  return new ChipNode(refId, label, prompt);
+export function $createChipNode(
+  refId: string,
+  label: string,
+  prompt: string,
+  imageUrl?: string,
+): ChipNode {
+  return new ChipNode(refId, label, prompt, undefined, imageUrl);
 }
 
 export function $isChipNode(node: LexicalNode | null | undefined): node is ChipNode {

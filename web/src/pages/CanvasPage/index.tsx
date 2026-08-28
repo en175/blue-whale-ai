@@ -33,6 +33,7 @@ import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUploa
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { saveCanvasDoc, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
+import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
 import type { GenerationCardBlock, SessionContentBlock } from '@/api/agentSessions';
 import {
   createGenerationJob,
@@ -53,6 +54,7 @@ import {
 import { uploadAssetFile } from '@/utils/upload';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
+import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
 import styles from './index.module.css';
 
 type ToolMode = 'drag' | 'select';
@@ -86,9 +88,9 @@ export default function CanvasPage() {
   /** 画布节点选取结果（ts 驱动注入音频对话框参考） */
   const [audioPickResult, setAudioPickResult] = useState<{ ts: number; item: { id: string; src: string; name: string; assetId?: string | number } } | null>(null);
   /** 画布节点选取结果（ts 驱动注入商品卡） */
-  const [productPickResult, setProductPickResult] = useState<{ ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video' } } | null>(null);
+  const [productPickResult, setProductPickResult] = useState<{ ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string } } | null>(null);
   /** 画布节点选取结果（ts 驱动注入资产卡） */
-  const [assetPickResult, setAssetPickResult] = useState<{ ts: number; assetId: string; ref: { id: string; src: string; type?: 'image' | 'video' } } | null>(null);
+  const [assetPickResult, setAssetPickResult] = useState<{ ts: number; assetId: string; ref: CanvasGalleryRef } | null>(null);
   /** 角色库弹窗状态 */
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
   /** 角色库发起目标（决定选中结果注入哪个对话框） */
@@ -284,7 +286,7 @@ export default function CanvasPage() {
           },
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
-          onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean; type?: 'image' | 'video' }>; detail?: string }) => handleProductChange(id, patch),
+          onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string }>; detail?: string }) => handleProductChange(id, patch),
           onPickFromCanvas: (id: string) => {
             setPickMode('product');
             setPickTarget('product');
@@ -301,7 +303,7 @@ export default function CanvasPage() {
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onGenerateImage: () => actionsRef.current.openImageDialog(),
           onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
-          onCardChange: (id: string, patch: { refs?: { id: string; src: string; type?: 'image' | 'video' }[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
+          onCardChange: (id: string, patch: { refs?: CanvasGalleryRef[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
           onPickFromCanvas: (id: string) => {
             setPickMode('asset');
             setPickTarget('asset');
@@ -402,6 +404,17 @@ export default function CanvasPage() {
     return null;
   };
 
+  /** 解析 references 数组元素 → 资产库身份（有则 @ 提及可走 asset_ref） */
+  const readReferenceAssetId = (r: unknown): string | undefined => {
+    if (typeof r === 'number' || typeof r === 'string') return String(r);
+    if (r != null && typeof r === 'object') {
+      const o = r as Record<string, unknown>;
+      const aid = o.asset_id ?? o.assetId;
+      if (aid != null && aid !== '') return String(aid);
+    }
+    return undefined;
+  };
+
   /** 解析 references 数组元素 → 媒体类型（image/video） */
   const resolveRefType = (r: unknown): 'image' | 'video' => {
     if (r != null && typeof r === 'object') {
@@ -435,9 +448,10 @@ export default function CanvasPage() {
           const src = resolveRefSrc(r);
           if (!src) return null;
           const type = resolveRefType(r);
-          return { id: `ref-hydra-${node.id}-${i}`, src, type };
+          const assetId = readReferenceAssetId(r);
+          return { id: `ref-hydra-${node.id}-${i}`, src, type, ...(assetId ? { assetId } : {}) };
         })
-        .filter((x): x is { id: string; src: string; type: 'image' | 'video' } => x !== null);
+        .filter((x): x is CanvasGalleryRef & { type: 'image' | 'video' } => x !== null);
       const desc = (data.content ?? data.desc ?? raw.content) as unknown;
       return {
         id: node.id,
@@ -614,181 +628,6 @@ export default function CanvasPage() {
     }
   };
 
-  /** 收集节点中的媒体元数据为 SessionContentBlock[] */
-  const collectMediaBlocks = (node: Node, chipId: string): SessionContentBlock[] => {
-    const blocks: SessionContentBlock[] = [];
-    const d = node.data ?? {};
-    console.log('[collectMediaBlocks] node.type:', node.type, 'node.data keys:', Object.keys(d));
-
-    // MediaNode: 单个媒体文件
-    if (node.type === 'mediaNode') {
-      const src = d.src as string | undefined;
-      if (src) {
-        const mediaType = (d.mediaType as 'image' | 'video' | 'audio') ?? 'image';
-        const displayLabel = (d.fileName as string) || mediaType === 'image' ? '图片' : mediaType === 'video' ? '视频' : '音频';
-        const resourceTypeMap = { image: '图片', video: '视频', audio: '音频' } as const;
-        blocks.push({
-          type: mediaType,
-          url: src,
-          mime: d.mime as string | undefined,
-          duration: d.duration as number | undefined,
-          name: displayLabel,
-          node_id: node.id,
-          asset_id: d.assetId as string | undefined,
-          source: 'node',
-          resource_type: resourceTypeMap[mediaType],
-          chip_id: chipId,
-          resource_id: node.id,
-          media_type: mediaType,
-          display_label: displayLabel,
-        });
-      }
-    }
-
-    // ProductNode: 商品图/视频列表
-    if (node.type === 'productNode') {
-      const images = d.images as { id: string; src: string; enabled: boolean; type?: 'image' | 'video' }[] | undefined;
-      const detail = (d.detail as string) ?? '';
-      if (images) {
-        for (const img of images) {
-          if (!img.enabled || !img.src) continue;
-          const mediaType = img.type ?? 'image';
-          const displayLabel = mediaType === 'image' ? '商品图' : '商品视频';
-          blocks.push({
-            type: mediaType,
-            url: img.src,
-            name: displayLabel,
-            node_id: node.id,
-            source: 'card-image',
-            resource_type: '商品卡',
-            chip_id: chipId,
-            resource_id: node.id,
-            media_type: mediaType,
-            display_label: displayLabel,
-            resource_text: detail || undefined,
-          });
-        }
-      }
-    }
-
-    // AssetCardNode: 参考图/视频 + 音色 + 生成卡
-    if (node.type === 'assetNode') {
-      // 根据 kind 确定 resource_type
-      const kind = (d.kind as string) ?? 'custom';
-      const resourceType =
-        kind === 'style' ? '风格卡' :
-        kind === 'character' ? '角色卡' :
-        kind === 'object' ? '物体卡' :
-        kind === 'environment' ? '环境卡' :
-        kind === 'generation' ? '生成卡' :
-        '自定义卡';
-
-      // 生成卡：从 generationCard 中提取元数据
-      if (kind === 'generation') {
-        const gc = d.generationCard as {
-          shotTitle?: string;
-          visual?: string;
-          prompt?: string;
-          timeRange?: string;
-          durationSeconds?: number;
-          aspectRatio?: string;
-          targetMedia?: 'image' | 'video';
-          shotNo?: number;
-          /** `${revision_id}#${shot_no}`，由 api/promptCardMapping.ts 拼出，随节点持久化。 */
-          cardId?: string;
-          assetRefItems?: { assetId: string; label: string; mediaType: 'image' | 'video' }[];
-        } | undefined;
-
-        if (gc) {
-          const displayLabel = gc.shotTitle || '生成卡';
-          // 生成卡胶囊：只带身份，正文由 agent 按 id 从自己的库里解析（胶囊契约 §5）。
-          //
-          // 这张卡本来就是 agent 发的，落在它的 prompt_card_revisions 里；节点上存着的
-          // `cardId` 是 `${revision_id}#${shot_no}` 的复合形式（见 api/promptCardMapping.ts），
-          // 拆开就是可解析的身份。此前这里填的是画布节点 id（`gencard-1724…`），agent 库里
-          // 查不到，同时把整卡正文塞进 `resource_text` 夹带过去——那是「胶囊是指针不是全文」
-          // （IKA5I8）反过来做。
-          const [cardRevisionId] = (gc.cardId ?? '').split('#');
-          blocks.push({
-            type: 'text',
-            name: displayLabel,
-            node_id: node.id,
-            source: 'card-generation',
-            resource_type: '生成卡',
-            chip_id: chipId,
-            // 拿不到 revision id 时退回节点 id：解析不到，但气泡还在、标签还在，
-            // 用户不会觉得自己 @ 的东西凭空消失。
-            resource_id: cardRevisionId || node.id,
-            ...(typeof gc.shotNo === 'number' ? { shot_no: gc.shotNo } : {}),
-            media_type: gc.targetMedia ?? 'image',
-            display_label: displayLabel,
-          });
-
-          // 如果有素材引用，也添加素材 block
-          if (gc.assetRefItems && gc.assetRefItems.length > 0) {
-            for (const ref of gc.assetRefItems) {
-              blocks.push({
-                type: ref.mediaType,
-                name: ref.label || '素材',
-                node_id: node.id,
-                asset_id: ref.assetId,
-                source: 'card-ref',
-                resource_type: '生成卡',
-                chip_id: chipId,
-                resource_id: node.id,
-                media_type: ref.mediaType,
-                display_label: ref.label || '素材',
-              });
-            }
-          }
-        }
-      }
-
-      // 参考图/视频（风格/角色/物体/环境/自定义卡）
-      const refs = (d.refs ?? d.initialRefs) as { id: string; src: string; type?: 'image' | 'video' }[] | undefined;
-      if (refs && refs.length > 0) {
-        for (const ref of refs) {
-          if (!ref.src) continue;
-          const mediaType = ref.type ?? 'image';
-          const displayLabel = mediaType === 'image' ? '参考图' : '参考视频';
-          blocks.push({
-            type: mediaType,
-            url: ref.src,
-            name: displayLabel,
-            node_id: node.id,
-            source: 'card-ref',
-            resource_type: resourceType,
-            chip_id: chipId,
-            resource_id: node.id,
-            media_type: mediaType,
-            display_label: displayLabel,
-          });
-        }
-      }
-
-      // 音色（角色卡）
-      const voice = d.voice as { name: string; src: string } | undefined;
-      if (voice?.src) {
-        const displayLabel = voice.name || '音色';
-        blocks.push({
-          type: 'audio',
-          url: voice.src,
-          name: displayLabel,
-          node_id: node.id,
-          source: 'card-voice',
-          resource_type: resourceType,
-          chip_id: chipId,
-          resource_id: node.id,
-          media_type: 'audio',
-          display_label: displayLabel,
-        });
-      }
-    }
-
-    console.log('[collectMediaBlocks] result:', blocks);
-    return blocks;
-  };
-
   /** 添加节点内容到 Agent 聊天 */
   const handleAddToChatNode = (id: string) => {
     const ts = Date.now();
@@ -939,6 +778,7 @@ export default function CanvasPage() {
           src: data.src as string,
           enabled: true,
           type: mediaType,
+          ...(data.assetId ? { assetId: String(data.assetId) } : {}),
         };
         setProductPickResult({ ts: Date.now(), productId: targetId, image: newImage });
       }
@@ -951,6 +791,7 @@ export default function CanvasPage() {
           id: `node-${node.id}-${Date.now()}`,
           src: data.src as string,
           type: mediaType,
+          ...(data.assetId ? { assetId: String(data.assetId) } : {}),
         };
         setAssetPickResult({ ts: Date.now(), assetId: targetId, ref: newRef });
       }
@@ -1269,6 +1110,7 @@ export default function CanvasPage() {
       console.warn('未选中项目，无法创建生成任务');
       return;
     }
+    if (blockIfQuotaInsufficient()) return;
     const nodeId = newNodeId('media-gen');
     const node: Node = {
       id: nodeId,
@@ -1321,6 +1163,10 @@ export default function CanvasPage() {
           pollJob(nodeId, created.generation_job_id);
         })
         .catch((e) => {
+          if (openRechargeForQuotaError(e)) {
+            setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+            return;
+          }
           patchMediaNode(nodeId, {
             genStatus: 'failed',
             errorText: isApiError(e) ? e.message : '创建任务失败',
@@ -1359,6 +1205,7 @@ export default function CanvasPage() {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const jobId = node?.data?.jobId as number | string | undefined;
     if (!currentId || !jobId) return;
+    if (blockIfQuotaInsufficient()) return;
     patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
     try {
       retryGenerationJob(currentId, jobId)
@@ -1367,6 +1214,13 @@ export default function CanvasPage() {
           pollJob(nodeId, created.generation_job_id);
         })
         .catch((e) => {
+          if (openRechargeForQuotaError(e)) {
+            patchMediaNode(nodeId, {
+              genStatus: 'failed',
+              errorText: isApiError(e) ? e.message : '余额不足',
+            });
+            return;
+          }
           patchMediaNode(nodeId, {
             genStatus: 'failed',
             errorText: isApiError(e) ? e.message : '重试失败',
@@ -1760,7 +1614,7 @@ export default function CanvasPage() {
         },
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
-        onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean }>; detail?: string }) => handleProductChange(id, patch),
+        onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string }>; detail?: string }) => handleProductChange(id, patch),
         onPickFromCanvas: (id: string) => {
           setPickMode('product');
           setPickTarget('product');
@@ -1786,7 +1640,7 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onGenerateImage: () => actionsRef.current.openImageDialog(),
         onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
-        onCardChange: (id: string, patch: { refs?: { id: string; src: string }[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
+        onCardChange: (id: string, patch: { refs?: CanvasGalleryRef[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
         onPickFromCanvas: (id: string) => {
           setPickMode('asset');
           setPickTarget('asset');
@@ -1807,7 +1661,7 @@ export default function CanvasPage() {
   /** 商品内容变更同步（组件内 images/detail 是 local state，需回写 node.data，否则右键保存读到空值） */
   const handleProductChange = (
     nodeId: string,
-    patch: { images?: Array<{ id: string; src: string; enabled: boolean; type?: 'image' | 'video' }>; detail?: string },
+    patch: { images?: Array<{ id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string }>; detail?: string },
   ) => {
     setProductNodes((prev) =>
       prev.map((n) =>
@@ -1828,7 +1682,7 @@ export default function CanvasPage() {
   /** 资产卡内容变更同步（组件内 refs/desc/voice 是 local state，需回写 node.data，否则右键保存读到空值） */
   const handleCardChange = (
     nodeId: string,
-    patch: { refs?: { id: string; src: string; type?: 'image' | 'video' }[]; desc?: string; voice?: { name: string; src: string } | null },
+    patch: { refs?: CanvasGalleryRef[]; desc?: string; voice?: { name: string; src: string } | null },
   ) => {
     setAssetNodes((prev) =>
       prev.map((n) =>
@@ -2050,7 +1904,7 @@ export default function CanvasPage() {
               onAddToChat: (id: string) => actionsRef.current.addToChat(id),
               onGenerateImage: () => actionsRef.current.openImageDialog(),
               onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
-              onCardChange: (id: string, patch: { refs?: { id: string; src: string; type?: 'image' | 'video' }[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
+              onCardChange: (id: string, patch: { refs?: CanvasGalleryRef[]; desc?: string; voice?: { name: string; src: string } | null }) => handleCardChange(id, patch),
               onPickFromCanvas: (id: string) => {
                 setPickMode('asset');
                 setPickTarget('asset');
@@ -2090,7 +1944,7 @@ export default function CanvasPage() {
               },
               onAddToChat: (id: string) => actionsRef.current.addToChat(id),
               onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
-              onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean; type?: 'image' | 'video' }>; detail?: string }) => handleProductChange(id, patch),
+              onProductChange: (id: string, patch: { images?: Array<{ id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string }>; detail?: string }) => handleProductChange(id, patch),
               onPickFromCanvas: (id: string) => {
                 setPickMode('product');
                 setPickTarget('product');
@@ -2593,6 +2447,7 @@ export default function CanvasPage() {
                   id: `char-${ts}`,
                   src: asset.URL,
                   type: 'image',
+                  assetId: asset.Id,
                 },
               });
             }

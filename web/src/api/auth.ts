@@ -76,9 +76,10 @@ export function fetchMe() {
   return apiRequest<MeData>('/api/me');
 }
 
-/** 获取积分配额 */
-export function fetchQuota() {
-  return apiRequest<UsageTokenData>('/api/usage/token');
+/** 获取积分配额。fresh 时带时间戳，避免与在途 GET 去重/缓存命中支付前的 0。 */
+export function fetchQuota(options?: { fresh?: boolean }) {
+  const path = options?.fresh ? `/api/usage/token?_=${Date.now()}` : '/api/usage/token';
+  return apiRequest<UsageTokenData>(path);
 }
 
 /** 退出登录 */
@@ -86,7 +87,7 @@ export function logout() {
   return apiRequest<null>('/api/auth/logout', { method: 'POST' });
 }
 
-/** 修改用户名（后端暂未实现时调用方降级为本地更新） */
+/** 修改用户名（后端暂未实现，保留接口定义供未来对接） */
 export function updateUsername(username: string) {
   return apiRequest<unknown>('/api/user/username', {
     method: 'PUT',

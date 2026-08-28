@@ -60,9 +60,9 @@ interface FlowCanvasProps {
   /** 注册出生点取数函数（当前视口中心的 flow 坐标），供父级创建节点时落在用户可见区域 */
   registerSpawnPosition?: (fn: () => { x: number; y: number }) => void;
   /** 商品卡 ts 驱动注入结果 */
-  productPickResult?: { ts: number; productId: string; image: { id: string; src: string; enabled: boolean } } | null;
+  productPickResult?: { ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string } } | null;
   /** 资产卡 ts 驱动注入结果 */
-  assetPickResult?: { ts: number; assetId: string; ref: { id: string; src: string } } | null;
+  assetPickResult?: { ts: number; assetId: string; ref: { id: string; src: string; type?: 'image' | 'video'; assetId?: string } } | null;
 }
 
 function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {

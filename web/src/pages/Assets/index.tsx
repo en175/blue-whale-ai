@@ -3,7 +3,7 @@
  * ============================================ */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Upload, Play, Trash2, RotateCw, AlertCircle, Loader2 } from 'lucide-react';
+import { Play, Trash2, RotateCw, AlertCircle, Loader2, Plus } from 'lucide-react';
 import { fetchAllAssets, deleteAsset, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
 import { createAsset as createMaterialAsset } from '@/api/material';
 import { uploadAssetFile } from '@/utils/upload';
@@ -24,7 +24,7 @@ const filterTabs: { key: FilterKey; label: string }[] = [
   { key: 'image', label: '图片' },
   { key: 'video', label: '视频' },
   { key: 'audio', label: '音频' },
-  { key: 'character', label: '虚拟人像' },
+  { key: 'character', label: '虚拟人像库' },
 ];
 
 /** 类型标签文字 */
@@ -296,16 +296,9 @@ export default function Assets() {
 
   const isCharacterView = activeFilter === 'character';
 
-  /** 上传按钮是否禁用：
-   *  - 全部 tab 或 虚拟人 tab（分组列表）：禁用
-   *  - 虚拟人分组详情视图：启用（素材库上传）
-   *  - 其他 tab（图片/视频/音频）：启用（普通上传）
-   */
-  const uploadDisabled = (activeFilter === 'all') || (isCharacterView && characterDetailGroupId === null);
-
   /** 上传素材：presign 获取预签名 URL → PUT 直传对象存储 → complete 登记 */
   const handleUpload = () => {
-    if (uploading || uploadDisabled) return;
+    if (uploading) return;
     fileInputRef.current?.click();
   };
 
@@ -432,7 +425,8 @@ export default function Assets() {
   return (
     <div className={styles.page}>
       <div className={styles.container}>
-        {/* 顶部标题栏 */}
+        {/* 顶部标题栏：虚拟人像库详情视图下隐藏 */}
+        {!(isCharacterView && characterDetailGroupId) && (
         <div className={styles.header}>
           <h1 className={styles.pageTitle}>资产库</h1>
           <div className={styles.headerActions}>
@@ -447,36 +441,27 @@ export default function Assets() {
               </button>
             ))}
 
-            {/* 分隔线 */}
-            <div className={styles.divider} />
-
-            {/* 上传按钮 */}
-            <button
-              className={`${styles.uploadBtn} ${uploadDisabled ? styles.uploadBtnDisabled : ''}`}
-              onClick={handleUpload}
-              disabled={uploading || uploadDisabled}
-              title={uploadDisabled ? (activeFilter === 'all' ? '全部视图不可上传，请选择具体分类' : '请进入分组后再上传') : ''}
-            >
-              <Upload size={16} strokeWidth={2} />
-              <span>{uploading ? '上传中…' : '上传素材'}</span>
-            </button>
             {actionError && <span className={styles.actionError}>{actionError}</span>}
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept={isCharacterView && characterDetailGroupId ? 'image/*' : 'image/*,video/*,audio/*'}
-              className={styles.hiddenInput}
-              onChange={handleFileChange}
-            />
           </div>
         </div>
+        )}
+
+        {/* 隐藏的文件上传 input：始终渲染，详情视图也能触发 */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={isCharacterView && characterDetailGroupId ? 'image/*' : 'image/*,video/*,audio/*'}
+          className={styles.hiddenInput}
+          onChange={handleFileChange}
+        />
 
         {/* 虚拟人视图：独立的分组 + 素材管理 */}
         {isCharacterView ? (
           <CharacterLibrary
-            key={characterRefreshTick}
+            refreshTick={characterRefreshTick}
             onDetailViewChange={(inDetail, groupId) => setCharacterDetailGroupId(inDetail ? groupId : null)}
+            onUpload={handleUpload}
           />
         ) : (
           /* 资产网格（2-5 列自适应） */
@@ -486,8 +471,22 @@ export default function Assets() {
                 <Skeleton key={index} className={styles.cardSkeleton} />
               ))}
             {!loading && loadError && <div className={styles.empty}>{loadError}</div>}
-            {!loading && !loadError && displayAssets.length === 0 && (
-              <div className={styles.empty}>暂无资产，点击"上传素材"添加</div>
+
+            {!loading && !loadError && activeFilter !== 'all' && (
+              /* 第一个位置：上传素材卡片（仅非"全部"tab 显示） */
+              <div
+                className={`${styles.card} ${styles.uploadCard}`}
+                onClick={handleUpload}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleUpload(); }}
+                aria-label="上传素材"
+              >
+                <div className={`${styles.thumbnail} ${styles.uploadThumb}`}>
+                  <Plus size={32} strokeWidth={1.5} />
+                  <span>上传素材</span>
+                </div>
+              </div>
             )}
 
             {!loading &&

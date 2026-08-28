@@ -6,12 +6,14 @@
  * 支持分组管理 + 素材选择
  * 上传流程：uploadAssetFile（3 步）→ 拿公网 URL → createAsset → 轮询就绪
  * ============================================ */
-import { useState, useEffect, useCallback, useRef, type KeyboardEvent } from 'react';
+import { useState, useEffect, useCallback, useRef, type KeyboardEvent, type WheelEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
   User,
   Plus,
+  Minus,
+  RotateCw,
   FolderOpen,
   MoreVertical,
   Trash2,
@@ -19,6 +21,7 @@ import {
   ArrowLeft,
   Check,
   Upload,
+  Loader2,
 } from 'lucide-react';
 import {
   createAssetGroup,
@@ -33,6 +36,7 @@ import {
 } from '@/api/material';
 import { uploadAssetFile } from '@/utils/upload';
 import { isApiError } from '@/api/http';
+import ConfirmModal from '@/components/ConfirmModal';
 import styles from './index.module.css';
 
 /** Tab 定义 */
@@ -90,7 +94,7 @@ function GroupCard({
         {/* 底部信息栏（覆盖在图片上） */}
         <div className={styles.groupInfo}>
           <div className={styles.groupInfoLeft}>
-            <span className={styles.groupName} title={group.Name}>{group.Name}</span>
+            <span className={styles.groupName} title={group.Description || group.Name}>{group.Description || group.Name}</span>
             <span className={styles.groupCount}>{assets.length} 个素材</span>
           </div>
         </div>
@@ -201,9 +205,52 @@ function GroupDetail({
   onRefresh: () => void;
 }) {
   const [previewAsset, setPreviewAsset] = useState<MaterialAsset | null>(null);
+  const [previewZoom, setPreviewZoom] = useState(0.6); // 默认较小比例
+  const [previewOffset, setPreviewOffset] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const PREVIEW_MIN_ZOOM = 0.1;
+  const PREVIEW_MAX_ZOOM = 3.0;
+
+  const handleZoomIn = () => { setPreviewZoom((z) => Math.min(z + 0.1, PREVIEW_MAX_ZOOM)); };
+  const handleZoomOut = () => { setPreviewZoom((z) => Math.max(z - 0.1, PREVIEW_MIN_ZOOM)); };
+  const handleZoomReset = () => { setPreviewZoom(0.6); setPreviewOffset({ x: 0, y: 0 }); };
+
+  const handleWheel = (e: WheelEvent) => {
+    const delta = e.deltaY > 0 ? -0.05 : 0.05;
+    setPreviewZoom((z) => Math.min(Math.max(z + delta, PREVIEW_MIN_ZOOM), PREVIEW_MAX_ZOOM));
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (previewZoom <= 0.6) return;
+    setDragging(true);
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      offsetX: previewOffset.x,
+      offsetY: previewOffset.y,
+    };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!dragging) return;
+    setPreviewOffset({
+      x: dragStartRef.current.offsetX + (e.clientX - dragStartRef.current.x),
+      y: dragStartRef.current.offsetY + (e.clientY - dragStartRef.current.y),
+    });
+  };
+
+  const handleMouseUp = () => setDragging(false);
+
+  const closePreview = () => {
+    setPreviewAsset(null);
+    setPreviewZoom(0.6);
+    setPreviewOffset({ x: 0, y: 0 });
+  };
 
   const handleUpload = useCallback(async (files: FileList) => {
     if (uploading) return;
@@ -240,7 +287,7 @@ function GroupDetail({
         <button className={styles.backBtn} onClick={onBack}>
           <ArrowLeft size={16} /> 返回
         </button>
-        <span className={styles.detailTitle}>{group.Name}</span>
+        <span className={styles.detailTitle}>{group.Description || group.Name}</span>
         <div className={styles.detailActions}>
           <button className={styles.uploadBtn} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
             <Upload size={14} /> {uploading ? '上传中...' : '上传素材'}
@@ -308,10 +355,44 @@ function GroupDetail({
       )}
 
       {previewAsset && (
-        <div className={styles.modalOverlay} onClick={() => setPreviewAsset(null)}>
-          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}
-            style={{ padding: 0, maxWidth: '90vw', maxHeight: '90vh', overflow: 'auto' }}>
-            <img src={previewAsset.URL} alt={previewAsset.Name} style={{ maxWidth: '100%', display: 'block' }} />
+        <div className={styles.modalOverlay} onClick={closePreview}>
+          <div
+            className={`${styles.previewContainer} ${dragging ? styles.previewDragging : ''}`}
+            onClick={(e) => e.stopPropagation()}
+            onWheel={handleWheel}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+          >
+            {/* 关闭按钮 */}
+            <button className={styles.previewCloseBtn} onClick={closePreview} title="关闭">
+              <X size={20} />
+            </button>
+            {/* 图片预览 */}
+            <img
+              src={previewAsset.URL}
+              alt={previewAsset.Name}
+              className={styles.previewImage}
+              style={{
+                transform: `translate(${previewOffset.x}px, ${previewOffset.y}px) scale(${previewZoom})`,
+                cursor: previewZoom > 0.6 ? 'grab' : 'default',
+              }}
+              draggable={false}
+            />
+            {/* 缩放控制栏 */}
+            <div className={styles.previewZoomControls}>
+              <button onClick={handleZoomOut} title="缩小">
+                <Minus size={16} />
+              </button>
+              <span className={styles.previewZoomLevel}>{Math.round(previewZoom * 100)}%</span>
+              <button onClick={handleZoomIn} title="放大">
+                <Plus size={16} />
+              </button>
+              <button onClick={handleZoomReset} title="重置">
+                <RotateCw size={16} />
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -330,6 +411,7 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
   const [loadError, setLoadError] = useState('');
   const [detailGroupId, setDetailGroupId] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<MaterialGroup | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'group'; id: string; name: string } | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [actionError, setActionError] = useState('');
 
@@ -416,6 +498,7 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
       ]);
       setGroupAssets((prev) => new Map(prev).set(result.Id, []));
       setShowCreateModal(false);
+      setDetailGroupId(result.Id);
     } catch (err) {
       setActionError(isApiError(err) ? err.message : '创建分组失败');
     }
@@ -427,9 +510,7 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
     setActionError('');
     try {
       await updateAssetGroup({ Id: renameTarget.Id, Description: description });
-      setGroups((prev) =>
-        prev.map((g) => (g.Id === renameTarget.Id ? { ...g, Description: description } : g))
-      );
+      await loadGroups();
       setRenameTarget(null);
     } catch (err) {
       setActionError(isApiError(err) ? err.message : '修改描述失败');
@@ -437,20 +518,27 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
     }
   };
 
-  /** 删除分组 */
-  const handleDeleteGroup = async (id: string) => {
-    if (!confirm('确定删除分组？分组内的素材也会被同步删除。')) return;
+  /** 删除分组 — 打开确认弹窗 */
+  const handleDeleteGroup = (group: MaterialGroup) => {
+    setDeleteTarget({ type: 'group', id: group.Id, name: group.Description || group.Name });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
     setActionError('');
     try {
-      await deleteAssetGroup(id);
-      setGroups((prev) => prev.filter((g) => g.Id !== id));
+      await deleteAssetGroup(deleteTarget.id);
+      setGroups((prev) => prev.filter((g) => g.Id !== deleteTarget.id));
       setGroupAssets((prev) => {
         const next = new Map(prev);
-        next.delete(id);
+        next.delete(deleteTarget.id);
         return next;
       });
+      if (detailGroupId === deleteTarget.id) setDetailGroupId(null);
+      setDeleteTarget(null);
     } catch (err) {
       setActionError(isApiError(err) ? err.message : '删除分组失败');
+      setDeleteTarget(null);
     }
   };
 
@@ -499,7 +587,12 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
 
         {/* 内容区 */}
         <div className={styles.content}>
-          {loading && <div className={styles.empty}>加载中...</div>}
+          {loading ? (
+            <div className={styles.loadingSpinner}>
+              <Loader2 size={32} className={styles.spin} />
+              <span>加载中...</span>
+            </div>
+          ) : null}
           {!loading && loadError && <div className={styles.empty}>加载失败：{loadError}</div>}
           {!loading && !loadError && activeTab === 'character' && (
             detailGroup ? (
@@ -527,7 +620,7 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
                       assets={groupAssets.get(group.Id) ?? []}
                       onView={() => setDetailGroupId(group.Id)}
                       onRename={() => setRenameTarget(group)}
-                      onDelete={() => handleDeleteGroup(group.Id)}
+                      onDelete={() => handleDeleteGroup(group)}
                     />
                   ))}
                 </div>
@@ -561,6 +654,20 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
             onCancel={() => setRenameTarget(null)}
           />
         ) : null}
+
+        {/* 删除确认弹窗 */}
+        <ConfirmModal
+          open={!!deleteTarget}
+          title="删除分组"
+          message={
+            deleteTarget
+              ? `确定要删除分组「${deleteTarget.name}」吗？分组内的所有素材也会被同步删除，此操作不可撤销。`
+              : ''
+          }
+          confirmText="确认删除"
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
       </div>
     </div>,
     document.body,

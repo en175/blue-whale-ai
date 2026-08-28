@@ -12,6 +12,7 @@ import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { type SkillRecord } from '@/api/skills';
 import { setGenHandoff } from '@/utils/gen-handoff';
 import { classifyRefOverflow } from '@/utils/ref-overflow';
+import DurationSlider from './DurationSlider';
 
 /** 选项卡定义 */
 const tabItems = [
@@ -811,19 +812,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                   </button>
                   {showDurationDrop && (
                     <div className={`${styles.dropdownMenuDown} ${styles.durationDropdown}`}>
-                      <div className={styles.durationValue}>{duration}s</div>
-                      <input
-                        type="range"
-                        min={4}
-                        max={15}
-                        value={duration}
-                        onChange={(e) => setDuration(Number(e.target.value))}
-                        className={styles.durationSlider}
-                      />
-                      <div className={styles.durationLabels}>
-                        <span>4s</span>
-                        <span>15s</span>
-                      </div>
+                      <DurationSlider value={duration} onChange={setDuration} />
                     </div>
                   )}
                 </div>

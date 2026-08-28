@@ -483,45 +483,9 @@
 
 /* ---- 时长滑块 ---- */
 .durationDropdown {
-  min-width: 200px !important;
-  padding: var(--spacing-md) !important;
-}
-
-.durationValue {
-  text-align: center;
-  font-size: var(--font-size-md);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin-bottom: var(--spacing-sm);
-}
-
-.durationSlider {
-  width: 100%;
-  height: 4px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: var(--color-border-secondary);
-  border-radius: var(--radius-full);
-  outline: none;
-  cursor: pointer;
-}
-
-.durationSlider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  border-radius: var(--radius-full);
-  background: var(--color-text-primary);
-  cursor: pointer;
-}
-
-.durationLabels {
-  display: flex;
-  justify-content: space-between;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-tertiary);
-  margin-top: 4px;
+  min-width: 248px !important;
+  padding: 12px !important;
+  overflow: visible;
 }
 
 /* ---- 或尝试无限 ---- */

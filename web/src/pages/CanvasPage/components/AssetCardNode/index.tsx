@@ -9,6 +9,7 @@ import { AtSign, Upload, WandSparkles, Info, Music, X, User, MousePointerClick }
 import type { GenerationCardBlock } from '@/api/agentSessions';
 import { uploadAssetFile } from '@/utils/upload';
 import type { UploadCompleteData } from '@/api/assets';
+import type { CanvasGalleryRef } from '../../collectMediaBlocks';
 import styles from './index.module.css';
 
 /** 资产卡类型（generation 为 Agent 生成卡落画布形态） */
@@ -47,7 +48,7 @@ interface AssetCardNodeData {
   toolMode?: 'drag' | 'select';
   isFirst?: boolean;
   /** 水合初始参考图（后端 reference 节点的 references 解析而来） */
-  initialRefs?: { id: string; src: string; type?: 'image' | 'video' }[];
+  initialRefs?: CanvasGalleryRef[];
   /** 水合初始描述文本 */
   initialDesc?: string;
   /** 水合初始音色（角色卡，共享资产加回画布时注入） */
@@ -57,7 +58,7 @@ interface AssetCardNodeData {
   /** 保存到共享资产 */
   onSaveToAssets?: (id: string) => void;
   /** 卡片内容变更同步回父组件（参考图/描述/音色），保证右键保存时能读到最新值 */
-  onCardChange?: (id: string, patch: { refs?: { id: string; src: string; type?: 'image' | 'video' }[]; desc?: string; voice?: { name: string; src: string } | null }) => void;
+  onCardChange?: (id: string, patch: { refs?: CanvasGalleryRef[]; desc?: string; voice?: { name: string; src: string } | null }) => void;
   /** 生成图片：唤起底部图片对话框 */
   onGenerateImage?: () => void;
   /** 触发画布节点选取模式（父级实现） */
@@ -77,7 +78,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
   // 水合容错：持久化的 kind 可能不在五种枚举内（旧数据/脏数据），降级为 custom 避免 KIND_META 落空
   const kind: AssetCardKind = data.kind && data.kind in KIND_META ? data.kind : 'custom';
   const meta = KIND_META[kind];
-  const [refs, setRefs] = useState<{ id: string; src: string; type?: 'image' | 'video' }[]>(data.initialRefs ?? []);
+  const [refs, setRefs] = useState<CanvasGalleryRef[]>(data.initialRefs ?? []);
   const [desc, setDesc] = useState(data.initialDesc ?? '');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [addMenu, setAddMenu] = useState(false);
@@ -108,7 +109,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
 
   /** ts 驱动注入：响应画布「到节点选择」结果，将选中的图片带入 */
   useEffect(() => {
-    const pickResult = (data as { assetPickResult?: { ts: number; assetId: string; ref: { id: string; src: string } } }).assetPickResult;
+    const pickResult = (data as { assetPickResult?: { ts: number; assetId: string; ref: CanvasGalleryRef } }).assetPickResult;
     if (!pickResult || pickResult.assetId !== id) return;
     setRefs((prev) => {
       if (prev.length >= MAX_IMAGE_REFS) return prev;
@@ -222,7 +223,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
               // 释放本地 blob，替换为永久 URL
               if (r.src.startsWith('blob:')) URL.revokeObjectURL(r.src);
               const mediaType: 'image' | 'video' = done.type === 'video' ? 'video' : 'image';
-              return { ...r, src: done.url || r.src, type: mediaType };
+              return { ...r, src: done.url || r.src, type: mediaType, assetId: done.asset_id };
             }),
           );
         })

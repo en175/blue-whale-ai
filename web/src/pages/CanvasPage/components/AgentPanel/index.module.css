@@ -880,6 +880,13 @@
   text-overflow: ellipsis;
 }
 
+.userMediaChipLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* chip 内的 @ 符号 */
 .userMediaChipAt {
   color: var(--color-text-muted);
@@ -887,8 +894,8 @@
 }
 
 /* 用户气泡中的文字内容 */
-.userBubble > span:last-child {
-  flex: 1 0 100%;
+.userMessageText {
+  min-width: 0;
 }
 
 /* Agent 回复：左对齐 markdown 文本块 */
@@ -1791,20 +1798,10 @@
 }
 
 /* ---- 消息气泡里的素材引用（IKAL46 · 临时）----
-   胶囊组件到位后连同 MessageAssetPreview.tsx 一起删掉。 */
+   图片胶囊已抽到 ImageMentionChip；这里只留视频 @ 胶囊与无 URL 降级。 */
 .messageAssets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--spacing-xs);
-  margin-top: var(--spacing-xs);
-}
-
-.messageAssetThumb {
-  max-width: 160px;
-  max-height: 120px;
-  border-radius: var(--radius-sm);
-  object-fit: cover;
-  display: block;
+  /* 素材引用属于用户消息的同一条 flex 流，不能自成一行。 */
+  display: contents;
 }
 
 .messageAssetFallback {

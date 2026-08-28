@@ -3,35 +3,40 @@
  * ============================================ */
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { X, Loader2 } from 'lucide-react';
 import styles from './index.module.css';
 
 interface ProfileModalProps {
   nickname: string;
   phone: string;
   onClose: () => void;
-  onSave: (nickname: string) => void;
+  onSave: (nickname: string) => Promise<boolean> | boolean;
+  error?: string;
+  onErrorClear?: () => void;
 }
 
-export default function ProfileModal({ nickname, phone, onClose, onSave }: ProfileModalProps) {
+export default function ProfileModal({ nickname, phone, onClose, onSave, error, onErrorClear }: ProfileModalProps) {
   const [name, setName] = useState(nickname);
+  const [saving, setSaving] = useState(false);
 
   /** 昵称非空且与当前不同才允许保存 */
   const canSave = name.trim().length > 0 && name.trim() !== nickname;
 
-  const handleSave = () => {
-    if (!canSave) return;
-    onSave(name.trim());
-    onClose();
+  const handleSave = async () => {
+    if (!canSave || saving) return;
+    setSaving(true);
+    const ok = await onSave(name.trim());
+    setSaving(false);
+    if (ok) onClose();
   };
 
   return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
+    <div className={styles.overlay} onClick={() => { if (!saving) onClose(); }}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         {/* 头部 */}
         <div className={styles.header}>
           <h3 className={styles.title}>个人资料</h3>
-          <button className={styles.closeBtn} onClick={onClose} title="关闭">
+          <button className={styles.closeBtn} onClick={() => { if (!saving) onClose(); }} title="关闭">
             <X size={16} strokeWidth={2} />
           </button>
         </div>
@@ -49,8 +54,9 @@ export default function ProfileModal({ nickname, phone, onClose, onSave }: Profi
             className={styles.input}
             value={name}
             maxLength={20}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => { setName(e.target.value); onErrorClear?.(); }}
             placeholder="请输入昵称"
+            disabled={saving}
           />
         </div>
 
@@ -65,17 +71,22 @@ export default function ProfileModal({ nickname, phone, onClose, onSave }: Profi
           />
         </div>
 
+        {/* 错误提示 */}
+        {error && (
+          <div className={styles.errorMsg}>{error}</div>
+        )}
+
         {/* 底部按钮 */}
         <div className={styles.footer}>
-          <button className={styles.cancelBtn} onClick={onClose}>
+          <button className={styles.cancelBtn} onClick={() => { if (!saving) onClose(); }} disabled={saving}>
             取消
           </button>
           <button
-            className={`${styles.saveBtn} ${canSave ? styles.saveBtnActive : ''}`}
+            className={`${styles.saveBtn} ${canSave && !saving ? styles.saveBtnActive : ''}`}
             onClick={handleSave}
-            disabled={!canSave}
+            disabled={!canSave || saving}
           >
-            保存
+            {saving ? <><Loader2 size={14} className={styles.spinner} /> 保存中…</> : '保存'}
           </button>
         </div>
       </div>

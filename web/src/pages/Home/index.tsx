@@ -1,7 +1,6 @@
 /* ============================================
  * Home 首页：对话入口 + 作品卡片画廊
  * ============================================ */
-import { Sparkles } from 'lucide-react';
 import { useState } from 'react';
 import UserDropdown from '@/components/UserDropdown';
 import ChatBox from './components/ChatBox';
@@ -14,18 +13,6 @@ export default function Home() {
 
   return (
     <div className={styles.home}>
-      {/* 顶部计费信息条 */}
-      <div className={styles.billingBar}>
-        <Sparkles size={14} color="#ffffff" strokeWidth={2} />
-        <span className={styles.billingText}>
-          <span className={styles.billingHighlight}>Seedance 2.0 $0.1/s,</span>
-          {' Mini '}
-          <span className={styles.billingHighlight}>$0.05/s</span>
-          {'  |  365 days of Unlimited '}
-          <span className={styles.billingHighlight}>Seedance 2.0 Mini &amp; GPT Image 2</span>
-        </span>
-      </div>
-
       {/* 右上角用户 - 绝对定位与画布页一致 */}
       <div className={styles.topBar}>
         <UserDropdown />

@@ -1,11 +1,11 @@
 /* ============================================
- * UserDropdown 右上角用户下拉菜单：个人资料/账号信息/积分充值入口
+ * UserDropdown 右上角用户下拉菜单：账号信息/积分充值入口
  * 未登录时渲染「登录」按钮并弹出登录弹窗
+ * IKBL2I：个人资料入口暂时隐藏，ProfileModal 保留以便恢复
  * ============================================ */
 import { useState, useRef, useEffect, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  User,
   FileText,
   Wallet,
   Settings,
@@ -14,27 +14,28 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import styles from './index.module.css';
-import { getCurrentUser, subscribe, isAdmin, updateUser, setSession } from '@/utils/auth';
-import { logout, fetchQuota, updateUsername, quotaToPoints } from '@/api/auth';
+import { getCurrentUser, subscribe, isAdmin, setSession } from '@/utils/auth';
+import { logout, fetchQuota, quotaToPoints } from '@/api/auth';
 import { useAuthStore } from '@/stores/auth';
-import ProfileModal from './ProfileModal';
+import { useRechargeUiStore } from '@/stores/recharge';
 import AccountModal from './AccountModal';
 import RechargeModal from './RechargeModal';
 import LoginModal from '@/components/LoginModal';
+import { USER_DROPDOWN_MENU_ITEMS } from './menuItems';
 
-const menuItems = [
-  { key: 'profile', label: '个人资料', icon: User },
-  { key: 'account', label: '账号信息', icon: FileText },
-  { key: 'recharge', label: '积分充值', icon: Wallet },
-  { key: 'settings', label: '系统设置', icon: Settings },
-];
+const menuIcons = {
+  account: FileText,
+  recharge: Wallet,
+  settings: Settings,
+} as const;
 
 export default function UserDropdown() {
   const user = useSyncExternalStore(subscribe, getCurrentUser);
   const [open, setOpen] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
-  const [showRecharge, setShowRecharge] = useState(false);
+  const showRecharge = useRechargeUiStore((s) => s.open);
+  const openRecharge = useRechargeUiStore((s) => s.openRecharge);
+  const closeRecharge = useRechargeUiStore((s) => s.closeRecharge);
   const [showLogin, setShowLogin] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const quota = useAuthStore((s) => s.quota);
@@ -87,16 +88,11 @@ export default function UserDropdown() {
   // 退出登录：调用退出接口后清空会话
   const handleLogout = async () => {
     setOpen(false);
+    closeRecharge();
     setLoggingOut(true);
     await logout().catch(() => undefined);
     setSession(null);
     setLoggingOut(false);
-  };
-
-  // 保存昵称：后端接口暂未实现时降级为本地更新
-  const handleSaveNickname = async (name: string) => {
-    await updateUsername(name).catch(() => undefined);
-    updateUser({ username: name });
   };
 
   return (
@@ -143,8 +139,8 @@ export default function UserDropdown() {
 
           {/* 菜单列表 */}
           <div className={styles.menuList}>
-            {menuItems.map((item) => {
-              const Icon = item.icon;
+            {USER_DROPDOWN_MENU_ITEMS.map((item) => {
+              const Icon = menuIcons[item.key];
               // 系统设置仅管理员可见
               if (item.key === 'settings' && !isAdmin()) return null;
               return (
@@ -153,9 +149,8 @@ export default function UserDropdown() {
                   className={styles.menuItem}
                   onClick={() => {
                     setOpen(false);
-                    if (item.key === 'profile') setShowProfile(true);
                     if (item.key === 'account') setShowAccount(true);
-                    if (item.key === 'recharge') setShowRecharge(true);
+                    if (item.key === 'recharge') openRecharge();
                     if (item.key === 'settings') navigate('/admin');
                   }}
                 >
@@ -184,28 +179,19 @@ export default function UserDropdown() {
         </div>
       )}
 
-      {/* 个人资料弹窗 */}
-      {showProfile && (
-        <ProfileModal
-          nickname={user.username}
-          phone={user.phone}
-          onClose={() => setShowProfile(false)}
-          onSave={handleSaveNickname}
-        />
-      )}
+      {/* IKBL2I：个人资料弹窗暂不挂载，入口隐藏后无法打开 */}
       {/* 账号信息弹窗 */}
       {showAccount && (
         <AccountModal
           userId={user.userId}
           nickname={user.username}
-          phone={user.phone}
           balance={quota === null ? null : quota / 50000}
           onClose={() => setShowAccount(false)}
-          onOpenRecharge={() => setShowRecharge(true)}
+          onOpenRecharge={openRecharge}
         />
       )}
-      {/* 积分充值弹窗 */}
-      {showRecharge && <RechargeModal onClose={() => setShowRecharge(false)} />}
+      {/* 积分充值弹窗（用户菜单与生成前余额拦截共用） */}
+      {showRecharge && <RechargeModal onClose={closeRecharge} />}
     </div>
   );
 }

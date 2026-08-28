@@ -30,8 +30,10 @@ import {
 } from '@/api/agentSessions';
 import { cardsFromRevision } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
+import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
 import { estimateOutputTokens, parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
 import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusLine';
+import { mergeConfirmedUser, projectMessage, textOf } from './userMessageProjection';
 
 /** 一轮结束后的结账信息，供常驻状态行报账（IKA4PG）。 */
 export interface TurnOutcome {
@@ -172,12 +174,6 @@ const LONG_RUN_HINT_MS = 60_000;
 const str = (v: unknown): string =>
   typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '';
 
-/** content 块数组拼为纯文本 */
-const textOf = (blocks: SessionMessage['content'] | undefined): string =>
-  (blocks ?? [])
-    .map((b) => (typeof b?.text === 'string' ? b.text : ''))
-    .join('');
-
 /**
  * 把生成卡挂到产出它的那条助手消息上。
  *
@@ -215,16 +211,6 @@ function attachCards(messages: ChatMessage[], records: PromptCardRecord[] | unde
   }
   return next;
 }
-
-/** 快照消息 → UI 消息 */
-const projectMessage = (m: SessionMessage): ChatMessage => ({
-  id: m.message_id,
-  role: m.role === 'user' ? 'user' : 'assistant',
-  content: textOf(m.content),
-  blocks: m.content ?? [],
-  sequence_no: m.sequence,
-  ...(m.source_run_id ? { sourceRunId: m.source_run_id } : {}),
-});
 
 /**
  * 画布 Agent 对话钩子（session 维度）
@@ -460,28 +446,7 @@ export function useAgentSession(projectId: string) {
 
   /** 确认用户消息：替换乐观气泡（无 client 关联字段，兜底最近一条乐观用户消息） */
   const confirmUser = useCallback((msg: SessionMessage) => {
-    const content = textOf(msg.content);
-    setMessages((prev) => {
-      const idx = prev.findIndex((m) => m.id === msg.message_id);
-      if (idx >= 0) return prev; // 幂等
-      for (let i = prev.length - 1; i >= 0; i--) {
-        if (prev[i].optimistic && prev[i].role === 'user') {
-          const next = [...prev];
-          // 保留乐观消息中携带的 skill_ref、resource_ref、chips（这些字段不会从服务端返回）
-          next[i] = {
-            id: msg.message_id,
-            role: 'user',
-            content,
-            sequence_no: msg.sequence,
-            skill_ref: prev[i].skill_ref,
-            resource_ref: prev[i].resource_ref,
-            chips: prev[i].chips,
-          };
-          return next;
-        }
-      }
-      return [...prev, { id: msg.message_id, role: 'user' as const, content, sequence_no: msg.sequence }];
-    });
+    setMessages((prev) => mergeConfirmedUser(prev, msg));
   }, []);
 
   /** 停掉匀速露出的循环（终态、丢弃、切会话都要停，否则会对着空缓冲空转） */
@@ -813,6 +778,7 @@ export function useAgentSession(projectId: string) {
         runningRef.current = runId || null;
         setRunningRunId(runId || null);
         setPaymentRequiredMessage(str(reason.message) || '运行授权或余额不足，请处理后继续，或取消本次运行。');
+        blockIfQuotaInsufficient();
         return;
       }
 
@@ -1156,6 +1122,7 @@ export function useAgentSession(projectId: string) {
       // 文本与胶囊都空才是真的没内容。
       if (textBlocks.length === 0 && finalResourceRef.length === 0) return false;
       if (!projectId) return false;
+      if (blockIfQuotaInsufficient()) return false;
       // 会话没建起来（初始化失败、或还没跑完）就当场补一个，而不是把用户堵在门外。
       let sid = sessionIdRef.current;
       if (!sid) {
@@ -1220,6 +1187,7 @@ export function useAgentSession(projectId: string) {
             setPaymentRequiredMessage(
               run.failure?.message || '运行授权或余额不足，请处理后继续，或取消本次运行。',
             );
+            blockIfQuotaInsufficient();
           } else if (isTerminalStatus(run.status)) {
             terminalRunIdsRef.current.add(run.run_id);
             streamingRef.current = false;
@@ -1256,7 +1224,8 @@ export function useAgentSession(projectId: string) {
         if (isApiError(e) && e.code === 'capability_required') {
           setSendError('当前环境未配置 Agent 运行能力券，请联系管理员配置后重试；输入内容已保留。');
         } else if (isApiError(e) && (e.status === 402 || e.code === 'payment_required')) {
-          setSendError('余额或运行授权不足，请处理后重试；输入内容已保留。');
+          openRechargeForQuotaError(e);
+          setSendError('余额不足，请充值后重试；输入内容已保留。');
         } else {
           setSendError(`消息发送失败：${e instanceof Error ? e.message : '请稍后重试'}；输入内容已保留。`);
         }
@@ -1294,6 +1263,7 @@ export function useAgentSession(projectId: string) {
   const retryRun = useCallback(() => {
     const sid = sessionIdRef.current;
     if (!projectId || !sid || failedRunId === null) return;
+    if (blockIfQuotaInsufficient()) return;
     api.retrySessionRun(projectId, failedRunId)
       .then(() => {
         setFailedRunId(null);
