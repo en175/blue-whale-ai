@@ -97,18 +97,24 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const pendingText = useRef('');
   /** 登录成功后需填入对话框的「直接使用」技能（IKA64P） */
   const pendingSkill = useRef<SkillRecord | null>(null);
+  /** 登录成功后需注入输入框的模板卡草稿 */
+  const pendingDraft = useRef<{ text: string; mediaType: 'video' | 'image' } | null>(null);
   /** IKA64P：「直接使用」武装的技能气泡（发送时随消息作为强制技能生效） */
   const [armedSkill, setArmedSkill] = useState<{ id: string; name: string } | null>(null);
 
-  /** 外部注入草稿（画廊卡片点击）：仅 ts 变化时覆盖输入框，并按 mediaType 切换 AI视频/AI图片 tab */
+  /** 外部注入草稿（画廊卡片点击）：未登录时存草稿并弹登录框；已登录则直接注入输入框 */
   useEffect(() => {
     if (draft?.ts) {
+      if (!user) {
+        pendingDraft.current = { text: draft.text, mediaType: draft.mediaType };
+        setShowLogin(true);
+        return;
+      }
       setInputValue(draft.text.slice(0, MAX_INPUT));
       setActiveTab(draft.mediaType === 'video' ? 'video' : 'image');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft?.ts]);
-  const [showUpload, setShowUpload] = useState(false);
   /** 智能体 tab 附件（+ 上传 图片/视频/音频）——保留原始 File，发送时经 handoff 带入画布 */
   const [agentFiles, setAgentFiles] = useState<
     { id: string; url: string; kind: 'image' | 'video' | 'audio'; name: string; file: File }[]
@@ -160,7 +166,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const uploadRef = useRef<HTMLDivElement>(null);
   const creationRef = useRef<HTMLDivElement>(null);
   const reasoningRef = useRef<HTMLDivElement>(null);
   const tabBarRef = useRef<HTMLDivElement>(null);
@@ -285,9 +290,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   // 点击外部关闭弹出层
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (uploadRef.current && !uploadRef.current.contains(e.target as Node)) {
-        setShowUpload(false);
-      }
       if (creationRef.current && !creationRef.current.contains(e.target as Node)) {
         setShowCreationDropdown(false);
       }
@@ -429,13 +431,21 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   };
 
   /** 关闭登录框：登录成功则携带原草稿按当前 tab /技能填入对话框；
-   *  未登录成功关闭则把草稿回填输入框，一个字都不丢 */
+   *  未登录成功关闭则把草稿回填输入框，一个字都不丢。
+   *  模板卡草稿（pendingDraft）：登录成功后注入输入框+切换tab，取消则清理不残留。 */
   const handleLoginClose = () => {
     setShowLogin(false);
     const text = pendingText.current;
     pendingText.current = '';
     const skill = pendingSkill.current;
     pendingSkill.current = null;
+    const draftPending = pendingDraft.current;
+    pendingDraft.current = null;
+    if (draftPending && getCurrentUser()) {
+      setInputValue(draftPending.text.slice(0, MAX_INPUT));
+      setActiveTab(draftPending.mediaType === 'video' ? 'video' : 'image');
+      return;
+    }
     if (skill && getCurrentUser()) {
       handleUseSkill(skill);
       return;
@@ -503,12 +513,21 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     });
   };
 
+  /** IME 输入组合状态跟踪（中文输入法回车确认不应触发发送） */
+  const composingRef = useRef(false);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // IME 组合输入中：回车仅确认候选词，不触发发送
+    if (composingRef.current || e.nativeEvent.isComposing) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
+
+  /** 三个 textarea 共用的 composition 事件处理 */
+  const handleCompositionStart = () => { composingRef.current = true; };
+  const handleCompositionEnd = () => { composingRef.current = false; };
 
   // 模型下拉选项：全部取自接口（fetchGenerationModels），无本地写死兜底
   const agentModelOptions = textModels.map((m) => ({ key: m.model_id, label: m.model_label }));
@@ -706,6 +725,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
                 maxLength={MAX_INPUT}
                 onKeyDown={handleKeyDown}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
                 rows={2}
               />
             </div>
@@ -845,7 +866,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               </div>
 
               <div className={styles.videoParamsRight}>
-                <span className={styles.tryUnlimited}>或尝试无限</span>
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() && !firstlastInvalid ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
@@ -902,6 +922,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
                 maxLength={MAX_INPUT}
                 onKeyDown={handleKeyDown}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
                 rows={2}
               />
             </div>
@@ -1011,7 +1033,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             </div>
           </>
         ) : (
-          /* ========== 视频智能体 原有布局 ========== */
+          /* ========== 视频智能体：媒体在上、文字在下，与 AI视频/AI图片 排版一致 ========== */
           <>
             {/* IKA64P：直接使用武装的技能气泡（与画布 Agent 风格一致） */}
             {armedSkill && (
@@ -1029,19 +1051,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               </div>
             )}
 
-            {/* 输入框 */}
-            <textarea
-              className={styles.textarea}
-              placeholder="描述你想制作的视频，微电影、产品广告、社媒视频等都可支持。适合 1-5 分钟视频。"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
-              maxLength={MAX_INPUT}
-              onKeyDown={handleKeyDown}
-              rows={3}
-            />
-
-            {/* 附件预览（+ 上传后展示） */}
-            {agentFiles.length > 0 && (
+            {/* 内容区域：媒体在上、文字在下 */}
+            <div className={styles.videoContent}>
+              {/* 附件预览 + 上传（顶部行） */}
               <div className={styles.refArea}>
                 {agentFiles.map((f, idx) => (
                   <div key={f.id} className={styles.refThumbWrap}>
@@ -1069,50 +1081,59 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                     </span>
                   </div>
                 ))}
+                <div
+                  className={styles.refCard}
+                  onClick={() => {
+                    if (agentAllFull) {
+                      showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${MAX_AGENT_VIDEOS} 个 / 音频 ${MAX_AGENT_AUDIO} 个）`);
+                      return;
+                    }
+                    agentFileInputRef.current?.click();
+                  }}
+                >
+                  <Plus size={16} strokeWidth={2} />
+                  <span>附件</span>
+                </div>
               </div>
-            )}
+
+              {/* 提示词输入框 */}
+              <textarea
+                className={styles.textarea}
+                placeholder="描述你想制作的视频，微电影、产品广告、社媒视频等都可支持。适合 1-5 分钟视频。"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
+                maxLength={MAX_INPUT}
+                onKeyDown={handleKeyDown}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
+                rows={2}
+              />
+            </div>
+
+            {/* 隐藏文件输入 */}
+            <input
+              ref={agentFileInputRef}
+              type="file"
+              accept="image/*,video/*,audio/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleAgentFilePick}
+            />
 
             {/* 底部工具栏 */}
             <div className={styles.toolbar}>
               {/* 左侧工具 */}
               <div className={styles.toolbarLeft}>
-                {/* + 按钮：悬停显示小提示，点击直接选取图片/视频/音频文件上传 */}
-                <div className={styles.uploadWrap} ref={uploadRef}>
-                  <button
-                    className={styles.iconBtn}
-                    onClick={() => {
-                      if (agentAllFull) {
-                        showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${MAX_AGENT_VIDEOS} 个 / 音频 ${MAX_AGENT_AUDIO} 个）`);
-                        return;
-                      }
-                      agentFileInputRef.current?.click();
-                    }}
-                    onMouseEnter={() => setShowUpload(true)}
-                    onMouseLeave={() => setShowUpload(false)}
-                  >
-                    <Plus size={18} strokeWidth={2} />
-                  </button>
-                  {showUpload && (
-                    <div className={styles.uploadPopup}>
-                      <span className={styles.uploadHint}>可上传视频、图片或音频</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* 隐藏文件输入（+ 上传：图片/视频/音频） */}
-                <input
-                  ref={agentFileInputRef}
-                  type="file"
-                  accept="image/*,video/*,audio/*"
-                  multiple
-                  style={{ display: 'none' }}
-                  onChange={handleAgentFilePick}
-                />
-
                 {/* Skill 按钮 */}
                 <button
                   className={styles.skillBtn}
-                  onClick={() => setShowSkillModal(true)}
+                  onClick={() => {
+                    if (!user) {
+                      setShowLogin(true);
+                      return;
+                    }
+                    setShowSkillModal(true);
+                  }}
                 >
                   <BookOpen size={16} strokeWidth={2} />
                   <span>Skill</span>

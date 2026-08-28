@@ -8,11 +8,12 @@ import styles from './index.module.css';
 export default function MainLayout() {
   const location = useLocation();
   const isCanvasPage = location.pathname === '/canvas';
+  const isHomePage = location.pathname === '/';
 
   return (
     <div className={styles.layout}>
       {!isCanvasPage && <Sidebar />}
-      <main className={`${styles.main} ${isCanvasPage ? styles.mainFull : ''}`}>
+      <main className={`${styles.main} ${isCanvasPage ? styles.mainFull : ''} ${isHomePage ? styles.mainHome : ''}`}>
         <Outlet />
       </main>
     </div>

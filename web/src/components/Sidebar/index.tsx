@@ -59,7 +59,7 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className={styles.sidebar}>
+    <aside className={`${styles.sidebar} ${location.pathname === '/' ? styles.onHome : ''}`}>
       {/* Logo */}
       <div className={styles.tabLogo}>
         <img src="/blue_whale.svg" alt="Blue Whale" className={styles.logoIcon} />

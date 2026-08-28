@@ -1,6 +1,6 @@
 import { Controller, Get, Headers } from "@nestjs/common";
 import { NewApiError } from "@blue-whale/core";
-import { ok } from "@blue-whale/contracts";
+import { FAILURE_CODE, ok } from "@blue-whale/contracts";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { toAuthError } from "@lib/shared/errors/auth-error.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
@@ -18,6 +18,11 @@ export class UsageController {
       const usage = await this.account.getTokenUsage(token);
       return ok({ quota: usage.userQuota });
     } catch (error) {
+      if (error instanceof NewApiError && error.status === 200) {
+        // 上游业务失败为 HTTP 200+success:false，透传原文，避免 toAuthError 吞成 502；
+        // HTTP 用 400，否则前端 code===200 会当成功读到 null data。
+        throw new NewApiError(error.message, FAILURE_CODE, error.code);
+      }
       throw toAuthError(error);
     }
   }
