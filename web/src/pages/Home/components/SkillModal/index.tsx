@@ -3,6 +3,7 @@
  * 技能库/我的技能走 /api/agent/skills 接口，滚动分页加载
  * ============================================ */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   // Plus, // 隐藏「创建技能」入口（2026-08-26 需求：仅隐藏按钮保留代码，恢复时一并解注释）
@@ -281,7 +282,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
       .finally(() => setSaving(false));
   };
 
-  return (
+  return createPortal(
     <div className={styles.overlay} onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         {/* 头部标签栏 */}
@@ -544,6 +545,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
           onCancel={() => setRemovalTarget(null)}
         />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

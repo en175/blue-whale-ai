@@ -1,0 +1,71 @@
+.carousel {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  isolation: isolate;
+  background: #080808;
+  pointer-events: none;
+}
+
+.poster,
+.video,
+.scrim {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.poster,
+.video {
+  object-fit: cover;
+}
+
+.poster {
+  z-index: 0;
+}
+
+.video {
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  transition: opacity 600ms ease;
+}
+
+.videoVisible {
+  opacity: 1;
+}
+
+.scrim {
+  z-index: 2;
+  pointer-events: none;
+  /* 只在标题一带加很浅的压暗，避免整段视频发灰 */
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.22) 0%, rgba(0, 0, 0, 0) 28%);
+}
+
+.content {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: var(--spacing-2xl);
+  padding: 92px var(--spacing-2xl) var(--spacing-xl);
+}
+
+@media (max-width: 1100px) {
+  .content {
+    gap: var(--spacing-xl);
+    padding: 72px var(--spacing-xl) var(--spacing-lg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .video {
+    transition: none;
+  }
+}

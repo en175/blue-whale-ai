@@ -20,3 +20,9 @@
 .mainFull {
   margin-left: 0;
 }
+
+/* 首页主区铺满视口，视频才能透到侧栏毛玻璃后面；内容区仍用 padding 避开导航 */
+.mainHome {
+  margin-left: 0;
+  background-color: transparent;
+}

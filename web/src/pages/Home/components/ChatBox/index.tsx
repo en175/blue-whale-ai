@@ -866,7 +866,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               </div>
 
               <div className={styles.videoParamsRight}>
-                <span className={styles.tryUnlimited}>或尝试无限</span>
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() && !firstlastInvalid ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
