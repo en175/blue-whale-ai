@@ -22,6 +22,7 @@ import {
   Check,
   Upload,
   Loader2,
+  Video,
 } from 'lucide-react';
 import {
   createAssetGroup,
@@ -55,13 +56,11 @@ interface CharacterLibraryModalProps {
  * ============================================ */
 function GroupCard({
   group,
-  assets,
   onView,
   onRename,
   onDelete,
 }: {
   group: MaterialGroup;
-  assets: MaterialAsset[];
   onView: () => void;
   onRename: () => void;
   onDelete: () => void;
@@ -80,22 +79,15 @@ function GroupCard({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [menuOpen]);
 
-  const coverAsset = assets.find((a) => a.GroupId === group.Id);
-  const coverUrl = coverAsset?.URL;
-
   return (
     <div className={styles.groupCard} onClick={onView}>
       <div className={styles.groupCover}>
-        {coverUrl ? (
-          <img src={coverUrl} alt={group.Name} />
-        ) : (
-          <FolderOpen className={styles.folderIcon} strokeWidth={1} />
-        )}
+        <FolderOpen className={styles.folderIcon} strokeWidth={1} />
         {/* 底部信息栏（覆盖在图片上） */}
         <div className={styles.groupInfo}>
           <div className={styles.groupInfoLeft}>
             <span className={styles.groupName} title={group.Description || group.Name}>{group.Description || group.Name}</span>
-            <span className={styles.groupCount}>{assets.length} 个素材</span>
+            <span className={styles.groupCount}>点击查看素材</span>
           </div>
         </div>
         {/* 右下角三点按钮 */}
@@ -321,10 +313,18 @@ function GroupDetail({
               onClick={() => onSelectAsset(asset)}>
               <div className={styles.assetThumb}>
                 {asset.URL ? (
-                  <img src={asset.URL} alt={asset.Name} loading="lazy" />
+                  asset.AssetType === 'Video' ? (
+                    <video src={asset.URL} muted playsInline preload="metadata" />
+                  ) : (
+                    <img src={asset.URL} alt={asset.Name} loading="lazy" />
+                  )
                 ) : (
                   <div className={styles.empty}>资源不可用</div>
                 )}
+                <div className={styles.assetTypeBadge}>
+                  {asset.AssetType === 'Video' ? <Video size={14} /> : null}
+                  {asset.AssetType === 'Video' ? '视频' : '图片'}
+                </div>
                 {asset.Status === 'Active' && (
                   <button
                     className={styles.assetSelectBtn}
@@ -417,7 +417,7 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
 
   const GROUP_TYPE: GroupType = 'AIGC';
 
-  /** 加载分组列表 */
+  /** 仅加载分组列表；素材在进入分组详情后再加载。 */
   const loadGroups = useCallback(async () => {
     setLoading(true);
     setLoadError('');
@@ -428,23 +428,7 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
         PageSize: 100,
       });
       setGroups(result.Items);
-      // 预加载每个分组的素材
-      const assetsMap = new Map<string, MaterialAsset[]>();
-      await Promise.all(
-        result.Items.map(async (g) => {
-          try {
-            const assets = await listAssets({
-              Filter: { GroupIds: [g.Id], GroupType: GROUP_TYPE },
-              PageNumber: 1,
-              PageSize: 100,
-            });
-            assetsMap.set(g.Id, assets.Items);
-          } catch {
-            assetsMap.set(g.Id, []);
-          }
-        }),
-      );
-      setGroupAssets(assetsMap);
+      setGroupAssets(new Map());
     } catch (err) {
       setLoadError(isApiError(err) ? err.message : '加载失败');
     } finally {
@@ -468,6 +452,11 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
       console.warn('刷新分组素材失败:', err);
     }
   }, []);
+
+  const handleViewGroup = useCallback((groupId: string) => {
+    setDetailGroupId(groupId);
+    void refreshGroupAssets(groupId);
+  }, [refreshGroupAssets]);
 
   /**
    * 自动轮询：列表中存在 Processing 状态素材时，每 5s 刷新对应分组，
@@ -617,8 +606,7 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
                     <GroupCard
                       key={group.Id}
                       group={group}
-                      assets={groupAssets.get(group.Id) ?? []}
-                      onView={() => setDetailGroupId(group.Id)}
+                      onView={() => handleViewGroup(group.Id)}
                       onRename={() => setRenameTarget(group)}
                       onDelete={() => handleDeleteGroup(group)}
                     />
