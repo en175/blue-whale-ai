@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { classifyRefOverflow } from '@/utils/ref-overflow';
+import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import ChipTextEditor, { type ChipTextEditorHandle, type ChipRef } from '../ChipTextEditor';
 import {
   EMPTY_COMPOSED,
@@ -125,13 +126,28 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   const [sizeOpen, setSizeOpen] = useState(false);
   /** 上传按钮弹菜单（image/video 各自独立，避免同时弹出）：上传 / 到节点选择 */
   const [sourceMenuOpen, setSourceMenuOpen] = useState<'image' | 'video' | null>(null);
+  /** Toast 提示 */
+  const [toast, setToast] = useState('');
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const anyInputRef = useRef<HTMLInputElement>(null);
-
-  /** Toast 提示 */
-  const [toast, setToast] = useState('');
+  const modelWrapRef = useRef<HTMLDivElement>(null);
+  const sizeWrapRef = useRef<HTMLDivElement>(null);
+  const modeWrapRef = useRef<HTMLDivElement>(null);
+  const imageSourceRef = useRef<HTMLDivElement>(null);
+  const videoSourceRef = useRef<HTMLDivElement>(null);
+  const configPanelRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<number | null>(null);
+
+  useDismissOnOutside([
+    { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
+    { open: sizeOpen, ref: sizeWrapRef, dismiss: () => setSizeOpen(false) },
+    { open: modeOpen, ref: modeWrapRef, dismiss: () => setModeOpen(false) },
+    { open: sourceMenuOpen === 'image', ref: imageSourceRef, dismiss: () => setSourceMenuOpen(null) },
+    { open: sourceMenuOpen === 'video', ref: videoSourceRef, dismiss: () => setSourceMenuOpen(null) },
+    { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
+  ]);
+
   const showToast = (msg: string) => {
     setToast(msg);
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
@@ -416,7 +432,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
 
       {/* 配置面板（展开悬浮于底栏上方） */}
       {showConfig && (
-        <div className={styles.configPanel}>
+        <div className={styles.configPanel} ref={configPanelRef}>
           {/* 关闭按钮 */}
           <button
             className={styles.configCloseBtn}
@@ -428,7 +444,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
           {/* 模型与质量 */}
           <span className={styles.configLabel}>模型与质量</span>
           <div className={styles.configRow}>
-            <div className={styles.selectWrap}>
+            <div className={styles.selectWrap} ref={modelWrapRef}>
               <button
                 className={styles.selectBtn}
                 onClick={() => { setModelOpen(!modelOpen); setSizeOpen(false); }}
@@ -459,7 +475,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
               )}
             </div>
 
-            <div className={styles.selectWrap}>
+            <div className={styles.selectWrap} ref={sizeWrapRef}>
               <button
                 className={styles.selectBtn}
                 onClick={() => { setSizeOpen(!sizeOpen); setModelOpen(false); }}
@@ -544,7 +560,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         })}
         {/* 图片上传按钮（弹菜单：图片上传 / 到节点选择） */}
         {imageCount < maxImages && (
-          <div className={styles.sourceWrap}>
+          <div className={styles.sourceWrap} ref={imageSourceRef}>
             <button
               className={`${styles.mediaBtn} ${pickMode === 'image' ? styles.mediaBtnPicking : ''}`}
               onClick={() => setSourceMenuOpen((v) => (v === 'image' ? null : 'image'))}
@@ -605,7 +621,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         })}
         {/* 视频上传按钮（弹菜单：视频上传 / 到节点选择） */}
         {(isKeyframe || videoCount < MAX_VIDEOS) && (
-          <div className={styles.sourceWrap}>
+          <div className={styles.sourceWrap} ref={videoSourceRef}>
             <button
               className={`${styles.mediaBtn} ${pickMode === 'video' ? styles.mediaBtnPicking : ''}`}
               onClick={() => setSourceMenuOpen((v) => (v === 'video' ? null : 'video'))}
@@ -746,7 +762,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
           )}
 
           {/* 模式选择器 */}
-          <div className={styles.modeWrap}>
+          <div className={styles.modeWrap} ref={modeWrapRef}>
             <button
               className={styles.modeBtn}
               onClick={() => setModeOpen(!modeOpen)}

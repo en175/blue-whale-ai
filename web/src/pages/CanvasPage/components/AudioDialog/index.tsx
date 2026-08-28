@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, AudioLines, ChevronDown, Music, ArrowUp, Upload, MousePointerClick, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import styles from './index.module.css';
 
 /** 输入框字数上限 */
@@ -59,6 +60,15 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
   /** 放大态：输入区高度占屏幕 2/3；收起回底部默认高度 */
   const [expanded, setExpanded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const modeWrapRef = useRef<HTMLDivElement>(null);
+  const modelWrapRef = useRef<HTMLDivElement>(null);
+  const sourceWrapRef = useRef<HTMLDivElement>(null);
+
+  useDismissOnOutside([
+    { open: modeOpen, ref: modeWrapRef, dismiss: () => setModeOpen(false) },
+    { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
+    { open: sourceMenuOpen, ref: sourceWrapRef, dismiss: () => setSourceMenuOpen(false) },
+  ]);
 
   useEffect(() => {
     fetchGenerationModels('audio')
@@ -152,7 +162,7 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
           </div>
         ))}
         {refs.length < MAX_AUDIO_REFS && (
-          <div className={styles.refWrap}>
+          <div className={styles.refWrap} ref={sourceWrapRef}>
             <button
               className={`${styles.refBtn} ${pickMode ? styles.refBtnPicking : ''}`}
               onClick={() => setSourceMenuOpen((v) => !v)}
@@ -217,7 +227,7 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
       <div className={styles.bottomBar}>
         <div className={styles.barLeft}>
           {/* 模式（音频生成） */}
-          <div className={styles.modeWrap}>
+          <div className={styles.modeWrap} ref={modeWrapRef}>
             <button className={styles.modeBtn} onClick={() => setModeOpen((v) => !v)}>
               <AudioLines size={14} strokeWidth={2} />
               <span>音频生成</span>
@@ -244,7 +254,7 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
           </div>
 
           {/* 模型（真实） */}
-          <div className={styles.modeWrap}>
+          <div className={styles.modeWrap} ref={modelWrapRef}>
             <button className={styles.modeBtn} onClick={() => setModelOpen((v) => !v)}>
               <span>{currentModel?.model_label ?? '选择模型'}</span>
               <ChevronDown

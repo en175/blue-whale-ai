@@ -9,6 +9,7 @@ import { AdminTemplateTagsController } from "./template-tags.controller.js";
 import { AdminTemplatesController } from "./templates.controller.js";
 import { AdminTopupTiersController } from "./topup-tiers.controller.js";
 import { AdminUsersController } from "./users.controller.js";
+import { AdminAssetsController } from "./assets.controller.js";
 
 @Module({
   controllers: [
@@ -22,6 +23,7 @@ import { AdminUsersController } from "./users.controller.js";
     AdminTemplatesController,
     AdminTemplateTagsController,
     AdminTemplateImagesController,
+    AdminAssetsController,
   ],
 })
 export class AdminModule {}

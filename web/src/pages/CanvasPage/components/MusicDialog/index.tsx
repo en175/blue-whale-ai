@@ -4,6 +4,7 @@
  * ============================================ */
 import { useRef, useState } from 'react';
 import { X, AudioLines, Upload, Move, ChevronDown, Music, ArrowUp } from 'lucide-react';
+import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import type { AudioRefItem, CanvasPickItem } from '../AudioDialog';
 import styles from './index.module.css';
 
@@ -52,6 +53,18 @@ export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAu
   const [instrumental, setInstrumental] = useState(false);
   const [speed, setSpeed] = useState(1);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const sourceWrapRef = useRef<HTMLDivElement>(null);
+  const modeWrapRef = useRef<HTMLDivElement>(null);
+  const modelWrapRef = useRef<HTMLDivElement>(null);
+  const speedWrapRef = useRef<HTMLDivElement>(null);
+
+  useDismissOnOutside([
+    { open: sourceOpen, ref: sourceWrapRef, dismiss: () => setSourceOpen(false) },
+    { open: pickerOpen, ref: sourceWrapRef, dismiss: () => setPickerOpen(false) },
+    { open: modeOpen, ref: modeWrapRef, dismiss: () => setModeOpen(false) },
+    { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
+    { open: speedOpen, ref: speedWrapRef, dismiss: () => setSpeedOpen(false) },
+  ]);
 
   const currentModel = MODEL_OPTIONS.find((m) => m.key === model);
 
@@ -136,7 +149,7 @@ export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAu
 
       {/* 顶部参考音频行 */}
       <div className={styles.topRow}>
-        <div className={styles.refWrap}>
+        <div className={styles.refWrap} ref={sourceWrapRef}>
           <button
             className={styles.refBtn}
             onClick={() => {
@@ -263,7 +276,7 @@ export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAu
       <div className={styles.bottomBar}>
         <div className={styles.barLeft}>
           {/* 模式（AI 音乐 / 音频生成切换） */}
-          <div className={styles.modeWrap}>
+          <div className={styles.modeWrap} ref={modeWrapRef}>
             <button className={styles.modeBtn} onClick={() => setModeOpen((v) => !v)}>
               <Music size={14} strokeWidth={2} />
               <span>AI 音乐</span>
@@ -292,7 +305,7 @@ export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAu
           </div>
 
           {/* 模型（mock） */}
-          <div className={styles.modeWrap}>
+          <div className={styles.modeWrap} ref={modelWrapRef}>
             <button className={styles.modeBtn} onClick={() => setModelOpen((v) => !v)}>
               <span>{currentModel?.label ?? '音乐模型（mock）'}</span>
               <ChevronDown
@@ -334,7 +347,7 @@ export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAu
           </div>
 
           {/* 倍速 */}
-          <div className={styles.modeWrap}>
+          <div className={styles.modeWrap} ref={speedWrapRef}>
             <button className={styles.modeBtn} onClick={() => setSpeedOpen((v) => !v)}>
               <span>{speed}x</span>
               <ChevronDown

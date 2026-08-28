@@ -177,6 +177,32 @@ export function resolveDescription(
     : (nonEmpty(row.description_en) ?? row.description);
 }
 
+/** 把 keyword 按空白拆成单词列表（折叠空白；空串/全空白 → 空数组）。
+ *  IKBMA3：技能库搜索由整串子串匹配升级为「空白拆词 + 全词命中」，
+ *  单词即退化为整串 includes 语义（完全兼容既有行为）。 */
+export function splitSearchTerms(keyword: string): string[] {
+  return keyword.trim().split(/\s+/).filter((t) => t.length > 0);
+}
+
+/** 分词模糊命中判定（契约 §11.4，IKBMA3）：
+ *  - 无词 → 全部命中（keyword 为空时不筛）；
+ *  - 每个词都需出现在解析语言的 name/description 或 search_keywords 之一；
+ *  - 匹配面与整串 includes 时代一致（绝不匹配正文 content）。 */
+export function matchLibraryKeyword(
+  keyword: string | undefined,
+  name: string,
+  description: string | null,
+  searchKeywords: string | null,
+): boolean {
+  const terms = splitSearchTerms(keyword ?? "");
+  if (terms.length === 0) return true;
+  return terms.every((term) =>
+    name.includes(term) ||
+    (description?.includes(term) ?? false) ||
+    (searchKeywords?.includes(term) ?? false),
+  );
+}
+
 /** 解析 official 域 creative_skill_id → 内部 skill.id；表不存在/个人域/未知/已删 → null。 */
 export async function resolveOfficialSourceSkillId(
   prisma: PrismaClient,

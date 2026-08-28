@@ -4,6 +4,8 @@ import { ScheduleModule } from "@nestjs/schedule";
 import { loadRedisConnection } from "@lib/shared/generation/video-queue.js";
 import { VIDEO_GENERATION_QUEUE } from "@lib/shared/generation/queue.constants.js";
 import { PrismaModule } from "@lib/shared/prisma/prisma.module.js";
+import { AssetModule } from "@lib/shared/assets/assets.module.js";
+import { OperationLogModule } from "@lib/shared/operation-log/operation-log.module.js";
 import { GenerationVideoProcessor } from "./generation-video.processor.js";
 import { HealthController } from "./health.controller.js";
 import { RecoveryService } from "./recovery.service.js";
@@ -13,6 +15,7 @@ import { RocketMqImageConsumer } from "./rocketmq-image.consumer.js";
 import { VideoWorkerService } from "./video-worker.service.js";
 import { MediaExtractWorkerService } from "./media-extract-worker.service.js";
 import { ImageWorkerService } from "./image-worker.service.js";
+import { AssetGcService } from "./asset-gc.service.js";
 
 /** 唤醒消费者按 VIDEO_QUEUE_DRIVER 选择：
  *  - rocketmq（默认）：RocketMqVideoConsumer（tag=step）+ RocketMqMediaExtractConsumer（tag=media_extract）
@@ -25,6 +28,8 @@ const useBullmq = driver === "bullmq";
 @Module({
   imports: [
     PrismaModule,
+    AssetModule,
+    OperationLogModule,
     ScheduleModule.forRoot(),
     ...(useBullmq
       ? [
@@ -41,6 +46,7 @@ const useBullmq = driver === "bullmq";
     MediaExtractWorkerService,
     ImageWorkerService,
     RecoveryService,
+    AssetGcService,
     ...(useBullmq
       ? [GenerationVideoProcessor]
       : [
