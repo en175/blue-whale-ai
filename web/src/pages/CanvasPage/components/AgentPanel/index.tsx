@@ -1446,6 +1446,12 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const removeAttachment = (key: string) =>
     setAttachments((prev) => prev.filter((item) => item.key !== key));
 
+  /** 移除首页带入的待发媒体块（按对象引用匹配，ref 同步后重渲染） */
+  const removePendingMediaBlock = (block: import('@/api/agentSessions').SessionContentBlock) => {
+    pendingMediaBlocksRef.current = pendingMediaBlocksRef.current.filter((b) => b !== block);
+    syncMediaBlocks();
+  };
+
   return (
     <div
       ref={panelRef}
@@ -1781,8 +1787,29 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
            *  撑高的责任只能落在它外面。见 .composerSlot。 */}
           {/* 待发素材（IKAL46）。刻意保持纯文本行：胶囊组件由专门的前端同学交付，
             *  这里只负责把接口打通并给出最简可用的呈现。 */}
-          {attachments.length > 0 && (
+          {(attachments.length > 0 || pendingMediaBlocksState.length > 0) && (
             <div className={styles.attachmentRow}>
+              {/* 首页带入的媒体块（已上传就绪，asset_ref）：展示并允许移除，否则发送前用户完全看不到。
+                *  带 chip_id 的画布 @ 块除外——它们已作为胶囊在输入框里展示，此处再画就是重复。 */}
+              {pendingMediaBlocksState.filter((b) => !b.chip_id).map((block, i) => (
+                <span
+                  key={`pm-${i}`}
+                  className={styles.attachmentChip}
+                  title={block.display_label || block.name || ''}
+                >
+                  <span className={styles.attachmentName}>
+                    {block.media_type === 'video' ? '视频' : '图片'}：{block.display_label || block.name || '附件'}
+                  </span>
+                  <button
+                    className={styles.attachmentRemove}
+                    onClick={() => removePendingMediaBlock(block)}
+                    title="移除"
+                    aria-label={`移除 ${block.display_label || block.name || '附件'}`}
+                  >
+                    <X size={11} strokeWidth={2.5} />
+                  </button>
+                </span>
+              ))}
               {attachments.map((item) => (
                 <span
                   key={item.key}

@@ -29,8 +29,9 @@ import type { Node, Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { quotaToPoints, fetchMe, toSessionUser } from '@/api/auth';
 import { fetchProjects, createProject, renameProject, deleteProject,  } from '@/api/projects';
-import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, type AssetRecord, type AssetType } from '@/api/assets';
+import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
+import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
 import { saveCanvasDoc, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
@@ -141,15 +142,18 @@ export default function CanvasPage() {
       if (attachments && attachments.length > 0) {
         const blocks: SessionContentBlock[] = [];
         for (const item of attachments) {
-          const assetId = await uploadFileToAsset(item.file, item.kind);
-          if (assetId) {
+          const uploaded = await uploadFileToAsset(item.file, item.kind);
+          if (uploaded) {
+            // 用 complete 返回的永久 URL（不是会被 revoke 的 objectURL），
+            // 并登记进 MessageAssetPreview 的缓存：发送后乐观气泡立刻能显示缩略图
+            rememberAssetUrl(uploaded.asset_id, uploaded.url);
             blocks.push({
-              type: item.kind,
-              url: item.preview,
+              type: 'asset_ref',
+              url: uploaded.url,
               name: item.name,
               media_type: item.kind,
               display_label: item.name,
-              asset_id: assetId,
+              asset_id: uploaded.asset_id,
             });
           } else {
             console.warn('首页附件上传失败，已跳过:', item.name);
@@ -2078,7 +2082,7 @@ export default function CanvasPage() {
   };
 
   /** 上传单个文件到服务器，返回 assetId */
-  const uploadFileToAsset = async (file: File, type: 'image' | 'video'): Promise<string | null> => {
+  const uploadFileToAsset = async (file: File, type: 'image' | 'video'): Promise<UploadCompleteData | null> => {
     try {
       const assetType: AssetType = type === 'image' ? 'image' : 'video';
       const presign = await fetchUploadPresign({ type: assetType, mime: file.type, size: file.size });
@@ -2090,7 +2094,7 @@ export default function CanvasPage() {
         storage_key: presign.storage_key,
         project_id: currentId || undefined,
       });
-      return complete.asset_id;
+      return complete;
     } catch (e) {
       console.warn('上传文件失败:', e);
       return null;
@@ -2129,7 +2133,8 @@ export default function CanvasPage() {
       );
     }
     if (!fileToUpload) return null;
-    return uploadFileToAsset(fileToUpload, item.type);
+    const uploaded = await uploadFileToAsset(fileToUpload, item.type);
+    return uploaded ? uploaded.asset_id : null;
   };
 
   /** 图片对话发送：上传参考图 → 创建图片生成任务 */
@@ -2157,8 +2162,8 @@ export default function CanvasPage() {
         fileToUpload = await fetchUrlAsFile(f.url, f.name, 'image/*');
       }
       if (fileToUpload) {
-        const assetId = await uploadFileToAsset(fileToUpload, 'image');
-        if (assetId) inputAssetIds.push(assetId);
+        const uploaded = await uploadFileToAsset(fileToUpload, 'image');
+        if (uploaded) inputAssetIds.push(uploaded.asset_id);
       }
     }
 
@@ -2233,8 +2238,8 @@ export default function CanvasPage() {
       (async () => {
         const inputAssetIds: string[] = [];
         for (const f of handoff.files) {
-          const assetId = await uploadFileToAsset(f.file, 'image');
-          if (assetId) inputAssetIds.push(assetId);
+          const uploaded = await uploadFileToAsset(f.file, 'image');
+          if (uploaded) inputAssetIds.push(uploaded.asset_id);
         }
         // url 的释放由 seed 进的图片对话框在卸载时负责（提前 revoke 会让缩略图失效）
         startGenerationJob('image', {
