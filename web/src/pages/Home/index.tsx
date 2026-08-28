@@ -8,8 +8,8 @@ import CardGallery from './components/CardGallery';
 import styles from './index.module.css';
 
 export default function Home() {
-  /** 画廊卡片点击带入聊天框的草稿（ts 驱动注入） */
-  const [chatDraft, setChatDraft] = useState<{ text: string; ts: number } | null>(null);
+  /** 画廊卡片点击带入聊天框的草稿（ts 驱动注入，mediaType 决定切换到 video/image tab） */
+  const [chatDraft, setChatDraft] = useState<{ text: string; ts: number; mediaType: 'video' | 'image' } | null>(null);
 
   return (
     <div className={styles.home}>
@@ -32,7 +32,7 @@ export default function Home() {
 
       {/* 卡片画廊 */}
       <div className={styles.galleryWrap}>
-        <CardGallery onCardClick={(text) => setChatDraft({ text, ts: Date.now() })} />
+        <CardGallery onCardClick={(text, mediaType) => setChatDraft({ text, mediaType, ts: Date.now() })} />
       </div>
     </div>
   );

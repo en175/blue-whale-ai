@@ -68,7 +68,7 @@ function RatioIcon({ ratio, size = 22 }: { ratio: string; size?: number }) {
   );
 }
 
-export default function ChatBox({ draft }: { draft?: { text: string; ts: number } | null }) {
+export default function ChatBox({ draft }: { draft?: { text: string; ts: number; mediaType: 'video' | 'image' } | null }) {
   const [activeTab, setActiveTab] = useState('agent');
   const [inputValue, setInputValue] = useState('');
   const navigate = useNavigate();
@@ -82,9 +82,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   /** IKA64P：「直接使用」武装的技能气泡（发送时随消息作为强制技能生效） */
   const [armedSkill, setArmedSkill] = useState<{ id: string; name: string } | null>(null);
 
-  /** 外部注入草稿（画廊卡片点击）：仅 ts 变化时覆盖输入框 */
+  /** 外部注入草稿（画廊卡片点击）：仅 ts 变化时覆盖输入框，并按 mediaType 切换 AI视频/AI图片 tab */
   useEffect(() => {
-    if (draft?.ts) setInputValue(draft.text.slice(0, MAX_INPUT));
+    if (draft?.ts) {
+      setInputValue(draft.text.slice(0, MAX_INPUT));
+      setActiveTab(draft.mediaType === 'video' ? 'video' : 'image');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft?.ts]);
   const [showUpload, setShowUpload] = useState(false);
