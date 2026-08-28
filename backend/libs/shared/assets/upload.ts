@@ -35,6 +35,8 @@ export interface AssetUploadStorage {
     publicUrl: string;
   } | null>;
   makePublic(storageKey: string): Promise<void>;
+  /** 批量物理删除对象（quiet 模式；404 视为成功幂等）。 */
+  deleteMultiObjects(storageKeys: string[]): Promise<void>;
 }
 
 const MAX_BYTES = {

@@ -19,6 +19,7 @@ describe("AssetRepo upload persistence", () => {
       },
       data: {
         is_delete: true,
+        deleted_at: expect.any(Date),
         version: { increment: 1 },
         gmt_modified: expect.any(Date),
       },

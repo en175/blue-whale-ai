@@ -66,12 +66,16 @@ model assets {
   gmt_modified      DateTime @default(now()) @db.DateTime(0)
   version           Int      @default(0)
   is_delete         Boolean  @default(false)
+  deleted_at        DateTime? @db.DateTime(0)
 
   @@index([project_id], map: "idx_asset_project")
   @@index([project_id, type], map: "idx_asset_project_type")
   @@index([generation_job_id], map: "idx_asset_generation_job")
   @@index([type], map: "idx_type")
   @@index([user_id], map: "idx_user_id")
+  // IKBMDM：findLiveRefs 按 storage_key IN + is_delete=false 做引用核对，需要 storage_key 前缀索引。
+  @@index([storage_key, is_delete], map: "idx_asset_storage_live")
+  @@index([is_delete, deleted_at], map: "idx_asset_gc_candidates")
 }
 
 /// 画布共享资产（IK9QKP）：用户主动保存、跨项目可复用的自包含快照库。
