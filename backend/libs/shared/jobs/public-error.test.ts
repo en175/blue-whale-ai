@@ -34,6 +34,7 @@ import {
   LEGACY_CODE_TO_CANONICAL,
   RETRYABLE_ERROR_CODES,
   fallbackErrorCode,
+  isRetryableForType,
   resolveErrorCode,
 } from "./error-codes.js";
 import { projectPublicError } from "./public-error.js";
@@ -110,6 +111,19 @@ describe("error-codes", () => {
     expect(fallbackErrorCode("media_extract")).toBe("media_extract_failed");
     expect(fallbackErrorCode("image")).toBe("image_generation_failed");
     expect(fallbackErrorCode("audio")).toBe("image_generation_failed");
+  });
+
+  it("retryable 按类型感知：仅 image 的 provider 瞬时码可重试（ADR-0078 review）", () => {
+    expect(isRetryableForType("provider_failed", "image")).toBe(true);
+    expect(isRetryableForType("provider_timeout", "image")).toBe(true);
+    expect(isRetryableForType("storage_failed", "image")).toBe(true);
+    // video/audio/media_extract 无自动重试 → 不投影可重试（避免空头承诺）
+    expect(isRetryableForType("provider_failed", "video")).toBe(false);
+    expect(isRetryableForType("provider_failed", "audio")).toBe(false);
+    expect(isRetryableForType("provider_failed", "media_extract")).toBe(false);
+    // 输入/凭证/quota 任何类型都不可重试
+    expect(isRetryableForType("quota_exhausted", "image")).toBe(false);
+    expect(isRetryableForType("invalid_input", "image")).toBe(false);
   });
 });
 

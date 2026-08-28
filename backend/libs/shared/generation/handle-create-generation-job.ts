@@ -4,6 +4,7 @@ import {
   ERROR_INVALID_INPUT,
   ERROR_MODEL_UNAVAILABLE,
   ERROR_UNSUPPORTED_INPUT,
+  ERROR_UNSUPPORTED_TYPE,
   fail,
   ok,
 } from "@blue-whale/contracts";
@@ -114,7 +115,7 @@ function validate(
 ): { code: string; message: string } | null {
   const type = body.type;
   if (type !== "image" && type !== "video" && type !== "audio")
-    return { code: ERROR_UNSUPPORTED_INPUT, message: "暂不支持该生成类型" };
+    return { code: ERROR_UNSUPPORTED_TYPE, message: "暂不支持该生成类型" };
   const params = body.parameters as GenerationParameters | undefined;
   const maxPromptLength = type === "audio" ? 3000 : 4000;
   if (

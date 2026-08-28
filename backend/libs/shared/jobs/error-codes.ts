@@ -96,12 +96,20 @@ export const GENERATION_ERROR_CODES = new Set<string>([
   ERROR_ENQUEUE_FAILED,
 ]);
 
-/** 可重试失败码（ADR-0078：provider 瞬时类可重试；输入/凭证/quota/审核不可重试）。 */
+/** 可重试失败码（ADR-0078：provider 瞬时类可重试；输入/凭证/quota/审核不可重试）。
+ *  按类型感知：仅 image 有自动重试（generation-worker TRANSIENT_IMAGE_ERROR_CODES），
+ *  video/audio/media_extract 无自动重试——对它们投影 retryable 恒 false，避免"可重试但无人重试"的空头承诺。 */
 export const RETRYABLE_ERROR_CODES = new Set<string>([
   ERROR_PROVIDER_FAILED,
   ERROR_PROVIDER_TIMEOUT,
   ERROR_STORAGE_FAILED,
 ]);
+
+/** 是否按任务类型允许可重试语义（ADR-0078：仅 image 有自动重试）。 */
+export function isRetryableForType(code: string, type: string): boolean {
+  if (!RETRYABLE_ERROR_CODES.has(code)) return false;
+  return type === "image";
+}
 
 /** 旧码归一为 canonical（未在别名表 → 原样返回，由调用方判断是否白名单内）。 */
 export function resolveErrorCode(code: string): string {

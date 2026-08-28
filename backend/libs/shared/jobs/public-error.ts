@@ -34,6 +34,7 @@ import {
   GENERATION_ERROR_CODES,
   RETRYABLE_ERROR_CODES,
   fallbackErrorCode,
+  isRetryableForType,
   resolveErrorCode,
 } from "./error-codes.js";
 
@@ -150,7 +151,7 @@ export function projectPublicError(
   return {
     code,
     message: messageFor(code, type),
-    retryable: RETRYABLE_ERROR_CODES.has(code),
+    retryable: isRetryableForType(code, type),
     details,
     params:
       storedError.params !== undefined && storedError.params !== null
