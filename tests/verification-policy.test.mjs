@@ -323,6 +323,16 @@ test("classifies operational scripts without product acceptance", async () => {
       reasons: ["operations tooling changed"],
     },
   );
+
+  // IKAXDT：画廊图片压缩换链脚本归 operations 分类（一次性维护工具，管理员会话鉴权）。
+  assert.deepEqual(
+    classifyChanges(["scripts/compress-gallery-images.mjs"], { stage: "pr" }),
+    {
+      tier: "scoped",
+      areas: ["operations"],
+      reasons: ["operations tooling changed"],
+    },
+  );
 });
 
 test("rejects unknown executable paths instead of escalating to full", async () => {
