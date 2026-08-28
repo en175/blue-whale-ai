@@ -27,7 +27,7 @@ import type { CanvasProject } from './components/ProjectSelector';
 import FlowCanvas from './components/Canvas';
 import type { Node, Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
-import { quotaToPoints, fetchMe, toSessionUser } from '@/api/auth';
+import { fetchMe, fetchQuota, toSessionUser } from '@/api/auth';
 import { fetchProjects, createProject, renameProject, deleteProject,  } from '@/api/projects';
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, type AssetRecord, type AssetType } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
@@ -203,8 +203,8 @@ export default function CanvasPage() {
   const versionRef = useRef<number | null>(null);
   /** 最近一次加载/保存成功的内容签名，避免重复保存 */
   const lastSavedRef = useRef('');
-  const quota = useAuthStore((s) => s.quota);
   const updateUser = useAuthStore((s) => s.updateUser);
+  const setQuota = useAuthStore((s) => s.setQuota);
   /** 新建商品节点序号（商品 1、商品 2…） */
   const productSeq = useRef(0);
 
@@ -214,6 +214,21 @@ export default function CanvasPage() {
       .then((me) => updateUser(toSessionUser(me)))
       .catch(() => undefined);
   }, [updateUser]);
+
+  // IKBN0G：画布顶栏不再挂 UserDropdown，配额改由本页拉取，供生成前余额拦截
+  useEffect(() => {
+    let alive = true;
+    fetchQuota()
+      .then((d) => {
+        if (alive) setQuota(d.quota);
+      })
+      .catch(() => {
+        if (alive) setQuota(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [setQuota]);
 
   // 加载项目列表；?project= 不在列表中时回退首项；无项目自动创建
   useEffect(() => {
@@ -2212,7 +2227,6 @@ export default function CanvasPage() {
       <CanvasHeader
         projects={projects}
         currentProjectId={currentId}
-        balance={quota === null ? '--' : quotaToPoints(quota)}
         onSelectProject={handleSelect}
         onRenameProject={handleRename}
         onDeleteProject={handleDelete}
