@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
+import { mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaNodeToolbarVisibility } from './toolbarVisibility';
 import styles from './index.module.css';
 
@@ -145,6 +146,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const isGenerating = data.genStatus === 'generating';
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
   const isMediaExtraction = isMediaExtractNodeId(id);
+  const generationOverlay = mediaNodeGenerationOverlay(isMediaExtraction);
 
   return (
     <div className={styles.wrapper} onContextMenu={handleContextMenu}>
@@ -226,17 +228,27 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         {/* 与图片节点一致：任意位置按下均可拖动（视频控件保留点击交互） */}
         <div className={styles.mediaContainer}>
           {isGenerating ? (
-            /* 生成中：进度条 + 取消生成 */
+            /* 生成中：转圈；音频提取展示真实进度；生图/生视频仅保留取消 */
             <div className={styles.genBox}>
               <div className={styles.genSpinner} />
-              <span className={styles.genText}>
-                {isMediaExtraction ? '正在提取音频' : '正在生成'}
-                {typeof data.progress === 'number' ? ` ${data.progress}%` : '…'}
-              </span>
-              <div className={styles.progressTrack}>
-                <div className={styles.progressFill} style={{ width: `${data.progress ?? 0}%` }} />
-              </div>
-              {!isMediaExtraction && (
+              {generationOverlay.showProgress && (
+                <>
+                  <span className={styles.genText}>
+                    {generationOverlay.progressLabel}
+                    {typeof data.progress === 'number' ? ` ${data.progress}%` : '…'}
+                  </span>
+                  <div
+                    className={styles.progressTrack}
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={typeof data.progress === 'number' ? data.progress : 0}
+                  >
+                    <div className={styles.progressFill} style={{ width: `${data.progress ?? 0}%` }} />
+                  </div>
+                </>
+              )}
+              {generationOverlay.showCancel && (
                 <button className={styles.genBtn} onClick={() => data.onCancelJob?.(id)}>
                   取消生成
                 </button>
