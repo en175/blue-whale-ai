@@ -28,6 +28,7 @@ import {
   type SkillRecord,
 } from '@/api/skills';
 import { isApiError } from '@/api/http';
+import ConfirmModal from '@/components/ConfirmModal';
 
 interface SkillModalProps {
   open: boolean;
@@ -87,6 +88,7 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
 
   /* ---- 我的技能状态 ---- */
   const [mySkills, setMySkills] = useState<SkillRecord[]>([]);
+  const [removalTarget, setRemovalTarget] = useState<SkillRecord | null>(null);
   const [mineHasMore, setMineHasMore] = useState(true);
   const minePageRef = useRef(1);
   const mineLoadedRef = useRef(false);
@@ -113,7 +115,10 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
 
   /** 弹框打开时重置两个列表，重新拉取 */
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setRemovalTarget(null);
+      return;
+    }
     libPageRef.current = 1;
     setLibraryList([]);
     setLibraryHasMore(true);
@@ -219,20 +224,25 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
   /** 删除个人技能（永久删除，需确认） */
   const handleDeletePersonal = (s: SkillRecord) => {
     if (!s.creative_skill_id) return;
-    const id = s.creative_skill_id;
-    if (!window.confirm(`确认删除个人技能「${s.name ?? ''}」？删除后不可恢复。`)) return;
-    deletePersonalSkill(id)
-      .then(() => setMySkills((prev) => prev.filter((r) => r.creative_skill_id !== id)))
-      .catch((e) => window.alert(errMsg(e)));
+    setRemovalTarget(s);
   };
 
   /** 从「我的技能」移除官方技能（仅解除引用，需确认） */
   const handleRemoveOfficial = (s: SkillRecord) => {
     if (!s.creative_skill_id) return;
-    const id = s.creative_skill_id;
-    if (!window.confirm(`确认从「我的技能」移除「${s.name ?? ''}」？`)) return;
-    removeMySkill(id)
-      .then(() => setMySkills((prev) => prev.filter((r) => r.creative_skill_id !== id)))
+    setRemovalTarget(s);
+  };
+
+  /** 确认后按技能归属执行原有的删除或解除引用请求。 */
+  const confirmRemoval = () => {
+    const target = removalTarget;
+    const id = target?.creative_skill_id;
+    if (!target || !id) return;
+
+    setRemovalTarget(null);
+    const request = target.asset_domain === 'personal' ? deletePersonalSkill(id) : removeMySkill(id);
+    request
+      .then(() => setMySkills((prev) => prev.filter((skill) => skill.creative_skill_id !== id)))
       .catch((e) => window.alert(errMsg(e)));
   };
 
@@ -520,6 +530,19 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
             />
           </div>
         )}
+
+        <ConfirmModal
+          open={removalTarget !== null}
+          title={removalTarget?.asset_domain === 'personal' ? '删除个人技能' : '移除技能'}
+          message={
+            removalTarget?.asset_domain === 'personal'
+              ? `确认删除个人技能「${removalTarget.name ?? ''}」？删除后不可恢复。`
+              : `确认从「我的技能」移除「${removalTarget?.name ?? ''}」？`
+          }
+          confirmText={removalTarget?.asset_domain === 'personal' ? '删除' : '移除'}
+          onConfirm={confirmRemoval}
+          onCancel={() => setRemovalTarget(null)}
+        />
       </div>
     </div>
   );
