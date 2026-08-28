@@ -96,19 +96,44 @@ export const GENERATION_ERROR_CODES = new Set<string>([
   ERROR_ENQUEUE_FAILED,
 ]);
 
-/** 可重试失败码（ADR-0078：provider 瞬时类可重试；输入/凭证/quota/审核不可重试）。
- *  按类型感知：仅 image 有自动重试（generation-worker TRANSIENT_IMAGE_ERROR_CODES），
- *  video/audio/media_extract 无自动重试——对它们投影 retryable 恒 false，避免"可重试但无人重试"的空头承诺。 */
+/** 可重试失败码（ADR-0078 修正：目前全部失败都可用户手动重试，retryable 恒 true。
+ *  手动重试入口 `POST /retry` 只按 job.status === failed 放行、不看 code；
+ *  失败原因由用户在 UI 上根据 message 自行判断（欠费→充值后重试、瞬时→直接重试）。
+ *  若将来某个失败码不允许重试，在此按码标 false 即可。 */
 export const RETRYABLE_ERROR_CODES = new Set<string>([
   ERROR_PROVIDER_FAILED,
   ERROR_PROVIDER_TIMEOUT,
   ERROR_STORAGE_FAILED,
+  ERROR_QUOTA_EXHAUSTED,
+  ERROR_INVALID_INPUT,
+  ERROR_UNSUPPORTED_TYPE,
+  ERROR_UNSUPPORTED_INPUT,
+  ERROR_MODEL_UNAVAILABLE,
+  ERROR_REFERENCE_ASSET_UNAVAILABLE,
+  ERROR_REFERENCE_LIMIT_EXCEEDED,
+  ERROR_SOURCE_ASSET_UNAVAILABLE,
+  ERROR_PROVIDER_CREDENTIAL_MISSING,
+  ERROR_PROVIDER_CONFIG,
+  ERROR_NO_RESULT,
+  ERROR_SUBMISSION_UNKNOWN,
+  ERROR_TIMED_OUT,
+  ERROR_ALL_OUTPUTS_FAILED,
+  ERROR_CONTENT_REJECTED,
+  ERROR_CONTENT_REVIEW_UNAVAILABLE,
+  ERROR_MEDIA_EXTRACT_FAILED,
+  ERROR_VIDEO_GENERATION_FAILED,
+  ERROR_IMAGE_GENERATION_FAILED,
+  ERROR_VIDEO_HAS_NO_AUDIO_TRACK,
+  ERROR_VIDEO_DOWNLOAD_FAILED,
+  ERROR_VIDEO_TOO_LARGE,
+  ERROR_EXTRACT_FAILED,
+  ERROR_UPLOAD_FAILED,
+  ERROR_ENQUEUE_FAILED,
 ]);
 
-/** 是否按任务类型允许可重试语义（ADR-0078：仅 image 有自动重试）。 */
+/** 是否可重试（ADR-0078 修正：目前一律可手动重试）。 */
 export function isRetryableForType(code: string, type: string): boolean {
-  if (!RETRYABLE_ERROR_CODES.has(code)) return false;
-  return type === "image";
+  return true;
 }
 
 /** 旧码归一为 canonical（未在别名表 → 原样返回，由调用方判断是否白名单内）。 */

@@ -83,12 +83,12 @@ describe("error-codes", () => {
     }
   });
 
-  it("retryable 集合只含 provider 瞬时类", () => {
+  it("retryable 集合：目前全部失败码可重试（ADR-0078 修正）", () => {
     expect(RETRYABLE_ERROR_CODES.has(ERROR_PROVIDER_FAILED)).toBe(true);
     expect(RETRYABLE_ERROR_CODES.has(ERROR_PROVIDER_TIMEOUT)).toBe(true);
     expect(RETRYABLE_ERROR_CODES.has(ERROR_STORAGE_FAILED)).toBe(true);
-    expect(RETRYABLE_ERROR_CODES.has(ERROR_QUOTA_EXHAUSTED)).toBe(false);
-    expect(RETRYABLE_ERROR_CODES.has(ERROR_INVALID_INPUT)).toBe(false);
+    expect(RETRYABLE_ERROR_CODES.has(ERROR_QUOTA_EXHAUSTED)).toBe(true);
+    expect(RETRYABLE_ERROR_CODES.has(ERROR_INVALID_INPUT)).toBe(true);
   });
 
   it("旧码归一 canonical", () => {
@@ -113,17 +113,18 @@ describe("error-codes", () => {
     expect(fallbackErrorCode("audio")).toBe("image_generation_failed");
   });
 
-  it("retryable 按类型感知：仅 image 的 provider 瞬时码可重试（ADR-0078 review）", () => {
+  it("retryable 手动重试语义：不区分，失败一律可重试（ADR-0078 修正）", () => {
+    // 失败原因由用户根据 message 自行判断，不阻断手动重试
     expect(isRetryableForType("provider_failed", "image")).toBe(true);
-    expect(isRetryableForType("provider_timeout", "image")).toBe(true);
+    expect(isRetryableForType("provider_failed", "video")).toBe(true);
+    expect(isRetryableForType("provider_failed", "audio")).toBe(true);
+    expect(isRetryableForType("provider_failed", "media_extract")).toBe(true);
+    expect(isRetryableForType("provider_timeout", "video")).toBe(true);
     expect(isRetryableForType("storage_failed", "image")).toBe(true);
-    // video/audio/media_extract 无自动重试 → 不投影可重试（避免空头承诺）
-    expect(isRetryableForType("provider_failed", "video")).toBe(false);
-    expect(isRetryableForType("provider_failed", "audio")).toBe(false);
-    expect(isRetryableForType("provider_failed", "media_extract")).toBe(false);
-    // 输入/凭证/quota 任何类型都不可重试
-    expect(isRetryableForType("quota_exhausted", "image")).toBe(false);
-    expect(isRetryableForType("invalid_input", "image")).toBe(false);
+    expect(isRetryableForType("quota_exhausted", "image")).toBe(true);
+    expect(isRetryableForType("invalid_input", "image")).toBe(true);
+    expect(isRetryableForType("unsupported_input", "image")).toBe(true);
+    expect(isRetryableForType("content_rejected", "image")).toBe(true);
   });
 });
 
@@ -140,7 +141,7 @@ describe("projectPublicError", () => {
     expect(out!.details).toEqual({ raw: "上游英文原文" });
   });
 
-  it("quota_exhausted 语义还原：message 充值引导 + 不可重试 + details 带原文", () => {
+  it("quota_exhausted 语义还原：message 充值引导 + 欠费可手动重试 + details 带原文", () => {
     // 真实案例 job 1494：provider_failed + overdue balance 英文
     const out = projectPublicError(
       {
@@ -151,20 +152,21 @@ describe("projectPublicError", () => {
     );
     expect(out!.code).toBe("quota_exhausted");
     expect(out!.message).toBe("账户余额不足，请充值后重试");
-    expect(out!.retryable).toBe(false);
+    // 手动重试语义：充值后可重试
+    expect(out!.retryable).toBe(true);
     expect(out!.details).toEqual({
       raw: "The request failed because your account has an overdue balance.",
     });
   });
 
-  it("旧码归一：历史 invalid_video_inputs → invalid_input 中文 + 不可重试", () => {
+  it("旧码归一：历史 invalid_video_inputs → invalid_input 中文 + 可重试", () => {
     const out = projectPublicError(
       { code: "invalid_video_inputs", message: "首帧只能指定一个来源" },
       "video",
     );
     expect(out!.code).toBe("invalid_input");
     expect(out!.message).toBe("输入参数无效");
-    expect(out!.retryable).toBe(false);
+    expect(out!.retryable).toBe(true);
   });
 
   it("白名单外码 fallback 到类型兜底", () => {
@@ -187,7 +189,7 @@ describe("projectPublicError", () => {
       "image",
     );
     expect(out!.params).toEqual({ max_reference_count: 9 });
-    expect(out!.retryable).toBe(false);
+    expect(out!.retryable).toBe(true);
   });
 
   it("null 输入返回 null", () => {
