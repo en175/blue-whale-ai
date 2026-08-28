@@ -115,7 +115,7 @@ function GalleryCard({ record, onClick }: { record: TemplateRecord; onClick?: ()
   );
 }
 
-export default function CardGallery({ onCardClick }: { onCardClick?: (text: string) => void }) {
+export default function CardGallery({ onCardClick }: { onCardClick?: (text: string, mediaType: 'video' | 'image') => void }) {
   const [tags, setTags] = useState<TemplateTag[]>(FALLBACK_TAGS);
   /** IKA64P：初始空值，加载后取接口返回首个可见标签 */
   const [activeTag, setActiveTag] = useState('');
@@ -175,7 +175,11 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
           <GalleryCard
             key={`${record.title}-${idx}`}
             record={record}
-            onClick={() => onCardClick?.(record.content?.trim() || record.title)}
+            onClick={() => {
+              const text = record.content?.trim() || record.title;
+              const mediaType: 'video' | 'image' = activeTag === 'video' ? 'video' : 'image';
+              onCardClick?.(text, mediaType);
+            }}
           />
         ))}
       </div>

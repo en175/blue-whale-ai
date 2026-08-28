@@ -28,9 +28,9 @@ export interface VideoGenHandoff {
   aspectRatio: string;
   resolution: string;
   duration: number;
-  /** 画布侧模式（首页键映射：omni/text2video → all，firstlast → keyframe）；
+  /** 画布侧模式：all 全能参考 / keyframe 首尾帧 / text2video 图生视频；
    *  keyframe 时 refs 为恰好 2 张图（首页已校验），走首尾帧提交 */
-  mode: 'all' | 'keyframe';
+  mode: 'all' | 'keyframe' | 'text2video';
   refs: GenRefItem[];
 }
 
