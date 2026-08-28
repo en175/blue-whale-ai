@@ -460,6 +460,44 @@
   left: 23px;
 }
 
+/* 特性 features 结构化分组 */
+.featureGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  margin-bottom: 22px;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  background: #202020;
+}
+
+.featureGroup .switchRow {
+  margin-top: 0;
+}
+
+.featureExtra {
+  margin-bottom: 22px;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  background: #202020;
+}
+
+.featureExtra summary {
+  padding: 14px 18px;
+  font-size: var(--font-size-md, 14px);
+  color: #d6d6d6;
+  cursor: pointer;
+  user-select: none;
+}
+
+.featureExtra textarea {
+  margin: 0;
+  border: none;
+  border-top: 1px solid #2a2a2a;
+  border-radius: 0 0 10px 10px;
+}
+
 .hint {
   margin: 20px 0 0;
   font-size: var(--font-size-sm, 13px);
