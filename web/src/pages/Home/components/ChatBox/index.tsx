@@ -343,8 +343,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
         aspectRatio,
         resolution: sizeEntry?.api_value ?? resolution,
         duration,
-        // 首页模式键映射画布模式：首尾帧→keyframe；图生视频/全能参考→all
-        mode: videoMode === 'firstlast' ? 'keyframe' : 'all',
+        // 首页模式键映射画布模式：首尾帧→keyframe；其余保留原键（omni→all、text2video→text2video）
+        mode: videoMode === 'firstlast' ? 'keyframe' : (videoMode === 'text2video' ? 'text2video' : 'all'),
         refs: refFiles.map((r) => ({
           preview: r.preview,
           type: r.file.type.startsWith('video/') ? ('video' as const) : ('image' as const),
