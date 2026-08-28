@@ -2,7 +2,7 @@
 // 账户面：能力探测、注册/登录、Token 身份与用量日志。
 import {NewApiError, positiveInteger} from "./new-api-transport.js";
 import type {NewApiEnvelope, NewApiRequest} from "./new-api-transport.js";
-import type {NewApiAccountCapabilities, NewApiAccountIdentity, NewApiLog, NewApiLoginInput, NewApiLoginResult, NewApiRegisterInput, NewApiUsage} from "./new-api-types.js";
+import type {NewApiAccountCapabilities, NewApiAccountIdentity, NewApiChangePasswordInput, NewApiLog, NewApiLoginInput, NewApiLoginResult, NewApiRegisterInput, NewApiUsage} from "./new-api-types.js";
 
 export function createNewApiAccountOps(request: NewApiRequest) {
   return {
@@ -171,6 +171,28 @@ export function createNewApiAccountOps(request: NewApiRequest) {
         token,
       );
       return Array.isArray(response.data) ? (response.data as NewApiLog[]) : [];
+    },
+
+    // —— 账户自助更新（IKBRCK：修改密码） ——
+
+    /** PUT /api/user/self 改密（网关 `checkUpdatePassword` 先验原密码后写新密码；
+     *  新密码 8–20 位，鉴权 UserAuth 凭 Bearer sk-，无需 New-Api-User 头）。
+     *  成功返回 void；原密码错误/账号未设密码等业务失败由传输层抛 NewApiError。 */
+    async changePassword(
+      input: NewApiChangePasswordInput,
+      token: string,
+    ): Promise<void> {
+      await request<NewApiEnvelope>(
+        "/api/user/self",
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            original_password: input.originalPassword,
+            password: input.newPassword,
+          }),
+        },
+        token,
+      );
     },
   };
 }
