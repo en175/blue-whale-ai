@@ -15,6 +15,7 @@ import {
   Image as ImageIcon,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import styles from './index.module.css';
 
 /** 接口失败时参考图上限回退值（IKA715：与后端/网关缺省 10 对齐） */
@@ -101,6 +102,17 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   /** 上传中状态：禁用发送按钮和输入框 */
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const modelWrapRef = useRef<HTMLDivElement>(null);
+  const resWrapRef = useRef<HTMLDivElement>(null);
+  const sourceWrapRef = useRef<HTMLDivElement>(null);
+  const configPanelRef = useRef<HTMLDivElement>(null);
+
+  useDismissOnOutside([
+    { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
+    { open: resOpen, ref: resWrapRef, dismiss: () => setResOpen(false) },
+    { open: sourceMenuOpen, ref: sourceWrapRef, dismiss: () => setSourceMenuOpen(false) },
+    { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
+  ]);
 
   /** 画布节点选取结果注入参考素材（去重 + 上限保护） */
   useEffect(() => {
@@ -228,7 +240,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
     <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
       {/* 配置面板（可展开/收起） */}
       {showConfig && (
-        <div className={styles.configPanel}>
+        <div className={styles.configPanel} ref={configPanelRef}>
           {/* 关闭按钮 */}
           <button
             className={styles.configCloseBtn}
@@ -241,7 +253,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           <div className={styles.configSection}>
             <span className={styles.configLabel}>模型与质量</span>
             <div className={styles.configRow}>
-              <div className={styles.selectWrap}>
+              <div className={styles.selectWrap} ref={modelWrapRef}>
                 <button
                   className={styles.selectBtn}
                   onClick={() => { setModelOpen(!modelOpen); setResOpen(false); }}
@@ -273,7 +285,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                 )}
               </div>
 
-              <div className={styles.selectWrap}>
+              <div className={styles.selectWrap} ref={resWrapRef}>
                 <button
                   className={styles.selectBtn}
                   onClick={() => { setResOpen(!resOpen); setModelOpen(false); }}
@@ -328,7 +340,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           <div className={styles.previewRow}>
             {/* 左上角图标：点击弹出「图片上传 / 到节点选择」（图片达上限隐藏） */}
             {!imagesFull && (
-            <div className={styles.sourceWrap}>
+            <div className={styles.sourceWrap} ref={sourceWrapRef}>
               <button
                 className={`${styles.previewItem} ${styles.previewPlaceholder} ${pickMode ? styles.previewPicking : ''}`}
                 onClick={() => setSourceMenuOpen((v) => !v)}
