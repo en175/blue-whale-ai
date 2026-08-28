@@ -48,6 +48,17 @@ test("project skills delegate final verification to the repository strategy", ()
   }
 });
 
+test("frontend Bugfix workflow extracts sparse Issue details instead of gating on a template", () => {
+  const workflow = read(".claude/skills/frontend-delivery/references/bugfix.md");
+
+  assert.match(workflow, /not\W+an entry gate/);
+  assert.match(workflow, /`confirmed`.*`inferred`.*`unknown`/s);
+  assert.match(workflow, /Do not require the Issue author to rewrite a terse requirement into a template/);
+  assert.match(workflow, /two or more materially different safe fixes/);
+  assert.doesNotMatch(workflow, /If a required field is absent, stop/);
+  assert.doesNotMatch(workflow, /已终止前端 Bugfix 流程/);
+});
+
 test("tracked skill mirrors match their authoritative sources", () => {
   assert.equal(read(".zcode/skills/implement/SKILL.md"), read(".claude/skills/implement/SKILL.md"));
 
