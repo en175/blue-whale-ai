@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 
-import { fail, ok } from "@blue-whale/contracts";
+import {
+  ERROR_INVALID_INPUT,
+  ERROR_MODEL_UNAVAILABLE,
+  ERROR_UNSUPPORTED_INPUT,
+  fail,
+  ok,
+} from "@blue-whale/contracts";
 import {
   DEFAULT_MAX_REFERENCE_IMAGES,
   type CreateJobInput,
@@ -101,11 +107,14 @@ function uniqueAssetIds(ids: string[]): string[] {
   return ids.filter((id, index) => ids.indexOf(id) === index);
 }
 
-/** 校验请求体，返回错误信息或 null。对齐 Java CreateGenerationJobRequest 约束。 */
-function validate(body: CreateGenerationJobBody): string | null {
+/** 校验请求体，返回 { code, message } 或 null。对齐 Java CreateGenerationJobRequest 约束。
+ *  IKBQEE / ADR-0078：创建期校验错误统一携带错误码（与执行期同源），前端 e.message 消费不变。 */
+function validate(
+  body: CreateGenerationJobBody,
+): { code: string; message: string } | null {
   const type = body.type;
   if (type !== "image" && type !== "video" && type !== "audio")
-    return "暂不支持该生成类型";
+    return { code: ERROR_UNSUPPORTED_INPUT, message: "暂不支持该生成类型" };
   const params = body.parameters as GenerationParameters | undefined;
   const maxPromptLength = type === "audio" ? 3000 : 4000;
   if (
@@ -114,23 +123,29 @@ function validate(body: CreateGenerationJobBody): string | null {
     params.prompt.trim() === "" ||
     params.prompt.length > maxPromptLength
   ) {
-    return "prompt 无效";
+    return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
   }
   if (type !== "audio") {
     if (
       !isStr(params.aspect_ratio) ||
       !/^[1-9][0-9]*:[1-9][0-9]*$/.test(params.aspect_ratio)
     ) {
-      return "aspect_ratio 无效";
+      return { code: ERROR_INVALID_INPUT, message: "aspect_ratio 无效" };
     }
   }
   if (!isStr(params.model_id) || params.model_id.trim() === "")
-    return "model_id 无效";
+    return { code: ERROR_INVALID_INPUT, message: "model_id 无效" };
   const count = Number(body.expected_output_count);
   if (!Number.isInteger(count) || count < 1 || count > 4)
-    return "expected_output_count 须为 1-4";
+    return {
+      code: ERROR_INVALID_INPUT,
+      message: "expected_output_count 须为 1-4",
+    };
   if ((type === "video" || type === "audio") && count !== 1)
-    return "视频/音频生成仅支持一个输出";
+    return {
+      code: ERROR_INVALID_INPUT,
+      message: "视频/音频生成仅支持一个输出",
+    };
   // IKA72G：音频一期不支持任何参考素材——reference_asset_ids 与 input_asset_ids 一并显式拒绝，
   // 避免统一字段语义后 input_asset_ids 被静默忽略。
   if (
@@ -139,7 +154,10 @@ function validate(body: CreateGenerationJobBody): string | null {
       body.reference_asset_ids.length > 0) ||
       (Array.isArray(body.input_asset_ids) && body.input_asset_ids.length > 0))
   )
-    return "音频生成一期不支持参考素材";
+    return {
+      code: ERROR_UNSUPPORTED_INPUT,
+      message: "音频生成一期不支持参考素材",
+    };
   const inputAssetIds = Array.isArray(body.input_asset_ids)
     ? body.input_asset_ids
     : [];
@@ -154,11 +172,14 @@ function validate(body: CreateGenerationJobBody): string | null {
     const hasExplicitInputs =
       hasExplicitFrames || body.reference_asset_ids !== undefined;
     if (body.first_frame_asset_id !== undefined && firstFrameAssetId === null)
-      return "首帧素材无效";
+      return { code: ERROR_INVALID_INPUT, message: "首帧素材无效" };
     if (body.last_frame_asset_id !== undefined && lastFrameAssetId === null)
-      return "尾帧素材无效";
+      return { code: ERROR_INVALID_INPUT, message: "尾帧素材无效" };
     if (lastFrameAssetId !== null && firstFrameAssetId === null)
-      return "尾帧必须与首帧一起使用";
+      return {
+        code: ERROR_INVALID_INPUT,
+        message: "尾帧必须与首帧一起使用",
+      };
     if (
       body.reference_asset_ids !== undefined &&
       assetIds(body.reference_asset_ids).length !==
@@ -166,21 +187,27 @@ function validate(body: CreateGenerationJobBody): string | null {
           ? body.reference_asset_ids.length
           : -1)
     )
-      return "参考素材无效";
+      return { code: ERROR_INVALID_INPUT, message: "参考素材无效" };
     const explicitReferenceIds = uniqueAssetIds(
       assetIds(body.reference_asset_ids),
     );
     if (hasExplicitFrames && explicitReferenceIds.length > 0) {
-      return "首尾帧模式不能与普通参考素材混用";
+      return {
+        code: ERROR_INVALID_INPUT,
+        message: "首尾帧模式不能与普通参考素材混用",
+      };
     }
     if (
       body.reference_asset_ids !== undefined &&
       explicitReferenceIds.length > 12
     ) {
-      return "参考素材最多 12 个";
+      return { code: ERROR_INVALID_INPUT, message: "参考素材最多 12 个" };
     }
     if (!hasExplicitInputs && inputAssetIds.length > 1)
-      return "视频生成仅支持 0 或 1 个参考图";
+      return {
+        code: ERROR_INVALID_INPUT,
+        message: "视频生成仅支持 0 或 1 个参考图",
+      };
   }
   // 素材库引用（MaterialReference）：仅视频生成可用；格式校验 + 与本地 Asset 引用按并集互斥/配对。
   if (type !== "video") {
@@ -189,7 +216,10 @@ function validate(body: CreateGenerationJobBody): string | null {
       body.last_frame_material_id !== undefined ||
       body.reference_materials !== undefined
     ) {
-      return "素材库引用仅支持视频生成";
+      return {
+        code: ERROR_UNSUPPORTED_INPUT,
+        message: "素材库引用仅支持视频生成",
+      };
     }
   } else {
     const firstFrameAssetId2 = assetId(body.first_frame_asset_id);
@@ -200,17 +230,18 @@ function validate(body: CreateGenerationJobBody): string | null {
       body.first_frame_material_id !== undefined &&
       firstFrameMaterialId === null
     )
-      return "首帧素材库引用无效";
+      return { code: ERROR_INVALID_INPUT, message: "首帧素材库引用无效" };
     if (body.last_frame_material_id !== undefined && lastFrameMaterialId === null)
-      return "尾帧素材库引用无效";
+      return { code: ERROR_INVALID_INPUT, message: "尾帧素材库引用无效" };
     if (firstFrameAssetId2 !== null && firstFrameMaterialId !== null)
-      return "首帧只能指定一个来源";
+      return { code: ERROR_INVALID_INPUT, message: "首帧只能指定一个来源" };
     if (lastFrameAssetId2 !== null && lastFrameMaterialId !== null)
-      return "尾帧只能指定一个来源";
+      return { code: ERROR_INVALID_INPUT, message: "尾帧只能指定一个来源" };
     if (lastFrameMaterialId !== null && firstFrameMaterialId === null)
-      return "尾帧必须与首帧一起使用";
+      return { code: ERROR_INVALID_INPUT, message: "尾帧必须与首帧一起使用" };
     const refs = materialRefs(body.reference_materials);
-    if (refs === null) return "参考素材库引用无效";
+    if (refs === null)
+      return { code: ERROR_INVALID_INPUT, message: "参考素材库引用无效" };
     const uniqueRefs = uniqueMaterialRefs(refs);
     // 模式互斥按并集（asset ∨ material）：帧（首/尾帧任一类）与普通参考（asset refs ∨ material refs）
     // 不可并存；跨来源组合在创建即拒绝，不再拖到 Worker 执行时才失败。
@@ -222,10 +253,13 @@ function validate(body: CreateGenerationJobBody): string | null {
     const hasRefSource =
       assetIds(body.reference_asset_ids).length > 0 || uniqueRefs.length > 0;
     if (hasFrameSource && hasRefSource) {
-      return "首尾帧模式不能与普通参考素材混用";
+      return {
+        code: ERROR_INVALID_INPUT,
+        message: "首尾帧模式不能与普通参考素材混用",
+      };
     }
     if (body.reference_materials !== undefined && uniqueRefs.length > 12) {
-      return "参考素材最多 12 个";
+      return { code: ERROR_INVALID_INPUT, message: "参考素材最多 12 个" };
     }
   }
   return null;
@@ -252,7 +286,7 @@ export async function handleCreateGenerationJob(
   if (!owned) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
 
   const err = validate(body);
-  if (err) return fail(400, err);
+  if (err) return fail(400, err.message, { code: err.code });
 
   const type = body.type as "image" | "video" | "audio";
   const params = body.parameters as GenerationParameters;
@@ -271,7 +305,9 @@ export async function handleCreateGenerationJob(
       : String(params.model_id);
   const whitelist = await deps.models.listEnabledByType(type);
   if (!whitelist.some((m) => m.model_id === resolvedModelId)) {
-    return fail(400, "model_id 不在可用模型白名单或已停用");
+    return fail(400, "model_id 不在可用模型白名单或已停用", {
+      code: ERROR_MODEL_UNAVAILABLE,
+    });
   }
 
   // IKA72G：参考图上限读取模型能力配置（features.max_reference_images），与 worker/网关同一来源；
@@ -294,7 +330,10 @@ export async function handleCreateGenerationJob(
         ? []
         : inputAssetIds;
   if (type === "image" && referenceAssetIds.length > maxReferenceImages) {
-    return fail(400, `参考图最多 ${maxReferenceImages} 张`);
+    return fail(400, `参考图最多 ${maxReferenceImages} 张`, {
+      code: ERROR_UNSUPPORTED_INPUT,
+      params: { max_reference_count: maxReferenceImages },
+    });
   }
 
   let input: Record<string, unknown>;

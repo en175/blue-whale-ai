@@ -239,7 +239,11 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
           where: fenceWhere({jobId, workerId, fencingToken}),
           data: {
             status: "failed",
-            error: { code: errorCode, message: errorMessage } as never,
+            error: {
+              code: errorCode,
+              message: errorMessage,
+              ...(input.details !== undefined ? { details: input.details } : {}),
+            } as never,
             next_action_at: null,
             lease_owner: null,
             lease_expires_at: null,

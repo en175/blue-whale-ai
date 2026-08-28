@@ -147,6 +147,9 @@ importers:
 
   packages/generation-runtime:
     dependencies:
+      '@blue-whale/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@blue-whale/core':
         specifier: workspace:*
         version: link:../core

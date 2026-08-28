@@ -1,4 +1,8 @@
 import {
+  ERROR_NO_RESULT,
+  ERROR_PROVIDER_FAILED,
+} from "@blue-whale/contracts";
+import {
   AudioProviderError,
   type AudioProvider,
   type GenerateAudioInput,
@@ -47,7 +51,7 @@ export function createNewApiAudioProvider(
       });
       if (!response.ok) {
         throw new AudioProviderError(
-          "provider_failed",
+          ERROR_PROVIDER_FAILED,
           `new-api 音频生成失败: ${response.status}`,
         );
       }
@@ -55,7 +59,7 @@ export function createNewApiAudioProvider(
       try {
         payload = (await response.json()) as OfficialAudioResponse;
       } catch {
-        throw new AudioProviderError("no_result", "生成服务未返回有效 JSON");
+        throw new AudioProviderError(ERROR_NO_RESULT, "生成服务未返回有效 JSON");
       }
       const url = typeof payload.url === "string" ? payload.url : null;
       const data =
@@ -63,7 +67,7 @@ export function createNewApiAudioProvider(
           ? new Uint8Array(Buffer.from(payload.audio, "base64"))
           : undefined;
       if (data === undefined && url === null) {
-        throw new AudioProviderError("no_result", "生成服务未返回音频结果");
+        throw new AudioProviderError(ERROR_NO_RESULT, "生成服务未返回音频结果");
       }
       const duration =
         typeof payload.duration === "number" && Number.isFinite(payload.duration)

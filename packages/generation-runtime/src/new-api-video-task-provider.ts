@@ -1,4 +1,5 @@
 import { createNewApiClient } from "@blue-whale/core";
+import { ERROR_PROVIDER_FAILED } from "@blue-whale/contracts";
 
 import type {
   VideoTaskObservation,
@@ -47,7 +48,7 @@ export function createNewApiVideoTaskProvider(options: {
           url: null,
           ...(quota !== undefined ? { quota } : {}),
           error: {
-            code: String(task.error?.code ?? "provider_failed"),
+            code: String(task.error?.code ?? ERROR_PROVIDER_FAILED),
             message: task.error?.message ?? "视频生成失败",
           },
         };

@@ -1,5 +1,10 @@
 import { NewApiError } from "@blue-whale/core";
 import { createNewApiClient } from "@blue-whale/core";
+import {
+  ERROR_PROVIDER_FAILED,
+  ERROR_PROVIDER_TIMEOUT,
+  ERROR_QUOTA_EXHAUSTED,
+} from "@blue-whale/contracts";
 
 import {
   VideoProviderError,
@@ -33,12 +38,12 @@ function providerError(error: unknown): VideoProviderError {
   if (error instanceof VideoProviderError) return error;
   if (error instanceof NewApiError) {
     return new VideoProviderError(
-      error.status === 402 ? "quota_exhausted" : "provider_failed",
+      error.status === 402 ? ERROR_QUOTA_EXHAUSTED : ERROR_PROVIDER_FAILED,
       error.message,
     );
   }
   return new VideoProviderError(
-    "provider_failed",
+    ERROR_PROVIDER_FAILED,
     error instanceof Error ? error.message : "视频生成失败",
   );
 }
@@ -71,7 +76,7 @@ export function createNewApiVideoProvider(
           if (SUCCESS_STATUSES.has(status)) {
             if (!task.url) {
               throw new VideoProviderError(
-                "provider_failed",
+                ERROR_PROVIDER_FAILED,
                 "视频任务成功但未返回 URL",
               );
             }
@@ -83,7 +88,7 @@ export function createNewApiVideoProvider(
           }
           if (FAILED_STATUSES.has(status)) {
             throw new VideoProviderError(
-              "provider_failed",
+              ERROR_PROVIDER_FAILED,
               task.error?.message ?? "视频生成失败",
             );
           }
@@ -92,7 +97,7 @@ export function createNewApiVideoProvider(
           }
         }
 
-        throw new VideoProviderError("provider_timeout", "视频生成轮询超时");
+        throw new VideoProviderError(ERROR_PROVIDER_TIMEOUT, "视频生成轮询超时");
       } catch (error) {
         throw providerError(error);
       }
