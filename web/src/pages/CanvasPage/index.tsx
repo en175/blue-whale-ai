@@ -55,6 +55,11 @@ import { uploadAssetFile } from '@/utils/upload';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
+import {
+  canvasLocationSearch,
+  pickCanvasIdAfterLoad,
+  readCanvasIdFromSearch,
+} from './canvasQuery';
 import styles from './index.module.css';
 
 type ToolMode = 'drag' | 'select';
@@ -64,8 +69,8 @@ export default function CanvasPage() {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const [projects, setProjects] = useState<CanvasProject[]>([]);
-  // 优先选中 ?project= 指定的项目（顶部展示该项目名）
-  const [currentId, setCurrentId] = useState(searchParams.get('project') ?? '');
+  // 优先选中 ?project= 指定的画布（顶部展示该画布名）；切换时回写同一 query 以便刷新还原
+  const [currentId, setCurrentId] = useState(() => readCanvasIdFromSearch(searchParams));
   const [showAgent, setShowAgent] = useState(false);
   const [showMiniMap, setShowMiniMap] = useState(false);
   const [toolMode, setToolMode] = useState<ToolMode>('select');
@@ -227,15 +232,35 @@ export default function CanvasPage() {
           }
         }
         setProjects(mapped);
-        setCurrentId((prev) =>
-          prev && mapped.some((m) => m.id === prev) ? prev : (mapped[0]?.id ?? '')
-        );
+        setCurrentId((prev) => pickCanvasIdAfterLoad(prev, mapped.map((m) => m.id)));
       })
       .catch(() => undefined);
     return () => {
       alive = false;
     };
   }, []);
+
+  /** 地址栏改 query（含后退）时切回对应画布 */
+  useEffect(() => {
+    const fromQuery = readCanvasIdFromSearch(new URLSearchParams(location.search));
+    if (fromQuery) setCurrentId(fromQuery);
+  }, [location.search]);
+
+  /** 当前画布写入 ?project=，刷新后回到同一张画布；保留其它 query 与 location.state */
+  useEffect(() => {
+    if (!currentId) return;
+    const currentSearch = new URLSearchParams(location.search);
+    if (readCanvasIdFromSearch(currentSearch) === currentId) return;
+    navigate(
+      {
+        pathname: location.pathname,
+        search: canvasLocationSearch(currentSearch, currentId),
+      },
+      { replace: true, state: location.state },
+    );
+    // 只在选中画布变化时回写，避免地址栏输入被旧 currentId 覆盖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId]);
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
   const { doc, assets: snapshotAssets, refetch } = useCanvasDoc(currentId);
