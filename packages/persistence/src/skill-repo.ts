@@ -3,7 +3,7 @@
 import {createHash, randomUUID} from "node:crypto";
 import type {PrismaClient} from "@prisma/client";
 import {scrubCreativeSkillFromRunPin} from "./agent-run-pin.js";
-import {checkPersonalNameKeyAvailable, countActiveRunReferences, decodeTerminalRunPin, escapeJsonSearchTerm, generateCreativeSkillId, mapCreativeSkillIds, mapUsageCounts, normalizeNameKey, resolveDescription, resolveName, resolveOfficialSourceSkillId, type SkillRow} from "./skill-repo-internals.js";
+import {checkPersonalNameKeyAvailable, countActiveRunReferences, decodeTerminalRunPin, escapeJsonSearchTerm, generateCreativeSkillId, mapCreativeSkillIds, mapUsageCounts, matchLibraryKeyword, normalizeNameKey, resolveDescription, resolveName, resolveOfficialSourceSkillId, type SkillRow} from "./skill-repo-internals.js";
 import {SkillAddConflictError, SkillInUseError, SkillNameConflictError, SkillNameReservedError} from "./skill-repo-types.js";
 import type {SkillMineView, SkillRepo} from "./skill-repo-types.js";
 
@@ -20,7 +20,8 @@ export { normalizeNameKey } from "./skill-repo-internals.js";
  *  - 个人技能凭 owner_user_id 可见，跨用户读/删 0 命中，不泄露存在性；
  *  - library v2（IK60WT，§11）：category 过滤、featured/most_used/newest 排序、zh/en
  *    语言解析（回退英文列再回退单语字段）、keyword 命中解析语言 name/description 与
- *    search_keywords（绝不匹配 content）；usage_count = 激活埋点表 COUNT(DISTINCT user_id)；
+ *    search_keywords（绝不匹配 content；IKBMA3：空白拆词 + 全词命中）；usage_count =
+ *    激活埋点表 COUNT(DISTINCT user_id)；
  *    官方目录规模小，过滤/排序/分页在内存完成（同 listMine，确定性优先）。
  *  creative_skill / creative_skill_version 已入 Node-owned schema（prisma/schema.prisma +
  *  schema/001_baseline.sql，Java 链已退役）；读路径保留 raw SQL + 查询失败回退空
@@ -61,20 +62,21 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         orderBy: { sort_order: "asc" },
       });
 
-      // 语言解析（§11.4），keyword 只命中解析后的 name/description 与 search_keywords（§11.4，绝不匹配 content）。
+      // 语言解析（§11.4），keyword 命中解析后的 name/description 与 search_keywords
+      // （§11.4，绝不匹配 content）；IKBMA3：空白拆词 + 全词命中（单词即整串 includes）。
       const resolved = rows.map((row) => ({
         row,
         name: resolveName(lang, row),
         description: resolveDescription(lang, row),
       }));
-      const matched = q.keyword
-        ? resolved.filter(
-            (r) =>
-              r.name.includes(q.keyword as string) ||
-              (r.description?.includes(q.keyword as string) ?? false) ||
-              (r.row.search_keywords?.includes(q.keyword as string) ?? false),
-          )
-        : resolved;
+      const matched = resolved.filter((r) =>
+        matchLibraryKeyword(
+          q.keyword,
+          r.name,
+          r.description,
+          r.row.search_keywords,
+        ),
+      );
 
       // 批量：我的 skill ids + creative 映射 + 去重使用人数（无 N+1）。
       const mine = await prisma.user_skill.findMany({
