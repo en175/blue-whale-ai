@@ -2509,6 +2509,7 @@ export default function CanvasPage() {
             externalPick={videoPickResult}
             externalImagePick={videoDlgImagePickResult}
             onOpenCharacterLibrary={() => { setCharacterLibraryTarget('video'); setShowCharacterLibrary(true); }}
+            onToast={(type, msg) => showToast(type, msg)}
           />
         )}
         {/* 底部图片对话框 */}
@@ -2524,6 +2525,7 @@ export default function CanvasPage() {
             pickMode={pickMode === 'image'}
             externalPick={imagePickResult}
             onOpenCharacterLibrary={() => { setCharacterLibraryTarget('image'); setShowCharacterLibrary(true); }}
+            onToast={(type, msg) => showToast(type, msg)}
           />
         )}
 
@@ -2551,6 +2553,7 @@ export default function CanvasPage() {
             onPickFromCanvas={() => { setPickMode('audio'); setPickTarget('audio'); }}
             pickMode={pickMode === 'audio'}
             externalPick={audioPickResult}
+            onToast={(type, msg) => showToast(type, msg)}
           />
         )}
 

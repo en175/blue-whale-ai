@@ -15,6 +15,7 @@ import {
   Image as ImageIcon,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import styles from './index.module.css';
 
@@ -53,6 +54,8 @@ interface ImageDialogProps {
   externalPick?: { ts: number; file: UploadedFile } | null;
   /** 打开角色库弹窗 */
   onOpenCharacterLibrary?: () => void;
+  /** Toast 提示（上传超限等场景，由父级注入） */
+  onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
 }
 
 /** 首页带入的初始生成参数（各字段经模型能力校验后应用，不在能力内的项回退模型默认值） */
@@ -74,7 +77,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, onPickFromCanvas, pickMode, externalPick }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, onPickFromCanvas, pickMode, externalPick, onToast }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
@@ -128,8 +131,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
     resolutionOptions.find((r) => r.key === selectedResolution)?.label ?? selectedResolution;
   const imageCount = files.filter((f) => f.type === 'image').length;
   const videoCount = files.filter((f) => f.type === 'video').length;
-  /** 参考图上限采用接口定义的 max_reference_images（模型能力未加载完时为 0，上传入口隐藏） */
-  const maxImages = currentGen?.features?.max_reference_images ?? 0;
+  /** 参考图上限固定 9 张（产品约定），不随模型能力接口的 max_reference_images 波动 */
+  const maxImages = REF_LIMITS.image;
   const imagesFull = imageCount >= maxImages;
   const videosFull = videoCount >= MAX_VIDEOS;
 
@@ -193,10 +196,12 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   /** 点击加号触发文件选择 */
   const handleAddClick = () => fileInputRef.current?.click();
 
-  /** 选择文件（按类型剩余名额截断：图片走接口上限，视频最多 3） */
+  /** 选择文件（按类型剩余名额截断：图片走接口上限，视频最多 3；超限 toast 提示） */
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const list = Array.from(e.target.files ?? []);
     if (list.length === 0) return;
+    const selImages = list.filter((f) => f.type.startsWith('image/')).length;
+    const selVideos = list.filter((f) => f.type.startsWith('video/')).length;
     setFiles((prev) => {
       let imgRoom = maxImages - prev.filter((f) => f.type === 'image').length;
       let vidRoom = MAX_VIDEOS - prev.filter((f) => f.type === 'video').length;
@@ -214,6 +219,11 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           file: f,
         });
       }
+      // 选中了但没被接受 = 超限丢弃，toast 提示（与 BottomDialog/卡片同措辞）
+      const accImages = added.filter((f) => f.type === 'image').length;
+      const accVideos = added.filter((f) => f.type === 'video').length;
+      if (selImages - accImages > 0) onToast?.('warn', refOverflowToast('image', maxImages));
+      else if (selVideos - accVideos > 0) onToast?.('warn', refOverflowToast('video', MAX_VIDEOS));
       return [...prev, ...added];
     });
     e.target.value = '';
@@ -419,10 +429,13 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           </div>
         </div>
 
+        {/* 参考素材数量提示（输入框上方固定灰色小字，与 BottomDialog/AudioDialog 统一） */}
+        <div className={styles.refHint}>图片最多 9 张</div>
+
         {/* 输入框 */}
         <textarea
           className={styles.textarea}
-          placeholder={uploading ? '正在上传参考图...' : '描述你希望如何编辑这张图片...'}
+          placeholder={uploading ? '正在上传参考图...' : '描述你希望如何编辑这张图片。'}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
           onKeyDown={handleKeyDown}

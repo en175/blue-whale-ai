@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, AudioLines, ChevronDown, Music, ArrowUp, Upload, MousePointerClick, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { refOverflowToast } from '@/utils/ref-overflow';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import styles from './index.module.css';
 
@@ -45,9 +46,11 @@ interface AudioDialogProps {
   pickMode?: boolean;
   /** 画布节点选取结果（ts 驱动注入参考音频） */
   externalPick?: { ts: number; item: { id: string; src: string; name: string; assetId?: string | number } } | null;
+  /** Toast 提示（上传超限等场景，由父级注入） */
+  onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
 }
 
-export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMode, externalPick }: AudioDialogProps) {
+export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMode, externalPick, onToast }: AudioDialogProps) {
   const [text, setText] = useState('');
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [modelId, setModelId] = useState<string>('');
@@ -79,14 +82,23 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
       .catch(() => setModels([]));
   }, []);
 
-  /** 本地音频上传（按上限截断） */
+  /** 本地音频上传：仅接受 MP3（扩展名 + MIME 双重校验），非 MP3 直接过滤并提示 */
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []).filter((f) => f.type.startsWith('audio/'));
+    const list = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (!files.length) return;
+    if (!list.length) return;
+    const isMp3 = (f: File) =>
+      f.name.toLowerCase().endsWith('.mp3') || f.type === 'audio/mpeg';
+    const mp3Files = list.filter(isMp3);
+    const rejected = list.length - mp3Files.length;
+    if (rejected > 0) {
+      onToast?.('warn', `仅支持 MP3 格式，已跳过 ${rejected} 个非 MP3 文件`);
+    }
+    if (!mp3Files.length) return;
     setRefs((prev) => {
       const room = Math.max(0, MAX_AUDIO_REFS - prev.length);
-      const add: AudioRefItem[] = files.slice(0, room).map((f, i) => ({
+      if (mp3Files.length > room) onToast?.('warn', refOverflowToast('audio', MAX_AUDIO_REFS));
+      const add: AudioRefItem[] = mp3Files.slice(0, room).map((f, i) => ({
         id: `local-${Date.now()}-${i}`,
         kind: 'audio',
         name: f.name,
@@ -193,7 +205,7 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
             )}
           </div>
         )}
-        <span className={styles.refHint}>参考音频（可选）</span>
+        <span className={styles.refOptionalLabel}>参考音频（可选）</span>
         {refs.length > 0 && (
           <span className={styles.refCount}>{refs.length}/{MAX_AUDIO_REFS}</span>
         )}
@@ -201,16 +213,19 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
       <input
         ref={fileInputRef}
         type="file"
-        accept="audio/*"
+        accept=".mp3,audio/mpeg"
         multiple
         className={styles.hiddenInput}
         onChange={handleUpload}
       />
 
+      {/* 参考素材数量提示（输入框上方固定灰色小字，与 BottomDialog/ImageDialog 统一） */}
+      <div className={styles.refHint}>参考音频最多 3 段</div>
+
       {/* 输入框 */}
       <textarea
         className={styles.textarea}
-        placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型。最长 120 秒。"
+        placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。"
         value={text}
         onChange={(e) => setText(e.target.value.slice(0, MAX_INPUT))}
         onKeyDown={handleKeyDown}

@@ -18,7 +18,7 @@ import {
   User,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { classifyRefOverflow } from '@/utils/ref-overflow';
+import { classifyRefOverflow, REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import ChipTextEditor, { type ChipTextEditorHandle, type ChipRef } from '../ChipTextEditor';
 import {
@@ -86,6 +86,8 @@ interface BottomDialogProps {
   externalImagePick?: { ts: number; item: BottomRefItem } | null;
   /** 打开角色库弹窗 */
   onOpenCharacterLibrary?: () => void;
+  /** Toast 提示（上传超限/首尾帧校验等场景，由父级注入全局 sonner，位置/样式与 ImageDialog/AudioDialog 统一） */
+  onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
 }
 
 /** 首页带入的初始生成参数（resolution 传 api_value 如 720p，模型列表加载后反查档位 id；
@@ -112,7 +114,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText, initialParams, onPickFromCanvas, pickMode, externalPick, externalImagePick, onOpenCharacterLibrary }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText, initialParams, onPickFromCanvas, pickMode, externalPick, externalImagePick, onOpenCharacterLibrary, onToast }: BottomDialogProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供生成按钮启用态判断 */
@@ -139,8 +141,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   const [sizeOpen, setSizeOpen] = useState(false);
   /** 上传按钮弹菜单（image/video 各自独立，避免同时弹出）：上传 / 到节点选择 */
   const [sourceMenuOpen, setSourceMenuOpen] = useState<'image' | 'video' | null>(null);
-  /** Toast 提示 */
-  const [toast, setToast] = useState('');
+  /** Toast 已废弃，所有提示走父级注入的 onToast（全局 sonner，位置/样式与 ImageDialog/AudioDialog 统一） */
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const anyInputRef = useRef<HTMLInputElement>(null);
@@ -150,7 +151,6 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   const imageSourceRef = useRef<HTMLDivElement>(null);
   const videoSourceRef = useRef<HTMLDivElement>(null);
   const configPanelRef = useRef<HTMLDivElement>(null);
-  const toastTimer = useRef<number | null>(null);
 
   useDismissOnOutside([
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
@@ -160,12 +160,6 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     { open: sourceMenuOpen === 'video', ref: videoSourceRef, dismiss: () => setSourceMenuOpen(null) },
     { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
   ]);
-
-  const showToast = (msg: string) => {
-    setToast(msg);
-    if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(''), 2800);
-  };
 
   const currentModel = modelList.find((m) => m.model_id === selectedModel) ?? null;
   const modelOptions = modelList.map((m) => ({ key: m.model_id, label: m.model_label }));
@@ -185,8 +179,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   const videoCount = refFiles.filter((f) => f.type === 'video').length;
   /** 首尾帧模式必须恰好 2 张图片（不多不少、不含视频），否则禁止发送 */
   const keyframeInvalid = isKeyframe && (imageCount !== 2 || videoCount > 0);
-  /** 图片上限：首尾帧模式固定 2（首帧+尾帧），其余采用接口定义的 max_reference_images（模型能力未加载完时为 0，上传入口隐藏） */
-  const maxImages = isKeyframe ? 2 : (currentModel?.features?.max_reference_images ?? 0);
+  /** 图片上限：首尾帧模式固定 2（首帧+尾帧），其余固定 9 张（产品约定，与 ImageDialog 统一，不随模型能力波动） */
+  const maxImages = isKeyframe ? 2 : REF_LIMITS.image;
 
   /** 时长刻度（min..max 逐 step；模型能力未加载时无刻度） */
   const ticks: number[] = [];
@@ -245,7 +239,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     const item = externalImagePick.item;
     const imgCount = refFiles.filter((f) => f.type === 'image').length;
     if (imgCount >= maxImages) {
-      showToast(`参考图最多 ${maxImages} 张，请减少图片`);
+      onToast?.('warn', refOverflowToast('image', maxImages));
       return;
     }
     setRefFiles((prev) => {
@@ -317,14 +311,14 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   /** 上传图片（首尾帧模式限 2 张；达上限 toast） */
   const handleImageClick = () => {
     if (imageCount < maxImages) imageInputRef.current?.click();
-    else showToast(`参考图最多 ${maxImages} 张，请减少图片`);
+    else onToast?.('warn', refOverflowToast('image', maxImages));
   };
 
   /** 上传视频（首尾帧模式禁用；达上限 toast） */
   const handleVideoClick = () => {
     if (isKeyframe) return;
     if (videoCount < MAX_VIDEOS) videoInputRef.current?.click();
-    else showToast(`参考视频最多 ${MAX_VIDEOS} 个`);
+    else onToast?.('warn', refOverflowToast('video', MAX_VIDEOS));
   };
 
   /** 通用上传（底部加号；首尾帧模式仅收图片且限 2 张） */
@@ -415,8 +409,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
       acceptedImages: acceptedImgs,
       acceptedVideos: acceptedVids,
     });
-    if (overflow === 'image') showToast(`参考图最多 ${maxImages} 张，请减少图片`);
-    else if (overflow === 'video') showToast(`参考视频最多 ${MAX_VIDEOS} 个`);
+    if (overflow === 'image') onToast?.('warn', refOverflowToast('image', maxImages));
+    else if (overflow === 'video') onToast?.('warn', refOverflowToast('video', MAX_VIDEOS));
     if (!list.length) return;
     const startIdx = refFiles.length;
     const newItems: BottomRefItem[] = list.map((file) => ({
@@ -446,11 +440,11 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     // 首尾帧模式校验：必须恰好 2 张图片
     if (isKeyframe) {
       if (videoCount > 0) {
-        showToast('首尾帧模式仅支持上传首帧和尾帧两张图片，不支持视频');
+        onToast?.('warn', '首尾帧模式仅支持上传首帧和尾帧两张图片，不支持视频');
         return;
       }
       if (imageCount !== 2) {
-        showToast('首尾帧模式需要上传首帧和尾帧两张图片');
+        onToast?.('warn', '首尾帧模式需要上传首帧和尾帧两张图片');
         return;
       }
     }
@@ -783,11 +777,22 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         onChange={handleAnyUpload}
       />
 
+      {/* 参考素材数量提示（输入框上方固定灰色小字，与 ImageDialog/AudioDialog 统一） */}
+      <div className={styles.refHint}>
+        {isKeyframe
+          ? `首尾帧模式：图片最多 2 张（首帧 + 尾帧）`
+          : `参考图最多 ${maxImages} 张 / 视频最多 ${MAX_VIDEOS} 个`}
+      </div>
+
       {/* 输入框：可多次插入生成卡引用胶囊，胶囊跟文字同一行 */}
       <div className={styles.editorWrap}>
         <ChipTextEditor
           ref={chipEditorRef}
-          placeholder="上传 3-10 秒视频，结合文本或图片编辑，@ 插入已添加资源。"
+          placeholder={
+            isKeyframe
+              ? '通过直接控制提示词快速生成单段片段。首尾帧模式可上传首帧与尾帧参考。'
+              : '通过直接控制提示词快速生成单段片段。'
+          }
           // 超限只提示、不动内容（IKAFSX）。原来这里会 `setText(truncated)`——那是「用纯文本
           // 整体替换编辑器内容」，**所有胶囊当场湮灭、正文被从中间腰斩**，丢的远不止超出的部分。
           // 而这个 1000 本身也是凭空定的：后端不校验 prompt 长度，模型能力接口里也没有这个字段。
@@ -841,12 +846,12 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
                     className={`${styles.modeOption} ${opt.key === selectedMode ? styles.modeOptionActive : ''}`}
                     onClick={() => {
                       if (opt.key === 'keyframe' && videoCount > 0) {
-                        showToast('首尾帧模式仅支持图片，请先移除视频文件');
+                        onToast?.('warn', '首尾帧模式仅支持图片，请先移除视频文件');
                         setModeOpen(false);
                         return;
                       }
                       if (opt.key === 'keyframe' && imageCount > 2) {
-                        showToast('首尾帧模式仅支持上传 2 张图片，请先移除多余图片');
+                        onToast?.('warn', '首尾帧模式仅支持上传 2 张图片，请先移除多余图片');
                         setModeOpen(false);
                         return;
                       }
@@ -886,13 +891,6 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
           </button>
         </div>
       </div>
-
-      {/* Toast 提示 */}
-      {toast && (
-        <div className={styles.toast} role="alert">
-          {toast}
-        </div>
-      )}
     </div>
   );
 }

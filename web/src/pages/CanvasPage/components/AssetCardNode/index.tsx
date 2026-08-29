@@ -264,7 +264,14 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
 
   /** 添加音色音频（最多 MAX_VOICE_FILES 段，每段不超过 MAX_VOICE_DURATION 秒） */
   const addVoiceFiles = async (files: FileList | File[]) => {
-    const audioFiles = Array.from(files).filter((f) => f.type.startsWith('audio/'));
+    const list = Array.from(files);
+    const isMp3 = (f: File) =>
+      f.name.toLowerCase().endsWith('.mp3') || f.type === 'audio/mpeg';
+    const audioFiles = list.filter(isMp3);
+    const rejected = list.length - audioFiles.length;
+    if (rejected > 0) {
+      data.onToast?.('warn', `音色仅支持 MP3 格式，已跳过 ${rejected} 个非 MP3 文件`);
+    }
     if (audioFiles.length === 0) return;
     const remaining = MAX_VOICE_FILES - voiceRefs.length;
     if (remaining <= 0) {
@@ -742,7 +749,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
               <input
                 ref={audioRef}
                 type="file"
-                accept="audio/*"
+                accept=".mp3,audio/mpeg"
                 multiple
                 className={styles.hiddenInput}
                 onChange={(e) => {
