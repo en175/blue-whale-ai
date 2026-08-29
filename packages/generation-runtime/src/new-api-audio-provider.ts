@@ -1,6 +1,7 @@
 import {
   ERROR_NO_RESULT,
   ERROR_PROVIDER_FAILED,
+  ERROR_QUOTA_EXHAUSTED,
 } from "@blue-whale/contracts";
 import {
   AudioProviderError,
@@ -50,15 +51,36 @@ export function createNewApiAudioProvider(
         }),
       });
       if (!response.ok) {
+        // IKBQEE：余额不足识别——不只看 402，也认 body 关键词（镜像 image/video provider）。
+        // 音频 new-api 预扣费失败同样可能是 HTTP200+body 报错，落 quota_exhausted 保证 message 准确。
+        const msg = await response.text().catch(() => "");
+        const isQuotaSignal =
+          response.status === 402 ||
+          /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required)/i.test(
+            msg,
+          );
         throw new AudioProviderError(
-          ERROR_PROVIDER_FAILED,
+          isQuotaSignal ? ERROR_QUOTA_EXHAUSTED : ERROR_PROVIDER_FAILED,
           `new-api 音频生成失败: ${response.status}`,
         );
       }
       let payload: OfficialAudioResponse;
       try {
-        payload = (await response.json()) as OfficialAudioResponse;
-      } catch {
+        const rawText = await response.text();
+        // IKBQEE：HTTP200+body 预扣费失败（new-api 欠费业务态）→ quota_exhausted，保证 message 准确。
+        if (
+          /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required)/i.test(
+            rawText,
+          )
+        ) {
+          throw new AudioProviderError(
+            ERROR_QUOTA_EXHAUSTED,
+            "new-api 音频生成余额不足",
+          );
+        }
+        payload = JSON.parse(rawText) as OfficialAudioResponse;
+      } catch (error) {
+        if (error instanceof AudioProviderError) throw error;
         throw new AudioProviderError(ERROR_NO_RESULT, "生成服务未返回有效 JSON");
       }
       const url = typeof payload.url === "string" ? payload.url : null;

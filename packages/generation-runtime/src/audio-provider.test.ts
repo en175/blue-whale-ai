@@ -86,6 +86,37 @@ describe("new-api audio provider", () => {
     ).rejects.toMatchObject({ code: "provider_failed" });
   });
 
+  it("HTTP 402 → AudioProviderError(quota_exhausted)（IKBQEE 余额识别）", async () => {
+    const module = await import("./new-api-audio-provider.js");
+    const provider = module.createNewApiAudioProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi
+        .fn()
+        .mockResolvedValue(new Response("余额不足", { status: 402 })),
+    });
+    await expect(
+      provider.generate({ model: "seed-audio-1.0", prompt: "x" }),
+    ).rejects.toMatchObject({ code: "quota_exhausted" });
+  });
+
+  it("HTTP200+body 预扣费失败 → AudioProviderError(quota_exhausted)（IKBQEE）", async () => {
+    const module = await import("./new-api-audio-provider.js");
+    const provider = module.createNewApiAudioProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: "预扣费额度失败, 用户剩余额度: ¥0.9" }),
+          { status: 200 },
+        ),
+      ),
+    });
+    await expect(
+      provider.generate({ model: "seed-audio-1.0", prompt: "x" }),
+    ).rejects.toMatchObject({ code: "quota_exhausted" });
+  });
+
   it("空/非法响应 → AudioProviderError(no_result)", async () => {
     const module = await import("./new-api-audio-provider.js");
     const provider = module.createNewApiAudioProvider({
