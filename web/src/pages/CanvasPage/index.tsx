@@ -744,6 +744,7 @@ export default function CanvasPage() {
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
+        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
     pendingNodeIdsRef.current.add(newNode.id);
@@ -2138,6 +2139,7 @@ export default function CanvasPage() {
               onDuplicate: (id: string) => actionsRef.current.duplicate(id),
               onAddToChat: (id: string) => actionsRef.current.addToChat(id),
               onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
+              onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
             },
           };
           pendingNodeIdsRef.current.add(node.id);

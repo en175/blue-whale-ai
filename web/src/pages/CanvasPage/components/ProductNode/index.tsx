@@ -40,6 +40,8 @@ interface ProductNodeData {
 }
 
 const MAX_IMAGES = 8;
+/** 商品详情最大字数（含粘贴） */
+const MAX_DETAIL_LENGTH = 2000;
 
 export default function ProductNode({ id, data, selected }: NodeProps & { data: ProductNodeData }) {
   const [images, setImages] = useState<ProductImage[]>(data.images ?? []);
@@ -345,7 +347,18 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
           <textarea
             className={`${styles.detailArea} nodrag`}
             value={detail}
-            onChange={(e) => setDetail(e.target.value)}
+            maxLength={MAX_DETAIL_LENGTH}
+            onChange={(e) => {
+              // 双保险：maxLength 拦截输入，这里兜底粘贴超限并提示
+              const val = e.target.value;
+              if (val.length > MAX_DETAIL_LENGTH) {
+                const trimmed = val.slice(0, MAX_DETAIL_LENGTH);
+                setDetail(trimmed);
+                data.onToast?.('warn', `商品详情最多 ${MAX_DETAIL_LENGTH} 字，已截断`);
+                return;
+              }
+              setDetail(val);
+            }}
             placeholder="商品名称、品类、核心参数、卖点、目标人群..."
             rows={6}
           />
