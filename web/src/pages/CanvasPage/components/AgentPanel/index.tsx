@@ -581,7 +581,11 @@ function blockKey(block: SessionContentBlock, ordinals: Record<string, number>):
  *
  * **只有真调了工具的轮次才渲染**（2026-08-26 真机裁定）：网格追问轮本来就零调用，给每一轮
  * 亮警示是把正常当异常——用户一屏黄色。零调用记录仍然完整落库，那是运维的检出原语，不是
- * 用户的。失败/被拒的动作渲染警示态：产卡被门拒不再只是「卡了一下」。
+ * 用户的。失败/未执行的动作渲染警示态：产卡被门拦不再只是「卡了一下」。
+ *
+ * 「rejected」显示为「未执行」而不是「被拒」（IKBRZV 复测 BUG-13）：拒绝多数来自确认门
+ * 按设计拦下产卡——正常防御被渲染成故障词，QA 把它当缺陷提了。动作没执行是事实，
+ * 为什么没执行由模型在正文里解释；内部状态词不再直接对用户。
  *
  * 「还差 N 项」不展示（record 里仍带）：计数来自需求理解版本表，而落库靠观察者攒够 token
  * 才触发，短问答轮会滞后好几轮——一个几轮不动的数字比没有数字更糟。
@@ -592,7 +596,7 @@ function ActionRow({ record }: { record: NonNullable<SessionContentBlock['run_ac
   const seconds = (ms: number) => (ms >= 100 ? `${(ms / 1000).toFixed(1)}s` : '');
   const summary = record.actions.map((a) => a.summary.replace(/^正在/, '')).join(' · ');
   const failed = record.actions.some((a) => a.status !== 'ok');
-  const statusLabel = { ok: '', failed: '失败', rejected: '被拒' } as const;
+  const statusLabel = { ok: '', failed: '失败', rejected: '未执行' } as const;
   return (
     <div className={`${styles.actionRow} ${failed ? styles.actionRowWarn : ''}`}>
       <button type="button" className={styles.actionRowHead} onClick={() => setOpen(!open)} aria-expanded={open}>
