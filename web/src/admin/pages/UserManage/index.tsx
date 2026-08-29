@@ -15,6 +15,7 @@ import {
 } from '@/api/admin';
 import { isApiError } from '@/api/http';
 import { formatLogIp } from '@/admin/formatLogIp';
+import { matchesAdminUserKeyword } from './userSearch';
 import styles from './index.module.css';
 
 const fmt = (n: number) => n.toLocaleString('en-US');
@@ -79,13 +80,11 @@ export default function UserManage() {
   useEffect(() => load(), [load]);
 
   const filtered = useMemo(() => {
-    const kw = search.trim().toLowerCase();
     const range = RANGE_OPTIONS.find((r) => r.key === rangeKey)!;
     const min = rangeKey === 'custom' ? (minVal.trim() === '' ? -Infinity : parseFloat(minVal)) : range.min;
     const max = rangeKey === 'custom' ? (maxVal.trim() === '' ? Infinity : parseFloat(maxVal)) : range.max;
     return users.filter((u) => {
-      if (kw && !u.nickname.toLowerCase().includes(kw) && !u.phone.includes(kw) && !String(u.userId).includes(kw))
-        return false;
+      if (!matchesAdminUserKeyword(u, search)) return false;
       if (statusFilter !== 'all' && u.status !== statusFilter) return false;
       if (u.balance < min || u.balance > max) return false;
       return true;
@@ -181,7 +180,7 @@ export default function UserManage() {
             )}
             {filtered.map((u) => (
               <tr key={u.userId}>
-                <td className={styles.cellId}>#{u.userId}</td>
+                <td className={styles.cellId}>{u.userId}</td>
                 <td>
                   <button className={styles.nickLink} onClick={() => setDetailId(u.userId)}>
                     {u.nickname}
@@ -301,7 +300,7 @@ function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () =>
             <div className={styles.infoGrid}>
               <div>
                 <div className={styles.infoLabel}>用户ID</div>
-                <div className={styles.infoValue}>#{user.userId}</div>
+                <div className={styles.infoValue}>{user.userId}</div>
               </div>
               <div>
                 <div className={styles.infoLabel}>昵称</div>
@@ -562,11 +561,11 @@ function FreezeModal({
           <div className={freezing ? styles.warnBox : styles.okBox}>
             {freezing ? (
               <>
-                即将冻结 <b>{user.nickname}</b>（#{user.userId}）的积分账户。冻结后该用户将无法充值和消费。
+                即将冻结 <b>{user.nickname}</b>（{user.userId}）的积分账户。冻结后该用户将无法充值和消费。
               </>
             ) : (
               <>
-                即将解冻 <b>{user.nickname}</b>（#{user.userId}）的积分账户。解冻后该用户将恢复充值和消费能力。
+                即将解冻 <b>{user.nickname}</b>（{user.userId}）的积分账户。解冻后该用户将恢复充值和消费能力。
               </>
             )}
           </div>
