@@ -177,7 +177,7 @@ describe('RechargeModal', () => {
     expect(document.body.querySelector(`.${styles.planRowPaying}`)).not.toBeNull();
   });
 
-  it('下单失败 toast 提示且不出现支付码', async () => {
+  it('下单失败展示错误且不出现支付码', async () => {
     rechargeApi.createRechargeOrder.mockRejectedValue(new Error('该档位已过期'));
     await renderRechargeModal();
     await act(async () => {
@@ -195,7 +195,8 @@ describe('RechargeModal', () => {
       await Promise.resolve();
     });
 
-    expect(toastApi.error).toHaveBeenCalledWith('该套餐已结束，请选择其他套餐');
+    expect(document.body.textContent).toContain('该套餐已结束，请选择其他套餐');
+    expect(toastApi.error).not.toHaveBeenCalled();
     expect(document.body.textContent).not.toContain('正在创建订单…');
     expect(document.body.textContent).not.toContain('等待支付结果...');
     expect(document.body.querySelector(`.${styles.planRowPaying}`)).toBeNull();

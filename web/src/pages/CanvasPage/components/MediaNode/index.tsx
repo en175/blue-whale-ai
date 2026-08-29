@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
+import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaNodeToolbarVisibility } from './toolbarVisibility';
 import styles from './index.module.css';
@@ -147,6 +148,11 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
   const isMediaExtraction = isMediaExtractNodeId(id);
   const generationOverlay = mediaNodeGenerationOverlay(isMediaExtraction);
+  const failHeadline = mediaNodeFailHeadline({
+    genStatus: data.genStatus,
+    errorText: data.errorText,
+    isMediaExtraction,
+  });
 
   return (
     <div className={styles.wrapper} onContextMenu={handleContextMenu}>
@@ -257,14 +263,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           ) : isGenDone ? (
             /* 失败/已取消：错误提示 + 重试 */
             <div className={styles.genBox}>
-              <span className={styles.genFailText}>
-                {data.genStatus === 'cancelled'
-                  ? '已取消生成'
-                  : isMediaExtraction
-                    ? '音频提取失败'
-                    : '生成失败'}
-              </span>
-              {data.errorText && <span className={styles.genError}>{data.errorText}</span>}
+              <span className={styles.genFailText}>{failHeadline}</span>
               {data.genStatus === 'failed' && !isMediaExtraction && (
                 <button className={styles.genBtn} onClick={() => data.onRetryJob?.(id)}>
                   重试

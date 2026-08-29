@@ -423,7 +423,7 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
         initial?.id
       );
     } catch (e) {
-      toast.error(isApiError(e) ? e.message : '保存失败，请稍后重试');
+      if (!isApiError(e)) toast.error('保存失败，请稍后重试');
     } finally {
       setSaving(false);
     }

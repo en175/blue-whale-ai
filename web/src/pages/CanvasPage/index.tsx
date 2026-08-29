@@ -42,6 +42,7 @@ import {
   retryGenerationJob,
   fetchJobStatus,
   createMediaExtraction,
+  readJobFailText,
   type ImageJobParameters,
   type VideoJobParameters,
   type AudioJobParameters,
@@ -1167,7 +1168,7 @@ export default function CanvasPage() {
             jobTimersRef.current.delete(nodeId);
             patchMediaNode(nodeId, {
               genStatus: 'failed',
-              errorText: detail.error?.message ?? '',
+              errorText: readJobFailText(detail.error),
             });
             return;
           }
@@ -1434,7 +1435,7 @@ export default function CanvasPage() {
       }
       pollJob(mediaExtractNodeId(created.job_id), created.job_id);
     } catch (error) {
-      showToast('error', isApiError(error) ? error.message : '音频提取任务创建失败');
+      if (!isApiError(error)) showToast('error', '音频提取任务创建失败');
     }
   };
 
@@ -1808,16 +1809,7 @@ export default function CanvasPage() {
       return result;
     } catch (e) {
       console.warn('[SaveAssets] 保存失败', e);
-      if (isApiError(e)) {
-        // 100408: 卡片无参考图且无描述
-        if (e.code === 100408) {
-          showToast('error', '请先为卡片补充参考图或描述');
-        } else {
-          showToast('error', e.message || '保存失败');
-        }
-      } else {
-        showToast('error', '保存失败，请重试');
-      }
+      if (!isApiError(e)) showToast('error', '保存失败，请重试');
       return null;
     }
   };

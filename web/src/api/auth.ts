@@ -57,6 +57,7 @@ export const toSessionUser = (m: MeData): SessionUser => ({
 export function loginWithPassword(username: string, password: string) {
   return apiRequest<LoginData>('/api/auth/login', {
     method: 'POST',
+    silent: true,
     body: JSON.stringify({ username, password }),
   });
 }
@@ -67,13 +68,14 @@ export function registerWithPassword(username: string, password: string, email?:
   if (email) body.email = email;
   return apiRequest<LoginData>('/api/auth/register', {
     method: 'POST',
+    silent: true,
     body: JSON.stringify(body),
   });
 }
 
 /** 获取当前登录用户信息 */
 export function fetchMe() {
-  return apiRequest<MeData>('/api/me');
+  return apiRequest<MeData>('/api/me', { silent: true });
 }
 
 /** 获取积分配额。fresh 时带时间戳，避免与在途 GET 去重/缓存命中支付前的 0。 */
@@ -91,6 +93,7 @@ export function logout() {
 export function changePassword(originalPassword: string, newPassword: string) {
   return apiRequest<null>('/api/me/password', {
     method: 'PUT',
+    silent: true,
     body: JSON.stringify({
       original_password: originalPassword,
       password: newPassword,

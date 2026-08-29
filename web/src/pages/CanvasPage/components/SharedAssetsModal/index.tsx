@@ -278,8 +278,7 @@ export default function SharedAssetsModal({
       onToast('success', '已删除共享资产');
     } catch (e) {
       setItems((prev) => prev.map((it) => (it.id === id ? { ...it, deleting: false } : it)));
-      if (isApiError(e)) onToast('error', e.message || '删除失败');
-      else onToast('error', '删除失败');
+      if (!isApiError(e)) onToast('error', '删除失败');
     }
   };
 
@@ -299,8 +298,7 @@ export default function SharedAssetsModal({
         onToast('success', `场景卡已添加（ID: ${result.sceneCardId}）`);
         onClose();
       } catch (e) {
-        if (isApiError(e)) onToast('error', e.message || '添加失败');
-        else onToast('error', '添加失败');
+        if (!isApiError(e)) onToast('error', '添加失败');
       } finally {
         setAddItemId(null);
       }
