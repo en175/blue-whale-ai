@@ -2421,7 +2421,7 @@ export default function CanvasPage() {
             >
               {saveStatus === 'saving' && '保存中…'}
               {saveStatus === 'saved' && `已保存 ${savedAt}`}
-              {saveStatus === 'error' && '保存失败'}
+              {saveStatus === 'error' && '保存失败，请重试'}
             </span>
           )}
         </div>
