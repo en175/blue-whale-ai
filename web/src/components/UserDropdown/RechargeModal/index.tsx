@@ -12,6 +12,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import { toast } from 'sonner';
 import Modal from '@/components/Modal';
 import styles from './index.module.css';
 import { quotaToPoints } from '@/api/auth';
@@ -57,6 +58,15 @@ function fmtExpiry(iso: string) {
   return `${hh}:${mm} 后过期`;
 }
 
+/** 下单失败文案：档位窗口失效用明确提示，其余透传接口错误 */
+function formatOrderError(error: unknown): string {
+  const msg = error instanceof Error ? error.message : '';
+  if (msg.includes('已过期') || msg.includes('已下架')) {
+    return '该套餐已结束，请选择其他套餐';
+  }
+  return msg || '创建订单失败';
+}
+
 export default function RechargeModal({ onClose }: RechargeModalProps) {
   const [tiers, setTiers] = useState<RechargeTier[]>([]);
   const [tiersLoading, setTiersLoading] = useState(true);
@@ -74,7 +84,9 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
 
   const selected = tiers.find((t) => t.id === selectedId) ?? null;
   const paying = phase === 'creating' || phase === 'waiting';
-  const showQrPanel = phase !== 'idle';
+  /** 仅 order 成功后出右侧支付码；下单中不出「正在创建订单…」 */
+  const showQrPanel =
+    phase === 'waiting' || phase === 'paid' || phase === 'expired' || phase === 'failed';
 
   // 打开弹窗拉取真实档位（按 sort_order 升序）
   useEffect(() => {
@@ -104,6 +116,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
           if (!alive) return;
           if (st.status === 'paid') {
             setPhase('paid');
+            toast.success('支付成功，积分已到账');
             void refreshQuotaAfterPayment({
               previousQuota: useAuthStore.getState().quota,
             });
@@ -121,7 +134,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     };
   }, [phase, order]);
 
-  /** 确认支付 / 重新支付：创建订单并展示真实二维码 */
+  /** 确认支付 / 重新支付：接口成功后再展开二维码；失败 toast，不出码区 */
   const handleConfirm = () => {
     if (!selected || paying || phase === 'paid') return;
     setOrderError('');
@@ -132,7 +145,9 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
         setPhase('waiting');
       })
       .catch((e) => {
-        setOrderError(e instanceof Error ? e.message : '创建订单失败');
+        const message = formatOrderError(e);
+        setOrderError(message);
+        toast.error(message);
         setPhase('idle');
       });
   };
@@ -158,7 +173,9 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
       setOrder(null);
       setPhase('idle');
     } catch (e) {
-      setOrderError(e instanceof Error ? e.message : '取消支付失败，请稍后重试');
+      const message = e instanceof Error ? e.message : '取消支付失败，请稍后重试';
+      setOrderError(message);
+      toast.error(message);
     } finally {
       setCancelling(false);
     }
@@ -322,18 +339,9 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
             </div>
           </div>
 
-          {/* 右侧二维码面板（真实支付码 + 状态轮询） */}
+          {/* 右侧二维码面板：仅 order 成功后出现 */}
           {showQrPanel && (
             <div className={styles.qrPanel}>
-              {phase === 'creating' && (
-                <>
-                  <div className={styles.qrBox}>
-                    <span className={styles.qrPlaceholder}>正在创建订单…</span>
-                  </div>
-                  <span className={styles.waiting}>请稍候</span>
-                </>
-              )}
-
               {order && phase === 'waiting' && (
                 <>
                   <div className={styles.qrBox}>

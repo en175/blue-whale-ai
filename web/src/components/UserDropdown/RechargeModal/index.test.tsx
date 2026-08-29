@@ -13,6 +13,11 @@ const rechargeApi = vi.hoisted(() => ({
   fetchRechargeTiers: vi.fn(),
 }));
 
+const toastApi = vi.hoisted(() => ({
+  error: vi.fn(),
+  success: vi.fn(),
+}));
+
 vi.mock('@/api/recharge', () => rechargeApi);
 vi.mock('@/api/auth', () => ({ quotaToPoints: (quota: number) => quota }));
 vi.mock('@/stores/auth', () => {
@@ -25,6 +30,10 @@ vi.mock('@/stores/auth', () => {
 vi.mock('@/utils/refreshQuota', () => ({
   refreshQuotaAfterPayment: vi.fn(),
   syncQuotaFromUsageToken: vi.fn(),
+}));
+vi.mock('sonner', () => ({
+  toast: toastApi,
+  Toaster: () => null,
 }));
 
 let root: Root;
@@ -116,6 +125,79 @@ describe('RechargeModal', () => {
     expect(rechargeApi.cancelRechargeOrder).toHaveBeenCalledWith('trade-1');
     expect(document.body.textContent).not.toContain('等待支付结果...');
     expect(document.body.textContent).toContain('确认支付 ¥10');
+    expect(document.body.querySelector(`.${styles.planRowPaying}`)).toBeNull();
+  });
+
+  it('下单未返回前不展开支付码，成功后才出现二维码', async () => {
+    let resolveOrder: (value: {
+      trade_no: string;
+      qr_code_url: string;
+      expire_time: string;
+      amount: number;
+      points: number;
+    }) => void = () => undefined;
+    rechargeApi.createRechargeOrder.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveOrder = resolve;
+        }),
+    );
+    await renderRechargeModal();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent?.includes('100 积分'))
+        ?.click();
+    });
+    await act(async () => {
+      [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent?.includes('确认支付 ¥10'))
+        ?.click();
+    });
+
+    expect(document.body.textContent).toContain('支付中...');
+    expect(document.body.textContent).not.toContain('正在创建订单…');
+    expect(document.body.textContent).not.toContain('等待支付结果...');
+    expect(document.body.querySelector(`.${styles.planRowPaying}`)).toBeNull();
+
+    await act(async () => {
+      resolveOrder({
+        trade_no: 'trade-1',
+        qr_code_url: 'https://example.com/qr',
+        expire_time: '2026-08-28T12:00:00+08:00',
+        amount: 10,
+        points: 100,
+      });
+      await Promise.resolve();
+    });
+
+    expect(document.body.textContent).toContain('等待支付结果...');
+    expect(document.body.querySelector(`.${styles.planRowPaying}`)).not.toBeNull();
+  });
+
+  it('下单失败 toast 提示且不出现支付码', async () => {
+    rechargeApi.createRechargeOrder.mockRejectedValue(new Error('该档位已过期'));
+    await renderRechargeModal();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent?.includes('100 积分'))
+        ?.click();
+    });
+    await act(async () => {
+      [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent?.includes('确认支付 ¥10'))
+        ?.click();
+      await Promise.resolve();
+    });
+
+    expect(toastApi.error).toHaveBeenCalledWith('该套餐已结束，请选择其他套餐');
+    expect(document.body.textContent).not.toContain('正在创建订单…');
+    expect(document.body.textContent).not.toContain('等待支付结果...');
     expect(document.body.querySelector(`.${styles.planRowPaying}`)).toBeNull();
   });
 });
