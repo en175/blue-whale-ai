@@ -129,6 +129,8 @@ export interface WorkerRepo {
     message: string;
     /** IK9VZ0：退款校验结果（refund_confirmed / refund_unverified），落 release_note。 */
     releaseNote?: string;
+    /** IKBQEE / ADR-0078：调试详情（provider 原文/request_id 等），落 error.details，禁展示用户。 */
+    details?: Record<string, unknown>;
   }): Promise<boolean>;
   cancelVideoBeforeDispatch(input: {
     jobId: string;
@@ -167,6 +169,8 @@ export interface WorkerRepo {
     fencingToken: number;
     code: string;
     message: string;
+    /** IKBQEE / ADR-0078：调试详情（provider 原文/request_id 等），落 error.details，禁展示用户。 */
+    details?: Record<string, unknown>;
   }): Promise<boolean>;
   /** 提取成功：把画布占位节点更新为最终音频节点（IKARDY）。 */
   updateMediaExtractNodeToAudio(input: {
@@ -245,6 +249,8 @@ export interface WorkerRepo {
     workerId: string;
     fencingToken: number;
     releaseNote?: string;
+    /** IKBQEE / ADR-0078：调试详情（provider 原文/request_id 等），落 error.details，禁展示用户。 */
+    details?: Record<string, unknown>;
   }): Promise<boolean>;
   /** 结算点数（reserved→settled，actual=0 占位，真计价后补）。
    *  只在守卫通过的事务内结算，stale worker 不能结算新一次尝试的预留（IK7GRP）。
