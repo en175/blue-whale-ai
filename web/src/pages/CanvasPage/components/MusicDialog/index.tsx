@@ -4,6 +4,7 @@
  * ============================================ */
 import { useRef, useState } from 'react';
 import { X, AudioLines, Upload, Move, ChevronDown, Music, ArrowUp } from 'lucide-react';
+import { toast } from 'sonner';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import type { AudioRefItem, CanvasPickItem } from '../AudioDialog';
 import styles from './index.module.css';
@@ -92,19 +93,23 @@ export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAu
 
   /** 本地文件选择 */
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      const items: AudioRefItem[] = Array.from(files).map((f, i) => ({
-        id: `local-${Date.now()}-${i}`,
-        kind: 'audio',
-        name: f.name,
-        src: URL.createObjectURL(f),
-        source: 'local',
-      }));
-      setRefs((prev) => [...prev, ...items].slice(0, MAX_REFS));
-    }
+    const list = Array.from(e.target.files ?? []);
+    if (!list.length) return;
+    const isMp3 = (f: File) =>
+      f.name.toLowerCase().endsWith('.mp3') || f.type === 'audio/mpeg';
+    const mp3Files = list.filter(isMp3);
+    const rejected = list.length - mp3Files.length;
+    if (rejected > 0) toast.warning(`仅支持 MP3 格式，已跳过 ${rejected} 个非 MP3 文件`);
+    if (!mp3Files.length) return;
+    const items: AudioRefItem[] = mp3Files.map((f, i) => ({
+      id: `local-${Date.now()}-${i}`,
+      kind: 'audio',
+      name: f.name,
+      src: URL.createObjectURL(f),
+      source: 'local',
+    }));
+    setRefs((prev) => [...prev, ...items].slice(0, MAX_REFS));
     if (e.target) e.target.value = '';
-    setSourceOpen(false);
   };
 
   const removeRef = (id: string, source: string) => {
@@ -212,7 +217,7 @@ export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAu
       <input
         ref={audioInputRef}
         type="file"
-        accept="audio/*"
+        accept=".mp3,audio/mpeg"
         multiple
         className={styles.hiddenInput}
         onChange={handleFileChange}

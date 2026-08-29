@@ -8,6 +8,9 @@ import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, F
 import { sanitizeHtml } from '@/utils/sanitize';
 import styles from './index.module.css';
 
+/** 文字节点最大字数（按纯文本计，含粘贴） */
+const MAX_TEXT_LENGTH = 2000;
+
 interface TextNodeData {
   html?: string;
   text?: string;
@@ -18,6 +21,8 @@ interface TextNodeData {
   onDuplicate?: (id: string) => void;
   onAddToChat?: (id: string) => void;
   onSaveToAssets?: (id: string) => void;
+  /** Toast 提示（超字数上限等场景，由父级注入） */
+  onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
 }
 
 export default function TextNode({ id, data, selected }: NodeProps & { data: TextNodeData; selected?: boolean }) {
@@ -50,10 +55,16 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     if (editing) editorRef.current?.focus();
   }, [editing]);
 
-  // 仅在首次挂载时设置初始 HTML
+  // 仅在首次挂载时设置初始 HTML（超上限时截断纯文本）
   useEffect(() => {
     if (!initializedRef.current && editorRef.current) {
       editorRef.current.innerHTML = sanitizeHtml(data.html || data.text || '');
+      // 旧数据/共享资产导入可能超字数：按纯文本截断
+      const text = editorRef.current.innerText ?? '';
+      if (text.length > MAX_TEXT_LENGTH) {
+        editorRef.current.innerText = text.slice(0, MAX_TEXT_LENGTH);
+        data.onToast?.('warn', `文字节点最多 ${MAX_TEXT_LENGTH} 字，已截断 ${text.length - MAX_TEXT_LENGTH} 字`);
+      }
       initializedRef.current = true;
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -232,14 +243,29 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     saveSelection();
   }, [saveSelection]);
 
-  /** 粘贴清洗：将富文本转为纯文本 */
+  /** 粘贴清洗：将富文本转为纯文本；超上限时截断并提示 */
+  /** 当前编辑器纯文本长度 */
+  const getTextLength = useCallback(
+    () => (editorRef.current?.innerText ?? '').length,
+    [],
+  );
+
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     e.preventDefault();
     const text = e.clipboardData.getData('text/plain');
-    document.execCommand('insertText', false, text);
+    // 粘贴截断：当前已有字数 + 粘贴内容不能超过上限
+    const remaining = MAX_TEXT_LENGTH - getTextLength();
+    if (remaining <= 0) {
+      data.onToast?.('warn', `文字节点最多 ${MAX_TEXT_LENGTH} 字`);
+      return;
+    }
+    if (text.length > remaining) {
+      data.onToast?.('warn', `文字节点最多 ${MAX_TEXT_LENGTH} 字，已截断 ${text.length - remaining} 字`);
+    }
+    document.execCommand('insertText', false, text.slice(0, remaining));
     saveSelection();
     syncContent();
-  }, [saveSelection, syncContent]);
+  }, [data, getTextLength, saveSelection, syncContent]);
 
   /** 编辑器键盘操作后保存选区并同步 */
   const handleEditorKeyUp = useCallback(() => {
@@ -357,7 +383,15 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
             setIsFocused(false);
             setEditing(false);
           }}
-          onInput={syncContent}
+          onInput={() => {
+            // 键入超限拦截：撤销本次输入并提示（IME/手打兜底，粘贴在 handlePaste 已截断）
+            if (getTextLength() > MAX_TEXT_LENGTH) {
+              document.execCommand('undo');
+              data.onToast?.('warn', `文字节点最多 ${MAX_TEXT_LENGTH} 字`);
+              return;
+            }
+            syncContent();
+          }}
           onDoubleClick={(e) => {
             if (!isSelect) return;
             // 双击激活输入，并阻止画布双击居中缩放

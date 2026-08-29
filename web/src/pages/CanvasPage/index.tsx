@@ -245,12 +245,22 @@ export default function CanvasPage() {
     },
     [],
   );
-  /** 新节点出生位：当前视口中心 + 小随机偏移，保证新节点落在用户可见区域 */
+  /** 新节点出生序号——用于围绕视口中心的黄金角螺旋散布 */
+  const spawnSeqRef = useRef(0);
+
+  /** 新节点出生位：以视口中心为原点按黄金角螺旋向外散布。
+   *  黄金角（≈137.5°）保证相邻节点方向错开、不会累积往某个方向漂移，
+   *  半径随序号缓慢增大，连续添加的节点围绕中心自然错落。 */
   const spawnPosition = () => {
-    const c = spawnPosRef.current();
+    const center = spawnPosRef.current();
+    const seq = spawnSeqRef.current;
+    spawnSeqRef.current += 1;
+    const GOLDEN_ANGLE = 2.399963; // 弧度 ≈ 137.508°
+    const angle = seq * GOLDEN_ANGLE + Math.random() * 0.6;
+    const radius = seq === 0 ? 0 : 90 + seq * 42 + Math.random() * 30;
     return {
-      x: Math.round(c.x + (Math.random() * 160 - 80)),
-      y: Math.round(c.y + (Math.random() * 120 - 60)),
+      x: Math.round(center.x + Math.cos(angle) * radius),
+      y: Math.round(center.y + Math.sin(angle) * radius),
     };
   };
   /** 画布保存状态：idle 未保存 / saving 保存中 / saved 已保存 / error 保存失败 */
@@ -261,6 +271,25 @@ export default function CanvasPage() {
   const versionRef = useRef<number | null>(null);
   /** 最近一次加载/保存成功的内容签名，避免重复保存 */
   const lastSavedRef = useRef('');
+  /** 尚未被服务端确认保存的新增节点 ID——「添加失败」回滚用。
+   *  自动保存发起时对当前集合做快照：成功清快照、失败只回滚快照，
+   *  请求飞行中新增的节点留给下一轮保存处理，不会被误判为添加失败。 */
+  const pendingNodeIdsRef = useRef<Set<string>>(new Set());
+  /** 回滚未保存成功的新增节点：从画布移除并释放 blob URL */
+  const rollbackPendingNodes = useCallback((ids: Set<string>) => {
+    if (ids.size === 0) return;
+    [...mediaNodesRef.current, ...textNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current].forEach((n) => {
+      if (ids.has(n.id)) {
+        const src = n.data?.src as string | undefined;
+        if (src?.startsWith('blob:')) URL.revokeObjectURL(src);
+      }
+    });
+    setTextNodes((prev) => prev.filter((n) => !ids.has(n.id)));
+    setMediaNodes((prev) => prev.filter((n) => !ids.has(n.id)));
+    setProductNodes((prev) => prev.filter((n) => !ids.has(n.id)));
+    setAssetNodes((prev) => prev.filter((n) => !ids.has(n.id)));
+    ids.forEach((id) => pendingNodeIdsRef.current.delete(id));
+  }, []);
   const updateUser = useAuthStore((s) => s.updateUser);
   const setQuota = useAuthStore((s) => s.setQuota);
   /** 新建商品节点序号（商品 1、商品 2…） */
@@ -664,21 +693,31 @@ export default function CanvasPage() {
       }
       lastSavedRef.current = sig;
       setSaveStatus('saving');
+      // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
+      const pendingSnapshot = new Set(pendingNodeIdsRef.current);
       saveCanvasDoc(currentId, { viewport, nodes }, versionRef.current)
         .then((saved) => {
           versionRef.current = saved.version;
+          pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
           setSaveStatus('saved');
           setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
         })
         .catch((e) => {
           // 释放签名，允许下次变更时重试
           lastSavedRef.current = '';
+          // 本次请求里有未保存的新增节点 → 添加失败：回滚节点（画布上不保留添加失败的节点）
+          const hadPendingAdds = pendingSnapshot.size > 0;
           if (isApiError(e) && e.status === 412) {
-            // 版本冲突：重新加载最新画布数据（加载后自动重试保存，保持 saving）
+            // 版本冲突：回滚未保存节点 + toast，然后重新加载最新画布数据
+            if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
+            showToast('warn', hadPendingAdds ? '添加失败，请重试' : '版本冲突，正在同步最新数据');
             console.warn('画布保存版本冲突，重新加载最新数据');
             refetch();
           } else {
+            // 网络/服务端错误：新增节点回滚，已有节点的编辑保留、左下角提示保存失败
+            if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
             setSaveStatus('error');
+            showToast('error', hadPendingAdds ? '添加失败，请重试' : '保存失败，请重试');
             console.warn('画布自动保存失败:', e);
           }
         });
@@ -706,8 +745,10 @@ export default function CanvasPage() {
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
+        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
+    pendingNodeIdsRef.current.add(newNode.id);
     setTextNodes((prev) => [...prev, newNode]);
   };
 
@@ -716,12 +757,14 @@ export default function CanvasPage() {
     const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
       const copy: Node = { ...t, id: newNodeId('text'), position: { x: t.position.x + 40, y: t.position.y + 40 }, data: { ...t.data } };
+      pendingNodeIdsRef.current.add(copy.id);
       setTextNodes((prev) => [...prev, copy]);
       return;
     }
     const m = mediaNodesRef.current.find((n) => n.id === id);
     if (m) {
       const copy: Node = { ...m, id: newNodeId('media'), position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
+      pendingNodeIdsRef.current.add(copy.id);
       setMediaNodes((prev) => [...prev, copy]);
     }
   };
@@ -996,7 +1039,7 @@ export default function CanvasPage() {
    * 单文件落到画布：本地预览立即可见，后台三步上传成功后换永久 URL。
    * 工具栏多选和 Agent 侧边栏「+」（IKBA6C）共用这一条，避免会话附件与画布各传一次。
    */
-  const placeFileOnCanvas = (file: File, offsetIndex = 0): Promise<{ asset_id: string; url: string }> => {
+  const placeFileOnCanvas = (file: File): Promise<{ asset_id: string; url: string }> => {
     const isImage = file.type.startsWith('image/');
     const isVideo = file.type.startsWith('video/');
     if (!isImage && !isVideo) {
@@ -1008,13 +1051,13 @@ export default function CanvasPage() {
     }
     const nodeId = newNodeId('media');
     const localSrc = URL.createObjectURL(file);
-    const center = spawnPosRef.current();
+    pendingNodeIdsRef.current.add(nodeId);
     setMediaNodes((prev) => [
       ...prev,
       {
         id: nodeId,
         type: 'mediaNode',
-        position: { x: Math.round(center.x + offsetIndex * 280), y: Math.round(center.y + Math.random() * 100) },
+        position: spawnPosition(),
         data: {
           src: localSrc,
           fileName: file.name,
@@ -1066,16 +1109,23 @@ export default function CanvasPage() {
         return { asset_id: done.asset_id, url: done.url };
       })
       .catch((err) => {
-        console.warn(`画布上传登记失败（${file.name}），保留本地预览:`, err);
+        // 上传登记失败 = 添加失败：节点不留在画布，移除并释放 blob URL
+        console.warn(`画布上传登记失败（${file.name}）：`, err);
+        URL.revokeObjectURL(localSrc);
+        pendingNodeIdsRef.current.delete(nodeId);
+        setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+        showToast('error', `「${file.name}」添加失败，请重试`);
         throw err instanceof Error ? err : new Error('上传失败');
       });
   };
 
-  /** 上传文件生成媒体节点：本地预览立即上画布，后台三步上传登记，成功后换永久 URL */
+  /** 上传文件生成媒体节点：本地预览立即上画布，后台三步上传登记，成功后换永久 URL；
+   *  上传失败时 placeFileOnCanvas 内部已移除节点并 toast「添加失败，请重试」 */
   const handleUploadFile = (files: File[]) => {
-    files.forEach((file, i) => {
-      void placeFileOnCanvas(file, i).catch(() => {
-        /* 工具栏路径保持原语义：失败时节点仍留本地预览，错误已在 placeFileOnCanvas 里 warn */
+    files.forEach((file) => {
+      void placeFileOnCanvas(file).catch(() => {
+        // 前置校验失败（类型不支持/超大小上限）发生在节点创建前：无节点可清理，仅提示
+        showToast('error', `「${file.name}」添加失败，请重试`);
       });
     });
   };
@@ -1586,8 +1636,10 @@ export default function CanvasPage() {
           setAssetNodes((prev) => prev.filter((n) => n.id !== id));
         },
         onGenerateImage: () => actionsRef.current.openImageDialog(),
+        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
+    pendingNodeIdsRef.current.add(node.id);
     setAssetNodes((prev) => [...prev, node]);
   };
 
@@ -1718,8 +1770,10 @@ export default function CanvasPage() {
           setPickTarget('product');
           setPickProductId(id);
         },
+        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
+    pendingNodeIdsRef.current.add(node.id);
     setProductNodes((prev) => [...prev, node]);
   };
 
@@ -1749,8 +1803,10 @@ export default function CanvasPage() {
           setCharacterLibraryTarget('asset');
           setShowCharacterLibrary(true);
         },
+        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
+    pendingNodeIdsRef.current.add(node.id);
     setAssetNodes((prev) => [...prev, node]);
   };
 
@@ -1805,7 +1861,12 @@ export default function CanvasPage() {
     try {
       const result = await saveSharedAsset(req);
       console.log('[SaveAssets] 保存结果', result);
-      showToast('success', successMsg);
+      // created:false = 后端判定已存在（幂等/去重），未写入新快照——不能提示「已保存」误导用户
+      if (result.created) {
+        showToast('success', successMsg);
+      } else {
+        showToast('warn', '该内容已在共享资产中，未重复创建；如需更新请先删除旧条目');
+      }
       return result;
     } catch (e) {
       console.warn('[SaveAssets] 保存失败', e);
@@ -1967,6 +2028,7 @@ export default function CanvasPage() {
               onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
             },
           };
+          pendingNodeIdsRef.current.add(node.id);
           setMediaNodes((prev) => [...prev, node]);
           return true;
         }
@@ -2004,11 +2066,13 @@ export default function CanvasPage() {
                 setCharacterLibraryTarget('asset');
                 setShowCharacterLibrary(true);
               },
+              onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
             },
           };
           if (snapshot.voice) {
             (node.data as Record<string, unknown>).voice = snapshot.voice;
           }
+          pendingNodeIdsRef.current.add(node.id);
           setAssetNodes((prev) => [...prev, node]);
           return true;
         }
@@ -2039,8 +2103,10 @@ export default function CanvasPage() {
                 setPickTarget('product');
                 setPickProductId(id);
               },
+              onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
             },
           };
+          pendingNodeIdsRef.current.add(node.id);
           setProductNodes((prev) => [...prev, node]);
           return true;
         }
@@ -2065,8 +2131,10 @@ export default function CanvasPage() {
               onDuplicate: (id: string) => actionsRef.current.duplicate(id),
               onAddToChat: (id: string) => actionsRef.current.addToChat(id),
               onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
+              onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
             },
           };
+          pendingNodeIdsRef.current.add(node.id);
           setTextNodes((prev) => [...prev, node]);
           return true;
         }
@@ -2413,7 +2481,7 @@ export default function CanvasPage() {
             >
               {saveStatus === 'saving' && '保存中…'}
               {saveStatus === 'saved' && `已保存 ${savedAt}`}
-              {saveStatus === 'error' && '保存失败'}
+              {saveStatus === 'error' && '保存失败，请重试'}
             </span>
           )}
         </div>
@@ -2433,6 +2501,7 @@ export default function CanvasPage() {
             externalPick={videoPickResult}
             externalImagePick={videoDlgImagePickResult}
             onOpenCharacterLibrary={() => { setCharacterLibraryTarget('video'); setShowCharacterLibrary(true); }}
+            onToast={(type, msg) => showToast(type, msg)}
           />
         )}
         {/* 底部图片对话框 */}
@@ -2448,6 +2517,7 @@ export default function CanvasPage() {
             pickMode={pickMode === 'image'}
             externalPick={imagePickResult}
             onOpenCharacterLibrary={() => { setCharacterLibraryTarget('image'); setShowCharacterLibrary(true); }}
+            onToast={(type, msg) => showToast(type, msg)}
           />
         )}
 
@@ -2475,6 +2545,7 @@ export default function CanvasPage() {
             onPickFromCanvas={() => { setPickMode('audio'); setPickTarget('audio'); }}
             pickMode={pickMode === 'audio'}
             externalPick={audioPickResult}
+            onToast={(type, msg) => showToast(type, msg)}
           />
         )}
 

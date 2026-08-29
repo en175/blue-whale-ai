@@ -65,6 +65,8 @@ interface AssetCardNodeData {
   onPickFromCanvas?: (id: string) => void;
   /** 打开角色库弹窗 */
   onOpenCharacterLibrary?: (id: string) => void;
+  /** Toast 提示（超上限等场景，由父级注入） */
+  onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
   /** Agent 生成卡数据（kind=generation） */
   generationCard?: GenerationCardNodeData;
 }
@@ -112,7 +114,10 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     const pickResult = (data as { assetPickResult?: { ts: number; assetId: string; ref: CanvasGalleryRef } }).assetPickResult;
     if (!pickResult || pickResult.assetId !== id) return;
     setRefs((prev) => {
-      if (prev.length >= MAX_IMAGE_REFS) return prev;
+      if (prev.length >= MAX_IMAGE_REFS) {
+        data.onToast?.('warn', `参考图最多 ${MAX_IMAGE_REFS} 张，已满`);
+        return prev;
+      }
       if (prev.some((r) => r.id === pickResult.ref.id)) return prev;
       return [...prev, pickResult.ref];
     });
@@ -199,7 +204,13 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     const newRefs = imgs.map(({ id, src, type }) => ({ id, src, type }));
     setRefs((prev) => {
       const remaining = MAX_IMAGE_REFS - prev.length;
-      if (remaining <= 0) return prev;
+      if (remaining <= 0) {
+        data.onToast?.('warn', `参考图最多 ${MAX_IMAGE_REFS} 张，已超出 ${imgs.length} 张`);
+        return prev;
+      }
+      if (imgs.length > remaining) {
+        data.onToast?.('warn', `参考图最多 ${MAX_IMAGE_REFS} 张，已超出 ${imgs.length - remaining} 张`);
+      }
       const toAdd = newRefs.slice(0, remaining);
       // 为被截断的文件释放 blob URL（用户看不到）
       imgs.slice(remaining).forEach(({ src }) => URL.revokeObjectURL(src));
@@ -253,10 +264,23 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
 
   /** 添加音色音频（最多 MAX_VOICE_FILES 段，每段不超过 MAX_VOICE_DURATION 秒） */
   const addVoiceFiles = async (files: FileList | File[]) => {
-    const audioFiles = Array.from(files).filter((f) => f.type.startsWith('audio/'));
+    const list = Array.from(files);
+    const isMp3 = (f: File) =>
+      f.name.toLowerCase().endsWith('.mp3') || f.type === 'audio/mpeg';
+    const audioFiles = list.filter(isMp3);
+    const rejected = list.length - audioFiles.length;
+    if (rejected > 0) {
+      data.onToast?.('warn', `音色仅支持 MP3 格式，已跳过 ${rejected} 个非 MP3 文件`);
+    }
     if (audioFiles.length === 0) return;
     const remaining = MAX_VOICE_FILES - voiceRefs.length;
-    if (remaining <= 0) return;
+    if (remaining <= 0) {
+      data.onToast?.('warn', `音色最多 ${MAX_VOICE_FILES} 段，已超出 ${audioFiles.length} 段`);
+      return;
+    }
+    if (audioFiles.length > remaining) {
+      data.onToast?.('warn', `音色最多 ${MAX_VOICE_FILES} 段，已超出 ${audioFiles.length - remaining} 段`);
+    }
     const toProcess = audioFiles.slice(0, remaining);
 
     const results: { id: string; src: string; name: string; duration: number }[] = [];
@@ -278,6 +302,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
       if (duration <= MAX_VOICE_DURATION) {
         results.push({ id: `voice-${Date.now()}-${results.length}`, src, name: f.name, duration });
       } else {
+        data.onToast?.('warn', `「${f.name}」超过 ${MAX_VOICE_DURATION} 秒，已跳过`);
         URL.revokeObjectURL(src);
       }
     }
@@ -624,32 +649,34 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
                         <MousePointerClick size={16} strokeWidth={2} />
                         <span>到节点选择</span>
                       </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          data.onOpenCharacterLibrary?.(id);
-                          setAddMenu(false);
-                        }}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          padding: '8px 10px',
-                          background: 'transparent',
-                          border: 'none',
-                          borderRadius: '6px',
-                          color: 'var(--color-text-primary)',
-                          fontSize: 'var(--font-size-sm)',
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                          width: '100%',
-                        }}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)')}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                      >
-                        <User size={16} strokeWidth={2} />
-                        <span>角色库</span>
-                      </button>
+                      {kind === 'character' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            data.onOpenCharacterLibrary?.(id);
+                            setAddMenu(false);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '8px 10px',
+                            background: 'transparent',
+                            border: 'none',
+                            borderRadius: '6px',
+                            color: 'var(--color-text-primary)',
+                            fontSize: 'var(--font-size-sm)',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            width: '100%',
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                        >
+                          <User size={16} strokeWidth={2} />
+                          <span>角色库</span>
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -722,7 +749,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
               <input
                 ref={audioRef}
                 type="file"
-                accept="audio/*"
+                accept=".mp3,audio/mpeg"
                 multiple
                 className={styles.hiddenInput}
                 onChange={(e) => {
