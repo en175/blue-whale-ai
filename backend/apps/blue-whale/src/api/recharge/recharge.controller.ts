@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, OnModuleInit, Param, Post } from "@nestjs/common";
 import { NewApiError } from "@blue-whale/core";
 import { ok } from "@blue-whale/contracts";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
@@ -7,7 +7,7 @@ import { quotaToCredits } from "@lib/shared/credits/credits.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
 import { toUpstreamError } from "@lib/shared/errors/upstream-error.js";
 import { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
-import { logger } from "@lib/infra/logging/blue-whale-logger.js";
+import { readCollectToken, warnIfCollectTokenMissing } from "./collect-token.js";
 
 const WAY_CODE_BY_METHOD: Record<string, string> = {
   wechat: "WX_NATIVE",
@@ -25,11 +25,15 @@ const STATUS_MAP: Record<string, "pending" | "paid" | "expired" | "failed"> = {
 };
 
 @Controller("recharge")
-export class RechargeController {
+export class RechargeController implements OnModuleInit {
   constructor(
     private readonly account: AccountService,
     private readonly topupTier: TopupTierService,
   ) {}
+
+  onModuleInit() {
+    warnIfCollectTokenMissing();
+  }
 
   @Public()
   @Get("tiers")
@@ -110,23 +114,25 @@ export class RechargeController {
       throw new NewApiError("档位原价须为正整数", 400);
     }
 
+    const collectToken = readCollectToken();
+    if (!collectToken) {
+      throw new NewApiError("下单服务不可用", 503, "topup_collect_unconfigured");
+    }
+
     try {
-      const payMoney = await this.account.requestTopUpAmount(token, amount);
-      if (Math.abs(payMoney - tier.price) > 0.01) {
-        logger.warn(
-          `报价漂移：Go 报价 ¥${payMoney} ≠ 档位实付 ¥${tier.price}（tier id=${tier.id}, N=${amount}）`,
-        );
-      }
-      const order = await this.account.createBlueWhalePayTopUp(
-        token,
+      const identity = await this.account.resolveTokenIdentity(token);
+      const order = await this.account.createCollectTopUp({
+        collectToken,
+        userId: identity.userId,
+        money: tier.price,
         amount,
         wayCode,
-      );
+      });
       return ok({
         trade_no: order.tradeNo,
         qr_code_url: order.payData,
         expire_time: new Date(Date.now() + QR_TTL_MS).toISOString(),
-        amount: payMoney,
+        amount: tier.price,
         points: Math.round(quotaToCredits(tier.amount)),
       });
     } catch (error) {

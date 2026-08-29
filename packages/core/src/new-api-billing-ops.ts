@@ -3,7 +3,7 @@
 import {NewApiError} from "./new-api-transport.js";
 import type {NewApiEnvelope, NewApiRequest} from "./new-api-transport.js";
 import {parseTopUpRecord} from "./new-api-types.js";
-import type {NewApiCapabilityQuotaResult, NewApiPricingItem, NewApiPricingResult, NewApiRechargeAgreement, NewApiRechargeOrderResult, NewApiRechargeOrderStatus, NewApiRechargeTiersResult, NewApiTopUpListResult, NewApiTopUpOrderResult, NewApiTopUpRecord, NewApiUserLogListResult, NewApiUserLogRecord} from "./new-api-types.js";
+import type {NewApiCapabilityQuotaResult, NewApiCollectTopUpInput, NewApiPricingItem, NewApiPricingResult, NewApiRechargeAgreement, NewApiRechargeOrderResult, NewApiRechargeOrderStatus, NewApiRechargeTiersResult, NewApiTopUpListResult, NewApiTopUpOrderResult, NewApiTopUpRecord, NewApiUserLogListResult, NewApiUserLogRecord} from "./new-api-types.js";
 
 /**
  * 从一条账单的 `other` 字段里读出能力券号。
@@ -25,6 +25,12 @@ function safeParse(value: string): unknown {
   } catch {
     return null;
   }
+}
+
+function isCollectCredentialFailure(reason: string): boolean {
+  return /代收凭证|collect-token|collect token|x-blue-whale-collect-token/i.test(
+    reason,
+  );
 }
 
 export function createNewApiBillingOps(request: NewApiRequest) {
@@ -150,6 +156,59 @@ export function createNewApiBillingOps(request: NewApiRequest) {
           "new-api bluewhalepay 下单响应无效",
           502,
           "invalid_topup_order_response",
+          response,
+        );
+      }
+      return { tradeNo: data.order_id, payData: data.pay_data };
+    },
+
+    /** 产品代收下单：POST /internal/v1/topup/pay。
+     *  只带代收凭证头，不发用户 JWT / Authorization。信封同钱包口，HTTP 恒 200。 */
+    async createCollectTopUp(
+      input: NewApiCollectTopUpInput,
+    ): Promise<NewApiTopUpOrderResult> {
+      const response = await request<NewApiEnvelope>(
+        "/internal/v1/topup/pay",
+        {
+          method: "POST",
+          headers: {
+            "X-Blue-Whale-Collect-Token": input.collectToken,
+          },
+          body: JSON.stringify({
+            user_id: input.userId,
+            money: input.money,
+            amount: input.amount,
+            way_code: input.wayCode,
+          }),
+        },
+      );
+      if (response.message === "error") {
+        const reason =
+          typeof response.data === "string" ? response.data : "";
+        if (isCollectCredentialFailure(reason)) {
+          throw new NewApiError(
+            "下单服务不可用",
+            502,
+            "topup_collect_auth_error",
+            response,
+          );
+        }
+        throw new NewApiError(
+          reason || "拉起支付失败",
+          400,
+          "topup_collect_error",
+          response,
+        );
+      }
+      const data = (response.data ?? {}) as {
+        pay_data?: unknown;
+        order_id?: unknown;
+      };
+      if (typeof data.pay_data !== "string" || typeof data.order_id !== "string") {
+        throw new NewApiError(
+          "new-api 代收下单响应无效",
+          502,
+          "invalid_topup_collect_response",
           response,
         );
       }

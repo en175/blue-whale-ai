@@ -74,6 +74,12 @@ export class AccountService {
     return this.client.createBlueWhalePayTopUp(token, amount, wayCode);
   }
 
+  createCollectTopUp(
+    input: Parameters<NewApiClient["createCollectTopUp"]>[0],
+  ) {
+    return this.client.createCollectTopUp(input);
+  }
+
   listUserTopUps(token: string, options: { page?: number; pageSize?: number }) {
     return this.client.listUserTopUps(token, options);
   }
