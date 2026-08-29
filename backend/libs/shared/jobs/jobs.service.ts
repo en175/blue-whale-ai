@@ -1,8 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import {
+  errorCodeToNumeric,
   fail,
   ok,
-  GENERATION_ERROR_UNKNOWN_NUMERIC_CODE,
 } from "@blue-whale/contracts";
 import { createJobRepo } from "@blue-whale/persistence";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -86,8 +86,11 @@ export class JobsService {
     // 成功保持 code=200；失败不再用 data.error 子对象，错误码提升到顶层。
     if (job.status === "failed") {
       const projected = projectPublicError(job.stored_error, job.type);
-      const code = projected?.code ?? GENERATION_ERROR_UNKNOWN_NUMERIC_CODE;
-      const msg = projected?.message ?? messageFor(fallbackErrorCode(job.type), job.type);
+      // stored_error 为 null（历史数据/非对象 error）时 code 与 msg 同步走类型兜底，
+      // 避免 code=1000 与 msg 类型文案脱节。
+      const fallback = fallbackErrorCode(job.type);
+      const code = projected?.code ?? errorCodeToNumeric(fallback);
+      const msg = projected?.message ?? messageFor(fallback, job.type);
       return fail(code, msg, {
         job_id: job.job_id,
         status: job.status,

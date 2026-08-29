@@ -219,7 +219,6 @@ describe("messageFor", () => {
       [ERROR_SOURCE_ASSET_UNAVAILABLE, "源视频资产不可用"],
       [ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置"],
       [ERROR_PROVIDER_CONFIG, "生成服务配置不完整"],
-      [ERROR_PROVIDER_FAILED, "图像生成失败"], // image 类型
       [ERROR_PROVIDER_TIMEOUT, "生成服务响应超时"],
       [ERROR_NO_RESULT, "生成服务未返回结果"],
       [ERROR_SUBMISSION_UNKNOWN, "无法确认视频任务是否已提交"],
@@ -239,8 +238,34 @@ describe("messageFor", () => {
       [ERROR_ENQUEUE_FAILED, "任务入队失败"],
     ];
     for (const [code, expected] of cases) {
-      const type = code === ERROR_PROVIDER_FAILED ? "image" : "image";
-      expect(messageFor(code, type), `messageFor(${code})`).toBe(expected);
+      expect(messageFor(code, "image"), `messageFor(${code})`).toBe(expected);
     }
+  });
+
+  it("provider_failed / 兜底按任务类型区分中英文案（video/audio/image）", () => {
+    // 类型分支是用户核心诉求「msg 按错误码返回对应中文」，逐类型断言防回归。
+    expect(messageFor(ERROR_PROVIDER_FAILED, "video")).toBe("视频生成失败");
+    expect(messageFor(ERROR_PROVIDER_FAILED, "audio")).toBe("音频生成失败");
+    expect(messageFor(ERROR_PROVIDER_FAILED, "image")).toBe("图像生成失败");
+    // media_extract 兜底
+    expect(messageFor(ERROR_MEDIA_EXTRACT_FAILED, "media_extract")).toBe(
+      "音频提取失败",
+    );
+    expect(messageFor(ERROR_EXTRACT_FAILED, "media_extract")).toBe(
+      "音频提取失败",
+    );
+  });
+
+  it("未知码按类型兜底到对应中文", () => {
+    expect(messageFor("some_new_code", "video")).toBe("视频生成失败");
+    expect(messageFor("some_new_code", "audio")).toBe("音频生成失败");
+    expect(messageFor("some_new_code", "image")).toBe("图像生成失败");
+    expect(messageFor("some_new_code", "media_extract")).toBe("音频提取失败");
+  });
+
+  it("projectPublicError 对 null stored_error 不抛错", () => {
+    // 失败 job 但 stored_error 为 null（历史数据/非对象 error）→ 投影返回 null，
+    // 调用方 jobs.service 会走类型兜底（code/msg 同步）。
+    expect(projectPublicError(null, "video")).toBeNull();
   });
 });

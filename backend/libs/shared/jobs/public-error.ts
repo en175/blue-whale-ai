@@ -1,7 +1,7 @@
 // IKBQEE / ADR-0078：生成任务失败错误投影层。
-// 对外错误对象：顶层 {code, message, retryable} 保持兼容；新增 details（调试详情，禁展示用户）
-// 与 params（结构化上下文，契约预留）。恒占位字段 retry_after_seconds/request_id/input_request_id/
-// budget_effect 已移除。
+// 二期：对外错误对象只含 { code: 数值码, message: 中文 }——数值码每错一码（1xxx 段，
+// 见 packages/contracts/src/generation-error-codes.ts）；message 一律由 messageFor() 生成
+// 用户可读中文，不暴露 provider 原文/英文 request id（原文存 DB error.details 供排查）。
 import {
   errorCodeToNumeric,
   type PublicGenerationError,
@@ -92,6 +92,8 @@ export function messageFor(code: string, type: string): string {
     case ERROR_VIDEO_TOO_LARGE:
       return "视频超过大小上限";
     case ERROR_EXTRACT_FAILED:
+    case ERROR_MEDIA_EXTRACT_FAILED:
+      // 两码文案相同是有意为之：数值码 1026/1020 各自独立（供前端按码映射），勿合并成一个。
       return "音频提取失败";
     case ERROR_UPLOAD_FAILED:
       return "音频上传失败";
@@ -119,6 +121,7 @@ export function messageFor(code: string, type: string): string {
  * - message：一律 messageFor() 用户可读中文，不使用 DB 原文；
  * - retryable/params/details：不入对外契约——retryable 目前恒可重试（前端一律展示重试），
  *   details 存 DB 供排查，避免泄漏 provider 原文。
+ * 输入为 null（历史数据无 error / 非对象 error）时返回 null，由调用方按类型兜底。
  */
 export function projectPublicError(
   storedError: Record<string, unknown> | null,
