@@ -189,7 +189,7 @@ export interface NewApiTopUpRecord {
   money: number;
   create_time: number;
   complete_time: number;
-  /** Go TopUp.payment_method（BlueWhalePay 单恒为 bluewhalepay；易支付单为 wechat/alipay 等） */
+  /** Go TopUp.payment_method：新单渠道族值 alipay/wxpay；存量可能是 bluewhalepay/wechat。 */
   payment_method: string;
 }
 

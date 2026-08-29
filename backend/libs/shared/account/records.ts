@@ -10,10 +10,12 @@ export function mapTopUpStatus(status: string): RechargeRecordStatus {
   return "pending";
 }
 
-/** Go payment_method → 展示文案；BlueWhalePay 单恒为「扫码支付」（Go 未落库 wayCode）。 */
+/** Go payment_method → 展示文案。
+ *  新单渠道族值 `wxpay`/`alipay`；存量可能是 `wechat`/`bluewhalepay`。 */
 export function mapPaymentMethodLabel(paymentMethod: string): string {
   switch (paymentMethod) {
     case "wechat":
+    case "wxpay":
       return "微信";
     case "alipay":
       return "支付宝";
@@ -42,6 +44,28 @@ export function summarizeConsumption(modelName: string): string {
   if (name.includes("seedream")) return "生成图片";
   if (name.includes("seedance")) return "生成视频";
   return "内容生成";
+}
+
+/** 用户侧消费记录：摘要 + 透传 Go `model_name`。 */
+export function toAccountConsumptionItem(log: {
+  id: number;
+  quota: number;
+  model_name: string;
+  created_at: number;
+}): {
+  id: number;
+  credits: number;
+  summary: string;
+  model: string;
+  created_at: number;
+} {
+  return {
+    id: log.id,
+    credits: consumeCredits(log.quota),
+    summary: summarizeConsumption(log.model_name),
+    model: log.model_name,
+    created_at: log.created_at,
+  };
 }
 
 /** 记录列表分页参数解析：p/page_size，非法/缺省 → 第 1 页 20 条；上限 100。 */
