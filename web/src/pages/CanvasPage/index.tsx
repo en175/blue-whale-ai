@@ -260,6 +260,25 @@ export default function CanvasPage() {
   const versionRef = useRef<number | null>(null);
   /** 最近一次加载/保存成功的内容签名，避免重复保存 */
   const lastSavedRef = useRef('');
+  /** 尚未被服务端确认保存的新增节点 ID——「添加失败」回滚用。
+   *  自动保存发起时对当前集合做快照：成功清快照、失败只回滚快照，
+   *  请求飞行中新增的节点留给下一轮保存处理，不会被误判为添加失败。 */
+  const pendingNodeIdsRef = useRef<Set<string>>(new Set());
+  /** 回滚未保存成功的新增节点：从画布移除并释放 blob URL */
+  const rollbackPendingNodes = useCallback((ids: Set<string>) => {
+    if (ids.size === 0) return;
+    [...mediaNodesRef.current, ...textNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current].forEach((n) => {
+      if (ids.has(n.id)) {
+        const src = n.data?.src as string | undefined;
+        if (src?.startsWith('blob:')) URL.revokeObjectURL(src);
+      }
+    });
+    setTextNodes((prev) => prev.filter((n) => !ids.has(n.id)));
+    setMediaNodes((prev) => prev.filter((n) => !ids.has(n.id)));
+    setProductNodes((prev) => prev.filter((n) => !ids.has(n.id)));
+    setAssetNodes((prev) => prev.filter((n) => !ids.has(n.id)));
+    ids.forEach((id) => pendingNodeIdsRef.current.delete(id));
+  }, []);
   const updateUser = useAuthStore((s) => s.updateUser);
   const setQuota = useAuthStore((s) => s.setQuota);
   /** 新建商品节点序号（商品 1、商品 2…） */
@@ -663,21 +682,31 @@ export default function CanvasPage() {
       }
       lastSavedRef.current = sig;
       setSaveStatus('saving');
+      // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
+      const pendingSnapshot = new Set(pendingNodeIdsRef.current);
       saveCanvasDoc(currentId, { viewport, nodes }, versionRef.current)
         .then((saved) => {
           versionRef.current = saved.version;
+          pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
           setSaveStatus('saved');
           setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
         })
         .catch((e) => {
           // 释放签名，允许下次变更时重试
           lastSavedRef.current = '';
+          // 本次请求里有未保存的新增节点 → 添加失败：回滚节点（画布上不保留添加失败的节点）
+          const hadPendingAdds = pendingSnapshot.size > 0;
           if (isApiError(e) && e.status === 412) {
-            // 版本冲突：重新加载最新画布数据（加载后自动重试保存，保持 saving）
+            // 版本冲突：回滚未保存节点 + toast，然后重新加载最新画布数据
+            if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
+            showToast('warn', hadPendingAdds ? '添加失败，请重试' : '版本冲突，正在同步最新数据');
             console.warn('画布保存版本冲突，重新加载最新数据');
             refetch();
           } else {
+            // 网络/服务端错误：新增节点回滚，已有节点的编辑保留、左下角提示保存失败
+            if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
             setSaveStatus('error');
+            showToast('error', hadPendingAdds ? '添加失败，请重试' : '保存失败，请重试');
             console.warn('画布自动保存失败:', e);
           }
         });
@@ -707,6 +736,7 @@ export default function CanvasPage() {
         onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
       },
     };
+    pendingNodeIdsRef.current.add(newNode.id);
     setTextNodes((prev) => [...prev, newNode]);
   };
 
@@ -715,12 +745,14 @@ export default function CanvasPage() {
     const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
       const copy: Node = { ...t, id: newNodeId('text'), position: { x: t.position.x + 40, y: t.position.y + 40 }, data: { ...t.data } };
+      pendingNodeIdsRef.current.add(copy.id);
       setTextNodes((prev) => [...prev, copy]);
       return;
     }
     const m = mediaNodesRef.current.find((n) => n.id === id);
     if (m) {
       const copy: Node = { ...m, id: newNodeId('media'), position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
+      pendingNodeIdsRef.current.add(copy.id);
       setMediaNodes((prev) => [...prev, copy]);
     }
   };
@@ -1008,6 +1040,7 @@ export default function CanvasPage() {
     const nodeId = newNodeId('media');
     const localSrc = URL.createObjectURL(file);
     const center = spawnPosRef.current();
+    pendingNodeIdsRef.current.add(nodeId);
     setMediaNodes((prev) => [
       ...prev,
       {
@@ -1065,16 +1098,23 @@ export default function CanvasPage() {
         return { asset_id: done.asset_id, url: done.url };
       })
       .catch((err) => {
-        console.warn(`画布上传登记失败（${file.name}），保留本地预览:`, err);
+        // 上传登记失败 = 添加失败：节点不留在画布，移除并释放 blob URL
+        console.warn(`画布上传登记失败（${file.name}）：`, err);
+        URL.revokeObjectURL(localSrc);
+        pendingNodeIdsRef.current.delete(nodeId);
+        setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+        showToast('error', `「${file.name}」添加失败，请重试`);
         throw err instanceof Error ? err : new Error('上传失败');
       });
   };
 
-  /** 上传文件生成媒体节点：本地预览立即上画布，后台三步上传登记，成功后换永久 URL */
+  /** 上传文件生成媒体节点：本地预览立即上画布，后台三步上传登记，成功后换永久 URL；
+   *  上传失败时 placeFileOnCanvas 内部已移除节点并 toast「添加失败，请重试」 */
   const handleUploadFile = (files: File[]) => {
     files.forEach((file, i) => {
       void placeFileOnCanvas(file, i).catch(() => {
-        /* 工具栏路径保持原语义：失败时节点仍留本地预览，错误已在 placeFileOnCanvas 里 warn */
+        // 前置校验失败（类型不支持/超大小上限）发生在节点创建前：无节点可清理，仅提示
+        showToast('error', `「${file.name}」添加失败，请重试`);
       });
     });
   };
@@ -1587,6 +1627,7 @@ export default function CanvasPage() {
         onGenerateImage: () => actionsRef.current.openImageDialog(),
       },
     };
+    pendingNodeIdsRef.current.add(node.id);
     setAssetNodes((prev) => [...prev, node]);
   };
 
@@ -1719,6 +1760,7 @@ export default function CanvasPage() {
         },
       },
     };
+    pendingNodeIdsRef.current.add(node.id);
     setProductNodes((prev) => [...prev, node]);
   };
 
@@ -1750,6 +1792,7 @@ export default function CanvasPage() {
         },
       },
     };
+    pendingNodeIdsRef.current.add(node.id);
     setAssetNodes((prev) => [...prev, node]);
   };
 
@@ -1975,6 +2018,7 @@ export default function CanvasPage() {
               onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
             },
           };
+          pendingNodeIdsRef.current.add(node.id);
           setMediaNodes((prev) => [...prev, node]);
           return true;
         }
@@ -2017,6 +2061,7 @@ export default function CanvasPage() {
           if (snapshot.voice) {
             (node.data as Record<string, unknown>).voice = snapshot.voice;
           }
+          pendingNodeIdsRef.current.add(node.id);
           setAssetNodes((prev) => [...prev, node]);
           return true;
         }
@@ -2049,6 +2094,7 @@ export default function CanvasPage() {
               },
             },
           };
+          pendingNodeIdsRef.current.add(node.id);
           setProductNodes((prev) => [...prev, node]);
           return true;
         }
@@ -2075,6 +2121,7 @@ export default function CanvasPage() {
               onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
             },
           };
+          pendingNodeIdsRef.current.add(node.id);
           setTextNodes((prev) => [...prev, node]);
           return true;
         }
