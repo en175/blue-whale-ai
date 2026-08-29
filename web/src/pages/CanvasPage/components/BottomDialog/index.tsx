@@ -777,21 +777,14 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         onChange={handleAnyUpload}
       />
 
-      {/* 参考素材数量提示（输入框上方固定灰色小字，与 ImageDialog/AudioDialog 统一） */}
-      <div className={styles.refHint}>
-        {isKeyframe
-          ? `首尾帧模式：图片最多 2 张（首帧 + 尾帧）`
-          : `参考图最多 ${maxImages} 张 / 视频最多 ${MAX_VIDEOS} 个`}
-      </div>
-
       {/* 输入框：可多次插入生成卡引用胶囊，胶囊跟文字同一行 */}
       <div className={styles.editorWrap}>
         <ChipTextEditor
           ref={chipEditorRef}
           placeholder={
             isKeyframe
-              ? '通过直接控制提示词快速生成单段片段。首尾帧模式可上传首帧与尾帧参考。'
-              : '通过直接控制提示词快速生成单段片段。'
+              ? '通过直接控制提示词快速生成单段片段。首尾帧模式可上传首帧与尾帧参考（图片最多 2 张）。'
+              : `通过直接控制提示词快速生成单段片段。参考图最多 ${maxImages} 张 / 视频最多 ${MAX_VIDEOS} 个。`
           }
           // 超限只提示、不动内容（IKAFSX）。原来这里会 `setText(truncated)`——那是「用纯文本
           // 整体替换编辑器内容」，**所有胶囊当场湮灭、正文被从中间腰斩**，丢的远不止超出的部分。

@@ -219,13 +219,10 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
         onChange={handleUpload}
       />
 
-      {/* 参考素材数量提示（输入框上方固定灰色小字，与 BottomDialog/ImageDialog 统一） */}
-      <div className={styles.refHint}>参考音频最多 3 段</div>
-
       {/* 输入框 */}
       <textarea
         className={styles.textarea}
-        placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。"
+        placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。参考音频最多 3 段。"
         value={text}
         onChange={(e) => setText(e.target.value.slice(0, MAX_INPUT))}
         onKeyDown={handleKeyDown}

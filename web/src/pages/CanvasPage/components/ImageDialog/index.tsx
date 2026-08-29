@@ -429,13 +429,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           </div>
         </div>
 
-        {/* 参考素材数量提示（输入框上方固定灰色小字，与 BottomDialog/AudioDialog 统一） */}
-        <div className={styles.refHint}>图片最多 9 张</div>
-
         {/* 输入框 */}
         <textarea
           className={styles.textarea}
-          placeholder={uploading ? '正在上传参考图...' : '描述你希望如何编辑这张图片。'}
+          placeholder={uploading ? '正在上传参考图...' : `描述你希望如何编辑这张图片。图片最多 ${maxImages} 张。`}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
           onKeyDown={handleKeyDown}
