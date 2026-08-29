@@ -244,12 +244,22 @@ export default function CanvasPage() {
     },
     [],
   );
-  /** 新节点出生位：当前视口中心 + 小随机偏移，保证新节点落在用户可见区域 */
+  /** 新节点出生序号——用于围绕视口中心的黄金角螺旋散布 */
+  const spawnSeqRef = useRef(0);
+
+  /** 新节点出生位：以视口中心为原点按黄金角螺旋向外散布。
+   *  黄金角（≈137.5°）保证相邻节点方向错开、不会累积往某个方向漂移，
+   *  半径随序号缓慢增大，连续添加的节点围绕中心自然错落。 */
   const spawnPosition = () => {
-    const c = spawnPosRef.current();
+    const center = spawnPosRef.current();
+    const seq = spawnSeqRef.current;
+    spawnSeqRef.current += 1;
+    const GOLDEN_ANGLE = 2.399963; // 弧度 ≈ 137.508°
+    const angle = seq * GOLDEN_ANGLE + Math.random() * 0.6;
+    const radius = seq === 0 ? 0 : 90 + seq * 42 + Math.random() * 30;
     return {
-      x: Math.round(c.x + (Math.random() * 160 - 80)),
-      y: Math.round(c.y + (Math.random() * 120 - 60)),
+      x: Math.round(center.x + Math.cos(angle) * radius),
+      y: Math.round(center.y + Math.sin(angle) * radius),
     };
   };
   /** 画布保存状态：idle 未保存 / saving 保存中 / saved 已保存 / error 保存失败 */
@@ -1027,7 +1037,7 @@ export default function CanvasPage() {
    * 单文件落到画布：本地预览立即可见，后台三步上传成功后换永久 URL。
    * 工具栏多选和 Agent 侧边栏「+」（IKBA6C）共用这一条，避免会话附件与画布各传一次。
    */
-  const placeFileOnCanvas = (file: File, offsetIndex = 0): Promise<{ asset_id: string; url: string }> => {
+  const placeFileOnCanvas = (file: File): Promise<{ asset_id: string; url: string }> => {
     const isImage = file.type.startsWith('image/');
     const isVideo = file.type.startsWith('video/');
     if (!isImage && !isVideo) {
@@ -1039,14 +1049,13 @@ export default function CanvasPage() {
     }
     const nodeId = newNodeId('media');
     const localSrc = URL.createObjectURL(file);
-    const center = spawnPosRef.current();
     pendingNodeIdsRef.current.add(nodeId);
     setMediaNodes((prev) => [
       ...prev,
       {
         id: nodeId,
         type: 'mediaNode',
-        position: { x: Math.round(center.x + offsetIndex * 280), y: Math.round(center.y + Math.random() * 100) },
+        position: spawnPosition(),
         data: {
           src: localSrc,
           fileName: file.name,
@@ -1111,8 +1120,8 @@ export default function CanvasPage() {
   /** 上传文件生成媒体节点：本地预览立即上画布，后台三步上传登记，成功后换永久 URL；
    *  上传失败时 placeFileOnCanvas 内部已移除节点并 toast「添加失败，请重试」 */
   const handleUploadFile = (files: File[]) => {
-    files.forEach((file, i) => {
-      void placeFileOnCanvas(file, i).catch(() => {
+    files.forEach((file) => {
+      void placeFileOnCanvas(file).catch(() => {
         // 前置校验失败（类型不支持/超大小上限）发生在节点创建前：无节点可清理，仅提示
         showToast('error', `「${file.name}」添加失败，请重试`);
       });
