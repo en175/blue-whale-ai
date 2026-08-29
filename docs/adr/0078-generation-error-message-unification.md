@@ -58,3 +58,12 @@
 | 3 | 创建期校验统一码 | `handle-create-generation-job.ts`、`handle-retry-generation-job.ts` 等 HTTP 400 裸中文 → 统一枚举码 + 中文 message | backend apps/blue-whale + 测试 |
 | 4 | DB 写入结构 | `failJob`/`failVideoJob`/`failMediaExtractJob`/`markFailed` 落 `details`；投影向后兼容旧记录 | packages/persistence + 测试 |
 | 5 | 前端（同事，非本期） | 消费 `retryable`（不可重试不显示/置灰重试）、`params`、`quota_exhausted` 充值引导；清理 `mediaExtract.ts` 双份映射 | web/ |
+
+## 迭代修正（2026-08-29 实施后定稿）
+
+以下两点在实施中经李小强确认修正，以本节为准（覆盖上文相应条目）：
+
+1. **`retryable` 恒 `true`（过度设计）**：手动重试入口 `POST /retry` 只看 `job.status === failed`、不看 code，失败原因由用户按 `message` 自行判断（欠费→充值后重试、瞬时→直接重试）。`retryable` 保留为契约字段但恒 `true`，不承担闸门语义；将来若某失败码不允许重试，再在 `RETRYABLE_ERROR_CODES` 按码标 false。替代上文「真实计算/不可重试」措辞。
+2. **`details` 不进对外契约**：调试详情（provider 原文、request_id 等）**只写 DB `error.details` 供排查，不返回前端**，避免泄漏 provider 原文。对外结构 = `{code, message, retryable, params?}`。替代上文「对外返回 details」措辞。
+3. **quota 语义还原扩展**：`quota_exhausted` 识别不只看 HTTP 402，也认 new-api「预扣费额度失败/用户剩余额度/额度不足」及 quota/balance/insufficient 关键词（覆盖 HTTP 200 + body 预扣失败的 job 1565/1576），四类 provider（image/video/audio/new-api 视频任务）一致。
+4. **历史 job 不重算**：已落库 `provider_failed` 的旧欠费 job（1565/1576 等）保持原码，投影为「视频生成失败」；新写入才识别为 `quota_exhausted`。符合「只登记不动名」。
