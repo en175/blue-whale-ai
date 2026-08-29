@@ -18,6 +18,8 @@ export interface ConsumptionRecord {
   id: number;
   credits: number;
   summary: string;
+  /** 原模型名（后端 `toAccountConsumptionItem.model`） */
+  model: string;
   created_at: number;
 }
 

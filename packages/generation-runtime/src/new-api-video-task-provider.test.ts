@@ -85,4 +85,60 @@ describe("new-api video task provider", () => {
       error: { code: "OutputAudioSensitiveContentDetected.PolicyViolation", message: "版权审核失败" },
     });
   });
+
+  it("maps upstream quota/balance failure to quota_exhausted (IKBQEE/ADR-0078)", async () => {
+    const module = await import("./new-api-video-task-provider.js");
+    const provider = module.createNewApiVideoTaskProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockResolvedValue(
+        jsonResponse({
+          code: "success",
+          data: {
+            task_id: "task-quota",
+            status: "FAILURE",
+            error: {
+              code: "account_balance_insufficient",
+              message: "The request failed because your account has an overdue balance.",
+            },
+          },
+        }),
+      ),
+    });
+
+    await expect(provider.poll("task-quota")).resolves.toEqual({
+      status: "failed",
+      progress: 100,
+      url: null,
+      error: {
+        code: "quota_exhausted",
+        message: "The request failed because your account has an overdue balance.",
+      },
+    });
+  });
+
+  it("passes through non-quota upstream failure code (IKBQEE)", async () => {
+    const module = await import("./new-api-video-task-provider.js");
+    const provider = module.createNewApiVideoTaskProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockResolvedValue(
+        jsonResponse({
+          code: "success",
+          data: {
+            task_id: "task-nonquota",
+            status: "FAILURE",
+            error: { code: "some_upstream_code", message: "upstream broke" },
+          },
+        }),
+      ),
+    });
+
+    await expect(provider.poll("task-nonquota")).resolves.toEqual({
+      status: "failed",
+      progress: 100,
+      url: null,
+      error: { code: "some_upstream_code", message: "upstream broke" },
+    });
+  });
 });

@@ -6,6 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createLogger } from "@blue-whale/core/logging";
+import {
+  ERROR_INVALID_INPUT,
+  ERROR_MEDIA_EXTRACT_FAILED,
+  ERROR_SOURCE_ASSET_UNAVAILABLE,
+} from "@blue-whale/contracts";
 
 const logger = createLogger("generation-runtime");
 
@@ -47,6 +52,8 @@ export interface MediaExtractRunnerRepo {
     fencingToken: number;
     code: string;
     message: string;
+    /** IKBQEE / ADR-0078：调试详情，落 error.details，禁展示用户。 */
+    details?: Record<string, unknown>;
   }): Promise<boolean>;
   /** 提取成功：把画布占位节点更新为最终音频节点（IKARDY）。 */
   updateMediaExtractNodeToAudio(input: {
@@ -138,6 +145,8 @@ async function failMediaExtract(
     fencingToken: claim.fencingToken,
     code,
     message,
+    // IKBQEE / ADR-0078：调试详情（provider 原文等）进 error.details，禁展示用户。
+    details: { raw: message },
   });
   // 画布占位节点置 failed（best-effort，失败不阻断）。
   await repo
@@ -185,7 +194,7 @@ export async function runMediaExtractStep(
         ? String(sourceAssetId)
         : "";
     if (!sourceAssetIdStr) {
-      await failMediaExtract(deps.repo, claim, "invalid_input", "缺少源视频资产 id");
+      await failMediaExtract(deps.repo, claim, ERROR_INVALID_INPUT, "缺少源视频资产 id");
       return claim.id;
     }
 
@@ -198,7 +207,7 @@ export async function runMediaExtractStep(
       await failMediaExtract(
         deps.repo,
         claim,
-        "source_asset_unavailable",
+        ERROR_SOURCE_ASSET_UNAVAILABLE,
         "源视频资产不可用",
       );
       return claim.id;
@@ -280,7 +289,7 @@ export async function runMediaExtractStep(
     return claim.id;
   } catch (error) {
     const code =
-      error instanceof MediaExtractError ? error.code : "media_extract_failed";
+      error instanceof MediaExtractError ? error.code : ERROR_MEDIA_EXTRACT_FAILED;
     const message =
       error instanceof Error ? error.message : "媒体提取失败";
     if (error instanceof Error) {
