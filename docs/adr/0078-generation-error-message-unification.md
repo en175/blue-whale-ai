@@ -1,9 +1,9 @@
 # 生成任务失败消息体统一设计（Generation Error Unification）
 
-- **状态**：Accepted（实施前定稿）
-- **日期**：2026-08-28
+- **状态**：Accepted（一期已实施；二期修订结构见文末）
+- **日期**：2026-08-28（一期）；2026-08-29（二期修订）
 - **决策者**：李小强（经 `grill-with-docs` 会话确认）
-- **关联工单**：待建（需求 IKAZIG 下「任务」子工单，见 ADR「落地拆解」节）
+- **关联工单**：需求 IKAZIG 下「任务」子工单 IKBQEE（一期 + 二期）
 - **上游决策**：[ADR-0074 前后端分离 NestJS Product API](0074-frontend-backend-separation-nestjs-product-api.md)、[ADR-0075 generation-worker 入 NestJS](0075-generation-worker-into-nestjs-backend.md)、[ADR-0076 媒体提取复用 generation_jobs](0076-media-extract-reuse-generation-jobs-and-ffmpeg.md)
 - **触发案例**：job 1494（图片 `doubao-seedream-5-0-260128`）失败 `error` 存 provider 原文 `{"code":"provider_failed","message":"The request failed because your account has an overdue balance. Request id: 0217..."}`——quota 语义被 `provider_failed` 吞掉、英文原文进 DB。
 
@@ -58,3 +58,33 @@
 | 3 | 创建期校验统一码 | `handle-create-generation-job.ts`、`handle-retry-generation-job.ts` 等 HTTP 400 裸中文 → 统一枚举码 + 中文 message | backend apps/blue-whale + 测试 |
 | 4 | DB 写入结构 | `failJob`/`failVideoJob`/`failMediaExtractJob`/`markFailed` 落 `details`；投影向后兼容旧记录 | packages/persistence + 测试 |
 | 5 | 前端（同事，非本期） | 消费 `retryable`（不可重试不显示/置灰重试）、`params`、`quota_exhausted` 充值引导；清理 `mediaExtract.ts` 双份映射 | web/ |
+
+---
+
+## 二期修订（2026-08-29）：失败响应结构升级为顶层数值码 + 中文 msg
+
+### 背景
+
+一期（子任务 1-4 落地）后，失败响应为 `{code:200, data:{..., error:{code,message,retryable,params}}}`——错误码是**字符串 canonical**、`retryable` 恒 true、`params` 恒 null。前端只消费 `message`，`code`（字符串）无精确分支能力。用户明确要求：
+
+- **msg 按不同错误码返回对应中文**；
+- **错误码全项目统一**（生成任务 + 未来 Agent/资产/支付等领域都可扩展），**每错一码**（非归类）；
+- 响应结构升级为顶层 `{code, msg, data}`，用户格式示例：
+  `{code:1001, data:{job_id:"1579", status:"failed", progress:0, asset:null}, msg:"账户余额不足，请充值后重试"}`
+- 前端改动由同事另做，后端只出结构。
+
+### 决策（二期）
+
+1. **失败响应结构**：`GET /api/jobs/:id` 失败不再用 `data.error` 子对象，错误码提升到**顶层 `code`**（数值码）、中文文案在**顶层 `msg`**；`data` 只放纯任务字段 `{job_id, status, progress, asset}`。成功保持 `code=200`。前端 `apiRequest` 见 `code !== 200` 抛 ApiError（`msg` 即中文），轮询需在 `.catch` 收敛失败态（前端同事适配点）。
+2. **数值错误码（对外契约）**：在 `packages/contracts/src/generation-error-codes.ts` 建跨包共享的字符串码 → 数值码映射表（28 码 → 1001-1028，`quota_exhausted=1001`，未知/白名单外兜底 `1000`）；段位约定写入 `result.ts`：`4xx/5xx`=HTTP 语义、`1xxxx`(100000+)=Java SystemCode、**`1xxx`(1000-1999)=领域错误码**（生成领域 1001-1028，其他领域从 1100+ 起扩展）。`errorCodeToNumeric(code)` 为唯一转换入口。
+3. **快照接口**：`generation_jobs[].error` 保持子对象形态，内容升级为 `{code: 数值码, message: 中文}`（同表同文案）。
+4. **`retryable`/`params`/`details` 不再对外输出**：一期决策 #2/#3 的增量字段在二期**全部移除**（`details` 仍存 DB 供排查、不进响应）。对外错误对象收敛为 `{code: 数值码, message: 中文}`。
+5. **投影逻辑**：`projectPublicError(storedError, type)` → 字符串码归一（`resolveErrorCode`）→ 白名单外按类型 fallback → `errorCodeToNumeric()` 映射数值码；`messageFor(code, type)` 按任务类型输出中文（video/audio/image/media_extract 分支）。`stored_error` 为 null 时返回 null，调用方（`jobs.service.ts`）同步用 `errorCodeToNumeric(fallbackErrorCode(type))` + `messageFor(fallback, type)` 兜底，保证 code 与 msg 一致。
+
+### 二期后果
+
+- `packages/contracts` 新增数值码映射表 + `PublicGenerationError{code:number, message:string}`（跨包共享唯一来源，web 与 backend 共用）。
+- 前端**行为破坏**（同事适配）：失败轮询从 `.then` 读 `data.error` → `.catch` 读 `ApiError.msg`；字符串 code → 数值码分支。
+- 历史字符串码（DB 旧记录）由投影归一映射，前端无需处理旧码。
+- 全项目错误码段位约定落定（`result.ts` 注释），后续领域从 1100+ 顺延扩展。
+- 对应代码：`packages/contracts/src/generation-error-codes.ts`、`backend/libs/shared/jobs/public-error.ts`、`backend/libs/shared/jobs/jobs.service.ts`、`backend/libs/shared/snapshot/handle-snapshot.ts`。对接文档见 `docs/api/generation-job-error.md`（v2）。

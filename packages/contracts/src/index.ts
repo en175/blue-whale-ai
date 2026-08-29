@@ -35,6 +35,10 @@ export {
   ERROR_VIDEO_GENERATION_FAILED,
   ERROR_VIDEO_HAS_NO_AUDIO_TRACK,
   ERROR_VIDEO_TOO_LARGE,
+  GENERATION_ERROR_UNKNOWN_NUMERIC_CODE,
+  GENERATION_ERROR_NUMERIC_CODES,
+  errorCodeToNumeric,
+  type PublicGenerationError,
 } from "./generation-error-codes.js";
 export {
   ok,
