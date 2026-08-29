@@ -65,6 +65,8 @@ interface AssetCardNodeData {
   onPickFromCanvas?: (id: string) => void;
   /** 打开角色库弹窗 */
   onOpenCharacterLibrary?: (id: string) => void;
+  /** Toast 提示（超上限等场景，由父级注入） */
+  onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
   /** Agent 生成卡数据（kind=generation） */
   generationCard?: GenerationCardNodeData;
 }
@@ -112,7 +114,10 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     const pickResult = (data as { assetPickResult?: { ts: number; assetId: string; ref: CanvasGalleryRef } }).assetPickResult;
     if (!pickResult || pickResult.assetId !== id) return;
     setRefs((prev) => {
-      if (prev.length >= MAX_IMAGE_REFS) return prev;
+      if (prev.length >= MAX_IMAGE_REFS) {
+        data.onToast?.('warn', `参考图最多 ${MAX_IMAGE_REFS} 张，已满`);
+        return prev;
+      }
       if (prev.some((r) => r.id === pickResult.ref.id)) return prev;
       return [...prev, pickResult.ref];
     });
@@ -199,7 +204,13 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     const newRefs = imgs.map(({ id, src, type }) => ({ id, src, type }));
     setRefs((prev) => {
       const remaining = MAX_IMAGE_REFS - prev.length;
-      if (remaining <= 0) return prev;
+      if (remaining <= 0) {
+        data.onToast?.('warn', `参考图最多 ${MAX_IMAGE_REFS} 张，已超出 ${imgs.length} 张`);
+        return prev;
+      }
+      if (imgs.length > remaining) {
+        data.onToast?.('warn', `参考图最多 ${MAX_IMAGE_REFS} 张，已超出 ${imgs.length - remaining} 张`);
+      }
       const toAdd = newRefs.slice(0, remaining);
       // 为被截断的文件释放 blob URL（用户看不到）
       imgs.slice(remaining).forEach(({ src }) => URL.revokeObjectURL(src));
@@ -256,7 +267,13 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     const audioFiles = Array.from(files).filter((f) => f.type.startsWith('audio/'));
     if (audioFiles.length === 0) return;
     const remaining = MAX_VOICE_FILES - voiceRefs.length;
-    if (remaining <= 0) return;
+    if (remaining <= 0) {
+      data.onToast?.('warn', `音色最多 ${MAX_VOICE_FILES} 段，已超出 ${audioFiles.length} 段`);
+      return;
+    }
+    if (audioFiles.length > remaining) {
+      data.onToast?.('warn', `音色最多 ${MAX_VOICE_FILES} 段，已超出 ${audioFiles.length - remaining} 段`);
+    }
     const toProcess = audioFiles.slice(0, remaining);
 
     const results: { id: string; src: string; name: string; duration: number }[] = [];
@@ -278,6 +295,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
       if (duration <= MAX_VOICE_DURATION) {
         results.push({ id: `voice-${Date.now()}-${results.length}`, src, name: f.name, duration });
       } else {
+        data.onToast?.('warn', `「${f.name}」超过 ${MAX_VOICE_DURATION} 秒，已跳过`);
         URL.revokeObjectURL(src);
       }
     }

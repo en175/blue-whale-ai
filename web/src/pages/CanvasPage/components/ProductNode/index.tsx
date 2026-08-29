@@ -35,6 +35,8 @@ interface ProductNodeData {
   onProductChange?: (id: string, patch: { images?: ProductImage[]; detail?: string }) => void;
   /** 触发画布节点选取模式（父级实现） */
   onPickFromCanvas?: (id: string) => void;
+  /** Toast 提示（超上限等场景，由父级注入） */
+  onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
 }
 
 const MAX_IMAGES = 8;
@@ -153,6 +155,7 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
       const trimmed = combined.slice(0, MAX_IMAGES);
       // 为被截断的文件释放 blob URL（用户看不到）
       if (combined.length > MAX_IMAGES) {
+        data.onToast?.('warn', `商品图最多 ${MAX_IMAGES} 张，已超出 ${combined.length - MAX_IMAGES} 张`);
         combined.slice(MAX_IMAGES).forEach((i) => {
           if (i.src.startsWith('blob:')) URL.revokeObjectURL(i.src);
         });

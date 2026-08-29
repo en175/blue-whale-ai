@@ -1634,6 +1634,7 @@ export default function CanvasPage() {
           setAssetNodes((prev) => prev.filter((n) => n.id !== id));
         },
         onGenerateImage: () => actionsRef.current.openImageDialog(),
+        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
     pendingNodeIdsRef.current.add(node.id);
@@ -1767,6 +1768,7 @@ export default function CanvasPage() {
           setPickTarget('product');
           setPickProductId(id);
         },
+        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
     pendingNodeIdsRef.current.add(node.id);
@@ -1799,6 +1801,7 @@ export default function CanvasPage() {
           setCharacterLibraryTarget('asset');
           setShowCharacterLibrary(true);
         },
+        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
     pendingNodeIdsRef.current.add(node.id);
@@ -2065,6 +2068,7 @@ export default function CanvasPage() {
                 setCharacterLibraryTarget('asset');
                 setShowCharacterLibrary(true);
               },
+              onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
             },
           };
           if (snapshot.voice) {
@@ -2101,6 +2105,7 @@ export default function CanvasPage() {
                 setPickTarget('product');
                 setPickProductId(id);
               },
+              onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
             },
           };
           pendingNodeIdsRef.current.add(node.id);
