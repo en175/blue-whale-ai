@@ -1,4 +1,5 @@
 // IKBQEE / ADR-0078：错误码枚举 + 投影补齐 单元测试。
+// 二期：对外输出为 { code: 数值码, message: 中文 }——数值码每错一码、前端可映射。
 import { describe, expect, it } from "vitest";
 
 import {
@@ -32,12 +33,15 @@ import {
   ERROR_VIDEO_TOO_LARGE,
   GENERATION_ERROR_CODES,
   LEGACY_CODE_TO_CANONICAL,
-  RETRYABLE_ERROR_CODES,
   fallbackErrorCode,
-  isRetryableForType,
   resolveErrorCode,
 } from "./error-codes.js";
-import { projectPublicError } from "./public-error.js";
+import {
+  GENERATION_ERROR_NUMERIC_CODES,
+  GENERATION_ERROR_UNKNOWN_NUMERIC_CODE,
+  errorCodeToNumeric,
+} from "@blue-whale/contracts";
+import { messageFor, projectPublicError } from "./public-error.js";
 
 describe("error-codes", () => {
   it("枚举常量值稳定（对外契约）", () => {
@@ -83,12 +87,53 @@ describe("error-codes", () => {
     }
   });
 
-  it("retryable 集合：目前全部失败码可重试（ADR-0078 修正）", () => {
-    expect(RETRYABLE_ERROR_CODES.has(ERROR_PROVIDER_FAILED)).toBe(true);
-    expect(RETRYABLE_ERROR_CODES.has(ERROR_PROVIDER_TIMEOUT)).toBe(true);
-    expect(RETRYABLE_ERROR_CODES.has(ERROR_STORAGE_FAILED)).toBe(true);
-    expect(RETRYABLE_ERROR_CODES.has(ERROR_QUOTA_EXHAUSTED)).toBe(true);
-    expect(RETRYABLE_ERROR_CODES.has(ERROR_INVALID_INPUT)).toBe(true);
+  it("数值码映射：每错一码，一一对应且无重复（ADR-0078 二期）", () => {
+    const exported = [
+      ERROR_INVALID_INPUT,
+      ERROR_UNSUPPORTED_TYPE,
+      ERROR_UNSUPPORTED_INPUT,
+      ERROR_MODEL_UNAVAILABLE,
+      ERROR_REFERENCE_ASSET_UNAVAILABLE,
+      ERROR_REFERENCE_LIMIT_EXCEEDED,
+      ERROR_SOURCE_ASSET_UNAVAILABLE,
+      ERROR_QUOTA_EXHAUSTED,
+      ERROR_PROVIDER_CREDENTIAL_MISSING,
+      ERROR_PROVIDER_CONFIG,
+      ERROR_PROVIDER_FAILED,
+      ERROR_PROVIDER_TIMEOUT,
+      ERROR_NO_RESULT,
+      ERROR_SUBMISSION_UNKNOWN,
+      ERROR_TIMED_OUT,
+      ERROR_STORAGE_FAILED,
+      ERROR_ALL_OUTPUTS_FAILED,
+      ERROR_CONTENT_REJECTED,
+      ERROR_CONTENT_REVIEW_UNAVAILABLE,
+      ERROR_MEDIA_EXTRACT_FAILED,
+      ERROR_VIDEO_GENERATION_FAILED,
+      ERROR_IMAGE_GENERATION_FAILED,
+      ERROR_VIDEO_HAS_NO_AUDIO_TRACK,
+      ERROR_VIDEO_DOWNLOAD_FAILED,
+      ERROR_VIDEO_TOO_LARGE,
+      ERROR_EXTRACT_FAILED,
+      ERROR_UPLOAD_FAILED,
+      ERROR_ENQUEUE_FAILED,
+    ];
+    const codes = exported.map((c) => GENERATION_ERROR_NUMERIC_CODES[c]);
+    // 每个字符串码都有数值码，且数值码互不重复
+    for (const n of codes) {
+      expect(typeof n).toBe("number");
+    }
+    expect(new Set(codes).size).toBe(exported.length);
+    // 特定映射稳定（对外契约）
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_QUOTA_EXHAUSTED]).toBe(1001);
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_INVALID_INPUT]).toBe(1002);
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_PROVIDER_FAILED]).toBe(1011);
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_IMAGE_GENERATION_FAILED]).toBe(
+      1022,
+    );
+    // 未知码兜底
+    expect(errorCodeToNumeric("some_unknown_code")).toBe(1000);
+    expect(GENERATION_ERROR_UNKNOWN_NUMERIC_CODE).toBe(1000);
   });
 
   it("旧码归一 canonical", () => {
@@ -112,35 +157,23 @@ describe("error-codes", () => {
     expect(fallbackErrorCode("image")).toBe("image_generation_failed");
     expect(fallbackErrorCode("audio")).toBe("image_generation_failed");
   });
-
-  it("retryable 手动重试语义：不区分，失败一律可重试（ADR-0078 修正）", () => {
-    // 失败原因由用户根据 message 自行判断，不阻断手动重试
-    expect(isRetryableForType("provider_failed", "image")).toBe(true);
-    expect(isRetryableForType("provider_failed", "video")).toBe(true);
-    expect(isRetryableForType("provider_failed", "audio")).toBe(true);
-    expect(isRetryableForType("provider_failed", "media_extract")).toBe(true);
-    expect(isRetryableForType("provider_timeout", "video")).toBe(true);
-    expect(isRetryableForType("storage_failed", "image")).toBe(true);
-    expect(isRetryableForType("quota_exhausted", "image")).toBe(true);
-    expect(isRetryableForType("invalid_input", "image")).toBe(true);
-    expect(isRetryableForType("unsupported_input", "image")).toBe(true);
-    expect(isRetryableForType("content_rejected", "image")).toBe(true);
-  });
 });
 
 describe("projectPublicError", () => {
-  it("canonical 码保留 + message 中文 + retryable 按码", () => {
+  it("canonical 码 → 数值码 + 中文 message（无 retryable/params/details）", () => {
     const out = projectPublicError(
       { code: "provider_failed", message: "上游英文原文" },
       "image",
     );
     expect(out).not.toBeNull();
-    expect(out!.code).toBe("provider_failed");
+    expect(out!.code).toBe(1011);
     expect(out!.message).toBe("图像生成失败");
-    expect(out!.retryable).toBe(true);
+    expect("retryable" in out!).toBe(false);
+    expect("params" in out!).toBe(false);
+    expect("details" in out!).toBe(false);
   });
 
-  it("quota_exhausted 语义还原：message 充值引导 + 欠费可手动重试 + details 带原文", () => {
+  it("quota_exhausted：1001 + 充值引导文案", () => {
     // 真实案例 job 1494：provider_failed + overdue balance 英文
     const out = projectPublicError(
       {
@@ -149,54 +182,65 @@ describe("projectPublicError", () => {
       },
       "image",
     );
-    expect(out!.code).toBe("quota_exhausted");
+    expect(out!.code).toBe(1001);
     expect(out!.message).toBe("账户余额不足，请充值后重试");
-    // 手动重试语义：充值后可重试
-    expect(out!.retryable).toBe(true);
   });
 
-  it("旧码归一：历史 invalid_video_inputs → invalid_input 中文 + 可重试", () => {
+  it("旧码归一：历史 invalid_video_inputs → invalid_input 数值码 + 中文", () => {
     const out = projectPublicError(
       { code: "invalid_video_inputs", message: "首帧只能指定一个来源" },
       "video",
     );
-    expect(out!.code).toBe("invalid_input");
+    expect(out!.code).toBe(1002);
     expect(out!.message).toBe("输入参数无效");
-    expect(out!.retryable).toBe(true);
   });
 
-  it("白名单外码 fallback 到类型兜底", () => {
+  it("白名单外码 fallback 到类型兜底再映射数值码", () => {
     const out = projectPublicError({ code: "some_new_code" }, "video");
-    expect(out!.code).toBe("video_generation_failed");
+    expect(out!.code).toBe(1021); // video_generation_failed
     expect(out!.message).toBe("视频生成失败");
-  });
-
-  it("details 不入对外契约（调试详情仅存 DB，前端拿不到）", () => {
-    const out = projectPublicError(
-      { code: "provider_failed", message: "x", details: { request_id: "r1" } },
-      "image",
-    );
-    expect("details" in out!).toBe(false);
-  });
-
-  it("params 透传（契约预留）", () => {
-    const out = projectPublicError(
-      { code: "unsupported_input", message: "x", params: { max_reference_count: 9 } },
-      "image",
-    );
-    expect(out!.params).toEqual({ max_reference_count: 9 });
-    expect(out!.retryable).toBe(true);
   });
 
   it("null 输入返回 null", () => {
     expect(projectPublicError(null, "image")).toBeNull();
   });
+});
 
-  it("顶层结构兼容：不再输出恒占位字段", () => {
-    const out = projectPublicError({ code: "provider_failed" }, "image")!;
-    expect("retry_after_seconds" in out).toBe(false);
-    expect("request_id" in out).toBe(false);
-    expect("budget_effect" in out).toBe(false);
-    expect(ERROR_IMAGE_GENERATION_FAILED).toBe("image_generation_failed");
+describe("messageFor", () => {
+  it("每种错误码都有中文文案（前端只展示 msg）", () => {
+    const cases: Array<[string, string]> = [
+      [ERROR_QUOTA_EXHAUSTED, "账户余额不足，请充值后重试"],
+      [ERROR_INVALID_INPUT, "输入参数无效"],
+      [ERROR_UNSUPPORTED_TYPE, "不支持的生成类型"],
+      [ERROR_UNSUPPORTED_INPUT, "输入内容不支持"],
+      [ERROR_MODEL_UNAVAILABLE, "模型未开通或不可用"],
+      [ERROR_REFERENCE_ASSET_UNAVAILABLE, "参考素材不可用"],
+      [ERROR_REFERENCE_LIMIT_EXCEEDED, "参考素材数量超过限制"],
+      [ERROR_SOURCE_ASSET_UNAVAILABLE, "源视频资产不可用"],
+      [ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置"],
+      [ERROR_PROVIDER_CONFIG, "生成服务配置不完整"],
+      [ERROR_PROVIDER_FAILED, "图像生成失败"], // image 类型
+      [ERROR_PROVIDER_TIMEOUT, "生成服务响应超时"],
+      [ERROR_NO_RESULT, "生成服务未返回结果"],
+      [ERROR_SUBMISSION_UNKNOWN, "无法确认视频任务是否已提交"],
+      [ERROR_TIMED_OUT, "视频生成超时"],
+      [ERROR_STORAGE_FAILED, "生成结果存储失败"],
+      [ERROR_ALL_OUTPUTS_FAILED, "所有输出均生成失败"],
+      [ERROR_CONTENT_REJECTED, "生成内容未通过安全审核"],
+      [ERROR_CONTENT_REVIEW_UNAVAILABLE, "内容审核不可用"],
+      [ERROR_MEDIA_EXTRACT_FAILED, "音频提取失败"],
+      [ERROR_VIDEO_GENERATION_FAILED, "视频生成失败"],
+      [ERROR_IMAGE_GENERATION_FAILED, "图像生成失败"],
+      [ERROR_VIDEO_HAS_NO_AUDIO_TRACK, "视频没有音轨"],
+      [ERROR_VIDEO_DOWNLOAD_FAILED, "视频下载失败"],
+      [ERROR_VIDEO_TOO_LARGE, "视频超过大小上限"],
+      [ERROR_EXTRACT_FAILED, "音频提取失败"],
+      [ERROR_UPLOAD_FAILED, "音频上传失败"],
+      [ERROR_ENQUEUE_FAILED, "任务入队失败"],
+    ];
+    for (const [code, expected] of cases) {
+      const type = code === ERROR_PROVIDER_FAILED ? "image" : "image";
+      expect(messageFor(code, type), `messageFor(${code})`).toBe(expected);
+    }
   });
 });

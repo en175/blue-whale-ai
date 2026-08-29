@@ -1,9 +1,14 @@
 import { Injectable } from "@nestjs/common";
-import { fail, ok } from "@blue-whale/contracts";
+import {
+  fail,
+  ok,
+  GENERATION_ERROR_UNKNOWN_NUMERIC_CODE,
+} from "@blue-whale/contracts";
 import { createJobRepo } from "@blue-whale/persistence";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
-import { projectPublicError } from "./public-error.js";
+import { fallbackErrorCode } from "./error-codes.js";
+import { messageFor, projectPublicError } from "./public-error.js";
 
 const RESOURCE_NOT_FOUND_CODE = 100301;
 const MAX_BATCH_IDS = 100;
@@ -77,15 +82,25 @@ export class JobsService {
     const owned = await this.project.findOwnedById(job.project_id, userId);
     if (!owned) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
 
+    // ADR-0078 二期：失败响应结构 —— { code: 数值码, msg: 中文, data: 纯任务字段 }。
+    // 成功保持 code=200；失败不再用 data.error 子对象，错误码提升到顶层。
+    if (job.status === "failed") {
+      const projected = projectPublicError(job.stored_error, job.type);
+      const code = projected?.code ?? GENERATION_ERROR_UNKNOWN_NUMERIC_CODE;
+      const msg = projected?.message ?? messageFor(fallbackErrorCode(job.type), job.type);
+      return fail(code, msg, {
+        job_id: job.job_id,
+        status: job.status,
+        progress: job.progress,
+        asset: job.asset,
+      });
+    }
+
     return ok({
       job_id: job.job_id,
       status: job.status,
       progress: job.progress,
       asset: job.asset,
-      error:
-        job.status === "failed"
-          ? projectPublicError(job.stored_error, job.type)
-          : null,
     });
   }
 }

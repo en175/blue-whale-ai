@@ -3,6 +3,10 @@
 // 与 params（结构化上下文，契约预留）。恒占位字段 retry_after_seconds/request_id/input_request_id/
 // budget_effect 已移除。
 import {
+  errorCodeToNumeric,
+  type PublicGenerationError,
+} from "@blue-whale/contracts";
+import {
   ERROR_ALL_OUTPUTS_FAILED,
   ERROR_CONTENT_REJECTED,
   ERROR_CONTENT_REVIEW_UNAVAILABLE,
@@ -32,14 +36,12 @@ import {
   ERROR_VIDEO_HAS_NO_AUDIO_TRACK,
   ERROR_VIDEO_TOO_LARGE,
   GENERATION_ERROR_CODES,
-  RETRYABLE_ERROR_CODES,
   fallbackErrorCode,
-  isRetryableForType,
   resolveErrorCode,
 } from "./error-codes.js";
 
 /** 用户可见中文文案（ADR-0078：对外 message 一律由此生成，杜绝 provider 原文/英文 request id）。 */
-function messageFor(code: string, type: string): string {
+export function messageFor(code: string, type: string): string {
   switch (code) {
     case ERROR_SUBMISSION_UNKNOWN:
       return "无法确认视频任务是否已提交";
@@ -111,26 +113,17 @@ function messageFor(code: string, type: string): string {
   }
 }
 
-export interface PublicJobError {
-  code: string;
-  message: string;
-  retryable: boolean;
-  /** 结构化上下文（契约预留，本期仅创建期参考图上限填充，如 max_reference_count）。 */
-  params?: Record<string, unknown> | null;
-}
-
 /**
- * 把 DB 存储的原始 error 投影为对外错误对象（ADR-0078）。
- * - code：canonical 码保留；旧码经 LEGACY_CODE_TO_CANONICAL 归一；白名单外历史码按类型 fallback；
+ * 把 DB 存储的原始 error 投影为对外错误对象（ADR-0078 二期）。
+ * - code：canonical 字符串码归一 → 查数值映射表，输出每错一码的独立数值码（白名单外历史码按类型 fallback 后映射）；
  * - message：一律 messageFor() 用户可读中文，不使用 DB 原文；
- * - retryable：手动重试语义（当前一律可重试，见 RETRYABLE_ERROR_CODES）；
- * - params：结构化上下文（契约预留，本期仅创建期参考图上限填充）。
- * details（调试详情）不入对外契约——存 DB 供排查，前端拿不到，避免泄漏 provider 原文。
+ * - retryable/params/details：不入对外契约——retryable 目前恒可重试（前端一律展示重试），
+ *   details 存 DB 供排查，避免泄漏 provider 原文。
  */
 export function projectPublicError(
   storedError: Record<string, unknown> | null,
   type: string,
-): PublicJobError | null {
+): PublicGenerationError | null {
   if (storedError === null) return null;
   const rawCode = storedError.code;
   let code = rawCode == null ? fallbackErrorCode(type) : String(rawCode);
@@ -139,12 +132,7 @@ export function projectPublicError(
     code = fallbackErrorCode(type);
   }
   return {
-    code,
+    code: errorCodeToNumeric(code),
     message: messageFor(code, type),
-    retryable: isRetryableForType(code, type),
-    params:
-      storedError.params !== undefined && storedError.params !== null
-        ? (storedError.params as Record<string, unknown>)
-        : null,
   };
 }
