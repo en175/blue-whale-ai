@@ -126,12 +126,14 @@ export default function AccountRecordsModal({ onClose }: AccountRecordsModalProp
                     <div className={styles.sub}>
                       <span>
                         ¥{Number.isFinite(r.amount_cny) ? r.amount_cny.toFixed(2) : '0.00'}
-                        {r.payment_method ? ` · ${r.payment_method}` : ''}
+                        {' · '}
+                        {r.payment_method || '其他'}
                       </span>
                       <span className={styles.status}>
                         {TOPUP_STATUS_LABEL[r.status] ?? r.status}
                       </span>
                     </div>
+                    <div className={styles.meta}>单号 {r.trade_no || '—'}</div>
                   </div>
                   <span className={styles.time}>{fmtRelativeTime(r.created_at)}</span>
                 </div>
@@ -146,7 +148,10 @@ export default function AccountRecordsModal({ onClose }: AccountRecordsModalProp
                 <div className={styles.main}>
                   <div className={styles.itemTitle}>-{fmtCredits(r.credits)} 积分</div>
                   <div className={styles.sub}>
-                    <span>{r.summary || '内容生成'}</span>
+                    <span>
+                      {r.summary || '内容生成'}
+                      {r.model ? ` · ${r.model}` : ''}
+                    </span>
                   </div>
                 </div>
                 <span className={styles.time}>{fmtRelativeTime(r.created_at)}</span>
