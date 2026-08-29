@@ -602,6 +602,8 @@ export interface OperationLog {
   detail: string;
   /** 操作人用户名 */
   operator: string;
+  /** 操作人 IP；后端未写入时为 null */
+  ipAddress?: string | null;
   /** 操作时间（ISO） */
   createdAt: string;
 }

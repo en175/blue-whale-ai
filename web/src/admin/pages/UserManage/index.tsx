@@ -14,6 +14,7 @@ import {
   type UserManageAction,
 } from '@/api/admin';
 import { isApiError } from '@/api/http';
+import { formatLogIp } from '@/admin/formatLogIp';
 import styles from './index.module.css';
 
 const fmt = (n: number) => n.toLocaleString('en-US');
@@ -351,22 +352,23 @@ function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () =>
                       <th>金额</th>
                       <th>原因</th>
                       <th>操作人</th>
+                      <th>IP</th>
                     </tr>
                   </thead>
                   <tbody>
                     {logsLoading && (
                       <tr>
-                        <td colSpan={4} className={styles.emptyCell}>加载中…</td>
+                        <td colSpan={5} className={styles.emptyCell}>加载中…</td>
                       </tr>
                     )}
                     {!logsLoading && logsError && (
                       <tr>
-                        <td colSpan={4} className={styles.emptyCell}>{logsError}</td>
+                        <td colSpan={5} className={styles.emptyCell}>{logsError}</td>
                       </tr>
                     )}
                     {!logsLoading && !logsError && adjusts.length === 0 && (
                       <tr>
-                        <td colSpan={4} className={styles.emptyCell}>暂无调整记录</td>
+                        <td colSpan={5} className={styles.emptyCell}>暂无调整记录</td>
                       </tr>
                     )}
                     {adjusts.map((l) => {
@@ -380,6 +382,7 @@ function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () =>
                           </td>
                           <td>{d.reason ?? '—'}</td>
                           <td>{l.operator}</td>
+                          <td className={styles.mono}>{formatLogIp(l.ipAddress)}</td>
                         </tr>
                       );
                     })}
@@ -399,22 +402,23 @@ function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () =>
                       <th>操作</th>
                       <th>原因</th>
                       <th>操作人</th>
+                      <th>IP</th>
                     </tr>
                   </thead>
                   <tbody>
                     {logsLoading && (
                       <tr>
-                        <td colSpan={4} className={styles.emptyCell}>加载中…</td>
+                        <td colSpan={5} className={styles.emptyCell}>加载中…</td>
                       </tr>
                     )}
                     {!logsLoading && logsError && (
                       <tr>
-                        <td colSpan={4} className={styles.emptyCell}>{logsError}</td>
+                        <td colSpan={5} className={styles.emptyCell}>{logsError}</td>
                       </tr>
                     )}
                     {!logsLoading && !logsError && logs.length === 0 && (
                       <tr>
-                        <td colSpan={4} className={styles.emptyCell}>暂无操作日志</td>
+                        <td colSpan={5} className={styles.emptyCell}>暂无操作日志</td>
                       </tr>
                     )}
                     {logs.map((l) => {
@@ -425,6 +429,7 @@ function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () =>
                           <td>{ACTION_LABELS[l.action] ?? l.action}</td>
                           <td>{d.reason ?? '—'}</td>
                           <td>{l.operator}</td>
+                          <td className={styles.mono}>{formatLogIp(l.ipAddress)}</td>
                         </tr>
                       );
                     })}
