@@ -1859,7 +1859,12 @@ export default function CanvasPage() {
     try {
       const result = await saveSharedAsset(req);
       console.log('[SaveAssets] 保存结果', result);
-      showToast('success', successMsg);
+      // created:false = 后端判定已存在（幂等/去重），未写入新快照——不能提示「已保存」误导用户
+      if (result.created) {
+        showToast('success', successMsg);
+      } else {
+        showToast('warn', '该内容已在共享资产中，未重复创建；如需更新请先删除旧条目');
+      }
       return result;
     } catch (e) {
       console.warn('[SaveAssets] 保存失败', e);
