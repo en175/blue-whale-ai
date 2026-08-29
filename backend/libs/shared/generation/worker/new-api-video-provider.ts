@@ -37,8 +37,16 @@ function defaultSleep(milliseconds: number): Promise<void> {
 function providerError(error: unknown): VideoProviderError {
   if (error instanceof VideoProviderError) return error;
   if (error instanceof NewApiError) {
+    // IKBQEE：余额不足识别——不只看 402，也认 new-api 中文「预扣费额度失败/用户剩余额度」
+    // 与英文 quota/balance/insufficient（job 1565「预扣费额度失败」为 HTTP200+body 报错，非 402）。
+    const msg = String(error.message);
+    const isQuotaSignal =
+      error.status === 402 ||
+      /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required)/i.test(
+        msg,
+      );
     return new VideoProviderError(
-      error.status === 402 ? ERROR_QUOTA_EXHAUSTED : ERROR_PROVIDER_FAILED,
+      isQuotaSignal ? ERROR_QUOTA_EXHAUSTED : ERROR_PROVIDER_FAILED,
       error.message,
     );
   }
@@ -87,8 +95,14 @@ export function createNewApiVideoProvider(
             };
           }
           if (FAILED_STATUSES.has(status)) {
+            // IKBQEE：任务失败态同样识别余额不足 → quota_exhausted
+            const msg = String(task.error?.message ?? "");
+            const isQuotaSignal =
+              /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required)/i.test(
+                msg,
+              );
             throw new VideoProviderError(
-              ERROR_PROVIDER_FAILED,
+              isQuotaSignal ? ERROR_QUOTA_EXHAUSTED : ERROR_PROVIDER_FAILED,
               task.error?.message ?? "视频生成失败",
             );
           }

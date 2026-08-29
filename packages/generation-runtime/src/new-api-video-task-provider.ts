@@ -49,7 +49,7 @@ export function createNewApiVideoTaskProvider(options: {
         // 避免欠费语义被 provider_failed 吞掉（job 1494 真实案例）。
         const upstreamCode = task.error?.code;
         const isQuotaSignal =
-          /quota|balance|insufficient|payment_required|(^|\D)402(\D|$)/i.test(
+          /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required|(^|\D)402(\D|$))/i.test(
             `${upstreamCode ?? ""} ${task.error?.message ?? ""}`,
           );
         return {

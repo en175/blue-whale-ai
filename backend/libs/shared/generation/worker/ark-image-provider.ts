@@ -126,9 +126,18 @@ function createNewApiImageProvider(options: ProviderOptions): ImageProvider {
         }));
       } catch (error) {
         if (error instanceof NewApiError) {
-          const code =
-            error.status === 402 ? ERROR_QUOTA_EXHAUSTED : ERROR_PROVIDER_FAILED;
-          throw new ImageProviderError(code, error.message);
+          // IKBQEE：余额不足识别——不只看 402，也认 new-api 中文「预扣费额度失败/用户剩余额度」
+          // 与英文 quota/balance/insufficient（job 1565「预扣费额度失败」为 HTTP200+body 报错，非 402）。
+          const msg = String(error.message);
+          const isQuotaSignal =
+            error.status === 402 ||
+            /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required)/i.test(
+              msg,
+            );
+          throw new ImageProviderError(
+            isQuotaSignal ? ERROR_QUOTA_EXHAUSTED : ERROR_PROVIDER_FAILED,
+            error.message,
+          );
         }
         throw new ImageProviderError(
           ERROR_PROVIDER_FAILED,

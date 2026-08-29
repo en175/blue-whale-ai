@@ -138,7 +138,6 @@ describe("projectPublicError", () => {
     expect(out!.code).toBe("provider_failed");
     expect(out!.message).toBe("图像生成失败");
     expect(out!.retryable).toBe(true);
-    expect(out!.details).toEqual({ raw: "上游英文原文" });
   });
 
   it("quota_exhausted 语义还原：message 充值引导 + 欠费可手动重试 + details 带原文", () => {
@@ -154,9 +153,6 @@ describe("projectPublicError", () => {
     expect(out!.message).toBe("账户余额不足，请充值后重试");
     // 手动重试语义：充值后可重试
     expect(out!.retryable).toBe(true);
-    expect(out!.details).toEqual({
-      raw: "The request failed because your account has an overdue balance.",
-    });
   });
 
   it("旧码归一：历史 invalid_video_inputs → invalid_input 中文 + 可重试", () => {
@@ -175,12 +171,12 @@ describe("projectPublicError", () => {
     expect(out!.message).toBe("视频生成失败");
   });
 
-  it("details 透传存储的扩展详情（DB 写入侧新增字段）", () => {
+  it("details 不入对外契约（调试详情仅存 DB，前端拿不到）", () => {
     const out = projectPublicError(
       { code: "provider_failed", message: "x", details: { request_id: "r1" } },
       "image",
     );
-    expect(out!.details).toEqual({ raw: "x", stored: { request_id: "r1" } });
+    expect("details" in out!).toBe(false);
   });
 
   it("params 透传（契约预留）", () => {

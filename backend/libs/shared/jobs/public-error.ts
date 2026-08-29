@@ -115,9 +115,7 @@ export interface PublicJobError {
   code: string;
   message: string;
   retryable: boolean;
-  /** 调试详情（provider 原文、request_id、重试次数等）。禁止展示给用户，仅供排查/埋点。 */
-  details?: Record<string, unknown> | null;
-  /** 结构化上下文（契约预留，本期仅对个别码填充，如 max_reference_count）。 */
+  /** 结构化上下文（契约预留，本期仅创建期参考图上限填充，如 max_reference_count）。 */
   params?: Record<string, unknown> | null;
 }
 
@@ -125,9 +123,9 @@ export interface PublicJobError {
  * 把 DB 存储的原始 error 投影为对外错误对象（ADR-0078）。
  * - code：canonical 码保留；旧码经 LEGACY_CODE_TO_CANONICAL 归一；白名单外历史码按类型 fallback；
  * - message：一律 messageFor() 用户可读中文，不使用 DB 原文；
- * - retryable：真实按码判定（RETRYABLE_ERROR_CODES）；
- * - details：DB 原文 + 可选扩展详情（供排查，禁展示）；
- * - params：结构化上下文（本期预留）。
+ * - retryable：手动重试语义（当前一律可重试，见 RETRYABLE_ERROR_CODES）；
+ * - params：结构化上下文（契约预留，本期仅创建期参考图上限填充）。
+ * details（调试详情）不入对外契约——存 DB 供排查，前端拿不到，避免泄漏 provider 原文。
  */
 export function projectPublicError(
   storedError: Record<string, unknown> | null,
@@ -140,19 +138,10 @@ export function projectPublicError(
   if (!GENERATION_ERROR_CODES.has(code)) {
     code = fallbackErrorCode(type);
   }
-  const rawMessage =
-    typeof storedError.message === "string" ? storedError.message : undefined;
-  const details: Record<string, unknown> = {
-    raw: rawMessage ?? null,
-    ...(storedError.details !== undefined
-      ? { stored: storedError.details }
-      : {}),
-  };
   return {
     code,
     message: messageFor(code, type),
     retryable: isRetryableForType(code, type),
-    details,
     params:
       storedError.params !== undefined && storedError.params !== null
         ? (storedError.params as Record<string, unknown>)
