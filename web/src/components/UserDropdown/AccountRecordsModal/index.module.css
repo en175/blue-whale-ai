@@ -96,7 +96,7 @@
 
 .item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 16px;
   padding: 20px 4px;
   border-bottom: 1px solid #262626;
@@ -105,11 +105,13 @@
 .iconDown {
   color: #22c55e;
   flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .iconUp {
   color: #ef4444;
   flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .main {
@@ -134,10 +136,18 @@
   color: #3e8efc;
 }
 
+.meta {
+  margin-top: 4px;
+  color: #888;
+  font-size: var(--font-size-sm);
+  word-break: break-all;
+}
+
 .time {
   color: #888;
   font-size: var(--font-size-sm);
   flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .note {
