@@ -74,8 +74,15 @@ export default function AccountModal({
         </div>
       </div>
 
-      {/* 修改密码弹窗 */}
-      {showPassword && <PasswordModal onClose={() => setShowPassword(false)} />}
+      {/* 修改密码弹窗：成功后连同账号信息一起关掉 */}
+      <PasswordModal
+        open={showPassword}
+        onClose={() => setShowPassword(false)}
+        onSuccess={() => {
+          setShowPassword(false);
+          onClose();
+        }}
+      />
       {/* 账户记录弹窗 */}
       {showRecords && <AccountRecordsModal onClose={() => setShowRecords(false)} />}
     </div>,

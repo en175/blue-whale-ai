@@ -54,5 +54,6 @@ describe('LoginModal shell', () => {
     expect(document.body.textContent).toContain('创建账号');
     expect(document.body.textContent).toContain('已有账号？返回登录');
     expect(document.body.querySelector('input[placeholder="账号（至少3位）"]')).not.toBeNull();
+    expect(document.body.querySelector('input[placeholder="密码（8-20位）"]')).not.toBeNull();
   });
 });

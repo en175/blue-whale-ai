@@ -152,3 +152,33 @@ img {
   background-color: var(--color-bg-hover) !important;
   fill: var(--color-text-primary) !important;
 }
+
+/* Sonner toast：顶部弹出，颜色对齐当前暗色主题 */
+[data-sonner-toaster] {
+  font-family: var(--font-family);
+  --z-index: calc(var(--z-modal) + 40);
+}
+
+[data-sonner-toaster][data-sonner-theme='dark'] {
+  --normal-bg: var(--color-bg-card);
+  --normal-border: var(--color-border-primary);
+  --normal-text: var(--color-text-primary);
+  --success-bg: color-mix(in srgb, var(--color-success) 16%, var(--color-bg-card));
+  --success-border: color-mix(in srgb, var(--color-success) 42%, var(--color-border-primary));
+  --success-text: var(--color-success);
+  --error-bg: color-mix(in srgb, var(--color-error) 16%, var(--color-bg-card));
+  --error-border: color-mix(in srgb, var(--color-error) 42%, var(--color-border-primary));
+  --error-text: var(--color-error);
+  --warning-bg: color-mix(in srgb, var(--color-warning) 16%, var(--color-bg-card));
+  --warning-border: color-mix(in srgb, var(--color-warning) 42%, var(--color-border-primary));
+  --warning-text: var(--color-warning);
+  --info-bg: color-mix(in srgb, var(--color-info) 16%, var(--color-bg-card));
+  --info-border: color-mix(in srgb, var(--color-info) 42%, var(--color-border-primary));
+  --info-text: var(--color-info);
+}
+
+[data-sonner-toast][data-styled='true'] {
+  font-size: var(--font-size-md);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}

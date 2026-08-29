@@ -13,6 +13,7 @@ import {
   type OperationLog,
 } from '@/api/admin';
 import { isApiError } from '@/api/http';
+import { formatLogIp } from '@/admin/formatLogIp';
 import styles from './index.module.css';
 
 /** 订单状态 */
@@ -433,7 +434,7 @@ function DetailModal({ order, onClose }: { order: AdminOrderRow; onClose: () => 
                       <div className={styles.logHead}>
                         <span className={styles.logAction}>{log.action === 'order.complete' ? '手动补单确认' : log.action}</span>
                         <span className={styles.logMeta}>
-                          {log.operator} · {fmtTime(log.createdAt)}
+                          {log.operator} · {formatLogIp(log.ipAddress)} · {fmtTime(log.createdAt)}
                         </span>
                       </div>
                       {d.reason && <div className={styles.logReason}>原因：{d.reason}</div>}

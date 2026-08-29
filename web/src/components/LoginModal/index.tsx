@@ -198,7 +198,7 @@ export default function LoginModal({ onClose, initialMode = 'login' }: LoginModa
           <input
             className={styles.input}
             type="password"
-            placeholder="密码（9-20位）"
+            placeholder="密码（8-20位）"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             aria-invalid={passwordRuleError}
@@ -206,7 +206,7 @@ export default function LoginModal({ onClose, initialMode = 'login' }: LoginModa
           />
           {passwordRuleError && (
             <div id="register-password-error" className={styles.error}>
-              密码长度需为 9-20 个字符
+              密码长度需为 8-20 个字符
             </div>
           )}
           <input

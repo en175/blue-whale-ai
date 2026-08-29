@@ -47,9 +47,22 @@ interface Envelope<T> {
   success?: boolean;
   msg?: string | null;
   message?: string;
+  /** 后台 AdminException 失败包络：{ success:false, error } */
+  error?: string;
   /** 包络级警告（后台侧同步 Go 折扣失败等场景返回，成功时可选） */
   warning?: string;
   data: T | null;
+}
+
+/** 失败包络取用户可见文案：用户侧 msg/message，后台侧 error。 */
+export function readApiErrorMessage(
+  body: Pick<Envelope<unknown>, 'msg' | 'message' | 'error'> | undefined,
+  status: number,
+): string {
+  for (const value of [body?.msg, body?.message, body?.error]) {
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return `请求失败（${status}）`;
 }
 
 /** 基础 fetch：附加 Content-Type（登录态走 HttpOnly cookie），处理 401 会话失效 */
@@ -101,7 +114,7 @@ async function doRequest<T>(path: string, init?: RequestInit): Promise<{ data: T
   if (!res.ok || !ok) {
     throw new ApiError(
       res.status,
-      body?.msg ?? body?.message ?? `请求失败（${res.status}）`,
+      readApiErrorMessage(body, res.status),
       body?.code ?? res.status
     );
   }
