@@ -16,11 +16,6 @@ import {
   parseTierDiscount,
   parseTierOriginalPrice,
 } from "@lib/shared/topup-tier/constants.js";
-import {
-  removeTierDiscountFromGo,
-  syncAllTierDiscountsToGo,
-  syncTierDiscountToGo,
-} from "@lib/shared/topup-tier/go-amount-discount.js";
 import { TopupTierService } from "@lib/shared/topup-tier/topup-tier.service.js";
 
 const BIGINT_ID_RE = /^\d{1,19}$/;
@@ -57,13 +52,11 @@ export class AdminTopupTiersController {
   async sync() {
     try {
       const tiers = await this.topupTier.listActive();
-      const synced = await syncAllTierDiscountsToGo(
-        tiers.map((t) => ({
-          originalPrice: t.originalPrice,
-          discount: t.discount,
-        })),
-      );
-      return { success: true, data: { synced, total: tiers.length } };
+      return {
+        success: true,
+        data: { synced: 0, total: tiers.length },
+        warning: "产品充值已改为代收，不再同步折扣到 Go",
+      };
     } catch (error) {
       throw toAdminError(error);
     }
@@ -108,20 +101,13 @@ export class AdminTopupTiersController {
           typeof body.endTime === "string" && body.endTime ? body.endTime : null,
       });
 
-      let warning: string | undefined;
-      try {
-        await syncTierDiscountToGo(originalPrice, discount);
-      } catch {
-        warning =
-          "折扣同步到 Go 失败（档位已保存），请到 Go 后台核对金额折扣，或重新保存本档位重试";
-      }
       try {
         await this.tierAudit.logCreate(tier);
       } catch {
         // best-effort 审计，失败不阻断
       }
 
-      return { success: true, data: tier, ...(warning && { warning }) };
+      return { success: true, data: tier };
     } catch (error) {
       throw toAdminError(error);
     }
@@ -223,23 +209,13 @@ export class AdminTopupTiersController {
         throw new AdminException(404, "档位不存在");
       }
 
-      let warning: string | undefined;
-      try {
-        if (Math.round(before.originalPrice) !== Math.round(tier.originalPrice)) {
-          await removeTierDiscountFromGo(before.originalPrice);
-        }
-        await syncTierDiscountToGo(tier.originalPrice, tier.discount);
-      } catch {
-        warning =
-          "折扣同步到 Go 失败（档位已保存），请到 Go 后台核对金额折扣，或重新保存本档位重试";
-      }
       try {
         await this.tierAudit.logUpdate(before, tier);
       } catch {
         // best-effort 审计，失败不阻断
       }
 
-      return { success: true, data: tier, ...(warning && { warning }) };
+      return { success: true, data: tier };
     } catch (error) {
       throw toAdminError(error);
     }
@@ -253,19 +229,13 @@ export class AdminTopupTiersController {
       throw new AdminException(404, "档位不存在");
     }
 
-    let warning: string | undefined;
     if (before) {
-      try {
-        await removeTierDiscountFromGo(before.originalPrice);
-      } catch {
-        warning = "折扣同步到 Go 失败（档位已删除），请到 Go 后台核对金额折扣";
-      }
       try {
         await this.tierAudit.logDelete(before);
       } catch {
         // best-effort 审计，失败不阻断
       }
     }
-    return { success: true, ...(warning && { warning }) };
+    return { success: true };
   }
 }

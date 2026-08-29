@@ -178,6 +178,17 @@ export interface NewApiTopUpOrderResult {
   payData: string;
 }
 
+/** 产品充值代收下单入参（IKBXLN / IKBWY4）。 */
+export interface NewApiCollectTopUpInput {
+  collectToken: string;
+  userId: number;
+  /** 档位实付（元） */
+  money: number;
+  /** 美元额度 N */
+  amount: number;
+  wayCode: string;
+}
+
 /** 原生充值订单记录（GET /api/user/topup/self 的 items 元素）。 */
 export interface NewApiTopUpRecord {
   trade_no: string;
