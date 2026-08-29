@@ -25,8 +25,10 @@ import {
   type TopupTier,
   type TopupTierPreview,
 } from '@/api/admin';
+import { toast } from 'sonner';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
+import { tierFormError } from './tierForm';
 import styles from './index.module.css';
 
 /** 档位数据（列表源 GET /api/admin/topup-tiers） */
@@ -401,7 +403,6 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
   const [recommended, setRecommended] = useState(initial?.recommended ?? false);
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState('');
 
   const priceNum = parseFloat(price) || 0;
   const ratioNum = parseFloat(ratio) || 0;
@@ -410,20 +411,19 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
 
   const handleSave = async () => {
     if (saving) return;
-    if (priceNum <= 0 || ratioNum <= 0 || ratioNum > 1) return;
-    if (!Number.isInteger(priceNum)) {
-      setFormError('原价须为正整数');
+    const err = tierFormError(priceNum, ratioNum);
+    if (err) {
+      toast.error(err);
       return;
     }
     setSaving(true);
-    setFormError('');
     try {
       await onSubmit(
         { name: name.trim(), price: priceNum, ratio: ratioNum, recommended, enabled, start, end },
         initial?.id
       );
     } catch (e) {
-      setFormError(isApiError(e) ? e.message : '保存失败，请稍后重试');
+      toast.error(isApiError(e) ? e.message : '保存失败，请稍后重试');
     } finally {
       setSaving(false);
     }
@@ -454,7 +454,12 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
             </div>
             <div>
               <div className={styles.label}>原价（元）</div>
-              <input className={styles.input} value={price} onChange={(e) => setPrice(e.target.value)} />
+              <input
+                className={styles.input}
+                value={price}
+                aria-label="原价（元）"
+                onChange={(e) => setPrice(e.target.value)}
+              />
             </div>
             <div>
               <div className={styles.label}>
@@ -464,7 +469,12 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
             </div>
             <div>
               <div className={styles.label}>折扣比例 (0–1]</div>
-              <input className={styles.input} value={ratio} onChange={(e) => setRatio(e.target.value)} />
+              <input
+                className={styles.input}
+                value={ratio}
+                aria-label="折扣比例"
+                onChange={(e) => setRatio(e.target.value)}
+              />
             </div>
             <div>
               <div className={styles.label}>实付价格</div>
@@ -518,8 +528,6 @@ function PlanFormModal({ initial, onClose, onSubmit }: PlanFormModalProps) {
             <option value="on">启用</option>
             <option value="off">停用</option>
           </select>
-
-          {formError && <div className={styles.formError}>{formError}</div>}
         </div>
 
         <div className={styles.modalFoot}>
