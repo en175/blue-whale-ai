@@ -92,7 +92,7 @@
 }
 
 .unit {
-  color: var(--color-text-tertiary);
+  color: rgba(255, 255, 255, 0.86);
   font-size: var(--font-size-md);
   line-height: 1;
 }
