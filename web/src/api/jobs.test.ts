@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createMediaExtraction } from './jobs';
+import { ApiError } from './http';
+import {
+  createMediaExtraction,
+  fetchJobStatus,
+  isGenerationDomainError,
+  readJobFailText,
+} from './jobs';
 
 describe('createMediaExtraction', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -24,6 +30,94 @@ describe('createMediaExtraction', () => {
     expect(JSON.parse(init.body as string)).toEqual({
       source_asset_id: '3985',
       output_format: 'mp3',
+    });
+  });
+});
+
+describe('readJobFailText', () => {
+  it('优先 msg，其次 message', () => {
+    expect(readJobFailText({ msg: '账户余额不足，请充值后重试', message: 'ignored' })).toBe(
+      '账户余额不足，请充值后重试',
+    );
+    expect(readJobFailText({ message: '视频没有音轨' })).toBe('视频没有音轨');
+    expect(readJobFailText({ msg: '  ' })).toBe('');
+    expect(readJobFailText(null)).toBe('');
+  });
+});
+
+describe('isGenerationDomainError', () => {
+  it('只把 1000-1099 当成生成任务失败', () => {
+    expect(isGenerationDomainError(new ApiError(200, '账户余额不足，请充值后重试', 1001))).toBe(true);
+    expect(isGenerationDomainError(new ApiError(200, '资源不存在', 100301))).toBe(false);
+    expect(isGenerationDomainError(new ApiError(500, '内部错误', 500))).toBe(false);
+    expect(isGenerationDomainError(new Error('network'))).toBe(false);
+  });
+});
+
+describe('fetchJobStatus', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('成功信封解包 data', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: 200,
+            msg: null,
+            data: { job_id: '1584', status: 'processing', progress: 30, asset: null },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    await expect(fetchJobStatus('1584')).resolves.toEqual({
+      job_id: '1584',
+      status: 'processing',
+      progress: 30,
+      asset: null,
+    });
+  });
+
+  it('1xxx + 顶层 msg 收敛为 failed，不抛给轮询重试', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: 1001,
+            msg: '账户余额不足，请充值后重试',
+            data: { job_id: '1585', status: 'failed', progress: 0, asset: null },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    await expect(fetchJobStatus('1585')).resolves.toEqual({
+      job_id: '1585',
+      status: 'failed',
+      progress: 0,
+      asset: null,
+      error: { code: 1001, msg: '账户余额不足，请充值后重试' },
+    });
+  });
+
+  it('非领域错误码仍然抛出', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ code: 100301, msg: '资源不存在', data: null }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    await expect(fetchJobStatus('9')).rejects.toMatchObject({
+      code: 100301,
+      message: '资源不存在',
     });
   });
 });

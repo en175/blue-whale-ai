@@ -157,7 +157,7 @@ describe('RechargePlans 档位边界值 toast', () => {
     expect(adminApi.createTopupTier).not.toHaveBeenCalled();
   });
 
-  it('接口失败 toast 后端 error 文案，不写页面 formError', async () => {
+  it('接口失败不写页面 formError（toast 由 http 层负责）', async () => {
     adminApi.createTopupTier.mockRejectedValue(
       new ApiError(409, '每个原价只能有一个档位：已存在原价 ¥10 的档位', 409),
     );
@@ -167,9 +167,7 @@ describe('RechargePlans 档位边界值 toast', () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(toastApi.error).toHaveBeenCalledWith(
-      '每个原价只能有一个档位：已存在原价 ¥10 的档位',
-    );
+    expect(toastApi.error).not.toHaveBeenCalled();
     expect(document.body.querySelector(`.${styles.formError}`)).toBeNull();
   });
 });

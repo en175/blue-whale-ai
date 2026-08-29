@@ -778,5 +778,6 @@ export interface SessionCredits {
 export function fetchSessionCredits(projectId: string, sessionId: string): Promise<SessionCredits> {
   return apiRequest<SessionCredits>(
     `/api/agent/billing/sessions/${encodeURIComponent(sessionId)}?project_id=${encodeURIComponent(projectId)}`,
+    { silent: true },
   );
 }

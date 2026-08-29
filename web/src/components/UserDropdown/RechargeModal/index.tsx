@@ -147,7 +147,6 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
       .catch((e) => {
         const message = formatOrderError(e);
         setOrderError(message);
-        toast.error(message);
         setPhase('idle');
       });
   };
@@ -175,7 +174,6 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     } catch (e) {
       const message = e instanceof Error ? e.message : '取消支付失败，请稍后重试';
       setOrderError(message);
-      toast.error(message);
     } finally {
       setCancelling(false);
     }

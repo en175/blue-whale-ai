@@ -2,7 +2,7 @@
  * jobs 接口：生成任务创建/取消/重试/轮询/列表
  * 创建与重试需 Idempotency-Key（UUID）幂等头
  * ============================================ */
-import { apiRequest } from './http';
+import { apiRequest, isApiError, type ApiError } from './http';
 
 /** 可由普通生成端点创建的任务类型 */
 export type GenerationJobType = 'image' | 'video' | 'audio';
@@ -25,11 +25,35 @@ export interface JobAsset {
   height?: number | null;
 }
 
-/** 任务错误信息（failed 时有值） */
+/**
+ * 任务失败信息。
+ * - 轮询 GET /api/jobs/:id：失败已升到顶层 `{ code: 数值, msg: 中文 }`，由 fetchJobStatus 收敛到此
+ * - 快照 generation_jobs[].error：仍是挂在任务上的 `{ code: 数值, message: 中文 }`
+ */
 export interface JobError {
-  code: string;
-  message: string;
-  retryable: boolean;
+  code: number | string;
+  msg?: string;
+  message?: string;
+}
+
+/** 生成任务领域错误码 1000-1099（IKBQEE 二期，quota_exhausted=1001）。 */
+export const GENERATION_DOMAIN_CODE_MIN = 1000;
+export const GENERATION_DOMAIN_CODE_MAX = 1099;
+
+export function isGenerationDomainError(e: unknown): e is ApiError {
+  if (!isApiError(e)) return false;
+  const n = typeof e.code === 'number' ? e.code : Number(e.code);
+  return Number.isInteger(n) && n >= GENERATION_DOMAIN_CODE_MIN && n <= GENERATION_DOMAIN_CODE_MAX;
+}
+
+/** 失败文案：优先顶层/对象 msg，其次旧字段 message。 */
+export function readJobFailText(
+  error?: { msg?: string | null; message?: string | null } | null,
+): string {
+  for (const value of [error?.msg, error?.message]) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
 }
 
 /** 图片生成参数 */
@@ -102,15 +126,15 @@ export interface MediaExtractionCreatedData {
   status: 'queued';
 }
 
-/** GET /api/jobs/:id 返回 */
+/** GET /api/jobs/:id 返回（成功无 error；失败由 fetchJobStatus 补 error.msg） */
 export interface JobDetail {
-  job_id: number;
+  job_id: number | string;
   status: JobStatus;
   /** 进度百分比 0-100 */
   progress: number;
   /** 产物信息，succeeded 时有值 */
   asset: JobAsset | null;
-  error: JobError | null;
+  error?: JobError | null;
 }
 
 /** GET /api/jobs 列表项 */
@@ -122,7 +146,7 @@ export interface JobRecord {
   input: unknown;
   created_at: string;
   output_assets: JobAsset[];
-  error: JobError | null;
+  error?: JobError | null;
 }
 
 /** GET /api/jobs 返回 */
@@ -200,9 +224,24 @@ export function retryGenerationJob(
   );
 }
 
-/** 轮询任务状态 GET /api/jobs/:id */
-export function fetchJobStatus(jobId: number | string) {
-  return apiRequest<JobDetail>(`/api/jobs/${jobId}`);
+/** 轮询任务状态 GET /api/jobs/:id。
+ *  失败任务 HTTP 仍可能是 200，但信封 code 为 1xxx + 顶层 msg；apiRequest 会抛 ApiError。
+ *  此处把领域错误收敛成 status=failed，文案走 msg，避免轮询 catch 当成网络抖动重试。 */
+export async function fetchJobStatus(jobId: number | string): Promise<JobDetail> {
+  try {
+    return await apiRequest<JobDetail>(`/api/jobs/${jobId}`, { silent: true });
+  } catch (e) {
+    if (isGenerationDomainError(e)) {
+      return {
+        job_id: jobId,
+        status: 'failed',
+        progress: 0,
+        asset: null,
+        error: { code: e.code, msg: e.message },
+      };
+    }
+    throw e;
+  }
 }
 
 /** GET /api/jobs 查询参数 */

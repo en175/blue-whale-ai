@@ -24,7 +24,6 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
-import { isApiError } from '@/api/http';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { fetchMySkills, fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
 import { useAgentSession, type ChatMessage, type TurnOutcome } from '../../hooks/useAgentSession';
@@ -1030,8 +1029,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSkillIds]);
 
-  /** 运行开始后拉取 Run 级技能推荐（GET /api/agent/runs/:runId/creative-skill-recommendations）
-   * 后端未部署该接口（404）时静默隐藏推荐区域 */
+  /** 运行开始后拉取 Run 级技能推荐；失败走 http 默认 toast，这里只清掉推荐区。 */
   useEffect(() => {
     if (runningRunId === null) return;
     let alive = true;
@@ -1039,12 +1037,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       .then((list) => {
         if (alive) setRecs(Array.isArray(list) ? list : []);
       })
-      .catch((e) => {
-        if (isApiError(e) && e.status === 404) {
-          if (alive) setRecs([]);
-          return;
-        }
-        console.warn('获取技能推荐失败:', e);
+      .catch(() => {
+        if (alive) setRecs([]);
       });
     return () => {
       alive = false;

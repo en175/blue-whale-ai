@@ -23,6 +23,7 @@ async function renderNode(
     selected?: boolean;
     genStatus?: 'generating' | 'failed' | 'cancelled';
     progress?: number;
+    errorText?: string;
   },
 ) {
   mountNode = document.createElement('div');
@@ -38,6 +39,7 @@ async function renderNode(
           fileName: `${mediaType}.bin`,
           genStatus: extra?.genStatus,
           progress: extra?.progress,
+          errorText: extra?.errorText,
         },
         selected: extra?.selected ?? true,
         type: 'mediaNode',
@@ -107,5 +109,36 @@ describe('MediaNode generating overlay', () => {
     expect(mountNode.textContent).toContain('正在提取音频 42%');
     expect(mountNode.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('42');
     expect(labels()).not.toContain('取消生成');
+  });
+});
+
+describe('MediaNode failed overlay', () => {
+  it('shows the backend error message instead of 生成失败 for image cards', async () => {
+    await renderNode('image', {
+      genStatus: 'failed',
+      errorText: '账户余额不足，请充值后重试',
+      selected: false,
+    });
+    expect(mountNode.textContent).toContain('账户余额不足，请充值后重试');
+    expect(mountNode.textContent).not.toContain('生成失败');
+    expect(labels()).toEqual(['重试']);
+  });
+
+  it('falls back to 生成失败 when the video card has no backend message', async () => {
+    await renderNode('video', { genStatus: 'failed', selected: false });
+    expect(mountNode.textContent).toContain('生成失败');
+    expect(labels()).toEqual(['重试']);
+  });
+
+  it('shows the backend error message for media extraction without duplicating 音频提取失败', async () => {
+    await renderNode('audio', {
+      id: 'media-extract-job-1',
+      genStatus: 'failed',
+      errorText: '视频没有音轨',
+      selected: false,
+    });
+    expect(mountNode.textContent).toContain('视频没有音轨');
+    expect(mountNode.textContent).not.toContain('音频提取失败');
+    expect(labels()).not.toContain('重试');
   });
 });

@@ -190,14 +190,9 @@
   color: #e5484d;
   font-size: 13px;
   font-weight: 600;
-}
-
-.genError {
-  color: #888;
-  font-size: 11px;
   max-width: 220px;
   text-align: center;
-  word-break: break-all;
+  word-break: break-word;
 }
 
 .progressTrack {
