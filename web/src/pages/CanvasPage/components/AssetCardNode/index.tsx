@@ -624,32 +624,34 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
                         <MousePointerClick size={16} strokeWidth={2} />
                         <span>到节点选择</span>
                       </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          data.onOpenCharacterLibrary?.(id);
-                          setAddMenu(false);
-                        }}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          padding: '8px 10px',
-                          background: 'transparent',
-                          border: 'none',
-                          borderRadius: '6px',
-                          color: 'var(--color-text-primary)',
-                          fontSize: 'var(--font-size-sm)',
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                          width: '100%',
-                        }}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)')}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                      >
-                        <User size={16} strokeWidth={2} />
-                        <span>角色库</span>
-                      </button>
+                      {kind === 'character' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            data.onOpenCharacterLibrary?.(id);
+                            setAddMenu(false);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '8px 10px',
+                            background: 'transparent',
+                            border: 'none',
+                            borderRadius: '6px',
+                            color: 'var(--color-text-primary)',
+                            fontSize: 'var(--font-size-sm)',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            width: '100%',
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                        >
+                          <User size={16} strokeWidth={2} />
+                          <span>角色库</span>
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
