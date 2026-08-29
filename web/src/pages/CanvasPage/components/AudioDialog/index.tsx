@@ -205,7 +205,7 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
             )}
           </div>
         )}
-        <span className={styles.refOptionalLabel}>参考音频（可选）</span>
+        {refs.length < MAX_AUDIO_REFS && <span className={styles.refOptionalLabel}>参考音频（可选）</span>}
         {refs.length > 0 && (
           <span className={styles.refCount}>{refs.length}/{MAX_AUDIO_REFS}</span>
         )}
