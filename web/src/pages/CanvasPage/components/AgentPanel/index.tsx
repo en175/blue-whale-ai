@@ -155,6 +155,7 @@ function RunStatusLine({
     finishedAt: outcome?.finishedAt ?? null,
     streamedText,
     estimatedOutputTokensAtFinish: outcome?.estimatedOutputTokens ?? null,
+    failureText: outcome?.failureText ?? null,
     tokenUsage: outcome?.tokenUsage ?? null,
     contextCapacity: outcome?.contextCapacity ?? null,
   });
