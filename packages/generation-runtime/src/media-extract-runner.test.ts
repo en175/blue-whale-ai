@@ -116,6 +116,7 @@ describe("runMediaExtractStep", () => {
       fencingToken: 2,
       code: "video_has_no_audio_track",
       message: "视频没有音轨",
+      details: { raw: "视频没有音轨" },
     });
     expect(repo.publishMediaExtractResult).not.toHaveBeenCalled();
   });

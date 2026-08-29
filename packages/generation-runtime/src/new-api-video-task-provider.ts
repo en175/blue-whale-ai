@@ -1,4 +1,8 @@
 import { createNewApiClient } from "@blue-whale/core";
+import {
+  ERROR_PROVIDER_FAILED,
+  ERROR_QUOTA_EXHAUSTED,
+} from "@blue-whale/contracts";
 
 import type {
   VideoTaskObservation,
@@ -41,13 +45,22 @@ export function createNewApiVideoTaskProvider(options: {
         };
       }
       if (FAILED_STATUSES.has(status)) {
+        // IKBQEE / ADR-0078：quota 语义还原——上游错误带 402/欠费信号时映射 quota_exhausted，
+        // 避免欠费语义被 provider_failed 吞掉（job 1494 真实案例）。
+        const upstreamCode = task.error?.code;
+        const isQuotaSignal =
+          /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required|(^|\D)402(\D|$))/i.test(
+            `${upstreamCode ?? ""} ${task.error?.message ?? ""}`,
+          );
         return {
           status: "failed",
           progress: 100,
           url: null,
           ...(quota !== undefined ? { quota } : {}),
           error: {
-            code: String(task.error?.code ?? "provider_failed"),
+            code: isQuotaSignal
+              ? ERROR_QUOTA_EXHAUSTED
+              : String(upstreamCode ?? ERROR_PROVIDER_FAILED),
             message: task.error?.message ?? "视频生成失败",
           },
         };

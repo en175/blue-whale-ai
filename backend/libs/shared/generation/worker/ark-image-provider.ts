@@ -5,6 +5,12 @@ import {
   loadArkImageConfig,
 } from "@blue-whale/core";
 import { createNewApiClient } from "@blue-whale/core";
+import {
+  ERROR_PROVIDER_CONFIG,
+  ERROR_PROVIDER_FAILED,
+  ERROR_QUOTA_EXHAUSTED,
+  ERROR_UNSUPPORTED_INPUT,
+} from "@blue-whale/contracts";
 
 import {
   ImageProviderError,
@@ -32,7 +38,7 @@ export function createArkImageProvider(
     async generate(input: GenerateImageInput): Promise<GeneratedImage[]> {
       if (input.sourceImage || input.sourceImages?.length) {
         throw new ImageProviderError(
-          "unsupported_input",
+          ERROR_UNSUPPORTED_INPUT,
           "Ark fallback 不支持图片编辑输入",
         );
       }
@@ -60,7 +66,7 @@ export function createArkImageProvider(
           throw new ImageProviderError(e.code, e.message);
         }
         throw new ImageProviderError(
-          "provider_failed",
+          ERROR_PROVIDER_FAILED,
           e instanceof Error ? e.message : "unknown",
         );
       }
@@ -74,7 +80,7 @@ function createNewApiImageProvider(options: ProviderOptions): ImageProvider {
     return {
       async generate(): Promise<GeneratedImage[]> {
         throw new ImageProviderError(
-          "provider_config",
+          ERROR_PROVIDER_CONFIG,
           "NEW_API_BASE_URL 或用户 sk token 未配置",
         );
       },
@@ -120,12 +126,21 @@ function createNewApiImageProvider(options: ProviderOptions): ImageProvider {
         }));
       } catch (error) {
         if (error instanceof NewApiError) {
-          const code =
-            error.status === 402 ? "quota_exhausted" : "provider_failed";
-          throw new ImageProviderError(code, error.message);
+          // IKBQEE：余额不足识别——不只看 402，也认 new-api 中文「预扣费额度失败/用户剩余额度」
+          // 与英文 quota/balance/insufficient（job 1565「预扣费额度失败」为 HTTP200+body 报错，非 402）。
+          const msg = String(error.message);
+          const isQuotaSignal =
+            error.status === 402 ||
+            /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required)/i.test(
+              msg,
+            );
+          throw new ImageProviderError(
+            isQuotaSignal ? ERROR_QUOTA_EXHAUSTED : ERROR_PROVIDER_FAILED,
+            error.message,
+          );
         }
         throw new ImageProviderError(
-          "provider_failed",
+          ERROR_PROVIDER_FAILED,
           error instanceof Error ? error.message : "unknown",
         );
       }
