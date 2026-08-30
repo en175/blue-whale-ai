@@ -26,3 +26,18 @@ export function pickCanvasIdAfterLoad(queryId: string, projectIds: readonly stri
   if (queryId && projectIds.includes(queryId)) return queryId;
   return projectIds[0] ?? '';
 }
+
+/**
+ * After deleting a canvas: keep the current id if it remains; otherwise the latest
+ * remaining item (list head; GET /api/projects is created_at desc). Empty when none remain.
+ */
+export function pickCanvasIdAfterDelete(
+  currentId: string,
+  deletedId: string,
+  projectIds: readonly string[],
+): string {
+  return pickCanvasIdAfterLoad(
+    currentId,
+    projectIds.filter((id) => id !== deletedId),
+  );
+}
