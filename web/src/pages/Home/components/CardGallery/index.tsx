@@ -18,6 +18,12 @@ import {
   type TemplateTag,
   type TemplateRecord,
 } from '@/api/agent';
+import {
+  galleryCoverSrc,
+  mediaKindFromTagCode,
+  shouldShowVideoChrome,
+  type GalleryMediaKind,
+} from './galleryCardModel';
 
 /** 图标映射：按 tag_code / label 对应现有图标，无匹配返回默认图标 */
 const TAG_ICON_BY_CODE: Record<string, LucideIcon> = {
@@ -62,24 +68,33 @@ function truncate(text: string, max = 30) {
   return text.length > max ? text.slice(0, max) + '...' : text;
 }
 
-/** 单张画廊卡片：默认展示第二张图片，鼠标悬停自动播放视频 */
-function GalleryCard({ record, onClick }: { record: TemplateRecord; onClick?: () => void }) {
+/** 单张画廊卡片：形态由 tagCode 决定；图片卡即使 images 为空也不走视频壳 */
+function GalleryCard({
+  record,
+  mediaKind,
+  onClick,
+}: {
+  record: TemplateRecord;
+  mediaKind: GalleryMediaKind;
+  onClick?: () => void;
+}) {
   const [hovered, setHovered] = useState(false);
-  // 三图堆叠：第二张在最上方，第一/三张在底部左右探出
-  const [first, second, third] = record.images ?? [];
-  const cover = second ?? first ?? '';
+  const [first, , third] = record.images ?? [];
+  const cover = galleryCoverSrc(record.images);
   const layoutCls = LAYOUT_CLASS[record.layout] ?? LAYOUT_CLASS.wide;
+  const videoChrome = shouldShowVideoChrome(mediaKind);
+  const playingHoverVideo = Boolean(hovered && videoChrome && record.video);
 
   return (
     <div
       className={`${styles.card} ${layoutCls}`}
+      data-testid="gallery-card"
+      data-media-kind={mediaKind}
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* 标题（展示在图片内容上方） */}
       <p className={styles.cardTitle}>{truncate(record.title)}</p>
-      {/* 图片区域 */}
       <div className={styles.imageArea}>
         {cover ? (
           <>
@@ -91,18 +106,19 @@ function GalleryCard({ record, onClick }: { record: TemplateRecord; onClick?: ()
             )}
             <img className={`${styles.stackImg} ${styles.stackTop}`} src={cover} alt={record.title} loading="lazy" />
           </>
+        ) : mediaKind === 'image' ? (
+          <div className={styles.imagePlaceholder} data-testid="gallery-image-placeholder" />
         ) : null}
-        {/* 悬停遮罩（视频播放中不展示播放按钮） */}
-        {!(hovered && record.video) && (
-          <div className={styles.hoverOverlay}>
+        {videoChrome && !playingHoverVideo && (
+          <div className={styles.hoverOverlay} data-testid="gallery-play-overlay">
             <span className={styles.playIcon}>▶</span>
           </div>
         )}
       </div>
-      {/* 悬停视频：铺满整张卡片（覆盖标题与图片区域） */}
-      {hovered && record.video && (
+      {playingHoverVideo && (
         <video
           className={styles.hoverVideo}
+          data-testid="gallery-hover-video"
           src={record.video}
           autoPlay
           muted
@@ -171,17 +187,20 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
 
       {/* 卡片网格（IKA64P：图片栏 3+3 排布） */}
       <div className={`${styles.cardGrid} ${activeTag === 'picture' ? styles.cardGridThree : ''}`}>
-        {records.map((record, idx) => (
-          <GalleryCard
-            key={`${record.title}-${idx}`}
-            record={record}
-            onClick={() => {
-              const text = record.content?.trim() || record.title;
-              const mediaType: 'video' | 'image' = activeTag === 'video' ? 'video' : 'image';
-              onCardClick?.(text, mediaType);
-            }}
-          />
-        ))}
+        {records.map((record, idx) => {
+          const mediaKind = mediaKindFromTagCode(activeTag);
+          return (
+            <GalleryCard
+              key={`${record.title}-${idx}`}
+              record={record}
+              mediaKind={mediaKind}
+              onClick={() => {
+                const text = record.content?.trim() || record.title;
+                onCardClick?.(text, mediaKind);
+              }}
+            />
+          );
+        })}
       </div>
     </div>
   );
