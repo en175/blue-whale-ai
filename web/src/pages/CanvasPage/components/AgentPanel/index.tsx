@@ -25,7 +25,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { fetchMySkills, fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
+import { fetchMySkills } from '@/api/skills';
 import { useAgentSession, type ChatMessage, type TurnOutcome } from '../../hooks/useAgentSession';
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
@@ -882,10 +882,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   /* 「上传图片」/「上传视频」此前走同一个 handler、accept 也不分，两个菜单项完全等价。
    * 现在各自把 accept 收窄到对应类型（真实 media_type 仍按文件 MIME 判定）。 */
-  /** 当前 Run 的技能推荐列表（推荐区域展示） */
-  const [recs, setRecs] = useState<RunSkillRecommendation[]>([]);
-  /** 已点 Use 的推荐技能ID（仅用户点 Use 可激活） */
-  const [usedSkillIds, setUsedSkillIds] = useState<Set<string>>(new Set());
   /** 画布上现存的生成卡节点 cardId 集合。父组件没给（例如测试）时按空集处理——空集意味着
    *  「都没应用过」，是安全的一侧：宁可让用户多按一次，也不要把没进画布的卡显示成绿勾。 */
   const appliedIds = appliedCardIds ?? EMPTY_APPLIED_IDS;
@@ -1029,21 +1025,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSkillIds]);
 
-  /** 运行开始后拉取 Run 级技能推荐；失败走 http 默认 toast，这里只清掉推荐区。 */
-  useEffect(() => {
-    if (runningRunId === null) return;
-    let alive = true;
-    fetchRunSkillRecommendations(runningRunId)
-      .then((list) => {
-        if (alive) setRecs(Array.isArray(list) ? list : []);
-      })
-      .catch(() => {
-        if (alive) setRecs([]);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [runningRunId]);
+  /* Run 级技能推荐（IK3NPI）已整体移除：那是 Java 运行时的接口，前后端分离重写时被带进
+   * 新前端，后端从未实现——每条消息发出后这里都会白打一次 404（IKBRZV 复测 BUG-NEW-01），
+   * 推荐区域因此从上线起从未渲染过。后端真做这个接口时连同 UI 一起按新契约重加。 */
 
   /**
    * ESC 取消本次回答（IKA4PH）。取消入口统一在发送侧，ESC 是那颗按钮的键盘等价物。
@@ -1271,25 +1255,13 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     chipEditorRef.current?.setText(prompt);
   };
 
-  /** 开启新对话：清空当前输入、消息流、技能推荐、武装技能与历史下拉 */
+  /** 开启新对话：清空当前输入、消息流、武装技能与历史下拉 */
   const handleNewChat = () => {
     // 不清空输入框：面板明写着「未发送的草稿会自动保留」，
     // 开新对话把用户刚敲的字抹掉，与承诺相反。
     resetChat();
-    setRecs([]);
-    setUsedSkillIds(new Set());
     setForcedSkill(null);
     setHistoryOpen(false);
-  };
-
-  /** 使用推荐技能：标记已激活，并把技能意图追加为一条消息提交给 Agent（顺带清掉「直接使用」武装，避免双技能叠加） */
-  const handleUseSkill = async (r: RunSkillRecommendation) => {
-    if (usedSkillIds.has(r.creative_skill_id) || runningRunId !== null || streaming) return;
-    setSkillNames((prev) => ({ ...prev, [r.creative_skill_id]: r.name }));
-    const accepted = await sendMessage([{ type: 'text', text: `使用「${r.name}」技能继续创作` }], r.creative_skill_id, undefined, r.name, `使用「${r.name}」技能继续创作`);
-    if (!accepted) return;
-    setUsedSkillIds((prev) => new Set(prev).add(r.creative_skill_id));
-    setForcedSkill(null);
   };
 
   /** 发送消息：**解引用发生在这一刻**——编辑期胶囊一直是指针，此处才换成完整 prompt；
@@ -1694,32 +1666,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         </div>
       )}
 
-      {/* Run 级技能推荐区域 */}
-      {recs.length > 0 && (
-        <div className={styles.recommendArea}>
-          <div className={styles.recommendTitle}>推荐技能</div>
-          <div className={styles.recommendList}>
-            {recs.map((r) => {
-              const used = usedSkillIds.has(r.creative_skill_id);
-              return (
-                <div key={r.creative_skill_id} className={styles.recommendItem}>
-                  <div className={styles.recommendInfo}>
-                    <span className={styles.recommendName}>{r.name}</span>
-                    <span className={styles.recommendDesc} title={r.description}>{r.description}</span>
-                  </div>
-                  <button
-                    className={`${styles.recommendUseBtn} ${used ? styles.recommendUsed : ''}`}
-                    onClick={() => handleUseSkill(r)}
-                    disabled={used || runningRunId !== null || streaming}
-                  >
-                    {used ? '已使用' : 'Use'}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* 输入区域 */}
       <div className={styles.inputArea}>
