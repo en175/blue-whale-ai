@@ -2,6 +2,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
 import { apiRequest, readApiErrorMessage } from './http';
+import { useAuthStore } from '@/stores/auth';
+import { useAuthPromptStore } from '@/stores/authPrompt';
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
@@ -83,5 +85,78 @@ describe('apiRequest 信封', () => {
       message: '账户余额不足，请充值后重试',
     });
     expect(toast.error).not.toHaveBeenCalled();
+  });
+});
+
+const sampleUser = {
+  userId: 1,
+  username: 'alice',
+  email: '',
+  phone: '',
+  hasPassword: true,
+  isAdmin: false,
+};
+
+describe('apiRequest 401', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(toast.error).mockClear();
+    useAuthPromptStore.getState().reset();
+    useAuthStore.setState({ user: null, isNewUser: false, quota: null });
+  });
+
+  it('已登录业务 401 弹过期登录门、保留本地用户、不 toast', async () => {
+    useAuthStore.setState({ user: sampleUser });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ code: 401, msg: '缺少登录凭证', data: null }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    await expect(apiRequest('/api/projects/p1/generation-jobs', { method: 'POST' })).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(useAuthPromptStore.getState().open).toBe(true);
+    expect(useAuthStore.getState().user).toEqual(sampleUser);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('未登录 /api/me 401 不清出登录门', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ code: 401, msg: '缺少登录凭证', data: null }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    await expect(apiRequest('/api/me', { silent: true })).rejects.toMatchObject({ status: 401 });
+    expect(useAuthPromptStore.getState().open).toBe(false);
+    expect(useAuthStore.getState().user).toBeNull();
+  });
+
+  it('登录接口 401 不弹过期门', async () => {
+    useAuthStore.setState({ user: sampleUser });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ code: 401, msg: '账号或密码错误', data: null }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    await expect(
+      apiRequest('/api/auth/login', { method: 'POST', silent: true }),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(useAuthPromptStore.getState().open).toBe(false);
+    expect(useAuthStore.getState().user).toEqual(sampleUser);
   });
 });

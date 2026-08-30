@@ -2,10 +2,10 @@
  * http 统一请求封装
  * - 产品：{code:200, data, msg}；code===200 解包 data，否则抛 ApiError（文案取 msg）并默认 toast
  * - 后台：{success:true, data} 仍兼容
- * - 登录态走 HttpOnly cookie；非 auth 接口 401 清空本地会话
+ * - 登录态走 HttpOnly cookie；非 auth 接口 401：已登录则弹窗续接，未登录才清会话
  * ============================================ */
 import { toast } from 'sonner';
-import { setSession } from '@/utils/auth';
+import { handleUnauthorized } from '@/utils/auth';
 
 /** 接口路径前缀 */
 export const API_PREFIX = '/api';
@@ -88,7 +88,7 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
 
   const res = await fetch(path, { ...init, headers });
 
-  // 凭证失效：清空本地会话（auth 类接口除外，避免登录失败误清；
+  // 凭证失效：已登录则弹登录续接，未登录才清会话（auth 类接口除外，避免登录失败误清；
   // admin/session 对非管理员返回 401 属正常业务结果，同样豁免；
   // agent 计费查账把**上游 new-api 的状态码原样透传**，那个 401 说的是"上游拒了这张
   // sk token"，不是"你在蓝鲸的登录失效了"——见下方 BILLING_PREFIX 的说明）
@@ -98,7 +98,7 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
     !path.startsWith(AGENT_BILLING_PREFIX) &&
     path !== `${API_PREFIX}/admin/session`
   ) {
-    setSession(null);
+    handleUnauthorized();
   }
   return res;
 }
@@ -128,7 +128,7 @@ async function doRequest<T>(path: string, init?: ApiRequestInit): Promise<{ data
       readApiErrorMessage(body, res.status),
       body?.code ?? res.status
     );
-    if (!silent) toast.error(err.message);
+    if (!silent && err.status !== 401) toast.error(err.message);
     throw err;
   }
   return { data: body.data as T, warning: body.warning };

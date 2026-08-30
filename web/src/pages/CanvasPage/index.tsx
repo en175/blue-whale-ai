@@ -34,6 +34,7 @@ import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
 import { saveCanvasDoc, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
+import { useAuthPromptStore } from '@/stores/authPrompt';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
 import type { GenerationCardBlock, SessionContentBlock } from '@/api/agentSessions';
 import {
@@ -1315,6 +1316,13 @@ export default function CanvasPage() {
             setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
             return;
           }
+          if (isApiError(e) && e.status === 401) {
+            setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+            useAuthPromptStore.getState().addResume(() => {
+              startGenerationJob(type, parameters, inputAssetIds, videoRefs);
+            });
+            return;
+          }
           patchMediaNode(nodeId, {
             genStatus: 'failed',
             errorText: isApiError(e) ? e.message : '创建任务失败',
@@ -1366,6 +1374,13 @@ export default function CanvasPage() {
             patchMediaNode(nodeId, {
               genStatus: 'failed',
               errorText: isApiError(e) ? e.message : '余额不足',
+            });
+            return;
+          }
+          if (isApiError(e) && e.status === 401) {
+            patchMediaNode(nodeId, { genStatus: 'failed', errorText: '' });
+            useAuthPromptStore.getState().addResume(() => {
+              handleRetryJob(nodeId);
             });
             return;
           }

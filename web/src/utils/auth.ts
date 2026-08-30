@@ -4,6 +4,7 @@
  * 登录是否成立只看 user 是否就位（/api/me 经 cookie 校验后回填）
  * ============================================ */
 import { useAuthStore, type SessionUser } from '@/stores/auth';
+import { useAuthPromptStore } from '@/stores/authPrompt';
 
 export type { SessionUser };
 
@@ -34,6 +35,18 @@ export function setSession(user: SessionUser | null) {
   } else {
     useAuthStore.getState().setSession(user);
   }
+}
+
+/**
+ * 业务接口 401：本地仍有用户则弹登录并等续接，不立刻清会话（避免画布卸载丢动作）；
+ * 从未登录（如 `/api/me` 探测）则静默清空，不弹窗。
+ */
+export function handleUnauthorized() {
+  if (useAuthStore.getState().user) {
+    useAuthPromptStore.getState().notifyExpired();
+    return;
+  }
+  useAuthStore.getState().clearSession();
 }
 
 /** 更新本地用户信息（如修改昵称后回写） */
