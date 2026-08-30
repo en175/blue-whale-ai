@@ -61,6 +61,7 @@ import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
 import {
   canvasLocationSearch,
+  pickCanvasIdAfterDelete,
   pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
 } from './canvasQuery';
@@ -1004,24 +1005,35 @@ export default function CanvasPage() {
       .catch(() => undefined);
   };
 
-  /** 删除项目：DELETE /api/projects/:id；删除当前项目后自动跳回首页 */
-  const handleDelete = (id: string) => {
-    deleteProject(id)
-      .then(() => {
-        if (currentId === id) {
-          navigate('/');
-          return;
-        }
-        setProjects((prev) => prev.filter((p) => p.id !== id));
-      })
-      .catch(() => undefined);
-  };
-
   /** 新建项目名：当前年月日时分（如 2026-08-18 02:58） */
   const newProjectName = () => {
     const d = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  /** 删除项目：DELETE /api/projects/:id；删除当前画布后切到剩余列表最新一项，不跳首页 */
+  const handleDelete = (id: string) => {
+    deleteProject(id)
+      .then(async () => {
+        const remaining = projects.filter((p) => p.id !== id);
+        const nextId = pickCanvasIdAfterDelete(currentId, id, projects.map((p) => p.id));
+        if (!nextId) {
+          try {
+            const created = await createProject(newProjectName());
+            const item: CanvasProject = { id: String(created.id), name: created.name };
+            setProjects([item]);
+            setCurrentId(item.id);
+          } catch {
+            setProjects([]);
+            setCurrentId('');
+          }
+          return;
+        }
+        setProjects(remaining);
+        setCurrentId(nextId);
+      })
+      .catch(() => undefined);
   };
 
   /** 新建项目：POST /api/projects 并切换选中（撞名由后端自动追加 (2)(3)） */
