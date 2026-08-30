@@ -13,6 +13,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import Skeleton from '@/components/Skeleton';
 import AssetDetailModal from './components/AssetDetailModal';
 import CharacterLibrary from './components/CharacterLibrary';
+import { assetMediaDisplay } from './assetMediaSrc';
 import styles from './index.module.css';
 
 /** 筛选类型：all 表示不传 type */
@@ -48,7 +49,7 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
   const [reloadKey, setReloadKey] = useState(0);
   const imgRef = useRef<HTMLImageElement>(null);
 
-  const mediaSrc = `${asset.url}${asset.url.includes('?') ? '&' : '?'}_reload=${reloadKey}`;
+  const { src: mediaSrc, nodeKey: mediaKey } = assetMediaDisplay(asset.url, reloadKey);
 
   // URL 或 reloadKey 变化时重置为 loading（视频通过 VideoThumb 的 onLoaded/onError 驱动状态）
   useEffect(() => {
@@ -64,7 +65,7 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
     if (img && img.complete && img.naturalWidth > 0) {
       setState('loaded');
     }
-  }, [mediaSrc]);
+  }, [mediaSrc, reloadKey]);
 
   const handleReload = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -108,6 +109,7 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       {/* 实际媒体元素 */}
       {(asset.type === 'image' || asset.type === 'character') && asset.url && (
         <img
+          key={mediaKey}
           ref={imgRef}
           className={styles.media}
           src={mediaSrc}
@@ -119,6 +121,7 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       )}
       {asset.type === 'video' && asset.url && (
         <VideoThumb
+          key={mediaKey}
           url={mediaSrc}
           onInView={() => setState('loading')}
           onLoaded={() => setState('loaded')}
@@ -127,6 +130,7 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       )}
       {asset.type === 'audio' && asset.url && (
         <audio
+          key={mediaKey}
           className={styles.audioPlayer}
           src={mediaSrc}
           controls
