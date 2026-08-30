@@ -113,6 +113,18 @@
   overflow: hidden;
 }
 
+/* 图片卡无封面：占位框，不复用视频播放按钮 */
+.imagePlaceholder {
+  position: absolute;
+  top: 8%;
+  bottom: 8%;
+  left: 20%;
+  right: 20%;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+}
+
 /* ---- 悬停视频（铺满整张卡片，含标题区域） ---- */
 .hoverVideo {
   position: absolute;
