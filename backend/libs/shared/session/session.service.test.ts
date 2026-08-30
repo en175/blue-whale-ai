@@ -5,11 +5,12 @@ import { SessionService } from "./session.service.js";
 const SECRET = "test-session-secret-1234567890";
 const TTL_SECONDS = 7 * 24 * 60 * 60;
 
-/** 内存版 ioredis（按 key 存字符串，记录 expire 调用）。vi.hoisted 保证 mock 提升时可见。 */
+/** 内存版 ioredis（按 key 存字符串，记录 expire/set 调用）。vi.hoisted 保证 mock 提升时可见。 */
 const { FakeRedis } = vi.hoisted(() => {
   class FakeRedis {
     store = new Map<string, string>();
     expiredKeys: string[] = [];
+    setKeys: string[] = [];
 
     constructor(_options?: unknown) {}
 
@@ -19,7 +20,9 @@ const { FakeRedis } = vi.hoisted(() => {
       _mode?: string,
       _ttl?: number,
     ): Promise<"OK"> {
+      // 生产只以「SET key 1 EX ttl」覆盖/补建索引（值恒定、同 TTL），无 NX 分支。
       this.store.set(key, value);
+      this.setKeys.push(key);
       return "OK";
     }
 
@@ -27,13 +30,67 @@ const { FakeRedis } = vi.hoisted(() => {
       return this.store.get(key) ?? null;
     }
 
-    async del(key: string): Promise<number> {
-      return this.store.delete(key) ? 1 : 0;
+    async del(...keys: string[]): Promise<number> {
+      let n = 0;
+      for (const k of keys) if (this.store.delete(k)) n += 1;
+      return n;
     }
 
     async expire(key: string, _ttl: number): Promise<number> {
       this.expiredKeys.push(key);
       return 1;
+    }
+
+    /** SCAN：支持 MATCH/COUNT 语义，一次返回全部匹配键（测试规模小）。 */
+    async scan(
+      cursor: string,
+      _match: "MATCH",
+      pattern: string,
+      _count: "COUNT",
+      _size: number,
+    ): Promise<[string, string[]]> {
+      if (cursor !== "0") return ["0", []];
+      const re = new RegExp(
+        `^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`,
+      );
+      const keys = [...this.store.keys()].filter((k) => re.test(k));
+      return ["0", keys];
+    }
+
+    /** MULTI/PIPELINE：批量排队后 exec 统一执行。 */
+    multi(): {
+      set: (k: string, v: string, m?: string, t?: number) => unknown;
+      del: (...keys: string[]) => unknown;
+      exec: () => Promise<unknown[]>;
+    } {
+      const ops: Array<[string, unknown[]]> = [];
+      const api = {
+        set: (k: string, v: string, m?: string, t?: number) => {
+          ops.push(["set", [k, v, m, t]]);
+          return api;
+        },
+        del: (...keys: string[]) => {
+          ops.push(["del", keys]);
+          return api;
+        },
+        exec: async (): Promise<unknown[]> => {
+          const results: unknown[] = [];
+          for (const [name, args] of ops) {
+            if (name === "set") {
+              const [k, v, m, t] = args as [string, string, string, number];
+              results.push(await this.set(k, v, m, t));
+            } else if (name === "del") {
+              results.push(await this.del(...(args as string[])));
+            }
+          }
+          return results;
+        },
+      };
+      return api;
+    }
+
+    pipeline(): ReturnType<FakeRedis["multi"]> {
+      return this.multi();
     }
 
     async quit(): Promise<"OK"> {
@@ -79,7 +136,9 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
     const raw = [...redis.store.values()][0];
     expect(raw).toContain("sealedSk");
     expect(raw).not.toContain("sk-upstream-secret");
-    expect(redis.store.size).toBe(1);
+    // 会话键 + 按用户索引键各一条
+    expect(redis.store.size).toBe(2);
+    expect(redis.store.has(`user_session:8:${hash(token)}`)).toBe(true);
   });
 
   it("resolveSession 解出身份与真实 sk-（round-trip）", async () => {
@@ -104,6 +163,20 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
     const token = await service.createSession(BASE);
     await service.resolveSession(token);
     expect(redis.expiredKeys).toContain(`session:${hash(token)}`);
+    // 索引键同步续期（SET 覆盖，保持与会话同寿命）
+    expect(redis.setKeys).toContain(`user_session:8:${hash(token)}`);
+  });
+
+  it("resolveSession 对部署前旧会话（无索引键）惰性补建索引", async () => {
+    const token = await service.createSession(BASE);
+    const sessionKey = `session:${hash(token)}`;
+    // 模拟部署前旧会话：只有会话键、没有索引键
+    redis.store.delete(`user_session:8:${hash(token)}`);
+
+    expect((await service.resolveSession(token))?.userId).toBe(8);
+    // 首次 resolve 后索引被补建，冻结枚举可覆盖该会话
+    expect(redis.store.has(`user_session:8:${hash(token)}`)).toBe(true);
+    expect(await service.revokeAllForUser(8)).toBe(1);
   });
 
   it("verifiedAt 超时后 needsRecheck=true", async () => {
@@ -139,10 +212,39 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
     expect(redis.store.has(key)).toBe(false);
   });
 
-  it("revoke 删除会话（登出吊销，上游 sk- 不动）", async () => {
+  it("revoke 删除会话与索引（登出吊销，上游 sk- 不动）", async () => {
     const token = await service.createSession(BASE);
     await service.revoke(token);
     expect(await service.resolveSession(token)).toBeNull();
     expect(redis.store.has(`session:${hash(token)}`)).toBe(false);
+    expect(redis.store.has(`user_session:8:${hash(token)}`)).toBe(false);
+  });
+
+  it("revokeAllForUser 删除该用户全部会话并返回计数，不影响其他用户", async () => {
+    const a = await service.createSession(BASE);
+    const b = await service.createSession(BASE);
+    const other = await service.createSession({
+      ...BASE,
+      userId: 99,
+      username: "bob",
+    });
+
+    const revoked = await service.revokeAllForUser(8);
+    expect(revoked).toBe(2);
+    expect(await service.resolveSession(a)).toBeNull();
+    expect(await service.resolveSession(b)).toBeNull();
+    // 其他用户会话不受影响
+    expect(await service.resolveSession(other)).not.toBeNull();
+    // 索引同步清空
+    expect(redis.store.has(`user_session:8:${hash(a)}`)).toBe(false);
+    expect(redis.store.has(`user_session:8:${hash(b)}`)).toBe(false);
+    expect(redis.store.has(`user_session:99:${hash(other)}`)).toBe(true);
+  });
+
+  it("revokeAllForUser 对零会话用户返回 0", async () => {
+    await service.createSession(BASE);
+    expect(await service.revokeAllForUser(12345)).toBe(0);
+    // 不误删其他用户会话
+    expect(await service.resolveSession((await service.createSession(BASE)))).not.toBeNull();
   });
 });

@@ -1,35 +1,56 @@
 import { NewApiError } from "@blue-whale/core";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MeController } from "./me.controller.js";
 
 // IKBRCK：PUT /me/password 改密端点的入口校验 + 透传 + 上游失败映射单测。
 // 关键回归：AuthGuard 回注 sk- 令牌后，控制器必须自解析请求头 Bearer 并原样转给
 // AccountService；原密码错误/账号未设密码这类网关业务失败要原样把 message 透出。
+// 改密成功后应吊销该用户全部会话（best-effort，失败不阻断改密）。
 
-function createController(changePassword = vi.fn().mockResolvedValue(undefined)) {
-  const account = { changePassword } as never;
-  const controller = new MeController(account);
-  return { controller, changePassword };
+function createController(overrides: {
+  changePassword?: ReturnType<typeof vi.fn>;
+  revokeAllForUser?: ReturnType<typeof vi.fn>;
+  revoke?: ReturnType<typeof vi.fn>;
+} = {}) {
+  const account = {
+    changePassword:
+      overrides.changePassword ?? vi.fn().mockResolvedValue(undefined),
+  };
+  const sessions = {
+    revokeAllForUser: overrides.revokeAllForUser ?? vi.fn().mockResolvedValue(0),
+    revoke: overrides.revoke ?? vi.fn().mockResolvedValue(undefined),
+  };
+  const controller = new MeController(account as never, sessions as never);
+  return { controller, account, sessions };
 }
 
 const USER = { userId: "42", username: "alice" } as never;
 const BEARER = "Bearer sk-user-token";
+/** 模拟 res：记录 clearCookie 调用（passthrough 响应，控制器不发送）。 */
+const RES = {
+  clearCookie: vi.fn(),
+} as never;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("MeController（IKBRCK 改密）", () => {
   it("没有 Bearer 令牌就 401，不调上游", async () => {
-    const { controller, changePassword } = createController();
+    const { controller, account } = createController();
     await expect(
       controller.changePassword(
         { original_password: "OldPass123", password: "NewPass456" },
         undefined,
+        USER,
       ),
     ).rejects.toMatchObject({ status: 401 });
-    expect(changePassword).not.toHaveBeenCalled();
+    expect(account.changePassword).not.toHaveBeenCalled();
   });
 
   it("原密码或新密码缺失/为空就 400，不调上游", async () => {
-    const { controller, changePassword } = createController();
+    const { controller, account } = createController();
     for (const body of [
       { original_password: "", password: "NewPass456" },
       { original_password: "  ", password: "NewPass456" },
@@ -39,14 +60,14 @@ describe("MeController（IKBRCK 改密）", () => {
       { password: "NewPass456" },
     ]) {
       await expect(
-        controller.changePassword(body, BEARER),
+        controller.changePassword(body, BEARER, USER),
       ).rejects.toMatchObject({ status: 400 });
     }
-    expect(changePassword).not.toHaveBeenCalled();
+    expect(account.changePassword).not.toHaveBeenCalled();
   });
 
   it("未知字段被契约 .strict() 拒绝（400），防止网关多用途接口被意外带参", async () => {
-    const { controller, changePassword } = createController();
+    const { controller, account } = createController();
     await expect(
       controller.changePassword(
         {
@@ -55,48 +76,90 @@ describe("MeController（IKBRCK 改密）", () => {
           username: "hacked",
         },
         BEARER,
+        USER,
       ),
     ).rejects.toMatchObject({ status: 400 });
-    expect(changePassword).not.toHaveBeenCalled();
+    expect(account.changePassword).not.toHaveBeenCalled();
   });
 
-  it("合法入参：解析 Bearer 令牌并把 original_password/password 原样转给 AccountService", async () => {
-    const { controller, changePassword } = createController();
+  it("合法入参：解析 Bearer 令牌并把 original_password/password 原样转给 AccountService，改密成功吊销全部会话", async () => {
+    const { controller, account, sessions } = createController({
+      revokeAllForUser: vi.fn().mockResolvedValue(3),
+    });
     const result = await controller.changePassword(
       { original_password: "OldPass123", password: "NewPass456" },
       BEARER,
+      USER,
+      RES,
     );
-    expect(result).toMatchObject({ code: 200 });
-    expect(changePassword).toHaveBeenCalledWith(
+    expect(result).toMatchObject({ code: 200, data: { revokedSessions: 3 } });
+    expect(account.changePassword).toHaveBeenCalledWith(
       { originalPassword: "OldPass123", newPassword: "NewPass456" },
       "sk-user-token",
     );
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42);
+    // 枚举吊销成功路径：不触发兜底单删
+    expect(sessions.revoke).not.toHaveBeenCalled();
   });
 
-  it("网关业务失败（原密码错误）原样透出 message，4xx 保持原状态码", async () => {
-    const { controller } = createController(
-      vi.fn().mockRejectedValue(
+  it("改密成功后会话吊销失败为 best-effort：仍返回 success，revokedSessions=0，并兜底吊销当前会话+清 cookie", async () => {
+    const { controller, sessions } = createController({
+      revokeAllForUser: vi.fn().mockRejectedValue(new Error("redis timeout")),
+    });
+    const result = await controller.changePassword(
+      { original_password: "OldPass123", password: "NewPass456" },
+      BEARER,
+      USER,
+      RES,
+      RES,
+    );
+    expect(result).toMatchObject({ code: 200, data: { revokedSessions: 0 } });
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42);
+    // 兜底：直接吊销当前会话 + 清 cookie，保证当前浏览器改密后立即要求重新登录
+    expect(sessions.revoke).toHaveBeenCalledWith("sk-user-token");
+    expect(RES.clearCookie).toHaveBeenCalled();
+  });
+
+  it("没有 CurrentUser 时不吊销会话（仅改密），不抛错", async () => {
+    const { controller, sessions } = createController();
+    const result = await controller.changePassword(
+      { original_password: "OldPass123", password: "NewPass456" },
+      BEARER,
+      undefined,
+      RES,
+    );
+    expect(result).toMatchObject({ code: 200, data: { revokedSessions: 0 } });
+    expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it("网关业务失败（原密码错误）原样透出 message，4xx 保持原状态码，且不吊销会话", async () => {
+    const { controller, sessions } = createController({
+      changePassword: vi.fn().mockRejectedValue(
         new NewApiError("原密码错误", 400),
       ),
-    );
+    });
     await expect(
       controller.changePassword(
         { original_password: "wrong", password: "NewPass456" },
         BEARER,
+        USER,
       ),
     ).rejects.toMatchObject({ status: 400, message: "原密码错误" });
+    expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
   });
 
   it("网关业务失败为非 4xx（如 success:false 的 200 信封）收敛成 502，但 message 保留", async () => {
-    const { controller } = createController(
-      vi.fn().mockRejectedValue(
+    const { controller } = createController({
+      changePassword: vi.fn().mockRejectedValue(
         new NewApiError("当前账号未设置密码", 200),
       ),
-    );
+    });
     await expect(
       controller.changePassword(
         { original_password: "OldPass123", password: "NewPass456" },
         BEARER,
+        USER,
+      RES,
       ),
     ).rejects.toMatchObject({ status: 502, message: "当前账号未设置密码" });
   });
