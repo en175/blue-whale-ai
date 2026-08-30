@@ -810,10 +810,15 @@ export function useAgentSession(projectId: string) {
         });
         // 终态一到就撤掉预览：这一刻起权威是校验过的卡片，让半成品留在屏幕上只会让人误以为能用。
         setPartialCard(null);
-        if (t === 'run.completed') settleStream(runId);
+        // cancelled 与 completed 一样固化（IKBRZV BUG-08，方案 A）：用户点停止时已经流出的
+        // 半截正文与思考，服务端从此随取消落库（agent failRun 的 partial），刷新后照常还原；
+        // 这里配套地不再乐观清空——用户亲眼看到的字不因「别写了」而消失。settleStream 对
+        // 空缓冲是 no-op，所以没流出任何字的取消不会生出一条空消息。failed/outcome_unknown
+        // 维持丢弃：服务端没有为它们落库，本地留下的文本刷新后就是对不上的幻影。
+        if (t === 'run.completed' || t === 'run.cancelled') settleStream(runId);
         else discardStream();
-        // completed 路径：settleStream 已把思考固化进助手消息并清空全局区；终态后到达的
-        // reasoning_trace.updated.v1 直接更新消息内的块。非 completed 终态没有消息可挂，
+        // completed/cancelled 路径：settleStream 已把思考固化进助手消息并清空全局区；终态后
+        // 到达的 reasoning_trace.updated.v1 直接更新消息内的块。其余终态没有消息可挂，
         // 全局思考保留到下一轮 run.queued/started，供回看
         if (t === 'run.failed' || t === 'run.outcome_unknown') {
           setFailedRunId(runId || null);
