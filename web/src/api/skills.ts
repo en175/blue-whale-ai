@@ -97,23 +97,5 @@ export function deletePersonalSkill(id: string) {
   return http.del<null>(`/api/agent/skills/personal/${encodeURIComponent(id)}`);
 }
 
-/* ============ Run 级技能推荐 ============ */
-
-/** Run 推荐技能项 */
-export interface RunSkillRecommendation {
-  /** 技能稳定身份ID */
-  creative_skill_id: string;
-  /** 技能名称 */
-  name: string;
-  /** 技能描述 */
-  description: string;
-  /** 激活资格：requires_user_use 仅用户点 Use 可激活 */
-  activation_eligibility: string;
-}
-
-/** 获取 Run 级技能推荐 GET /api/agent/runs/:runId/creative-skill-recommendations */
-export function fetchRunSkillRecommendations(runId: number | string) {
-  return http.get<RunSkillRecommendation[]>(
-    `/api/agent/runs/${runId}/creative-skill-recommendations`,
-  );
-}
+/* Run 级技能推荐（IK3NPI）已移除：Java 运行时的接口，后端从未在新架构实现，
+ * 每次调用必 404（IKBRZV 复测 BUG-NEW-01）。后端真提供时按新契约重加。 */
