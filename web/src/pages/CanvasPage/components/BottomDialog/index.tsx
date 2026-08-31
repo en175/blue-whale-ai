@@ -18,7 +18,7 @@ import {
   User,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { classifyRefOverflow, REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
+import { classifyRefOverflows, REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import ChipTextEditor, { type ChipTextEditorHandle, type ChipRef } from '../ChipTextEditor';
 import {
@@ -239,7 +239,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     const item = externalImagePick.item;
     const imgCount = refFiles.filter((f) => f.type === 'image').length;
     if (imgCount >= maxImages) {
-      onToast?.('warn', refOverflowToast('image', maxImages));
+      onToast?.('warn', refOverflowToast(['image'], { image: maxImages }));
       return;
     }
     setRefFiles((prev) => {
@@ -311,14 +311,14 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   /** 上传图片（首尾帧模式限 2 张；达上限 toast） */
   const handleImageClick = () => {
     if (imageCount < maxImages) imageInputRef.current?.click();
-    else onToast?.('warn', refOverflowToast('image', maxImages));
+    else onToast?.('warn', refOverflowToast(['image'], { image: maxImages }));
   };
 
   /** 上传视频（首尾帧模式禁用；达上限 toast） */
   const handleVideoClick = () => {
     if (isKeyframe) return;
     if (videoCount < MAX_VIDEOS) videoInputRef.current?.click();
-    else onToast?.('warn', refOverflowToast('video', MAX_VIDEOS));
+    else onToast?.('warn', refOverflowToast(['video'], { video: MAX_VIDEOS }));
   };
 
   /** 通用上传（底部加号；首尾帧模式仅收图片且限 2 张） */
@@ -403,14 +403,15 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
           })();
     const acceptedImgs = list.filter((f) => f.type.startsWith('image/')).length;
     const acceptedVids = list.filter((f) => f.type.startsWith('video/')).length;
-    const overflow = classifyRefOverflow({
+    const overflows = classifyRefOverflows({
       selectedImages: all.filter((f) => f.type.startsWith('image/')).length,
       selectedVideos: all.filter((f) => f.type.startsWith('video/')).length,
       acceptedImages: acceptedImgs,
       acceptedVideos: acceptedVids,
     });
-    if (overflow === 'image') onToast?.('warn', refOverflowToast('image', maxImages));
-    else if (overflow === 'video') onToast?.('warn', refOverflowToast('video', MAX_VIDEOS));
+    if (overflows.length > 0) {
+      onToast?.('warn', refOverflowToast(overflows, { image: maxImages, video: MAX_VIDEOS }));
+    }
     if (!list.length) return;
     const startIdx = refFiles.length;
     const newItems: BottomRefItem[] = list.map((file) => ({
@@ -805,9 +806,9 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
       <div className={styles.bottomBar}>
         {/* 左侧 */}
         <div className={styles.barLeft}>
-          {/* 加号上传（两类均达上限隐藏） */}
+          {/* 加号上传（已全部达上限时隐藏，杜绝点击后的超限提示） */}
           {(isKeyframe
-            ? imageCount < maxImages
+            ? imageCount < 2
             : imageCount < maxImages || videoCount < MAX_VIDEOS) && (
             <button
               className={styles.addBtn}

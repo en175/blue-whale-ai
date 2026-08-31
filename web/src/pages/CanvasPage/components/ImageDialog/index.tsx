@@ -130,11 +130,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const currentResolutionLabel =
     resolutionOptions.find((r) => r.key === selectedResolution)?.label ?? selectedResolution;
   const imageCount = files.filter((f) => f.type === 'image').length;
-  const videoCount = files.filter((f) => f.type === 'video').length;
   /** 参考图上限固定 9 张（产品约定），不随模型能力接口的 max_reference_images 波动 */
   const maxImages = REF_LIMITS.image;
   const imagesFull = imageCount >= maxImages;
-  const videosFull = videoCount >= MAX_VIDEOS;
 
   /** 选中模型后应用其默认清晰度/宽高比 */
   const applyModelDefaults = (m: GenerationModel) => {
@@ -222,8 +220,12 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
       // 选中了但没被接受 = 超限丢弃，toast 提示（与 BottomDialog/卡片同措辞）
       const accImages = added.filter((f) => f.type === 'image').length;
       const accVideos = added.filter((f) => f.type === 'video').length;
-      if (selImages - accImages > 0) onToast?.('warn', refOverflowToast('image', maxImages));
-      else if (selVideos - accVideos > 0) onToast?.('warn', refOverflowToast('video', MAX_VIDEOS));
+      if (selImages - accImages > 0 || selVideos - accVideos > 0) {
+        onToast?.('warn', refOverflowToast(
+          selImages - accImages > 0 ? ['image'] : [],
+          { image: maxImages },
+        ) + (selVideos - accVideos > 0 ? `（仅支持图片）` : ''));
+      }
       return [...prev, ...added];
     });
     e.target.value = '';
@@ -450,11 +452,11 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         <div className={styles.bottomBar}>
           {/* 左侧 */}
           <div className={styles.barLeft}>
-            {!(imagesFull && videosFull) && (
+            {!imagesFull && (
               <button
                 className={styles.addBtn}
                 onClick={handleAddClick}
-                title={`上传图片（最多 ${maxImages} 张）/ 视频（最多 ${MAX_VIDEOS} 个）`}
+                title={`上传图片（最多 ${maxImages} 张）`}
               >
                 <Plus size={16} strokeWidth={2} />
               </button>

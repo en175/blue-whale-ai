@@ -97,7 +97,7 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
     if (!mp3Files.length) return;
     setRefs((prev) => {
       const room = Math.max(0, MAX_AUDIO_REFS - prev.length);
-      if (mp3Files.length > room) onToast?.('warn', refOverflowToast('audio', MAX_AUDIO_REFS));
+      if (mp3Files.length > room) onToast?.('warn', refOverflowToast(['audio'], { audio: MAX_AUDIO_REFS }));
       const add: AudioRefItem[] = mp3Files.slice(0, room).map((f, i) => ({
         id: `local-${Date.now()}-${i}`,
         kind: 'audio',

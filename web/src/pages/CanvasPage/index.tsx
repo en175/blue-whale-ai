@@ -247,22 +247,13 @@ export default function CanvasPage() {
     },
     [],
   );
-  /** 新节点出生序号——用于围绕视口中心的黄金角螺旋散布 */
-  const spawnSeqRef = useRef(0);
-
-  /** 新节点出生位：以视口中心为原点按黄金角螺旋向外散布。
-   *  黄金角（≈137.5°）保证相邻节点方向错开、不会累积往某个方向漂移，
-   *  半径随序号缓慢增大，连续添加的节点围绕中心自然错落。 */
+  /** 新节点出生位：以视口中心为原点在小范围内随机错乱堆叠。
+   *  不避碰、不外扩，新节点都落在中心 ±80px 的方形区域内，自然堆叠。 */
   const spawnPosition = () => {
-    const center = spawnPosRef.current();
-    const seq = spawnSeqRef.current;
-    spawnSeqRef.current += 1;
-    const GOLDEN_ANGLE = 2.399963; // 弧度 ≈ 137.508°
-    const angle = seq * GOLDEN_ANGLE + Math.random() * 0.6;
-    const radius = seq === 0 ? 0 : 90 + seq * 42 + Math.random() * 30;
+    const c = spawnPosRef.current();
     return {
-      x: Math.round(center.x + Math.cos(angle) * radius),
-      y: Math.round(center.y + Math.sin(angle) * radius),
+      x: Math.round(c.x + (Math.random() * 160 - 80)),
+      y: Math.round(c.y + (Math.random() * 160 - 80)),
     };
   };
   /** 画布保存状态：idle 未保存 / saving 保存中 / saved 已保存 / error 保存失败 */
