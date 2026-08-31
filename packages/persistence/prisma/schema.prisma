@@ -7,44 +7,6 @@ datasource db {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model api_key {
-  id            BigInt   @id @default(autoincrement())
-  user_id       BigInt
-  name          String   @default("") @db.VarChar(128)
-  consumer_name String   @unique(map: "uk_consumer_name") @default("") @db.VarChar(64)
-  key_prefix    String   @default("") @db.VarChar(32)
-  key_hash      String   @unique(map: "uk_key_hash") @db.VarChar(128)
-  status        String   @default("ACTIVE") @db.VarChar(32)
-  token_quota   BigInt?
-  remark        String?  @db.VarChar(255)
-  gmt_create    DateTime @default(now()) @db.DateTime(0)
-  gmt_modified  DateTime @default(now()) @db.DateTime(0)
-  version       Int      @default(0)
-  is_delete     Int      @default(0) @db.TinyInt
-
-  @@index([user_id], map: "idx_user_id")
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model api_key_usage {
-  id            BigInt   @id @default(autoincrement())
-  api_key_id    BigInt
-  user_id       BigInt
-  model         String?  @db.VarChar(64)
-  provider      String?  @db.VarChar(64)
-  input_tokens  BigInt   @default(0)
-  output_tokens BigInt   @default(0)
-  request_id    String   @unique(map: "uk_request_id") @db.VarChar(64)
-  gmt_create    DateTime @default(now()) @db.DateTime(0)
-  gmt_modified  DateTime @default(now()) @db.DateTime(0)
-  version       Int      @default(0)
-  is_delete     Int      @default(0) @db.TinyInt
-
-  @@index([api_key_id], map: "idx_api_key_id")
-  @@index([user_id], map: "idx_user_id")
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model assets {
   id                BigInt   @id @default(autoincrement())
   user_id           BigInt
@@ -113,17 +75,6 @@ model canvas {
   gmt_modified  DateTime @default(now()) @db.DateTime(0)
   version       Int      @default(0)
   is_delete     Int      @default(0) @db.TinyInt
-}
-
-model captcha_challenges {
-  id          BigInt   @id @default(autoincrement())
-  token       String   @db.VarChar(36)
-  answer      String   @db.VarChar(10)
-  gmt_expire  DateTime @db.DateTime(0)
-  is_verified Boolean  @default(false)
-  gmt_create  DateTime @default(now()) @db.DateTime(0)
-
-  @@index([token], map: "idx_token")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -526,20 +477,17 @@ model skill {
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model template_card {
-  id           BigInt    @id @default(autoincrement())
-  tag_code     String    @db.VarChar(64)
-  title        String    @db.VarChar(255)
-  video_url    String?   @db.VarChar(512)
-  content      String?   @db.LongText
-  layout       String    @db.VarChar(32)
-  sort_order   Int       @default(0)
-  create_time  DateTime  @default(now()) @db.DateTime(0)
-  update_time  DateTime  @default(now()) @db.DateTime(0)
-  deleted      Int       @default(0) @db.TinyInt
-  is_delete    Int       @default(0) @db.TinyInt
-  gmt_create   DateTime? @default(now()) @db.DateTime(0)
-  gmt_modified DateTime? @default(now()) @db.DateTime(0)
-  version      BigInt?
+  id           BigInt   @id @default(autoincrement())
+  tag_code     String   @db.VarChar(64)
+  title        String   @db.VarChar(255)
+  video_url    String?  @db.VarChar(512)
+  content      String?  @db.LongText
+  layout       String   @db.VarChar(32)
+  sort_order   Int      @default(0)
+  is_delete    Int      @default(0) @db.TinyInt
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
 
   @@index([tag_code], map: "idx_tag_id")
   @@index([tag_code, sort_order], map: "idx_tag_sort")
@@ -547,17 +495,14 @@ model template_card {
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model template_card_image {
-  id           BigInt    @id @default(autoincrement())
+  id           BigInt   @id @default(autoincrement())
   card_id      BigInt
-  image_url    String    @db.VarChar(512)
-  sort_order   Int       @default(0)
-  create_time  DateTime  @default(now()) @db.DateTime(0)
-  update_time  DateTime  @default(now()) @db.DateTime(0)
-  deleted      Int       @default(0) @db.TinyInt
-  is_delete    Int       @default(0) @db.TinyInt
-  gmt_create   DateTime? @default(now()) @db.DateTime(0)
-  gmt_modified DateTime? @default(now()) @db.DateTime(0)
-  version      BigInt?
+  image_url    String   @db.VarChar(512)
+  sort_order   Int      @default(0)
+  is_delete    Int      @default(0) @db.TinyInt
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
 
   @@index([card_id], map: "idx_card_id")
   @@index([card_id, sort_order], map: "idx_card_sort")
@@ -565,14 +510,14 @@ model template_card_image {
 
 /// IK764F：首页模板标签（原硬编码枚举落库）。tag_code 与顺序固定，仅 label 可由管理后台改名。
 model template_tag {
-  id          BigInt   @id @default(autoincrement())
-  tag_code    String   @db.VarChar(64)
-  label       String   @db.VarChar(128)
-  sort_order  Int      @default(0)
-  visible     Int      @default(1) @db.TinyInt
-  create_time DateTime @default(now()) @db.DateTime(0)
-  update_time DateTime @default(now()) @db.DateTime(0)
-  is_delete   Int      @default(0) @db.TinyInt
+  id           BigInt   @id @default(autoincrement())
+  tag_code     String   @db.VarChar(64)
+  label        String   @db.VarChar(128)
+  sort_order   Int      @default(0)
+  visible      Int      @default(1) @db.TinyInt
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  is_delete    Int      @default(0) @db.TinyInt
 
   @@unique([tag_code], map: "uk_tag_code")
 }
