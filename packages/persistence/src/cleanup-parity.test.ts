@@ -16,6 +16,12 @@ const standaloneSql = readFileSync(
   new URL("../schema/010_cleanup_dead_tables_and_columns.sql", import.meta.url),
   "utf8",
 );
+// 007(ik764f) 是 010 D4 改名链的上游：必须保持 create_time/update_time 历史形态，
+// 否则升级链上 CHANGE COLUMN 会因列不存在而失败。
+const legacy007Sql = readFileSync(
+  new URL("../schema/007_ik764f_template_tag.sql", import.meta.url),
+  "utf8",
+);
 
 // 007(ik764f) 的历史契约：它以 create_time/update_time 建表，010 的 D4 再改名。
 // 故 007 保持历史原样、不可改为 gmt_* —— 否则升级链上 010 的 CHANGE 会因列不存在而失败。
@@ -85,6 +91,10 @@ describe("CLEANUP 双轨迁移（死表/残留列/漂移/模板冗余）", () =>
     expect(standaloneSql).toContain("CHANGE COLUMN `create_time` `gmt_create`");
     expect(migrationSql).toContain("CHANGE COLUMN `update_time` `gmt_modified`");
     expect(standaloneSql).toContain("CHANGE COLUMN `update_time` `gmt_modified`");
+    // 007 保持历史 create_time/update_time（010 的改名链上游），不可误改为 gmt_*
+    expect(legacy007Sql).toContain("`create_time` DATETIME(0)");
+    expect(legacy007Sql).toContain("`update_time` DATETIME(0)");
+    expect(legacy007Sql).not.toContain("gmt_create");
   });
 
   it("baseline 必须同步：fresh 库无死表、template 用 gmt_*、users 无残留列", () => {
