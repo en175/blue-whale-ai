@@ -50,6 +50,11 @@ export async function readSseResponse(
     } catch {
       /* 非 JSON data 保留原始字符串 */
     }
+    // [DEBUG] 原始 SSE data 行 + 解析后对象
+    // eslint-disable-next-line no-console
+    console.log(`[SSE raw] type=${type} id=${id}`, raw.length > 200 ? raw.slice(0, 200) + '...' : raw);
+    // eslint-disable-next-line no-console
+    console.log(`[SSE parsed] type=${type}`, data); 
     onEvent({ type, id, data });
   };
 

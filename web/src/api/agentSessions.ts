@@ -496,7 +496,7 @@ export function sendSessionMessage(
   if (forcedSkillId) {
     body.forced_creative_skill_id = forcedSkillId;
   }
-  return sessionRequest(
+  return sessionRequest<SessionMessageAck>(
     agentPath('send_message', projectId, { session_id: sessionId }),
     {
       method: agentMethod('send_message'),
@@ -504,7 +504,10 @@ export function sendSessionMessage(
       body: JSON.stringify(body),
       signal,
     },
-  );
+  ).then((resp) => {
+    console.log('[agent messages] response:', resp);
+    return resp;
+  });
 }
 
 /**
