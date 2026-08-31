@@ -36,7 +36,6 @@ describe("AssetRepo upload persistence", () => {
       size: BigInt(1024),
       width: null,
       height: null,
-      duration: null,
     };
     const assets = {
       findFirst: vi.fn().mockResolvedValue(committed),
@@ -80,7 +79,7 @@ describe("AssetRepo upload persistence", () => {
     expect(created).toMatchObject({ id: "42" });
   });
 
-  it("stores precise browser duration without changing the legacy seconds column", async () => {
+  it("stores precise browser duration in milliseconds", async () => {
     const committed = {
       id: BigInt(43),
       type: "video",
@@ -90,7 +89,7 @@ describe("AssetRepo upload persistence", () => {
       size: BigInt(1024),
       width: 1920,
       height: 1080,
-      duration: 7,
+      duration_ms: 6500,
     };
     const assets = {
       create: vi.fn().mockResolvedValue(committed),
@@ -111,7 +110,7 @@ describe("AssetRepo upload persistence", () => {
     });
 
     expect(assets.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ duration: 7, duration_ms: 6500 }),
+      data: expect.objectContaining({ duration_ms: 6500 }),
       select: expect.any(Object),
     });
   });
@@ -128,7 +127,6 @@ describe("AssetRepo upload persistence", () => {
         size: BigInt(1024),
         width: null,
         height: null,
-        duration: null,
       }),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     };

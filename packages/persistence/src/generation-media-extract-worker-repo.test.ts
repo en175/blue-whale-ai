@@ -154,7 +154,7 @@ describe("generation media extract worker repo", () => {
       data: expect.objectContaining({
         type: "audio",
         mime: "audio/mpeg",
-        duration: 8,
+        duration_ms: 8000,
         generation_job_id: 400n,
       }),
     });

@@ -14,7 +14,6 @@ describe("WorkerRepo.resolveInputAssets", () => {
           size: BigInt(1234),
           width: 1920,
           height: 1080,
-          duration: 7,
           duration_ms: 6500,
         },
       ]),
@@ -50,7 +49,6 @@ describe("WorkerRepo.resolveInputAssets", () => {
         size: true,
         width: true,
         height: true,
-        duration: true,
         duration_ms: true,
       },
     });

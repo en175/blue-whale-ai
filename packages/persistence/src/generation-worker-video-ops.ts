@@ -90,7 +90,10 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
             size: input.size === null ? null : BigInt(input.size),
             width: input.width,
             height: input.height,
-            duration: input.duration,
+            duration_ms:
+              input.duration === null || input.duration === undefined
+                ? null
+                : Math.round(input.duration * 1000),
             source: "generated",
             status: "normal",
           },

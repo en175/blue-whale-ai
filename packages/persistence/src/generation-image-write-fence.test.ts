@@ -258,7 +258,7 @@ describe("image write path fence（IK7GRP）", () => {
       expect(id).toBe("901");
       expect(assetCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ duration: 12, type: "audio" }),
+          data: expect.objectContaining({ duration_ms: 12000, type: "audio" }),
         }),
       );
     });
