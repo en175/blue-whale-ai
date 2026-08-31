@@ -38,6 +38,40 @@
   margin-bottom: 18px;
 }
 
+.passwordField {
+  position: relative;
+  margin-bottom: 18px;
+}
+
+.passwordField .input {
+  margin-bottom: 0;
+  padding-right: 52px;
+}
+
+.passwordToggle {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #666673;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.passwordToggle:hover,
+.passwordToggle:focus-visible {
+  color: #2b2a72;
+  outline: none;
+}
+
 .input::placeholder {
   color: #8a8a96;
 }
