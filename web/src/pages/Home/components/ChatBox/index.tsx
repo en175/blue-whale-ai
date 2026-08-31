@@ -13,7 +13,7 @@ import { type SkillRecord } from '@/api/skills';
 import { createProject } from '@/api/projects';
 import { setGenHandoff } from '@/utils/gen-handoff';
 import { setAgentHandoff } from '@/utils/agent-handoff';
-import { classifyRefOverflow } from '@/utils/ref-overflow';
+import { classifyRefOverflow, REF_LIMITS } from '@/utils/ref-overflow';
 import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput, MAX_PROMPT_INPUT_LENGTH } from './promptInput';
@@ -596,7 +596,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const firstlastInvalid =
     videoMode === 'firstlast' &&
     !(refFiles.length === 2 && refFiles.every((r) => r.file.type.startsWith('image/')));
-  const imageMaxImages = selectedImageModel?.features?.max_reference_images ?? 0;
+  /** AI 图片参考图上限：产品约定 9 张（与画布 ImageDialog REF_LIMITS.image 一致），取接口值和约定的较小值 */
+  const imageMaxImages = Math.min(selectedImageModel?.features?.max_reference_images ?? 0, REF_LIMITS.image);
 
   // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
   const handleRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -924,7 +925,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               <textarea
                 ref={textareaRef}
                 className={styles.textarea}
-                placeholder={'从文字与参考图生成 AI 图片。\n描述你想生成的图片，已上传的参考将引导风格与细节。'}
+                placeholder={`从文字与参考图生成 AI 图片。\n上传参考图片最多 ${imageMaxImages} 张；描述你想生成的图片，已上传的参考将引导风格与细节。`}
                 value={inputValue}
                 onChange={(e) => handleInputChange(e.target.value)}
                 onKeyDown={handleKeyDown}
