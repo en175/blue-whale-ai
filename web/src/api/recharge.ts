@@ -1,5 +1,5 @@
 /* ============================================
- * recharge 接口：充值档位/创建订单/状态轮询/取消/协议，对接真实后端
+ * recharge 接口：充值档位/创建订单/状态轮询/取消，对接真实后端
  * ============================================ */
 import { apiRequest } from './http';
 
@@ -48,13 +48,6 @@ export interface RechargeOrderStatus {
   credits_after: number | null;
 }
 
-/** 充值协议（GET /api/recharge/agreement） */
-export interface RechargeAgreement {
-  title: string;
-  /** 协议正文（Markdown 或 HTML） */
-  content: string;
-}
-
 /** 获取充值档位列表（仅 active 且在时间窗口内） */
 export function fetchRechargeTiers() {
   return apiRequest<{ tiers: RechargeTier[] }>('/api/recharge/tiers').then(
@@ -86,9 +79,4 @@ export function cancelRechargeOrder(tradeNo: string) {
     `/api/recharge/order/${encodeURIComponent(tradeNo)}/cancel`,
     { method: 'POST' },
   );
-}
-
-/** 获取充值协议 */
-export function fetchRechargeAgreement() {
-  return apiRequest<RechargeAgreement>('/api/recharge/agreement');
 }

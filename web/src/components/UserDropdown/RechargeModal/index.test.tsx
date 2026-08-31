@@ -8,7 +8,6 @@ import styles from './index.module.css';
 const rechargeApi = vi.hoisted(() => ({
   cancelRechargeOrder: vi.fn(),
   createRechargeOrder: vi.fn(),
-  fetchRechargeAgreement: vi.fn(),
   fetchRechargeOrderStatus: vi.fn(),
   fetchRechargeTiers: vi.fn(),
 }));
@@ -70,7 +69,6 @@ beforeEach(() => {
     points: 100,
   });
   rechargeApi.cancelRechargeOrder.mockResolvedValue(null);
-  rechargeApi.fetchRechargeAgreement.mockResolvedValue({ title: '充值协议', content: '协议内容' });
   rechargeApi.fetchRechargeOrderStatus.mockResolvedValue({
     trade_no: 'trade-1',
     status: 'pending',
@@ -200,5 +198,19 @@ describe('RechargeModal', () => {
     expect(document.body.textContent).not.toContain('正在创建订单…');
     expect(document.body.textContent).not.toContain('等待支付结果...');
     expect(document.body.querySelector(`.${styles.planRowPaying}`)).toBeNull();
+  });
+
+  it('《充值协议》在新标签打开静态站协议页', async () => {
+    await renderRechargeModal();
+
+    const link = [...document.body.querySelectorAll('a')].find((anchor) =>
+      anchor.textContent?.includes('充值协议'),
+    );
+    expect(link).toBeTruthy();
+    expect(link?.getAttribute('href')).toBe(
+      'https://static-bluewhale.yunjizi.cn/agreement/recharge-agreement.html',
+    );
+    expect(link?.getAttribute('target')).toBe('_blank');
+    expect(link?.rel.split(' ')).toEqual(expect.arrayContaining(['noopener', 'noreferrer']));
   });
 });
