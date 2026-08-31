@@ -81,6 +81,8 @@ export interface WorkerRepo {
   listDueVideoJobIds(limit: number): Promise<string[]>;
   /** IKBGKA：图片到点/孤儿 job 低频补入队扫描（镜像 listDueVideoJobIds；type=image）。 */
   listDueImageJobIds(limit: number): Promise<string[]>;
+  /** IKC9EJ：媒体提取到点/孤儿 job 低频补入队扫描（镜像 listDueImageJobIds；type=media_extract，不限 source）。 */
+  listDueMediaExtractJobIds(limit: number): Promise<string[]>;
   /** 重置图片任务中租约过期仍 processing 的孤儿任务 → queued，供恢复扫描接回。 */
   resetStalledImageJobs(): Promise<number>;
   /** 认领一个到点的图片 queued 任务（next_action_at<=now），置 processing + lease。无则 null。 */

@@ -68,6 +68,21 @@ describe("runMediaExtractStep", () => {
     ).resolves.toBeNull();
   });
 
+  it("rethrows claim errors without failing the job (IKC9EJ)", async () => {
+    // claim 抛错（瞬时 DB/Prisma 错误）→ 不落 failed（保持 queued 让 RocketMQ 重投/恢复扫描兜底），
+    // 且异常必须向外抛 → consumer 不 ack → 重投。若这里吞掉/置 failed，健康 job 会被误判死。
+    const claimError = new Error("claim boom");
+    const repo = makeRepo({
+      claimMediaExtractJobById: vi.fn().mockRejectedValue(claimError),
+    });
+    const { download, extract, upload } = makePorts();
+    await expect(
+      runMediaExtractStep({ repo, workerId: "w", jobId: "400", download, extract, upload }),
+    ).rejects.toBe(claimError);
+    expect(repo.failMediaExtractJob).not.toHaveBeenCalled();
+    expect(download.download).not.toHaveBeenCalled();
+  });
+
   it("runs download → extract → upload → publish on the happy path", async () => {
     const repo = makeRepo();
     const { download, extract, upload } = makePorts();

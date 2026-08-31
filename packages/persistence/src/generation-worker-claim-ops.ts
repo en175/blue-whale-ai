@@ -24,7 +24,7 @@ async function loadReservationFen(
   }
 }
 
-export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "claimJobById" | "claimNextJob" | "listDueVideoJobIds" | "listDueImageJobIds" | "claimVideoJobById" | "claimImageJobById" | "claimMediaExtractJobById" | "resetStalledImageJobs" | "claimNextImageJob" | "claimNextInProcessJob" | "requeueImageJobForRetry" | "claimNextVideoJob"> {
+export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "claimJobById" | "claimNextJob" | "listDueVideoJobIds" | "listDueImageJobIds" | "listDueMediaExtractJobIds" | "claimVideoJobById" | "claimImageJobById" | "claimMediaExtractJobById" | "resetStalledImageJobs" | "claimNextImageJob" | "claimNextInProcessJob" | "requeueImageJobForRetry" | "claimNextVideoJob"> {
   // 与拆分前一致：每次创建仓储时读一次 IMAGE_JOB_LEASE_SECONDS。
   const LEASE_SECONDS = imageJobLeaseSeconds();
 
@@ -150,6 +150,38 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
         where: {
           type: "image",
           source: { in: CLAIMABLE_JOB_SOURCES },
+          is_delete: false,
+          gmt_create: { gt: new Date(now.getTime() - RECOVERY_MAX_AGE_MS) },
+          next_action_at: { lte: now },
+          OR: [
+            { status: "queued" },
+            {
+              status: "processing",
+              OR: [
+                { lease_expires_at: null },
+                { lease_expires_at: { lt: now } },
+              ],
+            },
+          ],
+        },
+        orderBy: { id: "asc" },
+        take: Math.max(1, Math.min(500, limit)),
+        select: { id: true },
+      });
+      return rows.map((row) => row.id.toString());
+    },
+
+    async listDueMediaExtractJobIds(limit) {
+      // IKC9EJ：媒体提取到点/孤儿 job 低频补入队扫描——镜像 listDueImageJobIds。
+      // 与图片同构：queued（含漏入队：enqueue 失败/消息丢失）或 processing+lease 过期（孤儿）
+      // 且创建 1 天内的任务重新入队，让 MQ 消费端（Semaphore 背压）统一处理。
+      // 注意：media_extract 的 source="dock" 不在 CLAIMABLE_JOB_SOURCES 白名单，
+      // claimMediaExtractJobById 也只按 type 过滤——本扫描同样只按 type 捞，不套 source 白名单，
+      // 否则漏掉真正卡住的任务（IKC9EJ）。
+      const now = new Date();
+      const rows = await prisma.generation_jobs.findMany({
+        where: {
+          type: "media_extract",
           is_delete: false,
           gmt_create: { gt: new Date(now.getTime() - RECOVERY_MAX_AGE_MS) },
           next_action_at: { lte: now },
