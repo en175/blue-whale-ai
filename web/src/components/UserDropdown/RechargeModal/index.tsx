@@ -19,7 +19,6 @@ import { quotaToPoints } from '@/api/auth';
 import {
   cancelRechargeOrder,
   createRechargeOrder,
-  fetchRechargeAgreement,
   fetchRechargeOrderStatus,
   fetchRechargeTiers,
   type RechargeOrder,
@@ -37,6 +36,10 @@ const PERKS = ['积分即时到账', '积分永久有效', '支持全部模型�
 
 /** 支付流程状态：idle 未下单 / creating 下单中 / waiting 待支付 / paid / expired / failed */
 type Phase = 'idle' | 'creating' | 'waiting' | 'paid' | 'expired' | 'failed';
+
+/** 静态站托管的充值协议，跨域打开以免被 SPA catch-all 打回首页。 */
+const RECHARGE_AGREEMENT_HREF =
+  'https://static-bluewhale.yunjizi.cn/agreement/recharge-agreement.html';
 
 /** 价格格式化 */
 const fmtPrice = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
@@ -77,8 +80,6 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   const [order, setOrder] = useState<RechargeOrder | null>(null);
   const [orderError, setOrderError] = useState('');
   const [cancelling, setCancelling] = useState(false);
-  const [showAgreement, setShowAgreement] = useState(false);
-  const [agreement, setAgreement] = useState<{ title: string; content: string } | null>(null);
 
   const quota = useAuthStore((s) => s.quota);
 
@@ -179,17 +180,6 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     }
   };
 
-  /** 打开协议弹窗：首次从后端拉取 */
-  const handleOpenAgreement = () => {
-    setShowAgreement(true);
-    if (agreement) return;
-    fetchRechargeAgreement()
-      .then(setAgreement)
-      .catch(() =>
-        setAgreement({ title: '充值协议', content: '充值即视为同意本协议。' }),
-      );
-  };
-
   const confirmLabel = !selected
     ? '确认支付'
     : paying
@@ -201,8 +191,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
           : `确认支付 ¥${fmtPrice(selected.price)}`;
 
   return (
-    <>
-      <Modal
+    <Modal
         open
         footer={null}
         onCancel={handleClose}
@@ -406,30 +395,13 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
           <span>充值即视为同意</span>
           <a
             className={styles.agreementLink}
-            href="#"
-            onClick={(e) => {
-              e.preventDefault();
-              handleOpenAgreement();
-            }}
+            href={RECHARGE_AGREEMENT_HREF}
+            target="_blank"
+            rel="noopener noreferrer"
           >
             《充值协议》
           </a>
         </div>
       </Modal>
-
-      <Modal
-        open={showAgreement}
-        title={agreement?.title ?? '充值协议'}
-        footer={null}
-        onCancel={() => setShowAgreement(false)}
-        width="min(560px, calc(100vw - 48px))"
-        zIndex={130}
-        classNames={{ body: styles.agreementBody }}
-      >
-        <p className={styles.agreementText}>
-          {agreement ? agreement.content : '协议加载中…'}
-        </p>
-      </Modal>
-    </>
   );
 }

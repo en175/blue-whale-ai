@@ -486,19 +486,3 @@
 .agreementLink:hover {
   text-decoration: underline;
 }
-
-.agreementBody {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-height: 52vh;
-  overflow-y: auto;
-}
-
-.agreementText {
-  margin: 0;
-  font-size: var(--font-size-md);
-  color: #bbb;
-  line-height: 1.9;
-  white-space: pre-wrap;
-}
