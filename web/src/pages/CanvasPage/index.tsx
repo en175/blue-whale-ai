@@ -95,8 +95,6 @@ export default function CanvasPage() {
   const [videoPickResult, setVideoPickResult] = useState<{ ts: number; item: BottomRefItem } | null>(null);
   /** 画布节点选取结果（ts 驱动注入视频对话框参考图片） */
   const [videoDlgImagePickResult, setVideoDlgImagePickResult] = useState<{ ts: number; item: BottomRefItem } | null>(null);
-  /** 画布节点选取结果（ts 驱动注入音频对话框参考） */
-  const [audioPickResult, setAudioPickResult] = useState<{ ts: number; item: { id: string; src: string; name: string; assetId?: string | number } } | null>(null);
   /** 画布节点选取结果（ts 驱动注入商品卡） */
   const [productPickResult, setProductPickResult] = useState<{ ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string } } | null>(null);
   /** 画布节点选取结果（ts 驱动注入资产卡） */
@@ -901,16 +899,6 @@ export default function CanvasPage() {
           type: 'video',
           assetId: readNodeAssetId(data),
         },
-      });
-    } else if (pickMode === 'audio' && isReadyMedia && data.mediaType === 'audio') {
-      setAudioPickResult({
-        ts: Date.now(),
-        item: {
-            id: `node-${node.id}`,
-            src: data.src as string,
-            name: (data.fileName as string) || node.id,
-            assetId: readNodeAssetId(data),
-          },
       });
     } else if (pickMode === 'product' && isReadyMedia && data.mediaType !== 'audio') {
       // 商品卡发起的图片/视频节点选取 → ts 驱动注入目标商品卡
@@ -2191,33 +2179,9 @@ export default function CanvasPage() {
     [mediaNodes],
   );
 
-  /** 音频对话发送：参考音频解析 assetId（节点带 ID 直传 / 本地走三步上传）→ 创建音频生成任务 */
-  const handleAudioDialogSend = async (text: string, modelId: string, refs: AudioRefItem[]) => {
-    const inputAssetIds: string[] = [];
-    let failedCount = 0;
-    for (const r of refs) {
-      // 节点选取已有 assetId 直接复用；本地上传走三步上传换取 assetId
-      if (r.assetId != null) {
-        inputAssetIds.push(String(r.assetId));
-        continue;
-      }
-      let fileToUpload: File | null = r.file ?? null;
-      if (!fileToUpload && /^https?:/.test(r.src)) {
-        fileToUpload = await fetchUrlAsFile(r.src, r.name, 'audio/mpeg');
-      }
-      if (fileToUpload) {
-        const uploaded = await uploadFileToAsset(fileToUpload, 'audio');
-        if (uploaded) {
-          inputAssetIds.push(uploaded.asset_id);
-          continue;
-        }
-      }
-      failedCount += 1;
-    }
-    if (failedCount > 0) {
-      showToast('warn', failedCount === refs.length ? '参考音频上传失败，请重试' : `${failedCount} 个参考音频上传失败，已跳过`);
-    }
-    startGenerationJob('audio', { prompt: text, model_id: modelId }, inputAssetIds.length > 0 ? inputAssetIds : undefined);
+  /** 音频对话发送：创建音频生成任务（无参考素材） */
+  const handleAudioDialogSend = async (text: string, modelId: string, _refs: AudioRefItem[]) => {
+    startGenerationJob('audio', { prompt: text, model_id: modelId });
   };
 
   /** AI 音乐对话发送 */
@@ -2580,7 +2544,6 @@ export default function CanvasPage() {
           <div className={styles.pickHint}>
             {pickMode === 'image' && '到节点选择：点击画布中的图片节点带入参考图，点击空白处取消'}
             {pickMode === 'video' && '到节点选择：点击画布中的视频节点带入参考视频，点击空白处取消'}
-            {pickMode === 'audio' && '到节点选择：点击画布中的音频节点带入参考音频，点击空白处取消'}
             {pickMode === 'product' && '到节点选择：点击画布中的图片节点带入商品图，点击空白处取消'}
             {pickMode === 'asset' && '到节点选择：点击画布中的图片节点带入参考图，点击空白处取消'}
           </div>
@@ -2596,10 +2559,6 @@ export default function CanvasPage() {
               setShowAudioDialog(false);
               setShowMusicDialog(true);
             }}
-            onPickFromCanvas={() => { setPickMode('audio'); setPickTarget('audio'); }}
-            pickMode={pickMode === 'audio'}
-            externalPick={audioPickResult}
-            onToast={(type, msg) => showToast(type, msg)}
           />
         )}
 
