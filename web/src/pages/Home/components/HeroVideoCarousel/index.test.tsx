@@ -127,7 +127,7 @@ describe('HeroVideoCarousel', () => {
     const videos = await mountCarousel();
 
     expect(videos).toHaveLength(2);
-    expect(videos[0].getAttribute('src')).toContain('desert.mp4');
+    expect(videos[0].getAttribute('src')).toContain('aurora.mp4');
     expect(videos[1].hasAttribute('src')).toBe(false);
     expect(loadMock).toHaveBeenCalled();
     expect(playMock).toHaveBeenCalled();
@@ -140,8 +140,7 @@ describe('HeroVideoCarousel', () => {
 
     setPlaybackPosition(videos[0], 5, 5 - HERO_PRELOAD_LEAD_SECONDS + 0.1);
     await emit(videos[0], 'timeupdate');
-    expect(videos[1].getAttribute('src')).toContain('ocean.mp4');
-    expect(videos.every((video) => !video.getAttribute('src')?.includes('color-burst.mp4'))).toBe(true);
+    expect(videos[1].getAttribute('src')).toContain('ring.mp4');
   });
 
   it('does not reload the current source when it becomes ready', async () => {
@@ -151,7 +150,7 @@ describe('HeroVideoCarousel', () => {
     await emit(videos[0], 'canplay');
 
     expect(loadMock).not.toHaveBeenCalled();
-    expect(videos[0].getAttribute('src')).toContain('desert.mp4');
+    expect(videos[0].getAttribute('src')).toContain('aurora.mp4');
     expect(videos[1].hasAttribute('src')).toBe(false);
   });
 
@@ -175,8 +174,8 @@ describe('HeroVideoCarousel', () => {
     await emit(videos[0], 'timeupdate');
     await emit(videos[1], 'canplay');
 
-    expect(videos[0].getAttribute('src')).toContain('desert.mp4');
-    expect(videos[1].getAttribute('src')).toContain('ocean.mp4');
+    expect(videos[0].getAttribute('src')).toContain('aurora.mp4');
+    expect(videos[1].getAttribute('src')).toContain('ring.mp4');
     expect(videos[0].className).toContain('videoVisible');
     expect(videos[1].className).not.toContain('videoVisible');
 
@@ -186,21 +185,21 @@ describe('HeroVideoCarousel', () => {
 
     await act(async () => vi.advanceTimersByTime(HERO_TRANSITION_MS));
     expect(videos[0].hasAttribute('src')).toBe(false);
-    expect(videos[1].getAttribute('src')).toContain('ocean.mp4');
+    expect(videos[1].getAttribute('src')).toContain('ring.mp4');
 
     setPlaybackPosition(videos[1], 5, 4.2);
     await emit(videos[1], 'timeupdate');
-    expect(videos[0].getAttribute('src')).toContain('color-burst.mp4');
+    expect(videos[0].getAttribute('src')).toContain('aurora.mp4');
     await emit(videos[0], 'canplay');
     setPlaybackPosition(videos[1], 5, 5 - HERO_TRANSITION_LEAD_SECONDS + 0.01);
     await emit(videos[1], 'timeupdate');
     await act(async () => vi.advanceTimersByTime(HERO_TRANSITION_MS));
     expect(videos[1].hasAttribute('src')).toBe(false);
-    expect(videos[0].getAttribute('src')).toContain('color-burst.mp4');
+    expect(videos[0].getAttribute('src')).toContain('aurora.mp4');
 
     setPlaybackPosition(videos[0], 5, 4.2);
     await emit(videos[0], 'timeupdate');
-    expect(videos[1].getAttribute('src')).toContain('desert.mp4');
+    expect(videos[1].getAttribute('src')).toContain('ring.mp4');
   });
 
   it('pauses outside the viewport and when the page is hidden', async () => {
@@ -219,7 +218,7 @@ describe('HeroVideoCarousel', () => {
 
   it('uses the first poster and unloads video sources for reduced motion', async () => {
     const videos = await mountCarousel();
-    expect(videos[0].getAttribute('src')).toContain('desert.mp4');
+    expect(videos[0].getAttribute('src')).toContain('aurora.mp4');
 
     reducedMotion = true;
     act(() => {
@@ -231,7 +230,7 @@ describe('HeroVideoCarousel', () => {
     await act(async () => undefined);
 
     expect(videos.every((video) => !video.hasAttribute('src'))).toBe(true);
-    expect(container.querySelector('img')?.getAttribute('src')).toContain('desert-poster.jpg');
+    expect(container.querySelector('img')?.getAttribute('src')).toContain('aurora-poster.jpg');
   });
 
   it('does not attach any video source when reduced motion is enabled initially', async () => {
@@ -240,7 +239,7 @@ describe('HeroVideoCarousel', () => {
 
     expect(videos.every((video) => !video.hasAttribute('src'))).toBe(true);
     expect(playMock).not.toHaveBeenCalled();
-    expect(container.querySelector('img')?.getAttribute('src')).toContain('desert-poster.jpg');
+    expect(container.querySelector('img')?.getAttribute('src')).toContain('aurora-poster.jpg');
   });
 
   it('cleans the transition timer and media elements when unmounted', async () => {
