@@ -165,7 +165,12 @@ async function materialRequest<T>(
   // 尝试解析 JSON，解析失败用空对象兜底
   const json: unknown = text ? JSON.parse(text) : {};
 
-  const fail = (status: number, message: string, code: number | string): never => {
+  // 显式标注变量类型为 never 返回，TS 6 才能将 fail() 调用识别为函数终点
+  const fail: (status: number, message: string, code: number | string) => never = (
+    status,
+    message,
+    code,
+  ) => {
     const err = new ApiError(status, message, code as number);
     if (status === 401) {
       // 会话失效：弹登录续接（对齐 http.ts apiFetch 行为），不重复 toast
