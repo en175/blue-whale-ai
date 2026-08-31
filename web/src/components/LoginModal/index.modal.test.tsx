@@ -2,6 +2,10 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  PLATFORM_PRIVACY_POLICY_HREF,
+  USER_SERVICES_AGREEMENT_HREF,
+} from './agreements';
 import LoginModal from './index';
 
 let root: Root;
@@ -68,5 +72,30 @@ describe('LoginModal shell', () => {
     expect(document.body.textContent).toContain('已有账号？返回登录');
     expect(document.body.querySelector('input[placeholder="账号（至少3位）"]')).not.toBeNull();
     expect(document.body.querySelector('input[placeholder="密码（8-20位）"]')).not.toBeNull();
+  });
+
+  it('登录和注册表单分别打开用户协议与隐私政策', async () => {
+    await renderLoginModal();
+
+    const expectedHrefs = [USER_SERVICES_AGREEMENT_HREF, PLATFORM_PRIVACY_POLICY_HREF];
+    const loginLinks = Array.from(document.body.querySelectorAll<HTMLAnchorElement>('a'));
+    expect(loginLinks.map((link) => link.textContent)).toEqual(['《用户协议》', '《隐私政策》']);
+    expect(loginLinks.map((link) => link.href)).toEqual(expectedHrefs);
+    for (const link of loginLinks) {
+      expect(link.target).toBe('_blank');
+      expect(link.rel).toBe('noreferrer');
+    }
+
+    await act(async () => {
+      root.render(createElement(LoginModal, { onClose: vi.fn(), initialMode: 'register' }));
+    });
+
+    const registerLinks = Array.from(document.body.querySelectorAll<HTMLAnchorElement>('a'));
+    expect(registerLinks.map((link) => link.textContent)).toEqual(['《用户协议》', '《隐私政策》']);
+    expect(registerLinks.map((link) => link.href)).toEqual(expectedHrefs);
+    for (const link of registerLinks) {
+      expect(link.target).toBe('_blank');
+      expect(link.rel).toBe('noreferrer');
+    }
   });
 });
