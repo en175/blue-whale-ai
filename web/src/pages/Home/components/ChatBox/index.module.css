@@ -83,6 +83,11 @@
 }
 
 /* ---- 输入框 ---- */
+.textareaWrap {
+  position: relative;
+  width: 100%;
+}
+
 .textarea {
   width: 100%;
   box-sizing: border-box;
@@ -95,13 +100,24 @@
   color: var(--chat-fg);
   font-size: var(--font-size-md);
   line-height: 1.6;
-  padding: var(--spacing-xs) 0;
+  padding: var(--spacing-xs) 0 1.25rem 0;
   font-family: inherit;
 }
 
 .textarea::placeholder {
   color: var(--chat-fg-muted);
   opacity: 1;
+}
+
+.textareaCount {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  font-size: 0.75rem;
+  color: var(--chat-fg-muted);
+  line-height: 1;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---- 底部工具栏 ---- */
