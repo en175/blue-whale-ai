@@ -3,6 +3,7 @@
  * 外壳走共用 Modal（Portal / 遮罩 / ESC / 关闭），表单与鉴权逻辑保持不变
  * ============================================ */
 import { useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import {
   loginWithPassword,
   registerWithPassword,
@@ -32,6 +33,7 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
   const [mode, setMode] = useState<Mode>(initialMode);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [confirmPwd, setConfirmPwd] = useState('');
   const [email, setEmail] = useState('');
   const [agreed, setAgreed] = useState(false);
@@ -105,6 +107,7 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
   /* ---------- 切换模式时清空状态 ---------- */
   const switchMode = (target: Mode) => {
     setMode(target);
+    setPasswordVisible(false);
     setError('');
     setSuccess('');
   };
@@ -140,16 +143,27 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
             onChange={(e) => setUsername(e.target.value)}
             autoFocus
           />
-          <input
-            className={styles.input}
-            type="password"
-            placeholder="请输入密码"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submitLogin();
-            }}
-          />
+          <div className={styles.passwordField}>
+            <input
+              className={styles.input}
+              type={passwordVisible ? 'text' : 'password'}
+              placeholder="请输入密码"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitLogin();
+              }}
+            />
+            <button
+              type="button"
+              className={styles.passwordToggle}
+              aria-label={passwordVisible ? '隐藏密码' : '显示密码'}
+              aria-pressed={passwordVisible}
+              onClick={() => setPasswordVisible((visible) => !visible)}
+            >
+              {passwordVisible ? <EyeOff size={20} /> : <Eye size={20} />}
+            </button>
+          </div>
 
           {error && <div className={styles.error}>{error}</div>}
 

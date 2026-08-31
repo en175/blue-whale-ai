@@ -1,7 +1,7 @@
 /* ============================================
  * ChatBox 首页对话输入框：模型/技能/附件配置与发送
  * ============================================ */
-import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X } from 'lucide-react';
 import SkillModal from '../SkillModal';
@@ -16,6 +16,7 @@ import { setAgentHandoff } from '@/utils/agent-handoff';
 import { classifyRefOverflow } from '@/utils/ref-overflow';
 import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
+import { limitPromptInput, MAX_PROMPT_INPUT_LENGTH } from './promptInput';
 
 /** 选项卡定义 */
 const tabItems = [
@@ -39,7 +40,7 @@ const MAX_AGENT_VIDEOS = 3;
 const MAX_AGENT_AUDIO = 3;
 
 /** 输入框字数上限（与画布对话框一致） */
-const MAX_INPUT = 1000;
+const MAX_INPUT = MAX_PROMPT_INPUT_LENGTH;
 
 /** 生成时间戳项目名（与画布新建项目命名一致） */
 function makeProjectName(): string {
@@ -90,6 +91,7 @@ function RatioIcon({ ratio, size = 22 }: { ratio: string; size?: number }) {
 export default function ChatBox({ draft }: { draft?: { text: string; ts: number; mediaType: 'video' | 'image' } | null }) {
   const [activeTab, setActiveTab] = useState('agent');
   const [inputValue, setInputValue] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
   const user = useSyncExternalStore(subscribe, getCurrentUser);
   /** 未登录点击发送时弹登录框 */
@@ -108,6 +110,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft?.ts]);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [activeTab, inputValue]);
   /** 智能体 tab 附件（+ 上传 图片/视频/音频）——保留原始 File，发送时经 handoff 带入画布 */
   const [agentFiles, setAgentFiles] = useState<
     { id: string; url: string; kind: 'image' | 'video' | 'audio'; name: string; file: File }[]
@@ -516,6 +525,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     }
   };
 
+  const handleInputChange = (value: string) => {
+    const next = limitPromptInput(value, inputValue);
+    setInputValue(next.value);
+    if (next.reachedLimit) showToast(`输入内容最多 ${MAX_INPUT} 个字符`);
+  };
+
   /** 三个 textarea 共用的 composition 事件处理 */
   const handleCompositionStart = () => { composingRef.current = true; };
   const handleCompositionEnd = () => { composingRef.current = false; };
@@ -710,11 +725,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               </div>
               {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
               <textarea
+                ref={textareaRef}
                 className={styles.textarea}
                 placeholder={`通过直接控制提示词快速生成单段片段。\n上传参考：图片最多 ${videoMaxImages} 张 / 视频最多 ${MAX_VIDEOS} 个；首尾帧模式可上传首帧与尾帧参考。`}
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
-                maxLength={MAX_INPUT}
+                onChange={(e) => handleInputChange(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onCompositionStart={handleCompositionStart}
                 onCompositionEnd={handleCompositionEnd}
@@ -907,11 +922,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
               </div>
               {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
               <textarea
+                ref={textareaRef}
                 className={styles.textarea}
                 placeholder={'从文字与参考图生成 AI 图片。\n描述你想生成的图片，已上传的参考将引导风格与细节。'}
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
-                maxLength={MAX_INPUT}
+                onChange={(e) => handleInputChange(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onCompositionStart={handleCompositionStart}
                 onCompositionEnd={handleCompositionEnd}
@@ -1089,11 +1104,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
               {/* 提示词输入框 */}
               <textarea
+                ref={textareaRef}
                 className={styles.textarea}
                 placeholder="描述你想制作的视频，微电影、产品广告、社媒视频等都可支持。适合 1-5 分钟视频。"
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
-                maxLength={MAX_INPUT}
+                onChange={(e) => handleInputChange(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onCompositionStart={handleCompositionStart}
                 onCompositionEnd={handleCompositionEnd}

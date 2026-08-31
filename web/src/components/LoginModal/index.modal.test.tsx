@@ -48,6 +48,19 @@ describe('LoginModal shell', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('登录密码可在显示与隐藏状态之间切换', async () => {
+    await renderLoginModal();
+    const password = document.body.querySelector<HTMLInputElement>('input[placeholder="请输入密码"]');
+    const toggle = document.body.querySelector<HTMLButtonElement>('button[aria-label="显示密码"]');
+
+    expect(password?.type).toBe('password');
+
+    await act(async () => toggle?.click());
+
+    expect(password?.type).toBe('text');
+    expect(document.body.querySelector('button[aria-label="隐藏密码"]')).not.toBeNull();
+  });
+
   it('initialMode=register 时展示注册面板', async () => {
     await renderLoginModal({ initialMode: 'register' });
 
