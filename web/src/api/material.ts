@@ -165,7 +165,7 @@ async function materialRequest<T>(
   // 尝试解析 JSON，解析失败用空对象兜底
   const json: unknown = text ? JSON.parse(text) : {};
 
-  const fail = (status: number, message: string, code: number | string) => {
+  const fail = (status: number, message: string, code: number | string): never => {
     const err = new ApiError(status, message, code as number);
     if (status === 401) {
       // 会话失效：弹登录续接（对齐 http.ts apiFetch 行为），不重复 toast
@@ -214,7 +214,7 @@ async function materialRequest<T>(
   }
 
   // 5. 兜底（格式无法识别时也走统一出口，避免静默失败）
-  fail(res.status, `素材库请求失败（${res.status}）`, res.status);
+  return fail(res.status, `素材库请求失败（${res.status}）`, res.status);
 }
 
 /* ---------- 素材组接口 ---------- */
