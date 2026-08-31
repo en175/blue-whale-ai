@@ -855,6 +855,11 @@ export default function CanvasPage() {
       node.type === 'mediaNode' &&
       typeof data.src === 'string' &&
       !data.genStatus;
+    // 上传中的节点（blob 预览、无 assetId）：暂不可选取，否则发送时素材会被静默丢弃
+    if (isReadyMedia && (data.src as string).startsWith('blob:')) {
+      showToast('warn', '素材上传中，请稍候再选择');
+      return;
+    }
     if (pickMode === 'image' && isReadyMedia && data.mediaType !== 'video') {
       if (pickTarget === 'video') {
         // 视频对话框发起的图片节点选取 → 注入其参考图片
@@ -1675,6 +1680,7 @@ export default function CanvasPage() {
     // 解析引用：Asset- 前缀 = 素材库素材（走 *_material_id/reference_materials）；
     // 其余（本地 Asset id / 本地上传）走 asset 字段。两类不可混用于同一帧位（后端 400）。
     const resolved: Array<{ assetId: string | null; materialId: string | null; type: 'image' | 'video' }> = [];
+    let failedCount = 0;
     for (const r of refs) {
       // 素材库 ID 实测为小写 asset- 前缀（如 asset-20260820153209-6c9z8），大小写不敏感判定；
       // 本地 Asset id 为纯数字（BigInt），不冲突。
@@ -1683,12 +1689,14 @@ export default function CanvasPage() {
         continue;
       }
       const id = await resolveRefAssetId({ file: r.file, url: r.preview, name: `ref-${r.type}`, type: r.type, assetId: r.assetId });
+      if (id == null) failedCount += 1;
       resolved.push({ assetId: id, materialId: null, type: r.type });
     }
     if (opts.mode === 'keyframe') {
       const [first, last] = resolved;
       if (!first || !last || (!first.assetId && !first.materialId) || (!last.assetId && !last.materialId)) {
         console.warn('首尾帧素材上传失败，任务未创建');
+        showToast('error', '参考素材上传失败，任务未创建，请重试');
         return;
       }
       startGenerationJob('video', parameters, undefined, {
@@ -1705,6 +1713,10 @@ export default function CanvasPage() {
     const referenceMaterials = resolved
       .filter((r): r is { assetId: null; materialId: string; type: 'image' | 'video' } => r.materialId !== null)
       .map((r) => ({ id: r.materialId, type: r.type }));
+    // 素材解析失败的项会被过滤丢弃：toast 告知，避免用户误以为全部参考已生效
+    if (failedCount > 0) {
+      showToast('warn', failedCount === refs.length ? '参考素材上传失败，请重试' : `${failedCount} 个参考素材上传失败，已跳过`);
+    }
     startGenerationJob(
       'video',
       parameters,
