@@ -372,10 +372,15 @@
   aspect-ratio: 1;
 }
 
-.detailView .assetThumb img {
+.detailView .assetThumb img,
+.detailView .assetThumb video {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.detailView .assetThumb video {
+  pointer-events: none;
 }
 
 .detailView .assetSelectBtn {
@@ -412,6 +417,22 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.detailView .assetTypeBadge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px;
+  border-radius: 4px;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 500;
+  z-index: 1;
 }
 
 /* ============================================
@@ -641,6 +662,7 @@
   background-color: rgba(0, 0, 0, 0.6);
   border-radius: 24px;
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   z-index: 10;
 }
 

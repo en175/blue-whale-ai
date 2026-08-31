@@ -40,6 +40,11 @@ interface TosUploadClient {
     key: string;
     acl: "public-read";
   }): Promise<unknown>;
+  deleteMultiObjects(input: {
+    bucket: string;
+    quiet?: boolean;
+    objects: { key: string; versionId?: string }[];
+  }): Promise<{ data?: { Deleted?: unknown[]; Error?: unknown[] } }>;
 }
 
 const MIME_EXTENSIONS: Record<string, string> = {
@@ -209,6 +214,28 @@ export function createTosStorage(config: TosStorageConfig): {
           key: storageKey,
           acl: "public-read",
         });
+      },
+      async deleteMultiObjects(storageKeys) {
+        const keys = storageKeys.filter(Boolean);
+        if (keys.length === 0) return;
+        try {
+          const result = await client.deleteMultiObjects({
+            bucket: config.bucket,
+            quiet: true,
+            objects: keys.map((key) => ({ key })),
+          });
+          // SDK 把 Deleted/Error 放在响应 data 下（TosResponse.data），
+          // quiet 模式不回显 Deleted，只回显失败项；部分失败必须显式暴露（IKBMDM F6）。
+          const errors = result?.data?.Error ?? [];
+          if (errors.length > 0) {
+            throw new Error(
+              `TOS batch delete partial failure: ${JSON.stringify(errors)}`,
+            );
+          }
+        } catch (error) {
+          if (isNotFound(error)) return;
+          throw error;
+        }
       },
     },
   };

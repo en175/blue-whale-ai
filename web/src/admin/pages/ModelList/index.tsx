@@ -38,6 +38,66 @@ const pretty = (raw: string) => {
   }
 };
 
+/* ============ 特性 features 结构化字段定义 ============ */
+/** 已知布尔特性：字段名 → 展示名 + 可见能力类型（缺省则全部可见） */
+const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelType[] }> = {
+  reference_image: { label: '参考图 reference_image', types: ['image', 'video'] },
+  watermark: { label: '水印 watermark', types: ['image', 'video'] },
+  tools: { label: '工具 tools' },
+  stream: { label: '流式输出 stream', types: ['image'] },
+  sequential_image_generation: { label: '顺序生成 sequential_image_generation', types: ['image'] },
+  first_frame: { label: '首帧 first_frame', types: ['video'] },
+  last_frame: { label: '尾帧 last_frame', types: ['video'] },
+  first_last_frame: { label: '首尾帧 first_last_frame', types: ['video'] },
+  audio: { label: '音频 audio', types: ['video'] },
+};
+
+/** 已知数字特性：字段名 → 展示名 + 占位提示 + 可见能力类型 */
+const FEATURE_NUMBER_LABELS: Record<string, { label: string; types?: ModelType[]; placeholder: string }> = {
+  max_reference_images: { label: '参考图上限 max_reference_images', types: ['image', 'video'], placeholder: '如 10' },
+  quantity_max: { label: '单次生成数量 quantity_max', types: ['image'], placeholder: '如 1' },
+};
+
+/** 从 features 提取已知布尔开关（缺失按 false 处理） */
+const pickFeatureBooleans = (features: Record<string, unknown> = {}): Record<string, boolean> => {
+  const out: Record<string, boolean> = {};
+  for (const key of Object.keys(FEATURE_BOOL_LABELS)) {
+    out[key] = features[key] === true;
+  }
+  return out;
+};
+
+/** 从 features 提取已知数字字段（缺失/非数字 → 空串） */
+const pickFeatureNumbers = (features: Record<string, unknown> = {}): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const key of Object.keys(FEATURE_NUMBER_LABELS)) {
+    const v = features[key];
+    out[key] = typeof v === 'number' && Number.isFinite(v) ? String(v) : '';
+  }
+  return out;
+};
+
+/** 剔除已知字段后剩余 → 进入兜底 JSON 区 */
+const dropKnownFeatures = (features: Record<string, unknown> = {}): Record<string, unknown> => {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(features)) {
+    if (k in FEATURE_BOOL_LABELS || k in FEATURE_NUMBER_LABELS) continue;
+    out[k] = v;
+  }
+  return out;
+};
+
+/** 数字字段留空不写入 */
+const omitEmpty = (nums: Record<string, string>): Record<string, number> => {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(nums)) {
+    if (v.trim() === '') continue;
+    const n = Number(v);
+    if (Number.isFinite(n)) out[k] = n;
+  }
+  return out;
+};
+
 /** ISO 时间 → 本地展示 */
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });
 
@@ -291,7 +351,15 @@ function ModelFormModal({ initial, models, defaultType, onClose, onSubmit }: Mod
     initial?.supported_durations ? pretty(JSON.stringify(initial.supported_durations)) : ''
   );
   const [formats, setFormats] = useState(initial ? pretty(JSON.stringify(initial.supported_formats)) : '[]');
-  const [features, setFeatures] = useState(initial ? pretty(JSON.stringify(initial.features)) : '{}');
+  const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>(
+    initial ? pickFeatureBooleans(initial.features) : {}
+  );
+  const [featureNumbers, setFeatureNumbers] = useState<Record<string, string>>(
+    initial ? pickFeatureNumbers(initial.features) : {}
+  );
+  const [extraFeatures, setExtraFeatures] = useState(
+    initial ? pretty(JSON.stringify(dropKnownFeatures(initial.features))) : '{}'
+  );
   const [defaultSize, setDefaultSize] = useState(initial?.default_size ?? '');
   const [defaultRatio, setDefaultRatio] = useState(initial?.default_aspect_ratio ?? '');
   const [defaultFormat, setDefaultFormat] = useState(initial?.default_format ?? '');
@@ -314,7 +382,9 @@ function ModelFormModal({ initial, models, defaultType, onClose, onSubmit }: Mod
     setRatios(pretty(JSON.stringify(src.supported_aspect_ratios)));
     setDurations(src.supported_durations ? pretty(JSON.stringify(src.supported_durations)) : '');
     setFormats(pretty(JSON.stringify(src.supported_formats)));
-    setFeatures(pretty(JSON.stringify(src.features)));
+    setFeatureFlags(pickFeatureBooleans(src.features));
+    setFeatureNumbers(pickFeatureNumbers(src.features));
+    setExtraFeatures(pretty(JSON.stringify(dropKnownFeatures(src.features))));
     setDefaultSize(src.default_size ?? '');
     setDefaultRatio(src.default_aspect_ratio ?? '');
     setDefaultFormat(src.default_format ?? '');
@@ -344,12 +414,23 @@ function ModelFormModal({ initial, models, defaultType, onClose, onSubmit }: Mod
     const sRatios = parseJson<string[]>(ratios, '比例', []);
     const sDurations = parseJson<number[]>(durations, '时长', []);
     const sFormats = parseJson<string[]>(formats, '格式', []);
-    const sFeatures = parseJson<Record<string, unknown>>(features, '特性', {});
-    if (sSizes === null || sRatios === null || sDurations === null || sFormats === null || sFeatures === null) return;
+    const sExtraFeatures = parseJson<Record<string, unknown>>(extraFeatures, '其他特性', {});
+    if (sSizes === null || sRatios === null || sDurations === null || sFormats === null || sExtraFeatures === null) return;
     if (!Array.isArray(sSizes) || !Array.isArray(sRatios) || !Array.isArray(sDurations) || !Array.isArray(sFormats)) {
       setError('尺寸/比例/时长/格式须为 JSON 数组。');
       return;
     }
+    // 合并结构化开关/数字与兜底 JSON → 完整 features 对象
+    // 布尔开关只写入 true 或原数据已存在的键（避免"假变更"给未点过的开关补显式 false）
+    const mergedFeatures: Record<string, unknown> = {
+      ...sExtraFeatures,
+      ...omitEmpty(featureNumbers),
+      ...Object.fromEntries(
+        Object.entries(featureFlags).filter(
+          ([k, v]) => v || (initial?.features != null && k in initial.features)
+        )
+      ),
+    };
     let dd: number | null = null;
     if (defaultDuration.trim()) {
       dd = parseInt(defaultDuration, 10);
@@ -374,7 +455,7 @@ function ModelFormModal({ initial, models, defaultType, onClose, onSubmit }: Mod
         if (JSON.stringify(durVal) !== JSON.stringify(initial.supported_durations ?? null))
           changes.supported_durations = durVal;
         if (JSON.stringify(sFormats) !== JSON.stringify(initial.supported_formats)) changes.supported_formats = sFormats;
-        if (JSON.stringify(sFeatures) !== JSON.stringify(initial.features)) changes.features = sFeatures;
+        if (JSON.stringify(mergedFeatures) !== JSON.stringify(initial.features)) changes.features = mergedFeatures;
         const ds = defaultSize.trim() || null;
         if (ds !== (initial.default_size ?? null)) changes.default_size = ds;
         const dr = defaultRatio.trim() || null;
@@ -405,7 +486,7 @@ function ModelFormModal({ initial, models, defaultType, onClose, onSubmit }: Mod
           ...(defaultFormat.trim() ? { default_format: defaultFormat.trim() } : {}),
           ...(defaultRatio.trim() ? { default_aspect_ratio: defaultRatio.trim() } : {}),
           default_duration: dd,
-          features: sFeatures,
+          features: mergedFeatures,
           enabled,
         };
         await onSubmit(params);
@@ -523,7 +604,6 @@ function ModelFormModal({ initial, models, defaultType, onClose, onSubmit }: Mod
           </div>
 
           <div className={styles.sectionTitle}>能力 JSON 列（原始 JSON 编辑，保存时校验）</div>
-
           <div className={styles.label}>尺寸 supported_sizes</div>
           <textarea className={styles.textarea} value={sizes} onChange={(e) => setSizes(e.target.value)} />
 
@@ -541,8 +621,52 @@ function ModelFormModal({ initial, models, defaultType, onClose, onSubmit }: Mod
           <div className={styles.label}>格式 supported_formats</div>
           <textarea className={styles.textarea} value={formats} onChange={(e) => setFormats(e.target.value)} />
 
-          <div className={styles.label}>特性 features</div>
-          <textarea className={styles.textareaSm} value={features} onChange={(e) => setFeatures(e.target.value)} />
+          <div className={styles.sectionTitle}>特性 features（结构化）</div>
+
+          <div className={styles.featureGroup}>
+            {Object.entries(FEATURE_BOOL_LABELS)
+              .filter(([, meta]) => !meta.types || meta.types.includes(type))
+              .map(([key, meta]) => (
+                <div className={styles.switchRow} key={key}>
+                  <span className={styles.switchLabel}>{meta.label}</span>
+                  <button
+                    className={`${styles.switch} ${featureFlags[key] ? styles.switchOn : ''}`}
+                    onClick={() => setFeatureFlags((p) => ({ ...p, [key]: !p[key] }))}
+                  >
+                    <span className={styles.knob} />
+                  </button>
+                </div>
+              ))}
+          </div>
+
+          <div className={styles.grid2}>
+            {Object.entries(FEATURE_NUMBER_LABELS)
+              .filter(([, meta]) => !meta.types || meta.types.includes(type))
+              .map(([key, meta]) => (
+                <div key={key}>
+                  <div className={styles.label}>
+                    {meta.label} <span className={styles.labelSub}>（留空不写入）</span>
+                  </div>
+                  <input
+                    className={styles.input}
+                    type="number"
+                    min={0}
+                    placeholder={meta.placeholder}
+                    value={featureNumbers[key] ?? ''}
+                    onChange={(e) => setFeatureNumbers((p) => ({ ...p, [key]: e.target.value }))}
+                  />
+                </div>
+              ))}
+          </div>
+
+          <details className={styles.featureExtra}>
+            <summary>其他特性（兜底 JSON，未识别字段在此维护）</summary>
+            <textarea
+              className={styles.textareaSm}
+              value={extraFeatures}
+              onChange={(e) => setExtraFeatures(e.target.value)}
+            />
+          </details>
 
           <div className={styles.grid2}>
             <div>

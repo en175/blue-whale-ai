@@ -1,11 +1,11 @@
 /* ============================================
- * http 统一请求封装：兼容后端两种响应包络
- * - 用户侧：{code:200, msg, data}
- * - 后台侧：{success:true, data}
- * - 登录态走 HttpOnly 会话 cookie（浏览器自动携带，JS 不附加令牌）；非 auth 接口 401 时清空本地会话
- * - 开发期 /api 前缀由 vite 代理转发到测试环境
+ * http 统一请求封装
+ * - 产品：{code:200, data, msg}；code===200 解包 data，否则抛 ApiError（文案取 msg）并默认 toast
+ * - 后台：{success:true, data} 仍兼容
+ * - 登录态走 HttpOnly cookie；非 auth 接口 401：已登录则弹窗续接，未登录才清会话
  * ============================================ */
-import { setSession } from '@/utils/auth';
+import { toast } from 'sonner';
+import { handleUnauthorized } from '@/utils/auth';
 
 /** 接口路径前缀 */
 export const API_PREFIX = '/api';
@@ -42,14 +42,36 @@ export function isApiError(e: unknown): e is ApiError {
   return e instanceof ApiError;
 }
 
+/** 在标准 fetch init 上增加 silent：失败仍抛 ApiError，但不 toast（轮询/水合/登录探测）。 */
+export type ApiRequestInit = RequestInit & { silent?: boolean };
+
+function toFetchInit(init?: ApiRequestInit): RequestInit | undefined {
+  if (!init) return undefined;
+  const { silent: _silent, ...rest } = init;
+  return rest;
+}
+
 interface Envelope<T> {
   code?: number;
   success?: boolean;
   msg?: string | null;
   message?: string;
+  /** 后台 AdminException 失败包络：{ success:false, error } */
+  error?: string;
   /** 包络级警告（后台侧同步 Go 折扣失败等场景返回，成功时可选） */
   warning?: string;
   data: T | null;
+}
+
+/** 失败文案：产品 msg，其次 message / 后台 error。 */
+export function readApiErrorMessage(
+  body: Pick<Envelope<unknown>, 'msg' | 'message' | 'error'> | undefined,
+  status: number,
+): string {
+  for (const value of [body?.msg, body?.message, body?.error]) {
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return `请求失败（${status}）`;
 }
 
 /** 基础 fetch：附加 Content-Type（登录态走 HttpOnly cookie），处理 401 会话失效 */
@@ -66,7 +88,7 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
 
   const res = await fetch(path, { ...init, headers });
 
-  // 凭证失效：清空本地会话（auth 类接口除外，避免登录失败误清；
+  // 凭证失效：已登录则弹登录续接，未登录才清会话（auth 类接口除外，避免登录失败误清；
   // admin/session 对非管理员返回 401 属正常业务结果，同样豁免；
   // agent 计费查账把**上游 new-api 的状态码原样透传**，那个 401 说的是"上游拒了这张
   // sk token"，不是"你在蓝鲸的登录失效了"——见下方 BILLING_PREFIX 的说明）
@@ -76,7 +98,7 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
     !path.startsWith(AGENT_BILLING_PREFIX) &&
     path !== `${API_PREFIX}/admin/session`
   ) {
-    setSession(null);
+    handleUnauthorized();
   }
   return res;
 }
@@ -86,24 +108,28 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
  * 在结果层而非 Response 层去重，避免响应体只能消费一次的问题 */
 const inflight = new Map<string, Promise<{ data: unknown; warning?: string }>>();
 
-function dedupKey(path: string, init?: RequestInit): string {
-  const headers = new Headers(init?.headers);
+function dedupKey(path: string, init?: ApiRequestInit): string {
+  const fetchInit = toFetchInit(init);
+  const headers = new Headers(fetchInit?.headers);
   const headerStr = [...headers.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join('&');
-  return `${path}|${headerStr}|${init?.body ?? ''}`;
+  return `${path}|${headerStr}|${fetchInit?.body ?? ''}`;
 }
 
-/** 单次请求 + 包络解析：成功返回 data 与可选警告，失败抛 ApiError（msg 透传后端提示） */
-async function doRequest<T>(path: string, init?: RequestInit): Promise<{ data: T; warning?: string }> {
-  const res = await apiFetch(path, init);
+/** 单次请求 + 包络解析：成功返回 data；失败抛 ApiError，默认 toast(msg) */
+async function doRequest<T>(path: string, init?: ApiRequestInit): Promise<{ data: T; warning?: string }> {
+  const silent = init?.silent === true;
+  const res = await apiFetch(path, toFetchInit(init));
   const body = (await res.json().catch(() => undefined)) as Envelope<T> | undefined;
 
   const ok = body !== undefined && (body.code === 200 || body.success === true);
   if (!res.ok || !ok) {
-    throw new ApiError(
+    const err = new ApiError(
       res.status,
-      body?.msg ?? body?.message ?? `请求失败（${res.status}）`,
+      readApiErrorMessage(body, res.status),
       body?.code ?? res.status
     );
+    if (!silent && err.status !== 401) toast.error(err.message);
+    throw err;
   }
   return { data: body.data as T, warning: body.warning };
 }
@@ -111,7 +137,7 @@ async function doRequest<T>(path: string, init?: RequestInit): Promise<{ data: T
 /** 统一请求（附带包络级 warning）：GET 在途去重，写操作每次实发 */
 export async function apiRequestWithMeta<T>(
   path: string,
-  init?: RequestInit
+  init?: ApiRequestInit
 ): Promise<{ data: T; warning?: string }> {
   const method = (init?.method ?? 'GET').toUpperCase();
   if (method !== 'GET') return doRequest<T>(path, init);
@@ -123,29 +149,32 @@ export async function apiRequestWithMeta<T>(
   return p;
 }
 
-/** 统一请求：成功返回 data，失败抛 ApiError（msg 透传后端提示） */
-export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+/** 统一请求：成功返回 data，失败抛 ApiError（默认 toast msg） */
+export async function apiRequest<T>(path: string, init?: ApiRequestInit): Promise<T> {
   const { data } = await apiRequestWithMeta<T>(path, init);
   return data;
 }
 
-/** 常用方法快捷入口 */
+/** 常用方法快捷入口；init.silent 失败不 toast */
 export const http = {
-  get: <T>(path: string) => apiRequest<T>(path, { method: 'GET' }),
-  post: <T>(path: string, body?: unknown) =>
+  get: <T>(path: string, init?: ApiRequestInit) => apiRequest<T>(path, { ...init, method: 'GET' }),
+  post: <T>(path: string, body?: unknown, init?: ApiRequestInit) =>
     apiRequest<T>(path, {
+      ...init,
       method: 'POST',
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
-  put: <T>(path: string, body?: unknown) =>
+  put: <T>(path: string, body?: unknown, init?: ApiRequestInit) =>
     apiRequest<T>(path, {
+      ...init,
       method: 'PUT',
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
-  patch: <T>(path: string, body?: unknown) =>
+  patch: <T>(path: string, body?: unknown, init?: ApiRequestInit) =>
     apiRequest<T>(path, {
+      ...init,
       method: 'PATCH',
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
-  del: <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' }),
+  del: <T>(path: string, init?: ApiRequestInit) => apiRequest<T>(path, { ...init, method: 'DELETE' }),
 };

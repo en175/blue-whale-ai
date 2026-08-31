@@ -16,6 +16,7 @@
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-lg);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   z-index: 20;
 }
 
@@ -129,6 +130,7 @@
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-lg);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 

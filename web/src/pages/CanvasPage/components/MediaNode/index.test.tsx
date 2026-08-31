@@ -16,16 +16,32 @@ function labels() {
   return [...mountNode.querySelectorAll('button')].map((button) => button.textContent?.trim() || button.getAttribute('title') || '');
 }
 
-async function renderNode(mediaType: 'image' | 'video' | 'audio') {
+async function renderNode(
+  mediaType: 'image' | 'video' | 'audio',
+  extra?: {
+    id?: string;
+    selected?: boolean;
+    genStatus?: 'generating' | 'failed' | 'cancelled';
+    progress?: number;
+    errorText?: string;
+  },
+) {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
   await act(async () => {
     root.render(
       createElement(MediaNode, {
-        id: `${mediaType}-node`,
-        data: { mediaType, src: 'blob:test', fileName: `${mediaType}.bin` },
-        selected: true,
+        id: extra?.id ?? `${mediaType}-node`,
+        data: {
+          mediaType,
+          src: 'blob:test',
+          fileName: `${mediaType}.bin`,
+          genStatus: extra?.genStatus,
+          progress: extra?.progress,
+          errorText: extra?.errorText,
+        },
+        selected: extra?.selected ?? true,
         type: 'mediaNode',
         dragging: false,
         zIndex: 1,
@@ -63,5 +79,66 @@ describe('MediaNode selected toolbar', () => {
   it('keeps @ and generate-video on a video node', async () => {
     await renderNode('video');
     expect(labels()).toEqual(['重新编辑', '生成视频', '提取音频', '详情', '下载', '添加到 Agent 聊天']);
+  });
+});
+
+describe('MediaNode generating overlay', () => {
+  it('hides fake progress copy and bar for image generation, keeps cancel', async () => {
+    await renderNode('image', { genStatus: 'generating', progress: 0, selected: false });
+    expect(mountNode.textContent).not.toContain('正在生成');
+    expect(mountNode.textContent).not.toContain('0%');
+    expect(mountNode.querySelector('[role="progressbar"]')).toBeNull();
+    expect(labels()).toEqual(['取消生成']);
+  });
+
+  it('hides fake progress copy and bar for video generation, keeps cancel', async () => {
+    await renderNode('video', { genStatus: 'generating', progress: 0, selected: false });
+    expect(mountNode.textContent).not.toContain('正在生成');
+    expect(mountNode.textContent).not.toContain('0%');
+    expect(mountNode.querySelector('[role="progressbar"]')).toBeNull();
+    expect(labels()).toEqual(['取消生成']);
+  });
+
+  it('keeps extract progress copy and bar for audio extraction', async () => {
+    await renderNode('audio', {
+      id: 'media-extract-job-1',
+      genStatus: 'generating',
+      progress: 42,
+      selected: false,
+    });
+    expect(mountNode.textContent).toContain('正在提取音频 42%');
+    expect(mountNode.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('42');
+    expect(labels()).not.toContain('取消生成');
+  });
+});
+
+describe('MediaNode failed overlay', () => {
+  it('shows the backend error message instead of 生成失败 for image cards', async () => {
+    await renderNode('image', {
+      genStatus: 'failed',
+      errorText: '账户余额不足，请充值后重试',
+      selected: false,
+    });
+    expect(mountNode.textContent).toContain('账户余额不足，请充值后重试');
+    expect(mountNode.textContent).not.toContain('生成失败');
+    expect(labels()).toEqual(['重试']);
+  });
+
+  it('falls back to 生成失败 when the video card has no backend message', async () => {
+    await renderNode('video', { genStatus: 'failed', selected: false });
+    expect(mountNode.textContent).toContain('生成失败');
+    expect(labels()).toEqual(['重试']);
+  });
+
+  it('shows the backend error message for media extraction without duplicating 音频提取失败', async () => {
+    await renderNode('audio', {
+      id: 'media-extract-job-1',
+      genStatus: 'failed',
+      errorText: '视频没有音轨',
+      selected: false,
+    });
+    expect(mountNode.textContent).toContain('视频没有音轨');
+    expect(mountNode.textContent).not.toContain('音频提取失败');
+    expect(labels()).not.toContain('重试');
   });
 });

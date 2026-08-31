@@ -88,7 +88,7 @@ const snapshotPending = new Map<string, Promise<ProjectSnapshot>>();
 export function fetchProjectSnapshot(id: string): Promise<ProjectSnapshot> {
   const existed = snapshotPending.get(id);
   if (existed) return existed;
-  const p = apiRequest<ProjectSnapshot>(`/api/projects/${id}/snapshot`).finally(() => {
+  const p = apiRequest<ProjectSnapshot>(`/api/projects/${id}/snapshot`, { silent: true }).finally(() => {
     snapshotPending.delete(id);
   });
   snapshotPending.set(id, p);

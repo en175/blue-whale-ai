@@ -15,7 +15,7 @@ export interface AdminSessionData {
 
 /** 实时校验当前登录用户是否为管理员（登录态走 HttpOnly cookie） */
 export function fetchAdminSession() {
-  return http.get<AdminSessionData>('/api/admin/session');
+  return http.get<AdminSessionData>('/api/admin/session', { silent: true });
 }
 
 /** 最近充值记录（最近 5 笔） */
@@ -602,6 +602,8 @@ export interface OperationLog {
   detail: string;
   /** 操作人用户名 */
   operator: string;
+  /** 操作人 IP；后端未写入时为 null */
+  ipAddress?: string | null;
   /** 操作时间（ISO） */
   createdAt: string;
 }

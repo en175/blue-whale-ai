@@ -20,6 +20,8 @@ import {
   ExternalLink,
   Loader2,
   Inbox,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import {
   fetchSharedAssetList,
@@ -193,6 +195,7 @@ export default function SharedAssetsModal({
   const [items, setItems] = useState<AssetListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -220,7 +223,10 @@ export default function SharedAssetsModal({
 
   /** 加载列表 */
   const loadList = useCallback(async (reset = false) => {
-    if (reset) setLoading(true);
+    if (reset) {
+      setLoading(true);
+      setLoadError(false);
+    }
     try {
       const q = buildQuery();
       q.page = reset ? 1 : page;
@@ -234,7 +240,13 @@ export default function SharedAssetsModal({
       }
       setHasMore(data.current * data.size < data.total);
     } catch {
-      onToast('error', '加载共享资产失败');
+      if (reset) {
+        // 首次/切换 tab 加载失败：弹窗内已展示完整失败卡片，不再额外 toast
+        setLoadError(true);
+      } else {
+        // 加载更多失败：网格里还有旧数据，toast 提示一下即可
+        onToast('error', '加载共享资产失败');
+      }
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -278,8 +290,7 @@ export default function SharedAssetsModal({
       onToast('success', '已删除共享资产');
     } catch (e) {
       setItems((prev) => prev.map((it) => (it.id === id ? { ...it, deleting: false } : it)));
-      if (isApiError(e)) onToast('error', e.message || '删除失败');
-      else onToast('error', '删除失败');
+      if (!isApiError(e)) onToast('error', '删除失败');
     }
   };
 
@@ -299,8 +310,7 @@ export default function SharedAssetsModal({
         onToast('success', `场景卡已添加（ID: ${result.sceneCardId}）`);
         onClose();
       } catch (e) {
-        if (isApiError(e)) onToast('error', e.message || '添加失败');
-        else onToast('error', '添加失败');
+        if (!isApiError(e)) onToast('error', '添加失败');
       } finally {
         setAddItemId(null);
       }
@@ -429,6 +439,18 @@ export default function SharedAssetsModal({
             <div className={styles.empty}>
               <Loader2 size={22} className={styles.loadingIcon} />
               <span>加载中...</span>
+            </div>
+          ) : loadError ? (
+            <div className={`${styles.empty} ${styles.loadError}`}>
+              <div className={styles.emptyIconBox}>
+                <AlertCircle size={32} strokeWidth={1.5} />
+              </div>
+              <p className={styles.emptyTitle}>加载失败</p>
+              <p className={styles.emptyHint}>网络异常或服务暂时不可用</p>
+              <button className={styles.retryBtn} onClick={() => loadList(true)}>
+                <RefreshCw size={14} strokeWidth={2} />
+                <span>重新加载</span>
+              </button>
             </div>
           ) : filteredItems.length === 0 ? (
             <div className={styles.empty}>

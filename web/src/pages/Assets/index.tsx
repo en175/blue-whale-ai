@@ -13,6 +13,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import Skeleton from '@/components/Skeleton';
 import AssetDetailModal from './components/AssetDetailModal';
 import CharacterLibrary from './components/CharacterLibrary';
+import { assetMediaDisplay } from './assetMediaSrc';
 import styles from './index.module.css';
 
 /** 筛选类型：all 表示不传 type */
@@ -46,6 +47,9 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
     asset.type === 'video' && isSafari ? 'waiting' : 'loading',
   );
   const [reloadKey, setReloadKey] = useState(0);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  const { src: mediaSrc, nodeKey: mediaKey } = assetMediaDisplay(asset.url, reloadKey);
 
   // URL 或 reloadKey 变化时重置为 loading（视频通过 VideoThumb 的 onLoaded/onError 驱动状态）
   useEffect(() => {
@@ -53,6 +57,15 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       setState('loading');
     }
   }, [asset.url, reloadKey, asset.type]);
+
+  // 缓存图片竞态兜底：load 事件可能在 onLoad 处理器就绪前已派发，
+  // 此时 img.complete 为 true 但 state 仍是 loading，遮罩永远不会消失
+  useEffect(() => {
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth > 0) {
+      setState('loaded');
+    }
+  }, [mediaSrc, reloadKey]);
 
   const handleReload = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -64,8 +77,6 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       setState('loading');
     }
   }, [asset.type, isSafari]);
-
-  const mediaSrc = `${asset.url}${asset.url.includes('?') ? '&' : '?'}_reload=${reloadKey}`;
 
   return (
     <>
@@ -98,6 +109,8 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       {/* 实际媒体元素 */}
       {(asset.type === 'image' || asset.type === 'character') && asset.url && (
         <img
+          key={mediaKey}
+          ref={imgRef}
           className={styles.media}
           src={mediaSrc}
           alt=""
@@ -108,6 +121,7 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       )}
       {asset.type === 'video' && asset.url && (
         <VideoThumb
+          key={mediaKey}
           url={mediaSrc}
           onInView={() => setState('loading')}
           onLoaded={() => setState('loaded')}
@@ -116,6 +130,7 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       )}
       {asset.type === 'audio' && asset.url && (
         <audio
+          key={mediaKey}
           className={styles.audioPlayer}
           src={mediaSrc}
           controls
@@ -309,15 +324,19 @@ export default function Assets() {
     // 先清空 input 以支持重复上传同一文件
     if (fileInputRef.current) fileInputRef.current.value = '';
 
-    // 虚拟人分组详情视图：走素材库 API
+    // 虚拟人分组详情视图：走素材库 API（支持图片+视频）
     if (isCharacterView && characterDetailGroupId) {
       setUploading(true);
       setActionError('');
       const errors: string[] = [];
 
       for (const file of list) {
-        if (!file.type.startsWith('image/')) {
-          errors.push(`${file.name}：仅支持图片`);
+        // 支持图片和视频
+        let assetType: 'Image' | 'Video' | 'Audio';
+        if (file.type.startsWith('image/')) assetType = 'Image';
+        else if (file.type.startsWith('video/')) assetType = 'Video';
+        else {
+          errors.push(`${file.name}：仅支持图片和视频`);
           continue;
         }
         try {
@@ -328,7 +347,7 @@ export default function Assets() {
             GroupId: characterDetailGroupId,
             URL: uploadResult.url,
             Name: file.name,
-            AssetType: 'Image',
+            AssetType: assetType,
           });
         } catch (err) {
           errors.push(isApiError(err) ? `${file.name}：${err.message}` : `上传失败：${file.name}`);
@@ -354,6 +373,12 @@ export default function Assets() {
 
       if (!type) {
         errors.push(`不支持的文件类型：${file.name}`);
+        continue;
+      }
+      // tab 筛选下的类型约束：选中特定 tab 时只允许对应类型（同时校验 MIME 和扩展名）
+      if (!forceCharacter && activeFilter !== 'all' && activeFilter !== type) {
+        const ext = file.name.split('.').pop()?.toLowerCase() || '';
+        errors.push(`${file.name}：当前「${filterTabs.find((t) => t.key === activeFilter)?.label}」tab 不支持 .${ext || '?'} 格式`);
         continue;
       }
       const limitMb = Math.round(UPLOAD_SIZE_LIMIT[type] / 1024 / 1024);
@@ -451,7 +476,13 @@ export default function Assets() {
           ref={fileInputRef}
           type="file"
           multiple
-          accept={isCharacterView && characterDetailGroupId ? 'image/*' : 'image/*,video/*,audio/*'}
+          accept={(() => {
+            if (isCharacterView && characterDetailGroupId) return '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm';
+            if (activeFilter === 'image') return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp';
+            if (activeFilter === 'video') return '.mp4,.webm,.mov,.avi,.mkv';
+            if (activeFilter === 'audio') return '.mp3,.wav,.ogg,.m4a,.aac,.flac';
+            return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.mp4,.webm,.mov,.avi,.mkv,.mp3,.wav,.ogg,.m4a,.aac,.flac';
+          })()}
           className={styles.hiddenInput}
           onChange={handleFileChange}
         />

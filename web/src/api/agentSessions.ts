@@ -2,14 +2,14 @@
  * agentSessions 接口：Agent 会话（session 维度，唯一有 worker 执行 Run 的对话服务）
  * 基址 /api/agent/v1/projects/:id/sessions
  * - list/create/snapshot/messages/runs(cancel/retry)/events(SSE)
- * - 返回为裸 JSON（无 {code,msg,data} 包络），统一 fetch + 401 清会话
+ * - 返回为裸 JSON（无 {code,msg,data} 包络），统一 fetch + 401 走 handleUnauthorized
  * - 事件流为共享连接（引用计数）：StrictMode 双挂载/多处订阅不重复建连
  * ============================================ */
 import { readSseResponse, type SseEvent } from './events';
 import { ApiError, apiRequest } from './http';
 import { newIdempotencyKey } from './jobs';
 import { agentPath, agentUrl, agentMethod } from './agentRoutes';
-import { setSession } from '@/utils/auth';
+import { handleUnauthorized } from '@/utils/auth';
 
 export type { SseEvent };
 
@@ -295,7 +295,7 @@ function describeFailure(
   return { message, code };
 }
 
-/** 会话维度裸 JSON 请求（401 清会话；非 2xx 抛 ApiError，供调用方按 status/code 分支） */
+/** 会话维度裸 JSON 请求（401 走 handleUnauthorized；非 2xx 抛 ApiError） */
 async function sessionRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/agent/v1${path}`, {
     ...init,
@@ -316,7 +316,7 @@ async function sessionRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : undefined;
   const failure = res.ok ? null : describeFailure(record, res.status);
   // Agent 的 capability_required 也使用 401，但它表示缺少 per-Run 能力券，不是用户登录失效。
-  if (res.status === 401 && failure?.code !== 'capability_required') setSession(null);
+  if (res.status === 401 && failure?.code !== 'capability_required') handleUnauthorized();
   if (failure) throw new ApiError(res.status, failure.message, failure.code);
   return body as T;
 }
@@ -778,5 +778,6 @@ export interface SessionCredits {
 export function fetchSessionCredits(projectId: string, sessionId: string): Promise<SessionCredits> {
   return apiRequest<SessionCredits>(
     `/api/agent/billing/sessions/${encodeURIComponent(sessionId)}?project_id=${encodeURIComponent(projectId)}`,
+    { silent: true },
   );
 }

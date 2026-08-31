@@ -1,5 +1,11 @@
 /** 对齐 Java blue-whale-global Result<T>：{ code, msg, data }，msg 默认 null（不是 "success"）。
- *  前端 apiRequest 只看 code !== 200 抛错。 */
+ *  前端 apiRequest 只看 code !== 200 抛错。
+ *  错误码段位约定（IKBQEE / ADR-0078 二期，全项目统一）：
+ *  - 4xx / 5xx：HTTP 语义错误（参数/未授权/资源不存在等基础设施错误）；
+ *  - 1xxxx（100000+）：Java SystemCode 系全局业务码（DATA_NOT_EXIST / PLAN_APPLICATION_* 等）；
+ *  - 1xxx（1000-1999）：领域错误码——生成任务领域已用 1001-1028（quota_exhausted=1001），
+ *    其他领域（Agent/资产/支付等）从 1100+ 起扩展，每错一码，前端按码映射文案。
+ *    定义与映射见 packages/contracts/src/generation-error-codes.ts（跨包共享唯一来源）。 */
 export const SUCCESS_CODE = 200;
 export const FAILURE_CODE = 400;
 export const DATA_NOT_EXIST_CODE = 100100; // 对齐 Java SystemCode.DATA_NOT_EXIST_CODE

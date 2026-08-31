@@ -3,18 +3,41 @@
  * ============================================ */
 
 .chatBox {
+  /* 毛玻璃上的字色只分两档：静息/占位 80%，输入与选中 100% */
+  --chat-fg: #fff;
+  --chat-fg-muted: rgba(255, 255, 255, 0.8);
   max-width: 78.4rem;
   width: 73%;
   /* 固定高度：三个 tab 切换时窗口高度保持一致，不跳动 */
   height: 18rem;
   margin: 0 auto;
-  background-color: #1D1D1D;
-  border: 1px solid var(--color-border-primary);
+  position: relative;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: var(--radius-xl);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
   padding: var(--spacing-lg) var(--spacing-xl) var(--spacing-sm);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
+}
+
+/* 毛玻璃放在伪元素，避免 ChatBox 自己成为层叠上下文，把下拉/弹层压到画廊下面 */
+.chatBox::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(6, 6, 6, 0.82);
+  backdrop-filter: blur(32px) saturate(1.2);
+  -webkit-backdrop-filter: blur(32px) saturate(1.2);
+  z-index: 0;
+  pointer-events: none;
+}
+
+.chatBox > * {
+  position: relative;
+  z-index: 1;
 }
 
 /* ---- 顶部选项卡 ---- */
@@ -28,7 +51,7 @@
   position: relative;
   padding: var(--spacing-xs) 0;
   font-size: var(--font-size-sm);
-  color: var(--color-text-tertiary);
+  color: var(--chat-fg-muted);
   background: none;
   border: none;
   cursor: pointer;
@@ -36,11 +59,11 @@
 }
 
 .tabItem:hover {
-  color: var(--color-text-secondary);
+  color: var(--chat-fg);
 }
 
 .tabItemActive {
-  color: var(--color-text-primary);
+  color: var(--chat-fg);
   font-weight: 500;
 }
 
@@ -56,7 +79,7 @@
 /* ---- 描述文字 ---- */
 .desc {
   font-size: var(--font-size-sm);
-  color: var(--color-text-tertiary);
+  color: var(--chat-fg-muted);
   line-height: 1.5;
 }
 
@@ -71,7 +94,7 @@
   background-color: transparent;
   border: none;
   outline: none;
-  color: var(--color-text-primary);
+  color: var(--chat-fg);
   font-size: var(--font-size-md);
   line-height: 1.6;
   padding: var(--spacing-xs) 0;
@@ -79,7 +102,8 @@
 }
 
 .textarea::placeholder {
-  color: var(--color-text-tertiary);
+  color: var(--chat-fg-muted);
+  opacity: 1;
 }
 
 /* ---- 底部工具栏 ---- */
@@ -101,20 +125,20 @@
   width: 32px;
   height: 32px;
   border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border-secondary);
-  background-color: transparent;
-  color: var(--color-text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--chat-fg-muted);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .iconBtn:hover {
-  border-color: var(--color-border-hover);
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
+  color: var(--chat-fg);
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 /* ---- + 上传弹出 ---- */
@@ -126,10 +150,12 @@
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
-  background-color: #1e1e1e;
-  border: 1px solid var(--color-border-primary);
+  background: rgba(8, 8, 8, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(24px) saturate(1.35);
+  -webkit-backdrop-filter: blur(24px) saturate(1.35);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
   padding: var(--spacing-xs) var(--spacing-sm);
   z-index: var(--z-tooltip);
   animation: popupFadeIn 0.15s ease;
@@ -143,7 +169,7 @@
 /* + 按钮悬停小提示文案 */
 .uploadHint {
   font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
+  color: var(--chat-fg-muted);
   white-space: nowrap;
 }
 
@@ -154,18 +180,18 @@
   gap: var(--spacing-xs);
   padding: calc(var(--spacing-xs) + 2px) calc(var(--spacing-md) + 2px);
   border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border-secondary);
-  background-color: transparent;
-  color: var(--color-text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--chat-fg-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .skillBtn:hover {
-  border-color: var(--color-border-hover);
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
+  color: var(--chat-fg);
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 .skillIcon {
@@ -183,47 +209,50 @@
   gap: var(--spacing-xs);
   padding: calc(var(--spacing-xs) + 2px) calc(var(--spacing-md) + 2px);
   border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   background-color: transparent;
-  color: var(--color-text-secondary);
+  color: var(--chat-fg-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .modelBtn:hover {
-  border-color: var(--color-border-hover);
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
+  color: var(--chat-fg);
+  background-color: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
-.dropdownMenu {
+.dropdownMenu,
+.dropdownMenuDown {
   position: absolute;
-  bottom: calc(100% + 8px);
   left: 0;
-  background-color: #1e1e1e;
-  border: 1px solid var(--color-border-primary);
+  background: rgba(8, 8, 8, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(24px) saturate(1.35);
+  -webkit-backdrop-filter: blur(24px) saturate(1.35);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
   padding: var(--spacing-xs);
   min-width: 160px;
   z-index: var(--z-tooltip);
   animation: popupFadeIn 0.15s ease;
 }
 
-/* ---- 向下展开的下拉菜单 (AI视频/AI图片) ---- */
+.dropdownMenu {
+  bottom: calc(100% + 8px);
+}
+
 .dropdownMenuDown {
-  position: absolute;
   top: calc(100% + 8px);
-  left: 0;
-  background-color: #1e1e1e;
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  padding: var(--spacing-xs);
-  min-width: 160px;
-  z-index: 100;
-  animation: popupFadeIn 0.15s ease;
+}
+
+.dropdownWrap:has(.dropdownMenu) .modelBtn,
+.dropdownWrap:has(.dropdownMenuDown) .modelBtn,
+.dropdownWrap:has(.dropdownMenuDown) .paramBtn {
+  color: var(--chat-fg);
+  background-color: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 .dropdownItem {
@@ -234,21 +263,28 @@
   padding: var(--spacing-sm) var(--spacing-md);
   border: none;
   background: none;
-  color: var(--color-text-secondary);
+  color: var(--chat-fg-muted);
   font-size: var(--font-size-sm);
   border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: left;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-fast), background-color var(--transition-fast);
 }
 
 .dropdownItem:hover {
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
+  color: var(--chat-fg);
+  background-color: rgba(255, 255, 255, 0.14);
 }
 
 .dropdownItemActive {
-  color: var(--color-accent-primary);
+  color: var(--chat-fg);
+  font-weight: 500;
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.dropdownItemActive:hover {
+  color: var(--chat-fg);
+  background-color: rgba(255, 255, 255, 0.26);
 }
 
 /* ---- Token 用量 ---- */
@@ -261,40 +297,50 @@
 }
 
 .tokenPlus {
-  color: var(--color-text-secondary);
+  color: var(--chat-fg-muted);
 }
 
 .tokenCount {
-  color: var(--color-text-secondary);
+  color: var(--chat-fg-muted);
 }
 
 /* ---- 发送按钮 ---- */
 .sendBtn {
   width: 34px;
   height: 34px;
-  border-radius: var(--radius-md);
-  border: none;
-  background-color: #2a2a2a;
-  color: var(--color-text-secondary);
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--chat-fg-muted);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.sendBtn:hover:not(:disabled) {
+  color: var(--chat-fg);
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 .sendBtn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
 .sendBtnActive {
-  background-color: #4a4a4a;
-  color: #fff;
+  color: var(--chat-fg);
+  background: rgba(255, 255, 255, 0.24);
+  border-color: rgba(255, 255, 255, 0.32);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
-.sendBtnActive:hover {
-  background-color: #5a5a5a;
+.sendBtnActive:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 /* ============================================
@@ -317,24 +363,26 @@
   width: 56px;
   height: 56px;
   border-radius: var(--radius-md);
-  background-color: #2a2a2a;
-  border: 1px dashed var(--color-border-secondary);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  color: var(--color-text-secondary);
+  color: var(--chat-fg-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
   flex-shrink: 0;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .refCard:hover {
-  border-color: var(--color-border-hover);
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
+  color: var(--chat-fg);
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.32);
 }
 
 /* ---- 参考文件区域 ---- */
@@ -362,7 +410,8 @@
   height: 56px;
   border-radius: var(--radius-md);
   overflow: hidden;
-  background-color: #1a1a1a;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .refThumbMedia {
@@ -378,7 +427,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-text-tertiary);
+  color: var(--chat-fg-muted);
 }
 
 .refThumbRemove {
@@ -390,7 +439,7 @@
   border-radius: var(--radius-full);
   background-color: rgba(0, 0, 0, 0.6);
   border: none;
-  color: #fff;
+  color: var(--chat-fg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -405,7 +454,7 @@
 
 .refThumbLabel {
   font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
+  color: var(--chat-fg-muted);
   white-space: nowrap;
 }
 
@@ -466,19 +515,19 @@
   gap: var(--spacing-xs);
   padding: calc(var(--spacing-xs) + 2px) calc(var(--spacing-md) + 2px);
   border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   background-color: transparent;
-  color: var(--color-text-secondary);
+  color: var(--chat-fg-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
   white-space: nowrap;
 }
 
 .paramBtn:hover {
-  border-color: var(--color-border-hover);
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
+  color: var(--chat-fg);
+  background-color: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 /* ---- 时长滑块 ---- */
@@ -486,18 +535,6 @@
   min-width: 248px !important;
   padding: 12px !important;
   overflow: visible;
-}
-
-/* ---- 或尝试无限 ---- */
-.tryUnlimited {
-  font-size: var(--font-size-sm);
-  color: #4ade80;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.tryUnlimited:hover {
-  color: #22c55e;
 }
 
 /* ============================================
@@ -509,7 +546,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  color: var(--color-text-secondary);
+  color: var(--chat-fg-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
   padding: calc(var(--spacing-xs) + 2px) calc(var(--spacing-md) + 2px);
@@ -518,7 +555,7 @@
 }
 
 .imageStrengthBadge:hover {
-  color: var(--color-text-primary);
+  color: var(--chat-fg);
   background-color: var(--color-bg-hover);
 }
 
@@ -532,9 +569,9 @@
   border-radius: 10px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--color-text-secondary);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  color: var(--chat-fg-muted);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   width: fit-content;
   max-width: 100%;
 }

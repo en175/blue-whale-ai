@@ -48,6 +48,12 @@ export interface RunStatusInput {
   hasRunId: boolean;
   /** 本轮的终局；null 表示还在跑。 */
   outcome: RunOutcome | null;
+  /**
+   * 失败时后端给出的那句人话（run.failure.message，来自 agent 的失败码→文案表）。
+   * 有它就用它当标签，没有才退回「未能完成」——「未能完成」是兜底，不是答案（IKBRZV BUG-01
+   * 可见层：QA 的每一种失败此前都长成同一句话，用户无从知道是余额、素材还是模型的问题）。
+   */
+  failureText: string | null;
   /** 终态发生的时刻。终态后秒数必须冻在这里，不能继续走。 */
   finishedAt: number | null;
   /** 流式期间已收到的正文。按它估算输出 token。 */
@@ -229,7 +235,7 @@ export function deriveRunStatus(input: RunStatusInput): RunStatus | null {
     return {
       ...common,
       phase: outcome,
-      label: TERMINAL_LABEL[outcome],
+      label: (outcome === 'failed' && input.failureText) || TERMINAL_LABEL[outcome],
       tone: TERMINAL_TONE[outcome],
       settled: true,
     };

@@ -4,6 +4,7 @@ import {
   NewApiError,
   type NewApiAccountCapabilities,
   type NewApiAccountIdentity,
+  type NewApiChangePasswordInput,
   type NewApiLoginInput,
   type NewApiLoginResult,
   type NewApiRegisterInput,
@@ -54,6 +55,11 @@ export class AccountService {
     return this.client.getTokenUsage(token);
   }
 
+  /** 修改密码（IKBRCK）：校验原密码后写入新密码，透传网关 PUT /api/user/self。 */
+  changePassword(input: NewApiChangePasswordInput, token: string): Promise<void> {
+    return this.client.changePassword(input, token);
+  }
+
   // —— 充值/消费记录 ——
 
   getRechargeAgreement() {
@@ -66,6 +72,12 @@ export class AccountService {
 
   createBlueWhalePayTopUp(token: string, amount: number, wayCode: string) {
     return this.client.createBlueWhalePayTopUp(token, amount, wayCode);
+  }
+
+  createCollectTopUp(
+    input: Parameters<NewApiClient["createCollectTopUp"]>[0],
+  ) {
+    return this.client.createCollectTopUp(input);
   }
 
   listUserTopUps(token: string, options: { page?: number; pageSize?: number }) {

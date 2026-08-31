@@ -178,7 +178,8 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       await prisma.$transaction([
         prisma.assets.updateMany({
           where: { project_id: BigInt(id), is_delete: false },
-          data: { is_delete: true },
+          // 级联软删同样盖 deleted_at，否则延迟 GC 永远扫不到这批资产（IKBMDM F1）。
+          data: { is_delete: true, deleted_at: new Date() },
         }),
         prisma.project.update({
           where: { id: BigInt(id) },
@@ -205,7 +206,8 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
         await prisma.$transaction([
           prisma.assets.updateMany({
             where: { project_id: { in: toDelete }, is_delete: false },
-            data: { is_delete: true },
+            // 级联软删同样盖 deleted_at，否则延迟 GC 永远扫不到这批资产（IKBMDM F1）。
+            data: { is_delete: true, deleted_at: new Date() },
           }),
           prisma.project.updateMany({
             where: { id: { in: toDelete } },

@@ -150,7 +150,11 @@ export function createWorkerMediaExtractOps(
           },
           data: {
             status: "failed",
-            error: { code: input.code, message: input.message } as never,
+            error: {
+              code: input.code,
+              message: input.message,
+              ...(input.details !== undefined ? { details: input.details } : {}),
+            } as never,
             next_action_at: null,
             next_poll_at: null,
             lease_owner: null,

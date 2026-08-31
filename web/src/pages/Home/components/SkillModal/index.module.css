@@ -7,10 +7,12 @@
   inset: 0;
   background-color: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  /* 挂到 body 后仍需高于侧栏(--z-sidebar:100) 与顶栏用户菜单所在层 */
+  z-index: var(--z-modal);
 }
 
 .modal {

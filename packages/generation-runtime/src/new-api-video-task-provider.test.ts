@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { NewApiError } from "@blue-whale/core";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -84,5 +85,123 @@ describe("new-api video task provider", () => {
       url: null,
       error: { code: "OutputAudioSensitiveContentDetected.PolicyViolation", message: "版权审核失败" },
     });
+  });
+
+  it("maps upstream quota/balance failure to quota_exhausted (IKBQEE/ADR-0078)", async () => {
+    const module = await import("./new-api-video-task-provider.js");
+    const provider = module.createNewApiVideoTaskProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockResolvedValue(
+        jsonResponse({
+          code: "success",
+          data: {
+            task_id: "task-quota",
+            status: "FAILURE",
+            error: {
+              code: "account_balance_insufficient",
+              message: "The request failed because your account has an overdue balance.",
+            },
+          },
+        }),
+      ),
+    });
+
+    await expect(provider.poll("task-quota")).resolves.toEqual({
+      status: "failed",
+      progress: 100,
+      url: null,
+      error: {
+        code: "quota_exhausted",
+        message: "The request failed because your account has an overdue balance.",
+      },
+    });
+  });
+
+  it("passes through non-quota upstream failure code (IKBQEE)", async () => {
+    const module = await import("./new-api-video-task-provider.js");
+    const provider = module.createNewApiVideoTaskProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockResolvedValue(
+        jsonResponse({
+          code: "success",
+          data: {
+            task_id: "task-nonquota",
+            status: "FAILURE",
+            error: { code: "some_upstream_code", message: "upstream broke" },
+          },
+        }),
+      ),
+    });
+
+    await expect(provider.poll("task-nonquota")).resolves.toEqual({
+      status: "failed",
+      progress: 100,
+      url: null,
+      error: { code: "some_upstream_code", message: "upstream broke" },
+    });
+  });
+
+  it("maps submit NewApiError quota signal to quota_exhausted (job 1612 预扣费)", async () => {
+    const module = await import("./new-api-video-task-provider.js");
+    const provider = module.createNewApiVideoTaskProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockRejectedValue(
+        new NewApiError(
+          "预扣费额度失败, 用户剩余额度: ¥2.123294, 需要预扣费额度: ¥7.000000",
+          200,
+        ),
+      ),
+    });
+
+    await expect(
+      provider.submit({
+        model: "seedance-2",
+        prompt: "小猫",
+        duration: 5,
+        width: 1280,
+        height: 720,
+      }),
+    ).rejects.toMatchObject({ code: "quota_exhausted" });
+  });
+
+  it("submit non-quota NewApiError falls back to provider_failed", async () => {
+    const module = await import("./new-api-video-task-provider.js");
+    const provider = module.createNewApiVideoTaskProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockRejectedValue(new NewApiError("gateway down", 503)),
+    });
+
+    await expect(
+      provider.submit({
+        model: "seedance-2",
+        prompt: "测试",
+        duration: 5,
+        width: 1280,
+        height: 720,
+      }),
+    ).rejects.toMatchObject({ code: "provider_failed" });
+  });
+
+  it("submit HTTP 402 NewApiError maps to quota_exhausted even without keyword", async () => {
+    const module = await import("./new-api-video-task-provider.js");
+    const provider = module.createNewApiVideoTaskProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockRejectedValue(new NewApiError("request failed", 402)),
+    });
+
+    await expect(
+      provider.submit({
+        model: "seedance-2",
+        prompt: "测试",
+        duration: 5,
+        width: 1280,
+        height: 720,
+      }),
+    ).rejects.toMatchObject({ code: "quota_exhausted" });
   });
 });

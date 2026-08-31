@@ -302,5 +302,93 @@ describe("new-api client —— 充值与流水", () => {
     }
   });
 
+  it("places a collect topup with dedicated token, not user JWT", async () => {
+    const requests: Array<{ url: string; headers: Headers; body: unknown }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        const url = String(input);
+        const body = init.body ? JSON.parse(String(init.body)) : undefined;
+        requests.push({ url, headers: new Headers(init.headers), body });
+        if (url.endsWith("/internal/v1/topup/pay")) {
+          return jsonResponse({
+            message: "success",
+            data: { pay_data: "https://pay.test/qr/BWP9", order_id: "BWP9" },
+          });
+        }
+        return jsonResponse({ success: true, data: {} });
+      },
+    });
+
+    await expect(
+      client.createCollectTopUp({
+        collectToken: "secret-collect",
+        userId: 42,
+        money: 33.3,
+        amount: 37,
+        wayCode: "WX_NATIVE",
+      }),
+    ).resolves.toEqual({
+      tradeNo: "BWP9",
+      payData: "https://pay.test/qr/BWP9",
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe("http://new-api.test/internal/v1/topup/pay");
+    expect(requests[0]?.headers.get("X-Blue-Whale-Collect-Token")).toBe(
+      "secret-collect",
+    );
+    expect(requests[0]?.headers.get("Authorization")).toBeNull();
+    expect(requests[0]?.headers.get("New-Api-User")).toBeNull();
+    expect(requests[0]?.body).toEqual({
+      user_id: 42,
+      money: 33.3,
+      amount: 37,
+      way_code: "WX_NATIVE",
+    });
+  });
+
+  it("maps collect topup credential errors to 502 without leaking the token name", async () => {
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async () =>
+        jsonResponse({ message: "error", data: "代收凭证错误" }),
+    });
+    await expect(
+      client.createCollectTopUp({
+        collectToken: "wrong",
+        userId: 42,
+        money: 33.3,
+        amount: 37,
+        wayCode: "ALI_QR",
+      }),
+    ).rejects.toMatchObject({
+      status: 502,
+      code: "topup_collect_auth_error",
+      message: "下单服务不可用",
+    });
+  });
+
+  it("maps collect topup business errors to 400 with the gateway reason", async () => {
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async () =>
+        jsonResponse({ message: "error", data: "用户不存在或已停用" }),
+    });
+    await expect(
+      client.createCollectTopUp({
+        collectToken: "secret-collect",
+        userId: 99,
+        money: 33.3,
+        amount: 37,
+        wayCode: "ALI_QR",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "topup_collect_error",
+      message: "用户不存在或已停用",
+    });
+  });
+
   // ---- Go 管理端 option（RootAuth）----
 });

@@ -52,6 +52,7 @@ export {
   type NewApiLoginInput,
   type NewApiLoginResult,
   type NewApiRegisterInput,
+  type NewApiChangePasswordInput,
   type NewApiUsage,
   type NewApiVideoInput,
   type NewApiVideoSubmission,

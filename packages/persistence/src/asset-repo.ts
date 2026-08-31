@@ -77,6 +77,14 @@ export interface AssetRepo {
   listByUser(userId: string, filter: AssetListFilter): Promise<AssetPage>;
   /** 逻辑删除当前用户自己的未删除 Asset；不存在或不归属返回 false。 */
   softDeleteOwned(assetId: string, userId: string): Promise<boolean>;
+  /** 取超期软删行（deleted_at 早于 cutoff，含 storage_key，按 id 升序）——GC 候选。 */
+  listGcCandidates(cutoff: Date): Promise<
+    { id: bigint; storage_key: string | null }[]
+  >;
+  /** 给定 storage_key 集合，返回仍有 is_delete=false 活动引用的那些（存在复制副本时保护对象）。 */
+  findLiveRefs(storageKeys: string[]): Promise<string[]>;
+  /** 物理删除指定 id 行（GC 确认对象已删后清行）。 */
+  hardDeleteRows(ids: bigint[]): Promise<number>;
   /** 取当前用户在指定项目下的正常资产（access/content 用）；不存在/不归属/已删 → null。 */
   findAccessible(
     projectId: string,
@@ -277,11 +285,42 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         },
         data: {
           is_delete: true,
+          deleted_at: new Date(),
           version: { increment: 1 },
           gmt_modified: new Date(),
         },
       });
       return result.count === 1;
+    },
+    async listGcCandidates(cutoff) {
+      const rows = await prisma.assets.findMany({
+        where: { is_delete: true, deleted_at: { not: null, lt: cutoff } },
+        select: { id: true, storage_key: true },
+        orderBy: { id: "asc" },
+        // 单轮扫描上限：与 GC_BATCH_LIMIT 同向防堆积，剩余候选下轮继续（G7）。
+        take: 1000,
+      });
+      return rows.map((row) => ({
+        id: row.id,
+        storage_key: row.storage_key,
+      }));
+    },
+    async findLiveRefs(storageKeys) {
+      if (storageKeys.length === 0) return [];
+      const rows = await prisma.assets.findMany({
+        where: { storage_key: { in: storageKeys }, is_delete: false },
+        select: { storage_key: true },
+      });
+      return [...new Set(rows.map((row) => row.storage_key))].filter(
+        (key): key is string => key != null,
+      );
+    },
+    async hardDeleteRows(ids) {
+      if (ids.length === 0) return 0;
+      const result = await prisma.assets.deleteMany({
+        where: { id: { in: ids } },
+      });
+      return result.count;
     },
     async listByUser(userId, filter) {
       const where = {

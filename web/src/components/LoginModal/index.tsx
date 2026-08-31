@@ -20,13 +20,15 @@ import { isRegisterPasswordValid } from './password';
 
 interface LoginModalProps {
   onClose: () => void;
+  /** 登录/注册成功后、关闭弹窗前调用（会话过期续接用） */
+  onSuccess?: () => void;
   /** 初始模式：'login' 登录 | 'register' 注册 */
   initialMode?: 'login' | 'register';
 }
 
 type Mode = 'login' | 'register';
 
-export default function LoginModal({ onClose, initialMode = 'login' }: LoginModalProps) {
+export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }: LoginModalProps) {
   const [mode, setMode] = useState<Mode>(initialMode);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -64,6 +66,7 @@ export default function LoginModal({ onClose, initialMode = 'login' }: LoginModa
     fetchAdminSession()
       .then((session) => updateUser({ isAdmin: session.isAdmin }))
       .catch(() => undefined);
+    onSuccess?.();
     onClose();
   };
 
@@ -198,7 +201,7 @@ export default function LoginModal({ onClose, initialMode = 'login' }: LoginModa
           <input
             className={styles.input}
             type="password"
-            placeholder="密码（9-20位）"
+            placeholder="密码（8-20位）"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             aria-invalid={passwordRuleError}
@@ -206,7 +209,7 @@ export default function LoginModal({ onClose, initialMode = 'login' }: LoginModa
           />
           {passwordRuleError && (
             <div id="register-password-error" className={styles.error}>
-              密码长度需为 9-20 个字符
+              密码长度需为 8-20 个字符
             </div>
           )}
           <input

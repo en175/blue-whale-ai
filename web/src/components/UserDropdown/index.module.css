@@ -13,26 +13,32 @@
   gap: 8px;
   height: 32px;
   padding: 0 var(--spacing-sm) 0 4px;
-  border-radius: var(--radius-md);
-  background-color: rgba(26, 26, 26, 0.9);
-  border: 1px solid var(--color-border-primary);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   color: var(--color-text-primary);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .trigger:hover {
-  background-color: rgba(40, 40, 40, 0.95);
-  border-color: var(--color-border-hover);
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.wrapper:has(.dropdown) .trigger {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 .triggerAvatar {
   width: 24px;
   height: 24px;
-  border-radius: var(--radius-sm);
-  background-color: var(--color-bg-active);
+  border-radius: var(--radius-full);
+  background-color: rgba(255, 255, 255, 0.18);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -65,19 +71,22 @@
 .loginBtn {
   height: 40px;
   padding: 0 var(--spacing-lg);
-  border-radius: var(--radius-md);
-  background-color: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   color: var(--color-text-primary);
   font-size: var(--font-size-lg);
   font-weight: 500;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .loginBtn:hover {
-  background-color: var(--color-bg-hover);
-  border-color: var(--color-border-hover);
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 /* ---- 下拉面板 ---- */
@@ -86,10 +95,12 @@
   top: calc(100% + 8px);
   right: 0;
   width: 280px;
-  background-color: #1e1e1e;
-  border: 1px solid #2a2a2a;
+  background: rgba(22, 22, 22, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: var(--radius-lg);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(24px) saturate(1.35);
+  -webkit-backdrop-filter: blur(24px) saturate(1.35);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
   padding: 12px;
   z-index: var(--z-modal);
   animation: dropdownFadeIn 0.15s ease;
@@ -118,7 +129,7 @@
   width: 40px;
   height: 40px;
   border-radius: var(--radius-full);
-  background: linear-gradient(135deg, #3a3a3a, #2a2a2a);
+  background: rgba(255, 255, 255, 0.16);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -156,7 +167,8 @@
   justify-content: space-between;
   padding: 10px var(--spacing-sm);
   margin: 8px 0;
-  background-color: #252525;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--radius-md);
 }
 
@@ -191,7 +203,7 @@
 /* ---- 分隔线 ---- */
 .divider {
   height: 1px;
-  background-color: #2a2a2a;
+  background-color: rgba(255, 255, 255, 0.12);
   margin: 4px 0;
 }
 
@@ -207,10 +219,10 @@
   align-items: center;
   gap: var(--spacing-md);
   padding: 10px var(--spacing-sm);
-  color: var(--color-text-secondary);
+  color: rgba(255, 255, 255, 0.72);
   font-size: var(--font-size-md);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-fast), background-color var(--transition-fast);
   border: none;
   background: none;
   width: 100%;
@@ -219,15 +231,15 @@
 }
 
 .menuItem:hover {
-  color: var(--color-text-primary);
-  background-color: #2a2a2a;
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.14);
 }
 
 .logoutItem {
-  color: var(--color-text-tertiary);
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .logoutItem:hover {
   color: var(--color-error);
-  background-color: rgba(255, 77, 79, 0.08);
+  background-color: rgba(255, 77, 79, 0.14);
 }

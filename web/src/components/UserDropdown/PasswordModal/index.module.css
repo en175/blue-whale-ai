@@ -1,47 +1,18 @@
 /* ============================================
  * PasswordModal 修改密码弹窗样式
+ * 遮罩 / 关闭 / 入场动画由共用 Modal 提供
  * ============================================ */
-.overlay {
-  position: fixed;
-  inset: 0;
-  background-color: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 130;
-}
-
 .modal {
-  position: relative;
-  width: min(640px, 92vw);
-  max-height: 88vh;
-  overflow-y: auto;
   background-color: #1a1a1a;
   border: 1px solid #2a2a2a;
   border-radius: 16px;
+}
+
+.body {
   padding: 36px 40px;
-  box-sizing: border-box;
-}
-
-.closeBtn {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: 8px;
-  color: #999;
-  cursor: pointer;
-}
-
-.closeBtn:hover {
-  background-color: #262626;
-  color: #fff;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
 }
 
 .title {
@@ -67,7 +38,7 @@
   background-color: #232323;
   border: 1px solid #333;
   border-radius: 10px;
-  padding: 0 48px 0 16px;
+  padding: 0 64px 0 16px;
   color: #eee;
   font-size: var(--font-size-md);
   box-sizing: border-box;
@@ -83,50 +54,29 @@
   letter-spacing: 1px;
 }
 
-/* 竖排 显示/隐藏 切换 */
 .eye {
   position: absolute;
   right: 14px;
   top: 50%;
   transform: translateY(-50%);
-  writing-mode: vertical-rl;
-  letter-spacing: 4px;
   background: none;
   border: none;
-  padding: 4px 0;
+  padding: 0;
   color: #999;
   font-size: var(--font-size-sm);
   cursor: pointer;
+  white-space: nowrap;
+  line-height: 1;
 }
 
 .eye:hover {
   color: #ddd;
 }
 
-.codeRow {
-  display: flex;
-  gap: 12px;
-}
-
-.codeRow .input {
-  flex: 1;
-  padding-right: 16px;
-}
-
-.codeBtn {
-  width: 132px;
-  height: 52px;
-  flex-shrink: 0;
-  background-color: #232323;
-  border: 1px solid #333;
-  border-radius: 10px;
-  color: #ddd;
-  font-size: var(--font-size-md);
-  cursor: pointer;
-}
-
-.codeBtn:hover {
-  border-color: #555;
+.error {
+  margin: 8px 0 0;
+  font-size: var(--font-size-sm);
+  color: #ff7875;
 }
 
 .submitBtn {

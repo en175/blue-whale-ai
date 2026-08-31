@@ -4,14 +4,14 @@
  * 分组管理 + 素材上传 + 素材展示
  * 上传流程：uploadAssetFile（3 步）→ 拿公网 URL → createAsset
  * ============================================ */
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type WheelEvent } from 'react';
-import { Plus, Minus, RotateCw, FolderOpen, MoreVertical, Trash2, Edit3, ArrowLeft, X, Loader2 } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
+import { Plus, FolderOpen, Trash2, ArrowLeft, X, Loader2, Video } from 'lucide-react';
 import {
   createAssetGroup,
   listAssetGroups,
   deleteAssetGroup,
   listAssets,
-  updateAssetGroup,
   deleteAsset as deleteMaterialAsset,
   type MaterialGroup,
   type MaterialAsset,
@@ -26,69 +26,32 @@ import styles from './index.module.css';
  * ============================================ */
 function GroupCard({
   group,
-  assets,
   onView,
-  onRename,
   onDelete,
 }: {
   group: MaterialGroup;
-  assets: MaterialAsset[];
   onView: () => void;
-  onRename: () => void;
   onDelete: () => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const bottomMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (bottomMenuRef.current && bottomMenuRef.current.contains(target)) return;
-      setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [menuOpen]);
-
-  const coverAsset = assets.find((a) => a.GroupId === group.Id);
-  const coverUrl = coverAsset?.URL;
-
   return (
     <div className={styles.groupCard} onClick={onView}>
       <div className={styles.groupCover}>
-        {coverUrl ? (
-          <img src={coverUrl} alt={group.Name} />
-        ) : (
-          <FolderOpen className={styles.folderIcon} strokeWidth={1} />
-        )}
+        <FolderOpen className={styles.folderIcon} strokeWidth={1} />
         {/* 底部信息栏（覆盖在图片上） */}
         <div className={styles.groupInfo}>
           <div className={styles.groupInfoLeft}>
             <span className={styles.groupName} title={group.Description || group.Name}>{group.Description || group.Name}</span>
-            <span className={styles.groupCount}>{assets.length} 个素材</span>
+            <span className={styles.groupCount}>点击查看素材</span>
           </div>
         </div>
-        {/* 右下角三点按钮 */}
-        <div className={styles.groupBottomActions} ref={bottomMenuRef}>
-          <button
-            className={styles.groupBottomMenuBtn}
-            onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
-            title="更多操作"
-          >
-            <MoreVertical size={14} />
-          </button>
-          {menuOpen && (
-            <div className={styles.dropdownMenu} onClick={(e) => e.stopPropagation()} style={{ bottom: '32px', top: 'auto' }}>
-              <button className={styles.dropdownItem} onClick={() => { setMenuOpen(false); onRename(); }}>
-                <Edit3 size={14} /> 重命名
-              </button>
-              <button className={`${styles.dropdownItem} ${styles.dropdownItemDanger}`} onClick={() => { setMenuOpen(false); onDelete(); }}>
-                <Trash2 size={14} /> 删除
-              </button>
-            </div>
-          )}
-        </div>
+        {/* 右下角删除按钮：直接点击触发删除确认 */}
+        <button
+          className={styles.groupDeleteBtn}
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          title="删除"
+        >
+          <Trash2 size={14} strokeWidth={2} />
+        </button>
       </div>
     </div>
   );
@@ -158,6 +121,55 @@ function GroupFormModal({
 }
 
 /* ============================================
+ * 素材详情弹窗：样式对齐 AssetDetailModal（左媒体 + 右信息）
+ * ============================================ */
+function MaterialDetailModal({ asset, onClose }: { asset: MaterialAsset | null; onClose: () => void }) {
+  if (!asset) return null;
+
+  return createPortal(
+    <div className={styles.detailOverlay} onClick={onClose}>
+      <div className={styles.detailLayout} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        {/* 左侧：媒体预览 */}
+        <div className={styles.detailPreviewPane}>
+          {asset.URL ? (
+            asset.AssetType === 'Video' ? (
+              <video className={styles.detailMedia} src={asset.URL} controls autoPlay playsInline />
+            ) : (
+              <img className={styles.detailMedia} src={asset.URL} alt={asset.Name} draggable={false} />
+            )
+          ) : (
+            <div className={styles.detailEmpty}>媒体文件不可用</div>
+          )}
+        </div>
+
+        {/* 右侧：信息面板 */}
+        <aside className={styles.detailPane}>
+          <div className={styles.detailHeader}>
+            <span className={styles.detailTypeBadge}>
+              {asset.AssetType === 'Video' ? '视频' : '图片'}
+            </span>
+            <button className={styles.detailCloseBtn} type="button" onClick={onClose} aria-label="关闭">
+              <X size={18} strokeWidth={2} />
+            </button>
+          </div>
+          <dl className={styles.detailList}>
+            <div className={styles.detailItem}>
+              <dt>名称</dt>
+              <dd title={asset.Name}>{asset.Name}</dd>
+            </div>
+            <div className={styles.detailItem}>
+              <dt>创建时间</dt>
+              <dd>{asset.CreateTime || '暂无数据'}</dd>
+            </div>
+          </dl>
+        </aside>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+/* ============================================
  * 分组详情视图
  * ============================================ */
 function GroupDetail({
@@ -174,48 +186,7 @@ function GroupDetail({
   onUpload?: () => void;
 }) {
   const [previewAsset, setPreviewAsset] = useState<MaterialAsset | null>(null);
-  const [previewZoom, setPreviewZoom] = useState(0.6); // 默认较小比例
-  const [previewOffset, setPreviewOffset] = useState({ x: 0, y: 0 });
-  const [dragging, setDragging] = useState(false);
-  const dragStartRef = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
-  const PREVIEW_MIN_ZOOM = 0.1;
-  const PREVIEW_MAX_ZOOM = 3.0;
-
-  const handleZoomIn = () => { setPreviewZoom((z) => Math.min(z + 0.1, PREVIEW_MAX_ZOOM)); };
-  const handleZoomOut = () => { setPreviewZoom((z) => Math.max(z - 0.1, PREVIEW_MIN_ZOOM)); };
-  const handleZoomReset = () => { setPreviewZoom(0.6); setPreviewOffset({ x: 0, y: 0 }); };
-
-  const handleWheel = (e: WheelEvent) => {
-    const delta = e.deltaY > 0 ? -0.05 : 0.05;
-    setPreviewZoom((z) => Math.min(Math.max(z + delta, PREVIEW_MIN_ZOOM), PREVIEW_MAX_ZOOM));
-  };
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (previewZoom <= 0.6) return;
-    setDragging(true);
-    dragStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      offsetX: previewOffset.x,
-      offsetY: previewOffset.y,
-    };
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!dragging) return;
-    setPreviewOffset({
-      x: dragStartRef.current.offsetX + (e.clientX - dragStartRef.current.x),
-      y: dragStartRef.current.offsetY + (e.clientY - dragStartRef.current.y),
-    });
-  };
-
-  const handleMouseUp = () => setDragging(false);
-
-  const closePreview = () => {
-    setPreviewAsset(null);
-    setPreviewZoom(0.6);
-    setPreviewOffset({ x: 0, y: 0 });
-  };
+  const closePreview = () => setPreviewAsset(null);
 
   return (
     <div className={styles.detailView}>
@@ -242,10 +213,20 @@ function GroupDetail({
             onClick={() => setPreviewAsset(asset)}>
             <div className={styles.assetThumb}>
               {asset.URL ? (
-                <img src={asset.URL} alt={asset.Name} loading="lazy" />
+                asset.AssetType === 'Video' ? (
+                  <>
+                    <video src={asset.URL} muted playsInline preload="metadata" />
+                  </>
+                ) : (
+                  <img src={asset.URL} alt={asset.Name} loading="lazy" />
+                )
               ) : (
                 <div className={styles.empty}>资源不可用</div>
               )}
+              <div className={styles.assetTypeBadge}>
+                {asset.AssetType === 'Video' ? <Video size={14} /> : null}
+                {asset.AssetType === 'Video' ? '视频' : '图片'}
+              </div>
               {/* 底部名称浮层 */}
               <div className={styles.assetNameOverlay}>
                 <span className={styles.assetName} title={asset.Name}>{asset.Name}</span>
@@ -261,6 +242,7 @@ function GroupDetail({
                 title="删除素材"
                 onClick={(e) => {
                   e.stopPropagation();
+                  setPreviewAsset(null); // 关闭预览弹窗，避免层级冲突
                   onDeleteAsset(asset);
                 }}
               >
@@ -275,46 +257,7 @@ function GroupDetail({
       </div>
 
       {previewAsset && (
-        <div className={styles.modalOverlay} onClick={closePreview}>
-          <div
-            className={`${styles.previewContainer} ${dragging ? styles.previewDragging : ''}`}
-            onClick={(e) => e.stopPropagation()}
-            onWheel={handleWheel}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-          >
-            {/* 关闭按钮 */}
-            <button className={styles.previewCloseBtn} onClick={closePreview} title="关闭">
-              <X size={20} />
-            </button>
-            {/* 图片预览 */}
-            <img
-              src={previewAsset.URL}
-              alt={previewAsset.Name}
-              className={styles.previewImage}
-              style={{
-                transform: `translate(${previewOffset.x}px, ${previewOffset.y}px) scale(${previewZoom})`,
-                cursor: previewZoom > 0.6 ? 'grab' : 'default',
-              }}
-              draggable={false}
-            />
-            {/* 缩放控制栏 */}
-            <div className={styles.previewZoomControls}>
-              <button onClick={handleZoomOut} title="缩小">
-                <Minus size={16} />
-              </button>
-              <span className={styles.previewZoomLevel}>{Math.round(previewZoom * 100)}%</span>
-              <button onClick={handleZoomIn} title="放大">
-                <Plus size={16} />
-              </button>
-              <button onClick={handleZoomReset} title="重置">
-                <RotateCw size={16} />
-              </button>
-            </div>
-          </div>
-        </div>
+        <MaterialDetailModal asset={previewAsset} onClose={closePreview} />
       )}
     </div>
   );
@@ -331,13 +274,12 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
   const [actionError, setActionError] = useState('');
 
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [renameTarget, setRenameTarget] = useState<MaterialGroup | null>(null);
   const [detailGroupId, setDetailGroupId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'group' | 'asset'; id: string; name: string } | null>(null);
 
   const GROUP_TYPE: GroupType = 'AIGC';
 
-  /** 加载分组 + 素材 */
+  /** 仅加载分组列表；素材在进入分组详情后再加载。 */
   const loadGroups = useCallback(async () => {
     setLoading(true);
     setLoadError('');
@@ -348,23 +290,7 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
         PageSize: 100,
       });
       setGroups(result.Items);
-      // 预加载每个分组的素材
-      const assetsMap = new Map<string, MaterialAsset[]>();
-      await Promise.all(
-        result.Items.map(async (g) => {
-          try {
-            const assets = await listAssets({
-              Filter: { GroupIds: [g.Id], GroupType: GROUP_TYPE },
-              PageNumber: 1,
-              PageSize: 100,
-            });
-            assetsMap.set(g.Id, assets.Items);
-          } catch {
-            assetsMap.set(g.Id, []);
-          }
-        }),
-      );
-      setGroupAssets(assetsMap);
+      setGroupAssets(new Map());
     } catch (err) {
       setLoadError(isApiError(err) ? err.message : '加载失败');
     } finally {
@@ -388,6 +314,11 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
       console.warn('刷新分组素材失败:', err);
     }
   }, []);
+
+  const handleViewGroup = useCallback((groupId: string) => {
+    setDetailGroupId(groupId);
+    void refreshGroupAssets(groupId);
+  }, [refreshGroupAssets]);
 
   /**
    * 自动轮询：列表中存在 Processing 状态素材时，每 5s 刷新对应分组，
@@ -438,19 +369,6 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
     } catch (err) {
       setActionError(isApiError(err) ? err.message : '创建分组失败');
       throw err; // 让 GroupFormModal 的 submitting 状态正确恢复
-    }
-  };
-
-  const handleRenameGroup = async (description: string) => {
-    if (!renameTarget) return;
-    setActionError('');
-    try {
-      await updateAssetGroup({ Id: renameTarget.Id, Description: description });
-      await loadGroups();
-      setRenameTarget(null);
-    } catch (err) {
-      setActionError(isApiError(err) ? err.message : '修改描述失败');
-      throw err;
     }
   };
 
@@ -510,16 +428,23 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
           onDeleteAsset={handleDeleteAsset}
           onUpload={onUpload}
         />
-        {renameTarget && (
-          <GroupFormModal
-            title="修改分组描述"
-            initialText={renameTarget.Description || ''}
-            placeholder="请输入分组描述"
-            onConfirm={handleRenameGroup}
-            onCancel={() => setRenameTarget(null)}
-          />
-        )}
         {actionError && <div className={styles.errorMsg} style={{ margin: '0 24px' }}>{actionError}</div>}
+
+        {/* 删除确认弹窗：详情视图内点击删除时立即弹出 */}
+        <ConfirmModal
+          open={!!deleteTarget}
+          title={deleteTarget?.type === 'group' ? '删除分组' : '删除素材'}
+          message={
+            deleteTarget
+              ? deleteTarget.type === 'group'
+                ? `确定要删除分组「${deleteTarget.name}」吗？分组内的所有素材也会被同步删除，此操作不可撤销。`
+                : `确定要删除素材「${deleteTarget.name}」吗？此操作不可撤销。`
+              : ''
+          }
+          confirmText="确认删除"
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
       </>
     );
   }
@@ -555,9 +480,7 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
             <GroupCard
               key={group.Id}
               group={group}
-              assets={groupAssets.get(group.Id) ?? []}
-              onView={() => setDetailGroupId(group.Id)}
-              onRename={() => setRenameTarget(group)}
+              onView={() => handleViewGroup(group.Id)}
               onDelete={() => handleDeleteGroup(group)}
             />
           ))}
@@ -577,16 +500,6 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
           title="新建分组"
           onConfirm={handleCreateGroup}
           onCancel={() => setShowCreateModal(false)}
-        />
-      )}
-
-      {renameTarget && (
-        <GroupFormModal
-          title="修改分组描述"
-          initialText={renameTarget.Description || ''}
-          placeholder="请输入分组描述"
-          onConfirm={handleRenameGroup}
-          onCancel={() => setRenameTarget(null)}
         />
       )}
 

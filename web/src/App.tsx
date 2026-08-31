@@ -3,7 +3,9 @@
  * ============================================ */
 import { useEffect } from 'react';
 import { RouterProvider } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import router from '@/router';
+import AuthExpiredGate from '@/components/AuthExpiredGate';
 import { fetchMe, toSessionUser } from '@/api/auth';
 import { updateUser } from '@/utils/auth';
 
@@ -20,7 +22,13 @@ function App() {
       .catch(() => undefined);
   }, []);
 
-  return <RouterProvider router={router} />;
+  return (
+    <>
+      <RouterProvider router={router} />
+      <AuthExpiredGate />
+      <Toaster position="top-center" theme="dark" duration={2600} />
+    </>
+  );
 }
 
 export default App;

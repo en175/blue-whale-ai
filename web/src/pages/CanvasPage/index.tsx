@@ -14,9 +14,9 @@ import {
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
-import BottomDialog, { type VideoGenOptions, type BottomRefItem } from './components/BottomDialog';
+import BottomDialog, { type VideoGenOptions, type BottomRefItem, type VideoGenSeedParams } from './components/BottomDialog';
 import type { ChipRef } from './components/ChipTextEditor';
-import ImageDialog, { type UploadedFile } from './components/ImageDialog';
+import ImageDialog, { type UploadedFile, type ImageGenSeedParams } from './components/ImageDialog';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
@@ -27,12 +27,14 @@ import type { CanvasProject } from './components/ProjectSelector';
 import FlowCanvas from './components/Canvas';
 import type { Node, Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
-import { quotaToPoints, fetchMe, toSessionUser } from '@/api/auth';
+import { fetchMe, fetchQuota, toSessionUser } from '@/api/auth';
 import { fetchProjects, createProject, renameProject, deleteProject,  } from '@/api/projects';
-import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, type AssetRecord, type AssetType } from '@/api/assets';
+import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
+import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
 import { saveCanvasDoc, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
+import { useAuthPromptStore } from '@/stores/authPrompt';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
 import type { GenerationCardBlock, SessionContentBlock } from '@/api/agentSessions';
 import {
@@ -41,6 +43,7 @@ import {
   retryGenerationJob,
   fetchJobStatus,
   createMediaExtraction,
+  readJobFailText,
   type ImageJobParameters,
   type VideoJobParameters,
   type AudioJobParameters,
@@ -53,8 +56,15 @@ import {
 } from '@/api/sharedAssets';
 import { uploadAssetFile } from '@/utils/upload';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
+import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
+import {
+  canvasLocationSearch,
+  pickCanvasIdAfterDelete,
+  pickCanvasIdAfterLoad,
+  readCanvasIdFromSearch,
+} from './canvasQuery';
 import styles from './index.module.css';
 
 type ToolMode = 'drag' | 'select';
@@ -64,8 +74,8 @@ export default function CanvasPage() {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const [projects, setProjects] = useState<CanvasProject[]>([]);
-  // 优先选中 ?project= 指定的项目（顶部展示该项目名）
-  const [currentId, setCurrentId] = useState(searchParams.get('project') ?? '');
+  // 优先选中 ?project= 指定的画布（顶部展示该画布名）；切换时回写同一 query 以便刷新还原
+  const [currentId, setCurrentId] = useState(() => readCanvasIdFromSearch(searchParams));
   const [showAgent, setShowAgent] = useState(false);
   const [showMiniMap, setShowMiniMap] = useState(false);
   const [toolMode, setToolMode] = useState<ToolMode>('select');
@@ -128,23 +138,62 @@ export default function CanvasPage() {
     mediaBlocks?: SessionContentBlock[];
   } | null>(null);
 
-  /** 首页发送框携带草稿跳转：打开 Agent 弹框并注入输入框，随后清除导航状态避免刷新重复注入 */
+  /** 首页发送框携带草稿跳转：打开 Agent 弹框并注入输入框，随后清除导航状态避免刷新重复注入。
+   *  智能体附件（首页 + 上传的图/视频）经模块变量 handoff 带入：此处上传得 assetId 构造
+   *  asset_ref 媒体块挂进 agentContext.mediaBlocks，复用 AgentPanel 既有的注入链路。 */
   useEffect(() => {
     const state = location.state as { agentText?: string; skillId?: string; skillName?: string } | null;
     if (!state?.agentText && !state?.skillId) return;
-    setAgentContext({ text: state.agentText ?? '', skillId: state.skillId ?? '', skillName: state.skillName ?? '', ts: Date.now() });
-    setShowAgent(true);
-    navigate(location.pathname + location.search, { replace: true, state: null });
+    const attachments = takeAgentHandoff();
+    const inject = async () => {
+      let mediaBlocks: SessionContentBlock[] | undefined;
+      if (attachments && attachments.length > 0) {
+        const blocks: SessionContentBlock[] = [];
+        for (const item of attachments) {
+          const uploaded = await uploadFileToAsset(item.file, item.kind);
+          if (uploaded) {
+            // 用 complete 返回的永久 URL（不是会被 revoke 的 objectURL），
+            // 并登记进 MessageAssetPreview 的缓存：发送后乐观气泡立刻能显示缩略图
+            rememberAssetUrl(uploaded.asset_id, uploaded.url);
+            blocks.push({
+              type: 'asset_ref',
+              url: uploaded.url,
+              name: item.name,
+              media_type: item.kind,
+              display_label: item.name,
+              asset_id: uploaded.asset_id,
+            });
+          } else {
+            console.warn('首页附件上传失败，已跳过:', item.name);
+          }
+          URL.revokeObjectURL(item.preview);
+        }
+        mediaBlocks = blocks.length > 0 ? blocks : undefined;
+      }
+      setAgentContext({
+        text: state.agentText ?? '',
+        skillId: state.skillId ?? '',
+        skillName: state.skillName ?? '',
+        ts: Date.now(),
+        mediaBlocks,
+      });
+      setShowAgent(true);
+      navigate(location.pathname + location.search, { replace: true, state: null });
+    };
+    void inject();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, location.pathname, location.search, navigate]);
-  /** 节点工具条带入图片对话框的初始值（ts 作为 key 强制重挂载以注入初始值） */
-  const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[] } | null>(null);
-  /** 节点工具条带入视频对话框的初始参考；cards 是「引用到 dock」累计的生成卡胶囊，不因再次点击覆盖 */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; cards?: ChipRef[]; text?: string } | null>(null);
+  /** 节点工具条带入图片对话框的初始值（ts 作为 key 强制重挂载以注入初始值）；
+   *  params 是首页 AI图片 带入的生成参数（选中首页所选模型/清晰度/宽高比） */
+  const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[]; params?: ImageGenSeedParams } | null>(null);
+  /** 节点工具条带入视频对话框的初始参考；cards 是「引用到 dock」累计的生成卡胶囊，不因再次点击覆盖；
+   *  params 是首页 AI视频 带入的生成参数（选中首页所选模型/比例/清晰度/时长/模式） */
+  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; cards?: ChipRef[]; text?: string; params?: VideoGenSeedParams } | null>(null);
   /** 节点工具条打开音频对话框的重挂载 key */
   const [audioSeed, setAudioSeed] = useState<{ ts: number } | null>(null);
   /** 首页 AI视频/AI图片 生成交接：消费后置入此 ref，待项目就绪触发创建任务 */
   const pendingGenRef = useRef<GenHandoff | null>(null);
-  /** 首页 AI视频/AI图片 发送带入：唤起对应底部对话框并填充内容，同时立即尝试触发生成（等于带入后直接发送） */
+  /** 首页 AI视频/AI图片 发送带入：唤起底部对话框（参数带入、内容清空），同时直接创建生成任务（生成卡落画布） */
   useEffect(() => {
     const state = location.state as { genKind?: 'video' | 'image' } | null;
     if (!state?.genKind) return;
@@ -155,13 +204,29 @@ export default function CanvasPage() {
       return;
     }
     if (handoff.kind === 'video') {
-      setVideoSeed({ ts: Date.now(), refs: handoff.refs, text: handoff.text });
+      // 参数带入对话框；refs/text 不带（内容不保留，任务由 firePendingGen 直接创建）
+      setVideoSeed({
+        ts: Date.now(),
+        refs: [],
+        params: {
+          modelId: handoff.modelId,
+          aspectRatio: handoff.aspectRatio,
+          resolution: handoff.resolution,
+          duration: handoff.duration,
+          mode: handoff.mode,
+        },
+      });
       setShowBottomDialog(true);
       setShowImageDialog(false);
       setShowAudioDialog(false);
       setShowMusicDialog(false);
     } else {
-      setImageSeed({ ts: Date.now(), text: handoff.text, files: handoff.files });
+      setImageSeed({
+        ts: Date.now(),
+        text: '',
+        files: [],
+        params: { modelId: handoff.modelId, ratio: handoff.ratio, size: handoff.size },
+      });
       setShowImageDialog(true);
       setShowBottomDialog(false);
       setShowAudioDialog(false);
@@ -182,12 +247,13 @@ export default function CanvasPage() {
     },
     [],
   );
-  /** 新节点出生位：当前视口中心 + 小随机偏移，保证新节点落在用户可见区域 */
+  /** 新节点出生位：以视口中心为原点在小范围内随机错乱堆叠。
+   *  不避碰、不外扩，新节点都落在中心 ±80px 的方形区域内，自然堆叠。 */
   const spawnPosition = () => {
     const c = spawnPosRef.current();
     return {
       x: Math.round(c.x + (Math.random() * 160 - 80)),
-      y: Math.round(c.y + (Math.random() * 120 - 60)),
+      y: Math.round(c.y + (Math.random() * 160 - 80)),
     };
   };
   /** 画布保存状态：idle 未保存 / saving 保存中 / saved 已保存 / error 保存失败 */
@@ -198,8 +264,27 @@ export default function CanvasPage() {
   const versionRef = useRef<number | null>(null);
   /** 最近一次加载/保存成功的内容签名，避免重复保存 */
   const lastSavedRef = useRef('');
-  const quota = useAuthStore((s) => s.quota);
+  /** 尚未被服务端确认保存的新增节点 ID——「添加失败」回滚用。
+   *  自动保存发起时对当前集合做快照：成功清快照、失败只回滚快照，
+   *  请求飞行中新增的节点留给下一轮保存处理，不会被误判为添加失败。 */
+  const pendingNodeIdsRef = useRef<Set<string>>(new Set());
+  /** 回滚未保存成功的新增节点：从画布移除并释放 blob URL */
+  const rollbackPendingNodes = useCallback((ids: Set<string>) => {
+    if (ids.size === 0) return;
+    [...mediaNodesRef.current, ...textNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current].forEach((n) => {
+      if (ids.has(n.id)) {
+        const src = n.data?.src as string | undefined;
+        if (src?.startsWith('blob:')) URL.revokeObjectURL(src);
+      }
+    });
+    setTextNodes((prev) => prev.filter((n) => !ids.has(n.id)));
+    setMediaNodes((prev) => prev.filter((n) => !ids.has(n.id)));
+    setProductNodes((prev) => prev.filter((n) => !ids.has(n.id)));
+    setAssetNodes((prev) => prev.filter((n) => !ids.has(n.id)));
+    ids.forEach((id) => pendingNodeIdsRef.current.delete(id));
+  }, []);
   const updateUser = useAuthStore((s) => s.updateUser);
+  const setQuota = useAuthStore((s) => s.setQuota);
   /** 新建商品节点序号（商品 1、商品 2…） */
   const productSeq = useRef(0);
 
@@ -209,6 +294,21 @@ export default function CanvasPage() {
       .then((me) => updateUser(toSessionUser(me)))
       .catch(() => undefined);
   }, [updateUser]);
+
+  // IKBN0G：画布顶栏不再挂 UserDropdown，配额改由本页拉取，供生成前余额拦截
+  useEffect(() => {
+    let alive = true;
+    fetchQuota()
+      .then((d) => {
+        if (alive) setQuota(d.quota);
+      })
+      .catch(() => {
+        if (alive) setQuota(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [setQuota]);
 
   // 加载项目列表；?project= 不在列表中时回退首项；无项目自动创建
   useEffect(() => {
@@ -227,15 +327,35 @@ export default function CanvasPage() {
           }
         }
         setProjects(mapped);
-        setCurrentId((prev) =>
-          prev && mapped.some((m) => m.id === prev) ? prev : (mapped[0]?.id ?? '')
-        );
+        setCurrentId((prev) => pickCanvasIdAfterLoad(prev, mapped.map((m) => m.id)));
       })
       .catch(() => undefined);
     return () => {
       alive = false;
     };
   }, []);
+
+  /** 地址栏改 query（含后退）时切回对应画布 */
+  useEffect(() => {
+    const fromQuery = readCanvasIdFromSearch(new URLSearchParams(location.search));
+    if (fromQuery) setCurrentId(fromQuery);
+  }, [location.search]);
+
+  /** 当前画布写入 ?project=，刷新后回到同一张画布；保留其它 query 与 location.state */
+  useEffect(() => {
+    if (!currentId) return;
+    const currentSearch = new URLSearchParams(location.search);
+    if (readCanvasIdFromSearch(currentSearch) === currentId) return;
+    navigate(
+      {
+        pathname: location.pathname,
+        search: canvasLocationSearch(currentSearch, currentId),
+      },
+      { replace: true, state: location.state },
+    );
+    // 只在选中画布变化时回写，避免地址栏输入被旧 currentId 覆盖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId]);
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
   const { doc, assets: snapshotAssets, refetch } = useCanvasDoc(currentId);
@@ -308,11 +428,6 @@ export default function CanvasPage() {
             setPickMode('asset');
             setPickTarget('asset');
             setPickAssetId(id);
-          },
-          onOpenCharacterLibrary: (id: string) => {
-            setPickAssetId(id);
-            setCharacterLibraryTarget('asset');
-            setShowCharacterLibrary(true);
           },
           // 生成卡节点水合后补动作回调（引用到 dock / 给 Agent）
           generationCard: base.data?.generationCard
@@ -566,21 +681,31 @@ export default function CanvasPage() {
       }
       lastSavedRef.current = sig;
       setSaveStatus('saving');
+      // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
+      const pendingSnapshot = new Set(pendingNodeIdsRef.current);
       saveCanvasDoc(currentId, { viewport, nodes }, versionRef.current)
         .then((saved) => {
           versionRef.current = saved.version;
+          pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
           setSaveStatus('saved');
           setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
         })
         .catch((e) => {
           // 释放签名，允许下次变更时重试
           lastSavedRef.current = '';
+          // 本次请求里有未保存的新增节点 → 添加失败：回滚节点（画布上不保留添加失败的节点）
+          const hadPendingAdds = pendingSnapshot.size > 0;
           if (isApiError(e) && e.status === 412) {
-            // 版本冲突：重新加载最新画布数据（加载后自动重试保存，保持 saving）
+            // 版本冲突：回滚未保存节点 + toast，然后重新加载最新画布数据
+            if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
+            showToast('warn', hadPendingAdds ? '添加失败，请重试' : '版本冲突，正在同步最新数据');
             console.warn('画布保存版本冲突，重新加载最新数据');
             refetch();
           } else {
+            // 网络/服务端错误：新增节点回滚，已有节点的编辑保留、左下角提示保存失败
+            if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
             setSaveStatus('error');
+            showToast('error', hadPendingAdds ? '添加失败，请重试' : '保存失败，请重试');
             console.warn('画布自动保存失败:', e);
           }
         });
@@ -608,8 +733,10 @@ export default function CanvasPage() {
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
+        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
+    pendingNodeIdsRef.current.add(newNode.id);
     setTextNodes((prev) => [...prev, newNode]);
   };
 
@@ -618,12 +745,14 @@ export default function CanvasPage() {
     const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
       const copy: Node = { ...t, id: newNodeId('text'), position: { x: t.position.x + 40, y: t.position.y + 40 }, data: { ...t.data } };
+      pendingNodeIdsRef.current.add(copy.id);
       setTextNodes((prev) => [...prev, copy]);
       return;
     }
     const m = mediaNodesRef.current.find((n) => n.id === id);
     if (m) {
       const copy: Node = { ...m, id: newNodeId('media'), position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
+      pendingNodeIdsRef.current.add(copy.id);
       setMediaNodes((prev) => [...prev, copy]);
     }
   };
@@ -862,24 +991,35 @@ export default function CanvasPage() {
       .catch(() => undefined);
   };
 
-  /** 删除项目：DELETE /api/projects/:id；删除当前项目后自动跳回首页 */
-  const handleDelete = (id: string) => {
-    deleteProject(id)
-      .then(() => {
-        if (currentId === id) {
-          navigate('/');
-          return;
-        }
-        setProjects((prev) => prev.filter((p) => p.id !== id));
-      })
-      .catch(() => undefined);
-  };
-
   /** 新建项目名：当前年月日时分（如 2026-08-18 02:58） */
   const newProjectName = () => {
     const d = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  /** 删除项目：DELETE /api/projects/:id；删除当前画布后切到剩余列表最新一项，不跳首页 */
+  const handleDelete = (id: string) => {
+    deleteProject(id)
+      .then(async () => {
+        const remaining = projects.filter((p) => p.id !== id);
+        const nextId = pickCanvasIdAfterDelete(currentId, id, projects.map((p) => p.id));
+        if (!nextId) {
+          try {
+            const created = await createProject(newProjectName());
+            const item: CanvasProject = { id: String(created.id), name: created.name };
+            setProjects([item]);
+            setCurrentId(item.id);
+          } catch {
+            setProjects([]);
+            setCurrentId('');
+          }
+          return;
+        }
+        setProjects(remaining);
+        setCurrentId(nextId);
+      })
+      .catch(() => undefined);
   };
 
   /** 新建项目：POST /api/projects 并切换选中（撞名由后端自动追加 (2)(3)） */
@@ -898,7 +1038,7 @@ export default function CanvasPage() {
    * 单文件落到画布：本地预览立即可见，后台三步上传成功后换永久 URL。
    * 工具栏多选和 Agent 侧边栏「+」（IKBA6C）共用这一条，避免会话附件与画布各传一次。
    */
-  const placeFileOnCanvas = (file: File, offsetIndex = 0): Promise<{ asset_id: string; url: string }> => {
+  const placeFileOnCanvas = (file: File): Promise<{ asset_id: string; url: string }> => {
     const isImage = file.type.startsWith('image/');
     const isVideo = file.type.startsWith('video/');
     if (!isImage && !isVideo) {
@@ -910,13 +1050,13 @@ export default function CanvasPage() {
     }
     const nodeId = newNodeId('media');
     const localSrc = URL.createObjectURL(file);
-    const center = spawnPosRef.current();
+    pendingNodeIdsRef.current.add(nodeId);
     setMediaNodes((prev) => [
       ...prev,
       {
         id: nodeId,
         type: 'mediaNode',
-        position: { x: Math.round(center.x + offsetIndex * 280), y: Math.round(center.y + Math.random() * 100) },
+        position: spawnPosition(),
         data: {
           src: localSrc,
           fileName: file.name,
@@ -968,16 +1108,23 @@ export default function CanvasPage() {
         return { asset_id: done.asset_id, url: done.url };
       })
       .catch((err) => {
-        console.warn(`画布上传登记失败（${file.name}），保留本地预览:`, err);
+        // 上传登记失败 = 添加失败：节点不留在画布，移除并释放 blob URL
+        console.warn(`画布上传登记失败（${file.name}）：`, err);
+        URL.revokeObjectURL(localSrc);
+        pendingNodeIdsRef.current.delete(nodeId);
+        setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+        showToast('error', `「${file.name}」添加失败，请重试`);
         throw err instanceof Error ? err : new Error('上传失败');
       });
   };
 
-  /** 上传文件生成媒体节点：本地预览立即上画布，后台三步上传登记，成功后换永久 URL */
+  /** 上传文件生成媒体节点：本地预览立即上画布，后台三步上传登记，成功后换永久 URL；
+   *  上传失败时 placeFileOnCanvas 内部已移除节点并 toast「添加失败，请重试」 */
   const handleUploadFile = (files: File[]) => {
-    files.forEach((file, i) => {
-      void placeFileOnCanvas(file, i).catch(() => {
-        /* 工具栏路径保持原语义：失败时节点仍留本地预览，错误已在 placeFileOnCanvas 里 warn */
+    files.forEach((file) => {
+      void placeFileOnCanvas(file).catch(() => {
+        // 前置校验失败（类型不支持/超大小上限）发生在节点创建前：无节点可清理，仅提示
+        showToast('error', `「${file.name}」添加失败，请重试`);
       });
     });
   };
@@ -1070,7 +1217,7 @@ export default function CanvasPage() {
             jobTimersRef.current.delete(nodeId);
             patchMediaNode(nodeId, {
               genStatus: 'failed',
-              errorText: detail.error?.message ?? '',
+              errorText: readJobFailText(detail.error),
             });
             return;
           }
@@ -1167,6 +1314,13 @@ export default function CanvasPage() {
             setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
             return;
           }
+          if (isApiError(e) && e.status === 401) {
+            setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+            useAuthPromptStore.getState().addResume(() => {
+              startGenerationJob(type, parameters, inputAssetIds, videoRefs);
+            });
+            return;
+          }
           patchMediaNode(nodeId, {
             genStatus: 'failed',
             errorText: isApiError(e) ? e.message : '创建任务失败',
@@ -1218,6 +1372,13 @@ export default function CanvasPage() {
             patchMediaNode(nodeId, {
               genStatus: 'failed',
               errorText: isApiError(e) ? e.message : '余额不足',
+            });
+            return;
+          }
+          if (isApiError(e) && e.status === 401) {
+            patchMediaNode(nodeId, { genStatus: 'failed', errorText: '' });
+            useAuthPromptStore.getState().addResume(() => {
+              handleRetryJob(nodeId);
             });
             return;
           }
@@ -1337,7 +1498,7 @@ export default function CanvasPage() {
       }
       pollJob(mediaExtractNodeId(created.job_id), created.job_id);
     } catch (error) {
-      showToast('error', isApiError(error) ? error.message : '音频提取任务创建失败');
+      if (!isApiError(error)) showToast('error', '音频提取任务创建失败');
     }
   };
 
@@ -1488,8 +1649,10 @@ export default function CanvasPage() {
           setAssetNodes((prev) => prev.filter((n) => n.id !== id));
         },
         onGenerateImage: () => actionsRef.current.openImageDialog(),
+        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
+    pendingNodeIdsRef.current.add(node.id);
     setAssetNodes((prev) => [...prev, node]);
   };
 
@@ -1620,8 +1783,10 @@ export default function CanvasPage() {
           setPickTarget('product');
           setPickProductId(id);
         },
+        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
+    pendingNodeIdsRef.current.add(node.id);
     setProductNodes((prev) => [...prev, node]);
   };
 
@@ -1646,13 +1811,10 @@ export default function CanvasPage() {
           setPickTarget('asset');
           setPickAssetId(id);
         },
-        onOpenCharacterLibrary: (id: string) => {
-          setPickAssetId(id);
-          setCharacterLibraryTarget('asset');
-          setShowCharacterLibrary(true);
-        },
+        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
+    pendingNodeIdsRef.current.add(node.id);
     setAssetNodes((prev) => [...prev, node]);
   };
 
@@ -1707,20 +1869,16 @@ export default function CanvasPage() {
     try {
       const result = await saveSharedAsset(req);
       console.log('[SaveAssets] 保存结果', result);
-      showToast('success', successMsg);
+      // created:false = 后端判定已存在（幂等/去重），未写入新快照——不能提示「已保存」误导用户
+      if (result.created) {
+        showToast('success', successMsg);
+      } else {
+        showToast('warn', '该内容已在共享资产中，未重复创建；如需更新请先删除旧条目');
+      }
       return result;
     } catch (e) {
       console.warn('[SaveAssets] 保存失败', e);
-      if (isApiError(e)) {
-        // 100408: 卡片无参考图且无描述
-        if (e.code === 100408) {
-          showToast('error', '请先为卡片补充参考图或描述');
-        } else {
-          showToast('error', e.message || '保存失败');
-        }
-      } else {
-        showToast('error', '保存失败，请重试');
-      }
+      if (!isApiError(e)) showToast('error', '保存失败，请重试');
       return null;
     }
   };
@@ -1878,6 +2036,7 @@ export default function CanvasPage() {
               onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
             },
           };
+          pendingNodeIdsRef.current.add(node.id);
           setMediaNodes((prev) => [...prev, node]);
           return true;
         }
@@ -1910,16 +2069,13 @@ export default function CanvasPage() {
                 setPickTarget('asset');
                 setPickAssetId(id);
               },
-              onOpenCharacterLibrary: (id: string) => {
-                setPickAssetId(id);
-                setCharacterLibraryTarget('asset');
-                setShowCharacterLibrary(true);
-              },
+              onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
             },
           };
           if (snapshot.voice) {
             (node.data as Record<string, unknown>).voice = snapshot.voice;
           }
+          pendingNodeIdsRef.current.add(node.id);
           setAssetNodes((prev) => [...prev, node]);
           return true;
         }
@@ -1950,8 +2106,10 @@ export default function CanvasPage() {
                 setPickTarget('product');
                 setPickProductId(id);
               },
+              onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
             },
           };
+          pendingNodeIdsRef.current.add(node.id);
           setProductNodes((prev) => [...prev, node]);
           return true;
         }
@@ -1976,8 +2134,10 @@ export default function CanvasPage() {
               onDuplicate: (id: string) => actionsRef.current.duplicate(id),
               onAddToChat: (id: string) => actionsRef.current.addToChat(id),
               onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
+              onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
             },
           };
+          pendingNodeIdsRef.current.add(node.id);
           setTextNodes((prev) => [...prev, node]);
           return true;
         }
@@ -2025,7 +2185,7 @@ export default function CanvasPage() {
   };
 
   /** 上传单个文件到服务器，返回 assetId */
-  const uploadFileToAsset = async (file: File, type: 'image' | 'video'): Promise<string | null> => {
+  const uploadFileToAsset = async (file: File, type: 'image' | 'video'): Promise<UploadCompleteData | null> => {
     try {
       const assetType: AssetType = type === 'image' ? 'image' : 'video';
       const presign = await fetchUploadPresign({ type: assetType, mime: file.type, size: file.size });
@@ -2037,7 +2197,7 @@ export default function CanvasPage() {
         storage_key: presign.storage_key,
         project_id: currentId || undefined,
       });
-      return complete.asset_id;
+      return complete;
     } catch (e) {
       console.warn('上传文件失败:', e);
       return null;
@@ -2076,7 +2236,8 @@ export default function CanvasPage() {
       );
     }
     if (!fileToUpload) return null;
-    return uploadFileToAsset(fileToUpload, item.type);
+    const uploaded = await uploadFileToAsset(fileToUpload, item.type);
+    return uploaded ? uploaded.asset_id : null;
   };
 
   /** 图片对话发送：上传参考图 → 创建图片生成任务 */
@@ -2104,8 +2265,8 @@ export default function CanvasPage() {
         fileToUpload = await fetchUrlAsFile(f.url, f.name, 'image/*');
       }
       if (fileToUpload) {
-        const assetId = await uploadFileToAsset(fileToUpload, 'image');
-        if (assetId) inputAssetIds.push(assetId);
+        const uploaded = await uploadFileToAsset(fileToUpload, 'image');
+        if (uploaded) inputAssetIds.push(uploaded.asset_id);
       }
     }
 
@@ -2122,9 +2283,11 @@ export default function CanvasPage() {
     const handoff = pendingGenRef.current;
     if (!handoff) return;
     if (!currentId) return; // 项目未就绪：等 currentId 变化后由 effect 重试
+    if (!doc) return; // 文档未加载：此刻 setMediaNodes 会被 doc 水合 effect 清空，等 doc 就绪再触发
     pendingGenRef.current = null;
     if (handoff.kind === 'video') {
-      // 参考素材（图/视频）上传取 assetId → reference_asset_ids（首页无首尾帧模式）
+      // 参考素材（图/视频）上传取 assetId：首尾帧模式走 first/lastFrameAssetId（首页已校验恰好 2 张图），
+      // 其余模式走 reference_asset_ids
       (async () => {
         const parameters: VideoJobParameters = {
           prompt: handoff.text,
@@ -2135,6 +2298,27 @@ export default function CanvasPage() {
         };
         if (!handoff.refs.length) {
           startGenerationJob('video', parameters);
+          return;
+        }
+        if (handoff.mode === 'keyframe') {
+          const [first, last] = handoff.refs;
+          const firstAssetId = first ? await resolveRefAssetId({
+            file: first.file, url: first.preview, name: 'ref-image', type: first.type,
+          }) : null;
+          const lastAssetId = last ? await resolveRefAssetId({
+            file: last.file, url: last.preview, name: 'ref-image', type: last.type,
+          }) : null;
+          // 不再 seed 进底部对话框，objectURL 在此自行释放
+          if (!firstAssetId || !lastAssetId) {
+            console.warn('首尾帧素材上传失败，任务未创建');
+            handoff.refs.forEach((r) => URL.revokeObjectURL(r.preview));
+            return;
+          }
+          startGenerationJob('video', parameters, undefined, {
+            firstFrameAssetId: firstAssetId,
+            lastFrameAssetId: lastAssetId,
+          });
+          handoff.refs.forEach((r) => URL.revokeObjectURL(r.preview));
           return;
         }
         const referenceAssetIds: string[] = [];
@@ -2153,14 +2337,16 @@ export default function CanvasPage() {
           undefined,
           referenceAssetIds.length > 0 ? { referenceAssetIds } : undefined,
         );
+        // 不再 seed 进底部对话框，objectURL 在此自行释放
+        handoff.refs.forEach((r) => URL.revokeObjectURL(r.preview));
       })();
     } else {
       // 图片：参考图先上传取 assetId，再创建任务（同 handleImageDialogSend）
       (async () => {
         const inputAssetIds: string[] = [];
         for (const f of handoff.files) {
-          const assetId = await uploadFileToAsset(f.file, 'image');
-          if (assetId) inputAssetIds.push(assetId);
+          const uploaded = await uploadFileToAsset(f.file, 'image');
+          if (uploaded) inputAssetIds.push(uploaded.asset_id);
         }
         startGenerationJob('image', {
           prompt: handoff.text,
@@ -2168,6 +2354,8 @@ export default function CanvasPage() {
           aspect_ratio: handoff.ratio,
           size: handoff.size,
         }, inputAssetIds.length > 0 ? inputAssetIds : undefined);
+        // 不再 seed 进图片对话框，objectURL 在此自行释放
+        handoff.files.forEach((f) => URL.revokeObjectURL(f.url));
       })();
     }
     // 触发后清导航状态（消费时不提前清，避免 location 变化重跑消费 effect 重复注入对话框）
@@ -2175,11 +2363,11 @@ export default function CanvasPage() {
   };
   actionsRef.current.firePendingGen = firePendingGen;
 
-  /** 项目就绪后触发首页生成交接（消费时 currentId 已有值则已被消费 effect 立即触发，此处幂等重试） */
+  /** 项目/文档就绪后触发首页生成交接（消费时已就绪则已被消费 effect 立即触发，此处幂等重试） */
   useEffect(() => {
     actionsRef.current.firePendingGen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId]);
+  }, [currentId, doc]);
 
   return (
     <div className={styles.canvasPage}>
@@ -2187,7 +2375,6 @@ export default function CanvasPage() {
       <CanvasHeader
         projects={projects}
         currentProjectId={currentId}
-        balance={quota === null ? '--' : quotaToPoints(quota)}
         onSelectProject={handleSelect}
         onRenameProject={handleRename}
         onDeleteProject={handleDelete}
@@ -2302,7 +2489,7 @@ export default function CanvasPage() {
             >
               {saveStatus === 'saving' && '保存中…'}
               {saveStatus === 'saved' && `已保存 ${savedAt}`}
-              {saveStatus === 'error' && '保存失败'}
+              {saveStatus === 'error' && '保存失败，请重试'}
             </span>
           )}
         </div>
@@ -2314,6 +2501,7 @@ export default function CanvasPage() {
             initialRefs={videoSeed?.refs}
             initialCards={videoSeed?.cards}
             initialText={videoSeed?.text}
+            initialParams={videoSeed?.params}
             onClose={() => { setShowBottomDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleDialogSend}
             onPickFromCanvas={(kind) => { setPickMode(kind); setPickTarget('video'); }}
@@ -2321,6 +2509,7 @@ export default function CanvasPage() {
             externalPick={videoPickResult}
             externalImagePick={videoDlgImagePickResult}
             onOpenCharacterLibrary={() => { setCharacterLibraryTarget('video'); setShowCharacterLibrary(true); }}
+            onToast={(type, msg) => showToast(type, msg)}
           />
         )}
         {/* 底部图片对话框 */}
@@ -2329,12 +2518,14 @@ export default function CanvasPage() {
             key={imageSeed?.ts ?? 0}
             initialText={imageSeed?.text}
             initialFiles={imageSeed?.files}
+            initialParams={imageSeed?.params}
             onClose={() => { setShowImageDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleImageDialogSend}
             onPickFromCanvas={() => { setPickMode('image'); setPickTarget('image'); }}
             pickMode={pickMode === 'image'}
             externalPick={imagePickResult}
             onOpenCharacterLibrary={() => { setCharacterLibraryTarget('image'); setShowCharacterLibrary(true); }}
+            onToast={(type, msg) => showToast(type, msg)}
           />
         )}
 
@@ -2362,6 +2553,7 @@ export default function CanvasPage() {
             onPickFromCanvas={() => { setPickMode('audio'); setPickTarget('audio'); }}
             pickMode={pickMode === 'audio'}
             externalPick={audioPickResult}
+            onToast={(type, msg) => showToast(type, msg)}
           />
         )}
 

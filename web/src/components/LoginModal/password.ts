@@ -1,2 +1,2 @@
 export const isRegisterPasswordValid = (password: string) =>
-  password.length >= 9 && password.length <= 20;
+  password.length >= 8 && password.length <= 20;

@@ -50,6 +50,7 @@ export function fetchCanvasDoc(projectId: string): Promise<CanvasDoc> {
   if (existed) return existed;
   const p = apiRequest<CanvasRecord | null>(
     `/api/canvases?projectId=${encodeURIComponent(projectId)}`,
+    { silent: true },
   )
     .then((rec): CanvasDoc => {
       const nodes = safeParse<Node[]>(rec?.nodes ?? null, []).map((n) => ({
@@ -105,6 +106,7 @@ export function saveCanvasDoc(
 ): Promise<CanvasSaveData> {
   return apiRequest<CanvasSaveData>(`/api/canvases/${encodeURIComponent(projectId)}`, {
     method: 'PUT',
+    silent: true,
     headers: { 'If-Match': version === null ? '"missing"' : `"${version}"` },
     body: JSON.stringify({
       viewport: JSON.stringify(payload.viewport),

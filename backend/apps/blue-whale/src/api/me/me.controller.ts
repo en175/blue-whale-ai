@@ -1,11 +1,29 @@
-import { Controller, Get } from "@nestjs/common";
-import { ok } from "@blue-whale/contracts";
+import { Body, Controller, Get, Headers, Put, Res } from "@nestjs/common";
+import type { Response } from "express";
+import { NewApiError } from "@blue-whale/core";
+import { createLogger } from "@blue-whale/core/logging";
+import { changePasswordRequestSchema, ok } from "@blue-whale/contracts";
+import { AccountService } from "@lib/shared/account/account.service.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { SessionService } from "@lib/shared/session/session.service.js";
+import {
+  SESSION_COOKIE_NAME,
+  sessionCookieOptions,
+} from "@lib/shared/session/cookie.js";
+import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
+import { toUpstreamError } from "@lib/shared/errors/upstream-error.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
 /** 会话身份快照（AuthGuard 从本地会话解析，不再每次调 new-api /token/identity）。 */
 @Controller()
 export class MeController {
+  private readonly logger = createLogger("me");
+
+  constructor(
+    private readonly account: AccountService,
+    private readonly sessions: SessionService,
+  ) {}
+
   @Get("me")
   async me(@CurrentUser() user: AuthenticatedUser) {
     return ok({
@@ -17,5 +35,63 @@ export class MeController {
       has_password: true,
       is_admin: user.isAdmin,
     });
+  }
+
+  /** 修改密码（IKBRCK）：AuthGuard 已回注真实 sk-，原样透传网关 PUT /api/user/self。
+   *  新密码长度口径 8–20（网关为事实源），此处只做非空契约校验，不二次限长。
+   *  改密成功后吊销该用户全部会话（含当前窗口）；若枚举吊销失败，兜底至少清掉当前窗口。 */
+  @Put("me/password")
+  async changePassword(
+    @Body() body: unknown,
+    @Headers("authorization") authorization?: string,
+    @CurrentUser() user?: AuthenticatedUser,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const parsed = changePasswordRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new NewApiError("原密码和新密码不能为空", 400, "invalid_params");
+    }
+    const token = parseBearerToken(authorization);
+    if (!token) {
+      throw new NewApiError("未提供有效令牌", 401, "unauthorized");
+    }
+    try {
+      await this.account.changePassword(
+        {
+          originalPassword: parsed.data.original_password,
+          newPassword: parsed.data.password,
+        },
+        token,
+      );
+    } catch (error) {
+      throw toUpstreamError(error, "修改密码失败");
+    }
+    // 改密成功后再踢会话（best-effort）：上游改密成功已保证新密码生效，
+    // 会话吊销失败不阻断改密，避免旧会话残留。
+    let revokedSessions = 0;
+    try {
+      if (user?.userId != null) {
+        revokedSessions = await this.sessions.revokeAllForUser(Number(user.userId));
+      }
+    } catch (error) {
+      this.logger.error(
+        `changePassword user=${user?.userId} session revoke failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      // 兜底：枚举吊销失败（SCAN+pipeline）时，至少直接吊销当前会话并清 cookie——
+      // 保证当前浏览器改密后立即要求重新登录（其他设备会话靠 ≤5min 复核或后续枚举）。
+      try {
+        if (token) await this.sessions.revoke(token);
+        if (res) res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions());
+      } catch (fallbackError) {
+        this.logger.error(
+          `changePassword fallback revoke failed: ${
+            fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+          }`,
+        );
+      }
+    }
+    return ok({ revokedSessions });
   }
 }

@@ -207,6 +207,8 @@
   background-color: var(--color-bg-hover);
 }
 
+/* ---- 参考素材数量提示已合并回 placeholder，无需单独样式 ---- */
+
 /* ---- 输入框 ---- */
 .textarea {
   width: 100%;

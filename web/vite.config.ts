@@ -98,6 +98,12 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, './src'),
       },
     },
+    build: {
+      // Vite 8 默认 cssMinify=lightningcss。同一规则同时写 backdrop-filter
+      // 与 -webkit-backdrop-filter 时，lightningcss 会丢掉标准属性
+      // （vitejs/vite#22649），Chromium 生产环境毛玻璃失效。esbuild 会保留两条。
+      cssMinify: 'esbuild',
+    },
     server: {
       // 监听所有网卡：支持局域网 IP（如 http://192.168.x.x:3000）访问
       host: true,

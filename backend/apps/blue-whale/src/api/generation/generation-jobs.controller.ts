@@ -11,7 +11,10 @@ import {
 } from "@lib/shared/generation/handle-create-generation-job.js";
 import { handleCancelGenerationJob } from "@lib/shared/generation/handle-cancel-generation-job.js";
 import { handleRetryGenerationJob } from "@lib/shared/generation/handle-retry-generation-job.js";
-import { enqueueVideoGenerationJob } from "@lib/shared/generation/video-queue.js";
+import {
+  enqueueVideoGenerationJob,
+  enqueueImageGenerationJob,
+} from "@lib/shared/generation/video-queue.js";
 import { processJob } from "@lib/shared/generation/worker/generation-worker.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
@@ -60,6 +63,15 @@ export class GenerationJobsController {
       } catch (error) {
         logger.error(
           `[generation] enqueue video job failed: ${error instanceof Error ? error.message : "unknown"}`,
+        );
+      }
+    } else if (result.code === 200 && result.data && body.type === "image") {
+      // IKBGKA：图片 job 走 RocketMQ（消费端 Semaphore 控并发，不再 API 进程内无上限 fire-and-forget）。
+      try {
+        await enqueueImageGenerationJob(String(result.data.generation_job_id));
+      } catch (error) {
+        logger.error(
+          `[generation] enqueue image job failed: ${error instanceof Error ? error.message : "unknown"}`,
         );
       }
     } else if (result.code === 200 && result.data) {
@@ -113,6 +125,15 @@ export class GenerationJobsController {
         } catch (error) {
           logger.error(
             `[generation] enqueue retry video job failed: ${error instanceof Error ? error.message : "unknown"}`,
+          );
+        }
+      } else if (result.data.type === "image") {
+        // IKBGKA：图片 retry 走 RocketMQ。
+        try {
+          await enqueueImageGenerationJob(newJobId);
+        } catch (error) {
+          logger.error(
+            `[generation] enqueue retry image job failed: ${error instanceof Error ? error.message : "unknown"}`,
           );
         }
       } else {

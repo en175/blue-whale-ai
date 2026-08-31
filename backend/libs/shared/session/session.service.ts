@@ -88,6 +88,15 @@ export class SessionService implements OnModuleDestroy {
     return `session:${createHash("sha256").update(token).digest("hex")}`;
   }
 
+  private hashOf(token: string): string {
+    return createHash("sha256").update(token).digest("hex");
+  }
+
+  /** 按用户索引键：冻结时据此枚举该用户全部会话并批量吊销（TTL 与会话键同写同续）。 */
+  private indexKey(userId: number, hash: string): string {
+    return `user_session:${userId}:${hash}`;
+  }
+
   /** 密封 sk- 并写会话，返回下发给浏览器的会话令牌（明文不入 Redis）。 */
   async createSession(input: {
     userId: number;
@@ -98,6 +107,7 @@ export class SessionService implements OnModuleDestroy {
     sk: string;
   }): Promise<string> {
     const token = `sess_${randomBytes(32).toString("base64url")}`;
+    const hash = this.hashOf(token);
     const payload: SessionPayload = {
       userId: input.userId,
       username: input.username,
@@ -110,12 +120,17 @@ export class SessionService implements OnModuleDestroy {
       ),
       verifiedAt: Date.now(),
     };
-    await this.redis.set(
-      this.key(token),
-      JSON.stringify(payload),
-      "EX",
-      SESSION_TTL_SECONDS,
-    );
+    // 会话键 + 按用户索引键同写同 TTL（EX），冻结时可枚举该用户全部会话。
+    await this.redis
+      .multi()
+      .set(this.key(token), JSON.stringify(payload), "EX", SESSION_TTL_SECONDS)
+      .set(
+        this.indexKey(input.userId, hash),
+        "1",
+        "EX",
+        SESSION_TTL_SECONDS,
+      )
+      .exec();
     return token;
   }
 
@@ -132,6 +147,14 @@ export class SessionService implements OnModuleDestroy {
       return null;
     }
     await this.redis.expire(key, SESSION_TTL_SECONDS);
+    // 滑动续期同时以 SET 覆盖索引（值恒定）：既给已建索引续 TTL，
+    // 也给部署前旧会话（无索引键）惰性补建，使其纳入冻结枚举范围。
+    await this.redis.set(
+      this.indexKey(data.userId, this.hashOf(token)),
+      "1",
+      "EX",
+      SESSION_TTL_SECONDS,
+    );
     let sk: string;
     try {
       sk = openGenerationCredential(
@@ -168,6 +191,13 @@ export class SessionService implements OnModuleDestroy {
       data.status = input.status;
       data.verifiedAt = Date.now();
       await this.redis.set(key, JSON.stringify(data), "EX", SESSION_TTL_SECONDS);
+      // 复核回写同样以 SET 覆盖索引（值恒定）：续 TTL + 兜底补建，保持与会话键同寿命。
+      await this.redis.set(
+        this.indexKey(data.userId, this.hashOf(token)),
+        "1",
+        "EX",
+        SESSION_TTL_SECONDS,
+      );
     } catch {
       // 解析失败静默忽略：下次 resolve 仍会触发复核
     }
@@ -175,6 +205,45 @@ export class SessionService implements OnModuleDestroy {
 
   /** 登出吊销：删除会话（上游 sk- 不动，普通登出与凭证轮换分离，ADR-0062 #10/#19）。 */
   async revoke(token: string): Promise<void> {
-    await this.redis.del(this.key(token));
+    const key = this.key(token);
+    const hash = this.hashOf(token);
+    try {
+      const { userId } = JSON.parse(
+        (await this.redis.get(key)) ?? "{}",
+      ) as SessionPayload;
+      // 索引键一并删（键不存在时 DEL 为无害 no-op），避免 GET 后并发吊销留下孤儿索引。
+      await this.redis.multi().del(key).del(this.indexKey(userId, hash)).exec();
+    } catch {
+      // 载荷缺失/损坏时兜底只删会话键（索引键交由 TTL 自然过期）
+      await this.redis.del(key);
+    }
+  }
+
+  /** 踢单用户全部会话：按索引枚举并删除会话+索引键，返回枚举到的会话数（供冻结审计）。 */
+  async revokeAllForUser(userId: number): Promise<number> {
+    const prefix = `user_session:${userId}:`;
+    let cursor = "0";
+    const hashes = new Set<string>();
+    do {
+      const [next, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        `${prefix}*`,
+        "COUNT",
+        100,
+      );
+      cursor = next;
+      for (const k of keys) {
+        if (k.startsWith(prefix)) hashes.add(k.slice(prefix.length));
+      }
+    } while (cursor !== "0");
+    if (hashes.size === 0) return 0;
+    const pipeline = this.redis.pipeline();
+    for (const hash of hashes) {
+      pipeline.del(`session:${hash}`);
+      pipeline.del(this.indexKey(userId, hash));
+    }
+    await pipeline.exec();
+    return hashes.size;
   }
 }

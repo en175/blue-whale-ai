@@ -7,7 +7,7 @@
  * ============================================ */
 import { apiRequest } from './http';
 import { newIdempotencyKey } from './jobs';
-import { setSession } from '@/utils/auth';
+import { handleUnauthorized } from '@/utils/auth';
 
 /** @提及项（发送时可携带） */
 export interface MentionPayload {
@@ -102,8 +102,8 @@ export async function sendConversationMessage(
       signal,
     },
   );
-  // 凭证失效：清空本地会话（与 http 层行为一致）
-  if (res.status === 401) setSession(null);
+  // 凭证失效：与 http 层一致——已登录弹窗续接，未登录清会话
+  if (res.status === 401) handleUnauthorized();
 
   const contentType = res.headers.get('content-type') ?? '';
   if (contentType.includes('application/json')) {

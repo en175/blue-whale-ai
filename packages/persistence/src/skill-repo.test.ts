@@ -242,6 +242,89 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
     expect(select).toMatchObject({ name_zh: true, search_keywords: true });
   });
 
+  it("IKBMA3：多词 keyword 按空白拆词 + 全词命中（AND），跨 name/description/search_keywords", async () => {
+    const rows = [
+      // name 同时含两个词 → 命中
+      libraryRow({ id: 1n, name_zh: "智能视频生成" }),
+      // 「视频」在 name、「生成」在 description → 命中（跨字段 AND）
+      libraryRow({ id: 2n, name_zh: "视频剪辑", description_zh: "一键生成短视频" }),
+      // 「视频」「生成」都在 search_keywords → 命中（仅关键词库命中）
+      libraryRow({ id: 3n, name_zh: "口播文案", search_keywords: "视频带货 文案生成" }),
+      // 只含一个词 → 不命中
+      libraryRow({ id: 4n, name_zh: "智能海报" }),
+      // 一个词都没有 → 不命中
+      libraryRow({ id: 5n, name_zh: "深度写作" }),
+    ];
+    const { prisma } = createLibraryPrisma({ rows });
+
+    const page = await createSkillRepo(prisma).listLibrary("9", {
+      keyword: "视频 生成",
+      lang: "zh",
+      pageNum: 1,
+      pageSize: 10,
+    });
+
+    expect(page.records.map((r) => r.name)).toEqual([
+      "智能视频生成",
+      "视频剪辑",
+      "口播文案",
+    ]);
+    expect(page.total).toBe(3);
+    expect(page.pages).toBe(1);
+    expectWhitelistOnly(page.records);
+  });
+
+  it("IKBMA3：keyword 空白折叠，多空格/首尾空格与单词等价", async () => {
+    const rows = [
+      libraryRow({ id: 1n, name_zh: "智能视频生成" }),
+      libraryRow({ id: 2n, name_zh: "智能海报" }),
+    ];
+    const { prisma } = createLibraryPrisma({ rows });
+
+    const page = await createSkillRepo(prisma).listLibrary("9", {
+      keyword: "   视频   生成   ",
+      lang: "zh",
+      pageNum: 1,
+      pageSize: 10,
+    });
+
+    expect(page.records.map((r) => r.name)).toEqual(["智能视频生成"]);
+  });
+
+  it("IKBMA3：全空白 keyword 视同无筛选，返回全部", async () => {
+    const rows = [
+      libraryRow({ id: 1n, name_zh: "智能视频生成" }),
+      libraryRow({ id: 2n, name_zh: "深度写作" }),
+    ];
+    const { prisma } = createLibraryPrisma({ rows });
+
+    const page = await createSkillRepo(prisma).listLibrary("9", {
+      keyword: "   ",
+      lang: "zh",
+      pageNum: 1,
+      pageSize: 10,
+    });
+
+    expect(page.total).toBe(2);
+  });
+
+  it("IKBMA3：中文真实样例——搜「视频 生成」命中「智能视频生成」", async () => {
+    const rows = [
+      libraryRow({ id: 1n, name_zh: "智能视频生成", search_keywords: "短视频 内容生产" }),
+      libraryRow({ id: 2n, name_zh: "电商海报", search_keywords: "营销" }),
+    ];
+    const { prisma } = createLibraryPrisma({ rows });
+
+    const page = await createSkillRepo(prisma).listLibrary("9", {
+      keyword: "视频 生成",
+      lang: "zh",
+      pageNum: 1,
+      pageSize: 10,
+    });
+
+    expect(page.records.map((r) => r.name)).toEqual(["智能视频生成"]);
+  });
+
   it("sort=featured（缺省）按 sort_order 升序取回；sort=newest 按 gmt_create 降序", async () => {
     const rows = [
       libraryRow({ id: 1n, name_zh: "旧", gmt_create: new Date("2026-01-01") }),

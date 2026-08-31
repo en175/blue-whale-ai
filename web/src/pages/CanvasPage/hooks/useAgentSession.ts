@@ -45,6 +45,8 @@ export interface TurnOutcome {
   contextCapacity: RunContextCapacity | null;
   /** 结束那一刻按已收到正文估的输出 token。真实用量到达前由它顶着，见 runStatusLine。 */
   estimatedOutputTokens: number | null;
+  /** 失败时后端的那句人话（run.failure.message）。null 时状态行退回「未能完成」。 */
+  failureText: string | null;
 }
 
 /** 数据源：真实 /api/agent/v1（经 BFF 代理到独立 agent 服务）。本地开发需起 backend:3100 + agent + SSH 隧道，见 bw-test-env。 */
@@ -155,6 +157,7 @@ function parseSettledTurn(run: SessionRun): { startedAt: number; outcome: TurnOu
       // 正文早已固化成消息，流式缓冲是空的：这里没有可估的东西，也不该去估。
       // 真实用量缺失时状态行自己会把 token 那一段省掉。
       estimatedOutputTokens: null,
+      failureText: run.failure?.message || null,
     },
   };
 }
@@ -803,13 +806,19 @@ export function useAgentSession(projectId: string) {
           // 必须赶在 settleStream/discardStream 之前取：它们下一行就把正文清空了。
           // 取 accRef 而不是 streamingText——前者是收到的全部，后者只是逐字动画已经露出的部分。
           estimatedOutputTokens: estimateOutputTokens(accRef.current),
+          failureText: str((run.failure as Record<string, unknown> | undefined)?.message) || null,
         });
         // 终态一到就撤掉预览：这一刻起权威是校验过的卡片，让半成品留在屏幕上只会让人误以为能用。
         setPartialCard(null);
-        if (t === 'run.completed') settleStream(runId);
+        // cancelled 与 completed 一样固化（IKBRZV BUG-08，方案 A）：用户点停止时已经流出的
+        // 半截正文与思考，服务端从此随取消落库（agent failRun 的 partial），刷新后照常还原；
+        // 这里配套地不再乐观清空——用户亲眼看到的字不因「别写了」而消失。settleStream 对
+        // 空缓冲是 no-op，所以没流出任何字的取消不会生出一条空消息。failed/outcome_unknown
+        // 维持丢弃：服务端没有为它们落库，本地留下的文本刷新后就是对不上的幻影。
+        if (t === 'run.completed' || t === 'run.cancelled') settleStream(runId);
         else discardStream();
-        // completed 路径：settleStream 已把思考固化进助手消息并清空全局区；终态后到达的
-        // reasoning_trace.updated.v1 直接更新消息内的块。非 completed 终态没有消息可挂，
+        // completed/cancelled 路径：settleStream 已把思考固化进助手消息并清空全局区；终态后
+        // 到达的 reasoning_trace.updated.v1 直接更新消息内的块。其余终态没有消息可挂，
         // 全局思考保留到下一轮 run.queued/started，供回看
         if (t === 'run.failed' || t === 'run.outcome_unknown') {
           setFailedRunId(runId || null);
@@ -1202,6 +1211,7 @@ export function useAgentSession(projectId: string) {
               tokenUsage: null,
               contextCapacity: null,
               estimatedOutputTokens: null,
+              failureText: run.failure?.message || null,
             });
             runningRef.current = null;
             setRunningRunId(null);

@@ -163,6 +163,7 @@ export default function Modal(props: ModalProps) {
               style={{ ...style, ...semanticStyles.container, width: cssSize(width) }}
               data-semantic="container"
               aria-label={title == null ? ariaLabel : undefined}
+              onClick={(event) => event.stopPropagation()}
               onEscapeKeyDown={(event) => {
                 if (!keyboard) event.preventDefault();
               }}

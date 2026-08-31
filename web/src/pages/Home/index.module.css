@@ -4,12 +4,8 @@
 .home {
   width: 100%;
   height: 100%;
-  padding: var(--spacing-2xl) var(--spacing-2xl) var(--spacing-xl);
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-2xl);
   position: relative;
+  overflow: hidden;
 }
 
 /* ---- 顶部栏 ---- */
@@ -23,10 +19,32 @@
   z-index: 10;
 }
 
+/* 分层：视频 z-0；标题 / ChatBox / 画廊同在内容层，不再各自抬 z-index
+   （后渲染的画廊若自成一层，会把 ChatBox 下拉、弹层盖住） */
+.stage {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+  padding: 92px var(--spacing-2xl) var(--spacing-xl);
+  padding-left: calc(var(--sidebar-width) + var(--spacing-2xl));
+}
+
+@media (max-width: 1100px) {
+  .stage {
+    gap: var(--spacing-md);
+    padding: 72px var(--spacing-xl) var(--spacing-lg);
+    padding-left: calc(var(--sidebar-width) + var(--spacing-xl));
+  }
+}
+
 /* ---- 主标题 ---- */
 .hero {
   text-align: center;
-  margin-top: 60px;
 }
 
 .title {
@@ -35,18 +53,17 @@
   color: var(--color-text-primary);
   letter-spacing: -0.5px;
   margin: 0;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.72);
 }
 
-/* ---- 对话框容器 ---- */
+/* ---- 对话框 / 画廊：同一内容层，不各自抬 z-index ---- */
 .chatWrap {
   display: flex;
   justify-content: center;
 }
 
-/* ---- 卡片画廊容器 ---- */
 .galleryWrap {
   display: flex;
   justify-content: center;
-  margin-top: -18px;
   padding-bottom: var(--spacing-xl);
 }

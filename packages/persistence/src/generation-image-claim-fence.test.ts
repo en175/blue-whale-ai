@@ -174,8 +174,8 @@ describe("image claim fencing_token（IK7GRO 扩展）", () => {
   });
 });
 
-describe("claimNextInProcessJob 恢复扫描认领范围（IK9ILQ）", () => {
-  it("claimNextInProcessJob 认领 type∈(image,audio),不碰 video", async () => {
+describe("claimNextInProcessJob 恢复扫描认领范围（IK9ILQ + IKBGKA review 2 轮）", () => {
+  it("claimNextInProcessJob 只认领音频（图片已迁 MQ，不再进程内认领）", async () => {
     const now = new Date();
     const findFirst = vi.fn().mockResolvedValue({
       id: 310n,
@@ -202,7 +202,7 @@ describe("claimNextInProcessJob 恢复扫描认领范围（IK9ILQ）", () => {
     expect(claimed?.type).toBe("audio");
     expect(findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ type: { in: ["image", "audio"] } }),
+        where: expect.objectContaining({ type: "audio" }),
       }),
     );
   });

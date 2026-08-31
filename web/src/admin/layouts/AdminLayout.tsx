@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { getCurrentUser, subscribe, updateUser } from '@/utils/auth';
 import { fetchAdminSession } from '@/api/admin';
+import { useDocumentTitle } from '@/seo/useDocumentTitle';
 import styles from './index.module.css';
 
 /** 后台侧边菜单 */
@@ -33,6 +34,7 @@ const navItems = [
 ];
 
 export default function AdminLayout() {
+  useDocumentTitle();
   const user = useSyncExternalStore(subscribe, getCurrentUser);
   const [checking, setChecking] = useState(true);
 

@@ -7,6 +7,16 @@ import sharp from "sharp";
 
 import { AudioProviderError, type AudioProvider } from "@blue-whale/generation-runtime";
 import {
+  ERROR_INVALID_INPUT,
+  ERROR_MODEL_UNAVAILABLE,
+  ERROR_NO_RESULT,
+  ERROR_PROVIDER_CONFIG,
+  ERROR_PROVIDER_CREDENTIAL_MISSING,
+  ERROR_PROVIDER_FAILED,
+  ERROR_UNSUPPORTED_INPUT,
+  ERROR_UNSUPPORTED_TYPE,
+} from "@blue-whale/contracts";
+import {
   hasSeedreamSizeTable,
   resolveSeedreamImageSize,
 } from "../seedream-image-size.js";
@@ -41,7 +51,7 @@ export type WorkerDeps = {
 };
 
 /** 瞬时失败码：网络不可达 / 结果转存失败等——重试有意义。quota/config/校验类不算瞬时。 */
-const TRANSIENT_IMAGE_ERROR_CODES = new Set(["provider_failed"]);
+const TRANSIENT_IMAGE_ERROR_CODES = new Set([ERROR_PROVIDER_FAILED]);
 /** 图片任务最大重试次数（瞬时失败回 queued 后由恢复扫描或下次调度再领）。 */
 const MAX_IMAGE_RETRIES = 3;
 
@@ -64,8 +74,9 @@ export async function processNextJob(deps: WorkerDeps): Promise<string | null> {
   return processClaimedJob(job, deps);
 }
 
-/** 恢复扫描用：认领一个到点的进程内任务（claimNextInProcessJob，image+audio）并处理。
- *  与 claimNextImageJob 的区别——范围扩到 audio；视频仍归独立 RocketMQ worker，不在此认领。 */
+/** 恢复扫描用：认领一个到点的音频任务并处理。
+ *  IKBGKA（review 2 轮）：图片已迁 MQ，本函数只服务音频 inline 恢复；图片由
+ *  RecoveryService.listDueImageJobIds → enqueueImageGenerationJob 补入队。 */
 export async function processNextInProcessJob(
   deps: WorkerDeps,
 ): Promise<string | null> {
@@ -83,6 +94,18 @@ export async function processJob(
 ): Promise<string | null> {
   const { repo, workerId, jobId, userId } = deps;
   const job = await repo.claimJobById(jobId, userId, workerId);
+  if (!job) return null;
+
+  return processClaimedJob(job, deps);
+}
+
+/** 图片 MQ 消费端：按 RocketMQ 消息 jobId 领单个图片 job 并处理（IKBGKA）。
+ *  镜像 processJob 但按 id 领（无 request userId）——job 自带 user_id，消费端非 request-scoped。 */
+export async function processImageJobById(
+  jobId: string,
+  deps: WorkerDeps,
+): Promise<string | null> {
+  const job = await deps.repo.claimImageJobById(jobId, deps.workerId);
   if (!job) return null;
 
   return processClaimedJob(job, deps);
@@ -140,10 +163,17 @@ async function processClaimedJob(
       errorMessage: msg,
       ...fenceProof,
       releaseNote,
+      // IKBQEE / ADR-0078：调试详情（provider 原文/request_id 等）进 error.details，禁展示用户。
+      details: {
+        ...(attemptedRequestIds.length > 0
+          ? { request_ids: attemptedRequestIds }
+          : {}),
+        raw: msg,
+      },
     });
   };
   if (job.type !== "image" && job.type !== "video" && job.type !== "audio") {
-    await failClaimed("unsupported_type", `暂不支持类型: ${job.type}`);
+    await failClaimed(ERROR_UNSUPPORTED_TYPE, `暂不支持类型: ${job.type}`);
     return job.id;
   }
 
@@ -151,7 +181,7 @@ async function processClaimedJob(
   const prompt = typeof input.prompt === "string" ? input.prompt : "";
   const modelId = typeof input.model_id === "string" ? input.model_id : "";
   if (!prompt || !modelId) {
-    await failClaimed("invalid_input", "缺少 prompt 或 model_id");
+    await failClaimed(ERROR_INVALID_INPUT, "缺少 prompt 或 model_id");
     return job.id;
   }
 
@@ -169,7 +199,7 @@ async function processClaimedJob(
     : [];
   // 音频一期不支持参考素材,显式拦截不静默忽略。
   if (job.type === "audio" && referenceIds.length > 0) {
-    await failClaimed("unsupported_input", "音频生成一期不支持参考素材");
+    await failClaimed(ERROR_UNSUPPORTED_INPUT, "音频生成一期不支持参考素材");
     return job.id;
   }
   // IKA72G：图片参考图上限读取模型能力配置（features.max_reference_images），与创建校验同源；
@@ -184,7 +214,7 @@ async function processClaimedJob(
     imageCapability = await repo.findImageCapability(modelId, sizeId);
     if (!imageCapability) {
       await failClaimed(
-        "model_unavailable",
+        ERROR_MODEL_UNAVAILABLE,
         `未开通或不受支持的模型: ${modelId}`,
       );
       return job.id;
@@ -194,7 +224,7 @@ async function processClaimedJob(
   }
   if (referenceIds.length > maxReferenceCount) {
     await failClaimed(
-      "unsupported_input",
+      ERROR_UNSUPPORTED_INPUT,
       `当前模型最多支持 ${maxReferenceCount} 张参考图`,
     );
     return job.id;
@@ -207,7 +237,7 @@ async function processClaimedJob(
     sourceAssets.length !== referenceIds.length ||
     sourceAssets.some((asset) => asset.type !== "image")
   ) {
-    await failClaimed("unsupported_input", "参考素材不存在或无权访问");
+    await failClaimed(ERROR_UNSUPPORTED_INPUT, "参考素材不存在或无权访问");
     return job.id;
   }
 
@@ -216,7 +246,7 @@ async function processClaimedJob(
       const sealedCredential = job.input?.provider_credential;
       if (typeof sealedCredential !== "string" || sealedCredential.length === 0) {
         await failClaimed(
-          "provider_credential_missing",
+          ERROR_PROVIDER_CREDENTIAL_MISSING,
           "音频任务缺少供应商凭证",
         );
         return job.id;
@@ -227,7 +257,7 @@ async function processClaimedJob(
       const cap = await repo.findImageCapability(modelId, null);
       if (!cap) {
         await failClaimed(
-          "model_unavailable",
+          ERROR_MODEL_UNAVAILABLE,
           `未开通或不受支持的模型: ${modelId}`,
         );
         return job.id;
@@ -284,7 +314,7 @@ async function processClaimedJob(
 
     if (job.type === "video") {
       if (!videoProvider) {
-        await failClaimed("provider_config", "视频 provider 未配置");
+        await failClaimed(ERROR_PROVIDER_CONFIG, "视频 provider 未配置");
         return job.id;
       }
       const resolution =
@@ -294,7 +324,7 @@ async function processClaimedJob(
       const dimensions = videoDimensions(resolution, ratio);
       const duration = Number(input.duration);
       if (!dimensions || !Number.isFinite(duration) || duration <= 0) {
-        await failClaimed("invalid_input", "视频尺寸或时长无效");
+        await failClaimed(ERROR_INVALID_INPUT, "视频尺寸或时长无效");
         return job.id;
       }
       const video = await videoProvider.generate({
@@ -336,7 +366,7 @@ async function processClaimedJob(
     const sealedCredential = job.input?.provider_credential;
     if (typeof sealedCredential !== "string" || sealedCredential.length === 0) {
       await failClaimed(
-        "provider_credential_missing",
+        ERROR_PROVIDER_CREDENTIAL_MISSING,
         "图片任务缺少供应商凭证",
       );
       return job.id;
@@ -349,7 +379,7 @@ async function processClaimedJob(
     const cap = imageCapability;
     if (!cap) {
       await failClaimed(
-        "model_unavailable",
+        ERROR_MODEL_UNAVAILABLE,
         `未开通或不受支持的模型: ${modelId}`,
       );
       return job.id;
@@ -366,7 +396,7 @@ async function processClaimedJob(
         aspectRatio,
       );
       if (!providerSize) {
-        await failClaimed("invalid_input", "模型、分辨率与宽高比组合不受支持");
+        await failClaimed(ERROR_INVALID_INPUT, "模型、分辨率与宽高比组合不受支持");
         return job.id;
       }
     }
@@ -375,7 +405,7 @@ async function processClaimedJob(
     for (const source of sourceAssets) {
       const response = await fetchImpl(source.url);
       if (!response.ok) {
-        throw new ImageProviderError("unsupported_input", "参考图片读取失败");
+        throw new ImageProviderError(ERROR_UNSUPPORTED_INPUT, "参考图片读取失败");
       }
       const blob = await response.blob();
       sourceImages.push({
@@ -415,7 +445,7 @@ async function processClaimedJob(
       remaining = n - images.length;
     }
     if (images.length === 0) {
-      await failClaimed("no_result", "生成服务未返回结果");
+      await failClaimed(ERROR_NO_RESULT, "生成服务未返回结果");
       return job.id;
     }
     // IK67HE/T14：部分成功（images.length < n 但 > 0）→ 已成功的转 Asset 并 completeJob，
@@ -507,7 +537,7 @@ async function processClaimedJob(
       e instanceof VideoProviderError ||
       e instanceof AudioProviderError
         ? e.code
-        : "provider_failed";
+        : ERROR_PROVIDER_FAILED;
     const msg = e instanceof Error ? e.message : "unknown";
     // 图片瞬时失败（网络不可达 / 转存失败等）按指数退避回 queued 重试，不再一次判死。
     // 对应线上 job 416「new-api 不可达」类：实际下次调用即可成功（已 curl 验证 new-api 可达）。

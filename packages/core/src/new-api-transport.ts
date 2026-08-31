@@ -86,6 +86,7 @@ export function positiveInteger(value: unknown): number | null {
  * /api/user/topup/self）挂在账户层 AccountTokenOrUserAuth 下，只凭 Bearer
  * sk-xxx 证明账户身份；订单 User ID 由 Go 从 Token 属主解析，客户端不得
  * 发送 New-Api-User 头。（RootAuth 的 /api/option/ 管理接口仍需该头，见下方。）
+ * 产品代收 POST /internal/v1/topup/pay 不走用户 JWT，只带 X-Blue-Whale-Collect-Token。
  */
 
 

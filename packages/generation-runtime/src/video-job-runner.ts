@@ -1,4 +1,13 @@
 import { createLogger, timedProviderCall } from "@blue-whale/core/logging";
+import {
+  ERROR_INVALID_INPUT,
+  ERROR_PROVIDER_CREDENTIAL_MISSING,
+  ERROR_PROVIDER_FAILED,
+  ERROR_PROVIDER_TIMEOUT,
+  ERROR_REFERENCE_ASSET_UNAVAILABLE,
+  ERROR_REFERENCE_LIMIT_EXCEEDED,
+  ERROR_UNSUPPORTED_INPUT,
+} from "@blue-whale/contracts";
 
 const logger = createLogger("generation-runtime");
 
@@ -134,6 +143,8 @@ export interface VideoJobRunnerRepo {
     message: string;
     /** IK9VZ0：退款校验结果（refund_confirmed / refund_unverified），落 release_note。 */
     releaseNote?: string;
+    /** IKBQEE / ADR-0078：调试详情，落 error.details，禁展示用户。 */
+    details?: Record<string, unknown>;
   }): Promise<boolean>;
   cancelVideoBeforeDispatch(input: {
     jobId: string;
@@ -157,6 +168,20 @@ class VideoInputError extends Error {
   ) {
     super(message);
     this.name = "VideoInputError";
+  }
+}
+
+/**
+ * provider 错误：携带对外错误码（quota_exhausted / provider_failed 等），
+ * 供 runVideoJobStep 的 catch 直接取码落库，不再一律归 provider_failed。
+ */
+export class VideoProviderError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "VideoProviderError";
   }
 }
 
@@ -185,7 +210,7 @@ export async function runVideoJobStep(deps: {
 
   const sealedCredential = claim.input.provider_credential;
   if (typeof sealedCredential !== "string" || sealedCredential.length === 0) {
-    await fail(deps.repo, claim, "provider_credential_missing", "视频任务缺少供应商凭证");
+    await fail(deps.repo, claim, ERROR_PROVIDER_CREDENTIAL_MISSING, "视频任务缺少供应商凭证");
     return claim.id;
   }
 
@@ -213,7 +238,7 @@ export async function runVideoJobStep(deps: {
         await fail(
           deps.repo,
           claim,
-          "provider_timeout",
+          ERROR_PROVIDER_TIMEOUT,
           `视频生成轮询超时（超过 ${MAX_VIDEO_POLLS} 次）`,
         );
         return claim.id;
@@ -229,13 +254,13 @@ export async function runVideoJobStep(deps: {
       await fail(
         deps.repo,
         claim,
-        observation.error?.code ?? "provider_failed",
+        observation.error?.code ?? ERROR_PROVIDER_FAILED,
         observation.error?.message ?? "视频生成失败",
       );
       return claim.id;
     }
     if (!observation.url) {
-      await fail(deps.repo, claim, "provider_failed", "视频任务成功但未返回 URL");
+      await fail(deps.repo, claim, ERROR_PROVIDER_FAILED, "视频任务成功但未返回 URL");
       return claim.id;
     }
 
@@ -248,7 +273,7 @@ export async function runVideoJobStep(deps: {
       videoDimensions(claim.input.resolution, claim.input.aspect_ratio) ??
       dimensionsFromSize(inputParams?.size);
     if (!dimensions) {
-      await fail(deps.repo, claim, "invalid_input", "视频尺寸无效");
+      await fail(deps.repo, claim, ERROR_INVALID_INPUT, "视频尺寸无效");
       return claim.id;
     }
     // IK7G9X：视频实扣金额 = new-api 任务 quota 换算成分。
@@ -295,7 +320,14 @@ export async function runVideoJobStep(deps: {
     }
     return claim.id;
   } catch (error) {
-    const code = error instanceof VideoInputError ? error.code : "provider_failed";
+    // IKBQEE：provider 错误（含 submit 阶段的欠费识别）经 VideoProviderError 携带错误码，
+    // 直接取码落库；VideoInputError 为输入校验码；其余一律 provider_failed。
+    const code =
+      error instanceof VideoInputError
+        ? error.code
+        : error instanceof VideoProviderError
+          ? error.code
+          : ERROR_PROVIDER_FAILED;
     const message = error instanceof Error ? error.message : "视频生成失败";
     // IK9Q1B：失败必留痕——异常堆栈是定位间歇失败（985）的关键，之前只有 DB 侧 error 无任何 worker 日志。
     if (error instanceof Error) {
@@ -332,6 +364,8 @@ async function fail(
     code,
     message,
     releaseNote: claim.providerTaskId ? "refund_unverified" : "refund_confirmed",
+    // IKBQEE / ADR-0078：调试详情（provider 原文等）进 error.details，禁展示用户。
+    details: { raw: message },
   });
   if (failed) {
     logger.metric({
@@ -386,21 +420,21 @@ async function buildSubmitRequest(
     readMaterialRefs(claim.input.reference_materials),
   );
   if (firstFrameAssetId !== null && firstFrameMaterialId !== null) {
-    throw new VideoInputError("invalid_video_inputs", "首帧只能指定一个来源");
+    throw new VideoInputError(ERROR_INVALID_INPUT, "首帧只能指定一个来源");
   }
   if (lastFrameAssetId !== null && lastFrameMaterialId !== null) {
-    throw new VideoInputError("invalid_video_inputs", "尾帧只能指定一个来源");
+    throw new VideoInputError(ERROR_INVALID_INPUT, "尾帧只能指定一个来源");
   }
   const hasFirstFrame = firstFrameAssetId !== null || firstFrameMaterialId !== null;
   const hasLastFrame = lastFrameAssetId !== null || lastFrameMaterialId !== null;
   const hasReferences =
     referenceAssetIds.length > 0 || referenceMaterials.length > 0;
   if (hasLastFrame && !hasFirstFrame) {
-    throw new VideoInputError("invalid_video_inputs", "尾帧必须与首帧一起使用");
+    throw new VideoInputError(ERROR_INVALID_INPUT, "尾帧必须与首帧一起使用");
   }
   if ((hasFirstFrame || hasLastFrame) && hasReferences) {
     throw new VideoInputError(
-      "invalid_video_inputs",
+      ERROR_INVALID_INPUT,
       "首尾帧模式不能与普通参考素材混用",
     );
   }
@@ -412,7 +446,7 @@ async function buildSubmitRequest(
   const assets = await repo.resolveInputAssets(assetIds, claim.userId, claim.projectId);
   if (assets.length !== assetIds.length) {
     throw new VideoInputError(
-      "reference_asset_unavailable",
+      ERROR_REFERENCE_ASSET_UNAVAILABLE,
       "参考素材不存在或无权访问",
     );
   }
@@ -425,7 +459,7 @@ async function buildSubmitRequest(
     (lastFrame && lastFrame.type !== "image")
   ) {
     throw new VideoInputError(
-      "unsupported_reference_type",
+      ERROR_UNSUPPORTED_INPUT,
       "首尾帧素材必须是图片",
     );
   }
@@ -433,7 +467,7 @@ async function buildSubmitRequest(
     const asset = assetsById.get(id);
     if (!asset) {
       throw new VideoInputError(
-        "reference_asset_unavailable",
+        ERROR_REFERENCE_ASSET_UNAVAILABLE,
         "参考素材不存在或无权访问",
       );
     }
@@ -501,7 +535,7 @@ function validateReferences(
     }
     if (asset.type !== "video") {
       throw new VideoInputError(
-        "unsupported_reference_type",
+        ERROR_UNSUPPORTED_INPUT,
         "视频生成只支持图片或视频参考素材",
       );
     }
@@ -526,19 +560,19 @@ function validateReferences(
 
   if (imageCount > MAX_REFERENCE_IMAGES || videoCount > MAX_REFERENCE_VIDEOS) {
     throw new VideoInputError(
-      "reference_limit_exceeded",
+      ERROR_REFERENCE_LIMIT_EXCEEDED,
       "Seedance 2.0 最多支持 9 张参考图片和 3 个参考视频",
     );
   }
   if (videoCount > 0 && !isSeedance2Model(model)) {
     throw new VideoInputError(
-      "unsupported_video_inputs",
+      ERROR_UNSUPPORTED_INPUT,
       "只有 Seedance 2.0 支持参考视频",
     );
   }
   if (knownVideoDuration > MAX_REFERENCE_VIDEO_SECONDS) {
     throw new VideoInputError(
-      "invalid_reference_video",
+      ERROR_INVALID_INPUT,
       "参考视频已知总时长不能超过 15 秒",
     );
   }
@@ -549,7 +583,7 @@ function validateReferenceVideo(asset: VideoWorkerInputAsset): void {
   const mime = asset.mime?.split(";", 1)[0]?.trim().toLowerCase();
   if (mime && !REFERENCE_VIDEO_MIMES.has(mime)) {
     throw new VideoInputError(
-      "invalid_reference_video",
+      ERROR_INVALID_INPUT,
       "参考视频只支持 MP4 或 MOV",
     );
   }
@@ -561,7 +595,7 @@ function validateReferenceVideo(asset: VideoWorkerInputAsset): void {
       asset.size > MAX_REFERENCE_VIDEO_BYTES)
   ) {
     throw new VideoInputError(
-      "invalid_reference_video",
+      ERROR_INVALID_INPUT,
       "单个参考视频不能超过 200 MB",
     );
   }
@@ -573,7 +607,7 @@ function validateReferenceVideo(asset: VideoWorkerInputAsset): void {
       asset.duration > MAX_REFERENCE_VIDEO_SECONDS)
   ) {
     throw new VideoInputError(
-      "invalid_reference_video",
+      ERROR_INVALID_INPUT,
       "单个参考视频时长必须为 2 至 15 秒",
     );
   }
@@ -595,7 +629,7 @@ function validateReferenceVideoDimensions(asset: VideoWorkerInputAsset): void {
     )
   ) {
     throw new VideoInputError(
-      "invalid_reference_video",
+      ERROR_INVALID_INPUT,
       "参考视频单边像素必须为 300 至 6000",
     );
   }
@@ -611,7 +645,7 @@ function validateReferenceVideoDimensions(asset: VideoWorkerInputAsset): void {
     ratio > MAX_REFERENCE_VIDEO_RATIO
   ) {
     throw new VideoInputError(
-      "invalid_reference_video",
+      ERROR_INVALID_INPUT,
       "参考视频宽高比或总像素不满足 Seedance 2.0 要求",
     );
   }
@@ -625,18 +659,18 @@ function readAssetId(value: unknown): string | null {
   if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value);
   if (typeof value === "string" && /^[1-9][0-9]*$/.test(value)) return value;
   if (value === undefined || value === null) return null;
-  throw new VideoInputError("invalid_video_inputs", "视频素材 ID 无效");
+  throw new VideoInputError(ERROR_INVALID_INPUT, "视频素材 ID 无效");
 }
 
 function readAssetIds(value: unknown): string[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
-    throw new VideoInputError("invalid_video_inputs", "视频参考素材无效");
+    throw new VideoInputError(ERROR_INVALID_INPUT, "视频参考素材无效");
   }
   return value.map((candidate) => {
     const id = readAssetId(candidate);
     if (id === null) {
-      throw new VideoInputError("invalid_video_inputs", "视频参考素材 ID 无效");
+      throw new VideoInputError(ERROR_INVALID_INPUT, "视频参考素材 ID 无效");
     }
     return id;
   });
@@ -654,26 +688,26 @@ const MATERIAL_ID_PATTERN = /^[Aa]sset-.{1,128}$/;
 function readMaterialId(value: unknown): string | null {
   if (value === undefined || value === null) return null;
   if (typeof value === "string" && MATERIAL_ID_PATTERN.test(value)) return value;
-  throw new VideoInputError("invalid_video_inputs", "素材库引用 ID 无效");
+  throw new VideoInputError(ERROR_INVALID_INPUT, "素材库引用 ID 无效");
 }
 
 function readMaterialRefs(value: unknown): MaterialReference[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
-    throw new VideoInputError("invalid_video_inputs", "素材库参考素材无效");
+    throw new VideoInputError(ERROR_INVALID_INPUT, "素材库参考素材无效");
   }
   return value.map((candidate) => {
     if (typeof candidate !== "object" || candidate === null) {
-      throw new VideoInputError("invalid_video_inputs", "素材库参考素材无效");
+      throw new VideoInputError(ERROR_INVALID_INPUT, "素材库参考素材无效");
     }
     const { id, type } = candidate as { id?: unknown; type?: unknown };
     const materialId = readMaterialId(id);
     if (materialId === null) {
-      throw new VideoInputError("invalid_video_inputs", "素材库引用 ID 无效");
+      throw new VideoInputError(ERROR_INVALID_INPUT, "素材库引用 ID 无效");
     }
     if (type !== "image" && type !== "video") {
       throw new VideoInputError(
-        "invalid_video_inputs",
+        ERROR_INVALID_INPUT,
         "素材库参考素材类型无效",
       );
     }

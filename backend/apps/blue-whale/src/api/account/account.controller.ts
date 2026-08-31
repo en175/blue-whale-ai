@@ -3,11 +3,10 @@ import { NewApiError } from "@blue-whale/core";
 import { ok } from "@blue-whale/contracts";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import {
-  consumeCredits,
   mapPaymentMethodLabel,
   mapTopUpStatus,
   parseRecordPaging,
-  summarizeConsumption,
+  toAccountConsumptionItem,
   topUpCreditsGained,
 } from "@lib/shared/account/records.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
@@ -31,12 +30,7 @@ export class AccountController {
         pageSize,
       });
       return ok({
-        items: result.items.map((log) => ({
-          id: log.id,
-          credits: consumeCredits(log.quota),
-          summary: summarizeConsumption(log.model_name),
-          created_at: log.created_at,
-        })),
+        items: result.items.map(toAccountConsumptionItem),
         total: result.total,
       });
     } catch (error) {

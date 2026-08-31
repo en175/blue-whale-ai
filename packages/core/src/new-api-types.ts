@@ -22,6 +22,14 @@ export interface NewApiRegisterInput {
   verificationCode?: string;
 }
 
+/** PUT /api/user/self 改密入参（IKBRCK）。网关侧为多用途更新接口：
+ *  只改密码必须同时传 original_password + password，否则被当作其他字段更新而静默不生效。
+ *  originalPassword = 原密码；newPassword = 新密码（8–20 位，网关事实源）。 */
+export interface NewApiChangePasswordInput {
+  originalPassword: string;
+  newPassword: string;
+}
+
 export interface NewApiLoginResult {
   token: string;
   userId: number | null;
@@ -170,6 +178,17 @@ export interface NewApiTopUpOrderResult {
   payData: string;
 }
 
+/** 产品充值代收下单入参（IKBXLN / IKBWY4）。 */
+export interface NewApiCollectTopUpInput {
+  collectToken: string;
+  userId: number;
+  /** 档位实付（元） */
+  money: number;
+  /** 美元额度 N */
+  amount: number;
+  wayCode: string;
+}
+
 /** 原生充值订单记录（GET /api/user/topup/self 的 items 元素）。 */
 export interface NewApiTopUpRecord {
   trade_no: string;
@@ -181,7 +200,7 @@ export interface NewApiTopUpRecord {
   money: number;
   create_time: number;
   complete_time: number;
-  /** Go TopUp.payment_method（BlueWhalePay 单恒为 bluewhalepay；易支付单为 wechat/alipay 等） */
+  /** Go TopUp.payment_method：新单渠道族值 alipay/wxpay；存量可能是 bluewhalepay/wechat。 */
   payment_method: string;
 }
 

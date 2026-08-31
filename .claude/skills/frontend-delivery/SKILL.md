@@ -10,3 +10,4 @@ Only use this Skill when the user explicitly asks to use `frontend-delivery`. Fo
 - For a Gitee Issue-driven frontend defect repair, read and follow [references/bugfix.md](references/bugfix.md). Do not use Computer Use, Playwright, or automated browser smoke checks; start `npm run dev:test` and give its URL to the human for manual regression. Never start backend.
 - For Feature or Refactor work, load a matching reference only after one exists. Until then, follow the root repository rules and do not apply the Bugfix Issue gate.
 - Frontend product files belong in `web/**`. If work needs a backend, shared contract, root tool, root rule, or PR-template change, stop and ask for a separately scoped Issue.
+- Product API envelope is `{ code, data, msg }`. `code === 200` unwraps `data`; otherwise throw, read `msg`, and `toast.error`. Polling / hydration / session probes pass `{ silent: true }`.

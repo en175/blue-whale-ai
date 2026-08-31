@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Search } from 'lucide-react';
 import { fetchOperationLogs, type OperationLog } from '@/api/admin';
 import { isApiError } from '@/api/http';
+import { formatLogIp } from '@/admin/formatLogIp';
 import styles from './index.module.css';
 
 /** 类别 code → 展示名（筛选下拉与表格徽章共用） */
@@ -151,19 +152,20 @@ export default function OperationLog() {
               <th>操作</th>
               <th>目标</th>
               <th>详情</th>
+              <th>IP</th>
               <th className={styles.thRight}>操作人</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} className={styles.tableState}>
+                <td colSpan={7} className={styles.tableState}>
                   加载中…
                 </td>
               </tr>
             ) : loadError ? (
               <tr>
-                <td colSpan={6} className={styles.tableState}>
+                <td colSpan={7} className={styles.tableState}>
                   {loadError}{' '}
                   <button className={styles.retryLink} onClick={() => void loadLogs()}>
                     重试
@@ -172,7 +174,7 @@ export default function OperationLog() {
               </tr>
             ) : logs.length === 0 ? (
               <tr>
-                <td colSpan={6} className={styles.tableState}>
+                <td colSpan={7} className={styles.tableState}>
                   暂无日志
                 </td>
               </tr>
@@ -193,6 +195,9 @@ export default function OperationLog() {
                     </td>
                     <td className={styles.cellDetail} title={l.detail}>
                       {detailText}
+                    </td>
+                    <td className={styles.cellIp} title={l.ipAddress ?? undefined}>
+                      {formatLogIp(l.ipAddress)}
                     </td>
                     <td className={styles.cellOperator}>{l.operator}</td>
                   </tr>

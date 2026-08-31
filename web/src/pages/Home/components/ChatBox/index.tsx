@@ -10,9 +10,12 @@ import { getCurrentUser, subscribe } from '@/utils/auth';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { type SkillRecord } from '@/api/skills';
+import { createProject } from '@/api/projects';
 import { setGenHandoff } from '@/utils/gen-handoff';
+import { setAgentHandoff } from '@/utils/agent-handoff';
 import { classifyRefOverflow } from '@/utils/ref-overflow';
 import DurationSlider from './DurationSlider';
+import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 
 /** 选项卡定义 */
 const tabItems = [
@@ -21,76 +24,11 @@ const tabItems = [
   { key: 'image', label: 'AI 图片' },
 ];
 
-/** 创作模型选项 */
-const creationModels = [
-  { key: 'seedance', label: 'Seedance 2.0' },
-  { key: 'anime', label: '动漫模型' },
-  { key: 'realistic', label: '写实模型' },
-];
-
-/** 推理模型选项 */
-const reasoningModels = [
-  { key: 'minimax', label: 'MiniMax-M3' },
-  { key: 'gpt4', label: 'GPT-4o' },
-  { key: 'claude', label: 'Claude-3.5' },
-];
-
-/** AI视频 - 模型选项 */
-const videoModels = [
-  { key: 'seedance2', label: 'Seedance 2.0' },
-  { key: 'seedance1', label: 'Seedance 1.0' },
-];
-
-/** AI视频 - 模式选项 */
+/** AI视频 - 模式选项（纯 UI 交互概念，非后端参数） */
 const videoModes = [
   { key: 'omni', label: '全能参考' },
   { key: 'firstlast', label: '首尾帧' },
   { key: 'text2video', label: '图生视频' },
-];
-
-/** AI视频 - 宽高比选项 */
-const aspectRatios = [
-  { key: '16:9', label: '16:9' },
-  { key: '4:3', label: '4:3' },
-  { key: '1:1', label: '1:1' },
-  { key: '3:4', label: '3:4' },
-  { key: '9:16', label: '9:16' },
-  { key: '21:9', label: '21:9' },
-];
-
-/** AI视频 - 分辨率选项 */
-const resolutions = [
-  { key: '480p', label: '480p' },
-  { key: '720p', label: '720p' },
-  { key: '1080p', label: '1080p' },
-  { key: '2160p', label: '2160p' },
-];
-
-/** AI图片 - 模型选项 */
-const imageModels = [
-  { key: 'seedream5lite', label: 'Seedream 5.0 Lite' },
-  { key: 'seedream5pro', label: 'Seedream 5.0 Pro' },
-  { key: 'seedream45', label: 'Seedream 4.5' },
-  { key: 'gptimage2', label: 'gpt-image-2' },
-];
-
-/** AI图片 - 宽高比选项 */
-const imageAspectRatios = [
-  { key: '9:16', label: '9:16' },
-  { key: '3:4', label: '3:4' },
-  { key: '1:1', label: '1:1' },
-  { key: '4:3', label: '4:3' },
-  { key: '16:9', label: '16:9' },
-  { key: '2:3', label: '2:3' },
-  { key: '3:2', label: '3:2' },
-  { key: '21:9', label: '21:9' },
-];
-
-/** AI图片 - 分辨率选项 */
-const imageResolutions = [
-  { key: '2K', label: '2K' },
-  { key: '3K', label: '3K' },
-  { key: '4K', label: '4K' },
 ];
 
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
@@ -102,6 +40,23 @@ const MAX_AGENT_AUDIO = 3;
 
 /** 输入框字数上限（与画布对话框一致） */
 const MAX_INPUT = 1000;
+
+/** 生成时间戳项目名（与画布新建项目命名一致） */
+function makeProjectName(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 创建新项目并跳转画布（失败时降级为直接跳转） */
+async function navigateToNewProject(navigate: ReturnType<typeof useNavigate>, state: unknown) {
+  try {
+    const created = await createProject(makeProjectName());
+    navigate(`/canvas?project=${created.id}`, { state });
+  } catch {
+    navigate('/canvas', { state });
+  }
+}
 
 /** 宽高比图标 - 根据比例渲染对应形状的 SVG 矩形 */
 const ratioDims: Record<string, [number, number]> = {
@@ -132,44 +87,46 @@ function RatioIcon({ ratio, size = 22 }: { ratio: string; size?: number }) {
   );
 }
 
-export default function ChatBox({ draft }: { draft?: { text: string; ts: number } | null }) {
+export default function ChatBox({ draft }: { draft?: { text: string; ts: number; mediaType: 'video' | 'image' } | null }) {
   const [activeTab, setActiveTab] = useState('agent');
   const [inputValue, setInputValue] = useState('');
   const navigate = useNavigate();
   const user = useSyncExternalStore(subscribe, getCurrentUser);
   /** 未登录点击发送时弹登录框 */
   const [showLogin, setShowLogin] = useState(false);
-  /** 登录成功后需带入画布的草稿 */
-  const pendingText = useRef('');
-  /** 登录成功后需填入对话框的「直接使用」技能（IKA64P） */
-  const pendingSkill = useRef<SkillRecord | null>(null);
+  /** 登录成功后续接的原动作（Skill / 发送最后一次点击为准） */
+  const pendingAction = useRef<HomePendingAction | null>(null);
   /** IKA64P：「直接使用」武装的技能气泡（发送时随消息作为强制技能生效） */
   const [armedSkill, setArmedSkill] = useState<{ id: string; name: string } | null>(null);
 
-  /** 外部注入草稿（画廊卡片点击）：仅 ts 变化时覆盖输入框 */
+  /** 画廊卡片点击：只填输入框并切 tab，不拦登录；真正发送时再校验。
+   *  用 ts 驱动重复点击同一张卡也能注入，不把 text/mediaType 放进依赖。 */
   useEffect(() => {
-    if (draft?.ts) setInputValue(draft.text.slice(0, MAX_INPUT));
+    if (draft?.ts) {
+      setInputValue(draft.text.slice(0, MAX_INPUT));
+      setActiveTab(draft.mediaType === 'video' ? 'video' : 'image');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft?.ts]);
-  const [showUpload, setShowUpload] = useState(false);
-  /** 智能体 tab 附件（+ 上传 图片/视频/音频） */
+  /** 智能体 tab 附件（+ 上传 图片/视频/音频）——保留原始 File，发送时经 handoff 带入画布 */
   const [agentFiles, setAgentFiles] = useState<
-    { id: string; url: string; kind: 'image' | 'video' | 'audio'; name: string }[]
+    { id: string; url: string; kind: 'image' | 'video' | 'audio'; name: string; file: File }[]
   >([]);
   const agentFileInputRef = useRef<HTMLInputElement>(null);
   const [showSkillModal, setShowSkillModal] = useState(false);
-  const [creationModel, setCreationModel] = useState('seedance');
-  const [reasoningModel, setReasoningModel] = useState('minimax');
+  /** 创作/推理模型初始值为空：接口加载完成后由 effect 选中第一个，不写死任何模型 id */
+  const [creationModel, setCreationModel] = useState('');
+  const [reasoningModel, setReasoningModel] = useState('');
   const [showCreationDropdown, setShowCreationDropdown] = useState(false);
   const [showReasoningDropdown, setShowReasoningDropdown] = useState(false);
   const [underlineStyle, setUnderlineStyle] = useState<React.CSSProperties>({});
 
-  // AI视频专属状态
-  const [videoModel, setVideoModel] = useState('seedance2');
+  // AI视频专属状态（模型/比例/清晰度/时长初始均为空，接口加载完成后由校准 effect 套用模型默认值）
+  const [videoModel, setVideoModel] = useState('');
   const [videoMode, setVideoMode] = useState('omni');
-  const [aspectRatio, setAspectRatio] = useState('16:9');
-  const [resolution, setResolution] = useState('480p');
-  const [duration, setDuration] = useState(15);
+  const [aspectRatio, setAspectRatio] = useState('');
+  const [resolution, setResolution] = useState('');
+  const [duration, setDuration] = useState(0);
   const [showVideoModelDrop, setShowVideoModelDrop] = useState(false);
   const [showVideoModeDrop, setShowVideoModeDrop] = useState(false);
   const [showRatioDrop, setShowRatioDrop] = useState(false);
@@ -191,10 +148,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     [],
   );
 
-  // AI图片专属状态
-  const [imageModel, setImageModel] = useState('seedream5lite');
-  const [imageAspectRatio, setImageAspectRatio] = useState('16:9');
-  const [imageResolution, setImageResolution] = useState('2K');
+  // AI图片专属状态（初始为空，接口加载完成后 applyImageModel 套用默认值）
+  const [imageModel, setImageModel] = useState('');
+  const [imageAspectRatio, setImageAspectRatio] = useState('');
+  const [imageResolution, setImageResolution] = useState('');
   const [showImgModelDrop, setShowImgModelDrop] = useState(false);
   const [showImgRatioDrop, setShowImgRatioDrop] = useState(false);
   const [showImgResDrop, setShowImgResDrop] = useState(false);
@@ -202,7 +159,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const uploadRef = useRef<HTMLDivElement>(null);
   const creationRef = useRef<HTMLDivElement>(null);
   const reasoningRef = useRef<HTMLDivElement>(null);
   const tabBarRef = useRef<HTMLDivElement>(null);
@@ -247,6 +203,37 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     const ok = refFiles.length === 2 && refFiles.every((r) => r.file.type.startsWith('image/'));
     if (!ok) showToast('首尾帧模式需上传两张图片作为首帧与尾帧参考');
   }, [videoMode, refFiles, showToast]);
+
+  // 视频模型列表加载 / 切换模型后：当前参数若不在新模型能力内，套用该模型默认值（接口为唯一数据源）
+  useEffect(() => {
+    const m = videoModelList.find((x) => x.model_id === videoModel);
+    if (!m) return;
+    if (m.supported_aspect_ratios.length && !m.supported_aspect_ratios.includes(aspectRatio)) {
+      setAspectRatio(
+        m.default_aspect_ratio && m.supported_aspect_ratios.includes(m.default_aspect_ratio)
+          ? m.default_aspect_ratio
+          : m.supported_aspect_ratios[0],
+      );
+    }
+    if (m.supported_sizes.length && !m.supported_sizes.some((s) => s.id === resolution)) {
+      setResolution(
+        m.default_size && m.supported_sizes.some((s) => s.id === m.default_size)
+          ? (m.default_size as string)
+          : m.supported_sizes[0].id,
+      );
+    }
+    if (m.supported_durations) {
+      const d = m.supported_durations;
+      setDuration((prev) => {
+        if (prev >= d.min && prev <= d.max) return prev;
+        if (typeof m.default_duration === 'number' && m.default_duration >= d.min && m.default_duration <= d.max) {
+          return m.default_duration;
+        }
+        return Math.min(Math.max(prev, d.min), d.max);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoModelList, videoModel]);
 
   // 并发加载三种能力的模型列表
   useEffect(() => {
@@ -296,9 +283,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   // 点击外部关闭弹出层
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (uploadRef.current && !uploadRef.current.contains(e.target as Node)) {
-        setShowUpload(false);
-      }
       if (creationRef.current && !creationRef.current.contains(e.target as Node)) {
         setShowCreationDropdown(false);
       }
@@ -334,23 +318,49 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  /** 跳转画布页并携带草稿（经 location.state 注入 Agent 弹框）与武装技能 */
+  /** 跳转画布页并携带草稿（经 location.state 注入 Agent 弹框）与武装技能；
+   *  附件经模块变量 handoff 带入（File 无法序列化进 navigate state） */
   const goCanvasWithText = (text: string, skillId?: string, skillName?: string) => {
     setInputValue('');
     if (skillId) setArmedSkill(null); // 携带后清除气泡
-    navigate('/canvas', { state: { agentText: text, skillId: skillId ?? '', skillName: skillName ?? '' } });
+    // 附件交接：仅 image/video（画布 Agent 弹框同规则），音频 toast 提示后丢弃
+    if (agentFiles.length > 0) {
+      const media = agentFiles.filter((f) => f.kind !== 'audio');
+      const audioCount = agentFiles.length - media.length;
+      if (audioCount > 0) showToast('音频附件暂不支持带入画布，已忽略');
+      if (media.length > 0) {
+        setAgentHandoff(
+          media.map((f) => ({
+            file: f.file,
+            preview: f.url,
+            name: f.name,
+            kind: f.kind as 'image' | 'video',
+          })),
+        );
+      }
+      setAgentFiles([]);
+    }
+    navigateToNewProject(navigate, { agentText: text, skillId: skillId ?? '', skillName: skillName ?? '' });
   };
 
   /** 按当前 tab 分发：智能体→Agent 对话；AI视频/AI图片→画布直接生成节点并唤起对应对话框 */
   const dispatchByTab = (text: string) => {
     if (activeTab === 'video') {
+      if (!selectedVideoModel) {
+        showToast('视频模型能力加载中，请稍后重试');
+        return;
+      }
+      // 后端视频任务 resolution 期望 api_value（如 720p），此处由所选档位 id 换算
+      const sizeEntry = selectedVideoModel.supported_sizes.find((s) => s.id === resolution);
       setGenHandoff({
         kind: 'video',
         text,
         modelId: videoModel,
         aspectRatio,
-        resolution,
+        resolution: sizeEntry?.api_value ?? resolution,
         duration,
+        // 首页模式键映射画布模式：首尾帧→keyframe；其余保留原键（omni→all、text2video→text2video）
+        mode: videoMode === 'firstlast' ? 'keyframe' : (videoMode === 'text2video' ? 'text2video' : 'all'),
         refs: refFiles.map((r) => ({
           preview: r.preview,
           type: r.file.type.startsWith('video/') ? ('video' as const) : ('image' as const),
@@ -359,10 +369,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       });
       setInputValue('');
       setRefFiles([]);
-      navigate('/canvas', { state: { genKind: 'video' } });
+      navigateToNewProject(navigate, { genKind: 'video' });
       return;
     }
     if (activeTab === 'image') {
+      if (!selectedImageModel) {
+        showToast('图片模型能力加载中，请稍后重试');
+        return;
+      }
       setGenHandoff({
         kind: 'image',
         text,
@@ -379,7 +393,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
       });
       setInputValue('');
       setImageRefFiles([]);
-      navigate('/canvas', { state: { genKind: 'image' } });
+      navigateToNewProject(navigate, { genKind: 'image' });
       return;
     }
     goCanvasWithText(text, armedSkill?.id, armedSkill?.name);
@@ -388,8 +402,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   /** IKA64P：「直接使用」= 关闭弹窗并武装技能气泡（不再填全文；发送时随消息作为强制技能生效） */
   const handleUseSkill = (skill: SkillRecord) => {
     setShowSkillModal(false);
-    if (!user) {
-      pendingSkill.current = skill;
+    // 登录成功回调与当前渲染可能同拍，必须读 store 而不是闭包里的 user
+    if (!getCurrentUser()) {
+      pendingAction.current = { kind: 'use-skill', skill };
       setShowLogin(true);
       return;
     }
@@ -402,25 +417,35 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     if (!text) return;
     // 首页不发送：先校验登录，未登录弹登录框
     if (!user) {
-      pendingText.current = text;
+      pendingAction.current = { kind: 'send', text };
       setShowLogin(true);
       return;
     }
     dispatchByTab(text);
   };
 
-  /** 关闭登录框：登录成功则携带原草稿按当前 tab /技能填入对话框 */
+  /** 关闭登录框：登录成功则续接最后一次动作；放弃则清理（发送稿回填输入框）。 */
   const handleLoginClose = () => {
     setShowLogin(false);
-    const text = pendingText.current;
-    pendingText.current = '';
-    const skill = pendingSkill.current;
-    pendingSkill.current = null;
-    if (skill && getCurrentUser()) {
-      handleUseSkill(skill);
-      return;
+    const pending = pendingAction.current;
+    pendingAction.current = null;
+    const resume = resolveHomeLoginResume(pending, !!getCurrentUser());
+    switch (resume.action) {
+      case 'open-skill':
+        setShowSkillModal(true);
+        return;
+      case 'use-skill':
+        handleUseSkill(resume.skill);
+        return;
+      case 'send':
+        dispatchByTab(resume.text);
+        return;
+      case 'restore-text':
+        setInputValue(resume.text.slice(0, MAX_INPUT));
+        return;
+      default:
+        return;
     }
-    if (text && getCurrentUser()) dispatchByTab(text);
   };
 
   /** + 上传：点击直接选取图片/视频/音频（分类型上限：图片随创作模型能力、视频/音频固定 3），超限按类型 toast */
@@ -454,6 +479,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
             ? ('video' as const)
             : ('audio' as const),
         name: file.name,
+        file,
       }));
     const droppedImages =
       files.filter((f) => f.type.startsWith('image/')).length - items.filter((i) => i.kind === 'image').length;
@@ -478,27 +504,28 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
     });
   };
 
+  /** IME 输入组合状态跟踪（中文输入法回车确认不应触发发送） */
+  const composingRef = useRef(false);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // IME 组合输入中：回车仅确认候选词，不触发发送
+    if (composingRef.current || e.nativeEvent.isComposing) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
 
-  // 模型下拉选项：接口数据优先，失败回退本地选项
-  const agentModelOptions = textModels.length
-    ? textModels.map((m) => ({ key: m.model_id, label: m.model_label }))
-    : reasoningModels;
-  const videoModelOptions = videoModelList.length
-    ? videoModelList.map((m) => ({ key: m.model_id, label: m.model_label }))
-    : videoModels;
-  const imageModelOptions = imageModelList.length
-    ? imageModelList.map((m) => ({ key: m.model_id, label: m.model_label }))
-    : imageModels;
-  // 智能体 tab 创作模型下拉：与 AI视频 模型同源（video capability），失败回退本地选项
-  const creationModelOptions = videoModelList.length
-    ? videoModelList.map((m) => ({ key: m.model_id, label: m.model_label }))
-    : creationModels;
+  /** 三个 textarea 共用的 composition 事件处理 */
+  const handleCompositionStart = () => { composingRef.current = true; };
+  const handleCompositionEnd = () => { composingRef.current = false; };
+
+  // 模型下拉选项：全部取自接口（fetchGenerationModels），无本地写死兜底
+  const agentModelOptions = textModels.map((m) => ({ key: m.model_id, label: m.model_label }));
+  const videoModelOptions = videoModelList.map((m) => ({ key: m.model_id, label: m.model_label }));
+  const imageModelOptions = imageModelList.map((m) => ({ key: m.model_id, label: m.model_label }));
+  // 智能体 tab 创作模型下拉：与 AI视频 模型同源（video capability）
+  const creationModelOptions = videoModelOptions;
 
   const currentCreationModel =
     creationModelOptions.find((m) => m.key === creationModel)?.label ?? '';
@@ -516,22 +543,25 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   const currentImageModel =
     imageModelOptions.find((m) => m.key === imageModel)?.label ?? '';
 
-  // AI图片 比例/清晰度选项：取自所选模型能力，接口无数据时回退本地选项
+  // AI图片 比例/清晰度选项：取自所选模型能力（接口为唯一数据源）
   const selectedImageModel = imageModelList.find((m) => m.model_id === imageModel);
-  const imageRatioKeys = selectedImageModel?.supported_aspect_ratios.length
-    ? selectedImageModel.supported_aspect_ratios
-    : imageAspectRatios.map((r) => r.key);
-  const imageSizeItems = selectedImageModel?.supported_sizes.length
-    ? selectedImageModel.supported_sizes.map((s) => ({ key: s.id, label: s.label }))
-    : imageResolutions;
+  const imageRatioKeys = selectedImageModel?.supported_aspect_ratios ?? [];
+  const imageSizeItems =
+    selectedImageModel?.supported_sizes.map((s) => ({ key: s.id, label: s.label })) ?? [];
   const currentImageResolution =
     imageSizeItems.find((s) => s.key === imageResolution)?.label ?? imageResolution;
 
-  // 上传上限（与画布弹窗同规则）：图片数走接口 max_reference_images（首尾帧固定 2），视频最多 3
+  // AI视频 比例/清晰度/时长范围：取自所选模型能力（接口为唯一数据源）
   const selectedVideoModel = videoModelList.find((m) => m.model_id === videoModel);
-  /** 智能体 tab 附件分类型上限：图片随所选创作模型（video capability）读接口 max_reference_images，失败回退 9；视频/音频固定 3 */
+  const videoRatioKeys = selectedVideoModel?.supported_aspect_ratios ?? [];
+  const videoSizeItems =
+    selectedVideoModel?.supported_sizes.map((s) => ({ key: s.id, label: s.label })) ?? [];
+  const videoDurationRange = selectedVideoModel?.supported_durations ?? null;
+
+  // 上传上限（与画布弹窗同规则）：图片数走接口 max_reference_images（首尾帧固定 2），视频最多 3
+  /** 智能体 tab 附件分类型上限：图片随所选创作模型（video capability）读接口 max_reference_images（能力未加载完时为 0）；视频/音频固定 3 */
   const selectedCreationModel = videoModelList.find((m) => m.model_id === creationModel);
-  const agentMaxImages = selectedCreationModel?.features?.max_reference_images ?? 9;
+  const agentMaxImages = selectedCreationModel?.features?.max_reference_images ?? 0;
   const agentImageCount = agentFiles.filter((f) => f.kind === 'image').length;
   const agentVideoCount = agentFiles.filter((f) => f.kind === 'video').length;
   const agentAudioCount = agentFiles.filter((f) => f.kind === 'audio').length;
@@ -544,14 +574,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
   const videoMaxImages =
     videoMode === 'firstlast'
       ? 2
-      : (selectedVideoModel?.features?.max_reference_images ?? 10);
+      : (selectedVideoModel?.features?.max_reference_images ?? 0);
   const videoImagesFull = videoRefImageCount >= videoMaxImages;
   const videoVideosFull = videoRefVideoCount >= MAX_VIDEOS;
   /** 首尾帧模式必须恰好 2 张图片（不多不少、不含视频），否则禁止发送 */
   const firstlastInvalid =
     videoMode === 'firstlast' &&
     !(refFiles.length === 2 && refFiles.every((r) => r.file.type.startsWith('image/')));
-  const imageMaxImages = selectedImageModel?.features?.max_reference_images ?? 10;
+  const imageMaxImages = selectedImageModel?.features?.max_reference_images ?? 0;
 
   // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
   const handleRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -686,6 +716,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                 onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
                 maxLength={MAX_INPUT}
                 onKeyDown={handleKeyDown}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
                 rows={2}
               />
             </div>
@@ -763,14 +795,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                   </button>
                   {showRatioDrop && (
                     <div className={styles.dropdownMenuDown}>
-                      {aspectRatios.map((r) => (
+                      {videoRatioKeys.map((key) => (
                         <button
-                          key={r.key}
-                          className={`${styles.dropdownItem} ${aspectRatio === r.key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => { setAspectRatio(r.key); setShowRatioDrop(false); }}
+                          key={key}
+                          className={`${styles.dropdownItem} ${aspectRatio === key ? styles.dropdownItemActive : ''}`}
+                          onClick={() => { setAspectRatio(key); setShowRatioDrop(false); }}
                         >
-                          <RatioIcon ratio={r.key} />
-                          <span>{r.label}</span>
+                          <RatioIcon ratio={key} />
+                          <span>{key}</span>
                         </button>
                       ))}
                     </div>
@@ -788,7 +820,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                   </button>
                   {showResDrop && (
                     <div className={styles.dropdownMenuDown}>
-                      {resolutions.map((r) => (
+                      {videoSizeItems.map((r) => (
                         <button
                           key={r.key}
                           className={`${styles.dropdownItem} ${resolution === r.key ? styles.dropdownItemActive : ''}`}
@@ -810,16 +842,21 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                     <span>⏱ {duration}s</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
-                  {showDurationDrop && (
+                  {showDurationDrop && videoDurationRange && (
                     <div className={`${styles.dropdownMenuDown} ${styles.durationDropdown}`}>
-                      <DurationSlider value={duration} onChange={setDuration} />
+                      <DurationSlider
+                        value={duration}
+                        onChange={setDuration}
+                        min={videoDurationRange.min}
+                        max={videoDurationRange.max}
+                        step={videoDurationRange.step}
+                      />
                     </div>
                   )}
                 </div>
               </div>
 
               <div className={styles.videoParamsRight}>
-                <span className={styles.tryUnlimited}>或尝试无限</span>
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() && !firstlastInvalid ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
@@ -876,6 +913,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                 onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
                 maxLength={MAX_INPUT}
                 onKeyDown={handleKeyDown}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
                 rows={2}
               />
             </div>
@@ -985,7 +1024,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
             </div>
           </>
         ) : (
-          /* ========== 视频智能体 原有布局 ========== */
+          /* ========== 视频智能体：媒体在上、文字在下，与 AI视频/AI图片 排版一致 ========== */
           <>
             {/* IKA64P：直接使用武装的技能气泡（与画布 Agent 风格一致） */}
             {armedSkill && (
@@ -1003,19 +1042,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
               </div>
             )}
 
-            {/* 输入框 */}
-            <textarea
-              className={styles.textarea}
-              placeholder="描述你想制作的视频，微电影、产品广告、社媒视频等都可支持。适合 1-5 分钟视频。"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
-              maxLength={MAX_INPUT}
-              onKeyDown={handleKeyDown}
-              rows={3}
-            />
-
-            {/* 附件预览（+ 上传后展示） */}
-            {agentFiles.length > 0 && (
+            {/* 内容区域：媒体在上、文字在下 */}
+            <div className={styles.videoContent}>
+              {/* 附件预览 + 上传（顶部行） */}
               <div className={styles.refArea}>
                 {agentFiles.map((f, idx) => (
                   <div key={f.id} className={styles.refThumbWrap}>
@@ -1043,50 +1072,60 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number 
                     </span>
                   </div>
                 ))}
+                <div
+                  className={styles.refCard}
+                  onClick={() => {
+                    if (agentAllFull) {
+                      showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${MAX_AGENT_VIDEOS} 个 / 音频 ${MAX_AGENT_AUDIO} 个）`);
+                      return;
+                    }
+                    agentFileInputRef.current?.click();
+                  }}
+                >
+                  <Plus size={16} strokeWidth={2} />
+                  <span>附件</span>
+                </div>
               </div>
-            )}
+
+              {/* 提示词输入框 */}
+              <textarea
+                className={styles.textarea}
+                placeholder="描述你想制作的视频，微电影、产品广告、社媒视频等都可支持。适合 1-5 分钟视频。"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
+                maxLength={MAX_INPUT}
+                onKeyDown={handleKeyDown}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
+                rows={2}
+              />
+            </div>
+
+            {/* 隐藏文件输入 */}
+            <input
+              ref={agentFileInputRef}
+              type="file"
+              accept="image/*,video/*,audio/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleAgentFilePick}
+            />
 
             {/* 底部工具栏 */}
             <div className={styles.toolbar}>
               {/* 左侧工具 */}
               <div className={styles.toolbarLeft}>
-                {/* + 按钮：悬停显示小提示，点击直接选取图片/视频/音频文件上传 */}
-                <div className={styles.uploadWrap} ref={uploadRef}>
-                  <button
-                    className={styles.iconBtn}
-                    onClick={() => {
-                      if (agentAllFull) {
-                        showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${MAX_AGENT_VIDEOS} 个 / 音频 ${MAX_AGENT_AUDIO} 个）`);
-                        return;
-                      }
-                      agentFileInputRef.current?.click();
-                    }}
-                    onMouseEnter={() => setShowUpload(true)}
-                    onMouseLeave={() => setShowUpload(false)}
-                  >
-                    <Plus size={18} strokeWidth={2} />
-                  </button>
-                  {showUpload && (
-                    <div className={styles.uploadPopup}>
-                      <span className={styles.uploadHint}>可上传视频、图片或音频</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* 隐藏文件输入（+ 上传：图片/视频/音频） */}
-                <input
-                  ref={agentFileInputRef}
-                  type="file"
-                  accept="image/*,video/*,audio/*"
-                  multiple
-                  style={{ display: 'none' }}
-                  onChange={handleAgentFilePick}
-                />
-
                 {/* Skill 按钮 */}
                 <button
                   className={styles.skillBtn}
-                  onClick={() => setShowSkillModal(true)}
+                  onClick={() => {
+                    if (!user) {
+                      pendingAction.current = { kind: 'open-skill' };
+                      setShowLogin(true);
+                      return;
+                    }
+                    setShowSkillModal(true);
+                  }}
                 >
                   <BookOpen size={16} strokeWidth={2} />
                   <span>Skill</span>

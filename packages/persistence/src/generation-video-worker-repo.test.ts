@@ -34,6 +34,42 @@ describe("generation video worker repo", () => {
     );
   });
 
+  it("claims the image job named by the RocketMQ message (IKBGKA)", async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      id: 300n,
+      project_id: 55n,
+      user_id: 9n,
+      type: "image",
+      status: "queued",
+      input: { provider_credential: "sealed-token" },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencing_token: 0n,
+    });
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const repo = createWorkerRepo({
+      generation_jobs: { findFirst, updateMany },
+    } as never);
+
+    await expect(
+      repo.claimImageJobById("300", "worker-1"),
+    ).resolves.toEqual({
+      id: "300",
+      project_id: "55",
+      user_id: "9",
+      type: "image",
+      input: { provider_credential: "sealed-token" },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 1,
+    });
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 300n, type: "image" }),
+      }),
+    );
+  });
+
   it("lists due video jobs for low-frequency Redis recovery", async () => {
     const findMany = vi.fn().mockResolvedValue([{ id: 300n }, { id: 301n }]);
     const repo = createWorkerRepo({ generation_jobs: { findMany } } as never);
@@ -44,6 +80,23 @@ describe("generation video worker repo", () => {
         take: 100,
         where: expect.objectContaining({
           type: "video",
+          gmt_create: { gt: expect.any(Date) },
+          next_action_at: expect.any(Object),
+        }),
+      }),
+    );
+  });
+
+  it("lists due image jobs for MQ re-enqueue recovery (IKBGKA)", async () => {
+    const findMany = vi.fn().mockResolvedValue([{ id: 400n }]);
+    const repo = createWorkerRepo({ generation_jobs: { findMany } } as never);
+
+    await expect(repo.listDueImageJobIds(100)).resolves.toEqual(["400"]);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 100,
+        where: expect.objectContaining({
+          type: "image",
           gmt_create: { gt: expect.any(Date) },
           next_action_at: expect.any(Object),
         }),

@@ -1,16 +1,17 @@
 /* ============================================
- * CanvasHeader 画布页顶栏：项目名/积分/Agent 入口
+ * CanvasHeader 画布页顶栏：项目名 / Agent 入口
+ * IKBN0G：右侧去掉个人信息下拉，只保留 Agent
  * ============================================ */
 import { useNavigate } from 'react-router-dom';
 import { Bot } from 'lucide-react';
-import UserDropdown from '@/components/UserDropdown';
+import RechargeModal from '@/components/UserDropdown/RechargeModal';
+import { useRechargeUiStore } from '@/stores/recharge';
 import ProjectSelector, { type CanvasProject } from '../ProjectSelector';
 import styles from './index.module.css';
 
 interface CanvasHeaderProps {
   projects: CanvasProject[];
   currentProjectId: string;
-  balance?: string;
   onSelectProject: (id: string) => void;
   onRenameProject: (id: string, newName: string) => void;
   onDeleteProject: (id: string) => void;
@@ -28,6 +29,8 @@ export default function CanvasHeader({
   onToggleAgent,
 }: CanvasHeaderProps) {
   const navigate = useNavigate();
+  const showRecharge = useRechargeUiStore((s) => s.open);
+  const closeRecharge = useRechargeUiStore((s) => s.closeRecharge);
 
   return (
     <header className={styles.header}>
@@ -50,17 +53,14 @@ export default function CanvasHeader({
         />
       </div>
 
-      {/* 右侧：用户信息 + Agent */}
+      {/* 右侧：只保留 Agent；充值弹窗仍挂在此，供生成前余额拦截打开 */}
       <div className={styles.right}>
-        {/* 用户信息 */}
-        <UserDropdown />
-
-        {/* Agent 按钮 */}
         <button className={styles.agentBtn} onClick={onToggleAgent}>
           <Bot size={16} strokeWidth={2} />
           <span>Agent</span>
         </button>
       </div>
+      {showRecharge && <RechargeModal onClose={closeRecharge} />}
     </header>
   );
 }

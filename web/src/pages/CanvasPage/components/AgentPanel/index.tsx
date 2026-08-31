@@ -24,8 +24,8 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
-import { isApiError } from '@/api/http';
-import { fetchMySkills, fetchRunSkillRecommendations, type RunSkillRecommendation } from '@/api/skills';
+import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { fetchMySkills } from '@/api/skills';
 import { useAgentSession, type ChatMessage, type TurnOutcome } from '../../hooks/useAgentSession';
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
@@ -154,6 +154,7 @@ function RunStatusLine({
     finishedAt: outcome?.finishedAt ?? null,
     streamedText,
     estimatedOutputTokensAtFinish: outcome?.estimatedOutputTokens ?? null,
+    failureText: outcome?.failureText ?? null,
     tokenUsage: outcome?.tokenUsage ?? null,
     contextCapacity: outcome?.contextCapacity ?? null,
   });
@@ -579,7 +580,11 @@ function blockKey(block: SessionContentBlock, ordinals: Record<string, number>):
  *
  * **只有真调了工具的轮次才渲染**（2026-08-26 真机裁定）：网格追问轮本来就零调用，给每一轮
  * 亮警示是把正常当异常——用户一屏黄色。零调用记录仍然完整落库，那是运维的检出原语，不是
- * 用户的。失败/被拒的动作渲染警示态：产卡被门拒不再只是「卡了一下」。
+ * 用户的。失败/未执行的动作渲染警示态：产卡被门拦不再只是「卡了一下」。
+ *
+ * 「rejected」显示为「未执行」而不是「被拒」（IKBRZV 复测 BUG-13）：拒绝多数来自确认门
+ * 按设计拦下产卡——正常防御被渲染成故障词，QA 把它当缺陷提了。动作没执行是事实，
+ * 为什么没执行由模型在正文里解释；内部状态词不再直接对用户。
  *
  * 「还差 N 项」不展示（record 里仍带）：计数来自需求理解版本表，而落库靠观察者攒够 token
  * 才触发，短问答轮会滞后好几轮——一个几轮不动的数字比没有数字更糟。
@@ -590,7 +595,7 @@ function ActionRow({ record }: { record: NonNullable<SessionContentBlock['run_ac
   const seconds = (ms: number) => (ms >= 100 ? `${(ms / 1000).toFixed(1)}s` : '');
   const summary = record.actions.map((a) => a.summary.replace(/^正在/, '')).join(' · ');
   const failed = record.actions.some((a) => a.status !== 'ok');
-  const statusLabel = { ok: '', failed: '失败', rejected: '被拒' } as const;
+  const statusLabel = { ok: '', failed: '失败', rejected: '未执行' } as const;
   return (
     <div className={`${styles.actionRow} ${failed ? styles.actionRowWarn : ''}`}>
       <button type="button" className={styles.actionRowHead} onClick={() => setOpen(!open)} aria-expanded={open}>
@@ -702,14 +707,6 @@ function AssistantMessageBody({
     </>
   );
 }
-
-/** 可选模型列表 */
-const models = [
-  { key: 'minimax-m3', label: 'MiniMax-M3', cost: '1x' },
-  { key: 'deepseek-v4-pro', label: 'DeepSeek-V4-Pro', cost: '1x' },
-  { key: 'deepseek-v4-flash', label: 'DeepSeek-V4-Flash', cost: '1x' },
-  { key: 'qwen3.8-max', label: 'Qwen3.8-Max', cost: '1x' },
-];
 
 /** 快捷问题 */
 const quickQuestions = [
@@ -829,7 +826,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const syncMediaBlocks = () => {
     setPendingMediaBlocksState([...pendingMediaBlocksRef.current]);
   };
-  const [selectedModel, setSelectedModel] = useState(models[0].key);
+  /** Agent 模型列表：全部取自接口（fetchGenerationModels text capability），无本地写死兜底 */
+  const [modelList, setModelList] = useState<GenerationModel[]>([]);
+  const [selectedModel, setSelectedModel] = useState('');
   const [modelOpen, setModelOpen] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [showSkillModal, setShowSkillModal] = useState(false);
@@ -883,10 +882,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   /* 「上传图片」/「上传视频」此前走同一个 handler、accept 也不分，两个菜单项完全等价。
    * 现在各自把 accept 收窄到对应类型（真实 media_type 仍按文件 MIME 判定）。 */
-  /** 当前 Run 的技能推荐列表（推荐区域展示） */
-  const [recs, setRecs] = useState<RunSkillRecommendation[]>([]);
-  /** 已点 Use 的推荐技能ID（仅用户点 Use 可激活） */
-  const [usedSkillIds, setUsedSkillIds] = useState<Set<string>>(new Set());
   /** 画布上现存的生成卡节点 cardId 集合。父组件没给（例如测试）时按空集处理——空集意味着
    *  「都没应用过」，是安全的一侧：宁可让用户多按一次，也不要把没进画布的卡显示成绿勾。 */
   const appliedIds = appliedCardIds ?? EMPTY_APPLIED_IDS;
@@ -934,7 +929,17 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     };
   }, []);
 
-  const currentModel = models.find((m) => m.key === selectedModel);
+  const currentModel = modelList.find((m) => m.model_id === selectedModel);
+
+  // 加载 Agent（text capability）模型列表：接口为唯一数据源，加载完默认选中第一个
+  useEffect(() => {
+    fetchGenerationModels('text')
+      .then((list) => {
+        setModelList(list);
+        if (list.length) setSelectedModel((prev) => prev || list[0].model_id);
+      })
+      .catch(() => undefined);
+  }, []);
 
   /** 外部注入 @ 引用/生成卡：仅在版本真正变化时触发一次；生成卡追加胶囊（可多次叠加），普通引用整体替换文本
    * ref 记录已处理的 version，防 StrictMode 开发态 effect 双调用导致重复插入 */
@@ -1020,26 +1025,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSkillIds]);
 
-  /** 运行开始后拉取 Run 级技能推荐（GET /api/agent/runs/:runId/creative-skill-recommendations）
-   * 后端未部署该接口（404）时静默隐藏推荐区域 */
-  useEffect(() => {
-    if (runningRunId === null) return;
-    let alive = true;
-    fetchRunSkillRecommendations(runningRunId)
-      .then((list) => {
-        if (alive) setRecs(Array.isArray(list) ? list : []);
-      })
-      .catch((e) => {
-        if (isApiError(e) && e.status === 404) {
-          if (alive) setRecs([]);
-          return;
-        }
-        console.warn('获取技能推荐失败:', e);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [runningRunId]);
+  /* Run 级技能推荐（IK3NPI）已整体移除：那是 Java 运行时的接口，前后端分离重写时被带进
+   * 新前端，后端从未实现——每条消息发出后这里都会白打一次 404（IKBRZV 复测 BUG-NEW-01），
+   * 推荐区域因此从上线起从未渲染过。后端真做这个接口时连同 UI 一起按新契约重加。 */
 
   /**
    * ESC 取消本次回答（IKA4PH）。取消入口统一在发送侧，ESC 是那颗按钮的键盘等价物。
@@ -1267,25 +1255,13 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     chipEditorRef.current?.setText(prompt);
   };
 
-  /** 开启新对话：清空当前输入、消息流、技能推荐、武装技能与历史下拉 */
+  /** 开启新对话：清空当前输入、消息流、武装技能与历史下拉 */
   const handleNewChat = () => {
     // 不清空输入框：面板明写着「未发送的草稿会自动保留」，
     // 开新对话把用户刚敲的字抹掉，与承诺相反。
     resetChat();
-    setRecs([]);
-    setUsedSkillIds(new Set());
     setForcedSkill(null);
     setHistoryOpen(false);
-  };
-
-  /** 使用推荐技能：标记已激活，并把技能意图追加为一条消息提交给 Agent（顺带清掉「直接使用」武装，避免双技能叠加） */
-  const handleUseSkill = async (r: RunSkillRecommendation) => {
-    if (usedSkillIds.has(r.creative_skill_id) || runningRunId !== null || streaming) return;
-    setSkillNames((prev) => ({ ...prev, [r.creative_skill_id]: r.name }));
-    const accepted = await sendMessage([{ type: 'text', text: `使用「${r.name}」技能继续创作` }], r.creative_skill_id, undefined, r.name, `使用「${r.name}」技能继续创作`);
-    if (!accepted) return;
-    setUsedSkillIds((prev) => new Set(prev).add(r.creative_skill_id));
-    setForcedSkill(null);
   };
 
   /** 发送消息：**解引用发生在这一刻**——编辑期胶囊一直是指针，此处才换成完整 prompt；
@@ -1440,6 +1416,12 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
   const removeAttachment = (key: string) =>
     setAttachments((prev) => prev.filter((item) => item.key !== key));
+
+  /** 移除首页带入的待发媒体块（按对象引用匹配，ref 同步后重渲染） */
+  const removePendingMediaBlock = (block: import('@/api/agentSessions').SessionContentBlock) => {
+    pendingMediaBlocksRef.current = pendingMediaBlocksRef.current.filter((b) => b !== block);
+    syncMediaBlocks();
+  };
 
   return (
     <div
@@ -1684,32 +1666,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         </div>
       )}
 
-      {/* Run 级技能推荐区域 */}
-      {recs.length > 0 && (
-        <div className={styles.recommendArea}>
-          <div className={styles.recommendTitle}>推荐技能</div>
-          <div className={styles.recommendList}>
-            {recs.map((r) => {
-              const used = usedSkillIds.has(r.creative_skill_id);
-              return (
-                <div key={r.creative_skill_id} className={styles.recommendItem}>
-                  <div className={styles.recommendInfo}>
-                    <span className={styles.recommendName}>{r.name}</span>
-                    <span className={styles.recommendDesc} title={r.description}>{r.description}</span>
-                  </div>
-                  <button
-                    className={`${styles.recommendUseBtn} ${used ? styles.recommendUsed : ''}`}
-                    onClick={() => handleUseSkill(r)}
-                    disabled={used || runningRunId !== null || streaming}
-                  >
-                    {used ? '已使用' : 'Use'}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* 输入区域 */}
       <div className={styles.inputArea}>
@@ -1776,8 +1732,29 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
            *  撑高的责任只能落在它外面。见 .composerSlot。 */}
           {/* 待发素材（IKAL46）。刻意保持纯文本行：胶囊组件由专门的前端同学交付，
             *  这里只负责把接口打通并给出最简可用的呈现。 */}
-          {attachments.length > 0 && (
+          {(attachments.length > 0 || pendingMediaBlocksState.length > 0) && (
             <div className={styles.attachmentRow}>
+              {/* 首页带入的媒体块（已上传就绪，asset_ref）：展示并允许移除，否则发送前用户完全看不到。
+                *  带 chip_id 的画布 @ 块除外——它们已作为胶囊在输入框里展示，此处再画就是重复。 */}
+              {pendingMediaBlocksState.filter((b) => !b.chip_id).map((block, i) => (
+                <span
+                  key={`pm-${i}`}
+                  className={styles.attachmentChip}
+                  title={block.display_label || block.name || ''}
+                >
+                  <span className={styles.attachmentName}>
+                    {block.media_type === 'video' ? '视频' : '图片'}：{block.display_label || block.name || '附件'}
+                  </span>
+                  <button
+                    className={styles.attachmentRemove}
+                    onClick={() => removePendingMediaBlock(block)}
+                    title="移除"
+                    aria-label={`移除 ${block.display_label || block.name || '附件'}`}
+                  >
+                    <X size={11} strokeWidth={2.5} />
+                  </button>
+                </span>
+              ))}
               {attachments.map((item) => (
                 <span
                   key={item.key}
@@ -1859,8 +1836,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
             <div className={styles.modelWrap} ref={modelRef}>
               <button
                 className={`${styles.modelBtn} ${modelOpen ? styles.modelBtnActive : ''}`}
-                title={currentModel?.label ? `Agent 模型：${currentModel.label}` : '选择 Agent 模型'}
-                aria-label={currentModel?.label ? `Agent 模型：${currentModel.label}` : '选择 Agent 模型'}
+                title={currentModel?.model_label ? `Agent 模型：${currentModel.model_label}` : '选择 Agent 模型'}
+                aria-label={currentModel?.model_label ? `Agent 模型：${currentModel.model_label}` : '选择 Agent 模型'}
                 onClick={() => setModelOpen(!modelOpen)}
               >
                 {/* 平时只露一个盒子图标：模型名称在这一行没有常驻价值，点开菜单里才需要看见
@@ -1873,20 +1850,16 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                     <span className={styles.modelDropdownTitle}>Agent 模型</span>
                     <span className={styles.modelDropdownDesc}>选择驱动 Agent 的模型。</span>
                   </div>
-                  {models.map((m) => (
+                  {modelList.map((m) => (
                     <button
-                      key={m.key}
-                      className={`${styles.modelOption} ${m.key === selectedModel ? styles.modelOptionActive : ''}`}
+                      key={m.model_id}
+                      className={`${styles.modelOption} ${m.model_id === selectedModel ? styles.modelOptionActive : ''}`}
                       onClick={() => {
-                        setSelectedModel(m.key);
+                        setSelectedModel(m.model_id);
                         setModelOpen(false);
                       }}
                     >
-                      <span>{m.label}</span>
-                      <span className={styles.modelCost}>
-                        <Coins size={12} strokeWidth={2} />
-                        消耗 {m.cost}
-                      </span>
+                      <span>{m.model_label}</span>
                     </button>
                   ))}
                 </div>

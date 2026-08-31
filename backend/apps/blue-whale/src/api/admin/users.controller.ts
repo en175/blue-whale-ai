@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { NewApiError } from "@blue-whale/core";
+import { createLogger } from "@blue-whale/core/logging";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
@@ -18,6 +19,7 @@ import {
   parsePageSizeParam,
 } from "@lib/shared/account/admin-mapper.js";
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
+import { SessionService } from "@lib/shared/session/session.service.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
@@ -36,9 +38,12 @@ const ACTION_LOG_MAP: Record<string, string> = {
 @Controller("admin/users")
 @UseGuards(AdminGuard)
 export class AdminUsersController {
+  private readonly logger = createLogger("admin-users");
+
   constructor(
     private readonly account: AccountService,
     private readonly operationLog: OperationLogService,
+    private readonly sessions: SessionService,
   ) {}
 
   @Get()
@@ -109,12 +114,27 @@ export class AdminUsersController {
     const reason = typeof body.reason === "string" ? body.reason.trim() : "";
     if (!reason) throw new AdminException(400, "reason 必填");
 
+    // 冻结时吊销会话的统计（best-effort）：冻结成功后踢该用户全部登录会话，立即生效。
+    let revokedSessions = 0;
+    let revokeError: string | null = null;
+
     try {
       if (action === "freeze") {
         await this.account.manageAdminUser(token, Number(user.userId), {
           id: userId,
           action: "disable",
         });
+        // 上游 disable 成功后再踢会话（禁用先行，最小化并发登录窗口）。
+        try {
+          revokedSessions = await this.sessions.revokeAllForUser(userId);
+        } catch (error) {
+          revokeError = error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `freeze user=${userId} session revoke failed: ${revokeError}`,
+          );
+          // best-effort：上游 disable 已保证禁登录/禁继续用（≤5min 复核兜底），
+          // 会话清除失败不阻断冻结，落在审计里可见。
+        }
       } else if (action === "unfreeze") {
         await this.account.manageAdminUser(token, Number(user.userId), {
           id: userId,
@@ -153,6 +173,9 @@ export class AdminUsersController {
         detail: JSON.stringify({
           reason,
           ...(action === "adjustBalance" ? { value: Number(body.value) } : {}),
+          ...(action === "freeze"
+            ? { revokedSessions, ...(revokeError ? { revokeError } : {}) }
+            : {}),
         }),
         operator: user.username,
         operatorId: user.userId,
@@ -162,6 +185,10 @@ export class AdminUsersController {
       // best-effort 审计，失败不阻断
     }
 
-    return { success: true, data: null };
+    // freeze 额外返回吊销会话数，供前端展示（其余 action 维持 data: null）。
+    return {
+      success: true,
+      data: action === "freeze" ? { revokedSessions } : null,
+    };
   }
 }

@@ -1,3 +1,5 @@
+import { readJobFailText } from '@/api/jobs';
+
 /** 后端注入的提取音频占位节点 id 前缀：`media-extract-{jobId}`。 */
 export const MEDIA_EXTRACT_NODE_PREFIX = 'media-extract-';
 
@@ -29,10 +31,13 @@ export function snapshotHasMediaExtractNode(
 }
 
 export function mediaExtractErrorText(
-  error?: { code?: string; message?: string } | null,
+  error?: { code?: string | number; message?: string; msg?: string } | null,
 ): string {
-  if (error?.message) return error.message;
-  if (error?.code && ERROR_CODE_TEXT[error.code]) return ERROR_CODE_TEXT[error.code];
+  const text = readJobFailText(error);
+  if (text) return text;
+  if (error?.code != null && ERROR_CODE_TEXT[String(error.code)]) {
+    return ERROR_CODE_TEXT[String(error.code)];
+  }
   return '音频提取失败';
 }
 
@@ -41,7 +46,7 @@ export function mediaExtractTerminalPatch(
   detail: {
     status: string;
     asset?: { id?: string; url?: string } | null;
-    error?: { code?: string; message?: string } | null;
+    error?: { code?: string | number; message?: string; msg?: string } | null;
   },
   currentFileName?: string,
 ): Record<string, unknown> | null {

@@ -14,12 +14,13 @@ import { wireInteger } from "@lib/shared/wire-integer.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { SceneCardGenerationService } from "@lib/shared/generation/scene-card-generation.service.js";
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
-import { GenerationWorkerService } from "@lib/shared/generation/generation-worker.service.js";
 import { StoryboardPreviewService } from "@lib/shared/generation/storyboard-preview.service.js";
 import { handleSceneCardGenerate } from "@lib/shared/generation/handle-scene-card-generate.js";
 import { handleStoryboardPreviewCreate } from "@lib/shared/generation/handle-storyboard-preview-create.js";
-import { processJob } from "@lib/shared/generation/worker/generation-worker.js";
-import { enqueueVideoGenerationJob } from "@lib/shared/generation/video-queue.js";
+import {
+  enqueueVideoGenerationJob,
+  enqueueImageGenerationJob,
+} from "@lib/shared/generation/video-queue.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
@@ -34,7 +35,6 @@ export class SceneCardGenerateController {
     private readonly sceneCard: SceneCardGenerationService,
     private readonly storyboard: StoryboardPreviewService,
     private readonly cost: GenerationCostEstimatorService,
-    private readonly worker: GenerationWorkerService,
     private readonly account: AccountService,
   ) {}
 
@@ -156,15 +156,14 @@ export class SceneCardGenerateController {
       },
     );
 
-    // 成功后即时调度首图 job（低延迟；孤儿由 image-recovery 恢复扫描兜底）。
+    // 成功后即时调度首图 job（IKBGKA：走 RocketMQ 图片 consumer，消费端 Semaphore 控并发；
+    // 孤儿由 image-recovery 恢复扫描兜底）。
     if (result.code === 200 && result.data?.generation_job_id != null) {
-      void processJob({
-        ...this.worker.deps,
-        jobId: String(result.data.generation_job_id),
-        userId: user.userId,
-      }).catch((e) =>
+      void enqueueImageGenerationJob(
+        String(result.data.generation_job_id),
+      ).catch((e) =>
         logger.error(
-          `[storyboard-preview] async worker failed: ${e instanceof Error ? e.message : String(e)}`,
+          `[storyboard-preview] enqueue image job failed: ${e instanceof Error ? e.message : String(e)}`,
         ),
       );
     }

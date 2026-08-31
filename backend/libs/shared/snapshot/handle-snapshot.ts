@@ -1,5 +1,10 @@
-import { fail, ok, type ResultEnvelope } from "@blue-whale/contracts";
-import { projectPublicError, type PublicJobError } from "@lib/shared/jobs/public-error.js";
+import {
+  fail,
+  ok,
+  type PublicGenerationError,
+  type ResultEnvelope,
+} from "@blue-whale/contracts";
+import { projectPublicError } from "@lib/shared/jobs/public-error.js";
 import { wireInteger, type WireInteger } from "@lib/shared/wire-integer.js";
 import type { ProjectService } from "@lib/shared/project/project.service.js";
 import type { CanvasService } from "@lib/shared/canvas/canvas.service.js";
@@ -24,7 +29,7 @@ export interface SnapshotGenerationJob {
     retry_of_slot_id: string | null;
     initial_placement_status: "pending" | "placed";
   }>;
-  error: PublicJobError | null;
+  error: PublicGenerationError | null;
 }
 
 export interface SnapshotAssetSummary {
