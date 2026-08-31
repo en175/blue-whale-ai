@@ -129,7 +129,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
     async renameTag(tagCode, label) {
       const result = await prisma.template_tag.updateMany({
         where: { tag_code: tagCode, is_delete: 0 },
-        data: { label, update_time: new Date() },
+        data: { label, gmt_modified: new Date() },
       });
       return result.count > 0;
     },
@@ -137,7 +137,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
     async setTagVisibility(tagCode, visible) {
       const result = await prisma.template_tag.updateMany({
         where: { tag_code: tagCode, is_delete: 0 },
-        data: { visible, update_time: new Date() },
+        data: { visible, gmt_modified: new Date() },
       });
       return result.count > 0;
     },
@@ -170,7 +170,6 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
             video_url: input.video_url,
             layout: input.layout,
             sort_order: input.sort_order,
-            update_time: now,
             gmt_modified: now,
           },
         });
@@ -180,7 +179,6 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
               card_id: card.id,
               image_url: img.image_url,
               sort_order: i,
-              update_time: now,
               gmt_modified: now,
             })),
           });
@@ -206,7 +204,6 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
             video_url: input.video_url,
             layout: input.layout,
             sort_order: input.sort_order,
-            update_time: now,
             gmt_modified: now,
           },
         });
@@ -233,7 +230,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
         if (toDelete.length > 0) {
           await tx.template_card_image.updateMany({
             where: { id: { in: toDelete.map((img) => img.id) } },
-            data: { is_delete: 1, update_time: now, gmt_modified: now },
+            data: { is_delete: 1, gmt_modified: now },
           });
         }
         await Promise.all(
@@ -244,7 +241,6 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
                   data: {
                     image_url: img.image_url,
                     sort_order: i,
-                    update_time: now,
                     gmt_modified: now,
                   },
                 })
@@ -253,7 +249,6 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
                     card_id: id,
                     image_url: img.image_url,
                     sort_order: i,
-                    update_time: now,
                     gmt_modified: now,
                   },
                 }),
@@ -266,7 +261,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
     async softDeleteCard(id) {
       const result = await prisma.template_card.updateMany({
         where: { id, is_delete: 0 },
-        data: { is_delete: 1, update_time: new Date(), gmt_modified: new Date() },
+        data: { is_delete: 1, gmt_modified: new Date() },
       });
       return result.count > 0;
     },
@@ -294,7 +289,6 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
                   where: { id: c.id },
                   data: {
                     sort_order: i,
-                    update_time: new Date(),
                     gmt_modified: new Date(),
                   },
                 }),
@@ -326,7 +320,6 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
                   where: { id: img.id },
                   data: {
                     sort_order: i,
-                    update_time: new Date(),
                     gmt_modified: new Date(),
                   },
                 }),

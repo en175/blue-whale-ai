@@ -209,17 +209,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     data.onDelete?.(id);
   }, [data, id]);
 
-  /** 拷贝内容到剪贴板 */
-  const handleCopy = useCallback(async () => {
-    setContextMenu(null);
-    const text = editorRef.current?.innerText ?? '';
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      // 忽略剪贴板异常
-    }
-  }, []);
-
   /** 在旁边复制一个相同节点 */
   const handleDuplicate = useCallback(() => {
     setContextMenu(null);
@@ -421,13 +410,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           <button className={styles.contextItem} onClick={handleSaveToAssets}>
             <span>保存到共享资产</span>
           </button>
-          <button className={styles.contextItem} onClick={handleCopy}>
-            <span>拷贝</span>
-            <span className={styles.contextShortcut}>⌘C</span>
-          </button>
           <button className={styles.contextItem} onClick={handleDuplicate}>
             <span>复制</span>
-            <span className={styles.contextShortcut}>⌘D</span>
           </button>
           <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
             <span>删除</span>

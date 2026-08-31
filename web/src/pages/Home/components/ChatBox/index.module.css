@@ -3,9 +3,9 @@
  * ============================================ */
 
 .chatBox {
-  /* 毛玻璃上的字色只分两档：静息/占位 80%，输入与选中 100% */
+  /* 毛玻璃上的字色只分两档：静息/占位 70%，输入与选中 100% */
   --chat-fg: #fff;
-  --chat-fg-muted: rgba(255, 255, 255, 0.8);
+  --chat-fg-muted: rgba(255, 255, 255, 0.7);
   max-width: 78.4rem;
   width: 73%;
   /* 固定高度：三个 tab 切换时窗口高度保持一致，不跳动 */
@@ -28,9 +28,9 @@
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: rgba(6, 6, 6, 0.82);
-  backdrop-filter: blur(32px) saturate(1.2);
-  -webkit-backdrop-filter: blur(32px) saturate(1.2);
+  background: rgba(6, 6, 6, 0.72);
+  backdrop-filter: blur(28px) saturate(1.15);
+  -webkit-backdrop-filter: blur(28px) saturate(1.15);
   z-index: 0;
   pointer-events: none;
 }
