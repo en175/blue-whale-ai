@@ -1,10 +1,8 @@
 import { type ReactNode, useEffect, useReducer, useRef, useState } from 'react';
-import desertVideo from '@/assets/home-hero/desert.mp4';
-import desertPoster from '@/assets/home-hero/desert-poster.jpg';
-import oceanVideo from '@/assets/home-hero/ocean.mp4';
-import oceanPoster from '@/assets/home-hero/ocean-poster.jpg';
-import colorBurstVideo from '@/assets/home-hero/color-burst.mp4';
-import colorBurstPoster from '@/assets/home-hero/color-burst-poster.jpg';
+import auroraVideo from '@/assets/home-hero/aurora.mp4';
+import auroraPoster from '@/assets/home-hero/aurora-poster.jpg';
+import ringVideo from '@/assets/home-hero/ring.mp4';
+import ringPoster from '@/assets/home-hero/ring-poster.jpg';
 import styles from './index.module.css';
 
 export const HERO_TRANSITION_MS = 600;
@@ -34,9 +32,8 @@ type CarouselAction =
   | { type: 'reset' };
 
 const slides = [
-  { video: desertVideo, poster: desertPoster },
-  { video: oceanVideo, poster: oceanPoster },
-  { video: colorBurstVideo, poster: colorBurstPoster },
+  { video: auroraVideo, poster: auroraPoster },
+  { video: ringVideo, poster: ringPoster },
 ] as const;
 
 const initialState: CarouselState = {
