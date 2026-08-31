@@ -7,6 +7,7 @@ import { Play, Trash2, RotateCw, AlertCircle, Loader2, Plus } from 'lucide-react
 import { fetchAllAssets, deleteAsset, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
 import { createAsset as createMaterialAsset } from '@/api/material';
 import { uploadAssetFile } from '@/utils/upload';
+import { toast } from 'sonner';
 import { isApiError } from '@/api/http';
 import { fileToAssetType } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -342,11 +343,14 @@ export default function Assets() {
         try {
           // Step 1: 上传到 Asset 管道拿公网 URL
           const uploadResult = await uploadAssetFile(file);
-          // Step 2: 调用素材库 CreateAsset
+          // Step 2: 调用素材库 CreateAsset（名称限 30 字，超限截断）
+          const rawName = file.name;
+          const finalName = rawName.length > 30 ? rawName.slice(0, 30) : rawName;
+          if (rawName.length > 30) toast('当前上传素材名称过长，已截取', { style: { textAlign: 'center' } });
           await createMaterialAsset({
             GroupId: characterDetailGroupId,
             URL: uploadResult.url,
-            Name: file.name,
+            Name: finalName,
             AssetType: assetType,
           });
         } catch (err) {
