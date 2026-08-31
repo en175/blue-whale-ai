@@ -193,7 +193,7 @@ export default function CanvasPage() {
   const [audioSeed, setAudioSeed] = useState<{ ts: number } | null>(null);
   /** 首页 AI视频/AI图片 生成交接：消费后置入此 ref，待项目就绪触发创建任务 */
   const pendingGenRef = useRef<GenHandoff | null>(null);
-  /** 首页 AI视频/AI图片 发送带入：不唤起底部对话框，直接在画布创建生成任务（生成卡落画布） */
+  /** 首页 AI视频/AI图片 发送带入：唤起底部对话框（参数带入、内容清空），同时直接创建生成任务（生成卡落画布） */
   useEffect(() => {
     const state = location.state as { genKind?: 'video' | 'image' } | null;
     if (!state?.genKind) return;
@@ -202,6 +202,35 @@ export default function CanvasPage() {
       // 刷新/直开页面：交接数据已失效，仅清导航状态
       navigate(location.pathname + location.search, { replace: true, state: null });
       return;
+    }
+    if (handoff.kind === 'video') {
+      // 参数带入对话框；refs/text 不带（内容不保留，任务由 firePendingGen 直接创建）
+      setVideoSeed({
+        ts: Date.now(),
+        refs: [],
+        params: {
+          modelId: handoff.modelId,
+          aspectRatio: handoff.aspectRatio,
+          resolution: handoff.resolution,
+          duration: handoff.duration,
+          mode: handoff.mode,
+        },
+      });
+      setShowBottomDialog(true);
+      setShowImageDialog(false);
+      setShowAudioDialog(false);
+      setShowMusicDialog(false);
+    } else {
+      setImageSeed({
+        ts: Date.now(),
+        text: '',
+        files: [],
+        params: { modelId: handoff.modelId, ratio: handoff.ratio, size: handoff.size },
+      });
+      setShowImageDialog(true);
+      setShowBottomDialog(false);
+      setShowAudioDialog(false);
+      setShowMusicDialog(false);
     }
     pendingGenRef.current = handoff;
     // 项目已就绪则立即创建生成节点；未就绪由 currentId 变化后的 effect 重试
