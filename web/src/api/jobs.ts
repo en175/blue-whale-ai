@@ -87,7 +87,7 @@ export interface AudioJobParameters {
 /** POST /api/projects/:id/generation-jobs 请求体 */
 export interface CreateJobPayload {
   type: GenerationJobType;
-  /** 输入参考资产ID列表（仅 image） */
+  /** 输入参考资产ID列表（image 图片参考 / audio 参考音频；后端兼容字符串） */
   input_asset_ids?: (string | number)[];
   /** 期望生成数量 */
   expected_output_count: number;

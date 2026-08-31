@@ -94,16 +94,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     data.onDelete?.(id);
   }, [data, id]);
 
-  /** 拷贝文件信息到剪贴板 */
-  const handleCopy = useCallback(async () => {
-    setContextMenu(null);
-    try {
-      await navigator.clipboard.writeText(data.fileName || '');
-    } catch {
-      // 忽略剪贴板异常
-    }
-  }, [data.fileName]);
-
   /** 在旁边复制一个相同节点 */
   const handleDuplicate = useCallback(() => {
     setContextMenu(null);
@@ -315,13 +305,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           <button className={styles.contextItem} onClick={handleSaveToAssets}>
             <span>保存到共享资产</span>
           </button>
-          <button className={styles.contextItem} onClick={handleCopy}>
-            <span>拷贝</span>
-            <span className={styles.contextShortcut}>⌘C</span>
-          </button>
           <button className={styles.contextItem} onClick={handleDuplicate}>
             <span>复制</span>
-            <span className={styles.contextShortcut}>⌘D</span>
           </button>
           <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
             <span>删除</span>
