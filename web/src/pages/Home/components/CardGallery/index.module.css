@@ -67,12 +67,6 @@
   gap: var(--spacing-lg);
 }
 
-/* IKA64P：图片栏产品校准 3+3 排布（限宽使一行仅容 3 张 260px 卡） */
-.cardGridThree {
-  max-width: 840px;
-  margin-inline: auto;
-}
-
 /* ---- 单张卡片 ---- */
 .card {
   position: relative;

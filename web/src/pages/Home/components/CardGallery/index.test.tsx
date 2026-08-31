@@ -95,6 +95,25 @@ describe('CardGallery', () => {
     expect(onCardClick).toHaveBeenCalledWith('空图模板', 'image');
   });
 
+  it('图片 tab 与视频 tab 共用同一行 4 卡网格', async () => {
+    await mountGallery();
+
+    const pictureGrid = mountNode.querySelector('[data-testid="gallery-card-grid"]');
+    expect(pictureGrid).toBeTruthy();
+    expect(pictureGrid?.className.split(/\s+/).filter(Boolean)).toHaveLength(1);
+
+    const videoTab = [...mountNode.querySelectorAll('button')].find((btn) =>
+      btn.textContent?.includes('视频'),
+    );
+    await act(async () => {
+      videoTab?.click();
+      await Promise.resolve();
+    });
+
+    const videoGrid = mountNode.querySelector('[data-testid="gallery-card-grid"]');
+    expect(videoGrid?.className).toBe(pictureGrid?.className);
+  });
+
   it('视频 tab 才展示播放按钮，形态不由 images 是否为空决定', async () => {
     await mountGallery();
 

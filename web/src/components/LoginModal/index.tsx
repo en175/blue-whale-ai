@@ -17,6 +17,10 @@ import Modal from '@/components/Modal';
 import { useAuthStore, type SessionUser } from '@/stores/auth';
 import { updateUser } from '@/utils/auth';
 import styles from './index.module.css';
+import {
+  PLATFORM_PRIVACY_POLICY_HREF,
+  USER_SERVICES_AGREEMENT_HREF,
+} from './agreements';
 import { isRegisterPasswordValid } from './password';
 
 interface LoginModalProps {
@@ -28,6 +32,31 @@ interface LoginModalProps {
 }
 
 type Mode = 'login' | 'register';
+
+function AgreementLinks() {
+  return (
+    <span className={styles.agreeText}>
+      我已阅读并同意
+      <a
+        className={styles.link}
+        href={USER_SERVICES_AGREEMENT_HREF}
+        target="_blank"
+        rel="noreferrer"
+      >
+        《用户协议》
+      </a>
+      和
+      <a
+        className={styles.link}
+        href={PLATFORM_PRIVACY_POLICY_HREF}
+        target="_blank"
+        rel="noreferrer"
+      >
+        《隐私政策》
+      </a>
+    </span>
+  );
+}
 
 export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }: LoginModalProps) {
   const [mode, setMode] = useState<Mode>(initialMode);
@@ -174,16 +203,7 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
               checked={agreed}
               onChange={(e) => setAgreed(e.target.checked)}
             />
-            <span className={styles.agreeText}>
-              我已阅读并同意
-              <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
-                《用户协议》
-              </a>
-              和
-              <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
-                《隐私政策》
-              </a>
-            </span>
+            <AgreementLinks />
           </label>
 
           <button
@@ -251,16 +271,7 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
               checked={agreed}
               onChange={(e) => setAgreed(e.target.checked)}
             />
-            <span className={styles.agreeText}>
-              我已阅读并同意
-              <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
-                《用户协议》
-              </a>
-              和
-              <a className={styles.link} href="#" onClick={(e) => e.preventDefault()}>
-                《隐私政策》
-              </a>
-            </span>
+            <AgreementLinks />
           </label>
 
           <button

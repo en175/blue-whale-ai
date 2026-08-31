@@ -185,8 +185,8 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
         })}
       </div>
 
-      {/* 卡片网格（IKA64P：图片栏 3+3 排布） */}
-      <div className={`${styles.cardGrid} ${activeTag === 'picture' ? styles.cardGridThree : ''}`}>
+      {/* 卡片网格：视频 / 图片同一行 4 张 */}
+      <div className={styles.cardGrid} data-testid="gallery-card-grid">
         {records.map((record, idx) => {
           const mediaKind = mediaKindFromTagCode(activeTag);
           return (
