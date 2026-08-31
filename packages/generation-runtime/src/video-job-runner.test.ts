@@ -1157,4 +1157,158 @@ describe("video job runner material library references", () => {
       expect.objectContaining({ code: "invalid_input" }),
     );
   });
+
+  it("propagates provider error code on submit failure (IKBQEE: submit 阶段欠费识别)", async () => {
+    const { runVideoJobStep, VideoProviderError } = await import(
+      "./video-job-runner.js"
+    );
+    const submit = vi
+      .fn()
+      .mockRejectedValue(
+        new VideoProviderError(
+          "quota_exhausted",
+          "预扣费额度失败, 用户剩余额度: ¥2.123294, 需要预扣费额度: ¥7.000000",
+        ),
+      );
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "309",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "小猫",
+          model_id: "doubao-seedance-2-0-260128",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-submit-quota",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn().mockResolvedValue(true),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-submit-quota",
+      jobId: "309",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+    });
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(repo.failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "quota_exhausted" }),
+    );
+  });
+
+  it("submit non-quota provider error keeps provider_failed code", async () => {
+    const { runVideoJobStep, VideoProviderError } = await import(
+      "./video-job-runner.js"
+    );
+    const submit = vi
+      .fn()
+      .mockRejectedValue(new VideoProviderError("provider_failed", "gateway down"));
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "310",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "测试",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-submit-nonquota",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn().mockResolvedValue(true),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-submit-nonquota",
+      jobId: "310",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+    });
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(repo.failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "provider_failed" }),
+    );
+  });
+
+  it("poll-phase transport error falls back to provider_failed (不误判欠费)", async () => {
+    const { runVideoJobStep, VideoProviderError } = await import(
+      "./video-job-runner.js"
+    );
+    const poll = vi
+      .fn()
+      .mockRejectedValue(
+        new VideoProviderError("provider_failed", "new-api 不可达"),
+      );
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "311",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "轮询失败",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: "upstream-311",
+        cancelRequested: false,
+        workerId: "worker-poll-fail",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn().mockResolvedValue(true),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-poll-fail",
+      jobId: "311",
+      createProvider: () => ({ submit: vi.fn(), poll }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+    });
+
+    expect(poll).toHaveBeenCalledTimes(1);
+    expect(repo.failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "provider_failed" }),
+    );
+  });
 });

@@ -171,6 +171,20 @@ class VideoInputError extends Error {
   }
 }
 
+/**
+ * provider 错误：携带对外错误码（quota_exhausted / provider_failed 等），
+ * 供 runVideoJobStep 的 catch 直接取码落库，不再一律归 provider_failed。
+ */
+export class VideoProviderError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "VideoProviderError";
+  }
+}
+
 export async function runVideoJobStep(deps: {
   repo: VideoJobRunnerRepo;
   workerId: string;
@@ -306,7 +320,14 @@ export async function runVideoJobStep(deps: {
     }
     return claim.id;
   } catch (error) {
-    const code = error instanceof VideoInputError ? error.code : ERROR_PROVIDER_FAILED;
+    // IKBQEE：provider 错误（含 submit 阶段的欠费识别）经 VideoProviderError 携带错误码，
+    // 直接取码落库；VideoInputError 为输入校验码；其余一律 provider_failed。
+    const code =
+      error instanceof VideoInputError
+        ? error.code
+        : error instanceof VideoProviderError
+          ? error.code
+          : ERROR_PROVIDER_FAILED;
     const message = error instanceof Error ? error.message : "视频生成失败";
     // IK9Q1B：失败必留痕——异常堆栈是定位间歇失败（985）的关键，之前只有 DB 侧 error 无任何 worker 日志。
     if (error instanceof Error) {
