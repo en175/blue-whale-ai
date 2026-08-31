@@ -175,6 +175,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
 
   /** 首尾帧模式：仅允许上传 2 张图片（首帧+尾帧），禁止视频 */
   const isKeyframe = selectedMode === 'keyframe';
+  /** 图生视频 / 首尾帧 均不支持视频参考 */
+  const noVideoMode = isKeyframe || selectedMode === 'text2video';
   const imageCount = refFiles.filter((f) => f.type === 'image').length;
   const videoCount = refFiles.filter((f) => f.type === 'video').length;
   /** 首尾帧模式必须恰好 2 张图片（不多不少、不含视频），否则禁止发送 */
@@ -219,10 +221,10 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     }
   }, [initialText]);
 
-  // 画布节点选取结果注入参考视频（去重 + 上限保护；首尾帧模式不收视频）
+  // 画布节点选取结果注入参考视频（去重 + 上限保护；图生视频 / 首尾帧模式不收视频）
   useEffect(() => {
     if (!externalPick) return;
-    if (isKeyframe) return;
+    if (noVideoMode) return;
     const item = externalPick.item;
     setRefFiles((prev) => {
       const vidCount = prev.filter((f) => f.type === 'video').length;
@@ -654,12 +656,12 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         )}
 
         {/* 分隔点 */}
-        {((imageCount > 0 || imageCount < maxImages) && (isKeyframe || videoCount < MAX_VIDEOS || videoCount > 0)) && (
+        {((imageCount > 0 || imageCount < maxImages) && (!noVideoMode && (videoCount < MAX_VIDEOS || videoCount > 0))) && (
           <div className={styles.mediaDot} />
         )}
 
-        {/* 视频缩略图 */}
-        {!isKeyframe && refFiles.filter((f) => f.type === 'video').map((item, i) => {
+        {/* 视频缩略图（仅全能参考模式） */}
+        {!noVideoMode && refFiles.filter((f) => f.type === 'video').map((item, i) => {
           const idx = refFiles.indexOf(item);
           const dur = videoDurations[idx];
           return (
@@ -673,18 +675,17 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
             </div>
           );
         })}
-        {/* 视频上传按钮（弹菜单：视频上传 / 到节点选择） */}
-        {(isKeyframe || videoCount < MAX_VIDEOS) && (
+        {/* 视频上传按钮（仅全能参考模式） */}
+        {!noVideoMode && videoCount < MAX_VIDEOS && (
           <div className={styles.sourceWrap} ref={videoSourceRef}>
             <button
               className={`${styles.mediaBtn} ${pickMode === 'video' ? styles.mediaBtnPicking : ''}`}
               onClick={() => setSourceMenuOpen((v) => (v === 'video' ? null : 'video'))}
-              title={isKeyframe ? '首尾帧模式不支持视频' : '视频上传 / 到节点选择'}
-              disabled={isKeyframe}
+              title="视频上传 / 到节点选择"
             >
               <Video size={18} strokeWidth={2} />
             </button>
-            {sourceMenuOpen === 'video' && !isKeyframe && (
+            {sourceMenuOpen === 'video' && (
               <>
                 <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(null)} />
                 <div className={styles.sourceMenu}>
@@ -765,7 +766,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         ref={anyInputRef}
         type="file"
         accept={
-          isKeyframe
+          noVideoMode
             ? 'image/*'
             : imageCount >= maxImages
               ? 'video/*'
@@ -807,8 +808,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         {/* 左侧 */}
         <div className={styles.barLeft}>
           {/* 加号上传（已全部达上限时隐藏，杜绝点击后的超限提示） */}
-          {(isKeyframe
-            ? imageCount < 2
+          {(noVideoMode
+            ? imageCount < maxImages
             : imageCount < maxImages || videoCount < MAX_VIDEOS) && (
             <button
               className={styles.addBtn}
@@ -839,8 +840,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
                     key={opt.key}
                     className={`${styles.modeOption} ${opt.key === selectedMode ? styles.modeOptionActive : ''}`}
                     onClick={() => {
-                      if (opt.key === 'keyframe' && videoCount > 0) {
-                        onToast?.('warn', '首尾帧模式仅支持图片，请先移除视频文件');
+                      if ((opt.key === 'keyframe' || opt.key === 'text2video') && videoCount > 0) {
+                        onToast?.('warn', `${opt.key === 'keyframe' ? '首尾帧' : '图生视频'}模式不支持视频参考，请先移除视频文件`);
                         setModeOpen(false);
                         return;
                       }
