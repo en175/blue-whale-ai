@@ -3,6 +3,16 @@ export {
   type ChangePasswordRequest,
 } from "./change-password.js";
 export {
+  ACCOUNT_ERROR_PASSWORD_INCORRECT,
+  ACCOUNT_ERROR_PASSWORD_INVALID,
+  ACCOUNT_ERROR_PASSWORD_NOT_SET,
+  ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE,
+  ACCOUNT_ERROR_NUMERIC_CODES,
+  accountErrorToNumeric,
+  accountMessageFor,
+  type PublicAccountError,
+} from "./account-error-codes.js";
+export {
   readinessResponseSchema,
   type ReadinessResponse,
 } from "./readiness.js";

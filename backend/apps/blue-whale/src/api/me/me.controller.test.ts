@@ -132,35 +132,82 @@ describe("MeController（IKBRCK 改密）", () => {
     expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
   });
 
-  it("网关业务失败（原密码错误）原样透出 message，4xx 保持原状态码，且不吊销会话", async () => {
+  it("网关原密码错误（英文）→ 账号域数值码 1101 + 中文，且不吊销会话", async () => {
     const { controller, sessions } = createController({
       changePassword: vi.fn().mockRejectedValue(
-        new NewApiError("原密码错误", 400),
+        new NewApiError("Original password is incorrect", 400),
       ),
     });
-    await expect(
-      controller.changePassword(
-        { original_password: "wrong", password: "NewPass456" },
-        BEARER,
-        USER,
-      ),
-    ).rejects.toMatchObject({ status: 400, message: "原密码错误" });
+    const result = await controller.changePassword(
+      { original_password: "wrong", password: "NewPass456" },
+      BEARER,
+      USER,
+      RES,
+    );
+    // IKBQEE / ADR-0078：账号域错误统一投影——不再透传英文，返回 {code:1101, msg:中文}
+    expect(result).toMatchObject({
+      code: 1101,
+      msg: "原密码错误，请重试",
+      data: null,
+    });
     expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
   });
 
-  it("网关业务失败为非 4xx（如 success:false 的 200 信封）收敛成 502，但 message 保留", async () => {
+  it("网关密码格式错误（英文 Invalid input）→ 账号域数值码 1102 + 中文", async () => {
+    const { controller } = createController({
+      changePassword: vi.fn().mockRejectedValue(
+        new NewApiError("Invalid input", 200),
+      ),
+    });
+    const result = await controller.changePassword(
+      { original_password: "OldPass123", password: "123" },
+      BEARER,
+      USER,
+      RES,
+    );
+    expect(result).toMatchObject({
+      code: 1102,
+      msg: "新密码需为 8-20 位",
+      data: null,
+    });
+  });
+
+  it("网关账号未设密码 → 账号域数值码 1103 + 中文", async () => {
     const { controller } = createController({
       changePassword: vi.fn().mockRejectedValue(
         new NewApiError("当前账号未设置密码", 200),
       ),
     });
-    await expect(
-      controller.changePassword(
-        { original_password: "OldPass123", password: "NewPass456" },
-        BEARER,
-        USER,
+    const result = await controller.changePassword(
+      { original_password: "OldPass123", password: "NewPass456" },
+      BEARER,
+      USER,
       RES,
+    );
+    expect(result).toMatchObject({
+      code: 1103,
+      msg: "当前账号未设置密码",
+      data: null,
+    });
+  });
+
+  it("无法归类的网关错误 → 兜底 1100 + 通用中文，不吊销会话", async () => {
+    const { controller, sessions } = createController({
+      changePassword: vi.fn().mockRejectedValue(
+        new NewApiError("upstream exploded", 500),
       ),
-    ).rejects.toMatchObject({ status: 502, message: "当前账号未设置密码" });
+    });
+    const result = await controller.changePassword(
+      { original_password: "OldPass123", password: "NewPass456" },
+      BEARER,
+      USER,
+      RES,
+    );
+    expect(result).toMatchObject({
+      code: 1100,
+      msg: "修改密码失败",
+      data: null,
+    });
+    expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
   });
 });

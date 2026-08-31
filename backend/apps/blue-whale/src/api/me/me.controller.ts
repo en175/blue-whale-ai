@@ -2,8 +2,14 @@ import { Body, Controller, Get, Headers, Put, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { NewApiError } from "@blue-whale/core";
 import { createLogger } from "@blue-whale/core/logging";
-import { changePasswordRequestSchema, ok } from "@blue-whale/contracts";
+import {
+  ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE,
+  changePasswordRequestSchema,
+  fail,
+  ok,
+} from "@blue-whale/contracts";
 import { AccountService } from "@lib/shared/account/account.service.js";
+import { projectAccountError } from "@lib/shared/account/change-password-error.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
@@ -11,7 +17,6 @@ import {
   sessionCookieOptions,
 } from "@lib/shared/session/cookie.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
-import { toUpstreamError } from "@lib/shared/errors/upstream-error.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
 /** 会话身份快照（AuthGuard 从本地会话解析，不再每次调 new-api /token/identity）。 */
@@ -64,7 +69,18 @@ export class MeController {
         token,
       );
     } catch (error) {
-      throw toUpstreamError(error, "修改密码失败");
+      // IKBQEE / ADR-0078：账号域错误统一投影——网关英文 message 归一为
+      // 账号域数值码（1101 原密码错误/1102 密码格式/1103 未设密码）+ 中文，杜绝英文透传。
+      const projected = projectAccountError(error, "修改密码失败");
+      // 未归类错误（1100 兜底）现在走 HTTP200 信封，不再有 4xx/5xx 可观测——主动留痕。
+      if (projected.code === ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE) {
+        this.logger.error(
+          `changePassword 未归类上游错误: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      return fail(projected.code, projected.message);
     }
     // 改密成功后再踢会话（best-effort）：上游改密成功已保证新密码生效，
     // 会话吊销失败不阻断改密，避免旧会话残留。
