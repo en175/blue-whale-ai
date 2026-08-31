@@ -138,17 +138,23 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
 
   const enabledCount = images.filter((i) => i.enabled).length;
 
-  /** 添加商品图（点击选择或拖入，支持 image/* 和 video/*，上限 8 张）
+  /** 添加商品图（点击选择或拖入，仅支持 image/*，上限 8 张）
    * 先创建本地 blob 预览立即上画布，再异步调用 uploadAssetFile() 三步上传，
    * 成功后替换为永久 URL（与左侧工具栏加号上传逻辑一致） */
   const addFiles = (files: FileList | File[]) => {
+    const all = Array.from(files);
+    const invalid = all.filter((f) => !f.type.startsWith('image/'));
+    if (invalid.length > 0) {
+      data.onToast?.('warn', invalid.length === 1
+        ? `「${invalid[0].name}」不是图片格式，无法添加`
+        : `${invalid.length} 个文件不是图片格式，无法添加`);
+    }
     const newImgs: { id: string; src: string; file: File; type: 'image' | 'video' }[] = [];
-    Array.from(files)
-      .filter((f) => f.type.startsWith('image/') || f.type.startsWith('video/'))
+    all
+      .filter((f) => f.type.startsWith('image/'))
       .forEach((f, i) => {
         const imgId = `img-${Date.now()}-${i}`;
-        const mediaType: 'image' | 'video' = f.type.startsWith('video/') ? 'video' : 'image';
-        newImgs.push({ id: imgId, src: URL.createObjectURL(f), file: f, type: mediaType });
+        newImgs.push({ id: imgId, src: URL.createObjectURL(f), file: f, type: 'image' });
       });
     if (newImgs.length === 0) return;
 
@@ -333,7 +339,7 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
           <input
             ref={fileRef}
             type="file"
-            accept="image/*,video/*"
+            accept="image/*"
             multiple
             className={styles.hiddenInput}
             onChange={(e) => {

@@ -900,16 +900,15 @@ export default function CanvasPage() {
           assetId: readNodeAssetId(data),
         },
       });
-    } else if (pickMode === 'product' && isReadyMedia && data.mediaType !== 'audio') {
-      // 商品卡发起的图片/视频节点选取 → ts 驱动注入目标商品卡
+    } else if (pickMode === 'product' && isReadyMedia && data.mediaType === 'image') {
+      // 商品卡发起的图片节点选取 → ts 驱动注入目标商品卡（仅图片，商品卡不支持视频）
       const targetId = pickProductId;
       if (targetId) {
-        const mediaType: 'image' | 'video' = data.mediaType === 'video' ? 'video' : 'image';
         const newImage = {
           id: `node-${node.id}-${Date.now()}`,
           src: data.src as string,
           enabled: true,
-          type: mediaType,
+          type: 'image' as const,
           ...(readNodeAssetId(data) ? { assetId: String(readNodeAssetId(data)!) } : {}),
         };
         setProductPickResult({ ts: Date.now(), productId: targetId, image: newImage });
