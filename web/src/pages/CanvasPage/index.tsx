@@ -193,7 +193,7 @@ export default function CanvasPage() {
   const [audioSeed, setAudioSeed] = useState<{ ts: number } | null>(null);
   /** 首页 AI视频/AI图片 生成交接：消费后置入此 ref，待项目就绪触发创建任务 */
   const pendingGenRef = useRef<GenHandoff | null>(null);
-  /** 首页 AI视频/AI图片 发送带入：唤起对应底部对话框并填充内容，同时立即尝试触发生成（等于带入后直接发送） */
+  /** 首页 AI视频/AI图片 发送带入：不唤起底部对话框，直接在画布创建生成任务（生成卡落画布） */
   useEffect(() => {
     const state = location.state as { genKind?: 'video' | 'image' } | null;
     if (!state?.genKind) return;
@@ -202,35 +202,6 @@ export default function CanvasPage() {
       // 刷新/直开页面：交接数据已失效，仅清导航状态
       navigate(location.pathname + location.search, { replace: true, state: null });
       return;
-    }
-    if (handoff.kind === 'video') {
-      setVideoSeed({
-        ts: Date.now(),
-        refs: handoff.refs,
-        text: handoff.text,
-        params: {
-          modelId: handoff.modelId,
-          aspectRatio: handoff.aspectRatio,
-          resolution: handoff.resolution,
-          duration: handoff.duration,
-          mode: handoff.mode,
-        },
-      });
-      setShowBottomDialog(true);
-      setShowImageDialog(false);
-      setShowAudioDialog(false);
-      setShowMusicDialog(false);
-    } else {
-      setImageSeed({
-        ts: Date.now(),
-        text: handoff.text,
-        files: handoff.files,
-        params: { modelId: handoff.modelId, ratio: handoff.ratio, size: handoff.size },
-      });
-      setShowImageDialog(true);
-      setShowBottomDialog(false);
-      setShowAudioDialog(false);
-      setShowMusicDialog(false);
     }
     pendingGenRef.current = handoff;
     // 项目已就绪则立即创建生成节点；未就绪由 currentId 变化后的 effect 重试
@@ -2298,6 +2269,7 @@ export default function CanvasPage() {
     const handoff = pendingGenRef.current;
     if (!handoff) return;
     if (!currentId) return; // 项目未就绪：等 currentId 变化后由 effect 重试
+    if (!doc) return; // 文档未加载：此刻 setMediaNodes 会被 doc 水合 effect 清空，等 doc 就绪再触发
     pendingGenRef.current = null;
     if (handoff.kind === 'video') {
       // 参考素材（图/视频）上传取 assetId：首尾帧模式走 first/lastFrameAssetId（首页已校验恰好 2 张图），
@@ -2322,15 +2294,17 @@ export default function CanvasPage() {
           const lastAssetId = last ? await resolveRefAssetId({
             file: last.file, url: last.preview, name: 'ref-image', type: last.type,
           }) : null;
-          // preview 的释放由 seed 进的底部对话框在卸载时负责（提前 revoke 会让缩略图失效）
+          // 不再 seed 进底部对话框，objectURL 在此自行释放
           if (!firstAssetId || !lastAssetId) {
             console.warn('首尾帧素材上传失败，任务未创建');
+            handoff.refs.forEach((r) => URL.revokeObjectURL(r.preview));
             return;
           }
           startGenerationJob('video', parameters, undefined, {
             firstFrameAssetId: firstAssetId,
             lastFrameAssetId: lastAssetId,
           });
+          handoff.refs.forEach((r) => URL.revokeObjectURL(r.preview));
           return;
         }
         const referenceAssetIds: string[] = [];
@@ -2343,13 +2317,14 @@ export default function CanvasPage() {
           });
           if (assetId) referenceAssetIds.push(assetId);
         }
-        // preview 的释放由 seed 进的底部对话框在卸载时负责（提前 revoke 会让缩略图失效）
         startGenerationJob(
           'video',
           parameters,
           undefined,
           referenceAssetIds.length > 0 ? { referenceAssetIds } : undefined,
         );
+        // 不再 seed 进底部对话框，objectURL 在此自行释放
+        handoff.refs.forEach((r) => URL.revokeObjectURL(r.preview));
       })();
     } else {
       // 图片：参考图先上传取 assetId，再创建任务（同 handleImageDialogSend）
@@ -2359,13 +2334,14 @@ export default function CanvasPage() {
           const uploaded = await uploadFileToAsset(f.file, 'image');
           if (uploaded) inputAssetIds.push(uploaded.asset_id);
         }
-        // url 的释放由 seed 进的图片对话框在卸载时负责（提前 revoke 会让缩略图失效）
         startGenerationJob('image', {
           prompt: handoff.text,
           model_id: handoff.modelId,
           aspect_ratio: handoff.ratio,
           size: handoff.size,
         }, inputAssetIds.length > 0 ? inputAssetIds : undefined);
+        // 不再 seed 进图片对话框，objectURL 在此自行释放
+        handoff.files.forEach((f) => URL.revokeObjectURL(f.url));
       })();
     }
     // 触发后清导航状态（消费时不提前清，避免 location 变化重跑消费 effect 重复注入对话框）
@@ -2373,11 +2349,11 @@ export default function CanvasPage() {
   };
   actionsRef.current.firePendingGen = firePendingGen;
 
-  /** 项目就绪后触发首页生成交接（消费时 currentId 已有值则已被消费 effect 立即触发，此处幂等重试） */
+  /** 项目/文档就绪后触发首页生成交接（消费时已就绪则已被消费 effect 立即触发，此处幂等重试） */
   useEffect(() => {
     actionsRef.current.firePendingGen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId]);
+  }, [currentId, doc]);
 
   return (
     <div className={styles.canvasPage}>
