@@ -6,6 +6,7 @@
  * ============================================ */
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { toast } from 'sonner';
 import { Plus, FolderOpen, Trash2, ArrowLeft, X, Loader2, Video } from 'lucide-react';
 import {
   createAssetGroup,
@@ -270,8 +271,7 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [groupAssets, setGroupAssets] = useState<Map<string, MaterialAsset[]>>(new Map());
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-  const [actionError, setActionError] = useState('');
+  const [loadError, setLoadError] = useState(false);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [detailGroupId, setDetailGroupId] = useState<string | null>(null);
@@ -282,7 +282,7 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
   /** 仅加载分组列表；素材在进入分组详情后再加载。 */
   const loadGroups = useCallback(async () => {
     setLoading(true);
-    setLoadError('');
+    setLoadError(false);
     try {
       const result = await listAssetGroups({
         Filter: { GroupType: GROUP_TYPE },
@@ -292,7 +292,9 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
       setGroups(result.Items);
       setGroupAssets(new Map());
     } catch (err) {
-      setLoadError(isApiError(err) ? err.message : '加载失败');
+      // API 错误已由请求层统一 toast
+      if (!isApiError(err)) toast.error('加载失败');
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -356,9 +358,8 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
   /* ---- 分组操作 ---- */
 
   const handleCreateGroup = async (name: string) => {
-    setActionError('');
     try {
-      const result = await createAssetGroup({ Name: name, GroupType: GROUP_TYPE });
+      const result = await createAssetGroup({ Name: name, GroupType: GROUP_TYPE }, { silent: true });
       setGroups((prev) => [
         { Id: result.Id, Name: name, GroupType: GROUP_TYPE },
         ...prev,
@@ -367,7 +368,8 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
       setShowCreateModal(false);
       setDetailGroupId(result.Id);
     } catch (err) {
-      setActionError(isApiError(err) ? err.message : '创建分组失败');
+      // silent 请求：页面层统一用定制文案提示（401 已由请求层弹登录续接）
+      if (!isApiError(err) || err.status !== 401) toast.error('新建分组失败，请稍后重试');
       throw err; // 让 GroupFormModal 的 submitting 状态正确恢复
     }
   };
@@ -382,10 +384,9 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setActionError('');
     try {
       if (deleteTarget.type === 'group') {
-        await deleteAssetGroup(deleteTarget.id);
+        await deleteAssetGroup(deleteTarget.id, { silent: true });
         setGroups((prev) => prev.filter((g) => g.Id !== deleteTarget.id));
         setGroupAssets((prev) => {
           const next = new Map(prev);
@@ -407,7 +408,13 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
       }
       setDeleteTarget(null);
     } catch (err) {
-      setActionError(isApiError(err) ? err.message : '删除失败');
+      if (deleteTarget.type === 'group') {
+        // silent 请求：分组删除用定制文案（401 已由请求层弹登录续接）
+        if (!isApiError(err) || err.status !== 401) toast.error('分组删除失败，请稍后重试');
+      } else if (!isApiError(err)) {
+        // API 错误已由请求层统一 toast；非 API 错误兜底提示
+        toast.error('删除失败');
+      }
       setDeleteTarget(null);
     }
   };
@@ -428,7 +435,6 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
           onDeleteAsset={handleDeleteAsset}
           onUpload={onUpload}
         />
-        {actionError && <div className={styles.errorMsg} style={{ margin: '0 24px' }}>{actionError}</div>}
 
         {/* 删除确认弹窗：详情视图内点击删除时立即弹出 */}
         <ConfirmModal
@@ -456,14 +462,13 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
   // 分组列表视图
   return (
     <>
-      {actionError && <div className={styles.errorMsg}>{actionError}</div>}
       {loading ? (
         <div className={styles.loadingSpinner}>
           <Loader2 size={32} className={styles.spin} />
           <span>加载中...</span>
         </div>
       ) : loadError ? (
-        <div className={styles.empty} style={{ color: 'var(--color-error)' }}>{loadError}</div>
+        <div className={styles.empty}>分组加载失败，请稍后重试</div>
       ) : (
         <div className={styles.groupGrid}>
           {/* 新建分组卡片 */}

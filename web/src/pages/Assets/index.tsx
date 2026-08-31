@@ -281,7 +281,6 @@ export default function Assets() {
   const [previewTarget, setPreviewTarget] = useState<AssetRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [actionError, setActionError] = useState('');
   /** 虚拟人分组详情视图中当前分组 ID（null = 不在详情视图） */
   const [characterDetailGroupId, setCharacterDetailGroupId] = useState<string | null>(null);
   /** 虚拟人分组详情刷新触发器（上传后 +1 触发 CharacterLibrary 重新拉取） */
@@ -328,7 +327,6 @@ export default function Assets() {
     // 虚拟人分组详情视图：走素材库 API（支持图片+视频）
     if (isCharacterView && characterDetailGroupId) {
       setUploading(true);
-      setActionError('');
       const errors: string[] = [];
 
       for (const file of list) {
@@ -354,11 +352,12 @@ export default function Assets() {
             AssetType: assetType,
           });
         } catch (err) {
-          errors.push(isApiError(err) ? `${file.name}：${err.message}` : `上传失败：${file.name}`);
+          // API 错误已由请求层统一 toast，这里只收集本地校验类错误
+          if (!isApiError(err)) errors.push(`上传失败：${file.name}`);
         }
       }
 
-      if (errors.length) setActionError(errors.join('；'));
+      if (errors.length) toast.error(errors.join('；'));
       setUploading(false);
       // 触发 CharacterLibrary 刷新
       setCharacterRefreshTick((t) => t + 1);
@@ -367,7 +366,6 @@ export default function Assets() {
 
     // 普通资产视图（图片/视频/音频）
     setUploading(true);
-    setActionError('');
     const errors: string[] = [];
 
     for (const file of list) {
@@ -423,11 +421,12 @@ export default function Assets() {
           ...prev,
         ]);
       } catch (err) {
-        errors.push(isApiError(err) ? `${file.name}：${err.message}` : `上传失败：${file.name}`);
+        // API 错误已由请求层统一 toast，这里只收集本地校验类错误
+        if (!isApiError(err)) errors.push(`上传失败：${file.name}`);
       }
     }
 
-    if (errors.length) setActionError(errors.join('；'));
+    if (errors.length) toast.error(errors.join('；'));
     setUploading(false);
   };
 
@@ -438,13 +437,13 @@ export default function Assets() {
   const confirmDelete = async () => {
     if (!deleteTarget || deleting) return;
     setDeleting(true);
-    setActionError('');
     try {
       await deleteAsset(deleteTarget.id);
       setAssets((prev) => prev.filter((a) => a.id !== deleteTarget.id));
       setDeleteTarget(null);
     } catch (e) {
-      setActionError(isApiError(e) ? e.message : '删除失败，请稍后重试');
+      // API 错误已由请求层统一 toast，这里兜底非 API 错误（如网络中断）
+      if (!isApiError(e)) toast.error('删除失败，请稍后重试');
       setDeleteTarget(null);
     } finally {
       setDeleting(false);
@@ -469,8 +468,6 @@ export default function Assets() {
                 {tab.label}
               </button>
             ))}
-
-            {actionError && <span className={styles.actionError}>{actionError}</span>}
           </div>
         </div>
         )}

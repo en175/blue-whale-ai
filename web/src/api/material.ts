@@ -9,7 +9,9 @@
  *   上游侧（业务错误）→ 上游信封 {ResponseMetadata, ResponseError} + 上游状态码
  * ============================================ */
 
+import { toast } from 'sonner';
 import { ApiError } from './http';
+import { handleUnauthorized } from '@/utils/auth';
 
 /* ---------- 类型定义 ---------- */
 
@@ -144,10 +146,12 @@ export interface VisualValidateResult {
  * - 成功：HTTP 2xx + Result 字段
  * - 上游错误：HTTP 4xx/5xx + ResponseError
  * - 产品侧错误：HTTP 4xx/5xx + {code, msg, data}
+ * - 失败统一 toast（与 http.ts doRequest 行为一致），页面无需重复展示
  */
 async function materialRequest<T>(
   action: string,
   body: unknown,
+  opts?: { silent?: boolean },
 ): Promise<T> {
   const url = `/api/material/${action}`;
 
@@ -161,6 +165,18 @@ async function materialRequest<T>(
   // 尝试解析 JSON，解析失败用空对象兜底
   const json: unknown = text ? JSON.parse(text) : {};
 
+  const fail = (status: number, message: string, code: number | string) => {
+    const err = new ApiError(status, message, code as number);
+    if (status === 401) {
+      // 会话失效：弹登录续接（对齐 http.ts apiFetch 行为），不重复 toast
+      handleUnauthorized();
+    } else if (!opts?.silent) {
+      // silent：页面层用定制文案兜底，请求层不 toast
+      toast.error(message);
+    }
+    throw err;
+  };
+
   // 1. 产品侧错误检查（非法 Action / 未配置 / 401）
   //    产品侧错误会被 AllExceptionsFilter 包装成 {code, msg, data}
   if (
@@ -170,7 +186,7 @@ async function materialRequest<T>(
     'msg' in json
   ) {
     const err = json as { code: number; msg: string };
-    throw new ApiError(res.status, err.msg, err.code);
+    fail(res.status, err.msg, err.code);
   }
 
   // 2. 上游信封错误检查
@@ -180,11 +196,7 @@ async function materialRequest<T>(
     'ResponseError' in json
   ) {
     const err = (json as UpstreamError).ResponseError;
-    throw new ApiError(
-      res.status,
-      err.Message ?? `素材库错误(${err.Code})`,
-      err.Code,
-    );
+    fail(res.status, err.Message ?? `素材库错误(${err.Code})`, err.Code);
   }
 
   // 3. 上游信封成功
@@ -201,15 +213,15 @@ async function materialRequest<T>(
     return json as T;
   }
 
-  // 5. 兜底
-  throw new ApiError(res.status, `素材库请求失败（${res.status}）`, res.status);
+  // 5. 兜底（格式无法识别时也走统一出口，避免静默失败）
+  fail(res.status, `素材库请求失败（${res.status}）`, res.status);
 }
 
 /* ---------- 素材组接口 ---------- */
 
-/** 创建素材组 */
-export function createAssetGroup(params: CreateAssetGroupParams) {
-  return materialRequest<{ Id: string }>('CreateAssetGroup', params);
+/** 创建素材组（silent 时由页面层用定制文案提示） */
+export function createAssetGroup(params: CreateAssetGroupParams, opts?: { silent?: boolean }) {
+  return materialRequest<{ Id: string }>('CreateAssetGroup', params, opts);
 }
 
 /** 列出素材组 */
@@ -227,9 +239,9 @@ export function updateAssetGroup(params: UpdateAssetGroupParams) {
   return materialRequest<Record<string, never>>('UpdateAssetGroup', params);
 }
 
-/** 删除素材组（同步删除组内全部素材） */
-export function deleteAssetGroup(id: string) {
-  return materialRequest<Record<string, never>>('DeleteAssetGroup', { Id: id });
+/** 删除素材组（同步删除组内全部素材；silent 时由页面层用定制文案提示） */
+export function deleteAssetGroup(id: string, opts?: { silent?: boolean }) {
+  return materialRequest<Record<string, never>>('DeleteAssetGroup', { Id: id }, opts);
 }
 
 /* ---------- 素材接口 ---------- */

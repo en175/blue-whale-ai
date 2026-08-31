@@ -585,18 +585,6 @@
   background-color: rgba(220, 38, 38, 0.85);
 }
 
-/* 错误提示 */
-.errorMsg {
-  padding: 8px 16px;
-  margin: 0 24px 12px;
-  font-size: 13px;
-  color: var(--color-error, #dc2626);
-  background-color: rgba(220, 38, 38, 0.1);
-  border: 1px solid rgba(220, 38, 38, 0.3);
-  border-radius: 8px;
-  text-align: center;
-}
-
 /* ---- 预览弹窗（带缩放） ---- */
 .previewContainer {
   position: fixed;

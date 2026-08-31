@@ -239,13 +239,6 @@
   background-color: var(--color-error);
 }
 
-/* 操作错误提示 */
-.actionError {
-  color: var(--color-error);
-  font-size: var(--font-size-md);
-  white-space: nowrap;
-}
-
 /* 视频播放图标：绝对定位居中覆盖在缩略图上 */
 .playIcon {
   position: absolute;

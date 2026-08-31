@@ -589,17 +589,6 @@
   color: #fff;
 }
 
-/* ---- 错误消息 ---- */
-.errorMsg {
-  padding: var(--spacing-md);
-  margin: var(--spacing-sm) 0;
-  background-color: rgba(250, 82, 82, 0.1);
-  border: 1px solid rgba(250, 82, 82, 0.3);
-  border-radius: var(--radius-md);
-  color: var(--color-error);
-  font-size: var(--font-size-sm);
-}
-
 /* ---- 素材详情弹窗（样式对齐 AssetDetailModal） ---- */
 .detailOverlay {
   position: fixed;

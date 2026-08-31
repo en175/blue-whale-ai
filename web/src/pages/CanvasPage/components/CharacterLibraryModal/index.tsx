@@ -203,7 +203,6 @@ function GroupDetail({
   const [dragging, setDragging] = useState(false);
   const dragStartRef = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
   const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const PREVIEW_MIN_ZOOM = 0.1;
@@ -248,11 +247,10 @@ function GroupDetail({
   const handleUpload = useCallback(async (files: FileList) => {
     if (uploading) return;
     setUploading(true);
-    setUploadError('');
 
     for (const file of Array.from(files)) {
       if (!file.type.startsWith('image/')) {
-        setUploadError(`${file.name}：仅支持图片`);
+        toast.error(`${file.name}：仅支持图片`);
         continue;
       }
       try {
@@ -271,7 +269,8 @@ function GroupDetail({
         // Step 3: 刷新列表
         onRefresh();
       } catch (err) {
-        setUploadError(isApiError(err) ? `${file.name}：${err.message}` : `上传失败：${file.name}`);
+        // API 错误已由请求层统一 toast；非 API 错误兜底提示
+        if (!isApiError(err)) toast.error(`上传失败：${file.name}`);
       }
     }
     setUploading(false);
@@ -305,8 +304,6 @@ function GroupDetail({
           }
         }}
       />
-
-      {uploadError && <div className={styles.errorMsg}>{uploadError}</div>}
 
       {assets.length === 0 ? (
         <div className={styles.empty}>该分组暂无素材，点击「上传素材」添加</div>
@@ -412,19 +409,18 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [groupAssets, setGroupAssets] = useState<Map<string, MaterialAsset[]>>(new Map());
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
+  const [loadError, setLoadError] = useState(false);
   const [detailGroupId, setDetailGroupId] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<MaterialGroup | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'group'; id: string; name: string } | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [actionError, setActionError] = useState('');
 
   const GROUP_TYPE: GroupType = 'AIGC';
 
   /** 仅加载分组列表；素材在进入分组详情后再加载。 */
   const loadGroups = useCallback(async () => {
     setLoading(true);
-    setLoadError('');
+    setLoadError(false);
     try {
       const result = await listAssetGroups({
         Filter: { GroupType: GROUP_TYPE },
@@ -434,7 +430,9 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
       setGroups(result.Items);
       setGroupAssets(new Map());
     } catch (err) {
-      setLoadError(isApiError(err) ? err.message : '加载失败');
+      // API 错误已由请求层统一 toast
+      if (!isApiError(err)) toast.error('加载失败');
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -482,9 +480,8 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
 
   /** 新建分组 */
   const handleCreateGroup = async (name: string) => {
-    setActionError('');
     try {
-      const result = await createAssetGroup({ Name: name, GroupType: GROUP_TYPE });
+      const result = await createAssetGroup({ Name: name, GroupType: GROUP_TYPE }, { silent: true });
       setGroups((prev) => [
         { Id: result.Id, Name: name, GroupType: GROUP_TYPE },
         ...prev,
@@ -493,20 +490,21 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
       setShowCreateModal(false);
       setDetailGroupId(result.Id);
     } catch (err) {
-      setActionError(isApiError(err) ? err.message : '创建分组失败');
+      // silent 请求：页面层统一用定制文案提示（401 已由请求层弹登录续接）
+      if (!isApiError(err) || err.status !== 401) toast.error('新建分组失败，请稍后重试');
     }
   };
 
   /** 修改分组描述 */
   const handleRenameGroup = async (description: string) => {
     if (!renameTarget) return;
-    setActionError('');
     try {
       await updateAssetGroup({ Id: renameTarget.Id, Description: description });
       await loadGroups();
       setRenameTarget(null);
     } catch (err) {
-      setActionError(isApiError(err) ? err.message : '修改描述失败');
+      // API 错误已由请求层统一 toast；非 API 错误兜底提示
+      if (!isApiError(err)) toast.error('修改描述失败');
       throw err;
     }
   };
@@ -518,9 +516,8 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    setActionError('');
     try {
-      await deleteAssetGroup(deleteTarget.id);
+      await deleteAssetGroup(deleteTarget.id, { silent: true });
       setGroups((prev) => prev.filter((g) => g.Id !== deleteTarget.id));
       setGroupAssets((prev) => {
         const next = new Map(prev);
@@ -530,7 +527,8 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
       if (detailGroupId === deleteTarget.id) setDetailGroupId(null);
       setDeleteTarget(null);
     } catch (err) {
-      setActionError(isApiError(err) ? err.message : '删除分组失败');
+      // silent 请求：分组删除用定制文案（401 已由请求层弹登录续接）
+      if (!isApiError(err) || err.status !== 401) toast.error('分组删除失败，请稍后重试');
       setDeleteTarget(null);
     }
   };
@@ -538,7 +536,7 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
   /** 选择素材 */
   const handleSelectAsset = (asset: MaterialAsset) => {
     if (asset.Status !== 'Active') {
-      setActionError('素材尚未就绪，请稍后再试');
+      toast('素材尚未就绪，请稍后再试');
       return;
     }
     onSelect?.(asset);
@@ -575,9 +573,6 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
           ))}
         </div>
 
-        {/* 操作错误提示 */}
-        {actionError && <div className={styles.errorMsg}>{actionError}</div>}
-
         {/* 内容区 */}
         <div className={styles.content}>
           {loading ? (
@@ -586,7 +581,7 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
               <span>加载中...</span>
             </div>
           ) : null}
-          {!loading && loadError && <div className={styles.empty}>加载失败：{loadError}</div>}
+          {!loading && loadError && <div className={styles.empty}>分组加载失败，请稍后重试</div>}
           {!loading && !loadError && activeTab === 'character' && (
             detailGroup ? (
               <GroupDetail
