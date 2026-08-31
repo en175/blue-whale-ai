@@ -56,7 +56,6 @@ export interface AssetSourceFields {
   size: bigint | null;
   width: number | null;
   height: number | null;
-  duration: number | null;
   duration_ms?: number | null;
   source: string;
 }
@@ -144,15 +143,14 @@ const uploadAssetSelect = {
   size: true,
   width: true,
   height: true,
-  duration: true,
   duration_ms: true,
 } as const;
 
+/** E 层合并后 assets 只剩 duration_ms（毫秒）一列：对外统一以秒暴露，缺省保持 null。 */
 export function assetDurationSeconds(
-  duration: number | null,
   durationMs: number | null | undefined,
 ): number | null {
-  return durationMs == null ? duration : durationMs / 1000;
+  return durationMs == null ? null : durationMs / 1000;
 }
 
 function toUploadAsset(row: {
@@ -164,7 +162,6 @@ function toUploadAsset(row: {
   size: bigint | null;
   width: number | null;
   height: number | null;
-  duration: number | null;
   duration_ms: number | null;
 }): PendingUploadAsset | null {
   if (!row.storage_key) return null;
@@ -173,7 +170,7 @@ function toUploadAsset(row: {
     ...asset,
     id: row.id.toString(),
     storage_key: row.storage_key,
-    duration: assetDurationSeconds(row.duration, durationMs),
+    duration: assetDurationSeconds(durationMs),
   };
 }
 
@@ -230,7 +227,6 @@ function toAssetView(
     url: string;
     width: number | null;
     height: number | null;
-    duration: number | null;
     duration_ms: number | null;
     source: string | null;
     gmt_create: Date | null;
@@ -247,7 +243,7 @@ function toAssetView(
     url: a.url,
     width: a.width,
     height: a.height,
-    duration: assetDurationSeconds(a.duration, a.duration_ms),
+    duration: assetDurationSeconds(a.duration_ms),
     source: a.source ?? null,
     created_at: a.gmt_create?.toISOString() ?? null,
     size: a.size == null ? null : Number(a.size),
@@ -361,7 +357,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           type: true,
           mime: true,
           size: true,
-          duration: true,
           duration_ms: true,
         },
       });
@@ -371,10 +366,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
             type: row.type,
             mime: row.mime,
             size: row.size,
-            duration_seconds: assetDurationSeconds(
-              row.duration,
-              row.duration_ms,
-            ),
+            duration_seconds: assetDurationSeconds(row.duration_ms),
           }
         : null;
     },
@@ -396,7 +388,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         size: row.size,
         width: row.width,
         height: row.height,
-        duration: row.duration,
         duration_ms: row.duration_ms,
         source: row.source,
       };
@@ -413,7 +404,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           size: source.size,
           width: source.width,
           height: source.height,
-          duration: source.duration,
           duration_ms: source.duration_ms ?? null,
           source: source.source,
           status: "normal",
@@ -425,7 +415,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         url: row.url,
         width: row.width,
         height: row.height,
-        duration: assetDurationSeconds(row.duration, row.duration_ms),
+        duration: assetDurationSeconds(row.duration_ms),
         source: row.source ?? null,
         created_at: row.gmt_create?.toISOString() ?? null,
         size: row.size == null ? null : Number(row.size),
@@ -469,7 +459,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           size: true,
           width: true,
           height: true,
-          duration: true,
+          duration_ms: true,
         },
       });
       if (!row?.storage_key) return null;
@@ -477,6 +467,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         ...row,
         id: row.id.toString(),
         storage_key: row.storage_key,
+        duration: assetDurationSeconds(row.duration_ms),
       };
     },
     async markUploadReady(assetId, userId) {
@@ -515,7 +506,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           size: BigInt(input.size),
           ...(input.width == null ? {} : { width: input.width }),
           ...(input.height == null ? {} : { height: input.height }),
-          ...(input.duration == null ? {} : { duration: Math.round(input.duration) }),
           ...(input.duration == null
             ? {}
             : { duration_ms: Math.round(input.duration * 1000) }),

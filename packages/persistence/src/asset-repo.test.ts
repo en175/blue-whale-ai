@@ -3,10 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { assetDurationSeconds, createAssetRepo } from "./asset-repo";
 
 describe("assetDurationSeconds", () => {
-  it("prefers precise milliseconds and falls back to whole seconds", () => {
-    expect(assetDurationSeconds(66, 65_900)).toBe(65.9);
-    expect(assetDurationSeconds(66, null)).toBe(66);
-    expect(assetDurationSeconds(null, null)).toBeNull();
+  it("从 duration_ms 换算秒；缺省（无毫秒数据）为 null", () => {
+    expect(assetDurationSeconds(65_900)).toBe(65.9);
+    expect(assetDurationSeconds(null)).toBeNull();
+    expect(assetDurationSeconds(undefined)).toBeNull();
   });
 });
 
@@ -18,7 +18,6 @@ describe("createAssetRepo.listByUser", () => {
       url: "https://tos.test/a.png",
       width: 800,
       height: 600,
-      duration: null,
       duration_ms: null,
       source: "generated",
       gmt_create: new Date("2026-08-01T00:00:00.000Z"),
@@ -165,7 +164,6 @@ describe("createAssetRepo.findOwnedById", () => {
       url: "https://tos.test/a.png",
       width: 800,
       height: 600,
-      duration: null,
       duration_ms: null,
       source: "generated",
       gmt_create: new Date("2026-08-01T00:00:00.000Z"),
@@ -239,7 +237,6 @@ describe("createAssetRepo.findOwnedById", () => {
       url: "https://tos.test/upload.png",
       width: null,
       height: null,
-      duration: null,
       duration_ms: null,
       source: "uploaded",
       gmt_create: new Date("2026-08-01T00:00:00.000Z"),
@@ -267,7 +264,6 @@ describe("createAssetRepo.findOwnedById", () => {
       url: "https://tos.test/gen2.png",
       width: null,
       height: null,
-      duration: null,
       duration_ms: null,
       source: "generated",
       gmt_create: new Date("2026-08-03T00:00:00.000Z"),

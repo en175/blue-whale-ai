@@ -65,9 +65,9 @@ function toView(row: any): TopupTierView {
     id: row.id.toString(),
     name: row.name,
     amount: Number(row.amount),
-    originalPrice: row.original_price,
-    discount: row.discount,
-    price: row.price,
+    originalPrice: Number(row.original_price),
+    discount: Number(row.discount),
+    price: Number(row.price),
     isRecommended: row.is_recommended,
     status: row.status,
     startTime: row.start_time ? new Date(row.start_time).toISOString() : null,
@@ -163,8 +163,8 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
       });
       if (!existing) return null;
 
-      const originalPrice = input.originalPrice ?? existing.original_price;
-      const discount = input.discount ?? existing.discount;
+      const originalPrice = Number(input.originalPrice ?? existing.original_price);
+      const discount = Number(input.discount ?? existing.discount);
       const price = Math.round(originalPrice * discount * 100) / 100;
 
       const data: Record<string, unknown> = { price, gmt_modified: new Date() };

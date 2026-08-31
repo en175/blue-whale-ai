@@ -26,7 +26,6 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
           size: true,
           width: true,
           height: true,
-          duration: true,
           duration_ms: true,
         },
       });
@@ -44,9 +43,7 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
                 width: row.width,
                 height: row.height,
                 duration:
-                  row.duration_ms === null
-                    ? row.duration
-                    : row.duration_ms / 1000,
+                  row.duration_ms === null ? null : row.duration_ms / 1000,
               },
             ]
           : [];
@@ -135,7 +132,10 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
             storage_key: input.storage_key,
             mime: input.mime,
             size: input.size == null ? null : BigInt(input.size),
-            duration: input.duration == null ? null : input.duration,
+            duration_ms:
+              input.duration === null || input.duration === undefined
+                ? null
+                : Math.round(input.duration * 1000),
             width: input.width,
             height: input.height,
             source: "generated",

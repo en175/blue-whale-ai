@@ -69,7 +69,7 @@ export class AgentAssetsController {
       url: asset.url,
       width: asset.width ?? 0,
       height: asset.height ?? 0,
-      duration: assetDurationSeconds(asset.duration, asset.duration_ms),
+      duration: assetDurationSeconds(asset.duration_ms),
       mime: asset.mime ?? "application/octet-stream",
       size: Number(asset.size ?? BigInt(0)),
     });

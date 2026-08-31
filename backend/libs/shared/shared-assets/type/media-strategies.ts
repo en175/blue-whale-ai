@@ -51,7 +51,7 @@ export class MediaStrategy implements SharedAssetTypeStrategy {
       );
     }
     const duration =
-      asset.duration_ms == null ? asset.duration : asset.duration_ms / 1000;
+      asset.duration_ms == null ? 0 : asset.duration_ms / 1000;
     return {
       name: truncate(
         sharedAssetRequestNameOf(input)?.trim() || basename(asset.url) || "未命名素材",

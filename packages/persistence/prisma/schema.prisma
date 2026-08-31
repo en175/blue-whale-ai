@@ -20,7 +20,6 @@ model assets {
   size              BigInt?
   width             Int?
   height            Int?
-  duration          Int?
   duration_ms       Int?
   source            String   @default("generated") @db.VarChar(32)
   status            String   @default("normal") @db.VarChar(32)
@@ -623,9 +622,9 @@ model topup_tiers {
   id             BigInt    @id @default(autoincrement())
   name           String    @default("") @db.VarChar(100)
   amount         BigInt
-  original_price Float
-  discount       Float     @default(1)
-  price          Float
+  original_price Decimal   @db.Decimal(10, 2)
+  discount       Decimal   @default(1) @db.Decimal(5, 4)
+  price          Decimal   @db.Decimal(10, 2)
   is_recommended Boolean   @default(false)
   status         String    @default("active") @db.VarChar(16)
   start_time     DateTime? @db.DateTime(0)

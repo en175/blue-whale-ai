@@ -251,14 +251,14 @@ describe("generation video worker repo", () => {
     expect(createAsset).not.toHaveBeenCalled();
   });
 
-  it("persists generated video duration for future reference validation", async () => {
+  it("persists generated video duration (duration_ms) for future reference validation", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const createAsset = vi.fn().mockResolvedValue({ id: 901n });
     const update = vi.fn().mockResolvedValue({});
     const transaction = vi.fn(async (callback: (tx: unknown) => unknown) =>
       callback({
         // findUnique 来自 IK50GB-B（视频成功后查 job 追加 project event）；
-        // 本测试只验 duration 持久化，project_id: null 跳过 event 分支。
+        // 本测试只验 duration_ms 持久化，project_id: null 跳过 event 分支。
         generation_jobs: {
           updateMany,
           update,
@@ -290,7 +290,7 @@ describe("generation video worker repo", () => {
       }),
     ).resolves.toBe(true);
     expect(createAsset).toHaveBeenCalledWith({
-      data: expect.objectContaining({ duration: 8 }),
+      data: expect.objectContaining({ duration_ms: 8000 }),
     });
   });
 
