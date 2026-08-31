@@ -3,6 +3,9 @@
  * ============================================ */
 
 .chatBox {
+  /* 毛玻璃上的字色只分两档：静息/占位 80%，输入与选中 100% */
+  --chat-fg: #fff;
+  --chat-fg-muted: rgba(255, 255, 255, 0.8);
   max-width: 78.4rem;
   width: 73%;
   /* 固定高度：三个 tab 切换时窗口高度保持一致，不跳动 */
@@ -48,7 +51,7 @@
   position: relative;
   padding: var(--spacing-xs) 0;
   font-size: var(--font-size-sm);
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--chat-fg-muted);
   background: none;
   border: none;
   cursor: pointer;
@@ -56,11 +59,11 @@
 }
 
 .tabItem:hover {
-  color: #fff;
+  color: var(--chat-fg);
 }
 
 .tabItemActive {
-  color: #fff;
+  color: var(--chat-fg);
   font-weight: 500;
 }
 
@@ -76,7 +79,7 @@
 /* ---- 描述文字 ---- */
 .desc {
   font-size: var(--font-size-sm);
-  color: rgba(255, 255, 255, 0.86);
+  color: var(--chat-fg-muted);
   line-height: 1.5;
 }
 
@@ -91,7 +94,7 @@
   background-color: transparent;
   border: none;
   outline: none;
-  color: var(--color-text-primary);
+  color: var(--chat-fg);
   font-size: var(--font-size-md);
   line-height: 1.6;
   padding: var(--spacing-xs) 0;
@@ -99,7 +102,8 @@
 }
 
 .textarea::placeholder {
-  color: rgba(255, 255, 255, 0.86);
+  color: var(--chat-fg-muted);
+  opacity: 1;
 }
 
 /* ---- 底部工具栏 ---- */
@@ -123,7 +127,7 @@
   border-radius: var(--radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--chat-fg-muted);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -132,7 +136,7 @@
 }
 
 .iconBtn:hover {
-  color: #fff;
+  color: var(--chat-fg);
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.28);
 }
@@ -165,7 +169,7 @@
 /* + 按钮悬停小提示文案 */
 .uploadHint {
   font-size: var(--font-size-xs);
-  color: rgba(255, 255, 255, 0.86);
+  color: var(--chat-fg-muted);
   white-space: nowrap;
 }
 
@@ -178,14 +182,14 @@
   border-radius: var(--radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--chat-fg-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
   transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .skillBtn:hover {
-  color: #fff;
+  color: var(--chat-fg);
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.28);
 }
@@ -207,14 +211,14 @@
   border-radius: var(--radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.18);
   background-color: transparent;
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--chat-fg-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
   transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .modelBtn:hover {
-  color: #fff;
+  color: var(--chat-fg);
   background-color: rgba(255, 255, 255, 0.12);
   border-color: rgba(255, 255, 255, 0.28);
 }
@@ -246,7 +250,7 @@
 .dropdownWrap:has(.dropdownMenu) .modelBtn,
 .dropdownWrap:has(.dropdownMenuDown) .modelBtn,
 .dropdownWrap:has(.dropdownMenuDown) .paramBtn {
-  color: #fff;
+  color: var(--chat-fg);
   background-color: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.28);
 }
@@ -259,7 +263,7 @@
   padding: var(--spacing-sm) var(--spacing-md);
   border: none;
   background: none;
-  color: rgba(255, 255, 255, 0.86);
+  color: var(--chat-fg-muted);
   font-size: var(--font-size-sm);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -268,18 +272,18 @@
 }
 
 .dropdownItem:hover {
-  color: #fff;
+  color: var(--chat-fg);
   background-color: rgba(255, 255, 255, 0.14);
 }
 
 .dropdownItemActive {
-  color: #fff;
+  color: var(--chat-fg);
   font-weight: 500;
   background-color: rgba(255, 255, 255, 0.2);
 }
 
 .dropdownItemActive:hover {
-  color: #fff;
+  color: var(--chat-fg);
   background-color: rgba(255, 255, 255, 0.26);
 }
 
@@ -293,11 +297,11 @@
 }
 
 .tokenPlus {
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--chat-fg-muted);
 }
 
 .tokenCount {
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--chat-fg-muted);
 }
 
 /* ---- 发送按钮 ---- */
@@ -309,7 +313,7 @@
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  color: rgba(255, 255, 255, 0.86);
+  color: var(--chat-fg-muted);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -318,7 +322,7 @@
 }
 
 .sendBtn:hover:not(:disabled) {
-  color: #fff;
+  color: var(--chat-fg);
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.28);
 }
@@ -329,7 +333,7 @@
 }
 
 .sendBtnActive {
-  color: #fff;
+  color: var(--chat-fg);
   background: rgba(255, 255, 255, 0.24);
   border-color: rgba(255, 255, 255, 0.32);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
@@ -368,7 +372,7 @@
   align-items: center;
   justify-content: center;
   gap: 2px;
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--chat-fg-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
   flex-shrink: 0;
@@ -376,7 +380,7 @@
 }
 
 .refCard:hover {
-  color: #fff;
+  color: var(--chat-fg);
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.32);
 }
@@ -423,7 +427,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--chat-fg-muted);
 }
 
 .refThumbRemove {
@@ -435,7 +439,7 @@
   border-radius: var(--radius-full);
   background-color: rgba(0, 0, 0, 0.6);
   border: none;
-  color: #fff;
+  color: var(--chat-fg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -450,7 +454,7 @@
 
 .refThumbLabel {
   font-size: var(--font-size-xs);
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--chat-fg-muted);
   white-space: nowrap;
 }
 
@@ -513,7 +517,7 @@
   border-radius: var(--radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.18);
   background-color: transparent;
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--chat-fg-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
   transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
@@ -521,7 +525,7 @@
 }
 
 .paramBtn:hover {
-  color: #fff;
+  color: var(--chat-fg);
   background-color: rgba(255, 255, 255, 0.12);
   border-color: rgba(255, 255, 255, 0.28);
 }
@@ -542,7 +546,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--chat-fg-muted);
   font-size: var(--font-size-sm);
   cursor: pointer;
   padding: calc(var(--spacing-xs) + 2px) calc(var(--spacing-md) + 2px);
@@ -551,7 +555,7 @@
 }
 
 .imageStrengthBadge:hover {
-  color: var(--color-text-primary);
+  color: var(--chat-fg);
   background-color: var(--color-bg-hover);
 }
 
@@ -565,7 +569,7 @@
   border-radius: 10px;
   font-size: 13px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--chat-fg-muted);
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.18);
   width: fit-content;
