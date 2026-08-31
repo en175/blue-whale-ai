@@ -15,6 +15,7 @@ import { setGenHandoff } from '@/utils/gen-handoff';
 import { setAgentHandoff } from '@/utils/agent-handoff';
 import { classifyRefOverflow } from '@/utils/ref-overflow';
 import DurationSlider from './DurationSlider';
+import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 
 /** 选项卡定义 */
 const tabItems = [
@@ -93,23 +94,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const user = useSyncExternalStore(subscribe, getCurrentUser);
   /** 未登录点击发送时弹登录框 */
   const [showLogin, setShowLogin] = useState(false);
-  /** 登录成功后需带入画布的草稿 */
-  const pendingText = useRef('');
-  /** 登录成功后需填入对话框的「直接使用」技能（IKA64P） */
-  const pendingSkill = useRef<SkillRecord | null>(null);
-  /** 登录成功后需注入输入框的模板卡草稿 */
-  const pendingDraft = useRef<{ text: string; mediaType: 'video' | 'image' } | null>(null);
+  /** 登录成功后续接的原动作（Skill / 发送最后一次点击为准） */
+  const pendingAction = useRef<HomePendingAction | null>(null);
   /** IKA64P：「直接使用」武装的技能气泡（发送时随消息作为强制技能生效） */
   const [armedSkill, setArmedSkill] = useState<{ id: string; name: string } | null>(null);
 
-  /** 外部注入草稿（画廊卡片点击）：未登录时存草稿并弹登录框；已登录则直接注入输入框 */
+  /** 画廊卡片点击：只填输入框并切 tab，不拦登录；真正发送时再校验。
+   *  用 ts 驱动重复点击同一张卡也能注入，不把 text/mediaType 放进依赖。 */
   useEffect(() => {
     if (draft?.ts) {
-      if (!user) {
-        pendingDraft.current = { text: draft.text, mediaType: draft.mediaType };
-        setShowLogin(true);
-        return;
-      }
       setInputValue(draft.text.slice(0, MAX_INPUT));
       setActiveTab(draft.mediaType === 'video' ? 'video' : 'image');
     }
@@ -409,8 +402,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   /** IKA64P：「直接使用」= 关闭弹窗并武装技能气泡（不再填全文；发送时随消息作为强制技能生效） */
   const handleUseSkill = (skill: SkillRecord) => {
     setShowSkillModal(false);
-    if (!user) {
-      pendingSkill.current = skill;
+    // 登录成功回调与当前渲染可能同拍，必须读 store 而不是闭包里的 user
+    if (!getCurrentUser()) {
+      pendingAction.current = { kind: 'use-skill', skill };
       setShowLogin(true);
       return;
     }
@@ -423,38 +417,35 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     if (!text) return;
     // 首页不发送：先校验登录，未登录弹登录框
     if (!user) {
-      pendingText.current = text;
+      pendingAction.current = { kind: 'send', text };
       setShowLogin(true);
       return;
     }
     dispatchByTab(text);
   };
 
-  /** 关闭登录框：登录成功则携带原草稿按当前 tab /技能填入对话框；
-   *  未登录成功关闭则把草稿回填输入框，一个字都不丢。
-   *  模板卡草稿（pendingDraft）：登录成功后注入输入框+切换tab，取消则清理不残留。 */
+  /** 关闭登录框：登录成功则续接最后一次动作；放弃则清理（发送稿回填输入框）。 */
   const handleLoginClose = () => {
     setShowLogin(false);
-    const text = pendingText.current;
-    pendingText.current = '';
-    const skill = pendingSkill.current;
-    pendingSkill.current = null;
-    const draftPending = pendingDraft.current;
-    pendingDraft.current = null;
-    if (draftPending && getCurrentUser()) {
-      setInputValue(draftPending.text.slice(0, MAX_INPUT));
-      setActiveTab(draftPending.mediaType === 'video' ? 'video' : 'image');
-      return;
+    const pending = pendingAction.current;
+    pendingAction.current = null;
+    const resume = resolveHomeLoginResume(pending, !!getCurrentUser());
+    switch (resume.action) {
+      case 'open-skill':
+        setShowSkillModal(true);
+        return;
+      case 'use-skill':
+        handleUseSkill(resume.skill);
+        return;
+      case 'send':
+        dispatchByTab(resume.text);
+        return;
+      case 'restore-text':
+        setInputValue(resume.text.slice(0, MAX_INPUT));
+        return;
+      default:
+        return;
     }
-    if (skill && getCurrentUser()) {
-      handleUseSkill(skill);
-      return;
-    }
-    if (text && getCurrentUser()) {
-      dispatchByTab(text);
-      return;
-    }
-    if (text) setInputValue(text.slice(0, MAX_INPUT));
   };
 
   /** + 上传：点击直接选取图片/视频/音频（分类型上限：图片随创作模型能力、视频/音频固定 3），超限按类型 toast */
@@ -1129,6 +1120,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   className={styles.skillBtn}
                   onClick={() => {
                     if (!user) {
+                      pendingAction.current = { kind: 'open-skill' };
                       setShowLogin(true);
                       return;
                     }
