@@ -34,6 +34,25 @@ export function collectMediaBlocks(node: CollectableNode, chipId: string): Sessi
   const blocks: SessionContentBlock[] = [];
   const d = node.data ?? {};
 
+  if (node.type === 'textNode') {
+    const raw = (d.html as string) ?? '';
+    const cleanText = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (cleanText) {
+      const displayLabel = cleanText.length > 10 ? cleanText.slice(0, 10) + '…' : cleanText;
+      blocks.push({
+        type: 'text',
+        name: displayLabel,
+        node_id: node.id,
+        source: 'node',
+        resource_type: '文本节点',
+        chip_id: chipId,
+        resource_id: node.id,
+        display_label: displayLabel,
+        resource_text: cleanText,
+      });
+    }
+  }
+
   if (node.type === 'mediaNode') {
     const src = d.src as string | undefined;
     if (src) {

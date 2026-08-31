@@ -778,7 +778,13 @@ export default function CanvasPage() {
     if (t) {
       const text = ((t.data?.html as string) || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
       const label = text || '文本节点';
-      setAgentContext({ text: label, label, ts });
+      const mediaBlocks = collectMediaBlocks(t, String(ts));
+      setAgentContext({
+        text: `@${label}`,
+        label,
+        ts,
+        mediaBlocks: mediaBlocks.length > 0 ? mediaBlocks : undefined,
+      });
       setShowAgent(true);
       return;
     }
