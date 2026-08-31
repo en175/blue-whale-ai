@@ -847,6 +847,10 @@ export default function CanvasPage() {
     setShowMusicDialog(false);
   };
 
+  /** 节点选取时读取资产 ID：兼容 assetId/asset_id/assetID 三形态（后端写入节点为下划线形态） */
+  const readNodeAssetId = (data: Record<string, unknown>): string | number | undefined =>
+    (data.assetId ?? data.asset_id ?? data.assetID) as string | number | undefined;
+
   /** 画布节点单击：选取模式下点击对应类型节点带入对话框，其他节点取消选取 */
   const handleCanvasNodeClick = (node: Node) => {
     if (!pickMode || !pickTarget) return;
@@ -868,7 +872,7 @@ export default function CanvasPage() {
           item: {
             preview: data.src as string,
             type: 'image',
-            assetId: data.assetId as string | number | undefined,
+            assetId: readNodeAssetId(data),
           },
         });
       } else {
@@ -879,7 +883,7 @@ export default function CanvasPage() {
             url: data.src as string,
             type: 'image',
             name: (data.fileName as string) || node.id,
-            assetId: data.assetId as string | number | undefined,
+            assetId: readNodeAssetId(data),
           },
         });
       }
@@ -889,18 +893,18 @@ export default function CanvasPage() {
         item: {
           preview: data.src as string,
           type: 'video',
-          assetId: data.assetId as string | number | undefined,
+          assetId: readNodeAssetId(data),
         },
       });
     } else if (pickMode === 'audio' && isReadyMedia && data.mediaType === 'audio') {
       setAudioPickResult({
         ts: Date.now(),
         item: {
-          id: `node-${node.id}`,
-          src: data.src as string,
-          name: (data.fileName as string) || node.id,
-          assetId: data.assetId as string | number | undefined,
-        },
+            id: `node-${node.id}`,
+            src: data.src as string,
+            name: (data.fileName as string) || node.id,
+            assetId: readNodeAssetId(data),
+          },
       });
     } else if (pickMode === 'product' && isReadyMedia && data.mediaType !== 'audio') {
       // 商品卡发起的图片/视频节点选取 → ts 驱动注入目标商品卡
@@ -912,7 +916,7 @@ export default function CanvasPage() {
           src: data.src as string,
           enabled: true,
           type: mediaType,
-          ...(data.assetId ? { assetId: String(data.assetId) } : {}),
+          ...(readNodeAssetId(data) ? { assetId: String(readNodeAssetId(data)!) } : {}),
         };
         setProductPickResult({ ts: Date.now(), productId: targetId, image: newImage });
       }
@@ -925,7 +929,7 @@ export default function CanvasPage() {
           id: `node-${node.id}-${Date.now()}`,
           src: data.src as string,
           type: mediaType,
-          ...(data.assetId ? { assetId: String(data.assetId) } : {}),
+          ...(readNodeAssetId(data) ? { assetId: String(readNodeAssetId(data)!) } : {}),
         };
         setAssetPickResult({ ts: Date.now(), assetId: targetId, ref: newRef });
       }
@@ -1413,7 +1417,7 @@ export default function CanvasPage() {
     const type: 'image' | 'video' = node?.data?.mediaType === 'video' ? 'video' : 'image';
     const name = (node?.data?.fileName as string) || id;
     const prompt = typeof node?.data?.prompt === 'string' ? (node.data.prompt as string) : '';
-    const assetId = node?.data?.assetId as string | number | undefined;
+    const assetId = readNodeAssetId((node?.data ?? {}) as Record<string, unknown>);
     return { src, type, name, prompt, assetId };
   };
 
@@ -1456,11 +1460,11 @@ export default function CanvasPage() {
     handleOpenImageDialog();
   };
 
-  /** 生成视频：视频对话框 + 图片 */
+  /** 生成视频：视频对话框 + 图片（带 assetId，发送时免重传直传 ID） */
   const handleNodeGenVideo = (id: string) => {
     const ref = nodeRefOf(id);
     if (!ref) return;
-    setVideoSeed({ ts: Date.now(), refs: [{ preview: ref.src, type: ref.type }] });
+    setVideoSeed({ ts: Date.now(), refs: [{ preview: ref.src, type: ref.type, ...(ref.assetId != null ? { assetId: ref.assetId } : {}) }] });
     setShowBottomDialog(true);
     setShowImageDialog(false);
     setShowAudioDialog(false);
