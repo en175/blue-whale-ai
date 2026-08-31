@@ -333,16 +333,20 @@
 
 .card {
   cursor: pointer;
+  min-width: 0;
+  max-width: 196px;
 }
 
 .thumbBox {
   position: relative;
-  height: 150px;
-  padding: 12px;
+  width: 196px;
+  height: 140px;
+  padding: 0;
   background-color: #262626;
   border: 1px solid transparent;
   border-radius: 10px;
   display: flex;
+  overflow: hidden;
   box-sizing: border-box;
   transition: border-color var(--transition-fast);
 }
@@ -358,6 +362,7 @@
 .cover {
   flex: 1;
   border-radius: 8px;
+  margin: 6px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -376,11 +381,20 @@
   color: #555;
 }
 
-/* 真实图片封面：铺满 thumbBox 内区域 */
+/* 真实图片封面：铺满 thumbBox，保持宽高比 */
 .coverImg {
-  flex: 1;
-  min-width: 0;
-  border-radius: 8px;
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 10px;
+  object-fit: cover;
+  background-color: #111;
+}
+
+/* video 标签同样用 cover 裁剪铺满，避免被 flex 拉伸 */
+video.coverImg {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
 }
 
@@ -403,6 +417,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .cardMeta {
@@ -410,6 +425,7 @@
   align-items: center;
   gap: 8px;
   margin-top: 6px;
+  min-width: 0;
 }
 
 .badge {
