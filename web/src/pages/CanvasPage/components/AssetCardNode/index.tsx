@@ -5,7 +5,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { AtSign, Upload, WandSparkles, Info, Music, X, User, MousePointerClick } from 'lucide-react';
+import { AtSign, Upload, WandSparkles, Info, Music, X, MousePointerClick } from 'lucide-react';
 import type { GenerationCardBlock } from '@/api/agentSessions';
 import { uploadAssetFile } from '@/utils/upload';
 import type { UploadCompleteData } from '@/api/assets';
@@ -63,8 +63,6 @@ interface AssetCardNodeData {
   onGenerateImage?: () => void;
   /** 触发画布节点选取模式（父级实现） */
   onPickFromCanvas?: (id: string) => void;
-  /** 打开角色库弹窗 */
-  onOpenCharacterLibrary?: (id: string) => void;
   /** Toast 提示（超上限等场景，由父级注入） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
   /** Agent 生成卡数据（kind=generation） */
@@ -649,34 +647,6 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
                         <MousePointerClick size={16} strokeWidth={2} />
                         <span>到节点选择</span>
                       </button>
-                      {kind === 'character' && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            data.onOpenCharacterLibrary?.(id);
-                            setAddMenu(false);
-                          }}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            padding: '8px 10px',
-                            background: 'transparent',
-                            border: 'none',
-                            borderRadius: '6px',
-                            color: 'var(--color-text-primary)',
-                            fontSize: 'var(--font-size-sm)',
-                            cursor: 'pointer',
-                            textAlign: 'left',
-                            width: '100%',
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                        >
-                          <User size={16} strokeWidth={2} />
-                          <span>角色库</span>
-                        </button>
-                      )}
                     </div>
                   )}
                 </div>

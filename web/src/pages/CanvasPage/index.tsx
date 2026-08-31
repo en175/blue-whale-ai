@@ -429,11 +429,6 @@ export default function CanvasPage() {
             setPickTarget('asset');
             setPickAssetId(id);
           },
-          onOpenCharacterLibrary: (id: string) => {
-            setPickAssetId(id);
-            setCharacterLibraryTarget('asset');
-            setShowCharacterLibrary(true);
-          },
           // 生成卡节点水合后补动作回调（引用到 dock / 给 Agent）
           generationCard: base.data?.generationCard
             ? {
@@ -1816,11 +1811,6 @@ export default function CanvasPage() {
           setPickTarget('asset');
           setPickAssetId(id);
         },
-        onOpenCharacterLibrary: (id: string) => {
-          setPickAssetId(id);
-          setCharacterLibraryTarget('asset');
-          setShowCharacterLibrary(true);
-        },
         onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
@@ -2078,11 +2068,6 @@ export default function CanvasPage() {
                 setPickMode('asset');
                 setPickTarget('asset');
                 setPickAssetId(id);
-              },
-              onOpenCharacterLibrary: (id: string) => {
-                setPickAssetId(id);
-                setCharacterLibraryTarget('asset');
-                setShowCharacterLibrary(true);
               },
               onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
             },
