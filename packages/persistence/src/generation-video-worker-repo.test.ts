@@ -104,6 +104,27 @@ describe("generation video worker repo", () => {
     );
   });
 
+  it("lists due media_extract jobs for MQ re-enqueue recovery (IKC9EJ)", async () => {
+    const findMany = vi.fn().mockResolvedValue([{ id: 500n }]);
+    const repo = createWorkerRepo({ generation_jobs: { findMany } } as never);
+
+    await expect(repo.listDueMediaExtractJobIds(100)).resolves.toEqual(["500"]);
+    const where = findMany.mock.calls[0]?.[0]?.where as Record<string, unknown>;
+    // IKC9EJ 生命线：media_extract 的 source="dock" 不在 CLAIMABLE_JOB_SOURCES 白名单，
+    // 恢复扫描必须只按 type 捞——若误加 source 过滤，查询恒空、恢复静默失效。硬断言无 source。
+    expect(where).not.toHaveProperty("source");
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 100,
+        where: expect.objectContaining({
+          type: "media_extract",
+          gmt_create: { gt: expect.any(Date) },
+          next_action_at: expect.any(Object),
+        }),
+      }),
+    );
+  });
+
   it("reclaims an expired processing video job with a new fencing token", async () => {
     const findFirst = vi.fn().mockResolvedValue({
       id: 300n,

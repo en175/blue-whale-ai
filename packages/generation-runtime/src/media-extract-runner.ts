@@ -176,10 +176,23 @@ async function updateProgress(
 export async function runMediaExtractStep(
   deps: RunMediaExtractStepDeps,
 ): Promise<string | null> {
-  const claim = await deps.repo.claimMediaExtractJobById(
-    deps.jobId,
-    deps.workerId,
-  );
+  // IKC9EJ：claim 必须在 try 外保持抛错→consumer 不 ack 重投的语义（瞬时 DB 错误不应落 failed，
+  // 否则把健康 job 判死）；但抛错时不落 failed 也不被下方 catch 记录 → job 永久 queued 且无日志。
+  // 这里补日志抓实锤（瞬时 DB/Prisma 错误 vs 持久错误），错误文本此前被容器重建冲掉无法复现。
+  let claim: MediaExtractClaim | null;
+  try {
+    claim = await deps.repo.claimMediaExtractJobById(
+      deps.jobId,
+      deps.workerId,
+    );
+  } catch (error) {
+    logger.error(
+      `runMediaExtractStep claim 失败 jobId=${deps.jobId}: ${
+        error instanceof Error ? error.stack ?? error.message : String(error)
+      }`,
+    );
+    throw error; // 保持不 ack → RocketMQ 重投；DB 侧 RecoveryService 兜底捞回。
+  }
   if (!claim) return null;
 
   const maxVideoBytes = deps.maxVideoBytes ?? 200 * 1024 * 1024;
