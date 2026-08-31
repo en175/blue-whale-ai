@@ -4,49 +4,6 @@ SET NAMES utf8mb4;
 SET time_zone = '+00:00';
 
 -- CreateTable
-CREATE TABLE `api_key` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `user_id` BIGINT NOT NULL,
-    `name` VARCHAR(128) NOT NULL DEFAULT '',
-    `consumer_name` VARCHAR(64) NOT NULL DEFAULT '',
-    `key_prefix` VARCHAR(32) NOT NULL DEFAULT '',
-    `key_hash` VARCHAR(128) NOT NULL,
-    `status` VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
-    `token_quota` BIGINT NULL,
-    `remark` VARCHAR(255) NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` INTEGER NOT NULL DEFAULT 0,
-    `is_delete` TINYINT NOT NULL DEFAULT 0,
-
-    UNIQUE INDEX `uk_consumer_name`(`consumer_name`),
-    UNIQUE INDEX `uk_key_hash`(`key_hash`),
-    INDEX `idx_user_id`(`user_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateTable
-CREATE TABLE `api_key_usage` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `api_key_id` BIGINT NOT NULL,
-    `user_id` BIGINT NOT NULL,
-    `model` VARCHAR(64) NULL,
-    `provider` VARCHAR(64) NULL,
-    `input_tokens` BIGINT NOT NULL DEFAULT 0,
-    `output_tokens` BIGINT NOT NULL DEFAULT 0,
-    `request_id` VARCHAR(64) NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` INTEGER NOT NULL DEFAULT 0,
-    `is_delete` TINYINT NOT NULL DEFAULT 0,
-
-    UNIQUE INDEX `uk_request_id`(`request_id`),
-    INDEX `idx_api_key_id`(`api_key_id`),
-    INDEX `idx_user_id`(`user_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateTable
 CREATE TABLE `assets` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
@@ -89,19 +46,6 @@ CREATE TABLE `canvas` (
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
     UNIQUE INDEX `uk_canvas_project`(`project_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateTable
-CREATE TABLE `captcha_challenges` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `token` VARCHAR(36) NOT NULL,
-    `answer` VARCHAR(10) NOT NULL,
-    `gmt_expire` DATETIME(0) NOT NULL,
-    `is_verified` BOOLEAN NOT NULL DEFAULT false,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-
-    INDEX `idx_token`(`token`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -543,13 +487,10 @@ CREATE TABLE `template_card` (
     `content` LONGTEXT NULL,
     `layout` VARCHAR(32) NOT NULL,
     `sort_order` INTEGER NOT NULL DEFAULT 0,
-    `create_time` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `update_time` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `deleted` TINYINT NOT NULL DEFAULT 0,
     `is_delete` TINYINT NOT NULL DEFAULT 0,
-    `gmt_create` DATETIME(0) NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` BIGINT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `version` INTEGER NOT NULL DEFAULT 0,
 
     INDEX `idx_tag_id`(`tag_code`),
     INDEX `idx_tag_sort`(`tag_code`, `sort_order`),
@@ -562,13 +503,10 @@ CREATE TABLE `template_card_image` (
     `card_id` BIGINT NOT NULL,
     `image_url` VARCHAR(512) NOT NULL,
     `sort_order` INTEGER NOT NULL DEFAULT 0,
-    `create_time` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `update_time` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `deleted` TINYINT NOT NULL DEFAULT 0,
     `is_delete` TINYINT NOT NULL DEFAULT 0,
-    `gmt_create` DATETIME(0) NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` BIGINT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `version` INTEGER NOT NULL DEFAULT 0,
 
     INDEX `idx_card_id`(`card_id`),
     INDEX `idx_card_sort`(`card_id`, `sort_order`),
@@ -582,8 +520,8 @@ CREATE TABLE `template_tag` (
     `label` VARCHAR(128) NOT NULL,
     `sort_order` INTEGER NOT NULL DEFAULT 0,
     `visible` TINYINT NOT NULL DEFAULT 1,
-    `create_time` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `update_time` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
     UNIQUE INDEX `uk_tag_code`(`tag_code`),
