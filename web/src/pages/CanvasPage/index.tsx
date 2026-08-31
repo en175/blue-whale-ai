@@ -2181,9 +2181,33 @@ export default function CanvasPage() {
     [mediaNodes],
   );
 
-  /** 音频对话发送：创建音频生成任务 */
-  const handleAudioDialogSend = (text: string, modelId: string) => {
-    startGenerationJob('audio', { prompt: text, model_id: modelId });
+  /** 音频对话发送：参考音频解析 assetId（节点带 ID 直传 / 本地走三步上传）→ 创建音频生成任务 */
+  const handleAudioDialogSend = async (text: string, modelId: string, refs: AudioRefItem[]) => {
+    const inputAssetIds: string[] = [];
+    let failedCount = 0;
+    for (const r of refs) {
+      // 节点选取已有 assetId 直接复用；本地上传走三步上传换取 assetId
+      if (r.assetId != null) {
+        inputAssetIds.push(String(r.assetId));
+        continue;
+      }
+      let fileToUpload: File | null = r.file ?? null;
+      if (!fileToUpload && /^https?:/.test(r.src)) {
+        fileToUpload = await fetchUrlAsFile(r.src, r.name, 'audio/mpeg');
+      }
+      if (fileToUpload) {
+        const uploaded = await uploadFileToAsset(fileToUpload, 'audio');
+        if (uploaded) {
+          inputAssetIds.push(uploaded.asset_id);
+          continue;
+        }
+      }
+      failedCount += 1;
+    }
+    if (failedCount > 0) {
+      showToast('warn', failedCount === refs.length ? '参考音频上传失败，请重试' : `${failedCount} 个参考音频上传失败，已跳过`);
+    }
+    startGenerationJob('audio', { prompt: text, model_id: modelId }, inputAssetIds.length > 0 ? inputAssetIds : undefined);
   };
 
   /** AI 音乐对话发送 */
@@ -2197,9 +2221,9 @@ export default function CanvasPage() {
   };
 
   /** 上传单个文件到服务器，返回 assetId */
-  const uploadFileToAsset = async (file: File, type: 'image' | 'video'): Promise<UploadCompleteData | null> => {
+  const uploadFileToAsset = async (file: File, type: 'image' | 'video' | 'audio'): Promise<UploadCompleteData | null> => {
     try {
-      const assetType: AssetType = type === 'image' ? 'image' : 'video';
+      const assetType: AssetType = type;
       const presign = await fetchUploadPresign({ type: assetType, mime: file.type, size: file.size });
       await putToPresignedUrl(presign, file);
       const complete = await completeUpload({

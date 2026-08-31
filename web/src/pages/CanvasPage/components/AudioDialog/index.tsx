@@ -1,6 +1,6 @@
 /* ============================================
  * AudioDialog 音频生成底部对话框：纯文本描述 + 真实模型（fetchGenerationModels('audio')）
- * 参考音频：本地上传 / 到节点选择（后端音频任务一期不支持参考素材参数，暂只带入展示，待后端支持后接线）
+ * 参考音频：本地上传 / 到节点选择，发送时解析 assetId 传生成接口 input_asset_ids
  * ============================================ */
 import { useEffect, useRef, useState } from 'react';
 import { X, AudioLines, ChevronDown, Music, ArrowUp, Upload, MousePointerClick, Maximize2, Minimize2 } from 'lucide-react';
@@ -25,6 +25,10 @@ export interface AudioRefItem {
   name: string;
   src: string;
   source: 'local' | 'canvas';
+  /** 画布节点选取带入的资产 ID（有则发送时直接复用，跳过上传） */
+  assetId?: string | number;
+  /** 本地上传保留原始 File（发送时走三步上传换取 assetId） */
+  file?: File;
 }
 
 /** 画布可选媒体节点（保留给 MusicDialog 共享类型） */
@@ -37,7 +41,8 @@ export interface CanvasPickItem {
 
 interface AudioDialogProps {
   onClose: () => void;
-  onSend: (text: string, modelId: string) => void;
+  /** 发送：提示词 + 模型ID + 参考素材（父级解析 assetId 后传生成接口） */
+  onSend: (text: string, modelId: string, refs: AudioRefItem[]) => void | Promise<void>;
   /** 底部模式切换 → AI 音乐对话框 */
   onSwitchToMusic?: () => void;
   /** 到节点选择：进入画布音频节点选取模式 */
@@ -104,6 +109,7 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
         name: f.name,
         src: URL.createObjectURL(f),
         source: 'local',
+        file: f,
       }));
       return [...prev, ...add];
     });
@@ -116,7 +122,7 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
     setRefs((prev) => {
       if (prev.length >= MAX_AUDIO_REFS) return prev;
       if (prev.some((r) => r.id === item.id || r.src === item.src)) return prev;
-      return [...prev, { id: item.id, kind: 'audio', name: item.name, src: item.src, source: 'canvas' }];
+      return [...prev, { id: item.id, kind: 'audio', name: item.name, src: item.src, source: 'canvas', assetId: item.assetId }];
     });
   }, [externalPick]);
 
@@ -129,11 +135,23 @@ export default function AudioDialog({ onClose, onSend, onPickFromCanvas, pickMod
     });
   };
 
+  // 卸载时释放本地 objectURL（未删除就关闭对话框的场景），防止内存泄漏
+  const refsRef = useRef(refs);
+  refsRef.current = refs;
+  useEffect(
+    () => () => {
+      refsRef.current.forEach((r) => {
+        if (r.source === 'local') URL.revokeObjectURL(r.src);
+      });
+    },
+    [],
+  );
+
   const currentModel = models.find((m) => m.model_id === modelId);
 
   const handleSend = () => {
     if (!text.trim() || !modelId) return;
-    onSend(text.trim(), modelId);
+    onSend(text.trim(), modelId, refs);
     setText('');
   };
 
