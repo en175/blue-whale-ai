@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { NewApiError } from "@blue-whale/core";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -140,5 +141,67 @@ describe("new-api video task provider", () => {
       url: null,
       error: { code: "some_upstream_code", message: "upstream broke" },
     });
+  });
+
+  it("maps submit NewApiError quota signal to quota_exhausted (job 1612 预扣费)", async () => {
+    const module = await import("./new-api-video-task-provider.js");
+    const provider = module.createNewApiVideoTaskProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockRejectedValue(
+        new NewApiError(
+          "预扣费额度失败, 用户剩余额度: ¥2.123294, 需要预扣费额度: ¥7.000000",
+          200,
+        ),
+      ),
+    });
+
+    await expect(
+      provider.submit({
+        model: "seedance-2",
+        prompt: "小猫",
+        duration: 5,
+        width: 1280,
+        height: 720,
+      }),
+    ).rejects.toMatchObject({ code: "quota_exhausted" });
+  });
+
+  it("submit non-quota NewApiError falls back to provider_failed", async () => {
+    const module = await import("./new-api-video-task-provider.js");
+    const provider = module.createNewApiVideoTaskProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockRejectedValue(new NewApiError("gateway down", 503)),
+    });
+
+    await expect(
+      provider.submit({
+        model: "seedance-2",
+        prompt: "测试",
+        duration: 5,
+        width: 1280,
+        height: 720,
+      }),
+    ).rejects.toMatchObject({ code: "provider_failed" });
+  });
+
+  it("submit HTTP 402 NewApiError maps to quota_exhausted even without keyword", async () => {
+    const module = await import("./new-api-video-task-provider.js");
+    const provider = module.createNewApiVideoTaskProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockRejectedValue(new NewApiError("request failed", 402)),
+    });
+
+    await expect(
+      provider.submit({
+        model: "seedance-2",
+        prompt: "测试",
+        duration: 5,
+        width: 1280,
+        height: 720,
+      }),
+    ).rejects.toMatchObject({ code: "quota_exhausted" });
   });
 });
