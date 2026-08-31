@@ -37,6 +37,7 @@ import {
 } from '@/api/material';
 import { uploadAssetFile } from '@/utils/upload';
 import { isApiError } from '@/api/http';
+import { toast } from 'sonner';
 import ConfirmModal from '@/components/ConfirmModal';
 import styles from './index.module.css';
 
@@ -257,11 +258,14 @@ function GroupDetail({
       try {
         // Step 1: 上传到 Asset 管道拿公网 URL
         const uploadResult = await uploadAssetFile(file);
-        // Step 2: 调用素材库 CreateAsset
+        // Step 2: 调用素材库 CreateAsset（名称限 30 字，超限截断）
+        const rawName = file.name;
+        const finalName = rawName.length > 30 ? rawName.slice(0, 30) : rawName;
+        if (rawName.length > 30) toast('当前上传素材名称过长，已截取', { style: { textAlign: 'center' } });
         await createAsset({
           GroupId: group.Id,
           URL: uploadResult.url,
-          Name: file.name,
+          Name: finalName,
           AssetType: 'Image',
         });
         // Step 3: 刷新列表
