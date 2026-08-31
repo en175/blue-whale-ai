@@ -1,8 +1,6 @@
 import { type ReactNode, useEffect, useReducer, useRef, useState } from 'react';
 import auroraVideo from '@/assets/home-hero/aurora.mp4';
 import auroraPoster from '@/assets/home-hero/aurora-poster.jpg';
-import ringVideo from '@/assets/home-hero/ring.mp4';
-import ringPoster from '@/assets/home-hero/ring-poster.jpg';
 import styles from './index.module.css';
 
 export const HERO_TRANSITION_MS = 600;
@@ -33,7 +31,6 @@ type CarouselAction =
 
 const slides = [
   { video: auroraVideo, poster: auroraPoster },
-  { video: ringVideo, poster: ringPoster },
 ] as const;
 
 const initialState: CarouselState = {
@@ -121,9 +118,18 @@ function assignSource(video: HTMLVideoElement, source: string): void {
   video.muted = true;
   video.defaultMuted = true;
   video.playsInline = true;
+  video.loop = false;
   video.setAttribute('data-hero-src', source);
   video.src = source;
   video.load();
+}
+
+function rewindToStart(video: HTMLVideoElement): void {
+  try {
+    if (video.currentTime !== 0) video.currentTime = 0;
+  } catch {
+    // metadata 未就绪时无法seek，交给随后的 load / canplay。
+  }
 }
 
 function pauseAndUnload(video: HTMLVideoElement): void {
@@ -253,7 +259,10 @@ export default function HeroVideoCarousel({ children }: { children?: ReactNode }
     if (!state.transitioning) return;
     const enteringSlot = otherSlot(state.activeSlot);
     const enteringVideo = mediaRefs.current[enteringSlot];
-    if (enteringVideo && canAnimateRef.current) safePlay(enteringVideo);
+    if (enteringVideo && canAnimateRef.current) {
+      rewindToStart(enteringVideo);
+      safePlay(enteringVideo);
+    }
     const handle = window.setTimeout(() => {
       dispatch({ type: 'commit-transition' });
     }, HERO_TRANSITION_MS);

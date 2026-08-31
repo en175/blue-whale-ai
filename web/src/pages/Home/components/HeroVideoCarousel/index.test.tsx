@@ -123,12 +123,14 @@ describe('HeroVideoCarousel', () => {
     vi.unstubAllGlobals();
   });
 
-  it('loads only the current video until the preload window', async () => {
+  it('preloads a fresh aurora start before the seam and does not native-loop', async () => {
     const videos = await mountCarousel();
 
     expect(videos).toHaveLength(2);
     expect(videos[0].getAttribute('src')).toContain('aurora.mp4');
+    expect(videos[0].loop).toBe(false);
     expect(videos[1].hasAttribute('src')).toBe(false);
+    expect(videos.some((video) => video.getAttribute('src')?.includes('ring.mp4'))).toBe(false);
     expect(loadMock).toHaveBeenCalled();
     expect(playMock).toHaveBeenCalled();
 
@@ -140,7 +142,9 @@ describe('HeroVideoCarousel', () => {
 
     setPlaybackPosition(videos[0], 5, 5 - HERO_PRELOAD_LEAD_SECONDS + 0.1);
     await emit(videos[0], 'timeupdate');
-    expect(videos[1].getAttribute('src')).toContain('ring.mp4');
+    expect(videos[1].getAttribute('src')).toContain('aurora.mp4');
+    expect(videos[1].loop).toBe(false);
+    expect(videos[0].getAttribute('src')).toContain('aurora.mp4');
   });
 
   it('does not reload the current source when it becomes ready', async () => {
@@ -167,7 +171,7 @@ describe('HeroVideoCarousel', () => {
     expect(videos[1].hasAttribute('src')).toBe(false);
   });
 
-  it('crossfades with two slots, unloads the old source, and keeps playlist order', async () => {
+  it('crossfades the aurora tail into a fresh aurora start without loading ring', async () => {
     const videos = await mountCarousel();
     await emit(videos[0], 'canplay');
     setPlaybackPosition(videos[0], 5, 4.2);
@@ -175,9 +179,10 @@ describe('HeroVideoCarousel', () => {
     await emit(videos[1], 'canplay');
 
     expect(videos[0].getAttribute('src')).toContain('aurora.mp4');
-    expect(videos[1].getAttribute('src')).toContain('ring.mp4');
+    expect(videos[1].getAttribute('src')).toContain('aurora.mp4');
     expect(videos[0].className).toContain('videoVisible');
     expect(videos[1].className).not.toContain('videoVisible');
+    expect(videos.some((video) => video.getAttribute('src')?.includes('ring.mp4'))).toBe(false);
 
     setPlaybackPosition(videos[0], 5, 5 - HERO_TRANSITION_LEAD_SECONDS + 0.01);
     await emit(videos[0], 'timeupdate');
@@ -185,7 +190,7 @@ describe('HeroVideoCarousel', () => {
 
     await act(async () => vi.advanceTimersByTime(HERO_TRANSITION_MS));
     expect(videos[0].hasAttribute('src')).toBe(false);
-    expect(videos[1].getAttribute('src')).toContain('ring.mp4');
+    expect(videos[1].getAttribute('src')).toContain('aurora.mp4');
 
     setPlaybackPosition(videos[1], 5, 4.2);
     await emit(videos[1], 'timeupdate');
@@ -196,10 +201,6 @@ describe('HeroVideoCarousel', () => {
     await act(async () => vi.advanceTimersByTime(HERO_TRANSITION_MS));
     expect(videos[1].hasAttribute('src')).toBe(false);
     expect(videos[0].getAttribute('src')).toContain('aurora.mp4');
-
-    setPlaybackPosition(videos[0], 5, 4.2);
-    await emit(videos[0], 'timeupdate');
-    expect(videos[1].getAttribute('src')).toContain('ring.mp4');
   });
 
   it('pauses outside the viewport and when the page is hidden', async () => {
@@ -242,7 +243,7 @@ describe('HeroVideoCarousel', () => {
     expect(container.querySelector('img')?.getAttribute('src')).toContain('aurora-poster.jpg');
   });
 
-  it('cleans the transition timer and media elements when unmounted', async () => {
+  it('cleans the seam-transition timer and media elements when unmounted', async () => {
     const videos = await mountCarousel();
     await emit(videos[0], 'canplay');
     setPlaybackPosition(videos[0], 5, 4.2);
