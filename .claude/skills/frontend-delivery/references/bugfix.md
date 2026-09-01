@@ -1,6 +1,6 @@
 # Frontend Bugfix Workflow
 
-This workflow applies only to a Gitee Issue-driven frontend defect repair when `frontend-delivery` was explicitly invoked. It supplements the repository-root `CLAUDE.md`; the repository Git/worktree, Issue state-machine, and testing rules remain mandatory.
+This workflow applies only to a Gitee Issue-driven frontend defect repair. It supplements the repository-root `CLAUDE.md`; the repository Git/worktree, Issue state-machine, and testing rules remain mandatory. Keep existing `useEffect` fetch style unless the defect is a new data source; new server-state reads/writes follow [request.md](request.md).
 
 ## 0. Preconditions and write boundary
 
