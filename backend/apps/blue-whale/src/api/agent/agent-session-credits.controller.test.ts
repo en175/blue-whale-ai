@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { AgentSessionCreditsController } from "./agent-session-credits.controller.js";
 
-// 审查 W·S4：这个 controller 此前没有任何测试，而它下面那层（求和 helper）的 8 条用例
-// 只喂合成日志行，从不触碰 `runs → capability_id` 这条链接——积分恒为 0 的缺陷正是从
+// 审查 W·S4：这个 controller 此前没有任何测试，而它下面那层（求和 helper）的用例
+// 只喂合成日志行，从不触碰 `runs → 归属 id` 这条链接——积分恒为 0 的缺陷正是从
 // 这个缺口溜过去的。这里补的就是那一段：归属、上游故障、时间窗推导、truncated 透传，
-// 以及「一张券都没有」时到底该给调用方什么。
+// 以及「一个归属 id 都没有」时到底该给调用方什么。
+//
+// IKCGE7：归属 id 从券号换成 Run 号。用例形状不变，换的是那一列叫什么、从哪来。
 
 /** 假的 agent 服务：按路径决定返回什么，用来驱动 fetchRuns 的各条分支。 */
 type AgentBehaviour =
@@ -47,7 +49,7 @@ function createFakeAgent(behaviour: () => AgentBehaviour) {
 
 interface SumCall {
   token: string;
-  capabilityIds: readonly string[];
+  agentRunIds: readonly string[];
   window?: { startTimestamp?: number; endTimestamp?: number; maxPages?: number; budgetMs?: number };
 }
 
@@ -57,12 +59,12 @@ function createAccount(result: { quota: number; matched: number; truncated: bool
   return {
     calls,
     service: {
-      sumRunCapabilityQuota(
+      sumAgentRunQuota(
         token: string,
-        capabilityIds: readonly string[],
+        agentRunIds: readonly string[],
         window?: SumCall["window"],
       ) {
-        calls.push({ token, capabilityIds, window });
+        calls.push({ token, agentRunIds, window });
         return Promise.resolve(result);
       },
     },
@@ -193,12 +195,14 @@ describe("AgentSessionCreditsController", () => {
   describe("一张券都查不到时", () => {
     // 这一条是积分恒为 0 那个缺陷的正面：本层分辨不了「没花钱」和「券号没落库」，
     // 所以它**不编一个数**——credits 给 null，由调用方决定显示什么（审查 W·P1）。
-    it("有 Run 却一张券都没有 → credits 是 null，不是 0", async () => {
+    it("有 Run 却一个 Run 号都读不到 → credits 是 null，不是 0", async () => {
+      // Run 号理应永远存在，读不到只可能是 agent 那边返回了意料之外的形状。
+      // 那时候「不知道」是唯一诚实的答案，编一个 0 会被前端当成确切花费显示出去。
       behaviour = {
         kind: "runs",
         items: [
-          { run_id: "r1", capability_id: null, created_at: "2026-08-23T07:00:00Z" },
-          { run_id: "r2", capability_id: null, created_at: "2026-08-23T07:01:00Z" },
+          { run_id: null, created_at: "2026-08-23T07:00:00Z" },
+          { run_id: null, created_at: "2026-08-23T07:01:00Z" },
         ],
       };
       const account = createAccount({ quota: 999_999, matched: 7, truncated: true });
@@ -216,17 +220,16 @@ describe("AgentSessionCreditsController", () => {
         // 「不知道」不是「下界」。truncated 有它自己的意思，不能拿来给一个空答案背书。
         truncated: false,
       });
-      // 没有券号就没有可查的东西，不该去翻上游账单
+      // 没有 Run 号就没有可查的东西，不该去翻上游账单
       expect(account.calls).toEqual([]);
     });
 
-    // agent 侧回写 capability_id 的那次改动没部署时，就是这个形状（审查 W·P2）。
+    // agent 返回的形状不对时（审查 W·P2 的那一类），整个会话都是「不知道」。
     // 前端因此会显示「—」并退避重试，而不是一个笃定的 0。
-    it("agent 版本还没带上券号回写时，整个会话都是 null 而不是 0", async () => {
+    it("agent 返回的 Run 行整批缺号时，整个会话都是 null 而不是 0", async () => {
       behaviour = {
         kind: "runs",
-        items: Array.from({ length: 5 }, (_, i) => ({
-          run_id: `r${i}`,
+        items: Array.from({ length: 5 }, () => ({
           created_at: "2026-08-23T07:00:00Z",
         })),
       };
@@ -253,13 +256,13 @@ describe("AgentSessionCreditsController", () => {
     });
   });
 
-  describe("有券号时", () => {
-    it("按券号求和，用户令牌原样转给上游，并按 50000 换算成积分", async () => {
+  describe("有 Run 号时", () => {
+    it("按 Run 号求和，用户令牌原样转给上游，并按 50000 换算成积分", async () => {
       behaviour = {
         kind: "runs",
         items: [
-          { run_id: "r1", capability_id: "cap-a", created_at: "2026-08-23T07:00:00Z", finished_at: "2026-08-23T07:00:30Z" },
-          { run_id: "r2", capability_id: "cap-b", created_at: "2026-08-23T07:01:00Z", finished_at: "2026-08-23T07:01:20Z" },
+          { run_id: "r1", created_at: "2026-08-23T07:00:00Z", finished_at: "2026-08-23T07:00:30Z" },
+          { run_id: "r2", created_at: "2026-08-23T07:01:00Z", finished_at: "2026-08-23T07:01:20Z" },
         ],
       };
       const account = createAccount({ quota: 125_000, matched: 2, truncated: false });
@@ -272,15 +275,15 @@ describe("AgentSessionCreditsController", () => {
       expect(data).toMatchObject({ quota: 125_000, matched: 2, runCount: 2, credits: 2.5 });
       expect(account.calls).toHaveLength(1);
       expect(account.calls[0]?.token).toBe("sk-user-token");
-      expect(account.calls[0]?.capabilityIds).toEqual(["cap-a", "cap-b"]);
+      expect(account.calls[0]?.agentRunIds).toEqual(["r1", "r2"]);
     });
 
-    it("空串券号不算券号", async () => {
+    it("空串 Run 号不算 Run 号", async () => {
       behaviour = {
         kind: "runs",
         items: [
-          { run_id: "r1", capability_id: "", created_at: "2026-08-23T07:00:00Z" },
-          { run_id: "r2", capability_id: "cap-b", created_at: "2026-08-23T07:01:00Z" },
+          { run_id: "", created_at: "2026-08-23T07:00:00Z" },
+          { run_id: "r2", created_at: "2026-08-23T07:01:00Z" },
         ],
       };
       const account = createAccount({ quota: 50_000, matched: 1, truncated: false });
@@ -290,16 +293,16 @@ describe("AgentSessionCreditsController", () => {
       );
 
       await controller.sessionCredits("s1", "p1", USER, BEARER);
-      expect(account.calls[0]?.capabilityIds).toEqual(["cap-b"]);
+      expect(account.calls[0]?.agentRunIds).toEqual(["r2"]);
     });
 
-    it("只有一部分 Run 留下券号时标 truncated——求和必然偏小，不能说成确切花费", async () => {
+    it("只有一部分 Run 读到号时标 truncated——求和必然偏小，不能说成确切花费", async () => {
       behaviour = {
         kind: "runs",
         items: [
-          { run_id: "r1", capability_id: "cap-a", created_at: "2026-08-23T07:00:00Z", finished_at: "2026-08-23T07:00:30Z" },
-          // 老 Run，券号没落库。它花的钱查不回来，但它确实花过。
-          { run_id: "r2", capability_id: null, created_at: "2026-08-23T07:01:00Z", finished_at: "2026-08-23T07:01:20Z" },
+          { run_id: "r1", created_at: "2026-08-23T07:00:00Z", finished_at: "2026-08-23T07:00:30Z" },
+          // 号读不出来的 Run。它花的钱查不回来，但它确实花过。
+          { run_id: null, created_at: "2026-08-23T07:01:00Z", finished_at: "2026-08-23T07:01:20Z" },
         ],
       };
       const account = createAccount({ quota: 50_000, matched: 1, truncated: false });
@@ -316,7 +319,7 @@ describe("AgentSessionCreditsController", () => {
     it("truncated 原样透传——翻页到顶时 credits 是下界，不能说成确切花费", async () => {
       behaviour = {
         kind: "runs",
-        items: [{ run_id: "r1", capability_id: "cap-a", created_at: "2026-08-23T07:00:00Z", finished_at: "2026-08-23T07:00:30Z" }],
+        items: [{ run_id: "r1", created_at: "2026-08-23T07:00:00Z", finished_at: "2026-08-23T07:00:30Z" }],
       };
       const account = createAccount({ quota: 50_000, matched: 1, truncated: true });
       const controller = new AgentSessionCreditsController(
@@ -339,7 +342,7 @@ describe("AgentSessionCreditsController", () => {
     it("全部 Run 都结束了才设上界，两端各放宽 300 秒", async () => {
       behaviour = {
         kind: "runs",
-        items: [{ run_id: "r1", capability_id: "cap-a", created_at: RUN_START, finished_at: RUN_END }],
+        items: [{ run_id: "r1", created_at: RUN_START, finished_at: RUN_END }],
       };
       const account = createAccount({ quota: 0, matched: 0, truncated: false });
       const controller = new AgentSessionCreditsController(
@@ -361,8 +364,8 @@ describe("AgentSessionCreditsController", () => {
       behaviour = {
         kind: "runs",
         items: [
-          { run_id: "r1", capability_id: "cap-a", created_at: RUN_START, finished_at: RUN_END },
-          { run_id: "r2", capability_id: "cap-b", created_at: RUN_START },
+          { run_id: "r1", created_at: RUN_START, finished_at: RUN_END },
+          { run_id: "r2", created_at: RUN_START },
         ],
       };
       const account = createAccount({ quota: 0, matched: 0, truncated: false });
@@ -385,8 +388,8 @@ describe("AgentSessionCreditsController", () => {
       behaviour = {
         kind: "runs",
         items: [
-          { run_id: "r1", capability_id: "cap-a", created_at: RUN_START, finished_at: RUN_END },
-          { run_id: "r2", capability_id: "cap-b", created_at: earlier, finished_at: RUN_END },
+          { run_id: "r1", created_at: RUN_START, finished_at: RUN_END },
+          { run_id: "r2", created_at: earlier, finished_at: RUN_END },
         ],
       };
       const account = createAccount({ quota: 0, matched: 0, truncated: false });
@@ -404,7 +407,7 @@ describe("AgentSessionCreditsController", () => {
     it("时间全都解析不出来时不设窗，只留翻页上限", async () => {
       behaviour = {
         kind: "runs",
-        items: [{ run_id: "r1", capability_id: "cap-a", created_at: "不是时间" }],
+        items: [{ run_id: "r1", created_at: "不是时间" }],
       };
       const account = createAccount({ quota: 0, matched: 0, truncated: false });
       const controller = new AgentSessionCreditsController(

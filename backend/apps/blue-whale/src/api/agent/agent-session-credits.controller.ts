@@ -1,16 +1,16 @@
-// IKAFPC：本会话累计消耗积分。
+// IKAFPC / IKCGE7：本会话累计消耗积分。
 //
-// 归属只认**券号**，不认时间窗。new-api 只有「用户」这一个维度，没有会话与项目；同一个账号
+// 归属只认 **Run 号**，不认时间窗。new-api 只有「用户」这一个维度，没有会话与项目；同一个账号
 // 完全可能同时跑两个 Agent 会话，也完全可能一边对话一边在 dock 栏出图。按「用户 + 时间窗」
-// 求和会把这些全算进来。而 new-api 已经把 `other.run_capability_id` 写进每一笔走能力券的账单，
-// 一张券对应一次 Run，逐笔精确——出图出片不走能力券链路，账单上根本没有这个字段。
+// 求和会把这些全算进来。而 new-api 把 `other.agent_run_id` 写进每一笔经蓝鲸网关代打的账单，
+// 逐笔精确——出图出片不走这条链路，账单上根本没有这个字段。
 //
-// 因此 new-api 一行都不用改：它只是把一个自己看不懂的不透明 id 原样记下来，
-// 「哪些券属于哪个会话」这层知识留在蓝鲸这边。
+// 券退役前这里认的是券号（`other.run_capability_id`）。那意味着「这个会话花了多少钱」这件事，
+// 悬挂在一个一次性凭证的编号上：券没领到、券号没写下来，账就永久对不回来。Run 号是 Run 自己的
+// 身份，它一定存在，也不会随下一次凭证机制变更而消失。
 //
 // 求和只能发生在本层：agent 与后端之间用的是服务令牌，它手里没有用户凭证，调不了
-// /api/log/self；而浏览器请求带着用户 token 到达这里。agent 因此完全不碰钱，只负责记住
-// 「这个 Run 用的是哪张券」。
+// /api/log/self；而浏览器请求带着用户 token 到达这里。agent 因此完全不碰钱。
 import { Controller, Get, Headers, Param, Query } from "@nestjs/common";
 import { NewApiError } from "@blue-whale/core";
 import { ok } from "@blue-whale/contracts";
@@ -38,7 +38,6 @@ const SUM_BUDGET_MS = 15_000;
 
 interface AgentRunView {
   run_id?: unknown;
-  capability_id?: unknown;
   created_at?: unknown;
   finished_at?: unknown;
 }
@@ -78,19 +77,18 @@ export class AgentSessionCreditsController {
     if (!owned) throw new NewApiError("项目不可访问", 403, "forbidden");
 
     const runs = await this.fetchRuns(projectId, sessionId, user.userId);
-    const capabilityIds = runs
-      .map((run) => run.capability_id)
+    const agentRunIds = runs
+      .map((run) => run.run_id)
       .filter((id): id is string => typeof id === "string" && id.length > 0);
 
-    // 一张券都没有。**不要读成「这个会话没花过钱」**——它同样可能是 agent 没把领到的券号写下来
-    // （IKAFPC 修复前每一条 Run 的 capability_id 都是 NULL，而那些 Run 全都真的调过模型；
-    // 部署上只要 agent 还没带上 runView 暴露 capability_id 的那次改动，这里就恒为空）。
+    // 一个 Run 号都没读到。**不要读成「这个会话没花过钱」**——更可能是 agent 那边取数失败或
+    // 返回了意料之外的形状。
     //
     // 本层没有能力分辨这两者，所以**不编一个数**：`credits: null` 就是「不知道」。
     // 此前这里返回 `credits: 0` 并在注释里断言那是实打实的 0——它无从知道这件事，
     // 而 `truncated: false` 还主动为这个错误答案背书（审查 W·P1）。工单原话：
     // 「nullable 是有意义的：取数失败 / 尚未回填 / 老数据，与『真的花了 0』是两回事，不许默认成 0。」
-    if (capabilityIds.length === 0) {
+    if (agentRunIds.length === 0) {
       // 一个 Run 都没有，才是货真价实的 0——那时候确实什么都没发生。
       const genuinelyZero = runs.length === 0;
       return ok({
@@ -119,10 +117,13 @@ export class AgentSessionCreditsController {
       window.endTimestamp = Math.max(...ends) + WINDOW_SLACK_SECONDS;
     }
 
-    const summed = await this.account.sumRunCapabilityQuota(token, capabilityIds, window);
-    // 只有一部分 Run 留下了券号（新老 Run 混在同一个会话里就会这样）：剩下那些的花费查不到，
-    // 求和必然偏小。这与翻页到顶是同一种失真，走同一个字段告诉前端。
-    const partiallyAttributed = capabilityIds.length < runs.length;
+    const summed = await this.account.sumAgentRunQuota(token, agentRunIds, window);
+    // 只有一部分 Run 读到了号：剩下那些的花费查不到，求和必然偏小。Run 号理应永远存在，所以
+    // 这一条如今只是防御——但它守的失真是真的，与翻页到顶同一种，走同一个字段告诉前端。
+    //
+    // 注意还有一种偏小这里看不出来：券退役上线**之前**产生的账单写的是 run_capability_id，
+    // 没有 agent_run_id，因此老会话的历史消耗会查成 0。这是一次性的、只影响历史数据的断层。
+    const partiallyAttributed = agentRunIds.length < runs.length;
     return ok({
       credits: quotaToCredits(summed.quota),
       quota: summed.quota,

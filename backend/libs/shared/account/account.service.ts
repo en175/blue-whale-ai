@@ -96,12 +96,12 @@ export class AccountService {
   }
 
   /** IKAFPC：按能力券号汇总实际消费，用于「本会话累计消耗积分」。 */
-  sumRunCapabilityQuota(
+  sumAgentRunQuota(
     token: string,
-    capabilityIds: readonly string[],
+    agentRunIds: readonly string[],
     window?: { startTimestamp?: number; endTimestamp?: number; maxPages?: number },
   ) {
-    return this.client.sumRunCapabilityQuota(token, capabilityIds, window);
+    return this.client.sumAgentRunQuota(token, agentRunIds, window);
   }
 
   // —— 管理端 new-api admin ops ——

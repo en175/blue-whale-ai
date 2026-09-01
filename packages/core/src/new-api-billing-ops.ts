@@ -6,16 +6,20 @@ import {parseTopUpRecord} from "./new-api-types.js";
 import type {NewApiCapabilityQuotaResult, NewApiCollectTopUpInput, NewApiPricingItem, NewApiPricingResult, NewApiRechargeAgreement, NewApiRechargeOrderResult, NewApiRechargeOrderStatus, NewApiRechargeTiersResult, NewApiTopUpListResult, NewApiTopUpOrderResult, NewApiTopUpRecord, NewApiUserLogListResult, NewApiUserLogRecord} from "./new-api-types.js";
 
 /**
- * 从一条账单的 `other` 字段里读出能力券号。
+ * 从一条账单的 `other` 字段里读出 Agent Run 号。
  *
- * new-api 那边写的是 JSON 字符串（`service/log_info_generate.go`：走能力券计费时写入
- * `billing_authority` 与 `run_capability_id`）。这里刻意宽容：解析失败、不是对象、字段缺失，
- * 一律当成「这笔账不属于任何券」——它多半就是出图出片那类不走券的消费，**丢掉是对的**。
+ * new-api 那边写的是 JSON 字符串（`service/log_info_generate.go`：走蓝鲸网关计费时写入
+ * `billing_authority: "agent_gateway"` 与 `agent_run_id`）。这里刻意宽容：解析失败、不是对象、
+ * 字段缺失，一律当成「这笔账不属于任何 Run」——它多半就是出图出片那类不走 Agent 的消费，
+ * **丢掉是对的**。
+ *
+ * 券退役前这里读的是 `run_capability_id`（IKCGE7）。换字段不只是改名：券号是一次性凭证的
+ * 编号，Run 号是 Run 本身的身份，后者不会因为凭证机制再变一次而失效。
  */
-function readRunCapabilityId(other: unknown): string {
+function readAgentRunId(other: unknown): string {
   const raw = typeof other === "string" ? safeParse(other) : other;
   if (!raw || typeof raw !== "object") return "";
-  const id = (raw as Record<string, unknown>).run_capability_id;
+  const id = (raw as Record<string, unknown>).agent_run_id;
   return typeof id === "string" ? id : "";
 }
 
@@ -298,18 +302,18 @@ export function createNewApiBillingOps(request: NewApiRequest) {
     },
 
     /**
-     * IKAFPC：把一组能力券号对应的实际消费加起来。
+     * IKAFPC / IKCGE7：把一组 Agent Run 号对应的实际消费加起来。
      *
-     * 走的是**用户自己的凭证**（`/api/log/self` 是 AccountTokenOrUserAuth），不需要管理员权限，
-     * 也不需要 new-api 侧任何改动——`other.run_capability_id` 是它本来就在写的字段，用户侧查询
-     * 里也保留着（`formatUserLogs` 只剥 admin_info / audit_info / stream_status）。
+     * 走的是**用户自己的凭证**（`/api/log/self` 是 AccountTokenOrUserAuth），不需要管理员权限。
+     * `other.agent_run_id` 由 new-api 在网关代打时写入，用户侧查询里保留着
+     * （`formatUserLogs` 只剥 admin_info / audit_info / stream_status）。
      *
-     * 时间窗只用来**收敛翻页**，不参与归属判定：归属完全由券号决定，所以窗口开大一点只是多翻
-     * 几页，绝不会把别人的账算进来。
+     * 时间窗只用来**收敛翻页**，不参与归属判定：归属完全由 Run 号决定，所以窗口开大一点只是
+     * 多翻几页，绝不会把别人的账算进来。
      */
-    async sumRunCapabilityQuota(
+    async sumAgentRunQuota(
       token: string,
-      capabilityIds: readonly string[],
+      agentRunIds: readonly string[],
       window: {
         startTimestamp?: number;
         endTimestamp?: number;
@@ -318,7 +322,7 @@ export function createNewApiBillingOps(request: NewApiRequest) {
         budgetMs?: number;
       } = {},
     ): Promise<NewApiCapabilityQuotaResult> {
-      const wanted = new Set(capabilityIds.filter((id) => typeof id === "string" && id.length > 0));
+      const wanted = new Set(agentRunIds.filter((id) => typeof id === "string" && id.length > 0));
       if (wanted.size === 0) return { quota: 0, matched: 0, truncated: false };
 
       const pageSize = 100;
@@ -353,7 +357,7 @@ export function createNewApiBillingOps(request: NewApiRequest) {
         const data = (response.data ?? {}) as { items?: unknown; total?: unknown };
         const rawItems = Array.isArray(data.items) ? (data.items as Array<Record<string, unknown>>) : [];
         for (const raw of rawItems) {
-          if (!wanted.has(readRunCapabilityId(raw.other))) continue;
+          if (!wanted.has(readAgentRunId(raw.other))) continue;
           matched += 1;
           quota += Number(raw.quota ?? 0);
         }
@@ -363,10 +367,10 @@ export function createNewApiBillingOps(request: NewApiRequest) {
       }
       return { quota, matched, truncated };
 
-      // **不要加「券号全部命中就提前退出」。** 审查（W·A13）建议过这一条，它是错的：
-      // 一张能力券对应一次 Run，而一次 Run 会调好几次模型，因此**同一个券号有多条账单**，
-      // 且可能跨页。见到每个券号各一次就收手，求和会少算——那比慢更糟，因为它不会被标成
-      // truncated，用户看到的是一个笃定的错数。
+      // **不要加「Run 号全部命中就提前退出」。** 审查（W·A13）建议过这一条，它是错的：
+      // 一次 Run 会调好几次模型，因此**同一个 Run 号有多条账单**，且可能跨页。见到每个 Run 号
+      // 各一次就收手，求和会少算——那比慢更糟，因为它不会被标成 truncated，用户看到的是一个
+      // 笃定的错数。
     },
 
     /** IK7G9X：按 request_id 精确取一条消费流水（quota 单位与余额一致）。
