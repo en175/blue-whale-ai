@@ -2,11 +2,13 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import HeroVideoCarousel, {
+import {
+  HeroCarouselView,
   HERO_PRELOAD_LEAD_SECONDS,
   HERO_TRANSITION_LEAD_SECONDS,
   HERO_TRANSITION_MS,
 } from './index';
+import type { HeroSlide } from '@/api/homepageHeroes';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -22,6 +24,15 @@ let playMock: ReturnType<typeof vi.spyOn>;
 let pauseMock: ReturnType<typeof vi.spyOn>;
 let loadMock: ReturnType<typeof vi.spyOn>;
 let rootMounted: boolean;
+
+const AURORA: HeroSlide = {
+  id: 'aurora',
+  mediaType: 'video',
+  src: 'https://cdn.example.com/aurora.mp4',
+  poster: 'https://cdn.example.com/aurora-poster.jpg',
+};
+
+const FALLBACK = 'https://cdn.example.com/fallback.jpg';
 
 class FakeIntersectionObserver implements IntersectionObserver {
   readonly root = null;
@@ -52,10 +63,14 @@ function visibilityEntry(isIntersecting: boolean): IntersectionObserverEntry {
   };
 }
 
-async function mountCarousel() {
+async function mountCarousel(slides: HeroSlide[] = [AURORA]) {
   await act(async () => {
     root.render(
-      createElement(HeroVideoCarousel, null, createElement('span', null, '首页内容')),
+      createElement(
+        HeroCarouselView,
+        { slides, fallbackPoster: FALLBACK },
+        createElement('span', null, '首页内容'),
+      ),
     );
   });
   act(() => {
@@ -265,6 +280,24 @@ describe('HeroVideoCarousel', () => {
     const videos = await mountCarousel();
 
     await expect(emit(videos[0], 'canplay')).resolves.toBeUndefined();
+    expect(container.textContent).toContain('首页内容');
+  });
+
+  it('empty list keeps homepage content and uses the static fallback poster', async () => {
+    const videos = await mountCarousel([]);
+    expect(videos.every((video) => !video.hasAttribute('src'))).toBe(true);
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(FALLBACK);
+    expect(container.textContent).toContain('首页内容');
+    expect(playMock).not.toHaveBeenCalled();
+  });
+
+  it('renders image slides as img layers without attaching a video source', async () => {
+    const videos = await mountCarousel([
+      { id: 'img', mediaType: 'image', src: 'https://cdn.example.com/hero.jpg', poster: null },
+    ]);
+    expect(videos.every((video) => !video.hasAttribute('src'))).toBe(true);
+    const images = Array.from(container.querySelectorAll('img'));
+    expect(images.some((img) => img.getAttribute('src') === 'https://cdn.example.com/hero.jpg')).toBe(true);
     expect(container.textContent).toContain('首页内容');
   });
 });
