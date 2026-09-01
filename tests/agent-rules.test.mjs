@@ -59,6 +59,26 @@ test("frontend Bugfix workflow extracts sparse Issue details instead of gating o
   assert.doesNotMatch(workflow, /已终止前端 Bugfix 流程/);
 });
 
+test("frontend-delivery auto-loads for web work and routes new fetches to TanStack Query", () => {
+  const rootRules = read("CLAUDE.md");
+  const skill = read(".claude/skills/frontend-delivery/SKILL.md");
+  const request = read(".claude/skills/frontend-delivery/references/request.md");
+  const policy = read(".claude/skills/frontend-delivery/agents/openai.yaml");
+
+  assert.doesNotMatch(rootRules, /仅明确调用 `frontend-delivery`/);
+  assert.match(rootRules, /frontend-delivery\/SKILL\.md/);
+  assert.match(rootRules, /references\/request\.md/);
+  assert.match(skill, /^description: Use when.*web\//m);
+  assert.doesNotMatch(skill, /only when the user explicitly/);
+  assert.match(skill, /references\/request\.md/);
+  assert.match(policy, /allow_implicit_invocation: true/);
+  assert.match(request, /@tanstack\/react-query/);
+  assert.match(request, /queryOptions/);
+  assert.match(request, /silent: true/);
+  assert.match(request, /Do not migrate existing `useEffect`/);
+  assert.match(request, /refetchOnWindowFocus: false/);
+});
+
 test("tracked skill mirrors match their authoritative sources", () => {
   assert.equal(read(".zcode/skills/implement/SKILL.md"), read(".claude/skills/implement/SKILL.md"));
 
