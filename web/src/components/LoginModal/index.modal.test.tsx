@@ -58,11 +58,13 @@ describe('LoginModal shell', () => {
     const toggle = document.body.querySelector<HTMLButtonElement>('button[aria-label="显示密码"]');
 
     expect(password?.type).toBe('password');
+    expect(toggle?.querySelector('svg.lucide-eye-off')).not.toBeNull();
 
     await act(async () => toggle?.click());
 
     expect(password?.type).toBe('text');
     expect(document.body.querySelector('button[aria-label="隐藏密码"]')).not.toBeNull();
+    expect(document.body.querySelector('button[aria-label="隐藏密码"] svg.lucide-eye')).not.toBeNull();
   });
 
   it('initialMode=register 时展示注册面板', async () => {
@@ -72,6 +74,43 @@ describe('LoginModal shell', () => {
     expect(document.body.textContent).toContain('已有账号？返回登录');
     expect(document.body.querySelector('input[placeholder="账号（至少3位）"]')).not.toBeNull();
     expect(document.body.querySelector('input[placeholder="密码（8-20位）"]')).not.toBeNull();
+  });
+
+  it('注册密码与确认密码可用眼睛图标切换显示隐藏', async () => {
+    await renderLoginModal({ initialMode: 'register' });
+
+    const password = document.body.querySelector<HTMLInputElement>('input[placeholder="密码（8-20位）"]');
+    const confirm = document.body.querySelector<HTMLInputElement>('input[placeholder="确认密码"]');
+    const passwordToggle = password?.parentElement?.querySelector<HTMLButtonElement>('button');
+    const confirmToggle = confirm?.parentElement?.querySelector<HTMLButtonElement>('button');
+
+    expect(password?.type).toBe('password');
+    expect(confirm?.type).toBe('password');
+    expect(passwordToggle).not.toBeNull();
+    expect(confirmToggle).not.toBeNull();
+    expect(passwordToggle?.getAttribute('aria-label')).toBe('显示密码');
+    expect(confirmToggle?.getAttribute('aria-label')).toBe('显示确认密码');
+    expect(passwordToggle?.querySelector('svg.lucide-eye-off')).not.toBeNull();
+    expect(confirmToggle?.querySelector('svg.lucide-eye-off')).not.toBeNull();
+    expect(passwordToggle?.textContent).not.toMatch(/显示|隐藏/);
+    expect(confirmToggle?.textContent).not.toMatch(/显示|隐藏/);
+
+    await act(async () => passwordToggle?.click());
+
+    expect(password?.type).toBe('text');
+    expect(confirm?.type).toBe('password');
+    expect(passwordToggle?.getAttribute('aria-label')).toBe('隐藏密码');
+    expect(passwordToggle?.querySelector('svg.lucide-eye:not(.lucide-eye-off)')).not.toBeNull();
+
+    await act(async () => confirmToggle?.click());
+
+    expect(confirm?.type).toBe('text');
+    expect(confirmToggle?.getAttribute('aria-label')).toBe('隐藏确认密码');
+
+    await act(async () => passwordToggle?.click());
+
+    expect(password?.type).toBe('password');
+    expect(passwordToggle?.getAttribute('aria-label')).toBe('显示密码');
   });
 
   it('登录和注册表单分别打开用户协议与隐私政策', async () => {

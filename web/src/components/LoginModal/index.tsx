@@ -2,7 +2,7 @@
  * LoginModal 登录弹窗：登录 / 注册双模式
  * 外壳走共用 Modal（Portal / 遮罩 / ESC / 关闭），表单与鉴权逻辑保持不变
  * ============================================ */
-import { useState } from 'react';
+import { useState, type KeyboardEvent } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import {
   loginWithPassword,
@@ -58,12 +58,64 @@ function AgreementLinks() {
   );
 }
 
+interface PasswordFieldProps {
+  placeholder: string;
+  value: string;
+  visible: boolean;
+  onChange: (value: string) => void;
+  onToggleVisible: () => void;
+  showLabel?: string;
+  hideLabel?: string;
+  onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
+}
+
+function PasswordField({
+  placeholder,
+  value,
+  visible,
+  onChange,
+  onToggleVisible,
+  showLabel = '显示密码',
+  hideLabel = '隐藏密码',
+  onKeyDown,
+  ariaInvalid,
+  ariaDescribedBy,
+}: PasswordFieldProps) {
+  return (
+    <div className={styles.passwordField}>
+      <input
+        className={styles.input}
+        type={visible ? 'text' : 'password'}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        aria-invalid={ariaInvalid}
+        aria-describedby={ariaDescribedBy}
+      />
+      <button
+        type="button"
+        className={styles.passwordToggle}
+        aria-label={visible ? hideLabel : showLabel}
+        aria-pressed={visible}
+        onClick={onToggleVisible}
+      >
+        {/* 图标跟当前状态走：密文划掉眼睛，明文睁开眼睛 */}
+        {visible ? <Eye size={20} /> : <EyeOff size={20} />}
+      </button>
+    </div>
+  );
+}
+
 export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }: LoginModalProps) {
   const [mode, setMode] = useState<Mode>(initialMode);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [confirmPwd, setConfirmPwd] = useState('');
+  const [confirmPwdVisible, setConfirmPwdVisible] = useState(false);
   const [email, setEmail] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState('');
@@ -137,6 +189,7 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
   const switchMode = (target: Mode) => {
     setMode(target);
     setPasswordVisible(false);
+    setConfirmPwdVisible(false);
     setError('');
     setSuccess('');
   };
@@ -172,27 +225,16 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
             onChange={(e) => setUsername(e.target.value)}
             autoFocus
           />
-          <div className={styles.passwordField}>
-            <input
-              className={styles.input}
-              type={passwordVisible ? 'text' : 'password'}
-              placeholder="请输入密码"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submitLogin();
-              }}
-            />
-            <button
-              type="button"
-              className={styles.passwordToggle}
-              aria-label={passwordVisible ? '隐藏密码' : '显示密码'}
-              aria-pressed={passwordVisible}
-              onClick={() => setPasswordVisible((visible) => !visible)}
-            >
-              {passwordVisible ? <EyeOff size={20} /> : <Eye size={20} />}
-            </button>
-          </div>
+          <PasswordField
+            placeholder="请输入密码"
+            value={password}
+            visible={passwordVisible}
+            onChange={setPassword}
+            onToggleVisible={() => setPasswordVisible((visible) => !visible)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') submitLogin();
+            }}
+          />
 
           {error && <div className={styles.error}>{error}</div>}
 
@@ -232,26 +274,28 @@ export default function LoginModal({ onClose, onSuccess, initialMode = 'login' }
             onChange={(e) => setUsername(e.target.value)}
             autoFocus
           />
-          <input
-            className={styles.input}
-            type="password"
+          <PasswordField
             placeholder="密码（8-20位）"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            aria-invalid={passwordRuleError}
-            aria-describedby={passwordRuleError ? 'register-password-error' : undefined}
+            visible={passwordVisible}
+            onChange={setPassword}
+            onToggleVisible={() => setPasswordVisible((visible) => !visible)}
+            ariaInvalid={passwordRuleError}
+            ariaDescribedBy={passwordRuleError ? 'register-password-error' : undefined}
           />
           {passwordRuleError && (
             <div id="register-password-error" className={styles.error}>
               密码长度需为 8-20 个字符
             </div>
           )}
-          <input
-            className={styles.input}
-            type="password"
+          <PasswordField
             placeholder="确认密码"
             value={confirmPwd}
-            onChange={(e) => setConfirmPwd(e.target.value)}
+            visible={confirmPwdVisible}
+            onChange={setConfirmPwd}
+            onToggleVisible={() => setConfirmPwdVisible((visible) => !visible)}
+            showLabel="显示确认密码"
+            hideLabel="隐藏确认密码"
           />
           <input
             className={styles.input}
