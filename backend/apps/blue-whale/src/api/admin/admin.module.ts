@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AdminController } from "./admin.controller.js";
 import { AdminDashboardController } from "./dashboard.controller.js";
+import { AdminHomepageHeroesController } from "./homepage-heroes.controller.js";
 import { AdminModelsController } from "./models.controller.js";
 import { AdminOrdersController } from "./orders.controller.js";
 import { AdminSkillsController } from "./skills.controller.js";
@@ -23,6 +24,7 @@ import { AdminAssetsController } from "./assets.controller.js";
     AdminTemplatesController,
     AdminTemplateTagsController,
     AdminTemplateImagesController,
+    AdminHomepageHeroesController,
     AdminAssetsController,
   ],
 })
