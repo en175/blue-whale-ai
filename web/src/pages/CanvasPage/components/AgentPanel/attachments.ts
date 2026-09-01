@@ -18,6 +18,38 @@ export type SidebarCanvasUpload = {
   url: string;
 };
 
+export type ComposerAttachmentPreview = {
+  url: string;
+  label: string;
+  mediaType: 'image' | 'video';
+};
+
+/**
+ * 侧边栏上传在输入框里的缩略图判定（IKCJFQ）。
+ *
+ * 选中文件后立刻用本地 blob URL 出胶囊；没有 URL 才退回「图片：文件名」文字。
+ * 不认 MIME 之外的猜测：没有 URL 就不虚构缩略图。
+ */
+export function composerAttachmentPreview(item: {
+  name: string;
+  mediaType: 'image' | 'video';
+  url?: string;
+}): ComposerAttachmentPreview | undefined {
+  if (!item.url) return undefined;
+  return { url: item.url, label: item.name, mediaType: item.mediaType };
+}
+
+/** 图片/视频选中后立刻给输入框用的本地预览；其它类型不造 URL。 */
+export function createAttachmentPreviewUrl(file: File): string | undefined {
+  const detected = fileToAssetType(file);
+  if (detected !== 'image' && detected !== 'video') return undefined;
+  return URL.createObjectURL(file);
+}
+
+export function revokeAttachmentPreviewUrl(url: string | undefined): void {
+  if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+}
+
 export function planAttachment(file: File, projectId: string | undefined): AttachmentPlan {
   // 类型按真实 MIME 判定，不按用户点的是哪个菜单项。
   const detected = fileToAssetType(file);
