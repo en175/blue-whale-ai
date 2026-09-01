@@ -73,32 +73,41 @@ const OWNER_MISS_TTL_MS = 5_000;
 const OWNER_CACHE_MAX_ENTRIES = 2_000;
 
 type OwnerCacheEntry = { ownerId: string | null; expiresAt: number };
-const ownerCache = new Map<string, OwnerCacheEntry>();
 
-function cachedOwner(projectId: string): OwnerCacheEntry | undefined {
-  const hit = ownerCache.get(projectId);
-  if (!hit) return undefined;
-  if (hit.expiresAt <= Date.now()) {
-    ownerCache.delete(projectId);
-    return undefined;
+/**
+ * 项目 → 计费主体的短缓存。
+ *
+ * 挂在控制器实例上，不是模块级变量：模块级的那一版要导出一个「测试用」的 clear 函数，
+ * 测试还得靠 `vi.resetModules()` 才拿得到干净的一份——一个只为测试存在的导出，本身就是
+ * 状态放错了地方的信号。NestJS 控制器是单例，实例字段的生命周期与进程一致，语义不变。
+ */
+class OwnerCache {
+  private readonly entries = new Map<string, OwnerCacheEntry>();
+
+  get(projectId: string): OwnerCacheEntry | undefined {
+    const hit = this.entries.get(projectId);
+    if (!hit) return undefined;
+    if (hit.expiresAt <= Date.now()) {
+      this.entries.delete(projectId);
+      return undefined;
+    }
+    return hit;
   }
-  return hit;
-}
 
-function rememberOwner(projectId: string, ownerId: string | null): void {
-  if (ownerCache.size >= OWNER_CACHE_MAX_ENTRIES) {
-    const oldest = ownerCache.keys().next();
-    if (!oldest.done) ownerCache.delete(oldest.value);
+  set(projectId: string, ownerId: string | null): void {
+    // 先 delete 再 set：`Map.set` 对已存在的键**不刷新插入序**，而淘汰是按插入序取最旧的。
+    // 不删就重设的话，一个每 60 秒被续期一次的热点项目会永远停在它第一次写入的位置上，
+    // 到 2000 条时反倒是它被踢掉——缓存把最该留的那条淘汰了。
+    this.entries.delete(projectId);
+    if (this.entries.size >= OWNER_CACHE_MAX_ENTRIES) {
+      const oldest = this.entries.keys().next();
+      if (!oldest.done) this.entries.delete(oldest.value);
+    }
+    this.entries.set(projectId, {
+      ownerId,
+      expiresAt: Date.now() + (ownerId === null ? OWNER_MISS_TTL_MS : OWNER_CACHE_TTL_MS),
+    });
   }
-  ownerCache.set(projectId, {
-    ownerId,
-    expiresAt: Date.now() + (ownerId === null ? OWNER_MISS_TTL_MS : OWNER_CACHE_TTL_MS),
-  });
-}
-
-/** 测试用：清空项目→主人缓存。 */
-export function resetAgentModelGatewayOwnerCache(): void {
-  ownerCache.clear();
 }
 
 function constantTimeEquals(expected: string | undefined, supplied: string | undefined): boolean {
@@ -149,6 +158,8 @@ function isStreamingRequest(rawBody: Buffer): boolean {
 @BypassTransform()
 @Controller("internal/agent-model")
 export class AgentModelGatewayController {
+  private readonly ownerCache = new OwnerCache();
+
   constructor(private readonly project: ProjectService) {}
 
   @All("*path")
@@ -286,10 +297,10 @@ export class AgentModelGatewayController {
 
   /** 项目号 → 计费主体（NewAPI 用户号）。短缓存，未命中回库。 */
   private async resolveSubject(projectId: string): Promise<string | null> {
-    const hit = cachedOwner(projectId);
+    const hit = this.ownerCache.get(projectId);
     if (hit) return hit.ownerId;
     const ownerId = await this.project.findOwnerId(projectId);
-    rememberOwner(projectId, ownerId);
+    this.ownerCache.set(projectId, ownerId);
     return ownerId;
   }
 }

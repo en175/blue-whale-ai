@@ -98,7 +98,6 @@ describe("AgentModelGatewayController 计费归属", () => {
     // NEW_API_BASE_URL 在模块加载时读取，必须先设好环境再导入。
     vi.resetModules();
     const module = await import("./agent-model-gateway.controller.js");
-    module.resetAgentModelGatewayOwnerCache();
     const controller = new module.AgentModelGatewayController({
       findOwnerId: async (id: string) => {
         lookups.push(id);
@@ -181,6 +180,43 @@ describe("AgentModelGatewayController 计费归属", () => {
     await post(port, headers);
     expect(lookups).toEqual(["214"]);
     expect(seen).toHaveLength(2);
+  });
+});
+
+// 缓存淘汰按插入序取最旧的，而 `Map.set` 对**已存在**的键不刷新插入序。不先 delete 就重设，
+// 一个每 60 秒续期一次的热点项目会永远停在它第一次写入的位置，到上限时反倒是它先被踢掉。
+describe("项目→主体缓存的淘汰顺序", () => {
+  it("续期过的热点项目不会因为「插入序最旧」而被淘汰", async () => {
+    vi.resetModules();
+    process.env.AGENT_SERVICE_TOKEN = AGENT_TOKEN;
+    process.env.NEW_API_AGENT_BILLING_TOKEN = BILLING_TOKEN;
+    const module = await import("./agent-model-gateway.controller.js");
+
+    const lookups: string[] = [];
+    const controller = new module.AgentModelGatewayController({
+      findOwnerId: async (id: string) => {
+        lookups.push(id);
+        return "37";
+      },
+    } as never);
+
+    // resolveSubject 是私有的，从实例上取；这条用例要验的就是缓存本身的行为。
+    const resolve = (id: string) =>
+      (controller as unknown as { resolveSubject(id: string): Promise<string | null> }).resolveSubject(id);
+
+    await resolve("hot");                      // 首次写入，插入序最旧
+    for (let i = 0; i < 2_100; i += 1) await resolve(`cold-${i}`);  // 冲过 2000 条上限
+    await resolve("hot");                      // 若已被淘汰，这次会回库
+
+    const hotLookups = lookups.filter(id => id === "hot").length;
+    // 修复前：hot 停在插入序最旧的位置，被冷数据挤掉，这里是 2。
+    expect(hotLookups).toBe(2);
+
+    // 真正要守的是「续期之后不再被踢」：再灌一轮冷数据，hot 应当活下来。
+    const before = lookups.filter(id => id === "hot").length;
+    for (let i = 0; i < 1_500; i += 1) await resolve(`cold2-${i}`);
+    await resolve("hot");
+    expect(lookups.filter(id => id === "hot").length).toBe(before);
   });
 });
 
