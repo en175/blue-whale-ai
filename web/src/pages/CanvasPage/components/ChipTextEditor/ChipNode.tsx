@@ -14,10 +14,11 @@ import {
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { AtSign, X } from 'lucide-react';
 import { ImageMentionChip } from '../ImageMentionChip';
+import { VideoMentionChip } from '../VideoMentionChip';
 import styles from './index.module.css';
 
 export type SerializedChipNode = Spread<
-  { refId: string; label: string; prompt: string; imageUrl?: string },
+  { refId: string; label: string; prompt: string; imageUrl?: string; videoUrl?: string },
   SerializedLexicalNode
 >;
 
@@ -25,10 +26,12 @@ function ChipComponent({
   nodeKey,
   label,
   imageUrl,
+  videoUrl,
 }: {
   nodeKey: NodeKey;
   label: string;
   imageUrl?: string;
+  videoUrl?: string;
 }) {
   const [editor] = useLexicalComposerContext();
   const handleRemove = () => {
@@ -37,6 +40,9 @@ function ChipComponent({
       node?.remove();
     });
   };
+  if (videoUrl) {
+    return <VideoMentionChip url={videoUrl} label={label} onRemove={handleRemove} />;
+  }
   if (imageUrl) {
     return <ImageMentionChip url={imageUrl} label={label} onRemove={handleRemove} />;
   }
@@ -62,21 +68,30 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
   __label: string;
   __prompt: string;
   __imageUrl: string | undefined;
+  __videoUrl: string | undefined;
 
   static getType(): string {
     return 'chip';
   }
 
   static clone(node: ChipNode): ChipNode {
-    return new ChipNode(node.__refId, node.__label, node.__prompt, node.__key, node.__imageUrl);
+    return new ChipNode(node.__refId, node.__label, node.__prompt, node.__key, node.__imageUrl, node.__videoUrl);
   }
 
-  constructor(refId: string, label: string, prompt: string, key?: NodeKey, imageUrl?: string) {
+  constructor(
+    refId: string,
+    label: string,
+    prompt: string,
+    key?: NodeKey,
+    imageUrl?: string,
+    videoUrl?: string,
+  ) {
     super(key);
     this.__refId = refId;
     this.__label = label;
     this.__prompt = prompt;
     this.__imageUrl = imageUrl;
+    this.__videoUrl = videoUrl;
   }
 
   createDOM(): HTMLElement {
@@ -122,11 +137,18 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
       label: this.__label,
       prompt: this.__prompt,
       ...(this.__imageUrl ? { imageUrl: this.__imageUrl } : {}),
+      ...(this.__videoUrl ? { videoUrl: this.__videoUrl } : {}),
     };
   }
 
   static importJSON(serialized: SerializedChipNode): ChipNode {
-    return $createChipNode(serialized.refId, serialized.label, serialized.prompt, serialized.imageUrl);
+    return $createChipNode(
+      serialized.refId,
+      serialized.label,
+      serialized.prompt,
+      serialized.imageUrl,
+      serialized.videoUrl,
+    );
   }
 
   decorate(): JSX.Element {
@@ -135,6 +157,7 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
         nodeKey={this.getKey()}
         label={this.__label}
         imageUrl={this.__imageUrl}
+        videoUrl={this.__videoUrl}
       />
     );
   }
@@ -145,8 +168,9 @@ export function $createChipNode(
   label: string,
   prompt: string,
   imageUrl?: string,
+  videoUrl?: string,
 ): ChipNode {
-  return new ChipNode(refId, label, prompt, undefined, imageUrl);
+  return new ChipNode(refId, label, prompt, undefined, imageUrl, videoUrl);
 }
 
 export function $isChipNode(node: LexicalNode | null | undefined): node is ChipNode {

@@ -31,7 +31,7 @@ import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '..
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
 import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock, type OutboundAssetRef } from '@/api/agentSessions';
 import { commitSidebarAttachment, planAttachment, type SidebarCanvasUpload } from './attachments';
-import { composerImagePreview } from './composerImagePreview';
+import { composerImagePreview, isCanvasNodeVideo } from './composerImagePreview';
 import { MessageAssetPreview, rememberAssetUrl } from './MessageAssetPreview';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -795,11 +795,14 @@ interface AgentPanelProps {
   onPlaceFileOnCanvas: (file: File) => Promise<SidebarCanvasUpload>;
 }
 
-/** 图片已有“缩略图 + 文件名”呈现，不再重复渲染成 `@` 文字提及。 */
-function hasInlineImageMention(blocks: SessionContentBlock[] | undefined, chipId: string): boolean {
+/** 图片/画布视频已有“缩略图 + 文件名”呈现，不再重复渲染成 `@` 文字提及。 */
+function hasInlineVisualMention(blocks: SessionContentBlock[] | undefined, chipId: string): boolean {
   return (blocks ?? []).some((block) => {
-    if ((block.media_type !== 'image' && block.type !== 'image') || (!block.url && !block.asset_id)) return false;
-    return [block.chip_id, block.asset_id, block.resource_id, block.node_id].includes(chipId);
+    const ids = [block.chip_id, block.asset_id, block.resource_id, block.node_id];
+    if (!ids.includes(chipId)) return false;
+    const isImage = (block.media_type === 'image' || block.type === 'image') && Boolean(block.url || block.asset_id);
+    const isNodeVideo = isCanvasNodeVideo(block) && Boolean(block.url || block.asset_id);
+    return isImage || isNodeVideo;
   });
 }
 
@@ -951,12 +954,16 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     if (!inputVersion || inputVersion === lastInputVersionRef.current) return;
     lastInputVersionRef.current = inputVersion;
     if (initialCardLabel) {
-      const imagePreview = composerImagePreview(initialMediaBlocks);
+      const mediaPreview = composerImagePreview(initialMediaBlocks);
       chipEditorRef.current?.insertChip({
         id: String(inputVersion),
-        label: imagePreview?.label ?? initialCardLabel,
+        label: mediaPreview?.label ?? initialCardLabel,
         prompt: initialInput ?? '',
-        ...(imagePreview ? { imageUrl: imagePreview.url } : {}),
+        ...(mediaPreview?.mediaType === 'video'
+          ? { videoUrl: mediaPreview.url }
+          : mediaPreview
+            ? { imageUrl: mediaPreview.url }
+            : {}),
       });
     } else {
       chipEditorRef.current?.setText(initialInput ?? '');
@@ -1599,10 +1606,10 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                     <span>{m.skill_ref.name}</span>
                   </div>
                 )}
-                {/* 图片提及先于正文：缩略图 → 文件名 → 用户文字。 */}
+                {/* 图片/画布视频提及先于正文：缩略图 → 文件名 → 用户文字。 */}
                 <MessageAssetPreview blocks={m.blocks} chips={m.chips} />
                 {/* @卡片气泡（与输入框中的气泡一致） */}
-                {m.chips?.filter((c) => !hasInlineImageMention(m.blocks, c.id)).map((c) => (
+                {m.chips?.filter((c) => !hasInlineVisualMention(m.blocks, c.id)).map((c) => (
                   <div key={`chip-${c.id}`} className={styles.userMediaChip}>
                     <span className={styles.userMediaChipAt}>@</span>
                     <span className={styles.userMediaChipLabel}>{c.label}</span>
