@@ -3,7 +3,7 @@
 import {NewApiError} from "./new-api-transport.js";
 import type {NewApiEnvelope, NewApiRequest} from "./new-api-transport.js";
 import {parseTopUpRecord} from "./new-api-types.js";
-import type {NewApiCapabilityQuotaResult, NewApiCollectTopUpInput, NewApiPricingItem, NewApiPricingResult, NewApiRechargeAgreement, NewApiRechargeOrderResult, NewApiRechargeOrderStatus, NewApiRechargeTiersResult, NewApiTopUpListResult, NewApiTopUpOrderResult, NewApiTopUpRecord, NewApiUserLogListResult, NewApiUserLogRecord} from "./new-api-types.js";
+import type {NewApiAgentRunQuotaResult, NewApiCollectTopUpInput, NewApiPricingItem, NewApiPricingResult, NewApiRechargeAgreement, NewApiRechargeOrderResult, NewApiRechargeOrderStatus, NewApiRechargeTiersResult, NewApiTopUpListResult, NewApiTopUpOrderResult, NewApiTopUpRecord, NewApiUserLogListResult, NewApiUserLogRecord} from "./new-api-types.js";
 
 /**
  * 从一条账单的 `other` 字段里读出 Agent Run 号。
@@ -321,7 +321,7 @@ export function createNewApiBillingOps(request: NewApiRequest) {
         /** 整个求和的时间上限（毫秒），到点就停并标 truncated。缺省 20 秒。 */
         budgetMs?: number;
       } = {},
-    ): Promise<NewApiCapabilityQuotaResult> {
+    ): Promise<NewApiAgentRunQuotaResult> {
       const wanted = new Set(agentRunIds.filter((id) => typeof id === "string" && id.length > 0));
       if (wanted.size === 0) return { quota: 0, matched: 0, truncated: false };
 

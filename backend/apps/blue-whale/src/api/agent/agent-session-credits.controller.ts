@@ -120,17 +120,28 @@ export class AgentSessionCreditsController {
     const summed = await this.account.sumAgentRunQuota(token, agentRunIds, window);
     // 只有一部分 Run 读到了号：剩下那些的花费查不到，求和必然偏小。Run 号理应永远存在，所以
     // 这一条如今只是防御——但它守的失真是真的，与翻页到顶同一种，走同一个字段告诉前端。
-    //
-    // 注意还有一种偏小这里看不出来：券退役上线**之前**产生的账单写的是 run_capability_id，
-    // 没有 agent_run_id，因此老会话的历史消耗会查成 0。这是一次性的、只影响历史数据的断层。
     const partiallyAttributed = agentRunIds.length < runs.length;
+
+    // 有 Run 号，却一条账单都没匹配上——这同样是「不知道」，不是 0。
+    //
+    // 最常见的成因是券退役上线**之前**产生的账单：那些行写的是 `other.run_capability_id`，
+    // 没有 `agent_run_id`，按新口径一条都查不到。此外还有账单尚未回填、上游取数为空等。
+    //
+    // 上面 `agentRunIds.length === 0` 那一支已经立过规矩：本层分辨不了「真的花了 0」和
+    // 「查不到」时就不编数字，`credits: null` 就是不知道（审查 W·P1）。这里是同一件事的
+    // 另一半——此前它漏了，于是一个有 12 个 Run、真花过钱的老会话会返回
+    // `credits: 0, truncated: false`，一个带着「确切」背书的错误答案。
+    //
+    // 判据是 `matched === 0` 而不是 `quota === 0`：免费模型会留下一条 quota 为 0 的账单行，
+    // 那时 `matched` 是 1，能与「一行都没有」区分开。
+    const nothingMatched = summed.matched === 0;
     return ok({
-      credits: quotaToCredits(summed.quota),
-      quota: summed.quota,
+      credits: nothingMatched ? null : quotaToCredits(summed.quota),
+      quota: nothingMatched ? null : summed.quota,
       matched: summed.matched,
       runCount: runs.length,
       // 翻页到顶时 quota 是下界而非确切值，如实告诉前端，别把偏小的数说成确切花费。
-      truncated: summed.truncated || partiallyAttributed,
+      truncated: summed.truncated || partiallyAttributed || nothingMatched,
     });
   }
 

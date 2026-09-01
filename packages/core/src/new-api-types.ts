@@ -229,15 +229,18 @@ export interface NewApiUserLogListResult {
 }
 
 /**
- * IKAFPC：按能力券号汇总的消费。
+ * IKAFPC / IKCGE7：按 Agent Run 号汇总的消费。
  *
- * **归属只认券号，不认时间窗。** new-api 只有「用户」这一个维度，没有会话与项目；同一个账号
- * 完全可能同时跑两个 Agent 会话，也完全可能一边对话一边在 dock 栏出图。按「用户 + 时间窗」
- * 求和会把这些账全算进来。而 new-api 已经把 `other.run_capability_id` 写进了每一笔走能力券的
- * 账单，一张券对应一次 Run，逐笔精确——出图出片不走能力券链路，账单上根本没有这个字段，
+ * **归属只认 Run 号，不认时间窗。** new-api 只有「用户」这一个维度，没有会话与项目；同一个
+ * 账号完全可能同时跑两个 Agent 会话，也完全可能一边对话一边在 dock 栏出图。按「用户 + 时间窗」
+ * 求和会把这些账全算进来。而 new-api 把 `other.agent_run_id` 写进了每一笔经蓝鲸网关的账单，
+ * 一个 Run 号对应一次运行，逐笔精确——出图出片不走 Agent 链路，账单上根本没有这个字段，
  * 天然被排除。
+ *
+ * 券退役前这一列叫 `other.run_capability_id`（IKCGE7 改名）。上线之前产生的账单只有旧列，
+ * 按新口径一条都匹配不上，所以 `matched === 0` 时调用方必须报「不知道」而不是 0。
  */
-export interface NewApiCapabilityQuotaResult {
+export interface NewApiAgentRunQuotaResult {
   /** 汇总到的 quota 总额（未换算成积分；换算是展示层的事）。 */
   quota: number;
   /** 命中的账单条数，用于判断「真的是 0」还是「一条都没查到」。 */

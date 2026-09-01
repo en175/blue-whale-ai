@@ -1,8 +1,8 @@
-// IKAFPC：按能力券号汇总本会话消费。
+// IKAFPC / IKCGE7：按 Agent Run 号汇总本会话消费（券退役前认的是券号）。
 //
-// 这里锁住的是全案的正确性核心——**归属只认券号，不认时间窗**。new-api 只有「用户」这一个
+// 这里锁住的是全案的正确性核心——**归属只认 Run 号，不认时间窗**。new-api 只有「用户」这一个
 // 维度，同一个账号可能同时跑两个 Agent 会话、也可能一边对话一边出图；按时间窗求和会把这些
-// 全算进来，而按券号筛是逐笔精确的。
+// 全算进来，而按 Run 号筛是逐笔精确的。
 import { describe, expect, it } from "vitest";
 
 import { createNewApiClient } from "./new-api-client.js";
@@ -36,7 +36,7 @@ function clientReturning(pages: Array<Array<ReturnType<typeof log>>>, urls: stri
 }
 
 describe("sumAgentRunQuota", () => {
-  it("只把属于这些券的账加起来", async () => {
+  it("只把属于这些 Run 的账加起来", async () => {
     const client = clientReturning([[log(100, "run_a"), log(250, "run_b")]]);
     const result = await client.sumAgentRunQuota("sk-user", ["run_a", "run_b"]);
     expect(result).toEqual({ quota: 350, matched: 2, truncated: false });
@@ -49,14 +49,14 @@ describe("sumAgentRunQuota", () => {
     expect(result.matched).toBe(1);
   });
 
-  it("出图出片的账没有券号，天然被排除", async () => {
-    // dock 栏出图不走能力券链路，账单 other 里根本没有 agent_run_id。
+  it("出图出片的账没有 Run 号，天然被排除", async () => {
+    // dock 栏出图不走 Agent 链路，账单 other 里根本没有 agent_run_id。
     const client = clientReturning([[log(100, "run_a"), log(5000)]]);
     const result = await client.sumAgentRunQuota("sk-user", ["run_a"]);
     expect(result.quota).toBe(100);
   });
 
-  it("other 是坏 JSON 时当作「不属于任何券」丢掉，不炸", async () => {
+  it("other 是坏 JSON 时当作「不属于任何 Run」丢掉，不炸", async () => {
     const client = clientReturning([[{ ...log(100, "run_a"), other: "{not json" }, log(30, "run_a")]]);
     const result = await client.sumAgentRunQuota("sk-user", ["run_a"]);
     expect(result.quota).toBe(30);

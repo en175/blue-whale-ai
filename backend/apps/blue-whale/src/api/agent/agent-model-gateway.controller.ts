@@ -29,6 +29,42 @@ const SUBJECT_HEADER = "x-bw-subject-user-id";
 /** 转给 NewAPI 的 run 标签，落进账单行 other.agent_run_id，供按 run 查花费。 */
 const UPSTREAM_RUN_HEADER = "x-bw-agent-run-id";
 
+/**
+ * 打 NewAPI 用的服务凭证前缀。NewAPI 的 relay 入口**按前缀分流**：带前缀的走网关代打分支，
+ * 不带的落回 `TokenAuth` 去查 token 表。所以前缀不是装饰，配错了整条路静默失效。
+ */
+const BILLING_TOKEN_PREFIX = "bwsvc_";
+
+/**
+ * 启动时校验网关凭证，不留到第一个请求。
+ *
+ * 两种配错都表现为「Agent 不回话」，而且都不会在任何地方变红：
+ *
+ * - **没配**：每次调用 503，日志里只有一行请求级错误，混在正常流量里没人看。
+ * - **配了但没有 `bwsvc_` 前缀**：更阴，因为看起来配好了。NewAPI 按前缀分流，不带前缀的
+ *   凭证根本走不到网关分支，会掉进 `TokenAuth` 查不到 token 行，以一个普通 401 死掉。
+ *
+ * 前缀错直接拒绝启动：操作者明明打算启用它，静默不生效是最坏的结果。没配只记一行——
+ * 不跑 Agent 的部署仍要能起来。这与 NewAPI 侧 `ValidateAgentBillingConfig` 是同一套判断，
+ * 两端必须一起改。
+ */
+export function assertAgentModelGatewayConfig(): void {
+  const token = process.env.NEW_API_AGENT_BILLING_TOKEN?.trim() ?? "";
+  if (!token) {
+    logger.warn(
+      "[internal/agent-model] NEW_API_AGENT_BILLING_TOKEN 未配置：模型网关会对每个请求返回 503，Agent 无法调用模型",
+    );
+    return;
+  }
+  if (!token.startsWith(BILLING_TOKEN_PREFIX)) {
+    throw new Error(
+      `NEW_API_AGENT_BILLING_TOKEN 必须以 ${BILLING_TOKEN_PREFIX} 开头：NewAPI relay 按前缀分流，` +
+        "不带前缀的凭证走不到网关分支，会以普通 401 静默失败",
+    );
+  }
+  logger.info("[internal/agent-model] 模型网关计费凭证已配置");
+}
+
 /** 项目→主人 的解析结果缓存时长。项目归属几乎不变，短缓存足以挡住逐 token 的重复查库。 */
 const OWNER_CACHE_TTL_MS = 60_000;
 /** 查不到时也缓存，但只缓存很短一会儿：挡住坏 Agent 的重试风暴，又不至于让新建项目长时间不可用。 */

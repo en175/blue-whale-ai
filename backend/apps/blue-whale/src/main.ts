@@ -9,10 +9,15 @@ import { closeDefaultTlsLogWriter } from "@blue-whale/core/logging";
 import { traceMiddleware } from "@lib/infra/middleware/trace.middleware.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { AppModule } from "./app.module.js";
+import { assertAgentModelGatewayConfig } from "./api/agent/agent-model-gateway.controller.js";
 
 const port = Number.parseInt(process.env.PORT ?? "3100", 10);
 
 async function bootstrap(): Promise<void> {
+  // 模型网关凭证在这里查，不留到第一个请求才发现（IKCGDX review）。前缀配错会让整条
+  // 网关路径静默失效，所以那一种直接拒绝启动。
+  assertAgentModelGatewayConfig();
+
   // `bodyParser: false` 是下面那两个解析器能按注册顺序生效的前提。
   //
   // NestJS 自带的 body parser 不是"后注册就后跑"——它在 `init()` 时装到用户中间件**之前**，

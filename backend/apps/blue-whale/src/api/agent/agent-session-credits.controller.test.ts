@@ -192,8 +192,8 @@ describe("AgentSessionCreditsController", () => {
     });
   });
 
-  describe("一张券都查不到时", () => {
-    // 这一条是积分恒为 0 那个缺陷的正面：本层分辨不了「没花钱」和「券号没落库」，
+  describe("一个 Run 号都读不到时", () => {
+    // 这一条是积分恒为 0 那个缺陷的正面：本层分辨不了「没花钱」和「Run 号没落库」，
     // 所以它**不编一个数**——credits 给 null，由调用方决定显示什么（审查 W·P1）。
     it("有 Run 却一个 Run 号都读不到 → credits 是 null，不是 0", async () => {
       // Run 号理应永远存在，读不到只可能是 agent 那边返回了意料之外的形状。
@@ -314,6 +314,44 @@ describe("AgentSessionCreditsController", () => {
       const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
       // 上游自己没截断，但我们知道只查了 2 个 Run 里的 1 个。
       expect(data).toMatchObject({ credits: 1, matched: 1, runCount: 2, truncated: true });
+    });
+
+    it("有 Run 号却一条账单都没匹配上 → 同样是 null，不是一个带背书的 0", async () => {
+      // 最常见的成因是券退役上线之前的会话：那些账单行写的是 run_capability_id，按新口径
+      // 一条都查不到。此前这里返回 credits: 0 且 truncated: false——一个有 12 个 Run、
+      // 真花过钱的老会话，会被说成「确切地花了 0」。
+      behaviour = {
+        kind: "runs",
+        items: [
+          { run_id: "r1", created_at: "2026-08-23T07:00:00Z", finished_at: "2026-08-23T07:00:30Z" },
+          { run_id: "r2", created_at: "2026-08-23T07:01:00Z", finished_at: "2026-08-23T07:01:30Z" },
+        ],
+      };
+      const account = createAccount({ quota: 0, matched: 0, truncated: false });
+      const controller = new AgentSessionCreditsController(
+        createProject(true) as never,
+        account.service as never,
+      );
+
+      const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
+      expect(data).toMatchObject({ credits: null, quota: null, matched: 0, runCount: 2, truncated: true });
+    });
+
+    it("免费模型留下的 quota=0 账单不算「查不到」——matched 是 1，就是确切的 0", async () => {
+      // 判据必须是 matched 而不是 quota：免费模型会留下一条 quota 为 0 的真实账单行，
+      // 那是确切的 0，不该被说成不知道。
+      behaviour = {
+        kind: "runs",
+        items: [{ run_id: "r1", created_at: "2026-08-23T07:00:00Z", finished_at: "2026-08-23T07:00:30Z" }],
+      };
+      const account = createAccount({ quota: 0, matched: 1, truncated: false });
+      const controller = new AgentSessionCreditsController(
+        createProject(true) as never,
+        account.service as never,
+      );
+
+      const data = dataOf(await controller.sessionCredits("s1", "p1", USER, BEARER));
+      expect(data).toMatchObject({ credits: 0, quota: 0, matched: 1, truncated: false });
     });
 
     it("truncated 原样透传——翻页到顶时 credits 是下界，不能说成确切花费", async () => {

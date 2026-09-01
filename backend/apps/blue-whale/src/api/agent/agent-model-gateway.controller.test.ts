@@ -183,3 +183,30 @@ describe("AgentModelGatewayController 计费归属", () => {
     expect(seen).toHaveLength(2);
   });
 });
+
+// 凭证配错的两种形态都表现为「Agent 不回话」，且都不会在任何地方变红。启动时就得叫。
+describe("网关凭证的启动校验", () => {
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  async function assertConfig(token: string | undefined): Promise<void> {
+    vi.resetModules();
+    if (token === undefined) delete process.env.NEW_API_AGENT_BILLING_TOKEN;
+    else process.env.NEW_API_AGENT_BILLING_TOKEN = token;
+    const module = await import("./agent-model-gateway.controller.js");
+    module.assertAgentModelGatewayConfig();
+  }
+
+  it("没配只记日志，不拦启动——不跑 Agent 的部署仍要能起来", async () => {
+    await expect(assertConfig(undefined)).resolves.toBeUndefined();
+  });
+
+  it("带 bwsvc_ 前缀的凭证通过", async () => {
+    await expect(assertConfig("bwsvc_deadbeef")).resolves.toBeUndefined();
+  });
+
+  it("配了却没有 bwsvc_ 前缀就拒绝启动——NewAPI 按前缀分流，它会静默走错分支", async () => {
+    await expect(assertConfig("sk-looks-like-a-real-token")).rejects.toThrow("bwsvc_");
+  });
+});

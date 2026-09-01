@@ -95,7 +95,7 @@ export class AccountService {
     return this.client.listUserConsumeLogs(token, options);
   }
 
-  /** IKAFPC：按能力券号汇总实际消费，用于「本会话累计消耗积分」。 */
+  /** IKAFPC / IKCGE7：按 Agent Run 号汇总实际消费，用于「本会话累计消耗积分」。 */
   sumAgentRunQuota(
     token: string,
     agentRunIds: readonly string[],
