@@ -167,6 +167,16 @@ export {
   type AdminSkillCategoryView,
 } from "./skill-admin-repo.js";
 export {
+  createHomepageHeroRepo,
+  HOMEPAGE_HERO_MAX_ENABLED,
+  HomepageHeroLimitError,
+  type HomepageHeroRepo,
+  type HomepageHeroAdminView,
+  type HomepageHeroPublicView,
+  type CreateHomepageHeroInput,
+  type UpdateHomepageHeroInput,
+} from "./homepage-hero-repo.js";
+export {
   createUserRepo,
   type UserRepo,
   type UserInfoView,
