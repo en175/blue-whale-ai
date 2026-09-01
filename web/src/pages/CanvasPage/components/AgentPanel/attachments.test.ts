@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
-import { commitSidebarAttachment, planAttachment } from './attachments';
+import { commitSidebarAttachment, composerAttachmentPreview, planAttachment } from './attachments';
 
 const png = () => new File([''], 'a.png', { type: 'image/png' });
 
@@ -73,5 +73,44 @@ describe('commitSidebarAttachment', () => {
       ok: false,
       error: '画布上传登记失败',
     });
+  });
+});
+
+describe('composerAttachmentPreview', () => {
+  it('turns an uploading sidebar image with a local URL into a thumbnail capsule', () => {
+    expect(
+      composerAttachmentPreview({
+        name: 'shot.png',
+        mediaType: 'image',
+        url: 'blob:https://localhost/preview-1',
+      }),
+    ).toEqual({
+      url: 'blob:https://localhost/preview-1',
+      label: 'shot.png',
+      mediaType: 'image',
+    });
+  });
+
+  it('turns a sidebar video with a remote URL into a thumbnail capsule', () => {
+    expect(
+      composerAttachmentPreview({
+        name: 'clip.mp4',
+        mediaType: 'video',
+        url: 'https://cdn.example/clip.mp4',
+      }),
+    ).toEqual({
+      url: 'https://cdn.example/clip.mp4',
+      label: 'clip.mp4',
+      mediaType: 'video',
+    });
+  });
+
+  it('does not invent a thumbnail when the attachment has no URL yet', () => {
+    expect(
+      composerAttachmentPreview({
+        name: 'shot.png',
+        mediaType: 'image',
+      }),
+    ).toBeUndefined();
   });
 });

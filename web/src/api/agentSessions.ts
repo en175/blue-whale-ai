@@ -448,7 +448,9 @@ const RESOURCE_KIND_TO_CONTRACT: Record<string, 'asset' | 'card'> = {
 function toReferencePart(block: SessionContentBlock): Record<string, unknown> | null {
   const rest = stripInternalFields(block);
   if (block.asset_id && (block.media_type === 'image' || block.media_type === 'video')) {
-    return { ...rest, type: 'asset_ref', asset_id: block.asset_id, media_type: block.media_type };
+    const restWithoutUrl = { ...rest };
+    delete restWithoutUrl.url;
+    return { ...restWithoutUrl, type: 'asset_ref', asset_id: block.asset_id, media_type: block.media_type };
   }
   const resourceId = block.resource_id || block.node_id || block.asset_id;
   if (!resourceId) return null;
