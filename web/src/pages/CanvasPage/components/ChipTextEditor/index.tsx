@@ -36,6 +36,8 @@ export interface ChipRef {
   prompt: string;
   /** 画布图片提及的原图地址。有值时渲染缩略图胶囊（小图）+ 悬浮大图，与对话历史一致。 */
   imageUrl?: string;
+  /** 画布独立视频节点的原片地址。有值时渲染缩略图胶囊 + 悬浮静音预览。 */
+  videoUrl?: string;
 }
 
 export interface ChipTextEditorHandle {
@@ -110,7 +112,7 @@ const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(fun
         const first = root.getFirstChild();
         const paragraph = first && $isElementNode(first) ? first : $createParagraphNode();
         if (paragraph !== first) root.append(paragraph);
-        const chipNode = $createChipNode(chip.id, chip.label, chip.prompt, chip.imageUrl);
+        const chipNode = $createChipNode(chip.id, chip.label, chip.prompt, chip.imageUrl, chip.videoUrl);
         const spaceNode = $createTextNode(' ');
         paragraph.append(chipNode, spaceNode);
         spaceNode.selectEnd();

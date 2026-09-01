@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { fetchAllAssets } from '@/api/assets';
 import type { SessionContentBlock } from '@/api/agentSessions';
 import { ImageMentionChip } from '../ImageMentionChip';
+import { VideoMentionChip } from '../VideoMentionChip';
+import { isCanvasNodeVideo } from './composerImagePreview';
 import styles from './index.module.css';
 
 /**
@@ -55,16 +57,19 @@ export function MessageAssetPreview({
       : null;
     if (!mediaType) return [];
     const mentionIds = [block.chip_id, block.asset_id, block.resource_id, block.node_id];
-    // 画布提及与历史消息已有普通 @ 胶囊时，视频不再额外渲染一次。
-    if (mediaType === 'video' && chips?.some((chip) => mentionIds.includes(chip.id))) return [];
+    const nodeVideo = mediaType === 'video' && isCanvasNodeVideo(block);
+    // 普通 @ 视频已有文字胶囊时不再额外渲染；画布独立视频节点改走缩略图胶囊。
+    if (mediaType === 'video' && !nodeVideo && chips?.some((chip) => mentionIds.includes(chip.id))) return [];
     const assetId = block.asset_id;
     const url = block.url || (assetId ? urlCache.get(assetId) : undefined);
     if (mediaType === 'image' && !url && !assetId) return [];
+    if (nodeVideo && !url && !assetId) return [];
     return [{
       key: assetId || block.resource_id || block.node_id || `image-${index}`,
       assetId,
       url,
       mediaType,
+      nodeVideo,
       label: block.display_label || block.name || (mediaType === 'video' ? '视频' : '图片'),
     }];
   });
@@ -90,6 +95,16 @@ export function MessageAssetPreview({
     <div className={styles.messageAssets}>
       {refs.map((ref) => {
         if (ref.mediaType === 'video') {
+          if (ref.nodeVideo && ref.url) {
+            return <VideoMentionChip key={ref.key} url={ref.url} label={ref.label} />;
+          }
+          if (ref.nodeVideo) {
+            return (
+              <span key={ref.key} className={styles.messageAssetFallback} title={ref.label}>
+                视频：{ref.label}
+              </span>
+            );
+          }
           const label = ref.label.startsWith('[视频]') ? ref.label : `[视频] ${ref.label}`;
           return (
             <span key={ref.key} className={styles.userMediaChip}>

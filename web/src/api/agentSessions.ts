@@ -98,6 +98,11 @@ export interface SessionContentBlock {
   resource_id?: string;
   /** 媒体类型：image / video / audio */
   media_type?: 'image' | 'video' | 'audio';
+  /**
+   * 画布中文分类的 round-trip 字段（如「视频」）。
+   * 上线时 `resource_type` 会被改写成契约的 asset/card，历史快照靠这个认出独立视频节点。
+   */
+  resource_kind?: string;
   /** 展示标签（对外展示的名称） */
   display_label?: string;
   /** 资源文本描述（如商品卡的商品详情） */
