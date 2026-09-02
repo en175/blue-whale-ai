@@ -50,7 +50,7 @@ export interface LogRecord {
    * 扫第一块非环回网卡得出，容器里拿到的就是容器自己的地址。
    */
   host_ip: string;
-  /** OTel deployment.environment.name（NODE_ENV，缺省 local）。六个字段里唯一要外面给的 */
+  /** OTel deployment.environment.name（NODE_ENV，没给写 unknown）。六个字段里唯一要外面给的 */
   deployment_environment_name: string;
   /** OTel service.version —— LOG_SERVICE_VERSION，本仓自己的版本 */
   service_version: string;
@@ -180,14 +180,17 @@ export const LOG_SERVICE_VERSION = "0.1.0";
  * 下面每个值都从进程本来就确知的东西里直接得出，没有东西要配，也就没有东西会忘。
  *
  * 唯一的例外是 `deployment_environment_name`：这是哪一套部署，进程内部推不出来，只能从外面
- * 断言。它读 `NODE_ENV`——每个 Node 部署本来就有的那个，没有为它发明新变量。
+ * 断言。它读 `NODE_ENV`，没有为它发明新变量；没给就写 `unknown`，不写从前那个 `local`——
+ * 生产容器里的 `local` 是一句读起来像事实的假话。整个集群现在正处在这个状态：只有 agent
+ * 容器设了 NODE_ENV，本服务和 New API 在同一套栈里都自报 local。写 unknown 至少在控制台
+ * 里看得见这个洞。
  */
 function processIdentity(envSource: NodeJS.ProcessEnv) {
   return {
     service_name: logServiceName,
     service_instance_id: `${hostname()}-${process.pid}`,
     host_ip: firstNonLoopbackAddress(),
-    deployment_environment_name: envSource.NODE_ENV?.trim() || "local",
+    deployment_environment_name: envSource.NODE_ENV?.trim() || "unknown",
     service_version: LOG_SERVICE_VERSION,
   };
 }
