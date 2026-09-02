@@ -106,11 +106,10 @@
   display: none;
 }
 
-/* ---- 资产网格 (一行5个) ---- */
-.grid {
+/* ---- 初始加载骨架 ---- */
+.skeletonGrid {
   display: grid;
-  /* 2-5 列自适应：容器越宽列数越多 */
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: var(--spacing-lg);
 }
 
@@ -125,6 +124,22 @@
 .cardSkeleton {
   aspect-ratio: 1 / 1;
   border-radius: var(--radius-lg);
+}
+
+/* ---- 虚拟化五列瀑布流 ---- */
+.masonry {
+  width: 100%;
+}
+
+.masonry .card {
+  width: 100%;
+}
+
+.loadState {
+  padding: var(--spacing-lg) 0;
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
 }
 
 /* ---- 资产卡片 ---- */
@@ -191,6 +206,16 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* 图片/视频资源未就绪或加载失败时持续覆盖卡片，不改变已经确定的纵横比。 */
+.mediaSkeleton {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  border-radius: 0;
 }
 
 /* 视频容器：IntersectionObserver 懒加载检测（需 relative 给内部绝对定位元素提供基准） */

@@ -42,9 +42,9 @@ export interface AssetPageData {
 /** 资产页每页条数（规范指定 60） */
 export const ASSET_PAGE_SIZE = 60;
 
-/** 单页查询：type 不传或空表示全部 */
-export function fetchAssetPage(type: AssetType | '', page: number) {
-  const params = new URLSearchParams({ page: String(page), size: String(ASSET_PAGE_SIZE) });
+/** 单页查询：type 不传或空表示全部；页面可按展示密度指定更小的批量。 */
+export function fetchAssetPage(type: AssetType | '', page: number, size = ASSET_PAGE_SIZE) {
+  const params = new URLSearchParams({ page: String(page), size: String(size) });
   if (type) params.set('type', type);
   return apiRequest<AssetPageData>(`/api/assets?${params.toString()}`);
 }
