@@ -221,11 +221,11 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     data.onAddToChat?.(id);
   }, [data, id]);
 
-  /** 保存到共享资产 */
-  const handleSaveToAssets = useCallback(() => {
-    setContextMenu(null);
-    data.onSaveToAssets?.(id);
-  }, [data, id]);
+  /** 保存到共享资产（共享资产概念下线，入口已隐藏） */
+  // const handleSaveToAssets = useCallback(() => {
+  //   setContextMenu(null);
+  //   data.onSaveToAssets?.(id);
+  // }, [data, id]);
 
   /** 编辑器内鼠标抬起时保存选区 */
   const handleEditorMouseUp = useCallback(() => {
@@ -407,9 +407,10 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           <button className={styles.contextItem} onClick={handleAddToChat}>
             <span>添加到聊天</span>
           </button>
+          {/* 共享资产概念下线，入口已隐藏
           <button className={styles.contextItem} onClick={handleSaveToAssets}>
             <span>保存到共享资产</span>
-          </button>
+          </button> */}
           <button className={styles.contextItem} onClick={handleDuplicate}>
             <span>复制</span>
           </button>

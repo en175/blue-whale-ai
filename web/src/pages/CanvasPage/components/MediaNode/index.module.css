@@ -195,6 +195,25 @@
   word-break: break-word;
 }
 
+/* 素材已被删除占位区（灰色方案） */
+.missingBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 280px;
+  min-height: 200px;
+  padding: 20px;
+  box-sizing: border-box;
+  background-color: #161616;
+}
+
+.missingText {
+  color: #777;
+  font-size: 13px;
+}
+
 .progressTrack {
   width: 180px;
   height: 4px;

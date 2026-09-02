@@ -14,7 +14,8 @@ import {
   // Music,
   Library,
   ShoppingBag,
-  BarChart3,
+  // 共享资产隐藏，图标导入同步注释
+  // BarChart3,
   Palette,
   UserRound,
   Box,
@@ -52,7 +53,8 @@ const TOOL_MENUS: Record<ToolMenuKey, { title: string; icon: LucideIcon; items: 
     title: '资产库',
     icon: Library,
     items: [
-      { key: 'shared', label: '共享资产', icon: BarChart3 },
+      // 共享资产概念下线，隐藏入口，仅保留四种卡片
+      // { key: 'shared', label: '共享资产', icon: BarChart3 },
       { key: 'style', label: '风格卡', icon: Palette },
       { key: 'character', label: '角色卡', icon: UserRound },
       { key: 'object', label: '物体卡', icon: Box },

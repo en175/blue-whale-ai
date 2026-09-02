@@ -82,12 +82,26 @@ export interface CanvasSaveData {
   nodes: string;
 }
 
-/** 序列化节点：剥离回调函数与内部测量字段，仅保留 id/type/position/data */
+/** 序列化节点：剥离回调函数、内部测量字段与派生的素材缺失标记，仅保留 id/type/position/data */
 export function serializeNodes(nodes: Node[]): string {
   const clean = nodes.map((n) => {
     const data: Record<string, unknown> = {};
     Object.entries((n.data ?? {}) as Record<string, unknown>).forEach(([k, v]) => {
-      if (typeof v !== 'function') data[k] = v;
+      if (typeof v === 'function') return;
+      // 派生标记不持久化：重新进画布时按 snapshot 资产字典重新计算
+      if (k === 'assetMissing') return;
+      // 运行期上下文不持久化：水合时由 CanvasPage 按当前项目重新注入
+      if (k === 'projectId') return;
+      if ((k === 'images' || k === 'initialRefs') && Array.isArray(v)) {
+        data[k] = v.map((item) => {
+          if (item == null || typeof item !== 'object') return item;
+          const copy = { ...(item as Record<string, unknown>) };
+          delete copy.missing;
+          return copy;
+        });
+        return;
+      }
+      data[k] = v;
     });
     return { id: n.id, type: n.type, position: n.position, data };
   });
