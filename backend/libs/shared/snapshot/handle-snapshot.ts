@@ -48,7 +48,6 @@ export interface SnapshotData {
     version: number | null;
   };
   conversation_messages: readonly unknown[];
-  agent_runs: readonly unknown[];
   plan_messages: readonly unknown[];
   scene_cards: readonly unknown[];
   plan_applications: readonly unknown[];
@@ -137,20 +136,6 @@ export async function handleGetSnapshot(
         })),
       }),
     ),
-    agent_runs: conversation.agent_runs.map((run) => ({
-      ...run,
-      agent_run_id: wireInteger(run.agent_run_id),
-      conversation_id: wireInteger(run.conversation_id),
-      active_input_request:
-        run.active_input_request === null
-          ? null
-          : {
-              ...run.active_input_request,
-              input_request_id: wireInteger(
-                run.active_input_request.input_request_id,
-              ),
-            },
-    })),
     plan_messages: conversation.plan_messages.map((plan) => ({
       ...plan,
       message_id: wireInteger(plan.message_id),
