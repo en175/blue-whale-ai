@@ -3,7 +3,7 @@
  * ============================================ */
 
 import { memo, useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo } from 'react';
-import { Play, Trash2, RotateCw, AlertCircle, Loader2, Plus } from 'lucide-react';
+import { Trash2, RotateCw, AlertCircle, Loader2, Plus } from 'lucide-react';
 import { fetchAssetPage, deleteAsset, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
 import { createAsset as createMaterialAsset } from '@/api/material';
 import { uploadAssetFile } from '@/utils/upload';
@@ -17,6 +17,7 @@ import AssetDetailModal from './components/AssetDetailModal';
 import CharacterLibrary from './components/CharacterLibrary';
 import { assetMediaDisplay } from './assetMediaSrc';
 import { appendUniqueAssets, assetAspectRatio, hasNextAssetPage } from './assetGrid';
+import { startVideoPreview, stopVideoPreview } from './videoPreview';
 import styles from './index.module.css';
 
 /** 筛选类型：all 表示不传 type */
@@ -166,7 +167,6 @@ function VideoThumb({
   onInView?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [playing, setPlaying] = useState(false);
   const [inView, setInView] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -218,40 +218,34 @@ function VideoThumb({
     return () => video.removeEventListener('loadeddata', checkReady);
   }, [inView, onLoaded]);
 
-  const startPlay = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.muted = false;
-    void video.play().catch(() => setPlaying(false));
+  const startPreview = () => {
+    startVideoPreview(videoRef.current);
   };
 
+  const stopPreview = () => {
+    stopVideoPreview(videoRef.current);
+  };
+
+  useEffect(() => () => stopVideoPreview(videoRef.current), []);
+
   return (
-    <>
-      <div ref={containerRef} className={styles.videoContainer}>
-        <video
-          ref={videoRef}
-          className={styles.media}
-          src={inView ? url : undefined}
-          muted
-          playsInline
-          preload="metadata"
-          controls={playing}
-          onLoadedData={() => onLoaded?.()}
-          onError={() => onError?.()}
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          onEnded={() => setPlaying(false)}
-          onClick={() => {
-            if (!playing) startPlay();
-          }}
-        />
-      </div>
-      {!playing && inView && (
-        <button type="button" className={styles.playIcon} title="播放视频" onClick={startPlay}>
-          <Play size={22} fill="#fff" strokeWidth={0} />
-        </button>
-      )}
-    </>
+    <div
+      ref={containerRef}
+      className={styles.videoContainer}
+      onMouseEnter={startPreview}
+      onMouseLeave={stopPreview}
+    >
+      <video
+        ref={videoRef}
+        className={styles.media}
+        src={inView ? url : undefined}
+        muted
+        playsInline
+        preload="metadata"
+        onLoadedData={() => onLoaded?.()}
+        onError={() => onError?.()}
+      />
+    </div>
   );
 }
 

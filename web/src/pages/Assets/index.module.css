@@ -218,7 +218,7 @@
   border-radius: 0;
 }
 
-/* 视频容器：IntersectionObserver 懒加载检测（需 relative 给内部绝对定位元素提供基准） */
+/* 视频容器：承载懒加载检测与悬浮预览事件。 */
 .videoContainer {
   position: relative;
   width: 100%;
@@ -230,11 +230,9 @@
   width: 88%;
 }
 
-/* 卡片本身负责打开详情，缩略图里的媒体控件不单独消费点击。 */
+/* 卡片本身负责打开详情，媒体本体不单独消费点击。视频容器需保留指针事件以触发悬浮预览。 */
 .thumbnail .media,
-.thumbnail .videoContainer,
-.thumbnail .audioPlayer,
-.thumbnail .playIcon {
+.thumbnail .audioPlayer {
   pointer-events: none;
 }
 
@@ -262,31 +260,6 @@
 
 .deleteBtn:hover {
   background-color: var(--color-error);
-}
-
-/* 视频播放图标：绝对定位居中覆盖在缩略图上 */
-.playIcon {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-full);
-  background-color: rgba(0, 0, 0, 0.4);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: transform var(--transition-fast);
-  z-index: 2;
-}
-
-.card:hover .playIcon {
-  transform: translate(-50%, -50%) scale(1.1);
 }
 
 /* 音频图标 */
