@@ -50,7 +50,7 @@ export interface LogRecord {
    * 扫第一块非环回网卡得出，容器里拿到的就是容器自己的地址。
    */
   host_ip: string;
-  /** OTel deployment.environment.name（NODE_ENV，没给写 unknown）。六个字段里唯一要外面给的 */
+  /** OTel deployment.environment.name（NODE_ENV，没设就当 production）。见 processIdentity */
   deployment_environment_name: string;
   /** OTel service.version —— LOG_SERVICE_VERSION，本仓自己的版本 */
   service_version: string;
@@ -179,18 +179,26 @@ export const LOG_SERVICE_VERSION = "0.1.0";
  * 而漏配一个不会报错，只会安静地写出一个看起来很像真的错值。看不出错的字段比没有的字段更坏。
  * 下面每个值都从进程本来就确知的东西里直接得出，没有东西要配，也就没有东西会忘。
  *
- * 唯一的例外是 `deployment_environment_name`：这是哪一套部署，进程内部推不出来，只能从外面
- * 断言。它读 `NODE_ENV`，没有为它发明新变量；没给就写 `unknown`，不写从前那个 `local`——
- * 生产容器里的 `local` 是一句读起来像事实的假话。整个集群现在正处在这个状态：只有 agent
- * 容器设了 NODE_ENV，本服务和 New API 在同一套栈里都自报 local。写 unknown 至少在控制台
- * 里看得见这个洞。
+ * `deployment_environment_name` 同样不要变量，理由值得写下来，因为前两版都想错了：设了
+ * `NODE_ENV` 就用它（Vitest 会设 test，生产镜像会设 production），没设就当 production。
+ *
+ * 「当 production」听着不稳，直到问一句：这个字段谁在读？它在火山控制台里被读，而一行日志
+ * 要进控制台，得由一个拿着 TLS 凭证的进程发出去——也就是一套真实部署。开发机什么都不上报，
+ * 在那儿叫 production 不花任何人的钱。**默认值在唯一会读到它的地方就是对的。**
+ * 前两版（`APP_ENV > NODE_ENV > local`，以及 `NODE_ENV > unknown`）都让集群里的容器自报了
+ * 一个假值——只有 agent 容器设了 NODE_ENV，本服务和 New API 在同一套栈里都报 local——
+ * 而且都把修复寄托在有人记得配变量上。
+ *
+ * 这个默认唯一做不到的，是在测试站与生产共用一个 topic 时把两者分开。今天靠 `host_ip` 和
+ * `service_instance_id` 分得开；哪天分不开了，**那时**变量才配得上被加进来——为一个已经证明
+ * 的需求，而不是先摆着等人忘配。
  */
 function processIdentity(envSource: NodeJS.ProcessEnv) {
   return {
     service_name: logServiceName,
     service_instance_id: `${hostname()}-${process.pid}`,
     host_ip: firstNonLoopbackAddress(),
-    deployment_environment_name: envSource.NODE_ENV?.trim() || "unknown",
+    deployment_environment_name: envSource.NODE_ENV?.trim() || "production",
     service_version: LOG_SERVICE_VERSION,
   };
 }
