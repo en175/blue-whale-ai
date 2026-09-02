@@ -37,6 +37,11 @@ export class AssetService {
     return this.repo.linkAssetToProject(input);
   }
 
+  /** IKCNLS：上传 md5 去重——查该用户未删同 md5 最新资产。 */
+  findOwnedByMd5(userId: string, md5: string) {
+    return this.repo.findOwnedByMd5(userId, md5);
+  }
+
   findOwnedSource(sourceAssetId: string, userId: string) {
     return this.repo.findOwnedSource(sourceAssetId, userId);
   }

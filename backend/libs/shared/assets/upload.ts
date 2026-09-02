@@ -14,6 +14,17 @@ export type CompleteAssetInput = PresignAssetInput & {
   width?: number;
   height?: number;
   duration?: number;
+  /** IKCNLS：落库时写入 md5，供去重查询。 */
+  md5?: string;
+};
+
+/** IKCNLS：上传 md5 去重输入（presign 前判断）。 */
+export type DedupAssetInput = {
+  type: "image" | "video" | "audio";
+  mime: string;
+  size: number;
+  md5: string;
+  project_id?: string;
 };
 
 export interface AssetUploadStorage {
@@ -88,6 +99,50 @@ export async function handlePresignAsset(
   });
 }
 
+/**
+ * IKCNLS：上传 md5 去重（presign 前判断）。
+ * 命中：返回该用户未删同 md5 的最优资产（toAssetResponse），并建 project_asset 关联，前端跳过 presign→PUT→complete 3 步。
+ * 未命中：返回需上传标记，前端走 3 步。
+ */
+export async function handleDedupAsset(
+  userId: string,
+  input: DedupAssetInput,
+  deps: {
+    projects: ProjectService;
+    uploads: AssetService;
+  },
+) {
+  const invalid = validateUploadInput(input);
+  if (invalid) return invalid;
+  // 去重是 presign 前的 fast-path，绝不该阻断正常上传：md5 缺失/格式不标准 → 返回 {dedup:false}，
+  // 前端走 presign→PUT→complete 3 步。type/mime/size 校验保持 fail-closed（presign/complete 也会校验）。
+  if (!input.md5 || !/^[a-f0-9]{32}$/i.test(input.md5)) {
+    return ok({ dedup: false });
+  }
+  const projectId = input.project_id || "0";
+  if (
+    projectId !== "0" &&
+    !(await deps.projects.findOwnedById(projectId, userId))
+  ) {
+    return fail(100301, "资源不存在");
+  }
+  const existing = await deps.uploads.findOwnedByMd5(userId, input.md5);
+  // 命中但 type 不一致（同 md5 但存储时误标类型）→ 视为未命中，避免返回错误类型资产。
+  if (!existing || existing.type !== input.type) {
+    // 未命中：标记需上传，前端走 presign→PUT→complete。
+    return ok({ dedup: false });
+  }
+  // 命中：挂到目标项目（幂等），返回资产直接复用。
+  if (projectId !== "0") {
+    await deps.uploads.linkAssetToProject({
+      userId,
+      assetId: existing.id,
+      projectId,
+    });
+  }
+  return ok({ dedup: true, asset: toAssetResponse(existing) });
+}
+
 export async function handleCompleteAsset(
   userId: string,
   input: CompleteAssetInput,
@@ -146,6 +201,7 @@ export async function handleCompleteAsset(
     ...(input.width == null ? {} : { width: input.width }),
     ...(input.height == null ? {} : { height: input.height }),
     ...(input.duration == null ? {} : { duration: input.duration }),
+    ...(input.md5 ? { md5: input.md5 } : {}),
   });
 
   return ok(toAssetResponse(asset));

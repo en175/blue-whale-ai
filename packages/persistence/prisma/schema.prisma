@@ -15,6 +15,7 @@ model assets {
   type              String   @db.VarChar(16)
   storage_key       String?  @db.VarChar(512)
   content_sha256    String?  @db.VarChar(64)
+  md5               String?  @db.VarChar(32)
   url               String   @db.VarChar(512)
   mime              String?  @db.VarChar(64)
   size              BigInt?
@@ -37,6 +38,8 @@ model assets {
   // IKBMDM：findLiveRefs 按 storage_key IN + is_delete=false 做引用核对，需要 storage_key 前缀索引。
   @@index([storage_key, is_delete], map: "idx_asset_storage_live")
   @@index([is_delete, deleted_at], map: "idx_asset_gc_candidates")
+  // IKCNLS：上传 md5 去重按 (user_id, md5) 查未删资产，is_delete 条件支撑查询。
+  @@index([user_id, md5, is_delete], map: "idx_asset_user_md5")
 }
 
 /// 画布共享资产（IK9QKP）：用户主动保存、跨项目可复用的自包含快照库。
