@@ -7,8 +7,10 @@ import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import {
   handleCompleteAsset,
+  handleDedupAsset,
   handlePresignAsset,
   type CompleteAssetInput,
+  type DedupAssetInput,
   type PresignAssetInput,
 } from "@lib/shared/assets/upload.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -36,6 +38,18 @@ export class AgentAssetsController {
     @Body() body: PresignAssetInput,
   ) {
     return handlePresignAsset(user.userId, body, this.storage.uploads);
+  }
+
+  /** IKCNLS：上传 md5 去重（presign 前判断）。命中返回已有资产并建关联，未命中标记需上传。 */
+  @Post("uploads/dedup")
+  async uploadsDedup(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: DedupAssetInput,
+  ) {
+    return handleDedupAsset(user.userId, body, {
+      projects: this.projects,
+      uploads: this.assets,
+    });
   }
 
   @Post("uploads/complete")

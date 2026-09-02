@@ -215,3 +215,59 @@ describe("AssetRepo upload persistence", () => {
     expect(completed).toBe(true);
   });
 });
+
+describe("AssetRepo upload md5 去重（IKCNLS）", () => {
+  it("findOwnedByMd5 查该用户未删同 md5 最新资产", async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      id: 999n,
+      type: "image",
+      storage_key: "uploads/9/image/a.png",
+      url: "https://bucket.tos.test/uploads/9/image/a.png",
+      mime: "image/png",
+      size: 1n,
+      width: null,
+      height: null,
+      duration_ms: null,
+    });
+    const prisma = { assets: { findFirst } };
+    const repo = createAssetRepo(prisma as never);
+
+    const found = await repo.findOwnedByMd5("9", "abc123");
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { user_id: 9n, md5: "abc123", status: "normal", is_delete: false },
+      orderBy: { id: "desc" },
+      select: expect.any(Object),
+    });
+    expect(found).toMatchObject({ id: "999" });
+  });
+
+  it("findOwnedByMd5 无命中返回 null", async () => {
+    const prisma = { assets: { findFirst: vi.fn().mockResolvedValue(null) } };
+    const repo = createAssetRepo(prisma as never);
+    await expect(repo.findOwnedByMd5("9", "nonexistent")).resolves.toBeNull();
+  });
+
+  it("createUploadedAsset 落库写入 md5", async () => {
+    const assets = {
+      create: vi.fn().mockResolvedValue({
+        id: 42n, type: "image", storage_key: "k", url: "u",
+        mime: "image/png", size: 1n, width: null, height: null, duration_ms: null,
+      }),
+    };
+    const project_asset = { upsert: vi.fn().mockResolvedValue({}) };
+    const prisma = {
+      $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({ assets, project_asset })),
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    await repo.createUploadedAsset({
+      userId: "9", projectId: "55", type: "image", mime: "image/png",
+      size: 1, storageKey: "k", url: "u", md5: "abc123",
+    });
+
+    expect(assets.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ md5: "abc123" }),
+      select: expect.any(Object),
+    });
+  });
+});

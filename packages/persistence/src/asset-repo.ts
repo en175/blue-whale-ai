@@ -126,6 +126,8 @@ export interface AssetRepo {
     userId: string,
     storageKey: string,
   ): Promise<PendingUploadAsset | null>;
+  /** IKCNLS：上传 md5 去重——查该用户未删 normal 资产里 md5 相同的最新一条。命中返回资产；无则 null。 */
+  findOwnedByMd5(userId: string, md5: string): Promise<PendingUploadAsset | null>;
   createUploadedAsset(input: {
     userId: string;
     projectId: string;
@@ -137,6 +139,7 @@ export interface AssetRepo {
     width?: number;
     height?: number;
     duration?: number;
+    md5?: string;
   }): Promise<PendingUploadAsset>;
 }
 
@@ -527,6 +530,19 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       });
       return row ? toUploadAsset(row) : null;
     },
+    async findOwnedByMd5(userId, md5) {
+      const row = await prisma.assets.findFirst({
+        where: {
+          user_id: BigInt(userId),
+          md5,
+          status: "normal",
+          is_delete: false,
+        },
+        orderBy: { id: "desc" },
+        select: uploadAssetSelect,
+      });
+      return row ? toUploadAsset(row) : null;
+    },
     async createUploadedAsset(input) {
       // IKCNLP（方案C）：上传落库时若归属具体项目（project_id != 0）则自动建 project_asset 关联。
       const row = await prisma.$transaction(async (tx) => {
@@ -544,6 +560,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
             ...(input.duration == null
               ? {}
               : { duration_ms: Math.round(input.duration * 1000) }),
+            ...(input.md5 ? { md5: input.md5 } : {}),
             source: "uploaded",
             status: "normal",
           },
