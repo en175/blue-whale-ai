@@ -24,6 +24,12 @@ import {
 
 const traceLogger = createLogger("trace-middleware");
 
+/** `/api/agent/v1/projects/:p/sessions/:s/...` 里的会话 id；不是会话路由就返回空对象。 */
+function sessionIdFrom(pathname: string): Record<string, string> {
+  const match = /\/sessions\/([A-Za-z0-9_-]{1,128})(?:\/|$)/.exec(pathname);
+  return match ? { session_id: match[1]! } : {};
+}
+
 export const traceMiddleware: RequestHandler = (req, res, next) => {
   const resolved = resolveTraceId(
     req.get(TRACE_ID_HEADER) ?? null,
@@ -72,6 +78,9 @@ export const traceMiddleware: RequestHandler = (req, res, next) => {
           event: "http.request",
           http_request_method: req.method,
           url_path: req.path,
+          // 会话 id 从路径里提出来当字段（验收标准：会话 + 时间窗，只靠日志定位到 Run）。
+          // 它本来就在 url_path 里，grep 得到——但那样它只是一段文本，过滤和聚合都用不上。
+          ...sessionIdFrom(req.path),
           http_response_status_code: status,
           duration_ms: Math.round(durationMs),
           user_agent_original: req.get("user-agent") ?? "",
