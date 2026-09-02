@@ -16,6 +16,12 @@ export interface ProjectRepo {
   listByOwner(ownerId: string): Promise<ProjectView[]>;
   create(ownerId: string, name: string): Promise<ProjectView>;
   findOwnedById(id: string, ownerId: string): Promise<ProjectView | null>;
+  /**
+   * 按项目号解出主人（New API 用户号），不要求调用方先知道主人是谁。
+   * 计费归属专用：模型网关拿 Agent 声明的项目号来这里换计费主体，Agent 因此无法自报记谁的账。
+   * 逻辑删除的项目返回 null——已删项目不该再产生花费。
+   */
+  findOwnerId(id: string): Promise<string | null>;
   rename(
     id: string,
     ownerId: string,
@@ -136,6 +142,20 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
         where: { id: BigInt(id), owner_id: BigInt(ownerId), is_delete: 0 },
       });
       return row ? toView(row) : null;
+    },
+    async findOwnerId(id) {
+      let key: bigint;
+      try {
+        key = BigInt(id);
+      } catch {
+        // 非数字项目号：调用方是网关而非受控前端，坏输入按查不到处理，不要抛到 500。
+        return null;
+      }
+      const row = await prisma.project.findFirst({
+        where: { id: key, is_delete: 0 },
+        select: { owner_id: true },
+      });
+      return row ? row.owner_id.toString() : null;
     },
     async rename(id, ownerId, name) {
       const finalName = await uniqueName(

@@ -60,7 +60,7 @@ export {
   type NewApiAdminManageUserInput,
   type NewApiAdminTopUpRow,
   type NewApiAdminUserRow,
-  type NewApiCapabilityQuotaResult,
+  type NewApiAgentRunQuotaResult,
   type NewApiLogRow,
   type NewApiLogStat,
   type NewApiPageInfo,

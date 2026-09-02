@@ -52,10 +52,16 @@ function createFakeAgent() {
  * 这里补上这三个即可，既不依赖 express 的提升位置，又保留了真实的 socket、
  * flushHeaders 与管道行为——本工单要验证的正是这一层。
  */
-function createBff() {
+function createBff(
+  options: {
+    findOwnedById?: (projectId: string, userId: string) => Promise<unknown>;
+    userId?: string;
+  } = {},
+) {
   const controller = new AgentV1ProxyController({
-    findOwnedById: async () => ({ id: "p1" }),
+    findOwnedById: options.findOwnedById ?? (async () => ({ id: "p1" })),
   } as never);
+  const userId = options.userId ?? "u1";
   return createServer((req, res) => {
     const shim = res as typeof res & {
       status(code: number): typeof shim;
@@ -75,7 +81,7 @@ function createBff() {
       shim.end(JSON.stringify(body));
     };
     Object.assign(req, { originalUrl: req.url, body: undefined });
-    void controller.proxy(req as never, shim as never, { userId: "u1" } as never);
+    void controller.proxy(req as never, shim as never, { userId } as never);
   });
 }
 
@@ -126,5 +132,94 @@ describe("AgentV1ProxyController 上游超时语义（IKA2V3）", () => {
     const response = await fetch(`http://127.0.0.1:${bffPort}/api/agent/v1/projects/p1/sessions`);
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+});
+
+/**
+ * IKCGF1 ②c：用户侧的归属防线。
+ *
+ * 券退役后计费主体由网关拿**项目号**查 `project.owner_id` 解出（IKCGDX）。整条链上「一个用户
+ * 不能让另一个用户付钱」这件事，实际就落在这个入口的 `findOwnedById` 上——它放行了，后面的
+ * 网关只会老老实实按那个项目的主人记账。所以这道门必须有用例守着。
+ */
+describe("AgentV1ProxyController 归属防线（IKCGF1 ②c）", () => {
+  let agent: Server | undefined;
+  let agentPort = 0;
+  let seen: { url?: string; headers?: Record<string, unknown> }[] = [];
+  let bff: Server | undefined;
+  let bffPort = 0;
+
+  beforeEach(async () => {
+    seen = [];
+    agent = createServer((req, res) => {
+      seen.push({ url: req.url, headers: req.headers });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    agentPort = await listen(agent);
+    process.env.AGENT_SERVICE_BASE_URL = `http://127.0.0.1:${agentPort}`;
+  });
+
+  afterEach(async () => {
+    await close(bff);
+    await close(agent);
+    delete process.env.AGENT_SERVICE_BASE_URL;
+  });
+
+  async function start(options: Parameters<typeof createBff>[0]) {
+    bff = createBff(options);
+    bffPort = await listen(bff);
+  }
+
+  it("不是项目主人就 403，且一个字节都不打给 agent——打了就可能计费", async () => {
+    await start({ findOwnedById: async () => null, userId: "u-outsider" });
+
+    const response = await fetch(`http://127.0.0.1:${bffPort}/api/agent/v1/projects/p-someone-else/sessions`);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ code: 403 });
+    // 关键：上游没被调用。归属没过就不该产生任何可计费的动作。
+    expect(seen).toHaveLength(0);
+  });
+
+  it("归属按「URL 里的项目号 + 会话里的用户」判，不看调用方说了什么", async () => {
+    const calls: Array<[string, string]> = [];
+    await start({
+      findOwnedById: async (projectId, userId) => {
+        calls.push([projectId, userId]);
+        return { id: projectId };
+      },
+      userId: "u-real",
+    });
+
+    await fetch(`http://127.0.0.1:${bffPort}/api/agent/v1/projects/p-42/sessions`, {
+      headers: {
+        // 调用方自己声明的项目号与用户号：都不该被采信。
+        "x-blue-whale-project-id": "p-999",
+        "x-blue-whale-user-id": "u-999",
+      },
+    });
+
+    expect(calls).toEqual([["p-42", "u-real"]]);
+  });
+
+  it("透给 agent 的项目号与用户号由本层覆写，浏览器凭证不外泄", async () => {
+    await start({ userId: "u-real" });
+
+    await fetch(`http://127.0.0.1:${bffPort}/api/agent/v1/projects/p-42/sessions`, {
+      headers: {
+        authorization: "Bearer users-own-browser-token",
+        "x-blue-whale-project-id": "p-999",
+        "x-blue-whale-user-id": "u-999",
+      },
+    });
+
+    expect(seen).toHaveLength(1);
+    const headers = seen[0]!.headers as Record<string, string>;
+    // 伪造的两个头被本层的真值盖掉。
+    expect(headers["x-blue-whale-project-id"]).toBe("p-42");
+    expect(headers["x-blue-whale-user-id"]).toBe("u-real");
+    // 浏览器那把用户凭证被丢弃，换成 agent 服务凭证——它绝不该到达 agent。
+    expect(headers.authorization).not.toContain("users-own-browser-token");
   });
 });
