@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createLogger, toBlueWhaleTimestamp } from "./logger.js";
-import { runWithTraceId } from "./trace.js";
+import { runWithRequestContext, runWithTraceId } from "./trace.js";
 import type { TlsLogRecord, TlsLogWriter } from "./tls-writer.js";
 
 function fakeWriter(): { writer: TlsLogWriter; records: TlsLogRecord[] } {
@@ -49,9 +49,13 @@ describe("createLogger —— 结构化字段", () => {
       body: "hello tls",
     });
     // 恒为 +08:00：三仓同一个墙上时钟，且偏移写死不随 TZ 变。
-    expect(parsed.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+08:00$/);
+    expect(parsed.timestamp).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+08:00$/,
+    );
     // 仓库相对路径，不是构建机上的绝对路径——后者说的是构建机而不是文件，副本之间比不了。
-    expect(parsed.code_file_path).toMatch(/^packages\/core\/src\/logger\.test\.ts$/);
+    expect(parsed.code_file_path).toMatch(
+      /^packages\/core\/src\/logger\.test\.ts$/,
+    );
     // 行号自成一个字段，不再和路径粘在一起——粘着既过滤不了也排序不了（D2）。
     expect(typeof parsed.code_line_number).toBe("number");
     expect(parsed.code_line_number).toBeGreaterThan(0);
@@ -65,6 +69,7 @@ describe("createLogger —— 结构化字段", () => {
       "timestamp",
       "service_name",
       "service_instance_id",
+      "host_ip",
       "deployment_environment_name",
       "service_version",
       "trace_id",
@@ -98,8 +103,12 @@ describe("createLogger —— 结构化字段", () => {
     logger.error("boom");
     logger.warn("careful");
 
-    expect(JSON.parse(String(errorSpy.mock.calls[0]![0])).severity_text).toBe("error");
-    expect(JSON.parse(String(warnSpy.mock.calls[0]![0])).severity_text).toBe("warn");
+    expect(JSON.parse(String(errorSpy.mock.calls[0]![0])).severity_text).toBe(
+      "error",
+    );
+    expect(JSON.parse(String(warnSpy.mock.calls[0]![0])).severity_text).toBe(
+      "warn",
+    );
   });
 
   it("TLS writer 抛错时日志主通道不受影响", () => {
@@ -141,7 +150,13 @@ describe("createLogger —— 结构化 metric 事件（IK7G9Y）", () => {
     });
     expect(parsed.body).toContain("event=provider_call");
     const keys = records[0]!.contents.map((c) => c.Key);
-    for (const key of ["event", "result", "duration_ms", "provider", "operation"]) {
+    for (const key of [
+      "event",
+      "result",
+      "duration_ms",
+      "provider",
+      "operation",
+    ]) {
       expect(keys).toContain(key);
     }
     logSpy.mockRestore();
@@ -152,7 +167,10 @@ describe("createLogger —— 结构化 metric 事件（IK7G9Y）", () => {
     const { writer } = fakeWriter();
     const logger = createLogger("unit-svc", { ...QUIET, writer });
 
-    logger.metric({ event: "task_finished", fields: { severity_text: "hack", body: "hack" } });
+    logger.metric({
+      event: "task_finished",
+      fields: { severity_text: "hack", body: "hack" },
+    });
 
     const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
     expect(parsed.severity_text).toBe("info");
@@ -170,7 +188,12 @@ describe("createLogger —— 结构化 metric 事件（IK7G9Y）", () => {
       event: "provider_call",
       result: "ok",
       duration_ms: 50,
-      fields: { event: "hack", result: "fail", duration_ms: 9999, provider: "p" },
+      fields: {
+        event: "hack",
+        result: "fail",
+        duration_ms: 9999,
+        provider: "p",
+      },
     });
 
     const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
@@ -208,7 +231,9 @@ describe("createLogger —— 结构化 metric 事件（IK7G9Y）", () => {
 
 describe("toBlueWhaleTimestamp —— 三仓同一个墙上时钟", () => {
   it("恒为 +08:00，带毫秒", () => {
-    expect(toBlueWhaleTimestamp(1756800000000)).toBe("2025-09-02T16:00:00.000+08:00");
+    expect(toBlueWhaleTimestamp(1756800000000)).toBe(
+      "2025-09-02T16:00:00.000+08:00",
+    );
   });
 
   it("偏移写死，不随进程时区变化", () => {
@@ -218,7 +243,9 @@ describe("toBlueWhaleTimestamp —— 三仓同一个墙上时钟", () => {
     try {
       for (const tz of ["UTC", "America/New_York", "Asia/Shanghai"]) {
         process.env.TZ = tz;
-        expect(toBlueWhaleTimestamp(1756800000000)).toBe("2025-09-02T16:00:00.000+08:00");
+        expect(toBlueWhaleTimestamp(1756800000000)).toBe(
+          "2025-09-02T16:00:00.000+08:00",
+        );
       }
     } finally {
       if (original === undefined) delete process.env.TZ;
@@ -228,5 +255,77 @@ describe("toBlueWhaleTimestamp —— 三仓同一个墙上时钟", () => {
 
   it("解析回去与源时刻相等——偏移不是贴上去的假标签", () => {
     expect(Date.parse(toBlueWhaleTimestamp(1756800000000))).toBe(1756800000000);
+  });
+});
+
+describe("createLogger —— 来源地址与脱敏（IKB29O）", () => {
+  it("请求里的每一行都带调用方地址，不只是访问日志那一行", () => {
+    // 出问题的从来不是你预先标注好的那一行，所以地址进 ALS 而不是只写在入口。
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { writer } = fakeWriter();
+    const logger = createLogger("unit-svc", { ...QUIET, writer });
+    runWithRequestContext(
+      { traceId: "t-1", clientAddress: "203.0.113.9", peerAddress: "10.0.0.1" },
+      () => logger.info("deep inside a service"),
+    );
+    const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
+    expect(parsed).toMatchObject({
+      trace_id: "t-1",
+      client_address: "203.0.113.9",
+      network_peer_address: "10.0.0.1",
+    });
+  });
+
+  it("请求之外不写空地址，否则「没有」看起来像「采集失败」", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { writer } = fakeWriter();
+    createLogger("unit-svc", { ...QUIET, writer }).info("a scheduled job");
+    const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
+    expect(parsed).not.toHaveProperty("client_address");
+    expect(parsed).not.toHaveProperty("network_peer_address");
+  });
+
+  it("素材 URL 只留 path——签名在 query 里，而 TLS 是全企业可检索的", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { writer } = fakeWriter();
+    createLogger("unit-svc", { ...QUIET, writer }).info(
+      '下载失败 "https://bucket.tos-cn.volces.com/a/b.mp4?X-Tos-Signature=deadbeef"',
+    );
+    const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
+    expect(parsed.body).toBe(
+      '下载失败 "https://bucket.tos-cn.volces.com/a/b.mp4?…"',
+    );
+  });
+
+  it("按键名抹掉凭证，但不碰用来定位的标识", () => {
+    const logSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { writer } = fakeWriter();
+    createLogger("unit-svc", { ...QUIET, writer }).warn("上游拒绝", {
+      authorization: "Bearer sk-live-1",
+      idempotency_key: "idem-7",
+    });
+    const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
+    expect(parsed.authorization).toBe("[redacted]");
+    expect(parsed.idempotency_key).toBe("idem-7");
+  });
+
+  it("runWithTraceId 在深处换 trace 时保住地址", () => {
+    // worker 领到一条消息、请求被重放——这些地方拿不到 req，抹掉地址的那一行恰恰最可能出错。
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { writer } = fakeWriter();
+    const logger = createLogger("unit-svc", { ...QUIET, writer });
+    runWithRequestContext(
+      {
+        traceId: "outer",
+        clientAddress: "203.0.113.9",
+        peerAddress: "10.0.0.1",
+      },
+      () => runWithTraceId("inner", () => logger.info("nested")),
+    );
+    const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
+    expect(parsed).toMatchObject({
+      trace_id: "inner",
+      client_address: "203.0.113.9",
+    });
   });
 });

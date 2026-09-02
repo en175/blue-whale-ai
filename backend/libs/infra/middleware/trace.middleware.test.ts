@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   getCurrentTraceId,
@@ -8,20 +8,40 @@ import {
 
 import { traceMiddleware } from "./trace.middleware.js";
 
-function mockReq(headers: Record<string, string | undefined> = {}) {
+function mockReq(
+  headers: Record<string, string | undefined> = {},
+  extra: { method?: string; path?: string; remoteAddress?: string } = {},
+) {
   return {
+    method: extra.method ?? "GET",
+    path: extra.path ?? "/api/health",
+    socket: { remoteAddress: extra.remoteAddress },
     get(name: string): string | undefined {
       return headers[name.toLowerCase()];
     },
-  } as { get: (name: string) => string | undefined };
+  } as never;
 }
 
-function mockRes() {
+/**
+ * 中间件现在还挂 finish/close 监听器写访问日志（IKB29O），所以假的 res 得有 once 与
+ * statusCode。`fire` 用来在断言里模拟响应结束——不调用它就是「请求还没答完」。
+ */
+function mockRes(statusCode = 200) {
   const headers: Record<string, string> = {};
+  const listeners: Record<string, (() => void)[]> = {};
   return {
     headers,
+    statusCode,
+    writableEnded: true,
     setHeader(name: string, value: string) {
       headers[name.toLowerCase()] = value;
+    },
+    once(event: string, handler: () => void) {
+      (listeners[event] ??= []).push(handler);
+      return this;
+    },
+    fire(event: string) {
+      for (const handler of listeners[event] ?? []) handler();
     },
   };
 }
@@ -140,7 +160,9 @@ describe("traceMiddleware 入站校验（D6）", () => {
   });
 
   it("没有 X-Trace-Id 时认 traceparent", () => {
-    const req = mockReq({ traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" });
+    const req = mockReq({
+      traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    });
     const res = mockRes();
     let inside: string | null = null;
 
@@ -149,5 +171,102 @@ describe("traceMiddleware 入站校验（D6）", () => {
     });
 
     expect(inside).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
+  });
+});
+
+describe("访问日志与来源地址（IKB29O）", () => {
+  function captureLines(run: () => void): Record<string, unknown>[] {
+    const lines: Record<string, unknown>[] = [];
+    const collect = (...args: unknown[]) => {
+      try {
+        lines.push(JSON.parse(String(args[0])) as Record<string, unknown>);
+      } catch {
+        /* 不是我们的行 */
+      }
+    };
+    const log = vi.spyOn(console, "log").mockImplementation(collect);
+    const warn = vi.spyOn(console, "warn").mockImplementation(collect);
+    const error = vi.spyOn(console, "error").mockImplementation(collect);
+    try {
+      run();
+    } finally {
+      log.mockRestore();
+      warn.mockRestore();
+      error.mockRestore();
+    }
+    return lines;
+  }
+
+  it("每个请求一行，含方法、路径、状态、耗时与调用方地址", () => {
+    // 此前这个服务一行访问日志都没有：一次在路由之前就失败的请求，连「到达过」都证明不了。
+    const res = mockRes(200);
+    const lines = captureLines(() => {
+      traceMiddleware(
+        mockReq(
+          { "x-forwarded-for": "203.0.113.9, 10.0.0.1" },
+          {
+            method: "POST",
+            path: "/api/agent/v1/sessions",
+            remoteAddress: "10.0.0.1",
+          },
+        ),
+        res as never,
+        () => {},
+      );
+      res.fire("finish");
+    });
+    const access = lines.find((line) => line.event === "http.request");
+    expect(access).toMatchObject({
+      severity_text: "info",
+      http_request_method: "POST",
+      url_path: "/api/agent/v1/sessions",
+      http_response_status_code: 200,
+      client_address: "203.0.113.9",
+      network_peer_address: "10.0.0.1",
+    });
+    expect(typeof access!.duration_ms).toBe("number");
+  });
+
+  it("只记一行，finish 和 close 都到也一样", () => {
+    const res = mockRes(200);
+    const lines = captureLines(() => {
+      traceMiddleware(mockReq(), res as never, () => {});
+      res.fire("finish");
+      res.fire("close");
+    });
+    expect(lines.filter((line) => line.event === "http.request")).toHaveLength(
+      1,
+    );
+  });
+
+  it("5xx 记 warn，其余记 info", () => {
+    const res = mockRes(500);
+    const lines = captureLines(() => {
+      traceMiddleware(mockReq(), res as never, () => {});
+      res.fire("finish");
+    });
+    expect(lines.find((line) => line.event === "http.request")).toMatchObject({
+      severity_text: "warn",
+      http_response_status_code: 500,
+    });
+  });
+
+  it("伪造的 X-Forwarded-For 只能添一个声称，抹不掉 socket 对端", () => {
+    const res = mockRes();
+    const lines = captureLines(() => {
+      traceMiddleware(
+        mockReq(
+          { "x-forwarded-for": "8.8.8.8" },
+          { remoteAddress: "::ffff:10.0.0.1" },
+        ),
+        res as never,
+        () => {},
+      );
+      res.fire("finish");
+    });
+    expect(lines.find((line) => line.event === "http.request")).toMatchObject({
+      client_address: "8.8.8.8",
+      network_peer_address: "10.0.0.1",
+    });
   });
 });

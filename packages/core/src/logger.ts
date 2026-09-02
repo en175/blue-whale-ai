@@ -12,9 +12,10 @@
  * 日志通道永不抛错、不阻断业务。
  */
 // 流水线触发器测试：无功能改动。
-import { hostname } from "node:os";
+import { hostname, networkInterfaces } from "node:os";
 
-import { getCurrentTraceId } from "./trace.js";
+import { redactLogBody, redactLogValue } from "./redact.js";
+import { getCurrentRequestContext, requestAddressFields } from "./trace.js";
 import { getDefaultTlsLogWriter, type TlsLogWriter } from "./tls-writer.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -42,6 +43,13 @@ export interface LogRecord {
   service_name: string;
   /** OTel service.instance.id，回答「哪个副本报的错」（SERVICE_INSTANCE_ID，缺省 主机名-PID） */
   service_instance_id: string;
+  /**
+   * OTel host.ip，回答「哪个 IP 报的错」。
+   *
+   * service_instance_id 在 k8s 里的主机名那一半是 Pod 名——有用，但跟抓包、防火墙日志对不起来。
+   * HOST_IP 优先（downward API 的 status.podIP，那是权威的），留空则扫第一块非环回网卡。
+   */
+  host_ip: string;
   /** OTel deployment.environment.name（APP_ENV > NODE_ENV，缺省 local） */
   deployment_environment_name: string;
   /** OTel service.version（APP_VERSION，缺省 unknown） */
@@ -58,12 +66,15 @@ export interface LogRecord {
   body: string;
 }
 
+/** 随一行日志附带的结构化字段。同名不覆盖基础字段。 */
+export type LogExtras = Record<string, string | number>;
+
 export interface Logger {
   name: string;
-  debug(message: string): void;
-  info(message: string): void;
-  warn(message: string): void;
-  error(message: string): void;
+  debug(message: string, extras?: LogExtras): void;
+  info(message: string, extras?: LogExtras): void;
+  warn(message: string, extras?: LogExtras): void;
+  error(message: string, extras?: LogExtras): void;
   /** 结构化指标事件（IK7G9Y）：info 级 JSON 行，约定字段落顶层，供 TLS 侧聚合告警。 */
   metric(input: MetricEventInput): void;
 }
@@ -109,12 +120,18 @@ function captureCallSite(): {
     const funcMatch = /^(.*?)\s+\(?[^()\s]+:\d+:\d+\)?$/.exec(body);
     return {
       code_function_name:
-        funcMatch?.[1] && funcMatch[1] !== "Object.<anonymous>" ? funcMatch[1] : "anonymous",
+        funcMatch?.[1] && funcMatch[1] !== "Object.<anonymous>"
+          ? funcMatch[1]
+          : "anonymous",
       code_file_path: match ? relativeCallerPath(match[1]!) : "unknown",
       code_line_number: match ? Number(match[2]) : 0,
     };
   }
-  return { code_function_name: "anonymous", code_file_path: "unknown", code_line_number: 0 };
+  return {
+    code_function_name: "anonymous",
+    code_file_path: "unknown",
+    code_line_number: 0,
+  };
 }
 
 /**
@@ -137,14 +154,23 @@ function relativeCallerPath(file: string): string {
  * 会让 service_name 变成空串而不是回退到 name。Go 侧判的是 `== ""`，本来就没这个洞——
  * 这正是 IKB29O 决策点名的那个实现缺陷。
  */
-export function createLogger(name: string, options: CreateLoggerOptions = {}): Logger {
+export function createLogger(
+  name: string,
+  options: CreateLoggerOptions = {},
+): Logger {
   const envSource = options.envSource ?? process.env;
-  const serviceName = options.container || envSource.CONTAINER_NAME?.trim() || name;
+  const serviceName =
+    options.container || envSource.CONTAINER_NAME?.trim() || name;
   const instanceId =
     envSource.SERVICE_INSTANCE_ID?.trim() || `${hostname()}-${process.pid}`;
   const environment =
-    options.env || envSource.APP_ENV?.trim() || envSource.NODE_ENV?.trim() || "local";
-  const serviceVersion = options.version || envSource.APP_VERSION?.trim() || "unknown";
+    options.env ||
+    envSource.APP_ENV?.trim() ||
+    envSource.NODE_ENV?.trim() ||
+    "local";
+  const serviceVersion =
+    options.version || envSource.APP_VERSION?.trim() || "unknown";
+  const hostIp = envSource.HOST_IP?.trim() || firstNonLoopbackAddress();
   const writer = options.writer ?? getDefaultTlsLogWriter();
 
   const RESERVED_KEYS = new Set([
@@ -152,6 +178,7 @@ export function createLogger(name: string, options: CreateLoggerOptions = {}): L
     "timestamp",
     "service_name",
     "service_instance_id",
+    "host_ip",
     "deployment_environment_name",
     "service_version",
     "trace_id",
@@ -161,22 +188,28 @@ export function createLogger(name: string, options: CreateLoggerOptions = {}): L
     "body",
   ]);
 
-  function write(level: LogLevel, message: string, extras?: Record<string, string | number>): void {
+  function write(level: LogLevel, message: string, extras?: LogExtras): void {
     const callSite = captureCallSite();
+    const request = getCurrentRequestContext();
     const record: Record<string, string | number> = {
       severity_text: level,
       timestamp: toBlueWhaleTimestamp(Date.now()),
       service_name: serviceName,
       service_instance_id: instanceId,
+      host_ip: hostIp,
       deployment_environment_name: environment,
       service_version: serviceVersion,
-      trace_id: getCurrentTraceId() ?? "",
+      trace_id: request?.traceId ?? "",
       ...callSite,
-      body: message,
+      // 谁发起的这个请求，逐行带——工单要的是「错误场景能看到是哪个 IP」，
+      // 而出错的从来不是你预先标注好的那一行。
+      ...requestAddressFields(request),
+      // 截断与脱敏（D9）在这里，因为这里是所有写日志的路唯一的交汇点。
+      body: redactLogBody(message),
     };
     if (extras) {
       for (const [key, value] of Object.entries(extras)) {
-        if (!RESERVED_KEYS.has(key)) record[key] = value;
+        if (!RESERVED_KEYS.has(key)) record[key] = redactLogValue(key, value);
       }
     }
     const line = JSON.stringify(record);
@@ -186,7 +219,10 @@ export function createLogger(name: string, options: CreateLoggerOptions = {}): L
     try {
       writer.write({
         time: Date.now(),
-        contents: Object.entries(record).map(([Key, Value]) => ({ Key, Value: String(Value) })),
+        contents: Object.entries(record).map(([Key, Value]) => ({
+          Key,
+          Value: String(Value),
+        })),
       });
     } catch {
       // TLS 上报失败不影响日志主通道。
@@ -209,10 +245,32 @@ export function createLogger(name: string, options: CreateLoggerOptions = {}): L
 
   return {
     name,
-    debug: (message) => write("debug", message),
-    info: (message) => write("info", message),
-    warn: (message) => write("warn", message),
-    error: (message) => write("error", message),
+    debug: (message, extras) => write("debug", message, extras),
+    info: (message, extras) => write("info", message, extras),
+    warn: (message, extras) => write("warn", message, extras),
+    error: (message, extras) => write("error", message, extras),
     metric,
   };
+}
+
+/**
+ * 本机地址，启动时解析一次。
+ *
+ * 环回和内部接口跳过——「127.0.0.1」回答不了「哪个节点出的问题」。取不到就是空串，
+ * 那是合法状态（没有外部网卡的测试容器），不值得为它报一条错。
+ */
+function firstNonLoopbackAddress(): string {
+  try {
+    const entries = Object.values(networkInterfaces()).flatMap(
+      (list) => list ?? [],
+    );
+    const usable = entries.filter((entry) => !entry.internal);
+    return (
+      usable.find((entry) => entry.family === "IPv4")?.address ??
+      usable[0]?.address ??
+      ""
+    );
+  } catch {
+    return "";
+  }
 }
