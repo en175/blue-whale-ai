@@ -9,7 +9,9 @@ export {
   TRACE_ID_HEADER,
   generateTraceId,
   getCurrentTraceId,
-  getOrCreateTraceId,
+  resolveTraceId,
+  TRACE_ID_PATTERN,
+  TRACEPARENT_HEADER,
   runWithTraceId,
 } from "./trace.js";
 export {

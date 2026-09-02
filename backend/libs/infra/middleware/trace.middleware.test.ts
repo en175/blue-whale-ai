@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getCurrentTraceId,
   TRACE_ID_HEADER,
+  TRACE_ID_PATTERN,
 } from "@blue-whale/core/logging";
 
 import { traceMiddleware } from "./trace.middleware.js";
@@ -82,11 +83,12 @@ describe("traceMiddleware", () => {
   });
 
   it("next 后上下文不泄漏到外层", () => {
-    const req = mockReq({ [TRACE_ID_HEADER]: "abc" });
+    // "abc" 在 D6 之前是合法的（旧规则只要求可见 ASCII），现在长度不足 8 会被拒收。
+    const req = mockReq({ [TRACE_ID_HEADER]: "abc-12345" });
     const res = mockRes() as never;
 
     traceMiddleware(req, res, () => {
-      expect(getCurrentTraceId()).toBe("abc");
+      expect(getCurrentTraceId()).toBe("abc-12345");
     });
 
     // next 同步返回后，外层无 trace 上下文
@@ -116,5 +118,36 @@ describe("traceMiddleware 响应头", () => {
     traceMiddleware(req, res as never, () => undefined);
 
     expect(res.headers[TRACE_ID_HEADER]).toBe("from-upstream-1");
+  });
+});
+
+describe("traceMiddleware 入站校验（D6）", () => {
+  it("旧规则放行的脏值现在被拒收，另生成一个合规 id", () => {
+    // 旧规则是「长度 ≤256 的可见 ASCII」，含空格也放行——而这是每一条跨服务查询的键。
+    for (const dirty of ["has space", "abc", 'quote"inside']) {
+      const req = mockReq({ [TRACE_ID_HEADER]: dirty });
+      const res = mockRes();
+      let inside: string | null = null;
+
+      traceMiddleware(req, res as never, () => {
+        inside = getCurrentTraceId();
+      });
+
+      expect(inside).not.toBe(dirty);
+      expect(inside).toMatch(TRACE_ID_PATTERN);
+      expect(res.headers[TRACE_ID_HEADER]).toBe(inside);
+    }
+  });
+
+  it("没有 X-Trace-Id 时认 traceparent", () => {
+    const req = mockReq({ traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" });
+    const res = mockRes();
+    let inside: string | null = null;
+
+    traceMiddleware(req, res as never, () => {
+      inside = getCurrentTraceId();
+    });
+
+    expect(inside).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
   });
 });

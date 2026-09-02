@@ -1,12 +1,19 @@
 /**
- * 结构化日志（IK6KQQ，父任务 IK6KO2 / ADR-0002 D4）。
+ * 结构化日志（IK6KQQ，父任务 IK6KO2；字段名见 IKB29O 决策 D2）。
  *
- * 字段：{level, time, container, env, version, trace_id, caller, func, message}。
+ * 字段：{severity_text, timestamp, service_name, service_instance_id,
+ * deployment_environment_name, service_version, trace_id, code_file_path, code_line_number,
+ * code_function_name, body}。名字对齐 OpenTelemetry 语义约定，点号平铺为下划线——火山 TLS
+ * 对点号键索引支持不佳。平铺后已不是 OTel 能识别的属性名：这次对齐买到的是三仓只有一种叫法，
+ * 以及将来接 OTel 后端时字段能直接对上，不是今天的互操作性。
+ *
  * trace_id 自动取自 AsyncLocalStorage 链路上下文（见 trace.ts）。
  * 输出：JSON 行进 stdout/stderr，同时异步上报火山 TLS（配置不全则跳过）。
  * 日志通道永不抛错、不阻断业务。
  */
 // 流水线触发器测试：无功能改动。
+import { hostname } from "node:os";
+
 import { getCurrentTraceId } from "./trace.js";
 import { getDefaultTlsLogWriter, type TlsLogWriter } from "./tls-writer.js";
 
@@ -27,22 +34,28 @@ export interface MetricEventInput {
 
 /** 单条结构化日志记录（字段与 TLS 索引字段对齐）。 */
 export interface LogRecord {
-  level: LogLevel;
-  /** ISO8601 时间 */
-  time: string;
-  /** 容器/服务名（CONTAINER_NAME 或 createLogger 的 name） */
-  container: string;
-  /** 部署环境（APP_ENV > NODE_ENV，缺省 local） */
-  env: string;
-  /** 构建版本（APP_VERSION，缺省 unknown） */
-  version: string;
+  /** OTel SeverityText，小写 debug/info/warn/error */
+  severity_text: LogLevel;
+  /** OTel Timestamp，ISO8601 带毫秒带时区 */
+  timestamp: string;
+  /** OTel service.name（CONTAINER_NAME 或 createLogger 的 name） */
+  service_name: string;
+  /** OTel service.instance.id，回答「哪个副本报的错」（SERVICE_INSTANCE_ID，缺省 主机名-PID） */
+  service_instance_id: string;
+  /** OTel deployment.environment.name（APP_ENV > NODE_ENV，缺省 local） */
+  deployment_environment_name: string;
+  /** OTel service.version（APP_VERSION，缺省 unknown） */
+  service_version: string;
   /** 链路标识（无上下文为空串） */
   trace_id: string;
-  /** 调用点 file:line */
-  caller: string;
-  /** 调用函数名 */
-  func: string;
-  message: string;
+  /** OTel code.file.path */
+  code_file_path: string;
+  /** OTel code.line.number。自成一个字段，不和路径粘在一起——粘着既过滤不了也排序不了 */
+  code_line_number: number;
+  /** OTel code.function.name */
+  code_function_name: string;
+  /** OTel Body */
+  body: string;
 }
 
 export interface Logger {
@@ -64,8 +77,12 @@ export interface CreateLoggerOptions {
   envSource?: NodeJS.ProcessEnv;
 }
 
-/** 提取调用点（跳过 logger 自身帧）：{func, caller=file:line}。 */
-function captureCallSite(): { func: string; caller: string } {
+/** 提取调用点（跳过 logger 自身帧）。路径与行号分开返回，见 D2。 */
+function captureCallSite(): {
+  code_function_name: string;
+  code_file_path: string;
+  code_line_number: number;
+} {
   const stack = new Error().stack?.split("\n") ?? [];
   for (const line of stack.slice(1)) {
     if (line.includes("logger.ts") || line.includes("logger.js")) continue;
@@ -74,46 +91,71 @@ function captureCallSite(): { func: string; caller: string } {
     const match = /\(?([^()\s]+):(\d+):\d+\)?$/.exec(body);
     const funcMatch = /^(.*?)\s+\(?[^()\s]+:\d+:\d+\)?$/.exec(body);
     return {
-      func: funcMatch?.[1] && funcMatch[1] !== "Object.<anonymous>" ? funcMatch[1] : "anonymous",
-      caller: match ? `${match[1]}:${match[2]}` : "unknown",
+      code_function_name:
+        funcMatch?.[1] && funcMatch[1] !== "Object.<anonymous>" ? funcMatch[1] : "anonymous",
+      code_file_path: match ? relativeCallerPath(match[1]!) : "unknown",
+      code_line_number: match ? Number(match[2]) : 0,
     };
   }
-  return { func: "anonymous", caller: "unknown" };
+  return { code_function_name: "anonymous", code_file_path: "unknown", code_line_number: 0 };
 }
 
-/** 创建结构化 logger。container 缺省取 CONTAINER_NAME 环境变量或 name。 */
+/**
+ * `packages/core/src/logger.ts` 而不是构建机上的绝对路径。
+ *
+ * 绝对路径说的是构建机而不是文件：容器里是 /app/dist/…，开发机上是各自的检出路径，两者
+ * 比不了，同一份代码在不同副本上写出不同的值。截到 packages/ / backend/ / src/ / dist/ 之后，
+ * 三个仓的这个字段才是同一种东西——agent 侧同样这么做。
+ */
+function relativeCallerPath(file: string): string {
+  const cleaned = file.replace(/^file:\/\//, "");
+  const match = /(?:^|\/)((?:packages|backend|src|dist)\/.*)$/.exec(cleaned);
+  return match?.[1] ?? cleaned;
+}
+
+/**
+ * 创建结构化 logger。
+ *
+ * 取值一律用 `||` 而不是 `??`：`??` 只在 null/undefined 时兜底，于是 `CONTAINER_NAME=""`
+ * 会让 service_name 变成空串而不是回退到 name。Go 侧判的是 `== ""`，本来就没这个洞——
+ * 这正是 IKB29O 决策点名的那个实现缺陷。
+ */
 export function createLogger(name: string, options: CreateLoggerOptions = {}): Logger {
   const envSource = options.envSource ?? process.env;
-  const container =
-    options.container ?? envSource.CONTAINER_NAME?.trim() ?? name;
-  const env = options.env ?? envSource.APP_ENV?.trim() ?? envSource.NODE_ENV?.trim() ?? "local";
-  const version = options.version ?? envSource.APP_VERSION?.trim() ?? "unknown";
+  const serviceName = options.container || envSource.CONTAINER_NAME?.trim() || name;
+  const instanceId =
+    envSource.SERVICE_INSTANCE_ID?.trim() || `${hostname()}-${process.pid}`;
+  const environment =
+    options.env || envSource.APP_ENV?.trim() || envSource.NODE_ENV?.trim() || "local";
+  const serviceVersion = options.version || envSource.APP_VERSION?.trim() || "unknown";
   const writer = options.writer ?? getDefaultTlsLogWriter();
 
   const RESERVED_KEYS = new Set([
-    "level",
-    "time",
-    "container",
-    "env",
-    "version",
+    "severity_text",
+    "timestamp",
+    "service_name",
+    "service_instance_id",
+    "deployment_environment_name",
+    "service_version",
     "trace_id",
-    "caller",
-    "func",
-    "message",
+    "code_file_path",
+    "code_line_number",
+    "code_function_name",
+    "body",
   ]);
 
   function write(level: LogLevel, message: string, extras?: Record<string, string | number>): void {
-    const { func, caller } = captureCallSite();
+    const callSite = captureCallSite();
     const record: Record<string, string | number> = {
-      level,
-      time: new Date().toISOString(),
-      container,
-      env,
-      version,
+      severity_text: level,
+      timestamp: new Date().toISOString(),
+      service_name: serviceName,
+      service_instance_id: instanceId,
+      deployment_environment_name: environment,
+      service_version: serviceVersion,
       trace_id: getCurrentTraceId() ?? "",
-      caller,
-      func,
-      message,
+      ...callSite,
+      body: message,
     };
     if (extras) {
       for (const [key, value] of Object.entries(extras)) {
