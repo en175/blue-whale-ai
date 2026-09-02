@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
-import { fail } from "@blue-whale/contracts";
+import { fail, ok } from "@blue-whale/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
@@ -19,6 +19,23 @@ export class ProjectAssetsController {
     private readonly assets: AssetService,
     private readonly storage: AssetStorageService,
   ) {}
+
+  /** IKCNLP（方案C）：素材-项目关联。画布使用素材时前端调用，幂等。 */
+  @Post(":assetId/link")
+  async link(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("assetId") assetId: string,
+  ) {
+    const project = await this.project.findOwnedById(projectId, user.userId);
+    if (!project) return fail(100301, "资源不存在");
+    const linked = await this.assets.linkAssetToProject({
+      userId: user.userId,
+      assetId,
+      projectId,
+    });
+    return linked ? ok({ projectId, assetId }) : fail(100301, "资源不存在");
+  }
 
   @Post()
   async copy(

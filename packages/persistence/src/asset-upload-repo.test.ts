@@ -7,7 +7,16 @@ describe("AssetRepo upload persistence", () => {
     const assets = {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     };
-    const repo = createAssetRepo({ assets } as never);
+    const project_asset = {
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (cb: (tx: unknown) => Promise<unknown>) =>
+          cb({ assets, project_asset }),
+      ),
+    };
+    const repo = createAssetRepo(prisma as never);
 
     await expect(repo.softDeleteOwned("42", "9")).resolves.toBe(true);
 
@@ -41,7 +50,17 @@ describe("AssetRepo upload persistence", () => {
       findFirst: vi.fn().mockResolvedValue(committed),
       create: vi.fn().mockResolvedValue(committed),
     };
-    const repo = createAssetRepo({ assets } as never);
+    const project_asset = {
+      upsert: vi.fn().mockResolvedValue({}),
+    };
+    const prisma = {
+      assets, // findCommittedUpload 是非事务顶层查询
+      $transaction: vi.fn(
+        async (cb: (tx: unknown) => Promise<unknown>) =>
+          cb({ assets, project_asset }),
+      ),
+    };
+    const repo = createAssetRepo(prisma as never);
 
     const existing = await repo.findCommittedUpload(
       "9",
@@ -94,7 +113,16 @@ describe("AssetRepo upload persistence", () => {
     const assets = {
       create: vi.fn().mockResolvedValue(committed),
     };
-    const repo = createAssetRepo({ assets } as never);
+    const project_asset = {
+      upsert: vi.fn().mockResolvedValue({}),
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (cb: (tx: unknown) => Promise<unknown>) =>
+          cb({ assets, project_asset }),
+      ),
+    };
+    const repo = createAssetRepo(prisma as never);
 
     await repo.createUploadedAsset({
       userId: "9",

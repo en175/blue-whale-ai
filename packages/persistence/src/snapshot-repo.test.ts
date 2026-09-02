@@ -25,6 +25,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
         ]),
       },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
+      project_asset: { findMany: vi.fn().mockResolvedValue([]) },
       generation_output_slots: {
         findMany: vi.fn().mockResolvedValue([]),
       },
@@ -57,6 +58,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     const prisma = {
       generation_jobs: { findMany: findJobs },
       assets: { findMany: findAssets },
+      project_asset: { findMany: vi.fn().mockResolvedValue([{ asset_id: 200n }]) },
       generation_output_slots: {
         findMany: vi.fn().mockResolvedValue([]),
       },
@@ -70,10 +72,14 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     expect(findAssets).toHaveBeenCalledTimes(1);
     expect(findAssets).toHaveBeenCalledWith({
       where: {
-        project_id: 55n,
         user_id: 100n,
         status: "normal",
         is_delete: false,
+        OR: [
+          { id: { in: [200n] } },
+          { project_id: 0n },
+          { project_id: 55n },
+        ],
       },
     });
     expect(result.assets).toEqual([
@@ -90,6 +96,52 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
         url: "tos://project/55/201.png",
       },
     ]);
+  });
+
+  it("保留被本项目关联的跨项目素材，丢弃未关联的跨项目素材（IKCNLP bug 回归）", async () => {
+    const findJobs = vi.fn().mockResolvedValue([]);
+    const findAssets = vi.fn().mockResolvedValue([
+      // 跨项目关联命中的素材（project_id=777 是别项目，但已被本项目 project_asset 关联）→ 应保留
+      { id: 999n, project_id: 777n, type: "image", url: "tos://project/777/999.png" },
+      // 未关联的跨项目素材（project_id=777，不在 linkedSet）→ 应丢弃
+      { id: 888n, project_id: 777n, type: "image", url: "tos://project/777/888.png" },
+    ]);
+    const prisma = {
+      generation_jobs: { findMany: findJobs },
+      assets: { findMany: findAssets },
+      project_asset: { findMany: vi.fn().mockResolvedValue([{ asset_id: 999n }]) },
+      generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
+    } as unknown as PrismaClient;
+
+    const result = await createSnapshotRepo(prisma).loadJobsAndAssets(
+      "55",
+      "100",
+    );
+    // 999 关联命中 → 保留；888 未关联且 project_id=777 !== 55 且 !== 0 → 丢弃
+    const ids = result.assets.map((a) => a.id);
+    expect(ids).toContain("999");
+    expect(ids).not.toContain("888");
+  });
+
+  it("同一素材同时命中关联+project_id 分支时只在 assets 出现一次（IKCNLP 去重）", async () => {
+    const findJobs = vi.fn().mockResolvedValue([]);
+    const findAssets = vi.fn().mockResolvedValue([
+      // 既是本项目 project_id=55，又被 project_asset 关联 → 两条 OR 分支都命中
+      { id: 300n, project_id: 55n, type: "image", url: "tos://project/55/300.png" },
+    ]);
+    const prisma = {
+      generation_jobs: { findMany: findJobs },
+      assets: { findMany: findAssets },
+      project_asset: { findMany: vi.fn().mockResolvedValue([{ asset_id: 300n }]) },
+      generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
+    } as unknown as PrismaClient;
+
+    const result = await createSnapshotRepo(prisma).loadJobsAndAssets(
+      "55",
+      "100",
+    );
+    const matching = result.assets.filter((a) => a.id === "300");
+    expect(matching).toHaveLength(1);
   });
 });
 

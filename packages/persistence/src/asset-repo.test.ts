@@ -288,3 +288,56 @@ describe("createAssetRepo.findOwnedById", () => {
     expect(asset).toMatchObject({ id: "3", model: "unknown-model" });
   });
 });
+
+describe("createAssetRepo 方案C（project_asset 关联）", () => {
+  it("softDeleteOwned 软删资产 + 同步删 project_asset 关联", async () => {
+    const assetsUpdate = vi.fn().mockResolvedValue({ count: 1 });
+    const paUpdate = vi.fn().mockResolvedValue({ count: 2 });
+    const tx = {
+      assets: { updateMany: assetsUpdate },
+      project_asset: { updateMany: paUpdate },
+    };
+    const prisma = { $transaction: vi.fn(async (cb: (t: typeof tx) => Promise<unknown>) => cb(tx)) };
+    const repo = createAssetRepo(prisma as never);
+
+    const ok = await repo.softDeleteOwned("3652", "9");
+    expect(ok).toBe(true);
+    expect(paUpdate).toHaveBeenCalledWith({
+      where: { asset_id: 3652n, user_id: 9n, is_delete: 0 },
+      data: expect.objectContaining({ is_delete: 1 }),
+    });
+  });
+
+  it("linkAssetToProject 幂等 upsert 关联；资产不存在返回 false", async () => {
+    const assetsFind = vi.fn().mockResolvedValue({ id: 3652n });
+    const paUpsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      assets: { findFirst: assetsFind },
+      project_asset: { upsert: paUpsert },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const ok = await repo.linkAssetToProject({ userId: "9", assetId: "3652", projectId: "91" });
+    expect(ok).toBe(true);
+    expect(paUpsert).toHaveBeenCalledWith({
+      where: { user_id_asset_id_project_id: { user_id: 9n, asset_id: 3652n, project_id: 91n } },
+      create: { user_id: 9n, asset_id: 3652n, project_id: 91n, is_delete: 0 },
+      update: expect.objectContaining({ is_delete: 0 }),
+    });
+
+    assetsFind.mockResolvedValue(null);
+    await expect(repo.linkAssetToProject({ userId: "9", assetId: "999", projectId: "91" })).resolves.toBe(false);
+  });
+
+  it("createUploadedAsset 落库时 project_id!=0 自动建关联", async () => {
+    const tx = {
+      assets: { create: vi.fn().mockResolvedValue({ id: 501n, storage_key: "k", url: "u", type: "image", mime: "image/png", size: 1n, width: null, height: null, duration_ms: null }) },
+      project_asset: { upsert: vi.fn().mockResolvedValue({}) },
+    };
+    const prisma = { $transaction: vi.fn(async (cb: (t: typeof tx) => Promise<unknown>) => cb(tx)) };
+    const repo = createAssetRepo(prisma as never);
+
+    await repo.createUploadedAsset({ userId: "9", projectId: "91", type: "image", mime: "image/png", size: 1, storageKey: "k", url: "u" });
+    expect(tx.project_asset.upsert).toHaveBeenCalled();
+  });
+});

@@ -228,23 +228,52 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         orderBy: { gmt_create: "desc" },
       });
 
+      // IKCNLP（方案C）：本项目可用的素材 = project_asset 关联的 asset + 全局素材(project_id=0)。
+      // 画布节点引用的素材若不在其中，前端据此判定失效并显示占位图。
+      const linkedAssetIds = (
+        await prisma.project_asset.findMany({
+          where: { user_id: uid, project_id: pid, is_delete: 0 },
+          select: { asset_id: true },
+        })
+      ).map((r) => r.asset_id);
+
       const assetRows = await prisma.assets.findMany({
         where: {
-          project_id: pid,
           user_id: uid,
           status: "normal",
           is_delete: false,
+          OR: [
+            { id: { in: linkedAssetIds } },
+            { project_id: BigInt(0) }, // 全局素材
+            { project_id: pid }, // 兼容：本项目单值归属的素材（渐入期关联表未覆盖的）
+          ],
         },
       });
 
-      // 对齐 Java：仅保留归属本项目的 asset（防跨项目泄漏）。
+      // 对齐 Java：仅保留归属本项目的 asset、全局 asset(project_id=0)、或已被本项目 project_asset 关联的 asset。
+      // 关联命中的 asset 即使 assets.project_id 指向别项目（跨项目复用）也保留——它是本项目显式关联的素材。
+      // 用 seenIds 去重：同一素材可能同时命中多个 OR 分支（如既被关联又 project_id=pid），
+      // 显式保证一个项目里同一素材只出现一次，不依赖 SQL WHERE OR 的隐式单次语义。
+      const linkedSet = new Set(linkedAssetIds.map((id) => id.toString()));
+      const seenIds = new Set<string>();
       const assets: SnapshotAssetRow[] = [];
       for (const a of assetRows) {
+        const idStr = a.id.toString();
+        if (seenIds.has(idStr)) continue;
         const rowProjectId =
           a.project_id == null ? null : a.project_id.toString();
-        if (rowProjectId !== null && rowProjectId !== projectId) continue;
+        const isLinked = linkedSet.has(idStr);
+        if (
+          !isLinked &&
+          rowProjectId !== null &&
+          rowProjectId !== projectId &&
+          rowProjectId !== "0"
+        ) {
+          continue;
+        }
+        seenIds.add(idStr);
         assets.push({
-          id: a.id.toString(),
+          id: idStr,
           type: a.type,
           url: a.url,
           project_id: rowProjectId,
