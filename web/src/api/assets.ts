@@ -46,7 +46,8 @@ export const ASSET_PAGE_SIZE = 60;
 export function fetchAssetPage(type: AssetType | '', page: number, size = ASSET_PAGE_SIZE) {
   const params = new URLSearchParams({ page: String(page), size: String(size) });
   if (type) params.set('type', type);
-  return apiRequest<AssetPageData>(`/api/assets?${params.toString()}`);
+  // 资产页以骨架屏承接未就绪与请求失败状态，不向用户提示瞬态请求错误。
+  return apiRequest<AssetPageData>(`/api/assets?${params.toString()}`, { silent: true });
 }
 
 /** 删除资产 DELETE /api/assets/:assetId（成功 data 为 null，前端移除列表项） */

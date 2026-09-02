@@ -454,7 +454,6 @@ export default function Assets() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
-  const [loadError, setLoadError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<AssetRecord | null>(null);
   const [previewTarget, setPreviewTarget] = useState<AssetRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -491,7 +490,6 @@ export default function Assets() {
     setLoading(true);
     setLoadingMore(false);
     setHasMore(false);
-    setLoadError('');
     fetchAssetPage(assetType, 1, LIBRARY_PAGE_SIZE)
       .then((page) => {
         if (requestVersion !== requestVersionRef.current) return;
@@ -502,15 +500,10 @@ export default function Assets() {
         setAssets(records);
         setAssetTotal(page.total);
         setHasMore(nextHasMore);
+        setLoading(false);
       })
-      .catch((e) => {
-        if (requestVersion === requestVersionRef.current) {
-          setLoadError(isApiError(e) ? e.message : '资产列表加载失败');
-        }
-      })
-      .finally(() => {
-        if (requestVersion === requestVersionRef.current) setLoading(false);
-      });
+      // 请求失败时保持骨架屏，等用户切换筛选或重新进入页面后再发起新请求。
+      .catch(() => undefined);
   }, [activeFilter, assetType]);
 
   const loadNextPage = useCallback(async () => {
@@ -520,6 +513,7 @@ export default function Assets() {
     const requestVersion = requestVersionRef.current;
     loadingMoreRef.current = true;
     setLoadingMore(true);
+    let keepLoading = false;
 
     try {
       const page = await fetchAssetPage(assetType, pageNumber, LIBRARY_PAGE_SIZE);
@@ -533,12 +527,13 @@ export default function Assets() {
       setAssets(records);
       setAssetTotal(page.total);
       setHasMore(nextHasMore);
-    } catch (error) {
+    } catch {
       if (requestVersion === requestVersionRef.current) {
-        toast.error(isApiError(error) ? error.message : '加载更多资产失败，请稍后重试');
+        // 与首屏一致，分页失败时只保留加载反馈，不展示错误或 toast。
+        keepLoading = true;
       }
     } finally {
-      if (requestVersion === requestVersionRef.current) {
+      if (requestVersion === requestVersionRef.current && !keepLoading) {
         loadingMoreRef.current = false;
         setLoadingMore(false);
       }
@@ -756,8 +751,7 @@ export default function Assets() {
                   <Skeleton key={index} className={styles.cardSkeleton} />
                 ))}
               </div>}
-            {!loading && loadError && <div className={styles.empty}>{loadError}</div>}
-            {!loading && !loadError && gridItems.length > 0 && (
+            {!loading && gridItems.length > 0 && (
               <AssetMasonry
                 key={`${activeFilter}:${layoutVersion}`}
                 items={gridItems}
@@ -769,13 +763,13 @@ export default function Assets() {
                 onDelete={setDeleteTarget}
               />
             )}
-            {!loading && !loadError && gridItems.length === 0 && (
+            {!loading && gridItems.length === 0 && (
               <div className={styles.empty}>暂无素材</div>
             )}
-            {!loading && !loadError && loadingMore && (
+            {!loading && loadingMore && (
               <div className={styles.loadState} role="status">加载中…</div>
             )}
-            {!loading && !loadError && !hasMore && assets.length > 0 && (
+            {!loading && !hasMore && assets.length > 0 && (
               <div className={styles.loadState}>已加载全部素材</div>
             )}
           </>
