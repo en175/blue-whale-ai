@@ -98,9 +98,6 @@ function makeSnapshot() {
     canvas: {
       nodes: JSON.stringify([{ id: "generation-output:301" }]),
     },
-    agent_runs: [
-      { agent_run_id: "61", status: "succeeded", terminal_reason: null },
-    ],
     high_watermark_cursor: "999",
   };
 }
@@ -129,7 +126,6 @@ test("factDigest：字段清单与取值符合预期", () => {
     jobs: ["101:succeeded:direct", "102:succeeded:direct"],
     assets: ["201", "202"],
     canvasNodeIds: ["generation-output:301"],
-    runs: ["61:succeeded:"],
     highWatermark: "999",
   });
 });

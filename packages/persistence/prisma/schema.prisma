@@ -249,6 +249,8 @@ model scene_cards {
   @@index([project_id], map: "idx_scene_card_project")
 }
 
+/// 旧内嵌 Agent 引擎运行表（已退役，IKCKOW 保留）：支撑「个人技能删除时进行中引用禁删」
+/// 保护（SkillInUseError + run_pin scrub，见 skill-repo deletePersonal），不再有写入方。
 model agent_runs {
   id                                BigInt    @id @default(autoincrement())
   project_id                        BigInt
@@ -286,33 +288,6 @@ model agent_runs {
   @@index([status, engine, is_delete, id], map: "idx_agent_run_claim")
 }
 
-model agent_advances {
-  id                               BigInt   @id @default(autoincrement())
-  agent_run_id                     BigInt
-  ordinal                          Int
-  status                           String   @db.VarChar(16)
-  input_snapshot                   Json
-  input_high_watermark_sequence_no Int
-  mention_input_snapshot           Json?
-  gmt_create                       DateTime @default(now()) @db.DateTime(0)
-  gmt_modified                     DateTime @default(now()) @db.DateTime(0)
-
-  @@unique([agent_run_id, ordinal], map: "uk_agent_advance_run_ordinal")
-  @@index([agent_run_id, status], map: "idx_agent_advance_run_status")
-}
-
-model run_commits {
-  id             BigInt   @id @default(autoincrement())
-  advance_id     BigInt   @unique(map: "uk_run_commit_advance")
-  agent_run_id   BigInt
-  request_digest String   @db.VarChar(71)
-  outcome        String   @db.VarChar(32)
-  receipt        Json
-  gmt_create     DateTime @default(now()) @db.DateTime(0)
-
-  @@index([agent_run_id], map: "idx_run_commit_agent_run")
-}
-
 /// 计划卡冻结态（IK67H6，契约 §9）：与 conversation_messages(content_type=plan_message) 1:1，
 /// 存不可变权威 Markdown、按首次出现去重的素材引用、完整生成参数、能力快照版本、ProviderPromptProjection 与序列标签。
 /// 手动应用（创建 SceneCard / GenerationJob）由 T10/T11 交付，本票只冻结不应用。
@@ -342,86 +317,6 @@ model plan_messages {
   @@index([project_id], map: "idx_plan_message_project")
   @@index([agent_run_id], map: "idx_plan_message_agent_run")
   @@index([application_kind], map: "idx_plan_message_application_kind")
-}
-
-/// 临时助手交付（IK67GZ，契约 §8.1）：独立身份与顺序，永不成为 ConversationMessage。
-model agent_provisional_deliveries {
-  id                  BigInt   @id @default(autoincrement())
-  agent_run_id        BigInt
-  advance_id          BigInt
-  fencing_token       BigInt
-  status              String   @db.VarChar(16)
-  interruption_reason String?  @db.VarChar(32)
-  content             String   @db.Text
-  gmt_create          DateTime @default(now()) @db.DateTime(0)
-  gmt_modified        DateTime @default(now()) @db.DateTime(0)
-
-  @@index([agent_run_id], map: "idx_provisional_delivery_run")
-  @@index([advance_id, status], map: "idx_provisional_delivery_advance")
-}
-
-/// 临时交付分片（IK67GZ，契约 §8.1）：(delivery_id, chunk_index) 唯一，chunk_index 从 0 严格递增。
-model agent_provisional_chunks {
-  id          BigInt   @id @default(autoincrement())
-  delivery_id BigInt
-  chunk_index Int
-  content     String   @db.Text
-  gmt_create  DateTime @default(now()) @db.DateTime(0)
-
-  @@unique([delivery_id, chunk_index], map: "uk_provisional_chunk")
-}
-
-/// 供应商调用记录（IK67GZ，契约 §8.4）：接管重放与调用成本事实的权威。
-model agent_provider_calls {
-  id              BigInt    @id @default(autoincrement())
-  agent_run_id    BigInt
-  advance_id      BigInt
-  call_slot       Int
-  fencing_token   BigInt
-  status          String    @db.VarChar(24)
-  request_digest  String    @db.VarChar(71)
-  result_payload  Json?
-  failure_code    String?   @db.VarChar(128)
-  failure_message String?   @db.Text
-  started_at      DateTime  @default(now()) @db.DateTime(3)
-  ended_at        DateTime? @db.DateTime(3)
-  gmt_create      DateTime  @default(now()) @db.DateTime(0)
-  gmt_modified    DateTime  @default(now()) @db.DateTime(0)
-
-  @@unique([advance_id, call_slot], map: "uk_provider_call_slot")
-  @@index([agent_run_id], map: "idx_provider_call_run")
-}
-
-model user_input_requests {
-  id                    BigInt    @id @default(autoincrement())
-  project_id            BigInt
-  user_id               BigInt
-  request_type          String    @default("clarification") @db.VarChar(32)
-  conversation_id       BigInt?
-  source_agent_run_id   BigInt?
-  resumed_agent_run_id  BigInt?
-  request_target_type   String?   @db.VarChar(64)
-  question              String?   @db.Text
-  action_identity       String    @db.VarChar(128)
-  action_type           String    @db.VarChar(64)
-  arguments_digest      String    @db.VarChar(64)
-  quoted_amount_fen     BigInt?
-  quoted_provider       String?   @db.VarChar(64)
-  price_catalog_version String?   @db.VarChar(64)
-  exchange_rate_version String?   @db.VarChar(64)
-  model_policy_version  String?   @db.VarChar(64)
-  cost_rule_version     String?   @db.VarChar(64)
-  status                String    @db.VarChar(32)
-  expires_at            DateTime  @db.DateTime(0)
-  confirmed_at          DateTime? @db.DateTime(0)
-  consumed_at           DateTime? @db.DateTime(0)
-  answer_message_id     BigInt?
-  gmt_create            DateTime  @default(now()) @db.DateTime(0)
-  gmt_modified          DateTime  @default(now()) @db.DateTime(0)
-  version               Int       @default(0)
-  is_delete             Int       @default(0) @db.TinyInt
-
-  @@index([project_id, user_id, status], map: "idx_input_request_owner")
 }
 
 model command_idempotency {
@@ -612,8 +507,8 @@ model creative_skill_version {
   @@unique([creative_skill_id, display_version], map: "uk_creative_skill_version_semver")
 }
 
-/// Creative Skill 成功激活埋点（IK60WT，资产契约 §11.3）：只增不改；
-/// 普通用户仅经 library 视图 usage_count 聚合值接触，单用户明细无端点暴露。
+/// 技能激活埋点（IKCKOW 保留）：usage_count「X 人使用」唯一数据源
+/// （COUNT(DISTINCT user_id)，见 skill-repo-internals mapUsageCounts），后续上线可能需要。
 model creative_skill_activation {
   id                BigInt   @id @default(autoincrement())
   creative_skill_id String   @db.VarChar(80)

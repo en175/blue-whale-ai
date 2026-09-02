@@ -146,17 +146,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
 });
 
 describe("SnapshotRepo.loadConversationState", () => {
-  it("returns persisted messages, runs, active input requests, and the real high-watermark", async () => {
-    const findInputRequests = vi.fn().mockResolvedValue([
-      {
-        id: 10n,
-        source_agent_run_id: 9n,
-        request_type: "creation_clarification",
-        question: "需要什么风格？",
-        status: "pending",
-        expires_at: new Date("2026-07-30T00:00:00.000Z"),
-      },
-    ]);
+  it("returns persisted messages and the real high-watermark", async () => {
     const prisma = {
       conversation_messages: {
         findMany: vi.fn().mockResolvedValue([
@@ -173,36 +163,6 @@ describe("SnapshotRepo.loadConversationState", () => {
       },
       conversation_message_mentions: {
         findMany: vi.fn().mockResolvedValue([]),
-      },
-      agent_runs: {
-        findMany: vi.fn().mockResolvedValue([
-          {
-            id: 9n,
-            conversation_id: 7n,
-            status: "awaiting_input",
-            stage: "clarifying",
-            version: 2,
-            run_pin: { creative_skill_resources: [{ body: "private" }] },
-            activated_creative_skill_versions: [
-              {
-                creative_skill_id: "official.poster",
-                creative_skill_version_id: "version.poster.1",
-                name: "海报专家",
-                display_version: "1.0.0",
-                resource_digest: `sha256:${"a".repeat(64)}`,
-                source: "auto",
-                reason: {
-                  type: "agent_match",
-                  detail: { matched_fields: ["conversation_messages"] },
-                },
-              },
-            ],
-            reasoning_summary: "已使用「海报专家」完成回答。",
-          },
-        ]),
-      },
-      user_input_requests: {
-        findMany: findInputRequests,
       },
       project_events: {
         findMany: vi.fn().mockResolvedValue([]),
@@ -229,6 +189,7 @@ describe("SnapshotRepo.loadConversationState", () => {
       generation_output_slots: {
         findMany: vi.fn().mockResolvedValue([]),
       },
+      assets: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaClient;
 
     await expect(
@@ -242,37 +203,7 @@ describe("SnapshotRepo.loadConversationState", () => {
       plan_applications: [],
       scene_card_generation_records: [],
       storyboard_previews: [],
-      agent_runs: [
-        expect.objectContaining({
-          agent_run_id: "9",
-          active_input_request: expect.objectContaining({
-            input_request_id: "10",
-          }),
-          activated_creative_skill_versions: [
-            expect.objectContaining({
-              creative_skill_id: "official.poster",
-              name: "海报专家",
-              source: "auto",
-            }),
-          ],
-          reasoning_summary: "已使用「海报专家」完成回答。",
-        }),
-      ],
       high_watermark_cursor: "12",
-    });
-    const serialized = JSON.stringify(
-      await createSnapshotRepo(prisma).loadConversationState("42", "100"),
-    );
-    expect(serialized).not.toContain("run_pin");
-    expect(serialized).not.toContain("private");
-    expect(findInputRequests).toHaveBeenCalledWith({
-      where: {
-        project_id: 42n,
-        status: "pending",
-        expires_at: { gt: expect.any(Date) },
-        is_delete: 0,
-      },
-      orderBy: { id: "asc" },
     });
   });
 
@@ -357,8 +288,6 @@ describe("SnapshotRepo.loadConversationState", () => {
             { id: 2n, project_id: 42n, version: 4, is_delete: 0 },
           ]),
       },
-      agent_runs: { findMany: vi.fn().mockResolvedValue([]) },
-      user_input_requests: { findMany: vi.fn().mockResolvedValue([]) },
       project_events: {
         aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),
       },
@@ -520,8 +449,6 @@ describe("SnapshotRepo.loadConversationState", () => {
         conversation_message_mentions: {
           findMany: vi.fn().mockResolvedValue(opts.mentions ?? []),
         },
-        agent_runs: { findMany: vi.fn().mockResolvedValue([]) },
-        user_input_requests: { findMany: vi.fn().mockResolvedValue([]) },
         plan_messages: {
           findMany: vi.fn().mockResolvedValue(opts.planMessages),
         },
@@ -630,8 +557,6 @@ describe("SnapshotRepo.loadConversationState output slots", () => {
     const prisma = {
       conversation_messages: empty(),
       conversation_message_mentions: empty(),
-      agent_runs: empty(),
-      user_input_requests: empty(),
       plan_messages: empty(),
       generation_model_capability: empty(),
       project_events: {
