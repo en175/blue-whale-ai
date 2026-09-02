@@ -218,6 +218,14 @@
   border-radius: 0;
 }
 
+/* 音频同样覆盖加载骨架屏；时长元数据到达后再露出播放器。 */
+.audioMediaSkeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: 0;
+}
+
 /* 视频容器：承载懒加载检测与悬浮预览事件。 */
 .videoContainer {
   position: relative;
@@ -225,14 +233,13 @@
   height: 100%;
 }
 
-/* 音频播放器居中 */
-.audioPlayer {
+/* 卡片紧凑音频播放器：缩略图内居中展示 */
+.audioCardPlayer {
   width: 88%;
 }
 
-/* 卡片本身负责打开详情，媒体本体不单独消费点击。视频容器需保留指针事件以触发悬浮预览。 */
-.thumbnail .media,
-.thumbnail .audioPlayer {
+/* 图片本体不单独消费点击；视频与音频卡片保留指针事件以触发悬浮预览。 */
+.thumbnail .media {
   pointer-events: none;
 }
 
@@ -283,28 +290,6 @@
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   z-index: 3;
-}
-
-/* ---- 媒体加载中遮罩 ---- */
-.mediaLoading {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: rgba(20, 20, 20, 0.6);
-  z-index: 1;
-  pointer-events: none;
-}
-
-.spinner {
-  animation: spin 0.8s linear infinite;
-  color: var(--color-text-tertiary);
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
 }
 
 /* ---- 媒体加载失败遮罩 ---- */
