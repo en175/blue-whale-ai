@@ -17,8 +17,11 @@ import {
   runWithTraceId,
 } from "@blue-whale/core/logging";
 
-export const traceMiddleware: RequestHandler = (req, _res, next) => {
+export const traceMiddleware: RequestHandler = (req, res, next) => {
   const headerValue = req.get(TRACE_ID_HEADER) ?? null;
   const traceId = getOrCreateTraceId(headerValue);
+  // 回给客户端（IKB29O）。New API 早就这么做（middleware/request-id.go），我们没有——
+  // 于是用户在浏览器里看不到 trace_id，报障时报不出任何能定位的东西，只能说"刚才那次"。
+  res.setHeader(TRACE_ID_HEADER, traceId);
   runWithTraceId(traceId, next);
 };

@@ -6,6 +6,11 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
+import {
+  TRACE_ID_HEADER,
+  generateTraceId,
+  getCurrentTraceId,
+} from "@blue-whale/core/logging";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -88,6 +93,14 @@ export class AgentV1ProxyController {
     headers["x-blue-whale-tenant-id"] = agentTenantId();
     headers["x-blue-whale-user-id"] = user.userId;
     headers["x-blue-whale-project-id"] = projectId;
+    // 出站补 X-Trace-Id（IKB29O）。上面的透传循环搬的是**浏览器发来的**头，而浏览器不发这个头；
+    // traceMiddleware 生成的那个 id 只活在 ALS 里，从没写回出站。于是 agent 收不到、自己另起一个，
+    // 一次对话在两个服务的日志里是两个对不上的 trace_id。
+    // 三级取值而不是直接覆盖：ALS 有就用（traceMiddleware 透传优先，正常情况下它和客户端发来的
+    // 就是同一个值），没有就保留循环透传下来的那个，都没有才生成。无条件覆盖会在 traceMiddleware
+    // 万一没挂到某条路由时把客户端带来的 id 丢掉——那正是本单要消除的那类断链。
+    headers[TRACE_ID_HEADER] =
+      getCurrentTraceId() ?? headers[TRACE_ID_HEADER] ?? generateTraceId();
 
     // 全局 json body-parser（main.ts 的 useBodyParser("json")）已消费请求体流，此刻在已结束的
     // 流上等 data/end 会永久挂起；直接复用解析后的 req.body（agent 端全部为 JSON 契约）。

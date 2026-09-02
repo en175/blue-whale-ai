@@ -223,3 +223,58 @@ describe("AgentV1ProxyController 归属防线（IKCGF1 ②c）", () => {
     expect(headers.authorization).not.toContain("users-own-browser-token");
   });
 });
+
+/** 假 agent：把收到的请求头原样回给调用方，用来验证代理到底发了什么。 */
+function createHeaderEchoAgent() {
+  return createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ headers: req.headers }));
+  });
+}
+
+describe("AgentV1ProxyController 链路标识透传（IKB29O）", () => {
+  let agent: Server | undefined;
+  let bff: Server | undefined;
+  let bffPort = 0;
+
+  beforeEach(async () => {
+    agent = createHeaderEchoAgent();
+    const agentPort = await listen(agent);
+    process.env.AGENT_SERVICE_BASE_URL = `http://127.0.0.1:${agentPort}`;
+    bff = createBff();
+    bffPort = await listen(bff);
+  });
+
+  afterEach(async () => {
+    await close(bff);
+    await close(agent);
+    delete process.env.AGENT_SERVICE_BASE_URL;
+  });
+
+  async function upstreamHeaders(init?: RequestInit) {
+    const response = await fetch(`http://127.0.0.1:${bffPort}/api/agent/v1/projects/p1/sessions`, init);
+    const body = (await response.json()) as { headers: Record<string, string> };
+    return body.headers;
+  }
+
+  it("总是带着 x-trace-id 去 agent——此前一个字节都不发，agent 只能自己另起一个", async () => {
+    // 断链就在这里：中间件生成的 id 只活在 ALS 里，透传循环搬的是浏览器发来的头，
+    // 而浏览器不发这个头。于是一次对话在两个服务的日志里是两个对不上的 id。
+    const headers = await upstreamHeaders();
+    expect(headers["x-trace-id"]).toBeTruthy();
+  });
+
+  it("客户端自己带了 id 就沿用，不覆盖", async () => {
+    // ALS 为空时（本用例没挂 traceMiddleware）必须保留客户端的值而不是生成新的：
+    // 无条件覆盖会把已有的链路标识丢掉，那正是本单要消除的那类断链。
+    const headers = await upstreamHeaders({ headers: { "x-trace-id": "from-client-1" } });
+    expect(headers["x-trace-id"]).toBe("from-client-1");
+  });
+
+  it("仍然带着受信身份三件套", async () => {
+    const headers = await upstreamHeaders();
+    expect(headers["x-blue-whale-user-id"]).toBe("u1");
+    expect(headers["x-blue-whale-project-id"]).toBe("p1");
+    expect(headers["x-blue-whale-tenant-id"]).toBeTruthy();
+  });
+});
