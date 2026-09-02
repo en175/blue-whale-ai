@@ -168,7 +168,7 @@ model project {
 }
 
 /// IKCNLP（方案C）：素材-项目关联（1 素材可跨多项目）。
-/// 画布使用素材时建立；snapshot.assets 按本项目关联 + 全局(project_id=0)素材返回。
+/// 画布使用素材时建立；snapshot.assets 按本项目关联 + 直接归属本项目(project_id=pid)的素材返回。
 model project_asset {
   id           BigInt   @id @default(autoincrement())
   user_id      BigInt

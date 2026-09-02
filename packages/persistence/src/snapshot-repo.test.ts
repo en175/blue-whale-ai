@@ -75,11 +75,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
         user_id: 100n,
         status: "normal",
         is_delete: false,
-        OR: [
-          { id: { in: [200n] } },
-          { project_id: 0n },
-          { project_id: 55n },
-        ],
+        OR: [{ id: { in: [200n] } }, { project_id: 55n }],
       },
     });
     expect(result.assets).toEqual([
@@ -142,6 +138,40 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     );
     const matching = result.assets.filter((a) => a.id === "300");
     expect(matching).toHaveLength(1);
+  });
+
+  it("不再返回全局素材 project_id=0（全局素材移除回归）", async () => {
+    const findJobs = vi.fn().mockResolvedValue([]);
+    const findAssets = vi.fn().mockResolvedValue([
+      // 全局素材（project_id=0）：未关联任何项目 → 不应出现在项目 snapshot.assets 中
+      { id: 600n, project_id: 0n, type: "image", url: "tos://global/600.png" },
+      // 直接归属本项目的素材 → 仍应出现
+      { id: 601n, project_id: 55n, type: "image", url: "tos://project/55/601.png" },
+    ]);
+    const prisma = {
+      generation_jobs: { findMany: findJobs },
+      assets: { findMany: findAssets },
+      project_asset: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
+    } as unknown as PrismaClient;
+
+    const result = await createSnapshotRepo(prisma).loadJobsAndAssets(
+      "55",
+      "100",
+    );
+    // 全局素材 id=600 不再出现；project_id=55 直接归属素材 id=601 保留
+    expect(findAssets).toHaveBeenCalledTimes(1);
+    expect(findAssets).toHaveBeenCalledWith({
+      where: {
+        user_id: 100n,
+        status: "normal",
+        is_delete: false,
+        OR: [{ id: { in: [] } }, { project_id: 55n }],
+      },
+    });
+    const ids = result.assets.map((a) => a.id);
+    expect(ids).not.toContain("600");
+    expect(ids).toContain("601");
   });
 });
 
