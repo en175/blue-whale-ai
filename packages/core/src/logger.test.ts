@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createLogger, toBlueWhaleTimestamp } from "./logger.js";
+import {
+  LOG_SERVICE_VERSION,
+  createLogger,
+  setLogServiceName,
+  toBlueWhaleTimestamp,
+} from "./logger.js";
+import { readFileSync } from "node:fs";
 import { runWithRequestContext, runWithTraceId } from "./trace.js";
 import type { TlsLogRecord, TlsLogWriter } from "./tls-writer.js";
 
@@ -29,10 +35,7 @@ describe("createLogger —— 结构化字段", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const { writer, records } = fakeWriter();
     const logger = createLogger("unit-svc", {
-      ...QUIET,
-      container: "unit-container",
-      env: "test",
-      version: "1.2.3",
+      envSource: { NODE_ENV: "test" } as NodeJS.ProcessEnv,
       writer,
     });
 
@@ -42,9 +45,12 @@ describe("createLogger —— 结构化字段", () => {
     const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
     expect(parsed).toMatchObject({
       severity_text: "info",
-      service_name: "unit-container",
+      // 进程级常量，不是 createLogger 收到的那个名字，也没有环境变量能改它。
+      service_name: "blue-whale-backend",
+      // 模块名没丢，它换了个位置——服务名和模块名各自有字段，不再抢同一个。
+      logger_name: "unit-svc",
       deployment_environment_name: "test",
-      service_version: "1.2.3",
+      service_version: LOG_SERVICE_VERSION,
       trace_id: "",
       body: "hello tls",
     });
@@ -109,6 +115,51 @@ describe("createLogger —— 结构化字段", () => {
     expect(JSON.parse(String(warnSpy.mock.calls[0]![0])).severity_text).toBe(
       "warn",
     );
+  });
+
+  it("服务名是进程级常量，环境变量改不动它", () => {
+    // CONTAINER_NAME 没了。忘配一次的后果是同一个容器里每个模块自报一个不同的服务名，
+    // 线上实测 bw-backend 报的是 trace-middleware——那是个中间件，不是服务。
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { writer } = fakeWriter();
+    createLogger("trace-middleware", {
+      envSource: {
+        CONTAINER_NAME: "whatever",
+        SERVICE_INSTANCE_ID: "pinned",
+        HOST_IP: "9.9.9.9",
+        APP_VERSION: "ba50dec",
+      } as NodeJS.ProcessEnv,
+      writer,
+    }).info("x");
+    const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
+    expect(parsed.service_name).toBe("blue-whale-backend");
+    expect(parsed.service_instance_id).not.toBe("pinned");
+    expect(parsed.host_ip).not.toBe("9.9.9.9");
+    expect(parsed.service_version).toBe(LOG_SERVICE_VERSION);
+  });
+
+  it("另一个可部署单元用 setLogServiceName 声明自己，写日志那一刻才取值", () => {
+    // 各模块的 createLogger 在模块顶层求值，跑在 main.ts 的函数体之前——
+    // 建 logger 时取值就意味着声明永远来不及。这条断言锁的就是「晚取值」。
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { writer } = fakeWriter();
+    const logger = createLogger("video-worker", { ...QUIET, writer });
+    setLogServiceName("blue-whale-generation-worker");
+    try {
+      logger.info("x");
+      expect(JSON.parse(String(logSpy.mock.calls[0]![0])).service_name).toBe(
+        "blue-whale-generation-worker",
+      );
+    } finally {
+      setLogServiceName("blue-whale-backend");
+    }
+  });
+
+  it("service_version 与 package.json 一致，漂了就红", () => {
+    const pkg = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as { version: string };
+    expect(LOG_SERVICE_VERSION).toBe(pkg.version);
   });
 
   it("TLS writer 抛错时日志主通道不受影响", () => {

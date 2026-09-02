@@ -22,6 +22,8 @@ export {
 } from "./trace.js";
 export {
   createLogger,
+  setLogServiceName,
+  LOG_SERVICE_VERSION,
   type Logger,
   type LogExtras,
   type LogLevel,
