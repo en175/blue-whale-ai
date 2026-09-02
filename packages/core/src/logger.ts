@@ -36,7 +36,7 @@ export interface MetricEventInput {
 export interface LogRecord {
   /** OTel SeverityText，小写 debug/info/warn/error */
   severity_text: LogLevel;
-  /** OTel Timestamp，ISO8601 带毫秒带时区 */
+  /** OTel Timestamp，ISO8601 带毫秒，恒为 +08:00。见 toBlueWhaleTimestamp */
   timestamp: string;
   /** OTel service.name（CONTAINER_NAME 或 createLogger 的 name） */
   service_name: string;
@@ -75,6 +75,23 @@ export interface CreateLoggerOptions {
   /** 默认走进程级 TLS writer（按 TLS_* 环境变量惰性初始化）。 */
   writer?: TlsLogWriter;
   envSource?: NodeJS.ProcessEnv;
+}
+
+/**
+ * `2026-09-02T17:05:09.123+08:00` —— 三仓共用的那一个墙上时钟。
+ *
+ * **固定偏移，由时间戳算出，不读 TZ、不读宿主机。**这个区别就是它的安全性所在：跨服务按字符串
+ * 排序只在三家偏移**完全一致**时成立，而从容器配置推导出来的值，离「某个容器没配 TZ、于是退回
+ * UTC」只有一步——那正是它替掉的那个 bug（Go 写 +08:00、Node 写 Z，+08:00 排在 Z 后面尽管
+ * 实际更早）。写死之后，+08:00 和原来的 Z 一样确定。
+ *
+ * 选 +08:00 而不是 UTC：看日志的人都在这个时区，而心算减八小时最贵的时刻恰好是出故障的时候。
+ * 中国不实行夏令时，固定偏移全年成立。
+ */
+const LOG_TZ_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+export function toBlueWhaleTimestamp(epochMs: number): string {
+  return `${new Date(epochMs + LOG_TZ_OFFSET_MS).toISOString().slice(0, -1)}+08:00`;
 }
 
 /** 提取调用点（跳过 logger 自身帧）。路径与行号分开返回，见 D2。 */
@@ -148,7 +165,7 @@ export function createLogger(name: string, options: CreateLoggerOptions = {}): L
     const callSite = captureCallSite();
     const record: Record<string, string | number> = {
       severity_text: level,
-      timestamp: new Date().toISOString(),
+      timestamp: toBlueWhaleTimestamp(Date.now()),
       service_name: serviceName,
       service_instance_id: instanceId,
       deployment_environment_name: environment,
