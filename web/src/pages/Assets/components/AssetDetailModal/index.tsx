@@ -4,6 +4,7 @@ import type { AssetRecord } from '@/api/assets';
 import Modal from '@/components/Modal';
 import Skeleton from '@/components/Skeleton';
 import { formatFileSize } from '@/utils/format-file-size';
+import { assetAspectRatio } from '../../assetGrid';
 import AudioPlayer from '../AudioPlayer';
 import {
   EMPTY_ASSET_DETAIL,
@@ -25,7 +26,14 @@ function DetailValue({ loading, children }: { loading: boolean; children: ReactN
 
 function AssetPreview({ asset }: { asset: AssetRecord }) {
   const [loaded, setLoaded] = useState(false);
-  const previewAspectRatio = asset.width && asset.height ? asset.width / asset.height : 1;
+  const previewAspectRatio = assetAspectRatio(asset);
+  const [ratioWidth, ratioHeight] = previewAspectRatio.split('/').map(Number);
+  const previewMaxWidth = `${560 * (ratioWidth / ratioHeight)}px`;
+
+  const previewFrameStyle = {
+    aspectRatio: previewAspectRatio,
+    maxWidth: previewMaxWidth,
+  };
 
   if (!asset.url) {
     return <div className={styles.previewEmpty}>媒体文件不可用</div>;
@@ -35,7 +43,7 @@ function AssetPreview({ asset }: { asset: AssetRecord }) {
     return (
       <div
         className={`${styles.previewFrame} ${styles.imagePreviewFrame}`}
-        style={{ aspectRatio: previewAspectRatio }}
+        style={previewFrameStyle}
       >
         {!loaded && <Skeleton className={styles.previewSkeleton} />}
         <img
@@ -51,7 +59,7 @@ function AssetPreview({ asset }: { asset: AssetRecord }) {
 
   if (asset.type === 'video') {
     return (
-      <div className={styles.previewFrame}>
+      <div className={styles.previewFrame} style={previewFrameStyle}>
         {!loaded && <Skeleton className={styles.previewSkeleton} />}
         <video
           className={`${styles.previewMedia} ${loaded ? '' : styles.previewMediaLoading}`}

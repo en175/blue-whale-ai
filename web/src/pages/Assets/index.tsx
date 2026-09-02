@@ -3,9 +3,10 @@
  * ============================================ */
 
 import { memo, useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo, type RefObject } from 'react';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { Trash2, RotateCw, AlertCircle, Plus } from 'lucide-react';
-import { fetchAssetPage, deleteAsset, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
+import { assetKeys, assetPageQueryOptions, deleteAsset, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
 import { createAsset as createMaterialAsset } from '@/api/material';
 import { uploadAssetFile } from '@/utils/upload';
 import { toast } from 'sonner';
@@ -18,7 +19,7 @@ import AssetDetailModal from './components/AssetDetailModal';
 import AudioPlayer, { type AudioPlayerHandle } from './components/AudioPlayer';
 import CharacterLibrary from './components/CharacterLibrary';
 import { assetMediaDisplay } from './assetMediaSrc';
-import { appendUniqueAssets, assetAspectRatio, hasNextAssetPage } from './assetGrid';
+import { appendUniqueAssets, assetAspectRatio } from './assetGrid';
 import { startVideoPreview, stopVideoPreview } from './videoPreview';
 import { getAssetFilter, setAssetFilter, type FilterKey } from './filterQuery';
 import styles from './index.module.css';
@@ -452,17 +453,13 @@ const AssetMasonry = memo(function AssetMasonry({
 
 export default function Assets() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const activeFilter = getAssetFilter(searchParams);
 
   /** 筛选状态由 URL 承载，方便分享链接并响应浏览器前进/后退。 */
   const setActiveFilter = useCallback((next: FilterKey) => {
     setSearchParams(setAssetFilter(searchParams, next));
   }, [searchParams, setSearchParams]);
-  const [assets, setAssets] = useState<AssetRecord[]>([]);
-  const [assetTotal, setAssetTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AssetRecord | null>(null);
   const [previewTarget, setPreviewTarget] = useState<AssetRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -473,81 +470,35 @@ export default function Assets() {
   const [characterRefreshTick, setCharacterRefreshTick] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
-  const assetsRef = useRef<AssetRecord[]>([]);
-  const requestVersionRef = useRef(0);
-  const nextPageRef = useRef(2);
-  const hasMoreRef = useRef(false);
-  const loadingMoreRef = useRef(false);
   const [layoutVersion, setLayoutVersion] = useState(0);
 
   const isCharacterView = activeFilter === 'character';
   const assetType = activeFilter === 'all' ? '' : activeFilter;
-
-  // 筛选切换时仅获取首页；后续页由瀑布流接近末尾时按需加载。
-  // 虚拟人视图由 CharacterLibrary 组件自行管理数据，不在此拉取
-  useEffect(() => {
-    const requestVersion = requestVersionRef.current + 1;
-    requestVersionRef.current = requestVersion;
-    if (activeFilter === 'character') return;
-    assetsRef.current = [];
-    nextPageRef.current = 2;
-    hasMoreRef.current = false;
-    loadingMoreRef.current = false;
-    setLayoutVersion((version) => version + 1);
-    setAssets([]);
-    setAssetTotal(0);
-    setLoading(true);
-    setLoadingMore(false);
-    setHasMore(false);
-    fetchAssetPage(assetType, 1, LIBRARY_PAGE_SIZE)
-      .then((page) => {
-        if (requestVersion !== requestVersionRef.current) return;
-        const records = appendUniqueAssets([], page.records);
-        const nextHasMore = hasNextAssetPage(records.length, page.total, page.records.length);
-        assetsRef.current = records;
-        hasMoreRef.current = nextHasMore;
-        setAssets(records);
-        setAssetTotal(page.total);
-        setHasMore(nextHasMore);
-        setLoading(false);
-      })
-      // 请求失败时保持骨架屏，等用户切换筛选或重新进入页面后再发起新请求。
-      .catch(() => undefined);
-  }, [activeFilter, assetType]);
+  const {
+    data: assetData,
+    fetchNextPage,
+    hasNextPage,
+    isError: isAssetQueryError,
+    isFetchingNextPage,
+    isPending: isAssetQueryPending,
+  } = useInfiniteQuery({
+    ...assetPageQueryOptions(assetType, LIBRARY_PAGE_SIZE),
+    enabled: !isCharacterView,
+  });
+  const assetPages = assetData?.pages;
+  const assets = useMemo(
+    () => appendUniqueAssets([], assetPages?.flatMap((page) => page.records) ?? []),
+    [assetPages],
+  );
+  const assetTotal = assetPages?.at(-1)?.total ?? 0;
+  const loading = !isCharacterView && (isAssetQueryPending || (!assetPages && isAssetQueryError));
+  const loadingMore = isFetchingNextPage;
+  const hasMore = hasNextPage;
 
   const loadNextPage = useCallback(async () => {
-    if (loadingMoreRef.current || !hasMoreRef.current || activeFilter === 'character') return;
-
-    const pageNumber = nextPageRef.current;
-    const requestVersion = requestVersionRef.current;
-    loadingMoreRef.current = true;
-    setLoadingMore(true);
-    let keepLoading = false;
-
-    try {
-      const page = await fetchAssetPage(assetType, pageNumber, LIBRARY_PAGE_SIZE);
-      if (requestVersion !== requestVersionRef.current) return;
-
-      const records = appendUniqueAssets(assetsRef.current, page.records);
-      const nextHasMore = hasNextAssetPage(records.length, page.total, page.records.length);
-      assetsRef.current = records;
-      nextPageRef.current = pageNumber + 1;
-      hasMoreRef.current = nextHasMore;
-      setAssets(records);
-      setAssetTotal(page.total);
-      setHasMore(nextHasMore);
-    } catch {
-      if (requestVersion === requestVersionRef.current) {
-        // 与首屏一致，分页失败时只保留加载反馈，不展示错误或 toast。
-        keepLoading = true;
-      }
-    } finally {
-      if (requestVersion === requestVersionRef.current && !keepLoading) {
-        loadingMoreRef.current = false;
-        setLoadingMore(false);
-      }
-    }
-  }, [activeFilter, assetType]);
+    if (isCharacterView || !hasNextPage || isFetchingNextPage) return;
+    await fetchNextPage();
+  }, [fetchNextPage, hasNextPage, isCharacterView, isFetchingNextPage]);
 
   /** 上传素材：presign 获取预签名 URL → PUT 直传对象存储 → complete 登记 */
   const handleUpload = useCallback(() => {
@@ -605,6 +556,7 @@ export default function Assets() {
     // 普通资产视图（图片/视频/音频）
     setUploading(true);
     const errors: string[] = [];
+    let assetListChanged = false;
 
     for (const file of list) {
       // 虚拟人视图下，上传类型固定为 character
@@ -635,40 +587,26 @@ export default function Assets() {
         // 三步上传：presign → PUT → complete
         const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size });
         await putToPresignedUrl(presign, file);
-        const done = await completeUpload({
+        await completeUpload({
           type,
           mime: file.type,
           size: file.size,
           storage_key: presign.storage_key,
           ...(forceCharacter ? {} : {}),
         });
-        // 登记成功：新资产插入列表顶部
-        const uploadedAsset: AssetRecord = {
-          id: done.asset_id,
-          type: done.type,
-          url: done.url || URL.createObjectURL(file),
-          width: done.width || null,
-          height: done.height || null,
-          duration: done.duration,
-          size: file.size,
-          source: 'uploaded',
-          model: null,
-          created_at: new Date().toISOString(),
-        };
-        setAssets((prev) => {
-          const next = [uploadedAsset, ...prev];
-          assetsRef.current = next;
-          return next;
-        });
-        setAssetTotal((total) => total + 1);
-        // 新资产插在首位，会改变所有 index；重建 positioner 避免旧布局缓存错位。
-        setLayoutVersion((version) => version + 1);
+        // 上传会改变“全部”和对应类型缓存；本轮批量上传结束后统一失效并刷新。
+        assetListChanged = true;
       } catch (err) {
         // API 错误已由请求层统一 toast，这里只收集本地校验类错误
         if (!isApiError(err)) errors.push(`上传失败：${file.name}`);
       }
     }
 
+    if (assetListChanged) {
+      await queryClient.invalidateQueries({ queryKey: assetKeys.all });
+      // 新资产插在首位，会改变所有 index；重建 positioner 避免旧布局缓存错位。
+      setLayoutVersion((version) => version + 1);
+    }
     if (errors.length) toast.error(errors.join('；'));
     setUploading(false);
   };
@@ -683,18 +621,13 @@ export default function Assets() {
   );
   const totalGridItems = assetTotal + (activeFilter === 'all' ? 0 : 1);
 
-  /** 确认删除：DELETE /api/assets/:assetId，成功后从列表移除该项 */
+  /** 确认删除：删除成功后失效素材列表缓存并刷新当前筛选。 */
   const confirmDelete = async () => {
     if (!deleteTarget || deleting) return;
     setDeleting(true);
     try {
       await deleteAsset(deleteTarget.id);
-      setAssets((prev) => {
-        const next = prev.filter((asset) => asset.id !== deleteTarget.id);
-        assetsRef.current = next;
-        return next;
-      });
-      setAssetTotal((total) => Math.max(0, total - 1));
+      await queryClient.invalidateQueries({ queryKey: assetKeys.all });
       // 删除会缩短数组，必须重建 Masonic 缓存，避免保留已删除 index 的定位信息。
       setLayoutVersion((version) => version + 1);
       setDeleteTarget(null);
