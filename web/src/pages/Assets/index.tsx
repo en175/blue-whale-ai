@@ -3,6 +3,7 @@
  * ============================================ */
 
 import { memo, useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo, type RefObject } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Trash2, RotateCw, AlertCircle, Plus } from 'lucide-react';
 import { fetchAssetPage, deleteAsset, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
 import { createAsset as createMaterialAsset } from '@/api/material';
@@ -19,10 +20,8 @@ import CharacterLibrary from './components/CharacterLibrary';
 import { assetMediaDisplay } from './assetMediaSrc';
 import { appendUniqueAssets, assetAspectRatio, hasNextAssetPage } from './assetGrid';
 import { startVideoPreview, stopVideoPreview } from './videoPreview';
+import { getAssetFilter, setAssetFilter, type FilterKey } from './filterQuery';
 import styles from './index.module.css';
-
-/** 筛选类型：all 表示不传 type */
-type FilterKey = 'all' | AssetType;
 
 /** 筛选按钮定义 */
 const filterTabs: { key: FilterKey; label: string }[] = [
@@ -255,19 +254,6 @@ function VideoThumb({
   );
 }
 
-/** localStorage key for persisting the last selected filter tab */
-const ACTIVE_FILTER_STORAGE_KEY = 'assets.activeFilter';
-
-/** 从 localStorage 读取上次选中的 tab，无记录或非法值回退到 'all' */
-const readStoredFilter = (): FilterKey => {
-  if (typeof window === 'undefined') return 'all';
-  try {
-    const v = window.localStorage.getItem(ACTIVE_FILTER_STORAGE_KEY);
-    if (v && filterTabs.some((t) => t.key === v)) return v as FilterKey;
-  } catch { /* ignore */ }
-  return 'all';
-};
-
 type AssetGridItem =
   | { kind: 'asset'; asset: AssetRecord }
   | { kind: 'upload' };
@@ -465,12 +451,13 @@ const AssetMasonry = memo(function AssetMasonry({
 });
 
 export default function Assets() {
-  const [activeFilter, setActiveFilterState] = useState<FilterKey>(readStoredFilter);
-  /** 包装 setter：同步写入 localStorage，刷新后仍记住上次选中 */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeFilter = getAssetFilter(searchParams);
+
+  /** 筛选状态由 URL 承载，方便分享链接并响应浏览器前进/后退。 */
   const setActiveFilter = useCallback((next: FilterKey) => {
-    setActiveFilterState(next);
-    try { window.localStorage.setItem(ACTIVE_FILTER_STORAGE_KEY, next); } catch { /* ignore */ }
-  }, []);
+    setSearchParams(setAssetFilter(searchParams, next));
+  }, [searchParams, setSearchParams]);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [assetTotal, setAssetTotal] = useState(0);
   const [loading, setLoading] = useState(true);
