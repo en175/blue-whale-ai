@@ -87,6 +87,22 @@ describe('胶囊上线格式', () => {
     ]);
   });
 
+  it('asset_ref 不携带签名 URL，访问材料只留在前端预览缓存', async () => {
+    const read = captureBody();
+    await sendSessionMessage('p1', 's1', [], {
+      resourceRef: [{
+        type: 'asset_ref',
+        asset_id: 'ast_v1',
+        media_type: 'video',
+        display_label: 'clip.mp4',
+        url: 'https://cdn.example/clip.mp4',
+      }],
+    });
+    expect(read().content).toEqual([
+      { type: 'asset_ref', asset_id: 'ast_v1', media_type: 'video', display_label: 'clip.mp4' },
+    ]);
+  });
+
   it('音频即使有 asset_id 也不能走 asset_ref——agent 只认 image / video，塞进去整条 400', async () => {
     const read = captureBody();
     await sendSessionMessage('p1', 's1', [], {

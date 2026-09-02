@@ -8,6 +8,7 @@ import { AccountModule } from "@lib/shared/account/account.module.js";
 import { AssetModule } from "@lib/shared/assets/assets.module.js";
 import { CanvasModule } from "@lib/shared/canvas/canvas.module.js";
 import { GenerationModule } from "@lib/shared/generation/generation.module.js";
+import { HomepageHeroModule } from "@lib/shared/homepage-hero/homepage-hero.module.js";
 import { JobsModule } from "@lib/shared/jobs/jobs.module.js";
 import { ModelCapabilityAdminModule } from "@lib/shared/model-capability/model-capability-admin.module.js";
 import { OperationLogModule } from "@lib/shared/operation-log/operation-log.module.js";
@@ -37,6 +38,7 @@ import { ProjectsApiModule } from "./api/projects/projects.module.js";
 import { RechargeModule } from "./api/recharge/recharge.module.js";
 import { SceneCardsApiModule } from "./api/scene-cards/scene-cards.module.js";
 import { SharedAssetsApiModule } from "./api/shared-assets/shared-assets.module.js";
+import { SiteHomepageHeroesModule } from "./api/site/homepage-heroes.module.js";
 import { SkillsApiModule } from "./api/skills/skills.module.js";
 import { AgentTemplatesModule } from "./api/templates/templates.module.js";
 import { TextApiModule } from "./api/text/text.module.js";
@@ -54,6 +56,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     OperationLogModule,
     ModelCapabilityAdminModule,
     TemplateModule,
+    HomepageHeroModule,
     ProjectModule,
     JobsModule,
     CanvasModule,
@@ -81,6 +84,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     SkillsApiModule,
     SceneCardsApiModule,
     SharedAssetsApiModule,
+    SiteHomepageHeroesModule,
     AgentTemplatesModule,
     TextApiModule,
     AgentV1Module,

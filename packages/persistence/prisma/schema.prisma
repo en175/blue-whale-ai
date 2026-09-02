@@ -537,6 +537,24 @@ model user_skill {
   @@index([user_id], map: "idx_user")
 }
 
+/// IKCH05：首页背景图/视频后台动态配置条目。media_type=video 时 poster_url 必填；
+/// enabled=1 进首页轮播（按 sort_order 升序）；上限 8 条（应用层校验，不设 DB 唯一约束）。
+model homepage_hero {
+  id           BigInt   @id @default(autoincrement())
+  media_type   String   @default("video") @db.VarChar(16) // image | video
+  media_url    String   @db.VarChar(512) // 视频/图片 URL（TOS 迁移中可暂空）
+  poster_url   String?  @db.VarChar(512) // 视频封面；media_type=video 必填
+  sort_order   Int      @default(0)
+  enabled      Int      @default(1) @db.TinyInt // 1 进轮播 / 0 停用
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Int      @default(0) @db.TinyInt
+
+  @@index([enabled, is_delete, sort_order], map: "idx_hero_enabled_sort")
+  @@index([sort_order, is_delete], map: "idx_hero_sort")
+}
+
 /// Creative Skill 稳定身份（IK60WS，资产契约 §1）：官方与个人共用一表；
 /// owner_user_id=0 表示平台官方资产，asset_domain 区分 official/personal。
 model creative_skill {

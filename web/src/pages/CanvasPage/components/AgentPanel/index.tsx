@@ -30,9 +30,16 @@ import { useAgentSession, type ChatMessage, type TurnOutcome } from '../../hooks
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
 import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock, type OutboundAssetRef } from '@/api/agentSessions';
-import { commitSidebarAttachment, planAttachment, type SidebarCanvasUpload } from './attachments';
+import {
+  commitSidebarAttachment,
+  createAttachmentPreviewUrl,
+  planAttachment,
+  revokeAttachmentPreviewUrl,
+  type SidebarCanvasUpload,
+} from './attachments';
 import { composerImagePreview } from './composerImagePreview';
-import { MessageAssetPreview, rememberAssetUrl } from './MessageAssetPreview';
+import { ComposerAttachmentChip } from './ComposerAttachmentChip';
+import { isInlineMediaThumbnail, MessageAssetPreview, rememberAssetUrl, useAssetUrlCache } from './MessageAssetPreview';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
@@ -759,6 +766,10 @@ interface PendingAttachment {
   status: 'uploading' | 'ready' | 'failed';
   assetId?: string;
   error?: string;
+  /** 选中文件后立刻生成的 blob URL，给输入框缩略图用。 */
+  url?: string;
+  /** 三步上传完成后的 CDN URL；乐观气泡用它出缩略图，发送契约仍只带 asset_id。 */
+  remoteUrl?: string;
 }
 
 interface AgentPanelProps {
@@ -795,15 +806,17 @@ interface AgentPanelProps {
   onPlaceFileOnCanvas: (file: File) => Promise<SidebarCanvasUpload>;
 }
 
-/** 图片已有“缩略图 + 文件名”呈现，不再重复渲染成 `@` 文字提及。 */
-function hasInlineImageMention(blocks: SessionContentBlock[] | undefined, chipId: string): boolean {
+/** 图片/视频已有缩略图呈现时，不再重复渲染成 `@` 文字提及。 */
+function hasInlineVisualMention(blocks: SessionContentBlock[] | undefined, chipId: string): boolean {
   return (blocks ?? []).some((block) => {
-    if ((block.media_type !== 'image' && block.type !== 'image') || (!block.url && !block.asset_id)) return false;
-    return [block.chip_id, block.asset_id, block.resource_id, block.node_id].includes(chipId);
+    const ids = [block.chip_id, block.asset_id, block.resource_id, block.node_id];
+    if (!ids.includes(chipId)) return false;
+    return isInlineMediaThumbnail(block);
   });
 }
 
 export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas }: AgentPanelProps) {
+  useAssetUrlCache();
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供发送按钮启用态判断 */
@@ -877,9 +890,15 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const modelRef = useRef<HTMLDivElement>(null);
   /** 上传菜单容器 ref（外部点击自动收起判定） */
   const uploadRef = useRef<HTMLDivElement>(null);
-  /** 本条消息待携带的素材：选中即开始上传，发送时才变成 `asset_ref` 部件（IKAL46）。
-   *  这里刻意不做胶囊 UI——胶囊组件由专门的前端同学交付，此处只维护接口与最简可用的呈现。 */
+  /** 本条消息待携带的素材：选中即开始上传，发送时才变成 `asset_ref` 部件（IKAL46）。 */
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const attachmentsRef = useRef<PendingAttachment[]>([]);
+  attachmentsRef.current = attachments;
+  useEffect(() => {
+    return () => {
+      for (const item of attachmentsRef.current) revokeAttachmentPreviewUrl(item.url);
+    };
+  }, []);
   /* 「上传图片」/「上传视频」此前走同一个 handler、accept 也不分，两个菜单项完全等价。
    * 现在各自把 accept 收窄到对应类型（真实 media_type 仍按文件 MIME 判定）。 */
   /** 画布上现存的生成卡节点 cardId 集合。父组件没给（例如测试）时按空集处理——空集意味着
@@ -951,12 +970,16 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     if (!inputVersion || inputVersion === lastInputVersionRef.current) return;
     lastInputVersionRef.current = inputVersion;
     if (initialCardLabel) {
-      const imagePreview = composerImagePreview(initialMediaBlocks);
+      const mediaPreview = composerImagePreview(initialMediaBlocks);
       chipEditorRef.current?.insertChip({
         id: String(inputVersion),
-        label: imagePreview?.label ?? initialCardLabel,
+        label: mediaPreview?.label ?? initialCardLabel,
         prompt: initialInput ?? '',
-        ...(imagePreview ? { imageUrl: imagePreview.url } : {}),
+        ...(mediaPreview?.mediaType === 'video'
+          ? { videoUrl: mediaPreview.url }
+          : mediaPreview
+            ? { imageUrl: mediaPreview.url }
+            : {}),
       });
     } else {
       chipEditorRef.current?.setText(initialInput ?? '');
@@ -1273,6 +1296,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       ? [{ asset_id: item.assetId, media_type: item.mediaType, display_label: item.name }]
       : [],
   );
+  const readyPreviewUrls = new Map(
+    attachments.flatMap((item) =>
+      item.status === 'ready' && item.assetId && item.remoteUrl ? [[item.assetId, item.remoteUrl] as const] : [],
+    ),
+  );
 
   /** 能不能发：有文字、或有已就绪的附件；上传途中一律挡住（IKAL46）。 */
   const canSend =
@@ -1283,12 +1311,16 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     // 胶囊有两个来源，发送时必须合成一条序列：画布 @ 进来的节点/卡片，和本地上传的素材。
     // 后者带资产库身份，序列化成 `asset_ref`（agent 会建 Grant，模型真读得到）；前者只有
     // 画布 id，序列化成 `resource_ref`（模型先看到占位标签）。见 agentSessions.toReferencePart。
-    const uploadedBlocks: import('@/api/agentSessions').SessionContentBlock[] = readyAssets.map((asset) => ({
-      type: 'asset_ref',
-      asset_id: asset.asset_id,
-      media_type: asset.media_type,
-      ...(asset.display_label ? { display_label: asset.display_label } : {}),
-    }));
+    const uploadedBlocks: import('@/api/agentSessions').SessionContentBlock[] = readyAssets.map((asset) => {
+      const previewUrl = readyPreviewUrls.get(asset.asset_id);
+      return {
+        type: 'asset_ref',
+        asset_id: asset.asset_id,
+        media_type: asset.media_type,
+        ...(asset.display_label ? { display_label: asset.display_label } : {}),
+        ...(previewUrl ? { url: previewUrl } : {}),
+      };
+    });
     const mediaBlocks = [...pendingMediaBlocksRef.current, ...uploadedBlocks];
     // 只带附件、一个字不打也能发（IKAL46）：这是用户对附件做的第一个动作。
     if (!fullText && mediaBlocks.length === 0) return;
@@ -1331,6 +1363,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       setForcedSkill(armed);
       // 附件一并回填：重传一次的代价远大于把已经拿到的 asset_id 留在手上。
       setAttachments(sentAttachments);
+    } else {
+      for (const item of sentAttachments) revokeAttachmentPreviewUrl(item.url);
     }
   };
 
@@ -1387,15 +1421,19 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     event.target.value = '';
     for (const file of chosen) {
       const key = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const previewUrl = createAttachmentPreviewUrl(file);
       const plan = planAttachment(file, projectId);
       if (plan.ok === false) {
         setAttachments((prev) => [
           ...prev,
-          { key, name: file.name, mediaType: 'image', status: 'failed', error: plan.error },
+          { key, name: file.name, mediaType: 'image', status: 'failed', error: plan.error, url: previewUrl },
         ]);
         continue;
       }
-      setAttachments((prev) => [...prev, { key, name: file.name, mediaType: plan.mediaType, status: 'uploading' }]);
+      setAttachments((prev) => [
+        ...prev,
+        { key, name: file.name, mediaType: plan.mediaType, status: 'uploading', url: previewUrl },
+      ]);
       const result = await commitSidebarAttachment(file, projectId, onPlaceFileOnCanvas);
       if (result.ok === false) {
         setAttachments((prev) =>
@@ -1408,14 +1446,20 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       rememberAssetUrl(result.uploaded.asset_id, result.uploaded.url);
       setAttachments((prev) =>
         prev.map((item) =>
-          item.key === key ? { ...item, status: 'ready' as const, assetId: result.uploaded.asset_id } : item,
+          item.key === key
+            ? { ...item, status: 'ready' as const, assetId: result.uploaded.asset_id, remoteUrl: result.uploaded.url }
+            : item,
         ),
       );
     }
   };
 
   const removeAttachment = (key: string) =>
-    setAttachments((prev) => prev.filter((item) => item.key !== key));
+    setAttachments((prev) => {
+      const target = prev.find((item) => item.key === key);
+      revokeAttachmentPreviewUrl(target?.url);
+      return prev.filter((item) => item.key !== key);
+    });
 
   /** 移除首页带入的待发媒体块（按对象引用匹配，ref 同步后重渲染） */
   const removePendingMediaBlock = (block: import('@/api/agentSessions').SessionContentBlock) => {
@@ -1599,10 +1643,10 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                     <span>{m.skill_ref.name}</span>
                   </div>
                 )}
-                {/* 图片提及先于正文：缩略图 → 文件名 → 用户文字。 */}
+                {/* 图片/画布视频提及先于正文：缩略图 → 文件名 → 用户文字。 */}
                 <MessageAssetPreview blocks={m.blocks} chips={m.chips} />
                 {/* @卡片气泡（与输入框中的气泡一致） */}
-                {m.chips?.filter((c) => !hasInlineImageMention(m.blocks, c.id)).map((c) => (
+                {m.chips?.filter((c) => !hasInlineVisualMention(m.blocks, c.id)).map((c) => (
                   <div key={`chip-${c.id}`} className={styles.userMediaChip}>
                     <span className={styles.userMediaChipAt}>@</span>
                     <span className={styles.userMediaChipLabel}>{c.label}</span>
@@ -1730,53 +1774,31 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
           {/* 这一层负责把编辑区撑到工具栏上沿：ChipTextEditor 自己的 wrapper 是 block，
            *  撑高的责任只能落在它外面。见 .composerSlot。 */}
-          {/* 待发素材（IKAL46）。刻意保持纯文本行：胶囊组件由专门的前端同学交付，
-            *  这里只负责把接口打通并给出最简可用的呈现。 */}
+          {/* 待发素材（IKAL46 / IKCJFQ）：有预览 URL 就走图片/视频缩略图胶囊。 */}
           {(attachments.length > 0 || pendingMediaBlocksState.length > 0) && (
             <div className={styles.attachmentRow}>
               {/* 首页带入的媒体块（已上传就绪，asset_ref）：展示并允许移除，否则发送前用户完全看不到。
                 *  带 chip_id 的画布 @ 块除外——它们已作为胶囊在输入框里展示，此处再画就是重复。 */}
               {pendingMediaBlocksState.filter((b) => !b.chip_id).map((block, i) => (
-                <span
+                <ComposerAttachmentChip
                   key={`pm-${i}`}
-                  className={styles.attachmentChip}
-                  title={block.display_label || block.name || ''}
-                >
-                  <span className={styles.attachmentName}>
-                    {block.media_type === 'video' ? '视频' : '图片'}：{block.display_label || block.name || '附件'}
-                  </span>
-                  <button
-                    className={styles.attachmentRemove}
-                    onClick={() => removePendingMediaBlock(block)}
-                    title="移除"
-                    aria-label={`移除 ${block.display_label || block.name || '附件'}`}
-                  >
-                    <X size={11} strokeWidth={2.5} />
-                  </button>
-                </span>
+                  name={block.display_label || block.name || '附件'}
+                  mediaType={block.media_type === 'video' || block.type === 'video' ? 'video' : 'image'}
+                  status="ready"
+                  url={block.url}
+                  onRemove={() => removePendingMediaBlock(block)}
+                />
               ))}
               {attachments.map((item) => (
-                <span
+                <ComposerAttachmentChip
                   key={item.key}
-                  className={`${styles.attachmentChip} ${item.status === 'failed' ? styles.attachmentFailed : ''}`}
-                  title={item.status === 'failed' ? item.error : item.name}
-                >
-                  <span className={styles.attachmentName}>
-                    {item.mediaType === 'video' ? '视频' : '图片'}：{item.name}
-                  </span>
-                  {item.status === 'uploading' && <span className={styles.attachmentHint}>上传中…</span>}
-                  {item.status === 'failed' && (
-                    <span className={styles.attachmentHint}>{item.error ?? '上传失败'}</span>
-                  )}
-                  <button
-                    className={styles.attachmentRemove}
-                    onClick={() => removeAttachment(item.key)}
-                    title="移除"
-                    aria-label={`移除 ${item.name}`}
-                  >
-                    <X size={11} strokeWidth={2.5} />
-                  </button>
-                </span>
+                  name={item.name}
+                  mediaType={item.mediaType}
+                  status={item.status}
+                  url={item.url}
+                  error={item.error}
+                  onRemove={() => removeAttachment(item.key)}
+                />
               ))}
             </div>
           )}

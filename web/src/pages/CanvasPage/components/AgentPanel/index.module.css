@@ -425,8 +425,8 @@
  * 现在由这一层出面：它是 flex item（flex: 1 拿到确定高度），又是 flex container
  * （让编辑器 wrapper 撑满）。ChipTextEditor 一行不用改——它 dock 栏也在用，那边是另一套尺寸。
  * `min-height: 0` 不能省：flex item 默认 min-height: auto，长文本会把输入框顶破。 */
-/* ---- 待发素材（IKAL46）----
-   刻意做成朴素文本 chip：胶囊组件由专门的前端同学交付，这里只把接口打通并给出最简呈现。
+/* ---- 待发素材（IKAL46 / IKCJFQ）----
+   有预览 URL 时走图片/视频缩略图胶囊；没 URL 才退回文字 chip。
    flex-shrink: 0 —— 附件行不参与压缩，否则粘长文本时它会被挤没，用户以为附件掉了。 */
 .attachmentRow {
   display: flex;
@@ -448,6 +448,14 @@
   font-size: 12px;
   line-height: 18px;
   color: var(--color-text-secondary);
+}
+
+.attachmentPreview {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  max-width: 100%;
 }
 
 .attachmentFailed {

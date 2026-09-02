@@ -76,4 +76,31 @@ describe('collectMediaBlocks', () => {
       chip_id: 'chip-3',
     });
   });
+
+  it('keeps independent video node url and source for hover preview (IKCHEC)', () => {
+    const blocks = collectMediaBlocks(
+      {
+        id: 'media-v1',
+        type: 'mediaNode',
+        data: {
+          src: 'https://cdn.example/clip.mp4',
+          mediaType: 'video',
+          fileName: 'clip.mp4',
+          assetId: 'ast_video_1',
+        },
+      },
+      'chip-v',
+    );
+
+    expect(blocks[0]).toMatchObject({
+      type: 'video',
+      media_type: 'video',
+      source: 'node',
+      url: 'https://cdn.example/clip.mp4',
+      asset_id: 'ast_video_1',
+      display_label: 'clip.mp4',
+      resource_type: '视频',
+      chip_id: 'chip-v',
+    });
+  });
 });
