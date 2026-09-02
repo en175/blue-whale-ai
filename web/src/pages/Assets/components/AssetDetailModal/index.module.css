@@ -34,15 +34,11 @@
 
 .imagePreview {
   border-radius: 0;
-  object-fit: cover;
 }
 
 .previewFrame {
   position: relative;
   width: 100%;
-  height: min(55vh, 560px);
-  min-height: 360px;
-  max-height: 560px;
 }
 
 .imagePreviewFrame {
@@ -67,11 +63,11 @@
 }
 
 .audioPreview {
+  position: relative;
   width: min(440px, 100%);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--spacing-xl);
 }
 
 .audioPlayer {
@@ -79,8 +75,11 @@
 }
 
 .audioSkeleton {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 54px;
+  margin: auto;
 }
 
 .detailsPane {
