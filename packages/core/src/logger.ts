@@ -39,20 +39,20 @@ export interface LogRecord {
   severity_text: LogLevel;
   /** OTel Timestamp，ISO8601 带毫秒，恒为 +08:00。见 toBlueWhaleTimestamp */
   timestamp: string;
-  /** OTel service.name（CONTAINER_NAME 或 createLogger 的 name） */
+  /** OTel service.name，进程级常量，由 setLogServiceName 声明。不是配置 */
   service_name: string;
-  /** OTel service.instance.id，回答「哪个副本报的错」（SERVICE_INSTANCE_ID，缺省 主机名-PID） */
+  /** OTel service.instance.id，回答「哪个副本报的错」。主机名-PID；容器里主机名就是容器 id */
   service_instance_id: string;
   /**
    * OTel host.ip，回答「哪个 IP 报的错」。
    *
    * service_instance_id 在 k8s 里的主机名那一半是 Pod 名——有用，但跟抓包、防火墙日志对不起来。
-   * HOST_IP 优先（downward API 的 status.podIP，那是权威的），留空则扫第一块非环回网卡。
+   * 扫第一块非环回网卡得出，容器里拿到的就是容器自己的地址。
    */
   host_ip: string;
-  /** OTel deployment.environment.name（APP_ENV > NODE_ENV，缺省 local） */
+  /** OTel deployment.environment.name（NODE_ENV，缺省 local）。六个字段里唯一要外面给的 */
   deployment_environment_name: string;
-  /** OTel service.version（APP_VERSION，缺省 unknown） */
+  /** OTel service.version —— LOG_SERVICE_VERSION，本仓自己的版本 */
   service_version: string;
   /** 链路标识（无上下文为空串） */
   trace_id: string;
@@ -80,9 +80,6 @@ export interface Logger {
 }
 
 export interface CreateLoggerOptions {
-  container?: string;
-  env?: string;
-  version?: string;
   /** 默认走进程级 TLS writer（按 TLS_* 环境变量惰性初始化）。 */
   writer?: TlsLogWriter;
   envSource?: NodeJS.ProcessEnv;
@@ -148,29 +145,59 @@ function relativeCallerPath(file: string): string {
 }
 
 /**
- * 创建结构化 logger。
+ * 这个进程报出去的 `service_name`，以及它凭什么不是一个环境变量。
  *
- * 取值一律用 `||` 而不是 `??`：`??` 只在 null/undefined 时兜底，于是 `CONTAINER_NAME=""`
- * 会让 service_name 变成空串而不是回退到 name。Go 侧判的是 `== ""`，本来就没这个洞——
- * 这正是 IKB29O 决策点名的那个实现缺陷。
+ * 曾经是 `CONTAINER_NAME`，缺省回退到 `createLogger` 的那个名字。于是忘配一次——线上就是忘了
+ * ——同一个容器里每个模块报一个不同的服务名，实测 bw-backend 自报 `trace-middleware`，那是个
+ * 中间件的名字。「按服务过滤日志」这件事因此不成立，而且没有任何一处会红。
+ *
+ * 现在它是代码里的一个值：本仓有两个可部署单元，各自在 main.ts 里声明一次。缺省是主 API，
+ * 因为忘了声明时那是唯一说得通的答案，而不是一个由部署决定的空白。
+ *
+ * **在写日志的那一刻取值，不是在建 logger 的那一刻。** 各模块的 `createLogger(...)` 是模块
+ * 顶层求值的，跑在 main.ts 的函数体之前——建 logger 时取值就意味着声明永远来不及。
  */
+let logServiceName = "blue-whale-backend";
+
+export function setLogServiceName(name: string): void {
+  logServiceName = name;
+}
+
+/**
+ * 本仓的版本，镜像自 `packages/core/package.json`。
+ *
+ * 字面量而不是读文件：产物是 bundle，相对本模块的路径在那里解析不到东西。
+ * `logger.test.ts` 会在它和 package.json 不一致时失败，所以镜像不会悄悄漂。
+ */
+export const LOG_SERVICE_VERSION = "0.1.0";
+
+/**
+ * 进程身份：哪个副本、哪个 IP、哪一套部署、哪个版本。
+ *
+ * **这里没有一个值是配置。** 早先版本读 `CONTAINER_NAME` / `SERVICE_INSTANCE_ID` / `HOST_IP` /
+ * `APP_VERSION`，每个都带兜底——等于把日志格式的正确性押在「有人记得每套部署配四个变量」上，
+ * 而漏配一个不会报错，只会安静地写出一个看起来很像真的错值。看不出错的字段比没有的字段更坏。
+ * 下面每个值都从进程本来就确知的东西里直接得出，没有东西要配，也就没有东西会忘。
+ *
+ * 唯一的例外是 `deployment_environment_name`：这是哪一套部署，进程内部推不出来，只能从外面
+ * 断言。它读 `NODE_ENV`——每个 Node 部署本来就有的那个，没有为它发明新变量。
+ */
+function processIdentity(envSource: NodeJS.ProcessEnv) {
+  return {
+    service_name: logServiceName,
+    service_instance_id: `${hostname()}-${process.pid}`,
+    host_ip: firstNonLoopbackAddress(),
+    deployment_environment_name: envSource.NODE_ENV?.trim() || "local",
+    service_version: LOG_SERVICE_VERSION,
+  };
+}
+
+/** 创建结构化 logger。`name` 是模块名，逐行作为 `logger_name` 带出去，不是服务名。 */
 export function createLogger(
   name: string,
   options: CreateLoggerOptions = {},
 ): Logger {
   const envSource = options.envSource ?? process.env;
-  const serviceName =
-    options.container || envSource.CONTAINER_NAME?.trim() || name;
-  const instanceId =
-    envSource.SERVICE_INSTANCE_ID?.trim() || `${hostname()}-${process.pid}`;
-  const environment =
-    options.env ||
-    envSource.APP_ENV?.trim() ||
-    envSource.NODE_ENV?.trim() ||
-    "local";
-  const serviceVersion =
-    options.version || envSource.APP_VERSION?.trim() || "unknown";
-  const hostIp = envSource.HOST_IP?.trim() || firstNonLoopbackAddress();
   const writer = options.writer ?? getDefaultTlsLogWriter();
 
   const RESERVED_KEYS = new Set([
@@ -194,11 +221,7 @@ export function createLogger(
     const record: Record<string, string | number> = {
       severity_text: level,
       timestamp: toBlueWhaleTimestamp(Date.now()),
-      service_name: serviceName,
-      service_instance_id: instanceId,
-      host_ip: hostIp,
-      deployment_environment_name: environment,
-      service_version: serviceVersion,
+      ...processIdentity(envSource),
       trace_id: request?.traceId ?? "",
       ...callSite,
       // 谁发起的这个请求，逐行带——工单要的是「错误场景能看到是哪个 IP」，
@@ -206,6 +229,9 @@ export function createLogger(
       ...requestAddressFields(request),
       // 截断与脱敏（D9）在这里，因为这里是所有写日志的路唯一的交汇点。
       body: redactLogBody(message),
+      // 哪个模块写的。它曾经跟服务名抢同一个字段并且赢了；现在它有自己的位置，
+      // 服务名是常量，两个问题各自有答案。
+      logger_name: name,
     };
     if (extras) {
       for (const [key, value] of Object.entries(extras)) {
