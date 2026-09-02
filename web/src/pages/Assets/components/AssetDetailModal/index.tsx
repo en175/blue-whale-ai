@@ -1,9 +1,10 @@
-import { AudioLines, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import type { AssetRecord } from '@/api/assets';
 import Modal from '@/components/Modal';
 import Skeleton from '@/components/Skeleton';
 import { formatFileSize } from '@/utils/format-file-size';
+import AudioPlayer from '../AudioPlayer';
 import {
   EMPTY_ASSET_DETAIL,
   formatAssetCreatedAt,
@@ -67,15 +68,10 @@ function AssetPreview({ asset }: { asset: AssetRecord }) {
 
   return (
     <div className={styles.audioPreview}>
-      <div className={styles.audioIcon}>
-        <AudioLines size={44} strokeWidth={1.5} />
-      </div>
       {!loaded && <Skeleton className={styles.audioSkeleton} />}
-      <audio
+      <AudioPlayer
         className={`${styles.audioPlayer} ${loaded ? '' : styles.previewMediaLoading}`}
         src={asset.url}
-        controls
-        preload="metadata"
         onLoadedMetadata={() => setLoaded(true)}
         onError={() => setLoaded(true)}
       />

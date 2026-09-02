@@ -2,8 +2,8 @@
  * Assets 资产页面：GET /api/assets 分页拉取 + 类型筛选 + 真实媒体预览
  * ============================================ */
 
-import { memo, useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo } from 'react';
-import { Trash2, RotateCw, AlertCircle, Loader2, Plus } from 'lucide-react';
+import { memo, useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo, type RefObject } from 'react';
+import { Trash2, RotateCw, AlertCircle, Plus } from 'lucide-react';
 import { fetchAssetPage, deleteAsset, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
 import { createAsset as createMaterialAsset } from '@/api/material';
 import { uploadAssetFile } from '@/utils/upload';
@@ -14,6 +14,7 @@ import { useInfiniteLoader, useMasonry, usePositioner, useResizeObserver, type R
 import ConfirmModal from '@/components/ConfirmModal';
 import Skeleton from '@/components/Skeleton';
 import AssetDetailModal from './components/AssetDetailModal';
+import AudioPlayer, { type AudioPlayerHandle } from './components/AudioPlayer';
 import CharacterLibrary from './components/CharacterLibrary';
 import { assetMediaDisplay } from './assetMediaSrc';
 import { appendUniqueAssets, assetAspectRatio, hasNextAssetPage } from './assetGrid';
@@ -47,7 +48,13 @@ const typeLabel: Record<AssetType, string> = {
 type MediaLoadState = 'waiting' | 'loading' | 'loaded' | 'error';
 
 /** 单个资产媒体组件：图片与视频在未就绪（含失败）期间持续显示骨架屏。 */
-function AssetMedia({ asset }: { asset: AssetRecord }) {
+function AssetMedia({
+  asset,
+  audioPlayerRef,
+}: {
+  asset: AssetRecord;
+  audioPlayerRef?: RefObject<AudioPlayerHandle | null>;
+}) {
   const isSafari = isSafariBrowser();
   // Safari 视频初始为 waiting（懒加载），其余直接进入 loading
   const [state, setState] = useState<MediaLoadState>(
@@ -59,8 +66,11 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
 
   const { src: mediaSrc, nodeKey: mediaKey } = assetMediaDisplay(asset.url, reloadKey);
 
-  // URL 或 reloadKey 变化时重置为 loading（视频通过 VideoThumb 的 onLoaded/onError 驱动状态）
-  useEffect(() => {
+  // URL 或 reloadKey 变化时，在首帧绘制前重置为 loading。
+  // 复用的瀑布流卡片可能仍保留上一个资源的 loaded 状态；若放在 useEffect，
+  // 浏览器会先绘制一次旧播放器，再显示骨架屏，造成音频播放器闪烁。
+  // 视频通过 VideoThumb 的 onLoaded/onError 驱动状态，不在这里重置。
+  useLayoutEffect(() => {
     if (asset.type !== 'video') {
       setState('loading');
     }
@@ -91,12 +101,8 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       {/* 图片、视频和虚拟人像在加载或失败时都保持与卡片同尺寸的骨架屏。 */}
       {isVisualMedia && state !== 'loaded' && <Skeleton className={styles.mediaSkeleton} />}
 
-      {/* 音频保留原有的加载和重试反馈；本任务只调整图片与视频。 */}
-      {!isVisualMedia && state === 'loading' && (
-        <div className={styles.mediaLoading}>
-          <Loader2 size={24} className={styles.spinner} />
-        </div>
-      )}
+      {/* 音频元数据加载期间也用固定尺寸骨架屏，避免卡片在瀑布流中跳动。 */}
+      {!isVisualMedia && state === 'loading' && <Skeleton className={styles.audioMediaSkeleton} />}
 
       {!isVisualMedia && state === 'error' && (
         <div className={styles.mediaError}>
@@ -132,13 +138,13 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
         />
       )}
       {asset.type === 'audio' && asset.url && (
-        <audio
+        <AudioPlayer
           key={mediaKey}
-          className={styles.audioPlayer}
+          ref={audioPlayerRef}
           src={mediaSrc}
-          controls
-          preload="metadata"
-          onLoadedData={() => setState('loaded')}
+          variant="compact"
+          className={styles.audioCardPlayer}
+          onLoadedMetadata={() => setState('loaded')}
           onError={() => setState('error')}
         />
       )}
@@ -276,6 +282,61 @@ interface AssetMasonryProps {
   onDelete: (asset: AssetRecord) => void;
 }
 
+function AssetCard({
+  asset,
+  onPreview,
+  onDelete,
+}: Pick<AssetMasonryProps, 'onPreview' | 'onDelete'> & { asset: AssetRecord }) {
+  const audioPlayerRef = useRef<AudioPlayerHandle>(null);
+  const isAudio = asset.type === 'audio';
+
+  return (
+    <div
+      className={styles.card}
+      role="button"
+      tabIndex={0}
+      aria-label={`查看${typeLabel[asset.type]}资产详情`}
+      onMouseEnter={() => {
+        if (isAudio) audioPlayerRef.current?.startPreview();
+      }}
+      onMouseLeave={() => {
+        if (isAudio) audioPlayerRef.current?.stopPreview();
+      }}
+      onClick={() => onPreview(asset)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onPreview(asset);
+        }
+      }}
+    >
+      <div className={styles.thumbnail} style={{ aspectRatio: assetAspectRatio(asset) }}>
+        {asset.url ? (
+          <AssetMedia asset={asset} audioPlayerRef={isAudio ? audioPlayerRef : undefined} />
+        ) : (asset.type === 'image' || asset.type === 'video' || asset.type === 'character') ? (
+          <Skeleton className={styles.mediaSkeleton} />
+        ) : (
+          <div className={styles.mediaError}>
+            <AlertCircle size={28} />
+            <span className={styles.mediaErrorText}>资源不可用</span>
+          </div>
+        )}
+        <span className={styles.typeBadge}>{typeLabel[asset.type]}</span>
+        <button
+          className={styles.deleteBtn}
+          title="删除资产"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete(asset);
+          }}
+        >
+          <Trash2 size={14} strokeWidth={2} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Masonic 默认监听 window；资产页自身是滚动容器，因此在这里把它的可视区域
  * 和 scrollTop 传给底层 hook，保留其虚拟化及无限加载能力。
@@ -381,46 +442,7 @@ const AssetMasonry = memo(function AssetMasonry({
       );
     }
 
-    const { asset } = data;
-    return (
-      <div
-        className={styles.card}
-        role="button"
-        tabIndex={0}
-        aria-label={`查看${typeLabel[asset.type]}资产详情`}
-        onClick={() => onPreview(asset)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            onPreview(asset);
-          }
-        }}
-      >
-        <div className={styles.thumbnail} style={{ aspectRatio: assetAspectRatio(asset) }}>
-          {asset.url ? (
-            <AssetMedia asset={asset} />
-          ) : (asset.type === 'image' || asset.type === 'video' || asset.type === 'character') ? (
-            <Skeleton className={styles.mediaSkeleton} />
-          ) : (
-            <div className={styles.mediaError}>
-              <AlertCircle size={28} />
-              <span className={styles.mediaErrorText}>资源不可用</span>
-            </div>
-          )}
-          <span className={styles.typeBadge}>{typeLabel[asset.type]}</span>
-          <button
-            className={styles.deleteBtn}
-            title="删除资产"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDelete(asset);
-            }}
-          >
-            <Trash2 size={14} strokeWidth={2} />
-          </button>
-        </div>
-      </div>
-    );
+    return <AssetCard asset={data.asset} onPreview={onPreview} onDelete={onDelete} />;
   }, [onDelete, onPreview, onUpload]);
 
   return useMasonry({
