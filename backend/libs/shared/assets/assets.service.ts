@@ -32,6 +32,11 @@ export class AssetService {
     return this.repo.softDeleteOwned(assetId, userId);
   }
 
+  /** IKCNLP（方案C）：素材-项目关联（幂等 upsert）。 */
+  linkAssetToProject(input: { userId: string; assetId: string; projectId: string }) {
+    return this.repo.linkAssetToProject(input);
+  }
+
   findOwnedSource(sourceAssetId: string, userId: string) {
     return this.repo.findOwnedSource(sourceAssetId, userId);
   }
