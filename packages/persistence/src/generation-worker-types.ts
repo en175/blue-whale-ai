@@ -77,10 +77,17 @@ export interface WorkerRepo {
     jobId: string,
     workerId: string,
   ): Promise<ClaimedJob | null>;
+  /** 音频 MQ 消费端按 RocketMQ 消息 jobId 领取单个音频 job（IKCR78）；type="audio"，无 request userId。 */
+  claimAudioJobById(
+    jobId: string,
+    workerId: string,
+  ): Promise<ClaimedJob | null>;
   /** Redis 消息丢失或 Worker 重启后的低频补偿扫描。 */
   listDueVideoJobIds(limit: number): Promise<string[]>;
   /** IKBGKA：图片到点/孤儿 job 低频补入队扫描（镜像 listDueVideoJobIds；type=image）。 */
   listDueImageJobIds(limit: number): Promise<string[]>;
+  /** IKCR78：音频到点/孤儿 job 低频补入队扫描（镜像 listDueImageJobIds；type=audio）。 */
+  listDueAudioJobIds(limit: number): Promise<string[]>;
   /** IKC9EJ：媒体提取到点/孤儿 job 低频补入队扫描（镜像 listDueImageJobIds；type=media_extract，不限 source）。 */
   listDueMediaExtractJobIds(limit: number): Promise<string[]>;
   /** 重置图片任务中租约过期仍 processing 的孤儿任务 → queued，供恢复扫描接回。 */

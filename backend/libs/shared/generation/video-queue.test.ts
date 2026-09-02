@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Producer } from "rocketmq-client-nodejs";
 
-import { IMAGE_GENERATION_TAG } from "./queue.constants.js";
+import { AUDIO_GENERATION_TAG, IMAGE_GENERATION_TAG } from "./queue.constants.js";
 import {
   createRocketMqVideoProducer,
+  enqueueAudioGenerationJob,
   loadRocketMqConfig,
   VIDEO_MIN_DELAY_MS,
 } from "./video-queue.js";
@@ -25,6 +26,14 @@ describe("createRocketMqVideoProducer image tag", () => {
       body: Buffer.from(JSON.stringify({ jobId: "301" })),
       delay: VIDEO_MIN_DELAY_MS,
     });
+  });
+});
+
+/** IKCR78：enqueueAudioGenerationJob 用独立 tag=audio，与视频/图片/媒体提取隔离。 */
+describe("enqueueAudioGenerationJob audio tag", () => {
+  it("入队携带 audio tag 常量（与 createRocketMqVideoProducer tag 传播一致）", async () => {
+    expect(AUDIO_GENERATION_TAG).toBe("audio");
+    expect(AUDIO_GENERATION_TAG).not.toBe(IMAGE_GENERATION_TAG);
   });
 });
 

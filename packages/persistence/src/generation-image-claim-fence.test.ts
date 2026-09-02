@@ -207,3 +207,79 @@ describe("claimNextInProcessJob 恢复扫描认领范围（IK9ILQ + IKBGKA revie
     );
   });
 });
+
+// IKCR78：音频 MQ 消费端 claim + 低频补入队扫描（镜像图片 IKBGKA 语义，type=audio）。
+describe("claimAudioJobById + listDueAudioJobIds（IKCR78）", () => {
+  function audioRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 400n,
+      project_id: 60n,
+      user_id: 7n,
+      type: "audio",
+      status: "queued",
+      input: { prompt: "你好", model_id: "tts-model" },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencing_token: 0n,
+      is_delete: false,
+      source: "bottom_dock",
+      next_action_at: new Date(),
+      lease_expires_at: null,
+      ...overrides,
+    };
+  }
+
+  it("claimAudioJobById 领取音频 job 时 where 限定 type=audio + queued，不套 source 白名单", async () => {
+    const findFirst = vi.fn().mockResolvedValue(audioRow());
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      generation_jobs: { findFirst, updateMany },
+    } as never;
+    const repo = createWorkerRepo(prisma);
+
+    const claimed = await repo.claimAudioJobById("400", "worker-a");
+    expect(claimed).toMatchObject({ id: "400", type: "audio", fencingToken: 1 });
+    const where = findFirst.mock.calls[0]![0].where as Record<string, unknown>;
+    expect(where).toMatchObject({ id: 400n, type: "audio" });
+    // IKC9EJ 对齐 media_extract：claim 不套 source 白名单，与 listDueAudioJobIds（同样不带白名单）
+    // 语义对称——非白名单 source 的音频 job 不会被「recovery 补入队但 claim 拒绝」卡死。
+    expect(where).not.toHaveProperty("source");
+  });
+
+  it("claimAudioJobById 命中处理中且租约过期的音频 job 也可领取（镜像图片语义）", async () => {
+    const now = new Date();
+    const stale = audioRow({
+      status: "processing",
+      lease_expires_at: new Date(now.getTime() - 1000),
+    });
+    const findFirst = vi.fn().mockResolvedValue(stale);
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      generation_jobs: { findFirst, updateMany },
+    } as never;
+    const repo = createWorkerRepo(prisma);
+
+    const claimed = await repo.claimAudioJobById("400", "worker-a");
+    expect(claimed?.type).toBe("audio");
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: "processing" }),
+      }),
+    );
+  });
+
+  it("listDueAudioJobIds 只捞 type=audio + queued/租约过期孤儿，按 id asc，不套 source 白名单", async () => {
+    const findMany = vi
+      .fn()
+      .mockResolvedValue([{ id: 400n }, { id: 401n }]);
+    const prisma = { generation_jobs: { findMany } } as never;
+    const repo = createWorkerRepo(prisma);
+
+    const ids = await repo.listDueAudioJobIds(100);
+    expect(ids).toEqual(["400", "401"]);
+    const where = findMany.mock.calls[0]![0].where as Record<string, unknown>;
+    expect(where).toMatchObject({ type: "audio" });
+    // IKC9EJ 教训：恢复扫描不套 source 白名单，防未来非白名单 source 音频 job 漏捞
+    expect(where).not.toHaveProperty("source");
+  });
+});
