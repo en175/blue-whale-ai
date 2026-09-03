@@ -357,6 +357,9 @@ describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
           { project_id: 77n },
         ]),
       },
+      project: {
+        findMany: vi.fn().mockResolvedValue([{ id: 55n }, { id: 66n }, { id: 77n }]),
+      },
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -373,7 +376,33 @@ describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
     });
   });
 
-  it("两来源全空 → 返回 0", async () => {
+  it("已删除项目（is_delete=1）不计为引用：并集后与存活项目求交", async () => {
+    const prisma = {
+      assets: {
+        groupBy: vi.fn().mockResolvedValue([
+          { project_id: 55n },
+          { project_id: 66n },
+        ]),
+      },
+      project_asset: {
+        groupBy: vi.fn().mockResolvedValue([{ project_id: 77n }]),
+      },
+      project: {
+        findMany: vi.fn().mockResolvedValue([{ id: 55n }]), // 66/77 已删
+      },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const count = await repo.countReferencingProjects("42", "9");
+
+    expect(count).toBe(1); // 仅 55 存活
+    expect(prisma.project.findMany).toHaveBeenCalledWith({
+      where: { id: { in: [55n, 66n, 77n] }, is_delete: 0 },
+      select: { id: true },
+    });
+  });
+
+  it("两来源全空 → 返回 0（不触发 project 查询）", async () => {
     const prisma = {
       assets: { groupBy: vi.fn().mockResolvedValue([]) },
       project_asset: { groupBy: vi.fn().mockResolvedValue([]) },
@@ -381,6 +410,7 @@ describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
     const repo = createAssetRepo(prisma as never);
 
     await expect(repo.countReferencingProjects("42", "9")).resolves.toBe(0);
+    expect(prisma.project).toBeUndefined();
   });
 
   it("project_id=0 不计数（SQL 排除 + Set 兜底双保险）", async () => {
@@ -392,6 +422,9 @@ describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
         ]),
       },
       project_asset: { groupBy: vi.fn().mockResolvedValue([]) },
+      project: {
+        findMany: vi.fn().mockResolvedValue([{ id: 55n }]),
+      },
     };
     const repo = createAssetRepo(prisma as never);
 

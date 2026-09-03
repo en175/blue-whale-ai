@@ -328,7 +328,8 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
     },
     async countReferencingProjects(assetId, userId) {
       // IKCZAT：引用 = 直接归属（assets.project_id ≠ 0）+ project_asset 关联，两来源 project_id 并集去重。
-      // 用 groupBy 在 SQL 层去重：数据量远小于 assets 全集，groupBy(DISTINCT project_id) 比拉全量 Set 更稳。
+      // 只计存活项目（projects.is_delete=0）：项目删除不清 project_asset（见 project-repo delete/batchDelete），
+      // 已删项目不构成真实引用——接口目的就是「删素材前看影响面」，必须反映真实占用。
       const aid = BigInt(assetId);
       const uid = BigInt(userId);
       const [direct, linked] = await Promise.all([
@@ -350,7 +351,12 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         if (row.project_id === BigInt(0)) continue;
         ids.add(row.project_id.toString());
       }
-      return ids.size;
+      if (ids.size === 0) return 0;
+      const liveProjects = await prisma.project.findMany({
+        where: { id: { in: [...ids].map((id) => BigInt(id)) }, is_delete: 0 },
+        select: { id: true },
+      });
+      return liveProjects.length;
     },
     async listGcCandidates(cutoff) {
       const rows = await prisma.assets.findMany({
