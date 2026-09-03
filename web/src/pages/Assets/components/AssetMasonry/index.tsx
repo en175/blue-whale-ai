@@ -246,6 +246,10 @@ export interface AssetMasonryProps {
   columnCount?: number;
   /** 无限加载批大小（对应每次分页条数） */
   pageSize?: number;
+  /** 卡片水平与垂直间距；资产库可用更紧凑的布局，弹窗保留默认间距。 */
+  gutter?: number;
+  /** 仅 /library 页使用的视觉调整，不影响画布资产选择器。 */
+  libraryMode?: boolean;
 }
 
 function AssetCard({
@@ -320,6 +324,8 @@ const AssetMasonry = memo(function AssetMasonry({
   onUpload,
   columnCount = 5,
   pageSize = 30,
+  gutter = 16,
+  libraryMode = false,
 }: AssetMasonryProps) {
   const gridRef = useRef<HTMLElement>(null);
   const scrollStopTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -381,8 +387,8 @@ const AssetMasonry = memo(function AssetMasonry({
   const positioner = usePositioner({
     width: viewport.width,
     columnCount,
-    columnGutter: 16,
-    rowGutter: 16,
+    columnGutter: gutter,
+    rowGutter: gutter,
   });
   const resizeObserver = useResizeObserver(positioner);
 
@@ -399,7 +405,7 @@ const AssetMasonry = memo(function AssetMasonry({
       if (!onUpload) return null;
       return (
         <div
-          className={`${styles.card} ${styles.uploadCard}`}
+          className={`${styles.card} ${styles.uploadCard} ${libraryMode ? styles.libraryUploadCard : ''}`}
           onClick={onUpload}
           role="button"
           tabIndex={0}
@@ -415,7 +421,7 @@ const AssetMasonry = memo(function AssetMasonry({
     }
 
     return <AssetCard asset={data.asset} onPreview={onPreview} onDelete={onDelete} />;
-  }, [onDelete, onPreview, onUpload]);
+  }, [libraryMode, onDelete, onPreview, onUpload]);
 
   // 首帧 viewport 仍为初始值 {width:1, height:1}：此时 positioner 会算出负数列宽
   // （如 (1-16*3)/4 = -12px），非法 CSS 使 phase-one 卡片退化为 width:auto 按内容
