@@ -1,7 +1,7 @@
 /* ============================================
  * assets 接口：资产库列表（分页 + 筛选）
  * ============================================ */
-import { infiniteQueryOptions } from '@tanstack/react-query';
+import { infiniteQueryOptions, type QueryClient } from '@tanstack/react-query';
 import { apiRequest } from './http';
 
 /** 资产类型 */
@@ -49,6 +49,11 @@ export const assetKeys = {
   pages: (type: AssetType | '', size: number) =>
     [...assetKeys.all, 'pages', type || 'all', size] as const,
 };
+
+/** 资产库离开时释放所有筛选条件下的分页缓存，供下次挂载重新测量和加载。 */
+export function removeCachedAssetPages(queryClient: Pick<QueryClient, 'removeQueries'>) {
+  queryClient.removeQueries({ queryKey: assetKeys.all });
+}
 
 /** 单页查询：type 不传或空表示全部；页面可按展示密度指定更小的批量。 */
 export function fetchAssetPage(type: AssetType | '', page: number, size = ASSET_PAGE_SIZE) {
