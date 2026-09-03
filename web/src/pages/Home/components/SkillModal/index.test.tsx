@@ -9,7 +9,9 @@ const api = vi.hoisted(() => ({
   createPersonalSkill: vi.fn(),
   deletePersonalSkill: vi.fn(),
   fetchMySkills: vi.fn(),
+  fetchPersonalSkill: vi.fn(),
   fetchSkillCategories: vi.fn(),
+  fetchSkillContent: vi.fn(),
   fetchSkillLibrary: vi.fn(),
   formatPersonalSkill: vi.fn(),
   removeMySkill: vi.fn(),
@@ -38,6 +40,10 @@ beforeEach(() => {
     total: 1,
   });
   api.removeMySkill.mockResolvedValue(undefined);
+  api.fetchSkillContent.mockResolvedValue({
+    content: '---\nname: 海报生成\n---\n\n# 海报生成\n\n这是一个测试技能。',
+  });
+  api.fetchPersonalSkill.mockResolvedValue({ content: '# 个人技能\n\n这是个人技能正文。' });
 });
 
 afterEach(async () => {
@@ -77,5 +83,47 @@ describe('SkillModal', () => {
     });
 
     expect(api.removeMySkill).toHaveBeenCalledWith('official-skill');
+  });
+
+  it('三个点菜单「查看」打开详情弹窗，右上角「使用」直接使用技能', async () => {
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    const onUseSkill = vi.fn();
+    root = createRoot(mountNode);
+    await act(async () => {
+      root.render(createElement(SkillModal, { open: true, onClose: vi.fn(), onUseSkill }));
+    });
+
+    await act(async () => {
+      [...document.body.querySelectorAll('button')]
+        .find((button) => button.textContent === '我的技能')
+        ?.click();
+      await Promise.resolve();
+    });
+
+    // 点开卡片左上角三个点菜单
+    await act(async () => {
+      (document.body.querySelector('button[title="更多操作"]') as HTMLButtonElement).click();
+    });
+    expect(document.body.textContent).toContain('查看');
+
+    // 点「查看」→ 拉取官方技能正文并展示详情弹窗
+    await act(async () => {
+      (document.body.querySelector('button[title="查看技能详情"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+    expect(api.fetchSkillContent).toHaveBeenCalledWith('official-skill');
+    expect(document.body.textContent).toContain('这是一个测试技能');
+
+    // 详情弹窗右上角「使用」→ 走与卡片「直接使用」同一出口
+    await act(async () => {
+      [...document.body.querySelectorAll('button')]
+        .findLast((button) => button.textContent === '使用')
+        ?.click();
+      await Promise.resolve();
+    });
+    expect(onUseSkill).toHaveBeenCalledWith(
+      expect.objectContaining({ creative_skill_id: 'official-skill', name: '海报生成' }),
+    );
   });
 });

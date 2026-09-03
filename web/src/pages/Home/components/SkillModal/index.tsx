@@ -6,6 +6,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
+  MoreHorizontal,
+  Eye,
   // Plus, // 隐藏「创建技能」入口（2026-08-26 需求：仅隐藏按钮保留代码，恢复时一并解注释）
   Search,
   ChevronDown,
@@ -16,8 +18,11 @@ import {
   Check,
   Upload,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
 import {
+  fetchSkillContent,
   fetchSkillLibrary,
   fetchSkillCategories,
   addLibrarySkill,
@@ -26,6 +31,7 @@ import {
   removeMySkill,
   createPersonalSkill,
   formatPersonalSkill,
+  fetchPersonalSkill,
   type SkillRecord,
 } from '@/api/skills';
 import { isApiError } from '@/api/http';
@@ -94,6 +100,14 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
   const minePageRef = useRef(1);
   const mineLoadedRef = useRef(false);
   const mineGridRef = useRef<HTMLDivElement>(null);
+
+  /* ---- 卡片三个点菜单 + 详情弹窗（IKD0RJ） ---- */
+  const [menuSkillId, setMenuSkillId] = useState<string | null>(null);
+  /** 挂在 .cardMenu 包裹层上（含按钮与下拉项），mousedown 关闭逻辑以它为准 */
+  const menuWrapRef = useRef<HTMLDivElement | null>(null);
+  const [detailTarget, setDetailTarget] = useState<SkillRecord | null>(null);
+  const [detailContent, setDetailContent] = useState('');
+  const [detailLoading, setDetailLoading] = useState(false);
 
   /* ---- 创建技能状态 ---- */
   const [createTab, setCreateTab] = useState<'edit' | 'upload'>('edit');
@@ -204,7 +218,48 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     }
   };
 
+  /** 弹窗关闭时收起三个点菜单 */
+  useEffect(() => {
+    if (!open) setMenuSkillId(null);
+  }, [open]);
+
+  /** 点击菜单外区域收起三个点菜单 */
+  useEffect(() => {
+    if (!menuSkillId) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuWrapRef.current?.contains(e.target as Node)) return;
+      setMenuSkillId(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [menuSkillId]);
+
   if (!open) return null;
+
+  /** SKILL.md 正文渲染：复用 AgentPanel 同款 react-markdown + GFM（表格横向滚动、链接新标签） */
+  function SkillMarkdown({ text }: { text: string }) {
+    return (
+      <div className={styles.md}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            table: ({ children }) => (
+              <div className={styles.mdTableWrap}>
+                <table>{children}</table>
+              </div>
+            ),
+            a: ({ children, href }) => (
+              <a href={href} target="_blank" rel="noreferrer noopener">
+                {children}
+              </a>
+            ),
+          }}
+        >
+          {text}
+        </ReactMarkdown>
+      </div>
+    );
+  }
 
   /** 添加技能到「我的」（接口仅提供 add，已添加时不重复请求） */
   const handleAddSkill = (s: SkillRecord) => {
@@ -247,6 +302,29 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
       .catch((e) => window.alert(errMsg(e)));
   };
 
+  /** 查看技能详情：按归属拉取 SKILL.md 全文，打开详情弹窗（IKD0RJ） */
+  const openDetail = (s: SkillRecord) => {
+    const id = s.creative_skill_id;
+    if (!id) return;
+    setMenuSkillId(null);
+    setDetailTarget(s);
+    setDetailLoading(true);
+    setDetailContent('');
+    const request = s.asset_domain === 'personal' ? fetchPersonalSkill(id) : fetchSkillContent(id);
+    request
+      .then((data) => setDetailContent(data.content))
+      .catch((e) => window.alert(errMsg(e)))
+      .finally(() => setDetailLoading(false));
+  };
+
+  /** 详情弹窗右上角「使用」：复用卡片「直接使用」同一去向（首页武装技能 / 画布强制技能） */
+  const useDetailSkill = () => {
+    const s = detailTarget;
+    if (!s?.creative_skill_id) return;
+    setDetailTarget(null);
+    onUseSkill?.(s);
+  };
+
   /** 上传 SKILL.md */
   const handleMdSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -283,7 +361,8 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
   };
 
   return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
+    <>
+      <div className={styles.overlay} onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         {/* 头部标签栏 */}
         <div className={styles.header}>
@@ -428,8 +507,31 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
             <div ref={mineGridRef} className={styles.cardGrid} onScroll={handleMineScroll}>
               {coverMine.map((s) => {
                 const sid = s.creative_skill_id ?? s.name ?? '';
+                const menuOpen = menuSkillId === sid;
                 return (
                   <div key={sid} className={styles.card}>
+                    {/* 卡片左上角三个点菜单（仅「我的技能」tab，IKD0RJ） */}
+                    <div ref={menuOpen ? menuWrapRef : undefined} className={styles.cardMenu}>
+                      <button
+                        className={`${styles.menuBtn} ${menuOpen ? styles.menuBtnOpen : ''}`}
+                        onClick={() => setMenuSkillId(menuOpen ? null : sid)}
+                        title="更多操作"
+                      >
+                        <MoreHorizontal size={14} strokeWidth={2} />
+                      </button>
+                      {menuOpen && (
+                        <div className={styles.cardMenuDropdown}>
+                          <button
+                            className={styles.cardMenuOption}
+                            onClick={() => openDetail(s)}
+                            title="查看技能详情"
+                          >
+                            <Eye size={13} strokeWidth={2} />
+                            <span>查看</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     <img className={styles.coverImg} src={s.cover_url!} alt={s.name ?? ''} />
                     <div className={styles.cardBody}>
                       <div className={styles.cardTitleRow}>
@@ -545,7 +647,41 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
           onCancel={() => setRemovalTarget(null)}
         />
       </div>
-    </div>,
+    </div>
+      {/* 技能详情弹窗（IKD0RJ）：叠在技能弹窗上层，右上角「使用」直接使用该技能 */}
+      {detailTarget && (
+        <div className={styles.detailOverlay} onClick={() => setDetailTarget(null)}>
+          <div className={styles.detailModal} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.detailHeader}>
+              <div className={styles.detailTitle}>
+                <h3 className={styles.detailName}>{detailTarget.name ?? ''}</h3>
+                {detailTarget.asset_domain === 'official' && <span className={styles.officialTag}>官方</span>}
+              </div>
+              <div className={styles.detailActions}>
+                <button
+                  className={`${styles.cardAction} ${styles.detailUseBtn}`}
+                  onClick={useDetailSkill}
+                  title={detailTarget.creative_skill_id ? '直接使用（强制激活该技能）' : '该技能暂不可直接使用'}
+                >
+                  <AtSign size={12} strokeWidth={2} />
+                  <span>使用</span>
+                </button>
+                <button className={styles.closeBtn} onClick={() => setDetailTarget(null)} title="关闭">
+                  <X size={16} strokeWidth={2} />
+                </button>
+              </div>
+            </div>
+            <div className={styles.detailBody}>
+              {detailLoading ? (
+                <div className={styles.emptyTip}>加载中…</div>
+              ) : (
+                <SkillMarkdown text={detailContent} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>,
     document.body,
   );
 }
