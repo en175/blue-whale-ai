@@ -4,7 +4,7 @@
  * ============================================ */
 import { memo, useEffect, useRef, useState, useCallback, useLayoutEffect, type RefObject } from 'react';
 import { useInfiniteLoader, useMasonry, usePositioner, useResizeObserver, type RenderComponentProps } from 'masonic';
-import { Trash2, RotateCw, AlertCircle, Plus } from 'lucide-react';
+import { Trash2, RotateCw, AlertCircle, Plus, Check } from 'lucide-react';
 import type { AssetRecord } from '@/api/assets';
 import Skeleton from '@/components/Skeleton';
 import AudioPlayer, { type AudioPlayerHandle } from '../AudioPlayer';
@@ -236,12 +236,16 @@ export interface AssetMasonryProps {
   totalItems: number;
   onLoadMore: () => Promise<void>;
   scrollContainerRef: { current: HTMLDivElement | null };
-  /** 卡片点击回调（资产页打开详情，选择弹窗表示选中） */
-  onPreview: (asset: AssetRecord) => void;
+  /** 卡片点击回调（资产页打开详情；多选模式下不触发） */
+  onPreview?: (asset: AssetRecord) => void;
   /** 删除回调；不传则不渲染悬浮删除按钮 */
   onDelete?: (asset: AssetRecord) => void;
   /** 上传入口卡回调；不传则不渲染上传卡行为 */
   onUpload?: () => void;
+  /** 多选模式：已勾选资产 ID 集合；传入 onToggleSelect 即启用 */
+  selectedIds?: ReadonlySet<string>;
+  /** 多选模式：卡片点击切换勾选 */
+  onToggleSelect?: (asset: AssetRecord) => void;
   /** 瀑布流列数（资产页 5 列，弹窗内更窄可减少） */
   columnCount?: number;
   /** 无限加载批大小（对应每次分页条数） */
@@ -252,27 +256,39 @@ function AssetCard({
   asset,
   onPreview,
   onDelete,
-}: Pick<AssetMasonryProps, 'onPreview' | 'onDelete'> & { asset: AssetRecord }) {
+  selected,
+  onToggleSelect,
+}: Pick<AssetMasonryProps, 'onPreview' | 'onDelete' | 'onToggleSelect'> & {
+  asset: AssetRecord;
+  selected: boolean;
+}) {
   const audioPlayerRef = useRef<AudioPlayerHandle>(null);
   const isAudio = asset.type === 'audio';
+  const isSelectable = !!onToggleSelect;
+
+  const handleClick = () => {
+    if (isSelectable) onToggleSelect?.(asset);
+    else onPreview?.(asset);
+  };
 
   return (
     <div
       className={styles.card}
       role="button"
       tabIndex={0}
-      aria-label={`查看${typeLabel[asset.type]}资产详情`}
+      aria-label={isSelectable ? `选择${typeLabel[asset.type]}素材` : `查看${typeLabel[asset.type]}资产详情`}
+      aria-pressed={isSelectable ? selected : undefined}
       onMouseEnter={() => {
         if (isAudio) audioPlayerRef.current?.startPreview();
       }}
       onMouseLeave={() => {
         if (isAudio) audioPlayerRef.current?.stopPreview();
       }}
-      onClick={() => onPreview(asset)}
+      onClick={handleClick}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          onPreview(asset);
+          handleClick();
         }
       }}
     >
@@ -288,6 +304,15 @@ function AssetCard({
           </div>
         )}
         <span className={styles.typeBadge}>{typeLabel[asset.type]}</span>
+        {/* 多选模式：左上角勾选角标，选中态高亮 */}
+        {isSelectable && (
+          <span
+            className={`${styles.selectBadge} ${selected ? styles.selectBadgeActive : ''}`}
+            aria-hidden
+          >
+            {selected && <Check size={12} strokeWidth={3} />}
+          </span>
+        )}
         {onDelete && (
           <button
             className={styles.deleteBtn}
@@ -318,6 +343,8 @@ const AssetMasonry = memo(function AssetMasonry({
   onPreview,
   onDelete,
   onUpload,
+  selectedIds,
+  onToggleSelect,
   columnCount = 5,
   pageSize = 30,
 }: AssetMasonryProps) {
@@ -414,8 +441,16 @@ const AssetMasonry = memo(function AssetMasonry({
       );
     }
 
-    return <AssetCard asset={data.asset} onPreview={onPreview} onDelete={onDelete} />;
-  }, [onDelete, onPreview, onUpload]);
+    return (
+      <AssetCard
+        asset={data.asset}
+        onPreview={onPreview}
+        onDelete={onDelete}
+        selected={!!onToggleSelect && !!selectedIds?.has(String(data.asset.id))}
+        onToggleSelect={onToggleSelect}
+      />
+    );
+  }, [onDelete, onPreview, onUpload, onToggleSelect, selectedIds]);
 
   // 首帧 viewport 仍为初始值 {width:1, height:1}：此时 positioner 会算出负数列宽
   // （如 (1-16*3)/4 = -12px），非法 CSS 使 phase-one 卡片退化为 width:auto 按内容
