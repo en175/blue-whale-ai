@@ -1,11 +1,17 @@
-import { type ReactNode, useEffect, useReducer, useRef, useState } from 'react';
-import auroraVideo from '@/assets/home-hero/aurora.mp4';
+import { type ReactNode, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import auroraPoster from '@/assets/home-hero/aurora-poster.jpg';
+import {
+  publicHomepageHeroesOptions,
+  selectPlayableHeroSlides,
+  type HeroSlide,
+} from '@/api/homepageHeroes';
 import styles from './index.module.css';
 
 export const HERO_TRANSITION_MS = 600;
 export const HERO_PRELOAD_LEAD_SECONDS = 1;
 export const HERO_TRANSITION_LEAD_SECONDS = HERO_TRANSITION_MS / 1000 + 0.05;
+export const HERO_IMAGE_HOLD_MS = 8000;
 
 type SlotIndex = 0 | 1;
 
@@ -21,17 +27,13 @@ interface CarouselState {
 }
 
 type CarouselAction =
-  | { type: 'attach-current' }
-  | { type: 'queue-next' }
+  | { type: 'attach-current'; slideCount: number }
+  | { type: 'queue-next'; nextIndex: number }
   | { type: 'ready'; slot: SlotIndex }
   | { type: 'begin-transition' }
   | { type: 'commit-transition' }
   | { type: 'failed'; slot: SlotIndex }
   | { type: 'reset' };
-
-const slides = [
-  { video: auroraVideo, poster: auroraPoster },
-] as const;
 
 const initialState: CarouselState = {
   activeSlot: 0,
@@ -49,6 +51,7 @@ function otherSlot(slot: SlotIndex): SlotIndex {
 function carouselReducer(state: CarouselState, action: CarouselAction): CarouselState {
   switch (action.type) {
     case 'attach-current': {
+      if (action.slideCount <= 0) return state;
       if (state.slots[state.activeSlot].slideIndex !== null) return state;
       const slots: [SlotState, SlotState] = [...state.slots];
       slots[state.activeSlot] = { slideIndex: 0, ready: false };
@@ -58,10 +61,9 @@ function carouselReducer(state: CarouselState, action: CarouselAction): Carousel
       if (state.transitioning) return state;
       const standby = otherSlot(state.activeSlot);
       if (state.slots[standby].slideIndex !== null) return state;
-      const currentSlide = state.slots[state.activeSlot].slideIndex ?? 0;
       const slots: [SlotState, SlotState] = [...state.slots];
       slots[standby] = {
-        slideIndex: (currentSlide + 1) % slides.length,
+        slideIndex: action.nextIndex,
         ready: false,
       };
       return { ...state, slots };
@@ -169,18 +171,41 @@ function usePrefersReducedMotion(): boolean {
   return reduced;
 }
 
-export default function HeroVideoCarousel({ children }: { children?: ReactNode }) {
+function posterOf(slide: HeroSlide | undefined, fallback: string): string {
+  if (!slide) return fallback;
+  if (slide.poster) return slide.poster;
+  if (slide.mediaType === 'image') return slide.src;
+  return fallback;
+}
+
+function nextIndex(current: number, length: number): number {
+  if (length <= 0) return 0;
+  return (current + 1) % length;
+}
+
+export function HeroCarouselView({
+  children,
+  slides,
+  fallbackPoster,
+}: {
+  children?: ReactNode;
+  slides: HeroSlide[];
+  fallbackPoster: string;
+}) {
   const [state, dispatch] = useReducer(carouselReducer, initialState);
   const [idleReady, setIdleReady] = useState(false);
   const [inViewport, setInViewport] = useState(false);
   const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== 'hidden');
   const reducedMotion = usePrefersReducedMotion();
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const mediaRefs = useRef<[HTMLVideoElement | null, HTMLVideoElement | null]>([null, null]);
+  const mediaRefs = useRef<[HTMLVideoElement | HTMLImageElement | null, HTMLVideoElement | HTMLImageElement | null]>([null, null]);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const slidesRef = useRef(slides);
+  slidesRef.current = slides;
+  const slidesSignature = slides.map((slide) => `${slide.id}:${slide.src}`).join('|');
 
-  const canAnimate = idleReady && inViewport && pageVisible && !reducedMotion;
+  const canAnimate = idleReady && inViewport && pageVisible && !reducedMotion && slides.length > 0;
   const canAnimateRef = useRef(canAnimate);
   canAnimateRef.current = canAnimate;
 
@@ -214,54 +239,67 @@ export default function HeroVideoCarousel({ children }: { children?: ReactNode }
   }, []);
 
   useEffect(() => {
+    dispatch({ type: 'reset' });
+    mediaRefs.current.forEach((el) => {
+      if (el instanceof HTMLVideoElement) pauseAndUnload(el);
+    });
+  }, [slidesSignature]);
+
+  useEffect(() => {
     if (reducedMotion) {
       dispatch({ type: 'reset' });
-      mediaRefs.current.forEach((video) => video && pauseAndUnload(video));
+      mediaRefs.current.forEach((el) => {
+        if (el instanceof HTMLVideoElement) pauseAndUnload(el);
+      });
     }
   }, [reducedMotion]);
 
   useEffect(() => {
-    if (idleReady && inViewport && pageVisible && !reducedMotion) {
-      dispatch({ type: 'attach-current' });
+    if (idleReady && inViewport && pageVisible && !reducedMotion && slides.length > 0) {
+      dispatch({ type: 'attach-current', slideCount: slides.length });
     }
-  }, [idleReady, inViewport, pageVisible, reducedMotion]);
+  }, [idleReady, inViewport, pageVisible, reducedMotion, slides.length, slidesSignature]);
 
   const sourceKey0 = state.slots[0].slideIndex;
   const sourceKey1 = state.slots[1].slideIndex;
   useEffect(() => {
     [sourceKey0, sourceKey1].forEach((slideIndex, index) => {
-      const video = mediaRefs.current[index];
-      if (!video) return;
-      const expectedSource = slideIndex === null ? null : slides[slideIndex].video;
-      if (expectedSource) {
-        assignSource(video, expectedSource);
+      const el = mediaRefs.current[index];
+      const slide = slideIndex === null ? null : slides[slideIndex];
+      if (!(el instanceof HTMLVideoElement)) return;
+      if (slide?.mediaType === 'video') {
+        assignSource(el, slide.src);
       } else {
-        pauseAndUnload(video);
+        pauseAndUnload(el);
       }
     });
-  }, [sourceKey0, sourceKey1]);
+  }, [sourceKey0, sourceKey1, slides, slidesSignature]);
 
   useEffect(() => {
     if (!canAnimate) {
-      mediaRefs.current.forEach((video) => video?.pause());
+      mediaRefs.current.forEach((el) => {
+        if (el instanceof HTMLVideoElement) el.pause();
+      });
       return;
     }
-    const activeVideo = mediaRefs.current[state.activeSlot];
-    if (activeVideo && state.slots[state.activeSlot].slideIndex !== null) safePlay(activeVideo);
+    const activeEl = mediaRefs.current[state.activeSlot];
+    if (activeEl instanceof HTMLVideoElement && state.slots[state.activeSlot].slideIndex !== null) {
+      safePlay(activeEl);
+    }
     if (state.transitioning) {
       const standby = otherSlot(state.activeSlot);
-      const standbyVideo = mediaRefs.current[standby];
-      if (standbyVideo && state.slots[standby].ready) safePlay(standbyVideo);
+      const standbyEl = mediaRefs.current[standby];
+      if (standbyEl instanceof HTMLVideoElement && state.slots[standby].ready) safePlay(standbyEl);
     }
   }, [canAnimate, state.activeSlot, state.slots, state.transitioning]);
 
   useEffect(() => {
     if (!state.transitioning) return;
     const enteringSlot = otherSlot(state.activeSlot);
-    const enteringVideo = mediaRefs.current[enteringSlot];
-    if (enteringVideo && canAnimateRef.current) {
-      rewindToStart(enteringVideo);
-      safePlay(enteringVideo);
+    const enteringEl = mediaRefs.current[enteringSlot];
+    if (enteringEl instanceof HTMLVideoElement && canAnimateRef.current) {
+      rewindToStart(enteringEl);
+      safePlay(enteringEl);
     }
     const handle = window.setTimeout(() => {
       dispatch({ type: 'commit-transition' });
@@ -273,15 +311,39 @@ export default function HeroVideoCarousel({ children }: { children?: ReactNode }
     if (state.transitioning) return;
     const standby = otherSlot(state.activeSlot);
     if (!state.slots[standby].ready) return;
-    const activeVideo = mediaRefs.current[state.activeSlot];
-    if (activeVideo && (activeVideo.ended || isNearEnd(activeVideo, HERO_TRANSITION_LEAD_SECONDS))) {
+    const activeEl = mediaRefs.current[state.activeSlot];
+    if (activeEl instanceof HTMLVideoElement && (activeEl.ended || isNearEnd(activeEl, HERO_TRANSITION_LEAD_SECONDS))) {
       dispatch({ type: 'begin-transition' });
     }
   }, [state.activeSlot, state.slots, state.transitioning]);
 
+  const activeSlideIndex = state.slots[state.activeSlot].slideIndex;
+  const activeReady = state.slots[state.activeSlot].ready;
+  useEffect(() => {
+    if (!canAnimate || state.transitioning || !activeReady || activeSlideIndex === null) return;
+    const slide = slides[activeSlideIndex];
+    if (slide?.mediaType !== 'image') return;
+    if (slides.length <= 1) return;
+    const preloadAt = Math.max(0, HERO_IMAGE_HOLD_MS - HERO_PRELOAD_LEAD_SECONDS * 1000);
+    const preloadHandle = window.setTimeout(() => {
+      const snapshot = stateRef.current;
+      const current = snapshot.slots[snapshot.activeSlot].slideIndex ?? 0;
+      dispatch({ type: 'queue-next', nextIndex: nextIndex(current, slidesRef.current.length) });
+    }, preloadAt);
+    const transHandle = window.setTimeout(() => {
+      dispatch({ type: 'begin-transition' });
+    }, HERO_IMAGE_HOLD_MS);
+    return () => {
+      window.clearTimeout(preloadHandle);
+      window.clearTimeout(transHandle);
+    };
+  }, [canAnimate, state.transitioning, activeReady, activeSlideIndex, slides, slidesSignature]);
+
   useEffect(
     () => () => {
-      mediaRefs.current.forEach((video) => video && pauseAndUnload(video));
+      mediaRefs.current.forEach((el) => {
+        if (el instanceof HTMLVideoElement) pauseAndUnload(el);
+      });
     },
     [],
   );
@@ -294,11 +356,15 @@ export default function HeroVideoCarousel({ children }: { children?: ReactNode }
   const onTimeUpdate = (slot: SlotIndex) => {
     const snapshot = stateRef.current;
     if (slot !== snapshot.activeSlot || snapshot.transitioning) return;
-    const video = mediaRefs.current[slot];
-    if (!video) return;
-    if (isNearEnd(video, HERO_PRELOAD_LEAD_SECONDS)) dispatch({ type: 'queue-next' });
+    const el = mediaRefs.current[slot];
+    if (!(el instanceof HTMLVideoElement)) return;
+    const length = slidesRef.current.length;
+    if (isNearEnd(el, HERO_PRELOAD_LEAD_SECONDS)) {
+      const current = snapshot.slots[snapshot.activeSlot].slideIndex ?? 0;
+      dispatch({ type: 'queue-next', nextIndex: nextIndex(current, length) });
+    }
     const standby = otherSlot(snapshot.activeSlot);
-    if (snapshot.slots[standby].ready && isNearEnd(video, HERO_TRANSITION_LEAD_SECONDS)) {
+    if (snapshot.slots[standby].ready && isNearEnd(el, HERO_TRANSITION_LEAD_SECONDS)) {
       dispatch({ type: 'begin-transition' });
     }
   };
@@ -306,16 +372,18 @@ export default function HeroVideoCarousel({ children }: { children?: ReactNode }
   const onEnded = (slot: SlotIndex) => {
     const snapshot = stateRef.current;
     if (slot !== snapshot.activeSlot || snapshot.transitioning) return;
-    dispatch({ type: 'queue-next' });
+    const length = slidesRef.current.length;
+    const current = snapshot.slots[snapshot.activeSlot].slideIndex ?? 0;
+    dispatch({ type: 'queue-next', nextIndex: nextIndex(current, length) });
     const standby = otherSlot(snapshot.activeSlot);
     if (snapshot.slots[standby].ready) {
       dispatch({ type: 'begin-transition' });
       return;
     }
-    const video = mediaRefs.current[slot];
-    if (video) {
-      video.currentTime = 0;
-      if (canAnimateRef.current) safePlay(video);
+    const el = mediaRefs.current[slot];
+    if (el instanceof HTMLVideoElement) {
+      el.currentTime = 0;
+      if (canAnimateRef.current) safePlay(el);
     }
   };
 
@@ -324,15 +392,18 @@ export default function HeroVideoCarousel({ children }: { children?: ReactNode }
     if (snapshot.slots[slot].slideIndex === null) return;
     dispatch({ type: 'failed', slot });
     if (slot === snapshot.activeSlot && !snapshot.transitioning) {
-      dispatch({ type: 'queue-next' });
+      const current = snapshot.slots[snapshot.activeSlot].slideIndex ?? 0;
+      dispatch({ type: 'queue-next', nextIndex: nextIndex(current, slidesRef.current.length) });
     }
   };
+
+  const posterSrc = posterOf(slides[0], fallbackPoster);
 
   return (
     <section ref={rootRef} className={styles.carousel} data-testid="hero-video-carousel">
       <img
         className={styles.poster}
-        src={slides[0].poster}
+        src={posterSrc}
         alt=""
         width={1920}
         height={1080}
@@ -341,14 +412,31 @@ export default function HeroVideoCarousel({ children }: { children?: ReactNode }
       />
       {state.slots.map((slot, index) => {
         const slotIndex = index as SlotIndex;
+        const slide = slot.slideIndex === null ? null : slides[slot.slideIndex];
         const isEntering = state.transitioning && slotIndex === otherSlot(state.activeSlot);
         const isVisible = slot.ready && (slotIndex === state.activeSlot || isEntering);
         const isLeaving = state.transitioning && slotIndex === state.activeSlot;
+        const layerClass = `${styles.video} ${isVisible && !isLeaving ? styles.videoVisible : ''}`;
+        if (slide?.mediaType === 'image') {
+          return (
+            <img
+              key={`img-${slotIndex}`}
+              ref={(node) => { mediaRefs.current[slotIndex] = node; }}
+              className={layerClass}
+              src={slide.src}
+              alt=""
+              decoding="async"
+              aria-hidden="true"
+              onLoad={() => markReady(slotIndex)}
+              onError={() => onError(slotIndex)}
+            />
+          );
+        }
         return (
           <video
-            key={slotIndex}
+            key={`video-${slotIndex}`}
             ref={(node) => { mediaRefs.current[slotIndex] = node; }}
-            className={`${styles.video} ${isVisible && !isLeaving ? styles.videoVisible : ''}`}
+            className={layerClass}
             muted
             playsInline
             preload="none"
@@ -368,5 +456,15 @@ export default function HeroVideoCarousel({ children }: { children?: ReactNode }
       <div className={styles.scrim} aria-hidden="true" />
       {children ? <div className={styles.content}>{children}</div> : null}
     </section>
+  );
+}
+
+export default function HeroVideoCarousel({ children }: { children?: ReactNode }) {
+  const heroes = useQuery(publicHomepageHeroesOptions());
+  const slides = useMemo(() => selectPlayableHeroSlides(heroes.data), [heroes.data]);
+  return (
+    <HeroCarouselView slides={slides} fallbackPoster={auroraPoster}>
+      {children}
+    </HeroCarouselView>
   );
 }
