@@ -201,7 +201,7 @@ function GroupDetail({
       <div className={styles.assetGrid}>
         {/* 第一个位置：上传素材卡片 */}
         {onUpload && (
-          <div className={styles.assetCard} onClick={onUpload} role="button" tabIndex={0}
+          <div className={`${styles.assetCard} ${styles.uploadAssetCard}`} onClick={onUpload} role="button" tabIndex={0}
             onKeyDown={(e) => { if (e.key === 'Enter') onUpload(); }}>
             <div className={`${styles.assetThumb} ${styles.uploadThumb}`}>
               <Plus size={28} strokeWidth={1.5} />
