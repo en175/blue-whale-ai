@@ -1,12 +1,14 @@
 import { Processor, WorkerHost } from "@nestjs/bullmq";
 import { Job } from "bullmq";
 import {
+  AUDIO_GENERATION_TAG,
   IMAGE_GENERATION_TAG,
   MEDIA_EXTRACT_TAG,
   VIDEO_GENERATION_QUEUE,
 } from "@lib/shared/generation/queue.constants.js";
 import { VideoWorkerService } from "./video-worker.service.js";
 import { MediaExtractWorkerService } from "./media-extract-worker.service.js";
+import { AudioWorkerService } from "./audio-worker.service.js";
 import { createLogger } from "@blue-whale/core/logging";
 
 const logger = createLogger("generation-worker");
@@ -17,6 +19,7 @@ export class GenerationVideoProcessor extends WorkerHost {
   constructor(
     private readonly videoWorker: VideoWorkerService,
     private readonly mediaExtractWorker: MediaExtractWorkerService,
+    private readonly audioWorker: AudioWorkerService,
   ) {
     super();
   }
@@ -31,6 +34,12 @@ export class GenerationVideoProcessor extends WorkerHost {
       // 静默 claim null → 图片任务无声丢失。
       throw new Error(
         "BullMQ 回退路径不支持图片任务：请使用 VIDEO_QUEUE_DRIVER=rocketmq 或提供图片 BullMQ consumer",
+      );
+    }
+    if (job.name === AUDIO_GENERATION_TAG) {
+      // IKCR78：BullMQ 回退路径同样无音频 consumer——显式抛错，不静默丢给视频 worker。
+      throw new Error(
+        "BullMQ 回退路径不支持音频任务：请使用 VIDEO_QUEUE_DRIVER=rocketmq 或提供音频 BullMQ consumer",
       );
     }
     return this.videoWorker.runStep(job.data.jobId);

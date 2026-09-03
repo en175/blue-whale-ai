@@ -33,7 +33,7 @@ export function withTransaction(
   };
 }
 
-// RunPin fixture（复制 agent-run-repo.test.ts 的 runPinSource + signRunPin 模式）。
+// RunPin fixture（IKCKOW：原 agent-run-repo.test.ts 已删，保留 fixture 供 skill-repo 用例）。
 export const runPinSource: Omit<AgentRunPin, "pin_digest"> = {
   schema_version: 1 as const,
   manifest_id: bundledAgentRuntimeManifest.manifest_id,

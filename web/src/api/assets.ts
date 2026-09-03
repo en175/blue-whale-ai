@@ -1,6 +1,7 @@
 /* ============================================
  * assets 接口：资产库列表（分页 + 筛选）
  * ============================================ */
+import { infiniteQueryOptions, type QueryClient } from '@tanstack/react-query';
 import { apiRequest } from './http';
 
 /** 资产类型 */
@@ -42,12 +43,47 @@ export interface AssetPageData {
 /** 资产页每页条数（规范指定 60） */
 export const ASSET_PAGE_SIZE = 60;
 
+/** 素材列表缓存键：筛选类型和分页大小共同决定一个独立的无限分页缓存。 */
+export const assetKeys = {
+  all: ['assets'] as const,
+  pages: (type: AssetType | '', size: number) =>
+    [...assetKeys.all, 'pages', type || 'all', size] as const,
+};
+
+/** 资产库离开时释放所有筛选条件下的分页缓存，供下次挂载重新测量和加载。 */
+export function removeCachedAssetPages(queryClient: Pick<QueryClient, 'removeQueries'>) {
+  queryClient.removeQueries({ queryKey: assetKeys.all });
+}
+
 /** 单页查询：type 不传或空表示全部；页面可按展示密度指定更小的批量。 */
 export function fetchAssetPage(type: AssetType | '', page: number, size = ASSET_PAGE_SIZE) {
   const params = new URLSearchParams({ page: String(page), size: String(size) });
   if (type) params.set('type', type);
   // 资产页以骨架屏承接未就绪与请求失败状态，不向用户提示瞬态请求错误。
   return apiRequest<AssetPageData>(`/api/assets?${params.toString()}`, { silent: true });
+}
+
+/**
+ * 资产库分页查询配置。
+ *
+ * 全部、图片、视频和音频各自拥有独立缓存；切回相同筛选时由 TanStack Query
+ * 复用已加载页，只有缓存过期或素材发生变更后才重新请求。
+ */
+export function assetPageQueryOptions(type: AssetType | '', size = ASSET_PAGE_SIZE) {
+  return infiniteQueryOptions({
+    queryKey: assetKeys.pages(type, size),
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) => fetchAssetPage(type, pageParam, size),
+    getNextPageParam: (lastPage, pages) => {
+      const loadedAssetIds = new Set(
+        pages.flatMap((page) => page.records.map((record) => String(record.id))),
+      );
+
+      return lastPage.records.length > 0 && loadedAssetIds.size < lastPage.total
+        ? lastPage.current + 1
+        : undefined;
+    },
+  });
 }
 
 /** 删除资产 DELETE /api/assets/:assetId（成功 data 为 null，前端移除列表项） */

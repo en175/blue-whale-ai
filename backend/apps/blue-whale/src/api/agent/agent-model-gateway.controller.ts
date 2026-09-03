@@ -8,6 +8,11 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
+import {
+  TRACE_ID_HEADER,
+  generateTraceId,
+  getCurrentTraceId,
+} from "@blue-whale/core/logging";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
@@ -249,6 +254,11 @@ export class AgentModelGatewayController {
     headers[SUBJECT_HEADER] = subjectUserId;
     const runId = readHeader(req, RUN_HEADER);
     if (runId) headers[UPSTREAM_RUN_HEADER] = runId;
+    // X-Trace-Id 到 New API（IKB29O）。上面的循环已经透传 agent 发来的那个，这一行是兜底：
+    // agent 没发时（Studio 直连、evals）用本进程 ALS 里的值，而不是让 New API 另起一个。
+    // 取值顺序同 agent-v1-proxy：ALS → 已透传的 → 生成，任何一步都不丢已有的 id。
+    headers[TRACE_ID_HEADER] =
+      getCurrentTraceId() ?? headers[TRACE_ID_HEADER] ?? generateTraceId();
 
     // 全局 json body-parser（main.ts 的 useBodyParser("json")）已消费请求体流，此刻在已结束的
     // 流上等 data/end 会永久挂起；直接复用解析后的 req.body 重建字节（与 BFF 代理同一修法）。

@@ -2,9 +2,11 @@
  * Assets 资产页面：GET /api/assets 分页拉取 + 类型筛选 + 真实媒体预览
  * ============================================ */
 
-import { memo, useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo } from 'react';
-import { Trash2, RotateCw, AlertCircle, Loader2, Plus } from 'lucide-react';
-import { fetchAssetPage, deleteAsset, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
+import { memo, useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo, type RefObject } from 'react';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
+import { Trash2, RotateCw, AlertCircle, Plus } from 'lucide-react';
+import { assetKeys, assetPageQueryOptions, deleteAsset, removeCachedAssetPages, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
 import { createAsset as createMaterialAsset } from '@/api/material';
 import { uploadAssetFile } from '@/utils/upload';
 import { toast } from 'sonner';
@@ -14,14 +16,13 @@ import { useInfiniteLoader, useMasonry, usePositioner, useResizeObserver, type R
 import ConfirmModal from '@/components/ConfirmModal';
 import Skeleton from '@/components/Skeleton';
 import AssetDetailModal from './components/AssetDetailModal';
+import AudioPlayer, { type AudioPlayerHandle } from './components/AudioPlayer';
 import CharacterLibrary from './components/CharacterLibrary';
 import { assetMediaDisplay } from './assetMediaSrc';
-import { appendUniqueAssets, assetAspectRatio, hasNextAssetPage } from './assetGrid';
+import { appendUniqueAssets, assetAspectRatio } from './assetGrid';
 import { startVideoPreview, stopVideoPreview } from './videoPreview';
+import { getAssetFilter, setAssetFilter, type FilterKey } from './filterQuery';
 import styles from './index.module.css';
-
-/** 筛选类型：all 表示不传 type */
-type FilterKey = 'all' | AssetType;
 
 /** 筛选按钮定义 */
 const filterTabs: { key: FilterKey; label: string }[] = [
@@ -47,7 +48,13 @@ const typeLabel: Record<AssetType, string> = {
 type MediaLoadState = 'waiting' | 'loading' | 'loaded' | 'error';
 
 /** 单个资产媒体组件：图片与视频在未就绪（含失败）期间持续显示骨架屏。 */
-function AssetMedia({ asset }: { asset: AssetRecord }) {
+function AssetMedia({
+  asset,
+  audioPlayerRef,
+}: {
+  asset: AssetRecord;
+  audioPlayerRef?: RefObject<AudioPlayerHandle | null>;
+}) {
   const isSafari = isSafariBrowser();
   // Safari 视频初始为 waiting（懒加载），其余直接进入 loading
   const [state, setState] = useState<MediaLoadState>(
@@ -59,8 +66,11 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
 
   const { src: mediaSrc, nodeKey: mediaKey } = assetMediaDisplay(asset.url, reloadKey);
 
-  // URL 或 reloadKey 变化时重置为 loading（视频通过 VideoThumb 的 onLoaded/onError 驱动状态）
-  useEffect(() => {
+  // URL 或 reloadKey 变化时，在首帧绘制前重置为 loading。
+  // 复用的瀑布流卡片可能仍保留上一个资源的 loaded 状态；若放在 useEffect，
+  // 浏览器会先绘制一次旧播放器，再显示骨架屏，造成音频播放器闪烁。
+  // 视频通过 VideoThumb 的 onLoaded/onError 驱动状态，不在这里重置。
+  useLayoutEffect(() => {
     if (asset.type !== 'video') {
       setState('loading');
     }
@@ -91,12 +101,8 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
       {/* 图片、视频和虚拟人像在加载或失败时都保持与卡片同尺寸的骨架屏。 */}
       {isVisualMedia && state !== 'loaded' && <Skeleton className={styles.mediaSkeleton} />}
 
-      {/* 音频保留原有的加载和重试反馈；本任务只调整图片与视频。 */}
-      {!isVisualMedia && state === 'loading' && (
-        <div className={styles.mediaLoading}>
-          <Loader2 size={24} className={styles.spinner} />
-        </div>
-      )}
+      {/* 音频元数据加载期间也用固定尺寸骨架屏，避免卡片在瀑布流中跳动。 */}
+      {!isVisualMedia && state === 'loading' && <Skeleton className={styles.audioMediaSkeleton} />}
 
       {!isVisualMedia && state === 'error' && (
         <div className={styles.mediaError}>
@@ -132,13 +138,13 @@ function AssetMedia({ asset }: { asset: AssetRecord }) {
         />
       )}
       {asset.type === 'audio' && asset.url && (
-        <audio
+        <AudioPlayer
           key={mediaKey}
-          className={styles.audioPlayer}
+          ref={audioPlayerRef}
           src={mediaSrc}
-          controls
-          preload="metadata"
-          onLoadedData={() => setState('loaded')}
+          variant="compact"
+          className={styles.audioCardPlayer}
+          onLoadedMetadata={() => setState('loaded')}
           onError={() => setState('error')}
         />
       )}
@@ -249,19 +255,6 @@ function VideoThumb({
   );
 }
 
-/** localStorage key for persisting the last selected filter tab */
-const ACTIVE_FILTER_STORAGE_KEY = 'assets.activeFilter';
-
-/** 从 localStorage 读取上次选中的 tab，无记录或非法值回退到 'all' */
-const readStoredFilter = (): FilterKey => {
-  if (typeof window === 'undefined') return 'all';
-  try {
-    const v = window.localStorage.getItem(ACTIVE_FILTER_STORAGE_KEY);
-    if (v && filterTabs.some((t) => t.key === v)) return v as FilterKey;
-  } catch { /* ignore */ }
-  return 'all';
-};
-
 type AssetGridItem =
   | { kind: 'asset'; asset: AssetRecord }
   | { kind: 'upload' };
@@ -274,6 +267,61 @@ interface AssetMasonryProps {
   onUpload: () => void;
   onPreview: (asset: AssetRecord) => void;
   onDelete: (asset: AssetRecord) => void;
+}
+
+function AssetCard({
+  asset,
+  onPreview,
+  onDelete,
+}: Pick<AssetMasonryProps, 'onPreview' | 'onDelete'> & { asset: AssetRecord }) {
+  const audioPlayerRef = useRef<AudioPlayerHandle>(null);
+  const isAudio = asset.type === 'audio';
+
+  return (
+    <div
+      className={styles.card}
+      role="button"
+      tabIndex={0}
+      aria-label={`查看${typeLabel[asset.type]}资产详情`}
+      onMouseEnter={() => {
+        if (isAudio) audioPlayerRef.current?.startPreview();
+      }}
+      onMouseLeave={() => {
+        if (isAudio) audioPlayerRef.current?.stopPreview();
+      }}
+      onClick={() => onPreview(asset)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onPreview(asset);
+        }
+      }}
+    >
+      <div className={styles.thumbnail} style={{ aspectRatio: assetAspectRatio(asset) }}>
+        {asset.url ? (
+          <AssetMedia asset={asset} audioPlayerRef={isAudio ? audioPlayerRef : undefined} />
+        ) : (asset.type === 'image' || asset.type === 'video' || asset.type === 'character') ? (
+          <Skeleton className={styles.mediaSkeleton} />
+        ) : (
+          <div className={styles.mediaError}>
+            <AlertCircle size={28} />
+            <span className={styles.mediaErrorText}>资源不可用</span>
+          </div>
+        )}
+        <span className={styles.typeBadge}>{typeLabel[asset.type]}</span>
+        <button
+          className={styles.deleteBtn}
+          title="删除资产"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete(asset);
+          }}
+        >
+          <Trash2 size={14} strokeWidth={2} />
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -381,46 +429,7 @@ const AssetMasonry = memo(function AssetMasonry({
       );
     }
 
-    const { asset } = data;
-    return (
-      <div
-        className={styles.card}
-        role="button"
-        tabIndex={0}
-        aria-label={`查看${typeLabel[asset.type]}资产详情`}
-        onClick={() => onPreview(asset)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            onPreview(asset);
-          }
-        }}
-      >
-        <div className={styles.thumbnail} style={{ aspectRatio: assetAspectRatio(asset) }}>
-          {asset.url ? (
-            <AssetMedia asset={asset} />
-          ) : (asset.type === 'image' || asset.type === 'video' || asset.type === 'character') ? (
-            <Skeleton className={styles.mediaSkeleton} />
-          ) : (
-            <div className={styles.mediaError}>
-              <AlertCircle size={28} />
-              <span className={styles.mediaErrorText}>资源不可用</span>
-            </div>
-          )}
-          <span className={styles.typeBadge}>{typeLabel[asset.type]}</span>
-          <button
-            className={styles.deleteBtn}
-            title="删除资产"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDelete(asset);
-            }}
-          >
-            <Trash2 size={14} strokeWidth={2} />
-          </button>
-        </div>
-      </div>
-    );
+    return <AssetCard asset={data.asset} onPreview={onPreview} onDelete={onDelete} />;
   }, [onDelete, onPreview, onUpload]);
 
   return useMasonry({
@@ -443,17 +452,14 @@ const AssetMasonry = memo(function AssetMasonry({
 });
 
 export default function Assets() {
-  const [activeFilter, setActiveFilterState] = useState<FilterKey>(readStoredFilter);
-  /** 包装 setter：同步写入 localStorage，刷新后仍记住上次选中 */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+  const activeFilter = getAssetFilter(searchParams);
+
+  /** 筛选状态由 URL 承载，方便分享链接并响应浏览器前进/后退。 */
   const setActiveFilter = useCallback((next: FilterKey) => {
-    setActiveFilterState(next);
-    try { window.localStorage.setItem(ACTIVE_FILTER_STORAGE_KEY, next); } catch { /* ignore */ }
-  }, []);
-  const [assets, setAssets] = useState<AssetRecord[]>([]);
-  const [assetTotal, setAssetTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
+    setSearchParams(setAssetFilter(searchParams, next));
+  }, [searchParams, setSearchParams]);
   const [deleteTarget, setDeleteTarget] = useState<AssetRecord | null>(null);
   const [previewTarget, setPreviewTarget] = useState<AssetRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -464,81 +470,41 @@ export default function Assets() {
   const [characterRefreshTick, setCharacterRefreshTick] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
-  const assetsRef = useRef<AssetRecord[]>([]);
-  const requestVersionRef = useRef(0);
-  const nextPageRef = useRef(2);
-  const hasMoreRef = useRef(false);
-  const loadingMoreRef = useRef(false);
   const [layoutVersion, setLayoutVersion] = useState(0);
 
   const isCharacterView = activeFilter === 'character';
   const assetType = activeFilter === 'all' ? '' : activeFilter;
+  const {
+    data: assetData,
+    fetchNextPage,
+    hasNextPage,
+    isError: isAssetQueryError,
+    isFetchingNextPage,
+    isPending: isAssetQueryPending,
+  } = useInfiniteQuery({
+    ...assetPageQueryOptions(assetType, LIBRARY_PAGE_SIZE),
+    enabled: !isCharacterView,
+  });
+  const assetPages = assetData?.pages;
+  const assets = useMemo(
+    () => appendUniqueAssets([], assetPages?.flatMap((page) => page.records) ?? []),
+    [assetPages],
+  );
+  const assetTotal = assetPages?.at(-1)?.total ?? 0;
+  const loading = !isCharacterView && (isAssetQueryPending || (!assetPages && isAssetQueryError));
+  const loadingMore = isFetchingNextPage;
+  const hasMore = hasNextPage;
 
-  // 筛选切换时仅获取首页；后续页由瀑布流接近末尾时按需加载。
-  // 虚拟人视图由 CharacterLibrary 组件自行管理数据，不在此拉取
-  useEffect(() => {
-    const requestVersion = requestVersionRef.current + 1;
-    requestVersionRef.current = requestVersion;
-    if (activeFilter === 'character') return;
-    assetsRef.current = [];
-    nextPageRef.current = 2;
-    hasMoreRef.current = false;
-    loadingMoreRef.current = false;
-    setLayoutVersion((version) => version + 1);
-    setAssets([]);
-    setAssetTotal(0);
-    setLoading(true);
-    setLoadingMore(false);
-    setHasMore(false);
-    fetchAssetPage(assetType, 1, LIBRARY_PAGE_SIZE)
-      .then((page) => {
-        if (requestVersion !== requestVersionRef.current) return;
-        const records = appendUniqueAssets([], page.records);
-        const nextHasMore = hasNextAssetPage(records.length, page.total, page.records.length);
-        assetsRef.current = records;
-        hasMoreRef.current = nextHasMore;
-        setAssets(records);
-        setAssetTotal(page.total);
-        setHasMore(nextHasMore);
-        setLoading(false);
-      })
-      // 请求失败时保持骨架屏，等用户切换筛选或重新进入页面后再发起新请求。
-      .catch(() => undefined);
-  }, [activeFilter, assetType]);
+  // Masonic 的位置缓存只适用于当前挂载周期。离开资产库时移除分页缓存，
+  // 再次进入先显示骨架屏并取得新数据，避免将旧卡片直接交给新定位器。
+  useEffect(() => () => {
+    removeCachedAssetPages(queryClient);
+  }, [queryClient]);
 
   const loadNextPage = useCallback(async () => {
-    if (loadingMoreRef.current || !hasMoreRef.current || activeFilter === 'character') return;
-
-    const pageNumber = nextPageRef.current;
-    const requestVersion = requestVersionRef.current;
-    loadingMoreRef.current = true;
-    setLoadingMore(true);
-    let keepLoading = false;
-
-    try {
-      const page = await fetchAssetPage(assetType, pageNumber, LIBRARY_PAGE_SIZE);
-      if (requestVersion !== requestVersionRef.current) return;
-
-      const records = appendUniqueAssets(assetsRef.current, page.records);
-      const nextHasMore = hasNextAssetPage(records.length, page.total, page.records.length);
-      assetsRef.current = records;
-      nextPageRef.current = pageNumber + 1;
-      hasMoreRef.current = nextHasMore;
-      setAssets(records);
-      setAssetTotal(page.total);
-      setHasMore(nextHasMore);
-    } catch {
-      if (requestVersion === requestVersionRef.current) {
-        // 与首屏一致，分页失败时只保留加载反馈，不展示错误或 toast。
-        keepLoading = true;
-      }
-    } finally {
-      if (requestVersion === requestVersionRef.current && !keepLoading) {
-        loadingMoreRef.current = false;
-        setLoadingMore(false);
-      }
-    }
-  }, [activeFilter, assetType]);
+    if (isCharacterView || !hasNextPage || isFetchingNextPage) return;
+    await fetchNextPage();
+  }, [fetchNextPage, hasNextPage, isCharacterView, isFetchingNextPage]);
 
   /** 上传素材：presign 获取预签名 URL → PUT 直传对象存储 → complete 登记 */
   const handleUpload = useCallback(() => {
@@ -596,6 +562,7 @@ export default function Assets() {
     // 普通资产视图（图片/视频/音频）
     setUploading(true);
     const errors: string[] = [];
+    let assetListChanged = false;
 
     for (const file of list) {
       // 虚拟人视图下，上传类型固定为 character
@@ -626,40 +593,26 @@ export default function Assets() {
         // 三步上传：presign → PUT → complete
         const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size });
         await putToPresignedUrl(presign, file);
-        const done = await completeUpload({
+        await completeUpload({
           type,
           mime: file.type,
           size: file.size,
           storage_key: presign.storage_key,
           ...(forceCharacter ? {} : {}),
         });
-        // 登记成功：新资产插入列表顶部
-        const uploadedAsset: AssetRecord = {
-          id: done.asset_id,
-          type: done.type,
-          url: done.url || URL.createObjectURL(file),
-          width: done.width || null,
-          height: done.height || null,
-          duration: done.duration,
-          size: file.size,
-          source: 'uploaded',
-          model: null,
-          created_at: new Date().toISOString(),
-        };
-        setAssets((prev) => {
-          const next = [uploadedAsset, ...prev];
-          assetsRef.current = next;
-          return next;
-        });
-        setAssetTotal((total) => total + 1);
-        // 新资产插在首位，会改变所有 index；重建 positioner 避免旧布局缓存错位。
-        setLayoutVersion((version) => version + 1);
+        // 上传会改变“全部”和对应类型缓存；本轮批量上传结束后统一失效并刷新。
+        assetListChanged = true;
       } catch (err) {
         // API 错误已由请求层统一 toast，这里只收集本地校验类错误
         if (!isApiError(err)) errors.push(`上传失败：${file.name}`);
       }
     }
 
+    if (assetListChanged) {
+      await queryClient.invalidateQueries({ queryKey: assetKeys.all });
+      // 新资产插在首位，会改变所有 index；重建 positioner 避免旧布局缓存错位。
+      setLayoutVersion((version) => version + 1);
+    }
     if (errors.length) toast.error(errors.join('；'));
     setUploading(false);
   };
@@ -674,18 +627,13 @@ export default function Assets() {
   );
   const totalGridItems = assetTotal + (activeFilter === 'all' ? 0 : 1);
 
-  /** 确认删除：DELETE /api/assets/:assetId，成功后从列表移除该项 */
+  /** 确认删除：删除成功后失效素材列表缓存并刷新当前筛选。 */
   const confirmDelete = async () => {
     if (!deleteTarget || deleting) return;
     setDeleting(true);
     try {
       await deleteAsset(deleteTarget.id);
-      setAssets((prev) => {
-        const next = prev.filter((asset) => asset.id !== deleteTarget.id);
-        assetsRef.current = next;
-        return next;
-      });
-      setAssetTotal((total) => Math.max(0, total - 1));
+      await queryClient.invalidateQueries({ queryKey: assetKeys.all });
       // 删除会缩短数组，必须重建 Masonic 缓存，避免保留已删除 index 的定位信息。
       setLayoutVersion((version) => version + 1);
       setDeleteTarget(null);

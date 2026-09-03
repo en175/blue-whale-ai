@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from "@nestjs/common";
 import { Interval } from "@nestjs/schedule";
 import { createLogger } from "@blue-whale/core/logging";
 import {
+  enqueueAudioGenerationJob,
   enqueueImageGenerationJob,
   enqueueMediaExtractJob,
   enqueueVideoGenerationJob,
@@ -9,19 +10,22 @@ import {
 import { VideoWorkerService } from "./video-worker.service.js";
 import { ImageWorkerService } from "./image-worker.service.js";
 import { MediaExtractWorkerService } from "./media-extract-worker.service.js";
+import { AudioWorkerService } from "./audio-worker.service.js";
 
 const logger = createLogger("generation-worker");
 
 /** 低频恢复扫描：DB 事实源里到点未入队的视频 job 补入队（Redis 故障兜底）。
  *  IKBGKA（review 2 轮）：图片同构——孤儿/漏入队的图片 job 补入队到 RocketMQ，
  *  由 MQ 消费端（Semaphore 背压）统一处理，不在本进程 inline 跑（封死无背压后门）。
- *  IKC9EJ：media_extract 同构——创建时同步入队失败/消息丢失会永久卡 queued，低频扫描补入队。 */
+ *  IKC9EJ：media_extract 同构——创建时同步入队失败/消息丢失会永久卡 queued，低频扫描补入队。
+ *  IKCR78：音频同构——音频生成改走 RocketMQ 异步后，孤儿/漏入队的音频 job 同样补入队。 */
 @Injectable()
 export class RecoveryService implements OnModuleInit {
   constructor(
     private readonly videoWorker: VideoWorkerService,
     private readonly imageWorker: ImageWorkerService,
     private readonly mediaExtractWorker: MediaExtractWorkerService,
+    private readonly audioWorker: AudioWorkerService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -70,6 +74,20 @@ export class RecoveryService implements OnModuleInit {
         await enqueueMediaExtractJob(jobId).catch((error) => {
           logger.error(
             `recovery enqueue media_extract job ${jobId} failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
+      }
+      // IKCR78：音频补入队（与图片同构；enqueue 失败只 log，下轮扫描再试）。
+      // 分工：enqueue 抛异常由创建端控制器 markFailed 置 failed（fail-fast，用户可见失败）；
+      // 本扫描兜「发送成功但消息丢失」的永久卡 queued 场景，只捞 queued/processing+lease 过期，failed 不在此列。
+      const audioIds = await this.audioWorker.deps.repo.listDueAudioJobIds(100);
+      for (const jobId of audioIds) {
+        logger.info(`recovery re-enqueue stuck audio job ${jobId}`);
+        await enqueueAudioGenerationJob(jobId).catch((error) => {
+          logger.error(
+            `recovery enqueue audio job ${jobId} failed: ${
               error instanceof Error ? error.message : String(error)
             }`,
           );

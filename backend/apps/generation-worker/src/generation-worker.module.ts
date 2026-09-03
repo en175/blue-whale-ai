@@ -12,16 +12,20 @@ import { RecoveryService } from "./recovery.service.js";
 import { RocketMqVideoConsumer } from "./rocketmq-video.consumer.js";
 import { RocketMqMediaExtractConsumer } from "./rocketmq-extract.consumer.js";
 import { RocketMqImageConsumer } from "./rocketmq-image.consumer.js";
+import { RocketMqAudioConsumer } from "./rocketmq-audio.consumer.js";
 import { VideoWorkerService } from "./video-worker.service.js";
 import { MediaExtractWorkerService } from "./media-extract-worker.service.js";
 import { ImageWorkerService } from "./image-worker.service.js";
+import { AudioWorkerService } from "./audio-worker.service.js";
 import { AssetGcService } from "./asset-gc.service.js";
 
 /** 唤醒消费者按 VIDEO_QUEUE_DRIVER 选择：
  *  - rocketmq（默认）：RocketMqVideoConsumer（tag=step）+ RocketMqMediaExtractConsumer（tag=media_extract）
  *    + RocketMqImageConsumer（tag=image，IKBGKA，Semaphore(IMAGE_CONCURRENCY)）
+ *    + RocketMqAudioConsumer（tag=audio，IKCR78，Semaphore(AUDIO_CONCURRENCY)）
  *  - bullmq：BullModule + GenerationVideoProcessor（Redis 回退，按 job.name 分发 step/media_extract）
- *  与 producer 侧 enqueueVideoGenerationJob / enqueueMediaExtractJob / enqueueImageGenerationJob 的 driver 选择保持一致。 */
+ *  与 producer 侧 enqueueVideoGenerationJob / enqueueMediaExtractJob / enqueueImageGenerationJob
+ *  / enqueueAudioGenerationJob 的 driver 选择保持一致。 */
 const driver = process.env.VIDEO_QUEUE_DRIVER ?? "rocketmq";
 const useBullmq = driver === "bullmq";
 
@@ -45,6 +49,7 @@ const useBullmq = driver === "bullmq";
     VideoWorkerService,
     MediaExtractWorkerService,
     ImageWorkerService,
+    AudioWorkerService,
     RecoveryService,
     AssetGcService,
     ...(useBullmq
@@ -53,6 +58,7 @@ const useBullmq = driver === "bullmq";
           RocketMqVideoConsumer,
           RocketMqMediaExtractConsumer,
           RocketMqImageConsumer,
+          RocketMqAudioConsumer,
         ]),
   ],
 })

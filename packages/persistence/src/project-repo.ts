@@ -12,8 +12,22 @@ export interface ProjectView {
   created_at: string;
 }
 
+/** 对齐 GET /api/assets 分页壳：{ records, total, size, current }。 */
+export interface ProjectPage {
+  records: ProjectView[];
+  total: number;
+  size: number;
+  current: number;
+}
+
 export interface ProjectRepo {
   listByOwner(ownerId: string): Promise<ProjectView[]>;
+  /** 当前用户 canvas 项目分页；过滤条件与 listByOwner 相同。 */
+  listByOwnerPaged(
+    ownerId: string,
+    page: number,
+    size: number,
+  ): Promise<ProjectPage>;
   create(ownerId: string, name: string): Promise<ProjectView>;
   findOwnedById(id: string, ownerId: string): Promise<ProjectView | null>;
   /**
@@ -125,6 +139,26 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       const views = rows.map(toView);
       await attachPreviews(rows, views);
       return views;
+    },
+    async listByOwnerPaged(ownerId, page, size) {
+      const where = {
+        owner_id: BigInt(ownerId),
+        purpose: "canvas",
+        is_delete: 0,
+      };
+      const [total, rows] = await Promise.all([
+        prisma.project.count({ where }),
+        prisma.project.findMany({
+          where,
+          // id desc 兜底：gmt_create 秒级并列时跨页不重复（对齐 assets 列表）。
+          orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+          skip: (page - 1) * size,
+          take: size,
+        }),
+      ]);
+      const views = rows.map(toView);
+      await attachPreviews(rows, views);
+      return { records: views, total, size, current: page };
     },
     async create(ownerId, name) {
       const trimmed = name.trim();

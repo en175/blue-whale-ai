@@ -4,7 +4,6 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
-import { GenerationWorkerService } from "@lib/shared/generation/generation-worker.service.js";
 import {
   handleCreateGenerationJob,
   type CreateGenerationJobBody,
@@ -12,11 +11,12 @@ import {
 import { handleCancelGenerationJob } from "@lib/shared/generation/handle-cancel-generation-job.js";
 import { handleRetryGenerationJob } from "@lib/shared/generation/handle-retry-generation-job.js";
 import {
-  enqueueVideoGenerationJob,
+  enqueueAudioGenerationJob,
   enqueueImageGenerationJob,
+  enqueueVideoGenerationJob,
 } from "@lib/shared/generation/video-queue.js";
-import { processJob } from "@lib/shared/generation/worker/generation-worker.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
+import { ERROR_ENQUEUE_FAILED } from "@lib/shared/jobs/error-codes.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
@@ -31,7 +31,6 @@ export class GenerationJobsController {
     private readonly command: GenerationCommandService,
     private readonly models: ModelCapabilityReadService,
     private readonly cost: GenerationCostEstimatorService,
-    private readonly worker: GenerationWorkerService,
   ) {}
 
   @Post()
@@ -74,17 +73,23 @@ export class GenerationJobsController {
           `[generation] enqueue image job failed: ${error instanceof Error ? error.message : "unknown"}`,
         );
       }
-    } else if (result.code === 200 && result.data) {
-      void processJob({
-        ...this.worker.deps,
-        workerId: `next-${Date.now()}`,
-        jobId: result.data.generation_job_id,
-        userId: user.userId,
-      }).catch((e) =>
+    } else if (result.code === 200 && result.data && body.type === "audio") {
+      // IKCR78：音频 job 走 RocketMQ（与图片同构；封死 API 进程内同步 processJob 后门）。
+      // enqueue 抛异常 → markFailed 置 failed（fail-fast，用户可见失败）；
+      // 与 media-extract（IKARDY）同款兜底，防入队失败后无消费端而静默悬挂。
+      const jobId = String(result.data.generation_job_id);
+      try {
+        await enqueueAudioGenerationJob(jobId);
+      } catch (error) {
         logger.error(
-          `[generation] async worker failed: ${e instanceof Error ? e.message : String(e)}`,
-        ),
-      );
+          `[generation] enqueue audio job failed: ${error instanceof Error ? error.message : "unknown"}`,
+        );
+        await this.command
+          .markFailed(jobId, ERROR_ENQUEUE_FAILED, "任务入队失败", {
+            raw: "RocketMQ 入队失败",
+          })
+          .catch(() => {});
+      }
     }
     return result;
   }
@@ -136,17 +141,20 @@ export class GenerationJobsController {
             `[generation] enqueue retry image job failed: ${error instanceof Error ? error.message : "unknown"}`,
           );
         }
-      } else {
-        void processJob({
-          ...this.worker.deps,
-          workerId: `next-retry-${Date.now()}`,
-          jobId: result.data.generation_job_id,
-          userId: user.userId,
-        }).catch((e) =>
+      } else if (result.data.type === "audio") {
+        // IKCR78：音频 retry 走 RocketMQ（与 image 同构；enqueue 失败 fail-fast 置 failed）。
+        try {
+          await enqueueAudioGenerationJob(newJobId);
+        } catch (error) {
           logger.error(
-            `[generation] async retry worker failed: ${e instanceof Error ? e.message : String(e)}`,
-          ),
-        );
+            `[generation] enqueue retry audio job failed: ${error instanceof Error ? error.message : "unknown"}`,
+          );
+          await this.command
+            .markFailed(newJobId, ERROR_ENQUEUE_FAILED, "任务入队失败", {
+              raw: "RocketMQ 入队失败",
+            })
+            .catch(() => {});
+        }
       }
     }
     return result;

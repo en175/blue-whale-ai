@@ -24,13 +24,8 @@ describe("IK67H6 incremental migration", () => {
     );
   });
 
-  it("widens run_commits.outcome to fit completed_with_plan", () => {
-    expect(migrationSql).toContain(
-      "ALTER TABLE `run_commits` MODIFY COLUMN `outcome` VARCHAR(32) NOT NULL",
-    );
-    expect(baselineSql).toContain("`outcome` VARCHAR(32) NOT NULL");
-    expect(baselineSql).not.toContain("`outcome` VARCHAR(16) NOT NULL");
-  });
+  // IKCKOW：run_commits 表已随旧 Agent 引擎删除，baseline 不再含该表。
+  // 历史 migration 文件保留原样（ALTER run_commits 仅作用于升级链上的旧形态）。
 
   it("creates the plan_messages table for frozen PlanMessage state", () => {
     expect(migrationSql).toContain("CREATE TABLE `plan_messages`");

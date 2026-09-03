@@ -191,9 +191,6 @@ export function computeFactDigest(snapshot) {
       .sort(),
     assets: Object.keys(snapshot?.assets ?? {}).sort(),
     canvasNodeIds: canvasNodes.map((n) => String(n.id)).sort(),
-    runs: (snapshot?.agent_runs ?? [])
-      .map((r) => `${r.agent_run_id}:${r.status}:${r.terminal_reason ?? ""}`)
-      .sort(),
     highWatermark: String(snapshot?.high_watermark_cursor ?? "0"),
   };
 }
@@ -210,7 +207,6 @@ export function diffFactDigests(expected, actual) {
     "jobs",
     "assets",
     "canvasNodeIds",
-    "runs",
     "highWatermark",
   ];
   for (const field of fields) {
