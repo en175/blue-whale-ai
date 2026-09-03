@@ -5,7 +5,6 @@ import { useState } from 'react';
 import UserDropdown from '@/components/UserDropdown';
 import ChatBox from './components/ChatBox';
 import CardGallery from './components/CardGallery';
-import HeroVideoCarousel from './components/HeroVideoCarousel';
 import styles from './index.module.css';
 
 export default function Home() {
@@ -14,8 +13,6 @@ export default function Home() {
 
   return (
     <div className={styles.home}>
-      <HeroVideoCarousel />
-
       {/* 右上角用户 - 绝对定位与画布页一致 */}
       <div className={styles.topBar}>
         <UserDropdown />

@@ -5,8 +5,13 @@
 .page {
   width: 100%;
   height: 100%;
-  padding: var(--spacing-2xl) var(--spacing-2xl) var(--spacing-xl);
+  position: relative;
+  z-index: 1;
+  padding: var(--spacing-2xl) var(--spacing-2xl) var(--spacing-xl) calc(var(--sidebar-width) + var(--spacing-2xl));
   overflow-y: auto;
+  background: rgba(7, 7, 10, 0.2);
+  backdrop-filter: blur(4px) saturate(1.08);
+  -webkit-backdrop-filter: blur(4px) saturate(1.08);
 }
 
 .container {
@@ -27,6 +32,7 @@
   font-size: var(--font-size-2xl);
   font-weight: 700;
   color: var(--color-text-primary);
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.64);
 }
 
 .headerActions {
@@ -40,22 +46,27 @@
   padding: 10px 16px;
   border-radius: var(--radius-md);
   font-size: var(--font-size-md);
-  color: var(--color-text-secondary);
-  background-color: transparent;
-  border: none;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(8, 8, 8, 0.48);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(16px) saturate(1.12);
+  -webkit-backdrop-filter: blur(16px) saturate(1.12);
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
 .filterBtn:hover {
   color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.24);
 }
 
 .filterBtnActive {
   color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.3);
   font-weight: 500;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 /* ---- 分隔线 ---- */
@@ -110,7 +121,7 @@
 .skeletonGrid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--spacing-lg);
+  gap: 2px;
 }
 
 .empty {
@@ -123,7 +134,7 @@
 
 .cardSkeleton {
   aspect-ratio: 1 / 1;
-  border-radius: var(--radius-lg);
+  border-radius: 0;
 }
 
 /* ---- 虚拟化五列瀑布流 ---- */
@@ -144,16 +155,20 @@
 
 /* ---- 资产卡片 ---- */
 .card {
-  background-color: var(--color-bg-card);
-  border: 1px solid var(--color-border-primary);
+  background: rgba(8, 8, 8, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow: visible;
+  backdrop-filter: blur(16px) saturate(1.12);
+  -webkit-backdrop-filter: blur(16px) saturate(1.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
   cursor: pointer;
   transition: all var(--transition-normal);
 }
 
 .card:hover {
-  border-color: var(--color-border-hover);
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(8, 8, 8, 0.7);
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }

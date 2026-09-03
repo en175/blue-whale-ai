@@ -291,6 +291,7 @@ export default function Assets() {
                 onUpload={handleUpload}
                 onPreview={setPreviewTarget}
                 onDelete={setDeleteTarget}
+                gutter={2}
               />
             )}
             {!loading && gridItems.length === 0 && (

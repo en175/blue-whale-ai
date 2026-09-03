@@ -243,6 +243,8 @@ export interface AssetMasonryProps {
   columnCount?: number;
   /** 无限加载批大小（对应每次分页条数） */
   pageSize?: number;
+  /** 卡片水平与垂直间距；资产库可用更紧凑的布局，弹窗保留默认间距。 */
+  gutter?: number;
 }
 
 function AssetCard({
@@ -317,6 +319,7 @@ const AssetMasonry = memo(function AssetMasonry({
   onUpload,
   columnCount = 5,
   pageSize = 30,
+  gutter = 16,
 }: AssetMasonryProps) {
   const gridRef = useRef<HTMLElement>(null);
   const scrollStopTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -378,8 +381,8 @@ const AssetMasonry = memo(function AssetMasonry({
   const positioner = usePositioner({
     width: viewport.width,
     columnCount,
-    columnGutter: 16,
-    rowGutter: 16,
+    columnGutter: gutter,
+    rowGutter: gutter,
   });
   const resizeObserver = useResizeObserver(positioner);
 
