@@ -191,8 +191,6 @@
   border-radius: 0;
   background: var(--asset-upload-surface);
   border: 1px solid var(--asset-upload-border);
-  backdrop-filter: var(--asset-upload-filter);
-  -webkit-backdrop-filter: var(--asset-upload-filter);
   box-shadow: var(--asset-upload-shadow);
 }
 
@@ -314,8 +312,6 @@
   border-radius: 0;
   background: var(--asset-upload-surface);
   border: 1px solid var(--asset-upload-border);
-  backdrop-filter: var(--asset-upload-filter);
-  -webkit-backdrop-filter: var(--asset-upload-filter);
 }
 
 /* 音频同样覆盖加载骨架屏；时长元数据到达后再露出播放器。 */
@@ -330,12 +326,13 @@
   -webkit-backdrop-filter: var(--asset-upload-filter);
 }
 
-/* 音频没有可展示的封面，始终保留与加载态一致的玻璃底。 */
+/* 音频没有可展示的封面，始终保留深色玻璃观感的静态底。
+ * Masonic 会 transform 虚拟化卡片；这里避免逐卡 backdrop-filter，防止滚动时
+ * 叠加的视频背景与毛玻璃合成层丢失文字或整块内容。 */
 .audioThumbnail {
   background: var(--asset-upload-surface);
   border: 1px solid var(--asset-upload-border);
-  backdrop-filter: var(--asset-upload-filter);
-  -webkit-backdrop-filter: var(--asset-upload-filter);
+  box-shadow: var(--asset-upload-shadow);
 }
 
 /* 加载骨架只提供 shimmer，背景由音频缩略图的玻璃表面承载。 */
