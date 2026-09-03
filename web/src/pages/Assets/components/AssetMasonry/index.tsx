@@ -280,7 +280,10 @@ function AssetCard({
         }
       }}
     >
-      <div className={styles.thumbnail} style={{ aspectRatio: assetAspectRatio(asset) }}>
+      <div
+        className={`${styles.thumbnail} ${isAudio ? styles.audioThumbnail : ''}`}
+        style={{ aspectRatio: assetAspectRatio(asset) }}
+      >
         {asset.url ? (
           <AssetMedia asset={asset} audioPlayerRef={isAudio ? audioPlayerRef : undefined} />
         ) : (asset.type === 'image' || asset.type === 'video' || asset.type === 'character') ? (

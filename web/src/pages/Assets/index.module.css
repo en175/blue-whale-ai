@@ -8,8 +8,7 @@
   --asset-glass-filter: blur(16px);
   --asset-glass-shadow: 0 14px 34px rgba(0, 0, 0, 0.42), 0 1px 0 rgba(255, 255, 255, 0.12);
   --asset-glass-shadow-hover: 0 20px 46px rgba(0, 0, 0, 0.52), 0 1px 0 rgba(255, 255, 255, 0.16);
-  --asset-placeholder-surface: rgba(255, 255, 255, 0.06);
-  --asset-placeholder-border: rgba(255, 255, 255, 0.18);
+  /* 与首页 ChatBox 一致的深色玻璃表面，供加载态与音频卡片共用。 */
   --asset-upload-surface: rgba(6, 6, 6, 0.72);
   --asset-upload-border: rgba(255, 255, 255, 0.16);
   --asset-upload-filter: blur(28px) saturate(1.15);
@@ -190,11 +189,11 @@
 .skeletonGrid .cardSkeleton {
   aspect-ratio: 1 / 1;
   border-radius: 0;
-  background: var(--asset-placeholder-surface);
-  border: 1px solid var(--asset-placeholder-border);
-  backdrop-filter: var(--asset-glass-filter);
-  -webkit-backdrop-filter: var(--asset-glass-filter);
-  box-shadow: var(--asset-glass-shadow);
+  background: var(--asset-upload-surface);
+  border: 1px solid var(--asset-upload-border);
+  backdrop-filter: var(--asset-upload-filter);
+  -webkit-backdrop-filter: var(--asset-upload-filter);
+  box-shadow: var(--asset-upload-shadow);
 }
 
 /* ---- 虚拟化五列瀑布流 ---- */
@@ -313,10 +312,10 @@
   height: 100%;
   z-index: 1;
   border-radius: 0;
-  background: var(--asset-placeholder-surface);
-  border: 1px solid var(--asset-placeholder-border);
-  backdrop-filter: var(--asset-glass-filter);
-  -webkit-backdrop-filter: var(--asset-glass-filter);
+  background: var(--asset-upload-surface);
+  border: 1px solid var(--asset-upload-border);
+  backdrop-filter: var(--asset-upload-filter);
+  -webkit-backdrop-filter: var(--asset-upload-filter);
 }
 
 /* 音频同样覆盖加载骨架屏；时长元数据到达后再露出播放器。 */
@@ -325,10 +324,26 @@
   inset: 0;
   z-index: 2;
   border-radius: 0;
-  background: var(--asset-placeholder-surface);
-  border: 1px solid var(--asset-placeholder-border);
-  backdrop-filter: var(--asset-glass-filter);
-  -webkit-backdrop-filter: var(--asset-glass-filter);
+  background: var(--asset-upload-surface);
+  border: 1px solid var(--asset-upload-border);
+  backdrop-filter: var(--asset-upload-filter);
+  -webkit-backdrop-filter: var(--asset-upload-filter);
+}
+
+/* 音频没有可展示的封面，始终保留与加载态一致的玻璃底。 */
+.audioThumbnail {
+  background: var(--asset-upload-surface);
+  border: 1px solid var(--asset-upload-border);
+  backdrop-filter: var(--asset-upload-filter);
+  -webkit-backdrop-filter: var(--asset-upload-filter);
+}
+
+/* 加载骨架只提供 shimmer，背景由音频缩略图的玻璃表面承载。 */
+.audioThumbnail .audioMediaSkeleton {
+  background: transparent;
+  border: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* 视频容器：承载懒加载检测与悬浮预览事件。 */
