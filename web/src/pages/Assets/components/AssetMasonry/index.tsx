@@ -228,6 +228,9 @@ export type AssetGridItem =
   | { kind: 'asset'; asset: AssetRecord }
   | { kind: 'upload' };
 
+/** 未测量到真实视口时传给 useMasonry 的空列表（模块级常量保持引用稳定） */
+const EMPTY_ITEMS: AssetGridItem[] = [];
+
 export interface AssetMasonryProps {
   items: AssetGridItem[];
   totalItems: number;
@@ -414,10 +417,17 @@ const AssetMasonry = memo(function AssetMasonry({
     return <AssetCard asset={data.asset} onPreview={onPreview} onDelete={onDelete} />;
   }, [onDelete, onPreview, onUpload]);
 
+  // 首帧 viewport 仍为初始值 {width:1, height:1}：此时 positioner 会算出负数列宽
+  // （如 (1-16*3)/4 = -12px），非法 CSS 使 phase-one 卡片退化为 width:auto 按内容
+  // 撑满容器，污染的高度测量还会被拷贝到重建后的 positioner，导致只剩一张巨图
+  // 占满窗口（ResizeObserver 纠正存在竞态，偶发卡死）。因此测量到真实视口前
+  // 不渲染任何 item，让 positioner 始终以真实列宽全新构建。
+  const measured = viewport.width > 1 && viewport.height > 1;
+
   return useMasonry({
     positioner,
     resizeObserver,
-    items,
+    items: measured ? items : EMPTY_ITEMS,
     render: renderCard,
     onRender,
     className: styles.masonry,

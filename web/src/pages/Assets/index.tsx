@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { assetKeys, assetPageQueryOptions, deleteAsset, removeCachedAssetPages, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
+import { assetKeys, assetPageQueryOptions, deleteAsset, removeCachedAssetPages, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAssetReferences, type AssetRecord, type AssetType } from '@/api/assets';
 import { createAsset as createMaterialAsset } from '@/api/material';
 import { uploadAssetFile } from '@/utils/upload';
 import { toast } from 'sonner';
@@ -43,6 +43,8 @@ export default function Assets() {
     setSearchParams(setAssetFilter(searchParams, next));
   }, [searchParams, setSearchParams]);
   const [deleteTarget, setDeleteTarget] = useState<AssetRecord | null>(null);
+  /** 引用项目数查询结果（带目标 ID，切换目标时不展示旧值）；count null = 查询失败 */
+  const [refCount, setRefCount] = useState<{ id: string; count: number | null } | null>(null);
   const [previewTarget, setPreviewTarget] = useState<AssetRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -209,6 +211,35 @@ export default function Assets() {
   );
   const totalGridItems = assetTotal + (activeFilter === 'all' ? 0 : 1);
 
+  /** 打开删除确认弹窗时拉取该素材被多少项目引用（IKCZAT，只读不拦截删除）；失败降级为普通文案。 */
+  useEffect(() => {
+    if (!deleteTarget) return undefined;
+    let cancelled = false;
+    const targetId = String(deleteTarget.id);
+    fetchAssetReferences(deleteTarget.id)
+      .then((data) => {
+        if (!cancelled) setRefCount({ id: targetId, count: data.projectCount });
+      })
+      .catch(() => {
+        // silent 请求失败不阻断删除流程，兜底为普通文案
+        if (!cancelled) setRefCount({ id: targetId, count: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [deleteTarget]);
+
+  /**
+   * 当前删除目标的引用数查询状态（渲染时派生 loading）：
+   * - 'loading'：弹窗已开、结果未回
+   * - 'done'：结果已回（count null 表示查询失败）
+   */
+  const currentRefCount: { loading: boolean; count: number | null } = deleteTarget
+    ? refCount?.id === String(deleteTarget.id)
+      ? { loading: false, count: refCount.count }
+      : { loading: true, count: null }
+    : { loading: false, count: null };
+
   /** 确认删除：删除成功后失效素材列表缓存并刷新当前筛选。 */
   const confirmDelete = async () => {
     if (!deleteTarget || deleting) return;
@@ -308,13 +339,17 @@ export default function Assets() {
 
       <AssetDetailModal asset={previewTarget} onClose={() => setPreviewTarget(null)} />
 
-      {/* 删除确认弹窗 */}
+      {/* 删除确认弹窗：引用数查询中显示加载提示，返回后展示关联项目数，失败兜底普通文案（IKCZAT） */}
       <ConfirmModal
         open={!!deleteTarget}
         title="删除资产"
         message={
           deleteTarget
-            ? `确定要删除该${typeLabel[deleteTarget.type]}资产吗？此操作不可撤销。`
+            ? currentRefCount.loading
+              ? '正在查询该素材的项目引用情况…'
+              : currentRefCount.count !== null && currentRefCount.count > 0
+                ? `该${typeLabel[deleteTarget.type]}素材正被 ${currentRefCount.count} 个项目引用，删除后这些项目的画布节点将显示占位图。确定要删除吗？此操作不可撤销。`
+                : `确定要删除该${typeLabel[deleteTarget.type]}资产吗？此操作不可撤销。`
             : ''
         }
         confirmText="确认删除"
