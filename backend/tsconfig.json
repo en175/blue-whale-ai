@@ -19,7 +19,6 @@
     { "path": "../packages/persistence" },
     { "path": "../packages/contracts" },
     { "path": "../packages/core" },
-    { "path": "../packages/agent-runtime" },
     { "path": "../packages/generation-runtime" }
   ]
 }

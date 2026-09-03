@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bundledAgentRuntimeManifest } from "../../agent-runtime/src/runtime-manifest.js";
+import { bundledAgentRuntimeManifest } from "./agent-runtime-manifest-fixture.js";
 import {
   agentRunPinSchema,
   canonicalAgentRunPinDigestInput,

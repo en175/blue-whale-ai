@@ -1,4 +1,4 @@
-import { createControlledChatClient } from "@blue-whale/agent-runtime";
+import { createControlledChatClient } from "./controlled-chat-client.js";
 import { fail, ok } from "@blue-whale/contracts";
 import { parseSkillMd } from "@blue-whale/core";
 
