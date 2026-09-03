@@ -96,6 +96,18 @@ export function fetchAssetDetail(id: AssetRecord['id']) {
   return apiRequest<AssetRecord>(`/api/assets/${encodeURIComponent(String(id))}`);
 }
 
+/**
+ * 素材-项目关联（幂等）：POST /api/projects/:projectId/assets/:assetId/link。
+ * 把资产库素材挂到指定项目，使其进入该项目 snapshot 资产字典，
+ * 画布引用跨项目素材后刷新不会被判定为"素材已被删除"。
+ */
+export function linkAssetToProject(projectId: string, assetId: AssetRecord['id']) {
+  return apiRequest<{ projectId: string; assetId: string }>(
+    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(String(assetId))}/link`,
+    { method: 'POST' },
+  );
+}
+
 /** 上传大小上限（字节）：image 20MB / video 200MB / audio 25MB */
 export const UPLOAD_SIZE_LIMIT: Record<AssetType, number> = {
   image: 20 * 1024 * 1024,
@@ -154,6 +166,8 @@ export interface UploadCompleteParams {
   width?: number;
   height?: number;
   duration?: number;
+  /** 文件 MD5（32 位小写 hex），落库供下次上传 md5 查重复用 */
+  md5?: string;
 }
 
 /** POST /api/agent/assets/uploads/complete 返回 */
@@ -177,6 +191,34 @@ export function completeUpload(params: UploadCompleteParams) {
   return apiRequest<UploadCompleteData>('/api/agent/assets/uploads/complete', {
     method: 'POST',
     body: JSON.stringify(params),
+  });
+}
+
+/** POST /api/agent/assets/uploads/dedup 返回 */
+export interface DedupData {
+  /** true 表示命中同 md5 素材，可直接复用 asset 跳过上传三步 */
+  dedup: boolean;
+  /** 命中时返回；形状与 complete 响应 data 完全一致 */
+  asset?: UploadCompleteData;
+}
+
+/**
+ * 上传 md5 去重预检（IKCNLS）：presign 之前调用。
+ * 命中：直接拿 asset 复用，跳过 presign→PUT→complete；传 project_id 时后端自动建项目关联。
+ * 未命中 / md5 不合法：后端一律 fail-open 返回 dedup:false，不阻断上传。
+ * 请求本身失败也不应阻断上传，调用方需自行 catch（silent 避免错误 toast）。
+ */
+export function dedupUpload(params: {
+  type: AssetType;
+  mime: string;
+  size: number;
+  md5: string;
+  project_id?: string;
+}) {
+  return apiRequest<DedupData>('/api/agent/assets/uploads/dedup', {
+    method: 'POST',
+    body: JSON.stringify(params),
+    silent: true,
   });
 }
 
