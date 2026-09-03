@@ -11,11 +11,11 @@
 
 /* ---- 录入新真人卡片 ---- */
 .uploadCard {
-  background: rgba(8, 8, 8, 0.52);
+  background: var(--asset-glass-surface, rgba(6, 6, 6, 0.72));
   border: 1px dashed rgba(255, 255, 255, 0.2);
   border-radius: var(--radius-lg);
-  backdrop-filter: blur(16px) saturate(1.12);
-  -webkit-backdrop-filter: blur(16px) saturate(1.12);
+  backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
+  -webkit-backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -56,13 +56,13 @@
 /* ---- 分组卡片 ---- */
 .groupCard {
   position: relative;
-  background: rgba(8, 8, 8, 0.52);
+  background: var(--asset-glass-surface, rgba(6, 6, 6, 0.72));
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: var(--radius-lg);
   overflow: visible;
-  backdrop-filter: blur(16px) saturate(1.12);
-  -webkit-backdrop-filter: blur(16px) saturate(1.12);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
+  -webkit-backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
+  box-shadow: var(--asset-glass-shadow, 0 16px 48px rgba(0, 0, 0, 0.28));
   cursor: pointer;
   transition: all var(--transition-normal);
   display: flex;
@@ -218,11 +218,20 @@
 
 /* ---- 空状态 ---- */
 .empty {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
   text-align: center;
-  padding: var(--spacing-2xl) 0;
-  color: var(--color-text-tertiary);
+  padding: var(--spacing-lg) var(--spacing-xl);
+  color: rgba(255, 255, 255, 0.7);
   font-size: var(--font-size-md);
   grid-column: 1 / -1;
+  background: var(--asset-glass-surface, rgba(6, 6, 6, 0.72));
+  border: 1px solid var(--asset-glass-border, rgba(255, 255, 255, 0.16));
+  border-radius: var(--radius-md);
+  backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
+  -webkit-backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
+  box-shadow: var(--asset-glass-shadow, 0 16px 48px rgba(0, 0, 0, 0.28));
 }
 
 /* ---- 分组详情视图 ---- */
@@ -299,13 +308,13 @@
 }
 
 .assetCard {
-  background: rgba(8, 8, 8, 0.52);
+  background: var(--asset-glass-surface, rgba(6, 6, 6, 0.72));
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: var(--radius-lg);
   overflow: visible;
-  backdrop-filter: blur(16px) saturate(1.12);
-  -webkit-backdrop-filter: blur(16px) saturate(1.12);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
+  -webkit-backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
+  box-shadow: var(--asset-glass-shadow, 0 16px 48px rgba(0, 0, 0, 0.28));
   cursor: pointer;
   transition: all var(--transition-normal);
   align-self: start;
@@ -362,16 +371,18 @@
   flex-direction: column;
   gap: 8px;
   color: var(--color-text-tertiary);
-  background-color: var(--color-bg-tertiary);
-  border: 1px dashed var(--color-border-primary);
+  background: var(--asset-glass-surface, rgba(6, 6, 6, 0.72));
+  border: 1px dashed rgba(255, 255, 255, 0.24);
+  backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
+  -webkit-backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
 .uploadThumb:hover {
-  border-color: var(--color-text-primary);
+  border-color: rgba(255, 255, 255, 0.38);
   color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
+  background: rgba(8, 8, 8, 0.8);
 }
 
 .uploadCardLabel {
