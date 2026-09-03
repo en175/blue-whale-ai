@@ -69,7 +69,7 @@ test("frontend-delivery auto-loads for web work and routes new fetches to TanSta
   assert.match(rootRules, /frontend-delivery\/SKILL\.md/);
   assert.match(rootRules, /references\/request\.md/);
   assert.match(skill, /^description: Use when.*web\//m);
-  assert.doesNotMatch(skill, /only when the user explicitly/);
+  assert.match(skill, /Load this skill for any `web\/` product work/);
   assert.match(skill, /references\/request\.md/);
   assert.match(policy, /allow_implicit_invocation: true/);
   assert.match(request, /@tanstack\/react-query/);
@@ -77,6 +77,20 @@ test("frontend-delivery auto-loads for web work and routes new fetches to TanSta
   assert.match(request, /silent: true/);
   assert.match(request, /Do not migrate existing `useEffect`/);
   assert.match(request, /refetchOnWindowFocus: false/);
+});
+
+test("frontend-delivery routes explicit feat work to its reference", () => {
+  const skill = read(".claude/skills/frontend-delivery/SKILL.md");
+  const workflow = read(".claude/skills/frontend-delivery/references/feature.md");
+
+  assert.match(skill, /Explicit frontend \*\*feat\*\* workflow/);
+  assert.match(skill, /references\/feature\.md/);
+  assert.match(skill, /only when the user explicitly says/);
+  assert.match(workflow, /A Gitee Issue is optional context, not an entry condition/);
+  assert.match(workflow, /--no-issue/);
+  assert.match(workflow, /Do not create a worktree, write code, install dependencies, or start services before/);
+  assert.match(workflow, /`npm run dev:test`/);
+  assert.match(workflow, /Without an explicit human pass, do not claim completion/);
 });
 
 test("tracked skill mirrors match their authoritative sources", () => {
