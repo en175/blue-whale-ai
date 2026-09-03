@@ -26,7 +26,20 @@ let mountNode: HTMLDivElement;
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   api.fetchSkillCategories.mockResolvedValue([]);
-  api.fetchSkillLibrary.mockResolvedValue({ current: 1, records: [], total: 0 });
+  api.fetchSkillLibrary.mockResolvedValue({
+    current: 1,
+    records: [
+      {
+        creative_skill_id: 'lib-skill',
+        name: '分镜脚本',
+        description: '测试技能',
+        cover_url: 'https://example.com/lib-cover.png',
+        asset_domain: 'official',
+        usage_count: 12,
+      },
+    ],
+    total: 1,
+  });
   api.fetchMySkills.mockResolvedValue({
     current: 1,
     records: [
@@ -124,6 +137,44 @@ describe('SkillModal', () => {
     });
     expect(onUseSkill).toHaveBeenCalledWith(
       expect.objectContaining({ creative_skill_id: 'official-skill', name: '海报生成' }),
+    );
+  });
+
+  it('技能库卡片三个点菜单「查看」打开详情弹窗，「使用」直接使用技能（IKD22K）', async () => {
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    const onUseSkill = vi.fn();
+    root = createRoot(mountNode);
+    await act(async () => {
+      root.render(createElement(SkillModal, { open: true, onClose: vi.fn(), onUseSkill }));
+    });
+
+    // 默认落在技能库 tab，显示技能库卡片
+    expect(document.body.textContent).toContain('分镜脚本');
+
+    // 点开技能库卡片左上角三个点菜单
+    await act(async () => {
+      (document.body.querySelector('button[title="更多操作"]') as HTMLButtonElement).click();
+    });
+    expect(document.body.textContent).toContain('查看');
+
+    // 点「查看」→ 拉取官方技能正文并展示详情弹窗
+    await act(async () => {
+      (document.body.querySelector('button[title="查看技能详情"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+    expect(api.fetchSkillContent).toHaveBeenCalledWith('lib-skill');
+    expect(document.body.textContent).toContain('这是一个测试技能');
+
+    // 详情弹窗右上角「使用」→ 走与卡片「直接使用」同一出口
+    await act(async () => {
+      [...document.body.querySelectorAll('button')]
+        .findLast((button) => button.textContent === '使用')
+        ?.click();
+      await Promise.resolve();
+    });
+    expect(onUseSkill).toHaveBeenCalledWith(
+      expect.objectContaining({ creative_skill_id: 'lib-skill', name: '分镜脚本' }),
     );
   });
 });

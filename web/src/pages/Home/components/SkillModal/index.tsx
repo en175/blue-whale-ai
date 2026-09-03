@@ -466,8 +466,31 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
               {coverLibrary.map((s) => {
                 const added = !!s.added;
                 const sid = s.creative_skill_id ?? s.name ?? '';
+                const menuOpen = menuSkillId === sid;
                 return (
                   <div key={sid} className={styles.card}>
+                    {/* 卡片左上角三个点菜单（技能库 tab，IKD22K：查看官方 SKILL.md 全文） */}
+                    <div ref={menuOpen ? menuWrapRef : undefined} className={styles.cardMenu}>
+                      <button
+                        className={`${styles.menuBtn} ${menuOpen ? styles.menuBtnOpen : ''}`}
+                        onClick={() => setMenuSkillId(menuOpen ? null : sid)}
+                        title="更多操作"
+                      >
+                        <MoreHorizontal size={14} strokeWidth={2} />
+                      </button>
+                      {menuOpen && (
+                        <div className={styles.cardMenuDropdown}>
+                          <button
+                            className={styles.cardMenuOption}
+                            onClick={() => openDetail(s)}
+                            title="查看技能详情"
+                          >
+                            <Eye size={13} strokeWidth={2} />
+                            <span>查看</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     <img className={styles.coverImg} src={s.cover_url!} alt={s.name ?? ''} />
                     <div className={styles.cardBody}>
                       <h4 className={styles.cardTitle}>{s.name ?? ''}</h4>
