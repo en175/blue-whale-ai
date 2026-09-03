@@ -148,7 +148,7 @@ function captureCallSite(): {
  * 三个仓的这个字段才是同一种东西——agent 侧同样这么做。
  */
 function relativeCallerPath(file: string): string {
-  const cleaned = file.replace(/^file:\/\//, "");
+  const cleaned = file.replace(/^file:\/\//, "").replace(/\\/g, "/");
   const match = /(?:^|\/)((?:packages|backend|src|dist)\/.*)$/.exec(cleaned);
   return match?.[1] ?? cleaned;
 }
