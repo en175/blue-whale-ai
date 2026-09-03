@@ -1,6 +1,0 @@
-interface:
-  display_name: "Feat delivery"
-  short_description: "Confirmed frontend feature delivery"
-  default_prompt: "Use $feat-delivery for this frontend feature."
-policy:
-  allow_implicit_invocation: false
