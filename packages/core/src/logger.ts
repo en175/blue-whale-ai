@@ -37,7 +37,7 @@ export interface MetricEventInput {
 export interface LogRecord {
   /** OTel SeverityText，小写 debug/info/warn/error */
   severity_text: LogLevel;
-  /** OTel Timestamp，ISO8601 带毫秒，恒为 +08:00。见 toBlueWhaleTimestamp */
+  /** OTel Timestamp，ISO8601 带毫秒，恒为 UTC（Z）。见 toBlueWhaleTimestamp */
   timestamp: string;
   /** OTel service.name，进程级常量，由 setLogServiceName 声明。不是配置 */
   service_name: string;
@@ -86,20 +86,29 @@ export interface CreateLoggerOptions {
 }
 
 /**
- * `2026-09-02T17:05:09.123+08:00` —— 三仓共用的那一个墙上时钟。
+ * `2026-09-02T13:55:12.887Z` —— UTC、带毫秒，三仓共用的那一个墙上时钟。
  *
- * **固定偏移，由时间戳算出，不读 TZ、不读宿主机。**这个区别就是它的安全性所在：跨服务按字符串
- * 排序只在三家偏移**完全一致**时成立，而从容器配置推导出来的值，离「某个容器没配 TZ、于是退回
- * UTC」只有一步——那正是它替掉的那个 bug（Go 写 +08:00、Node 写 Z，+08:00 排在 Z 后面尽管
- * 实际更早）。写死之后，+08:00 和原来的 Z 一样确定。
+ * **由时间戳算出，不读 TZ、不读宿主机。**这个区别是它的安全性所在：跨服务按字符串排序只在三家
+ * 写同一个时区时成立，而从容器配置推导出来的值，离「某个容器改了 TZ、于是悄悄换了个时区」只有
+ * 一步——那正是它替掉的那个 bug（Go 写 +08:00、Node 写 Z，+08:00 排在 Z 后面尽管实际更早）。
  *
- * 选 +08:00 而不是 UTC：看日志的人都在这个时区，而心算减八小时最贵的时刻恰好是出故障的时候。
- * 中国不实行夏令时，固定偏移全年成立。
+ * **2026-09-03 从 +08:00 改成 UTC，理由不是「UTC 更标准」。** 上一版写 +08:00 是因为看日志的人
+ * 都在这个时区，而心算减八小时最贵的时刻恰好是出故障的时候。那个论证只在「日志被单独读」时成立，
+ * 而它不是：排查一定是把日志行、它写出的那条库记录、它返回的那个 API 响应放在一起看。全链路查了
+ * 一遍，那三样**已经全是 UTC**——
+ *
+ * | 位置 | 值 |
+ * | --- | --- |
+ * | agent REST 响应 | `2026-09-02T13:55:12.887Z` |
+ * | `blue_whale` / `blue_whale_agent` `datetime` | `2026-09-02 13:55:12`（UTC 墙钟） |
+ * | `new-api` `bigint` | `1788357317`（真 UTC epoch） |
+ *
+ * ——日志是整个系统里唯一的例外，于是每一次交叉引用都要付八小时心算。写 UTC 之后，日志里的时刻
+ * 可以直接粘进 SQL 的 WHERE。代价是真的（人读墙上时间要自己换算），而且是明知代价接受的：
+ * 换算每读一次付一次，它替掉的心算每交叉引用一次付一次。
  */
-const LOG_TZ_OFFSET_MS = 8 * 60 * 60 * 1000;
-
 export function toBlueWhaleTimestamp(epochMs: number): string {
-  return `${new Date(epochMs + LOG_TZ_OFFSET_MS).toISOString().slice(0, -1)}+08:00`;
+  return new Date(epochMs).toISOString();
 }
 
 /** 提取调用点（跳过 logger 自身帧）。路径与行号分开返回，见 D2。 */
