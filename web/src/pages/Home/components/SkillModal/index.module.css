@@ -263,6 +263,7 @@
 }
 
 .card {
+  position: relative; /* IKD0RJ：三个点菜单与右上角移除/删除按钮的定位基准 */
   background-color: #1e1e1e;
   border: 1px solid #2a2a2a;
   border-radius: 12px;
@@ -314,6 +315,278 @@
   background-color: #2a2a2a;
   padding: 2px 8px;
   border-radius: 4px;
+}
+
+/* ---- 卡片三个点菜单（IKD0RJ：仅「我的技能」tab，浮在封面图左上角） ---- */
+.cardMenu {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 30;
+}
+
+.menuBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #bbb;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.menuBtn:hover,
+.menuBtnOpen {
+  background-color: rgba(0, 0, 0, 0.5);
+  color: #fff;
+}
+
+.cardMenuDropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 104px;
+  background-color: #262626;
+  border: 1px solid #363636;
+  border-radius: 10px;
+  padding: 4px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+}
+
+.cardMenuOption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #ccc;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.cardMenuOption:hover {
+  color: #fff;
+  background-color: #333;
+}
+
+/* ---- 技能详情弹窗（IKD0RJ：叠在技能弹窗上层） ---- */
+.detailOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: calc(var(--z-modal) + 10);
+}
+
+.detailModal {
+  width: min(820px, 90vw);
+  height: min(640px, 82vh);
+  background-color: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.detailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid #242424;
+  flex-shrink: 0;
+}
+
+.detailTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.detailName {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detailActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.detailUseBtn {
+  padding: 6px 16px;
+  background-color: #3e63c4;
+  border-color: #3e63c4;
+  color: #fff;
+}
+
+.detailUseBtn:hover {
+  background-color: #4a70d8;
+  border-color: #4a70d8;
+  color: #fff;
+}
+
+.detailBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+  font-size: var(--font-size-sm);
+  line-height: 1.8;
+  color: #ddd;
+}
+
+/* ---- SKILL.md 正文 markdown 渲染（复用 AgentPanel 同款，适配详情弹窗） ---- */
+.md {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.md > *:first-child {
+  margin-top: 0;
+}
+
+.md > *:last-child {
+  margin-bottom: 0;
+}
+
+.md p {
+  margin: 0;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  font-weight: 600;
+  color: #fff;
+  margin: 10px 0 0;
+}
+
+.md h1 {
+  font-size: 1.3em;
+}
+
+.md h2 {
+  font-size: 1.2em;
+}
+
+.md h3 {
+  font-size: 1.1em;
+}
+
+.md ul,
+.md ol {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.md li > ul,
+.md li > ol {
+  margin-top: 3px;
+}
+
+.md blockquote {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--color-border-secondary);
+  color: var(--color-text-tertiary);
+}
+
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--color-border-secondary);
+  margin: 2px 0;
+}
+
+.md a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* 表格横向滚动：详情弹窗窄时宽表格不能撑破弹窗 */
+.mdTableWrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.mdTableWrap table {
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+
+.mdTableWrap th,
+.mdTableWrap td {
+  border: 1px solid var(--color-border-secondary);
+  padding: 5px 9px;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.mdTableWrap th {
+  background-color: #262626;
+  font-weight: 600;
+  color: #fff;
+}
+
+/* 围栏代码块：整块滚动，不继承行内 code 的胶囊样式 */
+.md pre {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 6px;
+  background-color: #1e1e1e;
+  border: 1px solid var(--color-border-secondary);
+  overflow-x: auto;
+}
+
+.md pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.88em;
+  white-space: pre;
+}
+
+.md code {
+  background-color: #2a2a2a;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.9em;
 }
 
 .cardDesc {
