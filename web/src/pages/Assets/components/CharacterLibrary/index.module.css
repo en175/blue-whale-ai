@@ -218,20 +218,11 @@
 
 /* ---- 空状态 ---- */
 .empty {
-  width: fit-content;
-  max-width: 100%;
-  margin: 0 auto;
   text-align: center;
-  padding: var(--spacing-lg) var(--spacing-xl);
-  color: rgba(255, 255, 255, 0.7);
+  padding: var(--spacing-2xl) 0;
+  color: var(--color-text-tertiary);
   font-size: var(--font-size-md);
   grid-column: 1 / -1;
-  background: var(--asset-glass-surface, rgba(6, 6, 6, 0.72));
-  border: 1px solid var(--asset-glass-border, rgba(255, 255, 255, 0.16));
-  border-radius: var(--radius-md);
-  backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
-  -webkit-backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
-  box-shadow: var(--asset-glass-shadow, 0 16px 48px rgba(0, 0, 0, 0.28));
 }
 
 /* ---- 分组详情视图 ---- */
@@ -371,10 +362,10 @@
   flex-direction: column;
   gap: 8px;
   color: var(--color-text-tertiary);
-  background: var(--asset-glass-surface, rgba(6, 6, 6, 0.72));
-  border: 1px dashed rgba(255, 255, 255, 0.24);
-  backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
-  -webkit-backdrop-filter: var(--asset-glass-filter, blur(28px) saturate(1.15));
+  background: var(--asset-placeholder-surface, rgba(255, 255, 255, 0.06));
+  border: 1px dashed var(--asset-placeholder-border, rgba(255, 255, 255, 0.18));
+  backdrop-filter: var(--asset-glass-filter, blur(16px));
+  -webkit-backdrop-filter: var(--asset-glass-filter, blur(16px));
   cursor: pointer;
   transition: all var(--transition-fast);
 }

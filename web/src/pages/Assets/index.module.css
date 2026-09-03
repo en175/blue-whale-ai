@@ -3,10 +3,12 @@
  * ============================================ */
 
 .page {
-  --asset-glass-surface: rgba(6, 6, 6, 0.72);
+  --asset-glass-surface: rgba(8, 8, 8, 0.68);
   --asset-glass-border: rgba(255, 255, 255, 0.16);
-  --asset-glass-filter: blur(28px) saturate(1.15);
-  --asset-glass-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
+  --asset-glass-filter: blur(16px);
+  --asset-glass-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --asset-placeholder-surface: rgba(255, 255, 255, 0.06);
+  --asset-placeholder-border: rgba(255, 255, 255, 0.18);
   width: 100%;
   height: 100%;
   position: relative;
@@ -130,26 +132,17 @@
 
 .empty {
   grid-column: 1 / -1;
-  width: fit-content;
-  max-width: 100%;
-  margin: 0 auto;
   text-align: center;
-  padding: var(--spacing-lg) var(--spacing-xl);
-  color: rgba(255, 255, 255, 0.7);
+  padding: var(--spacing-2xl) 0;
+  color: var(--color-text-tertiary);
   font-size: var(--font-size-md);
-  background: var(--asset-glass-surface);
-  border: 1px solid var(--asset-glass-border);
-  border-radius: var(--radius-md);
-  backdrop-filter: var(--asset-glass-filter);
-  -webkit-backdrop-filter: var(--asset-glass-filter);
-  box-shadow: var(--asset-glass-shadow);
 }
 
 .skeletonGrid .cardSkeleton {
   aspect-ratio: 1 / 1;
   border-radius: 0;
-  background: var(--asset-glass-surface);
-  border: 1px solid var(--asset-glass-border);
+  background: var(--asset-placeholder-surface);
+  border: 1px solid var(--asset-placeholder-border);
   backdrop-filter: var(--asset-glass-filter);
   -webkit-backdrop-filter: var(--asset-glass-filter);
   box-shadow: var(--asset-glass-shadow);
@@ -165,19 +158,10 @@
 }
 
 .loadState {
-  width: fit-content;
-  max-width: 100%;
-  margin: var(--spacing-lg) auto;
-  padding: var(--spacing-sm) var(--spacing-lg);
+  padding: var(--spacing-lg) 0;
   text-align: center;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);
-  background: var(--asset-glass-surface);
-  border: 1px solid var(--asset-glass-border);
-  border-radius: var(--radius-full);
-  backdrop-filter: var(--asset-glass-filter);
-  -webkit-backdrop-filter: var(--asset-glass-filter);
-  box-shadow: var(--asset-glass-shadow);
 }
 
 /* ---- 资产卡片 ---- */
@@ -215,8 +199,8 @@
   flex-direction: column;
   gap: 10px;
   color: rgba(255, 255, 255, 0.7);
-  background: var(--asset-glass-surface);
-  border: 1px dashed rgba(255, 255, 255, 0.24);
+  background: var(--asset-placeholder-surface);
+  border: 1px dashed var(--asset-placeholder-border);
   backdrop-filter: var(--asset-glass-filter);
   -webkit-backdrop-filter: var(--asset-glass-filter);
   cursor: pointer;
@@ -262,8 +246,8 @@
   height: 100%;
   z-index: 1;
   border-radius: 0;
-  background: var(--asset-glass-surface);
-  border: 1px solid var(--asset-glass-border);
+  background: var(--asset-placeholder-surface);
+  border: 1px solid var(--asset-placeholder-border);
   backdrop-filter: var(--asset-glass-filter);
   -webkit-backdrop-filter: var(--asset-glass-filter);
 }
@@ -274,8 +258,8 @@
   inset: 0;
   z-index: 2;
   border-radius: 0;
-  background: var(--asset-glass-surface);
-  border: 1px solid var(--asset-glass-border);
+  background: var(--asset-placeholder-surface);
+  border: 1px solid var(--asset-placeholder-border);
   backdrop-filter: var(--asset-glass-filter);
   -webkit-backdrop-filter: var(--asset-glass-filter);
 }
