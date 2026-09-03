@@ -2,6 +2,7 @@ import { Producer } from "rocketmq-client-nodejs";
 import { Queue, type ConnectionOptions, type JobsOptions } from "bullmq";
 
 import {
+  AUDIO_GENERATION_TAG,
   IMAGE_GENERATION_TAG,
   MEDIA_EXTRACT_TAG,
   VIDEO_GENERATION_QUEUE,
@@ -223,6 +224,27 @@ export async function enqueueImageGenerationJob(
     return;
   }
   await createVideoQueueProducer(getQueue(), IMAGE_GENERATION_TAG).enqueue(
+    jobId,
+    options,
+  );
+}
+
+/** 音频生成 job 入队（IKCR78）：复用视频 topic/queue，用独立 tag「audio」区分任务类型。 */
+export async function enqueueAudioGenerationJob(
+  jobId: string,
+  options?: { delayMs?: number },
+): Promise<void> {
+  const driver = process.env.VIDEO_QUEUE_DRIVER ?? "rocketmq";
+  if (driver === "rocketmq") {
+    const config = loadRocketMqConfig();
+    const producer = await getStartedRocketMqProducer(config);
+    await createRocketMqVideoProducer(producer, {
+      topic: config.topic,
+      tag: AUDIO_GENERATION_TAG,
+    }).enqueue(jobId, options);
+    return;
+  }
+  await createVideoQueueProducer(getQueue(), AUDIO_GENERATION_TAG).enqueue(
     jobId,
     options,
   );

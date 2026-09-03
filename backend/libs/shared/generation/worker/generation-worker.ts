@@ -75,8 +75,9 @@ export async function processNextJob(deps: WorkerDeps): Promise<string | null> {
 }
 
 /** 恢复扫描用：认领一个到点的音频任务并处理。
- *  IKBGKA（review 2 轮）：图片已迁 MQ，本函数只服务音频 inline 恢复；图片由
- *  RecoveryService.listDueImageJobIds → enqueueImageGenerationJob 补入队。 */
+ *  IKBGKA（review 2 轮）：图片已迁 MQ，本函数只服务音频 inline 恢复；
+ *  IKCR78：音频也已迁 MQ——生产路径不再调用本函数（孤儿由 RecoveryService 补入队到 RocketMQ），
+ *  仅保留导出供单测覆盖 claimNextInProcessJob 语义。 */
 export async function processNextInProcessJob(
   deps: WorkerDeps,
 ): Promise<string | null> {
@@ -106,6 +107,18 @@ export async function processImageJobById(
   deps: WorkerDeps,
 ): Promise<string | null> {
   const job = await deps.repo.claimImageJobById(jobId, deps.workerId);
+  if (!job) return null;
+
+  return processClaimedJob(job, deps);
+}
+
+/** 音频 MQ 消费端：按 RocketMQ 消息 jobId 领单个音频 job 并处理（IKCR78）。
+ *  镜像 processImageJobById——audio 走 data 直传 + 单 asset，与图片同构；消费端非 request-scoped。 */
+export async function processAudioJobById(
+  jobId: string,
+  deps: WorkerDeps,
+): Promise<string | null> {
+  const job = await deps.repo.claimAudioJobById(jobId, deps.workerId);
   if (!job) return null;
 
   return processClaimedJob(job, deps);
