@@ -38,11 +38,11 @@
   position: sticky;
   top: 0;
   z-index: 5;
-  /* Header 承载页面留白，并作为主区顶部的 ChatBox 玻璃表面。 */
+  /* Header 贴合素材区顶部，滚动后由伪元素提供整条玻璃表面。 */
   padding: var(--spacing-2xl);
-  margin-bottom: var(--spacing-xl);
-  border: none;
-  border-radius: var(--radius-xl);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
   background: transparent;
   box-shadow: none;
   transition: box-shadow var(--transition-fast);
