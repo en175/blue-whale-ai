@@ -115,7 +115,7 @@ GET /api/assets/:assetId/references
 
 ---
 
-## 5. 对接要点总结
+## 5. 对接要点总结  
 
 | 项 | 前端动作 |
 |---|---|

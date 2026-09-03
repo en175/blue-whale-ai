@@ -96,6 +96,24 @@ export function fetchAssetDetail(id: AssetRecord['id']) {
   return apiRequest<AssetRecord>(`/api/assets/${encodeURIComponent(String(id))}`);
 }
 
+/** GET /api/assets/:assetId/references 返回（IKCZAT） */
+export interface AssetReferencesData {
+  assetId: string;
+  /** 引用该素材的项目数（并集去重，只计存活项目） */
+  projectCount: number;
+}
+
+/**
+ * 查询素材被多少项目引用（IKCZAT）：删除前确认弹窗展示用。
+ * 只读接口、不拦截删除；请求失败时调用方降级为不展示引用数（silent 避免错误 toast）。
+ */
+export function fetchAssetReferences(id: AssetRecord['id']) {
+  return apiRequest<AssetReferencesData>(
+    `/api/assets/${encodeURIComponent(String(id))}/references`,
+    { silent: true },
+  );
+}
+
 /**
  * 素材-项目关联（幂等）：POST /api/projects/:projectId/assets/:assetId/link。
  * 把资产库素材挂到指定项目，使其进入该项目 snapshot 资产字典，
