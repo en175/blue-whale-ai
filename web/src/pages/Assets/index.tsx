@@ -90,8 +90,15 @@ export default function Assets() {
     if (!page) return undefined;
 
     const updateHeaderStickyState = () => {
-      const stickyThreshold = headerRef.current?.offsetTop ?? Number.POSITIVE_INFINITY;
-      setIsHeaderSticky(page.scrollTop >= stickyThreshold);
+      const header = headerRef.current;
+      if (!header) {
+        setIsHeaderSticky(false);
+        return;
+      }
+
+      const pageTop = page.getBoundingClientRect().top;
+      const normalHeaderTop = pageTop + header.offsetTop - page.scrollTop;
+      setIsHeaderSticky(header.getBoundingClientRect().top > normalHeaderTop + 1);
     };
 
     updateHeaderStickyState();
