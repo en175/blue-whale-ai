@@ -16,6 +16,7 @@
   border-radius: 0;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  box-shadow: var(--asset-glass-shadow, 0 14px 34px rgba(0, 0, 0, 0.42));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -30,6 +31,7 @@
 .uploadCard:hover {
   border-color: rgba(255, 255, 255, 0.34);
   background: transparent;
+  box-shadow: var(--asset-glass-shadow-hover, 0 20px 46px rgba(0, 0, 0, 0.52));
 }
 
 .uploadCard .plusIcon {
@@ -62,7 +64,7 @@
   overflow: visible;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  box-shadow: none;
+  box-shadow: var(--asset-glass-shadow, 0 14px 34px rgba(0, 0, 0, 0.42));
   cursor: pointer;
   transition: all var(--transition-normal);
   display: flex;
@@ -73,7 +75,7 @@
 .groupCard:hover {
   background: transparent;
   transform: none;
-  box-shadow: none;
+  box-shadow: var(--asset-glass-shadow-hover, 0 20px 46px rgba(0, 0, 0, 0.52));
 }
 
 .groupCover {
@@ -216,9 +218,10 @@
 .empty {
   text-align: center;
   padding: var(--spacing-2xl) 0;
-  color: var(--color-text-tertiary);
+  color: #fff;
   font-size: var(--font-size-md);
   grid-column: 1 / -1;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.72);
 }
 
 /* ---- 分组详情视图 ---- */
@@ -301,7 +304,7 @@
   overflow: visible;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  box-shadow: none;
+  box-shadow: var(--asset-glass-shadow, 0 14px 34px rgba(0, 0, 0, 0.42));
   cursor: pointer;
   transition: all var(--transition-normal);
   align-self: start;
@@ -310,7 +313,7 @@
 .assetCard:hover {
   background: transparent;
   transform: none;
-  box-shadow: none;
+  box-shadow: var(--asset-glass-shadow-hover, 0 20px 46px rgba(0, 0, 0, 0.52));
 }
 
 .assetThumb {

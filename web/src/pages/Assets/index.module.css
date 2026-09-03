@@ -6,7 +6,8 @@
   --asset-glass-surface: rgba(8, 8, 8, 0.68);
   --asset-glass-border: rgba(255, 255, 255, 0.16);
   --asset-glass-filter: blur(16px);
-  --asset-glass-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --asset-glass-shadow: 0 14px 34px rgba(0, 0, 0, 0.42), 0 1px 0 rgba(255, 255, 255, 0.12);
+  --asset-glass-shadow-hover: 0 20px 46px rgba(0, 0, 0, 0.52), 0 1px 0 rgba(255, 255, 255, 0.16);
   --asset-placeholder-surface: rgba(255, 255, 255, 0.06);
   --asset-placeholder-border: rgba(255, 255, 255, 0.18);
   width: 100%;
@@ -134,8 +135,9 @@
   grid-column: 1 / -1;
   text-align: center;
   padding: var(--spacing-2xl) 0;
-  color: var(--color-text-tertiary);
+  color: #fff;
   font-size: var(--font-size-md);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.72);
 }
 
 .skeletonGrid .cardSkeleton {
@@ -160,8 +162,9 @@
 .loadState {
   padding: var(--spacing-lg) 0;
   text-align: center;
-  color: var(--color-text-tertiary);
+  color: #fff;
   font-size: var(--font-size-sm);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.72);
 }
 
 /* ---- 资产卡片 ---- */
@@ -172,7 +175,7 @@
   overflow: visible;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  box-shadow: none;
+  box-shadow: var(--asset-glass-shadow);
   cursor: pointer;
   transition: all var(--transition-normal);
 }
@@ -180,7 +183,7 @@
 .card:hover {
   background: transparent;
   transform: none;
-  box-shadow: none;
+  box-shadow: var(--asset-glass-shadow-hover);
 }
 
 .card:focus-visible {
