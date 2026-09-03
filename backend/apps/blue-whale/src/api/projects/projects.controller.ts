@@ -29,6 +29,7 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { handleGetSnapshot } from "@lib/shared/snapshot/handle-snapshot.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+import { resolveProjectListQuery } from "./project-list-query.js";
 
 @Controller("projects")
 export class ProjectsController {
@@ -49,8 +50,24 @@ export class ProjectsController {
   }
 
   @Get()
-  async list(@CurrentUser() user: AuthenticatedUser) {
-    return ok(await this.project.listByOwner(user.userId));
+  async list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: Record<string, string> = {},
+  ) {
+    const resolved = resolveProjectListQuery(query);
+    if (resolved.kind === "invalid") {
+      return fail(FAILURE_CODE, "page 与 size 必须成对出现");
+    }
+    if (resolved.kind === "all") {
+      return ok(await this.project.listByOwner(user.userId));
+    }
+    return ok(
+      await this.project.listByOwnerPaged(
+        user.userId,
+        resolved.page,
+        resolved.size,
+      ),
+    );
   }
 
   @Post()

@@ -28,6 +28,10 @@ export class ProjectService {
     return this.repo.listByOwner(ownerId);
   }
 
+  listByOwnerPaged(ownerId: string, page: number, size: number) {
+    return this.repo.listByOwnerPaged(ownerId, page, size);
+  }
+
   create(ownerId: string, name: string) {
     return this.repo.create(ownerId, name);
   }

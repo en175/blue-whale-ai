@@ -8,6 +8,7 @@ export { getPrismaClient, type PrismaClient } from "./db.js";
 export { createAuthRepo, type AuthRepo } from "./auth-repo.js";
 export {
   createProjectRepo,
+  type ProjectPage,
   type ProjectRepo,
   type ProjectView,
 } from "./project-repo.js";
