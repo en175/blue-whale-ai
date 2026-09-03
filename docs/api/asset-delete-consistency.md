@@ -79,6 +79,24 @@ POST /api/projects/:projectId/assets/:assetId/link
 - 触发时机：素材被拖入/加入画布时（前端 `useCanvasDoc` 水合到新素材时，或用户主动添加素材到画布时调用）。
 - 效果：link 后该素材进入本项目的 `snapshot.assets`，前端即可正常渲染。
 
+### 2.3 查询素材被项目引用数（IKCZAT）
+
+```
+GET /api/assets/:assetId/references
+```
+
+响应：
+```json
+{ "code": 200, "msg": null, "data": { "assetId": "526", "projectCount": 3 } }
+```
+
+**语义**：`projectCount` = 引用该素材的项目数（并集去重）——
+- 素材表直接归属（`assets.project_id` ≠ 0）∪ `project_asset` 关联（`is_delete = 0`）
+- **只计存活项目**：已删除项目（`projects.is_delete = 0`）不计
+- 同一项目多来源只计一次
+
+**用途**：删除素材前的确认弹窗——「该素材被 N 个项目引用，确认删除？」。只读接口，不拦截删除（删除仍走 `DELETE /api/assets/:assetId`，画布节点不动，见 §4）。
+
 ---
 
 ## 3. 与上传链路的关系
