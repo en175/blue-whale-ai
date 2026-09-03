@@ -13,8 +13,10 @@ import {
   // 暂时隐藏AI音乐，图标导入同步注释
   // Music,
   Library,
+  Upload,
   ShoppingBag,
-  BarChart3,
+  // 共享资产隐藏，图标导入同步注释
+  // BarChart3,
   Palette,
   UserRound,
   Box,
@@ -52,7 +54,8 @@ const TOOL_MENUS: Record<ToolMenuKey, { title: string; icon: LucideIcon; items: 
     title: '资产库',
     icon: Library,
     items: [
-      { key: 'shared', label: '共享资产', icon: BarChart3 },
+      // 共享资产概念下线，隐藏入口，仅保留四种卡片
+      // { key: 'shared', label: '共享资产', icon: BarChart3 },
       { key: 'style', label: '风格卡', icon: Palette },
       { key: 'character', label: '角色卡', icon: UserRound },
       { key: 'object', label: '物体卡', icon: Box },
@@ -73,6 +76,8 @@ interface CanvasToolbarProps {
   mode: ToolMode;
   onModeChange: (mode: ToolMode) => void;
   onUploadFile: (files: File[]) => void;
+  /** 打开「资产库选择」弹窗（从已有资产中选取素材落画布） */
+  onOpenAssetsPicker?: () => void;
   onToggleVideoDialog: () => void;
   onToggleImageDialog: () => void;
   onToggleAudioDialog: () => void;
@@ -84,10 +89,14 @@ interface CanvasToolbarProps {
   onMenuSelect?: (menu: ToolMenuKey, item: string) => void;
 }
 
+/** 加号上传菜单项 key */
+type AddMenuItem = 'local' | 'assets';
+
 export default function CanvasToolbar({
   mode,
   onModeChange,
   onUploadFile,
+  onOpenAssetsPicker,
   onToggleVideoDialog,
   onToggleImageDialog,
   onToggleAudioDialog,
@@ -99,7 +108,7 @@ export default function CanvasToolbar({
 }: CanvasToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const [openMenu, setOpenMenu] = useState<ToolMenuKey | null>(null);
+  const [openMenu, setOpenMenu] = useState<ToolMenuKey | 'upload' | null>(null);
 
   /** 点击外部关闭弹出菜单 */
   useEffect(() => {
@@ -113,11 +122,6 @@ export default function CanvasToolbar({
     return () => document.removeEventListener('mousedown', handleDocClick);
   }, [openMenu]);
 
-  /** 点击加号上传 */
-  const handleAddClick = () => {
-    fileInputRef.current?.click();
-  };
-
   /** 文件选择 */
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -127,9 +131,19 @@ export default function CanvasToolbar({
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  /** 扩展工具按钮：切换弹出菜单 */
-  const toggleMenu = (key: ToolMenuKey) => {
+  /** 扩展工具按钮：切换弹出菜单（含加号上传菜单） */
+  const toggleMenu = (key: ToolMenuKey | 'upload') => {
     setOpenMenu((prev) => (prev === key ? null : key));
+  };
+
+  /** 加号上传菜单项点击：本地上传走隐藏 input，资产库选择交由父组件开弹窗 */
+  const handleAddMenuItemClick = (item: AddMenuItem) => {
+    setOpenMenu(null);
+    if (item === 'local') {
+      fileInputRef.current?.click();
+    } else {
+      onOpenAssetsPicker?.();
+    }
   };
 
   /** 菜单项点击：回调后收起 */
@@ -192,10 +206,29 @@ export default function CanvasToolbar({
         )}
       </button>
 
-      {/* 加号上传 */}
-      <button className={styles.toolBtn} onClick={handleAddClick} data-tooltip="上传素材" aria-label="上传素材">
-        <Plus size={20} strokeWidth={2} />
-      </button>
+      {/* 加号上传：弹出「本地上传 / 资产库选择」两项菜单 */}
+      <div className={styles.menuWrap}>
+        <button
+          className={`${styles.toolBtn} ${openMenu === 'upload' ? styles.toolBtnActive : ''}`}
+          onClick={() => toggleMenu('upload')}
+          data-tooltip="上传素材"
+          aria-label="上传素材"
+        >
+          <Plus size={20} strokeWidth={2} />
+        </button>
+        {openMenu === 'upload' && (
+          <div className={styles.popup} onClick={(e) => e.stopPropagation()}>
+            <button className={styles.popupItem} onClick={() => handleAddMenuItemClick('local')}>
+              <Upload size={16} strokeWidth={2} />
+              <span>本地上传</span>
+            </button>
+            <button className={styles.popupItem} onClick={() => handleAddMenuItemClick('assets')}>
+              <Library size={16} strokeWidth={2} />
+              <span>资产库选择</span>
+            </button>
+          </div>
+        )}
+      </div>
       <input
         ref={fileInputRef}
         type="file"

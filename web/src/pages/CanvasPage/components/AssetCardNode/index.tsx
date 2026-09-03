@@ -5,7 +5,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { AtSign, Upload, WandSparkles, Info, Music, X, MousePointerClick } from 'lucide-react';
+import { AtSign, Upload, WandSparkles, Info, Music, X, MousePointerClick, ImageOff } from 'lucide-react';
 import type { GenerationCardBlock } from '@/api/agentSessions';
 import { uploadAssetFile } from '@/utils/upload';
 import type { UploadCompleteData } from '@/api/assets';
@@ -47,6 +47,8 @@ interface AssetCardNodeData {
   kind?: AssetCardKind;
   toolMode?: 'drag' | 'select';
   isFirst?: boolean;
+  /** 当前项目 ID（CanvasPage 运行期注入）：节点内上传素材时携带，使素材归属本项目 */
+  projectId?: string;
   /** 水合初始参考图（后端 reference 节点的 references 解析而来） */
   initialRefs?: CanvasGalleryRef[];
   /** 水合初始描述文本 */
@@ -178,11 +180,11 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     data.onAddToChat?.(id);
   }, [data, id]);
 
-  /** 保存到共享资产 */
-  const handleSaveToAssets = useCallback(() => {
-    setContextMenu(null);
-    data.onSaveToAssets?.(id);
-  }, [data, id]);
+  /** 保存到共享资产（共享资产下线，入口已隐藏） */
+  // const handleSaveToAssets = useCallback(() => {
+  //   setContextMenu(null);
+  //   data.onSaveToAssets?.(id);
+  // }, [data, id]);
 
   /** 添加参考图/视频（点击选择或拖入，支持 image/* 和 video/*，最多 MAX_IMAGE_REFS 张）
    * 先创建本地 blob 预览立即上画布，再异步调用 uploadAssetFile() 三步上传，
@@ -220,7 +222,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
       // 记录待上传状态，便于删除时取消
       pendingUploadsRef.current.set(refId, { file, cancelled: false });
 
-      uploadAssetFile(file)
+      uploadAssetFile(file, { projectId: data.projectId })
         .then((done: UploadCompleteData) => {
           const entry = pendingUploadsRef.current.get(refId);
           if (!entry || entry.cancelled) return;
@@ -545,8 +547,21 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
             {refs.length > 0 && (
               <div className={styles.refGrid}>
                 {refs.map((ref) => (
-                  <div key={ref.id} className={styles.refThumb}>
-                    {ref.type === 'video' ? (
+                  <div key={ref.id} className={styles.refThumb} title={ref.missing ? '素材已被删除' : undefined}>
+                    {ref.missing ? (
+                      <div
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          backgroundColor: '#161616',
+                        }}
+                      >
+                        <ImageOff size={16} strokeWidth={1.8} color="#666" />
+                      </div>
+                    ) : ref.type === 'video' ? (
                       <video src={ref.src} className={styles.refThumbImg} muted playsInline />
                     ) : (
                       <img src={ref.src} alt="参考图" className={styles.refThumbImg} />
@@ -745,9 +760,10 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
             <button className={styles.contextItem} onClick={handleAddToChat}>
               <span>添加到聊天</span>
             </button>
-            <button className={styles.contextItem} onClick={handleSaveToAssets}>
+            {/* 共享资产概念下线，隐藏入口 */}
+            {/* <button className={styles.contextItem} onClick={handleSaveToAssets}>
               <span>保存到共享资产</span>
-            </button>
+            </button> */}
             <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
               <span>删除</span>
             </button>

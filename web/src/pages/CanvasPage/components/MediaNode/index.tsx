@@ -4,7 +4,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign } from 'lucide-react';
+import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
@@ -29,6 +29,8 @@ interface MediaNodeData {
   prompt?: string;
   /** 资产 ID（上传完成后存储） */
   assetId?: string | number;
+  /** 派生标记：资产在 snapshot 资产字典中查不到（素材已被删除），水合期计算 */
+  assetMissing?: boolean;
   /** MIME 类型（上传完成后存储，如 "image/jpeg"） */
   mime?: string;
   /** 媒体宽度（图片/视频，像素） */
@@ -106,12 +108,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     data.onAddToChat?.(id);
   }, [data, id]);
 
-  /** 保存到共享资产 */
-  const handleSaveToAssets = useCallback(() => {
-    setContextMenu(null);
-    console.log('[MediaNode] 保存到共享资产', { nodeId: id, hasCallback: !!data.onSaveToAssets, assetId: data.assetId, mediaType: data.mediaType });
-    data.onSaveToAssets?.(id);
-  }, [data, id]);
+  /** 保存到共享资产（共享资产下线，入口已隐藏） */
+  // const handleSaveToAssets = useCallback(() => {
+  //   setContextMenu(null);
+  //   console.log('[MediaNode] 保存到共享资产', { nodeId: id, hasCallback: !!data.onSaveToAssets, assetId: data.assetId, mediaType: data.mediaType });
+  //   data.onSaveToAssets?.(id);
+  // }, [data, id]);
 
   /** 工具条操作（stopPropagation 避免触发节点拖拽/选中变化） */
   const stop = (e: React.MouseEvent) => e.stopPropagation();
@@ -151,7 +153,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       )}
 
       {/* 选中态悬浮工具条：重新编辑/生成图片/生成视频/生成音频 + 详情/下载/@ */}
-      {selected && !data.genStatus && (
+      {selected && !data.genStatus && !data.assetMissing && (
         <div className={`nodrag nopan ${styles.toolbar}`} onMouseDown={stop}>
           <button className={styles.toolBtn} onClick={handleReEdit} title="带入原提示词与图片，打开图片对话框">
             <RefreshCcw size={14} strokeWidth={2} />
@@ -260,6 +262,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
                 </button>
               )}
             </div>
+          ) : data.assetMissing ? (
+            /* 素材已被删除：灰色占位（资产在 snapshot 字典中查不到） */
+            <div className={styles.missingBox}>
+              <ImageOff size={22} strokeWidth={1.8} color="#666" />
+              <span className={styles.missingText}>素材已被删除</span>
+            </div>
           ) : data.mediaType === 'audio' ? (
             <div className={styles.audioBox}>
               <audio
@@ -302,9 +310,10 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           <button className={styles.contextItem} onClick={handleAddToChat}>
             <span>添加到聊天</span>
           </button>
-          <button className={styles.contextItem} onClick={handleSaveToAssets}>
+          {/* 共享资产概念下线，隐藏入口 */}
+          {/* <button className={styles.contextItem} onClick={handleSaveToAssets}>
             <span>保存到共享资产</span>
-          </button>
+          </button> */}
           <button className={styles.contextItem} onClick={handleDuplicate}>
             <span>复制</span>
           </button>

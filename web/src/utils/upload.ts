@@ -1,14 +1,28 @@
 /* ============================================
- * upload 工具：presign → PUT 直传 → complete 三步上传封装
+ * upload 工具：md5 查重 → presign → PUT 直传 → complete 上传封装
  * ============================================ */
+import SparkMD5 from 'spark-md5';
 import {
   UPLOAD_SIZE_LIMIT,
   fetchUploadPresign,
   putToPresignedUrl,
   completeUpload,
+  dedupUpload,
   type AssetType,
   type UploadCompleteData,
 } from '@/api/assets';
+
+/** 流式计算文件 MD5（32 位小写 hex）：4MB 分块增量计算，避免大文件一次性读入内存。
+ *  SubtleCrypto 不支持 MD5 算法，这里使用 spark-md5 实现。 */
+async function computeFileMd5(file: File): Promise<string> {
+  const CHUNK_SIZE = 4 * 1024 * 1024;
+  const spark = new SparkMD5.ArrayBuffer();
+  for (let offset = 0; offset < file.size; offset += CHUNK_SIZE) {
+    const chunk = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
+    spark.append(chunk);
+  }
+  return spark.end().toLowerCase();
+}
 
 /** 探测媒体宽高/时长（失败返回空对象，不阻断上传；用于 complete 可选参数） */
 export function probeMediaMeta(
@@ -63,7 +77,10 @@ export function fileToAssetType(file: File): AssetType | null {
   return null;
 }
 
-/** 单文件三步上传：返回 complete 登记结果（含永久 url）
+/** 单文件上传：返回 complete 登记结果（含永久 url）
+ *
+ * IKCNLS md5 去重：presign 前先算 md5 调 dedup 预检——命中直接复用已有资产，跳过
+ * TOS 三步上传；未命中走三步，并在 complete 时带上 md5 落库，供后续同内容文件查重。
  *
  * 体积超限在发请求之前就挡掉（IKAL46）：presign 那一侧也会拒，但那要等一次网络往返，而且回来
  * 的是通用错误码，用户看不出是文件太大。本地先判一次，报得准也报得快。 */
@@ -77,6 +94,23 @@ export async function uploadAssetFile(
   if (file.size > limit) {
     throw new Error(`文件超过 ${Math.floor(limit / 1024 / 1024)}MB 上限`);
   }
+
+  // md5 计算或查重请求失败都不阻断上传：静默降级走原三步
+  const md5 = await computeFileMd5(file).catch(() => undefined);
+  if (md5) {
+    const dedup = await dedupUpload({
+      type,
+      mime: file.type,
+      size: file.size,
+      md5,
+      project_id: opts?.projectId,
+    }).catch(() => undefined);
+    if (dedup?.dedup && dedup.asset) {
+      console.log('[upload] md5 去重命中，复用已有资产:', dedup.asset.asset_id);
+      return dedup.asset;
+    }
+  }
+
   const presign = await fetchUploadPresign({ type, mime: file.type, size: file.size });
   console.log('[upload] presign 返回:', {
     storage_key: presign.storage_key,
@@ -92,6 +126,7 @@ export async function uploadAssetFile(
     size: file.size,
     storage_key: presign.storage_key,
     project_id: opts?.projectId,
+    md5,
     ...meta,
   });
   console.log('[upload] complete 返回:', { url: result.url, asset_id: result.asset_id });

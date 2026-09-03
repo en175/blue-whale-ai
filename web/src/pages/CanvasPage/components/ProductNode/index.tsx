@@ -5,7 +5,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { AtSign, Upload, X, Box, MousePointerClick } from 'lucide-react';
+import { AtSign, Upload, X, Box, MousePointerClick, ImageOff } from 'lucide-react';
 import { uploadAssetFile } from '@/utils/upload';
 import styles from './index.module.css';
 
@@ -19,6 +19,8 @@ export interface ProductImage {
   type?: 'image' | 'video';
   /** 上传完成后的资产库身份，@ 提及时发给 Agent */
   assetId?: string;
+  /** 派生标记：资产在 snapshot 资产字典中查不到（素材已被删除），保存时剥离 */
+  missing?: boolean;
 }
 
 interface ProductNodeData {
@@ -27,6 +29,8 @@ interface ProductNodeData {
   images?: ProductImage[];
   toolMode?: 'drag' | 'select';
   isFirst?: boolean;
+  /** 当前项目 ID（CanvasPage 运行期注入）：节点内上传素材时携带，使素材归属本项目 */
+  projectId?: string;
   onDelete?: (id: string) => void;
   onAddToChat?: (id: string) => void;
   /** 保存到共享资产 */
@@ -130,11 +134,11 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
     data.onAddToChat?.(id);
   }, [data, id]);
 
-  /** 保存到共享资产 */
-  const handleSaveToAssets = useCallback(() => {
-    setContextMenu(null);
-    data.onSaveToAssets?.(id);
-  }, [data, id]);
+  /** 保存到共享资产（共享资产概念下线，入口已隐藏） */
+  // const handleSaveToAssets = useCallback(() => {
+  //   setContextMenu(null);
+  //   data.onSaveToAssets?.(id);
+  // }, [data, id]);
 
   const enabledCount = images.filter((i) => i.enabled).length;
 
@@ -180,7 +184,7 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
     newImgs.forEach(({ id: imgId, file }) => {
       pendingUploadsRef.current.set(imgId, { file, cancelled: false });
 
-      uploadAssetFile(file)
+      uploadAssetFile(file, { projectId: data.projectId })
         .then((done) => {
           const entry = pendingUploadsRef.current.get(imgId);
           if (!entry || entry.cancelled) return;
@@ -264,9 +268,13 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
                   onClick={() =>
                     setImages((prev) => prev.map((p) => (p.id === img.id ? { ...p, enabled: !p.enabled } : p)))
                   }
-                  title={img.enabled ? '点击停用' : '点击启用'}
+                  title={img.missing ? '素材已被删除' : img.enabled ? '点击停用' : '点击启用'}
                 >
-                  {img.type === 'video' ? (
+                  {img.missing ? (
+                    <div className={styles.thumbMissing}>
+                      <ImageOff size={16} strokeWidth={1.8} color="#666" />
+                    </div>
+                  ) : img.type === 'video' ? (
                     <video src={img.src} draggable={false} muted playsInline />
                   ) : (
                     <img src={img.src} alt="" draggable={false} />
@@ -384,9 +392,10 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
             <button className={styles.contextItem} onClick={handleAddToChat}>
               <span>添加到聊天</span>
             </button>
+            {/* 共享资产概念下线，入口已隐藏
             <button className={styles.contextItem} onClick={handleSaveToAssets}>
               <span>保存到共享资产</span>
-            </button>
+            </button> */}
             <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
               <span>删除</span>
             </button>

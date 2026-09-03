@@ -6,6 +6,8 @@ export type CanvasGalleryRef = {
   src: string;
   type?: 'image' | 'video';
   assetId?: string;
+  /** 派生标记：资产在 snapshot 字典中查不到（素材已被删除），保存时剥离 */
+  missing?: boolean;
 };
 
 export type CollectableNode = {

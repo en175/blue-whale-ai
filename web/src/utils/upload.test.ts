@@ -9,10 +9,11 @@ function envelope(body: unknown) {
   });
 }
 
-/** presign → PUT → complete 三段的顺序桩 */
+/** dedup（未命中）→ presign → PUT → complete 四段的顺序桩 */
 function stubUploadFlow() {
   const fetchMock = vi
     .fn()
+    .mockResolvedValueOnce(envelope({ dedup: false }))
     .mockResolvedValueOnce(
       envelope({
         storage_key: 'uploads/7/image/a.png',
@@ -60,7 +61,7 @@ describe('uploadAssetFile', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('runs presign → PUT → complete and echoes the presigned identity back (IKAL46)', async () => {
+  it('runs dedup → presign → PUT → complete and echoes the presigned identity back (IKAL46/IKCNLS)', async () => {
     const fetchMock = stubUploadFlow();
     const file = new File(['abcd'], '海边人像.png', { type: 'image/png' });
 
@@ -69,9 +70,14 @@ describe('uploadAssetFile', () => {
       url: 'https://cdn.example.test/a.png',
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    // complete 必须回传与 presign 完全一致的 storage_key/type/mime/size，否则后端拒收。
-    const completeBody = JSON.parse(String((fetchMock.mock.calls[2] as [string, RequestInit])[1].body));
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    // dedup 预检须携带 md5 与 project_id，供后端建项目关联
+    const dedupBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(dedupBody).toMatchObject({ type: 'image', mime: 'image/png', size: 4, project_id: 'project-9' });
+    expect(dedupBody.md5).toMatch(/^[a-f0-9]{32}$/);
+    // complete 必须回传与 presign 完全一致的 storage_key/type/mime/size，否则后端拒收；
+    // 并带上 md5 落库，供下次同内容文件查重。
+    const completeBody = JSON.parse(String((fetchMock.mock.calls[3] as [string, RequestInit])[1].body));
     expect(completeBody).toMatchObject({
       storage_key: 'uploads/7/image/a.png',
       type: 'image',
@@ -79,6 +85,66 @@ describe('uploadAssetFile', () => {
       size: 4,
       project_id: 'project-9',
     });
+    expect(completeBody.md5).toMatch(/^[a-f0-9]{32}$/);
+  });
+
+  it('reuses the existing asset on dedup hit and skips presign → PUT → complete (IKCNLS)', async () => {
+    const asset = {
+      asset_id: '526',
+      status: 'ready',
+      type: 'image',
+      url: 'https://cdn.example.test/dup.png',
+      width: 854,
+      height: 480,
+      duration: null,
+      mime: 'image/png',
+      size: 4,
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(envelope({ dedup: true, asset }));
+    vi.stubGlobal('fetch', fetchMock);
+    const file = new File(['abcd'], '同一张图.png', { type: 'image/png' });
+
+    await expect(uploadAssetFile(file, { projectId: 'project-9' })).resolves.toMatchObject({
+      asset_id: '526',
+      url: 'https://cdn.example.test/dup.png',
+    });
+    // 命中后只发生一次 dedup 请求，TOS 三步全部跳过
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the three-step upload when the dedup request fails (IKCNLS fail-open)', async () => {
+    const fetchMock = vi
+      .fn()
+      // dedup 网络失败 → 静默降级
+      .mockRejectedValueOnce(new Error('dedup down'))
+      .mockResolvedValueOnce(
+        envelope({
+          storage_key: 'uploads/7/image/a.png',
+          upload_url: 'https://tos.example.test/put?sig=secret',
+          headers: { 'Content-Type': 'image/png' },
+          expires_in: 600,
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        envelope({
+          asset_id: '123',
+          status: 'ready',
+          type: 'image',
+          url: 'https://cdn.example.test/a.png',
+          width: 10,
+          height: 10,
+          duration: null,
+          mime: 'image/png',
+          size: 4,
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(uploadAssetFile(new File(['abcd'], 'a.png', { type: 'image/png' }))).resolves.toMatchObject({
+      asset_id: '123',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it('rejects an oversized file before touching the network (IKAL46)', async () => {

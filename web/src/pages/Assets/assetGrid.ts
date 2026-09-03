@@ -1,4 +1,12 @@
-import type { AssetRecord } from '@/api/assets';
+import type { AssetRecord, AssetType } from '@/api/assets';
+
+/** 类型标签文字 */
+export const typeLabel: Record<AssetType, string> = {
+  image: '图片',
+  video: '视频',
+  audio: '音频',
+  character: '虚拟人像',
+};
 
 /**
  * 瀑布流卡片的媒体比例。

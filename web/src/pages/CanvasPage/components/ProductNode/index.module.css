@@ -133,6 +133,16 @@
   opacity: 0.35;
 }
 
+/* 素材已被删除缩略占位（灰色方案） */
+.thumbMissing {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #161616;
+}
+
 .thumbRemove {
   position: absolute;
   top: 2px;

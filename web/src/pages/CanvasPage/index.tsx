@@ -20,6 +20,7 @@ import ImageDialog, { type UploadedFile, type ImageGenSeedParams } from './compo
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
+import AssetsPickerModal from './components/AssetsPickerModal';
 import CharacterLibraryModal from './components/CharacterLibraryModal';
 import type { MaterialAsset } from '@/api/material';
 import type { AssetCardKind } from './components/AssetCardNode';
@@ -29,7 +30,7 @@ import type { Node, Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchQuota, toSessionUser } from '@/api/auth';
 import { fetchProjects, createProject, renameProject, deleteProject,  } from '@/api/projects';
-import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
+import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
 import { saveCanvasDoc, serializeNodes } from '@/api/canvas';
@@ -121,6 +122,8 @@ export default function CanvasPage() {
   const [productNodes, setProductNodes] = useState<Node[]>([]);
   const [assetNodes, setAssetNodes] = useState<Node[]>([]);
   const [showAssetsModal, setShowAssetsModal] = useState(false);
+  /** 工具栏加号 →「资产库选择」弹窗开关 */
+  const [showAssetsPicker, setShowAssetsPicker] = useState(false);
   const [assetsModalDefaultTab, setAssetsModalDefaultTab] = useState<string | undefined>(undefined);
   const [assetsModalDefaultFilter, setAssetsModalDefaultFilter] = useState<string | undefined>(undefined);
   const [assetDetailTarget, setAssetDetailTarget] = useState<AssetRecord | null>(null);
@@ -399,6 +402,8 @@ export default function CanvasPage() {
       case 'productNode':
         base.data = {
           ...base.data,
+          // 节点内上传素材携带当前项目（运行期注入，不持久化）
+          projectId: currentId,
           onDelete: (id: string) => {
             setProductNodes((prev) => prev.filter((n) => n.id !== id));
           },
@@ -415,6 +420,8 @@ export default function CanvasPage() {
       case 'assetNode':
         base.data = {
           ...base.data,
+          // 节点内上传素材携带当前项目（运行期注入，不持久化）
+          projectId: currentId,
           onDelete: (id: string) => {
             setAssetNodes((prev) => prev.filter((n) => n.id !== id));
           },
@@ -472,7 +479,8 @@ export default function CanvasPage() {
     return base;
   };
 
-  /** 解析后端节点引用的资产（data/顶层的 asset_id、reference_asset_ids 或直接内嵌 url） */
+  /** 解析后端节点引用的资产（data/顶层的 asset_id、reference_asset_ids）。
+   *  素材 URL 以 snapshot 资产字典为唯一来源：查不到一律返回 null（调用方标「素材已被删除」），不再回退内嵌 url */
   const resolveAssetRef = (node: Node): { url: string; type: string; assetId?: string } | null => {
     const data = (node.data ?? {}) as Record<string, unknown>;
     const raw = node as unknown as Record<string, unknown>;
@@ -489,40 +497,20 @@ export default function CanvasPage() {
       Array.isArray(raw.reference_asset_ids) ? raw.reference_asset_ids[0] : undefined,
     ];
     for (const c of candidates) {
-      if (c == null) continue;
+      if (c == null || c === '') continue;
       const asset = snapshotAssets[String(c)];
       if (asset?.access_url) return { url: asset.access_url, type: asset.type, assetId: String(c) };
     }
-    const direct = (data.src ?? data.url ?? raw.url ?? raw.src) as unknown;
-    if (typeof direct === 'string' && direct) return { url: direct, type: '' };
     return null;
   };
 
-  /** 解析 references 数组元素 → 参考图 URL（兼容 assetId 数字/字符串与内嵌 url 对象） */
-  const resolveRefSrc = (r: unknown): string | null => {
-    if (r == null) return null;
-    if (typeof r === 'number' || typeof r === 'string') {
-      return snapshotAssets[String(r)]?.access_url || null;
-    }
-    if (typeof r === 'object') {
-      const o = r as Record<string, unknown>;
-      const aid = o.asset_id ?? o.assetId ?? o.id;
-      if (aid != null) {
-        const url = snapshotAssets[String(aid)]?.access_url;
-        if (url) return url;
-      }
-      if (typeof o.access_url === 'string' && o.access_url) return o.access_url;
-      if (typeof o.url === 'string' && o.url) return o.url;
-    }
-    return null;
-  };
-
-  /** 解析 references 数组元素 → 资产库身份（有则 @ 提及可走 asset_ref） */
-  const readReferenceAssetId = (r: unknown): string | undefined => {
-    if (typeof r === 'number' || typeof r === 'string') return String(r);
+  /** 解析 references 数组元素 → 资产 ID（兼容 assetId 数字/字符串与 o.id 历史形态）。
+   *  素材 URL 以 snapshot 资产字典为唯一来源，无 assetId 的条目一律按「素材已被删除」处理 */
+  const readRefLookupId = (r: unknown): string | undefined => {
+    if (typeof r === 'number' || typeof r === 'string') return r === '' ? undefined : String(r);
     if (r != null && typeof r === 'object') {
       const o = r as Record<string, unknown>;
-      const aid = o.asset_id ?? o.assetId;
+      const aid = o.asset_id ?? o.assetId ?? o.id;
       if (aid != null && aid !== '') return String(aid);
     }
     return undefined;
@@ -556,15 +544,16 @@ export default function CanvasPage() {
         ? (cardType as AssetCardKind)
         : 'custom';
       const refsRaw = Array.isArray(raw.references) ? raw.references : [];
-      const initialRefs = refsRaw
-        .map((r, i) => {
-          const src = resolveRefSrc(r);
-          if (!src) return null;
-          const type = resolveRefType(r);
-          const assetId = readReferenceAssetId(r);
-          return { id: `ref-hydra-${node.id}-${i}`, src, type, ...(assetId ? { assetId } : {}) };
-        })
-        .filter((x): x is CanvasGalleryRef & { type: 'image' | 'video' } => x !== null);
+      // 参考图有效性以 snapshot 资产字典为唯一来源：命中→access_url；查不到→保留条目并标 missing（渲染占位），不再静默丢弃
+      const initialRefs = refsRaw.map((r, i) => {
+        const type = resolveRefType(r);
+        const lookupAid = readRefLookupId(r);
+        const url = lookupAid != null ? snapshotAssets[lookupAid]?.access_url : undefined;
+        const base = { id: `ref-hydra-${node.id}-${i}`, type };
+        return url
+          ? { ...base, src: url, assetId: lookupAid }
+          : { ...base, src: '', missing: true, ...(lookupAid ? { assetId: lookupAid } : {}) };
+      });
       const desc = (data.content ?? data.desc ?? raw.content) as unknown;
       return {
         id: node.id,
@@ -589,10 +578,23 @@ export default function CanvasPage() {
       };
     }
 
-    // 其余未知类型：按资产引用尽力还原为媒体节点
+    // 其余未知类型：按资产引用尽力还原为媒体节点；素材查不到时保留节点并标「素材已被删除」（不再静默丢弃）
     const ref = resolveAssetRef(node);
-    if (!ref) return null;
     const prompt = (data.prompt ?? raw.prompt) as unknown;
+    if (!ref) {
+      return {
+        id: node.id,
+        type: 'mediaNode',
+        position,
+        data: {
+          src: '',
+          mediaType: 'image',
+          fileName: `参考 ${node.id}`,
+          prompt: typeof prompt === 'string' ? prompt : undefined,
+          assetMissing: true,
+        },
+      };
+    }
     return {
       id: node.id,
       type: 'mediaNode',
@@ -605,6 +607,67 @@ export default function CanvasPage() {
         assetId: ref.assetId,
       },
     };
+  };
+
+  /** 水合期素材解析：所有素材一律用 assetId 匹配 snapshot 资产字典取 access_url，不走节点内嵌 src。
+   *  - 命中 → src 替换为 access_url
+   *  - 无 assetId 或字典查不到 → 标缺失（媒体节点 assetMissing / 商品图与参考图 missing），渲染「素材已被删除」
+   *  - 瞬时态跳过：生成中/失败/取消（自有 UI，不依赖素材）、blob: 预览（上传中） */
+  const resolveNodeAssets = (node: Node): Node => {
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    if (node.type === 'mediaNode') {
+      if (data.genStatus) return node;
+      if (typeof data.src === 'string' && (data.src as string).startsWith('blob:')) return node;
+      const aid = (data.assetId ?? data.asset_id ?? data.assetID) as string | number | undefined;
+      const url = aid != null && aid !== '' ? snapshotAssets[String(aid)]?.access_url : undefined;
+      if (url) {
+        return data.src === url && !data.assetMissing
+          ? node
+          : { ...node, data: { ...data, src: url, assetMissing: undefined } };
+      }
+      return data.assetMissing ? node : { ...node, data: { ...data, assetMissing: true } };
+    }
+    if (node.type === 'productNode') {
+      const images = data.images;
+      if (!Array.isArray(images)) return node;
+      let changed = false;
+      const next = images.map((img) => {
+        const item = (img ?? {}) as Record<string, unknown>;
+        if (typeof item.src === 'string' && item.src.startsWith('blob:')) return img; // 上传中
+        const aid = (item.assetId ?? item.asset_id) as string | number | undefined;
+        const url = aid != null && aid !== '' ? snapshotAssets[String(aid)]?.access_url : undefined;
+        if (url) {
+          if (item.src === url && !item.missing) return img;
+          changed = true;
+          return { ...item, src: url, missing: undefined };
+        }
+        if (item.missing) return img;
+        changed = true;
+        return { ...item, src: '', missing: true };
+      });
+      return changed ? { ...node, data: { ...data, images: next } } : node;
+    }
+    if (node.type === 'assetNode') {
+      const refs = data.initialRefs;
+      if (!Array.isArray(refs)) return node;
+      let changed = false;
+      const next = refs.map((r) => {
+        const ref = (r ?? {}) as Record<string, unknown>;
+        if (typeof ref.src === 'string' && ref.src.startsWith('blob:')) return r; // 上传中
+        const aid = (ref.assetId ?? ref.asset_id) as string | number | undefined;
+        const url = aid != null && aid !== '' ? snapshotAssets[String(aid)]?.access_url : undefined;
+        if (url) {
+          if (ref.src === url && !ref.missing) return r;
+          changed = true;
+          return { ...ref, src: url, missing: undefined };
+        }
+        if (ref.missing) return r;
+        changed = true;
+        return { ...ref, src: '', missing: true };
+      });
+      return changed ? { ...node, data: { ...data, initialRefs: next } } : node;
+    }
+    return node;
   };
 
   /** 画布文档加载完成：按类型分发节点并注入回调；切换项目时先清空 */
@@ -625,14 +688,14 @@ export default function CanvasPage() {
     const a: Node[] = [];
     doc.nodes.forEach((node) => {
       if (node.type === 'textNode') t.push(attachCallbacks(node));
-      else if (node.type === 'mediaNode') m.push(attachCallbacks(node));
-      else if (node.type === 'productNode') p.push(attachCallbacks(node));
-      else if (node.type === 'assetNode') a.push(attachCallbacks(node));
+      else if (node.type === 'mediaNode') m.push(attachCallbacks(resolveNodeAssets(node)));
+      else if (node.type === 'productNode') p.push(attachCallbacks(resolveNodeAssets(node)));
+      else if (node.type === 'assetNode') a.push(attachCallbacks(resolveNodeAssets(node)));
       else {
-        // 后端节点类型（reference 参考卡 / text 等）：映射为本地节点后归类
+        // 后端节点类型（reference 参考卡 / text 等）：映射为本地节点后归类（映射内部已按资产字典解析/标缺失）
         const mapped = mapBackendNode(node);
         if (mapped) {
-          const attached = attachCallbacks(mapped);
+          const attached = attachCallbacks(resolveNodeAssets(mapped));
           if (mapped.type === 'assetNode') a.push(attached);
           else if (mapped.type === 'textNode') t.push(attached);
           else m.push(attached);
@@ -788,6 +851,10 @@ export default function CanvasPage() {
     }
     const m = mediaNodesRef.current.find((n) => n.id === id);
     if (m) {
+      if (m.data?.assetMissing) {
+        showToast('warn', '素材已被删除');
+        return;
+      }
       const type = m.data?.mediaType === 'video' ? '视频' : '图片';
       const label = `[${type}] ${m.data?.fileName || ''}`;
       const mediaBlocks = collectMediaBlocks(m, String(ts));
@@ -863,6 +930,11 @@ export default function CanvasPage() {
       node.type === 'mediaNode' &&
       typeof data.src === 'string' &&
       !data.genStatus;
+    // 素材失效（已被删除/查不到）：阻断选取
+    if (isReadyMedia && data.assetMissing) {
+      showToast('warn', '素材已被删除');
+      return;
+    }
     // 上传中的节点（blob 预览、无 assetId）：暂不可选取，否则发送时素材会被静默丢弃
     if (isReadyMedia && (data.src as string).startsWith('blob:')) {
       showToast('warn', '素材上传中，请稍候再选择');
@@ -1128,6 +1200,63 @@ export default function CanvasPage() {
         // 前置校验失败（类型不支持/超大小上限）发生在节点创建前：无节点可清理，仅提示
         showToast('error', `「${file.name}」添加失败，请重试`);
       });
+    });
+  };
+
+  /** 资产库选择弹窗 → 选中已有资产落到画布：
+   *  直接以 /api/assets 返回的 id 作为 assetId 建媒体节点，不走 TOS 上传；
+   *  后台补一次 link 关联，确保素材进入当前项目 snapshot 字典（刷新后不判缺失）。 */
+  const handleSelectAssetFromLibrary = (asset: AssetRecord) => {
+    setShowAssetsPicker(false);
+    if (!currentId) {
+      showToast('error', '项目未就绪，请稍后重试');
+      return;
+    }
+    const fileNameFromUrl = (() => {
+      try {
+        const last = new URL(asset.url).pathname.split('/').filter(Boolean).pop();
+        return last ? decodeURIComponent(last) : `资产-${asset.id}`;
+      } catch {
+        return `资产-${asset.id}`;
+      }
+    })();
+    const nodeId = newNodeId('media');
+    const node: Node = {
+      id: nodeId,
+      type: 'mediaNode',
+      position: spawnPosition(),
+      data: {
+        src: asset.url,
+        fileName: fileNameFromUrl,
+        mediaType: asset.type === 'video' ? 'video' : asset.type === 'audio' ? 'audio' : 'image',
+        assetId: String(asset.id),
+        width: asset.width ?? undefined,
+        height: asset.height ?? undefined,
+        duration: asset.duration ?? undefined,
+        size: asset.size ?? undefined,
+        toolMode,
+        onDelete: (id: string) => {
+          setMediaNodes((prev) => prev.filter((n) => n.id !== id));
+        },
+        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+        onReEdit: (id: string) => actionsRef.current.reEdit(id),
+        onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onGenVideo: (id: string) => actionsRef.current.genVideo(id),
+        onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+        onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
+        onDownload: (id: string) => actionsRef.current.download(id),
+        onShowDetails: (id: string) => actionsRef.current.showDetails(id),
+        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
+      },
+    };
+    pendingNodeIdsRef.current.add(nodeId);
+    setMediaNodes((prev) => [...prev, node]);
+
+    // 幂等补关联：素材已属当前项目也无副作用；失败仅提示，不影响节点展示
+    linkAssetToProject(currentId, asset.id).catch((err) => {
+      console.warn('资产关联项目失败：', err);
+      showToast('warn', '资产关联项目失败，请稍后重试');
     });
   };
 
@@ -1402,9 +1531,13 @@ export default function CanvasPage() {
 
   /* ============ 节点工具条：重新编辑/生成图片/生成视频/生成音频/下载 ============ */
 
-  /** 被点节点 → 对话框参考素材描述 */
+  /** 被点节点 → 对话框参考素材描述（素材已被删除的节点不可作为参考/下载来源） */
   const nodeRefOf = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (node?.data?.assetMissing) {
+      showToast('warn', '素材已被删除');
+      return null;
+    }
     const src = node?.data?.src as string | undefined;
     if (!src) return null;
     const type: 'image' | 'video' = node?.data?.mediaType === 'video' ? 'video' : 'image';
@@ -1479,6 +1612,10 @@ export default function CanvasPage() {
   const handleNodeExtractAudio = async (id: string) => {
     const node = mediaNodesRef.current.find((item) => item.id === id);
     const assetId = node?.data?.assetId as string | number | undefined;
+    if (node?.data?.assetMissing) {
+      showToast('warn', '素材已被删除');
+      return;
+    }
     if (!currentId) {
       showToast('warn', '未选中项目，无法提取音频');
       return;
@@ -1528,6 +1665,10 @@ export default function CanvasPage() {
   const handleNodeShowDetails = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     const data = (node?.data ?? {}) as Record<string, unknown>;
+    if (node?.data?.assetMissing) {
+      showToast('warn', '素材已被删除');
+      return;
+    }
     const type = data.mediaType;
     const url = data.src;
     if (!node || (type !== 'image' && type !== 'video' && type !== 'audio') || typeof url !== 'string') {
@@ -1781,6 +1922,8 @@ export default function CanvasPage() {
         detail: '',
         images: [],
         toolMode,
+        // 节点内上传素材携带当前项目（运行期注入，不持久化）
+        projectId: currentId,
         onDelete: (id: string) => {
           setProductNodes((prev) => prev.filter((n) => n.id !== id));
         },
@@ -1808,6 +1951,8 @@ export default function CanvasPage() {
       data: {
         kind,
         toolMode,
+        // 节点内上传素材携带当前项目（运行期注入，不持久化）
+        projectId: currentId,
         onDelete: (id: string) => {
           setAssetNodes((prev) => prev.filter((n) => n.id !== id));
         },
@@ -2066,6 +2211,8 @@ export default function CanvasPage() {
               initialRefs: snapshot.referenceImages,
               initialDesc: snapshot.description,
               toolMode,
+              // 节点内上传素材携带当前项目（运行期注入，不持久化）
+              projectId: currentId,
               onDelete: (id: string) => {
                 setAssetNodes((prev) => prev.filter((n) => n.id !== id));
               },
@@ -2104,6 +2251,8 @@ export default function CanvasPage() {
               detail: snapshot.detail || '',
               images: snapshot.images.map((img) => ({ ...img, enabled: img.enabled ?? true })),
               toolMode,
+              // 节点内上传素材携带当前项目（运行期注入，不持久化）
+              projectId: currentId,
               onDelete: (id: string) => {
                 setProductNodes((prev) => prev.filter((n) => n.id !== id));
               },
@@ -2434,6 +2583,7 @@ export default function CanvasPage() {
           mode={toolMode}
           onModeChange={setToolMode}
           onUploadFile={handleUploadFile}
+          onOpenAssetsPicker={() => setShowAssetsPicker(true)}
           onToggleVideoDialog={() => {
             setVideoSeed(null);
             setPickMode(null);
@@ -2589,6 +2739,14 @@ export default function CanvasPage() {
           initialSkillName={agentContext?.skillName ?? ''}
           mediaBlocks={agentContext?.mediaBlocks}
           onPlaceFileOnCanvas={placeFileOnCanvas}
+        />
+      )}
+
+      {/* 资产库选择弹框（工具栏加号 → 资产库选择） */}
+      {showAssetsPicker && (
+        <AssetsPickerModal
+          onClose={() => setShowAssetsPicker(false)}
+          onSelect={handleSelectAssetFromLibrary}
         />
       )}
 
