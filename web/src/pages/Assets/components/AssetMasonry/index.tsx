@@ -245,6 +245,8 @@ export interface AssetMasonryProps {
   pageSize?: number;
   /** 卡片水平与垂直间距；资产库可用更紧凑的布局，弹窗保留默认间距。 */
   gutter?: number;
+  /** 仅 /library 页使用的视觉调整，不影响画布资产选择器。 */
+  libraryMode?: boolean;
 }
 
 function AssetCard({
@@ -320,6 +322,7 @@ const AssetMasonry = memo(function AssetMasonry({
   columnCount = 5,
   pageSize = 30,
   gutter = 16,
+  libraryMode = false,
 }: AssetMasonryProps) {
   const gridRef = useRef<HTMLElement>(null);
   const scrollStopTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -399,7 +402,7 @@ const AssetMasonry = memo(function AssetMasonry({
       if (!onUpload) return null;
       return (
         <div
-          className={`${styles.card} ${styles.uploadCard}`}
+          className={`${styles.card} ${styles.uploadCard} ${libraryMode ? styles.libraryUploadCard : ''}`}
           onClick={onUpload}
           role="button"
           tabIndex={0}
@@ -415,7 +418,7 @@ const AssetMasonry = memo(function AssetMasonry({
     }
 
     return <AssetCard asset={data.asset} onPreview={onPreview} onDelete={onDelete} />;
-  }, [onDelete, onPreview, onUpload]);
+  }, [libraryMode, onDelete, onPreview, onUpload]);
 
   return useMasonry({
     positioner,

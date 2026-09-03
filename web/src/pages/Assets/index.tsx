@@ -292,6 +292,7 @@ export default function Assets() {
                 onPreview={setPreviewTarget}
                 onDelete={setDeleteTarget}
                 gutter={2}
+                libraryMode
               />
             )}
             {!loading && gridItems.length === 0 && (

@@ -224,6 +224,11 @@
   box-shadow: 0 20px 52px rgba(0, 0, 0, 0.36);
 }
 
+.libraryUploadCard,
+.libraryUploadCard:hover {
+  border: none;
+}
+
 .uploadCard .uploadThumb {
   flex-direction: column;
   gap: 10px;

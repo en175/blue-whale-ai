@@ -12,7 +12,7 @@
 /* ---- 录入新真人卡片 ---- */
 .uploadCard {
   background: var(--asset-upload-surface, rgba(6, 6, 6, 0.72));
-  border: 1px solid var(--asset-upload-border, rgba(255, 255, 255, 0.16));
+  border: none;
   border-radius: 0;
   backdrop-filter: var(--asset-upload-filter, blur(28px) saturate(1.15));
   -webkit-backdrop-filter: var(--asset-upload-filter, blur(28px) saturate(1.15));
@@ -29,7 +29,6 @@
 }
 
 .uploadCard:hover {
-  border-color: rgba(255, 255, 255, 0.28);
   background: rgba(8, 8, 8, 0.78);
   box-shadow: 0 20px 52px rgba(0, 0, 0, 0.36);
 }
@@ -312,7 +311,7 @@
 
 .uploadAssetCard {
   background: var(--asset-upload-surface, rgba(6, 6, 6, 0.72));
-  border: 1px solid var(--asset-upload-border, rgba(255, 255, 255, 0.16));
+  border: none;
   backdrop-filter: var(--asset-upload-filter, blur(28px) saturate(1.15));
   -webkit-backdrop-filter: var(--asset-upload-filter, blur(28px) saturate(1.15));
   box-shadow: var(--asset-upload-shadow, 0 16px 48px rgba(0, 0, 0, 0.28));
@@ -326,7 +325,6 @@
 
 .uploadAssetCard:hover {
   background: rgba(8, 8, 8, 0.78);
-  border-color: rgba(255, 255, 255, 0.28);
   box-shadow: 0 20px 52px rgba(0, 0, 0, 0.36);
 }
 
