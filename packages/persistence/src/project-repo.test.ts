@@ -74,6 +74,69 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     expect(views[0].previews).toEqual([]);
   });
 
+  it("pages canvas projects with skip/take and returns the assets-shaped envelope", async () => {
+    const projectCount = vi.fn().mockResolvedValue(5);
+    const projectFindMany = vi.fn().mockResolvedValue([
+      { id: 3n, name: "C", thumb: null, gmt_create: new Date("2026-08-23T00:00:00Z") },
+    ]);
+    const assetFindMany = vi.fn().mockResolvedValue([
+      { project_id: 3n, url: "c1.png" },
+    ]);
+    const prisma = {
+      project: { count: projectCount, findMany: projectFindMany },
+      assets: { findMany: assetFindMany },
+    } as unknown as PrismaClient;
+
+    const page = await createProjectRepo(prisma).listByOwnerPaged("100", 2, 2);
+
+    expect(projectCount).toHaveBeenCalledWith({
+      where: {
+        owner_id: 100n,
+        purpose: "canvas",
+        is_delete: 0,
+      },
+    });
+    expect(projectFindMany).toHaveBeenCalledWith({
+      where: {
+        owner_id: 100n,
+        purpose: "canvas",
+        is_delete: 0,
+      },
+      orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+      skip: 2,
+      take: 2,
+    });
+    expect(page).toEqual({
+      records: [
+        {
+          id: "3",
+          name: "C",
+          thumb: null,
+          previews: ["c1.png"],
+          created_at: "2026-08-23T00:00:00.000Z",
+        },
+      ],
+      total: 5,
+      size: 2,
+      current: 2,
+    });
+  });
+
+  it("returns empty records when the page is past the last item", async () => {
+    const prisma = {
+      project: {
+        count: vi.fn().mockResolvedValue(1),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      assets: { findMany: vi.fn() },
+    } as unknown as PrismaClient;
+
+    const page = await createProjectRepo(prisma).listByOwnerPaged("100", 3, 10);
+
+    expect(page).toEqual({ records: [], total: 1, size: 10, current: 3 });
+    expect(prisma.assets.findMany).not.toHaveBeenCalled();
+  });
+
   it("checks owner and canvas purpose in the update predicate before renaming", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
