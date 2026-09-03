@@ -37,6 +37,11 @@ export class AssetService {
     return this.repo.linkAssetToProject(input);
   }
 
+  /** IKCZAT：查询素材被多少项目引用（直接归属 ∪ project_asset，并集去重）。 */
+  countReferencingProjects(assetId: string, userId: string) {
+    return this.repo.countReferencingProjects(assetId, userId);
+  }
+
   /** IKCNLS：上传 md5 去重——查该用户未删同 md5 最新资产。 */
   findOwnedByMd5(userId: string, md5: string) {
     return this.repo.findOwnedByMd5(userId, md5);

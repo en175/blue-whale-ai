@@ -341,3 +341,60 @@ describe("createAssetRepo 方案C（project_asset 关联）", () => {
     expect(tx.project_asset.upsert).toHaveBeenCalled();
   });
 });
+
+describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
+  it("直接归属 ∪ project_asset 并集去重：重叠项目只计一次", async () => {
+    const prisma = {
+      assets: {
+        groupBy: vi.fn().mockResolvedValue([
+          { project_id: 55n },
+          { project_id: 66n },
+        ]),
+      },
+      project_asset: {
+        groupBy: vi.fn().mockResolvedValue([
+          { project_id: 66n },
+          { project_id: 77n },
+        ]),
+      },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const count = await repo.countReferencingProjects("42", "9");
+
+    expect(count).toBe(3); // {55, 66, 77}
+    expect(prisma.assets.groupBy).toHaveBeenCalledWith({
+      by: ["project_id"],
+      where: { id: 42n, user_id: 9n, is_delete: false, project_id: { not: 0n } },
+    });
+    expect(prisma.project_asset.groupBy).toHaveBeenCalledWith({
+      by: ["project_id"],
+      where: { asset_id: 42n, user_id: 9n, is_delete: 0 },
+    });
+  });
+
+  it("两来源全空 → 返回 0", async () => {
+    const prisma = {
+      assets: { groupBy: vi.fn().mockResolvedValue([]) },
+      project_asset: { groupBy: vi.fn().mockResolvedValue([]) },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    await expect(repo.countReferencingProjects("42", "9")).resolves.toBe(0);
+  });
+
+  it("project_id=0 不计数（SQL 排除 + Set 兜底双保险）", async () => {
+    const prisma = {
+      assets: {
+        groupBy: vi.fn().mockResolvedValue([
+          { project_id: 0n },
+          { project_id: 55n },
+        ]),
+      },
+      project_asset: { groupBy: vi.fn().mockResolvedValue([]) },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    await expect(repo.countReferencingProjects("42", "9")).resolves.toBe(1);
+  });
+});

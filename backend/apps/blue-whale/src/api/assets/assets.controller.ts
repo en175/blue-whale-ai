@@ -31,6 +31,21 @@ export class AssetsController {
     return asset ? ok(asset) : fail(100301, "资源不存在");
   }
 
+  /** IKCZAT：查询素材被多少项目引用（直接归属 ∪ project_asset 并集去重）。只读，不改删除行为。 */
+  @Get(":assetId/references")
+  async getReferences(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("assetId") assetId: string,
+  ) {
+    const asset = await this.assets.findOwnedById(assetId, user.userId);
+    if (!asset) return fail(100301, "资源不存在");
+    const projectCount = await this.assets.countReferencingProjects(
+      assetId,
+      user.userId,
+    );
+    return ok({ assetId, projectCount });
+  }
+
   @Delete(":assetId")
   async remove(
     @CurrentUser() user: AuthenticatedUser,

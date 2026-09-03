@@ -82,6 +82,8 @@ export interface AssetRepo {
     assetId: string;
     projectId: string;
   }): Promise<boolean>;
+  /** IKCZAT：统计引用该素材的项目数（直接归属 project_id ∪ project_asset 关联，并集去重）。 */
+  countReferencingProjects(assetId: string, userId: string): Promise<number>;
   /** 取超期软删行（deleted_at 早于 cutoff，含 storage_key，按 id 升序）——GC 候选。 */
   listGcCandidates(cutoff: Date): Promise<
     { id: bigint; storage_key: string | null }[]
@@ -323,6 +325,32 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         update: { is_delete: 0, gmt_modified: new Date() },
       });
       return true;
+    },
+    async countReferencingProjects(assetId, userId) {
+      // IKCZAT：引用 = 直接归属（assets.project_id ≠ 0）+ project_asset 关联，两来源 project_id 并集去重。
+      // 用 groupBy 在 SQL 层去重：数据量远小于 assets 全集，groupBy(DISTINCT project_id) 比拉全量 Set 更稳。
+      const aid = BigInt(assetId);
+      const uid = BigInt(userId);
+      const [direct, linked] = await Promise.all([
+        prisma.assets.groupBy({
+          by: ["project_id"],
+          where: { id: aid, user_id: uid, is_delete: false, project_id: { not: BigInt(0) } },
+        }),
+        prisma.project_asset.groupBy({
+          by: ["project_id"],
+          where: { asset_id: aid, user_id: uid, is_delete: 0 },
+        }),
+      ]);
+      const ids = new Set<string>();
+      for (const row of direct) {
+        if (row.project_id === BigInt(0)) continue;
+        ids.add(row.project_id.toString());
+      }
+      for (const row of linked) {
+        if (row.project_id === BigInt(0)) continue;
+        ids.add(row.project_id.toString());
+      }
+      return ids.size;
     },
     async listGcCandidates(cutoff) {
       const rows = await prisma.assets.findMany({
