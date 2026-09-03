@@ -81,7 +81,8 @@
   position: relative;
   flex: 1;
   min-height: 180px;
-  background: transparent;
+  /* 分组没有封面图时，也使用资产页统一的深色玻璃底，避免露出 Hero 视频。 */
+  background: var(--asset-upload-surface, rgba(6, 6, 6, 0.72));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -335,7 +336,8 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: transparent;
+  /* 详情页中资源尚未出图或无效时，保持和其他素材卡片一致的底色。 */
+  background: var(--asset-upload-surface, rgba(6, 6, 6, 0.72));
 }
 
 .assetThumb img {
