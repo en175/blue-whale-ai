@@ -79,6 +79,20 @@ test("frontend-delivery auto-loads for web work and routes new fetches to TanSta
   assert.match(request, /refetchOnWindowFocus: false/);
 });
 
+test("feat delivery is explicit, accepts no Issue, and requires human regression", () => {
+  const workflow = read(".claude/skills/feat-delivery/SKILL.md");
+  const policy = read(".claude/skills/feat-delivery/agents/openai.yaml");
+
+  assert.match(workflow, /^description: Use when.*explicitly requests the feat workflow/m);
+  assert.match(workflow, /disable-model-invocation: true/);
+  assert.match(policy, /allow_implicit_invocation: false/);
+  assert.match(workflow, /工单是可选上下文，不是入口条件/);
+  assert.match(workflow, /--no-issue/);
+  assert.match(workflow, /未获用户对“前端可执行需求”的明确确认，不创建 worktree、不写代码/s);
+  assert.match(workflow, /`npm run dev:test`/);
+  assert.match(workflow, /没有用户明确的通过结论，不得宣称功能完成/s);
+});
+
 test("tracked skill mirrors match their authoritative sources", () => {
   assert.equal(read(".zcode/skills/implement/SKILL.md"), read(".claude/skills/implement/SKILL.md"));
 
