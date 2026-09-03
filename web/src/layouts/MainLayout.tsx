@@ -11,12 +11,13 @@ export default function MainLayout() {
   const location = useLocation();
   useDocumentTitle();
   const isCanvasPage = location.pathname === '/canvas';
+  const isLibraryPage = location.pathname === '/library';
   const hasGlassBackground = ['/', '/projects', '/library'].includes(location.pathname);
 
   return (
     <div className={styles.layout}>
       {!isCanvasPage && <Sidebar />}
-      <main className={`${styles.main} ${isCanvasPage ? styles.mainFull : ''} ${hasGlassBackground ? styles.mainGlass : ''}`}>
+      <main className={`${styles.main} ${isCanvasPage ? styles.mainFull : ''} ${hasGlassBackground ? styles.mainGlass : ''} ${isLibraryPage ? styles.mainLibrary : ''}`}>
         {hasGlassBackground && <HeroVideoCarousel />}
         <Outlet />
       </main>
