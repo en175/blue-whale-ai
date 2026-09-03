@@ -1,4 +1,6 @@
 import "reflect-metadata";
+// 服务名要在任何模块顶层建 logger 之前落定，所以它排在业务 import 前面。
+import "./service-identity.js";
 import { NestFactory } from "@nestjs/core";
 import {
   closeDefaultTlsLogWriter,

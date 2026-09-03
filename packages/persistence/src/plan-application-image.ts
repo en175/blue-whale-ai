@@ -11,7 +11,7 @@ import { classifyPlanApplicationAvailability } from "@blue-whale/core";
 import { appendProjectEvent } from "./product-event-repo.js";
 import { createJobWithinTx } from "./generation-command-repo.js";
 import { loadPlanApplicationFacts } from "./plan-application-facts.js";
-import { loadMentionTargetFacts } from "./agent-run-repo.js";
+import { loadMentionTargetFacts } from "./mention-facts.js";
 import {
   IMAGE_OPERATION,
   toImageReceiptView,

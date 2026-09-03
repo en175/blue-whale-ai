@@ -203,6 +203,10 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
           cover_url: true,
           source: true,
           skill_code: true,
+          // IKCXOK：语言列一并取回，官方引用标题按 §11.4 中文优先解析
+          // （name_zh → name_en → 单语 name），与技能库展示一致，不再直接回退英文标题。
+          name_en: true,
+          name_zh: true,
         },
       });
       const skillMap = new Map(skills.map((s) => [s.id.toString(), s]));
@@ -214,7 +218,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
           creative_skill_id: s
             ? (creativeIds.get(s.id.toString()) ?? null)
             : null,
-          name: s?.name ?? null,
+          name: s ? resolveName("zh", s as SkillRow) : null,
           description: s?.description ?? null,
           cover_url: s?.cover_url ?? null,
           source: s?.source ?? null,

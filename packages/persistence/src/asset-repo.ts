@@ -76,6 +76,12 @@ export interface AssetRepo {
   listByUser(userId: string, filter: AssetListFilter): Promise<AssetPage>;
   /** 逻辑删除当前用户自己的未删除 Asset；不存在或不归属返回 false。 */
   softDeleteOwned(assetId: string, userId: string): Promise<boolean>;
+  /** IKCNLP（方案C）：素材-项目关联。幂等 upsert（唯一键 uk_project_asset 冲突即已关联，视为成功）。 */
+  linkAssetToProject(input: {
+    userId: string;
+    assetId: string;
+    projectId: string;
+  }): Promise<boolean>;
   /** 取超期软删行（deleted_at 早于 cutoff，含 storage_key，按 id 升序）——GC 候选。 */
   listGcCandidates(cutoff: Date): Promise<
     { id: bigint; storage_key: string | null }[]
@@ -120,6 +126,8 @@ export interface AssetRepo {
     userId: string,
     storageKey: string,
   ): Promise<PendingUploadAsset | null>;
+  /** IKCNLS：上传 md5 去重——查该用户未删 normal 资产里 md5 相同的最新一条。命中返回资产；无则 null。 */
+  findOwnedByMd5(userId: string, md5: string): Promise<PendingUploadAsset | null>;
   createUploadedAsset(input: {
     userId: string;
     projectId: string;
@@ -131,6 +139,7 @@ export interface AssetRepo {
     width?: number;
     height?: number;
     duration?: number;
+    md5?: string;
   }): Promise<PendingUploadAsset>;
 }
 
@@ -273,20 +282,47 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       return toAssetView(row, modelByJobId);
     },
     async softDeleteOwned(assetId, userId) {
-      const result = await prisma.assets.updateMany({
-        where: {
-          id: BigInt(assetId),
-          user_id: BigInt(userId),
-          is_delete: false,
-        },
-        data: {
-          is_delete: true,
-          deleted_at: new Date(),
-          version: { increment: 1 },
-          gmt_modified: new Date(),
-        },
+      // IKCNLP（方案C）：删除素材 = 软删 assets + 同步删 project_asset 关联，画布节点不动。
+      return prisma.$transaction(async (tx) => {
+        const result = await tx.assets.updateMany({
+          where: {
+            id: BigInt(assetId),
+            user_id: BigInt(userId),
+            is_delete: false,
+          },
+          data: {
+            is_delete: true,
+            deleted_at: new Date(),
+            version: { increment: 1 },
+            gmt_modified: new Date(),
+          },
+        });
+        if (result.count === 1) {
+          await tx.project_asset.updateMany({
+            where: { asset_id: BigInt(assetId), user_id: BigInt(userId), is_delete: 0 },
+            data: { is_delete: 1, gmt_modified: new Date() },
+          });
+        }
+        return result.count === 1;
       });
-      return result.count === 1;
+    },
+    async linkAssetToProject({ userId, assetId, projectId }) {
+      const aid = BigInt(assetId);
+      const pid = BigInt(projectId);
+      const uid = BigInt(userId);
+      const existing = await prisma.assets.findFirst({
+        where: { id: aid, user_id: uid, is_delete: false },
+        select: { id: true },
+      });
+      if (!existing) return false;
+      await prisma.project_asset.upsert({
+        where: {
+          user_id_asset_id_project_id: { user_id: uid, asset_id: aid, project_id: pid },
+        },
+        create: { user_id: uid, asset_id: aid, project_id: pid, is_delete: 0 },
+        update: { is_delete: 0, gmt_modified: new Date() },
+      });
+      return true;
     },
     async listGcCandidates(cutoff) {
       const rows = await prisma.assets.findMany({
@@ -494,25 +530,61 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       });
       return row ? toUploadAsset(row) : null;
     },
-    async createUploadedAsset(input) {
-      const row = await prisma.assets.create({
-        data: {
-          user_id: BigInt(input.userId),
-          project_id: BigInt(input.projectId),
-          type: input.type,
-          storage_key: input.storageKey,
-          url: input.url,
-          mime: input.mime,
-          size: BigInt(input.size),
-          ...(input.width == null ? {} : { width: input.width }),
-          ...(input.height == null ? {} : { height: input.height }),
-          ...(input.duration == null
-            ? {}
-            : { duration_ms: Math.round(input.duration * 1000) }),
-          source: "uploaded",
+    async findOwnedByMd5(userId, md5) {
+      const row = await prisma.assets.findFirst({
+        where: {
+          user_id: BigInt(userId),
+          md5,
           status: "normal",
+          is_delete: false,
         },
+        orderBy: { id: "desc" },
         select: uploadAssetSelect,
+      });
+      return row ? toUploadAsset(row) : null;
+    },
+    async createUploadedAsset(input) {
+      // IKCNLP（方案C）：上传落库时若归属具体项目（project_id != 0）则自动建 project_asset 关联。
+      const row = await prisma.$transaction(async (tx) => {
+        const created = await tx.assets.create({
+          data: {
+            user_id: BigInt(input.userId),
+            project_id: BigInt(input.projectId),
+            type: input.type,
+            storage_key: input.storageKey,
+            url: input.url,
+            mime: input.mime,
+            size: BigInt(input.size),
+            ...(input.width == null ? {} : { width: input.width }),
+            ...(input.height == null ? {} : { height: input.height }),
+            ...(input.duration == null
+              ? {}
+              : { duration_ms: Math.round(input.duration * 1000) }),
+            ...(input.md5 ? { md5: input.md5 } : {}),
+            source: "uploaded",
+            status: "normal",
+          },
+          select: uploadAssetSelect,
+        });
+        if (input.projectId !== "0") {
+          await tx.project_asset.upsert({
+            where: {
+              user_id_asset_id_project_id: {
+                user_id: BigInt(input.userId),
+                asset_id: created.id,
+                project_id: BigInt(input.projectId),
+              },
+            },
+            create: {
+              user_id: BigInt(input.userId),
+              asset_id: created.id,
+              project_id: BigInt(input.projectId),
+              is_delete: 0,
+            },
+            update: { is_delete: 0, gmt_modified: new Date() },
+          });
+        }
+        return created;
       });
       const asset = toUploadAsset(row);
       if (!asset) throw new Error("Committed upload is missing storage_key");

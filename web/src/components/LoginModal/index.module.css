@@ -48,6 +48,13 @@
   padding-right: 52px;
 }
 
+/* Edge 对 password 输入框默认渲染原生密码显示按钮（右侧眼睛），
+   与页面自定义的显示/隐藏按钮重复，隐藏原生按钮只保留自定义按钮 */
+.passwordField .input::-ms-reveal,
+.passwordField .input::-ms-clear {
+  display: none;
+}
+
 .passwordToggle {
   position: absolute;
   top: 50%;

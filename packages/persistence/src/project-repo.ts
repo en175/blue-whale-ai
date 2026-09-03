@@ -12,10 +12,30 @@ export interface ProjectView {
   created_at: string;
 }
 
+/** 对齐 GET /api/assets 分页壳：{ records, total, size, current }。 */
+export interface ProjectPage {
+  records: ProjectView[];
+  total: number;
+  size: number;
+  current: number;
+}
+
 export interface ProjectRepo {
   listByOwner(ownerId: string): Promise<ProjectView[]>;
+  /** 当前用户 canvas 项目分页；过滤条件与 listByOwner 相同。 */
+  listByOwnerPaged(
+    ownerId: string,
+    page: number,
+    size: number,
+  ): Promise<ProjectPage>;
   create(ownerId: string, name: string): Promise<ProjectView>;
   findOwnedById(id: string, ownerId: string): Promise<ProjectView | null>;
+  /**
+   * 按项目号解出主人（New API 用户号），不要求调用方先知道主人是谁。
+   * 计费归属专用：模型网关拿 Agent 声明的项目号来这里换计费主体，Agent 因此无法自报记谁的账。
+   * 逻辑删除的项目返回 null——已删项目不该再产生花费。
+   */
+  findOwnerId(id: string): Promise<string | null>;
   rename(
     id: string,
     ownerId: string,
@@ -120,6 +140,26 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       await attachPreviews(rows, views);
       return views;
     },
+    async listByOwnerPaged(ownerId, page, size) {
+      const where = {
+        owner_id: BigInt(ownerId),
+        purpose: "canvas",
+        is_delete: 0,
+      };
+      const [total, rows] = await Promise.all([
+        prisma.project.count({ where }),
+        prisma.project.findMany({
+          where,
+          // id desc 兜底：gmt_create 秒级并列时跨页不重复（对齐 assets 列表）。
+          orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+          skip: (page - 1) * size,
+          take: size,
+        }),
+      ]);
+      const views = rows.map(toView);
+      await attachPreviews(rows, views);
+      return { records: views, total, size, current: page };
+    },
     async create(ownerId, name) {
       const trimmed = name.trim();
       const finalName = await uniqueName(
@@ -136,6 +176,20 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
         where: { id: BigInt(id), owner_id: BigInt(ownerId), is_delete: 0 },
       });
       return row ? toView(row) : null;
+    },
+    async findOwnerId(id) {
+      let key: bigint;
+      try {
+        key = BigInt(id);
+      } catch {
+        // 非数字项目号：调用方是网关而非受控前端，坏输入按查不到处理，不要抛到 500。
+        return null;
+      }
+      const row = await prisma.project.findFirst({
+        where: { id: key, is_delete: 0 },
+        select: { owner_id: true },
+      });
+      return row ? row.owner_id.toString() : null;
     },
     async rename(id, ownerId, name) {
       const finalName = await uniqueName(

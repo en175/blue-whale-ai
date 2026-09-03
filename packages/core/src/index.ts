@@ -60,7 +60,7 @@ export {
   type NewApiAdminManageUserInput,
   type NewApiAdminTopUpRow,
   type NewApiAdminUserRow,
-  type NewApiCapabilityQuotaResult,
+  type NewApiAgentRunQuotaResult,
   type NewApiLogRow,
   type NewApiLogStat,
   type NewApiPageInfo,
@@ -152,7 +152,9 @@ export {
   TRACE_ID_HEADER,
   generateTraceId,
   getCurrentTraceId,
-  getOrCreateTraceId,
+  resolveTraceId,
+  TRACE_ID_PATTERN,
+  TRACEPARENT_HEADER,
   runWithTraceId,
 } from "./trace.js";
 // logger / tls-writer 依赖火山 SDK，走子路径 "@blue-whale/core/logging"，

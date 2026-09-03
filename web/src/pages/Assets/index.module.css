@@ -106,11 +106,10 @@
   display: none;
 }
 
-/* ---- 资产网格 (一行5个) ---- */
-.grid {
+/* ---- 初始加载骨架 ---- */
+.skeletonGrid {
   display: grid;
-  /* 2-5 列自适应：容器越宽列数越多 */
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: var(--spacing-lg);
 }
 
@@ -125,6 +124,22 @@
 .cardSkeleton {
   aspect-ratio: 1 / 1;
   border-radius: var(--radius-lg);
+}
+
+/* ---- 虚拟化五列瀑布流 ---- */
+.masonry {
+  width: 100%;
+}
+
+.masonry .card {
+  width: 100%;
+}
+
+.loadState {
+  padding: var(--spacing-lg) 0;
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
 }
 
 /* ---- 资产卡片 ---- */
@@ -193,23 +208,38 @@
   object-fit: cover;
 }
 
-/* 视频容器：IntersectionObserver 懒加载检测（需 relative 给内部绝对定位元素提供基准） */
+/* 图片/视频资源未就绪或加载失败时持续覆盖卡片，不改变已经确定的纵横比。 */
+.mediaSkeleton {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  border-radius: 0;
+}
+
+/* 音频同样覆盖加载骨架屏；时长元数据到达后再露出播放器。 */
+.audioMediaSkeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: 0;
+}
+
+/* 视频容器：承载懒加载检测与悬浮预览事件。 */
 .videoContainer {
   position: relative;
   width: 100%;
   height: 100%;
 }
 
-/* 音频播放器居中 */
-.audioPlayer {
+/* 卡片紧凑音频播放器：缩略图内居中展示 */
+.audioCardPlayer {
   width: 88%;
 }
 
-/* 卡片本身负责打开详情，缩略图里的媒体控件不单独消费点击。 */
-.thumbnail .media,
-.thumbnail .videoContainer,
-.thumbnail .audioPlayer,
-.thumbnail .playIcon {
+/* 图片本体不单独消费点击；视频与音频卡片保留指针事件以触发悬浮预览。 */
+.thumbnail .media {
   pointer-events: none;
 }
 
@@ -239,31 +269,6 @@
   background-color: var(--color-error);
 }
 
-/* 视频播放图标：绝对定位居中覆盖在缩略图上 */
-.playIcon {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-full);
-  background-color: rgba(0, 0, 0, 0.4);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: transform var(--transition-fast);
-  z-index: 2;
-}
-
-.card:hover .playIcon {
-  transform: translate(-50%, -50%) scale(1.1);
-}
-
 /* 音频图标 */
 .audioIcon {
   font-size: 40px;
@@ -285,28 +290,6 @@
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   z-index: 3;
-}
-
-/* ---- 媒体加载中遮罩 ---- */
-.mediaLoading {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: rgba(20, 20, 20, 0.6);
-  z-index: 1;
-  pointer-events: none;
-}
-
-.spinner {
-  animation: spin 0.8s linear infinite;
-  color: var(--color-text-tertiary);
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
 }
 
 /* ---- 媒体加载失败遮罩 ---- */

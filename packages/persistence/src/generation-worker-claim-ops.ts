@@ -24,7 +24,24 @@ async function loadReservationFen(
   }
 }
 
-export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "claimJobById" | "claimNextJob" | "listDueVideoJobIds" | "listDueImageJobIds" | "listDueMediaExtractJobIds" | "claimVideoJobById" | "claimImageJobById" | "claimMediaExtractJobById" | "resetStalledImageJobs" | "claimNextImageJob" | "claimNextInProcessJob" | "requeueImageJobForRetry" | "claimNextVideoJob"> {
+export function createWorkerClaimOps(prisma: PrismaClient): Pick<
+  WorkerRepo,
+  | "claimJobById"
+  | "claimNextJob"
+  | "listDueVideoJobIds"
+  | "listDueImageJobIds"
+  | "listDueMediaExtractJobIds"
+  | "listDueAudioJobIds"
+  | "claimVideoJobById"
+  | "claimImageJobById"
+  | "claimAudioJobById"
+  | "claimMediaExtractJobById"
+  | "resetStalledImageJobs"
+  | "claimNextImageJob"
+  | "claimNextInProcessJob"
+  | "requeueImageJobForRetry"
+  | "claimNextVideoJob"
+> {
   // 与拆分前一致：每次创建仓储时读一次 IMAGE_JOB_LEASE_SECONDS。
   const LEASE_SECONDS = imageJobLeaseSeconds();
 
@@ -203,6 +220,37 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
       return rows.map((row) => row.id.toString());
     },
 
+    async listDueAudioJobIds(limit) {
+      // IKCR78：音频到点/孤儿 job 低频补入队扫描——镜像 listDueImageJobIds（type=audio）。
+      // queued（含漏入队：enqueue 失败/消息丢失）或 processing+lease 过期（孤儿）且创建 1 天内的
+      // 音频 job 重新入队，让 MQ 消费端（Semaphore 背压）统一处理。
+      // 不套 source 白名单（仿 media_extract IKC9EJ 教训）：防未来非白名单 source 的音频 job 被漏捞；
+      // 重复补入队由 claim-by-id CAS 幂等兜底，无副作用。
+      const now = new Date();
+      const rows = await prisma.generation_jobs.findMany({
+        where: {
+          type: "audio",
+          is_delete: false,
+          gmt_create: { gt: new Date(now.getTime() - RECOVERY_MAX_AGE_MS) },
+          next_action_at: { lte: now },
+          OR: [
+            { status: "queued" },
+            {
+              status: "processing",
+              OR: [
+                { lease_expires_at: null },
+                { lease_expires_at: { lt: now } },
+              ],
+            },
+          ],
+        },
+        orderBy: { id: "asc" },
+        take: Math.max(1, Math.min(500, limit)),
+        select: { id: true },
+      });
+      return rows.map((row) => row.id.toString());
+    },
+
     async claimVideoJobById(jobId, workerId) {
       const now = new Date();
       const candidate = await prisma.generation_jobs.findFirst({
@@ -275,6 +323,64 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<WorkerRepo, "cl
           id: BigInt(jobId),
           type: "image",
           source: { in: CLAIMABLE_JOB_SOURCES },
+          is_delete: false,
+          next_action_at: { lte: now },
+          OR: [
+            { status: "queued" },
+            {
+              status: "processing",
+              OR: [
+                { lease_expires_at: null },
+                { lease_expires_at: { lt: now } },
+              ],
+            },
+          ],
+        },
+        orderBy: { id: "asc" },
+      });
+      if (!candidate) return null;
+
+      const lease = new Date(now.getTime() + LEASE_SECONDS * 1000);
+      const claimed = await prisma.generation_jobs.updateMany({
+        where: {
+          id: candidate.id,
+          fencing_token: candidate.fencing_token,
+          status: candidate.status,
+        },
+        data: {
+          status: "processing",
+          lease_owner: workerId,
+          lease_expires_at: lease,
+          last_polled_at: now,
+          fencing_token: { increment: 1 },
+          version: { increment: 1 },
+        },
+      });
+      if (claimed.count === 0) return null;
+
+      return {
+        id: candidate.id.toString(),
+        project_id: candidate.project_id?.toString() ?? "0",
+        user_id: candidate.user_id.toString(),
+        type: candidate.type,
+        input: (candidate.input as Record<string, unknown> | null) ?? null,
+        expected_output_count: candidate.expected_output_count ?? 1,
+        retry_count: candidate.retry_count ?? 0,
+        fencingToken: Number(candidate.fencing_token + 1n),
+      };
+    },
+
+    async claimAudioJobById(jobId, workerId) {
+      // IKCR78：音频 MQ 消费端按 RocketMQ 消息 jobId 领取单个音频 job（镜像 claimImageJobById，
+      // type="audio"、无 request userId——job 自带 user_id，消费端非 request-scoped 无跨用户风险）。
+      // 不套 source 白名单（IKC9EJ 教训对齐 media_extract）：恢复扫描 listDueAudioJobIds 同样
+      // 不套白名单，两者语义对称——非白名单 source 的音频 job 不会被「recovery 补入队但 claim 拒绝」
+      // 卡死成无限重放死循环。音频任务 source 当前恒为 bottom_dock，无实际新增接管面。
+      const now = new Date();
+      const candidate = await prisma.generation_jobs.findFirst({
+        where: {
+          id: BigInt(jobId),
+          type: "audio",
           is_delete: false,
           next_action_at: { lte: now },
           OR: [

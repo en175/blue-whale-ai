@@ -120,7 +120,9 @@ scripts/commit-task-for-review.sh --amend              # 默认保留原 commit 
 scripts/commit-task-for-review.sh --amend -m "<new>"   # 覆盖 commit message
 ```
 
-`--amend` 仅在该分支已有首次提交后可用（首次提交前 amend 会改写 worktree 基线，被入口拒绝）；入口在首次提交后拒绝再次首次提交并引导 `--amend`。worktree 验收分支 publish 前不 push，amend 改写历史安全。
+`--amend` 仅在该分支已有自己的 commit 后可用（还没有时 amend 会改写 worktree 基线，被入口拒绝）。worktree 验收分支 publish 前不 push，amend 改写历史安全。
+
+一个工单分支可以提交多次。父需求下的子项各落一个 commit 是既定流程（一个父工单一个 worktree），入口不再限制提交次数——早期版本用一个标记文件把「一个分支只能提交一次」钉死，逼得每个子项另开 worktree，与流程本身冲突。`--amend` 的用途仍然只有一个：修订**最后**那个 commit。
 
 Agent 不自动合入本地 `master`、不自动推送、不自动开 PR。
 

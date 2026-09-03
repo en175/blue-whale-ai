@@ -5,9 +5,7 @@ import {
   type MentionFailureReason,
 } from "@blue-whale/core";
 import {
-  creativeSkillActivationSchema,
   type CapabilitySnapshotVersion,
-  type CreativeSkillActivation,
   type DerivedReference,
 } from "@blue-whale/contracts";
 
@@ -23,7 +21,7 @@ import {
  *  对齐 Java SnapshotService 项目级 GenerationJob 与 Asset 引用读取：
  *  - generation_jobs 按 project_id 过滤、gmt_create desc。
  *  - 按 project_id 一次读取全部 normal assets（包含上传与生成产物，防 N+1）。
- *  对齐部署 schema：conversation_messages / agent_runs / generation_job_outputs /
+ *  对齐部署 schema：conversation_messages / generation_job_outputs /
  *  project_events 表暂无 → 这些切片由 handler 补空数组与 cursor 0。字段 snake_case。 */
 
 export interface SnapshotOutputSlotView {
@@ -86,25 +84,6 @@ export interface SnapshotConversationState {
   scene_card_generation_records: SnapshotSceneCardGenerationRecordView[];
   /** StoryboardPreview 分镜预览（IK67HF，T15）：从 SceneCard 触发的可选旁路预览会话，按 id 升序。 */
   storyboard_previews: SnapshotStoryboardPreviewView[];
-  agent_runs: Array<{
-    agent_run_id: string;
-    conversation_id: string;
-    status: string;
-    stage: string | null;
-    version: number;
-    terminal_reason: string | null;
-    failure_code: string | null;
-    retry_count: number;
-    activated_creative_skill_versions: CreativeSkillActivation[];
-    reasoning_summary: string | null;
-    active_input_request: {
-      input_request_id: string;
-      request_type: string;
-      question: string | null;
-      status: string;
-      expires_at: string;
-    } | null;
-  }>;
   high_watermark_cursor: string;
 }
 
@@ -228,23 +207,46 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         orderBy: { gmt_create: "desc" },
       });
 
+      // IKCNLP（方案C）：本项目可用的素材 = project_asset 关联的 asset + 直接归属本项目(project_id=pid)的 asset。
+      // 画布节点引用的素材若不在其中，前端据此判定失效并显示占位图。
+      const linkedAssetIds = (
+        await prisma.project_asset.findMany({
+          where: { user_id: uid, project_id: pid, is_delete: 0 },
+          select: { asset_id: true },
+        })
+      ).map((r) => r.asset_id);
+
       const assetRows = await prisma.assets.findMany({
         where: {
-          project_id: pid,
           user_id: uid,
           status: "normal",
           is_delete: false,
+          OR: [
+            { id: { in: linkedAssetIds } },
+            { project_id: pid }, // 兼容：本项目单值归属的素材（渐入期关联表未覆盖的）
+          ],
         },
       });
 
-      // 对齐 Java：仅保留归属本项目的 asset（防跨项目泄漏）。
+      // 对齐 Java：仅保留归属本项目的 asset、或已被本项目 project_asset 关联的 asset。
+      // 关联命中的 asset 即使 assets.project_id 指向别项目（跨项目复用）也保留——它是本项目显式关联的素材。
+      // 用 seenIds 去重：同一素材可能同时命中多个 OR 分支（如既被关联又 project_id=pid），
+      // 显式保证一个项目里同一素材只出现一次，不依赖 SQL WHERE OR 的隐式单次语义。
+      const linkedSet = new Set(linkedAssetIds.map((id) => id.toString()));
+      const seenIds = new Set<string>();
       const assets: SnapshotAssetRow[] = [];
       for (const a of assetRows) {
+        const idStr = a.id.toString();
+        if (seenIds.has(idStr)) continue;
         const rowProjectId =
           a.project_id == null ? null : a.project_id.toString();
-        if (rowProjectId !== null && rowProjectId !== projectId) continue;
+        const isLinked = linkedSet.has(idStr);
+        if (!isLinked && rowProjectId !== null && rowProjectId !== projectId) {
+          continue;
+        }
+        seenIds.add(idStr);
         assets.push({
-          id: a.id.toString(),
+          id: idStr,
           type: a.type,
           url: a.url,
           project_id: rowProjectId,
@@ -293,7 +295,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
     async loadConversationState(projectId, userId) {
       const pid = BigInt(projectId);
       const uid = BigInt(userId);
-      const [messages, mentionRows, runs, inputRequests, planMessageRows, capabilityRows, maxCursorRow, sceneCardRows, applicationRows, recordRows, previewRows] =
+      const [messages, mentionRows, planMessageRows, capabilityRows, maxCursorRow, sceneCardRows, applicationRows, recordRows, previewRows] =
         await Promise.all([
           prisma.conversation_messages.findMany({
             where: { project_id: pid, is_delete: 0 },
@@ -313,19 +315,6 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
               display_name: true,
               snapshot: true,
             },
-          }),
-          prisma.agent_runs.findMany({
-            where: { project_id: pid, is_delete: 0 },
-            orderBy: { id: "asc" },
-          }),
-          prisma.user_input_requests.findMany({
-            where: {
-              project_id: pid,
-              status: "pending",
-              expires_at: { gt: new Date() },
-              is_delete: 0,
-            },
-            orderBy: { id: "asc" },
           }),
           prisma.plan_messages.findMany({
             where: { project_id: pid },
@@ -511,20 +500,6 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         current.push(projected);
         mentionsByMessage.set(messageId, current);
       }
-      const activeByRun = new Map(
-        inputRequests
-          .filter((request) => request.source_agent_run_id !== null)
-          .map((request) => [
-            request.source_agent_run_id!.toString(),
-            {
-              input_request_id: request.id.toString(),
-              request_type: request.request_type,
-              question: request.question,
-              status: request.status,
-              expires_at: request.expires_at.toISOString(),
-            },
-          ]),
-      );
       const capabilityByKey = new Map(
         capabilityRows.map((cap) => [
           `${cap.model_id}:${cap.capability_type}`,
@@ -634,35 +609,6 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           first_generation_job_id: preview.first_generation_job_id.toString(),
           summary_status: preview.summary_status,
         })),
-        agent_runs: runs.map((run) => {
-          const activations = creativeSkillActivationSchema
-            .array()
-            .max(1)
-            .safeParse(run.activated_creative_skill_versions);
-          return {
-            agent_run_id: run.id.toString(),
-            conversation_id: run.conversation_id.toString(),
-            status: run.status,
-            stage: run.stage,
-            version: run.version,
-            terminal_reason:
-              run.terminal_reason === "user_requested" ||
-              run.terminal_reason === "runtime_error"
-                ? run.terminal_reason
-                : null,
-            failure_code: run.failure_code,
-            retry_count: run.retry_count,
-            activated_creative_skill_versions: activations.success
-              ? activations.data
-              : [],
-            reasoning_summary:
-              typeof run.reasoning_summary === "string" &&
-              run.reasoning_summary.length <= 280
-                ? run.reasoning_summary
-                : null,
-            active_input_request: activeByRun.get(run.id.toString()) ?? null,
-          };
-        }),
         high_watermark_cursor: (maxCursorRow?._max?.cursor ?? 0n).toString(),
       };
     },
