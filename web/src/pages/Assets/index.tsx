@@ -52,7 +52,9 @@ export default function Assets() {
   const [characterRefreshTick, setCharacterRefreshTick] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
+  const [isHeaderSticky, setIsHeaderSticky] = useState(false);
 
   const isCharacterView = activeFilter === 'character';
   const assetType = activeFilter === 'all' ? '' : activeFilter;
@@ -82,6 +84,20 @@ export default function Assets() {
   useEffect(() => () => {
     removeCachedAssetPages(queryClient);
   }, [queryClient]);
+
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page) return undefined;
+
+    const updateHeaderStickyState = () => {
+      const stickyThreshold = headerRef.current?.offsetTop ?? Number.POSITIVE_INFINITY;
+      setIsHeaderSticky(page.scrollTop >= stickyThreshold);
+    };
+
+    updateHeaderStickyState();
+    page.addEventListener('scroll', updateHeaderStickyState, { passive: true });
+    return () => page.removeEventListener('scroll', updateHeaderStickyState);
+  }, [characterDetailGroupId, isCharacterView]);
 
   const loadNextPage = useCallback(async () => {
     if (isCharacterView || !hasNextPage || isFetchingNextPage) return;
@@ -233,7 +249,7 @@ export default function Assets() {
       <div className={styles.container}>
         {/* 顶部标题栏：虚拟人像库详情视图下隐藏 */}
         {!(isCharacterView && characterDetailGroupId) && (
-        <div className={styles.header}>
+        <div ref={headerRef} className={`${styles.header} ${isHeaderSticky ? styles.headerStuck : ''}`}>
           <h1 className={styles.pageTitle}>资产库</h1>
           <div className={styles.headerActions}>
             {/* 筛选按钮 */}
