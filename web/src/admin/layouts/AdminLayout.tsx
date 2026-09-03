@@ -14,6 +14,7 @@ import {
   FileText,
   Settings,
   Sparkles,
+  Images,
 } from 'lucide-react';
 import { getCurrentUser, subscribe, updateUser } from '@/utils/auth';
 import { fetchAdminSession } from '@/api/admin';
@@ -30,6 +31,7 @@ const navItems = [
   { to: '/admin/users', end: false, label: '用户管理', icon: Users },
   { to: '/admin/orders', end: false, label: '订单管理', icon: ReceiptText },
   { to: '/admin/logs', end: false, label: '操作日志', icon: FileText },
+  { to: '/admin/site-config', end: false, label: '通用配置', icon: Images },
   { to: '/admin/settings', end: false, label: '系统管理', icon: Settings },
 ];
 
