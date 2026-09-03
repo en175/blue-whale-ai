@@ -40,10 +40,14 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
         findMany: vi.fn().mockResolvedValue([
           {
             id: 3n,
-            name: "深度写作",
+            name: "Deep Writing",
             description: "写作助手",
             cover_url: "https://x/cover.png",
             source: "official",
+            name_en: null,
+            name_zh: "深度写作",
+            description_en: null,
+            description_zh: null,
           },
         ]),
       },
@@ -51,6 +55,51 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     } as unknown as PrismaClient;
     return { prisma, queryRawUnsafe, userSkillFindMany };
   }
+
+  it("listMine 官方引用标题中文优先解析（name_zh → 回退单语 name），与技能库一致（IKCXOK）", async () => {
+    // 真实存量：name_zh 已填充、name_en 为 NULL、skill.name 是英文标题 —— 修复前直接
+    // 透传 s.name 出英文；修复后走 §11.4 resolveName("zh") 中文优先，返回 name_zh。
+    const { prisma } = createUnionPrisma();
+    const page = await createSkillRepo(prisma).listMine("9", {
+      pageNum: 1,
+      pageSize: 10,
+    });
+    expect(page.records[0]).toMatchObject({
+      creative_skill_id: "deep_writing",
+      name: "深度写作",
+      asset_domain: "official",
+    });
+  });
+
+  it("listMine 官方引用 name_zh/name_en 均缺失时回退单语 name，不返回空", async () => {
+    const prisma = {
+      user_skill: {
+        findMany: vi.fn().mockResolvedValue([{ skill_id: 3n, gmt_create: new Date("2026-02-01T00:00:00Z") }]),
+      },
+      skill: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 3n,
+            name: "深度写作",
+            description: "写作助手",
+            cover_url: null,
+            source: "official",
+            name_en: null,
+            name_zh: null,
+          },
+        ]),
+      },
+      $queryRawUnsafe: vi.fn().mockResolvedValue([]),
+    } as unknown as PrismaClient;
+    const page = await createSkillRepo(prisma).listMine("9", {
+      pageNum: 1,
+      pageSize: 10,
+    });
+    expect(page.records[0]).toMatchObject({
+      name: "深度写作",
+      asset_domain: "official",
+    });
+  });
 
   it("listMine 同页返回官方引用 ∪ 名下个人技能，asset_domain 分别为 official/personal", async () => {
     const { prisma, queryRawUnsafe, userSkillFindMany } = createUnionPrisma();
@@ -245,6 +294,8 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
             description: "写作助手",
             cover_url: null,
             source: "official",
+            name_en: null,
+            name_zh: null,
           },
         ]),
         count: vi.fn(),
