@@ -18,7 +18,7 @@
   height: 100%;
   position: relative;
   z-index: 1;
-  padding: var(--spacing-2xl) var(--spacing-2xl) var(--spacing-xl);
+  padding: 0;
   overflow-y: auto;
   background: rgba(7, 7, 10, 0.2);
   backdrop-filter: blur(4px) saturate(1.08);
@@ -27,8 +27,8 @@
 
 .container {
   width: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
 }
 
 /* ---- 顶部标题栏 ---- */
@@ -39,7 +39,8 @@
   position: sticky;
   top: 0;
   z-index: 5;
-  padding: var(--spacing-sm) 0;
+  /* 由 Header 承载页面的留白，吸顶后玻璃态才能从主区顶部连续覆盖。 */
+  padding: var(--spacing-2xl);
   margin-bottom: var(--spacing-xl);
   background: transparent;
   border: 1px solid transparent;
