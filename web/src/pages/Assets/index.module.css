@@ -166,22 +166,21 @@
 
 /* ---- 资产卡片 ---- */
 .card {
-  background: var(--asset-glass-surface);
-  border: 1px solid var(--asset-glass-border);
-  border-radius: var(--radius-lg);
+  background: transparent;
+  border: none;
+  border-radius: 0;
   overflow: visible;
-  backdrop-filter: var(--asset-glass-filter);
-  -webkit-backdrop-filter: var(--asset-glass-filter);
-  box-shadow: var(--asset-glass-shadow);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
   cursor: pointer;
   transition: all var(--transition-normal);
 }
 
 .card:hover {
-  border-color: rgba(255, 255, 255, 0.28);
-  background: rgba(8, 8, 8, 0.7);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  background: transparent;
+  transform: none;
+  box-shadow: none;
 }
 
 .card:focus-visible {
@@ -199,7 +198,7 @@
   flex-direction: column;
   gap: 10px;
   color: rgba(255, 255, 255, 0.7);
-  background: var(--asset-placeholder-surface);
+  background: transparent;
   border: 1px dashed var(--asset-placeholder-border);
   backdrop-filter: var(--asset-glass-filter);
   -webkit-backdrop-filter: var(--asset-glass-filter);
@@ -210,7 +209,7 @@
 .uploadCard:hover .uploadThumb {
   border-color: rgba(255, 255, 255, 0.38);
   color: var(--color-text-primary);
-  background: rgba(8, 8, 8, 0.8);
+  background: transparent;
 }
 
 .uploadCard .uploadThumb span {
@@ -226,9 +225,9 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: var(--asset-glass-surface);
-  backdrop-filter: var(--asset-glass-filter);
-  -webkit-backdrop-filter: var(--asset-glass-filter);
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* 图片/视频媒体填充 */
