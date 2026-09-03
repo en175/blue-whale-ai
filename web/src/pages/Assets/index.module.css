@@ -232,6 +232,7 @@
 .libraryUploadCard,
 .libraryUploadCard:hover {
   border: 1px solid rgba(255, 255, 255, 0.16);
+  border-top-left-radius: 12px;
 }
 
 .uploadCard .uploadThumb {
