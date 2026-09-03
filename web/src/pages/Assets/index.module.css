@@ -42,10 +42,11 @@
   /* Header 承载页面留白，并作为主区顶部的 ChatBox 玻璃表面。 */
   padding: var(--spacing-2xl);
   margin-bottom: var(--spacing-xl);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: none;
   border-radius: var(--radius-xl);
   background: transparent;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
+  box-shadow: none;
+  transition: box-shadow var(--transition-fast);
 }
 
 .header::before {
@@ -53,11 +54,21 @@
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: rgba(6, 6, 6, 0.72);
-  backdrop-filter: blur(28px) saturate(1.15);
-  -webkit-backdrop-filter: blur(28px) saturate(1.15);
+  background: transparent;
   z-index: 0;
   pointer-events: none;
+  transition: background var(--transition-fast);
+}
+
+/* 只有标题栏覆盖正在滚动的素材时才显示玻璃，避免首屏多一层深色遮罩。 */
+.headerScrolled {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+}
+
+.headerScrolled::before {
+  background: rgba(16, 16, 20, 0.42);
+  backdrop-filter: blur(20px) saturate(1.08);
+  -webkit-backdrop-filter: blur(20px) saturate(1.08);
 }
 
 .header > * {
@@ -379,11 +390,15 @@
   border-radius: var(--radius-sm);
   font-size: var(--font-size-xs);
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.25;
   color: #fff;
-  background-color: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  z-index: 3;
+  background-color: rgba(7, 10, 15, 0.82);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  /* Masonic 在滚动时会 transform 卡片；标签不用 backdrop-filter，避免合成层重绘丢字。 */
+  isolation: isolate;
+  z-index: 4;
 }
 
 /* ---- 媒体加载失败遮罩 ---- */
