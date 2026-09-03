@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { assetPageQueryOptions, fetchAssetPage } from './assets';
+import { assetKeys, assetPageQueryOptions, fetchAssetPage, removeCachedAssetPages } from './assets';
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn() },
@@ -67,5 +67,19 @@ describe('fetchAssetPage', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(video.queryKey).not.toEqual(image.queryKey);
+  });
+
+  it('clears every asset page cache when the Library unmounts', () => {
+    const queryClient = new QueryClient();
+    const all = assetKeys.pages('', 30);
+    const videos = assetKeys.pages('video', 30);
+
+    queryClient.setQueryData(all, { pages: ['all'] });
+    queryClient.setQueryData(videos, { pages: ['video'] });
+
+    removeCachedAssetPages(queryClient);
+
+    expect(queryClient.getQueryData(all)).toBeUndefined();
+    expect(queryClient.getQueryData(videos)).toBeUndefined();
   });
 });

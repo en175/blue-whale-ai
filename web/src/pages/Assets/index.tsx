@@ -6,7 +6,7 @@ import { memo, useEffect, useRef, useState, useCallback, useLayoutEffect, useMem
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { Trash2, RotateCw, AlertCircle, Plus } from 'lucide-react';
-import { assetKeys, assetPageQueryOptions, deleteAsset, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
+import { assetKeys, assetPageQueryOptions, deleteAsset, removeCachedAssetPages, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetRecord, type AssetType } from '@/api/assets';
 import { createAsset as createMaterialAsset } from '@/api/material';
 import { uploadAssetFile } from '@/utils/upload';
 import { toast } from 'sonner';
@@ -494,6 +494,12 @@ export default function Assets() {
   const loading = !isCharacterView && (isAssetQueryPending || (!assetPages && isAssetQueryError));
   const loadingMore = isFetchingNextPage;
   const hasMore = hasNextPage;
+
+  // Masonic 的位置缓存只适用于当前挂载周期。离开资产库时移除分页缓存，
+  // 再次进入先显示骨架屏并取得新数据，避免将旧卡片直接交给新定位器。
+  useEffect(() => () => {
+    removeCachedAssetPages(queryClient);
+  }, [queryClient]);
 
   const loadNextPage = useCallback(async () => {
     if (isCharacterView || !hasNextPage || isFetchingNextPage) return;
