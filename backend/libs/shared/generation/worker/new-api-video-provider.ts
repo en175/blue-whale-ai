@@ -1,9 +1,12 @@
 import { NewApiError } from "@blue-whale/core";
 import { createNewApiClient } from "@blue-whale/core";
 import {
+  ERROR_CONTENT_REJECTED,
   ERROR_PROVIDER_FAILED,
   ERROR_PROVIDER_TIMEOUT,
   ERROR_QUOTA_EXHAUSTED,
+  isContentPolicySignal,
+  isQuotaSignal,
 } from "@blue-whale/contracts";
 
 import {
@@ -39,16 +42,14 @@ function providerError(error: unknown): VideoProviderError {
   if (error instanceof NewApiError) {
     // IKBQEE：余额不足识别——不只看 402，也认 new-api 中文「预扣费额度失败/用户剩余额度」
     // 与英文 quota/balance/insufficient（job 1565「预扣费额度失败」为 HTTP200+body 报错，非 402）。
-    const msg = String(error.message);
-    const isQuotaSignal =
-      error.status === 402 ||
-      /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required)/i.test(
-        msg,
-      );
-    return new VideoProviderError(
-      isQuotaSignal ? ERROR_QUOTA_EXHAUSTED : ERROR_PROVIDER_FAILED,
-      error.message,
-    );
+    // IKDAJN：版权/敏感（copyright/sensitive）优先于 quota 判定，归 content_rejected。
+    const text = String(error.message);
+    const code = isContentPolicySignal(text)
+      ? ERROR_CONTENT_REJECTED
+      : isQuotaSignal(text, error.status)
+        ? ERROR_QUOTA_EXHAUSTED
+        : ERROR_PROVIDER_FAILED;
+    return new VideoProviderError(code, error.message);
   }
   return new VideoProviderError(
     ERROR_PROVIDER_FAILED,
@@ -96,13 +97,15 @@ export function createNewApiVideoProvider(
           }
           if (FAILED_STATUSES.has(status)) {
             // IKBQEE：任务失败态同样识别余额不足 → quota_exhausted
-            const msg = String(task.error?.message ?? "");
-            const isQuotaSignal =
-              /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required)/i.test(
-                msg,
-              );
+            // IKDAJN：版权/敏感（copyright/sensitive）优先于 quota 判定，归 content_rejected。
+            const text = String(task.error?.message ?? "");
+            const code = isContentPolicySignal(text)
+              ? ERROR_CONTENT_REJECTED
+              : isQuotaSignal(text)
+                ? ERROR_QUOTA_EXHAUSTED
+                : ERROR_PROVIDER_FAILED;
             throw new VideoProviderError(
-              isQuotaSignal ? ERROR_QUOTA_EXHAUSTED : ERROR_PROVIDER_FAILED,
+              code,
               task.error?.message ?? "视频生成失败",
             );
           }

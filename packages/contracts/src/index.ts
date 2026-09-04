@@ -49,6 +49,10 @@ export {
   GENERATION_ERROR_NUMERIC_CODES,
   errorCodeToNumeric,
   type PublicGenerationError,
+  CONTENT_POLICY_SIGNAL,
+  isContentPolicySignal,
+  NEW_API_QUOTA_SIGNAL,
+  isQuotaSignal,
 } from "./generation-error-codes.js";
 export {
   ok,

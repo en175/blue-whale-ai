@@ -130,4 +130,77 @@ describe("new-api audio provider", () => {
       provider.generate({ model: "seed-audio-1.0", prompt: "x" }),
     ).rejects.toMatchObject({ code: "no_result" });
   });
+
+  it("非 2xx + body 含 copyright restrictions → AudioProviderError(content_rejected)（IKDAJN）", async () => {
+    const module = await import("./new-api-audio-provider.js");
+    const provider = module.createNewApiAudioProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockResolvedValue(
+        new Response(
+          "The request failed because the output image may be related to copyright restrictions",
+          { status: 500 },
+        ),
+      ),
+    });
+    await expect(
+      provider.generate({ model: "seed-audio-1.0", prompt: "x" }),
+    ).rejects.toMatchObject({ code: "content_rejected" });
+  });
+
+  it("非 2xx + body 含 may contain sensitive information → AudioProviderError(content_rejected)（IKDAJN）", async () => {
+    const module = await import("./new-api-audio-provider.js");
+    const provider = module.createNewApiAudioProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockResolvedValue(
+        new Response(
+          "The request failed because the output image may contain sensitive information",
+          { status: 500 },
+        ),
+      ),
+    });
+    await expect(
+      provider.generate({ model: "seed-audio-1.0", prompt: "x" }),
+    ).rejects.toMatchObject({ code: "content_rejected" });
+  });
+
+  it("HTTP200+body 版权限制 → AudioProviderError(content_rejected)（IKDAJN 文案不泄漏原文）", async () => {
+    const module = await import("./new-api-audio-provider.js");
+    const provider = module.createNewApiAudioProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: "信息可能涉及版权限制，请您更换后重试",
+          }),
+          { status: 200 },
+        ),
+      ),
+    });
+    await expect(
+      provider.generate({ model: "seed-audio-1.0", prompt: "x" }),
+    ).rejects.toMatchObject({
+      code: "content_rejected",
+      message: "生成内容涉及版权或敏感信息",
+    });
+  });
+
+  it("非 2xx body 同时含欠费与敏感 keyword → content_rejected 优先（IKDAJN）", async () => {
+    const module = await import("./new-api-audio-provider.js");
+    const provider = module.createNewApiAudioProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockResolvedValue(
+        new Response(
+          "账户余额不足，且信息可能包含敏感内容",
+          { status: 200 },
+        ),
+      ),
+    });
+    await expect(
+      provider.generate({ model: "seed-audio-1.0", prompt: "x" }),
+    ).rejects.toMatchObject({ code: "content_rejected" });
+  });
 });
