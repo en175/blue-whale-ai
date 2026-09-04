@@ -1,7 +1,8 @@
 /* ============================================
  * projects 接口：项目列表
  * ============================================ */
-import { apiRequest } from './http';
+import { infiniteQueryOptions } from '@tanstack/react-query';
+import { apiRequest, type ApiRequestInit } from './http';
 
 /** GET /api/projects 返回项 */
 export interface ProjectRecord {
@@ -11,9 +12,28 @@ export interface ProjectRecord {
   name: string;
   /** 封面缩略图 URL，null 表示无封面 */
   thumb: string | null;
+  /** 项目内最新的图片预览，按创建时间倒序，最多三张 */
+  previews: string[];
   /** 创建时间（ISO 字符串） */
   created_at: string;
 }
+
+/** 项目分页包络：与 GET /api/assets 保持一致。 */
+export interface ProjectPageData {
+  records: ProjectRecord[];
+  total: number;
+  size: number;
+  current: number;
+}
+
+/** 项目卡片页首屏和续页统一取 30 条。 */
+export const PROJECT_PAGE_SIZE = 30;
+
+/** 项目分页缓存键。无参列表仍只供画布使用，不能与卡片页缓存混用。 */
+export const projectKeys = {
+  all: ['projects'] as const,
+  pages: (size: number) => [...projectKeys.all, 'pages', size] as const,
+};
 
 /** 在途去重：StrictMode 双挂载只发一次请求；完成后释放，再次进入页面拉最新 */
 let pending: Promise<ProjectRecord[]> | null = null;
@@ -27,25 +47,75 @@ export function fetchProjects() {
   return pending;
 }
 
-/** 创建项目 POST /api/projects（name 后端 trim；空串返回 400 “项目名不能为空”） */
-export function createProject(name: string) {
+/**
+ * 项目卡片页的单页请求。
+ *
+ * page 与 size 必须同时传给后端；页面通过自身的加载/错误态承接失败，避免瞬态 toast。
+ */
+export function fetchProjectPage(page: number, size = PROJECT_PAGE_SIZE) {
+  const params = new URLSearchParams({ page: String(page), size: String(size) });
+  return apiRequest<ProjectPageData>(`/api/projects?${params.toString()}`, { silent: true });
+}
+
+/** 项目卡片页的 TanStack Query 无限分页配置。 */
+export function projectPageQueryOptions(size = PROJECT_PAGE_SIZE) {
+  return infiniteQueryOptions({
+    queryKey: projectKeys.pages(size),
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) => fetchProjectPage(pageParam, size),
+    getNextPageParam: (lastPage, pages) => {
+      const loadedProjectIds = new Set(
+        pages.flatMap((page) => page.records.map((project) => String(project.id))),
+      );
+
+      return lastPage.records.length > 0 && loadedProjectIds.size < lastPage.total
+        ? lastPage.current + 1
+        : undefined;
+    },
+  });
+}
+
+/** 创建项目 POST /api/projects；空名称交由后端生成默认时间名称。 */
+export function createProject(name: string, init?: ApiRequestInit) {
   return apiRequest<ProjectRecord>('/api/projects', {
+    ...init,
     method: 'POST',
     body: JSON.stringify({ name }),
   });
 }
 
 /** 重命名项目 PUT /api/projects/:id（name 后端 trim；空串返回 400） */
-export function renameProject(id: ProjectRecord['id'], name: string) {
-  return apiRequest<ProjectRecord>(`/api/projects/${id}`, {
+export function renameProject(id: ProjectRecord['id'], name: string, init?: ApiRequestInit) {
+  return apiRequest<ProjectRecord>(`/api/projects/${encodeURIComponent(String(id))}`, {
+    ...init,
     method: 'PUT',
     body: JSON.stringify({ name }),
   });
 }
 
 /** 删除项目 DELETE /api/projects/:id（成功 data 为 null，前端移除列表项） */
-export function deleteProject(id: ProjectRecord['id']) {
-  return apiRequest<null>(`/api/projects/${id}`, { method: 'DELETE' });
+export function deleteProject(id: ProjectRecord['id'], init?: ApiRequestInit) {
+  return apiRequest<null>(`/api/projects/${encodeURIComponent(String(id))}`, {
+    ...init,
+    method: 'DELETE',
+  });
+}
+
+/** 批量删除项目 POST /api/projects/batch-delete；后端允许部分成功。 */
+export interface BatchDeleteProjectsResult {
+  succeeded: string[];
+  failed: string[];
+}
+
+export function batchDeleteProjects(
+  ids: ProjectRecord['id'][],
+  init?: ApiRequestInit,
+) {
+  return apiRequest<BatchDeleteProjectsResult>('/api/projects/batch-delete', {
+    ...init,
+    method: 'POST',
+    body: JSON.stringify({ ids: ids.map(String) }),
+  });
 }
 
 /* ============ 项目快照（画布水合） ============ */
