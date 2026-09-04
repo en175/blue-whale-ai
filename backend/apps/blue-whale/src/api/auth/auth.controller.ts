@@ -11,7 +11,10 @@ import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { handleSendCode } from "@lib/shared/auth/handle-send-code.js";
 import { resolveSmsProvider, type SmsProvider } from "@lib/shared/auth/sms.js";
-import { toAuthError } from "@lib/shared/errors/auth-error.js";
+import {
+  projectAccountBusinessFailure,
+  toAuthError,
+} from "@lib/shared/errors/auth-error.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
   SESSION_COOKIE_NAME,
@@ -104,9 +107,8 @@ export class AuthController {
       res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
       return ok(loginData(result, false));
     } catch (error) {
-      if (error instanceof NewApiError && error.status === 200) {
-        throw new NewApiError("登录凭证无效", 401, "invalid_credentials");
-      }
+      const projected = projectAccountBusinessFailure(error, 401);
+      if (projected) throw projected;
       throw toAuthError(error);
     }
   }
@@ -137,12 +139,11 @@ export class AuthController {
       res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
       return ok(loginData(result, true));
     } catch (error) {
-      if (error instanceof NewApiError && error.status === 200) {
-        // 上游业务失败（用户名重复/密码不合规）HTTP 200+success:false，透传原文，
-        // 避免 toAuthError 未命中映射吞成 502「账户服务响应异常」。HTTP 用 400（非 200），
-        // 否则前端 code===200 会当成功读到 null data。
-        throw new NewApiError(error.message, FAILURE_CODE, error.code);
-      }
+      // 上游业务失败（用户名重复/密码不合规）HTTP 200+success:false，透传原文，
+      // 避免 toAuthError 未命中映射吞成 502「账户服务响应异常」。HTTP 用 400（非 200），
+      // 否则前端 code===200 会当成功读到 null data。
+      const projected = projectAccountBusinessFailure(error, FAILURE_CODE);
+      if (projected) throw projected;
       throw toAuthError(error);
     }
   }

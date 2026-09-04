@@ -42,6 +42,7 @@ export {
 export {
   createNewApiClient,
   NewApiError,
+  CLIENT_SYSTEM_BLUEWHALE,
   type NewApiClientOptions,
   type NewApiAccountCapabilities,
   type NewApiAccountIdentity,

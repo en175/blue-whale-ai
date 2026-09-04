@@ -56,6 +56,7 @@ export default function Assets() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
+  const [isHeaderScrolled, setIsHeaderScrolled] = useState(false);
 
   /** 素材库视图（虚拟人像库/真人人像库）：渲染 CharacterLibrary，不走普通资产查询 */
   const isMaterialView = activeFilter === 'character' || activeFilter === 'liveness';
@@ -86,6 +87,17 @@ export default function Assets() {
   useEffect(() => () => {
     removeCachedAssetPages(queryClient);
   }, [queryClient]);
+
+  // 顶栏只在内容滚入其下方后才需要玻璃层；首屏保持透明，让背景自然延续。
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page) return undefined;
+
+    const syncHeaderGlass = () => setIsHeaderScrolled(page.scrollTop > 0);
+    syncHeaderGlass();
+    page.addEventListener('scroll', syncHeaderGlass, { passive: true });
+    return () => page.removeEventListener('scroll', syncHeaderGlass);
+  }, []);
 
   const loadNextPage = useCallback(async () => {
     if (isMaterialView || !hasNextPage || isFetchingNextPage) return;
@@ -266,7 +278,7 @@ export default function Assets() {
       <div className={styles.container}>
         {/* 顶部标题栏：素材库分组详情视图下隐藏 */}
         {!(isMaterialView && materialDetailGroupId) && (
-        <div className={styles.header}>
+        <div className={`${styles.header} ${isHeaderScrolled ? styles.headerScrolled : ''}`}>
           <h1 className={styles.pageTitle}>资产库</h1>
           <div className={styles.headerActions}>
             {/* 筛选按钮 */}
@@ -325,6 +337,8 @@ export default function Assets() {
                 onUpload={handleUpload}
                 onPreview={setPreviewTarget}
                 onDelete={setDeleteTarget}
+                gutter={4}
+                libraryMode
               />
             )}
             {!loading && gridItems.length === 0 && (

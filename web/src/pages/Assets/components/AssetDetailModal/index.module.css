@@ -44,8 +44,8 @@
 .imagePreviewFrame {
   height: auto;
   min-height: 0;
-  overflow: hidden;
-  border-radius: var(--radius-lg);
+  overflow: visible;
+  border-radius: 0;
 }
 
 .previewSkeleton {

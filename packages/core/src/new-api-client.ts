@@ -11,7 +11,7 @@ import { createNewApiAdminOps } from "./new-api-admin-ops.js";
 import type { NewApiClientOptions } from "./new-api-types.js";
 
 export * from "./new-api-types.js";
-export { NewApiError } from "./new-api-transport.js";
+export { NewApiError, CLIENT_SYSTEM_BLUEWHALE } from "./new-api-transport.js";
 
 /**
  * 原生充值接口（/api/user/amount、/api/user/bluewhalepay/pay、

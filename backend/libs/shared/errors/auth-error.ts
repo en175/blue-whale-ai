@@ -19,3 +19,15 @@ export function toAuthError(error: unknown): NewApiError {
   }
   return new NewApiError(FALLBACK_MESSAGE, 502, "account_service_error");
 }
+
+/** 上游 HTTP 200 + success:false 业务失败 → 透传原文到指定 HTTP 状态（login 401 / register 400）。
+ *  避免 toAuthError 的 status 映射吞掉业务文案（如登录隔离白名单拒绝）；不适用时返回 null。 */
+export function projectAccountBusinessFailure(
+  error: unknown,
+  status: number,
+): NewApiError | null {
+  if (error instanceof NewApiError && error.status === 200) {
+    return new NewApiError(error.message, status, error.code);
+  }
+  return null;
+}
