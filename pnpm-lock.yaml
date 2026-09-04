@@ -35,9 +35,6 @@ importers:
       '@blue-whale/core':
         specifier: workspace:*
         version: link:../packages/core
-      '@blue-whale/generation-runtime':
-        specifier: workspace:*
-        version: link:../packages/generation-runtime
       '@blue-whale/persistence':
         specifier: workspace:*
         version: link:../packages/persistence
@@ -132,18 +129,6 @@ importers:
       jose:
         specifier: ^6.2.4
         version: 6.2.4
-
-  packages/generation-runtime:
-    dependencies:
-      '@blue-whale/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@blue-whale/core':
-        specifier: workspace:*
-        version: link:../core
-      '@volcengine/tos-sdk':
-        specifier: ^2.9.1
-        version: 2.9.1(@types/express@5.0.6)(supports-color@7.2.0)
 
   packages/persistence:
     dependencies:
@@ -4577,7 +4562,7 @@ snapshots:
 
   cliui@8.0.1:
     dependencies:
-      string-width: 4.2.3
+      string-width: 4.2.0
       strip-ansi: 6.0.1
       wrap-ansi: 7.0.0
 

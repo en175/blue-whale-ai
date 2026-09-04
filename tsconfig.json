@@ -1,10 +1,17 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/core" },
-    { "path": "./packages/contracts" },
-    { "path": "./packages/persistence" },
-    { "path": "./packages/generation-runtime" },
-    { "path": "./backend" }
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./packages/contracts"
+    },
+    {
+      "path": "./packages/persistence"
+    },
+    {
+      "path": "./backend"
+    }
   ]
 }

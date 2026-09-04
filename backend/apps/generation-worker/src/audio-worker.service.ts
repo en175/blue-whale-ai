@@ -3,7 +3,7 @@
 // 镜像 image-worker.service（IKBGKA）——audio 与 image 同为单 asset 长调用路径。
 import { hostname } from "node:os";
 import { Injectable } from "@nestjs/common";
-import { createNewApiAudioProvider } from "@blue-whale/generation-runtime";
+import { createNewApiAudioProvider } from "@lib/shared/generation-runtime/index.js";
 import { createLogger } from "@blue-whale/core/logging";
 import {
   createNewApiClient,

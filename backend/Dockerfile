@@ -18,7 +18,6 @@ ENV FFMPEG_BINARIES_URL=https://registry.npmmirror.com/-/binary/ffmpeg-static
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/core/package.json packages/core/
-COPY packages/generation-runtime/package.json packages/generation-runtime/
 COPY packages/persistence/package.json packages/persistence/
 COPY backend/package.json backend/
 COPY backend/tsconfig.json backend/
@@ -32,7 +31,6 @@ RUN pnpm install --frozen-lockfile --filter "@blue-whale/backend..."
 COPY tsconfig.json tsconfig.base.json ./
 COPY packages/contracts packages/contracts
 COPY packages/core packages/core
-COPY packages/generation-runtime packages/generation-runtime
 COPY packages/persistence packages/persistence
 COPY backend backend
 

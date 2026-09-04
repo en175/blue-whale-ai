@@ -3,7 +3,7 @@ import { hostname } from "node:os";
 import { Injectable } from "@nestjs/common";
 import { createWorkerRepo } from "@blue-whale/persistence";
 import { createLogger } from "@blue-whale/core/logging";
-import { runMediaExtractStep } from "@blue-whale/generation-runtime";
+import { runMediaExtractStep } from "@lib/shared/generation-runtime/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { loadTosStorageConfig } from "@lib/shared/assets/tos-storage.js";
 import { extractAudioToMp3 } from "@lib/shared/media-extraction/ffmpeg.js";
