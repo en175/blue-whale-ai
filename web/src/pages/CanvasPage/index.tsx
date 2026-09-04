@@ -1203,60 +1203,68 @@ export default function CanvasPage() {
     });
   };
 
-  /** 资产库选择弹窗 → 选中已有资产落到画布：
+  /** 资产库选择弹窗 → 确认选中的已有资产批量落到画布（多选）：
    *  直接以 /api/assets 返回的 id 作为 assetId 建媒体节点，不走 TOS 上传；
-   *  后台补一次 link 关联，确保素材进入当前项目 snapshot 字典（刷新后不判缺失）。 */
-  const handleSelectAssetFromLibrary = (asset: AssetRecord) => {
+   *  后台补 link 关联，确保素材进入当前项目 snapshot 字典（刷新后不判缺失）。 */
+  const handleSelectAssetsFromLibrary = (selectedAssets: AssetRecord[]) => {
     setShowAssetsPicker(false);
+    if (selectedAssets.length === 0) return;
     if (!currentId) {
       showToast('error', '项目未就绪，请稍后重试');
       return;
     }
-    const fileNameFromUrl = (() => {
-      try {
-        const last = new URL(asset.url).pathname.split('/').filter(Boolean).pop();
-        return last ? decodeURIComponent(last) : `资产-${asset.id}`;
-      } catch {
-        return `资产-${asset.id}`;
-      }
-    })();
-    const nodeId = newNodeId('media');
-    const node: Node = {
-      id: nodeId,
-      type: 'mediaNode',
-      position: spawnPosition(),
-      data: {
-        src: asset.url,
-        fileName: fileNameFromUrl,
-        mediaType: asset.type === 'video' ? 'video' : asset.type === 'audio' ? 'audio' : 'image',
-        assetId: String(asset.id),
-        width: asset.width ?? undefined,
-        height: asset.height ?? undefined,
-        duration: asset.duration ?? undefined,
-        size: asset.size ?? undefined,
-        toolMode,
-        onDelete: (id: string) => {
-          setMediaNodes((prev) => prev.filter((n) => n.id !== id));
+
+    const nodes: Node[] = selectedAssets.map((asset) => {
+      const fileNameFromUrl = (() => {
+        try {
+          const last = new URL(asset.url).pathname.split('/').filter(Boolean).pop();
+          return last ? decodeURIComponent(last) : `资产-${asset.id}`;
+        } catch {
+          return `资产-${asset.id}`;
+        }
+      })();
+      const nodeId = newNodeId('media');
+      return {
+        id: nodeId,
+        type: 'mediaNode' as const,
+        // 多节点在视口中心 ±80px 范围内自然错乱堆叠，与单节点添加行为一致
+        position: spawnPosition(),
+        data: {
+          src: asset.url,
+          fileName: fileNameFromUrl,
+          mediaType: asset.type === 'video' ? 'video' : asset.type === 'audio' ? 'audio' : 'image',
+          assetId: String(asset.id),
+          width: asset.width ?? undefined,
+          height: asset.height ?? undefined,
+          duration: asset.duration ?? undefined,
+          size: asset.size ?? undefined,
+          toolMode,
+          onDelete: (id: string) => {
+            setMediaNodes((prev) => prev.filter((n) => n.id !== id));
+          },
+          onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+          onReEdit: (id: string) => actionsRef.current.reEdit(id),
+          onGenImage: (id: string) => actionsRef.current.genImage(id),
+          onGenVideo: (id: string) => actionsRef.current.genVideo(id),
+          onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+          onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
+          onDownload: (id: string) => actionsRef.current.download(id),
+          onShowDetails: (id: string) => actionsRef.current.showDetails(id),
+          onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
         },
-        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        onReEdit: (id: string) => actionsRef.current.reEdit(id),
-        onGenImage: (id: string) => actionsRef.current.genImage(id),
-        onGenVideo: (id: string) => actionsRef.current.genVideo(id),
-        onGenAudio: (id: string) => actionsRef.current.genAudio(id),
-        onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
-        onDownload: (id: string) => actionsRef.current.download(id),
-        onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
-      },
-    };
-    pendingNodeIdsRef.current.add(nodeId);
-    setMediaNodes((prev) => [...prev, node]);
+      };
+    });
+
+    nodes.forEach((node) => pendingNodeIdsRef.current.add(node.id));
+    setMediaNodes((prev) => [...prev, ...nodes]);
 
     // 幂等补关联：素材已属当前项目也无副作用；失败仅提示，不影响节点展示
-    linkAssetToProject(currentId, asset.id).catch((err) => {
-      console.warn('资产关联项目失败：', err);
-      showToast('warn', '资产关联项目失败，请稍后重试');
+    selectedAssets.forEach((asset) => {
+      linkAssetToProject(currentId, asset.id).catch((err) => {
+        console.warn('资产关联项目失败：', err);
+        showToast('warn', '资产关联项目失败，请稍后重试');
+      });
     });
   };
 
@@ -2746,7 +2754,7 @@ export default function CanvasPage() {
       {showAssetsPicker && (
         <AssetsPickerModal
           onClose={() => setShowAssetsPicker(false)}
-          onSelect={handleSelectAssetFromLibrary}
+          onSelect={handleSelectAssetsFromLibrary}
         />
       )}
 

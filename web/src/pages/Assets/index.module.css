@@ -292,6 +292,28 @@
   z-index: 3;
 }
 
+/* ---- 多选模式勾选角标（画布资产库选择弹窗）---- */
+.selectBadge {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.9);
+  background-color: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  z-index: 3;
+}
+
+.selectBadgeActive {
+  border-color: var(--color-bg-hover, #3a3a3a);
+  background-color: var(--color-bg-hover, #3a3a3a);
+}
+
 /* ---- 媒体加载失败遮罩 ---- */
 .mediaError {
   position: absolute;

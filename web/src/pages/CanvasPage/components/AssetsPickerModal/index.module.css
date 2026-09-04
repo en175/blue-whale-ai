@@ -77,3 +77,65 @@
   overflow-y: auto;
   padding: 16px 20px;
 }
+
+/* ---- 底部操作栏：已选数量提示 + 取消/确认 ---- */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.selectHint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  min-width: 0;
+}
+
+.footerActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.cancelBtn {
+  padding: 8px 20px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.cancelBtn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+/* 可点状态：亮灰色（区别于未勾选时的深灰禁用态） */
+.confirmBtn {
+  padding: 8px 24px;
+  border: none;
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-hover, #3a3a3a);
+  color: var(--color-text-primary, #fff);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.confirmBtn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+/* 未勾选时灰色禁用态 */
+.confirmBtn:disabled {
+  background-color: var(--color-bg-tertiary, #2f2f2f);
+  color: var(--color-text-tertiary, #666666);
+  cursor: not-allowed;
+  filter: none;
+}
