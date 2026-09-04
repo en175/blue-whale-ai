@@ -115,6 +115,10 @@ export default defineConfig(({ command, mode }) => {
       host: true,
       port: 3000,
       open: true,
+      // 忽略编辑器/Agent 原子写入留下的 .tmpdir/.tmp 锁定文件，避免 vite 文件监听 EBUSY 崩溃
+      watch: {
+        ignored: [/[\\/]\.[^\\/]*\.tmpdir[\\/]/, /\.tmp$/],
+      },
       // 接口代理：/api 与 /agent 前缀请求转发到当前环境接口域名
       proxy: {
         '/api': {
