@@ -7,6 +7,7 @@ import Home from '@/pages/Home';
 import CanvasPage from '@/pages/CanvasPage';
 import Projects from '@/pages/Projects';
 import Assets from '@/pages/Assets';
+import AuthSuccess from '@/pages/AuthSuccess';
 import { adminRoutes } from '@/admin/router';
 import { RequireAuth } from '@/router/guards';
 
@@ -18,6 +19,11 @@ const router = createBrowserRouter([
       {
         index: true,
         element: <Home />,
+      },
+      {
+        // 真人认证成功落地页：手机刷脸后由上游回调跳转，无需产品登录态
+        path: 'auth-success',
+        element: <AuthSuccess />,
       },
       {
         element: (

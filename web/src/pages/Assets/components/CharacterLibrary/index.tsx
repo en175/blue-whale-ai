@@ -466,7 +466,11 @@ export default function CharacterLibrary({
         throw new Error('invalid name');
       }
       try {
-        const session = await createVisualValidateSession({ Name: name }, { silent: true });
+        // callback_url 指向前端落地页：上游刷脸完成后跳转（手机端提示「请于 PC 端查看」）
+        const session = await createVisualValidateSession(
+          { Name: name, callback_url: `${window.location.origin}/auth-success` },
+          { silent: true },
+        );
         setShowCreateModal(false);
         // 展示二维码弹窗：手机扫码打开 H5 刷脸页；桌面端可点「在当前设备打开」
         setAuthSession({ H5Link: session.H5Link, BytedToken: session.BytedToken });

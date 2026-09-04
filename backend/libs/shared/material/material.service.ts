@@ -35,19 +35,8 @@ export const MATERIAL_ACTIONS = [
 
 export type MaterialAction = (typeof MATERIAL_ACTIONS)[number];
 
-/** 真人会话不对调用方开放自定义 CallbackURL：认证回调与数据全由网关维护。 */
-function stripCallbackUrl(body: unknown): unknown {
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    return body ?? {};
-  }
-  const record = body as Record<string, unknown>;
-  if (!("CallbackURL" in record)) return record;
-  const rest: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(record)) {
-    if (key !== "CallbackURL") rest[key] = value;
-  }
-  return rest;
-}
+// 真人会话的 callback_url 由前端传入（指向刷脸完成后的落地提示页），
+// 本层纯透传不改动；未传时由上游按自身默认行为处理。
 
 @Injectable()
 export class MaterialService {
@@ -81,8 +70,6 @@ export class MaterialService {
     if (!(MATERIAL_ACTIONS as readonly string[]).includes(action)) {
       throw new NewApiError("不支持的素材操作", 400, "InvalidAction");
     }
-    const payload =
-      action === "CreateVisualValidateSession" ? stripCallbackUrl(body) : body;
-    return this.client.callAction(action, payload, token);
+    return this.client.callAction(action, body, token);
   }
 }
