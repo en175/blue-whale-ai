@@ -672,11 +672,14 @@ export default function CharacterLibrary({
         />
       )}
 
-      {/* 真人认证二维码弹窗（轮询在外层，关闭弹窗不打断） */}
+      {/* 真人认证二维码弹窗：关闭 = 放弃认证，停止轮询 + 取消认证中状态 */}
       {authSession && (
         <AuthQrModal
           h5Link={authSession.H5Link}
-          onClose={() => setAuthSession(null)}
+          onClose={() => {
+            setAuthSession(null);
+            stopAuthPolling();
+          }}
         />
       )}
 
