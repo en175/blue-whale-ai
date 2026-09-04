@@ -198,39 +198,3 @@ export function retryAgentRun(
     },
   );
 }
-
-/* ============ 计划消息应用 ============ */
-
-/** 应用计划返回：冻结计划并出图（100405=余额不足，100403=需新计划） */
-export interface PlanApplyData {
-  /** 应用回执 */
-  receipt: unknown;
-  /** 首个生成任务ID，无任务时为 null */
-  first_generation_job_id: number | null;
-}
-
-/** 应用计划消息 POST /api/projects/:id/plan-messages/:messageId/apply
- * 登录态走 HttpOnly 会话 cookie（后端回注 sk- 做额度预检/凭证密封），请求体为空字符串 */
-export async function applyPlanMessage(
-  projectId: string,
-  messageId: number | string,
-): Promise<PlanApplyData> {
-  const res = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/plan-messages/${messageId}/apply`,
-    {
-      method: 'POST',
-      headers: {
-        'Idempotency-Key': newIdempotencyKey(),
-        'Content-Type': 'application/json',
-      },
-      body: '""',
-    },
-  );
-  const body = (await res.json().catch(() => undefined)) as
-    | { code?: number; msg?: string | null; data?: PlanApplyData }
-    | undefined;
-  if (!res.ok || body?.code !== 200) {
-    throw new Error(body?.msg ?? `应用计划失败（${res.status}）`);
-  }
-  return body.data as PlanApplyData;
-}
