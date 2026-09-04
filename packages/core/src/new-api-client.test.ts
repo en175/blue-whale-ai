@@ -2,6 +2,7 @@
 import {describe, expect, it} from "vitest";
 
 import {NewApiError, createNewApiClient} from "./new-api-client.js";
+import {createNewApiRequest} from "./new-api-transport.js";
 import {jsonResponse} from "./new-api-client.testlib.js";
 
 describe("new-api client —— 账户与错误映射", () => {
@@ -85,6 +86,64 @@ describe("new-api client —— 账户与错误映射", () => {
     ]);
     expect(new Headers(requests[2]?.init.headers).get("Authorization")).toBe(
       "Bearer sk-register",
+    );
+  });
+
+  it("declares the bluewhale client system on every outbound request", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test/",
+      fetchImpl: async (input, init = {}) => {
+        const url = String(input);
+        requests.push({ url, init });
+        if (url.endsWith("/api/user/login")) {
+          return jsonResponse({
+            success: true,
+            data: { id: 7, username: "alice", token: "sk-login" },
+          });
+        }
+        if (url.endsWith("/api/user/register")) {
+          return jsonResponse({
+            success: true,
+            data: { user_id: 8, username: "new-user", token: "sk-register" },
+          });
+        }
+        return jsonResponse({ code: true, data: { user_quota: 99 } });
+      },
+    });
+
+    await client.login({ username: "alice", password: "secret" });
+    await client.register({ username: "bob", password: "secret" });
+    await client.getAccountCapabilities();
+
+    expect(requests).toHaveLength(3);
+    for (const { init } of requests) {
+      expect(new Headers(init.headers).get("X-Client-System")).toBe(
+        "bluewhale",
+      );
+    }
+  });
+
+  it("lets a caller-supplied X-Client-System header win over the default", async () => {
+    const captured: Array<RequestInit> = [];
+    const request = createNewApiRequest({
+      baseUrl: "http://new-api.test/",
+      fetchImpl: async (input, init = {}) => {
+        captured.push(init);
+        return jsonResponse({ code: true, data: { user_quota: 99 } });
+      },
+    });
+
+    await request("/api/usage", {
+      headers: { "X-Client-System": "api" },
+    });
+    await request("/api/usage");
+
+    expect(new Headers(captured[0]?.headers).get("X-Client-System")).toBe(
+      "api",
+    );
+    expect(new Headers(captured[1]?.headers).get("X-Client-System")).toBe(
+      "bluewhale",
     );
   });
 

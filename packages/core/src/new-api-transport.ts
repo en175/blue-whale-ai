@@ -132,6 +132,12 @@ async function performRequest<T>(
       provided ?? getCurrentTraceId() ?? generateTraceId(),
     );
   }
+  // 出站统一声明客户端系统，网关登录白名单据此识别蓝鲸来源（IKC8XX）：
+  // 网关按 X-Client-System 判断请求来源系统，账号 allowed_systems 不含 bluewhale 则拒绝登录。
+  // 只拦登录不拦 API 调用；调用方显式头优先，允许将来覆盖为其他系统。
+  if (!headers.has("X-Client-System")) {
+    headers.set("X-Client-System", "bluewhale");
+  }
 
   let response: Response;
   let payload: NewApiEnvelope | null;

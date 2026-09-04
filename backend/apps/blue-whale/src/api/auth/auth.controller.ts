@@ -105,7 +105,9 @@ export class AuthController {
       return ok(loginData(result, false));
     } catch (error) {
       if (error instanceof NewApiError && error.status === 200) {
-        throw new NewApiError("登录凭证无效", 401, "invalid_credentials");
+        // 上游业务失败（登录凭证错误/账号未被授权登录当前系统）HTTP 200+success:false，
+        // 透传 Go 原文（登录隔离白名单拒绝时用户能看到具体文案），HTTP 用 401。
+        throw new NewApiError(error.message, 401, error.code);
       }
       throw toAuthError(error);
     }
