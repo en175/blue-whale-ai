@@ -16,7 +16,7 @@ ADR-0068（2026-08-09）将产品实现定为「模块化单体 + 进程隔离�
 - **迁移域**：auth、account、recharge、usage、admin、projects、canvases、scene-cards、assets、jobs、skills、templates（`blue_whale_web/app/api/**` 中除 agent 编排外的全部 Route Handler 及其 `lib/**` 服务层）。
 - **结构参考**：soybean-admin-nestjs 的完整架构与设计模式（module/controller/service/repository 分层、依赖注入、decorator、guard/interceptor/pipe/filter），**不参考其业务域**。
 - **数据层**：复用 `@blue-whale/persistence`（Prisma + MySQL），**不引入 TypeORM**——延续 ADR-0069 单一 DB 事实来源。
-- **共享包**：复用 `@blue-whale/contracts` 做 DTO 校验、`@blue-whale/core` 共享领域；不依赖 `@blue-whale/agent-runtime` / `@blue-whale/generation-runtime`。
+- **共享包**：复用 `@blue-whale/contracts` 做 DTO 校验、`@blue-whale/core` 共享领域；不依赖 `@blue-whale/agent-runtime`。`@blue-whale/generation-runtime` 已于 2026-09-04 退役并内联为 `backend/libs/shared/generation-runtime/`（见 [ADR-0075](0075-generation-worker-into-nestjs-backend.md)），属 backend 内部库。
 - **不迁移**：agent 编排（`/agent/v1/**`、conversation、plan-messages、internal-model、generation 流水线、两个 worker 进程），归属同事的独立抽离任务，原地不动。
 - **前端**：`blue_whale_web` 删除业务路由，直连 NestJS；agent 编排路由暂留至同事抽离完成。
 
