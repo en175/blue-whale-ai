@@ -438,12 +438,12 @@ export interface ModelSize {
 export interface AdminModel {
   /** 行ID（bigint string） */
   id: string;
-  /** 供应商ID */
+  /** 供应商ID（系统写死，管理端不再填写） */
   provider_id: string;
   /** 模型唯一标识 */
   model_id: string;
-  /** 能力类型：image 图片 / video 视频 / text 文生文 */
-  capability_type: 'image' | 'video' | 'text';
+  /** 能力类型：image / video / text / audio */
+  capability_type: 'image' | 'video' | 'text' | 'audio';
   /** 模型展示名称 */
   model_label: string;
   /** 图标 URL 或名称，无图标时为 null */
@@ -466,6 +466,10 @@ export interface AdminModel {
   default_duration: number | null;
   /** 特性开关 JSON 对象 */
   features: Record<string, unknown>;
+  /** 图片渠道解析器：seedream / gpt / banana */
+  channel_parser?: string | null;
+  /** 图片请求映射（gpt 交叉格 / banana 一维表）；seedream 为 null */
+  request_mapping?: unknown;
   /** 是否启用：true 在 dock 展示 / false 隐藏 */
   enabled: boolean;
   /** 排序序号，同类型内越小越靠前 */
@@ -481,9 +485,9 @@ export function fetchAdminModels() {
 
 /** POST /api/admin/models 新建模型入参（复制自某模型为前端预填，服务端不感知 copy_source） */
 export interface CreateAdminModelParams {
-  provider_id: string;
+  provider_id?: string;
   model_id: string;
-  capability_type: 'image' | 'video' | 'text';
+  capability_type: 'image' | 'video' | 'text' | 'audio';
   model_label: string;
   /** 留空为 null */
   icon?: string | null;
@@ -496,6 +500,8 @@ export interface CreateAdminModelParams {
   default_aspect_ratio?: string | null;
   default_duration?: number | null;
   features?: Record<string, unknown>;
+  channel_parser?: string | null;
+  request_mapping?: unknown;
   enabled?: boolean;
   /** 排序序号（编辑部分更新时可调序） */
   sort_order?: number;
