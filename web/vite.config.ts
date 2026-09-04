@@ -94,10 +94,10 @@ export default defineConfig(({ command, mode }) => {
 
   return {
     plugins: [
+      // 仅开发服务启用，且须先于 React 插件注册以保留组件源码位置信息。
+      command === 'serve' && codeInspectorPlugin({ bundler: 'vite' }),
       react(),
       tosUploadProxy(),
-      // 仅在 Vite 开发服务中启用，避免将源码定位逻辑带入构建产物。
-      command === 'serve' && codeInspectorPlugin({ bundler: 'vite' }),
     ],
     resolve: {
       alias: {
