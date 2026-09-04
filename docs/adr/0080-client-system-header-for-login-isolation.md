@@ -14,17 +14,17 @@ BFF 是账号登录/注册的唯一入口（`account.service` → `createNewApiC
 
 ## 决策
 
-1. **传输层统一注入**：`packages/core/src/new-api-transport.ts` 的 `performRequest()`（全部 new-api 出站的唯一入口，login/register/usage/identity/充值/worker 成本查询均经过）在 X-Trace-Id 注入块后声明：
+1. **传输层统一注入**：`packages/core/src/new-api-transport.ts` 的 `performRequest()`（new-api 账号/API 出站的统一入口，login/register/usage/identity/充值/worker 成本查询均经过；素材库透传层 `material-library-client.ts` 与 OAuth 浏览器重定向除外）在 X-Trace-Id 注入块后声明：
 
    ```ts
    if (!headers.has("X-Client-System")) {
-     headers.set("X-Client-System", "bluewhale");
+     headers.set("X-Client-System", CLIENT_SYSTEM_BLUEWHALE);
    }
    ```
 
-   `if (!headers.has(...))` 允许调用方显式覆盖，为将来对接其他网关系统留口。
+   `CLIENT_SYSTEM_BLUEWHALE = "bluewhale"` 常量随 `NewApiError` 一起从 `packages/core` 导出。`if (!headers.has(...))` 允许调用方显式覆盖，为将来对接其他网关系统留口。
 2. **头值硬编码常量**，不引入配置项：本仓即「蓝鲸」语义的事实来源，网关只有 `bluewhale`/`api` 两值，无配置需求。
-3. **login 200 业务失败分支透传 Go 文案**：`auth.controller.ts` login catch 改 `throw new NewApiError(error.message, 401, error.code)`，不再硬编码「登录凭证无效」。白名单拒绝（HTTP 200 + `success:false` + `"该账号未被授权登录当前系统"`）时用户能看到具体文案。register 已有同构先例（透传 + HTTP 400）。
+3. **login/register 200 业务失败分支统一透传 Go 文案**：`auth-error.ts` 新增 `projectAccountBusinessFailure(error, status)` 投影，`auth.controller.ts` login 用 401、register 用 400（原有同构先例），不再硬编码「登录凭证无效」。白名单拒绝（HTTP 200 + `success:false` + `"This account is not allowed to log into the current system"`）时用户能看到具体文案。
 4. **落 CONTEXT 术语**：「登录来源系统」条目入 `CONTEXT.md`（见下）。
 
 ## Considered Options
@@ -37,8 +37,8 @@ BFF 是账号登录/注册的唯一入口（`account.service` → `createNewApiC
 
 ## Consequences
 
-- BFF 发起的所有 new-api 请求自动带 `X-Client-System: bluewhale`；网关登录/注册默认值/白名单校验全部对齐，无需逐个接口改。
+- BFF 发起的所有 new-api 账号/API 请求自动带 `X-Client-System: bluewhale`；网关登录/注册默认值/白名单校验全部对齐，无需逐个接口改。
 - 存量账号 `allowed_systems` 为空串 = 全放行，双系统可登录，零迁移。
-- OAuth 回调是浏览器重定向，天然无此头，网关默认按 `api` 处理（OAuth 新注册默认 `api`），BFF 无需处理。
+- OAuth 回调是浏览器重定向，天然无此头，网关默认按 `api` 处理（OAuth 新注册默认 `api`），BFF 无需处理；素材库透传层（`material-library-client.ts`）不走 `performRequest`，也不带该头——它是产物直传不参与账号登录，网关只拦登录，不受影响。
 - 新注册（带 bluewhale 头）默认 `allowed_systems = bluewhale`（网关不信任请求体字段）。
-- 影响面：本仓只改 transport 注入 + login 透传两处；不追溯已登录会话，`/api/me`、Redis 会话均不动。
+- 影响面：本仓只改 transport 注入 + login/register 透传投影三处；不追溯已登录会话，`/api/me`、Redis 会话均不动。

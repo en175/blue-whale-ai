@@ -1,7 +1,11 @@
 // IK74V8：从 new-api-client.test.ts 拆出（≤800 行硬线）。用例逐块搬运，断言不变。
 import {describe, expect, it} from "vitest";
 
-import {NewApiError, createNewApiClient} from "./new-api-client.js";
+import {
+  NewApiError,
+  CLIENT_SYSTEM_BLUEWHALE,
+  createNewApiClient,
+} from "./new-api-client.js";
 import {createNewApiRequest} from "./new-api-transport.js";
 import {jsonResponse} from "./new-api-client.testlib.js";
 
@@ -119,7 +123,7 @@ describe("new-api client —— 账户与错误映射", () => {
     expect(requests).toHaveLength(3);
     for (const { init } of requests) {
       expect(new Headers(init.headers).get("X-Client-System")).toBe(
-        "bluewhale",
+        CLIENT_SYSTEM_BLUEWHALE,
       );
     }
   });
@@ -143,7 +147,7 @@ describe("new-api client —— 账户与错误映射", () => {
       "api",
     );
     expect(new Headers(captured[1]?.headers).get("X-Client-System")).toBe(
-      "bluewhale",
+      CLIENT_SYSTEM_BLUEWHALE,
     );
   });
 

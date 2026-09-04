@@ -18,6 +18,9 @@ export class NewApiError extends Error {
   }
 }
 
+/** 出站客户端系统标识（网关登录白名单据此识别蓝鲸来源，见 ADR-0080）。 */
+export const CLIENT_SYSTEM_BLUEWHALE = "bluewhale";
+
 export type NewApiEnvelope = {
   success?: boolean;
   code?: boolean | number | string;
@@ -132,11 +135,10 @@ async function performRequest<T>(
       provided ?? getCurrentTraceId() ?? generateTraceId(),
     );
   }
-  // 出站统一声明客户端系统，网关登录白名单据此识别蓝鲸来源（IKC8XX）：
-  // 网关按 X-Client-System 判断请求来源系统，账号 allowed_systems 不含 bluewhale 则拒绝登录。
-  // 只拦登录不拦 API 调用；调用方显式头优先，允许将来覆盖为其他系统。
+  // 出站统一声明客户端系统（ADR-0080）：网关登录白名单按 X-Client-System 判断来源系统，
+  // 账号 allowed_systems 不含 bluewhale 则拒绝登录。只拦登录不拦 API 调用；调用方显式头优先。
   if (!headers.has("X-Client-System")) {
-    headers.set("X-Client-System", "bluewhale");
+    headers.set("X-Client-System", CLIENT_SYSTEM_BLUEWHALE);
   }
 
   let response: Response;
