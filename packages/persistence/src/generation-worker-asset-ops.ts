@@ -6,15 +6,40 @@ import {appendProjectEvent} from "./product-event-repo.js";
 import {DEFAULT_MAX_REFERENCE_IMAGES} from "./model-capability-repo.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
+/** IKDD4Z：查当前项目显式关联的素材 id（project_asset 跨项目复用，is_delete=0）。
+ *  与 snapshot-repo.ts 的「项目可用素材」语义对齐：关联命中的素材即使 assets.project_id
+ *  指向别项目（跨项目复用）也视为本项目可用。 */
+async function findLinkedAssetIds(
+  prisma: PrismaClient,
+  userId: string,
+  projectId: string,
+): Promise<bigint[]> {
+  const rows = await prisma.project_asset.findMany({
+    where: {
+      user_id: BigInt(userId),
+      project_id: BigInt(projectId),
+      is_delete: 0,
+    },
+    select: { asset_id: true },
+  });
+  return rows.map((r) => r.asset_id);
+}
+
 export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "resolveInputAssets" | "resolveMediaExtractSource" | "findImageCapability" | "createAsset"> {
   return {
     async resolveInputAssets(assetIds, userId, projectId) {
       if (assetIds.length === 0) return [];
+      // IKDD4Z：归属 = 本项目直接归属 ∪ 全局素材(project_id=0) ∪ project_asset 显式关联（跨项目复用）。
+      const linkedAssetIds = await findLinkedAssetIds(prisma, userId, projectId);
       const rows = await prisma.assets.findMany({
         where: {
           id: { in: assetIds.map((id) => BigInt(id)) },
           user_id: BigInt(userId),
-          OR: [{ project_id: BigInt(projectId) }, { project_id: BigInt(0) }],
+          OR: [
+            { project_id: BigInt(projectId) },
+            { project_id: BigInt(0) },
+            ...(linkedAssetIds.length > 0 ? [{ id: { in: linkedAssetIds } }] : []),
+          ],
           status: "normal",
           is_delete: false,
         },
@@ -51,12 +76,18 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
     },
 
     async resolveMediaExtractSource(assetId, userId, projectId) {
-      // IKARDY：源视频资产解析——返回 storageKey + 公网 url 供下载（资产 public-read）；归属 = 同项目或共享 + 同用户。
+      // IKARDY：源视频资产解析——返回 storageKey + 公网 url 供下载（资产 public-read）；
+      // 归属 = 同项目或共享 + 同用户（IKDD4Z 增 project_asset 跨项目复用分支）。
+      const linkedAssetIds = await findLinkedAssetIds(prisma, userId, projectId);
       const row = await prisma.assets.findFirst({
         where: {
           id: BigInt(assetId),
           user_id: BigInt(userId),
-          OR: [{ project_id: BigInt(projectId) }, { project_id: BigInt(0) }],
+          OR: [
+            { project_id: BigInt(projectId) },
+            { project_id: BigInt(0) },
+            ...(linkedAssetIds.length > 0 ? [{ id: { in: linkedAssetIds } }] : []),
+          ],
           status: "normal",
           is_delete: false,
         },
