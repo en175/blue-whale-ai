@@ -335,7 +335,7 @@ export default function Assets() {
                   onUpload={handleUpload}
                   onPreview={setPreviewTarget}
                   onDelete={setDeleteTarget}
-                  gutter={2}
+                  gutter={4}
                   libraryMode
                 />
               )}

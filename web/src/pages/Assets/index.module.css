@@ -15,9 +15,11 @@
   --asset-upload-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
   width: 100%;
   height: 100%;
+  box-sizing: border-box;
   position: relative;
   z-index: 1;
-  padding: 0;
+  /* 背景延伸到固定侧栏下方，内容本身仍避让侧栏。 */
+  padding: 0 0 0 var(--sidebar-width);
   overflow-y: auto;
   background: rgba(7, 7, 10, 0.2);
   backdrop-filter: blur(4px) saturate(1.08);
@@ -172,7 +174,7 @@
 .skeletonGrid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 2px;
+  gap: 8px;
   border-radius: 0;
   overflow: visible;
 }

@@ -26,8 +26,3 @@
   margin-left: 0;
   background-color: transparent;
 }
-
-/* 资产库主区与固定侧栏并列，避免吸顶层继续由页面左内边距补偿侧栏宽度。 */
-.mainLibrary {
-  margin-left: var(--sidebar-width);
-}
