@@ -51,6 +51,16 @@
   color: var(--color-text-primary);
 }
 
+/* 真人认证中：卡片图标旋转 */
+.uploadCard .spin {
+  animation: spin 1s linear infinite;
+}
+
+/* 真人认证中：卡片禁用态 */
+.uploadCard[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
 /* ---- 分组卡片 ---- */
 .groupCard {
   position: relative;
@@ -420,6 +430,31 @@
   font-size: var(--font-size-lg);
   font-weight: 600;
   color: var(--color-text-primary);
+  margin-bottom: var(--spacing-lg);
+}
+
+/* 真人认证二维码弹窗 */
+.qrBox {
+  display: flex;
+  justify-content: center;
+  padding: var(--spacing-md);
+  background-color: #fff;
+  border-radius: var(--radius-md);
+  width: fit-content;
+  margin: 0 auto var(--spacing-md);
+}
+
+.qrHint {
+  text-align: center;
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+}
+
+.qrHintSub {
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-top: var(--spacing-xs);
   margin-bottom: var(--spacing-lg);
 }
 

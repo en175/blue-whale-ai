@@ -7,6 +7,7 @@ describe('asset filter query', () => {
     expect(getAssetFilter(new URLSearchParams('type=video'))).toBe('video');
     expect(getAssetFilter(new URLSearchParams('type=audio'))).toBe('audio');
     expect(getAssetFilter(new URLSearchParams('type=character'))).toBe('character');
+    expect(getAssetFilter(new URLSearchParams('type=liveness'))).toBe('liveness');
     expect(getAssetFilter(new URLSearchParams())).toBe('all');
     expect(getAssetFilter(new URLSearchParams('type=document'))).toBe('all');
   });

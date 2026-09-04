@@ -27,6 +27,7 @@ const filterTabs: { key: FilterKey; label: string }[] = [
   { key: 'video', label: '视频' },
   { key: 'audio', label: '音频' },
   { key: 'character', label: '虚拟人像库' },
+  { key: 'liveness', label: '真人人像库' },
 ];
 
 /** Library 瀑布流每次只请求 30 条，避免首屏过量加载。 */
@@ -48,16 +49,17 @@ export default function Assets() {
   const [previewTarget, setPreviewTarget] = useState<AssetRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [uploading, setUploading] = useState(false);
-  /** 虚拟人分组详情视图中当前分组 ID（null = 不在详情视图） */
-  const [characterDetailGroupId, setCharacterDetailGroupId] = useState<string | null>(null);
-  /** 虚拟人分组详情刷新触发器（上传后 +1 触发 CharacterLibrary 重新拉取） */
-  const [characterRefreshTick, setCharacterRefreshTick] = useState(0);
+  /** 素材库分组详情视图中当前分组 ID（null = 不在详情视图）；虚拟人像库/真人人像库共用 */
+  const [materialDetailGroupId, setMaterialDetailGroupId] = useState<string | null>(null);
+  /** 素材库分组详情刷新触发器（上传后 +1 触发 CharacterLibrary 重新拉取） */
+  const [materialRefreshTick, setMaterialRefreshTick] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
 
-  const isCharacterView = activeFilter === 'character';
-  const assetType = activeFilter === 'all' ? '' : activeFilter;
+  /** 素材库视图（虚拟人像库/真人人像库）：渲染 CharacterLibrary，不走普通资产查询 */
+  const isMaterialView = activeFilter === 'character' || activeFilter === 'liveness';
+  const assetType = activeFilter === 'all' || activeFilter === 'liveness' ? '' : activeFilter;
   const {
     data: assetData,
     fetchNextPage,
@@ -67,7 +69,7 @@ export default function Assets() {
     isPending: isAssetQueryPending,
   } = useInfiniteQuery({
     ...assetPageQueryOptions(assetType, LIBRARY_PAGE_SIZE),
-    enabled: !isCharacterView,
+    enabled: !isMaterialView,
   });
   const assetPages = assetData?.pages;
   const assets = useMemo(
@@ -75,7 +77,7 @@ export default function Assets() {
     [assetPages],
   );
   const assetTotal = assetPages?.at(-1)?.total ?? 0;
-  const loading = !isCharacterView && (isAssetQueryPending || (!assetPages && isAssetQueryError));
+  const loading = !isMaterialView && (isAssetQueryPending || (!assetPages && isAssetQueryError));
   const loadingMore = isFetchingNextPage;
   const hasMore = hasNextPage;
 
@@ -86,9 +88,9 @@ export default function Assets() {
   }, [queryClient]);
 
   const loadNextPage = useCallback(async () => {
-    if (isCharacterView || !hasNextPage || isFetchingNextPage) return;
+    if (isMaterialView || !hasNextPage || isFetchingNextPage) return;
     await fetchNextPage();
-  }, [fetchNextPage, hasNextPage, isCharacterView, isFetchingNextPage]);
+  }, [fetchNextPage, hasNextPage, isMaterialView, isFetchingNextPage]);
 
   /** 上传素材：presign 获取预签名 URL → PUT 直传对象存储 → complete 登记 */
   const handleUpload = useCallback(() => {
@@ -103,8 +105,8 @@ export default function Assets() {
     // 先清空 input 以支持重复上传同一文件
     if (fileInputRef.current) fileInputRef.current.value = '';
 
-    // 虚拟人分组详情视图：走素材库 API（支持图片+视频）
-    if (isCharacterView && characterDetailGroupId) {
+    // 素材库分组详情视图（虚拟人像库/真人人像库）：走素材库 API（支持图片+视频）
+    if (isMaterialView && materialDetailGroupId) {
       setUploading(true);
       const errors: string[] = [];
 
@@ -125,7 +127,7 @@ export default function Assets() {
           const finalName = rawName.length > 30 ? rawName.slice(0, 30) : rawName;
           if (rawName.length > 30) toast('当前上传素材名称过长，已截取', { style: { textAlign: 'center' } });
           await createMaterialAsset({
-            GroupId: characterDetailGroupId,
+            GroupId: materialDetailGroupId,
             URL: uploadResult.url,
             Name: finalName,
             AssetType: assetType,
@@ -139,7 +141,7 @@ export default function Assets() {
       if (errors.length) toast.error(errors.join('；'));
       setUploading(false);
       // 触发 CharacterLibrary 刷新
-      setCharacterRefreshTick((t) => t + 1);
+      setMaterialRefreshTick((t) => t + 1);
       return;
     }
 
@@ -262,8 +264,8 @@ export default function Assets() {
   return (
     <div ref={pageRef} className={styles.page}>
       <div className={styles.container}>
-        {/* 顶部标题栏：虚拟人像库详情视图下隐藏 */}
-        {!(isCharacterView && characterDetailGroupId) && (
+        {/* 顶部标题栏：素材库分组详情视图下隐藏 */}
+        {!(isMaterialView && materialDetailGroupId) && (
         <div className={styles.header}>
           <h1 className={styles.pageTitle}>资产库</h1>
           <div className={styles.headerActions}>
@@ -287,7 +289,7 @@ export default function Assets() {
           type="file"
           multiple
           accept={(() => {
-            if (isCharacterView && characterDetailGroupId) return '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm';
+            if (isMaterialView && materialDetailGroupId) return '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm';
             if (activeFilter === 'image') return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp';
             if (activeFilter === 'video') return '.mp4,.webm,.mov,.avi,.mkv';
             if (activeFilter === 'audio') return '.mp3,.wav,.ogg,.m4a,.aac,.flac';
@@ -297,11 +299,12 @@ export default function Assets() {
           onChange={handleFileChange}
         />
 
-        {/* 虚拟人视图：独立的分组 + 素材管理 */}
-        {isCharacterView ? (
+        {/* 素材库视图（虚拟人像库/真人人像库）：独立的分组 + 素材管理 */}
+        {isMaterialView ? (
           <CharacterLibrary
-            refreshTick={characterRefreshTick}
-            onDetailViewChange={(inDetail, groupId) => setCharacterDetailGroupId(inDetail ? groupId : null)}
+            groupType={activeFilter === 'liveness' ? 'LivenessFace' : 'AIGC'}
+            refreshTick={materialRefreshTick}
+            onDetailViewChange={(inDetail, groupId) => setMaterialDetailGroupId(inDetail ? groupId : null)}
             onUpload={handleUpload}
           />
         ) : (

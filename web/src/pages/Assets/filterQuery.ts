@@ -1,8 +1,8 @@
 import type { AssetType } from '@/api/assets';
 
-export type FilterKey = 'all' | AssetType;
+export type FilterKey = 'all' | AssetType | 'liveness';
 
-const filterKeys: readonly FilterKey[] = ['all', 'image', 'video', 'audio', 'character'];
+const filterKeys: readonly FilterKey[] = ['all', 'image', 'video', 'audio', 'character', 'liveness'];
 
 /** 从 URL 查询参数读取素材类型；缺失和未知值都回退到全部。 */
 export function getAssetFilter(searchParams: URLSearchParams): FilterKey {
