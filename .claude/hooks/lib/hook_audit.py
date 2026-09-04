@@ -11,8 +11,9 @@ Design contract (IK10CW):
     or existing stderr block message.
   - On audit failure, a short degradation notice is written to stderr only.
   - Active log rotates at 10 MiB, keeping at most one archive.
-  - Concurrent appends are serialized via fcntl.flock; each record stays a
-    complete single line.
+  - Concurrent appends are serialized via a platform lock (fcntl.flock on
+    POSIX, msvcrt.locking on Windows); each record stays a complete single
+    line.
 
 The log lives under the shared git common dir (``.git/hook-audit/``), so
 the main checkout and all task worktrees write to the same physical file.
@@ -23,10 +24,17 @@ control" requirement without an extra .gitignore entry.
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import subprocess
 import sys
+try:
+    import fcntl
+except ImportError:  # Windows 原生 Python（Anaconda）无此 POSIX 模块
+    fcntl = None
+try:
+    import msvcrt
+except ImportError:  # POSIX 平台无 msvcrt；fcntl 分支已覆盖
+    msvcrt = None
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -133,17 +141,34 @@ def append_record(
     lock: Path,
     record: dict,
 ) -> None:
-    """Append one JSON line under an exclusive flock, rotating when needed.
+    """Append one JSON line under an exclusive lock, rotating when needed.
 
     Rotation runs both before (handles a log already at/over threshold from a
     prior append) and after (handles this append crossing the threshold) the
     write, so the active log never settles at or above MAX_BYTES.
+
+    Locking is best-effort and platform-specific: ``fcntl.flock`` on POSIX,
+    ``msvcrt.locking`` on Windows, no lock if neither exists. Without a real
+    lock, concurrent hooks racing the same log may still write intact single
+    lines on Linux ``O_APPEND``-style semantics, but interleaving is not
+    guaranteed — serialization only holds where the platform lock exists.
     """
     active.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
-    with open(lock, "a") as lock_fd:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+    with open(lock, "a+") as lock_fd:
+        locked = False
         try:
+            if fcntl is not None:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+                locked = True
+            elif msvcrt is not None:
+                # 锁 1 字节（Windows msvcrt 不锁 0 长度区域）。锁区间不可超过
+                # 文件实际大小 + 写入中——共享锁文件 1 字节足够串行化 append。
+                try:
+                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
+                    locked = True
+                except OSError:
+                    pass  # 文件尚未扩展时锁 1 字节可能失败；走无锁追加
             maybe_rotate(active, archive)
             with open(active, "a") as log_fd:
                 log_fd.write(line)
@@ -151,7 +176,14 @@ def append_record(
             # now so the active log never rests at >= MAX_BYTES.
             maybe_rotate(active, archive)
         finally:
-            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+            if locked:
+                if fcntl is not None:
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                else:
+                    try:
+                        msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+                    except OSError:
+                        pass
 
 
 def run() -> int:

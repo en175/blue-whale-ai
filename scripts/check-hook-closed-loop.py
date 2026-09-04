@@ -19,6 +19,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 QUERY_SCRIPT = REPO_ROOT / "scripts" / "query-hook-audit.py"
 KIMI_SHIM_SRC = REPO_ROOT / ".kimi-code" / "hooks" / "blue-whale-hook.sh"
 TASK_BRANCH = "feature/ik10dx-audit"
+# 解析真实 bash（Windows Git Bash 在 E:\Git\usr\bin\bash.exe，POSIX 为 /bin/bash 或 /usr/bin/bash）。
+# 硬编码 /bin/bash 在 Windows 原生 Python 下必挂（Bug：MSYS 挂载不构成原生可执行路径）。
+BASH = shutil.which("bash")
 
 
 class VerificationError(RuntimeError):
@@ -252,20 +255,32 @@ def execute(
     payload: dict[str, object],
     env_extra: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    if BASH is None:
+        fail("shared", "execute", "未找到 bash 解释器（检查 PATH）")
     env = os.environ.copy()
     env["CLAUDE_PROJECT_DIR"] = str(REPO_ROOT)
     if env_extra:
         env.update(env_extra)
-    return subprocess.run(
-        chain.command,
-        cwd=str(REPO_ROOT),
-        env=env,
-        input=json.dumps(payload, ensure_ascii=False),
-        capture_output=True,
-        text=True,
-        shell=True,
-        executable="/bin/bash",
-    )
+    # 命令写入临时 .sh 再让 bash 直接执行，避免 Windows argv 传输阶段
+    # MSYS 对 `"$CLAUDE_PROJECT_DIR"/…` 内嵌引号的破坏（bash -c 报
+    # 「unexpected EOF while looking for matching '"'」）。POSIX 下等价。
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sh", delete=False, encoding="utf-8"
+    ) as script:
+        script.write(chain.command)
+        script.write("\n")
+        script_path = Path(script.name)
+    try:
+        return subprocess.run(
+            [BASH, str(script_path)],
+            cwd=str(REPO_ROOT),
+            env=env,
+            input=json.dumps(payload, ensure_ascii=False),
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        script_path.unlink(missing_ok=True)
 
 
 def query(project_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:

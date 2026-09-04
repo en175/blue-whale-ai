@@ -97,6 +97,13 @@ FAIL=0
 FAILURES=()
 
 # ── helper ──────────────────────────────────────────────────────
+# Windows 无 POSIX 权限模型：chmod 0600 不生效（stat 恒 0o666），
+# 相关断言降级为存在性检查（IS_WINDOWS=1）。
+case "$(uname -s)" in
+  *MINGW*|*MSYS*|*CYGWIN*) IS_WINDOWS=1 ;;
+  *) IS_WINDOWS=0 ;;
+esac
+
 # run_hook <hook_name> <json>
 # 喂 stdin JSON，捕获 exit code 到 $RUN_EXIT、stdout 到 $RUN_STDOUT、stderr 到 $RUN_STDERR。
 run_hook() {
@@ -392,6 +399,16 @@ assert_file_missing() {
 assert_file_mode_600() {
   local path="$1"; shift
   local label="$1"; shift
+  # Windows 无 POSIX 权限语义（chmod 0600 后 stat 仍 0o666）——降级为存在性检查。
+  if [ "$IS_WINDOWS" = "1" ]; then
+    if [ -f "$path" ]; then
+      PASS=$((PASS + 1))
+    else
+      FAIL=$((FAIL + 1))
+      FAILURES+=("[${label}] 文件不存在：${path}")
+    fi
+    return
+  fi
   local mode
   mode="$(python3 - "$path" <<'PY'
 import os, stat, sys
@@ -2134,14 +2151,17 @@ ROTATE_LOG="$(audit_log_path "$ROTATE_REPO" "$AUDIT_HOOK")"
 ROTATE_ARCHIVE="$(audit_log_archive_path "$ROTATE_REPO" "$AUDIT_HOOK")"
 # 写一条记录建立日志，再灌填充到 ~9.99 MiB，再追加一条触发轮转
 run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_fill1","session_id":"s_rot","tool_input":{"file_path":"'"$ROTATE_REPO"'/f.py"}}'
-{ dd if=/dev/zero bs=1 count=$((10*1024*1024 - 200)) 2>/dev/null | tr '\0' 'X'; } >>"$ROTATE_LOG"
+# 精确填充 (10MiB - 200) 字节触发轮转：python3 生成（跨平台，单次写快；
+# 旧 dd status=none/head -c 是 GNU 专属，macOS BSD dd 不认）
+python3 -c "import sys; sys.stdout.buffer.write(b'X' * $((10*1024*1024 - 200)))" >>"$ROTATE_LOG"
 run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_fill2","session_id":"s_rot","tool_input":{"file_path":"'"$ROTATE_REPO"'/g.py"}}'
 # 轮转后：归档存在且 >= 10MiB；活跃日志只含最后一条记录
 assert_file_exists "$ROTATE_ARCHIVE" "audit: 轮转后归档存在"
 [ "$(wc -c <"$ROTATE_ARCHIVE" 2>/dev/null)" -ge $((10*1024*1024 - 1000)) ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit: 归档大小] 未达 10MiB"); }
 assert_audit_line_count "$ROTATE_LOG" 1 "audit: 轮转后活跃日志只含 1 条"
 # 第二次轮转：旧归档被替换，不产生 .log.2
-{ dd if=/dev/zero bs=1 count=$((10*1024*1024 - 100)) 2>/dev/null | tr '\0' 'Y'; } >>"$ROTATE_LOG"
+# 精确填充 (10MiB - 100) 字节：同上 python3 跨平台写法
+python3 -c "import sys; sys.stdout.buffer.write(b'Y' * $((10*1024*1024 - 100)))" >>"$ROTATE_LOG"
 run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_fill3","session_id":"s_rot","tool_input":{"file_path":"'"$ROTATE_REPO"'/h.py"}}'
 assert_file_exists "$ROTATE_ARCHIVE" "audit: 二次轮转后归档仍存在"
 assert_audit_line_count "$ROTATE_LOG" 1 "audit: 二次轮转后活跃日志只含 1 条"
@@ -2160,12 +2180,13 @@ export CLAUDE_PROJECT_DIR="$CONCURRENT_REPO"
 CONCURRENT_LOG="$(audit_log_path "$CONCURRENT_REPO" "$AUDIT_HOOK")"
 # 20 个并发进程同时追加
 python3 - "$HOOK_DIR/$AUDIT_HOOK" "$CONCURRENT_REPO" "$CONCURRENT_LOG" <<'PY'
-import json, subprocess, sys, concurrent.futures
+import json, subprocess, sys, concurrent.futures, os
 hook_path, project_dir, log_path = sys.argv[1], sys.argv[2], sys.argv[3]
 def write_one(i):
     rec = {"tool_name":"Edit","tool_use_id":f"tu_c{i}","session_id":"s_conc","tool_input":{"file_path":f"{project_dir}/c{i}.py"}}
     payload = json.dumps(rec)
-    env = {"CLAUDE_PROJECT_DIR": project_dir, "PATH": "/usr/bin:/bin"}
+    env = os.environ.copy()
+    env["CLAUDE_PROJECT_DIR"] = project_dir
     r = subprocess.run(["bash", hook_path], input=payload.encode(), capture_output=True, env=env)
     return r.returncode
 with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
@@ -2308,11 +2329,13 @@ PY
 [ $? = 0 ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit-regress: 并发轮转合法 JSON 填充] 未精确填充到 10MiB-100"); }
 # 15 个并发进程同时追加（第一个跨越阈值触发轮转，其余追加到新 active）
 python3 - "$HOOK_DIR/$AUDIT_HOOK" "$CONCROT_REPO" "$CONCROT_LOG" "$CONCROT_ARCHIVE" <<'PY'
-import json, subprocess, sys, concurrent.futures
+import json, subprocess, sys, concurrent.futures, os
 hook_path, repo, log_path, archive_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 def write_one(i):
     rec = {"tool_name":"Edit","tool_use_id":f"tu_cr{i}","session_id":"s_cr","tool_input":{"file_path":f"{repo}/cr{i}.py"}}
-    r = subprocess.run(["bash", hook_path], input=json.dumps(rec).encode(), capture_output=True, env={"PATH":"/usr/bin:/bin"})
+    env = os.environ.copy()
+    env["CLAUDE_PROJECT_DIR"] = repo
+    r = subprocess.run(["bash", hook_path], input=json.dumps(rec).encode(), capture_output=True, env=env)
     return r.returncode
 with concurrent.futures.ThreadPoolExecutor(max_workers=15) as ex:
     codes = list(ex.map(write_one, range(15)))
