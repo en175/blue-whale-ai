@@ -55,6 +55,7 @@ export default function Assets() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
+  const [isHeaderScrolled, setIsHeaderScrolled] = useState(false);
 
   const isCharacterView = activeFilter === 'character';
   const assetType = activeFilter === 'all' ? '' : activeFilter;
@@ -84,6 +85,17 @@ export default function Assets() {
   useEffect(() => () => {
     removeCachedAssetPages(queryClient);
   }, [queryClient]);
+
+  // 顶栏只在内容滚入其下方后才需要玻璃层；首屏保持透明，让背景自然延续。
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page) return undefined;
+
+    const syncHeaderGlass = () => setIsHeaderScrolled(page.scrollTop > 0);
+    syncHeaderGlass();
+    page.addEventListener('scroll', syncHeaderGlass, { passive: true });
+    return () => page.removeEventListener('scroll', syncHeaderGlass);
+  }, []);
 
   const loadNextPage = useCallback(async () => {
     if (isCharacterView || !hasNextPage || isFetchingNextPage) return;
@@ -264,7 +276,7 @@ export default function Assets() {
       <div className={styles.container}>
         {/* 顶部标题栏：虚拟人像库详情视图下隐藏 */}
         {!(isCharacterView && characterDetailGroupId) && (
-        <div className={styles.header}>
+        <div className={`${styles.header} ${isHeaderScrolled ? styles.headerScrolled : ''}`}>
           <h1 className={styles.pageTitle}>资产库</h1>
           <div className={styles.headerActions}>
             {/* 筛选按钮 */}
@@ -281,60 +293,64 @@ export default function Assets() {
         </div>
         )}
 
-        {/* 隐藏的文件上传 input：始终渲染，详情视图也能触发 */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept={(() => {
-            if (isCharacterView && characterDetailGroupId) return '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm';
-            if (activeFilter === 'image') return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp';
-            if (activeFilter === 'video') return '.mp4,.webm,.mov,.avi,.mkv';
-            if (activeFilter === 'audio') return '.mp3,.wav,.ogg,.m4a,.aac,.flac';
-            return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.mp4,.webm,.mov,.avi,.mkv,.mp3,.wav,.ogg,.m4a,.aac,.flac';
-          })()}
-          className={styles.hiddenInput}
-          onChange={handleFileChange}
-        />
-
-        {/* 虚拟人视图：独立的分组 + 素材管理 */}
-        {isCharacterView ? (
-          <CharacterLibrary
-            refreshTick={characterRefreshTick}
-            onDetailViewChange={(inDetail, groupId) => setCharacterDetailGroupId(inDetail ? groupId : null)}
-            onUpload={handleUpload}
+        <div className={styles.content}>
+          {/* 隐藏的文件上传 input：始终渲染，详情视图也能触发 */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={(() => {
+              if (isCharacterView && characterDetailGroupId) return '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm';
+              if (activeFilter === 'image') return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp';
+              if (activeFilter === 'video') return '.mp4,.webm,.mov,.avi,.mkv';
+              if (activeFilter === 'audio') return '.mp3,.wav,.ogg,.m4a,.aac,.flac';
+              return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.mp4,.webm,.mov,.avi,.mkv,.mp3,.wav,.ogg,.m4a,.aac,.flac';
+            })()}
+            className={styles.hiddenInput}
+            onChange={handleFileChange}
           />
-        ) : (
-          <>
-            {loading &&
-              <div className={styles.skeletonGrid}>
-                {Array.from({ length: 10 }, (_, index) => (
-                  <Skeleton key={index} className={styles.cardSkeleton} />
-                ))}
-              </div>}
-            {!loading && gridItems.length > 0 && (
-              <AssetMasonry
-                key={`${activeFilter}:${layoutVersion}`}
-                items={gridItems}
-                totalItems={hasMore ? totalGridItems : gridItems.length}
-                onLoadMore={loadNextPage}
-                scrollContainerRef={pageRef}
-                onUpload={handleUpload}
-                onPreview={setPreviewTarget}
-                onDelete={setDeleteTarget}
-              />
-            )}
-            {!loading && gridItems.length === 0 && (
-              <div className={styles.empty}>暂无素材</div>
-            )}
-            {!loading && loadingMore && (
-              <div className={styles.loadState} role="status">加载中…</div>
-            )}
-            {!loading && !hasMore && assets.length > 0 && (
-              <div className={styles.loadState}>已加载全部素材</div>
-            )}
-          </>
-        )}
+
+          {/* 虚拟人视图：独立的分组 + 素材管理 */}
+          {isCharacterView ? (
+            <CharacterLibrary
+              refreshTick={characterRefreshTick}
+              onDetailViewChange={(inDetail, groupId) => setCharacterDetailGroupId(inDetail ? groupId : null)}
+              onUpload={handleUpload}
+            />
+          ) : (
+            <>
+              {loading &&
+                <div className={styles.skeletonGrid}>
+                  {Array.from({ length: 10 }, (_, index) => (
+                    <Skeleton key={index} className={styles.cardSkeleton} />
+                  ))}
+                </div>}
+              {!loading && gridItems.length > 0 && (
+                <AssetMasonry
+                  key={`${activeFilter}:${layoutVersion}`}
+                  items={gridItems}
+                  totalItems={hasMore ? totalGridItems : gridItems.length}
+                  onLoadMore={loadNextPage}
+                  scrollContainerRef={pageRef}
+                  onUpload={handleUpload}
+                  onPreview={setPreviewTarget}
+                  onDelete={setDeleteTarget}
+                  gutter={2}
+                  libraryMode
+                />
+              )}
+              {!loading && gridItems.length === 0 && (
+                <div className={styles.empty}>暂无素材</div>
+              )}
+              {!loading && loadingMore && (
+                <div className={styles.loadState} role="status">加载中…</div>
+              )}
+              {!loading && !hasMore && assets.length > 0 && (
+                <div className={styles.loadState}>已加载全部素材</div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       <AssetDetailModal asset={previewTarget} onClose={() => setPreviewTarget(null)} />

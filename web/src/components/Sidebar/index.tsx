@@ -57,9 +57,10 @@ export default function Sidebar() {
   const isActive = (item: (typeof menuItems)[0]) => {
     return location.pathname === item.path;
   };
+  const hasGlassBackground = ['/', '/projects', '/library'].includes(location.pathname);
 
   return (
-    <aside className={`${styles.sidebar} ${location.pathname === '/' ? styles.onHome : ''}`}>
+    <aside className={`${styles.sidebar} ${hasGlassBackground ? styles.onGlass : ''}`}>
       {/* Logo */}
       <div className={styles.tabLogo}>
         <img src="/blue_whale.svg" alt="Blue Whale" className={styles.logoIcon} />
