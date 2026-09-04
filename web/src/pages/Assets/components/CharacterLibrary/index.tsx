@@ -128,26 +128,27 @@ function GroupFormModal({
 /**
  * 真人认证二维码弹窗：H5Link 渲染为二维码，手机扫码打开 H5 刷脸页。
  * 认证结果由外层轮询（startAuthPolling），此处关闭弹窗不打断轮询（卡片保持「认证中…」）。
+ * 关闭入口仅右上角 ×；底部仅保留「在当前设备打开」。
  */
 function AuthQrModal({ h5Link, onClose }: { h5Link: string; onClose: () => void }) {
   return createPortal(
     <div className={styles.modalOverlay} onClick={onClose}>
-      <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalTitle}>真人认证</div>
+      <div className={styles.qrModalCard} onClick={(e) => e.stopPropagation()}>
+        <button className={styles.qrCloseBtn} onClick={onClose} aria-label="关闭">
+          <X size={18} />
+        </button>
+        <div className={styles.qrTitle}>真人认证</div>
+        <div className={styles.qrSubtitle}>请使用手机扫描二维码完成刷脸认证</div>
         <div className={styles.qrBox}>
-          <QRCodeSVG value={h5Link} size={192} />
+          <QRCodeSVG value={h5Link} size={200} />
         </div>
-        <div className={styles.qrHint}>请使用手机扫描二维码完成刷脸认证</div>
         <div className={styles.qrHintSub}>认证通过后将自动创建分组</div>
-        <div className={styles.modalActions}>
-          <button className={styles.modalCancelBtn} onClick={onClose}>关闭</button>
-          <button
-            className={styles.modalConfirmBtn}
-            onClick={() => window.open(h5Link, '_blank')}
-          >
-            在当前设备打开
-          </button>
-        </div>
+        <button
+          className={styles.qrOpenBtn}
+          onClick={() => window.open(h5Link, '_blank')}
+        >
+          在当前设备打开
+        </button>
       </div>
     </div>,
     document.body,
