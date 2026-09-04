@@ -1,7 +1,7 @@
 import { hostname } from "node:os";
 import { Injectable } from "@nestjs/common";
 import { createWorkerRepo } from "@blue-whale/persistence";
-import { createNewApiAudioProvider } from "@blue-whale/generation-runtime";
+import { createNewApiAudioProvider } from "@lib/shared/generation-runtime/index.js";
 import { createLogger } from "@blue-whale/core/logging";
 import {
   createNewApiClient,

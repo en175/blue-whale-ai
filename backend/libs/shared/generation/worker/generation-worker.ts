@@ -5,7 +5,7 @@ import {
 import type { AssetUploadStorage } from "@lib/shared/assets/upload.js";
 import sharp from "sharp";
 
-import { AudioProviderError, type AudioProvider } from "@blue-whale/generation-runtime";
+import { AudioProviderError, type AudioProvider } from "@lib/shared/generation-runtime/index.js";
 import {
   ERROR_INVALID_INPUT,
   ERROR_MODEL_UNAVAILABLE,

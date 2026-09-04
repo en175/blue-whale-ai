@@ -13,7 +13,7 @@
 - **backend 实际只消费 2 个函数**：`createControlledChatClient`（`backend/libs/shared/skills/skill-format.ts`，技能 AI 格式化链路）与 `resolveAgentAsset` + `agentAssetResolveRequestSchema`（`backend/apps/blue-whale/src/api/agent-assets/internal-agent-assets.controller.ts`，独立 agent 服务读素材的回调端点）。
 - **包内其余导出无任何生产消费者**：`createFakeAgentAdapter` / `createNewApiAgentAdapter` / `skill-summarize` 全家 / `runtime-manifest` / `read-asset-tool` / `write-plan-cards-tool` 仅被包内自引用或测试引用，属死代码。
 - **agent 运行时契约不在此包**：`AgentRun` / `AgentRunPin` / `RunCommit` / `RunPin` / `MentionInputSnapshot` / `agentRuntimeManifest` 等核心 schema 与类型已住在 `packages/contracts/src/agent-runtime.ts`（约 400 行），被 `packages/persistence` 生产消费（`agent-run-pin.ts`、`skill-repo-internals.ts:262`、`capability-digest.ts`、`scene-card-generation-repo.ts`）。删 `packages/agent-runtime` **不触碰**这些——它们不在删除范围，是另一实体。
-- **方向与 ADR-0074 一致**：[ADR-0074](0074-frontend-backend-separation-nestjs-product-api.md):19 明确规定 backend「**不依赖** `@blue-whale/agent-runtime` / `@blue-whale/generation-runtime`」。当前 backend 通过 `skill-format.ts` 与 `internal-agent-assets.controller.ts` 依赖该包，属 ADR-0074 的既有违背；本次迁移把这两个消费者内联进 backend，恰好**消除该违背**，使 backend 回到 ADR-0074 定义的边界。
+- **方向与 ADR-0074 一致**：[ADR-0074](0074-frontend-backend-separation-nestjs-product-api.md):19 曾规定 backend「**不依赖** `@blue-whale/agent-runtime` / `@blue-whale/generation-runtime`」。generation-runtime 的既有违背已由 2026-09-04 迁移消除（整包内联为 `backend/libs/shared/generation-runtime/`，见 [ADR-0075](0075-generation-worker-into-nestjs-backend.md)）；剩余 agent-runtime 的既有违背（`skill-format.ts` 与 `internal-agent-assets.controller.ts`）由本次迁移把这两个消费者内联进 backend 一并消除，使 backend 回到 ADR-0074 定义的边界。
 
 ## 决策
 

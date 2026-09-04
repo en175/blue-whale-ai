@@ -2,7 +2,7 @@
 // TOS mediaStorage（prepareUpload/makePublic，图片落地）+ 成本换算，跑 processImageJobById 单 job 长调用。
 import { hostname } from "node:os";
 import { Injectable } from "@nestjs/common";
-import { createNewApiAudioProvider } from "@blue-whale/generation-runtime";
+import { createNewApiAudioProvider } from "@lib/shared/generation-runtime/index.js";
 import { createLogger } from "@blue-whale/core/logging";
 import {
   createNewApiClient,

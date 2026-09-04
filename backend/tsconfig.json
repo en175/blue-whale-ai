@@ -10,15 +10,28 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo",
     "baseUrl": ".",
     "paths": {
-      "@lib/*": ["libs/*"]
+      "@lib/*": [
+        "libs/*"
+      ]
     }
   },
-  "include": ["apps/**/*.ts", "libs/**/*.ts"],
-  "exclude": ["**/*.spec.ts", "**/*.test.ts"],
+  "include": [
+    "apps/**/*.ts",
+    "libs/**/*.ts"
+  ],
+  "exclude": [
+    "**/*.spec.ts",
+    "**/*.test.ts"
+  ],
   "references": [
-    { "path": "../packages/persistence" },
-    { "path": "../packages/contracts" },
-    { "path": "../packages/core" },
-    { "path": "../packages/generation-runtime" }
+    {
+      "path": "../packages/persistence"
+    },
+    {
+      "path": "../packages/contracts"
+    },
+    {
+      "path": "../packages/core"
+    }
   ]
 }

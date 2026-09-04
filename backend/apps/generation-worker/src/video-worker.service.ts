@@ -15,7 +15,7 @@ import {
   loadGenerationMediaRelayMode,
   loadGenerationTosConfig,
   runVideoJobStep,
-} from "@blue-whale/generation-runtime";
+} from "@lib/shared/generation-runtime/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { enqueueVideoGenerationJob } from "@lib/shared/generation/video-queue.js";
 

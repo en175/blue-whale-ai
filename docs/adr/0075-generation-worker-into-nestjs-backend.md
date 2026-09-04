@@ -25,7 +25,9 @@ ADR-0074 将业务/数据/管理 API 迁入独立 NestJS `backend/`，但 genera
 
 - **worker 作为 `apps/blue-whale` 内的 module**：HTTP 请求面与出片长任务同进程，违背进程隔离与独立扩缩容。
 - **producer/consumer 统一队列端口**：BullMQ 与 RocketMQ 消费模型差异大（push vs tag/group 拉取），强统一会造别扭接口、过早抽象。
-- **核心逻辑搬进 backend**：generation-runtime 已是共享包，重复搬入破坏单一事实源。
+- **被否方案：核心逻辑搬进 backend**：generation-runtime 已是共享包，重复搬入破坏单一事实源。
+
+> **2026-09-04 更新（生成运行时迁移 backend）**：本条被否方案已被**部分推翻**。2026-09-04 起 `packages/generation-runtime` 整包退役（18 文件 `git mv`），核心逻辑（`runVideoJobStep` / `createNewApiVideoTaskProvider` / `createTosVideoMediaRelay` / media-extract-runner 等）连同测试内联进 `backend/libs/shared/generation-runtime/`（平铺，无 src/ 嵌套），8 个消费者 import 改为 `@lib/shared/generation-runtime/index.js`。generation-runtime 不再作为共享 workspace 包存在；「单一事实源」原则保留给仍在 `packages/` 的 contracts/core/persistence（见 ADR-0074 共享包边界）。
 
 ## 后果
 

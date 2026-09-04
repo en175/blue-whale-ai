@@ -4,7 +4,7 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { Readable } from "node:stream";
 import { createRequire } from "node:module";
 
-import { MediaExtractError } from "@blue-whale/generation-runtime";
+import { MediaExtractError } from "@lib/shared/generation-runtime/index.js";
 
 const require = createRequire(import.meta.url);
 /** ffmpeg-static 打包二进制路径（postinstall 下载；package types 不可靠，走 createRequire）。 */

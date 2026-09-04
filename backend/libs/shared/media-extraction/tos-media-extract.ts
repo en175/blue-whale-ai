@@ -2,7 +2,7 @@
 import { stat } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 
-import { MediaExtractError, type MediaExtractDownloader, type MediaExtractUploader } from "@blue-whale/generation-runtime";
+import { MediaExtractError, type MediaExtractDownloader, type MediaExtractUploader } from "@lib/shared/generation-runtime/index.js";
 import { createTosStorage, type TosStorageConfig } from "@lib/shared/assets/tos-storage.js";
 
 export interface TosMediaExtractPorts {
