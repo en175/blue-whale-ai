@@ -76,7 +76,7 @@
 }
 
 .content {
-  padding: 0 var(--spacing-2xl) var(--spacing-xl);
+  padding-inline: var(--spacing-2xl);
 }
 
 .pageTitle {
