@@ -12,8 +12,10 @@ const { listAssetGroups, listAssets } = vi.hoisted(() => ({
 
 vi.mock('@/api/material', () => ({
   createAssetGroup: vi.fn(),
+  createVisualValidateSession: vi.fn(),
   deleteAsset: vi.fn(),
   deleteAssetGroup: vi.fn(),
+  getVisualValidateResult: vi.fn(),
   listAssetGroups,
   listAssets,
 }));
@@ -23,12 +25,12 @@ vi.mock('@/api/http', () => ({ isApiError: () => false }));
 let root: Root;
 let mountNode: HTMLDivElement;
 
-async function renderLibrary() {
+async function renderLibrary(props?: { groupType?: 'AIGC' | 'LivenessFace' }) {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
   await act(async () => {
-    root.render(createElement(CharacterLibrary));
+    root.render(createElement(CharacterLibrary, props));
     await Promise.resolve();
   });
 }
@@ -78,5 +80,19 @@ describe('CharacterLibrary', () => {
     expect(mountNode.querySelector('video[src="https://example.test/video.mp4"]')).not.toBeNull();
     expect(mountNode.textContent).toContain('图片');
     expect(mountNode.textContent).toContain('视频');
+  });
+
+  it('renders LivenessFace groups with 新建真人 entry and empty-state guidance', async () => {
+    listAssetGroups.mockResolvedValue({ Items: [] });
+    await renderLibrary({ groupType: 'LivenessFace' });
+
+    expect(listAssetGroups).toHaveBeenCalledWith({
+      Filter: { GroupType: 'LivenessFace' },
+      PageNumber: 1,
+      PageSize: 100,
+    });
+    expect(mountNode.textContent).toContain('新建真人');
+    expect(mountNode.textContent).toContain('点击「新建真人」发起真人认证');
+    expect(mountNode.textContent).not.toContain('新建分组');
   });
 });

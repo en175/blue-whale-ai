@@ -278,19 +278,24 @@ export function deleteAsset(id: string) {
 
 /* ---------- 真人活体认证 ---------- */
 
-/** 创建真人认证会话（返回 H5Link + BytedToken，直接格式无信封） */
-export function createVisualValidateSession(params?: { Name?: string; ProjectName?: string }) {
+/** 创建真人认证会话（返回 H5Link + BytedToken，直接格式无信封；silent 时由页面层提示） */
+export function createVisualValidateSession(
+  params?: { Name?: string; ProjectName?: string; callback_url?: string },
+  opts?: { silent?: boolean },
+) {
   return materialRequest<VisualValidateSessionResult>(
     'CreateVisualValidateSession',
-    params ?? {},
+    // ProjectName 默认 default
+    { ProjectName: 'default', ...params },
+    opts,
   );
 }
 
-/** 查询真人认证结果（返回 GroupId，直接格式无信封） */
-export function getVisualValidateResult(bytedToken: string) {
+/** 查询真人认证结果（返回 GroupId，直接格式无信封；silent 供轮询使用，失败不打断） */
+export function getVisualValidateResult(bytedToken: string, opts?: { silent?: boolean }) {
   return materialRequest<VisualValidateResult>('GetVisualValidateResult', {
     BytedToken: bytedToken,
-  });
+  }, opts);
 }
 
 /* ---------- 辅助：等待素材就绪 ---------- */

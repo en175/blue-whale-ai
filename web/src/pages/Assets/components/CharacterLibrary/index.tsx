@@ -1,12 +1,14 @@
 /* ============================================
- * CharacterLibrary 虚拟人库（资产库页面）
+ * CharacterLibrary 人像库（资产库页面）
  * 对接素材库 API（POST /api/material/{Action}）
  * 分组管理 + 素材上传 + 素材展示
  * 上传流程：uploadAssetFile（3 步）→ 拿公网 URL → createAsset
+ * groupType='AIGC' 虚拟人像库；'LivenessFace' 真人人像库（新建走 H5 真人认证）
  * ============================================ */
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
+import { QRCodeSVG } from 'qrcode.react';
 import { Plus, FolderOpen, Trash2, ArrowLeft, X, Loader2, Video } from 'lucide-react';
 import {
   createAssetGroup,
@@ -14,6 +16,8 @@ import {
   deleteAssetGroup,
   listAssets,
   deleteAsset as deleteMaterialAsset,
+  createVisualValidateSession,
+  getVisualValidateResult,
   type MaterialGroup,
   type MaterialAsset,
   type GroupType,
@@ -118,6 +122,35 @@ function GroupFormModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * 真人认证二维码弹窗：H5Link 渲染为二维码，手机扫码打开 H5 刷脸页。
+ * 认证结果由外层轮询（startAuthPolling），此处关闭弹窗不打断轮询（卡片保持「认证中…」）。
+ */
+function AuthQrModal({ h5Link, onClose }: { h5Link: string; onClose: () => void }) {
+  return createPortal(
+    <div className={styles.modalOverlay} onClick={onClose}>
+      <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.modalTitle}>真人认证</div>
+        <div className={styles.qrBox}>
+          <QRCodeSVG value={h5Link} size={192} />
+        </div>
+        <div className={styles.qrHint}>请使用手机扫描二维码完成刷脸认证</div>
+        <div className={styles.qrHintSub}>认证通过后将自动创建分组</div>
+        <div className={styles.modalActions}>
+          <button className={styles.modalCancelBtn} onClick={onClose}>关闭</button>
+          <button
+            className={styles.modalConfirmBtn}
+            onClick={() => window.open(h5Link, '_blank')}
+          >
+            在当前设备打开
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -265,9 +298,25 @@ function GroupDetail({
 }
 
 /* ============================================
- * 主组件：虚拟人库（资产库页面）
+ * 主组件：人像库（资产库页面）
+ * groupType='AIGC' 虚拟人像库；'LivenessFace' 真人人像库
  * ============================================ */
-export default function CharacterLibrary({ onDetailViewChange, onUpload, refreshTick }: { onDetailViewChange?: (inDetail: boolean, groupId: string | null) => void; onUpload?: () => void; refreshTick?: number }) {
+
+/** 真人认证轮询间隔与超时（BytedToken 有效期 30 分钟） */
+const AUTH_POLL_INTERVAL_MS = 5000;
+const AUTH_TIMEOUT_MS = 30 * 60 * 1000;
+
+export default function CharacterLibrary({
+  groupType = 'AIGC',
+  onDetailViewChange,
+  onUpload,
+  refreshTick,
+}: {
+  groupType?: GroupType;
+  onDetailViewChange?: (inDetail: boolean, groupId: string | null) => void;
+  onUpload?: () => void;
+  refreshTick?: number;
+}) {
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [groupAssets, setGroupAssets] = useState<Map<string, MaterialAsset[]>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -277,7 +326,24 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
   const [detailGroupId, setDetailGroupId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'group' | 'asset'; id: string; name: string } | null>(null);
 
-  const GROUP_TYPE: GroupType = 'AIGC';
+  /** 真人认证中（轮询 H5 认证结果，期间禁止再次发起） */
+  const [authenticating, setAuthenticating] = useState(false);
+  /** 认证二维码弹窗数据（H5Link 渲染二维码供手机扫码；BytedToken 轮询用） */
+  const [authSession, setAuthSession] = useState<{ H5Link: string; BytedToken: string } | null>(null);
+  const authPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const isLiveness = groupType === 'LivenessFace';
+
+  const stopAuthPolling = useCallback(() => {
+    if (authPollRef.current) {
+      clearInterval(authPollRef.current);
+      authPollRef.current = null;
+    }
+    setAuthenticating(false);
+  }, []);
+
+  /** 组件卸载或切换库类型时停止轮询 */
+  useEffect(() => stopAuthPolling, [stopAuthPolling, groupType]);
 
   /** 仅加载分组列表；素材在进入分组详情后再加载。 */
   const loadGroups = useCallback(async () => {
@@ -285,7 +351,7 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
     setLoadError(false);
     try {
       const result = await listAssetGroups({
-        Filter: { GroupType: GROUP_TYPE },
+        Filter: { GroupType: groupType },
         PageNumber: 1,
         PageSize: 100,
       });
@@ -298,7 +364,7 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [groupType]);
 
   useEffect(() => {
     loadGroups();
@@ -307,7 +373,7 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
   const refreshGroupAssets = useCallback(async (groupId: string) => {
     try {
       const assets = await listAssets({
-        Filter: { GroupIds: [groupId], GroupType: GROUP_TYPE },
+        Filter: { GroupIds: [groupId], GroupType: groupType },
         PageNumber: 1,
         PageSize: 100,
       });
@@ -315,7 +381,41 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
     } catch (err) {
       console.warn('刷新分组素材失败:', err);
     }
-  }, []);
+  }, [groupType]);
+
+  /**
+   * 真人认证轮询：H5 刷脸完成后 GroupId 非空即认证成功。
+   * 轮询静默失败不打扰（网络抖动重试）；401 由请求层弹登录续接后停止轮询。
+   */
+  const startAuthPolling = useCallback((bytedToken: string) => {
+    stopAuthPolling();
+    setAuthenticating(true);
+    const startedAt = Date.now();
+    authPollRef.current = setInterval(async () => {
+      if (Date.now() - startedAt > AUTH_TIMEOUT_MS) {
+        stopAuthPolling();
+        setAuthSession(null);
+        toast.error('认证超时，请重新发起');
+        return;
+      }
+      try {
+        const { GroupId } = await getVisualValidateResult(bytedToken, { silent: true });
+        if (GroupId) {
+          stopAuthPolling();
+          setAuthSession(null);
+          toast.success('认证成功，已创建真人分组');
+          loadGroups();
+        }
+      } catch (err) {
+        // 会话失效（登录续接已弹出）：停止轮询，等待用户重新登录后再发起
+        if (isApiError(err) && err.status === 401) {
+          stopAuthPolling();
+          setAuthSession(null);
+        }
+        // 其余单次失败静默跳过，下轮重试
+      }
+    }, AUTH_POLL_INTERVAL_MS);
+  }, [loadGroups, stopAuthPolling]);
 
   const handleViewGroup = useCallback((groupId: string) => {
     setDetailGroupId(groupId);
@@ -358,10 +458,35 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
   /* ---- 分组操作 ---- */
 
   const handleCreateGroup = async (name: string) => {
+    // 真人像库：新建走 H5 真人认证，认证通过后上游自动建组
+    if (isLiveness) {
+      // 上游约束：名称含 < > 返回 400 InvalidParameter，前端先拦截
+      if (/[<>]/.test(name)) {
+        toast.error('名称不能包含 < 或 > 字符');
+        throw new Error('invalid name');
+      }
+      try {
+        // callback_url 指向前端落地页：上游刷脸完成后跳转（手机端提示「请于 PC 端查看」）
+        const session = await createVisualValidateSession(
+          { Name: name, callback_url: `${window.location.origin}/auth-success` },
+          { silent: true },
+        );
+        setShowCreateModal(false);
+        // 展示二维码弹窗：手机扫码打开 H5 刷脸页；桌面端可点「在当前设备打开」
+        setAuthSession({ H5Link: session.H5Link, BytedToken: session.BytedToken });
+        startAuthPolling(session.BytedToken);
+      } catch (err) {
+        // silent 请求：页面层定制文案（401 已由请求层弹登录续接）
+        if (!isApiError(err) || err.status !== 401) toast.error('发起真人认证失败，请稍后重试');
+        throw err; // 让 GroupFormModal 的 submitting 状态正确恢复
+      }
+      return;
+    }
+
     try {
-      const result = await createAssetGroup({ Name: name, GroupType: GROUP_TYPE }, { silent: true });
+      const result = await createAssetGroup({ Name: name, GroupType: groupType }, { silent: true });
       setGroups((prev) => [
-        { Id: result.Id, Name: name, GroupType: GROUP_TYPE },
+        { Id: result.Id, Name: name, GroupType: groupType },
         ...prev,
       ]);
       setGroupAssets((prev) => new Map(prev).set(result.Id, []));
@@ -456,7 +581,7 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
   }
 
   const handleUploadCardKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Enter') setShowCreateModal(true);
+    if (e.key === 'Enter' && !authenticating) setShowCreateModal(true);
   };
 
   // 分组列表视图
@@ -471,13 +596,25 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
         <div className={styles.empty}>分组加载失败，请稍后重试</div>
       ) : (
         <div className={styles.groupGrid}>
-          {/* 新建分组卡片 */}
-          <div className={styles.uploadCard}
-            role="button" tabIndex={0}
-            onClick={() => setShowCreateModal(true)}
-            onKeyDown={handleUploadCardKeyDown}>
-            <Plus className={styles.plusIcon} strokeWidth={1.5} />
-            <span className={styles.uploadLabel}>新建分组</span>
+          {/* 新建分组/新建真人卡片：真人认证中禁用（单真人单次认证串行） */}
+          <div
+            className={styles.uploadCard}
+            role="button" tabIndex={authenticating ? -1 : 0}
+            aria-disabled={authenticating}
+            onClick={() => { if (!authenticating) setShowCreateModal(true); }}
+            onKeyDown={handleUploadCardKeyDown}
+          >
+            {authenticating ? (
+              <>
+                <Loader2 className={`${styles.plusIcon} ${styles.spin}`} strokeWidth={1.5} />
+                <span className={styles.uploadLabel}>认证中…</span>
+              </>
+            ) : (
+              <>
+                <Plus className={styles.plusIcon} strokeWidth={1.5} />
+                <span className={styles.uploadLabel}>{isLiveness ? '新建真人' : '新建分组'}</span>
+              </>
+            )}
           </div>
 
           {/* 分组卡片列表 */}
@@ -493,18 +630,29 @@ export default function CharacterLibrary({ onDetailViewChange, onUpload, refresh
           {/* 空状态提示 */}
           {groups.length === 0 && (
             <div className={styles.empty}>
-              点击「新建分组」创建分组，分组内可上传虚拟人素材
+              {isLiveness
+                ? '点击「新建真人」发起真人认证，认证通过后可上传素材'
+                : '点击「新建分组」创建分组，分组内可上传虚拟人素材'}
             </div>
           )}
         </div>
       )}
 
-      {/* 新建分组弹窗 */}
+      {/* 新建分组/新建真人弹窗 */}
       {showCreateModal && (
         <GroupFormModal
-          title="新建分组"
+          title={isLiveness ? '新建真人' : '新建分组'}
+          placeholder={isLiveness ? '请输入真人名称' : undefined}
           onConfirm={handleCreateGroup}
           onCancel={() => setShowCreateModal(false)}
+        />
+      )}
+
+      {/* 真人认证二维码弹窗（轮询在外层，关闭弹窗不打断） */}
+      {authSession && (
+        <AuthQrModal
+          h5Link={authSession.H5Link}
+          onClose={() => setAuthSession(null)}
         />
       )}
 

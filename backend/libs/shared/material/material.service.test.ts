@@ -95,21 +95,33 @@ describe("MaterialService —— 纯过境调用", () => {
     });
   });
 
-  it("CreateVisualValidateSession 剥离 CallbackURL，其余字段保留", async () => {
+  it("CreateVisualValidateSession 纯透传（前端传入的 callback_url 原样保留）", async () => {
     const calls = stubFetch(() => json({ BytedToken: "bt-1", H5Link: "https://h5" }));
     const service = new MaterialService();
     await service.callAction(AUTH, "CreateVisualValidateSession", {
       Name: "真人组",
-      CallbackURL: "https://client.test/cb",
+      callback_url: "https://web.test/auth-success",
       ProjectName: "p",
     });
     expect(JSON.parse(String(calls[0].init.body))).toEqual({
       Name: "真人组",
+      callback_url: "https://web.test/auth-success",
       ProjectName: "p",
     });
   });
 
-  it("其他 Action 不剥离 CallbackURL（透传语义，仅真人会话剥离）", async () => {
+  it("CreateVisualValidateSession 未传 callback_url 时也纯透传", async () => {
+    const calls = stubFetch(() => json({ BytedToken: "bt-1", H5Link: "https://h5" }));
+    const service = new MaterialService();
+    await service.callAction(AUTH, "CreateVisualValidateSession", {
+      Name: "真人组",
+    });
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      Name: "真人组",
+    });
+  });
+
+  it("其他 Action 请求体原样透传（含任意自定义字段）", async () => {
     const calls = stubFetch(() => json({ Result: {} }));
     const service = new MaterialService();
     await service.callAction(AUTH, "CreateAsset", {
