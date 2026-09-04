@@ -4,7 +4,6 @@
     { "path": "./packages/core" },
     { "path": "./packages/contracts" },
     { "path": "./packages/persistence" },
-    { "path": "./packages/agent-runtime" },
     { "path": "./packages/generation-runtime" },
     { "path": "./backend" }
   ]

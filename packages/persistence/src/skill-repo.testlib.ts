@@ -1,7 +1,7 @@
 // IK74V8：SkillRepo 用例的共享夹具（从 skill-repo.test.ts 拆出）。
 // 命名 *.testlib.ts：tsconfig 排除编译、vitest 不当作用例文件收集。
 import {expect, vi} from "vitest";
-import {bundledAgentRuntimeManifest} from "../../agent-runtime/src/runtime-manifest.js";
+import {bundledAgentRuntimeManifest} from "./agent-runtime-manifest-fixture.js";
 import {canonicalAgentRunPinDigestInput, type AgentRunPin} from "@blue-whale/contracts";
 import {createHash} from "node:crypto";
 
