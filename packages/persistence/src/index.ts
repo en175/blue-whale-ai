@@ -166,11 +166,7 @@ export {
   type SlotSummaryStatus,
 } from "./generation-output-slot-repo.js";
 export {
-  createPlanApplicationRepo,
   validateDerivedReferences,
-  type PlanApplicationRepo,
-  type ApplyPlanMessageInput,
-  type ApplyPlanMessageResult,
   type CapabilitySnapshot,
   type DerivedReference,
 } from "./plan-application-repo.js";
