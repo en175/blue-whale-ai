@@ -10,6 +10,8 @@
   --color-bg-card: #141414;
   --color-bg-hover: #222222;
   --color-bg-active: #2a2a2a;
+  /* 滚动列表项的近不透明静态表面，避免主题背景穿透卡片。 */
+  --asset-item-surface: rgba(6, 6, 6, 0.92);
 
   /* 文字颜色 */
   --color-text-primary: #ffffff;

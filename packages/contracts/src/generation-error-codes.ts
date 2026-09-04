@@ -80,6 +80,31 @@ export function errorCodeToNumeric(code: string): number {
   return GENERATION_ERROR_NUMERIC_CODES[code] ?? GENERATION_ERROR_UNKNOWN_NUMERIC_CODE;
 }
 
+// ── provider 错误信号（上游错误正文识别，跨 provider 共享，IKDAJN）──
+// provider 层据这些信号把上游错误归入错误码（content-policy > quota > provider_failed）。
+// 单一来源：新增/调整 keyword 只改这里，四端 provider 同时生效。
+
+/** 内容安全策略信号：命中 → ERROR_CONTENT_REJECTED（版权/敏感）。中英文 keyword 都覆盖
+ *  （实测线上英文 copyright restrictions / sensitive information、中文「版权」「敏感」都可能出现）。 */
+export const CONTENT_POLICY_SIGNAL =
+  /(copyright|sensitive|版权|敏感|policy violation|policyviolation|content policy)/i;
+
+/** 内容安全策略信号判定：copyright/sensitive 命中 → true（IKDAJN）。 */
+export function isContentPolicySignal(text: string): boolean {
+  return CONTENT_POLICY_SIGNAL.test(text);
+}
+
+/** 欠费信号（IKBQEE / ADR-0078 共享判定，自 new-api-video-task-provider 迁入统一）。
+ *  不只看 402：new-api 预扣费失败常以 HTTP200+body 报错（job 1565/1612 真实案例），
+ *  中文「预扣费额度失败/剩余额度/余额」与英文 quota/balance/insufficient 均命中。 */
+export const NEW_API_QUOTA_SIGNAL =
+  /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required|(^|\D)402(\D|$))/i;
+
+/** 欠费信号判定：HTTP 402 或正文命中欠费信号（IKBQEE）。 */
+export function isQuotaSignal(text: string, status?: number): boolean {
+  return status === 402 || NEW_API_QUOTA_SIGNAL.test(text);
+}
+
 /** 生成任务失败对外错误对象（ADR-0078 二期：数值码 + 中文文案，前端可直接展示 msg）。 */
 export interface PublicGenerationError {
   /** 每错一码的独立数值码（1xxx 段；未知兜底 1000）。 */
