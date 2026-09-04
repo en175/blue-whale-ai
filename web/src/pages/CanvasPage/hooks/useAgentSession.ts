@@ -366,6 +366,19 @@ export function useAgentSession(projectId: string) {
 
   /** 流式累积缓冲：收到的全部文本，永远是事实来源；显示多少由 revealedRef 决定 */
   const accRef = useRef('');
+  /**
+   * 流式期间的工具调用断点：`at` 是这次调用发生时缓冲里已有的字数。
+   *
+   * 「先说一句、再动手、再说一句」此前只在消息落库之后成立——服务端把有序段落写进消息部件，
+   * 前端从 `content` 里读出来渲染。等待过程中拿到的却是一整块文本，交错要等消息回来才「啪」
+   * 地出现。而顺序信息其实一直都在：`run.activity` 事件带 `tool` 时，正是正文该断开的时刻，
+   * 且服务端保证它排在此前所有 delta 之后（`agent-service.ts` 的 `deltas.drain()`）。
+   *
+   * 记的是缓冲长度而不是已露出的长度：打字动画是表现，缓冲才是事实。断点因此会随动画自然
+   * 到达，而不是提前跳出来。
+   */
+  const streamToolCallsRef = useRef<{ tool: string; summary: string; at: number }[]>([]);
+  const [streamToolCalls, setStreamToolCalls] = useState<{ tool: string; summary: string; at: number }[]>([]);
   /** 已露出的字数（小数）：模型一次给一整句，按帧匀速露出才像在打字，见 streamPacing.ts */
   const revealedRef = useRef(0);
   /** 匀速露出的动画帧句柄 */
@@ -497,6 +510,8 @@ export function useAgentSession(projectId: string) {
     stopReveal();
     revealedRef.current = 0;
     accRef.current = '';
+    streamToolCallsRef.current = [];
+    setStreamToolCalls([]);
     setStreamingText('');
     streamingRef.current = false;
     setStreaming(false);
@@ -537,6 +552,8 @@ export function useAgentSession(projectId: string) {
     stopReveal();
     revealedRef.current = 0;
     accRef.current = '';
+    streamToolCallsRef.current = [];
+    setStreamToolCalls([]);
     streamRunRef.current = '';
     streamingRef.current = false;
     setStreamingText('');
@@ -690,6 +707,18 @@ export function useAgentSession(projectId: string) {
         const summary = str(payload.summary);
         if (!summary) return;
         setThinkingSteps((prev) => (prev[prev.length - 1] === summary ? prev : [...prev, summary]));
+        // 带 `tool` 的活动是一次可见的工具调用，也就是正文该断开的地方。只有服务端白名单里的
+        // 工具才带它，所以这里不必再判一次哪些工具该露面。
+        const tool = str(payload.tool);
+        if (tool) {
+          const at = accRef.current.length;
+          const last = streamToolCallsRef.current[streamToolCallsRef.current.length - 1];
+          // 同一处重复上报就不再记一条——落库那一路的段落合并也是这个规则。
+          if (!last || last.at !== at || last.tool !== tool) {
+            streamToolCallsRef.current = [...streamToolCallsRef.current, { tool, summary, at }];
+            setStreamToolCalls(streamToolCallsRef.current);
+          }
+        }
         setProgressTick((p) => p + 1);
         return;
       }
@@ -762,6 +791,8 @@ export function useAgentSession(projectId: string) {
           streamRunRef.current = runId;
           accRef.current = '';
           revealedRef.current = 0;
+          streamToolCallsRef.current = [];
+          setStreamToolCalls([]);
         }
         accRef.current += text;
         pumpReveal();
@@ -1363,6 +1394,7 @@ export function useAgentSession(projectId: string) {
     turnOutcome,
     partialCard,
     longRunning,
+    streamToolCalls,
     chatError,
     retryUnavailable,
     sendError,

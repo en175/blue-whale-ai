@@ -52,6 +52,7 @@ import {
 import AssetChip from '../AssetChip';
 import { shouldCancelOnKey } from './cancelShortcut';
 import { dockedPanelLayout, freePanelLayout, type PanelMetrics } from './layout';
+import { splitStreamingBody } from './streamingBody';
 
 /** 父组件没传已应用集合时的空集。提到模块级是为了保持引用稳定，避免每次渲染都造一个新 Set。 */
 const EMPTY_APPLIED_IDS: ReadonlySet<string> = new Set<string>();
@@ -675,6 +676,16 @@ function AssistantMessageBody({
         if (b.type === 'run_actions' && b.run_actions) {
           return <ActionRow key={key} record={b.run_actions} />;
         }
+        // 正文时间轴上的一次工具调用（IKD79E）：它夹在两段正文之间，让「先说了什么、
+        // 才去做的什么」读得出来。与上面收起来的台账不重复——那份回答「调了什么、多久」。
+        if (b.type === 'tool_call' && b.summary) {
+          return (
+            <div key={key} className={styles.inlineToolCall}>
+              <Cog size={11} strokeWidth={2.5} className={styles.inlineToolCallIcon} />
+              <span>{b.summary}</span>
+            </div>
+          );
+        }
         if (b.type === 'card' && b.card) {
           const cardId = b.card.cardId ?? b.card.shotTitle;
           return (
@@ -863,6 +874,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     turnOutcome,
     partialCard,
     longRunning,
+    streamToolCalls,
     chatError,
     retryUnavailable,
     sendError,
@@ -1684,10 +1696,22 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               />
             </div>
           )}
-          {/* Agent 运行中的实时流式文本（assistant.delta 累积投影） */}
+          {/* Agent 运行中的实时流式文本（assistant.delta 累积投影）。
+              正文按工具调用断开——「先说一句、再动手、再说一句」在**等待过程中**就成立，
+              不必等消息落库回来（IKD79E 落的是终态那一半，这里是实时的这一半）。断点由
+              `run.activity` 带 `tool` 时的缓冲长度决定，所以它随打字动画自然到达。 */}
           {streamingText && (
             <div className={styles.assistantBlock}>
-              <Markdown text={streamingText} />
+              {splitStreamingBody(streamingText, streamToolCalls).map((piece, index) =>
+                piece.type === 'tool_call' ? (
+                  <div key={`stc-${index}`} className={styles.inlineToolCall}>
+                    <Cog size={11} strokeWidth={2.5} className={styles.inlineToolCallIcon} />
+                    <span>{piece.summary}</span>
+                  </div>
+                ) : (
+                  <Markdown key={`stx-${index}`} text={piece.text} />
+                ),
+              )}
             </div>
           )}
           {/* 产卡逐版预览（IKA3GF）：在正文之后、成品卡将要出现的位置 */}

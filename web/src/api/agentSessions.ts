@@ -41,6 +41,14 @@ export interface SessionContentBlock {
   /** 本轮动作台账块（IKB93G 的动作行由它渲染；服务端消息部件 `run_actions` 原样透传）。 */
   run_actions?: RunActionsRecord;
   /**
+   * 一次工具调用在正文时间轴上的位置（IKD79E）。夹在两段正文之间，回答「它是在说完哪句话
+   * 之后去做的」——与 `run_actions` 那份收起来的清单不重复，后者回答「调了什么、多久」。
+   *
+   * 只有真的交错过的轮次才有。老消息与没调过工具的轮次仍然是一整块正文，照旧渲染。
+   */
+  tool?: string;
+  summary?: string;
+  /**
    * 思考过程块（可折叠展示）。
    *
    * `steps` 是服务端选的模板文案，`reasoning` 是模型自己的原话（assistant.reasoning.delta，
