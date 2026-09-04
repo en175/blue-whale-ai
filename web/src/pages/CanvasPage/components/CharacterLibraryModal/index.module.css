@@ -55,8 +55,9 @@
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: linear-gradient(135deg, #4c6ef5 0%, #3b5bdb 100%);
-  color: #fff;
+  background-color: var(--color-bg-active);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-hover);
 }
 
 .headTitle {
@@ -158,34 +159,6 @@
   gap: 16px;
 }
 
-/* 新建分组卡片 */
-.uploadCard {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  aspect-ratio: 1;
-  border: 2px dashed var(--color-border-primary);
-  border-radius: 12px;
-  background-color: var(--color-bg-secondary);
-  cursor: pointer;
-  gap: 12px;
-  transition: all var(--transition-fast);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-md);
-}
-
-.uploadCard:hover {
-  border-color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
-.uploadCard .plusIcon {
-  width: 32px;
-  height: 32px;
-}
-
 /* 分组卡片 */
 .groupCard {
   position: relative;
@@ -262,37 +235,6 @@
   margin-top: 2px;
 }
 
-/* 右下角三点按钮 */
-.groupBottomActions {
-  position: absolute;
-  bottom: 6px;
-  right: 6px;
-  z-index: 4;
-}
-
-.groupBottomMenuBtn {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background-color: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  border: none;
-  opacity: 0;
-  transition: opacity var(--transition-fast), background-color var(--transition-fast);
-}
-
-.groupCard:hover .groupBottomMenuBtn {
-  opacity: 1;
-}
-
-.groupBottomMenuBtn:hover {
-  background-color: rgba(255, 255, 255, 0.25);
-}
-
 /* ============================================
  * 分组详情视图
  * ============================================ */
@@ -338,11 +280,6 @@
   white-space: nowrap;
 }
 
-.detailActions {
-  display: flex;
-  gap: 8px;
-}
-
 .detailView .assetGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -383,32 +320,6 @@
   pointer-events: none;
 }
 
-.detailView .assetSelectBtn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  border: none;
-  background-color: rgba(76, 110, 245, 0.9);
-  color: #fff;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--transition-fast);
-}
-
-.detailView .assetCard:hover .assetSelectBtn {
-  opacity: 1;
-}
-
-.detailView .assetSelectBtn:hover {
-  background-color: rgba(76, 110, 245, 1);
-}
-
 .detailView .assetName {
   padding: 6px 8px;
   font-size: 12px;
@@ -436,58 +347,130 @@
 }
 
 /* ============================================
- * 通用弹窗（分组表单 / 预览）
+ * 真人人像库：多选素材卡片 / 确认栏 / 空状态引导
  * ============================================ */
-.modalOverlay {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
+.detailView .assetCardDisabled {
+  cursor: not-allowed;
+}
+
+.detailView .assetCardDisabled .assetThumb img,
+.detailView .assetCardDisabled .assetThumb video {
+  opacity: 0.4;
+  filter: grayscale(0.6);
+}
+
+.detailView .assetCardDisabled:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.detailView .assetCardSelected {
+  box-shadow: 0 0 0 2px rgba(160, 160, 170, 0.85);
+}
+
+.detailView .audioPlaceholder {
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: transparent;
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-hover);
 }
 
-.modalContent {
-  background-color: #000;
-  border: 1px solid var(--color-border-primary);
-  border-radius: 12px;
-  padding: 24px;
-  min-width: 320px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
-}
-
-.modalTitle {
-  font-size: var(--font-size-lg);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin-bottom: 16px;
-}
-
-.modalInput {
-  width: 100%;
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--color-border-primary);
-  background-color: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-md);
-  outline: none;
-  transition: border-color var(--transition-fast);
-  box-sizing: border-box;
-}
-
-.modalInput:focus {
-  border-color: var(--color-border-hover);
-}
-
-.modalActions {
+/* 勾选标记（右上角）；存在勾选标记时类型徽章左移避让 */
+.detailView .checkToggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
   display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  background-color: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  z-index: 2;
 }
 
+.detailView .assetTypeBadgeShifted {
+  right: 40px;
+}
+
+.detailView .checkToggleOn {
+  border-color: #7c7c88;
+  background-color: #7c7c88;
+}
+
+/* 空状态引导按钮（去资产页建档） */
+.emptyHint .emptyActionBtn {
+  margin-top: 16px;
+  padding: 8px 20px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-active);
+  border: 1px solid var(--color-border-hover);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.emptyHint .emptyActionBtn:hover {
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-text-secondary);
+}
+
+/* ============================================
+ * 弹窗级底部确认栏（虚拟/真人选择跨 tab 累加）
+ * ============================================ */
+.confirmBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--color-border-primary);
+  flex-shrink: 0;
+}
+
+.confirmCount {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.confirmActions {
+  display: flex;
+  gap: 8px;
+}
+
+.confirmPrimaryBtn {
+  padding: 8px 24px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-active);
+  border: 1px solid var(--color-border-hover);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.confirmPrimaryBtn:hover:not(:disabled) {
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-text-secondary);
+}
+
+.confirmPrimaryBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ============================================
+ * 通用按钮（确认栏取消/清空按钮等）
+ * ============================================ */
 .modalCancelBtn {
   padding: 8px 18px;
   border-radius: var(--radius-md);
@@ -500,26 +483,14 @@
   transition: all var(--transition-fast);
 }
 
-.modalCancelBtn:hover {
+.modalCancelBtn:hover:not(:disabled) {
   background-color: var(--color-bg-active);
   border-color: var(--color-border-hover);
 }
 
-.modalConfirmBtn {
-  padding: 8px 18px;
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-md);
-  font-weight: 500;
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
-  border: 1px solid var(--color-border-primary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.modalConfirmBtn:hover {
-  background-color: var(--color-bg-active);
-  border-color: var(--color-border-hover);
+.modalCancelBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 滚动条样式 */
@@ -540,32 +511,8 @@
 }
 
 /* ============================================
- * 素材管理：上传按钮 / 状态徽章 / 错误提示
+ * 素材状态徽章 / 错误提示
  * ============================================ */
-.detailView .uploadBtn {
-  padding: 6px 14px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
-  border: 1px solid var(--color-border-primary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.detailView .uploadBtn:hover {
-  background-color: var(--color-bg-active);
-  border-color: var(--color-border-hover);
-}
-
-.detailView .uploadBtn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
 /* 素材状态徽章 */
 .detailView .statusBadge {
@@ -583,101 +530,6 @@
 .detailView .statusBadge.statusFailed {
   color: #fff;
   background-color: rgba(220, 38, 38, 0.85);
-}
-
-/* ---- 预览弹窗（带缩放） ---- */
-.previewContainer {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: rgba(0, 0, 0, 0.85);
-  z-index: 80;
-  overflow: hidden;
-}
-
-.previewImage {
-  max-width: 70vw;
-  max-height: 70vh;
-  object-fit: contain;
-  transition: transform 0.15s ease-out;
-  transform-origin: center center;
-  border-radius: 8px;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
-}
-
-.previewCloseBtn {
-  position: absolute;
-  top: 24px;
-  right: 24px;
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background-color: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  border: none;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  z-index: 10;
-}
-
-.previewCloseBtn:hover {
-  background-color: rgba(255, 255, 255, 0.25);
-}
-
-.previewContainer.previewDragging {
-  cursor: grabbing;
-  user-select: none;
-}
-
-.previewContainer.previewDragging .previewImage {
-  transition: none;
-}
-
-.previewZoomControls {
-  position: absolute;
-  bottom: 32px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background-color: rgba(0, 0, 0, 0.6);
-  border-radius: 24px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  z-index: 10;
-}
-
-.previewZoomControls button {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background-color: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  border: none;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.previewZoomControls button:hover {
-  background-color: rgba(255, 255, 255, 0.2);
-}
-
-.previewZoomLevel {
-  min-width: 48px;
-  text-align: center;
-  font-size: 13px;
-  color: #fff;
-  font-weight: 500;
 }
 
 /* ---- 加载骨架屏 ---- */

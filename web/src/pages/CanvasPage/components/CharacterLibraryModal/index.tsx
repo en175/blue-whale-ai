@@ -2,84 +2,56 @@
  * CharacterLibraryModal 角色库弹窗
  * 对接素材库 API（POST /api/material/{Action}）
  * 与 SharedAssetsModal 同尺寸（1000×680）
- * Tab: 虚拟人像库（后续可扩展）
- * 支持分组管理 + 素材选择
- * 上传流程：uploadAssetFile（3 步）→ 拿公网 URL → createAsset → 轮询就绪
+ * Tab: 虚拟人像库（AIGC）/ 真人人像库（LivenessFace），统一多选（真人人像库仅视频入口显示）
+ * 弹窗仅做分组/素材展示与选中使用，分组/素材管理归资产页
  * ============================================ */
-import { useState, useEffect, useCallback, useRef, type KeyboardEvent, type WheelEvent } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
   User,
-  Plus,
-  Minus,
-  RotateCw,
   FolderOpen,
-  MoreVertical,
-  Trash2,
-  Edit3,
   ArrowLeft,
   Check,
-  Upload,
   Loader2,
-  Video,
+  ScanFace,
+  Music,
 } from 'lucide-react';
 import {
-  createAssetGroup,
   listAssetGroups,
-  deleteAssetGroup,
   listAssets,
-  createAsset,
-  updateAssetGroup,
   type MaterialGroup,
   type MaterialAsset,
   type GroupType,
 } from '@/api/material';
-import { uploadAssetFile } from '@/utils/upload';
 import { isApiError } from '@/api/http';
 import { toast } from 'sonner';
-import ConfirmModal from '@/components/ConfirmModal';
 import styles from './index.module.css';
 
-/** Tab 定义 */
+/** Tab 定义（真人人像库 tab 仅视频入口启用，真人素材只用于视频生成） */
 const TABS = [
   { key: 'character', label: '虚拟人像库', icon: User },
-];
+  { key: 'real', label: '真人人像库', icon: ScanFace },
+] as const;
 
 interface CharacterLibraryModalProps {
   onClose: () => void;
-  /** 选择素材后回调（返回 MaterialAsset） */
-  onSelect?: (asset: MaterialAsset) => void;
+  /** 多选确认回调（虚拟/真人人像库统一多选，确认后批量返回） */
+  onSelectAssets?: (assets: MaterialAsset[]) => void;
+  /** 显示真人人像库 tab（真人素材仅用于视频生成，图片/资产卡入口不展示） */
+  enableRealPersonTab?: boolean;
 }
 
 /* ============================================
- * 分组卡片
+ * 分组卡片（仅展示与点击查看，管理操作归资产页）
  * ============================================ */
 function GroupCard({
   group,
   onView,
-  onRename,
-  onDelete,
 }: {
   group: MaterialGroup;
   onView: () => void;
-  onRename: () => void;
-  onDelete: () => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const bottomMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (bottomMenuRef.current && bottomMenuRef.current.contains(target)) return;
-      setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [menuOpen]);
-
   return (
     <div className={styles.groupCard} onClick={onView}>
       <div className={styles.groupCover}>
@@ -91,190 +63,32 @@ function GroupCard({
             <span className={styles.groupCount}>点击查看素材</span>
           </div>
         </div>
-        {/* 右下角三点按钮 */}
-        <div className={styles.groupBottomActions} ref={bottomMenuRef}>
-          <button
-            className={styles.groupBottomMenuBtn}
-            onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
-            title="更多操作"
-          >
-            <MoreVertical size={14} />
-          </button>
-          {menuOpen && (
-            <div className={styles.dropdownMenu} onClick={(e) => e.stopPropagation()} style={{ bottom: '32px', top: 'auto' }}>
-              <button className={styles.dropdownItem} onClick={() => { setMenuOpen(false); onRename(); }}>
-                <Edit3 size={14} /> 重命名
-              </button>
-              <button className={`${styles.dropdownItem} ${styles.dropdownItemDanger}`} onClick={() => { setMenuOpen(false); onDelete(); }}>
-                <Trash2 size={14} /> 删除
-              </button>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
 }
 
 /* ============================================
- * 新建分组弹窗 / 修改描述弹窗
- * ============================================ */
-function GroupFormModal({
-  title,
-  initialText,
-  placeholder,
-  onConfirm,
-  onCancel,
-}: {
-  title: string;
-  initialText?: string;
-  placeholder?: string;
-  onConfirm: (text: string) => Promise<void> | void;
-  onCancel: () => void;
-}) {
-  const [text, setText] = useState(initialText || '');
-  const [submitting, setSubmitting] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, []);
-
-  const handleConfirm = async () => {
-    if (submitting) return;
-    setSubmitting(true);
-    try {
-      await onConfirm(text);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Enter') handleConfirm();
-    if (e.key === 'Escape') onCancel();
-  };
-
-  return (
-    <div className={styles.modalOverlay} onClick={onCancel}>
-      <div className={styles.modalContent} onClick={(e) => e.stopPropagation()} onKeyDown={handleKeyDown}>
-        <div className={styles.modalTitle}>{title}</div>
-        <input
-          ref={inputRef}
-          className={styles.modalInput}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={placeholder || '请输入内容'}
-          maxLength={200}
-        />
-        <div className={styles.modalActions}>
-          <button className={styles.modalCancelBtn} onClick={onCancel} disabled={submitting}>取消</button>
-          <button className={styles.modalConfirmBtn} onClick={handleConfirm} disabled={submitting}>
-            {submitting ? '处理中...' : '确定'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================
- * 分组详情视图（支持选择/上传素材）
+ * 分组详情视图（多选素材，仅展示与选择）
+ * 分组/素材管理（新建、重命名、删除、上传）归资产页，弹窗内不提供
+ * 选中状态由父组件持有（虚拟/真人跨 tab 累加），本组件仅展示与切换
  * ============================================ */
 function GroupDetail({
   group,
   assets,
+  selectedIds,
+  onToggleAsset,
   onBack,
-  onSelectAsset,
-  onRename,
-  onRefresh,
 }: {
   group: MaterialGroup;
   assets: MaterialAsset[];
+  selectedIds: Set<string>;
+  onToggleAsset: (asset: MaterialAsset) => void;
   onBack: () => void;
-  onSelectAsset: (asset: MaterialAsset) => void;
-  onRename: () => void;
-  onRefresh: () => void;
 }) {
-  const [previewAsset, setPreviewAsset] = useState<MaterialAsset | null>(null);
-  const [previewZoom, setPreviewZoom] = useState(0.6); // 默认较小比例
-  const [previewOffset, setPreviewOffset] = useState({ x: 0, y: 0 });
-  const [dragging, setDragging] = useState(false);
-  const dragStartRef = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const PREVIEW_MIN_ZOOM = 0.1;
-  const PREVIEW_MAX_ZOOM = 3.0;
-
-  const handleZoomIn = () => { setPreviewZoom((z) => Math.min(z + 0.1, PREVIEW_MAX_ZOOM)); };
-  const handleZoomOut = () => { setPreviewZoom((z) => Math.max(z - 0.1, PREVIEW_MIN_ZOOM)); };
-  const handleZoomReset = () => { setPreviewZoom(0.6); setPreviewOffset({ x: 0, y: 0 }); };
-
-  const handleWheel = (e: WheelEvent) => {
-    const delta = e.deltaY > 0 ? -0.05 : 0.05;
-    setPreviewZoom((z) => Math.min(Math.max(z + delta, PREVIEW_MIN_ZOOM), PREVIEW_MAX_ZOOM));
-  };
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (previewZoom <= 0.6) return;
-    setDragging(true);
-    dragStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      offsetX: previewOffset.x,
-      offsetY: previewOffset.y,
-    };
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!dragging) return;
-    setPreviewOffset({
-      x: dragStartRef.current.offsetX + (e.clientX - dragStartRef.current.x),
-      y: dragStartRef.current.offsetY + (e.clientY - dragStartRef.current.y),
-    });
-  };
-
-  const handleMouseUp = () => setDragging(false);
-
-  const closePreview = () => {
-    setPreviewAsset(null);
-    setPreviewZoom(0.6);
-    setPreviewOffset({ x: 0, y: 0 });
-  };
-
-  const handleUpload = useCallback(async (files: FileList) => {
-    if (uploading) return;
-    setUploading(true);
-
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith('image/')) {
-        toast.error(`${file.name}：仅支持图片`);
-        continue;
-      }
-      try {
-        // Step 1: 上传到 Asset 管道拿公网 URL
-        const uploadResult = await uploadAssetFile(file);
-        // Step 2: 调用素材库 CreateAsset（名称限 30 字，超限截断）
-        const rawName = file.name;
-        const finalName = rawName.length > 30 ? rawName.slice(0, 30) : rawName;
-        if (rawName.length > 30) toast('当前上传素材名称过长，已截取', { style: { textAlign: 'center' } });
-        await createAsset({
-          GroupId: group.Id,
-          URL: uploadResult.url,
-          Name: finalName,
-          AssetType: 'Image',
-        });
-        // Step 3: 刷新列表
-        onRefresh();
-      } catch (err) {
-        // API 错误已由请求层统一 toast；非 API 错误兜底提示
-        if (!isApiError(err)) toast.error(`上传失败：${file.name}`);
-      }
-    }
-    setUploading(false);
-  }, [uploading, group.Id, onRefresh]);
+  /** 素材是否可被选择：仅 Active 且类型为图片/视频 */
+  const isSelectable = (asset: MaterialAsset) =>
+    asset.Status === 'Active' && (asset.AssetType === 'Image' || asset.AssetType === 'Video');
 
   return (
     <div className={styles.detailView}>
@@ -283,118 +97,54 @@ function GroupDetail({
           <ArrowLeft size={16} /> 返回
         </button>
         <span className={styles.detailTitle}>{group.Description || group.Name}</span>
-        <div className={styles.detailActions}>
-          <button className={styles.uploadBtn} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-            <Upload size={14} /> {uploading ? '上传中...' : '上传素材'}
-          </button>
-          <button className={styles.modalCancelBtn} onClick={onRename}>
-            <Edit3 size={14} /> 重命名
-          </button>
-        </div>
       </div>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        style={{ display: 'none' }}
-        onChange={(e) => {
-          if (e.target.files && e.target.files.length > 0) {
-            handleUpload(e.target.files);
-            e.target.value = '';
-          }
-        }}
-      />
 
       {assets.length === 0 ? (
-        <div className={styles.empty}>该分组暂无素材，点击「上传素材」添加</div>
+        <div className={styles.empty}>该分组暂无素材，请前往资产页添加</div>
       ) : (
         <div className={styles.assetGrid}>
-          {assets.map((asset) => (
-            <div key={asset.Id} className={styles.assetCard}
-              onClick={() => onSelectAsset(asset)}>
-              <div className={styles.assetThumb}>
-                {asset.URL ? (
-                  asset.AssetType === 'Video' ? (
-                    <video src={asset.URL} muted playsInline preload="metadata" />
+          {assets.map((asset) => {
+            const selectable = isSelectable(asset);
+            const selectedFlag = selectedIds.has(asset.Id);
+            return (
+              <div
+                key={asset.Id}
+                className={`${styles.assetCard} ${!selectable ? styles.assetCardDisabled : ''} ${selectedFlag ? styles.assetCardSelected : ''}`}
+                onClick={() => onToggleAsset(asset)}
+              >
+                <div className={styles.assetThumb}>
+                  {asset.URL ? (
+                    asset.AssetType === 'Video' ? (
+                      <video src={asset.URL} muted playsInline preload="metadata" />
+                    ) : asset.AssetType === 'Audio' ? (
+                      <div className={styles.audioPlaceholder}>
+                        <Music size={28} strokeWidth={1.5} />
+                      </div>
+                    ) : (
+                      <img src={asset.URL} alt={asset.Name} loading="lazy" />
+                    )
                   ) : (
-                    <img src={asset.URL} alt={asset.Name} loading="lazy" />
-                  )
-                ) : (
-                  <div className={styles.empty}>资源不可用</div>
-                )}
-                <div className={styles.assetTypeBadge}>
-                  {asset.AssetType === 'Video' ? <Video size={14} /> : null}
-                  {asset.AssetType === 'Video' ? '视频' : '图片'}
-                </div>
-                {asset.Status === 'Active' && (
-                  <button
-                    className={styles.assetSelectBtn}
-                    title="选择此素材"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSelectAsset(asset);
-                    }}
-                  >
-                    <Check size={14} strokeWidth={2.5} />
-                  </button>
-                )}
-                {asset.Status === 'Processing' && (
-                  <div className={styles.statusBadge}>处理中</div>
-                )}
-                {asset.Status === 'Failed' && (
-                  <div className={`${styles.statusBadge} ${styles.statusFailed}`}>
-                    失败
+                    <div className={styles.empty}>资源不可用</div>
+                  )}
+                  <div className={`${styles.assetTypeBadge} ${selectable ? styles.assetTypeBadgeShifted : ''}`}>
+                    {asset.AssetType === 'Video' ? '视频' : asset.AssetType === 'Audio' ? '音频' : '图片'}
                   </div>
-                )}
+                  {asset.Status === 'Processing' && <div className={styles.statusBadge}>处理中</div>}
+                  {asset.Status === 'Failed' && (
+                    <div className={`${styles.statusBadge} ${styles.statusFailed}`}>失败</div>
+                  )}
+                  {selectable && (
+                    <div className={`${styles.checkToggle} ${selectedFlag ? styles.checkToggleOn : ''}`}>
+                      {selectedFlag && <Check size={14} strokeWidth={2.5} />}
+                    </div>
+                  )}
+                </div>
+                <div className={styles.assetName} title={asset.Name}>
+                  {asset.Name}
+                </div>
               </div>
-              <div className={styles.assetName} title={asset.Name}>
-                {asset.Name}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {previewAsset && (
-        <div className={styles.modalOverlay} onClick={closePreview}>
-          <div
-            className={`${styles.previewContainer} ${dragging ? styles.previewDragging : ''}`}
-            onClick={(e) => e.stopPropagation()}
-            onWheel={handleWheel}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-          >
-            {/* 关闭按钮 */}
-            <button className={styles.previewCloseBtn} onClick={closePreview} title="关闭">
-              <X size={20} />
-            </button>
-            {/* 图片预览 */}
-            <img
-              src={previewAsset.URL}
-              alt={previewAsset.Name}
-              className={styles.previewImage}
-              style={{
-                transform: `translate(${previewOffset.x}px, ${previewOffset.y}px) scale(${previewZoom})`,
-                cursor: previewZoom > 0.6 ? 'grab' : 'default',
-              }}
-              draggable={false}
-            />
-            {/* 缩放控制栏 */}
-            <div className={styles.previewZoomControls}>
-              <button onClick={handleZoomOut} title="缩小">
-                <Minus size={16} />
-              </button>
-              <span className={styles.previewZoomLevel}>{Math.round(previewZoom * 100)}%</span>
-              <button onClick={handleZoomIn} title="放大">
-                <Plus size={16} />
-              </button>
-              <button onClick={handleZoomReset} title="重置">
-                <RotateCw size={16} />
-              </button>
-            </div>
-          </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -404,26 +154,24 @@ function GroupDetail({
 /* ============================================
  * 主组件
  * ============================================ */
-export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLibraryModalProps) {
-  const [activeTab, setActiveTab] = useState(TABS[0].key);
+export default function CharacterLibraryModal({ onClose, onSelectAssets, enableRealPersonTab }: CharacterLibraryModalProps) {
+  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]['key']>('character');
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [groupAssets, setGroupAssets] = useState<Map<string, MaterialAsset[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [detailGroupId, setDetailGroupId] = useState<string | null>(null);
-  const [renameTarget, setRenameTarget] = useState<MaterialGroup | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'group'; id: string; name: string } | null>(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
 
-  const GROUP_TYPE: GroupType = 'AIGC';
+  const isRealTab = activeTab === 'real';
+  const groupType: GroupType = isRealTab ? 'LivenessFace' : 'AIGC';
 
-  /** 仅加载分组列表；素材在进入分组详情后再加载。 */
+  /** 仅加载分组列表；素材统一进入分组详情后再加载（与资产页一致的懒加载） */
   const loadGroups = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
     try {
       const result = await listAssetGroups({
-        Filter: { GroupType: GROUP_TYPE },
+        Filter: { GroupType: groupType },
         PageNumber: 1,
         PageSize: 100,
       });
@@ -436,16 +184,18 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [groupType]);
 
+  // 切换 tab / 首次加载：重置详情视图并按当前 tab 的 GroupType 重新拉取
   useEffect(() => {
     loadGroups();
+    setDetailGroupId(null);
   }, [loadGroups]);
 
   const refreshGroupAssets = useCallback(async (groupId: string) => {
     try {
       const assets = await listAssets({
-        Filter: { GroupIds: [groupId], GroupType: GROUP_TYPE },
+        Filter: { GroupIds: [groupId], GroupType: groupType },
         PageNumber: 1,
         PageSize: 100,
       });
@@ -453,7 +203,7 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
     } catch (err) {
       console.warn('刷新分组素材失败:', err);
     }
-  }, []);
+  }, [groupType]);
 
   const handleViewGroup = useCallback((groupId: string) => {
     setDetailGroupId(groupId);
@@ -478,68 +228,37 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processingGroupIds.join(','), refreshGroupAssets]);
 
-  /** 新建分组 */
-  const handleCreateGroup = async (name: string) => {
-    try {
-      const result = await createAssetGroup({ Name: name, GroupType: GROUP_TYPE }, { silent: true });
-      setGroups((prev) => [
-        { Id: result.Id, Name: name, GroupType: GROUP_TYPE },
-        ...prev,
-      ]);
-      setGroupAssets((prev) => new Map(prev).set(result.Id, []));
-      setShowCreateModal(false);
-      setDetailGroupId(result.Id);
-    } catch (err) {
-      // silent 请求：页面层统一用定制文案提示（401 已由请求层弹登录续接）
-      if (!isApiError(err) || err.status !== 401) toast.error('新建分组失败，请稍后重试');
-    }
-  };
+  /** 素材选中集合（虚拟/真人跨 tab 累加，持有完整素材对象） */
+  const [selectedMap, setSelectedMap] = useState<Map<string, MaterialAsset>>(new Map());
+  const selectedIds = useMemo(() => new Set(selectedMap.keys()), [selectedMap]);
+  const selectedAssets = useMemo(() => Array.from(selectedMap.values()), [selectedMap]);
 
-  /** 修改分组描述 */
-  const handleRenameGroup = async (description: string) => {
-    if (!renameTarget) return;
-    try {
-      await updateAssetGroup({ Id: renameTarget.Id, Description: description });
-      await loadGroups();
-      setRenameTarget(null);
-    } catch (err) {
-      // API 错误已由请求层统一 toast；非 API 错误兜底提示
-      if (!isApiError(err)) toast.error('修改描述失败');
-      throw err;
-    }
-  };
-
-  /** 删除分组 — 打开确认弹窗 */
-  const handleDeleteGroup = (group: MaterialGroup) => {
-    setDeleteTarget({ type: 'group', id: group.Id, name: group.Description || group.Name });
-  };
-
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    try {
-      await deleteAssetGroup(deleteTarget.id, { silent: true });
-      setGroups((prev) => prev.filter((g) => g.Id !== deleteTarget.id));
-      setGroupAssets((prev) => {
-        const next = new Map(prev);
-        next.delete(deleteTarget.id);
-        return next;
-      });
-      if (detailGroupId === deleteTarget.id) setDetailGroupId(null);
-      setDeleteTarget(null);
-    } catch (err) {
-      // silent 请求：分组删除用定制文案（401 已由请求层弹登录续接）
-      if (!isApiError(err) || err.status !== 401) toast.error('分组删除失败，请稍后重试');
-      setDeleteTarget(null);
-    }
-  };
-
-  /** 选择素材 */
-  const handleSelectAsset = (asset: MaterialAsset) => {
-    if (asset.Status !== 'Active') {
-      toast('素材尚未就绪，请稍后再试');
+  /** 切换素材选中态（含 Processing/Failed/音频拦截提示） */
+  const handleToggleAsset = (asset: MaterialAsset) => {
+    if (asset.Status === 'Processing') {
+      toast('素材处理中，稍后可用');
       return;
     }
-    onSelect?.(asset);
+    if (asset.Status === 'Failed') {
+      toast('素材处理失败，无法使用');
+      return;
+    }
+    if (asset.AssetType === 'Audio') {
+      toast('音频素材暂不支持选择');
+      return;
+    }
+    setSelectedMap((prev) => {
+      const next = new Map(prev);
+      if (next.has(asset.Id)) next.delete(asset.Id);
+      else next.set(asset.Id, asset);
+      return next;
+    });
+  };
+
+  /** 素材多选确认（虚拟/真人人像库统一入口） */
+  const handleConfirmAssets = () => {
+    if (selectedAssets.length === 0) return;
+    onSelectAssets?.(selectedAssets);
     onClose();
   };
 
@@ -559,9 +278,9 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
           </button>
         </div>
 
-        {/* Tab 栏 */}
+        {/* Tab 栏（真人人像库 tab 仅视频入口显示） */}
         <div className={styles.tabs}>
-          {TABS.map((tab) => (
+          {TABS.filter((tab) => tab.key !== 'real' || enableRealPersonTab).map((tab) => (
             <button
               key={tab.key}
               className={`${styles.tab} ${activeTab === tab.key ? styles.tabActive : ''}`}
@@ -587,34 +306,68 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
               <GroupDetail
                 group={detailGroup}
                 assets={detailAssets}
+                selectedIds={selectedIds}
+                onToggleAsset={handleToggleAsset}
                 onBack={() => setDetailGroupId(null)}
-                onSelectAsset={handleSelectAsset}
-                onRename={() => setRenameTarget(detailGroup)}
-                onRefresh={() => refreshGroupAssets(detailGroup.Id)}
               />
             ) : (
               <div className={styles.groupListView}>
                 <div className={styles.groupGrid}>
-                  {/* 新建分组卡片 */}
-                  <div className={styles.uploadCard} onClick={() => setShowCreateModal(true)}>
-                    <Plus className={styles.plusIcon} strokeWidth={1.5} />
-                    <span>新建分组</span>
-                  </div>
-                  {/* 分组列表 */}
+                  {/* 分组列表（仅展示与选择，分组管理归资产页） */}
                   {groups.map((group) => (
                     <GroupCard
                       key={group.Id}
                       group={group}
                       onView={() => handleViewGroup(group.Id)}
-                      onRename={() => setRenameTarget(group)}
-                      onDelete={() => handleDeleteGroup(group)}
                     />
                   ))}
                 </div>
                 {groups.length === 0 && (
                   <div className={styles.emptyHint}>
                     <p>暂无分组</p>
-                    <p>点击「新建分组」创建你的第一个角色分组</p>
+                    <p>请前往资产页·人像库创建分组并上传素材</p>
+                    <button
+                      className={styles.emptyActionBtn}
+                      onClick={() => window.open('/library?type=aigc', '_blank')}
+                    >
+                      去资产页·虚拟人像库
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          )}
+          {!loading && !loadError && activeTab === 'real' && (
+            detailGroup ? (
+              <GroupDetail
+                group={detailGroup}
+                assets={detailAssets}
+                selectedIds={selectedIds}
+                onToggleAsset={handleToggleAsset}
+                onBack={() => setDetailGroupId(null)}
+              />
+            ) : (
+              <div className={styles.groupListView}>
+                <div className={styles.groupGrid}>
+                  {/* 真人素材组卡片流（与虚拟人像库同款文件夹卡片，封面不取内部素材图） */}
+                  {groups.map((group) => (
+                    <GroupCard
+                      key={group.Id}
+                      group={group}
+                      onView={() => handleViewGroup(group.Id)}
+                    />
+                  ))}
+                </div>
+                {groups.length === 0 && (
+                  <div className={styles.emptyHint}>
+                    <p>暂无真人素材</p>
+                    <p>完成真人认证建档后，即可在视频生成时使用真人形象</p>
+                    <button
+                      className={styles.emptyActionBtn}
+                      onClick={() => window.open('/library?type=liveness', '_blank')}
+                    >
+                      去资产页·真人人像库建档
+                    </button>
                   </div>
                 )}
               </div>
@@ -622,39 +375,26 @@ export default function CharacterLibraryModal({ onClose, onSelect }: CharacterLi
           )}
         </div>
 
-        {/* 新建分组弹窗 */}
-        {showCreateModal && (
-          <GroupFormModal
-            title="新建分组"
-            onConfirm={handleCreateGroup}
-            onCancel={() => setShowCreateModal(false)}
-          />
-        )}
-
-        {/* 修改描述弹窗 */}
-        {renameTarget ? (
-          <GroupFormModal
-            title="修改分组描述"
-            initialText={renameTarget.Description || ''}
-            placeholder="请输入分组描述"
-            onConfirm={handleRenameGroup}
-            onCancel={() => setRenameTarget(null)}
-          />
-        ) : null}
-
-        {/* 删除确认弹窗 */}
-        <ConfirmModal
-          open={!!deleteTarget}
-          title="删除分组"
-          message={
-            deleteTarget
-              ? `确定要删除分组「${deleteTarget.name}」吗？分组内的所有素材也会被同步删除，此操作不可撤销。`
-              : ''
-          }
-          confirmText="确认删除"
-          onConfirm={confirmDelete}
-          onCancel={() => setDeleteTarget(null)}
-        />
+        {/* 弹窗级底部确认栏（虚拟/真人选择跨 tab 累加，任意视图均可确认） */}
+        <div className={styles.confirmBar}>
+          <span className={styles.confirmCount}>已选 {selectedAssets.length} 项</span>
+          <div className={styles.confirmActions}>
+            <button
+              className={styles.modalCancelBtn}
+              disabled={selectedAssets.length === 0}
+              onClick={() => setSelectedMap(new Map())}
+            >
+              清空
+            </button>
+            <button
+              className={styles.confirmPrimaryBtn}
+              disabled={selectedAssets.length === 0}
+              onClick={handleConfirmAssets}
+            >
+              确认
+            </button>
+          </div>
+        </div>
       </div>
     </div>,
     document.body,

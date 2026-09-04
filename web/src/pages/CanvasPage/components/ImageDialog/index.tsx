@@ -50,8 +50,8 @@ interface ImageDialogProps {
   onPickFromCanvas?: () => void;
   /** 画布选取模式进行中（左上角图标高亮提示） */
   pickMode?: boolean;
-  /** 画布节点选取结果（ts 驱动注入参考素材） */
-  externalPick?: { ts: number; file: UploadedFile } | null;
+  /** 外部注入参考素材（ts 驱动；画布节点单选 / 角色库多选，files 为一批） */
+  externalPick?: { ts: number; files: UploadedFile[] } | null;
   /** 打开角色库弹窗 */
   onOpenCharacterLibrary?: () => void;
   /** Toast 提示（上传超限等场景，由父级注入） */
@@ -106,17 +106,25 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
     { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
   ]);
 
-  /** 画布节点选取结果注入参考素材（去重 + 上限保护） */
+  /** 外部注入参考素材（画布节点选取/角色库多选；去重 + 上限保护） */
   useEffect(() => {
     if (!externalPick) return;
     setFiles((prev) => {
-      const imgCount = prev.filter((f) => f.type === 'image').length;
-      const vidCount = prev.filter((f) => f.type === 'video').length;
-      const full =
-        externalPick.file.type === 'image' ? imgCount >= maxImages : vidCount >= MAX_VIDEOS;
-      if (prev.some((f) => f.id === externalPick.file.id) || full) return prev;
-      return [...prev, externalPick.file];
+      let next = prev;
+      for (const file of externalPick.files) {
+        const imgCount = next.filter((f) => f.type === 'image').length;
+        const vidCount = next.filter((f) => f.type === 'video').length;
+        const full = file.type === 'image' ? imgCount >= maxImages : vidCount >= MAX_VIDEOS;
+        if (full) {
+          onToast?.('warn', refOverflowToast([file.type], { image: maxImages, video: MAX_VIDEOS }));
+          break;
+        }
+        if (next.some((f) => f.id === file.id)) continue;
+        next = [...next, file];
+      }
+      return next;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalPick]);
 
   /** 能力选项全部取自接口（无本地写死兜底）：模型列表未加载完时为空 */
