@@ -20,8 +20,23 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 
 /** NewAPI 上游（OpenAI 兼容 /v1）。空值时本控制器对每个请求返回 503。 */
 const NEW_API_BASE_URL = process.env.NEW_API_BASE_URL?.trim() || "";
-/** 非流式请求超时；流式（body.stream === true）不设超时，交给上游自然结束或客户端断开。 */
-const UPSTREAM_TIMEOUT_MS = 60_000;
+/**
+ * 上游**空闲**超时：多久没有新字节才算死，不是总共跑了多久（IKD7AS）。
+ *
+ * 此前这里是二选一的：非流式 `AbortSignal.timeout(60_000)` 按**总时长**砍，流式传 `null`
+ * 完全不砍。两头都错。
+ *
+ * 总时长会误杀正常但慢的调用：Agent 产卡前的需求抽取实测跑到 155 秒 / 18,296 token，每次都
+ * 在精确 60.018s 被砍成 `Bad Gateway`，算力全烧了什么都没拿到（IKD7A9）。而流式那一路一旦
+ * 上游卡住就可以永远挂着——把抽取改成流式之后，那正是唯一还没有闸的地方。
+ *
+ * 按空闲计两头都对：流式下 token 持续到达（实测首字节 1.3–1.4 秒），再慢的正常调用也不会
+ * 静默这么久；真挂住了照样断得掉。
+ *
+ * 90 秒的来历：观测到的最长合理静默是首字节，上游过载时可达几十秒；90 远在其上，又仍然
+ * 有界。**不要沿用 60**——那是上一版按总时长设的数，含义完全不同。
+ */
+const UPSTREAM_IDLE_TIMEOUT_MS = Number(process.env.AGENT_MODEL_IDLE_TIMEOUT_MS) || 90_000;
 /** 本控制器挂载的路由前缀（含全局 /api）。NewAPI 只认裸 `/v1/...`，转发前必须去掉这段。 */
 const ROUTE_PREFIX = "/api/internal/agent-model";
 
@@ -128,19 +143,8 @@ function authorizedAgentService(header: string | undefined): boolean {
   return constantTimeEquals(process.env.AGENT_SERVICE_TOKEN, header);
 }
 
-function isStreamingRequest(rawBody: Buffer): boolean {
-  if (rawBody.length === 0) return false;
-  try {
-    const parsed = JSON.parse(rawBody.toString("utf8")) as unknown;
-    return (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      (parsed as Record<string, unknown>).stream === true
-    );
-  } catch {
-    return false;
-  }
-}
+// 这里曾有一个 `isStreamingRequest`：它读请求体里的 `stream === true`，用来决定挂不挂超时。
+// 空闲超时对两种请求含义相同（IKD7AS），于是没有任何人再需要问这个问题。
 
 /**
  * `/api/internal/agent-model/*` —— 独立 blue-whale-agent 服务到 NewAPI 的计费网关代理。
@@ -266,21 +270,22 @@ export class AgentModelGatewayController {
       req.body === undefined || req.body === null ? "" : JSON.stringify(req.body),
     );
 
-    const streaming = isStreamingRequest(rawBody);
+    // 流式与否不再决定有没有闸，只决定闸打在哪儿：两者都用同一个空闲计时器。等首字节的这
+    // 一段也归它管，所以计时器在 fetch 之前就起。
+    const idle = createIdleTimer(UPSTREAM_IDLE_TIMEOUT_MS);
     let upstream: globalThis.Response;
     try {
-      const init: RequestInit = {
-        method: req.method,
-        headers,
-        signal: streaming ? null : AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-      };
+      const init: RequestInit = { method: req.method, headers, signal: idle.signal };
       if (!["GET", "HEAD"].includes(req.method)) init.body = rawBody;
       upstream = await fetch(upstreamUrl, init);
     } catch (error) {
-      const message =
-        error instanceof Error && error.name === "TimeoutError"
-          ? "NewAPI 响应超时"
-          : "NewAPI 不可用";
+      idle.clear();
+      const message = idle.expired
+        ? `NewAPI ${idleSeconds()} 秒没有任何响应`
+        : "NewAPI 不可用";
+      logger.error(
+        `[internal/agent-model] upstream request failed: ${message} (${error instanceof Error ? error.message : String(error)})`,
+      );
       res.status(502).json({ code: 502, msg: message, data: null });
       return;
     }
@@ -293,14 +298,22 @@ export class AgentModelGatewayController {
       const stream = Readable.fromWeb(
         upstream.body as import("node:stream/web").ReadableStream,
       );
+      // 每来一段字节就把闸往后推。`data` 与 `pipe` 同一个同步块内挂上，中间不可能漏掉一段
+      // ——流的事件是异步发的。
+      stream.on("data", () => idle.touch());
+      stream.on("end", () => idle.clear());
+      stream.on("close", () => idle.clear());
       stream.on("error", (error) => {
+        idle.clear();
         logger.error(
-          `[internal/agent-model] upstream stream error: ${error instanceof Error ? error.message : String(error)}`,
+          `[internal/agent-model] upstream stream error: ${idle.expired ? `空闲超过 ${idleSeconds()} 秒` : error instanceof Error ? error.message : String(error)}`,
         );
+        // 响应头早已发出，此刻只能断开连接——这就是「上游半途不说话了」的诚实表现。
         if (!res.writableEnded) res.destroy();
       });
       stream.pipe(res);
     } else {
+      idle.clear();
       res.end();
     }
   }
@@ -313,6 +326,45 @@ export class AgentModelGatewayController {
     this.ownerCache.set(projectId, ownerId);
     return ownerId;
   }
+}
+
+/** 闸的长度，写成人看的秒数。不用 `Math.round`：测试把窗口压到几百毫秒，round 会说成「0 秒」。 */
+function idleSeconds(): string {
+  return String(Number((UPSTREAM_IDLE_TIMEOUT_MS / 1000).toFixed(1)));
+}
+
+/**
+ * 一个可以反复往后推的闸。`touch()` 重新计时，`clear()` 拆掉，`expired` 说明这次中止是它干的
+ * ——`AbortError` 本身分不出「超时」和「客户端断开」，而这两件事对用户的意思完全不同。
+ */
+function createIdleTimer(ms: number) {
+  const controller = new AbortController();
+  const state = { expired: false };
+  let handle: NodeJS.Timeout | undefined = undefined;
+  const arm = () => {
+    handle = setTimeout(() => {
+      state.expired = true;
+      controller.abort();
+    }, ms);
+    // 这个计时器不该把进程留在事件循环里等它。
+    handle.unref?.();
+  };
+  arm();
+  return {
+    signal: controller.signal,
+    get expired() {
+      return state.expired;
+    },
+    touch() {
+      if (state.expired) return;
+      if (handle) clearTimeout(handle);
+      arm();
+    },
+    clear() {
+      if (handle) clearTimeout(handle);
+      handle = undefined;
+    },
+  };
 }
 
 function readHeader(req: Request, name: string): string {

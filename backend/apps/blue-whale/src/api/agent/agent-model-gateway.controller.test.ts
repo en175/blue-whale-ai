@@ -51,12 +51,26 @@ function createGateway(controller: { proxy: (...args: never[]) => Promise<void> 
       shim.setHeader("content-type", "application/json");
       shim.end(JSON.stringify(body));
     };
-    Object.assign(req, { originalUrl: req.url, body: { model: "test-model" } });
-    void controller.proxy(
-      req as never,
-      shim as never,
-      req.headers["x-agent-service-token"] as never,
-    );
+    // 真的把请求体读出来，而不是塞一个固定的。控制器会把 `req.body` 重新序列化后转给上游，
+    // 同时透传原始的 content-length——写死一个体，只要测试发的不是同一串字节，undici 就会
+    // 以 `RequestContentLengthMismatchError` 拒发，而报出来的是一句「NewAPI 不可用」。
+    const chunks: Buffer[] = [];
+    req.on("data", chunk => chunks.push(chunk as Buffer));
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8");
+      let body: unknown = { model: "test-model" };
+      try {
+        if (raw) body = JSON.parse(raw);
+      } catch {
+        /* 保持默认体 */
+      }
+      Object.assign(req, { originalUrl: req.url, body });
+      void controller.proxy(
+        req as never,
+        shim as never,
+        req.headers["x-agent-service-token"] as never,
+      );
+    });
   });
 }
 
@@ -244,5 +258,122 @@ describe("网关凭证的启动校验", () => {
 
   it("配了却没有 bwsvc_ 前缀就拒绝启动——NewAPI 按前缀分流，它会静默走错分支", async () => {
     await expect(assertConfig("sk-looks-like-a-real-token")).rejects.toThrow("bwsvc_");
+  });
+});
+
+// IKD7AS：上游超时改成按「空闲」计。此前是二选一——非流式按总时长砍 60 秒，流式完全不砍。
+// 前者误杀正常但慢的调用（实测 155 秒的需求抽取每次都死在精确 60.018s），后者一旦上游卡住
+// 就可以永远挂着。这组用例钉的正是这两头。
+describe("AgentModelGatewayController 上游空闲超时", () => {
+  const AGENT_TOKEN_2 = "agent-service-token-for-test";
+  const IDLE_MS = 300;
+  let upstream: Server | undefined;
+  let gateway: Server | undefined;
+  let port: number;
+
+  async function boot(handler: Parameters<typeof createServer>[0]): Promise<void> {
+    upstream = createServer(handler);
+    const upstreamPort = await listen(upstream);
+    process.env.AGENT_SERVICE_TOKEN = AGENT_TOKEN_2;
+    process.env.NEW_API_AGENT_BILLING_TOKEN = "bwsvc_test_billing_credential";
+    process.env.NEW_API_BASE_URL = `http://127.0.0.1:${upstreamPort}`;
+    process.env.AGENT_MODEL_IDLE_TIMEOUT_MS = String(IDLE_MS);
+    vi.resetModules();
+    const module = await import("./agent-model-gateway.controller.js");
+    const controller = new module.AgentModelGatewayController({
+      findOwnerId: async () => "37",
+    } as never);
+    gateway = createGateway(controller as never);
+    port = await listen(gateway);
+  }
+
+  afterEach(async () => {
+    await close(gateway);
+    await close(upstream);
+    gateway = undefined;
+    upstream = undefined;
+    delete process.env.AGENT_SERVICE_TOKEN;
+    delete process.env.NEW_API_AGENT_BILLING_TOKEN;
+    delete process.env.NEW_API_BASE_URL;
+    delete process.env.AGENT_MODEL_IDLE_TIMEOUT_MS;
+  });
+
+  it("上游一个字节都不吐，在空闲窗口内断开并说明原因", async () => {
+    // 连上了、响应头也不发——改成流式之后这正是唯一还没有闸的形状。
+    await boot(() => {
+      /* 故意什么都不做 */
+    });
+
+    const started = Date.now();
+    const result = await post(port, {
+      "x-agent-service-token": AGENT_TOKEN_2,
+      "x-blue-whale-project-id": "214",
+    });
+
+    expect(result.status).toBe(502);
+    expect((result.body as { msg?: string })?.msg).toContain("没有任何响应");
+    // 断得掉，而且是被这道闸断的，不是被别的什么慢慢拖死的。
+    expect(Date.now() - started).toBeLessThan(IDLE_MS * 10);
+  });
+
+  it("持续吐字节的慢调用不被误杀——总时长早已超过空闲窗口", async () => {
+    // 每 100ms 一段，一共 900ms：总时长是空闲窗口的三倍，但从来没有静默超过它。
+    await boot((_req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      let sent = 0;
+      const timer = setInterval(() => {
+        res.write(`data: {"n":${sent}}\n\n`);
+        if (++sent >= 9) {
+          clearInterval(timer);
+          res.end("data: [DONE]\n\n");
+        }
+      }, 100);
+    });
+
+    const started = Date.now();
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/internal/agent-model/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-agent-service-token": AGENT_TOKEN_2,
+          "x-blue-whale-project-id": "214",
+        },
+        body: JSON.stringify({ model: "test-model", stream: true }),
+      },
+    );
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(Date.now() - started).toBeGreaterThan(IDLE_MS);
+    // 九段全到齐：中途被砍的话这里会短一截。
+    expect(text).toContain('data: {"n":8}');
+    expect(text).toContain("[DONE]");
+  });
+
+  it("吐了一半就不说话了，照样断得掉", async () => {
+    await boot((_req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write('data: {"n":0}\n\n');
+      // 之后永远不再写，也不 end。
+    });
+
+    const started = Date.now();
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/internal/agent-model/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-agent-service-token": AGENT_TOKEN_2,
+          "x-blue-whale-project-id": "214",
+        },
+        body: JSON.stringify({ model: "test-model", stream: true }),
+      },
+    );
+    // 响应头早已发出，此刻只能断开连接——读到一半抛错正是它诚实的样子。
+    await expect(response.text()).rejects.toBeDefined();
+    expect(Date.now() - started).toBeLessThan(IDLE_MS * 10);
   });
 });
