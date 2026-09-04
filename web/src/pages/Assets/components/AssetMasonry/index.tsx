@@ -376,29 +376,45 @@ const AssetMasonry = memo(function AssetMasonry({
   }, [scrollContainerRef]);
 
   useLayoutEffect(() => {
-    const scroller = scrollContainerRef.current;
-    const grid = gridRef.current;
-    if (!scroller || !grid) return undefined;
+    let resizeObserver: ResizeObserver | undefined;
+    let handleScroll: (() => void) | undefined;
+    let raf = 0;
 
-    const handleScroll = () => {
+    const attach = () => {
+      const scroller = scrollContainerRef.current;
+      const grid = gridRef.current;
+      if (!scroller || !grid) return false;
+
+      handleScroll = () => {
+        updateViewport();
+        setIsScrolling(true);
+        if (scrollStopTimer.current) clearTimeout(scrollStopTimer.current);
+        scrollStopTimer.current = setTimeout(() => setIsScrolling(false), 120);
+      };
+
       updateViewport();
-      setIsScrolling(true);
-      if (scrollStopTimer.current) clearTimeout(scrollStopTimer.current);
-      scrollStopTimer.current = setTimeout(() => setIsScrolling(false), 120);
+      scroller.addEventListener('scroll', handleScroll, { passive: true });
+      window.addEventListener('resize', updateViewport);
+
+      resizeObserver = typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver(updateViewport);
+      resizeObserver?.observe(scroller);
+      resizeObserver?.observe(grid);
+      return true;
     };
 
-    updateViewport();
-    scroller.addEventListener('scroll', handleScroll, { passive: true });
-    window.addEventListener('resize', updateViewport);
-
-    const resizeObserver = typeof ResizeObserver === 'undefined'
-      ? undefined
-      : new ResizeObserver(updateViewport);
-    resizeObserver?.observe(scroller);
-    resizeObserver?.observe(grid);
+    // React 布局阶段按「子→父」顺序附着 ref：弹窗首帧即命中查询缓存时
+    // （loading 直接为 false），滚动容器 .body 与本组件同帧挂载，此刻祖先的
+    // scrollContainerRef 尚未赋值，同步 attach 会失败。若直接 return 将永久
+    // 失去测量机会（viewport 停在 {1,1}，弹窗空白、切 tab 才恢复）。
+    // 延迟一帧重试：rAF 回调执行时整棵树的 ref 必然已附着。
+    if (!attach()) raf = requestAnimationFrame(attach);
 
     return () => {
-      scroller.removeEventListener('scroll', handleScroll);
+      if (raf) cancelAnimationFrame(raf);
+      const scroller = scrollContainerRef.current;
+      if (scroller && handleScroll) scroller.removeEventListener('scroll', handleScroll);
       window.removeEventListener('resize', updateViewport);
       resizeObserver?.disconnect();
       if (scrollStopTimer.current) clearTimeout(scrollStopTimer.current);
