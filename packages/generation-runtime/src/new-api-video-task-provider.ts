@@ -56,13 +56,21 @@ export function createNewApiVideoTaskProvider(options: {
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
   });
 
+  // 视频 submit 上游可能慢（火山高峰 12–15s 返回 200），worker 侧默认 10s 硬超时
+  // 会提前 abort 误报失败；仅 submit 提为 30s，poll 保持默认 10s。
+  const submitClient = createNewApiClient({
+    baseUrl: options.baseUrl,
+    timeoutMs: 30_000,
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  });
+
   return {
     // IKBQEE / ADR-0078：submit 阶段同样识别欠费——new-api 预扣费失败（HTTP200+body 或 402）
     // 由 transport 抛 NewApiError，这里归一为 quota_exhausted，避免被 runner catch 归成 provider_failed
     // （job 1612 真实案例：余额不足却显示「视频生成失败」）。
     async submit(input) {
       try {
-        return await client.submitVideo(options.token, {
+        return await submitClient.submitVideo(options.token, {
           ...input,
           responseFormat: "url",
         });

@@ -204,4 +204,54 @@ describe("new-api video task provider", () => {
       }),
     ).rejects.toMatchObject({ code: "quota_exhausted" });
   });
+
+  it("submit 走 30s 硬超时而非默认 10s（火山高峰慢提交不误报失败）", async () => {
+    vi.useFakeTimers();
+    try {
+      const module = await import("./new-api-video-task-provider.js");
+      const fetchImpl = vi.fn(
+        (_url: string, init: RequestInit | undefined) =>
+          new Promise<Response>((_resolve, reject) => {
+            const signal = init?.signal;
+            if (!signal) {
+              reject(new Error("missing signal"));
+              return;
+            }
+            signal.addEventListener(
+              "abort",
+              () => reject(new Error("aborted")),
+              { once: true },
+            );
+          }),
+      );
+      const provider = module.createNewApiVideoTaskProvider({
+        baseUrl: "http://new-api.test",
+        token: "sk-user",
+        fetchImpl,
+      });
+
+      const submitPromise = provider.submit({
+        model: "seedance-2",
+        prompt: "慢提交",
+        duration: 5,
+        width: 1280,
+        height: 720,
+      });
+      // 先挂 no-op catch 避免 timer 推进触发 abort 时出现未处理拒绝
+      submitPromise.catch(() => {});
+
+      // 默认 10s 时点，submit 的 30s 超时不应触发
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(fetchImpl.mock.calls[0][1]?.signal?.aborted).toBe(false);
+
+      // 累计 30s 触发 abort → provider_failed
+      await vi.advanceTimersByTimeAsync(20_000);
+      await expect(submitPromise).rejects.toMatchObject({
+        code: "provider_failed",
+      });
+      expect(fetchImpl.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
