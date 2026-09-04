@@ -10,8 +10,6 @@
   --asset-glass-shadow-hover: 0 20px 46px rgba(0, 0, 0, 0.52), 0 1px 0 rgba(255, 255, 255, 0.16);
   /* 与首页 ChatBox 一致的深色玻璃表面，供加载态与音频卡片共用。 */
   --asset-upload-surface: rgba(6, 6, 6, 0.72);
-  /* 已就绪的素材项使用更深的表面，避免被背景视频穿透。 */
-  --asset-item-surface: rgba(6, 6, 6, 0.92);
   --asset-upload-border: rgba(255, 255, 255, 0.16);
   --asset-upload-filter: blur(28px) saturate(1.15);
   --asset-upload-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
@@ -80,7 +78,7 @@
 }
 
 .content {
-  padding-inline: var(--spacing-2xl);
+  padding-inline: var(--spacing-xl);
 }
 
 .pageTitle {
@@ -229,8 +227,6 @@
   border: none;
   border-radius: 0;
   overflow: visible;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   box-shadow: var(--asset-glass-shadow);
   cursor: pointer;
   transition: all var(--transition-normal);
@@ -309,8 +305,6 @@
   justify-content: center;
   overflow: hidden;
   background: transparent;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 /* 图片/视频媒体填充 */
@@ -340,15 +334,14 @@
   border-radius: 0;
   background: var(--asset-upload-surface);
   border: 1px solid var(--asset-upload-border);
-  backdrop-filter: var(--asset-upload-filter);
-  -webkit-backdrop-filter: var(--asset-upload-filter);
 }
 
 /* 音频没有可展示的封面，始终保留深色玻璃观感的静态底。
  * Masonic 会 transform 虚拟化卡片；这里避免逐卡 backdrop-filter，防止滚动时
  * 叠加的视频背景与毛玻璃合成层丢失文字或整块内容。 */
 .audioThumbnail {
-  background: var(--asset-item-surface);
+  background-color: var(--asset-item-surface);
+  background-image: radial-gradient(circle at 24% 28%, rgba(255, 255, 255, 0.09), transparent 38%);
   border: 1px solid var(--asset-upload-border);
   box-shadow: var(--asset-upload-shadow);
 }
@@ -357,8 +350,6 @@
 .audioThumbnail .audioMediaSkeleton {
   background: transparent;
   border: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 
 /* /library 的卡片外框由 .libraryCard 统一承载，避免内层边框被圆角裁切。 */
