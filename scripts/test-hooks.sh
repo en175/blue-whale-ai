@@ -2151,14 +2151,17 @@ ROTATE_LOG="$(audit_log_path "$ROTATE_REPO" "$AUDIT_HOOK")"
 ROTATE_ARCHIVE="$(audit_log_archive_path "$ROTATE_REPO" "$AUDIT_HOOK")"
 # 写一条记录建立日志，再灌填充到 ~9.99 MiB，再追加一条触发轮转
 run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_fill1","session_id":"s_rot","tool_input":{"file_path":"'"$ROTATE_REPO"'/f.py"}}'
-{ dd if=/dev/zero bs=1M count=$((10*1024*1024 / 1048576 + 1)) status=none 2>/dev/null | tr '\0' 'X' | head -c $((10*1024*1024 - 200)); } >>"$ROTATE_LOG"
+# 精确填充 (10MiB - 200) 字节触发轮转：python3 生成（跨平台，单次写快；
+# 旧 dd status=none/head -c 是 GNU 专属，macOS BSD dd 不认）
+python3 -c "import sys; sys.stdout.buffer.write(b'X' * $((10*1024*1024 - 200)))" >>"$ROTATE_LOG"
 run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_fill2","session_id":"s_rot","tool_input":{"file_path":"'"$ROTATE_REPO"'/g.py"}}'
 # 轮转后：归档存在且 >= 10MiB；活跃日志只含最后一条记录
 assert_file_exists "$ROTATE_ARCHIVE" "audit: 轮转后归档存在"
 [ "$(wc -c <"$ROTATE_ARCHIVE" 2>/dev/null)" -ge $((10*1024*1024 - 1000)) ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit: 归档大小] 未达 10MiB"); }
 assert_audit_line_count "$ROTATE_LOG" 1 "audit: 轮转后活跃日志只含 1 条"
 # 第二次轮转：旧归档被替换，不产生 .log.2
-{ dd if=/dev/zero bs=1M count=$((10*1024*1024 / 1048576 + 1)) status=none 2>/dev/null | tr '\0' 'Y' | head -c $((10*1024*1024 - 100)); } >>"$ROTATE_LOG"
+# 精确填充 (10MiB - 100) 字节：同上 python3 跨平台写法
+python3 -c "import sys; sys.stdout.buffer.write(b'Y' * $((10*1024*1024 - 100)))" >>"$ROTATE_LOG"
 run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_fill3","session_id":"s_rot","tool_input":{"file_path":"'"$ROTATE_REPO"'/h.py"}}'
 assert_file_exists "$ROTATE_ARCHIVE" "audit: 二次轮转后归档仍存在"
 assert_audit_line_count "$ROTATE_LOG" 1 "audit: 二次轮转后活跃日志只含 1 条"
