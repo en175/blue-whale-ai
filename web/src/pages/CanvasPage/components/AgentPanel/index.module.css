@@ -1823,3 +1823,24 @@
 .actionRowStatus {
   color: #c9705c;
 }
+
+/**
+ * 正文时间轴上的一次工具调用（IKD79E）。
+ *
+ * 刻意做得很轻：它夹在两段正文中间，说的是「它是在说完哪句话之后去做的」，不是一份要读的
+ * 清单——那份清单是上面的 .actionRow，收起来的。做重了会把用户的注意力从正文上拽走。
+ */
+.inlineToolCall {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 4px 2px;
+  font-size: var(--font-size-sm);
+  color: #92959a;
+  line-height: 1.6;
+}
+
+.inlineToolCallIcon {
+  flex: none;
+  color: #b4b7bc;
+}

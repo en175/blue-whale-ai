@@ -675,6 +675,16 @@ function AssistantMessageBody({
         if (b.type === 'run_actions' && b.run_actions) {
           return <ActionRow key={key} record={b.run_actions} />;
         }
+        // 正文时间轴上的一次工具调用（IKD79E）：它夹在两段正文之间，让「先说了什么、
+        // 才去做的什么」读得出来。与上面收起来的台账不重复——那份回答「调了什么、多久」。
+        if (b.type === 'tool_call' && b.summary) {
+          return (
+            <div key={key} className={styles.inlineToolCall}>
+              <Cog size={11} strokeWidth={2.5} className={styles.inlineToolCallIcon} />
+              <span>{b.summary}</span>
+            </div>
+          );
+        }
         if (b.type === 'card' && b.card) {
           const cardId = b.card.cardId ?? b.card.shotTitle;
           return (
