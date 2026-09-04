@@ -8,6 +8,8 @@ import {
   GENERATION_ERROR_NUMERIC_CODES,
   GENERATION_ERROR_UNKNOWN_NUMERIC_CODE,
   errorCodeToNumeric,
+  isContentPolicySignal,
+  isQuotaSignal,
 } from "./generation-error-codes.js";
 
 describe("generation error numeric codes (external contract)", () => {
@@ -30,5 +32,46 @@ describe("generation error numeric codes (external contract)", () => {
       GENERATION_ERROR_UNKNOWN_NUMERIC_CODE,
     );
     expect(GENERATION_ERROR_UNKNOWN_NUMERIC_CODE).toBe(1000);
+  });
+});
+
+describe("provider 错误信号（IKDAJN）", () => {
+  it("isContentPolicySignal 命中 copyright/sensitive 中英文 keyword", () => {
+    expect(
+      isContentPolicySignal(
+        "The request failed because the output image may be related to copyright restrictions",
+      ),
+    ).toBe(true);
+    expect(
+      isContentPolicySignal(
+        "The request failed because the output image may contain sensitive information",
+      ),
+    ).toBe(true);
+    expect(isContentPolicySignal("信息可能涉及版权限制，请您更换后重试")).toBe(true);
+    expect(isContentPolicySignal("信息可能包含敏感内容，请您更换后重试")).toBe(true);
+    expect(isContentPolicySignal("policy violation detected")).toBe(true);
+  });
+
+  it("isContentPolicySignal 不误伤欠费/普通文案", () => {
+    expect(isContentPolicySignal("预扣费额度失败, 用户剩余额度: ¥0.9")).toBe(false);
+    expect(isContentPolicySignal("gateway timeout")).toBe(false);
+    expect(isContentPolicySignal("")).toBe(false);
+  });
+
+  it("isQuotaSignal 命中欠费 keyword / HTTP 402", () => {
+    expect(isQuotaSignal("账户余额不足，请充值后重试")).toBe(true);
+    expect(isQuotaSignal("precondition payment_required", 500)).toBe(true);
+    expect(isQuotaSignal("request failed", 402)).toBe(true);
+    expect(isQuotaSignal("balance insufficient")).toBe(true);
+  });
+
+  it("isQuotaSignal 不被 content-policy 文案误伤", () => {
+    expect(
+      isQuotaSignal(
+        "The request failed because the output image may be related to copyright restrictions",
+        500,
+      ),
+    ).toBe(false);
+    expect(isQuotaSignal("gateway down", 503)).toBe(false);
   });
 });

@@ -62,7 +62,7 @@ describe("new-api video task provider", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("maps NewAPI FAILURE status to a terminal failed observation", async () => {
+  it("maps upstream content-policy FAILURE to content_rejected (IKDAJN)", async () => {
     const module = await import("./new-api-video-task-provider.js");
     const provider = module.createNewApiVideoTaskProvider({
       baseUrl: "http://new-api.test",
@@ -83,7 +83,7 @@ describe("new-api video task provider", () => {
       status: "failed",
       progress: 100,
       url: null,
-      error: { code: "OutputAudioSensitiveContentDetected.PolicyViolation", message: "版权审核失败" },
+      error: { code: "content_rejected", message: "版权审核失败" },
     });
   });
 
@@ -165,6 +165,27 @@ describe("new-api video task provider", () => {
         height: 720,
       }),
     ).rejects.toMatchObject({ code: "quota_exhausted" });
+  });
+
+  it("maps submit NewApiError content-policy signal to content_rejected (IKDAJN 敏感信息)", async () => {
+    const module = await import("./new-api-video-task-provider.js");
+    const provider = module.createNewApiVideoTaskProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockRejectedValue(
+        new NewApiError("生成内容可能包含敏感信息", 200, "sensitive_content"),
+      ),
+    });
+
+    await expect(
+      provider.submit({
+        model: "seedance-2",
+        prompt: "测试",
+        duration: 5,
+        width: 1280,
+        height: 720,
+      }),
+    ).rejects.toMatchObject({ code: "content_rejected" });
   });
 
   it("submit non-quota NewApiError falls back to provider_failed", async () => {
