@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { codeInspectorPlugin } from 'code-inspector-plugin'
 import path from 'path'
 
 const __dirname = import.meta.dirname;
@@ -87,12 +88,17 @@ function tosUploadProxy(): Plugin {
 }
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   // 按当前 mode 加载 .env.[mode] 环境变量（dev/test → https://web.master.xfai.cloud，见 .env.development / .env.test）
   const env = loadEnv(mode, process.cwd(), '');
 
   return {
-    plugins: [react(), tosUploadProxy()],
+    plugins: [
+      // 仅开发服务启用，且须先于 React 插件注册以保留组件源码位置信息。
+      command === 'serve' && codeInspectorPlugin({ bundler: 'vite' }),
+      react(),
+      tosUploadProxy(),
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
