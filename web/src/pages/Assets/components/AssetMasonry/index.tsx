@@ -17,7 +17,7 @@ import styles from '../../index.module.css';
 type MediaLoadState = 'waiting' | 'loading' | 'loaded' | 'error';
 
 /** 单个资产媒体组件：图片与视频在未就绪（含失败）期间持续显示骨架屏。 */
-function AssetMedia({
+export function AssetMedia({
   asset,
   audioPlayerRef,
 }: {
@@ -25,55 +25,64 @@ function AssetMedia({
   audioPlayerRef?: RefObject<AudioPlayerHandle | null>;
 }) {
   const isSafari = isSafariBrowser();
-  // Safari 视频初始为 waiting（懒加载），其余直接进入 loading
+  // Safari 视频初始为 waiting（懒加载），其余直接进入 loading。
   const [state, setState] = useState<MediaLoadState>(
     asset.type === 'video' && isSafari ? 'waiting' : 'loading',
   );
   const [reloadKey, setReloadKey] = useState(0);
   const imgRef = useRef<HTMLImageElement>(null);
+  const completedResourceKeyRef = useRef<string | null>(null);
   const isVisualMedia = asset.type !== 'audio';
 
   const { src: mediaSrc, nodeKey: mediaKey } = assetMediaDisplay(asset.url, reloadKey);
+  const resourceKey = `${asset.type}:${mediaKey}`;
+  const markLoaded = useCallback(() => {
+    completedResourceKeyRef.current = resourceKey;
+    setState('loaded');
+  }, [resourceKey]);
+  const markLoading = useCallback(() => setState('loading'), []);
+  const markError = useCallback(() => setState('error'), []);
 
   // URL 或 reloadKey 变化时，在首帧绘制前重置为 loading。
-  // 复用的瀑布流卡片可能仍保留上一个资源的 loaded 状态；若放在 useEffect，
-  // 浏览器会先绘制一次旧播放器，再显示骨架屏，造成音频播放器闪烁。
+  // 浏览器缓存音频时，子播放器会先于父组件的 layout effect 报告元数据；此时
+  // 不能把刚刚完成的同一资源重置回 loading，否则骨架会永久覆盖播放器。
   // 视频通过 VideoThumb 的 onLoaded/onError 驱动状态，不在这里重置。
   useLayoutEffect(() => {
     if (asset.type !== 'video') {
-      setState('loading');
+      setState(completedResourceKeyRef.current === resourceKey ? 'loaded' : 'loading');
     }
-  }, [asset.url, reloadKey, asset.type]);
+  }, [asset.type, resourceKey]);
 
   // 缓存图片竞态兜底：load 事件可能在 onLoad 处理器就绪前已派发，
   // 此时 img.complete 为 true 但 state 仍是 loading，遮罩永远不会消失
   useEffect(() => {
     const img = imgRef.current;
     if (img && img.complete && img.naturalWidth > 0) {
-      setState('loaded');
+      markLoaded();
     }
-  }, [mediaSrc, reloadKey]);
+  }, [mediaSrc, reloadKey, markLoaded]);
 
   const handleReload = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setReloadKey((k) => k + 1);
-    // Safari 视频重试需回到 waiting 让 IntersectionObserver 重新触发；其余直接 loading
+    // Safari 视频重试需回到 waiting 让 IntersectionObserver 重新触发；其余直接 loading。
     if (asset.type === 'video' && isSafari) {
       setState('waiting');
     } else {
       setState('loading');
     }
   }, [asset.type, isSafari]);
+  const showSkeleton = state === 'waiting' || state === 'loading';
 
   return (
     <>
-      {/* 图片、视频和虚拟人像在加载或失败时都保持与卡片同尺寸的骨架屏。 */}
-      {isVisualMedia && state !== 'loaded' && <Skeleton className={styles.mediaSkeleton} />}
+      {/* 只在媒体尚未就绪时显示骨架；失败态改由重试层承接。 */}
+      {isVisualMedia && showSkeleton && <Skeleton className={styles.mediaSkeleton} />}
 
       {/* 音频元数据加载期间也用固定尺寸骨架屏，避免卡片在瀑布流中跳动。 */}
-      {!isVisualMedia && state === 'loading' && <Skeleton className={styles.audioMediaSkeleton} />}
+      {!isVisualMedia && showSkeleton && <Skeleton className={styles.audioMediaSkeleton} />}
 
-      {!isVisualMedia && state === 'error' && (
+      {state === 'error' && (
         <div className={styles.mediaError}>
           <AlertCircle size={28} />
           <span className={styles.mediaErrorText}>加载失败</span>
@@ -93,17 +102,17 @@ function AssetMedia({
           src={mediaSrc}
           alt=""
           loading="lazy"
-          onLoad={() => setState('loaded')}
-          onError={() => setState('error')}
+          onLoad={markLoaded}
+          onError={markError}
         />
       )}
       {asset.type === 'video' && asset.url && (
         <VideoThumb
           key={mediaKey}
           url={mediaSrc}
-          onInView={() => setState('loading')}
-          onLoaded={() => setState('loaded')}
-          onError={() => setState('error')}
+          onInView={markLoading}
+          onLoaded={markLoaded}
+          onError={markError}
         />
       )}
       {asset.type === 'audio' && asset.url && (
@@ -113,8 +122,8 @@ function AssetMedia({
           src={mediaSrc}
           variant="compact"
           className={styles.audioCardPlayer}
-          onLoadedMetadata={() => setState('loaded')}
-          onError={() => setState('error')}
+          onLoadedMetadata={markLoaded}
+          onError={markError}
         />
       )}
     </>
@@ -250,6 +259,10 @@ export interface AssetMasonryProps {
   columnCount?: number;
   /** 无限加载批大小（对应每次分页条数） */
   pageSize?: number;
+  /** 卡片水平与垂直间距；资产库可用更紧凑的布局，弹窗保留默认间距。 */
+  gutter?: number;
+  /** 仅 /library 页使用的视觉调整，不影响画布资产选择器。 */
+  libraryMode?: boolean;
 }
 
 function AssetCard({
@@ -258,7 +271,8 @@ function AssetCard({
   onDelete,
   selected,
   onToggleSelect,
-}: Pick<AssetMasonryProps, 'onPreview' | 'onDelete' | 'onToggleSelect'> & {
+  libraryMode,
+}: Pick<AssetMasonryProps, 'onPreview' | 'onDelete' | 'onToggleSelect' | 'libraryMode'> & {
   asset: AssetRecord;
   selected: boolean;
 }) {
@@ -273,7 +287,7 @@ function AssetCard({
 
   return (
     <div
-      className={styles.card}
+      className={`${styles.card} ${libraryMode ? styles.libraryCard : ''}`}
       role="button"
       tabIndex={0}
       aria-label={isSelectable ? `选择${typeLabel[asset.type]}素材` : `查看${typeLabel[asset.type]}资产详情`}
@@ -292,7 +306,10 @@ function AssetCard({
         }
       }}
     >
-      <div className={styles.thumbnail} style={{ aspectRatio: assetAspectRatio(asset) }}>
+      <div
+        className={`${styles.thumbnail} ${isAudio ? styles.audioThumbnail : ''}`}
+        style={{ aspectRatio: assetAspectRatio(asset) }}
+      >
         {asset.url ? (
           <AssetMedia asset={asset} audioPlayerRef={isAudio ? audioPlayerRef : undefined} />
         ) : (asset.type === 'image' || asset.type === 'video' || asset.type === 'character') ? (
@@ -347,6 +364,8 @@ const AssetMasonry = memo(function AssetMasonry({
   onToggleSelect,
   columnCount = 5,
   pageSize = 30,
+  gutter = 16,
+  libraryMode = false,
 }: AssetMasonryProps) {
   const gridRef = useRef<HTMLElement>(null);
   const scrollStopTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -424,8 +443,8 @@ const AssetMasonry = memo(function AssetMasonry({
   const positioner = usePositioner({
     width: viewport.width,
     columnCount,
-    columnGutter: 16,
-    rowGutter: 16,
+    columnGutter: gutter,
+    rowGutter: gutter,
   });
   const resizeObserver = useResizeObserver(positioner);
 
@@ -442,7 +461,7 @@ const AssetMasonry = memo(function AssetMasonry({
       if (!onUpload) return null;
       return (
         <div
-          className={`${styles.card} ${styles.uploadCard}`}
+          className={`${styles.card} ${styles.uploadCard} ${libraryMode ? styles.libraryUploadCard : ''}`}
           onClick={onUpload}
           role="button"
           tabIndex={0}
@@ -464,9 +483,10 @@ const AssetMasonry = memo(function AssetMasonry({
         onDelete={onDelete}
         selected={!!onToggleSelect && !!selectedIds?.has(String(data.asset.id))}
         onToggleSelect={onToggleSelect}
+        libraryMode={libraryMode}
       />
     );
-  }, [onDelete, onPreview, onUpload, onToggleSelect, selectedIds]);
+  }, [libraryMode, onDelete, onPreview, onUpload, onToggleSelect, selectedIds]);
 
   // 首帧 viewport 仍为初始值 {width:1, height:1}：此时 positioner 会算出负数列宽
   // （如 (1-16*3)/4 = -12px），非法 CSS 使 phase-one 卡片退化为 width:auto 按内容
@@ -481,7 +501,7 @@ const AssetMasonry = memo(function AssetMasonry({
     items: measured ? items : EMPTY_ITEMS,
     render: renderCard,
     onRender,
-    className: styles.masonry,
+    className: `${styles.masonry} ${libraryMode ? styles.libraryMasonry : ''}`,
     containerRef: gridRef,
     itemKey: (item) => (item.kind === 'upload' ? 'upload' : String(item.asset.id)),
     itemHeightEstimate: 240,

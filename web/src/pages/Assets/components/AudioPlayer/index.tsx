@@ -1,5 +1,5 @@
 import { Pause, Play } from 'lucide-react';
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import styles from './index.module.css';
 
 export type AudioPlayerVariant = 'compact' | 'full';
@@ -43,15 +43,39 @@ const AudioPlayer = memo(forwardRef<AudioPlayerHandle, AudioPlayerProps>(functio
   const audioRef = useRef<HTMLAudioElement>(null);
   const seekingRef = useRef(false);
   const hoverPreviewingRef = useRef(false);
+  const reportedMetadataSourceRef = useRef<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  useEffect(() => {
+  const syncMetadata = useCallback((fromMetadataEvent = false) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    // 虚拟列表复用卡片或命中浏览器缓存时，loadedmetadata 可能早于 React
+    // 事件处理器派发。直接读取已经就绪的原生状态，避免骨架屏永久遮住播放器。
+    if (!fromMetadataEvent && audio.readyState < HTMLMediaElement.HAVE_METADATA) return;
+
+    if (Number.isFinite(audio.duration)) {
+      setDuration(audio.duration);
+    }
+
+    if (reportedMetadataSourceRef.current !== src) {
+      reportedMetadataSourceRef.current = src;
+      onLoadedMetadata?.();
+    }
+  }, [onLoadedMetadata, src]);
+
+  useLayoutEffect(() => {
     setPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+    reportedMetadataSourceRef.current = null;
   }, [src]);
+
+  useLayoutEffect(() => {
+    syncMetadata();
+  }, [syncMetadata]);
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
@@ -169,11 +193,8 @@ const AudioPlayer = memo(forwardRef<AudioPlayerHandle, AudioPlayerProps>(functio
         ref={audioRef}
         src={src}
         preload="metadata"
-        onLoadedMetadata={() => {
-          const audio = audioRef.current;
-          if (audio && Number.isFinite(audio.duration)) setDuration(audio.duration);
-          onLoadedMetadata?.();
-        }}
+        onLoadedMetadata={() => syncMetadata(true)}
+        onDurationChange={() => syncMetadata()}
         onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime ?? 0)}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}

@@ -10,7 +10,11 @@ let playMock: ReturnType<typeof vi.spyOn>;
 let pauseMock: ReturnType<typeof vi.spyOn>;
 
 async function renderPlayer(
-  props: { variant?: 'compact' | 'full' } = {},
+  props: {
+    variant?: 'compact' | 'full';
+    src?: string;
+    onLoadedMetadata?: () => void;
+  } = {},
   ref?: React.RefObject<AudioPlayerHandle | null>,
   onParentClick?: () => void,
   onParentPointerDown?: () => void,
@@ -70,6 +74,31 @@ describe('AudioPlayer', () => {
     audio.currentTime = 62;
     await act(async () => dispatchMediaEvent(audio, 'timeupdate'));
     expect(mountNode.textContent).toContain('1:02');
+  });
+
+  it('syncs cached metadata after a virtualized card reuses its audio element', async () => {
+    const onLoadedMetadata = vi.fn();
+    await renderPlayer({ src: 'https://example.test/first.mp3', onLoadedMetadata });
+    const audio = mountNode.querySelector('audio') as HTMLAudioElement;
+    Object.defineProperty(audio, 'readyState', {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_METADATA,
+    });
+    Object.defineProperty(audio, 'duration', { configurable: true, value: 125 });
+
+    await act(async () => {
+      root.render(createElement(
+        'div',
+        null,
+        createElement(AudioPlayer, {
+          src: 'https://example.test/cached.mp3',
+          onLoadedMetadata,
+        }),
+      ));
+    });
+
+    expect(onLoadedMetadata).toHaveBeenCalledTimes(1);
+    expect(mountNode.textContent).toContain('2:05');
   });
 
   it('exposes an operable keyboard progress control', async () => {

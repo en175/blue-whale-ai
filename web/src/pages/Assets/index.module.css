@@ -3,16 +3,35 @@
  * ============================================ */
 
 .page {
+  --asset-glass-surface: rgba(8, 8, 8, 0.68);
+  --asset-glass-border: rgba(255, 255, 255, 0.16);
+  --asset-glass-filter: blur(16px);
+  --asset-glass-shadow: 0 14px 34px rgba(0, 0, 0, 0.42), 0 1px 0 rgba(255, 255, 255, 0.12);
+  --asset-glass-shadow-hover: 0 20px 46px rgba(0, 0, 0, 0.52), 0 1px 0 rgba(255, 255, 255, 0.16);
+  /* 与首页 ChatBox 一致的深色玻璃表面，供加载态与音频卡片共用。 */
+  --asset-upload-surface: rgba(6, 6, 6, 0.72);
+  /* 已就绪的素材项使用更深的表面，避免被背景视频穿透。 */
+  --asset-item-surface: rgba(6, 6, 6, 0.92);
+  --asset-upload-border: rgba(255, 255, 255, 0.16);
+  --asset-upload-filter: blur(28px) saturate(1.15);
+  --asset-upload-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
   width: 100%;
   height: 100%;
-  padding: var(--spacing-2xl) var(--spacing-2xl) var(--spacing-xl);
+  box-sizing: border-box;
+  position: relative;
+  z-index: 1;
+  /* 背景延伸到固定侧栏下方，内容本身仍避让侧栏。 */
+  padding: 0 0 0 var(--sidebar-width);
   overflow-y: auto;
+  background: rgba(7, 7, 10, 0.2);
+  backdrop-filter: blur(4px) saturate(1.08);
+  -webkit-backdrop-filter: blur(4px) saturate(1.08);
 }
 
 .container {
   width: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
 }
 
 /* ---- 顶部标题栏 ---- */
@@ -20,13 +39,55 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--spacing-xl);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  /* Header 贴合素材区顶部，滚动后由伪元素提供整条玻璃表面。 */
+  padding: var(--spacing-xl);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transition: box-shadow var(--transition-fast);
+}
+
+.header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: transparent;
+  z-index: 0;
+  pointer-events: none;
+  transition: background var(--transition-fast);
+}
+
+/* 只有标题栏覆盖正在滚动的素材时才显示玻璃，避免首屏多一层深色遮罩。 */
+.headerScrolled {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+}
+
+.headerScrolled::before {
+  background: rgba(16, 16, 20, 0.42);
+  backdrop-filter: blur(20px) saturate(1.08);
+  -webkit-backdrop-filter: blur(20px) saturate(1.08);
+}
+
+.header > * {
+  position: relative;
+  z-index: 1;
+}
+
+.content {
+  padding-inline: var(--spacing-2xl);
 }
 
 .pageTitle {
   font-size: var(--font-size-2xl);
   font-weight: 700;
   color: var(--color-text-primary);
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.64);
 }
 
 .headerActions {
@@ -40,22 +101,27 @@
   padding: 10px 16px;
   border-radius: var(--radius-md);
   font-size: var(--font-size-md);
-  color: var(--color-text-secondary);
-  background-color: transparent;
-  border: none;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(8, 8, 8, 0.48);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(16px) saturate(1.12);
+  -webkit-backdrop-filter: blur(16px) saturate(1.12);
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
 .filterBtn:hover {
   color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.24);
 }
 
 .filterBtnActive {
   color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.3);
   font-weight: 500;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 /* ---- 分隔线 ---- */
@@ -110,25 +176,39 @@
 .skeletonGrid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--spacing-lg);
+  gap: 4px;
+  border-radius: 0;
+  overflow: visible;
 }
 
 .empty {
   grid-column: 1 / -1;
   text-align: center;
   padding: var(--spacing-2xl) 0;
-  color: var(--color-text-tertiary);
+  color: #fff;
   font-size: var(--font-size-md);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.72);
 }
 
-.cardSkeleton {
+.skeletonGrid .cardSkeleton {
   aspect-ratio: 1 / 1;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
+  background: var(--asset-upload-surface);
+  border: 1px solid var(--asset-upload-border);
+  box-shadow: var(--asset-upload-shadow);
 }
 
 /* ---- 虚拟化五列瀑布流 ---- */
 .masonry {
   width: 100%;
+  border-radius: 12px 12px 0 0;
+  overflow: hidden;
+}
+
+/* /library 的每张瀑布流卡片独立圆角，避免外层网格裁切卡片阴影。 */
+.libraryMasonry {
+  border-radius: 0;
+  overflow: visible;
 }
 
 .masonry .card {
@@ -138,24 +218,35 @@
 .loadState {
   padding: var(--spacing-lg) 0;
   text-align: center;
-  color: var(--color-text-tertiary);
+  color: #fff;
   font-size: var(--font-size-sm);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.72);
 }
 
 /* ---- 资产卡片 ---- */
 .card {
-  background-color: var(--color-bg-card);
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: var(--asset-glass-shadow);
   cursor: pointer;
   transition: all var(--transition-normal);
 }
 
+.libraryCard {
+  box-sizing: border-box;
+  border: 1px solid var(--asset-upload-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
 .card:hover {
-  border-color: var(--color-border-hover);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  background: transparent;
+  transform: none;
+  box-shadow: var(--asset-glass-shadow-hover);
 }
 
 .card:focus-visible {
@@ -167,22 +258,41 @@
 .uploadCard {
   display: flex;
   flex-direction: column;
+  background: var(--asset-item-surface);
+  border: 1px solid var(--asset-upload-border);
+  backdrop-filter: var(--asset-upload-filter);
+  -webkit-backdrop-filter: var(--asset-upload-filter);
+  box-shadow: var(--asset-upload-shadow);
+}
+
+.uploadCard:hover {
+  background: var(--asset-item-surface);
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.36);
+}
+
+.libraryUploadCard,
+.libraryUploadCard:hover {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
 .uploadCard .uploadThumb {
   flex-direction: column;
   gap: 10px;
-  color: var(--color-text-tertiary);
-  background-color: var(--color-bg-secondary);
-  border: 2px dashed var(--color-border-primary);
+  color: rgba(255, 255, 255, 0.7);
+  background: transparent;
+  border: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
 .uploadCard:hover .uploadThumb {
-  border-color: var(--color-text-primary);
   color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
+  background: transparent;
 }
 
 .uploadCard .uploadThumb span {
@@ -198,7 +308,9 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background-color: var(--color-bg-tertiary);
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* 图片/视频媒体填充 */
@@ -209,21 +321,52 @@
 }
 
 /* 图片/视频资源未就绪或加载失败时持续覆盖卡片，不改变已经确定的纵横比。 */
-.mediaSkeleton {
+.thumbnail .mediaSkeleton {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   z-index: 1;
   border-radius: 0;
+  background: var(--asset-upload-surface);
+  border: 1px solid var(--asset-upload-border);
 }
 
 /* 音频同样覆盖加载骨架屏；时长元数据到达后再露出播放器。 */
-.audioMediaSkeleton {
+.thumbnail .audioMediaSkeleton {
   position: absolute;
   inset: 0;
   z-index: 2;
   border-radius: 0;
+  background: var(--asset-upload-surface);
+  border: 1px solid var(--asset-upload-border);
+  backdrop-filter: var(--asset-upload-filter);
+  -webkit-backdrop-filter: var(--asset-upload-filter);
+}
+
+/* 音频没有可展示的封面，始终保留深色玻璃观感的静态底。
+ * Masonic 会 transform 虚拟化卡片；这里避免逐卡 backdrop-filter，防止滚动时
+ * 叠加的视频背景与毛玻璃合成层丢失文字或整块内容。 */
+.audioThumbnail {
+  background: var(--asset-item-surface);
+  border: 1px solid var(--asset-upload-border);
+  box-shadow: var(--asset-upload-shadow);
+}
+
+/* 加载骨架只提供 shimmer，背景由音频缩略图的玻璃表面承载。 */
+.audioThumbnail .audioMediaSkeleton {
+  background: transparent;
+  border: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* /library 的卡片外框由 .libraryCard 统一承载，避免内层边框被圆角裁切。 */
+.libraryCard .thumbnail .mediaSkeleton,
+.libraryCard .thumbnail .audioMediaSkeleton,
+.libraryCard .audioThumbnail,
+.libraryCard .mediaError {
+  border: none;
 }
 
 /* 视频容器：承载懒加载检测与悬浮预览事件。 */
@@ -285,11 +428,15 @@
   border-radius: var(--radius-sm);
   font-size: var(--font-size-xs);
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.25;
   color: #fff;
-  background-color: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  z-index: 3;
+  background-color: rgba(7, 10, 15, 0.82);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  /* Masonic 在滚动时会 transform 卡片；标签不用 backdrop-filter，避免合成层重绘丢字。 */
+  isolation: isolate;
+  z-index: 4;
 }
 
 /* ---- 多选模式勾选角标（画布资产库选择弹窗）---- */
@@ -324,7 +471,10 @@
   justify-content: center;
   gap: 8px;
   color: #f87171;
-  background-color: rgba(30, 15, 15, 0.85);
+  background: rgba(64, 18, 24, 0.72);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  backdrop-filter: var(--asset-glass-filter);
+  -webkit-backdrop-filter: var(--asset-glass-filter);
   z-index: 1;
 }
 
