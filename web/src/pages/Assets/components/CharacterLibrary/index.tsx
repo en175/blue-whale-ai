@@ -8,7 +8,7 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
-import { QRCodeSVG } from 'qrcode.react';
+import QRCodeStyling from 'qr-code-styling';
 import { Plus, FolderOpen, Trash2, ArrowLeft, X, Loader2, Video } from 'lucide-react';
 import {
   createAssetGroup,
@@ -131,6 +131,29 @@ function GroupFormModal({
  * 关闭入口仅右上角 ×；底部仅保留「在当前设备打开」。
  */
 function AuthQrModal({ h5Link, onClose }: { h5Link: string; onClose: () => void }) {
+  const qrContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!qrContainerRef.current) return;
+    qrContainerRef.current.innerHTML = '';
+    const qr = new QRCodeStyling({
+      width: 220,
+      height: 220,
+      type: 'svg',
+      data: h5Link,
+      dotsOptions: { color: '#1a1a1f', type: 'rounded' },
+      cornersSquareOptions: { type: 'extra-rounded' },
+      cornersDotOptions: { type: 'dot', color: '#1a1a1f' },
+      backgroundOptions: { color: '#ffffff' },
+      margin: 0,
+      qrOptions: { errorCorrectionLevel: 'L' },
+    });
+    qr.append(qrContainerRef.current);
+    return () => {
+      qrContainerRef.current?.replaceChildren();
+    };
+  }, [h5Link]);
+
   return createPortal(
     <div className={styles.modalOverlay} onClick={onClose}>
       <div className={styles.qrModalCard} onClick={(e) => e.stopPropagation()}>
@@ -140,7 +163,7 @@ function AuthQrModal({ h5Link, onClose }: { h5Link: string; onClose: () => void 
         <div className={styles.qrTitle}>真人认证</div>
         <div className={styles.qrSubtitle}>请使用手机扫描二维码完成刷脸认证</div>
         <div className={styles.qrBox}>
-          <QRCodeSVG value={h5Link} size={200} />
+          <div ref={qrContainerRef} />
         </div>
         <div className={styles.qrHintSub}>认证通过后将自动创建分组</div>
         <button
