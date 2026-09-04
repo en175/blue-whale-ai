@@ -71,8 +71,6 @@
   border: none;
   border-radius: 0;
   overflow: visible;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   box-shadow: var(--asset-glass-shadow, 0 14px 34px rgba(0, 0, 0, 0.42));
   cursor: pointer;
   transition: all var(--transition-normal);
@@ -95,7 +93,8 @@
   flex: 1;
   min-height: 180px;
   /* 分组没有封面图时，也使用资产页统一的深色玻璃底，避免露出 Hero 视频。 */
-  background: var(--asset-item-surface, rgba(6, 6, 6, 0.92));
+  background-color: var(--asset-item-surface, rgba(6, 6, 6, 0.92));
+  background-image: radial-gradient(circle at 24% 28%, rgba(255, 255, 255, 0.09), transparent 38%);
   display: flex;
   align-items: center;
   justify-content: center;

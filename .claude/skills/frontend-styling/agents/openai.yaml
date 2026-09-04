@@ -1,0 +1,6 @@
+interface:
+  display_name: "Frontend styling"
+  short_description: "Glass surfaces and scroll-compositing safety"
+  default_prompt: "Use $frontend-styling for visual styling under web/."
+policy:
+  allow_implicit_invocation: true

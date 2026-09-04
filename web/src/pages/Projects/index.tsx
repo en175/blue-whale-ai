@@ -7,6 +7,7 @@ import { type InfiniteData, useInfiniteQuery, useMutation, useQueryClient } from
 import { useNavigate } from 'react-router-dom';
 import { Check, ImageOff, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import Modal from '@/components/Modal';
+import Skeleton from '@/components/Skeleton';
 import {
   batchDeleteProjects,
   createProject,
@@ -95,6 +96,20 @@ function PreviewGallery({ project }: { project: ProjectRecord }) {
           loading="lazy"
         />
       ))}
+    </div>
+  );
+}
+
+function ProjectCardSkeleton() {
+  return (
+    <div className={styles.projectSkeletonCard} data-project-card-skeleton aria-hidden="true">
+      <div className={styles.projectSkeletonPreview}>
+        <Skeleton className={styles.projectSkeletonMedia} data-project-card-skeleton-media />
+      </div>
+      <div className={styles.projectSkeletonMeta}>
+        <Skeleton active={false} className={styles.projectSkeletonTitle} />
+        <Skeleton active={false} className={styles.projectSkeletonDate} />
+      </div>
     </div>
   );
 }
@@ -419,7 +434,11 @@ export default function Projects() {
         </header>
 
         <main className={styles.content}>
-          {isInitialLoading && <div className={styles.empty}>正在加载项目…</div>}
+          {isInitialLoading && (
+            <div className={styles.skeletonGrid} role="status" aria-label="正在加载项目">
+              {Array.from({ length: 6 }, (_, index) => <ProjectCardSkeleton key={index} />)}
+            </div>
+          )}
 
           {hasInitialError && (
             <div className={styles.empty} role="alert">
@@ -446,7 +465,7 @@ export default function Projects() {
                 return (
                   <article
                     key={project.id}
-                    className={`${styles.card} ${isSelected ? styles.cardSelected : ''}`}
+                    className={styles.card}
                     data-selected={isSelected || undefined}
                     tabIndex={0}
                     role={selectionMode ? 'button' : 'link'}

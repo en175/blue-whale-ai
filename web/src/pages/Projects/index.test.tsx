@@ -106,6 +106,16 @@ async function renderPage() {
   throw new Error(`项目列表仍未加载: ${document.body.textContent}`);
 }
 
+async function renderLoadingPage() {
+  mountNode = document.createElement('div');
+  document.body.appendChild(mountNode);
+  root = createRoot(mountNode);
+  await act(async () => {
+    root?.render(withProviders(createElement(Projects)));
+  });
+  await settle();
+}
+
 function pageData(): ProjectPageData {
   return {
     records: projects,
@@ -130,6 +140,17 @@ afterEach(async () => {
 });
 
 describe('Projects 项目卡片页', () => {
+  it('首屏请求未完成时渲染与项目卡片同布局的骨架屏', async () => {
+    projectApi.fetchProjectPage.mockImplementation(() => new Promise(() => {}));
+    await renderLoadingPage();
+
+    expect(document.body.querySelector('[role="status"][aria-label="正在加载项目"]')).not.toBeNull();
+    expect(document.body.querySelectorAll('[data-project-card-skeleton]')).toHaveLength(6);
+    expect(document.body.querySelectorAll('[data-project-card-skeleton-media]')).toHaveLength(6);
+    expect(document.body.textContent).not.toContain('正在加载项目…');
+    expect(document.body.querySelector('[aria-label="项目列表"]')).toBeNull();
+  });
+
   it('从首屏分页数据渲染三张预览图，并为无图项目显示占位', async () => {
     await renderPage();
 
@@ -148,6 +169,30 @@ describe('Projects 项目卡片页', () => {
 
     expect(document.body.querySelector('[data-testid="location"]')?.textContent)
       .toBe('/canvas?project=with-previews');
+  });
+
+  it('多选时卡片本身不变色，仅通过勾选控件标记已选', async () => {
+    await renderPage();
+    const enterSelectionMode = [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === '批量管理');
+    if (!enterSelectionMode) throw new Error('批量管理按钮未渲染');
+    await act(async () => { enterSelectionMode.click(); });
+
+    const card = document.body.querySelector<HTMLElement>('[aria-label="选择项目 有预览项目"]');
+    if (!card) throw new Error('多选项目卡片未渲染');
+    const classNameBeforeSelection = card.className;
+
+    await act(async () => { card.click(); });
+
+    expect(card.className).toBe(classNameBeforeSelection);
+    expect(card.getAttribute('data-selected')).toBe('true');
+    expect(card.getAttribute('aria-pressed')).toBe('true');
+    const toggle = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="取消选择 有预览项目"]',
+    );
+    expect(toggle?.getAttribute('aria-pressed')).toBe('true');
+    expect(toggle?.querySelector('svg')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="location"]')?.textContent).toBe('/projects');
   });
 
   it('从更多操作打开重命名时预填当前项目名称', async () => {

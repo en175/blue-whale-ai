@@ -21,8 +21,6 @@
   padding-left: var(--sidebar-width);
   overflow-y: auto;
   background: rgba(7, 7, 10, 0.2);
-  backdrop-filter: blur(4px) saturate(1.08);
-  -webkit-backdrop-filter: blur(4px) saturate(1.08);
 }
 
 .container {
@@ -43,6 +41,7 @@
   padding: var(--spacing-xl) var(--spacing-2xl) var(--spacing-lg);
   background: linear-gradient(180deg, rgba(10, 10, 13, 0.68), rgba(10, 10, 13, 0.42));
   border-bottom: 1px solid var(--project-glass-border);
+  /* 粘性标题栏脱离项目卡片滚动层，可保留玻璃以区分操作区。 */
   backdrop-filter: blur(18px) saturate(1.08);
   -webkit-backdrop-filter: blur(18px) saturate(1.08);
 }
@@ -216,14 +215,70 @@
 
 .empty p { margin: 0; }
 
-.cardGrid {
+.cardGrid,
+.skeletonGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(244px, 1fr));
   gap: var(--spacing-lg);
   align-items: start;
 }
 
+.projectSkeletonCard {
+  display: flex;
+  flex-direction: column;
+  min-height: 244px;
+  overflow: hidden;
+  border: 1px solid var(--project-glass-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-card);
+  box-shadow: none;
+}
+
+/* 对齐资产库图片 item：卡片壳稳定，shimmer 只覆盖图片预览区。 */
+.projectSkeletonPreview {
+  position: relative;
+  flex: none;
+  height: 168px;
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+}
+
+.projectSkeletonMedia {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: var(--color-bg-active);
+}
+
+.projectSkeletonMeta {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  min-height: 74px;
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--color-bg-card);
+}
+
+.projectSkeletonTitle,
+.projectSkeletonDate {
+  background: var(--color-bg-active);
+}
+
+.projectSkeletonTitle {
+  width: 62%;
+  height: 14px;
+}
+
+.projectSkeletonDate {
+  width: 38%;
+  height: 10px;
+}
+
 .card {
+  /* 滚动列表项使用静态表面；禁止 backdrop-filter，避免主题背景合成残影。 */
   position: relative;
   display: flex;
   flex-direction: column;
@@ -231,10 +286,8 @@
   border: 1px solid var(--project-glass-border);
   border-radius: var(--radius-xl);
   color: var(--color-text-primary);
-  background: var(--project-glass-surface);
+  background: var(--asset-item-surface);
   box-shadow: var(--project-glass-shadow);
-  backdrop-filter: var(--project-glass-filter);
-  -webkit-backdrop-filter: var(--project-glass-filter);
   cursor: pointer;
   outline: none;
   transition: transform var(--transition-normal), border-color var(--transition-normal), background var(--transition-normal), box-shadow var(--transition-normal);
@@ -242,7 +295,7 @@
 
 .card:hover {
   z-index: 2;
-  background: var(--project-glass-surface-hover);
+  background: var(--asset-item-surface);
   border-color: var(--project-glass-border-strong);
   box-shadow: var(--project-glass-shadow-hover);
   transform: translateY(-3px);
@@ -252,11 +305,6 @@
   z-index: 3;
   border-color: rgba(255, 255, 255, 0.42);
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12), var(--project-glass-shadow-hover);
-}
-
-.cardSelected {
-  border-color: rgba(255, 255, 255, 0.46);
-  background: var(--glass-surface-card-selected, rgba(255, 255, 255, 0.14));
 }
 
 .previewGallery,
@@ -318,20 +366,19 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #151515;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.8);
+  color: transparent;
+  background: rgba(8, 8, 8, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   border-radius: var(--radius-full);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.32);
   cursor: pointer;
 }
 
-.card:not(.cardSelected) .selectionToggle {
-  color: transparent;
-  background: rgba(8, 8, 8, 0.52);
-  border-color: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+.selectionToggle[aria-pressed='true'] {
+  color: #fff;
+  background: var(--color-bg-tertiary);
+  border-color: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.7);
 }
 
 .cardBody {
@@ -404,8 +451,6 @@
   border: 1px solid var(--project-glass-border-strong);
   border-radius: var(--radius-md);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
-  backdrop-filter: blur(20px) saturate(1.14);
-  -webkit-backdrop-filter: blur(20px) saturate(1.14);
 }
 
 .cardMenu button {
@@ -496,7 +541,8 @@
 
   .createForm { flex: 1 1 100%; }
   .nameInput { flex: 1 1 180px; width: auto; }
-  .cardGrid { grid-template-columns: minmax(0, 1fr); }
+  .cardGrid,
+  .skeletonGrid { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {

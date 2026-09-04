@@ -79,6 +79,25 @@ test("frontend-delivery auto-loads for web work and routes new fetches to TanSta
   assert.match(request, /refetchOnWindowFocus: false/);
 });
 
+test("frontend delivery progressively routes scroll compositing guidance to frontend styling", () => {
+  const delivery = read(".claude/skills/frontend-delivery/SKILL.md");
+  const styling = read(".claude/skills/frontend-styling/SKILL.md");
+  const scrolling = read(".claude/skills/frontend-styling/references/scroll-compositing.md");
+  const policy = read(".claude/skills/frontend-styling/agents/openai.yaml");
+
+  assert.match(delivery, /\[frontend-styling\]\(\.\.\/frontend-styling\/SKILL\.md\)/);
+  assert.match(styling, /This skill supplements `frontend-delivery`/);
+  assert.match(styling, /references\/scroll-compositing\.md/);
+  assert.match(policy, /allow_implicit_invocation: true/);
+  assert.match(scrolling, /must not declare `backdrop-filter` or `-webkit-backdrop-filter`/);
+  assert.match(scrolling, /including a `none` value/);
+  assert.match(scrolling, /the scrolling container/);
+  assert.match(scrolling, /repeated items/);
+  assert.match(scrolling, /list skeletons/);
+  assert.match(scrolling, /thumbnail\/media overlays/);
+  assert.match(scrolling, /persistent controls inside an item/);
+});
+
 test("frontend-delivery routes explicit feat work to its reference", () => {
   const skill = read(".claude/skills/frontend-delivery/SKILL.md");
   const workflow = read(".claude/skills/frontend-delivery/references/feature.md");
