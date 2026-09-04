@@ -90,12 +90,12 @@ export default function CanvasPage() {
   const [pickProductId, setPickProductId] = useState<string | null>(null);
   /** 资产卡选取目标节点ID（选中的图片注入哪个资产卡） */
   const [pickAssetId, setPickAssetId] = useState<string | null>(null);
-  /** 画布节点选取结果（ts 驱动注入图片对话框） */
-  const [imagePickResult, setImagePickResult] = useState<{ ts: number; file: UploadedFile } | null>(null);
-  /** 画布节点选取结果（ts 驱动注入视频对话框参考） */
-  const [videoPickResult, setVideoPickResult] = useState<{ ts: number; item: BottomRefItem } | null>(null);
-  /** 画布节点选取结果（ts 驱动注入视频对话框参考图片） */
-  const [videoDlgImagePickResult, setVideoDlgImagePickResult] = useState<{ ts: number; item: BottomRefItem } | null>(null);
+  /** 画布节点选取/角色库多选结果（ts 驱动注入图片对话框） */
+  const [imagePickResult, setImagePickResult] = useState<{ ts: number; files: UploadedFile[] } | null>(null);
+  /** 画布节点选取/角色库多选结果（ts 驱动注入视频对话框参考视频） */
+  const [videoPickResult, setVideoPickResult] = useState<{ ts: number; items: BottomRefItem[] } | null>(null);
+  /** 画布节点选取/角色库多选结果（ts 驱动注入视频对话框参考图片） */
+  const [videoDlgImagePickResult, setVideoDlgImagePickResult] = useState<{ ts: number; items: BottomRefItem[] } | null>(null);
   /** 画布节点选取结果（ts 驱动注入商品卡） */
   const [productPickResult, setProductPickResult] = useState<{ ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string } } | null>(null);
   /** 画布节点选取结果（ts 驱动注入资产卡） */
@@ -945,32 +945,32 @@ export default function CanvasPage() {
         // 视频对话框发起的图片节点选取 → 注入其参考图片
         setVideoDlgImagePickResult({
           ts: Date.now(),
-          item: {
+          items: [{
             preview: data.src as string,
             type: 'image',
             assetId: readNodeAssetId(data),
-          },
+          }],
         });
       } else {
         setImagePickResult({
           ts: Date.now(),
-          file: {
+          files: [{
             id: `node-${node.id}`,
             url: data.src as string,
             type: 'image',
             name: (data.fileName as string) || node.id,
             assetId: readNodeAssetId(data),
-          },
+          }],
         });
       }
     } else if (pickMode === 'video' && isReadyMedia && data.mediaType === 'video') {
       setVideoPickResult({
         ts: Date.now(),
-        item: {
+        items: [{
           preview: data.src as string,
           type: 'video',
           assetId: readNodeAssetId(data),
-        },
+        }],
       });
     } else if (pickMode === 'product' && isReadyMedia && data.mediaType === 'image') {
       // 商品卡发起的图片节点选取 → ts 驱动注入目标商品卡（仅图片，商品卡不支持视频）
@@ -2777,41 +2777,48 @@ export default function CanvasPage() {
       {showCharacterLibrary && (
         <CharacterLibraryModal
           onClose={() => { setShowCharacterLibrary(false); setCharacterLibraryTarget(null); }}
-          onSelect={(asset: MaterialAsset) => {
-            // 选中后注入到对应对话框
+          enableRealPersonTab={characterLibraryTarget === 'video'}
+          onSelectAssets={(assets: MaterialAsset[]) => {
+            // 虚拟/真人人像库统一多选确认后注入到对应对话框
+            // 素材库 asset- 前缀 ID 在发送时走 referenceMaterials（后端转 asset:// URI 引用）
             const ts = Date.now();
             if (characterLibraryTarget === 'image') {
-              setImagePickResult({
-                ts,
-                file: {
-                  id: `char-${ts}`,
-                  url: asset.URL,
-                  type: 'image',
-                  name: `角色-${asset.Name}`,
-                },
-              });
+              // 图片对话框：批量注入参考图
+              const images = assets
+                .filter((a) => a.AssetType === 'Image')
+                .map((a) => ({
+                  id: `char-${ts}-${a.Id}`,
+                  url: a.URL,
+                  type: 'image' as const,
+                  name: `角色-${a.Name}`,
+                  assetId: a.Id,
+                }));
+              if (images.length > 0) setImagePickResult({ ts, files: images });
             } else if (characterLibraryTarget === 'video') {
-              // 视频对话框注入图片参考
-              setVideoDlgImagePickResult({
-                ts,
-                item: {
-                  preview: asset.URL,
-                  type: 'image',
-                  assetId: asset.Id,
-                },
-              });
+              // 视频对话框：图片/视频分别注入参考素材
+              const images = assets
+                .filter((a) => a.AssetType === 'Image')
+                .map((a) => ({ preview: a.URL, type: 'image' as const, assetId: a.Id }));
+              const videos = assets
+                .filter((a) => a.AssetType === 'Video')
+                .map((a) => ({ preview: a.URL, type: 'video' as const, assetId: a.Id }));
+              if (images.length > 0) setVideoDlgImagePickResult({ ts, items: images });
+              if (videos.length > 0) setVideoPickResult({ ts, items: videos });
             } else if (characterLibraryTarget === 'asset') {
-              // 角色卡添加参考图
-              setAssetPickResult({
-                ts,
-                assetId: pickAssetId ?? '',
-                ref: {
-                  id: `char-${ts}`,
-                  src: asset.URL,
-                  type: 'image',
-                  assetId: asset.Id,
-                },
-              });
+              // 资产卡添加参考图（单张注入）
+              const image = assets.find((a) => a.AssetType === 'Image');
+              if (image) {
+                setAssetPickResult({
+                  ts,
+                  assetId: pickAssetId ?? '',
+                  ref: {
+                    id: `char-${ts}`,
+                    src: image.URL,
+                    type: 'image',
+                    assetId: image.Id,
+                  },
+                });
+              }
             }
           }}
         />

@@ -80,10 +80,10 @@ interface BottomDialogProps {
   onPickFromCanvas?: (kind: 'image' | 'video') => void;
   /** 画布选取模式进行中（image/video，对应按钮高亮提示） */
   pickMode?: 'image' | 'video' | null;
-  /** 画布节点选取结果（ts 驱动注入参考视频） */
-  externalPick?: { ts: number; item: BottomRefItem } | null;
-  /** 画布节点选取结果（ts 驱动注入参考图片） */
-  externalImagePick?: { ts: number; item: BottomRefItem } | null;
+  /** 外部注入参考视频（ts 驱动；画布节点单选 / 角色库多选，items 为一批） */
+  externalPick?: { ts: number; items: BottomRefItem[] } | null;
+  /** 外部注入参考图片（ts 驱动；画布节点单选 / 角色库多选，items 为一批） */
+  externalImagePick?: { ts: number; items: BottomRefItem[] } | null;
   /** 打开角色库弹窗 */
   onOpenCharacterLibrary?: () => void;
   /** Toast 提示（上传超限/首尾帧校验等场景，由父级注入全局 sonner，位置/样式与 ImageDialog/AudioDialog 统一） */
@@ -221,34 +221,47 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     }
   }, [initialText]);
 
-  // 画布节点选取结果注入参考视频（去重 + 上限保护；图生视频 / 首尾帧模式不收视频）
+  // 外部注入参考视频（画布节点选取/角色库多选；去重 + 上限保护；图生视频 / 首尾帧模式不收视频）
   useEffect(() => {
     if (!externalPick) return;
     if (noVideoMode) return;
-    const item = externalPick.item;
+    const items = externalPick.items;
     setRefFiles((prev) => {
-      const vidCount = prev.filter((f) => f.type === 'video').length;
-      if (vidCount >= MAX_VIDEOS) return prev;
-      if (prev.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview)) return prev;
-      return [...prev, item];
+      let next = prev;
+      for (const item of items) {
+        const vidCount = next.filter((f) => f.type === 'video').length;
+        if (vidCount >= MAX_VIDEOS) break;
+        if (next.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview)) continue;
+        next = [...next, item];
+      }
+      return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalPick]);
 
-  // 画布节点选取结果注入参考图片（去重 + 上限保护；首尾帧模式同样适用）
+  // 外部注入参考图片（画布节点选取/角色库多选；去重 + 上限保护；首尾帧模式同样适用）
   useEffect(() => {
     if (!externalImagePick) return;
-    const item = externalImagePick.item;
+    const items = externalImagePick.items;
     const imgCount = refFiles.filter((f) => f.type === 'image').length;
     if (imgCount >= maxImages) {
       onToast?.('warn', refOverflowToast(['image'], { image: maxImages }));
       return;
     }
+    // 超出剩余容量的部分丢弃并提示（与单张超限 toast 文案统一）
+    const accepted = items.slice(0, maxImages - imgCount);
+    if (accepted.length < items.length) {
+      onToast?.('warn', refOverflowToast(['image'], { image: maxImages }));
+    }
     setRefFiles((prev) => {
-      const imgCnt = prev.filter((f) => f.type === 'image').length;
-      if (imgCnt >= maxImages) return prev;
-      if (prev.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview)) return prev;
-      return [...prev, item];
+      let next = prev;
+      for (const item of accepted) {
+        const imgCnt = next.filter((f) => f.type === 'image').length;
+        if (imgCnt >= maxImages) break;
+        if (next.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview)) continue;
+        next = [...next, item];
+      }
+      return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalImagePick]);
