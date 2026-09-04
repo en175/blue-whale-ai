@@ -295,63 +295,65 @@ export default function Assets() {
         </div>
         )}
 
-        {/* 隐藏的文件上传 input：始终渲染，详情视图也能触发 */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept={(() => {
-            if (isMaterialView && materialDetailGroupId) return '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm';
-            if (activeFilter === 'image') return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp';
-            if (activeFilter === 'video') return '.mp4,.webm,.mov,.avi,.mkv';
-            if (activeFilter === 'audio') return '.mp3,.wav,.ogg,.m4a,.aac,.flac';
-            return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.mp4,.webm,.mov,.avi,.mkv,.mp3,.wav,.ogg,.m4a,.aac,.flac';
-          })()}
-          className={styles.hiddenInput}
-          onChange={handleFileChange}
-        />
-
-        {/* 素材库视图（虚拟人像库/真人人像库）：独立的分组 + 素材管理 */}
-        {isMaterialView ? (
-          <CharacterLibrary
-            groupType={activeFilter === 'liveness' ? 'LivenessFace' : 'AIGC'}
-            refreshTick={materialRefreshTick}
-            onDetailViewChange={(inDetail, groupId) => setMaterialDetailGroupId(inDetail ? groupId : null)}
-            onUpload={handleUpload}
+        <div className={styles.content}>
+          {/* 隐藏的文件上传 input：始终渲染，详情视图也能触发 */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={(() => {
+              if (isMaterialView && materialDetailGroupId) return '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm';
+              if (activeFilter === 'image') return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp';
+              if (activeFilter === 'video') return '.mp4,.webm,.mov,.avi,.mkv';
+              if (activeFilter === 'audio') return '.mp3,.wav,.ogg,.m4a,.aac,.flac';
+              return '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.mp4,.webm,.mov,.avi,.mkv,.mp3,.wav,.ogg,.m4a,.aac,.flac';
+            })()}
+            className={styles.hiddenInput}
+            onChange={handleFileChange}
           />
-        ) : (
-          <>
-            {loading &&
-              <div className={styles.skeletonGrid}>
-                {Array.from({ length: 10 }, (_, index) => (
-                  <Skeleton key={index} className={styles.cardSkeleton} />
-                ))}
-              </div>}
-            {!loading && gridItems.length > 0 && (
-              <AssetMasonry
-                key={`${activeFilter}:${layoutVersion}`}
-                items={gridItems}
-                totalItems={hasMore ? totalGridItems : gridItems.length}
-                onLoadMore={loadNextPage}
-                scrollContainerRef={pageRef}
-                onUpload={handleUpload}
-                onPreview={setPreviewTarget}
-                onDelete={setDeleteTarget}
-                gutter={4}
-                libraryMode
-              />
-            )}
-            {!loading && gridItems.length === 0 && (
-              <div className={styles.empty}>暂无素材</div>
-            )}
-            {!loading && loadingMore && (
-              <div className={styles.loadState} role="status">加载中…</div>
-            )}
-            {!loading && !hasMore && assets.length > 0 && (
-              <div className={styles.loadState}>已加载全部素材</div>
-            )}
-          </>
-        )}
+
+          {/* 素材库视图（虚拟人像库/真人人像库）：独立的分组 + 素材管理 */}
+          {isMaterialView ? (
+            <CharacterLibrary
+              groupType={activeFilter === 'liveness' ? 'LivenessFace' : 'AIGC'}
+              refreshTick={materialRefreshTick}
+              onDetailViewChange={(inDetail, groupId) => setMaterialDetailGroupId(inDetail ? groupId : null)}
+              onUpload={handleUpload}
+            />
+          ) : (
+            <>
+              {loading &&
+                <div className={styles.skeletonGrid}>
+                  {Array.from({ length: 10 }, (_, index) => (
+                    <Skeleton key={index} className={styles.cardSkeleton} />
+                  ))}
+                </div>}
+              {!loading && gridItems.length > 0 && (
+                <AssetMasonry
+                  key={`${activeFilter}:${layoutVersion}`}
+                  items={gridItems}
+                  totalItems={hasMore ? totalGridItems : gridItems.length}
+                  onLoadMore={loadNextPage}
+                  scrollContainerRef={pageRef}
+                  onUpload={handleUpload}
+                  onPreview={setPreviewTarget}
+                  onDelete={setDeleteTarget}
+                  gutter={4}
+                  libraryMode
+                />
+              )}
+              {!loading && gridItems.length === 0 && (
+                <div className={styles.empty}>暂无素材</div>
+              )}
+              {!loading && loadingMore && (
+                <div className={styles.loadState} role="status">加载中…</div>
+              )}
+              {!loading && !hasMore && assets.length > 0 && (
+                <div className={styles.loadState}>已加载全部素材</div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       <AssetDetailModal asset={previewTarget} onClose={() => setPreviewTarget(null)} />
