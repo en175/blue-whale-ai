@@ -38,7 +38,7 @@
   position: sticky;
   top: 0;
   z-index: 8;
-  padding: var(--spacing-xl) var(--spacing-2xl) var(--spacing-lg);
+  padding: var(--spacing-xl);
   background: linear-gradient(180deg, rgba(10, 10, 13, 0.68), rgba(10, 10, 13, 0.42));
   border-bottom: 1px solid var(--project-glass-border);
   /* 粘性标题栏脱离项目卡片滚动层，可保留玻璃以区分操作区。 */
@@ -486,7 +486,7 @@
   justify-content: center;
   gap: var(--spacing-sm);
   min-height: 76px;
-  color: var(--color-text-tertiary);
+  color: white;
   font-size: var(--font-size-sm);
   text-align: center;
 }
