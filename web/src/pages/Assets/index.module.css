@@ -235,6 +235,8 @@
 }
 
 .libraryCard {
+  box-sizing: border-box;
+  border: 1px solid var(--asset-upload-border);
   border-radius: var(--radius-md);
   overflow: hidden;
 }
@@ -355,6 +357,14 @@
   border: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+}
+
+/* /library 的卡片外框由 .libraryCard 统一承载，避免内层边框被圆角裁切。 */
+.libraryCard .thumbnail .mediaSkeleton,
+.libraryCard .thumbnail .audioMediaSkeleton,
+.libraryCard .audioThumbnail,
+.libraryCard .mediaError {
+  border: none;
 }
 
 /* 视频容器：承载懒加载检测与悬浮预览事件。 */
