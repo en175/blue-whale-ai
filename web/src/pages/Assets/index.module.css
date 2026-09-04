@@ -10,6 +10,8 @@
   --asset-glass-shadow-hover: 0 20px 46px rgba(0, 0, 0, 0.52), 0 1px 0 rgba(255, 255, 255, 0.16);
   /* 与首页 ChatBox 一致的深色玻璃表面，供加载态与音频卡片共用。 */
   --asset-upload-surface: rgba(6, 6, 6, 0.72);
+  /* 已就绪的素材项使用更深的表面，避免被背景视频穿透。 */
+  --asset-item-surface: rgba(6, 6, 6, 0.92);
   --asset-upload-border: rgba(255, 255, 255, 0.16);
   --asset-upload-filter: blur(28px) saturate(1.15);
   --asset-upload-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
@@ -256,7 +258,7 @@
 .uploadCard {
   display: flex;
   flex-direction: column;
-  background: var(--asset-upload-surface);
+  background: var(--asset-item-surface);
   border: 1px solid var(--asset-upload-border);
   backdrop-filter: var(--asset-upload-filter);
   -webkit-backdrop-filter: var(--asset-upload-filter);
@@ -264,7 +266,7 @@
 }
 
 .uploadCard:hover {
-  background: rgba(8, 8, 8, 0.78);
+  background: var(--asset-item-surface);
   border-color: rgba(255, 255, 255, 0.28);
   box-shadow: 0 20px 52px rgba(0, 0, 0, 0.36);
 }
@@ -346,7 +348,7 @@
  * Masonic 会 transform 虚拟化卡片；这里避免逐卡 backdrop-filter，防止滚动时
  * 叠加的视频背景与毛玻璃合成层丢失文字或整块内容。 */
 .audioThumbnail {
-  background: var(--asset-upload-surface);
+  background: var(--asset-item-surface);
   border: 1px solid var(--asset-upload-border);
   box-shadow: var(--asset-upload-shadow);
 }

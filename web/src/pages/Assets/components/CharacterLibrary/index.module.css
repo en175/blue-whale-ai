@@ -11,7 +11,7 @@
 
 /* ---- 录入新真人卡片 ---- */
 .uploadCard {
-  background: var(--asset-upload-surface, rgba(6, 6, 6, 0.72));
+  background: var(--asset-item-surface, rgba(6, 6, 6, 0.92));
   border: 1px solid var(--asset-upload-border);
   border-radius: var(--radius-md);
   backdrop-filter: var(--asset-upload-filter, blur(28px) saturate(1.15));
@@ -29,7 +29,7 @@
 }
 
 .uploadCard:hover {
-  background: rgba(8, 8, 8, 0.78);
+  background: var(--asset-item-surface, rgba(6, 6, 6, 0.92));
   box-shadow: 0 20px 52px rgba(0, 0, 0, 0.36);
 }
 
@@ -85,7 +85,7 @@
   flex: 1;
   min-height: 180px;
   /* 分组没有封面图时，也使用资产页统一的深色玻璃底，避免露出 Hero 视频。 */
-  background: var(--asset-upload-surface, rgba(6, 6, 6, 0.72));
+  background: var(--asset-item-surface, rgba(6, 6, 6, 0.92));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -314,7 +314,7 @@
 }
 
 .uploadAssetCard {
-  background: var(--asset-upload-surface, rgba(6, 6, 6, 0.72));
+  background: var(--asset-item-surface, rgba(6, 6, 6, 0.92));
   border: 1px solid rgba(255, 255, 255, 0.16);
   backdrop-filter: var(--asset-upload-filter, blur(28px) saturate(1.15));
   -webkit-backdrop-filter: var(--asset-upload-filter, blur(28px) saturate(1.15));
@@ -328,7 +328,7 @@
 }
 
 .uploadAssetCard:hover {
-  background: rgba(8, 8, 8, 0.78);
+  background: var(--asset-item-surface, rgba(6, 6, 6, 0.92));
   box-shadow: 0 20px 52px rgba(0, 0, 0, 0.36);
 }
 
@@ -340,7 +340,7 @@
   justify-content: center;
   overflow: hidden;
   /* 详情页中资源尚未出图或无效时，保持和其他素材卡片一致的底色。 */
-  background: var(--asset-upload-surface, rgba(6, 6, 6, 0.72));
+  background: var(--asset-item-surface, rgba(6, 6, 6, 0.92));
 }
 
 .assetThumb img {
