@@ -19,7 +19,6 @@ COPY packages/contracts/package.json packages/contracts/
 COPY packages/core/package.json packages/core/
 COPY packages/generation-runtime/package.json packages/generation-runtime/
 COPY packages/persistence/package.json packages/persistence/
-COPY packages/agent-runtime/package.json packages/agent-runtime/
 COPY backend/package.json backend/
 COPY backend/tsconfig.json backend/
 
@@ -34,7 +33,6 @@ COPY packages/contracts packages/contracts
 COPY packages/core packages/core
 COPY packages/generation-runtime packages/generation-runtime
 COPY packages/persistence packages/persistence
-COPY packages/agent-runtime packages/agent-runtime
 COPY backend backend
 
 # Prisma client + backend 全量构建（含 generation-worker app）

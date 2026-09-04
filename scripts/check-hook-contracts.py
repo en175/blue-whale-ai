@@ -243,7 +243,8 @@ def main() -> int:
 
     for platform, path, hook_keys, command_parser in platforms:
         try:
-            config = json.loads(path.read_text())
+            # 显式 UTF-8：Windows 默认 cp936 解码 UTF-8 配置会抛 UnicodeDecodeError
+            config = json.loads(path.read_text(encoding="utf-8"))
             actual = normalized_contracts(config, hook_keys, command_parser)
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError) as error:
             print(f"{platform}: 无法解析 Hook 配置 {path}: {error}", file=sys.stderr)
@@ -277,8 +278,10 @@ def main() -> int:
     for gate in sorted(runtime_pretool_gates):
         path = args.hooks_dir / gate
         try:
-            source = path.read_text()
-        except OSError as error:
+            # 显式 UTF-8：gate 脚本含中文注释，Windows 默认 cp936 解码会抛
+            # UnicodeDecodeError——它是 ValueError 子类，只捕 OSError 接不住。
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as error:
             print(f"审计覆盖检查: 无法读取运行时 Gate {path}: {error}", file=sys.stderr)
             failed = True
             continue
