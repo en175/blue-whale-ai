@@ -466,9 +466,9 @@ export default function CharacterLibrary({
         throw new Error('invalid name');
       }
       try {
-        // callback_url 指向前端落地页：上游刷脸完成后跳转（手机端提示「请于 PC 端查看」）
+        // CallbackURL 指向前端落地页：上游刷脸完成后跳转（手机端提示「请于 PC 端查看」）
         const session = await createVisualValidateSession(
-          { Name: name, callback_url: `${window.location.origin}/auth-success` },
+          { Name: name, CallbackURL: `${window.location.origin}/auth-success` },
           { silent: true },
         );
         setShowCreateModal(false);

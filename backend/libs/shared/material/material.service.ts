@@ -35,7 +35,7 @@ export const MATERIAL_ACTIONS = [
 
 export type MaterialAction = (typeof MATERIAL_ACTIONS)[number];
 
-// 真人会话的 callback_url 由前端传入（指向刷脸完成后的落地提示页），
+// 真人会话的 CallbackURL 由前端传入（指向刷脸完成后的落地提示页），
 // 本层纯透传不改动；未传时由上游按自身默认行为处理。
 
 @Injectable()

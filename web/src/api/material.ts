@@ -280,7 +280,7 @@ export function deleteAsset(id: string) {
 
 /** 创建真人认证会话（返回 H5Link + BytedToken，直接格式无信封；silent 时由页面层提示） */
 export function createVisualValidateSession(
-  params?: { Name?: string; ProjectName?: string; callback_url?: string },
+  params?: { Name?: string; ProjectName?: string; CallbackURL?: string },
   opts?: { silent?: boolean },
 ) {
   return materialRequest<VisualValidateSessionResult>(

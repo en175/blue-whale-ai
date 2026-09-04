@@ -95,22 +95,22 @@ describe("MaterialService —— 纯过境调用", () => {
     });
   });
 
-  it("CreateVisualValidateSession 纯透传（前端传入的 callback_url 原样保留）", async () => {
+  it("CreateVisualValidateSession 纯透传（前端传入的 CallbackURL 原样保留）", async () => {
     const calls = stubFetch(() => json({ BytedToken: "bt-1", H5Link: "https://h5" }));
     const service = new MaterialService();
     await service.callAction(AUTH, "CreateVisualValidateSession", {
       Name: "真人组",
-      callback_url: "https://web.test/auth-success",
+      CallbackURL: "https://web.test/auth-success",
       ProjectName: "p",
     });
     expect(JSON.parse(String(calls[0].init.body))).toEqual({
       Name: "真人组",
-      callback_url: "https://web.test/auth-success",
+      CallbackURL: "https://web.test/auth-success",
       ProjectName: "p",
     });
   });
 
-  it("CreateVisualValidateSession 未传 callback_url 时也纯透传", async () => {
+  it("CreateVisualValidateSession 未传 CallbackURL 时也纯透传", async () => {
     const calls = stubFetch(() => json({ BytedToken: "bt-1", H5Link: "https://h5" }));
     const service = new MaterialService();
     await service.callAction(AUTH, "CreateVisualValidateSession", {
