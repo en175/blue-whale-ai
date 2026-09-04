@@ -39,7 +39,7 @@
   top: 0;
   z-index: 5;
   /* Header 贴合素材区顶部，滚动后由伪元素提供整条玻璃表面。 */
-  padding: var(--spacing-2xl);
+  padding: var(--spacing-xl);
   margin: 0;
   border: 0;
   border-radius: 0;
