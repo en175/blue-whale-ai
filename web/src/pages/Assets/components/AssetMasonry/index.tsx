@@ -271,7 +271,8 @@ function AssetCard({
   onDelete,
   selected,
   onToggleSelect,
-}: Pick<AssetMasonryProps, 'onPreview' | 'onDelete' | 'onToggleSelect'> & {
+  libraryMode,
+}: Pick<AssetMasonryProps, 'onPreview' | 'onDelete' | 'onToggleSelect' | 'libraryMode'> & {
   asset: AssetRecord;
   selected: boolean;
 }) {
@@ -286,7 +287,7 @@ function AssetCard({
 
   return (
     <div
-      className={styles.card}
+      className={`${styles.card} ${libraryMode ? styles.libraryCard : ''}`}
       role="button"
       tabIndex={0}
       aria-label={isSelectable ? `选择${typeLabel[asset.type]}素材` : `查看${typeLabel[asset.type]}资产详情`}
@@ -482,6 +483,7 @@ const AssetMasonry = memo(function AssetMasonry({
         onDelete={onDelete}
         selected={!!onToggleSelect && !!selectedIds?.has(String(data.asset.id))}
         onToggleSelect={onToggleSelect}
+        libraryMode={libraryMode}
       />
     );
   }, [libraryMode, onDelete, onPreview, onUpload, onToggleSelect, selectedIds]);
@@ -499,7 +501,7 @@ const AssetMasonry = memo(function AssetMasonry({
     items: measured ? items : EMPTY_ITEMS,
     render: renderCard,
     onRender,
-    className: styles.masonry,
+    className: `${styles.masonry} ${libraryMode ? styles.libraryMasonry : ''}`,
     containerRef: gridRef,
     itemKey: (item) => (item.kind === 'upload' ? 'upload' : String(item.asset.id)),
     itemHeightEstimate: 240,

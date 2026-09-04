@@ -173,8 +173,8 @@
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 2px;
-  border-radius: 12px 12px 0 0;
-  overflow: hidden;
+  border-radius: 0;
+  overflow: visible;
 }
 
 .empty {
@@ -188,7 +188,7 @@
 
 .skeletonGrid .cardSkeleton {
   aspect-ratio: 1 / 1;
-  border-radius: 0;
+  border-radius: var(--radius-md);
   background: var(--asset-upload-surface);
   border: 1px solid var(--asset-upload-border);
   box-shadow: var(--asset-upload-shadow);
@@ -199,6 +199,12 @@
   width: 100%;
   border-radius: 12px 12px 0 0;
   overflow: hidden;
+}
+
+/* /library 的每张瀑布流卡片独立圆角，避免外层网格裁切卡片阴影。 */
+.libraryMasonry {
+  border-radius: 0;
+  overflow: visible;
 }
 
 .masonry .card {
@@ -224,6 +230,11 @@
   box-shadow: var(--asset-glass-shadow);
   cursor: pointer;
   transition: all var(--transition-normal);
+}
+
+.libraryCard {
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
 .card:hover {
@@ -257,7 +268,8 @@
 .libraryUploadCard,
 .libraryUploadCard:hover {
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-top-left-radius: 12px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
 .uploadCard .uploadThumb {
