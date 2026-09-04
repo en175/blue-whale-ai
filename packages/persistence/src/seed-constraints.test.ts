@@ -91,6 +91,8 @@ const COLUMN_NAMES = [
   "features",
   "enabled",
   "sort_order",
+  "channel_parser",
+  "request_mapping",
 ];
 
 describe("002_seed.sql 满足 001_baseline.sql 的 NOT NULL 约束", () => {

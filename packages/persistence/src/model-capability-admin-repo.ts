@@ -23,6 +23,8 @@ export interface AdminModelCapabilityRow {
   default_aspect_ratio: string;
   default_duration: number | null;
   features: unknown;
+  channel_parser: string;
+  request_mapping: unknown;
   enabled: boolean;
   sort_order: number;
   created_at: string;
@@ -44,6 +46,8 @@ export interface CreateModelCapabilityInput {
   default_aspect_ratio?: string;
   default_duration?: number | null;
   features?: unknown;
+  channel_parser?: string;
+  request_mapping?: unknown;
   enabled?: boolean;
 }
 
@@ -60,6 +64,8 @@ export interface UpdateModelCapabilityInput {
   default_aspect_ratio?: string;
   default_duration?: number | null;
   features?: unknown;
+  channel_parser?: string;
+  request_mapping?: unknown;
   enabled?: boolean;
   sort_order?: number;
 }
@@ -112,6 +118,11 @@ function toRow(row: any): AdminModelCapabilityRow {
     default_aspect_ratio: row.default_aspect_ratio,
     default_duration: row.default_duration,
     features: row.features,
+    channel_parser:
+      typeof row.channel_parser === "string" && row.channel_parser.length > 0
+        ? row.channel_parser
+        : "seedream",
+    request_mapping: row.request_mapping ?? null,
     enabled: row.enabled,
     sort_order: row.sort_order,
     created_at: new Date(row.gmt_create).toISOString(),
@@ -202,6 +213,8 @@ export function createModelCapabilityAdminRepo(
             default_aspect_ratio: input.default_aspect_ratio ?? "",
             default_duration: input.default_duration ?? null,
             features: (input.features ?? {}) as Prisma.InputJsonValue,
+            channel_parser: input.channel_parser ?? "seedream",
+            request_mapping: nullableJson(input.request_mapping),
             enabled: input.enabled ?? true,
             sort_order: nextSort,
           },
@@ -238,6 +251,9 @@ export function createModelCapabilityAdminRepo(
       if (input.default_duration !== undefined)
         data.default_duration = input.default_duration;
       if (input.features !== undefined) data.features = input.features;
+      if (input.channel_parser !== undefined) data.channel_parser = input.channel_parser;
+      if (input.request_mapping !== undefined)
+        data.request_mapping = nullableJson(input.request_mapping);
       if (input.enabled !== undefined) data.enabled = input.enabled;
       if (input.sort_order !== undefined) data.sort_order = input.sort_order;
 

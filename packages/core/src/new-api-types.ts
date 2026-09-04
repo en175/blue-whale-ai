@@ -73,6 +73,7 @@ export interface NewApiImageInput {
   model: string;
   prompt: string;
   size?: string | null;
+  quality?: string;
   n: number;
   webSearch?: boolean;
   sequential?: boolean;
@@ -91,6 +92,7 @@ export interface NewApiImageEditInput {
   fileName?: string;
   images?: Array<{ blob: Blob; fileName: string }>;
   size?: string | null;
+  quality?: string;
   n: number;
   webSearch?: boolean;
   sequential?: boolean;
