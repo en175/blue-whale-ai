@@ -47,6 +47,8 @@ async function ensureMedia(page: Page): Promise<GeneratedMedia> {
     out['portrait.png'] = { dataUrl: png(900, 1600, '#5d2f62'), contentType: 'image/png' };
     out['square.png'] = { dataUrl: png(800, 800, '#62522f'), contentType: 'image/png' };
     out['extreme-tall.png'] = { dataUrl: png(100, 1000, '#2f6262'), contentType: 'image/png' };
+    out['narrow-10.png'] = { dataUrl: png(10, 1000, '#2f6262'), contentType: 'image/png' };
+    out['narrow-1.png'] = { dataUrl: png(1, 1000, '#2f6262'), contentType: 'image/png' };
     out['extreme-wide.png'] = { dataUrl: png(1000, 100, '#623a2f'), contentType: 'image/png' };
     out['small.png'] = { dataUrl: png(50, 50, '#3a2f62'), contentType: 'image/png' };
     out['unknown.png'] = { dataUrl: png(1600, 900, '#2f3d62'), contentType: 'image/png' };
@@ -685,3 +687,203 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
   await page.screenshot({ path: join(evidenceDir, 'regression.png') });
   expect(smokeFailures(tracking)).toEqual([]);
 });
+
+
+/** 使用真实滚轮和 Canvas 变换量测屏幕 CSS 像素，禁止以局部字号冒充屏幕尺寸。 */
+async function titleMetrics(page: Page, id: string) {
+  return node(page, id).evaluate((el) => {
+    const viewport = document.querySelector('.react-flow__viewport')!;
+    const zoom = new DOMMatrixReadOnly(getComputedStyle(viewport).transform).a;
+    const row = el.querySelector<HTMLElement>('[data-testid="media-title"]')!;
+    const name = row.querySelector<HTMLElement>('[title]')!;
+    const meta = row.lastElementChild as HTMLElement;
+    const icon = row.querySelector('svg')!;
+    const content = el.querySelector<HTMLElement>('[data-testid="media-content"]')!;
+    return {
+      zoom,
+      name: parseFloat(getComputedStyle(name).fontSize) * zoom,
+      meta: parseFloat(getComputedStyle(meta).fontSize) * zoom,
+      icon: icon.getBoundingClientRect().width,
+      contentOffset: (content.getBoundingClientRect().top - el.getBoundingClientRect().top) / zoom,
+      position: (el as HTMLElement).style.transform,
+      text: row.textContent,
+    };
+  });
+}
+
+async function zoomTo(page: Page, zoom: number) {
+  const current = (await titleMetrics(page, 'n-landscape')).zoom;
+  await page.mouse.move(1900, 1550);
+  await page.mouse.wheel(0, Math.log2(current / zoom) / 0.002);
+  await expect.poll(async () => Math.abs((await titleMetrics(page, 'n-landscape')).zoom - zoom)).toBeLessThan(0.002);
+}
+
+test('标题分段缩放：三类媒体屏幕尺寸符合规格且内容锚点不移动', async ({ page }) => {
+  const tracking = await setupPage(page);
+  await page.goto('/canvas?project=project-1');
+  await waitImagesLoaded(page);
+  const ids = ['n-landscape', 'n-video', 'n-audio'];
+  const baseline = await Promise.all(ids.map((id) => titleMetrics(page, id)));
+  const evidence = [];
+  for (const [zoom, name, meta, icon] of [
+    [0.5, 8, 7.3333, 9.3333], [0.63, 10.08, 9.24, 11.76],
+    [0.75, 12, 11, 14], [1, 12, 11, 14], [1.25, 15, 13.75, 17.5],
+    [1.5, 16, 14, 18], [8, 16, 14, 18],
+  ]) {
+    await zoomTo(page, zoom);
+    for (const [index, id] of ids.entries()) {
+      const actual = await titleMetrics(page, id);
+      evidence.push({ id, expectedZoom: zoom, ...actual });
+      expect(Math.abs(actual.name - name), `${id} 名称 @ ${zoom}`).toBeLessThan(0.04);
+      expect(Math.abs(actual.meta - meta), `${id} 元信息 @ ${zoom}`).toBeLessThan(0.04);
+      expect(Math.abs(actual.icon - icon), `${id} 图标 @ ${zoom}`).toBeLessThan(0.04);
+      expect(actual.contentOffset).toBeCloseTo(baseline[index].contentOffset, 2);
+      expect(actual.position).toBe(baseline[index].position);
+      expect(actual.text).toBe(baseline[index].text);
+    }
+  }
+  writeFileSync(join(evidenceDir, 'title-scaling.json'), `${JSON.stringify(evidence, null, 2)}\n`);
+  expect(smokeFailures(tracking)).toEqual([]);
+});
+
+
+async function titleLayout(page: Page, id: string) {
+  return node(page, id).evaluate((el) => {
+    const row = el.querySelector<HTMLElement>('[data-testid="media-title"]')!;
+    const name = row.querySelector<HTMLElement>('[title]')!;
+    const meta = row.lastElementChild as HTMLElement;
+    const content = el.querySelector('[data-testid="media-content"]')!.getBoundingClientRect();
+    const bounds = row.getBoundingClientRect();
+    const button = [...el.querySelectorAll('button')].find((b) => b.textContent === '重新编辑');
+    const toolbar = button?.parentElement?.getBoundingClientRect();
+    return {
+      row: bounds.toJSON(), content: content.toJSON(),
+      elements: [name, meta, row.querySelector('svg')!].map((item) => {
+        const style = getComputedStyle(item);
+        const range = document.createRange();
+        range.selectNodeContents(item);
+        return {
+          box: item.getBoundingClientRect().toJSON(),
+          glyphHeight: item.textContent ? range.getBoundingClientRect().height : 0,
+          overflow: style.overflowX, ellipsis: style.textOverflow, whiteSpace: style.whiteSpace,
+          truncated: item.scrollWidth > item.clientWidth,
+        };
+      }),
+      toolbar: toolbar?.toJSON(), text: meta.textContent,
+      handleMidY: (() => {
+        const h = el.querySelector('.react-flow__handle-right')!.getBoundingClientRect();
+        return h.y + h.height / 2;
+      })(),
+    };
+  });
+}
+
+for (const selectedId of ['n-landscape', 'n-video', 'n-audio']) {
+test(`标题排版：${selectedId} 工具栏避让及窄卡片单行截断`, async ({ page }) => {
+  const tracking = await setupPage(page);
+  await page.goto('/canvas?project=project-1');
+  await waitImagesLoaded(page);
+  const selected = [selectedId];
+  await title(page, selectedId).click();
+  const toolbars = await Promise.all(selected.map(async (id) => (await titleLayout(page, id)).toolbar!));
+  const evidence = [];
+  for (const zoom of [0.5, 0.63, 0.75, 1, 1.25, 1.5, 8]) {
+    await zoomTo(page, zoom);
+    const actualZoom = (await titleMetrics(page, 'n-landscape')).zoom;
+    for (const id of [...selected, 'n-extreme-tall', 'n-audio-nodur', 'n-gen']) {
+      const layout = await titleLayout(page, id);
+      evidence.push({ id, zoom: actualZoom, ...layout });
+      expect(layout.row.width).toBeLessThanOrEqual(layout.content.width + 0.1);
+      expect(layout.row.bottom).toBeLessThanOrEqual(layout.content.top + 0.1);
+      for (const element of layout.elements) {
+        expect(element.box.left).toBeGreaterThanOrEqual(layout.row.left - 0.1);
+        expect(element.box.right).toBeLessThanOrEqual(layout.row.right + 0.1);
+        expect(element.box.top).toBeGreaterThanOrEqual(layout.row.top - 0.1);
+        expect(element.box.bottom).toBeLessThanOrEqual(layout.row.bottom + 0.1);
+        expect(element.glyphHeight).toBeLessThanOrEqual(element.box.height + 0.1);
+      }
+      for (const element of layout.elements.slice(0, 2)) {
+        expect(element.whiteSpace).toBe('nowrap');
+        expect(element.overflow).toBe('hidden');
+        expect(element.ellipsis).toBe('ellipsis');
+      }
+      expect(layout.elements[0].box.right).toBeLessThanOrEqual(layout.elements[1].box.left + 0.1);
+      if (id === 'n-extreme-tall' && zoom <= 1) {
+        expect(layout.elements.some((element) => element.truncated)).toBe(true);
+      }
+      if (id === 'n-audio-nodur' || id === 'n-gen') expect(layout.text).toBe('');
+      expect(Math.abs(layout.handleMidY - (layout.content.y + layout.content.height / 2))).toBeLessThan(0.2);
+      const index = selected.indexOf(id);
+      if (index >= 0) {
+        expect(layout.toolbar).toBeTruthy();
+        expect(layout.toolbar!.bottom).toBeLessThan(layout.row.top);
+        expect(layout.toolbar!.width / actualZoom).toBeCloseTo(toolbars[index].width, 1);
+        expect(layout.toolbar!.height / actualZoom).toBeCloseTo(toolbars[index].height, 1);
+      }
+    }
+    if (zoom === 0.63 || zoom === 1) await page.screenshot({ path: join(evidenceDir, `title-layout-${selectedId}-${zoom}.png`) });
+  }
+  writeFileSync(join(evidenceDir, `title-layout-${selectedId}.json`), `${JSON.stringify(evidence, null, 2)}\n`);
+  expect(smokeFailures(tracking)).toEqual([]);
+});
+
+}
+
+test('连续缩放：75%、100% 与三个独立封顶点两侧无尺寸跳变', async ({ page }) => {
+  const tracking = await setupPage(page);
+  await page.goto('/canvas?project=project-1');
+  await waitImagesLoaded(page);
+  const evidence = [];
+  for (const boundary of [0.75, 1, 14 / 11, 18 / 14, 16 / 12]) {
+    await zoomTo(page, boundary - 0.004);
+    const before = await Promise.all(['n-landscape', 'n-video', 'n-audio'].map((id) => titleMetrics(page, id)));
+    await zoomTo(page, boundary + 0.004);
+    const after = await Promise.all(['n-landscape', 'n-video', 'n-audio'].map((id) => titleMetrics(page, id)));
+    evidence.push({ boundary, before, after });
+    for (let index = 0; index < before.length; index += 1) {
+      for (const key of ['name', 'meta', 'icon'] as const) {
+        expect(after[index][key]).toBeGreaterThanOrEqual(before[index][key] - 0.04);
+        expect(after[index][key] - before[index][key]).toBeLessThan(0.15);
+      }
+    }
+  }
+  writeFileSync(join(evidenceDir, 'title-continuity.json'), `${JSON.stringify(evidence, null, 2)}\n`);
+  expect(smokeFailures(tracking)).toEqual([]);
+});
+
+
+for (const width of [10, 1]) {
+  test(`极窄真实图片 ${width}×1000：标题可见区域不越过内容边界`, async ({ page }) => {
+    const tracking = await setupPage(page);
+    const snapshot = structuredClone(fixture['GET /api/projects/project-1/snapshot']);
+    const body = snapshot.body as { data: { assets: Record<string, { width: number; access_url: string }> } };
+    body.data.assets['a-extreme-tall'].width = width;
+    body.data.assets['a-extreme-tall'].access_url = `https://e2e.media/narrow-${width}.png`;
+    await page.route('**/api/projects/project-1/snapshot', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify(body),
+    }));
+    await page.goto('/canvas?project=project-1');
+    await waitImagesLoaded(page);
+    const evidence = [];
+    for (const zoom of [0.5, 0.63, 0.75, 1]) {
+      await zoomTo(page, zoom);
+      const result = await title(page, 'n-extreme-tall').evaluate((row) => {
+        const bounds = row.getBoundingClientRect();
+        const content = row.parentElement!.querySelector('[data-testid="media-content"]')!.getBoundingClientRect();
+        const icon = row.querySelector('svg')!.getBoundingClientRect();
+        const hit = document.elementFromPoint(bounds.right + 1, icon.top + icon.height / 2);
+        return {
+          rowWidth: bounds.width, contentWidth: content.width,
+          overflowHit: hit !== null && row.contains(hit),
+          visibleAtProbe: bounds.right > 0 && bounds.right + 1 < innerWidth && icon.top > 0 && icon.bottom < innerHeight,
+        };
+      });
+      evidence.push({ zoom, ...result });
+      expect(result.visibleAtProbe).toBe(true);
+      expect(result.rowWidth).toBeLessThanOrEqual(result.contentWidth + 0.1);
+      expect(result.overflowHit).toBe(false);
+    }
+    writeFileSync(join(evidenceDir, `title-narrow-${width}.json`), `${JSON.stringify(evidence, null, 2)}\n`);
+    expect(smokeFailures(tracking)).toEqual([]);
+  });
+}
