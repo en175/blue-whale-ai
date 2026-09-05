@@ -89,6 +89,30 @@ describe("resolveAgentAsset", () => {
       // 视频的 mime 原样交出，不能被图片那条转码规则顺手改掉。
       expect(outcome).toMatchObject({ kind: "ok", value: { mime_type: "video/mp4" } });
     });
+
+    // TOS 对 SVG 做 x-tos-process 会挂死——2026-09-05 测试站实测 25 秒零字节返回。
+    // 绕开处理之后它原样吐字节，Agent 的嗅探认得出 <?xml，媒体白名单据此给不可重试的
+    // asset_format_unsupported，而不是让用户干等一轮再收一句「请重试」。
+    it("SVG 绕开图片处理——TOS 处理它会挂死", async () => {
+      const current = deps({
+        findAccessible: vi.fn().mockResolvedValue({
+          ...asset,
+          mime: "image/svg+xml",
+          storage_key: "uploads/7/image/logo.bin",
+        }),
+      });
+      const outcome = await resolveAgentAsset(
+        { asset_id: "123" },
+        { userId: "7", projectId: "9" },
+        current,
+      );
+
+      expect(current.sign).toHaveBeenCalledWith("uploads/7/image/logo.bin", {
+        forModelReading: false,
+      });
+      // mime 也要如实交出 svg，不能顺手报成 image/jpeg——那份 URL 吐的确实是 SVG。
+      expect(outcome).toMatchObject({ kind: "ok", value: { mime_type: "image/svg+xml" } });
+    });
   });
 
   it("rejects a request body that still carries the retired asset_version", () => {

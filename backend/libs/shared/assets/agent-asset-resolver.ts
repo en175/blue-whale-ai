@@ -101,7 +101,13 @@ export async function resolveAgentAsset(
   // 抬高那些上限只是把墙往后挪，下一张更大的图照样撞。降采样是从源头不再需要撞。
   //
   // 视频不动：TOS 的图片处理不适用，且视频走的是另一条理解链路。
-  const forModelReading = asset.type === "image";
+  // 存量 SVG 绕开图片处理（新上传已在 upload.ts 挡掉）。
+  //
+  // TOS 对 SVG 做 `x-tos-process` 会挂死——实测 25 秒零字节。跳过之后它原样吐字节，
+  // agent 的 `sniffSvg` 认得出 `<?xml`，媒体白名单据此给出 `asset_format_unsupported`
+  // （**不可重试**，文案直说换格式），而不是干等一轮再报一句没用的「请重试」。
+  const isSvg = (asset.mime ?? "").toLowerCase().includes("svg");
+  const forModelReading = asset.type === "image" && !isSvg;
   let signed: Awaited<ReturnType<AgentAssetResolverDeps["sign"]>>;
   try {
     signed = await deps.sign(asset.storage_key, { forModelReading });

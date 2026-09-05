@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { handleDedupAsset } from "./upload.js";
+import { handleDedupAsset, handlePresignAsset } from "./upload.js";
 
 const ASSET = {
   id: "526",
@@ -105,5 +105,58 @@ describe("handleDedupAsset（IKCNLS）", () => {
     await handleDedupAsset("9", { type: "video", mime: "video/mp4", size: 100, md5: VALID_MD5, project_id: "313" }, { projects, uploads } as never);
     expect(linkAssetToProject).toHaveBeenCalledTimes(2);
     expect(linkAssetToProject).toHaveBeenLastCalledWith({ userId: "9", assetId: "526", projectId: "313" });
+  });
+});
+
+describe("presign 的格式门（2026-09-05 深度回归）", () => {
+  const storage = () => ({
+    prepareUpload: vi.fn().mockResolvedValue({
+      storageKey: "uploads/7/image/x.jpg",
+      uploadUrl: "https://bucket.tos.test/put",
+      headers: {},
+      expiresIn: 900,
+    }),
+    inspectObject: vi.fn(),
+    makePublic: vi.fn(),
+    deleteMultiObjects: vi.fn(),
+  });
+
+  // TOS 对 SVG 做图片处理会挂死（测试站实测 25 秒零字节），所以不让它进库。
+  // 挡在上传口，用户拖文件的当下就知道要换格式。
+  it("SVG 在上传口就被挡下，且没有向存储要过预签名", async () => {
+    const s = storage();
+    const outcome = await handlePresignAsset(
+      "7",
+      { type: "image", mime: "image/svg+xml", size: 4096 },
+      s,
+    );
+    expect(outcome).toMatchObject({ code: 400 });
+    expect(s.prepareUpload).not.toHaveBeenCalled();
+  });
+
+  it("放行的图片仍然照常签", async () => {
+    const s = storage();
+    const outcome = await handlePresignAsset(
+      "7",
+      { type: "image", mime: "image/jpeg", size: 4096 },
+      s,
+    );
+    expect(outcome).toMatchObject({ code: 200 });
+    expect(s.prepareUpload).toHaveBeenCalledWith({
+      userId: "7",
+      type: "image",
+      mime: "image/jpeg",
+    });
+  });
+
+  // HEIC 是 iPhone 拍照的默认格式，TOS 转得动、模型读得了，不该被挡。
+  it("HEIC 放行——TOS 会把它转成 JPEG 给模型读", async () => {
+    const s = storage();
+    const outcome = await handlePresignAsset(
+      "7",
+      { type: "image", mime: "image/heic", size: 4096 },
+      s,
+    );
+    expect(outcome).toMatchObject({ code: 200 });
   });
 });

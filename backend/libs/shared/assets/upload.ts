@@ -50,6 +50,9 @@ export interface AssetUploadStorage {
   deleteMultiObjects(storageKeys: string[]): Promise<void>;
 }
 
+/** 读取链路处理不了的图片编码。见 validateUploadInput 里的理由。 */
+const UNSUPPORTED_IMAGE_MIMES = new Set(["image/svg+xml", "image/svg"]);
+
 const MAX_BYTES = {
   image: 20 * 1024 * 1024,
   video: 200 * 1024 * 1024,
@@ -66,6 +69,17 @@ function validateUploadInput(input: PresignAssetInput) {
   }
   if (!input.mime.startsWith(`${input.type}/`)) {
     return fail(400, "文件类型与声明类型不匹配");
+  }
+  // SVG 在这里就挡住，不让它进库。
+  //
+  // 它不是「模型读不懂」那么简单：给模型读的图要过 TOS 的 `x-tos-process`，而 TOS 对 SVG
+  // **挂死**——实测 25 秒零字节返回（2026-09-05，测试站）。于是 agent 的探测既取不到字节
+  // 也等不到超时，白白占住一次读取。库里 21 份用户传的 SVG 今天全在走这条路。
+  //
+  // 挡在上传口而不是读取时，用户在拖文件的当下就知道要换格式，而不是等到 Agent 说
+  // 「素材探测失败，请重试」——那句话既不准确，重试也没有用。
+  if (UNSUPPORTED_IMAGE_MIMES.has(input.mime.toLowerCase())) {
+    return fail(400, "这个图片格式读不了。请用 JPG、PNG、WebP 或 GIF。");
   }
   if (
     !Number.isInteger(input.size) ||
