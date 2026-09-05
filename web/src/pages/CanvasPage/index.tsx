@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { newNodeId } from './nodeId';
+import type { MediaDims } from './components/MediaNode/mediaContentSize';
 import {
   isMediaExtractNodeId,
   mediaExtractNodeId,
@@ -397,6 +398,7 @@ export default function CanvasPage() {
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
+          onMediaDims: handleMediaDims,
         };
         break;
       case 'productNode':
@@ -619,11 +621,16 @@ export default function CanvasPage() {
       if (data.genStatus) return node;
       if (typeof data.src === 'string' && (data.src as string).startsWith('blob:')) return node;
       const aid = (data.assetId ?? data.asset_id ?? data.assetID) as string | number | undefined;
-      const url = aid != null && aid !== '' ? snapshotAssets[String(aid)]?.access_url : undefined;
+      const asset = aid != null && aid !== '' ? snapshotAssets[String(aid)] : undefined;
+      const url = asset?.access_url;
       if (url) {
-        return data.src === url && !data.assetMissing
+        // 水合即回填资产字典里的真实尺寸：前端数据足够时不再经历 方形→实测 跳变与多余自动保存
+        const fill: Record<string, number> = {};
+        if (typeof data.width !== 'number' && typeof asset?.width === 'number') fill.width = asset.width;
+        if (typeof data.height !== 'number' && typeof asset?.height === 'number') fill.height = asset.height;
+        return data.src === url && !data.assetMissing && Object.keys(fill).length === 0
           ? node
-          : { ...node, data: { ...data, src: url, assetMissing: undefined } };
+          : { ...node, data: { ...data, ...fill, src: url, assetMissing: undefined } };
       }
       return data.assetMissing ? node : { ...node, data: { ...data, assetMissing: true } };
     }
@@ -1155,6 +1162,7 @@ export default function CanvasPage() {
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
+          onMediaDims: handleMediaDims,
         },
       },
     ]);
@@ -1252,6 +1260,7 @@ export default function CanvasPage() {
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
+          onMediaDims: handleMediaDims,
         },
       };
     });
@@ -1305,6 +1314,19 @@ export default function CanvasPage() {
     );
   };
 
+  /** 浏览器实测媒体尺寸回填：仅写缺失/不一致字段，避免触发无谓自动保存 */
+  const handleMediaDims = (nodeId: string, dims: MediaDims) => {
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    if (!node) return;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    const patch: Record<string, unknown> = {};
+    if (data.width !== dims.width) patch.width = dims.width;
+    if (data.height !== dims.height) patch.height = dims.height;
+    if (typeof dims.duration === 'number' && typeof data.duration !== 'number') patch.duration = dims.duration;
+    if (Object.keys(patch).length === 0) return;
+    patchMediaNode(nodeId, patch);
+  };
+
   /** 轮询函数引用（供水合恢复调用，避免声明顺序依赖） */
   const pollJobRef = useRef<(nodeId: string, jobId: number | string) => void>(() => {});
 
@@ -1349,6 +1371,7 @@ export default function CanvasPage() {
               assetId: detail.asset?.id,
               width: detail.asset?.width ?? undefined,
               height: detail.asset?.height ?? undefined,
+              duration: detail.asset?.duration ?? undefined,
             });
             return;
           }
@@ -1408,6 +1431,7 @@ export default function CanvasPage() {
         mediaType: type,
         fileName: type === 'video' ? '视频生成中' : type === 'audio' ? '音频生成中' : '图片生成中',
         prompt: parameters.prompt,
+        targetRatio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
         toolMode,
         onDelete: (id: string) => {
           setMediaNodes((prev) => prev.filter((n) => n.id !== id));
@@ -1424,6 +1448,7 @@ export default function CanvasPage() {
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
         onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
+        onMediaDims: handleMediaDims,
       },
     };
     setMediaNodes((prev) => [...prev, node]);
@@ -2196,6 +2221,7 @@ export default function CanvasPage() {
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
               onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
+              onMediaDims: handleMediaDims,
             },
           };
           pendingNodeIdsRef.current.add(node.id);

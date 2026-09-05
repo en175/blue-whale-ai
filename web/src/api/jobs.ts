@@ -23,6 +23,8 @@ export interface JobAsset {
   type: GenerationJobType;
   width?: number | null;
   height?: number | null;
+  /** 时长秒（视频/音频产物；后端未必返回，缺失时前端用浏览器实测补齐） */
+  duration?: number | null;
 }
 
 /**

@@ -1,9 +1,91 @@
 /* ============================================
  * MediaNode - 画布图片/视频节点
+ * 图片/视频：外部标题 + 独立圆角内容主体；音频保留卡片布局
  * ============================================ */
 
 .wrapper {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+/* 外部常驻标题行（宽度随内容主体） */
+.titleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0 2px 6px;
+  box-sizing: border-box;
+}
+
+.titleLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.titleName {
+  font-size: 11px;
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.titleMeta {
+  font-size: 10px;
+  color: #999;
+  white-space: nowrap;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* 独立圆角内容主体：弱化边框，尺寸由 mediaContentBox 显式给定
+ * 不用 overflow:hidden（会裁掉探出边缘的连接点并吃掉其命中），圆角改由内容元素自身承担 */
+.contentCard {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background-color: #111;
+  transition: border-color 0.2s ease;
+}
+
+.contentCard .mediaImage,
+.contentCard .mediaVideo,
+.contentCard .genBox,
+.contentCard .missingBox {
+  border-radius: 11px;
+}
+
+.wrapper:hover .contentCard {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* 连接点：平时隐藏，悬停/选中/连接中可见（锚定内容区左右中点，Handle 在 .contentCard 内） */
+.handle {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.wrapper:hover .handle,
+.wrapper.selected .handle,
+.handle:global(.connectingfrom),
+.handle:global(.connectingto),
+.handle:global(.valid) {
+  opacity: 1;
+}
+
+/* 占位区在内容主体内填满（音频卡片路径仍用下方固定尺寸基础样式） */
+.contentCard .genBox,
+.contentCard .missingBox {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 /* 选中态悬浮工具条（节点上方居中） */
@@ -121,19 +203,15 @@
 
 .mediaImage {
   display: block;
-  max-width: 280px;
-  max-height: 360px;
-  width: auto;
-  height: auto;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
 .mediaVideo {
   display: block;
-  max-width: 280px;
-  max-height: 360px;
-  width: auto;
-  height: auto;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   background-color: #000;
 }

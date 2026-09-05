@@ -347,6 +347,35 @@ test("rejects unknown executable paths instead of escalating to full", async () 
 // IKACK2：`web/scripts/` 是本轮新开的目录，此前没有任何规则覆盖，于是它命中 EXECUTABLE_FILE
 // 却分不了类，`--stage pr` 必抛 UNCLASSIFIED_PATH。补分类而不是放宽那条规矩——「归不了类就停下」
 // 本身是对的，缺的是这一条归属。
+// IKDIDO：web/e2e 的 Playwright 规格与 fixture 此前没有归类规则，提交后 PR 阶段必被兜底升级为
+// full（`unclassified PR scope requires full verification`）。补分类而不是接受升级——它们的题材是
+// web 产品行为，定向验证就是 web 那套（typecheck + lint + vitest）。
+test("classifies web e2e specs and fixtures as web", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  const expected = {
+    tier: "scoped",
+    areas: ["web"],
+    reasons: ["known source paths changed"],
+  };
+  assert.deepEqual(
+    classifyChanges(["web/e2e/media-node-layout.e2e.ts", "web/e2e/fixtures/media-node-layout.json"]),
+    expected,
+  );
+  assert.deepEqual(
+    classifyChanges(["web/e2e/media-node-layout.e2e.ts"], { stage: "pr" }),
+    expected,
+  );
+
+  // 与 web 源码同区：一起改时不该分裂出第二个 area。
+  assert.deepEqual(
+    classifyChanges(["web/e2e/media-node-layout.e2e.ts", "web/src/pages/CanvasPage/index.tsx"], {
+      stage: "pr",
+    }),
+    expected,
+  );
+});
+
 test("classifies web tooling scripts as web", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
