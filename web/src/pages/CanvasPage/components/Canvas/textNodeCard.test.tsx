@@ -68,7 +68,7 @@ async function finishGesture() {
  * 每个用例只挂载一次：画布对同 id 文本节点只同步新增与移除，重复渲染不会替换已注入的回调。
  */
 async function renderText(
-  overrides: { html?: string; toolMode?: 'drag' | 'select'; selected?: boolean } = {},
+  overrides: { html?: string; toolMode?: 'drag' | 'select'; selected?: boolean; zoom?: number } = {},
 ): Promise<TextCallbacks> {
   const callbacks: TextCallbacks = {
     onChange: vi.fn(),
@@ -81,6 +81,7 @@ async function renderText(
   const next: ComponentProps<typeof FlowCanvas> = {
     ...props,
     toolMode,
+    viewport: { x: 0, y: 0, zoom: overrides.zoom ?? 1 },
     textNodes: [{
       id: TEXT_ID,
       type: 'textNode',
@@ -261,5 +262,44 @@ describe('Canvas 文本节点卡片', () => {
     const remove = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === '删除')!;
     await act(async () => { remove.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
     expect(callbacks.onDelete).toHaveBeenCalledWith(TEXT_ID);
+  });
+});
+
+describe('Canvas 文本节点标题分段缩放', () => {
+  /** 节点根元素（titleRow 的父级）内联样式携带的分段缩放变量（局部值 = 屏幕目标值 ÷ 倍率） */
+  function titleVar(name: '--node-title-name' | '--node-title-icon') {
+    const wrapper = title().parentElement as HTMLElement;
+    return parseFloat(wrapper.style.getPropertyValue(name));
+  }
+
+  it.each([
+    [0.5, 8, 9.3333], [0.63, 10.08, 11.76], [0.75, 12, 14], [1, 12, 14],
+    [1.25, 15, 17.5], [1.5, 16, 18], [8, 16, 18],
+  ] as const)('倍率 %s 下名称与图标按父规格补偿为屏幕 %s/%s px', async (zoom, nameScreen, iconScreen) => {
+    await renderText({ zoom, html: '<p>一段正文</p>' });
+    expect(titleVar('--node-title-name') * zoom).toBeCloseTo(nameScreen, 2);
+    expect(titleVar('--node-title-icon') * zoom).toBeCloseTo(iconScreen, 2);
+    // 名称与正文大小策略独立：正文编辑区不随标题变量缩放
+    expect(title().textContent).toBe('文本节点');
+  });
+
+  it('缩放与选中、拖动组合时位置与标题稳定，操作条仍可达', async () => {
+    await renderText({ selected: true, zoom: 0.63, html: '<p>组合操作正文</p>' });
+    expect(node().style.transform).toBe('translate(50px,60px)');
+
+    await mouse('mousedown', title());
+    await mouse('mousemove', window, 120, 110);
+    await renderText({ selected: true, zoom: 0.75, html: '<p>组合操作正文</p>' });
+    await mouse('mousemove', window, 160, 140);
+    await finishGesture();
+    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ id: TEXT_ID }));
+    const draggedPosition = node().style.transform;
+    expect(draggedPosition).not.toBe('translate(50px,60px)');
+
+    await renderText({ selected: true, zoom: 1.5, html: '<p>组合操作正文</p>' });
+    expect(node().style.transform).toBe(draggedPosition);
+    expect(title().textContent).toBe('文本节点');
+    expect(node().textContent).toContain('组合操作正文');
+    expect(actions()).toContain('添加到对话');
   });
 });
