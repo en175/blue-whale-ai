@@ -1,9 +1,11 @@
 /* ============================================
- * 媒体内容区尺寸规则：短边 280、长边按比例且不超过 840
+ * 媒体内容区尺寸规则：图片/视频短边 280、长边按比例且不超过 840；音频恒为 280×280 方形
  * 真实宽高优先；缺失时用目标比例（生成参数透传，非真实分辨率）；均未知回退 280×280
  * ============================================ */
 
 export interface MediaContentSizeInput {
+  /** 媒体类型：音频无可视宽高，内容区恒方形 */
+  mediaType?: 'image' | 'video' | 'audio';
   /** 真实媒体宽度（像素），来自资产数据或浏览器实测 */
   width?: number;
   /** 真实媒体高度（像素） */
@@ -37,7 +39,10 @@ function parseRatio(ratio?: string): number | null {
   return w / h;
 }
 
-export function mediaContentBox({ width, height, ratio }: MediaContentSizeInput): MediaContentBox {
+export function mediaContentBox({ mediaType, width, height, ratio }: MediaContentSizeInput): MediaContentBox {
+  if (mediaType === 'audio') {
+    return { width: MEDIA_CONTENT_SHORT_SIDE, height: MEDIA_CONTENT_SHORT_SIDE };
+  }
   let r: number | null = null;
   if (typeof width === 'number' && typeof height === 'number' && width > 0 && height > 0) {
     r = width / height;

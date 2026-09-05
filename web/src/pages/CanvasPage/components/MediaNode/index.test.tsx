@@ -243,6 +243,59 @@ describe('MediaNode external title (image/video)', () => {
   });
 });
 
+describe('MediaNode audio layout', () => {
+  it('uses the external title and content body like image/video', async () => {
+    await renderNode('audio', { selected: false, data: { fileName: '配音.wav', duration: 37.6 } });
+    expect(titleRow().textContent).toContain('配音.wav');
+    expect(contentCard()).toBeTruthy();
+  });
+
+  it('shows only the real duration in the title, never size or resolution', async () => {
+    await renderNode('audio', {
+      selected: false,
+      data: { fileName: '配音.wav', duration: 37.6, size: 4.2 * 1024 * 1024, width: 1600, height: 900 },
+    });
+    const title = titleRow().textContent ?? '';
+    expect(title).toContain('38s');
+    expect(title).not.toContain('MB');
+    expect(title).not.toContain('×');
+  });
+
+  it('leaves the title meta blank when duration is unknown', async () => {
+    await renderNode('audio', { selected: false, data: { fileName: '配音.wav' } });
+    const meta = titleRow().lastElementChild?.textContent ?? '';
+    expect(meta.trim()).toBe('');
+  });
+
+  it('keeps the content body square regardless of dims or target ratio', async () => {
+    await renderNode('audio', { selected: false, data: { width: 1600, height: 900, targetRatio: '16:9' } });
+    expect(parseFloat(contentCard().style.width)).toBe(280);
+    expect(parseFloat(contentCard().style.height)).toBe(280);
+  });
+
+  it('keeps player controls reachable and out of the node drag path', async () => {
+    await renderNode('audio', { selected: false });
+    const audio = mountNode.querySelector('audio');
+    expect(audio).toBeTruthy();
+    expect(audio!.getAttribute('controls')).not.toBeNull();
+    expect(audio!.className).toContain('nodrag');
+  });
+
+  it('keeps the square body for generating, failed and missing audio', async () => {
+    await renderNode('audio', { selected: false, genStatus: 'generating', progress: 0 });
+    expect(parseFloat(contentCard().style.width)).toBe(280);
+    expect(parseFloat(contentCard().style.height)).toBe(280);
+
+    await renderNode('audio', { selected: false, genStatus: 'failed', errorText: '视频没有音轨' });
+    expect(mountNode.textContent).toContain('视频没有音轨');
+    expect(parseFloat(contentCard().style.height)).toBe(280);
+
+    await renderNode('audio', { selected: false, data: { assetMissing: true } });
+    expect(mountNode.textContent).toContain('素材已被删除');
+    expect(parseFloat(contentCard().style.height)).toBe(280);
+  });
+});
+
 describe('MediaNode browser-measured dims fill-in', () => {
   it('reports real image dims on load when missing', async () => {
     const onMediaDims = vi.fn();

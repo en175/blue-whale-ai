@@ -1,7 +1,7 @@
 /* ============================================
- * MediaNode 媒体节点：图片/视频展示与操作手柄
- * 图片/视频：外部常驻标题 + 独立圆角内容主体（统一尺度）
- * 音频：保留现有卡片布局，后续子任务接入外部标题
+ * MediaNode 媒体节点：图片/视频/音频展示与操作手柄
+ * 统一外部常驻标题 + 独立圆角内容主体
+ * 内容区尺度：图片/视频按真实比例（短边 280、长边 ≤840），音频恒 280×280 方形
  * ============================================ */
 import { useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
@@ -16,6 +16,10 @@ import styles from './index.module.css';
 
 /** 连接点统一样式（锚定内容区左右中点） */
 const HANDLE_STYLE = { background: '#666', width: 10, height: 10, border: '2px solid #444' } as const;
+
+/** 真实时长文案（秒取整）；未知或非正返回空串，标题右侧据此留空 */
+const durationLabel = (duration?: number) =>
+  typeof duration === 'number' && duration > 0 ? `${Math.round(duration)}s` : '';
 
 interface MediaNodeData {
   src?: string;
@@ -162,8 +166,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     data.onMediaDims?.(id, dims);
   }, [data, id]);
 
-  const Icon = data.mediaType === 'video' ? Video : data.mediaType === 'audio' ? AudioLines : Image;
-  const label = data.mediaType === 'video' ? '视频' : data.mediaType === 'audio' ? '音频' : '图片';
+  const isAudio = data.mediaType === 'audio';
+  const Icon = data.mediaType === 'video' ? Video : isAudio ? AudioLines : Image;
   const toolbar = mediaNodeToolbarVisibility(data.mediaType);
   const isGenerating = data.genStatus === 'generating';
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
@@ -175,18 +179,23 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     isMediaExtraction,
   });
 
-  const isAudio = data.mediaType === 'audio';
-  const contentBox = mediaContentBox({ width: data.width, height: data.height, ratio: data.targetRatio });
+  const contentBox = mediaContentBox({
+    mediaType: data.mediaType,
+    width: data.width,
+    height: data.height,
+    ratio: data.targetRatio,
+  });
 
-  /** 标题右侧元信息：仅真实媒体数据（分辨率 + 视频时长），缺失项留空；目标比例/占位尺寸不展示，文件大小只在详情 */
-  const titleMeta = [
-    data.width && data.height ? `${data.width}×${data.height}` : '',
-    data.mediaType === 'video' && typeof data.duration === 'number' && data.duration > 0
-      ? `${Math.round(data.duration)}s`
-      : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  /** 标题右侧元信息：仅真实媒体数据，缺失项留空；目标比例/占位尺寸不展示，文件大小只在详情。
+   *  音频无可视分辨率，只显真实时长；图片/视频显分辨率，视频另加时长。 */
+  const titleMeta = isAudio
+    ? durationLabel(data.duration)
+    : [
+        data.width && data.height ? `${data.width}×${data.height}` : '',
+        data.mediaType === 'video' ? durationLabel(data.duration) : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
 
   /** 生成中 / 失败 / 素材缺失占位（音频与图片/视频共用内部内容） */
   const renderPlaceholder = () => {
@@ -289,90 +298,51 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         </div>
       )}
 
-      {isAudio ? (
-        /* 音频：保留现有卡片布局（外部标题与新尺寸规则由后续子任务接入） */
-        <>
-          {!data.isFirst && (
-            <Handle type="target" position={Position.Left} style={HANDLE_STYLE} />
-          )}
-          <div className={styles.card}>
-            <div className={styles.cardHeader}>
-              <div className={styles.labelGroup}>
-                <Icon size={13} strokeWidth={2} color="#888" />
-                <span className={styles.label}>{label}</span>
-              </div>
-              <div className={styles.headerRight}>
-                <span className={styles.fileName}>
-                  {data.fileName || ''}
-                </span>
-                {!isGenerating && !isGenDone && (
-                  <span className={styles.mediaMeta}>
-                    {typeof data.duration === 'number' && data.duration > 0
-                      ? ` ${Math.round(data.duration)}s`
-                      : ''}
-                    {typeof data.size === 'number'
-                      ? ` ${(data.size / 1024 / 1024).toFixed(1)}MB`
-                      : ''}
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className={styles.mediaContainer}>
-              {isGenerating || isGenDone || data.assetMissing ? (
-                renderPlaceholder()
-              ) : (
-                <div className={styles.audioBox}>
-                  <audio
-                    className={styles.mediaAudio}
-                    src={data.src}
-                    controls
-                    preload="metadata"
-                  />
-                </div>
-              )}
-            </div>
+      {/* 外部常驻标题 + 独立圆角内容主体（三类媒体共用；音频内容区恒方形） */}
+      <div className={styles.titleRow} data-testid="media-title">
+        <div className={styles.titleLeft}>
+          <Icon size={13} strokeWidth={2} color="#888" />
+          <span className={styles.titleName} title={data.fileName || undefined}>{data.fileName || ''}</span>
+        </div>
+        <span className={styles.titleMeta}>{titleMeta}</span>
+      </div>
+      <div className={styles.contentCard} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
+        {!data.isFirst && (
+          <Handle type="target" position={Position.Left} className={styles.handle} style={HANDLE_STYLE} />
+        )}
+        {isGenerating || isGenDone || data.assetMissing ? (
+          renderPlaceholder()
+        ) : isAudio ? (
+          <div className={styles.audioBox}>
+            {/* nodrag nopan：播放控件的按下与拖动不被节点拖拽/画布平移吞掉 */}
+            <audio
+              className={`${styles.mediaAudio} nodrag nopan`}
+              src={data.src}
+              controls
+              preload="metadata"
+            />
           </div>
-          <Handle type="source" position={Position.Right} style={HANDLE_STYLE} />
-        </>
-      ) : (
-        /* 图片/视频：外部常驻标题 + 独立圆角内容主体 */
-        <>
-          <div className={styles.titleRow} data-testid="media-title">
-            <div className={styles.titleLeft}>
-              <Icon size={13} strokeWidth={2} color="#888" />
-              <span className={styles.titleName} title={data.fileName || undefined}>{data.fileName || ''}</span>
-            </div>
-            <span className={styles.titleMeta}>{titleMeta}</span>
-          </div>
-          <div className={styles.contentCard} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
-            {!data.isFirst && (
-              <Handle type="target" position={Position.Left} className={styles.handle} style={HANDLE_STYLE} />
-            )}
-            {isGenerating || isGenDone || data.assetMissing ? (
-              renderPlaceholder()
-            ) : data.mediaType === 'video' ? (
-              <video
-                className={styles.mediaVideo}
-                src={data.src}
-                controls={isSelect}
-                preload="metadata"
-                onLoadedMetadata={handleVideoMetadata}
-                style={isSelect ? undefined : { pointerEvents: 'none' }}
-              />
-            ) : (
-              <img
-                className={styles.mediaImage}
-                src={data.src}
-                alt={data.fileName || 'image'}
-                draggable={false}
-                onLoad={handleImageLoad}
-                style={isSelect ? undefined : { pointerEvents: 'none' }}
-              />
-            )}
-            <Handle type="source" position={Position.Right} className={styles.handle} style={HANDLE_STYLE} />
-          </div>
-        </>
-      )}
+        ) : data.mediaType === 'video' ? (
+          <video
+            className={styles.mediaVideo}
+            src={data.src}
+            controls={isSelect}
+            preload="metadata"
+            onLoadedMetadata={handleVideoMetadata}
+            style={isSelect ? undefined : { pointerEvents: 'none' }}
+          />
+        ) : (
+          <img
+            className={styles.mediaImage}
+            src={data.src}
+            alt={data.fileName || 'image'}
+            draggable={false}
+            onLoad={handleImageLoad}
+            style={isSelect ? undefined : { pointerEvents: 'none' }}
+          />
+        )}
+        <Handle type="source" position={Position.Right} className={styles.handle} style={HANDLE_STYLE} />
+      </div>
 
       {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}
       {contextMenu &&

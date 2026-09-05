@@ -51,4 +51,17 @@ describe('mediaContentBox', () => {
     expectBox({ ratio: '0:9' }, 280, 280);
     expectBox({ ratio: '' }, 280, 280);
   });
+
+  it('keeps audio square regardless of dims or target ratio', () => {
+    expectBox({ mediaType: 'audio' }, 280, 280);
+    expectBox({ mediaType: 'audio', width: 1600, height: 900 }, 280, 280);
+    expectBox({ mediaType: 'audio', ratio: '16:9' }, 280, 280);
+    expectBox({ mediaType: 'audio', width: 100, height: 1000, ratio: '9:16' }, 280, 280);
+  });
+
+  it('still scales image/video when mediaType is given', () => {
+    expectBox({ mediaType: 'image', width: 1600, height: 900 }, 497.8, 280);
+    expectBox({ mediaType: 'video', width: 900, height: 1600 }, 280, 497.8);
+    expectBox({ mediaType: 'video', ratio: '16:9' }, 497.8, 280);
+  });
 });

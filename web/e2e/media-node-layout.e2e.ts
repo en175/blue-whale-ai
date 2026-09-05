@@ -1,8 +1,8 @@
 /* ============================================
- * media-node-layout 验收取证（IKDIDO）
+ * media-node-layout 验收取证（IKDIDO 图片/视频、IKDIDR 音频）
  * 真实浏览器（Playwright Chromium）量测媒体节点新布局：
- * 统一尺度、外部标题、未知→已知回填、状态保形、工具栏/连接点交互、视频真实播放
- * 媒体字节在浏览器内生成（canvas 导出 PNG / MediaRecorder 录 WebM），不依赖二进制 fixture
+ * 统一尺度、音频恒方形、外部标题、未知→已知回填、状态保形、工具栏/连接点交互、视频与音频真实播放
+ * 媒体字节在浏览器内生成（canvas 导出 PNG / MediaRecorder 录 WebM / 手写编码 WAV），不依赖二进制 fixture
  * ============================================ */
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -26,7 +26,7 @@ interface GeneratedMedia {
 
 let mediaCache: GeneratedMedia | null = null;
 
-/** 浏览器内生成真实媒体：精确尺寸 PNG + 一段约 0.9s 的 WebM（VP8，headless Chromium 可解码播放） */
+/** 浏览器内生成真实媒体：精确尺寸 PNG + 一段约 0.9s 的 WebM（VP8）+ 一段 2.4s 的 WAV，headless Chromium 均可解码播放 */
 async function ensureMedia(page: Page): Promise<GeneratedMedia> {
   if (mediaCache) return mediaCache;
   mediaCache = await page.evaluate(async () => {
@@ -91,6 +91,37 @@ async function ensureMedia(page: Page): Promise<GeneratedMedia> {
       r.readAsDataURL(blob);
     });
     out['sample.webm'] = { dataUrl, contentType: 'video/webm' };
+
+    // 音频：手写编码 2.4s 440Hz 单声道 16bit PCM WAV（不依赖音频硬件/MediaRecorder，时长确定）
+    const sampleRate = 48000;
+    const seconds = 2.4;
+    const frames = Math.floor(sampleRate * seconds);
+    const wav = new DataView(new ArrayBuffer(44 + frames * 2));
+    const ascii = (offset: number, text: string) => {
+      for (let i = 0; i < text.length; i += 1) wav.setUint8(offset + i, text.charCodeAt(i));
+    };
+    ascii(0, 'RIFF');
+    wav.setUint32(4, 36 + frames * 2, true);
+    ascii(8, 'WAVE');
+    ascii(12, 'fmt ');
+    wav.setUint32(16, 16, true);
+    wav.setUint16(20, 1, true);
+    wav.setUint16(22, 1, true);
+    wav.setUint32(24, sampleRate, true);
+    wav.setUint32(28, sampleRate * 2, true);
+    wav.setUint16(32, 2, true);
+    wav.setUint16(34, 16, true);
+    ascii(36, 'data');
+    wav.setUint32(40, frames * 2, true);
+    for (let i = 0; i < frames; i += 1) {
+      wav.setInt16(44 + i * 2, Math.round(Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 12000), true);
+    }
+    const wavBytes = new Uint8Array(wav.buffer);
+    let binary = '';
+    for (let i = 0; i < wavBytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...Array.from(wavBytes.subarray(i, i + 0x8000)));
+    }
+    out['tone.wav'] = { dataUrl: `data:audio/wav;base64,${btoa(binary)}`, contentType: 'audio/wav' };
     return out;
   });
   return mediaCache;
@@ -251,11 +282,21 @@ test('布局：统一尺度/外部标题/未知转已知/失败保形/位置不�
   // 未知尺寸节点：先 280×280 占位，浏览器实测回填后按真实 16:9 更新
   await expectBox(page, 'n-unknown', 497.78, 280, measurements);
   await expectBox(page, 'n-video', 497.78, 280, measurements);
+  // 音频：内容区恒 280×280 方形，时长已知/未知都不变形（IKDIDR）
+  await expectBox(page, 'n-audio', 280, 280, measurements);
+  await expectBox(page, 'n-audio-nodur', 280, 280, measurements);
 
   // 生成中按目标比例占位；轮询转失败后保形、真实错误文案与「重试」可达
   await expect(node(page, 'n-gen')).toContainText('账户余额不足，请充值后重试');
   await expect(node(page, 'n-gen').getByRole('button', { name: '重试' })).toBeVisible();
   await expectBox(page, 'n-gen', 497.78, 280, measurements);
+
+  // 音频生成中→失败：真实轮询转失败后仍方形，真实错误文案与「重试」可达；素材缺失同样方形
+  await expect(node(page, 'n-audio-gen')).toContainText('音频生成失败：模型超时');
+  await expect(node(page, 'n-audio-gen').getByRole('button', { name: '重试' })).toBeVisible();
+  await expectBox(page, 'n-audio-gen', 280, 280, measurements);
+  await expect(node(page, 'n-audio-missing')).toContainText('素材已被删除');
+  await expectBox(page, 'n-audio-missing', 280, 280, measurements);
 
   // 外部标题：真实分辨率/时长；文件大小不出现；目标比例不伪装为分辨率
   await expect(title(page, 'n-landscape')).toContainText('1600×900');
@@ -266,12 +307,22 @@ test('布局：统一尺度/外部标题/未知转已知/失败保形/位置不�
   await expect(title(page, 'n-unknown')).toContainText('1600×900');
   await expect(title(page, 'n-gen')).not.toContainText('16:9');
 
+  // 音频标题：名称 + 真实时长；文件大小留在详情；时长未知则右侧留空，不显示占位数字
+  await expect(title(page, 'n-audio')).toContainText('配音成品.wav');
+  await expect(title(page, 'n-audio')).toContainText('2s');
+  await expect(title(page, 'n-audio')).not.toContainText('MB');
+  await expect(title(page, 'n-audio')).not.toContainText('×');
+  expect(((await title(page, 'n-audio-nodur').textContent()) ?? '').trim()).toBe('历史音频缺时长.wav');
+
   // 节点位置不被加载/尺寸变化改写（含未知→已知跳变后与密集邻居）
   expect(await node(page, 'n-unknown').evaluate((el) => (el as HTMLElement).style.transform)).toContain(
     'translate(1400px, 620px)',
   );
   expect(await node(page, 'n-extreme-wide').evaluate((el) => (el as HTMLElement).style.transform)).toContain(
     'translate(0px, 620px)',
+  );
+  expect(await node(page, 'n-audio').evaluate((el) => (el as HTMLElement).style.transform)).toContain(
+    'translate(1200px, 1050px)',
   );
 
   // 浏览器实测尺寸经既有保存通路持久化（PUT body 是外层 JSON，nodes 为内嵌转义字符串）
@@ -400,6 +451,114 @@ test('视频：真实播放且控件可达', async ({ page }) => {  const tracki
   expect(smokeFailures(tracking)).toEqual([]);
 });
 
+test('音频：方形内容区/连接点锚定/播放控件不被拖动吞掉/工具栏不遮挡', async ({ page }) => {
+  const tracking = await setupPage(page);
+  await page.goto('/canvas?project=project-1');
+  await expect(page.locator('.react-flow')).toBeVisible();
+  await waitImagesLoaded(page);
+
+  const measurements: Record<string, unknown> = {};
+  const audioSource = node(page, 'n-audio').locator('.react-flow__handle-right');
+  const audioTarget = node(page, 'n-audio').locator('.react-flow__handle-left');
+
+  // 连接点平时隐藏（未悬停未选中）
+  await page.mouse.move(2000, 1700);
+  expect(await audioSource.evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
+
+  // 悬停显现，并锚定方形内容区左右中点
+  await card(page, 'n-audio').hover();
+  await expect
+    .poll(() => audioSource.evaluate((el) => getComputedStyle(el).opacity), { timeout: 3000 })
+    .toBe('1');
+  const box = (await card(page, 'n-audio').boundingBox())!;
+  const targetBox = (await audioTarget.boundingBox())!;
+  const sourceBox = (await audioSource.boundingBox())!;
+  const midY = box.y + box.height / 2;
+  measurements.contentBox = { x: box.x, y: box.y, width: box.width, height: box.height };
+  measurements.handle = {
+    targetMid: { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 },
+    sourceMid: { x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 },
+    contentMidY: midY,
+    contentLeftX: box.x,
+    contentRightX: box.x + box.width,
+  };
+  expect(Math.abs(targetBox.y + targetBox.height / 2 - midY)).toBeLessThanOrEqual(2);
+  expect(Math.abs(sourceBox.y + sourceBox.height / 2 - midY)).toBeLessThanOrEqual(2);
+  expect(Math.abs(targetBox.x + targetBox.width / 2 - box.x)).toBeLessThanOrEqual(6);
+  expect(Math.abs(sourceBox.x + sourceBox.width / 2 - (box.x + box.width))).toBeLessThanOrEqual(6);
+
+  // 播放控件可达：真实点击控件推进播放，且节点不被拖走
+  const audio = node(page, 'n-audio').locator('audio');
+  await expect(audio).toBeVisible();
+  expect(await audio.getAttribute('controls')).not.toBeNull();
+  const translateBefore = await node(page, 'n-audio').evaluate((el) => (el as HTMLElement).style.transform);
+  const control = (await audio.boundingBox())!;
+  await page.mouse.click(control.x + 12, control.y + control.height / 2);
+  await page.waitForFunction(
+    () => {
+      const a = document.querySelector('.react-flow__node[data-id="n-audio"] audio') as HTMLAudioElement | null;
+      return !!a && a.currentTime > 0.05;
+    },
+    undefined,
+    { timeout: 8000 },
+  );
+  measurements.playedTo = await audio.evaluate((a: HTMLAudioElement) => a.currentTime);
+  await audio.evaluate((a: HTMLAudioElement) => a.pause());
+  expect(await node(page, 'n-audio').evaluate((el) => (el as HTMLElement).style.transform)).toBe(translateBefore);
+
+  // 选中：工具栏在外部标题上方，不遮挡标题、内容与播放器；动作集合保持音频原有可达项
+  await title(page, 'n-audio').click();
+  const toolBtn = node(page, 'n-audio').getByRole('button', { name: '重新编辑' });
+  await expect(toolBtn).toBeVisible();
+  const toolbarBox = (await toolBtn.locator('xpath=..').boundingBox())!;
+  const titleBox = (await title(page, 'n-audio').boundingBox())!;
+  const playerBox = (await audio.boundingBox())!;
+  measurements.toolbarBottom = toolbarBox.y + toolbarBox.height;
+  measurements.titleTop = titleBox.y;
+  expect(toolbarBox.y + toolbarBox.height).toBeLessThanOrEqual(titleBox.y + 1);
+  expect(toolbarBox.y + toolbarBox.height).toBeLessThanOrEqual(playerBox.y + 1);
+  const toolLabels = await node(page, 'n-audio').evaluate((el) =>
+    [...el.querySelectorAll('button')].map((b) => b.textContent?.trim() || b.getAttribute('title') || ''),
+  );
+  measurements.toolbarLabels = toolLabels;
+  expect(toolLabels).toEqual(['重新编辑', '详情', '下载']);
+  // 选中态连接点保持可见
+  await expect
+    .poll(() => audioTarget.evaluate((el) => getComputedStyle(el).opacity), { timeout: 3000 })
+    .toBe('1');
+  // 选中态整页截图：工具栏位于外部标题上方（视觉证据）
+  await page.screenshot({ path: join(evidenceDir, 'audio.png') });
+
+  // 右键菜单仍可达（在标题行右键，避开原生媒体控件菜单）
+  await title(page, 'n-audio').click({ button: 'right' });
+  await expect(page.getByRole('button', { name: '添加到聊天' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '复制' })).toBeVisible();
+  await page.mouse.click(2000, 1700);
+
+  // 100% 缩放下的音频节点特写（缩放步骤会缩小节点，视觉证据先取）
+  await node(page, 'n-audio').screenshot({ path: join(evidenceDir, 'audio-node.png') });
+
+  // 缩放：标题时长文案不变，内容屏幕尺寸随缩放变化
+  const titleBefore = await title(page, 'n-audio').textContent();
+  await page.mouse.move(2000, 1600);
+  await page.mouse.wheel(0, 240);
+  await page.waitForTimeout(300);
+  expect(await title(page, 'n-audio').textContent()).toBe(titleBefore);
+  const zoomed = (await card(page, 'n-audio').boundingBox())!;
+  measurements.zoomedWidth = zoomed.width;
+  expect(zoomed.width).toBeLessThan(280);
+  // 放大回 100%：内容区恢复 280×280，标题文案仍不变
+  await page.mouse.wheel(0, -240);
+  await page.waitForTimeout(300);
+  const zoomedBack = (await card(page, 'n-audio').boundingBox())!;
+  measurements.zoomedBackWidth = zoomedBack.width;
+  expect(Math.abs(zoomedBack.width - 280)).toBeLessThanOrEqual(1.5);
+  expect(await title(page, 'n-audio').textContent()).toBe(titleBefore);
+
+  writeFileSync(join(evidenceDir, 'audio-layout.json'), `${JSON.stringify(measurements, null, 2)}\n`);
+  expect(smokeFailures(tracking)).toEqual([]);
+});
+
 test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放', async ({ page }) => {
   const tracking = await setupPage(page);
   await page.goto('/canvas?project=project-1');
@@ -442,6 +601,37 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
     )
     .toBe(true);
 
+  // 1b) 音频节点同样按标题拖动，落点经既有保存通路持久化（IKDIDR）
+  const audioTitle = title(page, 'n-audio');
+  const audioTitleBox = (await audioTitle.boundingBox())!;
+  await page.mouse.move(audioTitleBox.x + audioTitleBox.width / 2, audioTitleBox.y + audioTitleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    audioTitleBox.x + audioTitleBox.width / 2 + 50,
+    audioTitleBox.y + audioTitleBox.height / 2 + 30,
+    { steps: 10 },
+  );
+  await page.mouse.up();
+  await expect.poll(() => nodeTranslate('n-audio'), { timeout: 5000 }).not.toBe('translate(1200px, 1050px)');
+  const audioDragged = /translate\((-?\d+(?:\.\d+)?)px, (-?\d+(?:\.\d+)?)px\)/.exec(
+    await nodeTranslate('n-audio'),
+  );
+  expect(audioDragged, '音频拖动后应有新坐标').toBeTruthy();
+  const [, audioX, audioY] = audioDragged!;
+  await expect
+    .poll(
+      () => {
+        const nodes = lastPutNodes();
+        return (
+          nodes.includes('"id":"n-audio"') &&
+          nodes.includes(`"x":${Number(audioX)}`) &&
+          nodes.includes(`"y":${Number(audioY)}`)
+        );
+      },
+      { timeout: 10000 },
+    )
+    .toBe(true);
+
   // 2) 平移（按住 Space 滚轮）：视口 transform 变化
   const viewportTransform = () =>
     page.locator('.react-flow__viewport').evaluate((el) => (el as HTMLElement).style.transform);
@@ -458,6 +648,10 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
   await expect(page.locator('.react-flow')).toBeVisible();
   await waitImagesLoaded(page);
   expect(await nodeTranslate('n-square')).toContain(`translate(${Number(dragX)}px, ${Number(dragY)}px)`);
+  expect(await nodeTranslate('n-audio')).toContain(`translate(${Number(audioX)}px, ${Number(audioY)}px)`);
+  const audioAfterReload = (await card(page, 'n-audio').boundingBox())!;
+  expect(Math.abs(audioAfterReload.width - 280)).toBeLessThanOrEqual(1.5);
+  expect(Math.abs(audioAfterReload.height - 280)).toBeLessThanOrEqual(1.5);
 
   // 4) 删除：选中后 Delete 键移除节点，后续保存体不再含该节点
   await title(page, 'n-small').click();
