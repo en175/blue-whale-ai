@@ -291,6 +291,13 @@ test('布局：统一尺度/外部标题/未知转已知/失败保形/位置不�
   await expect(node(page, 'n-gen').getByRole('button', { name: '重试' })).toBeVisible();
   await expectBox(page, 'n-gen', 497.78, 280, measurements);
 
+  // 音频生成中→失败：真实轮询转失败后仍方形，真实错误文案与「重试」可达；素材缺失同样方形
+  await expect(node(page, 'n-audio-gen')).toContainText('音频生成失败：模型超时');
+  await expect(node(page, 'n-audio-gen').getByRole('button', { name: '重试' })).toBeVisible();
+  await expectBox(page, 'n-audio-gen', 280, 280, measurements);
+  await expect(node(page, 'n-audio-missing')).toContainText('素材已被删除');
+  await expectBox(page, 'n-audio-missing', 280, 280, measurements);
+
   // 外部标题：真实分辨率/时长；文件大小不出现；目标比例不伪装为分辨率
   await expect(title(page, 'n-landscape')).toContainText('1600×900');
   await expect(title(page, 'n-landscape')).not.toContainText('MB');
@@ -540,6 +547,13 @@ test('音频：方形内容区/连接点锚定/播放控件不被拖动吞掉/�
   const zoomed = (await card(page, 'n-audio').boundingBox())!;
   measurements.zoomedWidth = zoomed.width;
   expect(zoomed.width).toBeLessThan(280);
+  // 放大回 100%：内容区恢复 280×280，标题文案仍不变
+  await page.mouse.wheel(0, -240);
+  await page.waitForTimeout(300);
+  const zoomedBack = (await card(page, 'n-audio').boundingBox())!;
+  measurements.zoomedBackWidth = zoomedBack.width;
+  expect(Math.abs(zoomedBack.width - 280)).toBeLessThanOrEqual(1.5);
+  expect(await title(page, 'n-audio').textContent()).toBe(titleBefore);
 
   writeFileSync(join(evidenceDir, 'audio-layout.json'), `${JSON.stringify(measurements, null, 2)}\n`);
   expect(smokeFailures(tracking)).toEqual([]);
@@ -589,10 +603,14 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
 
   // 1b) 音频节点同样按标题拖动，落点经既有保存通路持久化（IKDIDR）
   const audioTitle = title(page, 'n-audio');
-  const ta = (await audioTitle.boundingBox())!;
-  await page.mouse.move(ta.x + ta.width / 2, ta.y + ta.height / 2);
+  const audioTitleBox = (await audioTitle.boundingBox())!;
+  await page.mouse.move(audioTitleBox.x + audioTitleBox.width / 2, audioTitleBox.y + audioTitleBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(ta.x + ta.width / 2 + 50, ta.y + ta.height / 2 + 30, { steps: 10 });
+  await page.mouse.move(
+    audioTitleBox.x + audioTitleBox.width / 2 + 50,
+    audioTitleBox.y + audioTitleBox.height / 2 + 30,
+    { steps: 10 },
+  );
   await page.mouse.up();
   await expect.poll(() => nodeTranslate('n-audio'), { timeout: 5000 }).not.toBe('translate(1200px, 1050px)');
   const audioDragged = /translate\((-?\d+(?:\.\d+)?)px, (-?\d+(?:\.\d+)?)px\)/.exec(

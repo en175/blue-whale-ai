@@ -17,6 +17,10 @@ import styles from './index.module.css';
 /** 连接点统一样式（锚定内容区左右中点） */
 const HANDLE_STYLE = { background: '#666', width: 10, height: 10, border: '2px solid #444' } as const;
 
+/** 真实时长文案（秒取整）；未知或非正返回空串，标题右侧据此留空 */
+const durationLabel = (duration?: number) =>
+  typeof duration === 'number' && duration > 0 ? `${Math.round(duration)}s` : '';
+
 interface MediaNodeData {
   src?: string;
   fileName?: string;
@@ -185,14 +189,10 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   /** 标题右侧元信息：仅真实媒体数据，缺失项留空；目标比例/占位尺寸不展示，文件大小只在详情。
    *  音频无可视分辨率，只显真实时长；图片/视频显分辨率，视频另加时长。 */
   const titleMeta = isAudio
-    ? typeof data.duration === 'number' && data.duration > 0
-      ? `${Math.round(data.duration)}s`
-      : ''
+    ? durationLabel(data.duration)
     : [
         data.width && data.height ? `${data.width}×${data.height}` : '',
-        data.mediaType === 'video' && typeof data.duration === 'number' && data.duration > 0
-          ? `${Math.round(data.duration)}s`
-          : '',
+        data.mediaType === 'video' ? durationLabel(data.duration) : '',
       ]
         .filter(Boolean)
         .join(' ');
