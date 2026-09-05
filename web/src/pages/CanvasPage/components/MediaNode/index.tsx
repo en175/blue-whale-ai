@@ -1,5 +1,7 @@
 /* ============================================
  * MediaNode 媒体节点：图片/视频展示与操作手柄
+ * 图片/视频：外部常驻标题 + 独立圆角内容主体（统一尺度）
+ * 音频：保留现有卡片布局，后续子任务接入外部标题
  * ============================================ */
 import { useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
@@ -9,7 +11,11 @@ import { isMediaExtractNodeId } from '../../mediaExtract';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaNodeToolbarVisibility } from './toolbarVisibility';
+import { mediaContentBox, type MediaDims } from './mediaContentSize';
 import styles from './index.module.css';
+
+/** 连接点统一样式（锚定内容区左右中点） */
+const HANDLE_STYLE = { background: '#666', width: 10, height: 10, border: '2px solid #444' } as const;
 
 interface MediaNodeData {
   src?: string;
@@ -41,6 +47,10 @@ interface MediaNodeData {
   duration?: number;
   /** 文件大小字节 */
   size?: number;
+  /** 生成参数透传的目标比例（如 "16:9"），仅决定占位形状，不作原始分辨率展示 */
+  targetRatio?: string;
+  /** 浏览器量得真实媒体尺寸后回填（缺失或不一致时才回调） */
+  onMediaDims?: (id: string, dims: MediaDims) => void;
   onDelete?: (id: string) => void;
   onDuplicate?: (id: string) => void;
   onAddToChat?: (id: string) => void;
@@ -133,6 +143,25 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleShowDetails = useCallback(() => data.onShowDetails?.(id), [data, id]);
   const handleMention = useCallback(() => data.onAddToChat?.(id), [data, id]);
 
+  /** 浏览器实测尺寸回填：仅在缺失或与既有数据不一致时上报，避免回填抖动 */
+  const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
+    const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
+    if (!w || !h) return;
+    if (data.width === w && data.height === h) return;
+    data.onMediaDims?.(id, { width: w, height: h });
+  }, [data, id]);
+
+  const handleVideoMetadata = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const { videoWidth: w, videoHeight: h, duration } = e.currentTarget;
+    if (!w || !h) return;
+    const dims: MediaDims = { width: w, height: h };
+    if (Number.isFinite(duration) && duration > 0 && typeof data.duration !== 'number') {
+      dims.duration = duration;
+    }
+    if (data.width === w && data.height === h && dims.duration === undefined) return;
+    data.onMediaDims?.(id, dims);
+  }, [data, id]);
+
   const Icon = data.mediaType === 'video' ? Video : data.mediaType === 'audio' ? AudioLines : Image;
   const label = data.mediaType === 'video' ? '视频' : data.mediaType === 'audio' ? '音频' : '图片';
   const toolbar = mediaNodeToolbarVisibility(data.mediaType);
@@ -146,13 +175,76 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     isMediaExtraction,
   });
 
-  return (
-    <div className={styles.wrapper} onContextMenu={handleContextMenu}>
-      {!data.isFirst && (
-        <Handle type="target" position={Position.Left} style={{ background: '#666', width: 10, height: 10, border: '2px solid #444' }} />
-      )}
+  const isAudio = data.mediaType === 'audio';
+  const contentBox = mediaContentBox({ width: data.width, height: data.height, ratio: data.targetRatio });
 
-      {/* 选中态悬浮工具条：重新编辑/生成图片/生成视频/生成音频 + 详情/下载/@ */}
+  /** 标题右侧元信息：仅真实媒体数据（分辨率 + 视频时长），缺失项留空；目标比例/占位尺寸不展示，文件大小只在详情 */
+  const titleMeta = [
+    data.width && data.height ? `${data.width}×${data.height}` : '',
+    data.mediaType === 'video' && typeof data.duration === 'number' && data.duration > 0
+      ? `${Math.round(data.duration)}s`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  /** 生成中 / 失败 / 素材缺失占位（音频与图片/视频共用内部内容） */
+  const renderPlaceholder = () => {
+    if (isGenerating) {
+      /* 生成中：转圈；音频提取展示真实进度；生图/生视频仅保留取消 */
+      return (
+        <div className={styles.genBox}>
+          <div className={styles.genSpinner} />
+          {generationOverlay.showProgress && (
+            <>
+              <span className={styles.genText}>
+                {generationOverlay.progressLabel}
+                {typeof data.progress === 'number' ? ` ${data.progress}%` : '…'}
+              </span>
+              <div
+                className={styles.progressTrack}
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={typeof data.progress === 'number' ? data.progress : 0}
+              >
+                <div className={styles.progressFill} style={{ width: `${data.progress ?? 0}%` }} />
+              </div>
+            </>
+          )}
+          {generationOverlay.showCancel && (
+            <button className={styles.genBtn} onClick={() => data.onCancelJob?.(id)}>
+              取消生成
+            </button>
+          )}
+        </div>
+      );
+    }
+    if (isGenDone) {
+      /* 失败/已取消：错误提示 + 重试 */
+      return (
+        <div className={styles.genBox}>
+          <span className={styles.genFailText}>{failHeadline}</span>
+          {data.genStatus === 'failed' && !isMediaExtraction && (
+            <button className={styles.genBtn} onClick={() => data.onRetryJob?.(id)}>
+              重试
+            </button>
+          )}
+        </div>
+      );
+    }
+    /* 素材已被删除：灰色占位（资产在 snapshot 字典中查不到） */
+    return (
+      <div className={styles.missingBox}>
+        <ImageOff size={22} strokeWidth={1.8} color="#666" />
+        <span className={styles.missingText}>素材已被删除</span>
+      </div>
+    );
+  };
+
+  return (
+    <div className={`${styles.wrapper} ${selected ? styles.selected : ''}`} onContextMenu={handleContextMenu}>
+      {/* 选中态悬浮工具条：重新编辑/生成图片/生成视频/生成音频 + 详情/下载/@（位于外部标题上方） */}
       {selected && !data.genStatus && !data.assetMissing && (
         <div className={`nodrag nopan ${styles.toolbar}`} onMouseDown={stop}>
           <button className={styles.toolBtn} onClick={handleReEdit} title="带入原提示词与图片，打开图片对话框">
@@ -197,107 +289,90 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         </div>
       )}
 
-      <div className={styles.card}>
-        <div className={styles.cardHeader}>
-          <div className={styles.labelGroup}>
-            <Icon size={13} strokeWidth={2} color="#888" />
-            <span className={styles.label}>{label}</span>
-          </div>
-          <div className={styles.headerRight}>
-            <span className={styles.fileName}>
-              {data.fileName || ''}
-            </span>
-            {!isGenerating && !isGenDone && (
-              <span className={styles.mediaMeta}>
-                {data.mediaType !== 'audio' && data.width && data.height
-                  ? `${data.width}×${data.height}`
-                  : ''}
-                {typeof data.duration === 'number' && data.duration > 0
-                  ? ` ${Math.round(data.duration)}s`
-                  : ''}
-                {typeof data.size === 'number'
-                  ? ` ${(data.size / 1024 / 1024).toFixed(1)}MB`
-                  : ''}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* 与图片节点一致：任意位置按下均可拖动（视频控件保留点击交互） */}
-        <div className={styles.mediaContainer}>
-          {isGenerating ? (
-            /* 生成中：转圈；音频提取展示真实进度；生图/生视频仅保留取消 */
-            <div className={styles.genBox}>
-              <div className={styles.genSpinner} />
-              {generationOverlay.showProgress && (
-                <>
-                  <span className={styles.genText}>
-                    {generationOverlay.progressLabel}
-                    {typeof data.progress === 'number' ? ` ${data.progress}%` : '…'}
-                  </span>
-                  <div
-                    className={styles.progressTrack}
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={typeof data.progress === 'number' ? data.progress : 0}
-                  >
-                    <div className={styles.progressFill} style={{ width: `${data.progress ?? 0}%` }} />
-                  </div>
-                </>
-              )}
-              {generationOverlay.showCancel && (
-                <button className={styles.genBtn} onClick={() => data.onCancelJob?.(id)}>
-                  取消生成
-                </button>
-              )}
-            </div>
-          ) : isGenDone ? (
-            /* 失败/已取消：错误提示 + 重试 */
-            <div className={styles.genBox}>
-              <span className={styles.genFailText}>{failHeadline}</span>
-              {data.genStatus === 'failed' && !isMediaExtraction && (
-                <button className={styles.genBtn} onClick={() => data.onRetryJob?.(id)}>
-                  重试
-                </button>
-              )}
-            </div>
-          ) : data.assetMissing ? (
-            /* 素材已被删除：灰色占位（资产在 snapshot 字典中查不到） */
-            <div className={styles.missingBox}>
-              <ImageOff size={22} strokeWidth={1.8} color="#666" />
-              <span className={styles.missingText}>素材已被删除</span>
-            </div>
-          ) : data.mediaType === 'audio' ? (
-            <div className={styles.audioBox}>
-              <audio
-                className={styles.mediaAudio}
-                src={data.src}
-                controls
-                preload="metadata"
-              />
-            </div>
-          ) : data.mediaType === 'video' ? (
-            <video
-              className={styles.mediaVideo}
-              src={data.src}
-              controls={isSelect}
-              preload="metadata"
-              style={isSelect ? undefined : { pointerEvents: 'none' }}
-            />
-          ) : (
-            <img
-              className={styles.mediaImage}
-              src={data.src}
-              alt={data.fileName || 'image'}
-              draggable={false}
-              style={isSelect ? undefined : { pointerEvents: 'none' }}
-            />
+      {isAudio ? (
+        /* 音频：保留现有卡片布局（外部标题与新尺寸规则由后续子任务接入） */
+        <>
+          {!data.isFirst && (
+            <Handle type="target" position={Position.Left} style={HANDLE_STYLE} />
           )}
-        </div>
-      </div>
-
-      <Handle type="source" position={Position.Right} style={{ background: '#666', width: 10, height: 10, border: '2px solid #444' }} />
+          <div className={styles.card}>
+            <div className={styles.cardHeader}>
+              <div className={styles.labelGroup}>
+                <Icon size={13} strokeWidth={2} color="#888" />
+                <span className={styles.label}>{label}</span>
+              </div>
+              <div className={styles.headerRight}>
+                <span className={styles.fileName}>
+                  {data.fileName || ''}
+                </span>
+                {!isGenerating && !isGenDone && (
+                  <span className={styles.mediaMeta}>
+                    {typeof data.duration === 'number' && data.duration > 0
+                      ? ` ${Math.round(data.duration)}s`
+                      : ''}
+                    {typeof data.size === 'number'
+                      ? ` ${(data.size / 1024 / 1024).toFixed(1)}MB`
+                      : ''}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className={styles.mediaContainer}>
+              {isGenerating || isGenDone || data.assetMissing ? (
+                renderPlaceholder()
+              ) : (
+                <div className={styles.audioBox}>
+                  <audio
+                    className={styles.mediaAudio}
+                    src={data.src}
+                    controls
+                    preload="metadata"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+          <Handle type="source" position={Position.Right} style={HANDLE_STYLE} />
+        </>
+      ) : (
+        /* 图片/视频：外部常驻标题 + 独立圆角内容主体 */
+        <>
+          <div className={styles.titleRow} data-testid="media-title">
+            <div className={styles.titleLeft}>
+              <Icon size={13} strokeWidth={2} color="#888" />
+              <span className={styles.titleName} title={data.fileName || undefined}>{data.fileName || ''}</span>
+            </div>
+            <span className={styles.titleMeta}>{titleMeta}</span>
+          </div>
+          <div className={styles.contentCard} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
+            {!data.isFirst && (
+              <Handle type="target" position={Position.Left} className={styles.handle} style={HANDLE_STYLE} />
+            )}
+            {isGenerating || isGenDone || data.assetMissing ? (
+              renderPlaceholder()
+            ) : data.mediaType === 'video' ? (
+              <video
+                className={styles.mediaVideo}
+                src={data.src}
+                controls={isSelect}
+                preload="metadata"
+                onLoadedMetadata={handleVideoMetadata}
+                style={isSelect ? undefined : { pointerEvents: 'none' }}
+              />
+            ) : (
+              <img
+                className={styles.mediaImage}
+                src={data.src}
+                alt={data.fileName || 'image'}
+                draggable={false}
+                onLoad={handleImageLoad}
+                style={isSelect ? undefined : { pointerEvents: 'none' }}
+              />
+            )}
+            <Handle type="source" position={Position.Right} className={styles.handle} style={HANDLE_STYLE} />
+          </div>
+        </>
+      )}
 
       {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}
       {contextMenu &&
