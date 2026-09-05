@@ -164,7 +164,21 @@ export function createTosStorage(config: TosStorageConfig): {
     },
     uploads: {
       async prepareUpload(input) {
-        const extension = MIME_EXTENSIONS[input.mime.toLowerCase()] ?? "bin";
+        // 图片的兜底不能是 `bin`：模型侧**按 URL 后缀判格式**，不看内容。
+        //
+        // 实测（2026-09-05，测试站）：一张 BMP 落成 `<hash>.bin`，MiniMax 直接回
+        // `{"base_resp":{"status_code":2013,"status_msg":"invalid param: image format \".bin\" not allowed"}}`
+        // ——HTTP 200 但 body 不是 completion，AI SDK 抛 `Invalid JSON response`，
+        // agent 归为 `model_error`（**可重试**），用户于是一直重试，而后缀不会因为
+        // 重试而改变。
+        //
+        // 兜底成 `jpg` 而不是补全 MIME_EXTENSIONS，是因为**读给模型的那份本来就是 JPEG**：
+        // 上面的 `sign()` 对图片一律加 `x-tos-process=.../format,jpg/...`，resolver 也据此
+        // 把 `mime_type` 报成 `image/jpeg`。所以 `.jpg` 恰好描述了这个 URL 真正吐出来的东西。
+        // 这条兜底管的是 heic（**iPhone 拍照的默认格式**）、bmp、tiff、`image/*` 这些
+        // 表里没有、但 TOS 转得动的编码。
+        const extension =
+          MIME_EXTENSIONS[input.mime.toLowerCase()] ?? (input.type === "image" ? "jpg" : "bin");
         const storageKey = input.keyPrefix
           ? `${input.keyPrefix}/${input.type}/${nodeRandomUUID().replace(/-/g, "")}.${extension}`
           : `uploads/${input.userId}/${input.type}/${nodeRandomUUID().replace(/-/g, "")}.${extension}`;
