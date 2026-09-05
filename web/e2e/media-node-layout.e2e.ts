@@ -1,7 +1,8 @@
 /* ============================================
- * media-node-layout 验收取证（IKDIDO 图片/视频、IKDIDR 音频）
+ * media-node-layout 验收取证（IKDIDO 图片/视频、IKDIDR 音频、IKDJ73 文本）
  * 真实浏览器（Playwright Chromium）量测媒体节点新布局：
  * 统一尺度、音频恒方形、外部标题、未知→已知回填、状态保形、工具栏/连接点交互、视频与音频真实播放
+ * IKDJ73 起同画布混入文本节点（n-text），验收四类卡片标题分段缩放一致与正文回归
  * 媒体字节在浏览器内生成（canvas 导出 PNG / MediaRecorder 录 WebM / 手写编码 WAV），不依赖二进制 fixture
  * ============================================ */
 import { expect, test, type Page } from '@playwright/test';
@@ -887,3 +888,228 @@ for (const width of [10, 1]) {
     expect(smokeFailures(tracking)).toEqual([]);
   });
 }
+
+
+/* ============================================
+ * 文本卡片外部标题行分段缩放（IKDJ73）
+ * 复用媒体标题的 nodeTitleSizing 规则；正文 360×270、内部滚动与编辑行为保持现状
+ * ============================================ */
+const textTitle = (page: Page) => node(page, 'n-text').locator('[data-testid="text-title"]');
+const textContent = (page: Page) => node(page, 'n-text').locator('[data-testid="text-content"]');
+
+/** 文本标题实测：屏幕字号/图标（含 Canvas 变换），正文锚点与节点位置 */
+async function textTitleMetrics(page: Page) {
+  return node(page, 'n-text').evaluate((el) => {
+    const viewport = document.querySelector('.react-flow__viewport')!;
+    const zoom = new DOMMatrixReadOnly(getComputedStyle(viewport).transform).a;
+    const row = el.querySelector<HTMLElement>('[data-testid="text-title"]')!;
+    const name = row.querySelector<HTMLElement>('span')!;
+    const icon = row.querySelector('svg')!;
+    const content = el.querySelector<HTMLElement>('[data-testid="text-content"]')!;
+    return {
+      zoom,
+      name: parseFloat(getComputedStyle(name).fontSize) * zoom,
+      icon: icon.getBoundingClientRect().width,
+      contentOffset: (content.getBoundingClientRect().top - el.getBoundingClientRect().top) / zoom,
+      position: (el as HTMLElement).style.transform,
+      text: row.textContent,
+    };
+  });
+}
+
+test('文本标题分段缩放：屏幕尺寸符合父规格且与同倍率媒体标题一致', async ({ page }) => {
+  const tracking = await setupPage(page);
+  await page.goto('/canvas?project=project-1');
+  await expect(page.locator('.react-flow')).toBeVisible();
+  await waitImagesLoaded(page);
+
+  // 正文容器保持 360×270 尺寸契约（含标题占位，标题不推移正文）
+  const box = (await textContent(page).boundingBox())!;
+  expect(Math.abs(box.width - 360), '正文宽度应≈360').toBeLessThanOrEqual(1.5);
+  expect(Math.abs(box.height - 270), '正文高度应≈270').toBeLessThanOrEqual(1.5);
+
+  const baseline = await textTitleMetrics(page);
+  const evidence = [];
+  for (const [zoom, name, icon] of [
+    [0.5, 8, 9.3333], [0.63, 10.08, 11.76],
+    [0.75, 12, 14], [1, 12, 14], [1.25, 15, 17.5],
+    [1.5, 16, 18], [8, 16, 18],
+  ]) {
+    await zoomTo(page, zoom);
+    const actual = await textTitleMetrics(page);
+    const media = await Promise.all(['n-landscape', 'n-video', 'n-audio'].map((id) => titleMetrics(page, id)));
+    evidence.push({ expectedZoom: zoom, text: actual, media });
+    expect(Math.abs(actual.name - name), `文本名称 @ ${zoom}`).toBeLessThan(0.04);
+    expect(Math.abs(actual.icon - icon), `文本图标 @ ${zoom}`).toBeLessThan(0.04);
+    // 混排一致性：与同倍率图片、视频、音频标题使用同一套规则（名称与图标）
+    for (const item of media) {
+      expect(Math.abs(actual.name - item.name), `文本与媒体名称一致 @ ${zoom}`).toBeLessThan(0.04);
+      expect(Math.abs(actual.icon - item.icon), `文本与媒体图标一致 @ ${zoom}`).toBeLessThan(0.04);
+    }
+    expect(actual.contentOffset).toBeCloseTo(baseline.contentOffset, 2);
+    expect(actual.position).toBe(baseline.position);
+    expect(actual.text).toBe(baseline.text);
+    if (zoom === 0.63 || zoom === 1) await page.screenshot({ path: join(evidenceDir, `text-title-${zoom}.png`) });
+  }
+  writeFileSync(join(evidenceDir, 'text-title-scaling.json'), `${JSON.stringify(evidence, null, 2)}\n`);
+  expect(smokeFailures(tracking)).toEqual([]);
+});
+
+test('文本标题排版：行不越界不裁切，操作条避让且大小策略不变', async ({ page }) => {
+  const tracking = await setupPage(page);
+  await page.goto('/canvas?project=project-1');
+  await waitImagesLoaded(page);
+
+  await textTitle(page).click();
+  const evidence = [];
+  const barBaseline = await node(page, 'n-text')
+    .getByRole('button', { name: '添加到对话' })
+    .locator('xpath=..')
+    .boundingBox();
+  for (const zoom of [0.5, 0.63, 0.75, 1, 1.25, 1.5, 8]) {
+    await zoomTo(page, zoom);
+    const actualZoom = (await textTitleMetrics(page)).zoom;
+    const layout = await node(page, 'n-text').evaluate((el) => {
+      const row = el.querySelector<HTMLElement>('[data-testid="text-title"]')!;
+      const name = row.querySelector<HTMLElement>('span')!;
+      const icon = row.querySelector('svg')!;
+      const content = el.querySelector('[data-testid="text-content"]')!.getBoundingClientRect();
+      const bounds = row.getBoundingClientRect();
+      const button = [...el.querySelectorAll('button')].find((b) => b.textContent === '添加到对话');
+      const bar = button?.parentElement?.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(name);
+      const style = getComputedStyle(name);
+      return {
+        row: bounds.toJSON(),
+        content: content.toJSON(),
+        elements: [icon, name].map((item) => {
+          const box = item.getBoundingClientRect();
+          return { box: box.toJSON(), glyphHeight: item === name ? range.getBoundingClientRect().height : box.height };
+        }),
+        nameStyle: { overflow: style.overflowX, ellipsis: style.textOverflow, whiteSpace: style.whiteSpace },
+        bar: bar?.toJSON(),
+        handleMidY: (() => {
+          const h = el.querySelector('.react-flow__handle-right')!.getBoundingClientRect();
+          return h.y + h.height / 2;
+        })(),
+      };
+    });
+    evidence.push({ zoom: actualZoom, ...layout });
+    expect(layout.row.width).toBeLessThanOrEqual(layout.content.width + 0.1);
+    expect(layout.row.bottom).toBeLessThanOrEqual(layout.content.top + 0.1);
+    for (const element of layout.elements) {
+      expect(element.box.left).toBeGreaterThanOrEqual(layout.row.left - 0.1);
+      expect(element.box.right).toBeLessThanOrEqual(layout.row.right + 0.1);
+      expect(element.box.top).toBeGreaterThanOrEqual(layout.row.top - 0.1);
+      expect(element.box.bottom).toBeLessThanOrEqual(layout.row.bottom + 0.1);
+      expect(element.glyphHeight).toBeLessThanOrEqual(element.box.height + 0.1);
+    }
+    // 图标在名称左侧，名称单行省略
+    expect(layout.elements[0].box.right).toBeLessThanOrEqual(layout.elements[1].box.left + 0.1);
+    expect(layout.nameStyle.whiteSpace).toBe('nowrap');
+    expect(layout.nameStyle.overflow).toBe('hidden');
+    expect(layout.nameStyle.ellipsis).toBe('ellipsis');
+    // 连接点锚定正文容器左右中点
+    expect(Math.abs(layout.handleMidY - (layout.content.y + layout.content.height / 2))).toBeLessThan(0.2);
+    // 操作条在标题上方且沿用原有大小策略（屏幕尺寸随倍率、局部不变）
+    expect(layout.bar).toBeTruthy();
+    expect(layout.bar!.bottom).toBeLessThan(layout.row.top);
+    expect(layout.bar!.width / actualZoom).toBeCloseTo(barBaseline!.width, 1);
+    expect(layout.bar!.height / actualZoom).toBeCloseTo(barBaseline!.height, 1);
+  }
+  writeFileSync(join(evidenceDir, 'text-title-layout.json'), `${JSON.stringify(evidence, null, 2)}\n`);
+
+  // 编辑态格式工具栏同样位于标题上方，不遮挡标题或正文
+  await zoomTo(page, 1);
+  await node(page, 'n-text').locator('[contenteditable]').dblclick();
+  const formatBar = node(page, 'n-text').getByRole('button', { name: '加粗' }).locator('xpath=..');
+  await expect(formatBar).toBeVisible();
+  const formatBarBox = (await formatBar.boundingBox())!;
+  const titleBox = (await textTitle(page).boundingBox())!;
+  const contentBox = (await textContent(page).boundingBox())!;
+  expect(formatBarBox.y + formatBarBox.height).toBeLessThanOrEqual(titleBox.y + 1);
+  expect(formatBarBox.y + formatBarBox.height).toBeLessThanOrEqual(contentBox.y + 1);
+  await page.screenshot({ path: join(evidenceDir, 'text-title-editing.png') });
+  expect(smokeFailures(tracking)).toEqual([]);
+});
+
+test('文本正文回归：内部滚动/编辑保存/连接点不受标题缩放影响', async ({ page }) => {
+  const tracking = await setupPage(page);
+  await page.goto('/canvas?project=project-1');
+  await waitImagesLoaded(page);
+
+  // 连接点平时隐藏，悬停正文后锚定左右中点
+  await page.mouse.move(2000, 1700);
+  const sourceHandle = node(page, 'n-text').locator('.react-flow__handle-right');
+  expect(await sourceHandle.evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
+  await textContent(page).hover();
+  await expect
+    .poll(() => sourceHandle.evaluate((el) => getComputedStyle(el).opacity), { timeout: 3000 })
+    .toBe('1');
+  const contentBox = (await textContent(page).boundingBox())!;
+  const sourceBox = (await sourceHandle.boundingBox())!;
+  expect(Math.abs(sourceBox.y + sourceBox.height / 2 - (contentBox.y + contentBox.height / 2))).toBeLessThanOrEqual(2);
+  expect(Math.abs(sourceBox.x + sourceBox.width / 2 - (contentBox.x + contentBox.width))).toBeLessThanOrEqual(6);
+
+  // 正文内部滚动遵循阅读语义：滚轮推进 scrollTop，不缩放画布
+  const viewportTransform = () =>
+    page.locator('.react-flow__viewport').evaluate((el) => (el as HTMLElement).style.transform);
+  const transformBefore = await viewportTransform();
+  await page.mouse.wheel(0, 240);
+  await page.waitForTimeout(200);
+  expect(await viewportTransform()).toBe(transformBefore);
+  const scrollTop = await node(page, 'n-text').locator('[contenteditable]').evaluate((el) => el.scrollTop);
+  expect(scrollTop, '正文应真实滚动').toBeGreaterThan(0);
+
+  // 双击进入编辑，键入内容经既有保存通路持久化（标题缩放不改变编辑行为）
+  const editor = node(page, 'n-text').locator('[contenteditable]');
+  await editor.dblclick();
+  await editor.pressSequentially('分段缩放后新增的一段');
+  await page.locator('.react-flow__pane').click({ position: { x: 1900, y: 300 } });
+  await expect
+    .poll(
+      () =>
+        tracking.putBodies.some((raw) => {
+          try {
+            const parsed = JSON.parse(raw) as { nodes?: string };
+            return (
+              typeof parsed.nodes === 'string' &&
+              parsed.nodes.includes('"id":"n-text"') &&
+              parsed.nodes.includes('分段缩放后新增的一段')
+            );
+          } catch {
+            return false;
+          }
+        }),
+      { timeout: 10000 },
+    )
+    .toBe(true);
+
+  await page.screenshot({ path: join(evidenceDir, 'text-body-regression.png') });
+  writeFileSync(
+    join(evidenceDir, 'text-body-regression.json'),
+    `${JSON.stringify({ scrollTop, contentBox }, null, 2)}\n`,
+  );
+  expect(smokeFailures(tracking)).toEqual([]);
+});
+
+test('文本标题连续缩放：75%、100% 与名称、图标封顶倍率两侧无尺寸跳变', async ({ page }) => {
+  const tracking = await setupPage(page);
+  await page.goto('/canvas?project=project-1');
+  await waitImagesLoaded(page);
+  const evidence = [];
+  for (const boundary of [0.75, 1, 18 / 14, 16 / 12]) {
+    await zoomTo(page, boundary - 0.004);
+    const before = await textTitleMetrics(page);
+    await zoomTo(page, boundary + 0.004);
+    const after = await textTitleMetrics(page);
+    evidence.push({ boundary, before, after });
+    for (const key of ['name', 'icon'] as const) {
+      expect(after[key]).toBeGreaterThanOrEqual(before[key] - 0.04);
+      expect(after[key] - before[key]).toBeLessThan(0.15);
+    }
+  }
+  writeFileSync(join(evidenceDir, 'text-title-continuity.json'), `${JSON.stringify(evidence, null, 2)}\n`);
+  expect(smokeFailures(tracking)).toEqual([]);
+});

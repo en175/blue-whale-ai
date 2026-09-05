@@ -4,9 +4,10 @@
  * ============================================ */
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Palette } from 'lucide-react';
 import { sanitizeHtml } from '@/utils/sanitize';
+import { nodeTitleSizing } from '../nodeTitleSizing';
 import styles from './index.module.css';
 
 /** 文字节点最大字数（按纯文本计，含粘贴） */
@@ -39,6 +40,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
   const initializedRef = useRef(false);
+
+  const zoom = useStore((state) => state.transform[2]);
 
   /** 预设颜色 */
   const COLORS = ['#ffffff', '#e8e8e8', '#ff4d4f', '#ff7a45', '#ffa940', '#ffec3d', '#73d13d', '#36cfc9', '#40a9ff', '#597ef7', '#9254de', '#ff85c0'];
@@ -270,6 +273,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     <div
       className={`${styles.wrapper} ${selected ? styles.selected : ''} ${isFocused && isSelect ? `${styles.focused} nodrag` : ''}`}
       onContextMenu={handleContextMenu}
+      style={nodeTitleSizing(zoom)}
     >
       {/* 同一层操作位置：编辑时是格式工具栏，其余是节点操作条，两者不叠成多行 */}
       {isFocused ? (
@@ -356,7 +360,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       {/* 常驻标题行：左侧类型图标与现有名称，右侧留空 */}
       <div className={styles.titleRow} data-testid="text-title">
         <div className={styles.titleLeft}>
-          <FileText size={13} strokeWidth={2} color="#888" />
+          <FileText className={styles.titleIcon} strokeWidth={2} color="#888" />
           <span className={styles.titleName}>文本节点</span>
         </div>
       </div>

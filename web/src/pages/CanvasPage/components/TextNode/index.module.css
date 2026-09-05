@@ -7,12 +7,14 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  /* 保留原标题占位（11px × 1.5 行高 + 6px 间距），缩放不推移正文和连接点。 */
+  padding-top: 22.5px;
 }
 
 /* ---- 节点操作条：悬停/选中可见，与格式工具栏同处标题上方一层 ---- */
 .nodeBar {
   position: absolute;
-  bottom: calc(100% + 10px);
+  bottom: calc(100% - 22.5px + var(--node-title-line) + var(--node-title-gap) + 10px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -54,7 +56,7 @@
  * ============================================ */
 .toolbar {
   position: absolute;
-  bottom: calc(100% + 10px);
+  bottom: calc(100% - 22.5px + var(--node-title-line) + var(--node-title-gap) + 10px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -162,24 +164,36 @@
  * 外置标题行 + 固定正文容器
  * ============================================ */
 .titleRow {
+  position: absolute;
+  bottom: calc(100% - 22.5px);
+  height: calc(var(--node-title-line) + var(--node-title-gap));
+  line-height: var(--node-title-line);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  width: 360px;
-  padding: 0 2px 6px;
+  gap: var(--node-title-group-gap);
+  width: 100%;
+  padding: 0 min(2px, 2%) var(--node-title-gap);
+  overflow: hidden;
   box-sizing: border-box;
 }
 
 .titleLeft {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--node-title-gap);
+  flex: 1;
   min-width: 0;
 }
 
+.titleIcon {
+  width: var(--node-title-icon);
+  height: var(--node-title-icon);
+  flex-shrink: 0;
+}
+
 .titleName {
-  font-size: 11px;
+  font-size: var(--node-title-name);
   color: #888;
   overflow: hidden;
   text-overflow: ellipsis;
