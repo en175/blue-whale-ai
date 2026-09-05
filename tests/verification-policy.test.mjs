@@ -1407,3 +1407,44 @@ test("rejects an unknown verification stage on the command line", () => {
     rmSync(repository, { recursive: true, force: true });
   }
 });
+
+
+test("skill assets select their real checks at both stages", async () => {
+  const { classifyChanges, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+  const files = [
+    ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
+    ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
+    ".zcode/skills/wizard/template.sh",
+    "tests/skill-assets.test.mjs",
+  ];
+  for (const stage of ["completion", "pr"]) {
+    for (const file of files) {
+      const classification = classifyChanges([file], { stage });
+      assert.equal(classification.tier, "scoped");
+      assert.deepEqual(classification.areas, ["skill-assets"]);
+      const commands = buildVerificationPlan(classification, { base: "BASE" });
+      for (const expected of [
+        ["bash", files[0]],
+        ["node", "--check", files[1]],
+        ["bash", "-n", files[2]],
+        ["node", "--test", files[3]],
+      ]) assert.ok(commands.some(command => JSON.stringify(command) === JSON.stringify(expected)));
+    }
+  }
+});
+
+test("skill assets do not allow unknown siblings or downgrade product impact", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+  for (const stage of ["completion", "pr"]) {
+    for (const file of [
+      ".zcode/skills/wizard/unknown.sh",
+      ".zcode/skills/deploy-blue-whale-api/tests/unknown.sh",
+      ".zcode/skills/setup-ts-deep-modules/unknown.cjs",
+    ]) assert.throws(() => classifyChanges([file], { stage }), /UNCLASSIFIED_PATH/);
+  }
+  const classification = classifyChanges([
+    ".zcode/skills/wizard/template.sh", "backend/Dockerfile.worker",
+  ], { stage: "pr" });
+  assert.equal(classification.tier, "full");
+  assert.ok(classification.areas.includes("skill-assets"));
+});

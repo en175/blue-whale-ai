@@ -22,6 +22,14 @@ const EXECUTABLE_FILE = /^(?:scripts\/|.*\.(?:sh|py|mjs|cjs|js))$/;
 const SKILL_SCRIPT_FILE = /^\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/scripts\/.*\.(?:sh|py|mjs|cjs|js)$/;
 const GOVERNANCE_FILE = /^(?:eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/(?:implement|dispatching-parallel-agents|finishing-a-development-branch|subagent-driven-development)\/)/;
 
+// 精确登记已同步的技能资产；未知的同目录脚本仍须单独分类。
+const SKILL_ASSET_FILES = new Set([
+  ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
+  ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
+  ".zcode/skills/wizard/template.sh",
+  "tests/skill-assets.test.mjs",
+]);
+
 function isTestFile(file) {
   return /(?:^|\/)[^/]+\.(?:test|spec)\.(?:ts|tsx|js|mjs|cjs)$/.test(file);
 }
@@ -31,6 +39,7 @@ function hasProductImpact(file, documentationOnlyFiles) {
 }
 
 function sourceArea(file) {
+  if (SKILL_ASSET_FILES.has(file)) return "skill-assets";
   if (NODE_SOURCE.test(file)) return "node";
   if (BACKEND_SOURCE.test(file)) return "backend";
   if (WEB_SOURCE.test(file) || WEB_TOOLING_FILE.test(file) || WEB_E2E_FILE.test(file)) return "web";
@@ -224,6 +233,14 @@ function appendAreaCommands(commands, areas, base) {
         "scripts.tests.test_start_task_worktree",
         "scripts.tests.test_sync_task_from_origin",
       ],
+    );
+  }
+  if (areas.includes("skill-assets")) {
+    commands.push(
+      ["bash", ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh"],
+      ["bash", "-n", ".zcode/skills/wizard/template.sh"],
+      ["node", "--check", ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs"],
+      ["node", "--test", "tests/skill-assets.test.mjs"],
     );
   }
   if (areas.includes("operations")) {
