@@ -197,3 +197,57 @@ describe('Canvas space pan', () => {
     expect(node().classList.contains('draggable')).toBe(false);
   });
 });
+
+
+describe('Canvas 媒体标题缩放与交互组合', () => {
+  it.each(['image', 'video'] as const)('%s 加载与缩放保留选中状态，拖动后不会因再次缩放回跳', async (mediaType) => {
+    const onMediaDims = (id: string, dims: { width: number; height: number; duration?: number }) => {
+      props = {
+        ...props,
+        mediaNodes: props.mediaNodes.map((item) => item.id === id
+          ? { ...item, data: { ...item.data, ...dims } }
+          : item),
+      };
+      root.render(createElement(FlowCanvas, props));
+    };
+    props = {
+      ...props,
+      mediaNodes: props.mediaNodes.map((item) => ({
+        ...item, data: { ...item.data, mediaType, onMediaDims },
+      })),
+      viewport: { x: 0, y: 0, zoom: 0.63 },
+    };
+    await act(async () => { root.render(createElement(FlowCanvas, props)); });
+    const media = node().querySelector(mediaType === 'image' ? 'img' : 'video')!;
+    for (const [key, value] of Object.entries(mediaType === 'image'
+      ? { naturalWidth: 1600, naturalHeight: 900 }
+      : { videoWidth: 1600, videoHeight: 900, duration: 12.4 })) {
+      Object.defineProperty(media, key, { value, configurable: true });
+    }
+    await act(async () => { media.dispatchEvent(new Event(mediaType === 'image' ? 'load' : 'loadedmetadata')); });
+    const title = node().querySelector<HTMLElement>('[data-testid="media-title"]')!;
+    expect(title.textContent).toContain('1600×900');
+    if (mediaType === 'video') expect(title.textContent).toContain('12s');
+    expect(node().style.transform).toBe('translate(50px,60px)');
+    expect(node().querySelector('button')?.textContent).toBe('重新编辑');
+
+    await mouse('mousedown', title);
+    await mouse('mousemove', window, 120, 110);
+    await act(async () => {
+      props = { ...props, viewport: { x: 0, y: 0, zoom: 0.75 } };
+      root.render(createElement(FlowCanvas, props));
+    });
+    await mouse('mousemove', window, 160, 140);
+    await finishGesture();
+    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ id: 'image-1', selected: true }));
+    const draggedPosition = node().style.transform;
+    expect(draggedPosition).not.toBe('translate(50px,60px)');
+    await act(async () => {
+      props = { ...props, viewport: { x: 0, y: 0, zoom: 1.5 } };
+      root.render(createElement(FlowCanvas, props));
+    });
+    expect(node().style.transform).toBe(draggedPosition);
+    expect(title.textContent).toContain('1600×900');
+    expect(node().querySelector('button')?.textContent).toBe('重新编辑');
+  });
+});

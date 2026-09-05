@@ -2,12 +2,8 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ReactFlowProvider } from '@xyflow/react';
 import MediaNode from './index';
-
-vi.mock('@xyflow/react', () => ({
-  Handle: () => null,
-  Position: { Left: 'left', Right: 'right' },
-}));
 
 let root: Root;
 let mountNode: HTMLDivElement;
@@ -34,7 +30,7 @@ async function renderNode(
   root = createRoot(mountNode);
   await act(async () => {
     root.render(
-      createElement(MediaNode, {
+      createElement(ReactFlowProvider, null, createElement(MediaNode, {
         id: extra?.id ?? `${mediaType}-node`,
         data: {
           mediaType,
@@ -55,7 +51,7 @@ async function renderNode(
         isConnectable: true,
         positionAbsoluteX: 0,
         positionAbsoluteY: 0,
-      } as never),
+      } as never)),
     );
   });
 }

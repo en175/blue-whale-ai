@@ -5,13 +5,14 @@
  * ============================================ */
 import { useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaNodeToolbarVisibility } from './toolbarVisibility';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
+import { nodeTitleSizing } from '../nodeTitleSizing';
 import styles from './index.module.css';
 
 /** 连接点统一样式（锚定内容区左右中点） */
@@ -83,6 +84,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isExtractSubmitting, setIsExtractSubmitting] = useState(false);
 
+  const zoom = useStore((state) => state.transform[2]);
   const isSelect = data.toolMode === 'select';
 
   // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
@@ -252,7 +254,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   };
 
   return (
-    <div className={`${styles.wrapper} ${selected ? styles.selected : ''}`} onContextMenu={handleContextMenu}>
+    <div className={`${styles.wrapper} ${selected ? styles.selected : ''}`} onContextMenu={handleContextMenu} style={nodeTitleSizing(zoom)}>
       {/* 选中态悬浮工具条：重新编辑/生成图片/生成视频/生成音频 + 详情/下载/@（位于外部标题上方） */}
       {selected && !data.genStatus && !data.assetMissing && (
         <div className={`nodrag nopan ${styles.toolbar}`} onMouseDown={stop}>
@@ -301,7 +303,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       {/* 外部常驻标题 + 独立圆角内容主体（三类媒体共用；音频内容区恒方形） */}
       <div className={styles.titleRow} data-testid="media-title">
         <div className={styles.titleLeft}>
-          <Icon size={13} strokeWidth={2} color="#888" />
+          <Icon className={styles.titleIcon} strokeWidth={2} color="#888" />
           <span className={styles.titleName} title={data.fileName || undefined}>{data.fileName || ''}</span>
         </div>
         <span className={styles.titleMeta}>{titleMeta}</span>
