@@ -7,6 +7,8 @@ import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition, type SpawnBox } from './draftSpawn';
+import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, readAssetId } from './mediaRefs';
+import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 import type { MediaGenStatus } from './components/MediaNode';
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
@@ -124,8 +126,43 @@ export default function CanvasPage() {
     mediaNodesRef.current.some(
       (n) => n.id === id && (n.data as Record<string, unknown> | undefined)?.genStatus === 'generating',
     );
-  /** 建立连线：拒绝自环与重复 (source,target)（与服务端保存校验同口径），新边渲染形态与既有行为一致（custom 流光边）；
-   *  生成中节点的输入连线只读（IKDMQQ）：向目标新建连线被拦截 */
+  /** 建立连线（受控去重 + custom 流光渲染形态；与服务端保存校验同口径拒绝重复 (source,target)） */
+  const addCanvasEdge = (source: string, target: string) => {
+    setEdges((eds) => {
+      if (eds.some((e) => e.source === source && e.target === target)) return eds;
+      return addEdge(
+        { source, target, sourceHandle: null, targetHandle: null, type: 'custom', style: { stroke: '#444' } },
+        eds,
+      );
+    });
+  };
+  /** 图片草稿参考连线校验（IKDMQR）：仅当目标是图片草稿且来源是媒体节点时介入——
+   *  仅有效图片媒体结果可连入；重复素材（按 assetId 归一，兼容三形态）与超上限明确拒绝，不静默丢弃输入。
+   *  文本/商品/资产卡等来源与非草稿目标沿用既有语义（文本附件/未来切片），本函数放行。 */
+  const validateImageRefConnect = (sourceId: string, targetId: string): boolean => {
+    const target = mediaNodesRef.current.find((n) => n.id === targetId);
+    if (!isImageDraftNode(target)) return true;
+    const source = mediaNodesRef.current.find((n) => n.id === sourceId);
+    if (!source) return true;
+    const err = imageRefSourceError(source);
+    if (err) {
+      showToast('warn', err);
+      return false;
+    }
+    const refs = imageMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
+    const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>)!;
+    if (refs.some((r) => r.assetId === assetId)) {
+      showToast('warn', '该素材已连入当前草稿');
+      return false;
+    }
+    if (refs.length >= REF_LIMITS.image) {
+      showToast('warn', refOverflowToast(['image']));
+      return false;
+    }
+    return true;
+  };
+  /** 建立连线：拒绝自环（生成中节点的输入连线只读 IKDMQQ：向目标新建连线被拦截）；
+   *  图片草稿目标的来源校验见 validateImageRefConnect */
   const handleConnect = useCallback(
     (params: Connection) => {
       if (!params.source || !params.target || params.source === params.target) return;
@@ -133,10 +170,8 @@ export default function CanvasPage() {
         showToast('warn', '生成中，输入连线只读');
         return;
       }
-      setEdges((eds) => {
-        if (eds.some((e) => e.source === params.source && e.target === params.target)) return eds;
-        return addEdge({ ...params, type: 'custom', style: { stroke: '#444' } }, eds);
-      });
+      if (!validateImageRefConnect(params.source, params.target)) return;
+      addCanvasEdge(params.source, params.target);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [setEdges],
@@ -1148,6 +1183,18 @@ export default function CanvasPage() {
       return;
     }
     const data = (node.data ?? {}) as Record<string, unknown>;
+    // IKDMQR：草稿绑定面板的「到节点选择」建立来源→草稿连线（与画布连线同一关系）；
+    // 非法来源明确提示原因，不注入面板本地列表
+    if (pickMode === 'image' && pickTarget === 'image' && imageDraftId) {
+      if (node.type === 'mediaNode' && validateImageRefConnect(node.id, imageDraftId)) {
+        addCanvasEdge(node.id, imageDraftId);
+      }
+      setPickMode(null);
+      setPickTarget(null);
+      setPickProductId(null);
+      setPickAssetId(null);
+      return;
+    }
     const isReadyMedia =
       node.type === 'mediaNode' &&
       typeof data.src === 'string' &&
@@ -1997,6 +2044,19 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [imageDraftId, edges, textNodes],
   );
+
+  /** 草稿绑定面板的图片媒体参考（IKDMQR）：按连线实时推导，Dock 显示即提交输入（同源）。
+   *  连线持久化后刷新/重开项目同样经此推导恢复展示。 */
+  const imageDraftMediaRefs = useMemo(
+    () => (imageDraftId ? imageMediaRefsOf(imageDraftId, edges, mediaNodes) : undefined),
+    [imageDraftId, edges, mediaNodes],
+  );
+
+  /** Dock 移除图片参考（IKDMQR）：断开对应连线——仅改变关系，不删除来源素材卡，
+   *  也不影响其他目标对同一来源的引用（按 (source,target) 精确匹配）。 */
+  const handleRemoveImageMediaRef = (draftId: string, sourceNodeId: string) => {
+    setEdges((prev) => prev.filter((e) => !(e.source === sourceNodeId && e.target === draftId)));
+  };
 
   /** 重新编辑：视频节点 → 视频对话框；图片节点 → 图片对话框 */
   const handleNodeReEdit = (id: string) => {
@@ -2852,6 +2912,39 @@ export default function CanvasPage() {
     return uploaded ? uploaded.asset_id : null;
   };
 
+  /** 收集图片参考 assetId：草稿绑定（IKDMQR）按连线推导（与 Dock 显示同源）；
+   *  其余入口（重新编辑/资产卡等）沿用面板 files——有 assetId 直用，否则上传取 ID */
+  const collectImageInputAssetIds = async (
+    targetNodeId: string | undefined,
+    files: UploadedFile[],
+  ): Promise<string[]> => {
+    if (targetNodeId && isImageDraftNode(mediaNodesRef.current.find((n) => n.id === targetNodeId))) {
+      const ids: string[] = [];
+      for (const ref of imageMediaRefsOf(targetNodeId, edgesRef.current, mediaNodesRef.current)) {
+        if (!ids.includes(ref.assetId)) ids.push(ref.assetId);
+      }
+      return ids;
+    }
+    const ids: string[] = [];
+    for (const f of files.filter((item) => item.type === 'image')) {
+      // 已有 assetId 直接使用
+      if (f.assetId) {
+        ids.push(String(f.assetId));
+        continue;
+      }
+      // 有原始 File 对象，直接上传；没有则从 URL 获取（如画布选取的节点）
+      let fileToUpload: File | null = f.file ?? null;
+      if (!fileToUpload && f.url.startsWith('http')) {
+        fileToUpload = await fetchUrlAsFile(f.url, f.name, 'image/*');
+      }
+      if (fileToUpload) {
+        const uploaded = await uploadFileToAsset(fileToUpload, 'image');
+        if (uploaded) ids.push(uploaded.asset_id);
+      }
+    }
+    return ids;
+  };
+
   /** 图片对话发送：上传参考图 → 创建图片生成任务。
    *  从图片媒体节点面板发起时（IKDLQF）：先等待在途保存并落盘当前画布编辑
    *  （同 IKDLQE 应用预览的保存串行化），保证服务端按连线推导附件时读到最新正文，再携带 target_node_id 提交 */
@@ -2863,27 +2956,7 @@ export default function CanvasPage() {
     files: UploadedFile[],
   ) => {
     const targetNodeId = imageSeed?.targetNodeId;
-    // 收集参考图片的 assetId
-    const inputAssetIds: string[] = [];
-    const imageFiles = files.filter((f) => f.type === 'image');
-
-    for (const f of imageFiles) {
-      // 已有 assetId 直接使用
-      if (f.assetId) {
-        inputAssetIds.push(String(f.assetId));
-        continue;
-      }
-      // 有原始 File 对象，直接上传
-      let fileToUpload: File | null = f.file ?? null;
-      // 没有原始 File，从 URL 获取（如画布选取的节点）
-      if (!fileToUpload && f.url.startsWith('http')) {
-        fileToUpload = await fetchUrlAsFile(f.url, f.name, 'image/*');
-      }
-      if (fileToUpload) {
-        const uploaded = await uploadFileToAsset(fileToUpload, 'image');
-        if (uploaded) inputAssetIds.push(uploaded.asset_id);
-      }
-    }
+    const inputAssetIds = await collectImageInputAssetIds(targetNodeId, files);
 
     if (targetNodeId && currentId) {
       const projectId = currentId;
@@ -3160,6 +3233,10 @@ export default function CanvasPage() {
             initialFiles={imageSeed?.files}
             initialParams={imageSeed?.params}
             attachments={imageDraftId ? imageDraftAttachments : imageSeed?.attachments}
+            mediaRefs={imageDraftId ? imageDraftMediaRefs : undefined}
+            onRemoveMediaRef={
+              imageDraftId ? (nodeId) => handleRemoveImageMediaRef(imageDraftId, nodeId) : undefined
+            }
             draftBinding={
               imageDraftId
                 ? {
