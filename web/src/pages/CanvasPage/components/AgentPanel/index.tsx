@@ -495,6 +495,16 @@ function hasInlineVisualMention(blocks: SessionContentBlock[] | undefined, chipI
   });
 }
 
+/** 文本引用胶囊的悬浮正文（IKDLQJ）：块里带着快照正文时随悬浮展示，便于核对当时发出去的内容。 */
+function quoteTooltipOfChip(blocks: SessionContentBlock[] | undefined, chipId: string): string | undefined {
+  const block = (blocks ?? []).find(
+    (b) => Boolean(b.quote_id) && (b.quote_id === chipId || b.resource_id === chipId),
+  );
+  const text = block?.resource_text;
+  if (typeof text !== 'string' || !text) return undefined;
+  return text.length > 500 ? `${text.slice(0, 500)}…` : text;
+}
+
 export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyPreview, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas }: AgentPanelProps) {
   useAssetUrlCache();
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
@@ -1047,9 +1057,10 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       .trim();
 
     // 从 composed 中提取 @ 卡片气泡（与输入框展示一致）
-    const chips = composed.segments
-      .filter((s) => s.kind === 'ref')
-      .map((s) => ({ id: s.ref.id, label: s.ref.label }));
+    const chipRefs = composed.segments
+      .filter((s): s is { kind: 'ref'; ref: { id: string; label: string; prompt: string } } => s.kind === 'ref')
+      .map((s) => s.ref);
+    const chips = chipRefs.map((ref) => ({ id: ref.id, label: ref.label }));
 
     // content 只放用户实际输入的文字；胶囊由 resourceRef 那一路序列化成部件
     const textContent: import('@/api/agentSessions').SessionContentBlock[] = [];
@@ -1070,6 +1081,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     const accepted = await sendMessage(textContent, armed?.id, mediaBlocks, armed?.name, userText, chips);
     if (!accepted) {
       chipEditorRef.current?.setText(userText);
+      // 引用胶囊一并回填（IKDLQJ）：只回填文字会把引用弄丢，「保留原文」包括胶囊本身
+      for (const ref of chipRefs) chipEditorRef.current?.insertChip({ id: ref.id, label: ref.label, prompt: ref.prompt });
       pendingMediaBlocksRef.current = [...mediaBlocks];
       syncMediaBlocks();
       setForcedSkill(armed);
@@ -1369,9 +1382,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                   )}
                   {/* 图片/画布视频提及先于正文：缩略图 → 文件名 → 用户文字。 */}
                   <MessageAssetPreview blocks={m.blocks} chips={m.chips} />
-                  {/* @卡片气泡（与输入框中的气泡一致） */}
+                  {/* @卡片气泡（与输入框中的气泡一致）；文本引用附悬浮正文便于核对快照（IKDLQJ） */}
                   {m.chips?.filter((c) => !hasInlineVisualMention(m.blocks, c.id)).map((c) => (
-                    <div key={`chip-${c.id}`} className={styles.userMediaChip}>
+                    <div key={`chip-${c.id}`} className={styles.userMediaChip} title={quoteTooltipOfChip(m.blocks, c.id)}>
                       <span className={styles.userMediaChipAt}>@</span>
                       <span className={styles.userMediaChipLabel}>{c.label}</span>
                     </div>

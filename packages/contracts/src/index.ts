@@ -1,5 +1,10 @@
 export { previewSourceSchema, applyPreviewSchema, type PromptPreviewSource } from "./prompt-preview.js";
 export {
+  conversationQuoteCreateSchema,
+  CONVERSATION_QUOTE_LIST_LIMIT,
+  type ConversationQuoteCreate,
+} from "./conversation-quote.js";
+export {
   CANVAS_EDGE_LIMITS,
   canvasEdgeSchema,
   textAttachmentSnapshotSchema,

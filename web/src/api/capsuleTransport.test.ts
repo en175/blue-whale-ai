@@ -129,6 +129,41 @@ describe('胶囊上线格式', () => {
     expect(body.forced_creative_skill_id).toBe('sk_042');
     expect(body.content).toContainEqual({ type: 'skill_ref', skill_id: 'sk_042', name: '古风插画' });
   });
+
+  it('文本引用快照走 text_quote 部件：正文随消息上线，不再是旧卡片版本指针（IKDLQJ）', async () => {
+    const read = captureBody();
+    await sendSessionMessage('p1', 's1', [{ type: 'text', text: '基于它继续改' }], {
+      resourceRef: [{
+        type: 'text',
+        chip_id: '99',
+        name: '雪夜',
+        node_id: 'text-node-1',
+        source: 'node',
+        quote_id: '42',
+        resource_id: '42',
+        resource_type: '文本引用',
+        display_label: '雪夜',
+        resource_text: '画布实际编辑内容\n第二行',
+        prompt_source: { sessionId: 's-1', revisionId: 'r-1', shotNo: 2 },
+      }],
+    });
+
+    expect(read().content).toEqual([
+      { type: 'text', text: '基于它继续改' },
+      {
+        type: 'resource_ref',
+        resource_type: 'text_quote',
+        resource_id: '42',
+        resource_kind: '文本引用',
+        node_id: 'text-node-1',
+        quote_id: '42',
+        source: 'node',
+        display_label: '雪夜',
+        resource_text: '画布实际编辑内容\n第二行',
+        prompt_source: { sessionId: 's-1', revisionId: 'r-1', shotNo: 2 },
+      },
+    ]);
+  });
 });
 
 /**
