@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { previewSourceSchema } from "./prompt-preview.js";
 
 export const CANVAS_EDGE_LIMITS = { maxEdges: 500, fieldMax: 128, edgesBytes: 262_144 } as const;
 
@@ -20,6 +21,7 @@ export const textAttachmentSnapshotSchema = z
     node_id: z.string().min(1),
     title: z.string(),
     text: z.string(),
+    prompt_source: previewSourceSchema.optional(),
   })
   .strict();
 export type TextAttachmentSnapshot = z.infer<typeof textAttachmentSnapshotSchema>;

@@ -10,8 +10,9 @@ import {
   fail,
   ok,
   type TextAttachmentSnapshot,
+  previewSourceSchema,
 } from "@blue-whale/contracts";
-import { composeTextAttachmentPrompt } from "@blue-whale/core";
+import { composeTextAttachmentPrompt, extractTextNodeText } from "@blue-whale/core";
 import {
   DEFAULT_MAX_REFERENCE_IMAGES,
   type CanvasRepo,
@@ -406,17 +407,15 @@ export async function handleCreateGenerationJob(
         };
         if (edgeTarget !== targetNodeId) continue;
         const sourceNode = byId.get(source);
-        if (
-          !sourceNode ||
-          sourceNode.type !== "textNode" ||
-          typeof sourceNode.data?.text !== "string"
-        )
-          continue;
+        if (!sourceNode || sourceNode.type !== "textNode") continue;
+        // IKDL9U 修复：富文本节点按文本投影消费（html 也计入），并快照 prompt_source
+        const previewSource = previewSourceSchema.safeParse(sourceNode.data?.promptSource);
         textAttachments.push({
           node_id: source as string,
           title:
-            typeof sourceNode.data.title === "string" ? sourceNode.data.title : "",
-          text: sourceNode.data.text,
+            typeof sourceNode.data?.title === "string" ? sourceNode.data.title : "",
+          text: extractTextNodeText(sourceNode.data),
+          ...(previewSource.success ? { prompt_source: previewSource.data } : {}),
         });
       }
     }

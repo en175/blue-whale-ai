@@ -82,6 +82,8 @@ vi.mock('@/api/assets', () => ({
 }));
 
 vi.mock('@/api/canvas', () => ({
+  createConversationQuote: vi.fn(),
+  legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
   applyPromptPreview: vi.fn(),
   saveCanvasDoc: vi.fn(),
   serializeNodes: vi.fn(() => '[]'),

@@ -987,3 +987,25 @@ describe("handleCreateGenerationJob target_node_id 音频目标（IKDMQT）", ()
     expect(cmdArg.input).not.toHaveProperty("text_attachments");
   });
 });
+
+
+describe("IKDL9U review: ordinary text and provenance", () => {
+  it.each(["image", "video"])("freezes HTML text and preview identity for %s", async (type) => {
+    const source = { sessionId: "s1", revisionId: "r1", shotNo: 1 };
+    const { deps, createJob } = buildTargetDeps({
+      nodes: JSON.stringify([
+        { id: "target", type: "mediaNode", data: { mediaType: type } },
+        { id: "text", type: "textNode", data: { html: "<div>蓝鲸 &amp; 海</div><div>夜景</div>", promptSource: source } },
+      ]),
+      edges: JSON.stringify([{ id: "e", source: "text", target: "target" }]),
+    });
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY, type, target_node_id: "target",
+      parameters: { ...IMAGE_TARGET_BODY.parameters, prompt: "" },
+    }, null, deps);
+    expect(result.code).toBe(200);
+    expect(createJob.mock.calls[0][0].input.text_attachments).toEqual([
+      { node_id: "text", title: "", text: "蓝鲸 & 海\n夜景", prompt_source: source },
+    ]);
+  });
+});

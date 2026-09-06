@@ -56,3 +56,25 @@ describe("legacy card history repo", () => {
     });
   });
 });
+
+
+it("migration version conflict rolls back history together with canvas", async () => {
+  let persistedHistory: unknown[] = [];
+  const prisma = {
+    $transaction: async (run: (tx: any) => Promise<unknown>) => {
+      let staged: unknown[] = [];
+      const result = await run({
+        legacy_card_history: { createMany: async ({ data }: any) => { staged = data; } },
+        canvas: { updateMany: async () => ({ count: 0 }) },
+      });
+      persistedHistory = staged;
+      return result;
+    },
+  };
+  const repo = createLegacyCardHistoryRepo(prisma as never);
+  const result = await repo.migrate("55", 3, "[]", [
+    { nodeId: "a", title: "A", promptText: "before", visualText: null, source: null, cardJson: {} },
+  ]);
+  expect(result).toBe(false);
+  expect(persistedHistory).toEqual([]);
+});

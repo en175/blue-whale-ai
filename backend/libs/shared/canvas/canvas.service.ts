@@ -104,15 +104,8 @@ export class CanvasService {
         return { canvas, report: { migrated: [], failed: plan.failed } };
       }
       try {
-        await this.historyRepo.rememberMany(projectId, plan.historyDrafts);
-        const saved = await this.repo.saveIfVersion(
-          projectId,
-          canvas.version,
-          canvas.viewport,
-          JSON.stringify(plan.nodes),
-          canvas.edges,
-        );
-        if (saved) return { canvas: saved, report: { migrated: plan.migrated, failed: plan.failed } };
+        const saved = await this.historyRepo.migrate(projectId, canvas.version!, JSON.stringify(plan.nodes), plan.historyDrafts);
+        if (saved) return { canvas: await this.repo.getByProject(projectId), report: { migrated: plan.migrated, failed: plan.failed } };
       } catch (error) {
         // 并发打开的唯一键 INSERT IGNORE 可能死锁（MySQL 1213 → Prisma P2034）：与版本冲突同等处理，重读重算
         const code = (error as { code?: unknown })?.code;

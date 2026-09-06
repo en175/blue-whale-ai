@@ -30,22 +30,10 @@ export function readPromptSource(value: unknown): PromptPreviewSource | null {
 }
 
 /** 文本节点正文提取：`data.text` 是纯文本权威正文；旧 HTML 节点提取时把换行边界还原为 \n，不吞换行、不压缩连续空行。 */
+import { extractTextNodeText as readText } from '../../../../packages/core/src/text-node-content';
 export function extractTextNodeText(data: Record<string, unknown> | undefined): string {
-  const d = data ?? {};
-  if (typeof d.text === 'string') return d.text.trim().length > 0 ? d.text : '';
-  const html = typeof d.html === 'string' ? d.html : '';
-  if (!html) return '';
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(?:p|div|li|h[1-6]|blockquote|pre|tr)>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&')
-    .trim();
+  const text = readText(data);
+  return text.trim() ? text : '';
 }
 
 /** 引用胶囊标签：节点标题优先，否则正文前 10 字；不再是整段正文。 */

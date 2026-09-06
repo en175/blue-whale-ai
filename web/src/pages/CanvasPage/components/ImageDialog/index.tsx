@@ -307,15 +307,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
     onReorderAttachments(ids);
   };
 
-  /** 附件排序（IKDLQH）：与相邻项交换后把新 nodeId 序列交给父级；列表仍渲染自 props（父级同步同序快照） */
-  const handleAttachmentMove = (index: number, delta: -1 | 1) => {
-    if (!attachments || !onReorderAttachments) return;
-    const ids = attachments.map((a) => a.nodeId);
-    const [moved] = ids.splice(index, 1);
-    ids.splice(index + delta, 0, moved);
-    onReorderAttachments(ids);
-  };
-
   /** 发送（清晰度传分辨率档位 id，对应生成接口 parameters.size） */
   const handleSend = async () => {
     if (!canSend) return;

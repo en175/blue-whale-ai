@@ -5,6 +5,7 @@ import type { LegacyCardHistoryItem, LegacyMigrationReport } from '../../../pack
  * nodes/viewport 均为 JSON 字符串；保存支持 If-Match 乐观锁（412 版本冲突）
  * ============================================ */
 import { apiRequest } from './http';
+import { queryOptions } from '@tanstack/react-query';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 
 export type { LegacyCardHistoryItem, LegacyMigrationReport };
@@ -15,6 +16,14 @@ export function listLegacyCardHistory(projectId: string) {
     `/api/canvases/${encodeURIComponent(projectId)}/legacy-card-history`,
     { silent: true },
   );
+}
+
+export function legacyCardHistoryOptions(projectId: string) {
+  return queryOptions({
+    queryKey: ['canvas', projectId, 'legacy-history'],
+    queryFn: () => listLegacyCardHistory(projectId),
+    retry: false,
+  });
 }
 
 export function applyPromptPreview(input: { projectId: string; source: PromptPreviewSource; position: { x: number; y: number } }) {
