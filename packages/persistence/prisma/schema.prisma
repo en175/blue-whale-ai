@@ -796,3 +796,17 @@ model prompt_preview_snapshots {
 
   @@unique([project_id, source_key], map: "uk_prompt_preview_source")
 }
+
+/// Immutable conversation quote snapshot: node text captured when added to the conversation (IKDLQJ); retained after the source node is edited or deleted.
+model conversation_quote_snapshots {
+  id          BigInt   @id @default(autoincrement())
+  project_id  BigInt
+  quote_key   String   @db.VarChar(64)
+  node_id     String   @db.VarChar(128)
+  source_json Json?
+  title       String   @db.VarChar(200)
+  text        String   @db.MediumText
+  gmt_create  DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([project_id, quote_key], map: "uk_conversation_quote")
+}

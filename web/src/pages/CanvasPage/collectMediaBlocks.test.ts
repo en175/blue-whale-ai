@@ -2,6 +2,31 @@ import { describe, expect, it } from 'vitest';
 import { collectMediaBlocks } from './collectMediaBlocks';
 
 describe('collectMediaBlocks', () => {
+  it('no longer emits a bare revision pointer for generation cards; text goes through the quote snapshot flow (IKDLQJ)', () => {
+    const blocks = collectMediaBlocks(
+      {
+        id: 'gen-1',
+        type: 'assetNode',
+        data: {
+          kind: 'generation',
+          generationCard: {
+            shotTitle: '雪夜镜头',
+            prompt: '当前实际提示词',
+            cardId: 'revision-old#1',
+            shotNo: 1,
+            assetRefItems: [{ assetId: 'ast_ref_1', label: '主角参考', mediaType: 'image' }],
+          },
+        },
+      },
+      'chip-7',
+    );
+
+    expect(blocks.some((b) => b.resource_id === 'revision-old')).toBe(false);
+    expect(blocks.some((b) => b.shot_no === 1)).toBe(false);
+    // 显式挂在卡上的参考图仍然随引用走
+    expect(blocks).toContainEqual(expect.objectContaining({ asset_id: 'ast_ref_1', source: 'card-ref' }));
+  });
+
   it('carries 图集 reference asset_id so @ mention can serialize as asset_ref (IKBCV3)', () => {
     const blocks = collectMediaBlocks(
       {

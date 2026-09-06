@@ -1,20 +1,41 @@
 import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
-import { CANVAS_EDGE_LIMITS, DATA_NOT_EXIST_CODE, canvasEdgeSchema, fail, ok, applyPreviewSchema, PROMPT_TEXT_LIMITS as limits } from "@blue-whale/contracts";
-import { createCanvasRepo } from "@blue-whale/persistence";
+import { CANVAS_EDGE_LIMITS, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE, canvasEdgeSchema, fail, ok, applyPreviewSchema, conversationQuoteCreateSchema, previewSourceSchema, PROMPT_TEXT_LIMITS as limits } from "@blue-whale/contracts";
+import { createCanvasRepo, createConversationQuoteRepo, type ConversationQuoteRow } from "@blue-whale/persistence";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
+
+/** 对话引用快照视图（IKDLQJ）：主键字符串化；来源损坏时按无来源处理，不丢正文。 */
+function toQuoteView(row: ConversationQuoteRow) {
+  const source = previewSourceSchema.nullable().safeParse(row.source_json ?? null);
+  return {
+    quoteId: row.id.toString(),
+    nodeId: row.node_id,
+    title: row.title,
+    text: row.text,
+    source: source.success ? source.data : null,
+    quotedAt: row.gmt_create.toISOString(),
+  };
+}
 
 @Injectable()
 export class CanvasService {
   private repoInstance?: ReturnType<typeof createCanvasRepo>;
+  private quoteRepoInstance?: ReturnType<typeof createConversationQuoteRepo>;
 
   private get repo(): ReturnType<typeof createCanvasRepo> {
     if (!this.repoInstance) {
       this.repoInstance = createCanvasRepo(this.prisma.client);
     }
     return this.repoInstance;
+  }
+
+  private get quoteRepo(): ReturnType<typeof createConversationQuoteRepo> {
+    if (!this.quoteRepoInstance) {
+      this.quoteRepoInstance = createConversationQuoteRepo(this.prisma.client);
+    }
+    return this.quoteRepoInstance;
   }
 
   constructor(
@@ -30,6 +51,25 @@ export class CanvasService {
 
   getByProject(projectId: string) {
     return this.repo.getByProject(projectId);
+  }
+
+  /** 添加到对话（IKDLQJ）：冻结点击当刻正文与来源为不可变快照；相同内容复用既有快照。 */
+  async createConversationQuote(ownerId: string, projectId: string, body: unknown) {
+    if (!await this.project.findOwnedById(projectId, ownerId)) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
+    const parsed = conversationQuoteCreateSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(`引用正文缺失或超限（标题 ${limits.title}，正文 ${limits.text} 字），原文未改动`);
+    const { row, reused } = await this.quoteRepo.rememberQuote(projectId, parsed.data);
+    return ok({ quote: toQuoteView(row), reused });
+  }
+
+  /** 会话刷新后按消息中的 quoteId 批量回读引用事实；不存在的 id 省略。 */
+  async listConversationQuotes(ownerId: string, projectId: string, idsParam: string) {
+    if (!await this.project.findOwnedById(projectId, ownerId)) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
+    const ids = idsParam.split(",").map(id => id.trim()).filter(id => id.length > 0);
+    if (ids.length === 0) return ok({ items: [] });
+    if (ids.length > CONVERSATION_QUOTE_LIST_LIMIT) throw new BadRequestException(`一次最多回读 ${CONVERSATION_QUOTE_LIST_LIMIT} 条引用`);
+    const rows = await this.quoteRepo.listQuotesByIds(projectId, ids);
+    return ok({ items: rows.map(toQuoteView) });
   }
 
   async applyPreview(ownerId: string, projectId: string, body: unknown) {
