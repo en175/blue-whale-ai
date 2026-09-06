@@ -1,7 +1,7 @@
 /* ============================================
  * AgentPanel Agent 智能体对话面板：消息流与任务执行
  * ============================================ */
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   X,
   Plus,
@@ -55,6 +55,8 @@ import {
   readPersistedPanelWidth,
 } from './drawerWidth';
 import { itemsFromBlocks, itemsFromLive, type TimelineItem, type Turn } from '../../hooks/sessionTimeline';
+import { ASSET_MENTION_ATTR, collectKnownAssets, rehypeAssetMentions, type KnownAsset } from './assetMentions';
+import { AssetMentionChip } from './AssetMentionChip';
 import { ThinkingBlock, ToolCallRow, TurnFooter } from './TurnTimeline';
 
 /** 父组件没传已应用集合时的空集。提到模块级是为了保持引用稳定，避免每次渲染都造一个新 Set。 */
@@ -69,12 +71,30 @@ const EMPTY_APPLIED_IDS: ReadonlySet<string> = new Set<string>();
  *
  * 表格自带横向滚动容器：面板本来就窄，宽表格必须自己滚，不能把整个消息流撑出横向滚动条。
  */
-export function Markdown({ text }: { text: string }) {
+export function Markdown({ text, assets = [] }: { text: string; assets?: readonly KnownAsset[] }) {
+  // 本会话已知的素材名在正文里换成胶囊（IKDLW3）。插件按 assets 记忆：每次渲染造一个新插件会让
+  // react-markdown 重建整条处理链。
+  const rehypePlugins = useMemo(() => (assets.length ? [rehypeAssetMentions(assets)] : []), [assets]);
   return (
     <div className={styles.md}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={rehypePlugins}
         components={{
+          // 插件把命中的名字标成带 data 属性的 span；其余 span 原样。
+          span: ({ node: _node, children, ...props }) => {
+            const attrs = props as Record<string, unknown>;
+            const assetId = attrs[ASSET_MENTION_ATTR];
+            if (typeof assetId !== 'string') return <span {...props}>{children}</span>;
+            return (
+              <AssetMentionChip
+                assetId={assetId}
+                label={String(attrs['data-asset-label'] ?? '')}
+                mediaType={attrs['data-asset-media'] === 'video' ? 'video' : 'image'}
+                url={typeof attrs['data-asset-url'] === 'string' ? attrs['data-asset-url'] : undefined}
+              />
+            );
+          },
           table: ({ children }) => (
             <div className={styles.mdTableWrap}>
               <table>{children}</table>
@@ -309,10 +329,13 @@ function AssistantTurnBody({
   onCardApply,
   disabled,
   appliedCardIds,
+  knownAssets,
 }: {
   turn: Turn;
   /** 打字动画已露出的正文前缀，只对进行中的那一轮有意义。 */
   streamingText: string;
+  /** 本会话用户提过的素材，正文里提到名字就画成胶囊（IKDLW3）。 */
+  knownAssets: readonly KnownAsset[];
   onCardApply: (card: NonNullable<SessionContentBlock['card']>) => void;
   disabled: boolean;
   appliedCardIds: ReadonlySet<string>;
@@ -347,7 +370,7 @@ function AssistantTurnBody({
           case 'tool':
             return <ToolCallRow key={key} item={item} />;
           case 'text':
-            return <Markdown key={key} text={item.text} />;
+            return <Markdown key={key} text={item.text} assets={knownAssets} />;
           case 'card': {
             const cardId = item.card.cardId ?? item.card.shotTitle;
             return (
@@ -531,6 +554,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     dismissDeleteError,
     refreshSessions,
   } = useAgentSession(projectId ?? '');
+  /** 本会话用户提过的素材（IKDLW3）：助手正文里出现它们的名字就画成胶囊。 */
+  const knownAssets = useMemo(() => collectKnownAssets(turns), [turns]);
   /** 历史会话下拉展开态 */
   const [historyOpen, setHistoryOpen] = useState(false);
   /** 待确认删除的历史会话（点 X 后弹二次确认，取消不删） */
@@ -1363,6 +1388,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                     onCardApply={handleCardApply}
                     disabled={runningRunId !== null || streaming}
                     appliedCardIds={appliedIds}
+                    knownAssets={knownAssets}
                   />
                   {/* 这一轮的账挂在轮尾（IKDK5L）；还在跑的轮由输入框上方的状态行读秒。 */}
                   {turn.account && !turn.live && <TurnFooter account={turn.account} />}

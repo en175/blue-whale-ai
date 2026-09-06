@@ -1793,6 +1793,30 @@
   opacity: 0.8;
 }
 
+/* 助手正文里的素材胶囊，URL 还没反查回来时的占位（IKDLW3）：与 ImageMentionChip 同尺寸同圆角，
+   只是没有缩略图——反查回来换成真胶囊时位置不跳。 */
+.assetMentionPending {
+  display: inline-flex;
+  align-items: center;
+  max-width: 200px;
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 胶囊夹在正文行里：左右留一点气，垂直居中，不撑高行距。 */
+.assetMention {
+  display: inline-flex;
+  vertical-align: middle;
+  margin: 0 2px;
+}
+
 /* ---- 工具行：它在做什么（IKDK5K） ----
    夹在两段正文之间，说的是「它是在说完哪句话之后去做的」。做得很轻——正文才是主角——
    但它有生命周期：转圈读秒 → 打勾带耗时 / 叉 / 横线。子步骤缩进一档，运行中默认展开。 */

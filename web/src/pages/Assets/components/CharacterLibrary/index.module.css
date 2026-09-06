@@ -508,10 +508,26 @@
 }
 
 .qrBox {
+  position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
   margin-top: var(--spacing-lg);
+}
+
+/* 过期白色蒙层：覆盖二维码，中间提示文字 */
+.qrExpiredMask {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background-color: rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+  text-align: center;
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
 }
 
 .qrHintSub {
@@ -542,6 +558,50 @@
 
 .qrOpenBtn:active {
   background-color: var(--color-bg-active);
+}
+
+/* 倒计时提示 */
+.qrCountdown {
+  margin-top: var(--spacing-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+/* 重新生成按钮：灰底次级样式 */
+.qrResetBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: var(--spacing-sm);
+  padding: 9px 0;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.qrResetBtn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+}
+
+.qrResetBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 生成中图标旋转 */
+.qrSpin {
+  animation: qrSpinRotate 0.8s linear infinite;
+}
+
+@keyframes qrSpinRotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .modalInput {
