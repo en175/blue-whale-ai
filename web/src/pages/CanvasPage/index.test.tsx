@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CanvasPage from './index';
@@ -75,6 +76,7 @@ vi.mock('@/api/assets', () => ({
 }));
 
 vi.mock('@/api/canvas', () => ({
+  applyPromptPreview: vi.fn(),
   saveCanvasDoc: vi.fn(),
   serializeNodes: vi.fn(() => '[]'),
 }));
@@ -117,7 +119,7 @@ async function renderPage() {
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(createElement(MemoryRouter, null, createElement(CanvasPage)));
+    root.render(createElement(QueryClientProvider, { client: new QueryClient() }, createElement(MemoryRouter, null, createElement(CanvasPage))));
   });
 }
 

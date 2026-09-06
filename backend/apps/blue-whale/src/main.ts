@@ -49,6 +49,8 @@ async function bootstrap(): Promise<void> {
 
   // 对齐原 BFF：文生文透传上限 1MB（TEXT_MAX_BODY_BYTES）；框架默认 100kb 会先于
   // 控制器内的 OpenAI 形 413 拦截，导致 100kb–1MB 体返回错误响应形态。
+  // Canvas JSON is itself a string in the envelope; allow escaping overhead for the 4 MiB document contract.
+  app.use("/api/canvases", express.json({ limit: "16mb" }));
   app.use(express.json({ limit: "1mb" }));
   // urlencoded 随之一并手工注册：关掉自带 parser 之后它也没了，而表单端点还在用。
   app.use(express.urlencoded({ extended: true, limit: "1mb" }));

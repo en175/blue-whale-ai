@@ -15,7 +15,6 @@ import {
   Coins,
   MessageSquare,
   Check,
-  CheckCircle2,
   RotateCcw,
   Package,
 } from 'lucide-react';
@@ -47,7 +46,6 @@ import {
   resolveComposed,
   type ComposedValue,
 } from '../ChipTextEditor/composed';
-import AssetChip from '../AssetChip';
 import { shouldCancelOnKey } from './cancelShortcut';
 import { freePanelLayout, type PanelMetrics } from './layout';
 import {
@@ -246,7 +244,7 @@ function CardPreview({ preview }: { preview: PartialCardPreview | null }) {
     <div className={styles.cardPreview} aria-live="off">
       <div className={styles.cardPreviewLabel}>
         <BookText size={12} strokeWidth={2} />
-        <span>生成卡撰写中…</span>
+        <span>Prompt 撰写中…</span>
       </div>
       {preview.overview && <div className={styles.cardPreviewOverview}>{preview.overview}</div>}
       {preview.shots.map((shot, i) => (
@@ -264,214 +262,34 @@ function CardPreview({ preview }: { preview: PartialCardPreview | null }) {
   );
 }
 
-/** 分镜提示词生成卡：单镜头卡（画面/提示词/素材引用 + 手动应用，双击字段可编辑） */
-function GenerationCard({
-  card,
-  onApply,
-  disabled,
-  applied,
-  cancelled,
-}: {
+/** 一条已提交的 Prompt 预览：标题和单正文，逐条手动应用。 */
+function GenerationCard({ card, onApply, disabled, applied }: {
   card: NonNullable<SessionContentBlock['card']>;
-  onApply: (patch: { shotTitle?: string; visual?: string; prompt?: string }) => void;
+  onApply: () => void;
   disabled: boolean;
   applied?: boolean;
-  /** 本组生成卡已被「取消」：未应用的卡不再可操作（已应用的卡维持已应用态） */
-  cancelled?: boolean;
 }) {
-  /** 双击编辑：本地覆盖字段，应用时随 patch 一并提交 */
-  const [edited, setEdited] = useState<{ shotTitle?: string; visual?: string; prompt?: string }>({});
-  const [editingField, setEditingField] = useState<'shotTitle' | 'visual' | 'prompt' | null>(null);
-  const [draftValue, setDraftValue] = useState('');
-  /** 折叠态：**新产出的卡默认展开**（已确认）。纯视图状态，不持久化——刷新后重新展开是对的，
-   *  用户回到这一屏是来看内容的，不是来接着上次的折叠姿势的。 */
   const [collapsed, setCollapsed] = useState(false);
-
-  const shotTitle = edited.shotTitle ?? card.shotTitle;
-  const visual = edited.visual ?? card.visual;
-  const prompt = edited.prompt ?? card.prompt;
-
-  const startEdit = (field: 'shotTitle' | 'visual' | 'prompt', current?: string) => {
-    if (applied || cancelled || disabled) return;
-    setEditingField(field);
-    setDraftValue(current ?? '');
-  };
-  const commitEdit = () => {
-    if (!editingField) return;
-    setEdited((prev) => ({ ...prev, [editingField]: draftValue }));
-    setEditingField(null);
-  };
-  const cancelEdit = () => setEditingField(null);
-
-  /** 编辑框自适应高度：撑满实际内容，不用固定行数截断/滚动（保持与双击前的展示一致） */
-  const autoResizeTextarea = (el: HTMLTextAreaElement | null) => {
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
-  };
-
   return (
-    <div className={`${styles.generationCard} ${cancelled ? styles.generationCardCancelled : ''}`}>
-      {/* 卡头元信息栏（IKAFSQ）：左侧徽标 / 右侧 #N + 主动作 + 折叠。
-       *  三个徽标全部按数据渲染，缺失即不渲染——图片批次没有时长是正常的，不该占位。 */}
+    <div className={styles.generationCard}>
       <div className={styles.shotMeta}>
-        <div className={styles.shotBadges}>
-          {card.targetMedia && (
-            <span className={styles.shotKind}>{card.targetMedia === 'video' ? 'SCENE' : 'IMAGE'}</span>
-          )}
-          {typeof card.durationSeconds === 'number' && (
-            <span className={styles.shotBadge}>~{card.durationSeconds}s</span>
-          )}
-          {card.aspectRatio && <span className={styles.shotBadge}>{card.aspectRatio}</span>}
-        </div>
+        <span className={styles.shotTitle}>{card.shotTitle}</span>
         <div className={styles.shotMetaRight}>
-          {/* 镜号直接用协议里的 shot_no：一个 Session 只有一组卡，schema 强制 1..N 连续，
-           *  重编是整组替换，所以这个编号不存在歧义。 */}
-          {typeof card.shotNo === 'number' && <span className={styles.shotNo}>#{card.shotNo}</span>}
-          {applied ? (
-            <span className={styles.shotAppliedMark} title="已进入画布">
-              <CheckCircle2 size={16} strokeWidth={2.2} />
-            </span>
-          ) : cancelled ? (
-            <span className={styles.shotCancelled}>已取消</span>
-          ) : (
-            <button
-              type="button"
-              className={styles.shotApplyBtn}
-              onClick={() => onApply(edited)}
-              disabled={disabled}
-            >
-              <Plus size={13} strokeWidth={2.5} />
-              <span>手动应用</span>
-            </button>
-          )}
-          <button
-            type="button"
-            className={styles.shotCollapse}
-            title={collapsed ? '展开' : '收起'}
-            aria-expanded={!collapsed}
-            onClick={() => setCollapsed((v) => !v)}
-          >
-            {collapsed ? <ChevronDown size={14} strokeWidth={2} /> : <ChevronUp size={14} strokeWidth={2} />}
+          <button type="button" className={styles.shotApplyBtn}
+            disabled={disabled || !card.source}
+            onClick={onApply}>
+            <Plus size={13} />{applied ? '定位文本节点' : '手动应用'}
+          </button>
+          <button type="button" className={styles.shotCollapse}
+            title={collapsed ? '展开' : '收起'} aria-expanded={!collapsed}
+            onClick={() => setCollapsed(value => !value)}>
+            {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
           </button>
         </div>
       </div>
-      <div className={styles.shotHeader}>
-        {editingField === 'shotTitle' ? (
-          <input
-            className={styles.shotEditInput}
-            value={draftValue}
-            autoFocus
-            onChange={(e) => setDraftValue(e.target.value)}
-            onBlur={commitEdit}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitEdit();
-              else if (e.key === 'Escape') cancelEdit();
-            }}
-          />
-        ) : (
-          <span className={styles.shotTitle} title="双击编辑" onDoubleClick={() => startEdit('shotTitle', shotTitle)}>
-            {shotTitle}
-            {!applied && card.timeRange && <span className={styles.shotTime}> · {card.timeRange}</span>}
-          </span>
-        )}
-      </div>
-      {/* 折叠态到此为止：卡头一行 + 标题一行，与竞品一致。
-       *  标题就是那句话——协议里每镜各有自己的 title，产卡 Skill 已被要求写成能概括本镜核心
-       *  的十字左右短句（不是「镜头 3」这类废话），所以不需要另开一个摘要字段。 */}
-      {collapsed ? null : (
-      <>
-      {editingField === 'visual' ? (
-        <div className={styles.shotField}>
-          <span className={styles.shotFieldLabel}>画面</span>
-          <textarea
-            ref={autoResizeTextarea}
-            className={styles.shotEditTextarea}
-            value={draftValue}
-            autoFocus
-            rows={1}
-            onChange={(e) => {
-              setDraftValue(e.target.value);
-              autoResizeTextarea(e.target);
-            }}
-            onBlur={commitEdit}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                commitEdit();
-              } else if (e.key === 'Escape') cancelEdit();
-            }}
-          />
-        </div>
-      ) : (
-        visual && (
-          <div className={styles.shotField}>
-            <span className={styles.shotFieldLabel}>画面</span>
-            <span className={styles.shotFieldValue} title="双击编辑" onDoubleClick={() => startEdit('visual', visual)}>
-              {visual}
-            </span>
-          </div>
-        )
-      )}
-      {editingField === 'prompt' ? (
-        <div className={styles.shotField}>
-          <span className={styles.shotFieldLabel}>提示词</span>
-          <textarea
-            ref={autoResizeTextarea}
-            className={styles.shotEditTextarea}
-            value={draftValue}
-            autoFocus
-            rows={1}
-            onChange={(e) => {
-              setDraftValue(e.target.value);
-              autoResizeTextarea(e.target);
-            }}
-            onBlur={commitEdit}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                commitEdit();
-              } else if (e.key === 'Escape') cancelEdit();
-            }}
-          />
-        </div>
-      ) : (
-        prompt && (
-          <div className={styles.shotField}>
-            <span className={styles.shotFieldLabel}>提示词</span>
-            <span className={styles.shotFieldValue} title="双击编辑" onDoubleClick={() => startEdit('prompt', prompt)}>
-              {prompt}
-            </span>
-          </div>
-        )
-      )}
-      {/* 素材引用：有身份的走胶囊（缩略图 + 悬浮预览），只有旧数据才退回纯文字。
-       *  不内联进正文——正文是纯文本、asset_bindings 是无位置的平列表，内联需要模型在正文里
-       *  写位置标记，那是引用体系的整体设计，不在本单。 */}
-      {card.assetRefItems && card.assetRefItems.length > 0 ? (
-        <div className={styles.shotRefs}>
-          {card.assetRefItems.map((ref, i) => (
-            <AssetChip
-              key={`${ref.assetId}-${i}`}
-              assetId={ref.assetId}
-              label={ref.label}
-              mediaType={ref.mediaType}
-            />
-          ))}
-        </div>
-      ) : (
-        card.assetRefs && card.assetRefs.length > 0 && (
-          <div className={styles.shotRefs}>
-            {card.assetRefs.map((r) => (
-              <span key={r} className={styles.shotRef}>{r}</span>
-            ))}
-          </div>
-        )
-      )}
-      {/* 「已进入画布」不再另起一条提示条：卡头那个绿勾已经说明白了，两处说同一件事是冗余。 */}
-      {!applied && cancelled && <div className={styles.cancelledHint}>已取消，不会应用到画布</div>}
-      </>
-      )}
+      {!collapsed && <div className={styles.shotField}>
+        <span className={styles.shotFieldValue}>{card.prompt || '提示词正文缺失，请继续对话重新生成'}</span>
+      </div>}
     </div>
   );
 }
@@ -489,21 +307,15 @@ function AssistantTurnBody({
   turn,
   streamingText,
   onCardApply,
-  onApplyAllCards,
-  onCancelCardGroup,
   disabled,
   appliedCardIds,
-  cancelledMessageIds,
 }: {
   turn: Turn;
   /** 打字动画已露出的正文前缀，只对进行中的那一轮有意义。 */
   streamingText: string;
-  onCardApply: (card: NonNullable<SessionContentBlock['card']>, patch: { shotTitle?: string; visual?: string; prompt?: string }) => void;
-  onApplyAllCards: (cards: NonNullable<SessionContentBlock['card']>[]) => void;
-  onCancelCardGroup: (messageId: string) => void;
+  onCardApply: (card: NonNullable<SessionContentBlock['card']>) => void;
   disabled: boolean;
   appliedCardIds: ReadonlySet<string>;
-  cancelledMessageIds: Set<string>;
 }) {
   const items: TimelineItem[] = turn.assistant
     ? itemsFromBlocks(turn.assistant.blocks ?? [], turn.assistant.content)
@@ -511,14 +323,9 @@ function AssistantTurnBody({
       ? itemsFromLive(turn.live, streamingText)
       : [];
   if (items.length === 0) return null;
-  const messageId = turn.assistant?.id ?? turn.key;
   const live = turn.live !== null && !turn.live.ended;
   // 正文还没出来时思考展开：那段等待正是它要填的；正文一出现就收起。
   const hasBody = items.some((item) => item.kind === 'text' || item.kind === 'tool' || item.kind === 'card');
-  const cards = items.flatMap((item) => (item.kind === 'card' ? [item.card] : []));
-  const groupCancelled = cancelledMessageIds.has(messageId);
-  const unappliedCards = cards.filter((c) => !appliedCardIds.has(c.cardId ?? c.shotTitle));
-  const showGroupActions = cards.length > 1 && !groupCancelled && unappliedCards.length > 0;
   const ordinals: Record<string, number> = {};
   const keyOf = (item: TimelineItem): string => {
     if (item.kind === 'card') {
@@ -547,10 +354,9 @@ function AssistantTurnBody({
               <GenerationCard
                 key={key}
                 card={item.card}
-                onApply={(patch) => onCardApply(item.card, patch)}
+                onApply={() => onCardApply(item.card)}
                 disabled={disabled}
                 applied={appliedCardIds.has(cardId)}
-                cancelled={groupCancelled}
               />
             );
           }
@@ -558,26 +364,7 @@ function AssistantTurnBody({
             return <CardPreview key={key} preview={item.preview} />;
         }
       })}
-      {showGroupActions && (
-        <div className={styles.cardGroupActions}>
-          <button
-            type="button"
-            className={styles.cardGroupCancelBtn}
-            onClick={() => onCancelCardGroup(messageId)}
-            disabled={disabled}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            className={`${styles.cardBtn} ${styles.cardBtnPrimary}`}
-            onClick={() => onApplyAllCards(unappliedCards)}
-            disabled={disabled}
-          >
-            应用整组到画布
-          </button>
-        </div>
-      )}
+
     </>
   );
 }
@@ -652,7 +439,7 @@ interface AgentPanelProps {
   /** 当前项目ID：发送消息走 POST /api/projects/:id/conversation/messages */
   projectId?: string;
   /** 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent）；载荷是会话层唯一的生成卡形状，不再另开一份 */
-  onApplyToDock?: (payload: GenerationCardBlock) => void;
+  onApplyPreview?: (payload: GenerationCardBlock) => void;
   /**
    * 画布上现存的生成卡节点所对应的 cardId 集合（IKAFSQ）。
    *
@@ -685,7 +472,7 @@ function hasInlineVisualMention(blocks: SessionContentBlock[] | undefined, chipI
   });
 }
 
-export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas }: AgentPanelProps) {
+export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyPreview, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas }: AgentPanelProps) {
   useAssetUrlCache();
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
@@ -771,7 +558,6 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
    *  「都没应用过」，是安全的一侧：宁可让用户多按一次，也不要把没进画布的卡显示成绿勾。 */
   const appliedIds = appliedCardIds ?? EMPTY_APPLIED_IDS;
   /** 已「取消」的生成卡组（按消息ID标记，组内未应用的卡不再可操作） */
-  const [cancelledMessageIds, setCancelledMessageIds] = useState<Set<string>>(new Set());
   /**
    * 「直接使用」刚点上、**还没发出去**的那一条。发出去之后它就载入了会话，由
    * `activeSkillIds` 接手（0028）——所以这里只是一个未提交的选择，不是当前状态。
@@ -1269,27 +1055,15 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     }
   };
 
-  /** 手动应用生成卡 → 落画布节点（B2：标记已应用 + 回调 CanvasPage 落生成卡节点；patch 为双击编辑后的字段覆盖） */
+  /** 手动应用已提交的预览；来源随会话保留，应用结果由服务端决定。 */
   const handleCardApply = (
     card: NonNullable<SessionContentBlock['card']>,
-    patch: { shotTitle?: string; visual?: string; prompt?: string },
   ) => {
     if (runningRunId !== null || streaming) return;
     const cardId = card.cardId ?? card.shotTitle;
     // 不在这里记「已应用」：那个事实由画布上有没有这个节点决定，落节点之后自然就成立了。
-    const payload: GenerationCardBlock = { ...card, ...patch, cardId };
-    onApplyToDock?.(payload);
-  };
-
-  /** 手动应用整组生成卡（04 §5.2）：依次应用组内每张未应用的卡，不带各卡的双击编辑覆盖（编辑态仅存在于各卡内部，整组应用按原卡内容落地） */
-  const handleApplyAllCards = (cards: NonNullable<SessionContentBlock['card']>[]) => {
-    if (runningRunId !== null || streaming || cards.length === 0) return;
-    cards.forEach((card) => handleCardApply(card, {}));
-  };
-
-  /** 取消这组生成卡（04 §5.2）：标记消息已取消，组内未应用的卡不再可操作 */
-  const handleCancelCardGroup = (messageId: string) => {
-    setCancelledMessageIds((prev) => new Set(prev).add(messageId));
+    const payload: GenerationCardBlock = { ...card, cardId, source: card.source ? { ...card.source, sessionId: card.source.sessionId || sessionId || '' } : undefined };
+    onApplyPreview?.(payload);
   };
 
   /** 上传文件 */
@@ -1587,11 +1361,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                     turn={turn}
                     streamingText={streamingText}
                     onCardApply={handleCardApply}
-                    onApplyAllCards={handleApplyAllCards}
-                    onCancelCardGroup={handleCancelCardGroup}
                     disabled={runningRunId !== null || streaming}
                     appliedCardIds={appliedIds}
-                    cancelledMessageIds={cancelledMessageIds}
                   />
                   {/* 这一轮的账挂在轮尾（IKDK5L）；还在跑的轮由输入框上方的状态行读秒。 */}
                   {turn.account && !turn.live && <TurnFooter account={turn.account} />}

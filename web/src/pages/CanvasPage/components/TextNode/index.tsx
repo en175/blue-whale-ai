@@ -9,14 +9,18 @@ import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, F
 import { sanitizeHtml } from '@/utils/sanitize';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import styles from './index.module.css';
+import { PROMPT_TEXT_LIMITS } from '../../../../../../packages/contracts/src/prompt-text-limits';
 
 /** 文字节点最大字数（按纯文本计，含粘贴） */
-const MAX_TEXT_LENGTH = 2000;
+const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
 
 /** 连接点统一样式（锚定正文容器左右中点） */
 const HANDLE_STYLE = { background: '#666', width: 10, height: 10, border: '2px solid #444' } as const;
 
 interface TextNodeData {
+  title?: string;
+  onTitleChange?: (id: string, title: string) => void;
+  onTextChange?: (id: string, text: string) => void;
   html?: string;
   text?: string;
   toolMode?: 'drag' | 'select';
@@ -31,6 +35,12 @@ interface TextNodeData {
 }
 
 export default function TextNode({ id, data, selected }: NodeProps & { data: TextNodeData; selected?: boolean }) {
+  const plainText = typeof data.text === 'string';
+  const [contentError, setContentError] = useState('');
+  const [titleError, setTitleError] = useState('');
+  const [expanded, setExpanded] = useState(false);
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(data.title ?? '文本节点');
   const [isFocused, setIsFocused] = useState(false);
   /** 双击进入编辑；单击/拖动为移动节点 */
   const [editing, setEditing] = useState(false);
@@ -62,19 +72,20 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     if (editing) editorRef.current?.focus();
   }, [editing]);
 
-  // 仅在首次挂载时设置初始 HTML（超上限时截断纯文本）
+  // Keep the complete source, including legacy over-limit content. Never truncate on load.
   useEffect(() => {
     if (!initializedRef.current && editorRef.current) {
-      editorRef.current.innerHTML = sanitizeHtml(data.html || data.text || '');
-      // 旧数据/共享资产导入可能超字数：按纯文本截断
-      const text = editorRef.current.innerText ?? '';
-      if (text.length > MAX_TEXT_LENGTH) {
-        editorRef.current.innerText = text.slice(0, MAX_TEXT_LENGTH);
-        data.onToast?.('warn', `文字节点最多 ${MAX_TEXT_LENGTH} 字，已截断 ${text.length - MAX_TEXT_LENGTH} 字`);
-      }
+      if (plainText) editorRef.current.textContent = data.text ?? '';
+      else editorRef.current.innerHTML = sanitizeHtml(data.html || '');
       initializedRef.current = true;
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (plainText && !editing && !contentError && editorRef.current) {
+      editorRef.current.textContent = data.text ?? '';
+    }
+  }, [plainText, editing, contentError, data.text]);
 
   // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
   useEffect(() => {
@@ -121,9 +132,15 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
 
   /** 同步内容到父组件（净化后保存，防止 XSS 持久化） */
   const syncContent = useCallback(() => {
-    const html = sanitizeHtml(editorRef.current?.innerHTML || '');
-    data.onChange?.(id, html);
-  }, [data, id]);
+    const text = editorRef.current?.innerText ?? '';
+    if (text.length > MAX_TEXT_LENGTH) {
+      setContentError(`正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`);
+      return;
+    }
+    setContentError('');
+    if (plainText) data.onTextChange?.(id, text);
+    else data.onChange?.(id, sanitizeHtml(editorRef.current?.innerHTML || ''));
+  }, [data, id, plainText]);
 
   /** 执行格式化命令 */
   const execCmd = useCallback((cmd: string, value?: string) => {
@@ -239,29 +256,13 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     saveSelection();
   }, [saveSelection]);
 
-  /** 粘贴清洗：将富文本转为纯文本；超上限时截断并提示 */
-  /** 当前编辑器纯文本长度 */
-  const getTextLength = useCallback(
-    () => (editorRef.current?.innerText ?? '').length,
-    [],
-  );
-
+  /** Paste the entire actual text; over-limit drafts remain visible and are not persisted. */
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     e.preventDefault();
-    const text = e.clipboardData.getData('text/plain');
-    // 粘贴截断：当前已有字数 + 粘贴内容不能超过上限
-    const remaining = MAX_TEXT_LENGTH - getTextLength();
-    if (remaining <= 0) {
-      data.onToast?.('warn', `文字节点最多 ${MAX_TEXT_LENGTH} 字`);
-      return;
-    }
-    if (text.length > remaining) {
-      data.onToast?.('warn', `文字节点最多 ${MAX_TEXT_LENGTH} 字，已截断 ${text.length - remaining} 字`);
-    }
-    document.execCommand('insertText', false, text.slice(0, remaining));
+    document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
     saveSelection();
     syncContent();
-  }, [data, getTextLength, saveSelection, syncContent]);
+  }, [saveSelection, syncContent]);
 
   /** 编辑器键盘操作后保存选区并同步 */
   const handleEditorKeyUp = useCallback(() => {
@@ -276,7 +277,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       style={nodeTitleSizing(zoom)}
     >
       {/* 同一层操作位置：编辑时是格式工具栏，其余是节点操作条，两者不叠成多行 */}
-      {isFocused ? (
+      {isFocused && !plainText ? (
         <div
           className={`${styles.toolbar} nodrag nopan`}
           onMouseDown={(e) => e.preventDefault()}
@@ -357,16 +358,30 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         </div>
       )}
 
-      {/* 常驻标题行：左侧类型图标与现有名称，右侧留空 */}
+      {/* 常驻标题行：名称编辑与正文展开 */}
       <div className={styles.titleRow} data-testid="text-title">
         <div className={styles.titleLeft}>
           <FileText className={styles.titleIcon} strokeWidth={2} color="#888" />
-          <span className={styles.titleName}>文本节点</span>
+          {titleEditing ? <input className="nodrag nopan" aria-label="文本节点标题" value={titleDraft} autoFocus
+            onChange={event => setTitleDraft(event.target.value)}
+            onBlur={() => {
+              if (titleDraft.length > PROMPT_TEXT_LIMITS.title) {
+                setTitleError(`标题最多 ${PROMPT_TEXT_LIMITS.title} 字，草稿已保留`); return;
+              }
+              data.onTitleChange?.(id, titleDraft); setTitleEditing(false); setTitleError('');
+            }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') event.currentTarget.blur(); }} />
+            : <span className={styles.titleName} onDoubleClick={event => { event.stopPropagation(); if (data.onTitleChange) { setTitleDraft(data.title ?? '文本节点'); setTitleEditing(true); } }}>
+              {data.title || '文本节点'}
+            </span>}
         </div>
+      {plainText && <button className={`${styles.toolBtn} nodrag nopan`} onClick={() => setExpanded(value => !value)}>
+        {expanded ? '收起全文' : '展开全文'}
+      </button>}
       </div>
 
+      {(contentError || titleError) && <div role="alert" className="nodrag nopan">{contentError || titleError}</div>}
       {/* 固定正文容器：360×270（含内边距），超出的正文在内部上下滚动 */}
-      <div className={`${styles.contentCard} nowheel`} data-testid="text-content">
+      <div className={`${styles.contentCard} nowheel`} data-testid="text-content" style={expanded ? { height: 540, maxHeight: '70vh' } : undefined}>
         {!data.isFirst && (
           <Handle type="target" position={Position.Left} className={styles.handle} style={HANDLE_STYLE} />
         )}
@@ -374,7 +389,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         <div
           ref={editorRef}
           className={`${styles.editor} ${editing ? 'nodrag nopan' : ''}`}
-          contentEditable={editing}
+          contentEditable={editing ? (plainText ? 'plaintext-only' : true) : false}
           suppressContentEditableWarning
           style={{ pointerEvents: isSelect ? 'auto' : 'none' }}
           onFocus={() => setIsFocused(true)}
@@ -385,15 +400,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
             setIsFocused(false);
             setEditing(false);
           }}
-          onInput={() => {
-            // 键入超限拦截：撤销本次输入并提示（IME/手打兜底，粘贴在 handlePaste 已截断）
-            if (getTextLength() > MAX_TEXT_LENGTH) {
-              document.execCommand('undo');
-              data.onToast?.('warn', `文字节点最多 ${MAX_TEXT_LENGTH} 字`);
-              return;
-            }
-            syncContent();
-          }}
+          onInput={syncContent}
           onDoubleClick={(e) => {
             if (!isSelect) return;
             // 双击激活输入，并阻止画布双击居中缩放

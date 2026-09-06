@@ -153,14 +153,14 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     const added = textNodes.filter((n) => !currentIds.has(n.id));
     const removed = [...currentIds].filter((id) => !newIds.has(id));
 
-    if (added.length > 0 || removed.length > 0) {
-      setNodes((prev) => {
-        let result = removed.length > 0 ? prev.filter((n) => !removed.includes(n.id)) : prev;
-        if (added.length > 0) result = [...result, ...added];
-        return result;
+    const dataById = new Map(textNodes.map(node => [node.id, node.data]));
+    setNodes((prev) => {
+      const kept = prev.filter(node => !removed.includes(node.id)).map(node => {
+        const data = dataById.get(node.id);
+        return data ? { ...node, data } : node;
       });
-    }
-
+      return [...kept, ...added];
+    });
     textIdsRef.current = newIds;
   }, [textNodes, setNodes]);
 

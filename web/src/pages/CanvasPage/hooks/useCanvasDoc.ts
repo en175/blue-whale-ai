@@ -112,5 +112,5 @@ export function useCanvasDoc(projectId: string) {
 
   const refetch = useCallback(() => load(true), [load]);
 
-  return { doc, assets, loading, refetch };
+  return { doc, assets, loading, refetch, acceptDoc: setDoc };
 }
