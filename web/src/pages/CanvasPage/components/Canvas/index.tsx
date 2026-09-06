@@ -175,7 +175,19 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       setNodes((prev) => {
         let result = removed.length > 0 ? prev.filter((n) => !removed.includes(n.id)) : prev;
         if (updated.length > 0) {
-          result = result.map((node) => updated.find((u) => u.id === node.id) ?? node);
+          result = result.map((node) => {
+            const update = updated.find((u) => u.id === node.id);
+            if (!update) return node;
+            // 父层只在拖动结束时保存坐标；媒体加载不能覆盖画布当前的交互状态。
+            return {
+              ...node,
+              ...update,
+              position: node.dragging ? node.position : update.position,
+              selected: node.selected,
+              dragging: node.dragging,
+              measured: node.measured,
+            };
+          });
         }
         if (added.length > 0) result = [...result, ...added];
         return result;
