@@ -1,6 +1,8 @@
 /** 失败卡片主文案：后端具体原因优先，没有才用兜底。 */
+import type { MediaGenStatus } from './index';
+
 export function mediaNodeFailHeadline(input: {
-  genStatus?: 'generating' | 'failed' | 'cancelled';
+  genStatus?: MediaGenStatus;
   errorText?: string;
   isMediaExtraction: boolean;
 }): string {

@@ -331,11 +331,29 @@ describe('IKDLQF 连线受控化与目标生图接线', () => {
     expect(saved.edges).toHaveLength(1);
   });
 
-  it('底部固定入口提交不携带 target_node_id，也不做提交前落盘', async () => {
+  it('资产卡「生成图片」打开空白面板：提交不携带 target_node_id，也不做提交前落盘', async () => {
+    // IKDMQQ 起侧栏图片入口改为先建草稿卡（必带 target_node_id）；
+    // 不带目标节点的旧链路改由资产卡「生成图片」入口承载（空白面板）。
+    canvasDocMock.current = {
+      doc: {
+        id: 11,
+        version: 3,
+        viewport: { x: 0, y: 0, zoom: 1 },
+        nodes: [
+          { id: 't1', type: 'textNode', position: { x: 0, y: 0 }, data: { title: '故事文案', text: '一只蓝鲸在海里' } },
+          { id: 'c1', type: 'assetNode', position: { x: 300, y: 0 }, data: { kind: 'custom' } },
+        ],
+        edges: [],
+      },
+      assets: {},
+      refetch: () => Promise.resolve([]),
+      acceptDoc: vi.fn(),
+    };
     await renderPage();
 
+    const card = flowProps.current.assetNodes.find((n: Node) => n.id === 'c1');
     await act(async () => {
-      toolbarProps.current.onToggleImageDialog();
+      card.data.onGenerateImage();
     });
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     // 无目标节点：不展示附件区

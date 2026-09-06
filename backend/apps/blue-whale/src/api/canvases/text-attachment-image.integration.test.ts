@@ -25,6 +25,7 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
   const MODEL_ID = "ikdlqf-image-model";
+  const VIDEO_MODEL_ID = "ikdlqf-video-model";
   let app: Awaited<ReturnType<typeof NestFactory.create>>;
   let base = "";
   const previousDatabase = process.env.DATABASE_URL;
@@ -48,6 +49,25 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
         features: {},
       },
       update: { supported_sizes: sizes, default_size: "1024x1024" },
+    });
+    // 视频模型（IKDLQG 起 target_node_id 支持视频）：「视频类型携带」用例需要合法视频模型走到目标类型校验
+    await prisma.client.generation_model_capability.upsert({
+      where: { provider_id_model_id: { provider_id: "ikdlqf-test", model_id: VIDEO_MODEL_ID } },
+      create: {
+        provider_id: "ikdlqf-test",
+        model_id: VIDEO_MODEL_ID,
+        capability_type: "video",
+        model_label: "IKDLQF Test Video",
+        supported_sizes: [{ id: "720p", label: "720P", api_value: "720p" }],
+        supported_aspect_ratios: ["16:9"],
+        supported_formats: ["mp4"],
+        supported_durations: { min: 5, max: 10, step: 1 },
+        default_size: "720p",
+        default_aspect_ratio: "16:9",
+        default_duration: 5,
+        features: {},
+      },
+      update: {},
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
@@ -212,14 +232,15 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     expect(videoTarget.code).toBe(400);
     expect(videoTarget.msg).toBe("目标节点不存在或不是图片媒体节点");
 
+    // IKDLQG 起 target_node_id 支持视频；此处图片节点作为视频目标 → 目标类型不匹配明确失败
     const videoType = await createJob(projectId, {
       type: "video",
       target_node_id: "media-1",
       expected_output_count: 1,
-      parameters: { prompt: "暮色", model_id: "any-video-model", aspect_ratio: "16:9" },
+      parameters: { prompt: "暮色", model_id: VIDEO_MODEL_ID, aspect_ratio: "16:9", resolution: "720p", duration: 5 },
     });
     expect(videoType.code).toBe(400);
-    expect(videoType.msg).toBe("target_node_id 仅支持图片生成");
+    expect(videoType.msg).toBe("目标节点不存在或不是视频媒体节点");
 
     expect(await jobCount(projectId)).toBe(0);
 

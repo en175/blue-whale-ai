@@ -244,6 +244,13 @@
   font-weight: 500;
 }
 
+/* ---- 生成中只读提示（IKDMQQ） ---- */
+.readOnlyHint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}
+
 /* ---- 连线文本附件（IKDLQF，只读） ---- */
 .attachments {
   display: flex;
