@@ -3,7 +3,7 @@
  * IKBN0G：右侧去掉个人信息下拉，只保留 Agent
  * ============================================ */
 import { useNavigate } from 'react-router-dom';
-import { Bot } from 'lucide-react';
+import { Bot, History } from 'lucide-react';
 import RechargeModal from '@/components/UserDropdown/RechargeModal';
 import { useRechargeUiStore } from '@/stores/recharge';
 import ProjectSelector, { type CanvasProject } from '../ProjectSelector';
@@ -17,6 +17,8 @@ interface CanvasHeaderProps {
   onDeleteProject: (id: string) => void;
   onNewProject: () => void;
   onToggleAgent: () => void;
+  /** 旧生成卡迁移历史入口（IKDLQK）：仅项目存在迁移历史时提供，缺省不渲染 */
+  onShowLegacyHistory?: () => void;
   /** 面板展开时隐藏 Agent 入口（IKDLD4）：入口与面板内关闭按钮冗余，收起后自动恢复 */
   hideAgentEntry?: boolean;
 }
@@ -29,6 +31,7 @@ export default function CanvasHeader({
   onDeleteProject,
   onNewProject,
   onToggleAgent,
+  onShowLegacyHistory,
   hideAgentEntry = false,
 }: CanvasHeaderProps) {
   const navigate = useNavigate();
@@ -56,8 +59,17 @@ export default function CanvasHeader({
         />
       </div>
 
-      {/* 右侧：只保留 Agent；充值弹窗仍挂在此，供生成前余额拦截打开 */}
+      {/* 右侧：迁移历史（有历史时）+ Agent；充值弹窗仍挂在此，供生成前余额拦截打开 */}
       <div className={styles.right}>
+        {onShowLegacyHistory && (
+          <button
+            className={styles.agentBtn}
+            onClick={onShowLegacyHistory}
+          >
+            <History size={16} strokeWidth={2} />
+            <span>迁移历史</span>
+          </button>
+        )}
         <button
           className={`${styles.agentBtn} ${hideAgentEntry ? styles.agentBtnHidden : ''}`}
           onClick={onToggleAgent}

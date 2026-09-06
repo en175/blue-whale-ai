@@ -1,5 +1,13 @@
 export { previewSourceSchema, applyPreviewSchema, type PromptPreviewSource } from "./prompt-preview.js";
 export {
+  legacyCardHistoryItemSchema,
+  legacyMigrationFailureSchema,
+  legacyMigrationReportSchema,
+  type LegacyCardHistoryItem,
+  type LegacyMigrationFailure,
+  type LegacyMigrationReport,
+} from "./legacy-card-migration.js";
+export {
   conversationQuoteCreateSchema,
   CONVERSATION_QUOTE_LIST_LIMIT,
   type ConversationQuoteCreate,

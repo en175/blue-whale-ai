@@ -810,3 +810,18 @@ model conversation_quote_snapshots {
 
   @@unique([project_id, quote_key], map: "uk_conversation_quote")
 }
+
+/// Immutable legacy generation-card migration history (IKDLQK): card content captured before conversion to an ordinary text node; read-only, never rewritten by later edits.
+model legacy_card_history {
+  id          BigInt   @id @default(autoincrement())
+  project_id  BigInt
+  node_id     String   @db.VarChar(128)
+  title       String   @db.VarChar(200)
+  prompt_text String   @db.MediumText
+  visual_text String?  @db.MediumText
+  source_json Json?
+  card_json   Json
+  gmt_create  DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([project_id, node_id], map: "uk_legacy_card_history")
+}

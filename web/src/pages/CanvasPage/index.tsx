@@ -23,6 +23,7 @@ import ImageDialog, { type UploadedFile, type ImageGenSeedParams, type ImageText
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
+import LegacyHistoryModal from './components/LegacyHistoryModal';
 import AssetsPickerModal from './components/AssetsPickerModal';
 import CharacterLibraryModal from './components/CharacterLibraryModal';
 import type { MaterialAsset } from '@/api/material';
@@ -42,7 +43,7 @@ import {
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
-import { applyPromptPreview, createConversationQuote, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
+import { applyPromptPreview, createConversationQuote, listLegacyCardHistory, saveCanvasDoc, serializeEdges, serializeNodes, type LegacyCardHistoryItem } from '@/api/canvas';
 import { isApiError } from '@/api/http';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
@@ -434,7 +435,40 @@ export default function CanvasPage() {
   }, [currentId]);
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
-  const { doc, assets: snapshotAssets, refetch, acceptDoc } = useCanvasDoc(currentId);
+  const { doc, assets: snapshotAssets, refetch, acceptDoc, legacyMigration } = useCanvasDoc(currentId);
+
+  /** 旧生成卡迁移历史（IKDLQK）：水合后拉取，无历史或读取失败时入口隐藏 */
+  const [legacyHistory, setLegacyHistory] = useState<LegacyCardHistoryItem[] | null>(null);
+  const [showLegacyHistory, setShowLegacyHistory] = useState(false);
+
+  /** 迁移报告提示（IKDLQK）：按报告签名去重，同一报告只提示一次；失败附标题与原因 */
+  const migrationToastRef = useRef('');
+  useEffect(() => {
+    if (!legacyMigration) return;
+    const signature = JSON.stringify(legacyMigration);
+    if (migrationToastRef.current === signature) return;
+    migrationToastRef.current = signature;
+    const { migrated, failed } = legacyMigration;
+    if (failed.length === 0) {
+      if (migrated.length > 0) showToast('success', `已将 ${migrated.length} 张旧生成卡转换为普通文本节点`);
+      return;
+    }
+    const detail = failed.slice(0, 2).map((item) => `「${item.title || item.nodeId}」${item.reason}`).join('；');
+    const failedText = `${failed.length} 张旧生成卡未能迁移（${detail}${failed.length > 2 ? ' 等' : ''}），原卡片已保留`;
+    showToast('warn', migrated.length > 0 ? `已转换 ${migrated.length} 张旧生成卡；${failedText}` : failedText);
+  }, [legacyMigration, showToast]);
+
+  useEffect(() => {
+    if (!doc || !currentId) {
+      setLegacyHistory(null);
+      return;
+    }
+    let cancelled = false;
+    listLegacyCardHistory(currentId)
+      .then((res) => { if (!cancelled) setLegacyHistory(res.items); })
+      .catch(() => { if (!cancelled) setLegacyHistory(null); });
+    return () => { cancelled = true; };
+  }, [doc, currentId]);
 
   /** 为服务端加载的节点注入交互回调（JSON 不含函数） */
   const attachCallbacks = (node: Node): Node => {
@@ -2850,6 +2884,7 @@ export default function CanvasPage() {
         onDeleteProject={handleDelete}
         onNewProject={handleNewProject}
         onToggleAgent={() => setShowAgent(!showAgent)}
+        onShowLegacyHistory={legacyHistory && legacyHistory.length > 0 ? () => setShowLegacyHistory(true) : undefined}
         hideAgentEntry={showAgent}
       />
 
@@ -3158,6 +3193,13 @@ export default function CanvasPage() {
           }}
         />
       )}
+
+      {/* 旧生成卡迁移历史（IKDLQK，只读） */}
+      <LegacyHistoryModal
+        open={showLegacyHistory}
+        items={legacyHistory ?? []}
+        onClose={() => setShowLegacyHistory(false)}
+      />
 
       {/* Toast 提示 */}
       {toast && (
