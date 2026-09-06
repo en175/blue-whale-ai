@@ -150,7 +150,7 @@ describe('Canvas space pan', () => {
     await mouse('mousemove', window, 160, 140);
     await finishGesture();
     // React Flow 从超过拖拽阈值的首个移动事件开始累计位移。
-    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ position: { x: 90, y: 90 } }));
+    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ position: { x: 90, y: 90 } }), expect.any(Array));
     expect(props.onViewportChange).not.toHaveBeenCalled();
     expect(node().classList.contains('draggable')).toBe(false);
   });
@@ -239,7 +239,7 @@ describe('Canvas 媒体标题缩放与交互组合', () => {
     });
     await mouse('mousemove', window, 160, 140);
     await finishGesture();
-    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ id: 'image-1', selected: true }));
+    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ id: 'image-1', selected: true }), expect.any(Array));
     const draggedPosition = node().style.transform;
     expect(draggedPosition).not.toBe('translate(50px,60px)');
     await act(async () => {
@@ -290,7 +290,7 @@ describe('Canvas media loading during interaction', () => {
     expect(node().querySelector('button[title="详情"]')).not.toBeNull();
     await finishGesture();
     expect(node().style.transform).toBe(draggedPosition);
-    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ selected: true }));
+    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ selected: true }), expect.any(Array));
   });
 
   it('still applies externally restored positions when the node is idle', async () => {
