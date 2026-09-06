@@ -121,6 +121,16 @@ const card = (page: Page, id: string) => node(page, id).locator('[data-testid="t
 const title = (page: Page, id: string) => node(page, id).locator('[data-testid="text-title"]');
 const editor = (page: Page, id: string) => card(page, id).locator('[contenteditable]');
 
+/** 画布缩放需带修饰键（IKDKH1 后滚轮默认平移）。Ctrl+滚轮走捏合缩放路径，
+ * macOS 上该路径灵敏度高 10 倍，按平台归一使同一 deltaY 得到相同缩放倍率。 */
+const WHEEL_ZOOM_FACTOR = process.platform === 'darwin' ? 10 : 1;
+
+async function zoomWheel(page: Page, deltaY: number) {
+  await page.keyboard.down('Control');
+  await page.mouse.wheel(0, deltaY / WHEEL_ZOOM_FACTOR);
+  await page.keyboard.up('Control');
+}
+
 /** 最后一次保存下来的节点数组（PUT body 是外层 JSON，nodes 为内嵌转义字符串） */
 function lastPutNodes(tracking: Tracking): Array<{ id: string; position: { x: number; y: number }; data: Record<string, unknown> }> {
   const raw = tracking.putBodies[tracking.putBodies.length - 1] ?? '';
@@ -308,14 +318,14 @@ test('交互：连接点隐现与锚定 / 操作条与格式工具栏同层不�
   // 缩放：正文按画布缩放呈现，flow 尺寸规格不变，标题名称不变
   const titleTextBefore = await title(page, 'n-long').textContent();
   await page.mouse.move(1700, 1200);
-  await page.mouse.wheel(0, 240);
+  await zoomWheel(page, 240);
   await page.waitForTimeout(300);
   expect(await title(page, 'n-long').textContent()).toBe(titleTextBefore);
   const zoomed = (await card(page, 'n-long').boundingBox())!;
   expect(zoomed.width, '缩小后正文屏幕宽度应变化').toBeLessThan(CONTENT_WIDTH);
   expect(Math.abs(zoomed.width / zoomed.height - CONTENT_WIDTH / CONTENT_HEIGHT), '4:3 比例应保持').toBeLessThan(0.02);
   // 放大档：正文屏幕尺寸随之变大，标题名称不变
-  await page.mouse.wheel(0, -480);
+  await zoomWheel(page, -480);
   await page.waitForTimeout(300);
   const enlarged = (await card(page, 'n-long').boundingBox())!;
   expect(enlarged.width, '放大后正文屏幕宽度应大于 100% 规格').toBeGreaterThan(CONTENT_WIDTH);

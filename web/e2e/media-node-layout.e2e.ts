@@ -420,8 +420,8 @@ test('交互：工具栏不遮挡标题/连接点隐现与锚定/拉线/缩放�
   // 缩放：标题分辨率文案不变，内容屏幕尺寸随缩放变化（flow 尺寸不变）
   const titleTextBefore = await title(page, 'n-landscape').textContent();
   await page.mouse.move(2000, 1600);
-  await page.mouse.wheel(0, 240);
-  await page.mouse.wheel(0, 240);
+  await zoomWheel(page, 240);
+  await zoomWheel(page, 240);
   await page.waitForTimeout(300);
   expect(await title(page, 'n-landscape').textContent()).toBe(titleTextBefore);
   const zoomed = await card(page, 'n-landscape').boundingBox();
@@ -544,14 +544,14 @@ test('音频：方形内容区/连接点锚定/播放控件不被拖动吞掉/�
   // 缩放：标题时长文案不变，内容屏幕尺寸随缩放变化
   const titleBefore = await title(page, 'n-audio').textContent();
   await page.mouse.move(2000, 1600);
-  await page.mouse.wheel(0, 240);
+  await zoomWheel(page, 240);
   await page.waitForTimeout(300);
   expect(await title(page, 'n-audio').textContent()).toBe(titleBefore);
   const zoomed = (await card(page, 'n-audio').boundingBox())!;
   measurements.zoomedWidth = zoomed.width;
   expect(zoomed.width).toBeLessThan(280);
   // 放大回 100%：内容区恢复 280×280，标题文案仍不变
-  await page.mouse.wheel(0, -240);
+  await zoomWheel(page, -240);
   await page.waitForTimeout(300);
   const zoomedBack = (await card(page, 'n-audio').boundingBox())!;
   measurements.zoomedBackWidth = zoomedBack.width;
@@ -635,16 +635,16 @@ test('回归：拖动→保存→刷新生效 / 平移 / 删除 / 自由投放',
     )
     .toBe(true);
 
-  // 2) 平移（按住 Space 滚轮）：视口 transform 变化
+  // 2) 平移（无修饰键滚轮）：视口位置变化、缩放值不变
   const viewportTransform = () =>
     page.locator('.react-flow__viewport').evaluate((el) => (el as HTMLElement).style.transform);
+  const zoomOf = (transform: string) => /scale\(([^)]+)\)/.exec(transform)?.[1];
   const panBefore = await viewportTransform();
   await page.locator('.react-flow__pane').click({ position: { x: 1800, y: 1500 } });
-  await page.keyboard.down(' ');
   await page.mouse.move(1000, 800);
   await page.mouse.wheel(0, 120);
-  await page.keyboard.up(' ');
   await expect.poll(viewportTransform, { timeout: 3000 }).not.toBe(panBefore);
+  expect(zoomOf(await viewportTransform()), '滚轮平移不应改变缩放').toBe(zoomOf(panBefore));
 
   // 3) 刷新：拖动后的位置从保存通路恢复（旧画布恢复位置）
   await page.reload();
@@ -712,10 +712,20 @@ async function titleMetrics(page: Page, id: string) {
   });
 }
 
+/** 画布缩放需带修饰键（IKDKH1 后滚轮默认平移）。Ctrl+滚轮走捏合缩放路径，
+ * macOS 上该路径灵敏度高 10 倍，按平台归一使同一 deltaY 得到相同缩放倍率。 */
+const WHEEL_ZOOM_FACTOR = process.platform === 'darwin' ? 10 : 1;
+
+async function zoomWheel(page: Page, deltaY: number) {
+  await page.keyboard.down('Control');
+  await page.mouse.wheel(0, deltaY / WHEEL_ZOOM_FACTOR);
+  await page.keyboard.up('Control');
+}
+
 async function zoomTo(page: Page, zoom: number) {
   const current = (await titleMetrics(page, 'n-landscape')).zoom;
   await page.mouse.move(1900, 1550);
-  await page.mouse.wheel(0, Math.log2(current / zoom) / 0.002);
+  await zoomWheel(page, Math.log2(current / zoom) / 0.002);
   await expect.poll(async () => Math.abs((await titleMetrics(page, 'n-landscape')).zoom - zoom)).toBeLessThan(0.002);
 }
 
