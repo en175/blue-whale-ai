@@ -694,11 +694,24 @@ for event in ("PreToolUse", "PostToolUse"):
         script_count += len(master_edit_scripts)
 
         # 提醒型 gate 不属于平台中立契约；Codex 的 Edit|Write 由专用适配器接入共享 Gate。
+        # graphify 官方提醒型钩子（hook-guard / hook-check，恒 exit 0 只注入引导）同属
+        # 提醒型，不参与形状同步（同 check-hook-contracts.py 的排除原则）。
+        def is_graphify_reminder(it):
+            commands = [
+                hook.get("command", "")
+                for hook in it.get("hooks", [])
+                if hook.get("type") == "command"
+            ]
+            return bool(commands) and all(c.startswith("graphify ") for c in commands)
+
         claude_items = [
-            it for it in claude_items if it["matcher"] not in ("Grep|Glob", "Edit|Write")
+            it for it in claude_items
+            if it["matcher"] not in ("Grep|Glob", "Edit|Write")
+            and not is_graphify_reminder(it)
         ]
         codex_items = [
-            it for it in codex_items if it["matcher"] != "Edit|Write"
+            it for it in codex_items
+            if it["matcher"] != "Edit|Write" and not is_graphify_reminder(it)
         ]
     if shape(claude_items) != shape(codex_items):
         raise SystemExit(
