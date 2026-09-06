@@ -36,7 +36,8 @@ import { isApiError } from '@/api/http';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
 import { estimateOutputTokens, parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
 import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusLine';
-import { mergeConfirmedUser, projectMessage } from './userMessageProjection';
+import { collectMissingQuoteIds, mergeConfirmedUser, patchQuoteTexts, projectMessage } from './userMessageProjection';
+import { listConversationQuotes } from '@/api/canvas';
 import {
   EMPTY_SESSION_STATE,
   accountOfRun,
@@ -578,10 +579,11 @@ export function useAgentSession(projectId: string) {
         const account = run?.run_id ? accountOfRun(run) : null;
         if (account && run?.run_id) accounts[run.run_id] = account;
       }
+      // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
+      const restoredMessages = attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards);
       commit(() => ({
         ...EMPTY_SESSION_STATE,
-        // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
-        messages: attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards),
+        messages: restoredMessages,
         accounts,
         runningRunId: liveRun?.run_id ?? null,
         failedRunId: settledRun?.run_id && needsRetry(settledRun.status) ? settledRun.run_id : null,
@@ -601,6 +603,17 @@ export function useAgentSession(projectId: string) {
         etag: snap.session?.etag ?? null,
       });
       setChatError(null);
+      // IKDLQJ：历史消息里的文本引用若缺正文（agent 未 round-trip resource_text），按 quoteId 回读补齐，
+      // 引用事实在刷新后仍可完整回读；失败只少正文悬浮内容，不影响对话本身。
+      const missingQuoteIds = collectMissingQuoteIds(restoredMessages);
+      if (missingQuoteIds.length > 0) {
+        listConversationQuotes(projectId, missingQuoteIds)
+          .then(({ items }) => {
+            if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return;
+            commit((prev) => ({ ...prev, messages: patchQuoteTexts(prev.messages, items) }));
+          })
+          .catch((e) => console.warn('回读对话引用快照失败:', e));
+      }
       if (liveRun?.run_id) {
         if (liveRun.status === 'payment_required') {
           setStreaming(false);

@@ -17,6 +17,24 @@ export class CanvasesController {
     return this.canvas.applyPreview(user.userId, projectId, body);
   }
 
+  @Post(":projectId/conversation-quotes")
+  createConversationQuote(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+  ) {
+    return this.canvas.createConversationQuote(user.userId, projectId, body);
+  }
+
+  @Get(":projectId/conversation-quotes")
+  listConversationQuotes(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Query("ids") ids?: string,
+  ) {
+    return this.canvas.listConversationQuotes(user.userId, projectId, ids ?? "");
+  }
+
   @Get()
   async get(
     @CurrentUser() user: AuthenticatedUser,

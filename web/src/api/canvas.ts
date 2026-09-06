@@ -15,6 +15,41 @@ export function applyPromptPreview(input: { projectId: string; source: PromptPre
   );
 }
 
+/** 对话引用快照（IKDLQJ）：点击「添加到对话」当刻冻结的正文与来源，服务端不可变保存。 */
+export interface ConversationQuote {
+  quoteId: string;
+  nodeId: string;
+  title: string;
+  text: string;
+  /** 预览来源三件套（IKDLQE）；普通无预览来源文本为 null */
+  source: PromptPreviewSource | null;
+  quotedAt: string;
+}
+
+/** 创建/复用引用快照：相同（节点 + 来源 + 正文）复用既有快照（reused=true）。超限 400，原文不丢。 */
+export function createConversationQuote(input: {
+  projectId: string;
+  nodeId: string;
+  title: string;
+  text: string;
+  source?: PromptPreviewSource | null;
+}) {
+  return apiRequest<{ quote: ConversationQuote; reused: boolean }>(
+    `/api/canvases/${encodeURIComponent(input.projectId)}/conversation-quotes`, {
+      method: 'POST', silent: true,
+      body: JSON.stringify({ nodeId: input.nodeId, title: input.title, text: input.text, source: input.source ?? null }),
+    },
+  );
+}
+
+/** 会话刷新后按 quoteId 批量回读引用事实；不存在的 id 省略。 */
+export function listConversationQuotes(projectId: string, ids: string[]) {
+  return apiRequest<{ items: ConversationQuote[] }>(
+    `/api/canvases/${encodeURIComponent(projectId)}/conversation-quotes?ids=${ids.map(encodeURIComponent).join(',')}`,
+    { silent: true },
+  );
+}
+
 /** GET /api/canvases 返回（无记录时 id/version/viewport/nodes 均为 null） */
 export interface CanvasRecord {
   /** 画布记录ID，无记录为 null */

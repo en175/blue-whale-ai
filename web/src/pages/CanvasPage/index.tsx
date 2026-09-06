@@ -42,7 +42,7 @@ import {
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
-import { applyPromptPreview, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
+import { applyPromptPreview, createConversationQuote, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
@@ -70,6 +70,7 @@ import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
+import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from './quoteConversation';
 import {
   canvasLocationSearch,
   pickCanvasIdAfterLoad,
@@ -937,6 +938,32 @@ export default function CanvasPage() {
     }
   };
 
+  /**
+   * 添加到对话的文本引用（IKDLQJ）：先把点击当刻正文冻结成服务端引用快照，再注入胶囊。
+   * 超限或快照创建失败明确提示、不产生胶囊——节点原文与输入框既有内容都不改动。
+   */
+  const quoteTextIntoChat = async (input: QuoteConversationInput) => {
+    if (input.text.length > QUOTE_TEXT_LIMIT) {
+      showToast('warn', `正文超过 ${QUOTE_TEXT_LIMIT} 字上限，未添加到对话`);
+      return;
+    }
+    try {
+      const { quote } = await createConversationQuote({
+        projectId: currentId,
+        nodeId: input.nodeId,
+        title: input.title,
+        text: input.text,
+        source: input.source ?? null,
+      });
+      const label = quoteChipLabel(input.title, input.text);
+      const blocks = [textQuoteBlock({ nodeId: input.nodeId, chipId: String(input.ts), label, quote }), ...(input.extraBlocks ?? [])];
+      setAgentContext({ text: `@${label}`, label, ts: input.ts, mediaBlocks: blocks });
+      setShowAgent(true);
+    } catch (e) {
+      showToast('error', isApiError(e) ? `添加到对话失败：${e.message}` : '添加到对话失败，请检查网络后重试');
+    }
+  };
+
   /** 添加节点内容到 Agent 聊天 */
   const handleAddToChatNode = (id: string) => {
     const ts = Date.now();
@@ -956,16 +983,21 @@ export default function CanvasPage() {
     }
     const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
-      const text = typeof t.data.text === 'string' ? t.data.text : ((t.data?.html as string) || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-      const label = text || '文本节点';
-      const mediaBlocks = collectMediaBlocks(t, String(ts));
-      setAgentContext({
-        text: `@${label}`,
-        label,
-        ts,
-        mediaBlocks: mediaBlocks.length > 0 ? mediaBlocks : undefined,
-      });
-      setShowAgent(true);
+      // IKDLQJ：正文走引用快照；空正文节点没有可引用内容，维持纯 @ 标签
+      const text = extractTextNodeText(t.data as Record<string, unknown> | undefined);
+      if (text) {
+        void quoteTextIntoChat({
+          nodeId: t.id,
+          title: typeof t.data?.title === 'string' ? t.data.title : '',
+          text,
+          source: readPromptSource(t.data?.promptSource),
+          ts,
+        });
+      } else {
+        const label = '文本节点';
+        setAgentContext({ text: `@${label}`, label, ts });
+        setShowAgent(true);
+      }
       return;
     }
     const m = mediaNodesRef.current.find((n) => n.id === id);
@@ -989,7 +1021,7 @@ export default function CanvasPage() {
     }
     const a = assetNodesRef.current.find((n) => n.id === id);
     if (a) {
-      const gc = a.data?.generationCard as { shotTitle?: string } | undefined;
+      const gc = a.data?.generationCard as { shotTitle?: string; prompt?: string } | undefined;
       const kindTitle: Record<string, string> = {
         style: '风格卡',
         character: '角色卡',
@@ -999,6 +1031,18 @@ export default function CanvasPage() {
         generation: '生成卡',
       };
       const name = gc?.shotTitle || kindTitle[(a.data?.kind as string) ?? 'custom'] || '资产卡';
+      // IKDLQJ：生成卡的当前提示词同样捕获为引用快照，不再只发旧 revision 指针；显式挂载的素材引用随行
+      const prompt = typeof gc?.prompt === 'string' ? gc.prompt : '';
+      if (gc && prompt.trim()) {
+        void quoteTextIntoChat({
+          nodeId: a.id,
+          title: gc.shotTitle ?? '',
+          text: prompt,
+          ts,
+          extraBlocks: collectMediaBlocks(a, String(ts)),
+        });
+        return;
+      }
       const mediaBlocks = collectMediaBlocks(a, String(ts));
       console.log('[handleAddToChatNode] assetNode, mediaBlocks:', mediaBlocks.length, 'refs:', (a.data?.initialRefs as unknown[] | undefined)?.length ?? 0);
       setAgentContext({
