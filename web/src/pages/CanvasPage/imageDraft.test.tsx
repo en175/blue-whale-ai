@@ -124,6 +124,9 @@ vi.mock('@/api/assets', () => ({
 /* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
+  // IKDLQK 起 CanvasPage 还引入这两个调用：mock 补齐，否则组件挂载即抛错（IKDLQK 合入时的既有欠账）
+  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
+  createConversationQuote: vi.fn(),
   saveCanvasDoc: apiMocks.saveCanvasDoc,
   serializeNodes: vi.fn((nodes: Node[]) =>
     JSON.stringify(nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data }))),

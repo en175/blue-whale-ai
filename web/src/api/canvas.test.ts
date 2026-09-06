@@ -12,7 +12,7 @@ function okResponse(data: unknown) {
 }
 
 describe('serializeEdges', () => {
-  it('只保留持久形状 {id, source, target}，剥离渲染细节', () => {
+  it('保留持久形状 {id, source, target, data?}，剥离渲染细节；data 承载关系属性（IKDMQS refRole）', () => {
     const edges = [
       {
         id: 'e1',
@@ -21,11 +21,19 @@ describe('serializeEdges', () => {
         type: 'custom',
         style: { stroke: '#444' },
         selected: true,
-        data: { onDelete: () => {} },
+      },
+      {
+        id: 'e2',
+        source: 'img-1',
+        target: 'video-draft-1',
+        type: 'custom',
+        style: { stroke: '#444' },
+        data: { refRole: 'first' },
       },
     ] as unknown as Edge[];
     expect(JSON.parse(serializeEdges(edges))).toEqual([
       { id: 'e1', source: 'text-1', target: 'media-1' },
+      { id: 'e2', source: 'img-1', target: 'video-draft-1', data: { refRole: 'first' } },
     ]);
   });
 
