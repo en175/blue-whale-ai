@@ -437,15 +437,10 @@ async function processClaimedJob(
     const n = Math.max(1, Math.min(4, job.expected_output_count || 1));
     const sourceImages = [];
     for (const source of sourceAssets) {
-      const response = await fetchImpl(source.url);
-      if (!response.ok) {
-        throw new ImageProviderError(ERROR_UNSUPPORTED_INPUT, "参考图片读取失败");
+      if (typeof source.url !== "string" || source.url.length === 0) {
+        throw new ImageProviderError(ERROR_UNSUPPORTED_INPUT, "参考图片缺少地址");
       }
-      const blob = await response.blob();
-      sourceImages.push({
-        blob,
-        fileName: `asset-${source.id}.${imageExtension(source.mime ?? blob.type)}`,
-      });
+      sourceImages.push({ url: source.url });
     }
     const sequential = input.sequential_image_generation === true;
     const providerInput = {
@@ -718,12 +713,6 @@ async function finishJob(
     `产出 ${assetIds.length} 个素材`,
     { asset_ids: assetIds },
   );
-}
-
-function imageExtension(mime: string): string {
-  if (mime.includes("jpeg")) return "jpg";
-  if (mime.includes("webp")) return "webp";
-  return "png";
 }
 
 function videoDimensions(

@@ -12,15 +12,17 @@ export interface GenerateImageInput {
   height?: number | null;
   /** Banana 解析器写入的调用质量。 */
   quality?: string;
-  /** 已通过项目/用户归属校验的输入图片。存在时走 image edits。 */
+  /** 已通过项目/用户归属校验的参考图，走 generations Extra `image`。 */
   sourceImage?: {
-    blob: Blob;
-    fileName: string;
+    url: string;
+    blob?: Blob;
+    fileName?: string;
   };
   /** Ordered, authorized reference images. */
   sourceImages?: Array<{
-    blob: Blob;
-    fileName: string;
+    url: string;
+    blob?: Blob;
+    fileName?: string;
   }>;
 }
 
