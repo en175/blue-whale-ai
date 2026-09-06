@@ -139,46 +139,80 @@ export function createNewApiGenerationOps(
           url,
         })),
       ];
-      const hasFrames = Boolean(input.firstFrameImage || input.lastFrameImage);
-      if (
-        (input.lastFrameImage && !input.firstFrameImage) ||
-        (hasFrames && references.length > 0)
-      ) {
-        throw new NewApiError(
-          "首尾帧模式不能与普通参考素材混用",
-          422,
-          "unsupported_video_inputs",
+      // IKDJNZ：单数组 references 语义——首尾帧与普通参考可并存。检测方式：references 里
+      // 存在带 role(first_frame/last_frame) 的条目。旧分字段路径（references 仅普通参考、
+      // 无 role）仍走首尾帧互斥检查。
+      const useSingleArray =
+        Array.isArray(input.references) &&
+        input.references.some(
+          (r) => r.role === "first_frame" || r.role === "last_frame",
         );
+      if (!useSingleArray) {
+        const hasFrames = Boolean(input.firstFrameImage || input.lastFrameImage);
+        if (
+          (input.lastFrameImage && !input.firstFrameImage) ||
+          (hasFrames && references.length > 0)
+        ) {
+          throw new NewApiError(
+            "首尾帧模式不能与普通参考素材混用",
+            422,
+            "unsupported_video_inputs",
+          );
+        }
       }
       const content: Array<Record<string, unknown>> = [];
-      if (input.firstFrameImage) {
-        content.push({
-          type: "image_url",
-          image_url: { url: input.firstFrameImage },
-          role: "first_frame",
-        });
-      }
-      if (input.lastFrameImage) {
-        content.push({
-          type: "image_url",
-          image_url: { url: input.lastFrameImage },
-          role: "last_frame",
-        });
-      }
-      for (const reference of references) {
-        content.push(
-          reference.type === "image"
-            ? {
-                type: "image_url",
-                image_url: { url: reference.url },
-                role: "reference_image",
-              }
-            : {
-                type: "video_url",
-                video_url: { url: reference.url },
-                role: "reference_video",
-              },
-        );
+      if (useSingleArray) {
+        // 帧（first_frame/last_frame）在前、普通参考随后，保序。
+        const frameItems: Array<Record<string, unknown>> = [];
+        const refItems: Array<Record<string, unknown>> = [];
+        for (const ref of references) {
+          const entry =
+            ref.type === "image"
+              ? {
+                  type: "image_url",
+                  image_url: { url: ref.url },
+                  role: (ref as { role?: string }).role ?? "reference_image",
+                }
+              : {
+                  type: "video_url",
+                  video_url: { url: ref.url },
+                  role: "reference_video",
+                };
+          const role = (ref as { role?: string }).role;
+          if (role === "first_frame" || role === "last_frame") frameItems.push(entry);
+          else refItems.push(entry);
+        }
+        content.push(...frameItems, ...refItems);
+      } else {
+        if (input.firstFrameImage) {
+          content.push({
+            type: "image_url",
+            image_url: { url: input.firstFrameImage },
+            role: "first_frame",
+          });
+        }
+        if (input.lastFrameImage) {
+          content.push({
+            type: "image_url",
+            image_url: { url: input.lastFrameImage },
+            role: "last_frame",
+          });
+        }
+        for (const reference of references) {
+          content.push(
+            reference.type === "image"
+              ? {
+                  type: "image_url",
+                  image_url: { url: reference.url },
+                  role: "reference_image",
+                }
+              : {
+                  type: "video_url",
+                  video_url: { url: reference.url },
+                  role: "reference_video",
+                },
+          );
+        }
       }
       const body: Record<string, unknown> = {
         model: input.model,

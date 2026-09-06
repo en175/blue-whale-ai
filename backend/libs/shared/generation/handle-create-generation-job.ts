@@ -98,31 +98,36 @@ function uniqueMaterialRefs(
   }, []);
 }
 
-/** IKDJNZ：解析单数组 references。未传返回 null（走旧字段路径），格式非法返回 []（整体拒绝）。 */
-function parseReferences(v: unknown): ReferenceItemInput[] | null {
-  if (v === undefined || v === null) return null;
-  if (!Array.isArray(v)) return [];
+/** IKDJNZ：解析单数组 references。
+ *  - 未传返回 "absent"（走旧字段路径）
+ *  - 合法返回 { kind: "ok", items }
+ *  - 非法（非数组 / 空数组 / 元素缺 id / 首尾帧 video）返回 { kind: "invalid" } */
+function parseReferences(
+  v: unknown,
+): { kind: "absent" } | { kind: "ok"; items: ReferenceItemInput[] } | { kind: "invalid" } {
+  if (v === undefined || v === null) return { kind: "absent" };
+  if (!Array.isArray(v)) return { kind: "invalid" };
   const items: ReferenceItemInput[] = [];
   for (const item of v) {
-    if (typeof item !== "object" || item === null) return [];
+    if (typeof item !== "object" || item === null) return { kind: "invalid" };
     const { role, asset_id, material_id, type } = item as Record<string, unknown>;
     if (role !== "first_frame" && role !== "last_frame" && role !== "reference")
-      return [];
-    if (type !== "image" && type !== "video") return [];
+      return { kind: "invalid" };
+    if (type !== "image" && type !== "video") return { kind: "invalid" };
     // asset_id（本地，纯数字）与 material_id（素材库 asset-...）二选一。
     const aid = typeof asset_id === "string" ? assetId(asset_id) : null;
     const mid = typeof material_id === "string" ? materialId(material_id) : null;
-    if (aid === null && mid === null) return [];
-    if (aid !== null && mid !== null) return [];
+    if (aid === null && mid === null) return { kind: "invalid" };
+    if (aid !== null && mid !== null) return { kind: "invalid" };
     // 首尾帧必须是图片。
-    if (role !== "reference" && type !== "image") return [];
+    if (role !== "reference" && type !== "image") return { kind: "invalid" };
     items.push({
       role,
       ...(aid !== null ? { asset_id: aid } : { material_id: mid as string }),
       type,
     });
   }
-  return items;
+  return { kind: "ok", items };
 }
 
 /** IKDJNZ：校验 references 的 role 唯一性（首/尾帧各至多 1，不能同帧双来源）。 */
@@ -277,15 +282,29 @@ function validate(
     }
   } else {
     // IKDJNZ：单数组 references 优先；存在时跳过旧字段校验路径。
-    const parsedRefs = parseReferences(body.references);
-    if (parsedRefs !== null && parsedRefs.length === 0) {
+    const parsed = parseReferences(body.references);
+    if (parsed.kind === "invalid") {
       return { code: ERROR_INVALID_INPUT, message: "参考素材引用无效" };
     }
-    if (parsedRefs !== null) {
-      const roleErr = validateReferenceRoles(parsedRefs);
+    if (parsed.kind === "ok") {
+      // Critical fix（review）：references 与旧字段并存 → 400，防止新旧混用静默丢引用。
+      const hasLegacyRefFields =
+        body.first_frame_asset_id !== undefined ||
+        body.last_frame_asset_id !== undefined ||
+        body.reference_asset_ids !== undefined ||
+        body.first_frame_material_id !== undefined ||
+        body.last_frame_material_id !== undefined ||
+        body.reference_materials !== undefined;
+      if (hasLegacyRefFields) {
+        return { code: ERROR_INVALID_INPUT, message: "references 不能与旧参考字段混用" };
+      }
+      if (parsed.items.length === 0) {
+        return { code: ERROR_INVALID_INPUT, message: "参考素材不能为空" };
+      }
+      const roleErr = validateReferenceRoles(parsed.items);
       if (roleErr) return { code: ERROR_INVALID_INPUT, message: roleErr };
       // 普通参考数量上限沿用 Seedance 约束（首尾帧不计入）。
-      const refCount = parsedRefs.filter((r) => r.role === "reference").length;
+      const refCount = parsed.items.filter((r) => r.role === "reference").length;
       if (refCount > 12)
         return { code: ERROR_INVALID_INPUT, message: "参考素材最多 12 个" };
       return null;
@@ -425,9 +444,9 @@ export async function handleCreateGenerationJob(
     if (isStr(params.resolution)) input.resolution = params.resolution;
     if (params.duration !== undefined) input.duration = params.duration;
     // IKDJNZ：单数组 references 冻结进 input 快照（保序），Worker 执行时按 role 拆帧/参考并做关联转换。
-    const parsedRefs = parseReferences(body.references);
-    if (parsedRefs !== null) {
-      input.references = parsedRefs;
+    const parsed = parseReferences(body.references);
+    if (parsed.kind === "ok") {
+      input.references = parsed.items;
     } else {
       if (firstFrameAssetId) input.first_frame_asset_id = firstFrameAssetId;
       if (lastFrameAssetId) input.last_frame_asset_id = lastFrameAssetId;
