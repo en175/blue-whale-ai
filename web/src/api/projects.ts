@@ -120,7 +120,7 @@ export function batchDeleteProjects(
 
 /* ============ 项目快照（画布水合） ============ */
 
-/** 快照内画布数据（nodes/viewport 为 JSON 字符串） */
+/** 快照内画布数据（nodes/viewport/edges 为 JSON 字符串） */
 export interface SnapshotCanvas {
   /** 画布版本号（乐观锁） */
   version: number | null;
@@ -128,6 +128,8 @@ export interface SnapshotCanvas {
   nodes: string | null;
   /** 视口 JSON 字符串 {x, y, zoom} */
   viewport: string | null;
+  /** 连线列表 JSON 字符串（IKDLQF，旧数据缺省视为空数组） */
+  edges?: string | null;
 }
 
 /** 快照内资产字典项（key 为 assetId） */

@@ -85,6 +85,7 @@ vi.mock('@/api/canvas', () => ({
   applyPromptPreview: vi.fn(),
   saveCanvasDoc: vi.fn(),
   serializeNodes: vi.fn(() => '[]'),
+  serializeEdges: vi.fn(() => '[]'),
 }));
 
 vi.mock('@/api/jobs', () => ({
@@ -104,7 +105,7 @@ vi.mock('@/api/sharedAssets', () => ({
    打桩也必须保持引用稳定：每次渲染都新建对象会让 [doc, snapshotAssets] 水合 effect
    setState → 重渲染 → 再触发，异步死循环直到 OOM。 */
 const canvasDocMock = vi.hoisted(() => ({
-  doc: { id: null, version: null, viewport: { x: 0, y: 0, zoom: 1 }, nodes: [] },
+  doc: { id: null, version: null, viewport: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [] },
   assets: {},
   refetch: vi.fn(),
 }));

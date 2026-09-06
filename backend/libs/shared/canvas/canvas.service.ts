@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
-import { DATA_NOT_EXIST_CODE, fail, ok, applyPreviewSchema, PROMPT_TEXT_LIMITS as limits } from "@blue-whale/contracts";
+import { CANVAS_EDGE_LIMITS, DATA_NOT_EXIST_CODE, canvasEdgeSchema, fail, ok, applyPreviewSchema, PROMPT_TEXT_LIMITS as limits } from "@blue-whale/contracts";
 import { createCanvasRepo } from "@blue-whale/persistence";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -54,7 +54,7 @@ export class CanvasService {
       const node = { id: `text-${randomUUID()}`, type: "textNode", position, data: { ...content, promptSource: source } };
       const serialized = JSON.stringify([...nodes, node]);
       if (Buffer.byteLength(serialized, "utf8") > limits.canvasBytes) throw new BadRequestException("画布内容超过 4 MiB，原内容未改动");
-      const saved = await this.repo.saveIfVersion(projectId, canvas.version, canvas.viewport, serialized);
+      const saved = await this.repo.saveIfVersion(projectId, canvas.version, canvas.viewport, serialized, canvas.edges);
       if (saved) return ok({ node, canvas: saved, reused: false });
     }
     throw new ConflictException("画布正在被修改，请重试应用");
@@ -66,6 +66,7 @@ export class CanvasService {
     body: {
       viewport?: unknown;
       nodes?: unknown;
+      edges?: unknown;
       expectedVersion?: number | null;
     },
   ) {
@@ -73,6 +74,9 @@ export class CanvasService {
     if (!owned) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
     const viewport = typeof body.viewport === "string" ? body.viewport : null;
     const nodes = typeof body.nodes === "string" ? body.nodes : null;
+    // IKDLQF：edges 省略时保留既有连线（旧客户端保存不得清边）；携带时按下文校验后覆盖。
+    const edgesProvided = typeof body.edges === "string";
+    const edges = edgesProvided ? (body.edges as string) : null;
     let incoming: Array<{ id: string; type: string; data?: Record<string, unknown> }>;
     try {
       incoming = JSON.parse(nodes ?? "[]");
@@ -81,6 +85,29 @@ export class CanvasService {
       throw new BadRequestException("画布节点格式无效，原内容未改动");
     }
     if (Buffer.byteLength(nodes ?? "", "utf8") > limits.canvasBytes) throw new BadRequestException("画布内容超过 4 MiB，原内容未改动");
+    // IKDLQF：edges 与 nodes 同构（JSON 数组字符串），校验失败明确拒绝、零写入。
+    let incomingEdges: unknown[] = [];
+    if (edgesProvided) {
+      try {
+        incomingEdges = JSON.parse(edges ?? "[]");
+        if (!Array.isArray(incomingEdges)) throw new Error();
+      } catch {
+        throw new BadRequestException("画布连线格式无效，原内容未改动");
+      }
+      if (Buffer.byteLength(edges ?? "", "utf8") > CANVAS_EDGE_LIMITS.edgesBytes) throw new BadRequestException("连线内容超过 256 KiB，原内容未改动");
+      if (incomingEdges.length > CANVAS_EDGE_LIMITS.maxEdges) throw new BadRequestException(`连线数量超过 ${CANVAS_EDGE_LIMITS.maxEdges} 条上限，原内容未改动`);
+    }
+    const nodeIds = new Set(incoming.map(node => node.id));
+    const seenPairs = new Set<string>();
+    for (const edge of incomingEdges) {
+      const parsed = canvasEdgeSchema.safeParse(edge);
+      if (!parsed.success) throw new BadRequestException("画布连线格式无效，原内容未改动");
+      if (parsed.data.source === parsed.data.target) throw new BadRequestException("连线不能指向同一节点，原内容未改动");
+      if (!nodeIds.has(parsed.data.source) || !nodeIds.has(parsed.data.target)) throw new BadRequestException("连线端点必须引用本次保存的画布节点，原内容未改动");
+      const pair = `${parsed.data.source}\0${parsed.data.target}`;
+      if (seenPairs.has(pair)) throw new BadRequestException("同一对节点之间只允许一条连线，原内容未改动");
+      seenPairs.add(pair);
+    }
     for (const node of incoming) {
       if (node.type !== "textNode") continue;
       if ((typeof node.data?.text === "string" && node.data.text.length > limits.text)
@@ -111,6 +138,7 @@ export class CanvasService {
       body.expectedVersion === undefined ? current.version : body.expectedVersion,
       viewport,
       nodes,
+      edgesProvided ? edges : current.edges,
     );
     if (!saved) return { code: 412, msg: "Canvas 版本冲突", data: null } as const;
     return ok(saved);

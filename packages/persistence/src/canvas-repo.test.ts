@@ -21,6 +21,7 @@ describe("canvas optimistic save", () => {
         expectedVersion: number,
         viewport: string | null,
         nodes: string | null,
+        edges: string | null,
       ) => Promise<unknown>;
     };
 
@@ -28,13 +29,14 @@ describe("canvas optimistic save", () => {
     if (!repo.saveIfVersion) return;
 
     await expect(
-      repo.saveIfVersion("55", 3, null, JSON.stringify([{ id: "stale" }])),
+      repo.saveIfVersion("55", 3, null, JSON.stringify([{ id: "stale" }]), null),
     ).resolves.toBeNull();
     expect(updateMany).toHaveBeenCalledWith({
       where: { project_id: 55n, version: 3 },
       data: {
         viewport_json: null,
         nodes_json: [{ id: "stale" }],
+        edges_json: null,
         version: { increment: 1 },
       },
     });
@@ -52,6 +54,7 @@ describe("canvas optimistic save", () => {
           version: 4,
           viewport_json: null,
           nodes_json: [{ id: "generation-output:501" }],
+          edges_json: null,
         }),
       },
       generation_output_slots: { updateMany: markPlaced },
@@ -69,6 +72,7 @@ describe("canvas optimistic save", () => {
       3,
       null,
       JSON.stringify([{ id: "generation-output:501" }]),
+      null,
     );
 
     expect(markPlaced).toHaveBeenCalledWith({
@@ -80,5 +84,86 @@ describe("canvas optimistic save", () => {
       },
       data: { initial_placement_status: "placed" },
     });
+  });
+});
+
+// IKDLQF：edges_json 与 nodes_json 同一次条件写入，读取路径序列化为字符串（缺省 null）。
+describe("canvas edges persistence (IKDLQF)", () => {
+  it("persists parsed edges in the same conditional write and returns them serialized", async () => {
+    const edges = [{ id: "e1", source: "text-1", target: "media-1" }];
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      canvas: {
+        updateMany,
+        findFirst: vi.fn().mockResolvedValue({
+          id: 1n,
+          project_id: 55n,
+          version: 4,
+          viewport_json: null,
+          nodes_json: [{ id: "text-1" }, { id: "media-1" }],
+          edges_json: edges,
+        }),
+      },
+      generation_output_slots: { updateMany: vi.fn() },
+    };
+    const repo = createCanvasRepo({
+      $transaction: vi.fn(
+        async (callback: (client: typeof tx) => Promise<unknown>) =>
+          callback(tx),
+      ),
+    } as never);
+
+    const view = await repo.saveIfVersion(
+      "55",
+      3,
+      null,
+      JSON.stringify([{ id: "text-1" }, { id: "media-1" }]),
+      JSON.stringify(edges),
+    );
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { project_id: 55n, version: 3 },
+      data: {
+        viewport_json: null,
+        nodes_json: [{ id: "text-1" }, { id: "media-1" }],
+        edges_json: edges,
+        version: { increment: 1 },
+      },
+    });
+    expect(view?.edges).toBe(JSON.stringify(edges));
+  });
+
+  it("maps edges_json on reads: string when present, null when absent or no row", async () => {
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce({
+        id: 1n,
+        project_id: 55n,
+        version: 2,
+        viewport_json: null,
+        nodes_json: [],
+        edges_json: [{ id: "e1", source: "a", target: "b" }],
+      })
+      .mockResolvedValueOnce({
+        id: 1n,
+        project_id: 55n,
+        version: 2,
+        viewport_json: null,
+        nodes_json: [],
+        edges_json: null,
+      })
+      .mockResolvedValueOnce(null);
+    const repo = createCanvasRepo({
+      canvas: { findFirst },
+    } as never);
+
+    const withEdges = await repo.getByProject("55");
+    expect(withEdges.edges).toBe(
+      JSON.stringify([{ id: "e1", source: "a", target: "b" }]),
+    );
+    const withoutEdges = await repo.getByProject("55");
+    expect(withoutEdges.edges).toBeNull();
+    const missing = await repo.getByProject("55");
+    expect(missing.edges).toBeNull();
   });
 });

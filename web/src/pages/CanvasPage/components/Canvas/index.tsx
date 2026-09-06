@@ -13,9 +13,8 @@ import {
   type Node,
   type Edge,
   useNodesState,
-  useEdgesState,
-  addEdge,
   type Connection,
+  type EdgeChange,
   type NodeTypes,
   type EdgeTypes,
   type NodeMouseHandler,
@@ -35,8 +34,6 @@ import styles from './index.module.css';
 
 const initialNodes: Node[] = [];
 
-const initialEdges: Edge[] = [];
-
 interface FlowCanvasProps {
   showMiniMap: boolean;
   toolMode: 'drag' | 'select';
@@ -46,6 +43,12 @@ interface FlowCanvasProps {
   productNodes: Node[];
   assetNodes: Node[];
   showEdges: boolean;
+  /** 连线（受控：父级持有，水合恢复与自动保存签名以此为准，IKDLQF） */
+  edges: Edge[];
+  /** 连线变更上抛（剪刀删除等移除变更；受控模式下由父级落状态） */
+  onEdgesChange: (changes: EdgeChange[]) => void;
+  /** 建立连线 */
+  onConnect: (connection: Connection) => void;
   /** 加载画布文档后注入的视口（切换项目时应用） */
   viewport?: Viewport;
   /** 视口变更回调（拖拽/缩放结束），供自动保存使用 */
@@ -67,10 +70,9 @@ interface FlowCanvasProps {
   assetPickResult?: { ts: number; assetId: string; ref: { id: string; src: string; type?: 'image' | 'video'; assetId?: string } } | null;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const extraIdsRef = useRef<Set<string>>(new Set());
   const textIdsRef = useRef<Set<string>>(new Set());
   const mediaIdsRef = useRef<Set<string>>(new Set());
@@ -108,14 +110,6 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       setCenter(x, y, { zoom: 2, duration: 400 });
     },
     [setCenter],
-  );
-
-  const onConnect = useCallback(
-    (params: Connection) =>
-      setEdges((eds) =>
-        addEdge({ ...params, type: 'custom', style: { stroke: '#444' } }, eds),
-      ),
-    [setEdges],
   );
 
   /** 合并外部上传节点 */
@@ -288,7 +282,8 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const onDeleteNodeRef = useRef(onDeleteNode);
   onDeleteNodeRef.current = onDeleteNode;
 
-  /** Delete/Backspace 删除选中节点；Enter 继续拦截（输入框/编辑器内保持原语义） */
+  /** Delete/Backspace 删除选中节点；Enter 继续拦截（输入框/编辑器内保持原语义）。
+   *  连线级联删除由父级完成：节点离开各列表后，悬空连线被统一定时清理（IKDLQF） */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const action = canvasDeleteKeyAction(e.key, e.target);
@@ -301,11 +296,10 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       if (ids.length === 0) return;
       const idSet = new Set(ids);
       setNodes((prev) => prev.filter((node) => !idSet.has(node.id)));
-      setEdges((prev) => prev.filter((edge) => !idSet.has(edge.source) && !idSet.has(edge.target)));
     };
     document.addEventListener('keydown', handler, true);
     return () => document.removeEventListener('keydown', handler, true);
-  }, [setNodes, setEdges]);
+  }, [setNodes]);
 
   return (
     <div
@@ -373,7 +367,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -385,6 +379,9 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         productNodes={productNodes}
         assetNodes={assetNodes}
         showEdges={showEdges}
+        edges={edges}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
         viewport={viewport}
         onViewportChange={onViewportChange}
         onNodeDragStop={onNodeDragStop}

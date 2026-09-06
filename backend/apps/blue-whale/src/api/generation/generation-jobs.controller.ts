@@ -1,6 +1,7 @@
 import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
+import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
@@ -31,6 +32,7 @@ export class GenerationJobsController {
     private readonly command: GenerationCommandService,
     private readonly models: ModelCapabilityReadService,
     private readonly cost: GenerationCostEstimatorService,
+    private readonly canvas: CanvasService,
   ) {}
 
   @Post()
@@ -51,6 +53,7 @@ export class GenerationJobsController {
         projects: this.project,
         command: this.command.repo,
         models: this.models,
+        canvas: this.canvas,
         ...(this.cost.estimator ? { costEstimator: this.cost.estimator } : {}),
       },
       internal,

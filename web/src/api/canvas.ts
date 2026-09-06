@@ -4,7 +4,7 @@ import type { PromptPreviewSource } from '../../../packages/contracts/src/prompt
  * nodes/viewport 均为 JSON 字符串；保存支持 If-Match 乐观锁（412 版本冲突）
  * ============================================ */
 import { apiRequest } from './http';
-import type { Node, Viewport } from '@xyflow/react';
+import type { Edge, Node, Viewport } from '@xyflow/react';
 
 export function applyPromptPreview(input: { projectId: string; source: PromptPreviewSource; position: { x: number; y: number } }) {
   return apiRequest<{ node: Node; canvas: CanvasRecord; reused: boolean }>(
@@ -27,6 +27,8 @@ export interface CanvasRecord {
   viewport: string | null;
   /** 节点列表 JSON 字符串 */
   nodes: string | null;
+  /** 连线列表 JSON 字符串（IKDLQF，旧数据缺省为 null 视为空数组） */
+  edges?: string | null;
 }
 
 /** 解析后的画布文档 */
@@ -39,6 +41,8 @@ export interface CanvasDoc {
   viewport: Viewport;
   /** 节点列表（无记录为空数组） */
   nodes: Node[];
+  /** 连线列表（持久形状 {id, source, target}，无记录/旧数据为空数组） */
+  edges: Edge[];
 }
 
 /** 在途去重：StrictMode 双挂载只发一次请求；完成后释放 */
@@ -73,6 +77,7 @@ export function fetchCanvasDoc(projectId: string): Promise<CanvasDoc> {
         version: rec?.version ?? null,
         viewport: safeParse<Viewport>(rec?.viewport ?? null, { x: 0, y: 0, zoom: 1.1 }),
         nodes,
+        edges: safeParse<Edge[]>(rec?.edges ?? null, []),
       };
     })
     .finally(() => {
@@ -90,6 +95,8 @@ export interface CanvasSaveData {
   version: number;
   viewport: string;
   nodes: string;
+  /** 连线列表 JSON 字符串（IKDLQF 起随记录返回） */
+  edges?: string;
 }
 
 /** 序列化节点：剥离回调函数、内部测量字段与派生的素材缺失标记，仅保留 id/type/position/data */
@@ -118,6 +125,11 @@ export function serializeNodes(nodes: Node[]): string {
   return JSON.stringify(clean);
 }
 
+/** 序列化连线：仅保留持久形状 {id, source, target}（流光样式、选中态等渲染细节不持久化，IKDLQF） */
+export function serializeEdges(edges: Edge[]): string {
+  return JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target })));
+}
+
 /**
  * 保存画布 PUT /api/canvases/:projectId
  * @param version 乐观锁版本号：null 时 If-Match: "missing"（首次保存）
@@ -125,7 +137,7 @@ export function serializeNodes(nodes: Node[]): string {
  */
 export function saveCanvasDoc(
   projectId: string,
-  payload: { viewport: Viewport; nodes: Node[] },
+  payload: { viewport: Viewport; nodes: Node[]; edges: Edge[] },
   version: number | null,
 ): Promise<CanvasSaveData> {
   return apiRequest<CanvasSaveData>(`/api/canvases/${encodeURIComponent(projectId)}`, {
@@ -135,6 +147,7 @@ export function saveCanvasDoc(
     body: JSON.stringify({
       viewport: JSON.stringify(payload.viewport),
       nodes: serializeNodes(payload.nodes),
+      edges: serializeEdges(payload.edges),
     }),
   });
 }

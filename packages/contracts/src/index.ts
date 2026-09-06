@@ -1,5 +1,12 @@
 export { previewSourceSchema, applyPreviewSchema, type PromptPreviewSource } from "./prompt-preview.js";
-export { PROMPT_TEXT_LIMITS } from "./prompt-text-limits.js";
+export {
+  CANVAS_EDGE_LIMITS,
+  canvasEdgeSchema,
+  textAttachmentSnapshotSchema,
+  type CanvasEdge,
+  type TextAttachmentSnapshot,
+} from "./canvas-edges.js";
+export { PROMPT_TEXT_LIMITS, COMPOSED_IMAGE_PROMPT_MAX_LENGTH } from "./prompt-text-limits.js";
 export {
   changePasswordRequestSchema,
   type ChangePasswordRequest,
