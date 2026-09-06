@@ -224,7 +224,7 @@ export default function CanvasToolbar({
             </button>
             <button className={styles.popupItem} onClick={() => handleAddMenuItemClick('assets')}>
               <Library size={16} strokeWidth={2} />
-              <span>资产库选择</span>
+              <span>从资产中选择</span>
             </button>
           </div>
         )}

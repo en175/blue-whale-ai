@@ -13,6 +13,7 @@ import {
   ArrowUp,
   Upload,
   MousePointerClick,
+  FolderOpen,
   Maximize2,
   Minimize2,
   User,
@@ -78,6 +79,8 @@ interface BottomDialogProps {
   initialParams?: VideoGenSeedParams;
   /** 到节点选择：进入画布节点选取模式（image 图片节点 / video 视频节点） */
   onPickFromCanvas?: (kind: 'image' | 'video') => void;
+  /** 从资产中选择：打开资产库选择弹窗（按 kind 过滤媒体类型） */
+  onPickFromAssets?: (kind: 'image' | 'video') => void;
   /** 画布选取模式进行中（image/video，对应按钮高亮提示） */
   pickMode?: 'image' | 'video' | null;
   /** 外部注入参考视频（ts 驱动；画布节点单选 / 角色库多选，items 为一批） */
@@ -114,7 +117,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText, initialParams, onPickFromCanvas, pickMode, externalPick, externalImagePick, onOpenCharacterLibrary, onToast }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText, initialParams, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, externalImagePick, onOpenCharacterLibrary, onToast }: BottomDialogProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供生成按钮启用态判断 */
@@ -650,6 +653,13 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
                   </button>
                   <button
                     className={styles.sourceMenuItem}
+                    onClick={() => { setSourceMenuOpen(null); onPickFromAssets?.('image'); }}
+                  >
+                    <FolderOpen size={14} strokeWidth={2} />
+                    <span>从资产中选择</span>
+                  </button>
+                  <button
+                    className={styles.sourceMenuItem}
                     onClick={() => { setSourceMenuOpen(null); onPickFromCanvas?.('image'); }}
                   >
                     <MousePointerClick size={14} strokeWidth={2} />
@@ -708,6 +718,13 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
                   >
                     <Upload size={14} strokeWidth={2} />
                     <span>视频上传</span>
+                  </button>
+                  <button
+                    className={styles.sourceMenuItem}
+                    onClick={() => { setSourceMenuOpen(null); onPickFromAssets?.('video'); }}
+                  >
+                    <FolderOpen size={14} strokeWidth={2} />
+                    <span>从资产中选择</span>
                   </button>
                   <button
                     className={styles.sourceMenuItem}

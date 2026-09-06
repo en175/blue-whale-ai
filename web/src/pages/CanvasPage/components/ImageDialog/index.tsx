@@ -12,6 +12,7 @@ import {
   ArrowUp,
   Upload,
   MousePointerClick,
+  FolderOpen,
   Image as ImageIcon,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
@@ -48,6 +49,8 @@ interface ImageDialogProps {
   initialParams?: ImageGenSeedParams;
   /** 到节点选择：进入画布图片节点选取模式 */
   onPickFromCanvas?: () => void;
+  /** 从资产中选择：打开资产库选择弹窗（仅图片） */
+  onPickFromAssets?: () => void;
   /** 画布选取模式进行中（左上角图标高亮提示） */
   pickMode?: boolean;
   /** 外部注入参考素材（ts 驱动；画布节点单选 / 角色库多选，files 为一批） */
@@ -77,7 +80,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, onPickFromCanvas, pickMode, externalPick, onToast }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
@@ -394,6 +397,13 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                     >
                       <Upload size={14} strokeWidth={2} />
                       <span>图片上传</span>
+                    </button>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(false); onPickFromAssets?.(); }}
+                    >
+                      <FolderOpen size={14} strokeWidth={2} />
+                      <span>从资产中选择</span>
                     </button>
                     <button
                       className={styles.sourceMenuItem}

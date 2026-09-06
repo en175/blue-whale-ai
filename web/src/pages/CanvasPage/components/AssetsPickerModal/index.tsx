@@ -17,8 +17,11 @@ import assetStyles from '@/pages/Assets/index.module.css';
 import Skeleton from '@/components/Skeleton';
 import styles from './index.module.css';
 
-/** 弹窗 tab：全部 / 图片 / 视频 / 音频（不含虚拟人像库） */
-const pickerTabs: { key: 'all' | 'image' | 'video' | 'audio'; label: string }[] = [
+/** 媒体类型（与资产库 type 字段对齐） */
+export type PickerMediaType = 'image' | 'video' | 'audio';
+
+/** 全量 tab：全部 / 图片 / 视频 / 音频（不含虚拟人像库） */
+const pickerTabs: { key: 'all' | PickerMediaType; label: string }[] = [
   { key: 'all', label: '全部' },
   { key: 'image', label: '图片' },
   { key: 'video', label: '视频' },
@@ -31,10 +34,36 @@ export interface AssetsPickerModalProps {
   onClose: () => void;
   /** 确认选择（多选）：回调后由父组件批量落画布并决定是否关闭弹窗 */
   onSelect: (assets: AssetRecord[]) => void;
+  /**
+   * 按打开入口可接受的媒体类型过滤（PRD 模块C R3）：
+   * - 不传：全类型 + 默认「全部」tab（画布工具栏现状）
+   * - 单类型：隐藏 tab 栏，直接按该类型拉取
+   * - 多类型：仅展示允许的类型 tab（含「全部」），默认「全部」
+   */
+  mediaTypes?: PickerMediaType[];
+  /** 确认按钮文案（默认「插入画布」，首页/dock 参考入口可传「确定」等） */
+  confirmText?: string;
 }
 
-export default function AssetsPickerModal({ onClose, onSelect }: AssetsPickerModalProps) {
-  const [activeTab, setActiveTab] = useState<'all' | 'image' | 'video' | 'audio'>('all');
+export default function AssetsPickerModal({
+  onClose,
+  onSelect,
+  mediaTypes,
+  confirmText = '插入画布',
+}: AssetsPickerModalProps) {
+  /** 可展示的 tab：按入口可接受类型过滤；单类型时只剩一个 tab（渲染层隐藏 tab 栏） */
+  const visibleTabs = useMemo(() => {
+    if (!mediaTypes || mediaTypes.length === 0) return pickerTabs;
+    const allowed = mediaTypes.length === 1
+      ? pickerTabs.filter((tab) => tab.key !== 'all')
+      : pickerTabs;
+    return allowed.filter(
+      (tab) => tab.key === 'all' || mediaTypes.includes(tab.key),
+    );
+  }, [mediaTypes]);
+  const singleType = mediaTypes?.length === 1 ? mediaTypes[0] : null;
+
+  const [activeTab, setActiveTab] = useState<'all' | PickerMediaType>(singleType ?? 'all');
   /** 已勾选资产记录（id → record，跨 tab 保留：tab 仅是筛选视图，确认时统一提交） */
   const [selectedMap, setSelectedMap] = useState<ReadonlyMap<string, AssetRecord>>(() => new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -59,6 +88,15 @@ export default function AssetsPickerModal({ onClose, onSelect }: AssetsPickerMod
     () => appendUniqueAssets([], assetPages?.flatMap((page) => page.records) ?? []),
     [assetPages],
   );
+  /** 「全部」tab 会拉取全类型：按入口允许类型过滤（如仅图片入口不出现音频/视频卡片，避免勾选后被静默丢弃） */
+  const visibleAssets = useMemo(
+    () =>
+      mediaTypes && mediaTypes.length > 0
+        ? assets.filter((a): a is (typeof assets)[number] =>
+            (mediaTypes as string[]).includes(a.type))
+        : assets,
+    [assets, mediaTypes],
+  );
   const assetTotal = assetPages?.at(-1)?.total ?? 0;
   const loading = isPending || (!assetPages && isError);
 
@@ -68,8 +106,8 @@ export default function AssetsPickerModal({ onClose, onSelect }: AssetsPickerMod
   }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
   const gridItems = useMemo(
-    () => assets.map((asset) => ({ kind: 'asset' as const, asset })),
-    [assets],
+    () => visibleAssets.map((asset) => ({ kind: 'asset' as const, asset })),
+    [visibleAssets],
   );
 
   /** 已勾选的完整资产记录（保持勾选顺序） */
@@ -113,17 +151,19 @@ export default function AssetsPickerModal({ onClose, onSelect }: AssetsPickerMod
       <div className={styles.panel} role="dialog" aria-label="从资产库选择素材">
         <div className={styles.header}>
           <h2 className={styles.title}>资产库</h2>
-          <div className={styles.tabs}>
-            {pickerTabs.map((tab) => (
-              <button
-                key={tab.key}
-                className={`${assetStyles.filterBtn} ${activeTab === tab.key ? assetStyles.filterBtnActive : ''}`}
-                onClick={() => setActiveTab(tab.key)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+          {visibleTabs.length > 1 && (
+            <div className={styles.tabs}>
+              {visibleTabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  className={`${assetStyles.filterBtn} ${activeTab === tab.key ? assetStyles.filterBtnActive : ''}`}
+                  onClick={() => setActiveTab(tab.key)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          )}
           <button className={styles.closeBtn} onClick={onClose} aria-label="关闭">
             <X size={18} strokeWidth={2} />
           </button>
@@ -159,7 +199,7 @@ export default function AssetsPickerModal({ onClose, onSelect }: AssetsPickerMod
               {isFetchingNextPage && (
                 <div className={assetStyles.loadState} role="status">加载中…</div>
               )}
-              {!hasNextPage && assets.length > 0 && (
+              {!hasNextPage && visibleAssets.length > 0 && (
                 <div className={assetStyles.loadState}>已加载全部素材</div>
               )}
             </>
@@ -178,7 +218,7 @@ export default function AssetsPickerModal({ onClose, onSelect }: AssetsPickerMod
               disabled={selectedAssets.length === 0}
               onClick={() => onSelect(selectedAssets)}
             >
-              插入画布{selectedAssets.length > 0 ? `（${selectedAssets.length}）` : ''}
+              {confirmText}{selectedAssets.length > 0 ? `（${selectedAssets.length}）` : ''}
             </button>
           </div>
         </div>
