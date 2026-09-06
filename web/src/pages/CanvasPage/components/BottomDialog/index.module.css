@@ -66,6 +66,39 @@
   color: var(--color-text-secondary);
 }
 
+.attachmentHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.attachmentMoves {
+  display: flex;
+  gap: 2px;
+}
+
+.attachmentMove {
+  display: flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  padding: 2px;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.attachmentMove:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: #2c2c2c;
+}
+
+.attachmentMove:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .attachmentText {
   font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);

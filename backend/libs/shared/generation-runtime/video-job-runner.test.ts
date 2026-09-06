@@ -1399,4 +1399,36 @@ describe("video job runner 文本附件快照（IKDLQG）", () => {
       expect.objectContaining({ prompt: "赛博朋克\n\n人物走过街角" }),
     );
   });
+
+  // IKDLQH：排序后的快照——submit prompt 严格跟随快照数组顺序（非 node_id/标题排序），钉住「供应商请求顺序=快照顺序」。
+  it("快照数组为非默认顺序时 submit prompt 精确跟随（IKDLQH 顺序钉扎）", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "upstream-reordered", status: "queued" });
+    const repo = buildAttachmentRepo({
+      prompt: "目标提示词",
+      target_node_id: "media-2",
+      text_attachments: [
+        { node_id: "text-z", title: "乙", text: "正文乙" },
+        { node_id: "text-a", title: "甲", text: "正文甲" },
+      ],
+      model_id: "doubao-seedance-2-0-260128",
+      aspect_ratio: "16:9",
+      resolution: "720p",
+      duration: 8,
+    });
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-attachments",
+      jobId: "401",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: "正文乙\n\n正文甲\n\n目标提示词" }),
+    );
+  });
 });
