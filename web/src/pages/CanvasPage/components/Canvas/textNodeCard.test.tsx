@@ -139,10 +139,6 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-function execCommandSpy() {
-  return document.execCommand as unknown as ReturnType<typeof vi.fn>;
-}
-
 describe('Canvas 文本节点卡片', () => {
   it('标题常驻内容区上方，名称只呈现一次', async () => {
     await renderText();
@@ -206,20 +202,7 @@ describe('Canvas 文本节点卡片', () => {
     expect(actions()).not.toContain('加粗');
   });
 
-  it('粘贴超出字数上限时按既有规则截断并提示', async () => {
-    const callbacks = await renderText();
-    await startEditing();
-    const pasted = 'a'.repeat(2500);
-    await act(async () => {
-      const event = new Event('paste', { bubbles: true, cancelable: true });
-      Object.defineProperty(event, 'clipboardData', { value: { getData: () => pasted } });
-      editor().dispatchEvent(event);
-    });
-    expect(callbacks.onToast).toHaveBeenCalledWith('warn', expect.stringContaining('2000'));
-    const inserted = execCommandSpy().mock.calls.find((call) => call[0] === 'insertText');
-    expect(inserted).toBeTruthy();
-    expect(String(inserted![2]).length).toBe(2000);
-  });
+  // IKDLQE: truncation was retired; complete paste and over-limit drafts are covered by real-browser integration.
 
   it('滚轮在正文内遵循内部阅读语义，不缩放画布', async () => {
     await renderText({ html: '<p>需要滚动才能读完的正文</p>' });

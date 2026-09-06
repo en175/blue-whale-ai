@@ -14,7 +14,7 @@ export function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   let current: HTMLElement | null = el;
   while (current) {
     const mode = current.contentEditable;
-    if (mode === 'true') return true;
+    if (mode === 'true' || mode === 'plaintext-only') return true;
     if (mode === 'false') return false;
     current = current.parentElement;
   }

@@ -38,7 +38,7 @@ export function collectMediaBlocks(node: CollectableNode, chipId: string): Sessi
 
   if (node.type === 'textNode') {
     const raw = (d.html as string) ?? '';
-    const cleanText = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const cleanText = typeof d.text === 'string' ? d.text : raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     if (cleanText) {
       const displayLabel = cleanText.length > 10 ? cleanText.slice(0, 10) + '…' : cleanText;
       blocks.push({

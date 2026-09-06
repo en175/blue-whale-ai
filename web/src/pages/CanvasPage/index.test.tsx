@@ -82,6 +82,7 @@ vi.mock('@/api/assets', () => ({
 }));
 
 vi.mock('@/api/canvas', () => ({
+  applyPromptPreview: vi.fn(),
   saveCanvasDoc: vi.fn(),
   serializeNodes: vi.fn(() => '[]'),
 }));

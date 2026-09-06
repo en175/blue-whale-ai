@@ -1,9 +1,19 @@
+import type { PromptPreviewSource } from '../../../packages/contracts/src/prompt-preview';
 /* ============================================
  * canvas 接口：画布加载 GET /api/canvases + 保存 PUT /api/canvases/:projectId
  * nodes/viewport 均为 JSON 字符串；保存支持 If-Match 乐观锁（412 版本冲突）
  * ============================================ */
 import { apiRequest } from './http';
 import type { Node, Viewport } from '@xyflow/react';
+
+export function applyPromptPreview(input: { projectId: string; source: PromptPreviewSource; position: { x: number; y: number } }) {
+  return apiRequest<{ node: Node; canvas: CanvasRecord; reused: boolean }>(
+    `/api/canvases/${encodeURIComponent(input.projectId)}/prompt-previews/apply`, {
+      method: 'POST', silent: true,
+      body: JSON.stringify({ source: input.source, position: input.position }),
+    },
+  );
+}
 
 /** GET /api/canvases 返回（无记录时 id/version/viewport/nodes 均为 null） */
 export interface CanvasRecord {

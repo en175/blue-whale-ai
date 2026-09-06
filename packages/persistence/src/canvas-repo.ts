@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { PromptPreviewSource } from "@blue-whale/contracts";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 /** Canvas db port（Prisma-backed），复用部署的 canvas 表（project_id 唯一 / viewport_json / nodes_json）。
@@ -13,6 +15,9 @@ export interface CanvasView {
 }
 
 export interface CanvasRepo {
+  getPromptSnapshot(projectId: string, source: PromptPreviewSource): Promise<{ title: string; text: string } | null>;
+  rememberPromptSnapshot(projectId: string, source: PromptPreviewSource, content: { title: string; text: string }): Promise<{ title: string; text: string }>;
+
   getByProject(projectId: string): Promise<CanvasView>;
   save(
     projectId: string,
@@ -89,7 +94,26 @@ async function markOutputSlotsPlaced(
 }
 
 export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
+  const snapshotWhere = (projectId: string, source: PromptPreviewSource) => ({
+    project_id: BigInt(projectId),
+    source_key: createHash("sha256").update(JSON.stringify([source.sessionId, source.revisionId, source.shotNo])).digest("hex"),
+  });
   return {
+    async getPromptSnapshot(projectId, source) {
+      return prisma.prompt_preview_snapshots.findUnique({
+        where: { project_id_source_key: snapshotWhere(projectId, source) },
+        select: { title: true, text: true },
+      });
+    },
+    async rememberPromptSnapshot(projectId, source, content) {
+      const key = snapshotWhere(projectId, source);
+      await prisma.prompt_preview_snapshots.createMany({
+        data: [{ ...key, source_json: source, ...content }], skipDuplicates: true,
+      });
+      return prisma.prompt_preview_snapshots.findUniqueOrThrow({
+        where: { project_id_source_key: key }, select: { title: true, text: true },
+      });
+    },
     async getByProject(projectId) {
       const row = await prisma.canvas.findFirst({
         where: { project_id: BigInt(projectId) },

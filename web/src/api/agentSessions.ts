@@ -1,3 +1,4 @@
+import type { PromptPreviewSource } from '../../../packages/contracts/src/prompt-preview';
 /* ============================================
  * agentSessions 接口：Agent 会话（session 维度，唯一有 worker 执行 Run 的对话服务）
  * 基址 /api/agent/v1/projects/:id/sessions
@@ -141,6 +142,7 @@ export interface GenerationCardAssetRef {
 
 /** 生成卡：单镜头分镜提示词卡（S2 渲染，S3 手动应用） */
 export interface GenerationCardBlock {
+  source?: PromptPreviewSource;
   /** 卡片标题 / 镜头编号，如「镜头 1」 */
   shotTitle: string;
   /** 时间范围，如 0-4s */
