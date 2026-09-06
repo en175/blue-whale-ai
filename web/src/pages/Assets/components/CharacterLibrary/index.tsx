@@ -9,7 +9,7 @@ import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 're
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import QRCodeStyling from 'qr-code-styling';
-import { Plus, FolderOpen, Trash2, ArrowLeft, X, Loader2, Video } from 'lucide-react';
+import { Plus, FolderOpen, Trash2, ArrowLeft, X, Loader2, Video, RotateCw } from 'lucide-react';
 import {
   createAssetGroup,
   listAssetGroups,
@@ -128,10 +128,38 @@ function GroupFormModal({
 /**
  * 真人认证二维码弹窗：H5Link 渲染为二维码，手机扫码打开 H5 刷脸页。
  * 认证结果由外层轮询（startAuthPolling），此处关闭弹窗不打断轮询（卡片保持「认证中…」）。
- * 关闭入口仅右上角 ×；底部仅保留「在当前设备打开」。
+ * 二维码 15 分钟倒计时过期；「重新生成」按钮重新创建会话换新码。
+ * 关闭入口仅右上角 ×；底部保留「在当前设备打开」+「重新生成二维码」。
  */
-function AuthQrModal({ h5Link, onClose }: { h5Link: string; onClose: () => void }) {
+const QR_EXPIRE_SECONDS = 15 * 60;
+
+function AuthQrModal({
+  h5Link,
+  onClose,
+  onCreateSession,
+  creating,
+}: {
+  h5Link: string;
+  onClose: () => void;
+  onCreateSession: () => void;
+  creating: boolean;
+}) {
   const qrContainerRef = useRef<HTMLDivElement>(null);
+  const [remainSeconds, setRemainSeconds] = useState(QR_EXPIRE_SECONDS);
+  const expired = remainSeconds <= 0;
+
+  // 15 分钟过期倒计时（h5Link 重置时重新计时）
+  useEffect(() => {
+    setRemainSeconds(QR_EXPIRE_SECONDS);
+  }, [h5Link]);
+
+  useEffect(() => {
+    if (expired) return;
+    const timer = setInterval(() => {
+      setRemainSeconds((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [expired, h5Link]);
 
   useEffect(() => {
     if (!qrContainerRef.current) return;
@@ -164,13 +192,26 @@ function AuthQrModal({ h5Link, onClose }: { h5Link: string; onClose: () => void 
         <div className={styles.qrSubtitle}>请使用手机扫描二维码完成刷脸认证</div>
         <div className={styles.qrBox}>
           <div ref={qrContainerRef} />
+          {expired && (
+            <div className={styles.qrExpiredMask}>
+              <span>认证超时，请重新发起</span>
+            </div>
+          )}
         </div>
-        <div className={styles.qrHintSub}>认证通过后将自动创建分组</div>
+        <div className={styles.qrCountdown}>二维码有效期15分钟</div>
         <button
           className={styles.qrOpenBtn}
           onClick={() => window.open(h5Link, '_blank')}
         >
           在当前设备打开
+        </button>
+        <button
+          className={styles.qrResetBtn}
+          onClick={onCreateSession}
+          disabled={creating}
+        >
+          <RotateCw size={14} className={creating ? styles.qrSpin : undefined} />
+          {creating ? '生成中...' : '重新生成'}
         </button>
       </div>
     </div>,
@@ -352,8 +393,10 @@ export default function CharacterLibrary({
 
   /** 真人认证中（轮询 H5 认证结果，期间禁止再次发起） */
   const [authenticating, setAuthenticating] = useState(false);
-  /** 认证二维码弹窗数据（H5Link 渲染二维码供手机扫码；BytedToken 轮询用） */
-  const [authSession, setAuthSession] = useState<{ H5Link: string; BytedToken: string } | null>(null);
+  /** 认证二维码弹窗数据（H5Link 渲染二维码供手机扫码；BytedToken 轮询用；Name 供过期重置复用） */
+  const [authSession, setAuthSession] = useState<{ H5Link: string; BytedToken: string; Name: string } | null>(null);
+  /** 二维码过期后「重新生成」请求中 */
+  const [resettingSession, setResettingSession] = useState(false);
   const authPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isLiveness = groupType === 'LivenessFace';
@@ -497,7 +540,7 @@ export default function CharacterLibrary({
         );
         setShowCreateModal(false);
         // 展示二维码弹窗：手机扫码打开 H5 刷脸页；桌面端可点「在当前设备打开」
-        setAuthSession({ H5Link: session.H5Link, BytedToken: session.BytedToken });
+        setAuthSession({ H5Link: session.H5Link, BytedToken: session.BytedToken, Name: name });
         startAuthPolling(session.BytedToken);
       } catch (err) {
         // silent 请求：页面层定制文案（401 已由请求层弹登录续接）
@@ -520,6 +563,27 @@ export default function CharacterLibrary({
       // silent 请求：页面层统一用定制文案提示（401 已由请求层弹登录续接）
       if (!isApiError(err) || err.status !== 401) toast.error('新建分组失败，请稍后重试');
       throw err; // 让 GroupFormModal 的 submitting 状态正确恢复
+    }
+  };
+
+  /**
+   * 二维码过期后的「重新生成」：用原会话名重新创建认证会话，
+   * 换新二维码并重启轮询（旧 BytedToken 作废）。
+   */
+  const handleResetAuthSession = async () => {
+    if (!authSession || resettingSession) return;
+    setResettingSession(true);
+    try {
+      const session = await createVisualValidateSession(
+        { Name: authSession.Name, CallbackURL: `${window.location.origin}/auth-success` },
+        { silent: true },
+      );
+      setAuthSession({ H5Link: session.H5Link, BytedToken: session.BytedToken, Name: authSession.Name });
+      startAuthPolling(session.BytedToken);
+    } catch (err) {
+      if (!isApiError(err) || err.status !== 401) toast.error('重新生成二维码失败，请重试');
+    } finally {
+      setResettingSession(false);
     }
   };
 
@@ -680,6 +744,8 @@ export default function CharacterLibrary({
             setAuthSession(null);
             stopAuthPolling();
           }}
+          onCreateSession={handleResetAuthSession}
+          creating={resettingSession}
         />
       )}
 
