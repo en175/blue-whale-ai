@@ -13,13 +13,18 @@ TypeScript `agent-worker`、`generation-worker` 组成；三者属于同一模�
 **Canvas**:
 应用的核心交互界面（工作台），承载 Asset 素材与用户主动创建的文本便签的共享编排、
 个人视口变换和 Agent 创作。
-路由 `app/canvas/`：`page.tsx` 为编排层，UI 实现在 `app/canvas/_canvas/` 子模块下。
+路由 `/canvas`，实现在 `web/src/pages/CanvasPage/`：`index.tsx` 为编排层，UI 实现在其 `components/` 子模块下。
 _Avoid_: 画布（口语可用，文档中用 Canvas）、编辑器（指代不同概念）
 
 **AgentChatPanel**:
 Canvas 右侧的 Agent 对话面板（右侧对话区）。它只有一种需求对齐与创作策划模式，承载多轮澄清、
 方案迭代以及 PlanMessage 的生成与修改，不提供图片或视频生成能力，也不直接创建 SceneCard。
-_Avoid_: 对话区（口语可用，文档中用 AgentChatPanel）、Direct Gen、媒体生成操作面板、Agent 本体
+呈现为覆盖 Canvas 之上的全高非模态抽屉：无遮罩、不锁定焦点、画布保持可交互，仅可由面板内关闭按钮
+关闭；打开时隐藏 CanvasHeader 的 Agent 入口，关闭后恢复。宽度默认 468px，User 可拖拽抽屉左缘在
+400px ~ min(720px, 50vw) 间实时调宽，宽度按 User 持久化；展开状态不持久化，进入 Canvas 与切换
+Project 时默认收起。
+_Avoid_: 对话区（口语可用，文档中用 AgentChatPanel）、Direct Gen、媒体生成操作面板、Agent 本体、
+悬浮卡片形态、点击画布或 Esc 关闭
 
 **AgentComposer**（历史术语，已废弃）:
 曾指 Canvas 中与 Agent 交互的编排组件，对应旧文件 `components/AgentComposer.tsx`。
