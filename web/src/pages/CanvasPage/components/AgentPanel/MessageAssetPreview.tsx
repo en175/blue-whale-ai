@@ -75,7 +75,7 @@ export function isInlineMediaThumbnail(block: SessionContentBlock): boolean {
 }
 
 /** 反查一次素材库并把 id → url 填进缓存；并发调用共用同一个请求。 */
-function ensureAssetUrls(): Promise<void> {
+export function ensureAssetUrls(): Promise<void> {
   if (!listPromise) {
     listPromise = fetchAllAssets('')
       .then((records) => {
