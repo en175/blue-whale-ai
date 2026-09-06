@@ -3,8 +3,7 @@
  * 数据源 GET/POST/PUT /api/admin/models + PATCH /:id/toggle
  * ============================================ */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { Plus, X, Pencil, Trash2, ChevronUp, ChevronDown, Power } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronUp, ChevronDown, Power } from 'lucide-react';
 import {
   fetchAdminModels,
   createAdminModel,
@@ -13,97 +12,20 @@ import {
   deleteAdminModel,
   type AdminModel,
   type CreateAdminModelParams,
-  type ModelSize,
 } from '@/api/admin';
 import { isApiError } from '@/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
+import ModelFormModal from './ModelFormModal';
+import { TYPE_TABS, typeName, type ModelType } from './model-form';
 import styles from './index.module.css';
 
-/** 模型类型 */
-type ModelType = 'image' | 'video' | 'text';
-
-const TYPE_TABS: { key: ModelType; label: string }[] = [
-  { key: 'image', label: '图片' },
-  { key: 'video', label: '视频' },
-  { key: 'text', label: '文生文' },
-];
-
-const typeName = (t: ModelType) => TYPE_TABS.find((x) => x.key === t)?.label ?? t;
-
-const pretty = (raw: string) => {
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2);
-  } catch {
-    return raw;
-  }
-};
-
-/* ============ 特性 features 结构化字段定义 ============ */
-/** 已知布尔特性：字段名 → 展示名 + 可见能力类型（缺省则全部可见） */
-const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelType[] }> = {
-  reference_image: { label: '参考图 reference_image', types: ['image', 'video'] },
-  watermark: { label: '水印 watermark', types: ['image', 'video'] },
-  tools: { label: '工具 tools' },
-  stream: { label: '流式输出 stream', types: ['image'] },
-  sequential_image_generation: { label: '顺序生成 sequential_image_generation', types: ['image'] },
-  first_frame: { label: '首帧 first_frame', types: ['video'] },
-  last_frame: { label: '尾帧 last_frame', types: ['video'] },
-  first_last_frame: { label: '首尾帧 first_last_frame', types: ['video'] },
-  audio: { label: '音频 audio', types: ['video'] },
-};
-
-/** 已知数字特性：字段名 → 展示名 + 占位提示 + 可见能力类型 */
-const FEATURE_NUMBER_LABELS: Record<string, { label: string; types?: ModelType[]; placeholder: string }> = {
-  max_reference_images: { label: '参考图上限 max_reference_images', types: ['image', 'video'], placeholder: '如 10' },
-  quantity_max: { label: '单次生成数量 quantity_max', types: ['image'], placeholder: '如 1' },
-};
-
-/** 从 features 提取已知布尔开关（缺失按 false 处理） */
-const pickFeatureBooleans = (features: Record<string, unknown> = {}): Record<string, boolean> => {
-  const out: Record<string, boolean> = {};
-  for (const key of Object.keys(FEATURE_BOOL_LABELS)) {
-    out[key] = features[key] === true;
-  }
-  return out;
-};
-
-/** 从 features 提取已知数字字段（缺失/非数字 → 空串） */
-const pickFeatureNumbers = (features: Record<string, unknown> = {}): Record<string, string> => {
-  const out: Record<string, string> = {};
-  for (const key of Object.keys(FEATURE_NUMBER_LABELS)) {
-    const v = features[key];
-    out[key] = typeof v === 'number' && Number.isFinite(v) ? String(v) : '';
-  }
-  return out;
-};
-
-/** 剔除已知字段后剩余 → 进入兜底 JSON 区 */
-const dropKnownFeatures = (features: Record<string, unknown> = {}): Record<string, unknown> => {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(features)) {
-    if (k in FEATURE_BOOL_LABELS || k in FEATURE_NUMBER_LABELS) continue;
-    out[k] = v;
-  }
-  return out;
-};
-
-/** 数字字段留空不写入 */
-const omitEmpty = (nums: Record<string, string>): Record<string, number> => {
-  const out: Record<string, number> = {};
-  for (const [k, v] of Object.entries(nums)) {
-    if (v.trim() === '') continue;
-    const n = Number(v);
-    if (Number.isFinite(n)) out[k] = n;
-  }
-  return out;
-};
-
-/** ISO 时间 → 本地展示 */
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });
 
-/** 默认参数展示 */
 const defaultParams = (m: AdminModel) => {
-  if (m.capability_type === 'video') return m.default_duration != null ? `${m.default_duration}s` : '—';
+  if (m.capability_type === 'video' || m.capability_type === 'audio') {
+    const parts = [m.default_format, m.default_duration != null ? `${m.default_duration}s` : ''].filter(Boolean);
+    return parts.length ? parts.join(' · ') : '—';
+  }
   if (m.capability_type === 'image') {
     const parts = [m.default_size, m.default_aspect_ratio].filter(Boolean);
     return parts.length ? parts.join(' · ') : '—';
@@ -123,10 +45,9 @@ export default function ModelList() {
 
   const filtered = useMemo(
     () => models.filter((m) => m.capability_type === activeTab).sort((a, b) => a.sort_order - b.sort_order),
-    [models, activeTab]
+    [models, activeTab],
   );
 
-  /** 刷新列表：页面加载 / 操作后 */
   const load = useCallback(() => {
     setLoading(true);
     setLoadError('');
@@ -138,7 +59,6 @@ export default function ModelList() {
 
   useEffect(() => load(), [load]);
 
-  /** 排序：相邻模型互换 sort_order（两次部分更新 PUT）后刷新 */
   const move = async (id: string, dir: -1 | 1) => {
     const i = filtered.findIndex((m) => m.id === id);
     const j = i + dir;
@@ -157,7 +77,6 @@ export default function ModelList() {
     }
   };
 
-  /** 启停切换：PATCH /:id/toggle，响应完整记录直接合并 */
   const toggle = async (id: string) => {
     setActionError('');
     try {
@@ -168,7 +87,6 @@ export default function ModelList() {
     }
   };
 
-  /** 确认删除：DELETE /api/admin/models/:id（软删除），成功后刷新 */
   const confirmDelete = async () => {
     if (deleteId === null || deleting) return;
     setDeleting(true);
@@ -184,7 +102,6 @@ export default function ModelList() {
     }
   };
 
-  /** 新建/编辑提交：POST / PUT /api/admin/models，成功后刷新列表 */
   const handleSubmit = async (params: Partial<CreateAdminModelParams>, id?: string) => {
     setActionError('');
     if (id !== undefined) {
@@ -198,7 +115,6 @@ export default function ModelList() {
 
   return (
     <div className={styles.page}>
-      {/* 页头 */}
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>模型列表</h1>
@@ -210,10 +126,8 @@ export default function ModelList() {
         </button>
       </div>
 
-      {/* 操作错误 */}
       {actionError && <div className={styles.actionError}>{actionError}</div>}
 
-      {/* 类型 tabs */}
       <div className={styles.tabs}>
         {TYPE_TABS.map((t) => (
           <button
@@ -226,13 +140,11 @@ export default function ModelList() {
         ))}
       </div>
 
-      {/* 模型表格 */}
       <div className={styles.tableWrap}>
         <table className={styles.table}>
           <thead>
             <tr>
               <th>模型 ID</th>
-              <th>供应商</th>
               <th>展示名</th>
               <th>类型</th>
               <th>默认参数</th>
@@ -245,23 +157,22 @@ export default function ModelList() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={9} className={styles.tableState}>加载中…</td>
+                <td colSpan={8} className={styles.tableState}>加载中…</td>
               </tr>
             )}
             {!loading && loadError && (
               <tr>
-                <td colSpan={9} className={styles.tableState}>{loadError}</td>
+                <td colSpan={8} className={styles.tableState}>{loadError}</td>
               </tr>
             )}
             {!loading && !loadError && filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className={styles.tableState}>暂无模型</td>
+                <td colSpan={8} className={styles.tableState}>暂无模型</td>
               </tr>
             )}
             {filtered.map((m) => (
               <tr key={m.id}>
                 <td className={styles.cellMono}>{m.model_id}</td>
-                <td>{m.provider_id}</td>
                 <td className={styles.cellLabel}>{m.model_label}</td>
                 <td className={styles.cellType}>{typeName(m.capability_type)}</td>
                 <td>{defaultParams(m)}</td>
@@ -303,7 +214,6 @@ export default function ModelList() {
         </table>
       </div>
 
-      {/* 新建/编辑模型弹窗 */}
       {form !== null && (
         <ModelFormModal
           initial={form.id !== undefined ? models.find((m) => m.id === form.id) : undefined}
@@ -314,7 +224,6 @@ export default function ModelList() {
         />
       )}
 
-      {/* 删除二次确认 */}
       {deleteId !== null && (
         <ConfirmModal
           title="删除模型"
@@ -325,420 +234,5 @@ export default function ModelList() {
         />
       )}
     </div>
-  );
-}
-
-/* ============ 新建/编辑模型弹窗 ============ */
-interface ModelFormModalProps {
-  initial?: AdminModel;
-  models: AdminModel[];
-  defaultType: ModelType;
-  onClose: () => void;
-  /** 新建传完整入参；编辑传部分更新字段（仅变更项） */
-  onSubmit: (params: Partial<CreateAdminModelParams>, id?: string) => Promise<void>;
-}
-
-function ModelFormModal({ initial, models, defaultType, onClose, onSubmit }: ModelFormModalProps) {
-  const [type, setType] = useState<ModelType>(initial?.capability_type ?? defaultType);
-  const [copyFrom, setCopyFrom] = useState('');
-  const [providerId, setProviderId] = useState(initial?.provider_id ?? 'volcengine');
-  const [modelId, setModelId] = useState(initial?.model_id ?? '');
-  const [label, setLabel] = useState(initial?.model_label ?? '');
-  const [icon, setIcon] = useState(initial?.icon ?? '');
-  const [sizes, setSizes] = useState(initial ? pretty(JSON.stringify(initial.supported_sizes)) : '[]');
-  const [ratios, setRatios] = useState(initial ? pretty(JSON.stringify(initial.supported_aspect_ratios)) : '[]');
-  const [durations, setDurations] = useState(
-    initial?.supported_durations ? pretty(JSON.stringify(initial.supported_durations)) : ''
-  );
-  const [formats, setFormats] = useState(initial ? pretty(JSON.stringify(initial.supported_formats)) : '[]');
-  const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>(
-    initial ? pickFeatureBooleans(initial.features) : {}
-  );
-  const [featureNumbers, setFeatureNumbers] = useState<Record<string, string>>(
-    initial ? pickFeatureNumbers(initial.features) : {}
-  );
-  const [extraFeatures, setExtraFeatures] = useState(
-    initial ? pretty(JSON.stringify(dropKnownFeatures(initial.features))) : '{}'
-  );
-  const [defaultSize, setDefaultSize] = useState(initial?.default_size ?? '');
-  const [defaultRatio, setDefaultRatio] = useState(initial?.default_aspect_ratio ?? '');
-  const [defaultFormat, setDefaultFormat] = useState(initial?.default_format ?? '');
-  const [defaultDuration, setDefaultDuration] = useState(
-    initial?.default_duration != null ? String(initial.default_duration) : ''
-  );
-  const [enabled, setEnabled] = useState(initial?.enabled ?? true);
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const copyOptions = models.filter((m) => m.capability_type === type);
-
-  /** 复制式新建：整份能力 JSON 与默认参数带过来（前端预填，服务端不感知 copy_source） */
-  const handleCopy = (id: string) => {
-    setCopyFrom(id);
-    const src = models.find((m) => m.id === id);
-    if (!src) return;
-    setProviderId(src.provider_id);
-    setSizes(pretty(JSON.stringify(src.supported_sizes)));
-    setRatios(pretty(JSON.stringify(src.supported_aspect_ratios)));
-    setDurations(src.supported_durations ? pretty(JSON.stringify(src.supported_durations)) : '');
-    setFormats(pretty(JSON.stringify(src.supported_formats)));
-    setFeatureFlags(pickFeatureBooleans(src.features));
-    setFeatureNumbers(pickFeatureNumbers(src.features));
-    setExtraFeatures(pretty(JSON.stringify(dropKnownFeatures(src.features))));
-    setDefaultSize(src.default_size ?? '');
-    setDefaultRatio(src.default_aspect_ratio ?? '');
-    setDefaultFormat(src.default_format ?? '');
-    setDefaultDuration(src.default_duration != null ? String(src.default_duration) : '');
-  };
-
-  /** 解析 JSON 字段，失败记录错误并返回 null */
-  const parseJson = <T,>(raw: string, name: string, fallback: T): T | null => {
-    const t = raw.trim();
-    if (!t) return fallback;
-    try {
-      return JSON.parse(t) as T;
-    } catch {
-      setError(`${name} JSON 解析失败，请检查格式。`);
-      return null;
-    }
-  };
-
-  const handleSave = async () => {
-    if (saving) return;
-    if (!providerId.trim() || !modelId.trim() || !label.trim()) {
-      setError('供应商、模型 ID、展示名为必填项。');
-      return;
-    }
-    setError('');
-    const sSizes = parseJson<ModelSize[]>(sizes, '尺寸', []);
-    const sRatios = parseJson<string[]>(ratios, '比例', []);
-    const sDurations = parseJson<number[]>(durations, '时长', []);
-    const sFormats = parseJson<string[]>(formats, '格式', []);
-    const sExtraFeatures = parseJson<Record<string, unknown>>(extraFeatures, '其他特性', {});
-    if (sSizes === null || sRatios === null || sDurations === null || sFormats === null || sExtraFeatures === null) return;
-    if (!Array.isArray(sSizes) || !Array.isArray(sRatios) || !Array.isArray(sDurations) || !Array.isArray(sFormats)) {
-      setError('尺寸/比例/时长/格式须为 JSON 数组。');
-      return;
-    }
-    // 合并结构化开关/数字与兜底 JSON → 完整 features 对象
-    // 布尔开关只写入 true 或原数据已存在的键（避免"假变更"给未点过的开关补显式 false）
-    const mergedFeatures: Record<string, unknown> = {
-      ...sExtraFeatures,
-      ...omitEmpty(featureNumbers),
-      ...Object.fromEntries(
-        Object.entries(featureFlags).filter(
-          ([k, v]) => v || (initial?.features != null && k in initial.features)
-        )
-      ),
-    };
-    let dd: number | null = null;
-    if (defaultDuration.trim()) {
-      dd = parseInt(defaultDuration, 10);
-      if (Number.isNaN(dd) || dd < 0) {
-        setError('默认时长须为非负整数（秒）。');
-        return;
-      }
-    }
-
-    setSaving(true);
-    try {
-      if (initial) {
-        // 编辑：部分更新，仅提交变更字段（身份字段不可改，不参与提交）
-        const changes: Partial<CreateAdminModelParams> = {};
-        if (label.trim() !== initial.model_label) changes.model_label = label.trim();
-        const iconVal = icon.trim() || null;
-        if (iconVal !== (initial.icon ?? null)) changes.icon = iconVal;
-        if (JSON.stringify(sSizes) !== JSON.stringify(initial.supported_sizes)) changes.supported_sizes = sSizes;
-        if (JSON.stringify(sRatios) !== JSON.stringify(initial.supported_aspect_ratios))
-          changes.supported_aspect_ratios = sRatios;
-        const durVal = sDurations.length ? sDurations : null;
-        if (JSON.stringify(durVal) !== JSON.stringify(initial.supported_durations ?? null))
-          changes.supported_durations = durVal;
-        if (JSON.stringify(sFormats) !== JSON.stringify(initial.supported_formats)) changes.supported_formats = sFormats;
-        if (JSON.stringify(mergedFeatures) !== JSON.stringify(initial.features)) changes.features = mergedFeatures;
-        const ds = defaultSize.trim() || null;
-        if (ds !== (initial.default_size ?? null)) changes.default_size = ds;
-        const dr = defaultRatio.trim() || null;
-        if (dr !== (initial.default_aspect_ratio ?? null)) changes.default_aspect_ratio = dr;
-        const df = defaultFormat.trim() || null;
-        if (df !== (initial.default_format ?? null)) changes.default_format = df;
-        if (dd !== (initial.default_duration ?? null)) changes.default_duration = dd;
-        if (enabled !== initial.enabled) changes.enabled = enabled;
-        if (!Object.keys(changes).length) {
-          setError('未检测到任何变更。');
-          setSaving(false);
-          return;
-        }
-        await onSubmit(changes, initial.id);
-      } else {
-        // 新建：完整入参
-        const params: CreateAdminModelParams = {
-          provider_id: providerId.trim(),
-          model_id: modelId.trim(),
-          capability_type: type,
-          model_label: label.trim(),
-          ...(icon.trim() ? { icon: icon.trim() } : {}),
-          supported_sizes: sSizes,
-          supported_aspect_ratios: sRatios,
-          supported_durations: sDurations.length ? sDurations : null,
-          supported_formats: sFormats,
-          ...(defaultSize.trim() ? { default_size: defaultSize.trim() } : {}),
-          ...(defaultFormat.trim() ? { default_format: defaultFormat.trim() } : {}),
-          ...(defaultRatio.trim() ? { default_aspect_ratio: defaultRatio.trim() } : {}),
-          default_duration: dd,
-          features: mergedFeatures,
-          enabled,
-        };
-        await onSubmit(params);
-      }
-    } catch (e) {
-      setError(isApiError(e) ? e.message : '保存失败，请稍后重试');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHead}>
-          <h2 className={styles.modalTitle}>{initial ? '编辑模型' : '新建模型'}</h2>
-          <button className={styles.closeBtn} onClick={onClose} title="关闭">
-            <X size={16} strokeWidth={2} />
-          </button>
-        </div>
-
-        <div className={styles.modalBody}>
-          {initial && (
-            <div className={styles.summaryBox}>
-              <div>
-                <div className={styles.summaryLabel}>供应商</div>
-                <div className={styles.summaryValue}>{initial.provider_id}</div>
-              </div>
-              <div>
-                <div className={styles.summaryLabel}>模型 ID（不可改）</div>
-                <div className={`${styles.summaryValue} ${styles.mono}`}>{initial.model_id}</div>
-              </div>
-            </div>
-          )}
-
-          {/* 类型/复制式新建仅新建时展示 */}
-          {!initial && (
-            <div className={styles.grid2}>
-              <div>
-                <div className={styles.label}>类型</div>
-                <select
-                  className={styles.selectNarrow}
-                  value={type}
-                  onChange={(e) => {
-                    setType(e.target.value as ModelType);
-                    setCopyFrom('');
-                  }}
-                >
-                  {TYPE_TABS.map((t) => (
-                    <option key={t.key} value={t.key}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <div className={styles.label}>
-                  复制自某模型 <span className={styles.labelSub}>（选填）</span>
-                </div>
-                <select className={styles.select} value={copyFrom} onChange={(e) => handleCopy(e.target.value)}>
-                  <option value="">空白新建</option>
-                  {copyOptions.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.model_label}（{m.model_id}）
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
-
-          <div className={styles.grid2}>
-            <div>
-              <div className={styles.label}>供应商 provider_id</div>
-              <input
-                className={styles.input}
-                value={providerId}
-                disabled={!!initial}
-                onChange={(e) => setProviderId(e.target.value)}
-              />
-            </div>
-            <div>
-              <div className={styles.label}>模型 ID model_id</div>
-              <input
-                className={styles.input}
-                placeholder="如 doubao-seedream-4-0-250828"
-                value={modelId}
-                disabled={!!initial}
-                onChange={(e) => setModelId(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className={styles.grid2}>
-            <div>
-              <div className={styles.label}>展示名 model_label</div>
-              <input
-                className={styles.input}
-                placeholder="如 豆包 Seedream 4.0"
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-              />
-            </div>
-            <div>
-              <div className={styles.label}>
-                图标 icon <span className={styles.labelSub}>（选填）</span>
-              </div>
-              <input
-                className={styles.input}
-                placeholder="URL 或图标名"
-                value={icon}
-                onChange={(e) => setIcon(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className={styles.sectionTitle}>能力 JSON 列（原始 JSON 编辑，保存时校验）</div>
-          <div className={styles.label}>尺寸 supported_sizes</div>
-          <textarea className={styles.textarea} value={sizes} onChange={(e) => setSizes(e.target.value)} />
-
-          <div className={styles.label}>比例 supported_aspect_ratios</div>
-          <textarea className={styles.textarea} value={ratios} onChange={(e) => setRatios(e.target.value)} />
-
-          <div className={styles.label}>时长 supported_durations</div>
-          <textarea
-            className={styles.textarea}
-            placeholder="[5,10,30] 或留空"
-            value={durations}
-            onChange={(e) => setDurations(e.target.value)}
-          />
-
-          <div className={styles.label}>格式 supported_formats</div>
-          <textarea className={styles.textarea} value={formats} onChange={(e) => setFormats(e.target.value)} />
-
-          <div className={styles.sectionTitle}>特性 features（结构化）</div>
-
-          <div className={styles.featureGroup}>
-            {Object.entries(FEATURE_BOOL_LABELS)
-              .filter(([, meta]) => !meta.types || meta.types.includes(type))
-              .map(([key, meta]) => (
-                <div className={styles.switchRow} key={key}>
-                  <span className={styles.switchLabel}>{meta.label}</span>
-                  <button
-                    className={`${styles.switch} ${featureFlags[key] ? styles.switchOn : ''}`}
-                    onClick={() => setFeatureFlags((p) => ({ ...p, [key]: !p[key] }))}
-                  >
-                    <span className={styles.knob} />
-                  </button>
-                </div>
-              ))}
-          </div>
-
-          <div className={styles.grid2}>
-            {Object.entries(FEATURE_NUMBER_LABELS)
-              .filter(([, meta]) => !meta.types || meta.types.includes(type))
-              .map(([key, meta]) => (
-                <div key={key}>
-                  <div className={styles.label}>
-                    {meta.label} <span className={styles.labelSub}>（留空不写入）</span>
-                  </div>
-                  <input
-                    className={styles.input}
-                    type="number"
-                    min={0}
-                    placeholder={meta.placeholder}
-                    value={featureNumbers[key] ?? ''}
-                    onChange={(e) => setFeatureNumbers((p) => ({ ...p, [key]: e.target.value }))}
-                  />
-                </div>
-              ))}
-          </div>
-
-          <details className={styles.featureExtra}>
-            <summary>其他特性（兜底 JSON，未识别字段在此维护）</summary>
-            <textarea
-              className={styles.textareaSm}
-              value={extraFeatures}
-              onChange={(e) => setExtraFeatures(e.target.value)}
-            />
-          </details>
-
-          <div className={styles.grid2}>
-            <div>
-              <div className={styles.label}>默认尺寸 default_size</div>
-              <input
-                className={styles.input}
-                placeholder="如 2k"
-                value={defaultSize}
-                onChange={(e) => setDefaultSize(e.target.value)}
-              />
-            </div>
-            <div>
-              <div className={styles.label}>默认比例 default_aspect_ratio</div>
-              <input
-                className={styles.input}
-                placeholder="如 1:1"
-                value={defaultRatio}
-                onChange={(e) => setDefaultRatio(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className={styles.grid2}>
-            <div>
-              <div className={styles.label}>
-                默认格式 default_format <span className={styles.labelSub}>（选填）</span>
-              </div>
-              <input
-                className={styles.input}
-                placeholder="如 png"
-                value={defaultFormat}
-                onChange={(e) => setDefaultFormat(e.target.value)}
-              />
-            </div>
-            <div>
-              <div className={styles.label}>
-                默认时长 default_duration 秒 <span className={styles.labelSub}>（选填）</span>
-              </div>
-              <input
-                className={styles.input}
-                placeholder="如 5"
-                value={defaultDuration}
-                onChange={(e) => setDefaultDuration(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className={styles.switchRow}>
-            <span className={styles.switchLabel}>启用</span>
-            <button className={`${styles.switch} ${enabled ? styles.switchOn : ''}`} onClick={() => setEnabled(!enabled)}>
-              <span className={styles.knob} />
-            </button>
-          </div>
-
-          <p className={styles.hint}>
-            复制式新建会把所选模型的能力 JSON 与默认参数整份带过来，改 provider_id / model_id / 展示名即可出新档位；同
-            (provider_id, model_id) 不可重复（含已软删）。
-          </p>
-
-          {error && <p className={styles.error}>{error}</p>}
-        </div>
-
-        <div className={styles.modalFoot}>
-          <button className={styles.cancelBtn} onClick={onClose}>
-            取消
-          </button>
-          <button className={styles.saveBtn} disabled={saving} onClick={handleSave}>
-            {saving ? '保存中…' : '保存'}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
   );
 }
