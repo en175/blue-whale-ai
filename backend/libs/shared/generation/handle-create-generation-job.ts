@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   COMPOSED_IMAGE_PROMPT_MAX_LENGTH,
+  COMPOSED_VIDEO_PROMPT_MAX_LENGTH,
   ERROR_INVALID_INPUT,
   ERROR_MODEL_UNAVAILABLE,
   ERROR_UNSUPPORTED_INPUT,
@@ -10,7 +11,7 @@ import {
   ok,
   type TextAttachmentSnapshot,
 } from "@blue-whale/contracts";
-import { composeImagePrompt } from "@blue-whale/core";
+import { composeTextAttachmentPrompt } from "@blue-whale/core";
 import {
   DEFAULT_MAX_REFERENCE_IMAGES,
   type CanvasRepo,
@@ -49,7 +50,7 @@ export interface CreateGenerationJobBody {
   last_frame_material_id?: unknown;
   /** 元素 { id: "Asset-xxx", type: "image" | "video" }；素材零落表，类型由调用方声明。 */
   reference_materials?: unknown;
-  /** IKDLQF：生图目标画布节点 id（mediaType 为 image 的 mediaNode），仅 type==="image" 允许携带。 */
+  /** IKDLQF/IKDLQG：生成目标画布节点 id（图片=image/视频=video 媒体节点），仅 type==="image"|"video" 允许携带。 */
   target_node_id?: unknown;
   parameters?: unknown;
   expected_output_count?: unknown;
@@ -122,13 +123,13 @@ function validate(
   const type = body.type;
   if (type !== "image" && type !== "video" && type !== "audio")
     return { code: ERROR_UNSUPPORTED_TYPE, message: "暂不支持该生成类型" };
-  // IKDLQF：target_node_id 仅图片生成允许携带；携带时必须是有效字符串。
+  // IKDLQF/IKDLQG：target_node_id 仅图片/视频生成允许携带；携带时必须是有效字符串。
   const hasTargetNode = body.target_node_id !== undefined;
   if (hasTargetNode) {
-    if (type !== "image")
+    if (type !== "image" && type !== "video")
       return {
         code: ERROR_UNSUPPORTED_INPUT,
-        message: "target_node_id 仅支持图片生成",
+        message: "target_node_id 仅支持图片/视频生成",
       };
     if (!isStr(body.target_node_id) || body.target_node_id.trim() === "")
       return { code: ERROR_INVALID_INPUT, message: "target_node_id 无效" };
@@ -136,7 +137,7 @@ function validate(
   const params = body.parameters as GenerationParameters | undefined;
   const maxPromptLength = type === "audio" ? 3000 : 4000;
   // IKDLQF：携带 target_node_id 时 prompt 允许为空字符串（缺省按空串处理），长度上限不变；
-  // 全部有效文本（附件 + 提示词）为空的拒绝在 handler 读取画布快照后按 composeImagePrompt 结果判定。
+  // 全部有效文本（附件 + 提示词）为空的拒绝在 handler 读取画布快照后按 composeTextAttachmentPrompt 结果判定。
   if (
     !params ||
     (!isStr(params.prompt) && (params.prompt !== undefined || !hasTargetNode))
@@ -363,10 +364,10 @@ export async function handleCreateGenerationJob(
     });
   }
 
-  // IKDLQF：携带 target_node_id 时，接纳当下读取最新 Canvas 推导有序文本附件，
+  // IKDLQF/IKDLQG：携带 target_node_id 时，接纳当下读取最新 Canvas 推导有序文本附件，
   // 冻结进 input 快照；执行与重试只读快照，不回读来源节点。
   const targetNodeId =
-    type === "image" &&
+    (type === "image" || type === "video") &&
     isStr(body.target_node_id) &&
     body.target_node_id.trim() !== ""
       ? body.target_node_id
@@ -384,9 +385,9 @@ export async function handleCreateGenerationJob(
     if (
       !target ||
       target.type !== "mediaNode" ||
-      target.data?.mediaType !== "image"
+      target.data?.mediaType !== type
     ) {
-      return fail(400, "目标节点不存在或不是图片媒体节点", {
+      return fail(400, `目标节点不存在或不是${type === "video" ? "视频" : "图片"}媒体节点`, {
         code: ERROR_INVALID_INPUT,
       });
     }
@@ -413,14 +414,18 @@ export async function handleCreateGenerationJob(
         text: sourceNode.data.text,
       });
     }
-    const composed = composeImagePrompt(textAttachments, promptText);
+    const composed = composeTextAttachmentPrompt(textAttachments, promptText);
     if (composed.trim() === "") {
       return fail(400, "prompt 无效", { code: ERROR_INVALID_INPUT });
     }
-    if (composed.length > COMPOSED_IMAGE_PROMPT_MAX_LENGTH) {
+    const composedMaxLength =
+      type === "video"
+        ? COMPOSED_VIDEO_PROMPT_MAX_LENGTH
+        : COMPOSED_IMAGE_PROMPT_MAX_LENGTH;
+    if (composed.length > composedMaxLength) {
       return fail(
         400,
-        `文本附件与提示词组合后超过 ${COMPOSED_IMAGE_PROMPT_MAX_LENGTH} 字上限`,
+        `文本附件与提示词组合后超过 ${composedMaxLength} 字上限`,
         { code: ERROR_INVALID_INPUT },
       );
     }
@@ -464,6 +469,11 @@ export async function handleCreateGenerationJob(
     if (lastFrameMaterialId) input.last_frame_material_id = lastFrameMaterialId;
     if (materialRefsResolved.length > 0)
       input.reference_materials = materialRefsResolved;
+    // IKDLQG：视频目标快照与图片同构——target_node_id + 当次文本附件正文。
+    if (targetNodeId !== null) {
+      input.target_node_id = targetNodeId;
+      input.text_attachments = textAttachments;
+    }
   }
   // 图片与视频一致：sk token 密封进 job.input.provider_credential，处理时由 worker 解出。
   // 这样进程内即时调度与重启后的恢复扫描共用同一套凭据来源。

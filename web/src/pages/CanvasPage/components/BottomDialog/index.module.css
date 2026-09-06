@@ -41,6 +41,60 @@
   min-height: 0;
 }
 
+/* ---- 连线文本附件（IKDLQG，与 ImageDialog 附件区同构） ---- */
+.attachments {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.attachmentItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: #242424;
+  border: 1px solid #2c2c2c;
+  border-radius: 12px;
+}
+
+.attachmentTitle {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.attachmentText {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.attachmentTextCollapsed {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.attachmentToggle {
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.attachmentToggle:hover {
+  color: var(--color-text-primary);
+}
+
 .editorArea {
   height: 100%;
   overflow-y: auto;

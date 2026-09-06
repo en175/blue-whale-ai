@@ -681,20 +681,20 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  it("视频类型携带 target_node_id → 400 仅图片生成可用，不读画布不建任务", async () => {
+  it("音频类型携带 target_node_id → 400 仅图片/视频生成可用，不读画布不建任务", async () => {
     const { deps, createJob, getByProject } = buildTargetDeps(TARGET_CANVAS);
-    const listEnabledVideo = vi
-      .fn()
-      .mockResolvedValue([{ model_id: "doubao-seedance-2-0-260128" }]);
-    (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType =
-      listEnabledVideo;
 
     const result = await handleCreateGenerationJob(
-      "u1", "p1", { ...VIDEO_BODY, target_node_id: "media-1" }, null, deps,
+      "u1", "p1", {
+        type: "audio",
+        target_node_id: "media-1",
+        expected_output_count: 1,
+        parameters: { prompt: "哼一段旋律", model_id: "audio-model" },
+      }, null, deps,
     );
 
     expect(result.code).toBe(400);
-    expect(result.msg).toBe("target_node_id 仅支持图片生成");
+    expect(result.msg).toBe("target_node_id 仅支持图片/视频生成");
     expect(getByProject).not.toHaveBeenCalled();
     expect(createJob).not.toHaveBeenCalled();
   });
@@ -776,6 +776,151 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
     delete body.target_node_id;
 
     const result = await handleCreateGenerationJob("u1", "p1", body, null, deps);
+
+    expect(result.code).toBe(200);
+    expect(getByProject).not.toHaveBeenCalled();
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input).not.toHaveProperty("target_node_id");
+    expect(cmdArg.input).not.toHaveProperty("text_attachments");
+  });
+});
+
+// IKDLQG：target_node_id 文本附件扩展到生视频目标（mediaType 为 video 的 mediaNode）。
+// 快照形状与图片同构；视频既有冻结字段（resolution/duration/参考引用）保持。
+function buildVideoTargetDeps(canvasView: { nodes: string | null; edges: string | null }) {
+  const { deps, createJob, getByProject } = buildTargetDeps(canvasView);
+  // seedance-2 经别名解析为 doubao-seedance-2-0-260128，白名单按解析后 id 校验
+  (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType = vi
+    .fn()
+    .mockResolvedValue([{ model_id: "doubao-seedance-2-0-260128" }]);
+  return { deps, createJob, getByProject };
+}
+
+const VIDEO_TARGET_BODY = {
+  ...VIDEO_BODY,
+  target_node_id: "media-2",
+};
+
+describe("handleCreateGenerationJob target_node_id 视频目标（IKDLQG）", () => {
+  it("合法视频目标 → 200，按 edges 数组顺序冻结 text_attachments 与 target_node_id，视频参数保持", async () => {
+    const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob("u1", "p1", VIDEO_TARGET_BODY, null, deps);
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.target_node_id).toBe("media-2");
+    expect(cmdArg.input.prompt).toBe("人物走过街角");
+    // TARGET_CANVAS 中仅 e4（text-a → media-2）指向视频目标
+    expect(cmdArg.input.text_attachments).toEqual([
+      { node_id: "text-a", title: "风格", text: "赛博朋克" },
+    ]);
+    expect(cmdArg.input.model_id).toBe("doubao-seedance-2-0-260128");
+    expect(cmdArg.input.resolution).toBe("720p");
+    expect(cmdArg.input.duration).toBe(8);
+  });
+
+  it("目标是图片 mediaNode → 400 目标节点不存在或不是视频媒体节点，不建任务", async () => {
+    const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...VIDEO_TARGET_BODY, target_node_id: "media-1" }, null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("目标节点不存在或不是视频媒体节点");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("目标节点不存在 → 400，不建任务", async () => {
+    const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...VIDEO_TARGET_BODY, target_node_id: "media-404" }, null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("目标节点不存在或不是视频媒体节点");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("仅附件正文、prompt 为空字符串 → 200，prompt 冻结为空串", async () => {
+    const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      { ...VIDEO_TARGET_BODY, parameters: { ...VIDEO_BODY.parameters, prompt: "" } },
+      null, deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("");
+    expect(cmdArg.input.text_attachments).toEqual([
+      { node_id: "text-a", title: "风格", text: "赛博朋克" },
+    ]);
+  });
+
+  it("附件全部空白且 prompt 为空 → 400 沿用 prompt 无效，不建任务", async () => {
+    const { deps, createJob } = buildVideoTargetDeps({
+      nodes: JSON.stringify([
+        { id: "media-v", type: "mediaNode", data: { mediaType: "video" } },
+        { id: "text-blank", type: "textNode", data: { title: "空白", text: "  \n " } },
+      ]),
+      edges: JSON.stringify([{ id: "e1", source: "text-blank", target: "media-v" }]),
+    });
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      { ...VIDEO_TARGET_BODY, target_node_id: "media-v", parameters: { ...VIDEO_BODY.parameters, prompt: "" } },
+      null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("prompt 无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("组合后超过 30000 字 → 400 明确失败，不建任务、不截断", async () => {
+    const { deps, createJob } = buildVideoTargetDeps({
+      nodes: JSON.stringify([
+        { id: "media-v", type: "mediaNode", data: { mediaType: "video" } },
+        { id: "text-a", type: "textNode", data: { title: "a", text: "甲".repeat(20_000) } },
+        { id: "text-b", type: "textNode", data: { title: "b", text: "乙".repeat(20_000) } },
+      ]),
+      edges: JSON.stringify([
+        { id: "e1", source: "text-a", target: "media-v" },
+        { id: "e2", source: "text-b", target: "media-v" },
+      ]),
+    });
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      { ...VIDEO_TARGET_BODY, target_node_id: "media-v", parameters: { ...VIDEO_BODY.parameters, prompt: "" } },
+      null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("断开后边消失：edges 为空即不消费来源，text_attachments 冻结为空数组", async () => {
+    const { deps, createJob } = buildVideoTargetDeps({ nodes: TARGET_CANVAS.nodes, edges: "[]" });
+
+    const result = await handleCreateGenerationJob("u1", "p1", VIDEO_TARGET_BODY, null, deps);
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.target_node_id).toBe("media-2");
+    expect(cmdArg.input.text_attachments).toEqual([]);
+    expect(cmdArg.input.prompt).toBe("人物走过街角");
+  });
+
+  it("不携带 target_node_id 的视频创建 → 不读画布，input 不含附件字段，行为不变", async () => {
+    const { deps, createJob, getByProject } = buildVideoTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob("u1", "p1", VIDEO_BODY, null, deps);
 
     expect(result.code).toBe(200);
     expect(getByProject).not.toHaveBeenCalled();

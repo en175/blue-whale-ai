@@ -83,6 +83,7 @@ export {
 } from "./generation-cost.js";
 export type { NewApiImageReceipt } from "./new-api-generation-ops.js";
 export { composeImagePrompt } from "./compose-image-prompt.js";
+export { composeTextAttachmentPrompt } from "./compose-text-attachment-prompt.js";
 export {
   issueAccessToken,
   verifyAccessToken,

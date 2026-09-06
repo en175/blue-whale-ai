@@ -209,7 +209,7 @@ export default function CanvasPage() {
   const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[]; params?: ImageGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
   /** 节点工具条带入视频对话框的初始参考；cards 是「引用到 dock」累计的生成卡胶囊，不因再次点击覆盖；
    *  params 是首页 AI视频 带入的生成参数（选中首页所选模型/比例/清晰度/时长/模式） */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; cards?: ChipRef[]; text?: string; params?: VideoGenSeedParams } | null>(null);
+  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; cards?: ChipRef[]; text?: string; params?: VideoGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
   /** 节点工具条打开音频对话框的重挂载 key */
   const [audioSeed, setAudioSeed] = useState<{ ts: number } | null>(null);
   /** 首页 AI视频/AI图片 生成交接：消费后置入此 ref，待项目就绪触发创建任务 */
@@ -1482,7 +1482,7 @@ export default function CanvasPage() {
   /** 创建生成任务：立即上画布「生成中」占位节点，创建成功后启动轮询。
    *  videoRefs 仅 video：首尾帧（图片）或普通参考素材（图/视频）assetId/materialId，与 input_asset_ids 互斥。
    *  素材库引用（Asset- 前缀）走 *_material_id / reference_materials；同一帧位 asset 与 material 互斥。
-   *  targetNodeId 仅 image（IKDLQF）：从图片媒体节点面板发起时携带，服务端按最新画布推导连线文本附件 */
+   *  targetNodeId 仅图片/视频（IKDLQF/IKDLQG）：从对应媒体节点面板发起时携带，服务端按最新画布推导连线文本附件 */
   const startGenerationJob = (
     type: 'image' | 'video' | 'audio',
     parameters: ImageJobParameters | VideoJobParameters | AudioJobParameters,
@@ -1550,7 +1550,7 @@ export default function CanvasPage() {
         reference_materials: videoRefs?.referenceMaterials?.length
           ? videoRefs.referenceMaterials
           : undefined,
-        // 仅从图片媒体节点面板发起时携带（IKDLQF）；其余入口连字段都不上送
+        // 仅从图片/视频媒体节点面板发起时携带（IKDLQF/IKDLQG）；其余入口连字段都不上送
         ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
       })
         .then((created) => {
@@ -1683,11 +1683,13 @@ export default function CanvasPage() {
     if (!ref) return;
 
     if (ref.type === 'video') {
-      // 视频节点：打开视频对话框（底部窗口）
+      // 视频节点：打开视频对话框（底部窗口）；IKDLQG 起携带目标节点与连线文本附件快照
       setVideoSeed({
         ts: Date.now(),
         refs: [{ preview: ref.src, type: ref.type, assetId: ref.assetId }],
         text: ref.prompt,
+        targetNodeId: id,
+        attachments: textAttachmentsOf(id),
       });
       setShowBottomDialog(true);
       setShowImageDialog(false);
@@ -1720,11 +1722,16 @@ export default function CanvasPage() {
     handleOpenImageDialog();
   };
 
-  /** 生成视频：视频对话框 + 图片（带 assetId，发送时免重传直传 ID） */
+  /** 生成视频：视频对话框 + 图片（带 assetId，发送时免重传直传 ID）；
+   *  被点节点是视频媒体节点时携带目标节点与连线文本附件快照（IKDLQG），图片节点维持参考素材旧语义 */
   const handleNodeGenVideo = (id: string) => {
     const ref = nodeRefOf(id);
     if (!ref) return;
-    setVideoSeed({ ts: Date.now(), refs: [{ preview: ref.src, type: ref.type, ...(ref.assetId != null ? { assetId: ref.assetId } : {}) }] });
+    setVideoSeed({
+      ts: Date.now(),
+      refs: [{ preview: ref.src, type: ref.type, ...(ref.assetId != null ? { assetId: ref.assetId } : {}) }],
+      ...(ref.type === 'video' ? { targetNodeId: id, attachments: textAttachmentsOf(id) } : {}),
+    });
     setShowBottomDialog(true);
     setShowImageDialog(false);
     setShowAudioDialog(false);
@@ -1909,8 +1916,25 @@ export default function CanvasPage() {
   /** 底部对话框发送 */
   /** 视频对话发送：参考素材上传取 assetId → 创建视频生成任务。
    *  首尾帧模式传 first/last_frame_asset_id（对话框已校验恰好 2 张图，第 1 张首帧、第 2 张尾帧）；
-   *  其余模式图片/视频混合走 reference_asset_ids */
+   *  其余模式图片/视频混合走 reference_asset_ids。
+   *  从视频媒体节点面板发起时（IKDLQG）：先等待在途保存并落盘当前画布编辑
+   *  （同 IKDLQE 应用预览的保存串行化），保证服务端按连线推导附件时读到最新正文，再携带 target_node_id 提交 */
   const handleDialogSend = async (text: string, opts: VideoGenOptions, refs: BottomRefItem[]) => {
+    const targetNodeId = videoSeed?.targetNodeId;
+    if (targetNodeId && currentId) {
+      const projectId = currentId;
+      applyingRef.current = true;
+      try {
+        if (!(await flushCanvasSave(projectId))) return; // 等待期间项目已切换，中止提交
+      } catch (e) {
+        // 落盘失败则不提交：否则服务端读到的正文可能缺未防抖落盘的编辑
+        showToast('error', '保存失败，请重试');
+        console.warn('生成前画布落盘失败:', e);
+        return;
+      } finally {
+        applyingRef.current = false;
+      }
+    }
     const parameters: VideoJobParameters = {
       prompt: text,
       model_id: opts.modelId,
@@ -1919,7 +1943,7 @@ export default function CanvasPage() {
       duration: opts.duration,
     };
     if (!refs.length) {
-      startGenerationJob('video', parameters);
+      startGenerationJob('video', parameters, undefined, undefined, targetNodeId);
       return;
     }
     // 解析引用：Asset- 前缀 = 素材库素材（走 *_material_id/reference_materials）；
@@ -1949,7 +1973,7 @@ export default function CanvasPage() {
         lastFrameAssetId: last.assetId ?? undefined,
         firstFrameMaterialId: first.materialId ?? undefined,
         lastFrameMaterialId: last.materialId ?? undefined,
-      });
+      }, targetNodeId);
       return;
     }
     const referenceAssetIds = resolved
@@ -1972,6 +1996,7 @@ export default function CanvasPage() {
             ...(referenceMaterials.length > 0 ? { referenceMaterials } : {}),
           }
         : undefined,
+      targetNodeId,
     );
   };
 
@@ -2792,6 +2817,7 @@ export default function CanvasPage() {
             initialCards={videoSeed?.cards}
             initialText={videoSeed?.text}
             initialParams={videoSeed?.params}
+            attachments={videoSeed?.attachments}
             onClose={() => { setShowBottomDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleDialogSend}
             onPickFromCanvas={(kind) => { setPickMode(kind); setPickTarget('video'); }}
