@@ -359,6 +359,17 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId]);
 
+  /** 切换 Project 即切换画布与对话历史：面板随之收起（IKDLD4），展开状态不跨项目携带。
+   *  覆盖点选 / 新建 / 删除后自动切换 / 地址栏前进后退等全部 currentId 迁移路径。
+   *  空串 → 首项目 是初始水合（含首页交接降级路径），不是用户切换，不关面板。 */
+  const prevProjectIdRef = useRef(currentId);
+  useEffect(() => {
+    const prev = prevProjectIdRef.current;
+    prevProjectIdRef.current = currentId;
+    if (!prev || prev === currentId) return;
+    setShowAgent(false);
+  }, [currentId]);
+
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
   const { doc, assets: snapshotAssets, refetch } = useCanvasDoc(currentId);
 
@@ -2574,6 +2585,7 @@ export default function CanvasPage() {
         onDeleteProject={handleDelete}
         onNewProject={handleNewProject}
         onToggleAgent={() => setShowAgent(!showAgent)}
+        hideAgentEntry={showAgent}
       />
 
       <AssetDetailModal

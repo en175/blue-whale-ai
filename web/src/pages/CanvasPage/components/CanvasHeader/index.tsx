@@ -17,6 +17,8 @@ interface CanvasHeaderProps {
   onDeleteProject: (id: string) => void;
   onNewProject: () => void;
   onToggleAgent: () => void;
+  /** 面板展开时隐藏 Agent 入口（IKDLD4）：入口与面板内关闭按钮冗余，收起后自动恢复 */
+  hideAgentEntry?: boolean;
 }
 
 export default function CanvasHeader({
@@ -27,6 +29,7 @@ export default function CanvasHeader({
   onDeleteProject,
   onNewProject,
   onToggleAgent,
+  hideAgentEntry = false,
 }: CanvasHeaderProps) {
   const navigate = useNavigate();
   const showRecharge = useRechargeUiStore((s) => s.open);
@@ -55,7 +58,10 @@ export default function CanvasHeader({
 
       {/* 右侧：只保留 Agent；充值弹窗仍挂在此，供生成前余额拦截打开 */}
       <div className={styles.right}>
-        <button className={styles.agentBtn} onClick={onToggleAgent}>
+        <button
+          className={`${styles.agentBtn} ${hideAgentEntry ? styles.agentBtnHidden : ''}`}
+          onClick={onToggleAgent}
+        >
           <Bot size={16} strokeWidth={2} />
           <span>Agent</span>
         </button>
