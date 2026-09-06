@@ -1,29 +1,27 @@
 #!/usr/bin/env python3
-"""Unit tests for scripts/lib/sanitize_acceptance_logs.py (IK1NS2).
+"""Unit tests for scripts/lib/sanitize-acceptance-logs.mjs (IK1NS2).
 
 验收失败取证日志必须先脱敏再落盘：不得包含凭据、Token 或原始敏感内容，
 同时保留足以定位问题的普通诊断信息。公开 seam：
-- sanitize_text(text: str) -> str
 - CLI：stdin → stdout
 """
 
 import subprocess
-import sys
 import unittest
 from pathlib import Path
 
 LIB = Path(__file__).resolve().parents[1] / "lib"
-sys.path.insert(0, str(LIB))
 
-SCRIPT = LIB / "sanitize_acceptance_logs.py"
+SCRIPT = LIB / "sanitize-acceptance-logs.mjs"
 
 
 class SanitizeAcceptanceLogsTest(unittest.TestCase):
-    def setUp(self):
-        self.assertTrue(SCRIPT.exists(), "sanitize_acceptance_logs.py does not exist yet")
-        import sanitize_acceptance_logs
-
-        self.sanitize = sanitize_acceptance_logs.sanitize_text
+    def sanitize(self, text):
+        result = subprocess.run(
+            ["node", str(SCRIPT)], input=text, text=True, capture_output=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
 
     def test_preserves_ordinary_log_lines(self):
         line = "2026-07-17T15:00:00 INFO  c.b.w.agent.GenerationWorker - claimed job 42, status=PENDING\n"
@@ -90,7 +88,7 @@ class SanitizeAcceptanceLogsTest(unittest.TestCase):
     def test_cli_stdin_to_stdout(self):
         payload = "token=abc123\nplain line\n"
         result = subprocess.run(
-            [sys.executable, str(SCRIPT)],
+            ["node", str(SCRIPT)],
             input=payload,
             text=True,
             stdout=subprocess.PIPE,
