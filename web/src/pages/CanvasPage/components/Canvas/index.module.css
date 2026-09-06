@@ -22,6 +22,17 @@
 }
 
 /* 拖动模式：节点不拦截鼠标，画布任意位置按下即可平移 */
-.dragMode :global(.react-flow__node) {
-  pointer-events: none;
+.dragMode :global(.react-flow__node),
+.dragMode :global(.react-flow__node *),
+.dragMode :global(.react-flow__nodesselection),
+.dragMode :global(.react-flow__nodesselection *) {
+  pointer-events: none !important;
+}
+
+.dragMode :global(.react-flow__pane) {
+  cursor: grab;
+}
+
+.dragMode :global(.react-flow__pane.dragging) {
+  cursor: grabbing;
 }

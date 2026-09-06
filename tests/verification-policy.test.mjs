@@ -347,6 +347,35 @@ test("rejects unknown executable paths instead of escalating to full", async () 
 // IKACK2：`web/scripts/` 是本轮新开的目录，此前没有任何规则覆盖，于是它命中 EXECUTABLE_FILE
 // 却分不了类，`--stage pr` 必抛 UNCLASSIFIED_PATH。补分类而不是放宽那条规矩——「归不了类就停下」
 // 本身是对的，缺的是这一条归属。
+// IKDIDO：web/e2e 的 Playwright 规格与 fixture 此前没有归类规则，提交后 PR 阶段必被兜底升级为
+// full（`unclassified PR scope requires full verification`）。补分类而不是接受升级——它们的题材是
+// web 产品行为，定向验证就是 web 那套（typecheck + lint + vitest）。
+test("classifies web e2e specs and fixtures as web", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  const expected = {
+    tier: "scoped",
+    areas: ["web"],
+    reasons: ["known source paths changed"],
+  };
+  assert.deepEqual(
+    classifyChanges(["web/e2e/media-node-layout.e2e.ts", "web/e2e/fixtures/media-node-layout.json"]),
+    expected,
+  );
+  assert.deepEqual(
+    classifyChanges(["web/e2e/media-node-layout.e2e.ts"], { stage: "pr" }),
+    expected,
+  );
+
+  // 与 web 源码同区：一起改时不该分裂出第二个 area。
+  assert.deepEqual(
+    classifyChanges(["web/e2e/media-node-layout.e2e.ts", "web/src/pages/CanvasPage/index.tsx"], {
+      stage: "pr",
+    }),
+    expected,
+  );
+});
+
 test("classifies web tooling scripts as web", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
@@ -1377,4 +1406,45 @@ test("rejects an unknown verification stage on the command line", () => {
   } finally {
     rmSync(repository, { recursive: true, force: true });
   }
+});
+
+
+test("skill assets select their real checks at both stages", async () => {
+  const { classifyChanges, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+  const files = [
+    ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
+    ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
+    ".zcode/skills/wizard/template.sh",
+    "tests/skill-assets.test.mjs",
+  ];
+  for (const stage of ["completion", "pr"]) {
+    for (const file of files) {
+      const classification = classifyChanges([file], { stage });
+      assert.equal(classification.tier, "scoped");
+      assert.deepEqual(classification.areas, ["skill-assets"]);
+      const commands = buildVerificationPlan(classification, { base: "BASE" });
+      for (const expected of [
+        ["bash", files[0]],
+        ["node", "--check", files[1]],
+        ["bash", "-n", files[2]],
+        ["node", "--test", files[3]],
+      ]) assert.ok(commands.some(command => JSON.stringify(command) === JSON.stringify(expected)));
+    }
+  }
+});
+
+test("skill assets do not allow unknown siblings or downgrade product impact", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+  for (const stage of ["completion", "pr"]) {
+    for (const file of [
+      ".zcode/skills/wizard/unknown.sh",
+      ".zcode/skills/deploy-blue-whale-api/tests/unknown.sh",
+      ".zcode/skills/setup-ts-deep-modules/unknown.cjs",
+    ]) assert.throws(() => classifyChanges([file], { stage }), /UNCLASSIFIED_PATH/);
+  }
+  const classification = classifyChanges([
+    ".zcode/skills/wizard/template.sh", "backend/Dockerfile.worker",
+  ], { stage: "pr" });
+  assert.equal(classification.tier, "full");
+  assert.ok(classification.areas.includes("skill-assets"));
 });

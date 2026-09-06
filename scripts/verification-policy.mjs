@@ -12,12 +12,23 @@ const BACKEND_SOURCE = /^backend\/(?:apps|libs)\/.*\.ts$/;
 // `web/src/api/agent-rest-routes.v1.json`，正是 `web/src/api/agentRoutes.test.ts` 在断言的东西。
 // 归 operations 会去跑 `scripts/tests` 下的 Python 单测，与这里毫无关系。
 const WEB_TOOLING_FILE = /^web\/scripts\/.*\.(?:mjs|cjs|js)$/;
+// web 的浏览器端验收规格与 fixture（Playwright）：题材是 web 产品行为，对应的定向验证就是 web 那套。
+// 此前 web/e2e 没有任何归类规则，提交 e2e 规格会在 PR 阶段被兜底升级为 full——与 web/scripts 那个洞同形。
+const WEB_E2E_FILE = /^web\/e2e\/.*\.(?:ts|json)$/;
 const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.(?:claude|codex)\/hooks\/|\.zcode\/config\.json|scripts\/(?:check-hook-closed-loop|check-hook-contracts|cleanup-release-branch|cleanup-task-worktree|commit-spec-on-master|commit-task-for-review|gitee-resolve-ids|install-kimi-hooks|list-task-worktrees|manage-agent-authorization|merge-task-to-local-master|pr-update-evidence|probe-codex-write-hook|publish-review-package|publish-task-branch|query-hook-audit|setup-hooks|start-task-worktree|sync-codex-skill|sync-superpowers-skills|sync-task-from-origin|sync-write-rules-skill|sync_recovery|test-hooks|verification-policy|verify-change-scope|verify-pr-update)\.|scripts\/lib\/|scripts\/tests\/)/;
 const OPERATIONS_FILE = /^scripts\/(?:check-schema-charset|check-target-environment-retirement|compress-gallery-images|ensure-graphify-worktree|fix-ik7grv-replace-slot-backfill|reconcile-cost-reservations|run-ik50gb-c-testsite-probe|run-real-canary|tunnel-testsite-db)\./;
 const PRODUCT_IMPACT_FILE = /^(?:(?:web\/|backend\/)?package\.json|web\/package-lock\.json|web\/\.env[^/]*|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|packages\/contracts\/|packages\/persistence\/(?:prisma\/migrations|schema)\/|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
 const EXECUTABLE_FILE = /^(?:scripts\/|.*\.(?:sh|py|mjs|cjs|js))$/;
 const SKILL_SCRIPT_FILE = /^\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/scripts\/.*\.(?:sh|py|mjs|cjs|js)$/;
 const GOVERNANCE_FILE = /^(?:eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/(?:implement|dispatching-parallel-agents|finishing-a-development-branch|subagent-driven-development)\/)/;
+
+// 精确登记已同步的技能资产；未知的同目录脚本仍须单独分类。
+const SKILL_ASSET_FILES = new Set([
+  ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
+  ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
+  ".zcode/skills/wizard/template.sh",
+  "tests/skill-assets.test.mjs",
+]);
 
 function isTestFile(file) {
   return /(?:^|\/)[^/]+\.(?:test|spec)\.(?:ts|tsx|js|mjs|cjs)$/.test(file);
@@ -28,9 +39,10 @@ function hasProductImpact(file, documentationOnlyFiles) {
 }
 
 function sourceArea(file) {
+  if (SKILL_ASSET_FILES.has(file)) return "skill-assets";
   if (NODE_SOURCE.test(file)) return "node";
   if (BACKEND_SOURCE.test(file)) return "backend";
-  if (WEB_SOURCE.test(file) || WEB_TOOLING_FILE.test(file)) return "web";
+  if (WEB_SOURCE.test(file) || WEB_TOOLING_FILE.test(file) || WEB_E2E_FILE.test(file)) return "web";
   if (CONTROL_PLANE_FILE.test(file)) return "control-plane";
   if (OPERATIONS_FILE.test(file)) return "operations";
   if (SKILL_SCRIPT_FILE.test(file)) return "operations";
@@ -221,6 +233,14 @@ function appendAreaCommands(commands, areas, base) {
         "scripts.tests.test_start_task_worktree",
         "scripts.tests.test_sync_task_from_origin",
       ],
+    );
+  }
+  if (areas.includes("skill-assets")) {
+    commands.push(
+      ["bash", ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh"],
+      ["bash", "-n", ".zcode/skills/wizard/template.sh"],
+      ["node", "--check", ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs"],
+      ["node", "--test", "tests/skill-assets.test.mjs"],
     );
   }
   if (areas.includes("operations")) {

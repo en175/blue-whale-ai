@@ -1,15 +1,108 @@
 /* ============================================
- * MediaNode - 画布图片/视频节点
+ * MediaNode - 画布图片/视频/音频节点
+ * 统一外部标题 + 独立圆角内容主体；内容区尺寸由 mediaContentBox 显式给定
  * ============================================ */
 
 .wrapper {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  /* 保留原标题占位（11px × 1.5 行高 + 6px 间距），缩放不推移内容和连接点。 */
+  padding-top: 22.5px;
+}
+
+/* 外部常驻标题行（宽度随内容主体） */
+.titleRow {
+  position: absolute;
+  bottom: calc(100% - 22.5px);
+  height: calc(var(--node-title-line) + var(--node-title-gap));
+  line-height: var(--node-title-line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--node-title-group-gap);
+  width: 100%;
+  padding: 0 min(2px, 2%) var(--node-title-gap);
+  /* 极窄媒体可以截断整行，但不能让图标或固定间距越出内容边界。 */
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.titleLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--node-title-gap);
+  flex: 1;
+  min-width: 0;
+}
+
+.titleIcon {
+  width: var(--node-title-icon);
+  height: var(--node-title-icon);
+  flex-shrink: 0;
+}
+
+.titleName {
+  font-size: var(--node-title-name);
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.titleMeta {
+  font-size: var(--node-title-meta);
+  color: #999;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+/* 独立圆角内容主体：弱化边框，尺寸由 mediaContentBox 显式给定
+ * 不用 overflow:hidden（会裁掉探出边缘的连接点并吃掉其命中），圆角改由内容元素自身承担 */
+.contentCard {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background-color: #111;
+  transition: border-color 0.2s ease;
+}
+
+.contentCard .mediaImage,
+.contentCard .mediaVideo,
+.contentCard .audioBox,
+.contentCard .genBox,
+.contentCard .missingBox {
+  border-radius: 11px;
+}
+
+.wrapper:hover .contentCard {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* 连接点：平时隐藏，悬停/选中/连接中可见（锚定内容区左右中点，Handle 在 .contentCard 内） */
+.handle {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.wrapper:hover .handle,
+.wrapper.selected .handle,
+.handle:global(.connectingfrom),
+.handle:global(.connectingto),
+.handle:global(.valid) {
+  opacity: 1;
 }
 
 /* 选中态悬浮工具条（节点上方居中） */
 .toolbar {
   position: absolute;
-  bottom: calc(100% + 10px);
+  bottom: calc(100% - 22.5px + var(--node-title-line) + var(--node-title-gap) + 10px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -56,91 +149,24 @@
   background-color: #3a3a3a;
 }
 
-.card {
-  background-color: #1a1a1a;
-  border: 2px solid rgba(255, 255, 255, 0.15);
-  border-radius: 12px;
-  overflow: hidden;
-  transition: border-color 0.2s ease;
-}
-
-.wrapper:hover .card {
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-/* 标签行 */
-.cardHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid #2a2a2a;
-}
-
-.labelGroup {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.label {
-  font-size: 11px;
-  color: #888;
-  user-select: none;
-}
-
-.fileName {
-  font-size: 11px;
-  color: #666;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.headerRight {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.mediaMeta {
-  font-size: 10px;
-  color: #999;
-  white-space: nowrap;
-}
-
-/* 媒体容器 */
-.mediaContainer {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-}
-
 .mediaImage {
   display: block;
-  max-width: 280px;
-  max-height: 360px;
-  width: auto;
-  height: auto;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
 .mediaVideo {
   display: block;
-  max-width: 280px;
-  max-height: 360px;
-  width: auto;
-  height: auto;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   background-color: #000;
 }
 
 .audioBox {
-  width: 280px;
-  min-height: 120px;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -154,15 +180,15 @@
   height: 40px;
 }
 
-/* 生成中/失败占位区 */
+/* 生成中/失败占位区（填满内容主体） */
 .genBox {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  width: 280px;
-  min-height: 200px;
+  width: 100%;
+  height: 100%;
   padding: 20px;
   box-sizing: border-box;
   background-color: #111;
@@ -195,15 +221,15 @@
   word-break: break-word;
 }
 
-/* 素材已被删除占位区（灰色方案） */
+/* 素材已被删除占位区（灰色方案，填满内容主体） */
 .missingBox {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  width: 280px;
-  min-height: 200px;
+  width: 100%;
+  height: 100%;
   padding: 20px;
   box-sizing: border-box;
   background-color: #161616;

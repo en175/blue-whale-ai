@@ -29,6 +29,7 @@ import ProductNode from '../ProductNode';
 import AssetCardNode from '../AssetCardNode';
 import CustomEdge from '../CustomEdge';
 import { canvasDeleteKeyAction, deleteSelectedCanvasNodes } from './keyboardDelete';
+import { useCanvasPan } from './useCanvasPan';
 import styles from './index.module.css';
 
 const initialNodes: Node[] = [];
@@ -66,7 +67,7 @@ interface FlowCanvasProps {
 }
 
 function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
-  const isDrag = toolMode === 'drag';
+  const { isPanning: isDrag, spaceHeld, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -174,7 +175,19 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       setNodes((prev) => {
         let result = removed.length > 0 ? prev.filter((n) => !removed.includes(n.id)) : prev;
         if (updated.length > 0) {
-          result = result.map((node) => updated.find((u) => u.id === node.id) ?? node);
+          result = result.map((node) => {
+            const update = updated.find((u) => u.id === node.id);
+            if (!update) return node;
+            // 父层只在拖动结束时保存坐标；媒体加载不能覆盖画布当前的交互状态。
+            return {
+              ...node,
+              ...update,
+              position: node.dragging ? node.position : update.position,
+              selected: node.selected,
+              dragging: node.dragging,
+              measured: node.measured,
+            };
+          });
         }
         if (added.length > 0) result = [...result, ...added];
         return result;
@@ -294,7 +307,12 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   }, [setNodes, setEdges]);
 
   return (
-    <div className={`${styles.canvasContainer} ${isDrag ? styles.dragMode : ''}`}>
+    <div
+      className={`${styles.canvasContainer} ${isDrag ? styles.dragMode : ''}`}
+      onMouseDownCapture={onMouseDownCapture}
+      onClickCapture={onClickCapture}
+      onDoubleClickCapture={onClickCapture}
+    >
       <ReactFlow
         nodes={nodes}
         edges={showEdges ? edges : []}
@@ -310,6 +328,9 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         panOnDrag={isDrag}
+        panOnScroll={spaceHeld}
+        panActivationKeyCode={null}
+        zoomOnDoubleClick={!isDrag}
         nodesDraggable={!isDrag}
         elementsSelectable={!isDrag}
         nodesConnectable={!isDrag}

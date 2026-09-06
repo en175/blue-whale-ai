@@ -6,32 +6,31 @@
   position: relative;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  /* 保留原标题占位（11px × 1.5 行高 + 6px 间距），缩放不推移正文和连接点。 */
+  padding-top: 22.5px;
 }
 
-/* ---- 悬停/选中顶部操作条（与商品节点一致） ---- */
-.topBar {
+/* ---- 节点操作条：悬停/选中可见，与格式工具栏同处标题上方一层 ---- */
+.nodeBar {
+  position: absolute;
+  bottom: calc(100% - 22.5px + var(--node-title-line) + var(--node-title-gap) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--spacing-md);
-  margin-bottom: 8px;
+  white-space: nowrap;
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--transition-fast);
+  z-index: 10;
 }
 
-.wrapper:hover .topBar,
-.topBarVisible {
+.wrapper:hover .nodeBar,
+.nodeBarVisible {
   opacity: 1;
   pointer-events: auto;
-}
-
-.topLabel {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
 }
 
 .addToChatBtn {
@@ -57,7 +56,7 @@
  * ============================================ */
 .toolbar {
   position: absolute;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% - 22.5px + var(--node-title-line) + var(--node-title-gap) + 10px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -73,17 +72,21 @@
 }
 
 .toolBtn {
-  width: 28px;
+  min-width: 28px;
   height: 28px;
+  padding: 0 4px;
   border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   color: #aaa;
   background: transparent;
   border: none;
   cursor: pointer;
   transition: all 0.12s ease;
+  white-space: nowrap;
+  font-size: 12px;
 }
 
 .toolBtn:hover {
@@ -113,7 +116,7 @@
 
 .colorPicker {
   position: absolute;
-  top: calc(100% + 6px);
+  bottom: calc(100% + 6px);
   left: 50%;
   transform: translateX(-50%);
   background-color: #2a2a2a;
@@ -158,42 +161,76 @@
 }
 
 /* ============================================
- * 内容卡片
+ * 外置标题行 + 固定正文容器
  * ============================================ */
-.card {
-  min-width: 360px;
-  min-height: 180px;
-  background-color: #1a1a1a;
-  border: 2px solid rgba(255, 255, 255, 0.15);
-  border-radius: 12px;
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  transition: border-color 0.2s ease;
-}
-
-.wrapper.focused .card {
-  border-color: rgba(255, 255, 255, 0.35);
-}
-
-/* 卡片头部 */
-.cardHeader {
+.titleRow {
+  position: absolute;
+  bottom: calc(100% - 22.5px);
+  height: calc(var(--node-title-line) + var(--node-title-gap));
+  line-height: var(--node-title-line);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--node-title-group-gap);
+  width: 100%;
+  padding: 0 min(2px, 2%) var(--node-title-gap);
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
-.labelGroup {
+.titleLeft {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--node-title-gap);
+  flex: 1;
+  min-width: 0;
 }
 
-.label {
-  font-size: 12px;
+.titleIcon {
+  width: var(--node-title-icon);
+  height: var(--node-title-icon);
+  flex-shrink: 0;
+}
+
+.titleName {
+  font-size: var(--node-title-name);
   color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   user-select: none;
+}
+
+/* 正文容器：100% 缩放下固定 360×270（4:3），该尺寸含内边距与边框，标题与工具栏另算。
+ * 不用 overflow:hidden（会裁掉探出边缘的连接点并吃掉其命中），滚动交给内部编辑区 */
+.contentCard {
+  position: relative;
+  box-sizing: border-box;
+  width: 360px;
+  height: 270px;
+  padding: 14px 18px;
+  background-color: #1a1a1a;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  transition: border-color 0.2s ease;
+}
+
+.wrapper.focused .contentCard {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* 连接点：平时隐藏，悬停/选中/连接中可见（Handle 在 .contentCard 内，锚定其左右中点） */
+.handle {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.wrapper:hover .handle,
+.wrapper.selected .handle,
+.handle:global(.connectingfrom),
+.handle:global(.connectingto),
+.handle:global(.valid) {
+  opacity: 1;
 }
 
 /* ============================================
@@ -247,12 +284,10 @@
 }
 
 /* ============================================
- * 富文本编辑区
+ * 富文本编辑区（填满固定正文容器，超出部分内部上下滚动）
  * ============================================ */
 .editor {
-  flex: 1;
-  min-height: 120px;
-  max-height: 400px;
+  height: 100%;
   overflow-y: auto;
   color: #e8e8e8;
   font-size: 14px;

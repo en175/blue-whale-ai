@@ -1,15 +1,20 @@
 /* ============================================
- * TextNode 文本节点：富文本编辑与格式工具栏
+ * TextNode 文本节点：外置常驻标题 + 固定 360×270 正文容器（内部滚动）
+ * 富文本编辑与格式工具栏沿用既有实现
  * ============================================ */
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Palette } from 'lucide-react';
 import { sanitizeHtml } from '@/utils/sanitize';
+import { nodeTitleSizing } from '../nodeTitleSizing';
 import styles from './index.module.css';
 
 /** 文字节点最大字数（按纯文本计，含粘贴） */
 const MAX_TEXT_LENGTH = 2000;
+
+/** 连接点统一样式（锚定正文容器左右中点） */
+const HANDLE_STYLE = { background: '#666', width: 10, height: 10, border: '2px solid #444' } as const;
 
 interface TextNodeData {
   html?: string;
@@ -35,6 +40,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
   const initializedRef = useRef(false);
+
+  const zoom = useStore((state) => state.transform[2]);
 
   /** 预设颜色 */
   const COLORS = ['#ffffff', '#e8e8e8', '#ff4d4f', '#ff7a45', '#ffa940', '#ffec3d', '#73d13d', '#36cfc9', '#40a9ff', '#597ef7', '#9254de', '#ff85c0'];
@@ -264,14 +271,12 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
 
   return (
     <div
-      className={`${styles.wrapper} ${isFocused && isSelect ? `${styles.focused} nodrag` : ''}`}
+      className={`${styles.wrapper} ${selected ? styles.selected : ''} ${isFocused && isSelect ? `${styles.focused} nodrag` : ''}`}
       onContextMenu={handleContextMenu}
+      style={nodeTitleSizing(zoom)}
     >
-      {!data.isFirst && (
-        <Handle type="target" position={Position.Left} style={{ background: '#666', width: 10, height: 10, border: '2px solid #444' }} />
-      )}
-
-      {isFocused && (
+      {/* 同一层操作位置：编辑时是格式工具栏，其余是节点操作条，两者不叠成多行 */}
+      {isFocused ? (
         <div
           className={`${styles.toolbar} nodrag nopan`}
           onMouseDown={(e) => e.preventDefault()}
@@ -335,28 +340,36 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           <button className={styles.toolBtn} onClick={() => execCmd('insertHorizontalRule')} title="分割线">
             <Minus size={14} strokeWidth={2} />
           </button>
+
+          {/* 编辑时节点操作并入同一层操作位置，保持「添加到对话」可达且不叠成多行 */}
+          <div className={styles.divider} />
+          <button className={styles.toolBtn} onClick={() => data.onAddToChat?.(id)} title="添加到对话">
+            <AtSign size={14} strokeWidth={2} />
+            <span>添加到对话</span>
+          </button>
+        </div>
+      ) : (
+        <div className={`${styles.nodeBar} ${selected ? styles.nodeBarVisible : ''} nodrag nopan`}>
+          <button className={styles.addToChatBtn} onClick={() => data.onAddToChat?.(id)}>
+            <AtSign size={14} strokeWidth={2} />
+            <span>添加到对话</span>
+          </button>
         </div>
       )}
 
-      {/* 悬停/选中时顶部操作条：添加到对话（与商品节点一致） */}
-      <div className={`${styles.topBar} ${selected ? styles.topBarVisible : ''}`}>
-        <span className={styles.topLabel}>
-          <FileText size={14} strokeWidth={2} />
-          <span>文本</span>
-        </span>
-        <button className={`${styles.addToChatBtn} nodrag`} onClick={() => data.onAddToChat?.(id)}>
-          <AtSign size={14} strokeWidth={2} />
-          <span>添加到对话</span>
-        </button>
+      {/* 常驻标题行：左侧类型图标与现有名称，右侧留空 */}
+      <div className={styles.titleRow} data-testid="text-title">
+        <div className={styles.titleLeft}>
+          <FileText className={styles.titleIcon} strokeWidth={2} color="#888" />
+          <span className={styles.titleName}>文本节点</span>
+        </div>
       </div>
 
-      <div className={styles.card}>
-        <div className={styles.cardHeader}>
-          <div className={styles.labelGroup}>
-            <FileText size={13} strokeWidth={2} color="#888" />
-            <span className={styles.label}>文本节点</span>
-          </div>
-        </div>
+      {/* 固定正文容器：360×270（含内边距），超出的正文在内部上下滚动 */}
+      <div className={`${styles.contentCard} nowheel`} data-testid="text-content">
+        {!data.isFirst && (
+          <Handle type="target" position={Position.Left} className={styles.handle} style={HANDLE_STYLE} />
+        )}
 
         <div
           ref={editorRef}
@@ -392,9 +405,9 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           onPaste={handlePaste}
           data-placeholder="输入内容..."
         />
-      </div>
 
-      <Handle type="source" position={Position.Right} style={{ background: '#666', width: 10, height: 10, border: '2px solid #444' }} />
+        <Handle type="source" position={Position.Right} className={styles.handle} style={HANDLE_STYLE} />
+      </div>
 
       {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}
       {contextMenu &&
