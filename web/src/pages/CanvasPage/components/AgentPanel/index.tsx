@@ -49,7 +49,13 @@ import {
 } from '../ChipTextEditor/composed';
 import AssetChip from '../AssetChip';
 import { shouldCancelOnKey } from './cancelShortcut';
-import { dockedPanelLayout, freePanelLayout, type PanelMetrics } from './layout';
+import { freePanelLayout, type PanelMetrics } from './layout';
+import {
+  DEFAULT_PANEL_WIDTH,
+  clampPanelWidth,
+  persistPanelWidth,
+  readPersistedPanelWidth,
+} from './drawerWidth';
 import { itemsFromBlocks, itemsFromLive, type TimelineItem, type Turn } from '../../hooks/sessionTimeline';
 import { ThinkingBlock, ToolCallRow, TurnFooter } from './TurnTimeline';
 
@@ -615,6 +621,9 @@ const SHOW_SESSION_CREDIT_PILL: boolean = false;
 
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
+/** 抽屉滑入滑出动画时长：与 index.module.css 的 drawerSlideIn / transform transition 等长，卸载要等动画走完 */
+const DRAWER_SLIDE_MS = 240;
+
 /** 一条待发素材的本地状态（IKAL46）。
  *
  * `uploading` 期间不可发送——此刻还没有 `asset_id`，发出去的引用不成立。`failed` 保留在列表
@@ -783,6 +792,16 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const [panelHeight, setPanelHeight] = useState<number | undefined>(undefined);
   const panelRef = useRef<HTMLDivElement>(null);
   const dragState = useRef({ dragging: false, startX: 0, startY: 0, origX: 0, origY: 0 });
+
+  /* ---- 停靠抽屉（IKDLD4）：宽度可调 + 关闭滑出 ---- */
+  /** 抽屉宽度：初始读持久化值（按当前视口钳制），拖左缘实时改，松手才写回 */
+  const [panelWidth, setPanelWidth] = useState(() => readPersistedPanelWidth(window.innerWidth));
+  /** 左缘拖拽中：整面板锁 ew-resize 光标并禁文本选中 */
+  const [resizing, setResizing] = useState(false);
+  const resizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  /** 关闭中：抽屉先滑出（240ms 动画）再回调 onClose 卸载 */
+  const [closing, setClosing] = useState(false);
+  const closeTimerRef = useRef<number | undefined>(undefined);
 
   /**
    * 量一次面板与它的父容器，初始化 / 缩窗 / 拖拽三处共用同一组输入。
@@ -954,57 +973,42 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     el.scrollTop = el.scrollHeight;
   }, [turns, streamingText, runningRunId]);
 
-  /** 初始化位置：屏幕右侧；首次挂载也走统一安全边界，窄视口不会横向溢出。 */
+  /** 挂载即完成初始化：停靠抽屉全高贴右由纯 CSS 定位（IKDLD4），JS 坐标只有浮动模式需要。 */
   useEffect(() => {
     if (initialized) return;
-    const metrics = measurePanel();
-    if (metrics) {
-      const layout = dockedPanelLayout(metrics);
-      setPosition({ x: layout.x, y: layout.y });
-      setPanelHeight(layout.height);
-    }
     setInitialized(true);
-  }, [initialized, measurePanel]);
+  }, [initialized]);
 
-  /** 窗口缩放自适应：固定/浮动模式共用同一坐标与高度边界。 */
+  /** 窗口缩放自适应：浮动模式把位置收回可视区；停靠抽屉对当前宽度重新钳制。 */
   useEffect(() => {
     const handleResize = () => {
+      if (!floating) {
+        setPanelWidth((w) => clampPanelWidth(w, window.innerWidth));
+        return;
+      }
       const metrics = measurePanel();
       if (!metrics) return;
       // 浮动模式沿用上次位置，只把它收回可视区
-      if (floating) {
-        setPosition((prev) => {
-          const layout = freePanelLayout(metrics, prev.x, prev.y);
-          setPanelHeight(layout.height);
-          return { x: layout.x, y: layout.y };
-        });
-        return;
-      }
-      // 固定模式：贴右上角、撑满可用高度，避免缩窗后被推出可视区（IKAGZC）
-      const layout = dockedPanelLayout(metrics);
-      setPosition({ x: layout.x, y: layout.y });
-      setPanelHeight(layout.height);
+      setPosition((prev) => {
+        const layout = freePanelLayout(metrics, prev.x, prev.y);
+        setPanelHeight(layout.height);
+        return { x: layout.x, y: layout.y };
+      });
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, [floating, measurePanel]);
 
-  /** 切换到浮动模式时居中；切回固定模式时回到画布右侧初始位置 */
+  /** 切换到浮动模式时居中；切回停靠抽屉不需要 JS 坐标（纯 CSS 全高贴右） */
   useEffect(() => {
+    if (!floating) return;
     const metrics = measurePanel();
     if (!metrics) return;
-    if (floating) {
-      // 浮动模式：缩宽、居中
-      const centerX = (metrics.pageWidth - metrics.panelWidth) / 2;
-      const centerY = (metrics.pageHeight - metrics.panelHeight) / 2;
-      const layout = freePanelLayout(metrics, centerX, centerY);
-      setPosition({ x: layout.x, y: layout.y });
-    } else {
-      // 固定模式：贴右上角、撑满可用高度
-      const layout = dockedPanelLayout(metrics);
-      setPosition({ x: layout.x, y: layout.y });
-      setPanelHeight(layout.height);
-    }
+    // 浮动模式：缩宽、居中
+    const centerX = (metrics.pageWidth - metrics.panelWidth) / 2;
+    const centerY = (metrics.pageHeight - metrics.panelHeight) / 2;
+    const layout = freePanelLayout(metrics, centerX, centerY);
+    setPosition({ x: layout.x, y: layout.y });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floating]);
 
@@ -1128,6 +1132,47 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       window.removeEventListener('mouseup', handleDragEnd);
     };
   }, [handleDragMove, handleDragEnd]);
+
+  /* ---- 停靠抽屉左缘拖拽调宽（IKDLD4）：Pointer Events + pointer capture，跟手无过渡动画 ---- */
+  const handleResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    // jsdom 没有 pointer capture 实现；浏览器上捕获后指针移出手柄也不丢事件
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    resizeDragRef.current = { startX: e.clientX, startWidth: panelWidth };
+    setResizing(true);
+  };
+  /** 拖拽轨迹 → 钳制后的目标宽度：抽屉固定在右缘，指针左移（clientX 变小）= 加宽 */
+  const dragWidth = (drag: { startX: number; startWidth: number }, clientX: number) =>
+    clampPanelWidth(drag.startWidth + (drag.startX - clientX), window.innerWidth);
+  const handleResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = resizeDragRef.current;
+    if (!drag) return;
+    setPanelWidth(dragWidth(drag, e.clientX));
+  };
+  const handleResizeEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = resizeDragRef.current;
+    if (!drag) return;
+    resizeDragRef.current = null;
+    setResizing(false);
+    const finalWidth = dragWidth(drag, e.clientX);
+    setPanelWidth(finalWidth);
+    persistPanelWidth(finalWidth);
+  };
+  /** 双击手柄复位默认宽度（经视口钳制，极窄视口复位的也是可用宽度） */
+  const handleResizeReset = () => {
+    const width = clampPanelWidth(DEFAULT_PANEL_WIDTH, window.innerWidth);
+    setPanelWidth(width);
+    persistPanelWidth(width);
+  };
+
+  /** 关闭：先让抽屉滑出（动画 240ms），走完再回调父组件卸载 */
+  const handleClose = useCallback(() => {
+    if (closing) return;
+    setClosing(true);
+    closeTimerRef.current = window.setTimeout(() => onClose(), DRAWER_SLIDE_MS);
+  }, [closing, onClose]);
+
+  useEffect(() => () => window.clearTimeout(closeTimerRef.current), []);
 
   /** 点击快捷问题 */
   const handleQuickQuestion = (prompt: string) => {
@@ -1326,10 +1371,31 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   return (
     <div
       ref={panelRef}
-      className={`${styles.panel} ${floating ? styles.panelFloating : ''}`}
-      style={initialized ? { left: position.x, top: position.y, height: panelHeight, transform: 'none' } : undefined}
+      className={`${styles.panel} ${
+        floating
+          ? styles.panelFloating
+          : `${styles.panelDrawer} ${closing ? styles.panelDrawerClosing : ''}`
+      } ${!floating && resizing ? styles.panelResizing : ''}`}
+      style={
+        floating
+          ? initialized
+            ? { left: position.x, top: position.y, height: panelHeight, transform: 'none' }
+            : undefined
+          : { width: panelWidth }
+      }
       onMouseDown={handleDragStart}
     >
+      {/* 停靠抽屉左缘调宽手柄：6px 隐形热区，悬停亮线；浮动模式没有（IKDLD4） */}
+      {!floating && (
+        <div
+          className={styles.resizeHandle}
+          title={`拖拽调宽 · 双击复位 ${DEFAULT_PANEL_WIDTH}px`}
+          onPointerDown={handleResizeStart}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeEnd}
+          onDoubleClick={handleResizeReset}
+        />
+      )}
       {/* 头部标题栏（拖动区域） */}
       <div className={`${styles.panelHeader} ${floating ? styles.panelHeaderFloating : ''}`}>
         <div className={styles.headerLeft}>
@@ -1456,7 +1522,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           >
             <PictureInPicture2 size={14} strokeWidth={2} />
           </button>
-          <button className={styles.iconBtn} onClick={onClose} title="关闭">
+          <button className={styles.iconBtn} onClick={handleClose} title="关闭">
             <X size={14} strokeWidth={2} />
           </button>
         </div>

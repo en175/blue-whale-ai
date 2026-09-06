@@ -114,3 +114,11 @@
   background-color: rgba(40, 40, 40, 0.95);
   border-color: var(--color-border-hover);
 }
+
+/* 面板展开时入口淡出隐藏（150ms 走 .agentBtn 的 transition: all var(--transition-fast)），
+   visibility + pointer-events 保证隐藏后不占命中区域 */
+.agentBtnHidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
