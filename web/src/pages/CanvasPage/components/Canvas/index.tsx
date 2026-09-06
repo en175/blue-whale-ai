@@ -62,8 +62,8 @@ interface FlowCanvasProps {
   onPaneClick?: () => void;
   /** 隐藏右下角缩放控件。Agent 面板打开时它正好压在面板的发送按钮上（IKAGZC）。 */
   hideZoomControl?: boolean;
-  /** 注册出生点取数函数（当前视口中心的 flow 坐标），供父级创建节点时落在用户可见区域 */
-  registerSpawnPosition?: (fn: () => { x: number; y: number }) => void;
+  /** 注册屏幕点→flow 坐标转换（无参默认视口中心），供父级创建节点时落在用户可见区域并换算 Dock 避让区 */
+  registerSpawnPosition?: (fn: (screenPt?: { x: number; y: number }) => { x: number; y: number }) => void;
   /** 商品卡 ts 驱动注入结果 */
   productPickResult?: { ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string } } | null;
   /** 资产卡 ts 驱动注入结果 */
@@ -90,10 +90,10 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const { zoom } = useViewport();
   const dotSize = Math.max(0.4, Math.min(4, 1 / zoom));
 
-  /** 向父级注册出生点取数函数：屏幕视觉中心 → flow 坐标 */
+  /** 向父级注册屏幕点→flow 坐标转换（无参取屏幕视觉中心） */
   useEffect(() => {
-    registerSpawnPosition?.(() =>
-      screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }),
+    registerSpawnPosition?.((screenPt) =>
+      screenToFlowPosition(screenPt ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 }),
     );
   }, [registerSpawnPosition, screenToFlowPosition]);
 

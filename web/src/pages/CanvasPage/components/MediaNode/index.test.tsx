@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReactFlowProvider } from '@xyflow/react';
-import MediaNode from './index';
+import MediaNode, { type MediaGenStatus } from './index';
 
 let root: Root;
 let mountNode: HTMLDivElement;
@@ -15,7 +15,7 @@ function labels() {
 interface RenderExtra {
   id?: string;
   selected?: boolean;
-  genStatus?: 'generating' | 'failed' | 'cancelled';
+  genStatus?: MediaGenStatus;
   progress?: number;
   errorText?: string;
   data?: Record<string, unknown>;
@@ -88,6 +88,21 @@ describe('MediaNode selected toolbar', () => {
   it('keeps @ and generate-video on a video node', async () => {
     await renderNode('video');
     expect(labels()).toEqual(['重新编辑', '生成视频', '提取音频', '详情', '下载', '添加到 Agent 聊天']);
+  });
+});
+
+describe('MediaNode draft overlay (IKDMQQ)', () => {
+  it('待生成草稿：渲染待生成占位而非素材已被删除，无取消/重试按钮', async () => {
+    await renderNode('image', { genStatus: 'draft', selected: false, data: { src: '', draft: true } });
+    expect(mountNode.textContent).toContain('待生成');
+    expect(mountNode.textContent).not.toContain('素材已被删除');
+    expect(mountNode.textContent).not.toContain('取消生成');
+    expect(mountNode.textContent).not.toContain('重试');
+  });
+
+  it('待生成草稿：选中态不显示媒体工具条（无有效素材可操作）', async () => {
+    await renderNode('image', { genStatus: 'draft', selected: true, data: { src: '', draft: true } });
+    expect(labels()).toEqual([]);
   });
 });
 

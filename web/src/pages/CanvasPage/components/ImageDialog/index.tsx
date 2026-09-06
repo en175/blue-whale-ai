@@ -18,6 +18,7 @@ import {
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
 import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
+import type { MediaGenStatus } from '../MediaNode';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import styles from './index.module.css';
 
@@ -75,6 +76,11 @@ interface ImageDialogProps {
   onOpenCharacterLibrary?: () => void;
   /** Toast 提示（上传超限等场景，由父级注入） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
+  /** 草稿绑定（IKDMQQ）：面板编辑实时写回草稿节点；status 为 generating 时参数只读 */
+  draftBinding?: {
+    status?: MediaGenStatus;
+    onParamsChange: (patch: { prompt?: string; modelId?: string; size?: string; ratio?: string }) => void;
+  };
 }
 
 /** 首页带入的初始生成参数（各字段经模型能力校验后应用，不在能力内的项回退模型默认值） */
@@ -148,7 +154,7 @@ function AttachmentItem({ attachment, move }: {
   );
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onReorderAttachments, onPickFromCanvas, pickMode, externalPick, onToast }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onReorderAttachments, onPickFromCanvas, pickMode, externalPick, onToast, draftBinding }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
@@ -215,9 +221,16 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   /** 附件正文有效（去空白非空）时允许空提示词提交（IKDLQF 契约：附件可单独驱动生成）；
    *  全部有效文本为空时沿用「提示词必填」 */
   const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
-  const canSend = !uploading && (inputValue.trim().length > 0 || hasAttachmentText);
+  /** 生成中只读（IKDMQQ）：任务执行期间目标参数冻结，保留查看与画布上的取消入口 */
+  const readOnly = draftBinding?.status === 'generating';
+  const canSend = !uploading && !readOnly && (inputValue.trim().length > 0 || hasAttachmentText);
 
-  /** 选中模型后应用其默认清晰度/宽高比 */
+  /** 草稿绑定参数同步（IKDMQQ）：面板内的模型/分辨率/比例/提示词变更实时写回草稿节点 */
+  const syncDraftParams = (patch: { prompt?: string; modelId?: string; size?: string; ratio?: string }) => {
+    draftBinding?.onParamsChange(patch);
+  };
+
+  /** 选中模型后应用其默认清晰度/宽高比，返回实际应用值（供草稿参数同步） */
   const applyModelDefaults = (m: GenerationModel) => {
     setSelectedModel(m.model_id);
     const nextSize =
@@ -225,7 +238,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         ? m.default_size
         : (m.supported_sizes[0]?.id ?? '');
     if (m.supported_sizes.length) setSelectedResolution(nextSize);
-    setSelectedRatio(pickRatioForSize(m, nextSize, m.default_aspect_ratio));
+    const nextRatio = pickRatioForSize(m, nextSize, m.default_aspect_ratio);
+    setSelectedRatio(nextRatio);
+    return { modelId: m.model_id, size: nextSize, ratio: nextRatio };
   };
 
   // 加载图片模型能力列表：优先选中首页带入的模型，参数逐项按模型能力校验后应用
@@ -237,7 +252,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         const target =
           (initialParams?.modelId && list.find((m) => m.model_id === initialParams.modelId)) ||
           list[0];
-        applyModelDefaults(target);
+        const applied = applyModelDefaults(target);
+        let finalSize = applied.size;
+        let finalRatio = applied.ratio;
         // 首页带入参数覆盖默认值（逐项经模型能力校验，不合法项保持该模型默认值）
         if (initialParams) {
           const nextSize =
@@ -246,12 +263,18 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
               : target.default_size && target.supported_sizes.some((s) => s.id === target.default_size)
                 ? target.default_size
                 : target.supported_sizes[0]?.id;
-          if (nextSize) setSelectedResolution(nextSize);
+          if (nextSize) {
+            setSelectedResolution(nextSize);
+            finalSize = nextSize;
+          }
           const allowed = ratiosForSelectedSize(target, nextSize ?? '');
           if (initialParams.ratio && allowed.includes(initialParams.ratio)) {
             setSelectedRatio(initialParams.ratio);
+            finalRatio = initialParams.ratio;
           }
         }
+        // 草稿绑定：把实际生效的完整参数写回草稿节点（含首次默认落值）
+        syncDraftParams({ modelId: applied.modelId, size: finalSize, ratio: finalRatio });
       })
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -339,7 +362,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
     setUploading(true);
     try {
       await onSend(inputValue, selectedModel, selectedResolution, selectedRatio, files);
-      setInputValue('');
+      // 草稿绑定：保留提示词展示（草稿身份卡承载当次输入）；其余入口维持发送后清空
+      if (!draftBinding) setInputValue('');
     } finally {
       setUploading(false);
     }
@@ -374,6 +398,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                 <button
                   className={styles.selectBtn}
                   onClick={() => { setModelOpen(!modelOpen); setResOpen(false); }}
+                  disabled={readOnly}
                 >
                   <span>{currentModel?.label ?? '选择模型'}</span>
                   <ChevronDown
@@ -390,8 +415,11 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                         className={`${styles.selectOption} ${m.key === selectedModel ? styles.selectOptionActive : ''}`}
                         onClick={() => {
                           const gen = modelList.find((x) => x.model_id === m.key);
-                          if (gen) applyModelDefaults(gen);
-                          else setSelectedModel(m.key);
+                          if (gen) syncDraftParams(applyModelDefaults(gen));
+                          else {
+                            setSelectedModel(m.key);
+                            syncDraftParams({ modelId: m.key });
+                          }
                           setModelOpen(false);
                         }}
                       >
@@ -406,6 +434,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                 <button
                   className={styles.selectBtn}
                   onClick={() => { setResOpen(!resOpen); setModelOpen(false); }}
+                  disabled={readOnly}
                 >
                   <span>{currentResolutionLabel}</span>
                   <ChevronDown
@@ -422,7 +451,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                         className={`${styles.selectOption} ${r.key === selectedResolution ? styles.selectOptionActive : ''}`}
                         onClick={() => {
                           setSelectedResolution(r.key);
-                          if (currentGen) setSelectedRatio(pickRatioForSize(currentGen, r.key, selectedRatio));
+                          const nextRatio = currentGen ? pickRatioForSize(currentGen, r.key, selectedRatio) : selectedRatio;
+                          if (currentGen) setSelectedRatio(nextRatio);
+                          syncDraftParams({ size: r.key, ratio: nextRatio });
                           setResOpen(false);
                         }}
                       >
@@ -443,7 +474,11 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                 <button
                   key={r}
                   className={`${styles.ratioBtn} ${r === selectedRatio ? styles.ratioBtnActive : ''}`}
-                  onClick={() => setSelectedRatio(r)}
+                  onClick={() => {
+                    setSelectedRatio(r);
+                    syncDraftParams({ ratio: r });
+                  }}
+                  disabled={readOnly}
                 >
                   <RatioIcon ratio={r} />
                   <span>{r}</span>
@@ -459,8 +494,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         {/* 顶部：素材预览 + 右上角操作 */}
         <div className={styles.topRow}>
           <div className={styles.previewRow}>
-            {/* 左上角图标：点击弹出「图片上传 / 到节点选择」（图片达上限隐藏） */}
-            {!imagesFull && (
+            {/* 左上角图标：点击弹出「图片上传 / 到节点选择」（图片达上限或生成中只读时隐藏） */}
+            {!imagesFull && !readOnly && (
             <div className={styles.sourceWrap} ref={sourceWrapRef}>
               <button
                 className={`${styles.previewItem} ${styles.previewPlaceholder} ${pickMode ? styles.previewPicking : ''}`}
@@ -499,13 +534,15 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                 ) : (
                   <img src={f.url} alt={f.name} />
                 )}
-                <button
-                  className={styles.previewRemove}
-                  onClick={() => handleRemoveFile(f.id)}
-                  title="移除"
-                >
-                  <X size={10} strokeWidth={2.5} />
-                </button>
+                {!readOnly && (
+                  <button
+                    className={styles.previewRemove}
+                    onClick={() => handleRemoveFile(f.id)}
+                    title="移除"
+                  >
+                    <X size={10} strokeWidth={2.5} />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -533,7 +570,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                 key={a.nodeId}
                 attachment={a}
                 move={
-                  onReorderAttachments && attachments.length > 1
+                  // 生成中只读（IKDMQQ）：排序同属输入编辑，一并禁用
+                  !readOnly && onReorderAttachments && attachments.length > 1
                     ? {
                         isFirst: i === 0,
                         isLast: i === attachments.length - 1,
@@ -546,16 +584,25 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           </div>
         )}
 
+        {/* 生成中只读提示（IKDMQQ）：任务执行期间参数冻结，取消入口在画布卡片上 */}
+        {readOnly && (
+          <div className={styles.readOnlyHint}>生成中，参数与连线只读；可在画布卡片上取消生成</div>
+        )}
+
         {/* 输入框 */}
         <textarea
           className={styles.textarea}
           placeholder={uploading ? '正在上传参考图...' : `描述你希望如何编辑这张图片。图片最多 ${maxImages} 张。`}
           value={inputValue}
-          onChange={(e) => setInputValue(e.target.value.slice(0, MAX_INPUT))}
+          onChange={(e) => {
+            const v = e.target.value.slice(0, MAX_INPUT);
+            setInputValue(v);
+            syncDraftParams({ prompt: v });
+          }}
           onKeyDown={handleKeyDown}
           rows={3}
           maxLength={MAX_INPUT}
-          disabled={uploading}
+          disabled={uploading || readOnly}
         />
 
         {/* 字数统计 */}
@@ -567,7 +614,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         <div className={styles.bottomBar}>
           {/* 左侧 */}
           <div className={styles.barLeft}>
-            {!imagesFull && (
+            {!imagesFull && !readOnly && (
               <button
                 className={styles.addBtn}
                 onClick={handleAddClick}
