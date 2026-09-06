@@ -67,7 +67,7 @@ interface FlowCanvasProps {
 }
 
 function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
-  const { isPanning: isDrag, spaceHeld, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
+  const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -328,7 +328,9 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         panOnDrag={isDrag}
-        panOnScroll={spaceHeld}
+        // 滚轮=平移；缩放交给平台原生修饰键+滚轮与触控板捏合（库默认为滚轮缩放，此处刻意相反，见 ADR-0081）
+        panOnScroll
+        zoomOnScroll={false}
         panActivationKeyCode={null}
         zoomOnDoubleClick={!isDrag}
         nodesDraggable={!isDrag}

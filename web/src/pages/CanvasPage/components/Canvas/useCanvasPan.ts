@@ -56,5 +56,5 @@ export function useCanvasPan(toolMode: 'drag' | 'select') {
     event.stopPropagation();
   };
 
-  return { isPanning, spaceHeld, onMouseDownCapture, onClickCapture };
+  return { isPanning, onMouseDownCapture, onClickCapture };
 }

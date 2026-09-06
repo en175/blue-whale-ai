@@ -163,7 +163,8 @@ describe('Canvas space pan', () => {
     expect(node().classList.contains('draggable')).toBe(false);
     await mouse('mousemove', window, 160, 140);
     await finishGesture();
-    expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 });
+    // React Flow 对启用了滚轮平移的视口结束事件有 150ms 防抖。
+    await vi.waitFor(() => expect(props.onViewportChange).toHaveBeenCalledWith({ x: 60, y: 40, zoom: 1 }));
     expect(node().classList.contains('draggable')).toBe(true);
   });
 
@@ -195,6 +196,42 @@ describe('Canvas space pan', () => {
     await key('keydown');
     await key('keyup');
     expect(node().classList.contains('draggable')).toBe(false);
+  });
+});
+
+describe('Canvas 滚轮平移与修饰键缩放', () => {
+  const transform = () =>
+    container.querySelector<HTMLElement>('.react-flow__viewport')!.style.transform;
+  const scale = () => Number(/scale\(([^)]+)\)/.exec(transform())![1]);
+
+  async function wheel(init: WheelEventInit) {
+    const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, ...init });
+    await act(async () => { pane().dispatchEvent(event); });
+    return event;
+  }
+
+  it('无修饰键滚轮平移视口、不改变缩放且拦截浏览器默认行为', async () => {
+    expect(transform()).toBe('translate(0px,0px) scale(1)');
+    const event = await wheel({ deltaY: 100 });
+    expect(transform()).toBe('translate(0px,-50px) scale(1)');
+    expect(event.defaultPrevented, '画布内滚轮不应触发浏览器整页缩放').toBe(true);
+  });
+
+  it('Ctrl+滚轮缩放视口', async () => {
+    await wheel({ deltaY: 100, ctrlKey: true });
+    await vi.waitFor(() => expect(scale()).toBeLessThan(1));
+  });
+
+  it('按住平台原生缩放键时滚轮缩放视口', async () => {
+    // 与库同源判定：macOS 激活键为 Meta，其他平台为 Control。
+    const zoomKey = navigator.userAgent.includes('Mac') ? 'Meta' : 'Control';
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', {
+        key: zoomKey, code: `${zoomKey}Left`, bubbles: true, cancelable: true,
+      }));
+    });
+    await wheel({ deltaY: 100 });
+    await vi.waitFor(() => expect(scale()).toBeLessThan(1));
   });
 });
 
