@@ -77,6 +77,16 @@ export function createArkImageProvider(
   };
 }
 
+function referenceImageField(
+  sourceImages: ReadonlyArray<{ url?: string }>,
+): string | string[] | undefined {
+  const urls = sourceImages
+    .map((item) => item.url)
+    .filter((url): url is string => typeof url === "string" && url.length > 0);
+  if (urls.length === 0) return undefined;
+  return urls.length === 1 ? urls[0]! : urls;
+}
+
 function createNewApiImageProvider(options: ProviderOptions): ImageProvider {
   const baseUrl = options.env?.NEW_API_BASE_URL ?? process.env.NEW_API_BASE_URL;
   if (!baseUrl || !options.token) {
@@ -108,20 +118,19 @@ function createNewApiImageProvider(options: ProviderOptions): ImageProvider {
       try {
         const sourceImages =
           input.sourceImages ?? (input.sourceImage ? [input.sourceImage] : []);
+        const image = referenceImageField(sourceImages);
         // IK7G9X：用 with-receipt 变体拿 request_id（消费流水精确关联键）。
-        const receipt =
-          sourceImages.length > 0
-            ? await client.editImagesWithReceipt(options.token!, {
-                model: input.model,
-                prompt: input.prompt,
-                images: sourceImages,
-                ...(input.size !== undefined ? { size: input.size } : {}),
-                ...(input.quality ? { quality: input.quality } : {}),
-                n: input.n,
-                ...(input.webSearch !== undefined ? { webSearch: input.webSearch } : {}),
-                ...(input.sequential !== undefined ? { sequential: input.sequential } : {}),
-              })
-            : await client.generateImagesWithReceipt(options.token!, input);
+        // IKDMQE：有无参考图都走 generations；edits 被 highwayapi 拒绝。
+        const receipt = await client.generateImagesWithReceipt(options.token!, {
+          model: input.model,
+          prompt: input.prompt,
+          n: input.n,
+          ...(input.size !== undefined ? { size: input.size } : {}),
+          ...(input.quality ? { quality: input.quality } : {}),
+          ...(input.webSearch !== undefined ? { webSearch: input.webSearch } : {}),
+          ...(input.sequential !== undefined ? { sequential: input.sequential } : {}),
+          ...(image !== undefined ? { image } : {}),
+        });
         return receipt.images.map((image) => ({
           url: image.url,
           width: input.width ?? null,

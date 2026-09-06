@@ -37,6 +37,7 @@ export function createNewApiGenerationOps(
       };
       if (input.size) body.size = input.size;
       if (input.quality) body.quality = input.quality;
+      if (input.image !== undefined) body.image = input.image;
       body.n = input.n;
       if (input.webSearch) body.tools = [{ type: "web_search" }];
       if (input.sequential) {

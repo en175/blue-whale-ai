@@ -507,9 +507,16 @@ describe("processNextJob 图片参考图上限与字段语义（IKA72G）", () =
       "p1",
     );
     const providerArg = generate.mock.calls[0]![0] as {
-      sourceImages?: unknown[];
+      sourceImages?: Array<{ url?: string }>;
     };
     expect(providerArg.sourceImages).toHaveLength(5);
+    expect(providerArg.sourceImages?.map((item) => item.url)).toEqual([
+      "https://asset/101.png",
+      "https://asset/102.png",
+      "https://asset/103.png",
+      "https://asset/104.png",
+      "https://asset/105.png",
+    ]);
     expect(completeJobAndSettle).toHaveBeenCalledWith(
       expect.objectContaining({ jobId: "j-img-refs", assetIds: ["a1"] }),
     );

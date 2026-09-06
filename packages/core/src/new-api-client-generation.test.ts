@@ -29,6 +29,55 @@ describe("new-api client —— 图片与视频生成", () => {
     });
   });
 
+  it("图生图参考图走 generations 的 image 字段", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        requests.push({ url: String(input), init });
+        return jsonResponse({ data: [{ url: "https://cdn.test/i2i.png" }] });
+      },
+    });
+
+    await client.generateImages("sk-test", {
+      model: "nano-banana-2-i2i",
+      prompt: "钓到一条巨大的金枪鱼",
+      size: "1x1",
+      quality: "1k",
+      n: 1,
+      image: "https://asset/5829.png",
+    });
+
+    expect(requests[0]?.url).toBe("http://new-api.test/v1/images/generations");
+    expect(JSON.parse(String(requests[0]?.init.body))).toMatchObject({
+      image: "https://asset/5829.png",
+      size: "1x1",
+      quality: "1k",
+    });
+  });
+
+  it("多张参考图以 image 数组发给 generations", async () => {
+    const requests: RequestInit[] = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (_input, init = {}) => {
+        requests.push(init);
+        return jsonResponse({ data: [{ url: "https://cdn.test/i2i.png" }] });
+      },
+    });
+
+    await client.generateImages("sk-test", {
+      model: "nano-banana-2-i2i",
+      prompt: "combine",
+      n: 1,
+      image: ["https://asset/1.png", "https://asset/2.png"],
+    });
+
+    expect(JSON.parse(String(requests[0]?.body))).toMatchObject({
+      image: ["https://asset/1.png", "https://asset/2.png"],
+    });
+  });
+
   it("banana 请求带上 quality", async () => {
     const requests: RequestInit[] = [];
     const client = createNewApiClient({

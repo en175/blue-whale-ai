@@ -77,6 +77,8 @@ export interface NewApiImageInput {
   n: number;
   webSearch?: boolean;
   sequential?: boolean;
+  /** 图生图参考图：单张字符串，多张数组。走 generations Extra `image`。 */
+  image?: string | readonly string[];
 }
 
 export interface NewApiImage {
