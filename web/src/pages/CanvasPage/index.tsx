@@ -18,7 +18,7 @@ import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import BottomDialog, { type VideoGenOptions, type BottomRefItem, type VideoGenSeedParams } from './components/BottomDialog';
 import type { ChipRef } from './components/ChipTextEditor';
-import ImageDialog, { type UploadedFile, type ImageGenSeedParams } from './components/ImageDialog';
+import ImageDialog, { type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
@@ -28,14 +28,14 @@ import type { MaterialAsset } from '@/api/material';
 import type { AssetCardKind } from './components/AssetCardNode';
 import type { CanvasProject } from './components/ProjectSelector';
 import FlowCanvas from './components/Canvas';
-import type { Node, Viewport } from '@xyflow/react';
+import { addEdge, useEdgesState, type Connection, type Edge, type Node, type Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchQuota, toSessionUser } from '@/api/auth';
 import { fetchProjects, createProject, renameProject, deleteProject,  } from '@/api/projects';
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
-import { applyPromptPreview, saveCanvasDoc, serializeNodes } from '@/api/canvas';
+import { applyPromptPreview, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
@@ -108,7 +108,23 @@ export default function CanvasPage() {
   const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'video' | 'asset' | null>(null);
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
-  const [showEdges, setShowEdges] = useState(false);
+  const [showEdges, setShowEdges] = useState(true);
+  /** 连线（受控持有：水合恢复、自动保存签名、目标节点附件推导共用，IKDLQF） */
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  /** 连线最新值（避免闭包陈旧：提交前落盘与附件推导用） */
+  const edgesRef = useRef<Edge[]>([]);
+  edgesRef.current = edges;
+  /** 建立连线：拒绝自环与重复 (source,target)（与服务端保存校验同口径），新边渲染形态与既有行为一致（custom 流光边） */
+  const handleConnect = useCallback(
+    (params: Connection) => {
+      if (!params.source || !params.target || params.source === params.target) return;
+      setEdges((eds) => {
+        if (eds.some((e) => e.source === params.source && e.target === params.target)) return eds;
+        return addEdge({ ...params, type: 'custom', style: { stroke: '#444' } }, eds);
+      });
+    },
+    [setEdges],
+  );
   const [uploadedNodes] = useState<Node[]>([]);
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'warn'; msg: string } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
@@ -187,8 +203,10 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, location.pathname, location.search, navigate]);
   /** 节点工具条带入图片对话框的初始值（ts 作为 key 强制重挂载以注入初始值）；
-   *  params 是首页 AI图片 带入的生成参数（选中首页所选模型/清晰度/宽高比） */
-  const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[]; params?: ImageGenSeedParams } | null>(null);
+   *  params 是首页 AI图片 带入的生成参数（选中首页所选模型/清晰度/宽高比）；
+   *  targetNodeId/attachments 仅图片媒体节点面板发起时存在（IKDLQF）：提交携带 target_node_id，
+   *  附件在打开当下按连线快照，面板只读展示 */
+  const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[]; params?: ImageGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
   /** 节点工具条带入视频对话框的初始参考；cards 是「引用到 dock」累计的生成卡胶囊，不因再次点击覆盖；
    *  params 是首页 AI视频 带入的生成参数（选中首页所选模型/比例/清晰度/时长/模式） */
   const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; cards?: ChipRef[]; text?: string; params?: VideoGenSeedParams } | null>(null);
@@ -708,6 +726,7 @@ export default function CanvasPage() {
       setMediaNodes([]);
       setProductNodes([]);
       setAssetNodes([]);
+      setEdges([]);
       versionRef.current = null;
       lastSavedRef.current = '';
       setSaveStatus('idle');
@@ -744,10 +763,23 @@ export default function CanvasPage() {
     setMediaNodes(m);
     setProductNodes(p);
     setAssetNodes(a);
+    // 水合恢复连线：持久形状 {id, source, target} 补回 custom 流光渲染属性；
+    // 兜底过滤悬空端点（服务端保存校验已保证引用完整，此处防御旧/坏数据渲染告警）
+    const hydratedIds = new Set([...t, ...m, ...p, ...a].map((n) => n.id));
+    const hydratedEdges: Edge[] = doc.edges
+      .filter((e) => hydratedIds.has(e.source) && hydratedIds.has(e.target))
+      .map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        type: 'custom',
+        style: { stroke: '#444' },
+      }));
+    setEdges(hydratedEdges);
     // 同步乐观锁版本/视口，并记录内容签名避免加载后立即重复保存
     versionRef.current = doc.version;
     setViewport(doc.viewport);
-    lastSavedRef.current = JSON.stringify(doc.viewport) + serializeNodes([...t, ...m, ...p, ...a]);
+    lastSavedRef.current = JSON.stringify(doc.viewport) + serializeNodes([...t, ...m, ...p, ...a]) + serializeEdges(hydratedEdges);
     // 水合恢复：「生成中」媒体节点恢复任务轮询。
     // IK9R8X：jobId 后端返回字符串，兼容 string/number 双形态（历史画布文档已持久化字符串）。
     m
@@ -761,22 +793,43 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, snapshotAssets]);
 
+  /** 连线端点级联删除（IKDLQF）：仅当节点真实离开画布时清理其连线，覆盖键盘删除/工具条删除/回滚等全部删除路径。
+   *  不按「当前存在的节点」反查：挂载首批 effect 的节点列表尚在水合前，会把刚恢复的连线误清。 */
+  const canvasNodeIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const ids = new Set(
+      [...textNodes, ...mediaNodes, ...productNodes, ...assetNodes, ...uploadedNodes].map((n) => n.id),
+    );
+    const prevIds = canvasNodeIdsRef.current;
+    canvasNodeIdsRef.current = ids;
+    if (prevIds.size === 0) return;
+    const removed = new Set<string>();
+    prevIds.forEach((id) => {
+      if (!ids.has(id)) removed.add(id);
+    });
+    if (removed.size === 0) return;
+    setEdges((prev) => {
+      const next = prev.filter((e) => !removed.has(e.source) && !removed.has(e.target));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [textNodes, mediaNodes, productNodes, assetNodes, uploadedNodes, setEdges]);
+
   /** 画布变更后 800ms 防抖自动保存：PUT /api/canvases/:projectId（If-Match 乐观锁） */
   useEffect(() => {
     if (!currentId || !doc || applyingRef.current) return;
     const timer = window.setTimeout(() => {
       if (applyingRef.current || savePromiseRef.current) return;
       const nodes = [...textNodes, ...mediaNodes, ...productNodes, ...assetNodes];
-      const sig = JSON.stringify(viewport) + serializeNodes(nodes);
+      const sig = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edges);
       if (sig === lastSavedRef.current) return;
       if (import.meta.env.DEV) {
-        console.info(`[canvas] 自动保存：${nodes.length} 个节点（version=${versionRef.current}）`);
+        console.info(`[canvas] 自动保存：${nodes.length} 个节点 / ${edges.length} 条连线（version=${versionRef.current}）`);
       }
       lastSavedRef.current = sig;
       setSaveStatus('saving');
       // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
       const pendingSnapshot = new Set(pendingNodeIdsRef.current);
-      savePromiseRef.current = saveCanvasDoc(currentId, { viewport, nodes }, versionRef.current)
+      savePromiseRef.current = saveCanvasDoc(currentId, { viewport, nodes, edges }, versionRef.current)
         .then((saved) => {
           versionRef.current = saved.version;
           pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
@@ -803,7 +856,7 @@ export default function CanvasPage() {
         }).finally(() => { savePromiseRef.current = null; });
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [textNodes, mediaNodes, productNodes, assetNodes, viewport, currentId, doc, refetch, applying, saveEpoch]);
+  }, [textNodes, mediaNodes, productNodes, assetNodes, edges, viewport, currentId, doc, refetch, applying, saveEpoch]);
 
   /** 创建文本节点 */
   const handleAddTextNode = () => {
@@ -1428,7 +1481,8 @@ export default function CanvasPage() {
 
   /** 创建生成任务：立即上画布「生成中」占位节点，创建成功后启动轮询。
    *  videoRefs 仅 video：首尾帧（图片）或普通参考素材（图/视频）assetId/materialId，与 input_asset_ids 互斥。
-   *  素材库引用（Asset- 前缀）走 *_material_id / reference_materials；同一帧位 asset 与 material 互斥 */
+   *  素材库引用（Asset- 前缀）走 *_material_id / reference_materials；同一帧位 asset 与 material 互斥。
+   *  targetNodeId 仅 image（IKDLQF）：从图片媒体节点面板发起时携带，服务端按最新画布推导连线文本附件 */
   const startGenerationJob = (
     type: 'image' | 'video' | 'audio',
     parameters: ImageJobParameters | VideoJobParameters | AudioJobParameters,
@@ -1441,6 +1495,7 @@ export default function CanvasPage() {
       lastFrameMaterialId?: string;
       referenceMaterials?: Array<{ id: string; type: 'image' | 'video' }>;
     },
+    targetNodeId?: string,
   ) => {
     if (!currentId) {
       console.warn('未选中项目，无法创建生成任务');
@@ -1495,6 +1550,8 @@ export default function CanvasPage() {
         reference_materials: videoRefs?.referenceMaterials?.length
           ? videoRefs.referenceMaterials
           : undefined,
+        // 仅从图片媒体节点面板发起时携带（IKDLQF）；其余入口连字段都不上送
+        ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
       })
         .then((created) => {
           patchMediaNode(nodeId, { jobId: created.generation_job_id });
@@ -1508,7 +1565,7 @@ export default function CanvasPage() {
           if (isApiError(e) && e.status === 401) {
             setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
             useAuthPromptStore.getState().addResume(() => {
-              startGenerationJob(type, parameters, inputAssetIds, videoRefs);
+              startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId);
             });
             return;
           }
@@ -1607,6 +1664,19 @@ export default function CanvasPage() {
     return { src, type, name, prompt, assetId };
   };
 
+  /** 目标节点的文本附件（IKDLQF）：连线 target 为该节点、source 为 textNode 且 data.text 为 string；
+   *  顺序即 edges 数组顺序（连入顺序），面板打开当下取快照 */
+  const textAttachmentsOf = (targetNodeId: string): ImageTextAttachment[] =>
+    edgesRef.current
+      .filter((e) => e.target === targetNodeId)
+      .map((e) => textNodesRef.current.find((n) => n.id === e.source))
+      .filter((n): n is Node => n?.type === 'textNode' && typeof n.data?.text === 'string')
+      .map((n) => ({
+        nodeId: n.id,
+        title: typeof n.data.title === 'string' && n.data.title ? (n.data.title as string) : '文本节点',
+        text: n.data.text as string,
+      }));
+
   /** 重新编辑：视频节点 → 视频对话框；图片节点 → 图片对话框 */
   const handleNodeReEdit = (id: string) => {
     const ref = nodeRefOf(id);
@@ -1624,17 +1694,19 @@ export default function CanvasPage() {
       setShowAudioDialog(false);
       setShowMusicDialog(false);
     } else {
-      // 图片节点：打开图片对话框（原有逻辑）
+      // 图片节点：打开图片对话框（原有逻辑）；IKDLQF 起携带目标节点与连线文本附件快照
       setImageSeed({
         ts: Date.now(),
         text: ref.prompt,
         files: [{ id: `node-${id}`, url: ref.src, type: ref.type, name: ref.name, assetId: ref.assetId }],
+        targetNodeId: id,
+        attachments: textAttachmentsOf(id),
       });
       handleOpenImageDialog();
     }
   };
 
-  /** 生成图片：图片对话框 + 图片 */
+  /** 生成图片：图片对话框 + 图片；IKDLQF 起携带目标节点与连线文本附件快照 */
   const handleNodeGenImage = (id: string) => {
     const ref = nodeRefOf(id);
     if (!ref) return;
@@ -1642,6 +1714,8 @@ export default function CanvasPage() {
       ts: Date.now(),
       text: '',
       files: [{ id: `node-${id}`, url: ref.src, type: ref.type, name: ref.name, assetId: ref.assetId }],
+      targetNodeId: id,
+      attachments: textAttachmentsOf(id),
     });
     handleOpenImageDialog();
   };
@@ -1792,6 +1866,22 @@ export default function CanvasPage() {
     return source ? [`${source.revisionId}#${source.shotNo}`] : [];
   })), [textNodes]);
 
+  /** 等待在途保存完成并立即落盘当前画布编辑（IKDLQE 应用预览的保存串行化模式；IKDLQF 目标生图提交复用）。
+   *  返回 false 表示等待期间项目已切换，调用方应中止后续动作。
+   *  调用方须持有 applyingRef 闸口，阻断 800ms 防抖自动保存与本函数并发。 */
+  const flushCanvasSave = async (projectId: string): Promise<boolean> => {
+    await savePromiseRef.current;
+    if (activeProjectRef.current !== projectId) return false;
+    const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
+    const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
+    if (signature === lastSavedRef.current) return true;
+    const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current }, versionRef.current);
+    versionRef.current = saved.version;
+    lastSavedRef.current = signature;
+    pendingNodeIdsRef.current.clear();
+    return true;
+  };
+
   const handleAgentCardApply = async (payload: GenerationCardBlock) => {
     if (applyingRef.current || !currentId || !payload.source) return;
     const projectId = currentId;
@@ -1799,21 +1889,13 @@ export default function CanvasPage() {
     setApplying(true);
     (document.activeElement as HTMLElement | null)?.blur();
     try {
-      await savePromiseRef.current;
-      if (activeProjectRef.current !== projectId) return;
-      const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
-      const signature = JSON.stringify(viewport) + serializeNodes(nodes);
-      if (signature !== lastSavedRef.current) {
-        const saved = await saveCanvasDoc(projectId, { viewport, nodes }, versionRef.current);
-        versionRef.current = saved.version;
-        lastSavedRef.current = signature;
-        pendingNodeIdsRef.current.clear();
-      }
+      if (!(await flushCanvasSave(projectId))) return;
       const result = await applyMutation.mutateAsync({ projectId, source: payload.source, position: spawnPosition() });
       if (activeProjectRef.current !== projectId) return;
       const savedNodes = JSON.parse(result.canvas.nodes ?? '[]') as Node[];
+      const savedEdges = JSON.parse(result.canvas.edges ?? '[]') as Edge[];
       const savedViewport = JSON.parse(result.canvas.viewport ?? 'null') as Viewport | null;
-      acceptDoc({ id: result.canvas.id, version: result.canvas.version, nodes: savedNodes, viewport: savedViewport ?? viewport });
+      acceptDoc({ id: result.canvas.id, version: result.canvas.version, nodes: savedNodes, edges: savedEdges, viewport: savedViewport ?? viewport });
       const target = result.node.position;
       setFocusViewport({ x: window.innerWidth / 3 - target.x, y: window.innerHeight / 2 - target.y - 135, zoom: 1 });
       setSaveStatus('saved');
@@ -2424,7 +2506,9 @@ export default function CanvasPage() {
     return uploaded ? uploaded.asset_id : null;
   };
 
-  /** 图片对话发送：上传参考图 → 创建图片生成任务 */
+  /** 图片对话发送：上传参考图 → 创建图片生成任务。
+   *  从图片媒体节点面板发起时（IKDLQF）：先等待在途保存并落盘当前画布编辑
+   *  （同 IKDLQE 应用预览的保存串行化），保证服务端按连线推导附件时读到最新正文，再携带 target_node_id 提交 */
   const handleImageDialogSend = async (
     text: string,
     modelId: string,
@@ -2432,6 +2516,7 @@ export default function CanvasPage() {
     ratio: string,
     files: UploadedFile[],
   ) => {
+    const targetNodeId = imageSeed?.targetNodeId;
     // 收集参考图片的 assetId
     const inputAssetIds: string[] = [];
     const imageFiles = files.filter((f) => f.type === 'image');
@@ -2454,12 +2539,27 @@ export default function CanvasPage() {
       }
     }
 
+    if (targetNodeId && currentId) {
+      const projectId = currentId;
+      applyingRef.current = true;
+      try {
+        if (!(await flushCanvasSave(projectId))) return; // 等待期间项目已切换，中止提交
+      } catch (e) {
+        // 落盘失败则不提交：否则服务端读到的正文可能缺未防抖落盘的编辑
+        showToast('error', '保存失败，请重试');
+        console.warn('生成前画布落盘失败:', e);
+        return;
+      } finally {
+        applyingRef.current = false;
+      }
+    }
+
     startGenerationJob('image', {
       prompt: text,
       model_id: modelId,
       aspect_ratio: ratio,
       size,
-    }, inputAssetIds.length > 0 ? inputAssetIds : undefined);
+    }, inputAssetIds.length > 0 ? inputAssetIds : undefined, undefined, targetNodeId);
   };
 
   /** 触发首页生成交接：创建生成任务落节点（等于底部对话框按下发送），幂等——触发后即清 pending */
@@ -2585,6 +2685,9 @@ export default function CanvasPage() {
           productNodes={productNodes}
           assetNodes={assetNodes}
           showEdges={showEdges}
+          edges={edges}
+          onEdgesChange={onEdgesChange}
+          onConnect={handleConnect}
           viewport={focusViewport ?? doc?.viewport}
           onViewportChange={setViewport}
           registerSpawnPosition={registerSpawnPosition}
@@ -2706,6 +2809,7 @@ export default function CanvasPage() {
             initialText={imageSeed?.text}
             initialFiles={imageSeed?.files}
             initialParams={imageSeed?.params}
+            attachments={imageSeed?.attachments}
             onClose={() => { setShowImageDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleImageDialogSend}
             onPickFromCanvas={() => { setPickMode('image'); setPickTarget('image'); }}

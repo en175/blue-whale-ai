@@ -6,6 +6,8 @@ import type { AssetUploadStorage } from "@lib/shared/assets/upload.js";
 import sharp from "sharp";
 
 import { AudioProviderError, type AudioProvider } from "@lib/shared/generation-runtime/index.js";
+import { composeImagePrompt } from "@blue-whale/core";
+import { z } from "zod";
 import {
   ERROR_INVALID_INPUT,
   ERROR_MODEL_UNAVAILABLE,
@@ -15,6 +17,7 @@ import {
   ERROR_PROVIDER_FAILED,
   ERROR_UNSUPPORTED_INPUT,
   ERROR_UNSUPPORTED_TYPE,
+  textAttachmentSnapshotSchema,
 } from "@blue-whale/contracts";
 import {
   hasSeedreamSizeTable,
@@ -48,6 +51,11 @@ export type WorkerDeps = {
   quotaToFen?: (quota: number) => bigint;
   /** 实扣取证失败/异常时的告警回调（接入 logger/metrics）。缺省不注入 = 旧行为静默。 */
   warn?: (message: string) => void;
+};
+
+/** IKDLQF：job.input 快照上冻结的文本附件（契约「接纳快照」）；旧任务无此字段，视为无附件。 */
+type GenerationJobInput = Record<string, unknown> & {
+  text_attachments?: unknown;
 };
 
 /** 瞬时失败码：网络不可达 / 结果转存失败等——重试有意义。quota/config/校验类不算瞬时。 */
@@ -190,10 +198,17 @@ async function processClaimedJob(
     return job.id;
   }
 
-  const input = job.input ?? {};
+  const input = (job.input ?? {}) as GenerationJobInput;
   const prompt = typeof input.prompt === "string" ? input.prompt : "";
   const modelId = typeof input.model_id === "string" ? input.model_id : "";
-  if (!prompt || !modelId) {
+  // IKDLQF：图片任务允许空 prompt 仅凭非空白附件正文驱动（契约「接纳快照」）；
+  // 无附件（含 video/audio）时校验与旧行为逐字节一致；快照形状损坏按无附件处理。
+  const parsedAttachments = z.array(textAttachmentSnapshotSchema).safeParse(input.text_attachments ?? []);
+  const textAttachments = parsedAttachments.success ? parsedAttachments.data : [];
+  const hasNonBlankAttachment =
+    job.type === "image" &&
+    textAttachments.some((a) => a.text.trim().length > 0);
+  if ((!prompt && !hasNonBlankAttachment) || !modelId) {
     await failClaimed(ERROR_INVALID_INPUT, "缺少 prompt 或 model_id");
     return job.id;
   }
@@ -429,7 +444,12 @@ async function processClaimedJob(
     const sequential = input.sequential_image_generation === true;
     const providerInput = {
       model: cap.model_id,
-      prompt,
+      // IKDLQF：有文本附件时按契约组合（附件正文按序在前、忽略纯空白、非空 prompt 最后追加）；
+      // 无附件时沿用原 prompt，与旧链路逐字节一致。
+      prompt:
+        textAttachments.length > 0
+          ? composeImagePrompt(textAttachments, prompt)
+          : prompt,
       size: providerSize,
       webSearch: input.web_search === true,
       sequential,

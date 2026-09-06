@@ -73,6 +73,7 @@ model canvas {
   project_id    BigInt   @unique(map: "uk_canvas_project")
   viewport_json Json?
   nodes_json    Json?
+  edges_json    Json?
   gmt_create    DateTime @default(now()) @db.DateTime(0)
   gmt_modified  DateTime @default(now()) @db.DateTime(0)
   version       Int      @default(0)

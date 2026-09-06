@@ -4,7 +4,7 @@
  * 加载失败静默降级为空画布，不阻断画布操作
  * ============================================ */
 import { useCallback, useEffect, useState } from 'react';
-import type { Node, Viewport } from '@xyflow/react';
+import type { Edge, Node, Viewport } from '@xyflow/react';
 import { fetchProjectSnapshot, type SnapshotAsset } from '@/api/projects';
 import { fetchCanvasDoc, type CanvasDoc } from '@/api/canvas';
 
@@ -14,6 +14,7 @@ const EMPTY_DOC: CanvasDoc = {
   version: null,
   viewport: { x: 0, y: 0, zoom: 1.1 },
   nodes: [],
+  edges: [],
 };
 
 /** 安全解析 JSON：兼容后端直接返回已解析对象/数组的情况，失败返回 fallback */
@@ -93,6 +94,7 @@ export function useCanvasDoc(projectId: string) {
           version: canvas.version ?? null,
           viewport: safeParse<Viewport>(canvas.viewport, EMPTY_DOC.viewport),
           nodes,
+          edges: safeParse<Edge[]>(canvas.edges, []),
         });
         return nodes;
       })

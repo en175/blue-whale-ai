@@ -1,15 +1,19 @@
 import { createHash } from "node:crypto";
 
 import {
+  COMPOSED_IMAGE_PROMPT_MAX_LENGTH,
   ERROR_INVALID_INPUT,
   ERROR_MODEL_UNAVAILABLE,
   ERROR_UNSUPPORTED_INPUT,
   ERROR_UNSUPPORTED_TYPE,
   fail,
   ok,
+  type TextAttachmentSnapshot,
 } from "@blue-whale/contracts";
+import { composeImagePrompt } from "@blue-whale/core";
 import {
   DEFAULT_MAX_REFERENCE_IMAGES,
+  type CanvasRepo,
   type CreateJobInput,
   type GenerationCommandRepo,
   type ModelCapabilityRepo,
@@ -45,6 +49,8 @@ export interface CreateGenerationJobBody {
   last_frame_material_id?: unknown;
   /** 元素 { id: "Asset-xxx", type: "image" | "video" }；素材零落表，类型由调用方声明。 */
   reference_materials?: unknown;
+  /** IKDLQF：生图目标画布节点 id（mediaType 为 image 的 mediaNode），仅 type==="image" 允许携带。 */
+  target_node_id?: unknown;
   parameters?: unknown;
   expected_output_count?: unknown;
 }
@@ -116,13 +122,31 @@ function validate(
   const type = body.type;
   if (type !== "image" && type !== "video" && type !== "audio")
     return { code: ERROR_UNSUPPORTED_TYPE, message: "暂不支持该生成类型" };
+  // IKDLQF：target_node_id 仅图片生成允许携带；携带时必须是有效字符串。
+  const hasTargetNode = body.target_node_id !== undefined;
+  if (hasTargetNode) {
+    if (type !== "image")
+      return {
+        code: ERROR_UNSUPPORTED_INPUT,
+        message: "target_node_id 仅支持图片生成",
+      };
+    if (!isStr(body.target_node_id) || body.target_node_id.trim() === "")
+      return { code: ERROR_INVALID_INPUT, message: "target_node_id 无效" };
+  }
   const params = body.parameters as GenerationParameters | undefined;
   const maxPromptLength = type === "audio" ? 3000 : 4000;
+  // IKDLQF：携带 target_node_id 时 prompt 允许为空字符串（缺省按空串处理），长度上限不变；
+  // 全部有效文本（附件 + 提示词）为空的拒绝在 handler 读取画布快照后按 composeImagePrompt 结果判定。
   if (
     !params ||
-    !isStr(params.prompt) ||
-    params.prompt.trim() === "" ||
-    params.prompt.length > maxPromptLength
+    (!isStr(params.prompt) && (params.prompt !== undefined || !hasTargetNode))
+  ) {
+    return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
+  }
+  const promptText = isStr(params.prompt) ? params.prompt : "";
+  if (
+    (!hasTargetNode && promptText.trim() === "") ||
+    promptText.length > maxPromptLength
   ) {
     return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
   }
@@ -278,6 +302,8 @@ export async function handleCreateGenerationJob(
     command: GenerationCommandRepo;
     /** 能力目录白名单（启用 + 未软删，按 capability_type 过滤）。 */
     models: Pick<ModelCapabilityRepo, "listEnabledByType">;
+    /** IKDLQF：携带 target_node_id 时于接纳当下读取最新画布推导有序文本附件。 */
+    canvas: Pick<CanvasRepo, "getByProject">;
     /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额；缺省沿用旧行为（0 + dev）。 */
     costEstimator?: GenerationCostEstimator;
   },
@@ -337,12 +363,75 @@ export async function handleCreateGenerationJob(
     });
   }
 
+  // IKDLQF：携带 target_node_id 时，接纳当下读取最新 Canvas 推导有序文本附件，
+  // 冻结进 input 快照；执行与重试只读快照，不回读来源节点。
+  const targetNodeId =
+    type === "image" &&
+    isStr(body.target_node_id) &&
+    body.target_node_id.trim() !== ""
+      ? body.target_node_id
+      : null;
+  const promptText = isStr(params.prompt) ? params.prompt : "";
+  let textAttachments: TextAttachmentSnapshot[] = [];
+  if (targetNodeId !== null) {
+    const canvas = await deps.canvas.getByProject(projectId);
+    const nodes = JSON.parse(canvas.nodes ?? "[]") as Array<{
+      id?: unknown;
+      type?: unknown;
+      data?: Record<string, unknown>;
+    }>;
+    const target = nodes.find((node) => node.id === targetNodeId);
+    if (
+      !target ||
+      target.type !== "mediaNode" ||
+      target.data?.mediaType !== "image"
+    ) {
+      return fail(400, "目标节点不存在或不是图片媒体节点", {
+        code: ERROR_INVALID_INPUT,
+      });
+    }
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const edgesRaw: unknown = JSON.parse(canvas.edges ?? "[]");
+    for (const edge of Array.isArray(edgesRaw) ? edgesRaw : []) {
+      if (!edge || typeof edge !== "object") continue;
+      const { source, target: edgeTarget } = edge as {
+        source?: unknown;
+        target?: unknown;
+      };
+      if (edgeTarget !== targetNodeId) continue;
+      const sourceNode = byId.get(source);
+      if (
+        !sourceNode ||
+        sourceNode.type !== "textNode" ||
+        typeof sourceNode.data?.text !== "string"
+      )
+        continue;
+      textAttachments.push({
+        node_id: source as string,
+        title:
+          typeof sourceNode.data.title === "string" ? sourceNode.data.title : "",
+        text: sourceNode.data.text,
+      });
+    }
+    const composed = composeImagePrompt(textAttachments, promptText);
+    if (composed.trim() === "") {
+      return fail(400, "prompt 无效", { code: ERROR_INVALID_INPUT });
+    }
+    if (composed.length > COMPOSED_IMAGE_PROMPT_MAX_LENGTH) {
+      return fail(
+        400,
+        `文本附件与提示词组合后超过 ${COMPOSED_IMAGE_PROMPT_MAX_LENGTH} 字上限`,
+        { code: ERROR_INVALID_INPUT },
+      );
+    }
+  }
+
   let input: Record<string, unknown>;
   if (type === "audio") {
     input = { prompt: params.prompt, model_id: resolvedModelId };
   } else {
     input = {
-      prompt: params.prompt,
+      prompt: promptText,
       aspect_ratio: params.aspect_ratio,
       model_id: resolvedModelId,
     };
@@ -354,6 +443,10 @@ export async function handleCreateGenerationJob(
       params.sequential_image_generation === true;
     // IKA72G：image 参考图统一落 input_asset_ids（worker 读取同字段）。
     if (referenceAssetIds.length > 0) input.input_asset_ids = referenceAssetIds;
+    if (targetNodeId !== null) {
+      input.target_node_id = targetNodeId;
+      input.text_attachments = textAttachments;
+    }
   } else if (type === "video") {
     if (isStr(params.resolution)) input.resolution = params.resolution;
     if (params.duration !== undefined) input.duration = params.duration;

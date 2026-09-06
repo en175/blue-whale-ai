@@ -124,6 +124,7 @@ beforeEach(() => {
   props = {
     toolMode: 'select', showMiniMap: false, showEdges: false, hideZoomControl: true,
     extraNodes: [], textNodes: [], mediaNodes: [], productNodes: [], assetNodes: [],
+    edges: [], onEdgesChange: vi.fn(), onConnect: vi.fn(),
     viewport: { x: 0, y: 0, zoom: 1 },
     onDeleteNode: vi.fn(), onNodeDragStop: vi.fn(), onViewportChange: vi.fn(),
     onNodeClick: vi.fn(), onPaneClick: vi.fn(),
