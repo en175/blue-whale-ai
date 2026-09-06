@@ -219,7 +219,7 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
     expect(await historyCount(projectId)).toBe(1);
   });
 
-  it("recovers a stranded card from its saved history without rewriting history", async () => {
+  it("preserves both versions when stranded history conflicts with the current card", async () => {
     const projectId = await createProject("IKDLQK recovery");
     await seedCanvas(projectId, [legacyCardNode("card-1", { shotTitle: "现值标题", visual: "现值画面", prompt: "现值提示词" })]);
     // 模拟上次迁移：历史已落库、画布写入失败
@@ -232,9 +232,10 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
     });
 
     const canvas = await getCanvas(projectId);
-    expect(canvas.legacy_migration?.migrated).toEqual(["card-1"]);
+    expect(canvas.legacy_migration?.migrated).toEqual([]);
+    expect(canvas.legacy_migration?.failed[0].reason).toContain("冲突");
     const node = JSON.parse(canvas.nodes)[0];
-    expect(node).toMatchObject({ type: "textNode", data: { title: "历史标题", text: "历史提示词" } });
+    expect(node).toMatchObject({ type: "assetNode", data: { generationCard: { shotTitle: "现值标题", prompt: "现值提示词" } } });
     expect(await historyCount(projectId)).toBe(1);
   });
 

@@ -50,6 +50,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchMe: vi.fn(async () => null),
   fetchQuota: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
+  createConversationQuote: vi.fn(),
   applyPromptPreview: vi.fn(),
   saveCanvasDoc: vi.fn(async (
     _projectId: string,
@@ -112,6 +113,8 @@ vi.mock('@/api/assets', () => ({
 
 /* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
+  createConversationQuote: apiMocks.createConversationQuote,
+  legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
   applyPromptPreview: apiMocks.applyPromptPreview,
   saveCanvasDoc: apiMocks.saveCanvasDoc,
   serializeNodes: vi.fn((nodes: Node[]) =>
@@ -686,5 +689,46 @@ describe('IKDLQH 多附件排序接线', () => {
       );
     });
     expect(edgePairs(flowProps.current.edges)).toEqual(['t2->m1', 't1->m2', 't3->m2']);
+  });
+});
+
+
+describe('IKDL9U review text input consistency', () => {
+  it('shows a legacy HTML text attachment', async () => {
+    const doc = canvasDocMock.current.doc as any;
+    doc.nodes[0].data = { title: '旧文本', html: '<div>蓝鲸 &amp; 海</div><div>夜景</div>' };
+    await renderPage();
+    await act(async () => flowProps.current.mediaNodes[0].data.onGenImage('m1'));
+    expect(container.textContent).toContain('蓝鲸 & 海');
+    expect(container.textContent).toContain('夜景');
+  });
+  it('pauses autosave for invalid drafts and resumes after correction', async () => {
+    await renderPage();
+    await act(async () => {
+      flowProps.current.textNodes[0].data.onDraftError('t1', '正文超限');
+      flowProps.current.onConnect({ source: 't2', target: 'm1', sourceHandle: null, targetHandle: null });
+    });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1100)); });
+    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
+    await act(async () => flowProps.current.textNodes[0].data.onDraftError('t1', ''));
+    await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1), { timeout: 3000 });
+  });
+  it('blocks quoting an invalid draft instead of quoting the previous saved text', async () => {
+    await renderPage();
+    await act(async () => {
+      flowProps.current.textNodes[0].data.onDraftError('t1', '正文超限');
+      flowProps.current.textNodes[0].data.onAddToChat('t1');
+    });
+    expect(apiMocks.createConversationQuote).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('正文超限');
+  });
+  it('blocks generation while a connected text has an invalid draft', async () => {
+    await renderPage();
+    await act(async () => flowProps.current.mediaNodes[0].data.onGenImage('m1'));
+    await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
+    await act(async () => flowProps.current.textNodes[0].data.onDraftError?.('t1', '正文超限'));
+    await act(async () => sendButton().click());
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('正文超限');
   });
 });

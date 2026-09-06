@@ -10,8 +10,9 @@ import {
   fail,
   ok,
   type TextAttachmentSnapshot,
+  previewSourceSchema,
 } from "@blue-whale/contracts";
-import { composeTextAttachmentPrompt } from "@blue-whale/core";
+import { composeTextAttachmentPrompt, extractTextNodeText } from "@blue-whale/core";
 import {
   DEFAULT_MAX_REFERENCE_IMAGES,
   type CanvasRepo,
@@ -403,15 +404,16 @@ export async function handleCreateGenerationJob(
       const sourceNode = byId.get(source);
       if (
         !sourceNode ||
-        sourceNode.type !== "textNode" ||
-        typeof sourceNode.data?.text !== "string"
+        sourceNode.type !== "textNode"
       )
         continue;
+      const previewSource = previewSourceSchema.safeParse(sourceNode.data?.promptSource);
       textAttachments.push({
         node_id: source as string,
         title:
-          typeof sourceNode.data.title === "string" ? sourceNode.data.title : "",
-        text: sourceNode.data.text,
+          typeof sourceNode.data?.title === "string" ? sourceNode.data.title : "",
+        text: extractTextNodeText(sourceNode.data),
+        ...(previewSource.success ? { prompt_source: previewSource.data } : {}),
       });
     }
     const composed = composeTextAttachmentPrompt(textAttachments, promptText);

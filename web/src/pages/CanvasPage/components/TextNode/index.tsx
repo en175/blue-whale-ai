@@ -20,6 +20,7 @@ const HANDLE_STYLE = { background: '#666', width: 10, height: 10, border: '2px s
 interface TextNodeData {
   title?: string;
   onTitleChange?: (id: string, title: string) => void;
+  onDraftError?: (id: string, error: string) => void;
   onTextChange?: (id: string, text: string) => void;
   html?: string;
   text?: string;
@@ -134,13 +135,16 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const syncContent = useCallback(() => {
     const text = editorRef.current?.innerText ?? '';
     if (text.length > MAX_TEXT_LENGTH) {
-      setContentError(`正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`);
+      const error = `正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`;
+      setContentError(error);
+      data.onDraftError?.(id, error);
       return;
     }
     setContentError('');
+    data.onDraftError?.(id, titleError);
     if (plainText) data.onTextChange?.(id, text);
     else data.onChange?.(id, sanitizeHtml(editorRef.current?.innerHTML || ''));
-  }, [data, id, plainText]);
+  }, [data, id, plainText, titleError]);
 
   /** 执行格式化命令 */
   const execCmd = useCallback((cmd: string, value?: string) => {
@@ -366,9 +370,10 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
             onChange={event => setTitleDraft(event.target.value)}
             onBlur={() => {
               if (titleDraft.length > PROMPT_TEXT_LIMITS.title) {
-                setTitleError(`标题最多 ${PROMPT_TEXT_LIMITS.title} 字，草稿已保留`); return;
+                const error = `标题最多 ${PROMPT_TEXT_LIMITS.title} 字，草稿已保留`;
+                setTitleError(error); data.onDraftError?.(id, error); return;
               }
-              data.onTitleChange?.(id, titleDraft); setTitleEditing(false); setTitleError('');
+              data.onTitleChange?.(id, titleDraft); setTitleEditing(false); setTitleError(''); data.onDraftError?.(id, contentError);
             }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') event.currentTarget.blur(); }} />
             : <span className={styles.titleName} onDoubleClick={event => { event.stopPropagation(); if (data.onTitleChange) { setTitleDraft(data.title ?? '文本节点'); setTitleEditing(true); } }}>
               {data.title || '文本节点'}

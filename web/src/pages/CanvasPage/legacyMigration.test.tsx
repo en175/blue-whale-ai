@@ -63,6 +63,8 @@ vi.mock('@/api/assets', () => ({
 }));
 
 vi.mock('@/api/canvas', () => ({
+  createConversationQuote: vi.fn(),
+  legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => apiMocks.listLegacyCardHistory(projectId), retry: false }),
   applyPromptPreview: vi.fn(),
   saveCanvasDoc: vi.fn(),
   serializeNodes: vi.fn(() => '[]'),
@@ -187,6 +189,7 @@ describe('旧生成卡迁移报告与历史入口（IKDLQK）', () => {
   it('有迁移历史时顶栏出现「迁移历史」入口，点击打开只读历史', async () => {
     seedDoc({ historyItems: [HISTORY_ITEM] });
     await renderPage();
+    await vi.waitFor(() => expect([...container.querySelectorAll('button')].some(b => b.textContent?.includes('迁移历史'))).toBe(true));
     const entry = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('迁移历史'));
     expect(entry).toBeDefined();
     await act(async () => {

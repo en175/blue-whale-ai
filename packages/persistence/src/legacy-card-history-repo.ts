@@ -24,6 +24,7 @@ export interface LegacyCardHistoryDraft {
 }
 
 export interface LegacyCardHistoryRepo {
+  migrate(projectId: string, version: number, nodes: string, rows: LegacyCardHistoryDraft[]): Promise<boolean>;
   /** 本项目全部历史（id 升序）；无记录返回空数组。 */
   listByProject(projectId: string): Promise<LegacyCardHistoryRow[]>;
   /** 迁移先落历史再转画布；(project_id, node_id) 唯一，并发只接受首个。 */
@@ -32,6 +33,23 @@ export interface LegacyCardHistoryRepo {
 
 export function createLegacyCardHistoryRepo(prisma: PrismaClient): LegacyCardHistoryRepo {
   return {
+    async migrate(projectId, version, nodes, rows) {
+      const conflict = new Error("Canvas migration version conflict");
+      try {
+        await prisma.$transaction(async tx => {
+          await createLegacyCardHistoryRepo(tx as unknown as PrismaClient).rememberMany(projectId, rows);
+          const result = await tx.canvas.updateMany({
+            where: { project_id: BigInt(projectId), version },
+            data: { nodes_json: JSON.parse(nodes), version: { increment: 1 } },
+          });
+          if (result.count !== 1) throw conflict;
+        });
+        return true;
+      } catch (error) {
+        if (error === conflict) return false;
+        throw error;
+      }
+    },
     async listByProject(projectId) {
       return prisma.legacy_card_history.findMany({
         where: { project_id: BigInt(projectId) },

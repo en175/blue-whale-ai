@@ -15,7 +15,7 @@ export interface CanvasNodeLike {
   data?: Record<string, unknown>;
 }
 
-/** 一次迁移的转换计划：nodes 为转换后的完整节点数组；historyDrafts 先于画布写落库。 */
+/** 一次迁移的转换计划：nodes 为转换后的完整节点数组；historyDrafts 与画布在同一事务中落库。 */
 export interface LegacyMigrationPlan {
   nodes: CanvasNodeLike[];
   migrated: string[];
@@ -45,7 +45,7 @@ function inspectCard(card: unknown):
 /**
  * 计算旧生成卡迁移计划（纯函数）。
  * - 无旧卡返回 null（调用方不写画布）；
- * - 已有历史的旧卡按历史内容完成转换（失败恢复不丢历史、不重复落库）；
+ * - 已有历史的旧卡内容一致时完成转换（失败恢复不丢历史、不重复落库）；
  * - 损坏/超限卡片保留原样并给出面向用户的原因，不用画面描述代替缺失提示词；
  * - promptSource 只对合法且画布内唯一的来源携带，先扫描到者优先。
  */
@@ -80,6 +80,12 @@ export function planLegacyCardMigration(
     if (!isLegacyGenerationCard(node)) continue;
     const existing = historyByNode.get(node.id);
     if (existing) {
+      const current = inspectCard(node.data?.generationCard);
+      const visual = current.ok && typeof current.block.visual === "string" ? current.block.visual : null;
+      if (!current.ok || current.title !== existing.title || current.text !== existing.prompt_text || visual !== existing.visual_text) {
+        failed.push({ nodeId: node.id, title: current.ok ? current.title : "", reason: "旧卡与迁移历史冲突，双方资料已保留" });
+        continue;
+      }
       const source = previewSourceSchema.safeParse(existing.source_json ?? null);
       const promptSource = claimSource(source.success ? source.data : null);
       replacements.set(node.id, {

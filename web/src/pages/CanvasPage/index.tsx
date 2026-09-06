@@ -2,7 +2,7 @@
  * CanvasPage 画布编辑页：节点/连线/工具栏编排
  * ============================================ */
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
@@ -42,7 +42,7 @@ import {
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
-import { applyPromptPreview, createConversationQuote, listLegacyCardHistory, saveCanvasDoc, serializeEdges, serializeNodes, type LegacyCardHistoryItem } from '@/api/canvas';
+import { applyPromptPreview, createConversationQuote, legacyCardHistoryOptions, saveCanvasDoc, serializeEdges, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
@@ -313,6 +313,20 @@ export default function CanvasPage() {
     };
   };
   /** 画布保存状态：idle 未保存 / saving 保存中 / saved 已保存 / error 保存失败 */
+  const draftErrorsRef = useRef(new Map<string, string>());
+  const handleDraftError = (id: string, error: string) => {
+    if (error) draftErrorsRef.current.set(id, error);
+    else draftErrorsRef.current.delete(id);
+    setSaveStatus(error ? 'error' : 'idle');
+    setSaveEpoch(value => value + 1);
+  };
+  const blockInvalidDraft = (ids: string[]) => {
+    const id = ids.find(id => draftErrorsRef.current.has(id));
+    if (!id) return false;
+    showToast('warn', `文本节点 ${id}：${draftErrorsRef.current.get(id)}，请修正后继续`);
+    return true;
+  };
+  const quoteMutation = useMutation({ mutationFn: createConversationQuote });
   const applyMutation = useMutation({ mutationFn: applyPromptPreview });
   const applyingRef = useRef(false);
   const [applying, setApplying] = useState(false);
@@ -437,7 +451,8 @@ export default function CanvasPage() {
   const { doc, assets: snapshotAssets, refetch, acceptDoc, legacyMigration } = useCanvasDoc(currentId);
 
   /** 旧生成卡迁移历史（IKDLQK）：水合后拉取，无历史或读取失败时入口隐藏 */
-  const [legacyHistory, setLegacyHistory] = useState<LegacyCardHistoryItem[] | null>(null);
+  const historyQuery = useQuery({ ...legacyCardHistoryOptions(currentId), enabled: Boolean(doc && currentId) });
+  const legacyHistory = historyQuery.data?.items;
   const [showLegacyHistory, setShowLegacyHistory] = useState(false);
 
   /** 迁移报告提示（IKDLQK）：按报告签名去重，同一报告只提示一次；失败附标题与原因 */
@@ -457,18 +472,6 @@ export default function CanvasPage() {
     showToast('warn', migrated.length > 0 ? `已转换 ${migrated.length} 张旧生成卡；${failedText}` : failedText);
   }, [legacyMigration, showToast]);
 
-  useEffect(() => {
-    if (!doc || !currentId) {
-      setLegacyHistory(null);
-      return;
-    }
-    let cancelled = false;
-    listLegacyCardHistory(currentId)
-      .then((res) => { if (!cancelled) setLegacyHistory(res.items); })
-      .catch(() => { if (!cancelled) setLegacyHistory(null); });
-    return () => { cancelled = true; };
-  }, [doc, currentId]);
-
   /** 为服务端加载的节点注入交互回调（JSON 不含函数） */
   const attachCallbacks = (node: Node): Node => {
     const base: Node = { ...node, position: node.position ?? { x: 0, y: 0 }, data: { ...node.data, toolMode } };
@@ -478,6 +481,7 @@ export default function CanvasPage() {
           ...base.data,
           onDelete: (id: string) => setTextNodes((prev) => prev.filter((n) => n.id !== id)),
           onTitleChange: (id: string, title: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, title } } : n)),
+          onDraftError: handleDraftError,
           onTextChange: (id: string, text: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text } } : n)),
           onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
           onChange: (id: string, html: string) => {
@@ -850,6 +854,7 @@ export default function CanvasPage() {
     if (!currentId || !doc || applyingRef.current) return;
     const timer = window.setTimeout(() => {
       if (applyingRef.current || savePromiseRef.current) return;
+      if (textNodesRef.current.some(node => draftErrorsRef.current.has(node.id))) return;
       const nodes = [...textNodes, ...mediaNodes, ...productNodes, ...assetNodes];
       const sig = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edges);
       if (sig === lastSavedRef.current) return;
@@ -864,7 +869,7 @@ export default function CanvasPage() {
         .then((saved) => {
           versionRef.current = saved.version;
           pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
-          setSaveStatus('saved');
+          setSaveStatus(textNodesRef.current.some(node => draftErrorsRef.current.has(node.id)) ? 'error' : 'saved');
           setSaveEpoch(value => value + 1);
           setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
         })
@@ -897,6 +902,7 @@ export default function CanvasPage() {
       position: spawnPosition(),
       data: {
         html: '',
+        onDraftError: handleDraftError,
         toolMode,
         onDelete: (id: string) => {
           setTextNodes((prev) => prev.filter((n) => n.id !== id));
@@ -944,7 +950,7 @@ export default function CanvasPage() {
       return;
     }
     try {
-      const { quote } = await createConversationQuote({
+      const { quote } = await quoteMutation.mutateAsync({
         projectId: currentId,
         nodeId: input.nodeId,
         title: input.title,
@@ -979,6 +985,7 @@ export default function CanvasPage() {
     }
     const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
+      if (blockInvalidDraft([id])) return;
       // IKDLQJ：正文走引用快照；空正文节点没有可引用内容，维持纯 @ 标签
       const text = extractTextNodeText(t.data as Record<string, unknown> | undefined);
       if (text) {
@@ -1617,6 +1624,7 @@ export default function CanvasPage() {
       console.warn('未选中项目，无法创建生成任务');
       return;
     }
+    if (targetNodeId && blockInvalidDraft(edgesRef.current.filter(e => e.target === targetNodeId).map(e => e.source))) return;
     if (blockIfQuotaInsufficient()) return;
     const nodeId = newNodeId('media-gen');
     const node: Node = {
@@ -1786,11 +1794,11 @@ export default function CanvasPage() {
     edgesRef.current
       .filter((e) => e.target === targetNodeId)
       .map((e) => textNodesRef.current.find((n) => n.id === e.source))
-      .filter((n): n is Node => n?.type === 'textNode' && typeof n.data?.text === 'string')
+      .filter((n): n is Node => n?.type === 'textNode')
       .map((n) => ({
         nodeId: n.id,
         title: typeof n.data.title === 'string' && n.data.title ? (n.data.title as string) : '文本节点',
-        text: n.data.text as string,
+        text: extractTextNodeText(n.data),
       }));
 
   /** 目标面板附件重排（IKDLQH）：把该目标文本附件边子序列原地重排为新顺序（其余边相对位置不变，
@@ -2030,6 +2038,7 @@ export default function CanvasPage() {
   const flushCanvasSave = async (projectId: string): Promise<boolean> => {
     await savePromiseRef.current;
     if (activeProjectRef.current !== projectId) return false;
+    if (blockInvalidDraft(textNodesRef.current.map(n => n.id))) return false;
     const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
     const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
     if (signature === lastSavedRef.current) return true;

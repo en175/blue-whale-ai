@@ -134,14 +134,12 @@ describe("planLegacyCardMigration", () => {
     expect(plan!.failed).toEqual([{ nodeId: "card-6", title: "长".repeat(201), reason: "标题超过存储限长" }]);
   });
 
-  it("历史已存在而节点仍是旧卡：按历史内容完成转换，不重复落历史", () => {
+  it("历史与旧卡冲突：保留现值并报告冲突，不用旧历史覆盖", () => {
     const card = { shotTitle: "现值标题", prompt: "现值提示词", visual: "现值画面" };
     const plan = planLegacyCardMigration([legacyNode("card-7", card)], [historyRow("card-7")]);
-    expect(plan!.migrated).toEqual(["card-7"]);
-    expect(plan!.nodes[0]).toMatchObject({
-      type: "textNode",
-      data: { title: "历史标题", text: "历史提示词" },
-    });
+    expect(plan!.migrated).toEqual([]);
+    expect(plan!.nodes[0]).toEqual(legacyNode("card-7", card));
+    expect(plan!.failed[0]?.reason).toContain("冲突");
     expect(plan!.historyDrafts).toEqual([]);
   });
 
@@ -149,8 +147,9 @@ describe("planLegacyCardMigration", () => {
     const source = { sessionId: "s1", revisionId: "r1", shotNo: 1 };
     const plan = planLegacyCardMigration([
       textNode("text-9", source),
-      legacyNode("card-8", { shotTitle: "A", prompt: "p" }),
+      legacyNode("card-8", { shotTitle: "历史标题", prompt: "历史提示词", visual: "历史画面", source }),
     ], [historyRow("card-8", { source_json: source })]);
+    expect(plan!.migrated).toEqual(["card-8"]);
     expect(plan!.nodes[1]!.data).not.toHaveProperty("promptSource");
   });
 
