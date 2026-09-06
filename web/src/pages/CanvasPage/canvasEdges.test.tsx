@@ -359,3 +359,118 @@ describe('IKDLQF 连线受控化与目标生图接线', () => {
     expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
   });
 });
+
+/* IKDLQG 视频目标接线：视频节点面板附件展示、提交前保存串行化与 target_node_id 携带。
+   BottomDialog 用真实实现验证附件区；视频节点 v1 由 seedVideoDoc 注入。 */
+function seedVideoDoc() {
+  canvasDocMock.current = {
+    doc: {
+      id: 11,
+      version: 3,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [
+        { id: 't1', type: 'textNode', position: { x: 0, y: 0 }, data: { title: '故事文案', text: '一只蓝鲸在海里' } },
+        {
+          id: 'v1',
+          type: 'mediaNode',
+          position: { x: 200, y: 0 },
+          data: { src: 'http://vid/v1.mp4', mediaType: 'video', fileName: '目标视频', assetId: 'a9' },
+        },
+      ],
+      edges: [{ id: 'e1', source: 't1', target: 'v1' }],
+    },
+    assets: {
+      a9: { asset_id: 9, type: 'video', access_url: 'http://vid/v1.mp4', width: 100, height: 100 },
+    },
+    refetch: () => Promise.resolve([]),
+    acceptDoc: vi.fn(),
+  };
+}
+
+describe('IKDLQG 视频目标接线', () => {
+  it('从视频节点打开面板展示文本附件；提交先落盘当前编辑再携带 target_node_id', async () => {
+    seedVideoDoc();
+    await renderPage();
+
+    const media = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1');
+    await act(async () => {
+      media.data.onGenVideo('v1');
+    });
+
+    // 面板打开即展示当前附件（来源标题 + 正文预览）
+    await vi.waitFor(() => expect(container.textContent).toContain('文本附件（1）'));
+    expect(container.textContent).toContain('故事文案');
+    expect(container.textContent).toContain('一只蓝鲸在海里');
+
+    // 模型能力就位后，空提示词 + 非空附件正文即可发送（契约：附件可单独驱动生成）
+    await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
+    expect(sendButton().disabled).toBe(false);
+
+    // 制造一笔未防抖落盘的正文编辑
+    const text = flowProps.current.textNodes.find((n: Node) => n.id === 't1');
+    await act(async () => {
+      text.data.onTextChange('t1', '一只蓝鲸在海里游');
+    });
+
+    await act(async () => {
+      sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const [projectId, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
+    expect(projectId).toBe('p1');
+    expect(payload.type).toBe('video');
+    expect(payload.target_node_id).toBe('v1');
+    // 视频节点自身作为参考素材（旧语义保留），与目标语义并存
+    expect(payload.reference_asset_ids).toEqual(['a9']);
+    expect(payload.parameters.prompt).toBe('');
+
+    // 保存串行化：先落盘（含未防抖编辑与连线）再创建任务
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(apiMocks.saveCanvasDoc.mock.invocationCallOrder[0]!).toBeLessThan(
+      apiMocks.createGenerationJob.mock.invocationCallOrder[0]!,
+    );
+    const saved = apiMocks.saveCanvasDoc.mock.calls[0]![1];
+    expect(saved.nodes.find((n) => n.id === 't1')!.data.text).toBe('一只蓝鲸在海里游');
+    expect(saved.edges).toHaveLength(1);
+  });
+
+  it('重新编辑入口同样携带目标节点与附件快照', async () => {
+    seedVideoDoc();
+    await renderPage();
+
+    const media = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1');
+    await act(async () => {
+      media.data.onReEdit('v1');
+    });
+
+    await vi.waitFor(() => expect(container.textContent).toContain('文本附件（1）'));
+    expect(container.textContent).toContain('故事文案');
+
+    await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
+    await act(async () => {
+      sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const payload = apiMocks.createGenerationJob.mock.calls[0]![1];
+    expect(payload.type).toBe('video');
+    expect(payload.target_node_id).toBe('v1');
+  });
+
+  it('底部固定入口打开视频对话框：无附件区、空提示词禁用发送', async () => {
+    seedVideoDoc();
+    await renderPage();
+
+    await act(async () => {
+      toolbarProps.current.onToggleVideoDialog();
+    });
+    await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
+
+    // 无目标节点：不展示附件区，空提示词保持发送禁用（无附件语义）
+    expect(container.textContent).not.toContain('文本附件');
+    expect(sendButton().disabled).toBe(true);
+    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+  });
+});

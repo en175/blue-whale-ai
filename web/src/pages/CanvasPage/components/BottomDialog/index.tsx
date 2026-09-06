@@ -21,6 +21,7 @@ import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { classifyRefOverflows, REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import ChipTextEditor, { type ChipTextEditorHandle, type ChipRef } from '../ChipTextEditor';
+import type { ImageTextAttachment } from '../ImageDialog';
 import {
   EMPTY_COMPOSED,
   composedIsEmpty,
@@ -76,6 +77,8 @@ interface BottomDialogProps {
   initialText?: string;
   /** 初始生成参数（首页 AI视频 带入：选中首页所选的模型/比例/清晰度/时长/模式） */
   initialParams?: VideoGenSeedParams;
+  /** 连线文本附件（IKDLQG）：仅视频媒体节点面板发起时携带，打开当下快照，只读展示 */
+  attachments?: ImageTextAttachment[];
   /** 到节点选择：进入画布节点选取模式（image 图片节点 / video 视频节点） */
   onPickFromCanvas?: (kind: 'image' | 'video') => void;
   /** 画布选取模式进行中（image/video，对应按钮高亮提示） */
@@ -105,6 +108,34 @@ export interface VideoGenSeedParams {
   mode?: string;
 }
 
+/** 附件正文超过该长度默认折叠（可展开读全） */
+const ATTACHMENT_COLLAPSE_LENGTH = 120;
+
+/** 连线文本附件项（只读，IKDLQG）：标题 + 正文预览，长文默认折叠可展开；与 ImageDialog 附件项同构 */
+function AttachmentItem({ attachment }: { attachment: ImageTextAttachment }) {
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = attachment.text.length > ATTACHMENT_COLLAPSE_LENGTH;
+  return (
+    <div className={styles.attachmentItem}>
+      <span className={styles.attachmentTitle}>{attachment.title}</span>
+      <span
+        className={`${styles.attachmentText} ${collapsible && !expanded ? styles.attachmentTextCollapsed : ''}`}
+      >
+        {attachment.text}
+      </span>
+      {collapsible && (
+        <button
+          type="button"
+          className={styles.attachmentToggle}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? '收起' : '展开'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** 宽高比图标：按比例绘制小矩形 */
 function RatioIcon({ ratio }: { ratio: string }) {
   const [w, h] = ratio.split(':').map(Number);
@@ -114,7 +145,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText, initialParams, onPickFromCanvas, pickMode, externalPick, externalImagePick, onOpenCharacterLibrary, onToast }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText, initialParams, attachments, onPickFromCanvas, pickMode, externalPick, externalImagePick, onOpenCharacterLibrary, onToast }: BottomDialogProps) {
   /** 富文本输入框（可多次插入生成卡引用胶囊，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供生成按钮启用态判断 */
@@ -122,7 +153,10 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
   /** 计数口径：文字按字符数，一个胶囊算 1 个单位——不按它背后那几千字算。 */
   const composedCount = composedLength(composed);
-  const canSend = !composedIsEmpty(composed);
+  /** 附件正文有效（去空白非空）时允许空提示词提交（IKDLQG 契约：附件可单独驱动生成）；
+   *  全部有效文本为空时沿用「提示词必填」 */
+  const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
+  const canSend = !composedIsEmpty(composed) || hasAttachmentText;
   const [refFiles, setRefFiles] = useState<BottomRefItem[]>(initialRefs ?? []);
   /** 视频文件时长（秒），key 为 refFiles 索引 */
   const [videoDurations, setVideoDurations] = useState<Record<number, number>>({});
@@ -448,7 +482,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
    *  （携带模型/宽高比/清晰度/时长） */
   const handleSend = () => {
     const text = resolveComposed(composed).trim();
-    if (!text) return;
+    if (!text && !hasAttachmentText) return;
     if (!currentModel) {
       console.warn('视频模型能力加载中，请稍后重试');
       return;
@@ -791,6 +825,16 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         className={styles.hiddenInput}
         onChange={handleAnyUpload}
       />
+
+      {/* 连线文本附件（IKDLQG）：只读展示，增删通过画布连线建立/断开进行 */}
+      {attachments && attachments.length > 0 && (
+        <div className={styles.attachments}>
+          <span className={styles.configLabel}>文本附件（{attachments.length}）</span>
+          {attachments.map((a) => (
+            <AttachmentItem key={a.nodeId} attachment={a} />
+          ))}
+        </div>
+      )}
 
       {/* 输入框：可多次插入生成卡引用胶囊，胶囊跟文字同一行 */}
       <div className={styles.editorWrap}>
