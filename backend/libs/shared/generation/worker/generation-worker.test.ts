@@ -763,6 +763,20 @@ describe("processNextJob 文本附件组合 prompt（IKDLQF）", () => {
     expect(providerArg.prompt).toBe("背景：雨夜\n\n风格：水彩\n\n画一只猫");
   });
 
+  // IKDLQH：排序后的快照——provider prompt 严格跟随快照数组顺序（非 node_id/标题排序），钉住「供应商请求顺序=快照顺序」。
+  it("快照数组为非默认顺序时 provider prompt 精确跟随（IKDLQH 顺序钉扎）", async () => {
+    const { generate } = await runImageJob({
+      prompt: "目标提示词",
+      text_attachments: [
+        { node_id: "n9", title: "乙", text: "正文乙" },
+        { node_id: "n1", title: "甲", text: "正文甲" },
+      ],
+    });
+
+    const providerArg = generate.mock.calls[0]![0] as { prompt: string };
+    expect(providerArg.prompt).toBe("正文乙\n\n正文甲\n\n目标提示词");
+  });
+
   it("无 text_attachments 的旧任务 input：provider 收到的 prompt 逐字节不变（回归）", async () => {
     const { jobId, generate } = await runImageJob({ prompt: "一只猫" });
 
