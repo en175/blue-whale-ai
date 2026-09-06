@@ -4,13 +4,12 @@
 
 .panel {
   position: absolute;
-  /* 宽度是**固定值**，不跟视口走（IKAGZC）。原来是 clamp(280px, 26vw, 420px)：半屏时
-     26vw 会把面板挤窄，同一个界面在不同窗口下长得不一样。窄屏由 max-width 兜底。
-     468 = 边框 1×2 + 输入区左右各 4px + 输入框 458。对齐参照物的实测值。 */
+  /* 基准宽度 468 = 边框 1×2 + 输入区左右各 4px + 输入框 458（IKAGZC 对齐参照物的实测值）。
+     停靠抽屉的实际宽度由内联 style 接管（IKDLD4 可调宽，规则见 drawerWidth.ts），这里是首帧兜底。 */
   width: 468px;
   max-width: calc(100% - 16px);
   min-width: 0;
-  /* 一直延伸到底：原来底部留了 32px，面板下方空一截。只扣掉顶部的 header 与 8px 间距。 */
+  /* 高度的共享兜底；停靠抽屉由 .panelDrawer 覆盖成全高（100%），浮动模式由内联 style 接管。 */
   height: calc(100% - var(--header-height) - 8px);
   background-color: #1e1e1e;
   border: 1px solid var(--color-border-primary);
@@ -27,6 +26,67 @@
 .panelFloating {
   width: 360px;
   max-height: 70vh;
+}
+
+/* ---- 停靠抽屉形态（IKDLD4）：全高覆盖式，贴视口顶到底、盖住顶栏右端，宽度由内联 style 接管 ---- */
+.panelDrawer {
+  top: 0;
+  right: 0;
+  height: 100%;
+  max-width: none;
+  border: none;
+  border-left: 1px solid var(--color-border-primary);
+  border-radius: 0;
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.45);
+  /* 滑入用 keyframes（每次挂载即播一次）；滑出走 transition（.panelDrawerClosing 改 transform）。
+     只动 transform：不调 width、不触发画布重排，拖拽调宽因此天然无过渡动画。 */
+  animation: drawerSlideIn 0.24s ease-out;
+  transition: transform 0.24s ease-out;
+}
+
+@keyframes drawerSlideIn {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+/* 关闭中：滑出右缘。keyframes 播完后 transform 本就回退到类值，动画结束与否都不跳变 */
+.panelDrawerClosing {
+  animation: none;
+  transform: translateX(100%);
+}
+
+/* 左缘调宽手柄：6px 隐形热区贴左缘（.panel 有 overflow:hidden，探出外侧会被裁掉，故整体放内侧），
+   悬停才亮 2px 线（隐形热区方案） */
+.resizeHandle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 1;
+}
+
+.resizeHandle::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.resizeHandle:hover::after {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* 拖拽调宽期间整面板锁左右箭头光标并禁止文本选中 */
+.panelResizing,
+.panelResizing * {
+  cursor: ew-resize !important;
+  user-select: none !important;
 }
 
 /* 拖动指示图标 */

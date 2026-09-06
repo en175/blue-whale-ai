@@ -47,7 +47,7 @@ export function getPanelLayout(input: PanelLayoutInput): PanelLayout {
 /**
  * 一次 DOM 量测的结果：算布局要的全部输入。
  *
- * 四个调用点（初始化、缩窗×2、拖拽）此前各自量一遍 `parentElement` / `getBoundingClientRect` /
+ * 各调用点（缩窗、切浮动、拖拽）此前各自量一遍 `parentElement` / `getBoundingClientRect` /
  * `querySelector('header')`，量法还略有出入。收成一个形状，量测与决策就分开了。
  */
 export interface PanelMetrics {
@@ -55,26 +55,8 @@ export interface PanelMetrics {
   pageHeight: number;
   headerHeight: number;
   panelWidth: number;
-  /** 面板当前实测高度。固定模式不用它——那种模式的高度由可用空间决定，不由现状决定。 */
+  /** 面板当前实测高度，只服务浮动模式（停靠抽屉是全高覆盖，不参与这套坐标，IKDLD4）。 */
   panelHeight: number;
-}
-
-/**
- * 固定模式：贴右上角，撑满可用高度。
- *
- * 初始化与缩窗是同一件事，此前却是两份逐字相同的调用——改面板高度时同样的三行要改两遍，
- * 而第二遍恰好抄错过一次缩进（审查 W·S7 / W·S8）。
- *
- * 高度取「可用空间」而不是「当前高度」：原来减的是 8% 视口高度，那让面板在不同窗口下高矮不一，
- * 而且底部永远空一截（IKAGZC）。真正的收边交给 getPanelLayout 里的 PANEL_MARGIN。
- */
-export function dockedPanelLayout(metrics: PanelMetrics): PanelLayout {
-  return getPanelLayout({
-    ...metrics,
-    panelHeight: metrics.pageHeight - metrics.headerHeight,
-    desiredX: metrics.pageWidth - PANEL_MARGIN - metrics.panelWidth,
-    desiredY: metrics.headerHeight + PANEL_MARGIN,
-  });
 }
 
 /**

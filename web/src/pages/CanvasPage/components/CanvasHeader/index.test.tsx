@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react';
+import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CanvasHeader from './index';
@@ -39,12 +39,12 @@ const headerProps = {
   onToggleAgent: vi.fn(),
 };
 
-async function renderHeader() {
+async function renderHeader(overrides: Partial<ComponentProps<typeof CanvasHeader>> = {}) {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
   await act(async () => {
-    root.render(createElement(CanvasHeader, headerProps));
+    root.render(createElement(CanvasHeader, { ...headerProps, ...overrides }));
   });
 }
 
@@ -74,5 +74,19 @@ describe('CanvasHeader', () => {
       right?.querySelector('button')?.click();
     });
     expect(headerProps.onToggleAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it('面板展开时隐藏 Agent 入口（hideAgentEntry），避免与面板内关闭按钮冗余（IKDLD4）', async () => {
+    await renderHeader({ hideAgentEntry: true });
+
+    const agentBtn = mountNode.querySelector(`.${styles.agentBtn}`);
+    expect(agentBtn?.classList.contains(styles.agentBtnHidden)).toBe(true);
+  });
+
+  it('默认显示 Agent 入口', async () => {
+    await renderHeader();
+
+    const agentBtn = mountNode.querySelector(`.${styles.agentBtn}`);
+    expect(agentBtn?.classList.contains(styles.agentBtnHidden)).toBe(false);
   });
 });
