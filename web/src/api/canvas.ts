@@ -1,10 +1,21 @@
 import type { PromptPreviewSource } from '../../../packages/contracts/src/prompt-preview';
+import type { LegacyCardHistoryItem, LegacyMigrationReport } from '../../../packages/contracts/src/legacy-card-migration';
 /* ============================================
  * canvas 接口：画布加载 GET /api/canvases + 保存 PUT /api/canvases/:projectId
  * nodes/viewport 均为 JSON 字符串；保存支持 If-Match 乐观锁（412 版本冲突）
  * ============================================ */
 import { apiRequest } from './http';
 import type { Edge, Node, Viewport } from '@xyflow/react';
+
+export type { LegacyCardHistoryItem, LegacyMigrationReport };
+
+/** 旧生成卡迁移历史（IKDLQK）：项目级只读回读；失败由调用方静默降级。 */
+export function listLegacyCardHistory(projectId: string) {
+  return apiRequest<{ items: LegacyCardHistoryItem[] }>(
+    `/api/canvases/${encodeURIComponent(projectId)}/legacy-card-history`,
+    { silent: true },
+  );
+}
 
 export function applyPromptPreview(input: { projectId: string; source: PromptPreviewSource; position: { x: number; y: number } }) {
   return apiRequest<{ node: Node; canvas: CanvasRecord; reused: boolean }>(
@@ -64,6 +75,8 @@ export interface CanvasRecord {
   nodes: string | null;
   /** 连线列表 JSON 字符串（IKDLQF，旧数据缺省为 null 视为空数组） */
   edges?: string | null;
+  /** 旧生成卡迁移报告（IKDLQK，仅本轮发生迁移或存在失败时携带） */
+  legacy_migration?: LegacyMigrationReport;
 }
 
 /** 解析后的画布文档 */
@@ -78,6 +91,8 @@ export interface CanvasDoc {
   nodes: Node[];
   /** 连线列表（持久形状 {id, source, target}，无记录/旧数据为空数组） */
   edges: Edge[];
+  /** 旧生成卡迁移报告（IKDLQK，回退路径透传，不参与持久化） */
+  legacyMigration?: LegacyMigrationReport;
 }
 
 /** 在途去重：StrictMode 双挂载只发一次请求；完成后释放 */
@@ -113,6 +128,7 @@ export function fetchCanvasDoc(projectId: string): Promise<CanvasDoc> {
         viewport: safeParse<Viewport>(rec?.viewport ?? null, { x: 0, y: 0, zoom: 1.1 }),
         nodes,
         edges: safeParse<Edge[]>(rec?.edges ?? null, []),
+        ...(rec?.legacy_migration ? { legacyMigration: rec.legacy_migration } : {}),
       };
     })
     .finally(() => {

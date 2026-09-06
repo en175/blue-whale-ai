@@ -80,6 +80,7 @@ vi.mock('@/api/canvas', () => ({
   saveCanvasDoc: vi.fn(),
   serializeNodes: vi.fn(() => '[]'),
   serializeEdges: vi.fn(() => '[]'),
+  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
 }));
 
 vi.mock('@/api/jobs', () => ({
