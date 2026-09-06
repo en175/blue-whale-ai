@@ -36,6 +36,7 @@ export function createNewApiGenerationOps(
         stream: false,
       };
       if (input.size) body.size = input.size;
+      if (input.quality) body.quality = input.quality;
       body.n = input.n;
       if (input.webSearch) body.tools = [{ type: "web_search" }];
       if (input.sequential) {
@@ -95,6 +96,7 @@ export function createNewApiGenerationOps(
       body.append("n", String(input.n));
       body.append("response_format", "url");
       if (input.size) body.append("size", input.size);
+      if (input.quality) body.append("quality", input.quality);
       if (input.webSearch) {
         body.append("tools", JSON.stringify([{ type: "web_search" }]));
       }

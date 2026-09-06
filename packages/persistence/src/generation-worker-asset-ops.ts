@@ -135,6 +135,13 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
           features.maxReferenceImages ??
           features.max_reference_images ??
           DEFAULT_MAX_REFERENCE_IMAGES,
+        channel_parser:
+          typeof cap.channel_parser === "string" && cap.channel_parser.length > 0
+            ? cap.channel_parser
+            : "seedream",
+        request_mapping: cap.request_mapping ?? null,
+        default_size: cap.default_size,
+        default_aspect_ratio: cap.default_aspect_ratio,
       };
     },
 

@@ -10,6 +10,8 @@ export interface GenerateImageInput {
   /** 能力表给出的尺寸宽高（url 模式 provider 不回宽高时兜底）。 */
   width?: number | null;
   height?: number | null;
+  /** Banana 解析器写入的调用质量。 */
+  quality?: string;
   /** 已通过项目/用户归属校验的输入图片。存在时走 image edits。 */
   sourceImage?: {
     blob: Blob;

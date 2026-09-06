@@ -140,6 +140,8 @@ model generation_model_capability {
   default_aspect_ratio    String   @db.VarChar(16)
   default_duration        Int?
   features                Json
+  channel_parser          String   @default("seedream") @db.VarChar(32)
+  request_mapping         Json?
   enabled                 Boolean  @default(true)
   sort_order              Int      @default(0)
   gmt_create              DateTime @default(now()) @db.DateTime(0)
