@@ -2,6 +2,7 @@
  * CanvasPage 画布编辑页：节点/连线/工具栏编排
  * ============================================ */
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { newNodeId } from './nodeId';
@@ -34,7 +35,7 @@ import { fetchProjects, createProject, renameProject, deleteProject,  } from '@/
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
-import { saveCanvasDoc, serializeNodes } from '@/api/canvas';
+import { applyPromptPreview, saveCanvasDoc, serializeNodes } from '@/api/canvas';
 import { isApiError } from '@/api/http';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
@@ -259,6 +260,14 @@ export default function CanvasPage() {
     };
   };
   /** 画布保存状态：idle 未保存 / saving 保存中 / saved 已保存 / error 保存失败 */
+  const applyMutation = useMutation({ mutationFn: applyPromptPreview });
+  const applyingRef = useRef(false);
+  const [applying, setApplying] = useState(false);
+  const [saveEpoch, setSaveEpoch] = useState(0);
+  const savePromiseRef = useRef<Promise<unknown> | null>(null);
+  const activeProjectRef = useRef(currentId);
+  activeProjectRef.current = currentId;
+  const [focusViewport, setFocusViewport] = useState<Viewport>();
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   /** 最近一次保存成功时间（HH:mm） */
   const [savedAt, setSavedAt] = useState('');
@@ -368,10 +377,11 @@ export default function CanvasPage() {
     prevProjectIdRef.current = currentId;
     if (!prev || prev === currentId) return;
     setShowAgent(false);
+    setFocusViewport(undefined);
   }, [currentId]);
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
-  const { doc, assets: snapshotAssets, refetch } = useCanvasDoc(currentId);
+  const { doc, assets: snapshotAssets, refetch, acceptDoc } = useCanvasDoc(currentId);
 
   /** 为服务端加载的节点注入交互回调（JSON 不含函数） */
   const attachCallbacks = (node: Node): Node => {
@@ -381,6 +391,9 @@ export default function CanvasPage() {
         base.data = {
           ...base.data,
           onDelete: (id: string) => setTextNodes((prev) => prev.filter((n) => n.id !== id)),
+          onTitleChange: (id: string, title: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, title } } : n)),
+          onTextChange: (id: string, text: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text } } : n)),
+          onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
           onChange: (id: string, html: string) => {
             setTextNodes((prev) =>
               prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n))
@@ -750,8 +763,9 @@ export default function CanvasPage() {
 
   /** 画布变更后 800ms 防抖自动保存：PUT /api/canvases/:projectId（If-Match 乐观锁） */
   useEffect(() => {
-    if (!currentId || !doc) return;
+    if (!currentId || !doc || applyingRef.current) return;
     const timer = window.setTimeout(() => {
+      if (applyingRef.current || savePromiseRef.current) return;
       const nodes = [...textNodes, ...mediaNodes, ...productNodes, ...assetNodes];
       const sig = JSON.stringify(viewport) + serializeNodes(nodes);
       if (sig === lastSavedRef.current) return;
@@ -762,11 +776,12 @@ export default function CanvasPage() {
       setSaveStatus('saving');
       // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
       const pendingSnapshot = new Set(pendingNodeIdsRef.current);
-      saveCanvasDoc(currentId, { viewport, nodes }, versionRef.current)
+      savePromiseRef.current = saveCanvasDoc(currentId, { viewport, nodes }, versionRef.current)
         .then((saved) => {
           versionRef.current = saved.version;
           pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
           setSaveStatus('saved');
+          setSaveEpoch(value => value + 1);
           setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
         })
         .catch((e) => {
@@ -776,10 +791,8 @@ export default function CanvasPage() {
           const hadPendingAdds = pendingSnapshot.size > 0;
           if (isApiError(e) && e.status === 412) {
             // 版本冲突：回滚未保存节点 + toast，然后重新加载最新画布数据
-            if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
-            showToast('warn', hadPendingAdds ? '添加失败，请重试' : '版本冲突，正在同步最新数据');
-            console.warn('画布保存版本冲突，重新加载最新数据');
-            refetch();
+            setSaveStatus('error');
+            showToast('warn', '画布版本冲突，当前编辑已保留，请先复制正文再刷新复核');
           } else {
             // 网络/服务端错误：新增节点回滚，已有节点的编辑保留、左下角提示保存失败
             if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
@@ -787,10 +800,10 @@ export default function CanvasPage() {
             showToast('error', hadPendingAdds ? '添加失败，请重试' : '保存失败，请重试');
             console.warn('画布自动保存失败:', e);
           }
-        });
+        }).finally(() => { savePromiseRef.current = null; });
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [textNodes, mediaNodes, productNodes, assetNodes, viewport, currentId, doc, refetch]);
+  }, [textNodes, mediaNodes, productNodes, assetNodes, viewport, currentId, doc, refetch, applying, saveEpoch]);
 
   /** 创建文本节点 */
   const handleAddTextNode = () => {
@@ -824,6 +837,7 @@ export default function CanvasPage() {
     const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
       const copy: Node = { ...t, id: newNodeId('text'), position: { x: t.position.x + 40, y: t.position.y + 40 }, data: { ...t.data } };
+      delete copy.data.promptSource;
       pendingNodeIdsRef.current.add(copy.id);
       setTextNodes((prev) => [...prev, copy]);
       return;
@@ -855,7 +869,7 @@ export default function CanvasPage() {
     }
     const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
-      const text = ((t.data?.html as string) || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      const text = typeof t.data.text === 'string' ? t.data.text : ((t.data?.html as string) || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
       const label = text || '文本节点';
       const mediaBlocks = collectMediaBlocks(t, String(ts));
       setAgentContext({
@@ -1772,77 +1786,42 @@ export default function CanvasPage() {
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
 
-  /** Agent 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent） */
-  /**
-   * 画布上现存的生成卡节点对应的 cardId 集合（IKAFSQ）。
-   *
-   * 「这张卡应用过没有」不再是侧边栏自己维护的一份状态，而是从画布查出来的事实。侧边栏那份
-   * 内存 `useState` 刷新即清空（绿勾全掉），而且画布上把节点删了它也不知道——两处必然对不上。
-   * 改成派生之后，删节点自动退回「＋ 手动应用」、刷新自动恢复，都不需要额外的同步代码。
-   *
-   * cardId 随 payload 一起铺进了 `data.generationCard`，而 `serializeNodes` 会把节点存进画布
-   * 文档，所以这个事实本来就是持久化的，只是过去没人读。
-   */
-  const appliedCardIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const node of assetNodes) {
-      const card = (node.data as { generationCard?: { cardId?: unknown } } | undefined)?.generationCard;
-      if (typeof card?.cardId === 'string' && card.cardId) ids.add(card.cardId);
-    }
-    return ids;
-  }, [assetNodes]);
+  /** 应用事实来自已持久化的文本节点来源，删除与刷新后自然同步。 */
+  const appliedCardIds = useMemo(() => new Set(textNodes.flatMap(node => {
+    const source = node.data.promptSource as GenerationCardBlock['source'];
+    return source ? [`${source.revisionId}#${source.shotNo}`] : [];
+  })), [textNodes]);
 
-  const handleAgentCardApply = (payload: GenerationCardBlock) => {
-    const node: Node = {
-      id: newNodeId('gencard'),
-      type: 'assetNode',
-      position: spawnPosition(),
-      data: {
-        kind: 'generation',
-        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        generationCard: {
-          ...payload,
-          onApplyToDock: (apply: GenerationCardBlock) => {
-            // 引用到 dock：累计追加胶囊（不覆盖已有引用），ts 沿用已有值以免重挂载清空用户已输入的自由文字
-            setVideoSeed((prev) => ({
-              ts: prev?.ts ?? Date.now(),
-              refs: prev?.refs ?? [],
-              cards: [
-                ...(prev?.cards ?? []),
-                { id: `${apply.cardId ?? apply.shotTitle ?? 'card'}-${Date.now()}`, label: apply.shotTitle ?? '生成卡', prompt: apply.prompt },
-              ],
-            }));
-            setShowBottomDialog(true);
-            setShowImageDialog(false);
-            setShowAudioDialog(false);
-            setShowMusicDialog(false);
-            void apply;
-          },
-          onSendToAgent: () => {
-            // 给 Agent：走与节点工具栏同一条 @ 链路（collectMediaBlocks → 胶囊）。
-            // 旧写法只塞 label 不采块，chip 上屏了、消息里却没有胶囊，agent 只收到
-            // 光杆文字（IKBBKP 的根因）。
-            actionsRef.current.addToChat(node.id);
-          },
-          onUpdate: (patch: Record<string, unknown>) => {
-            setAssetNodes((prev) =>
-              prev.map((n) =>
-                n.id === node.id
-                  ? { ...n, data: { ...n.data, generationCard: { ...(n.data as { generationCard?: object }).generationCard, ...patch } } }
-                  : n,
-              ),
-            );
-          },
-        },
-        onDelete: (id: string) => {
-          setAssetNodes((prev) => prev.filter((n) => n.id !== id));
-        },
-        onGenerateImage: () => actionsRef.current.openImageDialog(),
-        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
-      },
-    };
-    pendingNodeIdsRef.current.add(node.id);
-    setAssetNodes((prev) => [...prev, node]);
+  const handleAgentCardApply = async (payload: GenerationCardBlock) => {
+    if (applyingRef.current || !currentId || !payload.source) return;
+    const projectId = currentId;
+    applyingRef.current = true;
+    setApplying(true);
+    (document.activeElement as HTMLElement | null)?.blur();
+    try {
+      await savePromiseRef.current;
+      if (activeProjectRef.current !== projectId) return;
+      const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
+      const signature = JSON.stringify(viewport) + serializeNodes(nodes);
+      if (signature !== lastSavedRef.current) {
+        const saved = await saveCanvasDoc(projectId, { viewport, nodes }, versionRef.current);
+        versionRef.current = saved.version;
+        lastSavedRef.current = signature;
+        pendingNodeIdsRef.current.clear();
+      }
+      const result = await applyMutation.mutateAsync({ projectId, source: payload.source, position: spawnPosition() });
+      if (activeProjectRef.current !== projectId) return;
+      const savedNodes = JSON.parse(result.canvas.nodes ?? '[]') as Node[];
+      const savedViewport = JSON.parse(result.canvas.viewport ?? 'null') as Viewport | null;
+      acceptDoc({ id: result.canvas.id, version: result.canvas.version, nodes: savedNodes, viewport: savedViewport ?? viewport });
+      const target = result.node.position;
+      setFocusViewport({ x: window.innerWidth / 3 - target.x, y: window.innerHeight / 2 - target.y - 135, zoom: 1 });
+      setSaveStatus('saved');
+      setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
+    } catch (error) {
+      setSaveStatus('error');
+      showToast('error', error instanceof Error ? error.message : '应用失败，请重试');
+    } finally { applyingRef.current = false; setApplying(false); }
   };
 
   /** 底部对话框发送 */
@@ -2596,7 +2575,8 @@ export default function CanvasPage() {
 
       {/* 画布区域 */}
       <div className={styles.canvasWrapper}>
-        <FlowCanvas
+        {applying && <div role="status" style={{ position: 'fixed', inset: 0, zIndex: 10000, cursor: 'wait' }}>正在应用预览…</div>}
+      <FlowCanvas
           showMiniMap={showMiniMap}
           toolMode={toolMode}
           extraNodes={uploadedNodes}
@@ -2605,7 +2585,7 @@ export default function CanvasPage() {
           productNodes={productNodes}
           assetNodes={assetNodes}
           showEdges={showEdges}
-          viewport={doc?.viewport}
+          viewport={focusViewport ?? doc?.viewport}
           onViewportChange={setViewport}
           registerSpawnPosition={registerSpawnPosition}
           hideZoomControl={showAgent}
@@ -2781,7 +2761,7 @@ export default function CanvasPage() {
           initialCardLabel={agentContext?.label}
           inputVersion={agentContext?.ts ?? 0}
           projectId={currentId || undefined}
-          onApplyToDock={handleAgentCardApply}
+          onApplyPreview={handleAgentCardApply}
           appliedCardIds={appliedCardIds}
           initialSkillId={agentContext?.skillId ?? ''}
           initialSkillName={agentContext?.skillName ?? ''}

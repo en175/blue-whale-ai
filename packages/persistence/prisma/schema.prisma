@@ -780,3 +780,16 @@ model storyboard_previews {
   @@index([scene_card_id], map: "idx_storyboard_scene")
   @@index([project_id], map: "idx_storyboard_project")
 }
+
+/// Immutable first-applied preview content, retained when its Canvas node is deleted.
+model prompt_preview_snapshots {
+  id          BigInt   @id @default(autoincrement())
+  project_id  BigInt
+  source_key  String   @db.VarChar(64)
+  source_json Json
+  title       String   @db.VarChar(200)
+  text        String   @db.MediumText
+  gmt_create  DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([project_id, source_key], map: "uk_prompt_preview_source")
+}
