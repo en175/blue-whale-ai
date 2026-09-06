@@ -10,6 +10,12 @@ TypeScript `agent-worker`、`generation-worker` 组成；三者属于同一模�
 
 ## Language
 
+### Canvas 生成草稿（已确认目标，待实现）
+
+**生成草稿节点**:
+用户在 Canvas 中为图片、视频或音频创作建立的持久工作对象，承载待提交的生成配置与参考关系；首次生成成功后，结果填回原节点并保留位置和连线。
+_Avoid_: 已提交的生成任务、正式媒体素材、素材缺失占位、SceneCard
+
 ### Prompt 创作（IKDL9U 已确认目标，待实现）
 
 本节记录 2026-09-06 确认的生成卡重构领域定义；本场景与下文历史 PlanMessage、SceneCard、
