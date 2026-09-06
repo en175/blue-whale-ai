@@ -1020,18 +1020,20 @@ export default function CanvasPage() {
     setPickAssetId(null);
   };
 
-  /** 节点拖拽结束：同步新坐标到父组件 state，触发自动保存 */
-  const handleNodeDragStop = (node: Node) => {
-    const { id, type, position } = node;
-    if (type === 'textNode') {
-      setTextNodes((prev) => prev.map((n) => (n.id === id ? { ...n, position } : n)));
-    } else if (type === 'mediaNode') {
-      setMediaNodes((prev) => prev.map((n) => (n.id === id ? { ...n, position } : n)));
-    } else if (type === 'productNode') {
-      setProductNodes((prev) => prev.map((n) => (n.id === id ? { ...n, position } : n)));
-    } else if (type === 'assetNode') {
-      setAssetNodes((prev) => prev.map((n) => (n.id === id ? { ...n, position } : n)));
-    }
+  /** 节点拖拽结束：同步本次全部拖动节点的新坐标到父组件 state，触发自动保存。
+   *  多选整组拖拽时 React Flow 第三参含同组全部节点；只回写被抓取节点会让父层坐标过期，
+   *  下一次媒体合并 effect 用过期坐标覆盖画布内部状态，导致同组节点跳变（IKDKII 验收缺陷） */
+  const handleNodeDragStop = (_node: Node, draggedNodes: Node[]) => {
+    const positions = new Map(draggedNodes.map((n) => [n.id, n.position]));
+    const applyDraggedPositions = (prev: Node[]) =>
+      prev.map((n) => {
+        const position = positions.get(n.id);
+        return position ? { ...n, position } : n;
+      });
+    setTextNodes(applyDraggedPositions);
+    setMediaNodes(applyDraggedPositions);
+    setProductNodes(applyDraggedPositions);
+    setAssetNodes(applyDraggedPositions);
   };
 
   // 资产卡等非节点入口：清空旧 seed，保证打开的是空白对话框
