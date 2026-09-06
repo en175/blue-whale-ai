@@ -197,3 +197,55 @@ describe('Canvas space pan', () => {
     expect(node().classList.contains('draggable')).toBe(false);
   });
 });
+
+describe('Canvas media loading during interaction', () => {
+  it.each(['image-1', 'image-2'])('preserves the active drag and selection when %s finishes loading', async (loadingId) => {
+    const onMediaDims = (id: string, dims: { width: number; height: number }) => {
+      props = {
+        ...props,
+        mediaNodes: props.mediaNodes.map((n) => n.id === id ? { ...n, data: { ...n.data, ...dims } } : n),
+      };
+      root.render(createElement(FlowCanvas, props));
+    };
+    props = {
+      ...props,
+      mediaNodes: [
+        { ...props.mediaNodes[0], selected: false, data: { ...props.mediaNodes[0].data, onMediaDims } },
+        {
+          id: 'image-2', type: 'mediaNode', position: { x: 400, y: 60 },
+          initialWidth: 200, initialHeight: 150,
+          data: { mediaType: 'image', src: 'blob:loading', fileName: 'loading', onMediaDims },
+        },
+      ],
+    };
+    await act(async () => { root.render(createElement(FlowCanvas, props)); });
+    await mouse('mousedown', node());
+    await mouse('mousemove', window, 120, 110);
+    await mouse('mousemove', window, 160, 140);
+    const draggedPosition = node().style.transform;
+    expect(draggedPosition).not.toBe('translate(50px,60px)');
+    expect(node().querySelector('button[title="详情"]')).not.toBeNull();
+
+    const image = container.querySelector<HTMLImageElement>(`[data-id="${loadingId}"] img`)!;
+    Object.defineProperties(image, { naturalWidth: { value: 1600 }, naturalHeight: { value: 900 } });
+    await act(async () => { image.dispatchEvent(new Event('load')); });
+
+    expect(container.querySelector(`[data-id="${loadingId}"] [data-testid="media-title"]`)!.textContent)
+      .toContain('1600×900');
+    expect(node().style.transform).toBe(draggedPosition);
+    expect(node().querySelector('button[title="详情"]')).not.toBeNull();
+    await finishGesture();
+    expect(node().style.transform).toBe(draggedPosition);
+    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ selected: true }));
+  });
+
+  it('still applies externally restored positions when the node is idle', async () => {
+    props = {
+      ...props,
+      mediaNodes: [{ ...props.mediaNodes[0], position: { x: 300, y: 240 } }],
+    };
+    await act(async () => { root.render(createElement(FlowCanvas, props)); });
+    expect(node().style.transform).toBe('translate(300px,240px)');
+    expect(props.onNodeDragStop).not.toHaveBeenCalled();
+  });
+});

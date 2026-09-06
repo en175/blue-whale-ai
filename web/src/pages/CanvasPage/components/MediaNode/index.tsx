@@ -252,7 +252,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   };
 
   return (
-    <div className={`${styles.wrapper} ${selected ? styles.selected : ''}`} onContextMenu={handleContextMenu}>
+    <div className={`${styles.wrapper} ${selected ? styles.selected : ''}`} style={{ width: contentBox.width }} onContextMenu={handleContextMenu}>
       {/* 选中态悬浮工具条：重新编辑/生成图片/生成视频/生成音频 + 详情/下载/@（位于外部标题上方） */}
       {selected && !data.genStatus && !data.assetMissing && (
         <div className={`nodrag nopan ${styles.toolbar}`} onMouseDown={stop}>
@@ -304,7 +304,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           <Icon size={13} strokeWidth={2} color="#888" />
           <span className={styles.titleName} title={data.fileName || undefined}>{data.fileName || ''}</span>
         </div>
-        <span className={styles.titleMeta}>{titleMeta}</span>
+        <span className={styles.titleMeta} title={titleMeta || undefined}>{titleMeta}</span>
       </div>
       <div className={styles.contentCard} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
         {!data.isFirst && (
