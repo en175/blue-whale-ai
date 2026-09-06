@@ -18,14 +18,13 @@ import {
   CheckCircle2,
   RotateCcw,
   Package,
-  Cog,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { fetchMySkills } from '@/api/skills';
-import { useAgentSession, type ChatMessage, type TurnOutcome } from '../../hooks/useAgentSession';
+import { useAgentSession, type TurnOutcome } from '../../hooks/useAgentSession';
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
 import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock, type OutboundAssetRef } from '@/api/agentSessions';
@@ -51,7 +50,8 @@ import {
 import AssetChip from '../AssetChip';
 import { shouldCancelOnKey } from './cancelShortcut';
 import { dockedPanelLayout, freePanelLayout, type PanelMetrics } from './layout';
-import { splitStreamingBody } from './streamingBody';
+import { itemsFromBlocks, itemsFromLive, type TimelineItem, type Turn } from '../../hooks/sessionTimeline';
+import { ThinkingBlock, ToolCallRow, TurnFooter } from './TurnTimeline';
 
 /** 父组件没传已应用集合时的空集。提到模块级是为了保持引用稳定，避免每次渲染都造一个新 Set。 */
 const EMPTY_APPLIED_IDS: ReadonlySet<string> = new Set<string>();
@@ -254,88 +254,6 @@ function CardPreview({ preview }: { preview: PartialCardPreview | null }) {
           )}
         </div>
       ))}
-    </div>
-  );
-}
-
-/**
- * 可折叠思考过程：小字展示。
- *
- * 两种内容，来源不同所以分开渲染：`steps` 是服务端选的模板文案，`reasoning` 是模型自己的
- * 原话（IKA3M6）。原话排在步骤下面——它更长、更零散，也更可能出现自我否定和内部名词，
- * 不该抢在"它现在在干什么"前面。
- *
- * ## 开合归谁管
- *
- * `autoOpen` 是**随状态变化的默认值**，不是初始值。此前这里是 `useState(defaultOpen)`：
- * 初始值只在挂载那一刻读一次，而这个块几乎总是先由 `run.activity` 的步骤挂载（那时还没有
- * 思考原话，`defaultOpen` 是 false），等原话流进来时组件早就挂上了，于是"运行中默认展开"
- * 这条从来没生效过——思考一直在流，用户一个字也看不见。
- *
- * 用户点过就以用户为准（`override`），没点过就跟着 `autoOpen` 走。这样运行中自动展开、
- * 正文一出现自动收起，而任何时候用户都能把它按回自己想要的样子。
- */
-function ThinkingBlock({
-  steps,
-  reasoning,
-  autoOpen = false,
-}: {
-  steps: string[];
-  reasoning?: string;
-  autoOpen?: boolean;
-}) {
-  const [override, setOverride] = useState<boolean | null>(null);
-  const open = override ?? autoOpen;
-  const setOpen = (next: boolean) => setOverride(next);
-
-  /**
-   * 思考原话自己就是一个滚动容器（`.thinkingReasoning` 上有 `max-height: 220px; overflow-y: auto`），
-   * 所以外层消息列表滚到底对它没有任何作用——文字是在那个 220px 的盒子里往下长的，盒子外面的
-   * 高度一点没变。要跟上流式输出，得滚这个盒子本身。
-   *
-   * `stick` 记的是「用户此刻是不是贴着底」，在 onScroll 里更新而不是在 effect 里现算：
-   * 追加发生之后再量，距离底部早就被新内容撑开了，怎么算都是「已经离底」，于是永远不滚。
-   * 用户往上翻看前文时 stick 变 false，不把他拽回来；翻回底部又变 true，继续跟。
-   */
-  const reasoningRef = useRef<HTMLDivElement>(null);
-  const stickRef = useRef(true);
-  useEffect(() => {
-    const el = reasoningRef.current;
-    if (!el || !open || !stickRef.current) return;
-    el.scrollTop = el.scrollHeight;
-  }, [reasoning, open]);
-
-  if (steps.length === 0 && !reasoning) return null;
-  return (
-    <div className={styles.thinkingBlock}>
-      <button
-        type="button"
-        className={styles.thinkingToggle}
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-      >
-        <span>思考过程</span>
-        {open ? <ChevronUp size={12} strokeWidth={2.5} /> : <ChevronDown size={12} strokeWidth={2.5} />}
-      </button>
-      {open && (
-        <div className={styles.thinkingBody}>
-          {steps.map((s, i) => (
-            <div key={i} className={styles.thinkingStep}>{s}</div>
-          ))}
-          {reasoning && (
-            <div
-              ref={reasoningRef}
-              className={styles.thinkingReasoning}
-              onScroll={(e) => {
-                const el = e.currentTarget;
-                stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-              }}
-            >
-              {reasoning}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -552,32 +470,18 @@ function GenerationCard({
   );
 }
 
-/** 助手消息：按结构化块渲染（text/thinking/card），无块时回退纯文本；追问与需求理解确认都走自然语言（grillme 式），不用结构化卡
- * 生成卡组支持「手动应用整组」「取消」（04 §5.2 用户动作），组内单卡仍可各自应用/双击编辑 */
 /**
- * 一个内容块的 React key。
+ * 一轮里助手那一半：按条目顺序渲染（IKDK5I / IKDK5K）。
  *
- * 此前用的是数组下标（审查 W·A18）。`attachCards` 每次水合都会**先剥掉已有的 card 块再整体
- * 追加**：`blocks: [...kept, ...blocks]`。于是同一个下标上的卡片可能被换成另一张，而
- * key 和组件类型都没变——React 保住组件实例，`GenerationCard` 里的 `edited` / `editingField` /
- * `draftValue` 三份草稿原样留在原地，用户正在编辑的那几个字提交到了另一张卡上。
+ * 落库的回答与进行中的回答走同一个函数——前者从消息部件投影条目，后者从进行中的一轮投影，
+ * 两者形状一致（sessionTimeline.ts）。「思考 → 短句 → 工具 → 短句」是数组顺序的自然结果。
  *
- * 卡片按自己的身份做 key；其余块按**同类型内的序号**——这样插入一张卡不会让后面的文字块
- * 整体位移一格。服务端的 content 数组没有块级 id，同类型序号是这里能拿到的最稳的东西。
+ * 条目的 React key 用**同类型内的序号**：进行中的回答被服务端消息替换时条目形状不变，
+ * 工具行与思考块的开合状态因此得以保留，不会在那一瞬间跳一下。卡片按自己的身份做 key。
  */
-function blockKey(block: SessionContentBlock, ordinals: Record<string, number>): string {
-  if (block.type === 'card' && block.card) {
-    const id = block.card.cardId ?? block.card.shotTitle;
-    if (id) return `card:${id}`;
-  }
-  const kind = block.type ?? 'text';
-  const n = (ordinals[kind] = (ordinals[kind] ?? 0) + 1);
-  return `${kind}:${n}`;
-}
-
-
-function AssistantMessageBody({
-  message,
+function AssistantTurnBody({
+  turn,
+  streamingText,
   onCardApply,
   onApplyAllCards,
   onCancelCardGroup,
@@ -585,7 +489,9 @@ function AssistantMessageBody({
   appliedCardIds,
   cancelledMessageIds,
 }: {
-  message: ChatMessage;
+  turn: Turn;
+  /** 打字动画已露出的正文前缀，只对进行中的那一轮有意义。 */
+  streamingText: string;
   onCardApply: (card: NonNullable<SessionContentBlock['card']>, patch: { shotTitle?: string; visual?: string; prompt?: string }) => void;
   onApplyAllCards: (cards: NonNullable<SessionContentBlock['card']>[]) => void;
   onCancelCardGroup: (messageId: string) => void;
@@ -593,61 +499,65 @@ function AssistantMessageBody({
   appliedCardIds: ReadonlySet<string>;
   cancelledMessageIds: Set<string>;
 }) {
-  const blocks = message.blocks ?? [];
-  // 每次渲染新起一份计数，`blockKey` 边走边填。
-  const blockOrdinals: Record<string, number> = {};
-  const structured = blocks.filter((b) => b.type !== 'text');
-  // 有结构化块 → 按块渲染；无 → 纯文本 markdown
-  if (structured.length === 0) return <Markdown text={message.content} />;
-  const cardBlocks = blocks.filter((b) => b.type === 'card' && b.card).map((b) => b.card!);
-  const groupCancelled = cancelledMessageIds.has(message.id);
-  const unappliedCards = cardBlocks.filter((c) => !appliedCardIds.has(c.cardId ?? c.shotTitle));
-  const showGroupActions = cardBlocks.length > 1 && !groupCancelled && unappliedCards.length > 0;
+  const items: TimelineItem[] = turn.assistant
+    ? itemsFromBlocks(turn.assistant.blocks ?? [], turn.assistant.content)
+    : turn.live
+      ? itemsFromLive(turn.live, streamingText)
+      : [];
+  if (items.length === 0) return null;
+  const messageId = turn.assistant?.id ?? turn.key;
+  const live = turn.live !== null && !turn.live.ended;
+  // 正文还没出来时思考展开：那段等待正是它要填的；正文一出现就收起。
+  const hasBody = items.some((item) => item.kind === 'text' || item.kind === 'tool' || item.kind === 'card');
+  const cards = items.flatMap((item) => (item.kind === 'card' ? [item.card] : []));
+  const groupCancelled = cancelledMessageIds.has(messageId);
+  const unappliedCards = cards.filter((c) => !appliedCardIds.has(c.cardId ?? c.shotTitle));
+  const showGroupActions = cards.length > 1 && !groupCancelled && unappliedCards.length > 0;
+  const ordinals: Record<string, number> = {};
+  const keyOf = (item: TimelineItem): string => {
+    if (item.kind === 'card') {
+      const id = item.card.cardId ?? item.card.shotTitle;
+      if (id) return `card:${id}`;
+    }
+    const n = (ordinals[item.kind] = (ordinals[item.kind] ?? 0) + 1);
+    return `${item.kind}:${n}`;
+  };
   return (
     <>
-      {blocks.map((b) => {
-        const key = blockKey(b, blockOrdinals);
-        if (b.type === 'thinking' && (b.thinking?.steps || b.thinking?.reasoning)) {
-          return (
-            <ThinkingBlock key={key} steps={b.thinking.steps ?? []} reasoning={b.thinking.reasoning} />
-          );
+      {items.map((item) => {
+        const key = keyOf(item);
+        switch (item.kind) {
+          case 'reasoning':
+            return (
+              <ThinkingBlock key={key} steps={item.steps} reasoning={item.reasoning} live={item.live} autoOpen={live && !hasBody} />
+            );
+          case 'tool':
+            return <ToolCallRow key={key} item={item} />;
+          case 'text':
+            return <Markdown key={key} text={item.text} />;
+          case 'card': {
+            const cardId = item.card.cardId ?? item.card.shotTitle;
+            return (
+              <GenerationCard
+                key={key}
+                card={item.card}
+                onApply={(patch) => onCardApply(item.card, patch)}
+                disabled={disabled}
+                applied={appliedCardIds.has(cardId)}
+                cancelled={groupCancelled}
+              />
+            );
+          }
+          case 'card_preview':
+            return <CardPreview key={key} preview={item.preview} />;
         }
-        // 按轮动作台账（`run_actions`）**不再渲染**（IKCPQ1，2026-09-06）：它把内部执行状态
-        // （「未执行」「失败」、耗时）直接摊给用户，而那些状态词来自服务端的门与调度细节，
-        // 用户读到的是故障感，不是信息。服务端仍然落库、仍然随消息部件送过来——那是运维
-        // 的检出原语；这里只是不再把它画出来。
-        // 正文时间轴上的一次工具调用（IKD79E）：它夹在两段正文之间，让「先说了什么、
-        // 才去做的什么」读得出来。
-        if (b.type === 'tool_call' && b.summary) {
-          return (
-            <div key={key} className={styles.inlineToolCall}>
-              <Cog size={11} strokeWidth={2.5} className={styles.inlineToolCallIcon} />
-              <span>{b.summary}</span>
-            </div>
-          );
-        }
-        if (b.type === 'card' && b.card) {
-          const cardId = b.card.cardId ?? b.card.shotTitle;
-          return (
-            <GenerationCard
-              key={key}
-              card={b.card}
-              onApply={(patch) => onCardApply(b.card!, patch)}
-              disabled={disabled}
-              applied={appliedCardIds.has(cardId)}
-              cancelled={groupCancelled}
-            />
-          );
-        }
-        if (b.text) return <Markdown key={key} text={b.text} />;
-        return null;
       })}
       {showGroupActions && (
         <div className={styles.cardGroupActions}>
           <button
             type="button"
             className={styles.cardGroupCancelBtn}
-            onClick={() => onCancelCardGroup(message.id)}
+            onClick={() => onCancelCardGroup(messageId)}
             disabled={disabled}
           >
             取消
@@ -799,7 +709,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const [floating, setFloating] = useState(false);
   /* ---- 对话状态机：消息流/运行态/流式文本由 session 维度事件流驱动（快照水合 + assistant.delta 流式） ---- */
   const {
-    messages,
+    turns,
     sessionId,
     sessions,
     activeSkillIds,
@@ -808,12 +718,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     streaming,
     runningRunId,
     failedRunId,
-    thinkingSteps,
-    reasoningText,
+    liveActivity,
     turnStartedAt,
     turnOutcome,
-    partialCard,
-    streamToolCalls,
     chatError,
     retryUnavailable,
     sendError,
@@ -1035,9 +942,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   }, [cancellable, stopRun]);
 
   /**
-   * 新消息 / 流式文本 / 流式思考 / 进入页面：滚动条始终拉到最底部，展示最新内容。
-   *
-   * 思考那两项此前不在依赖里，于是新增的步骤不会把列表带到底。
+   * 轮次有任何变化（新消息、流式正文、思考、工具进度）/ 进入页面：滚动条拉到最底部。
+   * `turns` 是一份派生值，进行中的一轮每收一条增量就换引用，所以只依赖它和打字动画即可。
    *
    * 注意这里管不到思考原话的滚动：`.thinkingReasoning` 自带 `max-height` 与 `overflow-y`，
    * 是独立的滚动容器，外层滚到底对它无效。那一段由 ThinkingBlock 自己滚（见其中的注释）。
@@ -1046,7 +952,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     const el = listRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, streamingText, reasoningText, thinkingSteps, runningRunId]);
+  }, [turns, streamingText, runningRunId]);
 
   /** 初始化位置：屏幕右侧；首次挂载也走统一安全边界，窄视口不会横向溢出。 */
   useEffect(() => {
@@ -1556,7 +1462,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         </div>
       </div>
 
-      {messages.length === 0 && !streamingText ? (
+      {turns.length === 0 ? (
         <>
           {/* 提示文案 */}
           <div className={styles.hintArea}>
@@ -1581,83 +1487,54 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           </div>
         </>
       ) : (
-        /* 对话消息流 */
+        /* 对话消息流：按轮渲染（IKDK5I）。一轮 = 这一批用户输入 + 回答它的那些条目 + 轮尾的账。
+           进行中的回答就是「最后一轮还在长」，不再是挂在整个列表之后的全局区——运行中再发一句，
+           回答仍然在自己的问题下面。 */
         <div className={styles.messageList} ref={listRef}>
-          {messages.map((m) =>
-            m.role === 'user' ? (
-              <div key={m.id} className={styles.userBubble}>
-                {/* Skill 标记（无气泡，仅文字+图标） */}
-                {m.skill_ref && (
-                  <div className={styles.userSkillChip}>
-                    <BookText size={13} strokeWidth={2} />
-                    <span>{m.skill_ref.name}</span>
-                  </div>
-                )}
-                {/* 图片/画布视频提及先于正文：缩略图 → 文件名 → 用户文字。 */}
-                <MessageAssetPreview blocks={m.blocks} chips={m.chips} />
-                {/* @卡片气泡（与输入框中的气泡一致） */}
-                {m.chips?.filter((c) => !hasInlineVisualMention(m.blocks, c.id)).map((c) => (
-                  <div key={`chip-${c.id}`} className={styles.userMediaChip}>
-                    <span className={styles.userMediaChipAt}>@</span>
-                    <span className={styles.userMediaChipLabel}>{c.label}</span>
-                  </div>
-                ))}
-                {/* 文字内容 */}
-                {m.content && <span className={styles.userMessageText}>{m.content}</span>}
-              </div>
-            ) : (
-              <div key={m.id} className={styles.assistantBlock}>
-                <AssistantMessageBody
-                  message={m}
-                  onCardApply={handleCardApply}
-                  onApplyAllCards={handleApplyAllCards}
-                  onCancelCardGroup={handleCancelCardGroup}
-                  disabled={runningRunId !== null || streaming}
-                  appliedCardIds={appliedIds}
-                  cancelledMessageIds={cancelledMessageIds}
-                />
-              </div>
-            ),
-          )}
-          {/* Agent 的思考过程：run.activity 实时步 + reasoning_trace 终态链 + 模型原话（IKA3M6）。
-              **正文出现之前展开，正文一出现就收起。** 那段等待正是它要填的，收起来就等于还是
-              白屏；而正文一开始写，思考就退居次要——它已经完成了自己的作用，再占着屏幕只会
-              把用户真正要读的东西挤下去。用户点过就以用户为准。
-              key 挂 runId：换一轮就是新的一次思考，上一轮用户手动收起过不该带到下一轮。 */}
-          {(thinkingSteps.length > 0 || reasoningText) && (
-            <div className={styles.assistantBlock}>
-              <ThinkingBlock
-                key={runningRunId ?? 'idle'}
-                steps={thinkingSteps}
-                reasoning={reasoningText}
-                autoOpen={!streamingText}
-              />
-            </div>
-          )}
-          {/* Agent 运行中的实时流式文本（assistant.delta 累积投影）。
-              正文按工具调用断开——「先说一句、再动手、再说一句」在**等待过程中**就成立，
-              不必等消息落库回来（IKD79E 落的是终态那一半，这里是实时的这一半）。断点由
-              `run.activity` 带 `tool` 时的缓冲长度决定，所以它随打字动画自然到达。 */}
-          {streamingText && (
-            <div className={styles.assistantBlock}>
-              {splitStreamingBody(streamingText, streamToolCalls).map((piece, index) =>
-                piece.type === 'tool_call' ? (
-                  <div key={`stc-${index}`} className={styles.inlineToolCall}>
-                    <Cog size={11} strokeWidth={2.5} className={styles.inlineToolCallIcon} />
-                    <span>{piece.summary}</span>
-                  </div>
-                ) : (
-                  <Markdown key={`stx-${index}`} text={piece.text} />
-                ),
+          {turns.map((turn) => (
+            <div key={turn.key} className={styles.turn}>
+              {turn.user.map((m) => (
+                <div key={m.id} className={styles.userBubble}>
+                  {/* Skill 标记（无气泡，仅文字+图标） */}
+                  {m.skill_ref && (
+                    <div className={styles.userSkillChip}>
+                      <BookText size={13} strokeWidth={2} />
+                      <span>{m.skill_ref.name}</span>
+                    </div>
+                  )}
+                  {/* 图片/画布视频提及先于正文：缩略图 → 文件名 → 用户文字。 */}
+                  <MessageAssetPreview blocks={m.blocks} chips={m.chips} />
+                  {/* @卡片气泡（与输入框中的气泡一致） */}
+                  {m.chips?.filter((c) => !hasInlineVisualMention(m.blocks, c.id)).map((c) => (
+                    <div key={`chip-${c.id}`} className={styles.userMediaChip}>
+                      <span className={styles.userMediaChipAt}>@</span>
+                      <span className={styles.userMediaChipLabel}>{c.label}</span>
+                    </div>
+                  ))}
+                  {/* 文字内容 */}
+                  {m.content && <span className={styles.userMessageText}>{m.content}</span>}
+                </div>
+              ))}
+              {(turn.assistant || turn.live || turn.account) && (
+                <div className={styles.assistantBlock}>
+                  <AssistantTurnBody
+                    turn={turn}
+                    streamingText={streamingText}
+                    onCardApply={handleCardApply}
+                    onApplyAllCards={handleApplyAllCards}
+                    onCancelCardGroup={handleCancelCardGroup}
+                    disabled={runningRunId !== null || streaming}
+                    appliedCardIds={appliedIds}
+                    cancelledMessageIds={cancelledMessageIds}
+                  />
+                  {/* 这一轮的账挂在轮尾（IKDK5L）；还在跑的轮由输入框上方的状态行读秒。 */}
+                  {turn.account && !turn.live && <TurnFooter account={turn.account} />}
+                </div>
               )}
             </div>
-          )}
-          {/* 产卡逐版预览（IKA3GF）：在正文之后、成品卡将要出现的位置 */}
-          <CardPreview preview={partialCard} />
-          {/* 「已超过 1 分钟无新内容」的兜底提示已移除（IKCPQ1 / IKD79P，2026-09-06）：它的计时器只认
-              正文与思考步，不认活动事件，读长视频、产卡前抽取这类合法的长等待里它必然误报。
-              等待期间的反馈由下面的常驻状态行负责（秒数持续走动、最近一个活动节点）；
-              取消与重连的入口分别在发送侧与会话切换处。 */}
+          ))}
+          {/* 「已超过 1 分钟无新内容」的兜底提示已移除（IKCPQ1 / IKD79P）：等待期间的反馈由
+              状态行（秒数持续走动、最近一个活动节点）与工具行的读秒负责。 */}
           {/* 取消运行的入口统一在发送侧（发送按钮变停止按钮 + ESC），这里不再重复一个（IKA4PH）。 */}
         </div>
       )}
@@ -1665,15 +1542,18 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
       {/* 输入区域 */}
       <div className={styles.inputArea}>
-        {/* 常驻状态行（IKA3GD）：钉在输入框正上方，不在滚动区里。
-            它是"屏幕上什么都没有"的地板，用户往上翻历史时更不能让它跟着滚走。 */}
-        <RunStatusLine
-          startedAt={turnStartedAt}
-          activity={thinkingSteps.at(-1) ?? null}
-          hasRunId={runningRunId !== null}
-          outcome={turnOutcome}
-          streamedText={streamingText}
-        />
+        {/* 运行中的状态行（IKA3GD）：钉在输入框正上方，不在滚动区里。
+            它是"屏幕上什么都没有"的地板，用户往上翻历史时更不能让它跟着滚走。
+            终态即收起（IKDK5L）：这一轮的账挂到了它所属那一轮的尾部，不再常驻在这里。 */}
+        {turnOutcome === null && (
+          <RunStatusLine
+            startedAt={turnStartedAt}
+            activity={liveActivity}
+            hasRunId={runningRunId !== null}
+            outcome={null}
+            streamedText={streamingText}
+          />
+        )}
         {chatError && <div className={styles.chatErrorHint}>{chatError}</div>}
         {sendError && <div className={styles.chatErrorHint}>{sendError}</div>}
         {paymentRequiredMessage && <div className={styles.chatErrorHint}>{paymentRequiredMessage}</div>}

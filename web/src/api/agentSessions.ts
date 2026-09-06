@@ -49,6 +49,14 @@ export interface SessionContentBlock {
   tool?: string;
   summary?: string;
   /**
+   * `tool_call` 的终态（IKDK5F）：`ok` / `failed` / `rejected`、相对 Run 开始的起止毫秒、子步骤。
+   * 前端据此把「正在读取图片」翻成「已读取图片 · 10.4s」。老记录没有这几个字段。
+   */
+  status?: 'ok' | 'failed' | 'rejected' | 'cancelled';
+  started_ms?: number;
+  ended_ms?: number | null;
+  substeps?: { id: string; summary: string; started_ms: number; ended_ms: number | null }[];
+  /**
    * 思考过程块（可折叠展示）。
    *
    * `steps` 是服务端选的模板文案，`reasoning` 是模型自己的原话（assistant.reasoning.delta，
@@ -196,6 +204,8 @@ export interface SessionMessage {
 export interface SessionRun {
   run_id: string;
   session_id?: string;
+  /** 这个 Run 回答的输入批次（IKDK5C）。回答按它挂回自己的问题下面。 */
+  input_batch_id?: string | null;
   status: string;
   failure?: { code?: string; message?: string } | null;
   trace_id?: string | null;
@@ -369,6 +379,19 @@ export function fetchSessionSnapshot(projectId: string, sessionId: string): Prom
   ).finally(() => snapshotPending.delete(key));
   snapshotPending.set(key, p);
   return p;
+}
+
+/**
+ * 会话的 Run 列表 GET /projects/:id/sessions/:sid/runs（IKDK5L）。
+ *
+ * 快照只带 `active_run` 与 `latest_terminal_run`，历史轮的账（耗时、token、上下文）只有这里有。
+ * 连上会话后拉一次，失败不影响对话——账只是少显示几行小字。
+ */
+export function listSessionRuns(
+  projectId: string,
+  sessionId: string,
+): Promise<{ items: SessionRun[]; next_cursor?: string | null }> {
+  return sessionRequest(agentPath('session_runs', projectId, { session_id: sessionId }));
 }
 
 /** 删除会话 DELETE /projects/:id/sessions/:sid（历史会话下拉「删除」，需二次确认）

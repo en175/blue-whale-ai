@@ -53,6 +53,7 @@ export function projectMessage(m: SessionMessage): ChatMessage {
     content: textOf(m.content),
     blocks,
     sequence_no: m.sequence,
+    inputBatchId: m.input_batch_id ?? null,
     ...(m.source_run_id ? { sourceRunId: m.source_run_id } : {}),
     ...(m.role === 'user' ? { chips: chipsFromContent(blocks) } : {}),
   };
@@ -76,6 +77,8 @@ export function mergeConfirmedUser(prev: ChatMessage[], msg: SessionMessage): Ch
         role: 'user',
         content,
         sequence_no: msg.sequence,
+        // 批次 id 只有回执才有：它是这条消息进哪一轮的依据（IKDK5I）。
+        inputBatchId: msg.input_batch_id ?? null,
         skill_ref: optimistic.skill_ref,
         resource_ref: optimistic.resource_ref,
         chips: optimistic.chips?.length ? optimistic.chips : chipsFromContent(msg.content),
@@ -85,5 +88,16 @@ export function mergeConfirmedUser(prev: ChatMessage[], msg: SessionMessage): Ch
       return next;
     }
   }
-  return [...prev, { id: msg.message_id, role: 'user' as const, content, sequence_no: msg.sequence, blocks: msg.content ?? [], chips: chipsFromContent(msg.content) }];
+  return [
+    ...prev,
+    {
+      id: msg.message_id,
+      role: 'user' as const,
+      content,
+      sequence_no: msg.sequence,
+      inputBatchId: msg.input_batch_id ?? null,
+      blocks: msg.content ?? [],
+      chips: chipsFromContent(msg.content),
+    },
+  ];
 }

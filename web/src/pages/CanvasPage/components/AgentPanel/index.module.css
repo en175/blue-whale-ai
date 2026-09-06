@@ -1124,53 +1124,65 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 可折叠思考过程（S1） ---- */
+/* ---- 思考块：它在想什么（IKDK5K） ----
+   竖线 + 小字，压在正文之下一档。运行中的标记脉动，和状态行用同一个 ✶——它们是同一件事。 */
 .thinkingBlock {
-  border-left: 2px solid #4a4d50;
-  padding: 4px 0 4px 12px;
-  margin-bottom: 4px;
+  border-left: 2px solid #3a3d40;
+  padding: 2px 0 2px 12px;
+  margin: 2px 0;
 }
 
 .thinkingToggle {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   padding: 0;
   background: transparent;
   border: none;
-  color: #aeb2b8;
+  color: #9a9ea4;
   font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
+  line-height: 20px;
 }
 
 .thinkingToggle:hover {
   color: var(--color-text-primary);
 }
 
+.thinkingMark {
+  color: #6f7378;
+  font-size: 11px;
+}
+
+.thinkingMarkLive {
+  color: var(--color-accent-agent);
+  animation: runStatusPulse 1.4s ease-in-out infinite;
+}
+
 .thinkingBody {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  margin-top: 6px;
+  gap: 2px;
+  margin-top: 4px;
 }
 
 .thinkingStep {
-  font-size: var(--font-size-md);
-  color: #92959a;
+  font-size: var(--font-size-sm);
+  color: #8a8e93;
   line-height: 1.6;
 }
 
-/* 模型自己的思考原文（IKA3M6）。比步骤更淡、更小，并保留换行——它是原样转发的草稿，
-   长且零散，排版上要一眼看出它和上面那些服务端文案不是一回事。
+/* 模型自己的思考原文（IKA3M6）。比步骤更淡，并保留换行——它是原样转发的草稿，
+   排版上要一眼看出它和上面那些服务端文案不是一回事。
    限高加滚动：4000 字的思考不该把回复顶出视口。 */
 .thinkingReasoning {
-  margin-top: 6px;
+  margin-top: 4px;
   padding-top: 6px;
   border-top: 1px solid var(--color-border-secondary);
   font-size: var(--font-size-sm);
-  color: #a8abb0;
+  color: #a3a6ab;
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1721,23 +1733,156 @@
   opacity: 0.8;
 }
 
-/**
- * 正文时间轴上的一次工具调用（IKD79E）。
- *
- * 刻意做得很轻：它夹在两段正文中间，说的是「它是在说完哪句话之后去做的」，不是一份要读的
- * 清单。做重了会把用户的注意力从正文上拽走。（按轮动作台账那一块已于 IKCPQ1 移除。）
- */
-.inlineToolCall {
+/* ---- 工具行：它在做什么（IKDK5K） ----
+   夹在两段正文之间，说的是「它是在说完哪句话之后去做的」。做得很轻——正文才是主角——
+   但它有生命周期：转圈读秒 → 打勾带耗时 / 叉 / 横线。子步骤缩进一档，运行中默认展开。 */
+.toolCall {
+  display: flex;
+  flex-direction: column;
+  margin: 2px 0 2px 2px;
+  font-size: var(--font-size-sm);
+  line-height: 20px;
+  color: #92959a;
+}
+
+.toolCallHead {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 4px 0 4px 2px;
-  font-size: var(--font-size-sm);
-  color: #92959a;
-  line-height: 1.6;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
 }
 
-.inlineToolCallIcon {
+.toolCallHead:disabled {
+  cursor: default;
+}
+
+.toolCallHead:not(:disabled):hover .toolCallLabel {
+  color: var(--color-text-primary);
+}
+
+.toolCallMark {
   flex: none;
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
   color: #b4b7bc;
+}
+
+.toolCallLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 耗时用等宽数字，读秒时整行不抖。 */
+.toolCallElapsed {
+  flex: none;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.toolCallChevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--color-text-tertiary);
+}
+
+.toolCallRunning .toolCallMark {
+  color: var(--color-accent-agent);
+}
+
+.toolCallDone .toolCallMark {
+  color: #7fb069;
+}
+
+.toolCallFailed {
+  color: var(--color-error);
+}
+
+.toolCallFailed .toolCallMark {
+  color: var(--color-error);
+}
+
+.toolCallRejected {
+  color: var(--color-text-tertiary);
+}
+
+.toolCallSubsteps {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 2px 5px;
+  padding-left: 12px;
+  border-left: 1px solid #3a3d40;
+  color: #7f8388;
+}
+
+.toolCallSubstep {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+  .thinkingMarkLive {
+    animation: none;
+  }
+}
+
+/* ---- 轮（IKDK5I）：一批用户输入 + 回答 + 轮尾的账 ---- */
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---- 轮尾的账（IKDK5L）：一行小字，压到最低一档。完成态不写字，只有符号和数字。 ---- */
+.turnFooter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -2px 0 0 2px;
+  font-size: var(--font-size-xs);
+  line-height: 16px;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.turnFooterMark {
+  flex: none;
+}
+
+.turnFooterMeta {
+  white-space: nowrap;
+}
+
+.turnFooterCancelled .turnFooterMark {
+  opacity: 0.6;
+}
+
+/* 失败：整行带上语气——只染一个符号在一屏灰字里看不见。 */
+.turnFooterFailed {
+  color: var(--color-error);
 }

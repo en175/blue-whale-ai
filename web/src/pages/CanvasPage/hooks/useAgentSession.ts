@@ -3,25 +3,28 @@
  * 项目维度 /api/projects/:id/conversation 服务只接纳消息不执行 Run（worker 缺失），
  * 会话维度 /api/agent/v1/projects/:id/sessions 为唯一能产出助手回复的服务：
  * - 进入页面：列表取最近会话（无则创建）→ 快照水合消息历史 → 从 event_cursor 订阅事件流
- * - message.accepted → 确认用户消息；run.queued/started → 运行态
- * - assistant.delta → 流式文本投影；run.completed → 助手消息固化
- * - run.failed → 重试；取消运行走 runs/:runId/cancel
+ * - 事件流里能改数据的那部分全部交给纯函数 `reduceSessionEvent`（sessionTimeline.ts）：
+ *   消息、进行中的一轮、每轮的账、运行态。这里只做副作用：打字动画、状态行计时、
+ *   刷新会话列表、回查生成卡、错误横幅。
+ * - 取消运行走 sessions/:sid/cancel；失败可重试
+ *
+ * 对外只交付 `turns[]`（IKDK5I）：一轮 = 一批用户输入 + 回答它的 Run + 按序条目。历史轮由
+ * 快照投影，进行中的轮由事件流拼接，渲染函数不区分两者。
  * ============================================ */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { advanceReveal, hasPendingReveal } from './streamPacing';
-import { toPartialCardPreview, type PartialCardPreview } from './partialCardPreview';
 import {
   listSessions,
   createSession,
   deleteSession,
   fetchSessionSnapshot,
+  listSessionRuns,
   sendSessionMessage,
   setSessionCreativeSkills,
   cancelSession,
   cancelSessionRun,
   retrySessionRun,
   subscribeSessionEvents,
-  type SessionMessage,
   type SessionRecord,
   type SessionRun,
   type SessionContentBlock,
@@ -33,19 +36,29 @@ import { isApiError } from '@/api/http';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
 import { estimateOutputTokens, parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
 import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusLine';
-import { mergeConfirmedUser, projectMessage, textOf } from './userMessageProjection';
+import { mergeConfirmedUser, projectMessage } from './userMessageProjection';
+import {
+  EMPTY_SESSION_STATE,
+  accountOfRun,
+  buildTurns,
+  isTerminalStatus,
+  msOf,
+  reduceSessionEvent,
+  startLiveRun,
+  terminalOutcomeOf,
+  type SessionState,
+} from './sessionTimeline';
 
-/** 一轮结束后的结账信息，供常驻状态行报账（IKA4PG）。 */
+/** 一轮结束后的结账信息（IKA4PG）。 */
 export interface TurnOutcome {
   outcome: RunOutcome;
-  /** 终态时刻。从快照恢复的历史轮次可能没有（Run 异常终止时 finished_at 为空），
-   *  此时状态行退回当前时间：数字略大，但好过让一条已结束的状态行继续读秒。 */
+  /** 终态时刻。从快照恢复的历史轮次可能没有（Run 异常终止时 finished_at 为空）。 */
   finishedAt: number | null;
   tokenUsage: RunTokenUsage | null;
   contextCapacity: RunContextCapacity | null;
   /** 结束那一刻按已收到正文估的输出 token。真实用量到达前由它顶着，见 runStatusLine。 */
   estimatedOutputTokens: number | null;
-  /** 失败时后端的那句人话（run.failure.message）。null 时状态行退回「未能完成」。 */
+  /** 失败时后端的那句人话（run.failure.message）。 */
   failureText: string | null;
 }
 
@@ -55,6 +68,7 @@ const api = {
   createSession,
   deleteSession,
   fetchSessionSnapshot,
+  listSessionRuns,
   sendSessionMessage,
   cancelSession,
   cancelSessionRun,
@@ -68,10 +82,15 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  /** 结构化内容块（思考过程/需求理解/追问/生成卡），无结构化时为空数组 */
+  /** 结构化内容块（思考过程/工具调用/生成卡），无结构化时为空数组 */
   blocks?: SessionContentBlock[];
   /** 服务端事件序号（排序依据；本地乐观气泡为最大值） */
   sequence_no: number;
+  /**
+   * 这条消息所属的输入批次（IKDK5C）。用户消息是它进哪一批，助手消息是它**回答**哪一批。
+   * 轮的归组只认它，不认序号——运行中再发一句，序号会比正在生成的回答小。
+   */
+  inputBatchId?: string | null;
   /** 产出这条消息的 Run；生成卡按它对回自己的助手消息 */
   sourceRunId?: string;
   /** 本地乐观上屏、尚未被服务端事件确认 */
@@ -84,65 +103,16 @@ export interface ChatMessage {
   chips?: { id: string; label: string }[];
 }
 
-/**
- * Run 状态这一个字符串域的唯一分类表。
- *
- * 三个来源写法各不相同：事件流按事件名给（`run.cancelled`），发送回执与快照按 `run.status`
- * 给（`cancelled`）。全部落到这一张表，加一种终态只改这里。
- *
- * `stopped` 归入「已取消」：那是用户自己按的停止，不该看到失败的语气。
- * `outcome_unknown` 归入失败：对用户而言「不知道」和「失败」一样需要重试。
- *
- * 此前这套判断散在四处——这张表、一个 if 链、外加两份写死的
- * `['failed','outcome_unknown'].includes(...)`（审查 W·S15）。
- */
-const RUN_STATUS_OUTCOME: Readonly<Record<string, RunOutcome>> = {
-  completed: 'completed',
-  succeeded: 'completed',
-  cancelled: 'cancelled',
-  canceled: 'cancelled',
-  stopped: 'cancelled',
-  failed: 'failed',
-  outcome_unknown: 'failed',
-};
-
-/** 这个状态是否已经是终态。表里有就是终态——表本身就是终态清单。 */
-function isTerminalStatus(status: string): boolean {
-  return Object.hasOwn(RUN_STATUS_OUTCOME, status);
-}
-
-/**
- * run 状态 → 状态行终局。
- *
- * 表外的状态一律按失败处理：认不出的终态对用户的意义和「不知道」一样，都需要重试入口。
- */
-function terminalOutcomeOf(status: string): RunOutcome {
-  return RUN_STATUS_OUTCOME[status] ?? 'failed';
-}
-
-/**
- * 这一轮是否需要给用户一个重试入口。
- *
- * 只对终态成立——还在跑的时候谈不上重试。此前两处写的是
- * `['failed','outcome_unknown'].includes(status)`，靠调用点恰好都在终态分支里才没出错。
- */
+/** 这一轮是否需要给用户一个重试入口。只对终态成立——还在跑的时候谈不上重试。 */
 function needsRetry(status: string): boolean {
   return isTerminalStatus(status) && terminalOutcomeOf(status) === 'failed';
 }
 
-/** ISO 时间 → 毫秒时间戳；缺失或不可解析返回 null（调用方自己决定怎么兜底）。 */
-function msOf(value: unknown): number | null {
-  if (typeof value !== 'string' || !value) return null;
-  const ms = Date.parse(value);
-  return Number.isNaN(ms) ? null : ms;
-}
-
 /**
- * 把快照里那条已经结束的 Run 翻成状态行要的「上一轮的账」。
+ * 把快照里那条已经结束的 Run 翻成「上一轮的账」。
  *
- * 起点取 `created_at` 而不是 `started_at`：状态行量的是**用户等了多久**，而排队、记忆投影、
- * 领券这些都发生在 `started_at` 之前，用后者会把这段等待抹掉。没有起点就返回 null——
- * 宁可不显示，也不要显示一个算错的耗时。
+ * 起点取 `created_at` 而不是 `started_at`：量的是**用户等了多久**，排队、记忆投影、领券都发生在
+ * `started_at` 之前。没有起点就返回 null——宁可不显示，也不要显示一个算错的耗时。
  */
 function parseSettledTurn(run: SessionRun): { startedAt: number; outcome: TurnOutcome } | null {
   const startedAt = msOf(run.created_at) ?? msOf(run.started_at);
@@ -154,8 +124,6 @@ function parseSettledTurn(run: SessionRun): { startedAt: number; outcome: TurnOu
       finishedAt: msOf(run.finished_at),
       tokenUsage: parseRunTokenUsage(run.token_usage),
       contextCapacity: parseRunContextCapacity(run.context_capacity),
-      // 正文早已固化成消息，流式缓冲是空的：这里没有可估的东西，也不该去估。
-      // 真实用量缺失时状态行自己会把 token 那一段省掉。
       estimatedOutputTokens: null,
       failureText: run.failure?.message || null,
     },
@@ -169,7 +137,6 @@ function parseSettledTurn(run: SessionRun): { startedAt: number; outcome: TurnOu
  * 前者「删除失败，可以重试」，后者「已经删掉了，只是没连上」。
  */
 const DELETE_ALREADY_REPORTED = Symbol('delete-already-reported');
-
 
 /** 字段安全转字符串 */
 const str = (v: unknown): string =>
@@ -196,11 +163,6 @@ function attachCards(messages: ChatMessage[], records: PromptCardRecord[] | unde
     if (idx < 0) idx = next.map((m) => m.role).lastIndexOf('assistant');
     if (idx < 0) continue;
     // 幂等：同一批次可能因重连再次水合，**只替换这一批**，别把别的批次一起抹掉（审查 W·A7）。
-    //
-    // 此前这里剥的是全部 card 块。配上下面那个 lastIndexOf 兜底——没有匹配到
-    // authoring_run_id 的记录统统解析到同一个下标——两批卡片进来只有后一批留下。
-    // 让重挂载安全的那个幂等过滤，正好也是让多批附加有损的原因。
-    //
     // cardId 是 `${revision_id}#${shot_no}`，前缀就是这一批的身份：按前缀剥，
     // 剥掉的恰好是自己上一次挂的那些。
     const revisionId = record.active_revision?.revision_id;
@@ -218,8 +180,21 @@ function attachCards(messages: ChatMessage[], records: PromptCardRecord[] | unde
  * @param projectId 当前项目ID（空串时不初始化）
  */
 export function useAgentSession(projectId: string) {
-  /** 正式对话消息（快照水合 + 事件投影） */
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  /**
+   * 事件流能改动的那部分状态：消息、进行中的一轮、每轮的账、运行态（sessionTimeline.ts）。
+   *
+   * 一份 state 加一份同步镜像 ref。事件处理器、动画帧、发送回执都要在渲染之间读到最新值，
+   * 而它们此前各自持有一个 ref（accRef / thinkingStepsRef / runningRef / terminalRunIdsRef…），
+   * 改一处漏一处。所有改动都走 `commit`。
+   */
+  const [session, setSession] = useState<SessionState>(EMPTY_SESSION_STATE);
+  const sessionRef = useRef<SessionState>(EMPTY_SESSION_STATE);
+  const commit = useCallback((update: (prev: SessionState) => SessionState) => {
+    const next = update(sessionRef.current);
+    if (next === sessionRef.current) return;
+    sessionRef.current = next;
+    setSession(next);
+  }, []);
   /** 当前会话ID */
   const [sessionId, setSessionId] = useState<string | null>(null);
   /**
@@ -238,65 +213,31 @@ export function useAgentSession(projectId: string) {
   const [deleteError, setDeleteError] = useState<{ sessionId: string; message: string } | null>(null);
   /** 当前会话的事件订阅取消函数（切换会话时先解绑旧的，防串话） */
   const unsubRef = useRef<(() => void) | null>(null);
-  /** 流式文本（assistant.delta 累积投影） */
+  /** 打字动画已露出的正文前缀。缓冲在 live.text 里，这只是表现。 */
   const [streamingText, setStreamingText] = useState('');
   /** 流式进行中（发送成功到运行终态之间） */
   const [streaming, setStreaming] = useState(false);
-  /** 当前运行中的 Run ID */
-  const [runningRunId, setRunningRunId] = useState<string | null>(null);
-  /** 最近失败的 Run ID（供重试） */
-  const [failedRunId, setFailedRunId] = useState<string | null>(null);
-  /** 当前运行中的思考过程步骤（run.activity 流式累积）。只属于进行中的一轮：
-   * 终态时整个搬进那条助手消息的 thinking 块——思考属于某一轮回复，不是对话级的悬浮物。 */
-  const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
-  const thinkingStepsRef = useRef<string[]>([]);
-  thinkingStepsRef.current = thinkingSteps;
-  /**
-   * 模型自己的思考原文（assistant.reasoning.delta 累积）。
-   *
-   * 和上面那些步骤是两回事：那些是服务端选的模板，这是模型自己的话。分开存也分开渲染，
-   * 因为它们的可信度不一样——模板是我们的承诺，思考是模型随口说的，混在一起看不出区别。
-   *
-   * 它存在的理由是首字之前那段空白：实测中位轮次要 8.4 秒才出第一个字，而那段时间里模型
-   * 一直在思考。丢帧是合法的（服务端尽力而为），所以这里只做追加，不做完整性校验。
-   */
-  const [reasoningText, setReasoningText] = useState('');
-  const reasoningTextRef = useRef('');
-  reasoningTextRef.current = reasoningText;
+  const streamingRef = useRef(false);
+  streamingRef.current = streaming;
   /**
    * 本轮开始的时刻。状态行的地板：提交那一刻就打点，不等 run.queued、不等模型吐字，
    * 这样"提交后什么都没有"的那几秒也有秒数在走。见 runStatusLine.ts。
    */
   const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
   /**
-   * 上一轮的结账信息（IKA4PG）。终态到达时填，下一轮开始时清。
+   * 上一轮的结账信息。终态到达时填，下一轮开始时清。
    *
-   * 状态行不再随终态消失，而是留下来报这一轮的账，所以「跑完了」这件事必须有地方记：
-   * turnStartedAt 一旦置空，状态行就没有起点可算了。
+   * IKDK5L 之后状态行只在运行中显示，账挂到轮尾；这个值仍然要记——它是「这一轮结束了」
+   * 这件事本身：状态行靠它判断该不该收起，积分查询靠它知道该刷新了。
    */
   const [turnOutcome, setTurnOutcome] = useState<TurnOutcome | null>(null);
-  /**
-   * 起点与终局是同一件事的两半——「本轮的账」——所以对它们的改动一律走下面三个动作，
-   * 不再各自裸调 setter。
-   *
-   * 理由是具体的：这两个状态此前在六处成对出现，其中一处只清了起点，结果是发送失败后
-   * 上一轮的终局残留在屏幕上；另一处两个都清了，结果是回执直接终态时状态行整条消失。
-   * 两个 bug 是同一种形状——改了一半。做成原子动作后这种写法就写不出来了。
-   */
-  /**
-   * `turnOutcome` 的同步镜像。
-   *
-   * 事件处理器要判断「上一轮的账还挂着吗」，而它的依赖数组里没有 turnOutcome（挂进去会让
-   * 整个处理器每轮重建）。ref 在下面几个原子动作里**同步**更新——不用 useEffect 同步，
-   * 因为终态事件与紧随其后的新一轮开始事件之间可能没有一次渲染，effect 太晚。
-   */
   const turnOutcomeRef = useRef<TurnOutcome | null>(null);
   const beginTurn = useCallback(() => {
     setTurnStartedAt(Date.now());
     turnOutcomeRef.current = null;
     setTurnOutcome(null);
   }, []);
-  /** 本轮结束，留下这一轮的账。刻意不动 turnStartedAt：没有起点就算不出耗时。 */
+  /** 本轮结束。刻意不动 turnStartedAt：没有起点就算不出耗时。 */
   const settleTurn = useCallback((outcome: TurnOutcome) => {
     turnOutcomeRef.current = outcome;
     setTurnOutcome(outcome);
@@ -304,15 +245,9 @@ export function useAgentSession(projectId: string) {
   /**
    * 新一轮的开始事件到达（`run.queued` / `run.started`）。
    *
-   * 两种情形，必须分开处理——此前只做了前一种，于是有了审查 W·A1：
-   *
-   * 1. **本轮已经开表**（sendMessage 走的路）：什么都不做。本地打的点更早（提交那一刻），
-   *    不该被服务端的排队时间往后推。
-   * 2. **上一轮的终局还挂在屏幕上，却来了新一轮的开始**：重试、自动排队的下一轮、
-   *    另一个标签页发起的 run——这三条路都不经过 sendMessage，因此谁都没清过 turnOutcome。
-   *    结果是整轮显示上一轮的判决（「未能完成 12s」），秒数和 token 双双冻结，
-   *    而这个文件的 docblock 说这条状态行是**活性信号**，绝不能死掉。
-   *    此时用服务端时间重新起表——本地没有提交时刻可用。
+   * 1. **本轮已经开表**（sendMessage 走的路）：什么都不做。本地打的点更早（提交那一刻）。
+   * 2. **上一轮的终局还挂着，却来了新一轮的开始**：重试、自动排队的下一轮、另一个标签页
+   *    发起的 run——都不经过 sendMessage。此时用服务端时间重新起表。
    */
   const adoptTurnStart = useCallback((at: number) => {
     if (turnOutcomeRef.current !== null) {
@@ -323,16 +258,7 @@ export function useAgentSession(projectId: string) {
     }
     setTurnStartedAt((cur) => cur ?? at);
   }, []);
-  /**
-   * 从历史里把已经结束的那一轮重新立起来（刷新 / 切回一个旧会话）。
-   *
-   * 起点与终局此前是纯内存态：切会话被 `clearTurn` 抹掉，刷新则只有**还活着**的运行能靠
-   * `run.queued` 事件补回起点——已经跑完的那一轮不会再发事件，于是状态行整条消失。
-   * 而用户回看一个会话时想知道的恰恰是"上一轮花了多久、多少 token"，这份账本来就在
-   * 快照的 `latest_terminal_run` 里躺着。
-   *
-   * 只在没有起点时生效：活着的运行由事件流负责，历史不该把它盖掉。
-   */
+  /** 从历史里把已经结束的那一轮重新立起来（刷新 / 切回一个旧会话）。只在没有起点时生效。 */
   const adoptSettledTurn = useCallback((startedAt: number, outcome: TurnOutcome) => {
     setTurnStartedAt((cur) => {
       if (cur !== null) return cur;
@@ -347,8 +273,6 @@ export function useAgentSession(projectId: string) {
     turnOutcomeRef.current = null;
     setTurnOutcome(null);
   }, []);
-  /** 正在写入的生成卡预览（prompt_card.partial.v1）。只用于展示，终态卡片到达即让位。 */
-  const [partialCard, setPartialCard] = useState<PartialCardPreview | null>(null);
   /** 「新对话」失败提示：创建/连接新会话失败时展示，成功/切换后清除（不静默吞掉） */
   const [chatError, setChatError] = useState<string | null>(null);
   /** 重试接口不可用标志（后端 404 时置位：重试按钮禁用并说明原因，不做静默降级；新 run/新消息清除） */
@@ -358,95 +282,31 @@ export function useAgentSession(projectId: string) {
   /** Run 在计费门暂停时的可操作提示；保留 runningRunId 以允许取消，不再显示“处理中” */
   const [paymentRequiredMessage, setPaymentRequiredMessage] = useState<string | null>(null);
 
-  /** 流式累积缓冲：收到的全部文本，永远是事实来源；显示多少由 revealedRef 决定 */
-  const accRef = useRef('');
-  /**
-   * 流式期间的工具调用断点：`at` 是这次调用发生时缓冲里已有的字数。
-   *
-   * 「先说一句、再动手、再说一句」此前只在消息落库之后成立——服务端把有序段落写进消息部件，
-   * 前端从 `content` 里读出来渲染。等待过程中拿到的却是一整块文本，交错要等消息回来才「啪」
-   * 地出现。而顺序信息其实一直都在：`run.activity` 事件带 `tool` 时，正是正文该断开的时刻，
-   * 且服务端保证它排在此前所有 delta 之后（`agent-service.ts` 的 `deltas.drain()`）。
-   *
-   * 记的是缓冲长度而不是已露出的长度：打字动画是表现，缓冲才是事实。断点因此会随动画自然
-   * 到达，而不是提前跳出来。
-   */
-  const streamToolCallsRef = useRef<{ tool: string; summary: string; at: number }[]>([]);
-  const [streamToolCalls, setStreamToolCalls] = useState<{ tool: string; summary: string; at: number }[]>([]);
   /** 已露出的字数（小数）：模型一次给一整句，按帧匀速露出才像在打字，见 streamPacing.ts */
   const revealedRef = useRef(0);
   /** 匀速露出的动画帧句柄 */
   const revealFrameRef = useRef<number | null>(null);
   /** 上一帧时间戳，用来算帧间隔 */
   const revealLastAtRef = useRef(0);
-  /** 当前流式交付对应的 run_id（delta stream_id 为 assistant_run_<id>） */
-  const streamRunRef = useRef('');
-  /** 运行态/流式态镜像（供回调内同步判断，避免闭包旧值） */
-  const runningRef = useRef<string | null>(null);
-  runningRef.current = runningRunId;
-  const streamingRef = useRef(false);
-  streamingRef.current = streaming;
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = sessionId;
   /** 每次连接/复位递增；所有异步快照、水合和创建回调只允许当前代写入状态。 */
   const connectionEpochRef = useRef(0);
   /** 历史列表请求代次；session.updated 会使更早的列表响应失效，避免标题回滚。 */
   const sessionsEpochRef = useRef(0);
-  /** 已观察到终态的 Run，防 REST ack 晚于 SSE 终态时把它重新标成运行中。 */
-  const terminalRunIdsRef = useRef<Set<string>>(new Set());
   /** 本轮提交过生成卡的 Run：revision_committed 先到、run.completed 后到，用它串起两个事件 */
   const cardRunsRef = useRef<Set<string>>(new Set());
 
-  /** upsert 助手消息（按 message_id 幂等；与流式固化内容重复时合并） */
-  const upsertAssistant = useCallback((msg: SessionMessage) => {
-    const content = textOf(msg.content);
-    const blocks = msg.content ?? [];
-    // IKAI1A 之后服务端正式消息**带** thinking 块了，来件通常自带思考，走上面那条路。
-    // 这个兜底仍然留着：来件不带时（老 Run 没有落库的原话、或投影还没跟上），整体替换
-    // blocks 会把终态时刚固化进消息的思考抹掉，所以本地已有而来件没有时，把它保在最前面。
-    const keepThinking = (existing: ChatMessage | undefined): SessionContentBlock[] => {
-      if (blocks.some((b) => b.type === 'thinking')) return blocks;
-      const prior = existing?.blocks?.filter((b) => b.type === 'thinking') ?? [];
-      return prior.length > 0 ? [...prior, ...blocks] : blocks;
-    };
-    const runLink = msg.source_run_id ? { sourceRunId: msg.source_run_id } : {};
-    setMessages((prev) => {
-      const idx = prev.findIndex((m) => m.id === msg.message_id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = {
-          ...next[idx],
-          content: content || next[idx].content,
-          blocks: keepThinking(next[idx]),
-          sequence_no: msg.sequence,
-          ...runLink,
-        };
-        return next;
-      }
-      // 与流式固化的助手消息内容一致 → 替换其 id（避免重复气泡）
-      const dupIdx = content ? prev.findIndex((m) => m.role === 'assistant' && m.content === content) : -1;
-      if (dupIdx >= 0) {
-        const next = [...prev];
-        next[dupIdx] = {
-          ...next[dupIdx],
-          id: msg.message_id,
-          blocks: keepThinking(next[dupIdx]),
-          sequence_no: msg.sequence,
-          ...runLink,
-        };
-        return next;
-      }
-      return [
-        ...prev,
-        { id: msg.message_id, role: 'assistant' as const, content, blocks, sequence_no: msg.sequence, ...runLink },
-      ];
-    });
-  }, []);
-
-  /** 确认用户消息：替换乐观气泡（无 client 关联字段，兜底最近一条乐观用户消息） */
-  const confirmUser = useCallback((msg: SessionMessage) => {
-    setMessages((prev) => mergeConfirmedUser(prev, msg));
-  }, []);
+  /** 记一笔账（快照里的 Run、Run 列表、发送回执）。事件流里的终态由 reducer 自己记。 */
+  const recordAccount = useCallback(
+    (run: SessionRun | null | undefined, fallbackFinishedAt: number | null = null) => {
+      if (!run?.run_id) return;
+      const account = accountOfRun(run, fallbackFinishedAt);
+      if (!account) return;
+      commit((prev) => ({ ...prev, accounts: { ...prev.accounts, [run.run_id]: account } }));
+    },
+    [commit],
+  );
 
   /** 停掉匀速露出的循环（终态、丢弃、切会话都要停，否则会对着空缓冲空转） */
   const stopReveal = useCallback(() => {
@@ -465,17 +325,18 @@ export function useAgentSession(projectId: string) {
     revealLastAtRef.current = performance.now();
     const step = () => {
       revealFrameRef.current = null;
+      const buffer = sessionRef.current.live?.text ?? '';
       const now = performance.now();
       const elapsedMs = now - revealLastAtRef.current;
       revealLastAtRef.current = now;
       revealedRef.current = advanceReveal({
         revealed: revealedRef.current,
-        received: accRef.current.length,
+        received: buffer.length,
         elapsedMs,
         done: false,
       });
-      setStreamingText(accRef.current.slice(0, Math.floor(revealedRef.current)));
-      if (hasPendingReveal(revealedRef.current, accRef.current.length)) {
+      setStreamingText(buffer.slice(0, Math.floor(revealedRef.current)));
+      if (hasPendingReveal(revealedRef.current, buffer.length)) {
         revealFrameRef.current = requestAnimationFrame(step);
       }
     };
@@ -485,61 +346,12 @@ export function useAgentSession(projectId: string) {
   /** 卸载时收掉动画帧，避免在已销毁的组件上 setState */
   useEffect(() => stopReveal, [stopReveal]);
 
-  /** 固化流式缓冲为助手消息（运行终态时调用；与后续 assistant_message 按内容去重） */
-  const settleStream = useCallback((runId: string) => {
-    // 固化的是缓冲里的全部文本，不是画面上已经露出的部分：
-    // 动画是表现，文本是事实，不能因为没播完就少存一段。
-    const text = accRef.current;
+  /** 一轮结束（任何终态、计费门）：动画停、露出的前缀清零、流式态收起。数据由 reducer 管。 */
+  const endStreaming = useCallback(() => {
     stopReveal();
     revealedRef.current = 0;
-    accRef.current = '';
-    streamToolCallsRef.current = [];
-    setStreamToolCalls([]);
     setStreamingText('');
     streamingRef.current = false;
-    setStreaming(false);
-    if (!text.trim()) return;
-    // 思考随消息走：固化成消息里的第一个块（正文之前），全局思考区随即清空。
-    // 不这么做的话，回复一进 messages，全局思考块就落到它下面去了——正是被反复报过的那个观感。
-    const steps = thinkingStepsRef.current;
-    const reasoning = reasoningTextRef.current;
-    setMessages((prev) => {
-      if (prev.some((m) => m.role === 'assistant' && (m.content === text || m.id.includes(runId)))) {
-        return prev;
-      }
-      const blocks: SessionContentBlock[] =
-        steps.length > 0 || reasoning
-          ? [
-              { type: 'thinking', thinking: { steps, ...(reasoning ? { reasoning } : {}) } },
-              { type: 'text', text },
-            ]
-          : [];
-      return [
-        ...prev,
-        {
-          id: `as-${runId}`,
-          role: 'assistant' as const,
-          content: text,
-          blocks,
-          sequence_no: Number.MAX_SAFE_INTEGER,
-          sourceRunId: runId,
-        },
-      ];
-    });
-    if (steps.length > 0) setThinkingSteps([]);
-    if (reasoning) setReasoningText('');
-  }, [stopReveal]);
-
-  /** 失败/取消/不确定终态不能把 provisional delta 固化成正式助手消息。 */
-  const discardStream = useCallback(() => {
-    stopReveal();
-    revealedRef.current = 0;
-    accRef.current = '';
-    streamToolCallsRef.current = [];
-    setStreamToolCalls([]);
-    streamRunRef.current = '';
-    streamingRef.current = false;
-    setStreamingText('');
     setStreaming(false);
   }, [stopReveal]);
 
@@ -555,7 +367,9 @@ export function useAgentSession(projectId: string) {
       .catch((e) => console.warn('获取历史会话列表失败:', e));
   }, [projectId]);
 
-  /** 事件状态机：session SSE 事件 → 消息/运行态/流式文本 */
+  /**
+   * 事件状态机：数据交给 `reduceSessionEvent`，这里按事件类型补副作用。
+   */
   const handleEvent = useCallback(
     (ev: SseEvent) => {
       const data = (ev.data && typeof ev.data === 'object' ? ev.data : {}) as Record<string, unknown>;
@@ -564,6 +378,7 @@ export function useAgentSession(projectId: string) {
         unknown
       >;
       const t = ev.type;
+      const occurredAt = msOf(data.occurred_at) ?? Date.now();
 
       /**
        * 回查快照，把本轮提交的生成卡挂到消息上。
@@ -577,7 +392,7 @@ export function useAgentSession(projectId: string) {
         try {
           const snap = await api.fetchSessionSnapshot(projectId, sid);
           if (sessionIdRef.current !== sid) return; // 期间切走了会话，丢弃
-          setMessages((prev) => attachCards(prev, snap.prompt_cards));
+          commit((prev) => ({ ...prev, messages: attachCards(prev.messages, snap.prompt_cards) }));
         } catch (e) {
           console.warn('回查生成卡失败:', e);
         }
@@ -585,145 +400,28 @@ export function useAgentSession(projectId: string) {
 
       if (t === 'stream.ready') return;
 
-      /* ---- 思考过程流式更新（可折叠展示） ---- */
-      if (t === 'reasoning_trace.updated.v1') {
-        // 终态权威（V3 加法事件，run.completed 之后到达）：payload.reasoning_trace.steps 是
-        // {kind, summary} 结构；旧实现读 payload.steps（不存在）导致思考链永远为空。
-        const trace = (payload.reasoning_trace ?? {}) as { steps?: unknown };
-        const steps = Array.isArray(trace.steps)
-          ? trace.steps
-              .map((s) => (typeof s === 'string' ? s : str((s as { summary?: unknown })?.summary)))
-              .filter(Boolean)
-          : [];
-        if (steps.length === 0) return;
-        const traceRunId = str(data.run_id);
-        if (traceRunId && terminalRunIdsRef.current.has(traceRunId)) {
-          // Run 已终态：思考已固化在那条助手消息里，最终链替换消息内的块。
-          // 写回全局区会让它缀在整个对话末尾——思考必须待在它所属的回复上方。
-          setMessages((prev) => {
-            const idx = prev.findIndex(
-              (m) => m.role === 'assistant' && (m.sourceRunId === traceRunId || m.id.includes(traceRunId)),
-            );
-            if (idx < 0) return prev;
-            const target = prev[idx];
-            const blocks = target.blocks ?? [];
-            const rest = blocks.filter((b) => b.type !== 'thinking');
-            const body = rest.length > 0 ? rest : target.content ? [{ type: 'text', text: target.content }] : [];
-            // 模型原话必须原样接过来（IKAI16）。这里此前写的是 `thinking: { steps }`：
-            // 终态链只带模板步骤，一替换就把 commitStream 刚固化进去的 `reasoning` 抹成 undefined。
-            // 而这条事件**总是**在 run.completed 之后到达，所以那不是偶发——模型自己的话只在
-            // 等待期间存在，等待一结束就被自己人删掉，用户看到的就只剩一行「根据对话继续澄清创作方向」。
-            // 权威的只有 steps 这一半：另一半的唯一来源是 assistant.reasoning.delta，终态链里没有它。
-            const priorReasoning = blocks.find((b) => b.type === 'thinking')?.thinking?.reasoning;
-            const next = [...prev];
-            next[idx] = {
-              ...target,
-              blocks: [
-                { type: 'thinking', thinking: { steps, ...(priorReasoning ? { reasoning: priorReasoning } : {}) } },
-                ...body,
-              ],
-            };
-            return next;
-          });
-        } else {
-          setThinkingSteps(steps);
-        }
+      const before = sessionRef.current;
+      // 终态前先把正文估个 token：reducer 下一步就把缓冲清了。
+      const bufferedText = before.live?.text ?? '';
+      commit((prev) => reduceSessionEvent(prev, ev, occurredAt));
+      const after = sessionRef.current;
+
+      /* ---- 正文长了：让打字动画跟上 ---- */
+      if (t === 'assistant.delta' && (after.live?.text ?? '') !== bufferedText) {
+        pumpReveal();
         return;
       }
 
-      /* ---- 按轮动作台账（run_actions.updated.v1，IKB926/IKB93G）：挂到本轮助手消息上 ----
-       * run.completed 之后到达。落库版随刷新从消息部件回来；这条事件负责「不用刷新就出现」。
-       * 挂不到消息（非 completed 终态）就丢弃——快照仍是恢复权威。 */
-      if (t === 'run_actions.updated.v1') {
-        const record = payload.run_actions as import('@/api/agentSessions').RunActionsRecord | undefined;
-        const actionsRunId = str(data.run_id);
-        if (!record || !actionsRunId) return;
-        setMessages((prev) => {
-          const idx = prev.findIndex(
-            (m) => m.role === 'assistant' && (m.sourceRunId === actionsRunId || m.id.includes(actionsRunId)),
-          );
-          if (idx < 0) return prev;
-          const target = prev[idx];
-          const blocks = (target.blocks ?? []).filter((b) => b.type !== 'run_actions');
-          // 位置约定与服务端一致：思考之下、正文之上——先看它做了什么，再读它说了什么。
-          const thinkingCount = blocks.filter((b) => b.type === 'thinking').length;
-          const body = blocks.length > 0 ? blocks : target.content ? [{ type: 'text', text: target.content }] : [];
-          const next = [...prev];
-          next[idx] = {
-            ...target,
-            blocks: [
-              ...body.slice(0, thinkingCount),
-              { type: 'run_actions', run_actions: record },
-              ...body.slice(thinkingCount),
-            ],
-          };
-          return next;
-        });
-        return;
-      }
-
-      /* ---- 产卡过程中的逐版预览（prompt_card.partial.v1，加法事件；IKA3GF） ----
-       * payload.payload 是模型正在写、尚未校验的对象：字段会缺、类型会不对。映射函数是全函数，
-       * 任何形状都不会抛。能落到画布上的卡片只有终态那一张，这里纯展示。 */
-      if (t === 'prompt_card.partial.v1') {
-        const preview = toPartialCardPreview(payload.card_id, payload.payload);
-        if (preview) {
-          setPartialCard(preview);
-        }
-        return;
-      }
-
-      /* ---- 模型自己的思考原文（assistant.reasoning.delta，IKA3M6）：填掉首字之前那段空白 ---- */
-      if (t === 'assistant.reasoning.delta') {
-        const chunk = str(payload.text);
-        if (!chunk) return;
-        setReasoningText((prev) => prev + chunk);
-        return;
-      }
-
-      /* ---- 运行中渐进思考（run.activity：W2 U7 实时思考面，payload {stage,summary,progress}） ---- */
-      if (t === 'run.activity') {
-        const summary = str(payload.summary);
-        if (!summary) return;
-        setThinkingSteps((prev) => (prev[prev.length - 1] === summary ? prev : [...prev, summary]));
-        // 带 `tool` 的活动是一次可见的工具调用，也就是正文该断开的地方。只有服务端白名单里的
-        // 工具才带它，所以这里不必再判一次哪些工具该露面。
-        const tool = str(payload.tool);
-        if (tool) {
-          const at = accRef.current.length;
-          const last = streamToolCallsRef.current[streamToolCallsRef.current.length - 1];
-          // 同一处重复上报就不再记一条——落库那一路的段落合并也是这个规则。
-          if (!last || last.at !== at || last.tool !== tool) {
-            streamToolCallsRef.current = [...streamToolCallsRef.current, { tool, summary, at }];
-            setStreamToolCalls(streamToolCallsRef.current);
-          }
-        }
-        return;
-      }
+      /* ---- 按轮动作台账（run_actions.updated.v1）不再消费（IKCPQ1 / IKDK5K） ----
+       * 它是同一次工具调用的另一份落库视图；工具行已经由 tool.activity 与 tool_call 部件
+       * 画出终态与耗时，再挂一份台账就是同一事实画两次。服务端仍然发，这里不接。 */
 
       /* ---- 需求理解的提出与接纳：不再有 UI 形态（IKAI14） ----
-       * `requirement_understanding.proposed.v1` / `.accepted.v1` 两条事件服务端仍然发，前端
-       * **故意**不为它们渲染任何东西。这里原先长着一张带「确认需求理解 / 修改」按钮的确认卡，
-       * 那是实现时自己长出来的，不是需求——最初的设想就是普通自然语言交互，竞品也没有这一步。
-       *
-       * 而且那张卡是坏的：它调的 `ui_action` 通道在 Run 之外，服务端只落库、开门、发事件，
-       * 不调度下一轮，所以点完确认卡片收起、然后什么都不发生。另外两条通道（自然语言白名单、
-       * 模型自判工具）都发生在 Run 内部，确认完同一轮就产卡——本来就是对的那两条。
-       *
-       * 现在理解摘要只走正文：模型本来就把它写在回复里。后端那道「没确认不产卡」的拦截仍然在，
-       * 它拦的是「需求真的不够时别按假设产卡」，与有没有按钮无关。
-       *
-       * 要恢复 UI 的话请先回到 IKAI14 看这个决定的前因，不要因为「事件没人处理」就加回来。 */
+       * `requirement_understanding.proposed.v1` / `.accepted.v1` 服务端仍然发，前端**故意**不为
+       * 它们渲染任何东西。理解摘要只走正文，确认由模型在对话里判断。要恢复 UI 先回 IKAI14。 */
 
-      /* ---- 用户消息确认 ---- */
       if (t === 'message.accepted') {
-        const msg = payload.message as SessionMessage | undefined;
-        if (msg?.message_id) confirmUser(msg);
-        const runId = str((payload.scheduling as Record<string, unknown> | undefined)?.run_id ?? data.run_id);
-        if (runId) {
-          setFailedRunId(null);
-          runningRef.current = runId;
-          setRunningRunId(runId);
+        if (after.runningRunId && after.runningRunId !== before.runningRunId) {
           setRetryUnavailable(false);
           setPaymentRequiredMessage(null);
           setSendError(null);
@@ -731,63 +429,23 @@ export function useAgentSession(projectId: string) {
         return;
       }
 
-      /* ---- 运行态 ---- */
       if (t === 'run.queued' || t === 'run.started') {
-        const runId = str((payload.run as Record<string, unknown> | undefined)?.run_id ?? data.run_id);
-        if (!runId) return;
-        setFailedRunId((cur) => (cur === runId ? null : cur));
+        if (!after.live) return;
         // 刷新或重连后本地没有提交时刻，用事件自己的服务端时间补上，
         // 否则重进页面秒数会从 0 重新数，等了两分钟的用户看到"3s"。
-        const queuedAt = Date.parse(str(data.occurred_at));
-        adoptTurnStart(Number.isNaN(queuedAt) ? Date.now() : queuedAt);
-        runningRef.current = runId;
-        setRunningRunId(runId);
-        // 新一轮开始：清掉上一轮思考，等 run.activity 事件重建（含自动排队的下一轮）
-        setThinkingSteps([]);
-        setReasoningText('');
-        setPartialCard(null);
+        adoptTurnStart(occurredAt);
         setRetryUnavailable(false);
         setPaymentRequiredMessage(null);
         return;
       }
 
-      /* ---- 助手流式增量（payload.text 为增量片段） ---- */
-      if (t === 'assistant.delta') {
-        const text = str(payload.text);
-        if (!text) return;
-        const streamId = str(payload.stream_id);
-        const runId = streamId.startsWith('assistant_run_')
-          ? streamId.slice('assistant_run_'.length)
-          : str(data.run_id);
-        if (runId && runningRef.current === null && !terminalRunIdsRef.current.has(runId)) {
-          runningRef.current = runId;
-          setRunningRunId(runId);
-        }
-        // 新交付开始：复位缓冲
-        if (streamRunRef.current !== runId) {
-          streamRunRef.current = runId;
-          accRef.current = '';
-          revealedRef.current = 0;
-          streamToolCallsRef.current = [];
-          setStreamToolCalls([]);
-        }
-        accRef.current += text;
-        pumpReveal();
-        return;
-      }
-
       /* ---- 计费门暂停：不是运行中，也不是可自动恢复的终态；明确提示并保留取消入口 ---- */
       if (t === 'run.payment_required') {
-        const run = (payload.run ?? {}) as Record<string, unknown>;
         const reason = (payload.reason ?? {}) as Record<string, unknown>;
-        const runId = str(run.run_id ?? data.run_id);
-        discardStream();
+        endStreaming();
         // 计费门是暂停不是终态，且下方 paymentRequiredMessage 会给出明确说明与处理入口。
         // 让状态行继续读秒会显得还在跑，报终局又不属实，因此这一段交给那条提示独占。
         clearTurn();
-        setPartialCard(null);
-        runningRef.current = runId || null;
-        setRunningRunId(runId || null);
         setPaymentRequiredMessage(str(reason.message) || '运行授权或余额不足，请处理后继续，或取消本次运行。');
         blockIfQuotaInsufficient();
         return;
@@ -803,42 +461,17 @@ export function useAgentSession(projectId: string) {
       ) {
         const run = (payload.run ?? {}) as Record<string, unknown>;
         const runId = str(run.run_id ?? data.run_id);
-        if (runId) terminalRunIdsRef.current.add(runId);
-        // turnStartedAt 刻意保留：状态行结束后要留下来报这一轮的账（耗时与 token），清掉它
-        // 就没有起点可算了。下一轮 sendMessage 会重新置位。
+        // turnStartedAt 刻意保留：积分查询与状态行收起都要知道「这一轮结束了」。
         settleTurn({
           outcome: terminalOutcomeOf(t.slice('run.'.length)),
           finishedAt: Date.now(),
           tokenUsage: parseRunTokenUsage(run.token_usage),
           contextCapacity: parseRunContextCapacity(run.context_capacity),
-          // 必须赶在 settleStream/discardStream 之前取：它们下一行就把正文清空了。
-          // 取 accRef 而不是 streamingText——前者是收到的全部，后者只是逐字动画已经露出的部分。
-          estimatedOutputTokens: estimateOutputTokens(accRef.current),
+          estimatedOutputTokens: estimateOutputTokens(bufferedText),
           failureText: str((run.failure as Record<string, unknown> | undefined)?.message) || null,
         });
-        // 终态一到就撤掉预览：这一刻起权威是校验过的卡片，让半成品留在屏幕上只会让人误以为能用。
-        setPartialCard(null);
-        // cancelled 与 completed 一样固化（IKBRZV BUG-08，方案 A）：用户点停止时已经流出的
-        // 半截正文与思考，服务端从此随取消落库（agent failRun 的 partial），刷新后照常还原；
-        // 这里配套地不再乐观清空——用户亲眼看到的字不因「别写了」而消失。settleStream 对
-        // 空缓冲是 no-op，所以没流出任何字的取消不会生出一条空消息。failed/outcome_unknown
-        // 维持丢弃：服务端没有为它们落库，本地留下的文本刷新后就是对不上的幻影。
-        if (t === 'run.completed' || t === 'run.cancelled') settleStream(runId);
-        else discardStream();
-        // completed/cancelled 路径：settleStream 已把思考固化进助手消息并清空全局区；终态后
-        // 到达的 reasoning_trace.updated.v1 直接更新消息内的块。其余终态没有消息可挂，
-        // 全局思考保留到下一轮 run.queued/started，供回看
-        if (t === 'run.failed' || t === 'run.outcome_unknown') {
-          setFailedRunId(runId || null);
-        }
+        endStreaming();
         setPaymentRequiredMessage(null);
-        setRunningRunId((cur) => {
-          const next = cur === runId ? null : cur;
-          runningRef.current = next;
-          return next;
-        });
-        const assistantMsg = payload.assistant_message as SessionMessage | undefined;
-        if (assistantMsg?.message_id) upsertAssistant(assistantMsg);
         // 会话标题由 agent 服务异步生成（title_generation_failed 时保持 null）：run 终态后
         // 刷新一次历史会话列表，让自动标题/失败兜底无需重开下拉即可在下拉里可见
         refreshSessions();
@@ -853,14 +486,12 @@ export function useAgentSession(projectId: string) {
 
       /* ---- 生成卡已提交：只带 card_id / revision 引用，正文要回查快照 ----
        *
-       * 这个事件是 run.completed 之后才发出的加法事件（服务端先 publish 终态，再 track 一个
-       * 异步任务写这条），实测两者相差 ~24ms。所以「等 run.completed 再回查」这条路在实时链路上
-       * 永远走不到：终态到达时这个 Set 还是空的，回查不触发，卡片只能靠切会话或刷新才出现。
+       * 这个事件是 run.completed 之后才发出的加法事件（实测两者相差 ~24ms）。
        * 两个方向都要接：终态已经过了就立刻回查，没过就记下来交给终态分支。 */
       if (t === 'prompt_card.revision_committed.v1') {
         const runId = str(data.run_id);
         if (!runId) return;
-        if (terminalRunIdsRef.current.has(runId)) void hydrateCards();
+        if (after.terminalRunIds.has(runId)) void hydrateCards();
         else cardRunsRef.current.add(runId);
         return;
       }
@@ -869,8 +500,7 @@ export function useAgentSession(projectId: string) {
       if (t === 'session.updated') {
         const s = (payload.session ?? null) as SessionRecord | null;
         if (s?.session_id) {
-          // 胶囊与 etag 跟着会话走。同一个会话在另一个标签页里被改过，这里也就跟着变了——
-          // 这正是把状态放在会话上而不是放在这个组件里换来的东西。
+          // 胶囊与 etag 跟着会话走。同一个会话在另一个标签页里被改过，这里也就跟着变了。
           if (s.session_id === sessionIdRef.current) {
             setActiveSkills({ ids: s.active_creative_skill_ids ?? [], etag: s.etag ?? null });
           }
@@ -888,7 +518,7 @@ export function useAgentSession(projectId: string) {
         return;
       }
     },
-    [confirmUser, discardStream, pumpReveal, refreshSessions, settleStream, upsertAssistant, projectId, adoptTurnStart, settleTurn, clearTurn],
+    [commit, endStreaming, pumpReveal, refreshSessions, projectId, adoptTurnStart, settleTurn, clearTurn],
   );
 
   /** 复位本地对话态（切换会话/新对话） */
@@ -899,27 +529,18 @@ export function useAgentSession(projectId: string) {
     unsubRef.current = null;
     stopReveal();
     revealedRef.current = 0;
-    accRef.current = '';
-    streamRunRef.current = '';
     cardRunsRef.current.clear();
     // 新开对话不带套路：这正是「会话级」的另一半——载入只在这一个会话里有效（0028）。
     setActiveSkills({ ids: [], etag: null });
-    setMessages([]);
+    commit(() => EMPTY_SESSION_STATE);
     setStreamingText('');
     setStreaming(false);
-    setRunningRunId(null);
-    runningRef.current = null;
-    setFailedRunId(null);
     clearTurn();
-    setThinkingSteps([]);
-    setReasoningText('');
-    setPartialCard(null);
     setChatError(null);
     setRetryUnavailable(false);
     setSendError(null);
     setPaymentRequiredMessage(null);
-    terminalRunIdsRef.current.clear();
-  }, [stopReveal, clearTurn]);
+  }, [stopReveal, clearTurn, commit]);
 
   /** 连接到指定会话：水合快照 + 订阅事件流（先解绑旧订阅，防止串话到上一个会话） */
   const connectSession = useCallback(
@@ -935,13 +556,8 @@ export function useAgentSession(projectId: string) {
       try {
         snap = await api.fetchSessionSnapshot(projectId, session.session_id);
       } catch (e) {
-        // 快照失败必须把会话 id 退回去（审查 W·A2）。
-        //
-        // 这个 id 是 `ensureSession` 的短路条件：留着它，用户关掉错误横幅继续发消息时
-        // ensureSession 会直接返回，POST 也会成功、乐观气泡照常出现、streaming 置真——
-        // **而 SSE 处理器根本没挂上**（抛出发生在 subscribeSessionEvents 之前）。
-        // 于是没有 delta、没有终态，永远等不到回复，只能等 60 秒的兜底提示。
-        // 退回去之后，下一次发送会重新走完整的连接流程，一次网络抖动不再是死局。
+        // 快照失败必须把会话 id 退回去（审查 W·A2）：留着它，ensureSession 会短路，
+        // 用户继续发消息时 POST 成功、乐观气泡照常出现，**而 SSE 处理器根本没挂上**。
         if (connectionEpochRef.current === epoch && sessionIdRef.current === session.session_id) {
           sessionIdRef.current = previousSessionId;
           setSessionId(previousSessionId);
@@ -949,20 +565,7 @@ export function useAgentSession(projectId: string) {
         throw e;
       }
       if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return false;
-      // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
-      setMessages(attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards));
-      // 刷新之后那排胶囊还在：这是会话级载入相对「前端自己记着」的全部意义（0028）。
-      setActiveSkills({
-        ids: snap.session?.active_creative_skill_ids ?? [],
-        etag: snap.session?.etag ?? null,
-      });
-      setChatError(null);
       // 已经是终态的 active_run 归到「上一轮的账」那条路去（审查 W·A4）。
-      //
-      // 此前这里是 `if (active_run) {…} else if (latest_terminal_run) {…}`：active_run 存在
-      // 但已终态时，内层三个分支一个都不匹配，外层的 else if 又被跳过——**重试按钮和状态行
-      // 同时消失**，而那正是这段代码要恢复的两样东西。下面那行 `!isTerminalStatus(...)` 说明
-      // 作者认为这种情况可达，只是没给它出路。
       const liveRun =
         snap.active_run?.run_id && !isTerminalStatus(snap.active_run.status) ? snap.active_run : null;
       const settledRun = liveRun
@@ -970,26 +573,44 @@ export function useAgentSession(projectId: string) {
         : (snap.active_run?.run_id && isTerminalStatus(snap.active_run.status)
             ? snap.active_run
             : snap.latest_terminal_run) ?? null;
+      const accounts: SessionState['accounts'] = {};
+      for (const run of [snap.active_run, snap.latest_terminal_run]) {
+        const account = run?.run_id ? accountOfRun(run) : null;
+        if (account && run?.run_id) accounts[run.run_id] = account;
+      }
+      commit(() => ({
+        ...EMPTY_SESSION_STATE,
+        // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
+        messages: attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards),
+        accounts,
+        runningRunId: liveRun?.run_id ?? null,
+        failedRunId: settledRun?.run_id && needsRetry(settledRun.status) ? settledRun.run_id : null,
+        // 正在跑的那一轮从这里立起来；它的思考与正文随后由事件流补。
+        live:
+          liveRun?.run_id && liveRun.status !== 'payment_required'
+            ? startLiveRun(
+                liveRun.run_id,
+                liveRun.input_batch_id ?? null,
+                msOf(liveRun.created_at) ?? msOf(liveRun.started_at) ?? Date.now(),
+              )
+            : null,
+      }));
+      // 刷新之后那排胶囊还在：这是会话级载入相对「前端自己记着」的全部意义（0028）。
+      setActiveSkills({
+        ids: snap.session?.active_creative_skill_ids ?? [],
+        etag: snap.session?.etag ?? null,
+      });
+      setChatError(null);
       if (liveRun?.run_id) {
         if (liveRun.status === 'payment_required') {
-          setRunningRunId(liveRun.run_id);
-          runningRef.current = liveRun.run_id;
           setStreaming(false);
           setPaymentRequiredMessage(
             liveRun.failure?.message || '运行授权或余额不足，请处理后继续，或取消本次运行。',
           );
         } else {
-          setRunningRunId(liveRun.run_id);
-          runningRef.current = liveRun.run_id;
           setStreaming(true);
         }
       } else if (settledRun?.run_id) {
-        if (needsRetry(settledRun.status)) {
-          setFailedRunId(settledRun.run_id);
-        }
-        // 上一轮的账：起点用入队时刻（用户等待是从提交开始算的，不是从模型开始跑算的），
-        // 终局用运行状态。两端时间缺一不可——没有起点就算不出耗时，没有终点秒数会一直走，
-        // 一条早已结束的状态行看起来像还在跑。
         const settled = parseSettledTurn(settledRun);
         if (settled) adoptSettledTurn(settled.startedAt, settled.outcome);
       }
@@ -1003,17 +624,23 @@ export function useAgentSession(projectId: string) {
           handleEvent(event);
         },
       );
+      // 历史轮的账（IKDK5L）：快照只带最后两条 Run，其余从 Run 列表补。拉不到就少几行小字，不影响对话。
+      api.listSessionRuns(projectId, session.session_id)
+        .then(({ items }) => {
+          if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return;
+          for (const run of items ?? []) recordAccount(run);
+        })
+        .catch((e) => console.warn('获取会话运行记录失败:', e));
       return true;
     },
-    [projectId, handleEvent, adoptSettledTurn],
+    [projectId, handleEvent, adoptSettledTurn, recordAccount, commit],
   );
 
   /**
    * 确保当前有一个已连接的会话，没有就现建一个。
    *
    * 初始化只在挂载时跑一次，失败就把 sessionId 永久留在 null——用户此后每次发送
-   * 都只能得到「会话正在初始化」，既不会自愈也没有重试入口，是个死胡同。
-   * 发送前先走这里，让一次网络抖动不再毁掉整个面板。
+   * 都只能得到「会话正在初始化」。发送前先走这里，让一次网络抖动不再毁掉整个面板。
    */
   const ensureSession = useCallback(async (): Promise<string | null> => {
     if (sessionIdRef.current) return sessionIdRef.current;
@@ -1084,12 +711,8 @@ export function useAgentSession(projectId: string) {
       setDeleteError((prev) => (prev?.sessionId === targetId ? null : prev));
       api.deleteSession(projectId, targetId)
         .catch((e) => {
-          // 只有**删除本身**失败才报「删除失败」（审查 W·A6）。
-          //
-          // 此前 .catch 罩住了整个 .then 体，连同后面的 listSessions / createSession /
-          // connectSession。删成功但重连失败时，resetLocal() 已经把面板清空了，用户却看到
-          // 一条红色「删除失败」钉在一个**已经不存在的会话**行上，然后去重试一个必然 404
-          // 的删除。善后失败是另一回事，走 chatError 那条路说「会话已删除，但重新连接失败」。
+          // 只有**删除本身**失败才报「删除失败」（审查 W·A6）。善后失败是另一回事，
+          // 走 chatError 那条路说「会话已删除，但重新连接失败」。
           console.warn('删除会话失败:', e);
           setDeleteError({
             sessionId: targetId,
@@ -1109,7 +732,6 @@ export function useAgentSession(projectId: string) {
         })
         .catch((e) => {
           if (e === DELETE_ALREADY_REPORTED) return;
-          // 删除成功了，善后没成功。别把这说成删除失败——那会把用户送去重试一个 404。
           console.warn('删除后重新连接失败:', e);
           setChatError('会话已删除，但重新连接失败，请刷新页面');
         });
@@ -1136,7 +758,6 @@ export function useAgentSession(projectId: string) {
       // 没有显式传入就从 content 里捞非文本块，调用方少传一个参数也不会把胶囊漏掉。
       const finalResourceRef = resourceRef ?? content.filter((b) => b.type !== 'text');
       // 纯附件消息是合法的：上传一张图、一个字不打就发，是用户对附件做的第一个动作（IKAL46）。
-      // 文本与胶囊都空才是真的没内容。
       if (textBlocks.length === 0 && finalResourceRef.length === 0) return false;
       if (!projectId) return false;
       if (blockIfQuotaInsufficient()) return false;
@@ -1155,27 +776,30 @@ export function useAgentSession(projectId: string) {
         }
         setSendError(null);
       }
-      if (runningRef.current !== null || streamingRef.current) return false;
+      if (sessionRef.current.runningRunId !== null || streamingRef.current) return false;
       const optimisticId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setSendError(null);
       // 乐观上屏：用户侧气泡显示**用户实际输入的文字**（不含 chip prompt），胶囊各自单独渲染。
       const skillRef = forcedSkillId ? { skill_id: forcedSkillId, name: skillName ?? '' } : undefined;
-      setMessages((prev) => [
+      commit((prev) => ({
         ...prev,
-        {
-          id: optimisticId,
-          role: 'user' as const,
-          content: userText ?? '',
-          // 乐观气泡也带上素材引用（IKAL46）：否则图要等服务端回执才出现，看着像「发完就没了」。
-          // 只有 `asset_ref` 块会被 MessageAssetPreview 挑出来渲染缩略图，画布节点块由 chips 负责。
-          blocks: finalResourceRef,
-          sequence_no: Number.MAX_SAFE_INTEGER,
-          optimistic: true,
-          skill_ref: skillRef,
-          resource_ref: finalResourceRef.length > 0 ? finalResourceRef : undefined,
-          chips: chips && chips.length > 0 ? chips : undefined,
-        },
-      ]);
+        messages: [
+          ...prev.messages,
+          {
+            id: optimisticId,
+            role: 'user' as const,
+            content: userText ?? '',
+            // 乐观气泡也带上素材引用（IKAL46）：否则图要等服务端回执才出现，看着像「发完就没了」。
+            blocks: finalResourceRef,
+            sequence_no: Number.MAX_SAFE_INTEGER,
+            inputBatchId: null,
+            optimistic: true,
+            skill_ref: skillRef,
+            resource_ref: finalResourceRef.length > 0 ? finalResourceRef : undefined,
+            chips: chips && chips.length > 0 ? chips : undefined,
+          },
+        ],
+      }));
       streamingRef.current = true;
       setStreaming(true);
       // 提交即开表。请求还没发出去、Run 还没排上队，用户也已经在等了，这段时间必须算进去。
@@ -1188,45 +812,50 @@ export function useAgentSession(projectId: string) {
           skillRef,
         });
         if (connectionEpochRef.current !== connectionEpoch || sessionIdRef.current !== sid) return true;
-        if (ack.message?.message_id) confirmUser(ack.message);
+        const message = ack.message;
+        if (message?.message_id) commit((prev) => ({ ...prev, messages: mergeConfirmedUser(prev.messages, message) }));
         const run = ack.run;
-        if (run?.run_id && !terminalRunIdsRef.current.has(run.run_id)) {
+        if (run?.run_id && !sessionRef.current.terminalRunIds.has(run.run_id)) {
           if (run.status === 'payment_required') {
             streamingRef.current = false;
             setStreaming(false);
             // 与 SSE 那条 payment_required 路径保持一致（审查 W·A8）。
-            // 那边的理由写在原处：计费门是暂停不是终态，让状态行继续读秒会显得还在跑，
-            // 报终局又不属实，所以这一段交给下面的 paymentRequiredMessage 独占。
-            // 同一件事走两条路进来，不该一条清表一条不清。
             clearTurn();
-            runningRef.current = run.run_id;
-            setRunningRunId(run.run_id);
+            commit((prev) => ({ ...prev, runningRunId: run.run_id }));
             setPaymentRequiredMessage(
               run.failure?.message || '运行授权或余额不足，请处理后继续，或取消本次运行。',
             );
             blockIfQuotaInsufficient();
           } else if (isTerminalStatus(run.status)) {
-            terminalRunIdsRef.current.add(run.run_id);
             streamingRef.current = false;
             setStreaming(false);
             // 回执回来时 Run 已经是终态（幂等命中、或排队即失败）：这仍然是一轮结束，
-            // 该按终态报账，而不是把状态行整条抹掉。清掉起点等于让刚提交的那一轮
-            // 在屏幕上凭空消失——用户看到的是自己发了一句话然后什么都没发生。
+            // 该按终态报账，而不是把状态行整条抹掉。
             settleTurn({
               outcome: terminalOutcomeOf(run.status),
               finishedAt: Date.now(),
-              // 回执的 SessionRun 上没有这些字段，真实数字随后由事件流补。
               tokenUsage: null,
               contextCapacity: null,
               estimatedOutputTokens: null,
               failureText: run.failure?.message || null,
             });
-            runningRef.current = null;
-            setRunningRunId(null);
-            if (needsRetry(run.status)) setFailedRunId(run.run_id);
+            commit((prev) => ({
+              ...prev,
+              runningRunId: null,
+              failedRunId: needsRetry(run.status) ? run.run_id : prev.failedRunId,
+              terminalRunIds: new Set(prev.terminalRunIds).add(run.run_id),
+            }));
+            recordAccount(run, Date.now());
           } else {
-            runningRef.current = run.run_id;
-            setRunningRunId(run.run_id);
+            // 回执可能先于 run.queued 事件到：这一轮从这里立起来，事件到了只补字段不重建。
+            commit((prev) => ({
+              ...prev,
+              runningRunId: run.run_id,
+              live:
+                prev.live && prev.live.runId === run.run_id
+                  ? prev.live
+                  : startLiveRun(run.run_id, run.input_batch_id ?? message?.input_batch_id ?? null, Date.now()),
+            }));
           }
         }
         return true;
@@ -1235,10 +864,9 @@ export function useAgentSession(projectId: string) {
         streamingRef.current = false;
         setStreaming(false);
         // 这里刻意清空而不是写终局：请求就没发出去，这一轮从未开始，乐观消息也回滚了。
-        // 屏幕并不沉默——下面的 sendError 会明确说发送失败且输入已保留，此时再挂一条
-        // 「未能完成 0s」只是把同一件事说两遍。「地板」要托的是静默，不是已有提示的场合。
+        // 下面的 sendError 会明确说发送失败且输入已保留，再挂一条「未能完成 0s」只是把同一件事说两遍。
         clearTurn();
-        setMessages((prev) => prev.filter((message) => message.id !== optimisticId));
+        commit((prev) => ({ ...prev, messages: prev.messages.filter((message) => message.id !== optimisticId) }));
         if (isApiError(e) && e.code === 'capability_required') {
           setSendError('当前环境未配置 Agent 运行能力券，请联系管理员配置后重试；输入内容已保留。');
         } else if (isApiError(e) && (e.status === 402 || e.code === 'payment_required')) {
@@ -1250,7 +878,7 @@ export function useAgentSession(projectId: string) {
         return false;
       }
     },
-    [confirmUser, projectId, ensureSession, beginTurn, settleTurn, clearTurn],
+    [projectId, ensureSession, beginTurn, settleTurn, clearTurn, recordAccount, commit],
   );
 
   /**
@@ -1265,13 +893,7 @@ export function useAgentSession(projectId: string) {
     setChatError(null);
     api.cancelSession(projectId, sid).catch((e) => {
       console.warn('停止 Agent 运行失败:', e);
-      // 刻意**不**把本地状态清成「已停止」。
-      //
-      // 原来的写法在失败分支里清了 runningRunId 与 streaming，于是取消请求失败的样子和成功
-      // 一模一样：按钮变回箭头，界面说停了，而后端那一轮还在跑。取消的路径写错打在 404 上
-      // 整整这么久没被发现，正是因为这里替它圆了场。
-      //
-      // 这一轮到底停没停，权威在事件流：真停了会有终态事件，没停就该继续显示在跑。
+      // 刻意**不**把本地状态清成「已停止」：这一轮到底停没停，权威在事件流。
       // 本地能做的只有把失败说出来。
       setChatError('停止失败，这一轮可能仍在运行；可稍后重试或刷新页面。');
     });
@@ -1280,11 +902,12 @@ export function useAgentSession(projectId: string) {
   /** 重试失败运行（仅 failed 可重试） */
   const retryRun = useCallback(() => {
     const sid = sessionIdRef.current;
+    const failedRunId = sessionRef.current.failedRunId;
     if (!projectId || !sid || failedRunId === null) return;
     if (blockIfQuotaInsufficient()) return;
     api.retrySessionRun(projectId, failedRunId)
       .then(() => {
-        setFailedRunId(null);
+        commit((prev) => ({ ...prev, failedRunId: null }));
         setStreaming(true);
       })
       .catch((e) => {
@@ -1295,7 +918,7 @@ export function useAgentSession(projectId: string) {
         }
         console.warn('重试 Agent 运行失败:', e);
       });
-  }, [projectId, failedRunId]);
+  }, [projectId, commit]);
 
   /** 开启新对话：先解绑旧会话事件订阅，再创建新会话 + 重新订阅事件流
    * （否则 createSession 网络往返窗口内，旧会话迟到的消息事件会把刚清空的消息流重新填满） */
@@ -1342,12 +965,11 @@ export function useAgentSession(projectId: string) {
       const sid = sessionIdRef.current;
       if (!projectId || !sid || !activeSkills.etag) return false;
       try {
-        const session = await api.setSessionCreativeSkills(projectId, sid, ids, activeSkills.etag);
-        setActiveSkills({ ids: session.active_creative_skill_ids ?? [], etag: session.etag ?? null });
+        const next = await api.setSessionCreativeSkills(projectId, sid, ids, activeSkills.etag);
+        setActiveSkills({ ids: next.active_creative_skill_ids ?? [], etag: next.etag ?? null });
         return true;
       } catch (e) {
-        // 412 是并发改动：另一个端刚改过，本地这份 etag 过期了。重读会话再让用户重来一次，
-        // 比静默失败或强行覆盖都好——强行覆盖会把另一个端刚做的事抹掉。
+        // 412 是并发改动：另一个端刚改过，本地这份 etag 过期了。重读会话再让用户重来一次。
         console.warn('修改会话创作套路失败:', e);
         return false;
       }
@@ -1355,22 +977,26 @@ export function useAgentSession(projectId: string) {
     [projectId, activeSkills.etag],
   );
 
+  /** 屏幕上唯一的东西：轮。历史轮与进行中的轮同一份。 */
+  const turns = useMemo(
+    () => buildTurns(session.messages, session.live, session.accounts),
+    [session.messages, session.live, session.accounts],
+  );
+
   return {
-    messages,
+    turns,
     sessionId,
     sessions,
     activeSkillIds: activeSkills.ids,
     changeActiveSkills,
     streamingText,
     streaming,
-    runningRunId,
-    failedRunId,
-    thinkingSteps,
-    reasoningText,
+    runningRunId: session.runningRunId,
+    failedRunId: session.failedRunId,
+    /** 最近一个活动节点（状态行文案）。 */
+    liveActivity: session.live?.lastActivity ?? null,
     turnStartedAt,
     turnOutcome,
-    partialCard,
-    streamToolCalls,
     chatError,
     retryUnavailable,
     sendError,
