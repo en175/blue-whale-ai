@@ -45,8 +45,19 @@ export interface CreateGenerationJobBody {
   last_frame_material_id?: unknown;
   /** 元素 { id: "Asset-xxx", type: "image" | "video" }；素材零落表，类型由调用方声明。 */
   reference_materials?: unknown;
+  /** IKDJNZ：视频参考素材单数组契约（保序）。元素 { role, asset_id?, material_id?, type }；
+   *  存在时优先于旧的 reference_asset_ids/reference_materials/首尾帧字段。 */
+  references?: unknown;
   parameters?: unknown;
   expected_output_count?: unknown;
+}
+
+/** IKDJNZ：单数组 references 元素（保序）。asset_id（本地）与 material_id（素材库）二选一。 */
+export interface ReferenceItemInput {
+  role: "first_frame" | "last_frame" | "reference";
+  asset_id?: string;
+  material_id?: string;
+  type: "image" | "video";
 }
 
 /** 素材库引用（MaterialReference）：仅格式校验（Asset- 前缀），存在性/状态由上游强校验。 */
@@ -85,6 +96,47 @@ function uniqueMaterialRefs(
     if (!result.some((r) => r.id === ref.id)) result.push(ref);
     return result;
   }, []);
+}
+
+/** IKDJNZ：解析单数组 references。未传返回 null（走旧字段路径），格式非法返回 []（整体拒绝）。 */
+function parseReferences(v: unknown): ReferenceItemInput[] | null {
+  if (v === undefined || v === null) return null;
+  if (!Array.isArray(v)) return [];
+  const items: ReferenceItemInput[] = [];
+  for (const item of v) {
+    if (typeof item !== "object" || item === null) return [];
+    const { role, asset_id, material_id, type } = item as Record<string, unknown>;
+    if (role !== "first_frame" && role !== "last_frame" && role !== "reference")
+      return [];
+    if (type !== "image" && type !== "video") return [];
+    // asset_id（本地，纯数字）与 material_id（素材库 asset-...）二选一。
+    const aid = typeof asset_id === "string" ? assetId(asset_id) : null;
+    const mid = typeof material_id === "string" ? materialId(material_id) : null;
+    if (aid === null && mid === null) return [];
+    if (aid !== null && mid !== null) return [];
+    // 首尾帧必须是图片。
+    if (role !== "reference" && type !== "image") return [];
+    items.push({
+      role,
+      ...(aid !== null ? { asset_id: aid } : { material_id: mid as string }),
+      type,
+    });
+  }
+  return items;
+}
+
+/** IKDJNZ：校验 references 的 role 唯一性（首/尾帧各至多 1，不能同帧双来源）。 */
+function validateReferenceRoles(items: ReferenceItemInput[]): string | null {
+  let firstFrame = 0;
+  let lastFrame = 0;
+  for (const item of items) {
+    if (item.role === "first_frame") firstFrame += 1;
+    if (item.role === "last_frame") lastFrame += 1;
+  }
+  if (firstFrame > 1) return "首帧只能指定一个";
+  if (lastFrame > 1) return "尾帧只能指定一个";
+  if (lastFrame > firstFrame) return "尾帧必须与首帧一起使用";
+  return null;
 }
 
 function isStr(v: unknown): v is string {
@@ -215,7 +267,8 @@ function validate(
     if (
       body.first_frame_material_id !== undefined ||
       body.last_frame_material_id !== undefined ||
-      body.reference_materials !== undefined
+      body.reference_materials !== undefined ||
+      body.references !== undefined
     ) {
       return {
         code: ERROR_UNSUPPORTED_INPUT,
@@ -223,6 +276,20 @@ function validate(
       };
     }
   } else {
+    // IKDJNZ：单数组 references 优先；存在时跳过旧字段校验路径。
+    const parsedRefs = parseReferences(body.references);
+    if (parsedRefs !== null && parsedRefs.length === 0) {
+      return { code: ERROR_INVALID_INPUT, message: "参考素材引用无效" };
+    }
+    if (parsedRefs !== null) {
+      const roleErr = validateReferenceRoles(parsedRefs);
+      if (roleErr) return { code: ERROR_INVALID_INPUT, message: roleErr };
+      // 普通参考数量上限沿用 Seedance 约束（首尾帧不计入）。
+      const refCount = parsedRefs.filter((r) => r.role === "reference").length;
+      if (refCount > 12)
+        return { code: ERROR_INVALID_INPUT, message: "参考素材最多 12 个" };
+      return null;
+    }
     const firstFrameAssetId2 = assetId(body.first_frame_asset_id);
     const lastFrameAssetId2 = assetId(body.last_frame_asset_id);
     const firstFrameMaterialId = materialId(body.first_frame_material_id);
@@ -357,20 +424,26 @@ export async function handleCreateGenerationJob(
   } else if (type === "video") {
     if (isStr(params.resolution)) input.resolution = params.resolution;
     if (params.duration !== undefined) input.duration = params.duration;
-    if (firstFrameAssetId) input.first_frame_asset_id = firstFrameAssetId;
-    if (lastFrameAssetId) input.last_frame_asset_id = lastFrameAssetId;
-    if (referenceAssetIds.length > 0)
-      input.reference_asset_ids = referenceAssetIds;
-    // 素材库引用：冻结进 input 快照（仅 video）。零本地表，Worker 执行时转 asset:// 载体。
-    const firstFrameMaterialId = materialId(body.first_frame_material_id);
-    const lastFrameMaterialId = materialId(body.last_frame_material_id);
-    const materialRefsResolved = uniqueMaterialRefs(
-      materialRefs(body.reference_materials) ?? [],
-    );
-    if (firstFrameMaterialId) input.first_frame_material_id = firstFrameMaterialId;
-    if (lastFrameMaterialId) input.last_frame_material_id = lastFrameMaterialId;
-    if (materialRefsResolved.length > 0)
-      input.reference_materials = materialRefsResolved;
+    // IKDJNZ：单数组 references 冻结进 input 快照（保序），Worker 执行时按 role 拆帧/参考并做关联转换。
+    const parsedRefs = parseReferences(body.references);
+    if (parsedRefs !== null) {
+      input.references = parsedRefs;
+    } else {
+      if (firstFrameAssetId) input.first_frame_asset_id = firstFrameAssetId;
+      if (lastFrameAssetId) input.last_frame_asset_id = lastFrameAssetId;
+      if (referenceAssetIds.length > 0)
+        input.reference_asset_ids = referenceAssetIds;
+      // 素材库引用：冻结进 input 快照（仅 video）。零本地表，Worker 执行时转 asset:// 载体。
+      const firstFrameMaterialId = materialId(body.first_frame_material_id);
+      const lastFrameMaterialId = materialId(body.last_frame_material_id);
+      const materialRefsResolved = uniqueMaterialRefs(
+        materialRefs(body.reference_materials) ?? [],
+      );
+      if (firstFrameMaterialId) input.first_frame_material_id = firstFrameMaterialId;
+      if (lastFrameMaterialId) input.last_frame_material_id = lastFrameMaterialId;
+      if (materialRefsResolved.length > 0)
+        input.reference_materials = materialRefsResolved;
+    }
   }
   // 图片与视频一致：sk token 密封进 job.input.provider_credential，处理时由 worker 解出。
   // 这样进程内即时调度与重启后的恢复扫描共用同一套凭据来源。

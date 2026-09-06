@@ -562,3 +562,122 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
     expect(cmdArg.input.first_frame_material_id).toBe("asset-face-1");
   });
 });
+
+describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
+  it("references（含本地 asset + 素材库 material，保序）→ 200，input 冻结 references 快照", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [
+          { role: "first_frame", asset_id: "11", type: "image" },
+          { role: "reference", asset_id: "12", type: "image" },
+          { role: "reference", material_id: "Asset-ref-1", type: "video" },
+          { role: "last_frame", material_id: "Asset-last-1", type: "image" },
+        ],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    // 单数组原样冻结（保序），旧字段不再落。
+    expect(cmdArg.input.references).toEqual([
+      { role: "first_frame", asset_id: "11", type: "image" },
+      { role: "reference", asset_id: "12", type: "image" },
+      { role: "reference", material_id: "Asset-ref-1", type: "video" },
+      { role: "last_frame", material_id: "Asset-last-1", type: "image" },
+    ]);
+    expect(cmdArg.input.reference_asset_ids).toBeUndefined();
+    expect(cmdArg.input.reference_materials).toBeUndefined();
+  });
+
+  it("references 首帧重复 → 400 首帧只能指定一个", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [
+          { role: "first_frame", asset_id: "11", type: "image" },
+          { role: "first_frame", asset_id: "12", type: "image" },
+        ],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("首帧只能指定一个");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("references 有尾帧无首帧 → 400 尾帧必须与首帧一起使用", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "last_frame", material_id: "Asset-last-1", type: "image" }],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("尾帧必须与首帧一起使用");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("references 首尾帧带 video 类型 → 400 参考素材引用无效", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "first_frame", material_id: "Asset-ff-1", type: "video" }],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考素材引用无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("references 项既无 asset_id 也无 material_id → 400 参考素材引用无效", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, references: [{ role: "reference", type: "image" }] },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考素材引用无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("references 普通参考超 12 个 → 400 参考素材最多 12 个", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const refs = Array.from({ length: 13 }, (_, i) => ({
+      role: "reference" as const,
+      material_id: `Asset-ref-${i}`,
+      type: "image" as const,
+    }));
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, references: refs },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考素材最多 12 个");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+});

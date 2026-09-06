@@ -1526,4 +1526,65 @@ describe("video job runner asset↔material link (IKDJNZ)", () => {
       expect.objectContaining({ code: "unsupported_input" }),
     );
   });
+
+  it("single references array preserves order across asset and material (IKDJNZ)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "ikdjnz-single-refs", status: "queued" });
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "405",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "单数组保序",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          references: [
+            { role: "first_frame", asset_id: "11", type: "image" },
+            { role: "reference", material_id: "asset-mat-1", type: "image" },
+            { role: "reference", asset_id: "12", type: "image" },
+            { role: "last_frame", material_id: "asset-last-1", type: "image" },
+          ],
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikdjnz-single-refs",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([
+        { id: "11", type: "image", url: "https://tos.test/f.png", material_id: null },
+        { id: "12", type: "image", url: "https://tos.test/r.png", material_id: null },
+      ]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikdjnz-single-refs",
+      jobId: "405",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        firstFrameImage: "https://tos.test/f.png",
+        lastFrameImage: "asset://asset-last-1",
+        references: [
+          { type: "image", url: "asset://asset-mat-1" },
+          { type: "image", url: "https://tos.test/r.png" },
+        ],
+      }),
+    );
+  });
 });

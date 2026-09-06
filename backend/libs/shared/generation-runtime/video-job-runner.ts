@@ -412,15 +412,42 @@ async function buildSubmitRequest(
     throw new Error("视频生成参数无效");
   }
 
-  const firstFrameAssetId = readAssetId(claim.input.first_frame_asset_id);
-  const lastFrameAssetId = readAssetId(claim.input.last_frame_asset_id);
-  const referenceAssetIds = uniqueAssetIds(readAssetIds(claim.input.reference_asset_ids));
-  // 素材库引用：零本地表、不进 resolveInputAssets；模式互斥/尾帧配对与本地 Asset 按并集计算。
-  const firstFrameMaterialId = readMaterialId(claim.input.first_frame_material_id);
-  const lastFrameMaterialId = readMaterialId(claim.input.last_frame_material_id);
-  const referenceMaterials = uniqueMaterialRefs(
+  // IKDJNZ：单数组 references 优先（input 快照冻结，保序）；未提供回落旧字段路径。
+  const refsFromSingle = readReferences(claim.input.references);
+  let firstFrameAssetId = readAssetId(claim.input.first_frame_asset_id);
+  let lastFrameAssetId = readAssetId(claim.input.last_frame_asset_id);
+  let referenceAssetIds = uniqueAssetIds(
+    readAssetIds(claim.input.reference_asset_ids),
+  );
+  let firstFrameMaterialId = readMaterialId(claim.input.first_frame_material_id);
+  let lastFrameMaterialId = readMaterialId(claim.input.last_frame_material_id);
+  let referenceMaterials = uniqueMaterialRefs(
     readMaterialRefs(claim.input.reference_materials),
   );
+  if (refsFromSingle !== null) {
+    // 单数组：按 role 拆帧/参考，asset_id/material_id 已由 handler 校验二选一。
+    firstFrameAssetId = null;
+    lastFrameAssetId = null;
+    referenceAssetIds = [];
+    firstFrameMaterialId = null;
+    lastFrameMaterialId = null;
+    referenceMaterials = [];
+    for (const ref of refsFromSingle) {
+      if (ref.role === "first_frame") {
+        if (ref.asset_id !== undefined) firstFrameAssetId = ref.asset_id;
+        else if (ref.material_id !== undefined) firstFrameMaterialId = ref.material_id;
+      } else if (ref.role === "last_frame") {
+        if (ref.asset_id !== undefined) lastFrameAssetId = ref.asset_id;
+        else if (ref.material_id !== undefined) lastFrameMaterialId = ref.material_id;
+      } else {
+        if (ref.asset_id !== undefined) referenceAssetIds.push(ref.asset_id);
+        else if (ref.material_id !== undefined)
+          referenceMaterials.push({ id: ref.material_id, type: ref.type });
+      }
+    }
+    referenceAssetIds = uniqueAssetIds(referenceAssetIds);
+    referenceMaterials = uniqueMaterialRefs(referenceMaterials);
+  }
   if (firstFrameAssetId !== null && firstFrameMaterialId !== null) {
     throw new VideoInputError(ERROR_INVALID_INPUT, "首帧只能指定一个来源");
   }
@@ -434,7 +461,9 @@ async function buildSubmitRequest(
   if (hasLastFrame && !hasFirstFrame) {
     throw new VideoInputError(ERROR_INVALID_INPUT, "尾帧必须与首帧一起使用");
   }
-  if ((hasFirstFrame || hasLastFrame) && hasReferences) {
+  // IKDJNZ：单数组 references 允许首尾帧与普通参考并存（保序单数组天然支持混排）；
+  // 互斥校验仅适用于旧的分字段路径（reference_asset_ids/reference_materials/首尾帧字段）。
+  if (refsFromSingle === null && (hasFirstFrame || hasLastFrame) && hasReferences) {
     throw new VideoInputError(
       ERROR_INVALID_INPUT,
       "首尾帧模式不能与普通参考素材混用",
@@ -790,6 +819,52 @@ function uniqueMaterialRefs(refs: MaterialReference[]): MaterialReference[] {
     if (!result.some((r) => r.id === ref.id)) result.push(ref);
     return result;
   }, []);
+}
+
+/** IKDJNZ：解析单数组 references（handler 已校验格式）。未提供返回 null（走旧字段路径）。 */
+type SingleReferenceItem = {
+  role: "first_frame" | "last_frame" | "reference";
+  asset_id?: string;
+  material_id?: string;
+  type: "image" | "video";
+};
+function readReferences(value: unknown): SingleReferenceItem[] | null {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value)) {
+    throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用无效");
+  }
+  return value.map((candidate) => {
+    if (typeof candidate !== "object" || candidate === null) {
+      throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用无效");
+    }
+    const { role, asset_id, material_id, type } = candidate as Record<
+      string,
+      unknown
+    >;
+    if (role !== "first_frame" && role !== "last_frame" && role !== "reference") {
+      throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用无效");
+    }
+    if (type !== "image" && type !== "video") {
+      throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用类型无效");
+    }
+    const item: SingleReferenceItem = { role, type };
+    if (asset_id !== undefined) {
+      const aid = readAssetId(asset_id);
+      if (aid === null) {
+        throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用无效");
+      }
+      item.asset_id = aid;
+    } else if (material_id !== undefined) {
+      const mid = readMaterialId(material_id);
+      if (mid === null) {
+        throw new VideoInputError(ERROR_INVALID_INPUT, "素材库引用 ID 无效");
+      }
+      item.material_id = mid;
+    } else {
+      throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用无效");
+    }
+    return item;
+  });
 }
 
 function videoDimensions(
