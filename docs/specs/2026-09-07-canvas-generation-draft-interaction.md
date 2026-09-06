@@ -108,5 +108,6 @@ Q4 不自动扩展生成模型的输入能力；音频引用能力不属于本�
 
 ## 关联
 
+- [正式交付规格与用户故事](2026-09-07-canvas-generation-draft-spec.md)，已发布为 [IKDMQM](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IKDMQM)；本文保留逐轮交互决策与验收场景记录。
 - [领域术语](../../CONTEXT.md)
 - [现有文本附件生图契约](2026-09-06-ikdlqf-text-attachment-image-contract.md)：本次讨论将扩展其媒体连线输入边界，尚未修改现行契约。
