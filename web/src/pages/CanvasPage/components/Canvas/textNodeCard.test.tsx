@@ -240,6 +240,7 @@ describe('Canvas 文本节点卡片', () => {
     await finishGesture();
     expect(props.onNodeDragStop).toHaveBeenCalledWith(
       expect.objectContaining({ id: TEXT_ID, position: { x: 90, y: 90 } }),
+      expect.any(Array),
     );
   });
 
@@ -292,7 +293,7 @@ describe('Canvas 文本节点标题分段缩放', () => {
     await renderText({ selected: true, zoom: 0.75, html: '<p>组合操作正文</p>' });
     await mouse('mousemove', window, 160, 140);
     await finishGesture();
-    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ id: TEXT_ID }));
+    expect(props.onNodeDragStop).toHaveBeenCalledWith(expect.objectContaining({ id: TEXT_ID }), expect.any(Array));
     const draggedPosition = node().style.transform;
     expect(draggedPosition).not.toBe('translate(50px,60px)');
 
