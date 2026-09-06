@@ -52,6 +52,8 @@ export type VideoWorkerInputAsset = {
   width?: number | null;
   height?: number | null;
   duration?: number | null;
+  /** IKDJNZ：该本地素材关联的素材库素材 id（无关联为 null）。命中则上游走 asset://。 */
+  material_id?: string | null;
 };
 
 export type VideoReference = {
@@ -452,6 +454,47 @@ async function buildSubmitRequest(
   }
 
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+
+  // IKDJNZ：本地 Asset 若已关联素材库素材（material_id 命中），则生成时走素材库 id（asset://），
+  // 不走本地 url；未关联的本地 Asset 照旧 url。关联判定按用户确认的流程：
+  //   命中 material_id 的 asset 从本地引用中移除，其 material_id 并入素材库引用，
+  //   合并后整个素材库引用数组按 id 去重（保留首次出现，跨 role 生效）。
+  const isLinked = (assetId: string): string | null => {
+    const asset = assetsById.get(assetId);
+    const materialId = asset?.material_id ?? null;
+    return materialId && materialId.length > 0 ? materialId : null;
+  };
+
+  // 首尾帧：若本地帧素材命中关联 → 转素材库首尾帧（同去重池）。
+  let firstFrameMaterialResolved = firstFrameMaterialId;
+  let lastFrameMaterialResolved = lastFrameMaterialId;
+  if (firstFrameAssetId !== null && firstFrameMaterialResolved === null) {
+    firstFrameMaterialResolved = isLinked(firstFrameAssetId);
+  }
+  if (lastFrameAssetId !== null && lastFrameMaterialResolved === null) {
+    lastFrameMaterialResolved = isLinked(lastFrameAssetId);
+  }
+
+  // 参考素材：命中关联的本地 asset 转素材库引用，未命中的保留本地引用。
+  const materialRefsFromAssets: MaterialReference[] = [];
+  const unlinkedReferenceAssetIds: string[] = [];
+  for (const id of referenceAssetIds) {
+    const materialId = isLinked(id);
+    if (materialId !== null) {
+      const asset = assetsById.get(id);
+      const type: "image" | "video" = asset?.type === "video" ? "video" : "image";
+      materialRefsFromAssets.push({ id: materialId, type });
+    } else {
+      unlinkedReferenceAssetIds.push(id);
+    }
+  }
+
+  // 合并素材库引用（显式声明 + 关联转换），按 id 去重保留首次出现。
+  const mergedMaterials = uniqueMaterialRefs([
+    ...referenceMaterials,
+    ...materialRefsFromAssets,
+  ]);
+
   const firstFrame = firstFrameAssetId ? assetsById.get(firstFrameAssetId) : undefined;
   const lastFrame = lastFrameAssetId ? assetsById.get(lastFrameAssetId) : undefined;
   if (
@@ -463,7 +506,7 @@ async function buildSubmitRequest(
       "首尾帧素材必须是图片",
     );
   }
-  const referenceAssets = referenceAssetIds.map((id) => {
+  const referenceAssets = unlinkedReferenceAssetIds.map((id) => {
     const asset = assetsById.get(id);
     if (!asset) {
       throw new VideoInputError(
@@ -473,7 +516,7 @@ async function buildSubmitRequest(
     }
     return asset;
   });
-  const references = validateReferences(model, referenceAssets, referenceMaterials);
+  const references = validateReferences(model, referenceAssets, mergedMaterials);
   const resolution =
     typeof claim.input.resolution === "string"
       ? claim.input.resolution
@@ -488,12 +531,15 @@ async function buildSubmitRequest(
         : "";
 
   // 帧来源二选一：本地 Asset 解析出的 TOS URL，或素材库 asset:// URI（火山原生载体）。
+  // IKDJNZ：本地帧素材命中关联（material_id）时优先走素材库 asset://（不走 url）。
   const firstFrameImage =
-    firstFrame?.url ??
-    (firstFrameMaterialId !== null ? `asset://${firstFrameMaterialId}` : undefined);
+    firstFrameMaterialResolved !== null
+      ? `asset://${firstFrameMaterialResolved}`
+      : firstFrame?.url;
   const lastFrameImage =
-    lastFrame?.url ??
-    (lastFrameMaterialId !== null ? `asset://${lastFrameMaterialId}` : undefined);
+    lastFrameMaterialResolved !== null
+      ? `asset://${lastFrameMaterialResolved}`
+      : lastFrame?.url;
 
   return {
     model,
@@ -547,16 +593,18 @@ function validateReferences(
     return { type: "video", url: asset.url };
   });
 
-  // 素材库引用：并入图/视频数量并集与 Seedance 2.0 约束；
-  // 时长/大小/分辨率等物理校验只作用于本地 Asset（素材库素材由上游强校验）。
-  for (const material of materials) {
+  // IKDJNZ：素材库引用（显式声明 + 关联转换）并入 references，统一按素材库来源在前、
+  // 未关联本地 Asset 在后排列（对齐前端「素材库引用在前、本地参考在后」的既有提交顺序，
+  // 避免破坏现有断言）；图/视频数量与 Seedance 2.0 约束按并集统计。
+  const materialRefs = materials.map<VideoReference>((material) => {
     if (material.type === "image") {
       imageCount += 1;
     } else {
       videoCount += 1;
     }
-    references.push({ type: material.type, url: `asset://${material.id}` });
-  }
+    return { type: material.type, url: `asset://${material.id}` };
+  });
+  references.unshift(...materialRefs);
 
   if (imageCount > MAX_REFERENCE_IMAGES || videoCount > MAX_REFERENCE_VIDEOS) {
     throw new VideoInputError(

@@ -143,6 +143,18 @@ export interface AssetRepo {
     duration?: number;
     md5?: string;
   }): Promise<PendingUploadAsset>;
+  /** IKDJNZ：素材库素材创建成功后，把原始素材与素材库素材绑定（一对多覆盖写）。
+   *  校验 asset 归属当前用户；material_id 唯一索引兜底一张素材只关联一个素材库素材。 */
+  linkAssetToMaterial(input: {
+    userId: string;
+    assetId: string;
+    materialId: string;
+    materialGroupId: string;
+  }): Promise<boolean>;
+  /** IKDJNZ：素材库素材被删除后，清除本地 assets 行上对应的 material_id 关联。 */
+  clearMaterialLink(userId: string, materialId: string): Promise<void>;
+  /** IKDJNZ：素材库组被删除后，按组 ID 批量清除本地 assets 行的 material 关联（两列）。 */
+  clearMaterialGroupLink(userId: string, materialGroupId: string): Promise<void>;
 }
 
 const uploadAssetSelect = {
@@ -623,6 +635,49 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       const asset = toUploadAsset(row);
       if (!asset) throw new Error("Committed upload is missing storage_key");
       return asset;
+    },
+    async linkAssetToMaterial({ userId, assetId, materialId, materialGroupId }) {
+      // IKDJNZ：校验归属（当前用户未删资产），不存在/不归属 → false。
+      const owned = await prisma.assets.findFirst({
+        where: {
+          id: BigInt(assetId),
+          user_id: BigInt(userId),
+          is_delete: false,
+        },
+        select: { id: true },
+      });
+      if (!owned) return false;
+      await prisma.assets.update({
+        where: { id: owned.id },
+        data: {
+          material_id: materialId,
+          material_group_id: materialGroupId,
+          version: { increment: 1 },
+          gmt_modified: new Date(),
+        },
+      });
+      return true;
+    },
+    async clearMaterialLink(userId, materialId) {
+      await prisma.assets.updateMany({
+        where: { material_id: materialId, user_id: BigInt(userId) },
+        data: {
+          material_id: null,
+          version: { increment: 1 },
+          gmt_modified: new Date(),
+        },
+      });
+    },
+    async clearMaterialGroupLink(userId, materialGroupId) {
+      await prisma.assets.updateMany({
+        where: { material_group_id: materialGroupId, user_id: BigInt(userId) },
+        data: {
+          material_id: null,
+          material_group_id: null,
+          version: { increment: 1 },
+          gmt_modified: new Date(),
+        },
+      });
     },
   };
 }

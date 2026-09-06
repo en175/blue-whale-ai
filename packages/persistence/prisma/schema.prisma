@@ -24,6 +24,10 @@ model assets {
   duration_ms       Int?
   source            String   @default("generated") @db.VarChar(32)
   status            String   @default("normal") @db.VarChar(32)
+  // IKDJNZ：原始素材与素材库（真人/虚拟人像库）素材关联。素材库零本地表，
+  // 仅存上游素材/组 ID 字符串；material_id 唯一索引兜底「一张素材只能关联一张」。
+  material_id       String?  @db.VarChar(128)
+  material_group_id String?  @db.VarChar(128)
   gmt_create        DateTime @default(now()) @db.DateTime(0)
   gmt_modified      DateTime @default(now()) @db.DateTime(0)
   version           Int      @default(0)
@@ -40,6 +44,9 @@ model assets {
   @@index([is_delete, deleted_at], map: "idx_asset_gc_candidates")
   // IKCNLS：上传 md5 去重按 (user_id, md5) 查未删资产，is_delete 条件支撑查询。
   @@index([user_id, md5, is_delete], map: "idx_asset_user_md5")
+  // IKDJNZ：素材库素材/组删除旁路按 ID 清关联；material_id 唯一索引兜底一对一。
+  @@unique([material_id], map: "uq_asset_material_id")
+  @@index([material_group_id], map: "idx_asset_material_group")
 }
 
 /// 画布共享资产（IK9QKP）：用户主动保存、跨项目可复用的自包含快照库。
