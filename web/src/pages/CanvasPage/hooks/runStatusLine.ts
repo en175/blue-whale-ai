@@ -14,7 +14,7 @@
  */
 
 /** 一轮运行走到的阶段。终态三种分开，因为用户对它们的反应完全不同。 */
-export type RunPhase = 'dispatching' | 'working' | 'stalled' | 'completed' | 'cancelled' | 'failed';
+export type RunPhase = 'dispatching' | 'working' | 'completed' | 'cancelled' | 'failed';
 
 /** 服务端报的终局。`outcome_unknown` 归入 failed：对用户而言"不知道"和"失败"一样需要重试。 */
 export type RunOutcome = 'completed' | 'cancelled' | 'failed';
@@ -42,8 +42,6 @@ export interface RunStatusInput {
   now: number;
   /** 最近一个可见节点的描述（来自 run.activity）；还没有任何节点时为 null。 */
   activity: string | null;
-  /** 长时间没有任何新进展。 */
-  stalled: boolean;
   /** 已经拿到 runId。没拿到说明还在派发途中，此时秒数已经在走了。 */
   hasRunId: boolean;
   /** 本轮的终局；null 表示还在跑。 */
@@ -96,7 +94,7 @@ export interface RunStatus {
    * 与 `tokens` 同一个约定：拿不到就不显示，不要编一个。
    */
   seconds: number | null;
-  tone: 'working' | 'stalled' | 'done' | 'error';
+  tone: 'working' | 'done' | 'error';
   /** 终态为 true：此时展示的是这一轮的账，不是进度。 */
   settled: boolean;
   /** 一个都没有时为 null，UI 据此不渲染 token 那一段。 */
@@ -211,7 +209,7 @@ function tokensOf(input: RunStatusInput): RunStatusTokens | null {
 }
 
 export function deriveRunStatus(input: RunStatusInput): RunStatus | null {
-  const { activeSince, now, activity, stalled, hasRunId, outcome, finishedAt } = input;
+  const { activeSince, now, activity, hasRunId, outcome, finishedAt } = input;
   // 从来没跑过才什么都不显示。跑完了要留下来报账，那正是 IKA4PG 要的。
   if (activeSince === null) return null;
 
@@ -248,10 +246,9 @@ export function deriveRunStatus(input: RunStatusInput): RunStatus | null {
 
   return {
     ...common,
-    phase: stalled ? 'stalled' : 'working',
+    phase: 'working',
     label: activity ?? INITIAL_LABEL,
-    // stalled 时 UI 换一种语气，但**不会**因此隐藏状态行。
-    tone: stalled ? 'stalled' : 'working',
+    tone: 'working',
     settled: false,
   };
 }

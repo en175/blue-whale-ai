@@ -170,8 +170,6 @@ function parseSettledTurn(run: SessionRun): { startedAt: number; outcome: TurnOu
  */
 const DELETE_ALREADY_REPORTED = Symbol('delete-already-reported');
 
-/** 运行中无产出事件的兜底提示阈值（毫秒）：超过该时长仍无 delta/思考/终态，提示用户可诊断信息，不无限「处理中」 */
-const LONG_RUN_HINT_MS = 60_000;
 
 /** 字段安全转字符串 */
 const str = (v: unknown): string =>
@@ -351,10 +349,6 @@ export function useAgentSession(projectId: string) {
   }, []);
   /** 正在写入的生成卡预览（prompt_card.partial.v1）。只用于展示，终态卡片到达即让位。 */
   const [partialCard, setPartialCard] = useState<PartialCardPreview | null>(null);
-  /** 运行活跃但长期无产出事件（delta/思考步）的兜底提示标志：超阈值仍无终态时给用户可诊断信息，不无限「处理中」 */
-  const [longRunning, setLongRunning] = useState(false);
-  /** 产出事件计数：每次 delta 文本/思考步到达 +1，用于重置兜底计时（有进度就不提示） */
-  const [progressTick, setProgressTick] = useState(0);
   /** 「新对话」失败提示：创建/连接新会话失败时展示，成功/切换后清除（不静默吞掉） */
   const [chatError, setChatError] = useState<string | null>(null);
   /** 重试接口不可用标志（后端 404 时置位：重试按钮禁用并说明原因，不做静默降级；新 run/新消息清除） */
@@ -402,17 +396,6 @@ export function useAgentSession(projectId: string) {
   const terminalRunIdsRef = useRef<Set<string>>(new Set());
   /** 本轮提交过生成卡的 Run：revision_committed 先到、run.completed 后到，用它串起两个事件 */
   const cardRunsRef = useRef<Set<string>>(new Set());
-
-  /** 运行兜底计时：run 活跃且 LONG_RUN_HINT_MS 内无任何产出/终态事件 → 置 longRunning 提示（有 delta/思考即重置） */
-  useEffect(() => {
-    if (!runningRunId && !streaming) {
-      setLongRunning(false);
-      return;
-    }
-    setLongRunning(false);
-    const t = window.setTimeout(() => setLongRunning(true), LONG_RUN_HINT_MS);
-    return () => window.clearTimeout(t);
-  }, [runningRunId, streaming, progressTick]);
 
   /** upsert 助手消息（按 message_id 幂等；与流式固化内容重复时合并） */
   const upsertAssistant = useCallback((msg: SessionMessage) => {
@@ -645,7 +628,6 @@ export function useAgentSession(projectId: string) {
         } else {
           setThinkingSteps(steps);
         }
-        setProgressTick((p) => p + 1);
         return;
       }
 
@@ -677,7 +659,6 @@ export function useAgentSession(projectId: string) {
           };
           return next;
         });
-        setProgressTick((p) => p + 1);
         return;
       }
 
@@ -688,7 +669,6 @@ export function useAgentSession(projectId: string) {
         const preview = toPartialCardPreview(payload.card_id, payload.payload);
         if (preview) {
           setPartialCard(preview);
-          setProgressTick((p) => p + 1);
         }
         return;
       }
@@ -698,7 +678,6 @@ export function useAgentSession(projectId: string) {
         const chunk = str(payload.text);
         if (!chunk) return;
         setReasoningText((prev) => prev + chunk);
-        setProgressTick((p) => p + 1);
         return;
       }
 
@@ -719,7 +698,6 @@ export function useAgentSession(projectId: string) {
             setStreamToolCalls(streamToolCallsRef.current);
           }
         }
-        setProgressTick((p) => p + 1);
         return;
       }
 
@@ -777,7 +755,6 @@ export function useAgentSession(projectId: string) {
       if (t === 'assistant.delta') {
         const text = str(payload.text);
         if (!text) return;
-        setProgressTick((p) => p + 1);
         const streamId = str(payload.stream_id);
         const runId = streamId.startsWith('assistant_run_')
           ? streamId.slice('assistant_run_'.length)
@@ -1393,7 +1370,6 @@ export function useAgentSession(projectId: string) {
     turnStartedAt,
     turnOutcome,
     partialCard,
-    longRunning,
     streamToolCalls,
     chatError,
     retryUnavailable,
