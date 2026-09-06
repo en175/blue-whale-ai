@@ -60,6 +60,7 @@ describe("WorkerRepo.resolveInputAssets", () => {
         width: true,
         height: true,
         duration_ms: true,
+        material_id: true,
       },
     });
   });
@@ -121,6 +122,7 @@ describe("WorkerRepo.resolveInputAssets", () => {
         width: true,
         height: true,
         duration_ms: true,
+        material_id: true,
       },
     });
   });
@@ -160,6 +162,7 @@ describe("WorkerRepo.resolveInputAssets", () => {
         width: true,
         height: true,
         duration_ms: true,
+        material_id: true,
       },
     });
   });
