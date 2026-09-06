@@ -7,6 +7,7 @@ import {
   Background,
   BackgroundVariant,
   MiniMap,
+  SelectionMode,
   useReactFlow,
   useViewport,
   type Node,
@@ -49,8 +50,8 @@ interface FlowCanvasProps {
   viewport?: Viewport;
   /** 视口变更回调（拖拽/缩放结束），供自动保存使用 */
   onViewportChange?: (v: Viewport) => void;
-  /** 节点拖拽结束回调（同步坐标到父组件，触发自动保存） */
-  onNodeDragStop?: (node: Node) => void;
+  /** 节点拖拽结束回调（同步坐标到父组件，触发自动保存）。多选整组拖拽时 draggedNodes 含同组全部节点 */
+  onNodeDragStop?: (node: Node, draggedNodes: Node[]) => void;
   onDeleteNode: (id: string) => void;
   /** 节点单击（画布选取模式等场景） */
   onNodeClick?: (node: Node) => void;
@@ -323,13 +324,15 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         onNodeClick={onNodeClick ? (_e, node) => onNodeClick(node) : undefined}
         onPaneClick={onPaneClick}
         onMoveEnd={(_e, v) => onViewportChangeRef.current?.(v)}
-        onNodeDragStop={(_e, node) => onNodeDragStop?.(node)}
+        onNodeDragStop={(_e, node, draggedNodes) => onNodeDragStop?.(node, draggedNodes)}
         onContextMenu={(e) => e.preventDefault()}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         panOnDrag={isDrag}
         panOnScroll={spaceHeld}
         panActivationKeyCode={null}
+        selectionOnDrag
+        selectionMode={SelectionMode.Partial}
         zoomOnDoubleClick={!isDrag}
         nodesDraggable={!isDrag}
         elementsSelectable={!isDrag}
