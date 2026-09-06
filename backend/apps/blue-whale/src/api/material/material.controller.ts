@@ -22,6 +22,10 @@ const SOURCE_ASSET_ID_FIELD = "SourceAssetId";
 /** 上游 CreateAsset 成功信封 Result 里的素材 id 字段。 */
 const MATERIAL_ID_FIELD = "Id";
 
+/** 素材库素材 id / 组 id 格式（对齐上游：素材 asset-...，组 group-...；与生成侧 MATERIAL_ID_PATTERN 同源）。 */
+const MATERIAL_ID_PATTERN = /^asset-.{1,128}$/i;
+const MATERIAL_GROUP_ID_PATTERN = /^group-.{1,128}$/i;
+
 @Controller("material")
 @BypassTransform()
 export class MaterialController {
@@ -45,6 +49,11 @@ export class MaterialController {
       const raw = body[SOURCE_ASSET_ID_FIELD];
       if (typeof raw === "string" && /^\d+$/.test(raw)) {
         sourceAssetId = raw;
+      } else if (SOURCE_ASSET_ID_FIELD in body) {
+        // 非法原始素材 id：静默丢弃前留痕，便于发现前端未接/接错的死绑定。
+        logger.warn(
+          `material CreateAsset: 非法 ${SOURCE_ASSET_ID_FIELD} 已丢弃（${JSON.stringify(raw)}）`,
+        );
       }
       if (SOURCE_ASSET_ID_FIELD in body) {
         const { [SOURCE_ASSET_ID_FIELD]: _stripped, ...rest } = body;
@@ -86,25 +95,35 @@ export class MaterialController {
         typeof groupId === "string" &&
         typeof materialId === "string"
       ) {
-        await this.assets.linkAssetToMaterial({
-          userId,
-          assetId: sourceAssetId,
-          materialId,
-          materialGroupId: groupId,
-        });
+        // IKDJNZ：id/组 id 格式兜底（asset-.../group-...）；脏数据不落库，避免污染生成链路。
+        if (
+          MATERIAL_ID_PATTERN.test(materialId) &&
+          MATERIAL_GROUP_ID_PATTERN.test(groupId)
+        ) {
+          await this.assets.linkAssetToMaterial({
+            userId,
+            assetId: sourceAssetId,
+            materialId,
+            materialGroupId: groupId,
+          });
+        } else {
+          logger.warn(
+            `material CreateAsset: 上游 id 格式异常已跳过绑定（material=${materialId} group=${groupId}）`,
+          );
+        }
       }
       return;
     }
     if (action === "DeleteAsset") {
       const id = isRecord(body) ? body.Id : undefined;
-      if (typeof id === "string") {
+      if (typeof id === "string" && MATERIAL_ID_PATTERN.test(id)) {
         await this.assets.clearMaterialLink(userId, id);
       }
       return;
     }
     if (action === "DeleteAssetGroup") {
       const id = isRecord(body) ? body.Id : undefined;
-      if (typeof id === "string") {
+      if (typeof id === "string" && MATERIAL_GROUP_ID_PATTERN.test(id)) {
         await this.assets.clearMaterialGroupLink(userId, id);
       }
       return;

@@ -466,13 +466,35 @@ async function buildSubmitRequest(
   };
 
   // 首尾帧：若本地帧素材命中关联 → 转素材库首尾帧（同去重池）。
+  // IKDJNZ：命中关联的本地帧素材即使类型为 video 也会被转成素材库引用，这里提前拦截——
+  // 保留「首尾帧素材必须是图片」的既有约束（本地侧仍按原 asset 类型校验，防关联后绕过）。
   let firstFrameMaterialResolved = firstFrameMaterialId;
   let lastFrameMaterialResolved = lastFrameMaterialId;
   if (firstFrameAssetId !== null && firstFrameMaterialResolved === null) {
-    firstFrameMaterialResolved = isLinked(firstFrameAssetId);
+    const linked = isLinked(firstFrameAssetId);
+    if (linked !== null) {
+      const firstFrameAsset = assetsById.get(firstFrameAssetId);
+      if (firstFrameAsset && firstFrameAsset.type !== "image") {
+        throw new VideoInputError(
+          ERROR_UNSUPPORTED_INPUT,
+          "首尾帧素材必须是图片",
+        );
+      }
+      firstFrameMaterialResolved = linked;
+    }
   }
   if (lastFrameAssetId !== null && lastFrameMaterialResolved === null) {
-    lastFrameMaterialResolved = isLinked(lastFrameAssetId);
+    const linked = isLinked(lastFrameAssetId);
+    if (linked !== null) {
+      const lastFrameAsset = assetsById.get(lastFrameAssetId);
+      if (lastFrameAsset && lastFrameAsset.type !== "image") {
+        throw new VideoInputError(
+          ERROR_UNSUPPORTED_INPUT,
+          "首尾帧素材必须是图片",
+        );
+      }
+      lastFrameMaterialResolved = linked;
+    }
   }
 
   // 参考素材：命中关联的本地 asset 转素材库引用，未命中的保留本地引用。
