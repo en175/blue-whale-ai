@@ -29,7 +29,7 @@ export class CanvasesController {
   async save(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
-    @Body() body: { viewport?: unknown; nodes?: unknown },
+    @Body() body: { viewport?: unknown; nodes?: unknown; edges?: unknown },
     @Headers("if-match") ifMatch?: string,
   ) {
     let expectedVersion: number | null | undefined;

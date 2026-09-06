@@ -99,6 +99,7 @@ beforeEach(async () => {
   props = {
     toolMode: 'select', showMiniMap: false, showEdges: false, hideZoomControl: true,
     extraNodes: [], textNodes: [], productNodes: [], assetNodes: [],
+    edges: [], onEdgesChange: vi.fn(), onConnect: vi.fn(),
     mediaNodes: [mediaNode('image-1', 50, 60), mediaNode('image-2', 500, 400)],
     viewport: { x: 0, y: 0, zoom: 1 },
     onDeleteNode: vi.fn(), onNodeDragStop: vi.fn(), onViewportChange: vi.fn(),

@@ -106,6 +106,8 @@ export interface CreateJobPayload {
   last_frame_material_id?: string;
   /** 素材库参考素材（仅 video）：[{ id: "Asset-xxx", type: "image" | "video" }]；与首尾帧模式互斥 */
   reference_materials?: Array<{ id: string; type: 'image' | 'video' }>;
+  /** 生图目标画布节点 id（仅 image，IKDLQF）：携带时服务端按最新画布推导连线文本附件并冻结进任务快照 */
+  target_node_id?: string;
 }
 
 /** 创建/重试任务返回 */

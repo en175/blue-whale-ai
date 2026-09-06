@@ -1,3 +1,4 @@
+import { composeImagePrompt } from "@blue-whale/core";
 import type { WorkerRepo } from "@blue-whale/persistence";
 import type { AssetUploadStorage } from "@lib/shared/assets/upload.js";
 import { describe, expect, it, vi } from "vitest";
@@ -654,5 +655,112 @@ describe("processNextJob 图片参考图上限与字段语义（IKA72G）", () =
         errorMessage: "当前模型最多支持 1 张参考图",
       }),
     );
+  });
+});
+
+// IKDLQF：文本附件驱动图片生成——worker 组 providerInput.prompt 时调用 composeImagePrompt
+// （契约「供应商请求组合」：附件正文按序在前、忽略纯空白、目标提示词非空则最后追加，"\n\n" 连接）。
+describe("processNextJob 文本附件组合 prompt（IKDLQF）", () => {
+  async function runImageJob(input: Record<string, unknown>) {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j-img-att",
+      project_id: "p1",
+      user_id: "u1",
+      type: "image",
+      input: {
+        model_id: "m1",
+        provider_credential: "<sealed>",
+        ...input,
+      },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 21,
+    });
+    const findImageCapability = vi.fn().mockResolvedValue({
+      model_id: "m1",
+      api_size: null,
+      width: 512,
+      height: 512,
+    });
+    const createAsset = vi.fn().mockResolvedValue("a1");
+    const completeJobAndSettle = vi.fn().mockResolvedValue(true);
+    const appendLog = vi.fn().mockResolvedValue(undefined);
+    const repo = {
+      claimNextJob,
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      findImageCapability,
+      createAsset,
+      completeJobAndSettle,
+      appendLog,
+    } as unknown as WorkerRepo;
+    const generate = vi.fn().mockResolvedValue([
+      { url: "https://img.test/a.png", width: 512, height: 512, requestId: "req-1" },
+    ]);
+    const createImageProvider = vi.fn().mockReturnValue({ generate });
+
+    const jobId = await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider,
+      createAudioProvider: vi.fn(),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+    });
+
+    return { jobId, generate, completeJobAndSettle };
+  }
+
+  it("带 text_attachments：provider 收到的 prompt 与 composeImagePrompt(冻结附件, 冻结 prompt) 精确相等", async () => {
+    const textAttachments = [
+      { node_id: "n1", title: "背景", text: "背景：雨夜" },
+      { node_id: "n2", title: "空白附件", text: "   " },
+      { node_id: "n3", title: "风格", text: "风格：水彩" },
+    ];
+
+    const { generate } = await runImageJob({
+      prompt: "画一只猫",
+      text_attachments: textAttachments,
+    });
+
+    const providerArg = generate.mock.calls[0]![0] as { prompt: string };
+    expect(providerArg.prompt).toBe(
+      composeImagePrompt(textAttachments, "画一只猫"),
+    );
+  });
+
+  it("仅附件、prompt 为空字符串：可生成且 provider 收到附件正文", async () => {
+    const { jobId, generate, completeJobAndSettle } = await runImageJob({
+      prompt: "",
+      text_attachments: [
+        { node_id: "n1", title: "设定", text: "一只在雨中的猫" },
+      ],
+    });
+
+    expect(jobId).toBe("j-img-att");
+    const providerArg = generate.mock.calls[0]![0] as { prompt: string };
+    expect(providerArg.prompt).toBe("一只在雨中的猫");
+    expect(completeJobAndSettle).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: "j-img-att", assetIds: ["a1"] }),
+    );
+  });
+
+  it("附件与目标提示词同时送达且顺序正确（附件按序在前，prompt 最后追加）", async () => {
+    const { generate } = await runImageJob({
+      prompt: "画一只猫",
+      text_attachments: [
+        { node_id: "n1", title: "甲", text: "背景：雨夜" },
+        { node_id: "n2", title: "乙", text: "风格：水彩" },
+      ],
+    });
+
+    const providerArg = generate.mock.calls[0]![0] as { prompt: string };
+    expect(providerArg.prompt).toBe("背景：雨夜\n\n风格：水彩\n\n画一只猫");
+  });
+
+  it("无 text_attachments 的旧任务 input：provider 收到的 prompt 逐字节不变（回归）", async () => {
+    const { jobId, generate } = await runImageJob({ prompt: "一只猫" });
+
+    expect(jobId).toBe("j-img-att");
+    const providerArg = generate.mock.calls[0]![0] as { prompt: string };
+    expect(providerArg.prompt).toBe("一只猫");
   });
 });
