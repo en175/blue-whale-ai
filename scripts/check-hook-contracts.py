@@ -176,6 +176,11 @@ def normalized_contracts(
                         f"type={hook.get('type')}"
                     )
                 command = hook.get("command", "")
+                # graphify 官方提醒型钩子（hook-guard / hook-check，实测恒 exit 0）：
+                # 只注入"优先查图谱"引导、不阻断，与 Grep|Glob 提醒型同源，
+                # 按 git-workflow.md「Hook 改动同步检查」排除于阻断等价比较。
+                if event == "PreToolUse" and command.startswith("graphify hook-"):
+                    continue
                 gate = command_parser(command)
                 if gate is None:
                     raise ValueError(
