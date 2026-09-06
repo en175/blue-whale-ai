@@ -116,6 +116,7 @@ function createNewApiImageProvider(options: ProviderOptions): ImageProvider {
                 prompt: input.prompt,
                 images: sourceImages,
                 ...(input.size !== undefined ? { size: input.size } : {}),
+                ...(input.quality ? { quality: input.quality } : {}),
                 n: input.n,
                 ...(input.webSearch !== undefined ? { webSearch: input.webSearch } : {}),
                 ...(input.sequential !== undefined ? { sequential: input.sequential } : {}),

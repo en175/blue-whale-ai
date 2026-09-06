@@ -110,6 +110,8 @@ CREATE TABLE `generation_model_capability` (
     `default_aspect_ratio` VARCHAR(16) NOT NULL,
     `default_duration` INTEGER NULL,
     `features` JSON NOT NULL,
+    `channel_parser` VARCHAR(32) NOT NULL DEFAULT 'seedream',
+    `request_mapping` JSON NULL,
     `enabled` BOOLEAN NOT NULL DEFAULT true,
     `sort_order` INTEGER NOT NULL DEFAULT 0,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),

@@ -15,6 +15,7 @@ import {
   Image as ImageIcon,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
 import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import styles from './index.module.css';
@@ -173,7 +174,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const resolutionOptions = currentGen?.supported_sizes?.length
     ? currentGen.supported_sizes.map((s) => ({ key: s.id, label: s.label }))
     : [];
-  const ratioOptions = currentGen?.supported_aspect_ratios ?? [];
+  const ratioOptions = currentGen ? ratiosForSelectedSize(currentGen, selectedResolution) : [];
   const currentModel = modelOptions.find((m) => m.key === selectedModel);
   const currentResolutionLabel =
     resolutionOptions.find((r) => r.key === selectedResolution)?.label ?? selectedResolution;
@@ -189,20 +190,12 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   /** 选中模型后应用其默认清晰度/宽高比 */
   const applyModelDefaults = (m: GenerationModel) => {
     setSelectedModel(m.model_id);
-    if (m.supported_aspect_ratios.length) {
-      setSelectedRatio(
-        m.default_aspect_ratio && m.supported_aspect_ratios.includes(m.default_aspect_ratio)
-          ? m.default_aspect_ratio
-          : m.supported_aspect_ratios[0],
-      );
-    }
-    if (m.supported_sizes.length) {
-      setSelectedResolution(
-        m.default_size && m.supported_sizes.some((s) => s.id === m.default_size)
-          ? (m.default_size as string)
-          : m.supported_sizes[0].id,
-      );
-    }
+    const nextSize =
+      m.default_size && m.supported_sizes.some((s) => s.id === m.default_size)
+        ? m.default_size
+        : (m.supported_sizes[0]?.id ?? '');
+    if (m.supported_sizes.length) setSelectedResolution(nextSize);
+    setSelectedRatio(pickRatioForSize(m, nextSize, m.default_aspect_ratio));
   };
 
   // 加载图片模型能力列表：优先选中首页带入的模型，参数逐项按模型能力校验后应用
@@ -217,11 +210,16 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         applyModelDefaults(target);
         // 首页带入参数覆盖默认值（逐项经模型能力校验，不合法项保持该模型默认值）
         if (initialParams) {
-          if (initialParams.ratio && target.supported_aspect_ratios.includes(initialParams.ratio)) {
+          const nextSize =
+            initialParams.size && target.supported_sizes.some((s) => s.id === initialParams.size)
+              ? initialParams.size
+              : target.default_size && target.supported_sizes.some((s) => s.id === target.default_size)
+                ? target.default_size
+                : target.supported_sizes[0]?.id;
+          if (nextSize) setSelectedResolution(nextSize);
+          const allowed = ratiosForSelectedSize(target, nextSize ?? '');
+          if (initialParams.ratio && allowed.includes(initialParams.ratio)) {
             setSelectedRatio(initialParams.ratio);
-          }
-          if (initialParams.size && target.supported_sizes.some((s) => s.id === initialParams.size)) {
-            setSelectedResolution(initialParams.size);
           }
         }
       })
@@ -383,7 +381,11 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                       <button
                         key={r.key}
                         className={`${styles.selectOption} ${r.key === selectedResolution ? styles.selectOptionActive : ''}`}
-                        onClick={() => { setSelectedResolution(r.key); setResOpen(false); }}
+                        onClick={() => {
+                          setSelectedResolution(r.key);
+                          if (currentGen) setSelectedRatio(pickRatioForSize(currentGen, r.key, selectedRatio));
+                          setResOpen(false);
+                        }}
                       >
                         {r.label}
                       </button>

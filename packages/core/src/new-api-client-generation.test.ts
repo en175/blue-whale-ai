@@ -29,6 +29,30 @@ describe("new-api client —— 图片与视频生成", () => {
     });
   });
 
+  it("banana 请求带上 quality", async () => {
+    const requests: RequestInit[] = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (_input, init = {}) => {
+        requests.push(init);
+        return jsonResponse({ data: [{ url: "https://cdn.test/banana.png" }] });
+      },
+    });
+
+    await client.generateImages("sk-test", {
+      model: "nano-banana",
+      prompt: "cat",
+      size: "1x1",
+      quality: "1k",
+      n: 1,
+    });
+
+    expect(JSON.parse(String(requests[0]?.body))).toMatchObject({
+      size: "1x1",
+      quality: "1k",
+    });
+  });
+
   it("preserves nested gateway error details from failed requests", async () => {
     const client = createNewApiClient({
       baseUrl: "http://new-api.test",

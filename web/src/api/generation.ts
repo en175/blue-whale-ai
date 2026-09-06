@@ -12,10 +12,12 @@ export interface ModelSize {
   id: string;
   /** 显示名称 */
   label: string;
-  /** 传给 API 的实际分辨率值 */
-  api_value: string;
-  width: number | null;
-  height: number | null;
+  /** 当前尺寸下已填、可供选择的比例（消费端不返调用值） */
+  available_aspect_ratios?: string[];
+  /** 旧接口调用值；新契约已剥离，只作兼容回退 */
+  api_value?: string;
+  width?: number | null;
+  height?: number | null;
 }
 
 /** 模型能力特性 */
