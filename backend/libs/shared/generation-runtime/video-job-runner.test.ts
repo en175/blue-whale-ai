@@ -1578,9 +1578,10 @@ describe("video job runner asset↔material link (IKDJNZ)", () => {
 
     expect(submit).toHaveBeenCalledWith(
       expect.objectContaining({
-        firstFrameImage: "https://tos.test/f.png",
-        lastFrameImage: "asset://asset-last-1",
+        // 单数组语义：帧作为带 role 的 reference 条目在前，普通参考随后，保序。
         references: [
+          { type: "image", url: "https://tos.test/f.png", role: "first_frame" },
+          { type: "image", url: "asset://asset-last-1", role: "last_frame" },
           { type: "image", url: "asset://asset-mat-1" },
           { type: "image", url: "https://tos.test/r.png" },
         ],

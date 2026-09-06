@@ -680,4 +680,36 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     expect(result.msg).toBe("参考素材最多 12 个");
     expect(createJob).not.toHaveBeenCalled();
   });
+
+  it("references 与旧参考字段混用 → 400 references 不能与旧参考字段混用", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "reference", material_id: "Asset-ref-1", type: "image" }],
+        reference_asset_ids: ["5"],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("references 不能与旧参考字段混用");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("references 为空数组 → 400 参考素材不能为空", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, references: [] },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考素材不能为空");
+    expect(createJob).not.toHaveBeenCalled();
+  });
 });

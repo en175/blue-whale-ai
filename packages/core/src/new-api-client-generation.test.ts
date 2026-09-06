@@ -290,13 +290,19 @@ describe("new-api client —— 图片与视频生成", () => {
     });
   });
 
-  it("rejects frame inputs mixed with ordinary references before fetch", async () => {
-    const fetchImpl = vi.fn();
+  it("rejects frame inputs mixed with ordinary references before fetch (legacy firstFrameImage field)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { task_id: "t-1", status: "queued" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
     const client = createNewApiClient({
       baseUrl: "http://new-api.test",
       fetchImpl,
     });
 
+    // 旧分字段路径：firstFrameImage + references 仍被拒（互斥守卫保留）。
     await expect(client.submitVideo("sk-test", {
       model: "doubao-seedance-2-0-260128",
       prompt: "含糊输入",
@@ -314,6 +320,23 @@ describe("new-api client —— 图片与视频生成", () => {
       }),
     );
     expect(fetchImpl).not.toHaveBeenCalled();
+
+    // IKDJNZ 单数组语义：references 带 role 的帧条目与普通参考可并存，不再互斥。
+    await client.submitVideo("sk-test", {
+      model: "doubao-seedance-2-0-260128",
+      prompt: "单数组并存",
+      duration: 5,
+      width: 1280,
+      height: 720,
+      resolution: "720p",
+      ratio: "16:9",
+      references: [
+        { type: "image", url: "asset://Asset-ff-1", role: "first_frame" },
+        { type: "image", url: "asset://Asset-last-1", role: "last_frame" },
+        { type: "video", url: "https://cdn.test/reference.mp4" },
+      ],
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("IK7G9X: generateImagesWithReceipt exposes X-Oneapi-Request-Id", async () => {

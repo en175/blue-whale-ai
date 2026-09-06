@@ -59,6 +59,8 @@ export type VideoWorkerInputAsset = {
 export type VideoReference = {
   type: "image" | "video";
   url: string;
+  /** IKDJNZ：单数组 references 语义下，帧条目带 role（first_frame/last_frame）；普通参考无 role。 */
+  role?: "first_frame" | "last_frame";
 };
 
 /**
@@ -434,9 +436,16 @@ async function buildSubmitRequest(
     referenceMaterials = [];
     for (const ref of refsFromSingle) {
       if (ref.role === "first_frame") {
+        // IKDJNZ review：worker 侧也守住「首尾帧必须图片」（retry 冻结快照可能含历史脏行）。
+        if (ref.type !== "image") {
+          throw new VideoInputError(ERROR_INVALID_INPUT, "首尾帧素材必须是图片");
+        }
         if (ref.asset_id !== undefined) firstFrameAssetId = ref.asset_id;
         else if (ref.material_id !== undefined) firstFrameMaterialId = ref.material_id;
       } else if (ref.role === "last_frame") {
+        if (ref.type !== "image") {
+          throw new VideoInputError(ERROR_INVALID_INPUT, "首尾帧素材必须是图片");
+        }
         if (ref.asset_id !== undefined) lastFrameAssetId = ref.asset_id;
         else if (ref.material_id !== undefined) lastFrameMaterialId = ref.material_id;
       } else {
@@ -583,6 +592,7 @@ async function buildSubmitRequest(
 
   // 帧来源二选一：本地 Asset 解析出的 TOS URL，或素材库 asset:// URI（火山原生载体）。
   // IKDJNZ：本地帧素材命中关联（material_id）时优先走素材库 asset://（不走 url）。
+  // 单数组 references 语义下帧与参考可并存，帧作为带 role 的 reference 条目传给上游。
   const firstFrameImage =
     firstFrameMaterialResolved !== null
       ? `asset://${firstFrameMaterialResolved}`
@@ -591,6 +601,24 @@ async function buildSubmitRequest(
     lastFrameMaterialResolved !== null
       ? `asset://${lastFrameMaterialResolved}`
       : lastFrame?.url;
+
+  // IKDJNZ review：单数组路径把首尾帧并入 references（带 role），避免 submitVideo 的
+  // 首尾帧互斥守卫拒绝并存；旧字段路径仍走 firstFrameImage/lastFrameImage 独立字段。
+  const useSingleReferences = refsFromSingle !== null;
+  if (useSingleReferences) {
+    const frameRefs: VideoReference[] = [];
+    if (firstFrameImage) frameRefs.push({ type: "image", url: firstFrameImage, role: "first_frame" });
+    if (lastFrameImage) frameRefs.push({ type: "image", url: lastFrameImage, role: "last_frame" });
+    return {
+      model,
+      prompt,
+      duration,
+      ...dimensions,
+      resolution,
+      ratio,
+      references: [...frameRefs, ...references],
+    };
+  }
 
   return {
     model,

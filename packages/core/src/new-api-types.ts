@@ -99,6 +99,8 @@ export interface NewApiImageEditInput {
 export type NewApiVideoReference = {
   type: "image" | "video";
   url: string;
+  /** IKDJNZ：单数组 references 语义下，帧条目带 role（first_frame/last_frame）；普通参考无。 */
+  role?: "first_frame" | "last_frame";
 };
 
 export interface NewApiVideoInput {
