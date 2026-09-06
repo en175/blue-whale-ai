@@ -120,6 +120,7 @@ vi.mock('@/api/canvas', () => ({
   serializeEdges: vi.fn((edges: Array<{ id: string; source: string; target: string }>) =>
     JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target }))),
   ),
+  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
 }));
 
 vi.mock('@/api/jobs', () => ({

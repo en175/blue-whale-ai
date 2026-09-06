@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 import { fetchProjectSnapshot, type SnapshotAsset } from '@/api/projects';
-import { fetchCanvasDoc, type CanvasDoc } from '@/api/canvas';
+import { fetchCanvasDoc, type CanvasDoc, type LegacyMigrationReport } from '@/api/canvas';
 
 /** 空画布文档（无记录/加载失败时使用） */
 const EMPTY_DOC: CanvasDoc = {
@@ -48,12 +48,15 @@ export function useCanvasDoc(projectId: string) {
   /** 快照资产字典（key 为 assetId），供节点还原资产 URL */
   const [assets, setAssets] = useState<Record<string, SnapshotAsset>>({});
   const [loading, setLoading] = useState(false);
+  /** 旧生成卡迁移报告（IKDLQK）：随本次打开响应透传，无迁移为 null */
+  const [legacyMigration, setLegacyMigration] = useState<LegacyMigrationReport | null>(null);
 
   /** 拉取快照并水合；手动刷新时保留现有画布，避免节点短暂清空。返回本次读到的节点，供调用方在 React 提交前判断注入结果。 */
   const load = useCallback((preserveCurrent = false): Promise<Node[]> => {
     if (!projectId) {
       setDoc(null);
       setAssets({});
+      setLegacyMigration(null);
       return Promise.resolve([]);
     }
     if (!preserveCurrent) setDoc(null);
@@ -62,6 +65,7 @@ export function useCanvasDoc(projectId: string) {
       .then(async (snap) => {
         setAssets(snap.assets ?? {});
         const canvas = snap.canvas;
+        setLegacyMigration(snap.legacy_migration ?? null);
         if (import.meta.env.DEV) {
           console.info('[canvas] snapshot canvas 字段形态:', {
             exists: !!canvas,
@@ -81,6 +85,7 @@ export function useCanvasDoc(projectId: string) {
             if (import.meta.env.DEV) {
               console.info('[canvas] canvases 回退结果:', { version: rec.version, nodeCount: rec.nodes.length });
             }
+            setLegacyMigration(rec.legacyMigration ?? null);
             setDoc(rec);
             return rec.nodes;
           } catch {
@@ -114,5 +119,5 @@ export function useCanvasDoc(projectId: string) {
 
   const refetch = useCallback(() => load(true), [load]);
 
-  return { doc, assets, loading, refetch, acceptDoc: setDoc };
+  return { doc, assets, loading, refetch, acceptDoc: setDoc, legacyMigration };
 }
