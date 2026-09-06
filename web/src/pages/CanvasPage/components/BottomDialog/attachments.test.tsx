@@ -36,7 +36,7 @@ vi.mock('@/api/generation', () => ({ fetchGenerationModels }));
 let root: Root;
 let container: HTMLDivElement;
 
-async function renderDialog(props: { attachments?: ImageTextAttachment[]; onSend?: ReturnType<typeof vi.fn> } = {}) {
+async function renderDialog(props: { attachments?: ImageTextAttachment[]; onSend?: ReturnType<typeof vi.fn>; onReorderAttachments?: ReturnType<typeof vi.fn> } = {}) {
   const onSend = props.onSend ?? vi.fn();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -47,6 +47,7 @@ async function renderDialog(props: { attachments?: ImageTextAttachment[]; onSend
         onClose: vi.fn(),
         onSend,
         attachments: props.attachments,
+        onReorderAttachments: props.onReorderAttachments,
       }),
     );
   });
@@ -143,5 +144,71 @@ describe('BottomDialog 文本附件（IKDLQG）', () => {
   it('无附件且提示词为空时保持提示词必填（发送禁用）', async () => {
     await renderDialog();
     expect(sendButton().disabled).toBe(true);
+  });
+});
+
+/* IKDLQH：多附件排序——与 ImageDialog 附件区同构，上移/下移经 onReorderAttachments 交出新序列 */
+describe('BottomDialog 文本附件排序（IKDLQH）', () => {
+  const three = [
+    { nodeId: 't1', title: '甲', text: '正文甲' },
+    { nodeId: 't2', title: '乙', text: '正文乙' },
+    { nodeId: 't3', title: '丙', text: '正文丙' },
+  ];
+
+  const renderedTitles = () =>
+    [...container.querySelectorAll(`.${styles.attachmentItem}`)].map(
+      (el) => el.querySelector(`.${styles.attachmentTitle}`)!.textContent,
+    );
+  const moveButton = (index: number, direction: '上移' | '下移') =>
+    [
+      ...container
+        .querySelectorAll(`.${styles.attachmentItem}`)
+        [index]!.querySelectorAll<HTMLButtonElement>('button'),
+    ].find((b) => b.getAttribute('title') === direction)!;
+
+  it('多附件按 props 顺序渲染并展示排序控件，首项禁用上移、末项禁用下移', async () => {
+    await renderDialog({ attachments: three, onReorderAttachments: vi.fn() });
+
+    expect(renderedTitles()).toEqual(['甲', '乙', '丙']);
+    expect(moveButton(0, '上移').disabled).toBe(true);
+    expect(moveButton(0, '下移').disabled).toBe(false);
+    expect(moveButton(2, '上移').disabled).toBe(false);
+    expect(moveButton(2, '下移').disabled).toBe(true);
+  });
+
+  it('点击中间项上移/下移：与相邻项交换，回调交出新 nodeId 序列', async () => {
+    const onReorderAttachments = vi.fn();
+    await renderDialog({ attachments: three, onReorderAttachments });
+
+    await act(async () => {
+      moveButton(1, '上移').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onReorderAttachments).toHaveBeenCalledWith(['t2', 't1', 't3']);
+
+    await act(async () => {
+      moveButton(1, '下移').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onReorderAttachments).toHaveBeenLastCalledWith(['t1', 't3', 't2']);
+  });
+
+  it('单附件或无回调时不渲染排序控件', async () => {
+    await renderDialog({
+      attachments: [{ nodeId: 't1', title: '甲', text: '正文甲' }],
+      onReorderAttachments: vi.fn(),
+    });
+    expect(
+      [...container.querySelectorAll('button')].some((b) =>
+        ['上移', '下移'].includes(b.getAttribute('title') ?? ''),
+      ),
+    ).toBe(false);
+
+    await act(async () => root.unmount());
+    container.remove();
+    await renderDialog({ attachments: three });
+    expect(
+      [...container.querySelectorAll('button')].some((b) =>
+        ['上移', '下移'].includes(b.getAttribute('title') ?? ''),
+      ),
+    ).toBe(false);
   });
 });

@@ -1677,6 +1677,41 @@ export default function CanvasPage() {
         text: n.data.text as string,
       }));
 
+  /** 目标面板附件重排（IKDLQH）：把该目标文本附件边子序列原地重排为新顺序（其余边相对位置不变，
+   *  各目标顺序独立），并同步面板 seed 的附件快照顺序（保持 ts 不重挂载面板）。重排随自动保存持久化。
+   *  面板快照与当前连线不一致（如打开期间来源被断开）时不重排。 */
+  const handleReorderAttachments = (targetNodeId: string, orderedNodeIds: string[]) => {
+    const liveIds = textAttachmentsOf(targetNodeId).map((a) => a.nodeId);
+    if (
+      liveIds.length !== orderedNodeIds.length ||
+      !orderedNodeIds.every((id) => liveIds.includes(id))
+    )
+      return;
+    setEdges((prev) => {
+      const slots = prev
+        .map((e, i) => (e.target === targetNodeId && orderedNodeIds.includes(e.source) ? i : -1))
+        .filter((i) => i >= 0);
+      if (slots.length !== orderedNodeIds.length) return prev;
+      const edgeBySource = new Map(slots.map((i) => [prev[i]!.source, prev[i]!]));
+      const next = [...prev];
+      slots.forEach((slot, k) => {
+        next[slot] = edgeBySource.get(orderedNodeIds[k]!)!;
+      });
+      return next;
+    });
+    const syncAttachments = (atts: ImageTextAttachment[] | undefined) => {
+      if (!atts) return atts;
+      const byId = new Map(atts.map((a) => [a.nodeId, a]));
+      return orderedNodeIds.map((id) => byId.get(id)!);
+    };
+    setImageSeed((s) =>
+      s?.targetNodeId === targetNodeId ? { ...s, attachments: syncAttachments(s.attachments) } : s,
+    );
+    setVideoSeed((s) =>
+      s?.targetNodeId === targetNodeId ? { ...s, attachments: syncAttachments(s.attachments) } : s,
+    );
+  };
+
   /** 重新编辑：视频节点 → 视频对话框；图片节点 → 图片对话框 */
   const handleNodeReEdit = (id: string) => {
     const ref = nodeRefOf(id);
@@ -2818,6 +2853,11 @@ export default function CanvasPage() {
             initialText={videoSeed?.text}
             initialParams={videoSeed?.params}
             attachments={videoSeed?.attachments}
+            onReorderAttachments={
+              videoSeed?.targetNodeId
+                ? (ids) => handleReorderAttachments(videoSeed.targetNodeId!, ids)
+                : undefined
+            }
             onClose={() => { setShowBottomDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleDialogSend}
             onPickFromCanvas={(kind) => { setPickMode(kind); setPickTarget('video'); }}
@@ -2836,6 +2876,11 @@ export default function CanvasPage() {
             initialFiles={imageSeed?.files}
             initialParams={imageSeed?.params}
             attachments={imageSeed?.attachments}
+            onReorderAttachments={
+              imageSeed?.targetNodeId
+                ? (ids) => handleReorderAttachments(imageSeed.targetNodeId!, ids)
+                : undefined
+            }
             onClose={() => { setShowImageDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleImageDialogSend}
             onPickFromCanvas={() => { setPickMode('image'); setPickTarget('image'); }}
