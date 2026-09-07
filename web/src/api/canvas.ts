@@ -176,9 +176,12 @@ export function serializeNodes(nodes: Node[]): string {
   return JSON.stringify(clean);
 }
 
-/** 序列化连线：仅保留持久形状 {id, source, target}（流光样式、选中态等渲染细节不持久化，IKDLQF） */
+/** 序列化连线：保留持久形状 {id, source, target, data?}（流光样式、选中态等渲染细节不持久化，IKDLQF）。
+ *  data 承载连线关系属性并随连线原样存取（IKDMQS 视频参考角色 refRole），无 data 的连线不带该键。 */
 export function serializeEdges(edges: Edge[]): string {
-  return JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target })));
+  return JSON.stringify(
+    edges.map((e) => ({ id: e.id, source: e.source, target: e.target, ...(e.data ? { data: e.data } : {}) })),
+  );
 }
 
 /**
