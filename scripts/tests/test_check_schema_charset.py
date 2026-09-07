@@ -29,7 +29,7 @@ class CheckSchemaCharsetTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.repo = pathlib.Path(self._tmp.name)
-        self.schema_dir = self.repo / "packages" / "persistence" / "schema"
+        self.schema_dir = self.repo / "backend" / "prisma" / "schema"
         self.schema_dir.mkdir(parents=True)
 
     def test_all_files_declare_charset_passes(self):
