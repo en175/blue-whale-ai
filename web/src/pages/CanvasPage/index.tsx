@@ -30,7 +30,6 @@ import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import BottomDialog, { type VideoGenOptions, type BottomRefItem, type VideoGenSeedParams } from './components/BottomDialog';
-import type { ChipRef } from './components/ChipTextEditor';
 import ImageDialog, { type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
@@ -347,9 +346,9 @@ export default function CanvasPage() {
   /** 面板当前绑定的视频草稿节点 id（IKDMQS）：仅草稿入口（侧栏新建/点击草稿卡）设置；
    *  生命周期与图片草稿绑定一致 */
   const [videoDraftId, setVideoDraftId] = useState<string | null>(null);
-  /** 节点工具条带入视频对话框的初始参考；cards 是「引用到 dock」累计的生成卡胶囊，不因再次点击覆盖；
+  /** 节点工具条带入视频对话框的初始参考；
    *  params 是首页 AI视频 带入的生成参数（选中首页所选模型/比例/清晰度/时长/模式） */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; cards?: ChipRef[]; text?: string; params?: VideoGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
+  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; text?: string; params?: VideoGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
   /** 节点工具条打开音频对话框的重挂载 key */
   const [audioSeed, setAudioSeed] = useState<{ ts: number } | null>(null);
   /** 首页 AI视频/AI图片 生成交接：消费后置入此 ref，待项目就绪触发创建任务 */
@@ -676,43 +675,6 @@ export default function CanvasPage() {
             setPickTarget('asset');
             setPickAssetId(id);
           },
-          // 生成卡节点水合后补动作回调（引用到 dock / 给 Agent）
-          generationCard: base.data?.generationCard
-            ? {
-                ...base.data.generationCard as object,
-                onApplyToDock: (apply: GenerationCardBlock) => {
-                  // ts 沿用已有值（不重挂载 BottomDialog），否则清空对话框里用户已输入的自由文字
-                  setVideoSeed((prev) => ({
-                    ts: prev?.ts ?? Date.now(),
-                    refs: prev?.refs ?? [],
-                    cards: [
-                      ...(prev?.cards ?? []),
-                      { id: `${apply.cardId ?? apply.shotTitle ?? 'card'}-${Date.now()}`, label: apply.shotTitle ?? '生成卡', prompt: apply.prompt },
-                    ],
-                  }));
-                  setShowBottomDialog(true);
-                  setShowImageDialog(false);
-                  setShowAudioDialog(false);
-                  setShowMusicDialog(false);
-                  void apply;
-                },
-                onSendToAgent: () => {
-                  // 给 Agent：走与节点工具栏同一条 @ 链路（collectMediaBlocks → 胶囊）。
-                  // 旧写法只塞 label 不采块，chip 上屏了、消息里却没有胶囊，agent 只收到
-                  // 光杆文字（IKBBKP 的根因）。
-                  actionsRef.current.addToChat(node.id);
-                },
-                onUpdate: (patch: Partial<Pick<GenerationCardBlock, 'shotTitle' | 'visual' | 'prompt'>>) => {
-                  setAssetNodes((prev) =>
-                    prev.map((n) =>
-                      n.id === node.id
-                        ? { ...n, data: { ...n.data, generationCard: { ...(n.data as { generationCard?: object }).generationCard, ...patch } } }
-                        : n,
-                    ),
-                  );
-                },
-              }
-            : base.data?.generationCard,
         };
         break;
       default:
@@ -3486,7 +3448,6 @@ export default function CanvasPage() {
           <BottomDialog
             key={videoSeed?.ts ?? 0}
             initialRefs={videoSeed?.refs}
-            initialCards={videoSeed?.cards}
             initialText={videoSeed?.text}
             initialParams={videoSeed?.params}
             attachments={videoDraftId ? videoDraftAttachments : videoSeed?.attachments}

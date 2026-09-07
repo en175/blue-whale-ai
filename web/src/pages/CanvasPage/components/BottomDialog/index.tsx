@@ -19,7 +19,7 @@ import {
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import ChipTextEditor, { type ChipTextEditorHandle, type ChipRef } from '../ChipTextEditor';
+import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
 import type { ImageTextAttachment } from '../ImageDialog';
 import type { MediaGenStatus } from '../MediaNode';
 import {
@@ -87,8 +87,6 @@ interface BottomDialogProps {
   onSend: (text: string, opts: VideoGenOptions, refs: BottomRefItem[]) => void;
   /** 初始参考素材（节点「生成视频」带入被点节点图片） */
   initialRefs?: BottomRefItem[];
-  /** 初始生成卡引用胶囊（Agent 生成卡「引用到 dock」带入，累计不覆盖，可多张） */
-  initialCards?: ChipRef[];
   /** 初始自由文本（视频节点「重新编辑」带入原提示词） */
   initialText?: string;
   /** 初始生成参数（首页 AI视频 带入：选中首页所选的模型/比例/清晰度/时长/模式） */
@@ -257,8 +255,8 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, firstSlotOpe
   );
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText, initialParams, attachments, onReorderAttachments, onPickFromCanvas, pickMode, externalPick, externalImagePick, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onToast }: BottomDialogProps) {
-  /** 富文本输入框（可多次插入生成卡引用胶囊，发送时替换成完整 prompt） */
+export default function BottomDialog({ onClose, onSend, initialRefs, initialText, initialParams, attachments, onReorderAttachments, onPickFromCanvas, pickMode, externalPick, externalImagePick, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onToast }: BottomDialogProps) {
+  /** 富文本输入框（自由文本；胶囊机制保留给后续引用场景，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框内容的结构化形态（IKAFSX）：胶囊是指针，解引用只发生在发送那一刻。 */
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
@@ -436,15 +434,6 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalImagePick]);
-
-  // 只插入 initialCards 里「上次还没插过」的新增部分：对话框不因追加引用而重挂载，
-  // 已输入的自由文字不会被清空；ref 记录已插入数量，同时防 StrictMode 开发态 effect 双调用重复插入
-  const insertedCardCountRef = useRef(0);
-  useEffect(() => {
-    const newCards = (initialCards ?? []).slice(insertedCardCountRef.current);
-    insertedCardCountRef.current = initialCards?.length ?? 0;
-    newCards.forEach((card) => chipEditorRef.current?.insertChip(card));
-  }, [initialCards]);
 
   // 加载视频模型能力列表：优先选中首页带入的模型，参数逐项按模型能力校验后应用
   useEffect(() => {
@@ -941,7 +930,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         </div>
       )}
 
-      {/* 输入框：可多次插入生成卡引用胶囊，胶囊跟文字同一行 */}
+      {/* 输入框：胶囊跟文字同一行 */}
       <div className={styles.editorWrap}>
         <ChipTextEditor
           ref={chipEditorRef}
