@@ -81,7 +81,14 @@ def fail(platform: str, stage: str, detail: str) -> None:
 
 def run_git(repo: Path, *args: str) -> str:
     result = subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        # 显式 utf-8：Windows 原生 Python 默认 cp936，与 subprocess text 模式的默认本地
+        # 编码解码（与 sync/start-task 同根因）；POSIX 本就 UTF-8，no-op。errors=replace
+        # 兜底防止任一非 UTF-8 字节让读线程抛 UnicodeDecodeError（result 变 None）。
+        encoding="utf-8",
+        errors="replace",
     )
     if result.returncode != 0:
         fail("shared", "fixture", result.stderr.strip() or "Git 命令失败")
@@ -278,6 +285,11 @@ def execute(
             input=json.dumps(payload, ensure_ascii=False),
             capture_output=True,
             text=True,
+            # 显式 utf-8：Windows 原生 Python 默认 cp936，解码 Git Bash 的 UTF-8 中文
+            # BLOCKED 消息必抛 UnicodeDecodeError（读线程异常 → result.stderr=None →
+            # verify 里 `not in None` TypeError）。POSIX 本就 UTF-8，no-op。
+            encoding="utf-8",
+            errors="replace",
         )
     finally:
         script_path.unlink(missing_ok=True)
@@ -288,6 +300,9 @@ def query(project_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
         [sys.executable, str(QUERY_SCRIPT), "--project-dir", str(project_dir), *args],
         capture_output=True,
         text=True,
+        # 显式 utf-8：与 execute/run_git 同根因（subprocess text 模式默认 cp936）。
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -456,6 +471,13 @@ def configured_platforms(args: argparse.Namespace) -> tuple[Platform, ...]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows 原生 Python 默认 stdout/stderr 为 cp936（GBK），中文/方块字符 print
+    # 输出 GBK 字节，被 test-hooks.sh 的 UTF-8 needle grep 断言漏配（与 sync/start-task
+    # 同根因的输出方向）。强制改 UTF-8；POSIX 本就 UTF-8，reconfigure 为 no-op。
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
     args = parse_args(argv or sys.argv[1:])
     try:
         verify(configured_platforms(args))

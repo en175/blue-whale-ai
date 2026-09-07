@@ -21,6 +21,10 @@ from typing import Any
 
 SEPARATORS = {";", "&", "&&", "|", "||", "(", ")"}
 WORK_BRANCH_PREFIXES = ("feature/", "fix/", "hotfix/", "docs/", "chore/")
+# 测试基建桥：test-hooks.sh 在 Windows 注入 fake git（git.bat）后，把该全路径
+# 经此环境变量交给 pretool 的 git 子进程，使 current_branch / configured_git_alias
+# 命中假分支而非真实仓库（POSIX 不导出此变量，走原 git PATH 解析，行为不变）。
+PRETOOL_GIT_BIN = os.environ.get("PRETOOL_GIT_BIN") or "git"
 NON_ALIAS_SUBCOMMANDS = {
     "add",
     "branch",
@@ -414,12 +418,14 @@ def git_invocations(command: str) -> list[GitInvocation]:
 def configured_git_alias(name: str, cwd: str | None) -> str | None:
     if name in NON_ALIAS_SUBCOMMANDS:
         return None
-    command = ["git"]
+    command = [PRETOOL_GIT_BIN]
     if cwd:
         command.extend(["-C", cwd])
     command.extend(["config", "--get", f"alias.{name}"])
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        result = subprocess.run(
+            command, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+        )
     except OSError:
         return None
     if result.returncode != 0:
@@ -514,12 +520,14 @@ def explicit_targets(invocation: GitInvocation) -> list[str]:
 
 
 def current_branch(cwd: str | None) -> str:
-    cmd = ["git"]
+    cmd = [PRETOOL_GIT_BIN]
     if cwd:
         cmd.extend(["-C", cwd])
     cmd.extend(["rev-parse", "--abbrev-ref", "HEAD"])
     try:
-        return subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL).strip()
+        return subprocess.check_output(
+            cmd, text=True, encoding="utf-8", errors="replace", stderr=subprocess.DEVNULL
+        ).strip()
     except Exception:
         return ""
 

@@ -53,6 +53,8 @@ def git_common_dir(project_dir: str) -> Path:
         ["git", "-C", str(root), "rev-parse", "--git-common-dir"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     common = result.stdout.strip()

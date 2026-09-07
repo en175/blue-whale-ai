@@ -124,8 +124,13 @@ fi
 #   实化 FILE_PATH 目录（解 macOS /var→/private/var 等 symlink）再剥离 TOPLEVEL 前缀；
 #   剥离失败（文件不在本工作树根下）→ 不命中，落入下方硬拦（fail closed）。
 if REAL_DIR="$(cd "$FILE_DIR" 2>/dev/null && pwd -P)" && [ -n "$REAL_DIR" ]; then
+  # TOPLEVEL（git rev-parse --show-toplevel）在 Windows 下是盘符形式（C:/...），
+  # 而 REAL_DIR 经 cd+pwd -P 是 POSIX 形式（/c/... 或 /tmp/...）——直接前缀剥离会
+  # 失败导致文档白名单/本地配置误拦。把 TOPLEVEL 也归一化到同一物理形式再剥离；
+  # 归一化失败时沿用原值（保持 fail-closed）。POSIX 上 pwd -P 为 no-op，行为不变。
+  TOPLEVEL_P="$(cd "$TOPLEVEL" 2>/dev/null && pwd -P)" || TOPLEVEL_P="$TOPLEVEL"
   REL_PATH="${REAL_DIR%/}/$(basename "$FILE_PATH")"
-  REL_PATH="${REL_PATH#$TOPLEVEL/}"
+  REL_PATH="${REL_PATH#$TOPLEVEL_P/}"
 
   # 本地个人配置只有同时满足「精确路径 + Git 已忽略」才放行。
   # 路径白名单防止扩大 master 写面；check-ignore 防止配置意外进入团队仓库。
