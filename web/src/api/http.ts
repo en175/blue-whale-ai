@@ -9,6 +9,8 @@ import { handleUnauthorized } from '@/utils/auth';
 
 /** 接口路径前缀 */
 export const API_PREFIX = '/api';
+/** 请求在网络断开时不能无限挂起；页面可据此结束保存态或展示重试入口。 */
+export const API_REQUEST_TIMEOUT_MS = 10_000;
 
 /**
  * agent 计费查账端点。**它的 401 不代表本地登录失效，因此豁免自动登出**（审查 W·A12）。
@@ -86,7 +88,28 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   // 登录态走 HttpOnly 会话 cookie，浏览器自动携带，JS 不附加任何令牌头。
 
-  const res = await fetch(path, { ...init, headers });
+  const timeoutController = new AbortController();
+  let timedOut = false;
+  const onExternalAbort = () => timeoutController.abort(init?.signal?.reason);
+  if (init?.signal) {
+    if (init.signal.aborted) onExternalAbort();
+    else init.signal.addEventListener('abort', onExternalAbort, { once: true });
+  }
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    timeoutController.abort();
+  }, API_REQUEST_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(path, { ...init, headers, signal: timeoutController.signal });
+  } catch (error) {
+    if (timedOut) throw new ApiError(408, '请求超时，请稍后重试', 408);
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+    init?.signal?.removeEventListener('abort', onExternalAbort);
+  }
 
   // 凭证失效：已登录则弹登录续接，未登录才清会话（auth 类接口除外，避免登录失败误清；
   // admin/session 对非管理员返回 401 属正常业务结果，同样豁免；
@@ -118,7 +141,16 @@ function dedupKey(path: string, init?: ApiRequestInit): string {
 /** 单次请求 + 包络解析：成功返回 data；失败抛 ApiError，默认 toast(msg) */
 async function doRequest<T>(path: string, init?: ApiRequestInit): Promise<{ data: T; warning?: string }> {
   const silent = init?.silent === true;
-  const res = await apiFetch(path, toFetchInit(init));
+  let res: Response;
+  try {
+    res = await apiFetch(path, toFetchInit(init));
+  } catch (error) {
+    const err = isApiError(error)
+      ? error
+      : new ApiError(0, '网络请求失败，请检查网络后重试');
+    if (!silent) toast.error(err.message);
+    throw err;
+  }
   const body = (await res.json().catch(() => undefined)) as Envelope<T> | undefined;
 
   const ok = body !== undefined && (body.code === 200 || body.success === true);
