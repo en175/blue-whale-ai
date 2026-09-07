@@ -863,6 +863,28 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       await browserExpect(composer).toHaveText(mixedDraft);
       await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
       const candidate = page.locator('.react-flow__node[data-id="text-pending"]').getByTestId("text-title");
+      // IKDXP1：重复点击已确认节点不使另一候选正在返回的有效快照失效。
+      let releaseDuplicate!: () => void;
+      const duplicateGate = new Promise<void>(resolve => { releaseDuplicate = resolve; });
+      let duplicateReady = false;
+      await page.route("**/conversation-quotes", async route => {
+        const response = await route.fetch();
+        expect(response.status()).toBeLessThan(300);
+        duplicateReady = true;
+        await duplicateGate;
+        await route.fulfill({ response });
+      }, { times: 1 });
+      await candidate.click();
+      const duplicateResponse = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/conversation-quotes"));
+      await confirm();
+      await browserExpect.poll(() => duplicateReady).toBe(true);
+      try {
+        await page.locator('.react-flow__node[data-id="text-kept"]').getByTestId("text-title").click();
+      } finally { releaseDuplicate(); await duplicateResponse; }
+      await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(2);
+      await composer.getByRole("button", { name: "移除引用", exact: true }).last().click();
+      await browserExpect(composer).toHaveText(mixedDraft);
       // 延迟真实 API 响应：分别在关闭期间和重开选好新候选后返回。
       for (const reopenFirst of [false, true]) {
         let release!: () => void;
@@ -955,6 +977,58 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       await browserExpect(composer).toHaveText("");
       expect(messageBodies[4].content).toEqual([
         { type: "text", text: "新会话草稿" },
+        expect.objectContaining({ node_id: "text-pending", resource_text: "不可回填" }),
+      ]);
+      // IKDXP1：发送回执只能清理本次内容，显式入口在等待期间新加的引用属于下一条。
+      await composer.fill("本次发送文字");
+      holdNextMessage = true;
+      const submissionIndex = messageBodies.length;
+      const accepted = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/messages"));
+      await page.locator('button[title="发送"]').click();
+      await browserExpect.poll(() => releaseMessage !== null).toBe(true);
+      try {
+        await candidate.click();
+        await page.locator('.react-flow__node[data-id="text-pending"]').getByRole("button", { name: "添加到对话", exact: true }).click();
+        await browserExpect(composer.getByText("旧候选", { exact: true })).toBeVisible();
+        expect(messageBodies[submissionIndex].content).toEqual([{ type: "text", text: "本次发送文字" }]);
+      } finally { releaseMessage!(); releaseMessage = null; await accepted; }
+      await browserExpect(composer.getByText("旧候选", { exact: true })).toBeVisible();
+      await browserExpect(composer).not.toContainText("本次发送文字");
+      await composer.press("ControlOrMeta+z");
+      await browserExpect(composer).not.toContainText("本次发送文字");
+      await page.locator('button[title="发送"]').click();
+      await browserExpect(composer).toHaveText("");
+      expect(messageBodies[submissionIndex + 1].content).toEqual([
+        expect.objectContaining({ node_id: "text-pending", resource_text: "不可回填" }),
+      ]);
+      // 已忽略的点选不能因随后删除 A 的引用而重新生效。
+      await page.locator('.react-flow__node[data-id="text-kept"]').getByTestId("text-title").click();
+      await confirm();
+      await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      let releaseDeletion!: () => void;
+      const deletionGate = new Promise<void>(resolve => { releaseDeletion = resolve; });
+      let deletionReady = false;
+      await page.route("**/conversation-quotes", async route => {
+        const response = await route.fetch();
+        expect(response.status()).toBeLessThan(300);
+        deletionReady = true;
+        await deletionGate;
+        await route.fulfill({ response });
+      }, { times: 1 });
+      await candidate.click();
+      const deletionResponse = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/conversation-quotes"));
+      await confirm();
+      await browserExpect.poll(() => deletionReady).toBe(true);
+      try {
+        await page.locator('.react-flow__node[data-id="text-kept"]').getByTestId("text-title").click();
+        await composer.getByRole("button", { name: "移除引用", exact: true }).click();
+        await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(0);
+      } finally { releaseDeletion(); await deletionResponse; }
+      await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      await browserExpect(composer.getByText("旧候选", { exact: true })).toBeVisible();
+      await page.locator('button[title="发送"]').click();
+      await browserExpect(composer).toHaveText("");
+      expect(messageBodies[submissionIndex + 2].content).toEqual([
         expect.objectContaining({ node_id: "text-pending", resource_text: "不可回填" }),
       ]);
       const canvasAfter = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;

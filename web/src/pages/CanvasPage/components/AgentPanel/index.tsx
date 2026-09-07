@@ -1,7 +1,7 @@
 /* ============================================
  * AgentPanel Agent 智能体对话面板：消息流与任务执行
  * ============================================ */
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import {
   X,
   Plus,
@@ -539,16 +539,21 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
   };
   const [pendingReference, setPendingReference] = useState<{ chip: ChipRef; blocks: SessionContentBlock[] } | null>(null);
   const currentCandidateRef = useRef(candidateBlocks);
-  currentCandidateRef.current = open ? candidateBlocks : null;
   const preparedBlocksRef = useRef<SessionContentBlock[] | null>(null);
   const [referenceNotice, setReferenceNotice] = useState('');
   const [submittingMessage, setSubmittingMessage] = useState(false);
   const submittingMessageRef = useRef(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (!open || !candidateBlocks?.length) {
+      currentCandidateRef.current = null;
+      setPendingReference(null);
+      return;
+    }
     if (submittingMessageRef.current) return;
-    if (!candidateBlocks?.length) { setPendingReference(null); return; }
     const first = candidateBlocks[0];
     if (pendingMediaBlocksRef.current.some((block) => block.node_id === first.node_id)) return;
+    // 仅新点选更新有效候选；删除已确认引用不能重新激活曾被忽略的点选。
+    currentCandidateRef.current = candidateBlocks;
     setPendingReference({
       chip: {
         id: first.chip_id!, label: first.display_label || '素材', prompt: '',
@@ -558,7 +563,7 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
       },
       blocks: candidateBlocks,
     });
-  }, [candidateBlocks]);
+  }, [candidateBlocks, open]);
   useEffect(() => { setReferenceNotice(''); }, [pendingReference]);
   /** Agent 模型列表：全部取自接口（fetchGenerationModels text capability），无本地写死兜底 */
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
@@ -1180,15 +1185,17 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
     if (armed) setSkillNames((prev) => ({ ...prev, [armed.id]: armed.name }));
     const sentAttachments = attachments;
     const sentEpoch = draftEpochRef.current;
+    const clearSubmittedContent = chipEditorRef.current?.captureSubmission();
+    const sentBlocks = new Set(orderedContent);
     try {
       const accepted = await sendMessage(orderedContent, armed?.id, undefined, armed?.name, userText, chips);
       if (accepted && sentEpoch === draftEpochRef.current) {
-        referenceHistoryRef.current.clear();
-        chipEditorRef.current?.clear();
-        pendingMediaBlocksRef.current = [];
+        for (const chip of chips) referenceHistoryRef.current.delete(chip.id);
+        clearSubmittedContent?.();
+        pendingMediaBlocksRef.current = pendingMediaBlocksRef.current.filter((block) => !sentBlocks.has(block));
         syncMediaBlocks();
-        setForcedSkill(null);
-        setAttachments([]);
+        setForcedSkill((current) => current === armed ? null : current);
+        setAttachments((current) => current.filter((item) => !sentAttachments.some((sent) => sent.key === item.key)));
         for (const item of sentAttachments) revokeAttachmentPreviewUrl(item.url);
       }
     } finally {
@@ -1632,7 +1639,7 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
               onCancelPending={onCancelCandidate}
               onPreparePending={async () => {
                 if (!pendingReference) return null;
-                const candidate = candidateBlocks;
+                const candidate = pendingReference.blocks;
                 const epoch = draftEpochRef.current;
                 preparedBlocksRef.current = null;
                 try {

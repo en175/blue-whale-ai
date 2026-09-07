@@ -33,6 +33,7 @@ import {
   type RangeSelection,
   type NodeKey,
   type LexicalEditor,
+  type LexicalNode,
 } from 'lexical';
 import { ChipNode, $createChipNode } from './ChipNode';
 import { type ComposedValue } from './composed';
@@ -61,6 +62,8 @@ export interface ChipTextEditorHandle {
   setText: (text: string) => void;
   /** 清空全部内容（发送后调用） */
   clear: () => void;
+  /** 捕获本次提交内容，成功后仅移除这些节点，保留等待期间的新输入。 */
+  captureSubmission: () => () => void;
   focus: () => void;
 }
 
@@ -266,6 +269,27 @@ const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(fun
         root.clear();
         root.append($createParagraphNode());
       }, { onUpdate: () => editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined) });
+    },
+    captureSubmission: () => {
+      const editor = editorRef.current;
+      if (!editor) return () => {};
+      const keys = editor.read(() => {
+        const result: NodeKey[] = [];
+        const visit = (node: LexicalNode) => {
+          if ($isElementNode(node)) node.getChildren().forEach(visit);
+          else result.push(node.getKey());
+        };
+        visit($getRoot());
+        return result;
+      });
+      return () => editor.update(() => {
+        for (const key of keys) $getNodeByKey(key)?.remove();
+        const root = $getRoot();
+        for (const child of root.getChildren()) {
+          if ($isElementNode(child) && child.isEmpty()) child.remove();
+        }
+        if (root.isEmpty()) root.append($createParagraphNode());
+      }, { tag: SKIP_DOM_SELECTION_TAG, onUpdate: () => editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined) });
     },
     focus: () => editorRef.current?.focus(),
   }), []);
