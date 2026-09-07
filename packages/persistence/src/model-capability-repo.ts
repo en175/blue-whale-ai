@@ -57,6 +57,10 @@ export interface ModelCapabilityView {
   default_aspect_ratio: string;
   default_duration: number | null;
   features: ModelFeatures;
+  /** 生成渠道解析器（seedream / gpt / banana）。消费端列表会剥掉。 */
+  channel_parser: string;
+  /** GPT 交叉格 / banana 一维映射。消费端列表会剥掉。 */
+  request_mapping: unknown;
   /** 乐观锁版本（DB version 列）；对应冻结快照的 row_version，用于预判能力漂移。 */
   version: number;
   /** 能力内容摘要（sha256，运行时算，不入库）；与冻结快照 digest 同源比对。
@@ -191,6 +195,11 @@ export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapability
         default_aspect_ratio: cap.default_aspect_ratio,
         default_duration: cap.default_duration,
         features: toFeatures(cap.features),
+        channel_parser:
+          typeof cap.channel_parser === "string" && cap.channel_parser.length > 0
+            ? cap.channel_parser
+            : "seedream",
+        request_mapping: cap.request_mapping ?? null,
         version: cap.version,
         digest: capabilityDigestFromModelCapability(cap),
       }));

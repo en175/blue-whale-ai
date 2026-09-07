@@ -18,6 +18,7 @@ import { createGenerationImageProvider } from "./ark-image-provider.js";
 function buildClientMock(error: NewApiError) {
   createNewApiClient.mockReturnValue({
     generateImagesWithReceipt: vi.fn().mockRejectedValue(error),
+    editImagesWithReceipt: vi.fn(),
   });
 }
 
@@ -79,5 +80,68 @@ describe("new-api image provider 错误分类（IKDAJN）", () => {
     await expect(
       provider.generate(generateInput()),
     ).rejects.toMatchObject({ code: "quota_exhausted" });
+  });
+});
+
+describe("new-api image provider 图生图走 generations（IKDMQE）", () => {
+  it("单张参考图调用 generateImagesWithReceipt，image 为 URL 字符串", async () => {
+    const generateImagesWithReceipt = vi.fn().mockResolvedValue({
+      images: [{ url: "https://cdn.test/out.png" }],
+      requestId: "req-1",
+    });
+    const editImagesWithReceipt = vi.fn();
+    createNewApiClient.mockReturnValue({
+      generateImagesWithReceipt,
+      editImagesWithReceipt,
+    });
+
+    const provider = createGenerationImageProvider({
+      env: { NEW_API_BASE_URL: "http://new-api.test" },
+      token: "sk-user",
+    });
+    await provider.generate({
+      ...generateInput(),
+      sourceImage: { url: "https://asset/5829.png" },
+    });
+
+    expect(generateImagesWithReceipt).toHaveBeenCalledWith("sk-user", {
+      model: "doubao-seedream-5-0-pro-260628",
+      prompt: "一只猫",
+      n: 1,
+      image: "https://asset/5829.png",
+    });
+    expect(editImagesWithReceipt).not.toHaveBeenCalled();
+  });
+
+  it("多张参考图把 image 做成 URL 数组，仍不走 edits", async () => {
+    const generateImagesWithReceipt = vi.fn().mockResolvedValue({
+      images: [{ url: "https://cdn.test/out.png" }],
+      requestId: "req-1",
+    });
+    const editImagesWithReceipt = vi.fn();
+    createNewApiClient.mockReturnValue({
+      generateImagesWithReceipt,
+      editImagesWithReceipt,
+    });
+
+    const provider = createGenerationImageProvider({
+      env: { NEW_API_BASE_URL: "http://new-api.test" },
+      token: "sk-user",
+    });
+    await provider.generate({
+      ...generateInput(),
+      sourceImages: [
+        { url: "https://asset/1.png" },
+        { url: "https://asset/2.png" },
+      ],
+    });
+
+    expect(generateImagesWithReceipt).toHaveBeenCalledWith("sk-user", {
+      model: "doubao-seedream-5-0-pro-260628",
+      prompt: "一只猫",
+      n: 1,
+      image: ["https://asset/1.png", "https://asset/2.png"],
+    });
+    expect(editImagesWithReceipt).not.toHaveBeenCalled();
   });
 });

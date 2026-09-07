@@ -1,3 +1,10 @@
+import {
+  IMAGE_CHANNEL_PARSERS,
+  isImageChannelParserId,
+  validateRequestMapping,
+  type ImageChannelParserId,
+} from "../generation/image-channel-parser.js";
+
 export const MODEL_CAPABILITY_TYPES = ["image", "video", "text", "audio"] as const;
 export type ModelCapabilityType = (typeof MODEL_CAPABILITY_TYPES)[number];
 
@@ -19,6 +26,8 @@ export const MODEL_FIELD_LIMITS = {
   default_aspect_ratio: 16,
 } as const;
 
+export const DEFAULT_PROVIDER_ID = "new-api";
+
 export type ModelCreatePayload = {
   provider_id: string;
   model_id: string;
@@ -34,6 +43,8 @@ export type ModelCreatePayload = {
   default_aspect_ratio?: string;
   default_duration?: number | null;
   features?: unknown;
+  channel_parser?: ImageChannelParserId;
+  request_mapping?: unknown;
   enabled?: boolean;
 };
 
@@ -49,6 +60,8 @@ export type ModelUpdatePayload = {
   default_aspect_ratio?: string;
   default_duration?: number | null;
   features?: unknown;
+  channel_parser?: ImageChannelParserId;
+  request_mapping?: unknown;
   enabled?: boolean;
   sort_order?: number;
 };
@@ -118,6 +131,54 @@ function pickNullableString(v: unknown): string | null | undefined {
   return v == null ? null : typeof v === "string" ? v : undefined;
 }
 
+function parseParserAndMapping(
+  body: Record<string, unknown>,
+  mode: "create" | "update",
+): ParseResult<{
+  channel_parser?: ImageChannelParserId;
+  request_mapping?: unknown;
+}> {
+  if (body.channel_parser !== undefined && !isImageChannelParserId(body.channel_parser)) {
+    return {
+      ok: false,
+      error: `生成渠道解析器只支持 ${IMAGE_CHANNEL_PARSERS.join(" / ")}`,
+    };
+  }
+  const parser = isImageChannelParserId(body.channel_parser)
+    ? body.channel_parser
+    : mode === "create"
+      ? "seedream"
+      : undefined;
+  if (body.request_mapping !== undefined && body.request_mapping !== null) {
+    const mappingTypeErr = jsonField(
+      body.request_mapping,
+      "映射(request_mapping)",
+      "features",
+    );
+    if (mappingTypeErr) return { ok: false, error: mappingTypeErr };
+  }
+  if (parser) {
+    const mapping =
+      body.request_mapping === undefined && parser === "seedream"
+        ? null
+        : body.request_mapping;
+    if (parser !== "seedream" && mapping === undefined) {
+      return { ok: false, error: "request_mapping 不能为空" };
+    }
+    const mappingErr = validateRequestMapping(parser, mapping ?? null);
+    if (mappingErr) return { ok: false, error: mappingErr };
+  }
+  return {
+    ok: true,
+    value: {
+      ...(parser ? { channel_parser: parser } : {}),
+      ...(body.request_mapping !== undefined
+        ? { request_mapping: body.request_mapping }
+        : {}),
+    },
+  };
+}
+
 function pickNullableDuration(v: unknown): number | null | undefined {
   if (v == null) return null;
   if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
@@ -131,11 +192,6 @@ export function parseModelCreateBody(
   if (!isPlainObject(body)) return { ok: false, error: "请求体须为 JSON 对象" };
 
   const err =
-    reqString(
-      body.provider_id,
-      MODEL_FIELD_LIMITS.provider_id,
-      "供应商(provider_id)",
-    ) ??
     reqString(body.model_id, MODEL_FIELD_LIMITS.model_id, "模型ID(model_id)") ??
     reqString(
       body.capability_type,
@@ -232,10 +288,13 @@ export function parseModelCreateBody(
       error: "默认时长(default_duration)须为非负整数秒（≤2147483647）或 null",
     };
 
+  const parsedMapping = parseParserAndMapping(body, "create");
+  if (!parsedMapping.ok) return parsedMapping;
+
   return {
     ok: true,
     value: {
-      provider_id: body.provider_id as string,
+      provider_id: DEFAULT_PROVIDER_ID,
       model_id: body.model_id as string,
       capability_type: body.capability_type as string,
       model_label: body.model_label as string,
@@ -251,6 +310,7 @@ export function parseModelCreateBody(
         : {}),
       default_duration: defaultDuration,
       features: body.features,
+      ...parsedMapping.value,
       ...(body.enabled !== undefined ? { enabled: body.enabled as boolean } : {}),
     },
   };
@@ -343,6 +403,9 @@ export function parseModelUpdateBody(
     jsonField(body.features, "特性(features)", "features");
   if (jsonErr) return { ok: false, error: jsonErr };
 
+  const parsedMapping = parseParserAndMapping(body, "update");
+  if (!parsedMapping.ok) return parsedMapping;
+
   return {
     ok: true,
     value: {
@@ -379,6 +442,7 @@ export function parseModelUpdateBody(
           | null,
       }),
       ...(body.features !== undefined && { features: body.features }),
+      ...parsedMapping.value,
       ...(body.enabled !== undefined && { enabled: body.enabled as boolean }),
       ...(body.sort_order !== undefined && {
         sort_order: body.sort_order as number,

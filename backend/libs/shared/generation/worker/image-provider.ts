@@ -10,15 +10,19 @@ export interface GenerateImageInput {
   /** 能力表给出的尺寸宽高（url 模式 provider 不回宽高时兜底）。 */
   width?: number | null;
   height?: number | null;
-  /** 已通过项目/用户归属校验的输入图片。存在时走 image edits。 */
+  /** Banana 解析器写入的调用质量。 */
+  quality?: string;
+  /** 已通过项目/用户归属校验的参考图，走 generations Extra `image`。 */
   sourceImage?: {
-    blob: Blob;
-    fileName: string;
+    url: string;
+    blob?: Blob;
+    fileName?: string;
   };
   /** Ordered, authorized reference images. */
   sourceImages?: Array<{
-    blob: Blob;
-    fileName: string;
+    url: string;
+    blob?: Blob;
+    fileName?: string;
   }>;
 }
 

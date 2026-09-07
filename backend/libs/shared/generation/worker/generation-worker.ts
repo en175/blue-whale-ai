@@ -17,6 +17,10 @@ import {
   ERROR_UNSUPPORTED_TYPE,
 } from "@blue-whale/contracts";
 import {
+  mapImageChannelRequest,
+  parseStoredImageRequestMapping,
+} from "../image-channel-parser.js";
+import {
   hasSeedreamSizeTable,
   resolveSeedreamImageSize,
 } from "../seedream-image-size.js";
@@ -399,10 +403,27 @@ async function processClaimedJob(
     }
     const aspectRatio =
       typeof input.aspect_ratio === "string" ? input.aspect_ratio : null;
-    // seedream 族按「分辨率×宽高比」查表换算供应商尺寸；族外模型（如验收
-    // fake 能力）直接沿用能力行 api_value，不受 seedream 表约束。
+    const sizeId = typeof input.size === "string" ? input.size : null;
+    const mapping = parseStoredImageRequestMapping(
+      cap.channel_parser,
+      cap.request_mapping,
+      {
+        sizeId: cap.default_size,
+        ratioId: cap.default_aspect_ratio,
+      },
+    );
     let providerSize = cap.api_size;
-    if (cap.api_size && aspectRatio && hasSeedreamSizeTable(cap.model_id)) {
+    let providerQuality: string | undefined;
+    if (mapping.parser === "gpt" || mapping.parser === "banana") {
+      const mapped = mapImageChannelRequest(mapping, sizeId, aspectRatio);
+      if (!mapped.ok) {
+        await failClaimed(ERROR_INVALID_INPUT, "模型、分辨率与宽高比组合不受支持");
+        return job.id;
+      }
+      providerSize = mapped.size;
+      providerQuality = mapped.quality;
+    } else if (cap.api_size && aspectRatio && hasSeedreamSizeTable(cap.model_id)) {
+      // seedream 族按代码表换算；族外模型直接沿用能力行 api_value。
       providerSize = resolveSeedreamImageSize(
         cap.model_id,
         cap.api_size,
@@ -416,21 +437,17 @@ async function processClaimedJob(
     const n = Math.max(1, Math.min(4, job.expected_output_count || 1));
     const sourceImages = [];
     for (const source of sourceAssets) {
-      const response = await fetchImpl(source.url);
-      if (!response.ok) {
-        throw new ImageProviderError(ERROR_UNSUPPORTED_INPUT, "参考图片读取失败");
+      if (typeof source.url !== "string" || source.url.length === 0) {
+        throw new ImageProviderError(ERROR_UNSUPPORTED_INPUT, "参考图片缺少地址");
       }
-      const blob = await response.blob();
-      sourceImages.push({
-        blob,
-        fileName: `asset-${source.id}.${imageExtension(source.mime ?? blob.type)}`,
-      });
+      sourceImages.push({ url: source.url });
     }
     const sequential = input.sequential_image_generation === true;
     const providerInput = {
       model: cap.model_id,
       prompt,
       size: providerSize,
+      ...(providerQuality ? { quality: providerQuality } : {}),
       webSearch: input.web_search === true,
       sequential,
       width: cap.width,
@@ -696,12 +713,6 @@ async function finishJob(
     `产出 ${assetIds.length} 个素材`,
     { asset_ids: assetIds },
   );
-}
-
-function imageExtension(mime: string): string {
-  if (mime.includes("jpeg")) return "jpg";
-  if (mime.includes("webp")) return "webp";
-  return "png";
 }
 
 function videoDimensions(

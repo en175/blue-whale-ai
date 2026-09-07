@@ -12,6 +12,7 @@ import { type AssetRecord } from '@/api/assets';
 import { getCurrentUser, subscribe } from '@/utils/auth';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
 import { type SkillRecord } from '@/api/skills';
 import { createProject } from '@/api/projects';
 import { setGenHandoff } from '@/utils/gen-handoff';
@@ -209,20 +210,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   /** 选中 AI图片 模型并套用其默认比例/清晰度 */
   const applyImageModel = (model: GenerationModel) => {
     setImageModel(model.model_id);
-    if (model.supported_aspect_ratios.length) {
-      setImageAspectRatio(
-        model.default_aspect_ratio && model.supported_aspect_ratios.includes(model.default_aspect_ratio)
-          ? model.default_aspect_ratio
-          : model.supported_aspect_ratios[0]
-      );
-    }
-    if (model.supported_sizes.length) {
-      setImageResolution(
-        model.default_size && model.supported_sizes.some((s) => s.id === model.default_size)
-          ? (model.default_size as string)
-          : model.supported_sizes[0].id
-      );
-    }
+    const nextSize =
+      model.default_size && model.supported_sizes.some((s) => s.id === model.default_size)
+        ? model.default_size
+        : (model.supported_sizes[0]?.id ?? '');
+    if (model.supported_sizes.length) setImageResolution(nextSize);
+    setImageAspectRatio(pickRatioForSize(model, nextSize, model.default_aspect_ratio));
   };
 
   // 首尾帧模式校验：选中该模式或参考上传变化时，要求恰好两张图片，否则弹出提示
@@ -393,7 +386,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         text,
         modelId: videoModel,
         aspectRatio,
-        resolution: sizeEntry?.api_value ?? resolution,
+        resolution: sizeEntry?.api_value ?? sizeEntry?.id ?? resolution,
         duration,
         // 首页模式键映射画布模式：首尾帧→keyframe；其余保留原键（omni→all、text2video→text2video）
         mode: videoMode === 'firstlast' ? 'keyframe' : (videoMode === 'text2video' ? 'text2video' : 'all'),
@@ -589,7 +582,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   // AI图片 比例/清晰度选项：取自所选模型能力（接口为唯一数据源）
   const selectedImageModel = imageModelList.find((m) => m.model_id === imageModel);
-  const imageRatioKeys = selectedImageModel?.supported_aspect_ratios ?? [];
+  const imageRatioKeys = selectedImageModel
+    ? ratiosForSelectedSize(selectedImageModel, imageResolution)
+    : [];
   const imageSizeItems =
     selectedImageModel?.supported_sizes.map((s) => ({ key: s.id, label: s.label })) ?? [];
   const currentImageResolution =
@@ -1192,7 +1187,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                         <button
                           key={r.key}
                           className={`${styles.dropdownItem} ${imageResolution === r.key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => { setImageResolution(r.key); setShowImgResDrop(false); }}
+                          onClick={() => {
+                            setImageResolution(r.key);
+                            if (selectedImageModel) {
+                              setImageAspectRatio(pickRatioForSize(selectedImageModel, r.key, imageAspectRatio));
+                            }
+                            setShowImgResDrop(false);
+                          }}
                         >
                           {r.label}
                         </button>

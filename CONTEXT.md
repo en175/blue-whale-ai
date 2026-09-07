@@ -168,22 +168,86 @@ Asset 正式发布时原子创建初始 NodeItem。**入口职责独立、是不
 三个生图入口共享的执行层，与入口的产品职责边界正交。由三部分组成：
 - **GenerationProvider** —— 图片执行层的产品中性请求/结果契约；具体实现（Fake、OpenAI、
   火山方舟 Agent Plan 等）按运行 mode（`GENERATION_MODE`）装配，当前没有独立的运行时 Provider Registry。
-- **generation_model_capability** —— 生图 / 生视频 / 文生文（text）模型能力目录的权威数据表：
-  provider_id + model_id 唯一标识一档能力，记录展示信息（label / icon）与能力参数
-  （尺寸 / 比例 / 格式 / 时长 / 数量 / 参考图 / tools）及启停状态。
+- **generation_model_capability** —— 图片 / 视频 / 文生文 / 音频模型能力目录的权威数据表：
+  provider_id + model_id 唯一标识一档能力，记录展示信息（label / icon）与该能力类型适用的
+  参数（图片与视频：尺寸选项 / 比例选项 / 格式 / 时长等；音频：时长 / 格式，无调用尺寸矩阵）及启停状态。
   承担双重角色：① 前端模型选项的展示源（不再写死，经 `/api/generation/models` 拉取）；
   ② 创建生成任务时的 model_id 白名单——请求引用的模型必须是该目录中启用且能力类型与
   生成类型匹配的条目（详见 [ADR-0067](docs/adr/0067-generation-model-capability-text-and-whitelist.md)）。
   其中 **TextCompletion（文生文接口）** 是 text 档位的直接消费端：供 Agent / 调用方直接调用大模型
   文本能力的 OpenAI 兼容通道，仅做登录鉴权与 text 白名单命中校验，不创建 GenerationJob、不落业务审计，
-  计费由 LLM 网关（blue-whale-api）按调用方身份扣 quota。
-  _Avoid_: 把文生文调用包装进生成任务队列；绕过 text 白名单直传任意模型名；在 BFF 承接业务语义校验。
+  计费由 LLM 网关（blue-whale-api）按调用方身份扣 quota。text 能力行在目录里只承载供应商、
+  调用模型、展示名、图标、启用与排序，没有尺寸选项、比例选项或调用尺寸矩阵。
+  _Avoid_: 把文生文调用包装进生成任务队列；绕过 text 白名单直传任意模型名；在 BFF 承接业务语义校验；
+  把音频生成写成视频的 features.audio；给 text 行配尺寸或比例。
 - **公共治理流水线** —— 成本预留（CostReservation）、内容审核（ContentReview）、失败重试与多输出，
   由统一的 GenerationJob 队列承接。
 火山方舟 Agent Plan 使用专属 `/api/plan/v3` 端点与专属 API Key；退役的 `/api/generation/image`
 直连因绕过成本预留与内容审核不再提供（详见 [ADR-0038](docs/adr/0038-generation-toolkit-and-image-direct-retirement.md)）。
 _Avoid_: 把工具包写成独立的 Provider Registry 运行时组件；把入口产品职责边界与执行层统一混为一谈；
 新增供应商时不走能力表与队列流水线。
+
+**能力类型（Capability Type）**:
+模型能力目录中一条能力的生成种类，仅四种：图片（image）、视频（video）、文生文（text）、
+音频（audio）。四种在管理目录中并列；一条能力的能力类型在创建后不可改。
+_Avoid_: 把音频生成当成视频特性；用 features.audio 表示音频模型（那是「视频带音轨」）；档位
+
+**尺寸选项（Size Option）**:
+User 在图片或视频生成中选择的分辨率档，如 `1K` / `2K` 或 `720p`。它是目录提供的展示选择，
+不是发给供应商的原始参数，也不是充值档位。控件种类全站统一；一条能力行有哪些尺寸选项
+由该行自己配置。所有图片模型对 User 都只露出尺寸选项与比例选项，不露出像素或供应商私有写法。
+_Avoid_: 档位、把 `1024x1024` 这类像素串直接当作 User 选项、与调用尺寸混用、全站写死同一组取值
+
+**比例选项（Aspect Ratio Option）**:
+User 在图片或视频生成中选择的画面宽高比，如 `1:1` / `16:9`。一条能力行有哪些比例选项
+由该行自己配置。图片上，前端只露出**当前尺寸选项下交叉格已填**的比例；未填组合不出现在控件里。
+User 只看到冒号写法，看不到 `1x1` 或像素。GPT 全量在 `1K` 下不提供 `16:9`（该交叉格留空）。
+_Avoid_: 把 `1x1` / `16x9` 当作 User 可见比例；把比例写成像素；全站写死同一组取值；
+把空交叉格仍展示给 User 去点
+
+**生成渠道解析器（Generation Channel Parser）**:
+代码内置的图片请求拼装与响应解析策略。管理端不能新建渠道或编写解析逻辑；图片能力行直接
+选择一个已注册的解析器。响应三家共用默认信封 `data[].url`。请求：Seedream 本期仍用代码表
+`seedream-image-size` 折成一个 `size`，不经管理端映射；GPT 用目录交叉格得到一个 `size`；
+Banana 用目录一维映射：尺寸选项 → `quality`，比例选项 → `size`（`1x1` 等）。
+_Avoid_: 管理端 JSONPath；与 new-api 渠道混用；把解析器做成可 CRUD 表；给 Banana 做像素交叉格；
+本期改 Seedream 出图像素
+
+**调用尺寸（Provider Size）**:
+写入请求 `size` 的像素或档位字符串。GPT 来自该行尺寸选项 × 比例选项交叉格（空则回退默认格），
+合法值仅限官方枚举（含 `1024x1024`、`2048x2048`、`3840x2160`、`auto` 等），2K/4K 是独立像素档不是 1K 钳位。
+Seedream 本期仍由代码表按模型 × 尺寸选项 × 比例选项计算，与目录交叉格无关。
+_Avoid_: 与尺寸选项混用；向消费端暴露调用尺寸；用另一套 1K 底表覆盖 Seedream 现网像素
+
+**调用质量（Provider Quality）**:
+Banana 解析器写入请求 `quality` 的值，由尺寸选项一维映射得到（展示 `1K` → `1k`）。
+_Avoid_: 与 Seedream/GPT 的调用尺寸交叉格混用
+
+**调用比例（Provider Ratio）**:
+Banana 解析器写入请求 `size` 的值，由比例选项一维映射得到（展示 `1:1` → `1x1`）。
+Banana 的请求字段名叫 `size`，语义是比例，不是像素。
+_Avoid_: 与 User 可见的比例选项（冒号写法）混用；当成 Seedream 的像素 `size`
+
+**供应商（provider_id）**:
+能力行上的供应方标识列，与调用模型组成目录唯一键，并写入计划卡 / 场景卡能力快照。
+运行时不出图选路，也不决定请求/响应怎么解析；管理端新建或编辑时不再填写，
+由系统写入默认值（现行为 `new-api`）。
+_Avoid_: 渠道、Channel、把网关渠道 ID 写进能力目录；在管理表单里当「选渠道」；
+用它选择解析器或 HTTP 客户端
+
+**调用模型（model_id）**:
+能力行真正提交给供应方的模型名，如 `doubao-seedream-4-0-250828`。创建后不可改。
+_Avoid_: 展示名、渠道模型别名、把 User 可见名称当作调用模型
+
+**展示名（model_label）**:
+能力行给 User 看的名称，如「豆包 Seedream 4.0」。可改，不参与调用。
+_Avoid_: 与调用模型混用
+
+**默认尺寸选项 / 默认比例选项**:
+该能力行上 User 未另选时使用的尺寸选项与比例选项。Seedream / GPT 上，二者交叉格的调用尺寸
+同时作为其他交叉格未填时的回退值。Banana 上分别回退到默认尺寸选项的 `quality` 映射与
+默认比例选项的 `size` 映射。
+_Avoid_: 全站写死 `2K`×`1:1`；把默认理解成直传展示字符串
 
 **Project**（项目，产品归属根）:
 领域顶层的归属、授权与生命周期范围；Canvas、Conversation、AgentRun、GenerationJob 与 Asset 均归属于 Project，但各自保持独立的一致性边界。
@@ -505,7 +569,7 @@ _Avoid_: PlanMessage 的 `asset://<mention_id>`（那是内部正文引用协议
 _Avoid_: 把素材库素材引用写进 PlanMessage 正文、把 PlanMessage mention 协议原样发给供应商
 
 **GenerationJob（生成任务）**:
-一次持久化的图片或视频后台任务。任务归属于 Project，页面刷新、浏览器关闭或服务重启后，
+一次持久化的图片、视频或音频后台任务。任务归属于 Project，页面刷新、浏览器关闭或服务重启后，
 已接纳状态与结果仍可恢复；同一请求或供应商回调重放不得产生重复任务、结果或费用。
 GenerationJob 可以随业务事务原子创建，但只能在事务提交后进入执行队列；事务内禁止直接调用生成供应商。
 Worker 通过短租约领取任务；租约过期后可由新 Worker 重新领取，旧 Worker 的迟到写入由 fence 拒绝。

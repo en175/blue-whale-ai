@@ -475,7 +475,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     onSend(text, {
       modelId: currentModel.model_id,
       aspectRatio: selectedRatio,
-      resolution: size.api_value,
+      resolution: size.api_value ?? size.id,
       duration,
       mode: selectedMode,
     }, refFiles);
