@@ -28,6 +28,7 @@ export interface VideoMediaRefs {
   reference: VideoMediaRef[];
   first?: VideoMediaRef;
   last?: VideoMediaRef;
+  invalid?: Array<{ nodeId: string; name: string; role: VideoRefRole; reason: string }>;
 }
 
 /** 视频草稿身份判定（IKDMQQ 约定延伸）：draft 标记 + 视频媒体类型 */
@@ -69,7 +70,7 @@ export function videoRefSourceError(node: Node | undefined, role: VideoRefRole):
 }
 
 /** 目标节点的视频媒体参考分组：连线 target=该节点，普通参考按连线顺序；
- *  仅推导当前有效来源（失效/悬空来源不展示也不消费，连线保留待恢复或用户断开）；
+ *  有效来源分组消费，失效来源保留原因并阻止提交，连线保留待恢复或用户断开；
  *  同一素材（相同 assetId）跨角色只取首条（历史画布防御，与连线时重复校验同口径）。 */
 export function videoMediaRefsOf(
   targetNodeId: string,
@@ -84,7 +85,16 @@ export function videoMediaRefsOf(
     const source = byId.get(edge.source);
     if (!source || source.type !== 'mediaNode') continue;
     const role = readRefRole(edge);
-    if (videoRefSourceError(source, role) !== null) continue;
+    const reason = videoRefSourceError(source, role);
+    if (reason) {
+      (refs.invalid ??= []).push({
+        nodeId: source.id,
+        name: String(source.data.fileName || source.id),
+        role,
+        reason,
+      });
+      continue;
+    }
     const data = (source.data ?? {}) as Record<string, unknown>;
     const assetId = readAssetId(data)!;
     if (seenAssetIds.has(assetId)) continue;
@@ -119,6 +129,7 @@ export function videoRefConflict(
   refs: VideoMediaRefs,
   caps: VideoRefCapabilities,
 ): string | null {
+  if (refs.invalid?.length) return '参考素材不可用，请恢复素材或移除失效引用后发送';
   if (refs.last && !refs.first) return '尾帧必须与首帧一起使用，请先指定首帧或移除尾帧';
   if ((refs.first || refs.last) && refs.reference.length > 0) {
     return '首尾帧与普通参考不能混用，请移除其中一类输入';

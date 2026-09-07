@@ -92,6 +92,7 @@ describe('videoMediaRefsOf 连线推导分组参考', () => {
         { nodeId: 'm1', url: 'http://img/m1.png', name: '图m1', assetId: 'a1', mediaType: 'image' },
         { nodeId: 'm2', url: 'http://img/m2.png', name: '图m2', assetId: 'a2', mediaType: 'image' },
       ],
+      invalid: [{ nodeId: 'gone', name: '图gone', role: 'reference', reason: '素材已被删除' }],
       first: { nodeId: 'f1', url: 'http://img/f1.png', name: '图f1', assetId: 'a3', mediaType: 'image' },
       last: { nodeId: 'f2', url: 'http://img/f2.png', name: '图f2', assetId: 'a4', mediaType: 'image' },
     });
@@ -112,12 +113,13 @@ describe('videoMediaRefsOf 连线推导分组参考', () => {
     });
   });
 
-  it('尾帧角色连了视频来源时该连线不消费（不展示也不提交），连线保留', () => {
+  it('尾帧角色连了视频来源时保留失效原因，不消费且阻止发送', () => {
     const edges = [
       edge('e1', 'm1', 'd1', 'first'),
       edge('e2', 'v1', 'd1', 'last'),
     ];
     expect(videoMediaRefsOf('d1', edges, nodes)).toEqual({
+      invalid: [{ nodeId: 'v1', name: '视频v1', role: 'last', reason: '首尾帧仅支持图片素材' }],
       reference: [],
       first: { nodeId: 'm1', url: 'http://img/m1.png', name: '图m1', assetId: 'a1', mediaType: 'image' },
     });

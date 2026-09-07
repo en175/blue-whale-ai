@@ -95,6 +95,7 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<
       input: (candidate.input as Record<string, unknown> | null) ?? null,
       expected_output_count: candidate.expected_output_count ?? 1,
       retry_count: candidate.retry_count ?? 0,
+      cancelRequested: candidate.cancel_requested_at != null,
       fencingToken: Number(candidate.fencing_token + 1n),
     };
   }
@@ -366,6 +367,7 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<
         input: (candidate.input as Record<string, unknown> | null) ?? null,
         expected_output_count: candidate.expected_output_count ?? 1,
         retry_count: candidate.retry_count ?? 0,
+        cancelRequested: candidate.cancel_requested_at != null,
         fencingToken: Number(candidate.fencing_token + 1n),
       };
     },
@@ -424,6 +426,7 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<
         input: (candidate.input as Record<string, unknown> | null) ?? null,
         expected_output_count: candidate.expected_output_count ?? 1,
         retry_count: candidate.retry_count ?? 0,
+        cancelRequested: candidate.cancel_requested_at != null,
         fencingToken: Number(candidate.fencing_token + 1n),
       };
     },

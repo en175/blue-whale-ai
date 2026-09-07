@@ -838,6 +838,17 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
               </span>
             )}
           </div>
+          {videoMediaRefs.invalid?.map((ref) => (
+            <div key={ref.nodeId} className={styles.refConflictHint} role="alert">
+              {ref.role === 'first' ? '首帧' : ref.role === 'last' ? '尾帧' : '普通参考'}：{ref.name} — {ref.reason}
+              <button
+                type="button"
+                disabled={readOnly}
+                aria-label={`移除失效引用 ${ref.name}`}
+                onClick={() => onRemoveVideoRef?.(ref.nodeId)}
+              >移除引用</button>
+            </div>
+          ))}
           {/* 组合冲突提示（IKDMQS）：明确说明不可提交的原因，不静默丢弃 */}
           {conflict && <div className={styles.refConflictHint}>{conflict}</div>}
           {readOnly && <div className={styles.readOnlyHint}>生成中，参数与连线只读；可在画布卡片上取消生成</div>}

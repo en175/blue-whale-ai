@@ -495,3 +495,25 @@ describe('IKDMQS 生成中连线只读', () => {
     ).toBe(false);
   });
 });
+
+describe('IKDWL8 视频失效引用保护', () => {
+  it.each(['reference', 'first', 'last'])('恢复的 %s 引用失效时显示原因，必须断线后才能发送', async (role) => {
+    const doc = canvasDocMock.current.doc as { nodes: Node[]; edges: unknown[] };
+    doc.nodes.find(n => n.id === 'm1')!.data.genStatus = 'failed';
+    doc.edges = [{ id: 'invalid-ref', source: 'm1', target: 'd1', data: { refRole: role } }];
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video', genStatus: 'draft' } });
+    await waitModelReady();
+    await typePrompt('保留参考意图');
+    expect(container.textContent).toContain('生成失败的卡片不能作为参考');
+    expect(sendButton().disabled).toBe(true);
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+    expect(flowProps.current.edges).toHaveLength(1);
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[aria-label="移除失效引用 首图"]')!.click();
+    });
+    expect(flowProps.current.edges).toHaveLength(0);
+    expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'm1')).toBe(true);
+    expect(sendButton().disabled).toBe(false);
+  });
+});

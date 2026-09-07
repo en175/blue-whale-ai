@@ -10,7 +10,7 @@ import CanvasPage from './index';
 
 /* IKDMQW 取消、删除与任务完成竞态：
    普通取消经接口确认后按任务权威状态收敛（cancelled → 草稿回待生成保留参数与连线；
-   processing（软取消已登记）→ 同样回待生成；succeeded 竞态 → 挂载作品不回待生成；
+   processing（软取消已登记）→ 保持生成中只读；succeeded 竞态 → 挂载作品不回待生成；
    成品卡重新生成取消 → 恢复成品态）。删除生成中卡片先请求取消：确认成功且非 succeeded
    才移除；取消失败保留卡片并提示原因；删除过程中任务抢先成功保留作品提示「任务已完成」。
    迟到轮询/取消响应不得复活已删除节点。FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props。 */
@@ -294,14 +294,27 @@ describe('IKDMQW 普通取消：接口确认后按任务权威状态收敛', () 
     expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'd1')).toBe(true);
   });
 
-  it('取消确认但权威状态仍 processing（软取消已登记）：同样回待生成', async () => {
+  it('软取消登记后保持生成中，删除也必须等待权威终态', async () => {
     await renderPage();
-
     await clickCancel('d1');
-
     expect(apiMocks.cancelGenerationJob).toHaveBeenCalledTimes(1);
-    await vi.waitFor(() => expect(dataOf('d1').genStatus).toBe('draft'));
+    expect(dataOf('d1').genStatus).toBe('generating');
+    await clickDelete('d1');
+    expect(apiMocks.cancelGenerationJob).toHaveBeenCalledTimes(2);
+    expect(nodeOf('d1')).toBeDefined();
+    apiMocks.fetchJobStatus.mockResolvedValue({ ...SUCCEEDED });
+    await vi.waitFor(() => expect(dataOf('d1').src).toBe('http://img/out.png'), { timeout: 4000 });
+    expect(container.textContent).toContain('任务已完成');
+  });
+
+  it('取消后的状态查询失败不能恢复待生成，轮询确认 cancelled 后才恢复', async () => {
+    await renderPage();
+    apiMocks.fetchJobStatus.mockRejectedValueOnce(new Error('状态查询离线'));
+    await clickCancel('d1');
+    expect(dataOf('d1').genStatus).toBe('generating');
     expect(dataOf('d1').prompt).toBe('原提示词');
+    apiMocks.fetchJobStatus.mockResolvedValue({ ...CANCELLED });
+    await vi.waitFor(() => expect(dataOf('d1').genStatus).toBe('draft'), { timeout: 4000 });
   });
 
   it('取消请求失败：卡片保持生成中并提示原因，任务可继续查看', async () => {
