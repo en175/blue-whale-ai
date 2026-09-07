@@ -4,11 +4,13 @@
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X, Upload, FolderOpen } from 'lucide-react';
+import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X, Upload, FolderOpen, User } from 'lucide-react';
 import SkillModal from '../SkillModal';
 import LoginModal from '@/components/LoginModal';
 import AssetsPickerModal from '@/pages/CanvasPage/components/AssetsPickerModal';
+import CharacterLibraryModal from '@/pages/CanvasPage/components/CharacterLibraryModal';
 import { type AssetRecord } from '@/api/assets';
+import { type MaterialAsset } from '@/api/material';
 import { getCurrentUser, subscribe } from '@/utils/auth';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
@@ -17,7 +19,7 @@ import { type SkillRecord } from '@/api/skills';
 import { createProject } from '@/api/projects';
 import { setGenHandoff } from '@/utils/gen-handoff';
 import { setAgentHandoff } from '@/utils/agent-handoff';
-import { classifyRefOverflow, REF_LIMITS } from '@/utils/ref-overflow';
+import { classifyRefOverflow, classifyRefOverflows, refOverflowToast, REF_LIMITS } from '@/utils/ref-overflow';
 import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput, MAX_PROMPT_INPUT_LENGTH } from './promptInput';
@@ -102,6 +104,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const [showLogin, setShowLogin] = useState(false);
   /** 从资产中选择弹窗打开来源（agent/video/image，null 关闭）：决定 mediaTypes 过滤与确认后的注入目标 */
   const [assetsPickerTarget, setAssetsPickerTarget] = useState<'agent' | 'video' | 'image' | null>(null);
+  /** 角色库弹窗开关（仅 AI视频 tab 入口：虚拟/真人人像库双 tab 多选，与画布视频入口一致） */
+  const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
   /** 参考卡上传菜单开关（三个 tab 的参考/附件卡共用：本地上传 / 从资产中选择） */
   const [refMenu, setRefMenu] = useState<'agent' | 'video' | 'image' | null>(null);
   /** 菜单 fixed 定位（portal 到 body，避免被 refArea 滚动容器裁切） */
@@ -710,6 +714,56 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       return;
     }
     setAssetsPickerTarget(target);
+  };
+
+  /** 打开角色库弹窗（仅 AI视频 tab；未登录先弹登录框，与资产选择入口一致） */
+  const openCharacterLibrary = () => {
+    if (!user) {
+      setShowLogin(true);
+      return;
+    }
+    setShowCharacterLibrary(true);
+  };
+
+  /** 角色库多选确认：注入 AI视频 参考素材
+   *  （assetId 去重 + 图片/视频分类型上限截断；超限/重复合并为一条提示，与画布视频入口口径一致） */
+  const handleCharacterLibrarySelect = (assets: MaterialAsset[]) => {
+    setShowCharacterLibrary(false);
+    const existing = new Set(
+      refFiles.filter((r) => r.assetId != null).map((r) => String(r.assetId)),
+    );
+    let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
+    let vidRoom = Math.max(0, MAX_VIDEOS - videoRefVideoCount);
+    const eligible = assets.filter((a) => a.AssetType === 'Image' || a.AssetType === 'Video');
+    const unique = eligible.filter((a) => !existing.has(String(a.Id)));
+    const items = unique
+      .filter((a) => {
+        if (a.AssetType === 'Image') {
+          if (imgRoom <= 0) return false;
+          imgRoom -= 1;
+          return true;
+        }
+        if (vidRoom <= 0) return false;
+        vidRoom -= 1;
+        return true;
+      })
+      .map((a) => ({
+        preview: a.URL,
+        type: (a.AssetType === 'Video' ? 'video' : 'image') as 'image' | 'video',
+        assetId: a.Id,
+      }));
+    const parts: string[] = [];
+    const overflows = classifyRefOverflows({
+      selectedImages: unique.filter((a) => a.AssetType === 'Image').length,
+      selectedVideos: unique.filter((a) => a.AssetType === 'Video').length,
+      acceptedImages: items.filter((i) => i.type === 'image').length,
+      acceptedVideos: items.filter((i) => i.type === 'video').length,
+    });
+    if (overflows.length > 0) parts.push(refOverflowToast(overflows, { image: videoMaxImages, video: MAX_VIDEOS }));
+    if (unique.length < eligible.length) parts.push('素材重复，已跳过');
+    if (parts.length > 0) showToast(parts.join('；'));
+    if (items.length === 0) return;
+    setRefFiles((prev) => [...prev, ...items]);
   };
 
   /** 参考/附件卡点击：切换上传菜单（按卡片位置 fixed 定位） */
@@ -1443,6 +1497,18 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             <FolderOpen size={14} strokeWidth={2} />
             <span>从资产中选择</span>
           </button>
+          {refMenu === 'video' && (
+            <button
+              className={styles.dropdownItem}
+              onClick={() => {
+                setRefMenu(null);
+                openCharacterLibrary();
+              }}
+            >
+              <User size={14} strokeWidth={2} />
+              <span>角色库</span>
+            </button>
+          )}
         </div>,
         document.body,
       )}
@@ -1460,6 +1526,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 : ['image', 'video']
           }
           confirmText="确定"
+        />
+      )}
+
+      {/* 角色库弹窗：AI视频 tab 专用（虚拟/真人人像库双 tab 多选，与画布视频入口一致） */}
+      {showCharacterLibrary && (
+        <CharacterLibraryModal
+          onClose={() => setShowCharacterLibrary(false)}
+          enableRealPersonTab
+          onSelectAssets={handleCharacterLibrarySelect}
         />
       )}
     </>
