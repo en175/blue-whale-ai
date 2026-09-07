@@ -98,9 +98,10 @@ export function isContentPolicySignal(text: string): boolean {
 
 /** 欠费信号（IKBQEE / ADR-0078 共享判定，自 new-api-video-task-provider 迁入统一）。
  *  不只看 402：new-api 预扣费失败常以 HTTP200+body 报错（job 1565/1612 真实案例），
- *  中文「预扣费额度失败/剩余额度/额度不足」与英文 quota/balance/insufficient 均命中。
- *  IKDQ5F：去掉「余额」一词——无用户/账户语境的「渠道无余额」「new-api 音频生成余额不足」
- *  等非用户欠费文案不再误判；真欠费靠「预扣费/剩余额度」锚点兜住。 */
+ *  中文「预扣费额度失败/剩余额度/额度不足/余额不足」与英文 balance/payment_required 均命中。
+ *  IKDQ5F：删掉宽泛英文子串 quota/insufficient/裸 402 与裸「余额」——避免 base64 随机字母
+ *  （qUOtA→quota）与「渠道无余额」「new-api 音频生成余额不足」误伤；真欠费靠
+ *  「预扣费额度失败/剩余额度/额度不足/余额不足」锚点兜住。 */
 export const NEW_API_QUOTA_SIGNAL =
   /(预扣费额度失败|剩余额度|余额不足|额度不足|balance|payment_required)/i;
 

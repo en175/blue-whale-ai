@@ -242,16 +242,17 @@ describe("new-api audio provider", () => {
     ).rejects.toMatchObject({ code: "quota_exhausted" });
   });
 
-  it("HTTP200+body 无用户语境的「余额不足」→ 不再误判欠费（IKDQ5F；纯文本走 no_result）", async () => {
+  it("HTTP200+body 纯文本（非 JSON）→ AudioProviderError(no_result)（IKDQ5F 不对成功文本判欠费）", async () => {
     const module = await import("./new-api-audio-provider.js");
     const provider = module.createNewApiAudioProvider({
       baseUrl: "http://new-api.test",
       token: "sk-user",
-      // 1743 现场：网关超时/失败文案是纯文本（非信封 JSON），含「余额」但无用户/账户语境。
+      // 1743 现场：成功态 body 是完整音频数据（非错误信封），修复后成功态先 JSON.parse，
+      // 解析失败落 no_result——绝不对成功文本跑 isQuotaSignal（否则 quota 子串误伤）。
       fetchImpl: vi.fn().mockResolvedValue(
-        new Response("new-api 音频生成余额不足", {
+        new Response("MQ==", {
           status: 200,
-          headers: { "Content-Type": "text/plain" },
+          headers: { "Content-Type": "application/octet-stream" },
         }),
       ),
     });
