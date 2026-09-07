@@ -3,9 +3,12 @@
  * ============================================ */
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X, Upload, FolderOpen } from 'lucide-react';
 import SkillModal from '../SkillModal';
 import LoginModal from '@/components/LoginModal';
+import AssetsPickerModal from '@/pages/CanvasPage/components/AssetsPickerModal';
+import { type AssetRecord } from '@/api/assets';
 import { getCurrentUser, subscribe } from '@/utils/auth';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
@@ -97,6 +100,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const user = useSyncExternalStore(subscribe, getCurrentUser);
   /** 未登录点击发送时弹登录框 */
   const [showLogin, setShowLogin] = useState(false);
+  /** 从资产中选择弹窗打开来源（agent/video/image，null 关闭）：决定 mediaTypes 过滤与确认后的注入目标 */
+  const [assetsPickerTarget, setAssetsPickerTarget] = useState<'agent' | 'video' | 'image' | null>(null);
+  /** 参考卡上传菜单开关（三个 tab 的参考/附件卡共用：本地上传 / 从资产中选择） */
+  const [refMenu, setRefMenu] = useState<'agent' | 'video' | 'image' | null>(null);
+  /** 菜单 fixed 定位（portal 到 body，避免被 refArea 滚动容器裁切） */
+  const [refMenuPos, setRefMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const refMenuRef = useRef<HTMLDivElement>(null);
+  /** 当前 tab 的参考/附件卡（定位锚点；三个 tab 同时只渲染一个） */
+  const refCardRef = useRef<HTMLDivElement>(null);
   /** 登录成功后续接的原动作（Skill / 发送最后一次点击为准） */
   const pendingAction = useRef<HomePendingAction | null>(null);
   /** IKA64P：「直接使用」武装的技能气泡（发送时随消息作为强制技能生效） */
@@ -118,9 +130,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     textarea.style.height = 'auto';
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [activeTab, inputValue]);
-  /** 智能体 tab 附件（+ 上传 图片/视频/音频）——保留原始 File，发送时经 handoff 带入画布 */
+  /** 智能体 tab 附件（+ 上传 图片/视频/音频、从资产中选择 图片/视频）——
+   *  本地上传保留原始 File，资产选择项带 assetId（发送时经 handoff 免重复上传） */
   const [agentFiles, setAgentFiles] = useState<
-    { id: string; url: string; kind: 'image' | 'video' | 'audio'; name: string; file: File }[]
+    { id: string; url: string; kind: 'image' | 'video' | 'audio'; name: string; file?: File; assetId?: string | number }[]
   >([]);
   const agentFileInputRef = useRef<HTMLInputElement>(null);
   const [showSkillModal, setShowSkillModal] = useState(false);
@@ -142,7 +155,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const [showRatioDrop, setShowRatioDrop] = useState(false);
   const [showResDrop, setShowResDrop] = useState(false);
   const [showDurationDrop, setShowDurationDrop] = useState(false);
-  const [refFiles, setRefFiles] = useState<{ file: File; preview: string }[]>([]);
+  /** AI视频 参考素材：本地上传带 File，资产选择项带 assetId（type 字段区分图片/视频） */
+  const [refFiles, setRefFiles] = useState<
+    { file?: File; preview: string; type: 'image' | 'video'; assetId?: string | number }[]
+  >([]);
   /** 校验类轻提示（顶部弹出，自动消失） */
   const [toast, setToast] = useState('');
   const toastTimer = useRef<number | null>(null);
@@ -165,7 +181,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const [showImgModelDrop, setShowImgModelDrop] = useState(false);
   const [showImgRatioDrop, setShowImgRatioDrop] = useState(false);
   const [showImgResDrop, setShowImgResDrop] = useState(false);
-  const [imageRefFiles, setImageRefFiles] = useState<{ file: File; preview: string }[]>([]);
+  /** AI图片 参考图：本地上传带 File，资产选择项带 assetId（preview 为永久 URL，免 revoke） */
+  const [imageRefFiles, setImageRefFiles] = useState<
+    { file?: File; preview: string; name?: string; assetId?: string | number }[]
+  >([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -202,7 +221,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   // 首尾帧模式校验：选中该模式或参考上传变化时，要求恰好两张图片，否则弹出提示
   useEffect(() => {
     if (videoMode !== 'firstlast') return;
-    const ok = refFiles.length === 2 && refFiles.every((r) => r.file.type.startsWith('image/'));
+    const ok = refFiles.length === 2 && refFiles.every((r) => r.type === 'image');
     if (!ok) showToast('首尾帧模式需上传两张图片作为首帧与尾帧参考');
   }, [videoMode, refFiles, showToast]);
 
@@ -315,6 +334,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       if (imgResRef.current && !imgResRef.current.contains(e.target as Node)) {
         setShowImgResDrop(false);
       }
+      // 上传菜单：点击菜单与参考卡以外区域时关闭（参考卡由自身 click 切换开合）
+      if (
+        refMenuRef.current && !refMenuRef.current.contains(e.target as Node) &&
+        (!refCardRef.current || !refCardRef.current.contains(e.target as Node))
+      ) {
+        setRefMenu(null);
+      }
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
@@ -337,6 +363,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             preview: f.url,
             name: f.name,
             kind: f.kind as 'image' | 'video',
+            assetId: f.assetId,
           })),
         );
       }
@@ -365,8 +392,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         mode: videoMode === 'firstlast' ? 'keyframe' : (videoMode === 'text2video' ? 'text2video' : 'all'),
         refs: refFiles.map((r) => ({
           preview: r.preview,
-          type: r.file.type.startsWith('video/') ? ('video' as const) : ('image' as const),
+          type: r.type,
           file: r.file,
+          assetId: r.assetId,
         })),
       });
       setInputValue('');
@@ -389,8 +417,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           id: `home-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           url: r.preview,
           type: 'image' as const,
-          name: r.file.name,
+          name: r.name ?? '参考图',
           file: r.file,
+          assetId: r.assetId,
         })),
       });
       setInputValue('');
@@ -497,11 +526,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     e.target.value = '';
   };
 
-  /** 移除附件并释放 objectURL */
+  /** 移除附件并释放 objectURL（资产选择项为永久 URL，不释放） */
   const removeAgentFile = (id: string) => {
     setAgentFiles((prev) => {
       const target = prev.find((f) => f.id === id);
-      if (target) URL.revokeObjectURL(target.url);
+      if (target?.file) URL.revokeObjectURL(target.url);
       return prev.filter((f) => f.id !== id);
     });
   };
@@ -579,8 +608,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     agentImageCount >= agentMaxImages &&
     agentVideoCount >= MAX_AGENT_VIDEOS &&
     agentAudioCount >= MAX_AGENT_AUDIO;
-  const videoRefImageCount = refFiles.filter((r) => r.file.type.startsWith('image/')).length;
-  const videoRefVideoCount = refFiles.filter((r) => r.file.type.startsWith('video/')).length;
+  const videoRefImageCount = refFiles.filter((r) => r.type === 'image').length;
+  const videoRefVideoCount = refFiles.filter((r) => r.type === 'video').length;
   const videoMaxImages =
     videoMode === 'firstlast'
       ? 2
@@ -590,7 +619,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   /** 首尾帧模式必须恰好 2 张图片（不多不少、不含视频），否则禁止发送 */
   const firstlastInvalid =
     videoMode === 'firstlast' &&
-    !(refFiles.length === 2 && refFiles.every((r) => r.file.type.startsWith('image/')));
+    !(refFiles.length === 2 && refFiles.every((r) => r.type === 'image'));
   /** AI 图片参考图上限：产品约定 9 张（与画布 ImageDialog REF_LIMITS.image 一致），取接口值和约定的较小值 */
   const imageMaxImages = Math.min(selectedImageModel?.features?.max_reference_images ?? 0, REF_LIMITS.image);
 
@@ -613,12 +642,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       .map((file) => ({
         file,
         preview: URL.createObjectURL(file),
+        type: file.type.startsWith('video/') ? ('video' as const) : ('image' as const),
       }));
     const overflow = classifyRefOverflow({
       selectedImages: files.filter((f) => f.type.startsWith('image/')).length,
       selectedVideos: files.filter((f) => f.type.startsWith('video/')).length,
-      acceptedImages: newFiles.filter((f) => f.file.type.startsWith('image/')).length,
-      acceptedVideos: newFiles.filter((f) => f.file.type.startsWith('video/')).length,
+      acceptedImages: newFiles.filter((f) => f.type === 'image').length,
+      acceptedVideos: newFiles.filter((f) => f.type === 'video').length,
     });
     if (overflow === 'image') showToast(`参考图最多 ${videoMaxImages} 张，请减少图片`);
     else if (overflow === 'video') showToast(`参考视频最多 ${MAX_VIDEOS} 个`);
@@ -630,7 +660,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const removeRefFile = (index: number) => {
     setRefFiles((prev) => {
       const copy = [...prev];
-      URL.revokeObjectURL(copy[index].preview);
+      // 资产选择项的 preview 是永久 URL，仅释放本地上传的 objectURL
+      if (copy[index].file) URL.revokeObjectURL(copy[index].preview);
       copy.splice(index, 1);
       return copy;
     });
@@ -643,6 +674,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     const newFiles = files.slice(0, remaining).map((file) => ({
       file,
       preview: URL.createObjectURL(file),
+      name: file.name,
     }));
     if (files.length > newFiles.length) showToast(`参考图最多 ${imageMaxImages} 张，请减少图片`);
     setImageRefFiles((prev) => [...prev, ...newFiles]);
@@ -652,10 +684,144 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const removeImageRefFile = (index: number) => {
     setImageRefFiles((prev) => {
       const copy = [...prev];
-      URL.revokeObjectURL(copy[index].preview);
+      // 资产选择项的 preview 是永久 URL，仅释放本地上传的 objectURL
+      if (copy[index].file) URL.revokeObjectURL(copy[index].preview);
       copy.splice(index, 1);
       return copy;
     });
+  };
+
+  /* ---- 从资产中选择（IKC3RY 模块D：三个 tab 的参考/附件卡 → 资产库选择弹窗） ---- */
+
+  /** 资产 URL 兜底展示名（AssetRecord 无 name 字段） */
+  const assetPickName = (asset: AssetRecord): string => {
+    try {
+      const last = new URL(asset.url).pathname.split('/').filter(Boolean).pop();
+      return last ? decodeURIComponent(last) : `资产-${asset.id}`;
+    } catch {
+      return `资产-${asset.id}`;
+    }
+  };
+
+  /** 打开资产选择弹窗（未登录先弹登录框，与 Skill 按钮等入口一致） */
+  const openAssetsPicker = (target: 'agent' | 'video' | 'image') => {
+    if (!user) {
+      setShowLogin(true);
+      return;
+    }
+    setAssetsPickerTarget(target);
+  };
+
+  /** 参考/附件卡点击：切换上传菜单（按卡片位置 fixed 定位） */
+  const toggleRefMenu = (key: 'agent' | 'video' | 'image') => {
+    if (refMenu === key) {
+      setRefMenu(null);
+      return;
+    }
+    const rect = refCardRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setRefMenuPos({ top: rect.bottom + 8, left: rect.left });
+    setRefMenu(key);
+  };
+
+  /** 资产选择确认：按来源注入对应 tab 的参考/附件列表
+   *  （assetId 直接复用免重复上传；上限与去重规则和本地上传入口一致） */
+  const handleAssetsPickerSelect = (assets: AssetRecord[]) => {
+    const target = assetsPickerTarget;
+    setAssetsPickerTarget(null);
+    if (!target || assets.length === 0) return;
+
+    if (target === 'agent') {
+      const existing = new Set(
+        agentFiles.filter((f) => f.assetId != null).map((f) => String(f.assetId)),
+      );
+      let imgRoom = Math.max(0, agentMaxImages - agentImageCount);
+      let vidRoom = Math.max(0, MAX_AGENT_VIDEOS - agentVideoCount);
+      let audRoom = Math.max(0, MAX_AGENT_AUDIO - agentAudioCount);
+      const eligible = assets
+        .filter((a) => a.type === 'image' || a.type === 'video' || a.type === 'audio')
+        .filter((a) => !existing.has(String(a.id)));
+      const items = eligible
+        .filter((a) => {
+          if (a.type === 'image') {
+            if (imgRoom <= 0) return false;
+            imgRoom -= 1;
+            return true;
+          }
+          if (a.type === 'video') {
+            if (vidRoom <= 0) return false;
+            vidRoom -= 1;
+            return true;
+          }
+          if (audRoom <= 0) return false;
+          audRoom -= 1;
+          return true;
+        })
+        .map((a) => ({
+          id: `asset-${a.id}`,
+          url: a.url,
+          kind: (a.type === 'video' ? 'video' : a.type === 'audio' ? 'audio' : 'image') as
+            | 'image' | 'video' | 'audio',
+          name: assetPickName(a),
+          assetId: a.id,
+        }));
+      if (eligible.length > items.length) {
+        showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${MAX_AGENT_VIDEOS} 个 / 音频 ${MAX_AGENT_AUDIO} 个）`);
+      }
+      if (items.length === 0) return;
+      setAgentFiles((prev) => [...prev, ...items]);
+      return;
+    }
+
+    if (target === 'video') {
+      const existing = new Set(
+        refFiles.filter((r) => r.assetId != null).map((r) => String(r.assetId)),
+      );
+      let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
+      let vidRoom = Math.max(0, MAX_VIDEOS - videoRefVideoCount);
+      const eligible = assets
+        .filter((a) => a.type === 'image' || a.type === 'video')
+        .filter((a) => !existing.has(String(a.id)));
+      const items = eligible
+        .filter((a) => {
+          if (a.type === 'image') {
+            if (imgRoom <= 0) return false;
+            imgRoom -= 1;
+            return true;
+          }
+          if (vidRoom <= 0) return false;
+          vidRoom -= 1;
+          return true;
+        })
+        .map((a) => ({
+          preview: a.url,
+          type: (a.type === 'video' ? 'video' : 'image') as 'image' | 'video',
+          assetId: a.id,
+        }));
+      if (eligible.length > items.length) {
+        showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${MAX_VIDEOS} 个）`);
+      }
+      if (items.length === 0) return;
+      setRefFiles((prev) => [...prev, ...items]);
+      return;
+    }
+
+    // AI 图片 tab：仅图片，受接口/约定上限约束，重复资产去重
+    const existing = new Set(
+      imageRefFiles.filter((r) => r.assetId != null).map((r) => String(r.assetId)),
+    );
+    const remaining = Math.max(0, imageMaxImages - imageRefFiles.length);
+    const eligible = assets
+      .filter((a) => a.type === 'image')
+      .filter((a) => !existing.has(String(a.id)));
+    const items = eligible
+      .slice(0, remaining)
+      .map((a) => ({ preview: a.url, name: assetPickName(a), assetId: a.id }));
+    if (eligible.length > items.length) {
+      showToast(`参考图最多 ${imageMaxImages} 张，请减少图片`);
+    }
+    if (items.length === 0) return;
+    setImageRefFiles((prev) => [...prev, ...items]);
   };
 
   return (
@@ -688,7 +854,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 {refFiles.map((item, idx) => (
                   <div key={idx} className={styles.refThumbWrap}>
                     <div className={styles.refThumb}>
-                      {item.file.type.startsWith('video/') ? (
+                      {item.type === 'video' ? (
                         <video src={item.preview} className={styles.refThumbMedia} />
                       ) : (
                         <img src={item.preview} alt="" className={styles.refThumbMedia} />
@@ -701,18 +867,19 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                       </button>
                     </div>
                     <span className={styles.refThumbLabel}>
-                      {item.file.type.startsWith('video/') ? `Video ${idx + 1}` : `Image ${idx + 1}`}
+                      {item.type === 'video' ? `Video ${idx + 1}` : `Image ${idx + 1}`}
                     </span>
                   </div>
                 ))}
                 <div
+                  ref={refCardRef}
                   className={styles.refCard}
                   onClick={() => {
                     if (videoImagesFull && videoVideosFull) {
                       showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${MAX_VIDEOS} 个）`);
                       return;
                     }
-                    fileInputRef.current?.click();
+                    toggleRefMenu('video');
                   }}
                 >
                   <Plus size={16} strokeWidth={2} />
@@ -906,13 +1073,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   </div>
                 ))}
                 <div
+                  ref={refCardRef}
                   className={styles.refCard}
                   onClick={() => {
                     if (imageRefFiles.length >= imageMaxImages) {
                       showToast(`参考图已到上限（${imageMaxImages} 张）`);
                       return;
                     }
-                    imageFileInputRef.current?.click();
+                    toggleRefMenu('image');
                   }}
                 >
                   <Plus size={16} strokeWidth={2} />
@@ -1096,13 +1264,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   </div>
                 ))}
                 <div
+                  ref={refCardRef}
                   className={styles.refCard}
                   onClick={() => {
                     if (agentAllFull) {
                       showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${MAX_AGENT_VIDEOS} 个 / 音频 ${MAX_AGENT_AUDIO} 个）`);
                       return;
                     }
-                    agentFileInputRef.current?.click();
+                    toggleRefMenu('agent');
                   }}
                 >
                   <Plus size={16} strokeWidth={2} />
@@ -1243,6 +1412,55 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         <div className={styles.toast} role="alert">
           {toast}
         </div>
+      )}
+
+      {/* 参考/附件卡上传菜单：fixed 定位随卡片，portal 到 body 避免被滚动容器裁切 */}
+      {refMenu && refMenuPos && createPortal(
+        <div ref={refMenuRef} className={styles.refMenu} style={refMenuPos}>
+          <button
+            className={styles.dropdownItem}
+            onClick={() => {
+              const input = refMenu === 'agent'
+                ? agentFileInputRef
+                : refMenu === 'video'
+                  ? fileInputRef
+                  : imageFileInputRef;
+              setRefMenu(null);
+              input.current?.click();
+            }}
+          >
+            <Upload size={14} strokeWidth={2} />
+            <span>本地上传</span>
+          </button>
+          <button
+            className={styles.dropdownItem}
+            onClick={() => {
+              const target = refMenu;
+              setRefMenu(null);
+              if (target) openAssetsPicker(target);
+            }}
+          >
+            <FolderOpen size={14} strokeWidth={2} />
+            <span>从资产中选择</span>
+          </button>
+        </div>,
+        document.body,
+      )}
+
+      {/* 从资产中选择弹窗：按入口过滤类型（图片入口仅图片；智能体入口与上传一致含音频；视频入口图片+视频） */}
+      {assetsPickerTarget && (
+        <AssetsPickerModal
+          onClose={() => setAssetsPickerTarget(null)}
+          onSelect={handleAssetsPickerSelect}
+          mediaTypes={
+            assetsPickerTarget === 'image'
+              ? ['image']
+              : assetsPickerTarget === 'agent'
+                ? ['image', 'video', 'audio']
+                : ['image', 'video']
+          }
+          confirmText="确定"
+        />
       )}
     </>
   );

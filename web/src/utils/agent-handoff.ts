@@ -5,13 +5,16 @@
  * 画布侧上传得 assetId 后构造 asset_ref 媒体块注入 AgentPanel。
  * ============================================ */
 
-/** 智能体附件交接项：File 与预览 URL（objectURL 生命周期归画布侧消费后收尾） */
+/** 智能体附件交接项：本地上传带 File + objectURL 预览；资产库选择带 assetId + 永久 URL（免重复上传） */
 export interface AgentHandoffItem {
-  file: File;
-  /** objectURL 预览，画布上传完成后负责 revoke */
+  /** 本地上传的原始 File；资产库选择项无（revoke 生命周期归画布侧消费后收尾，仅 blob 需要） */
+  file?: File;
+  /** 预览 URL（本地上传为 objectURL，画布上传完成后负责 revoke；资产选择为永久 URL） */
   preview: string;
   name: string;
   kind: 'image' | 'video';
+  /** 已有资产 ID（资产库选择时携带，画布侧直接复用，跳过上传） */
+  assetId?: string | number;
 }
 
 let pending: AgentHandoffItem[] | null = null;

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
-import { apiRequest, readApiErrorMessage } from './http';
+import { API_REQUEST_TIMEOUT_MS, apiRequest, readApiErrorMessage } from './http';
 import { useAuthStore } from '@/stores/auth';
 import { useAuthPromptStore } from '@/stores/authPrompt';
 
@@ -85,6 +85,25 @@ describe('apiRequest 信封', () => {
       message: '账户余额不足，请充值后重试',
     });
     expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('超时会中止请求并抛出可展示的错误', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_path: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = apiRequest('/api/projects', { silent: true });
+    const rejection = expect(request).rejects.toMatchObject({
+      status: 408,
+      message: '请求超时，请稍后重试',
+    });
+    await vi.advanceTimersByTimeAsync(API_REQUEST_TIMEOUT_MS);
+
+    await rejection;
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ signal: expect.any(AbortSignal) });
+    vi.useRealTimers();
   });
 });
 

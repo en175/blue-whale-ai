@@ -10,6 +10,8 @@ import {
   Minimize2,
   SlidersHorizontal,
   ArrowUp,
+  MousePointerClick,
+  FolderOpen,
   Image as ImageIcon,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
@@ -66,6 +68,8 @@ interface ImageDialogProps {
   onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 到节点选择：进入画布图片节点选取模式 */
   onPickFromCanvas?: () => void;
+  /** 从资产中选择：打开资产库选择弹窗（仅图片） */
+  onPickFromAssets?: () => void;
   /** 画布选取模式进行中（左上角图标高亮提示） */
   pickMode?: boolean;
   /** 外部注入参考素材（ts 驱动；画布节点单选 / 角色库多选，files 为一批） */
@@ -100,7 +104,7 @@ export interface ImageGenSeedParams {
 function RatioIcon({ ratio }: { ratio: string }) {
   const [w, h] = ratio.split(':').map(Number);
   const max = 16;
-  const width = w >= h ? max : Math.round((w / h) * max);
+  const width = w >= h ? max : Math.round((h / w) * max);
   const height = h >= w ? max : Math.round((h / w) * max);
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
@@ -157,7 +161,7 @@ function AttachmentItem({ attachment, move }: {
   );
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onReorderAttachments, onPickFromCanvas, pickMode, externalPick, onToast, draftBinding, mediaRefs, onRemoveMediaRef }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast, draftBinding, mediaRefs, onRemoveMediaRef }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
@@ -171,13 +175,17 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const [files, setFiles] = useState<UploadedFile[]>(initialFiles ?? []);
   /** 上传中状态：禁用发送按钮和输入框 */
   const [uploading, setUploading] = useState(false);
+  /** 媒体入口按钮弹菜单：从资产中选择 / 到节点选择 */
+  const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const resWrapRef = useRef<HTMLDivElement>(null);
   const configPanelRef = useRef<HTMLDivElement>(null);
+  const sourceWrapRef = useRef<HTMLDivElement>(null);
 
   useDismissOnOutside([
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
     { open: resOpen, ref: resWrapRef, dismiss: () => setResOpen(false) },
+    { open: sourceMenuOpen, ref: sourceWrapRef, dismiss: () => setSourceMenuOpen(false) },
     { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
   ]);
 
@@ -437,17 +445,38 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         {/* 顶部：素材预览 + 右上角操作 */}
         <div className={styles.topRow}>
           <div className={styles.previewRow}>
-            {/* 左上角图标：到节点选择当前画布素材（IKDMQR：Dock 不再提供本地上传/画布外素材入口；
-                新素材先从画布上传入口放入后再引用）。图片达上限或生成中只读时隐藏 */}
+            {/* 左上角图标：媒体来源菜单（上传入口退役，IKDLQR/IKDLQL 方向；保留资产选择/节点选择，
+                画布资产改造融合）。图片达上限或生成中只读时隐藏 */}
             {!imagesFull && !readOnly && (
-            <div className={styles.sourceWrap}>
+            <div className={styles.sourceWrap} ref={sourceWrapRef}>
               <button
                 className={`${styles.previewItem} ${styles.previewPlaceholder} ${pickMode ? styles.previewPicking : ''}`}
-                onClick={() => onPickFromCanvas?.()}
-                title="到节点选择"
+                onClick={() => setSourceMenuOpen((v) => !v)}
+                title="从资产中选择 / 到节点选择"
               >
                 <ImageIcon size={18} strokeWidth={2} />
               </button>
+              {sourceMenuOpen && (
+                <>
+                  <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(false)} />
+                  <div className={styles.sourceMenu}>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(false); onPickFromAssets?.(); }}
+                    >
+                      <FolderOpen size={14} strokeWidth={2} />
+                      <span>从资产中选择</span>
+                    </button>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(false); onPickFromCanvas?.(); }}
+                    >
+                      <MousePointerClick size={14} strokeWidth={2} />
+                      <span>到节点选择</span>
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
             )}
             {edgeRefs

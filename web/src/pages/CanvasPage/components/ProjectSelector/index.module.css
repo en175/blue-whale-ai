@@ -155,6 +155,15 @@
   border-color: var(--color-border-hover);
 }
 
+.renameError {
+  position: absolute;
+  left: var(--spacing-md);
+  bottom: calc(-1 * var(--spacing-md));
+  margin: 0;
+  color: var(--color-error);
+  font-size: var(--font-size-xs);
+}
+
 /* ---- 分隔线 ---- */
 .divider {
   height: 1px;

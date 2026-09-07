@@ -31,6 +31,7 @@ export default function ProjectSelector({
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  const [renameError, setRenameError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<CanvasProject | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -51,15 +52,21 @@ export default function ProjectSelector({
   const startRename = (project: CanvasProject) => {
     setEditingId(project.id);
     setEditingName(project.name);
+    setRenameError('');
   };
 
   /** 保存重命名 */
   const saveRename = () => {
-    if (editingId && editingName.trim()) {
-      onRename(editingId, editingName.trim());
+    if (!editingId) return;
+    const name = editingName.trim();
+    if (!name) {
+      setRenameError('项目名不能为空');
+      return;
     }
+    onRename(editingId, name);
     setEditingId(null);
     setEditingName('');
+    setRenameError('');
   };
 
   /** 确认删除 */
@@ -111,10 +118,17 @@ export default function ProjectSelector({
                   <input
                     className={styles.renameInput}
                     value={editingName}
-                    onChange={(e) => setEditingName(e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setEditingName(value);
+                      setRenameError(value.trim() ? '' : '项目名不能为空');
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') saveRename();
-                      if (e.key === 'Escape') setEditingId(null);
+                      if (e.key === 'Escape') {
+                        setEditingId(null);
+                        setRenameError('');
+                      }
                     }}
                     onBlur={saveRename}
                     autoFocus
@@ -122,6 +136,10 @@ export default function ProjectSelector({
                   />
                 ) : (
                   <span className={styles.projectName}>{project.name}</span>
+                )}
+
+                {editingId === project.id && renameError && (
+                  <p className={styles.renameError} role="alert">{renameError}</p>
                 )}
 
                 {/* 悬停显示删除按钮 */}

@@ -7,7 +7,7 @@ export interface ProjectView {
   id: string;
   name: string;
   thumb: string | null;
-  /** 项目内最近创建的 3 张 image 类型图片 URL（按 gmt_create 倒序取前 3），不足 3 张为实际张数，无图为空数组。 */
+  /** 本项目可用的最近 3 张 image URL（快照同源：project_asset ∪ 直接归属；按 gmt_create 倒序）。不足 3 张为实际张数，无图为空数组。 */
   previews: string[];
   created_at: string;
 }
@@ -96,29 +96,57 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
     return `${desired} (${n})`;
   }
 
-  /** 批量取每个项目最近 3 张 image 图片 URL（按 gmt_create 倒序取前 3），不足 3 张取实际张数。 */
+  /** 批量取每个项目最近 3 张可用 image URL。同源 snapshot：本项目 project_asset ∪ 直接归属。 */
   async function attachPreviews(
+    ownerId: string,
     rows: { id: bigint }[],
     views: ProjectView[],
   ): Promise<void> {
     if (rows.length === 0) return;
     const projectIds = rows.map((row) => row.id);
+    const listed = new Set(projectIds);
+    const uid = BigInt(ownerId);
+    const links = await prisma.project_asset.findMany({
+      where: {
+        user_id: uid,
+        project_id: { in: projectIds },
+        is_delete: 0,
+      },
+      select: { project_id: true, asset_id: true },
+    });
+    const linkedAssetIds = [...new Set(links.map((link) => link.asset_id))];
     const imageAssets = await prisma.assets.findMany({
       where: {
-        project_id: { in: projectIds },
+        user_id: uid,
         type: "image",
+        status: "normal",
         is_delete: false,
+        OR: [
+          { project_id: { in: projectIds } },
+          ...(linkedAssetIds.length > 0 ? [{ id: { in: linkedAssetIds } }] : []),
+        ],
       },
       orderBy: { gmt_create: "desc" },
-      select: { project_id: true, url: true },
+      select: { id: true, project_id: true, url: true },
     });
+    const membership = new Map<string, Set<bigint>>();
+    const addMember = (assetId: bigint, projectId: bigint) => {
+      if (!listed.has(projectId)) return;
+      const key = assetId.toString();
+      const projects = membership.get(key);
+      if (projects) projects.add(projectId);
+      else membership.set(key, new Set([projectId]));
+    };
+    for (const asset of imageAssets) addMember(asset.id, asset.project_id);
+    for (const link of links) addMember(link.asset_id, link.project_id);
     const byProject = new Map<bigint, string[]>();
     for (const asset of imageAssets) {
-      const list = byProject.get(asset.project_id);
-      if (!list) {
-        byProject.set(asset.project_id, [asset.url]);
-      } else if (list.length < 3) {
-        list.push(asset.url);
+      const projects = membership.get(asset.id.toString());
+      if (!projects) continue;
+      for (const projectId of projects) {
+        const list = byProject.get(projectId);
+        if (!list) byProject.set(projectId, [asset.url]);
+        else if (list.length < 3) list.push(asset.url);
       }
     }
     for (const view of views) {
@@ -137,7 +165,7 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
         orderBy: { gmt_create: "desc" },
       });
       const views = rows.map(toView);
-      await attachPreviews(rows, views);
+      await attachPreviews(ownerId, rows, views);
       return views;
     },
     async listByOwnerPaged(ownerId, page, size) {
@@ -157,7 +185,7 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
         }),
       ]);
       const views = rows.map(toView);
-      await attachPreviews(rows, views);
+      await attachPreviews(ownerId, rows, views);
       return { records: views, total, size, current: page };
     },
     async create(ownerId, name) {

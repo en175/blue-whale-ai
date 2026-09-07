@@ -160,6 +160,24 @@
   position: relative;
 }
 
+/* 参考/附件卡上传菜单：portal 到 body 的 fixed 定位弹层（避免被 refArea 滚动容器裁切）。
+ * 弹层在 .chatBox 作用域之外，字色变量需在此重新声明 */
+.refMenu {
+  --chat-fg: #fff;
+  --chat-fg-muted: rgba(255, 255, 255, 0.7);
+  position: fixed;
+  background: rgba(8, 8, 8, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(24px) saturate(1.35);
+  -webkit-backdrop-filter: blur(24px) saturate(1.35);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  padding: var(--spacing-xs);
+  min-width: 160px;
+  z-index: var(--z-tooltip);
+  animation: popupFadeIn 0.15s ease;
+}
+
 .uploadPopup {
   position: absolute;
   bottom: calc(100% + 8px);

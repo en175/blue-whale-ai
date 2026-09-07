@@ -169,14 +169,25 @@ describe('IKDMQS 草稿绑定模式渲染', () => {
     expect(mountNode.querySelector('input[type="file"]')).toBeNull();
   });
 
-  it('非草稿绑定路径（无 videoMediaRefs）保持模式选择器与本地列表渲染', async () => {
+  it('非草稿绑定路径（无 videoMediaRefs）保持模式选择器；媒体入口为来源菜单（资产/节点/角色库，无上传）', async () => {
     await renderDialog();
     expect(mountNode.textContent).toContain('全能参考');
-    // 无上传入口，图片/视频按钮直达「到节点选择」
-    expect(slotButton('到节点选择图片')).toBeTruthy();
-    expect(slotButton('到节点选择视频')).toBeTruthy();
+    // 图片/视频按钮改为弹出来源菜单（画布资产改造融合），不再直达「到节点选择」
+    const entryButtons = [...mountNode.querySelectorAll('button')].filter(
+      (b) => b.title === '从资产中选择 / 到节点选择 / 角色库',
+    );
+    expect(entryButtons.length).toBe(2);
+    await act(async () => {
+      entryButtons[0].click();
+    });
+    const menuText = mountNode.textContent ?? '';
+    expect(menuText).toContain('从资产中选择');
+    expect(menuText).toContain('到节点选择');
+    expect(menuText).toContain('角色库');
+    // 上传入口退役：菜单不含上传项，也不渲染文件选择 input
+    expect(menuText).not.toContain('图片上传');
+    expect(menuText).not.toContain('视频上传');
     expect(mountNode.querySelector('input[type="file"]')).toBeNull();
-    expect(mountNode.textContent).not.toContain('角色库');
   });
 });
 

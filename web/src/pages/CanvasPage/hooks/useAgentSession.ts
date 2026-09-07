@@ -210,6 +210,13 @@ export function useAgentSession(projectId: string) {
   });
   /** 当前项目下的历史会话列表（新→旧，供历史会话下拉使用） */
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  /**
+   * 同一份列表的 ref 镜像。删除要带这条会话自己的 etag（If-Match 乐观锁），而删除的回调
+   * 不该因为列表变化就重建——它挂在下拉的每一行上。`session.updated` 会把新 etag 写回
+   * 列表，这里读到的因此总是最新的那个。
+   */
+  const sessionsRef = useRef<SessionRecord[]>([]);
+  sessionsRef.current = sessions;
   /** 删除失败的那一行 + 原因：错误就显示在那一行上，下拉不关闭，用户能原地重试 */
   const [deleteError, setDeleteError] = useState<{ sessionId: string; message: string } | null>(null);
   /** 当前会话的事件订阅取消函数（切换会话时先解绑旧的，防串话） */
@@ -722,7 +729,10 @@ export function useAgentSession(projectId: string) {
     (targetId: string) => {
       if (!projectId) return;
       setDeleteError((prev) => (prev?.sessionId === targetId ? null : prev));
-      api.deleteSession(projectId, targetId)
+      // 删哪条就用哪条的 etag：列表里每条会话都带着自己的那个，不必为此多打一次请求。
+      // 列表里没有（刚建还没进列表之类）时传 undefined，deleteSession 自己回去读一次。
+      const etag = sessionsRef.current.find((s) => s.session_id === targetId)?.etag;
+      api.deleteSession(projectId, targetId, etag)
         .catch((e) => {
           // 只有**删除本身**失败才报「删除失败」（审查 W·A6）。善后失败是另一回事，
           // 走 chatError 那条路说「会话已删除，但重新连接失败」。

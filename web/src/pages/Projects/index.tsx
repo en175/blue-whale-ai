@@ -19,6 +19,7 @@ import {
   type ProjectRecord,
 } from '@/api/projects';
 import { isApiError } from '@/api/http';
+import { defaultProjectName } from '@/lib/projectName';
 import styles from './index.module.css';
 
 /** 页面向用户展示的日期；坏数据不让整张卡片失去可用性。 */
@@ -241,7 +242,7 @@ export default function Projects() {
   const handleCreate = () => {
     if (createMutation.isPending) return;
     setCreateError('');
-    createMutation.mutate(newName.trim(), {
+    createMutation.mutate(newName.trim() || defaultProjectName(), {
       onSuccess: (created) => navigate(`/canvas?project=${encodeURIComponent(String(created.id))}`),
       onError: (error) => setCreateError(errorMessage(error, '创建失败，请稍后重试')),
     });
@@ -587,7 +588,11 @@ export default function Projects() {
           <input
             className={styles.modalInput}
             value={editingName}
-            onChange={(event) => setEditingName(event.target.value)}
+            onChange={(event) => {
+              const value = event.target.value;
+              setEditingName(value);
+              setEditError(value.trim() ? '' : '项目名不能为空');
+            }}
             autoFocus
             onKeyDown={(event) => {
               if (event.key === 'Enter') saveEdit();

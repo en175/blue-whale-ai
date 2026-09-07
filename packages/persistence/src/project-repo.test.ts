@@ -31,16 +31,57 @@ describe("ProjectRepo GenerationInbox isolation", () => {
       { id: 1n, name: "A", thumb: null, gmt_create: new Date("2026-08-25T00:00:00Z") },
       { id: 2n, name: "B", thumb: null, gmt_create: new Date("2026-08-24T00:00:00Z") },
     ]);
+    const linkFindMany = vi.fn().mockResolvedValue([]);
     // 模拟 assets 按 gmt_create 倒序返回
     const assetFindMany = vi.fn().mockResolvedValue([
-      { project_id: 1n, url: "img1.png" },
-      { project_id: 1n, url: "img2.png" },
-      { project_id: 1n, url: "img3.png" },
-      { project_id: 1n, url: "img4.png" }, // 第 4 张，应被截断
-      { project_id: 2n, url: "other.png" },
+      { id: 11n, project_id: 1n, url: "img1.png" },
+      { id: 12n, project_id: 1n, url: "img2.png" },
+      { id: 13n, project_id: 1n, url: "img3.png" },
+      { id: 14n, project_id: 1n, url: "img4.png" }, // 第 4 张，应被截断
+      { id: 21n, project_id: 2n, url: "other.png" },
     ]);
     const prisma = {
       project: { findMany: projectFindMany },
+      project_asset: { findMany: linkFindMany },
+      assets: { findMany: assetFindMany },
+    } as unknown as PrismaClient;
+
+    const views = await createProjectRepo(prisma).listByOwner("100");
+
+    expect(linkFindMany).toHaveBeenCalledWith({
+      where: { user_id: 100n, project_id: { in: [1n, 2n] }, is_delete: 0 },
+      select: { project_id: true, asset_id: true },
+    });
+    expect(assetFindMany).toHaveBeenCalledWith({
+      where: {
+        user_id: 100n,
+        type: "image",
+        status: "normal",
+        is_delete: false,
+        OR: [{ project_id: { in: [1n, 2n] } }],
+      },
+      orderBy: { gmt_create: "desc" },
+      select: { id: true, project_id: true, url: true },
+    });
+    expect(views[0].previews).toEqual(["img1.png", "img2.png", "img3.png"]);
+    expect(views[1].previews).toEqual(["other.png"]);
+  });
+
+  it("attaches project_asset-linked images to the listing project, not assets.project_id", async () => {
+    const projectFindMany = vi.fn().mockResolvedValue([
+      { id: 1n, name: "A", thumb: null, gmt_create: new Date("2026-08-25T00:00:00Z") },
+      { id: 2n, name: "B", thumb: null, gmt_create: new Date("2026-08-24T00:00:00Z") },
+    ]);
+    const linkFindMany = vi.fn().mockResolvedValue([
+      { project_id: 2n, asset_id: 99n },
+    ]);
+    const assetFindMany = vi.fn().mockResolvedValue([
+      { id: 99n, project_id: 0n, url: "shared.png" },
+      { id: 11n, project_id: 1n, url: "owned.png" },
+    ]);
+    const prisma = {
+      project: { findMany: projectFindMany },
+      project_asset: { findMany: linkFindMany },
       assets: { findMany: assetFindMany },
     } as unknown as PrismaClient;
 
@@ -48,25 +89,48 @@ describe("ProjectRepo GenerationInbox isolation", () => {
 
     expect(assetFindMany).toHaveBeenCalledWith({
       where: {
-        project_id: { in: [1n, 2n] },
+        user_id: 100n,
         type: "image",
+        status: "normal",
         is_delete: false,
+        OR: [{ project_id: { in: [1n, 2n] } }, { id: { in: [99n] } }],
       },
       orderBy: { gmt_create: "desc" },
-      select: { project_id: true, url: true },
+      select: { id: true, project_id: true, url: true },
     });
-    expect(views[0].previews).toEqual(["img1.png", "img2.png", "img3.png"]);
-    expect(views[1].previews).toEqual(["other.png"]);
+    expect(views[0].previews).toEqual(["owned.png"]);
+    expect(views[1].previews).toEqual(["shared.png"]);
+  });
+
+  it("keeps a reused image on both the owning project and the linked project", async () => {
+    const projectFindMany = vi.fn().mockResolvedValue([
+      { id: 1n, name: "A", thumb: null, gmt_create: new Date("2026-08-25T00:00:00Z") },
+      { id: 2n, name: "B", thumb: null, gmt_create: new Date("2026-08-24T00:00:00Z") },
+    ]);
+    const prisma = {
+      project: { findMany: projectFindMany },
+      project_asset: { findMany: vi.fn().mockResolvedValue([{ project_id: 2n, asset_id: 11n }]) },
+      assets: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 11n, project_id: 1n, url: "reused.png" },
+        ]),
+      },
+    } as unknown as PrismaClient;
+
+    const views = await createProjectRepo(prisma).listByOwner("100");
+
+    expect(views[0].previews).toEqual(["reused.png"]);
+    expect(views[1].previews).toEqual(["reused.png"]);
   });
 
   it("returns empty previews when the project has no images", async () => {
     const projectFindMany = vi.fn().mockResolvedValue([
       { id: 1n, name: "A", thumb: null, gmt_create: new Date("2026-08-25T00:00:00Z") },
     ]);
-    const assetFindMany = vi.fn().mockResolvedValue([]);
     const prisma = {
       project: { findMany: projectFindMany },
-      assets: { findMany: assetFindMany },
+      project_asset: { findMany: vi.fn().mockResolvedValue([]) },
+      assets: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaClient;
 
     const views = await createProjectRepo(prisma).listByOwner("100");
@@ -80,10 +144,11 @@ describe("ProjectRepo GenerationInbox isolation", () => {
       { id: 3n, name: "C", thumb: null, gmt_create: new Date("2026-08-23T00:00:00Z") },
     ]);
     const assetFindMany = vi.fn().mockResolvedValue([
-      { project_id: 3n, url: "c1.png" },
+      { id: 31n, project_id: 3n, url: "c1.png" },
     ]);
     const prisma = {
       project: { count: projectCount, findMany: projectFindMany },
+      project_asset: { findMany: vi.fn().mockResolvedValue([]) },
       assets: { findMany: assetFindMany },
     } as unknown as PrismaClient;
 

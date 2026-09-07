@@ -1,7 +1,8 @@
 /* ============================================
  * BottomDialog 视频对话窗口：模式/模型/时长/宽高比配置与发送
- * IKDMQS：草稿绑定模式——参考由连线按角色推导（首帧/尾帧/普通参考），
- * 移除本地上传与角色库入口，素材唯一入口是画布已有素材（到节点选择/画布连线）。
+ * IKDMQS：草稿绑定模式——参考由连线按角色推导（首帧/尾帧/普通参考）。
+ * 素材入口经画布资产改造（mwq）与 IKDMQS 融合：上传入口退役，
+ * 保留 从资产中选择 / 到节点选择 / 角色库 三项来源菜单。
  * ============================================ */
 import { useState, useRef, useEffect } from 'react';
 import {
@@ -13,8 +14,11 @@ import {
   SlidersHorizontal,
   Play,
   ArrowUp,
+  MousePointerClick,
+  FolderOpen,
   Maximize2,
   Minimize2,
+  User,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
@@ -99,12 +103,16 @@ interface BottomDialogProps {
   /** 到节点选择：进入画布节点选取模式（image 图片节点 / video 视频节点）；
    *  role 为视频草稿目标参考角色（首帧/尾帧显式指定，IKDMQS），缺省普通参考 */
   onPickFromCanvas?: (kind: 'image' | 'video', role?: VideoRefRole) => void;
+  /** 从资产中选择：打开资产库选择弹窗（按 kind 过滤媒体类型） */
+  onPickFromAssets?: (kind: 'image' | 'video') => void;
   /** 画布选取模式进行中（image/video，对应按钮高亮提示） */
   pickMode?: 'image' | 'video' | null;
   /** 外部注入参考视频（ts 驱动；画布节点单选，items 为一批） */
   externalPick?: { ts: number; items: BottomRefItem[] } | null;
   /** 外部注入参考图片（ts 驱动；画布节点单选，items 为一批） */
   externalImagePick?: { ts: number; items: BottomRefItem[] } | null;
+  /** 打开角色库弹窗 */
+  onOpenCharacterLibrary?: () => void;
   /** 视频草稿绑定（IKDMQS）：面板编辑实时写回草稿节点；status 为 generating 时参数与输入只读 */
   videoDraftBinding?: {
     status?: MediaGenStatus;
@@ -255,7 +263,7 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, firstSlotOpe
   );
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs, initialText, initialParams, attachments, onReorderAttachments, onPickFromCanvas, pickMode, externalPick, externalImagePick, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onToast }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialRefs, initialText, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, externalImagePick, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onToast }: BottomDialogProps) {
   /** 富文本输入框（自由文本；胶囊机制保留给后续引用场景，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框内容的结构化形态（IKAFSX）：胶囊是指针，解引用只发生在发送那一刻。 */
@@ -287,15 +295,21 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
   const [duration, setDuration] = useState(0);
   const [modelOpen, setModelOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
+  /** 媒体入口按钮弹菜单（image/video 各自独立，避免同时弹出）：从资产中选择 / 到节点选择 / 角色库 */
+  const [sourceMenuOpen, setSourceMenuOpen] = useState<'image' | 'video' | null>(null);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const sizeWrapRef = useRef<HTMLDivElement>(null);
   const modeWrapRef = useRef<HTMLDivElement>(null);
   const configPanelRef = useRef<HTMLDivElement>(null);
+  const imageSourceRef = useRef<HTMLDivElement>(null);
+  const videoSourceRef = useRef<HTMLDivElement>(null);
 
   useDismissOnOutside([
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
     { open: sizeOpen, ref: sizeWrapRef, dismiss: () => setSizeOpen(false) },
     { open: modeOpen, ref: modeWrapRef, dismiss: () => setModeOpen(false) },
+    { open: sourceMenuOpen === 'image', ref: imageSourceRef, dismiss: () => setSourceMenuOpen(null) },
+    { open: sourceMenuOpen === 'video', ref: videoSourceRef, dismiss: () => setSourceMenuOpen(null) },
     { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
   ]);
 
@@ -838,15 +852,45 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
               </div>
             );
           })}
-          {/* 图片入口（IKDMQS：仅画布已有素材，本地上传/角色库入口已移除） */}
+          {/* 图片入口（上传入口退役，IKDLQL；保留资产选择/节点选择/角色库来源菜单，画布资产改造融合） */}
           {imageCount < maxImages && (
-            <button
-              className={`${styles.mediaBtn} ${pickMode === 'image' ? styles.mediaBtnPicking : ''}`}
-              onClick={() => onPickFromCanvas?.('image')}
-              title="到节点选择图片"
-            >
-              <Image size={18} strokeWidth={2} />
-            </button>
+            <div className={styles.sourceWrap} ref={imageSourceRef}>
+              <button
+                className={`${styles.mediaBtn} ${pickMode === 'image' ? styles.mediaBtnPicking : ''}`}
+                onClick={() => setSourceMenuOpen((v) => (v === 'image' ? null : 'image'))}
+                title="从资产中选择 / 到节点选择 / 角色库"
+              >
+                <Image size={18} strokeWidth={2} />
+              </button>
+              {sourceMenuOpen === 'image' && (
+                <>
+                  <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(null)} />
+                  <div className={styles.sourceMenu}>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(null); onPickFromAssets?.('image'); }}
+                    >
+                      <FolderOpen size={14} strokeWidth={2} />
+                      <span>从资产中选择</span>
+                    </button>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(null); onPickFromCanvas?.('image'); }}
+                    >
+                      <MousePointerClick size={14} strokeWidth={2} />
+                      <span>到节点选择</span>
+                    </button>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(null); onOpenCharacterLibrary?.(); }}
+                    >
+                      <User size={14} strokeWidth={2} />
+                      <span>角色库</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           )}
 
           {/* 分隔点 */}
@@ -867,15 +911,45 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
               </div>
             );
           })}
-          {/* 视频入口（仅全能参考模式；IKDMQS：仅画布已有素材） */}
+          {/* 视频入口（仅全能参考模式；上传入口退役，IKDLQL；保留资产选择/节点选择/角色库来源菜单） */}
           {!noVideoMode && videoCount < MAX_VIDEO_REFS && (
-            <button
-              className={`${styles.mediaBtn} ${pickMode === 'video' ? styles.mediaBtnPicking : ''}`}
-              onClick={() => onPickFromCanvas?.('video')}
-              title="到节点选择视频"
-            >
-              <Video size={18} strokeWidth={2} />
-            </button>
+            <div className={styles.sourceWrap} ref={videoSourceRef}>
+              <button
+                className={`${styles.mediaBtn} ${pickMode === 'video' ? styles.mediaBtnPicking : ''}`}
+                onClick={() => setSourceMenuOpen((v) => (v === 'video' ? null : 'video'))}
+                title="从资产中选择 / 到节点选择 / 角色库"
+              >
+                <Video size={18} strokeWidth={2} />
+              </button>
+              {sourceMenuOpen === 'video' && (
+                <>
+                  <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(null)} />
+                  <div className={styles.sourceMenu}>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(null); onPickFromAssets?.('video'); }}
+                    >
+                      <FolderOpen size={14} strokeWidth={2} />
+                      <span>从资产中选择</span>
+                    </button>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(null); onPickFromCanvas?.('video'); }}
+                    >
+                      <MousePointerClick size={14} strokeWidth={2} />
+                      <span>到节点选择</span>
+                    </button>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(null); onOpenCharacterLibrary?.(); }}
+                    >
+                      <User size={14} strokeWidth={2} />
+                      <span>角色库</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           )}
 
           {/* 计数 */}

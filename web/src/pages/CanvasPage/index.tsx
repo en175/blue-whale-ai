@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition, type SpawnBox } from './draftSpawn';
@@ -44,7 +45,13 @@ import FlowCanvas from './components/Canvas';
 import { addEdge, useEdgesState, type Connection, type Edge, type Node, type Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchQuota, toSessionUser } from '@/api/auth';
-import { fetchProjects, createProject, renameProject, deleteProject,  } from '@/api/projects';
+import {
+  fetchProjects,
+  createProject,
+  renameProject,
+  deleteProject,
+  projectKeys,
+} from '@/api/projects';
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
@@ -73,14 +80,15 @@ import {
 import { uploadAssetFile } from '@/utils/upload';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
+import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
 import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from './quoteConversation';
 import {
   canvasLocationSearch,
-  pickCanvasIdAfterDelete,
   pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
+  shouldReturnToProjectsAfterDelete,
 } from './canvasQuery';
 import styles from './index.module.css';
 
@@ -88,6 +96,7 @@ type ToolMode = 'drag' | 'select';
 
 export default function CanvasPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const [projects, setProjects] = useState<CanvasProject[]>([]);
@@ -275,6 +284,16 @@ export default function CanvasPage() {
   const [showAssetsModal, setShowAssetsModal] = useState(false);
   /** 工具栏加号 →「资产库选择」弹窗开关 */
   const [showAssetsPicker, setShowAssetsPicker] = useState(false);
+  /** 资产选择弹窗的打开来源（决定 mediaTypes 过滤与确认后的去向）：
+   *  toolbar 画布工具栏（全类型落画布）/ bottomImage|bottomVideo 视频 dock / imageDialog 图片 dock / agentPanel Agent 面板 */
+  const [assetsPickerTarget, setAssetsPickerTarget] = useState<'toolbar' | 'bottomImage' | 'bottomVideo' | 'imageDialog' | 'agentPanel'>('toolbar');
+  /** 打开资产选择弹窗（记录来源入口，确认时按来源路由） */
+  const openAssetsPicker = (target: typeof assetsPickerTarget) => {
+    setAssetsPickerTarget(target);
+    setShowAssetsPicker(true);
+  };
+  /** 资产库选择 → Agent 面板待发附件（ts 驱动注入，画布侧已落节点） */
+  const [agentAssetPicks, setAgentAssetPicks] = useState<{ ts: number; blocks: SessionContentBlock[] } | null>(null);
   const [assetsModalDefaultTab, setAssetsModalDefaultTab] = useState<string | undefined>(undefined);
   const [assetsModalDefaultFilter, setAssetsModalDefaultFilter] = useState<string | undefined>(undefined);
   const [assetDetailTarget, setAssetDetailTarget] = useState<AssetRecord | null>(null);
@@ -302,23 +321,38 @@ export default function CanvasPage() {
       if (attachments && attachments.length > 0) {
         const blocks: SessionContentBlock[] = [];
         for (const item of attachments) {
-          const uploaded = await uploadFileToAsset(item.file, item.kind);
-          if (uploaded) {
-            // 用 complete 返回的永久 URL（不是会被 revoke 的 objectURL），
-            // 并登记进 MessageAssetPreview 的缓存：发送后乐观气泡立刻能显示缩略图
-            rememberAssetUrl(uploaded.asset_id, uploaded.url);
+          if (item.assetId != null) {
+            // 资产库选择项：已有 assetId，直接复用（不重复上传），preview 即永久 URL
+            rememberAssetUrl(String(item.assetId), item.preview);
             blocks.push({
               type: 'asset_ref',
-              url: uploaded.url,
+              url: item.preview,
               name: item.name,
               media_type: item.kind,
               display_label: item.name,
-              asset_id: uploaded.asset_id,
+              asset_id: String(item.assetId),
             });
+          } else if (item.file) {
+            const uploaded = await uploadFileToAsset(item.file, item.kind);
+            if (uploaded) {
+              // 用 complete 返回的永久 URL（不是会被 revoke 的 objectURL），
+              // 并登记进 MessageAssetPreview 的缓存：发送后乐观气泡立刻能显示缩略图
+              rememberAssetUrl(uploaded.asset_id, uploaded.url);
+              blocks.push({
+                type: 'asset_ref',
+                url: uploaded.url,
+                name: item.name,
+                media_type: item.kind,
+                display_label: item.name,
+                asset_id: uploaded.asset_id,
+              });
+            } else {
+              console.warn('首页附件上传失败，已跳过:', item.name);
+            }
+            URL.revokeObjectURL(item.preview);
           } else {
-            console.warn('首页附件上传失败，已跳过:', item.name);
+            console.warn('首页附件缺少 file/assetId，已跳过:', item.name);
           }
-          URL.revokeObjectURL(item.preview);
         }
         mediaBlocks = blocks.length > 0 ? blocks : undefined;
       }
@@ -1607,33 +1641,18 @@ export default function CanvasPage() {
       .catch(() => undefined);
   };
 
-  /** 新建项目名：当前年月日时分（如 2026-08-18 02:58） */
-  const newProjectName = () => {
-    const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  };
-
-  /** 删除项目：DELETE /api/projects/:id；删除当前画布后切到剩余列表最新一项，不跳首页 */
+  /** 删除当前画布后回到项目列表；删除其他项目时留在当前画布。 */
   const handleDelete = (id: string) => {
     deleteProject(id)
-      .then(async () => {
+      .then(() => {
         const remaining = projects.filter((p) => p.id !== id);
-        const nextId = pickCanvasIdAfterDelete(currentId, id, projects.map((p) => p.id));
-        if (!nextId) {
-          try {
-            const created = await createProject(newProjectName());
-            const item: CanvasProject = { id: String(created.id), name: created.name };
-            setProjects([item]);
-            setCurrentId(item.id);
-          } catch {
-            setProjects([]);
-            setCurrentId('');
-          }
+        setProjects(remaining);
+        // 项目卡片页缓存含已删除项目；返回前清除，确保挂载后重新请求最新列表。
+        queryClient.removeQueries({ queryKey: projectKeys.all });
+        if (shouldReturnToProjectsAfterDelete(currentId, id)) {
+          navigate('/projects');
           return;
         }
-        setProjects(remaining);
-        setCurrentId(nextId);
       })
       .catch(() => undefined);
   };
@@ -1642,7 +1661,7 @@ export default function CanvasPage() {
   const handleNewProject = async () => {
     if (!(await ensureSavedBeforeProjectSwitch())) return;
     try {
-      const created = await createProject(newProjectName());
+      const created = await createProject(defaultProjectName());
       const item: CanvasProject = { id: String(created.id), name: created.name };
       setProjects((prev) => [item, ...prev]);
       setCurrentId(item.id);
@@ -1747,26 +1766,25 @@ export default function CanvasPage() {
     });
   };
 
+  /** 从资产 URL 提取展示名（无元数据字段时的兜底命名） */
+  const assetDisplayName = (asset: AssetRecord): string => {
+    try {
+      const last = new URL(asset.url).pathname.split('/').filter(Boolean).pop();
+      return last ? decodeURIComponent(last) : `资产-${asset.id}`;
+    } catch {
+      return `资产-${asset.id}`;
+    }
+  };
+
   /** 资产库选择弹窗 → 确认选中的已有资产批量落到画布（多选）：
    *  直接以 /api/assets 返回的 id 作为 assetId 建媒体节点，不走 TOS 上传；
-   *  后台补 link 关联，确保素材进入当前项目 snapshot 字典（刷新后不判缺失）。 */
-  const handleSelectAssetsFromLibrary = (selectedAssets: AssetRecord[]) => {
-    setShowAssetsPicker(false);
-    if (selectedAssets.length === 0) return;
-    if (!currentId) {
-      showToast('error', '项目未就绪，请稍后重试');
-      return;
-    }
+   *  后台补 link 关联，确保素材进入当前项目 snapshot 字典（刷新后不判缺失）。
+   *  返回是否成功（项目未就绪时 false，由调用方决定是否提示）。 */
+  const placeAssetsOnCanvas = (selectedAssets: AssetRecord[]): boolean => {
+    if (!currentId) return false;
 
     const nodes: Node[] = selectedAssets.map((asset) => {
-      const fileNameFromUrl = (() => {
-        try {
-          const last = new URL(asset.url).pathname.split('/').filter(Boolean).pop();
-          return last ? decodeURIComponent(last) : `资产-${asset.id}`;
-        } catch {
-          return `资产-${asset.id}`;
-        }
-      })();
+      const fileNameFromUrl = assetDisplayName(asset);
       const nodeId = newNodeId('media');
       return {
         id: nodeId,
@@ -1811,6 +1829,64 @@ export default function CanvasPage() {
         showToast('warn', '资产关联项目失败，请稍后重试');
       });
     });
+    return true;
+  };
+
+  /** 资产选择弹窗统一确认路由（IKC3RY 模块D 八入口）：
+   *  按打开来源分发——画布工具栏/Agent 面板落画布节点（Agent 面板额外挂会话附件），
+   *  dock 对话框注入参考素材（带 assetId，发送时免重复上传）。
+   *  选择行为与该入口现有上传一致：数量上限/超限提示由各消费方既有链路兜底。 */
+  const handleAssetsPickerSelect = (selectedAssets: AssetRecord[]) => {
+    const target = assetsPickerTarget;
+    setShowAssetsPicker(false);
+    if (selectedAssets.length === 0) return;
+
+    if (target === 'bottomImage' || target === 'bottomVideo') {
+      // 视频 dock：注入 BottomDialog 参考素材（图片/视频分开注入，走 externalPick 既有上限保护与去重）
+      const kind = target === 'bottomImage' ? 'image' : 'video';
+      const items: BottomRefItem[] = selectedAssets
+        .filter((a) => a.type === kind)
+        .map((a) => ({ preview: a.url, type: kind, assetId: a.id }));
+      if (items.length === 0) return;
+      if (target === 'bottomImage') {
+        setVideoDlgImagePickResult({ ts: Date.now(), items });
+      } else {
+        setVideoPickResult({ ts: Date.now(), items });
+      }
+      return;
+    }
+    if (target === 'imageDialog') {
+      // 图片 dock：注入 ImageDialog 参考图（externalPick 既有上限保护与去重）
+      const files: UploadedFile[] = selectedAssets
+        .filter((a) => a.type === 'image')
+        .map((a) => ({ id: `asset-${a.id}`, url: a.url, type: 'image' as const, name: assetDisplayName(a), assetId: a.id }));
+      if (files.length === 0) return;
+      setImagePickResult({ ts: Date.now(), files });
+      return;
+    }
+    if (target === 'agentPanel') {
+      // Agent 面板：与上传一致落画布节点（IKBA6C），并挂 ready 会话附件
+      if (!placeAssetsOnCanvas(selectedAssets)) {
+        showToast('error', '项目未就绪，请稍后重试');
+        return;
+      }
+      const blocks: SessionContentBlock[] = selectedAssets
+        .filter((a) => a.type === 'image' || a.type === 'video')
+        .map((a) => ({
+          type: 'asset_ref',
+          url: a.url,
+          name: assetDisplayName(a),
+          media_type: (a.type === 'video' ? 'video' : 'image') as 'image' | 'video',
+          display_label: assetDisplayName(a),
+          asset_id: String(a.id),
+        }));
+      if (blocks.length > 0) setAgentAssetPicks({ ts: Date.now(), blocks });
+      return;
+    }
+    // 默认（画布工具栏）：全类型批量落画布
+    if (!placeAssetsOnCanvas(selectedAssets)) {
+      showToast('error', '项目未就绪，请稍后重试');
+    }
   };
 
   /* ============ 生成任务编排：创建 → 占位节点 → 轮询 → 产物挂载 ============ */
@@ -3250,22 +3326,22 @@ export default function CanvasPage() {
         if (handoff.mode === 'keyframe') {
           const [first, last] = handoff.refs;
           const firstAssetId = first ? await resolveRefAssetId({
-            file: first.file, url: first.preview, name: 'ref-image', type: first.type,
+            file: first.file, url: first.preview, name: 'ref-image', type: first.type, assetId: first.assetId,
           }) : null;
           const lastAssetId = last ? await resolveRefAssetId({
-            file: last.file, url: last.preview, name: 'ref-image', type: last.type,
+            file: last.file, url: last.preview, name: 'ref-image', type: last.type, assetId: last.assetId,
           }) : null;
           // 不再 seed 进底部对话框，objectURL 在此自行释放
           if (!firstAssetId || !lastAssetId) {
             console.warn('首尾帧素材上传失败，任务未创建');
-            handoff.refs.forEach((r) => URL.revokeObjectURL(r.preview));
+            handoff.refs.forEach((r) => { if (r.file) URL.revokeObjectURL(r.preview); });
             return;
           }
           startGenerationJob('video', parameters, undefined, {
             firstFrameAssetId: firstAssetId,
             lastFrameAssetId: lastAssetId,
           });
-          handoff.refs.forEach((r) => URL.revokeObjectURL(r.preview));
+          handoff.refs.forEach((r) => { if (r.file) URL.revokeObjectURL(r.preview); });
           return;
         }
         const referenceAssetIds: string[] = [];
@@ -3275,6 +3351,7 @@ export default function CanvasPage() {
             url: r.preview,
             name: `ref-${r.type}`,
             type: r.type,
+            assetId: r.assetId,
           });
           if (assetId) referenceAssetIds.push(assetId);
         }
@@ -3285,13 +3362,18 @@ export default function CanvasPage() {
           referenceAssetIds.length > 0 ? { referenceAssetIds } : undefined,
         );
         // 不再 seed 进底部对话框，objectURL 在此自行释放
-        handoff.refs.forEach((r) => URL.revokeObjectURL(r.preview));
+        handoff.refs.forEach((r) => { if (r.file) URL.revokeObjectURL(r.preview); });
       })();
     } else {
-      // 图片：参考图先上传取 assetId，再创建任务（同 handleImageDialogSend）
+      // 图片：参考图先上传取 assetId（资产库选择项直接复用），再创建任务（同 handleImageDialogSend）
       (async () => {
         const inputAssetIds: string[] = [];
         for (const f of handoff.files) {
+          if (f.assetId != null) {
+            inputAssetIds.push(String(f.assetId));
+            continue;
+          }
+          if (!f.file) continue;
           const uploaded = await uploadFileToAsset(f.file, 'image');
           if (uploaded) inputAssetIds.push(uploaded.asset_id);
         }
@@ -3302,7 +3384,7 @@ export default function CanvasPage() {
           size: handoff.size,
         }, inputAssetIds.length > 0 ? inputAssetIds : undefined);
         // 不再 seed 进图片对话框，objectURL 在此自行释放
-        handoff.files.forEach((f) => URL.revokeObjectURL(f.url));
+        handoff.files.forEach((f) => { if (f.file) URL.revokeObjectURL(f.url); });
       })();
     }
     // 触发后清导航状态（消费时不提前清，避免 location 变化重跑消费 effect 重复注入对话框）
@@ -3378,7 +3460,7 @@ export default function CanvasPage() {
           mode={toolMode}
           onModeChange={setToolMode}
           onUploadFile={handleUploadFile}
-          onOpenAssetsPicker={() => setShowAssetsPicker(true)}
+          onOpenAssetsPicker={() => openAssetsPicker('toolbar')}
           onToggleVideoDialog={() => {
             // IKDMQS：侧栏视频入口不再开关空对话框，每次点击新建独立视频草稿卡并绑定面板
             setPickMode(null);
@@ -3459,6 +3541,8 @@ export default function CanvasPage() {
             onClose={() => { setShowBottomDialog(false); setPickMode(null); setPickTarget(null); setPickRefRole(null); }}
             onSend={handleDialogSend}
             onPickFromCanvas={(kind, role) => { setPickMode(kind); setPickTarget('video'); setPickRefRole(role ?? null); }}
+            onPickFromAssets={(kind) => openAssetsPicker(kind === 'image' ? 'bottomImage' : 'bottomVideo')}
+            onOpenCharacterLibrary={() => { setCharacterLibraryTarget('video'); setShowCharacterLibrary(true); }}
             pickMode={pickTarget === 'video' && pickMode !== 'audio' && pickMode !== 'product' && pickMode !== 'asset' ? pickMode : null}
             externalPick={videoPickResult}
             externalImagePick={videoDlgImagePickResult}
@@ -3510,6 +3594,7 @@ export default function CanvasPage() {
             onClose={() => { setShowImageDialog(false); setImageDraftId(null); setPickMode(null); setPickTarget(null); }}
             onSend={handleImageDialogSend}
             onPickFromCanvas={() => { setPickMode('image'); setPickTarget('image'); }}
+            onPickFromAssets={() => openAssetsPicker('imageDialog')}
             pickMode={pickMode === 'image'}
             externalPick={imagePickResult}
             onOpenCharacterLibrary={() => { setCharacterLibraryTarget('image'); setShowCharacterLibrary(true); }}
@@ -3562,20 +3647,32 @@ export default function CanvasPage() {
           initialCardLabel={agentContext?.label}
           inputVersion={agentContext?.ts ?? 0}
           projectId={currentId || undefined}
-          onApplyPreview={handleAgentCardApply}
+          onApplyToDock={handleAgentCardApply}
           appliedCardIds={appliedCardIds}
           initialSkillId={agentContext?.skillId ?? ''}
           initialSkillName={agentContext?.skillName ?? ''}
           mediaBlocks={agentContext?.mediaBlocks}
           onPlaceFileOnCanvas={placeFileOnCanvas}
+          onPickFromAssets={() => openAssetsPicker('agentPanel')}
+          externalAssetPicks={agentAssetPicks}
         />
       )}
 
-      {/* 资产库选择弹框（工具栏加号 → 资产库选择） */}
+      {/* 资产库选择弹框（按入口来源过滤类型：工具栏/Agent 面板/dock 对话框） */}
       {showAssetsPicker && (
         <AssetsPickerModal
           onClose={() => setShowAssetsPicker(false)}
-          onSelect={handleSelectAssetsFromLibrary}
+          onSelect={handleAssetsPickerSelect}
+          mediaTypes={
+            assetsPickerTarget === 'bottomImage' || assetsPickerTarget === 'imageDialog'
+              ? ['image']
+              : assetsPickerTarget === 'bottomVideo'
+                ? ['video']
+                : assetsPickerTarget === 'agentPanel'
+                  ? ['image', 'video']
+                  : undefined
+          }
+          confirmText={assetsPickerTarget === 'toolbar' ? '插入画布' : '确定'}
         />
       )}
 

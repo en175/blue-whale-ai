@@ -319,18 +319,29 @@ describe('IKDMQR 连线 → Dock 同步与提交消费', () => {
 });
 
 describe('IKDMQR Dock 选择 → 连线', () => {
+  /** Dock 媒体入口已改为来源菜单（画布资产改造融合）：先点入口按钮弹菜单，再点「到节点选择」项进入选取模式 */
+  const enterPickMode = async () => {
+    const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.getAttribute('title') === '从资产中选择 / 到节点选择',
+    )!;
+    await act(async () => {
+      entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent === '到节点选择',
+    )!;
+    await act(async () => {
+      item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+  };
+
   it('Dock「到节点选择」选中画布图片节点建立对应连线，Dock 同步显示', async () => {
     await renderPage();
     const draftId = await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
     // Dock 进入选取模式
-    const pickEntry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (b) => b.getAttribute('title') === '到节点选择',
-    )!;
-    await act(async () => {
-      pickEntry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
+    await enterPickMode();
     expect(container.textContent).toContain('点击画布中的图片节点');
 
     // 点击画布图片节点 → 建立连线（而非注入面板本地列表）
@@ -361,12 +372,7 @@ describe('IKDMQR Dock 选择 → 连线', () => {
     });
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
-    const pickEntry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (b) => b.getAttribute('title') === '到节点选择',
-    )!;
-    await act(async () => {
-      pickEntry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
+    await enterPickMode();
 
     // 待生成草稿作为来源：拒绝
     await act(async () => {
@@ -376,9 +382,7 @@ describe('IKDMQR Dock 选择 → 连线', () => {
     expect(container.textContent).toContain('待生成的草稿不能作为参考');
 
     // 视频节点作为来源：拒绝
-    await act(async () => {
-      pickEntry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
+    await enterPickMode();
     const v1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!;
     await act(async () => {
       flowProps.current.onNodeClick(v1);
