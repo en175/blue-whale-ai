@@ -565,6 +565,11 @@ describe('IKDMQQ 保存失败暂停生成与项目切换', () => {
     // 保存恢复：切换放行
     apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
     await act(async () => {
+      const retry = [...container.querySelectorAll('button')].find(button => button.textContent === '重试保存');
+      retry!.click();
+    });
+    await vi.waitFor(() => expect(container.textContent).toContain('已保存'));
+    await act(async () => {
       await headerProps.current.onSelectProject('p2');
     });
     expect(headerProps.current.currentProjectId).toBe('p2');

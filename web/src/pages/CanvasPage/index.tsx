@@ -384,6 +384,8 @@ export default function CanvasPage() {
   /** 面板当前绑定的图片草稿节点 id（IKDMQQ）：仅草稿入口（侧栏新建/点击草稿卡）设置；
    *  草稿被删除/取消或成功转成品卡时由清理 effect 结束绑定并关闭面板 */
   const [imageDraftId, setImageDraftId] = useState<string | null>(null);
+  const imagePanelHiddenRef = useRef(false);
+  const editingTargetRef = useRef<string | null>(null);
   /** 面板当前绑定的视频草稿节点 id（IKDMQS）：仅草稿入口（侧栏新建/点击草稿卡）设置；
    *  生命周期与图片草稿绑定一致 */
   const [videoDraftId, setVideoDraftId] = useState<string | null>(null);
@@ -513,6 +515,7 @@ export default function CanvasPage() {
   activeProjectRef.current = currentId;
   const [focusViewport, setFocusViewport] = useState<Viewport>();
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveBlocked, setSaveBlocked] = useState(false);
   /** 最近一次保存成功时间（HH:mm） */
   const [savedAt, setSavedAt] = useState('');
   /** 画布乐观锁版本号（来自快照；null 表示从未保存，If-Match 传 missing） */
@@ -1045,12 +1048,14 @@ export default function CanvasPage() {
       savePromiseRef.current = saveCanvasDoc(currentId, { viewport, nodes, edges }, versionRef.current)
         .then((saved) => {
           versionRef.current = saved.version;
+          setSaveBlocked(false);
           pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
           setSaveStatus(textNodesRef.current.some(node => draftErrorsRef.current.has(node.id)) ? 'error' : 'saved');
           setSaveEpoch(value => value + 1);
           setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
         })
         .catch((e) => {
+          setSaveBlocked(true);
           // 释放签名，允许下次变更时重试
           lastSavedRef.current = '';
           // 本次请求里有未保存的新增节点 → 添加失败：回滚节点（画布上不保留添加失败的节点）
@@ -1256,6 +1261,7 @@ export default function CanvasPage() {
 
   /** 唤起底部图片对话框（工具栏图片图标 / 资产卡「生成图片」共用） */
   const handleOpenImageDialog = () => {
+    imagePanelHiddenRef.current = false;
     setShowImageDialog(true);
     setShowBottomDialog(false);
     setShowAudioDialog(false);
@@ -1265,6 +1271,15 @@ export default function CanvasPage() {
   /** 节点选取时读取资产 ID：兼容 assetId/asset_id/assetID 三形态（后端写入节点为下划线形态） */
   const readNodeAssetId = (data: Record<string, unknown>): string | number | undefined =>
     (data.assetId ?? data.asset_id ?? data.assetID) as string | number | undefined;
+
+  // 隐藏与重开同一目标可放行；重试尚未成功时不能换到其它编辑目标。
+  const canOpenEditor = (nodeId?: string): boolean => {
+    if ((saveBlocked || saveStatus === 'error') && nodeId !== editingTargetRef.current) {
+      showToast('warn', '保存失败，请重试');
+      return false;
+    }
+    return true;
+  };
 
   /** 画布节点单击：选取模式下点击对应类型节点带入对话框，其他节点取消选取；
    *  非选取模式点击草稿身份卡（IKDMQQ 图片 / IKDMQS 视频 / IKDMQT 音频）：打开绑定面板继续编辑（待生成/生成中查看/失败修改） */
@@ -1276,10 +1291,8 @@ export default function CanvasPage() {
       if (
         node.type === 'mediaNode' &&
         isInPlaceRegenTarget(node) &&
-        saveStatus === 'error' &&
-        node.id !== imageDraftId &&
-        node.id !== videoDraftId &&
-        node.id !== audioDraftId
+        (saveBlocked || saveStatus === 'error') &&
+        node.id !== editingTargetRef.current
       ) {
         showToast('warn', '保存失败，请重试');
         return;
@@ -1407,6 +1420,7 @@ export default function CanvasPage() {
 
   /** 画布空白处单击：取消节点选取模式 */
   const handleCanvasPaneClick = () => {
+    imagePanelHiddenRef.current = true;
     setPickMode(null);
     setPickTarget(null);
     setPickProductId(null);
@@ -1448,7 +1462,7 @@ export default function CanvasPage() {
       if (soloId || candidates.length > 1) setShow(false); // 单选其他卡或多选：隐藏
       // 空选中：不动作（真空白点击由 onPaneClick 处理，节点删除由绑定清理 effect 处理）
     };
-    syncPanelVisible(imageDraftId, setShowImageDialog);
+    if (!imagePanelHiddenRef.current) syncPanelVisible(imageDraftId, setShowImageDialog);
     syncPanelVisible(videoDraftId, setShowBottomDialog);
     syncPanelVisible(audioDraftId, setShowAudioDialog);
   };
@@ -1471,6 +1485,7 @@ export default function CanvasPage() {
 
   // 资产卡等非节点入口：清空旧 seed，保证打开的是空白对话框
   actionsRef.current.openImageDialog = () => {
+    if (!canOpenEditor()) return;
     setImageSeed(null);
     handleOpenImageDialog();
   };
@@ -1499,6 +1514,8 @@ export default function CanvasPage() {
 
   /** 打开绑定指定草稿的图片面板（IKDMQQ）：带入草稿已保存的参数与当前连线文本附件 */
   const openImageDraftDialog = (nodeId: string) => {
+    if (!canOpenEditor(nodeId)) return;
+    editingTargetRef.current = nodeId;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
     setImageDraftId(nodeId);
@@ -1514,13 +1531,13 @@ export default function CanvasPage() {
       targetNodeId: nodeId,
       attachments: textAttachmentsOf(nodeId),
     });
-    warnStaleMediaRefs(nodeId, 'image');
     handleOpenImageDialog();
   };
 
   /** 侧栏图片入口（IKDMQQ）：每次点击新建独立图片草稿卡，自动选中并打开绑定面板；
    *  草稿不进 pendingNodeIds 回滚集合——保存失败时草稿与当前编辑保留，随下次保存重试 */
   const handleAddImageDraft = () => {
+    if (!canOpenEditor()) return;
     const nodeId = newNodeId('media-draft');
     const node: Node = {
       id: nodeId,
@@ -1596,6 +1613,8 @@ export default function CanvasPage() {
 
   /** 打开绑定指定草稿的视频面板（IKDMQS）：带入草稿已保存的参数与当前连线文本附件 */
   const openVideoDraftDialog = (nodeId: string) => {
+    if (!canOpenEditor(nodeId)) return;
+    editingTargetRef.current = nodeId;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
     setVideoDraftId(nodeId);
@@ -1623,6 +1642,7 @@ export default function CanvasPage() {
   /** 侧栏视频入口（IKDMQS）：每次点击新建独立视频草稿卡，自动选中并打开绑定面板；
    *  位置避开底部 Dock 预留区（与图片草稿同一出生点算法） */
   const handleAddVideoDraft = () => {
+    if (!canOpenEditor()) return;
     const nodeId = newNodeId('media-draft');
     const node: Node = {
       id: nodeId,
@@ -1698,6 +1718,8 @@ export default function CanvasPage() {
 
   /** 打开绑定指定草稿的音频面板（IKDMQT）：带入草稿已保存的文字描述与模型 */
   const openAudioDraftDialog = (nodeId: string) => {
+    if (!canOpenEditor(nodeId)) return;
+    editingTargetRef.current = nodeId;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
     setAudioDraftId(nodeId);
@@ -1717,6 +1739,7 @@ export default function CanvasPage() {
    *  位置避开底部 Dock 预留区（与图片/视频草稿同一出生点算法）；
    *  音频草稿只有文字描述与模型，无比例/分辨率/时长参数 */
   const handleAddAudioDraft = () => {
+    if (!canOpenEditor()) return;
     const nodeId = newNodeId('media-draft');
     const node: Node = {
       id: nodeId,
@@ -1802,6 +1825,10 @@ export default function CanvasPage() {
   /** 项目切换/新建前的落盘闸门（IKDMQQ Q19）：先把未防抖编辑落盘；保存失败停留当前项目并提示重试。
    *  顺带修复「带未保存编辑切换项目丢失修改」的旧缺口。 */
   const ensureSavedBeforeProjectSwitch = async (): Promise<boolean> => {
+    if (saveBlocked) {
+      showToast('warn', '保存失败，请重试');
+      return false;
+    }
     if (!currentId || !doc) return true;
     const projectId = currentId;
     applyingRef.current = true;
@@ -2703,6 +2730,15 @@ export default function CanvasPage() {
     () => (imageDraftId ? imageMediaRefsOf(imageDraftId, edges, mediaNodes) : undefined),
     [imageDraftId, edges, mediaNodes],
   );
+  const invalidImageMediaRefs = useMemo(() => {
+    if (!imageDraftId) return [];
+    return edges.filter(edge => edge.target === imageDraftId).flatMap(edge => {
+      const source = mediaNodes.find(node => node.id === edge.source);
+      return source && imageRefSourceError(source)
+        ? [{ nodeId: source.id, name: String(source.data.fileName || source.id) }]
+        : [];
+    });
+  }, [imageDraftId, edges, mediaNodes]);
 
   /** Dock 移除图片参考（IKDMQR）：断开对应连线——仅改变关系，不删除来源素材卡，
    *  也不影响其他目标对同一来源的引用（按 (source,target) 精确匹配）。 */
@@ -2765,6 +2801,7 @@ export default function CanvasPage() {
 
   /** 生成图片：图片对话框 + 图片；IKDLQF 起携带目标节点与连线文本附件快照 */
   const handleNodeGenImage = (id: string) => {
+    if (!canOpenEditor()) return;
     const ref = nodeRefOf(id);
     if (!ref) return;
     setImageSeed({
@@ -2780,6 +2817,7 @@ export default function CanvasPage() {
   /** 生成视频：视频对话框 + 图片（带 assetId，发送时免重传直传 ID）；
    *  被点节点是视频媒体节点时携带目标节点与连线文本附件快照（IKDLQG），图片节点维持参考素材旧语义 */
   const handleNodeGenVideo = (id: string) => {
+    if (!canOpenEditor()) return;
     const ref = nodeRefOf(id);
     if (!ref) return;
     setVideoSeed({
@@ -2795,6 +2833,7 @@ export default function CanvasPage() {
 
   /** 生成音频：打开音频对话框 */
   const handleNodeGenAudio = (id: string) => {
+    if (!canOpenEditor()) return;
     const ref = nodeRefOf(id);
     if (!ref) return;
     setAudioSeed({ ts: Date.now() });
@@ -2937,12 +2976,37 @@ export default function CanvasPage() {
     if (blockInvalidDraft(textNodesRef.current.map(n => n.id))) return false;
     const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
     const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
-    if (signature === lastSavedRef.current) return true;
-    const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current }, versionRef.current);
-    versionRef.current = saved.version;
-    lastSavedRef.current = signature;
-    pendingNodeIdsRef.current.clear();
+    if (signature !== lastSavedRef.current) {
+      try {
+        const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current }, versionRef.current);
+        versionRef.current = saved.version;
+        lastSavedRef.current = signature;
+        pendingNodeIdsRef.current.clear();
+      } catch (error) {
+        setSaveBlocked(true);
+        setSaveStatus('error');
+        throw error;
+      }
+    }
+    setSaveBlocked(false);
+    setSaveStatus('saved');
+    setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
     return true;
+  };
+
+  const handleRetryCanvasSave = async () => {
+    if (!currentId || applyingRef.current) return;
+    applyingRef.current = true;
+    setSaveStatus('saving');
+    try {
+      if (!(await flushCanvasSave(currentId))) setSaveStatus('error');
+      else setSaveEpoch(value => value + 1);
+    } catch {
+      setSaveStatus('error');
+      showToast('error', '保存失败，请重试');
+    } finally {
+      applyingRef.current = false;
+    }
   };
 
   const handleAgentCardApply = async (payload: GenerationCardBlock) => {
@@ -3921,7 +3985,7 @@ export default function CanvasPage() {
         <div className={styles.bottomLeftActions}>
           <button
             className={styles.backHomeBtn}
-            onClick={() => navigate('/')}
+            onClick={async () => { if (await ensureSavedBeforeProjectSwitch()) navigate('/'); }}
           >
             <ArrowLeft size={14} strokeWidth={2} />
             <span>返回首页</span>
@@ -3947,7 +4011,9 @@ export default function CanvasPage() {
             >
               {saveStatus === 'saving' && '保存中…'}
               {saveStatus === 'saved' && `已保存 ${savedAt}`}
-              {saveStatus === 'error' && '保存失败，请重试'}
+              {saveStatus === 'error' && <>
+                保存失败，请重试 <button type="button" onClick={handleRetryCanvasSave}>重试保存</button>
+              </>}
             </span>
           )}
         </div>
@@ -4001,12 +4067,15 @@ export default function CanvasPage() {
             initialParams={imageSeed?.params}
             attachments={imageDraftId ? imageDraftAttachments : imageSeed?.attachments}
             mediaRefs={imageDraftId ? imageDraftMediaRefs : undefined}
+            invalidMediaRefs={invalidImageMediaRefs}
             onRemoveMediaRef={
               imageDraftId ? (nodeId) => handleRemoveImageMediaRef(imageDraftId, nodeId) : undefined
             }
             draftBinding={
               imageDraftId
                 ? {
+                    restoreExisting: hasGenerationRecord(mediaNodes.find(n => n.id === imageDraftId)),
+                    saveFailed: saveBlocked || saveStatus === 'error',
                     status: (mediaNodes.find((n) => n.id === imageDraftId)?.data as Record<string, unknown> | undefined)
                       ?.genStatus as MediaGenStatus | undefined,
                     onParamsChange: (patch) => handleImageDraftParamsChange(imageDraftId, patch),
@@ -4018,7 +4087,7 @@ export default function CanvasPage() {
                 ? (ids) => handleReorderAttachments(imageSeed.targetNodeId!, ids)
                 : undefined
             }
-            onClose={() => { setShowImageDialog(false); setImageDraftId(null); setPickMode(null); setPickTarget(null); }}
+            onClose={() => { imagePanelHiddenRef.current = true; setShowImageDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleImageDialogSend}
             onPickFromCanvas={() => { setPickMode('image'); setPickTarget('image'); }}
             onPickFromAssets={() => openAssetsPicker('imageDialog')}

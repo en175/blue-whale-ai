@@ -16,6 +16,7 @@ import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
+import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
 // IKDMQQ「图片草稿创建、保存与首次生成」公开接口集成（契约「验证」节服务端项）：
 // 真 NestFactory 挂载生产 Canvas/Generation/Jobs 控制器与服务 + 隔离 MySQL（IKDMQQ_DATABASE_URL 门控）。
@@ -66,6 +67,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
       { provide: GenerationCostEstimatorService, useValue: new GenerationCostEstimatorService() },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
+    app.useGlobalFilters(new AllExceptionsFilter());
     app.use(json({ limit: "16mb" }));
     app.setGlobalPrefix("api");
     app.use((req: { user: unknown }, _res: unknown, next: () => void) => {
@@ -114,6 +116,13 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
   async function getCanvas(projectId: string) {
     const response = await fetch(`${base}/api/canvases?projectId=${projectId}`);
     return (await response.json()).data;
+  }
+  async function getJobs(projectId: string) {
+    const response = await fetch(`${base}/api/jobs?projectId=${projectId}`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.code).toBe(200);
+    return body.data.records;
   }
   async function createJob(projectId: string, body: unknown) {
     const response = await fetch(`${base}/api/projects/${projectId}/generation-jobs`, {
@@ -188,6 +197,174 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
     expect(second.code).toBe(200);
     const secondJob = await readJob(second.data.generation_job_id);
     expect(secondJob!.input.text_attachments).toEqual([{ node_id: "text-1", title: "雨夜", text: "霓虹都市" }]);
+  });
+
+  it.runIf(process.env.IKDUHM_BROWSER).each([
+    { model: "ikdmqq-image-model", size: "1024x1024", ratio: "1:1", ref: false, error: "" },
+    { model: "ikdmqq-image-model", size: "1024x1024", ratio: "1:1", ref: "valid", error: "" },
+    { model: "ikdmqq-image-model", size: "1024x1024", ratio: "1:1", ref: "incompatible", error: "当前模型不支持图片参考，请调整模型或参考" },
+    { model: "", size: "1024x1024", ratio: "1:1", ref: false, error: "原生成模型已不可用，请重新选择模型" },
+    { model: "unavailable-model", size: "1024x1024", ratio: "1:1", ref: false, error: "原生成模型已不可用，请重新选择模型" },
+    { model: "ikdmqq-image-model", size: "removed-size", ratio: "1:1", ref: false, error: "原分辨率已不可用，请重新选择分辨率" },
+    { model: "ikdmqq-image-model", size: "1024x1024", ratio: "16:9", ref: false, error: "原比例与当前配置不兼容，请重新选择比例" },
+    { model: "ikdmqq-image-model", size: "1024x1024", ratio: "1:1", ref: true, error: "参考素材不可用，请调整参考后发送" },
+  ])("IKDUHM browser: $error; preserve edits and retry saving", async ({ model, size, ratio, ref, error }) => {
+    const { chromium } = await import("playwright");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    const projectId = (await projects.create("987654", "IKDUHM model restore")).id;
+    const otherProjectId = (await projects.create("987654", "IKDUHM other project")).id;
+    await prisma.client.generation_model_capability.update({
+      where: { provider_id_model_id: { provider_id: "ikdmqq-test", model_id: MODEL_ID } },
+      data: { features: { reference_image: ref !== "incompatible", max_reference_images: 9 } },
+    });
+    const asset = await prisma.client.assets.create({ data: {
+      user_id: BigInt(987654), project_id: BigInt(projectId), type: "image", url: "https://example.com/saved.png",
+    } });
+    const node = draftNode("saved-image", "A");
+    const savedNode = { ...node, data: { ...node.data, draft: false, genStatus: undefined,
+      jobId: "123", assetId: asset.id.toString(), src: asset.url, draftModelId: model, draftSize: size, draftRatio: ratio } };
+    const source = { ...savedNode, id: "failed-source", position: { x: 600, y: 90 },
+      data: { ...savedNode.data, jobId: undefined, genStatus: ref === true ? "failed" : undefined } };
+    const initialEdges = ref ? [{ id: "image-ref", source: source.id, target: savedNode.id }] : [];
+    const other = { ...savedNode, id: "other-image", position: { x: 650, y: 90 }, data: { ...savedNode.data, prompt: "另一节点" } };
+    const upload = { ...other, id: "uploaded-image", position: { x: 950, y: 90 }, data: { ...other.data, jobId: undefined } };
+    const initialNodes = ref ? [savedNode, other, upload, { ...source, position: { x: 600, y: 450 } }] : [savedNode, other, upload];
+    expect((await saveCanvas(projectId, initialNodes, initialEdges, "missing")).status).toBe(200);
+    const vite = await createVite({ root: `${process.cwd()}/web`, server: {
+      open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base }, "/agent": { target: base } },
+    } });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      const requests: string[] = [];
+      page.on("request", request => {
+        if (request.method() === "POST" && request.url().endsWith("/generation-jobs")) requests.push(request.url());
+      });
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
+        userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+      } }, version: 0 })));
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+      await page.locator('[data-id="uploaded-image"] [data-testid="media-content"]').click();
+      expect(await page.locator("textarea").count()).toBe(0);
+      await page.locator('[data-id="saved-image"] [data-testid="media-content"]').click();
+      if (error) await page.getByText(error).waitFor({ timeout: 10_000 });
+      else await page.getByText("IKDMQQ Test", { exact: true }).waitFor();
+      expect(await page.locator('button[title="发送"]').isDisabled()).toBe(Boolean(error));
+      if (ref === "valid") expect(await page.getByTestId("dock-media-ref").count()).toBe(1);
+      await page.locator("textarea").fill("B");
+      await page.locator("textarea").press("Enter");
+      await vi.waitFor(async () => {
+        const stored = JSON.parse((await getCanvas(projectId)).nodes);
+        expect(stored[0].data.prompt).toBe("B\n");
+        expect(stored[0].data.draftModelId).toBe(model);
+        expect(stored[0].data.draftSize).toBe(size);
+        expect(stored[0].data.draftRatio).toBe(ratio);
+      }, { timeout: 10_000 });
+      await page.reload();
+      await page.locator('[data-id="saved-image"] [data-testid="media-content"]').click();
+      if (error) await page.getByText(error).waitFor({ timeout: 10_000 });
+      else await page.getByText("IKDMQQ Test", { exact: true }).waitFor();
+      expect(await page.locator("textarea").inputValue()).toBe("B\n");
+      await page.locator('[data-id="other-image"] [data-testid="media-content"]').click({ modifiers: ["Meta"] });
+      await vi.waitFor(async () => expect(await page.locator('.react-flow__node.selected').count()).toBe(2));
+      await vi.waitFor(async () => expect(await page.locator("textarea").count(), "多选隐藏编辑面板").toBe(0));
+      await page.locator('.react-flow__pane').click({ position: { x: 1100, y: 450 } });
+      await page.locator('[data-id="saved-image"] [data-testid="media-content"]').click();
+      expect(await page.locator("textarea").inputValue()).toBe("B\n");
+      // 恢复网络前仅保存重试，不以发送动作作为重试入口。
+      await page.route("**/api/canvases/*", route => route.request().method() === "PUT"
+        ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ code: 500, msg: "保存故障" }) })
+        : route.continue());
+      await page.locator("textarea").fill("尚未保存的 C");
+      await page.getByRole("button", { name: "重试保存" }).waitFor({ timeout: 10_000 });
+      expect(await page.locator('button[title="发送"]').isDisabled(), "保存失败暂停发送").toBe(true);
+      await page.locator('button[aria-label="图片对话"]').click();
+      expect(await page.locator('.react-flow__node-mediaNode').count(), "保存失败禁止侧栏切换到新草稿").toBe(initialNodes.length);
+      await page.locator("button", { hasText: "IKDUHM model restore" }).first().click();
+      await page.locator('div[class*="projectItem"]', { hasText: "IKDUHM other project" }).first().click();
+      expect(page.url(), "保存失败不得离开项目").toContain(`project=${projectId}`);
+      await page.getByRole("button", { name: "返回首页" }).click();
+      expect(page.url(), "保存失败不得经首页离开当前项目").toContain(`project=${projectId}`);
+      await page.locator('[data-id="other-image"] [data-testid="media-content"]').click();
+      await page.getByText("重新编辑", { exact: true }).click();
+      expect(await page.locator("textarea").evaluateAll(inputs => inputs.map(input => input.value))).not.toContain("另一节点");
+      await page.locator('[data-id="saved-image"] [data-testid="media-content"]').click();
+      expect(await page.locator("textarea").inputValue()).toBe("尚未保存的 C");
+      await page.locator('.react-flow__pane').click({ position: { x: 1100, y: 200 } });
+      await vi.waitFor(async () => expect(await page.locator("textarea").count()).toBe(0));
+      await page.locator('[data-id="saved-image"] [data-testid="media-content"]').click();
+      expect(await page.locator("textarea").inputValue()).toBe("尚未保存的 C");
+      await page.unroute("**/api/canvases/*");
+      let finishRetry!: () => void;
+      const retryHeld = new Promise<void>(resolve => { finishRetry = resolve; });
+      let retryReceived!: () => void;
+      const retryReceiving = new Promise<void>(resolve => { retryReceived = resolve; });
+      const retryResponses: number[] = [];
+      await page.route("**/api/canvases/*", async route => {
+        if (route.request().method() !== "PUT") return route.continue();
+        const response = await route.fetch();
+        retryResponses.push(response.status());
+        retryReceived();
+        await retryHeld;
+        await route.fulfill({ response });
+      });
+      try {
+        await page.getByRole("button", { name: "重试保存" }).click();
+        await retryReceiving;
+        expect(await page.locator('button[title="发送"]').isDisabled(), "重试响应未成功前继续暂停发送").toBe(true);
+        await page.locator('[data-id="other-image"] [data-testid="media-content"]').click();
+        const visibleInputs = await page.locator("textarea").evaluateAll(inputs => inputs.map(input => input.value));
+        expect(visibleInputs).not.toContain("另一节点");
+      } finally { finishRetry(); }
+      await vi.waitFor(async () => expect(JSON.parse((await getCanvas(projectId)).nodes)[0].data.prompt).toBe("尚未保存的 C"));
+      await vi.waitFor(async () => expect(await page.getByRole("button", { name: "重试保存" }).count(), `retry statuses: ${retryResponses}`).toBe(0), { timeout: 5_000 });
+      await page.getByText(/^已保存 /).waitFor();
+      await page.unroute("**/api/canvases/*");
+      await page.locator('[data-id="other-image"] [data-testid="media-content"]').click();
+      await vi.waitFor(async () => expect(await page.locator("textarea").inputValue()).toBe("另一节点"));
+      await page.locator('[data-id="saved-image"] [data-testid="media-content"]').click();
+      expect(await page.locator("textarea").inputValue()).toBe("尚未保存的 C");
+      if (!error) {
+        let release!: () => void;
+        const held = new Promise<void>(resolve => { release = resolve; });
+        let received!: () => void;
+        const receiving = new Promise<void>(resolve => { received = resolve; });
+        await page.route("**/api/canvases/*", async route => {
+          if (route.request().method() !== "PUT") return route.continue();
+          const response = await route.fetch();
+          received();
+          await held;
+          await route.fulfill({ response });
+        });
+        try {
+          await page.locator("textarea").fill("在途旧编辑");
+          await receiving;
+          await page.locator("textarea").fill("在途期间的新编辑");
+        } finally { release(); }
+        await vi.waitFor(async () => expect(JSON.parse((await getCanvas(projectId)).nodes)[0].data.prompt).toBe("在途期间的新编辑"), { timeout: 10_000 });
+        await page.unroute("**/api/canvases/*");
+      }
+      const persisted = await getCanvas(projectId);
+      expect(JSON.parse(persisted.nodes)).toHaveLength(initialNodes.length);
+      expect(JSON.parse(persisted.edges)).toEqual(initialEdges);
+      await page.screenshot({ path: `/tmp/ikduhm-${String(ref)}-${model || "missing"}-${size}-${ratio.replace(":", "-")}.png` });
+      await page.locator("button", { hasText: "IKDUHM model restore" }).first().click();
+      await page.locator('div[class*="projectItem"]', { hasText: "IKDUHM other project" }).first().click();
+      await page.waitForURL(`**project=${otherProjectId}**`);
+      expect(requests).toEqual([]);
+      expect(await getJobs(projectId)).toEqual([]);
+    } finally { await browser.close(); await vite.close(); }
+  }, 60_000);
+
+  it("IKDUHM API: stale save cannot replace the latest node edit", async () => {
+    const projectId = (await projects.create("987654", "IKDUHM conditional save")).id;
+    expect((await saveCanvas(projectId, [draftNode("same-node", "A")], [], "missing")).status).toBe(200);
+    const version = (await getCanvas(projectId)).version;
+    expect((await saveCanvas(projectId, [draftNode("same-node", "B")], [], version)).status).toBe(200);
+    expect((await saveCanvas(projectId, [draftNode("same-node", "late A")], [], version)).status).toBe(412);
+    expect(JSON.parse((await getCanvas(projectId)).nodes)[0].data.prompt).toBe("B");
+    expect(await getJobs(projectId)).toEqual([]);
   });
 
   // 浏览器段（契约「验证」节）：真实浏览器 + 真实业务 API + 隔离 MySQL。

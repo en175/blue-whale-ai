@@ -84,7 +84,7 @@ const apiMocks = vi.hoisted(() => ({
       default_format: null,
       default_aspect_ratio: '1:1',
       default_duration: null,
-      features: {},
+      features: { reference_image: true, max_reference_images: 9 },
       version: 1,
       digest: '',
     },
