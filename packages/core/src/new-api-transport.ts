@@ -18,6 +18,17 @@ export class NewApiError extends Error {
   }
 }
 
+/** 超时错误（IKDQ5F）：出站请求在 timeoutMs 内未返回，AbortController 主动中止。
+ *  继承 NewApiError（503，语义对齐旧「new-api 不可达」），现有 `instanceof NewApiError`
+ *  分支全部兼容；需要区分超时语义的调用方（如音频 provider 归 provider_timeout）判
+ *  `instanceof NewApiTimeoutError`。 */
+export class NewApiTimeoutError extends NewApiError {
+  constructor(message = "new-api 不可达") {
+    super(message, 503, "timeout");
+    this.name = "NewApiTimeoutError";
+  }
+}
+
 /** 出站客户端系统标识（网关登录白名单据此识别蓝鲸来源，见 ADR-0080）。 */
 export const CLIENT_SYSTEM_BLUEWHALE = "bluewhale";
 
@@ -161,12 +172,17 @@ async function performRequest<T>(
       payload = (await response.json()) as NewApiEnvelope;
     } catch {
       if (controller.signal.aborted) {
-        throw new NewApiError("new-api 不可达", 503);
+        // IKDQ5F：超时中止（AbortController 主动 abort）→ 可区分超时语义的 NewApiTimeoutError，
+        // 不再与「响应非 JSON」混为一个 502 裸 NewApiError。
+        throw new NewApiTimeoutError();
       }
       payload = null;
     }
   } catch (error) {
     if (error instanceof NewApiError) throw error;
+    // IKDQ5F：fetch 层主动 abort（AbortSignal.timeout / controller.abort）同样归超时，
+    // 供调用方区分 provider_timeout；其余网络异常保持旧语义「new-api 不可达」。
+    if (controller.signal.aborted) throw new NewApiTimeoutError();
     throw new NewApiError("new-api 不可达", 503);
   } finally {
     clearTimeout(timeout);
@@ -216,5 +232,87 @@ export function createNewApiRequestWithMeta(
   ): Promise<{ data: T; requestId: string | null }> {
     const result = await performRequest<T>(options, path, init, token);
     return { data: result.payload, requestId: result.requestId };
+  };
+}
+
+/** 原始响应（IKDQ5F）：保留 status + 正文 + 响应头，不做信封解析。
+ *  用于非信封接口（如音频 `/v1/audio/speech` 官方透传 JSON / 纯 text 错误体）——
+ *  performRequest 的强制 `response.json()` 会吞掉非 JSON 错误原文与状态码。 */
+export interface NewApiRawResult {
+  status: number;
+  text: string;
+  headers: Headers;
+  /** X-Oneapi-Request-Id 响应头（new-api 服务端生成，IK7G9X 消费流水精确关联）。 */
+  requestId: string | null;
+}
+
+export type NewApiRawRequest = (
+  path: string,
+  init?: RequestInit,
+  token?: string,
+) => Promise<NewApiRawResult>;
+
+/** 带超时/追踪头/出站系统头的原始响应请求器（复用 performRequest 的头注入逻辑）。
+ *  不抛业务失败（isBusinessFailure/!ok 不上抛——音频 provider 需要原始 status + 原文做
+ *  content-policy > quota > provider_failed 分类判定）；超时仍抛 NewApiTimeoutError。 */
+export function createNewApiRawRequest(
+  options: NewApiClientOptions,
+): NewApiRawRequest {
+  return async function rawRequest(
+    path: string,
+    init: RequestInit = {},
+    token?: string,
+  ): Promise<NewApiRawResult> {
+    const fetchImpl = options.fetchImpl ?? fetch;
+    const timeoutMs = options.timeoutMs ?? 10_000;
+    const headers = new Headers(init.headers);
+    if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    if (!headers.has("X-Trace-Id")) {
+      const provided = options.traceIdProvider
+        ? await options.traceIdProvider()
+        : null;
+      headers.set(
+        "X-Trace-Id",
+        provided ?? getCurrentTraceId() ?? generateTraceId(),
+      );
+    }
+    if (!headers.has("X-Client-System")) {
+      headers.set("X-Client-System", CLIENT_SYSTEM_BLUEWHALE);
+    }
+
+    let response: Response;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const forwardAbort = () => controller.abort();
+    if (init.signal?.aborted) {
+      controller.abort();
+    } else {
+      init.signal?.addEventListener("abort", forwardAbort, { once: true });
+    }
+    try {
+      response = await fetchImpl(joinUrl(options.baseUrl, path), {
+        ...init,
+        headers,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof NewApiError) throw error;
+      if (controller.signal.aborted) throw new NewApiTimeoutError();
+      throw new NewApiError("new-api 不可达", 503);
+    } finally {
+      clearTimeout(timeout);
+      init.signal?.removeEventListener("abort", forwardAbort);
+    }
+
+    const text = await response.text().catch(() => "");
+    return {
+      status: response.status,
+      text,
+      headers: response.headers,
+      requestId: response.headers.get("X-Oneapi-Request-Id"),
+    };
   };
 }

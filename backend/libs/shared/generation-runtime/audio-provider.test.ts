@@ -107,7 +107,7 @@ describe("new-api audio provider", () => {
       token: "sk-user",
       fetchImpl: vi.fn().mockResolvedValue(
         new Response(
-          JSON.stringify({ error: "预扣费额度失败, 用户剩余额度: ¥0.9" }),
+          JSON.stringify({ error: { message: "预扣费额度失败, 用户剩余额度: ¥0.9" } }),
           { status: 200 },
         ),
       ),
@@ -173,7 +173,7 @@ describe("new-api audio provider", () => {
       fetchImpl: vi.fn().mockResolvedValue(
         new Response(
           JSON.stringify({
-            error: "信息可能涉及版权限制，请您更换后重试",
+            error: { message: "信息可能涉及版权限制，请您更换后重试" },
           }),
           { status: 200 },
         ),
@@ -187,14 +187,16 @@ describe("new-api audio provider", () => {
     });
   });
 
-  it("非 2xx body 同时含欠费与敏感 keyword → content_rejected 优先（IKDAJN）", async () => {
+  it("HTTP200+body 错误信封含版权文案 → content_rejected（IKDAJN 仅判 error.message）", async () => {
     const module = await import("./new-api-audio-provider.js");
     const provider = module.createNewApiAudioProvider({
       baseUrl: "http://new-api.test",
       token: "sk-user",
       fetchImpl: vi.fn().mockResolvedValue(
         new Response(
-          "账户余额不足，且信息可能包含敏感内容",
+          JSON.stringify({
+            error: { message: "账户余额不足，且信息可能包含敏感内容" },
+          }),
           { status: 200 },
         ),
       ),
@@ -202,5 +204,95 @@ describe("new-api audio provider", () => {
     await expect(
       provider.generate({ model: "seed-audio-1.0", prompt: "x" }),
     ).rejects.toMatchObject({ code: "content_rejected" });
+  });
+
+  it("HTTP200 + 合法音频 base64（人工含 quota/balance 子串）→ 不抛 quota_exhausted、正确返回音频（IKDQ5F 根因）", async () => {
+    const module = await import("./new-api-audio-provider.js");
+    const base64 = "qUOtAbAlAnCeInSuFfIcIeNtPaYmEnTqUoTaSUQzBAAA";
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ audio: base64, duration: 3.2 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const provider = module.createNewApiAudioProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl,
+    });
+    const result = await provider.generate({
+      model: "seed-audio-1.0",
+      prompt: "x",
+    });
+    expect(result.data).toEqual(new Uint8Array(Buffer.from(base64, "base64")));
+    expect(result.duration).toBe(3.2);
+  });
+
+  it("HTTP 非 2xx 含欠费文案 → AudioProviderError(quota_exhausted)（IKDQ5F）", async () => {
+    const module = await import("./new-api-audio-provider.js");
+    const provider = module.createNewApiAudioProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: vi.fn().mockResolvedValue(
+        new Response("预扣费额度失败, 用户剩余额度: ¥0.9", { status: 500 }),
+      ),
+    });
+    await expect(
+      provider.generate({ model: "seed-audio-1.0", prompt: "x" }),
+    ).rejects.toMatchObject({ code: "quota_exhausted" });
+  });
+
+  it("HTTP200+body 无用户语境的「余额不足」→ 不再误判欠费（IKDQ5F；纯文本走 no_result）", async () => {
+    const module = await import("./new-api-audio-provider.js");
+    const provider = module.createNewApiAudioProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      // 1743 现场：网关超时/失败文案是纯文本（非信封 JSON），含「余额」但无用户/账户语境。
+      fetchImpl: vi.fn().mockResolvedValue(
+        new Response("new-api 音频生成余额不足", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
+      ),
+    });
+    await expect(
+      provider.generate({ model: "seed-audio-1.0", prompt: "x" }),
+    ).rejects.toMatchObject({ code: "no_result" });
+  });
+
+  it("fetch 超时（AbortController 主动中止）→ AudioProviderError(provider_timeout)（IKDQ5F）", async () => {
+    const module = await import("./new-api-audio-provider.js");
+    const provider = module.createNewApiAudioProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      timeoutMs: 50,
+      // 模拟真实 fetch：遵守 signal，abort 时 reject AbortError（如 AbortSignal.timeout）。
+      fetchImpl: (_input, init = {}) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = (init.signal ?? null) as AbortSignal | null;
+          const abortHandler = () => reject(new DOMException("Aborted", "AbortError"));
+          signal?.addEventListener("abort", abortHandler, { once: true });
+          const timer = setTimeout(() => {
+            signal?.removeEventListener("abort", abortHandler);
+            resolve(new Response("too late", { status: 200 }));
+          }, 200);
+          void timer;
+        }),
+    });
+    await expect(
+      provider.generate({ model: "seed-audio-1.0", prompt: "x" }),
+    ).rejects.toMatchObject({ code: "provider_timeout" });
+  });
+
+  it("fetch 网络异常（非超时）→ AudioProviderError(provider_failed)", async () => {
+    const module = await import("./new-api-audio-provider.js");
+    const provider = module.createNewApiAudioProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl: () => Promise.reject(new Error("ECONNREFUSED")),
+    });
+    await expect(
+      provider.generate({ model: "seed-audio-1.0", prompt: "x" }),
+    ).rejects.toMatchObject({ code: "provider_failed" });
   });
 });
