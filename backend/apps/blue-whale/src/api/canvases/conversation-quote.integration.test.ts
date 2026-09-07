@@ -378,6 +378,200 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       messageBodies.length = 0; recordedMessages.splice(2); activeRevision = source.revisionId; lastRunId = '';
     }
   }, 90_000);
+  it.runIf(process.env.IKDXHP_BROWSER)("browser confirms video and audio alongside images with stable identities and inline order", async () => {
+    const { chromium, expect: browserExpect } = await import("playwright/test");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    const vite = await createVite({ root: `${process.cwd()}/web`, server: {
+      open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } },
+    } });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    // 本地媒体服务只提供可解码的素材字节，业务 API 仍由真实 Nest 服务承载。
+    const fixturePage = await browser.newPage();
+    const videoBytes = await fixturePage.evaluate(async () => {
+      const canvas = document.createElement('canvas'); canvas.width = 120; canvas.height = 120;
+      const context = canvas.getContext('2d')!;
+      const stream = canvas.captureStream(10);
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = event => chunks.push(event.data);
+      const stopped = new Promise<void>(resolve => { recorder.onstop = () => resolve(); });
+      recorder.start();
+      context.fillStyle = 'blue'; context.fillRect(0, 0, 120, 120);
+      await new Promise(resolve => setTimeout(resolve, 200)); recorder.stop(); await stopped;
+      stream.getTracks().forEach(track => track.stop());
+      return Array.from(new Uint8Array(await new Blob(chunks).arrayBuffer()));
+    });
+    await fixturePage.close();
+    const wav = Buffer.alloc(44 + 16000);
+    wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
+    wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+    wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32);
+    wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(16000, 40);
+    const mediaServer = createServer((req, res) => {
+      const audio = req.url === '/audio.wav';
+      res.setHeader('content-type', audio ? 'audio/wav' : 'video/webm');
+      res.end(audio ? wav : Buffer.from(videoBytes));
+    });
+    await new Promise<void>(resolve => mediaServer.listen(0, '127.0.0.1', resolve));
+    const mediaBase = `http://127.0.0.1:${(mediaServer.address() as { port: number }).port}`;
+    try {
+      projectId = (await projects.create("987654", "IKDXHP browser")).id;
+      const media = [
+        { type: "video", url: `${mediaBase}/video.webm` },
+        { type: "audio", url: `${mediaBase}/audio.wav` },
+        { type: "image", url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E" },
+      ];
+      const assets = await Promise.all(media.map(item => prisma.client.assets.create({ data: {
+        user_id: 987654n, project_id: BigInt(projectId), type: item.type, url: item.url,
+      } })));
+      const seeded = await fetch(`${base}/api/canvases/${projectId}`, {
+        method: "PUT", headers: { "content-type": "application/json", "if-match": '\"missing\"' },
+        body: JSON.stringify({ nodes: JSON.stringify(media.flatMap((item, index) => [
+          { id: item.type, type: "mediaNode", position: { x: 100 + index * 360, y: 180 }, data: {
+            mediaType: item.type, src: item.url, assetId: String(assets[index].id), fileName: "同名素材", width: 120, height: 120,
+          } },
+          { id: `${item.type}-draft`, type: "mediaNode", position: { x: 100 + index * 360, y: 520 }, data: {
+            mediaType: item.type, draft: true, genStatus: "draft", fileName: `${item.type}草稿`, width: 120, height: 120,
+          } },
+        ])), viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }),
+      });
+      expect(seeded.status).toBe(200);
+      const page = await browser.newPage({ viewport: { width: 1800, height: 1000 } });
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
+        userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+      } }, version: 0 })));
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+      await page.getByRole("button", { name: "Agent", exact: true }).click();
+      const composer = page.locator('[data-agent-composer] [contenteditable][aria-placeholder]');
+      const pending = composer.getByLabel('待确认引用：同名素材', { exact: true });
+      const node = (id: string) => page.locator(`.react-flow__node[data-id="${id}"]`);
+      await composer.fill('前文后文');
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('ArrowLeft');
+      await node('video').click();
+      await browserExpect(pending).toBeVisible();
+      await browserExpect(composer).not.toBeFocused();
+      await browserExpect(pending.getByLabel('预览视频：同名素材')).toBeVisible();
+      await pending.getByLabel('预览视频：同名素材').hover();
+      const videoPreview = page.getByRole('tooltip').locator('video');
+      await browserExpect(videoPreview).toHaveAttribute('src', media[0].url);
+      await browserExpect.poll(() => videoPreview.evaluate(video => video.readyState)).toBeGreaterThanOrEqual(2);
+      await node('audio').getByTestId('media-title').click();
+      await browserExpect(pending.getByLabel('预览音频：同名素材')).toBeVisible();
+      await pending.getByLabel('预览音频：同名素材').hover();
+      const audioPreview = page.getByRole('tooltip').locator('audio');
+      await browserExpect(audioPreview).toHaveAttribute('src', media[1].url);
+      await browserExpect.poll(() => audioPreview.evaluate(audio => audio.readyState)).toBeGreaterThanOrEqual(2);
+      await audioPreview.click({ position: { x: 20, y: 25 } });
+      await browserExpect(pending).toBeVisible();
+      await browserExpect(pending.getByLabel('预览视频：同名素材')).toHaveCount(0);
+      await composer.click({ position: { x: 3, y: 3 } });
+      await browserExpect(composer).toHaveText('前文同名素材后文');
+      await node('audio').getByTestId('media-title').click();
+      await browserExpect(pending).toHaveCount(0);
+      await composer.getByRole('button', { name: '移除 同名素材' }).click();
+      await node('audio').getByTestId('media-title').click();
+      await browserExpect(pending).toBeVisible();
+      await page.keyboard.press('Escape');
+      await browserExpect(pending).toHaveCount(0);
+      // 每次确认回到输入末尾，出站顺序必须遵循编辑器，而非资产类型排序。
+      await composer.fill('开始');
+      for (const type of ['video', 'audio', 'image']) {
+        await node(type).getByTestId('media-title').click();
+        await browserExpect(pending).toBeVisible();
+        await composer.click({ position: { x: 3, y: 3 } });
+        await composer.press('ControlOrMeta+End');
+        await browserExpect(pending).toHaveCount(0);
+      }
+      await browserExpect(composer.getByRole('button', { name: '移除 同名素材' })).toHaveCount(3);
+      const send = page.locator('button[title="发送"]');
+      const mixedSent = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/messages'));
+      await send.click();
+      expect((await mixedSent).status()).toBeLessThan(300);
+      expect(messageBodies).toHaveLength(1);
+      expect(messageBodies[0].content).toMatchObject([
+        { type: 'text', text: '开始' },
+        { type: 'asset_ref', asset_id: String(assets[0].id), node_id: 'video', media_type: 'video' },
+        { type: 'resource_ref', resource_type: 'asset', resource_id: 'audio', asset_id: String(assets[1].id), node_id: 'audio', media_type: 'audio' },
+        { type: 'asset_ref', asset_id: String(assets[2].id), node_id: 'image', media_type: 'image' },
+      ]);
+      await browserExpect(composer).toHaveText('');
+      await composer.fill('开始');
+      for (const type of ['video', 'audio', 'image']) {
+        await node(type).getByTestId('media-title').click();
+        await browserExpect(pending).toBeVisible();
+        await composer.click({ position: { x: 3, y: 3 } });
+        await composer.press('ControlOrMeta+End');
+        await browserExpect(pending).toHaveCount(0);
+      }
+      // 已确认素材静默去重；删除音频后重选作为候选，发送不能绕过确认。
+      await node('video').click();
+      await browserExpect(pending).toHaveCount(0);
+      await composer.getByRole('button', { name: '移除 同名素材' }).nth(1).click();
+      await node('audio').getByTestId('media-title').click();
+      await browserExpect(pending).toBeVisible();
+      await send.click();
+      await browserExpect(page.getByRole('alert').filter({ hasText: '请先确认或取消待确认引用' })).toBeVisible();
+      await composer.focus();
+      await composer.press('Enter');
+      expect(messageBodies).toHaveLength(1);
+      await page.locator('.react-flow__pane').click({ position: { x: 1200, y: 150 } });
+      await browserExpect(pending).toHaveCount(0);
+      for (const type of ['video', 'audio']) {
+        await node(`${type}-draft`).click();
+        await browserExpect(pending).toHaveCount(0);
+        await page.locator('.react-flow__pane').click({ position: { x: 1200, y: 150 } });
+      }
+      const sent = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/messages'));
+      await send.click();
+      expect((await sent).status()).toBeLessThan(300);
+      expect(messageBodies).toHaveLength(2);
+      expect(messageBodies[1].content).toMatchObject([
+        { type: 'text', text: '开始' },
+        { type: 'asset_ref', asset_id: String(assets[0].id), node_id: 'video', media_type: 'video' },
+        { type: 'asset_ref', asset_id: String(assets[2].id), node_id: 'image', media_type: 'image' },
+      ]);
+      await browserExpect(composer).toHaveText('');
+      // 原编辑路径覆盖有生成记录的成品卡；上传卡没有原生成参数。
+      const beforeEdit = await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json();
+      const generatedNodes = JSON.parse(beforeEdit.data.nodes).map((item: { id: string; data: Record<string, unknown> }) =>
+        item.id === 'video' || item.id === 'audio' ? { ...item, data: { ...item.data, jobId: `fixture-${item.id}`, prompt: '原生成描述' } } : item);
+      const prepareEdit = await fetch(`${base}/api/canvases/${projectId}`, {
+        method: 'PUT', headers: { 'content-type': 'application/json', 'if-match': `"${beforeEdit.data.version}"` },
+        body: JSON.stringify({ nodes: JSON.stringify(generatedNodes), viewport: beforeEdit.data.viewport }),
+      });
+      expect(prepareEdit.status).toBe(200);
+      await page.reload();
+      await page.getByRole('button', { name: 'Agent', exact: true }).click();
+      for (const type of ['video', 'audio']) {
+        await node(type).getByTestId('media-title').click();
+        await browserExpect(node(type)).toHaveClass(/selected/);
+        await browserExpect(node(type).getByRole('button', { name: '重新编辑', exact: true })).toBeVisible();
+        await browserExpect(node(type).getByRole('button', { name: '添加到 Agent 聊天' })).toHaveCount(type === 'video' ? 1 : 0);
+        await node(type).getByRole('button', { name: '重新编辑', exact: true }).click();
+        if (type === 'audio') await browserExpect(page.getByTestId('audio-input')).toBeVisible();
+        else await browserExpect(page.locator('[contenteditable][aria-placeholder^="描述你希望生成的视频"]')).toBeVisible();
+        // 重新编辑仍打开对应生成面板，引用仍是候选，不能被工具栏隐式确认。
+        await browserExpect(pending).toBeVisible();
+        await page.locator('.react-flow__pane').click({ position: { x: 1200, y: 150 } });
+        const rect = (await node(type).getByTestId('media-title').boundingBox())!;
+        const moved = page.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes('/api/canvases/'));
+        await page.mouse.move(rect.x + 40, rect.y + rect.height / 2);
+        await page.mouse.down(); await page.mouse.move(rect.x + 80, rect.y + rect.height / 2 + 30, { steps: 8 }); await page.mouse.up();
+        expect((await moved).status()).toBe(200);
+        const saved = await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json();
+        const originalX = type === 'video' ? 100 : 460;
+        expect(JSON.parse(saved.data.nodes).find((item: { id: string }) => item.id === type).position.x).toBeGreaterThan(originalX + 20);
+      }
+      await page.screenshot({ path: '/tmp/ikdxhp-browser.png', fullPage: true });
+    } finally {
+      await browser.close(); await vite.close();
+      mediaServer.closeAllConnections();
+      await new Promise<void>(resolve => mediaServer.close(() => resolve()));
+      messageBodies.length = 0; recordedMessages.splice(2); activeRevision = source.revisionId; lastRunId = '';
+    }
+  }, 90_000);
   it.runIf(process.env.IKDLQJ_BROWSER)("browser quotes edited text, receives a new preview and reapplies after reload", async () => {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");

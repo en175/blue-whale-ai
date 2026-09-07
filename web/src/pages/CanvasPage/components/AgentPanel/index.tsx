@@ -545,7 +545,12 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     const first = candidateBlocks[0];
     if (pendingMediaBlocksRef.current.some((block) => block.node_id === first.node_id)) return;
     setPendingReference({
-      chip: { id: first.chip_id!, label: first.display_label || '图片', prompt: '', imageUrl: first.url },
+      chip: {
+        id: first.chip_id!, label: first.display_label || '素材', prompt: '',
+        ...(first.type === 'image' ? { imageUrl: first.url } : {}),
+        ...(first.type === 'video' ? { videoUrl: first.url } : {}),
+        ...(first.type === 'audio' ? { audioUrl: first.url } : {}),
+      },
       blocks: candidateBlocks,
     });
   }, [candidateBlocks]);

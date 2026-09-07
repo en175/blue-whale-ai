@@ -50,6 +50,8 @@ export interface ChipRef {
   imageUrl?: string;
   /** 画布独立视频节点的原片地址。有值时渲染缩略图胶囊 + 悬浮静音预览。 */
   videoUrl?: string;
+  /** 音频原片地址，悬浮后由用户主动播放。 */
+  audioUrl?: string;
 }
 
 export interface ChipTextEditorHandle {
@@ -176,7 +178,7 @@ const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(fun
         pendingKey.current = null;
         return;
       }
-      const chip = $createChipNode(pendingChip.id, pendingChip.label, pendingChip.prompt, pendingChip.imageUrl, pendingChip.videoUrl, true);
+      const chip = $createChipNode(pendingChip.id, pendingChip.label, pendingChip.prompt, pendingChip.imageUrl, pendingChip.videoUrl, true, pendingChip.audioUrl);
       if (previous instanceof ChipNode && previous.isPending()) {
         previous.replace(chip);
       } else {
@@ -219,7 +221,7 @@ const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(fun
         const first = root.getFirstChild();
         const paragraph = first && $isElementNode(first) ? first : $createParagraphNode();
         if (paragraph !== first) root.append(paragraph);
-        const chipNode = $createChipNode(chip.id, chip.label, chip.prompt, chip.imageUrl, chip.videoUrl);
+        const chipNode = $createChipNode(chip.id, chip.label, chip.prompt, chip.imageUrl, chip.videoUrl, false, chip.audioUrl);
         const spaceNode = $createTextNode(' ');
         paragraph.append(chipNode, spaceNode);
         spaceNode.selectEnd();
