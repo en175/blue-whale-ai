@@ -325,6 +325,16 @@
   background-color: #3a3a3a;
 }
 
+/* IKDMQV 失败角标文案：与 regenText 同布局约束（单行截断），红色区分生成中文案 */
+.failOverlayText {
+  flex: 1;
+  color: #e5484d;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 右键菜单 */
 .contextMenu {
   position: fixed;

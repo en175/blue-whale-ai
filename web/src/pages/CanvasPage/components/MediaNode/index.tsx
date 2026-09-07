@@ -336,8 +336,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           <Handle type="target" position={Position.Left} className={styles.handle} style={HANDLE_STYLE} />
         )}
         {/* IKDMQU Q5：重新生成中的成品卡继续显示旧素材，仅叠加状态角标；
-            无旧素材的生成中（草稿首生成、提取任务）仍走占位 genBox */}
-        {isDraft || isGenDone || data.assetMissing || (isGenerating && !hasMediaSrc) ? (
+            IKDMQV：重新生成失败/取消同样保留旧素材（Q5「失败或取消后仍保留旧素材与最新编辑内容」），
+            失败原因与重试入口收进底部角标；无旧素材的失败（草稿首生成、提取任务）仍走占位 genBox */}
+        {isDraft || (isGenDone && !hasMediaSrc) || data.assetMissing || (isGenerating && !hasMediaSrc) ? (
           renderPlaceholder()
         ) : isAudio ? (
           <div className={styles.audioBox}>
@@ -377,6 +378,18 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <button className={styles.regenCancel} onClick={() => data.onCancelJob?.(id)}>
               取消
             </button>
+          </div>
+        )}
+        {/* IKDMQV：重新生成失败/取消的成品卡——旧素材继续显示，底部角标呈现原因与重试。
+            重试沿用失败任务冻结快照（retry 接口）；修改参数或引用后新生成走面板「生成」（新任务新快照）。 */}
+        {isGenDone && hasMediaSrc && (
+          <div className={`nodrag nopan ${styles.regenOverlay}`} data-testid="fail-overlay">
+            <span className={styles.failOverlayText} title={failHeadline}>{failHeadline}</span>
+            {data.genStatus === 'failed' && !isMediaExtraction && (
+              <button className={styles.regenCancel} onClick={() => data.onRetryJob?.(id)}>
+                重试
+              </button>
+            )}
           </div>
         )}
         <Handle type="source" position={Position.Right} className={styles.handle} style={HANDLE_STYLE} />
