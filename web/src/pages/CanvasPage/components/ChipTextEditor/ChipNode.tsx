@@ -14,11 +14,11 @@ import {
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { AtSign, X } from 'lucide-react';
 import { ImageMentionChip } from '../ImageMentionChip';
-import { VideoMentionChip } from '../VideoMentionChip';
+import { AudioMentionChip, VideoMentionChip } from '../VideoMentionChip';
 import styles from './index.module.css';
 
 export type SerializedChipNode = Spread<
-  { refId: string; label: string; prompt: string; imageUrl?: string; videoUrl?: string; pending?: boolean },
+  { refId: string; label: string; prompt: string; imageUrl?: string; videoUrl?: string; audioUrl?: string; pending?: boolean },
   SerializedLexicalNode
 >;
 
@@ -27,11 +27,13 @@ function ChipComponent({
   label,
   imageUrl,
   videoUrl,
+  audioUrl,
 }: {
   nodeKey: NodeKey;
   label: string;
   imageUrl?: string;
   videoUrl?: string;
+  audioUrl?: string;
 }) {
   const [editor] = useLexicalComposerContext();
   const handleRemove = () => {
@@ -41,6 +43,9 @@ function ChipComponent({
       node?.remove();
     });
   };
+  if (audioUrl) {
+    return <AudioMentionChip url={audioUrl} label={label} onRemove={handleRemove} />;
+  }
   if (videoUrl) {
     return <VideoMentionChip url={videoUrl} label={label} onRemove={handleRemove} />;
   }
@@ -71,13 +76,14 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
   __imageUrl: string | undefined;
   __videoUrl: string | undefined;
   __pending: boolean;
+  __audioUrl: string | undefined;
 
   static getType(): string {
     return 'chip';
   }
 
   static clone(node: ChipNode): ChipNode {
-    return new ChipNode(node.__refId, node.__label, node.__prompt, node.__key, node.__imageUrl, node.__videoUrl, node.__pending);
+    return new ChipNode(node.__refId, node.__label, node.__prompt, node.__key, node.__imageUrl, node.__videoUrl, node.__pending, node.__audioUrl);
   }
 
   constructor(
@@ -88,6 +94,7 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
     imageUrl?: string,
     videoUrl?: string,
     pending = false,
+    audioUrl?: string,
   ) {
     super(key);
     this.__refId = refId;
@@ -96,6 +103,7 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
     this.__imageUrl = imageUrl;
     this.__videoUrl = videoUrl;
     this.__pending = pending;
+    this.__audioUrl = audioUrl;
   }
 
   isPending(): boolean {
@@ -150,6 +158,7 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
       prompt: this.__prompt,
       ...(this.__imageUrl ? { imageUrl: this.__imageUrl } : {}),
       ...(this.__videoUrl ? { videoUrl: this.__videoUrl } : {}),
+      ...(this.__audioUrl ? { audioUrl: this.__audioUrl } : {}),
       ...(this.__pending ? { pending: true } : {}),
     };
   }
@@ -162,12 +171,15 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
       serialized.imageUrl,
       serialized.videoUrl,
       serialized.pending,
+      serialized.audioUrl,
     );
   }
 
   decorate(): JSX.Element {
     if (this.__pending) {
       return <span className={styles.pendingChip} contentEditable={false} aria-label={`待确认引用：${this.__label}`}>
+        {this.__audioUrl && <AudioMentionChip url={this.__audioUrl} label={this.__label} />}
+        {this.__videoUrl && <VideoMentionChip url={this.__videoUrl} label={this.__label} />}
         {this.__imageUrl && <ImageMentionChip url={this.__imageUrl} label={this.__label} />}
         <span>待确认引用</span>
       </span>;
@@ -178,6 +190,7 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
         label={this.__label}
         imageUrl={this.__imageUrl}
         videoUrl={this.__videoUrl}
+        audioUrl={this.__audioUrl}
       />
     );
   }
@@ -190,8 +203,9 @@ export function $createChipNode(
   imageUrl?: string,
   videoUrl?: string,
   pending = false,
+  audioUrl?: string,
 ): ChipNode {
-  return new ChipNode(refId, label, prompt, undefined, imageUrl, videoUrl, pending);
+  return new ChipNode(refId, label, prompt, undefined, imageUrl, videoUrl, pending, audioUrl);
 }
 
 export function $isChipNode(node: LexicalNode | null | undefined): node is ChipNode {

@@ -1304,8 +1304,16 @@ export default function CanvasPage() {
   /** 画布节点单击：选取模式下点击对应类型节点带入对话框，其他节点取消选取；
    *  非选取模式点击草稿身份卡（IKDMQQ 图片 / IKDMQS 视频 / IKDMQT 音频）：打开绑定面板继续编辑（待生成/生成中查看/失败修改） */
   const handleCanvasNodeClick = (node: Node) => {
-    if (showAgent && node.type === 'mediaNode' && imageRefSourceError(node) === null) {
-      setAgentCandidate(collectMediaBlocks(node, `canvas:${node.id}`));
+    if (showAgent && node.type === 'mediaNode') {
+      const data = node.data ?? {};
+      const blocks = collectMediaBlocks(node, `canvas:${node.id}`);
+      if (
+        !data.assetMissing &&
+        !['draft', 'generating', 'failed', 'cancelled'].includes(String(data.genStatus)) &&
+        blocks.length === 1 && blocks[0].asset_id &&
+        ['image', 'video', 'audio'].includes(blocks[0].type) &&
+        blocks[0].url && !blocks[0].url.startsWith('blob:')
+      ) setAgentCandidate(blocks);
     }
     if (!pickMode || !pickTarget) {
       const data = (node.data ?? {}) as Record<string, unknown>;
