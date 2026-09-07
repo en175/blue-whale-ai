@@ -146,10 +146,10 @@ export default function CanvasPage() {
   /** 连线最新值（避免闭包陈旧：提交前落盘与附件推导用） */
   const edgesRef = useRef<Edge[]>([]);
   edgesRef.current = edges;
-  const [videoSubmittingId, setVideoSubmittingId] = useState<string | null>(null);
+  const [submittingNodeId, setSubmittingNodeId] = useState<string | null>(null);
   /** 生成中节点判定（IKDMQQ）：执行期间目标参数与输入连线只读 */
   const isGeneratingNode = (id: string) =>
-    id === videoSubmittingId || mediaNodesRef.current.some(
+    id === submittingNodeId || mediaNodesRef.current.some(
       (n) => n.id === id && (n.data as Record<string, unknown> | undefined)?.genStatus === 'generating',
     );
   /** 建立连线（受控去重 + custom 流光渲染形态；与服务端保存校验同口径拒绝重复 (source,target)）。
@@ -387,6 +387,7 @@ export default function CanvasPage() {
   const [imageDraftId, setImageDraftId] = useState<string | null>(null);
   const imagePanelHiddenRef = useRef(false);
   const videoPanelHiddenRef = useRef(false);
+  const audioPanelHiddenRef = useRef(false);
   const editingTargetRef = useRef<string | null>(null);
   /** 面板当前绑定的视频草稿节点 id（IKDMQS）：仅草稿入口（侧栏新建/点击草稿卡）设置；
    *  生命周期与图片草稿绑定一致 */
@@ -1276,7 +1277,7 @@ export default function CanvasPage() {
 
   // 隐藏与重开同一目标可放行；重试尚未成功时不能换到其它编辑目标。
   const canOpenEditor = (nodeId?: string): boolean => {
-    if (videoSubmittingId && nodeId !== videoSubmittingId) {
+    if (submittingNodeId && nodeId !== submittingNodeId) {
       showToast('warn', '正在保存并提交，请稍候');
       return false;
     }
@@ -1428,6 +1429,7 @@ export default function CanvasPage() {
   const handleCanvasPaneClick = () => {
     imagePanelHiddenRef.current = true;
     videoPanelHiddenRef.current = true;
+    audioPanelHiddenRef.current = true;
     setPickMode(null);
     setPickTarget(null);
     setPickProductId(null);
@@ -1462,7 +1464,7 @@ export default function CanvasPage() {
       setShow: (visible: boolean) => void,
     ) => {
       if (!boundId) return;
-      if (videoSubmittingId && boundId !== videoSubmittingId) return;
+      if (submittingNodeId && boundId !== submittingNodeId) return;
       if (soloId && soloId === boundId) {
         setShow(true); // 命中绑定目标：保持/恢复（修复程序化选中误报把面板当多选误关）
         return;
@@ -1472,7 +1474,7 @@ export default function CanvasPage() {
     };
     if (!imagePanelHiddenRef.current) syncPanelVisible(imageDraftId, setShowImageDialog);
     if (!videoPanelHiddenRef.current) syncPanelVisible(videoDraftId, setShowBottomDialog);
-    syncPanelVisible(audioDraftId, setShowAudioDialog);
+    if (!audioPanelHiddenRef.current) syncPanelVisible(audioDraftId, setShowAudioDialog);
   };
 
   /** 节点拖拽结束：同步本次全部拖动节点的新坐标到父组件 state，触发自动保存。
@@ -1728,6 +1730,7 @@ export default function CanvasPage() {
   /** 打开绑定指定草稿的音频面板（IKDMQT）：带入草稿已保存的文字描述与模型 */
   const openAudioDraftDialog = (nodeId: string) => {
     if (!canOpenEditor(nodeId)) return;
+    audioPanelHiddenRef.current = false;
     editingTargetRef.current = nodeId;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
@@ -1834,7 +1837,7 @@ export default function CanvasPage() {
   /** 项目切换/新建前的落盘闸门（IKDMQQ Q19）：先把未防抖编辑落盘；保存失败停留当前项目并提示重试。
    *  顺带修复「带未保存编辑切换项目丢失修改」的旧缺口。 */
   const ensureSavedBeforeProjectSwitch = async (): Promise<boolean> => {
-    if (videoSubmittingId) {
+    if (submittingNodeId) {
       showToast('warn', '正在保存并提交，请稍候');
       return false;
     }
@@ -3060,7 +3063,7 @@ export default function CanvasPage() {
     if (targetNodeId && currentId) {
       const projectId = currentId;
       applyingRef.current = true;
-      setVideoSubmittingId(targetNodeId);
+      setSubmittingNodeId(targetNodeId);
       try {
         if (!(await flushCanvasSave(projectId))) return; // 等待期间项目已切换，中止提交
       } catch (e) {
@@ -3070,7 +3073,7 @@ export default function CanvasPage() {
         return;
       } finally {
         applyingRef.current = false;
-        setVideoSubmittingId(null);
+        setSubmittingNodeId(null);
       }
     }
     const parameters: VideoJobParameters = {
@@ -3634,11 +3637,13 @@ export default function CanvasPage() {
    *  再携带 target_node_id 提交；绑定以 audioDraftId 为准（seed 可能残留旧草稿值），
    *  工具条等非草稿入口沿用直接提交 */
   const handleAudioDialogSend = async (text: string, modelId: string, _refs: AudioRefItem[]) => {
+    if (applyingRef.current || saveBlocked || saveStatus === 'error') return;
     const targetNodeId =
       audioDraftId && audioSeed?.targetNodeId === audioDraftId ? audioDraftId : undefined;
     if (targetNodeId && currentId) {
       const projectId = currentId;
       applyingRef.current = true;
+      setSubmittingNodeId(targetNodeId);
       try {
         if (!(await flushCanvasSave(projectId))) return; // 等待期间项目已切换，中止提交
       } catch (e) {
@@ -3648,6 +3653,7 @@ export default function CanvasPage() {
         return;
       } finally {
         applyingRef.current = false;
+        setSubmittingNodeId(null);
       }
     }
     startGenerationJob('audio', { prompt: text, model_id: modelId }, undefined, undefined, targetNodeId);
@@ -4058,7 +4064,7 @@ export default function CanvasPage() {
             videoDraftBinding={
               videoDraftId
                 ? {
-                    submitting: videoSubmittingId === videoDraftId,
+                    submitting: submittingNodeId === videoDraftId,
                     restoreExisting: hasGenerationRecord(mediaNodes.find(n => n.id === videoDraftId)),
                     saveFailed: saveBlocked || saveStatus === 'error',
                     status: (mediaNodes.find((n) => n.id === videoDraftId)?.data as Record<string, unknown> | undefined)
@@ -4136,13 +4142,16 @@ export default function CanvasPage() {
             draftBinding={
               audioDraftId
                 ? {
+                    saveFailed: saveBlocked || saveStatus === 'error',
+                    submitting: submittingNodeId === audioDraftId,
+                    restoreExisting: hasGenerationRecord(mediaNodes.find(n => n.id === audioDraftId)),
                     status: (mediaNodes.find((n) => n.id === audioDraftId)?.data as Record<string, unknown> | undefined)
                       ?.genStatus as MediaGenStatus | undefined,
                     onParamsChange: (patch) => handleAudioDraftParamsChange(audioDraftId, patch),
                   }
                 : undefined
             }
-            onClose={() => { setShowAudioDialog(false); setAudioDraftId(null); setPickMode(null); setPickTarget(null); }}
+            onClose={() => { audioPanelHiddenRef.current = true; setShowAudioDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleAudioDialogSend}
             onToast={(type, msg) => showToast(type, msg)}
             onSwitchToMusic={() => {
