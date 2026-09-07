@@ -81,11 +81,14 @@ interface ImageDialogProps {
   /** 草稿绑定（IKDMQQ）：面板编辑实时写回草稿节点；status 为 generating 时参数只读 */
   draftBinding?: {
     status?: MediaGenStatus;
+    restoreExisting?: boolean;
+    saveFailed?: boolean;
     onParamsChange: (patch: { prompt?: string; modelId?: string; size?: string; ratio?: string }) => void;
   };
   /** 连线图片参考（IKDMQR）：草稿绑定时由父级按连线实时推导传入，面板据此渲染参考区；
    *  传入了 mediaRefs 即为连线绑定模式，面板本地 files 不再参与展示与提交 */
   mediaRefs?: ImageMediaRef[];
+  invalidMediaRefs?: Array<{ nodeId: string; name: string }>;
   /** 移除某个图片参考（IKDMQR）：携带来源节点 id，父级断开对应连线 */
   onRemoveMediaRef?: (sourceNodeId: string) => void;
 }
@@ -161,9 +164,10 @@ function AttachmentItem({ attachment, move }: {
   );
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast, draftBinding, mediaRefs, onRemoveMediaRef }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast, draftBinding, mediaRefs, invalidMediaRefs, onRemoveMediaRef }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedResolution, setSelectedResolution] = useState('');
   const [selectedRatio, setSelectedRatio] = useState('');
@@ -232,7 +236,18 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
   /** 生成中只读（IKDMQQ）：任务执行期间目标参数冻结，保留查看与画布上的取消入口 */
   const readOnly = draftBinding?.status === 'generating';
-  const canSend = !uploading && !readOnly && (inputValue.trim().length > 0 || hasAttachmentText);
+  const configurationError = !modelsLoaded ? '正在加载模型配置'
+    : !currentGen ? '原生成模型已不可用，请重新选择模型'
+    : selectedResolution && !resolutionOptions.some(option => option.key === selectedResolution)
+      ? '原分辨率已不可用，请重新选择分辨率'
+    : selectedRatio && !ratioOptions.includes(selectedRatio)
+      ? '原比例与当前配置不兼容，请重新选择比例'
+    : invalidMediaRefs?.length ? '参考素材不可用，请调整参考后发送'
+    : edgeRefs?.length && !currentGen.features.reference_image ? '当前模型不支持图片参考，请调整模型或参考'
+    : edgeRefs && edgeRefs.length > Math.min(maxImages, currentGen.features.max_reference_images || maxImages)
+      ? '参考图片数量超过模型支持上限，请调整参考'
+    : null;
+  const canSend = !uploading && !readOnly && !draftBinding?.saveFailed && !configurationError && (inputValue.trim().length > 0 || hasAttachmentText);
 
   /** 草稿绑定参数同步（IKDMQQ）：面板内的模型/分辨率/比例/提示词变更实时写回草稿节点 */
   const syncDraftParams = (patch: { prompt?: string; modelId?: string; size?: string; ratio?: string }) => {
@@ -254,9 +269,19 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
 
   // 加载图片模型能力列表：优先选中首页带入的模型，参数逐项按模型能力校验后应用
   useEffect(() => {
+    let active = true;
     fetchGenerationModels('image')
       .then((list) => {
+        if (!active) return;
         setModelList(list);
+        setModelsLoaded(true);
+        // 节点已有配置原样恢复；能力变化须由用户调整，打开面板不改写它。
+        if (draftBinding && (draftBinding.restoreExisting || initialParams?.modelId)) {
+          setSelectedModel(initialParams?.modelId ?? '');
+          setSelectedResolution(initialParams?.size ?? '');
+          setSelectedRatio(initialParams?.ratio ?? '');
+          return;
+        }
         if (!list.length) return;
         // IKDMQU Q3：恢复的模型已不可用时明确提示（回退默认，不静默降级），用户调整后再发送
         if (initialParams?.modelId && !list.some((m) => m.model_id === initialParams.modelId)) {
@@ -289,7 +314,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         // 草稿绑定：把实际生效的完整参数写回草稿节点（含首次默认落值）
         syncDraftParams({ modelId: applied.modelId, size: finalSize, ratio: finalRatio });
       })
-      .catch(() => undefined);
+      .catch(() => { if (active) setModelsLoaded(true); });
+    return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -553,6 +579,11 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         )}
 
         {/* 输入框 */}
+        {configurationError && <div role="alert">{configurationError}</div>}
+        {invalidMediaRefs?.map(ref => <div key={ref.nodeId}>
+          {ref.name}（不可用）
+          {!readOnly && <button type="button" onClick={() => onRemoveMediaRef?.(ref.nodeId)}>移除失效参考</button>}
+        </div>)}
         <textarea
           className={styles.textarea}
           placeholder={uploading ? '正在上传参考图...' : `描述你希望如何编辑这张图片。图片最多 ${maxImages} 张。`}
@@ -581,7 +612,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                 onClick={() => setShowConfig(!showConfig)}
               >
               <SlidersHorizontal size={14} strokeWidth={2} />
-              <span>{currentModel?.label ?? '选择模型'}</span>
+              <span>{currentModel?.label ?? (selectedModel || '选择模型')}</span>
               <span className={styles.barDivider} />
               <span>{selectedRatio}</span>
               <span className={styles.barDivider} />

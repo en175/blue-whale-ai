@@ -362,7 +362,7 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
     });
     expect(promptTextarea()).toBeTruthy();
 
-    // 单选命中绑定目标（面板曾因过渡事件被关的场景）：恢复可见
+    // 空白明确隐藏后，迟到选中事件不得重开；用户重新点击才恢复。
     await act(async () => {
       flowProps.current.onPaneClick();
     });
@@ -370,6 +370,8 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: [nodeOf('g1')], edges: [] });
     });
+    expect(promptTextarea()).toBeNull();
+    await clickNode('g1');
     await vi.waitFor(() => expect(promptTextarea()).toBeTruthy());
   });
 
