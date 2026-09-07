@@ -3,6 +3,7 @@
  * ============================================ */
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
@@ -30,7 +31,13 @@ import FlowCanvas from './components/Canvas';
 import type { Node, Viewport } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchQuota, toSessionUser } from '@/api/auth';
-import { fetchProjects, createProject, renameProject, deleteProject,  } from '@/api/projects';
+import {
+  fetchProjects,
+  createProject,
+  renameProject,
+  deleteProject,
+  projectKeys,
+} from '@/api/projects';
 import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAllAssets, fetchAssetDetail, linkAssetToProject, type AssetRecord, type AssetType, type UploadCompleteData } from '@/api/assets';
 import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
 import { rememberAssetUrl } from './components/AgentPanel/MessageAssetPreview';
@@ -59,13 +66,14 @@ import {
 import { uploadAssetFile } from '@/utils/upload';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
+import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
 import {
   canvasLocationSearch,
-  pickCanvasIdAfterDelete,
   pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
+  shouldReturnToProjectsAfterDelete,
 } from './canvasQuery';
 import styles from './index.module.css';
 
@@ -73,6 +81,7 @@ type ToolMode = 'drag' | 'select';
 
 export default function CanvasPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const [projects, setProjects] = useState<CanvasProject[]>([]);
@@ -1110,33 +1119,18 @@ export default function CanvasPage() {
       .catch(() => undefined);
   };
 
-  /** 新建项目名：当前年月日时分（如 2026-08-18 02:58） */
-  const newProjectName = () => {
-    const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  };
-
-  /** 删除项目：DELETE /api/projects/:id；删除当前画布后切到剩余列表最新一项，不跳首页 */
+  /** 删除当前画布后回到项目列表；删除其他项目时留在当前画布。 */
   const handleDelete = (id: string) => {
     deleteProject(id)
-      .then(async () => {
+      .then(() => {
         const remaining = projects.filter((p) => p.id !== id);
-        const nextId = pickCanvasIdAfterDelete(currentId, id, projects.map((p) => p.id));
-        if (!nextId) {
-          try {
-            const created = await createProject(newProjectName());
-            const item: CanvasProject = { id: String(created.id), name: created.name };
-            setProjects([item]);
-            setCurrentId(item.id);
-          } catch {
-            setProjects([]);
-            setCurrentId('');
-          }
+        setProjects(remaining);
+        // 项目卡片页缓存含已删除项目；返回前清除，确保挂载后重新请求最新列表。
+        queryClient.removeQueries({ queryKey: projectKeys.all });
+        if (shouldReturnToProjectsAfterDelete(currentId, id)) {
+          navigate('/projects');
           return;
         }
-        setProjects(remaining);
-        setCurrentId(nextId);
       })
       .catch(() => undefined);
   };
@@ -1144,7 +1138,7 @@ export default function CanvasPage() {
   /** 新建项目：POST /api/projects 并切换选中（撞名由后端自动追加 (2)(3)） */
   const handleNewProject = async () => {
     try {
-      const created = await createProject(newProjectName());
+      const created = await createProject(defaultProjectName());
       const item: CanvasProject = { id: String(created.id), name: created.name };
       setProjects((prev) => [item, ...prev]);
       setCurrentId(item.id);
