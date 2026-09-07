@@ -83,6 +83,7 @@ interface ImageDialogProps {
     status?: MediaGenStatus;
     restoreExisting?: boolean;
     saveFailed?: boolean;
+    submitting?: boolean;
     onParamsChange: (patch: { prompt?: string; modelId?: string; size?: string; ratio?: string }) => void;
   };
   /** 连线图片参考（IKDMQR）：草稿绑定时由父级按连线实时推导传入，面板据此渲染参考区；
@@ -235,7 +236,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
    *  全部有效文本为空时沿用「提示词必填」 */
   const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
   /** 生成中只读（IKDMQQ）：任务执行期间目标参数冻结，保留查看与画布上的取消入口 */
-  const readOnly = draftBinding?.status === 'generating';
+  const readOnly = uploading || draftBinding?.submitting === true || draftBinding?.status === 'generating';
   const configurationError = !modelsLoaded ? '正在加载模型配置'
     : !currentGen ? '原生成模型已不可用，请重新选择模型'
     : selectedResolution && !resolutionOptions.some(option => option.key === selectedResolution)
@@ -385,6 +386,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                     {modelOptions.map((m) => (
                       <button
                         key={m.key}
+                        disabled={readOnly}
                         className={`${styles.selectOption} ${m.key === selectedModel ? styles.selectOptionActive : ''}`}
                         onClick={() => {
                           const gen = modelList.find((x) => x.model_id === m.key);
@@ -421,6 +423,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                     {resolutionOptions.map((r) => (
                       <button
                         key={r.key}
+                        disabled={readOnly}
                         className={`${styles.selectOption} ${r.key === selectedResolution ? styles.selectOptionActive : ''}`}
                         onClick={() => {
                           setSelectedResolution(r.key);
@@ -575,7 +578,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
 
         {/* 生成中只读提示（IKDMQQ）：任务执行期间参数冻结，取消入口在画布卡片上 */}
         {readOnly && (
-          <div className={styles.readOnlyHint}>生成中，参数与连线只读；可在画布卡片上取消生成</div>
+          <div className={styles.readOnlyHint}>{draftBinding?.status === 'generating'
+            ? '生成中，参数与连线只读；可在画布卡片上取消生成'
+            : '正在保存并提交，参数与连线只读'}</div>
         )}
 
         {/* 输入框 */}

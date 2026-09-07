@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { setGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 
 /* IKDMQU 成功卡原卡编辑与重新生成：P1 单选成品卡自动开面板 / Q4 上传素材不自动开 /
    P2 编辑实时写回原卡 / Q1+Q6 发送后原卡重新生成不新建卡（旧素材保留）/
@@ -68,6 +69,10 @@ const apiMocks = vi.hoisted(() => ({
   cancelGenerationJob: vi.fn(),
   retryGenerationJob: vi.fn(),
   createMediaExtraction: vi.fn(),
+  linkAssetToProject: vi.fn(async () => {}),
+  fetchUploadPresign: vi.fn(),
+  putToPresignedUrl: vi.fn(),
+  completeUpload: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
   fetchGenerationModels: vi.fn(async () => [
     {
@@ -105,12 +110,12 @@ vi.mock('@/api/auth', () => ({
 
 vi.mock('@/api/assets', () => ({
   UPLOAD_SIZE_LIMIT: 100 * 1024 * 1024,
-  fetchUploadPresign: vi.fn(),
-  putToPresignedUrl: vi.fn(),
-  completeUpload: vi.fn(),
+  fetchUploadPresign: apiMocks.fetchUploadPresign,
+  putToPresignedUrl: apiMocks.putToPresignedUrl,
+  completeUpload: apiMocks.completeUpload,
   fetchAllAssets: vi.fn(async () => []),
   fetchAssetDetail: vi.fn(),
-  linkAssetToProject: vi.fn(),
+  linkAssetToProject: apiMocks.linkAssetToProject,
 }));
 
 vi.mock('@/api/canvas', () => ({
@@ -229,10 +234,13 @@ function seedAudioDoc() {
   };
 }
 
+const defaultJobStatus = apiMocks.fetchJobStatus.getMockImplementation()!;
+
 let root: Root;
 let container: HTMLDivElement;
 
-async function renderPage() {
+async function renderPage(handoff?: GenHandoff) {
+  if (handoff) setGenHandoff(handoff);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -241,7 +249,7 @@ async function renderPage() {
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, { initialEntries: [{ pathname: '/canvas', state: handoff ? { genKind: handoff.kind } : null }] }, createElement(CanvasPage)),
       ),
     );
   });
@@ -287,6 +295,7 @@ afterEach(async () => {
   if (root) await act(async () => root.unmount());
   container?.remove();
   vi.clearAllMocks();
+  apiMocks.fetchJobStatus.mockReset().mockImplementation(defaultJobStatus);
 });
 
 describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
@@ -390,6 +399,42 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
 });
 
 describe('IKDMQU Q1/Q5/Q6/Q8：原卡重新生成', () => {
+  it('图片发送等待保存期间隐藏重开仍只读，并阻止切目标与重复发送（IKDXHS）', async () => {
+    await renderPage();
+    await clickNode('g1');
+    await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
+    await typePrompt('本次提交 A');
+
+    let release!: () => void;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    apiMocks.saveCanvasDoc.mockImplementationOnce(async () => {
+      await barrier;
+      return { id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' };
+    });
+    try {
+      await act(async () => sendButton().click());
+      await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalled());
+      await act(async () => flowProps.current.onPaneClick());
+      await clickNode('g1');
+      await vi.waitFor(() => expect(promptTextarea()).toBeTruthy());
+      expect(promptTextarea().disabled).toBe(true);
+      expect(sendButton().disabled).toBe(true);
+      await act(async () => toolbarProps.current.onToggleImageDialog());
+      expect(flowProps.current.mediaNodes).toHaveLength(2);
+      await act(async () => {
+        flowProps.current.onConnect({ source: 'u1', target: 'g1' });
+        sendButton().click();
+      });
+      expect(flowProps.current.edges).toHaveLength(1);
+      expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => release());
+    }
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].parameters.prompt).toBe('本次提交 A');
+    expect(nodeOf('g1').data.prompt).toBe('本次提交 A');
+  });
+
   it('发送后原卡原地转生成中：不新建卡片、保留旧素材、任务带目标节点', async () => {
     // 任务停留在执行中，捕获「生成中保留旧素材」的中间态
     apiMocks.fetchJobStatus.mockImplementationOnce(
@@ -510,4 +555,86 @@ describe('IKDMQU Q10：保存失败暂停切换编辑目标', () => {
     await clickNode(draftId);
     expect(promptTextarea()).toBeTruthy();
   });
+});
+
+
+describe('IKDXHS：首页生成节点保留可编辑配置', () => {
+  it.each(['image', 'video'] as const)('%s 保存实际参数，成功后重开并刷新仍恢复', async kind => {
+    const models = await apiMocks.fetchGenerationModels();
+    const capable = models.map(model => ({ ...model,
+      supported_durations: { min: 4, max: 12, step: 1 }, default_duration: 8,
+      features: { reference_image: true, first_frame: true, last_frame: true, first_last_frame: true },
+    }));
+    apiMocks.fetchGenerationModels.mockResolvedValueOnce(capable).mockResolvedValueOnce(capable).mockResolvedValueOnce(capable);
+    apiMocks.fetchJobStatus.mockResolvedValue({ job_id: 'j2', status: 'succeeded', progress: 100,
+      asset: { id: 'a9', url: kind === 'image' ? 'http://img/out.png' : 'http://img/out.mp4', type: kind } });
+    const handoff: GenHandoff = kind === 'image'
+      ? { kind, text: '首页输入', modelId: 'm-test', size: '2k', ratio: '1:1',
+          files: [{ id: 'ref-a2', name: '参考图', type: 'image', assetId: 'a2', url: 'http://img/u1.png' }] }
+      : { kind, text: '首页输入', modelId: 'm-test', resolution: '2k', aspectRatio: '1:1', duration: 8,
+          mode: 'keyframe', refs: [
+            { type: 'image', assetId: 'a1', preview: 'http://img/g1.png' },
+            { type: 'image', assetId: 'a2', preview: 'http://img/u1.png' },
+          ] };
+    await renderPage(handoff);
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const generated = () => flowProps.current.mediaNodes.find((n: Node) => n.id.startsWith('media-gen')) as Node;
+    await vi.waitFor(() => expect(generated()?.data.jobId).toBe('j2'));
+    expect(generated().data).toMatchObject({ prompt: '首页输入', draftModelId: 'm-test', draftSize: '2k', draftRatio: '1:1',
+      ...(kind === 'video' ? { draftDuration: 8, draftMode: 'keyframe' } : {}) });
+    const refs = flowProps.current.edges.filter((e: { target: string }) => e.target === generated().id);
+    expect(refs).toHaveLength(kind === 'image' ? 1 : 2);
+    expect(refs.map((e: { source: string }) => nodeOf(e.source).data.assetId)).toEqual(kind === 'image' ? ['a2'] : ['a1', 'a2']);
+    if (kind === 'video') expect(refs.map((e: { data: { refRole: string } }) => e.data.refRole)).toEqual(['first', 'last']);
+    const generatedId = generated().id;
+    await clickNode(generatedId);
+    await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
+    expect(container.textContent).not.toContain('原生成模型已不可用');
+    await vi.waitFor(() => expect(apiMocks.saveCanvasDoc.mock.calls.at(-1)?.[1].nodes.some((n: Node) => n.id === generatedId)).toBe(true), { timeout: 3000 });
+    const saved = apiMocks.saveCanvasDoc.mock.calls.at(-1)![1];
+    await act(async () => root.unmount());
+    container.remove();
+    canvasDocMock.current.doc = { id: 11, version: 4, ...JSON.parse(JSON.stringify(saved)) };
+    await renderPage();
+    await clickNode(generatedId);
+    expect(nodeOf(generatedId).data.draftModelId).toBe('m-test');
+    expect(flowProps.current.edges.filter((e: { target: string }) => e.target === generatedId)).toHaveLength(refs.length);
+    expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(sendButton()?.disabled).toBe(false));
+    await act(async () => sendButton().click());
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(2));
+    const repeated = apiMocks.createGenerationJob.mock.calls[1]![1];
+    expect(repeated.target_node_id).toBe(generatedId);
+    expect(repeated.parameters.model_id).toBe('m-test');
+    if (kind === 'image') expect(repeated.input_asset_ids).toEqual(['a2']);
+    else expect(repeated).toMatchObject({ first_frame_asset_id: 'a1', last_frame_asset_id: 'a2' });
+  });
+});
+
+
+it('首页上传参考保留永久素材地址与连线，不保存已释放的 blob 地址（IKDXHS）', async () => {
+  apiMocks.fetchUploadPresign.mockResolvedValueOnce({ storage_key: 'ref.png' });
+  apiMocks.completeUpload.mockResolvedValueOnce({ asset_id: 'new-ref', type: 'image', status: 'ready',
+    url: 'https://assets/ref.png', width: 100, height: 100, duration: null, mime: 'image/png', size: 3 });
+  const revoke = vi.fn();
+  vi.stubGlobal('URL', class extends URL { static revokeObjectURL = revoke; });
+  try {
+    await renderPage({ kind: 'image', text: '上传参考生成', modelId: 'm-test', size: '2k', ratio: '1:1',
+      files: [{ id: 'upload', name: 'ref.png', type: 'image', file: new File(['png'], 'ref.png', { type: 'image/png' }), url: 'blob:home-reference' }] });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const source = flowProps.current.mediaNodes.find((n: Node) => n.data.assetId === 'new-ref') as Node;
+    expect(source.data.src).toBe('https://assets/ref.png');
+    expect(flowProps.current.edges.some((e: { source: string }) => e.source === source.id)).toBe(true);
+    expect(revoke).toHaveBeenCalledWith('blob:home-reference');
+  } finally { vi.unstubAllGlobals(); }
+});
+
+
+it('首页引用先关联当前项目，关联失败不丢参考后继续生成（IKDXHS）', async () => {
+  apiMocks.linkAssetToProject.mockRejectedValueOnce(new Error('关联失败'));
+  await renderPage({ kind: 'image', text: '跨项目参考', modelId: 'm-test', size: '2k', ratio: '1:1',
+    files: [{ id: 'cross', name: '跨项目素材', type: 'image', assetId: 'outside', url: 'https://assets/outside.png' }] });
+  await vi.waitFor(() => expect(apiMocks.linkAssetToProject).toHaveBeenCalledWith('p1', 'outside'));
+  expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+  expect(flowProps.current.mediaNodes.some((n: Node) => n.id.startsWith('media-gen'))).toBe(false);
 });

@@ -263,7 +263,7 @@ export default function CanvasPage() {
       addCanvasEdge(params.source, params.target);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [setEdges],
+    [setEdges, submittingNodeId],
   );
   /** 连线变更守卫（IKDMQQ）：生成中节点的入边删除变更被拦截（剪刀等 remove 路径统一收口） */
   const guardEdgesChange: typeof onEdgesChange = (changes) => {
@@ -2348,6 +2348,10 @@ export default function CanvasPage() {
       referenceMaterials?: Array<{ id: string; type: 'image' | 'video' }>;
     },
     targetNodeId?: string,
+    initialDraft?: {
+      mode?: string;
+      references: Array<{ assetId: string; url: string; name: string; mediaType: 'image' | 'video'; role: VideoRefRole }>;
+    },
   ) => {
     if (!currentId) {
       console.warn('未选中项目，无法创建生成任务');
@@ -2381,6 +2385,19 @@ export default function CanvasPage() {
     }
     const nodeId = inPlaceNodeId ?? newNodeId('media-gen');
     if (!inPlaceNodeId) {
+    const referenceNodes: Node[] = [];
+    for (const ref of initialDraft?.references ?? []) {
+      let source = [...mediaNodesRef.current, ...referenceNodes].find(n =>
+        readAssetId(n.data) === ref.assetId && videoRefSourceError(n, ref.role) === null);
+      if (!source) {
+        source = attachCallbacks({
+          id: newNodeId('media'), type: 'mediaNode', position: spawnPosition(),
+          data: { src: ref.url, fileName: ref.name, mediaType: ref.mediaType, assetId: ref.assetId },
+        });
+        referenceNodes.push(source);
+      }
+      addCanvasEdge(source.id, nodeId, ref.role);
+    }
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
@@ -2391,6 +2408,11 @@ export default function CanvasPage() {
         mediaType: type,
         fileName: type === 'video' ? '视频生成中' : type === 'audio' ? '音频生成中' : '图片生成中',
         prompt: parameters.prompt,
+        draftModelId: parameters.model_id,
+        draftRatio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
+        draftSize: 'size' in parameters ? parameters.size : 'resolution' in parameters ? parameters.resolution : undefined,
+        draftDuration: 'duration' in parameters ? parameters.duration : undefined,
+        draftMode: initialDraft?.mode,
         targetRatio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
         toolMode,
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
@@ -2409,7 +2431,7 @@ export default function CanvasPage() {
         onMediaDims: handleMediaDims,
       },
     };
-    setMediaNodes((prev) => [...prev, node]);
+    setMediaNodes((prev) => [...prev, ...referenceNodes, node]);
     }
     // 提交立即接管节点，防止 create 返回前旧取消/轮询响应解除本次生成状态。
     const activeAtCreate = newNodeId('pending-generation');
@@ -2459,16 +2481,22 @@ export default function CanvasPage() {
           if (openRechargeForQuotaError(e)) {
             if (takenOver()) return; // 已被其他提交接管：回退不得覆盖新任务状态
             if (inPlaceNodeId) rollbackInPlace();
-            else setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+            else {
+              setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+              setEdges(prev => prev.filter(edge => edge.target !== nodeId));
+            }
             return;
           }
           if (isApiError(e) && e.status === 401) {
             if (!takenOver()) {
               if (inPlaceNodeId) rollbackInPlace();
-              else setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+              else {
+                setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+                setEdges(prev => prev.filter(edge => edge.target !== nodeId));
+              }
             }
             useAuthPromptStore.getState().addResume(() => {
-              startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId);
+              startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft);
             });
             return;
           }
@@ -3772,50 +3800,33 @@ export default function CanvasPage() {
     ratio: string,
     files: UploadedFile[],
   ) => {
+    if (applyingRef.current || saveBlocked) return;
     const targetNodeId = imageSeed?.targetNodeId;
-    // IKDMQU：成品卡绑定时参考同样按连线推导（绑定判定与音频发送同口径）
-    const inputAssetIds = await collectImageInputAssetIds(
-      targetNodeId,
-      files,
-      imageDraftId != null && targetNodeId === imageDraftId,
-    );
-
-    if (targetNodeId && currentId) {
-      const projectId = currentId;
-      applyingRef.current = true;
-      try {
-        if (!(await flushCanvasSave(projectId))) return; // 等待期间项目已切换，中止提交
-      } catch (e) {
-        // 落盘失败则不提交：否则服务端读到的正文可能缺未防抖落盘的编辑
-        showToast('error', '保存失败，请重试');
-        console.warn('生成前画布落盘失败:', e);
-        return;
-      } finally {
-        applyingRef.current = false;
-      }
+    const projectId = currentId;
+    if (!projectId) return;
+    applyingRef.current = true;
+    setSubmittingNodeId(targetNodeId ?? null);
+    try {
+      const inputAssetIds = await collectImageInputAssetIds(
+        targetNodeId,
+        files,
+        imageDraftId != null && targetNodeId === imageDraftId,
+      );
+      if (targetNodeId && !(await flushCanvasSave(projectId))) return;
+      if (activeProjectRef.current !== projectId) return;
+      startGenerationJob('image', {
+        prompt: text,
+        model_id: modelId,
+        aspect_ratio: ratio,
+        size,
+      }, inputAssetIds.length > 0 ? inputAssetIds : undefined, undefined, targetNodeId);
+    } catch (e) {
+      showToast('error', '保存或提交失败，请重试');
+      console.warn('图片生成前准备失败:', e);
+    } finally {
+      applyingRef.current = false;
+      setSubmittingNodeId(null);
     }
-
-    if (targetNodeId && currentId) {
-      const projectId = currentId;
-      applyingRef.current = true;
-      try {
-        if (!(await flushCanvasSave(projectId))) return; // 等待期间项目已切换，中止提交
-      } catch (e) {
-        // 落盘失败则不提交：否则服务端读到的正文可能缺未防抖落盘的编辑
-        showToast('error', '保存失败，请重试');
-        console.warn('生成前画布落盘失败:', e);
-        return;
-      } finally {
-        applyingRef.current = false;
-      }
-    }
-
-    startGenerationJob('image', {
-      prompt: text,
-      model_id: modelId,
-      aspect_ratio: ratio,
-      size,
-    }, inputAssetIds.length > 0 ? inputAssetIds : undefined, undefined, targetNodeId);
   };
 
   /** 触发首页生成交接：创建生成任务落节点（等于底部对话框按下发送），幂等——触发后即清 pending */
@@ -3825,85 +3836,50 @@ export default function CanvasPage() {
     if (!currentId) return; // 项目未就绪：等 currentId 变化后由 effect 重试
     if (!doc) return; // 文档未加载：此刻 setMediaNodes 会被 doc 水合 effect 清空，等 doc 就绪再触发
     pendingGenRef.current = null;
-    if (handoff.kind === 'video') {
-      // 参考素材（图/视频）上传取 assetId：首尾帧模式走 first/lastFrameAssetId（首页已校验恰好 2 张图），
-      // 其余模式走 reference_asset_ids
-      (async () => {
-        const parameters: VideoJobParameters = {
-          prompt: handoff.text,
-          model_id: handoff.modelId,
-          aspect_ratio: handoff.aspectRatio,
-          resolution: handoff.resolution,
-          duration: handoff.duration,
-        };
-        if (!handoff.refs.length) {
-          startGenerationJob('video', parameters);
-          return;
-        }
-        if (handoff.mode === 'keyframe') {
-          const [first, last] = handoff.refs;
-          const firstAssetId = first ? await resolveRefAssetId({
-            file: first.file, url: first.preview, name: 'ref-image', type: first.type, assetId: first.assetId,
-          }) : null;
-          const lastAssetId = last ? await resolveRefAssetId({
-            file: last.file, url: last.preview, name: 'ref-image', type: last.type, assetId: last.assetId,
-          }) : null;
-          // 不再 seed 进底部对话框，objectURL 在此自行释放
-          if (!firstAssetId || !lastAssetId) {
-            console.warn('首尾帧素材上传失败，任务未创建');
-            handoff.refs.forEach((r) => { if (r.file) URL.revokeObjectURL(r.preview); });
-            return;
+    const projectId = currentId;
+    (async () => {
+      const items = handoff.kind === 'image'
+        ? handoff.files.map(f => ({ url: f.url, name: f.name, mediaType: 'image' as const, file: f.file, assetId: f.assetId, role: 'reference' as VideoRefRole }))
+        : handoff.refs.map((r, i) => ({ url: r.preview, name: r.file?.name ?? `参考${i + 1}`, mediaType: r.type, file: r.file, assetId: r.assetId,
+            role: (handoff.mode === 'keyframe' ? (i === 0 ? 'first' : 'last') : 'reference') as VideoRefRole }));
+      const references = [];
+      try {
+        for (const item of items) {
+          let assetId = item.assetId == null ? undefined : String(item.assetId);
+          let url = item.url;
+          if (!assetId) {
+            const file = item.file ?? await fetchUrlAsFile(url, item.name, item.mediaType);
+            const uploaded = file ? await uploadFileToAsset(file, item.mediaType) : null;
+            if (!uploaded) {
+              showToast('error', '参考素材上传失败，请重新发送');
+              return;
+            }
+            assetId = uploaded.asset_id;
+            url = uploaded.url;
           }
-          startGenerationJob('video', parameters, undefined, {
-            firstFrameAssetId: firstAssetId,
-            lastFrameAssetId: lastAssetId,
-          });
-          handoff.refs.forEach((r) => { if (r.file) URL.revokeObjectURL(r.preview); });
-          return;
+          // 快照仅返回当前项目关联的素材；先关联，避免刷新后参考变成失效占位。
+          await linkAssetToProject(projectId, assetId);
+          references.push({ assetId, url, name: item.name, mediaType: item.mediaType, role: item.role });
         }
-        const referenceAssetIds: string[] = [];
-        for (const r of handoff.refs) {
-          const assetId = await resolveRefAssetId({
-            file: r.file,
-            url: r.preview,
-            name: `ref-${r.type}`,
-            type: r.type,
-            assetId: r.assetId,
-          });
-          if (assetId) referenceAssetIds.push(assetId);
+        if (activeProjectRef.current !== projectId) return;
+        if (handoff.kind === 'image') {
+          startGenerationJob('image', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.ratio, size: handoff.size },
+            references.map(r => r.assetId), undefined, undefined, { references });
+        } else {
+          startGenerationJob('video', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.aspectRatio,
+            resolution: handoff.resolution, duration: handoff.duration }, undefined,
+            handoff.mode === 'keyframe'
+              ? { firstFrameAssetId: references[0]?.assetId, lastFrameAssetId: references[1]?.assetId }
+              : { referenceAssetIds: references.map(r => r.assetId) },
+            undefined, { references, mode: handoff.mode });
         }
-        startGenerationJob(
-          'video',
-          parameters,
-          undefined,
-          referenceAssetIds.length > 0 ? { referenceAssetIds } : undefined,
-        );
-        // 不再 seed 进底部对话框，objectURL 在此自行释放
-        handoff.refs.forEach((r) => { if (r.file) URL.revokeObjectURL(r.preview); });
-      })();
-    } else {
-      // 图片：参考图先上传取 assetId（资产库选择项直接复用），再创建任务（同 handleImageDialogSend）
-      (async () => {
-        const inputAssetIds: string[] = [];
-        for (const f of handoff.files) {
-          if (f.assetId != null) {
-            inputAssetIds.push(String(f.assetId));
-            continue;
-          }
-          if (!f.file) continue;
-          const uploaded = await uploadFileToAsset(f.file, 'image');
-          if (uploaded) inputAssetIds.push(uploaded.asset_id);
-        }
-        startGenerationJob('image', {
-          prompt: handoff.text,
-          model_id: handoff.modelId,
-          aspect_ratio: handoff.ratio,
-          size: handoff.size,
-        }, inputAssetIds.length > 0 ? inputAssetIds : undefined);
-        // 不再 seed 进图片对话框，objectURL 在此自行释放
-        handoff.files.forEach((f) => { if (f.file) URL.revokeObjectURL(f.url); });
-      })();
-    }
+      } catch (error) {
+        console.warn('首页生成参考准备失败:', error);
+        showToast('error', '参考素材准备失败，请重新发送');
+      } finally {
+        items.forEach(item => { if (item.file) URL.revokeObjectURL(item.url); });
+      }
+    })();
     // 触发后清导航状态（消费时不提前清，避免 location 变化重跑消费 effect 重复注入对话框）
     navigate(location.pathname + location.search, { replace: true, state: null });
   };
@@ -4099,6 +4075,7 @@ export default function CanvasPage() {
             draftBinding={
               imageDraftId
                 ? {
+                    submitting: submittingNodeId === imageDraftId,
                     restoreExisting: hasGenerationRecord(mediaNodes.find(n => n.id === imageDraftId)),
                     saveFailed: saveBlocked || saveStatus === 'error',
                     status: (mediaNodes.find((n) => n.id === imageDraftId)?.data as Record<string, unknown> | undefined)
