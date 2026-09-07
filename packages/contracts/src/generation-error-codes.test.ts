@@ -59,10 +59,26 @@ describe("provider 错误信号（IKDAJN）", () => {
   });
 
   it("isQuotaSignal 命中欠费 keyword / HTTP 402", () => {
+    // IKDQ5F：真欠费锚点 = 预扣费额度失败/剩余额度/额度不足/余额不足。
+    expect(
+      isQuotaSignal("预扣费额度失败, 用户剩余额度: ¥0.9", 200),
+    ).toBe(true);
     expect(isQuotaSignal("账户余额不足，请充值后重试")).toBe(true);
+    expect(isQuotaSignal("账户剩余额度不足，请充值后重试")).toBe(true);
+    expect(isQuotaSignal("额度不足", 200)).toBe(true);
     expect(isQuotaSignal("precondition payment_required", 500)).toBe(true);
     expect(isQuotaSignal("request failed", 402)).toBe(true);
     expect(isQuotaSignal("balance insufficient")).toBe(true);
+  });
+
+  it("isQuotaSignal 不被非用户欠费文案误伤（IKDQ5F）", () => {
+    // 渠道无余额 / 无可用渠道 / 超时：非用户欠费，必须 false。
+    // 注：「new-api 音频生成余额不足」是我们抛 ERROR_QUOTA_EXHAUSTED 时的固定文案
+    // （ADR-0078 message 不泄漏原文），本身就该被 quota 锚点命中——不是本测试的反例。
+    expect(isQuotaSignal("当前渠道无余额，请更换渠道", 200)).toBe(false);
+    expect(isQuotaSignal("无可用的渠道，请配置渠道后再试", 200)).toBe(false);
+    expect(isQuotaSignal("gateway timeout", 503)).toBe(false);
+    expect(isQuotaSignal("request timed out", 504)).toBe(false);
   });
 
   it("isQuotaSignal 不被 content-policy 文案误伤", () => {
