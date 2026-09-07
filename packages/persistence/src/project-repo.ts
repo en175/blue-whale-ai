@@ -7,7 +7,7 @@ export interface ProjectView {
   id: string;
   name: string;
   thumb: string | null;
-  /** 本项目可用的最近 3 张 image URL（快照同源：project_asset ∪ 直接归属；按 gmt_create 倒序）。不足 3 张为实际张数，无图为空数组。 */
+  /** 本项目画布上还挂着的最近 3 张 image URL（可用素材 ∩ nodes_json；按 gmt_create 倒序）。不足 3 张为实际张数，无图为空数组。 */
   previews: string[];
   created_at: string;
 }
@@ -69,6 +69,51 @@ function defaultProjectName(now: Date = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 }
 
+const NON_IMAGE_MEDIA = new Set(["video", "audio"]);
+
+function readId(value: unknown): string | null {
+  if (typeof value === "string" && value.length > 0) return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function readUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  if (value.startsWith("blob:")) return null;
+  return value;
+}
+
+/** 从 canvas.nodes_json 收 image 的 assetId / src，跳过 video/audio 与未启用的商品图。 */
+function collectCanvasImageRefs(nodes: unknown): { ids: Set<string>; urls: Set<string> } {
+  const ids = new Set<string>();
+  const urls = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const rec = value as Record<string, unknown>;
+    if (rec.enabled === false) return;
+    const mediaType = rec.mediaType ?? rec.media_type ?? rec.type;
+    if (typeof mediaType === "string" && NON_IMAGE_MEDIA.has(mediaType)) return;
+    for (const key of ["assetId", "asset_id", "assetID"] as const) {
+      const id = readId(rec[key]);
+      if (id) ids.add(id);
+    }
+    for (const key of ["src", "url"] as const) {
+      const url = readUrl(rec[key]);
+      if (url) urls.add(url);
+    }
+    visit(rec.data);
+    visit(rec.images);
+    visit(rec.initialRefs);
+    visit(rec.refs);
+  };
+  visit(nodes);
+  return { ids, urls };
+}
+
 export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
   /** 名称撞名时自动追加序号（PRD E4/E6，如「名称 (2)」）。excludeId 用于重命名时排除自身。 */
   async function uniqueName(
@@ -96,7 +141,7 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
     return `${desired} (${n})`;
   }
 
-  /** 批量取每个项目最近 3 张可用 image URL。同源 snapshot：本项目 project_asset ∪ 直接归属。 */
+  /** 批量取每个项目画布上还挂着的最近 3 张 image URL。可用素材 ∩ nodes_json。 */
   async function attachPreviews(
     ownerId: string,
     rows: { id: bigint }[],
@@ -139,11 +184,22 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
     };
     for (const asset of imageAssets) addMember(asset.id, asset.project_id);
     for (const link of links) addMember(link.asset_id, link.project_id);
+    const canvases = await prisma.canvas.findMany({
+      where: { project_id: { in: projectIds }, is_delete: 0 },
+      select: { project_id: true, nodes_json: true },
+    });
+    const onCanvas = new Map<bigint, { ids: Set<string>; urls: Set<string> }>();
+    for (const row of canvases) {
+      onCanvas.set(row.project_id, collectCanvasImageRefs(row.nodes_json));
+    }
     const byProject = new Map<bigint, string[]>();
     for (const asset of imageAssets) {
       const projects = membership.get(asset.id.toString());
       if (!projects) continue;
+      const assetId = asset.id.toString();
       for (const projectId of projects) {
+        const refs = onCanvas.get(projectId);
+        if (!refs || (!refs.ids.has(assetId) && !refs.urls.has(asset.url))) continue;
         const list = byProject.get(projectId);
         if (!list) byProject.set(projectId, [asset.url]);
         else if (list.length < 3) list.push(asset.url);
