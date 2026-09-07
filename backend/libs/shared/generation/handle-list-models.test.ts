@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ModelCapabilityView } from "@blue-whale/persistence";
+import type { ModelCapabilityView } from "@lib/shared/persistence/index.js";
 import { handleListModels } from "./handle-list-models.js";
 
 function imageView(

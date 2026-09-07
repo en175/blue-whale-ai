@@ -17,7 +17,7 @@ WORKDIR /workspace
 COPY . .
 
 RUN pnpm install --frozen-lockfile \
-    && pnpm --filter @blue-whale/persistence exec prisma generate --schema prisma/schema.prisma \
+    && pnpm --dir backend exec prisma generate \
     && pnpm build:node \
     && pnpm --dir backend build
 
