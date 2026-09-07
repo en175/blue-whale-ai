@@ -18,7 +18,7 @@ import { ModelCapabilityReadService } from "@lib/shared/generation/model-capabil
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 
 // IKDMQW「取消、删除与任务完成竞态」公开接口集成（契约沿用 IKDMQQ~IKDMQV）：
-// 取消为软取消（queued/processing 登记 cancel_requested_at），终态任务拒绝取消（100301）；
+// 图片取消直接收敛 cancelled 并撤销写入权；视频/音频保留软取消。非本次取消形成的终态拒绝取消（100301）；
 // 前端删除/取消流程的权威核对依赖 GET /api/jobs/:id 反映落库终态。
 // 真 NestFactory 挂载生产控制器 + 隔离 MySQL（IKDMQW_DATABASE_URL 门控）。
 // 浏览器段（IKDMQW_BROWSER=1）覆盖三类媒体的取消回待生成、删除先取消、取消失败保留与抢先成功竞态。
@@ -203,7 +203,7 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
     await prisma.client.generation_jobs.update({ where: { id: BigInt(jobId) }, data: { status } });
   }
 
-  it("queued/processing 任务软取消：200 登记 cancel_requested_at，重复取消幂等", async () => {
+  it("图片取消：200 登记 cancel_requested_at 并收敛终态，重复取消幂等", async () => {
     const projectId = (await projects.create("987654", "IKDMQW soft cancel")).id;
     expect(
       (await saveCanvas(projectId, [mediaDraftNode("d1", "image", "暮色")], [], "missing")).status,
@@ -223,7 +223,7 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
     const row = await readJobRow(jobId);
     expect(row!.cancel_requested_at).not.toBeNull();
 
-    // 重复取消（仍 queued/processing）：幂等 200
+    // 重复已确认取消：幂等 200
     const second = await cancelJob(projectId, jobId);
     expect(second.code).toBe(200);
   });
@@ -250,7 +250,7 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
     expect((await cancelJob(projectId, "999999999")).code).toBe(100301);
   });
 
-  it("软取消登记后 worker 停止：状态置 cancelled 后权威查询返回 cancelled（前端核对依赖）", async () => {
+  it("图片取消确认后权威查询立即返回 cancelled（前端核对依赖）", async () => {
     const projectId = (await projects.create("987654", "IKDMQW authority")).id;
     expect(
       (await saveCanvas(projectId, [mediaDraftNode("d1", "image", "暮色")], [], "missing")).status,
@@ -264,12 +264,7 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
     const jobId = created.data.generation_job_id as string;
     expect((await cancelJob(projectId, jobId)).code).toBe(200);
 
-    // 取消登记后任务仍 queued（worker 未消费）——前端按已确认取消收敛可见状态
-    const before = await getJobDetail(jobId);
-    expect(before.data.status).toBe("queued");
-
-    // worker 读到取消标记后置 cancelled：权威状态查询反映终态
-    await settleJob(jobId, "cancelled");
+    // IKDUHN：取消事务自身形成终态，无需测试直接改写 worker 结果。
     const after = await getJobDetail(jobId);
     expect(after.data.status).toBe("cancelled");
   });
