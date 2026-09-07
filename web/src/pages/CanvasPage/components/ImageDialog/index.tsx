@@ -258,6 +258,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
       .then((list) => {
         setModelList(list);
         if (!list.length) return;
+        // IKDMQU Q3：恢复的模型已不可用时明确提示（回退默认，不静默降级），用户调整后再发送
+        if (initialParams?.modelId && !list.some((m) => m.model_id === initialParams.modelId)) {
+          onToast?.('warn', '原生成模型已不可用，已回退默认模型，请确认后发送');
+        }
         const target =
           (initialParams?.modelId && list.find((m) => m.model_id === initialParams.modelId)) ||
           list[0];
@@ -317,14 +321,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
       if (!draftBinding) setInputValue('');
     } finally {
       setUploading(false);
-    }
-  };
-
-  /** 键盘事件 */
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
     }
   };
 
@@ -566,7 +562,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
             setInputValue(v);
             syncDraftParams({ prompt: v });
           }}
-          onKeyDown={handleKeyDown}
           rows={3}
           maxLength={MAX_INPUT}
           disabled={uploading || readOnly}

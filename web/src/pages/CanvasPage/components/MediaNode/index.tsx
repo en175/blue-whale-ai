@@ -183,6 +183,10 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const isDraft = data.genStatus === 'draft';
   const isGenerating = data.genStatus === 'generating';
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
+  /** IKDMQU Q5：有旧素材（有效 http 素材 src）的生成中卡片继续显示素材，仅叠加状态角标；
+   *  blob 预览（上传中/占位 fixture）不算旧素材，走占位 genBox */
+  const hasMediaSrc =
+    typeof data.src === 'string' && data.src !== '' && !data.src.startsWith('blob:');
   const isMediaExtraction = isMediaExtractNodeId(id);
   const generationOverlay = mediaNodeGenerationOverlay(isMediaExtraction);
   const failHeadline = mediaNodeFailHeadline({
@@ -331,7 +335,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         {!data.isFirst && (
           <Handle type="target" position={Position.Left} className={styles.handle} style={HANDLE_STYLE} />
         )}
-        {isDraft || isGenerating || isGenDone || data.assetMissing ? (
+        {/* IKDMQU Q5：重新生成中的成品卡继续显示旧素材，仅叠加状态角标；
+            无旧素材的生成中（草稿首生成、提取任务）仍走占位 genBox */}
+        {isDraft || isGenDone || data.assetMissing || (isGenerating && !hasMediaSrc) ? (
           renderPlaceholder()
         ) : isAudio ? (
           <div className={styles.audioBox}>
@@ -361,6 +367,17 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             onLoad={handleImageLoad}
             style={isSelect ? undefined : { pointerEvents: 'none' }}
           />
+        )}
+        {isGenerating && hasMediaSrc && (
+          <div className={`nodrag nopan ${styles.regenOverlay}`} data-testid="regen-overlay">
+            <span className={styles.regenSpinner} />
+            <span className={styles.regenText}>
+              重新生成中{typeof data.progress === 'number' ? ` ${data.progress}%` : ''}
+            </span>
+            <button className={styles.regenCancel} onClick={() => data.onCancelJob?.(id)}>
+              取消
+            </button>
+          </div>
         )}
         <Handle type="source" position={Position.Right} className={styles.handle} style={HANDLE_STYLE} />
       </div>

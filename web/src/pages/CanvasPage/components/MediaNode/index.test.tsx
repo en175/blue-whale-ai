@@ -134,6 +134,20 @@ describe('MediaNode generating overlay', () => {
     expect(mountNode.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('42');
     expect(labels()).not.toContain('取消生成');
   });
+
+  it('重新生成中的成品卡继续显示旧素材并叠加状态角标（IKDMQU Q5）', async () => {
+    await renderNode('image', {
+      genStatus: 'generating',
+      progress: 30,
+      selected: false,
+      data: { src: 'http://img/old.png', fileName: '生成-j1', jobId: 'j1' },
+    });
+    const overlay = mountNode.querySelector('[data-testid="regen-overlay"]');
+    expect(overlay).toBeTruthy();
+    expect(overlay!.textContent).toContain('重新生成中 30%');
+    expect(overlay!.textContent).toContain('取消');
+    expect(mountNode.querySelector('img')?.getAttribute('src')).toBe('http://img/old.png');
+  });
 });
 
 describe('MediaNode failed overlay', () => {

@@ -455,6 +455,10 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
       .then((list) => {
         setModelList(list);
         if (!list.length) return;
+        // IKDMQU Q3：恢复的模型已不可用时明确提示（回退默认，不静默降级），用户调整后再发送
+        if (initialParams?.modelId && !list.some((m) => m.model_id === initialParams.modelId)) {
+          onToast?.('warn', '原生成模型已不可用，已回退默认模型，请确认后发送');
+        }
         const target =
           (initialParams?.modelId && list.find((m) => m.model_id === initialParams.modelId)) ||
           list[0];

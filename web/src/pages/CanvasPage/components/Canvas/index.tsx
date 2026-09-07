@@ -19,6 +19,7 @@ import {
   type EdgeTypes,
   type NodeMouseHandler,
   type Viewport,
+  type OnSelectionChangeParams,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useCallback, useEffect, useRef, useMemo } from 'react';
@@ -60,6 +61,8 @@ interface FlowCanvasProps {
   onNodeClick?: (node: Node) => void;
   /** 画布空白处单击 */
   onPaneClick?: () => void;
+  /** 选中集合变化（IKDMQU：空白/多选隐藏生成面板） */
+  onSelectionChange?: (params: OnSelectionChangeParams) => void;
   /** 隐藏右下角缩放控件。Agent 面板打开时它正好压在面板的发送按钮上（IKAGZC）。 */
   hideZoomControl?: boolean;
   /** 注册屏幕点→flow 坐标转换（无参默认视口中心），供父级创建节点时落在用户可见区域并换算 Dock 避让区 */
@@ -70,7 +73,7 @@ interface FlowCanvasProps {
   assetPickResult?: { ts: number; assetId: string; ref: { id: string; src: string; type?: 'image' | 'video'; assetId?: string } } | null;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -317,6 +320,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         onNodeDoubleClick={onNodeDoubleClick}
         onNodeClick={onNodeClick ? (_e, node) => onNodeClick(node) : undefined}
         onPaneClick={onPaneClick}
+        onSelectionChange={onSelectionChange}
         onMoveEnd={(_e, v) => onViewportChangeRef.current?.(v)}
         onNodeDragStop={(_e, node, draggedNodes) => onNodeDragStop?.(node, draggedNodes)}
         onContextMenu={(e) => e.preventDefault()}
@@ -367,7 +371,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -388,6 +392,7 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         onDeleteNode={onDeleteNode}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        onSelectionChange={onSelectionChange}
         registerSpawnPosition={registerSpawnPosition}
         hideZoomControl={hideZoomControl}
         productPickResult={productPickResult}

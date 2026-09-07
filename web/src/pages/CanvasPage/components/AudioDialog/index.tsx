@@ -48,11 +48,13 @@ interface AudioDialogProps {
     status?: MediaGenStatus;
     onParamsChange: (patch: { prompt?: string; modelId?: string }) => void;
   };
+  /** Toast 提示（IKDMQU Q3：恢复的模型不可用时提示，由父级注入） */
+  onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
   /** 底部模式切换 → AI 音乐对话框 */
   onSwitchToMusic?: () => void;
 }
 
-export default function AudioDialog({ onClose, onSend, initialText, initialModelId, draftBinding }: AudioDialogProps) {
+export default function AudioDialog({ onClose, onSend, initialText, initialModelId, draftBinding, onToast }: AudioDialogProps) {
   const [text, setText] = useState(initialText ?? '');
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [modelId, setModelId] = useState<string>('');
@@ -74,10 +76,13 @@ export default function AudioDialog({ onClose, onSend, initialText, initialModel
         setModels(list);
         if (list.length > 0) {
           // 草稿带入的模型优先（仍在可用列表中时），否则回退首个；选中即写回草稿
-          const restored =
-            initialModelId && list.some((m) => m.model_id === initialModelId)
-              ? initialModelId
-              : list[0].model_id;
+          // IKDMQU Q3：恢复的模型已不可用时明确提示（回退默认，不静默降级），用户调整后再发送
+          const restoredAvailable =
+            !!initialModelId && list.some((m) => m.model_id === initialModelId);
+          if (initialModelId && !restoredAvailable) {
+            onToast?.('warn', '原生成模型已不可用，已回退默认模型，请确认后发送');
+          }
+          const restored = restoredAvailable ? initialModelId! : list[0].model_id;
           setModelId(restored);
           draftBinding?.onParamsChange({ modelId: restored });
         }
@@ -109,13 +114,6 @@ export default function AudioDialog({ onClose, onSend, initialText, initialModel
     if (!draftBinding) setText('');
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
   return (
     <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
       {/* 右上角操作：放大/收起 + 关闭 */}
@@ -139,7 +137,6 @@ export default function AudioDialog({ onClose, onSend, initialText, initialModel
         placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。"
         value={text}
         onChange={(e) => handleTextChange(e.target.value.slice(0, MAX_INPUT))}
-        onKeyDown={handleKeyDown}
         rows={2}
         maxLength={MAX_INPUT}
         disabled={readOnly}
