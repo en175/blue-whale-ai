@@ -601,6 +601,7 @@ const TARGET_CANVAS = {
   nodes: JSON.stringify([
     { id: "media-1", type: "mediaNode", data: { mediaType: "image" } },
     { id: "media-2", type: "mediaNode", data: { mediaType: "video" } },
+    { id: "media-4", type: "mediaNode", data: { mediaType: "audio" } },
     { id: "media-3", type: "mediaNode", data: { mediaType: "image", text: "非文本节点正文" } },
     { id: "text-a", type: "textNode", data: { title: "风格", text: "赛博朋克" } },
     { id: "text-b", type: "textNode", data: { text: "雨夜" } },
@@ -612,6 +613,7 @@ const TARGET_CANVAS = {
     { id: "e3", source: "text-blank", target: "media-1" },
     { id: "e4", source: "text-a", target: "media-2" },
     { id: "e5", source: "media-3", target: "media-1" },
+    { id: "e6", source: "text-a", target: "media-4" },
   ]),
 };
 
@@ -678,24 +680,6 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
 
     expect(result.code).toBe(400);
     expect(result.msg).toBe("目标节点不存在或不是图片媒体节点");
-    expect(createJob).not.toHaveBeenCalled();
-  });
-
-  it("音频类型携带 target_node_id → 400 仅图片/视频生成可用，不读画布不建任务", async () => {
-    const { deps, createJob, getByProject } = buildTargetDeps(TARGET_CANVAS);
-
-    const result = await handleCreateGenerationJob(
-      "u1", "p1", {
-        type: "audio",
-        target_node_id: "media-1",
-        expected_output_count: 1,
-        parameters: { prompt: "哼一段旋律", model_id: "audio-model" },
-      }, null, deps,
-    );
-
-    expect(result.code).toBe(400);
-    expect(result.msg).toBe("target_node_id 仅支持图片/视频生成");
-    expect(getByProject).not.toHaveBeenCalled();
     expect(createJob).not.toHaveBeenCalled();
   });
 
@@ -921,6 +905,80 @@ describe("handleCreateGenerationJob target_node_id 视频目标（IKDLQG）", ()
     const { deps, createJob, getByProject } = buildVideoTargetDeps(TARGET_CANVAS);
 
     const result = await handleCreateGenerationJob("u1", "p1", VIDEO_BODY, null, deps);
+
+    expect(result.code).toBe(200);
+    expect(getByProject).not.toHaveBeenCalled();
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input).not.toHaveProperty("target_node_id");
+    expect(cmdArg.input).not.toHaveProperty("text_attachments");
+  });
+});
+
+// IKDMQT：target_node_id 扩展到生音频目标（mediaType 为 audio 的 mediaNode）。
+// 音频无文本附件能力：文本连线不推导不冻结；空 prompt 无附件兜底直接 400；
+// 快照落 { prompt, model_id, target_node_id }，执行与重试只读。
+function buildAudioTargetDeps(canvasView: { nodes: string | null; edges: string | null }) {
+  const { deps, createJob, getByProject } = buildTargetDeps(canvasView);
+  (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType = vi
+    .fn()
+    .mockResolvedValue([{ model_id: "audio-model" }]);
+  return { deps, createJob, getByProject };
+}
+
+const AUDIO_TARGET_BODY = {
+  type: "audio",
+  target_node_id: "media-4",
+  expected_output_count: 1,
+  parameters: { prompt: "哼一段轻快的旋律", model_id: "audio-model" },
+};
+
+describe("handleCreateGenerationJob target_node_id 音频目标（IKDMQT）", () => {
+  it("合法音频目标 → 200 冻结 target_node_id，文本连线不推导不冻结", async () => {
+    const { deps, createJob } = buildAudioTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob("u1", "p1", AUDIO_TARGET_BODY, null, deps);
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    // e6（text-a → media-4）存在但不被音频消费：无 text_attachments 字段
+    expect(cmdArg.input.target_node_id).toBe("media-4");
+    expect(cmdArg.input.prompt).toBe("哼一段轻快的旋律");
+    expect(cmdArg.input.model_id).toBe("audio-model");
+    expect(cmdArg.input).not.toHaveProperty("text_attachments");
+  });
+
+  it("目标是视频 mediaNode → 400 不是音频媒体节点，不建任务", async () => {
+    const { deps, createJob } = buildAudioTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...AUDIO_TARGET_BODY, target_node_id: "media-2" }, null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("目标节点不存在或不是音频媒体节点");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("空 prompt → 400 prompt 无效（音频无附件兜底），不建任务", async () => {
+    const { deps, createJob } = buildAudioTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      { ...AUDIO_TARGET_BODY, parameters: { prompt: "", model_id: "audio-model" } },
+      null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("prompt 无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("不携带 target_node_id 的音频创建 → 不读画布，input 不含 target_node_id，行为不变", async () => {
+    const { deps, createJob, getByProject } = buildAudioTargetDeps(TARGET_CANVAS);
+    const body = { ...AUDIO_TARGET_BODY } as Record<string, unknown>;
+    delete body.target_node_id;
+
+    const result = await handleCreateGenerationJob("u1", "p1", body, null, deps);
 
     expect(result.code).toBe(200);
     expect(getByProject).not.toHaveBeenCalled();

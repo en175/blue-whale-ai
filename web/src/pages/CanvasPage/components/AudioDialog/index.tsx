@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { X, AudioLines, ChevronDown, Music, ArrowUp, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
+import type { MediaGenStatus } from '../MediaNode';
 import styles from './index.module.css';
 
 /** 输入框字数上限 */
@@ -38,12 +39,21 @@ interface AudioDialogProps {
   onClose: () => void;
   /** 发送：提示词 + 模型ID */
   onSend: (text: string, modelId: string, refs: AudioRefItem[]) => void | Promise<void>;
+  /** 初始文字描述（草稿打开时带入已保存 prompt） */
+  initialText?: string;
+  /** 初始模型（草稿打开时带入已保存 draftModelId；不在模型列表时回退首个） */
+  initialModelId?: string;
+  /** 草稿绑定（IKDMQT）：面板编辑实时写回草稿节点；status 为 generating 时参数只读 */
+  draftBinding?: {
+    status?: MediaGenStatus;
+    onParamsChange: (patch: { prompt?: string; modelId?: string }) => void;
+  };
   /** 底部模式切换 → AI 音乐对话框 */
   onSwitchToMusic?: () => void;
 }
 
-export default function AudioDialog({ onClose, onSend }: AudioDialogProps) {
-  const [text, setText] = useState('');
+export default function AudioDialog({ onClose, onSend, initialText, initialModelId, draftBinding }: AudioDialogProps) {
+  const [text, setText] = useState(initialText ?? '');
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [modelId, setModelId] = useState<string>('');
   const [modelOpen, setModelOpen] = useState(false);
@@ -62,17 +72,41 @@ export default function AudioDialog({ onClose, onSend }: AudioDialogProps) {
     fetchGenerationModels('audio')
       .then((list) => {
         setModels(list);
-        if (list.length > 0) setModelId(list[0].model_id);
+        if (list.length > 0) {
+          // 草稿带入的模型优先（仍在可用列表中时），否则回退首个；选中即写回草稿
+          const restored =
+            initialModelId && list.some((m) => m.model_id === initialModelId)
+              ? initialModelId
+              : list[0].model_id;
+          setModelId(restored);
+          draftBinding?.onParamsChange({ modelId: restored });
+        }
       })
       .catch(() => setModels([]));
+    // 挂载时按 seed 初始化一次，后续编辑经用户交互写回
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const currentModel = models.find((m) => m.model_id === modelId);
+  /** 草稿绑定生成中（IKDMQT）：描述/模型/发送只读，保留查看与画布上的取消入口 */
+  const readOnly = draftBinding?.status === 'generating';
+
+  const handleTextChange = (value: string) => {
+    setText(value);
+    draftBinding?.onParamsChange({ prompt: value });
+  };
+
+  const handleModelSelect = (id: string) => {
+    setModelId(id);
+    setModelOpen(false);
+    draftBinding?.onParamsChange({ modelId: id });
+  };
 
   const handleSend = () => {
     if (!text.trim() || !modelId) return;
     onSend(text.trim(), modelId, []);
-    setText('');
+    // 草稿绑定发送后保留输入（卡片原地转生成中，面板进入只读），非草稿保持清空
+    if (!draftBinding) setText('');
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -101,12 +135,14 @@ export default function AudioDialog({ onClose, onSend }: AudioDialogProps) {
       {/* 输入框 */}
       <textarea
         className={styles.textarea}
+        data-testid="audio-input"
         placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。"
         value={text}
-        onChange={(e) => setText(e.target.value.slice(0, MAX_INPUT))}
+        onChange={(e) => handleTextChange(e.target.value.slice(0, MAX_INPUT))}
         onKeyDown={handleKeyDown}
         rows={2}
         maxLength={MAX_INPUT}
+        disabled={readOnly}
       />
 
       {/* 字数统计 */}
@@ -146,7 +182,7 @@ export default function AudioDialog({ onClose, onSend }: AudioDialogProps) {
 
           {/* 模型（真实） */}
           <div className={styles.modeWrap} ref={modelWrapRef}>
-            <button className={styles.modeBtn} onClick={() => setModelOpen((v) => !v)}>
+            <button className={styles.modeBtn} onClick={() => setModelOpen((v) => !v)} disabled={readOnly}>
               <span>{currentModel?.model_label ?? '选择模型'}</span>
               <ChevronDown
                 size={10}
@@ -160,10 +196,7 @@ export default function AudioDialog({ onClose, onSend }: AudioDialogProps) {
                   <button
                     key={opt.model_id}
                     className={`${styles.modeOption} ${opt.model_id === modelId ? styles.modeOptionActive : ''}`}
-                    onClick={() => {
-                      setModelId(opt.model_id);
-                      setModelOpen(false);
-                    }}
+                    onClick={() => handleModelSelect(opt.model_id)}
                   >
                     {opt.model_label}
                   </button>
@@ -174,9 +207,13 @@ export default function AudioDialog({ onClose, onSend }: AudioDialogProps) {
         </div>
 
         <div className={styles.barRight}>
+          {readOnly && (
+            <span className={styles.readOnlyHint}>生成中，参数只读；可在画布卡片上取消生成</span>
+          )}
           <button
             className={`${styles.sendBtn} ${text.trim() && modelId ? styles.sendBtnActive : ''}`}
-            disabled={!text.trim() || !modelId}
+            data-testid="audio-send"
+            disabled={!text.trim() || !modelId || readOnly}
             onClick={handleSend}
             title="发送"
           >

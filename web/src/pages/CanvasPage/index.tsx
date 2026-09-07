@@ -383,8 +383,11 @@ export default function CanvasPage() {
   /** 节点工具条带入视频对话框的初始参考；
    *  params 是首页 AI视频 带入的生成参数（选中首页所选模型/比例/清晰度/时长/模式） */
   const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; text?: string; params?: VideoGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
-  /** 节点工具条打开音频对话框的重挂载 key */
-  const [audioSeed, setAudioSeed] = useState<{ ts: number } | null>(null);
+  /** 音频对话框的重挂载 key；草稿入口（IKDMQT）同时携带文字描述/模型/目标节点 */
+  const [audioSeed, setAudioSeed] = useState<{ ts: number; text?: string; modelId?: string; targetNodeId?: string } | null>(null);
+  /** 面板当前绑定的音频草稿节点 id（IKDMQT）：仅草稿入口（侧栏新建/点击草稿卡）设置；
+   *  生命周期与图片/视频草稿绑定一致 */
+  const [audioDraftId, setAudioDraftId] = useState<string | null>(null);
   /** 首页 AI视频/AI图片 生成交接：消费后置入此 ref，待项目就绪触发创建任务 */
   const pendingGenRef = useRef<GenHandoff | null>(null);
   /** 首页 AI视频/AI图片 发送带入：唤起底部对话框（参数带入、内容清空），同时直接创建生成任务（生成卡落画布） */
@@ -1247,7 +1250,7 @@ export default function CanvasPage() {
     (data.assetId ?? data.asset_id ?? data.assetID) as string | number | undefined;
 
   /** 画布节点单击：选取模式下点击对应类型节点带入对话框，其他节点取消选取；
-   *  非选取模式点击草稿身份卡（IKDMQQ 图片 / IKDMQS 视频）：打开绑定面板继续编辑（待生成/生成中查看/失败修改） */
+   *  非选取模式点击草稿身份卡（IKDMQQ 图片 / IKDMQS 视频 / IKDMQT 音频）：打开绑定面板继续编辑（待生成/生成中查看/失败修改） */
   const handleCanvasNodeClick = (node: Node) => {
     if (!pickMode || !pickTarget) {
       const data = (node.data ?? {}) as Record<string, unknown>;
@@ -1256,6 +1259,9 @@ export default function CanvasPage() {
       }
       if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'video') {
         openVideoDraftDialog(node.id);
+      }
+      if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'audio') {
+        openAudioDraftDialog(node.id);
       }
       return;
     }
@@ -1589,6 +1595,93 @@ export default function CanvasPage() {
       setShowBottomDialog(false);
     }
   }, [videoDraftId, videoSeed, mediaNodes]);
+
+  /** 打开绑定指定草稿的音频面板（IKDMQT）：带入草稿已保存的文字描述与模型 */
+  const openAudioDraftDialog = (nodeId: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const d = (node?.data ?? {}) as Record<string, unknown>;
+    setAudioDraftId(nodeId);
+    setAudioSeed({
+      ts: Date.now(),
+      text: typeof d.prompt === 'string' ? d.prompt : '',
+      modelId: typeof d.draftModelId === 'string' ? d.draftModelId : undefined,
+      targetNodeId: nodeId,
+    });
+    setShowAudioDialog(true);
+    setShowBottomDialog(false);
+    setShowImageDialog(false);
+    setShowMusicDialog(false);
+  };
+
+  /** 侧栏音频入口（IKDMQT）：每次点击新建独立音频草稿卡，自动选中并打开绑定面板；
+   *  位置避开底部 Dock 预留区（与图片/视频草稿同一出生点算法）；
+   *  音频草稿只有文字描述与模型，无比例/分辨率/时长参数 */
+  const handleAddAudioDraft = () => {
+    const nodeId = newNodeId('media-draft');
+    const node: Node = {
+      id: nodeId,
+      type: 'mediaNode',
+      position: spawnDraftPosition(),
+      selected: true,
+      data: {
+        src: '',
+        mediaType: 'audio',
+        fileName: '音频草稿',
+        genStatus: 'draft',
+        draft: true,
+        prompt: '',
+        toolMode,
+        onDelete: (id: string) => {
+          setMediaNodes((prev) => prev.filter((n) => n.id !== id));
+        },
+        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+        onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
+        onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+        onReEdit: (id: string) => actionsRef.current.reEdit(id),
+        onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onGenVideo: (id: string) => actionsRef.current.genVideo(id),
+        onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+        onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
+        onDownload: (id: string) => actionsRef.current.download(id),
+        onShowDetails: (id: string) => actionsRef.current.showDetails(id),
+        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
+        onMediaDims: handleMediaDims,
+      },
+    };
+    const deselect = (prev: Node[]) => prev.map((n) => (n.selected ? { ...n, selected: false } : n));
+    setTextNodes(deselect);
+    setProductNodes(deselect);
+    setAssetNodes(deselect);
+    setMediaNodes((prev) => [...deselect(prev), node]);
+    openAudioDraftDialog(nodeId);
+  };
+
+  /** 面板编辑实时写回音频草稿节点（IKDMQT）：参数随节点 data 进入自动保存，刷新后恢复 */
+  const handleAudioDraftParamsChange = (
+    nodeId: string,
+    patch: { prompt?: string; modelId?: string },
+  ) => {
+    const data: Record<string, unknown> = {};
+    if (patch.prompt !== undefined) data.prompt = patch.prompt;
+    if (patch.modelId !== undefined) data.draftModelId = patch.modelId;
+    if (Object.keys(data).length === 0) return;
+    patchMediaNode(nodeId, data);
+  };
+
+  /** 音频草稿绑定清理（IKDMQT）：绑定被其它入口取代、草稿被删除/取消、或成功转成品卡时结束绑定并关闭面板 */
+  useEffect(() => {
+    if (!audioDraftId) return;
+    if (audioSeed?.targetNodeId !== audioDraftId) {
+      setAudioDraftId(null);
+      return;
+    }
+    const node = mediaNodes.find((n) => n.id === audioDraftId);
+    if (!node || (node.data as Record<string, unknown> | undefined)?.draft !== true) {
+      setAudioDraftId(null);
+      setShowAudioDialog(false);
+    }
+  }, [audioDraftId, audioSeed, mediaNodes]);
 
   /** 同步 toolMode 到所有文本节点和媒体节点 */
   useEffect(() => {
@@ -2114,13 +2207,13 @@ export default function CanvasPage() {
         })
         .catch((e) => {
           if (openRechargeForQuotaError(e)) {
-            // 原位模式：草稿回退待生成，保留卡片与参数（IKDMQQ/IKDMQS）
-            if (inPlaceNodeId) patchMediaNode(nodeId, { genStatus: 'draft', progress: undefined, fileName: type === 'video' ? '视频草稿' : '图片草稿' });
+            // 原位模式：草稿回退待生成，保留卡片与参数（IKDMQQ/IKDMQS/IKDMQT）
+            if (inPlaceNodeId) patchMediaNode(nodeId, { genStatus: 'draft', progress: undefined, fileName: type === 'video' ? '视频草稿' : type === 'audio' ? '音频草稿' : '图片草稿' });
             else setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
             return;
           }
           if (isApiError(e) && e.status === 401) {
-            if (inPlaceNodeId) patchMediaNode(nodeId, { genStatus: 'draft', progress: undefined, fileName: type === 'video' ? '视频草稿' : '图片草稿' });
+            if (inPlaceNodeId) patchMediaNode(nodeId, { genStatus: 'draft', progress: undefined, fileName: type === 'video' ? '视频草稿' : type === 'audio' ? '音频草稿' : '图片草稿' });
             else setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
             useAuthPromptStore.getState().addResume(() => {
               startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId);
@@ -3161,9 +3254,28 @@ export default function CanvasPage() {
     [mediaNodes],
   );
 
-  /** 音频对话发送：创建音频生成任务（无参考素材） */
+  /** 音频对话发送：创建音频生成任务（无参考素材）。
+   *  草稿绑定模式（IKDMQT）：先等待在途保存并落盘当前画布编辑（同图片/视频草稿），
+   *  再携带 target_node_id 提交；绑定以 audioDraftId 为准（seed 可能残留旧草稿值），
+   *  工具条等非草稿入口沿用直接提交 */
   const handleAudioDialogSend = async (text: string, modelId: string, _refs: AudioRefItem[]) => {
-    startGenerationJob('audio', { prompt: text, model_id: modelId });
+    const targetNodeId =
+      audioDraftId && audioSeed?.targetNodeId === audioDraftId ? audioDraftId : undefined;
+    if (targetNodeId && currentId) {
+      const projectId = currentId;
+      applyingRef.current = true;
+      try {
+        if (!(await flushCanvasSave(projectId))) return; // 等待期间项目已切换，中止提交
+      } catch (e) {
+        // 落盘失败则不提交：任务目标节点尚未持久化，提交会因目标不存在被拒
+        showToast('error', '保存失败，请重试');
+        console.warn('生成前画布落盘失败:', e);
+        return;
+      } finally {
+        applyingRef.current = false;
+      }
+    }
+    startGenerationJob('audio', { prompt: text, model_id: modelId }, undefined, undefined, targetNodeId);
   };
 
   /** AI 音乐对话发送 */
@@ -3475,13 +3587,10 @@ export default function CanvasPage() {
             handleAddImageDraft();
           }}
           onToggleAudioDialog={() => {
-            setAudioSeed(null);
+            // IKDMQT：侧栏音频入口不再开关空对话框，每次点击新建独立音频草稿卡并绑定面板
             setPickMode(null);
             setPickTarget(null);
-            setShowAudioDialog((prev) => !prev);
-            setShowBottomDialog(false);
-            setShowImageDialog(false);
-            setShowMusicDialog(false);
+            handleAddAudioDraft();
           }}
           showVideoDialog={showBottomDialog}
           showImageDialog={showImageDialog}
@@ -3616,9 +3725,23 @@ export default function CanvasPage() {
         {showAudioDialog && (
           <AudioDialog
             key={audioSeed?.ts ?? 0}
-            onClose={() => { setShowAudioDialog(false); setPickMode(null); setPickTarget(null); }}
+            initialText={audioSeed?.text}
+            initialModelId={audioSeed?.modelId}
+            draftBinding={
+              audioDraftId
+                ? {
+                    status: (mediaNodes.find((n) => n.id === audioDraftId)?.data as Record<string, unknown> | undefined)
+                      ?.genStatus as MediaGenStatus | undefined,
+                    onParamsChange: (patch) => handleAudioDraftParamsChange(audioDraftId, patch),
+                  }
+                : undefined
+            }
+            onClose={() => { setShowAudioDialog(false); setAudioDraftId(null); setPickMode(null); setPickTarget(null); }}
             onSend={handleAudioDialogSend}
             onSwitchToMusic={() => {
+              // 切走即结束草稿绑定并重置 seed：切回音频面板是干净的非草稿状态
+              setAudioSeed({ ts: Date.now() });
+              setAudioDraftId(null);
               setShowAudioDialog(false);
               setShowMusicDialog(true);
             }}

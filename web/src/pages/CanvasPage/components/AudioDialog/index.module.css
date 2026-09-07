@@ -514,3 +514,11 @@
   align-items: center;
   gap: 6px;
 }
+
+/* ---- 生成中只读提示（IKDMQT，草稿绑定） ---- */
+.readOnlyHint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+  white-space: nowrap;
+}
