@@ -449,16 +449,32 @@
   transform: rotate(180deg);
 }
 
-/* ---- 配置面板 ---- */
+/* ---- 配置面板（悬浮于底栏上方，与视频面板一致；IKDXL4） ---- */
 .configPanel {
-  position: relative;
-  background-color: #1e1e1e;
-  border: 1px solid #2c2c2c;
-  border-radius: 16px;
+  position: absolute;
+  /* 下缘贴字数统计上方：输入卡边框 1px + 底 padding 16px + 底栏 36px + 间距 8px + 字数统计行 11px + 余量 1px */
+  bottom: 73px;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: 480px;
+  max-width: calc(100% - 24px);
+  background-color: #232323;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  z-index: 5;
+  animation: popupFadeIn 0.15s ease;
+  box-sizing: border-box;
   padding: var(--spacing-lg);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-lg);
+}
+
+@keyframes popupFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ---- 配置面板关闭按钮 ---- */
