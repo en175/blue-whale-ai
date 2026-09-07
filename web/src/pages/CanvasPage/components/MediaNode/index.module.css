@@ -271,6 +271,60 @@
   background-color: #333;
 }
 
+/* 重新生成中角标（IKDMQU Q5）：成品卡保留旧素材显示，底部半透明条标记生成中。
+   glass 边界：backdrop-filter 仅作角标条对底层素材的轻模糊，静态 rgba(0.72) 底色
+   已独立保证对比度（不唯一依赖半透明）；角标随卡片移动，非静止表面上的整层玻璃 */
+.regenOverlay {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background-color: rgba(12, 12, 12, 0.72);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 2;
+}
+
+.regenSpinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #444;
+  border-top-color: #ddd;
+  border-radius: 50%;
+  animation: genSpin 0.9s linear infinite;
+}
+
+.regenText {
+  flex: 1;
+  color: #ddd;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.regenCancel {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: #ddd;
+  background-color: rgba(48, 48, 48, 0.9);
+  border: 1px solid #3a3a3a;
+  cursor: pointer;
+}
+
+.regenCancel:hover {
+  color: #fff;
+  background-color: #3a3a3a;
+}
+
 /* 右键菜单 */
 .contextMenu {
   position: fixed;
