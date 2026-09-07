@@ -6,7 +6,7 @@
  * - 事件流为共享连接（引用计数）：StrictMode 双挂载/多处订阅不重复建连
  * ============================================ */
 import { readSseResponse, type SseEvent } from './events';
-import { ApiError, apiRequest } from './http';
+import { ApiError, apiRequest, isApiError } from './http';
 import { newIdempotencyKey } from './jobs';
 import { agentPath, agentUrl, agentMethod } from './agentRoutes';
 import { handleUnauthorized } from '@/utils/auth';
@@ -394,16 +394,52 @@ export function listSessionRuns(
   return sessionRequest(agentPath('session_runs', projectId, { session_id: sessionId }));
 }
 
+/**
+ * 读一次会话，取它当前的 etag。
+ *
+ * 响应体里没有 etag 是契约破了，不是"再试试"能解决的事，所以直接抛而不是兜一个假值下去
+ * ——拿 `"missing"` 这类占位去发 If-Match，只会把 400 从 if_match_required 换成
+ * invalid_etag，用户看到的还是一句失败。
+ */
+async function readSessionEtag(projectId: string, sessionId: string): Promise<string> {
+  const session = await sessionRequest<SessionRecord>(
+    agentPath('get_session', projectId, { session_id: sessionId }),
+  );
+  if (!session?.etag) throw new ApiError(500, '读取会话版本失败，请刷新页面重试', 'missing_etag');
+  return session.etag;
+}
+
 /** 删除会话 DELETE /projects/:id/sessions/:sid（历史会话下拉「删除」，需二次确认）
  *
- * Idempotency-Key 是 agent 侧对**所有**写操作的硬要求（`http/app.ts` 的 idempotentMutation
- * 缺则直接 400 idempotency_key_required），删除也不例外——之前这里漏了，于是这个删除从上线起
- * 一次都没成功过。 */
-export function deleteSession(projectId: string, sessionId: string): Promise<unknown> {
-  return sessionRequest(
-    agentPath('delete_session', projectId, { session_id: sessionId }),
-    { method: agentMethod('delete_session'), headers: { 'Idempotency-Key': newIdempotencyKey() } },
-  );
+ * agent 对会话写操作有**两道**门，缺任何一样都是 400，而在界面上都长成同一句「删除失败」：
+ *
+ * - `Idempotency-Key`：`http/app.ts` 的 idempotentMutation 缺则 400 idempotency_key_required
+ * - `If-Match: W/"session-N"`：同文件 expectedVersion 缺则 400 if_match_required
+ *
+ * 这个删除从上线起一次都没成功过，而且是同一处连错两次——先漏 Idempotency-Key，补上之后
+ * 又漏 If-Match。两道门是一起的，别再只补一半。
+ *
+ * `etag` 让调用方传：历史会话列表里每一条都带着自己的 etag（`GET /sessions` 逐条经服务端
+ * sessionView 序列化），删哪条就用哪条的，不必为此多打一次请求。没传才回去读一次。
+ *
+ * 412 是"手里的 etag 旧了"——另一个端在这中间改了标题之类。重读一次再来，只重一次：
+ * 真的在并发改动中，无限重试也追不上，那时候该让用户刷新。
+ */
+export async function deleteSession(projectId: string, sessionId: string, etag?: string): Promise<void> {
+  const path = agentPath('delete_session', projectId, { session_id: sessionId });
+  const method = agentMethod('delete_session');
+  const submit = (tag: string) =>
+    sessionRequest<void>(path, {
+      method,
+      headers: { 'Idempotency-Key': newIdempotencyKey(), 'If-Match': tag },
+    });
+
+  try {
+    await submit(etag ?? (await readSessionEtag(projectId, sessionId)));
+  } catch (e) {
+    if (!isApiError(e) || e.status !== 412) throw e;
+    await submit(await readSessionEtag(projectId, sessionId));
+  }
 }
 
 /* ============ 消息与运行控制 ============ */
