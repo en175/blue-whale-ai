@@ -462,7 +462,7 @@ interface AgentPanelProps {
   /** 当前项目ID：发送消息走 POST /api/projects/:id/conversation/messages */
   projectId?: string;
   /** 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent）；载荷是会话层唯一的生成卡形状，不再另开一份 */
-  onApplyPreview?: (payload: GenerationCardBlock) => void;
+  onApplyToDock?: (payload: GenerationCardBlock) => void;
   /**
    * 画布上现存的生成卡节点所对应的 cardId 集合（IKAFSQ）。
    *

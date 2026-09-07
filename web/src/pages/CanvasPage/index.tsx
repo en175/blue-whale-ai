@@ -73,7 +73,7 @@ import {
   type VideoJobParameters,
   type AudioJobParameters,
 } from '@/api/jobs';
-import { removeCancelledGenerationNode } from './generationPolling';
+import { removeCancelledGenerationNode, stopJobPolling } from './generationPolling';
 import {
   saveSharedAsset,
   type SaveSharedAssetRequest,
@@ -95,6 +95,11 @@ import {
 import styles from './index.module.css';
 
 type ToolMode = 'drag' | 'select';
+
+/** 草稿回退显示名（IKDMQW）：取消回待生成/创建回退共用（节点 data 宽松类型，按字面量收窄） */
+function draftFileNameOf(type: unknown): string {
+  return type === 'video' ? '视频草稿' : type === 'audio' ? '音频草稿' : '图片草稿';
+}
 
 export default function CanvasPage() {
   const navigate = useNavigate();
@@ -669,9 +674,7 @@ export default function CanvasPage() {
       case 'mediaNode':
         base.data = {
           ...base.data,
-          onDelete: (id: string) => {
-            setMediaNodes((prev) => prev.filter((n) => n.id !== id));
-          },
+          onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
@@ -1239,6 +1242,7 @@ export default function CanvasPage() {
     openImageDialog: () => {},
     cancelJob: (_id: string) => {},
     retryJob: (_id: string) => {},
+    removeMediaNode: (_id: string) => {},
     reEdit: (_id: string) => {},
     genImage: (_id: string) => {},
     genVideo: (_id: string) => {},
@@ -1531,9 +1535,7 @@ export default function CanvasPage() {
         draft: true,
         prompt: '',
         toolMode,
-        onDelete: (id: string) => {
-          setMediaNodes((prev) => prev.filter((n) => n.id !== id));
-        },
+        onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
@@ -1635,9 +1637,7 @@ export default function CanvasPage() {
         draft: true,
         prompt: '',
         toolMode,
-        onDelete: (id: string) => {
-          setMediaNodes((prev) => prev.filter((n) => n.id !== id));
-        },
+        onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
@@ -1731,9 +1731,7 @@ export default function CanvasPage() {
         draft: true,
         prompt: '',
         toolMode,
-        onDelete: (id: string) => {
-          setMediaNodes((prev) => prev.filter((n) => n.id !== id));
-        },
+        onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
@@ -1893,13 +1891,7 @@ export default function CanvasPage() {
           fileName: file.name,
           mediaType: isVideo ? 'video' : 'image',
           toolMode,
-          onDelete: (id: string) => {
-            setMediaNodes((current) => {
-              const node = current.find((n) => n.id === id);
-              if (node?.data?.src) URL.revokeObjectURL(node.data.src as string);
-              return current.filter((n) => n.id !== id);
-            });
-          },
+          onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
@@ -2140,6 +2132,129 @@ export default function CanvasPage() {
     patchMediaNode(nodeId, patch);
   };
 
+  /** 迟到响应防线（IKDMQW）：节点已被本地删除（防复活）、已离开画布、或活跃任务已被新任务
+   *  接管（IKDMQV 登记）时，迟到的取消响应/权威核对/轮询响应一律丢弃，不得覆盖新状态。 */
+  const jobResponseGuarded = (nodeId: string, jobId: number | string): boolean =>
+    !locallyRemovedGenerationNodesRef.current.has(nodeId) &&
+    mediaNodesRef.current.some((n) => n.id === nodeId) &&
+    activeJobByNodeRef.current.get(nodeId) === String(jobId);
+
+  /** 任务终态收敛（IKDMQW）：按任务权威状态落卡片终态，轮询 tick、普通取消与删除流程共用。
+   *  返回 'terminal' 表示已终态（轮询应停），'processing' 表示未终态（调用方决定续链）。
+   *  调用方需先过 jobResponseGuarded 防线。
+   *  pendingDelete（删除流程登记的删除意图）在终态处接管：cancelled/failed → 移除；
+   *  succeeded → 挂载作品并提示（停止删除，用户需要时再操作一次）。 */
+  const applyJobTerminal = (
+    nodeId: string,
+    jobId: number | string,
+    detail: Awaited<ReturnType<typeof fetchJobStatus>>,
+  ): 'terminal' | 'processing' => {
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    if (!node) return 'terminal'; // 节点已删除：不续链
+    const removeWithPendingDelete = () => {
+      pendingDeleteJobNodesRef.current.delete(nodeId);
+      locallyRemovedGenerationNodesRef.current.add(nodeId);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+    };
+    if (isMediaExtractNodeId(nodeId)) {
+      const extractPatch = mediaExtractTerminalPatch(
+        detail,
+        typeof node.data?.fileName === 'string' ? node.data.fileName : undefined,
+      );
+      if (extractPatch) {
+        stopJobPolling(nodeId, jobTimersRef.current);
+        settledExtractNodesRef.current.add(nodeId);
+        patchMediaNode(nodeId, extractPatch);
+        return 'terminal';
+      }
+    }
+    if (detail.status === 'succeeded') {
+      stopJobPolling(nodeId, jobTimersRef.current);
+      const originalType = node.data?.mediaType;
+      const assetType = detail.asset?.type;
+      patchMediaNode(nodeId, {
+        genStatus: undefined,
+        progress: 100,
+        errorText: undefined,
+        src: detail.asset?.url ?? '',
+        mediaType: (assetType === 'audio' || assetType === 'video' || assetType === 'image')
+          ? assetType
+          : (originalType ?? 'image'),
+        fileName: `生成-${jobId}`,
+        assetId: detail.asset?.id,
+        width: detail.asset?.width ?? undefined,
+        height: detail.asset?.height ?? undefined,
+        duration: detail.asset?.duration ?? undefined,
+        // 原位草稿成功（IKDMQQ）：草稿身份结束转为普通成品卡；
+        // draftModelId/draftSize/draftRatio 保留为该卡的生成参数记录（再次编辑复制切片复用）
+        draft: undefined,
+      });
+      if (pendingDeleteJobNodesRef.current.has(nodeId)) {
+        // 删除等待终态期间任务抢先成功：停止删除保留作品，用户需要时再操作一次
+        pendingDeleteJobNodesRef.current.delete(nodeId);
+        showToast('warn', '任务已完成，已停止删除；如需删除请再次操作');
+      }
+      return 'terminal';
+    }
+    if (detail.status === 'failed') {
+      stopJobPolling(nodeId, jobTimersRef.current);
+      if (pendingDeleteJobNodesRef.current.has(nodeId)) {
+        removeWithPendingDelete();
+        return 'terminal';
+      }
+      patchMediaNode(nodeId, {
+        genStatus: 'failed',
+        errorText: readJobFailText(detail.error),
+      });
+      return 'terminal';
+    }
+    if (detail.status === 'cancelled') {
+      stopJobPolling(nodeId, jobTimersRef.current);
+      settleCancelledNode(nodeId);
+      return 'terminal';
+    }
+    return 'processing';
+  };
+
+  /** 取消终态可见收敛（IKDMQW）：草稿卡回待生成（保留参数与连线）、有旧素材的成品卡
+   *  恢复成品态（IKDMQU Q5）、无内容可保留的占位卡移除并防迟到响应复活。
+   *  删除流程登记的删除意图优先：cancelled 时直接移除。 */
+  const settleCancelledNode = (nodeId: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    if (!node) return;
+    if (pendingDeleteJobNodesRef.current.has(nodeId)) {
+      pendingDeleteJobNodesRef.current.delete(nodeId);
+      locallyRemovedGenerationNodesRef.current.add(nodeId);
+      removeCancelledGenerationNode(
+        nodeId,
+        jobTimersRef.current,
+        (id) => setMediaNodes((prev) => prev.filter((n) => n.id !== id)),
+      );
+      return;
+    }
+    const action = cancelledTerminalAction(node);
+    if (action === 'to-draft') {
+      patchMediaNode(nodeId, {
+        genStatus: 'draft',
+        progress: undefined,
+        errorText: undefined,
+        fileName: draftFileNameOf(node.data?.mediaType),
+      });
+      return;
+    }
+    if (action === 'restore') {
+      patchMediaNode(nodeId, { genStatus: undefined, progress: undefined, errorText: undefined });
+      return;
+    }
+    locallyRemovedGenerationNodesRef.current.add(nodeId);
+    removeCancelledGenerationNode(
+      nodeId,
+      jobTimersRef.current,
+      (id) => setMediaNodes((prev) => prev.filter((n) => n.id !== id)),
+    );
+  };
+
   /** 轮询函数引用（供水合恢复调用，避免声明顺序依赖） */
   const pollJobRef = useRef<(nodeId: string, jobId: number | string) => void>(() => {});
 
@@ -2153,66 +2268,14 @@ export default function CanvasPage() {
     const tick = () => {
       fetchJobStatus(jobId)
         .then((detail) => {
-          const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-          if (!node) return; // 节点已删除
+          if (!mediaNodesRef.current.find((n) => n.id === nodeId)) return; // 节点已删除
           if (activeJobByNodeRef.current.get(nodeId) !== String(jobId)) return; // 迟到旧任务响应——节点已承接新任务，丢弃且不续链
           if (locallyRemovedGenerationNodesRef.current.has(nodeId)) {
             jobTimersRef.current.delete(nodeId);
             return;
           }
-          if (isMediaExtractNodeId(nodeId)) {
-            const extractPatch = mediaExtractTerminalPatch(
-              detail,
-              typeof node.data?.fileName === 'string' ? node.data.fileName : undefined,
-            );
-            if (extractPatch) {
-              jobTimersRef.current.delete(nodeId);
-              settledExtractNodesRef.current.add(nodeId);
-              patchMediaNode(nodeId, extractPatch);
-              return;
-            }
-          }
-          if (detail.status === 'succeeded') {
-            jobTimersRef.current.delete(nodeId);
-            const originalType = node.data?.mediaType;
-            const assetType = detail.asset?.type;
-            patchMediaNode(nodeId, {
-              genStatus: undefined,
-              progress: 100,
-              errorText: undefined,
-              src: detail.asset?.url ?? '',
-              mediaType: (assetType === 'audio' || assetType === 'video' || assetType === 'image')
-                ? assetType
-                : (originalType ?? 'image'),
-              fileName: `生成-${jobId}`,
-              assetId: detail.asset?.id,
-              width: detail.asset?.width ?? undefined,
-              height: detail.asset?.height ?? undefined,
-              duration: detail.asset?.duration ?? undefined,
-              // 原位草稿成功（IKDMQQ）：草稿身份结束转为普通成品卡；
-              // draftModelId/draftSize/draftRatio 保留为该卡的生成参数记录（再次编辑复制切片复用）
-              draft: undefined,
-            });
-            return;
-          }
-          if (detail.status === 'failed') {
-            jobTimersRef.current.delete(nodeId);
-            patchMediaNode(nodeId, {
-              genStatus: 'failed',
-              errorText: readJobFailText(detail.error),
-            });
-            return;
-          }
-          if (detail.status === 'cancelled') {
-            jobTimersRef.current.delete(nodeId);
-            if (cancelledTerminalAction(node) === 'restore') {
-              // IKDMQU Q5：成品卡重新生成被取消 → 恢复成品态，保留旧素材与最新编辑
-              patchMediaNode(nodeId, { genStatus: undefined, progress: undefined, errorText: undefined });
-              return;
-            }
-            setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
-            return;
-          }
+          const outcome = applyJobTerminal(nodeId, jobId, detail);
+          if (outcome === 'terminal') return;
           patchMediaNode(nodeId, { progress: detail.progress });
           jobTimersRef.current.set(nodeId, window.setTimeout(tick, 2500));
         })
@@ -2287,9 +2350,7 @@ export default function CanvasPage() {
         prompt: parameters.prompt,
         targetRatio: 'aspect_ratio' in parameters ? parameters.aspect_ratio : undefined,
         toolMode,
-        onDelete: (id: string) => {
-          setMediaNodes((prev) => prev.filter((n) => n.id !== id));
-        },
+        onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
@@ -2344,7 +2405,7 @@ export default function CanvasPage() {
               patchMediaNode(nodeId, {
                 genStatus: 'draft',
                 progress: undefined,
-                fileName: type === 'video' ? '视频草稿' : type === 'audio' ? '音频草稿' : '图片草稿',
+                fileName: draftFileNameOf(type),
               });
             } else {
               patchMediaNode(nodeId, { genStatus: undefined, progress: undefined, errorText: undefined });
@@ -2382,23 +2443,124 @@ export default function CanvasPage() {
     }
   };
 
-  /** 取消生成：接口确认后立即移除卡片，避免测试站状态延迟造成持续轮询。 */
+  /** 普通取消（IKDMQW）：cancel 200 仅代表软取消已登记，请求发出不视为取消成功；
+   *  卡片终态以任务权威状态收敛——cancelled / 仍 processing（worker 未停）→ 草稿回待生成
+   *  （保留参数与连线）/ 成品卡恢复 / 占位移除；succeeded 竞态 → 挂载作品。
+   *  取消失败：卡片保持生成中（任务可继续查看），提示原因。 */
   const handleCancelJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const jobId = node?.data?.jobId as number | string | undefined;
     if (!currentId || jobId == null) return;
     void cancelGenerationJob(currentId, jobId)
-      .then(() => {
-        locallyRemovedGenerationNodesRef.current.add(nodeId);
-        removeCancelledGenerationNode(
-          nodeId,
-          jobTimersRef.current,
-          (id) => setMediaNodes((prev) => prev.filter((n) => n.id !== id)),
-        );
+      .then(() => fetchJobStatus(jobId).catch(() => null))
+      .then((detail) => {
+        if (!jobResponseGuarded(nodeId, jobId)) return; // 迟到响应：已删除/已被新任务接管
+        if (detail && (detail.status === 'succeeded' || detail.status === 'failed')) {
+          // 权威终态优先于取消确认：抢先成功挂载作品，失败展示原因
+          applyJobTerminal(nodeId, jobId, detail);
+          return;
+        }
+        if (detail?.status === 'cancelled') stopJobPolling(nodeId, jobTimersRef.current);
+        // cancelled / processing（软取消已登记）/ 状态不可得：取消已确认，可见状态收敛；
+        // processing 时不停轮询——后续权威终态（cancelled 幂等 / succeeded 挂载）自然收敛
+        settleCancelledNode(nodeId);
       })
       .catch((e) => {
         console.warn('取消生成失败:', e);
+        showToast('error', isApiError(e) ? `取消失败：${e.message}` : '取消失败，请稍后重试');
       });
+  };
+
+  /** 删除在途登记：同一卡片的删除流程在取消确认往返期间只发起一次 */
+  const deletingJobNodesRef = useRef<Set<string>>(new Set());
+
+  /** 删除意图登记（IKDMQW）：取消已登记但任务未终态（worker 未停）时，删除流程不移除卡片、
+   *  只记录意图；轮询拿到权威终态后由 applyJobTerminal 接管——cancelled/failed 移除，
+   *  succeeded 挂载作品并提示（worker 竞态完成的作品不得失去入口）。 */
+  const pendingDeleteJobNodesRef = useRef<Set<string>>(new Set());
+
+  /** 立即移除媒体节点（非生成中路径）：仅释放 blob 预览 URL（http 素材 URL 无需 revoke） */
+  const removeMediaNodeNow = (nodeId: string) => {
+    setMediaNodes((prev) => {
+      const target = prev.find((n) => n.id === nodeId);
+      const src = target?.data?.src;
+      if (typeof src === 'string' && src.startsWith('blob:')) URL.revokeObjectURL(src);
+      return prev.filter((n) => n.id !== nodeId);
+    });
+  };
+
+  /** 删除生成中卡片（IKDMQW）：先请求取消；任务权威终态非 succeeded 才移除——
+   *  cancelled/failed 终态确认后立即移除；仍 processing（软取消已登记、worker 未停）时不
+   *  抢先移除，登记删除意图由轮询终态驱动（succeeded 竞态保留作品并提示「任务已完成」）。
+   *  取消失败：保留卡片提示原因（任务仍可查看/轮询收敛），用户需要时再操作一次。 */
+  const deleteGeneratingNode = async (nodeId: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const jobId = node?.data?.jobId as number | string | undefined;
+    if (!currentId || jobId == null) {
+      // 无任务可取消（异常态）：退回直接移除，避免删除入口卡死
+      removeMediaNodeNow(nodeId);
+      return;
+    }
+    if (deletingJobNodesRef.current.has(nodeId)) return;
+    deletingJobNodesRef.current.add(nodeId);
+    const finish = () => { deletingJobNodesRef.current.delete(nodeId); };
+    const stopWithCompleted = (detail: Awaited<ReturnType<typeof fetchJobStatus>>) => {
+      // 任务抢先成功：停止自动删除，挂载作品并提示；如需删除用户再操作一次
+      applyJobTerminal(nodeId, jobId, detail);
+      showToast('warn', '任务已完成，已停止删除；如需删除请再次操作');
+      finish();
+    };
+    try {
+      await cancelGenerationJob(currentId, jobId);
+    } catch (e) {
+      // 取消失败（多为任务已终态 100301）：核对权威状态，succeeded 视为抢先成功
+      const detail = await fetchJobStatus(jobId).catch(() => null);
+      if (detail?.status === 'succeeded' && jobResponseGuarded(nodeId, jobId)) {
+        stopWithCompleted(detail);
+        return;
+      }
+      console.warn('删除生成中卡片：取消任务失败:', e);
+      showToast('error', isApiError(e) ? `取消失败，卡片已保留：${e.message}` : '取消失败，卡片已保留，请稍后重试');
+      finish();
+      return;
+    }
+    // 取消登记成功 ≠ 任务已停：核对权威状态，succeeded 竞态保护（worker 抢先完成）
+    const detail = await fetchJobStatus(jobId).catch(() => null);
+    if (!jobResponseGuarded(nodeId, jobId)) { // 防御：往返期间被新任务接管/已删除则放弃
+      finish();
+      return;
+    }
+    if (detail?.status === 'succeeded') {
+      stopWithCompleted(detail);
+      return;
+    }
+    if (detail?.status === 'cancelled' || detail?.status === 'failed') {
+      // 任务已终态：确认移除，登记防迟到响应复活
+      locallyRemovedGenerationNodesRef.current.add(nodeId);
+      removeCancelledGenerationNode(
+        nodeId,
+        jobTimersRef.current,
+        (id) => setMediaNodes((prev) => prev.filter((n) => n.id !== id)),
+      );
+      finish();
+      return;
+    }
+    // 仍 queued/processing（软取消已登记）或状态不可得：不抢先移除（worker 竞态完成的作品
+    // 不得失去入口）——登记删除意图，轮询终态驱动移除/挂载
+    pendingDeleteJobNodesRef.current.add(nodeId);
+    finish();
+  };
+
+  /** 媒体节点删除统一入口（IKDMQW）：右键菜单/键盘删除/节点回调全部收口——
+   *  生成中且带任务的卡片先取消再移除；其余直接移除。 */
+  const handleRemoveMediaNode = (nodeId: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const data = node?.data as Record<string, unknown> | undefined;
+    if (data?.genStatus === 'generating' && data.jobId != null) {
+      void deleteGeneratingNode(nodeId);
+      return;
+    }
+    removeMediaNodeNow(nodeId);
   };
 
   /** 重试失败任务：retry 接口创建新任务（沿用失败任务冻结快照），节点回到生成中。
@@ -2451,6 +2613,7 @@ export default function CanvasPage() {
   };
   actionsRef.current.cancelJob = handleCancelJob;
   actionsRef.current.retryJob = handleRetryJob;
+  actionsRef.current.removeMediaNode = handleRemoveMediaNode;
   pollJobRef.current = pollJob;
 
   /* ============ 节点工具条：重新编辑/生成图片/生成视频/生成音频/下载 ============ */
@@ -3235,9 +3398,7 @@ export default function CanvasPage() {
               fileName: item.name || `资产-${Date.now()}`,
               mediaType,
               toolMode,
-              onDelete: (id: string) => {
-                setMediaNodes((prev) => prev.filter((n) => n.id !== id));
-              },
+              onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
               onDuplicate: (id: string) => actionsRef.current.duplicate(id),
               onAddToChat: (id: string) => actionsRef.current.addToChat(id),
               onReEdit: (id: string) => actionsRef.current.reEdit(id),
@@ -3717,11 +3878,8 @@ export default function CanvasPage() {
           assetPickResult={assetPickResult}
           onDeleteNode={(id) => {
             setTextNodes((prev) => prev.filter((n) => n.id !== id));
-            setMediaNodes((prev) => {
-              const node = prev.find((n) => n.id === id);
-              if (node?.data?.src) URL.revokeObjectURL(node.data.src as string);
-              return prev.filter((n) => n.id !== id);
-            });
+            // 媒体节点删除收口（IKDMQW）：生成中卡片先取消任务确认后移除，其余直接移除
+            handleRemoveMediaNode(id);
             setProductNodes((prev) => prev.filter((n) => n.id !== id));
             setAssetNodes((prev) => prev.filter((n) => n.id !== id));
           }}
@@ -3931,7 +4089,7 @@ export default function CanvasPage() {
           initialCardLabel={agentContext?.label}
           inputVersion={agentContext?.ts ?? 0}
           projectId={currentId || undefined}
-          onApplyPreview={handleAgentCardApply}
+          onApplyToDock={handleAgentCardApply}
           appliedCardIds={appliedCardIds}
           initialSkillId={agentContext?.skillId ?? ''}
           initialSkillName={agentContext?.skillName ?? ''}

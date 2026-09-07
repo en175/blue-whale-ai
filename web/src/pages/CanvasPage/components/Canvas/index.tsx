@@ -302,7 +302,10 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   onDeleteNodeRef.current = onDeleteNode;
 
   /** Delete/Backspace 删除选中节点；Enter 继续拦截（输入框/编辑器内保持原语义）。
-   *  连线级联删除由父级完成：节点离开各列表后，悬空连线被统一定时清理（IKDLQF） */
+   *  连线级联删除由父级完成：节点离开各列表后，悬空连线被统一定时清理（IKDLQF）。
+   *  内部 nodes 不在此处直接移除（IKDMQW）：生成中卡片的删除是「先取消后移除」的异步流程，
+   *  若内部抢先移除而父级在取消竞态中保留卡片（任务抢先成功保留作品），节点会从画布消失；
+   *  统一由父级各列表状态驱动，各合并 effect 的 removed 分支同步内部 nodes。 */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const action = canvasDeleteKeyAction(e.key, e.target);
@@ -311,14 +314,11 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       e.stopPropagation();
       if (action !== 'delete-selected') return;
 
-      const ids = deleteSelectedCanvasNodes(nodesRef.current, onDeleteNodeRef.current);
-      if (ids.length === 0) return;
-      const idSet = new Set(ids);
-      setNodes((prev) => prev.filter((node) => !idSet.has(node.id)));
+      deleteSelectedCanvasNodes(nodesRef.current, onDeleteNodeRef.current);
     };
     document.addEventListener('keydown', handler, true);
     return () => document.removeEventListener('keydown', handler, true);
-  }, [setNodes]);
+  }, []);
 
   return (
     <div

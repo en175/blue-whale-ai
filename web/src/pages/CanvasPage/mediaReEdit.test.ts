@@ -54,16 +54,24 @@ describe('isInPlaceRegenTarget 原位承接判定（Q1 原卡重新生成）', (
   });
 });
 
-describe('cancelledTerminalAction 取消终态处置（Q5 保留旧素材）', () => {
+describe('cancelledTerminalAction 取消终态处置（Q5 保留旧素材 + IKDMQW 三分支）', () => {
   it('成品卡取消 → 恢复成品态（不删卡，保留旧素材与最新编辑）', () => {
     expect(cancelledTerminalAction(mediaNode({ src: 'http://a/1.png', jobId: 'j2' }))).toBe('restore');
   });
 
-  it('草稿取消 → 维持既有删除路径（取消竞态属后续切片）', () => {
-    expect(cancelledTerminalAction(mediaNode({ draft: true, genStatus: 'generating' }))).toBe('remove');
+  it('草稿取消 → 回待生成（IKDMQW：保留参数与连线继续调整）', () => {
+    expect(cancelledTerminalAction(mediaNode({ draft: true, genStatus: 'generating' }))).toBe('to-draft');
   });
 
-  it('无生成记录的非草稿节点取消 → 维持删除（历史占位卡语义）', () => {
+  it('视频/音频草稿取消同样回待生成（三类媒体一致）', () => {
+    expect(cancelledTerminalAction(mediaNode({ draft: true, genStatus: 'generating', mediaType: 'video' }))).toBe('to-draft');
+    expect(cancelledTerminalAction(mediaNode({ draft: true, genStatus: 'generating', mediaType: 'audio' }))).toBe('to-draft');
+  });
+
+  it('无生成记录或无旧素材的非草稿节点取消 → 移除（历史占位卡语义）', () => {
     expect(cancelledTerminalAction(mediaNode({ genStatus: 'generating' }))).toBe('remove');
+    // jobId 在但无有效素材（新建占位卡）：没有可保留的内容
+    expect(cancelledTerminalAction(mediaNode({ genStatus: 'generating', jobId: 'j3' }))).toBe('remove');
+    expect(cancelledTerminalAction(mediaNode({ genStatus: 'generating', jobId: 'j3', src: 'blob:preview' }))).toBe('remove');
   });
 });

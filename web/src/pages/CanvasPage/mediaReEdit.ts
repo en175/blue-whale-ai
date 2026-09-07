@@ -29,8 +29,19 @@ export function isInPlaceRegenTarget(node: Node | undefined): boolean {
   return hasGenerationRecord(node);
 }
 
-/** 取消终态处置（Q5）：成品卡恢复成品态保留旧素材与最新编辑；
- *  草稿/历史占位卡维持既有删除路径（普通取消回待生成属后续切片）。 */
-export function cancelledTerminalAction(node: Node | undefined): 'restore' | 'remove' {
-  return hasGenerationRecord(node) ? 'restore' : 'remove';
+/** 取消终态处置（IKDMQU Q5 + IKDMQW）三分支：
+ *  to-draft 草稿卡回待生成（保留参数与连线）；restore 有旧素材的成品卡恢复成品态；
+ *  remove 其余（无旧素材的历史占位卡）移除——没有可保留的内容。 */
+export function cancelledTerminalAction(node: Node | undefined): 'to-draft' | 'restore' | 'remove' {
+  if (!node || node.type !== 'mediaNode') return 'remove';
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  if (data.draft === true) return 'to-draft';
+  if (hasGenerationRecord(node) && hasSettledMediaSrc(data)) return 'restore';
+  return 'remove';
+}
+
+/** 有效旧素材判定（与 MediaNode 展示口径一致）：http(s) 素材算旧素材，blob 预览不算 */
+function hasSettledMediaSrc(data: Record<string, unknown>): boolean {
+  const src = data.src;
+  return typeof src === 'string' && src !== '' && !src.startsWith('blob:');
 }
