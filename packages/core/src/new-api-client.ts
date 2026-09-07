@@ -1,6 +1,7 @@
 // new-api 客户端组合入口。实现按职责拆分到同目录子模块（IK74V8，≤800 行硬线）；
 // 本文件只做组合与再导出，对外导出面保持不变。
 import {
+  createNewApiRawRequest,
   createNewApiRequest,
   createNewApiRequestWithMeta,
 } from "./new-api-transport.js";
@@ -11,7 +12,14 @@ import { createNewApiAdminOps } from "./new-api-admin-ops.js";
 import type { NewApiClientOptions } from "./new-api-types.js";
 
 export * from "./new-api-types.js";
-export { NewApiError, CLIENT_SYSTEM_BLUEWHALE } from "./new-api-transport.js";
+export {
+  createNewApiRawRequest,
+  type NewApiRawRequest,
+  type NewApiRawResult,
+  NewApiError,
+  NewApiTimeoutError,
+  CLIENT_SYSTEM_BLUEWHALE,
+} from "./new-api-transport.js";
 
 /**
  * 原生充值接口（/api/user/amount、/api/user/bluewhalepay/pay、

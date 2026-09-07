@@ -41,7 +41,11 @@ export {
 } from "./ark-image-client.js";
 export {
   createNewApiClient,
+  createNewApiRawRequest,
   NewApiError,
+  NewApiTimeoutError,
+  type NewApiRawRequest,
+  type NewApiRawResult,
   CLIENT_SYSTEM_BLUEWHALE,
   type NewApiClientOptions,
   type NewApiAccountCapabilities,
