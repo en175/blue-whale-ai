@@ -71,11 +71,35 @@ TOPLEVEL=$(git -C "$FILE_DIR" rev-parse --show-toplevel 2>/dev/null || echo "")
 
 # file_path 父目录尚不存在（如 Write 全新子目录文件）→ git -C 失败、BRANCH/TOPLEVEL 空。
 # 向上遍历到最近存在的祖先目录重试，否则误判「仓库外」放行，master 内新文件漏拦。
+# 遍历有界（上限 64 层）且对 dirname 不收敛的盘符根（E:、C: 等，MSYS 下 dirname 自引用）判死：
+# 命中即 fail-closed 按 master 拦截，绝不落到下方「仓库外」放行（IK10D1 codex 适配 + Windows 盘符
+# 伪路径组合会制造 E:\... 这类不可解析路径，无上限会死循环）。POSIX 上路径总能向上收敛，行为不变。
 if [ -z "$BRANCH" ] && [ -z "$TOPLEVEL" ] && [ -n "$FILE_DIR" ] && [ "$FILE_DIR" != "/" ]; then
   ancestor="$FILE_DIR"
-  while [ "$ancestor" != "/" ] && [ ! -d "$ancestor" ]; do
-    ancestor="$(dirname "$ancestor")"
+  steps=0
+  while [ "$ancestor" != "/" ] && [ ! -d "$ancestor" ] && [ "$steps" -lt 64 ]; do
+    next="$(dirname "$ancestor")"
+    if [ "$next" = "$ancestor" ]; then
+      ancestor=""
+      break
+    fi
+    ancestor="$next"
+    steps=$((steps + 1))
   done
+  if [ -z "$ancestor" ]; then
+    # 不可解析路径（盘符根/自引用）→ 无法定位工作树，fail-closed 按 master 硬拦。
+    audit 2 "blocked-master"
+    cat >&2 <<EOF
+BLOCKED: 禁止在 master 分支直接 Edit/Write 文件。
+  工具: $TOOL_NAME（无法解析目标工作树路径: $FILE_DIR）
+
+Agent 不得在本地 master 直接修改文件（最高红线）。
+- 请使用唯一入口创建 task worktree：scripts/start-task-worktree.sh --type fix --issue IK094T --summary 修复工作树写入护栏
+- 在 worktree 的工单分支上完成开发后，走 PR 流程合并
+- 详见 CLAUDE.md「Task Worktree」与 docs/agents/worktree-workflow.md
+EOF
+    exit 2
+  fi
   if [ "$ancestor" != "/" ] && [ -d "$ancestor" ] && [ "$ancestor" != "$FILE_DIR" ]; then
     BRANCH=$(git -C "$ancestor" symbolic-ref --short HEAD 2>/dev/null || echo "")
     TOPLEVEL=$(git -C "$ancestor" rev-parse --show-toplevel 2>/dev/null || echo "")

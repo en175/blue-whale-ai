@@ -116,6 +116,11 @@ def value(key: str) -> int:
     return 0
 
 
+def is_posix_style(path: str) -> bool:
+    """判断路径是否为 POSIX 风格（MSYS/Git Bash 路径，以 / 开头且非盘符）。"""
+    return bool(path) and path.startswith("/")
+
+
 def normalize_codex_apply_patch() -> int:
     data = load_pretool()
     tool_input = data.get("tool_input")
@@ -143,7 +148,15 @@ def normalize_codex_apply_patch() -> int:
         target = match.group(1)
         if not target:
             return 2
-        targets.append(os.path.abspath(os.path.join(cwd, target)))
+        if is_posix_style(cwd):
+            # MSYS/Git Bash 的 session cwd 是 POSIX 形式（/tmp/...、/e/IDEA_Programme/...）。
+            # 这里必须用 posixpath 拼接并保留 POSIX 形式：若用 os.path.abspath（Windows 原生
+            # Python 下是 ntpath），/tmp/... 会被翻译成盘符 E:\tmp\...，而 MSYS bash 的 dirname
+            # 对 E:\... 不收敛，会让 block-master-edit.sh 的祖先遍历死循环（IK10D1 gate 卡死）。
+            # POSIX 平台上 posixpath 即 os.path，行为不变。
+            targets.append(posixpath.normpath(posixpath.join(cwd, target)))
+        else:
+            targets.append(os.path.abspath(os.path.join(cwd, target)))
 
     if not targets:
         return 2
