@@ -85,12 +85,12 @@ await createMaterialAsset({
 type RefItem =
   | { role: 'first_frame'; asset_id?: string; material_id?: string; type: 'image' }
   | { role: 'last_frame';  asset_id?: string; material_id?: string; type: 'image' }
-  | { role: 'reference';   asset_id?: string; material_id?: string; type: 'image' | 'video' };
+  | { role: 'reference';   asset_id?: string; material_id?: string; type: 'image' | 'video' | 'audio' };
 
 references: RefItem[];
 ```
 
-**完整示例**：
+**完整示例**（含参考音频）：
 
 ```json
 {
@@ -107,7 +107,9 @@ references: RefItem[];
     { "role": "first_frame", "asset_id": "4946", "type": "image" },
     { "role": "last_frame",  "material_id": "asset-20260820153209-6c9z8", "type": "image" },
     { "role": "reference",   "asset_id": "4759", "type": "image" },
-    { "role": "reference",   "material_id": "asset-20260827113901-ab12", "type": "video" }
+    { "role": "reference",   "material_id": "asset-20260827113901-ab12", "type": "video" },
+    { "role": "reference",   "asset_id": "4972", "type": "audio" },
+    { "role": "reference",   "material_id": "asset-20260901103002-cd34", "type": "audio" }
   ]
 }
 ```
@@ -117,9 +119,11 @@ references: RefItem[];
 | 字段 | 必填 | 取值 | 说明 |
 |---|---|---|---|
 | `role` | ✅ | `first_frame` / `last_frame` / `reference` | 引用角色 |
-| `type` | ✅ | `image` / `video` | 媒体类型；**首尾帧只能 `image`** |
+| `type` | ✅ | `image` / `video` / `audio` | 媒体类型；**首尾帧只能 `image`**（`audio` 只能作普通参考） |
 | `asset_id` | 二选一 | 纯数字字符串 | 本地 `assets` 表 id |
 | `material_id` | 二选一 | `asset-` 前缀字符串 | 素材库素材 id |
+
+> **参考音频**（`type: "audio"`，IKDJNZ）：与图片/视频参考同数组、同结构，`role` 必须为 `reference`。上游 Seedance 以 `audio_url` + `role: reference_audio` 提交（后端组装，前端只传 id）。
 
 ### 2.3 校验规则（后端创建期强制，400 拒绝）
 
@@ -128,6 +132,8 @@ references: RefItem[];
 3. 普通参考（`role: "reference"`）**≤ 12 个**（首尾帧不计入）。
 4. **`references` 不能与旧参考字段混用**——同时出现 `reference_asset_ids` / `reference_materials` / `first_frame_asset_id` / `last_frame_asset_id` / `first_frame_material_id` / `last_frame_material_id` 任一 → 400 `references 不能与旧参考字段混用`。
 5. 仅 `type: "video"` 支持；图片/音频带 `references` → 400。
+6. **参考音频 `role` 必须为 `reference`**——`first_frame`/`last_frame` 带 `audio` → 400 `参考素材引用无效`。
+7. **参考音频不计入图/视频 12 上限**：`role: "reference"` 且 `type: "audio"` 的项不占普通参考额度，与图片/视频参考分开计数。
 
 ### 2.4 关键语义（前端要知道的）
 
@@ -135,6 +141,7 @@ references: RefItem[];
 - **已关联素材自动转素材库引用**：某 `asset_id` 对应的本地素材若已通过 §1 绑定过 `material_id`，worker 生成时自动走 `asset://<material_id>`（**不走本地 url**），前端**无需**手动把它改成 `material_id`。
 - **去重**：多个 `material_id` 相同时只保留**首次出现**（跨 role 生效，如首帧与参考同一素材只算一次）。
 - **`asset://` 前端不关心**：`asset://<素材id>` 由后端 worker 组装，前端只传 id。
+- **参考音频约束（worker 侧，submit 前）**：≤ 3 个参考音频；参考音频只在 Seedance 2.0 模型下可用（非 2.0 拒绝）。单个音频的时长/格式无本地校验，由上游强校验——**建议前端只放行 mp3/wav 等常规音频，控制时长**。
 
 ### 2.5 旧字段兼容（过渡期）
 
@@ -178,6 +185,7 @@ const refs: RefItem[] = resolvedRefs.map((r, i) => {
 | 生成：有尾帧无首帧 | 400 | `尾帧必须与首帧一起使用` |
 | 生成：首尾帧 `type` 非 image | 400 | `参考素材引用无效` |
 | 生成：普通参考 > 12 | 400 | `参考素材最多 12 个` |
+| 生成：参考音频当首尾帧（`role` 非 reference 且 `type` audio） | 400 | `参考素材引用无效` |
 | 生成：非 video 带 `references` | 400 | `素材库引用仅支持视频生成` |
 
 ---
@@ -188,6 +196,7 @@ const refs: RefItem[] = resolvedRefs.map((r, i) => {
 2. 素材库上传处（`Assets/index.tsx` / `CharacterLibrary`）：`createMaterialAsset` 带 `uploadResult.asset_id`。
 3. 视频生成参考素材组装（`CanvasPage/index.tsx`）：两数组 → 单数组 `references`（保序，role + asset_id/material_id）。
 4. 生成任务请求类型（`web/src/api/jobs.ts`）：增加 `references` 字段类型。
+5. 视频生成参考音频（IKDJNZ 扩展）：`references` 里增加 `{ role: 'reference', asset_id 或 material_id, type: 'audio' }` 项；音频只作普通参考，不做首尾帧；参考音频不计入图/视频 12 上限。
 
 ---
 
@@ -199,3 +208,4 @@ const refs: RefItem[] = resolvedRefs.map((r, i) => {
 4. **素材 id 大写前缀也认**：`asset-` 前缀大小写不敏感（上游实测小写），前端正常传即可。
 5. **账号维度隔离**：`asset-` id / `SourceAssetId` 均在同一登录账号下有效，跨账号无关联。
 6. **历史数据不处理**：改造前的本地素材无 `material_id` 关联，生成时照旧走本地 url，不受影响。
+7. **参考音频仅普通参考**：`role` 必须为 `reference`、`type` 必须为 `audio`；音频不能当首尾帧；视频生成才支持（音频生成一期仍不支持任何参考素材）。

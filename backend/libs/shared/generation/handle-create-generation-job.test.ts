@@ -816,6 +816,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     expect(result.msg).toBe("参考素材引用无效");
     expect(createJob).not.toHaveBeenCalled();
   });
+});
 
 // IKDLQF：target_node_id 文本附件（单个文本附件驱动图片生成）。
 // canvas repo 以 mock 表达：合法路径断言冻结进 input 的快照与当时画布一致（edges 数组顺序），
