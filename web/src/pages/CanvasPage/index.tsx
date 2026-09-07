@@ -110,6 +110,19 @@ export default function CanvasPage() {
   // 优先选中 ?project= 指定的画布（顶部展示该画布名）；切换时回写同一 query 以便刷新还原
   const [currentId, setCurrentId] = useState(() => readCanvasIdFromSearch(searchParams));
   const [showAgent, setShowAgent] = useState(false);
+  const [agentCandidate, setAgentCandidate] = useState<SessionContentBlock[] | null>(null);
+  const cancelAgentCandidate = useCallback(() => setAgentCandidate(null), []);
+  useEffect(() => {
+    if (!showAgent) setAgentCandidate(null);
+  }, [showAgent]);
+  useEffect(() => {
+    if (!agentCandidate) return;
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAgentCandidate(null);
+    };
+    window.addEventListener('keydown', cancel);
+    return () => window.removeEventListener('keydown', cancel);
+  }, [agentCandidate]);
   const [showMiniMap, setShowMiniMap] = useState(false);
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [showBottomDialog, setShowBottomDialog] = useState(false);
@@ -1291,6 +1304,9 @@ export default function CanvasPage() {
   /** 画布节点单击：选取模式下点击对应类型节点带入对话框，其他节点取消选取；
    *  非选取模式点击草稿身份卡（IKDMQQ 图片 / IKDMQS 视频 / IKDMQT 音频）：打开绑定面板继续编辑（待生成/生成中查看/失败修改） */
   const handleCanvasNodeClick = (node: Node) => {
+    if (showAgent && node.type === 'mediaNode' && imageRefSourceError(node) === null) {
+      setAgentCandidate(collectMediaBlocks(node, `canvas:${node.id}`));
+    }
     if (!pickMode || !pickTarget) {
       const data = (node.data ?? {}) as Record<string, unknown>;
       // IKDMQU Q10：保存失败时暂停切换编辑目标，提示重试（发送路径由 flushCanvasSave 单独拦截）；
@@ -1427,6 +1443,7 @@ export default function CanvasPage() {
 
   /** 画布空白处单击：取消节点选取模式 */
   const handleCanvasPaneClick = () => {
+    cancelAgentCandidate();
     imagePanelHiddenRef.current = true;
     videoPanelHiddenRef.current = true;
     audioPanelHiddenRef.current = true;
@@ -4168,6 +4185,8 @@ export default function CanvasPage() {
           initialSkillId={agentContext?.skillId ?? ''}
           initialSkillName={agentContext?.skillName ?? ''}
           mediaBlocks={agentContext?.mediaBlocks}
+          candidateBlocks={agentCandidate}
+          onCancelCandidate={cancelAgentCandidate}
           onPlaceFileOnCanvas={placeFileOnCanvas}
           onPickFromAssets={() => openAssetsPicker('agentPanel')}
           externalAssetPicks={agentAssetPicks}
