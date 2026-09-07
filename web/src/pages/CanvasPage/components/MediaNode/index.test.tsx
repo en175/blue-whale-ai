@@ -181,6 +181,77 @@ describe('MediaNode failed overlay', () => {
   });
 });
 
+describe('MediaNode failed overlay with old media (IKDMQV)', () => {
+  it('重新生成失败的成品卡保留旧素材，失败原因与重试收进底部角标', async () => {
+    await renderNode('image', {
+      genStatus: 'failed',
+      errorText: '内容审核未通过',
+      selected: false,
+      data: { src: 'http://img/old.png', fileName: '生成-j1', jobId: 'j1' },
+    });
+    // 旧素材继续显示（IKDMQU Q5：失败后仍保留旧素材）
+    expect(mountNode.querySelector('img')?.getAttribute('src')).toBe('http://img/old.png');
+    const overlay = mountNode.querySelector('[data-testid="fail-overlay"]');
+    expect(overlay).toBeTruthy();
+    expect(overlay!.textContent).toContain('内容审核未通过');
+    expect(overlay!.textContent).toContain('重试');
+    // 不再整卡遮成失败占位
+    expect(mountNode.textContent).not.toContain('生成失败');
+  });
+
+  it('失败成品卡的角标重试点击派发 onRetryJob（沿用失败任务快照的入口）', async () => {
+    const onRetryJob = vi.fn();
+    await renderNode('image', {
+      genStatus: 'failed',
+      errorText: '内容审核未通过',
+      selected: false,
+      data: { src: 'http://img/old.png', fileName: '生成-j1', jobId: 'j1', onRetryJob },
+    });
+    const overlay = mountNode.querySelector('[data-testid="fail-overlay"]')!;
+    const retry = [...overlay.querySelectorAll('button')].find((b) => b.textContent?.trim() === '重试')!;
+    await act(async () => {
+      retry.click();
+    });
+    expect(onRetryJob).toHaveBeenCalledWith('image-node');
+  });
+
+  it('无后端原因时角标回退「生成失败」文案', async () => {
+    await renderNode('video', {
+      genStatus: 'failed',
+      selected: false,
+      data: { src: 'http://img/old.mp4', fileName: '生成-j1', jobId: 'j1' },
+    });
+    const overlay = mountNode.querySelector('[data-testid="fail-overlay"]');
+    expect(overlay!.textContent).toContain('生成失败');
+    expect(overlay!.textContent).toContain('重试');
+    expect(mountNode.querySelector('video')).toBeTruthy();
+  });
+
+  it('取消态成品卡显示旧素材与「已取消生成」角标，不提供重试', async () => {
+    await renderNode('image', {
+      genStatus: 'cancelled',
+      selected: false,
+      data: { src: 'http://img/old.png', fileName: '生成-j1', jobId: 'j1' },
+    });
+    expect(mountNode.querySelector('img')?.getAttribute('src')).toBe('http://img/old.png');
+    const overlay = mountNode.querySelector('[data-testid="fail-overlay"]');
+    expect(overlay!.textContent).toContain('已取消生成');
+    expect(labels()).toEqual([]);
+  });
+
+  it('无旧素材的失败草稿卡维持占位与重试按钮（现状回归）', async () => {
+    await renderNode('image', {
+      genStatus: 'failed',
+      errorText: '配额不足',
+      selected: false,
+      data: { src: '', draft: true, jobId: 'j1' },
+    });
+    expect(mountNode.querySelector('[data-testid="fail-overlay"]')).toBeNull();
+    expect(mountNode.textContent).toContain('配额不足');
+    expect(labels()).toEqual(['重试']);
+  });
+});
+
 describe('MediaNode external title (image/video)', () => {
   it('shows real resolution for images without file size', async () => {
     await renderNode('image', {

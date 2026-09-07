@@ -390,6 +390,10 @@ export default function CanvasPage() {
   /** 面板当前绑定的音频草稿节点 id（IKDMQT）：仅草稿入口（侧栏新建/点击草稿卡）设置；
    *  生命周期与图片/视频草稿绑定一致 */
   const [audioDraftId, setAudioDraftId] = useState<string | null>(null);
+  /** 侧栏新建草稿的显式选中请求（IKDMQV）：新卡自动选中并取消其余。
+   *  经 Canvas 内部 setNodes 应用——直接经 nodes selected 字段传播会因 React Flow
+   *  selection store 的时序差报双选中，把自动打开的绑定面板当多选误关 */
+  const [selectRequest, setSelectRequest] = useState<{ id: string; ts: number } | null>(null);
   /** 首页 AI视频/AI图片 生成交接：消费后置入此 ref，待项目就绪触发创建任务 */
   const pendingGenRef = useRef<GenHandoff | null>(null);
   /** 首页 AI视频/AI图片 发送带入：唤起底部对话框（参数带入、内容清空），同时直接创建生成任务（生成卡落画布） */
@@ -1396,20 +1400,46 @@ export default function CanvasPage() {
     setPickTarget(null);
     setPickProductId(null);
     setPickAssetId(null);
+    // Q9：点击空白隐藏生成面板（面板编辑已实时写回节点 data，隐藏不丢弃内容）。
+    // 空白点击在 React Flow 是 PaneClick；onSelectionChange 的空选中可能是
+    // 「取消旧选中→选中新卡」的过渡事件，不能作为关闭依据（IKDMQV）。
+    if (imageDraftId) setShowImageDialog(false);
+    if (videoDraftId) setShowBottomDialog(false);
+    if (audioDraftId) setShowAudioDialog(false);
   };
 
-  /** 选中变化（IKDMQU P1/Q9）：点击空白或选中数≠1 时隐藏生成面板；
-   *  面板编辑已实时写回节点 data，隐藏不丢弃内容，重新选中即恢复。
-   *  仅隐藏不清绑定 id——保留「最近编辑目标」供 Q10 保存失败时放行重开原节点；
-   *  其它入口打开新面板时绑定清理 effect 会自动接管旧 id。
+  /** 选中变化（IKDMQU P1/Q9，IKDMQV 修订）：多选或单选切换到非绑定目标时隐藏面板；
+   *  单选命中绑定目标时保持/恢复面板可见。
+   *  空选中（nodes=[]）不在此处理——真空白点击由 onPaneClick 关闭（Q9 本义），
+   *  节点删除由面板绑定清理 effect 关闭。
+   *  仅隐藏不清绑定 id——保留「最近编辑目标」供 Q10 保存失败时放行重开原节点。
    *  选取参考模式进行中不关闭——用户正在为面板挑参考（pickMode 在 onNodeClick 尾部才清空，
    *  selection 变化先到达，此时 pickMode 仍活跃）。 */
   const handleSelectionChange = ({ nodes }: OnSelectionChangeParams) => {
     if (pickMode || pickTarget) return;
-    const soloId = nodes.length === 1 ? nodes[0].id : null;
-    if (imageDraftId && soloId !== imageDraftId) setShowImageDialog(false);
-    if (videoDraftId && soloId !== videoDraftId) setShowBottomDialog(false);
-    if (audioDraftId && soloId !== audioDraftId) setShowAudioDialog(false);
+    // 事件参数在程序化改选中时会滞后误报（React Flow 内部 selection store 与受控 nodes
+    // 的同步窗口：侧栏新建草稿 deselect 旧卡 + select 新卡，事件可能报旧卡+新卡双选中，
+    // 把刚打开的面板当多选误关）——以受控 state 为准：state 明确 selected:false 的排除
+    const candidates = nodes.filter((n) => {
+      const m = mediaNodesRef.current.find((x) => x.id === n.id);
+      return !m || m.selected !== false;
+    });
+    const soloId = candidates.length === 1 ? candidates[0]!.id : null;
+    const syncPanelVisible = (
+      boundId: string | null,
+      setShow: (visible: boolean) => void,
+    ) => {
+      if (!boundId) return;
+      if (soloId && soloId === boundId) {
+        setShow(true); // 命中绑定目标：保持/恢复（修复程序化选中误报把面板当多选误关）
+        return;
+      }
+      if (soloId || candidates.length > 1) setShow(false); // 单选其他卡或多选：隐藏
+      // 空选中：不动作（真空白点击由 onPaneClick 处理，节点删除由绑定清理 effect 处理）
+    };
+    syncPanelVisible(imageDraftId, setShowImageDialog);
+    syncPanelVisible(videoDraftId, setShowBottomDialog);
+    syncPanelVisible(audioDraftId, setShowAudioDialog);
   };
 
   /** 节点拖拽结束：同步本次全部拖动节点的新坐标到父组件 state，触发自动保存。
@@ -1517,6 +1547,7 @@ export default function CanvasPage() {
     setProductNodes(deselect);
     setAssetNodes(deselect);
     setMediaNodes((prev) => [...deselect(prev), node]);
+    setSelectRequest({ id: nodeId, ts: Date.now() });
     openImageDraftDialog(nodeId);
   };
 
@@ -1620,6 +1651,7 @@ export default function CanvasPage() {
     setProductNodes(deselect);
     setAssetNodes(deselect);
     setMediaNodes((prev) => [...deselect(prev), node]);
+    setSelectRequest({ id: nodeId, ts: Date.now() });
     openVideoDraftDialog(nodeId);
   };
 
@@ -1715,6 +1747,7 @@ export default function CanvasPage() {
     setProductNodes(deselect);
     setAssetNodes(deselect);
     setMediaNodes((prev) => [...deselect(prev), node]);
+    setSelectRequest({ id: nodeId, ts: Date.now() });
     openAudioDraftDialog(nodeId);
   };
 
@@ -2064,13 +2097,19 @@ export default function CanvasPage() {
   const locallyRemovedGenerationNodesRef = useRef<Set<string>>(new Set());
   /** 已本地收敛的提取节点：快照若仍停留在 generating，水合不得再开轮询。 */
   const settledExtractNodesRef = useRef<Set<string>>(new Set());
+  /** 节点当前活跃任务登记（IKDMQV）：轮询启动即同步写入，响应到达时核对——
+   *  迟到旧任务响应（创建/重试后仍在飞行的旧 promise）直接丢弃，不覆盖当前任务状态或结果。
+   *  用同步 ref 而非节点 data：patch jobId 经 React 提交有延迟，首个响应可能先于提交到达。 */
+  const activeJobByNodeRef = useRef<Map<string, string>>(new Map());
 
   // 卸载时清理全部轮询
   useEffect(() => {
     const timers = jobTimersRef.current;
+    const activeJobs = activeJobByNodeRef.current;
     return () => {
       timers.forEach((t) => window.clearTimeout(t));
       timers.clear();
+      activeJobs.clear();
     };
   }, []);
 
@@ -2097,23 +2136,27 @@ export default function CanvasPage() {
   /** 轮询函数引用（供水合恢复调用，避免声明顺序依赖） */
   const pollJobRef = useRef<(nodeId: string, jobId: number | string) => void>(() => {});
 
-  /** 轮询任务状态直至终态：succeeded 挂载产物 / failed 展示错误 / cancelled 收敛 */
+  /** 轮询任务状态直至终态：succeeded 挂载产物 / failed 展示错误 / cancelled 收敛。
+   *  启动即登记本任务为节点活跃任务（IKDMQV）：后启动的轮询覆盖登记，
+   *  旧任务迟到的飞行中响应因登记不匹配被丢弃，不得覆盖当前任务。 */
   const pollJob = (nodeId: string, jobId: number | string) => {
     const existing = jobTimersRef.current.get(nodeId);
     if (existing) window.clearTimeout(existing);
+    activeJobByNodeRef.current.set(nodeId, String(jobId));
     const tick = () => {
       fetchJobStatus(jobId)
         .then((detail) => {
-          if (!mediaNodesRef.current.some((n) => n.id === nodeId)) return; // 节点已删除
+          const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+          if (!node) return; // 节点已删除
+          if (activeJobByNodeRef.current.get(nodeId) !== String(jobId)) return; // 迟到旧任务响应——节点已承接新任务，丢弃且不续链
           if (locallyRemovedGenerationNodesRef.current.has(nodeId)) {
             jobTimersRef.current.delete(nodeId);
             return;
           }
           if (isMediaExtractNodeId(nodeId)) {
-            const node = mediaNodesRef.current.find((n) => n.id === nodeId);
             const extractPatch = mediaExtractTerminalPatch(
               detail,
-              typeof node?.data?.fileName === 'string' ? node.data.fileName : undefined,
+              typeof node.data?.fileName === 'string' ? node.data.fileName : undefined,
             );
             if (extractPatch) {
               jobTimersRef.current.delete(nodeId);
@@ -2124,12 +2167,12 @@ export default function CanvasPage() {
           }
           if (detail.status === 'succeeded') {
             jobTimersRef.current.delete(nodeId);
-            const node = mediaNodesRef.current.find((n) => n.id === nodeId);
-            const originalType = node?.data?.mediaType;
+            const originalType = node.data?.mediaType;
             const assetType = detail.asset?.type;
             patchMediaNode(nodeId, {
               genStatus: undefined,
               progress: 100,
+              errorText: undefined,
               src: detail.asset?.url ?? '',
               mediaType: (assetType === 'audio' || assetType === 'video' || assetType === 'image')
                 ? assetType
@@ -2155,7 +2198,6 @@ export default function CanvasPage() {
           }
           if (detail.status === 'cancelled') {
             jobTimersRef.current.delete(nodeId);
-            const node = mediaNodesRef.current.find((n) => n.id === nodeId);
             if (cancelledTerminalAction(node) === 'restore') {
               // IKDMQU Q5：成品卡重新生成被取消 → 恢复成品态，保留旧素材与最新编辑
               patchMediaNode(nodeId, { genStatus: undefined, progress: undefined, errorText: undefined });
@@ -2257,6 +2299,9 @@ export default function CanvasPage() {
     };
     setMediaNodes((prev) => [...prev, node]);
     }
+    // 发起前的活跃任务登记（IKDMQV）：create 返回时核对——期间若被重试等其他提交接管，
+    // 放弃本次结果（不 patch、不开轮询），与 handleRetryJob 的接管核对对称
+    const activeAtCreate = activeJobByNodeRef.current.get(nodeId);
     try {
       createGenerationJob(currentId, {
         type,
@@ -2277,6 +2322,7 @@ export default function CanvasPage() {
         ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
       })
         .then((created) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
           patchMediaNode(nodeId, { jobId: created.generation_job_id });
           pollJob(nodeId, created.generation_job_id);
         })
@@ -2296,19 +2342,24 @@ export default function CanvasPage() {
               patchMediaNode(nodeId, { genStatus: undefined, progress: undefined, errorText: undefined });
             }
           };
+          const takenOver = () => activeJobByNodeRef.current.get(nodeId) !== activeAtCreate;
           if (openRechargeForQuotaError(e)) {
+            if (takenOver()) return; // 已被其他提交接管：回退不得覆盖新任务状态
             if (inPlaceNodeId) rollbackInPlace();
             else setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
             return;
           }
           if (isApiError(e) && e.status === 401) {
-            if (inPlaceNodeId) rollbackInPlace();
-            else setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+            if (!takenOver()) {
+              if (inPlaceNodeId) rollbackInPlace();
+              else setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
+            }
             useAuthPromptStore.getState().addResume(() => {
               startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId);
             });
             return;
           }
+          if (takenOver()) return; // 已被接管：失败态不得覆盖新任务的执行状态
           patchMediaNode(nodeId, {
             genStatus: 'failed',
             errorText: isApiError(e) ? e.message : '创建任务失败',
@@ -2342,20 +2393,28 @@ export default function CanvasPage() {
       });
   };
 
-  /** 重试失败任务：retry 接口创建新任务，节点回到生成中 */
+  /** 重试失败任务：retry 接口创建新任务（沿用失败任务冻结快照），节点回到生成中。
+   *  与「修改后新生成」（面板发送 → createGenerationJob 新任务新快照）是两条独立路径：
+   *  重试不改输入也不落盘画布——历史失败任务输入保持不变（IKDMQV）。 */
   const handleRetryJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const jobId = node?.data?.jobId as number | string | undefined;
     if (!currentId || !jobId) return;
+    // 防重入：首次点击已置 generating（重试按钮随失败占位消失，此处拦截双击与迟到回调交错）
+    if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
     if (blockIfQuotaInsufficient()) return;
     patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
+    // 登记发起重试时的任务为核对基准：retry 返回前若被新任务接管（面板重新提交），放弃本次结果不覆盖
+    activeJobByNodeRef.current.set(nodeId, String(jobId));
     try {
       retryGenerationJob(currentId, jobId)
         .then((created) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== String(jobId)) return;
           patchMediaNode(nodeId, { jobId: created.generation_job_id });
           pollJob(nodeId, created.generation_job_id);
         })
         .catch((e) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== String(jobId)) return;
           if (openRechargeForQuotaError(e)) {
             patchMediaNode(nodeId, {
               genStatus: 'failed',
@@ -3629,6 +3688,7 @@ export default function CanvasPage() {
           onNodeClick={handleCanvasNodeClick}
           onPaneClick={handleCanvasPaneClick}
           onSelectionChange={handleSelectionChange}
+          selectRequest={selectRequest}
           productPickResult={productPickResult}
           assetPickResult={assetPickResult}
           onDeleteNode={(id) => {

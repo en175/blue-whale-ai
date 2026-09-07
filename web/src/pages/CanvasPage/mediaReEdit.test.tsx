@@ -328,9 +328,9 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
     await vi.waitFor(() => expect(promptTextarea()).toBeTruthy());
     await typePrompt('编辑中内容');
 
-    // 点空白：选中集合清空 → 面板隐藏
+    // 点空白（IKDMQV：空白点击收敛为 PaneClick，空选中是过渡态不再关面板）
     await act(async () => {
-      flowProps.current.onSelectionChange({ nodes: [], edges: [] });
+      flowProps.current.onPaneClick();
     });
     expect(container.querySelector('textarea')).toBeNull();
     // 编辑已实时写回节点，隐藏不丢弃
@@ -348,6 +348,28 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
       });
     });
     expect(container.querySelector('textarea')).toBeNull();
+  });
+
+  it('空选中过渡事件不隐藏面板（IKDMQV：取消旧选中→选中新卡的过渡不再误关）', async () => {
+    await renderPage();
+    await clickNode('g1');
+    await vi.waitFor(() => expect(promptTextarea()).toBeTruthy());
+
+    // 模拟 React Flow 的过渡空选中事件：面板保持可见
+    await act(async () => {
+      flowProps.current.onSelectionChange({ nodes: [], edges: [] });
+    });
+    expect(promptTextarea()).toBeTruthy();
+
+    // 单选命中绑定目标（面板曾因过渡事件被关的场景）：恢复可见
+    await act(async () => {
+      flowProps.current.onPaneClick();
+    });
+    expect(container.querySelector('textarea')).toBeNull();
+    await act(async () => {
+      flowProps.current.onSelectionChange({ nodes: [nodeOf('g1')], edges: [] });
+    });
+    await vi.waitFor(() => expect(promptTextarea()).toBeTruthy());
   });
 
   it('音频成品卡点击打开音频面板（修复此前落入图片分支的缺陷）', async () => {
@@ -474,8 +496,9 @@ describe('IKDMQU Q10：保存失败暂停切换编辑目标', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('保存失败'), { timeout: 3000 });
 
     // 隐藏面板后点击其它成品卡：暂停切换编辑目标（不开新面板）
+    // （IKDMQV：空白点击收敛为 PaneClick 关面板；空选中是过渡态不再关）
     await act(async () => {
-      flowProps.current.onSelectionChange({ nodes: [], edges: [] });
+      flowProps.current.onPaneClick();
     });
     await clickNode('g1');
     expect(container.querySelector('textarea')).toBeNull();

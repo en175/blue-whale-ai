@@ -63,6 +63,11 @@ interface FlowCanvasProps {
   onPaneClick?: () => void;
   /** 选中集合变化（IKDMQU：空白/多选隐藏生成面板） */
   onSelectionChange?: (params: OnSelectionChangeParams) => void;
+  /** 父层显式选中请求（IKDMQV，侧栏新建草稿自动选中）：唯一选中目标节点。
+   *  必须经内部 setNodes 应用——外部 nodes 的 selected 字段会被合并保护忽略
+   *  （父层尺寸回填等 update 携带过期选中态时不得覆盖交互），且经外部传播
+   *  会因内部 selection store 的时序差产生旧卡+新卡双选中误报。ts 驱动去重。 */
+  selectRequest?: { id: string; ts: number } | null;
   /** 隐藏右下角缩放控件。Agent 面板打开时它正好压在面板的发送按钮上（IKAGZC）。 */
   hideZoomControl?: boolean;
   /** 注册屏幕点→flow 坐标转换（无参默认视口中心），供父级创建节点时落在用户可见区域并换算 Dock 避让区 */
@@ -73,7 +78,7 @@ interface FlowCanvasProps {
   assetPickResult?: { ts: number; assetId: string; ref: { id: string; src: string; type?: 'image' | 'video'; assetId?: string } } | null;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -81,6 +86,15 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const mediaIdsRef = useRef<Set<string>>(new Set());
   const productIdsRef = useRef<Set<string>>(new Set());
   const assetIdsRef = useRef<Set<string>>(new Set());
+
+  /** 父层显式选中请求（IKDMQV）：唯一选中目标并取消其余——经内部 setNodes 应用，
+   *  同步 React Flow selection store，避免外部 selected 传播的双选中误报。 */
+  const selectReqTsRef = useRef(0);
+  useEffect(() => {
+    if (!selectRequest || selectRequest.ts === selectReqTsRef.current) return;
+    selectReqTsRef.current = selectRequest.ts;
+    setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === selectRequest.id })));
+  }, [selectRequest, setNodes]);
 
   const nodeTypes: NodeTypes = useMemo(() => ({ textNode: TextNode, mediaNode: MediaNode, productNode: ProductNode, assetNode: AssetCardNode }), []);
   const edgeTypes: EdgeTypes = useMemo(() => ({ custom: CustomEdge }), []);
@@ -176,7 +190,9 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
           result = result.map((node) => {
             const update = updated.find((u) => u.id === node.id);
             if (!update) return node;
-            // 父层只在拖动结束时保存坐标；媒体加载不能覆盖画布当前的交互状态。
+            // 父层只在拖动结束时保存坐标；媒体加载不能覆盖画布当前的交互状态
+            // （父层尺寸回填等 update 可能顺带携带过期的 selected，一律以内部交互态为准；
+            //  父层显式选中请求走 selectRequest prop，经内部 setNodes 应用——IKDMQV）
             return {
               ...node,
               ...update,
@@ -371,7 +387,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -397,6 +413,7 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         hideZoomControl={hideZoomControl}
         productPickResult={productPickResult}
         assetPickResult={assetPickResult}
+        selectRequest={selectRequest}
       />
     </ReactFlowProvider>
   );
