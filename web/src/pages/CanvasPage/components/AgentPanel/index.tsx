@@ -453,6 +453,7 @@ interface PendingAttachment {
 }
 
 interface AgentPanelProps {
+  open?: boolean;
   candidateBlocks?: SessionContentBlock[] | null;
   onPrepareCandidate?: (blocks: SessionContentBlock[]) => Promise<SessionContentBlock[]>;
   onCancelCandidate?: () => void;
@@ -512,7 +513,7 @@ function quoteTooltipOfChip(blocks: SessionContentBlock[] | undefined, chipId: s
   return text.length > 500 ? `${text.slice(0, 500)}…` : text;
 }
 
-export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas, onPickFromAssets, externalAssetPicks, candidateBlocks, onPrepareCandidate, onCancelCandidate }: AgentPanelProps) {
+export default function AgentPanel({ open = true, onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas, onPickFromAssets, externalAssetPicks, candidateBlocks, onPrepareCandidate, onCancelCandidate }: AgentPanelProps) {
   useAssetUrlCache();
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
@@ -538,7 +539,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   };
   const [pendingReference, setPendingReference] = useState<{ chip: ChipRef; blocks: SessionContentBlock[] } | null>(null);
   const currentCandidateRef = useRef(candidateBlocks);
-  currentCandidateRef.current = candidateBlocks;
+  currentCandidateRef.current = open ? candidateBlocks : null;
   const preparedBlocksRef = useRef<SessionContentBlock[] | null>(null);
   const [referenceNotice, setReferenceNotice] = useState('');
   const [submittingMessage, setSubmittingMessage] = useState(false);
@@ -650,9 +651,22 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 左缘拖拽中：整面板锁 ew-resize 光标并禁文本选中 */
   const [resizing, setResizing] = useState(false);
   const resizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  /** 关闭中：抽屉先滑出（240ms 动画）再回调 onClose 卸载 */
+  /** 关闭中：抽屉先滑出（240ms 动画）再回调 onClose 隐藏 */
   const [closing, setClosing] = useState(false);
   const closeTimerRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (open) setClosing(false);
+    else {
+      window.clearTimeout(closeTimerRef.current);
+      setPendingReference(null);
+      preparedBlocksRef.current = null;
+      setHistoryOpen(false);
+      setModelOpen(false);
+      setShowUpload(false);
+      setShowSkillModal(false);
+      setDeleteTarget(null);
+    }
+  }, [open]);
 
   /**
    * 量一次面板与它的父容器，初始化 / 缩窗 / 拖拽三处共用同一组输入。
@@ -694,6 +708,31 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const prevChipIdsRef = useRef<Set<string>>(new Set());
   /** 编辑器重做恢复标签时，同步恢复其已确认内容；成功发送后一起清空。 */
   const referenceHistoryRef = useRef(new Map<string, SessionContentBlock[]>());
+  const draftEpochRef = useRef(0);
+  const draftSessionRef = useRef(sessionId);
+  const clearDraft = useCallback(() => {
+    draftEpochRef.current += 1;
+    currentCandidateRef.current = null;
+    preparedBlocksRef.current = null;
+    setPendingReference(null);
+    onCancelCandidate?.();
+    referenceHistoryRef.current.clear();
+    prevChipIdsRef.current.clear();
+    chipEditorRef.current?.clear();
+    setComposed(EMPTY_COMPOSED);
+    pendingMediaBlocksRef.current = [];
+    setPendingMediaBlocksState([]);
+    setForcedSkill(null);
+    for (const item of attachmentsRef.current) revokeAttachmentPreviewUrl(item.url);
+    setAttachments([]);
+    submittingMessageRef.current = false;
+    setSubmittingMessage(false);
+  }, [onCancelCandidate]);
+  useEffect(() => {
+    // 首次会话水合承接当前输入；已有会话被切换或删除时不能携带草稿。
+    if (draftSessionRef.current && draftSessionRef.current !== sessionId) clearDraft();
+    draftSessionRef.current = sessionId;
+  }, [sessionId, clearDraft]);
 
   useEffect(() => {
     if (!inputVersion || inputVersion === lastInputVersionRef.current) return;
@@ -815,7 +854,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
    */
   const cancellable = streaming || runningRunId !== null;
   useEffect(() => {
-    if (!cancellable || pendingReference) return;
+    if (!open || closing || !cancellable || pendingReference) return;
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target instanceof HTMLElement ? e.target : null;
       if (
@@ -834,7 +873,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [cancellable, stopRun, pendingReference]);
+  }, [open, closing, cancellable, stopRun, pendingReference]);
 
   /**
    * 轮次有任何变化（新消息、流式正文、思考、工具进度）/ 进入页面：滚动条拉到最底部。
@@ -1041,12 +1080,16 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     persistPanelWidth(width);
   };
 
-  /** 关闭：先让抽屉滑出（动画 240ms），走完再回调父组件卸载 */
+  /** 关闭：先让抽屉滑出（动画 240ms），走完再回调父组件隐藏 */
   const handleClose = useCallback(() => {
     if (closing) return;
+    currentCandidateRef.current = null;
+    preparedBlocksRef.current = null;
+    setPendingReference(null);
+    onCancelCandidate?.();
     setClosing(true);
     closeTimerRef.current = window.setTimeout(() => onClose(), DRAWER_SLIDE_MS);
-  }, [closing, onClose]);
+  }, [closing, onClose, onCancelCandidate]);
 
   useEffect(() => () => window.clearTimeout(closeTimerRef.current), []);
 
@@ -1057,8 +1100,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
   /** 开启新对话：清空当前输入、消息流、武装技能与历史下拉 */
   const handleNewChat = () => {
-    // 不清空输入框：面板明写着「未发送的草稿会自动保留」，
-    // 开新对话把用户刚敲的字抹掉，与承诺相反。
+    clearDraft();
+    draftSessionRef.current = null;
     resetChat();
     setForcedSkill(null);
     setHistoryOpen(false);
@@ -1136,9 +1179,10 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     const armed = forcedSkill;
     if (armed) setSkillNames((prev) => ({ ...prev, [armed.id]: armed.name }));
     const sentAttachments = attachments;
+    const sentEpoch = draftEpochRef.current;
     try {
       const accepted = await sendMessage(orderedContent, armed?.id, undefined, armed?.name, userText, chips);
-      if (accepted) {
+      if (accepted && sentEpoch === draftEpochRef.current) {
         referenceHistoryRef.current.clear();
         chipEditorRef.current?.clear();
         pendingMediaBlocksRef.current = [];
@@ -1148,9 +1192,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         for (const item of sentAttachments) revokeAttachmentPreviewUrl(item.url);
       }
     } finally {
-      submittingMessageRef.current = false;
-      setSubmittingMessage(false);
-      onCancelCandidate?.();
+      if (sentEpoch === draftEpochRef.current) {
+        submittingMessageRef.current = false;
+        setSubmittingMessage(false);
+        onCancelCandidate?.();
+      }
     }
   };
 
@@ -1250,7 +1296,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           : `${styles.panelDrawer} ${closing ? styles.panelDrawerClosing : ''}`
       } ${!floating && resizing ? styles.panelResizing : ''}`}
       style={
-        floating
+        !open ? { display: 'none' } : floating
           ? initialized
             ? { left: position.x, top: position.y, height: panelHeight, transform: 'none' }
             : undefined
@@ -1359,6 +1405,10 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                               type="button"
                               className={styles.historyItemLabel}
                               onClick={() => {
+                                if (s.session_id !== sessionId) {
+                                  clearDraft();
+                                  draftSessionRef.current = s.session_id;
+                                }
                                 switchSession(s.session_id);
                                 setHistoryOpen(false);
                               }}
@@ -1407,7 +1457,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           <div className={styles.hintArea}>
             <h3 className={styles.hintTitle}>让 Agent 帮你创作</h3>
             <p className={styles.hintDesc}>
-              描述你想生成的图片或视频，发送第一条消息即可开始。未发送的草稿会自动保留。
+              描述你想生成的图片或视频，发送第一条消息即可开始。同一会话关闭重开后，未发送的草稿会保留。
             </p>
           </div>
 
@@ -1583,19 +1633,20 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               onPreparePending={async () => {
                 if (!pendingReference) return null;
                 const candidate = candidateBlocks;
+                const epoch = draftEpochRef.current;
                 preparedBlocksRef.current = null;
                 try {
                   const blocks = onPrepareCandidate
                     ? await onPrepareCandidate(pendingReference.blocks)
                     : pendingReference.blocks;
-                  if (currentCandidateRef.current !== candidate) return null;
+                  if (currentCandidateRef.current !== candidate || draftEpochRef.current !== epoch) return null;
                   const first = blocks[0];
                   // 快照身份区分同一节点的不同确认版本，撤销/重做不会串用新版正文。
                   const id = first.quote_id ? `quote:${first.quote_id}` : pendingReference.chip.id;
                   preparedBlocksRef.current = blocks.map((block) => ({ ...block, chip_id: id }));
                   return { ...pendingReference.chip, id, label: first.display_label || pendingReference.chip.label, prompt: first.resource_text || '' };
                 } catch (error) {
-                  if (currentCandidateRef.current === candidate) {
+                  if (currentCandidateRef.current === candidate && draftEpochRef.current === epoch) {
                     setReferenceNotice(`确认引用失败：${error instanceof Error ? error.message : '请检查网络后重试'}`);
                   }
                   return null;

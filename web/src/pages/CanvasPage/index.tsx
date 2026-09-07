@@ -110,6 +110,9 @@ export default function CanvasPage() {
   // 优先选中 ?project= 指定的画布（顶部展示该画布名）；切换时回写同一 query 以便刷新还原
   const [currentId, setCurrentId] = useState(() => readCanvasIdFromSearch(searchParams));
   const [showAgent, setShowAgent] = useState(false);
+  // 同一画布关闭面板只隐藏，保留会话、编辑器与未发送引用。
+  const [agentOpened, setAgentOpened] = useState(false);
+  useEffect(() => { if (showAgent) setAgentOpened(true); }, [showAgent]);
   const [agentCandidate, setAgentCandidate] = useState<SessionContentBlock[] | null>(null);
   const cancelAgentCandidate = useCallback(() => setAgentCandidate(null), []);
   useEffect(() => {
@@ -640,6 +643,10 @@ export default function CanvasPage() {
     prevProjectIdRef.current = currentId;
     if (!prev || prev === currentId) return;
     setShowAgent(false);
+    setAgentOpened(false);
+    setAgentContext(null);
+    setAgentAssetPicks(null);
+    setAgentCandidate(null);
     setFocusViewport(undefined);
   }, [currentId]);
 
@@ -4208,8 +4215,10 @@ export default function CanvasPage() {
       </div>
 
       {/* Agent 对话框 */}
-      {showAgent && (
+      {(showAgent || agentOpened) && (
         <AgentPanel
+          key={currentId}
+          open={showAgent}
           onClose={() => setShowAgent(false)}
           initialInput={agentContext?.text ?? ''}
           initialCardLabel={agentContext?.label}
