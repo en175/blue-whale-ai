@@ -59,7 +59,8 @@ interface ChipTextEditorProps {
    * 由调用方自己在 send 时调 `resolveComposed`。字数统计、禁用态判断都从片段派生。
    */
   onChange: (value: ComposedValue) => void;
-  onSend: () => void;
+  /** 不提供时 Enter 仅换行，发送由外部按钮触发。 */
+  onSend?: () => void;
   className?: string;
   /** 只读（IKDMQS）：生成中草稿参数冻结，编辑器不可输入、Enter 不发送 */
   readOnly?: boolean;
@@ -82,13 +83,13 @@ function EditorRefBridge({ editorRef }: { editorRef: React.MutableRefObject<Lexi
 }
 
 /** Enter 发送 / Shift+Enter 换行：跟原生 textarea 的既有约定保持一致 */
-function EnterKeyPlugin({ onSend, readOnly }: { onSend: () => void; readOnly?: boolean }) {
+function EnterKeyPlugin({ onSend, readOnly }: { onSend?: () => void; readOnly?: boolean }) {
   const [editor] = useLexicalComposerContext();
   useEffect(() => {
     return editor.registerCommand<KeyboardEvent | null>(
       KEY_ENTER_COMMAND,
       (event) => {
-        if (event?.shiftKey) return false;
+        if (!onSend || event?.shiftKey) return false;
         if (readOnly) return true; // 只读：吞掉 Enter 但不发送
         event?.preventDefault();
         onSend();
