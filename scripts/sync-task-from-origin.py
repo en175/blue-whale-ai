@@ -25,6 +25,7 @@ def git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProce
     return subprocess.run(
         ["git", "-C", str(root), *args],
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=check,
     )
@@ -38,6 +39,7 @@ def repository_root() -> Path:
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
         text=True,
+        encoding="utf-8",
         capture_output=True,
     )
     if result.returncode != 0:
@@ -61,6 +63,7 @@ def worktree_context(root: Path) -> tuple[Path, str]:
     validation = subprocess.run(
         [sys.executable, str(validator), "--validate-branch", branch],
         text=True,
+        encoding="utf-8",
         capture_output=True,
     )
     if validation.returncode != 0:
@@ -276,6 +279,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows 原生 Python 的 stdout/stderr 默认 GBK，emit() 的 ensure_ascii=False
+    # 中文输出会抛 UnicodeEncodeError（与 subprocess 解码同根因的输出方向）。
+    # 强制改 UTF-8；POSIX 本就 UTF-8，reconfigure 为 no-op，不影响其他操作系统。
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
     args = parse_args(argv or sys.argv[1:])
     try:
         if args.target_branch != "master" and not (

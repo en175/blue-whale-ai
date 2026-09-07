@@ -4,6 +4,11 @@ import subprocess
 import tempfile
 import unittest
 
+try:  # 作为 scripts.tests.* 命名空间包导入
+    from .bash_helper import BASH
+except ImportError:  # 经 discover -s scripts/tests 顶层导入
+    from bash_helper import BASH
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "run-ik50gb-c-testsite-probe.sh"
@@ -23,11 +28,12 @@ class TestProbeTerminalTimeout(unittest.TestCase):
             }
         )
         result = subprocess.run(
-            ["bash", str(SCRIPT)],
+            [BASH, str(SCRIPT)],
             cwd=ROOT,
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(result.returncode, 2)
@@ -41,11 +47,12 @@ class TestIk50gbCTestsiteProbe(unittest.TestCase):
         env["BW_TEST_USERNAME"] = "probe-user"
         env["BW_TEST_PASSWORD"] = "probe-password"
         result = subprocess.run(
-            ["bash", str(SCRIPT)],
+            [BASH, str(SCRIPT)],
             cwd=ROOT,
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertNotEqual(result.returncode, 0)
@@ -61,11 +68,12 @@ class TestIk50gbCTestsiteProbe(unittest.TestCase):
             }
         )
         result = subprocess.run(
-            ["bash", str(SCRIPT)],
+            [BASH, str(SCRIPT)],
             cwd=ROOT,
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(result.returncode, 2)
@@ -82,11 +90,12 @@ class TestIk50gbCTestsiteProbe(unittest.TestCase):
             }
         )
         result = subprocess.run(
-            ["bash", str(SCRIPT)],
+            [BASH, str(SCRIPT)],
             cwd=ROOT,
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         # URL 闸门放行后会在网络层失败（域名不可解析），但不得是 HTTPS 拒绝。
@@ -104,11 +113,12 @@ class TestIk50gbCTestsiteProbe(unittest.TestCase):
             }
         )
         result = subprocess.run(
-            ["bash", str(SCRIPT)],
+            [BASH, str(SCRIPT)],
             cwd=ROOT,
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(result.returncode, 2)
@@ -132,7 +142,7 @@ class TestIk50gbCTestsiteProbe(unittest.TestCase):
                 }
             )
             result = subprocess.run(
-                ["bash", str(SCRIPT)],
+                [BASH, str(SCRIPT)],
                 cwd=ROOT,
                 env=env,
                 capture_output=True,
@@ -182,7 +192,7 @@ sys.stdout.write("200")
                 }
             )
             result = subprocess.run(
-                ["bash", str(SCRIPT)],
+                [BASH, str(SCRIPT)],
                 cwd=ROOT,
                 env=env,
                 capture_output=True,
@@ -246,7 +256,7 @@ sys.stdout.write("200")
                 }
             )
             result = subprocess.run(
-                ["bash", str(SCRIPT)],
+                [BASH, str(SCRIPT)],
                 cwd=ROOT,
                 env=env,
                 capture_output=True,

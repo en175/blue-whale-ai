@@ -4,14 +4,52 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 
 class RecoveryError(RuntimeError):
     pass
+
+
+def _restrict_to_owner(path: Path) -> None:
+    """把恢复点文件权限收窄为仅属主可读写。
+
+    POSIX 直接用 os.chmod 设 0o600；Windows 的 os.chmod 无法设置 Unix 权限位
+    （NTFS 无 mode bits），改用 icacls 显式撤销 Everyone/Users 并授予当前用户，
+    效果等价于"仅属主私有"。两种实现都只在成功时静默，失败交由调用方兜底。
+    """
+    if os.name == "nt":
+        # icacls 的 grant 目标是「账户 SID 映射后的规范名」：字面量 CURRENT_USER
+        # 不是有效标识（实测 rc=52 "安全标识符无法映射"）。getpass.getuser() 返回
+        # 可 round-trip 的账户名（本机实测 = USERNAME，icacls 可识别）；USERNAME
+        # 在非英文 Windows 上可能返回本地化名，故优先 getpass。
+        owner = getpass.getuser() or os.environ.get("USERNAME") or os.environ.get("USER")
+        try:
+            subprocess.run(
+                [
+                    "icacls",
+                    str(path),
+                    "/inheritance:r",
+                    "/grant:r",
+                    "{}:F".format(owner),
+                ],
+                check=True,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except (OSError, subprocess.CalledProcessError):
+            pass
+    else:
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
 
 
 def load_recovery(path: Path) -> dict[str, object]:
@@ -30,7 +68,7 @@ def write_recovery(path: Path, data: dict[str, object]) -> None:
         temporary.write_text(
             json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
-        os.chmod(temporary, 0o600)
+        _restrict_to_owner(temporary)
         temporary.replace(path)
     except OSError as exc:
         raise RecoveryError("同步恢复点无法原子写入：{}".format(exc)) from exc
