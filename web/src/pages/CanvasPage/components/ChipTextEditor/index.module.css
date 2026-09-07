@@ -78,3 +78,13 @@
 .chipRemove:hover {
   background-color: var(--color-bg-hover, rgba(255, 255, 255, 0.08));
 }
+
+.pendingChip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px dashed var(--color-border-secondary);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  padding-right: 6px;
+}

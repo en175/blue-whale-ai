@@ -18,7 +18,7 @@ import { VideoMentionChip } from '../VideoMentionChip';
 import styles from './index.module.css';
 
 export type SerializedChipNode = Spread<
-  { refId: string; label: string; prompt: string; imageUrl?: string; videoUrl?: string },
+  { refId: string; label: string; prompt: string; imageUrl?: string; videoUrl?: string; pending?: boolean },
   SerializedLexicalNode
 >;
 
@@ -35,6 +35,7 @@ function ChipComponent({
 }) {
   const [editor] = useLexicalComposerContext();
   const handleRemove = () => {
+    if (!editor.isEditable()) return;
     editor.update(() => {
       const node = $getNodeByKey(nodeKey);
       node?.remove();
@@ -69,13 +70,14 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
   __prompt: string;
   __imageUrl: string | undefined;
   __videoUrl: string | undefined;
+  __pending: boolean;
 
   static getType(): string {
     return 'chip';
   }
 
   static clone(node: ChipNode): ChipNode {
-    return new ChipNode(node.__refId, node.__label, node.__prompt, node.__key, node.__imageUrl, node.__videoUrl);
+    return new ChipNode(node.__refId, node.__label, node.__prompt, node.__key, node.__imageUrl, node.__videoUrl, node.__pending);
   }
 
   constructor(
@@ -85,6 +87,7 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
     key?: NodeKey,
     imageUrl?: string,
     videoUrl?: string,
+    pending = false,
   ) {
     super(key);
     this.__refId = refId;
@@ -92,6 +95,15 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
     this.__prompt = prompt;
     this.__imageUrl = imageUrl;
     this.__videoUrl = videoUrl;
+    this.__pending = pending;
+  }
+
+  isPending(): boolean {
+    return this.getLatest().__pending;
+  }
+
+  confirm(): void {
+    this.getWritable().__pending = false;
   }
 
   createDOM(): HTMLElement {
@@ -120,7 +132,7 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
    * 解引用现在只发生在提交那一刻，见 `composed.ts` 的 `resolveComposed`。
    */
   getTextContent(): string {
-    return this.__label;
+    return this.__pending ? '' : this.__label;
   }
 
   /** 供 `composed.ts` 读出结构化片段——不经过任何字符串拼接。 */
@@ -138,6 +150,7 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
       prompt: this.__prompt,
       ...(this.__imageUrl ? { imageUrl: this.__imageUrl } : {}),
       ...(this.__videoUrl ? { videoUrl: this.__videoUrl } : {}),
+      ...(this.__pending ? { pending: true } : {}),
     };
   }
 
@@ -148,10 +161,17 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
       serialized.prompt,
       serialized.imageUrl,
       serialized.videoUrl,
+      serialized.pending,
     );
   }
 
   decorate(): JSX.Element {
+    if (this.__pending) {
+      return <span className={styles.pendingChip} contentEditable={false} aria-label={`待确认引用：${this.__label}`}>
+        {this.__imageUrl && <ImageMentionChip url={this.__imageUrl} label={this.__label} />}
+        <span>待确认引用</span>
+      </span>;
+    }
     return (
       <ChipComponent
         nodeKey={this.getKey()}
@@ -169,8 +189,9 @@ export function $createChipNode(
   prompt: string,
   imageUrl?: string,
   videoUrl?: string,
+  pending = false,
 ): ChipNode {
-  return new ChipNode(refId, label, prompt, undefined, imageUrl, videoUrl);
+  return new ChipNode(refId, label, prompt, undefined, imageUrl, videoUrl, pending);
 }
 
 export function $isChipNode(node: LexicalNode | null | undefined): node is ChipNode {
