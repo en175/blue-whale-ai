@@ -1502,7 +1502,7 @@ export default function CanvasPage() {
         ? imageRefSourceError(source) !== null
         : videoRefSourceError(source, readRefRole(e)) !== null;
     });
-    if (stale) showToast('warn', '部分参考素材已失效，已忽略');
+    if (stale) showToast('warn', '部分参考素材已失效，请恢复素材或移除引用后发送');
   };
 
   /** 按媒体类型打开对应绑定面板（IKDMQU）：图片/视频/音频统一派发，编辑实时写回本卡 */
@@ -2471,10 +2471,7 @@ export default function CanvasPage() {
     }
   };
 
-  /** 普通取消（IKDMQW）：cancel 200 仅代表软取消已登记，请求发出不视为取消成功；
-   *  卡片终态以任务权威状态收敛——cancelled / 仍 processing（worker 未停）→ 草稿回待生成
-   *  （保留参数与连线）/ 成品卡恢复 / 占位移除；succeeded 竞态 → 挂载作品。
-   *  取消失败：卡片保持生成中（任务可继续查看），提示原因。 */
+  /** 取消接口仅登记意图；权威终态确认前保留生成中状态及轮询，避免编辑/删除绕过在途保护。 */
   const handleCancelJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const jobId = node?.data?.jobId as number | string | undefined;
@@ -2488,10 +2485,12 @@ export default function CanvasPage() {
           applyJobTerminal(nodeId, jobId, detail);
           return;
         }
-        if (detail?.status === 'cancelled') stopJobPolling(nodeId, jobTimersRef.current);
-        // cancelled / processing（软取消已登记）/ 状态不可得：取消已确认，可见状态收敛；
-        // processing 时不停轮询——后续权威终态（cancelled 幂等 / succeeded 挂载）自然收敛
-        settleCancelledNode(nodeId);
+        if (detail?.status === 'cancelled') {
+          stopJobPolling(nodeId, jobTimersRef.current);
+          settleCancelledNode(nodeId);
+          return;
+        }
+        showToast('warn', '取消已请求，正在等待任务停止');
       })
       .catch((e) => {
         console.warn('取消生成失败:', e);

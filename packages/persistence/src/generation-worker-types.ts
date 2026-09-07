@@ -1,6 +1,8 @@
 // IK74V8：generation worker 仓储的行投影类型与接口（从 generation-worker-repo.ts 拆出）。
 
 export interface ClaimedJob {
+  /** 领取时已登记取消；历史调用方未携带时沿用未取消。 */
+  cancelRequested?: boolean;
   id: string;
   project_id: string;
   user_id: string;

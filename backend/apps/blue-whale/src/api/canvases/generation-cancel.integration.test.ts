@@ -17,6 +17,14 @@ import { GenerationCommandService } from "@lib/shared/generation/generation-comm
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 
+import { createWorkerRepo } from "@blue-whale/persistence";
+import { openGenerationCredential } from "@blue-whale/core";
+import { ERROR_UNSUPPORTED_INPUT } from "@blue-whale/contracts";
+import { processImageJobById, processAudioJobById, type WorkerDeps } from "@lib/shared/generation/worker/generation-worker.js";
+import { ImageProviderError, type GenerateImageInput } from "@lib/shared/generation/worker/image-provider.js";
+import { runVideoJobStep } from "@lib/shared/generation-runtime/video-job-runner.js";
+import { createPassthroughVideoMediaRelay } from "@lib/shared/generation-runtime/tos-video-media-relay.js";
+
 // IKDMQW「取消、删除与任务完成竞态」公开接口集成（契约沿用 IKDMQQ~IKDMQV）：
 // 图片取消直接收敛 cancelled 并撤销写入权；视频/音频保留软取消。非本次取消形成的终态拒绝取消（100301）；
 // 前端删除/取消流程的权威核对依赖 GET /api/jobs/:id 反映落库终态。
@@ -31,8 +39,12 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
   let app: Awaited<ReturnType<typeof NestFactory.create>>;
   let base = "";
   const previousDatabase = process.env.DATABASE_URL;
+  const previousSecret = process.env.GENERATION_CREDENTIAL_SECRET;
+  const credentialSecret = "ikdwl8-isolated-test-credential";
+  const providerRequests: GenerateImageInput[] = [];
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKDMQW_DATABASE_URL;
+    process.env.GENERATION_CREDENTIAL_SECRET = credentialSecret;
     await prisma.client.generation_model_capability.upsert({
       where: { provider_id_model_id: { provider_id: "ikdmqw-test", model_id: IMAGE_MODEL } },
       create: {
@@ -114,6 +126,8 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
     await app?.close();
     if (previousDatabase === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previousDatabase;
+    if (previousSecret === undefined) delete process.env.GENERATION_CREDENTIAL_SECRET;
+    else process.env.GENERATION_CREDENTIAL_SECRET = previousSecret;
     await prisma.client.$disconnect();
   });
 
@@ -152,7 +166,7 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
   async function createJob(projectId: string, body: unknown) {
     const response = await fetch(`${base}/api/projects/${projectId}/generation-jobs`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", authorization: "Bearer sk-ikdwl8-test" },
       body: JSON.stringify(body),
     });
     return response.json();
@@ -171,36 +185,42 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
   async function readJobRow(jobId: string) {
     return prisma.client.generation_jobs.findUnique({ where: { id: BigInt(jobId) } });
   }
-  /** 供应商替身：直接落库把任务置为终态（job + 输出槽） */
-  async function settleJob(jobId: string, status: "succeeded" | "failed" | "cancelled", assetUrl?: string) {
-    if (status === "succeeded") {
-      const row = await readJobRow(jobId);
-      const asset = await prisma.client.assets.create({
-        data: {
-          user_id: BigInt(987654),
-          project_id: row!.project_id,
-          type: row!.type as "image" | "video" | "audio",
-          url: assetUrl ?? `https://example.com/ikdmqw-${jobId}.png`,
-          width: 1024,
-          height: 1024,
-          size: BigInt(2048),
-        },
-      });
-      await prisma.client.generation_output_slots.updateMany({
-        where: { generation_job_id: BigInt(jobId) },
-        data: { status: "succeeded", asset_id: asset.id },
-      });
-      await prisma.client.generation_jobs.update({
-        where: { id: BigInt(jobId) },
-        data: { status: "succeeded", output_asset_ids: [asset.id.toString()] },
-      });
-      return;
+  /** 仅供应商端口可控；认领、快照解析、素材、输出槽和终态全部走生产 Worker/仓储。 */
+  async function executeWorker(jobId: string, outcome: "succeeded" | "failed" | "cancelled", assetUrl?: string, beforeResult?: () => Promise<void>, expectedStatus = outcome) {
+    const row = (await readJobRow(jobId))!;
+    if (outcome === "cancelled" && !row.cancel_requested_at) {
+      expect((await cancelJob(String(row.project_id), jobId)).code).toBe(200);
     }
-    await prisma.client.generation_output_slots.updateMany({
-      where: { generation_job_id: BigInt(jobId) },
-      data: { status },
-    });
-    await prisma.client.generation_jobs.update({ where: { id: BigInt(jobId) }, data: { status } });
+    const repo = createWorkerRepo(prisma.client);
+    const credentialVault = { open: (cipher: string) => openGenerationCredential(cipher, credentialSecret) };
+    const deps: WorkerDeps = {
+      repo, workerId: "ikdwl8-integration", credentialVault,
+      createImageProvider: (token) => {
+        expect(token).toBe("sk-ikdwl8-test");
+        return { generate: async (input) => {
+          providerRequests.push(input);
+          await beforeResult?.();
+          if (outcome === "cancelled") throw new Error("取消任务不应派发供应商");
+          if (outcome === "failed") throw new ImageProviderError(ERROR_UNSUPPORTED_INPUT, "供应商拒绝输入");
+          return [{ url: assetUrl ?? `https://example.com/ikdwl8-${jobId}.png`, width: 1024, height: 1024 }];
+        } };
+      },
+      createAudioProvider: () => ({ generate: async () => { throw new Error("取消任务不应派发供应商"); } }),
+    };
+    await vi.waitFor(async () => {
+      const current = (await readJobRow(jobId))!;
+      if (current.next_action_at) expect(current.next_action_at.getTime()).toBeLessThanOrEqual(Date.now());
+    }, { timeout: 2_000 });
+    if (row.type === "video") {
+      await runVideoJobStep({ repo, workerId: deps.workerId, jobId, credentialVault,
+        createProvider: () => ({
+          submit: async () => { throw new Error("取消任务不应派发供应商"); },
+          poll: async () => { throw new Error("取消任务不应轮询供应商"); },
+        }), mediaRelay: createPassthroughVideoMediaRelay(),
+      });
+    } else if (row.type === "audio") await processAudioJobById(jobId, deps);
+    else await processImageJobById(jobId, deps);
+    expect((await getJobDetail(jobId)).data.status).toBe(expectedStatus);
   }
 
   it("图片取消：200 登记 cancel_requested_at 并收敛终态，重复取消幂等", async () => {
@@ -228,7 +248,7 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
     expect(second.code).toBe(200);
   });
 
-  it("终态任务拒绝取消：succeeded/failed/cancelled → 100301 资源不存在（删除竞态的判定来源）", async () => {
+  it("成功/失败终态拒绝取消，已确认图片取消可幂等重放", async () => {
     const projectId = (await projects.create("987654", "IKDMQW terminal reject")).id;
     expect(
       (await saveCanvas(projectId, [mediaDraftNode("d1", "image", "暮色")], [], "missing")).status,
@@ -241,39 +261,63 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
         parameters: { prompt: `暮色-${terminal}`, model_id: IMAGE_MODEL, aspect_ratio: "1:1" },
       });
       const jobId = created.data.generation_job_id as string;
-      await settleJob(jobId, terminal);
+      await executeWorker(jobId, terminal);
       const result = await cancelJob(projectId, jobId);
-      expect(result.code, `${terminal} 终态不可取消`).toBe(100301);
-      expect(result.msg).toBe("资源不存在");
+      expect(result.code).toBe(terminal === "cancelled" ? 200 : 100301);
+      if (terminal !== "cancelled") expect(result.msg).toBe("资源不存在");
     }
     // 不存在的任务同样 100301
     expect((await cancelJob(projectId, "999999999")).code).toBe(100301);
   });
 
-  it("图片取消确认后权威查询立即返回 cancelled（前端核对依赖）", async () => {
-    const projectId = (await projects.create("987654", "IKDMQW authority")).id;
-    expect(
-      (await saveCanvas(projectId, [mediaDraftNode("d1", "image", "暮色")], [], "missing")).status,
-    ).toBe(200);
+  it.each(["image", "video", "audio"] as const)("%s 排队取消最终收敛，不调用供应商", async (type) => {
+    const model = { image: IMAGE_MODEL, video: VIDEO_MODEL, audio: AUDIO_MODEL }[type];
+    const projectId = (await projects.create("987654", "IKDWL8 authority")).id;
+    expect((await saveCanvas(projectId, [mediaDraftNode("d1", type, "暮色")], [], "missing")).status).toBe(200);
     const created = await createJob(projectId, {
-      type: "image",
-      target_node_id: "d1",
-      expected_output_count: 1,
-      parameters: { prompt: "暮色", model_id: IMAGE_MODEL, aspect_ratio: "1:1" },
+      type, target_node_id: "d1", expected_output_count: 1,
+      parameters: { prompt: "暮色", model_id: model,
+        ...(type === "video" ? { size: "720p", aspect_ratio: "16:9", duration: 5 } : type === "image" ? { aspect_ratio: "1:1" } : {}),
+      },
     });
+    expect(created.code).toBe(200);
     const jobId = created.data.generation_job_id as string;
     expect((await cancelJob(projectId, jobId)).code).toBe(200);
+    expect((await getJobDetail(jobId)).data.status).toBe(type === "image" ? "cancelled" : "queued");
+    const callsBefore = providerRequests.length;
+    await executeWorker(jobId, "cancelled");
+    expect(providerRequests).toHaveLength(callsBefore);
+    expect(await prisma.client.assets.count({ where: { generation_job_id: BigInt(jobId) } })).toBe(0);
+  });
 
-    // IKDUHN：取消事务自身形成终态，无需测试直接改写 worker 结果。
-    const after = await getJobDetail(jobId);
-    expect(after.data.status).toBe("cancelled");
+  it.each(["succeeded", "failed"] as const)("图片在途取消撤销写入权，拒绝供应商迟到的 %s", async (outcome) => {
+    const projectId = (await projects.create("987654", "IKDWL8 in-flight")).id;
+    expect((await saveCanvas(projectId, [mediaDraftNode("d1", "image", "冻结的提示词")], [], "missing")).status).toBe(200);
+    const created = await createJob(projectId, {
+      type: "image", target_node_id: "d1", expected_output_count: 1,
+      parameters: { prompt: "冻结的提示词", model_id: IMAGE_MODEL, aspect_ratio: "1:1" },
+    });
+    expect(created.code).toBe(200);
+    const jobId = created.data.generation_job_id as string;
+    await executeWorker(jobId, outcome, undefined, async () => {
+      expect((await getJobDetail(jobId)).data.status).toBe("processing");
+      expect((await cancelJob(projectId, jobId)).code).toBe(200);
+      expect((await getJobDetail(jobId)).data.status).toBe("cancelled");
+      const canvas = await getCanvas(projectId);
+      expect((await saveCanvas(projectId, [mediaDraftNode("d1", "image", "之后编辑")], [], canvas.version)).status).toBe(200);
+    }, "cancelled");
+    expect(providerRequests.at(-1)?.prompt).toBe("冻结的提示词");
+    const slots = await prisma.client.generation_output_slots.findMany({ where: { generation_job_id: BigInt(jobId) } });
+    expect(slots).toHaveLength(1);
+    expect(slots[0].status).toBe("failed");
+    expect(await prisma.client.assets.count({ where: { generation_job_id: BigInt(jobId) } })).toBe(0);
   });
 
   it.runIf(process.env.IKDMQW_BROWSER)("browser: 三类媒体取消回待生成、删除先取消、取消失败保留与抢先成功竞态", async () => {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     // 无 RocketMQ：切 BullMQ 入队（本机 Redis），任务停留 queued 等待 worker——卡片稳定「生成中」，
-    // 供应商执行结果仍由落库替身控制（enqueue 成功与否不改变任务终态语义）
+    // 真实 Worker 按 jobId 消费；仅供应商端口控制执行结果。
     const previousDriver = process.env.VIDEO_QUEUE_DRIVER;
     process.env.VIDEO_QUEUE_DRIVER = "bullmq";
     const projectId = (await projects.create("987654", "IKDMQW browser")).id;
@@ -287,7 +331,7 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
     await vite.listen();
     const browser = await chromium.launch({ headless: true });
     try {
-      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      const page = await browser.newPage({ extraHTTPHeaders: { Authorization: "Bearer sk-ikdwl8-test" }, viewport: { width: 1440, height: 1000 } });
       const cancelRequests: string[] = [];
       page.on("request", (request) => {
         if (request.method() === "POST" && /\/generation-jobs\/\d+\/cancel$/.test(request.url())) {
@@ -332,14 +376,11 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
       const imgCard = nodeById(draftId);
       await imgCard.getByRole("button", { name: "取消生成" }).waitFor({ timeout: 15_000 });
 
-      // 2) 普通取消：接口确认（queued 软取消登记）后回待生成，参数与连线保留
+      // 2) 图片取消事务撤销写入权：权威 cancelled 后回草稿，刷新保留参数与连线。
       await imgCard.getByRole("button", { name: "取消生成" }).click();
       await vi.waitFor(() => expect(cancelRequests).toHaveLength(1), { timeout: 10_000 });
-      await vi.waitFor(async () =>
-        expect(await imgCard.innerText()).toContain("待生成"), { timeout: 10_000 });
-      expect(await imgCard.innerText()).toContain("图片草稿");
-      // worker 停止（落库置 cancelled）→ 等画布落盘后刷新：待生成草稿与连线恢复
-      await settleJob(await lastJobId("image"), "cancelled");
+      await vi.waitFor(async () => expect((await getJobDetail(await lastJobId("image"))).data.status).toBe("cancelled"));
+      await executeWorker(await lastJobId("image"), "cancelled");
       await vi.waitFor(async () => {
         const doc = await getCanvas(projectId);
         const nodes = JSON.parse(doc.nodes) as Array<{ id: string; data: Record<string, unknown> }>;
@@ -362,7 +403,9 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
       await page.locator('button[title="发送"]').click();
       await vi.waitFor(async () => expect((await jobRows()).length).toBe(2), { timeout: 10_000 });
       await imgCard.getByRole("button", { name: "取消生成" }).waitFor({ timeout: 15_000 });
-      await settleJob(await lastJobId("image"), "succeeded", "https://example.com/ikdmqw-race.png");
+      await executeWorker(await lastJobId("image"), "succeeded", "https://example.com/ikdmqw-race.png");
+      expect(providerRequests.at(-1)?.prompt).toContain("赛博朋克");
+      expect(providerRequests.at(-1)?.prompt).toContain("画一只蓝鲸");
       await imgCard.locator('[data-testid="media-content"]').click();
       await page.keyboard.press("Delete");
       await vi.waitFor(() => expect(cancelRequests).toHaveLength(2), { timeout: 10_000 });
@@ -385,13 +428,13 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
       await vi.waitFor(async () => expect((await jobRows()).length).toBe(3), { timeout: 10_000 });
       const failCard = nodeById(failDraftId);
       await failCard.getByRole("button", { name: "取消生成" }).waitFor({ timeout: 15_000 });
-      await settleJob(await lastJobId("image"), "failed");
+      await executeWorker(await lastJobId("image"), "failed");
       await failCard.locator('[data-testid="media-content"]').click();
       await page.keyboard.press("Delete");
       await vi.waitFor(() => expect(cancelRequests).toHaveLength(3), { timeout: 10_000 });
       await vi.waitFor(async () => expect(await page.getByText("取消失败").count()).toBeGreaterThan(0), { timeout: 10_000 });
       expect(await mediaNodes.count(), "取消失败保留卡片").toBe(1);
-      await failCard.getByText("生成失败").waitFor({ timeout: 15_000 });
+      await failCard.getByText("输入内容不支持", { exact: true }).waitFor({ timeout: 15_000 });
       // 取消失败保留后用户再删一次：失败卡非生成中 → 直接移除
       await page.keyboard.press("Delete");
       await vi.waitFor(async () =>
@@ -411,6 +454,15 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
       await videoCard.getByRole("button", { name: "取消生成" }).waitFor({ timeout: 15_000 });
       await videoCard.getByRole("button", { name: "取消生成" }).click();
       await vi.waitFor(() => expect(cancelRequests).toHaveLength(4), { timeout: 10_000 });
+      expect(await videoCard.innerText()).toContain("视频生成中");
+      await vi.waitFor(async () => {
+        const saved = JSON.parse((await getCanvas(projectId)).nodes).find((node: { id: string }) => node.id === videoDraftId);
+        expect(saved?.data.genStatus).toBe("generating");
+        expect(saved?.data.jobId).toBe(await lastJobId("video"));
+      }, { timeout: 10_000 });
+      await page.reload();
+      await videoCard.getByRole("button", { name: "取消生成" }).waitFor({ timeout: 15_000 });
+      await executeWorker(await lastJobId("video"), "cancelled");
       await vi.waitFor(async () =>
         expect(await videoCard.innerText()).toContain("视频草稿"), { timeout: 10_000 });
       await vi.waitFor(async () => expect(await videoCard.innerText()).toContain("待生成"), { timeout: 10_000 });
@@ -431,7 +483,7 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
       await page.keyboard.press("Delete");
       await vi.waitFor(() => expect(cancelRequests).toHaveLength(5), { timeout: 10_000 });
       // 取消登记（queued 态任务 200）但任务未终态：不抢先移除，等 worker 停止（轮询拿到 cancelled）
-      await settleJob(await lastJobId("audio"), "cancelled");
+      await executeWorker(await lastJobId("audio"), "cancelled");
       await vi.waitFor(async () =>
         expect(await page.locator(".react-flow__node-mediaNode").count()).toBe(1), { timeout: 10_000 });
 
