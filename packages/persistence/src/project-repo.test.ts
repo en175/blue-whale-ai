@@ -3,6 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createProjectRepo } from "./project-repo.js";
 
+function mediaNode(assetId: string | number) {
+  return {
+    id: `media-${assetId}`,
+    type: "mediaNode",
+    data: { mediaType: "image", assetId },
+  };
+}
+
+function canvasFindMany(
+  rows: { project_id: bigint; nodes_json: unknown }[],
+) {
+  return vi.fn().mockResolvedValue(rows);
+}
+
 describe("ProjectRepo GenerationInbox isolation", () => {
   it("lists only ordinary canvas projects, ordered by creation time desc", async () => {
     const projectFindMany = vi.fn().mockResolvedValue([]);
@@ -44,6 +58,15 @@ describe("ProjectRepo GenerationInbox isolation", () => {
       project: { findMany: projectFindMany },
       project_asset: { findMany: linkFindMany },
       assets: { findMany: assetFindMany },
+      canvas: {
+        findMany: canvasFindMany([
+          {
+            project_id: 1n,
+            nodes_json: [mediaNode(11), mediaNode(12), mediaNode(13), mediaNode(14)],
+          },
+          { project_id: 2n, nodes_json: [mediaNode(21)] },
+        ]),
+      },
     } as unknown as PrismaClient;
 
     const views = await createProjectRepo(prisma).listByOwner("100");
@@ -83,6 +106,12 @@ describe("ProjectRepo GenerationInbox isolation", () => {
       project: { findMany: projectFindMany },
       project_asset: { findMany: linkFindMany },
       assets: { findMany: assetFindMany },
+      canvas: {
+        findMany: canvasFindMany([
+          { project_id: 1n, nodes_json: [mediaNode(11)] },
+          { project_id: 2n, nodes_json: [mediaNode(99)] },
+        ]),
+      },
     } as unknown as PrismaClient;
 
     const views = await createProjectRepo(prisma).listByOwner("100");
@@ -115,6 +144,12 @@ describe("ProjectRepo GenerationInbox isolation", () => {
           { id: 11n, project_id: 1n, url: "reused.png" },
         ]),
       },
+      canvas: {
+        findMany: canvasFindMany([
+          { project_id: 1n, nodes_json: [mediaNode(11)] },
+          { project_id: 2n, nodes_json: [mediaNode(11)] },
+        ]),
+      },
     } as unknown as PrismaClient;
 
     const views = await createProjectRepo(prisma).listByOwner("100");
@@ -131,11 +166,121 @@ describe("ProjectRepo GenerationInbox isolation", () => {
       project: { findMany: projectFindMany },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
+      canvas: { findMany: canvasFindMany([{ project_id: 1n, nodes_json: [] }]) },
     } as unknown as PrismaClient;
 
     const views = await createProjectRepo(prisma).listByOwner("100");
 
     expect(views[0].previews).toEqual([]);
+  });
+
+  it("omits owned images that are not on the canvas", async () => {
+    const projectFindMany = vi.fn().mockResolvedValue([
+      { id: 1n, name: "A", thumb: null, gmt_create: new Date("2026-08-25T00:00:00Z") },
+    ]);
+    const prisma = {
+      project: { findMany: projectFindMany },
+      project_asset: { findMany: vi.fn().mockResolvedValue([]) },
+      assets: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 11n, project_id: 1n, url: "kept.png" },
+          { id: 12n, project_id: 1n, url: "deleted-from-canvas.png" },
+        ]),
+      },
+      canvas: {
+        findMany: canvasFindMany([{ project_id: 1n, nodes_json: [mediaNode(11)] }]),
+      },
+    } as unknown as PrismaClient;
+
+    const views = await createProjectRepo(prisma).listByOwner("100");
+
+    expect(views[0].previews).toEqual(["kept.png"]);
+  });
+
+  it("returns empty previews when the canvas has no image nodes", async () => {
+    const projectFindMany = vi.fn().mockResolvedValue([
+      { id: 1n, name: "A", thumb: null, gmt_create: new Date("2026-08-25T00:00:00Z") },
+    ]);
+    const prisma = {
+      project: { findMany: projectFindMany },
+      project_asset: { findMany: vi.fn().mockResolvedValue([]) },
+      assets: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 11n, project_id: 1n, url: "orphan.png" },
+        ]),
+      },
+      canvas: {
+        findMany: canvasFindMany([{ project_id: 1n, nodes_json: [] }]),
+      },
+    } as unknown as PrismaClient;
+
+    const views = await createProjectRepo(prisma).listByOwner("100");
+
+    expect(views[0].previews).toEqual([]);
+  });
+
+  it("counts product-card images that are still on the canvas", async () => {
+    const projectFindMany = vi.fn().mockResolvedValue([
+      { id: 1n, name: "A", thumb: null, gmt_create: new Date("2026-08-25T00:00:00Z") },
+    ]);
+    const prisma = {
+      project: { findMany: projectFindMany },
+      project_asset: { findMany: vi.fn().mockResolvedValue([]) },
+      assets: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 11n, project_id: 1n, url: "product.png" },
+        ]),
+      },
+      canvas: {
+        findMany: canvasFindMany([
+          {
+            project_id: 1n,
+            nodes_json: [
+              {
+                id: "product-1",
+                type: "productNode",
+                data: {
+                  images: [
+                    { id: "i1", src: "product.png", enabled: true, type: "image", assetId: "11" },
+                  ],
+                },
+              },
+            ],
+          },
+        ]),
+      },
+    } as unknown as PrismaClient;
+
+    const views = await createProjectRepo(prisma).listByOwner("100");
+
+    expect(views[0].previews).toEqual(["product.png"]);
+  });
+
+  it("does not show a reused image on a project whose canvas no longer has it", async () => {
+    const projectFindMany = vi.fn().mockResolvedValue([
+      { id: 1n, name: "A", thumb: null, gmt_create: new Date("2026-08-25T00:00:00Z") },
+      { id: 2n, name: "B", thumb: null, gmt_create: new Date("2026-08-24T00:00:00Z") },
+    ]);
+    const prisma = {
+      project: { findMany: projectFindMany },
+      project_asset: { findMany: vi.fn().mockResolvedValue([{ project_id: 2n, asset_id: 11n }]) },
+      assets: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 11n, project_id: 1n, url: "reused.png" },
+        ]),
+      },
+      canvas: {
+        findMany: canvasFindMany([
+          { project_id: 1n, nodes_json: [mediaNode(11)] },
+          { project_id: 2n, nodes_json: [] },
+        ]),
+      },
+    } as unknown as PrismaClient;
+
+    const views = await createProjectRepo(prisma).listByOwner("100");
+
+    expect(views[0].previews).toEqual(["reused.png"]);
+    expect(views[1].previews).toEqual([]);
   });
 
   it("pages canvas projects with skip/take and returns the assets-shaped envelope", async () => {
@@ -150,6 +295,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
       project: { count: projectCount, findMany: projectFindMany },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
       assets: { findMany: assetFindMany },
+      canvas: { findMany: canvasFindMany([{ project_id: 3n, nodes_json: [mediaNode(31)] }]) },
     } as unknown as PrismaClient;
 
     const page = await createProjectRepo(prisma).listByOwnerPaged("100", 2, 2);
