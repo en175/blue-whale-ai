@@ -7,6 +7,7 @@ import {
   ERROR_PROVIDER_FAILED,
   GENERATION_ERROR_NUMERIC_CODES,
   GENERATION_ERROR_UNKNOWN_NUMERIC_CODE,
+  RATE_LIMITED,
   errorCodeToNumeric,
   isContentPolicySignal,
   isQuotaSignal,
@@ -32,6 +33,11 @@ describe("generation error numeric codes (external contract)", () => {
       GENERATION_ERROR_UNKNOWN_NUMERIC_CODE,
     );
     expect(GENERATION_ERROR_UNKNOWN_NUMERIC_CODE).toBe(1000);
+  });
+
+  it("RATE_LIMITED 是 HTTP 限流字符串码，不占用生成 1xxx 数值表", () => {
+    expect(RATE_LIMITED).toBe("rate_limited");
+    expect(GENERATION_ERROR_NUMERIC_CODES[RATE_LIMITED]).toBeUndefined();
   });
 });
 
