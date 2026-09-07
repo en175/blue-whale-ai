@@ -51,7 +51,7 @@ export interface CreateGenerationJobBody {
   last_frame_material_id?: unknown;
   /** 元素 { id: "Asset-xxx", type: "image" | "video" }；素材零落表，类型由调用方声明。 */
   reference_materials?: unknown;
-  /** IKDLQF/IKDLQG：生成目标画布节点 id（图片=image/视频=video 媒体节点），仅 type==="image"|"video" 允许携带。 */
+  /** IKDLQF/IKDLQG/IKDMQT：生成目标画布节点 id（图片=image/视频=video/音频=audio 媒体节点），仅三类生成允许携带。 */
   target_node_id?: unknown;
   parameters?: unknown;
   expected_output_count?: unknown;
@@ -124,13 +124,13 @@ function validate(
   const type = body.type;
   if (type !== "image" && type !== "video" && type !== "audio")
     return { code: ERROR_UNSUPPORTED_TYPE, message: "暂不支持该生成类型" };
-  // IKDLQF/IKDLQG：target_node_id 仅图片/视频生成允许携带；携带时必须是有效字符串。
+  // IKDLQF/IKDLQG/IKDMQT：target_node_id 仅图片/视频/音频生成允许携带；携带时必须是有效字符串。
   const hasTargetNode = body.target_node_id !== undefined;
   if (hasTargetNode) {
-    if (type !== "image" && type !== "video")
+    if (type !== "image" && type !== "video" && type !== "audio")
       return {
         code: ERROR_UNSUPPORTED_INPUT,
-        message: "target_node_id 仅支持图片/视频生成",
+        message: "target_node_id 仅支持图片/视频/音频生成",
       };
     if (!isStr(body.target_node_id) || body.target_node_id.trim() === "")
       return { code: ERROR_INVALID_INPUT, message: "target_node_id 无效" };
@@ -365,10 +365,10 @@ export async function handleCreateGenerationJob(
     });
   }
 
-  // IKDLQF/IKDLQG：携带 target_node_id 时，接纳当下读取最新 Canvas 推导有序文本附件，
-  // 冻结进 input 快照；执行与重试只读快照，不回读来源节点。
+  // IKDLQF/IKDLQG/IKDMQT：携带 target_node_id 时，接纳当下读取最新 Canvas 校验目标节点；
+  // 文本附件推导仅图片/视频（音频无文本附件能力，IKDMQT），空 prompt 由组合校验拒绝。
   const targetNodeId =
-    (type === "image" || type === "video") &&
+    (type === "image" || type === "video" || type === "audio") &&
     isStr(body.target_node_id) &&
     body.target_node_id.trim() !== ""
       ? body.target_node_id
@@ -383,38 +383,41 @@ export async function handleCreateGenerationJob(
       data?: Record<string, unknown>;
     }>;
     const target = nodes.find((node) => node.id === targetNodeId);
+    const typeLabel =
+      type === "video" ? "视频" : type === "audio" ? "音频" : "图片";
     if (
       !target ||
       target.type !== "mediaNode" ||
       target.data?.mediaType !== type
     ) {
-      return fail(400, `目标节点不存在或不是${type === "video" ? "视频" : "图片"}媒体节点`, {
+      return fail(400, `目标节点不存在或不是${typeLabel}媒体节点`, {
         code: ERROR_INVALID_INPUT,
       });
     }
-    const byId = new Map(nodes.map((node) => [node.id, node]));
-    const edgesRaw: unknown = JSON.parse(canvas.edges ?? "[]");
-    for (const edge of Array.isArray(edgesRaw) ? edgesRaw : []) {
-      if (!edge || typeof edge !== "object") continue;
-      const { source, target: edgeTarget } = edge as {
-        source?: unknown;
-        target?: unknown;
-      };
-      if (edgeTarget !== targetNodeId) continue;
-      const sourceNode = byId.get(source);
-      if (
-        !sourceNode ||
-        sourceNode.type !== "textNode"
-      )
-        continue;
-      const previewSource = previewSourceSchema.safeParse(sourceNode.data?.promptSource);
-      textAttachments.push({
-        node_id: source as string,
-        title:
-          typeof sourceNode.data?.title === "string" ? sourceNode.data.title : "",
-        text: extractTextNodeText(sourceNode.data),
-        ...(previewSource.success ? { prompt_source: previewSource.data } : {}),
-      });
+    // IKDMQT：音频无文本附件能力——不遍历文本连线（textAttachments 保持空），
+    // 空 prompt 由下方组合校验拒绝；图片/视频沿用文本附件推导与冻结。
+    if (type !== "audio") {
+      const byId = new Map(nodes.map((node) => [node.id, node]));
+      const edgesRaw: unknown = JSON.parse(canvas.edges ?? "[]");
+      for (const edge of Array.isArray(edgesRaw) ? edgesRaw : []) {
+        if (!edge || typeof edge !== "object") continue;
+        const { source, target: edgeTarget } = edge as {
+          source?: unknown;
+          target?: unknown;
+        };
+        if (edgeTarget !== targetNodeId) continue;
+        const sourceNode = byId.get(source);
+        if (!sourceNode || sourceNode.type !== "textNode") continue;
+        // IKDL9U 修复：富文本节点按文本投影消费（html 也计入），并快照 prompt_source
+        const previewSource = previewSourceSchema.safeParse(sourceNode.data?.promptSource);
+        textAttachments.push({
+          node_id: source as string,
+          title:
+            typeof sourceNode.data?.title === "string" ? sourceNode.data.title : "",
+          text: extractTextNodeText(sourceNode.data),
+          ...(previewSource.success ? { prompt_source: previewSource.data } : {}),
+        });
+      }
     }
     const composed = composeTextAttachmentPrompt(textAttachments, promptText);
     if (composed.trim() === "") {
@@ -435,7 +438,9 @@ export async function handleCreateGenerationJob(
 
   let input: Record<string, unknown>;
   if (type === "audio") {
-    input = { prompt: params.prompt, model_id: resolvedModelId };
+    input = { prompt: promptText, model_id: resolvedModelId };
+    // IKDMQT：音频草稿目标冻结进快照（执行与重试只读，不回读画布）；无文本附件。
+    if (targetNodeId !== null) input.target_node_id = targetNodeId;
   } else {
     input = {
       prompt: promptText,

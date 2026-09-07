@@ -13,6 +13,7 @@ import {
   type OutputSlotStatus,
 } from "./generation-output-slot-repo.js";
 import { appendProjectEvent } from "./product-event-repo.js";
+import { cancelImageJob } from "./generation-image-cancel.js";
 
 /** 生成命令 repo（Prisma-backed）：创建/取消/重试生成任务 + 操作日志 + 点数预留。
  *  简化模型：一次任务一行（单输出语义，产出写 output_asset_ids JSON 数组）。
@@ -54,7 +55,7 @@ export interface GenerationCommandRepo {
     input: CreateJobInput,
     callerTx?: Prisma.TransactionClient,
   ): Promise<CreatedJob>;
-  /** 软取消：置 cancel_requested_at，状态不变（worker 读到后停止）。返回是否命中可取消的任务。 */
+  /** 图片取消原子收敛并撤销写入权；其他媒体登记软取消，由 worker 确认终态。 */
   requestCancel(jobId: string, userId: string): Promise<boolean>;
   /** 重试失败/缺失输出槽（IK67HE/T14，spec §4.4）：复用原参数快照，只补 failed/missing 槽，
    *  不覆盖成功输出。创建新 GenerationJob（retry_of_job_id 指向原 job），expected_output_count =
@@ -371,8 +372,9 @@ export function createGenerationCommandRepo(
       // 仅归属当前用户的 queued/processing 任务可取消。
       const job = await prisma.generation_jobs.findFirst({
         where: { id: BigInt(jobId), user_id: BigInt(userId), is_delete: false },
-        select: { id: true, status: true },
+        select: { id: true, status: true, type: true },
       });
+      if (job?.type === "image") return cancelImageJob(prisma, jobId, userId);
       if (!job || (job.status !== "queued" && job.status !== "processing"))
         return false;
       await prisma.generation_jobs.update({

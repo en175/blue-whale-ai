@@ -881,3 +881,87 @@
   color: var(--color-accent-text, #4c6ef5);
   border: 1px dashed var(--color-accent-text, #4c6ef5);
 }
+
+/* ============================================
+ * IKDMQS 草稿绑定参考角色区：首帧/尾帧/普通参考分组展示连线推导的输入
+ * ============================================ */
+.refRoleArea {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm, 8px);
+  padding: var(--spacing-sm, 8px) 0;
+}
+
+.refSlot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm, 8px);
+}
+
+.refSlotLabel {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  flex: 0 0 48px;
+}
+
+/* 角色徽标：缩略图左下角常驻显示输入用途（显式角色，不按顺序猜测） */
+.refRoleBadge {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 16px;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+/* 首帧/尾帧徽标强调（普通参考保持中性） */
+.refRoleBadgeFrame {
+  background-color: rgba(76, 110, 245, 0.85);
+}
+
+/* 角色切换按钮组：悬停缩略图时可见（与移除按钮同层） */
+.refRoleSwitch {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: none;
+  gap: 4px;
+}
+
+.mediaThumb:hover .refRoleSwitch {
+  display: flex;
+}
+
+.refRoleSwitch button {
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #fff;
+  background-color: rgba(76, 110, 245, 0.9);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.refRoleSwitch button:hover {
+  background-color: rgba(76, 110, 245, 1);
+}
+
+/* 组合冲突提示：明确说明不可提交的原因（禁止静默丢弃或降级） */
+.refConflictHint {
+  font-size: 12px;
+  color: #e8590c;
+  line-height: 1.4;
+}
+
+.readOnlyHint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}

@@ -59,8 +59,11 @@ interface ChipTextEditorProps {
    * 由调用方自己在 send 时调 `resolveComposed`。字数统计、禁用态判断都从片段派生。
    */
   onChange: (value: ComposedValue) => void;
-  onSend: () => void;
+  /** 不提供时 Enter 仅换行，发送由外部按钮触发。 */
+  onSend?: () => void;
   className?: string;
+  /** 只读（IKDMQS）：生成中草稿参数冻结，编辑器不可输入、Enter 不发送 */
+  readOnly?: boolean;
 }
 
 function onError(error: Error) {
@@ -80,25 +83,35 @@ function EditorRefBridge({ editorRef }: { editorRef: React.MutableRefObject<Lexi
 }
 
 /** Enter 发送 / Shift+Enter 换行：跟原生 textarea 的既有约定保持一致 */
-function EnterKeyPlugin({ onSend }: { onSend: () => void }) {
+function EnterKeyPlugin({ onSend, readOnly }: { onSend?: () => void; readOnly?: boolean }) {
   const [editor] = useLexicalComposerContext();
   useEffect(() => {
     return editor.registerCommand<KeyboardEvent | null>(
       KEY_ENTER_COMMAND,
       (event) => {
-        if (event?.shiftKey) return false;
+        if (!onSend || event?.shiftKey) return false;
+        if (readOnly) return true; // 只读：吞掉 Enter 但不发送
         event?.preventDefault();
         onSend();
         return true;
       },
       COMMAND_PRIORITY_LOW,
     );
-  }, [editor, onSend]);
+  }, [editor, onSend, readOnly]);
+  return null;
+}
+
+/** 只读开关（IKDMQS）：editor.setEditable 控制内容编辑能力 */
+function EditablePlugin({ readOnly }: { readOnly?: boolean }) {
+  const [editor] = useLexicalComposerContext();
+  useEffect(() => {
+    editor.setEditable(!readOnly);
+  }, [editor, readOnly]);
   return null;
 }
 
 const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(function ChipTextEditor(
-  { placeholder, onChange, onSend, className },
+  { placeholder, onChange, onSend, className, readOnly },
   ref,
 ) {
   const editorRef = useRef<LexicalEditor | null>(null);
@@ -154,7 +167,8 @@ const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(fun
   return (
     <LexicalComposer initialConfig={initialConfig}>
       <EditorRefBridge editorRef={editorRef} />
-      <EnterKeyPlugin onSend={onSend} />
+      <EditablePlugin readOnly={readOnly} />
+      <EnterKeyPlugin onSend={onSend} readOnly={readOnly} />
       <HistoryPlugin />
       <OnChangePlugin
         onChange={(editorState) => {

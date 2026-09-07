@@ -61,6 +61,7 @@ describe("generation video worker repo", () => {
       input: { provider_credential: "sealed-token" },
       expected_output_count: 1,
       retry_count: 0,
+      cancelRequested: false,
       fencingToken: 1,
     });
     expect(findFirst).toHaveBeenCalledWith(

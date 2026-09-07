@@ -462,7 +462,7 @@ interface AgentPanelProps {
   /** 当前项目ID：发送消息走 POST /api/projects/:id/conversation/messages */
   projectId?: string;
   /** 生成卡手动应用 → 落画布节点（B2：先落画布再选引用 dock/Agent）；载荷是会话层唯一的生成卡形状，不再另开一份 */
-  onApplyPreview?: (payload: GenerationCardBlock) => void;
+  onApplyToDock?: (payload: GenerationCardBlock) => void;
   /**
    * 画布上现存的生成卡节点所对应的 cardId 集合（IKAFSQ）。
    *
@@ -509,7 +509,7 @@ function quoteTooltipOfChip(blocks: SessionContentBlock[] | undefined, chipId: s
   return text.length > 500 ? `${text.slice(0, 500)}…` : text;
 }
 
-export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyPreview, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas, onPickFromAssets, externalAssetPicks }: AgentPanelProps) {
+export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas, onPickFromAssets, externalAssetPicks }: AgentPanelProps) {
   useAssetUrlCache();
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
@@ -1116,7 +1116,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     const cardId = card.cardId ?? card.shotTitle;
     // 不在这里记「已应用」：那个事实由画布上有没有这个节点决定，落节点之后自然就成立了。
     const payload: GenerationCardBlock = { ...card, cardId, source: card.source ? { ...card.source, sessionId: card.source.sessionId || sessionId || '' } : undefined };
-    onApplyPreview?.(payload);
+    onApplyToDock?.(payload);
   };
 
   /** 上传文件 */
