@@ -869,11 +869,11 @@ export default function CanvasPage() {
   /** 水合期素材解析：所有素材一律用 assetId 匹配 snapshot 资产字典取 access_url，不走节点内嵌 src。
    *  - 命中 → src 替换为 access_url
    *  - 无 assetId 或字典查不到 → 标缺失（媒体节点 assetMissing / 商品图与参考图 missing），渲染「素材已被删除」
-   *  - 瞬时态跳过：生成中/失败/取消（自有 UI，不依赖素材）、blob: 预览（上传中） */
+   *  - 无旧素材的生成占位与 blob: 上传预览跳过；重新生成中的旧素材仍需刷新地址。 */
   const resolveNodeAssets = (node: Node): Node => {
     const data = (node.data ?? {}) as Record<string, unknown>;
     if (node.type === 'mediaNode') {
-      if (data.genStatus) return node;
+      if (data.genStatus && readAssetId(data) === undefined) return node;
       if (typeof data.src === 'string' && (data.src as string).startsWith('blob:')) return node;
       const aid = (data.assetId ?? data.asset_id ?? data.assetID) as string | number | undefined;
       const asset = aid != null && aid !== '' ? snapshotAssets[String(aid)] : undefined;
@@ -2395,9 +2395,10 @@ export default function CanvasPage() {
     };
     setMediaNodes((prev) => [...prev, node]);
     }
-    // 发起前的活跃任务登记（IKDMQV）：create 返回时核对——期间若被重试等其他提交接管，
-    // 放弃本次结果（不 patch、不开轮询），与 handleRetryJob 的接管核对对称
-    const activeAtCreate = activeJobByNodeRef.current.get(nodeId);
+    // 提交立即接管节点，防止 create 返回前旧取消/轮询响应解除本次生成状态。
+    const activeAtCreate = newNodeId('pending-generation');
+    activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+    stopJobPolling(nodeId, jobTimersRef.current);
     try {
       createGenerationJob(currentId, {
         type,
