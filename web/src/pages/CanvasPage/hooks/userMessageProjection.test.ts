@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chipsFromContent, mergeConfirmedUser, projectMessage } from './userMessageProjection';
+import { chipsFromContent, collectMissingQuoteIds, mergeConfirmedUser, patchQuoteTexts, projectMessage } from './userMessageProjection';
 import type { ChatMessage } from './useAgentSession';
 
 describe('chipsFromContent', () => {
@@ -18,6 +18,43 @@ describe('chipsFromContent', () => {
         { type: 'asset_ref', asset_id: 'video_1', media_type: 'video', display_label: 'scene.mp4' },
       ]),
     ).toEqual([{ id: 'video_1', label: '[视频] scene.mp4' }]);
+  });
+
+  it('rebuilds text quote chips from persisted text_quote parts (IKDLQJ)', () => {
+    expect(
+      chipsFromContent([
+        { type: 'text', text: '基于它继续改' },
+        { type: 'resource_ref', resource_type: 'text_quote', resource_id: '42', display_label: '雪夜' },
+      ]),
+    ).toEqual([{ id: '42', label: '雪夜' }]);
+  });
+});
+
+describe('quote text hydration (IKDLQJ)', () => {
+  it('collects quote ids whose text was not round-tripped, and patches them back', () => {
+    const messages: ChatMessage[] = [
+      {
+        id: 'm-1',
+        role: 'user',
+        content: '改一版',
+        sequence_no: 1,
+        inputBatchId: null,
+        blocks: [
+          { type: 'text', text: '改一版' },
+          { type: 'resource_ref', resource_type: 'text_quote', resource_id: '42', display_label: '雪夜' },
+          { type: 'resource_ref', resource_type: 'text_quote', resource_id: '43', display_label: '带正文的', resource_text: '已在' },
+        ],
+      },
+    ];
+    expect(collectMissingQuoteIds(messages)).toEqual(['42']);
+    const patched = patchQuoteTexts(messages, [
+      { quoteId: '42', text: '回读正文\n第二行' },
+    ]);
+    const blocks = patched[0]!.blocks!;
+    expect(blocks[1]).toMatchObject({ resource_id: '42', resource_text: '回读正文\n第二行' });
+    expect(blocks[2]).toMatchObject({ resource_id: '43', resource_text: '已在' });
+    // 原消息不被改写
+    expect(messages[0]!.blocks![1]).not.toHaveProperty('resource_text');
   });
 });
 

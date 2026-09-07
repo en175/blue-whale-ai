@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CanvasPage from './index';
 import headerStyles from './components/CanvasHeader/index.module.css';
@@ -23,10 +24,12 @@ vi.mock('./components/Canvas', () => ({
 }));
 
 /* ProjectSelector 打桩但透出 props：测试要直接触发 onSelect 模拟用户切换项目。 */
-const selectorProps: { current?: { onSelect: (id: string) => void } } = {};
+const selectorProps: {
+  current?: { onSelect: (id: string) => void; onDelete: (id: string) => void };
+} = {};
 
 vi.mock('./components/ProjectSelector', () => ({
-  default: (props: { onSelect: (id: string) => void }) => {
+  default: (props: { onSelect: (id: string) => void; onDelete: (id: string) => void }) => {
     selectorProps.current = props;
     return createElement('div', { 'data-testid': 'project-selector' });
   },
@@ -56,6 +59,10 @@ vi.mock('@/api/projects', () => ({
   createProject: apiMocks.createProject,
   renameProject: apiMocks.renameProject,
   deleteProject: apiMocks.deleteProject,
+  projectKeys: {
+    all: ['projects'],
+    pages: (size: number) => ['projects', 'pages', size],
+  },
 }));
 
 vi.mock('@/api/auth', () => ({
@@ -75,8 +82,13 @@ vi.mock('@/api/assets', () => ({
 }));
 
 vi.mock('@/api/canvas', () => ({
+  createConversationQuote: vi.fn(),
+  legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
+  applyPromptPreview: vi.fn(),
   saveCanvasDoc: vi.fn(),
   serializeNodes: vi.fn(() => '[]'),
+  serializeEdges: vi.fn(() => '[]'),
+  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
 }));
 
 vi.mock('@/api/jobs', () => ({
@@ -96,7 +108,7 @@ vi.mock('@/api/sharedAssets', () => ({
    打桩也必须保持引用稳定：每次渲染都新建对象会让 [doc, snapshotAssets] 水合 effect
    setState → 重渲染 → 再触发，异步死循环直到 OOM。 */
 const canvasDocMock = vi.hoisted(() => ({
-  doc: { id: null, version: null, viewport: { x: 0, y: 0, zoom: 1 }, nodes: [] },
+  doc: { id: null, version: null, viewport: { x: 0, y: 0, zoom: 1 }, nodes: [], edges: [] },
   assets: {},
   refetch: vi.fn(),
 }));
@@ -107,6 +119,12 @@ vi.mock('./hooks/useCanvasDoc', () => ({
 
 let root: Root;
 let container: HTMLDivElement;
+let queryClient: QueryClient;
+
+function LocationProbe() {
+  const location = useLocation();
+  return createElement('output', { 'data-testid': 'location' }, `${location.pathname}${location.search}`);
+}
 
 function agentEntry() {
   return container.querySelector<HTMLElement>(`.${headerStyles.agentBtn}`);
@@ -116,8 +134,22 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   await act(async () => {
-    root.render(createElement(MemoryRouter, null, createElement(CanvasPage)));
+    root.render(
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(
+          MemoryRouter,
+          { initialEntries: ['/canvas?project=p1'] },
+          createElement(CanvasPage),
+          createElement(LocationProbe),
+        ),
+      ),
+    );
   });
 }
 
@@ -172,5 +204,19 @@ describe('CanvasPage Agent 面板接线（IKDLD4）', () => {
     });
     expect(container.querySelector('[data-testid="agent-panel-stub"]')).toBeNull();
     expect(agentEntry()!.classList.contains(headerStyles.agentBtnHidden)).toBe(false);
+  });
+
+  it('删除当前项目时清除卡片列表缓存并返回项目列表（IKDDHS）', async () => {
+    apiMocks.deleteProject.mockResolvedValue(null);
+    await renderPage();
+    queryClient.setQueryData(['projects', 'pages', 30], { records: ['p1'] });
+
+    await act(async () => {
+      selectorProps.current!.onDelete('p1');
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="location"]')?.textContent).toBe('/projects');
+    expect(queryClient.getQueryData(['projects', 'pages', 30])).toBeUndefined();
   });
 });

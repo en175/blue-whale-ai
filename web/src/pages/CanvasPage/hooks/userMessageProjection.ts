@@ -25,16 +25,33 @@ function isVisualMention(block: SessionContentBlock): boolean {
   return block.media_type === 'image' || block.media_type === 'video';
 }
 
+/** 文本引用快照部件（IKDLQJ）：契约 resource_type 或 quote_id 任一命中即认。 */
+function isQuoteMention(block: SessionContentBlock): boolean {
+  return block.type === 'resource_ref' && (block.resource_type === 'text_quote' || Boolean(block.quote_id));
+}
+
+function quoteMentionId(block: SessionContentBlock): string | undefined {
+  return block.quote_id || block.resource_id || block.node_id;
+}
+
 /**
  * 从落库的 content 部件还原 @ 提及胶囊。
  *
  * chips 是前端渲染态，快照不会原样送回来；身份在 `asset_ref` / `resource_ref` 里。
  * 不还原的话，刷新或切历史会话后 @ 图片会从对话里消失（IKBCV3）。
+ * 文本引用（IKDLQJ）同理：部件里的 quote_id 即快照身份，正文由 hydrate 按它补齐。
  */
 export function chipsFromContent(blocks: SessionContentBlock[] | undefined): ChatMessage['chips'] {
   const chips: NonNullable<ChatMessage['chips']> = [];
   const seen = new Set<string>();
   for (const block of blocks ?? []) {
+    if (isQuoteMention(block)) {
+      const id = quoteMentionId(block);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      chips.push({ id, label: block.display_label || '文本引用' });
+      continue;
+    }
     if (!isVisualMention(block)) continue;
     const id = block.asset_id || block.resource_id || block.node_id;
     if (!id || seen.has(id)) continue;
@@ -42,6 +59,43 @@ export function chipsFromContent(blocks: SessionContentBlock[] | undefined): Cha
     chips.push({ id, label: visualLabel(block) });
   }
   return chips.length > 0 ? chips : undefined;
+}
+
+/** 历史消息里缺正文的文本引用快照 id（agent 未 round-trip resource_text 时按它回读补齐）。 */
+export function collectMissingQuoteIds(messages: ChatMessage[]): string[] {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    for (const block of message.blocks ?? []) {
+      if (!isQuoteMention(block)) continue;
+      if (typeof block.resource_text === 'string' && block.resource_text.length > 0) continue;
+      const id = quoteMentionId(block);
+      if (id) ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
+/** 把回读到的快照正文并入消息块；原消息不被改写（返回新数组）。 */
+export function patchQuoteTexts(
+  messages: ChatMessage[],
+  quotes: { quoteId: string; text: string }[],
+): ChatMessage[] {
+  const byId = new Map(quotes.map((quote) => [quote.quoteId, quote.text]));
+  if (byId.size === 0) return messages;
+  return messages.map((message) => {
+    const blocks = message.blocks;
+    if (!blocks?.some((block) => isQuoteMention(block) && !block.resource_text && byId.has(quoteMentionId(block) ?? ''))) {
+      return message;
+    }
+    return {
+      ...message,
+      blocks: blocks.map((block) => {
+        if (!isQuoteMention(block) || block.resource_text) return block;
+        const text = byId.get(quoteMentionId(block) ?? '');
+        return text ? { ...block, resource_text: text } : block;
+      }),
+    };
+  });
 }
 
 /** 快照消息 → UI 消息 */

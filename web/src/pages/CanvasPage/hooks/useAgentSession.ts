@@ -36,7 +36,8 @@ import { isApiError } from '@/api/http';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
 import { estimateOutputTokens, parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
 import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusLine';
-import { mergeConfirmedUser, projectMessage } from './userMessageProjection';
+import { collectMissingQuoteIds, mergeConfirmedUser, patchQuoteTexts, projectMessage } from './userMessageProjection';
+import { listConversationQuotes } from '@/api/canvas';
 import {
   EMPTY_SESSION_STATE,
   accountOfRun,
@@ -209,6 +210,13 @@ export function useAgentSession(projectId: string) {
   });
   /** 当前项目下的历史会话列表（新→旧，供历史会话下拉使用） */
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  /**
+   * 同一份列表的 ref 镜像。删除要带这条会话自己的 etag（If-Match 乐观锁），而删除的回调
+   * 不该因为列表变化就重建——它挂在下拉的每一行上。`session.updated` 会把新 etag 写回
+   * 列表，这里读到的因此总是最新的那个。
+   */
+  const sessionsRef = useRef<SessionRecord[]>([]);
+  sessionsRef.current = sessions;
   /** 删除失败的那一行 + 原因：错误就显示在那一行上，下拉不关闭，用户能原地重试 */
   const [deleteError, setDeleteError] = useState<{ sessionId: string; message: string } | null>(null);
   /** 当前会话的事件订阅取消函数（切换会话时先解绑旧的，防串话） */
@@ -578,10 +586,11 @@ export function useAgentSession(projectId: string) {
         const account = run?.run_id ? accountOfRun(run) : null;
         if (account && run?.run_id) accounts[run.run_id] = account;
       }
+      // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
+      const restoredMessages = attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards);
       commit(() => ({
         ...EMPTY_SESSION_STATE,
-        // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
-        messages: attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards),
+        messages: restoredMessages,
         accounts,
         runningRunId: liveRun?.run_id ?? null,
         failedRunId: settledRun?.run_id && needsRetry(settledRun.status) ? settledRun.run_id : null,
@@ -601,6 +610,17 @@ export function useAgentSession(projectId: string) {
         etag: snap.session?.etag ?? null,
       });
       setChatError(null);
+      // IKDLQJ：历史消息里的文本引用若缺正文（agent 未 round-trip resource_text），按 quoteId 回读补齐，
+      // 引用事实在刷新后仍可完整回读；失败只少正文悬浮内容，不影响对话本身。
+      const missingQuoteIds = collectMissingQuoteIds(restoredMessages);
+      if (missingQuoteIds.length > 0) {
+        listConversationQuotes(projectId, missingQuoteIds)
+          .then(({ items }) => {
+            if (connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return;
+            commit((prev) => ({ ...prev, messages: patchQuoteTexts(prev.messages, items) }));
+          })
+          .catch((e) => console.warn('回读对话引用快照失败:', e));
+      }
       if (liveRun?.run_id) {
         if (liveRun.status === 'payment_required') {
           setStreaming(false);
@@ -709,7 +729,10 @@ export function useAgentSession(projectId: string) {
     (targetId: string) => {
       if (!projectId) return;
       setDeleteError((prev) => (prev?.sessionId === targetId ? null : prev));
-      api.deleteSession(projectId, targetId)
+      // 删哪条就用哪条的 etag：列表里每条会话都带着自己的那个，不必为此多打一次请求。
+      // 列表里没有（刚建还没进列表之类）时传 undefined，deleteSession 自己回去读一次。
+      const etag = sessionsRef.current.find((s) => s.session_id === targetId)?.etag;
+      api.deleteSession(projectId, targetId, etag)
         .catch((e) => {
           // 只有**删除本身**失败才报「删除失败」（审查 W·A6）。善后失败是另一回事，
           // 走 chatError 那条路说「会话已删除，但重新连接失败」。

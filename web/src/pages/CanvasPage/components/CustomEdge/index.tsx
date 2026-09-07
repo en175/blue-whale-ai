@@ -14,7 +14,7 @@ export default function CustomEdge({
   sourcePosition,
   targetPosition,
 }: EdgeProps) {
-  const { setEdges } = useReactFlow();
+  const { deleteElements } = useReactFlow();
 
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -27,7 +27,8 @@ export default function CustomEdge({
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setEdges((prev) => prev.filter((edge) => edge.id !== id));
+    // 受控连线（IKDLQF）：deleteElements 经 onEdgesChange 上抛 remove 变更，由父级落状态并纳入自动保存
+    void deleteElements({ edges: [{ id }] });
   };
 
   const grad = `url(#flow-grad-${id})`;

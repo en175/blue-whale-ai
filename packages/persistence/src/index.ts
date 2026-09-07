@@ -23,6 +23,17 @@ export {
   type CanvasView,
 } from "./canvas-repo.js";
 export {
+  createConversationQuoteRepo,
+  type ConversationQuoteRepo,
+  type ConversationQuoteRow,
+} from "./conversation-quote-repo.js";
+export {
+  createLegacyCardHistoryRepo,
+  type LegacyCardHistoryDraft,
+  type LegacyCardHistoryRepo,
+  type LegacyCardHistoryRow,
+} from "./legacy-card-history-repo.js";
+export {
   createJobRepo,
   type JobRepo,
   type JobListItem,

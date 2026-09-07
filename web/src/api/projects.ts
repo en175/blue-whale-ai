@@ -3,6 +3,7 @@
  * ============================================ */
 import { infiniteQueryOptions } from '@tanstack/react-query';
 import { apiRequest, type ApiRequestInit } from './http';
+import type { LegacyMigrationReport } from '../../../packages/contracts/src/legacy-card-migration';
 
 /** GET /api/projects 返回项 */
 export interface ProjectRecord {
@@ -120,7 +121,7 @@ export function batchDeleteProjects(
 
 /* ============ 项目快照（画布水合） ============ */
 
-/** 快照内画布数据（nodes/viewport 为 JSON 字符串） */
+/** 快照内画布数据（nodes/viewport/edges 为 JSON 字符串） */
 export interface SnapshotCanvas {
   /** 画布版本号（乐观锁） */
   version: number | null;
@@ -128,6 +129,8 @@ export interface SnapshotCanvas {
   nodes: string | null;
   /** 视口 JSON 字符串 {x, y, zoom} */
   viewport: string | null;
+  /** 连线列表 JSON 字符串（IKDLQF，旧数据缺省视为空数组） */
+  edges?: string | null;
 }
 
 /** 快照内资产字典项（key 为 assetId） */
@@ -149,6 +152,8 @@ export interface ProjectSnapshot {
   assets: Record<string, SnapshotAsset>;
   /** 关联生成任务摘要列表 */
   jobs: unknown[];
+  /** 旧生成卡迁移报告（IKDLQK，仅本轮发生迁移或存在失败时携带） */
+  legacy_migration?: LegacyMigrationReport;
 }
 
 /** 在途去重：StrictMode 双挂载只发一次；完成后释放 */

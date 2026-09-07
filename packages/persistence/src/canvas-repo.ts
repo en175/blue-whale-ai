@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
+import type { PromptPreviewSource } from "@blue-whale/contracts";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
-/** Canvas db port（Prisma-backed），复用部署的 canvas 表（project_id 唯一 / viewport_json / nodes_json）。
+/** Canvas db port（Prisma-backed），复用部署的 canvas 表（project_id 唯一 / viewport_json / nodes_json / edges_json）。
  *  对齐 Java CanvasDto：{id, project_id, viewport, nodes}——viewport/nodes 是 JSON 字符串（前端 JSON.parse）。
+ *  edges（IKDLQF）同构：JSON 字符串，缺省 null 由调用侧视为空数组。
  *  repo 负责 Json 列 ↔ 字符串转换。 */
 
 export interface CanvasView {
@@ -10,21 +13,27 @@ export interface CanvasView {
   version: number | null;
   viewport: string | null;
   nodes: string | null;
+  edges: string | null;
 }
 
 export interface CanvasRepo {
+  getPromptSnapshot(projectId: string, source: PromptPreviewSource): Promise<{ title: string; text: string } | null>;
+  rememberPromptSnapshot(projectId: string, source: PromptPreviewSource, content: { title: string; text: string }): Promise<{ title: string; text: string }>;
+
   getByProject(projectId: string): Promise<CanvasView>;
   save(
     projectId: string,
     viewport: string | null,
     nodes: string | null,
   ): Promise<CanvasView>;
-  /** 仅当 Canvas 仍是调用方读取的版本时保存；冲突返回 null，由调用方重读并重算。 */
+  /** 仅当 Canvas 仍是调用方读取的版本时保存；冲突返回 null，由调用方重读并重算。
+   *  edges 与 nodes 同一次条件写入（IKDLQF）；调用方须显式传入（保留旧值或新值）。 */
   saveIfVersion(
     projectId: string,
     expectedVersion: number | null,
     viewport: string | null,
     nodes: string | null,
+    edges: string | null,
   ): Promise<CanvasView | null>;
 }
 
@@ -35,6 +44,7 @@ function emptyView(projectId: string): CanvasView {
     version: null,
     viewport: null,
     nodes: null,
+    edges: null,
   };
 }
 
@@ -44,6 +54,7 @@ function toView(row: {
   version: number;
   viewport_json: unknown;
   nodes_json: unknown;
+  edges_json: unknown;
 }): CanvasView {
   return {
     id: row.id.toString(),
@@ -52,6 +63,7 @@ function toView(row: {
     viewport:
       row.viewport_json == null ? null : JSON.stringify(row.viewport_json),
     nodes: row.nodes_json == null ? null : JSON.stringify(row.nodes_json),
+    edges: row.edges_json == null ? null : JSON.stringify(row.edges_json),
   };
 }
 
@@ -89,7 +101,26 @@ async function markOutputSlotsPlaced(
 }
 
 export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
+  const snapshotWhere = (projectId: string, source: PromptPreviewSource) => ({
+    project_id: BigInt(projectId),
+    source_key: createHash("sha256").update(JSON.stringify([source.sessionId, source.revisionId, source.shotNo])).digest("hex"),
+  });
   return {
+    async getPromptSnapshot(projectId, source) {
+      return prisma.prompt_preview_snapshots.findUnique({
+        where: { project_id_source_key: snapshotWhere(projectId, source) },
+        select: { title: true, text: true },
+      });
+    },
+    async rememberPromptSnapshot(projectId, source, content) {
+      const key = snapshotWhere(projectId, source);
+      await prisma.prompt_preview_snapshots.createMany({
+        data: [{ ...key, source_json: source, ...content }], skipDuplicates: true,
+      });
+      return prisma.prompt_preview_snapshots.findUniqueOrThrow({
+        where: { project_id_source_key: key }, select: { title: true, text: true },
+      });
+    },
     async getByProject(projectId) {
       const row = await prisma.canvas.findFirst({
         where: { project_id: BigInt(projectId) },
@@ -112,11 +143,12 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
         return toView(row);
       });
     },
-    async saveIfVersion(projectId, expectedVersion, viewport, nodes) {
+    async saveIfVersion(projectId, expectedVersion, viewport, nodes, edges) {
       const pid = BigInt(projectId);
       const data = {
         viewport_json: viewport ? JSON.parse(viewport) : null,
         nodes_json: nodes ? JSON.parse(nodes) : null,
+        edges_json: edges ? JSON.parse(edges) : null,
       };
       if (expectedVersion === null) {
         try {

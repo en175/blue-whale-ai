@@ -36,24 +36,8 @@ export function collectMediaBlocks(node: CollectableNode, chipId: string): Sessi
   const blocks: SessionContentBlock[] = [];
   const d = node.data ?? {};
 
-  if (node.type === 'textNode') {
-    const raw = (d.html as string) ?? '';
-    const cleanText = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    if (cleanText) {
-      const displayLabel = cleanText.length > 10 ? cleanText.slice(0, 10) + '…' : cleanText;
-      blocks.push({
-        type: 'text',
-        name: displayLabel,
-        node_id: node.id,
-        source: 'node',
-        resource_type: '文本节点',
-        chip_id: chipId,
-        resource_id: node.id,
-        display_label: displayLabel,
-        resource_text: cleanText,
-      });
-    }
-  }
+  // IKDLQJ：textNode 与生成卡正文不再经这里进对话——正文统一走「对话引用快照」（quoteConversation.ts），
+  // 这里只继续收集显式挂在节点/卡上的媒体引用。
 
   if (node.type === 'mediaNode') {
     const src = d.src as string | undefined;
@@ -133,21 +117,8 @@ export function collectMediaBlocks(node: CollectableNode, chipId: string): Sessi
       } | undefined;
 
       if (gc) {
-        const displayLabel = gc.shotTitle || '生成卡';
-        const [cardRevisionId] = (gc.cardId ?? '').split('#');
-        blocks.push({
-          type: 'text',
-          name: displayLabel,
-          node_id: node.id,
-          source: 'card-generation',
-          resource_type: '生成卡',
-          chip_id: chipId,
-          resource_id: cardRevisionId || node.id,
-          ...(typeof gc.shotNo === 'number' ? { shot_no: gc.shotNo } : {}),
-          media_type: gc.targetMedia ?? 'image',
-          display_label: displayLabel,
-        });
-
+        // IKDLQJ：不再把旧 revision 指针（cardId/shotNo）当引用内容发出去；
+        // 卡的当前提示词由「对话引用快照」捕获发送，这里只保留显式挂载的素材引用。
         if (gc.assetRefItems && gc.assetRefItems.length > 0) {
           for (const ref of gc.assetRefItems) {
             blocks.push({

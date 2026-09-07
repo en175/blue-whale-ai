@@ -16,6 +16,7 @@ let container: HTMLDivElement;
 let props: ComponentProps<typeof FlowCanvas>;
 
 interface TextCallbacks {
+  onDraftError: ReturnType<typeof vi.fn>;
   onChange: ReturnType<typeof vi.fn>;
   onAddToChat: ReturnType<typeof vi.fn>;
   onDelete: ReturnType<typeof vi.fn>;
@@ -71,6 +72,7 @@ async function renderText(
   overrides: { html?: string; toolMode?: 'drag' | 'select'; selected?: boolean; zoom?: number } = {},
 ): Promise<TextCallbacks> {
   const callbacks: TextCallbacks = {
+    onDraftError: vi.fn(),
     onChange: vi.fn(),
     onAddToChat: vi.fn(),
     onDelete: vi.fn(),
@@ -124,6 +126,7 @@ beforeEach(() => {
   props = {
     toolMode: 'select', showMiniMap: false, showEdges: false, hideZoomControl: true,
     extraNodes: [], textNodes: [], mediaNodes: [], productNodes: [], assetNodes: [],
+    edges: [], onEdgesChange: vi.fn(), onConnect: vi.fn(),
     viewport: { x: 0, y: 0, zoom: 1 },
     onDeleteNode: vi.fn(), onNodeDragStop: vi.fn(), onViewportChange: vi.fn(),
     onNodeClick: vi.fn(), onPaneClick: vi.fn(),
@@ -138,10 +141,6 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-
-function execCommandSpy() {
-  return document.execCommand as unknown as ReturnType<typeof vi.fn>;
-}
 
 describe('Canvas 文本节点卡片', () => {
   it('标题常驻内容区上方，名称只呈现一次', async () => {
@@ -206,20 +205,7 @@ describe('Canvas 文本节点卡片', () => {
     expect(actions()).not.toContain('加粗');
   });
 
-  it('粘贴超出字数上限时按既有规则截断并提示', async () => {
-    const callbacks = await renderText();
-    await startEditing();
-    const pasted = 'a'.repeat(2500);
-    await act(async () => {
-      const event = new Event('paste', { bubbles: true, cancelable: true });
-      Object.defineProperty(event, 'clipboardData', { value: { getData: () => pasted } });
-      editor().dispatchEvent(event);
-    });
-    expect(callbacks.onToast).toHaveBeenCalledWith('warn', expect.stringContaining('2000'));
-    const inserted = execCommandSpy().mock.calls.find((call) => call[0] === 'insertText');
-    expect(inserted).toBeTruthy();
-    expect(String(inserted![2]).length).toBe(2000);
-  });
+  // IKDLQE: truncation was retired; complete paste and over-limit drafts are covered by real-browser integration.
 
   it('滚轮在正文内遵循内部阅读语义，不缩放画布', async () => {
     await renderText({ html: '<p>需要滚动才能读完的正文</p>' });
@@ -303,4 +289,24 @@ describe('Canvas 文本节点标题分段缩放', () => {
     expect(node().textContent).toContain('组合操作正文');
     expect(actions()).toContain('添加到对话');
   });
+});
+
+
+it('reports invalid text to the canvas and clears the error after correction', async () => {
+  const callbacks = await renderText();
+  await startEditing();
+  await act(async () => {
+    Object.defineProperty(editor(), 'innerText', { configurable: true, value: '长'.repeat(100001) });
+    editor().dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(callbacks.onChange).not.toHaveBeenCalled();
+  expect(callbacks.onDraftError).toHaveBeenLastCalledWith(TEXT_ID, expect.stringContaining('100000'));
+  expect(node().textContent).toContain('草稿已保留');
+  await act(async () => {
+    Object.defineProperty(editor(), 'innerText', { configurable: true, value: '修正正文' });
+    editor().innerHTML = '修正正文';
+    editor().dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(callbacks.onDraftError).toHaveBeenLastCalledWith(TEXT_ID, '');
+  expect(callbacks.onChange).toHaveBeenLastCalledWith(TEXT_ID, '修正正文');
 });

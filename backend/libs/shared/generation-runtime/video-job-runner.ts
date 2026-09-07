@@ -1,4 +1,6 @@
 import { createLogger, timedProviderCall } from "@blue-whale/core/logging";
+import { composeTextAttachmentPrompt } from "@blue-whale/core";
+import { z } from "zod";
 import {
   ERROR_INVALID_INPUT,
   ERROR_PROVIDER_CREDENTIAL_MISSING,
@@ -7,6 +9,7 @@ import {
   ERROR_REFERENCE_ASSET_UNAVAILABLE,
   ERROR_REFERENCE_LIMIT_EXCEEDED,
   ERROR_UNSUPPORTED_INPUT,
+  textAttachmentSnapshotSchema,
 } from "@blue-whale/contracts";
 
 const logger = createLogger("generation-runtime");
@@ -395,12 +398,22 @@ async function buildSubmitRequest(
     claim.input.parameters && typeof claim.input.parameters === "object"
       ? (claim.input.parameters as Record<string, unknown>)
       : null;
-  const prompt =
+  const basePrompt =
     typeof claim.input.prompt === "string"
       ? claim.input.prompt
       : typeof claim.input.prompt_text === "string"
         ? claim.input.prompt_text
         : "";
+  // IKDLQG：目标驱动视频任务的快照携带 text_attachments（接纳时冻结的当次正文），
+  // 提交时按契约确定性组合；存量任务无该字段，prompt 逐字节不变。
+  // 快照形状校验与图片 worker 同源（textAttachmentSnapshotSchema），损坏按无附件处理。
+  const parsedAttachments = z
+    .array(textAttachmentSnapshotSchema)
+    .safeParse(claim.input.text_attachments ?? []);
+  const prompt = composeTextAttachmentPrompt(
+    parsedAttachments.success ? parsedAttachments.data : [],
+    basePrompt,
+  );
   const model =
     typeof claim.input.model_id === "string"
       ? claim.input.model_id

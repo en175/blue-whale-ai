@@ -80,6 +80,7 @@ model canvas {
   project_id    BigInt   @unique(map: "uk_canvas_project")
   viewport_json Json?
   nodes_json    Json?
+  edges_json    Json?
   gmt_create    DateTime @default(now()) @db.DateTime(0)
   gmt_modified  DateTime @default(now()) @db.DateTime(0)
   version       Int      @default(0)
@@ -788,4 +789,46 @@ model storyboard_previews {
   @@unique([project_id, command_id], map: "uk_storyboard_command")
   @@index([scene_card_id], map: "idx_storyboard_scene")
   @@index([project_id], map: "idx_storyboard_project")
+}
+
+/// Immutable first-applied preview content, retained when its Canvas node is deleted.
+model prompt_preview_snapshots {
+  id          BigInt   @id @default(autoincrement())
+  project_id  BigInt
+  source_key  String   @db.VarChar(64)
+  source_json Json
+  title       String   @db.VarChar(200)
+  text        String   @db.MediumText
+  gmt_create  DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([project_id, source_key], map: "uk_prompt_preview_source")
+}
+
+/// Immutable conversation quote snapshot: node text captured when added to the conversation (IKDLQJ); retained after the source node is edited or deleted.
+model conversation_quote_snapshots {
+  id          BigInt   @id @default(autoincrement())
+  project_id  BigInt
+  quote_key   String   @db.VarChar(64)
+  node_id     String   @db.VarChar(128)
+  source_json Json?
+  title       String   @db.VarChar(200)
+  text        String   @db.MediumText
+  gmt_create  DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([project_id, quote_key], map: "uk_conversation_quote")
+}
+
+/// Immutable legacy generation-card migration history (IKDLQK): card content captured before conversion to an ordinary text node; read-only, never rewritten by later edits.
+model legacy_card_history {
+  id          BigInt   @id @default(autoincrement())
+  project_id  BigInt
+  node_id     String   @db.VarChar(128)
+  title       String   @db.VarChar(200)
+  prompt_text String   @db.MediumText
+  visual_text String?  @db.MediumText
+  source_json Json?
+  card_json   Json
+  gmt_create  DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([project_id, node_id], map: "uk_legacy_card_history")
 }

@@ -82,7 +82,9 @@ export function errorCodeToNumeric(code: string): number {
 
 // ── provider 错误信号（上游错误正文识别，跨 provider 共享，IKDAJN）──
 // provider 层据这些信号把上游错误归入错误码（content-policy > quota > provider_failed）。
-// 单一来源：新增/调整 keyword 只改这里，四端 provider 同时生效。
+// 单一来源：新增/调整 keyword 只改这里，各 provider（audio/video×2）同时生效。
+// 注：packages/core/src/ark-image-client.ts 有同构本地副本（保留「余额」），IKDP2C 去重前
+// 与权威版存在「余额」语义分歧——ARK 直连路径仍认「余额」，relay 路径不认（IKDQ5F）。
 
 /** 内容安全策略信号：命中 → ERROR_CONTENT_REJECTED（版权/敏感）。中英文 keyword 都覆盖
  *  （实测线上英文 copyright restrictions / sensitive information、中文「版权」「敏感」都可能出现）。 */
@@ -96,9 +98,12 @@ export function isContentPolicySignal(text: string): boolean {
 
 /** 欠费信号（IKBQEE / ADR-0078 共享判定，自 new-api-video-task-provider 迁入统一）。
  *  不只看 402：new-api 预扣费失败常以 HTTP200+body 报错（job 1565/1612 真实案例），
- *  中文「预扣费额度失败/剩余额度/余额」与英文 quota/balance/insufficient 均命中。 */
+ *  中文「预扣费额度失败/剩余额度/额度不足/余额不足」与英文 balance/payment_required 均命中。
+ *  IKDQ5F：删掉宽泛英文子串 quota/insufficient/裸 402 与裸「余额」——避免 base64 随机字母
+ *  （qUOtA→quota）与「渠道无余额」「new-api 音频生成余额不足」误伤；真欠费靠
+ *  「预扣费额度失败/剩余额度/额度不足/余额不足」锚点兜住。 */
 export const NEW_API_QUOTA_SIGNAL =
-  /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required|(^|\D)402(\D|$))/i;
+  /(预扣费额度失败|剩余额度|余额不足|额度不足|balance|payment_required)/i;
 
 /** 欠费信号判定：HTTP 402 或正文命中欠费信号（IKBQEE）。 */
 export function isQuotaSignal(text: string, status?: number): boolean {

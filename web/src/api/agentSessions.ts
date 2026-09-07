@@ -1,3 +1,4 @@
+import type { PromptPreviewSource } from '../../../packages/contracts/src/prompt-preview';
 /* ============================================
  * agentSessions 接口：Agent 会话（session 维度，唯一有 worker 执行 Run 的对话服务）
  * 基址 /api/agent/v1/projects/:id/sessions
@@ -6,7 +7,7 @@
  * - 事件流为共享连接（引用计数）：StrictMode 双挂载/多处订阅不重复建连
  * ============================================ */
 import { readSseResponse, type SseEvent } from './events';
-import { ApiError, apiRequest } from './http';
+import { ApiError, apiRequest, isApiError } from './http';
 import { newIdempotencyKey } from './jobs';
 import { agentPath, agentUrl, agentMethod } from './agentRoutes';
 import { handleUnauthorized } from '@/utils/auth';
@@ -93,24 +94,27 @@ export interface SessionContentBlock {
   asset_id?: string;
   /** 来源：card-ref 卡片参考图、card-image 商品图、card-voice 角色音色、card-generation 生成卡、node 独立节点 */
   source?: 'card-ref' | 'card-image' | 'card-voice' | 'card-generation' | 'node';
-  /** 资源来源类型：区分从哪种卡片/节点带出的媒体数据 */
+  /** 资源来源类型：区分从哪种卡片/节点带出的媒体数据；
+   *  'text_quote' 是文本引用快照（IKDLQJ）的契约判别值，只在 round-trip 回来的部件上出现 */
   resource_type?:
     | '图片'       // 独立图片节点
     | '视频'       // 独立视频节点
     | '音频'       // 独立音频节点
     | '文本节点'   // 文本节点
+    | '文本引用'   // 对话引用快照（IKDLQJ）
     | '商品卡'     // 商品卡
     | '风格卡'     // 风格卡
     | '角色卡'     // 角色卡
     | '物体卡'     // 物体卡
     | '环境卡'     // 环境卡
     | '自定义卡'   // 自定义卡
-    | '生成卡';    // 生成卡
+    | '生成卡'     // 生成卡
+    | 'text_quote'; // 文本引用快照契约值（IKDLQJ，agent round-trip 回填）
   /** 关联的 chip ID（用于删除 chip 时同步移除媒体数据） */
   chip_id?: string;
 
   // ---- 封装参数（给后端消费的统一字段） ----
-  /** 资源 ID，对应画布节点 id */
+  /** 资源 ID，对应画布节点 id；文本引用快照（IKDLQJ）为 quoteId */
   resource_id?: string;
   /** 媒体类型：image / video / audio */
   media_type?: 'image' | 'video' | 'audio';
@@ -121,10 +125,14 @@ export interface SessionContentBlock {
   resource_kind?: string;
   /** 展示标签（对外展示的名称） */
   display_label?: string;
-  /** 资源文本描述（如商品卡的商品详情） */
+  /** 资源文本描述（如商品卡的商品详情）；文本引用快照为冻结正文 */
   resource_text?: string;
   /** 生成卡胶囊指向的镜号：`resource_id` 是 revision，配上它才定位到具体那一镜。 */
   shot_no?: number;
+  /** 对话引用快照 id（IKDLQJ）：服务端 `conversation_quote_snapshots` 主键，刷新后按它回读引用事实 */
+  quote_id?: string;
+  /** 引用节点的预览来源三件套（IKDLQE）；普通无预览来源文本不携带 */
+  prompt_source?: PromptPreviewSource | null;
 }
 
 /** 生成卡里的一条素材引用（IKAFSQ）。
@@ -141,6 +149,7 @@ export interface GenerationCardAssetRef {
 
 /** 生成卡：单镜头分镜提示词卡（S2 渲染，S3 手动应用） */
 export interface GenerationCardBlock {
+  source?: PromptPreviewSource;
   /** 卡片标题 / 镜头编号，如「镜头 1」 */
   shotTitle: string;
   /** 时间范围，如 0-4s */
@@ -394,16 +403,52 @@ export function listSessionRuns(
   return sessionRequest(agentPath('session_runs', projectId, { session_id: sessionId }));
 }
 
+/**
+ * 读一次会话，取它当前的 etag。
+ *
+ * 响应体里没有 etag 是契约破了，不是"再试试"能解决的事，所以直接抛而不是兜一个假值下去
+ * ——拿 `"missing"` 这类占位去发 If-Match，只会把 400 从 if_match_required 换成
+ * invalid_etag，用户看到的还是一句失败。
+ */
+async function readSessionEtag(projectId: string, sessionId: string): Promise<string> {
+  const session = await sessionRequest<SessionRecord>(
+    agentPath('get_session', projectId, { session_id: sessionId }),
+  );
+  if (!session?.etag) throw new ApiError(500, '读取会话版本失败，请刷新页面重试', 'missing_etag');
+  return session.etag;
+}
+
 /** 删除会话 DELETE /projects/:id/sessions/:sid（历史会话下拉「删除」，需二次确认）
  *
- * Idempotency-Key 是 agent 侧对**所有**写操作的硬要求（`http/app.ts` 的 idempotentMutation
- * 缺则直接 400 idempotency_key_required），删除也不例外——之前这里漏了，于是这个删除从上线起
- * 一次都没成功过。 */
-export function deleteSession(projectId: string, sessionId: string): Promise<unknown> {
-  return sessionRequest(
-    agentPath('delete_session', projectId, { session_id: sessionId }),
-    { method: agentMethod('delete_session'), headers: { 'Idempotency-Key': newIdempotencyKey() } },
-  );
+ * agent 对会话写操作有**两道**门，缺任何一样都是 400，而在界面上都长成同一句「删除失败」：
+ *
+ * - `Idempotency-Key`：`http/app.ts` 的 idempotentMutation 缺则 400 idempotency_key_required
+ * - `If-Match: W/"session-N"`：同文件 expectedVersion 缺则 400 if_match_required
+ *
+ * 这个删除从上线起一次都没成功过，而且是同一处连错两次——先漏 Idempotency-Key，补上之后
+ * 又漏 If-Match。两道门是一起的，别再只补一半。
+ *
+ * `etag` 让调用方传：历史会话列表里每一条都带着自己的 etag（`GET /sessions` 逐条经服务端
+ * sessionView 序列化），删哪条就用哪条的，不必为此多打一次请求。没传才回去读一次。
+ *
+ * 412 是"手里的 etag 旧了"——另一个端在这中间改了标题之类。重读一次再来，只重一次：
+ * 真的在并发改动中，无限重试也追不上，那时候该让用户刷新。
+ */
+export async function deleteSession(projectId: string, sessionId: string, etag?: string): Promise<void> {
+  const path = agentPath('delete_session', projectId, { session_id: sessionId });
+  const method = agentMethod('delete_session');
+  const submit = (tag: string) =>
+    sessionRequest<void>(path, {
+      method,
+      headers: { 'Idempotency-Key': newIdempotencyKey(), 'If-Match': tag },
+    });
+
+  try {
+    await submit(etag ?? (await readSessionEtag(projectId, sessionId)));
+  } catch (e) {
+    if (!isApiError(e) || e.status !== 412) throw e;
+    await submit(await readSessionEtag(projectId, sessionId));
+  }
 }
 
 /* ============ 消息与运行控制 ============ */
@@ -446,8 +491,11 @@ function stripInternalFields(block: SessionContentBlock): Record<string, unknown
  * 画布侧的中文资源分类 → 契约里的 `resource_type`。
  *
  * 两者不是一个东西，此前被当成了一个：画布用「商品卡 / 图片 / 音频」这类中文分类做渲染分支，
- * 契约的 `resource_type` 只有 `asset` 与 `card` 两个值，是 agent 的判别字段。中文分类照旧
- * 随包带过去（挂在 `resource_kind` 上，agent 原样 round-trip），但判别位必须是契约那两个。
+ * 契约的 `resource_type` 是 agent 的判别字段。中文分类照旧随包带过去（挂在 `resource_kind` 上，
+ * agent 原样 round-trip），但判别位必须是契约值。
+ *
+ * 契约值现有三个：`asset` / `card`（本表映射），以及 `text_quote`（IKDLQJ 文本引用快照，
+ * 不走本表——`toReferencePart` 在 quote_id 分支直接给出）。
  */
 const RESOURCE_KIND_TO_CONTRACT: Record<string, 'asset' | 'card'> = {
   图片: 'asset',
@@ -478,6 +526,16 @@ const RESOURCE_KIND_TO_CONTRACT: Record<string, 'asset' | 'card'> = {
  */
 function toReferencePart(block: SessionContentBlock): Record<string, unknown> | null {
   const rest = stripInternalFields(block);
+  // 文本引用快照（IKDLQJ）：身份是服务端 quoteId，正文随部件走（resource_text），不按 id 解析、不用旧 revision 指针。
+  if (block.quote_id) {
+    return {
+      ...rest,
+      type: 'resource_ref',
+      resource_type: 'text_quote',
+      resource_kind: block.resource_type ?? '文本引用',
+      resource_id: block.quote_id,
+    };
+  }
   if (block.asset_id && (block.media_type === 'image' || block.media_type === 'video')) {
     const restWithoutUrl = { ...rest };
     delete restWithoutUrl.url;

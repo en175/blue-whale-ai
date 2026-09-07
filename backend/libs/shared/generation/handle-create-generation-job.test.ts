@@ -816,4 +816,392 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     expect(result.msg).toBe("参考素材引用无效");
     expect(createJob).not.toHaveBeenCalled();
   });
+
+// IKDLQF：target_node_id 文本附件（单个文本附件驱动图片生成）。
+// canvas repo 以 mock 表达：合法路径断言冻结进 input 的快照与当时画布一致（edges 数组顺序），
+// 非法路径断言明确失败且不建任务；无 target_node_id 时不读画布、行为完全不变。
+function buildTargetDeps(canvasView: { nodes: string | null; edges: string | null }) {
+  const findOwnedById = vi.fn().mockResolvedValue({
+    id: "1",
+    name: "项目",
+    thumb: null,
+    created_at: "2026-08-18T00:00:00.000Z",
+  });
+  const listEnabledByType = vi
+    .fn()
+    .mockResolvedValue([{ model_id: "seedream-5.0" }]);
+  const createJob = vi.fn().mockResolvedValue({
+    generation_job_id: "1",
+    cursor: 1,
+  });
+  const getByProject = vi.fn().mockResolvedValue({
+    id: "9",
+    project_id: "1",
+    version: 3,
+    viewport: null,
+    nodes: canvasView.nodes,
+    edges: canvasView.edges,
+  });
+  const deps = {
+    projects: { findOwnedById },
+    models: { listEnabledByType },
+    command: { createJob },
+    canvas: { getByProject },
+  } as unknown as HandlerDeps;
+  return { deps, createJob, getByProject };
+}
+
+const TARGET_CANVAS = {
+  nodes: JSON.stringify([
+    { id: "media-1", type: "mediaNode", data: { mediaType: "image" } },
+    { id: "media-2", type: "mediaNode", data: { mediaType: "video" } },
+    { id: "media-3", type: "mediaNode", data: { mediaType: "image", text: "非文本节点正文" } },
+    { id: "text-a", type: "textNode", data: { title: "风格", text: "赛博朋克" } },
+    { id: "text-b", type: "textNode", data: { text: "雨夜" } },
+    { id: "text-blank", type: "textNode", data: { title: "空白", text: "   " } },
+  ]),
+  edges: JSON.stringify([
+    { id: "e1", source: "text-b", target: "media-1" },
+    { id: "e2", source: "text-a", target: "media-1" },
+    { id: "e3", source: "text-blank", target: "media-1" },
+    { id: "e4", source: "text-a", target: "media-2" },
+    { id: "e5", source: "media-3", target: "media-1" },
+  ]),
+};
+
+const IMAGE_TARGET_BODY = {
+  type: "image",
+  target_node_id: "media-1",
+  expected_output_count: 1,
+  parameters: {
+    prompt: "海边日落",
+    model_id: "seedream-5.0",
+    aspect_ratio: "1:1",
+  },
+};
+
+describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", () => {
+  it("合法目标 → 200，按 edges 数组顺序冻结 text_attachments 与 target_node_id", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob("u1", "p1", IMAGE_TARGET_BODY, null, deps);
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.target_node_id).toBe("media-1");
+    expect(cmdArg.input.prompt).toBe("海边日落");
+    // 顺序即 edges 数组顺序；缺 title 缺省 ""；空白正文照实冻结（组合时才忽略）；
+    // 指向其他目标的 e4 与非 textNode 来源的 e5 不进入快照。
+    expect(cmdArg.input.text_attachments).toEqual([
+      { node_id: "text-b", title: "", text: "雨夜" },
+      { node_id: "text-a", title: "风格", text: "赛博朋克" },
+      { node_id: "text-blank", title: "空白", text: "   " },
+    ]);
+  });
+
+  it("目标节点不存在 → 400 目标节点不存在或不是图片媒体节点，不建任务", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...IMAGE_TARGET_BODY, target_node_id: "media-404" }, null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("目标节点不存在或不是图片媒体节点");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("目标是 textNode（非 mediaNode）→ 400，不建任务", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...IMAGE_TARGET_BODY, target_node_id: "text-a" }, null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("目标节点不存在或不是图片媒体节点");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("目标是视频 mediaNode → 400，不建任务", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...IMAGE_TARGET_BODY, target_node_id: "media-2" }, null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("目标节点不存在或不是图片媒体节点");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("音频类型携带 target_node_id → 400 仅图片/视频生成可用，不读画布不建任务", async () => {
+    const { deps, createJob, getByProject } = buildTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", {
+        type: "audio",
+        target_node_id: "media-1",
+        expected_output_count: 1,
+        parameters: { prompt: "哼一段旋律", model_id: "audio-model" },
+      }, null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("target_node_id 仅支持图片/视频生成");
+    expect(getByProject).not.toHaveBeenCalled();
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("组合后超过 30000 字 → 400 明确失败，不建任务、不截断", async () => {
+    const { deps, createJob } = buildTargetDeps({
+      nodes: JSON.stringify([
+        { id: "media-1", type: "mediaNode", data: { mediaType: "image" } },
+        { id: "text-a", type: "textNode", data: { title: "a", text: "甲".repeat(20_000) } },
+        { id: "text-b", type: "textNode", data: { title: "b", text: "乙".repeat(20_000) } },
+      ]),
+      edges: JSON.stringify([
+        { id: "e1", source: "text-a", target: "media-1" },
+        { id: "e2", source: "text-b", target: "media-1" },
+      ]),
+    });
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      { ...IMAGE_TARGET_BODY, parameters: { ...IMAGE_TARGET_BODY.parameters, prompt: "" } },
+      null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("仅附件正文、prompt 为空字符串 → 200，prompt 冻结为空串", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      { ...IMAGE_TARGET_BODY, parameters: { ...IMAGE_TARGET_BODY.parameters, prompt: "" } },
+      null, deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("");
+    expect(cmdArg.input.text_attachments).toHaveLength(3);
+  });
+
+  it("附件全部空白且 prompt 为空 → 400 沿用 prompt 无效，不建任务", async () => {
+    const { deps, createJob } = buildTargetDeps({
+      nodes: JSON.stringify([
+        { id: "media-1", type: "mediaNode", data: { mediaType: "image" } },
+        { id: "text-blank", type: "textNode", data: { title: "空白", text: "  \n " } },
+      ]),
+      edges: JSON.stringify([{ id: "e1", source: "text-blank", target: "media-1" }]),
+    });
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      { ...IMAGE_TARGET_BODY, parameters: { ...IMAGE_TARGET_BODY.parameters, prompt: "" } },
+      null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("prompt 无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("断开后边消失：edges 为空即不消费来源，text_attachments 冻结为空数组", async () => {
+    const { deps, createJob } = buildTargetDeps({ nodes: TARGET_CANVAS.nodes, edges: "[]" });
+
+    const result = await handleCreateGenerationJob("u1", "p1", IMAGE_TARGET_BODY, null, deps);
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.target_node_id).toBe("media-1");
+    expect(cmdArg.input.text_attachments).toEqual([]);
+    expect(cmdArg.input.prompt).toBe("海边日落");
+  });
+
+  it("不携带 target_node_id → 不读画布，input 不含附件字段，行为不变", async () => {
+    const { deps, createJob, getByProject } = buildTargetDeps(TARGET_CANVAS);
+    const body = { ...IMAGE_TARGET_BODY } as Record<string, unknown>;
+    delete body.target_node_id;
+
+    const result = await handleCreateGenerationJob("u1", "p1", body, null, deps);
+
+    expect(result.code).toBe(200);
+    expect(getByProject).not.toHaveBeenCalled();
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input).not.toHaveProperty("target_node_id");
+    expect(cmdArg.input).not.toHaveProperty("text_attachments");
+  });
+});
+
+// IKDLQG：target_node_id 文本附件扩展到生视频目标（mediaType 为 video 的 mediaNode）。
+// 快照形状与图片同构；视频既有冻结字段（resolution/duration/参考引用）保持。
+function buildVideoTargetDeps(canvasView: { nodes: string | null; edges: string | null }) {
+  const { deps, createJob, getByProject } = buildTargetDeps(canvasView);
+  // seedance-2 经别名解析为 doubao-seedance-2-0-260128，白名单按解析后 id 校验
+  (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType = vi
+    .fn()
+    .mockResolvedValue([{ model_id: "doubao-seedance-2-0-260128" }]);
+  return { deps, createJob, getByProject };
+}
+
+const VIDEO_TARGET_BODY = {
+  ...VIDEO_BODY,
+  target_node_id: "media-2",
+};
+
+describe("handleCreateGenerationJob target_node_id 视频目标（IKDLQG）", () => {
+  it("合法视频目标 → 200，按 edges 数组顺序冻结 text_attachments 与 target_node_id，视频参数保持", async () => {
+    const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob("u1", "p1", VIDEO_TARGET_BODY, null, deps);
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.target_node_id).toBe("media-2");
+    expect(cmdArg.input.prompt).toBe("人物走过街角");
+    // TARGET_CANVAS 中仅 e4（text-a → media-2）指向视频目标
+    expect(cmdArg.input.text_attachments).toEqual([
+      { node_id: "text-a", title: "风格", text: "赛博朋克" },
+    ]);
+    expect(cmdArg.input.model_id).toBe("doubao-seedance-2-0-260128");
+    expect(cmdArg.input.resolution).toBe("720p");
+    expect(cmdArg.input.duration).toBe(8);
+  });
+
+  it("目标是图片 mediaNode → 400 目标节点不存在或不是视频媒体节点，不建任务", async () => {
+    const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...VIDEO_TARGET_BODY, target_node_id: "media-1" }, null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("目标节点不存在或不是视频媒体节点");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("目标节点不存在 → 400，不建任务", async () => {
+    const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", { ...VIDEO_TARGET_BODY, target_node_id: "media-404" }, null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("目标节点不存在或不是视频媒体节点");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("仅附件正文、prompt 为空字符串 → 200，prompt 冻结为空串", async () => {
+    const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      { ...VIDEO_TARGET_BODY, parameters: { ...VIDEO_BODY.parameters, prompt: "" } },
+      null, deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("");
+    expect(cmdArg.input.text_attachments).toEqual([
+      { node_id: "text-a", title: "风格", text: "赛博朋克" },
+    ]);
+  });
+
+  it("附件全部空白且 prompt 为空 → 400 沿用 prompt 无效，不建任务", async () => {
+    const { deps, createJob } = buildVideoTargetDeps({
+      nodes: JSON.stringify([
+        { id: "media-v", type: "mediaNode", data: { mediaType: "video" } },
+        { id: "text-blank", type: "textNode", data: { title: "空白", text: "  \n " } },
+      ]),
+      edges: JSON.stringify([{ id: "e1", source: "text-blank", target: "media-v" }]),
+    });
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      { ...VIDEO_TARGET_BODY, target_node_id: "media-v", parameters: { ...VIDEO_BODY.parameters, prompt: "" } },
+      null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("prompt 无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("组合后超过 30000 字 → 400 明确失败，不建任务、不截断", async () => {
+    const { deps, createJob } = buildVideoTargetDeps({
+      nodes: JSON.stringify([
+        { id: "media-v", type: "mediaNode", data: { mediaType: "video" } },
+        { id: "text-a", type: "textNode", data: { title: "a", text: "甲".repeat(20_000) } },
+        { id: "text-b", type: "textNode", data: { title: "b", text: "乙".repeat(20_000) } },
+      ]),
+      edges: JSON.stringify([
+        { id: "e1", source: "text-a", target: "media-v" },
+        { id: "e2", source: "text-b", target: "media-v" },
+      ]),
+    });
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1",
+      { ...VIDEO_TARGET_BODY, target_node_id: "media-v", parameters: { ...VIDEO_BODY.parameters, prompt: "" } },
+      null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("断开后边消失：edges 为空即不消费来源，text_attachments 冻结为空数组", async () => {
+    const { deps, createJob } = buildVideoTargetDeps({ nodes: TARGET_CANVAS.nodes, edges: "[]" });
+
+    const result = await handleCreateGenerationJob("u1", "p1", VIDEO_TARGET_BODY, null, deps);
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.target_node_id).toBe("media-2");
+    expect(cmdArg.input.text_attachments).toEqual([]);
+    expect(cmdArg.input.prompt).toBe("人物走过街角");
+  });
+
+  it("不携带 target_node_id 的视频创建 → 不读画布，input 不含附件字段，行为不变", async () => {
+    const { deps, createJob, getByProject } = buildVideoTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob("u1", "p1", VIDEO_BODY, null, deps);
+
+    expect(result.code).toBe(200);
+    expect(getByProject).not.toHaveBeenCalled();
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input).not.toHaveProperty("target_node_id");
+    expect(cmdArg.input).not.toHaveProperty("text_attachments");
+  });
+});
+
+
+describe("IKDL9U review: ordinary text and provenance", () => {
+  it.each(["image", "video"])("freezes HTML text and preview identity for %s", async (type) => {
+    const source = { sessionId: "s1", revisionId: "r1", shotNo: 1 };
+    const { deps, createJob } = buildTargetDeps({
+      nodes: JSON.stringify([
+        { id: "target", type: "mediaNode", data: { mediaType: type } },
+        { id: "text", type: "textNode", data: { html: "<div>蓝鲸 &amp; 海</div><div>夜景</div>", promptSource: source } },
+      ]),
+      edges: JSON.stringify([{ id: "e", source: "text", target: "target" }]),
+    });
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY, type, target_node_id: "target",
+      parameters: { ...IMAGE_TARGET_BODY.parameters, prompt: "" },
+    }, null, deps);
+    expect(result.code).toBe(200);
+    expect(createJob.mock.calls[0][0].input.text_attachments).toEqual([
+      { node_id: "text", title: "", text: "蓝鲸 & 海\n夜景", prompt_source: source },
+    ]);
+  });
 });

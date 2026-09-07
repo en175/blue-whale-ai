@@ -1,0 +1,55 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.item {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.itemHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.itemTitle {
+  font-weight: 600;
+}
+
+.itemTime {
+  font-size: 12px;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.field {
+  margin-top: 8px;
+}
+
+.fieldLabel {
+  font-size: 12px;
+  opacity: 0.6;
+  margin-bottom: 4px;
+}
+
+.fieldBody {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.sourceLine {
+  margin-top: 8px;
+  font-size: 12px;
+  opacity: 0.6;
+}

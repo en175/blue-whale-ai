@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   CANVAS_QUERY_KEY,
   canvasLocationSearch,
-  pickCanvasIdAfterDelete,
   pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
+  shouldReturnToProjectsAfterDelete,
   withCanvasId,
 } from './canvasQuery';
 
@@ -57,19 +57,9 @@ describe('pickCanvasIdAfterLoad', () => {
   });
 });
 
-describe('pickCanvasIdAfterDelete', () => {
-  const ids = ['newest', 'mid', 'oldest'] as const;
-
-  it('switches to the latest remaining canvas when the current one is deleted', () => {
-    expect(pickCanvasIdAfterDelete('mid', 'mid', ids)).toBe('newest');
-    expect(pickCanvasIdAfterDelete('newest', 'newest', ids)).toBe('mid');
-  });
-
-  it('keeps the current canvas when a different one is deleted', () => {
-    expect(pickCanvasIdAfterDelete('mid', 'oldest', ids)).toBe('mid');
-  });
-
-  it('returns empty string when the last canvas is deleted', () => {
-    expect(pickCanvasIdAfterDelete('only', 'only', ['only'])).toBe('');
+describe('shouldReturnToProjectsAfterDelete', () => {
+  it('returns to the project list only after deleting the current canvas', () => {
+    expect(shouldReturnToProjectsAfterDelete('mid', 'mid')).toBe(true);
+    expect(shouldReturnToProjectsAfterDelete('mid', 'oldest')).toBe(false);
   });
 });

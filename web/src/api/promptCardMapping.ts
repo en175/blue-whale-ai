@@ -52,6 +52,7 @@ export function cardsFromRevision(record: PromptCardRecord): GenerationCardBlock
     return {
       // 版本内唯一且跨重渲染稳定：应用状态按这个 id 记，重编某一镜后旧 id 自然失效
       cardId: `${revision.revision_id}#${shot.shot_no}`,
+      source: { sessionId: record.session_id ?? '', revisionId: revision.revision_id, shotNo: shot.shot_no },
       shotNo: shot.shot_no,
       shotTitle: shot.title || `镜头 ${shot.shot_no}`,
       ...(timeRange ? { timeRange } : {}),

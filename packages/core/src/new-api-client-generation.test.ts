@@ -510,5 +510,34 @@ describe("new-api client —— 图片与视频生成", () => {
     expect(task.quota).toBe(880000);
   });
 
+  // IKDLQF：供应商线路收到的 prompt 必须与冻结快照按 composeImagePrompt 精确对应。
+  it("delivers the composed text-attachment prompt verbatim to the image endpoint", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        requests.push({ url: String(input), init });
+        return jsonResponse({ data: [{ url: "https://cdn.test/out.png" }] });
+      },
+    });
+    const { composeImagePrompt } = await import("./compose-image-prompt.js");
+    const frozenSnapshot = {
+      text_attachments: [
+        { node_id: "text-1", title: "背景", text: "雨夜" },
+        { node_id: "text-2", title: "风格", text: "赛博朋克" },
+      ],
+      prompt: "暮色",
+    };
+
+    await client.generateImages("sk-test", {
+      model: "image-model",
+      prompt: composeImagePrompt(frozenSnapshot.text_attachments, frozenSnapshot.prompt),
+      n: 1,
+    });
+
+    expect(requests[0]?.url).toBe("http://new-api.test/v1/images/generations");
+    expect(JSON.parse(String(requests[0]?.init.body)).prompt).toBe("雨夜\n\n赛博朋克\n\n暮色");
+  });
+
   // ---- native topup（Model B：结算复用 Go 原生 new-api 充值）----
 });
