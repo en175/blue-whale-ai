@@ -412,6 +412,55 @@ describe("new-api client —— 图片与视频生成", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("maps audio reference into Seedance metadata.content audio_url (IKDJNZ)", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        requests.push({ url: String(input), init });
+        return jsonResponse({ task_id: "task-audio-ref", status: "queued" });
+      },
+    });
+
+    await client.submitVideo("sk-test", {
+      model: "doubao-seedance-2-0-260128",
+      prompt: "参考音频生成视频",
+      duration: 5,
+      width: 1280,
+      height: 720,
+      resolution: "720p",
+      ratio: "16:9",
+      references: [
+        { type: "audio", url: "asset://asset-audio-1" },
+        { type: "audio", url: "https://tos.test/1.mp3" },
+      ],
+    });
+
+    expect(JSON.parse(String(requests[0]?.init.body))).toEqual({
+      model: "doubao-seedance-2-0-260128",
+      prompt: "参考音频生成视频",
+      duration: 5,
+      response_format: "url",
+      metadata: {
+        duration: 5,
+        resolution: "720p",
+        ratio: "16:9",
+        content: [
+          {
+            type: "audio_url",
+            audio_url: { url: "asset://asset-audio-1" },
+            role: "reference_audio",
+          },
+          {
+            type: "audio_url",
+            audio_url: { url: "https://tos.test/1.mp3" },
+            role: "reference_audio",
+          },
+        ],
+      },
+    });
+  });
+
   it("IK7G9X: generateImagesWithReceipt exposes X-Oneapi-Request-Id", async () => {
     const client = createNewApiClient({
       baseUrl: "http://new-api.test",

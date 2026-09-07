@@ -57,13 +57,15 @@ export interface ReferenceItemInput {
   role: "first_frame" | "last_frame" | "reference";
   asset_id?: string;
   material_id?: string;
-  type: "image" | "video";
+  /** IKDJNZ：图片/视频参考 + 参考音频（role 仅 reference）。 */
+  type: "image" | "video" | "audio";
 }
 
 /** 素材库引用（MaterialReference）：仅格式校验（Asset- 前缀），存在性/状态由上游强校验。 */
 export interface MaterialReferenceInput {
   id: string;
-  type: "image" | "video";
+  /** IKDJNZ：支持参考音频（type:"audio"），与单数组 references 对齐；走旧 reference_materials 字段的音频引用同样生效。 */
+  type: "image" | "video" | "audio";
 }
 
 // 素材库 ID 实测存在小写 asset- 前缀（如 asset-20260820153209-6c9z8），大小写不敏感校验；
@@ -83,7 +85,7 @@ function materialRefs(v: unknown): MaterialReferenceInput[] | null {
     if (typeof item !== "object" || item === null) return null;
     const { id, type } = item as { id?: unknown; type?: unknown };
     if (materialId(id) === null) return null;
-    if (type !== "image" && type !== "video") return null;
+    if (type !== "image" && type !== "video" && type !== "audio") return null;
     refs.push({ id: id as string, type });
   }
   return refs;
@@ -113,13 +115,14 @@ function parseReferences(
     const { role, asset_id, material_id, type } = item as Record<string, unknown>;
     if (role !== "first_frame" && role !== "last_frame" && role !== "reference")
       return { kind: "invalid" };
-    if (type !== "image" && type !== "video") return { kind: "invalid" };
+    if (type !== "image" && type !== "video" && type !== "audio")
+      return { kind: "invalid" };
     // asset_id（本地，纯数字）与 material_id（素材库 asset-...）二选一。
     const aid = typeof asset_id === "string" ? assetId(asset_id) : null;
     const mid = typeof material_id === "string" ? materialId(material_id) : null;
     if (aid === null && mid === null) return { kind: "invalid" };
     if (aid !== null && mid !== null) return { kind: "invalid" };
-    // 首尾帧必须是图片。
+    // 首尾帧必须是图片；参考音频只能作普通参考（不能当首尾帧）。
     if (role !== "reference" && type !== "image") return { kind: "invalid" };
     items.push({
       role,
@@ -303,8 +306,10 @@ function validate(
       }
       const roleErr = validateReferenceRoles(parsed.items);
       if (roleErr) return { code: ERROR_INVALID_INPUT, message: roleErr };
-      // 普通参考数量上限沿用 Seedance 约束（首尾帧不计入）。
-      const refCount = parsed.items.filter((r) => r.role === "reference").length;
+      // 普通参考数量上限沿用 Seedance 约束（首尾帧不计入；参考音频不占图/视频额度）。
+      const refCount = parsed.items.filter(
+        (r) => r.role === "reference" && r.type !== "audio",
+      ).length;
       if (refCount > 12)
         return { code: ERROR_INVALID_INPUT, message: "参考素材最多 12 个" };
       return null;
@@ -345,7 +350,11 @@ function validate(
         message: "首尾帧模式不能与普通参考素材混用",
       };
     }
-    if (body.reference_materials !== undefined && uniqueRefs.length > 12) {
+    // IKDJNZ：参考音频不占图/视频额度——12 上限只计图/视频并集；音频引用单独统计。
+    const imageVideoRefCount = uniqueRefs.filter(
+      (r) => r.type !== "audio",
+    ).length;
+    if (imageVideoRefCount > 12) {
       return { code: ERROR_INVALID_INPUT, message: "参考素材最多 12 个" };
     }
   }
@@ -453,6 +462,7 @@ export async function handleCreateGenerationJob(
       if (referenceAssetIds.length > 0)
         input.reference_asset_ids = referenceAssetIds;
       // 素材库引用：冻结进 input 快照（仅 video）。零本地表，Worker 执行时转 asset:// 载体。
+      // IKDJNZ：参考音频（type:"audio"）与图/视频一并冻结（对齐单数组 references 契约）。
       const firstFrameMaterialId = materialId(body.first_frame_material_id);
       const lastFrameMaterialId = materialId(body.last_frame_material_id);
       const materialRefsResolved = uniqueMaterialRefs(

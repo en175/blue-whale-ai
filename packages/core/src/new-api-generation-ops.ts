@@ -166,19 +166,25 @@ export function createNewApiGenerationOps(
         const frameItems: Array<Record<string, unknown>> = [];
         const refItems: Array<Record<string, unknown>> = [];
         for (const ref of references) {
+          const role = (ref as { role?: string }).role;
           const entry =
             ref.type === "image"
               ? {
                   type: "image_url",
                   image_url: { url: ref.url },
-                  role: (ref as { role?: string }).role ?? "reference_image",
+                  role: role ?? "reference_image",
                 }
-              : {
-                  type: "video_url",
-                  video_url: { url: ref.url },
-                  role: "reference_video",
-                };
-          const role = (ref as { role?: string }).role;
+              : ref.type === "audio"
+                ? {
+                    type: "audio_url",
+                    audio_url: { url: ref.url },
+                    role: "reference_audio",
+                  }
+                : {
+                    type: "video_url",
+                    video_url: { url: ref.url },
+                    role: "reference_video",
+                  };
           if (role === "first_frame" || role === "last_frame") frameItems.push(entry);
           else refItems.push(entry);
         }
@@ -206,11 +212,17 @@ export function createNewApiGenerationOps(
                   image_url: { url: reference.url },
                   role: "reference_image",
                 }
-              : {
-                  type: "video_url",
-                  video_url: { url: reference.url },
-                  role: "reference_video",
-                },
+              : reference.type === "audio"
+                ? {
+                    type: "audio_url",
+                    audio_url: { url: reference.url },
+                    role: "reference_audio",
+                  }
+                : {
+                    type: "video_url",
+                    video_url: { url: reference.url },
+                    role: "reference_video",
+                  },
           );
         }
       }

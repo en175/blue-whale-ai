@@ -224,15 +224,15 @@ describe("video job runner recovery", () => {
       code: "reference_limit_exceeded",
     },
     {
-      name: "audio Asset",
-      model: "doubao-seedance-2-0-260128",
-      assets: [{ id: "1", type: "audio", url: "https://tos.test/1.mp3", mime: "audio/mpeg" }],
-      code: "unsupported_input",
-    },
-    {
       name: "video on a non-2.0 model",
       model: "doubao-seedance-1-5-pro-251215",
       assets: [{ id: "1", type: "video", url: "https://tos.test/1.mp4", mime: "video/mp4", size: 100, duration: 3 }],
+      code: "unsupported_input",
+    },
+    {
+      name: "audio Asset on a non-2.0 model (IKDJNZ audio reference)",
+      model: "doubao-seedance-1-5-pro-251215",
+      assets: [{ id: "1", type: "audio", url: "https://tos.test/1.mp3", mime: "audio/mpeg" }],
       code: "unsupported_input",
     },
     {
@@ -1584,6 +1584,68 @@ describe("video job runner asset↔material link (IKDJNZ)", () => {
           { type: "image", url: "asset://asset-last-1", role: "last_frame" },
           { type: "image", url: "asset://asset-mat-1" },
           { type: "image", url: "https://tos.test/r.png" },
+        ],
+      }),
+    );
+  });
+
+  it("single references array with audio reference maps to audio url and keeps order (IKDJNZ)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "ikdjnz-audio-ref", status: "queued" });
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "406",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "单数组参考音频",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          references: [
+            { role: "first_frame", asset_id: "11", type: "image" },
+            { role: "reference", asset_id: "13", type: "audio" },
+            { role: "reference", material_id: "asset-audio-1", type: "audio" },
+            { role: "last_frame", material_id: "asset-last-1", type: "image" },
+          ],
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikdjnz-audio-ref",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([
+        { id: "11", type: "image", url: "https://tos.test/f.png", material_id: null },
+        { id: "13", type: "audio", url: "https://tos.test/1.mp3", material_id: null },
+      ]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikdjnz-audio-ref",
+      jobId: "406",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        references: [
+          { type: "image", url: "https://tos.test/f.png", role: "first_frame" },
+          { type: "image", url: "asset://asset-last-1", role: "last_frame" },
+          // 素材库音频引用在前、本地音频在后（与既有排序一致）。
+          { type: "audio", url: "asset://asset-audio-1" },
+          { type: "audio", url: "https://tos.test/1.mp3" },
         ],
       }),
     );

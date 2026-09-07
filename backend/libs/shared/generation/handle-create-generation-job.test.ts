@@ -495,6 +495,30 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
     expect(createJob).not.toHaveBeenCalled();
   });
 
+  it("素材库参考 12 图 + 3 音频 → 200（参考音频不计入 12 上限，IKDJNZ）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const imageRefs = Array.from({ length: 12 }, (_, i) => ({
+      id: `Asset-img-${i}`,
+      type: "image" as const,
+    }));
+    const audioRefs = Array.from({ length: 3 }, (_, i) => ({
+      id: `Asset-audio-${i}`,
+      type: "audio" as const,
+    }));
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        reference_materials: [...imageRefs, ...audioRefs],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
   it("素材库引用 ID 非法（非 Asset- 前缀）→ 400 参考素材库引用无效", async () => {
     const { deps, createJob } = buildVideoDeps();
     const result = await handleCreateGenerationJob(
@@ -519,14 +543,49 @@ describe("handleCreateGenerationJob 素材库引用（MaterialReference）", () 
       "p1",
       {
         ...VIDEO_BODY,
-        reference_materials: [{ id: "Asset-img-1", type: "audio" }],
+        reference_materials: [{ id: "Asset-img-1", type: "image" }],
+        first_frame_material_id: "Asset-ff-1",
       },
       null,
       deps,
     );
     expect(result.code).toBe(400);
-    expect(result.msg).toBe("参考素材库引用无效");
+    expect(result.msg).toBe("首尾帧模式不能与普通参考素材混用");
     expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("旧 reference_materials 支持参考音频（type=audio）→ 200 冻结且不计入 12 上限（IKDJNZ）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const audioRefs = Array.from({ length: 3 }, (_, i) => ({
+      id: `Asset-audio-${i}`,
+      type: "audio" as const,
+    }));
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        reference_materials: [
+          { id: "Asset-img-1", type: "image" },
+          ...audioRefs,
+        ],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          reference_materials: [
+            { id: "Asset-img-1", type: "image" },
+            { id: "Asset-audio-0", type: "audio" },
+            { id: "Asset-audio-1", type: "audio" },
+            { id: "Asset-audio-2", type: "audio" },
+          ],
+        }),
+      }),
+    );
   });
 
   it("素材库引用小写 asset- 前缀（上游真实格式）→ 200", async () => {
@@ -710,6 +769,51 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
     );
     expect(result.code).toBe(400);
     expect(result.msg).toBe("参考素材不能为空");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("references 参考音频（type=audio, role=reference）→ 200 冻结进 input 且不占图/视频额度", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [
+          { role: "reference", asset_id: "13", type: "audio" },
+          { role: "reference", material_id: "asset-audio-1", type: "audio" },
+        ],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          references: [
+            { role: "reference", asset_id: "13", type: "audio" },
+            { role: "reference", material_id: "asset-audio-1", type: "audio" },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("references 首尾帧带 audio 类型 → 400 参考素材引用无效", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "first_frame", asset_id: "13", type: "audio" }],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考素材引用无效");
     expect(createJob).not.toHaveBeenCalled();
   });
 });

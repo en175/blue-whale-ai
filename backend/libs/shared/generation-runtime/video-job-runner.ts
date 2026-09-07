@@ -57,7 +57,8 @@ export type VideoWorkerInputAsset = {
 };
 
 export type VideoReference = {
-  type: "image" | "video";
+  /** IKDJNZ：参考音频（type:"audio"）作为普通 reference 支持；首尾帧仍只允许图片。 */
+  type: "image" | "video" | "audio";
   url: string;
   /** IKDJNZ：单数组 references 语义下，帧条目带 role（first_frame/last_frame）；普通参考无 role。 */
   role?: "first_frame" | "last_frame";
@@ -70,7 +71,8 @@ export type VideoReference = {
  */
 export type MaterialReference = {
   id: string;
-  type: "image" | "video";
+  /** IKDJNZ：支持参考音频（type:"audio"，素材库音频引用；不占图/视频额度）。 */
+  type: "image" | "video" | "audio";
 };
 
 export type StoredVideo = {
@@ -542,7 +544,12 @@ async function buildSubmitRequest(
     const materialId = isLinked(id);
     if (materialId !== null) {
       const asset = assetsById.get(id);
-      const type: "image" | "video" = asset?.type === "video" ? "video" : "image";
+      const type: "image" | "video" | "audio" =
+        asset?.type === "video"
+          ? "video"
+          : asset?.type === "audio"
+            ? "audio"
+            : "image";
       materialRefsFromAssets.push({ id: materialId, type });
     } else {
       unlinkedReferenceAssetIds.push(id);
@@ -652,16 +659,22 @@ function validateReferences(
 ): VideoReference[] {
   let imageCount = 0;
   let videoCount = 0;
+  let audioCount = 0;
   let knownVideoDuration = 0;
   const references = assets.map<VideoReference>((asset) => {
     if (asset.type === "image") {
       imageCount += 1;
       return { type: "image", url: asset.url };
     }
+    if (asset.type === "audio") {
+      // IKDJNZ：参考音频——本地音频素材作为 audio reference 支持（不占图/视频额度）。
+      audioCount += 1;
+      return { type: "audio", url: asset.url };
+    }
     if (asset.type !== "video") {
       throw new VideoInputError(
         ERROR_UNSUPPORTED_INPUT,
-        "视频生成只支持图片或视频参考素材",
+        "视频生成只支持图片、视频或音频参考素材",
       );
     }
     videoCount += 1;
@@ -674,12 +687,15 @@ function validateReferences(
 
   // IKDJNZ：素材库引用（显式声明 + 关联转换）并入 references，统一按素材库来源在前、
   // 未关联本地 Asset 在后排列（对齐前端「素材库引用在前、本地参考在后」的既有提交顺序，
-  // 避免破坏现有断言）；图/视频数量与 Seedance 2.0 约束按并集统计。
+  // 避免破坏现有断言）；图/视频数量与 Seedance 2.0 约束按并集统计，参考音频（image/video 之外的
+  // 素材库音频引用）不占图/视频额度。
   const materialRefs = materials.map<VideoReference>((material) => {
     if (material.type === "image") {
       imageCount += 1;
-    } else {
+    } else if (material.type === "video") {
       videoCount += 1;
+    } else {
+      audioCount += 1;
     }
     return { type: material.type, url: `asset://${material.id}` };
   });
@@ -691,10 +707,18 @@ function validateReferences(
       "Seedance 2.0 最多支持 9 张参考图片和 3 个参考视频",
     );
   }
-  if (videoCount > 0 && !isSeedance2Model(model)) {
+  // IKDJNZ：参考音频与 Seedance 2.0 视频输入绑定（参考音频走 Ark video content.audio_url，
+  // 非 2.0 系列不支持）；音频数量上限沿用「每任务最多 3 个参考视频」同档约束，上游强校验。
+  if (audioCount > MAX_REFERENCE_VIDEOS) {
+    throw new VideoInputError(
+      ERROR_REFERENCE_LIMIT_EXCEEDED,
+      "Seedance 2.0 最多支持 3 个参考音频",
+    );
+  }
+  if ((videoCount > 0 || audioCount > 0) && !isSeedance2Model(model)) {
     throw new VideoInputError(
       ERROR_UNSUPPORTED_INPUT,
-      "只有 Seedance 2.0 支持参考视频",
+      "只有 Seedance 2.0 支持参考视频和参考音频",
     );
   }
   if (knownVideoDuration > MAX_REFERENCE_VIDEO_SECONDS) {
@@ -832,7 +856,7 @@ function readMaterialRefs(value: unknown): MaterialReference[] {
     if (materialId === null) {
       throw new VideoInputError(ERROR_INVALID_INPUT, "素材库引用 ID 无效");
     }
-    if (type !== "image" && type !== "video") {
+    if (type !== "image" && type !== "video" && type !== "audio") {
       throw new VideoInputError(
         ERROR_INVALID_INPUT,
         "素材库参考素材类型无效",
@@ -854,7 +878,7 @@ type SingleReferenceItem = {
   role: "first_frame" | "last_frame" | "reference";
   asset_id?: string;
   material_id?: string;
-  type: "image" | "video";
+  type: "image" | "video" | "audio";
 };
 function readReferences(value: unknown): SingleReferenceItem[] | null {
   if (value === undefined || value === null) return null;
@@ -872,7 +896,7 @@ function readReferences(value: unknown): SingleReferenceItem[] | null {
     if (role !== "first_frame" && role !== "last_frame" && role !== "reference") {
       throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用无效");
     }
-    if (type !== "image" && type !== "video") {
+    if (type !== "image" && type !== "video" && type !== "audio") {
       throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用类型无效");
     }
     const item: SingleReferenceItem = { role, type };
