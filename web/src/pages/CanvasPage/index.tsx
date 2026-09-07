@@ -1157,11 +1157,31 @@ export default function CanvasPage() {
       });
       const label = quoteChipLabel(input.title, input.text);
       const blocks = [textQuoteBlock({ nodeId: input.nodeId, chipId: String(input.ts), label, quote }), ...(input.extraBlocks ?? [])];
+      setAgentCandidate(candidate => candidate?.some(block => block.node_id === input.nodeId) ? null : candidate);
       setAgentContext({ text: `@${label}`, label, ts: input.ts, mediaBlocks: blocks });
       setShowAgent(true);
     } catch (e) {
       showToast('error', isApiError(e) ? `添加到对话失败：${e.message}` : '添加到对话失败，请检查网络后重试');
     }
+  };
+
+  const confirmAgentCandidate = async (blocks: SessionContentBlock[]): Promise<SessionContentBlock[]> => {
+    const first = blocks[0];
+    if (first.type !== 'text') return blocks;
+    // 确认当刻读取画布正文，不使用预览时或持久化画布的旧副本。
+    const node = textNodesRef.current.find((item) => item.id === first.node_id);
+    if (!node) throw new Error('源文本节点已删除，请取消后重新选择');
+    const draftError = draftErrorsRef.current.get(node.id);
+    if (draftError) throw new Error(draftError);
+    const text = extractTextNodeText(node.data);
+    if (!text) throw new Error('文本正文为空，请编辑后重试');
+    if (text.length > QUOTE_TEXT_LIMIT) throw new Error(`正文超过 ${QUOTE_TEXT_LIMIT} 字上限`);
+    const title = typeof node.data.title === 'string' ? node.data.title : '';
+    const { quote } = await quoteMutation.mutateAsync({
+      projectId: currentId, nodeId: node.id, title, text,
+      source: readPromptSource(node.data.promptSource),
+    });
+    return [textQuoteBlock({ nodeId: node.id, chipId: first.chip_id!, label: quoteChipLabel(title, text), quote })];
   };
 
   /** 添加节点内容到 Agent 聊天 */
@@ -1304,6 +1324,13 @@ export default function CanvasPage() {
   /** 画布节点单击：选取模式下点击对应类型节点带入对话框，其他节点取消选取；
    *  非选取模式点击草稿身份卡（IKDMQQ 图片 / IKDMQS 视频 / IKDMQT 音频）：打开绑定面板继续编辑（待生成/生成中查看/失败修改） */
   const handleCanvasNodeClick = (node: Node) => {
+    if (showAgent && node.type === 'textNode') {
+      const text = extractTextNodeText(node.data);
+      if (text) setAgentCandidate([{
+        type: 'text', node_id: node.id, chip_id: `canvas:${node.id}`,
+        display_label: quoteChipLabel(typeof node.data.title === 'string' ? node.data.title : '', text),
+      }]);
+    }
     if (showAgent && node.type === 'mediaNode') {
       const data = node.data ?? {};
       const blocks = collectMediaBlocks(node, `canvas:${node.id}`);
@@ -4194,6 +4221,7 @@ export default function CanvasPage() {
           initialSkillName={agentContext?.skillName ?? ''}
           mediaBlocks={agentContext?.mediaBlocks}
           candidateBlocks={agentCandidate}
+          onPrepareCandidate={confirmAgentCandidate}
           onCancelCandidate={cancelAgentCandidate}
           onPlaceFileOnCanvas={placeFileOnCanvas}
           onPickFromAssets={() => openAssetsPicker('agentPanel')}
