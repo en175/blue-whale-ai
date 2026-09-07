@@ -13,6 +13,9 @@
 !packages/**
 !backend/
 !backend/**
+# 前端镜像改为仓库根 context 后，必须放行 web/（否则 COPY web/... 是空的）。
+!web/
+!web/**
 # IK7ERQ：builder 阶段 pnpm test:ci 需跨端契约的 JSON Schema 与夹具进 build context。
 # 只放行 docs/specs 下的 .json（schema）与 fixtures 子树（约 104K），散文 .md 仍排除。
 !docs/
