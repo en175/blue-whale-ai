@@ -103,7 +103,7 @@ export function isContentPolicySignal(text: string): boolean {
  *  （qUOtA→quota）与「渠道无余额」「new-api 音频生成余额不足」误伤；真欠费靠
  *  「预扣费额度失败/剩余额度/额度不足/余额不足」锚点兜住。 */
 export const NEW_API_QUOTA_SIGNAL =
-  /(预扣费|剩余额度|余额|额度不足|quota|balance|insufficient|payment_required|(^|\D)402(\D|$))/i;
+  /(预扣费额度失败|剩余额度|余额不足|额度不足|balance|payment_required)/i;
 
 /** 欠费信号判定：HTTP 402 或正文命中欠费信号（IKBQEE）。 */
 export function isQuotaSignal(text: string, status?: number): boolean {
