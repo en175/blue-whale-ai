@@ -26,6 +26,8 @@ RUN npm ci
 WORKDIR /src
 # contracts 源码依赖 zod；装到仓库根 node_modules，tsc 从 packages/contracts 上溯即可解析。
 RUN npm install zod@4.4.3 --no-package-lock --omit=dev
+# packages/*/tsconfig.json extends ../../tsconfig.base.json；Vite 编这些文件时要读到仓库根这份。
+COPY tsconfig.base.json tsconfig.json ./
 COPY packages/contracts ./packages/contracts
 COPY packages/core ./packages/core
 COPY web ./web
