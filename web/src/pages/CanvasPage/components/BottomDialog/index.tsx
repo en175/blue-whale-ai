@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Plus,
   ChevronDown,
+  ChevronUp,
   X,
   Image,
   Video,
@@ -21,7 +22,8 @@ import {
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { classifyRefOverflows, REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import ChipTextEditor, { type ChipTextEditorHandle, type ChipRef } from '../ChipTextEditor';
+import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
+import type { ImageTextAttachment } from '../ImageDialog';
 import {
   EMPTY_COMPOSED,
   composedIsEmpty,
@@ -71,12 +73,14 @@ interface BottomDialogProps {
   onSend: (text: string, opts: VideoGenOptions, refs: BottomRefItem[]) => void;
   /** 初始参考素材（节点「生成视频」带入被点节点图片） */
   initialRefs?: BottomRefItem[];
-  /** 初始生成卡引用胶囊（Agent 生成卡「引用到 dock」带入，累计不覆盖，可多张） */
-  initialCards?: ChipRef[];
   /** 初始自由文本（视频节点「重新编辑」带入原提示词） */
   initialText?: string;
   /** 初始生成参数（首页 AI视频 带入：选中首页所选的模型/比例/清晰度/时长/模式） */
   initialParams?: VideoGenSeedParams;
+  /** 连线文本附件（IKDLQG）：仅视频媒体节点面板发起时携带，打开当下快照，只读展示 */
+  attachments?: ImageTextAttachment[];
+  /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；仅多附件时展示控件，缺省不渲染排序入口 */
+  onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 到节点选择：进入画布节点选取模式（image 图片节点 / video 视频节点） */
   onPickFromCanvas?: (kind: 'image' | 'video') => void;
   /** 从资产中选择：打开资产库选择弹窗（按 kind 过滤媒体类型） */
@@ -108,6 +112,62 @@ export interface VideoGenSeedParams {
   mode?: string;
 }
 
+/** 附件正文超过该长度默认折叠（可展开读全） */
+const ATTACHMENT_COLLAPSE_LENGTH = 120;
+
+/** 连线文本附件项（IKDLQG）：标题 + 正文预览，长文默认折叠可展开；与 ImageDialog 附件项同构，
+ *  多附件且父级提供重排回调时展示上移/下移（IKDLQH） */
+function AttachmentItem({ attachment, move }: {
+  attachment: ImageTextAttachment;
+  move?: { isFirst: boolean; isLast: boolean; onMove: (delta: -1 | 1) => void };
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = attachment.text.length > ATTACHMENT_COLLAPSE_LENGTH;
+  return (
+    <div className={styles.attachmentItem}>
+      <div className={styles.attachmentHead}>
+        <span className={styles.attachmentTitle}>{attachment.title}</span>
+        {move && (
+          <span className={styles.attachmentMoves}>
+            <button
+              type="button"
+              title="上移"
+              className={styles.attachmentMove}
+              disabled={move.isFirst}
+              onClick={() => move.onMove(-1)}
+            >
+              <ChevronUp size={12} strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              title="下移"
+              className={styles.attachmentMove}
+              disabled={move.isLast}
+              onClick={() => move.onMove(1)}
+            >
+              <ChevronDown size={12} strokeWidth={2} />
+            </button>
+          </span>
+        )}
+      </div>
+      <span
+        className={`${styles.attachmentText} ${collapsible && !expanded ? styles.attachmentTextCollapsed : ''}`}
+      >
+        {attachment.text}
+      </span>
+      {collapsible && (
+        <button
+          type="button"
+          className={styles.attachmentToggle}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? '收起' : '展开'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** 宽高比图标：按比例绘制小矩形 */
 function RatioIcon({ ratio }: { ratio: string }) {
   const [w, h] = ratio.split(':').map(Number);
@@ -117,15 +177,26 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs, initialCards, initialText, initialParams, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, externalImagePick, onOpenCharacterLibrary, onToast }: BottomDialogProps) {
-  /** 富文本输入框（可多次插入生成卡引用胶囊，发送时替换成完整 prompt） */
+export default function BottomDialog({ onClose, onSend, initialRefs, initialText, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, externalImagePick, onOpenCharacterLibrary, onToast }: BottomDialogProps) {
+  /** 富文本输入框（自由文本；胶囊机制保留给后续引用场景，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框实时纯文本（胶囊已替换成完整 prompt），供生成按钮启用态判断 */
   /** 输入框内容的结构化形态（IKAFSX）：胶囊是指针，解引用只发生在发送那一刻。 */
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
   /** 计数口径：文字按字符数，一个胶囊算 1 个单位——不按它背后那几千字算。 */
   const composedCount = composedLength(composed);
-  const canSend = !composedIsEmpty(composed);
+  /** 附件正文有效（去空白非空）时允许空提示词提交（IKDLQG 契约：附件可单独驱动生成）；
+   *  全部有效文本为空时沿用「提示词必填」 */
+  const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
+  const canSend = !composedIsEmpty(composed) || hasAttachmentText;
+  /** 附件排序（IKDLQH）：与相邻项交换后把新 nodeId 序列交给父级；列表仍渲染自 props（父级同步同序快照） */
+  const handleAttachmentMove = (index: number, delta: -1 | 1) => {
+    if (!attachments || !onReorderAttachments) return;
+    const ids = attachments.map((a) => a.nodeId);
+    const [moved] = ids.splice(index, 1);
+    ids.splice(index + delta, 0, moved);
+    onReorderAttachments(ids);
+  };
   const [refFiles, setRefFiles] = useState<BottomRefItem[]>(initialRefs ?? []);
   /** 视频文件时长（秒），key 为 refFiles 索引 */
   const [videoDurations, setVideoDurations] = useState<Record<number, number>>({});
@@ -268,15 +339,6 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalImagePick]);
-
-  // 只插入 initialCards 里「上次还没插过」的新增部分：对话框不因追加引用而重挂载，
-  // 已输入的自由文字不会被清空；ref 记录已插入数量，同时防 StrictMode 开发态 effect 双调用重复插入
-  const insertedCardCountRef = useRef(0);
-  useEffect(() => {
-    const newCards = (initialCards ?? []).slice(insertedCardCountRef.current);
-    insertedCardCountRef.current = initialCards?.length ?? 0;
-    newCards.forEach((card) => chipEditorRef.current?.insertChip(card));
-  }, [initialCards]);
 
   // 加载视频模型能力列表：优先选中首页带入的模型，参数逐项按模型能力校验后应用
   useEffect(() => {
@@ -451,7 +513,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
    *  （携带模型/宽高比/清晰度/时长） */
   const handleSend = () => {
     const text = resolveComposed(composed).trim();
-    if (!text) return;
+    if (!text && !hasAttachmentText) return;
     if (!currentModel) {
       console.warn('视频模型能力加载中，请稍后重试');
       return;
@@ -809,7 +871,29 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialCard
         onChange={handleAnyUpload}
       />
 
-      {/* 输入框：可多次插入生成卡引用胶囊，胶囊跟文字同一行 */}
+      {/* 连线文本附件（IKDLQG）：只读展示，增删通过画布连线建立/断开进行；多附件可上移/下移排序（IKDLQH） */}
+      {attachments && attachments.length > 0 && (
+        <div className={styles.attachments}>
+          <span className={styles.configLabel}>文本附件（{attachments.length}）</span>
+          {attachments.map((a, i) => (
+            <AttachmentItem
+              key={a.nodeId}
+              attachment={a}
+              move={
+                onReorderAttachments && attachments.length > 1
+                  ? {
+                      isFirst: i === 0,
+                      isLast: i === attachments.length - 1,
+                      onMove: (delta) => handleAttachmentMove(i, delta),
+                    }
+                  : undefined
+              }
+            />
+          ))}
+        </div>
+      )}
+
+      {/* 输入框：胶囊跟文字同一行 */}
       <div className={styles.editorWrap}>
         <ChipTextEditor
           ref={chipEditorRef}

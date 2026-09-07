@@ -82,6 +82,8 @@ export {
   type CostReservationVersions,
 } from "./generation-cost.js";
 export type { NewApiImageReceipt } from "./new-api-generation-ops.js";
+export { composeImagePrompt } from "./compose-image-prompt.js";
+export { composeTextAttachmentPrompt } from "./compose-text-attachment-prompt.js";
 export {
   issueAccessToken,
   verifyAccessToken,
@@ -160,3 +162,5 @@ export {
 } from "./trace.js";
 // logger / tls-writer 依赖火山 SDK，走子路径 "@blue-whale/core/logging"，
 // 不进主 barrel，避免所有 core 消费者被静态绑定（见 logging.ts 头注释）。
+
+export { extractTextNodeText } from "./text-node-content.js";

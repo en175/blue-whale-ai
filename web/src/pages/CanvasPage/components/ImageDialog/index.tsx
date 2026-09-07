@@ -6,6 +6,7 @@ import {
   X,
   Plus,
   ChevronDown,
+  ChevronUp,
   Maximize2,
   Minimize2,
   SlidersHorizontal,
@@ -38,6 +39,19 @@ export interface UploadedFile {
   assetId?: string | number;
 }
 
+/** 连线文本附件（IKDLQF）：目标图片节点经连线带入的 textNode 正文快照，面板只读展示 */
+export interface ImageTextAttachment {
+  /** 来源文本节点 id */
+  nodeId: string;
+  /** 来源节点标题 */
+  title: string;
+  /** 当次正文 */
+  text: string;
+}
+
+/** 附件正文超过该长度默认折叠（可展开读全） */
+const ATTACHMENT_COLLAPSE_LENGTH = 120;
+
 interface ImageDialogProps {
   onClose: () => void;
   /** 发送：提示词 + 模型ID + 分辨率档位 id（如 2k） + 宽高比 + 参考素材列表（异步：上传完成后 resolve） */
@@ -48,6 +62,10 @@ interface ImageDialogProps {
   initialFiles?: UploadedFile[];
   /** 初始生成参数（首页 AI图片 带入：选中首页所选的模型/清晰度/宽高比） */
   initialParams?: ImageGenSeedParams;
+  /** 连线文本附件（IKDLQF）：仅图片媒体节点面板发起时携带，打开当下快照，只读展示 */
+  attachments?: ImageTextAttachment[];
+  /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；仅多附件时展示控件，缺省不渲染排序入口 */
+  onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 到节点选择：进入画布图片节点选取模式 */
   onPickFromCanvas?: () => void;
   /** 从资产中选择：打开资产库选择弹窗（仅图片） */
@@ -81,7 +99,59 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast }: ImageDialogProps) {
+/** 连线文本附件项：标题 + 正文预览，长文默认折叠可展开；多附件且父级提供重排回调时展示上移/下移（IKDLQH） */
+function AttachmentItem({ attachment, move }: {
+  attachment: ImageTextAttachment;
+  move?: { isFirst: boolean; isLast: boolean; onMove: (delta: -1 | 1) => void };
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = attachment.text.length > ATTACHMENT_COLLAPSE_LENGTH;
+  return (
+    <div className={styles.attachmentItem}>
+      <div className={styles.attachmentHead}>
+        <span className={styles.attachmentTitle}>{attachment.title}</span>
+        {move && (
+          <span className={styles.attachmentMoves}>
+            <button
+              type="button"
+              title="上移"
+              className={styles.attachmentMove}
+              disabled={move.isFirst}
+              onClick={() => move.onMove(-1)}
+            >
+              <ChevronUp size={12} strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              title="下移"
+              className={styles.attachmentMove}
+              disabled={move.isLast}
+              onClick={() => move.onMove(1)}
+            >
+              <ChevronDown size={12} strokeWidth={2} />
+            </button>
+          </span>
+        )}
+      </div>
+      <span
+        className={`${styles.attachmentText} ${collapsible && !expanded ? styles.attachmentTextCollapsed : ''}`}
+      >
+        {attachment.text}
+      </span>
+      {collapsible && (
+        <button
+          type="button"
+          className={styles.attachmentToggle}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? '收起' : '展开'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
@@ -145,6 +215,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   /** 参考图上限固定 9 张（产品约定），不随模型能力接口的 max_reference_images 波动 */
   const maxImages = REF_LIMITS.image;
   const imagesFull = imageCount >= maxImages;
+  /** 附件正文有效（去空白非空）时允许空提示词提交（IKDLQF 契约：附件可单独驱动生成）；
+   *  全部有效文本为空时沿用「提示词必填」 */
+  const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
+  const canSend = !uploading && (inputValue.trim().length > 0 || hasAttachmentText);
 
   /** 选中模型后应用其默认清晰度/宽高比 */
   const applyModelDefaults = (m: GenerationModel) => {
@@ -249,9 +323,18 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
     });
   };
 
+  /** 附件排序（IKDLQH）：与相邻项交换后把新 nodeId 序列交给父级；列表仍渲染自 props（父级同步同序快照） */
+  const handleAttachmentMove = (index: number, delta: -1 | 1) => {
+    if (!attachments || !onReorderAttachments) return;
+    const ids = attachments.map((a) => a.nodeId);
+    const [moved] = ids.splice(index, 1);
+    ids.splice(index + delta, 0, moved);
+    onReorderAttachments(ids);
+  };
+
   /** 发送（清晰度传分辨率档位 id，对应生成接口 parameters.size） */
   const handleSend = async () => {
-    if (!inputValue.trim() || uploading) return;
+    if (!canSend) return;
     if (!currentGen) {
       console.warn('图片模型能力加载中，请稍后重试');
       return;
@@ -451,6 +534,28 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           </div>
         </div>
 
+        {/* 连线文本附件（IKDLQF）：只读展示，增删通过画布连线建立/断开进行；多附件可上移/下移排序（IKDLQH） */}
+        {attachments && attachments.length > 0 && (
+          <div className={styles.attachments}>
+            <span className={styles.configLabel}>文本附件（{attachments.length}）</span>
+            {attachments.map((a, i) => (
+              <AttachmentItem
+                key={a.nodeId}
+                attachment={a}
+                move={
+                  onReorderAttachments && attachments.length > 1
+                    ? {
+                        isFirst: i === 0,
+                        isLast: i === attachments.length - 1,
+                        onMove: (delta) => handleAttachmentMove(i, delta),
+                      }
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        )}
+
         {/* 输入框 */}
         <textarea
           className={styles.textarea}
@@ -506,9 +611,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           {/* 右侧：发送按钮 */}
           <div className={styles.barRight}>
             <button
-              className={`${styles.sendBtn} ${inputValue.trim() && !uploading ? styles.sendBtnActive : ''}`}
+              className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}
               onClick={handleSend}
-              disabled={!inputValue.trim() || uploading}
+              disabled={!canSend}
               title={uploading ? '上传中...' : '发送'}
             >
               <ArrowUp size={16} fill="currentColor" strokeWidth={0} />

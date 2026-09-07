@@ -1,3 +1,25 @@
+export { previewSourceSchema, applyPreviewSchema, type PromptPreviewSource } from "./prompt-preview.js";
+export {
+  legacyCardHistoryItemSchema,
+  legacyMigrationFailureSchema,
+  legacyMigrationReportSchema,
+  type LegacyCardHistoryItem,
+  type LegacyMigrationFailure,
+  type LegacyMigrationReport,
+} from "./legacy-card-migration.js";
+export {
+  conversationQuoteCreateSchema,
+  CONVERSATION_QUOTE_LIST_LIMIT,
+  type ConversationQuoteCreate,
+} from "./conversation-quote.js";
+export {
+  CANVAS_EDGE_LIMITS,
+  canvasEdgeSchema,
+  textAttachmentSnapshotSchema,
+  type CanvasEdge,
+  type TextAttachmentSnapshot,
+} from "./canvas-edges.js";
+export { PROMPT_TEXT_LIMITS, COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH } from "./prompt-text-limits.js";
 export {
   changePasswordRequestSchema,
   type ChangePasswordRequest,

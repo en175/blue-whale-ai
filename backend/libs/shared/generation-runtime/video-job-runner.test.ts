@@ -1312,3 +1312,123 @@ describe("video job runner material library references", () => {
     );
   });
 });
+
+// IKDLQG：目标驱动视频任务——提交时把冻结的 text_attachments 快照按契约确定性组合进 provider prompt。
+// 快照即事实来源：runner 不回读来源节点；无该字段的存量任务 prompt 逐字节不变（见上文既有用例）。
+describe("video job runner 文本附件快照（IKDLQG）", () => {
+  function buildAttachmentRepo(input: Record<string, unknown>) {
+    return {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "401",
+        projectId: "55",
+        userId: "9",
+        input: { provider_credential: "sealed-token", ...input },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-attachments",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+  }
+
+  it("仅附件正文（prompt 为空串）→ submit prompt 由附件组合", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "upstream-attach", status: "queued" });
+    const repo = buildAttachmentRepo({
+      prompt: "",
+      target_node_id: "media-2",
+      text_attachments: [
+        { node_id: "text-a", title: "风格", text: "赛博朋克" },
+        { node_id: "text-b", title: "", text: "雨夜" },
+      ],
+      model_id: "doubao-seedance-2-0-260128",
+      aspect_ratio: "16:9",
+      resolution: "720p",
+      duration: 8,
+    });
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-attachments",
+      jobId: "401",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: "赛博朋克\n\n雨夜" }),
+    );
+  });
+
+  it("附件加目标提示词 → 附件按序在前、目标提示词最后；空白附件忽略", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "upstream-mixed", status: "queued" });
+    const repo = buildAttachmentRepo({
+      prompt: "人物走过街角",
+      target_node_id: "media-2",
+      text_attachments: [
+        { node_id: "text-blank", title: "空白", text: "   " },
+        { node_id: "text-a", title: "风格", text: "赛博朋克" },
+      ],
+      model_id: "doubao-seedance-2-0-260128",
+      aspect_ratio: "16:9",
+      resolution: "720p",
+      duration: 8,
+    });
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-attachments",
+      jobId: "401",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: "赛博朋克\n\n人物走过街角" }),
+    );
+  });
+
+  // IKDLQH：排序后的快照——submit prompt 严格跟随快照数组顺序（非 node_id/标题排序），钉住「供应商请求顺序=快照顺序」。
+  it("快照数组为非默认顺序时 submit prompt 精确跟随（IKDLQH 顺序钉扎）", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "upstream-reordered", status: "queued" });
+    const repo = buildAttachmentRepo({
+      prompt: "目标提示词",
+      target_node_id: "media-2",
+      text_attachments: [
+        { node_id: "text-z", title: "乙", text: "正文乙" },
+        { node_id: "text-a", title: "甲", text: "正文甲" },
+      ],
+      model_id: "doubao-seedance-2-0-260128",
+      aspect_ratio: "16:9",
+      resolution: "720p",
+      duration: 8,
+    });
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-attachments",
+      jobId: "401",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: "正文乙\n\n正文甲\n\n目标提示词" }),
+    );
+  });
+});

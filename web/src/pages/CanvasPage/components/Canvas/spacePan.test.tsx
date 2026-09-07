@@ -64,6 +64,7 @@ beforeEach(async () => {
   props = {
     toolMode: 'select', showMiniMap: false, showEdges: false, hideZoomControl: true,
     extraNodes: [], textNodes: [], productNodes: [], assetNodes: [],
+    edges: [], onEdgesChange: vi.fn(), onConnect: vi.fn(),
     mediaNodes: [{
       id: 'image-1', type: 'mediaNode', position: { x: 50, y: 60 },
       initialWidth: 200, initialHeight: 150, selected: true,
