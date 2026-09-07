@@ -13,6 +13,11 @@ import time
 import unittest
 from pathlib import Path
 
+try:  # 作为 scripts.tests.* 命名空间包导入
+    from .bash_helper import BASH
+except ImportError:  # 经 discover -s scripts/tests 顶层导入
+    from bash_helper import BASH
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PUBLISH_SCRIPT = REPO_ROOT / "scripts" / "publish-review-package.sh"
@@ -22,7 +27,11 @@ BRANCH = "feature/测试已有PR更新流程"
 
 
 def run(*args: str, cwd: Path, check: bool = False) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(list(args), cwd=cwd, text=True, capture_output=True, check=check)
+    if args and args[0] == "bash":
+        args = (BASH,) + args[1:]
+    return subprocess.run(
+        list(args), cwd=cwd, text=True, encoding="utf-8", capture_output=True, check=check
+    )
 
 
 class PublishReviewPackageTest(unittest.TestCase):
@@ -47,7 +56,11 @@ class PublishReviewPackageTest(unittest.TestCase):
         )
         fake_node.chmod(0o755)
         self.base_env = os.environ.copy()
-        self.base_env["PATH"] = "{}:{}".format(self.fake_bin, self.base_env["PATH"])
+        # os.pathsep：POSIX 为 ":"（行为与原来一致）；Windows 为 ";"。
+        # 若在 Git Bash 下用 ":" 拼接 Windows 盘符路径，MSYS 会把 `C:\...` 拦腰
+        # 拆成 "C" + 相对路径，导致 fake-verification-bin 从 PATH 中消失，
+        # 真实 node 顶替运行 verify-change-scope.mjs（rc 11）。
+        self.base_env["PATH"] = str(self.fake_bin) + os.pathsep + self.base_env["PATH"]
         self.base_env["REAL_NODE"] = self.real_node
         self.base_env["VERIFICATION_LOG"] = str(self.verification_log)
         run("git", "init", "--bare", str(self.origin), cwd=self.root, check=True)
@@ -94,9 +107,10 @@ class PublishReviewPackageTest(unittest.TestCase):
 
     def invoke(self, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["bash", str(PUBLISH_SCRIPT), *args],
+            [BASH, str(PUBLISH_SCRIPT), *args],
             cwd=self.worktree,
             text=True,
+            encoding="utf-8",
             errors="replace",
             capture_output=True,
             env=env or self.base_env,
@@ -146,7 +160,7 @@ class PublishReviewPackageTest(unittest.TestCase):
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
-                "bash",
+                BASH,
                 str(PUBLISH_SCRIPT),
                 "--user-authorized",
                 "--update-pr",
@@ -158,6 +172,7 @@ class PublishReviewPackageTest(unittest.TestCase):
             ],
             cwd=self.worktree,
             text=True,
+            encoding="utf-8",
             capture_output=True,
             env=env or self.base_env,
         )
@@ -476,12 +491,15 @@ class PublishReviewPackageTest(unittest.TestCase):
         )
         fake_git.chmod(0o755)
         env = self.base_env.copy()
-        env["PATH"] = "{}:{}".format(fake_bin, env["PATH"])
+        # os.pathsep：POSIX 为 ":"（与原来一致）；Windows 为 ";"，避免 MSYS
+        # 把 `C:\...` 拦腰拆成 "C"+相对路径而让前置目录从 PATH 中丢失。
+        env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
 
         result = subprocess.run(
-            ["bash", str(PUBLISH_SCRIPT), "--user-authorized", "--create-pr", "--json"],
+            [BASH, str(PUBLISH_SCRIPT), "--user-authorized", "--create-pr", "--json"],
             cwd=self.worktree,
             text=True,
+            encoding="utf-8",
             capture_output=True,
             env=env,
         )
@@ -510,6 +528,11 @@ class PublishReviewPackageTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 8)
                 self.assertEqual(self.response(result)["status"], "PR_EVIDENCE_INVALID")
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows CreateProcess 无法执行无扩展名脚本，PATH 注入假 git 仅在 POSIX 有效"
+        "（对应 test-hooks.sh 的 IS_WINDOWS 降级先例）",
+    )
     def test_push_success_with_marker_write_failure_still_blocks_rollback(self) -> None:
         self.git("push", "-u", "origin", "HEAD")
         self.commit_followup("local review fix")
@@ -535,7 +558,9 @@ class PublishReviewPackageTest(unittest.TestCase):
         )
         fake_git.chmod(0o755)
         env = self.base_env.copy()
-        env["PATH"] = "{}:{}".format(fake_bin, env["PATH"])
+        # os.pathsep：POSIX 为 ":"（与原来一致）；Windows 为 ";"，避免 MSYS
+        # 把 `C:\...` 拦腰拆成 "C"+相对路径而让前置目录从 PATH 中丢失。
+        env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
         env["FAIL_RECOVERY_TMP"] = str(recovery_file) + ".tmp"
 
         published = self.invoke_update(env=env)
@@ -549,6 +574,11 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertEqual(rollback.returncode, 1)
         self.assertIn("推送", str(self.response(rollback)["detail"]))
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows CreateProcess 无法执行无扩展名脚本，PATH 注入假 git 仅在 POSIX 有效"
+        "（对应 test-hooks.sh 的 IS_WINDOWS 降级先例）",
+    )
     def test_lost_push_ack_keeps_fail_closed_state_and_blocks_rollback(self) -> None:
         self.git("push", "-u", "origin", "HEAD")
         self.commit_followup("local review fix")
@@ -573,7 +603,9 @@ class PublishReviewPackageTest(unittest.TestCase):
         )
         fake_git.chmod(0o755)
         env = self.base_env.copy()
-        env["PATH"] = "{}:{}".format(fake_bin, env["PATH"])
+        # os.pathsep：POSIX 为 ":"（与原来一致）；Windows 为 ";"，避免 MSYS
+        # 把 `C:\...` 拦腰拆成 "C"+相对路径而让前置目录从 PATH 中丢失。
+        env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
 
         published = self.invoke_update(env=env)
 
@@ -637,12 +669,15 @@ class PublishReviewPackageTest(unittest.TestCase):
         )
         py_launcher.chmod(0o755)
         env = self.base_env.copy()
-        env["PATH"] = "{}:{}".format(fake_bin, env["PATH"])
+        # os.pathsep：POSIX 为 ":"（与原来一致）；Windows 为 ";"，避免 MSYS
+        # 把 `C:\...` 拦腰拆成 "C"+相对路径而让前置目录从 PATH 中丢失。
+        env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
 
         result = subprocess.run(
-            ["bash", str(PUBLISH_SCRIPT), "--user-authorized", "--create-pr", "--json"],
+            [BASH, str(PUBLISH_SCRIPT), "--user-authorized", "--create-pr", "--json"],
             cwd=self.worktree,
             text=True,
+            encoding="utf-8",
             capture_output=True,
             env=env,
         )

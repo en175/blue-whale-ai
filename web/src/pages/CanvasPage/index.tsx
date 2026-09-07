@@ -1071,6 +1071,7 @@ export default function CanvasPage() {
       position: spawnPosition(),
       data: {
         html: '',
+        onDraftError: handleDraftError,
         toolMode,
         onDelete: (id: string) => {
           setTextNodes((prev) => prev.filter((n) => n.id !== id));
@@ -2240,6 +2241,7 @@ export default function CanvasPage() {
       console.warn('未选中项目，无法创建生成任务');
       return;
     }
+    if (targetNodeId && blockInvalidDraft(edgesRef.current.filter(e => e.target === targetNodeId).map(e => e.source))) return;
     if (blockIfQuotaInsufficient()) return;
     // 原位模式（IKDMQQ 草稿 + IKDMQU 成品卡原卡重新生成）：目标节点原地承接任务，身份/位置/连线保持不变
     const inPlaceNode = targetNodeId
@@ -3539,6 +3541,21 @@ export default function CanvasPage() {
       }
     }
 
+    if (targetNodeId && currentId) {
+      const projectId = currentId;
+      applyingRef.current = true;
+      try {
+        if (!(await flushCanvasSave(projectId))) return; // 等待期间项目已切换，中止提交
+      } catch (e) {
+        // 落盘失败则不提交：否则服务端读到的正文可能缺未防抖落盘的编辑
+        showToast('error', '保存失败，请重试');
+        console.warn('生成前画布落盘失败:', e);
+        return;
+      } finally {
+        applyingRef.current = false;
+      }
+    }
+
     startGenerationJob('image', {
       prompt: text,
       model_id: modelId,
@@ -3907,7 +3924,7 @@ export default function CanvasPage() {
           initialCardLabel={agentContext?.label}
           inputVersion={agentContext?.ts ?? 0}
           projectId={currentId || undefined}
-          onApplyToDock={handleAgentCardApply}
+          onApplyPreview={handleAgentCardApply}
           appliedCardIds={appliedCardIds}
           initialSkillId={agentContext?.skillId ?? ''}
           initialSkillName={agentContext?.skillName ?? ''}

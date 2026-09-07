@@ -80,6 +80,17 @@ fi
 exit 0
 EOF
   chmod +x "${STUB_DIR}/git"
+  # Windows 桥：扩展名无权限位的 bash 脚本可被 Git Bash（bash）当命令执行，但 Windows
+  # 原生 Python 的 subprocess / shutil.which 会跳过它直落真实 git.exe（GBK 解码 UTF-8
+  # 分支名崩溃）。写一个同目录 git.bat 转发到 Git Bash 全路径 bash 执行 stub，并把该
+  # 全路径经 PRETOOL_GIT_BIN 交给 pretool 的 git 子进程——POSIX 无此变量，行为不变。
+  if [ "$IS_WINDOWS" = "1" ]; then
+    GIT_BASH_BIN="$(command -v bash)"
+    STUB_BAT="$STUB_DIR/git.bat"
+    printf '@echo off\r\n"%s" "%s" %%*\r\n' "$(cygpath -w "$GIT_BASH_BIN")" "$(cygpath -w "$STUB_DIR/git")" > "$STUB_BAT"
+    chmod +x "$STUB_BAT"
+    export PRETOOL_GIT_BIN="$(cygpath -m "$STUB_BAT")"
+  fi
   export PATH="${STUB_DIR}:${SAVED_PATH}"
 }
 
@@ -89,6 +100,7 @@ teardown_git_stub() {
   fi
   PATH="$SAVED_PATH"
   export PATH
+  unset PRETOOL_GIT_BIN
 }
 
 # ── 计数 ────────────────────────────────────────────────────────
@@ -1268,6 +1280,11 @@ run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git -c alias.integrate=\"mer
 assert_exit 2 "release: inline alias merge 硬拦"
 
 ALIAS_TEST_ROOT="$(mktemp -d)"
+# Windows：mktemp 给出 MSYS /tmp/... 路径，python 侧 git -C 无法 chdir（fatal），
+# alias 查询落空 → option-* 别名不拦。转成 Windows 盘符路径（POSIX cygpath 未装时为 no-op）。
+if [ "$IS_WINDOWS" = "1" ] && command -v cygpath >/dev/null 2>&1; then
+  ALIAS_TEST_ROOT="$(cygpath -m "$ALIAS_TEST_ROOT")"
+fi
 "$REAL_GIT" -C "$ALIAS_TEST_ROOT" init -q
 "$REAL_GIT" -C "$ALIAS_TEST_ROOT" config alias.ship push
 "$REAL_GIT" -C "$ALIAS_TEST_ROOT" config alias.save commit
@@ -2166,7 +2183,11 @@ ROTATE_ARCHIVE="$(audit_log_archive_path "$ROTATE_REPO" "$AUDIT_HOOK")"
 run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_fill1","session_id":"s_rot","tool_input":{"file_path":"'"$ROTATE_REPO"'/f.py"}}'
 # 精确填充 (10MiB - 200) 字节触发轮转：python3 生成（跨平台，单次写快；
 # 旧 dd status=none/head -c 是 GNU 专属，macOS BSD dd 不认）
-python3 -c "import sys; sys.stdout.buffer.write(b'X' * $((10*1024*1024 - 200)))" >>"$ROTATE_LOG"
+python3 - "$ROTATE_LOG" "$((10*1024*1024 - 200))" <<'PY'
+import sys
+with open(sys.argv[1], "ab") as f:
+    f.write(b"X" * int(sys.argv[2]))
+PY
 run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_fill2","session_id":"s_rot","tool_input":{"file_path":"'"$ROTATE_REPO"'/g.py"}}'
 # 轮转后：归档存在且 >= 10MiB；活跃日志只含最后一条记录
 assert_file_exists "$ROTATE_ARCHIVE" "audit: 轮转后归档存在"
@@ -2174,7 +2195,11 @@ assert_file_exists "$ROTATE_ARCHIVE" "audit: 轮转后归档存在"
 assert_audit_line_count "$ROTATE_LOG" 1 "audit: 轮转后活跃日志只含 1 条"
 # 第二次轮转：旧归档被替换，不产生 .log.2
 # 精确填充 (10MiB - 100) 字节：同上 python3 跨平台写法
-python3 -c "import sys; sys.stdout.buffer.write(b'Y' * $((10*1024*1024 - 100)))" >>"$ROTATE_LOG"
+python3 - "$ROTATE_LOG" "$((10*1024*1024 - 100))" <<'PY'
+import sys
+with open(sys.argv[1], "ab") as f:
+    f.write(b"Y" * int(sys.argv[2]))
+PY
 run_hook "$AUDIT_HOOK" '{"tool_name":"Edit","tool_use_id":"tu_fill3","session_id":"s_rot","tool_input":{"file_path":"'"$ROTATE_REPO"'/h.py"}}'
 assert_file_exists "$ROTATE_ARCHIVE" "audit: 二次轮转后归档仍存在"
 assert_audit_line_count "$ROTATE_LOG" 1 "audit: 二次轮转后活跃日志只含 1 条"
@@ -2193,14 +2218,17 @@ export CLAUDE_PROJECT_DIR="$CONCURRENT_REPO"
 CONCURRENT_LOG="$(audit_log_path "$CONCURRENT_REPO" "$AUDIT_HOOK")"
 # 20 个并发进程同时追加
 python3 - "$HOOK_DIR/$AUDIT_HOOK" "$CONCURRENT_REPO" "$CONCURRENT_LOG" <<'PY'
-import json, subprocess, sys, concurrent.futures, os
+import json, subprocess, sys, concurrent.futures, os, shutil
 hook_path, project_dir, log_path = sys.argv[1], sys.argv[2], sys.argv[3]
 def write_one(i):
     rec = {"tool_name":"Edit","tool_use_id":f"tu_c{i}","session_id":"s_conc","tool_input":{"file_path":f"{project_dir}/c{i}.py"}}
     payload = json.dumps(rec)
     env = os.environ.copy()
     env["CLAUDE_PROJECT_DIR"] = project_dir
-    r = subprocess.run(["bash", hook_path], input=payload.encode(), capture_output=True, env=env)
+    # Windows 原生 Python 的 PATH 查找跳过无扩展名脚本（Git Bash stub 同 git 一样）
+    # 会冒名落到 WSL bash；shutil.which() 解析到真实 Git Bash 全路径（POSIX no-op）。
+    bash = shutil.which("bash")
+    r = subprocess.run([bash, hook_path], input=payload.encode(), capture_output=True, env=env)
     return r.returncode
 with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
     codes = list(ex.map(write_one, range(20)))
@@ -2335,20 +2363,25 @@ if padding_size < 0:
     sys.exit(1)
 record["padding"] = "Z" * padding_size
 line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
-with open(log_path, "a") as f:
-    f.write(line)
+# 二进制模式写入：Windows 文本模式会 \n→\r\n（每行 +1 字节），破坏下面的精确
+# 字节数断言；POSIX 上两种模式等效，行为不变。
+with open(log_path, "ab") as f:
+    f.write(line.encode("utf-8"))
 sys.exit(0 if os.path.getsize(log_path) == target else 1)
 PY
 [ $? = 0 ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[audit-regress: 并发轮转合法 JSON 填充] 未精确填充到 10MiB-100"); }
 # 15 个并发进程同时追加（第一个跨越阈值触发轮转，其余追加到新 active）
 python3 - "$HOOK_DIR/$AUDIT_HOOK" "$CONCROT_REPO" "$CONCROT_LOG" "$CONCROT_ARCHIVE" <<'PY'
-import json, subprocess, sys, concurrent.futures, os
+import json, subprocess, sys, concurrent.futures, os, shutil
 hook_path, repo, log_path, archive_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 def write_one(i):
     rec = {"tool_name":"Edit","tool_use_id":f"tu_cr{i}","session_id":"s_cr","tool_input":{"file_path":f"{repo}/cr{i}.py"}}
     env = os.environ.copy()
     env["CLAUDE_PROJECT_DIR"] = repo
-    r = subprocess.run(["bash", hook_path], input=json.dumps(rec).encode(), capture_output=True, env=env)
+    # Windows 原生 Python 的 PATH 查找跳过无扩展名脚本（Git Bash stub 同 git 一样）
+    # 会冒名落到 WSL bash；shutil.which() 解析到真实 Git Bash 全路径（POSIX no-op）。
+    bash = shutil.which("bash")
+    r = subprocess.run([bash, hook_path], input=json.dumps(rec).encode(), capture_output=True, env=env)
     return r.returncode
 with concurrent.futures.ThreadPoolExecutor(max_workers=15) as ex:
     codes = list(ex.map(write_one, range(15)))

@@ -16,6 +16,13 @@ AS_JSON=0
 PYTHON=()
 ALLOW_SCOPE_FILES=()
 . "$SCRIPT_ROOT/scripts/lib/python3-command.sh"
+
+# Windows 下子进程 python（inherit 管道）默认按 GBK 编码输出，中文会被
+# 写成 GBK 字节；父进程按 utf-8 解码会崩溃。强制 UTF-8 与 Python 源码内
+# reconfigure(utf-8) 对齐；POSIX 环境下 PYTHONIOENCODING 同样只是把本就
+# 默认的 utf-8 显式化，不影响其他操作系统。
+export PYTHONIOENCODING=utf-8
+
 if select_python3_command; then
   PYTHON=("${PYTHON3_COMMAND[@]}")
 fi
@@ -184,12 +191,26 @@ if [ -n "$remote_line" ]; then
 fi
 
 slug="$(printf '%s' "$branch" | tr '/' '%')"
+# Git Bash on Windows：git 的路径输出是 `C:/...`（MSYS 绝对路径），而 $ROOT
+# 已统一为 pwd 风格 `/c/...`。若直接把 `C:/...` 当作相对路径拼到 $ROOT 后，
+# 会得到 `/c/.../main/.gitC:/...` 的混合垃圾路径，marker 写错目录。
+# 先用 cygpath 把 Windows 风格绝对路径转成 POSIX 风格，再统一 cd/pwd 归一化。
 common="$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
 case "$common" in
-  "") common="$ROOT/.git" ;;
-  /*) ;;
-  *) common="$ROOT/$common" ;;
+  [A-Za-z]:*)
+    common="$(cygpath -u "$common")"
+    ;;
 esac
+case "$common" in
+  "")
+    common="$ROOT/.git"
+    ;;
+  /*) ;;
+  *)
+    common="$ROOT/$common"
+    ;;
+esac
+common="$(cd "$common" && pwd)"
 marker_path="$common/agent-release-review-package-$slug"
 git_dir="$(git -C "$ROOT" rev-parse --absolute-git-dir)"
 recovery_file="$git_dir/agent-sync-recovery.json"
