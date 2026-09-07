@@ -85,7 +85,7 @@ const apiMocks = vi.hoisted(() => ({
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
   fetchGenerationModels: vi.fn(async () => [
     {
-      model_id: 'v-test',
+      model_id: 'seedance-2',
       provider_id: 'prov',
       model_label: '测试视频模型',
       icon: null,
@@ -219,7 +219,8 @@ function seedDoc() {
             genStatus: 'draft',
             draft: true,
             prompt: '',
-            draftModelId: 'v-test',
+            draftModelId: 'seedance-2',
+            draftSize: '720p', draftRatio: '16:9', draftDuration: 5,
           },
         },
       ],

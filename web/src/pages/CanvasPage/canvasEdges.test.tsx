@@ -398,7 +398,7 @@ function seedVideoDoc() {
           id: 'v1',
           type: 'mediaNode',
           position: { x: 200, y: 0 },
-          data: { src: 'http://vid/v1.mp4', mediaType: 'video', fileName: '目标视频', assetId: 'a9', jobId: 'j1' },
+          data: { src: 'http://vid/v1.mp4', mediaType: 'video', fileName: '目标视频', assetId: 'a9', jobId: 'j1', draftModelId: 'm-test', draftSize: '2k', draftRatio: '1:1' },
         },
       ],
       edges: [{ id: 'e1', source: 't1', target: 'v1' }],
@@ -556,7 +556,7 @@ function seedMultiVideoDoc() {
           id: 'v1',
           type: 'mediaNode',
           position: { x: 200, y: 0 },
-          data: { src: 'http://vid/v1.mp4', mediaType: 'video', fileName: '目标视频', assetId: 'a9', jobId: 'j1' },
+          data: { src: 'http://vid/v1.mp4', mediaType: 'video', fileName: '目标视频', assetId: 'a9', jobId: 'j1', draftModelId: 'm-test', draftSize: '2k', draftRatio: '1:1' },
         },
       ],
       edges: [

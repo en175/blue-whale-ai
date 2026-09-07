@@ -146,9 +146,10 @@ export default function CanvasPage() {
   /** 连线最新值（避免闭包陈旧：提交前落盘与附件推导用） */
   const edgesRef = useRef<Edge[]>([]);
   edgesRef.current = edges;
+  const [videoSubmittingId, setVideoSubmittingId] = useState<string | null>(null);
   /** 生成中节点判定（IKDMQQ）：执行期间目标参数与输入连线只读 */
   const isGeneratingNode = (id: string) =>
-    mediaNodesRef.current.some(
+    id === videoSubmittingId || mediaNodesRef.current.some(
       (n) => n.id === id && (n.data as Record<string, unknown> | undefined)?.genStatus === 'generating',
     );
   /** 建立连线（受控去重 + custom 流光渲染形态；与服务端保存校验同口径拒绝重复 (source,target)）。
@@ -385,6 +386,7 @@ export default function CanvasPage() {
    *  草稿被删除/取消或成功转成品卡时由清理 effect 结束绑定并关闭面板 */
   const [imageDraftId, setImageDraftId] = useState<string | null>(null);
   const imagePanelHiddenRef = useRef(false);
+  const videoPanelHiddenRef = useRef(false);
   const editingTargetRef = useRef<string | null>(null);
   /** 面板当前绑定的视频草稿节点 id（IKDMQS）：仅草稿入口（侧栏新建/点击草稿卡）设置；
    *  生命周期与图片草稿绑定一致 */
@@ -1274,6 +1276,10 @@ export default function CanvasPage() {
 
   // 隐藏与重开同一目标可放行；重试尚未成功时不能换到其它编辑目标。
   const canOpenEditor = (nodeId?: string): boolean => {
+    if (videoSubmittingId && nodeId !== videoSubmittingId) {
+      showToast('warn', '正在保存并提交，请稍候');
+      return false;
+    }
     if ((saveBlocked || saveStatus === 'error') && nodeId !== editingTargetRef.current) {
       showToast('warn', '保存失败，请重试');
       return false;
@@ -1421,6 +1427,7 @@ export default function CanvasPage() {
   /** 画布空白处单击：取消节点选取模式 */
   const handleCanvasPaneClick = () => {
     imagePanelHiddenRef.current = true;
+    videoPanelHiddenRef.current = true;
     setPickMode(null);
     setPickTarget(null);
     setPickProductId(null);
@@ -1455,6 +1462,7 @@ export default function CanvasPage() {
       setShow: (visible: boolean) => void,
     ) => {
       if (!boundId) return;
+      if (videoSubmittingId && boundId !== videoSubmittingId) return;
       if (soloId && soloId === boundId) {
         setShow(true); // 命中绑定目标：保持/恢复（修复程序化选中误报把面板当多选误关）
         return;
@@ -1463,7 +1471,7 @@ export default function CanvasPage() {
       // 空选中：不动作（真空白点击由 onPaneClick 处理，节点删除由绑定清理 effect 处理）
     };
     if (!imagePanelHiddenRef.current) syncPanelVisible(imageDraftId, setShowImageDialog);
-    syncPanelVisible(videoDraftId, setShowBottomDialog);
+    if (!videoPanelHiddenRef.current) syncPanelVisible(videoDraftId, setShowBottomDialog);
     syncPanelVisible(audioDraftId, setShowAudioDialog);
   };
 
@@ -1614,6 +1622,7 @@ export default function CanvasPage() {
   /** 打开绑定指定草稿的视频面板（IKDMQS）：带入草稿已保存的参数与当前连线文本附件 */
   const openVideoDraftDialog = (nodeId: string) => {
     if (!canOpenEditor(nodeId)) return;
+    videoPanelHiddenRef.current = false;
     editingTargetRef.current = nodeId;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
@@ -1825,6 +1834,10 @@ export default function CanvasPage() {
   /** 项目切换/新建前的落盘闸门（IKDMQQ Q19）：先把未防抖编辑落盘；保存失败停留当前项目并提示重试。
    *  顺带修复「带未保存编辑切换项目丢失修改」的旧缺口。 */
   const ensureSavedBeforeProjectSwitch = async (): Promise<boolean> => {
+    if (videoSubmittingId) {
+      showToast('warn', '正在保存并提交，请稍候');
+      return false;
+    }
     if (saveBlocked) {
       showToast('warn', '保存失败，请重试');
       return false;
@@ -3042,10 +3055,12 @@ export default function CanvasPage() {
    *  携带 targetNodeId 时（IKDLQG/IKDMQS）：先等待在途保存并落盘当前画布编辑
    *  （同 IKDLQE 应用预览的保存串行化），保证服务端按连线推导附件时读到最新正文，再携带 target_node_id 提交 */
   const handleDialogSend = async (text: string, opts: VideoGenOptions, refs: BottomRefItem[]) => {
+    if (applyingRef.current) return;
     const targetNodeId = videoSeed?.targetNodeId;
     if (targetNodeId && currentId) {
       const projectId = currentId;
       applyingRef.current = true;
+      setVideoSubmittingId(targetNodeId);
       try {
         if (!(await flushCanvasSave(projectId))) return; // 等待期间项目已切换，中止提交
       } catch (e) {
@@ -3055,6 +3070,7 @@ export default function CanvasPage() {
         return;
       } finally {
         applyingRef.current = false;
+        setVideoSubmittingId(null);
       }
     }
     const parameters: VideoJobParameters = {
@@ -4031,7 +4047,7 @@ export default function CanvasPage() {
                 ? (ids) => handleReorderAttachments(videoSeed.targetNodeId!, ids)
                 : undefined
             }
-            onClose={() => { setShowBottomDialog(false); setPickMode(null); setPickTarget(null); setPickRefRole(null); }}
+            onClose={() => { videoPanelHiddenRef.current = true; setShowBottomDialog(false); setPickMode(null); setPickTarget(null); setPickRefRole(null); }}
             onSend={handleDialogSend}
             onPickFromCanvas={(kind, role) => { setPickMode(kind); setPickTarget('video'); setPickRefRole(role ?? null); }}
             onPickFromAssets={(kind) => openAssetsPicker(kind === 'image' ? 'bottomImage' : 'bottomVideo')}
@@ -4042,6 +4058,9 @@ export default function CanvasPage() {
             videoDraftBinding={
               videoDraftId
                 ? {
+                    submitting: videoSubmittingId === videoDraftId,
+                    restoreExisting: hasGenerationRecord(mediaNodes.find(n => n.id === videoDraftId)),
+                    saveFailed: saveBlocked || saveStatus === 'error',
                     status: (mediaNodes.find((n) => n.id === videoDraftId)?.data as Record<string, unknown> | undefined)
                       ?.genStatus as MediaGenStatus | undefined,
                     onParamsChange: (patch) => handleVideoDraftParamsChange(videoDraftId, patch),

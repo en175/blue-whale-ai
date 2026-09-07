@@ -88,7 +88,7 @@ export interface VideoDraftParamsPatch {
 
 interface BottomDialogProps {
   onClose: () => void;
-  onSend: (text: string, opts: VideoGenOptions, refs: BottomRefItem[]) => void;
+  onSend: (text: string, opts: VideoGenOptions, refs: BottomRefItem[]) => void | Promise<void>;
   /** 初始参考素材（节点「生成视频」带入被点节点图片） */
   initialRefs?: BottomRefItem[];
   /** 初始自由文本（视频节点「重新编辑」带入原提示词） */
@@ -116,6 +116,9 @@ interface BottomDialogProps {
   /** 视频草稿绑定（IKDMQS）：面板编辑实时写回草稿节点；status 为 generating 时参数与输入只读 */
   videoDraftBinding?: {
     status?: MediaGenStatus;
+    restoreExisting?: boolean;
+    submitting?: boolean;
+    saveFailed?: boolean;
     onParamsChange: (patch: VideoDraftParamsPatch) => void;
   };
   /** 连线推导的视频参考分组（IKDMQS）：传入即为草稿绑定模式，参考区按角色渲染，
@@ -288,6 +291,9 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
   /** 放大态：输入区高度占屏幕 2/3；收起回底部默认高度 */
   const [expanded, setExpanded] = useState(false);
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedSize, setSelectedSize] = useState('');
   /** 比例/时长初始为空/0：接口加载完成后 applyModelDefaults 套用所选模型默认值 */
@@ -328,7 +334,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
   /** 草稿绑定模式（IKDMQS）：参考由连线推导，本地 refFiles 不参与展示与提交 */
   const draftBound = videoMediaRefs !== undefined;
   /** 生成中只读（IKDMQS）：任务执行期间目标参数与输入冻结，保留查看与画布上的取消入口 */
-  const readOnly = videoDraftBinding?.status === 'generating';
+  const readOnly = sending || videoDraftBinding?.submitting || videoDraftBinding?.status === 'generating';
   /** 草稿绑定参数同步：面板内变更实时写回草稿节点（随画布自动保存持久化） */
   const syncDraftParams = (patch: VideoDraftParamsPatch) => {
     videoDraftBinding?.onParamsChange(patch);
@@ -343,7 +349,12 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
       }
     : null;
   /** 组合校验（IKDMQS）：与服务端 400 同口径 + 能力位；冲突时明确提示并禁用发送 */
-  const conflict = draftBound && caps && videoMediaRefs ? videoRefConflict(videoMediaRefs, caps) : null;
+  const supportsVideoReference = selectedModel === 'seedance-2' || /^doubao-seedance-2-0(?:-|$)/.test(selectedModel);
+  const conflict = draftBound && caps && videoMediaRefs
+    ? videoRefConflict(videoMediaRefs, caps)
+      ?? (!supportsVideoReference && videoMediaRefs.reference.some(ref => ref.mediaType === 'video')
+        ? '当前模型不支持视频参考，请更换模型或移除视频参考' : null)
+    : null;
   const canAddFirst = !!(caps && videoMediaRefs && canAddRefRole('first', videoMediaRefs, caps));
   const canAddLast = !!(caps && videoMediaRefs && canAddRefRole('last', videoMediaRefs, caps));
   const canAddReference = !!caps?.referenceImage;
@@ -355,11 +366,20 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
   const imageCount = refFiles.filter((f) => f.type === 'image').length;
   const videoCount = refFiles.filter((f) => f.type === 'video').length;
   /** 首尾帧模式必须恰好 2 张图片（不多不少、不含视频），否则禁止发送（非草稿绑定路径旧语义） */
-  const keyframeInvalid = isKeyframe && (imageCount !== 2 || videoCount > 0);
+  const keyframeInvalid = !draftBound && isKeyframe && (imageCount !== 2 || videoCount > 0);
   /** 图片上限：首尾帧模式固定 2（首帧+尾帧），其余固定 9 张（产品约定，与 ImageDialog 统一，不随模型能力波动） */
   const maxImages = isKeyframe ? 2 : REF_LIMITS.image;
 
-  const canSend = !composedIsEmpty(composed) || hasAttachmentText;
+  const configurationError = !modelsLoaded ? '正在加载模型配置'
+    : !currentModel ? '原生成模型不可用，请重新选择模型'
+    : !sizeOptions.some(option => option.key === selectedSize) ? '原分辨率不可用，请重新选择分辨率'
+    : !ratioOptions.includes(selectedRatio) ? '原比例不兼容，请重新选择比例'
+    : durationRange && (duration < durationRange.min || duration > durationRange.max
+      || (duration - durationRange.min) % durationRange.step !== 0)
+      ? '原时长不兼容，请重新选择时长'
+    : null;
+  const canSend = !readOnly && !videoDraftBinding?.saveFailed && !configurationError
+    && (!composedIsEmpty(composed) || hasAttachmentText);
 
   /** 时长刻度（min..max 逐 step；模型能力未加载时无刻度） */
   const ticks: number[] = [];
@@ -485,9 +505,23 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
 
   // 加载视频模型能力列表：优先选中首页带入的模型，参数逐项按模型能力校验后应用
   useEffect(() => {
+    let active = true;
     fetchGenerationModels('video')
       .then((list) => {
+        if (!active) return;
         setModelList(list);
+        setModelsLoaded(true);
+        // 已有节点配置原样恢复，禁止因模型能力变化自动改写最新编辑。
+        if (videoDraftBinding && (videoDraftBinding.restoreExisting || initialParams?.modelId)) {
+          setSelectedModel(initialParams?.modelId ?? '');
+          const model = list.find(m => m.model_id === initialParams?.modelId);
+          const size = model?.supported_sizes.find(s => s.id === initialParams?.resolution || s.api_value === initialParams?.resolution);
+          setSelectedSize(size?.id ?? initialParams?.resolution ?? '');
+          setSelectedRatio(initialParams?.aspectRatio ?? '');
+          setDuration(initialParams?.duration ?? 0);
+          setSelectedMode(initialParams?.mode ?? 'all');
+          return;
+        }
         if (!list.length) return;
         // IKDMQU Q3：恢复的模型已不可用时明确提示（回退默认，不静默降级），用户调整后再发送
         if (initialParams?.modelId && !list.some((m) => m.model_id === initialParams.modelId)) {
@@ -526,7 +560,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
         // 草稿绑定：把实际生效的完整参数写回草稿节点（含首次默认落值）
         syncDraftParams(patch);
       })
-      .catch(() => undefined);
+      .catch(() => { if (active) setModelsLoaded(true); });
+    return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -570,7 +605,20 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
   /** 发送：**解引用发生在这一刻**——编辑期胶囊一直是指针，此处才换成完整 prompt
    *  （携带模型/宽高比/清晰度/时长）。草稿绑定模式（IKDMQS）参考由父级按连线角色推导，
    *  组合冲突（帧/参考混用、能力不支持）在此明确提示并阻止提交，不静默丢弃。 */
+  const submit = async (text: string, options: VideoGenOptions, refs: BottomRefItem[]) => {
+    if (sendingRef.current) return;
+    sendingRef.current = true;
+    setSending(true);
+    try {
+      await onSend(text, options, refs);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+  };
+
   const handleSend = () => {
+    if (!canSend) return;
     const text = resolveComposed(composed).trim();
     if (!text && !hasAttachmentText) return;
     if (!currentModel) {
@@ -588,7 +636,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
         console.warn('视频模型清晰度能力缺失，请稍后重试');
         return;
       }
-      onSend(text, {
+      void submit(text, {
         modelId: currentModel.model_id,
         aspectRatio: selectedRatio,
         resolution: size.api_value ?? size.id,
@@ -613,7 +661,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
       console.warn('视频模型清晰度能力缺失，请稍后重试');
       return;
     }
-    onSend(text, {
+    void submit(text, {
       modelId: currentModel.model_id,
       aspectRatio: selectedRatio,
       resolution: size.api_value ?? size.id,
@@ -884,8 +932,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
             </div>
           ))}
           {/* 组合冲突提示（IKDMQS）：明确说明不可提交的原因，不静默丢弃 */}
-          {conflict && <div className={styles.refConflictHint}>{conflict}</div>}
-          {readOnly && <div className={styles.readOnlyHint}>生成中，参数与连线只读；可在画布卡片上取消生成</div>}
+          {conflict && <div className={styles.refConflictHint} role="alert">{conflict}</div>}
+          {readOnly && <div className={styles.readOnlyHint}>{sending || videoDraftBinding?.submitting ? '正在保存并提交，参数与连线只读' : '生成中，参数与连线只读；可在画布卡片上取消生成'}</div>}
         </div>
       ) : (
         <div className={styles.mediaRow}>
@@ -1053,6 +1101,8 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
         </div>
       )}
 
+      {configurationError && <div className={styles.refConflictHint} role="alert">{configurationError}</div>}
+
       {/* 输入框：胶囊跟文字同一行 */}
       <div className={styles.editorWrap}>
         <ChipTextEditor
@@ -1069,7 +1119,6 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
           // 而这个 1000 本身也是凭空定的：后端不校验 prompt 长度，模型能力接口里也没有这个字段。
           // 拿到模型真实上限之前，它只是个提示，不足以据此删改用户内容。
           onChange={handleComposedChange}
-          onSend={handleSend}
           readOnly={readOnly}
           className={styles.editorArea}
         />
