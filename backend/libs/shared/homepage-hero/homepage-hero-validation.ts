@@ -1,4 +1,4 @@
-import type { CreateHomepageHeroInput } from "@blue-whale/persistence";
+import type { CreateHomepageHeroInput } from "@lib/shared/persistence/index.js";
 
 /**
  * 首页背景配置入参校验纯函数（IKCH05），对齐母工单 IKCH01 接口草稿：

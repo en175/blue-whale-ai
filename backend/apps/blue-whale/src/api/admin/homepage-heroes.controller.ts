@@ -12,7 +12,7 @@ import {
 import {
   HomepageHeroLimitError,
   type CreateHomepageHeroInput,
-} from "@blue-whale/persistence";
+} from "@lib/shared/persistence/index.js";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";

@@ -8,8 +8,8 @@ import { SceneStrategy } from "./type/scene-strategy.js";
 
 const { mockCreateRepo } = vi.hoisted(() => ({ mockCreateRepo: vi.fn() }));
 
-vi.mock("@blue-whale/persistence", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@blue-whale/persistence")>();
+vi.mock("@lib/shared/persistence/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/persistence/index.js")>();
   return { ...actual, createSharedAssetRepo: mockCreateRepo };
 });
 

@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-describe("@blue-whale/persistence development resolution", () => {
+describe("@lib/shared/persistence development resolution", () => {
   it("resolves an executable dist build with the current AssetRepo API", () => {
     const result = spawnSync(
       process.execPath,
@@ -13,7 +13,7 @@ describe("@blue-whale/persistence development resolution", () => {
         "--input-type=module",
         "--eval",
         [
-          "const url = import.meta.resolve('@blue-whale/persistence');",
+          "const url = import.meta.resolve('@lib/shared/persistence/index.js');",
           "const { createAssetRepo } = await import(url);",
           "const repo = createAssetRepo({});",
           "console.log(JSON.stringify({ url, methods: [typeof repo.findCommittedUpload, typeof repo.createUploadedAsset] }));",
@@ -28,7 +28,7 @@ describe("@blue-whale/persistence development resolution", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout.trim())).toEqual({
       url: pathToFileURL(
-        resolve(process.cwd(), "packages/persistence/dist/index.js"),
+        resolve(process.cwd(), "backend/libs/shared/persistence/index.js"),
       ).href,
       methods: ["function", "function"],
     });

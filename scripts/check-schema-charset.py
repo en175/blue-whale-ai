@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify every schema SQL declares SET NAMES utf8mb4.
 
-Regression guard: packages/persistence/schema/*.sql are imported through
+Regression guard: backend/prisma/schema/*.sql are imported through
 docker-entrypoint-initdb.d, whose client session defaults to latin1 unless
 the file declares SET NAMES utf8mb4. Without it, UTF-8 Chinese seed data is
 double-encoded into mojibake at insert time (对照组: 001_baseline.sql).
@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_DIR = REPO_ROOT / "packages" / "persistence" / "schema"
+SCHEMA_DIR = REPO_ROOT / "backend" / "prisma" / "schema"
 REQUIRED = "SET NAMES utf8mb4"
 
 

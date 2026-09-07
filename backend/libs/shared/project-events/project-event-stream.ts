@@ -1,7 +1,7 @@
 import type {
   ProductEventRepo,
   ProductEventView,
-} from "@blue-whale/persistence";
+} from "@lib/shared/persistence/index.js";
 import { wireInteger } from "@lib/shared/wire-integer.js";
 
 const encoder = new TextEncoder();

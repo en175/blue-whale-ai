@@ -20,7 +20,7 @@ import {
   type GenerationCommandRepo,
   type ModelCapabilityRepo,
   type ProjectRepo,
-} from "@blue-whale/persistence";
+} from "@lib/shared/persistence/index.js";
 
 import type { GenerationCostEstimator } from "./cost-estimator.js";
 

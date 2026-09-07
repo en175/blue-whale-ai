@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { createOperationLogRepo } from "@blue-whale/persistence";
+import { createOperationLogRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 /** OperationLog 用例依赖：wire Prisma admin_operation_logs repo。 */

@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { createAssetRepo } from "@blue-whale/persistence";
+import { createAssetRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { AssetStorageService } from "./storage.service.js";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
