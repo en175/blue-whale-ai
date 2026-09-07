@@ -6,7 +6,7 @@
 
 ## 背景与状态
 
-用户希望通过提示词生成的图片、视频、音频节点在选中时显示对应生成面板，保留可继续编辑的输入。本文记录 grill-with-docs 访谈中逐轮确认的决定。三轮 Q1–Q10 已逐项确认，用户于 2026-09-07 回复“确认”，完成整体方案确认，随后确认测试边界并授权发布。正式规格已补充到正在实施的 IKDMQU 并核验；本次访谈与规格发布未修改产品代码，不代表功能已完成。
+用户希望通过提示词生成的图片、视频、音频节点在选中时显示对应生成面板，保留可继续编辑的输入。本文记录 grill-with-docs 访谈中逐轮确认的决定。三轮 Q1–Q10 已逐项确认，用户于 2026-09-07 回复“确认”，完成整体方案确认，随后确认测试边界并授权发布。正式规格已独立发布为新需求 IKDQW7 并核验；本次访谈与规格发布未修改产品代码，不代表功能已完成。
 
 本修订替代既有生成草稿规格中成功卡“再次编辑立即复制新草稿”的规则。侧栏创建新草稿不是本次修订对象。
 
@@ -62,7 +62,7 @@
 
 ## 关联
 
-- [正式规格与测试决定](2026-09-07-canvas-node-editing-draft-spec.md)，已发布至 [IKDMQU](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IKDMQU)
+- [正式规格与测试决定](2026-09-07-canvas-node-editing-draft-spec.md)，已独立发布为 [IKDQW7](https://gitee.com/hangzhou-xuanfu_1/blue-whale-ai/issues/IKDQW7)
 - [领域术语](../../CONTEXT.md)
 - [既有生成草稿交互规格](2026-09-07-canvas-generation-draft-interaction.md)
 - [既有生成草稿交付规格](2026-09-07-canvas-generation-draft-spec.md)
