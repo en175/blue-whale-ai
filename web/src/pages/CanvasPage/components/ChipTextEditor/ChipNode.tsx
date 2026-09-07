@@ -110,8 +110,14 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
     return this.getLatest().__pending;
   }
 
-  confirm(): void {
-    this.getWritable().__pending = false;
+  confirm(ref?: { id: string; label: string; prompt: string }): void {
+    const node = this.getWritable();
+    node.__pending = false;
+    if (ref) {
+      node.__refId = ref.id;
+      node.__label = ref.label;
+      node.__prompt = ref.prompt;
+    }
   }
 
   createDOM(): HTMLElement {
@@ -181,6 +187,7 @@ export class ChipNode extends DecoratorNode<JSX.Element> {
         {this.__audioUrl && <AudioMentionChip url={this.__audioUrl} label={this.__label} />}
         {this.__videoUrl && <VideoMentionChip url={this.__videoUrl} label={this.__label} />}
         {this.__imageUrl && <ImageMentionChip url={this.__imageUrl} label={this.__label} />}
+        {!this.__audioUrl && !this.__videoUrl && !this.__imageUrl && <span>{this.__label}</span>}
         <span>待确认引用</span>
       </span>;
     }

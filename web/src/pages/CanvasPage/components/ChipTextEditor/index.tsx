@@ -79,6 +79,8 @@ interface ChipTextEditorProps {
   /** 只读（IKDMQS）：生成中草稿参数冻结，编辑器不可输入、Enter 不发送 */
   readOnly?: boolean;
   pendingChip?: ChipRef | null;
+  /** 异步准备成功后才确认；返回 null 保留候选与已有输入。 */
+  onPreparePending?: () => Promise<ChipRef | null>;
   onConfirmPending?: () => void;
   onCancelPending?: () => void;
 }
@@ -128,12 +130,13 @@ function EditablePlugin({ readOnly }: { readOnly?: boolean }) {
 }
 
 const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(function ChipTextEditor(
-  { placeholder, onChange, onSend, className, readOnly, pendingChip, onConfirmPending, onCancelPending },
+  { placeholder, onChange, onSend, className, readOnly, pendingChip, onPreparePending, onConfirmPending, onCancelPending },
   ref,
 ) {
   const editorRef = useRef<LexicalEditor | null>(null);
   const savedSelection = useRef<RangeSelection | null>(null);
   const pendingKey = useRef<NodeKey | null>(null);
+  const preparingKey = useRef<NodeKey | null>(null);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -197,16 +200,30 @@ const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(fun
     }, { tag: [SKIP_DOM_SELECTION_TAG, HISTORIC_TAG] });
   }, [pendingChip]);
 
-  const confirmPending = (event: React.MouseEvent<HTMLDivElement>) => {
+  const confirmPending = async (event: React.MouseEvent<HTMLDivElement>) => {
     if (!pendingChip || readOnly) return;
     const target = event.target as HTMLElement;
     // 胶囊、移除按钮、悬浮预览不是输入编辑位置。
     if (target.closest('[contenteditable="false"],button')) return;
+    const key = pendingKey.current;
+    if (!key || preparingKey.current === key) return;
+    let prepared = pendingChip;
+    if (onPreparePending) {
+      preparingKey.current = key;
+      try {
+        const result = await onPreparePending();
+        if (!result || pendingKey.current !== key) return;
+        prepared = result;
+      } finally {
+        if (preparingKey.current === key) preparingKey.current = null;
+      }
+    }
     let confirmed = false;
     editorRef.current?.update(() => {
-      const node = pendingKey.current ? $getNodeByKey(pendingKey.current) : null;
+      if (pendingKey.current !== key) return;
+      const node = $getNodeByKey(key);
       if (!(node instanceof ChipNode) || !node.isPending()) return;
-      node.confirm();
+      node.confirm(prepared);
       pendingKey.current = null;
       confirmed = true;
     }, { tag: HISTORY_PUSH_TAG, onUpdate: () => { if (confirmed) onConfirmPending?.(); } });

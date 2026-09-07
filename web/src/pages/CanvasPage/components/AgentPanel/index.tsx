@@ -454,6 +454,7 @@ interface PendingAttachment {
 
 interface AgentPanelProps {
   candidateBlocks?: SessionContentBlock[] | null;
+  onPrepareCandidate?: (blocks: SessionContentBlock[]) => Promise<SessionContentBlock[]>;
   onCancelCandidate?: () => void;
   onClose: () => void;
   initialInput?: string;
@@ -511,7 +512,7 @@ function quoteTooltipOfChip(blocks: SessionContentBlock[] | undefined, chipId: s
   return text.length > 500 ? `${text.slice(0, 500)}…` : text;
 }
 
-export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas, onPickFromAssets, externalAssetPicks, candidateBlocks, onCancelCandidate }: AgentPanelProps) {
+export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas, onPickFromAssets, externalAssetPicks, candidateBlocks, onPrepareCandidate, onCancelCandidate }: AgentPanelProps) {
   useAssetUrlCache();
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
@@ -536,6 +537,9 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     setPendingMediaBlocksState([...pendingMediaBlocksRef.current]);
   };
   const [pendingReference, setPendingReference] = useState<{ chip: ChipRef; blocks: SessionContentBlock[] } | null>(null);
+  const currentCandidateRef = useRef(candidateBlocks);
+  currentCandidateRef.current = candidateBlocks;
+  const preparedBlocksRef = useRef<SessionContentBlock[] | null>(null);
   const [referenceNotice, setReferenceNotice] = useState('');
   const [submittingMessage, setSubmittingMessage] = useState(false);
   const submittingMessageRef = useRef(false);
@@ -1576,9 +1580,31 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               readOnly={submittingMessage}
               pendingChip={pendingReference?.chip}
               onCancelPending={onCancelCandidate}
+              onPreparePending={async () => {
+                if (!pendingReference) return null;
+                const candidate = candidateBlocks;
+                preparedBlocksRef.current = null;
+                try {
+                  const blocks = onPrepareCandidate
+                    ? await onPrepareCandidate(pendingReference.blocks)
+                    : pendingReference.blocks;
+                  if (currentCandidateRef.current !== candidate) return null;
+                  const first = blocks[0];
+                  // 快照身份区分同一节点的不同确认版本，撤销/重做不会串用新版正文。
+                  const id = first.quote_id ? `quote:${first.quote_id}` : pendingReference.chip.id;
+                  preparedBlocksRef.current = blocks.map((block) => ({ ...block, chip_id: id }));
+                  return { ...pendingReference.chip, id, label: first.display_label || pendingReference.chip.label, prompt: first.resource_text || '' };
+                } catch (error) {
+                  if (currentCandidateRef.current === candidate) {
+                    setReferenceNotice(`确认引用失败：${error instanceof Error ? error.message : '请检查网络后重试'}`);
+                  }
+                  return null;
+                }
+              }}
               onConfirmPending={() => {
-                if (!pendingReference) return;
-                pendingMediaBlocksRef.current = [...pendingMediaBlocksRef.current, ...pendingReference.blocks];
+                if (!pendingReference || !preparedBlocksRef.current) return;
+                pendingMediaBlocksRef.current = [...pendingMediaBlocksRef.current, ...preparedBlocksRef.current];
+                preparedBlocksRef.current = null;
                 syncMediaBlocks();
                 setPendingReference(null);
                 onCancelCandidate?.();
