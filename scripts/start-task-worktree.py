@@ -32,6 +32,7 @@ def git(cwd, *args, check=True):
     result = subprocess.run(
         ["git", "-C", str(cwd), *args],
         text=True,
+        encoding="utf-8",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -72,6 +73,7 @@ def build_branch(task_type, issue, summary):
     result = subprocess.run(
         ["git", "check-ref-format", "--branch", branch],
         text=True,
+        encoding="utf-8",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -241,6 +243,13 @@ def parse_start_args(argv):
 
 
 def main(argv=None):
+    # Windows 原生 Python 的 stdout/stderr 默认 GBK，中文/emoji print 会抛
+    # UnicodeEncodeError（与 subprocess 解码同根因的输出方向）。强制改 UTF-8；
+    # POSIX 本就 UTF-8，reconfigure 为 no-op，不影响其他操作系统。
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
         if len(argv) == 2 and argv[0] == "--validate-branch":

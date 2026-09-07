@@ -1,3 +1,5 @@
+SET NAMES utf8mb4;
+
 -- IKDBYY：generation_model_capability 增加生成渠道解析器与请求映射。
 -- 与 prisma/migrations/20260904120000_ikdbyy_channel_parser/migration.sql 双轨同步。
 ALTER TABLE `generation_model_capability`

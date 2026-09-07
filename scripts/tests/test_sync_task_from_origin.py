@@ -4,10 +4,16 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+
+try:  # 作为 scripts.tests.* 命名空间包导入
+    from .bash_helper import BASH
+except ImportError:  # 经 discover -s scripts/tests 顶层导入
+    from bash_helper import BASH
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -15,10 +21,13 @@ SYNC_SCRIPT = REPO_ROOT / "scripts" / "sync-task-from-origin.sh"
 
 
 def run(*args: str, cwd: Path, check: bool = False) -> subprocess.CompletedProcess[str]:
+    if args and args[0] == "bash":
+        args = (BASH,) + args[1:]
     return subprocess.run(
         list(args),
         cwd=cwd,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=check,
     )
@@ -293,7 +302,21 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         payload = self.response(result)
         self.assertEqual(payload["remote_branch_sha"], original_head)
         marker = Path(str(payload["recovery_file"]))
-        self.assertEqual(marker.stat().st_mode & 0o777, 0o600)
+        # Windows 无 POSIX 权限位（os.chmod 0600 后 st_mode 仍 0o666），
+        # 恢复点私密性改由 ACL 收紧实现：断言仅属主有权，其余（BUILTIN\Users）被拒。
+        if os.name == "nt":
+            acl = subprocess.run(
+                ["icacls", str(marker)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            self.assertEqual(acl.returncode, 0, acl.stderr)
+            # 收紧后的 ACL 不得含 BUILTIN\Users 条目；注意区分路径本身的 \Users\<name>。
+            self.assertNotRegex(acl.stdout, r"BUILTIN[\\/]Users")
+        else:
+            self.assertEqual(marker.stat().st_mode & 0o777, 0o600)
 
     def test_recovery_atomic_write_failure_returns_structured_error(self) -> None:
         original_head = self.commit_task_change()
