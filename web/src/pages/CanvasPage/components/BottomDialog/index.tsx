@@ -403,17 +403,49 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
     }
   }, [initialText]);
 
-  // 外部注入参考视频（画布节点选取；去重 + 上限保护；图生视频 / 首尾帧模式不收视频）。
+  /** 角色库注入结果提示队列：图片/视频分两个 effect 注入，同一批次超限/重复合并为一条 toast */
+  const injectNoticeRef = useRef<{ overflows: ('image' | 'video')[]; dup: boolean }>({ overflows: [], dup: false });
+  const injectNoticeTimerRef = useRef<number | null>(null);
+  const queueInjectNotice = (notice: { overflow?: 'image' | 'video'; dup?: boolean }) => {
+    const pending = injectNoticeRef.current;
+    if (notice.overflow && !pending.overflows.includes(notice.overflow)) pending.overflows.push(notice.overflow);
+    if (notice.dup) pending.dup = true;
+    if (injectNoticeTimerRef.current != null) return;
+    injectNoticeTimerRef.current = window.setTimeout(() => {
+      injectNoticeTimerRef.current = null;
+      const { overflows, dup } = injectNoticeRef.current;
+      injectNoticeRef.current = { overflows: [], dup: false };
+      const parts: string[] = [];
+      if (overflows.length > 0) parts.push(refOverflowToast(overflows, { image: maxImages, video: MAX_VIDEO_REFS }));
+      if (dup) parts.push('素材重复，已跳过');
+      if (parts.length > 0) onToast?.('warn', parts.join('；'));
+    }, 0);
+  };
+
+  // 外部注入参考视频（画布节点选取/角色库多选；去重 + 上限保护 + 超限/重复提示；图生视频 / 首尾帧模式不收视频）
   // 草稿绑定模式下注入不生效：参考走连线（到节点选择建立连线）。
   useEffect(() => {
     if (!externalPick || draftBound) return;
     if (noVideoMode) return;
     const items = externalPick.items;
+    const vidCount = refFiles.filter((f) => f.type === 'video').length;
+    if (vidCount >= MAX_VIDEO_REFS) {
+      queueInjectNotice({ overflow: 'video' });
+      return;
+    }
+    // 超出剩余容量的部分丢弃并提示（与图片注入口径一致）
+    const capped = items.slice(0, MAX_VIDEO_REFS - vidCount);
+    if (capped.length < items.length) queueInjectNotice({ overflow: 'video' });
+    // 与已添加素材重复（assetId 优先，preview 兜底）时提示
+    const dupCount = capped.filter((item) =>
+      refFiles.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview),
+    ).length;
+    if (dupCount > 0) queueInjectNotice({ dup: true });
     setRefFiles((prev) => {
       let next = prev;
-      for (const item of items) {
-        const vidCount = next.filter((f) => f.type === 'video').length;
-        if (vidCount >= MAX_VIDEO_REFS) break;
+      for (const item of capped) {
+        const vidCnt = next.filter((f) => f.type === 'video').length;
+        if (vidCnt >= MAX_VIDEO_REFS) break;
         if (next.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview)) continue;
         next = [...next, item];
       }
@@ -422,20 +454,22 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalPick]);
 
-  // 外部注入参考图片（画布节点选取；去重 + 上限保护；首尾帧模式同样适用）
+  // 外部注入参考图片（画布节点选取/角色库多选；去重 + 上限保护 + 超限/重复提示；首尾帧模式同样适用）
   useEffect(() => {
     if (!externalImagePick || draftBound) return;
     const items = externalImagePick.items;
     const imgCount = refFiles.filter((f) => f.type === 'image').length;
     if (imgCount >= maxImages) {
-      onToast?.('warn', refOverflowToast(['image'], { image: maxImages }));
+      queueInjectNotice({ overflow: 'image' });
       return;
     }
     // 超出剩余容量的部分丢弃并提示（与单张超限 toast 文案统一）
     const accepted = items.slice(0, maxImages - imgCount);
-    if (accepted.length < items.length) {
-      onToast?.('warn', refOverflowToast(['image'], { image: maxImages }));
-    }
+    if (accepted.length < items.length) queueInjectNotice({ overflow: 'image' });
+    const dupCount = accepted.filter((item) =>
+      refFiles.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview),
+    ).length;
+    if (dupCount > 0) queueInjectNotice({ dup: true });
     setRefFiles((prev) => {
       let next = prev;
       for (const item of accepted) {
