@@ -25,25 +25,12 @@ export {
   type ChangePasswordRequest,
 } from "./change-password.js";
 export {
-  ACCOUNT_ERROR_PASSWORD_INCORRECT,
-  ACCOUNT_ERROR_PASSWORD_INVALID,
-  ACCOUNT_ERROR_PASSWORD_NOT_SET,
-  ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE,
-  ACCOUNT_ERROR_NUMERIC_CODES,
-  accountErrorToNumeric,
-  accountMessageFor,
-  type PublicAccountError,
-} from "./account-error-codes.js";
-export {
-  readinessResponseSchema,
-  type ReadinessResponse,
-} from "./readiness.js";
-export {
+  // ── 生成任务域错误码（字符串契约 + 数值表 + 信号 + 类型）──
   ERROR_ALL_OUTPUTS_FAILED,
+  ERROR_AUDIO_GENERATION_FAILED,
   ERROR_CONTENT_REJECTED,
   ERROR_CONTENT_REVIEW_UNAVAILABLE,
   ERROR_ENQUEUE_FAILED,
-  RATE_LIMITED,
   ERROR_EXTRACT_FAILED,
   ERROR_IMAGE_GENERATION_FAILED,
   ERROR_INVALID_INPUT,
@@ -68,6 +55,7 @@ export {
   ERROR_VIDEO_GENERATION_FAILED,
   ERROR_VIDEO_HAS_NO_AUDIO_TRACK,
   ERROR_VIDEO_TOO_LARGE,
+  RATE_LIMITED,
   GENERATION_ERROR_UNKNOWN_NUMERIC_CODE,
   GENERATION_ERROR_NUMERIC_CODES,
   errorCodeToNumeric,
@@ -76,12 +64,20 @@ export {
   isContentPolicySignal,
   NEW_API_QUOTA_SIGNAL,
   isQuotaSignal,
-} from "./generation-error-codes.js";
-export {
-  ok,
-  fail,
-  SUCCESS_CODE,
-  FAILURE_CODE,
+  // ── 账号域错误码 ──
+  ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE,
+  ACCOUNT_ERROR_PASSWORD_INCORRECT,
+  ACCOUNT_ERROR_PASSWORD_INVALID,
+  ACCOUNT_ERROR_PASSWORD_NOT_SET,
+  ACCOUNT_ERROR_NUMERIC_CODES,
+  accountErrorToNumeric,
+  accountMessageFor,
+  type PublicAccountError,
+  // ── 一码一文案表 + 查询 ──
+  ERROR_CODES,
+  errorMessage,
+  messageOf,
+  // ── 全局业务码常量（Java SystemCode 系）──
   DATA_NOT_EXIST_CODE,
   ASSET_UNAVAILABLE_CODE,
   RESOURCE_NOT_FOUND_CODE,
@@ -99,6 +95,16 @@ export {
   PLAN_APPLICATION_TARGET_STALE_CODE,
   SHARED_ASSET_EMPTY_CARD_CODE,
   SHARED_ASSET_TYPE_UNSUPPORTED_CODE,
+} from "./error-codes.js";
+export {
+  readinessResponseSchema,
+  type ReadinessResponse,
+} from "./readiness.js";
+export {
+  ok,
+  fail,
+  SUCCESS_CODE,
+  FAILURE_CODE,
   type ResultEnvelope,
 } from "./result.js";
 export {

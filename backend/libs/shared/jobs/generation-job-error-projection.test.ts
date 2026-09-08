@@ -3,7 +3,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  GENERATION_ERROR_CODES,
+  fallbackErrorCode,
+  resolveErrorCode,
+} from "./generation-job-error-projection.js";
+import {
   ERROR_ALL_OUTPUTS_FAILED,
+  ERROR_AUDIO_GENERATION_FAILED,
   ERROR_CONTENT_REJECTED,
   ERROR_CONTENT_REVIEW_UNAVAILABLE,
   ERROR_ENQUEUE_FAILED,
@@ -31,17 +37,11 @@ import {
   ERROR_VIDEO_GENERATION_FAILED,
   ERROR_VIDEO_HAS_NO_AUDIO_TRACK,
   ERROR_VIDEO_TOO_LARGE,
-  GENERATION_ERROR_CODES,
-  LEGACY_CODE_TO_CANONICAL,
-  fallbackErrorCode,
-  resolveErrorCode,
-} from "./error-codes.js";
-import {
   GENERATION_ERROR_NUMERIC_CODES,
   GENERATION_ERROR_UNKNOWN_NUMERIC_CODE,
   errorCodeToNumeric,
 } from "@blue-whale/contracts";
-import { messageFor, projectPublicError } from "./public-error.js";
+import { messageFor, projectPublicError } from "./generation-job-error-projection.js";
 
 describe("error-codes", () => {
   it("枚举常量值稳定（对外契约）", () => {
@@ -81,6 +81,7 @@ describe("error-codes", () => {
       ERROR_EXTRACT_FAILED,
       ERROR_UPLOAD_FAILED,
       ERROR_ENQUEUE_FAILED,
+      ERROR_AUDIO_GENERATION_FAILED,
     ];
     for (const c of exported) {
       expect(GENERATION_ERROR_CODES.has(c), `code ${c} 未登记`).toBe(true);
@@ -117,6 +118,7 @@ describe("error-codes", () => {
       ERROR_EXTRACT_FAILED,
       ERROR_UPLOAD_FAILED,
       ERROR_ENQUEUE_FAILED,
+      ERROR_AUDIO_GENERATION_FAILED,
     ];
     const codes = exported.map((c) => GENERATION_ERROR_NUMERIC_CODES[c]);
     // 每个字符串码都有数值码，且数值码互不重复
@@ -148,14 +150,13 @@ describe("error-codes", () => {
     expect(resolveErrorCode("invalid_video_response")).toBe("provider_failed");
     // 未在别名表的码原样返回
     expect(resolveErrorCode("provider_failed")).toBe("provider_failed");
-    expect(LEGACY_CODE_TO_CANONICAL).toMatchObject({});
   });
 
   it("fallback 按类型", () => {
     expect(fallbackErrorCode("video")).toBe("video_generation_failed");
     expect(fallbackErrorCode("media_extract")).toBe("media_extract_failed");
     expect(fallbackErrorCode("image")).toBe("image_generation_failed");
-    expect(fallbackErrorCode("audio")).toBe("image_generation_failed");
+    expect(fallbackErrorCode("audio")).toBe("audio_generation_failed");
   });
 });
 
@@ -167,7 +168,8 @@ describe("projectPublicError", () => {
     );
     expect(out).not.toBeNull();
     expect(out!.code).toBe(1011);
-    expect(out!.message).toBe("图像生成失败");
+    // IKDZGM / ADR-0083：一码一文案——provider_failed 统一文案，不再按 type 分词。
+    expect(out!.message).toBe("生成服务响应异常");
     expect("retryable" in out!).toBe(false);
     expect("params" in out!).toBe(false);
     expect("details" in out!).toBe(false);
@@ -242,12 +244,12 @@ describe("messageFor", () => {
     }
   });
 
-  it("provider_failed / 兜底按任务类型区分中英文案（video/audio/image）", () => {
-    // 类型分支是用户核心诉求「msg 按错误码返回对应中文」，逐类型断言防回归。
-    expect(messageFor(ERROR_PROVIDER_FAILED, "video")).toBe("视频生成失败");
-    expect(messageFor(ERROR_PROVIDER_FAILED, "audio")).toBe("音频生成失败");
-    expect(messageFor(ERROR_PROVIDER_FAILED, "image")).toBe("图像生成失败");
-    // media_extract 兜底
+  it("I一码一文案：provider_failed 统一文案，media_extract 码表文案（ADR-0083）", () => {
+    // IKDZGM / ADR-0083：一码一文案——provider_failed 不再按 type 分词。
+    expect(messageFor(ERROR_PROVIDER_FAILED, "video")).toBe("生成服务响应异常");
+    expect(messageFor(ERROR_PROVIDER_FAILED, "audio")).toBe("生成服务响应异常");
+    expect(messageFor(ERROR_PROVIDER_FAILED, "image")).toBe("生成服务响应异常");
+    // media_extract 码：码表有文案（1020/1026 均「音频提取失败」），直接查表。
     expect(messageFor(ERROR_MEDIA_EXTRACT_FAILED, "media_extract")).toBe(
       "音频提取失败",
     );
