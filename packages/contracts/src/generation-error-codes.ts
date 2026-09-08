@@ -37,6 +37,9 @@ export const ERROR_EXTRACT_FAILED = "extract_failed";
 export const ERROR_UPLOAD_FAILED = "upload_failed";
 export const ERROR_ENQUEUE_FAILED = "enqueue_failed";
 
+/** HTTP 限流（IKDPHS）：NewApiError 第三参；过滤器按 status=429 透传。 */
+export const RATE_LIMITED = "rate_limited";
+
 // ── 对外数值错误码（IKBQEE 二期：字符串码 → 每错一码的独立数值码）──
 // 响应结构：{ code: 数值, msg: 中文, data: {job_id,status,progress,asset} }。
 // 字符串码是内部契约（DB/worker/投影），数值码是前端消费的外部契约——一一映射、每个错误一个码。
