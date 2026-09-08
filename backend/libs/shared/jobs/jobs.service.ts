@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import {
+  RESOURCE_NOT_FOUND_CODE,
   errorCodeToNumeric,
   fail,
   ok,
@@ -9,7 +10,6 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { fallbackErrorCode, messageFor, projectPublicError } from "./generation-job-error-projection.js";
 
-const RESOURCE_NOT_FOUND_CODE = 100301;
 const MAX_BATCH_IDS = 100;
 const VALID_ID = /^[1-9]\d*$/;
 

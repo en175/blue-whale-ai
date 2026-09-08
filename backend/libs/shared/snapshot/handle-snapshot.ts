@@ -1,4 +1,5 @@
 import {
+  RESOURCE_NOT_FOUND_CODE,
   fail,
   ok,
   type LegacyMigrationReport,
@@ -10,8 +11,6 @@ import { wireInteger, type WireInteger } from "@lib/shared/wire-integer.js";
 import type { ProjectService } from "@lib/shared/project/project.service.js";
 import type { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import type { SnapshotService } from "./snapshot.service.js";
-
-const RESOURCE_NOT_FOUND_CODE = 100301;
 
 export interface SnapshotGenerationJob {
   job_id: string;

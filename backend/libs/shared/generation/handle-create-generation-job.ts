@@ -7,6 +7,7 @@ import {
   ERROR_MODEL_UNAVAILABLE,
   ERROR_UNSUPPORTED_INPUT,
   ERROR_UNSUPPORTED_TYPE,
+  RESOURCE_NOT_FOUND_CODE,
   fail,
   ok,
   type TextAttachmentSnapshot,
@@ -24,7 +25,6 @@ import {
 
 import type { GenerationCostEstimator } from "./cost-estimator.js";
 
-const RESOURCE_NOT_FOUND_CODE = 100301;
 const VIDEO_MODEL_ALIASES: Readonly<Record<string, string>> = {
   "seedance-2": "doubao-seedance-2-0-260128",
 };

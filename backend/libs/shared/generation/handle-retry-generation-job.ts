@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { fail, ok } from "@blue-whale/contracts";
+import { RESOURCE_NOT_FOUND_CODE, fail, ok } from "@blue-whale/contracts";
 import type {
   GenerationCommandRepo,
   ProjectRepo,
 } from "@lib/shared/persistence/index.js";
 
-const RESOURCE_NOT_FOUND_CODE = 100301;
 const IDEMPOTENCY_CONFLICT_CODE = 100409;
 
 /** POST /api/projects/{projectId}/generation-jobs/{jobId}/retry（IK67HE/T14）：
