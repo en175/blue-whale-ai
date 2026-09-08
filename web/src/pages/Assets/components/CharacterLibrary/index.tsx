@@ -619,6 +619,7 @@ export default function CharacterLibrary({
           });
         }
       }
+      toast.success('已删除');
       setDeleteTarget(null);
     } catch (err) {
       if (deleteTarget.type === 'group') {
