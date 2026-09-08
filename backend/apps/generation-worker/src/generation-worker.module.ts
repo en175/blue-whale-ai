@@ -1,12 +1,9 @@
-import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { ScheduleModule } from "@nestjs/schedule";
-import { loadRedisConnection } from "@lib/shared/generation/video-queue.js";
 import { VIDEO_GENERATION_QUEUE } from "@lib/shared/generation/queue.constants.js";
 import { PrismaModule } from "@lib/shared/prisma/prisma.module.js";
 import { AssetModule } from "@lib/shared/assets/assets.module.js";
 import { OperationLogModule } from "@lib/shared/operation-log/operation-log.module.js";
-import { GenerationVideoProcessor } from "./generation-video.processor.js";
 import { HealthController } from "./health.controller.js";
 import { RecoveryService } from "./recovery.service.js";
 import { RocketMqVideoConsumer } from "./rocketmq-video.consumer.js";
@@ -19,30 +16,17 @@ import { ImageWorkerService } from "./image-worker.service.js";
 import { AudioWorkerService } from "./audio-worker.service.js";
 import { AssetGcService } from "./asset-gc.service.js";
 
-/** 唤醒消费者按 VIDEO_QUEUE_DRIVER 选择：
- *  - rocketmq（默认）：RocketMqVideoConsumer（tag=step）+ RocketMqMediaExtractConsumer（tag=media_extract）
- *    + RocketMqImageConsumer（tag=image，IKBGKA，Semaphore(IMAGE_CONCURRENCY)）
- *    + RocketMqAudioConsumer（tag=audio，IKCR78，Semaphore(AUDIO_CONCURRENCY)）
- *  - bullmq：BullModule + GenerationVideoProcessor（Redis 回退，按 job.name 分发 step/media_extract）
- *  与 producer 侧 enqueueVideoGenerationJob / enqueueMediaExtractJob / enqueueImageGenerationJob
- *  / enqueueAudioGenerationJob 的 driver 选择保持一致。 */
-const driver = process.env.VIDEO_QUEUE_DRIVER ?? "rocketmq";
-const useBullmq = driver === "bullmq";
-
+/** 唤醒消费者统一走 RocketMQ：RocketMqVideoConsumer（tag=step）+ RocketMqMediaExtractConsumer（tag=media_extract）
+ *  + RocketMqImageConsumer（tag=image，IKBGKA，Semaphore(IMAGE_CONCURRENCY)）
+ *  + RocketMqAudioConsumer（tag=audio，IKCR78，Semaphore(AUDIO_CONCURRENCY)）
+ *  producer 侧 enqueueVideoGenerationJob / enqueueMediaExtractJob / enqueueImageGenerationJob
+ *  / enqueueAudioGenerationJob 同走 RocketMQ（IKDZJK：收敛为 rocketmq 唯一驱动）。 */
 @Module({
   imports: [
     PrismaModule,
     AssetModule,
     OperationLogModule,
     ScheduleModule.forRoot(),
-    ...(useBullmq
-      ? [
-          BullModule.forRoot({
-            connection: loadRedisConnection(process.env, true),
-          }),
-          BullModule.registerQueue({ name: VIDEO_GENERATION_QUEUE }),
-        ]
-      : []),
   ],
   controllers: [HealthController],
   providers: [
@@ -52,14 +36,10 @@ const useBullmq = driver === "bullmq";
     AudioWorkerService,
     RecoveryService,
     AssetGcService,
-    ...(useBullmq
-      ? [GenerationVideoProcessor]
-      : [
-          RocketMqVideoConsumer,
-          RocketMqMediaExtractConsumer,
-          RocketMqImageConsumer,
-          RocketMqAudioConsumer,
-        ]),
+    RocketMqVideoConsumer,
+    RocketMqMediaExtractConsumer,
+    RocketMqImageConsumer,
+    RocketMqAudioConsumer,
   ],
 })
 export class GenerationWorkerModule {}
