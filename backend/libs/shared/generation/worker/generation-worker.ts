@@ -5,7 +5,11 @@ import {
 import type { AssetUploadStorage } from "@lib/shared/assets/upload.js";
 import sharp from "sharp";
 
-import { AudioProviderError, type AudioProvider } from "@lib/shared/generation-runtime/index.js";
+import {
+  AudioProviderError,
+  type AudioProvider,
+  type SeedAudioReference,
+} from "@lib/shared/generation-runtime/index.js";
 import { composeImagePrompt } from "@blue-whale/core";
 import { z } from "zod";
 import {
@@ -15,6 +19,7 @@ import {
   ERROR_PROVIDER_CONFIG,
   ERROR_PROVIDER_CREDENTIAL_MISSING,
   ERROR_PROVIDER_FAILED,
+  ERROR_REFERENCE_ASSET_UNAVAILABLE,
   ERROR_UNSUPPORTED_INPUT,
   ERROR_UNSUPPORTED_TYPE,
   textAttachmentSnapshotSchema,
@@ -122,6 +127,82 @@ export async function processImageJobById(
   if (!job) return null;
 
   return processClaimedJob(job, deps);
+}
+
+/** IKE4GC：把冻结在产品格式的 audio references（{role, asset_id|material_id, type}）解析成
+ *  seed-audio 的《references》数组（audio→audio_url、image→image_url；已关联素材→asset://<material_id>，
+ *  本地 asset→其 TOS url）。仅音频生成使用。找不到 asset 来源返回失败（调用方 failClaimed）。 */
+type RawAudioReference = {
+  role?: unknown;
+  asset_id?: unknown;
+  material_id?: unknown;
+  type?: unknown;
+};
+async function resolveAudioSeedReferences(
+  raw: unknown,
+  userId: string,
+  projectId: string,
+  repo: WorkerRepo,
+): Promise<{ ok: true; refs: SeedAudioReference[] } | { ok: false; message: string }> {
+  // 无 references（纯文本生成）→ 空数组；非数组/损坏快照 → 失败，不静默丢参考（避免白生成）。
+  if (raw === undefined || raw === null) return { ok: true, refs: [] };
+  if (!Array.isArray(raw)) {
+    return { ok: false, message: "参考素材引用无效" };
+  }
+  const items = raw.filter(
+    (it): it is RawAudioReference =>
+      typeof it === "object" && it !== null,
+  );
+  const assetIds = items
+    .map((it) =>
+      typeof it.asset_id === "string" && it.asset_id.length > 0
+        ? it.asset_id
+        : null,
+    )
+    .filter((id): id is string => id !== null);
+  const assets =
+    assetIds.length > 0
+      ? await repo.resolveInputAssets(assetIds, userId, projectId)
+      : [];
+  const assetsById = new Map(assets.map((a) => [a.id, a]));
+  const refs: SeedAudioReference[] = [];
+  // 同一素材来源重复出现 → 只保留首次（跨 role 生效）。音频生成仅走本地资产 url，不用素材库 asset://。
+  const seen = new Set<string>();
+  for (const it of items) {
+    let mediaType: "audio" | "image";
+    let source: string | null = null;
+    if (
+      typeof it.material_id === "string" &&
+      it.material_id.length > 0
+    ) {
+      // 音频生成不支持素材库（真人/虚拟人像库）引用——创建期已拦，损坏快照兜底。
+      return { ok: false, message: "音频生成不支持素材库引用" };
+    }
+    if (typeof it.asset_id === "string" && it.asset_id.length > 0) {
+      const asset = assetsById.get(it.asset_id);
+      if (!asset) {
+        return {
+          ok: false,
+          message: "参考素材不存在或无权访问",
+        };
+      }
+      // 参考介质以资产实际类型为准（视频/未知类型不适用于音频生成参考）。
+      if (asset.type !== "audio" && asset.type !== "image") {
+        return { ok: false, message: "参考素材类型不适用" };
+      }
+      mediaType = asset.type === "audio" ? "audio" : "image";
+      // 音频生成用本地资产 url，不因素材库绑定而转 asset://。
+      source = asset.url;
+    } else {
+      continue;
+    }
+    if (source === null || seen.has(source)) continue;
+    seen.add(source);
+    refs.push(
+      mediaType === "audio" ? { audio_url: source } : { image_url: source },
+    );
+  }
+  return { ok: true, refs };
 }
 
 /** 音频 MQ 消费端：按 RocketMQ 消息 jobId 领单个音频 job 并处理（IKCR78）。
@@ -234,9 +315,12 @@ async function processClaimedJob(
         )
         .map(String)
     : [];
-  // 音频一期不支持参考素材,显式拦截不静默忽略。
+  // IKE4GC：音频参考素材走新单数组 references；旧字段 reference_asset_ids 对音频仍不支持，防御拦截。
   if (job.type === "audio" && referenceIds.length > 0) {
-    await failClaimed(ERROR_UNSUPPORTED_INPUT, "音频生成一期不支持参考素材");
+    await failClaimed(
+      ERROR_UNSUPPORTED_INPUT,
+      "音频生成暂不支持旧参考字段，请使用 references",
+    );
     return job.id;
   }
   // IKA72G：图片参考图上限读取模型能力配置（features.max_reference_images），与创建校验同源；
@@ -299,9 +383,21 @@ async function processClaimedJob(
         );
         return job.id;
       }
+      // IKE4GC：解析音频参考素材（input.references，产品格式 → seed-audio references）。
+      const audioRefs = await resolveAudioSeedReferences(
+        input.references,
+        job.user_id,
+        job.project_id,
+        repo,
+      );
+      if (!audioRefs.ok) {
+        await failClaimed(ERROR_REFERENCE_ASSET_UNAVAILABLE, audioRefs.message);
+        return job.id;
+      }
       const audio = await provider.generate({
         model: cap.model_id,
         prompt,
+        ...(audioRefs.refs.length > 0 ? { references: audioRefs.refs } : {}),
       });
       // audio.data 为原始字节;url 为空串,persistProviderMedia 走 data 直传路径。
       const stored = await persistProviderMedia(

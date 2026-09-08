@@ -159,6 +159,14 @@ function isStr(v: unknown): v is string {
   return typeof v === "string";
 }
 
+/** 字段是否携带实际内容（非空数组 / 非空字符串 / 非 null 非 undefined）。用于旧参考字段判定，
+ *  避免空数组（如 input_asset_ids: []）被误判为「携带旧字段」。 */
+function hasContent(v: unknown): boolean {
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === "string") return v.length > 0;
+  return v !== undefined && v !== null;
+}
+
 function assetId(v: unknown): string | null {
   if (typeof v === "number" && Number.isSafeInteger(v) && v > 0)
     return String(v);
@@ -232,19 +240,65 @@ function validateCommon(
   return null;
 }
 
-/** IKA72G：音频一期不支持任何参考素材——reference_asset_ids 与 input_asset_ids 一并显式拒绝，
- *  避免统一字段语义后 input_asset_ids 被静默忽略。 */
-function validateAudioReferenceRestrictions(
+/** IKE4GC：音频生成参考素材——仅接受单数组 references（audio|image，role 强制 reference）。
+ *  音频/图片生成无首尾帧概念；音频参考 ≤3、图片参考 ≤1、二者不可混用（seed-audio 官方限制）。
+ *  旧参考字段（reference_asset_ids/input_asset_ids/reference_materials/首尾帧字段）对音频仍不支持，
+ *  且与 references 互斥。 */
+function validateAudioReferences(
   body: CreateGenerationJobBody,
 ): { code: string; message: string } | null {
-  if (
-    (Array.isArray(body.reference_asset_ids) &&
-      body.reference_asset_ids.length > 0) ||
-    (Array.isArray(body.input_asset_ids) && body.input_asset_ids.length > 0)
-  )
+  const parsed = parseReferences(body.references);
+  if (parsed.kind === "invalid") {
+    return { code: ERROR_INVALID_INPUT, message: "参考素材引用无效" };
+  }
+  // 旧参考字段：仅当携带实际内容才视为「旧字段」——空数组/空串不误拒（前端可能发 input_asset_ids: []）。
+  const hasLegacy =
+    hasContent(body.reference_asset_ids) ||
+    hasContent(body.input_asset_ids) ||
+    hasContent(body.reference_materials) ||
+    hasContent(body.first_frame_asset_id) ||
+    hasContent(body.last_frame_asset_id) ||
+    hasContent(body.first_frame_material_id) ||
+    hasContent(body.last_frame_material_id);
+  if (parsed.kind === "absent") {
+    // 未走 references：音频仍不支持旧参考字段，不静默忽略。
+    if (hasLegacy) {
+      return {
+        code: ERROR_UNSUPPORTED_INPUT,
+        message: "音频生成暂不支持旧参考字段，请使用 references",
+      };
+    }
+    return null;
+  }
+  if (hasLegacy) {
+    return { code: ERROR_INVALID_INPUT, message: "references 不能与旧参考字段混用" };
+  }
+  if (parsed.items.length === 0) {
+    return { code: ERROR_INVALID_INPUT, message: "参考素材不能为空" };
+  }
+  for (const item of parsed.items) {
+    // 音频/图片生成无帧角色；video 参考对音频生成无意义。
+    if (item.role !== "reference" || item.type === "video") {
+      return { code: ERROR_INVALID_INPUT, message: "参考素材引用无效" };
+    }
+    // 音频生成不支持素材库（真人/虚拟人像库）引用：参考只能用本地资产（asset_id → 本地 url）。
+    if (item.material_id !== undefined) {
+      return {
+        code: ERROR_UNSUPPORTED_INPUT,
+        message: "音频生成不支持素材库引用",
+      };
+    }
+  }
+  const audioCount = parsed.items.filter((r) => r.type === "audio").length;
+  const imageCount = parsed.items.filter((r) => r.type === "image").length;
+  if (audioCount > 3)
+    return { code: ERROR_INVALID_INPUT, message: "参考音频最多 3 个" };
+  if (imageCount > 1)
+    return { code: ERROR_INVALID_INPUT, message: "参考图最多 1 个" };
+  if (audioCount > 0 && imageCount > 0)
     return {
-      code: ERROR_UNSUPPORTED_INPUT,
-      message: "音频生成一期不支持参考素材",
+      code: ERROR_INVALID_INPUT,
+      message: "音频与图片参考不可混用",
     };
   return null;
 }
@@ -494,17 +548,17 @@ const videoStrategy: GenerationTypeStrategy = {
 
 const audioStrategy: GenerationTypeStrategy = {
   validate(body) {
-    return (
-      validateCommon(body, "audio") ??
-      validateAudioReferenceRestrictions(body) ??
-      validateRejectMaterialReferences(body)
-    );
+    return validateCommon(body, "audio") ?? validateAudioReferences(body);
   },
-  composeInput({ resolvedModelId, promptText, targetNodeId }) {
+  composeInput({ body, resolvedModelId, promptText, targetNodeId }) {
     const input: Record<string, unknown> = {
       prompt: promptText,
       model_id: resolvedModelId,
     };
+    // IKE4GC：音频参考素材冻结进 input 快照（保序）；Worker 执行时转 seed-audio references
+    //   （audio→audio_url、image→image_url、已关联素材→asset://），不改 prompt。
+    const parsed = parseReferences(body.references);
+    if (parsed.kind === "ok") input.references = parsed.items;
     // IKDMQT：音频草稿目标冻结进快照（执行与重试只读，不回读画布）；无文本附件。
     if (targetNodeId !== null) input.target_node_id = targetNodeId;
     return input;

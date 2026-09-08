@@ -5,6 +5,7 @@ export {
   type AudioProvider,
   type GenerateAudioInput,
   type GeneratedAudio,
+  type SeedAudioReference,
 } from "./audio-provider.js";
 export {
   createNewApiAudioProvider,

@@ -52,6 +52,50 @@ describe("new-api audio provider", () => {
     expect(body).not.toHaveProperty("input");
   });
 
+  it("携带 references（IKE4GC）→ body 原样加 references 数组，text_prompt 不变", async () => {
+    const module = await import("./new-api-audio-provider.js");
+    const fetchImpl = vi.fn().mockResolvedValue(officialAudioJson({ audio: "SUQzBAAA" }));
+    const provider = module.createNewApiAudioProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl,
+    });
+    await provider.generate({
+      model: "seed-audio-1.0",
+      prompt: "海浪声 30 秒",
+      references: [
+        { audio_url: "asset://asset-audio-1" },
+        { image_url: "https://tos/ref.jpg" },
+      ],
+    });
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://new-api.test/v1/audio/speech");
+    const body = JSON.parse(init.body as string);
+    expect(body.references).toEqual([
+      { audio_url: "asset://asset-audio-1" },
+      { image_url: "https://tos/ref.jpg" },
+    ]);
+    // text_prompt 原样透传，不注入 @AudioN
+    expect(body.text_prompt).toBe("海浪声 30 秒");
+  });
+
+  it("未携带 references → body 无 references 字段（无副作用）", async () => {
+    const module = await import("./new-api-audio-provider.js");
+    const fetchImpl = vi.fn().mockResolvedValue(officialAudioJson({ audio: "SUQzBAAA" }));
+    const provider = module.createNewApiAudioProvider({
+      baseUrl: "http://new-api.test",
+      token: "sk-user",
+      fetchImpl,
+    });
+    await provider.generate({
+      model: "seed-audio-1.0",
+      prompt: "x",
+    });
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body).not.toHaveProperty("references");
+  });
+
   it("仅 url 无 audio 字段 → url 带回、data 为 undefined", async () => {
     const module = await import("./new-api-audio-provider.js");
     const fetchImpl = vi.fn().mockResolvedValue(

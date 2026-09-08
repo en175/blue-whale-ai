@@ -37,6 +37,8 @@ export interface WorkerInputAsset {
   width: number | null;
   height: number | null;
   duration: number | null;
+  /** IKDJNZ：关联的素材库素材 id（生成时命中走 asset://，不走 url）；无关联为 null。 */
+  material_id: string | null;
 }
 
 export interface ClaimedVideoJob {

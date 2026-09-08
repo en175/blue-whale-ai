@@ -208,4 +208,5 @@ const refs: RefItem[] = resolvedRefs.map((r, i) => {
 4. **素材 id 大写前缀也认**：`asset-` 前缀大小写不敏感（上游实测小写），前端正常传即可。
 5. **账号维度隔离**：`asset-` id / `SourceAssetId` 均在同一登录账号下有效，跨账号无关联。
 6. **历史数据不处理**：改造前的本地素材无 `material_id` 关联，生成时照旧走本地 url，不受影响。
-7. **参考音频仅普通参考**：`role` 必须为 `reference`、`type` 必须为 `audio`；音频不能当首尾帧；视频生成才支持（音频生成一期仍不支持任何参考素材）。
+7. **参考音频仅普通参考**：`role` 必须为 `reference`、`type` 必须为 `audio`；音频不能当首尾帧。
+8. **音频生成参考素材（IKE4GC，接口先行）**：`type` 为 `audio` 的生成任务同样支持 `references`，但仅接受 **`type: "audio"` / `type: "image"`**（无首尾帧概念，`role` 必须为 `reference`；`video` 参考对音频无意义 → 400）。数量硬约束（seed-audio 官方限制）：**音频 ≤3 个、图片 ≤1 个、二者不可混用**。**音频生成不支持素材库（真人/虚拟人像库）引用**：`references` 项只能传本地资产的 `asset_id`（→ 本地 url），传 `material_id`（素材库 `asset://`）→ 400 `音频生成不支持素材库引用`（创建期拦截，前端下期接 UI 时只放行本地资产）。`text_prompt` 里的 `@AudioN`/`@ImageN` 内联标记由**前端**负责（后端不改 prompt，只透传 `references` 数组）——前端本期无需改动。

@@ -98,7 +98,7 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  it("音频带 reference_asset_ids → 400 音频生成一期不支持参考素材", async () => {
+  it("音频带旧字段 reference_asset_ids → 400 改走 references（IKE4GC）", async () => {
     const { deps, createJob } = buildDeps();
 
     const result = await handleCreateGenerationJob(
@@ -110,8 +110,192 @@ describe("handleCreateGenerationJob 音频校验分支（IK9ILQ）", () => {
     );
 
     expect(result.code).toBe(400);
-    expect(result.msg).toBe("音频生成一期不支持参考素材");
+    expect(result.msg).toBe("音频生成暂不支持旧参考字段，请使用 references");
     expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("音频 + 音频参考（references type:audio）→ 200，job.input 冻结 references", async () => {
+    const { deps, createJob } = buildDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...AUDIO_BODY, references: [{ role: "reference", asset_id: "42", type: "audio" }] },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "audio",
+        input: expect.objectContaining({
+          references: [{ role: "reference", asset_id: "42", type: "audio" }],
+        }),
+      }),
+    );
+  });
+
+  it("音频 + 图片参考（references type:image）→ 200", async () => {
+    const { deps, createJob } = buildDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...AUDIO_BODY,
+        references: [{ role: "reference", asset_id: "42", type: "image" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          references: [{ role: "reference", asset_id: "42", type: "image" }],
+        }),
+      }),
+    );
+  });
+
+  it("音频 + 素材库引用（references type:image + material_id）→ 400 音频生成不支持素材库引用", async () => {
+    const { deps, createJob } = buildDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...AUDIO_BODY,
+        references: [{ role: "reference", material_id: "asset-img-1", type: "image" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("音频生成不支持素材库引用");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("音频 + video 参考 → 400 参考素材引用无效", async () => {
+    const { deps, createJob } = buildDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...AUDIO_BODY, references: [{ role: "reference", asset_id: "42", type: "video" }] },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考素材引用无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("音频 + 首帧位（role:first_frame）→ 400 参考素材引用无效", async () => {
+    const { deps, createJob } = buildDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...AUDIO_BODY, references: [{ role: "first_frame", asset_id: "42", type: "image" }] },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考素材引用无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("音频 + 音频与图片参考混用 → 400 音频与图片参考不可混用", async () => {
+    const { deps, createJob } = buildDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...AUDIO_BODY,
+        references: [
+          { role: "reference", asset_id: "42", type: "audio" },
+          { role: "reference", asset_id: "43", type: "image" },
+        ],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("音频与图片参考不可混用");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("音频 + 音频参考超 3 个 → 400 参考音频最多 3 个", async () => {
+    const { deps, createJob } = buildDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...AUDIO_BODY,
+        references: [
+          { role: "reference", asset_id: "1", type: "audio" },
+          { role: "reference", asset_id: "2", type: "audio" },
+          { role: "reference", asset_id: "3", type: "audio" },
+          { role: "reference", asset_id: "4", type: "audio" },
+        ],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考音频最多 3 个");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("音频 + 图片参考超 1 个 → 400 参考图最多 1 个", async () => {
+    const { deps, createJob } = buildDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...AUDIO_BODY,
+        references: [
+          { role: "reference", asset_id: "1", type: "image" },
+          { role: "reference", asset_id: "2", type: "image" },
+        ],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考图最多 1 个");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("音频 + references + 空旧字段 input_asset_ids:[] → 200（空数组不误判为旧字段，IKE4GC）", async () => {
+    const { deps, createJob } = buildDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...AUDIO_BODY,
+        input_asset_ids: [],
+        references: [{ role: "reference", asset_id: "42", type: "audio" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
   });
 
   it("音频 model_id 不在白名单 → 400", async () => {

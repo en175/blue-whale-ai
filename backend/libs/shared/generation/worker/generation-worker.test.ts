@@ -1,4 +1,5 @@
 import { composeImagePrompt } from "@blue-whale/core";
+import { ERROR_REFERENCE_ASSET_UNAVAILABLE } from "@blue-whale/contracts";
 import type { WorkerRepo } from "@lib/shared/persistence/index.js";
 import type { AssetUploadStorage } from "@lib/shared/assets/upload.js";
 import { describe, expect, it, vi } from "vitest";
@@ -158,6 +159,262 @@ describe("processNextJob 音频分支（IK9ILQ）", () => {
     expect(completeJobAndSettle).toHaveBeenCalledWith(
       expect.objectContaining({
         actualAmountFen: 100n,
+      }),
+    );
+  });
+
+  it("音频任务带 references：解析 asset→本地 url（不走素材库 asset://），provider.generate 收到 seed-audio references（IKE4GC）", async () => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j2",
+      project_id: "p1",
+      user_id: "u1",
+      type: "audio",
+      input: {
+        prompt: "海浪",
+        model_id: "seed-audio-1.0",
+        provider_credential: "<sealed>",
+        references: [
+          { role: "reference", asset_id: "42", type: "audio" },
+          { role: "reference", asset_id: "43", type: "image" },
+        ],
+      },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 5,
+    });
+    const findImageCapability = vi.fn().mockResolvedValue({
+      model_id: "seed-audio-1.0",
+    });
+    const createAsset = vi.fn().mockResolvedValue("a1");
+    const completeJobAndSettle = vi.fn().mockResolvedValue(true);
+    const appendLog = vi.fn().mockResolvedValue(undefined);
+    const resolveInputAssets = vi.fn().mockResolvedValue([
+      { id: "42", type: "audio", url: "https://tos/ref42.mp3", material_id: "asset-bind-1" }, // 虽绑定素材库，音频仍用本地 url
+      { id: "43", type: "image", url: "https://tos/ref43.jpg", material_id: null },
+    ]);
+    const repo = {
+      claimNextJob,
+      findImageCapability,
+      createAsset,
+      completeJobAndSettle,
+      appendLog,
+      resolveInputAssets,
+    } as unknown as WorkerRepo;
+    const generate = vi.fn().mockResolvedValue({
+      data: new Uint8Array([1, 2, 3]),
+      mime: "audio/mpeg",
+    });
+    const createAudioProvider = vi.fn().mockReturnValue({ generate });
+
+    await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider: vi.fn(),
+      createAudioProvider,
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      mediaStorage: buildStorage(),
+      fetchImpl: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    expect(resolveInputAssets).toHaveBeenCalledWith(["42", "43"], "u1", "p1");
+    expect(generate).toHaveBeenCalledWith({
+      model: "seed-audio-1.0",
+      prompt: "海浪",
+      references: [
+        { audio_url: "https://tos/ref42.mp3" }, // 按资产实际类型 → audio_url，用本地 url（绑定素材库也转 asset://）
+        { image_url: "https://tos/ref43.jpg" }, // 图片资产 → image_url
+      ],
+    });
+  });
+
+  it("音频任务带 references 但 asset 不存在 → 参考素材不存在或无权访问", async () => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j3",
+      project_id: "p1",
+      user_id: "u1",
+      type: "audio",
+      input: {
+        prompt: "海浪",
+        model_id: "seed-audio-1.0",
+        provider_credential: "<sealed>",
+        references: [{ role: "reference", asset_id: "999", type: "audio" }],
+      },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 5,
+    });
+    const findImageCapability = vi.fn().mockResolvedValue({
+      model_id: "seed-audio-1.0",
+    });
+    const failJob = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimNextJob,
+      findImageCapability,
+      resolveInputAssets: vi.fn().mockReturnValue([]), // asset 不存在
+      failJob,
+      appendLog: vi.fn(),
+    } as unknown as WorkerRepo;
+    const createAudioProvider = vi.fn().mockReturnValue({ generate: vi.fn() });
+
+    const jobId = await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider: vi.fn(),
+      createAudioProvider,
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      mediaStorage: buildStorage(),
+      fetchImpl: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    expect(jobId).toBe("j3");
+    expect(failJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: "j3",
+        errorCode: ERROR_REFERENCE_ASSET_UNAVAILABLE,
+        errorMessage: "参考素材不存在或无权访问",
+      }),
+    );
+  });
+
+  it("音频任务带 references：重复来源（本地 url 相同）只保留首个（IKE4GC 去重）", async () => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j4",
+      project_id: "p1",
+      user_id: "u1",
+      type: "audio",
+      input: {
+        prompt: "海浪",
+        model_id: "seed-audio-1.0",
+        provider_credential: "<sealed>",
+        references: [
+          { role: "reference", asset_id: "42", type: "audio" },
+          { role: "reference", asset_id: "43", type: "audio" }, // 与 42 同 url
+        ],
+      },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 5,
+    });
+    const findImageCapability = vi.fn().mockResolvedValue({ model_id: "seed-audio-1.0" });
+    const createAsset = vi.fn().mockResolvedValue("a1");
+    const completeJobAndSettle = vi.fn().mockResolvedValue(true);
+    const appendLog = vi.fn().mockResolvedValue(undefined);
+    const resolveInputAssets = vi.fn().mockReturnValue([
+      { id: "42", type: "audio", url: "https://tos/same.mp3", material_id: null },
+      { id: "43", type: "audio", url: "https://tos/same.mp3", material_id: null },
+    ]);
+    const repo = {
+      claimNextJob, findImageCapability, createAsset, completeJobAndSettle, appendLog, resolveInputAssets,
+    } as unknown as WorkerRepo;
+    const generate = vi.fn().mockResolvedValue({ data: new Uint8Array([1]), mime: "audio/mpeg" });
+    const createAudioProvider = vi.fn().mockReturnValue({ generate });
+
+    await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider: vi.fn(),
+      createAudioProvider,
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      mediaStorage: buildStorage(),
+      fetchImpl: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    // 两个 reference 都解析成同一本地 url → 去重仅保留 1 个。
+    expect(generate).toHaveBeenCalledWith({
+      model: "seed-audio-1.0",
+      prompt: "海浪",
+      references: [{ audio_url: "https://tos/same.mp3" }],
+    });
+  });
+
+  it("音频任务带 references：asset 实际类型为 video → 参考素材类型不适用（IKE4GC）", async () => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j5",
+      project_id: "p1",
+      user_id: "u1",
+      type: "audio",
+      input: {
+        prompt: "海浪",
+        model_id: "seed-audio-1.0",
+        provider_credential: "<sealed>",
+        references: [{ role: "reference", asset_id: "44", type: "image" }],
+      },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 5,
+    });
+    const findImageCapability = vi.fn().mockResolvedValue({ model_id: "seed-audio-1.0" });
+    const failJob = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimNextJob,
+      findImageCapability,
+      resolveInputAssets: vi.fn().mockReturnValue([
+        { id: "44", type: "video", url: "https://tos/v.mp4", material_id: null },
+      ]),
+      failJob,
+      appendLog: vi.fn(),
+    } as unknown as WorkerRepo;
+    const createAudioProvider = vi.fn().mockReturnValue({ generate: vi.fn() });
+
+    await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider: vi.fn(),
+      createAudioProvider,
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      mediaStorage: buildStorage(),
+      fetchImpl: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    expect(failJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: "j5",
+        errorMessage: "参考素材类型不适用",
+      }),
+    );
+  });
+
+  it("音频任务 references 为损坏形状（非数组）→ 参考素材引用无效（IKE4GC）", async () => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j6",
+      project_id: "p1",
+      user_id: "u1",
+      type: "audio",
+      input: {
+        prompt: "海浪",
+        model_id: "seed-audio-1.0",
+        provider_credential: "<sealed>",
+        references: { role: "reference" }, // 非数组
+      },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 5,
+    });
+    const findImageCapability = vi.fn().mockResolvedValue({ model_id: "seed-audio-1.0" });
+    const failJob = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimNextJob,
+      findImageCapability,
+      resolveInputAssets: vi.fn(),
+      failJob,
+      appendLog: vi.fn(),
+    } as unknown as WorkerRepo;
+    const createAudioProvider = vi.fn().mockReturnValue({ generate: vi.fn() });
+
+    await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider: vi.fn(),
+      createAudioProvider,
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      mediaStorage: buildStorage(),
+      fetchImpl: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    expect(failJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: "j6",
+        errorMessage: "参考素材引用无效",
       }),
     );
   });
