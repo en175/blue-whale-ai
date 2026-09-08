@@ -10,6 +10,8 @@ function makeController(assetMock: {
 }) {
   const material = {
     callAction: vi.fn(),
+    // IKDE6X：虚拟组兜底——默认返回与传入一致的组 id 以免破坏既有断言；专项用例覆盖替换逻辑。
+    ensureVirtualDefaultGroup: vi.fn().mockResolvedValue("group-1"),
   } as unknown as MaterialService;
   const assets = {
     linkAssetToMaterial: assetMock.linkAssetToMaterial ?? vi.fn(),
@@ -203,5 +205,97 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
       { PageNumber: 1, PageSize: 20 },
     );
     expect(assets.linkAssetToMaterial).not.toHaveBeenCalled();
+  });
+
+  it("CreateAsset 未传 GroupId：ensureVirtualDefaultGroup 建虚拟组并强制替换 GroupId 后透传，旁路落虚拟组关联（IKDE6X）", async () => {
+    const { controller, material, assets } = makeController({});
+    // 虚拟组：前端不传 GroupId，仅带 SourceAssetId。
+    material.ensureVirtualDefaultGroup.mockResolvedValue("group-virt-1");
+    material.callAction.mockResolvedValue({
+      status: 200,
+      body: { ResponseMetadata: {}, Result: { Id: "asset-virt-1" } },
+    });
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
+
+    await controller.callAction(
+      "CreateAsset",
+      "Bearer sk-test",
+      { URL: "https://cdn.test/v.png", Name: "v", AssetType: "Image", SourceAssetId: "88" },
+      res,
+      { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
+    );
+
+    // 建组被触发（前端不传组，后端兜底建虚拟组）。
+    expect(material.ensureVirtualDefaultGroup).toHaveBeenCalledWith(
+      "Bearer sk-test",
+      "9",
+    );
+    // 透传：SourceAssetId 剥离，GroupId 被强制替换为虚拟组 id。
+    expect(material.callAction).toHaveBeenCalledWith(
+      "Bearer sk-test",
+      "CreateAsset",
+      {
+        GroupId: "group-virt-1",
+        URL: "https://cdn.test/v.png",
+        Name: "v",
+        AssetType: "Image",
+      },
+    );
+    // 旁路：落虚拟组关联。
+    expect(assets.linkAssetToMaterial).toHaveBeenCalledWith({
+      userId: "9",
+      assetId: "88",
+      materialId: "asset-virt-1",
+      materialGroupId: "group-virt-1",
+    });
+  });
+
+  it("CreateAsset 已传 GroupId：不触发虚拟组建组，透传原样（真人组/显式指定不受影响）", async () => {
+    const { controller, material, assets } = makeController({});
+    material.callAction.mockResolvedValue({
+      status: 200,
+      body: { ResponseMetadata: {}, Result: { Id: "asset-real-1" } },
+    });
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
+
+    await controller.callAction(
+      "CreateAsset",
+      "Bearer sk-test",
+      { GroupId: "group-real-1", URL: "https://cdn.test/r.png", Name: "r", AssetType: "Image", SourceAssetId: "77" },
+      res,
+      { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
+    );
+
+    // 已传 GroupId → 不建虚拟组。
+    expect(material.ensureVirtualDefaultGroup).not.toHaveBeenCalled();
+    expect(material.callAction).toHaveBeenCalledWith(
+      "Bearer sk-test",
+      "CreateAsset",
+      { GroupId: "group-real-1", URL: "https://cdn.test/r.png", Name: "r", AssetType: "Image" },
+    );
+    expect(assets.linkAssetToMaterial).toHaveBeenCalledWith({
+      userId: "9",
+      assetId: "77",
+      materialId: "asset-real-1",
+      materialGroupId: "group-real-1",
+    });
+  });
+
+  it("CreateAsset 未传 GroupId 且建组失败：抛错阻断，不透传缺组请求", async () => {
+    const { controller, material } = makeController({});
+    material.ensureVirtualDefaultGroup.mockRejectedValue(new Error("upstream down"));
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
+
+    await expect(
+      controller.callAction(
+        "CreateAsset",
+        "Bearer sk-test",
+        { URL: "https://cdn.test/x.png", Name: "x", AssetType: "Image", SourceAssetId: "66" },
+        res,
+        { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
+      ),
+    ).rejects.toThrow("upstream down");
+    // 建组失败 → 不透传（无 GroupId）。
+    expect(material.callAction).not.toHaveBeenCalled();
   });
 });

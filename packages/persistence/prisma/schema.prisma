@@ -49,6 +49,30 @@ model assets {
   @@index([material_group_id], map: "idx_asset_material_group")
 }
 
+/// IKDE6X：素材库组（虚拟人像库 + 真人像库）落地。本地为组主、上游备份、双向维护。
+/// kind：virtual=虚拟人像库组（每用户至多 1 个默认组），real=真人像库组（每用户可多个）。
+/// cover_url：封面图（真人组用，虚拟组可空）。material_group_id：上游组 id（group-...）。
+/// is_default 每用户 virtual 至多 1 个用应用层保证（MySQL 唯一索引无法表达条件唯一，不设 DB 约束）。
+model material_groups {
+  id                BigInt    @id @default(autoincrement())
+  user_id           BigInt
+  material_group_id String    @db.VarChar(128) // 上游组 id（group-...）
+  kind              String    @db.VarChar(16) // virtual | real
+  name              String    @db.VarChar(128)
+  cover_url         String?   @db.VarChar(512) // 封面图（真人组用，virtual 可空）
+  is_default        Boolean   @default(false) // 每用户虚拟默认组标记
+  status            String    @default("normal") @db.VarChar(32)
+  gmt_create        DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified      DateTime  @default(now()) @db.DateTime(0)
+  version           Int       @default(0)
+  is_delete         Boolean   @default(false)
+  deleted_at        DateTime? @db.DateTime(0)
+
+  @@unique([user_id, material_group_id], map: "uk_material_group_user_upstream")
+  @@index([user_id, kind], map: "idx_material_group_user_kind")
+  @@index([user_id, is_delete], map: "idx_material_group_user_alive")
+}
+
 /// 画布共享资产（IK9QKP）：用户主动保存、跨项目可复用的自包含快照库。
 /// 两层类型对齐画布节点结构：asset_type = 节点大类（card/media/goods/scene/text），
 /// kind = 节点判别字段（card 的 data.kind / media 的 data.mediaType；goods/scene/text 为 NULL）。

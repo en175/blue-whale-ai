@@ -59,6 +59,17 @@ export class MaterialController {
         const { [SOURCE_ASSET_ID_FIELD]: _stripped, ...rest } = body;
         payload = rest;
       }
+      // IKDE6X：虚拟人像上传到「虚拟默认组」——前端不感知组、不传 GroupId。
+      // 兜底仅当前端未传 GroupId 时生效（传了组 = 真人组/显式指定，不覆盖）；未传则
+      // ensureVirtualDefaultGroup 建组（无则上游建 + 本地落表）+ 强制替换 GroupId。
+      // 建组失败（拿不到虚拟组）抛错阻断，不静默拖到上游 400。
+      if (user && !(payload as Record<string, unknown>).GroupId) {
+        const groupId = await this.material.ensureVirtualDefaultGroup(
+          authorization,
+          user.userId,
+        );
+        payload = { ...(payload as Record<string, unknown>), GroupId: groupId };
+      }
     }
 
     const upstream = await this.material.callAction(authorization, action, payload);
@@ -67,7 +78,14 @@ export class MaterialController {
     // IKDJNZ：关联旁路——仅上游 2xx 成功且当前用户可解析时执行；失败只告警，不阻断透传响应。
     if (upstream.status >= 200 && upstream.status < 300 && user) {
       try {
-        await this.applyLinkSideEffects(action, body, upstream.body, user.userId);
+        // IKDE6X：关联旁路合并两来源——SourceAssetId 在剥离前的原 body，GroupId 在强制替换后的
+        // payload（虚拟组场景前端不传 GroupId，必须取替换后的才能落 assets.material_group_id）。
+        await this.applyLinkSideEffects(
+          action,
+          isRecord(body) && isRecord(payload) ? { ...body, ...payload } : payload,
+          upstream.body,
+          user.userId,
+        );
       } catch (error) {
         logger.error(
           `material ${action} link side-effect failed: ${
