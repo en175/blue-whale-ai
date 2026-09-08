@@ -55,6 +55,9 @@ export const ERROR_ENQUEUE_FAILED = "enqueue_failed";
 /** HTTP 限流（IKDPHS）：NewApiError 第三参；过滤器按 status=429 透传。 */
 export const RATE_LIMITED = "rate_limited";
 
+/** 登录失败锁定（IKDR4J）：连续失败达阈值后锁定期内 429 的 NewApiError 第三参。 */
+export const ACCOUNT_LOCKED = "account_locked";
+
 // ═══════════════════════════════════════════════════════════════
 // 二、账号域错误码（字符串契约）
 // ═══════════════════════════════════════════════════════════════
