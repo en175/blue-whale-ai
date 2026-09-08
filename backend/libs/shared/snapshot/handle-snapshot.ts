@@ -5,7 +5,7 @@ import {
   type PublicGenerationError,
   type ResultEnvelope,
 } from "@blue-whale/contracts";
-import { projectPublicError } from "@lib/shared/jobs/public-error.js";
+import { projectPublicError } from "@lib/shared/jobs/generation-job-error-projection.js";
 import { wireInteger, type WireInteger } from "@lib/shared/wire-integer.js";
 import type { ProjectService } from "@lib/shared/project/project.service.js";
 import type { CanvasService } from "@lib/shared/canvas/canvas.service.js";

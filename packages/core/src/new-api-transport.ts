@@ -344,8 +344,15 @@ export function createNewApiRawRequest(
       });
     } catch (error) {
       if (error instanceof NewApiError) throw error;
-      if (controller.signal.aborted) throw new NewApiTimeoutError();
-      throw new NewApiError("new-api 不可达", 503);
+      // raw 路径同样给失败留痕（音频/视频 raw 调用用）——失败要知道为啥失败（IKDZGM）。
+      if (controller.signal.aborted) {
+        const failed = new NewApiTimeoutError();
+        logNewApiFailure(failed, path, null);
+        throw failed;
+      }
+      const failed = new NewApiError("new-api 不可达", 503);
+      logNewApiFailure(failed, path, null);
+      throw failed;
     } finally {
       clearTimeout(timeout);
       init.signal?.removeEventListener("abort", forwardAbort);
