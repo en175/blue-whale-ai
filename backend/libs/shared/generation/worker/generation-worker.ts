@@ -129,9 +129,11 @@ export async function processImageJobById(
   return processClaimedJob(job, deps);
 }
 
-/** IKE4GC：把冻结在产品格式的 audio references（{role, asset_id|material_id, type}）解析成
- *  seed-audio 的《references》数组（audio→audio_url、image→image_url；已关联素材→asset://<material_id>，
- *  本地 asset→其 TOS url）。仅音频生成使用。找不到 asset 来源返回失败（调用方 failClaimed）。 */
+/** IKE4GC：把冻结在产品格式的 audio references（{role, asset_id, type}）解析成
+ *  seed-audio 的《references》数组（audio→audio_url、image→image_url）。
+ *  **与视频不同：音频生成不做 url→material_id 转换**——asset_id 一律用本地 asset 的 TOS url
+ *  （即便已绑定素材库也不转 asset://）。material_id（素材库引用）**在提交任务时**被拦截，
+ *  worker 不处理 material_id，只在提交期校验。仅音频生成使用；找不到 asset 来源返回失败（调用方 failClaimed）。 */
 type RawAudioReference = {
   role?: unknown;
   asset_id?: unknown;
@@ -166,40 +168,34 @@ async function resolveAudioSeedReferences(
       : [];
   const assetsById = new Map(assets.map((a) => [a.id, a]));
   const refs: SeedAudioReference[] = [];
-  // 同一素材来源重复出现 → 只保留首次（跨 role 生效）。音频生成仅走本地资产 url，不用素材库 asset://。
+  // 同一素材来源重复出现 → 只保留首次（跨 role 生效）。
+  // 与视频不同：音频生成不做 url→material_id 转换——asset_id 一律用本地 TOS url（即便绑定素材库也不转 asset://）；
+  // material_id（素材库引用）在**提交任务时**已拦截，worker 不处理 material_id。
   const seen = new Set<string>();
   for (const it of items) {
-    let mediaType: "audio" | "image";
-    let source: string | null = null;
-    if (
-      typeof it.material_id === "string" &&
-      it.material_id.length > 0
-    ) {
-      // 音频生成不支持素材库（真人/虚拟人像库）引用——创建期已拦，损坏快照兜底。
-      return { ok: false, message: "音频生成不支持素材库引用" };
+    // 提交期已保证项只带 asset_id；material_id/缺失来源项在提交期被 400 拦截，此处跳过不复审。
+    const assetId =
+      typeof it.asset_id === "string" && it.asset_id.length > 0
+        ? it.asset_id
+        : null;
+    if (assetId === null) continue;
+    const asset = assetsById.get(assetId);
+    if (!asset) {
+      return {
+        ok: false,
+        message: "参考素材不存在或无权访问",
+      };
     }
-    if (typeof it.asset_id === "string" && it.asset_id.length > 0) {
-      const asset = assetsById.get(it.asset_id);
-      if (!asset) {
-        return {
-          ok: false,
-          message: "参考素材不存在或无权访问",
-        };
-      }
-      // 参考介质以资产实际类型为准（视频/未知类型不适用于音频生成参考）。
-      if (asset.type !== "audio" && asset.type !== "image") {
-        return { ok: false, message: "参考素材类型不适用" };
-      }
-      mediaType = asset.type === "audio" ? "audio" : "image";
-      // 音频生成用本地资产 url，不因素材库绑定而转 asset://。
-      source = asset.url;
-    } else {
-      continue;
+    // 参考介质以资产实际类型为准（视频/未知类型不适用于音频生成参考）。
+    if (asset.type !== "audio" && asset.type !== "image") {
+      return { ok: false, message: "参考素材类型不适用" };
     }
-    if (source === null || seen.has(source)) continue;
-    seen.add(source);
+    if (asset.url === null || seen.has(asset.url)) continue;
+    seen.add(asset.url);
     refs.push(
-      mediaType === "audio" ? { audio_url: source } : { image_url: source },
+      asset.type === "audio"
+        ? { audio_url: asset.url }
+        : { image_url: asset.url },
     );
   }
   return { ok: true, refs };
