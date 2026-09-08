@@ -51,12 +51,18 @@ vi.mock('../../hooks/useAgentSession', () => ({
   },
 }));
 
-/** 下拉的数据源：蓝鲸模型目录里 text 能力、已启用的两条，顺序即默认。 */
+/** 下拉的数据源：蓝鲸模型目录里 text 能力、已启用的行，按 sort_order 排好序送来。 */
+const catalog = vi.hoisted(() => ({
+  rows: [] as { model_id: string; model_label: string; is_default?: boolean }[],
+}));
+
+const DEFAULT_CATALOG = [
+  { model_id: 'MiniMax-M3', model_label: 'MiniMax-M3' },
+  { model_id: 'doubao-seed-evolving', model_label: 'doubao-seed-evolving' },
+];
+
 vi.mock('@/api/generation', () => ({
-  fetchGenerationModels: vi.fn(async () => [
-    { model_id: 'MiniMax-M3', model_label: 'MiniMax-M3' },
-    { model_id: 'doubao-seed-evolving', model_label: 'doubao-seed-evolving' },
-  ]),
+  fetchGenerationModels: vi.fn(async () => catalog.rows),
 }));
 
 vi.mock('@/api/skills', () => ({ fetchMySkills: vi.fn(async () => []) }));
@@ -103,6 +109,7 @@ beforeEach(() => {
   handedToSession.values = [];
   sessionState.sessionId = null;
   sessionState.sessions = [];
+  catalog.rows = DEFAULT_CATALOG.map((row) => ({ ...row }));
 });
 
 afterEach(async () => {
@@ -146,6 +153,51 @@ describe('Agent 模型选择器交给会话状态机的值（IKE0II）', () => {
     sessionState.sessions = [{ session_id: 's-new', model: null }];
 
     await renderPanel();
+    await openDropdown();
+    const doubao = modelOptions().find((option) => option.textContent === 'doubao-seed-evolving')!;
+    await act(async () => doubao.click());
+
+    expect(currentModel()).toBe('doubao-seed-evolving');
+  });
+});
+
+describe('默认模型来自目录的显式标记（IKE0VX）', () => {
+  it('选中标了 is_default 的那条，哪怕它不排第一', async () => {
+    // 这是本单的全部意义：在它之前默认值是列表第一条，也就是 sort_order 最小的那条——
+    // 于是「Agent 默认用哪个模型」是排序字段的副作用。调一次排序就换掉了所有新会话的
+    // 默认模型，而那个字段在管理后台叫「排序」。
+    catalog.rows = [
+      { model_id: 'MiniMax-M3', model_label: 'MiniMax-M3' },
+      { model_id: 'doubao-seed-evolving', model_label: 'doubao-seed-evolving', is_default: true },
+    ];
+
+    await renderPanel();
+
+    expect(currentModel()).toBe('doubao-seed-evolving');
+  });
+
+  it('一条都没标时退回列表第一条，不是空、不报错', async () => {
+    // 目录是运营数据。没人标过默认（老库刚迁移完、或新建的能力类型）时，面板必须照常
+    // 可用——硬失败会让一个运营字段的缺省值决定产品能不能打开。
+    catalog.rows = [
+      { model_id: 'MiniMax-M3', model_label: 'MiniMax-M3' },
+      { model_id: 'doubao-seed-evolving', model_label: 'doubao-seed-evolving' },
+    ];
+
+    await renderPanel();
+
+    expect(currentModel()).toBe('MiniMax-M3');
+  });
+
+  it('用户点过之后，目录标记不再回头改写他的选择', async () => {
+    catalog.rows = [
+      { model_id: 'MiniMax-M3', model_label: 'MiniMax-M3', is_default: true },
+      { model_id: 'doubao-seed-evolving', model_label: 'doubao-seed-evolving' },
+    ];
+
+    await renderPanel();
+    expect(currentModel()).toBe('MiniMax-M3');
+
     await openDropdown();
     const doubao = modelOptions().find((option) => option.textContent === 'doubao-seed-evolving')!;
     await act(async () => doubao.click());

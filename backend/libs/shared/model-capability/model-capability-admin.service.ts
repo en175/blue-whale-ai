@@ -28,6 +28,10 @@ export class ModelCapabilityAdminService {
     return this.repo.toggleEnabled(id);
   }
 
+  setDefault(id: string) {
+    return this.repo.setDefault(id);
+  }
+
   remove(id: string) {
     return this.repo.remove(id);
   }

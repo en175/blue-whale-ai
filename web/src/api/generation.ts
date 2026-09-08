@@ -54,6 +54,11 @@ export interface GenerationModel {
   default_aspect_ratio: string | null;
   default_duration: number | null;
   features: ModelFeatures;
+  /**
+   * 该能力类型的显式默认模型（IKE0VX）。整个列表一条都没标时，消费端退回列表第一条——
+   * 不能硬失败，目录空标记时界面还得能用。
+   */
+  is_default: boolean;
   /** 乐观锁版本号 */
   version: number;
   /** 能力内容摘要 */

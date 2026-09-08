@@ -250,3 +250,33 @@ describe("ModelCapabilityRepo.listEnabledByType 时长归一化", () => {
     });
   });
 });
+
+describe("显式默认标记（IKE0VX）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("投影出 is_default；列缺省（老库尚未迁移）按 false 处理", async () => {
+    const { repo } = repoWith([
+      buildRow({ model_id: "a", is_default: true }),
+      buildRow({ model_id: "b", is_default: false }),
+      buildRow({ model_id: "c" }),
+    ]);
+    const rows = await repo.listEnabledByType("text");
+    expect(rows.map((r) => r.is_default)).toEqual([true, false, false]);
+  });
+
+  it("is_default 不进 digest：标记谁是默认不算能力漂移", async () => {
+    const { repo } = repoWith([buildRow({ is_default: false })]);
+    const notDefault = (await repo.listEnabledByType("text"))[0].digest;
+
+    vi.clearAllMocks();
+    const { repo: repo2 } = repoWith([buildRow({ is_default: true })]);
+    const isDefault = (await repo2.listEnabledByType("text"))[0].digest;
+
+    // 这条比「digest 没变」更重要：digest 是冻结快照的比对口径，把一个运营开关
+    // 算进去，会让所有历史快照在有人点一次「设为默认」之后集体误判漂移。
+    expect(isDefault).toBe(notDefault);
+    expect(isDefault).toBe(capabilityDigest(CAP_FIELDS));
+  });
+});

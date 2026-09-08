@@ -474,6 +474,8 @@ export interface AdminModel {
   enabled: boolean;
   /** 排序序号，同类型内越小越靠前 */
   sort_order: number;
+  /** 是否为该能力类型的默认模型：同类型内至多一条 */
+  is_default: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -523,6 +525,18 @@ export function updateAdminModel(id: string, params: Partial<CreateAdminModelPar
 /** PATCH /api/admin/models/:id/toggle 启停切换：翻转 enabled，停用后 dock 与消费端不再返回该模型 */
 export function toggleAdminModel(id: string) {
   return apiRequest<AdminModel>(`/api/admin/models/${id}/toggle`, {
+    method: 'PATCH',
+  });
+}
+
+/**
+ * PATCH /api/admin/models/:id/default 设为该能力类型的默认模型。
+ *
+ * 同类型其它模型的默认标记由服务端在同一事务里清除，所以返回的是**整份列表**而不是单行。
+ * 只设不清：取消默认之后消费端会退回列表第一条，那正是这个标记要消灭的状态。
+ */
+export function setAdminModelDefault(id: string) {
+  return apiRequest<AdminModel[]>(`/api/admin/models/${id}/default`, {
     method: 'PATCH',
   });
 }

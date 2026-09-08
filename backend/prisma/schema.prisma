@@ -176,6 +176,7 @@ model generation_model_capability {
   request_mapping         Json?
   enabled                 Boolean  @default(true)
   sort_order              Int      @default(0)
+  is_default              Boolean  @default(false)
   gmt_create              DateTime @default(now()) @db.DateTime(0)
   gmt_modified            DateTime @default(now()) @db.DateTime(0)
   version                 Int      @default(0)

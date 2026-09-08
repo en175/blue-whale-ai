@@ -54,6 +54,7 @@ const fullModel: GenerationModel = {
   default_aspect_ratio: '16:9',
   default_duration: 10,
   features: baseFeatures,
+  is_default: false,
   version: 1,
   digest: '',
 };
