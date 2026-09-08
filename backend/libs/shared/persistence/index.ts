@@ -102,6 +102,12 @@ export {
   type SharedAssetPage,
 } from "./shared-asset-repo.js";
 export {
+  createMaterialGroupRepo,
+  type MaterialGroupRepo,
+  type MaterialGroupView,
+  type CreateMaterialGroupInput,
+} from "./material-group-repo.js";
+export {
   createSkillRepo,
   normalizeNameKey,
   SkillAddConflictError,

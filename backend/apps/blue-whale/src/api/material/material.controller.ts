@@ -5,15 +5,34 @@
 //   经 @Res 原样回传；因此类级 @BypassTransform，避免被统一信封二次包裹。
 // - 产品侧错误（非法 Action/缺凭证/未配置/网关不可达）抛 NewApiError，
 //   由 AllExceptionsFilter 统一成产品 {code, msg, data} 信封。
+// - IKDJNZ 关联旁路：CreateAsset / DeleteAsset / DeleteAssetGroup 上游成功后同步维护
+//   本地 assets 的素材库关联字段（上游为权威，本地只做关联镜像；失败仅告警不阻断透传）。
 import { Body, Controller, Headers, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
+import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
+import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
+
+/** CreateAsset 请求体里携带的原始素材 id（需求 #1：上传素材库素材时带上原始素材 id）。 */
+const SOURCE_ASSET_ID_FIELD = "SourceAssetId";
+
+/** 上游 CreateAsset 成功信封 Result 里的素材 id 字段。 */
+const MATERIAL_ID_FIELD = "Id";
+
+/** 素材库素材 id / 组 id 格式（对齐上游：素材 asset-...，组 group-...；与生成侧 MATERIAL_ID_PATTERN 同源）。 */
+const MATERIAL_ID_PATTERN = /^asset-.{1,128}$/i;
+const MATERIAL_GROUP_ID_PATTERN = /^group-.{1,128}$/i;
 
 @Controller("material")
 @BypassTransform()
 export class MaterialController {
-  constructor(private readonly material: MaterialService) {}
+  constructor(
+    private readonly material: MaterialService,
+    private readonly assets: AssetService,
+  ) {}
 
   @Post(":action")
   async callAction(
@@ -21,8 +40,123 @@ export class MaterialController {
     @Headers("authorization") authorization: string | undefined,
     @Body() body: unknown,
     @Res() res: Response,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<void> {
-    const upstream = await this.material.callAction(authorization, action, body);
+    // IKDJNZ：CreateAsset 的原始素材 id 是产品侧字段，透传前剥离，上游请求体保持原样。
+    let sourceAssetId: string | undefined;
+    let payload = body;
+    if (action === "CreateAsset" && isRecord(body)) {
+      const raw = body[SOURCE_ASSET_ID_FIELD];
+      if (typeof raw === "string" && /^\d+$/.test(raw)) {
+        sourceAssetId = raw;
+      } else if (SOURCE_ASSET_ID_FIELD in body) {
+        // 非法原始素材 id：静默丢弃前留痕，便于发现前端未接/接错的死绑定。
+        logger.warn(
+          `material CreateAsset: 非法 ${SOURCE_ASSET_ID_FIELD} 已丢弃（${JSON.stringify(raw)}）`,
+        );
+      }
+      if (SOURCE_ASSET_ID_FIELD in body) {
+        const { [SOURCE_ASSET_ID_FIELD]: _stripped, ...rest } = body;
+        payload = rest;
+      }
+      // IKDE6X：虚拟人像上传到「虚拟默认组」——前端不感知组、不传 GroupId。
+      // 兜底仅当前端未传 GroupId 时生效（传了组 = 真人组/显式指定，不覆盖）；未传则
+      // ensureVirtualDefaultGroup 建组（无则上游建 + 本地落表）+ 强制替换 GroupId。
+      // 建组失败（拿不到虚拟组）抛错阻断，不静默拖到上游 400。
+      if (user && !(payload as Record<string, unknown>).GroupId) {
+        const groupId = await this.material.ensureVirtualDefaultGroup(
+          authorization,
+          user.userId,
+        );
+        payload = { ...(payload as Record<string, unknown>), GroupId: groupId };
+      }
+    }
+
+    const upstream = await this.material.callAction(authorization, action, payload);
     res.status(upstream.status).json(upstream.body);
+
+    // IKDJNZ：关联旁路——仅上游 2xx 成功且当前用户可解析时执行；失败只告警，不阻断透传响应。
+    if (upstream.status >= 200 && upstream.status < 300 && user) {
+      try {
+        // IKDE6X：关联旁路合并两来源——SourceAssetId 在剥离前的原 body，GroupId 在强制替换后的
+        // payload（虚拟组场景前端不传 GroupId，必须取替换后的才能落 assets.material_group_id）。
+        await this.applyLinkSideEffects(
+          action,
+          isRecord(body) && isRecord(payload) ? { ...body, ...payload } : payload,
+          upstream.body,
+          user.userId,
+        );
+      } catch (error) {
+        logger.error(
+          `material ${action} link side-effect failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
   }
+
+  private async applyLinkSideEffects(
+    action: string,
+    body: unknown,
+    upstreamBody: unknown,
+    userId: string,
+  ): Promise<void> {
+    if (action === "CreateAsset") {
+      const sourceAssetId = isRecord(body)
+        ? body[SOURCE_ASSET_ID_FIELD]
+        : undefined;
+      const groupId = isRecord(body) ? body.GroupId : undefined;
+      const materialId = readResultId(upstreamBody);
+      if (
+        typeof sourceAssetId === "string" &&
+        typeof groupId === "string" &&
+        typeof materialId === "string"
+      ) {
+        // IKDJNZ：id/组 id 格式兜底（asset-.../group-...）；脏数据不落库，避免污染生成链路。
+        if (
+          MATERIAL_ID_PATTERN.test(materialId) &&
+          MATERIAL_GROUP_ID_PATTERN.test(groupId)
+        ) {
+          await this.assets.linkAssetToMaterial({
+            userId,
+            assetId: sourceAssetId,
+            materialId,
+            materialGroupId: groupId,
+          });
+        } else {
+          logger.warn(
+            `material CreateAsset: 上游 id 格式异常已跳过绑定（material=${materialId} group=${groupId}）`,
+          );
+        }
+      }
+      return;
+    }
+    if (action === "DeleteAsset") {
+      const id = isRecord(body) ? body.Id : undefined;
+      if (typeof id === "string" && MATERIAL_ID_PATTERN.test(id)) {
+        await this.assets.clearMaterialLink(userId, id);
+      }
+      return;
+    }
+    if (action === "DeleteAssetGroup") {
+      const id = isRecord(body) ? body.Id : undefined;
+      if (typeof id === "string" && MATERIAL_GROUP_ID_PATTERN.test(id)) {
+        await this.assets.clearMaterialGroupLink(userId, id);
+      }
+      return;
+    }
+  }
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function readResultId(upstreamBody: unknown): string | undefined {
+  if (!isRecord(upstreamBody)) return undefined;
+  const result = upstreamBody.Result;
+  if (!isRecord(result)) return undefined;
+  const id = result[MATERIAL_ID_FIELD];
+  return typeof id === "string" ? id : undefined;
 }

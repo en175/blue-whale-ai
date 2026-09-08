@@ -363,13 +363,19 @@ describe("new-api client —— 图片与视频生成", () => {
     });
   });
 
-  it("rejects frame inputs mixed with ordinary references before fetch", async () => {
-    const fetchImpl = vi.fn();
+  it("rejects frame inputs mixed with ordinary references before fetch (legacy firstFrameImage field)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { task_id: "t-1", status: "queued" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
     const client = createNewApiClient({
       baseUrl: "http://new-api.test",
       fetchImpl,
     });
 
+    // 旧分字段路径：firstFrameImage + references 仍被拒（互斥守卫保留）。
     await expect(client.submitVideo("sk-test", {
       model: "doubao-seedance-2-0-260128",
       prompt: "含糊输入",
@@ -387,6 +393,72 @@ describe("new-api client —— 图片与视频生成", () => {
       }),
     );
     expect(fetchImpl).not.toHaveBeenCalled();
+
+    // IKDJNZ 单数组语义：references 带 role 的帧条目与普通参考可并存，不再互斥。
+    await client.submitVideo("sk-test", {
+      model: "doubao-seedance-2-0-260128",
+      prompt: "单数组并存",
+      duration: 5,
+      width: 1280,
+      height: 720,
+      resolution: "720p",
+      ratio: "16:9",
+      references: [
+        { type: "image", url: "asset://Asset-ff-1", role: "first_frame" },
+        { type: "image", url: "asset://Asset-last-1", role: "last_frame" },
+        { type: "video", url: "https://cdn.test/reference.mp4" },
+      ],
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps audio reference into Seedance metadata.content audio_url (IKDJNZ)", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input, init = {}) => {
+        requests.push({ url: String(input), init });
+        return jsonResponse({ task_id: "task-audio-ref", status: "queued" });
+      },
+    });
+
+    await client.submitVideo("sk-test", {
+      model: "doubao-seedance-2-0-260128",
+      prompt: "参考音频生成视频",
+      duration: 5,
+      width: 1280,
+      height: 720,
+      resolution: "720p",
+      ratio: "16:9",
+      references: [
+        { type: "audio", url: "asset://asset-audio-1" },
+        { type: "audio", url: "https://tos.test/1.mp3" },
+      ],
+    });
+
+    expect(JSON.parse(String(requests[0]?.init.body))).toEqual({
+      model: "doubao-seedance-2-0-260128",
+      prompt: "参考音频生成视频",
+      duration: 5,
+      response_format: "url",
+      metadata: {
+        duration: 5,
+        resolution: "720p",
+        ratio: "16:9",
+        content: [
+          {
+            type: "audio_url",
+            audio_url: { url: "asset://asset-audio-1" },
+            role: "reference_audio",
+          },
+          {
+            type: "audio_url",
+            audio_url: { url: "https://tos.test/1.mp3" },
+            role: "reference_audio",
+          },
+        ],
+      },
+    });
   });
 
   it("IK7G9X: generateImagesWithReceipt exposes X-Oneapi-Request-Id", async () => {

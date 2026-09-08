@@ -52,6 +52,8 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
           width: true,
           height: true,
           duration_ms: true,
+          // IKDJNZ：关联素材库素材 id（生成时命中走 asset://，不走 url）。
+          material_id: true,
         },
       });
       const byId = new Map(rows.map((row) => [row.id.toString(), row]));
@@ -69,6 +71,7 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
                 height: row.height,
                 duration:
                   row.duration_ms === null ? null : row.duration_ms / 1000,
+                material_id: row.material_id,
               },
             ]
           : [];
