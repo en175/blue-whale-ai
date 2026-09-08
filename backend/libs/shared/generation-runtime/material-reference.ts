@@ -7,7 +7,8 @@ import { ERROR_INVALID_INPUT } from "@blue-whale/contracts";
  */
 export type MaterialReference = {
   id: string;
-  type: "image" | "video";
+  /** IKDJNZ：支持参考音频（type:"audio"，素材库音频引用；不占图/视频额度）。 */
+  type: "image" | "video" | "audio";
 };
 
 /** 输入校验错误：携带对外错误码（ERROR_INVALID_INPUT 等），供 runner catch 取码落库。 */
@@ -72,7 +73,7 @@ function readMaterialRefs(value: unknown): MaterialReference[] {
     if (materialId === null) {
       throw new VideoInputError(ERROR_INVALID_INPUT, "素材库引用 ID 无效");
     }
-    if (type !== "image" && type !== "video") {
+    if (type !== "image" && type !== "video" && type !== "audio") {
       throw new VideoInputError(ERROR_INVALID_INPUT, "素材库参考素材类型无效");
     }
     return { id: materialId, type };

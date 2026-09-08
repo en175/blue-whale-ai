@@ -1358,12 +1358,12 @@ describe("video job runner asset↔material link (IKDJNZ)", () => {
       scheduleNext: vi.fn().mockResolvedValue(undefined),
     });
 
-    // 关联的 11 转 asset://，未关联的 12 保留本地 url。
+    // 关联的 11 转 asset://，未关联的 12 保留本地 url（master 排序：本地在前、素材库在后）。
     expect(submit).toHaveBeenCalledWith(
       expect.objectContaining({
         references: [
-          { type: "image", url: "asset://asset-linked-1" },
           { type: "image", url: "https://tos.test/b.png" },
+          { type: "image", url: "asset://asset-linked-1" },
         ],
       }),
     );
@@ -1578,12 +1578,12 @@ describe("video job runner asset↔material link (IKDJNZ)", () => {
 
     expect(submit).toHaveBeenCalledWith(
       expect.objectContaining({
-        // 单数组语义：帧作为带 role 的 reference 条目在前，普通参考随后，保序。
+        // 单数组语义：帧作为带 role 的 reference 条目在前，普通参考随后（未关联本地在前、素材库在后）。
         references: [
           { type: "image", url: "https://tos.test/f.png", role: "first_frame" },
           { type: "image", url: "asset://asset-last-1", role: "last_frame" },
-          { type: "image", url: "asset://asset-mat-1" },
           { type: "image", url: "https://tos.test/r.png" },
+          { type: "image", url: "asset://asset-mat-1" },
         ],
       }),
     );
@@ -1643,9 +1643,9 @@ describe("video job runner asset↔material link (IKDJNZ)", () => {
         references: [
           { type: "image", url: "https://tos.test/f.png", role: "first_frame" },
           { type: "image", url: "asset://asset-last-1", role: "last_frame" },
-          // 素材库音频引用在前、本地音频在后（与既有排序一致）。
-          { type: "audio", url: "asset://asset-audio-1" },
+          // 未关联本地资源在前、素材库引用在后（master 排序）。
           { type: "audio", url: "https://tos.test/1.mp3" },
+          { type: "audio", url: "asset://asset-audio-1" },
         ],
       }),
     );

@@ -309,93 +309,78 @@ function validateVideo(
     };
   }
   // 素材库引用（MaterialReference）：仅视频生成可用；格式校验 + 与本地 Asset 引用按并集互斥/配对。
-  if (type !== "video") {
-    if (
+  // IKDJNZ：单数组 references 优先；存在时跳过旧字段校验路径。
+  const parsed = parseReferences(body.references);
+  if (parsed.kind === "invalid") {
+    return { code: ERROR_INVALID_INPUT, message: "参考素材引用无效" };
+  }
+  if (parsed.kind === "ok") {
+    // Critical fix（review）：references 与旧字段并存 → 400，防止新旧混用静默丢引用。
+    const hasLegacyRefFields =
+      body.first_frame_asset_id !== undefined ||
+      body.last_frame_asset_id !== undefined ||
+      body.reference_asset_ids !== undefined ||
       body.first_frame_material_id !== undefined ||
       body.last_frame_material_id !== undefined ||
-      body.reference_materials !== undefined ||
-      body.references !== undefined
-    ) {
-      return {
-        code: ERROR_UNSUPPORTED_INPUT,
-        message: "素材库引用仅支持视频生成",
-      };
+      body.reference_materials !== undefined;
+    if (hasLegacyRefFields) {
+      return { code: ERROR_INVALID_INPUT, message: "references 不能与旧参考字段混用" };
     }
-  } else {
-    // IKDJNZ：单数组 references 优先；存在时跳过旧字段校验路径。
-    const parsed = parseReferences(body.references);
-    if (parsed.kind === "invalid") {
-      return { code: ERROR_INVALID_INPUT, message: "参考素材引用无效" };
+    if (parsed.items.length === 0) {
+      return { code: ERROR_INVALID_INPUT, message: "参考素材不能为空" };
     }
-    if (parsed.kind === "ok") {
-      // Critical fix（review）：references 与旧字段并存 → 400，防止新旧混用静默丢引用。
-      const hasLegacyRefFields =
-        body.first_frame_asset_id !== undefined ||
-        body.last_frame_asset_id !== undefined ||
-        body.reference_asset_ids !== undefined ||
-        body.first_frame_material_id !== undefined ||
-        body.last_frame_material_id !== undefined ||
-        body.reference_materials !== undefined;
-      if (hasLegacyRefFields) {
-        return { code: ERROR_INVALID_INPUT, message: "references 不能与旧参考字段混用" };
-      }
-      if (parsed.items.length === 0) {
-        return { code: ERROR_INVALID_INPUT, message: "参考素材不能为空" };
-      }
-      const roleErr = validateReferenceRoles(parsed.items);
-      if (roleErr) return { code: ERROR_INVALID_INPUT, message: roleErr };
-      // 普通参考数量上限沿用 Seedance 约束（首尾帧不计入；参考音频不占图/视频额度）。
-      const refCount = parsed.items.filter(
-        (r) => r.role === "reference" && r.type !== "audio",
-      ).length;
-      if (refCount > 12)
-        return { code: ERROR_INVALID_INPUT, message: "参考素材最多 12 个" };
-      return null;
-    }
-    const firstFrameAssetId2 = assetId(body.first_frame_asset_id);
-    const lastFrameAssetId2 = assetId(body.last_frame_asset_id);
-    const firstFrameMaterialId = materialId(body.first_frame_material_id);
-    const lastFrameMaterialId = materialId(body.last_frame_material_id);
-    if (
-      body.first_frame_material_id !== undefined &&
-      firstFrameMaterialId === null
-    )
-      return { code: ERROR_INVALID_INPUT, message: "首帧素材库引用无效" };
-    if (body.last_frame_material_id !== undefined && lastFrameMaterialId === null)
-      return { code: ERROR_INVALID_INPUT, message: "尾帧素材库引用无效" };
-    if (firstFrameAssetId2 !== null && firstFrameMaterialId !== null)
-      return { code: ERROR_INVALID_INPUT, message: "首帧只能指定一个来源" };
-    if (lastFrameAssetId2 !== null && lastFrameMaterialId !== null)
-      return { code: ERROR_INVALID_INPUT, message: "尾帧只能指定一个来源" };
-    if (lastFrameMaterialId !== null && firstFrameMaterialId === null)
-      return { code: ERROR_INVALID_INPUT, message: "尾帧必须与首帧一起使用" };
-    const refs = materialRefs(body.reference_materials);
-    if (refs === null)
-      return { code: ERROR_INVALID_INPUT, message: "参考素材库引用无效" };
-    const uniqueRefs = uniqueMaterialRefs(refs);
-    // 模式互斥按并集（asset ∨ material）：帧（首/尾帧任一类）与普通参考（asset refs ∨ material refs）
-    // 不可并存；跨来源组合在创建即拒绝，不再拖到 Worker 执行时才失败。
-    const hasFrameSource =
-      firstFrameAssetId2 !== null ||
-      lastFrameAssetId2 !== null ||
-      firstFrameMaterialId !== null ||
-      lastFrameMaterialId !== null;
-    const hasRefSource =
-      assetIds(body.reference_asset_ids).length > 0 || uniqueRefs.length > 0;
-    if (hasFrameSource && hasRefSource) {
-      return {
-        code: ERROR_INVALID_INPUT,
-        message: "首尾帧模式不能与普通参考素材混用",
-      };
-    }
-    // IKDJNZ：参考音频不占图/视频额度——12 上限只计图/视频并集；音频引用单独统计。
-    const imageVideoRefCount = uniqueRefs.filter(
-      (r) => r.type !== "audio",
+    const roleErr = validateReferenceRoles(parsed.items);
+    if (roleErr) return { code: ERROR_INVALID_INPUT, message: roleErr };
+    // 普通参考数量上限沿用 Seedance 约束（首尾帧不计入；参考音频不占图/视频额度）。
+    const refCount = parsed.items.filter(
+      (r) => r.role === "reference" && r.type !== "audio",
     ).length;
-    if (imageVideoRefCount > 12) {
+    if (refCount > 12)
       return { code: ERROR_INVALID_INPUT, message: "参考素材最多 12 个" };
-    }
     return null;
+  }
+  const firstFrameAssetId2 = assetId(body.first_frame_asset_id);
+  const lastFrameAssetId2 = assetId(body.last_frame_asset_id);
+  const firstFrameMaterialId = materialId(body.first_frame_material_id);
+  const lastFrameMaterialId = materialId(body.last_frame_material_id);
+  if (
+    body.first_frame_material_id !== undefined &&
+    firstFrameMaterialId === null
+  )
+    return { code: ERROR_INVALID_INPUT, message: "首帧素材库引用无效" };
+  if (body.last_frame_material_id !== undefined && lastFrameMaterialId === null)
+    return { code: ERROR_INVALID_INPUT, message: "尾帧素材库引用无效" };
+  if (firstFrameAssetId2 !== null && firstFrameMaterialId !== null)
+    return { code: ERROR_INVALID_INPUT, message: "首帧只能指定一个来源" };
+  if (lastFrameAssetId2 !== null && lastFrameMaterialId !== null)
+    return { code: ERROR_INVALID_INPUT, message: "尾帧只能指定一个来源" };
+  if (lastFrameMaterialId !== null && firstFrameMaterialId === null)
+    return { code: ERROR_INVALID_INPUT, message: "尾帧必须与首帧一起使用" };
+  const refs = materialRefs(body.reference_materials);
+  if (refs === null)
+    return { code: ERROR_INVALID_INPUT, message: "参考素材库引用无效" };
+  const uniqueRefs = uniqueMaterialRefs(refs);
+  // 模式互斥按并集（asset ∨ material）：帧（首/尾帧任一类）与普通参考（asset refs ∨ material refs）
+  // 不可并存；跨来源组合在创建即拒绝，不再拖到 Worker 执行时才失败。
+  const hasFrameSource =
+    firstFrameAssetId2 !== null ||
+    lastFrameAssetId2 !== null ||
+    firstFrameMaterialId !== null ||
+    lastFrameMaterialId !== null;
+  const hasRefSource =
+    assetIds(body.reference_asset_ids).length > 0 || uniqueRefs.length > 0;
+  if (hasFrameSource && hasRefSource) {
+    return {
+      code: ERROR_INVALID_INPUT,
+      message: "首尾帧模式不能与普通参考素材混用",
+    };
+  }
+  // IKDJNZ：参考音频不占图/视频额度——12 上限只计图/视频并集；音频引用单独统计。
+  const imageVideoRefCount = uniqueRefs.filter(
+    (r) => r.type !== "audio",
+  ).length;
+  if (imageVideoRefCount > 12) {
+    return { code: ERROR_INVALID_INPUT, message: "参考素材最多 12 个" };
   }
   return null;
 }
