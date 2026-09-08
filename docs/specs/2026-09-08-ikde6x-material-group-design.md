@@ -141,3 +141,23 @@ model material_groups {
 6. 组查询接口返回本地表数据（按 `kind`/`user_id` 过滤），不触发 newapi 组查询。
 7. 删除组（上游成功）→ 本地软删 `material_groups`。
 8. 字段命名统一 snake_case，跟 `assets`/`shared_assets` 等表一致。
+
+---
+
+## 8. 实现范围（重要）
+
+本契约对素材库组做了**较完整**的设计（组表落地、虚拟组自动建组、组查询走本地、真人组镜像、双维护）。但当前已交付的后端改动（IKDJNZ 分支扫尾、group 设计对应工单）**只实现了**：
+
+- **组表落地**（`material_groups`，schema + migration + 双轨 + 快照）；
+- **虚拟组自动建组**（`MaterialService.ensureVirtualDefaultGroup` + controller `CreateAsset` 未传 GroupId 时兜底替换）；
+- **组表 repo**（upsert / findVirtualDefault / listByUser / findByUserAndUpstream / softDelete）。
+
+**未接入（留待后续工单，本单不实现）**：
+
+| 契约条目 | 说明 |
+|---|---|
+| §5 组查询走本地 | `listLocalGroups`（service 层）已备留，但 controller 无组查询路由接线，`ListAssetGroups` 仍透传上游；后续由前端组查询诉求驱动接线 |
+| §3 真人组镜像 | 建组/改名/删组的真人组本地镜像钩子（repo 的 `findByUserAndUpstream`/`softDelete` 已备，暂无调用方） |
+| §4 组操作双向维护 | 删除/改名的本地同步暂由 IKDE6X 后续子任务或既有旁路承接 |
+
+> 结论：本单交付「虚拟组自动建组（前端不感知）+ 组表落地」的**最小闭环**；组查询走本地、真人组镜像同步属后续范围。契约 §5 验收第 6/7 条暂不满足，待后续接线后关闭。
