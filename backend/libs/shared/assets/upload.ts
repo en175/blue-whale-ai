@@ -1,4 +1,10 @@
 import { fail, ok } from "@blue-whale/contracts";
+import {
+  FILE_SIGNATURE_HEAD_BYTES,
+  sniffFileSignature,
+  type FileSignature,
+  type MediaKind,
+} from "./file-signature.js";
 import type { AssetService } from "./assets.service.js";
 import type { ProjectService } from "@lib/shared/project/project.service.js";
 
@@ -28,6 +34,14 @@ export type DedupAssetInput = {
 };
 
 export interface AssetUploadStorage {
+  /**
+   * 取对象开头的若干字节（IKE53U）。
+   *
+   * 单独一个方法而不是复用 `AssetReader.read`：那个读整份对象，而这里只需要开头几十字节就能
+   * 认出容器——为了校验一份 200MB 的视频而把它整个拉下来，是把一道便宜的门做成了一笔昂贵的
+   * 账。适配器取不到时返回 `null`，调用方据此选择放行还是拒绝。
+   */
+  readHead(storageKey: string, length: number): Promise<Uint8Array | null>;
   prepareUpload(input: {
     userId: string;
     type: "image" | "video" | "audio";
@@ -157,6 +171,34 @@ export async function handleDedupAsset(
   return ok({ dedup: true, asset: toAssetResponse(existing) });
 }
 
+const MEDIA_KIND_LABELS: Record<MediaKind, string> = {
+  image: "图片",
+  video: "视频",
+  audio: "音频",
+};
+
+/**
+ * 读文件头并认它（IKE53U）。
+ *
+ * 两种「没结论」要分开：**读不到**和**认不出**。取字节本身失败（对象存储抖动、适配器没实现
+ * 这个方法）时放行——这道门是为了挡住明显不是媒体的文件，不该因为一次网络抖动把正常上传拒掉；
+ * 真的读到了字节却认不出任何容器，那才是拒绝的理由。混在一起会让一次抖动看起来像「你的文件
+ * 坏了」，那是最容易让人白白重传三次的一种错话。
+ */
+async function readFileSignature(
+  storage: AssetUploadStorage,
+  storageKey: string,
+): Promise<{ checked: boolean; value: FileSignature | null }> {
+  let head: Uint8Array | null;
+  try {
+    head = await storage.readHead(storageKey, FILE_SIGNATURE_HEAD_BYTES);
+  } catch {
+    return { checked: false, value: null };
+  }
+  if (!head) return { checked: false, value: null };
+  return { checked: true, value: sniffFileSignature(head) };
+}
+
 export async function handleCompleteAsset(
   userId: string,
   input: CompleteAssetInput,
@@ -201,6 +243,25 @@ export async function handleCompleteAsset(
     input.mime.toLowerCase()
   ) {
     return fail(400, "文件类型与实际上传不符");
+  }
+
+  // 到这里为止校验的全是**声明值**：type、mime、size，以及对象存储上的 size 与 Content-Type
+  // 是否与声明一致。而 Content-Type 正是客户端 PUT 时自己写的，两边天然自洽——一份伪造的
+  // 文件把每一道都走通了。测试站 2026-09-08 的 asset_id=6012 就是这么进的库：524 字节随机
+  // 数据、头四字节 AB CD EF 12、声明 image/jpeg，一路畅通，直到 Agent 读它时才发现读不了。
+  //
+  // 所以在这里读一次文件本身。与上面 SVG 那道门同一条理由：挡在上传口，用户在拖文件的当下
+  // 就知道要换一份，而不是等一轮对话之后收到一句「素材探测失败，请重试」。
+  const signature = await readFileSignature(deps.storage, input.storage_key);
+  if (signature.checked && !signature.value) {
+    return fail(400, "这个文件打不开，可能已损坏。请换一份 JPG、PNG、WebP 或 MP4 重新上传。");
+  }
+  if (signature.value && signature.value.kind !== input.type) {
+    // 认得出，但不是它声明的那类。按**字节**说的算——声明是别人说的。
+    return fail(
+      400,
+      `这个文件实际是${MEDIA_KIND_LABELS[signature.value.kind]}，和你选择的类型不一致。请重新上传。`,
+    );
   }
 
   await deps.storage.makePublic(input.storage_key);

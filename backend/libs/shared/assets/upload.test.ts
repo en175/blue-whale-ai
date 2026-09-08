@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { handleDedupAsset, handlePresignAsset } from "./upload.js";
+import {
+  handleCompleteAsset,
+  handleDedupAsset,
+  handlePresignAsset,
+} from "./upload.js";
 
 const ASSET = {
   id: "526",
@@ -158,5 +162,88 @@ describe("presign 的格式门（2026-09-05 深度回归）", () => {
       s,
     );
     expect(outcome).toMatchObject({ code: 200 });
+  });
+});
+
+
+/**
+ * IKE53U：上传口读一次文件本身。
+ *
+ * 此前 complete 校验的全是声明值——type、mime、size，以及对象存储上的 size 与 Content-Type
+ * 是否与声明一致。而 Content-Type 正是客户端 PUT 时自己写的，两边天然自洽。测试站
+ * 2026-09-08 的 asset_id=6012 就这么进了库：524 字节随机数据、声明 image/jpeg、一路畅通。
+ */
+describe("complete 的文件头校验（IKE53U）", () => {
+  const head = (...values: number[]) => {
+    const buffer = new Uint8Array(32);
+    buffer.set(values);
+    return buffer;
+  };
+
+  const completeDeps = (headBytes: Uint8Array | null) => ({
+    projects: { findOwnedById: vi.fn().mockResolvedValue({ id: "0" }) } as never,
+    uploads: {
+      findCommittedUpload: vi.fn().mockResolvedValue(null),
+      createUploadedAsset: vi
+        .fn()
+        .mockResolvedValue({ ...ASSET, type: "image", mime: "image/jpeg" }),
+    } as never,
+    storage: {
+      readHead: vi.fn().mockResolvedValue(headBytes),
+      inspectObject: vi.fn().mockResolvedValue({
+        size: 524,
+        mime: "image/jpeg",
+        publicUrl: "https://bucket.tos.test/uploads/7/image/x.jpg",
+      }),
+      makePublic: vi.fn(),
+      prepareUpload: vi.fn(),
+      deleteMultiObjects: vi.fn(),
+    } as never,
+  });
+
+  const complete = (deps: ReturnType<typeof completeDeps>) =>
+    handleCompleteAsset(
+      "7",
+      {
+        type: "image",
+        mime: "image/jpeg",
+        size: 524,
+        storage_key: "uploads/7/image/x.jpg",
+      },
+      deps,
+    );
+
+  it("字节认不出任何容器就拒收，不落库", async () => {
+    // 那份坏文件的真实头：AB CD EF 12，而 JPEG 该是 FF D8 FF。
+    const deps = completeDeps(head(0xab, 0xcd, 0xef, 0x12, 0x00, 0x10, 0x4a, 0x46));
+    const outcome = await complete(deps);
+
+    expect(outcome).toMatchObject({ code: 400 });
+    expect(
+      (deps.uploads as unknown as { createUploadedAsset: ReturnType<typeof vi.fn> })
+        .createUploadedAsset,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("真的 JPEG 照常入库", async () => {
+    const deps = completeDeps(head(0xff, 0xd8, 0xff, 0xe0));
+    await expect(complete(deps)).resolves.toMatchObject({ code: 200 });
+  });
+
+  it("认出来但不是声明的那一类也拒——按字节说的算", async () => {
+    // 声明 image，字节是 MP4：ftyp 盒子的 brand 是 isom。
+    const mp4 = new Uint8Array(32);
+    mp4.set(new TextEncoder().encode("ftypisom"), 4);
+    const deps = completeDeps(mp4);
+    await expect(complete(deps)).resolves.toMatchObject({ code: 400 });
+  });
+
+  /**
+   * 读不到和认不出要分开。取字节失败（存储抖动、适配器没实现）时放行——这道门是为了挡住
+   * 明显不是媒体的文件，不该因为一次网络抖动把正常上传拒掉，那是最容易让人白白重传三次的
+   * 一种错话。
+   */
+  it("读不到文件头时放行，不把一次抖动说成「你的文件坏了」", async () => {
+    await expect(complete(completeDeps(null))).resolves.toMatchObject({ code: 200 });
   });
 });
