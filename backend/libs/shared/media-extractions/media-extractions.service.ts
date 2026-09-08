@@ -7,7 +7,7 @@ import {
   fail,
   ok,
 } from "@blue-whale/contracts";
-import { placeMediaExtractPendingNode } from "@blue-whale/persistence";
+import { placeMediaExtractPendingNode } from "@lib/shared/persistence/index.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";

@@ -3,7 +3,7 @@
 // 物理删除 TOS 对象 → 物理删除行。任一环节失败记日志，不阻塞后续批次。
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { Interval } from "@nestjs/schedule";
-import { createAssetRepo } from "@blue-whale/persistence";
+import { createAssetRepo } from "@lib/shared/persistence/index.js";
 import { createLogger } from "@blue-whale/core/logging";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";

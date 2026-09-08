@@ -20,7 +20,7 @@ import {
   fail,
   ok,
 } from "@blue-whale/contracts";
-import { createProductEventRepo } from "@blue-whale/persistence";
+import { createProductEventRepo } from "@lib/shared/persistence/index.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";

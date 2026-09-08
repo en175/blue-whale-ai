@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { createStoryboardPreviewRepo } from "@blue-whale/persistence";
+import { createStoryboardPreviewRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 type Repo = ReturnType<typeof createStoryboardPreviewRepo>;

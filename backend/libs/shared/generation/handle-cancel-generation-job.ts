@@ -2,7 +2,7 @@ import { fail, ok } from "@blue-whale/contracts";
 import type {
   GenerationCommandRepo,
   ProjectRepo,
-} from "@blue-whale/persistence";
+} from "@lib/shared/persistence/index.js";
 
 const RESOURCE_NOT_FOUND_CODE = 100301;
 

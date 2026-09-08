@@ -21,12 +21,10 @@
   ],
   "exclude": [
     "**/*.spec.ts",
-    "**/*.test.ts"
+    "**/*.test.ts",
+    "**/*.testlib.ts"
   ],
   "references": [
-    {
-      "path": "../packages/persistence"
-    },
     {
       "path": "../packages/contracts"
     },

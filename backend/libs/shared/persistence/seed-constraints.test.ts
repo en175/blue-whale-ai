@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 // C1 复盘：text 行曾在 supported_sizes 等 5 列写 NULL → fresh MySQL 8.4（STRICT_TRANS_TABLES）
 // 报 1048，listEnabledByType("text") 返回 []，接口 400。单测 mock 了 repo，测不出来，故在此静态断言。
 
-const seedPath = resolve(import.meta.dirname, "../schema/002_seed.sql");
-const baselinePath = resolve(import.meta.dirname, "../schema/001_baseline.sql");
+const seedPath = resolve(import.meta.dirname, "../../../prisma/schema/002_seed.sql");
+const baselinePath = resolve(import.meta.dirname, "../../../prisma/schema/001_baseline.sql");
 
 const NOT_NULL_COLUMNS = [
   "provider_id",

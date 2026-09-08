@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 
 const migrationSql = readFileSync(
   new URL(
-    "../prisma/migrations/20260804200000_ik67h3_mention_input_snapshot/migration.sql",
+    "../../../prisma/migrations/20260804200000_ik67h3_mention_input_snapshot/migration.sql",
     import.meta.url,
   ),
   "utf8",
 );
 const baselineSql = readFileSync(
-  new URL("../schema/001_baseline.sql", import.meta.url),
+  new URL("../../../prisma/schema/001_baseline.sql", import.meta.url),
   "utf8",
 );
 

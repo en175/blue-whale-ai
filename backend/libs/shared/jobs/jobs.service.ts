@@ -4,7 +4,7 @@ import {
   fail,
   ok,
 } from "@blue-whale/contracts";
-import { createJobRepo } from "@blue-whale/persistence";
+import { createJobRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { fallbackErrorCode } from "./error-codes.js";

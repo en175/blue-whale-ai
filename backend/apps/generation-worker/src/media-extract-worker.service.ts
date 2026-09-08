@@ -1,7 +1,7 @@
 // IKARDY：媒体提取（视频→音频）worker 服务。装配 repo + TOS 下载/上传端口 + ffmpeg，跑 runMediaExtractStep 短步骤。
 import { hostname } from "node:os";
 import { Injectable } from "@nestjs/common";
-import { createWorkerRepo } from "@blue-whale/persistence";
+import { createWorkerRepo } from "@lib/shared/persistence/index.js";
 import { createLogger } from "@blue-whale/core/logging";
 import { runMediaExtractStep } from "@lib/shared/generation-runtime/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";

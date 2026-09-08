@@ -17,7 +17,7 @@ import { GenerationCommandService } from "@lib/shared/generation/generation-comm
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 
-import { createWorkerRepo } from "@blue-whale/persistence";
+import { createWorkerRepo } from "@lib/shared/persistence/index.js";
 import { openGenerationCredential } from "@blue-whale/core";
 import { ERROR_UNSUPPORTED_INPUT } from "@blue-whale/contracts";
 import { processImageJobById, processAudioJobById, type WorkerDeps } from "@lib/shared/generation/worker/generation-worker.js";

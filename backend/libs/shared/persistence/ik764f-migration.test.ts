@@ -3,17 +3,17 @@ import { describe, expect, it } from "vitest";
 
 const migrationSql = readFileSync(
   new URL(
-    "../prisma/migrations/20260807160000_ik764f_template_tag/migration.sql",
+    "../../../prisma/migrations/20260807160000_ik764f_template_tag/migration.sql",
     import.meta.url,
   ),
   "utf8",
 );
 const baselineSql = readFileSync(
-  new URL("../schema/001_baseline.sql", import.meta.url),
+  new URL("../../../prisma/schema/001_baseline.sql", import.meta.url),
   "utf8",
 );
 const standaloneSql = readFileSync(
-  new URL("../schema/007_ik764f_template_tag.sql", import.meta.url),
+  new URL("../../../prisma/schema/007_ik764f_template_tag.sql", import.meta.url),
   "utf8",
 );
 

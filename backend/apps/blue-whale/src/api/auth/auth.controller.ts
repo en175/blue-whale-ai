@@ -6,7 +6,7 @@ import {
   type NewApiLoginResult,
 } from "@blue-whale/core";
 import { FAILURE_CODE, ok } from "@blue-whale/contracts";
-import { createAuthRepo } from "@blue-whale/persistence";
+import { createAuthRepo } from "@lib/shared/persistence/index.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { handleSendCode } from "@lib/shared/auth/handle-send-code.js";

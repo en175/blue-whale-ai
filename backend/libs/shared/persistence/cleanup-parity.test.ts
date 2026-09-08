@@ -3,23 +3,23 @@ import { describe, expect, it } from "vitest";
 
 const migrationSql = readFileSync(
   new URL(
-    "../prisma/migrations/20260831000000_cleanup_dead_tables_and_columns/migration.sql",
+    "../../../prisma/migrations/20260831000000_cleanup_dead_tables_and_columns/migration.sql",
     import.meta.url,
   ),
   "utf8",
 );
 const baselineSql = readFileSync(
-  new URL("../schema/001_baseline.sql", import.meta.url),
+  new URL("../../../prisma/schema/001_baseline.sql", import.meta.url),
   "utf8",
 );
 const standaloneSql = readFileSync(
-  new URL("../schema/010_cleanup_dead_tables_and_columns.sql", import.meta.url),
+  new URL("../../../prisma/schema/010_cleanup_dead_tables_and_columns.sql", import.meta.url),
   "utf8",
 );
 // 007(ik764f) 是 010 D4 改名链的上游：必须保持 create_time/update_time 历史形态，
 // 否则升级链上 CHANGE COLUMN 会因列不存在而失败。
 const legacy007Sql = readFileSync(
-  new URL("../schema/007_ik764f_template_tag.sql", import.meta.url),
+  new URL("../../../prisma/schema/007_ik764f_template_tag.sql", import.meta.url),
   "utf8",
 );
 

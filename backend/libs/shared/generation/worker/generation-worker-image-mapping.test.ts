@@ -1,4 +1,4 @@
-import type { WorkerRepo } from "@blue-whale/persistence";
+import type { WorkerRepo } from "@lib/shared/persistence/index.js";
 import type { AssetUploadStorage } from "@lib/shared/assets/upload.js";
 import { describe, expect, it, vi } from "vitest";
 
