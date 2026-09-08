@@ -70,22 +70,28 @@ export function createNewApiAudioProvider(
     async generate(input: GenerateAudioInput): Promise<GeneratedAudio> {
       let response;
       try {
+        // IKE4GC：透传 body 在 model/text_prompt/audio_config/watermark 基础上，携带时加 references
+        //  （seed-audio 参考素材数组）。text_prompt 原样透传（@AudioN/@ImageN 由前端负责）。
+        const payload: Record<string, unknown> = {
+          model: input.model,
+          text_prompt: input.prompt,
+          audio_config: {
+            format: "mp3",
+            sample_rate: 48000,
+            pitch_rate: 0,
+            speech_rate: 0,
+            loudness_rate: 0,
+          },
+          watermark: {},
+        };
+        if (input.references && input.references.length > 0) {
+          payload.references = input.references;
+        }
         response = await rawRequest(
           "/v1/audio/speech",
           {
             method: "POST",
-            body: JSON.stringify({
-              model: input.model,
-              text_prompt: input.prompt,
-              audio_config: {
-                format: "mp3",
-                sample_rate: 48000,
-                pitch_rate: 0,
-                speech_rate: 0,
-                loudness_rate: 0,
-              },
-              watermark: {},
-            }),
+            body: JSON.stringify(payload),
           },
           options.token,
         );

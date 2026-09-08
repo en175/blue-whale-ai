@@ -1,6 +1,16 @@
+/** IKE4GC：seed-audio 参考素材——由 worker 已解析为 audio_url/image_url 二选一字段。
+ *  音频参考（type:audio）→ audio_url；图片参考（type:image）→ image_url。 */
+export interface SeedAudioReference {
+  audio_url?: string;
+  image_url?: string;
+}
+
 export interface GenerateAudioInput {
   model: string;
   prompt: string;
+  /** IKE4GC：seed-audio《references》数组（音频≤3 + 图片≤1，二者不可混用），
+   *  由 worker 解析填充；缺省无（纯文本生成）。text_prompt 的 @AudioN/@ImageN 标记由前端负责，后端不改。 */
+  references?: SeedAudioReference[];
 }
 
 export interface GeneratedAudio {
