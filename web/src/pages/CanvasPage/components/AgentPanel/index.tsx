@@ -1,7 +1,7 @@
 /* ============================================
  * AgentPanel Agent 智能体对话面板：消息流与任务执行
  * ============================================ */
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import {
   X,
   Plus,
@@ -39,7 +39,7 @@ import { ComposerAttachmentChip } from './ComposerAttachmentChip';
 import { isInlineMediaThumbnail, MessageAssetPreview, rememberAssetUrl, useAssetUrlCache } from './MessageAssetPreview';
 import SkillModal from '@/pages/Home/components/SkillModal';
 import ConfirmModal from '@/components/ConfirmModal';
-import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
+import ChipTextEditor, { type ChipRef, type ChipTextEditorHandle } from '../ChipTextEditor';
 import {
   EMPTY_COMPOSED,
   composedIsEmpty,
@@ -453,6 +453,10 @@ interface PendingAttachment {
 }
 
 interface AgentPanelProps {
+  open?: boolean;
+  candidateBlocks?: SessionContentBlock[] | null;
+  onPrepareCandidate?: (blocks: SessionContentBlock[]) => Promise<SessionContentBlock[]>;
+  onCancelCandidate?: () => void;
   onClose: () => void;
   initialInput?: string;
   /** 生成卡引用标签：有值时输入框渲染成可移除胶囊（画布「给 Agent」），而非纯文本预填 */
@@ -509,7 +513,7 @@ function quoteTooltipOfChip(blocks: SessionContentBlock[] | undefined, chipId: s
   return text.length > 500 ? `${text.slice(0, 500)}…` : text;
 }
 
-export default function AgentPanel({ onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas, onPickFromAssets, externalAssetPicks }: AgentPanelProps) {
+export default function AgentPanel({ open = true, onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas, onPickFromAssets, externalAssetPicks, candidateBlocks, onPrepareCandidate, onCancelCandidate }: AgentPanelProps) {
   useAssetUrlCache();
   /** 富文本输入框（可多次插入生成卡引用胶囊 + 普通 @ 文本预填） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
@@ -533,6 +537,34 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const syncMediaBlocks = () => {
     setPendingMediaBlocksState([...pendingMediaBlocksRef.current]);
   };
+  const [pendingReference, setPendingReference] = useState<{ chip: ChipRef; blocks: SessionContentBlock[] } | null>(null);
+  const currentCandidateRef = useRef(candidateBlocks);
+  const preparedBlocksRef = useRef<SessionContentBlock[] | null>(null);
+  const [referenceNotice, setReferenceNotice] = useState('');
+  const [submittingMessage, setSubmittingMessage] = useState(false);
+  const submittingMessageRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!open || !candidateBlocks?.length) {
+      currentCandidateRef.current = null;
+      setPendingReference(null);
+      return;
+    }
+    if (submittingMessageRef.current) return;
+    const first = candidateBlocks[0];
+    if (pendingMediaBlocksRef.current.some((block) => block.node_id === first.node_id)) return;
+    // 仅新点选更新有效候选；删除已确认引用不能重新激活曾被忽略的点选。
+    currentCandidateRef.current = candidateBlocks;
+    setPendingReference({
+      chip: {
+        id: first.chip_id!, label: first.display_label || '素材', prompt: '',
+        ...(first.type === 'image' ? { imageUrl: first.url } : {}),
+        ...(first.type === 'video' ? { videoUrl: first.url } : {}),
+        ...(first.type === 'audio' ? { audioUrl: first.url } : {}),
+      },
+      blocks: candidateBlocks,
+    });
+  }, [candidateBlocks, open]);
+  useEffect(() => { setReferenceNotice(''); }, [pendingReference]);
   /** Agent 模型列表：全部取自接口（fetchGenerationModels text capability），无本地写死兜底 */
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
@@ -624,9 +656,22 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   /** 左缘拖拽中：整面板锁 ew-resize 光标并禁文本选中 */
   const [resizing, setResizing] = useState(false);
   const resizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  /** 关闭中：抽屉先滑出（240ms 动画）再回调 onClose 卸载 */
+  /** 关闭中：抽屉先滑出（240ms 动画）再回调 onClose 隐藏 */
   const [closing, setClosing] = useState(false);
   const closeTimerRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (open) setClosing(false);
+    else {
+      window.clearTimeout(closeTimerRef.current);
+      setPendingReference(null);
+      preparedBlocksRef.current = null;
+      setHistoryOpen(false);
+      setModelOpen(false);
+      setShowUpload(false);
+      setShowSkillModal(false);
+      setDeleteTarget(null);
+    }
+  }, [open]);
 
   /**
    * 量一次面板与它的父容器，初始化 / 缩窗 / 拖拽三处共用同一组输入。
@@ -690,6 +735,33 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
   const lastInputVersionRef = useRef(0);
   /** 上一次 composed 中的 chip IDs（用于检测 chip 是否被删除） */
   const prevChipIdsRef = useRef<Set<string>>(new Set());
+  /** 编辑器重做恢复标签时，同步恢复其已确认内容；成功发送后一起清空。 */
+  const referenceHistoryRef = useRef(new Map<string, SessionContentBlock[]>());
+  const draftEpochRef = useRef(0);
+  const draftSessionRef = useRef(sessionId);
+  const clearDraft = useCallback(() => {
+    draftEpochRef.current += 1;
+    currentCandidateRef.current = null;
+    preparedBlocksRef.current = null;
+    setPendingReference(null);
+    onCancelCandidate?.();
+    referenceHistoryRef.current.clear();
+    prevChipIdsRef.current.clear();
+    chipEditorRef.current?.clear();
+    setComposed(EMPTY_COMPOSED);
+    pendingMediaBlocksRef.current = [];
+    setPendingMediaBlocksState([]);
+    setForcedSkill(null);
+    for (const item of attachmentsRef.current) revokeAttachmentPreviewUrl(item.url);
+    setAttachments([]);
+    submittingMessageRef.current = false;
+    setSubmittingMessage(false);
+  }, [onCancelCandidate]);
+  useEffect(() => {
+    // 首次会话水合承接当前输入；已有会话被切换或删除时不能携带草稿。
+    if (draftSessionRef.current && draftSessionRef.current !== sessionId) clearDraft();
+    draftSessionRef.current = sessionId;
+  }, [sessionId, clearDraft]);
 
   useEffect(() => {
     if (!inputVersion || inputVersion === lastInputVersionRef.current) return;
@@ -725,6 +797,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
         .filter((s): s is { kind: 'ref'; ref: { id: string; label: string; prompt: string } } => s.kind === 'ref')
         .map((s) => s.ref.id),
     );
+    for (const block of pendingMediaBlocksRef.current) {
+      if (block.chip_id) {
+        referenceHistoryRef.current.set(block.chip_id, pendingMediaBlocksRef.current.filter((item) => item.chip_id === block.chip_id));
+      }
+    }
 
     // 检测是否有 chip 被删除（对比上一次的 chip IDs）
     const prevIds = prevChipIdsRef.current;
@@ -736,6 +813,13 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       pendingMediaBlocksRef.current = filtered;
       syncMediaBlocks();
       console.log('[AgentPanel] chip 删除同步, 剩余 blocks:', filtered.length);
+    }
+    const restored = [...chipIds].flatMap((id) =>
+      pendingMediaBlocksRef.current.some((block) => block.chip_id === id) ? [] : referenceHistoryRef.current.get(id) ?? [],
+    );
+    if (restored.length) {
+      pendingMediaBlocksRef.current = [...pendingMediaBlocksRef.current, ...restored];
+      syncMediaBlocks();
     }
 
     // 更新记录
@@ -799,7 +883,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
    */
   const cancellable = streaming || runningRunId !== null;
   useEffect(() => {
-    if (!cancellable) return;
+    if (!open || closing || !cancellable || pendingReference) return;
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target instanceof HTMLElement ? e.target : null;
       if (
@@ -818,7 +902,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [cancellable, stopRun]);
+  }, [open, closing, cancellable, stopRun, pendingReference]);
 
   /**
    * 轮次有任何变化（新消息、流式正文、思考、工具进度）/ 进入页面：滚动条拉到最底部。
@@ -1025,12 +1109,16 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     persistPanelWidth(width);
   };
 
-  /** 关闭：先让抽屉滑出（动画 240ms），走完再回调父组件卸载 */
+  /** 关闭：先让抽屉滑出（动画 240ms），走完再回调父组件隐藏 */
   const handleClose = useCallback(() => {
     if (closing) return;
+    currentCandidateRef.current = null;
+    preparedBlocksRef.current = null;
+    setPendingReference(null);
+    onCancelCandidate?.();
     setClosing(true);
     closeTimerRef.current = window.setTimeout(() => onClose(), DRAWER_SLIDE_MS);
-  }, [closing, onClose]);
+  }, [closing, onClose, onCancelCandidate]);
 
   useEffect(() => () => window.clearTimeout(closeTimerRef.current), []);
 
@@ -1041,8 +1129,8 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
 
   /** 开启新对话：清空当前输入、消息流、武装技能与历史下拉 */
   const handleNewChat = () => {
-    // 不清空输入框：面板明写着「未发送的草稿会自动保留」，
-    // 开新对话把用户刚敲的字抹掉，与承诺相反。
+    clearDraft();
+    draftSessionRef.current = null;
     resetChat();
     setForcedSkill(null);
     setHistoryOpen(false);
@@ -1068,6 +1156,11 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
     (composerHasText || readyAssets.length > 0 || pendingMediaBlocksState.length > 0) && !uploadingAttachment;
 
   const handleSend = async () => {
+    if (submittingMessageRef.current) return;
+    if (pendingReference) {
+      setReferenceNotice('请先确认或取消待确认引用');
+      return;
+    }
     const fullText = resolveComposed(composed).trim();
     // 胶囊有两个来源，发送时必须合成一条序列：画布 @ 进来的节点/卡片，和本地上传的素材。
     // 后者带资产库身份，序列化成 `asset_ref`（agent 会建 Grant，模型真读得到）；前者只有
@@ -1101,34 +1194,40 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
       .map((s) => s.ref);
     const chips = chipRefs.map((ref) => ({ id: ref.id, label: ref.label }));
 
-    // content 只放用户实际输入的文字；胶囊由 resourceRef 那一路序列化成部件
-    const textContent: import('@/api/agentSessions').SessionContentBlock[] = [];
-    if (userText) {
-      textContent.push({ type: 'text', text: userText });
-    }
+    // 按编辑器的行内顺序提交；删除的胶囊即使还未触发 effect 也不能残留在消息里。
+    const orderedContent: SessionContentBlock[] = composed.segments.flatMap((segment) =>
+      segment.kind === 'text'
+        ? [{ type: 'text', text: segment.value }]
+        : mediaBlocks.filter((block) => block.chip_id === segment.ref.id),
+    );
+    orderedContent.push(...mediaBlocks.filter((block) => !block.chip_id));
 
-    // 先清空再发。等 POST 回来才清，用户已经看到自己的气泡上屏、输入框里原文却还在，
-    // 极易重复点发送。失败时把原文回填，一个字都不丢。
-    chipEditorRef.current?.clear();
-    pendingMediaBlocksRef.current = [];
-    syncMediaBlocks();
+    // POST 接受前保留完整草稿，失败不需要重建段落、引用位置或缩略图。
+    submittingMessageRef.current = true;
+    setSubmittingMessage(true);
     const armed = forcedSkill;
     if (armed) setSkillNames((prev) => ({ ...prev, [armed.id]: armed.name }));
     const sentAttachments = attachments;
-    setForcedSkill(null);
-    setAttachments([]);
-    const accepted = await sendMessage(textContent, armed?.id, mediaBlocks, armed?.name, userText, chips);
-    if (!accepted) {
-      chipEditorRef.current?.setText(userText);
-      // 引用胶囊一并回填（IKDLQJ）：只回填文字会把引用弄丢，「保留原文」包括胶囊本身
-      for (const ref of chipRefs) chipEditorRef.current?.insertChip({ id: ref.id, label: ref.label, prompt: ref.prompt });
-      pendingMediaBlocksRef.current = [...mediaBlocks];
-      syncMediaBlocks();
-      setForcedSkill(armed);
-      // 附件一并回填：重传一次的代价远大于把已经拿到的 asset_id 留在手上。
-      setAttachments(sentAttachments);
-    } else {
-      for (const item of sentAttachments) revokeAttachmentPreviewUrl(item.url);
+    const sentEpoch = draftEpochRef.current;
+    const clearSubmittedContent = chipEditorRef.current?.captureSubmission();
+    const sentBlocks = new Set(orderedContent);
+    try {
+      const accepted = await sendMessage(orderedContent, armed?.id, undefined, armed?.name, userText, chips);
+      if (accepted && sentEpoch === draftEpochRef.current) {
+        for (const chip of chips) referenceHistoryRef.current.delete(chip.id);
+        clearSubmittedContent?.();
+        pendingMediaBlocksRef.current = pendingMediaBlocksRef.current.filter((block) => !sentBlocks.has(block));
+        syncMediaBlocks();
+        setForcedSkill((current) => current === armed ? null : current);
+        setAttachments((current) => current.filter((item) => !sentAttachments.some((sent) => sent.key === item.key)));
+        for (const item of sentAttachments) revokeAttachmentPreviewUrl(item.url);
+      }
+    } finally {
+      if (sentEpoch === draftEpochRef.current) {
+        submittingMessageRef.current = false;
+        setSubmittingMessage(false);
+        onCancelCandidate?.();
+      }
     }
   };
 
@@ -1228,7 +1327,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           : `${styles.panelDrawer} ${closing ? styles.panelDrawerClosing : ''}`
       } ${!floating && resizing ? styles.panelResizing : ''}`}
       style={
-        floating
+        !open ? { display: 'none' } : floating
           ? initialized
             ? { left: position.x, top: position.y, height: panelHeight, transform: 'none' }
             : undefined
@@ -1337,6 +1436,10 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                               type="button"
                               className={styles.historyItemLabel}
                               onClick={() => {
+                                if (s.session_id !== sessionId) {
+                                  clearDraft();
+                                  draftSessionRef.current = s.session_id;
+                                }
                                 switchSession(s.session_id);
                                 setHistoryOpen(false);
                               }}
@@ -1385,7 +1488,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
           <div className={styles.hintArea}>
             <h3 className={styles.hintTitle}>让 Agent 帮你创作</h3>
             <p className={styles.hintDesc}>
-              描述你想生成的图片或视频，发送第一条消息即可开始。未发送的草稿会自动保留。
+              描述你想生成的图片或视频，发送第一条消息即可开始。同一会话关闭重开后，未发送的草稿会保留。
             </p>
           </div>
 
@@ -1548,12 +1651,46 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
               ))}
             </div>
           )}
+          {referenceNotice && <div role="alert">{referenceNotice}</div>}
           <div className={styles.composerSlot}>
             <ChipTextEditor
               ref={chipEditorRef}
               placeholder="描述你的想法，使用 @ 引用素材"
               onChange={setComposed}
               onSend={handleSend}
+              readOnly={submittingMessage}
+              pendingChip={pendingReference?.chip}
+              onCancelPending={onCancelCandidate}
+              onPreparePending={async () => {
+                if (!pendingReference) return null;
+                const candidate = pendingReference.blocks;
+                const epoch = draftEpochRef.current;
+                preparedBlocksRef.current = null;
+                try {
+                  const blocks = onPrepareCandidate
+                    ? await onPrepareCandidate(pendingReference.blocks)
+                    : pendingReference.blocks;
+                  if (currentCandidateRef.current !== candidate || draftEpochRef.current !== epoch) return null;
+                  const first = blocks[0];
+                  // 快照身份区分同一节点的不同确认版本，撤销/重做不会串用新版正文。
+                  const id = first.quote_id ? `quote:${first.quote_id}` : pendingReference.chip.id;
+                  preparedBlocksRef.current = blocks.map((block) => ({ ...block, chip_id: id }));
+                  return { ...pendingReference.chip, id, label: first.display_label || pendingReference.chip.label, prompt: first.resource_text || '' };
+                } catch (error) {
+                  if (currentCandidateRef.current === candidate && draftEpochRef.current === epoch) {
+                    setReferenceNotice(`确认引用失败：${error instanceof Error ? error.message : '请检查网络后重试'}`);
+                  }
+                  return null;
+                }
+              }}
+              onConfirmPending={() => {
+                if (!pendingReference || !preparedBlocksRef.current) return;
+                pendingMediaBlocksRef.current = [...pendingMediaBlocksRef.current, ...preparedBlocksRef.current];
+                preparedBlocksRef.current = null;
+                syncMediaBlocks();
+                setPendingReference(null);
+                onCancelCandidate?.();
+              }}
               className={styles.composerEditable}
             />
           </div>
@@ -1664,7 +1801,7 @@ export default function AgentPanel({ onClose, initialInput, initialCardLabel, in
                 /* 不再拿 sessionId 当门槛：刷新后要先「取项目 → 列会话 → 连会话」几个来回，
                  * 这段时间按钮是灰的，用户以为面板必须整页加载完才能用。而 sendMessage 早就会在
                  * 会话还没建好时自己补一个（ensureSession），这道门挡的是一条本来就走得通的路。 */
-                disabled={!canSend || streaming}
+                disabled={(!canSend && !pendingReference) || streaming}
                 title={
                   streaming
                     ? '等待运行状态；超时后可重新连接'

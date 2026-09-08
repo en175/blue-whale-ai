@@ -1,10 +1,15 @@
 // IK74V8：从 new-api-client.ts 拆出（≤800 行硬线）。逐块搬运，语义不变。
 // 传输层：错误类型、响应信封解析、分页归一化与带超时/追踪头的请求器。
+import { createLogger, type Logger } from "./logger.js";
 import { generateTraceId, getCurrentTraceId } from "./trace.js";
 import type {
   NewApiClientOptions,
   NewApiPageInfo,
 } from "./new-api-types.js";
+
+/** new-api 出站失败日志（IKDZGM）：失败可定位——status/request_id/原始 body/堆栈一次带全。
+ *  传输层是所有出站调用的汇聚点，此处打日志覆盖视频/音频/图片/素材库/计费/账号所有调用方。 */
+const newApiLogger: Logger = createLogger("new-api");
 
 export class NewApiError extends Error {
   constructor(
@@ -16,6 +21,30 @@ export class NewApiError extends Error {
     super(message);
     this.name = "NewApiError";
   }
+}
+
+/** 出站失败日志（IKDZGM）：任何 new-api 调用失败都打一行结构化日志，供排查定位。
+ *  封装在同一处，失败分支统一调用。path 是调用方传入的相对路径（不记录 baseUrl，避免泄漏内部地址）。 */
+function logNewApiFailure(
+  error: NewApiError,
+  path: string,
+  requestId: string | null,
+): void {
+  const extras: Record<string, string | number> = {
+    status: error.status,
+    ...(requestId ? { request_id: requestId } : {}),
+    ...(error.code !== undefined ? { err_code: String(error.code) } : {}),
+    url: path,
+  };
+  // body 只放报错原文；detail（原始响应体）与 message 相同时不重复，仅在有差异时附加。
+  // 长度与脱敏交由 logger.error 内部的 redactLogBody 统一兜底（MAX_BODY_CHARS=4096）。
+  const detailText =
+    error.detail != null ? JSON.stringify(error.detail) : "";
+  const body =
+    detailText && detailText !== error.message
+      ? `${error.message} | resp: ${detailText}`
+      : error.message;
+  newApiLogger.error(body, extras);
 }
 
 /** 超时错误（IKDQ5F）：出站请求在 timeoutMs 内未返回，AbortController 主动中止。
@@ -173,8 +202,11 @@ async function performRequest<T>(
     } catch {
       if (controller.signal.aborted) {
         // IKDQ5F：超时中止（AbortController 主动 abort）→ 可区分超时语义的 NewApiTimeoutError，
-        // 不再与「响应非 JSON」混为一个 502 裸 NewApiError。
-        throw new NewApiTimeoutError();
+        // 不再与「响应非 JSON」混为一个 502 裸 NewApiError。同时为「请求已发出但未收到有效响应」
+        // 保留可定位性：status=503/request_id 缺省，堆栈已在 NewApiTimeoutError 携带。
+        const failed = new NewApiTimeoutError();
+        logNewApiFailure(failed, path, null);
+        throw failed;
       }
       payload = null;
     }
@@ -182,27 +214,39 @@ async function performRequest<T>(
     if (error instanceof NewApiError) throw error;
     // IKDQ5F：fetch 层主动 abort（AbortSignal.timeout / controller.abort）同样归超时，
     // 供调用方区分 provider_timeout；其余网络异常保持旧语义「new-api 不可达」。
-    if (controller.signal.aborted) throw new NewApiTimeoutError();
-    throw new NewApiError("new-api 不可达", 503);
+    if (controller.signal.aborted) {
+      const failed = new NewApiTimeoutError();
+      logNewApiFailure(failed, path, null);
+      throw failed;
+    }
+    const failed = new NewApiError("new-api 不可达", 503);
+    logNewApiFailure(failed, path, null);
+    throw failed;
   } finally {
     clearTimeout(timeout);
     init.signal?.removeEventListener("abort", forwardAbort);
   }
 
   if (payload === null) {
-    throw new NewApiError(
+    const parsedRequestId = response.headers.get("X-Oneapi-Request-Id");
+    const failed = new NewApiError(
       "new-api 响应不是有效 JSON",
       502,
       "invalid_json_response",
     );
+    logNewApiFailure(failed, path, parsedRequestId);
+    throw failed;
   }
   if (!response.ok || isBusinessFailure(payload)) {
-    throw new NewApiError(
+    const requestId = response.headers.get("X-Oneapi-Request-Id");
+    const failed = new NewApiError(
       messageFrom(payload, `new-api 请求失败: ${response.status}`),
       response.status,
       codeFrom(payload),
       payload,
     );
+    logNewApiFailure(failed, path, requestId);
+    throw failed;
   }
   return {
     payload: payload as T,
@@ -300,8 +344,15 @@ export function createNewApiRawRequest(
       });
     } catch (error) {
       if (error instanceof NewApiError) throw error;
-      if (controller.signal.aborted) throw new NewApiTimeoutError();
-      throw new NewApiError("new-api 不可达", 503);
+      // raw 路径同样给失败留痕（音频/视频 raw 调用用）——失败要知道为啥失败（IKDZGM）。
+      if (controller.signal.aborted) {
+        const failed = new NewApiTimeoutError();
+        logNewApiFailure(failed, path, null);
+        throw failed;
+      }
+      const failed = new NewApiError("new-api 不可达", 503);
+      logNewApiFailure(failed, path, null);
+      throw failed;
     } finally {
       clearTimeout(timeout);
       init.signal?.removeEventListener("abort", forwardAbort);

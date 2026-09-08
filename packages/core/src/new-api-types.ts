@@ -101,8 +101,11 @@ export interface NewApiImageEditInput {
 }
 
 export type NewApiVideoReference = {
-  type: "image" | "video";
+  /** IKDJNZ：参考音频（type:"audio"）作为普通 reference；首尾帧仍只允许图片。 */
+  type: "image" | "video" | "audio";
   url: string;
+  /** IKDJNZ：单数组 references 语义下，帧条目带 role（first_frame/last_frame）；普通参考无。 */
+  role?: "first_frame" | "last_frame";
 };
 
 export interface NewApiVideoInput {

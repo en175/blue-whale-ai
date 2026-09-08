@@ -1,5 +1,4 @@
 import { Producer } from "rocketmq-client-nodejs";
-import { Queue, type ConnectionOptions, type JobsOptions } from "bullmq";
 
 import {
   AUDIO_GENERATION_TAG,
@@ -8,75 +7,18 @@ import {
   VIDEO_GENERATION_QUEUE,
 } from "./queue.constants.js";
 
+/** 唤醒消费者统一走 RocketMQ：RocketMqVideoConsumer（tag=step）+ RocketMqMediaExtractConsumer（tag=media_extract）
+ *  + RocketMqImageConsumer（tag=image，IKBGKA，Semaphore(IMAGE_CONCURRENCY)）
+ *  + RocketMqAudioConsumer（tag=audio，IKCR78，Semaphore(AUDIO_CONCURRENCY)）
+ *  producer 侧 enqueueVideoGenerationJob / enqueueMediaExtractJob / enqueueImageGenerationJob
+ *  / enqueueAudioGenerationJob 同走 RocketMQ（IKDZJK：收敛为 rocketmq 唯一驱动）。 */
+
 /** IKBBXH：RocketMQ producer 延时下限（ms）。topic 只收 DELAY 消息，delay≤0 也落到该值，保证消息判为 DELAY。 */
 export const VIDEO_MIN_DELAY_MS = 1_000;
 
 export type VideoQueueProducer = {
   enqueue(jobId: string, options?: { delayMs?: number }): Promise<void>;
 };
-
-type QueuePort = {
-  add(
-    name: string,
-    data: { jobId: string },
-    options: JobsOptions,
-  ): Promise<unknown>;
-};
-
-/** Redis 连接配置：显式 REDIS_HOST/PORT/DB/PASSWORD 优先，缺失回退解析 REDIS_CONN_STRING。 */
-export function loadRedisConnection(
-  env: Readonly<Record<string, string | undefined>> = process.env,
-  worker = false,
-): ConnectionOptions {
-  let { REDIS_HOST, REDIS_PORT, REDIS_DB, REDIS_PASSWORD } = env;
-  if (!REDIS_HOST && env.REDIS_CONN_STRING) {
-    try {
-      const u = new URL(env.REDIS_CONN_STRING);
-      REDIS_HOST = u.hostname;
-      REDIS_PORT = u.port;
-      REDIS_DB = u.pathname.replace(/^\//, "");
-      if (u.password) REDIS_PASSWORD = decodeURIComponent(u.password);
-    } catch {
-      // 解析失败走默认（127.0.0.1）
-    }
-  }
-  return {
-    host: REDIS_HOST ?? "127.0.0.1",
-    port: Number.parseInt(REDIS_PORT ?? "6379", 10),
-    db: Number.parseInt(REDIS_DB ?? "0", 10),
-    ...(REDIS_PASSWORD ? { password: REDIS_PASSWORD } : {}),
-    maxRetriesPerRequest: worker ? null : 1,
-    keepAlive: 30_000,
-  };
-}
-
-/** BullMQ 适配器：把 Queue 包成 VideoQueueProducer 端口（VIDEO_QUEUE_DRIVER=bullmq 回退路径）。jobName 区分任务类型（step=视频 / extract=媒体提取）。
- *  注：BullMQ/Redis 无「只收 DELAY」的 topic 约束，delay=0 即即时任务——只有 RocketMQ 路径（createRocketMqVideoProducer）
- *  需要 ≥VIDEO_MIN_DELAY_MS 的延时下限来保证消息判为 DELAY，勿把此下限搬到 BullMQ 适配器。 */
-export function createVideoQueueProducer(
-  queue: QueuePort,
-  jobName = "step",
-  now: () => number = Date.now,
-): VideoQueueProducer {
-  return {
-    async enqueue(jobId, options = {}) {
-      const delay = Math.max(0, options.delayMs ?? 0);
-      const runAt = now() + delay;
-      await queue.add(
-        jobName,
-        { jobId },
-        {
-          jobId: `video-${jobId}-${runAt}`,
-          delay,
-          attempts: 3,
-          backoff: { type: "exponential", delay: 1_000 },
-          removeOnComplete: 1_000,
-          removeOnFail: 5_000,
-        },
-      );
-    },
-  };
-}
 
 export type RocketMqConfig = {
   /** gRPC proxy 端点（如 115.190.244.91:8081）。 */
@@ -121,15 +63,6 @@ export function createRocketMqVideoProducer(
   };
 }
 
-let queue: Queue<{ jobId: string }> | null = null;
-
-function getQueue(): Queue<{ jobId: string }> {
-  queue ??= new Queue(VIDEO_GENERATION_QUEUE, {
-    connection: loadRedisConnection(),
-  });
-  return queue;
-}
-
 let rocketMqProducer: Producer | null = null;
 let rocketMqStartup: Promise<Producer> | null = null;
 
@@ -139,7 +72,7 @@ async function getStartedRocketMqProducer(
 ): Promise<Producer> {
   if (!config.endpoints) {
     throw new Error(
-      "VIDEO_QUEUE_DRIVER=rocketmq 但未配置 ROCKETMQ_ENDPOINTS（测试环境 gRPC 端点，如 115.190.244.91:8081）",
+      "未配置 ROCKETMQ_ENDPOINTS（测试环境 gRPC 端点，如 115.190.244.91:8081）",
     );
   }
   if (!rocketMqStartup) {
@@ -169,22 +102,17 @@ async function getStartedRocketMqProducer(
   return rocketMqStartup;
 }
 
-/** 视频 job 入队（producer 侧入口）。driver 默认 rocketmq；VIDEO_QUEUE_DRIVER=bullmq 回退 Redis 队列。 */
+/** 视频 job 入队（producer 侧入口）。rocketmq 唯一驱动。 */
 export async function enqueueVideoGenerationJob(
   jobId: string,
   options?: { delayMs?: number },
 ): Promise<void> {
-  const driver = process.env.VIDEO_QUEUE_DRIVER ?? "rocketmq";
-  if (driver === "rocketmq") {
-    const config = loadRocketMqConfig();
-    const producer = await getStartedRocketMqProducer(config);
-    await createRocketMqVideoProducer(producer, {
-      topic: config.topic,
-      tag: config.tag,
-    }).enqueue(jobId, options);
-    return;
-  }
-  await createVideoQueueProducer(getQueue()).enqueue(jobId, options);
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqVideoProducer(producer, {
+    topic: config.topic,
+    tag: config.tag,
+  }).enqueue(jobId, options);
 }
 
 /** 媒体提取（视频→音频）job 入队（IKARDY）：复用视频 topic/queue，用独立 tag/jobName「extract」区分任务类型。 */
@@ -192,20 +120,12 @@ export async function enqueueMediaExtractJob(
   jobId: string,
   options?: { delayMs?: number },
 ): Promise<void> {
-  const driver = process.env.VIDEO_QUEUE_DRIVER ?? "rocketmq";
-  if (driver === "rocketmq") {
-    const config = loadRocketMqConfig();
-    const producer = await getStartedRocketMqProducer(config);
-    await createRocketMqVideoProducer(producer, {
-      topic: config.topic,
-      tag: MEDIA_EXTRACT_TAG,
-    }).enqueue(jobId, options);
-    return;
-  }
-  await createVideoQueueProducer(getQueue(), MEDIA_EXTRACT_TAG).enqueue(
-    jobId,
-    options,
-  );
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqVideoProducer(producer, {
+    topic: config.topic,
+    tag: MEDIA_EXTRACT_TAG,
+  }).enqueue(jobId, options);
 }
 
 /** 图片生成 job 入队（IKBGKA）：复用视频 topic/queue，用独立 tag「image」区分任务类型。 */
@@ -213,20 +133,12 @@ export async function enqueueImageGenerationJob(
   jobId: string,
   options?: { delayMs?: number },
 ): Promise<void> {
-  const driver = process.env.VIDEO_QUEUE_DRIVER ?? "rocketmq";
-  if (driver === "rocketmq") {
-    const config = loadRocketMqConfig();
-    const producer = await getStartedRocketMqProducer(config);
-    await createRocketMqVideoProducer(producer, {
-      topic: config.topic,
-      tag: IMAGE_GENERATION_TAG,
-    }).enqueue(jobId, options);
-    return;
-  }
-  await createVideoQueueProducer(getQueue(), IMAGE_GENERATION_TAG).enqueue(
-    jobId,
-    options,
-  );
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqVideoProducer(producer, {
+    topic: config.topic,
+    tag: IMAGE_GENERATION_TAG,
+  }).enqueue(jobId, options);
 }
 
 /** 音频生成 job 入队（IKCR78）：复用视频 topic/queue，用独立 tag「audio」区分任务类型。 */
@@ -234,26 +146,15 @@ export async function enqueueAudioGenerationJob(
   jobId: string,
   options?: { delayMs?: number },
 ): Promise<void> {
-  const driver = process.env.VIDEO_QUEUE_DRIVER ?? "rocketmq";
-  if (driver === "rocketmq") {
-    const config = loadRocketMqConfig();
-    const producer = await getStartedRocketMqProducer(config);
-    await createRocketMqVideoProducer(producer, {
-      topic: config.topic,
-      tag: AUDIO_GENERATION_TAG,
-    }).enqueue(jobId, options);
-    return;
-  }
-  await createVideoQueueProducer(getQueue(), AUDIO_GENERATION_TAG).enqueue(
-    jobId,
-    options,
-  );
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqVideoProducer(producer, {
+    topic: config.topic,
+    tag: AUDIO_GENERATION_TAG,
+  }).enqueue(jobId, options);
 }
 
 export async function closeVideoGenerationQueue(): Promise<void> {
-  const current = queue;
-  queue = null;
-  await current?.close();
   const startup = rocketMqStartup;
   rocketMqProducer = null;
   rocketMqStartup = null;

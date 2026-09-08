@@ -1,4 +1,5 @@
 // IKBQEE / ADR-0078 二期：对外数值错误码映射（前端按 code 映射文案的唯一来源）。
+// 定义收敛到 error-codes.ts（高内聚），此处直接测它。
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,7 +12,7 @@ import {
   errorCodeToNumeric,
   isContentPolicySignal,
   isQuotaSignal,
-} from "./generation-error-codes.js";
+} from "./error-codes.js";
 
 describe("generation error numeric codes (external contract)", () => {
   it("关键映射稳定（前端契约）", () => {

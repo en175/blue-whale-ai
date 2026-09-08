@@ -241,22 +241,22 @@ export default function CanvasToolbar({
       {/* 分隔线 */}
       <div className={styles.divider} />
 
-      {/* 图片对话 */}
+      {/* 图片 */}
       <button
         className={`${styles.toolBtn} ${showImageDialog ? styles.toolBtnActive : ''}`}
         onClick={onToggleImageDialog}
-        data-tooltip="图片对话"
-        aria-label="图片对话"
+        data-tooltip="图片"
+        aria-label="图片"
       >
         <ImagePlus size={20} strokeWidth={2} />
       </button>
 
-      {/* 视频对话 */}
+      {/* 视频 */}
       <button
         className={`${styles.toolBtn} ${showVideoDialog ? styles.toolBtnActive : ''}`}
         onClick={onToggleVideoDialog}
-        data-tooltip="视频对话"
-        aria-label="视频对话"
+        data-tooltip="视频"
+        aria-label="视频"
       >
         <Video size={20} strokeWidth={2} />
       </button>
@@ -265,8 +265,8 @@ export default function CanvasToolbar({
       <button
         className={`${styles.toolBtn} ${showAudioDialog ? styles.toolBtnActive : ''}`}
         onClick={onToggleAudioDialog}
-        data-tooltip="音频生成"
-        aria-label="音频生成"
+        data-tooltip="音频"
+        aria-label="音频"
       >
         <AudioLines size={20} strokeWidth={2} />
       </button>

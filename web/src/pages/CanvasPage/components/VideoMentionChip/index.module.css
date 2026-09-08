@@ -72,3 +72,14 @@
   object-fit: contain;
   background: #000;
 }
+
+.audioPreview {
+  display: block;
+  z-index: 10000;
+  width: min(300px, 80vw);
+}
+
+.audioPreview audio {
+  display: block;
+  width: 100%;
+}

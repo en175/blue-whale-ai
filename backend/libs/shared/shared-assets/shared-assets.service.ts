@@ -3,7 +3,7 @@ import {
   createSharedAssetRepo,
   type SharedAssetRepo,
   type SharedAssetRow,
-} from "@blue-whale/persistence";
+} from "@lib/shared/persistence/index.js";
 import {
   RESOURCE_NOT_FOUND_CODE,
   SHARED_ASSET_EMPTY_CARD_CODE,

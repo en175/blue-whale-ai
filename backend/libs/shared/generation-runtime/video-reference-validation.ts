@@ -27,16 +27,22 @@ function validateReferences(
 ): VideoReference[] {
   let imageCount = 0;
   let videoCount = 0;
+  let audioCount = 0;
   let knownVideoDuration = 0;
   const references = assets.map<VideoReference>((asset) => {
     if (asset.type === "image") {
       imageCount += 1;
       return { type: "image", url: asset.url };
     }
+    if (asset.type === "audio") {
+      // IKDJNZ：参考音频——本地音频素材作为 audio reference 支持（不占图/视频额度）。
+      audioCount += 1;
+      return { type: "audio", url: asset.url };
+    }
     if (asset.type !== "video") {
       throw new VideoInputError(
         ERROR_UNSUPPORTED_INPUT,
-        "视频生成只支持图片或视频参考素材",
+        "视频生成只支持图片、视频或音频参考素材",
       );
     }
     videoCount += 1;
@@ -47,13 +53,15 @@ function validateReferences(
     return { type: "video", url: asset.url };
   });
 
-  // 素材库引用：并入图/视频数量并集与 Seedance 2.0 约束；
+  // 素材库引用：并入图/视频/音频数量并集与 Seedance 2.0 约束；
   // 时长/大小/分辨率等物理校验只作用于本地 Asset（素材库素材由上游强校验）。
   for (const material of materials) {
     if (material.type === "image") {
       imageCount += 1;
-    } else {
+    } else if (material.type === "video") {
       videoCount += 1;
+    } else {
+      audioCount += 1;
     }
     references.push({ type: material.type, url: `asset://${material.id}` });
   }
@@ -64,10 +72,17 @@ function validateReferences(
       "Seedance 2.0 最多支持 9 张参考图片和 3 个参考视频",
     );
   }
-  if (videoCount > 0 && !isSeedance2Model(model)) {
+  // IKDJNZ：参考音频数上限沿用参考视频同档（3）；参考音频仅 Seedance 2.0 支持（同参考视频）。
+  if (audioCount > MAX_REFERENCE_VIDEOS) {
+    throw new VideoInputError(
+      ERROR_REFERENCE_LIMIT_EXCEEDED,
+      "Seedance 2.0 最多支持 3 个参考音频",
+    );
+  }
+  if ((videoCount > 0 || audioCount > 0) && !isSeedance2Model(model)) {
     throw new VideoInputError(
       ERROR_UNSUPPORTED_INPUT,
-      "只有 Seedance 2.0 支持参考视频",
+      "只有 Seedance 2.0 支持参考视频和参考音频",
     );
   }
   if (knownVideoDuration > MAX_REFERENCE_VIDEO_SECONDS) {

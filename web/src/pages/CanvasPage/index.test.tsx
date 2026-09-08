@@ -7,11 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CanvasPage from './index';
 import headerStyles from './components/CanvasHeader/index.module.css';
 
-/* 本测试只验证 CanvasPage 的接线：showAgent 同时驱动面板挂载与 CanvasHeader 入口显隐。
+/* 本测试只验证 CanvasPage 的接线：showAgent 同时驱动面板与 CanvasHeader 入口显隐。
    被测协作方是真实 CanvasHeader；面板本身的抽屉行为由 AgentPanel 自己的测试覆盖，这里打桩。 */
 vi.mock('./components/AgentPanel', () => ({
-  default: ({ onClose }: { onClose: () => void }) =>
-    createElement(
+  default: ({ onClose, open }: { onClose: () => void; open: boolean }) =>
+    !open ? null : createElement(
       'button',
       { 'data-testid': 'agent-panel-stub', onClick: onClose },
       'AgentPanel',
@@ -173,7 +173,7 @@ describe('CanvasPage Agent 面板接线（IKDLD4）', () => {
     expect(agentEntry()!.classList.contains(headerStyles.agentBtnHidden)).toBe(false);
   });
 
-  it('打开面板后右上角 Agent 入口隐藏，关闭后面板卸载、入口恢复', async () => {
+  it('打开面板后右上角 Agent 入口隐藏，关闭后面板隐藏、入口恢复', async () => {
     await renderPage();
 
     await act(async () => {

@@ -788,10 +788,10 @@ export function useAgentSession(projectId: string, agentModel?: string) {
       chips?: { id: string; label: string }[],
     ): Promise<boolean> => {
       const textBlocks = content
-        .filter((b) => b.type === 'text')
+        .filter((b) => b.type === 'text' && !b.quote_id)
         .filter((b) => (b.text ?? '').trim().length > 0);
       // 没有显式传入就从 content 里捞非文本块，调用方少传一个参数也不会把胶囊漏掉。
-      const finalResourceRef = resourceRef ?? content.filter((b) => b.type !== 'text');
+      const finalResourceRef = resourceRef ?? content.filter((b) => b.type !== 'text' || b.quote_id);
       // 纯附件消息是合法的：上传一张图、一个字不打就发，是用户对附件做的第一个动作（IKAL46）。
       if (textBlocks.length === 0 && finalResourceRef.length === 0) return false;
       if (!projectId) return false;
@@ -841,9 +841,9 @@ export function useAgentSession(projectId: string, agentModel?: string) {
       beginTurn();
       try {
         const connectionEpoch = connectionEpochRef.current;
-        const ack = await api.sendSessionMessage(projectId, sid, textBlocks, {
+        const ack = await api.sendSessionMessage(projectId, sid, content, {
           forcedCreativeSkillId: forcedSkillId,
-          resourceRef: finalResourceRef,
+          resourceRef,
           skillRef,
           ...(agentModelRef.current ? { model: agentModelRef.current } : {}),
         });

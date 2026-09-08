@@ -1,36 +1,13 @@
 /** 对齐 Java blue-whale-global Result<T>：{ code, msg, data }，msg 默认 null（不是 "success"）。
  *  前端 apiRequest 只看 code !== 200 抛错。
- *  错误码段位约定（IKBQEE / ADR-0078 二期，全项目统一）：
+ *  错误码段位约定与全部业务错误码见 error-codes.ts（IKDZGM / ADR-0083 高内聚唯一来源）：
  *  - 4xx / 5xx：HTTP 语义错误（参数/未授权/资源不存在等基础设施错误）；
  *  - 1xxxx（100000+）：Java SystemCode 系全局业务码（DATA_NOT_EXIST / PLAN_APPLICATION_* 等）；
- *  - 1xxx（1000-1999）：领域错误码——生成任务领域已用 1001-1028（quota_exhausted=1001），
- *    其他领域（Agent/资产/支付等）从 1100+ 起扩展，每错一码，前端按码映射文案。
- *    定义与映射见 packages/contracts/src/generation-error-codes.ts（跨包共享唯一来源）。 */
-export const SUCCESS_CODE = 200;
-export const FAILURE_CODE = 400;
-export const DATA_NOT_EXIST_CODE = 100100; // 对齐 Java SystemCode.DATA_NOT_EXIST_CODE
-export const ASSET_UNAVAILABLE_CODE = 100202; // 对齐 Java SystemCode.ASSET_UNAVAILABLE_CODE
-export const RESOURCE_NOT_FOUND_CODE = 100301; // 对齐 Java SystemCode.RESOURCE_NOT_FOUND_CODE（不泄漏存在性）
-export const IDEMPOTENCY_KEY_REUSED_CODE = 100302; // 对齐 Java SystemCode.IDEMPOTENCY_KEY_REUSED_CODE
-export const AGENT_RUN_CONFLICT_CODE = 100303; // AgentRun 状态冲突（输入请求失效/运行中/配置冻结/当前状态不可停止）
-export const AGENT_RUN_ALREADY_TERMINAL_CODE = 100307; // AgentRun 已处于终态，停止命令不改写（契约 §8.2）
-export const AGENT_RUN_NOT_RETRYABLE_CODE = 100308; // AgentRun 非 failed 状态，不可手动重试（契约 §8.3）
-export const PARAM_MISSING_CODE = 100000; // 对齐 Java GlobalException(100000, "缺少 Idempotency-Key")
-// 计划应用闭环（IK67H9 / T11）：复用既有 IDEMPOTENCY_KEY_REUSED_CODE=100302 处理同 key 不同内容
-export const PLAN_APPLICATION_PLAN_NOT_FOUND_CODE = 100401; // PlanMessage 不存在或不属于该项目
-export const PLAN_APPLICATION_KIND_UNSUPPORTED_CODE = 100402; // PlanMessage 的 application_kind 当前不支持应用（当前仅 scene_card_create 与 image_generate 可应用）
-export const PLAN_APPLICATION_CAPABILITY_DRIFT_CODE = 100403; // 冻结能力快照与当前能力版本不一致（CONTEXT requires_new_plan）
-export const PLAN_APPLICATION_ALREADY_APPLIED_CODE = 100404; // 该 PlanMessage 已被成功应用过，不可重复应用
-export const PLAN_APPLICATION_QUOTA_INSUFFICIENT_CODE = 100405; // 余额不足（retryable_blocked），充值后用新 CommandId 重试
-// SceneCard 生成编辑器（IK67HB / T13）：版本冲突零写入保留草稿（CONTEXT L84-89 乐观并发）
-export const SCENE_CARD_VERSION_CONFLICT_CODE = 100406; // base 版本与当前 SceneCard/Preset 版本不一致
-// 计划应用覆盖分支（IK67HA / T12）：100406 已被 T13 占用，T12 target_stale 用 100407
-export const PLAN_APPLICATION_TARGET_STALE_CODE = 100407; // 覆盖目标场景卡已变化（版本/删除/越权），需生成新计划
-// 画布共享资产（IK9QKP）：E6 空参数卡片不可保存（无参考图且无描述，须补全其一）
-export const SHARED_ASSET_EMPTY_CARD_CODE = 100408;
-// 共享资产类型不支持（判别联合兜底，防枚举漂移/越权传值）。
-// 100409 已被 generation retry 的 IDEMPOTENCY_CONFLICT_CODE 占用，勿复用。
-export const SHARED_ASSET_TYPE_UNSUPPORTED_CODE = 100410;
+ *  - 1xxx（1000-1999）：领域错误码——生成任务领域已用 1001-1028（quota_exhausted=1001）。
+ *  本文件只负责信封 + HTTP 汇总码；业务错误码全部定义在 error-codes.ts。 */
+import { FAILURE_CODE, SUCCESS_CODE } from "./error-codes.js";
+
+export { FAILURE_CODE, SUCCESS_CODE };
 
 export interface ResultEnvelope<T> {
   code: number;

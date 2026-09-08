@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { createAssetRepo } from "@blue-whale/persistence";
+import { createAssetRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { AssetStorageService } from "./storage.service.js";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
@@ -63,6 +63,26 @@ export class AssetService {
     input: Parameters<ReturnType<typeof createAssetRepo>["createUploadedAsset"]>[0],
   ) {
     return this.repo.createUploadedAsset(input);
+  }
+
+  /** IKDJNZ：素材库素材创建成功后，绑定原始素材 ↔ 素材库素材（覆盖写）。 */
+  linkAssetToMaterial(input: {
+    userId: string;
+    assetId: string;
+    materialId: string;
+    materialGroupId: string;
+  }) {
+    return this.repo.linkAssetToMaterial(input);
+  }
+
+  /** IKDJNZ：素材库素材删除后，清除本地 assets 的 material_id 关联。 */
+  clearMaterialLink(userId: string, materialId: string) {
+    return this.repo.clearMaterialLink(userId, materialId);
+  }
+
+  /** IKDJNZ：素材库组删除后，按组批量清除本地 assets 的 material 关联。 */
+  clearMaterialGroupLink(userId: string, materialGroupId: string) {
+    return this.repo.clearMaterialGroupLink(userId, materialGroupId);
   }
 
   findAccessible(projectId: string, assetId: string, userId: string) {

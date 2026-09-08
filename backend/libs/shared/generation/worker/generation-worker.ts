@@ -1,7 +1,7 @@
 import {
   DEFAULT_MAX_REFERENCE_IMAGES,
   type WorkerRepo,
-} from "@blue-whale/persistence";
+} from "@lib/shared/persistence/index.js";
 import type { AssetUploadStorage } from "@lib/shared/assets/upload.js";
 import sharp from "sharp";
 

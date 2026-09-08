@@ -1,4 +1,4 @@
-import type { ModelCapabilityRepo } from "@blue-whale/persistence";
+import type { ModelCapabilityRepo } from "@lib/shared/persistence/index.js";
 
 /** 文生文接口（IK6ZEH）：OpenAI 兼容薄代理。
  *  后端只做登录鉴权 + text 白名单闸，body 全透传 Go /v1/chat/completions。

@@ -593,10 +593,17 @@ export function sendSessionMessage(
   },
 ): Promise<SessionMessageAck> {
   const { forcedCreativeSkillId: forcedSkillId, signal, resourceRef, skillRef, model } = options ?? {};
+  const hasInlineReferences = content.some((block) => block.type !== 'text' || block.quote_id);
   const parts: Record<string, unknown>[] = [
-    ...content
-      .filter(block => block.type === 'text' && (block.text ?? '').trim().length > 0)
-      .map(block => ({ type: 'text', text: (block.text ?? '').trim() })),
+    ...content.flatMap((block): Record<string, unknown>[] => {
+      if (block.type === 'text' && !block.quote_id) {
+        return (block.text ?? '').trim()
+          ? [{ type: 'text', text: hasInlineReferences ? block.text! : block.text!.trim() }]
+          : [];
+      }
+      const part = toReferencePart(block);
+      return part ? [part] : [];
+    }),
     ...(resourceRef ?? []).map(toReferencePart).filter((part): part is Record<string, unknown> => part !== null),
     ...(skillRef ? [{ type: 'skill_ref', skill_id: skillRef.skill_id, name: skillRef.name }] : []),
   ];

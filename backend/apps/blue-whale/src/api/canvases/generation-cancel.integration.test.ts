@@ -17,13 +17,25 @@ import { GenerationCommandService } from "@lib/shared/generation/generation-comm
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 
-import { createWorkerRepo } from "@blue-whale/persistence";
+import { createWorkerRepo } from "@lib/shared/persistence/index.js";
 import { openGenerationCredential } from "@blue-whale/core";
 import { ERROR_UNSUPPORTED_INPUT } from "@blue-whale/contracts";
 import { processImageJobById, processAudioJobById, type WorkerDeps } from "@lib/shared/generation/worker/generation-worker.js";
 import { ImageProviderError, type GenerateImageInput } from "@lib/shared/generation/worker/image-provider.js";
 import { runVideoJobStep } from "@lib/shared/generation-runtime/video-job-runner.js";
 import { createPassthroughVideoMediaRelay } from "@lib/shared/generation-runtime/tos-video-media-relay.js";
+
+vi.mock("@lib/shared/generation/video-queue.js", () => ({
+  enqueueVideoGenerationJob: vi.fn(async () => {}),
+  enqueueImageGenerationJob: vi.fn(async () => {}),
+  enqueueAudioGenerationJob: vi.fn(async () => {}),
+  enqueueMediaExtractJob: vi.fn(async () => {}),
+  loadRocketMqConfig: vi.fn(() => ({
+    endpoints: "", sslEnabled: false, topic: "generation-video", tag: "step",
+  })),
+  createRocketMqVideoProducer: vi.fn(() => ({ enqueue: vi.fn(async () => {}) })),
+  closeVideoGenerationQueue: vi.fn(async () => {}),
+}));
 
 // IKDMQW「取消、删除与任务完成竞态」公开接口集成（契约沿用 IKDMQQ~IKDMQV）：
 // 图片取消直接收敛 cancelled 并撤销写入权；视频/音频保留软取消。非本次取消形成的终态拒绝取消（100301）；
@@ -316,10 +328,8 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
   it.runIf(process.env.IKDMQW_BROWSER)("browser: 三类媒体取消回待生成、删除先取消、取消失败保留与抢先成功竞态", async () => {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
-    // 无 RocketMQ：切 BullMQ 入队（本机 Redis），任务停留 queued 等待 worker——卡片稳定「生成中」，
+    // 入队函数在测试中被 stub，任务停留 queued 等待 worker——卡片稳定「生成中」，
     // 真实 Worker 按 jobId 消费；仅供应商端口控制执行结果。
-    const previousDriver = process.env.VIDEO_QUEUE_DRIVER;
-    process.env.VIDEO_QUEUE_DRIVER = "bullmq";
     const projectId = (await projects.create("987654", "IKDMQW browser")).id;
     expect(
       (await saveCanvas(projectId, [{ id: "t1", type: "textNode", position: { x: 560, y: 80 }, data: { title: "雨夜", text: "赛博朋克" } }], [], "missing")).status,
@@ -490,8 +500,6 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
       await browser.close();
       await vite.close();
     } finally {
-      if (previousDriver === undefined) delete process.env.VIDEO_QUEUE_DRIVER;
-      else process.env.VIDEO_QUEUE_DRIVER = previousDriver;
       await browser.close().catch(() => {});
       await vite.close().catch(() => {});
     }

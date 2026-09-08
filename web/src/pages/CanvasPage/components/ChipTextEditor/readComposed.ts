@@ -26,7 +26,7 @@ export function readComposed(): ComposedValue {
   };
   const walk = (node: LexicalNode) => {
     if ($isChipNode(node)) {
-      segments.push({ kind: 'ref', ref: node.toRef() });
+      if (!node.isPending()) segments.push({ kind: 'ref', ref: node.toRef() });
       return;
     }
     if ($isElementNode(node)) {

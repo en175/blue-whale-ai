@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { createModelCapabilityRepo } from "@blue-whale/persistence";
+import { createModelCapabilityRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 type Repo = ReturnType<typeof createModelCapabilityRepo>;

@@ -224,15 +224,15 @@ describe("video job runner recovery", () => {
       code: "reference_limit_exceeded",
     },
     {
-      name: "audio Asset",
-      model: "doubao-seedance-2-0-260128",
-      assets: [{ id: "1", type: "audio", url: "https://tos.test/1.mp3", mime: "audio/mpeg" }],
-      code: "unsupported_input",
-    },
-    {
       name: "video on a non-2.0 model",
       model: "doubao-seedance-1-5-pro-251215",
       assets: [{ id: "1", type: "video", url: "https://tos.test/1.mp4", mime: "video/mp4", size: 100, duration: 3 }],
+      code: "unsupported_input",
+    },
+    {
+      name: "audio Asset on a non-2.0 model (IKDJNZ audio reference)",
+      model: "doubao-seedance-1-5-pro-251215",
+      assets: [{ id: "1", type: "audio", url: "https://tos.test/1.mp3", mime: "audio/mpeg" }],
       code: "unsupported_input",
     },
     {
@@ -1313,6 +1313,344 @@ describe("video job runner material library references", () => {
   });
 });
 
+describe("video job runner asset↔material link (IKDJNZ)", () => {
+  it("linked reference asset converts to material reference (asset://), unlinked keeps url", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "ikdjnz-linked-refs", status: "queued" });
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "401",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "关联参考",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          reference_asset_ids: ["11", "12"],
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikdjnz-refs",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([
+        { id: "11", type: "image", url: "https://tos.test/a.png", material_id: "asset-linked-1" },
+        { id: "12", type: "image", url: "https://tos.test/b.png", material_id: null },
+      ]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikdjnz-refs",
+      jobId: "401",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    // 关联的 11 转 asset://，未关联的 12 保留本地 url（master 排序：本地在前、素材库在后）。
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        references: [
+          { type: "image", url: "https://tos.test/b.png" },
+          { type: "image", url: "asset://asset-linked-1" },
+        ],
+      }),
+    );
+  });
+
+  it("dedups merged material ids across explicit and linked refs (first occurrence wins)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "ikdjnz-dedup", status: "queued" });
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "402",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "去重",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          reference_asset_ids: ["11"],
+          reference_materials: [
+            { id: "asset-same", type: "image" },
+            { id: "asset-other", type: "video" },
+          ],
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikdjnz-dedup",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([
+        { id: "11", type: "image", url: "https://tos.test/a.png", material_id: "asset-same" },
+      ]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikdjnz-dedup",
+      jobId: "402",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    // asset-same 同时出现在显式素材库引用与关联转换，只保留一次。
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        references: [
+          { type: "image", url: "asset://asset-same" },
+          { type: "video", url: "asset://asset-other" },
+        ],
+      }),
+    );
+  });
+
+  it("linked first frame asset resolves to material asset:// first frame", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "ikdjnz-linked-ff", status: "queued" });
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "403",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "关联首帧",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          first_frame_asset_id: "11",
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikdjnz-ff",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([
+        { id: "11", type: "image", url: "https://tos.test/first.png", material_id: "asset-face-1" },
+      ]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikdjnz-ff",
+      jobId: "403",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        firstFrameImage: "asset://asset-face-1",
+        references: [],
+      }),
+    );
+  });
+
+  it("linked non-image (video) first frame asset is rejected (首尾帧必须图片)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn();
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "404",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "关联视频首帧",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          first_frame_asset_id: "11",
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikdjnz-ff-video",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([
+        { id: "11", type: "video", url: "https://tos.test/first.mp4", material_id: "asset-vid-1" },
+      ]),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn().mockResolvedValue(true),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikdjnz-ff-video",
+      jobId: "404",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(repo.failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "unsupported_input" }),
+    );
+  });
+
+  it("single references array preserves order across asset and material (IKDJNZ)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "ikdjnz-single-refs", status: "queued" });
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "405",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "单数组保序",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          references: [
+            { role: "first_frame", asset_id: "11", type: "image" },
+            { role: "reference", material_id: "asset-mat-1", type: "image" },
+            { role: "reference", asset_id: "12", type: "image" },
+            { role: "last_frame", material_id: "asset-last-1", type: "image" },
+          ],
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikdjnz-single-refs",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([
+        { id: "11", type: "image", url: "https://tos.test/f.png", material_id: null },
+        { id: "12", type: "image", url: "https://tos.test/r.png", material_id: null },
+      ]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikdjnz-single-refs",
+      jobId: "405",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // 单数组语义：帧作为带 role 的 reference 条目在前，普通参考随后（未关联本地在前、素材库在后）。
+        references: [
+          { type: "image", url: "https://tos.test/f.png", role: "first_frame" },
+          { type: "image", url: "asset://asset-last-1", role: "last_frame" },
+          { type: "image", url: "https://tos.test/r.png" },
+          { type: "image", url: "asset://asset-mat-1" },
+        ],
+      }),
+    );
+  });
+
+  it("single references array with audio reference maps to audio url and keeps order (IKDJNZ)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "ikdjnz-audio-ref", status: "queued" });
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "406",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "单数组参考音频",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          references: [
+            { role: "first_frame", asset_id: "11", type: "image" },
+            { role: "reference", asset_id: "13", type: "audio" },
+            { role: "reference", material_id: "asset-audio-1", type: "audio" },
+            { role: "last_frame", material_id: "asset-last-1", type: "image" },
+          ],
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikdjnz-audio-ref",
+        fencingToken: 1,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([
+        { id: "11", type: "image", url: "https://tos.test/f.png", material_id: null },
+        { id: "13", type: "audio", url: "https://tos.test/1.mp3", material_id: null },
+      ]),
+      markVideoSubmitted: vi.fn().mockResolvedValue(true),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikdjnz-audio-ref",
+      jobId: "406",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        references: [
+          { type: "image", url: "https://tos.test/f.png", role: "first_frame" },
+          { type: "image", url: "asset://asset-last-1", role: "last_frame" },
+          // 未关联本地资源在前、素材库引用在后（master 排序）。
+          { type: "audio", url: "https://tos.test/1.mp3" },
+          { type: "audio", url: "asset://asset-audio-1" },
+        ],
+      }),
+    );
+  });
+});
 // IKDLQG：目标驱动视频任务——提交时把冻结的 text_attachments 快照按契约确定性组合进 provider prompt。
 // 快照即事实来源：runner 不回读来源节点；无该字段的存量任务 prompt 逐字节不变（见上文既有用例）。
 describe("video job runner 文本附件快照（IKDLQG）", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { LegacyCardHistoryRow } from "@blue-whale/persistence";
+import type { LegacyCardHistoryRow } from "@lib/shared/persistence/index.js";
 import { isLegacyGenerationCard, planLegacyCardMigration, type CanvasNodeLike } from "./legacy-card-migration.js";
 
 function legacyNode(id: string, card: unknown, position = { x: 1, y: 2 }): CanvasNodeLike {

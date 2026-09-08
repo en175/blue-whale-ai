@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { getPrismaClient, type PrismaClient } from "@blue-whale/persistence";
+import { getPrismaClient, type PrismaClient } from "@lib/shared/persistence/index.js";
 
 @Injectable()
 export class PrismaService {
