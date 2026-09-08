@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { createWorkerRepo } from "@blue-whale/persistence";
+import { createWorkerRepo } from "@lib/shared/persistence/index.js";
 import { openGenerationCredential } from "@blue-whale/core";
 import { processImageJobById } from "@lib/shared/generation/worker/generation-worker.js";
 import { runVideoJobStep, type VideoTaskProvider } from "@lib/shared/generation-runtime/video-job-runner.js";

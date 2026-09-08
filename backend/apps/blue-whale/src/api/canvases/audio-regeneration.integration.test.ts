@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { createWorkerRepo } from "@blue-whale/persistence";
+import { createWorkerRepo } from "@lib/shared/persistence/index.js";
 import { openGenerationCredential } from "@blue-whale/core";
 import { processAudioJobById, processImageJobById } from "@lib/shared/generation/worker/generation-worker.js";
 import { AudioProviderError, type AudioProvider } from "@lib/shared/generation-runtime/audio-provider.js";
