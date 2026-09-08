@@ -17,6 +17,25 @@
  * 依赖更便宜。改其中一份时记得看另一份。
  */
 
+/**
+ * 这份文件不能上传，而且**换个时间点重试也不会变**（IKE53Z）。
+ *
+ * 单独一个类型，是因为调用点必须能把它和「网络抖了一下」分开。上传失败在画布上一律被套成
+ * 「「xxx」添加失败，请重试」——对一份坏文件说「请重试」，等于让用户把同一件不可能成功的事
+ * 再做一遍。判到这个错就直接把 `message` 端给用户，那句话已经写好了该怎么办。
+ */
+export class FileRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FileRejectedError';
+  }
+}
+
+/** 这次上传失败是不是「这份文件本身不行」。 */
+export function isFileRejected(error: unknown): error is FileRejectedError {
+  return error instanceof Error && error.name === 'FileRejectedError';
+}
+
 export type MediaKind = 'image' | 'video' | 'audio';
 
 export interface FileSignature {

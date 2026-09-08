@@ -168,7 +168,7 @@ describe('uploadAssetFile', () => {
     const fetchMock = stubUploadFlow();
     const doc = new File(['x'], 'spec.pdf', { type: 'application/pdf' });
 
-    await expect(uploadAssetFile(doc)).rejects.toThrow(/不支持的文件类型/);
+    await expect(uploadAssetFile(doc)).rejects.toThrow(/格式不支持/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

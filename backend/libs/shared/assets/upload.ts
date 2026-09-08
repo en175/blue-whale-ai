@@ -185,6 +185,29 @@ const MEDIA_KIND_LABELS: Record<MediaKind, string> = {
  * 真的读到了字节却认不出任何容器，那才是拒绝的理由。混在一起会让一次抖动看起来像「你的文件
  * 坏了」，那是最容易让人白白重传三次的一种错话。
  */
+/**
+ * 拒收，并把刚写进对象存储的那份字节删掉（IKE53U）。
+ *
+ * **字节比这道门先落地。** 前端拿预签名地址直传对象存储，后端不在那条路上——`complete` 是
+ * 它第一次有机会看见文件。所以一次被拒的上传会在桶里留下一个谁也不引用的对象：产品侧没有
+ * 资产行、用户拿不到 asset_id，但字节还在，而素材 GC 至今没跑。留着它没有任何用处，正因为
+ * 没有任何一行数据指向它——将来谁也认不出它是什么、能不能删。
+ *
+ * 删失败不影响拒收结论：用户要看到的是「这份文件不行」，不是「清理失败」。
+ */
+async function rejectUploadedObject(
+  storage: AssetUploadStorage,
+  storageKey: string,
+  message: string,
+) {
+  try {
+    await storage.deleteMultiObjects([storageKey]);
+  } catch {
+    // 吞掉：孤儿对象是存储成本，说错话是产品问题，后者更贵。
+  }
+  return fail(400, message);
+}
+
 async function readFileSignature(
   storage: AssetUploadStorage,
   storageKey: string,
@@ -254,12 +277,17 @@ export async function handleCompleteAsset(
   // 就知道要换一份，而不是等一轮对话之后收到一句「素材探测失败，请重试」。
   const signature = await readFileSignature(deps.storage, input.storage_key);
   if (signature.checked && !signature.value) {
-    return fail(400, "这个文件打不开，可能已损坏。请换一份 JPG、PNG、WebP 或 MP4 重新上传。");
+    return rejectUploadedObject(
+      deps.storage,
+      input.storage_key,
+      "这个文件打不开，可能已损坏。请换一份 JPG、PNG、WebP 或 MP4 重新上传。",
+    );
   }
   if (signature.value && signature.value.kind !== input.type) {
     // 认得出，但不是它声明的那类。按**字节**说的算——声明是别人说的。
-    return fail(
-      400,
+    return rejectUploadedObject(
+      deps.storage,
+      input.storage_key,
       `这个文件实际是${MEDIA_KIND_LABELS[signature.value.kind]}，和你选择的类型不一致。请重新上传。`,
     );
   }

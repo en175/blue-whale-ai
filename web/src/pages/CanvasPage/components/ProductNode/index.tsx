@@ -6,7 +6,9 @@ import { useRef, useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { AtSign, Upload, X, Box, MousePointerClick, ImageOff } from 'lucide-react';
+import { toast } from 'sonner';
 import { uploadAssetFile } from '@/utils/upload';
+import { isFileRejected } from '@/utils/fileSignature';
 import styles from './index.module.css';
 
 /** 商品图项 */
@@ -204,6 +206,8 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
           if (!entry || entry.cancelled) return;
           pendingUploadsRef.current.delete(imgId);
           console.warn(`[商品] 图片上传失败（${file.name}），保留本地预览:`, err);
+          // 文件本身不行时要说出来：只写 console 等于用户看着预览一直挂着，不知道为什么（IKE53Z）。
+          if (isFileRejected(err)) toast.error(err.message);
         });
     });
   };

@@ -80,7 +80,7 @@ import {
   type SharedAssetView,
 } from '@/api/sharedAssets';
 import { uploadAssetFile } from '@/utils/upload';
-import { checkFileBeforeUpload } from '@/utils/fileSignature';
+import { checkFileBeforeUpload, isFileRejected } from '@/utils/fileSignature';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { defaultProjectName } from '@/lib/projectName';
@@ -2040,7 +2040,9 @@ export default function CanvasPage() {
         URL.revokeObjectURL(localSrc);
         pendingNodeIdsRef.current.delete(nodeId);
         setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
-        showToast('error', `「${file.name}」添加失败，请重试`);
+        // 「请重试」只对网络那一类成立。文件本身不行时那句话是错的建议——把已经写好的
+        // 那句原样端出去（IKE53Z）。
+        showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
         throw err instanceof Error ? err : new Error('上传失败');
       });
   };
@@ -2049,9 +2051,10 @@ export default function CanvasPage() {
    *  上传失败时 placeFileOnCanvas 内部已移除节点并 toast「添加失败，请重试」 */
   const handleUploadFile = (files: File[]) => {
     files.forEach((file) => {
-      void placeFileOnCanvas(file).catch(() => {
-        // 前置校验失败（类型不支持/超大小上限）发生在节点创建前：无节点可清理，仅提示
-        showToast('error', `「${file.name}」添加失败，请重试`);
+      void placeFileOnCanvas(file).catch((err) => {
+        // 前置校验失败（格式不支持 / 超上限 / 文件打不开）发生在节点创建前：无节点可清理，仅提示。
+        // 这一类不该说「请重试」——见 placeFileOnCanvas 里同一处判断。
+        showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
       });
     });
   };

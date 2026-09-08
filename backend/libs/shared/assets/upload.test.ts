@@ -213,6 +213,24 @@ describe("complete 的文件头校验（IKE53U）", () => {
       deps,
     );
 
+  it("拒收时把刚直传上去的那份字节删掉，不在桶里留孤儿", async () => {
+    // 字节比这道门先落地：前端拿预签名地址直传对象存储，后端不在那条路上。被拒的上传如果
+    // 不清理，桶里就留下一个谁也不引用的对象，而素材 GC 至今没跑。
+    const deps = completeDeps(head(0xab, 0xcd, 0xef, 0x12));
+    await complete(deps);
+    expect(
+      (deps.storage as unknown as { deleteMultiObjects: ReturnType<typeof vi.fn> })
+        .deleteMultiObjects,
+    ).toHaveBeenCalledWith(["uploads/7/image/x.jpg"]);
+  });
+
+  it("删不掉也照样拒收——用户要看到的是「这份文件不行」，不是「清理失败」", async () => {
+    const deps = completeDeps(head(0xab, 0xcd, 0xef, 0x12));
+    (deps.storage as unknown as { deleteMultiObjects: ReturnType<typeof vi.fn> })
+      .deleteMultiObjects.mockRejectedValue(new Error("TOS 抽风"));
+    await expect(complete(deps)).resolves.toMatchObject({ code: 400 });
+  });
+
   it("字节认不出任何容器就拒收，不落库", async () => {
     // 那份坏文件的真实头：AB CD EF 12，而 JPEG 该是 FF D8 FF。
     const deps = completeDeps(head(0xab, 0xcd, 0xef, 0x12, 0x00, 0x10, 0x4a, 0x46));

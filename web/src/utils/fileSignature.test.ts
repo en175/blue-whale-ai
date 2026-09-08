@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { checkFileBeforeUpload, sniffFileSignature } from './fileSignature';
+import { checkFileBeforeUpload, isFileRejected, sniffFileSignature } from './fileSignature';
 
 /** 测试站 `asset_id=6012` 的真实字节（`corrupt.jpg`，524 字节，头四字节 AB CD EF 12）。 */
 const CORRUPT_JPG =
@@ -83,5 +83,24 @@ describe('checkFileBeforeUpload', () => {
       'image',
     );
     expect(message).toContain('视频');
+  });
+});
+
+/**
+ * IKE53Z：拒绝的理由必须能传到用户面前。
+ *
+ * 画布上每一处上传失败都被套成「「xxx」添加失败，请重试」，两个资产节点更是只写 console。
+ * 对一份坏文件说「请重试」，是让用户把同一件不可能成功的事再做一遍——这正是这次要改掉的
+ * 那种错话。调用点靠 isFileRejected 把它和网络抖动分开。
+ */
+describe('isFileRejected', () => {
+  it('认得出「这份文件本身不行」', async () => {
+    const { FileRejectedError } = await import('./fileSignature');
+    expect(isFileRejected(new FileRejectedError('打不开'))).toBe(true);
+  });
+
+  it('普通错误不算——那一类才该说「请重试」', () => {
+    expect(isFileRejected(new Error('Failed to fetch'))).toBe(false);
+    expect(isFileRejected(undefined)).toBe(false);
   });
 });
