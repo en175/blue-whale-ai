@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { createSkillAdminRepo } from "@blue-whale/persistence";
+import { createSkillAdminRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 type Repo = ReturnType<typeof createSkillAdminRepo>;

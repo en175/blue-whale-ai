@@ -3,7 +3,7 @@ import { Module } from "@nestjs/common";
 import {
   alignReservationBySettlement,
   createCostAdjustmentRepo,
-} from "@blue-whale/persistence";
+} from "@lib/shared/persistence/index.js";
 import { PrismaModule } from "@lib/shared/prisma/prisma.module.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { CostSettlementConsumer } from "@lib/shared/cost-reconciliation/cost-settlement-consumer.service.js";

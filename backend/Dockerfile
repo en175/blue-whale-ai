@@ -18,7 +18,6 @@ ENV FFMPEG_BINARIES_URL=https://registry.npmmirror.com/-/binary/ffmpeg-static
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/core/package.json packages/core/
-COPY packages/persistence/package.json packages/persistence/
 COPY backend/package.json backend/
 COPY backend/tsconfig.json backend/
 
@@ -31,11 +30,12 @@ RUN pnpm install --frozen-lockfile --filter "@blue-whale/backend..."
 COPY tsconfig.json tsconfig.base.json ./
 COPY packages/contracts packages/contracts
 COPY packages/core packages/core
-COPY packages/persistence packages/persistence
+COPY backend/prisma backend/prisma
+COPY backend/prisma.config.ts backend/
 COPY backend backend
 
 # Prisma client + backend 全量构建（含主 API app）
-RUN pnpm --dir packages/persistence exec prisma generate
+RUN pnpm --filter @blue-whale/backend exec prisma generate
 RUN pnpm --dir backend build
 
 WORKDIR /app/backend

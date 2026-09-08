@@ -35,10 +35,10 @@ import { fileURLToPath } from "node:url";
 // 相对路径直接引用已 build 的 dist，避免依赖 pnpm workspace 符号链接解析。
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const { getPrismaClient } = await import(
-  resolve(scriptDir, "../packages/persistence/dist/db.js")
+  resolve(scriptDir, "../backend/dist/libs/shared/persistence/db.js")
 );
 const { aggregateSlotStatus, resolveLogicalSlots } = await import(
-  resolve(scriptDir, "../packages/persistence/dist/generation-output-slot-repo.js")
+  resolve(scriptDir, "../backend/dist/libs/shared/persistence/generation-output-slot-repo.js")
 );
 
 const APPLY = process.argv.includes("--apply");

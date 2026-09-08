@@ -22,6 +22,9 @@ const HANDLE_STYLE = { background: '#666', width: 10, height: 10, border: '2px s
 const durationLabel = (duration?: number) =>
   typeof duration === 'number' && duration > 0 ? `${Math.round(duration)}s` : '';
 
+/** 生成状态（IKDMQQ 起含 draft）：draft 待生成草稿；generating 进度展示；failed/cancelled 错误展示；无值为普通媒体 */
+export type MediaGenStatus = 'draft' | 'generating' | 'failed' | 'cancelled';
+
 interface MediaNodeData {
   src?: string;
   fileName?: string;
@@ -30,8 +33,14 @@ interface MediaNodeData {
   isFirst?: boolean;
   /** 关联生成任务ID（生成中的占位节点）。后端返回字符串，兼容 number 历史形态。 */
   jobId?: number | string;
-  /** 生成状态：generating 进度展示；failed/cancelled 错误展示；无值为普通媒体 */
-  genStatus?: 'generating' | 'failed' | 'cancelled';
+  /** 生成状态：见 MediaGenStatus */
+  genStatus?: MediaGenStatus;
+  /** 草稿身份标记（IKDMQQ）：待生成/生成中/失败的草稿卡均为 true；成功后清除转为普通成品卡 */
+  draft?: boolean;
+  /** 草稿持久化参数（IKDMQQ）：面板编辑实时写回，随画布保存恢复 */
+  draftModelId?: string;
+  draftSize?: string;
+  draftRatio?: string;
   /** 生成进度 0-100 */
   progress?: number;
   /** 失败原因 */
@@ -171,8 +180,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const isAudio = data.mediaType === 'audio';
   const Icon = data.mediaType === 'video' ? Video : isAudio ? AudioLines : Image;
   const toolbar = mediaNodeToolbarVisibility(data.mediaType);
+  const isDraft = data.genStatus === 'draft';
   const isGenerating = data.genStatus === 'generating';
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
+  /** IKDMQU Q5：有旧素材（有效 http 素材 src）的生成中卡片继续显示素材，仅叠加状态角标；
+   *  blob 预览（上传中/占位 fixture）不算旧素材，走占位 genBox */
+  const hasMediaSrc =
+    typeof data.src === 'string' && data.src !== '' && !data.src.startsWith('blob:');
   const isMediaExtraction = isMediaExtractNodeId(id);
   const generationOverlay = mediaNodeGenerationOverlay(isMediaExtraction);
   const failHeadline = mediaNodeFailHeadline({
@@ -201,6 +215,15 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   /** 生成中 / 失败 / 素材缺失占位（音频与图片/视频共用内部内容） */
   const renderPlaceholder = () => {
+    if (isDraft) {
+      /* 待生成草稿（IKDMQQ）：不是素材缺失，点击卡片打开面板继续编辑 */
+      return (
+        <div className={styles.genBox}>
+          <Image size={22} strokeWidth={1.8} color="#666" />
+          <span className={styles.missingText}>待生成</span>
+        </div>
+      );
+    }
     if (isGenerating) {
       /* 生成中：转圈；音频提取展示真实进度；生图/生视频仅保留取消 */
       return (
@@ -312,7 +335,10 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         {!data.isFirst && (
           <Handle type="target" position={Position.Left} className={styles.handle} style={HANDLE_STYLE} />
         )}
-        {isGenerating || isGenDone || data.assetMissing ? (
+        {/* IKDMQU Q5：重新生成中的成品卡继续显示旧素材，仅叠加状态角标；
+            IKDMQV：重新生成失败/取消同样保留旧素材（Q5「失败或取消后仍保留旧素材与最新编辑内容」），
+            失败原因与重试入口收进底部角标；无旧素材的失败（草稿首生成、提取任务）仍走占位 genBox */}
+        {isDraft || (isGenDone && !hasMediaSrc) || data.assetMissing || (isGenerating && !hasMediaSrc) ? (
           renderPlaceholder()
         ) : isAudio ? (
           <div className={styles.audioBox}>
@@ -342,6 +368,29 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             onLoad={handleImageLoad}
             style={isSelect ? undefined : { pointerEvents: 'none' }}
           />
+        )}
+        {isGenerating && hasMediaSrc && (
+          <div className={`nodrag nopan ${styles.regenOverlay}`} data-testid="regen-overlay">
+            <span className={styles.regenSpinner} />
+            <span className={styles.regenText}>
+              重新生成中{typeof data.progress === 'number' ? ` ${data.progress}%` : ''}
+            </span>
+            <button className={styles.regenCancel} onClick={() => data.onCancelJob?.(id)}>
+              取消
+            </button>
+          </div>
+        )}
+        {/* IKDMQV：重新生成失败/取消的成品卡——旧素材继续显示，底部角标呈现原因与重试。
+            重试沿用失败任务冻结快照（retry 接口）；修改参数或引用后新生成走面板「生成」（新任务新快照）。 */}
+        {isGenDone && hasMediaSrc && (
+          <div className={`nodrag nopan ${styles.regenOverlay}`} data-testid="fail-overlay">
+            <span className={styles.failOverlayText} title={failHeadline}>{failHeadline}</span>
+            {data.genStatus === 'failed' && !isMediaExtraction && (
+              <button className={styles.regenCancel} onClick={() => data.onRetryJob?.(id)}>
+                重试
+              </button>
+            )}
+          </div>
         )}
         <Handle type="source" position={Position.Right} className={styles.handle} style={HANDLE_STYLE} />
       </div>

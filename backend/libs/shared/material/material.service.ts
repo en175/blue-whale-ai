@@ -10,7 +10,7 @@ import {
   type MaterialLibraryClient,
   type MaterialLibraryResponse,
 } from "@blue-whale/core";
-import { createMaterialGroupRepo, type MaterialGroupRepo } from "@blue-whale/persistence";
+import { createMaterialGroupRepo, type MaterialGroupRepo } from "@lib/shared/persistence/index.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";

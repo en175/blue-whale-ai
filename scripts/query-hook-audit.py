@@ -22,6 +22,9 @@ def git_common_dir(project_dir: Path) -> Path:
         ["git", "-C", str(project_dir), "rev-parse", "--git-common-dir"],
         capture_output=True,
         text=True,
+        # 显式 utf-8：Windows 原生 Python 默认 cp936，与 subprocess text 模式的
+        # 默认本地编码解码（与 sync/start-task 同根因）；POSIX 本就 UTF-8，no-op。
+        encoding="utf-8",
     )
     if result.returncode != 0:
         raise QueryError(result.stderr.strip() or "无法解析 Git common dir")
@@ -62,6 +65,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows 原生 Python 默认 stdout 为 cp936（GBK），中文诊断行按 UTF-8 打印会被
+    # 父进程（如 unittest 的 capture_output）以 cp936 解码崩溃；强制改 UTF-8。
+    # POSIX 本就 UTF-8，reconfigure 为 no-op。
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
     args = parse_args(argv or sys.argv[1:])
     try:
         audit_dir = git_common_dir(args.project_dir) / "hook-audit"

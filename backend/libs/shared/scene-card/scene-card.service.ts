@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { createSceneCardResourceRepo } from "@blue-whale/persistence";
+import { createSceneCardResourceRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 @Injectable()

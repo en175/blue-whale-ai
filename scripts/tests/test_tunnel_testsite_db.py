@@ -4,6 +4,11 @@ import socket
 import subprocess
 import unittest
 
+try:  # 作为 scripts.tests.* 命名空间包导入
+    from .bash_helper import BASH
+except ImportError:  # 经 discover -s scripts/tests 顶层导入
+    from bash_helper import BASH
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "tunnel-testsite-db.sh"
@@ -11,10 +16,11 @@ SCRIPT = ROOT / "scripts" / "tunnel-testsite-db.sh"
 
 def run(args):
     return subprocess.run(
-        ["bash", str(SCRIPT), *args],
+        [BASH, str(SCRIPT), *args],
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
         timeout=15,
     )

@@ -263,6 +263,7 @@ export default function Assets() {
       await queryClient.invalidateQueries({ queryKey: assetKeys.all });
       // 删除会缩短数组，必须重建 Masonic 缓存，避免保留已删除 index 的定位信息。
       setLayoutVersion((version) => version + 1);
+      toast.success('已删除');
       setDeleteTarget(null);
     } catch (e) {
       // API 错误已由请求层统一 toast，这里兜底非 API 错误（如网络中断）

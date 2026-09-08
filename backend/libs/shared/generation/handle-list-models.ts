@@ -1,5 +1,5 @@
 import { ok } from "@blue-whale/contracts";
-import type { ModelCapabilityView } from "@blue-whale/persistence";
+import type { ModelCapabilityView } from "@lib/shared/persistence/index.js";
 
 import {
   availableAspectRatiosForSize,

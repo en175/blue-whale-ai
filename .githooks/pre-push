@@ -32,6 +32,10 @@ invalid_name=0
 direct_master=0
 
 while read -r local_ref local_sha remote_ref remote_sha; do
+  # Git Bash 下 stdin 经 Python subprocess 传入时行尾为 CRLF，read 会把 \r 留在
+  # 末位字段 remote_sha 上，导致下方全零判断永不命中（40 个 0 + \r = 41 字符）。
+  # 统一剥离 \r，保证 Linux / macOS / Git Bash 行为一致。
+  remote_sha=${remote_sha%$'\r'}
   # 第一道：master/main 无论更新还是删除都拦截（合并只在 Gitee 服务端走 PR）
   case "$remote_ref" in
     refs/heads/master|refs/heads/main)

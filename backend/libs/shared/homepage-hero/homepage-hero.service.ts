@@ -3,7 +3,7 @@ import {
   createHomepageHeroRepo,
   type CreateHomepageHeroInput,
   type UpdateHomepageHeroInput,
-} from "@blue-whale/persistence";
+} from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 type Repo = ReturnType<typeof createHomepageHeroRepo>;

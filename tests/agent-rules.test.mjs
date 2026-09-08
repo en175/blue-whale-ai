@@ -146,6 +146,6 @@ test("typecheck generates the Prisma client before compiling a fresh worktree", 
 
   assert.match(
     packageJson.scripts.typecheck,
-    /^pnpm --filter @blue-whale\/persistence exec prisma generate && /,
+    /^pnpm --filter @blue-whale\/backend exec prisma generate && /,
   );
 });

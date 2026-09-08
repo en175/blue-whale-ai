@@ -9,6 +9,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+try:  # 作为 scripts.tests.* 命名空间包导入
+    from .bash_helper import BASH
+except ImportError:  # 经 discover -s scripts/tests 顶层导入
+    from bash_helper import BASH
+
 
 SOURCE = Path(__file__).resolve().parents[1] / "start-task-worktree.py"
 SOURCE_SH = Path(__file__).resolve().parents[1] / "start-task-worktree.sh"
@@ -17,10 +22,13 @@ SOURCE_PRE_PUSH = Path(__file__).resolve().parents[2] / ".githooks/pre-push"
 
 
 def run(*args, cwd, check=True):
+    if args and args[0] == "bash":
+        args = (BASH,) + args[1:]
     result = subprocess.run(
         [str(arg) for arg in args],
         cwd=str(cwd),
         text=True,
+        encoding="utf-8",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -90,12 +98,13 @@ class StartTaskWorktreeTest(unittest.TestCase):
         sha = sha or run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
         remote_sha = remote_sha or "0" * 40
         return subprocess.run(
-            ["bash", str(self.repo / ".githooks/pre-push")],
+            [BASH, str(self.repo / ".githooks/pre-push")],
             cwd=str(self.repo),
             input="refs/heads/{0} {1} refs/heads/{0} {2}\n".format(
                 branch, sha, remote_sha
             ),
             text=True,
+            encoding="utf-8",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -315,6 +324,11 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertEqual("", run("git", "status", "--porcelain", cwd=self.repo).stdout)
         self.assertFalse((self.root / "blue-whale-worktrees").exists())
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows CreateProcess 无法执行无扩展名脚本，PATH 注入假 git 仅在 POSIX 有效"
+        "（对应 test-hooks.sh 的 IS_WINDOWS 降级先例）",
+    )
     def test_conflict_abort_failure_reports_honestly_without_claiming_success(self):
         # 与上一用例同样的分叉冲突，但通过 PATH 注入假 git，让 merge --abort
         # 强制失败，其余 git 调用透传真实 git，验证文案如实、不误报成功。
@@ -355,6 +369,7 @@ class StartTaskWorktreeTest(unittest.TestCase):
             cwd=str(self.repo),
             env=env,
             text=True,
+            encoding="utf-8",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -382,11 +397,12 @@ class StartTaskWorktreeTest(unittest.TestCase):
         env["PATH"] = "{}{}{}".format(store_dir, os.pathsep, env["PATH"])
 
         result = subprocess.run(
-            ["bash", str(self.repo / "scripts/start-task-worktree.sh"),
+            [BASH, str(self.repo / "scripts/start-task-worktree.sh"),
              "--type", "fix", "--no-issue", "--summary", "跳过桩检测场景"],
             cwd=str(self.repo),
             env=env,
             text=True,
+            encoding="utf-8",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -430,11 +446,12 @@ class StartTaskWorktreeTest(unittest.TestCase):
         )
 
         result = subprocess.run(
-            ["bash", str(self.repo / "scripts/start-task-worktree.sh"),
+            [BASH, str(self.repo / "scripts/start-task-worktree.sh"),
              "--type", "fix", "--no-issue", "--summary", "回退py启动器场景"],
             cwd=str(self.repo),
             env=env,
             text=True,
+            encoding="utf-8",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )

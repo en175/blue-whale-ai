@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
 import { planLegacyCardMigration, type CanvasNodeLike } from "./legacy-card-migration.js";
 import { CANVAS_EDGE_LIMITS, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE, canvasEdgeSchema, fail, ok, applyPreviewSchema, conversationQuoteCreateSchema, previewSourceSchema, PROMPT_TEXT_LIMITS as limits, type LegacyCardHistoryItem, type LegacyMigrationReport } from "@blue-whale/contracts";
-import { createCanvasRepo, createConversationQuoteRepo, createLegacyCardHistoryRepo, type CanvasView, type ConversationQuoteRow, type LegacyCardHistoryRow } from "@blue-whale/persistence";
+import { createCanvasRepo, createConversationQuoteRepo, createLegacyCardHistoryRepo, type CanvasView, type ConversationQuoteRow, type LegacyCardHistoryRow } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 

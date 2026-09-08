@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { createTemplateRepo } from "@blue-whale/persistence";
+import { createTemplateRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 /** 首页模板读取侧依赖：wire Prisma template repo。 */
