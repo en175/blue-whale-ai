@@ -82,6 +82,14 @@ export interface GenerationCommandRepo {
     message?: string,
     payload?: unknown,
   ): Promise<void>;
+  /** 入队失败兜底（IKDZGH）：queued 任务置 failed——只改 queued 态，不改终态/在途。
+   *  供 generation/media-extract 共用，消除两处重复的实现（本 repo 内规范化 updateMany）。 */
+  markFailedQueued(
+    jobId: string,
+    code: string,
+    message: string,
+    details?: Record<string, unknown>,
+  ): Promise<void>;
 }
 
 const SOURCE_BOTTOM_DOCK = "bottom_dock";
@@ -663,6 +671,22 @@ export function createGenerationCommandRepo(
       if (message !== undefined) data.message = message;
       if (payload !== undefined) data.payload = payload as never;
       await prisma.generation_job_logs.create({ data: data as never });
+    },
+
+    async markFailedQueued(jobId, code, message, details) {
+      // 与原先两处 service 内联的 updateMany 行为一致（IKDZGH 收敛到 repo，消除裸查/重复）。
+      // error 为 Prisma JSON 字段：显式构建对象（avoid optional spread），值按 JSON 契约强转。
+      const error: Record<string, unknown> = { code, message };
+      if (details !== undefined) error.details = details;
+      await prisma.generation_jobs.updateMany({
+        where: { id: BigInt(jobId), status: "queued" },
+        data: {
+          status: "failed",
+          error: error as Prisma.InputJsonValue,
+          next_action_at: null,
+          version: { increment: 1 },
+        },
+      });
     },
   };
 }
