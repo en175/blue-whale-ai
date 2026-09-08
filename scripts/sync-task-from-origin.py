@@ -178,6 +178,10 @@ def synchronize(root: Path, as_json: bool, target_branch: str) -> int:
             raise WorkflowError("当前 HEAD 已离开已有同步事务，拒绝覆盖恢复点。")
         backup_ref = str(recovery.get("backup_ref", backup_ref))
         remote_sha = str(recovery.get("remote_branch_sha", ""))
+        # 旧版脚本（PR577 前）可能写入 GBK 乱码的 branch 字段；read_recovery 已兼容放行，
+        # 这里归一化为实时真实分支名并随 write_recovery 写回，确保下游（如
+        # publish-review-package.sh --update-pr 的严格比较）读到的始终是真实 UTF-8 名。
+        recovery["branch"] = branch
         recovery["upstream_sha"] = upstream_sha
     else:
         remote_sha = remote_branch_sha(root, branch)

@@ -325,6 +325,9 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         payload = self.response(result)
         self.assertEqual(payload["status"], "SYNCED")
         self.assertTrue(marker.exists())
+        # branch 字段应在同步事务中被归一化为实时真实 UTF-8 名，供下游严格比较使用。
+        recovery_after = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(recovery_after["branch"], branch)
 
     def test_sync_records_existing_remote_source_sha_and_private_marker_mode(self) -> None:
         original_head = self.commit_task_change()
