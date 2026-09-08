@@ -760,7 +760,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       acceptedVideos: items.filter((i) => i.type === 'video').length,
     });
     if (overflows.length > 0) parts.push(refOverflowToast(overflows, { image: videoMaxImages, video: MAX_VIDEOS }));
-    if (unique.length < eligible.length) parts.push('素材重复，已跳过');
+    if (unique.length < eligible.length) parts.push('重复的素材已跳过');
     if (parts.length > 0) showToast(parts.join('；'));
     if (items.length === 0) return;
     setRefFiles((prev) => [...prev, ...items]);
