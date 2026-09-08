@@ -78,6 +78,14 @@ export {
   isQuotaSignal,
 } from "./generation-error-codes.js";
 export {
+  ERROR_CODE_DEFINITIONS,
+  GLOBAL_CODE_MESSAGES,
+  errorCodeDefinition,
+  errorCodeMessage,
+  globalCodeMessage,
+  domainCodeToNumeric,
+} from "./error-codes.js";
+export {
   ok,
   fail,
   SUCCESS_CODE,
