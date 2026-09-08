@@ -180,7 +180,12 @@ function attachCards(messages: ChatMessage[], records: PromptCardRecord[] | unde
  * 画布 Agent 对话钩子（session 维度）
  * @param projectId 当前项目ID（空串时不初始化）
  */
-export function useAgentSession(projectId: string) {
+/**
+ * @param agentModel 当前选中的 Agent 模型 id（IKE0II）。随每条消息发给 agent：带了就载入会话、
+ *   之后一直生效，并冻到那一轮的 Run 上。空串表示模型列表还没加载完，此时不发这个字段，
+ *   agent 按会话已选的、再按服务端 `AGENT_MODEL` 回落——与这个字段存在之前的行为逐字一致。
+ */
+export function useAgentSession(projectId: string, agentModel?: string) {
   /**
    * 事件流能改动的那部分状态：消息、进行中的一轮、每轮的账、运行态（sessionTimeline.ts）。
    *
@@ -190,6 +195,13 @@ export function useAgentSession(projectId: string) {
    */
   const [session, setSession] = useState<SessionState>(EMPTY_SESSION_STATE);
   const sessionRef = useRef<SessionState>(EMPTY_SESSION_STATE);
+  /**
+   * 走 ref 而不是把 `agentModel` 放进 `sendMessage` 的依赖：`sendMessage` 被下游当作稳定引用
+   * 用（发送按钮、快捷键、外部注入都挂着它），让它随下拉选择重建，会把那些 memo 一起打散。
+   * 发送那一刻读 ref，拿到的就是用户此刻看见的那个模型。
+   */
+  const agentModelRef = useRef<string | undefined>(agentModel);
+  agentModelRef.current = agentModel;
   const commit = useCallback((update: (prev: SessionState) => SessionState) => {
     const next = update(sessionRef.current);
     if (next === sessionRef.current) return;
@@ -833,6 +845,7 @@ export function useAgentSession(projectId: string) {
           forcedCreativeSkillId: forcedSkillId,
           resourceRef: finalResourceRef,
           skillRef,
+          ...(agentModelRef.current ? { model: agentModelRef.current } : {}),
         });
         if (connectionEpochRef.current !== connectionEpoch || sessionIdRef.current !== sid) return true;
         const message = ack.message;

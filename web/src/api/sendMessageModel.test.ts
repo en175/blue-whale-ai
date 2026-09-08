@@ -1,0 +1,74 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { sendSessionMessage } from './agentSessions';
+
+/**
+ * 发消息时把用户选的 Agent 模型带出去的护栏（IKE0II）。
+ *
+ * 这个选择器上线时是**假的**：`selectedModel` 只用来算 tooltip 和高亮，从不进请求体。
+ * 用户点了豆包，界面高亮换了，实际跑的还是服务端默认的 MiniMax——两端各自都「看起来对」，
+ * 错的只在字节上。所以护栏架在**实际发出去的请求体**上，和删除会话那组同一个理由。
+ */
+function stubFetch(...responses: Response[]) {
+  const fetchMock = vi.fn();
+  for (const res of responses) fetchMock.mockResolvedValueOnce(res);
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+function ack() {
+  return new Response(JSON.stringify({ message: { message_id: 'm1' } }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function sentBody(fetchMock: ReturnType<typeof vi.fn>) {
+  const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+  return JSON.parse(String(init.body)) as Record<string, unknown>;
+}
+
+const text = [{ type: 'text' as const, text: '做一条手冲咖啡短视频' }];
+
+describe('发消息带上 Agent 模型', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('用户选了模型就写进请求体', async () => {
+    const fetchMock = stubFetch(ack());
+
+    await sendSessionMessage('p1', 's1', text, { model: 'doubao-seed-evolving' });
+
+    expect(sentBody(fetchMock).model).toBe('doubao-seed-evolving');
+  });
+
+  it('没传模型时请求体里不出现这个字段', async () => {
+    // 「没选」由字段缺席表达，agent 据此回落到会话已选的、再回落服务端默认。
+    const fetchMock = stubFetch(ack());
+
+    await sendSessionMessage('p1', 's1', text);
+
+    expect(sentBody(fetchMock)).not.toHaveProperty('model');
+  });
+
+  it('空串不发：模型列表还没加载完时选中值就是空串', async () => {
+    // 发一个空字段与不发行为相同，但会让抓包的人多猜一轮「是不是清空了」。
+    const fetchMock = stubFetch(ack());
+
+    await sendSessionMessage('p1', 's1', text, { model: '' });
+
+    expect(sentBody(fetchMock)).not.toHaveProperty('model');
+  });
+
+  it('模型与创作套路互不干扰，同一条消息可以都带', async () => {
+    const fetchMock = stubFetch(ack());
+
+    await sendSessionMessage('p1', 's1', text, {
+      model: 'doubao-seed-evolving',
+      forcedCreativeSkillId: 'tvc_product_ad',
+    });
+
+    const body = sentBody(fetchMock);
+    expect(body.model).toBe('doubao-seed-evolving');
+    expect(body.forced_creative_skill_id).toBe('tvc_product_ad');
+  });
+});

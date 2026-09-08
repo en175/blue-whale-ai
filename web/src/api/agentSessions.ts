@@ -189,6 +189,13 @@ export interface SessionRecord {
    * 每一轮都注入，直到显式取消。只有 id——名称在技能目录里，前端本来就有那一份。
    */
   active_creative_skill_ids?: string[];
+  /**
+   * 本会话选定的 Agent 模型（IKE0II）。`null` 表示用户从没选过，这条会话跟着服务端默认走。
+   *
+   * 服务端**故意不**在这里填它自己的默认值：前端要能分出「用户选过 MiniMax」和「没选过、
+   * 跟着服务端」——服务端默认哪天变了，这两种的表现就不一样了。
+   */
+  model?: string | null;
   created_at?: string;
   updated_at?: string;
   etag?: string;
@@ -567,6 +574,10 @@ function toReferencePart(block: SessionContentBlock): Record<string, unknown> | 
  * 已把它标为废弃，这里仍然一起发，只为不依赖 agent 与 web 的上线先后；agent 侧以 `skill_ref`
  * 优先。两端都发布后删掉这个参数。
  *
+ * options.model：这一条消息用哪个 Agent 模型（IKE0II）。带了就载入会话、之后一直生效，
+ * 与创作套路同一种黏性；agent 侧还会把它冻到这一轮的 Run 上，于是回复、产卡、读图、标题
+ * 全用同一个模型。老版本 agent 会忽略这个字段，所以前端可以先上，不依赖两端上线先后。
+ *
  * 纯附件消息（一个字不打、只带图）是合法的：`content` 里可以没有 text 部件，agent 会把引用
  * 投影成 `[图片：标签]` 之类的占位符。 */
 export function sendSessionMessage(
@@ -578,9 +589,10 @@ export function sendSessionMessage(
     signal?: AbortSignal;
     resourceRef?: SessionContentBlock[];
     skillRef?: OutboundSkillRef;
+    model?: string;
   },
 ): Promise<SessionMessageAck> {
-  const { forcedCreativeSkillId: forcedSkillId, signal, resourceRef, skillRef } = options ?? {};
+  const { forcedCreativeSkillId: forcedSkillId, signal, resourceRef, skillRef, model } = options ?? {};
   const parts: Record<string, unknown>[] = [
     ...content
       .filter(block => block.type === 'text' && (block.text ?? '').trim().length > 0)
@@ -591,6 +603,11 @@ export function sendSessionMessage(
   const body: Record<string, unknown> = { content: parts };
   if (forcedSkillId) {
     body.forced_creative_skill_id = forcedSkillId;
+  }
+  // 空串不发：模型列表还没加载完时 `selectedModel` 就是空串，发过去会被 agent 当成
+  // 「没选」——行为虽然一样，但让请求体带一个空字段只会让抓包的人多猜一轮。
+  if (model) {
+    body.model = model;
   }
   return sessionRequest<SessionMessageAck>(
     agentPath('send_message', projectId, { session_id: sessionId }),
