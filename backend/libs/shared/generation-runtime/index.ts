@@ -20,6 +20,18 @@ export {
 } from "./tos-video-media-relay.js";
 export { runVideoWorkerLoop } from "./video-worker-loop.js";
 export {
+  readAssetId,
+  readAssetIds,
+  readMaterialId,
+  readMaterialRefs,
+  uniqueAssetIds,
+  uniqueMaterialRefs,
+  VideoInputError,
+  type MaterialReference,
+} from "./material-reference.js";
+export { videoDimensions, dimensionsFromSize } from "./video-dimensions.js";
+export { validateReferences, validateReferenceVideo, isSeedance2Model } from "./video-reference-validation.js";
+export {
   runVideoJobStep,
   type GenerationCredentialVault,
   type StoredVideo,
