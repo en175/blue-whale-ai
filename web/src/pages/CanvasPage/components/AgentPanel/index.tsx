@@ -599,7 +599,7 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
     deleteError,
     dismissDeleteError,
     refreshSessions,
-  } = useAgentSession(projectId ?? '');
+  } = useAgentSession(projectId ?? '', selectedModel);
   /** 本会话用户提过的素材（IKDLW3）：助手正文里出现它们的名字就画成胶囊。 */
   const knownAssets = useMemo(() => collectKnownAssets(turns), [turns]);
   /** 历史会话下拉展开态 */
@@ -705,6 +705,30 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
       })
       .catch(() => undefined);
   }, []);
+
+  /**
+   * 切到一条会话时，选择器跟着那条会话已经选过的模型走（IKE0II）。
+   *
+   * 不做这一步，选择器就变成另一种假：切到一条用豆包跑过的历史会话，界面显示 MiniMax，
+   * 而这条会话在服务端仍然是豆包——用户看到的和实际在跑的又对不上了。
+   *
+   * 只在那条会话**真的选过**时回填。`model` 为 null 的有两种：老会话，以及刚新建的会话；
+   * 这两种都保留用户此刻的选择，而不是重置回列表第一项——刚点完豆包又新建一条会话，
+   * 选择器跳回 MiniMax 是错的。
+   *
+   * 每条会话只回填一次，之后用户在这条会话里怎么改就是怎么改；`sessions` 列表因为别的原因
+   * 刷新时不会把用户刚点的选择顶掉。
+   */
+  const hydratedModelSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sessionId) return;
+    const record = sessions.find((item) => item.session_id === sessionId);
+    // 列表还没到就先不判：此刻回填等于用「查不到」冒充「没选过」。
+    if (!record) return;
+    if (hydratedModelSessionRef.current === sessionId) return;
+    hydratedModelSessionRef.current = sessionId;
+    if (record.model) setSelectedModel(record.model);
+  }, [sessionId, sessions]);
 
   /** 外部注入 @ 引用/生成卡：仅在版本真正变化时触发一次；生成卡追加胶囊（可多次叠加），普通引用整体替换文本
    * ref 记录已处理的 version，防 StrictMode 开发态 effect 双调用导致重复插入 */
