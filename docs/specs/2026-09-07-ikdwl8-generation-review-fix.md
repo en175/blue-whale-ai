@@ -16,8 +16,10 @@
 重跑前准备隔离 MySQL 数据库（应用当前 Prisma schema）与专用 Redis，然后从仓库根目录执行：
 
 ```sh
-IKDMQW_DATABASE_URL="$TEST_DATABASE_URL" IKDMQW_BROWSER=1 VIDEO_QUEUE_DRIVER=bullmq REDIS_HOST=127.0.0.1 REDIS_PORT="$TEST_REDIS_PORT" pnpm exec vitest run backend/apps/blue-whale/src/api/canvases/generation-cancel.integration.test.ts
+IKDMQW_DATABASE_URL="$TEST_DATABASE_URL" IKDMQW_BROWSER=1 pnpm exec vitest run backend/apps/blue-whale/src/api/canvases/generation-cancel.integration.test.ts
 ```
+
+入队函数在测试内 stub，无需 Redis 或 `VIDEO_QUEUE_DRIVER`（IKDZJK）。
 
 覆盖边界：视频、音频在此文件覆盖排队取消；在途供应商成功/失败竞态以图片链路验证。人工交互验收与整个父需求的完整媒体生成矩阵验收不由本记录替代。
 

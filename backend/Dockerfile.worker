@@ -1,6 +1,6 @@
 # generation-worker 镜像（prod 视频生成消费者，NestJS app）。
 #
-# 消费 BullMQ generation-video 队列：调 new-api 出片、写 DB/TOS。
+# 消费 RocketMQ generation-video 队列：调 new-api 出片、写 DB/TOS。
 # 与主 API（apps/blue-whale）同构构建：tsc -b + tsc-alias → node dist。
 #
 # 构建（context = 仓库根）：

@@ -18,7 +18,7 @@
 
 - `task_finished`：视频任务成功/失败（`packages/generation-runtime/src/video-job-runner.ts`，只在状态迁移成功时计数，fencing 竞态不双计）。派发前被取消的视频任务不计数（任务未开始、未耗 provider 资源，不进失败率分母）。
 - `provider_call`：视频 provider `submit`/`poll`（provider=new_api_video）。
-- `queue_depth`：**仅 `VIDEO_QUEUE_DRIVER=bullmq` 部署单元产生**（2026-08-19 IK9RSS 确认生产与后续方向为 RocketMQ，默认 `rocketmq` 驱动下本事件**不发**，告警 2 与相关仪表盘为空）。采样器定义见 `packages/core/src/queue-depth-sampler.ts`，只采 BullMQ 积压/在途态——`video_bullmq`（BullMQ/Redis）的 waiting/waiting-children/delayed/active。队列排空时照发零值读数，保证仪表盘曲线与告警恢复能归零。若未来需要 RocketMQ 口径的队列深度，另行评估 consumer offset/lag。
+- `queue_depth`：当前仅保留 sampler 基建（`packages/core/src/queue-depth-sampler.ts`），未接线任何生产采样器（IKDZJK 清理 bullmq 回退路径后无 `video_bullmq` 队列，事件不再产生）。若未来需要 RocketMQ 口径的队列深度，另行评估 consumer offset/lag。
 
 本文档负责 TLS 控制台侧：字段索引、三条告警、一个仪表盘、送达渠道、人工验证。
 明确不做 Prometheus/APMplus（见工单 IK7G9Y）。
@@ -33,7 +33,7 @@
 
 `TLS_ENDPOINT`、`TLS_REGION`、`TLS_TOPIC_ID`、`TLS_AK`、`TLS_SK`
 
-上线后先在 TLS 控制台确认有 `event:task_finished` / `event:provider_call` 日志流入，再配告警（`queue_depth` 仅 bullmq 驱动，见「打点位置」）。
+上线后先在 TLS 控制台确认有 `event:task_finished` / `event:provider_call` 日志流入，再配告警（`queue_depth` 未接线，见「打点位置」）。
 
 ### 1. 开启字段索引
 
