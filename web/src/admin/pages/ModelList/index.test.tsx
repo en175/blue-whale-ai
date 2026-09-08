@@ -45,6 +45,7 @@ const audio: AdminModel = {
   features: {},
   enabled: true,
   sort_order: 30,
+  is_default: false,
   created_at: '2026-09-04T00:00:00.000Z',
   updated_at: '2026-09-04T00:00:00.000Z',
 };

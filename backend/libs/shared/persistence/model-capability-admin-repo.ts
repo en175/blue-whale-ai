@@ -27,6 +27,8 @@ export interface AdminModelCapabilityRow {
   request_mapping: unknown;
   enabled: boolean;
   sort_order: number;
+  /** 该 capability_type 的显式默认模型（IKE0VX）；每类至多一条，由 setDefault 单点保证。 */
+  is_default: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -98,6 +100,9 @@ export interface ModelCapabilityAdminRepo {
   updateSortOrder(
     items: { id: string; sortOrder: number }[],
   ): Promise<UpdateSortOrderResult>;
+  /** 设为该 capability_type 的默认模型（IKE0VX）：同类其它行的标记在同一事务内清掉。
+   *  id 不存在或已软删 → null。只设不清——「一个都不默认」是回落态，不该由一次误点产生。 */
+  setDefault(id: string): Promise<AdminModelCapabilityRow | null>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -125,6 +130,7 @@ function toRow(row: any): AdminModelCapabilityRow {
     request_mapping: row.request_mapping ?? null,
     enabled: row.enabled,
     sort_order: row.sort_order,
+    is_default: row.is_default === true,
     created_at: new Date(row.gmt_create).toISOString(),
     updated_at: new Date(row.gmt_modified).toISOString(),
   };
@@ -322,6 +328,40 @@ export function createModelCapabilityAdminRepo(
         ),
       );
       return { ok: true };
+    },
+
+    async setDefault(id) {
+      const pid = parseId(id);
+      if (pid === null) return null;
+      const target = await prisma.generation_model_capability.findFirst({
+        where: { id: pid, is_delete: false },
+        select: { id: true, capability_type: true },
+      });
+      if (!target) return null;
+
+      // 「每类至多一条」在这一个事务里成立：先清同类，再置本行。分两步写而不是
+      // 一条 CASE 语句，是因为清除要按 capability_type 扫、置位要按主键，条件不同。
+      // 停用行也参与清除——否则停用一条默认模型再启用回来，会出现两条默认。
+      await prisma.$transaction([
+        prisma.generation_model_capability.updateMany({
+          where: {
+            capability_type: target.capability_type,
+            is_delete: false,
+            is_default: true,
+            id: { not: pid },
+          },
+          data: { is_default: false, gmt_modified: new Date() },
+        }),
+        prisma.generation_model_capability.update({
+          where: { id: pid },
+          data: { is_default: true, gmt_modified: new Date() },
+        }),
+      ]);
+
+      const row = await prisma.generation_model_capability.findFirst({
+        where: { id: pid, is_delete: false },
+      });
+      return row ? toRow(row) : null;
     },
   };
 }

@@ -114,6 +114,7 @@ CREATE TABLE `generation_model_capability` (
     `request_mapping` JSON NULL,
     `enabled` BOOLEAN NOT NULL DEFAULT true,
     `sort_order` INTEGER NOT NULL DEFAULT 0,
+    `is_default` BOOLEAN NOT NULL DEFAULT false,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,

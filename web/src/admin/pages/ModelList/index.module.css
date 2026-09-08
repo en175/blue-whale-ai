@@ -189,6 +189,28 @@
   font-size: var(--font-size-xs, 12px);
 }
 
+.badgeDefault {
+  display: inline-block;
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: rgba(62, 142, 252, 0.15);
+  color: #3e8efc;
+  font-size: var(--font-size-xs, 12px);
+}
+
+.linkBtn {
+  padding: 5px 0;
+  border: none;
+  background: none;
+  color: #9a9a9a;
+  font-size: var(--font-size-xs, 12px);
+  cursor: pointer;
+}
+
+.linkBtn:hover {
+  color: #3e8efc;
+}
+
 .actionGroup {
   display: inline-flex;
   align-items: center;

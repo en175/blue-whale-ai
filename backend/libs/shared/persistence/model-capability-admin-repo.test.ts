@@ -319,3 +319,80 @@ describe("ModelCapabilityAdminRepo.updateSortOrder", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
+
+describe("ModelCapabilityAdminRepo.setDefault（IKE0VX）", () => {
+  it("同一事务内先清同类默认、再置本行，且不碰别的 capability_type", async () => {
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce({ id: 2n, capability_type: "text" })
+      .mockResolvedValueOnce(
+        makeRow({ id: 2n, capability_type: "text", is_default: true }),
+      );
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const update = vi.fn().mockResolvedValue({});
+    const prisma = {
+      generation_model_capability: { findFirst, updateMany, update },
+      $transaction: vi.fn().mockResolvedValue([]),
+    } as unknown as PrismaClient;
+
+    const row = await createModelCapabilityAdminRepo(prisma).setDefault("2");
+
+    expect(row).toMatchObject({ id: "2", is_default: true });
+    // 清除只扫同类未软删的已标记行，并排除自己——否则会把刚置上的位又清掉。
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        capability_type: "text",
+        is_delete: false,
+        is_default: true,
+        id: { not: 2n },
+      },
+      data: expect.objectContaining({ is_default: false }),
+    });
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 2n },
+        data: expect.objectContaining({ is_default: true }),
+      }),
+    );
+    // 两条写在同一个 $transaction 里：清了旧的却没置上新的，会让整类没有默认。
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction.mock.calls[0][0]).toHaveLength(2);
+  });
+
+  it("id 非法 → null 不查库；不存在/已软删 → null 不写库", async () => {
+    const notQueried = {
+      generation_model_capability: { findFirst: vi.fn() },
+      $transaction: vi.fn(),
+    } as unknown as PrismaClient;
+    expect(await createModelCapabilityAdminRepo(notQueried).setDefault("abc")).toBeNull();
+    expect(notQueried.generation_model_capability.findFirst).not.toHaveBeenCalled();
+
+    const missing = {
+      generation_model_capability: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn(),
+        update: vi.fn(),
+      },
+      $transaction: vi.fn(),
+    } as unknown as PrismaClient;
+    expect(await createModelCapabilityAdminRepo(missing).setDefault("9")).toBeNull();
+    expect(missing.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("停用的行也参与清除：停用一条默认模型再启用回来，不该出现两条默认", async () => {
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce({ id: 3n, capability_type: "text" })
+      .mockResolvedValueOnce(makeRow({ id: 3n, capability_type: "text", is_default: true }));
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      generation_model_capability: { findFirst, updateMany, update: vi.fn() },
+      $transaction: vi.fn().mockResolvedValue([]),
+    } as unknown as PrismaClient;
+
+    await createModelCapabilityAdminRepo(prisma).setDefault("3");
+
+    const where = updateMany.mock.calls[0][0].where;
+    expect(where).not.toHaveProperty("enabled");
+  });
+});

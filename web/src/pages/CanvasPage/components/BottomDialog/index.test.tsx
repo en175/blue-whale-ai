@@ -44,6 +44,7 @@ const seedance: GenerationModel = {
     first_last_frame: false,
     audio: false,
   },
+  is_default: false,
   version: 1,
   digest: '',
 };

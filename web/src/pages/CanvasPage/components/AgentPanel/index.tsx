@@ -696,12 +696,24 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
 
   const currentModel = modelList.find((m) => m.model_id === selectedModel);
 
-  // 加载 Agent（text capability）模型列表：接口为唯一数据源，加载完默认选中第一个
+  /**
+   * 加载 Agent（text capability）模型列表：接口为唯一数据源。
+   *
+   * 默认选中**目录里标了 `is_default` 的那一条**（IKE0VX）。在此之前默认值是
+   * `list[0]`，也就是 `sort_order` 最小的一条——于是「Agent 默认用哪个模型」是排序字段
+   * 的副作用：谁在管理后台调一次 text 的排序，就换掉了所有新会话的默认模型，而那个字段
+   * 在界面上叫「排序」，改的人不会知道自己改了这个。
+   *
+   * 一条都没标时仍退回 `list[0]`，不硬失败：目录是运营数据，没标记不该让面板不可用。
+   */
   useEffect(() => {
     fetchGenerationModels('text')
       .then((list) => {
         setModelList(list);
-        if (list.length) setSelectedModel((prev) => prev || list[0].model_id);
+        if (list.length) {
+          const fallback = list.find((m) => m.is_default) ?? list[0];
+          setSelectedModel((prev) => prev || fallback.model_id);
+        }
       })
       .catch(() => undefined);
   }, []);

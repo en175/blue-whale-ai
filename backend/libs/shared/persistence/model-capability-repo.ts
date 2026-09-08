@@ -61,6 +61,11 @@ export interface ModelCapabilityView {
   channel_parser: string;
   /** GPT 交叉格 / banana 一维映射。消费端列表会剥掉。 */
   request_mapping: unknown;
+  /** 该 capability_type 的显式默认模型（IKE0VX）。
+   *  在它之前，「默认用哪个」是 sort_order 的副作用：调一次排序就换掉了所有新会话的
+   *  默认模型，而那个字段在管理后台叫「排序」。消费端读这一位，读不到才退回列表第一条。
+   *  **不进 digest**——digest 的字段集是冻结快照的比对口径，多一位会让历史快照全部误判漂移。 */
+  is_default: boolean;
   /** 乐观锁版本（DB version 列）；对应冻结快照的 row_version，用于预判能力漂移。 */
   version: number;
   /** 能力内容摘要（sha256，运行时算，不入库）；与冻结快照 digest 同源比对。
@@ -200,6 +205,7 @@ export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapability
             ? cap.channel_parser
             : "seedream",
         request_mapping: cap.request_mapping ?? null,
+        is_default: cap.is_default === true,
         version: cap.version,
         digest: capabilityDigestFromModelCapability(cap),
       }));

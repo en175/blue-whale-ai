@@ -161,6 +161,33 @@ export class AdminModelsController {
     }
   }
 
+  /** 设为该能力类型的默认模型（IKE0VX）。
+   *
+   *  为什么不复用 PUT :id：那个方法是单行全字段写，而这件事必然要动同类的**其它**行。
+   *  把跨行副作用藏进一个看起来只改一行的接口里，是下一个人看不懂 diff 的起点。
+   *
+   *  为什么不做成 toggle：取消默认之后就没有默认了，消费端回落到列表第一条——正是本单
+   *  要消灭的那个状态。它可以由「改设别的模型」达成，不该由一次误点达成。 */
+  @Patch(":id/default")
+  async setDefault(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    try {
+      const after = await this.modelCapability.setDefault(id);
+      if (!after) throw new AdminException(404, "模型不存在");
+      try {
+        await this.modelAudit.logSetDefault(after, user.username);
+      } catch {
+        // best-effort 审计，失败不阻断
+      }
+      return { success: true, data: await this.modelCapability.listAll() };
+    } catch (error) {
+      if (error instanceof AdminException) throw error;
+      throw toAdminError(error);
+    }
+  }
+
   @Delete(":id")
   async remove(
     @Param("id") id: string,

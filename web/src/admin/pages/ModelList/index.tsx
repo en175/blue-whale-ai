@@ -1,6 +1,6 @@
 /* ============================================
  * ModelList 模型列表：dock 模型能力目录管理（generation_model_capability）
- * 数据源 GET/POST/PUT /api/admin/models + PATCH /:id/toggle
+ * 数据源 GET/POST/PUT /api/admin/models + PATCH /:id/toggle + PATCH /:id/default
  * ============================================ */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Pencil, Trash2, ChevronUp, ChevronDown, Power } from 'lucide-react';
@@ -9,6 +9,7 @@ import {
   createAdminModel,
   updateAdminModel,
   toggleAdminModel,
+  setAdminModelDefault,
   deleteAdminModel,
   type AdminModel,
   type CreateAdminModelParams,
@@ -74,6 +75,21 @@ export default function ModelList() {
       load();
     } catch (e) {
       setActionError(isApiError(e) ? e.message : '排序失败，请稍后重试');
+    }
+  };
+
+  /**
+   * 设为该类型的默认模型（IKE0VX）。
+   *
+   * 同类其它行的标记由服务端在同一事务里清掉，所以这里用返回的**整份列表**覆盖，
+   * 不做单行合并——单行合并会让被清掉的那一行在界面上继续显示「默认」。
+   */
+  const makeDefault = async (id: string) => {
+    setActionError('');
+    try {
+      setModels(await setAdminModelDefault(id));
+    } catch (e) {
+      setActionError(isApiError(e) ? e.message : '设为默认失败，请稍后重试');
     }
   };
 
@@ -149,6 +165,7 @@ export default function ModelList() {
               <th>类型</th>
               <th>默认参数</th>
               <th>启用</th>
+              <th>默认</th>
               <th>排序</th>
               <th>更新时间</th>
               <th className={styles.thRight}>操作</th>
@@ -157,17 +174,17 @@ export default function ModelList() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={8} className={styles.tableState}>加载中…</td>
+                <td colSpan={9} className={styles.tableState}>加载中…</td>
               </tr>
             )}
             {!loading && loadError && (
               <tr>
-                <td colSpan={8} className={styles.tableState}>{loadError}</td>
+                <td colSpan={9} className={styles.tableState}>{loadError}</td>
               </tr>
             )}
             {!loading && !loadError && filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className={styles.tableState}>暂无模型</td>
+                <td colSpan={9} className={styles.tableState}>暂无模型</td>
               </tr>
             )}
             {filtered.map((m) => (
@@ -178,6 +195,15 @@ export default function ModelList() {
                 <td>{defaultParams(m)}</td>
                 <td>
                   <span className={m.enabled ? styles.badgeOn : styles.badgeOff}>{m.enabled ? '启用' : '停用'}</span>
+                </td>
+                <td>
+                  {m.is_default ? (
+                    <span className={styles.badgeDefault}>默认</span>
+                  ) : (
+                    <button className={styles.linkBtn} onClick={() => makeDefault(m.id)}>
+                      设为默认
+                    </button>
+                  )}
                 </td>
                 <td className={styles.cellSort}>{m.sort_order}</td>
                 <td className={styles.cellTime}>{fmtTime(m.updated_at)}</td>

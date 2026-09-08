@@ -132,6 +132,17 @@ export class ModelAuditService {
     );
   }
 
+  async logSetDefault(after: AdminModelCapabilityRow, operator: string) {
+    await this.writeLog(
+      {
+        action: "model.set-default",
+        target: modelTarget(after),
+        detail: `设为默认模型：${modelTypeLabel(after.capability_type)}「${after.model_label}」（${after.provider_id}/${after.model_id}）；同类其它模型的默认标记已清除`,
+      },
+      operator,
+    );
+  }
+
   async logReorder(
     changes: { id: string; model_id: string; sortOrder: number }[],
     operator: string,
