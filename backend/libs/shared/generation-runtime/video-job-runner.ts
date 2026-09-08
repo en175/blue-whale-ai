@@ -643,7 +643,6 @@ async function buildSubmitRequest(
   };
 }
 
-
 /** IKDJNZ：解析单数组 references（handler 已校验格式）。未提供返回 null（走旧字段路径）。 */
 type SingleReferenceItem = {
   role: "first_frame" | "last_frame" | "reference";
