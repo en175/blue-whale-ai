@@ -11,7 +11,7 @@ import {
  *  + RocketMqImageConsumer（tag=image，IKBGKA，Semaphore(IMAGE_CONCURRENCY)）
  *  + RocketMqAudioConsumer（tag=audio，IKCR78，Semaphore(AUDIO_CONCURRENCY)）
  *  producer 侧 enqueueVideoGenerationJob / enqueueMediaExtractJob / enqueueImageGenerationJob
- *  / enqueueAudioGenerationJob 同走 RocketMQ（IKDZJK：bullmq 回退路径已清理，rocketmq 唯一驱动）。 */
+ *  / enqueueAudioGenerationJob 同走 RocketMQ（IKDZJK：收敛为 rocketmq 唯一驱动）。 */
 
 /** IKBBXH：RocketMQ producer 延时下限（ms）。topic 只收 DELAY 消息，delay≤0 也落到该值，保证消息判为 DELAY。 */
 export const VIDEO_MIN_DELAY_MS = 1_000;
