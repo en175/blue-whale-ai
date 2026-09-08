@@ -1,6 +1,5 @@
 import { Module } from "@nestjs/common";
 import { ScheduleModule } from "@nestjs/schedule";
-import { VIDEO_GENERATION_QUEUE } from "@lib/shared/generation/queue.constants.js";
 import { PrismaModule } from "@lib/shared/prisma/prisma.module.js";
 import { AssetModule } from "@lib/shared/assets/assets.module.js";
 import { OperationLogModule } from "@lib/shared/operation-log/operation-log.module.js";
