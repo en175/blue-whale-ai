@@ -1,10 +1,8 @@
-import { fail, ok } from "@blue-whale/contracts";
+import { RESOURCE_NOT_FOUND_CODE, fail, ok } from "@blue-whale/contracts";
 import type {
   GenerationCommandRepo,
   ProjectRepo,
 } from "@lib/shared/persistence/index.js";
-
-const RESOURCE_NOT_FOUND_CODE = 100301;
 
 /** POST /api/projects/{projectId}/generation-jobs/{jobId}/cancel：软取消（置 cancel_requested_at）。
  *  worker 读到后停止；仅归属当前用户的 queued/processing 任务可取消。 */
