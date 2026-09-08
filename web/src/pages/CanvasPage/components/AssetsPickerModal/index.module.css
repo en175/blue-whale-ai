@@ -75,6 +75,9 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* 恒定预留滚动条槽位：瀑布流高度在估算与实测间修正时，滚动条出现/消失
+     会让内容宽度 ±6px 振荡，进而触发 positioner 重建与卡片重排（尺寸抖动）。 */
+  scrollbar-gutter: stable;
   padding: 16px 20px;
 }
 

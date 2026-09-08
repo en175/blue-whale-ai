@@ -5,7 +5,7 @@
  * 上传流程：uploadAssetFile（3 步）→ 拿公网 URL → createAsset
  * groupType='AIGC' 虚拟人像库；'LivenessFace' 真人人像库（新建走 H5 真人认证）
  * ============================================ */
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import QRCodeStyling from 'qr-code-styling';
@@ -271,6 +271,78 @@ function MaterialDetailModal({ asset, onClose }: { asset: MaterialAsset | null; 
 /* ============================================
  * 分组详情视图
  * ============================================ */
+/** 图片缩略图卡片：加载完成后解除 1:1 占位、按真实宽高比撑开（视频保持固定 1:1）。
+ *  加载前保持 1:1 占位，避免图片未就绪时高度塌陷引起布局跳动。 */
+function MeasuredThumb({
+  src,
+  alt,
+  children,
+}: {
+  src: string;
+  alt?: string;
+  children?: ReactNode;
+}) {
+  const [measured, setMeasured] = useState(false);
+  return (
+    <div className={`${styles.assetThumb} ${measured ? styles.assetThumbMeasured : ''}`}>
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        onLoad={(e) => {
+          const { naturalWidth, naturalHeight } = e.currentTarget;
+          // 正方形图片占位即终态，无需切换，避免无谓重排
+          if (naturalWidth > 0 && naturalHeight > 0 && naturalWidth !== naturalHeight) {
+            setMeasured(true);
+          }
+        }}
+      />
+      {children}
+    </div>
+  );
+}
+
+/** 素材卡片上的角标/名称浮层/状态角标/删除按钮（图片/视频卡片共用） */
+function AssetCardOverlays({
+  asset,
+  onDeleteAsset,
+  onClosePreview,
+}: {
+  asset: MaterialAsset;
+  onDeleteAsset: (asset: MaterialAsset) => void;
+  onClosePreview: () => void;
+}) {
+  return (
+    <>
+      <div className={styles.assetTypeBadge}>
+        {asset.AssetType === 'Video' ? <Video size={14} /> : null}
+        {asset.AssetType === 'Video' ? '视频' : '图片'}
+      </div>
+      {/* 底部名称浮层 */}
+      <div className={styles.assetNameOverlay}>
+        <span className={styles.assetName} title={asset.Name}>{asset.Name}</span>
+      </div>
+      {asset.Status === 'Processing' && (
+        <div className={styles.statusBadge}>处理中</div>
+      )}
+      {asset.Status === 'Failed' && (
+        <div className={`${styles.statusBadge} ${styles.statusFailed}`}>失败</div>
+      )}
+      <button
+        className={styles.assetDeleteBtn}
+        title="删除素材"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClosePreview(); // 关闭预览弹窗，避免层级冲突
+          onDeleteAsset(asset);
+        }}
+      >
+        <Trash2 size={14} strokeWidth={2} />
+      </button>
+    </>
+  );
+}
+
 function GroupDetail({
   group,
   assets,
@@ -310,44 +382,24 @@ function GroupDetail({
         {assets.map((asset) => (
           <div key={asset.Id} className={styles.assetCard}
             onClick={() => setPreviewAsset(asset)}>
-            <div className={styles.assetThumb}>
-              {asset.URL ? (
-                asset.AssetType === 'Video' ? (
-                  <>
-                    <video src={asset.URL} muted playsInline preload="metadata" />
-                  </>
+            {asset.URL && asset.AssetType === 'Image' ? (
+              <MeasuredThumb src={asset.URL} alt={asset.Name}>
+                <AssetCardOverlays asset={asset} onDeleteAsset={onDeleteAsset} onClosePreview={closePreview} />
+              </MeasuredThumb>
+            ) : (
+              <div className={styles.assetThumb}>
+                {asset.URL ? (
+                  asset.AssetType === 'Video' ? (
+                    <>
+                      <video src={asset.URL} muted playsInline preload="metadata" />
+                    </>
+                  ) : null
                 ) : (
-                  <img src={asset.URL} alt={asset.Name} loading="lazy" />
-                )
-              ) : (
-                <div className={styles.empty}>资源不可用</div>
-              )}
-              <div className={styles.assetTypeBadge}>
-                {asset.AssetType === 'Video' ? <Video size={14} /> : null}
-                {asset.AssetType === 'Video' ? '视频' : '图片'}
+                  <div className={styles.empty}>资源不可用</div>
+                )}
+                <AssetCardOverlays asset={asset} onDeleteAsset={onDeleteAsset} onClosePreview={closePreview} />
               </div>
-              {/* 底部名称浮层 */}
-              <div className={styles.assetNameOverlay}>
-                <span className={styles.assetName} title={asset.Name}>{asset.Name}</span>
-              </div>
-              {asset.Status === 'Processing' && (
-                <div className={styles.statusBadge}>处理中</div>
-              )}
-              {asset.Status === 'Failed' && (
-                <div className={`${styles.statusBadge} ${styles.statusFailed}`}>失败</div>
-              )}
-              <button
-                className={styles.assetDeleteBtn}
-                title="删除素材"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setPreviewAsset(null); // 关闭预览弹窗，避免层级冲突
-                  onDeleteAsset(asset);
-                }}
-              >
-                <Trash2 size={14} strokeWidth={2} />
-              </button>
-            </div>
+            )}
           </div>
         ))}
         {!onUpload && assets.length === 0 && (

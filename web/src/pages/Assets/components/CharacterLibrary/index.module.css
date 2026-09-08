@@ -232,7 +232,8 @@
   padding: var(--spacing-2xl) 0;
   color: #fff;
   font-size: var(--font-size-md);
-  grid-column: 1 / -1;
+  /* 素材网格已是 multi-column 瀑布流，空态需跨全宽展示 */
+  column-span: all;
   text-shadow: 0 2px 12px rgba(0, 0, 0, 0.72);
 }
 
@@ -302,11 +303,10 @@
   background-color: var(--color-accent-hover);
 }
 
-/* ---- 素材网格（复用资产卡片样式） ---- */
+/* ---- 素材网格（瀑布流：图片按真实宽高比渲染，列优先排布） ---- */
 .assetGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 8px;
+  columns: 200px;
+  column-gap: 8px;
 }
 
 .assetCard {
@@ -319,7 +319,9 @@
   box-shadow: var(--asset-glass-shadow, 0 14px 34px rgba(0, 0, 0, 0.42));
   cursor: pointer;
   transition: all var(--transition-normal);
-  align-self: start;
+  /* 瀑布流防断裂：卡片不被拆到两列，行距由 margin 提供 */
+  break-inside: avoid;
+  margin-bottom: 8px;
 }
 
 .uploadAssetCard {
@@ -363,6 +365,17 @@
   height: 100%;
   object-fit: cover;
   pointer-events: none;
+}
+
+/* 图片加载完成后解除 1:1 占位，按真实宽高比撑开（视频保持 1:1） */
+.assetThumbMeasured {
+  aspect-ratio: auto;
+}
+
+.assetThumbMeasured img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
 }
 
 .assetTypeBadge {

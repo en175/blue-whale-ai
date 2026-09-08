@@ -5,7 +5,7 @@
  * Tab: 虚拟人像库（AIGC）/ 真人人像库（LivenessFace），统一多选（真人人像库仅视频入口显示）
  * 弹窗仅做分组/素材展示与选中使用，分组/素材管理归资产页
  * ============================================ */
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
@@ -73,6 +73,37 @@ function GroupCard({
  * 分组/素材管理（新建、重命名、删除、上传）归资产页，弹窗内不提供
  * 选中状态由父组件持有（虚拟/真人跨 tab 累加），本组件仅展示与切换
  * ============================================ */
+/** 图片缩略图卡片：加载完成后解除 1:1 占位、按真实宽高比撑开（视频/音频保持固定 1:1）。
+ *  加载前保持 1:1 占位，避免图片未就绪时高度塌陷引起布局跳动。 */
+function MeasuredThumb({
+  src,
+  alt,
+  children,
+}: {
+  src: string;
+  alt?: string;
+  children?: ReactNode;
+}) {
+  const [measured, setMeasured] = useState(false);
+  return (
+    <div className={`${styles.assetThumb} ${measured ? styles.assetThumbMeasured : ''}`}>
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        onLoad={(e) => {
+          const { naturalWidth, naturalHeight } = e.currentTarget;
+          // 正方形图片占位即终态，无需切换，避免无谓重排
+          if (naturalWidth > 0 && naturalHeight > 0 && naturalWidth !== naturalHeight) {
+            setMeasured(true);
+          }
+        }}
+      />
+      {children}
+    </div>
+  );
+}
+
 function GroupDetail({
   group,
   assets,
@@ -112,33 +143,26 @@ function GroupDetail({
                 className={`${styles.assetCard} ${!selectable ? styles.assetCardDisabled : ''} ${selectedFlag ? styles.assetCardSelected : ''}`}
                 onClick={() => onToggleAsset(asset)}
               >
-                <div className={styles.assetThumb}>
-                  {asset.URL ? (
-                    asset.AssetType === 'Video' ? (
-                      <video src={asset.URL} muted playsInline preload="metadata" />
-                    ) : asset.AssetType === 'Audio' ? (
-                      <div className={styles.audioPlaceholder}>
-                        <Music size={28} strokeWidth={1.5} />
-                      </div>
+                {asset.URL && asset.AssetType === 'Image' ? (
+                  <MeasuredThumb src={asset.URL} alt={asset.Name}>
+                    <AssetCardOverlays asset={asset} selectable={selectable} selectedFlag={selectedFlag} />
+                  </MeasuredThumb>
+                ) : (
+                  <div className={styles.assetThumb}>
+                    {asset.URL ? (
+                      asset.AssetType === 'Video' ? (
+                        <video src={asset.URL} muted playsInline preload="metadata" />
+                      ) : asset.AssetType === 'Audio' ? (
+                        <div className={styles.audioPlaceholder}>
+                          <Music size={28} strokeWidth={1.5} />
+                        </div>
+                      ) : null
                     ) : (
-                      <img src={asset.URL} alt={asset.Name} loading="lazy" />
-                    )
-                  ) : (
-                    <div className={styles.empty}>资源不可用</div>
-                  )}
-                  <div className={`${styles.assetTypeBadge} ${selectable ? styles.assetTypeBadgeShifted : ''}`}>
-                    {asset.AssetType === 'Video' ? '视频' : asset.AssetType === 'Audio' ? '音频' : '图片'}
+                      <div className={styles.empty}>资源不可用</div>
+                    )}
+                    <AssetCardOverlays asset={asset} selectable={selectable} selectedFlag={selectedFlag} />
                   </div>
-                  {asset.Status === 'Processing' && <div className={styles.statusBadge}>处理中</div>}
-                  {asset.Status === 'Failed' && (
-                    <div className={`${styles.statusBadge} ${styles.statusFailed}`}>失败</div>
-                  )}
-                  {selectable && (
-                    <div className={`${styles.checkToggle} ${selectedFlag ? styles.checkToggleOn : ''}`}>
-                      {selectedFlag && <Check size={14} strokeWidth={2.5} />}
-                    </div>
-                  )}
-                </div>
+                )}
                 <div className={styles.assetName} title={asset.Name}>
                   {asset.Name}
                 </div>
@@ -151,9 +175,34 @@ function GroupDetail({
   );
 }
 
-/* ============================================
- * 主组件
- * ============================================ */
+/** 素材卡片上的角标/勾选浮层（与媒体类型无关，图片/视频/音频卡片共用） */
+function AssetCardOverlays({
+  asset,
+  selectable,
+  selectedFlag,
+}: {
+  asset: MaterialAsset;
+  selectable: boolean;
+  selectedFlag: boolean;
+}) {
+  return (
+    <>
+      <div className={`${styles.assetTypeBadge} ${selectable ? styles.assetTypeBadgeShifted : ''}`}>
+        {asset.AssetType === 'Video' ? '视频' : asset.AssetType === 'Audio' ? '音频' : '图片'}
+      </div>
+      {asset.Status === 'Processing' && <div className={styles.statusBadge}>处理中</div>}
+      {asset.Status === 'Failed' && (
+        <div className={`${styles.statusBadge} ${styles.statusFailed}`}>失败</div>
+      )}
+      {selectable && (
+        <div className={`${styles.checkToggle} ${selectedFlag ? styles.checkToggleOn : ''}`}>
+          {selectedFlag && <Check size={14} strokeWidth={2.5} />}
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function CharacterLibraryModal({ onClose, onSelectAssets, enableRealPersonTab }: CharacterLibraryModalProps) {
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]['key']>('character');
   const [groups, setGroups] = useState<MaterialGroup[]>([]);

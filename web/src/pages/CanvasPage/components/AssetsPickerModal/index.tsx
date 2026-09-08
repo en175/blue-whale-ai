@@ -195,6 +195,7 @@ export default function AssetsPickerModal({
                 onToggleSelect={handleToggleSelect}
                 columnCount={4}
                 pageSize={PICKER_PAGE_SIZE}
+                libraryMode
               />
               {isFetchingNextPage && (
                 <div className={assetStyles.loadState} role="status">加载中…</div>

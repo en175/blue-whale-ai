@@ -281,13 +281,12 @@
 }
 
 .detailView .assetGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 12px;
+  /* 瀑布流：图片按真实宽高比渲染，列优先排布 */
+  columns: 140px;
+  column-gap: 12px;
   overflow-y: auto;
   flex: 1;
   min-height: 0;
-  align-content: start;
 }
 
 .detailView .assetCard {
@@ -297,6 +296,9 @@
   overflow: hidden;
   background-color: var(--color-bg-secondary);
   transition: all var(--transition-fast);
+  /* 瀑布流防断裂：卡片不被拆到两列，行距由 margin 提供 */
+  break-inside: avoid;
+  margin-bottom: 12px;
 }
 
 .detailView .assetCard:hover {
@@ -314,6 +316,17 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* 图片加载完成后解除 1:1 占位，按真实宽高比撑开（视频/音频保持 1:1） */
+.detailView .assetThumbMeasured {
+  aspect-ratio: auto;
+}
+
+.detailView .assetThumbMeasured img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
 }
 
 .detailView .assetThumb video {

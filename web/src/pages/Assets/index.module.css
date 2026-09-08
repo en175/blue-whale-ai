@@ -229,7 +229,9 @@
   overflow: visible;
   box-shadow: var(--asset-glass-shadow);
   cursor: pointer;
-  transition: all var(--transition-normal);
+  /* 仅过渡 box-shadow：transition: all 会把列宽变化派生的卡片高度变化拉成动画，
+     masonic ResizeObserver 在动画期间逐帧测量并重排，引发弹窗尺寸抖动。 */
+  transition: box-shadow var(--transition-normal);
 }
 
 .libraryCard {
