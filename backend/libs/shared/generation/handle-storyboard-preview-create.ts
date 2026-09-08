@@ -10,7 +10,7 @@ import {
   ok,
   storyboardPreviewCreateRequestSchema,
 } from "@blue-whale/contracts";
-import type { StoryboardPreviewRepo } from "@blue-whale/persistence";
+import type { StoryboardPreviewRepo } from "@lib/shared/persistence/index.js";
 import type { CostReservationSnapshot } from "@blue-whale/core";
 
 import { wireInteger } from "@lib/shared/wire-integer.js";

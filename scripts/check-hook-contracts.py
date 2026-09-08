@@ -203,6 +203,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    # Windows 原生 Python 默认 stdout/stderr 为 cp936（GBK），诊断输出被 test-hooks.sh
+    # 的 UTF-8 needle grep 漏配（与 sync/start-task 同根因的输出方向）。强制改 UTF-8；
+    # POSIX 本就 UTF-8，reconfigure 为 no-op。
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
     args = parse_args()
     platforms = (
         ("ZCode", args.zcode, ("hooks", "events"), claude_gate),

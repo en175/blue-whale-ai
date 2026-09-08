@@ -1,7 +1,7 @@
 import {
   DEFAULT_MAX_REFERENCE_IMAGES,
   type WorkerRepo,
-} from "@blue-whale/persistence";
+} from "@lib/shared/persistence/index.js";
 import type { AssetUploadStorage } from "@lib/shared/assets/upload.js";
 import sharp from "sharp";
 
@@ -152,6 +152,11 @@ async function processClaimedJob(
   // IK7GRP：claim 后 job 已是 processing + 当前 worker 持 lease；围栏凭证（workerId + fencingToken）
   // 随每次写方法透传，stale worker（旧 fencing_token / 失效 lease）的迟到写入被仓储层拒绝。
   const fenceProof = { workerId, fencingToken: job.fencingToken };
+  if (job.cancelRequested) {
+    // 沿用历史命名的通用派发前取消事务：围栏保护与预留释放对图片/音频同样适用。
+    await repo.cancelVideoBeforeDispatch({ jobId: job.id, ...fenceProof });
+    return job.id;
+  }
   // IK9VZ0：失败释放校验用——本 job 曾发出的 new-api 请求证据（request_id 列表 + sk token）。
   let attemptedRequestIds: string[] = [];
   let providerTokenRef: string | undefined;

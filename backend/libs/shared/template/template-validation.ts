@@ -1,4 +1,4 @@
-import type { TemplateCardInput } from "@blue-whale/persistence";
+import type { TemplateCardInput } from "@lib/shared/persistence/index.js";
 
 export const TEMPLATE_LAYOUTS = [
   "wide",

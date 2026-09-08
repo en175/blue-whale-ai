@@ -12,7 +12,7 @@ import {
   openGenerationCredential,
   quotaToFen,
 } from "@blue-whale/core";
-import { createWorkerRepo } from "@blue-whale/persistence";
+import { createWorkerRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import {
   createTosStorage,

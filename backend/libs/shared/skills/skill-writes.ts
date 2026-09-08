@@ -5,7 +5,7 @@ import {
   SkillInUseError,
   SkillNameConflictError,
   SkillNameReservedError,
-} from "@blue-whale/persistence";
+} from "@lib/shared/persistence/index.js";
 import type { SkillService } from "./skills.service.js";
 
 const DATA_NOT_EXIST_CODE = 100100;

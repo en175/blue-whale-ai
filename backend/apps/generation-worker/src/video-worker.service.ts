@@ -1,6 +1,6 @@
 import { hostname } from "node:os";
 import { Injectable } from "@nestjs/common";
-import { createWorkerRepo } from "@blue-whale/persistence";
+import { createWorkerRepo } from "@lib/shared/persistence/index.js";
 import { createLogger } from "@blue-whale/core/logging";
 import {
   loadGenerationCostConfig,

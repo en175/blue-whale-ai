@@ -4,7 +4,7 @@ import {
   type LegacyMigrationFailure,
   type PromptPreviewSource,
 } from "@blue-whale/contracts";
-import type { LegacyCardHistoryDraft, LegacyCardHistoryRow } from "@blue-whale/persistence";
+import type { LegacyCardHistoryDraft, LegacyCardHistoryRow } from "@lib/shared/persistence/index.js";
 import { sourceKey } from "./prompt-preview.js";
 
 /** 画布 JSON 中的节点最小形状（IKDLQK 迁移只关心这些字段）。 */

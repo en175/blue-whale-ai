@@ -7,10 +7,21 @@ import {
   ERROR_PROVIDER_FAILED,
   ERROR_PROVIDER_TIMEOUT,
   ERROR_REFERENCE_ASSET_UNAVAILABLE,
-  ERROR_REFERENCE_LIMIT_EXCEEDED,
   ERROR_UNSUPPORTED_INPUT,
   textAttachmentSnapshotSchema,
 } from "@blue-whale/contracts";
+import { videoDimensions, dimensionsFromSize } from "./video-dimensions.js";
+import {
+  readAssetId,
+  readAssetIds,
+  readMaterialId,
+  readMaterialRefs,
+  uniqueAssetIds,
+  uniqueMaterialRefs,
+  VideoInputError,
+  type MaterialReference,
+} from "./material-reference.js";
+import { validateReferences } from "./video-reference-validation.js";
 
 const logger = createLogger("generation-runtime");
 
@@ -168,16 +179,6 @@ export interface GenerationCredentialVault {
 
 export interface VideoMediaRelay {
   persist(sourceUrl: string, userId: string): Promise<StoredVideo>;
-}
-
-class VideoInputError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "VideoInputError";
-  }
 }
 
 /**
@@ -652,6 +653,7 @@ async function buildSubmitRequest(
     references,
   };
 }
+<<<<<<< HEAD
 
 const MAX_REFERENCE_IMAGES = 9;
 const MAX_REFERENCE_VIDEOS = 3;

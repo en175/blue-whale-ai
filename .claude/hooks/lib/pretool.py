@@ -21,6 +21,10 @@ from typing import Any
 
 SEPARATORS = {";", "&", "&&", "|", "||", "(", ")"}
 WORK_BRANCH_PREFIXES = ("feature/", "fix/", "hotfix/", "docs/", "chore/")
+# 测试基建桥：test-hooks.sh 在 Windows 注入 fake git（git.bat）后，把该全路径
+# 经此环境变量交给 pretool 的 git 子进程，使 current_branch / configured_git_alias
+# 命中假分支而非真实仓库（POSIX 不导出此变量，走原 git PATH 解析，行为不变）。
+PRETOOL_GIT_BIN = os.environ.get("PRETOOL_GIT_BIN") or "git"
 NON_ALIAS_SUBCOMMANDS = {
     "add",
     "branch",
@@ -116,6 +120,11 @@ def value(key: str) -> int:
     return 0
 
 
+def is_posix_style(path: str) -> bool:
+    """判断路径是否为 POSIX 风格（MSYS/Git Bash 路径，以 / 开头且非盘符）。"""
+    return bool(path) and path.startswith("/")
+
+
 def normalize_codex_apply_patch() -> int:
     data = load_pretool()
     tool_input = data.get("tool_input")
@@ -143,7 +152,15 @@ def normalize_codex_apply_patch() -> int:
         target = match.group(1)
         if not target:
             return 2
-        targets.append(os.path.abspath(os.path.join(cwd, target)))
+        if is_posix_style(cwd):
+            # MSYS/Git Bash 的 session cwd 是 POSIX 形式（/tmp/...、/e/IDEA_Programme/...）。
+            # 这里必须用 posixpath 拼接并保留 POSIX 形式：若用 os.path.abspath（Windows 原生
+            # Python 下是 ntpath），/tmp/... 会被翻译成盘符 E:\tmp\...，而 MSYS bash 的 dirname
+            # 对 E:\... 不收敛，会让 block-master-edit.sh 的祖先遍历死循环（IK10D1 gate 卡死）。
+            # POSIX 平台上 posixpath 即 os.path，行为不变。
+            targets.append(posixpath.normpath(posixpath.join(cwd, target)))
+        else:
+            targets.append(os.path.abspath(os.path.join(cwd, target)))
 
     if not targets:
         return 2
@@ -401,12 +418,14 @@ def git_invocations(command: str) -> list[GitInvocation]:
 def configured_git_alias(name: str, cwd: str | None) -> str | None:
     if name in NON_ALIAS_SUBCOMMANDS:
         return None
-    command = ["git"]
+    command = [PRETOOL_GIT_BIN]
     if cwd:
         command.extend(["-C", cwd])
     command.extend(["config", "--get", f"alias.{name}"])
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        result = subprocess.run(
+            command, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+        )
     except OSError:
         return None
     if result.returncode != 0:
@@ -501,12 +520,14 @@ def explicit_targets(invocation: GitInvocation) -> list[str]:
 
 
 def current_branch(cwd: str | None) -> str:
-    cmd = ["git"]
+    cmd = [PRETOOL_GIT_BIN]
     if cwd:
         cmd.extend(["-C", cwd])
     cmd.extend(["rev-parse", "--abbrev-ref", "HEAD"])
     try:
-        return subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL).strip()
+        return subprocess.check_output(
+            cmd, text=True, encoding="utf-8", errors="replace", stderr=subprocess.DEVNULL
+        ).strip()
     except Exception:
         return ""
 

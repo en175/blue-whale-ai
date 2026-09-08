@@ -4,6 +4,11 @@ import subprocess
 import tempfile
 import unittest
 
+try:  # 作为 scripts.tests.* 命名空间包导入
+    from .bash_helper import BASH
+except ImportError:  # 经 discover -s scripts/tests 顶层导入
+    from bash_helper import BASH
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "check-target-environment-retirement.sh"
@@ -102,11 +107,12 @@ class TestCheckTargetEnvironmentRetirement(unittest.TestCase):
         if extra_env:
             env.update(extra_env)
         return subprocess.run(
-            ["bash", str(SCRIPT)],
+            [BASH, str(SCRIPT)],
             cwd=ROOT,
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
 
@@ -193,6 +199,11 @@ class TestCheckTargetEnvironmentRetirement(unittest.TestCase):
             self.assertNotIn(secret, result.stdout)
             self.assertNotIn("topsecret", result.stdout)
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows 下 os.symlink 默认无特权（WinError 1314），且 MSYS 也拒绝"
+        "`/opt/blue_whale_server/...` 这类 POSIX 绝对路径链接；仅 POSIX 有效。",
+    )
     def test_retired_path_symlink_fails(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             self._prepare_stubs(temp_dir)

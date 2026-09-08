@@ -10,7 +10,7 @@ import {
   ok,
   sceneCardRegenerationRequestSchema,
 } from "@blue-whale/contracts";
-import type { SceneCardGenerationRepo } from "@blue-whale/persistence";
+import type { SceneCardGenerationRepo } from "@lib/shared/persistence/index.js";
 import type { CostReservationSnapshot } from "@blue-whale/core";
 
 import { wireInteger } from "@lib/shared/wire-integer.js";

@@ -19,6 +19,7 @@ import {
   type EdgeTypes,
   type NodeMouseHandler,
   type Viewport,
+  type OnSelectionChangeParams,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useCallback, useEffect, useRef, useMemo } from 'react';
@@ -60,17 +61,24 @@ interface FlowCanvasProps {
   onNodeClick?: (node: Node) => void;
   /** 画布空白处单击 */
   onPaneClick?: () => void;
+  /** 选中集合变化（IKDMQU：空白/多选隐藏生成面板） */
+  onSelectionChange?: (params: OnSelectionChangeParams) => void;
+  /** 父层显式选中请求（IKDMQV，侧栏新建草稿自动选中）：唯一选中目标节点。
+   *  必须经内部 setNodes 应用——外部 nodes 的 selected 字段会被合并保护忽略
+   *  （父层尺寸回填等 update 携带过期选中态时不得覆盖交互），且经外部传播
+   *  会因内部 selection store 的时序差产生旧卡+新卡双选中误报。ts 驱动去重。 */
+  selectRequest?: { id: string; ts: number } | null;
   /** 隐藏右下角缩放控件。Agent 面板打开时它正好压在面板的发送按钮上（IKAGZC）。 */
   hideZoomControl?: boolean;
-  /** 注册出生点取数函数（当前视口中心的 flow 坐标），供父级创建节点时落在用户可见区域 */
-  registerSpawnPosition?: (fn: () => { x: number; y: number }) => void;
+  /** 注册屏幕点→flow 坐标转换（无参默认视口中心），供父级创建节点时落在用户可见区域并换算 Dock 避让区 */
+  registerSpawnPosition?: (fn: (screenPt?: { x: number; y: number }) => { x: number; y: number }) => void;
   /** 商品卡 ts 驱动注入结果 */
   productPickResult?: { ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string } } | null;
   /** 资产卡 ts 驱动注入结果 */
   assetPickResult?: { ts: number; assetId: string; ref: { id: string; src: string; type?: 'image' | 'video'; assetId?: string } } | null;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -78,6 +86,15 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const mediaIdsRef = useRef<Set<string>>(new Set());
   const productIdsRef = useRef<Set<string>>(new Set());
   const assetIdsRef = useRef<Set<string>>(new Set());
+
+  /** 父层显式选中请求（IKDMQV）：唯一选中目标并取消其余——经内部 setNodes 应用，
+   *  同步 React Flow selection store，避免外部 selected 传播的双选中误报。 */
+  const selectReqTsRef = useRef(0);
+  useEffect(() => {
+    if (!selectRequest || selectRequest.ts === selectReqTsRef.current) return;
+    selectReqTsRef.current = selectRequest.ts;
+    setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === selectRequest.id })));
+  }, [selectRequest, setNodes]);
 
   const nodeTypes: NodeTypes = useMemo(() => ({ textNode: TextNode, mediaNode: MediaNode, productNode: ProductNode, assetNode: AssetCardNode }), []);
   const edgeTypes: EdgeTypes = useMemo(() => ({ custom: CustomEdge }), []);
@@ -90,10 +107,10 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const { zoom } = useViewport();
   const dotSize = Math.max(0.4, Math.min(4, 1 / zoom));
 
-  /** 向父级注册出生点取数函数：屏幕视觉中心 → flow 坐标 */
+  /** 向父级注册屏幕点→flow 坐标转换（无参取屏幕视觉中心） */
   useEffect(() => {
-    registerSpawnPosition?.(() =>
-      screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }),
+    registerSpawnPosition?.((screenPt) =>
+      screenToFlowPosition(screenPt ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 }),
     );
   }, [registerSpawnPosition, screenToFlowPosition]);
 
@@ -173,7 +190,9 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
           result = result.map((node) => {
             const update = updated.find((u) => u.id === node.id);
             if (!update) return node;
-            // 父层只在拖动结束时保存坐标；媒体加载不能覆盖画布当前的交互状态。
+            // 父层只在拖动结束时保存坐标；媒体加载不能覆盖画布当前的交互状态
+            // （父层尺寸回填等 update 可能顺带携带过期的 selected，一律以内部交互态为准；
+            //  父层显式选中请求走 selectRequest prop，经内部 setNodes 应用——IKDMQV）
             return {
               ...node,
               ...update,
@@ -283,7 +302,10 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   onDeleteNodeRef.current = onDeleteNode;
 
   /** Delete/Backspace 删除选中节点；Enter 继续拦截（输入框/编辑器内保持原语义）。
-   *  连线级联删除由父级完成：节点离开各列表后，悬空连线被统一定时清理（IKDLQF） */
+   *  连线级联删除由父级完成：节点离开各列表后，悬空连线被统一定时清理（IKDLQF）。
+   *  内部 nodes 不在此处直接移除（IKDMQW）：生成中卡片的删除是「先取消后移除」的异步流程，
+   *  若内部抢先移除而父级在取消竞态中保留卡片（任务抢先成功保留作品），节点会从画布消失；
+   *  统一由父级各列表状态驱动，各合并 effect 的 removed 分支同步内部 nodes。 */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const action = canvasDeleteKeyAction(e.key, e.target);
@@ -292,14 +314,11 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       e.stopPropagation();
       if (action !== 'delete-selected') return;
 
-      const ids = deleteSelectedCanvasNodes(nodesRef.current, onDeleteNodeRef.current);
-      if (ids.length === 0) return;
-      const idSet = new Set(ids);
-      setNodes((prev) => prev.filter((node) => !idSet.has(node.id)));
+      deleteSelectedCanvasNodes(nodesRef.current, onDeleteNodeRef.current);
     };
     document.addEventListener('keydown', handler, true);
     return () => document.removeEventListener('keydown', handler, true);
-  }, [setNodes]);
+  }, []);
 
   return (
     <div
@@ -317,6 +336,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         onNodeDoubleClick={onNodeDoubleClick}
         onNodeClick={onNodeClick ? (_e, node) => onNodeClick(node) : undefined}
         onPaneClick={onPaneClick}
+        onSelectionChange={onSelectionChange}
         onMoveEnd={(_e, v) => onViewportChangeRef.current?.(v)}
         onNodeDragStop={(_e, node, draggedNodes) => onNodeDragStop?.(node, draggedNodes)}
         onContextMenu={(e) => e.preventDefault()}
@@ -367,7 +387,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -388,10 +408,12 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         onDeleteNode={onDeleteNode}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        onSelectionChange={onSelectionChange}
         registerSpawnPosition={registerSpawnPosition}
         hideZoomControl={hideZoomControl}
         productPickResult={productPickResult}
         assetPickResult={assetPickResult}
+        selectRequest={selectRequest}
       />
     </ReactFlowProvider>
   );

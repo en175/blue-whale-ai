@@ -23,7 +23,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const { getPrismaClient } = await import(
-  pathToFileURL(resolve(scriptDir, "../packages/persistence/dist/db.js")).href
+  pathToFileURL(resolve(scriptDir, "../backend/dist/libs/shared/persistence/db.js")).href
 );
 
 const JSON_MODE = process.argv.includes("--json");

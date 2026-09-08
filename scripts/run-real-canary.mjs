@@ -17,7 +17,7 @@
  *      GIT_COMMIT="$(git rev-parse HEAD)" BUILD_TIME="$(date -u +%FT%TZ)" pnpm --filter @blue-whale/web dev
  *      （compose 项目 bw-ts-dev 先由 scripts/dev-stack.sh up 启动）；
  *   2. new-api 已配真实火山引擎渠道（图片 doubao-seedream-4-0-250828 /
- *      视频 doubao-seedance-2-0-260128，种子见 packages/persistence/schema/002_seed.sql）；
+ *      视频 doubao-seedance-2-0-260128，种子见 backend/prisma/schema/002_seed.sql）；
  *   3. 对象存储（TOS：VOLC_ACCESS_KEY_ID / VOLC_SECRET_ACCESS_KEY / VOLC_TOS_ENDPOINT /
  *      VOLC_TOS_BUCKET / VOLC_TOS_REGION）已配到 web 与 generation-worker 进程——
  *      未配置时生成结果会直引 provider 源 URL，对象存储断言会 FAIL（这正是要验的点）。

@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { TopupTierView } from "@blue-whale/persistence";
+import type { TopupTierView } from "@lib/shared/persistence/index.js";
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 

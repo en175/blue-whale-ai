@@ -22,8 +22,14 @@ class EvidenceError(RuntimeError):
 
 
 def git(root: Path, *args: str) -> str:
+    # 显式 utf-8：Windows 原生 Python 默认 cp936，git 输出的 UTF-8 中文分支名
+    # 会被 GBK 解码成乱码（与 sync/start-task 同根因的输入方向）。
+    # POSIX 本就 UTF-8，encoding="utf-8" 为 no-op。
     result = subprocess.run(
-        ["git", "-C", str(root), *args], text=True, capture_output=True
+        ["git", "-C", str(root), *args],
+        text=True,
+        capture_output=True,
+        encoding="utf-8",
     )
     if result.returncode != 0:
         raise EvidenceError(result.stderr.strip() or "Git 命令失败。")
@@ -166,6 +172,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows 原生 Python 的 stdout/stderr 默认 GBK，emit() 的 ensure_ascii=False
+    # 中文输出会抛 UnicodeEncodeError 或被 utf-8 解码方读成乱码（与 sync/start-task
+    # 同根因的输出方向）。强制改 UTF-8；POSIX 本就 UTF-8，reconfigure 为 no-op。
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
     args = parse_args(argv or sys.argv[1:])
     try:
         root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel")).resolve()

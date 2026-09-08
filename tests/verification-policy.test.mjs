@@ -259,7 +259,7 @@ test("keeps high-impact infrastructure scoped at completion but full at PR stage
   const files = [
     "pnpm-lock.yaml",
     "Dockerfile.typescript-baseline",
-    "packages/persistence/schema/001_baseline.sql",
+    "backend/prisma/schema/001_baseline.sql",
   ];
 
   assert.deepEqual(classifyChanges(files), {

@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { createSkillRepo } from "@blue-whale/persistence";
+import { createSkillRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 @Injectable()

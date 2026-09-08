@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { AdminModelCapabilityRow } from "@blue-whale/persistence";
+import type { AdminModelCapabilityRow } from "@lib/shared/persistence/index.js";
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
 import { MODEL_CAPABILITY_LABELS } from "./constants.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
