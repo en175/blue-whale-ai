@@ -4,10 +4,14 @@ import {
   COMPOSED_IMAGE_PROMPT_MAX_LENGTH,
   COMPOSED_VIDEO_PROMPT_MAX_LENGTH,
   ERROR_INVALID_INPUT,
+  ERROR_INVALID_REFERENCE,
+  ERROR_INVALID_REFERENCE_TYPE,
   ERROR_MODEL_UNAVAILABLE,
   ERROR_UNSUPPORTED_INPUT,
   ERROR_UNSUPPORTED_TYPE,
   RESOURCE_NOT_FOUND_CODE,
+  checkGenerationParamLimit,
+  toGenerationParamCheckInput,
   fail,
   ok,
   type TextAttachmentSnapshot,
@@ -21,9 +25,15 @@ import {
   type GenerationCommandRepo,
   type ModelCapabilityRepo,
   type ProjectRepo,
+  type WorkerRepo,
 } from "@lib/shared/persistence/index.js";
 
 import type { GenerationCostEstimator } from "./cost-estimator.js";
+import { dimensionsFromSize, videoDimensions } from "@lib/shared/generation-runtime/index.js";
+import {
+  mapImageChannelRequest,
+  parseStoredImageRequestMapping,
+} from "./image-channel-parser.js";
 
 const VIDEO_MODEL_ALIASES: Readonly<Record<string, string>> = {
   "seedance-2": "doubao-seedance-2-0-260128",
@@ -249,7 +259,7 @@ function validateAudioReferences(
 ): { code: string; message: string } | null {
   const parsed = parseReferences(body.references);
   if (parsed.kind === "invalid") {
-    return { code: ERROR_INVALID_INPUT, message: "参考素材引用无效" };
+    return { code: ERROR_INVALID_REFERENCE, message: "参考素材引用无效" };
   }
   // 旧参考字段：仅当携带实际内容才视为「旧字段」——空数组/空串不误拒（前端可能发 input_asset_ids: []）。
   const hasLegacy =
@@ -271,15 +281,15 @@ function validateAudioReferences(
     return null;
   }
   if (hasLegacy) {
-    return { code: ERROR_INVALID_INPUT, message: "references 不能与旧参考字段混用" };
+    return { code: ERROR_INVALID_REFERENCE, message: "references 不能与旧参考字段混用" };
   }
   if (parsed.items.length === 0) {
-    return { code: ERROR_INVALID_INPUT, message: "参考素材不能为空" };
+    return { code: ERROR_INVALID_REFERENCE, message: "参考素材不能为空" };
   }
   for (const item of parsed.items) {
     // 音频/图片生成无帧角色；video 参考对音频生成无意义。
     if (item.role !== "reference" || item.type === "video") {
-      return { code: ERROR_INVALID_INPUT, message: "参考素材引用无效" };
+      return { code: ERROR_INVALID_REFERENCE, message: "参考素材引用无效" };
     }
     // 音频生成不支持素材库（真人/虚拟人像库）引用：参考只能用本地资产（asset_id → 本地 url）。
     if (item.material_id !== undefined) {
@@ -292,12 +302,12 @@ function validateAudioReferences(
   const audioCount = parsed.items.filter((r) => r.type === "audio").length;
   const imageCount = parsed.items.filter((r) => r.type === "image").length;
   if (audioCount > 3)
-    return { code: ERROR_INVALID_INPUT, message: "参考音频最多 3 个" };
+    return { code: ERROR_INVALID_REFERENCE, message: "参考音频最多 3 个" };
   if (imageCount > 1)
-    return { code: ERROR_INVALID_INPUT, message: "参考图最多 1 个" };
+    return { code: ERROR_INVALID_REFERENCE, message: "参考图最多 1 个" };
   if (audioCount > 0 && imageCount > 0)
     return {
-      code: ERROR_INVALID_INPUT,
+      code: ERROR_INVALID_REFERENCE,
       message: "音频与图片参考不可混用",
     };
   return null;
@@ -337,12 +347,12 @@ function validateVideo(
   const hasExplicitInputs =
     hasExplicitFrames || body.reference_asset_ids !== undefined;
   if (body.first_frame_asset_id !== undefined && firstFrameAssetId === null)
-    return { code: ERROR_INVALID_INPUT, message: "首帧素材无效" };
+    return { code: ERROR_INVALID_REFERENCE_TYPE, message: "首帧素材无效" };
   if (body.last_frame_asset_id !== undefined && lastFrameAssetId === null)
-    return { code: ERROR_INVALID_INPUT, message: "尾帧素材无效" };
+    return { code: ERROR_INVALID_REFERENCE_TYPE, message: "尾帧素材无效" };
   if (lastFrameAssetId !== null && firstFrameAssetId === null)
     return {
-      code: ERROR_INVALID_INPUT,
+      code: ERROR_INVALID_REFERENCE,
       message: "尾帧必须与首帧一起使用",
     };
   if (
@@ -352,13 +362,13 @@ function validateVideo(
         ? body.reference_asset_ids.length
         : -1)
   )
-    return { code: ERROR_INVALID_INPUT, message: "参考素材无效" };
+    return { code: ERROR_INVALID_REFERENCE, message: "参考素材无效" };
   const explicitReferenceIds = uniqueAssetIds(
     assetIds(body.reference_asset_ids),
   );
   if (hasExplicitFrames && explicitReferenceIds.length > 0) {
     return {
-      code: ERROR_INVALID_INPUT,
+      code: ERROR_INVALID_REFERENCE,
       message: "首尾帧模式不能与普通参考素材混用",
     };
   }
@@ -366,7 +376,7 @@ function validateVideo(
   // IKDJNZ：单数组 references 优先；存在时跳过旧字段校验路径。
   const parsed = parseReferences(body.references);
   if (parsed.kind === "invalid") {
-    return { code: ERROR_INVALID_INPUT, message: "参考素材引用无效" };
+    return { code: ERROR_INVALID_REFERENCE, message: "参考素材引用无效" };
   }
   if (parsed.kind === "ok") {
     // Critical fix（review）：references 与旧字段并存 → 400，防止新旧混用静默丢引用。
@@ -378,19 +388,19 @@ function validateVideo(
       body.last_frame_material_id !== undefined ||
       body.reference_materials !== undefined;
     if (hasLegacyRefFields) {
-      return { code: ERROR_INVALID_INPUT, message: "references 不能与旧参考字段混用" };
+      return { code: ERROR_INVALID_REFERENCE, message: "references 不能与旧参考字段混用" };
     }
     if (parsed.items.length === 0) {
-      return { code: ERROR_INVALID_INPUT, message: "参考素材不能为空" };
+      return { code: ERROR_INVALID_REFERENCE, message: "参考素材不能为空" };
     }
     const roleErr = validateReferenceRoles(parsed.items);
-    if (roleErr) return { code: ERROR_INVALID_INPUT, message: roleErr };
+    if (roleErr) return { code: ERROR_INVALID_REFERENCE, message: roleErr };
     // 普通参考数量上限沿用 Seedance 约束（首尾帧不计入；参考音频不占图/视频额度）。
     const refCount = parsed.items.filter(
       (r) => r.role === "reference" && r.type !== "audio",
     ).length;
     if (refCount > 12)
-      return { code: ERROR_INVALID_INPUT, message: "参考素材最多 12 个" };
+      return { code: ERROR_INVALID_REFERENCE, message: "参考素材最多 12 个" };
     return null;
   }
   const firstFrameAssetId2 = assetId(body.first_frame_asset_id);
@@ -401,18 +411,18 @@ function validateVideo(
     body.first_frame_material_id !== undefined &&
     firstFrameMaterialId === null
   )
-    return { code: ERROR_INVALID_INPUT, message: "首帧素材库引用无效" };
+    return { code: ERROR_INVALID_REFERENCE_TYPE, message: "首帧素材库引用无效" };
   if (body.last_frame_material_id !== undefined && lastFrameMaterialId === null)
-    return { code: ERROR_INVALID_INPUT, message: "尾帧素材库引用无效" };
+    return { code: ERROR_INVALID_REFERENCE_TYPE, message: "尾帧素材库引用无效" };
   if (firstFrameAssetId2 !== null && firstFrameMaterialId !== null)
-    return { code: ERROR_INVALID_INPUT, message: "首帧只能指定一个来源" };
+    return { code: ERROR_INVALID_REFERENCE, message: "首帧只能指定一个来源" };
   if (lastFrameAssetId2 !== null && lastFrameMaterialId !== null)
-    return { code: ERROR_INVALID_INPUT, message: "尾帧只能指定一个来源" };
+    return { code: ERROR_INVALID_REFERENCE, message: "尾帧只能指定一个来源" };
   if (lastFrameMaterialId !== null && firstFrameMaterialId === null)
-    return { code: ERROR_INVALID_INPUT, message: "尾帧必须与首帧一起使用" };
+    return { code: ERROR_INVALID_REFERENCE, message: "尾帧必须与首帧一起使用" };
   const refs = materialRefs(body.reference_materials);
   if (refs === null)
-    return { code: ERROR_INVALID_INPUT, message: "参考素材库引用无效" };
+    return { code: ERROR_INVALID_REFERENCE_TYPE, message: "参考素材库引用无效" };
   const uniqueRefs = uniqueMaterialRefs(refs);
   // 模式互斥按并集（asset ∨ material）：帧（首/尾帧任一类）与普通参考（asset refs ∨ material refs）
   // 不可并存；跨来源组合在创建即拒绝，不再拖到 Worker 执行时才失败。
@@ -434,7 +444,7 @@ function validateVideo(
     (r) => r.type !== "audio",
   ).length;
   if (imageVideoRefCount > 12) {
-    return { code: ERROR_INVALID_INPUT, message: "参考素材最多 12 个" };
+    return { code: ERROR_INVALID_REFERENCE, message: "参考素材最多 12 个" };
   }
   return null;
 }
@@ -733,6 +743,8 @@ interface GenerationDeps {
   models: Pick<ModelCapabilityRepo, "listEnabledByType">;
   /** IKDLQF：携带 target_node_id 时于接纳当下读取最新画布推导有序文本附件。 */
   canvas: Pick<CanvasRepo, "getByProject">;
+  /** IKE7JP：提交时复用 worker resolveInputAssets 查参考素材存在性/类型（归属逻辑单份）。 */
+  assets: Pick<WorkerRepo, "resolveInputAssets">;
   /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额；缺省沿用旧行为（0 + dev）。 */
   costEstimator?: GenerationCostEstimator;
 }
@@ -777,12 +789,104 @@ export async function handleCreateGenerationJob(
   const capability = whitelist.find((m) => m.model_id === resolvedModelId);
   const maxReferenceImages =
     capability?.features?.max_reference_images ?? DEFAULT_MAX_REFERENCE_IMAGES;
+  // IKE7JP：Dock 提交时前置校验 resolution/size/aspect_ratio/duration 对能力目录合法性——
+  // 越界值在接纳当下 4xx 返回（capability_unsupported_* 细分码 + 可用值文案），不拖到 worker 执行期。
+  // 仅视频校验时长；图片无时长。SceneCard 路径已有同源 checkCapabilityLimit（下一步迁移共享）。
+  // 仅当请求明确携带尺寸/比例/时长时才校验（缺省由能力默认值兜底，见 checkCapabilityLimit 同源语义）；
+  // 图片路径允许缺 size（能力行默认尺寸）。duration 单独存在也进入校验（review：防只带时长越界漏网）。
+  if (
+    capability &&
+    type !== "audio" &&
+    (params.size !== undefined ||
+      params.resolution !== undefined ||
+      (type === "video" && params.duration !== undefined))
+  ) {
+    const checked = toGenerationParamCheckInput({
+      resolution: params.resolution,
+      size: params.size,
+      aspect_ratio: params.aspect_ratio,
+      duration: type === "video" ? params.duration : undefined,
+    });
+    if (checked) {
+      const limitErr = checkGenerationParamLimit(
+        {
+          supported_sizes: capability.supported_sizes,
+          supported_aspect_ratios: capability.supported_aspect_ratios,
+          supported_durations: capability.supported_durations,
+        },
+        checked,
+      );
+      if (limitErr) {
+        return fail(400, limitErr.reason, {
+          code: limitErr.code,
+        });
+      }
+    }
+  }
+  // IKE7JP：图片 size×ratio 交叉格前置——GPT 交叉格未填 / banana 一维映射缺失的组合
+  // 在接纳当下 400（invalid_reference_type，与 worker mapImageChannelRequest 同码同文案），不拖到执行期。
+  if (type === "image" && capability) {
+    const mapping = parseStoredImageRequestMapping(
+      capability.channel_parser,
+      capability.request_mapping,
+      { sizeId: capability.default_size, ratioId: capability.default_aspect_ratio },
+    );
+    if (mapping.parser !== "seedream") {
+      // GPT 交叉格对未填组合可回退默认交叉格（与 worker mapImageChannelRequest 同源逻辑）；
+      // banana 一维映射缺任一侧同样回退默认。仅当回退后仍无法拼出请求才 400。
+      const sizeId = isStr(params.size) ? params.size : null;
+      const ratioId = isStr(params.aspect_ratio) ? params.aspect_ratio : null;
+      const mapped = mapImageChannelRequest(mapping, sizeId, ratioId);
+      if (!mapped.ok) {
+        return fail(400, "模型、分辨率与宽高比组合不受支持", {
+          code: ERROR_INVALID_REFERENCE_TYPE,
+        });
+      }
+    }
+  }
+  // IKE7JP：视频 resolution/aspect_ratio 组合必须能换算成像素（与 worker videoDimensions 同源），
+  // 否则 worker 会在执行期才失败——越界在接纳当下 400（invalid_input），不拖到执行期。
+  // 图片路径无此概念（走上方交叉格校验）。
+  if (type === "video" && capability) {
+    const resolution = isStr(params.resolution) ? params.resolution : "";
+    const ratio = isStr(params.aspect_ratio) ? params.aspect_ratio : "";
+    if (resolution && ratio) {
+      const dimensions =
+        videoDimensions(resolution, ratio) ?? dimensionsFromSize(resolution);
+      if (!dimensions) {
+        return fail(400, "视频分辨率与宽高比组合无效", {
+          code: ERROR_INVALID_INPUT,
+        });
+      }
+    }
+  }
   const refs = resolveReferenceAssets(body, type, maxReferenceImages);
   if (!refs.ok) {
     return fail(400, refs.value.message, {
       code: refs.value.code,
       params: refs.value.params,
     });
+  }
+  // IKE7JP：提交时前置查参考素材存在性/类型——复用 worker resolveInputAssets（归属逻辑单份：
+  // 项目直属 ∪ 全局 ∪ project_asset 关联）。缺失/无权访问在接纳当下 400，不拖到 worker 执行期。
+  // 仅本地 Asset 引用需要查存在性；素材库引用（asset:// 载体）由上游强校验，格式已在前置校验。
+  // code 与 worker 侧 resolveInputAssets 失败同源（review：参考不可用归 invalid_reference，
+  // 类型不符归 invalid_reference_type，避免提交 gate 与 worker 兜底码漂移）。
+  if (type !== "audio" && refs.value.referenceAssetIds.length > 0) {
+    const ids = refs.value.referenceAssetIds.map(String);
+    const resolved = await deps.assets.resolveInputAssets(ids, userId, projectId);
+    if (resolved.length !== ids.length) {
+      return fail(400, "参考素材不存在或无权访问", {
+        code: ERROR_INVALID_REFERENCE,
+      });
+    }
+    // 图片参考必须是图片（worker 同源校验）；视频参考允许图/视频（首尾帧必须图片已由
+    // strategy.validate 校验 role 类型，普通参考可含视频/音频）。
+    if (type === "image" && resolved.some((a) => a.type !== "image")) {
+      return fail(400, "参考素材必须是图片", {
+        code: ERROR_INVALID_REFERENCE_TYPE,
+      });
+    }
   }
   // 5. 画布目标快照（仅携带 target_node_id 时读画布）
   const target = await resolveTargetSnapshot({

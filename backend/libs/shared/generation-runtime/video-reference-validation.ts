@@ -1,5 +1,5 @@
 import {
-  ERROR_INVALID_INPUT,
+  ERROR_INVALID_REFERENCE_MEDIA,
   ERROR_REFERENCE_LIMIT_EXCEEDED,
   ERROR_UNSUPPORTED_INPUT,
 } from "@blue-whale/contracts";
@@ -87,7 +87,7 @@ function validateReferences(
   }
   if (knownVideoDuration > MAX_REFERENCE_VIDEO_SECONDS) {
     throw new VideoInputError(
-      ERROR_INVALID_INPUT,
+      ERROR_INVALID_REFERENCE_MEDIA,
       "参考视频已知总时长不能超过 15 秒",
     );
   }
@@ -97,7 +97,7 @@ function validateReferences(
 function validateReferenceVideo(asset: VideoWorkerInputAsset): void {
   const mime = asset.mime?.split(";", 1)[0]?.trim().toLowerCase();
   if (mime && !REFERENCE_VIDEO_MIMES.has(mime)) {
-    throw new VideoInputError(ERROR_INVALID_INPUT, "参考视频只支持 MP4 或 MOV");
+    throw new VideoInputError(ERROR_INVALID_REFERENCE_MEDIA, "参考视频只支持 MP4 或 MOV");
   }
   if (
     asset.size !== null &&
@@ -107,7 +107,7 @@ function validateReferenceVideo(asset: VideoWorkerInputAsset): void {
       asset.size > MAX_REFERENCE_VIDEO_BYTES)
   ) {
     throw new VideoInputError(
-      ERROR_INVALID_INPUT,
+      ERROR_INVALID_REFERENCE_MEDIA,
       "单个参考视频不能超过 200 MB",
     );
   }
@@ -119,7 +119,7 @@ function validateReferenceVideo(asset: VideoWorkerInputAsset): void {
       asset.duration > MAX_REFERENCE_VIDEO_SECONDS)
   ) {
     throw new VideoInputError(
-      ERROR_INVALID_INPUT,
+      ERROR_INVALID_REFERENCE_MEDIA,
       "单个参考视频时长必须为 2 至 15 秒",
     );
   }
@@ -141,7 +141,7 @@ function validateReferenceVideoDimensions(asset: VideoWorkerInputAsset): void {
     )
   ) {
     throw new VideoInputError(
-      ERROR_INVALID_INPUT,
+      ERROR_INVALID_REFERENCE_MEDIA,
       "参考视频单边像素必须为 300 至 6000",
     );
   }
@@ -157,7 +157,7 @@ function validateReferenceVideoDimensions(asset: VideoWorkerInputAsset): void {
     ratio > MAX_REFERENCE_VIDEO_RATIO
   ) {
     throw new VideoInputError(
-      ERROR_INVALID_INPUT,
+      ERROR_INVALID_REFERENCE_MEDIA,
       "参考视频宽高比或总像素不满足 Seedance 2.0 要求",
     );
   }

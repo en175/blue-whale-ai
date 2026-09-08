@@ -1,3 +1,10 @@
+export {
+  checkGenerationParamLimit,
+  toGenerationParamCheckInput,
+  type CapabilityLimitInput,
+  type CapabilityParamFailure,
+  type GenerationParamCheckInput,
+} from "./capability-param-validation.js";
 export { previewSourceSchema, applyPreviewSchema, type PromptPreviewSource } from "./prompt-preview.js";
 export {
   legacyCardHistoryItemSchema,
@@ -45,6 +52,14 @@ export {
   ERROR_REFERENCE_ASSET_UNAVAILABLE,
   ERROR_REFERENCE_LIMIT_EXCEEDED,
   ERROR_SOURCE_ASSET_UNAVAILABLE,
+  ERROR_CAPABILITY_UNSUPPORTED_PARAM,
+  ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION,
+  ERROR_CAPABILITY_UNSUPPORTED_RATIO,
+  ERROR_CAPABILITY_UNSUPPORTED_DURATION,
+  ERROR_INVALID_REFERENCE,
+  ERROR_INVALID_REFERENCE_TYPE,
+  ERROR_INVALID_REFERENCE_MEDIA,
+  ERROR_OUTPUT_COUNT_MISMATCH,
   ERROR_STORAGE_FAILED,
   ERROR_SUBMISSION_UNKNOWN,
   ERROR_TIMED_OUT,

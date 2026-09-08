@@ -10,6 +10,11 @@ import {
   ERROR_QUOTA_EXHAUSTED,
   ERROR_INVALID_INPUT,
   GENERATION_ERROR_NUMERIC_CODES,
+  ERROR_CAPABILITY_UNSUPPORTED_PARAM,
+  ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION,
+  ERROR_CAPABILITY_UNSUPPORTED_RATIO,
+  ERROR_CAPABILITY_UNSUPPORTED_DURATION,
+  ERROR_INVALID_REFERENCE,
   ACCOUNT_ERROR_PASSWORD_INCORRECT,
   ACCOUNT_ERROR_NUMERIC_CODES,
   RESOURCE_NOT_FOUND_CODE,
@@ -42,6 +47,28 @@ describe("单一码表（IKDZGM / ADR-0083）", () => {
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_INVALID_INPUT]).toBe(1002);
     // 码表里对应数字已有文案
     expect(ERROR_CODES[1001]).toBe(ERROR_CODES[GENERATION_ERROR_NUMERIC_CODES[ERROR_QUOTA_EXHAUSTED]]);
+  });
+
+  it("IKE7JP：capability_unsupported_param 登记数值码 1030 且一码一文案", () => {
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CAPABILITY_UNSUPPORTED_PARAM]).toBe(1030);
+    expect(ERROR_CODES[1030]).toBe("当前模型不支持所选参数，请按提示调整");
+    // 落在 web 端生成域错误窗口（1000-1099，isGenerationDomainError）
+    expect(1030).toBeGreaterThanOrEqual(1000);
+    expect(1030).toBeLessThanOrEqual(1099);
+  });
+
+  it("IKE7JP：能力细分码 1031-1033 各配固定文案（一码一文案）", () => {
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION]).toBe(1031);
+    expect(ERROR_CODES[1031]).toBe("当前模型不支持所选分辨率");
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CAPABILITY_UNSUPPORTED_RATIO]).toBe(1032);
+    expect(ERROR_CODES[1032]).toBe("当前模型不支持所选比例");
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CAPABILITY_UNSUPPORTED_DURATION]).toBe(1033);
+    expect(ERROR_CODES[1033]).toBe("当前模型不支持所选时长");
+  });
+
+  it("IKE7JP：invalid_reference 登记数值码 1034 且一码一文案", () => {
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_INVALID_REFERENCE]).toBe(1034);
+    expect(ERROR_CODES[1034]).toBe("参考素材无效，请重新选择");
   });
 
   it("全局业务码已登记；未知码 messageOf 给缺省文案", () => {

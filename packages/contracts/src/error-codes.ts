@@ -5,7 +5,7 @@
 //
 // 段位约定（对齐 result.ts ADR-0078）：
 //   4xx/5xx   —— HTTP 语义错误（参数/未授权/资源不存在等基础设施错误）
-//   1xxx      —— 领域错误码，每错一码（生成域 1001-1028；账号域 1100+）
+//   1xxx      —— 领域错误码，每错一码（生成域 1001-1030；账号域 1100+）
 //   1xxxx     —— 全局业务码（Java SystemCode 系，如 100301 资源不存在）
 //
 // 对外契约：错误响应统一 { code: 数值码, message: 中文 }（见 result.ts ResultEnvelope）。
@@ -24,6 +24,23 @@ export const ERROR_MODEL_UNAVAILABLE = "model_unavailable";
 export const ERROR_REFERENCE_ASSET_UNAVAILABLE = "reference_asset_unavailable";
 export const ERROR_REFERENCE_LIMIT_EXCEEDED = "reference_limit_exceeded";
 export const ERROR_SOURCE_ASSET_UNAVAILABLE = "source_asset_unavailable";
+/** IKE7JP：提交时参数超出当前模型能力目录支持范围（分辨率/宽高比/时长/尺寸档位越界）——统一兜底码。 */
+export const ERROR_CAPABILITY_UNSUPPORTED_PARAM = "capability_unsupported_param";
+/** IKE7JP：分辨率/尺寸档位越界（细分码，码表文案兜底，一码一文案）。 */
+export const ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION = "capability_unsupported_resolution";
+/** IKE7JP：宽高比越界（细分码）。 */
+export const ERROR_CAPABILITY_UNSUPPORTED_RATIO = "capability_unsupported_ratio";
+/** IKE7JP：时长越界（细分码）。 */
+export const ERROR_CAPABILITY_UNSUPPORTED_DURATION = "capability_unsupported_duration";
+/** IKE7JP：参考素材结构/关系非法（引用无效、为空、混用、帧位约束）。 */
+export const ERROR_INVALID_REFERENCE = "invalid_reference";
+/** IKE7JP：参考素材类型不匹配（首尾帧必须图片、参考图必须图片、素材库类型非法）。 */
+export const ERROR_INVALID_REFERENCE_TYPE = "invalid_reference_type";
+/** IKE7JP：参考视频物理约束不满足（MIME/大小/时长/像素/总时长）。 */
+export const ERROR_INVALID_REFERENCE_MEDIA = "invalid_reference_media";
+/** IKE7JP：生成输出数量与预期不符。仅 52 库历史存量（退役 blue_whale_web worker 写入），
+ *  现行 generation-worker 对数量不符按「部分成功」处理（partial_output），不再产生该码；登记仅为投影兜底。 */
+export const ERROR_OUTPUT_COUNT_MISMATCH = "output_count_mismatch";
 
 export const ERROR_QUOTA_EXHAUSTED = "quota_exhausted";
 export const ERROR_PROVIDER_CREDENTIAL_MISSING = "provider_credential_missing";
@@ -101,6 +118,14 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_UPLOAD_FAILED]: 1027,
   [ERROR_ENQUEUE_FAILED]: 1028,
   [ERROR_AUDIO_GENERATION_FAILED]: 1029,
+  [ERROR_CAPABILITY_UNSUPPORTED_PARAM]: 1030,
+  [ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION]: 1031,
+  [ERROR_CAPABILITY_UNSUPPORTED_RATIO]: 1032,
+  [ERROR_CAPABILITY_UNSUPPORTED_DURATION]: 1033,
+  [ERROR_INVALID_REFERENCE]: 1034,
+  [ERROR_INVALID_REFERENCE_TYPE]: 1035,
+  [ERROR_INVALID_REFERENCE_MEDIA]: 1036,
+  [ERROR_OUTPUT_COUNT_MISMATCH]: 1037,
 };
 
 /** 字符串码 → 数值码；白名单外/未知码兜底 1000。 */
@@ -351,6 +376,14 @@ export const ERROR_CODES: Record<number, string> = {
   1027: "音频上传失败",
   1028: "任务入队失败",
   1029: "音频生成失败", // audio_generation_failed
+  1030: "当前模型不支持所选参数，请按提示调整", // capability_unsupported_param
+  1031: "当前模型不支持所选分辨率", // capability_unsupported_resolution
+  1032: "当前模型不支持所选比例", // capability_unsupported_ratio
+  1033: "当前模型不支持所选时长", // capability_unsupported_duration
+  1034: "参考素材无效，请重新选择", // invalid_reference
+  1035: "参考素材类型不符合要求，请更换后重试", // invalid_reference_type
+  1036: "参考视频不符合要求（格式/大小/时长/像素），请更换后重试", // invalid_reference_media
+  1037: "生成数量与预期不符，请重新生成", // output_count_mismatch
   // ── 账号域（1xxx，1100+）──
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",

@@ -216,6 +216,7 @@ export {
 } from "./storyboard-preview-repo.js";
 export {
   createWorkerRepo,
+  createWorkerAssetOps,
   type WorkerRepo,
   type ClaimedJob,
   type ClaimedVideoJob,

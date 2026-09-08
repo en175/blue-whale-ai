@@ -12,6 +12,7 @@ import {
   ERROR_AUDIO_GENERATION_FAILED,
   ERROR_IMAGE_GENERATION_FAILED,
   ERROR_INVALID_INPUT,
+  ERROR_INVALID_REFERENCE,
   ERROR_MEDIA_EXTRACT_FAILED,
   ERROR_PROVIDER_FAILED,
   ERROR_UNSUPPORTED_INPUT,
@@ -32,8 +33,9 @@ export const GENERATION_ERROR_CODES = new Set<string>(
  *  历史 DB 已写入这些旧码：投影时经 resolveErrorCode 归一到 canonical。
  *  （保留供投影兼容历史数据；新写入不再产生这些旧码。） */
 export const LEGACY_CODE_TO_CANONICAL: Record<string, string> = {
-  invalid_video_inputs: ERROR_INVALID_INPUT,
-  invalid_reference_video: ERROR_INVALID_INPUT,
+  // IKE7JP：参考素材/帧位类旧码统一归 invalid_reference（语义一致，不再归 invalid_input）。
+  invalid_video_inputs: ERROR_INVALID_REFERENCE,
+  invalid_reference_video: ERROR_INVALID_REFERENCE,
   unsupported_video_inputs: ERROR_UNSUPPORTED_INPUT,
   unsupported_reference_type: ERROR_UNSUPPORTED_INPUT,
   invalid_video_response: ERROR_PROVIDER_FAILED,
@@ -86,8 +88,24 @@ export function projectPublicError(
   if (!GENERATION_ERROR_CODES.has(code)) {
     code = fallbackErrorCode(type);
   }
+  // IKE7JP：码表文案优先（ADR-0078 对外 message 唯一来源）；码表未登记时（白名单外/细粒度码）
+  // 用类型兜底码的码表文案（如「视频生成失败」）——上游/provider 原文（英文、request id）不外露，
+  // 自有码的具体原因（首尾帧素材必须是图片等）由 messageFor 命中码表保留语义。code 一律出自码表。
+  const tableMessage = messageFor(code, type);
+  if (tableMessage !== "未知错误") {
+    return {
+      code: errorCodeToNumeric(code),
+      message: tableMessage,
+    };
+  }
+  // 理论上不可达（messageFor 对白名单内码必命中，白名单外码经 fallbackErrorCode 也必命中）；
+  // 兜底保留 DB 原文，避免返回空文案。
+  const storedMessage =
+    typeof storedError.message === "string" && storedError.message.trim() !== ""
+      ? storedError.message.trim()
+      : null;
   return {
     code: errorCodeToNumeric(code),
-    message: messageFor(code, type),
+    message: storedMessage ?? "生成失败",
   };
 }

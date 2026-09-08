@@ -92,6 +92,7 @@ export function redactLogBody(body: string): string {
  * path 保留——那是素材的身份；`?` 与 `#` 之后才是预签名凭证。
  */
 export function stripUrlQueries(text: string): string {
+  if (typeof text !== "string" || text.length === 0) return text;
   if (!text.includes("://")) return text;
   return text.replace(URL_IN_TEXT, (match) => {
     const cut = match.search(/[?#]/);

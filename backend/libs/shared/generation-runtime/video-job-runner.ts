@@ -4,6 +4,8 @@ import { NewApiError, NewApiNetworkError, NewApiTimeoutError } from "@blue-whale
 import { z } from "zod";
 import {
   ERROR_INVALID_INPUT,
+  ERROR_INVALID_REFERENCE,
+  ERROR_INVALID_REFERENCE_TYPE,
   ERROR_PROVIDER_CREDENTIAL_MISSING,
   ERROR_PROVIDER_FAILED,
   ERROR_PROVIDER_TIMEOUT,
@@ -594,7 +596,13 @@ async function buildSubmitRequest(
     dimensions = dimensionsFromSize(params?.size);
   }
   if (!prompt || !model || !Number.isFinite(duration) || duration <= 0 || !dimensions) {
-    throw new Error("视频生成参数无效");
+    // IKE7JP：错误归类修正——输入校验失败应落 invalid_input 而非 provider_failed（此前普通
+    // Error 被 catch 归 provider_failed，用户拿到「供应商拒绝生成」而非参数错误）。提交侧已
+    // 前置校验同源参数；这里命中即说明前置有洞，故兜底告警可观测。
+    logger.warn(
+      `[IKE7JP] 前置校验遗漏：job ${claim.id} 视频参数无效仍进入 worker（prompt=${prompt ? "ok" : "missing"} model=${model ? "ok" : "missing"} duration=${duration} dimensions=${dimensions ? "ok" : "missing"}）`,
+    );
+    throw new VideoInputError(ERROR_INVALID_INPUT, "视频生成参数无效");
   }
 
   // IKDJNZ：单数组 references 优先（input 快照冻结，保序）；未提供回落旧字段路径。
@@ -621,13 +629,13 @@ async function buildSubmitRequest(
       if (ref.role === "first_frame") {
         // IKDJNZ review：worker 侧也守住「首尾帧必须图片」（retry 冻结快照可能含历史脏行）。
         if (ref.type !== "image") {
-          throw new VideoInputError(ERROR_INVALID_INPUT, "首尾帧素材必须是图片");
+          throw new VideoInputError(ERROR_INVALID_REFERENCE_TYPE, "首尾帧素材必须是图片");
         }
         if (ref.asset_id !== undefined) firstFrameAssetId = ref.asset_id;
         else if (ref.material_id !== undefined) firstFrameMaterialId = ref.material_id;
       } else if (ref.role === "last_frame") {
         if (ref.type !== "image") {
-          throw new VideoInputError(ERROR_INVALID_INPUT, "首尾帧素材必须是图片");
+          throw new VideoInputError(ERROR_INVALID_REFERENCE_TYPE, "首尾帧素材必须是图片");
         }
         if (ref.asset_id !== undefined) lastFrameAssetId = ref.asset_id;
         else if (ref.material_id !== undefined) lastFrameMaterialId = ref.material_id;
@@ -641,23 +649,23 @@ async function buildSubmitRequest(
     referenceMaterials = uniqueMaterialRefs(referenceMaterials);
   }
   if (firstFrameAssetId !== null && firstFrameMaterialId !== null) {
-    throw new VideoInputError(ERROR_INVALID_INPUT, "首帧只能指定一个来源");
+    throw new VideoInputError(ERROR_INVALID_REFERENCE, "首帧只能指定一个来源");
   }
   if (lastFrameAssetId !== null && lastFrameMaterialId !== null) {
-    throw new VideoInputError(ERROR_INVALID_INPUT, "尾帧只能指定一个来源");
+    throw new VideoInputError(ERROR_INVALID_REFERENCE, "尾帧只能指定一个来源");
   }
   const hasFirstFrame = firstFrameAssetId !== null || firstFrameMaterialId !== null;
   const hasLastFrame = lastFrameAssetId !== null || lastFrameMaterialId !== null;
   const hasReferences =
     referenceAssetIds.length > 0 || referenceMaterials.length > 0;
   if (hasLastFrame && !hasFirstFrame) {
-    throw new VideoInputError(ERROR_INVALID_INPUT, "尾帧必须与首帧一起使用");
+    throw new VideoInputError(ERROR_INVALID_REFERENCE, "尾帧必须与首帧一起使用");
   }
   // IKDJNZ：单数组 references 允许首尾帧与普通参考并存（保序单数组天然支持混排）；
   // 互斥校验仅适用于旧的分字段路径（reference_asset_ids/reference_materials/首尾帧字段）。
   if (refsFromSingle === null && (hasFirstFrame || hasLastFrame) && hasReferences) {
     throw new VideoInputError(
-      ERROR_INVALID_INPUT,
+      ERROR_INVALID_REFERENCE,
       "首尾帧模式不能与普通参考素材混用",
     );
   }
@@ -831,37 +839,37 @@ type SingleReferenceItem = {
 function readReferences(value: unknown): SingleReferenceItem[] | null {
   if (value === undefined || value === null) return null;
   if (!Array.isArray(value)) {
-    throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用无效");
+    throw new VideoInputError(ERROR_INVALID_REFERENCE, "参考素材引用无效");
   }
   return value.map((candidate) => {
     if (typeof candidate !== "object" || candidate === null) {
-      throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用无效");
+      throw new VideoInputError(ERROR_INVALID_REFERENCE, "参考素材引用无效");
     }
     const { role, asset_id, material_id, type } = candidate as Record<
       string,
       unknown
     >;
     if (role !== "first_frame" && role !== "last_frame" && role !== "reference") {
-      throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用无效");
+      throw new VideoInputError(ERROR_INVALID_REFERENCE, "参考素材引用无效");
     }
     if (type !== "image" && type !== "video" && type !== "audio") {
-      throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用类型无效");
+      throw new VideoInputError(ERROR_INVALID_REFERENCE_TYPE, "参考素材引用类型无效");
     }
     const item: SingleReferenceItem = { role, type };
     if (asset_id !== undefined) {
       const aid = readAssetId(asset_id);
       if (aid === null) {
-        throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用无效");
+        throw new VideoInputError(ERROR_INVALID_REFERENCE, "参考素材引用无效");
       }
       item.asset_id = aid;
     } else if (material_id !== undefined) {
       const mid = readMaterialId(material_id);
       if (mid === null) {
-        throw new VideoInputError(ERROR_INVALID_INPUT, "素材库引用 ID 无效");
+        throw new VideoInputError(ERROR_INVALID_REFERENCE, "素材库引用 ID 无效");
       }
       item.material_id = mid;
     } else {
-      throw new VideoInputError(ERROR_INVALID_INPUT, "参考素材引用无效");
+      throw new VideoInputError(ERROR_INVALID_REFERENCE, "参考素材引用无效");
     }
     return item;
   });

@@ -54,6 +54,7 @@ export class GenerationJobsController {
         command: this.command.repo,
         models: this.models,
         canvas: this.canvas,
+        assets: this.command.assets,
         ...(this.cost.estimator ? { costEstimator: this.cost.estimator } : {}),
       },
       internal,

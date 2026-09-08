@@ -801,7 +801,7 @@ describe("processNextJob 图片参考图上限与字段语义（IKA72G）", () =
 
     expect(failJob).toHaveBeenCalledWith(
       expect.objectContaining({
-        errorCode: "unsupported_input",
+        errorCode: "invalid_reference",
         errorMessage: "当前模型最多支持 10 张参考图",
       }),
     );
@@ -915,7 +915,7 @@ describe("processNextJob 图片参考图上限与字段语义（IKA72G）", () =
 
     expect(failJob).toHaveBeenCalledWith(
       expect.objectContaining({
-        errorCode: "unsupported_input",
+        errorCode: "invalid_reference",
         errorMessage: "当前模型最多支持 1 张参考图",
       }),
     );

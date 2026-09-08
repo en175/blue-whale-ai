@@ -26,6 +26,7 @@ function buildDeps() {
     projects: { findOwnedById },
     models: { listEnabledByType },
     command: { createJob },
+    assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
   } as unknown as HandlerDeps;
   return { deps, findOwnedById, listEnabledByType, createJob };
 }
@@ -341,12 +342,28 @@ function buildImageDeps(maxReferenceImages?: number) {
     generation_job_id: "1",
     cursor: 1,
   });
+  // IKE7JP：参考素材前置——resolveInputAssets 返回与请求等长的正常素材（图片参考路径。
+  //  非图片参考场景各测试自 mock 覆盖）。
+  const resolveInputAssets = vi.fn().mockImplementation(async (ids: string[]) =>
+    ids.map((id) => ({
+      id,
+      type: "image",
+      url: `https://tos.test/${id}.png`,
+      mime: "image/png",
+      size: 100,
+      width: 1024,
+      height: 1024,
+      duration: null,
+      material_id: null,
+    })),
+  );
   const deps = {
     projects: { findOwnedById },
     models: { listEnabledByType },
     command: { createJob },
+    assets: { resolveInputAssets },
   } as unknown as HandlerDeps;
-  return { deps, createJob };
+  return { deps, createJob, resolveInputAssets };
 }
 
 function imageBody(refCount: number) {
@@ -473,6 +490,7 @@ function buildVideoDeps() {
     projects: { findOwnedById },
     models: { listEnabledByType },
     command: { createJob },
+    assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
   } as unknown as HandlerDeps;
   return { deps, createJob };
 }
@@ -1032,6 +1050,7 @@ function buildTargetDeps(canvasView: { nodes: string | null; edges: string | nul
     models: { listEnabledByType },
     command: { createJob },
     canvas: { getByProject },
+    assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
   } as unknown as HandlerDeps;
   return { deps, createJob, getByProject };
 }
@@ -1446,5 +1465,276 @@ describe("IKDL9U review: ordinary text and provenance", () => {
     expect(createJob.mock.calls[0][0].input.text_attachments).toEqual([
       { node_id: "text", title: "", text: "蓝鲸 & 海\n夜景", prompt_source: source },
     ]);
+  });
+});
+
+// IKE7JP：Dock 视频/图片参数前置校验——resolution/size/aspect_ratio/duration 对能力目录合法性，
+// 越界在提交时 400（capability_unsupported_param + 可用值文案），不创建任务。
+function buildCapabilityDeps(capabilityRows: Array<Record<string, unknown>>) {
+  const findOwnedById = vi.fn().mockResolvedValue({
+    id: "1",
+    name: "项目",
+    thumb: null,
+    created_at: "2026-08-18T00:00:00.000Z",
+  });
+  const listEnabledByType = vi.fn().mockResolvedValue(capabilityRows);
+  const createJob = vi.fn().mockResolvedValue({
+    generation_job_id: "1",
+    cursor: 1,
+  });
+  const resolveInputAssets = vi.fn().mockResolvedValue([]);
+  const deps = {
+    projects: { findOwnedById },
+    models: { listEnabledByType },
+    command: { createJob },
+    assets: { resolveInputAssets },
+  } as unknown as HandlerDeps;
+  return { deps, createJob, resolveInputAssets };
+}
+
+const VIDEO_CAPABILITY_ROW = {
+  model_id: "doubao-seedance-2-0-260128",
+  supported_sizes: [
+    { id: "1k", api_value: "720p" },
+    { id: "2k", api_value: "1080p" },
+  ],
+  supported_aspect_ratios: ["16:9", "9:16"],
+  supported_durations: { min: 5, max: 10, step: 5 },
+  channel_parser: "seedream",
+  request_mapping: null,
+  default_size: "2k",
+  default_aspect_ratio: "16:9",
+};
+
+const VIDEO_PARAMS_OK = {
+  type: "video",
+  expected_output_count: 1,
+  parameters: {
+    prompt: "人物走过街角",
+    model_id: "doubao-seedance-2-0-260128",
+    aspect_ratio: "16:9",
+    resolution: "720p",
+    duration: 8,
+  },
+};
+
+describe("handleCreateGenerationJob 视频参数能力目录前置（IKE7JP）", () => {
+  it("分辨率不在能力支持范围 → 400 capability_unsupported_resolution + 可用值文案，不建任务", async () => {
+    const { deps, createJob } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_PARAMS_OK,
+        parameters: { ...VIDEO_PARAMS_OK.parameters, resolution: "8k" },
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("capability_unsupported_resolution");
+    expect(result.msg).toContain("8k");
+    expect(result.msg).toContain("720p");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("比例不在能力支持范围 → 400 capability_unsupported_ratio + 可用值文案", async () => {
+    const { deps, createJob } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_PARAMS_OK,
+        parameters: { ...VIDEO_PARAMS_OK.parameters, aspect_ratio: "4:3" },
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("capability_unsupported_ratio");
+    expect(result.msg).toContain("4:3");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("时长超出能力范围 → 400 capability_unsupported_duration + 范围文案", async () => {
+    const { deps, createJob } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_PARAMS_OK,
+        parameters: { ...VIDEO_PARAMS_OK.parameters, duration: 12 },
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("capability_unsupported_duration");
+    expect(result.msg).toContain("12");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("合法参数 → 200 建任务（不误拦）", async () => {
+    const { deps, createJob } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("能力行未配置 supported_* 时不阻断（worker 兜底）", async () => {
+    const { deps, createJob } = buildCapabilityDeps([
+      { model_id: "doubao-seedance-2-0-260128" },
+    ]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      VIDEO_PARAMS_OK,
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+});
+
+// IKE7JP：图片 size×ratio 交叉格前置——GPT 交叉格未填 / banana 一维映射缺失的组合
+// 在提交时 400（invalid_input），与 worker mapImageChannelRequest 同码同文案。
+const GPT_IMAGE_CAPABILITY = {
+  model_id: "gpt-image-1",
+  supported_sizes: [{ id: "1k", api_value: "1024x1024" }],
+  supported_aspect_ratios: ["1:1", "16:9"],
+  supported_durations: null,
+  channel_parser: "gpt",
+  request_mapping: {
+    matrix: { "1k": { "1:1": "1024x1024" } }, // 16:9 交叉格未填
+  },
+  default_size: "1k",
+  default_aspect_ratio: "1:1",
+};
+
+function gptImageBody(aspectRatio: string) {
+  return {
+    type: "image",
+    expected_output_count: 1,
+    parameters: {
+      prompt: "海边日落",
+      model_id: "gpt-image-1",
+      aspect_ratio: aspectRatio,
+      size: "1k",
+    },
+  };
+}
+
+describe("handleCreateGenerationJob 图片交叉格前置（IKE7JP）", () => {
+  it("GPT 交叉格已填组合 → 200 建任务", async () => {
+    const { deps, createJob } = buildCapabilityDeps([GPT_IMAGE_CAPABILITY]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      gptImageBody("1:1"),
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("GPT 交叉格与默认格都缺失 → 400 invalid_reference_type（模型、分辨率与宽高比组合不受支持）", async () => {
+    // 请求组合 1k×16:9 未填；默认格也缺失（default_size 不在 matrix）→ 无回退，400。
+    const badCapability = {
+      ...GPT_IMAGE_CAPABILITY,
+      default_size: "2k",
+      default_aspect_ratio: "16:9",
+    };
+    const { deps, createJob } = buildCapabilityDeps([badCapability]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      gptImageBody("16:9"),
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference_type");
+    expect(result.msg).toBe("模型、分辨率与宽高比组合不受支持");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("GPT 交叉格未填但默认格可回退 → 200（与 worker mapImageChannelRequest 同源）", async () => {
+    const { deps, createJob } = buildCapabilityDeps([GPT_IMAGE_CAPABILITY]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      gptImageBody("16:9"),
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+});
+
+// IKE7JP：参考素材前置——提交时复用 worker resolveInputAssets 查存在性/类型。
+describe("handleCreateGenerationJob 参考素材前置（IKE7JP）", () => {
+  it("参考素材存在且类型匹配 → 200 建任务", async () => {
+    const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
+    resolveInputAssets.mockResolvedValue([
+      { id: "1", type: "image", url: "https://tos.test/1.png", mime: "image/png", size: 100, width: 1024, height: 1024, duration: null, material_id: null },
+    ]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_PARAMS_OK,
+        reference_asset_ids: ["1"],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("参考素材不存在（resolve 返回空）→ 400 invalid_reference", async () => {
+    const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
+    resolveInputAssets.mockResolvedValue([]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_PARAMS_OK,
+        reference_asset_ids: ["999"],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(result.msg).toBe("参考素材不存在或无权访问");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("图片参考类型非图片 → 400 参考素材必须是图片", async () => {
+    const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([GPT_IMAGE_CAPABILITY]);
+    resolveInputAssets.mockResolvedValue([
+      { id: "1", type: "video", url: "https://tos.test/1.mp4", mime: "video/mp4", size: 100, width: 1280, height: 720, duration: 5, material_id: null },
+    ]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...gptImageBody("1:1"), input_asset_ids: ["1"] },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference_type");
+    expect(result.msg).toBe("参考素材必须是图片");
+    expect(createJob).not.toHaveBeenCalled();
   });
 });
