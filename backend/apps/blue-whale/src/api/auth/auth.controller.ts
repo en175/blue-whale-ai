@@ -5,7 +5,7 @@ import {
   NewApiError,
   type NewApiLoginResult,
 } from "@blue-whale/core";
-import { FAILURE_CODE, ok } from "@blue-whale/contracts";
+import { ACCOUNT_LOCKED, FAILURE_CODE, ok } from "@blue-whale/contracts";
 import { createAuthRepo } from "@lib/shared/persistence/index.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
@@ -15,6 +15,12 @@ import {
   projectAccountBusinessFailure,
   toAuthError,
 } from "@lib/shared/errors/auth-error.js";
+import { RateLimit } from "@lib/shared/rate-limit/decorators/rate-limit.decorator.js";
+import {
+  LOGIN_LOCK_SCOPE,
+  LoginFailureTracker,
+} from "@lib/shared/rate-limit/login-failure-tracker.js";
+import { RateLimiter } from "@lib/shared/rate-limit/rate-limiter.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
   SESSION_COOKIE_NAME,
@@ -36,6 +42,28 @@ function loginData(result: NewApiLoginResult, isNewUser: boolean) {
   };
 }
 
+/** IKDR4J：IP 20 次/分拦单机批量撞库；账号 5 次/分拦多 IP 分散撞单账号。 */
+const AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
+
+function authRateLimit(endpoint: "login" | "register") {
+  return RateLimit({
+    buckets: [
+      {
+        scope: `${endpoint}_ip`,
+        key: "ip" as const,
+        limit: 20,
+        windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+      },
+      {
+        scope: `${endpoint}_account`,
+        key: "account" as const,
+        limit: 5,
+        windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+      },
+    ],
+  });
+}
+
 @Controller("auth")
 export class AuthController {
   private smsInstance?: SmsProvider;
@@ -44,6 +72,8 @@ export class AuthController {
     private readonly account: AccountService,
     private readonly prisma: PrismaService,
     private readonly sessions: SessionService,
+    private readonly limiter: RateLimiter,
+    private readonly loginFailures: LoginFailureTracker,
   ) {}
 
   private get sms(): SmsProvider {
@@ -92,6 +122,7 @@ export class AuthController {
 
   @Public()
   @Post("login")
+  @authRateLimit("login")
   async login(
     @Body() body: LoginDto,
     @Res({ passthrough: true }) res: Response,
@@ -101,20 +132,35 @@ export class AuthController {
     if (!username || !password) {
       return { code: FAILURE_CODE, msg: "用户名和密码不能为空", data: null };
     }
+    if (await this.limiter.isBlocked(LOGIN_LOCK_SCOPE, username)) {
+      // 失败锁定期内（IKDR4J）：直接 429，跳过对 new-api 的无效调用。
+      throw new NewApiError(
+        "尝试次数过多，账号已锁定，请稍后再试",
+        429,
+        ACCOUNT_LOCKED,
+      );
+    }
     try {
       const result = await this.account.login({ username, password });
+      // 凭证已被上游接受（IKDR4J）：清零失败计数与锁定，会话签发失败不回退。
+      await this.loginFailures.clear(username);
       const sessionToken = await this.establishSession(result);
       res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
       return ok(loginData(result, false));
     } catch (error) {
       const projected = projectAccountBusinessFailure(error, 401);
-      if (projected) throw projected;
+      if (projected) {
+        // 仅账密错误计数（IKDR4J）：上游 5xx/超时是服务问题，不是撞库信号。
+        await this.loginFailures.recordFailure(username);
+        throw projected;
+      }
       throw toAuthError(error);
     }
   }
 
   @Public()
   @Post("register")
+  @authRateLimit("register")
   async register(
     @Body() body: RegisterDto,
     @Res({ passthrough: true }) res: Response,

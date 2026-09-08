@@ -9,6 +9,7 @@ import {
   GENERATION_ERROR_NUMERIC_CODES,
   GENERATION_ERROR_UNKNOWN_NUMERIC_CODE,
   RATE_LIMITED,
+  ACCOUNT_LOCKED,
   errorCodeToNumeric,
   isContentPolicySignal,
   isQuotaSignal,
@@ -39,6 +40,11 @@ describe("generation error numeric codes (external contract)", () => {
   it("RATE_LIMITED 是 HTTP 限流字符串码，不占用生成 1xxx 数值表", () => {
     expect(RATE_LIMITED).toBe("rate_limited");
     expect(GENERATION_ERROR_NUMERIC_CODES[RATE_LIMITED]).toBeUndefined();
+  });
+
+  it("ACCOUNT_LOCKED 是登录失败锁定字符串码，不占用生成 1xxx 数值表", () => {
+    expect(ACCOUNT_LOCKED).toBe("account_locked");
+    expect(GENERATION_ERROR_NUMERIC_CODES[ACCOUNT_LOCKED]).toBeUndefined();
   });
 });
 
