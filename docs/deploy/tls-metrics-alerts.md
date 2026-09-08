@@ -68,7 +68,7 @@ SELECT queue, max(depth) AS max_depth GROUP BY queue
 - 查询区间：10 分钟；执行间隔：5 分钟
 - 触发条件：`max_depth > N`（**N 待定**，占位 50）
 - 「持续 10 分钟」语义由查询区间覆盖
-- 当前只有 `video_bullmq` 一条队列；状态值为 BullMQ 积压/在途态（waiting 等）
+- `queue_depth` 当前未接线任何生产采样器，无 `video_bullmq` 队列，该事件不再产生；告警 2 在 sampler 接线前不可用（见「打点位置」）
 
 ### 3. provider p95 时延超阈值
 
@@ -133,6 +133,6 @@ SELECT queue, status, max(depth) AS depth GROUP BY queue, status
 ## 关联
 
 - 工单：IK7G9Y（核心指标 + 告警，复用已有 TLS，不引入 Prometheus）
-- 队列选型：docs/research/IK3UW2-node-generation-worker-queue-provider-evaluation.md（其 MySQL 队列 worker 已由 IK813V 下线，生产视频链路为 BullMQ）
+- 队列选型：docs/research/IK3UW2-node-generation-worker-queue-provider-evaluation.md（其 MySQL 队列 worker 已由 IK813V 下线，生产视频链路为 RocketMQ）
 - 日志通道：packages/core/src/tls-writer.ts（IK6KQQ）；metric 出口：packages/core/src/logger.ts
 - 实现计划：docs/superpowers/plans/2026-08-10-ik7g9y-core-metrics-alerts.md
