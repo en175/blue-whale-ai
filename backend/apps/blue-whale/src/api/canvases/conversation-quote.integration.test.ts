@@ -36,12 +36,18 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
   ];
   /** POST /messages 收到的请求体（字节级证据：引用正文随消息上线） */
   const messageBodies: Array<Record<string, unknown>> = [];
+  let rejectNextMessage = false;
+  let showOtherSession = false;
+  let holdNextMessage = false;
+  let releaseMessage: (() => void) | null = null;
+  let rejectMessage: (() => void) | null = null;
   const sseResponses = new Set<import("node:http").ServerResponse>();
   const agentRequests: Array<{ path: string; user: unknown; project: unknown }> = [];
   const agent = createServer((req, res) => {
     agentRequests.push({ path: req.url ?? "", user: req.headers["x-blue-whale-user-id"], project: req.headers["x-blue-whale-project-id"] });
     res.setHeader("content-type", "application/json");
     const session = { session_id: source.sessionId, title: "引用对话", phase: "idle", lifecycle: "active" };
+    const otherSession = { ...session, session_id: "session-other", title: "另一会话" };
     if (req.url?.includes("/events")) {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       res.write(": connected\n\n");
@@ -55,25 +61,34 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       req.on("end", () => {
         const body = JSON.parse(raw) as { content: unknown[] };
         messageBodies.push(body);
-        const seq = recordedMessages.length + 1;
-        lastRunId = `run-${seq}`;
-        activeRevision = "revision-two";
-        const userMessage = { message_id: `user-${seq}`, sequence: seq, role: "user", content: body.content, input_batch_id: `batch-${seq}` };
-        recordedMessages.push(userMessage);
-        recordedMessages.push({ message_id: `assistant-${seq}`, sequence: seq + 1, role: "assistant", content: [{ type: "text", text: "已按引用改好，见新预览。" }], source_run_id: lastRunId });
-        res.end(JSON.stringify({ message: userMessage, run: { run_id: lastRunId, status: "running", input_batch_id: `batch-${seq}` } }));
-        // 与真实 Agent 同序：先 run.completed 终态，再发 revision_committed 加法事件
-        const now = new Date().toISOString();
-        const frames = [
-          `event: run.completed\nid: ${seq}-a\ndata: ${JSON.stringify({ run_id: lastRunId, occurred_at: now, payload: { run: { run_id: lastRunId, status: "succeeded" } } })}\n\n`,
-          `event: prompt_card.revision_committed.v1\nid: ${seq}-b\ndata: ${JSON.stringify({ run_id: lastRunId, occurred_at: now })}\n\n`,
-        ];
-        for (const sse of sseResponses) for (const frame of frames) sse.write(frame);
+        if (rejectNextMessage) {
+          rejectNextMessage = false;
+          rejectMessage = () => { res.writeHead(503); res.end(JSON.stringify({ message: "integration rejection" })); };
+          return;
+        }
+        const accept = () => {
+          const seq = recordedMessages.length + 1;
+          lastRunId = `run-${seq}`;
+          activeRevision = "revision-two";
+          const userMessage = { message_id: `user-${seq}`, sequence: seq, role: "user", content: body.content, input_batch_id: `batch-${seq}` };
+          recordedMessages.push(userMessage);
+          recordedMessages.push({ message_id: `assistant-${seq}`, sequence: seq + 1, role: "assistant", content: [{ type: "text", text: "已按引用改好，见新预览。" }], source_run_id: lastRunId });
+          res.end(JSON.stringify({ message: userMessage, run: { run_id: lastRunId, status: "running", input_batch_id: `batch-${seq}` } }));
+          // 与真实 Agent 同序：先 run.completed 终态，再发 revision_committed 加法事件
+          const now = new Date().toISOString();
+          const frames = [
+            `event: run.completed\nid: ${seq}-a\ndata: ${JSON.stringify({ run_id: lastRunId, occurred_at: now, payload: { run: { run_id: lastRunId, status: "succeeded" } } })}\n\n`,
+            `event: prompt_card.revision_committed.v1\nid: ${seq}-b\ndata: ${JSON.stringify({ run_id: lastRunId, occurred_at: now })}\n\n`,
+          ];
+          for (const sse of sseResponses) for (const frame of frames) sse.write(frame);
+        };
+        if (holdNextMessage) { holdNextMessage = false; releaseMessage = accept; }
+        else accept();
       });
       return;
     }
-    if (!req.url?.endsWith("/snapshot")) { res.end(JSON.stringify({ items: [session] })); return; }
-    res.end(JSON.stringify({ session, event_cursor: "0", messages: recordedMessages, prompt_cards: [{
+    if (!req.url?.endsWith("/snapshot")) { res.end(JSON.stringify({ items: showOtherSession ? [session, otherSession] : [session] })); return; }
+    res.end(JSON.stringify({ session: req.url.includes("session-other") ? otherSession : session, event_cursor: "0", messages: recordedMessages, prompt_cards: [{
       session_id: source.sessionId,
       ...(lastRunId ? { authoring_run_id: lastRunId } : {}),
       active_revision: { revision_id: activeRevision, payload: { shots: revisionShots[activeRevision] } },
@@ -228,6 +243,864 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       expect(second.data.canvas.edges).toBe(JSON.stringify([{ id: "edge-a-b", source: "text-a", target: "text-b" }]));
     } finally { activeRevision = source.revisionId; }
   });
+  it.runIf(process.env.IKDXHO_BROWSER)("browser previews, confirms and sends images in place while preserving canvas interaction and failed drafts", async () => {
+    const { chromium, expect: browserExpect } = await import("playwright/test");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    const vite = await createVite({ root: `${process.cwd()}/web`, server: {
+      open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } },
+    } });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      projectId = (await projects.create("987654", "IKDXHO browser")).id;
+      const url = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='80'%3E%3Crect width='120' height='80' fill='blue'/%3E%3C/svg%3E";
+      const asset = await prisma.client.assets.create({ data: { user_id: 987654n, project_id: BigInt(projectId), type: "image", url } });
+      const seeded = await fetch(`${base}/api/canvases/${projectId}`, {
+        method: "PUT", headers: { "content-type": "application/json", "if-match": '"missing"' },
+        body: JSON.stringify({ nodes: JSON.stringify([
+          { id: "image-a", type: "mediaNode", position: { x: 100, y: 100 }, data: { mediaType: "image", src: url, assetId: String(asset.id), fileName: "图片 A", width: 180, height: 120 } },
+          { id: "image-b", type: "mediaNode", position: { x: 400, y: 100 }, data: { mediaType: "image", src: url, assetId: String(asset.id), fileName: "图片 B", width: 180, height: 120 } },
+          { id: "image-c", type: "mediaNode", position: { x: 100, y: 380 }, data: { mediaType: "image", src: url, assetId: String(asset.id), fileName: "图片 A", width: 180, height: 120 } },
+          { id: "image-draft", type: "mediaNode", position: { x: 400, y: 380 }, data: { mediaType: "image", draft: true, genStatus: "draft", fileName: "图片草稿" } },
+        ]), viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }),
+      });
+      expect(seeded.status).toBe(200);
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
+        userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+      } }, version: 0 })));
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+      await page.getByRole("button", { name: "Agent", exact: true }).click();
+      const composer = page.locator('[contenteditable][aria-placeholder]');
+      await page.locator('.react-flow__node[data-id="image-a"]').click();
+      await browserExpect(composer.getByText("待确认引用")).toBeVisible();
+      await browserExpect(composer).not.toBeFocused();
+      expect(messageBodies).toHaveLength(0);
+      await page.locator('.react-flow__node[data-id="image-b"]').click();
+      await browserExpect(composer.getByLabel('待确认引用：图片 B', { exact: true })).toBeVisible();
+      await browserExpect(composer.getByLabel('待确认引用：图片 A', { exact: true })).toHaveCount(0);
+      const send = page.locator('button[title="发送"]');
+      await browserExpect(send).toBeEnabled();
+      await send.click();
+      await browserExpect(page.getByRole('alert').filter({ hasText: '请先确认或取消待确认引用' })).toBeVisible();
+      expect(messageBodies).toHaveLength(0);
+      // 程序聚焦不是确认；Enter 也必须走同一发送阻断。
+      await composer.focus();
+      await page.keyboard.press('Enter');
+      await browserExpect(composer.getByText('待确认引用')).toBeVisible();
+      expect(messageBodies).toHaveLength(0);
+      await page.keyboard.press('Escape');
+      await browserExpect(composer.getByText('待确认引用')).toHaveCount(0);
+      await page.locator('.react-flow__node[data-id="image-a"]').click();
+      await browserExpect(composer.getByText('待确认引用')).toBeVisible();
+      await page.locator('.react-flow__pane').click({ position: { x: 100, y: 700 } });
+      await browserExpect(composer.getByText('待确认引用')).toHaveCount(0);
+      await composer.fill('第一段\n前文后文');
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('ArrowLeft');
+      await page.locator('.react-flow__node[data-id="image-a"]').click();
+      await browserExpect(composer.getByText('待确认引用')).toBeVisible();
+      // 真实点击第一段开头：引用留在第二段原光标处，新文字写在点击位置。
+      await page.waitForTimeout(1100); // 跨过 Lexical 历史合并窗口，独立验证确认与文字编辑的撤销。
+      const start = await composer.evaluate(element => {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let text: Node | null;
+        while ((text = walker.nextNode())) {
+          if (text.textContent?.startsWith('第一段')) {
+            const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 1);
+            const rect = range.getBoundingClientRect(); return { x: rect.x + 1, y: rect.y + rect.height / 2 };
+          }
+        }
+        throw new Error('第一段不可见');
+      });
+      await page.mouse.click(start.x, start.y);
+      await page.waitForTimeout(1100);
+      await page.keyboard.type('起');
+      await browserExpect(composer.getByText('待确认引用')).toHaveCount(0);
+      await browserExpect(composer).toHaveText('起第一段\n前文图片 A后文');
+      await page.keyboard.press('ControlOrMeta+z');
+      await browserExpect(composer).toHaveText('第一段\n前文图片 A后文');
+      await page.keyboard.press('ControlOrMeta+z');
+      await browserExpect(composer.getByText('待确认引用')).toHaveCount(0);
+      await browserExpect(composer.getByRole('button', { name: '移除 图片 A' })).toHaveCount(0);
+      await page.keyboard.press('ControlOrMeta+Shift+z');
+      await page.keyboard.press('ControlOrMeta+Shift+z');
+      await browserExpect(composer).toHaveText('起第一段\n前文图片 A后文');
+      await page.locator('.react-flow__node[data-id="image-a"]').click();
+      await browserExpect(composer.getByText('待确认引用')).toHaveCount(0);
+      await browserExpect(composer.getByRole('button', { name: '移除 图片 A' })).toHaveCount(1);
+      // 同名不同节点可以确认；删除标签后允许重选，取消后不得残留发送附件。
+      await page.locator('.react-flow__node[data-id="image-c"]').click();
+      await composer.click({ position: { x: 350, y: 10 } });
+      await browserExpect(composer.getByRole('button', { name: '移除 图片 A' })).toHaveCount(2);
+      await composer.getByRole('button', { name: '移除 图片 A' }).first().click();
+      await page.locator('.react-flow__node[data-id="image-c"]').click();
+      await browserExpect(composer.getByText('待确认引用')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await page.locator('.react-flow__node[data-id="image-draft"]').click();
+      await browserExpect(composer.getByText('待确认引用')).toHaveCount(0);
+      await browserExpect(page.getByText('图片草稿').first()).toBeVisible();
+      await page.locator('.react-flow__pane').click({ position: { x: 100, y: 700 } });
+      rejectNextMessage = true;
+      const rejected = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/messages'));
+      await send.click();
+      await browserExpect.poll(() => rejectMessage !== null).toBe(true);
+      try {
+        await browserExpect(composer).toHaveText('起第一段\n前文图片 A后文');
+      } finally { rejectMessage?.(); rejectMessage = null; await rejected; }
+      await browserExpect(page.getByText(/消息发送失败/).first()).toBeVisible();
+      await browserExpect(composer).toHaveText('起第一段\n前文图片 A后文');
+      const sent = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/messages'));
+      await send.click();
+      await sent;
+      expect(messageBodies).toHaveLength(2);
+      expect(messageBodies[1].content).toMatchObject([
+        { type: 'text', text: '起第一段\n前文' },
+        { type: 'asset_ref', asset_id: String(asset.id), node_id: 'image-a' },
+        { type: 'text', text: '后文' },
+      ]);
+      expect(messageBodies[0].content).toEqual(messageBodies[1].content);
+      await browserExpect(composer).toHaveText('');
+      await page.locator('.react-flow__node[data-id="image-a"]').click();
+      await browserExpect(composer.getByText('待确认引用')).toBeVisible();
+      await browserExpect(page.locator('.react-flow__node[data-id="image-a"]')).toHaveClass(/selected/);
+      await browserExpect(page.getByRole('button', { name: '添加到 Agent 聊天' }).first()).toBeVisible();
+      await page.locator('.react-flow__pane').click({ position: { x: 100, y: 700 } });
+      const node = page.locator('.react-flow__node[data-id="image-a"]');
+      const rect = (await node.boundingBox())!;
+      const moved = page.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes('/api/canvases/'));
+      await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(rect.x + rect.width / 2 + 60, rect.y + rect.height / 2 + 40, { steps: 8 });
+      await page.mouse.up();
+      expect((await moved).status()).toBe(200);
+      await browserExpect.poll(async () => {
+        const saved = await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json();
+        return JSON.parse(saved.data.nodes).find((item: { id: string }) => item.id === 'image-a').position.x;
+      }).toBeGreaterThan(140);
+      await browserExpect(composer.getByText('待确认引用')).toHaveCount(0);
+      await page.screenshot({ path: '/tmp/ikdxho-browser.png', fullPage: true });
+    } finally {
+      rejectMessage?.(); rejectMessage = null; rejectNextMessage = false;
+      await browser.close(); await vite.close();
+      messageBodies.length = 0; recordedMessages.splice(2); activeRevision = source.revisionId; lastRunId = '';
+    }
+  }, 90_000);
+  it.runIf(process.env.IKDXHP_BROWSER)("browser confirms video and audio alongside images with stable identities and inline order", async () => {
+    const { chromium, expect: browserExpect } = await import("playwright/test");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    const vite = await createVite({ root: `${process.cwd()}/web`, server: {
+      open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } },
+    } });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    // 本地媒体服务只提供可解码的素材字节，业务 API 仍由真实 Nest 服务承载。
+    const fixturePage = await browser.newPage();
+    const videoBytes = await fixturePage.evaluate(async () => {
+      const canvas = document.createElement('canvas'); canvas.width = 120; canvas.height = 120;
+      const context = canvas.getContext('2d')!;
+      const stream = canvas.captureStream(10);
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = event => chunks.push(event.data);
+      const stopped = new Promise<void>(resolve => { recorder.onstop = () => resolve(); });
+      recorder.start();
+      context.fillStyle = 'blue'; context.fillRect(0, 0, 120, 120);
+      await new Promise(resolve => setTimeout(resolve, 200)); recorder.stop(); await stopped;
+      stream.getTracks().forEach(track => track.stop());
+      return Array.from(new Uint8Array(await new Blob(chunks).arrayBuffer()));
+    });
+    await fixturePage.close();
+    const wav = Buffer.alloc(44 + 16000);
+    wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
+    wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+    wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32);
+    wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(16000, 40);
+    const mediaServer = createServer((req, res) => {
+      const audio = req.url === '/audio.wav';
+      res.setHeader('content-type', audio ? 'audio/wav' : 'video/webm');
+      res.end(audio ? wav : Buffer.from(videoBytes));
+    });
+    await new Promise<void>(resolve => mediaServer.listen(0, '127.0.0.1', resolve));
+    const mediaBase = `http://127.0.0.1:${(mediaServer.address() as { port: number }).port}`;
+    try {
+      projectId = (await projects.create("987654", "IKDXHP browser")).id;
+      const media = [
+        { type: "video", url: `${mediaBase}/video.webm` },
+        { type: "audio", url: `${mediaBase}/audio.wav` },
+        { type: "image", url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E" },
+      ];
+      const assets = await Promise.all(media.map(item => prisma.client.assets.create({ data: {
+        user_id: 987654n, project_id: BigInt(projectId), type: item.type, url: item.url,
+      } })));
+      const seeded = await fetch(`${base}/api/canvases/${projectId}`, {
+        method: "PUT", headers: { "content-type": "application/json", "if-match": '\"missing\"' },
+        body: JSON.stringify({ nodes: JSON.stringify(media.flatMap((item, index) => [
+          { id: item.type, type: "mediaNode", position: { x: 100 + index * 360, y: 180 }, data: {
+            mediaType: item.type, src: item.url, assetId: String(assets[index].id), fileName: "同名素材", width: 120, height: 120,
+          } },
+          { id: `${item.type}-draft`, type: "mediaNode", position: { x: 100 + index * 360, y: 520 }, data: {
+            mediaType: item.type, draft: true, genStatus: "draft", fileName: `${item.type}草稿`, width: 120, height: 120,
+          } },
+        ])), viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }),
+      });
+      expect(seeded.status).toBe(200);
+      const page = await browser.newPage({ viewport: { width: 1800, height: 1000 } });
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
+        userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+      } }, version: 0 })));
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+      await page.getByRole("button", { name: "Agent", exact: true }).click();
+      const composer = page.locator('[data-agent-composer] [contenteditable][aria-placeholder]');
+      const pending = composer.getByLabel('待确认引用：同名素材', { exact: true });
+      const node = (id: string) => page.locator(`.react-flow__node[data-id="${id}"]`);
+      await composer.fill('前文后文');
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('ArrowLeft');
+      await node('video').click();
+      await browserExpect(pending).toBeVisible();
+      await browserExpect(composer).not.toBeFocused();
+      await browserExpect(pending.getByLabel('预览视频：同名素材')).toBeVisible();
+      await pending.getByLabel('预览视频：同名素材').hover();
+      const videoPreview = page.getByRole('tooltip').locator('video');
+      await browserExpect(videoPreview).toHaveAttribute('src', media[0].url);
+      await browserExpect.poll(() => videoPreview.evaluate(video => video.readyState)).toBeGreaterThanOrEqual(2);
+      await node('audio').getByTestId('media-title').click();
+      await browserExpect(pending.getByLabel('预览音频：同名素材')).toBeVisible();
+      await pending.getByLabel('预览音频：同名素材').hover();
+      const audioPreview = page.getByRole('tooltip').locator('audio');
+      await browserExpect(audioPreview).toHaveAttribute('src', media[1].url);
+      await browserExpect.poll(() => audioPreview.evaluate(audio => audio.readyState)).toBeGreaterThanOrEqual(2);
+      await audioPreview.click({ position: { x: 20, y: 25 } });
+      await browserExpect(pending).toBeVisible();
+      await browserExpect(pending.getByLabel('预览视频：同名素材')).toHaveCount(0);
+      await composer.click({ position: { x: 3, y: 3 } });
+      await browserExpect(composer).toHaveText('前文同名素材后文');
+      await node('audio').getByTestId('media-title').click();
+      await browserExpect(pending).toHaveCount(0);
+      await composer.getByRole('button', { name: '移除 同名素材' }).click();
+      await node('audio').getByTestId('media-title').click();
+      await browserExpect(pending).toBeVisible();
+      await page.keyboard.press('Escape');
+      await browserExpect(pending).toHaveCount(0);
+      // 每次确认回到输入末尾，出站顺序必须遵循编辑器，而非资产类型排序。
+      await composer.fill('开始');
+      for (const type of ['video', 'audio', 'image']) {
+        await node(type).getByTestId('media-title').click();
+        await browserExpect(pending).toBeVisible();
+        await composer.click({ position: { x: 3, y: 3 } });
+        await composer.press('ControlOrMeta+End');
+        await browserExpect(pending).toHaveCount(0);
+      }
+      await browserExpect(composer.getByRole('button', { name: '移除 同名素材' })).toHaveCount(3);
+      const send = page.locator('button[title="发送"]');
+      const mixedSent = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/messages'));
+      await send.click();
+      expect((await mixedSent).status()).toBeLessThan(300);
+      expect(messageBodies).toHaveLength(1);
+      expect(messageBodies[0].content).toMatchObject([
+        { type: 'text', text: '开始' },
+        { type: 'asset_ref', asset_id: String(assets[0].id), node_id: 'video', media_type: 'video' },
+        { type: 'resource_ref', resource_type: 'asset', resource_id: 'audio', asset_id: String(assets[1].id), node_id: 'audio', media_type: 'audio' },
+        { type: 'asset_ref', asset_id: String(assets[2].id), node_id: 'image', media_type: 'image' },
+      ]);
+      await browserExpect(composer).toHaveText('');
+      await composer.fill('开始');
+      for (const type of ['video', 'audio', 'image']) {
+        await node(type).getByTestId('media-title').click();
+        await browserExpect(pending).toBeVisible();
+        await composer.click({ position: { x: 3, y: 3 } });
+        await composer.press('ControlOrMeta+End');
+        await browserExpect(pending).toHaveCount(0);
+      }
+      // 已确认素材静默去重；删除音频后重选作为候选，发送不能绕过确认。
+      await node('video').click();
+      await browserExpect(pending).toHaveCount(0);
+      await composer.getByRole('button', { name: '移除 同名素材' }).nth(1).click();
+      await node('audio').getByTestId('media-title').click();
+      await browserExpect(pending).toBeVisible();
+      await send.click();
+      await browserExpect(page.getByRole('alert').filter({ hasText: '请先确认或取消待确认引用' })).toBeVisible();
+      await composer.focus();
+      await composer.press('Enter');
+      expect(messageBodies).toHaveLength(1);
+      await page.locator('.react-flow__pane').click({ position: { x: 1200, y: 150 } });
+      await browserExpect(pending).toHaveCount(0);
+      for (const type of ['video', 'audio']) {
+        await node(`${type}-draft`).click();
+        await browserExpect(pending).toHaveCount(0);
+        await page.locator('.react-flow__pane').click({ position: { x: 1200, y: 150 } });
+      }
+      const sent = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/messages'));
+      await send.click();
+      expect((await sent).status()).toBeLessThan(300);
+      expect(messageBodies).toHaveLength(2);
+      expect(messageBodies[1].content).toMatchObject([
+        { type: 'text', text: '开始' },
+        { type: 'asset_ref', asset_id: String(assets[0].id), node_id: 'video', media_type: 'video' },
+        { type: 'asset_ref', asset_id: String(assets[2].id), node_id: 'image', media_type: 'image' },
+      ]);
+      await browserExpect(composer).toHaveText('');
+      // 原编辑路径覆盖有生成记录的成品卡；上传卡没有原生成参数。
+      const beforeEdit = await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json();
+      const generatedNodes = JSON.parse(beforeEdit.data.nodes).map((item: { id: string; data: Record<string, unknown> }) =>
+        item.id === 'video' || item.id === 'audio' ? { ...item, data: { ...item.data, jobId: `fixture-${item.id}`, prompt: '原生成描述' } } : item);
+      const prepareEdit = await fetch(`${base}/api/canvases/${projectId}`, {
+        method: 'PUT', headers: { 'content-type': 'application/json', 'if-match': `"${beforeEdit.data.version}"` },
+        body: JSON.stringify({ nodes: JSON.stringify(generatedNodes), viewport: beforeEdit.data.viewport }),
+      });
+      expect(prepareEdit.status).toBe(200);
+      await page.reload();
+      await page.getByRole('button', { name: 'Agent', exact: true }).click();
+      for (const type of ['video', 'audio']) {
+        await node(type).getByTestId('media-title').click();
+        await browserExpect(node(type)).toHaveClass(/selected/);
+        await browserExpect(node(type).getByRole('button', { name: '重新编辑', exact: true })).toBeVisible();
+        await browserExpect(node(type).getByRole('button', { name: '添加到 Agent 聊天' })).toHaveCount(type === 'video' ? 1 : 0);
+        await node(type).getByRole('button', { name: '重新编辑', exact: true }).click();
+        if (type === 'audio') await browserExpect(page.getByTestId('audio-input')).toBeVisible();
+        else await browserExpect(page.locator('[contenteditable][aria-placeholder^="描述你希望生成的视频"]')).toBeVisible();
+        // 重新编辑仍打开对应生成面板，引用仍是候选，不能被工具栏隐式确认。
+        await browserExpect(pending).toBeVisible();
+        await page.locator('.react-flow__pane').click({ position: { x: 1200, y: 150 } });
+        const rect = (await node(type).getByTestId('media-title').boundingBox())!;
+        const moved = page.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes('/api/canvases/'));
+        await page.mouse.move(rect.x + 40, rect.y + rect.height / 2);
+        await page.mouse.down(); await page.mouse.move(rect.x + 80, rect.y + rect.height / 2 + 30, { steps: 8 }); await page.mouse.up();
+        expect((await moved).status()).toBe(200);
+        const saved = await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json();
+        const originalX = type === 'video' ? 100 : 460;
+        expect(JSON.parse(saved.data.nodes).find((item: { id: string }) => item.id === type).position.x).toBeGreaterThan(originalX + 20);
+      }
+      await page.screenshot({ path: '/tmp/ikdxhp-browser.png', fullPage: true });
+    } finally {
+      await browser.close(); await vite.close();
+      mediaServer.closeAllConnections();
+      await new Promise<void>(resolve => mediaServer.close(() => resolve()));
+      messageBodies.length = 0; recordedMessages.splice(2); activeRevision = source.revisionId; lastRunId = '';
+    }
+  }, 90_000);
+  it.runIf(process.env.IKDXHQ_BROWSER)("browser freezes current text on confirmation and sends the confirmed version", async () => {
+    const { chromium, expect: browserExpect } = await import("playwright/test");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    const vite = await createVite({ root: `${process.cwd()}/web`, server: {
+      open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } },
+    } });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      projectId = (await projects.create("987654", "IKDXHQ browser")).id;
+      const imageUrl = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='80'%3E%3Crect width='120' height='80' fill='blue'/%3E%3C/svg%3E";
+      const asset = await prisma.client.assets.create({ data: { user_id: 987654n, project_id: BigInt(projectId), type: "image", url: imageUrl } });
+      expect((await fetch(`${base}/api/canvases/${projectId}`, {
+        method: "PUT", headers: { "content-type": "application/json", "if-match": '"missing"' },
+        body: JSON.stringify({ nodes: JSON.stringify([
+          { id: "text-confirm", type: "textNode", position: { x: 100, y: 100 }, data: { title: "正文版本", text: "最初候选正文" } },
+          { id: "image-mixed", type: "mediaNode", position: { x: 500, y: 100 }, data: { mediaType: "image", src: imageUrl, assetId: String(asset.id), fileName: "混排图片", width: 180, height: 120 } },
+        ]), viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }),
+      })).status).toBe(200);
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
+        userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+      } }, version: 0 })));
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+      await page.getByRole("button", { name: "Agent", exact: true }).click();
+      const composer = page.locator('[contenteditable][aria-placeholder]');
+      await composer.fill("已有输入");
+      const node = page.locator('.react-flow__node[data-id="text-confirm"]');
+      const editor = node.locator('[data-placeholder="输入内容..."]');
+      await node.click();
+      await browserExpect(composer.getByLabel("待确认引用：正文版本", { exact: true })).toBeVisible();
+      await browserExpect(composer.getByLabel("待确认引用：正文版本", { exact: true })).toContainText("正文版本");
+      await browserExpect(composer).not.toBeFocused();
+      const saved = page.waitForResponse(response => response.request().method() === "PUT" && response.url().includes("/api/canvases/"));
+      await editor.dblclick();
+      await editor.fill("确认前保存的新版\n保留第二行");
+      await composer.focus();
+      expect((await saved).status()).toBe(200);
+      await browserExpect(composer.getByText("待确认引用")).toBeVisible();
+      const frozen = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/conversation-quotes"));
+      await composer.click({ position: { x: 8, y: 8 } });
+      const quote = (await (await frozen).json()).data.quote;
+      expect(quote.text).toBe("确认前保存的新版\n保留第二行");
+      await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      expect(messageBodies).toHaveLength(0);
+      await editor.dblclick();
+      await editor.fill("确认后编辑的版本");
+      await composer.click({ position: { x: 8, y: 8 } });
+      expect((await listQuotes([quote.quoteId]))[0].text).toBe("确认前保存的新版\n保留第二行");
+      await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(1);
+      // 同节点静默去重；删除标签重引才采用编辑后的版本。
+      await node.getByTestId("text-title").click();
+      await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      await composer.getByRole("button", { name: "移除引用", exact: true }).click();
+      await browserExpect(composer).toHaveText("已有输入");
+      await composer.click();
+      await page.keyboard.press("ControlOrMeta+End");
+      await page.keyboard.type("后文");
+      await page.keyboard.press("ArrowLeft"); await page.keyboard.press("ArrowLeft");
+      await node.getByTestId("text-title").click();
+      const requoted = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/conversation-quotes"));
+      const start = await composer.evaluate(element => {
+        const text = document.createTreeWalker(element, NodeFilter.SHOW_TEXT).nextNode()!;
+        const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 1);
+        const rect = range.getBoundingClientRect(); return { x: rect.x + 1, y: rect.y + rect.height / 2 };
+      });
+      await page.mouse.click(start.x, start.y);
+      const newQuote = (await (await requoted).json()).data.quote;
+      expect(newQuote.quoteId).not.toBe(quote.quoteId);
+      expect(newQuote.text).toBe("确认后编辑的版本");
+      await browserExpect(composer).toHaveText("已有输入正文版本后文");
+      // 点击位置在开头，异步确认不得将后续输入拉回引用位置。
+      await page.keyboard.type("起");
+      await browserExpect(composer).toHaveText("起已有输入正文版本后文");
+      await composer.click(); await page.keyboard.press("ControlOrMeta+End");
+      await page.locator('.react-flow__node[data-id="image-mixed"]').click();
+      await composer.click({ position: { x: 8, y: 8 } });
+      await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      // 删除源节点不会删除已确认引用，公开接口仍返回冻结正文。
+      const deleted = page.waitForResponse(response => response.request().method() === "PUT" && response.url().includes("/api/canvases/"));
+      await node.getByTestId("text-title").click({ button: "right" });
+      await page.getByRole("button", { name: "删除", exact: true }).click();
+      expect((await deleted).status()).toBe(200);
+      await browserExpect(node).toHaveCount(0);
+      expect((await listQuotes([newQuote.quoteId]))[0].text).toBe("确认后编辑的版本");
+      const sent = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/messages"));
+      await page.locator('button[title="发送"]').click();
+      await sent;
+      expect(messageBodies).toHaveLength(1);
+      expect(messageBodies[0].content).toEqual([
+        { type: "text", text: "起已有输入" },
+        expect.objectContaining({ type: "resource_ref", resource_type: "text_quote", node_id: "text-confirm", resource_id: newQuote.quoteId, resource_text: "确认后编辑的版本" }),
+        { type: "text", text: "后文" },
+        expect.objectContaining({ type: "asset_ref", asset_id: String(asset.id), node_id: "image-mixed" }),
+      ]);
+    } finally {
+      await browser.close(); await vite.close();
+      messageBodies.length = 0; recordedMessages.splice(2); activeRevision = source.revisionId; lastRunId = "";
+    }
+  }, 90_000);
+  it.runIf(process.env.IKDXHQ_BROWSER)("browser preserves drafts on quote rejection and ignores cancelled or replaced late responses", async () => {
+    const { chromium, expect: browserExpect } = await import("playwright/test");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    const vite = await createVite({ root: `${process.cwd()}/web`, server: {
+      open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } },
+    } });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      projectId = (await projects.create("987654", "IKDXHQ races")).id;
+      expect((await fetch(`${base}/api/canvases/${projectId}`, {
+        method: "PUT", headers: { "content-type": "application/json", "if-match": '"missing"' },
+        body: JSON.stringify({ nodes: JSON.stringify([
+          { id: "text-a", type: "textNode", position: { x: 100, y: 100 }, data: { title: "同名文本", text: "正文 A" } },
+          { id: "text-b", type: "textNode", position: { x: 500, y: 100 }, data: { title: "同名文本", text: "正文 B" } },
+        ]), viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }),
+      })).status).toBe(200);
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
+        userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+      } }, version: 0 })));
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+      await page.getByRole("button", { name: "Agent", exact: true }).click();
+      const composer = page.locator('[contenteditable][aria-placeholder]');
+      const a = page.locator('.react-flow__node[data-id="text-a"]').getByTestId("text-title");
+      const b = page.locator('.react-flow__node[data-id="text-b"]').getByTestId("text-title");
+      await composer.fill("保留输入");
+      // 在公开 HTTP 边界注入不合法请求，响应仍由真实业务 API 校验生成。
+      await page.route("**/conversation-quotes", async route => {
+        const response = await route.fetch({ postData: JSON.stringify({ ...route.request().postDataJSON(), title: "题".repeat(201) }) });
+        expect(response.status()).toBe(400);
+        await route.fulfill({ response });
+      }, { times: 1 });
+      await a.click();
+      await composer.click({ position: { x: 350, y: 10 } });
+      await browserExpect(page.getByRole("alert").filter({ hasText: "确认引用失败" })).toBeVisible();
+      await browserExpect(composer.getByText("待确认引用")).toBeVisible();
+      await browserExpect(composer).toContainText("保留输入");
+      await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(0);
+      expect(messageBodies).toHaveLength(0);
+
+      for (const action of ["cancel", "replace"] as const) {
+        let release: (() => void) | undefined;
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        let responseReady = false;
+        // 只延迟真实快照 API 的响应，保留真实持久化与响应内容。
+        await page.route("**/conversation-quotes", async route => {
+          const response = await route.fetch();
+          expect(response.status()).toBeLessThan(300);
+          responseReady = true;
+          await gate;
+          await route.fulfill({ response });
+        }, { times: 1 });
+        await a.click();
+        const arrived = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/conversation-quotes"));
+        await composer.click({ position: { x: 350, y: 10 } });
+        await browserExpect.poll(() => responseReady).toBe(true);
+        try {
+          await page.locator('button[title="发送"]').click();
+          await browserExpect(page.getByRole("alert").filter({ hasText: "请先确认或取消" })).toBeVisible();
+          await composer.focus(); await page.keyboard.press("Enter");
+          expect(messageBodies).toHaveLength(0);
+          if (action === "cancel") {
+            await page.keyboard.press("Escape");
+            await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+          } else {
+            await b.click();
+            const confirmedB = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/conversation-quotes"));
+            await composer.click({ position: { x: 350, y: 10 } });
+            expect((await (await confirmedB).json()).data.quote.text).toBe("正文 B");
+            await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(1);
+          }
+        } finally { release!(); await arrived; }
+        await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+        await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(action === "cancel" ? 0 : 1);
+        await browserExpect(composer).toContainText("保留输入");
+      }
+      // 同名不同节点仍可确认，删除 B 标签后实际出站只含 A。
+      await a.click();
+      await composer.click({ position: { x: 350, y: 10 } });
+      await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(2);
+      await composer.getByRole("button", { name: "移除引用", exact: true }).first().click();
+      const sent = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/messages"));
+      await page.locator('button[title="发送"]').click(); await sent;
+      const parts = messageBodies[0].content as Array<Record<string, unknown>>;
+      expect(parts.filter(part => part.type === "resource_ref")).toEqual([
+        expect.objectContaining({ node_id: "text-a", resource_text: "正文 A", resource_type: "text_quote" }),
+      ]);
+      expect(parts.filter(part => part.type === "text").map(part => part.text).join("")).toBe("保留输入");
+    } finally {
+      await browser.close(); await vite.close();
+      messageBodies.length = 0; recordedMessages.splice(2); activeRevision = source.revisionId; lastRunId = "";
+    }
+  }, 90_000);
+  it.runIf(process.env.IKDXHR_BROWSER)("browser restores the same session draft after closing and keeps consecutive messages separate", async () => {
+    const { chromium, expect: browserExpect } = await import("playwright/test");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    const vite = await createVite({ root: `${process.cwd()}/web`, server: {
+      open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } },
+    } });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      projectId = (await projects.create("987654", "IKDXHR lifecycle")).id;
+      const fixturePage = await browser.newPage();
+      const video = await fixturePage.evaluate(async () => {
+        const canvas = document.createElement("canvas"); canvas.width = 20; canvas.height = 20;
+        const stream = canvas.captureStream(10);
+        const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp8" });
+        const chunks: Blob[] = [];
+        recorder.ondataavailable = event => chunks.push(event.data);
+        const stopped = new Promise<void>(resolve => { recorder.onstop = () => resolve(); });
+        recorder.start(); canvas.getContext("2d")!.fillRect(0, 0, 20, 20);
+        await new Promise(resolve => setTimeout(resolve, 200)); recorder.stop(); await stopped;
+        stream.getTracks().forEach(track => track.stop());
+        return Array.from(new Uint8Array(await new Blob(chunks).arrayBuffer()));
+      });
+      await fixturePage.close();
+      const wav = Buffer.alloc(46);
+      wav.write("RIFF"); wav.writeUInt32LE(38, 4); wav.write("WAVEfmt ", 8);
+      wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+      wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32);
+      wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(2, 40);
+      const media = [
+        { type: "image", title: "图片", url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E" },
+        { type: "video", title: "视频", url: `data:video/webm;base64,${Buffer.from(video).toString("base64")}` },
+        { type: "audio", title: "音频", url: `data:audio/wav;base64,${wav.toString("base64")}` },
+      ];
+      const assets = await Promise.all(media.map(item => prisma.client.assets.create({ data: {
+        user_id: 987654n, project_id: BigInt(projectId), type: item.type, url: item.url,
+      } })));
+      expect((await fetch(`${base}/api/canvases/${projectId}`, {
+        method: "PUT", headers: { "content-type": "application/json", "if-match": '"missing"' },
+        body: JSON.stringify({ nodes: JSON.stringify([
+          ...media.map((item, index) => ({ id: item.type, type: "mediaNode", position: { x: 100 + index * 300, y: 400 }, data: {
+            mediaType: item.type, src: item.url, assetId: String(assets[index].id), fileName: item.title, width: 120, height: 120,
+          } })),
+          { id: "text-kept", type: "textNode", position: { x: 100, y: 100 }, data: { title: "已确认正文", text: "冻结正文" } },
+          { id: "text-pending", type: "textNode", position: { x: 500, y: 100 }, data: { title: "旧候选", text: "不可回填" } },
+          { id: "text-target", type: "textNode", position: { x: 900, y: 100 }, data: { title: "连线目标", text: "连接验证" } },
+        ]), viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }),
+      })).status).toBe(200);
+      const page = await browser.newPage({ viewport: { width: 1800, height: 1000 } });
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
+        userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+      } }, version: 0 })));
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+      // 等待媒体元数据的既有自动保存完成，再比较引用操作是否额外写画布。
+      await browserExpect.poll(async () => {
+        const canvas = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+        return JSON.parse(canvas.nodes).find((node: { id: string }) => node.id === "video").data.duration;
+      }).toBeDefined();
+      const open = page.getByRole("button", { name: "Agent", exact: true });
+      await open.click();
+      const composer = page.locator('[data-agent-composer] [contenteditable][aria-placeholder]');
+      const confirm = async () => {
+        const box = (await composer.boundingBox())!;
+        await composer.click({ position: { x: box.width - 4, y: box.height - 4 } });
+      };
+      await composer.fill("保留输入");
+      await page.locator('.react-flow__node[data-id="text-kept"]').getByTestId("text-title").click();
+      await confirm();
+      await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      await browserExpect(composer).toHaveText("保留输入已确认正文");
+      for (const item of media) {
+        await composer.press("ControlOrMeta+a"); await composer.press("ArrowRight");
+        await page.locator(`.react-flow__node[data-id="${item.type}"]`).getByTestId("media-title").click();
+        await browserExpect(composer.getByText("待确认引用")).toBeVisible();
+        await confirm();
+        await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      }
+      const mixedDraft = "保留输入已确认正文图片视频音频";
+      await browserExpect(composer).toHaveText(mixedDraft);
+      const canvasBefore = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+
+      await page.locator('.react-flow__node[data-id="text-pending"]').getByTestId("text-title").click();
+      await browserExpect(composer.getByText("待确认引用")).toBeVisible();
+      await page.getByRole("button", { name: "关闭", exact: true }).click();
+      await browserExpect(composer).toBeHidden();
+      await open.click();
+      await browserExpect(composer).toHaveText(mixedDraft);
+      await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      const candidate = page.locator('.react-flow__node[data-id="text-pending"]').getByTestId("text-title");
+      // IKDXP1：重复点击已确认节点不使另一候选正在返回的有效快照失效。
+      let releaseDuplicate!: () => void;
+      const duplicateGate = new Promise<void>(resolve => { releaseDuplicate = resolve; });
+      let duplicateReady = false;
+      await page.route("**/conversation-quotes", async route => {
+        const response = await route.fetch();
+        expect(response.status()).toBeLessThan(300);
+        duplicateReady = true;
+        await duplicateGate;
+        await route.fulfill({ response });
+      }, { times: 1 });
+      await candidate.click();
+      const duplicateResponse = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/conversation-quotes"));
+      await confirm();
+      await browserExpect.poll(() => duplicateReady).toBe(true);
+      try {
+        await page.locator('.react-flow__node[data-id="text-kept"]').getByTestId("text-title").click();
+      } finally { releaseDuplicate(); await duplicateResponse; }
+      await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(2);
+      await composer.getByRole("button", { name: "移除引用", exact: true }).last().click();
+      await browserExpect(composer).toHaveText(mixedDraft);
+      // 延迟真实 API 响应：分别在关闭期间和重开选好新候选后返回。
+      for (const reopenFirst of [false, true]) {
+        let release!: () => void;
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        let ready = false;
+        await page.route("**/conversation-quotes", async route => {
+          const response = await route.fetch();
+          expect(response.status()).toBeLessThan(300);
+          ready = true;
+          await gate;
+          await route.fulfill({ response });
+        }, { times: 1 });
+        await candidate.click();
+        const arrived = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/conversation-quotes"));
+        await confirm();
+        await browserExpect.poll(() => ready).toBe(true);
+        try {
+          await page.getByRole("button", { name: "关闭", exact: true }).click();
+          await browserExpect(composer).toBeHidden();
+          if (reopenFirst) {
+            await open.click();
+            await candidate.click();
+            await browserExpect(composer.getByText("待确认引用")).toBeVisible();
+          }
+        } finally { release(); await arrived; }
+        if (!reopenFirst) await open.click();
+        await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(1);
+        if (reopenFirst) {
+          await browserExpect(composer.getByText("待确认引用")).toBeVisible();
+          await page.locator('button[title="发送"]').click();
+          await browserExpect(page.getByRole("alert").filter({ hasText: "请先确认或取消" })).toBeVisible();
+          await composer.focus(); await page.keyboard.press("Enter");
+          expect(messageBodies).toHaveLength(0);
+          await page.keyboard.press("Escape");
+        }
+        await browserExpect(composer).toHaveText(mixedDraft);
+      }
+      rejectNextMessage = true;
+      await page.locator('button[title="发送"]').click();
+      await browserExpect.poll(() => rejectMessage !== null).toBe(true);
+      await page.getByRole("button", { name: "关闭", exact: true }).click();
+      await browserExpect(composer).toBeHidden();
+      rejectMessage!(); rejectMessage = null;
+      await open.click();
+      await browserExpect(page.getByText(/消息发送失败/).first()).toBeVisible();
+      await browserExpect(composer).toHaveText(mixedDraft);
+      await page.locator('button[title="发送"]').click();
+      await browserExpect(composer).toHaveText("");
+      expect(messageBodies[1]).toEqual(messageBodies[0]);
+      const firstParts = messageBodies[1].content as Array<Record<string, unknown>>;
+      expect(firstParts.filter(part => part.type !== "text")).toEqual([
+        expect.objectContaining({ node_id: "text-kept", resource_text: "冻结正文" }),
+        ...media.map((item, index) => expect.objectContaining({ type: item.type === "audio" ? "resource_ref" : "asset_ref", node_id: item.type, media_type: item.type, asset_id: String(assets[index].id) })),
+      ]);
+      await candidate.click();
+      await browserExpect(composer.getByText("待确认引用")).toBeVisible();
+      await confirm();
+      await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      await page.locator('button[title="发送"]').click();
+      await browserExpect(composer).toHaveText("");
+      const secondParts = messageBodies[2].content as Array<Record<string, unknown>>;
+      expect(secondParts.filter(part => part.type !== "text")).toEqual([
+        expect.objectContaining({ node_id: "text-pending", resource_text: "不可回填" }),
+      ]);
+      // 切换会话不能携带上一会话未发送的文字或冻结引用。
+      await composer.fill("旧会话草稿");
+      await candidate.click();
+      await confirm();
+      await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      showOtherSession = true;
+      await page.getByRole("button", { name: "引用对话", exact: true }).click();
+      await page.getByRole("button", { name: "另一会话", exact: true }).click();
+      await browserExpect(composer).toHaveText("");
+      // 旧会话的成功回执晚到，不能清空已经开始编辑的新会话草稿。
+      await composer.fill("其他会话消息");
+      holdNextMessage = true;
+      const oldAccepted = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("session-other/messages"));
+      await page.locator('button[title="发送"]').click();
+      await browserExpect.poll(() => releaseMessage !== null).toBe(true);
+      try {
+        await page.getByRole("button", { name: "另一会话", exact: true }).click();
+        await page.getByRole("button", { name: "引用对话", exact: true }).click();
+        await composer.fill("新会话草稿");
+        await candidate.click();
+        await confirm();
+        await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      } finally { releaseMessage!(); releaseMessage = null; await oldAccepted; }
+      await browserExpect(composer).toHaveText("新会话草稿旧候选");
+      await page.locator('button[title="发送"]').click();
+      await browserExpect(composer).toHaveText("");
+      expect(messageBodies[4].content).toEqual([
+        { type: "text", text: "新会话草稿" },
+        expect.objectContaining({ node_id: "text-pending", resource_text: "不可回填" }),
+      ]);
+      // IKDXP1：发送回执只能清理本次内容，显式入口在等待期间新加的引用属于下一条。
+      await composer.fill("本次发送文字");
+      holdNextMessage = true;
+      const submissionIndex = messageBodies.length;
+      const accepted = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/messages"));
+      await page.locator('button[title="发送"]').click();
+      await browserExpect.poll(() => releaseMessage !== null).toBe(true);
+      try {
+        await candidate.click();
+        await page.locator('.react-flow__node[data-id="text-pending"]').getByRole("button", { name: "添加到对话", exact: true }).click();
+        await browserExpect(composer.getByText("旧候选", { exact: true })).toBeVisible();
+        expect(messageBodies[submissionIndex].content).toEqual([{ type: "text", text: "本次发送文字" }]);
+      } finally { releaseMessage!(); releaseMessage = null; await accepted; }
+      await browserExpect(composer.getByText("旧候选", { exact: true })).toBeVisible();
+      await browserExpect(composer).not.toContainText("本次发送文字");
+      await composer.press("ControlOrMeta+z");
+      await browserExpect(composer).not.toContainText("本次发送文字");
+      await page.locator('button[title="发送"]').click();
+      await browserExpect(composer).toHaveText("");
+      expect(messageBodies[submissionIndex + 1].content).toEqual([
+        expect.objectContaining({ node_id: "text-pending", resource_text: "不可回填" }),
+      ]);
+      // 已忽略的点选不能因随后删除 A 的引用而重新生效。
+      await page.locator('.react-flow__node[data-id="text-kept"]').getByTestId("text-title").click();
+      await confirm();
+      await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      let releaseDeletion!: () => void;
+      const deletionGate = new Promise<void>(resolve => { releaseDeletion = resolve; });
+      let deletionReady = false;
+      await page.route("**/conversation-quotes", async route => {
+        const response = await route.fetch();
+        expect(response.status()).toBeLessThan(300);
+        deletionReady = true;
+        await deletionGate;
+        await route.fulfill({ response });
+      }, { times: 1 });
+      await candidate.click();
+      const deletionResponse = page.waitForResponse(response => response.request().method() === "POST" && response.url().includes("/conversation-quotes"));
+      await confirm();
+      await browserExpect.poll(() => deletionReady).toBe(true);
+      try {
+        await page.locator('.react-flow__node[data-id="text-kept"]').getByTestId("text-title").click();
+        await composer.getByRole("button", { name: "移除引用", exact: true }).click();
+        await browserExpect(composer.getByRole("button", { name: "移除引用", exact: true })).toHaveCount(0);
+      } finally { releaseDeletion(); await deletionResponse; }
+      await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      await browserExpect(composer.getByText("旧候选", { exact: true })).toBeVisible();
+      await page.locator('button[title="发送"]').click();
+      await browserExpect(composer).toHaveText("");
+      expect(messageBodies[submissionIndex + 2].content).toEqual([
+        expect.objectContaining({ node_id: "text-pending", resource_text: "不可回填" }),
+      ]);
+      const canvasAfter = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+      expect(canvasAfter.version).toBe(canvasBefore.version);
+      expect(canvasAfter.nodes).toBe(canvasBefore.nodes);
+      // 对比面板开/关：引用不能接管画布编辑、拖动、连线或滚轮操作。
+      const node = (id: string) => page.locator(`.react-flow__node[data-id="${id}"]`);
+      const pane = page.locator(".react-flow__pane");
+      const viewport = page.locator(".react-flow__viewport");
+      for (const enabled of [false, true]) {
+        if (enabled) await open.click();
+        else {
+          await page.getByRole("button", { name: "关闭", exact: true }).click();
+          await browserExpect(composer).toBeHidden();
+        }
+        await node("text-kept").getByTestId("text-title").click();
+        await browserExpect(node("text-kept")).toHaveClass(/selected/);
+        await browserExpect(node("text-kept").getByRole("button", { name: "添加到对话", exact: true })).toBeVisible();
+        const editor = node("text-kept").locator('[data-placeholder="输入内容..."]');
+        await editor.dblclick();
+        await editor.fill(`回归正文 ${enabled}`);
+        await pane.click({ position: { x: 1100, y: 700 } });
+        await browserExpect.poll(async () => {
+          const saved = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+          return JSON.parse(saved.nodes).find((item: { id: string }) => item.id === "text-kept").data.text;
+        }).toContain(`回归正文 ${enabled}`);
+        const title = node("text-kept").getByTestId("text-title");
+        const box = (await title.boundingBox())!;
+        await page.mouse.move(box.x + 30, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + 70, box.y + box.height / 2 + 20, { steps: 8 });
+        await page.mouse.up();
+        await browserExpect.poll(async () => (await title.boundingBox())!.x).toBeGreaterThan(box.x + 20);
+        const sourceId = "text-kept";
+        const targetId = enabled ? "text-target" : "text-pending";
+        const src = (await node(sourceId).locator(".react-flow__handle-right").boundingBox())!;
+        const dst = (await node(targetId).locator(".react-flow__handle-left").boundingBox())!;
+        await page.mouse.move(src.x + src.width / 2, src.y + src.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(dst.x + dst.width / 2, dst.y + dst.height / 2, { steps: 10 });
+        await browserExpect(node(targetId).locator(".react-flow__handle-left")).toHaveClass(/connectingto/);
+        await page.mouse.up();
+        await browserExpect.poll(async () => {
+          const saved = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+          return JSON.parse(saved.edges || "[]").some((edge: { source: string; target: string }) =>
+            edge.source === sourceId && edge.target === targetId);
+        }).toBe(true);
+        await pane.click({ position: { x: 1100, y: 700 } });
+        const beforePan = await viewport.getAttribute("style");
+        await page.mouse.wheel(40, 30);
+        await browserExpect(viewport).not.toHaveAttribute("style", beforePan!);
+        const beforeZoom = await viewport.evaluate(el => new DOMMatrix(getComputedStyle(el).transform).a);
+        await page.keyboard.down("Control");
+        await page.mouse.wheel(0, process.platform === "darwin" ? 12 : 120);
+        await page.keyboard.up("Control");
+        await browserExpect.poll(() => viewport.evaluate(el => new DOMMatrix(getComputedStyle(el).transform).a)).toBeLessThan(beforeZoom);
+        // Esc 维持取消候选/退出编辑的原行为，不留下已确认附件。
+        await node("text-pending").getByTestId("text-title").click();
+        if (enabled) await browserExpect(composer.getByText("待确认引用")).toBeVisible();
+        await page.keyboard.press("Escape");
+        await browserExpect(composer.getByText("待确认引用")).toHaveCount(0);
+      }
+    } finally {
+      holdNextMessage = false;
+      releaseMessage?.(); releaseMessage = null;
+      showOtherSession = false;
+      rejectNextMessage = false;
+      rejectMessage?.(); rejectMessage = null;
+      await browser.close(); await vite.close();
+      messageBodies.length = 0; recordedMessages.splice(2); activeRevision = source.revisionId; lastRunId = "";
+    }
+  }, 90_000);
   it.runIf(process.env.IKDLQJ_BROWSER)("browser quotes edited text, receives a new preview and reapplies after reload", async () => {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
@@ -279,7 +1152,7 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
       await messageSent;
       expect(messageBodies).toHaveLength(1);
       const parts = messageBodies[0].content as Array<Record<string, unknown>>;
-      expect(parts[0]).toEqual({ type: "text", text: "请基于它改一版" });
+      expect(parts.find(part => part.type === 'text')?.text.trim()).toBe("请基于它改一版");
       const quotePart = parts.find(part => part.type === "resource_ref");
       expect(quotePart).toMatchObject({
         resource_type: "text_quote",

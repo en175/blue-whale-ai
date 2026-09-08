@@ -11,7 +11,7 @@ import {
   useHover,
   useInteractions,
 } from '@floating-ui/react';
-import { X } from 'lucide-react';
+import { AudioLines, X } from 'lucide-react';
 import styles from './index.module.css';
 
 export interface VideoMentionChipProps {
@@ -26,6 +26,14 @@ export interface VideoMentionChipProps {
  * 视觉对齐 ImageMentionChip，交互对齐 AssetChip 的视频预览。
  */
 export function VideoMentionChip({ url, label, onRemove }: VideoMentionChipProps) {
+  return <MediaMentionChip url={url} label={label} onRemove={onRemove} mediaType="video" />;
+}
+
+export function AudioMentionChip({ url, label, onRemove }: VideoMentionChipProps) {
+  return <MediaMentionChip url={url} label={label} onRemove={onRemove} mediaType="audio" />;
+}
+
+function MediaMentionChip({ url, label, onRemove, mediaType }: VideoMentionChipProps & { mediaType: 'video' | 'audio' }) {
   const [open, setOpen] = useState(false);
   const { refs, floatingStyles, context } = useFloating({
     open,
@@ -44,10 +52,10 @@ export function VideoMentionChip({ url, label, onRemove }: VideoMentionChipProps
         ref={refs.setReference}
         className={styles.chip}
         contentEditable={false}
-        aria-label={`预览视频：${label}`}
+        aria-label={`预览${mediaType === 'audio' ? '音频' : '视频'}：${label}`}
         {...getReferenceProps()}
       >
-        <video className={styles.thumb} src={url} muted playsInline preload="metadata" />
+        {mediaType === 'audio' ? <AudioLines size={15} /> : <video className={styles.thumb} src={url} muted playsInline preload="metadata" />}
         <span className={styles.label} title={label}>{label}</span>
         {onRemove && (
           <button
@@ -66,12 +74,13 @@ export function VideoMentionChip({ url, label, onRemove }: VideoMentionChipProps
         <FloatingPortal>
           <span
             ref={refs.setFloating}
-            className={styles.preview}
+            className={mediaType === 'audio' ? styles.audioPreview : styles.preview}
             style={floatingStyles}
             role="tooltip"
+            contentEditable={false}
             {...getFloatingProps()}
           >
-            <video src={url} autoPlay muted loop playsInline />
+            {mediaType === 'audio' ? <audio src={url} controls preload="metadata" aria-label={`播放音频：${label}`} /> : <video src={url} autoPlay muted loop playsInline />}
           </span>
         </FloatingPortal>
       )}

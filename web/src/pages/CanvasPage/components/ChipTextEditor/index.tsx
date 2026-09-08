@@ -16,11 +16,24 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import {
   $createParagraphNode,
   $createTextNode,
+  $createRangeSelection,
   $getRoot,
+  $getSelection,
+  $getNodeByKey,
+  $nodesOfType,
+  $isRangeSelection,
+  $setSelection,
   $isElementNode,
   COMMAND_PRIORITY_LOW,
   KEY_ENTER_COMMAND,
+  SKIP_DOM_SELECTION_TAG,
+  HISTORIC_TAG,
+  HISTORY_PUSH_TAG,
+  CLEAR_HISTORY_COMMAND,
+  type RangeSelection,
+  type NodeKey,
   type LexicalEditor,
+  type LexicalNode,
 } from 'lexical';
 import { ChipNode, $createChipNode } from './ChipNode';
 import { type ComposedValue } from './composed';
@@ -38,6 +51,8 @@ export interface ChipRef {
   imageUrl?: string;
   /** 画布独立视频节点的原片地址。有值时渲染缩略图胶囊 + 悬浮静音预览。 */
   videoUrl?: string;
+  /** 音频原片地址，悬浮后由用户主动播放。 */
+  audioUrl?: string;
 }
 
 export interface ChipTextEditorHandle {
@@ -47,6 +62,8 @@ export interface ChipTextEditorHandle {
   setText: (text: string) => void;
   /** 清空全部内容（发送后调用） */
   clear: () => void;
+  /** 捕获本次提交内容，成功后仅移除这些节点，保留等待期间的新输入。 */
+  captureSubmission: () => () => void;
   focus: () => void;
 }
 
@@ -64,6 +81,11 @@ interface ChipTextEditorProps {
   className?: string;
   /** 只读（IKDMQS）：生成中草稿参数冻结，编辑器不可输入、Enter 不发送 */
   readOnly?: boolean;
+  pendingChip?: ChipRef | null;
+  /** 异步准备成功后才确认；返回 null 保留候选与已有输入。 */
+  onPreparePending?: () => Promise<ChipRef | null>;
+  onConfirmPending?: () => void;
+  onCancelPending?: () => void;
 }
 
 function onError(error: Error) {
@@ -111,10 +133,104 @@ function EditablePlugin({ readOnly }: { readOnly?: boolean }) {
 }
 
 const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(function ChipTextEditor(
-  { placeholder, onChange, onSend, className, readOnly },
+  { placeholder, onChange, onSend, className, readOnly, pendingChip, onPreparePending, onConfirmPending, onCancelPending },
   ref,
 ) {
   const editorRef = useRef<LexicalEditor | null>(null);
+  const savedSelection = useRef<RangeSelection | null>(null);
+  const pendingKey = useRef<NodeKey | null>(null);
+  const preparingKey = useRef<NodeKey | null>(null);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    return editor.registerUpdateListener(({ editorState }) => {
+      const { stale, missing } = editorState.read(() => ({
+        stale: $nodesOfType(ChipNode).filter((node) => node.isPending() && node.getKey() !== pendingKey.current).map((node) => node.getKey()),
+        missing: pendingKey.current !== null && !$getNodeByKey(pendingKey.current),
+      }));
+      // Undo/Redo 只恢复编辑内容，不能复活已经确认或取消的候选。
+      if (stale.length) editor.update(() => {
+        for (const key of stale) $getNodeByKey(key)?.remove();
+      }, { tag: HISTORIC_TAG });
+      if (missing) { pendingKey.current = null; onCancelPending?.(); }
+    });
+  }, [onCancelPending]);
+
+  useEffect(() => {
+    const rememberCaret = (event: PointerEvent) => {
+      const editor = editorRef.current;
+      const root = editor?.getRootElement();
+      const selection = window.getSelection();
+      if (!editor || !root || root.contains(event.target as Node) || !selection?.rangeCount || !root.contains(selection.anchorNode)) return;
+      // 在浏览器改变焦点前读实际 DOM 光标，避免 selectionchange 尚未提交时保存旧位置。
+      editor.read(() => {
+        const saved = $createRangeSelection();
+        saved.applyDOMRange(selection.getRangeAt(0));
+        savedSelection.current = saved;
+      });
+    };
+    document.addEventListener('pointerdown', rememberCaret, true);
+    return () => document.removeEventListener('pointerdown', rememberCaret, true);
+  }, []);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.update(() => {
+      const previous = pendingKey.current ? $getNodeByKey(pendingKey.current) : null;
+      if (!pendingChip) {
+        if (previous instanceof ChipNode && previous.isPending()) previous.remove();
+        pendingKey.current = null;
+        return;
+      }
+      const chip = $createChipNode(pendingChip.id, pendingChip.label, pendingChip.prompt, pendingChip.imageUrl, pendingChip.videoUrl, true, pendingChip.audioUrl);
+      if (previous instanceof ChipNode && previous.isPending()) {
+        previous.replace(chip);
+      } else {
+        const selection = savedSelection.current?.clone();
+        if (selection && $getNodeByKey(selection.focus.key)?.isAttached()) {
+          // 引用插入光标处，不覆盖用户离开前选中的文字。
+          selection.anchor.set(selection.focus.key, selection.focus.offset, selection.focus.type);
+          $setSelection(selection);
+        } else {
+          $getRoot().selectEnd();
+        }
+        const insertion = $getSelection();
+        if ($isRangeSelection(insertion)) insertion.insertNodes([chip]);
+      }
+      pendingKey.current = chip.getKey();
+    }, { tag: [SKIP_DOM_SELECTION_TAG, HISTORIC_TAG] });
+  }, [pendingChip]);
+
+  const confirmPending = async (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!pendingChip || readOnly) return;
+    const target = event.target as HTMLElement;
+    // 胶囊、移除按钮、悬浮预览不是输入编辑位置。
+    if (target.closest('[contenteditable="false"],button')) return;
+    const key = pendingKey.current;
+    if (!key || preparingKey.current === key) return;
+    let prepared = pendingChip;
+    if (onPreparePending) {
+      preparingKey.current = key;
+      try {
+        const result = await onPreparePending();
+        if (!result || pendingKey.current !== key) return;
+        prepared = result;
+      } finally {
+        if (preparingKey.current === key) preparingKey.current = null;
+      }
+    }
+    let confirmed = false;
+    editorRef.current?.update(() => {
+      if (pendingKey.current !== key) return;
+      const node = $getNodeByKey(key);
+      if (!(node instanceof ChipNode) || !node.isPending()) return;
+      node.confirm(prepared);
+      pendingKey.current = null;
+      confirmed = true;
+    }, { tag: HISTORY_PUSH_TAG, onUpdate: () => { if (confirmed) onConfirmPending?.(); } });
+  };
 
   useImperativeHandle(ref, () => ({
     insertChip: (chip) => {
@@ -125,7 +241,7 @@ const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(fun
         const first = root.getFirstChild();
         const paragraph = first && $isElementNode(first) ? first : $createParagraphNode();
         if (paragraph !== first) root.append(paragraph);
-        const chipNode = $createChipNode(chip.id, chip.label, chip.prompt, chip.imageUrl, chip.videoUrl);
+        const chipNode = $createChipNode(chip.id, chip.label, chip.prompt, chip.imageUrl, chip.videoUrl, false, chip.audioUrl);
         const spaceNode = $createTextNode(' ');
         paragraph.append(chipNode, spaceNode);
         spaceNode.selectEnd();
@@ -152,7 +268,28 @@ const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(fun
         const root = $getRoot();
         root.clear();
         root.append($createParagraphNode());
+      }, { onUpdate: () => editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined) });
+    },
+    captureSubmission: () => {
+      const editor = editorRef.current;
+      if (!editor) return () => {};
+      const keys = editor.read(() => {
+        const result: NodeKey[] = [];
+        const visit = (node: LexicalNode) => {
+          if ($isElementNode(node)) node.getChildren().forEach(visit);
+          else result.push(node.getKey());
+        };
+        visit($getRoot());
+        return result;
       });
+      return () => editor.update(() => {
+        for (const key of keys) $getNodeByKey(key)?.remove();
+        const root = $getRoot();
+        for (const child of root.getChildren()) {
+          if ($isElementNode(child) && child.isEmpty()) child.remove();
+        }
+        if (root.isEmpty()) root.append($createParagraphNode());
+      }, { tag: SKIP_DOM_SELECTION_TAG, onUpdate: () => editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined) });
     },
     focus: () => editorRef.current?.focus(),
   }), []);
@@ -179,7 +316,7 @@ const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(fun
       />
       <div className={styles.editorWrapper}>
         <PlainTextPlugin
-          contentEditable={<ContentEditable className={`${styles.editable} ${className ?? ''}`} aria-placeholder={placeholder} placeholder={<span className={styles.placeholder}>{placeholder}</span>} />}
+          contentEditable={<ContentEditable onClick={confirmPending} className={`${styles.editable} ${className ?? ''}`} aria-placeholder={placeholder} placeholder={<span className={styles.placeholder}>{placeholder}</span>} />}
           ErrorBoundary={LexicalErrorBoundary}
         />
       </div>
