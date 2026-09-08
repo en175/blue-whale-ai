@@ -196,6 +196,27 @@ export function createTosStorage(config: TosStorageConfig): {
           expiresIn: ttlSeconds,
         };
       },
+      /**
+       * 只取开头那几十个字节（IKE53U）。走 Range，不下载整份对象——一份 200MB 的视频不该为了
+       * 一道校验被整个拉一遍。取不到就返回 null，由调用方决定放行还是拒绝。
+       */
+      async readHead(storageKey, length) {
+        try {
+          const url = await client.getPreSignedUrl({
+            bucket: config.bucket,
+            key: storageKey,
+            method: "GET",
+            expires: 60,
+          });
+          const res = await fetch(url, {
+            headers: { range: `bytes=0-${Math.max(0, length - 1)}` },
+          });
+          if (!res.ok) return null;
+          return new Uint8Array(await res.arrayBuffer());
+        } catch {
+          return null;
+        }
+      },
       async inspectObject(storageKey) {
         try {
           const response = await client.headObject({

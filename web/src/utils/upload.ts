@@ -11,6 +11,7 @@ import {
   type AssetType,
   type UploadCompleteData,
 } from '@/api/assets';
+import { FileRejectedError, checkFileBeforeUpload } from './fileSignature';
 
 /** 流式计算文件 MD5（32 位小写 hex）：4MB 分块增量计算，避免大文件一次性读入内存。
  *  SubtleCrypto 不支持 MD5 算法，这里使用 spark-md5 实现。 */
@@ -89,11 +90,19 @@ export async function uploadAssetFile(
   opts?: { projectId?: string },
 ): Promise<UploadCompleteData> {
   const type = fileToAssetType(file);
-  if (!type) throw new Error(`不支持的文件类型：${file.name}`);
+  if (!type) throw new FileRejectedError(`${file.name} 的格式不支持，请用 JPG、PNG、WebP、MP4 或常见音频格式。`);
   const limit = UPLOAD_SIZE_LIMIT[type];
   if (file.size > limit) {
-    throw new Error(`文件超过 ${Math.floor(limit / 1024 / 1024)}MB 上限`);
+    throw new FileRejectedError(`${file.name} 超过 ${Math.floor(limit / 1024 / 1024)}MB 上限，请换一份小一些的。`);
   }
+
+  // 读一眼文件开头，认不出是媒体就不发请求（IKE53Z）。理由与上面的体积门一样，只是判据换成了
+  // 内容：type 是从 file.type 推的，而 file.type 来自后缀，后缀是别人说的。测试站 2026-09-08
+  // 那份 524 字节的假 JPEG 就是这么一路走到 Agent 读图才被发现的。
+  const rejection = await checkFileBeforeUpload(file, type);
+  // 抛 FileRejectedError 而不是普通 Error：调用点一律把上传失败套成「请重试」，而这一类
+  // 重试没有意义，那句话得原样端到用户面前。
+  if (rejection) throw new FileRejectedError(rejection);
 
   // md5 计算或查重请求失败都不阻断上传：静默降级走原三步
   const md5 = await computeFileMd5(file).catch(() => undefined);

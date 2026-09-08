@@ -298,6 +298,13 @@ afterEach(async () => {
   apiMocks.fetchJobStatus.mockReset().mockImplementation(defaultJobStatus);
 });
 
+/** 一份带真 PNG 文件头的最小文件：上传前会读开头认容器（IKE53Z），'png' 这三个字母过不去。 */
+const pngFile = (name: string) => {
+  const head = new Uint8Array(32);
+  head.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  return new File([head.slice().buffer as ArrayBuffer], name, { type: 'image/png' });
+};
+
 describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
   it('单选有生成记录的成品卡自动打开图片面板并恢复参数与文本附件', async () => {
     await renderPage();
@@ -620,7 +627,7 @@ it('首页上传参考保留永久素材地址与连线，不保存已释放的 
   vi.stubGlobal('URL', class extends URL { static revokeObjectURL = revoke; });
   try {
     await renderPage({ kind: 'image', text: '上传参考生成', modelId: 'm-test', size: '2k', ratio: '1:1',
-      files: [{ id: 'upload', name: 'ref.png', type: 'image', file: new File(['png'], 'ref.png', { type: 'image/png' }), url: 'blob:home-reference' }] });
+      files: [{ id: 'upload', name: 'ref.png', type: 'image', file: pngFile('ref.png'), url: 'blob:home-reference' }] });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     const source = flowProps.current.mediaNodes.find((n: Node) => n.data.assetId === 'new-ref') as Node;
     expect(source.data.src).toBe('https://assets/ref.png');

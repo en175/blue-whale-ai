@@ -8,6 +8,7 @@ import { useSearchParams } from 'react-router-dom';
 import { assetKeys, assetPageQueryOptions, deleteAsset, removeCachedAssetPages, UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, fetchAssetReferences, type AssetRecord, type AssetType } from '@/api/assets';
 import { createAsset as createMaterialAsset } from '@/api/material';
 import { uploadAssetFile } from '@/utils/upload';
+import { isFileRejected } from '@/utils/fileSignature';
 import { toast } from 'sonner';
 import { isApiError } from '@/api/http';
 import { fileToAssetType } from '@/utils/upload';
@@ -145,8 +146,10 @@ export default function Assets() {
             AssetType: assetType,
           });
         } catch (err) {
-          // API 错误已由请求层统一 toast，这里只收集本地校验类错误
-          if (!isApiError(err)) errors.push(`上传失败：${file.name}`);
+          // API 错误已由请求层统一 toast，这里只收集本地校验类错误。
+          // 文件本身不行时把写好的那句原样收进去，不要覆盖成通用的「上传失败」（IKE53Z）。
+          if (isFileRejected(err)) errors.push(err.message);
+          else if (!isApiError(err)) errors.push(`上传失败：${file.name}`);
         }
       }
 
