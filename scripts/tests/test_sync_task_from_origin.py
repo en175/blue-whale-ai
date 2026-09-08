@@ -291,6 +291,44 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         self.assertEqual(payload["status"], "ERROR")
         self.assertIn("结构化", str(payload["detail"]))
 
+    def test_sync_accepts_legacy_gbk_polluted_recovery_branch_field(self) -> None:
+        original_head = self.commit_task_change()
+        self.advance_master()
+        git_dir = Path(self.git("rev-parse", "--absolute-git-dir"))
+        branch = "feature/测试已有PR更新流程"
+        # 模拟 PR577 前旧版脚本污染：真实分支名 UTF-8 字节按 GBK 解码得到的乱码 str，
+        # 再经 ensure_ascii=False 写文件（utf-8 编码）——即恢复点 branch 字段实际形态。
+        polluted = branch.encode("utf-8").decode("gbk")
+        marker = git_dir / "agent-sync-recovery.json"
+        marker.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "branch": polluted,
+                    "original_head": original_head,
+                    "upstream_sha": self.git("rev-parse", "HEAD"),
+                    "target_branch": "master",
+                    "remote_branch_sha": "",
+                    "backup_ref": "refs/agent-sync-backups/{}/{}".format(
+                        "feature", "测试已有PR更新流程"
+                    ),
+                    "created_at": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.invoke("sync", "--json")
+
+        # 旧乱码恢复点不再误判「属于其他分支」；应正常开启同步事务。
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = self.response(result)
+        self.assertEqual(payload["status"], "SYNCED")
+        self.assertTrue(marker.exists())
+        # branch 字段应在同步事务中被归一化为实时真实 UTF-8 名，供下游严格比较使用。
+        recovery_after = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(recovery_after["branch"], branch)
+
     def test_sync_records_existing_remote_source_sha_and_private_marker_mode(self) -> None:
         original_head = self.commit_task_change()
         self.git("push", "-u", "origin", "HEAD")
