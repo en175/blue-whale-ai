@@ -436,7 +436,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
       const { overflows, dup } = injectNoticeRef.current;
       injectNoticeRef.current = { overflows: [], dup: false };
       const parts: string[] = [];
-      if (overflows.length > 0) parts.push(refOverflowToast(overflows, { image: maxImages, video: MAX_VIDEOS }));
+      if (overflows.length > 0) parts.push(refOverflowToast(overflows, { image: maxImages, video: MAX_VIDEO_REFS }));
       if (dup) parts.push('重复的素材已跳过');
       if (parts.length > 0) onToast?.('warn', parts.join('；'));
     }, 0);
