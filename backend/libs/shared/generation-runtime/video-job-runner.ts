@@ -7,10 +7,21 @@ import {
   ERROR_PROVIDER_FAILED,
   ERROR_PROVIDER_TIMEOUT,
   ERROR_REFERENCE_ASSET_UNAVAILABLE,
-  ERROR_REFERENCE_LIMIT_EXCEEDED,
   ERROR_UNSUPPORTED_INPUT,
   textAttachmentSnapshotSchema,
 } from "@blue-whale/contracts";
+import { videoDimensions, dimensionsFromSize } from "./video-dimensions.js";
+import {
+  readAssetId,
+  readAssetIds,
+  readMaterialId,
+  readMaterialRefs,
+  uniqueAssetIds,
+  uniqueMaterialRefs,
+  VideoInputError,
+  type MaterialReference,
+} from "./material-reference.js";
+import { validateReferences } from "./video-reference-validation.js";
 
 const logger = createLogger("generation-runtime");
 
@@ -60,16 +71,6 @@ export type VideoWorkerInputAsset = {
 export type VideoReference = {
   type: "image" | "video";
   url: string;
-};
-
-/**
- * 素材库引用（MaterialReference）：视频生成输入里对上游素材库素材的引用。
- * 零本地落表：类型由调用方在创建任务时声明，Worker 只做格式校验并转成
- * `asset://<素材ID>` 载体交给网关；存在性/状态/物理约束由上游强校验。
- */
-export type MaterialReference = {
-  id: string;
-  type: "image" | "video";
 };
 
 export type StoredVideo = {
@@ -162,16 +163,6 @@ export interface GenerationCredentialVault {
 
 export interface VideoMediaRelay {
   persist(sourceUrl: string, userId: string): Promise<StoredVideo>;
-}
-
-class VideoInputError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "VideoInputError";
-  }
 }
 
 /**
@@ -519,242 +510,4 @@ async function buildSubmitRequest(
     ...(lastFrameImage ? { lastFrameImage } : {}),
     references,
   };
-}
-
-const MAX_REFERENCE_IMAGES = 9;
-const MAX_REFERENCE_VIDEOS = 3;
-const MAX_REFERENCE_VIDEO_BYTES = 200 * 1024 * 1024;
-const MAX_REFERENCE_VIDEO_SECONDS = 15;
-const MIN_REFERENCE_VIDEO_SIDE = 300;
-const MAX_REFERENCE_VIDEO_SIDE = 6000;
-const MIN_REFERENCE_VIDEO_PIXELS = 409_600;
-const MAX_REFERENCE_VIDEO_PIXELS = 8_295_044;
-const MIN_REFERENCE_VIDEO_RATIO = 0.4;
-const MAX_REFERENCE_VIDEO_RATIO = 2.5;
-const REFERENCE_VIDEO_MIMES = new Set(["video/mp4", "video/quicktime"]);
-
-function validateReferences(
-  model: string,
-  assets: VideoWorkerInputAsset[],
-  materials: MaterialReference[],
-): VideoReference[] {
-  let imageCount = 0;
-  let videoCount = 0;
-  let knownVideoDuration = 0;
-  const references = assets.map<VideoReference>((asset) => {
-    if (asset.type === "image") {
-      imageCount += 1;
-      return { type: "image", url: asset.url };
-    }
-    if (asset.type !== "video") {
-      throw new VideoInputError(
-        ERROR_UNSUPPORTED_INPUT,
-        "视频生成只支持图片或视频参考素材",
-      );
-    }
-    videoCount += 1;
-    validateReferenceVideo(asset);
-    if (asset.duration !== null && asset.duration !== undefined) {
-      knownVideoDuration += asset.duration;
-    }
-    return { type: "video", url: asset.url };
-  });
-
-  // 素材库引用：并入图/视频数量并集与 Seedance 2.0 约束；
-  // 时长/大小/分辨率等物理校验只作用于本地 Asset（素材库素材由上游强校验）。
-  for (const material of materials) {
-    if (material.type === "image") {
-      imageCount += 1;
-    } else {
-      videoCount += 1;
-    }
-    references.push({ type: material.type, url: `asset://${material.id}` });
-  }
-
-  if (imageCount > MAX_REFERENCE_IMAGES || videoCount > MAX_REFERENCE_VIDEOS) {
-    throw new VideoInputError(
-      ERROR_REFERENCE_LIMIT_EXCEEDED,
-      "Seedance 2.0 最多支持 9 张参考图片和 3 个参考视频",
-    );
-  }
-  if (videoCount > 0 && !isSeedance2Model(model)) {
-    throw new VideoInputError(
-      ERROR_UNSUPPORTED_INPUT,
-      "只有 Seedance 2.0 支持参考视频",
-    );
-  }
-  if (knownVideoDuration > MAX_REFERENCE_VIDEO_SECONDS) {
-    throw new VideoInputError(
-      ERROR_INVALID_INPUT,
-      "参考视频已知总时长不能超过 15 秒",
-    );
-  }
-  return references;
-}
-
-function validateReferenceVideo(asset: VideoWorkerInputAsset): void {
-  const mime = asset.mime?.split(";", 1)[0]?.trim().toLowerCase();
-  if (mime && !REFERENCE_VIDEO_MIMES.has(mime)) {
-    throw new VideoInputError(
-      ERROR_INVALID_INPUT,
-      "参考视频只支持 MP4 或 MOV",
-    );
-  }
-  if (
-    asset.size !== null &&
-    asset.size !== undefined &&
-    (!Number.isFinite(asset.size) ||
-      asset.size <= 0 ||
-      asset.size > MAX_REFERENCE_VIDEO_BYTES)
-  ) {
-    throw new VideoInputError(
-      ERROR_INVALID_INPUT,
-      "单个参考视频不能超过 200 MB",
-    );
-  }
-  if (
-    asset.duration !== null &&
-    asset.duration !== undefined &&
-    (!Number.isFinite(asset.duration) ||
-      asset.duration < 2 ||
-      asset.duration > MAX_REFERENCE_VIDEO_SECONDS)
-  ) {
-    throw new VideoInputError(
-      ERROR_INVALID_INPUT,
-      "单个参考视频时长必须为 2 至 15 秒",
-    );
-  }
-  validateReferenceVideoDimensions(asset);
-}
-
-function validateReferenceVideoDimensions(asset: VideoWorkerInputAsset): void {
-  const width = asset.width;
-  const height = asset.height;
-  const knownSides = [width, height].filter(
-    (side): side is number => side !== null && side !== undefined,
-  );
-  if (
-    knownSides.some(
-      (side) =>
-        !Number.isInteger(side) ||
-        side < MIN_REFERENCE_VIDEO_SIDE ||
-        side > MAX_REFERENCE_VIDEO_SIDE,
-    )
-  ) {
-    throw new VideoInputError(
-      ERROR_INVALID_INPUT,
-      "参考视频单边像素必须为 300 至 6000",
-    );
-  }
-  if (width === null || width === undefined || height === null || height === undefined) {
-    return;
-  }
-  const pixels = width * height;
-  const ratio = width / height;
-  if (
-    pixels < MIN_REFERENCE_VIDEO_PIXELS ||
-    pixels > MAX_REFERENCE_VIDEO_PIXELS ||
-    ratio < MIN_REFERENCE_VIDEO_RATIO ||
-    ratio > MAX_REFERENCE_VIDEO_RATIO
-  ) {
-    throw new VideoInputError(
-      ERROR_INVALID_INPUT,
-      "参考视频宽高比或总像素不满足 Seedance 2.0 要求",
-    );
-  }
-}
-
-function isSeedance2Model(model: string): boolean {
-  return model === "seedance-2" || /^doubao-seedance-2-0(?:-|$)/.test(model);
-}
-
-function readAssetId(value: unknown): string | null {
-  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value);
-  if (typeof value === "string" && /^[1-9][0-9]*$/.test(value)) return value;
-  if (value === undefined || value === null) return null;
-  throw new VideoInputError(ERROR_INVALID_INPUT, "视频素材 ID 无效");
-}
-
-function readAssetIds(value: unknown): string[] {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value)) {
-    throw new VideoInputError(ERROR_INVALID_INPUT, "视频参考素材无效");
-  }
-  return value.map((candidate) => {
-    const id = readAssetId(candidate);
-    if (id === null) {
-      throw new VideoInputError(ERROR_INVALID_INPUT, "视频参考素材 ID 无效");
-    }
-    return id;
-  });
-}
-
-function uniqueAssetIds(ids: Array<string | null>): string[] {
-  return ids.reduce<string[]>((result, id) => {
-    if (id && !result.includes(id)) result.push(id);
-    return result;
-  }, []);
-}
-
-const MATERIAL_ID_PATTERN = /^[Aa]sset-.{1,128}$/;
-
-function readMaterialId(value: unknown): string | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value === "string" && MATERIAL_ID_PATTERN.test(value)) return value;
-  throw new VideoInputError(ERROR_INVALID_INPUT, "素材库引用 ID 无效");
-}
-
-function readMaterialRefs(value: unknown): MaterialReference[] {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value)) {
-    throw new VideoInputError(ERROR_INVALID_INPUT, "素材库参考素材无效");
-  }
-  return value.map((candidate) => {
-    if (typeof candidate !== "object" || candidate === null) {
-      throw new VideoInputError(ERROR_INVALID_INPUT, "素材库参考素材无效");
-    }
-    const { id, type } = candidate as { id?: unknown; type?: unknown };
-    const materialId = readMaterialId(id);
-    if (materialId === null) {
-      throw new VideoInputError(ERROR_INVALID_INPUT, "素材库引用 ID 无效");
-    }
-    if (type !== "image" && type !== "video") {
-      throw new VideoInputError(
-        ERROR_INVALID_INPUT,
-        "素材库参考素材类型无效",
-      );
-    }
-    return { id: materialId, type };
-  });
-}
-
-function uniqueMaterialRefs(refs: MaterialReference[]): MaterialReference[] {
-  return refs.reduce<MaterialReference[]>((result, ref) => {
-    if (!result.some((r) => r.id === ref.id)) result.push(ref);
-    return result;
-  }, []);
-}
-
-function videoDimensions(
-  resolution: unknown,
-  aspectRatio: unknown,
-): { width: number; height: number } | null {
-  if (typeof resolution !== "string" || typeof aspectRatio !== "string") return null;
-  const height = Number(/^([0-9]+)p$/.exec(resolution)?.[1]);
-  const ratio = /^([1-9][0-9]*):([1-9][0-9]*)$/.exec(aspectRatio);
-  if (!Number.isFinite(height) || height <= 0 || !ratio) return null;
-  const width = Math.round((height * Number(ratio[1])) / Number(ratio[2]) / 2) * 2;
-  return { width, height };
-}
-
-/** plan/scene_card 任务用 capabilities 的 "宽x高" size 档（如 1280x720）。 */
-function dimensionsFromSize(size: unknown): { width: number; height: number } | null {
-  if (typeof size !== "string") return null;
-  const match = /^([0-9]+)x([0-9]+)$/i.exec(size);
-  if (!match) return null;
-  const width = Number(match[1]);
-  const height = Number(match[2]);
-  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0)
-    return null;
-  return { width, height };
 }
