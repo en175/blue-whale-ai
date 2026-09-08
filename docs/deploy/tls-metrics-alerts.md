@@ -127,7 +127,7 @@ SELECT queue, status, max(depth) AS depth GROUP BY queue, status
 
 1. **失败率链路**：本地/测试站造一个必失败的视频任务（例如缺少 provider 凭证产生 `provider_credential_missing`），确认 `task_finished result=fail` 日志可查；短时集中造几个失败任务，验证窗口失败率越限能收到告警。
 2. **p95 链路**：对 provider 发若干真实/假调用，确认 `provider_call` 带 `duration_ms` 可查、仪表盘 p95 曲线有数。
-3. **队列深度链路**：测试站批量入队视频任务并暂停消费，确认 `queue_depth` 每 30s 有新日志、仪表盘曲线上涨；恢复消费后回落（排空时读数归零）。
+3. **队列深度链路**：`queue_depth` 当前未接线任何生产采样器，此验收步骤暂不可执行（待 sampler 接线后按「打点位置」补写验证方法）。
 4. 三条告警各发一条测试通知（控制台「发送测试通知」），确认群/邮件实际收到。
 
 ## 关联
