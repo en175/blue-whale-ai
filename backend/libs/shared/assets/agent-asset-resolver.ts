@@ -31,6 +31,18 @@ export const agentAssetResolveResultSchema = z
     size_bytes: z.number().int().nonnegative(),
     duration_seconds: z.number().nonnegative().nullable(),
     read_url: z.string().url(),
+    /**
+     * 用户上传的那份字节，原样（IKE53N）。
+     *
+     * 与 `read_url` 的区别只有一个，但它是本字段存在的全部理由：`read_url` 对图片带
+     * `x-tos-process` 降采样，`probe_url` 不带。探测要回答「这份文件到底是什么」，那个答案
+     * 只能从用户的字节里读，读转码结果读到的是 TOS 的答案——文件好的时候恒等于 `jpeg`，
+     * 文件坏的时候 TOS 直接回 400，一个字节也拿不到（实测 `This image format is not
+     * supported`，测试站 2026-09-08）。
+     *
+     * 视频与存量 SVG 本来就不过图片处理，两条地址相同。
+     */
+    probe_url: z.string().url(),
     expires_at: z.string().datetime(),
   })
   .strict();
@@ -109,8 +121,20 @@ export async function resolveAgentAsset(
   const isSvg = (asset.mime ?? "").toLowerCase().includes("svg");
   const forModelReading = asset.type === "image" && !isSvg;
   let signed: Awaited<ReturnType<AgentAssetResolverDeps["sign"]>>;
+  // 探测那一条（IKE53N）。降采样是**给模型的**，探测要的是用户上传的字节本身，所以图片要签
+  // 两次：一次带处理参数给模型，一次不带给探测。两者都不过网络，签名是本地算的。
+  //
+  // 不这么做的代价不是理论上的：一份坏图 TOS 转不动、直接回 400，探测于是连一个字节都读不到，
+  // 只能报「取字节失败，可以重试」，模型照着这句话又读一遍，再失败一次（测试站 2026-09-08，
+  // 同一个 Run 里读了两次）。更安静的一半是文件没坏的时候——探测嗅到的永远是 TOS 转出来的
+  // JPEG，于是 agent 那份「只看字节、不看别人说的」的探测承诺，对图片一直是空转的。
+  let probeSigned: Awaited<ReturnType<AgentAssetResolverDeps["sign"]>>;
   try {
     signed = await deps.sign(asset.storage_key, { forModelReading });
+    // 没有处理参数时两条地址本来就是同一条，不必多签一次。
+    probeSigned = forModelReading
+      ? await deps.sign(asset.storage_key, { forModelReading: false })
+      : signed;
   } catch {
     return { kind: "rejected", reason: "storage_access_unavailable" };
   }
@@ -126,6 +150,7 @@ export async function resolveAgentAsset(
     size_bytes: Number(asset.size),
     duration_seconds: asset.duration_seconds,
     read_url: signed.url,
+    probe_url: probeSigned.url,
     expires_at: signed.expiresAt.toISOString(),
   });
   if (!parsed.success) {
