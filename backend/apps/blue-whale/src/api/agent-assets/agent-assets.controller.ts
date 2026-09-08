@@ -14,7 +14,18 @@ import {
   type PresignAssetInput,
 } from "@lib/shared/assets/upload.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
+import {
+  RateLimit,
+  type RateLimitBucket,
+} from "@lib/shared/rate-limit/decorators/rate-limit.decorator.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+
+/** IKDR4P：presign 与 uploads/presign 同为 TOS 预签名入口，共享同一计数 scope，
+ *  防止换端点把 30/min、120/hr 配额翻倍。 */
+const ASSET_PRESIGN_BUCKETS: RateLimitBucket[] = [
+  { scope: "asset-presign", key: "user", limit: 30, windowMs: 60_000 },
+  { scope: "asset-presign", key: "user", limit: 120, windowMs: 3_600_000 },
+];
 
 @Controller("agent/assets")
 export class AgentAssetsController {
@@ -25,6 +36,7 @@ export class AgentAssetsController {
   ) {}
 
   @Post("presign")
+  @RateLimit({ buckets: ASSET_PRESIGN_BUCKETS })
   async presign(
     @CurrentUser() user: AuthenticatedUser,
     @Body() body: PresignAssetInput,
@@ -33,6 +45,7 @@ export class AgentAssetsController {
   }
 
   @Post("uploads/presign")
+  @RateLimit({ buckets: ASSET_PRESIGN_BUCKETS })
   async uploadsPresign(
     @CurrentUser() user: AuthenticatedUser,
     @Body() body: PresignAssetInput,
@@ -42,6 +55,9 @@ export class AgentAssetsController {
 
   /** IKCNLS：上传 md5 去重（presign 前判断）。命中返回已有资产并建关联，未命中标记需上传。 */
   @Post("uploads/dedup")
+  @RateLimit({
+    buckets: [{ scope: "asset-dedup", key: "user", limit: 30, windowMs: 60_000 }],
+  })
   async uploadsDedup(
     @CurrentUser() user: AuthenticatedUser,
     @Body() body: DedupAssetInput,
@@ -53,6 +69,9 @@ export class AgentAssetsController {
   }
 
   @Post("uploads/complete")
+  @RateLimit({
+    buckets: [{ scope: "asset-complete", key: "user", limit: 30, windowMs: 60_000 }],
+  })
   async uploadsComplete(
     @CurrentUser() user: AuthenticatedUser,
     @Body() body: CompleteAssetInput,
