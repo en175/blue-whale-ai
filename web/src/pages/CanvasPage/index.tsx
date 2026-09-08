@@ -80,6 +80,7 @@ import {
   type SharedAssetView,
 } from '@/api/sharedAssets';
 import { uploadAssetFile } from '@/utils/upload';
+import { checkFileBeforeUpload } from '@/utils/fileSignature';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { defaultProjectName } from '@/lib/projectName';
@@ -3760,6 +3761,13 @@ export default function CanvasPage() {
   const uploadFileToAsset = async (file: File, type: 'image' | 'video' | 'audio'): Promise<UploadCompleteData | null> => {
     try {
       const assetType: AssetType = type;
+      // 与 uploadAssetFile 同一道门（IKE53Z）：这条路径没走那个封装，但用户看到的后果一样，
+      // 所以校验也要一样。少了这一句，从这里传的坏文件照旧一路走到 Agent 读图才被发现。
+      const rejection = await checkFileBeforeUpload(file, assetType);
+      if (rejection) {
+        showToast('warn', rejection);
+        return null;
+      }
       const presign = await fetchUploadPresign({ type: assetType, mime: file.type, size: file.size });
       await putToPresignedUrl(presign, file);
       const complete = await completeUpload({

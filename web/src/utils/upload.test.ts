@@ -40,6 +40,13 @@ function stubUploadFlow() {
   return fetchMock;
 }
 
+/** 一份最小的真 PNG 头（IKE53Z 之后，上传前会读文件开头认容器，'abcd' 这种占位字节过不去）。 */
+const pngBytes = () => {
+  const head = new Uint8Array(32);
+  head.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  return head.slice().buffer as ArrayBuffer;
+};
+
 describe('uploadAssetFile', () => {
   beforeEach(() => {
     // jsdom 不真的加载图片，probeMediaMeta 的 onload/onerror 都不会自己触发。
@@ -63,7 +70,7 @@ describe('uploadAssetFile', () => {
 
   it('runs dedup → presign → PUT → complete and echoes the presigned identity back (IKAL46/IKCNLS)', async () => {
     const fetchMock = stubUploadFlow();
-    const file = new File(['abcd'], '海边人像.png', { type: 'image/png' });
+    const file = new File([pngBytes()], '海边人像.png', { type: 'image/png' });
 
     await expect(uploadAssetFile(file, { projectId: 'project-9' })).resolves.toMatchObject({
       asset_id: '123',
@@ -73,7 +80,7 @@ describe('uploadAssetFile', () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
     // dedup 预检须携带 md5 与 project_id，供后端建项目关联
     const dedupBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
-    expect(dedupBody).toMatchObject({ type: 'image', mime: 'image/png', size: 4, project_id: 'project-9' });
+    expect(dedupBody).toMatchObject({ type: 'image', mime: 'image/png', size: 32, project_id: 'project-9' });
     expect(dedupBody.md5).toMatch(/^[a-f0-9]{32}$/);
     // complete 必须回传与 presign 完全一致的 storage_key/type/mime/size，否则后端拒收；
     // 并带上 md5 落库，供下次同内容文件查重。
@@ -82,7 +89,7 @@ describe('uploadAssetFile', () => {
       storage_key: 'uploads/7/image/a.png',
       type: 'image',
       mime: 'image/png',
-      size: 4,
+      size: 32,
       project_id: 'project-9',
     });
     expect(completeBody.md5).toMatch(/^[a-f0-9]{32}$/);
@@ -102,7 +109,7 @@ describe('uploadAssetFile', () => {
     };
     const fetchMock = vi.fn().mockResolvedValueOnce(envelope({ dedup: true, asset }));
     vi.stubGlobal('fetch', fetchMock);
-    const file = new File(['abcd'], '同一张图.png', { type: 'image/png' });
+    const file = new File([pngBytes()], '同一张图.png', { type: 'image/png' });
 
     await expect(uploadAssetFile(file, { projectId: 'project-9' })).resolves.toMatchObject({
       asset_id: '526',
@@ -141,7 +148,7 @@ describe('uploadAssetFile', () => {
       );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(uploadAssetFile(new File(['abcd'], 'a.png', { type: 'image/png' }))).resolves.toMatchObject({
+    await expect(uploadAssetFile(new File([pngBytes()], 'a.png', { type: 'image/png' }))).resolves.toMatchObject({
       asset_id: '123',
     });
     expect(fetchMock).toHaveBeenCalledTimes(4);
@@ -168,7 +175,7 @@ describe('uploadAssetFile', () => {
   it('throws instead of resolving, so a caller can show the reason', async () => {
     // Agent 面板要把失败原因显示出来：用户刚选完文件，静默失败会让他以为图已经带上了。
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
-    await expect(uploadAssetFile(new File(['abcd'], 'a.png', { type: 'image/png' }))).rejects.toBeTruthy();
+    await expect(uploadAssetFile(new File([pngBytes()], 'a.png', { type: 'image/png' }))).rejects.toBeTruthy();
   });
 });
 

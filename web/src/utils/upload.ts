@@ -11,6 +11,7 @@ import {
   type AssetType,
   type UploadCompleteData,
 } from '@/api/assets';
+import { checkFileBeforeUpload } from './fileSignature';
 
 /** 流式计算文件 MD5（32 位小写 hex）：4MB 分块增量计算，避免大文件一次性读入内存。
  *  SubtleCrypto 不支持 MD5 算法，这里使用 spark-md5 实现。 */
@@ -94,6 +95,12 @@ export async function uploadAssetFile(
   if (file.size > limit) {
     throw new Error(`文件超过 ${Math.floor(limit / 1024 / 1024)}MB 上限`);
   }
+
+  // 读一眼文件开头，认不出是媒体就不发请求（IKE53Z）。理由与上面的体积门一样，只是判据换成了
+  // 内容：type 是从 file.type 推的，而 file.type 来自后缀，后缀是别人说的。测试站 2026-09-08
+  // 那份 524 字节的假 JPEG 就是这么一路走到 Agent 读图才被发现的。
+  const rejection = await checkFileBeforeUpload(file, type);
+  if (rejection) throw new Error(rejection);
 
   // md5 计算或查重请求失败都不阻断上传：静默降级走原三步
   const md5 = await computeFileMd5(file).catch(() => undefined);
