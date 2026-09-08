@@ -18,7 +18,7 @@
 
 - `task_finished`：视频任务成功/失败（`packages/generation-runtime/src/video-job-runner.ts`，只在状态迁移成功时计数，fencing 竞态不双计）。派发前被取消的视频任务不计数（任务未开始、未耗 provider 资源，不进失败率分母）。
 - `provider_call`：视频 provider `submit`/`poll`（provider=new_api_video）。
-- `queue_depth`：**仅 `VIDEO_QUEUE_DRIVER=bullmq` 部署单元产生**（2026-08-19 IK9RSS 确认生产与后续方向为 RocketMQ，默认 `rocketmq` 驱动下本事件**不发**，告警 2 与相关仪表盘为空）。采样器定义见 `packages/core/src/queue-depth-sampler.ts`，只采 BullMQ 积压/在途态——`video_bullmq`（BullMQ/Redis）的 waiting/waiting-children/delayed/active。队列排空时照发零值读数，保证仪表盘曲线与告警恢复能归零。若未来需要 RocketMQ 口径的队列深度，另行评估 consumer offset/lag。
+- `queue_depth`：当前仅保留 sampler 基建（`packages/core/src/queue-depth-sampler.ts`），未接线任何生产采样器（IKDZJK 清理 bullmq 回退路径后无 `video_bullmq` 队列，事件不再产生）。若未来需要 RocketMQ 口径的队列深度，另行评估 consumer offset/lag。
 
 本文档负责 TLS 控制台侧：字段索引、三条告警、一个仪表盘、送达渠道、人工验证。
 明确不做 Prometheus/APMplus（见工单 IK7G9Y）。
@@ -33,7 +33,7 @@
 
 `TLS_ENDPOINT`、`TLS_REGION`、`TLS_TOPIC_ID`、`TLS_AK`、`TLS_SK`
 
-上线后先在 TLS 控制台确认有 `event:task_finished` / `event:provider_call` 日志流入，再配告警（`queue_depth` 仅 bullmq 驱动，见「打点位置」）。
+上线后先在 TLS 控制台确认有 `event:task_finished` / `event:provider_call` 日志流入，再配告警（`queue_depth` 未接线，见「打点位置」）。
 
 ### 1. 开启字段索引
 
@@ -68,7 +68,7 @@ SELECT queue, max(depth) AS max_depth GROUP BY queue
 - 查询区间：10 分钟；执行间隔：5 分钟
 - 触发条件：`max_depth > N`（**N 待定**，占位 50）
 - 「持续 10 分钟」语义由查询区间覆盖
-- 当前只有 `video_bullmq` 一条队列；状态值为 BullMQ 积压/在途态（waiting 等）
+- `queue_depth` 当前未接线任何生产采样器，无 `video_bullmq` 队列，该事件不再产生；告警 2 在 sampler 接线前不可用（见「打点位置」）
 
 ### 3. provider p95 时延超阈值
 
@@ -127,12 +127,12 @@ SELECT queue, status, max(depth) AS depth GROUP BY queue, status
 
 1. **失败率链路**：本地/测试站造一个必失败的视频任务（例如缺少 provider 凭证产生 `provider_credential_missing`），确认 `task_finished result=fail` 日志可查；短时集中造几个失败任务，验证窗口失败率越限能收到告警。
 2. **p95 链路**：对 provider 发若干真实/假调用，确认 `provider_call` 带 `duration_ms` 可查、仪表盘 p95 曲线有数。
-3. **队列深度链路**：测试站批量入队视频任务并暂停消费，确认 `queue_depth` 每 30s 有新日志、仪表盘曲线上涨；恢复消费后回落（排空时读数归零）。
+3. **队列深度链路**：`queue_depth` 当前未接线任何生产采样器，此验收步骤暂不可执行（待 sampler 接线后按「打点位置」补写验证方法）。
 4. 三条告警各发一条测试通知（控制台「发送测试通知」），确认群/邮件实际收到。
 
 ## 关联
 
 - 工单：IK7G9Y（核心指标 + 告警，复用已有 TLS，不引入 Prometheus）
-- 队列选型：docs/research/IK3UW2-node-generation-worker-queue-provider-evaluation.md（其 MySQL 队列 worker 已由 IK813V 下线，生产视频链路为 BullMQ）
+- 队列选型：docs/research/IK3UW2-node-generation-worker-queue-provider-evaluation.md（其 MySQL 队列 worker 已由 IK813V 下线，生产视频链路为 RocketMQ）
 - 日志通道：packages/core/src/tls-writer.ts（IK6KQQ）；metric 出口：packages/core/src/logger.ts
 - 实现计划：docs/superpowers/plans/2026-08-10-ik7g9y-core-metrics-alerts.md

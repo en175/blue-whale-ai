@@ -4,7 +4,6 @@ import { openGenerationCredential } from "@blue-whale/core";
 import { processAudioJobById, processImageJobById } from "@lib/shared/generation/worker/generation-worker.js";
 import { AudioProviderError, type AudioProvider } from "@lib/shared/generation-runtime/audio-provider.js";
 import { runVideoJobStep } from "@lib/shared/generation-runtime/video-job-runner.js";
-import { closeVideoGenerationQueue } from "@lib/shared/generation/video-queue.js";
 import { Module } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { json } from "express";
@@ -28,6 +27,18 @@ import { GenerationCommandService } from "@lib/shared/generation/generation-comm
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
+
+vi.mock("@lib/shared/generation/video-queue.js", () => ({
+  enqueueVideoGenerationJob: vi.fn(async () => {}),
+  enqueueImageGenerationJob: vi.fn(async () => {}),
+  enqueueAudioGenerationJob: vi.fn(async () => {}),
+  enqueueMediaExtractJob: vi.fn(async () => {}),
+  loadRocketMqConfig: vi.fn(() => ({
+    endpoints: "", sslEnabled: false, topic: "generation-video", tag: "step",
+  })),
+  createRocketMqVideoProducer: vi.fn(() => ({ enqueue: vi.fn(async () => {}) })),
+  closeVideoGenerationQueue: vi.fn(async () => {}),
+}));
 
 describe.skipIf(!process.env.IKDUHQ_DATABASE_URL)("Audio regeneration public API (IKDUHQ)", () => {
   const secret = "ikduhq-isolated-test-secret";
@@ -58,11 +69,6 @@ describe.skipIf(!process.env.IKDUHQ_DATABASE_URL)("Audio regeneration public API
     mp3 = execFileSync(ffmpeg!, ["-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-f", "mp3", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"] });
     mp4 = execFileSync(ffmpeg!, ["-f", "lavfi", "-i", "color=blue:s=1280x720:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "frag_keyframe+empty_moov", "-f", "mp4", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"] });
     vi.stubEnv("GENERATION_CREDENTIAL_SECRET", secret);
-    vi.stubEnv("VIDEO_QUEUE_DRIVER", "bullmq");
-    vi.stubEnv("REDIS_HOST", "127.0.0.1");
-    vi.stubEnv("REDIS_PORT", process.env.IKDUHQ_REDIS_PORT ?? "28379");
-    vi.stubEnv("REDIS_PASSWORD", "");
-    vi.stubEnv("REDIS_DB", "0");
     process.env.DATABASE_URL = process.env.IKDUHQ_DATABASE_URL;
     media.listen(0, "127.0.0.1");
     await once(media, "listening");
@@ -115,7 +121,6 @@ describe.skipIf(!process.env.IKDUHQ_DATABASE_URL)("Audio regeneration public API
   }, 30_000);
   afterAll(async () => {
     await app?.close();
-    await closeVideoGenerationQueue();
     media.close();
     if (previousDatabase === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previousDatabase;

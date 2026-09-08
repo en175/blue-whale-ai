@@ -17,6 +17,18 @@ import { GenerationCommandService } from "@lib/shared/generation/generation-comm
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 
+vi.mock("@lib/shared/generation/video-queue.js", () => ({
+  enqueueVideoGenerationJob: vi.fn(async () => {}),
+  enqueueImageGenerationJob: vi.fn(async () => {}),
+  enqueueAudioGenerationJob: vi.fn(async () => {}),
+  enqueueMediaExtractJob: vi.fn(async () => {}),
+  loadRocketMqConfig: vi.fn(() => ({
+    endpoints: "", sslEnabled: false, topic: "generation-video", tag: "step",
+  })),
+  createRocketMqVideoProducer: vi.fn(() => ({ enqueue: vi.fn(async () => {}) })),
+  closeVideoGenerationQueue: vi.fn(async () => {}),
+}));
+
 // IKDMQT「音频草稿完整流程」公开接口集成（工单「范围与测试约定」节）：
 // 真 NestFactory 挂载生产 Canvas/Generation/Jobs 控制器与服务 + 隔离 MySQL（IKDMQT_DATABASE_URL 门控）。
 // 服务端改动：target_node_id 扩展支持音频（校验目标为 audio 媒体节点、冻结快照、不推导文本附件）。
@@ -28,15 +40,9 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
   let app: Awaited<ReturnType<typeof NestFactory.create>>;
   let base = "";
   const previousDatabase = process.env.DATABASE_URL;
-  const previousQueueDriver = process.env.VIDEO_QUEUE_DRIVER;
-  const previousRedisDb = process.env.REDIS_DB;
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKDMQT_DATABASE_URL;
-    // 音频任务入队失败会 fail-fast 置 failed（IKCR78），无 RocketMQ 的本地环境无法观察「生成中」；
-    // 切到产品内置 bullmq 回退（本地 Redis，独立 DB 隔离），任务入队后无消费者停在 queued，
-    // 驱动浏览器段「生成中只读」；结果仍由测试直接翻 DB 状态（供应商替身=记录式）。
-    process.env.VIDEO_QUEUE_DRIVER = "bullmq";
-    process.env.REDIS_DB = "5";
+    // 入队函数在测试中被 stub，任务停在 queued 驱动「生成中只读」；结果仍由测试直接翻 DB 状态。
     await prisma.client.generation_model_capability.upsert({
       where: { provider_id_model_id: { provider_id: "ikdmqt-test", model_id: MODEL_ID } },
       create: {
@@ -84,10 +90,6 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
     await app?.close();
     if (previousDatabase === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previousDatabase;
-    if (previousQueueDriver === undefined) delete process.env.VIDEO_QUEUE_DRIVER;
-    else process.env.VIDEO_QUEUE_DRIVER = previousQueueDriver;
-    if (previousRedisDb === undefined) delete process.env.REDIS_DB;
-    else process.env.REDIS_DB = previousRedisDb;
     await prisma.client.$disconnect();
   });
 
