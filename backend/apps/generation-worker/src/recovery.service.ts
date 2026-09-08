@@ -14,7 +14,7 @@ import { AudioWorkerService } from "./audio-worker.service.js";
 
 const logger = createLogger("generation-worker");
 
-/** 低频恢复扫描：DB 事实源里到点未入队的视频 job 补入队（Redis 故障兜底）。
+/** 低频恢复扫描：DB 事实源里到点未入队的视频 job 补入队到 RocketMQ。
  *  IKBGKA（review 2 轮）：图片同构——孤儿/漏入队的图片 job 补入队到 RocketMQ，
  *  由 MQ 消费端（Semaphore 背压）统一处理，不在本进程 inline 跑（封死无背压后门）。
  *  IKC9EJ：media_extract 同构——创建时同步入队失败/消息丢失会永久卡 queued，低频扫描补入队。
