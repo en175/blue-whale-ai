@@ -7,7 +7,10 @@ import {
   fail,
   ok,
 } from "@blue-whale/contracts";
-import { placeMediaExtractPendingNode } from "@lib/shared/persistence/index.js";
+import {
+  createGenerationCommandRepo,
+  placeMediaExtractPendingNode,
+} from "@lib/shared/persistence/index.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -77,25 +80,18 @@ export class MediaExtractionsService {
   }
 
   /** 入队失败兜底：queued 任务直接置 failed，避免媒体提取任务无恢复扫描而静默悬挂。
-   *  IKBQEE / ADR-0078：details 落调试原文，禁展示用户。 */
+   *  IKBQEE / ADR-0078：details 落调试原文，禁展示用户。逻辑在 repo.markFailedQueued（IKDZGH 收敛）。 */
   async markFailed(
     jobId: string,
     code: string,
     message: string,
     details?: Record<string, unknown>,
   ): Promise<void> {
-    await this.prisma.client.generation_jobs.updateMany({
-      where: { id: BigInt(jobId), status: "queued" },
-      data: {
-        status: "failed",
-        error: {
-          code,
-          message,
-          ...(details !== undefined ? { details } : {}),
-        } as never,
-        next_action_at: null,
-        version: { increment: 1 },
-      },
-    });
+    await createGenerationCommandRepo(this.prisma.client).markFailedQueued(
+      jobId,
+      code,
+      message,
+      details,
+    );
   }
 }
