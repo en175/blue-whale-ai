@@ -1,4 +1,10 @@
-import { fail, ok } from "@blue-whale/contracts";
+import {
+  ASSET_ERROR_SPECS,
+  DomainError,
+  RESOURCE_NOT_FOUND_CODE,
+  assetError,
+  ok,
+} from "@blue-whale/contracts";
 import {
   FILE_SIGNATURE_HEAD_BYTES,
   sniffFileSignature,
@@ -64,7 +70,7 @@ export interface AssetUploadStorage {
   deleteMultiObjects(storageKeys: string[]): Promise<void>;
 }
 
-/** 读取链路处理不了的图片编码。见 validateUploadInput 里的理由。 */
+/** 读取链路处理不了的图片编码。见 assertUploadInput 里的理由。 */
 const UNSUPPORTED_IMAGE_MIMES = new Set(["image/svg+xml", "image/svg"]);
 
 const MAX_BYTES = {
@@ -73,16 +79,23 @@ const MAX_BYTES = {
   audio: 25 * 1024 * 1024,
 } as const;
 
-function validateUploadInput(input: PresignAssetInput) {
+/**
+ * 校验声明值。**不合格就抛**，不再返回一个信封。
+ *
+ * 改抛的理由不是风格：返回的信封走不到 `AllExceptionsFilter`，没人给它写 HTTP 状态码，
+ * 于是一次 POST 的拒绝回成 `HTTP 201` + 信封 `code: 400`（2026-09-08 测试站实测）。
+ * 见 `contracts/domain-error.ts` 与 ADR-0083。
+ */
+function assertUploadInput(input: PresignAssetInput): void {
   if (
     input.type !== "image" &&
     input.type !== "video" &&
     input.type !== "audio"
   ) {
-    return fail(400, "不支持的素材类型");
+    throw assetError("ASSET_TYPE_UNSUPPORTED");
   }
   if (!input.mime.startsWith(`${input.type}/`)) {
-    return fail(400, "文件类型与声明类型不匹配");
+    throw assetError("ASSET_TYPE_MIME_MISMATCH");
   }
   // SVG 在这里就挡住，不让它进库。
   //
@@ -93,16 +106,15 @@ function validateUploadInput(input: PresignAssetInput) {
   // 挡在上传口而不是读取时，用户在拖文件的当下就知道要换格式，而不是等到 Agent 说
   // 「素材探测失败，请重试」——那句话既不准确，重试也没有用。
   if (UNSUPPORTED_IMAGE_MIMES.has(input.mime.toLowerCase())) {
-    return fail(400, "这个图片格式读不了。请用 JPG、PNG、WebP 或 GIF。");
+    throw assetError("ASSET_FORMAT_UNSUPPORTED");
   }
   if (
     !Number.isInteger(input.size) ||
     input.size <= 0 ||
     input.size > MAX_BYTES[input.type]
   ) {
-    return fail(400, "文件大小无效或超过限制");
+    throw assetError("ASSET_SIZE_INVALID");
   }
-  return null;
 }
 
 export async function handlePresignAsset(
@@ -110,9 +122,8 @@ export async function handlePresignAsset(
   input: PresignAssetInput,
   storage: AssetUploadStorage | null,
 ) {
-  const invalid = validateUploadInput(input);
-  if (invalid) return invalid;
-  if (!storage) return fail(100202, "对象存储未配置");
+  assertUploadInput(input);
+  if (!storage) throw assetError("ASSET_STORAGE_UNCONFIGURED");
 
   const prepared = await storage.prepareUpload({
     userId,
@@ -140,8 +151,7 @@ export async function handleDedupAsset(
     uploads: AssetService;
   },
 ) {
-  const invalid = validateUploadInput(input);
-  if (invalid) return invalid;
+  assertUploadInput(input);
   // 去重是 presign 前的 fast-path，绝不该阻断正常上传：md5 缺失/格式不标准 → 返回 {dedup:false}，
   // 前端走 presign→PUT→complete 3 步。type/mime/size 校验保持 fail-closed（presign/complete 也会校验）。
   if (!input.md5 || !/^[a-f0-9]{32}$/i.test(input.md5)) {
@@ -152,7 +162,7 @@ export async function handleDedupAsset(
     projectId !== "0" &&
     !(await deps.projects.findOwnedById(projectId, userId))
   ) {
-    return fail(100301, "资源不存在");
+    throw new DomainError(RESOURCE_NOT_FOUND_CODE, "资源不存在");
   }
   const existing = await deps.uploads.findOwnedByMd5(userId, input.md5);
   // 命中但 type 不一致（同 md5 但存储时误标类型）→ 视为未命中，避免返回错误类型资产。
@@ -198,14 +208,14 @@ const MEDIA_KIND_LABELS: Record<MediaKind, string> = {
 async function rejectUploadedObject(
   storage: AssetUploadStorage,
   storageKey: string,
-  message: string,
-) {
+  error: DomainError,
+): Promise<never> {
   try {
     await storage.deleteMultiObjects([storageKey]);
   } catch {
     // 吞掉：孤儿对象是存储成本，说错话是产品问题，后者更贵。
   }
-  return fail(400, message);
+  throw error;
 }
 
 async function readFileSignature(
@@ -231,21 +241,20 @@ export async function handleCompleteAsset(
     storage: AssetUploadStorage | null;
   },
 ) {
-  const invalid = validateUploadInput(input);
-  if (invalid) return invalid;
-  if (!input.storage_key) return fail(400, "缺少存储键");
+  assertUploadInput(input);
+  if (!input.storage_key) throw assetError("ASSET_STORAGE_KEY_MISSING");
   const projectId = input.project_id || "0";
   if (
     projectId !== "0" &&
     !(await deps.projects.findOwnedById(projectId, userId))
   ) {
-    return fail(100301, "资源不存在");
+    throw new DomainError(RESOURCE_NOT_FOUND_CODE, "资源不存在");
   }
   if (!input.storage_key.startsWith(`uploads/${userId}/${input.type}/`)) {
-    return fail(400, "存储键与当前用户不匹配");
+    throw assetError("ASSET_STORAGE_KEY_FOREIGN");
   }
 
-  if (!deps.storage) return fail(100202, "对象存储未配置");
+  if (!deps.storage) throw assetError("ASSET_STORAGE_UNCONFIGURED");
   const existing = await deps.uploads.findCommittedUpload(
     userId,
     input.storage_key,
@@ -256,16 +265,16 @@ export async function handleCompleteAsset(
   }
   const object = await deps.storage.inspectObject(input.storage_key);
   if (!object) {
-    return fail(400, "上传对象不存在");
+    throw assetError("ASSET_OBJECT_MISSING");
   }
   if (object.size !== input.size) {
-    return fail(400, "文件大小与实际上传不符");
+    throw assetError("ASSET_SIZE_MISMATCH");
   }
   if (
     object.mime?.split(";", 1)[0]?.trim().toLowerCase() !==
     input.mime.toLowerCase()
   ) {
-    return fail(400, "文件类型与实际上传不符");
+    throw assetError("ASSET_MIME_MISMATCH");
   }
 
   // 到这里为止校验的全是**声明值**：type、mime、size，以及对象存储上的 size 与 Content-Type
@@ -280,7 +289,7 @@ export async function handleCompleteAsset(
     return rejectUploadedObject(
       deps.storage,
       input.storage_key,
-      "这个文件打不开，可能已损坏。请换一份 JPG、PNG、WebP 或 MP4 重新上传。",
+      assetError("ASSET_BYTES_UNRECOGNIZED"),
     );
   }
   if (signature.value && signature.value.kind !== input.type) {
@@ -288,7 +297,10 @@ export async function handleCompleteAsset(
     return rejectUploadedObject(
       deps.storage,
       input.storage_key,
-      `这个文件实际是${MEDIA_KIND_LABELS[signature.value.kind]}，和你选择的类型不一致。请重新上传。`,
+      new DomainError(
+        ASSET_ERROR_SPECS.ASSET_KIND_MISMATCH.code,
+        `这个文件实际是${MEDIA_KIND_LABELS[signature.value.kind]}，和你选择的类型不一致。请重新上传。`,
+      ),
     );
   }
 

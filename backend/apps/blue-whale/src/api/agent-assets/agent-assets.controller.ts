@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { NewApiError } from "@blue-whale/core";
-import { fail, ok } from "@blue-whale/contracts";
+import { DomainError, RESOURCE_NOT_FOUND_CODE, ok } from "@blue-whale/contracts";
 import { assetDurationSeconds } from "@lib/shared/persistence/index.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
@@ -94,7 +94,7 @@ export class AgentAssetsController {
     @Param("assetId") assetId: string,
   ) {
     const asset = await this.assets.findOwnedSource(assetId, user.userId);
-    if (!asset) return fail(100301, "资源不存在");
+    if (!asset) throw new DomainError(RESOURCE_NOT_FOUND_CODE, "资源不存在");
     return ok({
       asset_id: assetId,
       status: "ready" as const,
