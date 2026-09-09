@@ -50,7 +50,8 @@ import type { MaterialAsset } from '@/api/material';
 import type { AssetCardKind } from './components/AssetCardNode';
 import type { CanvasProject } from './components/ProjectSelector';
 import FlowCanvas from './components/Canvas';
-import { addEdge, useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
+import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
+import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchQuota, toSessionUser } from '@/api/auth';
 import {
@@ -91,6 +92,16 @@ import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
 import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
+import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
+import {
+  groupFrameBBox,
+  groupToNode,
+  membersInGroupBox,
+  parseGroupsFromNodes,
+  MIN_GROUP_MEMBERS,
+  type CanvasGroup,
+  type GroupFrameDragResult,
+} from './canvasGroups';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
 import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from './quoteConversation';
 import {
@@ -167,6 +178,14 @@ export default function CanvasPage() {
   /** 连线最新值（避免闭包陈旧：提交前落盘与附件推导用） */
   const edgesRef = useRef<Edge[]>([]);
   edgesRef.current = edges;
+  /** 撤销/重做栈（IKD0JT A2）：在节点 refs 就绪后实例化并回填；
+   *  此前的消费方（addCanvasEdge 等）经该 ref 惰性调用 */
+  const historyRef = useRef<CanvasHistoryApi | null>(null);
+  /** 成组（IKD0JT A3）：组 = 节点 ID 名单；底框由 Canvas 按成员包围盒派生。
+   *  持久化走伪节点（type: 'groupFrame' 混入 nodes JSON），水合剥离还原 */
+  const [groups, setGroups] = useState<CanvasGroup[]>([]);
+  const groupsRef = useRef<CanvasGroup[]>([]);
+  groupsRef.current = groups;
   const [submittingNodeId, setSubmittingNodeId] = useState<string | null>(null);
   /** 生成中节点判定（IKDMQQ）：执行期间目标参数与输入连线只读 */
   const isGeneratingNode = (id: string) =>
@@ -174,23 +193,24 @@ export default function CanvasPage() {
       (n) => n.id === id && (n.data as Record<string, unknown> | undefined)?.genStatus === 'generating',
     );
   /** 建立连线（受控去重 + custom 流光渲染形态；与服务端保存校验同口径拒绝重复 (source,target)）。
-   *  refRole（IKDMQS）写入 edge.data.refRole 随连线持久化：first 首帧 / last 尾帧，缺省普通参考 */
+   *  refRole（IKDMQS）写入 edge.data.refRole 随连线持久化：first 首帧 / last 尾帧，缺省普通参考。
+   *  连线进撤销栈（IKD0JT）：id 由 (source,target) 确定性生成，撤销/重做往返保持稳定 */
   const addCanvasEdge = (source: string, target: string, refRole?: VideoRefRole) => {
-    setEdges((eds) => {
-      if (eds.some((e) => e.source === source && e.target === target)) return eds;
-      return addEdge(
-        {
-          source,
-          target,
-          sourceHandle: null,
-          targetHandle: null,
-          type: 'custom',
-          style: { stroke: '#444' },
-          ...(refRole && refRole !== 'reference' ? { data: { refRole } } : {}),
-        },
-        eds,
-      );
-    });
+    if (edgesRef.current.some((e) => e.source === source && e.target === target)) return;
+    const edge: Edge = {
+      id: `e-${source}-${target}`,
+      source,
+      target,
+      sourceHandle: null,
+      targetHandle: null,
+      type: 'custom',
+      style: { stroke: '#444' },
+      ...(refRole && refRole !== 'reference' ? { data: { refRole } } : {}),
+    };
+    historyRef.current?.pushAddEdges([edge]);
+    setEdges((eds) =>
+      eds.some((e) => e.source === source && e.target === target) ? eds : [...eds, edge],
+    );
   };
   /** 图片草稿参考连线校验（IKDMQR）：仅当目标是图片草稿且来源是媒体节点时介入——
    *  仅有效图片媒体结果可连入；重复素材（按 assetId 归一，兼容三形态）与超上限明确拒绝，不静默丢弃输入。
@@ -257,7 +277,8 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [setEdges, submittingNodeId],
   );
-  /** 连线变更守卫（IKDMQQ）：生成中节点的入边删除变更被拦截（剪刀等 remove 路径统一收口） */
+  /** 连线变更守卫（IKDMQQ）：生成中节点的入边删除变更被拦截（剪刀等 remove 路径统一收口）；
+   *  放行的删边进撤销栈（IKD0JT），撤销可加回 */
   const guardEdgesChange: typeof onEdgesChange = (changes) => {
     const allowed = changes.filter((c) => {
       if (c.type !== 'remove') return true;
@@ -265,6 +286,14 @@ export default function CanvasPage() {
       return edge ? !isGeneratingNode(edge.target) : true;
     });
     if (allowed.length < changes.length) showToast('warn', '生成中，输入连线只读');
+    // 删边登记撤销（放行部分）
+    const removedEdges: Edge[] = [];
+    for (const c of allowed) {
+      if (c.type !== 'remove') continue;
+      const edge = edgesRef.current.find((e) => e.id === c.id);
+      if (edge) removedEdges.push(edge);
+    }
+    if (removedEdges.length > 0) historyRef.current?.pushRemoveEdges(removedEdges);
     if (allowed.length > 0) onEdgesChange(allowed);
   };
   const [uploadedNodes] = useState<Node[]>([]);
@@ -625,6 +654,8 @@ export default function CanvasPage() {
     setAgentAssetPicks(null);
     setAgentCandidate(null);
     setFocusViewport(undefined);
+    // 撤销/重做栈不跨项目（PRD §7.2 X1：不跨会话）
+    historyRef.current?.clear();
   }, [currentId]);
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
@@ -659,7 +690,7 @@ export default function CanvasPage() {
       case 'textNode':
         base.data = {
           ...base.data,
-          onDelete: (id: string) => setTextNodes((prev) => prev.filter((n) => n.id !== id)),
+          onDelete: (id: string) => removeCanvasNodes([id]),
           onTitleChange: (id: string, title: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, title } } : n)),
           onDraftError: handleDraftError,
           onTextChange: (id: string, text: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text } } : n)),
@@ -699,7 +730,7 @@ export default function CanvasPage() {
           // 节点内上传素材携带当前项目（运行期注入，不持久化）
           projectId: currentId,
           onDelete: (id: string) => {
-            setProductNodes((prev) => prev.filter((n) => n.id !== id));
+            removeCanvasNodes([id]);
           },
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
@@ -940,6 +971,7 @@ export default function CanvasPage() {
       setProductNodes([]);
       setAssetNodes([]);
       setEdges([]);
+      setGroups([]);
       versionRef.current = null;
       lastSavedRef.current = '';
       setSaveStatus('idle');
@@ -949,7 +981,9 @@ export default function CanvasPage() {
     const m: Node[] = [];
     const p: Node[] = [];
     const a: Node[] = [];
-    doc.nodes.forEach((node) => {
+    // 组伪节点剥离（IKD0JT A3）：type: 'groupFrame' 的持久化形状还原为组名单
+    const { groups: hydratedGroups, contentNodes } = parseGroupsFromNodes(doc.nodes);
+    contentNodes.forEach((node) => {
       if (node.type === 'textNode') t.push(attachCallbacks(node));
       else if (node.type === 'mediaNode') m.push(attachCallbacks(resolveNodeAssets(node)));
       else if (node.type === 'productNode') p.push(attachCallbacks(resolveNodeAssets(node)));
@@ -976,6 +1010,10 @@ export default function CanvasPage() {
     setMediaNodes(m);
     setProductNodes(p);
     setAssetNodes(a);
+    setGroups(hydratedGroups);
+    if (import.meta.env.DEV && hydratedGroups.length > 0) {
+      console.info(`[canvas] 水合成组：${hydratedGroups.length} 个组`);
+    }
     // 水合恢复连线：持久形状 {id, source, target, data?} 补回 custom 流光渲染属性；
     // data 承载连线关系属性（IKDMQS 视频参考角色 refRole）随连线恢复；
     // 兜底过滤悬空端点（服务端保存校验已保证引用完整，此处防御旧/坏数据渲染告警）
@@ -992,9 +1030,14 @@ export default function CanvasPage() {
       }));
     setEdges(hydratedEdges);
     // 同步乐观锁版本/视口，并记录内容签名避免加载后立即重复保存
+    // （签名口径与自动保存一致：含组伪节点，否则组数据会导致加载后立即误判变更）
     versionRef.current = doc.version;
     setViewport(doc.viewport);
-    lastSavedRef.current = JSON.stringify(doc.viewport) + serializeNodes([...t, ...m, ...p, ...a]) + serializeEdges(hydratedEdges);
+    const hydratedAll = [...t, ...m, ...p, ...a];
+    lastSavedRef.current =
+      JSON.stringify(doc.viewport) +
+      serializeNodes([...hydratedAll, ...hydratedGroups.map((g) => groupToNode(g))]) +
+      serializeEdges(hydratedEdges);
     // 水合恢复：「生成中」媒体节点恢复任务轮询。
     // IK9R8X：jobId 后端返回字符串，兼容 string/number 双形态（历史画布文档已持久化字符串）。
     m
@@ -1035,7 +1078,9 @@ export default function CanvasPage() {
     const timer = window.setTimeout(() => {
       if (applyingRef.current || savePromiseRef.current) return;
       if (textNodesRef.current.some(node => draftErrorsRef.current.has(node.id))) return;
-      const nodes = [...textNodes, ...mediaNodes, ...productNodes, ...assetNodes];
+      const contentNodes = [...textNodes, ...mediaNodes, ...productNodes, ...assetNodes];
+      // 组伪节点随 nodes 持久化（IKD0JT A3）：水合时剥离还原
+      const nodes = [...contentNodes, ...groups.map((g) => groupToNode(g))];
       const sig = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edges);
       if (sig === lastSavedRef.current) return;
       if (import.meta.env.DEV) {
@@ -1074,7 +1119,7 @@ export default function CanvasPage() {
         }).finally(() => { savePromiseRef.current = null; });
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [textNodes, mediaNodes, productNodes, assetNodes, edges, viewport, currentId, doc, refetch, applying, saveEpoch]);
+  }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch]);
 
   /** 创建文本节点 */
   const handleAddTextNode = () => {
@@ -1101,16 +1146,18 @@ export default function CanvasPage() {
       },
     };
     pendingNodeIdsRef.current.add(newNode.id);
+    historyRef.current?.pushAddNodes([newNode.id]);
     setTextNodes((prev) => [...prev, newNode]);
   };
 
-  /** 复制节点到旁边 */
+  /** 复制节点到旁边（副本进撤销栈，IKD0JT：撤销移除副本） */
   const handleDuplicateNode = (id: string) => {
     const t = textNodesRef.current.find((n) => n.id === id);
     if (t) {
       const copy: Node = { ...t, id: newNodeId('text'), position: { x: t.position.x + 40, y: t.position.y + 40 }, data: { ...t.data } };
       delete copy.data.promptSource;
       pendingNodeIdsRef.current.add(copy.id);
+      historyRef.current?.pushAddNodes([copy.id]);
       setTextNodes((prev) => [...prev, copy]);
       return;
     }
@@ -1118,6 +1165,7 @@ export default function CanvasPage() {
     if (m) {
       const copy: Node = { ...m, id: newNodeId('media'), position: { x: m.position.x + 40, y: m.position.y + 40 }, data: { ...m.data } };
       pendingNodeIdsRef.current.add(copy.id);
+      historyRef.current?.pushAddNodes([copy.id]);
       setMediaNodes((prev) => [...prev, copy]);
     }
   };
@@ -1522,6 +1570,20 @@ export default function CanvasPage() {
    *  下一次媒体合并 effect 用过期坐标覆盖画布内部状态，导致同组节点跳变（IKDKII 验收缺陷） */
   const handleNodeDragStop = (_node: Node, draggedNodes: Node[]) => {
     const positions = new Map(draggedNodes.map((n) => [n.id, n.position]));
+    // 撤销登记（IKD0JT）：refs 此刻仍是拖拽前坐标，仅登记实际移动过的节点
+    const before = [
+      ...textNodesRef.current,
+      ...mediaNodesRef.current,
+      ...productNodesRef.current,
+      ...assetNodesRef.current,
+    ];
+    const oldPositions = before
+      .filter((n) => {
+        const next = positions.get(n.id);
+        return next && (n.position.x !== next.x || n.position.y !== next.y);
+      })
+      .map((n) => ({ id: n.id, x: n.position.x, y: n.position.y }));
+    historyRef.current?.pushMove(oldPositions);
     const applyDraggedPositions = (prev: Node[]) =>
       prev.map((n) => {
         const position = positions.get(n.id);
@@ -1531,6 +1593,17 @@ export default function CanvasPage() {
     setMediaNodes(applyDraggedPositions);
     setProductNodes(applyDraggedPositions);
     setAssetNodes(applyDraggedPositions);
+    // 方向性规则（成员归属）：用户主动拖动节点 = 有意进出组，一律解除其排除记录——
+    //  - 拖进组矩形 → 吸收为成员（节点显示在玻璃上层）
+    //  - 拖出组矩形 → 本就脱离组，排除记录失效一并清掉
+    if (groupsRef.current.length > 0) {
+      setGroups((prev) =>
+        prev.map((g) => {
+          if (!g.excludedIds.some((id) => positions.has(id))) return g;
+          return { ...g, excludedIds: g.excludedIds.filter((id) => !positions.has(id)) };
+        }),
+      );
+    }
   };
 
   // 资产卡等非节点入口：清空旧 seed，保证打开的是空白对话框
@@ -1916,6 +1989,7 @@ export default function CanvasPage() {
         },
       },
     ]);
+    historyRef.current?.pushAddNodes([nodeId]);
     return uploadAssetFile(file, { projectId: currentId || undefined })
       .then((done) => {
         setMediaNodes((prev) =>
@@ -2156,6 +2230,42 @@ export default function CanvasPage() {
   /** 商品节点最新列表（避免闭包陈旧） */
   const productNodesRef = useRef<Node[]>([]);
   productNodesRef.current = productNodes;
+  /** 撤销/重做栈（IKD0JT A2）：覆盖移动/删除/复制/连线/删边；生成类操作不登记（PRD §7.2） */
+  const canvasHistory = useCanvasHistory({
+    getTextNodes: () => textNodesRef.current,
+    getMediaNodes: () => mediaNodesRef.current,
+    getProductNodes: () => productNodesRef.current,
+    getAssetNodes: () => assetNodesRef.current,
+    getEdges: () => edgesRef.current,
+    getGroups: () => groupsRef.current,
+    setTextNodes: (updater) => setTextNodes(updater),
+    setMediaNodes: (updater) => setMediaNodes(updater),
+    setProductNodes: (updater) => setProductNodes(updater),
+    setAssetNodes: (updater) => setAssetNodes(updater),
+    setEdges: (updater) => setEdges(updater),
+    setGroups: (updater) => setGroups(updater),
+    /** 撤销移除副本时同步清未保存登记，避免回滚引用幽灵节点 */
+    onNodesRemoved: (ids) => ids.forEach((id) => pendingNodeIdsRef.current.delete(id)),
+  });
+  historyRef.current = canvasHistory;
+  /** 撤销/重做快捷键（IKD0JT A2）：Ctrl/Cmd+Z 撤销、Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做；
+   *  输入框/编辑器内不拦截（文字编辑不进画布撤销栈，PRD §7.2 R1） */
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (isEditableKeyboardTarget(e.target)) return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key !== 'z' && key !== 'y') return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (key === 'y' || e.shiftKey) canvasHistory.redo();
+      else canvasHistory.undo();
+    };
+    document.addEventListener('keydown', handler, true);
+    return () => document.removeEventListener('keydown', handler, true);
+    // undo/redo 为 hook 内稳定 useCallback
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasHistory.undo, canvasHistory.redo]);
   /** 生成节点轮询定时器（节点 id → timer） */
   const jobTimersRef = useRef<Map<string, number>>(new Map<string, number>());
   /** 取消接口已确认成功的节点：忽略仍在飞行中的旧轮询响应。 */
@@ -2645,6 +2755,132 @@ export default function CanvasPage() {
     finish();
   };
 
+  /** 画布删除统一入口（IKD0JT 撤销接入）：右键/键盘/节点回调删除收口——
+   *  撤销栈登记 + 悬空边清理 + blob 释放；生成中媒体卡片转取消任务流程（不可回退，PRD §7.2 R2）。 */
+  const removeCanvasNodes = (ids: string[]) => {
+    if (ids.length === 0) return;
+    // 生成中媒体卡片：先取消任务，终态驱动移除（不进撤销栈）
+    const generating = ids.filter((id) => mediaNodesRef.current.some((n) => n.id === id) && isGeneratingNode(id));
+    generating.forEach((id) => void deleteGeneratingNode(id));
+    const idSet = new Set(ids.filter((id) => !generating.includes(id)));
+    if (idSet.size === 0) return;
+
+    const allNodes = [
+      ...textNodesRef.current,
+      ...mediaNodesRef.current,
+      ...productNodesRef.current,
+      ...assetNodesRef.current,
+    ];
+    const removedNodes = allNodes.filter((n) => idSet.has(n.id));
+    const removedEdges = edgesRef.current.filter((e) => idSet.has(e.source) || idSet.has(e.target));
+
+    // blob 预览释放（http 素材 URL 无需 revoke）
+    removedNodes.forEach((n) => {
+      const src = (n.data as Record<string, unknown> | undefined)?.src;
+      if (typeof src === 'string' && src.startsWith('blob:')) URL.revokeObjectURL(src);
+    });
+
+    // 撤销登记：blob 节点（上传中）预览已释放、撤销无法恢复，跳过其登记；
+    // 连线两端撤销后都能回来（本批可撤销或未被删）才随删除登记
+    const undoableNodes = removedNodes.filter((n) => {
+      const src = (n.data as Record<string, unknown> | undefined)?.src;
+      return !(typeof src === 'string' && src.startsWith('blob:'));
+    });
+    const undoableIds = new Set(undoableNodes.map((n) => n.id));
+    const survivingIds = new Set(allNodes.map((n) => n.id).filter((id) => !idSet.has(id)));
+    const undoableEdges = removedEdges.filter(
+      (e) =>
+        (undoableIds.has(e.source) || survivingIds.has(e.source)) &&
+        (undoableIds.has(e.target) || survivingIds.has(e.target)),
+    );
+    // 动态成员模型：组矩形固定，删除节点不裁剪组（删掉的成员下次按坐标判定自然脱离）
+    if (undoableNodes.length > 0) {
+      historyRef.current?.pushDelete(undoableNodes, undoableEdges);
+    }
+
+    // 移除节点 + 清 pending 登记（未保存新增的删除一并清理）
+    idSet.forEach((id) => pendingNodeIdsRef.current.delete(id));
+    const filter = (prev: Node[]) => prev.filter((n) => !idSet.has(n.id));
+    setTextNodes(filter);
+    setMediaNodes(filter);
+    setProductNodes(filter);
+    setAssetNodes(filter);
+    // 立即清理悬空边（不等定时器）
+    if (removedEdges.length > 0) {
+      const removedEdgeIds = new Set(removedEdges.map((e) => e.id));
+      setEdges((prev) => prev.filter((e) => !removedEdgeIds.has(e.id)));
+    }
+  };
+
+  /* ============ 成组交互（IKD0JT A3/A4） ============ */
+
+  /** 成组：≥2 节点划定格组矩形（选中成员包围盒+留白），之后矩形固定、成员按坐标动态判定。
+   *  入参为画布内部节点对象（含 measured 实际尺寸），保证矩形真实框住全部选中节点——
+   *  父级数组缺 measured 时按缺省尺寸估算会导致框偏小、框不住节点。 */
+  const handleCreateGroup = (selectedNodes: Node[]) => {
+    if (selectedNodes.length < MIN_GROUP_MEMBERS) return;
+    const box = groupFrameBBox(selectedNodes);
+    if (!box) return;
+    const group: CanvasGroup = { id: newNodeId('group'), box, excludedIds: [] };
+    const before = groupsRef.current;
+    const after = [...before, group];
+    setGroups(after);
+    historyRef.current?.pushCreateGroup(group, before, after);
+  };
+
+  /** 整组拖动结束（动态成员 + 固定矩形）：由 GroupOverlay 上抛拖动期间的矩形与成员位移，
+   *  在此落父级坐标与组矩形（触发自动保存落盘），并登记撤销（矩形+成员同步回放）。
+   *  方向性规则：组盖到节点上 → 该节点排除（不吸收为成员、被玻璃盖住）；
+   *  排除名单随组矩形一并落盘与撤销。成员可为空，此时仅更新矩形。 */
+  const handleGroupFrameDragStop = useCallback(
+    (res: GroupFrameDragResult) => {
+      setGroups((prev) =>
+        prev.map((g) =>
+          g.id === res.groupId
+            ? { ...g, box: { ...res.newBox }, excludedIds: [...res.excludedAfter] }
+            : g,
+        ),
+      );
+      if (res.nodeNew.length === 0) return;
+      const posNew = new Map(res.nodeNew.map((p) => [p.id, { x: p.x, y: p.y }]));
+      const applyPos = (prev: Node[]) =>
+        prev.map((n) => {
+          const p = posNew.get(n.id);
+          return p ? { ...n, position: { x: p.x, y: p.y } } : n;
+        });
+      setTextNodes(applyPos);
+      setMediaNodes(applyPos);
+      setProductNodes(applyPos);
+      setAssetNodes(applyPos);
+      historyRef.current?.pushGroupMove(res);
+    },
+    [setTextNodes, setMediaNodes, setProductNodes, setAssetNodes, setGroups],
+  );
+
+  /** 解组：仅移除组矩形，成员节点保留原位（成员本为按坐标动态判定） */
+  const handleUngroup = (groupId: string) => {
+    const group = groupsRef.current.find((g) => g.id === groupId);
+    if (!group) return;
+    setGroups((prev) => prev.filter((g) => g.id !== groupId));
+    historyRef.current?.pushUngroup(group);
+  };
+
+  /** 删除组 = 删除当前落在组矩形内的全部节点（走统一删除入口：撤销/悬空边清理/生成中取消全复用） */
+  const handleDeleteGroup = (groupId: string) => {
+    const group = groupsRef.current.find((g) => g.id === groupId);
+    if (!group) return;
+    const all = [
+      ...textNodesRef.current,
+      ...mediaNodesRef.current,
+      ...productNodesRef.current,
+      ...assetNodesRef.current,
+    ];
+    const inside = membersInGroupBox(all, group.box, group.excludedIds).map((n) => n.id);
+    if (inside.length > 0) removeCanvasNodes(inside);
+    setGroups((prev) => prev.filter((g) => g.id !== groupId));
+    historyRef.current?.pushDeleteGroup(group, all.filter((n) => inside.includes(n.id)), []);
+  };
+
   /** 媒体节点删除统一入口（IKDMQW）：右键菜单/键盘删除/节点回调全部收口——
    *  生成中且带任务的卡片先取消再移除；其余直接移除。 */
   const handleRemoveMediaNode = (nodeId: string) => {
@@ -2654,7 +2890,7 @@ export default function CanvasPage() {
       void deleteGeneratingNode(nodeId);
       return;
     }
-    removeMediaNodeNow(nodeId);
+    removeCanvasNodes([nodeId]);
   };
 
   /** 重试失败任务：retry 接口创建新任务（沿用失败任务冻结快照），节点回到生成中。
@@ -4040,12 +4276,15 @@ export default function CanvasPage() {
           productPickResult={productPickResult}
           assetPickResult={assetPickResult}
           onDeleteNode={(id) => {
-            setTextNodes((prev) => prev.filter((n) => n.id !== id));
-            // 媒体节点删除收口（IKDMQW）：生成中卡片先取消任务确认后移除，其余直接移除
-            handleRemoveMediaNode(id);
-            setProductNodes((prev) => prev.filter((n) => n.id !== id));
-            setAssetNodes((prev) => prev.filter((n) => n.id !== id));
+            // 画布删除统一入口（IKD0JT）：撤销登记 + 悬空边清理；生成中媒体卡片内部转取消流程
+            removeCanvasNodes([id]);
           }}
+          onDuplicateSelected={(ids) => ids.forEach((id) => actionsRef.current.duplicate(id))}
+          groups={groups}
+          onCreateGroup={handleCreateGroup}
+          onUngroupGroup={handleUngroup}
+          onDeleteGroup={handleDeleteGroup}
+          onGroupFrameDragStop={handleGroupFrameDragStop}
         />
 
         {/* 左侧工具栏 */}

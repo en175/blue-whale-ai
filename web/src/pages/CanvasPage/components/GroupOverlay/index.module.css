@@ -1,0 +1,161 @@
+/* ============================================
+ * GroupOverlay 成组交互层样式（IKD0JT A3/A4）
+ * ============================================ */
+
+/* 组框拖拽层（flow 坐标层）：z-index 3，压在 ReactFlow 节点(renderer z4)之下、
+ * pan(z1) 之上 —— 组内空白区命中组框拖动整组，节点区仍命中节点本体不受影响。 */
+.frameLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* 整个组框为拖拽面 + 玻璃质感背景：框内任意非节点空白区按下即可拖动整组（IKD0JT A4）。
+ *  毛玻璃用 backdrop-filter 在画布底纹之上做模糊，半透明深色底让框显层级；
+ *  组框位于 z-index:3（ReactFlow 节点 renderer z-index:4 之上），玻璃层刚好"糊"住画布点阵/远处内容，
+ *  组内节点因位于上层而保持锐利，不被玻璃模糊。 */
+.frame {
+  position: absolute;
+  border-style: dashed;
+  border-color: rgba(140, 140, 140, 0.5);
+  border-radius: 8px;
+  pointer-events: auto;
+  cursor: grab;
+  background-color: rgba(26, 26, 26, 0.28);
+  backdrop-filter: blur(10px) saturate(1.4);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  transition: background-color 160ms ease;
+}
+
+.frame:active {
+  cursor: grabbing;
+  background-color: rgba(26, 26, 26, 0.38);
+}
+
+/* 排除节点覆盖层（flow 坐标层）：z-index 5，高于 ReactFlow 节点 renderer(z4) ——
+ * 组盖住的节点被玻璃压在下层（成员归属即视觉层级），纯视觉不拦截交互 */
+.coverLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* 单个被排除节点的玻璃覆盖块（与组框同款玻璃质感） */
+.cover {
+  position: absolute;
+  border-radius: 8px;
+  background-color: rgba(26, 26, 26, 0.28);
+  backdrop-filter: blur(10px) saturate(1.4);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+}
+
+/* 组徽标 + 操作条 + 成组按钮所在交互层：高于节点，保证始终可点 */
+.uiLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* ---------- 组徽标 + 操作条（屏幕空间层） ---------- */
+
+.groupBadgeWrap {
+  position: absolute;
+  pointer-events: none;
+  transform: translateY(-100%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.groupBadge {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  background-color: rgba(26, 26, 26, 0.9);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: color var(--transition-fast);
+}
+
+.groupBadge:hover {
+  color: var(--color-text-primary);
+}
+
+.groupTools {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background-color: rgba(26, 26, 26, 0.94);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.toolBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.toolBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* ---------- 成组入口按钮 ---------- */
+
+.createBtn {
+  pointer-events: auto;
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  transform: translate(-50%, -100%);
+  border-radius: var(--radius-sm);
+  background-color: rgba(26, 26, 26, 0.9);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background-color var(--transition-fast);
+}
+
+.createBtn:hover {
+  background-color: var(--color-bg-hover);
+}

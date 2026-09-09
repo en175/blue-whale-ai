@@ -29,8 +29,17 @@ import MediaNode from '../MediaNode';
 import ProductNode from '../ProductNode';
 import AssetCardNode from '../AssetCardNode';
 import CustomEdge from '../CustomEdge';
-import { canvasDeleteKeyAction, deleteSelectedCanvasNodes } from './keyboardDelete';
+import GroupOverlay from '../GroupOverlay';
+import { canvasDeleteKeyAction, deleteSelectedCanvasNodes, isEditableKeyboardTarget } from './keyboardDelete';
 import { useCanvasPan } from './useCanvasPan';
+import {
+  MIN_GROUP_MEMBERS,
+  membersInGroupBox,
+  nodeInsideGroupBox,
+  type CanvasGroup,
+  type GroupFrameDragResult,
+} from '../../canvasGroups';
+
 import styles from './index.module.css';
 
 const initialNodes: Node[] = [];
@@ -76,9 +85,21 @@ interface FlowCanvasProps {
   productPickResult?: { ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string } } | null;
   /** 资产卡 ts 驱动注入结果 */
   assetPickResult?: { ts: number; assetId: string; ref: { id: string; src: string; type?: 'image' | 'video'; assetId?: string } } | null;
+  /** 快捷键复制选中节点（Ctrl/Cmd+D，IKD0JT REQ-A-109）：内部选中态由 Canvas 持有，回调上抛 */
+  onDuplicateSelected?: (ids: string[]) => void;
+  /** 成组名单（IKD0JT A3）：底框/徽标渲染与整组拖拽依据 */
+  groups?: CanvasGroup[];
+  /** 成组（IKD0JT A4）：成组按钮 / Ctrl/Cmd+G 上抛选中节点对象（含 measured 实际尺寸，父级按真实包围盒定格组矩形） */
+  onCreateGroup?: (nodes: Node[]) => void;
+  /** 解组 */
+  onUngroupGroup?: (groupId: string) => void;
+  /** 删除组（连同成员） */
+  onDeleteGroup?: (groupId: string) => void;
+  /** 整组拖动结束（动态成员 + 固定矩形），父级落坐标/矩形并登记撤销 */
+  onGroupFrameDragStop?: (res: GroupFrameDragResult) => void;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onGroupFrameDragStop }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -300,14 +321,84 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   nodesRef.current = nodes;
   const onDeleteNodeRef = useRef(onDeleteNode);
   onDeleteNodeRef.current = onDeleteNode;
+  const onDuplicateSelectedRef = useRef(onDuplicateSelected);
+  onDuplicateSelectedRef.current = onDuplicateSelected;
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+  const onCreateGroupRef = useRef(onCreateGroup);
+  onCreateGroupRef.current = onCreateGroup;
+  const onNodeDragStopRef = useRef(onNodeDragStop);
+  onNodeDragStopRef.current = onNodeDragStop;
+  const onGroupFrameDragStopRef = useRef(onGroupFrameDragStop);
+  onGroupFrameDragStopRef.current = onGroupFrameDragStop;
+
+  /** 整组拖拽（IKD0JT A4）：拖起组员时把同组成员一并选中，React Flow 随即整体拖动；
+   *  拖前选中集合快照，拖完还原，避免整组拖拽把选中态扩散到全部组员 */
+  const dragRestoreSelectionRef = useRef<Set<string> | null>(null);
+  const onNodeDragStart = useCallback(
+    (_e: MouseEvent | TouchEvent, node: Node) => {
+      // 拖起节点：若其位于某组矩形内（未被排除），把该组当前在框内的全部成员一并选中整体拖动
+      const group = groupsRef.current?.find((g) => nodeInsideGroupBox(node, g.box) && !g.excludedIds.includes(node.id));
+      if (!group) return;
+      const memberIds = membersInGroupBox(nodesRef.current, group.box, group.excludedIds).map((n) => n.id);
+      if (memberIds.length === 0) return;
+      const prevSelected = new Set(
+        nodesRef.current.filter((n) => n.selected || n.id === node.id).map((n) => n.id),
+      );
+      dragRestoreSelectionRef.current = prevSelected;
+      setNodes((prev) =>
+        prev.map((n) => (memberIds.includes(n.id) ? { ...n, selected: true } : n)),
+      );
+    },
+    [setNodes],
+  );
+
+  const handleNodeDragStopInternal = useCallback(
+    (_e: MouseEvent | TouchEvent, node: Node, draggedNodes: Node[]) => {
+      const restore = dragRestoreSelectionRef.current;
+      dragRestoreSelectionRef.current = null;
+      if (restore) {
+        setNodes((prev) => prev.map((n) => ({ ...n, selected: restore.has(n.id) })));
+      }
+      onNodeDragStopRef.current?.(node, draggedNodes);
+    },
+    [setNodes],
+  );
 
   /** Delete/Backspace 删除选中节点；Enter 继续拦截（输入框/编辑器内保持原语义）。
    *  连线级联删除由父级完成：节点离开各列表后，悬空连线被统一定时清理（IKDLQF）。
    *  内部 nodes 不在此处直接移除（IKDMQW）：生成中卡片的删除是「先取消后移除」的异步流程，
    *  若内部抢先移除而父级在取消竞态中保留卡片（任务抢先成功保留作品），节点会从画布消失；
-   *  统一由父级各列表状态驱动，各合并 effect 的 removed 分支同步内部 nodes。 */
+   *  统一由父级各列表状态驱动，各合并 effect 的 removed 分支同步内部 nodes。
+   *  快捷键（IKD0JT）：Ctrl/Cmd+D 复制选中节点（偏移落位由父级 duplicate 处理）；
+   *  Ctrl/Cmd+A 全选画布节点（拖动模式不响应，保持既有手势语义）；
+   *  Ctrl/Cmd+G 选中 ≥2 节点成组。 */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey) {
+        const key = e.key.toLowerCase();
+        if (key === 'd' && !isEditableKeyboardTarget(e.target)) {
+          e.preventDefault();
+          e.stopPropagation();
+          const ids = nodesRef.current.filter((n) => n.selected).map((n) => n.id);
+          if (ids.length > 0) onDuplicateSelectedRef.current?.(ids);
+          return;
+        }
+        if (key === 'g' && !isEditableKeyboardTarget(e.target)) {
+          e.preventDefault();
+          e.stopPropagation();
+          const selected = nodesRef.current.filter((n) => n.selected);
+          if (selected.length >= MIN_GROUP_MEMBERS) onCreateGroupRef.current?.(selected);
+          return;
+        }
+        if (key === 'a' && !isEditableKeyboardTarget(e.target)) {
+          e.preventDefault();
+          e.stopPropagation();
+          setNodes((prev) => prev.map((n) => ({ ...n, selected: true })));
+          return;
+        }
+        return;
+      }
       const action = canvasDeleteKeyAction(e.key, e.target);
       if (action === 'ignore') return;
       e.preventDefault();
@@ -318,7 +409,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     };
     document.addEventListener('keydown', handler, true);
     return () => document.removeEventListener('keydown', handler, true);
-  }, []);
+  }, [setNodes]);
 
   return (
     <div
@@ -338,11 +429,13 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         onPaneClick={onPaneClick}
         onSelectionChange={onSelectionChange}
         onMoveEnd={(_e, v) => onViewportChangeRef.current?.(v)}
-        onNodeDragStop={(_e, node, draggedNodes) => onNodeDragStop?.(node, draggedNodes)}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={handleNodeDragStopInternal}
         onContextMenu={(e) => e.preventDefault()}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        panOnDrag={isDrag}
+        // 中键（button 1）任意模式均可平移（IKD0JT A1 R2）；拖动模式左键也平移，选择模式左键留给框选
+        panOnDrag={isDrag ? [0, 1] : [1]}
         // 滚轮=平移；缩放交给平台原生修饰键+滚轮与触控板捏合（库默认为滚轮缩放，此处刻意相反，见 ADR-0081）
         panOnScroll
         zoomOnScroll={false}
@@ -355,6 +448,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         nodesConnectable={!isDrag}
         nodesFocusable={false}
         edgesFocusable={false}
+        minZoom={0.2}
         maxZoom={8}
         connectionRadius={30}
         defaultViewport={{ x: 0, y: 0, zoom: 1.1 }}
@@ -382,12 +476,23 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
           />
         )}
       </ReactFlow>
+      {groups && (
+        <GroupOverlay
+          nodes={nodes}
+          groups={groups}
+          onCreateGroup={onCreateGroup ?? (() => {})}
+          onUngroup={onUngroupGroup ?? (() => {})}
+          onDeleteGroup={onDeleteGroup ?? (() => {})}
+          setNodes={setNodes}
+          onGroupFrameDragStop={onGroupFrameDragStopRef.current}
+        />
+      )}
       {!hideZoomControl && <ZoomControl />}
     </div>
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onGroupFrameDragStop }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -414,6 +519,12 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         productPickResult={productPickResult}
         assetPickResult={assetPickResult}
         selectRequest={selectRequest}
+        onDuplicateSelected={onDuplicateSelected}
+        groups={groups}
+        onCreateGroup={onCreateGroup}
+        onUngroupGroup={onUngroupGroup}
+        onDeleteGroup={onDeleteGroup}
+        onGroupFrameDragStop={onGroupFrameDragStop}
       />
     </ReactFlowProvider>
   );
