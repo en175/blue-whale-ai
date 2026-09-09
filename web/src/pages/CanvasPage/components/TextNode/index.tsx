@@ -5,7 +5,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Palette } from 'lucide-react';
+import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Palette, Plus } from 'lucide-react';
 import { sanitizeHtml } from '@/utils/sanitize';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import styles from './index.module.css';
@@ -14,8 +14,28 @@ import { PROMPT_TEXT_LIMITS } from '../../../../../../packages/contracts/src/pro
 /** 文字节点最大字数（按纯文本计，含粘贴） */
 const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
 
-/** 连接点统一样式（锚定正文容器左右中点） */
-const HANDLE_STYLE = { background: '#666', width: 10, height: 10, border: '2px solid #444' } as const;
+/** 连接点统一样式：透明背景（加号图标由 children 渲染） */
+const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;
+
+/** 加号连接点图标 */
+function HandlePlus() {
+  return (
+    <span className="nodrag nopan" style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 24,
+      height: 24,
+      borderRadius: '50%',
+      background: '#2a2a2a',
+      border: '1px solid #555',
+      color: '#ccc',
+      boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+    }}>
+      <Plus size={14} strokeWidth={2.5} />
+    </span>
+  );
+}
 
 interface TextNodeData {
   title?: string;
@@ -388,7 +408,9 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       {/* 固定正文容器：360×270（含内边距），超出的正文在内部上下滚动 */}
       <div className={`${styles.contentCard} nowheel`} data-testid="text-content" style={expanded ? { height: 540, maxHeight: '70vh' } : undefined}>
         {!data.isFirst && (
-          <Handle type="target" position={Position.Left} className={styles.handle} style={HANDLE_STYLE} />
+          <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
+          <HandlePlus />
+        </Handle>
         )}
 
         <div
@@ -418,7 +440,9 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           data-placeholder="输入内容..."
         />
 
-        <Handle type="source" position={Position.Right} className={styles.handle} style={HANDLE_STYLE} />
+        <Handle type="source" position={Position.Right} className={styles.handle} style={{ ...HANDLE_STYLE, right: '-16px' }}>
+        <HandlePlus />
+      </Handle>
       </div>
 
       {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}

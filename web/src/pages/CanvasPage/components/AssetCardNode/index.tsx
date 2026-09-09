@@ -5,7 +5,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { AtSign, Upload, WandSparkles, Info, Music, X, MousePointerClick, ImageOff } from 'lucide-react';
+import { AtSign, Upload, WandSparkles, Info, Music, X, MousePointerClick, ImageOff, Plus } from 'lucide-react';
 import type { GenerationCardBlock } from '@/api/agentSessions';
 import { toast } from 'sonner';
 import { uploadAssetFile } from '@/utils/upload';
@@ -13,6 +13,27 @@ import { isFileRejected } from '@/utils/fileSignature';
 import type { UploadCompleteData } from '@/api/assets';
 import type { CanvasGalleryRef } from '../../collectMediaBlocks';
 import styles from './index.module.css';
+
+const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;
+
+function HandlePlus() {
+  return (
+    <span className="nodrag nopan" style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 24,
+      height: 24,
+      borderRadius: '50%',
+      background: '#2a2a2a',
+      border: '1px solid #555',
+      color: '#ccc',
+      boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+    }}>
+      <Plus size={14} strokeWidth={2.5} />
+    </span>
+  );
+}
 
 /** 资产卡类型（generation 为 Agent 生成卡落画布形态） */
 export type AssetCardKind = 'style' | 'character' | 'object' | 'environment' | 'custom' | 'generation';
@@ -320,7 +341,9 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
   return (
     <div className={styles.wrapper} onContextMenu={handleContextMenu}>
       {!data.isFirst && (
-        <Handle type="target" position={Position.Left} style={{ background: '#666', width: 10, height: 10, border: '2px solid #444' }} />
+        <Handle type="target" position={Position.Left} style={{ ...HANDLE_STYLE, left: '-16px' }}>
+          <HandlePlus />
+        </Handle>
       )}
 
       {/* 悬停/选中时顶部操作条：添加到对话（与商品节点一致）
@@ -597,7 +620,9 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
         </div>
       </div>
 
-      <Handle type="source" position={Position.Right} style={{ background: '#666', width: 10, height: 10, border: '2px solid #444' }} />
+      <Handle type="source" position={Position.Right} style={{ ...HANDLE_STYLE, right: '-16px' }}>
+        <HandlePlus />
+      </Handle>
 
       {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}
       {contextMenu &&

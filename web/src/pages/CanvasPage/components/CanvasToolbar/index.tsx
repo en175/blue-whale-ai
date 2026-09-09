@@ -233,7 +233,7 @@ export default function CanvasToolbar({
         ref={fileInputRef}
         type="file"
         multiple
-        accept="image/*,video/*"
+        accept="image/*,video/*,audio/*"
         className={styles.hiddenInput}
         onChange={handleFileChange}
       />

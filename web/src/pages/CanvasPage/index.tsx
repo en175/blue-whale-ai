@@ -1876,16 +1876,18 @@ export default function CanvasPage() {
   const placeFileOnCanvas = (file: File): Promise<{ asset_id: string; url: string }> => {
     const isImage = file.type.startsWith('image/');
     const isVideo = file.type.startsWith('video/');
-    if (!isImage && !isVideo) {
-      return Promise.reject(new Error('只支持图片或视频'));
+    const isAudio = file.type.startsWith('audio/');
+    if (!isImage && !isVideo && !isAudio) {
+      return Promise.reject(new Error('只支持图片、视频或音频'));
     }
-    const limit = UPLOAD_SIZE_LIMIT[isImage ? 'image' : 'video'];
+    const limit = UPLOAD_SIZE_LIMIT[isImage ? 'image' : isVideo ? 'video' : 'audio'];
     if (file.size > limit) {
       return Promise.reject(new Error(`文件超过 ${Math.round(limit / 1024 / 1024)}MB 上限`));
     }
     const nodeId = newNodeId('media');
     const localSrc = URL.createObjectURL(file);
     pendingNodeIdsRef.current.add(nodeId);
+    const mediaType = isVideo ? 'video' : isAudio ? 'audio' : 'image';
     setMediaNodes((prev) => [
       ...prev,
       {
@@ -1895,7 +1897,7 @@ export default function CanvasPage() {
         data: {
           src: localSrc,
           fileName: file.name,
-          mediaType: isVideo ? 'video' : 'image',
+          mediaType,
           toolMode,
           onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),

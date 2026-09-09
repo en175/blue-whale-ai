@@ -6,17 +6,38 @@
 import { useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff } from 'lucide-react';
+import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaNodeToolbarVisibility } from './toolbarVisibility';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
+import AudioPlayer from './AudioPlayer';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import styles from './index.module.css';
 
-/** 连接点统一样式（锚定内容区左右中点） */
-const HANDLE_STYLE = { background: '#666', width: 10, height: 10, border: '2px solid #444' } as const;
+/** 连接点统一样式：透明背景（加号图标由 children 渲染） */
+const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;
+
+/** 加号连接点图标（ReactFlow Handle 的 children，替代默认圆点） */
+function HandlePlus() {
+  return (
+    <span className="nodrag nopan" style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 24,
+      height: 24,
+      borderRadius: '50%',
+      background: '#2a2a2a',
+      border: '1px solid #555',
+      color: '#ccc',
+      boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+    }}>
+      <Plus size={14} strokeWidth={2.5} />
+    </span>
+  );
+}
 
 /** 真实时长文案（秒取整）；未知或非正返回空串，标题右侧据此留空 */
 const durationLabel = (duration?: number) =>
@@ -333,7 +354,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       </div>
       <div className={styles.contentCard} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
         {!data.isFirst && (
-          <Handle type="target" position={Position.Left} className={styles.handle} style={HANDLE_STYLE} />
+          <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
+          <HandlePlus />
+        </Handle>
         )}
         {/* IKDMQU Q5：重新生成中的成品卡继续显示旧素材，仅叠加状态角标；
             IKDMQV：重新生成失败/取消同样保留旧素材（Q5「失败或取消后仍保留旧素材与最新编辑内容」），
@@ -341,15 +364,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         {isDraft || (isGenDone && !hasMediaSrc) || data.assetMissing || (isGenerating && !hasMediaSrc) ? (
           renderPlaceholder()
         ) : isAudio ? (
-          <div className={styles.audioBox}>
-            {/* nodrag nopan：播放控件的按下与拖动不被节点拖拽/画布平移吞掉 */}
-            <audio
-              className={`${styles.mediaAudio} nodrag nopan`}
-              src={data.src}
-              controls
-              preload="metadata"
-            />
-          </div>
+          <AudioPlayer src={data.src || ''} fileName={data.fileName} />
         ) : data.mediaType === 'video' ? (
           <video
             className={styles.mediaVideo}
@@ -392,7 +407,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             )}
           </div>
         )}
-        <Handle type="source" position={Position.Right} className={styles.handle} style={HANDLE_STYLE} />
+        <Handle type="source" position={Position.Right} className={styles.handle} style={{ ...HANDLE_STYLE, right: '-16px' }}>
+        <HandlePlus />
+      </Handle>
       </div>
 
       {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}
