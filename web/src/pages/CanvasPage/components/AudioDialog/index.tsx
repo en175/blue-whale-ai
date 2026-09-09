@@ -2,7 +2,7 @@
  * AudioDialog 音频生成底部对话框：纯文本描述 + 真实模型（fetchGenerationModels('audio')）
  * ============================================ */
 import { useEffect, useRef, useState } from 'react';
-import { X, AudioLines, ChevronDown, Music, ArrowUp, Maximize2, Minimize2 } from 'lucide-react';
+import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2, Music2, Pause, XCircle } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import type { MediaGenStatus } from '../MediaNode';
@@ -10,6 +10,14 @@ import styles from './index.module.css';
 
 /** 输入框字数上限 */
 const MAX_INPUT = 1000;
+/** 参考音频上限（与首页 Audio tab 一致） */
+const MAX_AUDIO_REFS = 3;
+
+/** 仅允许 MP3：按 MIME 与扩展名双判据（兼容 audio/mp3 的浏览器变体） */
+const isMp3File = (file: File): boolean => {
+  const type = (file.type || '').toLowerCase();
+  return type === 'audio/mpeg' || type === 'audio/mp3' || /\.mp3$/i.test(file.name);
+};
 
 /** 参考素材类型（保留给 MusicDialog 共享类型） */
 type RefKind = 'audio' | 'image';
@@ -53,7 +61,7 @@ interface AudioDialogProps {
   };
   /** Toast 提示（IKDMQU Q3：恢复的模型不可用时提示，由父级注入） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
-  /** 底部模式切换 → AI 音乐对话框 */
+  /** 底部模式切换 → AI 音乐对话框（已废弃：仅保留 prop 兼容父级，不再渲染） */
   onSwitchToMusic?: () => void;
 }
 
@@ -63,14 +71,18 @@ export default function AudioDialog({ onClose, onSend, initialText, initialModel
   const [modelId, setModelId] = useState(initialModelId ?? '');
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
-  const [modeOpen, setModeOpen] = useState(false);
   /** 放大态：输入区高度占屏幕 2/3；收起回底部默认高度 */
   const [expanded, setExpanded] = useState(false);
-  const modeWrapRef = useRef<HTMLDivElement>(null);
+  /** 参考音频列表（本地上传） */
+  const [refs, setRefs] = useState<AudioRefItem[]>([]);
+  /** 当前正在播放的参考项 id */
+  const [playingId, setPlayingId] = useState<string | null>(null);
   const modelWrapRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  if (!audioRef.current) audioRef.current = new Audio();
 
   useDismissOnOutside([
-    { open: modeOpen, ref: modeWrapRef, dismiss: () => setModeOpen(false) },
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
   ]);
 
@@ -122,11 +134,95 @@ export default function AudioDialog({ onClose, onSend, initialText, initialModel
     draftBinding?.onParamsChange({ modelId: id });
   };
 
+  /** 上传参考音频：本地文件选择，上限 MAX_AUDIO_REFS=3 */
+  const handlePickAudio = () => {
+    if (readOnly) return;
+    if (refs.length >= MAX_AUDIO_REFS) {
+      onToast?.('warn', `参考音频最多 ${MAX_AUDIO_REFS} 段已超出`);
+      return;
+    }
+    fileInputRef.current?.click();
+  };
+
+  const handleAudioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!files.length) return;
+    // 仅允许 MP3：非 mp3 明确提示并跳过（选择器 accept 已尽量过滤，此处兜底）
+    const valid = files.filter((f) => {
+      if (isMp3File(f)) return true;
+      onToast?.('warn', `「${f.name}」不是 MP3 格式，已跳过`);
+      return false;
+    });
+    if (valid.length === 0) return;
+    const remaining = MAX_AUDIO_REFS - refs.length;
+    const accepted = valid.slice(0, remaining);
+    const next: AudioRefItem[] = accepted.map((f, i) => ({
+      id: `local-${Date.now()}-${i}`,
+      kind: 'audio',
+      name: f.name,
+      src: URL.createObjectURL(f),
+      source: 'local',
+      file: f,
+    }));
+    setRefs((prev) => [...prev, ...next]);
+  };
+
+  /** 点击参考 chip 播放/暂停（同一次点击的音频只允许一个在播） */
+  const togglePlay = (item: AudioRefItem) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playingId === item.id) {
+      audio.pause();
+      setPlayingId(null);
+      return;
+    }
+    audio.src = item.src;
+    audio.currentTime = 0;
+    audio.play().catch(() => {
+      // 播放失败（如格式不被浏览器支持）静默忽略，不阻塞移除/发送
+    });
+    setPlayingId(item.id);
+  };
+
+  const handleRemoveRef = (id: string) => {
+    if (playingId === id) {
+      audioRef.current?.pause();
+      setPlayingId(null);
+    }
+    setRefs((prev) => {
+      const item = prev.find((r) => r.id === id);
+      if (item?.source === 'local' && item.src.startsWith('blob:')) {
+        URL.revokeObjectURL(item.src);
+      }
+      return prev.filter((r) => r.id !== id);
+    });
+  };
+
+  /** 组件卸载时 revoke 所有 blob URL 并停播，防内存泄漏 */
+  useEffect(() => {
+    const audio = audioRef.current;
+    const onEnded = () => setPlayingId(null);
+    audio?.addEventListener('ended', onEnded);
+    return () => {
+      audio?.removeEventListener('ended', onEnded);
+      audio?.pause();
+      audioRef.current = null;
+      refs.forEach((r) => {
+        if (r.source === 'local' && r.src.startsWith('blob:')) URL.revokeObjectURL(r.src);
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleSend = () => {
     if (!text.trim() || !currentModel || readOnly || draftBinding?.saveFailed) return;
-    onSend(text.trim(), modelId, []);
+    onSend(text.trim(), modelId, refs);
     // 草稿绑定发送后保留输入（卡片原地转生成中，面板进入只读），非草稿保持清空
-    if (!draftBinding) setText('');
+    if (!draftBinding) {
+      setText('');
+      setRefs([]);
+    }
   };
 
   return (
@@ -143,6 +239,62 @@ export default function AudioDialog({ onClose, onSend, initialText, initialModel
         <button className={styles.iconBtn} onClick={onClose} title="关闭">
           <X size={16} strokeWidth={2} />
         </button>
+      </div>
+
+      {/* 顶部参考按钮行（与 ImageDialog/BottomDialog 统一占位视觉；参考上传功能待后续接入） */}
+      <div className={styles.topRow}>
+        <div className={styles.refWrap}>
+          {refs.length < MAX_AUDIO_REFS ? (
+            <button
+              className={styles.refBtn}
+              onClick={handlePickAudio}
+              disabled={readOnly}
+              title={readOnly ? '生成中只读' : '添加参考音频（最多 3 段）'}
+            >
+              <AudioLines size={20} strokeWidth={2} />
+            </button>
+          ) : (
+            <span className={styles.refCount} title={`参考音频最多 ${MAX_AUDIO_REFS} 段`}>
+              已达上限
+            </span>
+          )}
+        </div>
+        {/* 已上传的参考音频 chip：点击播放/暂停 */}
+        {refs.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            className={`${styles.audioChip} ${playingId === r.id ? styles.audioChipPlaying : ''}`}
+            onClick={() => togglePlay(r)}
+            disabled={readOnly}
+            title={playingId === r.id ? '暂停' : `播放：${r.name}`}
+          >
+            <span className={styles.audioChipIcon}>
+              {playingId === r.id ? <Pause size={13} strokeWidth={2} /> : <Music2 size={13} strokeWidth={2} />}
+            </span>
+            <span className={styles.audioChipName}>{r.name}</span>
+            <span
+              role="button"
+              tabIndex={-1}
+              className={styles.audioChipRemove}
+              onClick={(ev) => {
+                ev.stopPropagation();
+                handleRemoveRef(r.id);
+              }}
+              title="移除"
+            >
+              <XCircle size={14} strokeWidth={2} />
+            </span>
+          </button>
+        ))}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".mp3,audio/mpeg"
+          multiple
+          className={styles.hiddenInput}
+          onChange={handleAudioFileChange}
+        />
       </div>
 
       {/* 输入框 */}
@@ -167,34 +319,13 @@ export default function AudioDialog({ onClose, onSend, initialText, initialModel
       {/* 底部状态栏 */}
       <div className={styles.bottomBar}>
         <div className={styles.barLeft}>
-          {/* 模式（音频生成） */}
-          <div className={styles.modeWrap} ref={modeWrapRef}>
-            <button className={styles.modeBtn} onClick={() => setModeOpen((v) => !v)}>
-              <AudioLines size={14} strokeWidth={2} />
-              <span>音频生成</span>
-              <ChevronDown
-                size={10}
-                strokeWidth={2}
-                className={`${styles.modeArrow} ${modeOpen ? styles.modeArrowUp : ''}`}
-              />
-            </button>
-            {modeOpen && (
-              <div className={styles.modeDropdown}>
-                <button className={`${styles.modeOption} ${styles.modeOptionActive}`} onClick={() => setModeOpen(false)}>
-                  音频生成
-                </button>
-                {/* AI 音乐暂未上线：展示但禁用 */}
-                <button className={styles.modeOption} disabled title="即将上线">
-                  <span className={styles.modeOptionRow}>
-                    <Music size={12} strokeWidth={2} />
-                    AI 音乐
-                  </span>
-                </button>
-              </div>
-            )}
+          {/* 模式：固定显示「音频生成」，无下拉（AI 音乐已废弃） */}
+          <div className={styles.modeBtn}>
+            <AudioLines size={14} strokeWidth={2} />
+            <span>音频生成</span>
           </div>
 
-          {/* 模型（真实） */}
+          {/* 模型选择 */}
           <div className={styles.modeWrap} ref={modelWrapRef}>
             <button className={styles.modeBtn} onClick={() => setModelOpen((v) => !v)} disabled={readOnly}>
               <span>{currentModel?.model_label ?? '选择模型'}</span>

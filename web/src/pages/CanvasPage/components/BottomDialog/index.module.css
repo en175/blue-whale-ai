@@ -7,10 +7,11 @@
   bottom: var(--spacing-lg);
   left: 50%;
   transform: translateX(-50%);
-  width: 640px;
+  width: 740px;
   max-width: 90%;
-  /* 与 ImageDialog/.AudioDialog 统一：三者共用同一 min-height，空态严格等高 */
-  min-height: 230px;
+  /* 与 ImageDialog/.AudioDialog 固定等高；内容超高时窗口内滚动 */
+  height: 200px;
+  overflow-y: auto;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -174,12 +175,12 @@
   flex-wrap: wrap;
 }
 
-/* 媒体缩略图（与按钮同尺寸正方形） */
+/* 媒体缩略图（与按钮同尺寸正方形）——与 ImageDialog/AudioDialog 统一 56×56，圆角 12px */
 .mediaThumb {
   position: relative;
-  width: 48px;
-  height: 48px;
-  border-radius: var(--radius-md);
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--color-border-secondary);
   flex-shrink: 0;
@@ -244,11 +245,11 @@
   pointer-events: none;
 }
 
-/* 上传按钮（与缩略图同尺寸正方形） */
+/* 上传按钮（与缩略图同尺寸正方形）——与 ImageDialog/AudioDialog 统一 56×56，圆角 12px */
 .mediaBtn {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--radius-md);
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -897,7 +898,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm, 8px);
-  padding: var(--spacing-sm, 8px) 0;
+  /* 与下方 textarea/编辑器的垂直间距：16px，与 ImageDialog 统一 */
+  margin-bottom: var(--spacing-lg, 16px);
 }
 
 .refSlot {
