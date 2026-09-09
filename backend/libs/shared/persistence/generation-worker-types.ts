@@ -52,6 +52,11 @@ export interface ClaimedVideoJob {
   fencingToken: number;
   /** 已轮询次数（rescheduleVideoPoll 累计）。IKBBXH：轮询上限判定用。 */
   pollCount: number;
+  /** IKEA26：瞬时网络错误重排时保持轮询进度显示不倒退（rescheduleVideoPoll 落库用）。 */
+  progress: number;
+  /** IKEA26：父 job 的 provider_task_id（retry job 有 retry_of_job_id 时查）。
+   *  第 3 层防双扣：retry job 先查上游旧 task 状态，SUCCESS 则复用结果不重新 submit。 */
+  parentProviderTaskId: string | null;
   /** IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null）。 */
   reservedAmountFen: bigint | null;
 }

@@ -1311,6 +1311,480 @@ describe("video job runner material library references", () => {
       expect.objectContaining({ code: "provider_failed" }),
     );
   });
+
+  // IKEA26：poll 阶段瞬时网络错误（NewApiNetworkError/NewApiTimeoutError/5xx/429）不应 fail，
+  // 走 rescheduleVideoPoll 继续轮询；4xx 业务错误仍 fail。第 3 层 retry job 复用父 job 上游结果。
+  it("reschedules instead of failing when poll throws a transient network error (IKEA26)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const { NewApiError, NewApiNetworkError, NewApiTimeoutError } = await import(
+      "@blue-whale/core"
+    );
+    const scheduleNext = vi.fn().mockResolvedValue(undefined);
+    const rescheduleVideoPoll = vi.fn().mockResolvedValue(true);
+    const failVideoJob = vi.fn().mockResolvedValue(true);
+    const poll = vi
+      .fn()
+      .mockRejectedValueOnce(new NewApiNetworkError("new-api 不可达"))
+      .mockRejectedValueOnce(new NewApiTimeoutError("new-api 不可达"))
+      .mockRejectedValueOnce(new NewApiError("upstream 503", 503))
+      .mockRejectedValueOnce(new NewApiError("upstream 429", 429));
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "312",
+        projectId: "55",
+        userId: "9",
+        input: { provider_credential: "sealed-token" },
+        providerTaskId: "upstream-312",
+        cancelRequested: false,
+        workerId: "worker-ikea26",
+        fencingToken: 1,
+        pollCount: 0,
+        progress: 25,
+        parentProviderTaskId: null,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn(),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll,
+      publishVideoResult: vi.fn(),
+      failVideoJob,
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+    const { runVideoJobStep: run } = await import("./video-job-runner.js");
+
+    for (let i = 0; i < 4; i += 1) {
+      await run({
+        repo,
+        workerId: "worker-ikea26",
+        jobId: "312",
+        createProvider: () => ({ submit: vi.fn(), poll }),
+        credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+        mediaRelay: { persist: vi.fn() },
+        scheduleNext,
+      });
+    }
+
+    expect(poll).toHaveBeenCalledTimes(4);
+    expect(rescheduleVideoPoll).toHaveBeenCalledTimes(4);
+    expect(failVideoJob).not.toHaveBeenCalled();
+    expect(rescheduleVideoPoll).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: "312", progress: 25 }),
+    );
+    expect(scheduleNext).toHaveBeenCalledWith("312", VIDEO_POLL_INTERVAL_MS);
+  });
+
+  it("fails when poll throws a 4xx business error (IKEA26)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const { NewApiError } = await import("@blue-whale/core");
+    const failVideoJob = vi.fn().mockResolvedValue(true);
+    const rescheduleVideoPoll = vi.fn().mockResolvedValue(true);
+    const poll = vi
+      .fn()
+      .mockRejectedValue(new NewApiError("上游视频任务不存在", 404));
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "313",
+        projectId: "55",
+        userId: "9",
+        input: { provider_credential: "sealed-token" },
+        providerTaskId: "upstream-313",
+        cancelRequested: false,
+        workerId: "worker-ikea26",
+        fencingToken: 1,
+        pollCount: 0,
+        progress: 25,
+        parentProviderTaskId: null,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn(),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll,
+      publishVideoResult: vi.fn(),
+      failVideoJob,
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikea26",
+      jobId: "313",
+      createProvider: () => ({ submit: vi.fn(), poll }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+    });
+
+    expect(failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: "313", code: "provider_failed" }),
+    );
+    expect(rescheduleVideoPoll).not.toHaveBeenCalled();
+  });
+
+  it("reuses parent upstream result on retry job instead of resubmitting (IKEA26)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn();
+    const poll = vi.fn().mockResolvedValue({
+      status: "succeeded",
+      progress: 100,
+      url: "https://tos.test/reused-video.mp4",
+      error: null,
+    });
+    const persist = vi.fn().mockResolvedValue({
+      url: "https://tos.test/reused-video.mp4",
+      storageKey: "videos/reused.mp4",
+      mime: "video/mp4",
+      size: 12345,
+    });
+    const publishVideoResult = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "314",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "重试复用",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikea26",
+        fencingToken: 1,
+        pollCount: 0,
+        progress: 0,
+        parentProviderTaskId: "upstream-parent-314",
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult,
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikea26",
+      jobId: "314",
+      createProvider: () => ({ submit, poll }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist },
+      scheduleNext: vi.fn(),
+    });
+
+    expect(poll).toHaveBeenCalledWith("upstream-parent-314");
+    expect(submit).not.toHaveBeenCalled();
+    expect(persist).toHaveBeenCalledWith(
+      "https://tos.test/reused-video.mp4",
+      "9",
+    );
+    expect(publishVideoResult).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: "314" }),
+    );
+  });
+
+  it("warns on cost telemetry when reuse path has quota but reserved deviates (IKEA26)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const warn = vi.fn();
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "317",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "重试复用偏差",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikea26",
+        fencingToken: 1,
+        pollCount: 0,
+        progress: 0,
+        parentProviderTaskId: "upstream-parent-317",
+        // IK9VZ0：预留 100 fen，实扣经 quotaToFen 换算后远大于预留 → 偏差告警
+        reservedAmountFen: 100n,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn().mockResolvedValue(true),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+    const quotaToFen = vi.fn().mockReturnValue(10000n);
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikea26",
+      jobId: "317",
+      createProvider: () => ({
+        submit: vi.fn(),
+        poll: vi.fn().mockResolvedValue({
+          status: "succeeded",
+          progress: 100,
+          url: "https://tos.test/reused-317.mp4",
+          quota: 100,
+          error: null,
+        }),
+      }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: {
+        persist: vi.fn().mockResolvedValue({
+          url: "https://tos.test/reused-317.mp4",
+          storageKey: "videos/reused-317.mp4",
+          mime: "video/mp4",
+          size: 123,
+        }),
+      },
+      quotaToFen,
+      warn,
+      scheduleNext: vi.fn(),
+    });
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("视频复用结果实扣与预留偏差超阈值"),
+    );
+  });
+
+  it("resubmits on retry job when parent succeeded but returned no url (IKEA26)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "new-task", status: "queued" });
+    const poll = vi.fn().mockResolvedValue({
+      status: "succeeded",
+      progress: 100,
+      url: null,
+      error: null,
+    });
+    const markVideoSubmitted = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "318",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "重试成功无url",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikea26",
+        fencingToken: 1,
+        pollCount: 0,
+        progress: 0,
+        parentProviderTaskId: "upstream-parent-318",
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted,
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikea26",
+      jobId: "318",
+      createProvider: () => ({ submit, poll }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn(),
+    });
+
+    expect(poll).toHaveBeenCalledWith("upstream-parent-318");
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(markVideoSubmitted).toHaveBeenCalledWith(
+      expect.objectContaining({ providerTaskId: "new-task" }),
+    );
+  });
+
+  it("resubmits on retry job when reuse publish fails (fencing race, IKEA26)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "new-task", status: "queued" });
+    const poll = vi.fn().mockResolvedValue({
+      status: "succeeded",
+      progress: 100,
+      url: "https://tos.test/reused-319.mp4",
+      error: null,
+    });
+    const persist = vi.fn().mockResolvedValue({
+      url: "https://tos.test/reused-319.mp4",
+      storageKey: "videos/reused-319.mp4",
+      mime: "video/mp4",
+      size: 123,
+    });
+    const publishVideoResult = vi.fn().mockResolvedValue(false);
+    const markVideoSubmitted = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "319",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "重试复用publish失败",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikea26",
+        fencingToken: 1,
+        pollCount: 0,
+        progress: 0,
+        parentProviderTaskId: "upstream-parent-319",
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted,
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult,
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikea26",
+      jobId: "319",
+      createProvider: () => ({ submit, poll }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist },
+      scheduleNext: vi.fn(),
+    });
+
+    // publish 返回 false → 视为未复用 → 重新 submit（防 job 无终态悬挂）
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(markVideoSubmitted).toHaveBeenCalledWith(
+      expect.objectContaining({ providerTaskId: "new-task" }),
+    );
+  });
+
+  it("resubmits on retry job when parent upstream failed or missing (IKEA26)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "new-task", status: "queued" });
+    const poll = vi.fn().mockResolvedValue({
+      status: "failed",
+      progress: 100,
+      url: null,
+      error: { code: "provider_failed", message: "上游失败" },
+    });
+    const markVideoSubmitted = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "315",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "重试上游失败",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikea26",
+        fencingToken: 1,
+        pollCount: 0,
+        progress: 0,
+        parentProviderTaskId: "upstream-parent-315",
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted,
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikea26",
+      jobId: "315",
+      createProvider: () => ({ submit, poll }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn(),
+    });
+
+    expect(poll).toHaveBeenCalledWith("upstream-parent-315");
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(markVideoSubmitted).toHaveBeenCalledWith(
+      expect.objectContaining({ providerTaskId: "new-task" }),
+    );
+  });
+
+  it("resubmits on retry job when parent upstream query fails (D6, IKEA26)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const { NewApiNetworkError } = await import("@blue-whale/core");
+    const submit = vi.fn().mockResolvedValue({ taskId: "new-task", status: "queued" });
+    const poll = vi.fn().mockRejectedValue(new NewApiNetworkError("new-api 不可达"));
+    const markVideoSubmitted = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "316",
+        projectId: "55",
+        userId: "9",
+        input: {
+          prompt: "重试查上游失败",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          provider_credential: "sealed-token",
+        },
+        providerTaskId: null,
+        cancelRequested: false,
+        workerId: "worker-ikea26",
+        fencingToken: 1,
+        pollCount: 0,
+        progress: 0,
+        parentProviderTaskId: "upstream-parent-316",
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn().mockResolvedValue([]),
+      markVideoSubmitted,
+      rescheduleVideoPoll: vi.fn(),
+      publishVideoResult: vi.fn(),
+      failVideoJob: vi.fn(),
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikea26",
+      jobId: "316",
+      createProvider: () => ({ submit, poll }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn(),
+    });
+
+    expect(poll).toHaveBeenCalledWith("upstream-parent-316");
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(markVideoSubmitted).toHaveBeenCalledWith(
+      expect.objectContaining({ providerTaskId: "new-task" }),
+    );
+  });
 });
 
 describe("video job runner asset↔material link (IKDJNZ)", () => {

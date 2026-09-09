@@ -18,6 +18,7 @@ export {
   type NewApiRawResult,
   NewApiError,
   NewApiTimeoutError,
+  NewApiNetworkError,
   CLIENT_SYSTEM_BLUEWHALE,
 } from "./new-api-transport.js";
 

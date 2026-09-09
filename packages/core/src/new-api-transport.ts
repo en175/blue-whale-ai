@@ -58,6 +58,21 @@ export class NewApiTimeoutError extends NewApiError {
   }
 }
 
+/** 网络不可达错误（IKEA26）：fetch 无响应（连接层异常——undici `fetch failed`、
+ *  ECONNRESET/ECONNREFUSED/ETIMEDOUT 等），非 new-api 返回的业务错误。
+ *  继承 NewApiError（503，语义对齐旧「new-api 不可达」），现有 `instanceof NewApiError`
+ *  分支全部兼容；需要区分「瞬时网络抖动」与「上游 HTTP 业务失败」的调用方（如视频 runner
+ *  轮询把瞬时错误重排而非判死）判 `instanceof NewApiNetworkError`。cause 链原始异常供排查。 */
+export class NewApiNetworkError extends NewApiError {
+  constructor(message = "new-api 不可达", cause?: unknown) {
+    super(message, 503, "unreachable");
+    this.name = "NewApiNetworkError";
+    // 原生 Error cause 链原始异常（undici TypeError / ECONNRESET 等）供排查；
+    // 不塞 detail——避免 logNewApiFailure 对原始错误 JSON.stringify 污染失败日志。
+    if (cause !== undefined) this.cause = cause;
+  }
+}
+
 /** 出站客户端系统标识（网关登录白名单据此识别蓝鲸来源，见 ADR-0080）。 */
 export const CLIENT_SYSTEM_BLUEWHALE = "bluewhale";
 
@@ -213,13 +228,14 @@ async function performRequest<T>(
   } catch (error) {
     if (error instanceof NewApiError) throw error;
     // IKDQ5F：fetch 层主动 abort（AbortSignal.timeout / controller.abort）同样归超时，
-    // 供调用方区分 provider_timeout；其余网络异常保持旧语义「new-api 不可达」。
+    // 供调用方区分 provider_timeout；其余网络异常（undici fetch failed / ECONNRESET /
+    // ECONNREFUSED / ETIMEDOUT）归网络不可达（IKEA26：调用方可判 instance 做瞬时重排）。
     if (controller.signal.aborted) {
       const failed = new NewApiTimeoutError();
       logNewApiFailure(failed, path, null);
       throw failed;
     }
-    const failed = new NewApiError("new-api 不可达", 503);
+    const failed = new NewApiNetworkError("new-api 不可达", error);
     logNewApiFailure(failed, path, null);
     throw failed;
   } finally {
@@ -350,7 +366,9 @@ export function createNewApiRawRequest(
         logNewApiFailure(failed, path, null);
         throw failed;
       }
-      const failed = new NewApiError("new-api 不可达", 503);
+      // IKEA26：raw 路径（音频 provider 用）的网络异常同样归 NewApiNetworkError，
+      // 与信封路径判定一致；cause 链原始异常。
+      const failed = new NewApiNetworkError("new-api 不可达", error);
       logNewApiFailure(failed, path, null);
       throw failed;
     } finally {

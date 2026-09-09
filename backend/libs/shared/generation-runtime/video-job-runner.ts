@@ -1,5 +1,6 @@
 import { createLogger, timedProviderCall } from "@blue-whale/core/logging";
 import { composeTextAttachmentPrompt } from "@blue-whale/core";
+import { NewApiError, NewApiNetworkError, NewApiTimeoutError } from "@blue-whale/core";
 import { z } from "zod";
 import {
   ERROR_INVALID_INPUT,
@@ -53,6 +54,11 @@ export type VideoJobClaim = {
   fencingToken: number;
   /** 已轮询次数（rescheduleVideoPoll 累计）。IKBBXH：轮询上限判定用。 */
   pollCount: number;
+  /** IKEA26：瞬时网络错误重排时保持轮询进度显示不倒退（rescheduleVideoPoll 落库用）。 */
+  progress: number;
+  /** IKEA26：父 job 的 provider_task_id（retry job 有 retry_of_job_id 时查）。
+   *  第 3 层防双扣：retry job 先查上游旧 task 状态，SUCCESS 则复用结果不重新 submit。 */
+  parentProviderTaskId: string | null;
   /** IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null/undefined）。 */
   reservedAmountFen?: bigint | null;
 };
@@ -216,6 +222,15 @@ export async function runVideoJobStep(deps: {
   try {
     const provider = deps.createProvider(deps.credentialVault.open(sealedCredential));
     if (!claim.providerTaskId) {
+      // IKEA26：retry job 复用父 job 上游结果防双扣。父 job 已向上游提交过 task
+      // （provider_task_id 非空）且已失败——先查该 task 的上游状态：SUCCESS → 直接补
+      // publish（复用 URL 转存/落 assets/发布流水），不重新 submit；FAILED/不存在 →
+      // 现有逻辑重新 submit（新 task 新扣费）。上游查询本身失败（网络又抖）→ 当不存在
+      // 重新 submit（D6：多扣可接受，不设计失败分支——见工单决策）。
+      if (claim.parentProviderTaskId) {
+        const reused = await tryReuseParentResult(deps, claim, provider);
+        if (reused) return claim.id;
+      }
       const request = await buildSubmitRequest(deps.repo, claim);
       const submitted = await timedVideoProviderCall("submit", () => provider.submit(request));
       const updated = await deps.repo.markVideoSubmitted({
@@ -226,7 +241,26 @@ export async function runVideoJobStep(deps: {
       return claim.id;
     }
 
-    const observation = await timedVideoProviderCall("poll", () => provider.poll(claim.providerTaskId!));
+    // IKEA26：poll 阶段瞬时网络错误不应 fail——只是「这次查不到」，任务仍在生成，
+    // 走 rescheduleVideoPoll 继续轮询（递增 poll_count，达 MAX_VIDEO_POLLS 兜底 provider_timeout）。
+    // 仅业务性失败（task status=failed）或 4xx（task 不存在/渠道失效）才 fail。
+    let observation: VideoTaskObservation;
+    try {
+      observation = await timedVideoProviderCall("poll", () => provider.poll(claim.providerTaskId!));
+    } catch (pollError) {
+      if (isTransientPollError(pollError)) {
+        logger.warn(
+          `video job 轮询瞬时错误 jobId=${claim.id} pollCount=${claim.pollCount} err=${messageOfError(pollError)}，重排继续轮询（IKEA26）`,
+        );
+        const updated = await deps.repo.rescheduleVideoPoll({
+          ...claimIdentity(claim),
+          progress: claim.progress,
+        });
+        if (updated) await deps.scheduleNext?.(claim.id, VIDEO_POLL_INTERVAL_MS);
+        return claim.id;
+      }
+      throw pollError;
+    }
     if (observation.status === "queued" || observation.status === "processing") {
       // IK9Q1B：轮询中间态打 debug，便于定位间歇失败时观察状态演化
       logger.debug(
@@ -345,6 +379,136 @@ function claimIdentity(claim: VideoJobClaim) {
     workerId: claim.workerId,
     fencingToken: claim.fencingToken,
   };
+}
+
+/** IKEA26：poll 抛出的错误是否为「瞬时网络层错误」（应重排继续轮询而非 fail）。
+ *  网络不可达（NewApiNetworkError）/ 超时（NewApiTimeoutError）/ 上游 5xx / 429 均属瞬时；
+ *  4xx（404 task 不存在、401 渠道失效等）与信封业务失败（VideoProviderError 已由 provider
+ *  归一）属业务失败 → 走现有 fail。 */
+function isTransientPollError(error: unknown): boolean {
+  if (error instanceof NewApiNetworkError || error instanceof NewApiTimeoutError) {
+    return true;
+  }
+  if (error instanceof NewApiError) {
+    // 503 已被 NewApiNetworkError 独占（unreachable），此处只处理真实 HTTP 状态。
+    return error.status >= 500 || error.status === 429;
+  }
+  return false;
+}
+
+/** IKEA26：错误消息提取（日志用，不向用户展示 provider 原文）。 */
+function messageOfError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** IKEA26：retry job 复用父 job 上游结果。父 job 的 provider_task_id 对应的上游 task
+ *  SUCCESS → 直接用其结果 URL 走 publishVideoResult（转存/落 assets/发布流水/结单），
+ *  返回 true（已处理，不重新 submit）；上游 FAILED / 不存在 / 查询失败 → 返回 false（走
+ *  现有 submit 逻辑重新生成）。第 3 层防双扣：SUCCESS 复用即不再产生新 task、不再双扣。 */
+async function tryReuseParentResult(
+  deps: {
+    repo: VideoJobRunnerRepo;
+    workerId: string;
+    createProvider: (token: string) => VideoTaskProvider;
+    credentialVault: GenerationCredentialVault;
+    mediaRelay: VideoMediaRelay;
+    quotaToFen?: (quota: number) => bigint | undefined;
+    warn?: (message: string) => void;
+  },
+  claim: VideoJobClaim,
+  provider: VideoTaskProvider,
+): Promise<boolean> {
+  if (!claim.parentProviderTaskId) return false;
+  let observation: VideoTaskObservation;
+  try {
+    observation = await provider.poll(claim.parentProviderTaskId);
+  } catch (error) {
+    // D6：查询失败（网络又抖）→ 当不存在，走重新 submit（多扣可接受，不设计失败分支）。
+    logger.warn(
+      `video job 重试查上游失败 jobId=${claim.id} parentTask=${claim.parentProviderTaskId} err=${messageOfError(error)}，按不存在处理重新 submit（IKEA26）`,
+    );
+    return false;
+  }
+  if (observation.status !== "succeeded" || !observation.url) return false;
+  const reused = await publishVideo(claim, observation, deps);
+  // IKEA26 review：publish 落账失败（fencing 竞态）→ 视为未复用，走重新 submit。
+  // 否则 retry job 会停留在无终态（publish 要求 processing+fencing 匹配，失败即未迁移）。
+  return reused;
+}
+
+/** IKEA26：把已成功的结果 URL 走标准 publish 路径（复用 publishVideoResult，与正常轮询成功一致）。
+ *  返回 publishVideoResult 是否迁移成功（fencing 竞态时 false，调用方据此决定是否重新 submit）。 */
+async function publishVideo(
+  claim: VideoJobClaim,
+  observation: VideoTaskObservation,
+  deps: {
+    repo: VideoJobRunnerRepo;
+    workerId: string;
+    mediaRelay: VideoMediaRelay;
+    quotaToFen?: (quota: number) => bigint | undefined;
+    warn?: (message: string) => void;
+  },
+): Promise<boolean> {
+  const stored = await deps.mediaRelay.persist(observation.url!, claim.userId);
+  const inputParams =
+    claim.input.parameters && typeof claim.input.parameters === "object"
+      ? (claim.input.parameters as Record<string, unknown>)
+      : null;
+  const dimensions =
+    videoDimensions(claim.input.resolution, claim.input.aspect_ratio) ??
+    dimensionsFromSize(inputParams?.size);
+  if (!dimensions) {
+    await fail(deps.repo, claim, ERROR_INVALID_INPUT, "视频尺寸无效");
+    return false;
+  }
+  let actualAmountFen: bigint | undefined;
+  if (deps.quotaToFen && observation.quota !== undefined) {
+    actualAmountFen = deps.quotaToFen(observation.quota);
+  }
+  // IKEA26 review：复用路径同样保留实扣取证——quota 缺失告警（对齐正常轮询成功路径 IK9VZ0 ①），
+  // 实扣与预留偏差超阈值告警（IK9VZ0 ②）。复用路径是「上游已成功」的补偿落账，成本校验不该丢。
+  if (actualAmountFen === undefined) {
+    deps.warn?.(
+      `[cost] job ${claim.id} 视频复用结果实扣取证失败：task quota 缺失，actual_amount_fen 将落 0`,
+    );
+  } else if (
+    claim.reservedAmountFen !== undefined &&
+    claim.reservedAmountFen !== null &&
+    claim.reservedAmountFen > 0n
+  ) {
+    const diffRatio =
+      Number(actualAmountFen - claim.reservedAmountFen) /
+      Number(claim.reservedAmountFen);
+    if (Math.abs(diffRatio) > VIDEO_QUOTA_DEVIATION_THRESHOLD) {
+      deps.warn?.(
+        `[cost] job ${claim.id} 视频复用结果实扣与预留偏差超阈值：reserved=${claim.reservedAmountFen}fen actual=${actualAmountFen}fen（偏差 ${Math.round(Math.abs(diffRatio) * 100)}%），需人工核对`,
+      );
+    }
+  }
+  const published = await deps.repo.publishVideoResult({
+    ...claimIdentity(claim),
+    projectId: claim.projectId,
+    userId: claim.userId,
+    ...stored,
+    ...dimensions,
+    duration: Number(claim.input.duration ?? inputParams?.duration),
+    ...(actualAmountFen !== undefined ? { actualAmountFen } : {}),
+  });
+  if (published) {
+    logger.metric({
+      event: "task_finished",
+      result: "ok",
+      fields: { job_type: "video_generation", reused: "parent" },
+    });
+  } else {
+    // IKEA26 review：复用结果 publish 失败（fencing 竞态——另一 worker 已迁移状态，或更新失败）
+    // 留痕防排查黑洞；retry job 的 cost_reservations 由胜出的 claim 结算，此处不重复 settle。
+    // 镜像 failVideoJob 的「状态未迁移」告警模式。
+    logger.warn(
+      `video job 复用结果 publish 但状态未迁移 jobId=${claim.id}（fencing 竞态？）`,
+    );
+  }
+  return published;
 }
 
 async function fail(
