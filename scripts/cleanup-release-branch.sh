@@ -50,8 +50,8 @@ if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
   fail "工作区不干净，不能清理。"
 fi
 
-# 目标分支白名单（与 branch-naming.md / ADR-0004 同源）
-case "$BRANCH" in feature/*|fix/*|hotfix/*|docs/*|chore/*) ;; *) fail "分支必须使用白名单前缀：feature/ fix/ hotfix/ docs/ chore/" ;; esac
+# 目标分支白名单（与 branch-naming.md / ADR-0004 同源）；发布分支 release/* 也允许清理
+case "$BRANCH" in feature/*|fix/*|hotfix/*|docs/*|chore/*|release/*) ;; *) fail "分支必须使用白名单前缀：feature/ fix/ hotfix/ docs/ chore/ 或 release/" ;; esac
 
 # 本地分支必须存在
 git -C "$ROOT" show-ref --verify --quiet "refs/heads/$BRANCH" || fail "本地分支不存在：$BRANCH"

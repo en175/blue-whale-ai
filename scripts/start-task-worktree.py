@@ -12,6 +12,14 @@ from pathlib import Path
 
 
 ALLOWED_TYPES = ("feature", "fix", "hotfix", "docs", "chore")
+# release 分支与任务分支不同：无工单号、日期+描述命名、不建 worktree，单独校验，不进 ALLOWED_TYPES。
+# 形态：release/YYYY.MM.DD[_<描述>][_N]。描述组结构性要求至少一个 CJK 字符（长度另查），
+# 防止同日碰撞序号 "_2" 被贪吃成描述后又被长度检查误杀；_N 为碰撞序号（manage-release-branch.sh 生成）。
+RELEASE_RE = re.compile(
+    r"^release/(\d{4})\.(\d{2})\.(\d{2})"
+    r"(?:_([A-Za-z0-9\u3400-\u4dbf\u4e00-\u9fff]*[\u3400-\u4dbf\u4e00-\u9fff][A-Za-z0-9\u3400-\u4dbf\u4e00-\u9fff]*))?"
+    r"(?:_\d+)?$"
+)
 ISSUE_RE = re.compile(r"^(?=.*[A-Za-z])[A-Za-z0-9]+$")
 CHINESE_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 MERGE_MESSAGE = "chore: 同步远程 master 更新"
@@ -83,6 +91,12 @@ def build_branch(task_type, issue, summary):
 
 
 def validate_existing_branch(branch):
+    match = RELEASE_RE.fullmatch(branch)
+    if match:
+        description = match.group(4)
+        if description is not None and not 6 <= len(description) <= 15:
+            raise WorkflowError("release 分支描述必须为 6–15 个字符：{}".format(branch))
+        return branch
     try:
         task_type, suffix = branch.split("/", 1)
     except ValueError as exc:

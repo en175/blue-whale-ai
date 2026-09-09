@@ -41,7 +41,7 @@
 
 ## 发布授权与审查门槛
 
-Agent 完成子 issue 后的默认终点是**任务验收分支上的一个 commit + 验证结果汇报**：完成即直接走 `scripts/commit-task-for-review.sh -m "<message>"` 落盘（worktree 工单分支 commit 是本地可逆动作，无需用户授权门槛），停在 commit 等 review。用户 review commit 后若需修订，Agent 走 `scripts/commit-task-for-review.sh --amend`（默认保留原 message，`-m` 覆盖）覆盖最后 commit，维持一个子 issue 一个 commit 粒度。用户确认 commit 无问题后，Agent 才能通过 `scripts/merge-task-to-local-master.sh --user-authorized <branch>` 将该任务分支以 `merge --no-ff` 合入用户本地 `master`（合入门槛保持不变）。未经用户明确授权，Agent 禁止执行发布动作：
+Agent 完成子 issue 后的默认终点是**任务验收分支上的一个 commit + 验证结果汇报**：完成即直接走 `scripts/commit-task-for-review.sh -m "<message>"` 落盘（worktree 工单分支 commit 是本地可逆动作，无需用户授权门槛），停在 commit 等 review。用户 review commit 后若需修订，Agent 走 `scripts/commit-task-for-review.sh --amend`（默认保留原 message，`-m` 覆盖）覆盖最后 commit，维持一个子 issue 一个 commit 粒度。用户确认 commit 无问题后，Agent 直接走发布审查包（推送工单分支 + 创建 PR，target 当次 `release/*` 批次或 `master`，见「发布授权」与 `git-workflow.md`「发布分支流程」）；**PR 审合前不合入 master——本地集成区同理，不提前吃未审代码**，本地 `master` 在服务端合并后由开工入口同步获得。旧「先合本地 master 再提 PR」步骤废止，`merge-task-to-local-master.sh` 降为 legacy 入口。未经用户明确授权，Agent 禁止执行发布动作：
 
 - `git push`
 - 创建 PR
@@ -57,9 +57,11 @@ Agent 完成子 issue 后的默认终点是**任务验收分支上的一个 comm
 
 ```bash
 scripts/publish-review-package.sh --user-authorized --create-pr
-scripts/publish-review-package.sh --user-authorized --create-pr --target-branch release/prod
+scripts/publish-review-package.sh --user-authorized --create-pr --target-branch release/2026.09.09_资产库优化批次
 scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <推送前临时JSON>
 ```
+
+**target 选择（发布分支流程，见 `git-workflow.md`）**：产品影响路径的 feature/fix PR target 当次 `release/*` 批次分支——提 PR 前 Agent 先跑 `scripts/manage-release-branch.sh list` 拉取最近 3 个批次连同「新建批次」选项交用户选择；选新建则 `scripts/manage-release-branch.sh create --summary <中文简述> --user-authorized`（自动从同步后的 origin/master 拉出）。工程面 docs/chore 改动与 hotfix 仍 target `master`。
 
 任务分支落后时，Agent 可继续普通 `git push` 保存或协作；创建/更新 PR 前才运行 `scripts/sync-task-from-origin.sh sync --target-branch <PR目标分支> --json`（`master` 可省略参数）。该入口建立绑定目标分支的可恢复 rebase 事务，Hook 不自动同步。`--create-pr` 推送后写入绑定实际目标的短期发布标记，Agent 随后创建相同 `target_branch` 且 `draft` 非 true 的 Gitee PR；PR Hook 在 Pre 校验、创建成功 Post 消费，失败保留（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)）。`--update-pr` 从 Gitee 快照读取目标分支，并按该基线核验 IID/opened/source/target/head/冻结范围后才使用显式 lease 推送。推送后重新取快照并通过 `scripts/verify-pr-update.sh` 核验 head/conflict/diff，才可 finalize 和宣布完成。Hook 只对保护分支、发布审查包的绕过、缺授权、缺模式或缺快照兜底。
 
@@ -102,10 +104,10 @@ PR 合并用 **merge**，**禁用 squash / rebase**。
 | 禁直推 master/main | 🔴 硬挡 | pre-push：任何本地直推 `master`/`main` 一律拦，合并只在 Gitee 服务端走 PR |
 | PR 前目标基线校验 | 🔴 发布门禁 | 普通任务分支即使落后也允许日常 push；创建/更新 PR 前由 `publish-review-package.sh` 校验是否包含实际目标基线，未包含时要求先运行 `sync-task-from-origin.sh sync --target-branch <目标分支> --json`。Hook 不自动同步。 |
 | AI 破坏性 git 操作 | 🔴 硬挡 | 裸 `--force`/`-f`、对 `master`/`main` 强推、`reset --hard` / `clean -f` / `branch -D` / `checkout .` / `restore .` 均拦；工单分支上的 `--force-with-lease` 放行（前缀见 [branch-naming.md](branch-naming.md)） |
-| 本地任务提交与合入 | 🟢 放行 / 🔴 授权 | ZCode / Claude Code / Codex / Kimi CLI `PreToolUse`（`confirm-release-action.sh`）：任务分支的普通 `git commit`（含 `--amend`）与 `git merge` 放行；`commit-task-for-review.sh` 仍是推荐的 review 检查点；合入本地 master 的 `merge-task-to-local-master.sh` 仍需 `--user-authorized` |
+| 本地任务提交与合入 | 🟢 放行 / 🔴 授权 | ZCode / Claude Code / Codex / Kimi CLI `PreToolUse`（`confirm-release-action.sh`）：任务分支的普通 `git commit`（含 `--amend`）与 `git merge` 放行；`commit-task-for-review.sh` 仍是推荐的 review 检查点；`merge-task-to-local-master.sh`（legacy——PR 审合前不合本地 master）仍需 `--user-authorized` |
 | 工单分支落后软提醒 | 🟡 软提醒 | pre-commit：工单分支（前缀见 [branch-naming.md](branch-naming.md)）落后 `origin/master` 时可提示落后提交数，**不拦 commit，也不影响普通 push**。同步硬门槛位于创建/更新 PR 前。本地 `master` 不做落后提醒，它是用户本地集成区。历史演进见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md)。 |
 | squash/rebase 合并拦截 | 🔴 硬挡 | ZCode / Claude Code / Codex / Kimi CLI `PreToolUse`（`confirm-release-action.sh`，在凭证校验前）：AI 调 `mcp__gitee-ent__merge_enterprise_pull` 时 `merge_method=squash`/`rebase` 一律拦，强制 **merge**（免改写 sha 致 `git branch -d` 失败 + 拦 `-D` 死锁，见 [ADR-0006](../adr/0006-sync-mechanism-auto-block.md)）。人网页操作拦不到，靠自觉 |
-| 发布动作标准入口 | 🔴 阻断 / 🟢 凭证放行 | ZCode / Claude Code / Codex / Kimi CLI `PreToolUse` / `PostToolUse`（`confirm-release-action.sh`）：任务分支普通 `git push` 放行，`release/*` 直推硬拦；发布入口须带 `--user-authorized` 且显式选择 `--create-pr` 或 `--update-pr <IID>`，合规时静默放行。create 写 PR 标记，update 不写；合并 PR / 创建 release 需绑定对象的一次性凭证。Hook 只兜底，不自动同步或推进状态机（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)、[ADR-0012](../adr/0012-agent-noninteractive-authorization.md)、[ADR-0013](../adr/0013-open-pr-update-state-machine.md)） |
+| 发布动作标准入口 | 🔴 阻断 / 🟢 凭证放行 | ZCode / Claude Code / Codex / Kimi CLI `PreToolUse` / `PostToolUse`（`confirm-release-action.sh`）：任务分支普通 `git push` 放行，`release/*` 直推硬拦（批次管理唯一入口 `manage-release-branch.sh`：`list` 只读放行，`create` 须 `--user-authorized`）；发布入口须带 `--user-authorized` 且显式选择 `--create-pr` 或 `--update-pr <IID>`，合规时静默放行。create 写 PR 标记，update 不写；合并 PR / 创建 release 需绑定对象的一次性凭证。Hook 只兜底，不自动同步或推进状态机（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)、[ADR-0012](../adr/0012-agent-noninteractive-authorization.md)、[ADR-0013](../adr/0013-open-pr-update-state-machine.md)） |
 
 > 本表与项目 README 的「Hook 兜底清单」（如有）**同源**——改一处须同步另一处，避免漂移。权威实现以 `.githooks/` + `.claude/hooks/block-dangerous-git.sh` 代码为准。
 

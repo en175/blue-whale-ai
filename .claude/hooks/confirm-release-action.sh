@@ -308,6 +308,18 @@ if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes merg
   allow
 fi
 
+# Bash: release 分支管理入口。list 为只读放行；create 是发布动作，必须带 --user-authorized。
+# 放在 merge-task 之后、commit-task 之前：授权型检查先于无条件放行，避免复合命令短路。
+if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes manage-release-branch.sh; then
+  AUDIT_OPERATION="release-branch"
+  if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes manage-release-branch.sh list; then
+    if ! printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes manage-release-branch.sh --user-authorized; then
+      block "release 分支 create 是发布动作，缺少 --user-authorized。必须先获得用户明确授权。"
+    fi
+  fi
+  allow
+fi
+
 # Bash: 标准本地任务验收入口（worktree 工单分支 commit，本地可逆，非发布动作）。
 # 出现即放行，不校验 --user-authorized（用户确认环节落在 merge 本地 master 前）。
 if [ -n "$COMMAND" ] && printf '%s' "$COMMAND" | python3 "$PRETOOL" invokes commit-task-for-review.sh; then
