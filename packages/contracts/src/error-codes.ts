@@ -254,6 +254,69 @@ export const ASSET_ERROR_SPECS = {
 
 export type AssetErrorName = keyof typeof ASSET_ERROR_SPECS;
 
+/**
+ * 技能域（`/api/agent/skills`）错误码。
+ *
+ * **这几个码此前散在 `backend/libs/shared/skills/*.ts` 里各自 `const` 定义**，同一个 100100
+ * 在两个文件里各写一遍——正是 ADR-0083 §1 要终结的那件事（「所有领域从这里取码，不再各自定义」）。
+ * 搬进来的同时补上此前完全缺失的那一格：HTTP 状态码。
+ *
+ * 段位沿用 Java SystemCode 系的 1001xx，不另起 2xxx——这些码前端已经在用，换段位是白白制造
+ * 一次兼容问题，而本次要修的是状态码，不是码本身。
+ */
+export const SKILL_ERROR_SPECS = {
+  /** 技能不存在。文案要带上是哪个技能，所以调用点会覆写 message。 */
+  SKILL_NOT_FOUND: {
+    code: 100100,
+    status: 404,
+    message: "技能不存在",
+  },
+  /** 个人技能重名。 */
+  SKILL_NAME_CONFLICT: {
+    code: 100101,
+    status: 409,
+    message: "同名技能已存在",
+  },
+  /** 名称占用了官方技能的名字。 */
+  SKILL_NAME_RESERVED: {
+    code: 100102,
+    status: 409,
+    message: "名称与官方技能冲突",
+  },
+  /** 要添加的官方技能与用户已有的个人技能同名。 */
+  SKILL_ADD_CONFLICT: {
+    code: 100103,
+    status: 409,
+    message: "官方技能与你的个人技能同名，无法添加；你仍可直接使用",
+  },
+  /** AI 格式化这一步失败或没配置。 */
+  SKILL_FORMAT_FAILED: {
+    code: 100104,
+    status: 503,
+    message: "AI 格式化失败，请稍后重试",
+  },
+  /** 技能正被引用，不能删。 */
+  SKILL_IN_USE: {
+    code: 100105,
+    status: 409,
+    message: "技能正在使用中，无法删除",
+  },
+  /** SKILL.md 的 frontmatter 缺失或字段为空。 */
+  SKILL_FORMAT_INVALID: {
+    code: 100106,
+    status: 400,
+    message: "SKILL.md 格式不合法",
+  },
+  /** creative_skill_id / category / sort / lang 这类查询参数不合法。 */
+  SKILL_PARAM_INVALID: {
+    code: 100107,
+    status: 400,
+    message: "参数不合法",
+  },
+} as const satisfies Record<string, ErrorCodeSpec>;
+
+export type SkillErrorName = keyof typeof SKILL_ERROR_SPECS;
+
 // ═══════════════════════════════════════════════════════════════
 // 四、一码一中文文案表（对外 message 唯一来源）
 // ═══════════════════════════════════════════════════════════════
@@ -319,6 +382,9 @@ export const ERROR_CODES: Record<number, string> = {
  * 排查时最难认。声明提前到这里是因为 `ERROR_CODES` 是本文件对外的那张总表，素材域必须在表里。
  */
 for (const spec of Object.values(ASSET_ERROR_SPECS)) {
+  ERROR_CODES[spec.code] = spec.message;
+}
+for (const spec of Object.values(SKILL_ERROR_SPECS)) {
   ERROR_CODES[spec.code] = spec.message;
 }
 
@@ -400,13 +466,14 @@ export const SHARED_ASSET_TYPE_UNSUPPORTED_CODE = 100410;
  */
 const GLOBAL_CODE_HTTP_STATUS: Record<number, number> = {
   [PARAM_MISSING_CODE]: 400,
-  [DATA_NOT_EXIST_CODE]: 404,
   [RESOURCE_NOT_FOUND_CODE]: 404,
   [ASSET_UNAVAILABLE_CODE]: 503,
 };
 
-const ASSET_CODE_HTTP_STATUS: Record<number, number> = Object.fromEntries(
-  Object.values(ASSET_ERROR_SPECS).map((spec) => [spec.code, spec.status]),
+const SPEC_CODE_HTTP_STATUS: Record<number, number> = Object.fromEntries(
+  [...Object.values(ASSET_ERROR_SPECS), ...Object.values(SKILL_ERROR_SPECS)].map(
+    (spec) => [spec.code, spec.status],
+  ),
 );
 
 /**
@@ -418,5 +485,5 @@ const ASSET_CODE_HTTP_STATUS: Record<number, number> = Object.fromEntries(
  */
 export function httpStatusForCode(code: number): number {
   if (code >= 400 && code <= 599) return code;
-  return ASSET_CODE_HTTP_STATUS[code] ?? GLOBAL_CODE_HTTP_STATUS[code] ?? 400;
+  return SPEC_CODE_HTTP_STATUS[code] ?? GLOBAL_CODE_HTTP_STATUS[code] ?? 400;
 }

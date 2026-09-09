@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
-import { fail, ok } from "@blue-whale/contracts";
+import { ok, skillError } from "@blue-whale/contracts";
 import type { SkillLibraryView, SkillMineView } from "@lib/shared/persistence/index.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { SkillAdminService } from "@lib/shared/skills/skill-admin.service.js";
@@ -82,13 +82,13 @@ export class SkillsController {
       category !== "all" &&
       (category.length < 1 || category.length > CATEGORY_MAX)
     ) {
-      return fail(400, "category 参数非法");
+      throw skillError("SKILL_PARAM_INVALID", "category 参数非法");
     }
     if (body.sort !== undefined && !LIBRARY_SORTS.has(body.sort)) {
-      return fail(400, "sort 参数非法");
+      throw skillError("SKILL_PARAM_INVALID", "sort 参数非法");
     }
     if (body.lang !== undefined && !LIBRARY_LANGS.has(body.lang)) {
-      return fail(400, "lang 参数非法");
+      throw skillError("SKILL_PARAM_INVALID", "lang 参数非法");
     }
     const filter: {
       keyword?: string;
@@ -140,7 +140,7 @@ export class SkillsController {
   @Get("library/:id/content")
   async libraryContent(@Param("id") id: string) {
     const content = await this.skills.getOfficialContent(id);
-    if (content === null) return fail(404, "技能不存在或无正文");
+    if (content === null) throw skillError("SKILL_NOT_FOUND", "技能不存在或无正文");
     return ok({ content });
   }
 
@@ -159,7 +159,7 @@ export class SkillsController {
   ) {
     const content = body.content;
     if (!content || typeof content !== "string") {
-      return fail(400, "content 参数缺失");
+      throw skillError("SKILL_PARAM_INVALID", "content 参数缺失");
     }
     return handleCreateSkill(user.userId, content, this.skills);
   }
@@ -171,10 +171,10 @@ export class SkillsController {
   ) {
     const content = body.content;
     if (!content || typeof content !== "string") {
-      return fail(400, "content 参数缺失");
+      throw skillError("SKILL_PARAM_INVALID", "content 参数缺失");
     }
     const deps = createSkillFormatDeps();
-    if (!deps) return fail(100104, "AI 格式化未配置");
+    if (!deps) throw skillError("SKILL_FORMAT_FAILED", "AI 格式化未配置");
     return handleFormatSkillDraft(content, deps);
   }
 

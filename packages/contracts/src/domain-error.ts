@@ -1,9 +1,11 @@
 import {
   ASSET_ERROR_SPECS,
+  SKILL_ERROR_SPECS,
   httpStatusForCode,
   messageOf,
   type AssetErrorName,
   type ErrorCodeSpec,
+  type SkillErrorName,
 } from "./error-codes.js";
 
 /**
@@ -44,6 +46,15 @@ export class DomainError extends Error {
 export function assetError(name: AssetErrorName): DomainError {
   const spec: ErrorCodeSpec = ASSET_ERROR_SPECS[name];
   return new DomainError(spec.code, spec.message, spec.status);
+}
+
+/**
+ * 技能域同上。`message` 可覆写——那几条文案要带上具体是哪个技能，
+ * 覆写的是同一句话里的一个名字，不是另起一句。
+ */
+export function skillError(name: SkillErrorName, message?: string): DomainError {
+  const spec: ErrorCodeSpec = SKILL_ERROR_SPECS[name];
+  return new DomainError(spec.code, message ?? spec.message, spec.status);
 }
 
 export function isDomainError(value: unknown): value is DomainError {
