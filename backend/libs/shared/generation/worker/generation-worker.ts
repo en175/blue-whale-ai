@@ -11,6 +11,7 @@ import {
   type SeedAudioReference,
 } from "@lib/shared/generation-runtime/index.js";
 import { composeImagePrompt } from "@blue-whale/core";
+import { createLogger } from "@blue-whale/core/logging";
 import { z } from "zod";
 import {
   ERROR_INVALID_INPUT,
@@ -34,6 +35,8 @@ import {
 } from "../seedream-image-size.js";
 import { ImageProviderError, type ImageProvider } from "./image-provider.js";
 import { VideoProviderError, type VideoProvider } from "./video-provider.js";
+
+const logger = createLogger("generation-worker");
 
 export type WorkerDeps = {
   repo: WorkerRepo;
@@ -686,6 +689,17 @@ async function processClaimedJob(
         ? e.code
         : ERROR_PROVIDER_FAILED;
     const msg = e instanceof Error ? e.message : "unknown";
+    // 失败必留痕——异常堆栈是定位间歇失败的关键，之前图片/音频失败只落库不打 worker 日志，
+    // 出现「DB 已 failed 但 worker 无任何日志」的排查黑洞（对齐视频 job 985 的教训，见 video-job-runner）。
+    if (e instanceof Error) {
+      logger.error(
+        `processClaimedJob 异常 jobId=${job.id} type=${job.type} code=${code}: ${e.stack ?? e.message}`,
+      );
+    } else {
+      logger.error(
+        `processClaimedJob 异常 jobId=${job.id} type=${job.type} code=${code}: ${String(e)}`,
+      );
+    }
     // 图片瞬时失败（网络不可达 / 转存失败等）按指数退避回 queued 重试，不再一次判死。
     // 对应线上 job 416「new-api 不可达」类：实际下次调用即可成功（已 curl 验证 new-api 可达）。
     if (
