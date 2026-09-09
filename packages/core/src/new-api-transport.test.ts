@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   NewApiError,
+  NewApiNetworkError,
   NewApiTimeoutError,
   createNewApiRawRequest,
 } from "./new-api-transport.js";
@@ -81,5 +82,44 @@ describe("createNewApiRawRequest（IKDQ5F）", () => {
     expect(error).toBeInstanceOf(NewApiError);
     expect((error as NewApiTimeoutError).status).toBe(503);
     expect((error as NewApiTimeoutError).code).toBe("timeout");
+  });
+
+  // IKEA26：fetch 无响应（连接层异常，undici fetch failed / ECONNRESET 等）→ NewApiNetworkError，
+  // 供视频轮询把瞬时网络抖动重排而非判死。
+  it("fetch 网络不可达 → NewApiNetworkError（instanceof NewApiError，status 503 / code unreachable）", async () => {
+    const rawRequest = createNewApiRawRequest({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async () => {
+        throw new TypeError("fetch failed");
+      },
+    });
+    const error = await rawRequest("/v1/audio/speech", { method: "POST" }, "sk-t").then(
+      () => null,
+      (e) => e as unknown,
+    );
+    expect(error).toBeInstanceOf(NewApiNetworkError);
+    expect(error).toBeInstanceOf(NewApiError);
+    expect((error as NewApiNetworkError).status).toBe(503);
+    expect((error as NewApiNetworkError).code).toBe("unreachable");
+    expect((error as NewApiNetworkError).cause).toBeInstanceOf(TypeError);
+  });
+
+  it("fetch 网络不可达（信封路径）→ NewApiNetworkError（cause 链原错误）", async () => {
+    const { createNewApiClient } = await import("./new-api-client.js");
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async () => {
+        throw new TypeError("fetch failed");
+      },
+    });
+    const error = await client.getVideoTask("sk-t", "task-1").then(
+      () => null,
+      (e) => e as unknown,
+    );
+    expect(error).toBeInstanceOf(NewApiNetworkError);
+    expect(error).toBeInstanceOf(NewApiError);
+    expect((error as NewApiNetworkError).status).toBe(503);
+    expect((error as NewApiNetworkError).code).toBe("unreachable");
+    expect((error as NewApiNetworkError).cause).toBeInstanceOf(TypeError);
   });
 });

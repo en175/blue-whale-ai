@@ -44,6 +44,7 @@ export {
   createNewApiRawRequest,
   NewApiError,
   NewApiTimeoutError,
+  NewApiNetworkError,
   type NewApiRawRequest,
   type NewApiRawResult,
   CLIENT_SYSTEM_BLUEWHALE,

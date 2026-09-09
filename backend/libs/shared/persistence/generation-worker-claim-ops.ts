@@ -310,6 +310,19 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<
         fencingToken: Number(candidate.fencing_token + 1n),
         /** IKBBXH：轮询次数（rescheduleVideoPoll 累计），供轮询上限判定。 */
         pollCount: Number(candidate.poll_count ?? 0),
+        /** IKEA26：瞬时网络错误重排时保持轮询进度显示不倒退（rescheduleVideoPoll 落库用）。 */
+        progress: Number(candidate.progress ?? 0),
+        // IKEA26：父 job 的 provider_task_id（retry job 有 retry_of_job_id 时查）。
+        // candidate 行已含 retry_of_job_id（findFirst 全行返回）——非 retry job 零额外查询；
+        // 仅 retry job 多查一次父 job（1 查询），按归属 scope 防未来跨租户路径。
+        parentProviderTaskId: candidate.retry_of_job_id
+          ? await loadParentProviderTaskId(
+              prisma,
+              candidate.retry_of_job_id,
+              candidate.user_id,
+              candidate.project_id,
+            )
+          : null,
         // IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null）。
         reservedAmountFen: await loadReservationFen(prisma, candidate.id),
       };
@@ -622,9 +635,41 @@ export function createWorkerClaimOps(prisma: PrismaClient): Pick<
         fencingToken: Number(candidate.fencing_token + 1n),
         /** IKBBXH：轮询次数（rescheduleVideoPoll 累计），供轮询上限判定。 */
         pollCount: Number(candidate.poll_count ?? 0),
+        /** IKEA26：瞬时网络错误重排时保持轮询进度显示不倒退（rescheduleVideoPoll 落库用）。 */
+        progress: Number(candidate.progress ?? 0),
+        // IKEA26：父 job 的 provider_task_id（retry job 有 retry_of_job_id 时查）。
+        // candidate 行已含 retry_of_job_id（findFirst 全行返回）——非 retry job 零额外查询；
+        // 仅 retry job 多查一次父 job（1 查询），按归属 scope 防未来跨租户路径。
+        parentProviderTaskId: candidate.retry_of_job_id
+          ? await loadParentProviderTaskId(
+              prisma,
+              candidate.retry_of_job_id,
+              candidate.user_id,
+              candidate.project_id,
+            )
+          : null,
         // IK9VZ0：视频实扣二次校验的基准（预留金额，fen；无预留/查询失败为 null）。
         reservedAmountFen: await loadReservationFen(prisma, candidate.id),
       };
     },
   };
+}
+
+/** IKEA26：查 retry job 的父 job provider_task_id（第 3 层防双扣用）。
+ *  retry job 创建时带 retry_of_job_id（generation-command-repo），父 job 上存着上次
+ *  提交的上游 task id；worker claim retry job 时据此查上游旧 task 状态，SUCCESS 则
+ *  复用结果不重新 submit，避免双份生成 + 双份扣费。非 retry job 不调用（调用方先判
+ *  retry_of_job_id 非空）。按 user_id/project_id scope 查父 job，防未来 worker 无归属
+ *  scope 的路径读到跨租户数据（retryJob 创建时已校验归属，此处自证不变式）。 */
+async function loadParentProviderTaskId(
+  prisma: PrismaClient,
+  parentJobId: bigint,
+  userId: bigint,
+  projectId: bigint | null,
+): Promise<string | null> {
+  const parent = await prisma.generation_jobs.findFirst({
+    where: { id: parentJobId, user_id: userId, project_id: projectId },
+    select: { provider_task_id: true },
+  });
+  return parent?.provider_task_id ?? null;
 }

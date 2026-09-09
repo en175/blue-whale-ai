@@ -163,6 +163,9 @@ describe("generation video worker repo", () => {
       fencingToken: 5,
       // IKBBXH：mock 未提供 poll_count → 轮询次数兜底 0
       pollCount: 0,
+      // IKEA26：mock 未提供 progress → 兜底 0；非 retry job（retry_of_job_id 缺失）→ 父任务 null
+      progress: 0,
+      parentProviderTaskId: null,
       // IK9VZ0：mock 未提供 cost_reservations → 预留查询兜底 null
       reservedAmountFen: null,
     });
