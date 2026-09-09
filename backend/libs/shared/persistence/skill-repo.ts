@@ -21,12 +21,12 @@ export { normalizeNameKey } from "./skill-repo-internals.js";
  *  - library v2（IK60WT，§11）：category 过滤、featured/most_used/newest 排序、zh/en
  *    语言解析（回退英文列再回退单语字段）、keyword 命中解析语言 name/description 与
  *    search_keywords（绝不匹配 content；IKBMA3：空白拆词 + 全词命中）；usage_count =
- *    激活埋点表 COUNT(DISTINCT user_id)；
+ *    激活埋点表 COUNT(DISTINCT user_id)（IKEEFV：埋点表已删，raw SQL 缺表容错 → 恒 0）；
  *    官方目录规模小，过滤/排序/分页在内存完成（同 listMine，确定性优先）。
  *  creative_skill / creative_skill_version 已入 Node-owned schema（prisma/schema.prisma +
  *  schema/001_baseline.sql，Java 链已退役）；读路径保留 raw SQL + 查询失败回退空
  *  （旧库缺表/缺列不阻塞主路径）；写路径 deletePersonal 不容错，失败直接抛错；
- *  recordActivation 为埋点写，best-effort 容错，不阻塞消息接纳主路径。 */
+ *  IKCKOW：recordActivation 埋点写全仓零调用方，随 creative_skill_activation 表（IKEEFV）一并移除。 */
 
 export function createSkillRepo(prisma: PrismaClient): SkillRepo {
   return {
@@ -461,21 +461,5 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
       );
     },
 
-    async recordActivation(rec) {
-      // 埋点只增不改、best-effort：旧库缺表/写失败不阻塞消息接纳主路径（契约 §11.3）。
-      try {
-        await prisma.creative_skill_activation.create({
-          data: {
-            creative_skill_id: rec.creativeSkillId,
-            user_id: BigInt(rec.userId),
-            agent_run_id: rec.agentRunId,
-            skill_version: rec.skillVersion,
-            activation_source: rec.activationSource,
-          },
-        });
-      } catch {
-        // 吞掉：埋点失败不改变既有校验与错误语义。
-      }
-    },
   };
 }

@@ -295,26 +295,26 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
     async loadConversationState(projectId, userId) {
       const pid = BigInt(projectId);
       const uid = BigInt(userId);
-      const [messages, mentionRows, planMessageRows, capabilityRows, maxCursorRow, sceneCardRows, applicationRows, recordRows, previewRows] =
+      // IKEEFV：conversation_message_mentions 表已删（唯一写入点 acceptConversationMessageInTransaction
+      // 随 IKCKOW 旧引擎移除，删除时全库 0 行）。引用事实不再存在：message.mentions 恒为空，
+      // plan 冻结引用取不到 mention → 维持 missingMention="unavailable"（前端「需重新计划」）原语义。
+      // SceneCard 迁移（IKDMQM）重新定义引用来源后按需恢复本投影。
+      const mentionRows: Array<{
+        id: bigint;
+        message_id: bigint;
+        accepted_user_id: bigint;
+        mention_seq: number;
+        mention_type: ConversationMentionType;
+        target_id: bigint;
+        target_version: number | null;
+        display_name: string;
+        snapshot: unknown;
+      }> = [];
+      const [messages, planMessageRows, capabilityRows, maxCursorRow, sceneCardRows, applicationRows, recordRows, previewRows] =
         await Promise.all([
           prisma.conversation_messages.findMany({
             where: { project_id: pid, is_delete: 0 },
             orderBy: { sequence_no: "asc" },
-          }),
-          prisma.conversation_message_mentions.findMany({
-            where: { project_id: pid },
-            orderBy: [{ message_id: "asc" }, { mention_seq: "asc" }],
-            select: {
-              id: true,
-              message_id: true,
-              accepted_user_id: true,
-              mention_seq: true,
-              mention_type: true,
-              target_id: true,
-              target_version: true,
-              display_name: true,
-              snapshot: true,
-            },
           }),
           prisma.plan_messages.findMany({
             where: { project_id: pid },
