@@ -139,8 +139,8 @@ describe("error-codes", () => {
   });
 
   it("旧码归一 canonical", () => {
-    expect(resolveErrorCode("invalid_video_inputs")).toBe("invalid_input");
-    expect(resolveErrorCode("invalid_reference_video")).toBe("invalid_input");
+    expect(resolveErrorCode("invalid_video_inputs")).toBe("invalid_reference");
+    expect(resolveErrorCode("invalid_reference_video")).toBe("invalid_reference");
     expect(resolveErrorCode("unsupported_video_inputs")).toBe(
       "unsupported_input",
     );
@@ -161,21 +161,21 @@ describe("error-codes", () => {
 });
 
 describe("projectPublicError", () => {
-  it("canonical 码 → 数值码 + 中文 message（无 retryable/params/details）", () => {
+  it("canonical 码 → 数值码 + 码表文案（上游原文不返给用户）", () => {
     const out = projectPublicError(
       { code: "provider_failed", message: "上游英文原文" },
       "image",
     );
     expect(out).not.toBeNull();
     expect(out!.code).toBe(1011);
-    // IKDZGM / ADR-0083：一码一文案——provider_failed 统一文案，不再按 type 分词。
+    // 码表优先（ADR-0078）：provider_failed 统一文案，不返上游英文原文。
     expect(out!.message).toBe("生成服务响应异常");
     expect("retryable" in out!).toBe(false);
     expect("params" in out!).toBe(false);
     expect("details" in out!).toBe(false);
   });
 
-  it("quota_exhausted：1001 + 充值引导文案", () => {
+  it("quota_exhausted：1001 + 码表文案（上游英文不回显）", () => {
     // 真实案例 job 1494：provider_failed + overdue balance 英文
     const out = projectPublicError(
       {
@@ -188,16 +188,16 @@ describe("projectPublicError", () => {
     expect(out!.message).toBe("账户余额不足，请充值后重试");
   });
 
-  it("旧码归一：历史 invalid_video_inputs → invalid_input 数值码 + 中文", () => {
+  it("旧码归一：历史 invalid_video_inputs → invalid_reference 数值码 1034 + 码表文案", () => {
     const out = projectPublicError(
       { code: "invalid_video_inputs", message: "首帧只能指定一个来源" },
       "video",
     );
-    expect(out!.code).toBe(1002);
-    expect(out!.message).toBe("输入参数无效");
+    expect(out!.code).toBe(1034);
+    expect(out!.message).toBe("参考素材无效，请重新选择");
   });
 
-  it("白名单外码 fallback 到类型兜底再映射数值码", () => {
+  it("白名单外码 fallback 到类型兜底：码表文案（视频生成失败）", () => {
     const out = projectPublicError({ code: "some_new_code" }, "video");
     expect(out!.code).toBe(1021); // video_generation_failed
     expect(out!.message).toBe("视频生成失败");

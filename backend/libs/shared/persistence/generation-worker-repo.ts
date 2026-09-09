@@ -10,6 +10,7 @@ import { createWorkerMediaExtractOps } from "./generation-worker-media-extract-o
 import type { WorkerRepo } from "./generation-worker-types.js";
 
 export * from "./generation-worker-types.js";
+export { createWorkerAssetOps } from "./generation-worker-asset-ops.js";
 
 export function createWorkerRepo(prisma: PrismaClient): WorkerRepo {
   return {

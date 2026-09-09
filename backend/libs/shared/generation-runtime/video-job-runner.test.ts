@@ -239,7 +239,7 @@ describe("video job runner recovery", () => {
       name: "unsupported video MIME",
       model: "doubao-seedance-2-0-260128",
       assets: [{ id: "1", type: "video", url: "https://tos.test/1.webm", mime: "video/webm", size: 100, duration: 3 }],
-      code: "invalid_input",
+      code: "invalid_reference_media",
     },
     {
       name: "video larger than 200 MB",
@@ -252,13 +252,13 @@ describe("video job runner recovery", () => {
         size: 200 * 1024 * 1024 + 1,
         duration: 3,
       }],
-      code: "invalid_input",
+      code: "invalid_reference_media",
     },
     {
       name: "video shorter than two seconds",
       model: "doubao-seedance-2-0-260128",
       assets: [{ id: "1", type: "video", url: "https://tos.test/1.mp4", mime: "video/mp4", size: 100, duration: 1.9 }],
-      code: "invalid_input",
+      code: "invalid_reference_media",
     },
     {
       name: "video with a side shorter than 300 pixels",
@@ -273,7 +273,7 @@ describe("video job runner recovery", () => {
         height: 180,
         duration: 3,
       }],
-      code: "invalid_input",
+      code: "invalid_reference_media",
     },
     {
       name: "video below the minimum total pixel count",
@@ -288,7 +288,7 @@ describe("video job runner recovery", () => {
         height: 360,
         duration: 3,
       }],
-      code: "invalid_input",
+      code: "invalid_reference_media",
     },
     {
       name: "known total duration above 15 seconds",
@@ -297,7 +297,7 @@ describe("video job runner recovery", () => {
         { id: "1", type: "video", url: "https://tos.test/1.mp4", mime: "video/mp4", size: 100, duration: 8 },
         { id: "2", type: "video", url: "https://tos.test/2.mov", mime: "video/quicktime", size: 100, duration: 8 },
       ],
-      code: "invalid_input",
+      code: "invalid_reference_media",
     },
   ])("fails $name before provider submit", async ({ model, assets, code }) => {
     const { runVideoJobStep } = await import("./video-job-runner.js");
@@ -402,7 +402,7 @@ describe("video job runner recovery", () => {
     expect(repo.resolveInputAssets).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
     expect(repo.failVideoJob).toHaveBeenCalledWith(
-      expect.objectContaining({ code: "invalid_input" }),
+      expect.objectContaining({ code: "invalid_reference" }),
     );
     // IK9VZ0 I5：派发前失败（未提交，无 providerTaskId）→ release_note = refund_confirmed
     expect(repo.failVideoJob).toHaveBeenCalledWith(
@@ -1107,7 +1107,7 @@ describe("video job runner material library references", () => {
 
     expect(submit).not.toHaveBeenCalled();
     expect(repo.failVideoJob).toHaveBeenCalledWith(
-      expect.objectContaining({ code: "invalid_input" }),
+      expect.objectContaining({ code: "invalid_reference" }),
     );
   });
 
@@ -1154,7 +1154,7 @@ describe("video job runner material library references", () => {
 
     expect(submit).not.toHaveBeenCalled();
     expect(repo.failVideoJob).toHaveBeenCalledWith(
-      expect.objectContaining({ code: "invalid_input" }),
+      expect.objectContaining({ code: "invalid_reference" }),
     );
   });
 

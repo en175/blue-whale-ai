@@ -15,6 +15,8 @@ import { createLogger } from "@blue-whale/core/logging";
 import { z } from "zod";
 import {
   ERROR_INVALID_INPUT,
+  ERROR_INVALID_REFERENCE,
+  ERROR_INVALID_REFERENCE_TYPE,
   ERROR_MODEL_UNAVAILABLE,
   ERROR_NO_RESULT,
   ERROR_PROVIDER_CONFIG,
@@ -317,7 +319,7 @@ async function processClaimedJob(
   // IKE4GC：音频参考素材走新单数组 references；旧字段 reference_asset_ids 对音频仍不支持，防御拦截。
   if (job.type === "audio" && referenceIds.length > 0) {
     await failClaimed(
-      ERROR_UNSUPPORTED_INPUT,
+      ERROR_INVALID_REFERENCE,
       "音频生成暂不支持旧参考字段，请使用 references",
     );
     return job.id;
@@ -344,7 +346,7 @@ async function processClaimedJob(
   }
   if (referenceIds.length > maxReferenceCount) {
     await failClaimed(
-      ERROR_UNSUPPORTED_INPUT,
+      ERROR_INVALID_REFERENCE,
       `当前模型最多支持 ${maxReferenceCount} 张参考图`,
     );
     return job.id;
@@ -357,7 +359,7 @@ async function processClaimedJob(
     sourceAssets.length !== referenceIds.length ||
     sourceAssets.some((asset) => asset.type !== "image")
   ) {
-    await failClaimed(ERROR_UNSUPPORTED_INPUT, "参考素材不存在或无权访问");
+    await failClaimed(ERROR_INVALID_REFERENCE, "参考素材不存在或无权访问");
     return job.id;
   }
 
@@ -532,7 +534,7 @@ async function processClaimedJob(
     if (mapping.parser === "gpt" || mapping.parser === "banana") {
       const mapped = mapImageChannelRequest(mapping, sizeId, aspectRatio);
       if (!mapped.ok) {
-        await failClaimed(ERROR_INVALID_INPUT, "模型、分辨率与宽高比组合不受支持");
+        await failClaimed(ERROR_INVALID_REFERENCE_TYPE, "模型、分辨率与宽高比组合不受支持");
         return job.id;
       }
       providerSize = mapped.size;
@@ -545,7 +547,7 @@ async function processClaimedJob(
         aspectRatio,
       );
       if (!providerSize) {
-        await failClaimed(ERROR_INVALID_INPUT, "模型、分辨率与宽高比组合不受支持");
+        await failClaimed(ERROR_INVALID_REFERENCE_TYPE, "模型、分辨率与宽高比组合不受支持");
         return job.id;
       }
     }
