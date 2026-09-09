@@ -40,7 +40,8 @@ describe("resolveAgentAsset", () => {
       current,
     );
 
-    expect(current.findAccessible).toHaveBeenCalledWith("9", "123", "7");
+    // 只拿素材号和人查，不带项目号：素材是一个人的共享池，项目不是权限边界。
+    expect(current.findAccessible).toHaveBeenCalledWith("123", "7");
     expect(outcome).toEqual({
       kind: "ok",
       value: {

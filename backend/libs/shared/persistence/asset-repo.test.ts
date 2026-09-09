@@ -431,3 +431,52 @@ describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
     await expect(repo.countReferencingProjects("42", "9")).resolves.toBe(1);
   });
 });
+
+describe("createAssetRepo.findAccessible", () => {
+  /**
+   * 归属按人算，不按项目算。
+   *
+   * 这条守的是一次真实故障：md5 去重（IKCNLS）跨项目复用素材时只写 `project_asset` 关联行，
+   * `assets.project_id` 仍是第一次上传的那个项目。当时这里的 where 带着 `project_id`，于是
+   * 同一张图传进第二个项目后 agent 一律读不到——画布上看得见、resolve 返回 404，用户看到的
+   * 错话是「服务端打开文件失败」，像文件坏了。
+   *
+   * 断言 where **不含** `project_id`，而不只是断言查得到：查得到可以靠 mock 蒙对，
+   * 少一个过滤条件才是这条修复的实质。
+   */
+  it("只按素材号与用户查，不带项目号", async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      storage_key: "uploads/49/image/a.jpg",
+      type: "image",
+      mime: "image/jpeg",
+      size: 274_779n,
+      duration_ms: null,
+    });
+    const repo = createAssetRepo({ assets: { findFirst } } as never);
+
+    const asset = await repo.findAccessible("5942", "49");
+
+    expect(asset).toEqual({
+      storage_key: "uploads/49/image/a.jpg",
+      type: "image",
+      mime: "image/jpeg",
+      size: 274_779n,
+      duration_seconds: null,
+    });
+    const where = findFirst.mock.calls[0][0].where;
+    expect(where).toEqual({
+      id: 5942n,
+      user_id: 49n,
+      status: "normal",
+      is_delete: false,
+    });
+    expect(where).not.toHaveProperty("project_id");
+  });
+
+  it("查不到返回 null", async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const repo = createAssetRepo({ assets: { findFirst } } as never);
+
+    await expect(repo.findAccessible("5942", "49")).resolves.toBeNull();
+  });
+});
