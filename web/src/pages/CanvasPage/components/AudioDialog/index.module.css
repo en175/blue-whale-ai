@@ -7,10 +7,13 @@
   bottom: var(--spacing-lg);
   left: 50%;
   transform: translateX(-50%);
-  width: 640px;
+  width: 740px;
   max-width: 90%;
-  min-height: 200px;
-  height: auto;
+  /* 与 ImageDialog/.BottomDialog 固定等高；内容超高时窗口内滚动 */
+  height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   background-color: #1e1e1e;
   border: 1px solid var(--color-border-primary);
   border-radius: 16px;
@@ -69,7 +72,7 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
 }
 
 .refWrap {
@@ -77,9 +80,9 @@
 }
 
 .refBtn {
-  width: 44px;
-  height: 44px;
-  border-radius: var(--radius-md);
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -271,29 +274,41 @@
   display: none;
 }
 
-/* ---- 音频参考芯片（替换原图片缩略图样式） ---- */
+/* ---- 音频参考芯片（替换原图片缩略图样式；点击播放/暂停） ---- */
 .audioChip {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  max-width: 180px;
-  padding: 6px 28px 6px 8px;
+  gap: 5px;
+  max-width: 140px;
+  padding: 5px 26px 5px 6px;
   border-radius: 20px;
   background-color: #2a2a2a;
   border: 1px solid var(--color-border-secondary);
-  cursor: default;
+  cursor: pointer;
   flex-shrink: 0;
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+  font-family: inherit;
+  color: inherit;
 }
 
-.audioChip:hover {
+.audioChip:hover:not(:disabled) {
   border-color: var(--color-border-hover);
 }
 
+.audioChip:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* 播放中：accent 高亮提示当前在播 */
+.audioChipPlaying {
+  border-color: var(--color-accent-text, #4c6ef5);
+}
+
 .audioChipIcon {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -309,7 +324,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 120px;
+  max-width: 88px;
 }
 
 .audioChipRemove {
@@ -324,8 +339,6 @@
   align-items: center;
   justify-content: center;
   color: var(--color-text-tertiary);
-  background-color: transparent;
-  border: none;
   cursor: pointer;
   transition: all var(--transition-fast);
 }

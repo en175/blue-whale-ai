@@ -48,6 +48,8 @@ async function renderDialog(props: { attachments?: ImageTextAttachment[]; onSend
         onSend,
         attachments: props.attachments,
         onReorderAttachments: props.onReorderAttachments,
+        videoMediaRefs: { reference: [] },
+        videoDraftBinding: { onParamsChange: vi.fn() },
       }),
     );
   });
@@ -131,7 +133,7 @@ describe('BottomDialog 文本附件（IKDLQG）', () => {
       resolution: '720p',
       duration: 5,
       mode: 'all',
-    }, []);
+    });
   });
 
   it('附件正文仅含空白时沿用提示词必填（发送禁用）', async () => {

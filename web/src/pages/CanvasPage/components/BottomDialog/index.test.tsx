@@ -67,6 +67,8 @@ async function renderDialog(onClose = vi.fn()) {
       createElement(BottomDialog, {
         onClose,
         onSend: vi.fn(),
+        videoMediaRefs: { reference: [] },
+        videoDraftBinding: { onParamsChange: vi.fn() },
       }),
     );
   });

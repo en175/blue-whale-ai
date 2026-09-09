@@ -11,7 +11,17 @@
 }
 
 .canvasContainer :global(.react-flow__edge-path) {
-  stroke-width: 2;
+  stroke-width: 3;
+}
+
+/* 拖动连线时的预览线，与已建立连线保持同宽 */
+.canvasContainer :global(.react-flow__connection-path) {
+  stroke-width: 3;
+}
+
+/* 从 Handle 向外拖时出现的连接预览路径 */
+.canvasContainer :global(.react-flow__connectionline path) {
+  stroke-width: 3;
 }
 
 .canvasContainer :global(.react-flow__handle) {

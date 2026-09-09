@@ -159,7 +159,7 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/** 默认画布：文本节点 t1 + 就绪图片 m1（assetId a1）+ 视频节点 v1 */
+/** 默认画布：文本节点 t1 + 就绪图片 m1（assetId a1）+ 视频节点 v1 + 图片草稿 d1 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -170,6 +170,7 @@ function seedDoc() {
         { id: 't1', type: 'textNode', position: { x: 0, y: 0 }, data: { title: '故事文案', text: '一只蓝鲸在海里' } },
         { id: 'm1', type: 'mediaNode', position: { x: 200, y: 0 }, data: { src: 'http://img/m1.png', mediaType: 'image', fileName: '素材图一', assetId: 'a1' } },
         { id: 'v1', type: 'mediaNode', position: { x: 400, y: 0 }, data: { src: 'http://vid/v1.mp4', mediaType: 'video', fileName: '素材视频', assetId: 'a9' } },
+        { id: 'd1', type: 'mediaNode', position: { x: 420, y: 160 }, data: { src: '', mediaType: 'image', fileName: '图片草稿', genStatus: 'draft', draft: true, prompt: '' } },
       ],
       edges: [],
     },
@@ -220,13 +221,13 @@ async function typePrompt(text: string) {
   });
 }
 
-/** 点击侧栏图片入口创建草稿并绑定面板，返回草稿节点 id */
+/** 点击画布草稿卡 d1 打开绑定面板（草稿绑定路径），返回草稿节点 id */
 async function createDraft(): Promise<string> {
+  const draft = flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1')!;
   await act(async () => {
-    toolbarProps.current.onToggleImageDialog();
+    flowProps.current.onNodeClick(draft);
   });
-  const draft = flowProps.current.mediaNodes.find((n: Node) => n.data?.draft === true)!;
-  return draft.id;
+  return 'd1';
 }
 
 function connect(source: string, target: string) {
@@ -357,21 +358,17 @@ describe('IKDMQR Dock 选择 → 连线', () => {
   });
 
   it('Dock 选取非法来源（待生成草稿/视频）明确提示且不建立连线', async () => {
+    // 追加第二张待生成草稿 d2 作为非法来源（draft 状态不可作参考）
+    ((canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> }).nodes).push({
+      id: 'd2',
+      type: 'mediaNode',
+      position: { x: 440, y: 160 },
+      data: { src: '', mediaType: 'image', fileName: '图片草稿', genStatus: 'draft', draft: true, prompt: '' },
+    });
     await renderPage();
-    const draftId = await createDraft();
-    // 再建一张草稿作为非法来源
-    await act(async () => {
-      toolbarProps.current.onToggleImageDialog();
-    });
-    const otherDraft = flowProps.current.mediaNodes
-      .filter((n: Node) => n.data?.draft === true)
-      .find((n: Node) => n.id !== draftId)!;
-    // 面板已重新绑定到最新草稿；切回第一个草稿的面板
-    const first = flowProps.current.mediaNodes.find((n: Node) => n.id === draftId)!;
-    await act(async () => {
-      flowProps.current.onNodeClick(first);
-    });
+    await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
+    const otherDraft = flowProps.current.mediaNodes.find((n: Node) => n.id === 'd2')!;
 
     await enterPickMode();
 
@@ -466,6 +463,7 @@ describe('IKDMQR 画布连线来源校验', () => {
         nodes: [
           { id: 'm1', type: 'mediaNode', position: { x: 200, y: 0 }, data: { src: 'http://img/m1.png', mediaType: 'image', fileName: '素材图一', assetId: 'a1' } },
           { id: 'm1-copy', type: 'mediaNode', position: { x: 220, y: 0 }, data: { src: 'http://img/m1.png', mediaType: 'image', fileName: '素材图一 副本', assetId: 'a1' } },
+          { id: 'd1', type: 'mediaNode', position: { x: 420, y: 160 }, data: { src: '', mediaType: 'image', fileName: '图片草稿', genStatus: 'draft', draft: true, prompt: '' } },
           ...Array.from({ length: 9 }, (_, i) => ({
             id: `mx${i}`, type: 'mediaNode', position: { x: 300 + i * 10, y: 0 },
             data: { src: `http://img/mx${i}.png`, mediaType: 'image', fileName: `素材${i}`, assetId: `ax${i}` },
@@ -510,6 +508,7 @@ describe('IKDMQR 画布连线来源校验', () => {
           { id: 'm-u', type: 'mediaNode', position: { x: 200, y: 0 }, data: { src: 'http://img/u.png', mediaType: 'image', fileName: '下划线形态', asset_id: 'a7' } },
           { id: 'm-c', type: 'mediaNode', position: { x: 220, y: 0 }, data: { src: 'http://img/u.png', mediaType: 'image', fileName: '驼峰形态', assetId: 'a7' } },
           { id: 'm-x', type: 'mediaNode', position: { x: 240, y: 0 }, data: { src: 'http://img/x.png', mediaType: 'image', fileName: '其他素材', assetID: 'a8' } },
+          { id: 'd1', type: 'mediaNode', position: { x: 420, y: 160 }, data: { src: '', mediaType: 'image', fileName: '图片草稿', genStatus: 'draft', draft: true, prompt: '' } },
         ],
         edges: [],
       },

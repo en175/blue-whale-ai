@@ -7,10 +7,11 @@
   bottom: var(--spacing-lg);
   left: 50%;
   transform: translateX(-50%);
-  width: 640px;
+  width: 740px;
   max-width: 90%;
-  /* IKA715：固定高度改为最小高度，参考素材增多时自然增高，不再裁切底部控件 */
-  min-height: 200px;
+  /* 与 ImageDialog/.AudioDialog 固定等高；内容超高时窗口内滚动 */
+  height: 200px;
+  overflow-y: auto;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -174,12 +175,12 @@
   flex-wrap: wrap;
 }
 
-/* 媒体缩略图（与按钮同尺寸正方形） */
+/* 媒体缩略图（与按钮同尺寸正方形）——与 ImageDialog/AudioDialog 统一 56×56，圆角 12px */
 .mediaThumb {
   position: relative;
-  width: 48px;
-  height: 48px;
-  border-radius: var(--radius-md);
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--color-border-secondary);
   flex-shrink: 0;
@@ -244,11 +245,11 @@
   pointer-events: none;
 }
 
-/* 上传按钮（与缩略图同尺寸正方形） */
+/* 上传按钮（与缩略图同尺寸正方形）——与 ImageDialog/AudioDialog 统一 56×56，圆角 12px */
 .mediaBtn {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--radius-md);
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -882,6 +883,14 @@
   border: 1px dashed var(--color-accent-text, #4c6ef5);
 }
 
+/* 首尾帧空占位：按钮内展示「首帧/尾帧」文字（无图时） */
+.mediaBtnLabel {
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
 /* ============================================
  * IKDMQS 草稿绑定参考角色区：首帧/尾帧/普通参考分组展示连线推导的输入
  * ============================================ */
@@ -889,7 +898,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm, 8px);
-  padding: var(--spacing-sm, 8px) 0;
+  /* 与下方 textarea/编辑器的垂直间距：16px，与 ImageDialog 统一 */
+  margin-bottom: var(--spacing-lg, 16px);
 }
 
 .refSlot {
@@ -919,9 +929,9 @@
   pointer-events: none;
 }
 
-/* 首帧/尾帧徽标强调（普通参考保持中性） */
+/* 首帧/尾帧徽标强调（普通参考保持中性）：灰色底，禁用蓝色 */
 .refRoleBadgeFrame {
-  background-color: rgba(76, 110, 245, 0.85);
+  background-color: rgba(42, 42, 42, 0.85);
 }
 
 /* 角色切换按钮组：悬停缩略图时可见（与移除按钮同层） */

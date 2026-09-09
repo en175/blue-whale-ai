@@ -445,8 +445,8 @@ describe('IKDLQG 视频目标接线', () => {
     expect(projectId).toBe('p1');
     expect(payload.type).toBe('video');
     expect(payload.target_node_id).toBe('v1');
-    // 视频节点自身作为参考素材（旧语义保留），与目标语义并存
-    expect(payload.reference_asset_ids).toEqual(['a9']);
+    // 原位重新生成：视频节点自身不再作为参考素材（旧自由模式语义已随统一迁移退役）
+    expect(payload.reference_asset_ids).toBeUndefined();
     expect(payload.parameters.prompt).toBe('');
 
     // 保存串行化：先落盘（含未防抖编辑与连线）再创建任务

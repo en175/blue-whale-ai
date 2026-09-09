@@ -1,5 +1,5 @@
 /* ============================================
- * CustomEdge 自定义连线边：贝塞尔路径与彗星流光动画
+ * CustomEdge 自定义连线边：贝塞尔路径 + 虚线流动
  * ============================================ */
 import { getBezierPath, useReactFlow, type EdgeProps } from '@xyflow/react';
 import { Scissors } from 'lucide-react';
@@ -27,44 +27,13 @@ export default function CustomEdge({
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    // 受控连线（IKDLQF）：deleteElements 经 onEdgesChange 上抛 remove 变更，由父级落状态并纳入自动保存
     void deleteElements({ edges: [{ id }] });
   };
 
-  const grad = `url(#flow-grad-${id})`;
-
   return (
     <g className={styles.edgeGroup}>
-      {/* 浅蓝 → 深蓝 渐变 */}
-      <defs>
-        <linearGradient
-          id={`flow-grad-${id}`}
-          gradientUnits="userSpaceOnUse"
-          x1={sourceX}
-          y1={sourceY}
-          x2={targetX}
-          y2={targetY}
-        >
-          <stop offset="0%" stopColor="#7dd8fa" />
-          <stop offset="100%" stopColor="#1e56c8" />
-        </linearGradient>
-      </defs>
-
-      {/* 可见基础连线 */}
+      {/* 连线 */}
       <path d={edgePath} fill="none" className={styles.basePath} />
-
-      {/* 外层虚化光晕 */}
-      <path d={edgePath} fill="none" className={styles.flowGlow} stroke={grad} />
-
-      {/* 8 层等宽描边叠加：头部对齐、宽度 0.5px 递进，模糊融合成平滑渐细 */}
-      <path d={edgePath} fill="none" className={styles.flow1} stroke={grad} />
-      <path d={edgePath} fill="none" className={styles.flow2} stroke={grad} />
-      <path d={edgePath} fill="none" className={styles.flow3} stroke={grad} />
-      <path d={edgePath} fill="none" className={styles.flow4} stroke={grad} />
-      <path d={edgePath} fill="none" className={styles.flow5} stroke={grad} />
-      <path d={edgePath} fill="none" className={styles.flow6} stroke={grad} />
-      <path d={edgePath} fill="none" className={styles.flow7} stroke={grad} />
-      <path d={edgePath} fill="none" className={styles.flow8} stroke={grad} />
 
       {/* 透明粗路径扩大悬停区域 */}
       <path

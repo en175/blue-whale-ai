@@ -163,6 +163,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const [refFiles, setRefFiles] = useState<
     { file?: File; preview: string; type: 'image' | 'video'; assetId?: string | number }[]
   >([]);
+  /** 当前是否首尾帧模式（对齐画布：首尾帧为两个独立槽位，各一张图片） */
+  const isKeyframe = videoMode === 'firstlast';
+  /** 首尾帧模式专用：首帧/尾帧各一张图片。提交按 first→last 拼进 refs，保证顺序兼容画布映射 */
+  const [keyframeRefs, setKeyframeRefs] = useState<{
+    first?: { file?: File; preview: string; type: 'image'; assetId?: string | number };
+    last?: { file?: File; preview: string; type: 'image'; assetId?: string | number };
+  }>({});
+  /** 首尾帧槽位当前的添加目标（本地上传/资产/角色库共用分流） */
+  const [slotTarget, setSlotTarget] = useState<'first' | 'last' | null>(null);
   /** 校验类轻提示（顶部弹出，自动消失） */
   const [toast, setToast] = useState('');
   const toastTimer = useRef<number | null>(null);
@@ -191,6 +200,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   >([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** 首尾帧槽位占位按钮的定位 ref（本地上传/资产/角色库菜单按对应槽定位） */
+  const firstSlotRef = useRef<HTMLButtonElement>(null);
+  const lastSlotRef = useRef<HTMLButtonElement>(null);
 
   const creationRef = useRef<HTMLDivElement>(null);
   const reasoningRef = useRef<HTMLDivElement>(null);
@@ -222,12 +234,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     setImageAspectRatio(pickRatioForSize(model, nextSize, model.default_aspect_ratio));
   };
 
-  // 首尾帧模式校验：选中该模式或参考上传变化时，要求恰好两张图片，否则弹出提示
+  // 首尾帧模式校验：至少上传一张图片（首帧或尾帧）即可，不再强制成对
   useEffect(() => {
-    if (videoMode !== 'firstlast') return;
-    const ok = refFiles.length === 2 && refFiles.every((r) => r.type === 'image');
-    if (!ok) showToast('首尾帧模式需上传两张图片作为首帧与尾帧参考');
-  }, [videoMode, refFiles, showToast]);
+    if (!isKeyframe) return;
+    const ok = keyframeRefs.first || keyframeRefs.last;
+    if (!ok) showToast('首尾帧模式需至少上传一张图片（首帧或尾帧）');
+  }, [isKeyframe, keyframeRefs, showToast]);
 
   // 视频模型列表加载 / 切换模型后：当前参数若不在新模型能力内，套用该模型默认值（接口为唯一数据源）
   useEffect(() => {
@@ -394,15 +406,25 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         duration,
         // 首页模式键映射画布模式：首尾帧→keyframe；其余保留原键（omni→all、text2video→text2video）
         mode: videoMode === 'firstlast' ? 'keyframe' : (videoMode === 'text2video' ? 'text2video' : 'all'),
-        refs: refFiles.map((r) => ({
-          preview: r.preview,
-          type: r.type,
-          file: r.file,
-          assetId: r.assetId,
-        })),
+        refs: isKeyframe
+          ? ([keyframeRefs.first, keyframeRefs.last].filter(Boolean) as (
+              { file?: File; preview: string; type: 'image'; assetId?: string | number }
+            )[]).map((r) => ({
+              preview: r.preview,
+              type: r.type,
+              file: r.file,
+              assetId: r.assetId,
+            }))
+          : refFiles.map((r) => ({
+              preview: r.preview,
+              type: r.type,
+              file: r.file,
+              assetId: r.assetId,
+            })),
       });
       setInputValue('');
-      setRefFiles([]);
+      if (isKeyframe) setKeyframeRefs({});
+      else setRefFiles([]);
       navigateToNewProject(navigate, { genKind: 'video' });
       return;
     }
@@ -450,6 +472,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const handleSend = () => {
     const text = inputValue.trim();
     if (!text) return;
+    // 首尾帧模式：发送时必须首帧与尾帧齐全
+    if (keyframeSendHint) {
+      showToast(keyframeSendHint);
+      return;
+    }
     // 首页不发送：先校验登录，未登录弹登录框
     if (!user) {
       pendingAction.current = { kind: 'send', text };
@@ -620,16 +647,35 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       : (selectedVideoModel?.features?.max_reference_images ?? 0);
   const videoImagesFull = videoRefImageCount >= videoMaxImages;
   const videoVideosFull = videoRefVideoCount >= MAX_VIDEOS;
-  /** 首尾帧模式必须恰好 2 张图片（不多不少、不含视频），否则禁止发送 */
-  const firstlastInvalid =
-    videoMode === 'firstlast' &&
-    !(refFiles.length === 2 && refFiles.every((r) => r.type === 'image'));
+  /** 首尾帧模式发送校验：添加阶段允许先只传一个（首帧/尾帧），但发送时必须首帧与尾帧齐全。
+   *  keyframeSendHint 非空表示不完整，用于发送按钮 title 与点击时的 toast 提示缺项。 */
+  const keyframeSendHint = isKeyframe
+    ? !keyframeRefs.first && !keyframeRefs.last
+      ? '请补充首帧/尾帧'
+      : !keyframeRefs.first
+        ? '请补充首帧'
+        : !keyframeRefs.last
+          ? '请补充尾帧'
+          : ''
+    : '';
   /** AI 图片参考图上限：产品约定 9 张（与画布 ImageDialog REF_LIMITS.image 一致），取接口值和约定的较小值 */
   const imageMaxImages = Math.min(selectedImageModel?.features?.max_reference_images ?? 0, REF_LIMITS.image);
 
   // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
   const handleRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
+    // 首尾帧模式：每个槽位只接受一张图片，写入目标槽（本地上传已限定 accept=image/*）
+    if (isKeyframe) {
+      const image = files.find((f) => f.type.startsWith('image/'));
+      if (image && slotTarget) {
+        const item = { file: image, preview: URL.createObjectURL(image), type: 'image' as const };
+        setKeyframeRefs((prev) =>
+          slotTarget === 'first' ? { ...prev, first: item } : { ...prev, last: item },
+        );
+      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
     let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
     let vidRoom = Math.max(0, MAX_VIDEOS - videoRefVideoCount);
     const newFiles = files
@@ -729,6 +775,17 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
    *  （assetId 去重 + 图片/视频分类型上限截断；超限/重复合并为一条提示，与画布视频入口口径一致） */
   const handleCharacterLibrarySelect = (assets: MaterialAsset[]) => {
     setShowCharacterLibrary(false);
+    // 首尾帧模式：角色库仅取一张图片写入目标槽
+    if (isKeyframe) {
+      const image = assets.find((a) => a.AssetType === 'Image');
+      if (image && slotTarget) {
+        const item = { preview: image.URL, type: 'image' as const, assetId: image.Id };
+        setKeyframeRefs((prev) =>
+          slotTarget === 'first' ? { ...prev, first: item } : { ...prev, last: item },
+        );
+      }
+      return;
+    }
     const existing = new Set(
       refFiles.filter((r) => r.assetId != null).map((r) => String(r.assetId)),
     );
@@ -776,6 +833,21 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     if (!rect) return;
     setRefMenuPos({ top: rect.bottom + 8, left: rect.left });
     setRefMenu(key);
+  };
+
+  /** 首尾帧槽位添加：按对应槽定位打开来源菜单（本地上传/资产/角色库） */
+  const openKeyframeSlotMenu = (slot: 'first' | 'last') => {
+    const el = slot === 'first' ? firstSlotRef.current : lastSlotRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setRefMenuPos({ top: rect.bottom + 8, left: rect.left });
+    setSlotTarget(slot);
+    setRefMenu('video');
+  };
+
+  /** 首尾帧槽位移除：只清对应槽 */
+  const removeKeyframeSlot = (slot: 'first' | 'last') => {
+    setKeyframeRefs((prev) => (slot === 'first' ? { last: prev.last } : { first: prev.first }));
   };
 
   /** 资产选择确认：按来源注入对应 tab 的参考/附件列表
@@ -828,6 +900,17 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     }
 
     if (target === 'video') {
+      // 首尾帧模式：仅取一张图片写入目标槽
+      if (isKeyframe) {
+        const image = assets.find((a) => a.type === 'image');
+        if (image && slotTarget) {
+          const item = { preview: image.url, type: 'image' as const, assetId: image.id };
+          setKeyframeRefs((prev) =>
+            slotTarget === 'first' ? { ...prev, first: item } : { ...prev, last: item },
+          );
+        }
+        return;
+      }
       const existing = new Set(
         refFiles.filter((r) => r.assetId != null).map((r) => String(r.assetId)),
       );
@@ -905,6 +988,58 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             <div className={styles.videoContent}>
               {/* 参考文件预览 + 上传（顶部行） */}
               <div className={styles.refArea}>
+                {isKeyframe ? (
+                  /* 首尾帧模式：首帧 + 尾帧两个独立槽位同一行（对齐画布） */
+                  <div className={styles.refSlotRow}>
+                    {keyframeRefs.first ? (
+                      <div className={styles.refSlot}>
+                        <div className={styles.refThumb}>
+                          <img src={keyframeRefs.first.preview} alt="" className={styles.refThumbMedia} />
+                          <span className={styles.refSlotBadge}>首帧</span>
+                          <button
+                            className={styles.refThumbRemove}
+                            onClick={() => removeKeyframeSlot('first')}
+                          >
+                            <X size={12} strokeWidth={2} />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        ref={firstSlotRef}
+                        className={styles.refSlotAdd}
+                        onClick={() => openKeyframeSlotMenu('first')}
+                      >
+                        <Plus size={16} strokeWidth={2} />
+                        <span>首帧</span>
+                      </button>
+                    )}
+                    {keyframeRefs.last ? (
+                      <div className={styles.refSlot}>
+                        <div className={styles.refThumb}>
+                          <img src={keyframeRefs.last.preview} alt="" className={styles.refThumbMedia} />
+                          <span className={styles.refSlotBadge}>尾帧</span>
+                          <button
+                            className={styles.refThumbRemove}
+                            onClick={() => removeKeyframeSlot('last')}
+                          >
+                            <X size={12} strokeWidth={2} />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        ref={lastSlotRef}
+                        className={styles.refSlotAdd}
+                        onClick={() => openKeyframeSlotMenu('last')}
+                      >
+                        <Plus size={16} strokeWidth={2} />
+                        <span>尾帧</span>
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <>
                 {refFiles.map((item, idx) => (
                   <div key={idx} className={styles.refThumbWrap}>
                     <div className={styles.refThumb}>
@@ -939,6 +1074,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   <Plus size={16} strokeWidth={2} />
                   <span>参考</span>
                 </div>
+                  </>
+                )}
               </div>
               {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
               <div className={styles.textareaWrap}>
@@ -961,7 +1098,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             <input
               ref={fileInputRef}
               type="file"
-              accept={videoImagesFull ? 'video/*' : videoVideosFull ? 'image/*' : 'image/*,video/*'}
+              accept={isKeyframe ? 'image/*' : videoImagesFull ? 'video/*' : videoVideosFull ? 'image/*' : 'image/*,video/*'}
               multiple
               style={{ display: 'none' }}
               onChange={handleRefFiles}
@@ -1093,10 +1230,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
               <div className={styles.videoParamsRight}>
                 <button
-                  className={`${styles.sendBtn} ${inputValue.trim() && !firstlastInvalid ? styles.sendBtnActive : ''}`}
+                  className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
-                  disabled={!inputValue.trim() || firstlastInvalid}
-                  title={firstlastInvalid ? '首尾帧模式需恰好 2 张图片' : '发送'}
+                  disabled={!inputValue.trim()}
+                  title={keyframeSendHint || '发送'}
                 >
                   <ChevronUp size={18} strokeWidth={2.5} />
                 </button>
@@ -1138,7 +1275,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   }}
                 >
                   <Plus size={16} strokeWidth={2} />
-                  <span>图片</span>
+                  <span>参考</span>
                 </div>
               </div>
               {/* 提示词输入框：与智能体 tab 共享草稿状态，画廊卡片按当前选中 tab 带入；说明文字仅作空态 placeholder */}
@@ -1329,7 +1466,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   }}
                 >
                   <Plus size={16} strokeWidth={2} />
-                  <span>附件</span>
+                  <span>参考</span>
                 </div>
               </div>
 

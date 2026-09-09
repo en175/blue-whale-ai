@@ -240,6 +240,38 @@ function seedDraftDoc() {
   };
 }
 
+/** 含空白音频草稿 d1 的画布文档（无参数无连线）：绑定面板默认参数落值与提交链路的测试基线 */
+function seedEmptyDraftDoc() {
+  canvasDocMock.current = {
+    doc: {
+      id: 11,
+      version: 3,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [
+        { id: 't1', type: 'textNode', position: { x: 0, y: 0 }, data: { title: '故事文案', text: '一只蓝鲸在海里' } },
+        {
+          id: 'm1',
+          type: 'mediaNode',
+          position: { x: 200, y: 0 },
+          data: { src: 'http://img/m1.png', mediaType: 'image', fileName: '目标图', assetId: 'a1' },
+        },
+        {
+          id: 'd1',
+          type: 'mediaNode',
+          position: { x: 420, y: 160 },
+          data: { src: '', mediaType: 'audio', fileName: '音频草稿', genStatus: 'draft', draft: true, prompt: '' },
+        },
+      ],
+      edges: [],
+    },
+    assets: {
+      a1: { asset_id: 1, type: 'image', access_url: 'http://img/m1.png', width: 100, height: 100 },
+    },
+    refetch: () => Promise.resolve([]),
+    acceptDoc: vi.fn(),
+  };
+}
+
 let root: Root;
 let container: HTMLDivElement;
 
@@ -289,6 +321,15 @@ async function clickSidebarAudio() {
   });
 }
 
+/** 点击画布草稿卡 d1 打开绑定面板（草稿绑定路径），返回草稿节点 id */
+async function openDraftPanel(): Promise<string> {
+  const draft = flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1')!;
+  await act(async () => {
+    flowProps.current.onNodeClick(draft);
+  });
+  return 'd1';
+}
+
 /** 等待音频模型能力加载完成（发送前置条件） */
 async function waitModelReady() {
   await vi.waitFor(() => expect(container.textContent).toContain('测试音频模型'), { timeout: 3000 });
@@ -308,59 +349,59 @@ afterEach(async () => {
 });
 
 describe('IKDMQT 音频草稿创建与编辑', () => {
-  it('侧栏点击先建音频草稿卡并绑定面板：自动选中、不创建生成任务', async () => {
+  it('侧栏音频入口仅打开面板：不建卡、不创建任务（自由模式）', async () => {
     await renderPage();
     const before = flowProps.current.mediaNodes.length;
 
     await clickSidebarAudio();
 
-    const drafts = draftNodes();
-    expect(drafts).toHaveLength(1);
-    expect(flowProps.current.mediaNodes).toHaveLength(before + 1);
-    const draft = drafts[0]!;
-    expect(draft.type).toBe('mediaNode');
-    expect(draft.data.mediaType).toBe('audio');
-    expect(draft.data.genStatus).toBe('draft');
-    expect(draft.data.draft).toBe(true);
-    expect(draft.data.fileName).toBe('音频草稿');
-    expect(draft.data.assetId).toBeUndefined();
-    expect(draft.selected).toBe(true);
-    // 其它节点取消选中
-    expect(flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')!.selected).toBeFalsy();
-
-    // 面板打开且绑定该草稿（空描述时发送禁用）
+    // 点击入口不新建任何节点、不建草稿
+    expect(flowProps.current.mediaNodes).toHaveLength(before);
+    expect(draftNodes()).toHaveLength(0);
+    // 仅点击入口不创建任务
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+    // 面板打开（模型能力加载后空描述时发送禁用）
     expect(promptTextarea()).toBeTruthy();
     await waitModelReady();
     expect(sendButton().disabled).toBe(true);
-
-    // 建卡与编辑不产生任务
-    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-
-    // 草稿随自动保存上送（genStatus=draft、draft 标记持久化）
-    await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalled(), { timeout: 3000 });
-    const payload = apiMocks.saveCanvasDoc.mock.calls.at(-1)![1];
-    const saved = payload.nodes.find((n) => n.id === draft.id)!;
-    expect(saved.data.genStatus).toBe('draft');
-    expect(saved.data.draft).toBe(true);
-    expect(saved.data.mediaType).toBe('audio');
   });
 
-  it('连续点击侧栏入口每次新增独立草稿', async () => {
+  it('侧栏自由模式发送：直接落生成卡（无 target_node_id）', async () => {
+    await renderPage();
+    await clickSidebarAudio();
+    await waitModelReady();
+    await typePrompt('自由模式音效');
+
+    await act(async () => {
+      sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
+    expect(payload.type).toBe('audio');
+    expect(payload.target_node_id).toBeUndefined();
+    expect(payload.parameters.prompt).toBe('自由模式音效');
+    expect(payload.parameters.model_id).toBe('a-test');
+    // 生成卡落画布（seed m1 + 新生成卡）
+    expect(flowProps.current.mediaNodes).toHaveLength(2);
+  });
+
+  it('连续点击侧栏入口：不建卡，面板保持打开', async () => {
     await renderPage();
 
     await clickSidebarAudio();
     await clickSidebarAudio();
 
-    const drafts = draftNodes();
-    expect(drafts).toHaveLength(2);
-    expect(drafts[0]!.id).not.toBe(drafts[1]!.id);
+    expect(flowProps.current.mediaNodes).toHaveLength(1);
+    expect(draftNodes()).toHaveLength(0);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+    expect(promptTextarea()).toBeTruthy();
   });
 
   it('面板编辑实时写回草稿节点（描述与模型）；参数随自动保存落盘', async () => {
+    seedEmptyDraftDoc();
     await renderPage();
-    await clickSidebarAudio();
-    const draftId = draftNodes()[0]!.id;
+    const draftId = await openDraftPanel();
 
     await waitModelReady();
     await typePrompt('轻快的海浪声');
@@ -418,10 +459,10 @@ describe('IKDMQT 音频草稿创建与编辑', () => {
 
 describe('IKDMQT 原位提交与首次生成', () => {
   it('点击生成才提交：先落盘后建任务、携带 target_node_id、节点数不变、成功回填同一张卡', async () => {
+    seedEmptyDraftDoc();
     await renderPage();
-    await clickSidebarAudio();
-    const draftId = draftNodes()[0]!.id;
-    const positionBefore = { ...draftNodes()[0]!.position };
+    const draftId = await openDraftPanel();
+    const positionBefore = { ...flowProps.current.mediaNodes.find((n: Node) => n.id === draftId)!.position };
 
     await waitModelReady();
     await typePrompt('轻快的海浪声');
@@ -469,9 +510,9 @@ describe('IKDMQT 原位提交与首次生成', () => {
       progress: 10,
       asset: null,
     }));
+    seedEmptyDraftDoc();
     await renderPage();
-    await clickSidebarAudio();
-    const draftId = draftNodes()[0]!.id;
+    const draftId = await openDraftPanel();
 
     // 草稿态可连线（音频草稿不校验来源，画布连线保持现状）
     await act(async () => {
@@ -512,9 +553,9 @@ describe('IKDMQT 原位提交与首次生成', () => {
   it('建任务 401：草稿回退待生成（标题恢复「音频草稿」），卡片与参数保留', async () => {
     const { ApiError } = await import('@/api/http');
     apiMocks.createGenerationJob.mockRejectedValueOnce(new ApiError(401, '未登录'));
+    seedEmptyDraftDoc();
     await renderPage();
-    await clickSidebarAudio();
-    const draftId = draftNodes()[0]!.id;
+    const draftId = await openDraftPanel();
 
     await waitModelReady();
     await typePrompt('轻快的海浪声');
@@ -536,9 +577,9 @@ describe('IKDMQT 原位提交与首次生成', () => {
   it('建任务 402（配额耗尽）：草稿回退待生成（标题恢复「音频草稿」），卡片与参数保留', async () => {
     const { ApiError } = await import('@/api/http');
     apiMocks.createGenerationJob.mockRejectedValueOnce(new ApiError(402, '积分不足'));
+    seedEmptyDraftDoc();
     await renderPage();
-    await clickSidebarAudio();
-    const draftId = draftNodes()[0]!.id;
+    const draftId = await openDraftPanel();
 
     await waitModelReady();
     await typePrompt('轻快的海浪声');
@@ -565,9 +606,9 @@ describe('IKDMQT 原位提交与首次生成', () => {
       asset: null,
       error: { msg: '供应商超时' },
     }));
+    seedEmptyDraftDoc();
     await renderPage();
-    await clickSidebarAudio();
-    const draftId = draftNodes()[0]!.id;
+    const draftId = await openDraftPanel();
 
     await waitModelReady();
     await typePrompt('轻快的海浪声');
@@ -595,9 +636,9 @@ describe('IKDMQT 原位提交与首次生成', () => {
 
 describe('IKDMQT 保存失败暂停生成', () => {
   it('落盘失败中止提交并保留草稿：提示保存失败、不创建任务', async () => {
+    seedEmptyDraftDoc();
     await renderPage();
-    await clickSidebarAudio();
-    const draftId = draftNodes()[0]!.id;
+    const draftId = await openDraftPanel();
 
     await waitModelReady();
     await typePrompt('轻快的海浪声');
