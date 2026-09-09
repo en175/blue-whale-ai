@@ -386,6 +386,11 @@ describe('文案', () => {
   });
 
   it('耗时：一秒内保留一位小数，一分钟以上带分', () => {
+    // 5 毫秒的 freeze 曾被渲染成「0s」，读起来像没执行（IKCPQ1 D4）。
+    expect(formatDuration(5)).toBe('<0.1s');
+    expect(formatDuration(49)).toBe('<0.1s');
+    expect(formatDuration(50)).toBe('0.1s');
+    expect(formatDuration(0)).toBe('0s');
     expect(formatDuration(242)).toBe('0.2s');
     expect(formatDuration(8460)).toBe('8.5s');
     expect(formatDuration(10416)).toBe('10s');

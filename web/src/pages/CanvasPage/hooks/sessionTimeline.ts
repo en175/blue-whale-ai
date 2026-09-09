@@ -499,9 +499,17 @@ export function settledStepLabel(summary: string): string {
   return summary.startsWith('正在') ? `已${summary.slice(2)}` : summary;
 }
 
-/** `0.4s` / `10.4s` / `1m 2s`。一秒以内保留一位小数，否则「打开素材文件 0s」像没做。 */
+/**
+ * `<0.1s` / `0.4s` / `10.4s` / `1m 2s`。一秒以内保留一位小数，否则「打开素材文件 0s」像没做。
+ *
+ * 一位小数在 50 毫秒以下又四舍五入回 0，「0s」重新出现在一条真跑过的步骤上——产卡工作流的
+ * freeze 本机量到 5 毫秒，界面上就是「已固定本次创作的上下文 0s」，测试把它记成了缺陷
+ * （IKCPQ1 D4）。快到读不出秒数不等于没发生，所以这一段说「不到 0.1 秒」，不说「0 秒」。
+ * 真正的 0（服务端没给耗时）由调用方不显示这一栏来表达，不走这里。
+ */
 export function formatDuration(ms: number): string {
   const seconds = Math.max(0, ms) / 1000;
+  if (ms > 0 && seconds < 0.05) return '<0.1s';
   if (seconds < 60) return `${seconds < 10 ? Math.round(seconds * 10) / 10 : Math.round(seconds)}s`;
   const minutes = Math.floor(seconds / 60);
   const rest = Math.round(seconds % 60);
