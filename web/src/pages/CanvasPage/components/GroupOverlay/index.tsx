@@ -61,7 +61,7 @@ export default function GroupOverlay({
   setNodes,
   onGroupFrameDragStop,
 }: GroupOverlayProps) {
-  const { flowToScreenPosition } = useReactFlow();
+  const { flowToScreenPosition, screenToFlowPosition } = useReactFlow();
   const { x: vx, y: vy, zoom } = useViewport();
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState<DragOffset | null>(null);
@@ -140,6 +140,18 @@ export default function GroupOverlay({
   const draggingRef = useRef(false);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
+  /** 供 window 级命中测试读取最新组数据（避免监听器随 groups 变化反复重挂） */
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+  /** pane DOM（承载光标反馈）：组框在节点层之下无法自己显示 cursor，改由 pane 内联光标表达 */
+  const paneRef = useRef<HTMLElement | null>(null);
+  /** 拖组结束后需吞掉一次 click（避免冒泡到 pane 触发 onPaneClick 清空选中） */
+  const clickSuppressRef = useRef(false);
+  const uiLayerRef = useCallback((el: HTMLDivElement | null) => {
+    paneRef.current = el
+      ? el.closest('.react-flow')?.querySelector<HTMLElement>('.react-flow__pane') ?? null
+      : null;
+  }, []);
   const dragStateRef = useRef<{
     groupId: string;
     startScreen: { x: number; y: number };
@@ -213,36 +225,117 @@ export default function GroupOverlay({
     window.removeEventListener('pointerup', endDrag);
     if (!draggingRef.current) return;
     draggingRef.current = false;
+    if (paneRef.current) paneRef.current.style.cursor = '';
     endFrameDrag();
+    // 吞掉本次按下抬起派发的 click：否则会冒泡到 pane 触发 onPaneClick 清空选中
+    // （click 在 mouseup 后同轮派发，故用宏任务在本轮结束后复位标记）
+    clickSuppressRef.current = true;
+    window.setTimeout(() => {
+      clickSuppressRef.current = false;
+    }, 0);
   }, [onFrameMove, endFrameDrag]);
 
-  /** 按下组框开始：冻结当前在矩形内且未被排除的成员作为本次拖动集合。
-   *  被排除节点（组此前盖住的）不随组移动；成员可为空。 */
-  const beginFrameDrag = useCallback(
-    (e: React.PointerEvent, f: FrameInfo) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      e.stopPropagation();
+  /** 按下开始拖动整组：冻结当前在矩形内且未被排除的成员作为本次拖动集合。
+   *  被排除节点（组此前盖住的）不随组移动；成员可为空（拖空框去圈节点）。
+   *  注：组框位于节点层之下收不到 pointer 事件，故由 window 捕获阶段命中测试后调用（见下）。 */
+  const startFrameDrag = useCallback(
+    (clientX: number, clientY: number, g: CanvasGroup) => {
       const nodeOld = new Map<string, { x: number; y: number }>();
-      membersInGroupBox(nodes, f.box, f.excludedIds).forEach((n) => {
+      membersInGroupBox(nodesRef.current, g.box, g.excludedIds).forEach((n) => {
         nodeOld.set(n.id, { x: n.position.x, y: n.position.y });
       });
       draggingRef.current = true;
       dragStateRef.current = {
-        groupId: f.id,
-        startScreen: { x: e.clientX, y: e.clientY },
+        groupId: g.id,
+        startScreen: { x: clientX, y: clientY },
         dx: 0,
         dy: 0,
-        oldBox: { ...f.box },
-        excludedBefore: [...f.excludedIds],
+        oldBox: { ...g.box },
+        excludedBefore: [...g.excludedIds],
         nodeOld,
         nodeNew: new Map(nodeOld),
       };
+      if (paneRef.current) paneRef.current.style.cursor = 'grabbing';
       window.addEventListener('pointermove', onFrameMove);
       window.addEventListener('pointerup', endDrag);
     },
-    [nodes, onFrameMove, endDrag],
+    [onFrameMove, endDrag],
   );
+
+  /** 命中测试：屏幕点是否落在某组矩形的「空白区」。
+   *  落在节点/边/面板/自有 UI（徽标、操作条、成组按钮）上时返回 null，交回各自处理。 */
+  const hitGroupAt = useCallback(
+    (clientX: number, clientY: number, target: EventTarget | null): CanvasGroup | null => {
+      if (!(target instanceof Element)) return null;
+      if (
+        target.closest('.react-flow__node') ||
+        target.closest('.react-flow__edge') ||
+        target.closest('.react-flow__panel') ||
+        target.closest(`.${styles.groupBadgeWrap}`) ||
+        target.closest(`.${styles.groupTools}`) ||
+        target.closest(`.${styles.createBtn}`)
+      ) {
+        return null;
+      }
+      const p = screenToFlowPosition({ x: clientX, y: clientY });
+      const list = groupsRef.current;
+      // 后创建的组视觉上在上层：倒序取首个命中
+      for (let i = list.length - 1; i >= 0; i--) {
+        const g = list[i];
+        if (
+          p.x >= g.box.x &&
+          p.x <= g.box.x + g.box.w &&
+          p.y >= g.box.y &&
+          p.y <= g.box.y + g.box.h
+        ) {
+          return g;
+        }
+      }
+      return null;
+    },
+    [screenToFlowPosition],
+  );
+
+  /** 捕获阶段接管 mousedown：组框层在 renderer(z4) 之下、pane 铺满画布会吃掉事件，
+   *  故不靠组框自身接事件，而是在 window 捕获阶段先做命中测试。命中「组内空白」时
+   *  stopPropagation 阻断事件下传到 pane —— pane 的平移/框选由 d3-zoom 的 `mousedown.zoom`
+   *  驱动（@xyflow/system createFilter 判 event.type === 'mousedown'），拦 pointerdown 无效。 */
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 0 || draggingRef.current) return;
+      const g = hitGroupAt(e.clientX, e.clientY, e.target);
+      if (!g) return;
+      e.preventDefault();
+      e.stopPropagation();
+      startFrameDrag(e.clientX, e.clientY, g);
+    };
+    // 拖组结束后吞掉那一次 click（见 endDrag），避免 pane 的 onPaneClick 清空节点选中
+    const onClick = (e: MouseEvent) => {
+      if (!clickSuppressRef.current) return;
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    window.addEventListener('mousedown', onDown, true);
+    window.addEventListener('click', onClick, true);
+    return () => {
+      window.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('click', onClick, true);
+    };
+  }, [hitGroupAt, startFrameDrag]);
+
+  /** 悬停组内空白区 → pane 光标 grab（恢复组框下沉后丢失的可拖拽提示） */
+  useEffect(() => {
+    if (groups.length === 0) return;
+    const onMove = (e: PointerEvent) => {
+      if (draggingRef.current || !paneRef.current) return;
+      paneRef.current.style.cursor = hitGroupAt(e.clientX, e.clientY, e.target) ? 'grab' : '';
+    };
+    window.addEventListener('pointermove', onMove);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      if (paneRef.current) paneRef.current.style.cursor = '';
+    };
+  }, [groups.length, hitGroupAt]);
 
   /** 卸载时若在拖动中则清理监听（不触发结束回调，避免卸载期落库） */
   useEffect(
@@ -263,7 +356,8 @@ export default function GroupOverlay({
 
   return (
     <>
-      {/* 组框拖拽层（flow 坐标，随视口变换）：整框为拖拽面，节点区在上不受影响 */}
+      {/* 组框层（flow 坐标，随视口变换）：纯视觉玻璃底框，位于节点层之下。
+       *  拖动不靠本层接事件（pane 会吃掉），由 window 捕获阶段命中测试驱动，见 hitGroupAt */}
       <div
         className={styles.frameLayer}
         style={{ transform: `translate(${vx}px, ${vy}px) scale(${zoom})` }}
@@ -281,8 +375,6 @@ export default function GroupOverlay({
                 height: box.h,
                 borderWidth,
               }}
-              title="拖动整组"
-              onPointerDown={(e) => beginFrameDrag(e, f)}
             />
           );
         })}
@@ -299,8 +391,9 @@ export default function GroupOverlay({
         ))}
       </div>
 
-      {/* 组徽标 + 操作条 + 成组按钮（屏幕空间，恒定尺寸，置于节点之上） */}
-      <div className={styles.uiLayer}>
+      {/* 组徽标 + 操作条 + 成组按钮（屏幕空间，恒定尺寸，置于节点之上）。
+       *  ref 仅用于定位 .react-flow__pane 以承载光标反馈 */}
+      <div className={styles.uiLayer} ref={uiLayerRef}>
         {frames.map((f) => {
           const box = boxFor(f);
           const pt = flowToScreenPosition({ x: box.x, y: box.y });

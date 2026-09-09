@@ -2,8 +2,10 @@
  * GroupOverlay 成组交互层样式（IKD0JT A3/A4）
  * ============================================ */
 
-/* 组框拖拽层（flow 坐标层）：z-index 3，压在 ReactFlow 节点(renderer z4)之下、
- * pan(z1) 之上 —— 组内空白区命中组框拖动整组，节点区仍命中节点本体不受影响。 */
+/* 组框层（flow 坐标层）：z-index 3，位于 ReactFlow 节点 renderer(z4) 之下 ——
+ *  组内成员节点显示在玻璃上方（成员归属即视觉层级）。
+ *  pointer-events:none：本层在 pane 之下本就收不到事件，拖动改由 window 捕获阶段
+ *  命中测试驱动（见 index.tsx hitGroupAt），光标反馈落在 .react-flow__pane 上。 */
 .frameLayer {
   position: absolute;
   top: 0;
@@ -15,26 +17,20 @@
   z-index: 3;
 }
 
-/* 整个组框为拖拽面 + 玻璃质感背景：框内任意非节点空白区按下即可拖动整组（IKD0JT A4）。
- *  毛玻璃用 backdrop-filter 在画布底纹之上做模糊，半透明深色底让框显层级；
- *  组框位于 z-index:3（ReactFlow 节点 renderer z-index:4 之上），玻璃层刚好"糊"住画布点阵/远处内容，
- *  组内节点因位于上层而保持锐利，不被玻璃模糊。 */
+/* 组底框玻璃质感：画布为深色主题，用「浅色半透明 + backdrop-filter 模糊 + 内高光描边」
+ *  配方（深色叠深色看不出玻璃感且会压暗组内内容）。纯视觉，不拦截交互。 */
 .frame {
   position: absolute;
   border-style: dashed;
-  border-color: rgba(140, 140, 140, 0.5);
+  border-color: rgba(255, 255, 255, 0.22);
   border-radius: 8px;
-  pointer-events: auto;
-  cursor: grab;
-  background-color: rgba(26, 26, 26, 0.28);
+  pointer-events: none;
+  background-color: rgba(255, 255, 255, 0.07);
   backdrop-filter: blur(10px) saturate(1.4);
   -webkit-backdrop-filter: blur(10px) saturate(1.4);
-  transition: background-color 160ms ease;
-}
-
-.frame:active {
-  cursor: grabbing;
-  background-color: rgba(26, 26, 26, 0.38);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 8px 24px rgba(0, 0, 0, 0.32);
 }
 
 /* 排除节点覆盖层（flow 坐标层）：z-index 5，高于 ReactFlow 节点 renderer(z4) ——
@@ -54,9 +50,10 @@
 .cover {
   position: absolute;
   border-radius: 8px;
-  background-color: rgba(26, 26, 26, 0.28);
+  background-color: rgba(255, 255, 255, 0.07);
   backdrop-filter: blur(10px) saturate(1.4);
   -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 
 /* 组徽标 + 操作条 + 成组按钮所在交互层：高于节点，保证始终可点 */

@@ -475,18 +475,24 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             style={{ bottom: 60 }}
           />
         )}
+        {/* GroupOverlay 必须作为 ReactFlow 的 children 渲染：
+         *  .react-flow 根有 position:relative + z-index:0，自成层叠上下文，会把整棵子树
+         *  （含 .react-flow__renderer z4 与全部节点）压平到 0 层。若把 overlay 放在
+         *  <ReactFlow> 之外做兄弟节点，其 frameLayer(z3) 会在外层与 0 比较而盖住所有节点，
+         *  导致组成员被玻璃压在下面。放进内部后才能与 renderer 同上下文比较：
+         *  frame(z3) < 节点(z4) < cover(z5) < 徽标/按钮(z10)。 */}
+        {groups && (
+          <GroupOverlay
+            nodes={nodes}
+            groups={groups}
+            onCreateGroup={onCreateGroup ?? (() => {})}
+            onUngroup={onUngroupGroup ?? (() => {})}
+            onDeleteGroup={onDeleteGroup ?? (() => {})}
+            setNodes={setNodes}
+            onGroupFrameDragStop={onGroupFrameDragStopRef.current}
+          />
+        )}
       </ReactFlow>
-      {groups && (
-        <GroupOverlay
-          nodes={nodes}
-          groups={groups}
-          onCreateGroup={onCreateGroup ?? (() => {})}
-          onUngroup={onUngroupGroup ?? (() => {})}
-          onDeleteGroup={onDeleteGroup ?? (() => {})}
-          setNodes={setNodes}
-          onGroupFrameDragStop={onGroupFrameDragStopRef.current}
-        />
-      )}
       {!hideZoomControl && <ZoomControl />}
     </div>
   );
