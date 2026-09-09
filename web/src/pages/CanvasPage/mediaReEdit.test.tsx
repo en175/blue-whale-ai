@@ -235,6 +235,7 @@ function seedAudioDoc() {
 }
 
 const defaultJobStatus = apiMocks.fetchJobStatus.getMockImplementation()!;
+const defaultSaveDoc = apiMocks.saveCanvasDoc.getMockImplementation()!;
 
 let root: Root;
 let container: HTMLDivElement;
@@ -296,6 +297,8 @@ afterEach(async () => {
   container?.remove();
   vi.clearAllMocks();
   apiMocks.fetchJobStatus.mockReset().mockImplementation(defaultJobStatus);
+  // clearAllMocks 不清除实现：持续失败的保存替身会污染后续用例，统一恢复默认
+  apiMocks.saveCanvasDoc.mockReset().mockImplementation(defaultSaveDoc);
 });
 
 /** 一份带真 PNG 文件头的最小文件：上传前会读开头认容器（IKE53Z），'png' 这三个字母过不去。 */
@@ -531,23 +534,24 @@ describe('IKDMQU Q1/Q5/Q6/Q8：原卡重新生成', () => {
 
 describe('IKDMQU Q10：保存失败暂停切换编辑目标', () => {
   it('保存失败后点击成品卡不自动开面板并提示重试', async () => {
-    apiMocks.saveCanvasDoc.mockRejectedValueOnce(new Error('save failed'));
+    // 追加第二张成品卡 g2 作为切换目标（有生成记录才会触发切换拦截）
+    ((canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> }).nodes).push({
+      id: 'g2',
+      type: 'mediaNode',
+      position: { x: 800, y: 0 },
+      data: { src: 'http://img/g2.png', mediaType: 'image', fileName: '生成-j2', assetId: 'a3', jobId: 'j2', prompt: '原提示词二', draftModelId: 'm-test', draftSize: '2k', draftRatio: '1:1' },
+    });
+    (canvasDocMock.current.assets as Record<string, unknown>).a3 = { asset_id: 3, type: 'image', access_url: 'http://img/g2.png', width: 100, height: 100 };
+    // 保存持续失败：面板打开时的参数写回与输入都会触发保存，避免一次性失败被提前消费
+    apiMocks.saveCanvasDoc.mockImplementation(() => Promise.reject(new Error('save failed')));
     await renderPage();
 
-    // 触发一次保存失败：侧栏建草稿（草稿入保存）→ 保存失败
-    await act(async () => {
-      toolbarProps.current.onToggleImageDialog();
-    });
-    const draftId = flowProps.current.mediaNodes.find((n: Node) => n.data?.draft === true)!.id;
-    await vi.waitFor(
-      () => {
-        const last = apiMocks.saveCanvasDoc.mock.calls.at(-1);
-        expect(last).toBeTruthy();
-      },
-      { timeout: 3000 },
-    );
-
-    // 等待保存失败状态落定（toast 提示）
+    // 绑定成品卡 g1 编辑：输入触发自动保存 → 保存失败
+    await clickNode('g1');
+    await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
+    await typePrompt('触发保存失败的编辑');
+    // 面板输入触发 800ms 防抖自动保存，先等保存调用确实发起
+    await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalled(), { timeout: 3000 });
     await vi.waitFor(() => expect(container.textContent).toContain('保存失败'), { timeout: 3000 });
 
     // 隐藏面板后点击其它成品卡：暂停切换编辑目标（不开新面板）
@@ -555,11 +559,11 @@ describe('IKDMQU Q10：保存失败暂停切换编辑目标', () => {
     await act(async () => {
       flowProps.current.onPaneClick();
     });
-    await clickNode('g1');
+    await clickNode('g2');
     expect(container.querySelector('textarea')).toBeNull();
 
-    // 重开当前绑定目标（草稿）不算切换：面板恢复，未保存内容保留、可继续触发保存重试
-    await clickNode(draftId);
+    // 重开当前绑定目标（g1）不算切换：面板恢复，未保存内容保留、可继续触发保存重试
+    await clickNode('g1');
     expect(promptTextarea()).toBeTruthy();
   });
 });

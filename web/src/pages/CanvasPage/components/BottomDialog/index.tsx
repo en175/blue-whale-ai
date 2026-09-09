@@ -1,8 +1,7 @@
 /* ============================================
- * BottomDialog 视频对话窗口：模式/模型/时长/宽高比配置与发送
- * IKDMQS：草稿绑定模式——参考由连线按角色推导（首帧/尾帧/普通参考）。
- * 素材入口经画布资产改造（mwq）与 IKDMQS 融合：上传入口退役，
- * 保留 从资产中选择 / 到节点选择 / 角色库 三项来源菜单。
+ * BottomDialog 视频对话窗口：模型/时长/宽高比配置与发送
+ * 统一草稿绑定模式：参考由「画布连线 + 草稿 material refs」合并推导（首帧/尾帧/普通参考）。
+ * 三类来源菜单：从资产中选择（落画布节点+连线）/ 到节点选择（建线）/ 角色库（入草稿 data）。
  * ============================================ */
 import { useState, useRef, useEffect } from 'react';
 import {
@@ -12,7 +11,6 @@ import {
   Image,
   Video,
   SlidersHorizontal,
-  Play,
   ArrowUp,
   MousePointerClick,
   FolderOpen,
@@ -21,7 +19,7 @@ import {
   User,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
+import { REF_LIMITS } from '@/utils/ref-overflow';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
 import type { ImageTextAttachment } from '../ImageDialog';
@@ -29,6 +27,7 @@ import type { MediaGenStatus } from '../MediaNode';
 import {
   canAddRefRole,
   MAX_VIDEO_REFS,
+  supportsVideoReferenceModel,
   videoRefConflict,
   type VideoMediaRef,
   type VideoMediaRefs,
@@ -44,7 +43,7 @@ import {
 } from '../ChipTextEditor/composed';
 import styles from './index.module.css';
 
-/** 模式选项 */
+/** 模式选项（保留默认 all 以兼容草稿参数契约 draftMode；模式选择器 UI 已随旧自由模式退役） */
 const modeOptions = [
   { key: 'all', label: '全能参考' },
   { key: 'keyframe', label: '首尾帧' },
@@ -67,15 +66,6 @@ export interface VideoGenOptions {
   mode: string;
 }
 
-/** 参考素材项（file 仅历史本地上传路径有值；画布带入的节点只有 preview URL，assetId 已有则直接复用） */
-export interface BottomRefItem {
-  file?: File;
-  preview: string;
-  type: 'image' | 'video';
-  /** 已有资产 ID（画布节点带入时携带，发送时免重复上传） */
-  assetId?: string | number;
-}
-
 /** 视频草稿面板参数写回补丁（IKDMQS）：字段名对齐草稿节点 data 的持久化键 */
 export interface VideoDraftParamsPatch {
   prompt?: string;
@@ -88,46 +78,42 @@ export interface VideoDraftParamsPatch {
 
 interface BottomDialogProps {
   onClose: () => void;
-  onSend: (text: string, opts: VideoGenOptions, refs: BottomRefItem[]) => void | Promise<void>;
-  /** 初始参考素材（节点「生成视频」带入被点节点图片） */
-  initialRefs?: BottomRefItem[];
+  onSend: (text: string, opts: VideoGenOptions) => void | Promise<void>;
   /** 初始自由文本（视频节点「重新编辑」带入原提示词） */
   initialText?: string;
   /** 初始生成参数（首页 AI视频 带入：选中首页所选的模型/比例/清晰度/时长/模式） */
   initialParams?: VideoGenSeedParams;
-  /** 连线文本附件（IKDLQG）：仅视频媒体节点面板发起时携带，打开当下快照，只读展示；
-   *  草稿绑定模式（IKDMQS）由父级按连线实时推导传入 */
+  /** 连线文本附件（IKDLQG）：草稿绑定模式由父级按连线实时推导传入 */
   attachments?: ImageTextAttachment[];
   /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；仅多附件时展示控件，缺省不渲染排序入口 */
   onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 到节点选择：进入画布节点选取模式（image 图片节点 / video 视频节点）；
    *  role 为视频草稿目标参考角色（首帧/尾帧显式指定，IKDMQS），缺省普通参考 */
   onPickFromCanvas?: (kind: 'image' | 'video', role?: VideoRefRole) => void;
-  /** 从资产中选择：打开资产库选择弹窗（按 kind 过滤媒体类型） */
-  onPickFromAssets?: (kind: 'image' | 'video') => void;
+  /** 从资产中选择：打开资产库选择弹窗（按 kind 过滤媒体类型；role 为目标槽位角色） */
+  onPickFromAssets?: (kind: 'image' | 'video', role?: VideoRefRole) => void;
   /** 画布选取模式进行中（image/video，对应按钮高亮提示） */
   pickMode?: 'image' | 'video' | null;
-  /** 外部注入参考视频（ts 驱动；画布节点单选，items 为一批） */
-  externalPick?: { ts: number; items: BottomRefItem[] } | null;
-  /** 外部注入参考图片（ts 驱动；画布节点单选，items 为一批） */
-  externalImagePick?: { ts: number; items: BottomRefItem[] } | null;
-  /** 打开角色库弹窗 */
-  onOpenCharacterLibrary?: () => void;
+  /** 打开角色库弹窗（role 为目标槽位角色） */
+  onOpenCharacterLibrary?: (role?: VideoRefRole) => void;
   /** 视频草稿绑定（IKDMQS）：面板编辑实时写回草稿节点；status 为 generating 时参数与输入只读 */
-  videoDraftBinding?: {
+  videoDraftBinding: {
     status?: MediaGenStatus;
     restoreExisting?: boolean;
     submitting?: boolean;
     saveFailed?: boolean;
     onParamsChange: (patch: VideoDraftParamsPatch) => void;
   };
-  /** 连线推导的视频参考分组（IKDMQS）：传入即为草稿绑定模式，参考区按角色渲染，
-   *  面板本地 refFiles 不再参与展示与提交 */
-  videoMediaRefs?: VideoMediaRefs;
-  /** 移除某个视频参考（IKDMQS）：携带来源节点 id，父级断开对应连线 */
+  /** 合并推导的视频参考分组（连线 + material refs）：参考区按角色渲染 */
+  videoMediaRefs: VideoMediaRefs;
+  /** 移除某个视频参考：携带来源节点 id，父级断开对应连线 */
   onRemoveVideoRef?: (sourceNodeId: string) => void;
-  /** 显式改变参考角色（IKDMQS）：父级改写连线 edge.data.refRole */
+  /** 显式改变参考角色：父级改写连线 edge.data.refRole */
   onSetVideoRefRole?: (sourceNodeId: string, role: VideoRefRole) => void;
+  /** 移除角色库 material 参考（materialId，父级从草稿 data.draftMaterialRefs 过滤） */
+  onRemoveMaterialRef?: (materialId: string) => void;
+  /** 改变角色库 material 参考角色（父级改写草稿 data.draftMaterialRefs 对应项 role） */
+  onSetMaterialRefRole?: (materialId: string, role: VideoRefRole) => void;
   /** Toast 提示（上传超限/首尾帧校验等场景，由父级注入全局 sonner，位置/样式与 ImageDialog/AudioDialog 统一） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
 }
@@ -219,18 +205,30 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-/** 草稿绑定的参考项缩略图（IKDMQS）：连线推导项 + 角色徽标 + 移除；
+/** 草稿绑定的参考项缩略图（IKDMQS）：连线推导/角色库 material 项 + 角色徽标 + 移除；
  *  首帧/尾帧项提供「设为普通参考」，普通参考项提供「设为首帧/设为尾帧」（受能力与槽位约束，
- *  槽位不满足时入口不渲染，父级校验兜底并 toast 原因） */
-function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, firstSlotOpen, lastSlotOpen }: {
+ *  槽位不满足时入口不渲染，父级校验兜底并 toast 原因）；
+ *  materialId 非空为角色库素材项：移除/改角色走 material 回调（操作草稿 data，非连线） */
+function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMaterial, onSetMaterialRole, firstSlotOpen, lastSlotOpen }: {
   item: VideoMediaRef;
   role: VideoRefRole;
   readOnly: boolean;
   onRemove?: (nodeId: string) => void;
   onSetRole?: (nodeId: string, role: VideoRefRole) => void;
+  onRemoveMaterial?: (materialId: string) => void;
+  onSetMaterialRole?: (materialId: string, role: VideoRefRole) => void;
   firstSlotOpen: boolean;
   lastSlotOpen: boolean;
 }) {
+  const isMaterial = item.materialId != null;
+  const handleRemove = () => {
+    if (isMaterial) onRemoveMaterial?.(item.materialId!);
+    else onRemove?.(item.nodeId);
+  };
+  const handleSetRole = (next: VideoRefRole) => {
+    if (isMaterial) onSetMaterialRole?.(item.materialId!, next);
+    else onSetRole?.(item.nodeId, next);
+  };
   return (
     <div className={styles.mediaThumb} title={item.name} data-testid="dock-video-ref">
       {item.mediaType === 'video'
@@ -241,22 +239,22 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, firstSlotOpe
       </span>
       {!readOnly && (
         <>
-          <button className={styles.mediaThumbRemove} onClick={() => onRemove?.(item.nodeId)} title="移除（断开连线）">
+          <button className={styles.mediaThumbRemove} onClick={handleRemove} title={isMaterial ? '移除' : '移除（断开连线）'}>
             <X size={10} strokeWidth={2} />
           </button>
-          {onSetRole && (
+          {(isMaterial ? onSetMaterialRole : onSetRole) && (
             <span className={styles.refRoleSwitch}>
               {role === 'reference' ? (
                 <>
                   {firstSlotOpen && (
-                    <button type="button" onClick={() => onSetRole(item.nodeId, 'first')}>设为首帧</button>
+                    <button type="button" onClick={() => handleSetRole('first')}>设为首帧</button>
                   )}
                   {lastSlotOpen && (
-                    <button type="button" onClick={() => onSetRole(item.nodeId, 'last')}>设为尾帧</button>
+                    <button type="button" onClick={() => handleSetRole('last')}>设为尾帧</button>
                   )}
                 </>
               ) : (
-                <button type="button" onClick={() => onSetRole(item.nodeId, 'reference')}>设为普通参考</button>
+                <button type="button" onClick={() => handleSetRole('reference')}>设为普通参考</button>
               )}
             </span>
           )}
@@ -266,7 +264,7 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, firstSlotOpe
   );
 }
 
-export default function BottomDialog({ onClose, onSend, initialRefs, initialText, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, externalImagePick, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onToast }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast }: BottomDialogProps) {
   /** 富文本输入框（自由文本；胶囊机制保留给后续引用场景，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框内容的结构化形态（IKAFSX）：胶囊是指针，解引用只发生在发送那一刻。 */
@@ -284,7 +282,6 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
     ids.splice(index + delta, 0, moved);
     onReorderAttachments(ids);
   };
-  const [refFiles, setRefFiles] = useState<BottomRefItem[]>(initialRefs ?? []);
   const [selectedMode, setSelectedMode] = useState(modeOptions[0].key);
   const [modeOpen, setModeOpen] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
@@ -301,21 +298,19 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
   const [duration, setDuration] = useState(0);
   const [modelOpen, setModelOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
-  /** 媒体入口按钮弹菜单（image/video 各自独立，避免同时弹出）：从资产中选择 / 到节点选择 / 角色库 */
-  const [sourceMenuOpen, setSourceMenuOpen] = useState<'image' | 'video' | null>(null);
+  /** 槽位来源菜单（按 kind+role 区分，一次只弹一个）：从资产中选择 / 到节点选择 / 角色库 */
+  const [sourceMenuOpen, setSourceMenuOpen] = useState<{ kind: 'image' | 'video'; role: VideoRefRole } | null>(null);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const sizeWrapRef = useRef<HTMLDivElement>(null);
   const modeWrapRef = useRef<HTMLDivElement>(null);
   const configPanelRef = useRef<HTMLDivElement>(null);
-  const imageSourceRef = useRef<HTMLDivElement>(null);
-  const videoSourceRef = useRef<HTMLDivElement>(null);
+  const sourceMenuRef = useRef<HTMLDivElement>(null);
 
   useDismissOnOutside([
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
     { open: sizeOpen, ref: sizeWrapRef, dismiss: () => setSizeOpen(false) },
     { open: modeOpen, ref: modeWrapRef, dismiss: () => setModeOpen(false) },
-    { open: sourceMenuOpen === 'image', ref: imageSourceRef, dismiss: () => setSourceMenuOpen(null) },
-    { open: sourceMenuOpen === 'video', ref: videoSourceRef, dismiss: () => setSourceMenuOpen(null) },
+    { open: sourceMenuOpen !== null, ref: sourceMenuRef, dismiss: () => setSourceMenuOpen(null) },
     { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
   ]);
 
@@ -329,15 +324,12 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
   const durationRange = currentModel?.supported_durations ?? null;
   const currentSizeLabel =
     sizeOptions.find((s) => s.key === selectedSize)?.label ?? selectedSize;
-  const currentMode = modeOptions.find((m) => m.key === selectedMode);
 
-  /** 草稿绑定模式（IKDMQS）：参考由连线推导，本地 refFiles 不参与展示与提交 */
-  const draftBound = videoMediaRefs !== undefined;
   /** 生成中只读（IKDMQS）：任务执行期间目标参数与输入冻结，保留查看与画布上的取消入口 */
-  const readOnly = sending || videoDraftBinding?.submitting || videoDraftBinding?.status === 'generating';
+  const readOnly = sending || videoDraftBinding.submitting || videoDraftBinding.status === 'generating';
   /** 草稿绑定参数同步：面板内变更实时写回草稿节点（随画布自动保存持久化） */
   const syncDraftParams = (patch: VideoDraftParamsPatch) => {
-    videoDraftBinding?.onParamsChange(patch);
+    videoDraftBinding.onParamsChange(patch);
   };
   /** 当前模型与视频参考相关的能力位（模型未加载时为 null，约束入口按不可用处理） */
   const caps: VideoRefCapabilities | null = currentModel
@@ -349,26 +341,49 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
       }
     : null;
   /** 组合校验（IKDMQS）：与服务端 400 同口径 + 能力位；冲突时明确提示并禁用发送 */
-  const supportsVideoReference = selectedModel === 'seedance-2' || /^doubao-seedance-2-0(?:-|$)/.test(selectedModel);
-  const conflict = draftBound && caps && videoMediaRefs
+  const conflict = caps
     ? videoRefConflict(videoMediaRefs, caps)
-      ?? (!supportsVideoReference && videoMediaRefs.reference.some(ref => ref.mediaType === 'video')
+      ?? (!supportsVideoReferenceModel(selectedModel) && videoMediaRefs.reference.some(ref => ref.mediaType === 'video')
         ? '当前模型不支持视频参考，请更换模型或移除视频参考' : null)
     : null;
-  const canAddFirst = !!(caps && videoMediaRefs && canAddRefRole('first', videoMediaRefs, caps));
-  const canAddLast = !!(caps && videoMediaRefs && canAddRefRole('last', videoMediaRefs, caps));
+  const canAddFirst = !!(caps && canAddRefRole('first', videoMediaRefs, caps));
+  /** 尾帧占位：首尾帧模式下与首帧并排常显（未填即显示），不依赖模型能力位与是否已有首帧——
+   *  模型是否支持尾帧 / 首尾帧组合由 conflict（videoRefConflict）在发送时兜底提示，避免占位缺失导致无法上传尾帧。 */
+  const canAddLast = !videoMediaRefs.last;
   const canAddReference = !!caps?.referenceImage;
 
-  /** 首尾帧模式：仅允许 2 张图片（首帧+尾帧），禁止视频 */
+  /** 参考模式（与首页底部操作同步）：全能参考(all) / 首尾帧(keyframe) / 图生视频(text2video)。
+   *  首尾帧模式才展示首帧/尾帧槽（同一行）；其余模式仅展示普通参考；图生视频不收视频参考。 */
+  const currentMode = modeOptions.find((m) => m.key === selectedMode);
   const isKeyframe = selectedMode === 'keyframe';
-  /** 图生视频 / 首尾帧 均不支持视频参考 */
-  const noVideoMode = isKeyframe || selectedMode === 'text2video';
-  const imageCount = refFiles.filter((f) => f.type === 'image').length;
-  const videoCount = refFiles.filter((f) => f.type === 'video').length;
-  /** 首尾帧模式必须恰好 2 张图片（不多不少、不含视频），否则禁止发送（非草稿绑定路径旧语义） */
-  const keyframeInvalid = !draftBound && isKeyframe && (imageCount !== 2 || videoCount > 0);
-  /** 图片上限：首尾帧模式固定 2（首帧+尾帧），其余固定 9 张（产品约定，与 ImageDialog 统一，不随模型能力波动） */
-  const maxImages = isKeyframe ? 2 : REF_LIMITS.image;
+  const isText2Video = selectedMode === 'text2video';
+  /** 已连入的视频参考数（切换到首尾帧/图生视频时不兼容，需先移除） */
+  const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType === 'video').length;
+
+  /** 切换模式：目标模式与现有参考冲突时明确提示并阻止切换（保证「可见槽 = 实际参考」），否则写回草稿 */
+  const handleModeChange = (key: string) => {
+    setModeOpen(false);
+    if (key === selectedMode) return;
+    const hasFrames = !!(videoMediaRefs.first || videoMediaRefs.last);
+    const hasRefs = videoMediaRefs.reference.length > 0;
+    if (key === 'keyframe') {
+      if (hasRefs || videoRefCount > 0) {
+        onToast?.('warn', '首尾帧模式仅支持首帧与尾帧，请先移除普通参考');
+        return;
+      }
+    } else {
+      if (hasFrames) {
+        onToast?.('warn', `${key === 'text2video' ? '图生视频' : '全能参考'}模式不支持首尾帧，请先移除首帧/尾帧`);
+        return;
+      }
+      if (key === 'text2video' && videoRefCount > 0) {
+        onToast?.('warn', '图生视频模式不支持视频参考，请先移除视频参考');
+        return;
+      }
+    }
+    setSelectedMode(key);
+    syncDraftParams({ mode: key });
+  };
 
   const configurationError = !modelsLoaded ? '正在加载模型配置'
     : !currentModel ? '原生成模型不可用，请重新选择模型'
@@ -378,7 +393,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
       || (duration - durationRange.min) % durationRange.step !== 0)
       ? '原时长不兼容，请重新选择时长'
     : null;
-  const canSend = !readOnly && !videoDraftBinding?.saveFailed && !configurationError
+  const canSend = !readOnly && !videoDraftBinding.saveFailed && !configurationError
     && (!composedIsEmpty(composed) || hasAttachmentText);
 
   /** 时长刻度（min..max 逐 step；模型能力未加载时无刻度） */
@@ -423,86 +438,6 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
     }
   }, [initialText]);
 
-  /** 角色库注入结果提示队列：图片/视频分两个 effect 注入，同一批次超限/重复合并为一条 toast */
-  const injectNoticeRef = useRef<{ overflows: ('image' | 'video')[]; dup: boolean }>({ overflows: [], dup: false });
-  const injectNoticeTimerRef = useRef<number | null>(null);
-  const queueInjectNotice = (notice: { overflow?: 'image' | 'video'; dup?: boolean }) => {
-    const pending = injectNoticeRef.current;
-    if (notice.overflow && !pending.overflows.includes(notice.overflow)) pending.overflows.push(notice.overflow);
-    if (notice.dup) pending.dup = true;
-    if (injectNoticeTimerRef.current != null) return;
-    injectNoticeTimerRef.current = window.setTimeout(() => {
-      injectNoticeTimerRef.current = null;
-      const { overflows, dup } = injectNoticeRef.current;
-      injectNoticeRef.current = { overflows: [], dup: false };
-      const parts: string[] = [];
-      if (overflows.length > 0) parts.push(refOverflowToast(overflows, { image: maxImages, video: MAX_VIDEOS }));
-      if (dup) parts.push('重复的素材已跳过');
-      if (parts.length > 0) onToast?.('warn', parts.join('；'));
-    }, 0);
-  };
-
-  // 外部注入参考视频（画布节点选取/角色库多选；去重 + 上限保护 + 超限/重复提示；图生视频 / 首尾帧模式不收视频）
-  // 草稿绑定模式下注入不生效：参考走连线（到节点选择建立连线）。
-  useEffect(() => {
-    if (!externalPick || draftBound) return;
-    if (noVideoMode) return;
-    const items = externalPick.items;
-    const vidCount = refFiles.filter((f) => f.type === 'video').length;
-    if (vidCount >= MAX_VIDEO_REFS) {
-      queueInjectNotice({ overflow: 'video' });
-      return;
-    }
-    // 超出剩余容量的部分丢弃并提示（与图片注入口径一致）
-    const capped = items.slice(0, MAX_VIDEO_REFS - vidCount);
-    if (capped.length < items.length) queueInjectNotice({ overflow: 'video' });
-    // 与已添加素材重复（assetId 优先，preview 兜底）时提示
-    const dupCount = capped.filter((item) =>
-      refFiles.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview),
-    ).length;
-    if (dupCount > 0) queueInjectNotice({ dup: true });
-    setRefFiles((prev) => {
-      let next = prev;
-      for (const item of capped) {
-        const vidCnt = next.filter((f) => f.type === 'video').length;
-        if (vidCnt >= MAX_VIDEO_REFS) break;
-        if (next.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview)) continue;
-        next = [...next, item];
-      }
-      return next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [externalPick]);
-
-  // 外部注入参考图片（画布节点选取/角色库多选；去重 + 上限保护 + 超限/重复提示；首尾帧模式同样适用）
-  useEffect(() => {
-    if (!externalImagePick || draftBound) return;
-    const items = externalImagePick.items;
-    const imgCount = refFiles.filter((f) => f.type === 'image').length;
-    if (imgCount >= maxImages) {
-      queueInjectNotice({ overflow: 'image' });
-      return;
-    }
-    // 超出剩余容量的部分丢弃并提示（与单张超限 toast 文案统一）
-    const accepted = items.slice(0, maxImages - imgCount);
-    if (accepted.length < items.length) queueInjectNotice({ overflow: 'image' });
-    const dupCount = accepted.filter((item) =>
-      refFiles.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview),
-    ).length;
-    if (dupCount > 0) queueInjectNotice({ dup: true });
-    setRefFiles((prev) => {
-      let next = prev;
-      for (const item of accepted) {
-        const imgCnt = next.filter((f) => f.type === 'image').length;
-        if (imgCnt >= maxImages) break;
-        if (next.some((f) => (item.assetId != null && f.assetId === item.assetId) || f.preview === item.preview)) continue;
-        next = [...next, item];
-      }
-      return next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [externalImagePick]);
-
   // 加载视频模型能力列表：优先选中首页带入的模型，参数逐项按模型能力校验后应用
   useEffect(() => {
     let active = true;
@@ -512,7 +447,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
         setModelList(list);
         setModelsLoaded(true);
         // 已有节点配置原样恢复，禁止因模型能力变化自动改写最新编辑。
-        if (videoDraftBinding && (videoDraftBinding.restoreExisting || initialParams?.modelId)) {
+        if (videoDraftBinding.restoreExisting || initialParams?.modelId) {
           setSelectedModel(initialParams?.modelId ?? '');
           const model = list.find(m => m.model_id === initialParams?.modelId);
           const size = model?.supported_sizes.find(s => s.id === initialParams?.resolution || s.api_value === initialParams?.resolution);
@@ -565,52 +500,21 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 卸载时释放本地 objectURL（历史本地上传遗留）。画布节点带入无 file 不释放。
-  const refFilesRef = useRef(refFiles);
-  refFilesRef.current = refFiles;
-  useEffect(
-    () => () => {
-      refFilesRef.current.forEach((f) => {
-        if (f.file) URL.revokeObjectURL(f.preview);
-      });
-    },
-    [],
-  );
-
-  /** 截断文件名用于 chip 展示 */
-  const truncateName = (name: string, max = 14) => {
-    const dot = name.lastIndexOf('.');
-    const base = dot > 0 ? name.slice(0, dot) : name;
-    const ext = dot > 0 ? name.slice(dot) : '';
-    if (base.length <= max) return name;
-    return `${base.slice(0, max)}...${ext}`;
-  };
-
-  /** 删除文件（仅历史本地上传的 objectURL 需要释放） */
-  const removeFile = (index: number) => {
-    setRefFiles((prev) => {
-      const copy = [...prev];
-      if (copy[index].file) URL.revokeObjectURL(copy[index].preview);
-      copy.splice(index, 1);
-      return copy;
-    });
-  };
-
   /** 编辑器内容变化（IKDMQS 草稿绑定：提示词实时写回草稿节点） */
   const handleComposedChange = (v: ComposedValue) => {
     setComposed(v);
-    if (draftBound) syncDraftParams({ prompt: resolveComposed(v) });
+    syncDraftParams({ prompt: resolveComposed(v) });
   };
 
   /** 发送：**解引用发生在这一刻**——编辑期胶囊一直是指针，此处才换成完整 prompt
-   *  （携带模型/宽高比/清晰度/时长）。草稿绑定模式（IKDMQS）参考由父级按连线角色推导，
+   *  （携带模型/宽高比/清晰度/时长）。参考由父级按连线+material refs 合并推导，
    *  组合冲突（帧/参考混用、能力不支持）在此明确提示并阻止提交，不静默丢弃。 */
-  const submit = async (text: string, options: VideoGenOptions, refs: BottomRefItem[]) => {
+  const submit = async (text: string, options: VideoGenOptions) => {
     if (sendingRef.current) return;
     sendingRef.current = true;
     setSending(true);
     try {
-      await onSend(text, options, refs);
+      await onSend(text, options);
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -619,42 +523,16 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
 
   const handleSend = () => {
     if (!canSend) return;
+    if (readOnly) return;
     const text = resolveComposed(composed).trim();
     if (!text && !hasAttachmentText) return;
     if (!currentModel) {
       console.warn('视频模型能力加载中，请稍后重试');
       return;
     }
-    if (draftBound) {
-      if (readOnly) return;
-      if (conflict) {
-        onToast?.('warn', conflict);
-        return;
-      }
-      const size = currentModel.supported_sizes.find((s) => s.id === selectedSize);
-      if (!size) {
-        console.warn('视频模型清晰度能力缺失，请稍后重试');
-        return;
-      }
-      void submit(text, {
-        modelId: currentModel.model_id,
-        aspectRatio: selectedRatio,
-        resolution: size.api_value ?? size.id,
-        duration,
-        mode: selectedMode,
-      }, []);
+    if (conflict) {
+      onToast?.('warn', conflict);
       return;
-    }
-    // 非草稿绑定路径（重新编辑/资产卡）旧语义
-    if (isKeyframe) {
-      if (videoCount > 0) {
-        onToast?.('warn', '首尾帧模式仅支持上传首帧和尾帧两张图片，不支持视频');
-        return;
-      }
-      if (imageCount !== 2) {
-        onToast?.('warn', '首尾帧模式需要上传首帧和尾帧两张图片');
-        return;
-      }
     }
     const size = currentModel.supported_sizes.find((s) => s.id === selectedSize);
     if (!size) {
@@ -667,8 +545,58 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
       resolution: size.api_value ?? size.id,
       duration,
       mode: selectedMode,
-    }, refFiles);
-    chipEditorRef.current?.clear();
+    });
+  };
+
+  /** 槽位来源菜单（统一草稿绑定）：按 kind+role 区分目标槽位，一次只弹一个；
+   *  三项来源：从资产中选择（落画布节点+连线）/ 到节点选择（建线）/ 角色库（入草稿 data） */
+  const renderSourceMenu = (
+    kind: 'image' | 'video',
+    role: VideoRefRole,
+    title: string,
+    Icon: typeof Image,
+    label?: string,
+  ) => {
+    const isOpen = sourceMenuOpen?.kind === kind && sourceMenuOpen.role === role;
+    return (
+      <div className={styles.sourceWrap} ref={isOpen ? sourceMenuRef : undefined}>
+        <button
+          className={`${styles.mediaBtn} ${pickMode === kind ? styles.mediaBtnPicking : ''}`}
+          title={title}
+          onClick={() => setSourceMenuOpen(isOpen ? null : { kind, role })}
+        >
+          {label ? <span className={styles.mediaBtnLabel}>{label}</span> : <Icon size={18} strokeWidth={2} />}
+        </button>
+        {isOpen && (
+          <>
+            <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(null)} />
+            <div className={styles.sourceMenu}>
+              <button
+                className={styles.sourceMenuItem}
+                onClick={() => { setSourceMenuOpen(null); onPickFromAssets?.(kind, role); }}
+              >
+                <FolderOpen size={14} strokeWidth={2} />
+                <span>从资产中选择</span>
+              </button>
+              <button
+                className={styles.sourceMenuItem}
+                onClick={() => { setSourceMenuOpen(null); onPickFromCanvas?.(kind, role); }}
+              >
+                <MousePointerClick size={14} strokeWidth={2} />
+                <span>到节点选择</span>
+              </button>
+              <button
+                className={styles.sourceMenuItem}
+                onClick={() => { setSourceMenuOpen(null); onOpenCharacterLibrary?.(role); }}
+              >
+                <User size={14} strokeWidth={2} />
+                <span>角色库</span>
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -820,98 +748,61 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
         </div>
       )}
 
-      {/* 顶部媒体行（IKDMQS 草稿绑定：按角色分组的连线推导参考；否则本地列表） */}
-      {draftBound && videoMediaRefs ? (
-        <div className={styles.refRoleArea}>
-          {/* 首帧槽 */}
+      {/* 顶部媒体行（统一草稿绑定：按模式门控展示。「连线 + material」合并推导参考）
+          首尾帧模式：首帧 + 尾帧同一行；全能参考/图生视频：普通参考（图生视频不收视频参考）。
+          角色由「模式 + 目标槽」决定，不再提供跨模式角色切换（避免槽隐藏后参考丢失）。 */}
+      <div className={styles.refRoleArea}>
+        {isKeyframe ? (
           <div className={styles.refSlot}>
-            <span className={styles.refSlotLabel}>首帧</span>
+            {/* 首帧：有图时缩略图（含角色徽标）；无图时占位内展示「首帧」文字 */}
             {videoMediaRefs.first ? (
               <VideoRefThumb
                 item={videoMediaRefs.first}
                 role="first"
                 readOnly={readOnly}
                 onRemove={onRemoveVideoRef}
-                onSetRole={onSetVideoRefRole}
+                onRemoveMaterial={onRemoveMaterialRef}
                 firstSlotOpen={false}
-                lastSlotOpen={canAddLast}
+                lastSlotOpen={false}
               />
             ) : (
-              !readOnly && (
-                <button
-                  className={`${styles.mediaBtn} ${pickMode === 'image' ? styles.mediaBtnPicking : ''}`}
-                  disabled={!canAddFirst}
-                  title={canAddFirst ? '到节点选择首帧' : '当前模型不支持首帧'}
-                  onClick={() => onPickFromCanvas?.('image', 'first')}
-                >
-                  <Image size={18} strokeWidth={2} />
-                </button>
-              )
+              !readOnly && canAddFirst && renderSourceMenu('image', 'first', '添加首帧（从资产中选择 / 到节点选择 / 角色库）', Image, '首帧')
             )}
-          </div>
-          {/* 尾帧槽 */}
-          <div className={styles.refSlot}>
-            <span className={styles.refSlotLabel}>尾帧</span>
+            {/* 尾帧（与首帧同一行）：有图时缩略图；无图时占位内展示「尾帧」文字 */}
             {videoMediaRefs.last ? (
               <VideoRefThumb
                 item={videoMediaRefs.last}
                 role="last"
                 readOnly={readOnly}
                 onRemove={onRemoveVideoRef}
-                onSetRole={onSetVideoRefRole}
-                firstSlotOpen={canAddFirst}
+                onRemoveMaterial={onRemoveMaterialRef}
+                firstSlotOpen={false}
                 lastSlotOpen={false}
               />
             ) : (
-              !readOnly && (
-                <button
-                  className={`${styles.mediaBtn} ${pickMode === 'image' ? styles.mediaBtnPicking : ''}`}
-                  disabled={!canAddLast}
-                  title={
-                    !canAddLast
-                      ? caps && (!caps.lastFrame || !caps.firstLastFrame)
-                        ? '当前模型不支持尾帧'
-                        : '尾帧必须与首帧一起使用，请先指定首帧'
-                      : '到节点选择尾帧'
-                  }
-                  onClick={() => onPickFromCanvas?.('image', 'last')}
-                >
-                  <Image size={18} strokeWidth={2} />
-                </button>
-              )
+              !readOnly && canAddLast && renderSourceMenu('image', 'last', '添加尾帧（从资产中选择 / 到节点选择 / 角色库）', Image, '尾帧')
             )}
           </div>
-          {/* 普通参考区 */}
+        ) : (
           <div className={styles.refSlot}>
-            <span className={styles.refSlotLabel}>普通参考</span>
             {videoMediaRefs.reference.map((r) => (
               <VideoRefThumb
-                key={r.nodeId}
+                key={r.materialId ?? r.nodeId}
                 item={r}
                 role="reference"
                 readOnly={readOnly}
                 onRemove={onRemoveVideoRef}
                 onSetRole={onSetVideoRefRole}
-                firstSlotOpen={canAddFirst}
-                lastSlotOpen={canAddLast}
+                onRemoveMaterial={onRemoveMaterialRef}
+                onSetMaterialRole={onSetMaterialRefRole}
+                firstSlotOpen={false}
+                lastSlotOpen={false}
               />
             ))}
             {!readOnly && canAddReference && (
               <>
-                <button
-                  className={`${styles.mediaBtn} ${pickMode === 'image' ? styles.mediaBtnPicking : ''}`}
-                  title="到节点选择图片"
-                  onClick={() => onPickFromCanvas?.('image')}
-                >
-                  <Image size={18} strokeWidth={2} />
-                </button>
-                <button
-                  className={`${styles.mediaBtn} ${pickMode === 'video' ? styles.mediaBtnPicking : ''}`}
-                  title="到节点选择视频"
-                  onClick={() => onPickFromCanvas?.('video')}
-                >
-                  <Video size={18} strokeWidth={2} />
-                </button>
+                {renderSourceMenu('image', 'reference', '添加图片参考（从资产中选择 / 到节点选择 / 角色库）', Image)}
+                {!isText2Video && renderSourceMenu('video', 'reference', '添加视频参考（从资产中选择 / 到节点选择 / 角色库）', Video)}
               </>
             )}
             {videoMediaRefs.reference.length > 0 && (
@@ -920,164 +811,22 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
               </span>
             )}
           </div>
-          {videoMediaRefs.invalid?.map((ref) => (
-            <div key={ref.nodeId} className={styles.refConflictHint} role="alert">
-              {ref.role === 'first' ? '首帧' : ref.role === 'last' ? '尾帧' : '普通参考'}：{ref.name} — {ref.reason}
-              <button
-                type="button"
-                disabled={readOnly}
-                aria-label={`移除失效引用 ${ref.name}`}
-                onClick={() => onRemoveVideoRef?.(ref.nodeId)}
-              >移除引用</button>
-            </div>
-          ))}
-          {/* 组合冲突提示（IKDMQS）：明确说明不可提交的原因，不静默丢弃 */}
-          {conflict && <div className={styles.refConflictHint} role="alert">{conflict}</div>}
-          {readOnly && <div className={styles.readOnlyHint}>{sending || videoDraftBinding?.submitting ? '正在保存并提交，参数与连线只读' : '生成中，参数与连线只读；可在画布卡片上取消生成'}</div>}
-        </div>
-      ) : (
-        <div className={styles.mediaRow}>
-          {/* 图片缩略图 */}
-          {refFiles.filter((f) => f.type === 'image').map((item, i) => {
-            const idx = refFiles.indexOf(item);
-            return (
-              <div key={`img-${i}`} className={styles.mediaThumb}>
-                <img src={item.preview} alt="" className={styles.mediaThumbImg} />
-                <button className={styles.mediaThumbRemove} onClick={() => removeFile(idx)} title="移除">
-                  <X size={10} strokeWidth={2} />
-                </button>
-              </div>
-            );
-          })}
-          {/* 图片入口（上传入口退役，IKDLQL；保留资产选择/节点选择/角色库来源菜单，画布资产改造融合） */}
-          {imageCount < maxImages && (
-            <div className={styles.sourceWrap} ref={imageSourceRef}>
-              <button
-                className={`${styles.mediaBtn} ${pickMode === 'image' ? styles.mediaBtnPicking : ''}`}
-                onClick={() => setSourceMenuOpen((v) => (v === 'image' ? null : 'image'))}
-                title="从资产中选择 / 到节点选择 / 角色库"
-              >
-                <Image size={18} strokeWidth={2} />
-              </button>
-              {sourceMenuOpen === 'image' && (
-                <>
-                  <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(null)} />
-                  <div className={styles.sourceMenu}>
-                    <button
-                      className={styles.sourceMenuItem}
-                      onClick={() => { setSourceMenuOpen(null); onPickFromAssets?.('image'); }}
-                    >
-                      <FolderOpen size={14} strokeWidth={2} />
-                      <span>从资产中选择</span>
-                    </button>
-                    <button
-                      className={styles.sourceMenuItem}
-                      onClick={() => { setSourceMenuOpen(null); onPickFromCanvas?.('image'); }}
-                    >
-                      <MousePointerClick size={14} strokeWidth={2} />
-                      <span>到节点选择</span>
-                    </button>
-                    <button
-                      className={styles.sourceMenuItem}
-                      onClick={() => { setSourceMenuOpen(null); onOpenCharacterLibrary?.(); }}
-                    >
-                      <User size={14} strokeWidth={2} />
-                      <span>角色库</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* 分隔点 */}
-          {((imageCount > 0 || imageCount < maxImages) && (!noVideoMode && (videoCount < MAX_VIDEO_REFS || videoCount > 0))) && (
-            <div className={styles.mediaDot} />
-          )}
-
-          {/* 视频缩略图（仅全能参考模式） */}
-          {!noVideoMode && refFiles.filter((f) => f.type === 'video').map((item, i) => {
-            const idx = refFiles.indexOf(item);
-            return (
-              <div key={`vid-${i}`} className={styles.mediaThumb}>
-                <video src={item.preview} className={styles.mediaThumbImg} muted />
-                <button className={styles.mediaThumbRemove} onClick={() => removeFile(idx)} title="移除">
-                  <X size={10} strokeWidth={2} />
-                </button>
-                <div className={styles.mediaPlayIcon}><Play size={12} fill="#fff" strokeWidth={0} /></div>
-              </div>
-            );
-          })}
-          {/* 视频入口（仅全能参考模式；上传入口退役，IKDLQL；保留资产选择/节点选择/角色库来源菜单） */}
-          {!noVideoMode && videoCount < MAX_VIDEO_REFS && (
-            <div className={styles.sourceWrap} ref={videoSourceRef}>
-              <button
-                className={`${styles.mediaBtn} ${pickMode === 'video' ? styles.mediaBtnPicking : ''}`}
-                onClick={() => setSourceMenuOpen((v) => (v === 'video' ? null : 'video'))}
-                title="从资产中选择 / 到节点选择 / 角色库"
-              >
-                <Video size={18} strokeWidth={2} />
-              </button>
-              {sourceMenuOpen === 'video' && (
-                <>
-                  <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(null)} />
-                  <div className={styles.sourceMenu}>
-                    <button
-                      className={styles.sourceMenuItem}
-                      onClick={() => { setSourceMenuOpen(null); onPickFromAssets?.('video'); }}
-                    >
-                      <FolderOpen size={14} strokeWidth={2} />
-                      <span>从资产中选择</span>
-                    </button>
-                    <button
-                      className={styles.sourceMenuItem}
-                      onClick={() => { setSourceMenuOpen(null); onPickFromCanvas?.('video'); }}
-                    >
-                      <MousePointerClick size={14} strokeWidth={2} />
-                      <span>到节点选择</span>
-                    </button>
-                    <button
-                      className={styles.sourceMenuItem}
-                      onClick={() => { setSourceMenuOpen(null); onOpenCharacterLibrary?.(); }}
-                    >
-                      <User size={14} strokeWidth={2} />
-                      <span>角色库</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* 计数 */}
-          {refFiles.length > 0 && (
-            <span className={styles.fileCount}>
-              {isKeyframe ? `${imageCount}/2` : `${refFiles.length}/${maxImages + MAX_VIDEO_REFS}`}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* 文件名 chips（非草稿绑定路径的面板本地列表） */}
-      {!draftBound && refFiles.length > 0 && (
-        <div className={styles.fileChipRow}>
-          {refFiles.map((item, idx) => (
-            <div key={idx} className={styles.fileChip}>
-              {item.type === 'image'
-                ? <Image size={12} strokeWidth={2} />
-                : <Video size={12} strokeWidth={2} />}
-              <span>{item.file ? truncateName(item.file.name) : (item.type === 'image' ? '图片' : '视频')}</span>
-              <button
-                className={styles.fileChipRemove}
-                onClick={() => removeFile(idx)}
-                title="移除"
-              >
-                <X size={10} strokeWidth={2} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+        )}
+        {videoMediaRefs.invalid?.map((ref) => (
+          <div key={ref.nodeId} className={styles.refConflictHint} role="alert">
+            {ref.role === 'first' ? '首帧' : ref.role === 'last' ? '尾帧' : '普通参考'}：{ref.name} — {ref.reason}
+            <button
+              type="button"
+              disabled={readOnly}
+              aria-label={`移除失效引用 ${ref.name}`}
+              onClick={() => (ref.materialId != null ? onRemoveMaterialRef?.(ref.materialId) : onRemoveVideoRef?.(ref.nodeId))}
+            >移除引用</button>
+          </div>
+        ))}
+        {/* 组合冲突提示（IKDMQS）：明确说明不可提交的原因，不静默丢弃 */}
+        {conflict && <div className={styles.refConflictHint} role="alert">{conflict}</div>}
+        {readOnly && <div className={styles.readOnlyHint}>{sending || videoDraftBinding.submitting ? '正在保存并提交，参数与连线只读' : '生成中，参数与连线只读；可在画布卡片上取消生成'}</div>}
+      </div>
 
       {/* 连线文本附件（IKDLQG）：只读展示，增删通过画布连线建立/断开进行；多附件可上移/下移排序（IKDLQH） */}
       {attachments && attachments.length > 0 && (
@@ -1107,13 +856,7 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
       <div className={styles.editorWrap}>
         <ChipTextEditor
           ref={chipEditorRef}
-          placeholder={
-            draftBound
-              ? '描述你希望生成的视频。参考素材从画布连入或到节点选择，首帧/尾帧需显式指定。'
-              : isKeyframe
-                ? '通过直接控制提示词快速生成单段片段。首尾帧模式可上传首帧与尾帧参考（图片最多 2 张）。'
-                : `通过直接控制提示词快速生成单段片段。参考图最多 ${maxImages} 张 / 视频最多 ${MAX_VIDEO_REFS} 个。`
-          }
+          placeholder="描述你希望生成的视频。参考素材从画布连入或到节点选择，首帧/尾帧需显式指定。"
           // 超限只提示、不动内容（IKAFSX）。原来这里会 `setText(truncated)`——那是「用纯文本
           // 整体替换编辑器内容」，**所有胶囊当场湮灭、正文被从中间腰斩**，丢的远不止超出的部分。
           // 而这个 1000 本身也是凭空定的：后端不校验 prompt 长度，模型能力接口里也没有这个字段。
@@ -1133,49 +876,34 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
       <div className={styles.bottomBar}>
         {/* 左侧 */}
         <div className={styles.barLeft}>
-          {/* 模式选择器（IKDMQS 草稿绑定模式隐藏：首帧/尾帧/普通参考由角色槽显式表达，不再按模式预设） */}
-          {!draftBound && (
-            <div className={styles.modeWrap} ref={modeWrapRef}>
-              <button
-                className={styles.modeBtn}
-                onClick={() => setModeOpen(!modeOpen)}
-              >
-                <span>{currentMode?.label ?? '选择模式'}</span>
-                <ChevronDown
-                  size={12}
-                  strokeWidth={2}
-                  className={`${styles.modeArrow} ${modeOpen ? styles.modeArrowUp : ''}`}
-                />
-              </button>
-              {modeOpen && (
-                <div className={styles.modeDropdown}>
-                  {modeOptions.map((opt) => (
-                    <button
-                      key={opt.key}
-                      className={`${styles.modeOption} ${opt.key === selectedMode ? styles.modeOptionActive : ''}`}
-                      onClick={() => {
-                        if ((opt.key === 'keyframe' || opt.key === 'text2video') && videoCount > 0) {
-                          onToast?.('warn', `${opt.key === 'keyframe' ? '首尾帧' : '图生视频'}模式不支持视频参考，请先移除视频文件`);
-                          setModeOpen(false);
-                          return;
-                        }
-                        if (opt.key === 'keyframe' && imageCount > 2) {
-                          onToast?.('warn', '首尾帧模式仅支持上传 2 张图片，请先移除多余图片');
-                          setModeOpen(false);
-                          return;
-                        }
-                        setSelectedMode(opt.key);
-                        syncDraftParams({ mode: opt.key });
-                        setModeOpen(false);
-                      }}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {/* 模式选择器（与首页底部操作同步：全能参考 / 首尾帧 / 图生视频） */}
+          <div className={styles.modeWrap} ref={modeWrapRef}>
+            <button
+              className={styles.modeBtn}
+              disabled={readOnly}
+              onClick={() => setModeOpen((v) => !v)}
+            >
+              <span>{currentMode?.label ?? '选择模式'}</span>
+              <ChevronDown
+                size={12}
+                strokeWidth={2}
+                className={`${styles.modeArrow} ${modeOpen ? styles.modeArrowUp : ''}`}
+              />
+            </button>
+            {modeOpen && (
+              <div className={styles.modeDropdown}>
+                {modeOptions.map((opt) => (
+                  <button
+                    key={opt.key}
+                    className={`${styles.modeOption} ${opt.key === selectedMode ? styles.modeOptionActive : ''}`}
+                    onClick={() => handleModeChange(opt.key)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* 配置信息（点击展开配置面板） */}
           <button className={styles.configBtn} onClick={() => setShowConfig(!showConfig)}>
@@ -1194,10 +922,10 @@ export default function BottomDialog({ onClose, onSend, initialRefs, initialText
         <div className={styles.barRight}>
           <button
             data-testid="video-send"
-            className={`${styles.sendBtn} ${canSend && !keyframeInvalid && !readOnly && !conflict ? styles.sendBtnActive : ''}`}
+            className={`${styles.sendBtn} ${canSend && !readOnly && !conflict ? styles.sendBtnActive : ''}`}
             onClick={handleSend}
-            disabled={!canSend || keyframeInvalid || readOnly || !!conflict}
-            title={conflict ?? (readOnly ? '生成中，输入只读' : keyframeInvalid ? '首尾帧模式需恰好 2 张图片' : '发送')}
+            disabled={!canSend || readOnly || !!conflict}
+            title={conflict ?? (readOnly ? '生成中，输入只读' : '发送')}
           >
             <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
           </button>

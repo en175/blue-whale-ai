@@ -41,8 +41,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
-  /* IKA715：固定高度改为最小高度，内容（预览行/配置面板）增多时自然增高，不再裁切底部控件 */
-  min-height: 200px;
+  /* IMGD-统一对话框高度：图片/视频/音频三者共用同一 min-height，空态严格等高，
+   * 内容增多时自然增高（本卡片实际高度由内容撑开，此值为兜底） */
+  min-height: 230px;
   box-sizing: border-box;
   transition: border-color var(--transition-fast);
 }

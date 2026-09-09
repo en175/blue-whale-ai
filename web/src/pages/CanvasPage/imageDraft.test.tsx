@@ -227,6 +227,38 @@ function seedDraftDoc() {
   };
 }
 
+/** 含空白图片草稿 d1 的画布文档（无参数无连线）：绑定面板首开默认参数落值与提交链路的测试基线 */
+function seedEmptyDraftDoc() {
+  canvasDocMock.current = {
+    doc: {
+      id: 11,
+      version: 3,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [
+        { id: 't1', type: 'textNode', position: { x: 0, y: 0 }, data: { title: '故事文案', text: '一只蓝鲸在海里' } },
+        {
+          id: 'm1',
+          type: 'mediaNode',
+          position: { x: 200, y: 0 },
+          data: { src: 'http://img/m1.png', mediaType: 'image', fileName: '目标图', assetId: 'a1' },
+        },
+        {
+          id: 'd1',
+          type: 'mediaNode',
+          position: { x: 420, y: 160 },
+          data: { src: '', mediaType: 'image', fileName: '图片草稿', genStatus: 'draft', draft: true, prompt: '' },
+        },
+      ],
+      edges: [],
+    },
+    assets: {
+      a1: { asset_id: 1, type: 'image', access_url: 'http://img/m1.png', width: 100, height: 100 },
+    },
+    refetch: () => Promise.resolve([]),
+    acceptDoc: vi.fn(),
+  };
+}
+
 let root: Root;
 let container: HTMLDivElement;
 
@@ -276,6 +308,15 @@ async function clickSidebarImage() {
   });
 }
 
+/** 点击画布草稿卡 d1 打开绑定面板（草稿绑定路径），返回草稿节点 id */
+async function openDraftPanel(): Promise<string> {
+  const draft = flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1')!;
+  await act(async () => {
+    flowProps.current.onNodeClick(draft);
+  });
+  return 'd1';
+}
+
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
@@ -290,57 +331,59 @@ afterEach(async () => {
 });
 
 describe('IKDMQQ 图片草稿创建与编辑', () => {
-  it('侧栏点击先建草稿卡并绑定面板：自动选中、不创建生成任务', async () => {
+  it('侧栏图片入口仅打开面板：不建卡、不创建任务（自由模式）', async () => {
     await renderPage();
     const before = flowProps.current.mediaNodes.length;
 
     await clickSidebarImage();
 
-    const drafts = draftNodes();
-    expect(drafts).toHaveLength(1);
-    expect(flowProps.current.mediaNodes).toHaveLength(before + 1);
-    const draft = drafts[0]!;
-    expect(draft.type).toBe('mediaNode');
-    expect(draft.data.mediaType).toBe('image');
-    expect(draft.data.genStatus).toBe('draft');
-    expect(draft.data.draft).toBe(true);
-    expect(draft.data.assetId).toBeUndefined();
-    expect(draft.selected).toBe(true);
-    // 其它节点取消选中
-    expect(flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')!.selected).toBeFalsy();
-
-    // 面板打开且绑定该草稿（空提示词、无附件时发送禁用）
+    // 点击入口不新建任何节点、不建草稿
+    expect(flowProps.current.mediaNodes).toHaveLength(before);
+    expect(draftNodes()).toHaveLength(0);
+    // 仅点击入口不创建任务
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+    // 面板打开（模型能力加载后空提示词、无附件时发送禁用）
     expect(promptTextarea()).toBeTruthy();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     expect(sendButton().disabled).toBe(true);
-
-    // 建卡与编辑不产生任务
-    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-
-    // 草稿随自动保存上送（genStatus=draft、draft 标记持久化）
-    await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalled(), { timeout: 3000 });
-    const payload = apiMocks.saveCanvasDoc.mock.calls.at(-1)![1];
-    const saved = payload.nodes.find((n) => n.id === draft.id)!;
-    expect(saved.data.genStatus).toBe('draft');
-    expect(saved.data.draft).toBe(true);
   });
 
-  it('连续点击侧栏入口每次新增独立草稿', async () => {
+  it('侧栏自由模式发送：直接落生成卡（无 target_node_id）', async () => {
+    await renderPage();
+    await clickSidebarImage();
+    await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
+    await typePrompt('自由模式画图');
+
+    await act(async () => {
+      sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
+    expect(payload.type).toBe('image');
+    expect(payload.target_node_id).toBeUndefined();
+    expect(payload.parameters.prompt).toBe('自由模式画图');
+    expect(payload.parameters.model_id).toBe('m-test');
+    // 生成卡落画布（seed m1 + 新生成卡）
+    expect(flowProps.current.mediaNodes).toHaveLength(2);
+  });
+
+  it('连续点击侧栏入口：不建卡，面板保持打开', async () => {
     await renderPage();
 
     await clickSidebarImage();
     await clickSidebarImage();
 
-    const drafts = draftNodes();
-    expect(drafts).toHaveLength(2);
-    expect(drafts[0]!.id).not.toBe(drafts[1]!.id);
+    expect(flowProps.current.mediaNodes).toHaveLength(1);
+    expect(draftNodes()).toHaveLength(0);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+    expect(promptTextarea()).toBeTruthy();
   });
 
   it('面板编辑实时写回草稿节点（提示词与模型/分辨率/比例参数）', async () => {
+    seedEmptyDraftDoc();
     await renderPage();
-    await clickSidebarImage();
-    const draftId = draftNodes()[0]!.id;
+    const draftId = await openDraftPanel();
 
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     await typePrompt('画一只蓝鲸');
@@ -390,10 +433,10 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
 
 describe('IKDMQQ 原位提交与首次生成', () => {
   it('点击生成才提交：先落盘后建任务、节点数不变、成功回填同一张卡', async () => {
+    seedEmptyDraftDoc();
     await renderPage();
-    await clickSidebarImage();
-    const draftId = draftNodes()[0]!.id;
-    const positionBefore = { ...draftNodes()[0]!.position };
+    const draftId = await openDraftPanel();
+    const positionBefore = { ...flowProps.current.mediaNodes.find((n: Node) => n.id === draftId)!.position };
 
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     await typePrompt('画一只蓝鲸');
@@ -425,7 +468,6 @@ describe('IKDMQQ 原位提交与首次生成', () => {
       expect(node.data.genStatus).toBeUndefined();
     });
     const done = flowProps.current.mediaNodes.find((n: Node) => n.id === draftId)!;
-    expect(flowProps.current.mediaNodes).toHaveLength(2);
     expect(done.position).toEqual(positionBefore);
     expect(done.data.src).toBe('http://img/out.png');
     expect(done.data.assetId).toBe('a2');
@@ -439,9 +481,10 @@ describe('IKDMQQ 原位提交与首次生成', () => {
       progress: 10,
       asset: null,
     }));
+    seedEmptyDraftDoc();
     await renderPage();
-    await clickSidebarImage();
-    const draftId = draftNodes()[0]!.id;
+    await openDraftPanel();
+    const draftId = 'd1';
 
     // 草稿态可连线：t1 → draft
     await act(async () => {
@@ -481,9 +524,9 @@ describe('IKDMQQ 原位提交与首次生成', () => {
   it('建任务 401：草稿回退待生成（标题恢复「图片草稿」），卡片与参数保留', async () => {
     const { ApiError } = await import('@/api/http');
     apiMocks.createGenerationJob.mockRejectedValueOnce(new ApiError(401, '未登录'));
+    seedEmptyDraftDoc();
     await renderPage();
-    await clickSidebarImage();
-    const draftId = draftNodes()[0]!.id;
+    const draftId = await openDraftPanel();
 
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     await typePrompt('画一只蓝鲸');
@@ -510,9 +553,9 @@ describe('IKDMQQ 原位提交与首次生成', () => {
       asset: null,
       error: { msg: '供应商超时' },
     }));
+    seedEmptyDraftDoc();
     await renderPage();
-    await clickSidebarImage();
-    const draftId = draftNodes()[0]!.id;
+    const draftId = await openDraftPanel();
 
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     await typePrompt('画一只蓝鲸');
@@ -540,9 +583,9 @@ describe('IKDMQQ 原位提交与首次生成', () => {
 
 describe('IKDMQQ 保存失败暂停生成与项目切换', () => {
   it('落盘失败中止提交并保留草稿；项目切换被阻断，保存恢复后放行', async () => {
+    seedEmptyDraftDoc();
     await renderPage();
-    await clickSidebarImage();
-    const draftId = draftNodes()[0]!.id;
+    const draftId = await openDraftPanel();
 
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     await typePrompt('画一只蓝鲸');

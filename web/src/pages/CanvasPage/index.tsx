@@ -14,9 +14,14 @@ import {
   isVideoDraftNode,
   MAX_VIDEO_REFS,
   readRefRole,
-  videoMediaRefsOf,
+  readDraftMaterialRefs,
+  mergedVideoMediaRefsOf,
+  supportsVideoReferenceModel,
   videoRefConflict,
   videoRefSourceError,
+  type VideoMaterialRefData,
+  type VideoMediaRef,
+  type VideoMediaRefs,
   type VideoRefRole,
 } from './videoMediaRefs';
 import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
@@ -32,7 +37,7 @@ import {
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
-import BottomDialog, { type VideoGenOptions, type BottomRefItem, type VideoGenSeedParams } from './components/BottomDialog';
+import BottomDialog, { type VideoGenOptions, type VideoGenSeedParams } from './components/BottomDialog';
 import ImageDialog, { type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
@@ -143,10 +148,6 @@ export default function CanvasPage() {
   const [pickAssetId, setPickAssetId] = useState<string | null>(null);
   /** 画布节点选取/角色库多选结果（ts 驱动注入图片对话框） */
   const [imagePickResult, setImagePickResult] = useState<{ ts: number; files: UploadedFile[] } | null>(null);
-  /** 画布节点选取/角色库多选结果（ts 驱动注入视频对话框参考视频） */
-  const [videoPickResult, setVideoPickResult] = useState<{ ts: number; items: BottomRefItem[] } | null>(null);
-  /** 画布节点选取/角色库多选结果（ts 驱动注入视频对话框参考图片） */
-  const [videoDlgImagePickResult, setVideoDlgImagePickResult] = useState<{ ts: number; items: BottomRefItem[] } | null>(null);
   /** 画布节点选取结果（ts 驱动注入商品卡） */
   const [productPickResult, setProductPickResult] = useState<{ ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string } } | null>(null);
   /** 画布节点选取结果（ts 驱动注入资产卡） */
@@ -155,6 +156,8 @@ export default function CanvasPage() {
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
   /** 角色库发起目标（决定选中结果注入哪个对话框） */
   const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'video' | 'asset' | null>(null);
+  /** 角色库为视频草稿面板打开时的目标槽位角色（material 参考仅存草稿 data） */
+  const [charLibPickRole, setCharLibPickRole] = useState<VideoRefRole>('reference');
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
   const [showEdges, setShowEdges] = useState(true);
@@ -227,7 +230,7 @@ export default function CanvasPage() {
       showToast('warn', err);
       return false;
     }
-    const refs = videoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
+    const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
     const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>)!;
     const occupied =
       refs.reference.some((r) => r.assetId === assetId) ||
@@ -245,7 +248,7 @@ export default function CanvasPage() {
     }
     if (role === 'last') {
       if (!refs.first) {
-        showToast('warn', '尾帧必须与首帧一起使用，请先指定首帧');
+        showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
         return false;
       }
       if (refs.last) {
@@ -310,13 +313,15 @@ export default function CanvasPage() {
   /** 工具栏加号 →「资产库选择」弹窗开关 */
   const [showAssetsPicker, setShowAssetsPicker] = useState(false);
   /** 资产选择弹窗的打开来源（决定 mediaTypes 过滤与确认后的去向）：
-   *  toolbar 画布工具栏（全类型落画布）/ bottomImage|bottomVideo 视频 dock / imageDialog 图片 dock / agentPanel Agent 面板 */
-  const [assetsPickerTarget, setAssetsPickerTarget] = useState<'toolbar' | 'bottomImage' | 'bottomVideo' | 'imageDialog' | 'agentPanel'>('toolbar');
+   *  toolbar 画布工具栏（全类型落画布）/ videoDraft 视频草稿面板（落画布+按槽位连线）/ imageDialog 图片 dock / agentPanel Agent 面板 */
+  const [assetsPickerTarget, setAssetsPickerTarget] = useState<'toolbar' | 'videoDraft' | 'imageDialog' | 'agentPanel'>('toolbar');
   /** 打开资产选择弹窗（记录来源入口，确认时按来源路由） */
   const openAssetsPicker = (target: typeof assetsPickerTarget) => {
     setAssetsPickerTarget(target);
     setShowAssetsPicker(true);
   };
+  /** 视频草稿面板「从资产中选择」的目标槽位角色：first/last 仅图片，reference 图+视频 */
+  const [videoAssetPickRole, setVideoAssetPickRole] = useState<VideoRefRole>('reference');
   /** 资产库选择 → Agent 面板待发附件（ts 驱动注入，画布侧已落节点） */
   const [agentAssetPicks, setAgentAssetPicks] = useState<{ ts: number; blocks: SessionContentBlock[] } | null>(null);
   const [assetsModalDefaultTab, setAssetsModalDefaultTab] = useState<string | undefined>(undefined);
@@ -409,9 +414,12 @@ export default function CanvasPage() {
   /** 面板当前绑定的视频草稿节点 id（IKDMQS）：仅草稿入口（侧栏新建/点击草稿卡）设置；
    *  生命周期与图片草稿绑定一致 */
   const [videoDraftId, setVideoDraftId] = useState<string | null>(null);
-  /** 节点工具条带入视频对话框的初始参考；
+  /** 工具栏自由模式（无草稿卡）的视频参考：本地暂存首帧/尾帧/普通参考，
+   *  发送时随任务一次性提交，关闭面板即丢弃（不落画布不连线） */
+  const [videoFreeRefs, setVideoFreeRefs] = useState<VideoMediaRefs>({ reference: [] });
+  /** 节点工具条/首页带入视频对话框的种子；
    *  params 是首页 AI视频 带入的生成参数（选中首页所选模型/比例/清晰度/时长/模式） */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; refs: BottomRefItem[]; text?: string; params?: VideoGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
+  const [videoSeed, setVideoSeed] = useState<{ ts: number; text?: string; params?: VideoGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
   /** 音频对话框的重挂载 key；草稿入口（IKDMQT）同时携带文字描述/模型/目标节点 */
   const [audioSeed, setAudioSeed] = useState<{ ts: number; text?: string; modelId?: string; targetNodeId?: string } | null>(null);
   /** 面板当前绑定的音频草稿节点 id（IKDMQT）：仅草稿入口（侧栏新建/点击草稿卡）设置；
@@ -423,7 +431,9 @@ export default function CanvasPage() {
   const [selectRequest, setSelectRequest] = useState<{ id: string; ts: number } | null>(null);
   /** 首页 AI视频/AI图片 生成交接：消费后置入此 ref，待项目就绪触发创建任务 */
   const pendingGenRef = useRef<GenHandoff | null>(null);
-  /** 首页 AI视频/AI图片 发送带入：唤起底部对话框（参数带入、内容清空），同时直接创建生成任务（生成卡落画布） */
+  /** 首页 AI视频 带入的草稿参数种子：待项目与文档就绪后新建视频草稿卡并打开绑定面板 */
+  const pendingVideoDraftSeedRef = useRef<VideoGenSeedParams | null>(null);
+  /** 首页 AI视频/AI图片 发送带入：新建视频草稿卡+绑定面板（参数写入草稿 data，任务由 firePendingGen 直接创建） */
   useEffect(() => {
     const state = location.state as { genKind?: 'video' | 'image' } | null;
     if (!state?.genKind) return;
@@ -434,22 +444,15 @@ export default function CanvasPage() {
       return;
     }
     if (handoff.kind === 'video') {
-      // 参数带入对话框；refs/text 不带（内容不保留，任务由 firePendingGen 直接创建）
-      setVideoSeed({
-        ts: Date.now(),
-        refs: [],
-        params: {
-          modelId: handoff.modelId,
-          aspectRatio: handoff.aspectRatio,
-          resolution: handoff.resolution,
-          duration: handoff.duration,
-          mode: handoff.mode,
-        },
-      });
-      setShowBottomDialog(true);
-      setShowImageDialog(false);
-      setShowAudioDialog(false);
-      setShowMusicDialog(false);
+      // 统一草稿绑定：存参数种子，待项目就绪由 firePendingVideoDraft 新建草稿卡并开面板；
+      // 任务仍由 firePendingGen 直接创建（生成卡落画布）
+      pendingVideoDraftSeedRef.current = {
+        modelId: handoff.modelId,
+        aspectRatio: handoff.aspectRatio,
+        resolution: handoff.resolution,
+        duration: handoff.duration,
+        mode: handoff.mode,
+      };
     } else {
       setImageSeed({
         ts: Date.now(),
@@ -463,8 +466,9 @@ export default function CanvasPage() {
       setShowMusicDialog(false);
     }
     pendingGenRef.current = handoff;
-    // 项目已就绪则立即创建生成节点；未就绪由 currentId 变化后的 effect 重试
+    // 项目已就绪则立即创建生成节点与草稿卡；未就绪由 currentId/doc 变化后的 effect 重试
     actionsRef.current.firePendingGen?.();
+    actionsRef.current.firePendingVideoDraft?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, location.pathname, location.search, navigate]);
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
@@ -1300,6 +1304,7 @@ export default function CanvasPage() {
     download: (_id: string) => {},
     showDetails: (_id: string) => {},
     firePendingGen: () => {},
+    firePendingVideoDraft: () => {},
   });
   actionsRef.current = { ...actionsRef.current, duplicate: handleDuplicateNode, addToChat: handleAddToChatNode };
 
@@ -1393,10 +1398,34 @@ export default function CanvasPage() {
       return;
     }
     // IKDMQS：视频草稿绑定面板的「到节点选择」建立来源→草稿连线，角色由发起入口显式指定
-    // （首帧/尾帧/普通参考）；普通参考对图片与视频来源均开放
-    if (pickTarget === 'video' && videoDraftId && (pickMode === 'image' || pickMode === 'video')) {
-      if (node.type === 'mediaNode' && validateVideoRefConnect(node.id, videoDraftId, pickRefRole ?? undefined)) {
-        addCanvasEdge(node.id, videoDraftId, pickRefRole ?? undefined);
+    // （首帧/尾帧/普通参考）；普通参考对图片与视频来源均开放。
+    // 自由模式（工具栏入口无草稿卡）：来源存本地参考，不落画布不连线
+    if (pickTarget === 'video' && (pickMode === 'image' || pickMode === 'video')) {
+      if (videoDraftId) {
+        if (node.type === 'mediaNode' && validateVideoRefConnect(node.id, videoDraftId, pickRefRole ?? undefined)) {
+          addCanvasEdge(node.id, videoDraftId, pickRefRole ?? undefined);
+        }
+      } else if (node.type === 'mediaNode') {
+        const role = pickRefRole ?? 'reference';
+        const err = videoRefSourceError(node, role);
+        if (err) {
+          showToast('warn', err);
+        } else {
+          const d = (node.data ?? {}) as Record<string, unknown>;
+          const assetId = readAssetId(d);
+          if (assetId != null) {
+            appendVideoFreeRef(
+              {
+                nodeId: node.id,
+                url: String(d.src ?? ''),
+                name: typeof d.fileName === 'string' && d.fileName ? d.fileName : node.id,
+                assetId: String(assetId),
+                mediaType: d.mediaType === 'video' ? 'video' : 'image',
+              },
+              role,
+            );
+          }
+        }
       }
       setPickMode(null);
       setPickTarget(null);
@@ -1420,34 +1449,13 @@ export default function CanvasPage() {
       return;
     }
     if (pickMode === 'image' && isReadyMedia && data.mediaType !== 'video') {
-      if (pickTarget === 'video') {
-        // 视频对话框发起的图片节点选取 → 注入其参考图片
-        setVideoDlgImagePickResult({
-          ts: Date.now(),
-          items: [{
-            preview: data.src as string,
-            type: 'image',
-            assetId: readNodeAssetId(data),
-          }],
-        });
-      } else {
-        setImagePickResult({
-          ts: Date.now(),
-          files: [{
-            id: `node-${node.id}`,
-            url: data.src as string,
-            type: 'image',
-            name: (data.fileName as string) || node.id,
-            assetId: readNodeAssetId(data),
-          }],
-        });
-      }
-    } else if (pickMode === 'video' && isReadyMedia && data.mediaType === 'video') {
-      setVideoPickResult({
+      setImagePickResult({
         ts: Date.now(),
-        items: [{
-          preview: data.src as string,
-          type: 'video',
+        files: [{
+          id: `node-${node.id}`,
+          url: data.src as string,
+          type: 'image',
+          name: (data.fileName as string) || node.id,
           assetId: readNodeAssetId(data),
         }],
       });
@@ -1604,49 +1612,6 @@ export default function CanvasPage() {
     handleOpenImageDialog();
   };
 
-  /** 侧栏图片入口（IKDMQQ）：每次点击新建独立图片草稿卡，自动选中并打开绑定面板；
-   *  草稿不进 pendingNodeIds 回滚集合——保存失败时草稿与当前编辑保留，随下次保存重试 */
-  const handleAddImageDraft = () => {
-    if (!canOpenEditor()) return;
-    const nodeId = newNodeId('media-draft');
-    const node: Node = {
-      id: nodeId,
-      type: 'mediaNode',
-      position: spawnDraftPosition(),
-      selected: true,
-      data: {
-        src: '',
-        mediaType: 'image',
-        fileName: '图片草稿',
-        genStatus: 'draft',
-        draft: true,
-        prompt: '',
-        toolMode,
-        onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
-        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
-        onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-        onReEdit: (id: string) => actionsRef.current.reEdit(id),
-        onGenImage: (id: string) => actionsRef.current.genImage(id),
-        onGenVideo: (id: string) => actionsRef.current.genVideo(id),
-        onGenAudio: (id: string) => actionsRef.current.genAudio(id),
-        onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
-        onDownload: (id: string) => actionsRef.current.download(id),
-        onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
-        onMediaDims: handleMediaDims,
-      },
-    };
-    const deselect = (prev: Node[]) => prev.map((n) => (n.selected ? { ...n, selected: false } : n));
-    setTextNodes(deselect);
-    setProductNodes(deselect);
-    setAssetNodes(deselect);
-    setMediaNodes((prev) => [...deselect(prev), node]);
-    setSelectRequest({ id: nodeId, ts: Date.now() });
-    openImageDraftDialog(nodeId);
-  };
-
   /** 面板编辑实时写回草稿节点（IKDMQQ）：参数随节点 data 进入自动保存，刷新后恢复 */
   const handleImageDraftParamsChange = (
     nodeId: string,
@@ -1681,8 +1646,9 @@ export default function CanvasPage() {
     }
   }, [imageDraftId, imageSeed, mediaNodes]);
 
-  /** 打开绑定指定草稿的视频面板（IKDMQS）：带入草稿已保存的参数与当前连线文本附件 */
-  const openVideoDraftDialog = (nodeId: string) => {
+  /** 打开绑定指定草稿的视频面板（IKDMQS）：带入草稿已保存的参数与当前连线文本附件；
+   *  preset 覆盖节点 data 读出的参数——新建草稿后 mediaNodesRef 尚未更新，种子参数经 preset 兜底 */
+  const openVideoDraftDialog = (nodeId: string, preset?: VideoGenSeedParams) => {
     if (!canOpenEditor(nodeId)) return;
     videoPanelHiddenRef.current = false;
     editingTargetRef.current = nodeId;
@@ -1691,14 +1657,13 @@ export default function CanvasPage() {
     setVideoDraftId(nodeId);
     setVideoSeed({
       ts: Date.now(),
-      refs: [],
       text: typeof d.prompt === 'string' ? d.prompt : '',
       params: {
-        modelId: typeof d.draftModelId === 'string' ? d.draftModelId : undefined,
-        aspectRatio: typeof d.draftRatio === 'string' ? d.draftRatio : undefined,
-        resolution: typeof d.draftSize === 'string' ? d.draftSize : undefined,
-        duration: typeof d.draftDuration === 'number' ? d.draftDuration : undefined,
-        mode: typeof d.draftMode === 'string' ? d.draftMode : undefined,
+        modelId: preset?.modelId ?? (typeof d.draftModelId === 'string' ? d.draftModelId : undefined),
+        aspectRatio: preset?.aspectRatio ?? (typeof d.draftRatio === 'string' ? d.draftRatio : undefined),
+        resolution: preset?.resolution ?? (typeof d.draftSize === 'string' ? d.draftSize : undefined),
+        duration: preset?.duration ?? (typeof d.draftDuration === 'number' ? d.draftDuration : undefined),
+        mode: preset?.mode ?? (typeof d.draftMode === 'string' ? d.draftMode : undefined),
       },
       targetNodeId: nodeId,
       attachments: textAttachmentsOf(nodeId),
@@ -1710,10 +1675,15 @@ export default function CanvasPage() {
     setShowMusicDialog(false);
   };
 
-  /** 侧栏视频入口（IKDMQS）：每次点击新建独立视频草稿卡，自动选中并打开绑定面板；
-   *  位置避开底部 Dock 预留区（与图片草稿同一出生点算法） */
-  const handleAddVideoDraft = () => {
-    if (!canOpenEditor()) return;
+  /** 新建视频草稿卡（IKDMQS 统一入口共用）：seed 字段写入草稿 data 持久化键并自动选中，返回节点 id；
+   *  草稿不进 pendingNodeIds 回滚集合——保存失败时草稿与当前编辑保留，随下次保存重试 */
+  const createVideoDraftCard = (seed?: {
+    modelId?: string;
+    ratio?: string;
+    size?: string;
+    duration?: number;
+    mode?: string;
+  }): string => {
     const nodeId = newNodeId('media-draft');
     const node: Node = {
       id: nodeId,
@@ -1728,6 +1698,11 @@ export default function CanvasPage() {
         draft: true,
         prompt: '',
         toolMode,
+        ...(seed?.modelId != null ? { draftModelId: seed.modelId } : {}),
+        ...(seed?.ratio != null ? { draftRatio: seed.ratio, targetRatio: seed.ratio } : {}),
+        ...(seed?.size != null ? { draftSize: seed.size } : {}),
+        ...(seed?.duration != null ? { draftDuration: seed.duration } : {}),
+        ...(seed?.mode != null ? { draftMode: seed.mode } : {}),
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
@@ -1750,7 +1725,7 @@ export default function CanvasPage() {
     setAssetNodes(deselect);
     setMediaNodes((prev) => [...deselect(prev), node]);
     setSelectRequest({ id: nodeId, ts: Date.now() });
-    openVideoDraftDialog(nodeId);
+    return nodeId;
   };
 
   /** 面板编辑实时写回视频草稿节点（IKDMQS）：参数随节点 data 进入自动保存，刷新后恢复 */
@@ -1805,50 +1780,6 @@ export default function CanvasPage() {
     setShowBottomDialog(false);
     setShowImageDialog(false);
     setShowMusicDialog(false);
-  };
-
-  /** 侧栏音频入口（IKDMQT）：每次点击新建独立音频草稿卡，自动选中并打开绑定面板；
-   *  位置避开底部 Dock 预留区（与图片/视频草稿同一出生点算法）；
-   *  音频草稿只有文字描述与模型，无比例/分辨率/时长参数 */
-  const handleAddAudioDraft = () => {
-    if (!canOpenEditor()) return;
-    const nodeId = newNodeId('media-draft');
-    const node: Node = {
-      id: nodeId,
-      type: 'mediaNode',
-      position: spawnDraftPosition(),
-      selected: true,
-      data: {
-        src: '',
-        mediaType: 'audio',
-        fileName: '音频草稿',
-        genStatus: 'draft',
-        draft: true,
-        prompt: '',
-        toolMode,
-        onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
-        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-        onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
-        onRetryJob: (id: string) => actionsRef.current.retryJob(id),
-        onReEdit: (id: string) => actionsRef.current.reEdit(id),
-        onGenImage: (id: string) => actionsRef.current.genImage(id),
-        onGenVideo: (id: string) => actionsRef.current.genVideo(id),
-        onGenAudio: (id: string) => actionsRef.current.genAudio(id),
-        onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
-        onDownload: (id: string) => actionsRef.current.download(id),
-        onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
-        onMediaDims: handleMediaDims,
-      },
-    };
-    const deselect = (prev: Node[]) => prev.map((n) => (n.selected ? { ...n, selected: false } : n));
-    setTextNodes(deselect);
-    setProductNodes(deselect);
-    setAssetNodes(deselect);
-    setMediaNodes((prev) => [...deselect(prev), node]);
-    setSelectRequest({ id: nodeId, ts: Date.now() });
-    openAudioDraftDialog(nodeId);
   };
 
   /** 面板编辑实时写回音频草稿节点（IKDMQT）：参数随节点 data 进入自动保存，刷新后恢复 */
@@ -2072,9 +2003,9 @@ export default function CanvasPage() {
   /** 资产库选择弹窗 → 确认选中的已有资产批量落到画布（多选）：
    *  直接以 /api/assets 返回的 id 作为 assetId 建媒体节点，不走 TOS 上传；
    *  后台补 link 关联，确保素材进入当前项目 snapshot 字典（刷新后不判缺失）。
-   *  返回是否成功（项目未就绪时 false，由调用方决定是否提示）。 */
-  const placeAssetsOnCanvas = (selectedAssets: AssetRecord[]): boolean => {
-    if (!currentId) return false;
+   *  返回新建节点 id 列表（项目未就绪时 null，由调用方决定是否提示）。 */
+  const placeAssetsOnCanvas = (selectedAssets: AssetRecord[]): string[] | null => {
+    if (!currentId) return null;
 
     const nodes: Node[] = selectedAssets.map((asset) => {
       const fileNameFromUrl = assetDisplayName(asset);
@@ -2122,7 +2053,7 @@ export default function CanvasPage() {
         showToast('warn', '资产关联项目失败，请稍后重试');
       });
     });
-    return true;
+    return nodes.map((n) => n.id);
   };
 
   /** 资产选择弹窗统一确认路由（IKC3RY 模块D 八入口）：
@@ -2134,18 +2065,77 @@ export default function CanvasPage() {
     setShowAssetsPicker(false);
     if (selectedAssets.length === 0) return;
 
-    if (target === 'bottomImage' || target === 'bottomVideo') {
-      // 视频 dock：注入 BottomDialog 参考素材（图片/视频分开注入，走 externalPick 既有上限保护与去重）
-      const kind = target === 'bottomImage' ? 'image' : 'video';
-      const items: BottomRefItem[] = selectedAssets
-        .filter((a) => a.type === kind)
-        .map((a) => ({ preview: a.url, type: kind, assetId: a.id }));
-      if (items.length === 0) return;
-      if (target === 'bottomImage') {
-        setVideoDlgImagePickResult({ ts: Date.now(), items });
+    if (target === 'videoDraft') {
+      // 视频草稿面板「从资产中选择」（IKDMQS 来源补齐）：素材落画布节点并按槽位角色连线，
+      // 节点可复用可持久化；首/尾帧槽仅图片且多选只取首张，普通参考按图9/视频3联算上限并查重。
+      // 自由模式（工具栏入口无草稿卡）：资产存本地参考，不落画布不连线
+      const role = videoAssetPickRole;
+      const refs = videoDraftId
+        ? mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current)
+        : videoFreeRefs;
+      let accepted = selectedAssets.filter((a) => a.type === 'image' || a.type === 'video');
+      if (role === 'first' || role === 'last') {
+        if (refs[role]) {
+          showToast('warn', role === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
+          return;
+        }
+        if (role === 'last' && !refs.first) {
+          showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
+          return;
+        }
+        accepted = accepted.filter((a) => a.type === 'image');
+        if (accepted.length === 0) return;
+        if (accepted.length > 1) showToast('warn', '首尾帧仅支持一张图片，已取首张');
+        accepted = accepted.slice(0, 1);
       } else {
-        setVideoPickResult({ ts: Date.now(), items });
+        // 普通参考：图 9/视频 3 与连线+material 合并联算；assetId 查重跳过
+        const known = new Set(refs.reference.map((r) => r.assetId));
+        let imgSlots = REF_LIMITS.image - refs.reference.filter((r) => r.mediaType === 'image').length;
+        let vidSlots = MAX_VIDEO_REFS - refs.reference.filter((r) => r.mediaType === 'video').length;
+        const overflowKinds: Array<'image' | 'video'> = [];
+        let skippedDup = false;
+        const filtered: AssetRecord[] = [];
+        for (const a of accepted) {
+          if (known.has(String(a.id))) {
+            skippedDup = true;
+            continue;
+          }
+          const isImage = a.type === 'image';
+          if (isImage ? imgSlots <= 0 : vidSlots <= 0) {
+            overflowKinds.push(isImage ? 'image' : 'video');
+            continue;
+          }
+          if (isImage) imgSlots -= 1;
+          else vidSlots -= 1;
+          known.add(String(a.id));
+          filtered.push(a);
+        }
+        accepted = filtered;
+        if (skippedDup) showToast('warn', '重复的素材已跳过');
+        if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds));
+        if (accepted.length === 0) return;
       }
+      if (!videoDraftId) {
+        accepted.forEach((a) =>
+          appendVideoFreeRef(
+            {
+              nodeId: `asset-${a.id}`,
+              url: a.url,
+              name: assetDisplayName(a),
+              assetId: String(a.id),
+              mediaType: a.type === 'video' ? 'video' : 'image',
+            },
+            role,
+          ),
+        );
+        return;
+      }
+      const nodeIds = placeAssetsOnCanvas(accepted);
+      if (!nodeIds) {
+        showToast('error', '项目未就绪，请稍后重试');
+        return;
+      }
+      nodeIds.forEach((nid) => addCanvasEdge(nid, videoDraftId, role));
       return;
     }
     if (target === 'imageDialog') {
@@ -2856,7 +2846,7 @@ export default function CanvasPage() {
   /** 草稿绑定面板的视频媒体参考（IKDMQS）：按连线角色实时分组推导，Dock 显示即提交输入（同源）。
    *  角色随连线持久化，刷新/重开项目后经同一推导恢复展示。 */
   const videoDraftMediaRefs = useMemo(
-    () => (videoDraftId ? videoMediaRefsOf(videoDraftId, edges, mediaNodes) : undefined),
+    () => (videoDraftId ? mergedVideoMediaRefsOf(videoDraftId, edges, mediaNodes) : undefined),
     [videoDraftId, edges, mediaNodes],
   );
 
@@ -2874,14 +2864,14 @@ export default function CanvasPage() {
       showToast('warn', sourceErr);
       return;
     }
-    const refs = videoMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current);
+    const refs = mergedVideoMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current);
     if (role === 'first' && refs.first && refs.first.nodeId !== sourceNodeId) {
       showToast('warn', '首帧已指定，请先移除现有首帧');
       return;
     }
     if (role === 'last') {
       if (!refs.first) {
-        showToast('warn', '尾帧必须与首帧一起使用，请先指定首帧');
+        showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
         return;
       }
       if (refs.last && refs.last.nodeId !== sourceNodeId) {
@@ -2896,6 +2886,141 @@ export default function CanvasPage() {
           : e,
       ),
     );
+  };
+
+  /** 角色库 material 参考变更（IKDMQS 来源补齐）：移除（patch 为 null）或改角色——操作草稿
+   *  data.draftMaterialRefs（非连线）；校验口径与 handleSetVideoRefRole 一致（首帧占用/尾帧配首帧） */
+  const handleMaterialRefChange = (
+    draftId: string,
+    materialId: string,
+    patch: { role: VideoRefRole } | null,
+  ) => {
+    const existing = readDraftMaterialRefs(mediaNodesRef.current.find((n) => n.id === draftId));
+    if (patch === null) {
+      patchMediaNode(draftId, {
+        draftMaterialRefs: existing.filter((m) => m.materialId !== materialId),
+      });
+      return;
+    }
+    const target = existing.find((m) => m.materialId === materialId);
+    if (!target) return;
+    const next = patch.role;
+    if (next !== 'reference') {
+      if (target.mediaType === 'video') {
+        showToast('warn', '首尾帧仅支持图片素材');
+        return;
+      }
+      const refs = mergedVideoMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current);
+      if (refs[next] && refs[next]!.materialId !== materialId) {
+        showToast('warn', next === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
+        return;
+      }
+      if (next === 'last' && !refs.first) {
+        showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
+        return;
+      }
+    }
+    patchMediaNode(draftId, {
+      draftMaterialRefs: existing.map((m) => (m.materialId === materialId ? { ...m, role: next } : m)),
+    });
+  };
+
+  /* ============ 视频自由模式（工具栏入口，无草稿卡）：参考本地暂存与变更 ============ */
+
+  /** 自由模式追加参考（到节点选择/从资产中选择/角色库共用）：校验口径与草稿连线一致——
+   *  槽位占用/尾帧配首帧/查重/图9视频3上限；通过后写入本地 refs，不落画布不连线 */
+  const appendVideoFreeRef = (item: VideoMediaRef, role: VideoRefRole): void => {
+    const refs = videoFreeRefs;
+    const occupied =
+      refs.reference.some((r) => r.assetId === item.assetId) ||
+      [refs.first, refs.last].some((r) => r?.assetId === item.assetId);
+    if (occupied) {
+      showToast('warn', '重复的素材已跳过');
+      return;
+    }
+    if (role === 'first') {
+      if (refs.first) {
+        showToast('warn', '首帧已指定，请先移除现有首帧');
+        return;
+      }
+      setVideoFreeRefs((prev) => ({ ...prev, first: item }));
+      return;
+    }
+    if (role === 'last') {
+      if (!refs.first) {
+        showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
+        return;
+      }
+      if (refs.last) {
+        showToast('warn', '尾帧已指定，请先移除现有尾帧');
+        return;
+      }
+      setVideoFreeRefs((prev) => ({ ...prev, last: item }));
+      return;
+    }
+    const videoCount = refs.reference.filter((r) => r.mediaType === 'video').length;
+    if (item.mediaType === 'video') {
+      if (videoCount >= MAX_VIDEO_REFS) {
+        showToast('warn', refOverflowToast(['video'], { video: MAX_VIDEO_REFS }));
+        return;
+      }
+    } else if (refs.reference.length >= REF_LIMITS.image) {
+      showToast('warn', refOverflowToast(['image']));
+      return;
+    }
+    setVideoFreeRefs((prev) => ({ ...prev, reference: [...prev.reference, item] }));
+  };
+
+  /** 自由模式移除参考：key 对应 VideoMediaRef.nodeId（画布节点 id / 资产合成键 / materialId） */
+  const removeVideoFreeRef = (key: string): void => {
+    setVideoFreeRefs((prev) => {
+      const next: VideoMediaRefs = { reference: prev.reference.filter((r) => r.nodeId !== key) };
+      if (prev.first?.nodeId !== key) next.first = prev.first;
+      if (prev.last?.nodeId !== key) next.last = prev.last;
+      return next;
+    });
+  };
+
+  /** 自由模式改变参考角色：校验口径与 handleSetVideoRefRole / handleMaterialRefChange 一致
+   *  （首帧占用/尾帧配首帧/首尾帧仅图片） */
+  const changeVideoFreeRefRole = (key: string, role: VideoRefRole): void => {
+    const refs = videoFreeRefs;
+    const target =
+      [refs.first, refs.last].find((r) => r?.nodeId === key) ??
+      refs.reference.find((r) => r.nodeId === key);
+    if (!target) return;
+    if (role !== 'reference' && target.mediaType === 'video') {
+      showToast('warn', '首尾帧仅支持图片素材');
+      return;
+    }
+    if (role === 'first' && refs.first && refs.first.nodeId !== key) {
+      showToast('warn', '首帧已指定，请先移除现有首帧');
+      return;
+    }
+    if (role === 'last') {
+      if (!refs.first) {
+        showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
+        return;
+      }
+      if (refs.last && refs.last.nodeId !== key) {
+        showToast('warn', '尾帧已指定，请先移除现有尾帧');
+        return;
+      }
+    }
+    setVideoFreeRefs((prev) => {
+      const strip = (s: VideoMediaRefs): VideoMediaRefs => {
+        const next: VideoMediaRefs = { reference: s.reference.filter((r) => r.nodeId !== key) };
+        if (s.first?.nodeId !== key) next.first = s.first;
+        if (s.last?.nodeId !== key) next.last = s.last;
+        return next;
+      };
+      const moved = { ...target };
+      const next = strip(prev);
+      if (role === 'first') next.first = moved;
+      else if (role === 'last') next.last = moved;
+      else next.reference = [...next.reference, moved];
+      return next;
+    });
   };
 
   /** 重新编辑（IKDMQU）：三类媒体卡统一走绑定面板——编辑实时写回本卡、发送后原卡重新生成（Q1）；
@@ -2921,21 +3046,26 @@ export default function CanvasPage() {
     handleOpenImageDialog();
   };
 
-  /** 生成视频：视频对话框 + 图片（带 assetId，发送时免重传直传 ID）；
-   *  被点节点是视频媒体节点时携带目标节点与连线文本附件快照（IKDLQG），图片节点维持参考素材旧语义 */
+  /** 生成视频（IKDMQS 统一草稿绑定）：有生成记录的视频节点 → 绑定原卡原位重新生成（与「重新编辑」一致）；
+   *  其他节点（图片/上传视频等）→ 来源有效性预检后新建视频草稿卡 + 被点节点自动连线为普通参考。
+   *  不调 validateVideoRefConnect（新草稿未进 ref 会使校验被跳过），canOpenEditor 闸口保留 */
   const handleNodeGenVideo = (id: string) => {
     if (!canOpenEditor()) return;
-    const ref = nodeRefOf(id);
-    if (!ref) return;
-    setVideoSeed({
-      ts: Date.now(),
-      refs: [{ preview: ref.src, type: ref.type, ...(ref.assetId != null ? { assetId: ref.assetId } : {}) }],
-      ...(ref.type === 'video' ? { targetNodeId: id, attachments: textAttachmentsOf(id) } : {}),
-    });
-    setShowBottomDialog(true);
-    setShowImageDialog(false);
-    setShowAudioDialog(false);
-    setShowMusicDialog(false);
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    const d = (node.data ?? {}) as Record<string, unknown>;
+    if (d.mediaType === 'video' && hasGenerationRecord(node)) {
+      openVideoDraftDialog(id);
+      return;
+    }
+    const err = videoRefSourceError(node, 'reference');
+    if (err) {
+      showToast('warn', err);
+      return;
+    }
+    const draftId = createVideoDraftCard();
+    addCanvasEdge(id, draftId, 'reference');
+    openVideoDraftDialog(draftId);
   };
 
   /** 生成音频：打开音频对话框 */
@@ -3141,14 +3271,14 @@ export default function CanvasPage() {
   };
 
   /** 底部对话框发送 */
-  /** 视频对话发送：参考素材上传取 assetId → 创建视频生成任务。
-   *  草稿绑定模式（IKDMQS）：参考由连线按角色推导（首帧/尾帧 → first/last_frame_asset_id，
-   *  普通参考 → reference_asset_ids），面板本地 refs 不再参与；与 Dock 显示逐项一致。
-   *  非草稿绑定路径沿用旧语义：首尾帧模式按对话框校验后的 2 张图（第 1 张首帧、第 2 张尾帧），
-   *  其余模式图片/视频混合走 reference_asset_ids。
+  /** 视频对话发送（IKDMQS 统一草稿绑定）：参考由「画布连线 + 角色库 material」合并推导，
+   *  首帧/尾帧逐槽路由 first/last_frame_asset_id 或 *_material_id（同一帧位 asset 与 material 互斥，
+   *  materialId 非空即走 material）；普通参考拆 reference_asset_ids + reference_materials；
+   *  与 Dock 显示逐项一致（同源推导）。
    *  携带 targetNodeId 时（IKDLQG/IKDMQS）：先等待在途保存并落盘当前画布编辑
-   *  （同 IKDLQE 应用预览的保存串行化），保证服务端按连线推导附件时读到最新正文，再携带 target_node_id 提交 */
-  const handleDialogSend = async (text: string, opts: VideoGenOptions, refs: BottomRefItem[]) => {
+   *  （同 IKDLQE 应用预览的保存串行化），保证服务端按连线推导附件时读到最新正文，再携带 target_node_id 提交。
+   *  自由模式（工具栏入口无草稿卡）：参考读本地暂存 refs，直接创建生成卡（无 target），发送后关闭面板 */
+  const handleDialogSend = async (text: string, opts: VideoGenOptions) => {
     if (applyingRef.current) return;
     const targetNodeId = videoSeed?.targetNodeId;
     if (targetNodeId && currentId) {
@@ -3174,9 +3304,18 @@ export default function CanvasPage() {
       resolution: opts.resolution,
       duration: opts.duration,
     };
-    // 草稿绑定模式（IKDMQS）：连线角色推导提交输入——画布来源都带 assetId（无素材库 material 路径）
-    if (videoDraftId && videoSeed?.targetNodeId === videoDraftId) {
-      const draftRefs = videoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current);
+    // 草稿绑定模式按连线+material 合并推导；自由模式（工具栏入口无草稿卡）读本地暂存参考
+    const freeMode = !videoDraftId;
+    const draftRefs = videoDraftId
+      ? mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current)
+      : videoFreeRefs;
+    // 自由模式发送后任务落生成卡：面板无绑定目标，关闭并清空本地参考（关闭即丢弃语义）
+    const finishFreeMode = () => {
+      if (!freeMode) return;
+      setShowBottomDialog(false);
+      setVideoFreeRefs({ reference: [] });
+    };
+    {
       // 组合校验与 Dock 同源（videoRefConflict）：能力位由面板按所选模型约束，此处提交防线
       // 传全能力位只校验互斥语义（帧↔参考混用、尾帧配首帧），能力位不支持由服务端 400 兜底
       const conflict = videoRefConflict(draftRefs, {
@@ -3189,80 +3328,39 @@ export default function CanvasPage() {
         showToast('warn', conflict);
         return;
       }
-      const hasFrames = !!(draftRefs.first || draftRefs.last);
-      if (hasFrames) {
-        startGenerationJob('video', parameters, undefined, {
-          firstFrameAssetId: draftRefs.first?.assetId,
-          lastFrameAssetId: draftRefs.last?.assetId,
-        }, targetNodeId);
+      // 视频参考仅部分模型支持（Seedance 2.0 系）：提交防线与面板 UI 禁用同一判定
+      if (!supportsVideoReferenceModel(opts.modelId) && draftRefs.reference.some((r) => r.mediaType === 'video')) {
+        showToast('warn', '当前模型不支持视频参考，请移除后重试');
         return;
       }
-      const referenceAssetIds = draftRefs.reference.map((r) => r.assetId);
+      if (draftRefs.first || draftRefs.last) {
+        startGenerationJob('video', parameters, undefined, {
+          firstFrameAssetId: draftRefs.first && !draftRefs.first.materialId ? draftRefs.first.assetId : undefined,
+          firstFrameMaterialId: draftRefs.first?.materialId,
+          lastFrameAssetId: draftRefs.last && !draftRefs.last.materialId ? draftRefs.last.assetId : undefined,
+          lastFrameMaterialId: draftRefs.last?.materialId,
+        }, targetNodeId);
+        finishFreeMode();
+        return;
+      }
+      const referenceAssetIds = draftRefs.reference.filter((r) => !r.materialId).map((r) => r.assetId);
+      const referenceMaterials = draftRefs.reference
+        .filter((r) => r.materialId)
+        .map((r) => ({ id: r.materialId!, type: r.mediaType }));
       startGenerationJob(
         'video',
         parameters,
         undefined,
-        referenceAssetIds.length > 0 ? { referenceAssetIds } : undefined,
+        referenceAssetIds.length > 0 || referenceMaterials.length > 0
+          ? {
+              ...(referenceAssetIds.length > 0 ? { referenceAssetIds } : {}),
+              ...(referenceMaterials.length > 0 ? { referenceMaterials } : {}),
+            }
+          : undefined,
         targetNodeId,
       );
-      return;
+      finishFreeMode();
     }
-    if (!refs.length) {
-      startGenerationJob('video', parameters, undefined, undefined, targetNodeId);
-      return;
-    }
-    // 解析引用：Asset- 前缀 = 素材库素材（走 *_material_id/reference_materials）；
-    // 其余（本地 Asset id / 本地上传）走 asset 字段。两类不可混用于同一帧位（后端 400）。
-    const resolved: Array<{ assetId: string | null; materialId: string | null; type: 'image' | 'video' }> = [];
-    let failedCount = 0;
-    for (const r of refs) {
-      // 素材库 ID 实测为小写 asset- 前缀（如 asset-20260820153209-6c9z8），大小写不敏感判定；
-      // 本地 Asset id 为纯数字（BigInt），不冲突。
-      if (typeof r.assetId === 'string' && /^asset-/i.test(r.assetId)) {
-        resolved.push({ assetId: null, materialId: r.assetId, type: r.type });
-        continue;
-      }
-      const id = await resolveRefAssetId({ file: r.file, url: r.preview, name: `ref-${r.type}`, type: r.type, assetId: r.assetId });
-      if (id == null) failedCount += 1;
-      resolved.push({ assetId: id, materialId: null, type: r.type });
-    }
-    if (opts.mode === 'keyframe') {
-      const [first, last] = resolved;
-      if (!first || !last || (!first.assetId && !first.materialId) || (!last.assetId && !last.materialId)) {
-        console.warn('首尾帧素材上传失败，任务未创建');
-        showToast('error', '参考素材上传失败，任务未创建，请重试');
-        return;
-      }
-      startGenerationJob('video', parameters, undefined, {
-        firstFrameAssetId: first.assetId ?? undefined,
-        lastFrameAssetId: last.assetId ?? undefined,
-        firstFrameMaterialId: first.materialId ?? undefined,
-        lastFrameMaterialId: last.materialId ?? undefined,
-      }, targetNodeId);
-      return;
-    }
-    const referenceAssetIds = resolved
-      .filter((r): r is { assetId: string; materialId: null; type: 'image' | 'video' } => r.assetId !== null)
-      .map((r) => r.assetId);
-    const referenceMaterials = resolved
-      .filter((r): r is { assetId: null; materialId: string; type: 'image' | 'video' } => r.materialId !== null)
-      .map((r) => ({ id: r.materialId, type: r.type }));
-    // 素材解析失败的项会被过滤丢弃：toast 告知，避免用户误以为全部参考已生效
-    if (failedCount > 0) {
-      showToast('warn', failedCount === refs.length ? '参考素材上传失败，请重试' : `${failedCount} 个参考素材上传失败，已跳过`);
-    }
-    startGenerationJob(
-      'video',
-      parameters,
-      undefined,
-      referenceAssetIds.length > 0 || referenceMaterials.length > 0
-        ? {
-            ...(referenceAssetIds.length > 0 ? { referenceAssetIds } : {}),
-            ...(referenceMaterials.length > 0 ? { referenceMaterials } : {}),
-          }
-        : undefined,
-      targetNodeId,
-    );
   };
 
   /** 扩展工具菜单选择：资产库/商品等预留联调入口（音频按钮已改为直开对话框） */
@@ -3801,28 +3899,6 @@ export default function CanvasPage() {
     }
   };
 
-  /** 参考素材 → assetId：优先复用已有 assetId，其次上传原始 File，否则从 URL 下载后上传 */
-  const resolveRefAssetId = async (item: {
-    file?: File;
-    url: string;
-    name: string;
-    type: 'image' | 'video';
-    assetId?: string | number;
-  }): Promise<string | null> => {
-    if (item.assetId) return String(item.assetId);
-    let fileToUpload: File | null = item.file ?? null;
-    if (!fileToUpload && /^https?:/.test(item.url)) {
-      fileToUpload = await fetchUrlAsFile(
-        item.url,
-        item.name,
-        item.type === 'video' ? 'video/mp4' : 'image/*',
-      );
-    }
-    if (!fileToUpload) return null;
-    const uploaded = await uploadFileToAsset(fileToUpload, item.type);
-    return uploaded ? uploaded.asset_id : null;
-  };
-
   /** 收集图片参考 assetId：绑定模式（IKDMQR 草稿 + IKDMQU 成品卡）按连线推导（与 Dock 显示同源）；
    *  其余入口（生成图片带入原图/资产卡等）沿用面板 files——有 assetId 直用，否则上传取 ID */
   const collectImageInputAssetIds = async (
@@ -3955,9 +4031,30 @@ export default function CanvasPage() {
   };
   actionsRef.current.firePendingGen = firePendingGen;
 
-  /** 项目/文档就绪后触发首页生成交接（消费时已就绪则已被消费 effect 立即触发，此处幂等重试） */
+  /** 触发首页 AI视频草稿种子（IKDMQS 统一草稿绑定）：新建视频草稿卡（种子参数写入草稿 data）
+   *  并打开绑定面板；幂等——消费后即清 ref。生成任务仍由 firePendingGen 直接创建（生成卡落画布）。 */
+  const firePendingVideoDraft = () => {
+    const seed = pendingVideoDraftSeedRef.current;
+    if (!seed) return;
+    if (!currentId) return; // 项目未就绪：等 currentId 变化后由 effect 重试
+    if (!doc) return; // 文档未加载：此刻 setMediaNodes 会被 doc 水合 effect 清空，等 doc 就绪再触发
+    pendingVideoDraftSeedRef.current = null;
+    const nodeId = createVideoDraftCard({
+      modelId: seed.modelId,
+      ratio: seed.aspectRatio,
+      size: seed.resolution,
+      duration: seed.duration,
+      mode: seed.mode,
+    });
+    openVideoDraftDialog(nodeId, seed);
+  };
+  actionsRef.current.firePendingVideoDraft = firePendingVideoDraft;
+
+  /** 项目/文档就绪后触发首页生成交接（消费时已就绪则已被消费 effect 立即触发，此处幂等重试；
+   *  firePendingGen 先建任务卡，firePendingVideoDraft 后建草稿卡并打开绑定面板） */
   useEffect(() => {
     actionsRef.current.firePendingGen();
+    actionsRef.current.firePendingVideoDraft();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId, doc]);
 
@@ -4024,23 +4121,41 @@ export default function CanvasPage() {
           onUploadFile={handleUploadFile}
           onOpenAssetsPicker={() => openAssetsPicker('toolbar')}
           onToggleVideoDialog={() => {
-            // IKDMQS：侧栏视频入口不再开关空对话框，每次点击新建独立视频草稿卡并绑定面板
+            // 自由模式：点击只打开面板不建卡；参数与参考本地暂存，发送时才落生成卡，关闭即丢弃
+            if (!canOpenEditor()) return;
             setPickMode(null);
             setPickTarget(null);
             setPickRefRole(null);
-            handleAddVideoDraft();
+            setVideoDraftId(null);
+            setVideoFreeRefs({ reference: [] });
+            videoPanelHiddenRef.current = false;
+            setVideoSeed({ ts: Date.now() });
+            setShowBottomDialog(true);
+            setShowImageDialog(false);
+            setShowAudioDialog(false);
+            setShowMusicDialog(false);
           }}
           onToggleImageDialog={() => {
-            // IKDMQQ：侧栏图片入口不再开关空对话框，每次点击新建独立草稿卡并绑定面板
+            // 自由模式：点击只打开面板不建卡；参考图存面板本地，发送时才落生成卡
+            if (!canOpenEditor()) return;
             setPickMode(null);
             setPickTarget(null);
-            handleAddImageDraft();
+            setImageDraftId(null);
+            setImageSeed({ ts: Date.now(), text: '', files: [] });
+            handleOpenImageDialog();
           }}
           onToggleAudioDialog={() => {
-            // IKDMQT：侧栏音频入口不再开关空对话框，每次点击新建独立音频草稿卡并绑定面板
+            // 自由模式：点击只打开面板不建卡；发送时才落生成卡
+            if (!canOpenEditor()) return;
             setPickMode(null);
             setPickTarget(null);
-            handleAddAudioDraft();
+            setAudioDraftId(null);
+            audioPanelHiddenRef.current = false;
+            setAudioSeed({ ts: Date.now() });
+            setShowAudioDialog(true);
+            setShowBottomDialog(false);
+            setShowImageDialog(false);
+            setShowMusicDialog(false);
           }}
           showVideoDialog={showBottomDialog}
           showImageDialog={showImageDialog}
@@ -4069,7 +4184,6 @@ export default function CanvasPage() {
             className={`${styles.mapBtn} ${showEdges ? styles.mapBtnActive : ''}`}
             onClick={() => setShowEdges(!showEdges)}
             title={showEdges ? '隐藏连线' : '显示连线'}
-            style={{ display: 'none' }}
           >
             {showEdges ? <Link size={14} strokeWidth={2} /> : <Link2Off size={14} strokeWidth={2} />}
           </button>
@@ -4086,27 +4200,40 @@ export default function CanvasPage() {
           )}
         </div>
 
-        {/* 底部视频对话框 */}
+        {/* 底部视频对话框（IKDMQS 统一草稿绑定；工具栏入口为无卡自由模式） */}
         {showBottomDialog && (
           <BottomDialog
             key={videoSeed?.ts ?? 0}
-            initialRefs={videoSeed?.refs}
             initialText={videoSeed?.text}
             initialParams={videoSeed?.params}
-            attachments={videoDraftId ? videoDraftAttachments : videoSeed?.attachments}
+            attachments={videoDraftAttachments}
             onReorderAttachments={
               videoSeed?.targetNodeId
                 ? (ids) => handleReorderAttachments(videoSeed.targetNodeId!, ids)
                 : undefined
             }
-            onClose={() => { videoPanelHiddenRef.current = true; setShowBottomDialog(false); setPickMode(null); setPickTarget(null); setPickRefRole(null); }}
+            onClose={() => {
+              videoPanelHiddenRef.current = true;
+              setShowBottomDialog(false);
+              setVideoFreeRefs({ reference: [] });
+              setPickMode(null);
+              setPickTarget(null);
+              setPickRefRole(null);
+              setVideoAssetPickRole('reference');
+              setCharLibPickRole('reference');
+            }}
             onSend={handleDialogSend}
             onPickFromCanvas={(kind, role) => { setPickMode(kind); setPickTarget('video'); setPickRefRole(role ?? null); }}
-            onPickFromAssets={(kind) => openAssetsPicker(kind === 'image' ? 'bottomImage' : 'bottomVideo')}
-            onOpenCharacterLibrary={() => { setCharacterLibraryTarget('video'); setShowCharacterLibrary(true); }}
+            onPickFromAssets={(_kind, role) => {
+              setVideoAssetPickRole(role ?? 'reference');
+              openAssetsPicker('videoDraft');
+            }}
+            onOpenCharacterLibrary={(role) => {
+              setCharLibPickRole(role ?? 'reference');
+              setCharacterLibraryTarget('video');
+              setShowCharacterLibrary(true);
+            }}
             pickMode={pickTarget === 'video' && pickMode !== 'audio' && pickMode !== 'product' && pickMode !== 'asset' ? pickMode : null}
-            externalPick={videoPickResult}
-            externalImagePick={videoDlgImagePickResult}
             videoDraftBinding={
               videoDraftId
                 ? {
@@ -4117,15 +4244,17 @@ export default function CanvasPage() {
                       ?.genStatus as MediaGenStatus | undefined,
                     onParamsChange: (patch) => handleVideoDraftParamsChange(videoDraftId, patch),
                   }
-                : undefined
+                : {
+                    // 自由模式：参数仅存面板本地状态，无草稿可写回
+                    saveFailed: saveBlocked || saveStatus === 'error',
+                    onParamsChange: () => {},
+                  }
             }
-            videoMediaRefs={videoDraftId ? videoDraftMediaRefs : undefined}
-            onRemoveVideoRef={
-              videoDraftId ? (nodeId) => handleRemoveVideoRef(videoDraftId, nodeId) : undefined
-            }
-            onSetVideoRefRole={
-              videoDraftId ? (nodeId, role) => handleSetVideoRefRole(videoDraftId, nodeId, role) : undefined
-            }
+            videoMediaRefs={videoDraftId ? (videoDraftMediaRefs ?? { reference: [] }) : videoFreeRefs}
+            onRemoveVideoRef={videoDraftId ? ((nodeId) => handleRemoveVideoRef(videoDraftId, nodeId)) : removeVideoFreeRef}
+            onSetVideoRefRole={videoDraftId ? ((nodeId, role) => handleSetVideoRefRole(videoDraftId, nodeId, role)) : changeVideoFreeRefRole}
+            onRemoveMaterialRef={videoDraftId ? ((materialId) => handleMaterialRefChange(videoDraftId, materialId, null)) : removeVideoFreeRef}
+            onSetMaterialRefRole={videoDraftId ? ((materialId, role) => handleMaterialRefChange(videoDraftId, materialId, { role })) : changeVideoFreeRefRole}
             onToast={(type, msg) => showToast(type, msg)}
           />
         )}
@@ -4255,10 +4384,12 @@ export default function CanvasPage() {
           onClose={() => setShowAssetsPicker(false)}
           onSelect={handleAssetsPickerSelect}
           mediaTypes={
-            assetsPickerTarget === 'bottomImage' || assetsPickerTarget === 'imageDialog'
+            assetsPickerTarget === 'imageDialog'
               ? ['image']
-              : assetsPickerTarget === 'bottomVideo'
-                ? ['video']
+              : assetsPickerTarget === 'videoDraft'
+                ? videoAssetPickRole === 'first' || videoAssetPickRole === 'last'
+                  ? ['image']
+                  : ['image', 'video']
                 : assetsPickerTarget === 'agentPanel'
                   ? ['image', 'video']
                   : undefined
@@ -4285,7 +4416,11 @@ export default function CanvasPage() {
       {/* 角色库弹框 */}
       {showCharacterLibrary && (
         <CharacterLibraryModal
-          onClose={() => { setShowCharacterLibrary(false); setCharacterLibraryTarget(null); }}
+          onClose={() => {
+            setShowCharacterLibrary(false);
+            setCharacterLibraryTarget(null);
+            setCharLibPickRole('reference');
+          }}
           enableRealPersonTab={characterLibraryTarget === 'video'}
           onSelectAssets={(assets: MaterialAsset[]) => {
             // 虚拟/真人人像库统一多选确认后注入到对应对话框
@@ -4304,15 +4439,88 @@ export default function CanvasPage() {
                 }));
               if (images.length > 0) setImagePickResult({ ts, files: images });
             } else if (characterLibraryTarget === 'video') {
-              // 视频对话框：图片/视频分别注入参考素材
-              const images = assets
-                .filter((a) => a.AssetType === 'Image')
-                .map((a) => ({ preview: a.URL, type: 'image' as const, assetId: a.Id }));
-              const videos = assets
-                .filter((a) => a.AssetType === 'Video')
-                .map((a) => ({ preview: a.URL, type: 'video' as const, assetId: a.Id }));
-              if (images.length > 0) setVideoDlgImagePickResult({ ts, items: images });
-              if (videos.length > 0) setVideoPickResult({ ts, items: videos });
+              // 视频草稿面板（IKDMQS 来源补齐）：角色库素材（asset- 前缀 materialId）无法落画布，
+              // 仅存草稿 data.draftMaterialRefs 并在面板槽位展示；首/尾帧槽仅图片且只取首张，
+              // 普通参考按图9/视频3与连线+material 合并联算上限并按 materialId 查重。
+              // 自由模式（工具栏入口无草稿卡）：material 参考存本地 refs
+              const role = charLibPickRole;
+              const refs = videoDraftId
+                ? mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current)
+                : videoFreeRefs;
+              const writeMaterialRefs = (items: VideoMaterialRefData[]) => {
+                if (videoDraftId) {
+                  const node = mediaNodesRef.current.find((n) => n.id === videoDraftId);
+                  patchMediaNode(videoDraftId, { draftMaterialRefs: [...readDraftMaterialRefs(node), ...items] });
+                } else {
+                  items.forEach((m) =>
+                    appendVideoFreeRef(
+                      {
+                        nodeId: m.materialId,
+                        url: m.url,
+                        name: m.name,
+                        assetId: m.materialId,
+                        mediaType: m.mediaType,
+                        materialId: m.materialId,
+                      },
+                      m.role,
+                    ),
+                  );
+                }
+              };
+              if (role === 'first' || role === 'last') {
+                if (refs[role]) {
+                  showToast('warn', role === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
+                  return;
+                }
+                if (role === 'last' && !refs.first) {
+                  showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
+                  return;
+                }
+                const images = assets.filter((a) => a.AssetType === 'Image');
+                if (images.length === 0) return;
+                if (images.length > 1) showToast('warn', '首尾帧仅支持一张图片，已取首张');
+                writeMaterialRefs([
+                  { materialId: images[0].Id, url: images[0].URL, name: `角色-${images[0].Name}`, mediaType: 'image' as const, role },
+                ]);
+                return;
+              }
+              const known = new Set(
+                videoDraftId
+                  ? readDraftMaterialRefs(mediaNodesRef.current.find((n) => n.id === videoDraftId)).map((m) => m.materialId)
+                  : videoFreeRefs.reference.filter((r) => r.materialId).map((r) => r.materialId!),
+              );
+              let imgSlots = REF_LIMITS.image - refs.reference.filter((r) => r.mediaType === 'image').length;
+              let vidSlots = MAX_VIDEO_REFS - refs.reference.filter((r) => r.mediaType === 'video').length;
+              const overflowKinds: Array<'image' | 'video'> = [];
+              let skippedDup = false;
+              const accepted: VideoMaterialRefData[] = [];
+              for (const a of assets) {
+                if (a.AssetType !== 'Image' && a.AssetType !== 'Video') continue;
+                if (known.has(a.Id)) {
+                  skippedDup = true;
+                  continue;
+                }
+                const isImage = a.AssetType === 'Image';
+                if (isImage ? imgSlots <= 0 : vidSlots <= 0) {
+                  overflowKinds.push(isImage ? 'image' : 'video');
+                  continue;
+                }
+                if (isImage) imgSlots -= 1;
+                else vidSlots -= 1;
+                known.add(a.Id);
+                accepted.push({
+                  materialId: a.Id,
+                  url: a.URL,
+                  name: `角色-${a.Name}`,
+                  mediaType: isImage ? 'image' : 'video',
+                  role: 'reference',
+                });
+              }
+              if (skippedDup) showToast('warn', '重复的素材已跳过');
+              if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds));
+              if (accepted.length > 0) {
+                writeMaterialRefs(accepted);
+              }
             } else if (characterLibraryTarget === 'asset') {
               // 资产卡添加参考图（单张注入）
               const image = assets.find((a) => a.AssetType === 'Image');
