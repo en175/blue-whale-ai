@@ -67,8 +67,8 @@ export class InternalAgentAssetsController {
       request.data,
       { userId, projectId },
       {
-        findAccessible: (ownerProjectId, assetId, ownerUserId) =>
-          this.assets.findAccessible(ownerProjectId, assetId, ownerUserId),
+        findAccessible: (assetId, ownerUserId) =>
+          this.assets.findAccessible(assetId, ownerUserId),
         sign: (storageKey, options) => signer.sign(storageKey, options),
       },
     );

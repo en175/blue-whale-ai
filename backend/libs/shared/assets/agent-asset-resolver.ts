@@ -70,7 +70,6 @@ export type AgentAssetResolveOutcome =
 
 export interface AgentAssetResolverDeps {
   findAccessible(
-    projectId: string,
     assetId: string,
     userId: string,
   ): Promise<AgentReadableAsset | null>;
@@ -86,11 +85,7 @@ export async function resolveAgentAsset(
   owner: { userId: string; projectId: string },
   deps: AgentAssetResolverDeps,
 ): Promise<AgentAssetResolveOutcome> {
-  const asset = await deps.findAccessible(
-    owner.projectId,
-    request.asset_id,
-    owner.userId,
-  );
+  const asset = await deps.findAccessible(request.asset_id, owner.userId);
   if (!asset) return { kind: "rejected", reason: "asset_inaccessible" };
 
   if (

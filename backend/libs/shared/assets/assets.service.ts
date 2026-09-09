@@ -85,8 +85,8 @@ export class AssetService {
     return this.repo.clearMaterialGroupLink(userId, materialGroupId);
   }
 
-  findAccessible(projectId: string, assetId: string, userId: string) {
-    return this.repo.findAccessible(projectId, assetId, userId);
+  findAccessible(assetId: string, userId: string) {
+    return this.repo.findAccessible(assetId, userId);
   }
 
   insertCopy(

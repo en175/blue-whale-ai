@@ -92,9 +92,19 @@ export interface AssetRepo {
   findLiveRefs(storageKeys: string[]): Promise<string[]>;
   /** 物理删除指定 id 行（GC 确认对象已删后清行）。 */
   hardDeleteRows(ids: bigint[]): Promise<number>;
-  /** 取当前用户在指定项目下的正常资产（access/content 用）；不存在/不归属/已删 → null。 */
+  /**
+   * 取当前用户的正常资产（access/content/agent 读取用）；不存在/不归属/已删 → null。
+   *
+   * **按人查，不按项目查。** 素材是一个人的共享池：素材库列表就是按 user 列的
+   * （见 `listByUser`），用户在自己任何一个项目里都看得见、拖得上自己全部素材。项目不是
+   * 权限边界——`project` 表只有一个 `owner_id`，没有协作者、没有共享，所以再叠一层
+   * `project_id` 挡不住任何人，只挡住用户自己在别的项目里传过的图。
+   *
+   * 曾经这里带 `projectId`，于是 md5 去重（IKCNLS）跨项目复用素材时必然踩空：复用只写
+   * `project_asset` 关联行，`assets.project_id` 还是第一次上传时那个项目，按项目查就查不到。
+   * 表现是画布上图看得见、agent 读不到，错话还是「服务端打开文件失败」——像文件坏了。
+   */
   findAccessible(
-    projectId: string,
     assetId: string,
     userId: string,
   ): Promise<AssetInternal | null>;
@@ -425,11 +435,10 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         current: filter.page,
       };
     },
-    async findAccessible(projectId, assetId, userId) {
+    async findAccessible(assetId, userId) {
       const row = await prisma.assets.findFirst({
         where: {
           id: BigInt(assetId),
-          project_id: BigInt(projectId),
           user_id: BigInt(userId),
           status: "normal",
           is_delete: false,
