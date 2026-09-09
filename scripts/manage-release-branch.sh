@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Manage release/* branches (发布批次分支) on the main checkout.
 #
-#   list    — 列出远端最近 N 个 release/* 分支（默认 3），供提 PR 时选目标。只读，无需授权。
-#   create  — 从同步后的 origin/master 拉新 release 分支并推送 origin。发布动作，需 --user-authorized。
+#   list    — 列出远端最近 N 个 release/* 分支（默认 3），提 PR 时连同 master 一并交用户选目标。只读，无需授权。
+#   create  — 从同步后的 origin/master 拉新 release 分支并推送 origin。发布人的独立动作，
+#             需 --user-authorized；提 PR 时不自动新建批次。
 #
 # 命名（branch-naming.md「release 分支」节）：
 #   release/YYYY.MM.DD            纯日期
@@ -36,9 +37,10 @@ usage() {
   scripts/manage-release-branch.sh list [--count N]
   scripts/manage-release-branch.sh create [--summary <6–15字中文简述>] --user-authorized [--json]
 
-list:    fetch 后列出远端最近 N 个 release/* 分支（默认 3，按最近提交排序），供提 PR 选目标。只读。
+list:    fetch 后列出远端最近 N 个 release/* 分支（默认 3，按最近提交排序），提 PR 时连同
+         master 一并交用户选合并目标。只读。提 PR 不自动新建批次。
 create:  从同步后的 origin/master 创建 release/YYYY.MM.DD[_<中文描述>] 并推送 origin。
-         发布动作，必须先获用户明确授权（--user-authorized）；仅在主 checkout 的本地 master 上执行。
+         发布人的独立发布动作，必须先获用户明确授权（--user-authorized）；仅在主 checkout 的本地 master 上执行。
          同名已存在（同日多批次）自动追加 _2/_3 序号。
 清理已合并的 release 分支：scripts/cleanup-release-branch.sh --user-authorized <branch>
 EOF
@@ -98,7 +100,8 @@ if [ "$ACTION" = "list" ]; then
     'refs/remotes/origin/release/*' 2>/dev/null)"
   if [ -z "$listing" ]; then
     echo "（远端没有 release/* 分支）"
-    echo "开新批次：scripts/manage-release-branch.sh create --summary <中文简述> --user-authorized"
+    echo "提 PR 可选目标：master（仅工程面 docs/chore 与 hotfix 直进）。"
+    echo "产品批次需发布人先开批：scripts/manage-release-branch.sh create --summary <中文简述> --user-authorized"
     exit 0
   fi
   echo "最近 release 分支（按最近提交排序，供提 PR 选目标）："
@@ -112,7 +115,10 @@ if [ "$ACTION" = "list" ]; then
     esac
   done
   echo
-  echo "选旧批次 → publish-review-package.sh --create-pr --target-branch <分支名>；开新批次 → create 子命令。"
+  echo "  master  仅工程面 docs/chore 与 hotfix 直进目标（产品影响路径不得选）"
+  echo
+  echo "与 master 一并交用户选目标 → publish-review-package.sh --create-pr --target-branch <分支名>；"
+  echo "提 PR 不自动新建批次——开批次是发布人独立动作（create 子命令）。"
   exit 0
 fi
 

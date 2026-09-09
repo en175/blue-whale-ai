@@ -16,7 +16,7 @@ hotfix/*     ← 生产紧急修复（直接进 master，见下）
 ### 命名与入口
 
 - 命名 `release/YYYY.MM.DD_<中文描述>`（或纯日期；同日多批次自动追加 `_2`/`_3`），详见 `branch-naming.md`。
-- 唯一入口 `scripts/manage-release-branch.sh`：`list`（fetch 后列最近 3 个远端 release 分支，供提 PR 选目标；只读免授权）/ `create`（从同步后的 origin/master 拉新分支并推送；发布动作，需 `--user-authorized`）。
+- 唯一入口 `scripts/manage-release-branch.sh`：`list`（fetch 后列最近 3 个远端 release 分支，提 PR 时连同 `master` 一起交用户选目标；只读免授权）/ `create`（从同步后的 origin/master 拉新分支并推送；**发布人独立动作**，需 `--user-authorized`，提 PR 时不自动新建批次）。
 - 发布完成后的清理走 `scripts/cleanup-release-branch.sh --user-authorized <branch>`（唯一清理入口）。
 - Agent 不直推 `release/*`（hook 硬拦）；批次内容的更新只经 Gitee PR 服务端合并。
 
@@ -24,7 +24,7 @@ hotfix/*     ← 生产紧急修复（直接进 master，见下）
 
 1. **日常开发**：master 拉 `feature/<工单>`，开发、验证（沿用 task worktree）。
 2. **发布人开批次**：`manage-release-branch.sh create --summary <中文简述> --user-authorized` 从同步后的 origin/master 拉新 release 分支。
-3. **合功能进批次（提 PR 时选批次）**：提 PR 前 Agent 先跑 `manage-release-branch.sh list` 拉取最近 3 个 release 分支，连同「新建批次」选项交用户选择——用旧批次，或自动从 master 拉新批次（`create`）。选定后 feature 分支 PR → target 为该 release 分支（`publish-review-package.sh --user-authorized --create-pr --target-branch release/<名>`）；落后批次基线先走 `sync-task-from-origin.sh sync --target-branch release/<名>`。没到期的留自己分支等下次；想只上 A 不带 B → 这次 release 只合 A。
+3. **合功能进批次（提 PR 时选目标）**：提 PR 前 Agent 先跑 `manage-release-branch.sh list`，把最近 3 个 release 分支**连同 `master`** 交用户选择合并目标；**不自动新建批次**——没有合适批次时请发布人先执行步骤 2 开批。产品影响路径的 PR **不得选 `master`**（工程面 / hotfix 例外见下「适用范围」）。选定批次后 feature 分支 PR → target 为该 release 分支（`publish-review-package.sh --user-authorized --create-pr --target-branch release/<名>`）；落后批次基线先走 `sync-task-from-origin.sh sync --target-branch release/<名>`。没到期的留自己分支等下次；想只上 A 不带 B → 这次 release 只合 A。
 4. **测试验证**：部署该 release 分支到共享 staging → 测试这一批（部署对象 = 最终进 master 的内容）。有问题回 feature 修，重新合入。
 5. **发布**：测试通过 → 发布人在 Gitee 页面建 release→master PR 并合并（高风险人手动合；Agent 不代建——创建 PR 的 hook 要求 source 为工单分支）→ 打 tag（vX.Y.Z；MCP 创建 release 走一次性凭证）→ 部署 tag 到生产。
 6. **清理**：合入 master 后 `cleanup-release-branch.sh --user-authorized release/<名>` 删除本地 + 远端批次分支，开下一批再新建。
