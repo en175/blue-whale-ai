@@ -61,7 +61,7 @@ scripts/publish-review-package.sh --user-authorized --create-pr --target-branch 
 scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <推送前临时JSON>
 ```
 
-**target 选择（发布分支流程，见 `git-workflow.md`）**：产品影响路径的 feature/fix PR target 当次 `release/*` 批次分支——提 PR 前 Agent 先跑 `scripts/manage-release-branch.sh list` 拉取最近 3 个批次连同「新建批次」选项交用户选择；选新建则 `scripts/manage-release-branch.sh create --summary <中文简述> --user-authorized`（自动从同步后的 origin/master 拉出）。工程面 docs/chore 改动与 hotfix 仍 target `master`。
+**target 选择（发布分支流程，见 `git-workflow.md`）**：提 PR 前 Agent 先跑 `scripts/manage-release-branch.sh list`，把最近 3 个 `release/*` 批次**连同 `master`** 交用户选择合并目标；**不自动新建批次**——开批次是发布人的独立 `create` 动作（`scripts/manage-release-branch.sh create --summary <中文简述> --user-authorized`），没有合适批次时请发布人先开批。产品影响路径的 feature/fix PR target 必须是当次 `release/*` 批次、不得选 `master`；工程面 docs/chore 改动与 hotfix 才 target `master`。
 
 任务分支落后时，Agent 可继续普通 `git push` 保存或协作；创建/更新 PR 前才运行 `scripts/sync-task-from-origin.sh sync --target-branch <PR目标分支> --json`（`master` 可省略参数）。该入口建立绑定目标分支的可恢复 rebase 事务，Hook 不自动同步。`--create-pr` 推送后写入绑定实际目标的短期发布标记，Agent 随后创建相同 `target_branch` 且 `draft` 非 true 的 Gitee PR；PR Hook 在 Pre 校验、创建成功 Post 消费，失败保留（见 [ADR-0011](../adr/0011-release-marker-consume-after-pr-success.md)）。`--update-pr` 从 Gitee 快照读取目标分支，并按该基线核验 IID/opened/source/target/head/冻结范围后才使用显式 lease 推送。推送后重新取快照并通过 `scripts/verify-pr-update.sh` 核验 head/conflict/diff，才可 finalize 和宣布完成。Hook 只对保护分支、发布审查包的绕过、缺授权、缺模式或缺快照兜底。
 
