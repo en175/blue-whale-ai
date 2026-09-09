@@ -128,6 +128,196 @@ export function accountMessageFor(code: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 三之二、素材域错误码（2xxx；Agent 素材上传与引用）
+//    放在文案表**之前**：下面的 ERROR_CODES 要从这里派生素材域的文案。
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * **一条错误一行，码、HTTP 状态、文案都在这一行里。**
+ *
+ * 为什么要把 HTTP 状态并进码表——这正是 ADR-0083 点名的那处「两套投影机制」漏掉的一格：
+ *
+ * - `throw` 出去的错误经 `AllExceptionsFilter`，那里 `response.status(...)` 写了状态码；
+ * - `return fail(code, msg)` 直接被 `TransformInterceptor` 透传，**状态码由 Nest 按方法默认给**。
+ *   于是一次 POST 的拒绝回的是 `HTTP 201` + 信封 `code: 400`：信封说失败，传输层说创建成功。
+ *
+ * 实测（2026-09-08 测试站）：上传一份 SVG，`presign` 回 `HTTP 201` 且 body 是
+ * `{"code":400,"msg":"这个图片格式读不了…"}`。只看状态码的非浏览器客户端会把拒绝当成成功。
+ * 本仓前端两条都判（`web/src/api/http.ts` 的 `!res.ok || !ok`）所以没出事，但那是前端替我们兜的。
+ *
+ * 状态码写在码表里而不是各调用点，是为了让「新增一个错误码」仍然只改一处（ADR-0083 §3）。
+ */
+export interface ErrorCodeSpec {
+  /** 对外数值码。素材域占 2xxx 段。 */
+  code: number;
+  /** 这条错误该用哪个 HTTP 状态回。 */
+  status: number;
+  /** 对外中文文案的唯一来源。调用点不再自己写中文。 */
+  message: string;
+}
+
+/**
+ * 素材上传与引用的错误码。
+ *
+ * 取代此前 `fail(400, "中文")` 那批**裸中文**——它们没有码，前端拿到的一律是 400，
+ * 既没法分支也没法定位，只能靠 msg 去猜（ADR-0083 §核心问题 1）。
+ *
+ * 分工上照 HTTP 语义摆：**客户端把话说错了是 400；说的是真话但东西不在是 404；
+ * 我们自己没配好是 503。** 「文件与声明不符」归 422：请求本身合法，是内容不符合语义。
+ */
+export const ASSET_ERROR_SPECS = {
+  /** 声明的 type 不是 image/video/audio。 */
+  ASSET_TYPE_UNSUPPORTED: {
+    code: 2001,
+    status: 400,
+    message: "不支持的素材类型",
+  },
+  /** mime 与声明的 type 对不上，例如 type=image 而 mime=video/mp4。 */
+  ASSET_TYPE_MIME_MISMATCH: {
+    code: 2002,
+    status: 400,
+    message: "文件类型与声明类型不匹配",
+  },
+  /** 我们读不了的图片编码（今天只有 SVG，见 upload.ts 里那段为什么挡在上传口）。 */
+  ASSET_FORMAT_UNSUPPORTED: {
+    code: 2003,
+    status: 400,
+    message: "这个图片格式读不了。请用 JPG、PNG、WebP 或 GIF。",
+  },
+  /** size 非正整数或超过该类型的上限。 */
+  ASSET_SIZE_INVALID: {
+    code: 2004,
+    status: 400,
+    message: "文件大小无效或超过限制",
+  },
+  /** complete 时没带 storage_key。 */
+  ASSET_STORAGE_KEY_MISSING: {
+    code: 2005,
+    status: 400,
+    message: "缺少存储键",
+  },
+  /** storage_key 的前缀不属于当前用户——越权，不是「找不到」。 */
+  ASSET_STORAGE_KEY_FOREIGN: {
+    code: 2006,
+    status: 403,
+    message: "存储键与当前用户不匹配",
+  },
+  /** 预签名发了，但那个对象没被真正 PUT 上来。 */
+  ASSET_OBJECT_MISSING: {
+    code: 2007,
+    status: 404,
+    message: "上传对象不存在",
+  },
+  /** 对象存储上的字节数与声明的 size 不符。 */
+  ASSET_SIZE_MISMATCH: {
+    code: 2008,
+    status: 422,
+    message: "文件大小与实际上传不符",
+  },
+  /** 对象存储上的 Content-Type 与声明的 mime 不符。 */
+  ASSET_MIME_MISMATCH: {
+    code: 2009,
+    status: 422,
+    message: "文件类型与实际上传不符",
+  },
+  /**
+   * 读到了字节，但认不出任何已知容器——文件是坏的。
+   *
+   * 与 {@link ASSET_ERROR_SPECS.ASSET_FORMAT_UNSUPPORTED} 是两回事，措辞也必须不一样：
+   * 那条是「格式我们不支持」（换个格式就行），这条是「这份文件本身打不开」（换个文件）。
+   * 混成一句话会让人白白重传三次。
+   */
+  ASSET_BYTES_UNRECOGNIZED: {
+    code: 2010,
+    status: 400,
+    message:
+      "这个文件打不开，可能已损坏。请换一份 JPG、PNG、WebP 或 MP4 重新上传。",
+  },
+  /**
+   * 字节认得出，但不是它声明的那一类（选了图片，传的是视频）。
+   *
+   * 文案里要报出**实测的那一类**，所以这条是少数允许调用点覆写 message 的——覆写的是同一
+   * 句话里的一个词，不是另起一句。
+   */
+  ASSET_KIND_MISMATCH: {
+    code: 2012,
+    status: 422,
+    message: "这个文件的实际类型和你选择的类型不一致。请重新上传。",
+  },
+  /** 对象存储没配置——是我们的部署问题，不是用户的请求问题。 */
+  ASSET_STORAGE_UNCONFIGURED: {
+    code: 2011,
+    status: 503,
+    message: "对象存储未配置",
+  },
+} as const satisfies Record<string, ErrorCodeSpec>;
+
+export type AssetErrorName = keyof typeof ASSET_ERROR_SPECS;
+
+/**
+ * 技能域（`/api/agent/skills`）错误码。
+ *
+ * **这几个码此前散在 `backend/libs/shared/skills/*.ts` 里各自 `const` 定义**，同一个 100100
+ * 在两个文件里各写一遍——正是 ADR-0083 §1 要终结的那件事（「所有领域从这里取码，不再各自定义」）。
+ * 搬进来的同时补上此前完全缺失的那一格：HTTP 状态码。
+ *
+ * 段位沿用 Java SystemCode 系的 1001xx，不另起 2xxx——这些码前端已经在用，换段位是白白制造
+ * 一次兼容问题，而本次要修的是状态码，不是码本身。
+ */
+export const SKILL_ERROR_SPECS = {
+  /** 技能不存在。文案要带上是哪个技能，所以调用点会覆写 message。 */
+  SKILL_NOT_FOUND: {
+    code: 100100,
+    status: 404,
+    message: "技能不存在",
+  },
+  /** 个人技能重名。 */
+  SKILL_NAME_CONFLICT: {
+    code: 100101,
+    status: 409,
+    message: "同名技能已存在",
+  },
+  /** 名称占用了官方技能的名字。 */
+  SKILL_NAME_RESERVED: {
+    code: 100102,
+    status: 409,
+    message: "名称与官方技能冲突",
+  },
+  /** 要添加的官方技能与用户已有的个人技能同名。 */
+  SKILL_ADD_CONFLICT: {
+    code: 100103,
+    status: 409,
+    message: "官方技能与你的个人技能同名，无法添加；你仍可直接使用",
+  },
+  /** AI 格式化这一步失败或没配置。 */
+  SKILL_FORMAT_FAILED: {
+    code: 100104,
+    status: 503,
+    message: "AI 格式化失败，请稍后重试",
+  },
+  /** 技能正被引用，不能删。 */
+  SKILL_IN_USE: {
+    code: 100105,
+    status: 409,
+    message: "技能正在使用中，无法删除",
+  },
+  /** SKILL.md 的 frontmatter 缺失或字段为空。 */
+  SKILL_FORMAT_INVALID: {
+    code: 100106,
+    status: 400,
+    message: "SKILL.md 格式不合法",
+  },
+  /** creative_skill_id / category / sort / lang 这类查询参数不合法。 */
+  SKILL_PARAM_INVALID: {
+    code: 100107,
+    status: 400,
+    message: "参数不合法",
+  },
+} as const satisfies Record<string, ErrorCodeSpec>;
+
+export type SkillErrorName = keyof typeof SKILL_ERROR_SPECS;
+
+// ═══════════════════════════════════════════════════════════════
 // 四、一码一中文文案表（对外 message 唯一来源）
 // ═══════════════════════════════════════════════════════════════
 export const ERROR_CODES: Record<number, string> = {
@@ -184,6 +374,19 @@ export const ERROR_CODES: Record<number, string> = {
   100408: "空参数卡片不可保存，请补全参考图或描述",
   100410: "共享资产类型不支持",
 };
+
+/**
+ * 素材域（2xxx）的文案不在上面手抄一遍，直接从码表派生进来——**一条错误只写一次**。
+ *
+ * 手抄的第二份迟早和第一份分叉，而分叉出来的症状是「同一个码在两个地方说两句不同的话」，
+ * 排查时最难认。声明提前到这里是因为 `ERROR_CODES` 是本文件对外的那张总表，素材域必须在表里。
+ */
+for (const spec of Object.values(ASSET_ERROR_SPECS)) {
+  ERROR_CODES[spec.code] = spec.message;
+}
+for (const spec of Object.values(SKILL_ERROR_SPECS)) {
+  ERROR_CODES[spec.code] = spec.message;
+}
 
 /** 按数字码取中文文案；未登记返回 undefined（调用方决定兜底/缺省文案）。 */
 export function errorMessage(code: number): string | undefined {
@@ -248,3 +451,39 @@ export const SCENE_CARD_VERSION_CONFLICT_CODE = 100406;
 export const PLAN_APPLICATION_TARGET_STALE_CODE = 100407;
 export const SHARED_ASSET_EMPTY_CARD_CODE = 100408;
 export const SHARED_ASSET_TYPE_UNSUPPORTED_CODE = 100410;
+
+// ═══════════════════════════════════════════════════════════════
+// 八、数值码 → HTTP 状态码（ADR-0083 阶段 5/6 的投影换算，唯一一处）
+// ═══════════════════════════════════════════════════════════════
+
+
+
+/**
+ * Java SystemCode 系那几个码该用哪个 HTTP 状态。
+ *
+ * **只列本仓真的会经过统一投影的那些**，不做一张假装完备的大表——没走投影的调用点写在
+ * 这里也不会生效，那种表只会让人以为已经对齐了。
+ */
+const GLOBAL_CODE_HTTP_STATUS: Record<number, number> = {
+  [PARAM_MISSING_CODE]: 400,
+  [RESOURCE_NOT_FOUND_CODE]: 404,
+  [ASSET_UNAVAILABLE_CODE]: 503,
+};
+
+const SPEC_CODE_HTTP_STATUS: Record<number, number> = Object.fromEntries(
+  [...Object.values(ASSET_ERROR_SPECS), ...Object.values(SKILL_ERROR_SPECS)].map(
+    (spec) => [spec.code, spec.status],
+  ),
+);
+
+/**
+ * 数值码 → HTTP 状态码。**投影层唯一的换算处。**
+ *
+ * 段位按 `result.ts` 的约定读：`4xx`/`5xx` 本身就是 HTTP 语义，原样用；领域码与全局业务码
+ * 查表；查不到的一律 400——**宁可回一个笼统的 400，也不要把一次失败回成 2xx**，后者会让
+ * 只看状态码的客户端把拒绝当成成功，而这正是本次要修的那个 bug。
+ */
+export function httpStatusForCode(code: number): number {
+  if (code >= 400 && code <= 599) return code;
+  return SPEC_CODE_HTTP_STATUS[code] ?? GLOBAL_CODE_HTTP_STATUS[code] ?? 400;
+}

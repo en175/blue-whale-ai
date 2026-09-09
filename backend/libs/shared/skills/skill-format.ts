@@ -1,8 +1,6 @@
 import { createControlledChatClient } from "./controlled-chat-client.js";
-import { fail, ok } from "@blue-whale/contracts";
+import { ok, skillError } from "@blue-whale/contracts";
 import { parseSkillMd } from "@blue-whale/core";
-
-const SKILL_FORMAT_FAILED_CODE = 100104;
 
 export type SkillFormatChatClient = {
   complete(input: { rules: string; draft: string }): Promise<string>;
@@ -56,12 +54,12 @@ export async function handleFormatSkillDraft(
   content: string,
   deps: { ai: SkillFormatChatClient; rules: string },
 ) {
-  if (!content.trim()) return fail(400, "草稿内容为空，无法格式化");
+  if (!content.trim()) throw skillError("SKILL_FORMAT_INVALID", "草稿内容为空，无法格式化");
   let formatted: string;
   try {
     formatted = await deps.ai.complete({ rules: deps.rules, draft: content });
   } catch {
-    return fail(SKILL_FORMAT_FAILED_CODE, "AI 格式化失败，请稍后重试");
+    throw skillError("SKILL_FORMAT_FAILED");
   }
   const parsed = typeof formatted === "string" ? parseSkillMd(formatted) : null;
   if (
@@ -70,7 +68,7 @@ export async function handleFormatSkillDraft(
     !parsed.description.trim() ||
     !parsed.body.trim()
   ) {
-    return fail(SKILL_FORMAT_FAILED_CODE, "AI 返回内容无效，已保留原草稿");
+    throw skillError("SKILL_FORMAT_FAILED", "AI 返回内容无效，已保留原草稿");
   }
   return ok({ content: formatted });
 }

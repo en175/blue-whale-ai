@@ -1,10 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
+import { DomainError, RESOURCE_NOT_FOUND_CODE } from "@blue-whale/contracts";
 
 import {
   handleCompleteAsset,
   handleDedupAsset,
   handlePresignAsset,
 } from "./upload.js";
+
+/**
+ * 拒绝要**抛**，而且抛出来的错误必须同时钉住 `code` 与 `status`。
+ *
+ * 只断言 code 是不够的——这次修的正是「信封里 code=400，HTTP 却回 201」。少了 status 这一格，
+ * 同样的 bug 明天可以原样再来一次而测试全绿。
+ */
+async function expectRejected(
+  run: () => Promise<unknown>,
+  expected: { code: number; status: number },
+) {
+  await expect(run()).rejects.toBeInstanceOf(DomainError);
+  const error = await run().catch((e: unknown) => e as DomainError);
+  expect({ code: error.code, status: error.status }).toEqual(expected);
+  return error;
+}
 
 const ASSET = {
   id: "526",
@@ -94,10 +111,12 @@ describe("handleDedupAsset（IKCNLS）", () => {
   it("无归属项目 → 100301", async () => {
     const uploads = { findOwnedByMd5: vi.fn() };
     const projects = { findOwnedById: vi.fn().mockResolvedValue(null) };
-    const result = await handleDedupAsset("9", {
-      type: "video", mime: "video/mp4", size: 100, md5: VALID_MD5, project_id: "404",
-    }, { projects, uploads } as never);
-    expect(result).toMatchObject({ code: 100301 });
+    await expectRejected(
+      () => handleDedupAsset("9", {
+        type: "video", mime: "video/mp4", size: 100, md5: VALID_MD5, project_id: "404",
+      }, { projects, uploads } as never),
+      { code: RESOURCE_NOT_FOUND_CODE, status: 404 },
+    );
     expect(uploads.findOwnedByMd5).not.toHaveBeenCalled();
   });
 
@@ -129,12 +148,11 @@ describe("presign 的格式门（2026-09-05 深度回归）", () => {
   // 挡在上传口，用户拖文件的当下就知道要换格式。
   it("SVG 在上传口就被挡下，且没有向存储要过预签名", async () => {
     const s = storage();
-    const outcome = await handlePresignAsset(
-      "7",
-      { type: "image", mime: "image/svg+xml", size: 4096 },
-      s,
+    // 2003 = 格式读不了。HTTP 必须也是 400——此前这里回的是 201，信封说失败、传输层说创建成功。
+    await expectRejected(
+      () => handlePresignAsset("7", { type: "image", mime: "image/svg+xml", size: 4096 }, s),
+      { code: 2003, status: 400 },
     );
-    expect(outcome).toMatchObject({ code: 400 });
     expect(s.prepareUpload).not.toHaveBeenCalled();
   });
 
@@ -217,7 +235,7 @@ describe("complete 的文件头校验（IKE53U）", () => {
     // 字节比这道门先落地：前端拿预签名地址直传对象存储，后端不在那条路上。被拒的上传如果
     // 不清理，桶里就留下一个谁也不引用的对象，而素材 GC 至今没跑。
     const deps = completeDeps(head(0xab, 0xcd, 0xef, 0x12));
-    await complete(deps);
+    await expect(complete(deps)).rejects.toBeInstanceOf(DomainError);
     expect(
       (deps.storage as unknown as { deleteMultiObjects: ReturnType<typeof vi.fn> })
         .deleteMultiObjects,
@@ -228,15 +246,14 @@ describe("complete 的文件头校验（IKE53U）", () => {
     const deps = completeDeps(head(0xab, 0xcd, 0xef, 0x12));
     (deps.storage as unknown as { deleteMultiObjects: ReturnType<typeof vi.fn> })
       .deleteMultiObjects.mockRejectedValue(new Error("TOS 抽风"));
-    await expect(complete(deps)).resolves.toMatchObject({ code: 400 });
+    await expectRejected(() => complete(deps), { code: 2010, status: 400 });
   });
 
   it("字节认不出任何容器就拒收，不落库", async () => {
     // 那份坏文件的真实头：AB CD EF 12，而 JPEG 该是 FF D8 FF。
     const deps = completeDeps(head(0xab, 0xcd, 0xef, 0x12, 0x00, 0x10, 0x4a, 0x46));
-    const outcome = await complete(deps);
-
-    expect(outcome).toMatchObject({ code: 400 });
+    // 2010 = 文件打不开。与 2003「格式不支持」是两条不同的话，措辞和码都不许混。
+    await expectRejected(() => complete(deps), { code: 2010, status: 400 });
     expect(
       (deps.uploads as unknown as { createUploadedAsset: ReturnType<typeof vi.fn> })
         .createUploadedAsset,
@@ -253,7 +270,8 @@ describe("complete 的文件头校验（IKE53U）", () => {
     const mp4 = new Uint8Array(32);
     mp4.set(new TextEncoder().encode("ftypisom"), 4);
     const deps = completeDeps(mp4);
-    await expect(complete(deps)).resolves.toMatchObject({ code: 400 });
+    // 认得出、但不是声明的那一类：请求合法而内容不符语义，归 422。
+    await expectRejected(() => complete(deps), { code: 2012, status: 422 });
   });
 
   /**

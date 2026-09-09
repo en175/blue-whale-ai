@@ -96,7 +96,20 @@ export {
   PLAN_APPLICATION_TARGET_STALE_CODE,
   SHARED_ASSET_EMPTY_CARD_CODE,
   SHARED_ASSET_TYPE_UNSUPPORTED_CODE,
+  // ── 素材域错误码（2xxx）+ 码 → HTTP 状态 ──
+  ASSET_ERROR_SPECS,
+  SKILL_ERROR_SPECS,
+  httpStatusForCode,
+  type AssetErrorName,
+  type SkillErrorName,
+  type ErrorCodeSpec,
 } from "./error-codes.js";
+export {
+  DomainError,
+  assetError,
+  skillError,
+  isDomainError,
+} from "./domain-error.js";
 export {
   readinessResponseSchema,
   type ReadinessResponse,
