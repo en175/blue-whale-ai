@@ -113,12 +113,13 @@ function matchIp(entries: RateLimitAllowlistEntries, key: string): boolean {
 }
 
 /**
- * 限流白名单：命中即跳过 @RateLimit 频率桶（不消耗 Redis 计数）。
- * 只豁免 ip / account 两个维度；user 维度（资产上传限流）一律不豁免。
+ * 限流豁免名单（RateLimitAllowlist）：本类只提供 ip / account 两个匹配原语，
+ * 豁免粒度是**请求级**——guard 用 `X-Real-IP`（真实连接 IP）与 body.username 各查一次，
+ * 任一命中即整个请求跳过全部 @RateLimit 频率桶（含 user 维度桶，不消耗 Redis 计数）。
  * 登录失败锁定不被豁免，但机制不是"在 take 内部"——guard 短路发生在 take 之前，
  * take 内的 rlblock 检查同样会被跳过；真实原因是 login_lock scope 的封锁检查由
  * AuthController 在 guard 之外独立执行。若未来对某个桶 scope 直接调 limiter.block()，
- * 白名单短路会连带跳过该封锁检查，届时需要把封锁检查挪到 guard 短路之前。
+ * 豁免短路会连带跳过该封锁检查，届时需要把封锁检查挪到 guard 短路之前。
  * 名单来自环境变量，启动加载一次；改名单需重启（IKEBOY 设计决策）。
  */
 @Injectable()

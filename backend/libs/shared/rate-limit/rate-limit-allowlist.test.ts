@@ -126,7 +126,7 @@ describe("RateLimitAllowlist.isAllowed", () => {
     expect(list.isAllowed("account", "carol")).toBe(false);
   });
 
-  it("never exempts the user dimension", () => {
+  it("user dimension is not a match primitive (exemption is request-level in the guard)", () => {
     const list = allowlist({
       RATE_LIMIT_ALLOW_IPS: "10.0.0.0/8",
       RATE_LIMIT_ALLOW_ACCOUNTS: "alice",
