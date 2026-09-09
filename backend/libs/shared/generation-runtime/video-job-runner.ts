@@ -382,16 +382,30 @@ function claimIdentity(claim: VideoJobClaim) {
 }
 
 /** IKEA26：poll 抛出的错误是否为「瞬时网络层错误」（应重排继续轮询而非 fail）。
- *  网络不可达（NewApiNetworkError）/ 超时（NewApiTimeoutError）/ 上游 5xx / 429 均属瞬时；
- *  4xx（404 task 不存在、401 渠道失效等）与信封业务失败（VideoProviderError 已由 provider
- *  归一）属业务失败 → 走现有 fail。 */
+ *  网络不可达（NewApiNetworkError）/ 超时（NewApiTimeoutError）→ 瞬时；
+ *  HTTP 5xx 仅白名单 500/502/503/504 + 429 限流 → 瞬时；白名单外未知 5xx → 默认 fail
+ *  （宁可暴露错误让用户重试，也不空转 MAX_VIDEO_POLLS 到 provider_timeout）。
+ *  502 里的 invalid_json_response / invalid_video_response 是响应形状/契约错误（持久），
+ *  排除不当瞬时。4xx 与信封业务失败（VideoProviderError 已由 provider 归一）属业务失败 → fail。 */
 function isTransientPollError(error: unknown): boolean {
   if (error instanceof NewApiNetworkError || error instanceof NewApiTimeoutError) {
     return true;
   }
   if (error instanceof NewApiError) {
-    // 503 已被 NewApiNetworkError 独占（unreachable），此处只处理真实 HTTP 状态。
-    return error.status >= 500 || error.status === 429;
+    if (
+      error.status === 429 ||
+      error.status === 500 ||
+      error.status === 502 ||
+      error.status === 503 ||
+      error.status === 504
+    ) {
+      // 契约/形状错误（响应非 JSON / 视频响应缺 task_id/status）是持久问题，非瞬时。
+      return !(
+        error.code === "invalid_json_response" ||
+        error.code === "invalid_video_response"
+      );
+    }
+    return false;
   }
   return false;
 }

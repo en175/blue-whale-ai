@@ -1419,6 +1419,101 @@ describe("video job runner material library references", () => {
     expect(rescheduleVideoPoll).not.toHaveBeenCalled();
   });
 
+  it("fails when poll throws a 502 invalid_video_response contract error (IKEA26)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const { NewApiError } = await import("@blue-whale/core");
+    const failVideoJob = vi.fn().mockResolvedValue(true);
+    const rescheduleVideoPoll = vi.fn().mockResolvedValue(true);
+    const poll = vi.fn().mockRejectedValue(
+      new NewApiError("new-api 视频任务响应无效", 502, "invalid_video_response"),
+    );
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "320",
+        projectId: "55",
+        userId: "9",
+        input: { provider_credential: "sealed-token" },
+        providerTaskId: "upstream-320",
+        cancelRequested: false,
+        workerId: "worker-ikea26",
+        fencingToken: 1,
+        pollCount: 0,
+        progress: 25,
+        parentProviderTaskId: null,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn(),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll,
+      publishVideoResult: vi.fn(),
+      failVideoJob,
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikea26",
+      jobId: "320",
+      createProvider: () => ({ submit: vi.fn(), poll }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn(),
+    });
+
+    expect(failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: "320", code: "provider_failed" }),
+    );
+    expect(rescheduleVideoPoll).not.toHaveBeenCalled();
+    expect(poll).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails when poll throws an unknown 5xx (501) not in transient whitelist (IKEA26)", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const { NewApiError } = await import("@blue-whale/core");
+    const failVideoJob = vi.fn().mockResolvedValue(true);
+    const rescheduleVideoPoll = vi.fn().mockResolvedValue(true);
+    const poll = vi.fn().mockRejectedValue(
+      new NewApiError("upstream 501", 501),
+    );
+    const repo = {
+      claimVideoJobById: vi.fn().mockResolvedValue({
+        id: "321",
+        projectId: "55",
+        userId: "9",
+        input: { provider_credential: "sealed-token" },
+        providerTaskId: "upstream-321",
+        cancelRequested: false,
+        workerId: "worker-ikea26",
+        fencingToken: 1,
+        pollCount: 0,
+        progress: 25,
+        parentProviderTaskId: null,
+      }),
+      claimNextVideoJob: vi.fn(),
+      resolveInputAssets: vi.fn(),
+      markVideoSubmitted: vi.fn(),
+      rescheduleVideoPoll,
+      publishVideoResult: vi.fn(),
+      failVideoJob,
+      cancelVideoBeforeDispatch: vi.fn(),
+    };
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-ikea26",
+      jobId: "321",
+      createProvider: () => ({ submit: vi.fn(), poll }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn(),
+    });
+
+    expect(failVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: "321", code: "provider_failed" }),
+    );
+    expect(rescheduleVideoPoll).not.toHaveBeenCalled();
+  });
+
   it("reuses parent upstream result on retry job instead of resubmitting (IKEA26)", async () => {
     const { runVideoJobStep } = await import("./video-job-runner.js");
     const submit = vi.fn();
