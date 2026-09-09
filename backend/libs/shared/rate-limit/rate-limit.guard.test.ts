@@ -1,7 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { RATE_LIMITED } from "@blue-whale/contracts";
+import { RateLimitAllowlist } from "./rate-limit-allowlist.js";
 import { RateLimitGuard } from "./rate-limit.guard.js";
 import type { RateLimitOptions } from "./decorators/rate-limit.decorator.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function makeContext(request: Record<string, unknown>) {
   return {
@@ -19,6 +24,7 @@ describe("RateLimitGuard", () => {
     const guard = new RateLimitGuard(
       { getAllAndOverride: () => undefined } as never,
       { take } as never,
+      { isAllowed: () => false } as never,
     );
     await expect(guard.canActivate(makeContext({}) as never)).resolves.toBe(true);
     expect(take).not.toHaveBeenCalled();
@@ -38,6 +44,7 @@ describe("RateLimitGuard", () => {
     const guard = new RateLimitGuard(
       { getAllAndOverride: () => options } as never,
       { take } as never,
+      { isAllowed: () => false } as never,
     );
     const context = makeContext({
       headers: { "x-forwarded-for": "203.0.113.9, 10.0.0.1" },
@@ -71,6 +78,7 @@ describe("RateLimitGuard", () => {
     const guard = new RateLimitGuard(
       { getAllAndOverride: () => options } as never,
       { take } as never,
+      { isAllowed: () => false } as never,
     );
     await expect(
       guard.canActivate(makeContext({ headers: {}, body: {} }) as never),
@@ -86,6 +94,7 @@ describe("RateLimitGuard", () => {
     const guard = new RateLimitGuard(
       { getAllAndOverride: () => options } as never,
       { take } as never,
+      { isAllowed: () => false } as never,
     );
     await expect(
       guard.canActivate(
@@ -101,5 +110,121 @@ describe("RateLimitGuard", () => {
       limit: 20,
       windowMs: 60_000,
     });
+  });
+
+  it("skips whitelisted buckets without consuming limiter counts", async () => {
+    const take = vi.fn().mockResolvedValue({ allowed: true });
+    const options: RateLimitOptions = {
+      buckets: [
+        { scope: "login_ip", key: "ip", limit: 20, windowMs: 60_000 },
+        { scope: "login_account", key: "account", limit: 5, windowMs: 60_000 },
+      ],
+    };
+    const guard = new RateLimitGuard(
+      { getAllAndOverride: () => options } as never,
+      { take } as never,
+      { isAllowed: (kind: string) => kind === "ip" } as never,
+    );
+    const context = makeContext({
+      headers: { "x-forwarded-for": "203.0.113.9" },
+      body: { username: "alice" },
+    });
+    await expect(guard.canActivate(context as never)).resolves.toBe(true);
+    // ip 桶被白名单短路，只有 account 桶消耗计数
+    expect(take).toHaveBeenCalledTimes(1);
+    expect(take).toHaveBeenCalledWith({
+      scope: "login_account",
+      key: "alice",
+      limit: 5,
+      windowMs: 60_000,
+    });
+  });
+
+  it("does not exempt user-keyed buckets via ip/account allowlists", async () => {
+    const take = vi.fn().mockResolvedValue({ allowed: false, retryAfter: 1 });
+    const options: RateLimitOptions = {
+      buckets: [{ scope: "asset-presign", key: "user", limit: 30, windowMs: 60_000 }],
+    };
+    const guard = new RateLimitGuard(
+      { getAllAndOverride: () => options } as never,
+      { take } as never,
+      // 白名单只认 ip/account 维度：user 维度问什么都答 false
+      { isAllowed: (kind: string) => kind !== "user" } as never,
+    );
+    const context = makeContext({
+      headers: {},
+      body: {},
+      user: { userId: "12345" },
+    });
+    await expect(guard.canActivate(context as never)).rejects.toMatchObject({
+      status: 429,
+      code: RATE_LIMITED,
+    });
+    expect(take).toHaveBeenCalledTimes(1);
+  });
+
+  it("still enforces non-whitelisted buckets when another bucket hits the allowlist", async () => {
+    const take = vi.fn().mockResolvedValue({ allowed: false, retryAfter: 3 });
+    const options: RateLimitOptions = {
+      buckets: [
+        { scope: "login_ip", key: "ip", limit: 20, windowMs: 60_000 },
+        { scope: "login_account", key: "account", limit: 5, windowMs: 60_000 },
+      ],
+    };
+    const guard = new RateLimitGuard(
+      { getAllAndOverride: () => options } as never,
+      { take } as never,
+      { isAllowed: (kind: string) => kind === "ip" } as never,
+    );
+    const context = makeContext({
+      headers: { "x-forwarded-for": "203.0.113.9" },
+      body: { username: "alice" },
+    });
+    // ip 豁免不连带 account：账号桶超限仍然 429
+    await expect(guard.canActivate(context as never)).rejects.toMatchObject({
+      status: 429,
+      code: RATE_LIMITED,
+    });
+  });
+
+  it("exempts a whitelisted IP end-to-end with the real allowlist (wiring check)", async () => {
+    // 不打桩 isAllowed：用真实 RateLimitAllowlist 接进 guard，钉住 kind/key 接线正确性
+    vi.stubEnv("RATE_LIMIT_ALLOW_IPS", "203.0.113.0/24");
+    vi.stubEnv("RATE_LIMIT_ALLOW_ACCOUNTS", "");
+    const take = vi.fn().mockResolvedValue({ allowed: false, retryAfter: 1 });
+    const options: RateLimitOptions = {
+      buckets: [{ scope: "login_ip", key: "ip", limit: 20, windowMs: 60_000 }],
+    };
+    const guard = new RateLimitGuard(
+      { getAllAndOverride: () => options } as never,
+      { take } as never,
+      new RateLimitAllowlist(),
+    );
+    await expect(
+      guard.canActivate(
+        makeContext({ headers: { "x-forwarded-for": "203.0.113.9" } }) as never,
+      ),
+    ).resolves.toBe(true);
+    expect(take).not.toHaveBeenCalled();
+  });
+
+  it("still limits a non-whitelisted IP end-to-end with the real allowlist", async () => {
+    vi.stubEnv("RATE_LIMIT_ALLOW_IPS", "203.0.113.0/24");
+    vi.stubEnv("RATE_LIMIT_ALLOW_ACCOUNTS", "");
+    const take = vi.fn().mockResolvedValue({ allowed: false, retryAfter: 1 });
+    const options: RateLimitOptions = {
+      buckets: [{ scope: "login_ip", key: "ip", limit: 20, windowMs: 60_000 }],
+    };
+    const guard = new RateLimitGuard(
+      { getAllAndOverride: () => options } as never,
+      { take } as never,
+      new RateLimitAllowlist(),
+    );
+    await expect(
+      guard.canActivate(
+        makeContext({ headers: { "x-forwarded-for": "203.0.114.9" } }) as never,
+      ),
+    ).rejects.toMatchObject({ status: 429, code: RATE_LIMITED });
+    expect(take).toHaveBeenCalledTimes(1);
   });
 });
