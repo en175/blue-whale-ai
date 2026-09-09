@@ -6,6 +6,7 @@
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
 import { readAssetId } from './mediaRefs';
+import { REF_LIMITS } from '@/utils/ref-overflow';
 
 /** 视频参考角色：reference 普通参考 / first 首帧 / last 尾帧 */
 export type VideoRefRole = 'reference' | 'first' | 'last';
@@ -212,17 +213,23 @@ export interface VideoRefCapabilities {
 }
 
 /** 视频参考组合校验：返回 null 表示当前输入可提交，否则为用户可读的阻止原因。
- *  与服务端 400 同口径的结构约束（尾帧必须配首帧、首尾帧与普通参考互斥）+ 普通参考能力位；
+ *  与服务端 400 同口径的结构约束（首尾帧与普通参考互斥）+ 普通参考能力位；
  *  首帧/尾帧**不做**模型能力位门控（服务端 first_last_frame / last_frame 标记不可靠，
- *  实际能否使用以后端返回为准），不兼容时明确提示，禁止静默丢弃或降级。 */
+ *  实际能否使用以后端返回为准），不兼容时明确提示，禁止静默丢弃或降级。
+ *  添加阶段允许先只传首帧/尾帧其一（见 checkAddVideoRef / canAddRefRole），
+ *  但**发送阶段**要求首帧与尾帧齐全，否则提示补全。 */
 export function videoRefConflict(
   refs: VideoMediaRefs,
   caps: VideoRefCapabilities,
 ): string | null {
   if (refs.invalid?.length) return '参考素材不可用，请恢复素材或移除失效引用后发送';
-  if (refs.last && !refs.first) return '尾帧必须与首帧一起使用，请补充首帧或尾帧';
   if ((refs.first || refs.last) && refs.reference.length > 0) {
     return '首尾帧与普通参考不能混用，请移除其中一类输入';
+  }
+  // 首尾帧模式发送：首帧与尾帧需齐全，否则按缺项提示补全
+  if (refs.first || refs.last) {
+    if (!refs.first) return '请补充首帧';
+    if (!refs.last) return '请补充尾帧';
   }
   if (refs.reference.length > 0 && !caps.referenceImage) {
     return '当前模型不支持图片参考，请移除普通参考';
@@ -230,14 +237,46 @@ export function videoRefConflict(
   return null;
 }
 
-/** 角色槽能否添加：能力位 + 槽位空闲。尾帧还要求已指定首帧（服务端「尾帧必须与首帧一起使用」，
- *  因此 last 实际可用 = lastFrame && firstLastFrame）。 */
+/** 角色槽能否添加：能力位 + 槽位空闲。首帧与尾帧独立使用，允许只传其一。 */
 export function canAddRefRole(
   role: VideoRefRole,
   refs: VideoMediaRefs,
   caps: VideoRefCapabilities,
 ): boolean {
   if (role === 'first') return caps.firstFrame && !refs.first;
-  if (role === 'last') return caps.lastFrame && caps.firstLastFrame && !!refs.first && !refs.last;
+  if (role === 'last') return caps.lastFrame && !refs.last;
   return caps.referenceImage;
+}
+
+/** 统一校验「向视频草稿添加参考素材」：重复素材 / 槽位已占 / 首尾帧收视频 / 普通参考超限。
+ *  返回 null 表示可添加；否则为用户可读的拒绝原因——所有添加入口（连线 / 到节点选择 /
+ *  角色库 / 资产 / Dock 角色改写）必须调本函数，禁止各自复制 guard。 */
+export function checkAddVideoRef(
+  role: VideoRefRole,
+  mediaType: 'image' | 'video',
+  assetId: string | undefined,
+  refs: VideoMediaRefs,
+): string | null {
+  // 首尾帧槽只收图片
+  if (role !== 'reference' && mediaType !== 'image') return '首尾帧仅支持图片素材';
+  // 槽位已占
+  if (role === 'first' && refs.first) return '首帧已指定，请先移除现有首帧';
+  if (role === 'last' && refs.last) return '尾帧已指定，请先移除现有尾帧';
+  // 素材已连入同一草稿（跨角色去重）；首尾帧用「素材重复」，普通参考沿用「重复的素材已跳过」
+  if (assetId) {
+    const occupied =
+      refs.reference.some((r) => r.assetId === assetId) ||
+      [refs.first, refs.last].some((r) => r?.assetId === assetId);
+    if (occupied) return role !== 'reference' ? '素材重复' : '重复的素材已跳过';
+  }
+  // 普通参考上限
+  if (role === 'reference') {
+    if (mediaType === 'video') {
+      const videoCount = refs.reference.filter((r) => r.mediaType === 'video').length;
+      if (videoCount >= MAX_VIDEO_REFS) return `参考视频最多 ${MAX_VIDEO_REFS} 个`;
+    } else if (refs.reference.length >= REF_LIMITS.image) {
+      return `参考图最多 ${REF_LIMITS.image} 张`;
+    }
+  }
+  return null;
 }

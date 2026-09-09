@@ -234,9 +234,12 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMate
       {item.mediaType === 'video'
         ? <video src={item.url} className={styles.mediaThumbImg} muted />
         : <img src={item.url} alt={item.name} className={styles.mediaThumbImg} />}
-      <span data-role={role} className={`${styles.refRoleBadge} ${role !== 'reference' ? styles.refRoleBadgeFrame : ''}`}>
-        {ROLE_LABELS[role]}
-      </span>
+      {/* 角色徽标：仅首帧/尾帧保留；普通参考不在图片上保留标签 */}
+      {role !== 'reference' && (
+        <span data-role={role} className={`${styles.refRoleBadge} ${styles.refRoleBadgeFrame}`}>
+          {ROLE_LABELS[role]}
+        </span>
+      )}
       {!readOnly && (
         <>
           <button className={styles.mediaThumbRemove} onClick={handleRemove} title={isMaterial ? '移除' : '移除（断开连线）'}>

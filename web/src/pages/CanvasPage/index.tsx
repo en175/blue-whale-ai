@@ -19,6 +19,7 @@ import {
   supportsVideoReferenceModel,
   videoRefConflict,
   videoRefSourceError,
+  checkAddVideoRef,
   type VideoMaterialRefData,
   type VideoMediaRef,
   type VideoMediaRefs,
@@ -231,40 +232,11 @@ export default function CanvasPage() {
       return false;
     }
     const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
-    const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>)!;
-    const occupied =
-      refs.reference.some((r) => r.assetId === assetId) ||
-      [refs.first, refs.last].some((r) => r?.assetId === assetId);
-    if (occupied) {
-      showToast('warn', '该素材已连入当前草稿');
-      return false;
-    }
-    if (role === 'first') {
-      if (refs.first) {
-        showToast('warn', '首帧已指定，请先移除现有首帧');
-        return false;
-      }
-      return true;
-    }
-    if (role === 'last') {
-      if (!refs.first) {
-        showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
-        return false;
-      }
-      if (refs.last) {
-        showToast('warn', '尾帧已指定，请先移除现有尾帧');
-        return false;
-      }
-      return true;
-    }
-    const videoCount = refs.reference.filter((r) => r.mediaType === 'video').length;
-    if ((source.data as Record<string, unknown>).mediaType === 'video') {
-      if (videoCount >= MAX_VIDEO_REFS) {
-        showToast('warn', refOverflowToast(['video'], { video: MAX_VIDEO_REFS }));
-        return false;
-      }
-    } else if (refs.reference.length >= REF_LIMITS.image) {
-      showToast('warn', refOverflowToast(['image']));
+    const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>);
+    const mediaType = ((source.data ?? {}) as Record<string, unknown>).mediaType as 'image' | 'video';
+    const msg = checkAddVideoRef(role, mediaType, assetId, refs);
+    if (msg) {
+      showToast('warn', msg);
       return false;
     }
     return true;
@@ -2079,10 +2051,6 @@ export default function CanvasPage() {
           showToast('warn', role === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
           return;
         }
-        if (role === 'last' && !refs.first) {
-          showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
-          return;
-        }
         accepted = accepted.filter((a) => a.type === 'image');
         if (accepted.length === 0) return;
         if (accepted.length > 1) showToast('warn', '首尾帧仅支持一张图片，已取首张');
@@ -2865,17 +2833,13 @@ export default function CanvasPage() {
       return;
     }
     const refs = mergedVideoMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current);
-    if (role === 'first' && refs.first && refs.first.nodeId !== sourceNodeId) {
-      showToast('warn', '首帧已指定，请先移除现有首帧');
-      return;
-    }
-    if (role === 'last') {
-      if (!refs.first) {
-        showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
-        return;
-      }
-      if (refs.last && refs.last.nodeId !== sourceNodeId) {
-        showToast('warn', '尾帧已指定，请先移除现有尾帧');
+    // 改角色 ≠ 添加素材：只需检查目标槽是否被**其他**素材占用
+    if (role !== 'reference') {
+      const occupiedByOther =
+        (role === 'first' ? refs.first : refs.last)?.nodeId !== undefined &&
+        (role === 'first' ? refs.first : refs.last)?.nodeId !== sourceNodeId;
+      if (occupiedByOther) {
+        showToast('warn', role === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
         return;
       }
     }
@@ -2915,10 +2879,6 @@ export default function CanvasPage() {
         showToast('warn', next === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
         return;
       }
-      if (next === 'last' && !refs.first) {
-        showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
-        return;
-      }
     }
     patchMediaNode(draftId, {
       draftMaterialRefs: existing.map((m) => (m.materialId === materialId ? { ...m, role: next } : m)),
@@ -2931,41 +2891,17 @@ export default function CanvasPage() {
    *  槽位占用/尾帧配首帧/查重/图9视频3上限；通过后写入本地 refs，不落画布不连线 */
   const appendVideoFreeRef = (item: VideoMediaRef, role: VideoRefRole): void => {
     const refs = videoFreeRefs;
-    const occupied =
-      refs.reference.some((r) => r.assetId === item.assetId) ||
-      [refs.first, refs.last].some((r) => r?.assetId === item.assetId);
-    if (occupied) {
-      showToast('warn', '重复的素材已跳过');
+    const msg = checkAddVideoRef(role, item.mediaType, item.assetId, refs);
+    if (msg) {
+      showToast('warn', msg);
       return;
     }
     if (role === 'first') {
-      if (refs.first) {
-        showToast('warn', '首帧已指定，请先移除现有首帧');
-        return;
-      }
       setVideoFreeRefs((prev) => ({ ...prev, first: item }));
       return;
     }
     if (role === 'last') {
-      if (!refs.first) {
-        showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
-        return;
-      }
-      if (refs.last) {
-        showToast('warn', '尾帧已指定，请先移除现有尾帧');
-        return;
-      }
       setVideoFreeRefs((prev) => ({ ...prev, last: item }));
-      return;
-    }
-    const videoCount = refs.reference.filter((r) => r.mediaType === 'video').length;
-    if (item.mediaType === 'video') {
-      if (videoCount >= MAX_VIDEO_REFS) {
-        showToast('warn', refOverflowToast(['video'], { video: MAX_VIDEO_REFS }));
-        return;
-      }
-    } else if (refs.reference.length >= REF_LIMITS.image) {
-      showToast('warn', refOverflowToast(['image']));
       return;
     }
     setVideoFreeRefs((prev) => ({ ...prev, reference: [...prev.reference, item] }));
@@ -2998,10 +2934,6 @@ export default function CanvasPage() {
       return;
     }
     if (role === 'last') {
-      if (!refs.first) {
-        showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
-        return;
-      }
       if (refs.last && refs.last.nodeId !== key) {
         showToast('warn', '尾帧已指定，请先移除现有尾帧');
         return;
@@ -4470,10 +4402,6 @@ export default function CanvasPage() {
               if (role === 'first' || role === 'last') {
                 if (refs[role]) {
                   showToast('warn', role === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
-                  return;
-                }
-                if (role === 'last' && !refs.first) {
-                  showToast('warn', '尾帧必须与首帧一起使用，请补充首帧或尾帧');
                   return;
                 }
                 const images = assets.filter((a) => a.AssetType === 'Image');
