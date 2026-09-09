@@ -122,14 +122,7 @@ export {
   type SkillLibraryCategory,
   type SkillLibrarySort,
   type SkillLibraryLang,
-  type SkillActivationInput,
 } from "./skill-repo.js";
-export {
-  createSkillSummarizeRepo,
-  type SkillSummarizeRepo,
-  type SkillSummarizePendingSession,
-  type SkillSummarizeHistoryMessage,
-} from "./skill-summarize-repo.js";
 export {
   createTemplateRepo,
   type TemplateRepo,

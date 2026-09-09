@@ -191,9 +191,6 @@ describe("SnapshotRepo.loadConversationState", () => {
           },
         ]),
       },
-      conversation_message_mentions: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
       project_events: {
         findMany: vi.fn().mockResolvedValue([]),
         aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),
@@ -237,23 +234,10 @@ describe("SnapshotRepo.loadConversationState", () => {
     });
   });
 
-  it("recomputes mention availability without rewriting immutable snapshots or leaking unavailable content", async () => {
-    const assetFindMany = vi.fn().mockResolvedValue([
-      {
-        id: 1n,
-        user_id: 999n,
-        project_id: 42n,
-        status: "normal",
-        is_delete: false,
-      },
-      {
-        id: 3n,
-        user_id: 100n,
-        project_id: 42n,
-        status: "normal",
-        is_delete: false,
-      },
-    ]);
+  // IKEEFV：conversation_message_mentions 表已删，读链不再触该表——message.mentions
+  // 恒为空（引用事实不复存在），asset/scene_card 批量查询被空 id 集 guard 挡住。
+  it("mention 表已删 → message.mentions 恒为空且素材批量查询不触发", async () => {
+    const assetsFindMany = vi.fn().mockResolvedValue([]);
     const prisma = {
       conversation_messages: {
         findMany: vi.fn().mockResolvedValue([
@@ -268,56 +252,8 @@ describe("SnapshotRepo.loadConversationState", () => {
           },
         ]),
       },
-      conversation_message_mentions: {
-        findMany: vi.fn().mockResolvedValue([
-          {
-            id: 101n,
-            message_id: 8n,
-            accepted_user_id: 100n,
-            mention_seq: 0,
-            mention_type: "asset",
-            target_id: 1n,
-            target_version: null,
-            display_name: "他人素材",
-            snapshot: { asset_type: "image", content_sha256: "secret-a" },
-          },
-          {
-            id: 102n,
-            message_id: 8n,
-            accepted_user_id: 100n,
-            mention_seq: 1,
-            mention_type: "scene_card",
-            target_id: 2n,
-            target_version: 3,
-            display_name: "旧版分镜",
-            snapshot: {
-              title: "冻结标题",
-              summary: "冻结摘要",
-              content_markdown: "# 冻结正文",
-              version: 3,
-            },
-          },
-          {
-            id: 103n,
-            message_id: 8n,
-            accepted_user_id: 100n,
-            mention_seq: 2,
-            mention_type: "asset",
-            target_id: 3n,
-            target_version: null,
-            display_name: "可用素材",
-            snapshot: { asset_type: "image", content_sha256: "safe-c" },
-          },
-        ]),
-      },
-      assets: { findMany: assetFindMany },
-      scene_cards: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([
-            { id: 2n, project_id: 42n, version: 4, is_delete: 0 },
-          ]),
-      },
+      assets: { findMany: assetsFindMany },
+      scene_cards: { findMany: vi.fn().mockResolvedValue([]) },
       project_events: {
         aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),
       },
@@ -336,52 +272,8 @@ describe("SnapshotRepo.loadConversationState", () => {
       "100",
     );
 
-    expect(state.conversation_messages[0]?.mentions).toEqual([
-      {
-        mention_id: "101",
-        index: 0,
-        type: "asset",
-        display_name: "他人素材",
-        availability: "unavailable",
-        reason: "permission_lost",
-      },
-      {
-        mention_id: "102",
-        index: 1,
-        type: "scene_card",
-        display_name: "旧版分镜",
-        availability: "stale",
-        reason: "stale",
-        snapshot: {
-          title: "冻结标题",
-          summary: "冻结摘要",
-          content_markdown: "# 冻结正文",
-          version: 3,
-        },
-      },
-      {
-        mention_id: "103",
-        index: 2,
-        type: "asset",
-        display_name: "可用素材",
-        availability: "available",
-        reason: null,
-        snapshot: { asset_type: "image", content_sha256: "safe-c" },
-      },
-    ]);
-    expect(
-      JSON.stringify(state.conversation_messages[0]?.mentions[0]),
-    ).not.toContain("secret-a");
-    expect(assetFindMany).toHaveBeenCalledWith({
-      where: { id: { in: [1n, 3n] } },
-      select: {
-        id: true,
-        user_id: true,
-        project_id: true,
-        status: true,
-        is_delete: true,
-      },
-    });
+    expect(state.conversation_messages[0]?.mentions).toEqual([]);
+    expect(assetsFindMany).not.toHaveBeenCalled();
   });
 
   // —— plan_messages.application_availability 投影（IK6MZU）：复用 loadPlanApplicationFacts，
@@ -443,42 +335,13 @@ describe("SnapshotRepo.loadConversationState", () => {
       };
     }
 
-    function assetRow(id: bigint, overrides: Record<string, unknown> = {}) {
-      return {
-        id,
-        user_id: 100n,
-        project_id: 42n,
-        status: "normal",
-        is_delete: false,
-        ...overrides,
-      };
-    }
-
-    function mentionRow(id: bigint, targetId: bigint) {
-      return {
-        id,
-        message_id: 8n,
-        accepted_user_id: 100n,
-        mention_seq: 0,
-        mention_type: "asset",
-        target_id: targetId,
-        target_version: null,
-        display_name: "素材",
-        snapshot: {},
-      };
-    }
-
+    // IKEEFV：mention 表已删——原 mentionRow/assetRow 夹具与 assets 查询随下线。
     function buildPrisma(opts: {
       planMessages: unknown[];
       capabilityRows?: unknown[];
-      mentions?: unknown[];
-      assets?: unknown[];
     }) {
       return {
         conversation_messages: { findMany: vi.fn().mockResolvedValue([]) },
-        conversation_message_mentions: {
-          findMany: vi.fn().mockResolvedValue(opts.mentions ?? []),
-        },
         plan_messages: {
           findMany: vi.fn().mockResolvedValue(opts.planMessages),
         },
@@ -495,7 +358,6 @@ describe("SnapshotRepo.loadConversationState", () => {
         scene_card_generation_records: { findMany: vi.fn().mockResolvedValue([]) },
         storyboard_previews: { findMany: vi.fn().mockResolvedValue([]) },
         generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
-        assets: { findMany: vi.fn().mockResolvedValue(opts.assets ?? []) },
       } as unknown as PrismaClient;
     }
 
@@ -507,58 +369,13 @@ describe("SnapshotRepo.loadConversationState", () => {
       return state.plan_messages[0]?.application_availability ?? "MISSING";
     }
 
-    it("asset 状态 normal + 能力 version/digest 匹配 → available", async () => {
+    // IKEEFV：mention 表已删 → mentionById 恒空，asset 冻结引用一律缺 mention
+    // fail-closed（前端「需重新计划」）。能力漂移分支被缺 mention 短路、在快照
+    // 读路径不再可达，原「能力行缺失 / row_version 变 / enabled=false」三例随下线
+    //（判定逻辑本体由 regen 侧与 plan-application-internals 覆盖）。
+    it("asset 冻结引用 mention 不可解析 → requires_new_plan（IKEEFV fail-closed）", async () => {
       const prisma = buildPrisma({
         planMessages: [buildPlanMessage([{ mention_id: "101", type: "asset" }])],
-        mentions: [mentionRow(101n, 1n)],
-        assets: [assetRow(1n)],
-      });
-      expect(await firstAvailability(prisma)).toBe("available");
-    });
-
-    it("derived mention_id 在 mentionRows 缺失 → requires_new_plan（读路径 unavailable 语义）", async () => {
-      const prisma = buildPrisma({
-        planMessages: [buildPlanMessage([{ mention_id: "404", type: "asset" }])],
-        mentions: [], // 404 行缺失 → helper 判失效
-      });
-      expect(await firstAvailability(prisma)).toBe("requires_new_plan");
-    });
-
-    it("asset 已删（is_delete）→ requires_new_plan", async () => {
-      const prisma = buildPrisma({
-        planMessages: [buildPlanMessage([{ mention_id: "101", type: "asset" }])],
-        mentions: [mentionRow(101n, 1n)],
-        assets: [assetRow(1n, { is_delete: true })],
-      });
-      expect(await firstAvailability(prisma)).toBe("requires_new_plan");
-    });
-
-    it("能力行缺失 → requires_new_plan", async () => {
-      const prisma = buildPrisma({
-        planMessages: [buildPlanMessage([{ mention_id: "101", type: "asset" }])],
-        capabilityRows: [],
-        mentions: [mentionRow(101n, 1n)],
-        assets: [assetRow(1n)],
-      });
-      expect(await firstAvailability(prisma)).toBe("requires_new_plan");
-    });
-
-    it("能力 row_version 变 → requires_new_plan", async () => {
-      const prisma = buildPrisma({
-        planMessages: [buildPlanMessage([{ mention_id: "101", type: "asset" }])],
-        capabilityRows: [matchingCapability({ version: 99 })],
-        mentions: [mentionRow(101n, 1n)],
-        assets: [assetRow(1n)],
-      });
-      expect(await firstAvailability(prisma)).toBe("requires_new_plan");
-    });
-
-    it("能力被禁用（enabled=false）→ requires_new_plan", async () => {
-      const prisma = buildPrisma({
-        planMessages: [buildPlanMessage([{ mention_id: "101", type: "asset" }])],
-        capabilityRows: [matchingCapability({ enabled: false })],
-        mentions: [mentionRow(101n, 1n)],
-        assets: [assetRow(1n)],
       });
       expect(await firstAvailability(prisma)).toBe("requires_new_plan");
     });
@@ -586,7 +403,6 @@ describe("SnapshotRepo.loadConversationState output slots", () => {
     const empty = () => ({ findMany: vi.fn().mockResolvedValue([]) });
     const prisma = {
       conversation_messages: empty(),
-      conversation_message_mentions: empty(),
       plan_messages: empty(),
       generation_model_capability: empty(),
       project_events: {

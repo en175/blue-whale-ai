@@ -142,14 +142,9 @@ function buildTx(
       findUnique: vi.fn().mockResolvedValue(buildCapabilityRow()),
       ...overrides.generation_model_capability,
     },
-    conversation_message_mentions: {
-      findMany: vi.fn().mockResolvedValue([]),
-      ...overrides.conversation_message_mentions,
-    },
-    assets: {
-      findMany: vi.fn().mockResolvedValue([]),
-      ...overrides.assets,
-    },
+    // IKEEFV：conversation_message_mentions 表已删，regen 预检不再触库该表
+    //（validateDerivedReferences fail-closed、resolveReferenceAssetsToFlat 不查 assets），
+    // 相应 mock 随下线。
     canvas: {
       findFirst: vi.fn().mockResolvedValue({
         viewport_json: { x: 0, y: 0, zoom: 1 },
@@ -611,7 +606,11 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
   });
 
-  it("模型声明 camelCase 首尾帧能力时接纳首尾帧组合并持久化到新任务", async () => {
+  // IKEEFV：conversation_message_mentions 表已删，validateDerivedReferences 对任何
+  // mention 引用一律 fail-closed（不再触库）。本用例保留的价值：camelCase features 的
+  // 能力校验（5b）仍在 mention 引用校验（6）之前放行——若 camelCase 判定回归，
+  // 结果会是 capability_limit 而非 validation_failed("mention … not found")。
+  it("模型声明 camelCase 首尾帧能力时通过能力校验，但 mention 引用 fail-closed 零写入（IKEEFV）", async () => {
     const capFields = { ...CAP_FIELDS, features: { firstLastFrame: true } };
     const tx = buildTx({
       generation_model_capability: {
@@ -632,18 +631,6 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
           ],
         }),
       },
-      conversation_message_mentions: {
-        findMany: vi.fn().mockResolvedValue([
-          { id: 101n, target_id: 201n, project_id: 42n },
-          { id: 102n, target_id: 202n, project_id: 42n },
-        ]),
-      },
-      assets: {
-        findMany: vi.fn().mockResolvedValue([
-          { id: 201n, project_id: 42n, status: "normal", is_delete: false },
-          { id: 202n, project_id: 42n, status: "normal", is_delete: false },
-        ]),
-      },
     });
     const { repo } = repoWith(tx);
 
@@ -660,23 +647,12 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       },
     });
 
-    expect(result.kind).toBe("applied");
-    expect(
-      tx.scene_card_generation_presets.updateMany.mock.calls[0][0].data,
-    ).toMatchObject({
-      reference_mode: "first_and_last_frame",
-      reference_assets: [
-        { mention_id: "101", role: "first_frame" },
-        { mention_id: "102", role: "last_frame" },
-      ],
+    expect(result).toEqual({
+      kind: "validation_failed",
+      reason: "mention 101 not found",
     });
-    expect(tx.generation_jobs.create.mock.calls[0][0].data.input).toMatchObject(
-      {
-        reference_mode: "first_and_last_frame",
-        first_frame_asset_id: "201",
-        last_frame_asset_id: "202",
-      },
-    );
+    expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
   });
 
   it("无首次 Receipt 返回 validation_failed", async () => {
@@ -690,20 +666,10 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(result.kind).toBe("validation_failed");
   });
 
+  // IKEEFV：mention 表已删，引用素材不再可解析——fail-closed 拒绝语义与旧
+  // 「mention 行查不到」逐字一致，零写入不变。
   it("引用素材失效返回 validation_failed 零写入（AC#4）", async () => {
     const tx = buildTx({
-      conversation_message_mentions: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([{ id: 101n, target_id: 201n, project_id: 42n }]),
-      },
-      assets: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([
-            { id: 201n, project_id: 42n, status: "deleted", is_delete: false },
-          ]),
-      },
       scene_card_generation_presets: {
         findFirst: vi.fn().mockResolvedValue({
           id: 6001n,
