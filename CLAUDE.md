@@ -35,13 +35,14 @@
 2. **发布须用户授权** — 未经明确授权禁止 push/PR/merge/release。
 3. **合并只用 merge** — 禁 squash/rebase。合并不自动删源分支，事后手动清理。
 4. **可写任务先建 task worktree** — 只读调查/审查可直接进行；一旦任务可能写文件或改变 Git 状态，必须先从主 checkout 运行**开工入口**（唯一入口）：`scripts/start-task-worktree.sh --type <类型> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>`。入口成功前禁止写入。例外（散文文档 ADR-0025、本地个人配置 ADR-0010）见「写入前自检」末节。
-5. **Worktree 基于同步后的本地 master** — 开工入口负责同步（fetch 融合本地/远程、冲突自动 abort）并从同步后的精确 SHA 建中文任务分支；细则见 `docs/agents/git-workflow.md`。
-6. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证（提交入口除外：worktree 工单分支 commit 本地可逆，出现即放行），Hook 只纠偏和硬拦，不返回 ASK。
-7. **文档驱动、Hook 兜底** — Agent 优先依据本文件及路由规则主动调用标准入口；Hook 只在检测到绕过、缺授权、缺模式或危险 Git 操作时阻断，禁止让 Hook 自动同步、选择策略或推进正常状态机。
-8. **同族工单串行、契约先行** — 同一契约章节的基础设施先合入，功能工单再开工；跨进程字段先在契约文档定死后实现。细则见 `docs/agents/git-workflow.md`（路由表 Must Read）。
-9. **产品实现技术栈红线** — 只约束直接交付用户能力的产品实现：Web UI 使用 Next.js App Router；浏览器业务 API 由独立 NestJS `backend/` 服务承载（见 ADR-0074）；独立 `agent-worker` / `generation-worker` 使用 Node.js LTS；共享领域、契约与持久化能力位于 TypeScript packages。禁止新增 Java/Python 产品运行时，或恢复已退役的 `blue_whale_server`、`blue_whale_agent_worker`；已迁出独立仓库的 `blue_whale_api`、`blue_whale_pay_web`、`blue_whale_pay_server` 不在本仓维护；专用计算例外按路由表中的 ADR-0068 判断。
-10. **工程工具不受产品语言禁令** — Hook、Worktree、Git/PR/发布、Agent 授权与审计等工程协作控制面，以及产品测试、构建/数据库维护等长期工具和一次性脚本，不因产品采用 TypeScript 而必须改写。无关 Python 存量默认不阻塞普通功能工单，也不自动形成迁移任务；分类、触发条件与验收方式按路由表中的 ADR-0070 和处置清单执行。
-11. **验证按影响面与阶段分层** — 任务收口与创建/更新 PR 前都由选择器按影响面决定验证层级；PR 前必须运行 `--stage pr` 并通过发布门禁，但普通治理、Hook、Git、worktree、PR 和运维工具改动保持定向验证，只有产品影响路径或显式高风险进入全量。纯文档保持文档验证。同一 HEAD 的有效凭证直接复用，代码、基线或影响面变化后重新验证。细则见 `docs/agents/testing-strategy.md`。
+5. **master 只被已验证代码推进** — 多人各自上线 + 共享 staging：产品影响路径的 feature/fix PR target 当次 `release/*` 批次分支（提 PR 前 `manage-release-branch.sh list` 选批次或 `create` 开新批），批次部署 staging 测试通过后才合入 master + tag 上生产；没进批次的产品代码碰不到 master。工程面 docs/chore 改动与 hotfix 例外直进 master。**PR 审合前不合入 master，本地集成区同理不提前吃未审代码**——确认 commit 后直接推送+提 PR，本地 master 在服务端合并后由开工入口同步。细则见 `docs/agents/git-workflow.md`（路由表 Must Read）。
+6. **Worktree 基于同步后的本地 master** — 开工入口负责同步（fetch 融合本地/远程、冲突自动 abort）并从同步后的精确 SHA 建中文任务分支；细则见 `docs/agents/git-workflow.md`。
+7. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证（提交入口除外：worktree 工单分支 commit 本地可逆，出现即放行），Hook 只纠偏和硬拦，不返回 ASK。
+8. **文档驱动、Hook 兜底** — Agent 优先依据本文件及路由规则主动调用标准入口；Hook 只在检测到绕过、缺授权、缺模式或危险 Git 操作时阻断，禁止让 Hook 自动同步、选择策略或推进正常状态机。
+9. **同族工单串行、契约先行** — 同一契约章节的基础设施先合入，功能工单再开工；跨进程字段先在契约文档定死后实现。细则见 `docs/agents/git-workflow.md`（路由表 Must Read）。
+10. **产品实现技术栈红线** — 只约束直接交付用户能力的产品实现：Web UI 使用 Next.js App Router；浏览器业务 API 由独立 NestJS `backend/` 服务承载（见 ADR-0074）；独立 `agent-worker` / `generation-worker` 使用 Node.js LTS；共享领域、契约与持久化能力位于 TypeScript packages。禁止新增 Java/Python 产品运行时，或恢复已退役的 `blue_whale_server`、`blue_whale_agent_worker`；已迁出独立仓库的 `blue_whale_api`、`blue_whale_pay_web`、`blue_whale_pay_server` 不在本仓维护；专用计算例外按路由表中的 ADR-0068 判断。
+11. **工程工具不受产品语言禁令** — Hook、Worktree、Git/PR/发布、Agent 授权与审计等工程协作控制面，以及产品测试、构建/数据库维护等长期工具和一次性脚本，不因产品采用 TypeScript 而必须改写。无关 Python 存量默认不阻塞普通功能工单，也不自动形成迁移任务；分类、触发条件与验收方式按路由表中的 ADR-0070 和处置清单执行。
+12. **验证按影响面与阶段分层** — 任务收口与创建/更新 PR 前都由选择器按影响面决定验证层级；PR 前必须运行 `--stage pr` 并通过发布门禁，但普通治理、Hook、Git、worktree、PR 和运维工具改动保持定向验证，只有产品影响路径或显式高风险进入全量。纯文档保持文档验证。同一 HEAD 的有效凭证直接复用，代码、基线或影响面变化后重新验证。细则见 `docs/agents/testing-strategy.md`。
 
 ## 任务状态机（摘要，全文见 `docs/agents/issue-tracker.md`）
 

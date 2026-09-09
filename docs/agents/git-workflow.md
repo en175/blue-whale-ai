@@ -2,6 +2,49 @@
 
 > 防御顺序：规范前置 → Hook 兜底。Hook 违规时会拦截并在错误信息中指路到对应文档。
 
+## 发布分支（Release）流程
+
+多人各自上线 + 共享 staging 的分支模型。**核心：master 只装已发布代码；谁能上线 = 谁被合进 release；没合进去的碰不到 master。**
+
+```
+master       ← 生产基线，只含已发布代码（tag 版本）
+release/*    ← 每次发布的临时载体：只装"本次要上"的功能（短命）
+feature/*    ← 开发者功能分支（worktree）
+hotfix/*     ← 生产紧急修复（直接进 master，见下）
+```
+
+### 命名与入口
+
+- 命名 `release/YYYY.MM.DD_<中文描述>`（或纯日期；同日多批次自动追加 `_2`/`_3`），详见 `branch-naming.md`。
+- 唯一入口 `scripts/manage-release-branch.sh`：`list`（fetch 后列最近 3 个远端 release 分支，供提 PR 选目标；只读免授权）/ `create`（从同步后的 origin/master 拉新分支并推送；发布动作，需 `--user-authorized`）。
+- 发布完成后的清理走 `scripts/cleanup-release-branch.sh --user-authorized <branch>`（唯一清理入口）。
+- Agent 不直推 `release/*`（hook 硬拦）；批次内容的更新只经 Gitee PR 服务端合并。
+
+### 主流程
+
+1. **日常开发**：master 拉 `feature/<工单>`，开发、验证（沿用 task worktree）。
+2. **发布人开批次**：`manage-release-branch.sh create --summary <中文简述> --user-authorized` 从同步后的 origin/master 拉新 release 分支。
+3. **合功能进批次（提 PR 时选批次）**：提 PR 前 Agent 先跑 `manage-release-branch.sh list` 拉取最近 3 个 release 分支，连同「新建批次」选项交用户选择——用旧批次，或自动从 master 拉新批次（`create`）。选定后 feature 分支 PR → target 为该 release 分支（`publish-review-package.sh --user-authorized --create-pr --target-branch release/<名>`）；落后批次基线先走 `sync-task-from-origin.sh sync --target-branch release/<名>`。没到期的留自己分支等下次；想只上 A 不带 B → 这次 release 只合 A。
+4. **测试验证**：部署该 release 分支到共享 staging → 测试这一批（部署对象 = 最终进 master 的内容）。有问题回 feature 修，重新合入。
+5. **发布**：测试通过 → 发布人在 Gitee 页面建 release→master PR 并合并（高风险人手动合；Agent 不代建——创建 PR 的 hook 要求 source 为工单分支）→ 打 tag（vX.Y.Z；MCP 创建 release 走一次性凭证）→ 部署 tag 到生产。
+6. **清理**：合入 master 后 `cleanup-release-branch.sh --user-authorized release/<名>` 删除本地 + 远端批次分支，开下一批再新建。
+
+### 适用范围与批次同步
+
+- **产品影响路径**（backend / web / workers / packages 等部署物）的 feature / fix PR 走 release 批次。
+- **工程面改动**（docs / chore：规则、脚本、hooks、散文文档）与 **hotfix** 例外直进 master（对齐红线「验证按影响面与阶段分层」——这类改动不经 staging 部署验证）。
+- 工程面改动直进 master 后，发布人在 release→master 合并前先把 master 合入批次分支解决冲突（merge-only；该同步归发布人，Agent 不直推 release/*）。
+
+### 三道闸（红线对齐）
+
+- **master 只被 release 批次推进**：B 没进 release → 进不了 master。
+- **合并只用 merge**（禁 squash/rebase）。
+- **发布授权**：create/cleanup release 分支、合并 release PR 均需显式 `--user-authorized` / 一次性凭证。
+
+### Hotfix（生产紧急，例外通道）
+
+`master 拉 hotfix/* → PR → 合入 master → tag → 部署生产`，不进 release 等批次窗口；合入 master 后同时把修复同步回当前 release 分支保持下一批基线一致。
+
 ## 发布授权（最高红线）
 
 - 未经用户明确授权，禁止创建/更新 PR、合并 PR、创建 release、删除远程源分支，以及对 `master` / `main` / `release/*` 的 push。任务分支的普通 `git push` 不属于发布动作。
@@ -38,8 +81,8 @@
 - 入口要求本地 `master` 干净，fetch 后融合本地与远程历史，再从同步后的精确 SHA 创建 Work Tree，固定在 `../blue-whale-worktrees/`。
 - 本地领先时保留本地提交；远程领先时 fast-forward；分叉时普通 merge；冲突自动 abort 且不创建 Work Tree。
 - 本地 `master` 是用户集成区，Agent 只允许通过上述开工入口执行同步，不得直接写任务文件。
-- 子 issue 完成即直接走提交入口落盘 commit（无需用户先确认/授权），停在 commit 等 review；用户确认环节后移到 merge 本地 master 前。
-- 提交流程：`scripts/commit-task-for-review.sh -m "<message>"`（完成即提交，无需授权）→ 用户确认后 `scripts/merge-task-to-local-master.sh --user-authorized <branch>`（合入门槛保持不变）
+- 子 issue 完成即直接走提交入口落盘 commit（无需用户先确认/授权），停在 commit 等 review；用户确认环节在提 PR 前。
+- 提交流程：`scripts/commit-task-for-review.sh -m "<message>"`（完成即提交，无需授权）→ 用户确认后直接 `scripts/publish-review-package.sh --user-authorized --create-pr [--target-branch release/*]`（推送工单分支 + 创建 PR）。**PR 审合前不合入 master——本地集成区同理，不提前吃未审代码**；本地 `master` 在 Gitee 服务端合并后由开工入口同步自动获得。旧「先合本地 master 再提 PR」步骤废止，`merge-task-to-local-master.sh` 降为 legacy 入口（彻底下线另见治理工单）。
 - 完整流程：`docs/agents/worktree-workflow.md`，决策：`docs/adr/0010-local-master-is-user-integration-zone.md`
 - **散文文档例外（[ADR-0025](docs/adr/0025-doc-on-master-allowlist.md)）**：仅编辑根 `CONTEXT.md` + `docs/**/*.md` 时，AI 可在本地 master 直改并用 `scripts/commit-spec-on-master.sh -m "<描述>"` 落盘，不需 Work Tree；规则源（`.claude/`）、代码、`docs/**/*.json` 契约仍必须 Work Tree。
 - **本地个人配置例外（[ADR-0010](../adr/0010-local-master-is-user-integration-zone.md)）**：仅根 `CLAUDE.local.md` 与 `.codex/config.toml` 在 `git check-ignore` 确认已忽略时可由 Agent 在本地 master 直改；不得暂存、提交或输出其中凭证。其他 ignored 文件不在例外内。

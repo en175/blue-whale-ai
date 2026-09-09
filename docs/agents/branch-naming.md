@@ -18,7 +18,38 @@
 | `docs/` | 文档 / 规则文件（`CLAUDE.md` / ADR / `docs/agents/*` / `README.md`） |
 | `chore/` | 构建 / 脚本 / 配置 / CI 等杂项 |
 
-**不单列**：`refactor/`（归 `feature/` 或 `fix/`）、`release/`（无发布分支线，`master` 即发布，见 [ADR-0003](../adr/0003-no-direct-push-to-master.md)）、`ci/build/perf/test`（归 `chore/` 或 `feature/`）。
+**不单列**：`refactor/`（归 `feature/` 或 `fix/`）、`ci/build/perf/test`（归 `chore/` 或 `feature/`）。
+
+## release 分支（发布批次，独立命名）
+
+发布分支不建 worktree、不挂工单，走独立入口 `scripts/manage-release-branch.sh`。命名：
+
+```
+release/YYYY.MM.DD            # 纯日期
+release/YYYY.MM.DD_<中文描述> # 日期 + 中文描述（6–15 字）
+```
+
+### 实例
+
+```
+✅ release/2026.09.09                （纯日期批次）
+✅ release/2026.09.09_资产库优化批次   （日期 + 7 字中文描述）
+✅ release/2026.09.09_资产库优化批次_2 （同日第二批，入口自动加序号）
+
+❌ release/prod                      （无日期，历史遗留命名，不再新建）
+❌ release/2026.9.9                  （日期必须零填充 YYYY.MM.DD）
+❌ release/2026.09.09_短             （描述不足 6 字）
+❌ release/2026.09.09_hotfix batch   （描述禁空格且须含中文）
+```
+
+### 规则
+
+- **日期** = 创建日期（发布日期，`YYYY.MM.DD`，零填充）。
+- **描述**：须含中文，6–15 字，禁空格 / 下划线 / 连字符 / 斜杠（与任务分支简述同规）；可省（纯日期批次）。
+- **同日多次发布**：同名已存在时入口自动追加序号 `_2` / `_3`。
+- **唯一创建入口**：`scripts/manage-release-branch.sh`（`list` / `create`），不手工 `git checkout -b release/...`；发布后清理走 `scripts/cleanup-release-branch.sh`。
+- **校验**：与任务分支同一权威校验器（`scripts/start-task-worktree.py --validate-branch`，pre-push 复用），不合规命名首次 push 即被拒。
+- `release/prod` 等历史遗留 ASCII 分支不迁移，只收尾不新建。
 
 > 前缀粒度是**任务级**（这批改动啥性质），不是提交级。一个 `feature` 分支可含 `feat`+`docs`+`refactor` 多次提交。提交级语义用 [Conventional Commits](commit-and-review.md)（type：`feat`/`fix`/`docs`/`refactor`/`chore`/…）。
 
@@ -106,8 +137,9 @@ git 原生支持 UTF-8 分支名，Gitee 支持。国际惯例分支名走 ASCII
 
 | hook | 拦什么 | 白名单 |
 |---|---|---|
-| `scripts/block-dangerous-git.sh` | 非工单分支的 `--force-with-lease` | `feature/* fix/* hotfix/* docs/* chore/*` |
-| `scripts/start-task-worktree.py` | 创建前拒绝不合规命名 | `feature/* fix/* hotfix/* docs/* chore/*` + 中文简述 |
-| `.githooks/pre-push` | 拒绝直推 `master/main`；拒绝首次 push 新建不合规分支名；普通任务分支日常 push 不检查是否落后 | 复用 Python 校验器 |
+| `scripts/block-dangerous-git.sh` | 非工单分支的 `--force-with-lease` | `feature/* fix/* hotfix/* docs/* chore/*`（release/* 是共享批次基线，禁强推） |
+| `scripts/start-task-worktree.py` | 创建前拒绝不合规命名 | 工单分支五前缀 + 中文简述；`release/YYYY.MM.DD[_描述][_N]`（描述含中文 6–15 字） |
+| `.githooks/pre-push` | 拒绝直推 `master/main`；拒绝首次 push 新建不合规分支名；普通任务分支日常 push 不检查是否落后 | 复用 Python 校验器（含 release 命名） |
+| `.claude/hooks/confirm-release-action.sh` | Agent 直推 `release/*`；`manage-release-branch.sh create` 缺授权 | `list` 只读放行；`create` 须 `--user-authorized` |
 
 分支名不合规会在创建和首次 push 两个节点被拒绝。策略生效前已经存在于 `origin` 的 ASCII 分支仅允许继续收尾，不要求迁移；不得据此创建新的 ASCII 分支。排障见入口错误信息或 hook 脚本注释。

@@ -788,10 +788,18 @@ PY
 }
 
 run_hook_contract_check() {
-  local tmp_out tmp_err
+  local tmp_out tmp_err py3
   tmp_out="$(mktemp)"
   tmp_err="$(mktemp)"
-  python3 "$HOOK_CONTRACT_CHECKER" "$@" >"$tmp_out" 2>"$tmp_err"
+  # 优先用 3.11+ Python 跑契约检查（kimi .toml 需 tomllib）；无则回退 python3（低版本降级为 kimi 警告）。
+  if command -v python3.12 >/dev/null 2>&1; then
+    py3=python3.12
+  elif command -v python3.11 >/dev/null 2>&1; then
+    py3=python3.11
+  else
+    py3=python3
+  fi
+  "$py3" "$HOOK_CONTRACT_CHECKER" "$@" >"$tmp_out" 2>"$tmp_err"
   RUN_EXIT=$?
   RUN_STDOUT="$(cat "$tmp_out")"
   RUN_STDERR="$(cat "$tmp_err")"
@@ -996,6 +1004,16 @@ assert_closed_loop_gate_drift_detection() {
   cp "$REPO_ROOT/.claude/settings.json" "$claude_fixture"
   cp "$CODEX_HOOKS_JSON" "$codex_fixture"
 
+  # 3.11+ Python 才带 tomllib（kimi 链需要）；无则回退 python3（降级为 kimi 警告失败）。
+  # 本函数（更早执行）与主 closed-loop 用例共用同一选择。
+  if command -v python3.12 >/dev/null 2>&1; then
+    CLOSED_LOOP_PY=python3.12
+  elif command -v python3.11 >/dev/null 2>&1; then
+    CLOSED_LOOP_PY=python3.11
+  else
+    CLOSED_LOOP_PY=python3
+  fi
+
   python3 - "$zcode_fixture" <<'PY'
 import json
 import sys
@@ -1012,7 +1030,7 @@ path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n")
 PY
 
   run_command_hook \
-    "python3 \"$HOOK_CLOSED_LOOP_CHECKER\" --zcode \"$zcode_fixture\" --claude \"$claude_fixture\" --codex \"$codex_fixture\"" \
+    "\"$CLOSED_LOOP_PY\" \"$HOOK_CLOSED_LOOP_CHECKER\" --zcode \"$zcode_fixture\" --claude \"$claude_fixture\" --codex \"$codex_fixture\"" \
     ""
   assert_exit_nonzero "closed-loop drift: Gate 不一致时失败"
   assert_stderr_has "stage=gate" "closed-loop drift: 诊断含失败阶段"
@@ -1228,6 +1246,17 @@ unset FAKE_BRANCH
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/sync-task-from-origin.sh sync --json"}}'
 assert_exit 0 "release: 标准同步入口静默放行"
 assert_stdout_empty "release: 标准同步入口无 Hook 输出"
+
+# release 分支管理入口：list 为只读放行；create 是发布动作，缺 --user-authorized 硬拦。
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/manage-release-branch.sh list"}}'
+assert_exit 0 "release: manage-release-branch list 只读放行"
+assert_stdout_empty "release: manage-release-branch list 无交互输出"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/manage-release-branch.sh create --summary 资产库优化批次"}}'
+assert_exit 2 "release: manage-release-branch create 缺授权被拦截"
+assert_stderr_has "--user-authorized" "release: manage-release-branch create 缺授权提示授权参数"
+run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"scripts/manage-release-branch.sh create --summary 资产库优化批次 --user-authorized"}}'
+assert_exit 0 "release: manage-release-branch create 授权入口放行"
+assert_stdout_empty "release: manage-release-branch create 无交互输出"
 
 run_hook "$RELEASE_HOOK" '{"tool_input":{"command":"git merge --ff-only origin/master"}}'
 assert_exit 0 "release: git merge --ff-only 同步放行"
@@ -2434,7 +2463,17 @@ assert_exit 0 "contracts: 真实四端 Hook 配置满足共享契约"
 assert_stdout_empty "contracts: 真实四端 Hook 配置 stdout 为空"
 assert_stderr_empty "contracts: 真实四端 Hook 配置 stderr 为空"
 assert_file_exists "$HOOK_CLOSED_LOOP_CHECKER" "closed-loop: 四端配置链闭环检查器存在"
-run_command_hook "python3 \"$HOOK_CLOSED_LOOP_CHECKER\"" ""
+# CLOSED_LOOP_PY 已在 assert_closed_loop_gate_drift_detection（更早执行）中定义；此处兜底补选。
+if [ -z "${CLOSED_LOOP_PY:-}" ]; then
+  if command -v python3.12 >/dev/null 2>&1; then
+    CLOSED_LOOP_PY=python3.12
+  elif command -v python3.11 >/dev/null 2>&1; then
+    CLOSED_LOOP_PY=python3.11
+  else
+    CLOSED_LOOP_PY=python3
+  fi
+fi
+run_command_hook "\"$CLOSED_LOOP_PY\" \"$HOOK_CLOSED_LOOP_CHECKER\"" ""
 assert_exit 0 "closed-loop: 四端配置链闭环检查通过"
 assert_stdout_has "[配置链集成] ZCode" "closed-loop: 报告含 ZCode 配置链证据"
 assert_stdout_has "[配置链集成] Claude Code" "closed-loop: 报告含 Claude Code 配置链证据"
@@ -2653,7 +2692,10 @@ build_repo_at() {
   git init "$repo" >/dev/null 2>&1
   mkdir -p "$repo/scripts/lib"
   cp "$REPO_ROOT/scripts/lib/worktree-paths.sh" "$repo/scripts/lib/"
+  cp "$REPO_ROOT/scripts/lib/python3-command.sh" "$repo/scripts/lib/"
   cp "$REPO_ROOT/scripts/cleanup-release-branch.sh" "$repo/scripts/"
+  cp "$REPO_ROOT/scripts/manage-release-branch.sh" "$repo/scripts/"
+  cp "$REPO_ROOT/scripts/start-task-worktree.py" "$repo/scripts/"
   (
     cd "$repo"
     git config user.email t@t
@@ -2730,9 +2772,9 @@ run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-aut
 assert_exit 1 "release-cleanup: 工作区不干净拦截"
 assert_stderr_has "工作区不干净" "release-cleanup: 不干净提示"
 
-# 非白名单前缀 → 拦
+# 非白名单前缀 → 拦（旧规范 release/x 现属 release/* 白名单，改用真正非法前缀）
 setup_release_repo
-run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-authorized release/x
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-authorized evil/x
 assert_exit 1 "release-cleanup: 非白名单前缀拦截"
 assert_stderr_has "白名单前缀" "release-cleanup: 白名单提示"
 
@@ -2809,6 +2851,95 @@ run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-aut
 assert_exit 0 "release-cleanup: 远程已无时仍清本地（幂等）"
 if git -C "$RELEASE_TMP/main" show-ref --verify --quiet refs/heads/feature/idem-release; then
   FAIL=$((FAIL + 1)); FAILURES+=("[release-cleanup: 幂等本地分支应删] feature/idem-release 仍存在")
+else
+  PASS=$((PASS + 1))
+fi
+
+# Slice 6b — manage-release-branch.sh（同一真实临时仓库夹具）
+# M1 — 参数层：无操作 → usage exit 2；未知操作 → exit 1
+setup_release_repo
+run_repo_script "$RELEASE_TMP/main" scripts/manage-release-branch.sh
+assert_exit 2 "release-manage: 无操作走 usage exit 2"
+run_repo_script "$RELEASE_TMP/main" scripts/manage-release-branch.sh bogus
+assert_exit 1 "release-manage: 未知操作拦截"
+
+# M2 — list：远端无 release 分支 → exit 0 且提示
+setup_release_repo
+run_repo_script "$RELEASE_TMP/main" scripts/manage-release-branch.sh list
+assert_exit 0 "release-manage: list 空仓放行"
+assert_stdout_has "没有 release/* 分支" "release-manage: list 空仓提示"
+
+# M3 — create 授权门槛：缺 --user-authorized → exit 1
+setup_release_repo
+run_repo_script "$RELEASE_TMP/main" scripts/manage-release-branch.sh create --summary 测试批次
+assert_exit 1 "release-manage: create 缺授权拦截"
+assert_stderr_has "--user-authorized" "release-manage: create 缺授权提示"
+
+# M4 — create 非 master → exit 1
+setup_release_repo
+git -C "$RELEASE_TMP/main" checkout -b feature/other >/dev/null 2>&1
+run_repo_script "$RELEASE_TMP/main" scripts/manage-release-branch.sh create --summary 测试批次名 --user-authorized
+assert_exit 1 "release-manage: create 非 master 拦截"
+assert_stderr_has "master" "release-manage: create 非 master 提示"
+
+# M5 — create 描述非法字符 → exit 1
+setup_release_repo
+run_repo_script "$RELEASE_TMP/main" scripts/manage-release-branch.sh create --summary "bad name" --user-authorized
+assert_exit 1 "release-manage: create 描述含空格拦截"
+
+# M6 — create happy path：建本地分支 + 推远端，命名 release/YYYY.MM.DD_<描述>
+setup_release_repo
+expected_base="$(date +%Y.%m.%d)"
+run_repo_script "$RELEASE_TMP/main" scripts/manage-release-branch.sh create --summary 资产库优化批次 --user-authorized --json
+assert_exit 0 "release-manage: create happy path 成功"
+assert_stdout_has "\"branch\":\"release/${expected_base}_资产库优化批次\"" "release-manage: create JSON 含分支名"
+if git -C "$RELEASE_TMP/main" show-ref --verify --quiet "refs/heads/release/${expected_base}_资产库优化批次"; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1)); FAILURES+=("[release-manage: 本地分支应存在] release/${expected_base}_资产库优化批次 缺失")
+fi
+if git -C "$RELEASE_TMP/main" ls-remote --exit-code --heads origin "release/${expected_base}_资产库优化批次" >/dev/null 2>&1; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1)); FAILURES+=("[release-manage: 远程分支应存在] origin release/${expected_base}_资产库优化批次 缺失")
+fi
+# 新分支必须基于 origin/master（发布批次从生产基线拉出）
+created_sha="$(git -C "$RELEASE_TMP/main" rev-parse "release/${expected_base}_资产库优化批次")"
+master_sha="$(git -C "$RELEASE_TMP/main" rev-parse origin/master)"
+if [ "$created_sha" = "$master_sha" ]; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1)); FAILURES+=("[release-manage: 应基于 origin/master] created=$created_sha master=$master_sha")
+fi
+
+# M7 — 同日重名 → 自动 _2 序号
+run_repo_script "$RELEASE_TMP/main" scripts/manage-release-branch.sh create --summary 资产库优化批次 --user-authorized --json
+assert_exit 0 "release-manage: 同日重名 create 成功"
+assert_stdout_has "\"branch\":\"release/${expected_base}_资产库优化批次_2\"" "release-manage: 重名自动加 _2 序号"
+
+# M8 — 重名后 list 应列出两个批次
+run_repo_script "$RELEASE_TMP/main" scripts/manage-release-branch.sh list
+assert_exit 0 "release-manage: list 放行"
+assert_stdout_has "release/${expected_base}_资产库优化批次" "release-manage: list 含首批次"
+assert_stdout_has "release/${expected_base}_资产库优化批次_2" "release-manage: list 含 _2 批次"
+
+# M9 — cleanup 守卫（经 cleanup-release-branch.sh）：release 分支带未发布提交 → 拦；合入 master 后 → 成功。
+# 注意：刚从 master 拉出的空批次与 origin/master 同 SHA，is-ancestor 自反为真、可直接清理（无未发布内容，语义正确）；
+# 本用例先造未发布提交再验证守卫。
+git -C "$RELEASE_TMP/main" checkout "release/${expected_base}_资产库优化批次" >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" commit --allow-empty -m "release content" >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" push -q origin "release/${expected_base}_资产库优化批次" >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" checkout master >/dev/null 2>&1
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-authorized "release/${expected_base}_资产库优化批次"
+assert_exit 1 "release-manage: 未合入 master 的 release 分支 cleanup 拦截"
+assert_stderr_has "尚未被 origin/master 包含" "release-manage: cleanup 未合入提示"
+# 发布完成（合入 master）后清理成功
+git -C "$RELEASE_TMP/main" merge --no-ff --no-edit "release/${expected_base}_资产库优化批次" >/dev/null 2>&1
+git -C "$RELEASE_TMP/main" push -q origin master >/dev/null 2>&1
+run_repo_script "$RELEASE_TMP/main" scripts/cleanup-release-branch.sh --user-authorized "release/${expected_base}_资产库优化批次"
+assert_exit 0 "release-manage: 合入 master 后 release 分支 cleanup 成功"
+if git -C "$RELEASE_TMP/main" ls-remote --exit-code --heads origin "release/${expected_base}_资产库优化批次" >/dev/null 2>&1; then
+  FAIL=$((FAIL + 1)); FAILURES+=("[release-manage: cleanup 后远程 release 分支应删] 仍存在")
 else
   PASS=$((PASS + 1))
 fi
