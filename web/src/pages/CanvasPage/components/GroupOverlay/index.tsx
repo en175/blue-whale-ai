@@ -118,7 +118,9 @@ export default function GroupOverlay({
     [selectedNodes],
   );
   const showCreateBtn = !!selectionBox && !allInOneGroup;
-  const showSelectionDownload = !!selectionBox;
+  /* 框选悬浮条的下载入口仅在「多选且未全部同组」时出现：已成组后下载由组徽标操作条承担，
+   *  避免与节点工具栏自带的下载图标重复（用户故事：成组后中间不再出现下载按钮）。 */
+  const showSelectionDownload = !!selectionBox && !allInOneGroup;
   const createBtnPt = selectionBox
     ? flowToScreenPosition({ x: selectionBox.x + selectionBox.w / 2, y: selectionBox.y })
     : null;
