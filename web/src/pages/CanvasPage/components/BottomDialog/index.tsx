@@ -603,22 +603,9 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
   };
 
   return (
-    <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
-      {/* 右上角操作：放大/收起 + 关闭 */}
-      <div className={styles.topActions}>
-        <button
-          className={styles.iconBtn}
-          onClick={() => setExpanded((v) => !v)}
-          title={expanded ? '收起' : '展开'}
-        >
-          {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
-        </button>
-        <button className={styles.iconBtn} onClick={onClose} title="关闭">
-          <X size={16} strokeWidth={2} />
-        </button>
-      </div>
-
-      {/* 配置面板（展开悬浮于底栏上方） */}
+    <div className={styles.dialogWrap}>
+      {/* 配置面板（展开悬浮于底栏上方）：挂在不带 overflow 的定位外壳 .dialogWrap 上，
+          脱出 .dialog 滚动框，避免面板顶部被滚动容器裁剪（IKEOLP） */}
       {showConfig && (
         <div className={styles.configPanel} ref={configPanelRef}>
           {/* 关闭按钮 */}
@@ -750,6 +737,21 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
           </div>
         </div>
       )}
+
+      <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
+      {/* 右上角操作：放大/收起 + 关闭 */}
+      <div className={styles.topActions}>
+        <button
+          className={styles.iconBtn}
+          onClick={() => setExpanded((v) => !v)}
+          title={expanded ? '收起' : '展开'}
+        >
+          {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
+        </button>
+        <button className={styles.iconBtn} onClick={onClose} title="关闭">
+          <X size={16} strokeWidth={2} />
+        </button>
+      </div>
 
       {/* 顶部媒体行（统一草稿绑定：按模式门控展示。「连线 + material」合并推导参考）
           首尾帧模式：首帧 + 尾帧同一行；全能参考/图生视频：普通参考（图生视频不收视频参考）。
@@ -933,6 +935,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
             <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
           </button>
         </div>
+      </div>
       </div>
     </div>
   );
