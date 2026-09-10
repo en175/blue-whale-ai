@@ -1,0 +1,135 @@
+[
+  {
+    "case_id": "G01",
+    "contract_ref": "§3.1",
+    "title_zh": "图片 claimNextJob findFirst 完整谓词",
+    "given": "generation_jobs 中存在一条 type=image, status=queued, is_delete=false, source 在白名单内, next_action_at<=now 的候选行",
+    "expect": "findFirst 被调用时 where 含 status='queued', is_delete=false, source IN ['bottom_dock','plan_apply','storyboard_preview'], next_action_at={lte: now}"
+  },
+  {
+    "case_id": "G02",
+    "contract_ref": "§3.1",
+    "title_zh": "视频 claimNextVideoJob findFirst 完整谓词（含孤儿 OR）",
+    "given": "generation_jobs 中存在一条 type=video, status=queued, source 在白名单内, next_action_at<=now 的候选行",
+    "expect": "findFirst 被调用时 where 含 type='video', source IN ['bottom_dock','plan_apply','plan','scene_card'], is_delete=false, next_action_at={lte: now}, OR 包含 queued 与 processing+孤儿（lease_expires_at null 或 < now）两分支"
+  },
+  {
+    "case_id": "G03",
+    "contract_ref": "§3.1",
+    "title_zh": "claimNextJob CAS SET 完整字段",
+    "given": "候选行 id=300, fencing_token=0n; workerId='worker-1'; IMAGE_JOB_LEASE_SECONDS=120",
+    "expect": "updateMany where={id:300n, status:'queued', fencing_token:0n}; data={status:'processing', lease_owner:'worker-1', lease_expires_at: now+120s, last_polled_at: now, fencing_token:{increment:1}, version:{increment:1}}"
+  },
+  {
+    "case_id": "G04",
+    "contract_ref": "§3.1",
+    "title_zh": "claimJobById CAS where 含 user_id",
+    "given": "调用 claimJobById('300','9','worker-1')；候选行 id=300, user_id=9n",
+    "expect": "findFirst where 含 id=300n, user_id=9n, status='queued'; CAS updateMany where 含 user_id=9n"
+  },
+  {
+    "case_id": "G05",
+    "contract_ref": "§3.1",
+    "title_zh": "孤儿接管：processing + lease_expires_at=null（视频）",
+    "given": "候选行 status='processing', lease_expires_at=null, fencing_token=4n",
+    "expect": "claimVideoJobById 返回非 null 且 fencingToken=5; CAS where 含 status='processing'（不强制 queued）"
+  },
+  {
+    "case_id": "G06",
+    "contract_ref": "§3.1",
+    "title_zh": "孤儿接管：processing + 过期租约（图片）",
+    "given": "候选行 status='processing', lease_expires_at < now, fencing_token=2n",
+    "expect": "claimImageJobById 返回非 null 且 fencingToken=3; findFirst where 的 OR 包含 processing+孤儿分支"
+  },
+  {
+    "case_id": "G07",
+    "contract_ref": "§3.1",
+    "title_zh": "updateMany reject 兜底 → claim 返回 null",
+    "given": "findFirst 返回候选行；updateMany 抛 DB 异常（reject）",
+    "expect": "claimNextJob 返回 null（不抛）——源码 .catch(()=>({count:0}))"
+  },
+  {
+    "case_id": "G08",
+    "contract_ref": "§3.2",
+    "title_zh": "markVideoSubmitted guard-fail（stale token）",
+    "given": "updateMany 返回 count=0（fencing_token 不一致或 job 已非 processing）",
+    "expect": "markVideoSubmitted 返回 false"
+  },
+  {
+    "case_id": "G09",
+    "contract_ref": "§3.2",
+    "title_zh": "rescheduleVideoPoll happy：钳制+续租+释放",
+    "given": "input progress=42; updateMany 返回 count=1",
+    "expect": "data.progress=42; data.poll_count={increment:1}; data.next_poll_at=now+5s; data.next_action_at=now+5s; data.lease_owner=null; data.lease_expires_at=null; data.version={increment:1}; 返回 true"
+  },
+  {
+    "case_id": "G10",
+    "contract_ref": "§3.2",
+    "title_zh": "rescheduleVideoPoll progress 钳制 >99 与 <0",
+    "given": "input progress=150 和 progress=-5 各一次",
+    "expect": "data.progress 分别被钳制为 99 和 0（Math.max(0, Math.min(99, Math.round(x))))"
+  },
+  {
+    "case_id": "G11",
+    "contract_ref": "§3.2",
+    "title_zh": "rescheduleVideoPoll guard-fail（stale token）",
+    "given": "updateMany 返回 count=0",
+    "expect": "返回 false"
+  },
+  {
+    "case_id": "G12",
+    "contract_ref": "§3.3",
+    "title_zh": "cancelVideoBeforeDispatch stale token → false",
+    "given": "事务内 updateMany 返回 count=0",
+    "expect": "返回 false; cost_reservations.updateMany（释放预留）不被调用"
+  },
+  {
+    "case_id": "G13",
+    "contract_ref": "§3.3",
+    "title_zh": "cancelVideoBeforeDispatch provider_task_id 非空不命中",
+    "given": "job 已提交上游（provider_task_id 非空）；CAS where 硬编码 provider_task_id=null",
+    "expect": "updateMany 返回 count=0 → 返回 false; 释放预留不执行; CAS where 断言含 provider_task_id:null"
+  },
+  {
+    "case_id": "G14",
+    "contract_ref": "§3.1",
+    "title_zh": "requeueImageJobForRetry count=0 → false",
+    "given": "job 不在 processing 态；updateMany 返回 count=0",
+    "expect": "返回 false"
+  },
+  {
+    "case_id": "G15",
+    "contract_ref": "§3.1",
+    "title_zh": "requeueImageJobForRetry happy data 完整",
+    "given": "jobId='300', nextActionAt=now+30s; updateMany 返回 count=1",
+    "expect": "where={id:300n, status:'processing'}; data={status:'queued', lease_owner:null, lease_expires_at:null, next_action_at:入参透传, retry_count:{increment:1}, fencing_token:{increment:1}, version:{increment:1}}; 返回 true"
+  },
+  {
+    "case_id": "G16",
+    "contract_ref": "§3.1",
+    "title_zh": "requeueImageJobForRetry updateMany reject 兜底",
+    "given": "updateMany 抛 DB 异常",
+    "expect": "返回 false（不抛）——源码 .catch(()=>({count:0}))"
+  },
+  {
+    "case_id": "G17",
+    "contract_ref": "§3.3",
+    "title_zh": "completeJob CAS data 完整字段",
+    "given": "守卫通过（count=1）；无输出槽；job project_id 非空",
+    "expect": "CAS data={status:'succeeded', progress:100, output_asset_ids:[Number(id)], next_action_at:null, lease_owner:null, lease_expires_at:null, version:{increment:1}}"
+  },
+  {
+    "case_id": "G18",
+    "contract_ref": "§3.2",
+    "title_zh": "updateMediaExtractProgress 钳制 150→99 与 -5→0",
+    "given": "input progress=150 和 progress=-5 各一次; updateMany 返回 count=1",
+    "expect": "data.progress 分别被钳制为 99 和 0"
+  },
+  {
+    "case_id": "G19",
+    "contract_ref": "§3.2",
+    "title_zh": "updateMediaExtractProgress 续租 lease_expires_at≈now+120s",
+    "given": "input progress=50; IMAGE_JOB_LEASE_SECONDS=120",
+    "expect": "data={progress:50, last_polled_at:now, lease_expires_at:now+120s, version:{increment:1}}"
+  }
+]
