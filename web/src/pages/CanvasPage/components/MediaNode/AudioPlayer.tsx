@@ -1,6 +1,6 @@
 /* ============================================
  * AudioPlayer：画布音频节点的自包含播放器
- * 白色卡片 + 浅灰波形区 + 播放控制，样式参考设计稿
+ * 深灰卡片 + 暗色波形区 + 播放控制，样式参考设计稿
  * ============================================ */
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { Play, Pause } from 'lucide-react';
@@ -21,12 +21,49 @@ function formatTime(sec: number): string {
 
 const BARS = 24;
 
-/** 生成静态波形条高度（伪随机但稳定，避免每次渲染跳动） */
-const barHeights = Array.from({ length: BARS }, (_, i) => {
-  const t = i / BARS;
-  const base = 0.25 + 0.5 * Math.sin(t * Math.PI * 3);
-  return 20 + Math.round(base * 60);
-});
+/** 从真实音频解码数据生成波形条高度百分比（RMS 归一化） */
+async function computeWaveform(src: string, bars: number, signal: AbortSignal): Promise<number[]> {
+  const res = await fetch(src, { signal });
+  if (!res.ok) throw new Error('fetch failed');
+  const arrayBuffer = await res.arrayBuffer();
+  const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)();
+  const buffer = await ctx.decodeAudioData(arrayBuffer);
+  await ctx.close();
+  const data = buffer.getChannelData(0);
+  const samplesPerBar = Math.max(1, Math.floor(data.length / bars));
+  const heights: number[] = [];
+  for (let i = 0; i < bars; i++) {
+    const start = i * samplesPerBar;
+    const end = Math.min(start + samplesPerBar, data.length);
+    let sum = 0;
+    for (let j = start; j < end; j++) {
+      sum += data[j] * data[j];
+    }
+    const rms = Math.sqrt(sum / (end - start || 1));
+    heights.push(rms);
+  }
+  const max = Math.max(...heights, 0.001);
+  return heights.map((h) => 12 + (h / max) * 80);
+}
+
+/** 基于 src 与时长生成稳定但不同的兜底波形，避免不同节点完全一样 */
+function fallbackWaveform(src: string, duration: number, bars: number): number[] {
+  let seed = 0;
+  for (let i = 0; i < src.length; i++) {
+    seed = (seed * 31 + src.charCodeAt(i)) >>> 0;
+  }
+  seed = (seed + Math.round((duration || 0) * 1000)) >>> 0;
+  const rand = () => {
+    seed = (seed * 9301 + 49297) % 233280;
+    return seed / 233280;
+  };
+  return Array.from({ length: bars }, (_, i) => {
+    const t = i / bars;
+    const envelope = Math.sin(t * Math.PI) * 0.3 + 0.7;
+    const noise = rand();
+    return 12 + Math.round((envelope * 0.6 + noise * 0.4) * 78);
+  });
+}
 
 export default function AudioPlayer({ src, fileName, onDownload }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -35,6 +72,7 @@ export default function AudioPlayer({ src, fileName, onDownload }: AudioPlayerPr
   const [currentTime, setCurrentTime] = useState(0);
   const [err, setErr] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [waveform, setWaveform] = useState<number[] | null>(null);
   const trackRef = useRef<HTMLDivElement>(null);
 
   const onLoaded = useCallback(() => {
@@ -94,6 +132,17 @@ export default function AudioPlayer({ src, fileName, onDownload }: AudioPlayerPr
     setPlaying(false);
     setCurrentTime(0);
     setErr(false);
+    setWaveform(null);
+    const abort = new AbortController();
+    computeWaveform(src, BARS, abort.signal)
+      .then((heights) => {
+        if (!abort.signal.aborted) setWaveform(heights);
+      })
+      .catch(() => {
+        // 跨域/解码失败时使用 src+时长 生成的稳定兜底波形，避免不同节点完全一样
+        if (!abort.signal.aborted) setWaveform(fallbackWaveform(src, duration, BARS));
+      });
+    return () => abort.abort();
   }, [src]);
 
   // 组件卸载时兜底移除拖拽监听，防止泄漏
@@ -145,14 +194,14 @@ export default function AudioPlayer({ src, fileName, onDownload }: AudioPlayerPr
         onError={() => setErr(true)}
       />
 
-      {/* 浅灰波形区：可点击拖拽 seek；紫色 playhead 指示当前进度 */}
+      {/* 暗色波形区：可点击拖拽 seek；红色 playhead 指示当前进度 */}
       <div
         className={`${styles.audioWaveBox} nodrag nopan`}
         ref={trackRef}
         onMouseDown={handleTrackDown}
       >
         <div className={styles.audioWaveBars}>
-          {barHeights.map((h, i) => (
+          {(waveform ?? fallbackWaveform(src, duration, BARS)).map((h, i) => (
             <span
               key={i}
               className={styles.audioWaveBar}
