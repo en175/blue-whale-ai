@@ -36,6 +36,16 @@ const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelType[] }
 const FEATURE_NUMBER_LABELS: Record<string, { label: string; types?: ModelType[]; placeholder: string }> = {
   max_reference_images: { label: '参考图上限 max_reference_images', types: ['image', 'video'], placeholder: '如 10' },
   quantity_max: { label: '单次生成数量 quantity_max', types: ['image'], placeholder: '如 1' },
+  max_prompt_length: { label: '提示词上限 max_prompt_length', types: ['image', 'video'], placeholder: '如 32000' },
+};
+
+/** ADR-0085（IKESD9）：字符串型能力键——i2i_model_name 存的是上游模型名，非行 id。 */
+const FEATURE_STRING_LABELS: Record<string, { label: string; types?: ModelType[]; placeholder: string }> = {
+  i2i_model_name: {
+    label: '图生图上游模型名 i2i_model_name',
+    types: ['image'],
+    placeholder: '如 gpt-image-2-edit（留空 = 不分流）',
+  },
 };
 
 const pretty = (raw: unknown) => {
@@ -61,11 +71,28 @@ const pickFeatureNumbers = (features: Record<string, unknown> = {}): Record<stri
   return out;
 };
 
+const pickFeatureStrings = (features: Record<string, unknown> = {}): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const key of Object.keys(FEATURE_STRING_LABELS)) {
+    const v = features[key];
+    out[key] = typeof v === 'string' ? v : '';
+  }
+  return out;
+};
+
 const dropKnownFeatures = (features: Record<string, unknown> = {}): Record<string, unknown> => {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(features)) {
-    if (k in FEATURE_BOOL_LABELS || k in FEATURE_NUMBER_LABELS) continue;
+    if (k in FEATURE_BOOL_LABELS || k in FEATURE_NUMBER_LABELS || k in FEATURE_STRING_LABELS) continue;
     out[k] = v;
+  }
+  return out;
+};
+
+const omitEmptyStrings = (strs: Record<string, string>): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(strs)) {
+    if (v.trim() !== '') out[k] = v.trim();
   }
   return out;
 };
@@ -111,6 +138,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   const [formats, setFormats] = useState<string[]>(initial?.supported_formats ?? []);
   const [featureFlags, setFeatureFlags] = useState(initial ? pickFeatureBooleans(initial.features) : {});
   const [featureNumbers, setFeatureNumbers] = useState(initial ? pickFeatureNumbers(initial.features) : {});
+  const [featureStrings, setFeatureStrings] = useState(initial ? pickFeatureStrings(initial.features) : {});
   const [extraFeatures, setExtraFeatures] = useState(
     initial ? pretty(dropKnownFeatures(initial.features)) : '{}',
   );
@@ -153,6 +181,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     setFormats(src.supported_formats ?? []);
     setFeatureFlags(pickFeatureBooleans(src.features));
     setFeatureNumbers(pickFeatureNumbers(src.features));
+    setFeatureStrings(pickFeatureStrings(src.features));
     setExtraFeatures(pretty(dropKnownFeatures(src.features)));
     setDefaultSize(src.default_size ?? '');
     setDefaultRatio(src.default_aspect_ratio ?? '');
@@ -245,6 +274,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
       features: {
         ...extra,
         ...omitEmpty(featureNumbers),
+        ...omitEmptyStrings(featureStrings),
         ...Object.fromEntries(
           Object.entries(featureFlags).filter(([k, v]) => v || (initial?.features != null && k in initial.features)),
         ),
@@ -650,6 +680,23 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
                         placeholder={meta.placeholder}
                         value={featureNumbers[key] ?? ''}
                         onChange={(e) => setFeatureNumbers((p) => ({ ...p, [key]: e.target.value }))}
+                      />
+                    </div>
+                  ))}
+              </div>
+              <div className={styles.grid2}>
+                {Object.entries(FEATURE_STRING_LABELS)
+                  .filter(([, meta]) => !meta.types || meta.types.includes(type))
+                  .map(([key, meta]) => (
+                    <div key={key}>
+                      <div className={styles.label}>
+                        {meta.label} <span className={styles.labelSub}>（留空不写入）</span>
+                      </div>
+                      <input
+                        className={styles.input}
+                        placeholder={meta.placeholder}
+                        value={featureStrings[key] ?? ''}
+                        onChange={(e) => setFeatureStrings((p) => ({ ...p, [key]: e.target.value }))}
                       />
                     </div>
                   ))}

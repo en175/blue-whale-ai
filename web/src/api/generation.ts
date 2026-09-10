@@ -33,6 +33,9 @@ export interface ModelFeatures {
   last_frame: boolean;
   first_last_frame: boolean;
   audio: boolean;
+  /** 每模型 prompt 上限（ADR-0085）；null/缺省 = 未配置，前端回落默认。
+   *  i2i_model_name 属出站调用值，后端已从消费端剥除，不在此类型。 */
+  max_prompt_length?: number | null;
 }
 
 /** GET /api/generation/models 返回项 */
