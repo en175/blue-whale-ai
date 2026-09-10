@@ -22,6 +22,7 @@
     <rocketmq-client.version>5.0.7</rocketmq-client.version>
     <okhttp.version>4.12.0</okhttp.version>
     <mybatis-plus.version>3.5.7</mybatis-plus.version>
+    <ve-tos-java-sdk.version>2.9.19</ve-tos-java-sdk.version>
   </properties>
 
   <dependencies>
@@ -56,6 +57,11 @@
       <groupId>com.squareup.okhttp3</groupId>
       <artifactId>okhttp</artifactId>
       <version>${okhttp.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.volcengine</groupId>
+      <artifactId>ve-tos-java-sdk</artifactId>
+      <version>${ve-tos-java-sdk.version}</version>
     </dependency>
 
     <dependency>
