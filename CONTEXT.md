@@ -4,7 +4,7 @@
 TypeScript `agent-worker`、`generation-worker` 组成；三者属于同一模块化单体代码库。
 独立 `product-api` 进程已退役，浏览器业务 API 折进 Next.js Route Handlers（ADR-0059）。
 `blue_whale_api`（new-api 二开，Go，承担 LLM 网关与计费）已迁出至独立仓库 `blue-whale-api`（`hangzhou-xuanfu_1/blue-whale-api`），保持独立且不在本仓改造。
-`blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写 入；
+`blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写 入（不约束按 ADR-0084 新建的 `worker-java` 生成执行服务——薄执行器，非旧服务复活）；
 `blue_whale_pay_web` 与 `blue_whale_pay_server`（Java 支付）已迁出至独立仓库 `blue-whale-pay`（`hangzhou-xuanfu_1/blue-whale-pay`），其中 server 冻结、web 单独迭代。范围以
 [ADR-0055](docs/adr/0055-prelaunch-typescript-unification-scope.md) 为准。
 
@@ -894,7 +894,7 @@ _Avoid_: 用户 JWT、root、能力券、把铸券令牌拿来下充值单
 ### 技术栈边界
 
 **产品实现**:
-直接向用户交付产品能力的代码，包括 Next.js Web、浏览器业务 Route Handlers、独立 Agent / Generation Workers，以及共享领域、契约与持久化 packages。实现语言统一为 TypeScript；浏览器代码在浏览器运行，服务端与 Worker 使用 Node.js LTS。
+直接向用户交付产品能力的代码，包括 Next.js Web、浏览器业务 Route Handlers、独立 Agent / Generation Workers，以及共享领域、契约与持久化 packages。实现语言统一为 TypeScript；浏览器代码在浏览器运行，服务端使用 Node.js LTS；generation-worker 生成执行按 ADR-0084 为独立 Java 薄执行器服务，领域规则权威仍在 TypeScript 侧。
 _Avoid_: TypeScript 运行时、把浏览器代码描述成运行在 Node.js、把仓库内所有可执行文件都算作产品实现
 
 **工程协作控制面**:

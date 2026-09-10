@@ -352,8 +352,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   };
 
   return (
-    <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
-      {/* 配置面板（可展开/收起） */}
+    <div className={styles.dialogWrap}>
+      {/* 配置面板（可展开/收起）：挂在不带 overflow 的定位外壳 .dialogWrap 上，
+          脱出 .dialog 滚动框，避免面板顶部被滚动容器裁剪（IKEOLP） */}
       {showConfig && (
         <div className={styles.configPanel} ref={configPanelRef}>
           {/* 关闭按钮 */}
@@ -465,6 +466,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         </div>
       )}
 
+      <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
       {/* 输入卡片 */}
       <div className={styles.inputBox}>
         {/* 顶部：素材预览 + 右上角操作 */}
@@ -637,6 +639,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
             </button>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

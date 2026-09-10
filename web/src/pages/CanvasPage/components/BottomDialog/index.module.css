@@ -2,13 +2,22 @@
  * BottomDialog - 画布底部对话框
  * ============================================ */
 
-.dialog {
+/* 定位外壳：承载对话框的绝对定位与唤出动画。不加 overflow、不定高——
+ * configPanel 以它为包含块悬浮，避免被滚动对话框裁剪（IKEOLP；
+ * 同 IKA715 原则：弹出层路径上的容器不加 overflow） */
+.dialogWrap {
   position: absolute;
   bottom: var(--spacing-lg);
   left: 50%;
   transform: translateX(-50%);
   width: 740px;
   max-width: 90%;
+  z-index: 10;
+  animation: dialogFadeIn 0.2s ease;
+}
+
+.dialog {
+  position: relative;
   /* 与 ImageDialog/.AudioDialog 固定等高；内容超高时窗口内滚动 */
   height: 200px;
   overflow-y: auto;
@@ -22,8 +31,6 @@
   -webkit-backdrop-filter: blur(12px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   padding: var(--spacing-lg);
-  z-index: 10;
-  animation: dialogFadeIn 0.2s ease;
 }
 
 @keyframes dialogFadeIn {
@@ -579,7 +586,7 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 配置面板（悬浮于底栏上方） ---- */
+/* ---- 配置面板（悬浮于底栏上方；包含块为不带 overflow 的 .dialogWrap，不被 .dialog 滚动框裁剪，IKEOLP） ---- */
 .configPanel {
   position: absolute;
   bottom: 72px;
