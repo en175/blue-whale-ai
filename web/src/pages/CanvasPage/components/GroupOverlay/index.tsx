@@ -45,6 +45,8 @@ interface GroupOverlayProps {
   onConnectGroupToTarget?: (memberIds: string[], targetId: string) => void;
   /** 源→组：外部节点拖到组左侧「+」，为该源到组内每个成员各建一条边 */
   onConnectSourceToGroup?: (sourceId: string, memberIds: string[]) => void;
+  /** 节点拖拽中：拖动节点时隐藏框选悬浮条（成组/下载标签只在静止框选时出现） */
+  isDraggingNode?: boolean;
 }
 
 interface FrameInfo {
@@ -72,6 +74,7 @@ export default function GroupOverlay({
   onGroupFrameDragStop,
   onFrameDragMembersChange,
   onConnectGroupToTarget,
+  isDraggingNode,
 }: GroupOverlayProps) {
   const { flowToScreenPosition, screenToFlowPosition } = useReactFlow();
   const { x: vx, y: vy, zoom } = useViewport();
@@ -127,10 +130,11 @@ export default function GroupOverlay({
     () => (selectedNodes.length >= MIN_GROUP_MEMBERS ? memberBBox(selectedNodes) : null),
     [selectedNodes],
   );
-  const showCreateBtn = !!selectionBox && !allInOneGroup;
+  const showCreateBtn = !!selectionBox && !allInOneGroup && !isDraggingNode;
   /* 框选悬浮条的下载入口仅在「多选且未全部同组」时出现：已成组后下载由组徽标操作条承担，
-   *  避免与节点工具栏自带的下载图标重复（用户故事：成组后中间不再出现下载按钮）。 */
-  const showSelectionDownload = !!selectionBox && !allInOneGroup;
+   *  避免与节点工具栏自带的下载图标重复（用户故事：成组后中间不再出现下载按钮）。
+   *  拖动节点时隐藏：成组/下载标签只在静止框选状态出现，不跟随被拖节点移动。 */
+  const showSelectionDownload = !!selectionBox && !allInOneGroup && !isDraggingNode;
   const createBtnPt = selectionBox
     ? flowToScreenPosition({ x: selectionBox.x + selectionBox.w / 2, y: selectionBox.y })
     : null;
@@ -472,9 +476,9 @@ export default function GroupOverlay({
 
   return (
     <>
-      {/* 组框层（flow 坐标，随视口变换）：纯视觉玻璃底框，位于节点层之上（z5），
-       *  使组框整体高于组外素材。拖动不靠本层接事件（pane 会吃掉），由 window
-       *  捕获阶段命中测试驱动，见 hitGroupAt。线宽按 zoom 反向补偿保持屏幕恒定。 */}
+      {/* 组框淡色底层（flow 坐标，随视口变换）：z3，位于节点 renderer(z4) 之下——
+       *  组内成员节点显示在淡色底之上，内容清晰不被蒙住。拖动不靠本层接事件（pane 会吃掉），
+       *  由 window 捕获阶段命中测试驱动，见 hitGroupAt。 */}
       <div
         className={styles.frameLayer}
         style={{ transform: `translate(${vx}px, ${vy}px) scale(${zoom})` }}
@@ -485,6 +489,30 @@ export default function GroupOverlay({
             <div
               key={f.id}
               className={styles.frame}
+              style={{
+                left: box.x,
+                top: box.y,
+                width: box.w,
+                height: box.h,
+              }}
+            />
+          );
+        })}
+      </div>
+
+      {/* 组框边框顶层（flow 坐标，随视口变换）：z5，高于节点 renderer——仅重描虚线边，
+       *  使组框轮廓高于组外素材（组外节点不会盖住组框边线）。透明无模糊，不影响成员清晰度。
+       *  线宽按 zoom 反向补偿保持屏幕恒定。 */}
+      <div
+        className={styles.frameBorderLayer}
+        style={{ transform: `translate(${vx}px, ${vy}px) scale(${zoom})` }}
+      >
+        {frames.map((f) => {
+          const box = boxFor(f);
+          return (
+            <div
+              key={f.id}
+              className={styles.frameBorder}
               style={{
                 left: box.x,
                 top: box.y,

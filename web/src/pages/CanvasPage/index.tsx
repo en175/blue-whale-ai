@@ -97,8 +97,10 @@ import {
   groupFrameBBox,
   groupToNode,
   membersInGroupBox,
+  nodeInsideGroupBox,
   parseGroupsFromNodes,
   MIN_GROUP_MEMBERS,
+  GROUP_FRAME_PADDING,
   type CanvasGroup,
   type GroupFrameDragResult,
 } from './canvasGroups';
@@ -1630,6 +1632,60 @@ export default function CanvasPage() {
           return { ...g, excludedIds: g.excludedIds.filter((id) => !positions.has(id)) };
         }),
       );
+    }
+
+    // 组外节点拖进组：被拖节点压到某组边界（节点矩形与组矩形相交）时，扩大该组矩形把节点
+    //  完全包进来，视为进组。仅处理拖动前不在任何组内的节点（组内成员已被 clamp 约束在组内）。
+    if (groupsRef.current.length > 0) {
+      const beforeById = new Map(before.map((n) => [n.id, n]));
+      // 收集每个组需要 union 的节点矩形
+      const expandByGroup = new Map<string, { x: number; y: number; x2: number; y2: number }>();
+      draggedNodes.forEach((n) => {
+        const w = n.measured?.width ?? 200;
+        const h = n.measured?.height ?? 120;
+        // 拖动前位置：判定该节点拖动前是否已在某组内（是成员则跳过，clamp 已约束）
+        const prev = beforeById.get(n.id);
+        const prevPos = prev?.position ?? n.position;
+        const wasInsideSomeGroup = groupsRef.current.some(
+          (g) => !g.excludedIds.includes(n.id) && nodeInsideGroupBox({ ...n, position: prevPos }, g.box),
+        );
+        if (wasInsideSomeGroup) return;
+        // 拖动后节点矩形
+        const nx = n.position.x, ny = n.position.y;
+        // 倒序取首个相交的组（后创建的组在上层）
+        for (let i = groupsRef.current.length - 1; i >= 0; i--) {
+          const g = groupsRef.current[i];
+          if (g.excludedIds.includes(n.id)) continue;
+          const intersects =
+            nx < g.box.x + g.box.w && nx + w > g.box.x && ny < g.box.y + g.box.h && ny + h > g.box.y;
+          if (!intersects) continue;
+          const cur = expandByGroup.get(g.id);
+          const x = Math.min(nx, cur?.x ?? g.box.x);
+          const y = Math.min(ny, cur?.y ?? g.box.y);
+          const x2 = Math.max(nx + w, cur?.x2 ?? g.box.x + g.box.w);
+          const y2 = Math.max(ny + h, cur?.y2 ?? g.box.y + g.box.h);
+          expandByGroup.set(g.id, { x, y, x2, y2 });
+          break;
+        }
+      });
+      if (expandByGroup.size > 0) {
+        const pad = GROUP_FRAME_PADDING;
+        setGroups((prev) =>
+          prev.map((g) => {
+            const e = expandByGroup.get(g.id);
+            if (!e) return g;
+            return {
+              ...g,
+              box: {
+                x: e.x - pad,
+                y: e.y - pad,
+                w: e.x2 - e.x + pad * 2,
+                h: e.y2 - e.y + pad * 2,
+              },
+            };
+          }),
+        );
+      }
     }
   };
 

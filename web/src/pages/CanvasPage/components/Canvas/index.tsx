@@ -35,7 +35,6 @@ import { useCanvasPan } from './useCanvasPan';
 import {
   MIN_GROUP_MEMBERS,
   membersInGroupBox,
-  nodeInsideGroupBox,
   type CanvasGroup,
   type GroupFrameDragResult,
 } from '../../canvasGroups';
@@ -346,47 +345,36 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
    *  membersInGroupBox 漏判；故 GroupOverlay 在拖组起止上抛「冻结的本次拖动成员集合」，
    *  并入 memberIds，保证拖组途中成员仍维持高 zIndex，不被组外素材盖住。 */
   const [frameDragMemberIds, setFrameDragMemberIds] = useState<Set<string>>(new Set());
+  /** 节点拖拽中标记：拖动节点（含拖组内成员出组）时隐藏框选悬浮条（成组/下载标签），
+   *  这些标签只在静止框选状态出现，不应跟随被拖节点移动。 */
+  const [isDraggingNode, setIsDraggingNode] = useState(false);
   const memberIds = useMemo(() => {
     const ids = new Set<string>(frameDragMemberIds);
     groups?.forEach((g) => membersInGroupBox(nodes, g.box, g.excludedIds).forEach((n) => ids.add(n.id)));
     return ids;
   }, [groups, nodes, frameDragMemberIds]);
   const nodesForFlow = useMemo(
-    () => nodes.map((n) => (memberIds.has(n.id) ? { ...n, zIndex: 10 } : { ...n, zIndex: 0 })),
-    [nodes, memberIds],
+    () =>
+      nodes.map((n) => {
+        // 正在整组拖动的成员层级最高（压住其他组与节点），普通组员次之，组外节点最低
+        const z = frameDragMemberIds.has(n.id) ? 100 : memberIds.has(n.id) ? 10 : 0;
+        return { ...n, zIndex: z };
+      }),
+    [nodes, memberIds, frameDragMemberIds],
   );
 
-  /** 整组拖拽（IKD0JT A4）：拖起组员时把同组成员一并选中，React Flow 随即整体拖动；
-   *  拖前选中集合快照，拖完还原，避免整组拖拽把选中态扩散到全部组员 */
-  const dragRestoreSelectionRef = useRef<Set<string> | null>(null);
-  const onNodeDragStart = useCallback(
-    (_e: MouseEvent | TouchEvent, node: Node) => {
-      // 拖起节点：若其位于某组矩形内（未被排除），把该组当前在框内的全部成员一并选中整体拖动
-      const group = groupsRef.current?.find((g) => nodeInsideGroupBox(node, g.box) && !g.excludedIds.includes(node.id));
-      if (!group) return;
-      const memberIds = membersInGroupBox(nodesRef.current, group.box, group.excludedIds).map((n) => n.id);
-      if (memberIds.length === 0) return;
-      const prevSelected = new Set(
-        nodesRef.current.filter((n) => n.selected || n.id === node.id).map((n) => n.id),
-      );
-      dragRestoreSelectionRef.current = prevSelected;
-      setNodes((prev) =>
-        prev.map((n) => (memberIds.includes(n.id) ? { ...n, selected: true } : n)),
-      );
-    },
-    [setNodes],
-  );
+  /** 节点拖拽起：仅标记拖拽中（隐藏框选悬浮条）。组内节点可自由拖出组，拖出后按
+   *  坐标动态脱离组；不再整组选中——整组拖动改由组框把手承担。 */
+  const onNodeDragStart = useCallback((_e: MouseEvent | TouchEvent, _node: Node) => {
+    setIsDraggingNode(true);
+  }, []);
 
   const handleNodeDragStopInternal = useCallback(
     (_e: MouseEvent | TouchEvent, node: Node, draggedNodes: Node[]) => {
-      const restore = dragRestoreSelectionRef.current;
-      dragRestoreSelectionRef.current = null;
-      if (restore) {
-        setNodes((prev) => prev.map((n) => ({ ...n, selected: restore.has(n.id) })));
-      }
+      setIsDraggingNode(false);
       onNodeDragStopRef.current?.(node, draggedNodes);
     },
-    [setNodes],
+    [],
   );
 
   /** Delete/Backspace 删除选中节点；Enter 继续拦截（输入框/编辑器内保持原语义）。
@@ -504,8 +492,9 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
          *  （含 .react-flow__renderer z4 与全部节点）压平到 0 层。若把 overlay 放在
          *  <ReactFlow> 之外做兄弟节点，其 frameLayer 会在外层与 0 比较而盖住所有节点。
          *  放进内部后才能与 renderer 同上下文比较：
-         *  节点(z4) < 组框玻璃/排除节点覆盖(z5) < 徽标/按钮(z10)；组内成员节点经
-         *  nodesForFlow 抬高 zIndex，仍位于组框玻璃之上，保持内容清晰。 */}
+         *  组框淡色底(z3) < 节点(z4) < 组框边框/排除节点覆盖(z5) < 徽标/按钮/连线把手(z10)；
+         *  组框淡色底在成员之下，组内素材保持清晰；组框边框在节点之上，组外素材盖不住组框轮廓。
+         *  组内成员节点经 nodesForFlow 抬高 zIndex，叠盖时高于组外素材。 */}
         {groups && (
           <GroupOverlay
             nodes={nodes}
@@ -519,6 +508,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             onFrameDragMembersChange={setFrameDragMemberIds}
             onConnectGroupToTarget={onConnectGroupToTarget ?? (() => {})}
             onConnectSourceToGroup={onConnectSourceToGroup ?? (() => {})}
+            isDraggingNode={isDraggingNode}
           />
         )}
       </ReactFlow>
