@@ -22,7 +22,7 @@ import {
   type OnSelectionChangeParams,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useCallback, useEffect, useRef, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import ZoomControl from '../ZoomControl';
 import TextNode from '../TextNode';
 import MediaNode from '../MediaNode';
@@ -334,6 +334,24 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const onGroupFrameDragStopRef = useRef(onGroupFrameDragStop);
   onGroupFrameDragStopRef.current = onGroupFrameDragStop;
 
+  /** 组成员视觉层级：组成员节点的 zIndex 抬到普通节点之上——ReactFlow 把全部节点
+   *  渲染在同一 renderer 层，节点间叠盖只靠 node.zIndex；组成员给更高的基础 zIndex，
+   *  使「组层内的素材」在视觉上高于未进组的素材。选中/拖拽时 ReactFlow 会在 base 之上
+   *  叠加 SELECTED_NODE_Z(1000)，不影响此基础排序。
+   *  拖动整组期间逻辑框 g.box 暂不更新（落盘在 dragStop），成员随偏移移出固定框会使
+   *  membersInGroupBox 漏判；故 GroupOverlay 在拖组起止上抛「冻结的本次拖动成员集合」，
+   *  并入 memberIds，保证拖组途中成员仍维持高 zIndex，不被组外素材盖住。 */
+  const [frameDragMemberIds, setFrameDragMemberIds] = useState<Set<string>>(new Set());
+  const memberIds = useMemo(() => {
+    const ids = new Set<string>(frameDragMemberIds);
+    groups?.forEach((g) => membersInGroupBox(nodes, g.box, g.excludedIds).forEach((n) => ids.add(n.id)));
+    return ids;
+  }, [groups, nodes, frameDragMemberIds]);
+  const nodesForFlow = useMemo(
+    () => nodes.map((n) => (memberIds.has(n.id) ? { ...n, zIndex: 10 } : { ...n, zIndex: 0 })),
+    [nodes, memberIds],
+  );
+
   /** 整组拖拽（IKD0JT A4）：拖起组员时把同组成员一并选中，React Flow 随即整体拖动；
    *  拖前选中集合快照，拖完还原，避免整组拖拽把选中态扩散到全部组员 */
   const dragRestoreSelectionRef = useRef<Set<string> | null>(null);
@@ -421,7 +439,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       onDoubleClickCapture={onClickCapture}
     >
       <ReactFlow
-        nodes={nodes}
+        nodes={nodesForFlow}
         edges={showEdges ? edges : []}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -480,9 +498,10 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         {/* GroupOverlay 必须作为 ReactFlow 的 children 渲染：
          *  .react-flow 根有 position:relative + z-index:0，自成层叠上下文，会把整棵子树
          *  （含 .react-flow__renderer z4 与全部节点）压平到 0 层。若把 overlay 放在
-         *  <ReactFlow> 之外做兄弟节点，其 frameLayer(z3) 会在外层与 0 比较而盖住所有节点，
-         *  导致组成员被玻璃压在下面。放进内部后才能与 renderer 同上下文比较：
-         *  frame(z3) < 节点(z4) < cover(z5) < 徽标/按钮(z10)。 */}
+         *  <ReactFlow> 之外做兄弟节点，其 frameLayer 会在外层与 0 比较而盖住所有节点。
+         *  放进内部后才能与 renderer 同上下文比较：
+         *  节点(z4) < 组框玻璃/排除节点覆盖(z5) < 徽标/按钮(z10)；组内成员节点经
+         *  nodesForFlow 抬高 zIndex，仍位于组框玻璃之上，保持内容清晰。 */}
         {groups && (
           <GroupOverlay
             nodes={nodes}
@@ -493,6 +512,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             onDownloadNodes={onDownloadGroup ?? (() => {})}
             setNodes={setNodes}
             onGroupFrameDragStop={onGroupFrameDragStopRef.current}
+            onFrameDragMembersChange={setFrameDragMemberIds}
           />
         )}
       </ReactFlow>

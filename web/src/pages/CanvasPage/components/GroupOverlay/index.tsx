@@ -38,6 +38,9 @@ interface GroupOverlayProps {
   setNodes: (updater: (prev: Node[]) => Node[]) => void;
   /** 整组拖动结束：上抛矩形前后 + 成员节点位移，父级落盘并登记撤销 */
   onGroupFrameDragStop?: (res: GroupFrameDragResult) => void;
+  /** 整组拖动起止：上抛「冻结的本次拖动成员集合」（拖起时传集合，结束时传空集合），
+   *  供父级在拖组途中维持成员的高 zIndex（逻辑框未随拖动更新，避免成员被误判出组）。 */
+  onFrameDragMembersChange?: (ids: Set<string>) => void;
 }
 
 interface FrameInfo {
@@ -63,6 +66,7 @@ export default function GroupOverlay({
   onDownloadNodes,
   setNodes,
   onGroupFrameDragStop,
+  onFrameDragMembersChange,
 }: GroupOverlayProps) {
   const { flowToScreenPosition, screenToFlowPosition } = useReactFlow();
   const { x: vx, y: vy, zoom } = useViewport();
@@ -82,7 +86,8 @@ export default function GroupOverlay({
   );
 
   /** 被排除节点的覆盖块（组盖住的节点）：组矩形内且在排除名单中的节点，
-   *  用独立玻璃块盖在其上方（z 高于节点），视觉呈现"被组压在玻璃之下"。 */
+   *  用独立淡色块盖在其上方（z 高于节点），视觉呈现「被组压在下层」——仅暗化不模糊，
+   *  保持被排除节点内容清晰可辨（用户语义：只需表现层级，不做成雾面）。 */
   const excludedCovers = useMemo(() => {
     const byId = new Map(nodes.map((n) => [n.id, n]));
     const result: { key: string; groupId: string; x: number; y: number; w: number; h: number }[] = [];
@@ -233,13 +238,15 @@ export default function GroupOverlay({
     draggingRef.current = false;
     if (paneRef.current) paneRef.current.style.cursor = '';
     endFrameDrag();
+    // 拖组结束：清空冻结成员集合，成员层级回归按落盘后的逻辑框判定
+    onFrameDragMembersChange?.(new Set());
     // 吞掉本次按下抬起派发的 click：否则会冒泡到 pane 触发 onPaneClick 清空选中
     // （click 在 mouseup 后同轮派发，故用宏任务在本轮结束后复位标记）
     clickSuppressRef.current = true;
     window.setTimeout(() => {
       clickSuppressRef.current = false;
     }, 0);
-  }, [onFrameMove, endFrameDrag]);
+  }, [onFrameMove, endFrameDrag, onFrameDragMembersChange]);
 
   /** 按下开始拖动整组：冻结当前在矩形内且未被排除的成员作为本次拖动集合。
    *  被排除节点（组此前盖住的）不随组移动；成员可为空（拖空框去圈节点）。
@@ -262,10 +269,11 @@ export default function GroupOverlay({
         nodeNew: new Map(nodeOld),
       };
       if (paneRef.current) paneRef.current.style.cursor = 'grabbing';
+      onFrameDragMembersChange?.(new Set(nodeOld.keys()));
       window.addEventListener('pointermove', onFrameMove);
       window.addEventListener('pointerup', endDrag);
     },
-    [onFrameMove, endDrag],
+    [onFrameMove, endDrag, onFrameDragMembersChange],
   );
 
   /** 命中测试：屏幕点是否落在某组矩形的「空白区」。
@@ -365,8 +373,9 @@ export default function GroupOverlay({
 
   return (
     <>
-      {/* 组框层（flow 坐标，随视口变换）：纯视觉玻璃底框，位于节点层之下。
-       *  拖动不靠本层接事件（pane 会吃掉），由 window 捕获阶段命中测试驱动，见 hitGroupAt */}
+      {/* 组框层（flow 坐标，随视口变换）：纯视觉玻璃底框，位于节点层之上（z5），
+       *  使组框整体高于组外素材。拖动不靠本层接事件（pane 会吃掉），由 window
+       *  捕获阶段命中测试驱动，见 hitGroupAt。线宽按 zoom 反向补偿保持屏幕恒定。 */}
       <div
         className={styles.frameLayer}
         style={{ transform: `translate(${vx}px, ${vy}px) scale(${zoom})` }}
@@ -390,7 +399,7 @@ export default function GroupOverlay({
       </div>
 
       {/* 排除节点覆盖层（flow 坐标，随视口变换）：z 高于节点 renderer，
-       *  组盖住的节点视觉上被玻璃压在下层（成员归属即视觉层级） */}
+       *  组盖住的被排除节点多叠一层淡色底以示区分（仅暗化不模糊，保持内容清晰） */}
       <div
         className={styles.coverLayer}
         style={{ transform: `translate(${vx}px, ${vy}px) scale(${zoom})` }}
