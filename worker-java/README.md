@@ -26,9 +26,27 @@ java -jar target/worker-java-0.0.1-SNAPSHOT.jar
 curl localhost:4002/ready
 ```
 
-## 现状进度（IKEL4L）
+## 现状进度（IKENZZZ / IKEL4L）
 
-- [x] 工程骨架 / 配置绑定 / `/ready` / 消息契约测试
+- [x] 工程骨架 / 配置绑定 / `/ready` / 消息契约测试（IKEL4L）
+- [x] **Job 状态机 extract 子集**（IKENZZZ）：
+  - [x] `DataSourceConfig`：DATABASE_URL 解析（mysql:// → jdbc:mysql://，含特殊字符）+ HikariCP 保守池（max 10）
+  - [x] persistence 包：`GenerationJob` / `Asset` / `GenerationJobLog` / `ProjectEvent` + 对应 Mapper
+    - SQL 逐字移植自 TS Prisma 调用，注释标注 TS 源码行号
+    - CAS updates 返回 int，service 层映射 0→false
+  - [x] service `JobStateMachineService`（@Service，单例权威）：
+    - `claimMediaExtract(jobId, workerId)` → Optional<ClaimedMediaExtractJob>
+      两段式 CAS（select + updateMany），返回增后 token；DB 异常上抛（契约 §3.1 不对称）
+    - `updateMediaExtractProgress` → boolean：钳制 0-99 + 续租（lease≈now+120s）
+    - `publishMediaExtractResult` → boolean（@Transactional）：
+      CAS guard → insert asset → update output_asset_ids → insert log → insert project_events
+    - `failMediaExtractJob` → boolean（@Transactional）：
+      CAS failed + error JSON → insert log → insert project_events
+  - [x] tests：
+    - `DataSourceUrlTest`：基础/特殊字符/默认端口/异常路径
+    - `JobStateMachineServiceGoldenMirrorTest`：mock Mappers 驱动，断言 SQL 参数
+      覆盖：G05（孤儿接管）、G18（钳制 150→99/-5→0）、G19（续租 lease≈now+120s）
+      延迟用例（刀① 覆盖）：G01-G04/G07/G08-G11/G12-G13/G14-G16/G17（见测试类 Javadoc）
 - [ ] MQ 连接装配与 4 消费者（media_extract 先行，IKEL4N）
 - [ ] backend internal endpoints 客户端（待 IKEL4J 交付端点契约 §4 定稿）
 - [ ] TOS Java SDK 坐标与 ffmpeg 子进程封装（IKEL4N 时引入，勿提前猜版本）
