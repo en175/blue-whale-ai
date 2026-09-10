@@ -2043,8 +2043,8 @@ export CLAUDE_PROJECT_DIR="$SAVED_CLAUDE_PROJECT_DIR_DOCALLO"
 rm -rf "$DOCALLO_REPO"
 unset DOCALLO_REPO SAVED_CLAUDE_PROJECT_DIR_DOCALLO DOCALLO_LOG
 
-# Slice 4.6.7 — commit-spec-on-master.sh（ADR-0025 落盘入口）
-# 真实 master 仓库端到端：doc-only 通过 + docs: 前缀；git mv 代码进 docs/ 被 --no-renames 捕获拒。
+# Slice 4.6.7 — commit-spec-on-master.sh（入口已废止：本地 master 禁直提，stub 必须拒）
+# 废止回归：任何路径（doc-only / git mv 伪装）都不得在 master 落新 commit。
 commit_spec_setup() {
   local repo="$1"
   git -C "$repo" init -q
@@ -2056,21 +2056,22 @@ commit_spec_setup() {
   git -C "$repo" add -A && git -C "$repo" commit -q -m "feat: baseline"
 }
 
-# 用例1：doc-only CONTEXT.md → 落盘 master + docs: 前缀
+# 用例1：doc-only CONTEXT.md → 入口废止，拒绝且不落新 commit
 SPEC1="$(mktemp -d)"; commit_spec_setup "$SPEC1"
 printf 'ctx\n' > "$SPEC1/CONTEXT.md"
 ( cd "$SPEC1" && bash "$REPO_ROOT/scripts/commit-spec-on-master.sh" -m "补领域语言" ) >/dev/null 2>&1
 RUN_EXIT=$?
-assert_exit 0 "commit-spec: doc-only CONTEXT.md 落盘 master（exit 0）"
-git -C "$SPEC1" log -1 --format=%s | grep -q '^docs: 补领域语言' && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[commit-spec: docs: 前缀自动添加]"); }
+assert_exit 1 "commit-spec: 入口已废止——doc-only 也拒（exit 1）"
+git -C "$SPEC1" log -1 --format=%s | grep -q '^feat: baseline$' && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[commit-spec: 废止入口不得在 master 落新 commit]"); }
 rm -rf "$SPEC1"
 
-# 用例2：git mv 代码进 docs/（rename）→ --no-renames 捕获旧路径 src/a.py → 拒绝（ADR-0025 威胁边界回归）
+# 用例2：git mv 代码进 docs/（rename 伪装）→ 废止入口同样拒绝（原白名单威胁边界的升级回归）
 SPEC2="$(mktemp -d)"; commit_spec_setup "$SPEC2"
 git -C "$SPEC2" mv src/a.py docs/malicious.md 2>/dev/null || { FAIL=$((FAIL + 1)); FAILURES+=("[commit-spec: 预置 git mv 失败]"); }
 ( cd "$SPEC2" && bash "$REPO_ROOT/scripts/commit-spec-on-master.sh" -m "改名" ) >/dev/null 2>&1
 RUN_EXIT=$?
-assert_exit 1 "commit-spec: git mv 代码进 docs/ rename 被拒（--no-renames 捕获旧路径 src/a.py）"
+assert_exit 1 "commit-spec: git mv 伪装路径被拒（入口整体废止）"
+git -C "$SPEC2" log -1 --format=%s | grep -q '^feat: baseline$' && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); FAILURES+=("[commit-spec: 废止入口不得落新 commit（rename 伪装）]"); }
 rm -rf "$SPEC2"
 unset -f commit_spec_setup 2>/dev/null || true
 unset SPEC1 SPEC2
