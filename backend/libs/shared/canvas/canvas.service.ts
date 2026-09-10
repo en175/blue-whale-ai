@@ -6,6 +6,8 @@ import { CANVAS_EDGE_LIMITS, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE,
 import { createCanvasRepo, createConversationQuoteRepo, createLegacyCardHistoryRepo, type CanvasView, type ConversationQuoteRow, type LegacyCardHistoryRow } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
+import { promptMentionSchema, validPromptMentions, type PromptPreviewContent, type PromptPreviewSource } from "@blue-whale/contracts";
+import { PromptMaterialUnavailableError } from "@lib/shared/persistence/canvas-repo.js";
 
 /** 对话引用快照视图（IKDLQJ）：主键字符串化；来源损坏时按无来源处理，不丢正文。 */
 function toQuoteView(row: ConversationQuoteRow) {
@@ -157,12 +159,11 @@ export class CanvasService {
     if (!parsed.success) throw new BadRequestException("预览来源或位置无效");
     const { source, position } = parsed.data;
     const key = sourceKey(source);
-    let content: { title: string; text: string } | undefined;
+    let content: PromptPreviewContent | undefined;
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const canvas = await this.repo.getByProject(projectId);
-      const nodes = JSON.parse(canvas.nodes ?? "[]") as Array<{ id: string; type: string; data?: Record<string, unknown> }>;
+      const nodes = JSON.parse(canvas.nodes ?? "[]") as Array<{ id: string; type: string; position?: { x: number; y: number }; data?: Record<string, unknown> }>;
       const existing = nodes.find(node => node.type === "textNode" && sourceKey(node.data?.promptSource) === key);
-      if (existing) return ok({ node: existing, canvas, reused: true });
       if (!content) {
         content = await this.repo.getPromptSnapshot(projectId, source) ?? undefined;
         if (!content) {
@@ -170,11 +171,37 @@ export class CanvasService {
           content = await this.repo.rememberPromptSnapshot(projectId, source, preview);
         }
       }
-      const node = { id: `text-${randomUUID()}`, type: "textNode", position, data: { ...content, promptSource: source } };
-      const serialized = JSON.stringify([...nodes, node]);
+      const additions: typeof nodes = [];
+      const materialViews = [];
+      const requiredIds = existing && Array.isArray(existing.data?.promptMentions)
+        ? new Set((existing.data.promptMentions as Array<{ assetId: string }>).map(mention => mention.assetId)) : undefined;
+      for (const material of content.promptMaterials ?? []) {
+        if (requiredIds && !requiredIds.has(material.assetId)) continue;
+        const asset = await this.prisma.client.assets.findFirst({ where: {
+          id: BigInt(material.assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal", type: material.mediaType,
+        } });
+        const indices = content.promptMentions?.filter(mention => mention.assetId === material.assetId).map(mention => `#${mention.index}`).join("、");
+        if (!asset) throw new BadRequestException(`素材索引 ${indices} 已删除或无权访问，整次应用未保存`);
+        materialViews.push({ ...material, url: asset.url });
+        const exists = nodes.some(item => item.type === "mediaNode" && String(item.data?.assetId ?? item.data?.asset_id ?? item.data?.assetID ?? "") === material.assetId);
+        if (!existing && !exists) additions.push({ id: `media-${randomUUID()}`, type: "mediaNode", position: { x: position.x + 420, y: position.y + additions.length * 300 },
+          data: { assetId: material.assetId, mediaType: material.mediaType, src: asset.url, width: asset.width, height: asset.height } });
+      }
+      if (existing) return ok({ node: existing, canvas, reused: true });
+      const node = { id: `text-${randomUUID()}`, type: "textNode", position, data: { ...content,
+        ...(content.promptMaterials ? { promptMaterials: materialViews } : {}), promptSource: source } };
+      const serialized = JSON.stringify([...nodes, ...additions, node]);
       if (Buffer.byteLength(serialized, "utf8") > limits.canvasBytes) throw new BadRequestException("画布内容超过 4 MiB，原内容未改动");
-      const saved = await this.repo.saveIfVersion(projectId, canvas.version, canvas.viewport, serialized, canvas.edges);
-      if (saved) return ok({ node, canvas: saved, reused: false });
+      try {
+        const saved = await this.repo.saveIfVersion(projectId, canvas.version, canvas.viewport, serialized, canvas.edges, { ownerId, items: content.promptMaterials ?? [] });
+        if (saved) return ok({ node, canvas: saved, reused: false });
+      } catch (error) {
+        if (error instanceof PromptMaterialUnavailableError) {
+          const indices = content.promptMentions?.filter(mention => mention.assetId === error.assetId).map(mention => `#${mention.index}`).join("、");
+          throw new BadRequestException(`素材索引 ${indices} 已删除或无权访问，整次应用未保存`);
+        }
+        if ((error as { code?: unknown })?.code !== "P2034") throw error;
+      }
     }
     throw new ConflictException("画布正在被修改，请重试应用");
   }
@@ -229,6 +256,10 @@ export class CanvasService {
       seenPairs.add(pair);
     }
     for (const node of incoming) {
+      if ((node.data?.promptMaterials !== undefined || node.data?.promptMentions !== undefined || node.data?.promptOriginalTitle !== undefined)
+        && node.data?.promptSource === undefined) {
+        throw new BadRequestException("方案素材身份不可伪造，请使用应用入口");
+      }
       if (node.type !== "textNode") continue;
       if ((typeof node.data?.text === "string" && node.data.text.length > limits.text)
         || (typeof node.data?.title === "string" && node.data.title.length > limits.title)) {
@@ -250,6 +281,20 @@ export class CanvasService {
             throw new BadRequestException("预览来源不可修改或重复，请使用应用入口");
           }
           seen.add(key);
+          if (JSON.stringify(node.data?.promptMaterials) !== JSON.stringify(old?.data?.promptMaterials)
+            || node.data?.promptOriginalTitle !== old?.data?.promptOriginalTitle) {
+            throw new BadRequestException("方案素材身份不可伪造，请使用应用入口");
+          }
+          if (old?.data?.promptMentions !== undefined) {
+            const mentions = promptMentionSchema.array().safeParse(node.data?.promptMentions);
+            const trusted = await this.repo.getPromptSnapshot(projectId, node.data!.promptSource as PromptPreviewSource);
+            if (!mentions.success || !validPromptMentions(node.data!.text as string, mentions.data)
+              || mentions.data.some(mention => !trusted?.promptMentions?.some(item => item.assetId === mention.assetId && item.index === mention.index))) {
+              throw new BadRequestException("正文素材索引无效或绑定被伪造，原内容未改动");
+            }
+          } else if (node.data?.promptMentions !== undefined) {
+            throw new BadRequestException("正文素材索引不可伪造，请使用应用入口");
+          }
         }
       }
     }

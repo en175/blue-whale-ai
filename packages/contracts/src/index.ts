@@ -5,7 +5,7 @@ export {
   type CapabilityParamFailure,
   type GenerationParamCheckInput,
 } from "./capability-param-validation.js";
-export { previewSourceSchema, applyPreviewSchema, type PromptPreviewSource } from "./prompt-preview.js";
+export { previewSourceSchema, applyPreviewSchema, promptMentionSchema, validPromptMentions, type PromptPreviewSource, type PromptPreviewContent, type PromptMention, type PromptMaterial } from "./prompt-preview.js";
 export {
   legacyCardHistoryItemSchema,
   legacyMigrationFailureSchema,
