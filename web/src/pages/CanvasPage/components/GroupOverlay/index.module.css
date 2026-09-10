@@ -153,3 +153,47 @@
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
+
+/* ---------- 组右侧「+」批量连线把手 ---------- */
+
+/* 选中组（徽标展开）时出现在组右边中点的连线把手。灰色底（项目规范：禁蓝色底），
+ *  pointer-events:auto 接管按下；按下即开始批量连线拖拽（见 startConnectDrag）。 */
+.connectHandle {
+  pointer-events: auto;
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--color-border-primary);
+  border-radius: 999px;
+  background-color: rgba(26, 26, 26, 0.9);
+  color: var(--color-text-secondary);
+  cursor: crosshair;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.connectHandle:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+/* 批量连线预览层：屏幕空间 SVG，铺满视口、不拦截交互。路径灰色描边（与项目连线风格一致）。 */
+.connectPreview {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.connectPreview path {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.55);
+  stroke-width: 2;
+}

@@ -262,18 +262,44 @@ export default function CanvasPage() {
     }
     return true;
   };
+/** 单条连线的统一校验与落盘（供普通连线与组连线复用）：拒绝自环、生成中目标只读、
+ *  图片/视频草稿目标的来源校验。返回是否成功建立。 */
+  const connectPair = (source: string, target: string): boolean => {
+    if (!source || !target || source === target) return false;
+    if (isGeneratingNode(target)) {
+      showToast('warn', '生成中，输入连线只读');
+      return false;
+    }
+    if (!validateImageRefConnect(source, target)) return false;
+    if (!validateVideoRefConnect(source, target)) return false;
+    addCanvasEdge(source, target);
+    return true;
+  };
   /** 建立连线：拒绝自环（生成中节点的输入连线只读 IKDMQQ：向目标新建连线被拦截）；
  *  图片草稿目标的来源校验见 validateImageRefConnect */
   const handleConnect = useCallback(
     (params: Connection) => {
-      if (!params.source || !params.target || params.source === params.target) return;
-      if (isGeneratingNode(params.target)) {
-        showToast('warn', '生成中，输入连线只读');
-        return;
-      }
-      if (!validateImageRefConnect(params.source, params.target)) return;
-      if (!validateVideoRefConnect(params.source, params.target)) return;
-      addCanvasEdge(params.source, params.target);
+      if (!params.source || !params.target) return;
+      connectPair(params.source, params.target);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [setEdges, submittingNodeId],
+  );
+  /** 组→目标：从组右侧「+」拖到某节点，为组内每个成员各建一条边到目标（目标引用全部成员输出）。
+   *  目标须为组外节点（组内节点不允许单独连线，命中已在 GroupOverlay 过滤）。 */
+  const handleConnectGroupToTarget = useCallback(
+    (memberIds: string[], targetId: string) => {
+      if (memberIds.length === 0 || !targetId) return;
+      memberIds.forEach((m) => connectPair(m, targetId));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [setEdges, submittingNodeId],
+  );
+  /** 源→组：外部节点拖到组左侧「+」，为该源到组内每个成员各建一条边（每个成员都引用该源输出）。 */
+  const handleConnectSourceToGroup = useCallback(
+    (sourceId: string, memberIds: string[]) => {
+      if (!sourceId || memberIds.length === 0) return;
+      memberIds.forEach((m) => connectPair(sourceId, m));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [setEdges, submittingNodeId],
@@ -4368,6 +4394,8 @@ export default function CanvasPage() {
           onDeleteGroup={handleDeleteGroup}
           onDownloadGroup={handleDownloadGroupNodes}
           onGroupFrameDragStop={handleGroupFrameDragStop}
+          onConnectGroupToTarget={handleConnectGroupToTarget}
+          onConnectSourceToGroup={handleConnectSourceToGroup}
         />
 
         {/* 左侧工具栏 */}

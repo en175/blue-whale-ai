@@ -10,8 +10,8 @@
  * 根层 pointer-events:none，仅徽标/按钮/操作条/把手可交互，不遮挡节点操作。
  * ============================================ */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useReactFlow, useViewport, type Node } from '@xyflow/react';
-import { Group, Ungroup, Trash2, Download } from 'lucide-react';
+import { useReactFlow, useViewport, getBezierPath, Position, type Node } from '@xyflow/react';
+import { Group, Ungroup, Trash2, Download, Plus } from 'lucide-react';
 import {
   memberBBox,
   membersInGroupBox,
@@ -41,6 +41,10 @@ interface GroupOverlayProps {
   /** 整组拖动起止：上抛「冻结的本次拖动成员集合」（拖起时传集合，结束时传空集合），
    *  供父级在拖组途中维持成员的高 zIndex（逻辑框未随拖动更新，避免成员被误判出组）。 */
   onFrameDragMembersChange?: (ids: Set<string>) => void;
+  /** 组→目标：从组右侧「+」拖到某节点，为组内每个成员各建一条边到目标 */
+  onConnectGroupToTarget?: (memberIds: string[], targetId: string) => void;
+  /** 源→组：外部节点拖到组左侧「+」，为该源到组内每个成员各建一条边 */
+  onConnectSourceToGroup?: (sourceId: string, memberIds: string[]) => void;
 }
 
 interface FrameInfo {
@@ -67,6 +71,7 @@ export default function GroupOverlay({
   setNodes,
   onGroupFrameDragStop,
   onFrameDragMembersChange,
+  onConnectGroupToTarget,
 }: GroupOverlayProps) {
   const { flowToScreenPosition, screenToFlowPosition } = useReactFlow();
   const { x: vx, y: vy, zoom } = useViewport();
@@ -130,11 +135,17 @@ export default function GroupOverlay({
     ? flowToScreenPosition({ x: selectionBox.x + selectionBox.w / 2, y: selectionBox.y })
     : null;
 
-  /** 点击空白处收起操作条 */
+  /** 点击空白处收起操作条（点击组徽标 / 操作条 / 右侧「+」连线把手本身不收起） */
   useEffect(() => {
     if (!openGroupId) return;
     const close = (e: MouseEvent) => {
-      if (e.target instanceof Element && e.target.closest(`.${styles.groupTools}`)) return;
+      if (!(e.target instanceof Element)) return;
+      if (
+        e.target.closest(`.${styles.groupTools}`) ||
+        e.target.closest(`.${styles.groupBadgeWrap}`) ||
+        e.target.closest(`.${styles.connectHandle}`)
+      )
+        return;
       setOpenGroupId(null);
     };
     document.addEventListener('mousedown', close, true);
@@ -237,9 +248,17 @@ export default function GroupOverlay({
     if (!draggingRef.current) return;
     draggingRef.current = false;
     if (paneRef.current) paneRef.current.style.cursor = '';
+    // 先抓取本次拖拽状态：endFrameDrag 会清空 dragStateRef。若全程无位移（dx=dy=0）
+    // 则视为「点击组区域」——激活该组（展开徽标操作条 + 显示右侧「+」连线把手），
+    // 与点击徽标同效。有位移则按整组拖动落盘。
+    const s = dragStateRef.current;
+    const isClick = !!s && s.dx === 0 && s.dy === 0;
     endFrameDrag();
     // 拖组结束：清空冻结成员集合，成员层级回归按落盘后的逻辑框判定
     onFrameDragMembersChange?.(new Set());
+    if (isClick && s) {
+      setOpenGroupId((prev) => (prev === s.groupId ? null : s.groupId));
+    }
     // 吞掉本次按下抬起派发的 click：否则会冒泡到 pane 触发 onPaneClick 清空选中
     // （click 在 mouseup 后同轮派发，故用宏任务在本轮结束后复位标记）
     clickSuppressRef.current = true;
@@ -287,7 +306,8 @@ export default function GroupOverlay({
         target.closest('.react-flow__panel') ||
         target.closest(`.${styles.groupBadgeWrap}`) ||
         target.closest(`.${styles.groupTools}`) ||
-        target.closest(`.${styles.selectionBar}`)
+        target.closest(`.${styles.selectionBar}`) ||
+        target.closest(`.${styles.connectHandle}`)
       ) {
         return null;
       }
@@ -370,6 +390,85 @@ export default function GroupOverlay({
     dragOffset && dragOffset.id === f.id
       ? { x: f.box.x + dragOffset.x, y: f.box.y + dragOffset.y, w: f.box.w, h: f.box.h }
       : f.box;
+
+  /* ============ 组右侧「+」批量连线（组→目标） ============ */
+  /** 拖拽中的连线状态：组成员右中点（flow 坐标）+ 当前光标（屏幕坐标）。null 表示未拖拽。
+   *  预览线在屏幕空间绘制：成员右中点经 flowToScreenPosition 转屏幕，与光标屏幕点连 bezier。 */
+  interface ConnectDragState {
+    groupId: string;
+    memberIds: string[];
+    /** 成员右中点 flow 坐标（拖拽期间成员不动，起点固定） */
+    sources: { x: number; y: number }[];
+  }
+  const connectStateRef = useRef<ConnectDragState | null>(null);
+  const [connectCursor, setConnectCursor] = useState<{ x: number; y: number } | null>(null);
+
+  const onConnectMove = useCallback((e: PointerEvent) => {
+    setConnectCursor({ x: e.clientX, y: e.clientY });
+  }, []);
+
+  /** 命中测试：屏幕点下的目标节点 id。排除组内成员（组内不允许单独连线）。
+   *  仅认 ReactFlow 节点（.react-flow__node[data-id]），组框是 overlay 不在此列。 */
+  const targetNodeIdAt = useCallback(
+    (clientX: number, clientY: number, memberIds: string[]): string | null => {
+      const el = document.elementFromPoint(clientX, clientY);
+      if (!(el instanceof Element)) return null;
+      const nodeEl = el.closest('.react-flow__node') as HTMLElement | null;
+      if (!nodeEl) return null;
+      const id = nodeEl.getAttribute('data-id');
+      if (!id || memberIds.includes(id)) return null;
+      return id;
+    },
+    [],
+  );
+
+  const endConnectDrag = useCallback(
+    (e: PointerEvent) => {
+      window.removeEventListener('pointermove', onConnectMove);
+      window.removeEventListener('pointerup', endConnectDrag);
+      const s = connectStateRef.current;
+      connectStateRef.current = null;
+      setConnectCursor(null);
+      if (paneRef.current) paneRef.current.style.cursor = '';
+      if (!s) return;
+      const targetId = targetNodeIdAt(e.clientX, e.clientY, s.memberIds);
+      if (targetId) onConnectGroupToTarget?.(s.memberIds, targetId);
+    },
+    [onConnectMove, targetNodeIdAt, onConnectGroupToTarget],
+  );
+
+  /** 按下组右侧「+」开始批量连线：冻结当前组成员，记录各成员右中点为连线起点 */
+  const startConnectDrag = useCallback(
+    (groupId: string, box: GroupBBox, excludedIds: string[], clientX: number, clientY: number) => {
+      const members = membersInGroupBox(nodesRef.current, box, excludedIds);
+      const sources = members.map((n) => {
+        const w = n.measured?.width ?? 200;
+        const h = n.measured?.height ?? 120;
+        return { x: n.position.x + w, y: n.position.y + h / 2 };
+      });
+      connectStateRef.current = {
+        groupId,
+        memberIds: members.map((n) => n.id),
+        sources,
+      };
+      setConnectCursor({ x: clientX, y: clientY });
+      if (paneRef.current) paneRef.current.style.cursor = 'crosshair';
+      window.addEventListener('pointermove', onConnectMove);
+      window.addEventListener('pointerup', endConnectDrag);
+    },
+    [onConnectMove, endConnectDrag],
+  );
+
+  /** 卸载时若在连线拖拽中则清理监听（不触发结束回调，避免卸载期落库） */
+  useEffect(
+    () => () => {
+      if (!connectStateRef.current) return;
+      window.removeEventListener('pointermove', onConnectMove);
+      window.removeEventListener('pointerup', endConnectDrag);
+      connectStateRef.current = null;
+    },
+    [onConnectMove, endConnectDrag],
+  );
 
   return (
     <>
@@ -473,6 +572,30 @@ export default function GroupOverlay({
           );
         })}
 
+        {/* 组右侧「+」批量连线把手：选中组（徽标展开）时出现，按下拖动 = 同时从组内
+         *  每个成员右中点拉线到目标节点（见 startConnectDrag / endConnectDrag）。 */}
+        {frames.map((f) => {
+          if (openGroupId !== f.id) return null;
+          const box = boxFor(f);
+          const pt = flowToScreenPosition({ x: box.x + box.w, y: box.y + box.h / 2 });
+          return (
+            <button
+              key={`connect-${f.id}`}
+              className={styles.connectHandle}
+              style={{ left: pt.x, top: pt.y }}
+              title="拖动为组内全部素材连线"
+              onPointerDown={(e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                startConnectDrag(f.id, f.box, f.excludedIds, e.clientX, e.clientY);
+              }}
+            >
+              <Plus size={14} strokeWidth={2} />
+            </button>
+          );
+        })}
+
         {/* 框选悬浮条：成组（未同组时）+ 下载；已成组时仍保留下载 */}
         {showSelectionDownload && createBtnPt && (
           <div className={styles.selectionBar} style={{ left: createBtnPt.x, top: createBtnPt.y }}>
@@ -501,6 +624,25 @@ export default function GroupOverlay({
               <span>下载</span>
             </button>
           </div>
+        )}
+
+        {/* 批量连线预览：拖动组「+」期间，从每个成员右中点到光标画 bezier。
+         *  屏幕空间 SVG，pointer-events:none 不挡命中测试。 */}
+        {connectCursor && connectStateRef.current && (
+          <svg className={styles.connectPreview}>
+            {connectStateRef.current.sources.map((src, i) => {
+              const s = flowToScreenPosition(src);
+              const [path] = getBezierPath({
+                sourceX: s.x,
+                sourceY: s.y,
+                sourcePosition: Position.Right,
+                targetX: connectCursor.x,
+                targetY: connectCursor.y,
+                targetPosition: Position.Left,
+              });
+              return <path key={i} d={path} />;
+            })}
+          </svg>
         )}
       </div>
     </>

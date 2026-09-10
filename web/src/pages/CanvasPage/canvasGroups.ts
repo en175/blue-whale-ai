@@ -23,7 +23,7 @@ export interface CanvasGroup {
 export const MIN_GROUP_MEMBERS = 2;
 
 /** 组框外扩留白（成员包围盒 → 底框可视边距） */
-export const GROUP_FRAME_PADDING = 24;
+export const GROUP_FRAME_PADDING = 48;
 
 export interface GroupBBox {
   x: number;
