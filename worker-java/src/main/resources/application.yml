@@ -1,0 +1,30 @@
+# 环境变量名与 TS worker 逐一对齐（ADR-0084 / 契约 §5）：灰度期一套部署 env 喂两个栈。
+server:
+  port: ${GENERATION_WORKER_PORT:4002}
+
+spring:
+  application:
+    name: worker-java
+
+worker:
+  # 逗号分隔列表；留空 = 不消费任何 tag（安全拉起默认值）。
+  # 一刀切换 = TS 侧停该 tag + 此列表加该 tag；反向即回滚。
+  enabled-tags: ${WORKER_ENABLED_TAGS:}
+  # consumer group 后缀：同一 tag 同一时刻只允许一侧（TS / Java）在消费
+  group-suffix: ${WORKER_GROUP_SUFFIX:-java}
+  concurrency:
+    image: ${IMAGE_CONCURRENCY:20}
+    audio: ${AUDIO_CONCURRENCY:5}
+    media-extract: ${MEDIA_EXTRACT_CONCURRENCY:2}
+
+rocketmq:
+  # gRPC proxy 端点（与 TS 同组变量；凭证只走 env，禁止落库）
+  endpoints: ${ROCKETMQ_ENDPOINTS:}
+  access-key: ${ROCKETMQ_ACCESS_KEY:}
+  secret-key: ${ROCKETMQ_SECRET_KEY:}
+  ssl-enabled: ${ROCKETMQ_SSL_ENABLED:false}
+  topic: ${ROCKETMQ_TOPIC:generation-video}
+
+logging:
+  level:
+    root: info
