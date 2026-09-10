@@ -287,29 +287,12 @@ async function waitModelReady() {
   await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型'), { timeout: 3000 });
 }
 
-/** 切换 BottomDialog 到首尾帧模式（底部模式选择器：全能参考 → 首尾帧） */
-async function switchToKeyframeMode() {
-  await vi.waitFor(() => {
-    const modeBtn = [...container.querySelectorAll('button')].find(
-      (b) => b.textContent?.includes('全能参考'),
-    );
-    expect(modeBtn).toBeTruthy();
+async function selectKeyframeMode() {
+  await act(async () => {
+    [...container.querySelectorAll('button')].find((b) => b.textContent === '全能参考')!.click();
   });
   await act(async () => {
-    [...container.querySelectorAll('button')].find(
-      (b) => b.textContent?.includes('全能参考'),
-    )!.click();
-  });
-  await vi.waitFor(() => {
-    const opt = [...container.querySelectorAll('button')].find(
-      (b) => b.textContent === '首尾帧',
-    );
-    expect(opt).toBeTruthy();
-  });
-  await act(async () => {
-    [...container.querySelectorAll('button')].find(
-      (b) => b.textContent === '首尾帧',
-    )!.click();
+    [...container.querySelectorAll('button')].find((b) => b.textContent === '首尾帧')!.click();
   });
 }
 
@@ -364,9 +347,9 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
     expect(videoDrafts()).toHaveLength(1);
     // 仅点击入口不创建任务
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-    // 面板打开（发送按钮与编辑器可见；默认全能参考模式，首帧/尾帧槽仅在首尾帧模式下渲染）
-    expect(container.querySelector('[data-testid="video-send"]')).toBeTruthy();
-    expect(container.querySelector('textarea')).toBeTruthy();
+    // 面板打开（角色槽可见）
+    expect(container.textContent).toContain('全能参考');
+    expect(container.querySelector('button[title^="添加图片参考"]')).toBeTruthy();
   });
 
   it('侧栏自由模式发送：直接落生成卡（无 target_node_id），面板关闭', async () => {
@@ -394,8 +377,7 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
     expect(videoDrafts()).toHaveLength(1); // 仅 seed d1
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-    // 面板保持打开（发送按钮可见）
-    expect(container.querySelector('[data-testid="video-send"]')).toBeTruthy();
+    expect(container.textContent).toContain('全能参考');
   });
 
   it('点击已保存的视频草稿卡重开绑定面板', async () => {
@@ -406,9 +388,8 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
       type: 'mediaNode',
       data: { draft: true, mediaType: 'video', genStatus: 'draft' },
     });
-    // 绑定面板打开（发送按钮与编辑器可见；默认全能参考模式）
-    expect(container.querySelector('[data-testid="video-send"]')).toBeTruthy();
-    expect(container.querySelector('textarea')).toBeTruthy();
+    expect(container.textContent).toContain('全能参考');
+    expect(container.querySelector('button[title^="添加图片参考"]')).toBeTruthy();
   });
 });
 
@@ -452,7 +433,7 @@ describe('IKDMQS 视频参考连线与显式角色', () => {
 });
 
 describe('IKDMQS 提交推导与组合约束', () => {
-  it('仅普通参考连线：提交 references 数组含 reference 角色 + target_node_id，先落盘后建任务', async () => {
+  it('仅普通参考连线：提交 reference_asset_ids + target_node_id，先落盘后建任务', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await connect('m1', 'd1');
@@ -467,12 +448,8 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(projectId).toBe('p1');
     expect(payload.type).toBe('video');
     expect(payload.target_node_id).toBe('d1');
-    // IKDJNZ 契约：提交走 references 单数组，不再使用旧扁平字段
-    expect(payload.references).toEqual([
-      { role: 'reference', type: 'image', asset_id: 'a1' },
-    ]);
+    expect(payload.reference_asset_ids).toEqual(['a1']);
     expect(payload.first_frame_asset_id).toBeUndefined();
-    expect(payload.reference_asset_ids).toBeUndefined();
     // 原位承接 + 首次结果回填同一张卡（fetchJobStatus mock 秒回 succeeded）：
     // 节点数量与身份不变，草稿标记清除、结果 src/assetId 写入同节点
     await vi.waitFor(() => {
@@ -486,53 +463,56 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(flowProps.current.mediaNodes).toHaveLength(4);
   });
 
-  it('首帧+尾帧连线：提交 references 数组含 first_frame/last_frame 角色，不携带旧扁平字段', async () => {
+  it('首帧+尾帧连线：提交 first/last_frame_asset_id，不携带 reference_asset_ids', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
-    // 首帧/尾帧槽仅在首尾帧模式可见——先切换模式
-    await switchToKeyframeMode();
+    await selectKeyframeMode();
     // 经 Dock 首帧/尾帧入口显式指定（不按连入顺序猜测）
-    // pickRefNode 存入 pendingVideoCanvasRefs，提交时 commitPendingVideoCanvasEdges 落成连线
     await pickRefNode('添加首帧（从资产中选择 / 到节点选择 / 角色库）', 'm1');
     await pickRefNode('添加尾帧（从资产中选择 / 到节点选择 / 角色库）', 'm2');
+    await vi.waitFor(() => {
+      const roles = flowProps.current.edges.map((e: { data?: { refRole?: string } }) => e.data?.refRole);
+      expect(roles).toEqual(expect.arrayContaining(['first', 'last']));
+    });
     await typePrompt('首尾帧驱动');
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
     expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1);
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
-    // IKDJNZ 契约：references 单数组，角色 first_frame / last_frame
-    expect(payload.references).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ role: 'first_frame', type: 'image', asset_id: 'a1' }),
-        expect.objectContaining({ role: 'last_frame', type: 'image', asset_id: 'a2' }),
-      ]),
-    );
-    // references 路径不携带旧扁平字段
+    expect(payload.first_frame_asset_id).toBe('a1');
+    expect(payload.last_frame_asset_id).toBe('a2');
     expect(payload.reference_asset_ids).toBeUndefined();
-    expect(payload.first_frame_asset_id).toBeUndefined();
-    expect(payload.last_frame_asset_id).toBeUndefined();
     expect(payload.target_node_id).toBe('d1');
   });
 
-  it('首尾帧与普通参考混用：提交被阻止并提示，不创建任务', async () => {
+  it('恢复的首尾帧与普通参考混用时禁止提交', async () => {
+    const doc = canvasDocMock.current.doc as { edges: unknown[] };
+    doc.edges = [
+      { id: 'ref', source: 'm1', target: 'd1' },
+      { id: 'first', source: 'm2', target: 'd1', data: { refRole: 'first' } },
+    ];
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
-    // 先切到首尾帧模式添加首帧，再经画布连线引入普通参考，构造混用状态
-    await switchToKeyframeMode();
-    await pickRefNode('添加首帧（从资产中选择 / 到节点选择 / 角色库）', 'm2');
-    // 画布连线默认按普通参考角色连入，与已有首帧形成混用
-    await connect('m1', 'd1');
     await typePrompt('混用输入');
-    // videoRefConflict 返回「首尾帧与普通参考不能混用，请移除其中一类输入」（videoMediaRefs.ts:227）
-    // BottomDialog 在 refConflictHint div 中渲染冲突文本并禁用发送按钮（BottomDialog/index.tsx:832,932）
-    await vi.waitFor(() => expect(container.textContent).toContain('首尾帧与普通参考不能混用'));
-
-    // 发送按钮被冲突禁用
+    expect(container.textContent).toContain('首尾帧与普通参考不能混用');
     expect(sendButton().disabled).toBe(true);
     await act(async () => { sendButton().click(); });
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+  });
+
+  it('已有普通参考时拒绝切换首尾帧模式，保留原引用且不创建任务', async () => {
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await connect('m1', 'd1');
+    await waitModelReady();
+    await selectKeyframeMode();
+    await vi.waitFor(() => expect(container.textContent).toContain('请先移除普通参考'));
+    expect(container.textContent).toContain('全能参考');
+    expect(container.querySelector('button[title^="添加首帧"]')).toBeNull();
+    expect(flowProps.current.edges).toHaveLength(1);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
   });
 });
