@@ -352,7 +352,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         </div>
         <span className={styles.titleMeta} title={titleMeta || undefined}>{titleMeta}</span>
       </div>
-      <div className={styles.contentCard} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
+      <div className={`${styles.contentCard} ${isAudio ? styles.audioCard : ''}`} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
         {!data.isFirst && (
           <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
           <HandlePlus />
@@ -364,7 +364,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         {isDraft || (isGenDone && !hasMediaSrc) || data.assetMissing || (isGenerating && !hasMediaSrc) ? (
           renderPlaceholder()
         ) : isAudio ? (
-          <AudioPlayer src={data.src || ''} fileName={data.fileName} />
+          <AudioPlayer src={data.src || ''} fileName={data.fileName} onDownload={() => data.onDownload?.(id)} />
         ) : data.mediaType === 'video' ? (
           <video
             className={styles.mediaVideo}

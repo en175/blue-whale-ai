@@ -97,7 +97,6 @@ import {
   groupFrameBBox,
   groupToNode,
   membersInGroupBox,
-  nodeInsideGroupBox,
   parseGroupsFromNodes,
   MIN_GROUP_MEMBERS,
   GROUP_FRAME_PADDING,
@@ -1634,30 +1633,23 @@ export default function CanvasPage() {
       );
     }
 
-    // 组外节点拖进组：被拖节点压到某组边界（节点矩形与组矩形相交）时，扩大该组矩形把节点
-    //  完全包进来，视为进组。仅处理拖动前不在任何组内的节点（组内成员已被 clamp 约束在组内）。
+    // 拖动节点压到某组边界时扩大该组：被拖节点矩形与组矩形相交（含贴边/压住边界线）
+    //  即把该节点包进来；后创建的组在上层优先。拖动前已是该组成员也允许扩大——
+    //  用户把组员拖到边界时组应随之外扩，使其仍在组内。
     if (groupsRef.current.length > 0) {
-      const beforeById = new Map(before.map((n) => [n.id, n]));
       // 收集每个组需要 union 的节点矩形
       const expandByGroup = new Map<string, { x: number; y: number; x2: number; y2: number }>();
       draggedNodes.forEach((n) => {
         const w = n.measured?.width ?? 200;
         const h = n.measured?.height ?? 120;
-        // 拖动前位置：判定该节点拖动前是否已在某组内（是成员则跳过，clamp 已约束）
-        const prev = beforeById.get(n.id);
-        const prevPos = prev?.position ?? n.position;
-        const wasInsideSomeGroup = groupsRef.current.some(
-          (g) => !g.excludedIds.includes(n.id) && nodeInsideGroupBox({ ...n, position: prevPos }, g.box),
-        );
-        if (wasInsideSomeGroup) return;
-        // 拖动后节点矩形
         const nx = n.position.x, ny = n.position.y;
         // 倒序取首个相交的组（后创建的组在上层）
         for (let i = groupsRef.current.length - 1; i >= 0; i--) {
           const g = groupsRef.current[i];
           if (g.excludedIds.includes(n.id)) continue;
+          // 用 <= / >= 把贴边也视为相交，提高灵敏度
           const intersects =
-            nx < g.box.x + g.box.w && nx + w > g.box.x && ny < g.box.y + g.box.h && ny + h > g.box.y;
+            nx <= g.box.x + g.box.w && nx + w >= g.box.x && ny <= g.box.y + g.box.h && ny + h >= g.box.y;
           if (!intersects) continue;
           const cur = expandByGroup.get(g.id);
           const x = Math.min(nx, cur?.x ?? g.box.x);

@@ -1,14 +1,15 @@
 /* ============================================
  * AudioPlayer：画布音频节点的自包含播放器
- * 唱片封面 + 播放按钮 + 频谱律动 + 进度条拖拽
+ * 白色卡片 + 浅灰波形区 + 播放控制，样式参考设计稿
  * ============================================ */
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { Play, Pause, AudioLines } from 'lucide-react';
+import { Play, Pause } from 'lucide-react';
 import styles from './index.module.css';
 
 interface AudioPlayerProps {
   src: string;
   fileName?: string;
+  onDownload?: () => void;
 }
 
 function formatTime(sec: number): string {
@@ -18,9 +19,16 @@ function formatTime(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-const BARS = 18;
+const BARS = 24;
 
-export default function AudioPlayer({ src, fileName }: AudioPlayerProps) {
+/** 生成静态波形条高度（伪随机但稳定，避免每次渲染跳动） */
+const barHeights = Array.from({ length: BARS }, (_, i) => {
+  const t = i / BARS;
+  const base = 0.25 + 0.5 * Math.sin(t * Math.PI * 3);
+  return 20 + Math.round(base * 60);
+});
+
+export default function AudioPlayer({ src, fileName, onDownload }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -33,9 +41,35 @@ export default function AudioPlayer({ src, fileName }: AudioPlayerProps) {
     if (audioRef.current) setDuration(audioRef.current.duration || 0);
   }, []);
 
+  /** timeupdate 兜底：拖拽时不更新，播放中主要靠 rAF 高频刷新 */
   const onTimeUpdate = useCallback(() => {
     if (audioRef.current && !dragging) setCurrentTime(audioRef.current.currentTime);
   }, [dragging]);
+
+  /** 播放中使用 requestAnimationFrame 高频刷新进度，避免 timeupdate 事件间隔大导致卡顿 */
+  const rafRef = useRef<number | null>(null);
+  const stopRaf = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }, []);
+  const tick = useCallback(() => {
+    const a = audioRef.current;
+    if (a && !dragging) {
+      setCurrentTime(a.currentTime);
+    }
+    rafRef.current = requestAnimationFrame(tick);
+  }, [dragging]);
+
+  useEffect(() => {
+    if (playing) {
+      rafRef.current = requestAnimationFrame(tick);
+    } else {
+      stopRaf();
+    }
+    return stopRaf;
+  }, [playing, tick, stopRaf]);
 
   const toggle = useCallback(() => {
     const a = audioRef.current;
@@ -111,58 +145,41 @@ export default function AudioPlayer({ src, fileName }: AudioPlayerProps) {
         onError={() => setErr(true)}
       />
 
-      {/* 唱片封面 */}
-      <div className={`${styles.audioCoverWrap} nodrag nopan`}>
-        <div className={`${styles.audioDisc} ${playing ? styles.audioDiscSpinning : ''}`}>
-          <div className={styles.audioDiscCenter}>
-            <AudioLines size={28} strokeWidth={1.8} color="#bbb" />
-          </div>
+      {/* 浅灰波形区：可点击拖拽 seek；紫色 playhead 指示当前进度 */}
+      <div
+        className={`${styles.audioWaveBox} nodrag nopan`}
+        ref={trackRef}
+        onMouseDown={handleTrackDown}
+      >
+        <div className={styles.audioWaveBars}>
+          {barHeights.map((h, i) => (
+            <span
+              key={i}
+              className={styles.audioWaveBar}
+              style={{ height: `${h}%` }}
+            />
+          ))}
         </div>
+        <div
+          className={styles.audioPlayhead}
+          style={{ left: `${progressPct}%` }}
+        />
+      </div>
 
+      {/* 底部控制区：时间 + 播放按钮 */}
+      <div className={styles.audioControls}>
+        <div className={styles.audioTime}>
+          {formatTime(currentTime)} / {formatTime(duration)}
+        </div>
         <button
           className={`${styles.audioPlayBtn} nodrag nopan`}
           onClick={toggle}
           aria-label={playing ? '暂停' : '播放'}
         >
           {playing
-            ? <Pause size={18} strokeWidth={2.5} />
-            : <Play size={18} strokeWidth={2.5} style={{ marginLeft: 2 }} />}
+            ? <Pause size={18} strokeWidth={2.5} color="#fff" />
+            : <Play size={18} strokeWidth={2.5} color="#fff" style={{ marginLeft: 2 }} />}
         </button>
-      </div>
-
-      {/* 频谱律动条 */}
-      <div className={styles.audioSpectrum}>
-        {Array.from({ length: BARS }).map((_, i) => (
-          <span
-            key={i}
-            className={`${styles.audioBar} ${playing ? styles.audioBarAnim : ''}`}
-            style={{ animationDelay: `${(i * 0.07) % 0.42}s` }}
-          />
-        ))}
-      </div>
-
-      {/* 文件名 */}
-      <div className={styles.audioName} title={fileName || ''}>
-        {fileName || '未命名音频'}
-      </div>
-
-      {/* 进度条：需要 nodrag nopan 否则拖拽进度条会带动节点 */}
-      <div className={`${styles.audioProgress} nodrag nopan`} ref={trackRef} onMouseDown={handleTrackDown}>
-        <div className={styles.audioProgressTrack} />
-        <div
-          className={styles.audioProgressFill}
-          style={{ width: `${progressPct}%` }}
-        />
-        <div
-          className={styles.audioProgressThumb}
-          style={{ left: `calc(${progressPct}% - 5px)` }}
-        />
-      </div>
-
-      {/* 时长 */}
-      <div className={styles.audioTime}>
-        <span>{formatTime(currentTime)}</span>
-        <span>{formatTime(duration)}</span>
       </div>
 
       {err && (

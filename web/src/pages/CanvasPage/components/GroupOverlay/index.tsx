@@ -300,10 +300,12 @@ export default function GroupOverlay({
   );
 
   /** 命中测试：屏幕点是否落在某组矩形的「空白区」。
-   *  落在节点/边/面板/自有 UI（徽标、操作条、成组按钮）上时返回 null，交回各自处理。 */
+   *  落在节点/边/面板/自有 UI（徽标、操作条、成组按钮）或任何画布外 portal
+   *  （如 body 挂载的右键菜单）上时返回 null，交回各自处理。 */
   const hitGroupAt = useCallback(
     (clientX: number, clientY: number, target: EventTarget | null): CanvasGroup | null => {
       if (!(target instanceof Element)) return null;
+      if (!target.closest('.react-flow')) return null;
       if (
         target.closest('.react-flow__node') ||
         target.closest('.react-flow__edge') ||
@@ -406,6 +408,8 @@ export default function GroupOverlay({
   }
   const connectStateRef = useRef<ConnectDragState | null>(null);
   const [connectCursor, setConnectCursor] = useState<{ x: number; y: number } | null>(null);
+  /** 正在从哪个组拉批量连线：拖拽期间隐藏该组右侧「+」把手，避免把手随线一起出现 */
+  const [connectDraggingGroupId, setConnectDraggingGroupId] = useState<string | null>(null);
 
   const onConnectMove = useCallback((e: PointerEvent) => {
     setConnectCursor({ x: e.clientX, y: e.clientY });
@@ -433,6 +437,7 @@ export default function GroupOverlay({
       const s = connectStateRef.current;
       connectStateRef.current = null;
       setConnectCursor(null);
+      setConnectDraggingGroupId(null);
       if (paneRef.current) paneRef.current.style.cursor = '';
       if (!s) return;
       const targetId = targetNodeIdAt(e.clientX, e.clientY, s.memberIds);
@@ -456,6 +461,7 @@ export default function GroupOverlay({
         sources,
       };
       setConnectCursor({ x: clientX, y: clientY });
+      setConnectDraggingGroupId(groupId);
       if (paneRef.current) paneRef.current.style.cursor = 'crosshair';
       window.addEventListener('pointermove', onConnectMove);
       window.addEventListener('pointerup', endConnectDrag);
@@ -603,7 +609,7 @@ export default function GroupOverlay({
         {/* 组右侧「+」批量连线把手：选中组（徽标展开）时出现，按下拖动 = 同时从组内
          *  每个成员右中点拉线到目标节点（见 startConnectDrag / endConnectDrag）。 */}
         {frames.map((f) => {
-          if (openGroupId !== f.id) return null;
+          if (openGroupId !== f.id || connectDraggingGroupId === f.id) return null;
           const box = boxFor(f);
           const pt = flowToScreenPosition({ x: box.x + box.w, y: box.y + box.h / 2 });
           return (
