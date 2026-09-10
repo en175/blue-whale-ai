@@ -1,6 +1,18 @@
 # worker-java 迁移契约（IKEL4A / ADR-0084）
 
-- **状态**：**已冻结**（2026-09-10，IKEL4H 从代码逐项核对回填）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
+- **状态**：**已冻结 + 修正一**（2026-09-10，IKEL4H 从代码逐项核对回填；同日修正一记录 cost_reservations 记账移出迁移范围）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
+
+## 0. 修正一（2026-09-10）：cost_reservations 记账移出迁移范围（工单 IKEM7S）
+
+- 决策：`cost_reservations` 预扣/结算/release 记账**整体下线**（IKEM7S），**Java 侧一概不实现**。本修正覆盖 §3.3、§4、§5、§6、§8 中所有结算/退款语义：`.../complete`、`.../fail`、`.../requeue` 端点实现必须封装**删除后**的逻辑，禁止先行按旧语义封装。
+- 实施顺序钉死：IKEM7S 删除（TS 产品路径 → release 批次）→ 本契约修正二（终态语义定稿）→ IKEL4J 端点 → 四刀。
+- **不受删除影响的外部事实（保留）**：new-api 网关按 token 真实扣费；`ERROR_QUOTA_EXHAUSTED` 识别（HTTP 402 / 文案正则，§5 优先级不变）；失败分类中该码仍是终态。receipt/consume-log 查询随 settle 一并消失；展示额度口径（quota/50000）是另一契约，不在本单。
+- 下列旧段落保留作**删除前基线取证**（对账历史数据、验证删除完整性用），标注处语义以本节为准：
+  - §3.3 `completeJobAndSettle` 的 settle 段、`release_note`/refund 证据链 → 删
+  - §4 `.../complete` `.../fail` 中的结算/释放职责 → 端点只做状态终写
+  - §5 receipt→`actual_amount_fen`、`quotaToFen`、video 偏差 warn → 删
+  - §6 audio/image/video 结算联动、§8 `publishVideoResult` settle 字段 → 删
+  - §4 `claim` 投影中的 `reservedAmountFen`（video）→ 删
 - **原则**：领域规则权威在 NestJS backend 侧；§3/§4 描述的实现**不迁移、只暴露**——Java 侧经 internal endpoints 使用，禁止二次实现。
 - 文件行号基线 = 本地 master `59ba3282`。
 
