@@ -1,7 +1,9 @@
 package com.bluewhale.worker.config;
 
 import com.bluewhale.worker.application.consumer.AbstractGenerationConsumer;
+import com.bluewhale.worker.application.consumer.AudioConsumer;
 import com.bluewhale.worker.application.consumer.MediaExtractConsumer;
+import com.bluewhale.worker.application.processor.AudioJobProcessor;
 import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 import org.apache.rocketmq.client.apis.ClientConfigurationBuilder;
@@ -81,6 +83,50 @@ public class RocketMqConfig {
         int concurrency = workerProps.concurrency().mediaExtract();
 
         return new MediaExtractConsumer(
+                processor,
+                mqProps.topic(),
+                configBuilder.build(),
+                consumerGroup,
+                concurrency
+        );
+    }
+
+    /**
+     * audio consumer（条件：enabled-tags 含 audio）。
+     * <p>
+     * consumer group = "generation-audio-worker" + groupSuffix（契约 §1）。
+     * tag = "audio"（queue.constants.ts:2）。
+     * digitGuard = true（音频/图片做纯数字守卫，与 TS rocketmq-audio.consumer.ts 一致）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    @Conditional(AudioEnabledCondition.class)
+    public AudioConsumer audioConsumer(
+            AudioJobProcessor processor,
+            WorkerProperties workerProps,
+            Environment env
+    ) {
+        RocketMqProperties mqProps = Binder.get(env)
+                .bind("rocketmq", RocketMqProperties.class)
+                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+
+        if (mqProps.endpoints().isBlank()) {
+            throw new IllegalStateException(
+                    "ROCKETMQ_ENDPOINTS 未配置：audio consumer 无法启动");
+        }
+
+        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
+                .setEndpoints(mqProps.endpoints())
+                .enableSsl(mqProps.sslEnabled());
+
+        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
+            configBuilder.setCredentialProvider(
+                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
+        }
+
+        String consumerGroup = "generation-audio-worker" + workerProps.groupSuffix();
+        int concurrency = workerProps.concurrency().audio();
+
+        return new AudioConsumer(
                 processor,
                 mqProps.topic(),
                 configBuilder.build(),

@@ -131,5 +131,47 @@
     "title_zh": "updateMediaExtractProgress 续租 lease_expires_at≈now+120s",
     "given": "input progress=50; IMAGE_JOB_LEASE_SECONDS=120",
     "expect": "data={progress:50, last_polled_at:now, lease_expires_at:now+120s, version:{increment:1}}"
+  },
+  {
+    "case_id": "G20",
+    "contract_ref": "§3.1",
+    "title_zh": "音频 claimAudioJobById 孤儿接管（processing + 过期租约）",
+    "given": "候选行 status='processing', lease_expires_at < now, fencing_token=2n",
+    "expect": "claimAudioJobById 返回非 null 且 fencingToken=3; findFirst where 的 OR 包含 processing+孤儿分支; 不套 source 白名单（IKCR78）"
+  },
+  {
+    "case_id": "G21",
+    "contract_ref": "§3.1/附录B",
+    "title_zh": "音频 claim 投影 snake_case（ClaimedJobDto）",
+    "given": "候选行 type=audio, expected_output_count=1, retry_count=0, cancel_requested_at=null",
+    "expect": "投影字段 id/project_id/user_id/type/input/expected_output_count/retry_count/cancelRequested/fencingToken 完整"
+  },
+  {
+    "case_id": "G22",
+    "contract_ref": "§3.3/asset-ops",
+    "title_zh": "createAsset fence guard 通过 → asset.id 返回",
+    "given": "createAssetGuard 返回 count=1; asset insert 成功",
+    "expect": "返回 asset.id.toString(); asset.source='generated'; asset.status='normal'; asset.created 事件写入"
+  },
+  {
+    "case_id": "G23",
+    "contract_ref": "§3.3/asset-ops",
+    "title_zh": "createAsset fence guard 失败 → null（stale worker）",
+    "given": "createAssetGuard 返回 count=0",
+    "expect": "返回 null; asset insert 不执行"
+  },
+  {
+    "case_id": "G24",
+    "contract_ref": "§3.3/settle-ops",
+    "title_zh": "completeJob happy path（修正一：无 cost_reservations）",
+    "given": "completeJobGuard count=1; 无 output_slots; job.project_id 非空",
+    "expect": "CAS data={status:'succeeded', progress:100, output_asset_ids, next_action_at:null, lease:null, version+1}; generation_job.status_changed 事件; 无 settleReservation（修正一）"
+  },
+  {
+    "case_id": "G25",
+    "contract_ref": "§3.3/settle-ops",
+    "title_zh": "failJob happy path（修正一：无 releaseReservation）",
+    "given": "failJobGuard count=1; 无 pending slots; job.project_id 非空",
+    "expect": "status='failed'; error JSON; generation_job_logs; generation_job.status_changed 事件; 无 releaseReservationInTx（修正一）"
   }
 ]

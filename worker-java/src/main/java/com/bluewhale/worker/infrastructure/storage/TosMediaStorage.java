@@ -164,6 +164,46 @@ public class TosMediaStorage {
         }
     }
 
+    /**
+     * 上传字节到 TOS（blade-② audio data-direct 路径）。
+     * <p>
+     * key 格式：{@code uploads/audio/{uuid去横线}.mp3}（tos-storage.ts:182-183，prefix 为空时用 uploads）。
+     *
+     * @param data 音频字节（base64 解码后）
+     * @param mime MIME 类型（恒 "audio/mpeg"）
+     * @return 上传结果
+     * @throws MediaExtractError upload_failed
+     */
+    public UploadResult uploadBytes(byte[] data, String mime) {
+        try {
+            String uuid = java.util.UUID.randomUUID().toString().replace("-", "");
+            String storageKey = "uploads/audio/" + uuid + ".mp3";
+
+            ObjectMetaRequestOptions options = new ObjectMetaRequestOptions()
+                    .setHeaders(java.util.Map.of("Content-Type", mime));
+            PutObjectInput putInput = new PutObjectInput()
+                    .setBucket(bucket)
+                    .setKey(storageKey)
+                    .setContent(new ByteArrayInputStream(data))
+                    .setContentLength((long) data.length)
+                    .setOptions(options);
+            client.putObject(putInput);
+
+            PutObjectACLInput aclInput = new PutObjectACLInput()
+                    .setBucket(bucket)
+                    .setKey(storageKey)
+                    .setAcl(ACLType.ACL_PUBLIC_READ);
+            client.putObjectAcl(aclInput);
+
+            String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;
+            return new UploadResult(publicUrl, storageKey, mime, data.length);
+        } catch (Exception e) {
+            throw new MediaExtractError(
+                    MediaExtractError.UPLOAD_FAILED,
+                    "TOS 音频上传失败: " + e.getMessage(), e);
+        }
+    }
+
     /** 上传结果（对齐 tos-media-extract.ts:86-91 返回形状）。 */
     public record UploadResult(String url, String storageKey, String mime, long size) {}
 

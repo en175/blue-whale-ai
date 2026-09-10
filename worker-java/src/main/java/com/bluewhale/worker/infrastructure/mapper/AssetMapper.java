@@ -63,4 +63,38 @@ public interface AssetMapper extends BaseMapper<AssetEntity> {
             @Param("projectId") Long projectId,
             @Param("linkedIds") List<Long> linkedIds
     );
+
+    // ========== 音频/图片输入素材解析（blade-② asset-ops.ts:30-79） ==========
+
+    /**
+     * 解析输入素材（resolveInputAssets，asset-ops.ts:34-58）。
+     * <p>
+     * 归属三分支（IKDD4Z）：本项目直接 ∪ 全局素材(project_id=0) ∪ project_asset 显式关联。
+     * 返回 id/type/url/mime/size/width/height/duration_ms/material_id（select 与 TS :46-57 逐字一致）。
+     */
+    @Select("""
+            <script>
+            SELECT id, type, url, mime, size, width, height, duration_ms, material_id
+            FROM assets
+            WHERE id IN
+            <foreach item="aid" collection="assetIds" open="(" separator="," close=")">#{aid}</foreach>
+              AND user_id = #{userId}
+              AND status = 'normal'
+              AND is_delete = false
+              AND (
+                project_id = #{projectId}
+                OR project_id = 0
+                <if test="linkedIds != null and !linkedIds.isEmpty()">
+                  OR id IN
+                  <foreach item="l" collection="linkedIds" open="(" separator="," close=")">#{l}</foreach>
+                </if>
+              )
+            </script>
+            """)
+    List<AssetEntity> resolveInputAssetsWithLinked(
+            @Param("assetIds") List<Long> assetIds,
+            @Param("userId") Long userId,
+            @Param("projectId") Long projectId,
+            @Param("linkedIds") List<Long> linkedIds
+    );
 }

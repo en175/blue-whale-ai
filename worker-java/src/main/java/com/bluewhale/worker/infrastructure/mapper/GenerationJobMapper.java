@@ -164,4 +164,144 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("fencingToken") Long fencingToken,
             @Param("errorJson") String errorJson
     );
+
+    // ========== 音频路径（blade-② IKCR78） ==========
+
+    /**
+     * 领取音频作业：候选查询（claim-ops.ts:395-413）。
+     * <p>
+     * 镜像 claimImageJobById 但不套 source 白名单（IKCR78/IKC9EJ 教训对齐 media_extract）。
+     * WHERE id=? AND type='audio' AND is_delete=false AND next_action_at&lt;=now
+     * AND (queued OR processing+孤儿)
+     */
+    @Select("""
+            SELECT * FROM generation_jobs
+            WHERE id = #{jobId}
+              AND type = 'audio'
+              AND is_delete = false
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (
+                  status = 'processing'
+                  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+                )
+              )
+            ORDER BY id ASC
+            LIMIT 1
+            """)
+    GenerationJobEntity findAudioCandidate(@Param("jobId") Long jobId);
+
+    /**
+     * 领取音频作业：CAS 更新（claim-ops.ts:417-431）。
+     * <p>
+     * 与 claimMediaExtractCas 逐字一致（同 CAS 模式）。
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'processing',
+                lease_owner = #{workerId},
+                lease_expires_at = #{leaseExpiresAt},
+                last_polled_at = NOW(),
+                fencing_token = fencing_token + 1,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND fencing_token = #{fencingToken}
+              AND status = #{candidateStatus}
+            """)
+    int claimAudioCas(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt,
+            @Param("fencingToken") Long fencingToken,
+            @Param("candidateStatus") String candidateStatus
+    );
+
+    // ========== 通用终态写入（settle-ops.ts:53-206 / 233-336） ==========
+
+    /**
+     * completeJob CAS 守卫（settle-ops.ts:65-77）。
+     * <p>
+     * SET status='succeeded', progress=100, output_asset_ids=?, next_action_at=null,
+     *     lease_owner=null, lease_expires_at=null, version=version+1
+     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'succeeded',
+                progress = 100,
+                output_asset_ids = #{outputAssetIdsJson},
+                next_action_at = NULL,
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+            """)
+    int completeJobGuard(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken,
+            @Param("outputAssetIdsJson") String outputAssetIdsJson
+    );
+
+    /**
+     * completeJob 槽位聚合后修正状态（settle-ops.ts:116-121）。
+     * 仅当聚合态 ≠ 'succeeded' 时调用（partially_succeeded / failed）。
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = #{finalStatus}
+            WHERE id = #{jobId}
+            """)
+    int updateJobStatus(@Param("jobId") Long jobId, @Param("finalStatus") String finalStatus);
+
+    /**
+     * failJob CAS 守卫（settle-ops.ts:238-253）。
+     * <p>
+     * SET status='failed', error=?, next_action_at=null,
+     *     lease_owner=null, lease_expires_at=null, version=version+1
+     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'failed',
+                error = #{errorJson},
+                next_action_at = NULL,
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+            """)
+    int failJobGuard(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken,
+            @Param("errorJson") String errorJson
+    );
+
+    /**
+     * createAsset fence CAS 守卫（asset-ops.ts:156-165）。
+     * <p>
+     * 用 version 自增做无业务副作用的原子占位（不改 status，job 仍是 processing）。
+     * count≠1 即 stale worker，返回 0。
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+            """)
+    int createAssetGuard(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken
+    );
 }

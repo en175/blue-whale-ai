@@ -4,7 +4,9 @@ import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.ProjectEventEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
+import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
@@ -12,6 +14,7 @@ import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
 
 import com.bluewhale.worker.infrastructure.mapper.*;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -26,6 +29,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -68,11 +72,14 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Mock
     private ProjectEventMapper projectEventMapper;
 
+    @Mock
+    private GenerationOutputSlotMapper slotMapper;
+
     private JobStateMachineService service;
 
     @BeforeEach
     void setUp() {
-        service = new JobStateMachineService(jobMapper, assetMapper, jobLogMapper, projectEventMapper);
+        service = new JobStateMachineService(jobMapper, assetMapper, jobLogMapper, projectEventMapper, slotMapper);
     }
 
     @Test
@@ -373,6 +380,191 @@ class JobStateMachineServiceGoldenMirrorTest {
         );
 
         boolean result = service.failMediaExtractJob(input);
+
+        assertThat(result).isFalse();
+        verify(jobLogMapper, never()).insert(any(GenerationJobLogEntity.class));
+    }
+
+    // ========== Blade-② audio golden mirrors ==========
+
+    @Test
+    @DisplayName("G06-audio: 音频孤儿接管（processing + 过期租约）")
+    void g06_audioOrphanTakeover() {
+        // given: 候选行 status='processing', lease_expires_at < now, fencing_token=2
+        GenerationJobEntity candidate = new GenerationJobEntity();
+        candidate.setId(400L);
+        candidate.setProjectId(42L);
+        candidate.setUserId(9L);
+        candidate.setType("audio");
+        candidate.setStatus("processing");
+        candidate.setFencingToken(2L);
+        candidate.setLeaseExpiresAt(LocalDateTime.now().minusSeconds(10)); // 过期租约
+        candidate.setInput("{\"prompt\":\"hello\",\"model_id\":\"seed-audio-1.0\"}");
+        candidate.setExpectedOutputCount(1);
+        candidate.setRetryCount(0);
+
+        when(jobMapper.findAudioCandidate(400L)).thenReturn(candidate);
+        when(jobMapper.claimAudioCas(
+                eq(400L),
+                eq("worker-1"),
+                any(LocalDateTime.class),
+                eq(2L),
+                eq("processing")
+        )).thenReturn(1);
+
+        // when
+        Optional<ClaimedJobDto> result = service.claimAudioJobById("400", "worker-1");
+
+        // then
+        assertThat(result).isPresent();
+        ClaimedJobDto claimed = result.get();
+        assertThat(claimed.fencingToken()).isEqualTo(3L); // 增后 token = 2 + 1
+        assertThat(claimed.type()).isEqualTo("audio");
+        assertThat(claimed.project_id()).isEqualTo("42");
+        assertThat(claimed.user_id()).isEqualTo("9");
+
+        // 断言 CAS where 含 status='processing'（孤儿接管）
+        verify(jobMapper).claimAudioCas(
+                eq(400L),
+                eq("worker-1"),
+                any(LocalDateTime.class),
+                eq(2L),
+                eq("processing")
+        );
+    }
+
+    @Test
+    @DisplayName("claimAudioJobById: no candidate → empty")
+    void claimAudio_noCandidate() {
+        when(jobMapper.findAudioCandidate(400L)).thenReturn(null);
+        Optional<ClaimedJobDto> result = service.claimAudioJobById("400", "worker-1");
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("claimAudioJobById: CAS rejected → empty")
+    void claimAudio_casRejected() {
+        GenerationJobEntity candidate = new GenerationJobEntity();
+        candidate.setId(400L);
+        candidate.setFencingToken(2L);
+        candidate.setStatus("queued");
+        candidate.setType("audio");
+
+        when(jobMapper.findAudioCandidate(400L)).thenReturn(candidate);
+        when(jobMapper.claimAudioCas(eq(400L), eq("worker-1"), any(LocalDateTime.class),
+                eq(2L), eq("queued"))).thenReturn(0);
+
+        Optional<ClaimedJobDto> result = service.claimAudioJobById("400", "worker-1");
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("createAsset: happy path → asset.id returned")
+    void createAsset_happy() {
+        when(jobMapper.createAssetGuard(300L, "worker-1", 5L)).thenReturn(1);
+        when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(inv -> {
+            AssetEntity a = (AssetEntity) inv.getArgument(0);
+            a.setId(888L);
+            return 1;
+        });
+        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
+
+        String result = service.createAsset(new JobStateMachineService.CreateAssetInput(
+                "9", "42", "300", "audio",
+                "https://example.com/audio.mp3", "uploads/audio/abc.mp3",
+                "audio/mpeg", 1024L, null, null, 12.5,
+                "worker-1", 5L
+        ));
+
+        assertThat(result).isEqualTo("888");
+
+        // 断言 asset 字段
+        ArgumentCaptor<AssetEntity> captor = ArgumentCaptor.forClass(AssetEntity.class);
+        verify(assetMapper).insert(captor.capture());
+        AssetEntity asset = captor.getValue();
+        assertThat(asset.getType()).isEqualTo("audio");
+        assertThat(asset.getMime()).isEqualTo("audio/mpeg");
+        assertThat(asset.getDurationMs()).isEqualTo(12500); // 12.5 * 1000
+        assertThat(asset.getSource()).isEqualTo("generated");
+        assertThat(asset.getStatus()).isEqualTo("normal");
+    }
+
+    @Test
+    @DisplayName("createAsset: fence guard fail → null")
+    void createAsset_fenceFail() {
+        when(jobMapper.createAssetGuard(300L, "worker-1", 5L)).thenReturn(0);
+
+        String result = service.createAsset(new JobStateMachineService.CreateAssetInput(
+                "9", "42", "300", "audio",
+                "https://example.com/audio.mp3", "uploads/audio/abc.mp3",
+                "audio/mpeg", 1024L, null, null, null,
+                "worker-1", 5L
+        ));
+
+        assertThat(result).isNull();
+        verify(assetMapper, never()).insert(any(AssetEntity.class));
+    }
+
+    @Test
+    @DisplayName("G17-audio: completeJob happy path (minus reservations, 修正一)")
+    void completeJob_happy() {
+        // given
+        when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
+        when(slotMapper.findByJobId(300L)).thenReturn(List.of()); // 无槽位
+        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio", "succeeded", 100));
+        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
+
+        // when
+        boolean result = service.completeJob("300", List.of("888"), "worker-1", 5L);
+
+        // then
+        assertThat(result).isTrue();
+        verify(jobMapper).completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString());
+        // 按修正一省略：无 settleReservation 调用
+        // 断言 project_event（generation_job.status_changed）
+        verify(projectEventMapper, atLeastOnce()).insert(any(ProjectEventEntity.class));
+    }
+
+    @Test
+    @DisplayName("completeJob: fence guard fail → false")
+    void completeJob_fenceFail() {
+        when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(0);
+
+        boolean result = service.completeJob("300", List.of("888"), "worker-1", 5L);
+
+        assertThat(result).isFalse();
+        verify(slotMapper, never()).findByJobId(anyLong());
+    }
+
+    @Test
+    @DisplayName("failJob: happy path with log + events (minus releaseReservation, 修正一)")
+    void failJob_happy() {
+        // given
+        when(jobMapper.failJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
+        when(slotMapper.findPendingByJobId(300L)).thenReturn(List.of());
+        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio", "failed", 0));
+        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
+
+        // when
+        boolean result = service.failJob("300", "provider_failed", "TTS 调用失败",
+                Map.of("raw", "connection refused"), "worker-1", 5L);
+
+        // then
+        assertThat(result).isTrue();
+        // 断言 log
+        ArgumentCaptor<GenerationJobLogEntity> logCaptor = ArgumentCaptor.forClass(GenerationJobLogEntity.class);
+        verify(jobLogMapper).insert(logCaptor.capture());
+        assertThat(logCaptor.getValue().getMessage()).isEqualTo("provider_failed: TTS 调用失败");
+        // 按修正一省略：无 releaseReservationInTx 调用
+    }
+
+    @Test
+    @DisplayName("failJob: fence guard fail → false")
+    void failJob_fenceFail() {
+        when(jobMapper.failJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(0);
+
+        boolean result = service.failJob("300", "provider_failed", "err",
+                null, "worker-1", 5L);
 
         assertThat(result).isFalse();
         verify(jobLogMapper, never()).insert(any(GenerationJobLogEntity.class));

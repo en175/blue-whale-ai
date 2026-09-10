@@ -62,4 +62,75 @@ class AssetSourceResolverTest {
 
         assertThat(new AssetSourceService(assetMapper).resolve(555L, 9L, 42L)).isNull();
     }
+
+    // ========== Blade-② resolveInputAssets tests ==========
+
+    @Test
+    @DisplayName("resolveInputAssets: 空列表 → 空映射")
+    void resolveInputAssets_empty() {
+        var result = new AssetSourceService(assetMapper)
+                .resolveInputAssets(List.of(), "9", "42");
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("resolveInputAssets: linked 分支必须传参（IKDD4Z，与 resolve 同源）")
+    void resolveInputAssets_passesLinkedIds() {
+        when(assetMapper.findLinkedAssetIds(9L, 42L)).thenReturn(List.of(777L));
+
+        AssetEntity a1 = new AssetEntity();
+        a1.setId(100L);
+        a1.setType("audio");
+        a1.setUrl("https://example.com/audio.mp3");
+
+        when(assetMapper.resolveInputAssetsWithLinked(
+                eq(List.of(100L)), eq(9L), eq(42L), eq(List.of(777L))))
+                .thenReturn(List.of(a1));
+
+        var result = new AssetSourceService(assetMapper)
+                .resolveInputAssets(List.of("100"), "9", "42");
+
+        assertThat(result).containsKey("100");
+        assertThat(result.get("100").getType()).isEqualTo("audio");
+        verify(assetMapper).findLinkedAssetIds(9L, 42L);
+    }
+
+    @Test
+    @DisplayName("resolveInputAssets: 缺失项不在 map 中")
+    void resolveInputAssets_missingNotInMap() {
+        when(assetMapper.findLinkedAssetIds(anyLong(), anyLong())).thenReturn(List.of());
+        when(assetMapper.resolveInputAssetsWithLinked(anyList(), anyLong(), anyLong(), anyList()))
+                .thenReturn(List.of()); // 无命中
+
+        var result = new AssetSourceService(assetMapper)
+                .resolveInputAssets(List.of("100", "101"), "9", "42");
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("resolveInputAssets: 多资产按 id 映射")
+    void resolveInputAssets_multipleAssets() {
+        when(assetMapper.findLinkedAssetIds(anyLong(), anyLong())).thenReturn(List.of());
+
+        AssetEntity audio = new AssetEntity();
+        audio.setId(100L);
+        audio.setType("audio");
+        audio.setUrl("https://example.com/audio.mp3");
+
+        AssetEntity image = new AssetEntity();
+        image.setId(101L);
+        image.setType("image");
+        image.setUrl("https://example.com/image.png");
+
+        when(assetMapper.resolveInputAssetsWithLinked(anyList(), anyLong(), anyLong(), anyList()))
+                .thenReturn(List.of(audio, image));
+
+        var result = new AssetSourceService(assetMapper)
+                .resolveInputAssets(List.of("100", "101"), "9", "42");
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get("100").getType()).isEqualTo("audio");
+        assertThat(result.get("101").getType()).isEqualTo("image");
+    }
 }

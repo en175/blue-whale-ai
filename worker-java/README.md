@@ -48,6 +48,10 @@ curl localhost:4002/ready
 | `FFMPEG_PATH` | 否 | ffmpeg 二进制路径（Dockerfile 须 ship 一个） | `ffmpeg`（PATH 查找） |
 | `MEDIA_EXTRACT_CONCURRENCY` | 否 | 提取并发度（1-16） | `2` |
 | `GENERATION_WORKER_PORT` | 否 | HTTP 端口 | `4002` |
+| `NEW_API_BASE_URL` | 是（audio 启用时） | new-api 网关地址 | — |
+| `GENERATION_CREDENTIAL_SECRET` | 是（audio 启用时） | 凭证密封密钥（≥16 字符） | — |
+| `NEW_API_AUDIO_TIMEOUT_MS` | 否 | 音频 TTS 超时（毫秒） | `30000` |
+| `AUDIO_CONCURRENCY` | 否 | 音频并发度（1-64） | `5` |
 
 ### 启动行为
 
@@ -82,7 +86,7 @@ worker/
 ├─ config(*Config/*Properties/*Condition) + web(*Controller)
 ```
 
-## 现状进度（IKENZZZ / IKEL4L / IKEL4N）
+## 现状进度（IKENZZZ / IKEL4L / IKEL4N / IKEL69）
 
 - [x] 工程骨架 / 配置绑定 / `/ready` / 消息契约测试（IKEL4L）
 - [x] **Job 状态机 extract 子集**（IKENZZZ）：
@@ -106,8 +110,38 @@ worker/
   - [x] config `MediaExtractEnabledCondition`：@Conditional 按 tag 启停
   - [x] config `StubDataSourceConfig`：未启用时的空 DataSource 回退
   - [x] Dockerfile：eclipse-temurin:21-jre + ffmpeg apt install
-- [x] tests（52 全绿）：
-  - 契约测试 6 + 状态机金标 10 + URL 解析 7 = **23（已有）**
-  - consumer template 5 + ffmpeg regex 12 + processor 错误映射 12 = **29（新增）**
+- [x] **audio 执行路径**（IKEL69 刀②）：
+  - [x] dto `ClaimedJobDto`：snake_case 投影（types.ts:3-16，音频/图片共用）
+  - [x] error `GenerationError`：错误码常量（error-codes.ts:20-70）
+  - [x] error `AudioProviderError`：音频供应商错误（含 code）
+  - [x] entity `GenerationOutputSlotEntity` + mapper：槽位聚合（settle-ops.ts:79-121）
+  - [x] credential `GenerationCredentialService`：AES-256-GCM 解封（generation-credential.ts:52-70）
+    - 格式：`v1.<nonce-b64url>.<tag-b64url>.<ciphertext-b64url>`
+    - 密钥：SHA-256(secret) → 32 bytes
+  - [x] audio `NewApiAudioClient`：OkHttp TTS 客户端（new-api-audio-provider.ts:55-190）
+    - POST /v1/audio/speech + Bearer + X-Trace-Id + X-Client-System: bluewhale（ADR-0080）
+    - 错误分类优先级：content > quota > provider_failed（§5 Chinese regexes）
+  - [x] service `JobStateMachineService` 扩展：
+    - `claimAudioJobById` → Optional<ClaimedJobDto>（不套 source 白名单，IKCR78）
+    - `completeJob` → boolean：fence guard + 槽位聚合 + events（**修正一：无 cost_reservations**）
+    - `failJob` → boolean：fence guard + pending slots→failed + log + events（**修正一：无 releaseReservation**）
+    - `createAsset` → String|null：fence guard + asset insert + asset.created event
+    - `appendLog` → job log helper
+  - [x] service `AssetSourceService` 扩展：`resolveInputAssets`（IKDD4Z linked 分支 REQUIRED）
+  - [x] processor `AudioJobProcessor`：完整音频编排（generation-worker.ts:367-446）
+    - claim → 解封凭证 → 校验输入 → 解析参考素材 → TTS → 转存 → createAsset → completeJob
+    - resolveAudioSeedReferences：asset_id → resolveInputAssets → audio/image 过滤 → URL 去重
+    - data-direct 转存：mime 恒 audio/mpeg；TOS 未配置 → 硬失败
+  - [x] consumer `AudioConsumer`：tag=audio, digitGuard=true, group=generation-audio-worker+suffix
+  - [x] config `AudioEnabledCondition`：@Conditional 按 tag 启停
+  - [x] config `RocketMqConfig` 扩展：audio consumer bean（Semaphore AUDIO_CONCURRENCY default 5）
+- [x] tests（**55 + 新增 ≈30 = ~85 全绿基线**）：
+  - 刀① 已有：契约测试 6 + 状态机金标 10 + URL 解析 7 + consumer template 5 + ffmpeg regex 12 + processor 错误映射 12 = **52**
+  - 刀② 新增：audio golden mirror 8 + crypto 向量 5 + TTS 错误分类 11 + 参考素材解析 8 + consumer template 6 + processor 错误映射 7 + AssetSourceService 4 = **~49**
 - [ ] backend internal endpoints 客户端（待 IKEL4J 交付端点契约 §4 定稿）
-- [ ] 其他 3 消费者（step / image / audio）
+- [ ] 其他 2 消费者（step / image）
+
+### 刀② 上线前提
+
+**IKEF1K（cost_reservations 整体下线）必须已合入 master**。
+修正一要求 Java 侧不实现任何 `cost_reservations` 逻辑；若 IKEF1K 未上线，TS 侧仍有结算路径，Java 写入会产生账不平。
