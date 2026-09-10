@@ -131,28 +131,19 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---------- 成组入口按钮 ---------- */
+/* ---------- 框选悬浮条（成组 / 下载） ---------- */
 
-.createBtn {
+.selectionBar {
   pointer-events: auto;
   position: absolute;
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 10px;
+  gap: 2px;
+  padding: 4px;
   transform: translate(-50%, -100%);
-  border-radius: var(--radius-sm);
-  background-color: rgba(26, 26, 26, 0.9);
+  background-color: rgba(26, 26, 26, 0.94);
   border: 1px solid var(--color-border-primary);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-xs);
-  cursor: pointer;
+  border-radius: var(--radius-md);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  transition: background-color var(--transition-fast);
-}
-
-.createBtn:hover {
-  background-color: var(--color-bg-hover);
 }

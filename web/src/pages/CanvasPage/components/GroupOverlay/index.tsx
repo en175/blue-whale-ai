@@ -2,7 +2,7 @@
  * GroupOverlay 成组交互层（IKD0JT A3/A4）：
  * - 组底框：组矩形（成组时刻固定）虚线框（线宽按 zoom 反向补偿保持屏幕恒定）
  * - 组徽标：底框左上角屏幕空间徽标，点击展开操作条（解组/删除）
- * - 成组入口：≥2 节点选中且未全部同组时，在选区上方浮现「成组」按钮
+ * - 成组入口：≥2 节点选中且未全部同组时，在选区上方浮现「成组」；框选后同时提供「下载」
  *   （Ctrl/Cmd+G 快捷键同效，见 Canvas 键盘处理）
  * - 动态成员：节点是否属于组 = 是否落在组矩形内（不存冻结名单）。
  * - 整组拖动：拖起组顶部把手，实时移动「当前在框内的全部节点」+ 组矩形
@@ -11,7 +11,7 @@
  * ============================================ */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useReactFlow, useViewport, type Node } from '@xyflow/react';
-import { Group, Ungroup, Trash2 } from 'lucide-react';
+import { Group, Ungroup, Trash2, Download } from 'lucide-react';
 import {
   memberBBox,
   membersInGroupBox,
@@ -32,6 +32,8 @@ interface GroupOverlayProps {
   onCreateGroup: (nodes: Node[]) => void;
   onUngroup: (groupId: string) => void;
   onDeleteGroup: (groupId: string) => void;
+  /** 依次下载组内/框选节点中的可下载素材 */
+  onDownloadNodes: (nodeIds: string[]) => void;
   /** 内部节点落笔（整组拖动实时移动成员用） */
   setNodes: (updater: (prev: Node[]) => Node[]) => void;
   /** 整组拖动结束：上抛矩形前后 + 成员节点位移，父级落盘并登记撤销 */
@@ -58,6 +60,7 @@ export default function GroupOverlay({
   onCreateGroup,
   onUngroup,
   onDeleteGroup,
+  onDownloadNodes,
   setNodes,
   onGroupFrameDragStop,
 }: GroupOverlayProps) {
@@ -115,6 +118,7 @@ export default function GroupOverlay({
     [selectedNodes],
   );
   const showCreateBtn = !!selectionBox && !allInOneGroup;
+  const showSelectionDownload = !!selectionBox;
   const createBtnPt = selectionBox
     ? flowToScreenPosition({ x: selectionBox.x + selectionBox.w / 2, y: selectionBox.y })
     : null;
@@ -273,7 +277,7 @@ export default function GroupOverlay({
         target.closest('.react-flow__panel') ||
         target.closest(`.${styles.groupBadgeWrap}`) ||
         target.closest(`.${styles.groupTools}`) ||
-        target.closest(`.${styles.createBtn}`)
+        target.closest(`.${styles.selectionBar}`)
       ) {
         return null;
       }
@@ -296,13 +300,16 @@ export default function GroupOverlay({
     [screenToFlowPosition],
   );
 
-  /** 捕获阶段接管 mousedown：组框层在 renderer(z4) 之下、pane 铺满画布会吃掉事件，
-   *  故不靠组框自身接事件，而是在 window 捕获阶段先做命中测试。命中「组内空白」时
-   *  stopPropagation 阻断事件下传到 pane —— pane 的平移/框选由 d3-zoom 的 `mousedown.zoom`
-   *  驱动（@xyflow/system createFilter 判 event.type === 'mousedown'），拦 pointerdown 无效。 */
+  /** 捕获阶段接管 pointerdown：组框层在 renderer(z4) 之下、pane 铺满画布会吃掉事件，
+   *  故不靠组框自身接事件，而在 window 捕获阶段先做命中测试。命中「组内空白」时
+   *  stopPropagation 阻断事件下传到 pane —— ReactFlow v12 的框选由 pane 上的
+   *  `onPointerDownCapture`（React 合成捕获）驱动，React 在根容器挂捕获监听，window
+   *  原生捕获先于它执行，此处 stopPropagation 即可在合成捕获前阻断框选武装；
+   *  平移则由 d3-zoom 的 `mousedown.zoom` 驱动，select 模式左键已被 panOnDrag=[1] 过滤，
+   *  不会被触发。 */
   useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (e.button !== 0 || draggingRef.current) return;
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0 || !e.isPrimary || draggingRef.current) return;
       const g = hitGroupAt(e.clientX, e.clientY, e.target);
       if (!g) return;
       e.preventDefault();
@@ -315,10 +322,10 @@ export default function GroupOverlay({
       e.stopPropagation();
       e.preventDefault();
     };
-    window.addEventListener('mousedown', onDown, true);
+    window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('click', onClick, true);
     return () => {
-      window.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('pointerdown', onDown, true);
       window.removeEventListener('click', onClick, true);
     };
   }, [hitGroupAt, startFrameDrag]);
@@ -427,6 +434,18 @@ export default function GroupOverlay({
                   </button>
                   <button
                     className={styles.toolBtn}
+                    title="下载组内全部素材"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const members = membersInGroupBox(nodes, f.box, f.excludedIds);
+                      onDownloadNodes(members.map((n) => n.id));
+                    }}
+                  >
+                    <Download size={13} strokeWidth={2} />
+                    <span>下载</span>
+                  </button>
+                  <button
+                    className={styles.toolBtn}
                     title="删除组内全部节点"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -443,20 +462,34 @@ export default function GroupOverlay({
           );
         })}
 
-        {/* 成组入口按钮：上抛选中节点对象（含 measured 实际尺寸），父级按真实包围盒定格组矩形 */}
-        {showCreateBtn && createBtnPt && (
-          <button
-            className={styles.createBtn}
-            style={{ left: createBtnPt.x, top: createBtnPt.y }}
-            onClick={(e) => {
-              e.stopPropagation();
-              onCreateGroup(selectedNodes);
-            }}
-            title="成组（Ctrl/Cmd+G）"
-          >
-            <Group size={12} strokeWidth={2} />
-            <span>成组</span>
-          </button>
+        {/* 框选悬浮条：成组（未同组时）+ 下载；已成组时仍保留下载 */}
+        {showSelectionDownload && createBtnPt && (
+          <div className={styles.selectionBar} style={{ left: createBtnPt.x, top: createBtnPt.y }}>
+            {showCreateBtn && (
+              <button
+                className={styles.toolBtn}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCreateGroup(selectedNodes);
+                }}
+                title="成组（Ctrl/Cmd+G）"
+              >
+                <Group size={12} strokeWidth={2} />
+                <span>成组</span>
+              </button>
+            )}
+            <button
+              className={styles.toolBtn}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDownloadNodes(selectedNodes.map((n) => n.id));
+              }}
+              title="下载选中全部素材"
+            >
+              <Download size={12} strokeWidth={2} />
+              <span>下载</span>
+            </button>
+          </div>
         )}
       </div>
     </>

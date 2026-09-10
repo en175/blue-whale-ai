@@ -103,6 +103,7 @@ import {
   type GroupFrameDragResult,
 } from './canvasGroups';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
+import { blobToUint8Array, buildStoreZip, uniqueDownloadName } from './groupDownloadZip';
 import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from './quoteConversation';
 import {
   canvasLocationSearch,
@@ -3283,24 +3284,105 @@ export default function CanvasPage() {
     }
   };
 
+  /** 触发浏览器文件下载 */
+  const triggerFileDownload = (href: string, filename: string, revokeObjectUrl = false) => {
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    if (revokeObjectUrl) window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+  };
+
+  /** 拉取远程素材为 blob；失败则 null（组下载不再 window.open，避免只弹出第一个）。
+   *  开发模式下跨域素材走 Vite /__tos-fetch 代理，避免浏览器 CORS 拦截 fetch blob */
+  const fetchAssetBlob = async (src: string): Promise<Blob | null> => {
+    const fetchUrl =
+      import.meta.env.DEV && /^https?:\/\//.test(src) && !src.startsWith(window.location.origin)
+        ? `/__tos-fetch?url=${encodeURIComponent(src)}`
+        : src;
+    try {
+      const res = await fetch(fetchUrl);
+      if (!res.ok) return null;
+      return await res.blob();
+    } catch {
+      return null;
+    }
+  };
+
+  /** 下载单个媒体节点：成功返回 true，无素材则 false */
+  const downloadMediaById = async (id: string, notifyMissing: boolean): Promise<boolean> => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (node?.data?.assetMissing) {
+      if (notifyMissing) showToast('warn', '素材已被删除');
+      return false;
+    }
+    const src = node?.data?.src as string | undefined;
+    if (!src) return false;
+    const name = (node?.data?.fileName as string) || id;
+    const blob = await fetchAssetBlob(src);
+    if (blob) {
+      triggerFileDownload(URL.createObjectURL(blob), name, true);
+      return true;
+    }
+    window.open(src, '_blank', 'noopener');
+    return true;
+  };
+
+  type GroupDownloadItem = { filename: string; blob: Blob };
+
+  /** 收集组内全部可下载素材（媒体原件 + 文本 txt），按节点顺序 */
+  const collectGroupDownloadItems = async (ids: string[]): Promise<GroupDownloadItem[]> => {
+    const items: GroupDownloadItem[] = [];
+    const usedNames = new Set<string>();
+    for (const id of ids) {
+      const media = mediaNodesRef.current.find((n) => n.id === id);
+      const src = media?.data?.src as string | undefined;
+      if (media && !media.data?.assetMissing && src) {
+        const blob = await fetchAssetBlob(src);
+        if (blob) {
+          items.push({
+            filename: uniqueDownloadName((media.data?.fileName as string) || id, usedNames),
+            blob,
+          });
+        }
+        continue;
+      }
+      const textNode = textNodesRef.current.find((n) => n.id === id);
+      if (textNode) {
+        const text = extractTextNodeText(textNode.data);
+        if (!text.trim()) continue;
+        const title =
+          typeof textNode.data.title === 'string' && textNode.data.title.trim()
+            ? (textNode.data.title as string)
+            : '文本';
+        items.push({
+          filename: uniqueDownloadName(`${title}.txt`, usedNames),
+          blob: new Blob([text], { type: 'text/plain;charset=utf-8' }),
+        });
+      }
+    }
+    return items;
+  };
+
+  /** 组下载：浏览器会拦截同一次点击的多次 a.click，故打成一份 zip 一次保存全部素材 */
+  const handleDownloadGroupNodes = async (ids: string[]) => {
+    const items = await collectGroupDownloadItems(ids);
+    if (items.length === 0) {
+      showToast('warn', '组内没有可下载的素材');
+      return;
+    }
+    const zipParts = await Promise.all(
+      items.map(async (item) => ({ name: item.filename, data: await blobToUint8Array(item.blob) })),
+    );
+    const zipBlob = await buildStoreZip(zipParts);
+    triggerFileDownload(URL.createObjectURL(zipBlob), '组素材.zip', true);
+  };
+
   /** 下载：优先 fetch blob 触发下载，跨域失败回退新标签页打开 */
   const handleNodeDownload = async (id: string) => {
-    const ref = nodeRefOf(id);
-    if (!ref) return;
-    try {
-      const res = await fetch(ref.src);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = ref.name || 'download';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch {
-      window.open(ref.src, '_blank', 'noopener');
-    }
+    await downloadMediaById(id, true);
   };
 
   /** 查看媒体详情：先展示节点快照，再按 assetId 补全完整资产字段。 */
@@ -4284,6 +4366,7 @@ export default function CanvasPage() {
           onCreateGroup={handleCreateGroup}
           onUngroupGroup={handleUngroup}
           onDeleteGroup={handleDeleteGroup}
+          onDownloadGroup={handleDownloadGroupNodes}
           onGroupFrameDragStop={handleGroupFrameDragStop}
         />
 
