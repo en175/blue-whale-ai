@@ -197,9 +197,6 @@ export default function CanvasPage() {
   const [pickTarget, setPickTarget] = useState<'image' | 'video' | 'audio' | 'product' | 'asset' | null>(null);
   /** 视频草稿「到节点选择」的目标参考角色（IKDMQS）：首帧/尾帧由 Dock 入口显式指定，缺省普通参考 */
   const [pickRefRole, setPickRefRole] = useState<VideoRefRole | null>(null);
-  /** 跳过下一次 selectionChange 触发的面板关闭：命中「到节点选择」节点后，
-   *  pickMode 被清空可能早于 selectionChange，导致绑定面板被误关。 */
-  const skipPanelCloseRef = useRef(false);
   /** 商品卡选取目标节点ID（选中的图片注入哪个商品卡） */
   const [pickProductId, setPickProductId] = useState<string | null>(null);
   /** 资产卡选取目标节点ID（选中的图片注入哪个资产卡） */

@@ -65,7 +65,7 @@ function fallbackWaveform(src: string, duration: number, bars: number): number[]
   });
 }
 
-export default function AudioPlayer({ src, fileName, onDownload }: AudioPlayerProps) {
+export default function AudioPlayer({ src }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);

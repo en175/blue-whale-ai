@@ -111,7 +111,10 @@ export async function buildStoreZip(files: { name: string; data: Uint8Array }[])
     u32(offset),
     u16(0),
   ]);
-  return new Blob([concatBytes([...locals, centralDir, eocd])], { type: 'application/zip' });
+  const zipBytes = concatBytes([...locals, centralDir, eocd]);
+  const zipBuffer = new ArrayBuffer(zipBytes.byteLength);
+  new Uint8Array(zipBuffer).set(zipBytes);
+  return new Blob([zipBuffer], { type: 'application/zip' });
 }
 
 function concatBytes(parts: Uint8Array[]): Uint8Array {
