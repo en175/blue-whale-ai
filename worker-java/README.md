@@ -52,6 +52,8 @@ curl localhost:4002/ready
 | `GENERATION_CREDENTIAL_SECRET` | 是（audio 启用时） | 凭证密封密钥（≥16 字符） | — |
 | `NEW_API_AUDIO_TIMEOUT_MS` | 否 | 音频 TTS 超时（毫秒） | `30000` |
 | `AUDIO_CONCURRENCY` | 否 | 音频并发度（1-64） | `5` |
+| `IMAGE_CONCURRENCY` | 否 | 图片并发度（1-64） | `20` |
+| `NEW_API_IMAGE_TIMEOUT_MS` | 否 | 图片生成超时（毫秒） | `60000` |
 
 ### 启动行为
 
@@ -135,11 +137,53 @@ worker/
   - [x] consumer `AudioConsumer`：tag=audio, digitGuard=true, group=generation-audio-worker+suffix
   - [x] config `AudioEnabledCondition`：@Conditional 按 tag 启停
   - [x] config `RocketMqConfig` 扩展：audio consumer bean（Semaphore AUDIO_CONCURRENCY default 5）
-- [x] tests（**55 + 新增 ≈30 = ~85 全绿基线**）：
-  - 刀① 已有：契约测试 6 + 状态机金标 10 + URL 解析 7 + consumer template 5 + ffmpeg regex 12 + processor 错误映射 12 = **52**
-  - 刀② 新增：audio golden mirror 8 + crypto 向量 5 + TTS 错误分类 11 + 参考素材解析 8 + consumer template 6 + processor 错误映射 7 + AssetSourceService 4 = **~49**
+- [x] **image 执行路径**（IKELJA 刀③）：
+  - [x] error `ImageProviderError`：图片供应商错误（含 code，image-provider.ts:41-49）
+  - [x] entity `GenerationModelCapabilityEntity` + mapper：模型能力行（asset-ops.ts:103-149）
+  - [x] gateway `NewApiErrorClassifier`：共享错误分类（从 NewApiAudioClient 提取，content > quota > provider_failed）
+  - [x] gateway `NewApiImageClient`：OkHttp 图片生成客户端（new-api-generation-ops.ts:22-175）
+    - 端点选择：有参考图 → POST /v1/images/edits（multipart）；无 → POST /v1/images/generations（JSON）
+    - 请求头：Bearer + X-Trace-Id + X-Client-System: bluewhale（ADR-0080）
+    - 响应解析：{data:[{url}]}（parseImageList :333-344）
+  - [x] processor `ImageChannelMapper`：渠道映射工具（image-channel-parser.ts + seedream-image-size.ts）
+    - seedream 代码表（doubao-seedream-* 族模型尺寸查算）
+    - gpt 矩阵查表（matrix[sizeId][ratioId]，大小写不敏感）
+    - banana 双映射（quality × size）
+    - supported_sizes 匹配（id / api_value / apiValue）
+    - features JSON 解析（maxReferenceImages / max_reference_images）
+  - [x] processor `ImageJobProcessor`：完整图片编排（generation-worker.ts:499-685）
+    - claim → 校验输入 → 查能力 → 校验参考图 → 解封凭证 → 渠道映射 →
+      调 provider（批量循环）→ 转存 → createAsset 循环 → completeJob
+    - input_asset_ids（IKA72G）→ 参考图字段（与视频 reference_asset_ids 不同）
+    - 瞬态重试：provider_failed + retry_count<3 → requeueImageJobForRetry
+      退避 30/60/120s 封顶 300s（caller 计算），return WITHOUT ack-fail
+    - persistProviderImage：url→fetch→ImageIO 宽高→TOS 上传
+      契约 §8：ImageIO 解析失败静默 null，资产照常落库（webp 不支持但等价标准满足）
+    - TOS 未配置 → 降级直存 URL（storageKey=null，generation-worker.ts:752-761）
+    - **修正三**：ARK provider（ark-image-provider.ts）不移植——new-api 网关是唯一 provider
+      - 不引入 GENERATION_PROVIDER env / VOLC_ARK_* 配置
+      - 不实现 ark-image-provider.ts 的任何逻辑
+  - [x] service `JobStateMachineService` 扩展：
+    - `claimImageJobById` → Optional<ClaimedJobDto>（**套 source 白名单**：bottom_dock/plan_apply/storyboard_preview）
+    - `requeueImageJobForRetry` → boolean（WHERE status='processing'，无 fence；.catch→false）
+    - `syncRecordSummary`：completeJob/failJob 事务内回写 scene_card_generation_records.summary_status
+      （internals.ts:21-62 逐字移植；resolveLogicalSlots + aggregateSlotStatus 纯函数）
+    - `syncStoryboardPreviewSummary`：completeJob/failJob 事务内回写 storyboard_previews.summary_status
+      （internals.ts:67-113 逐字移植；按 first_generation_job_id 反查）
+  - [x] entity `SceneCardGenerationRecordEntity` + mapper（syncRecordSummary 用）
+  - [x] entity `StoryboardPreviewEntity` + mapper（syncStoryboardPreviewSummary 用）
+  - [x] consumer `ImageConsumer`：tag=image, digitGuard=true, group=generation-image-worker+suffix
+  - [x] config `ImageEnabledCondition`：@Conditional 按 tag 启停
+  - [x] config `RocketMqConfig` 扩展：image consumer bean（Semaphore IMAGE_CONCURRENCY default 20，1-64）
+  - [x] storage `TosMediaStorage` 扩展：`uploadImageBytes`（uploads/{userId}/image/{uuid}.{ext}）
+- [x] tests（**109 + 新增 62 = 171 全绿基线**）：
+  - 刀①② 已有 109 全绿
+  - 刀③ 新增 62：image consumer template 6 + processor 错误映射 15（含瞬态重试 G34-G38）
+    + 渠道映射矩阵 15 + 状态机金标镜像 23（claimImage G06-image + requeue G14-G16
+    + 多图槽聚合 G39-G41 + syncRecord G42-G44 + syncPreview G45-G46
+    + aggregateSlotStatus/resolveLogicalSlots G47-G48 纯函数 6） = **62**
 - [ ] backend internal endpoints 客户端（待 IKEL4J 交付端点契约 §4 定稿）
-- [ ] 其他 2 消费者（step / image）
+- [ ] 其他 1 消费者（step）
 
 ### 刀② 上线前提
 

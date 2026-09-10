@@ -173,5 +173,159 @@
     "title_zh": "failJob happy path（修正一：无 releaseReservation）",
     "given": "failJobGuard count=1; 无 pending slots; job.project_id 非空",
     "expect": "status='failed'; error JSON; generation_job_logs; generation_job.status_changed 事件; 无 releaseReservationInTx（修正一）"
+  },
+  {
+    "case_id": "G27",
+    "contract_ref": "附录A/image:303",
+    "title_zh": "图片 invalid_input：缺少 prompt 或 model_id",
+    "given": "input 中 prompt 为空或 model_id 为空",
+    "expect": "failClaimed(ERROR_INVALID_INPUT, '缺少 prompt 或 model_id')"
+  },
+  {
+    "case_id": "G28",
+    "contract_ref": "附录A/image:338",
+    "title_zh": "图片 model_unavailable：capability 缺失",
+    "given": "findImageCapability(modelId, sizeId) 返回 null",
+    "expect": "failClaimed(ERROR_MODEL_UNAVAILABLE, '未开通或不受支持的模型: ...')"
+  },
+  {
+    "case_id": "G29",
+    "contract_ref": "附录A/image:349",
+    "title_zh": "图片 invalid_reference：参考图数量超限",
+    "given": "referenceIds.length > maxReferenceCount（capability.features.maxReferenceImages）",
+    "expect": "failClaimed(ERROR_INVALID_REFERENCE, '当前模型最多支持 N 张参考图')"
+  },
+  {
+    "case_id": "G30",
+    "contract_ref": "附录A/image:362",
+    "title_zh": "图片 invalid_reference：参考素材不存在或类型不匹配",
+    "given": "resolveInputAssets 返回数量 < referenceIds.length 或存在非 image 类型",
+    "expect": "failClaimed(ERROR_INVALID_REFERENCE, '参考素材不存在或无权访问')"
+  },
+  {
+    "case_id": "G31",
+    "contract_ref": "附录A/image:502",
+    "title_zh": "图片 provider_credential_missing：凭证缺失",
+    "given": "input.provider_credential 非字符串或为空",
+    "expect": "failClaimed(ERROR_PROVIDER_CREDENTIAL_MISSING, '图片任务缺少供应商凭证')"
+  },
+  {
+    "case_id": "G32",
+    "contract_ref": "附录A/image:537",
+    "title_zh": "图片 invalid_reference_type：渠道映射失败",
+    "given": "mapImageChannelRequest 返回 ok=false（gpt/banana 矩阵无匹配且无回退）",
+    "expect": "failClaimed(ERROR_INVALID_REFERENCE_TYPE, '模型、分辨率与宽高比组合不受支持')"
+  },
+  {
+    "case_id": "G33",
+    "contract_ref": "附录A/image:600",
+    "title_zh": "图片 no_result：provider 返回 0 张",
+    "given": "provider.generate 返回空数组",
+    "expect": "failClaimed(ERROR_NO_RESULT, '生成服务未返回结果')"
+  },
+  {
+    "case_id": "G34",
+    "contract_ref": "§6/generation-worker.ts:705-725",
+    "title_zh": "图片瞬态重试：provider_failed + retry_count=0 → requeue 30s",
+    "given": "provider 抛 provider_failed; retry_count=0 < MAX_IMAGE_RETRIES(3)",
+    "expect": "requeueImageJobForRetry(jobId, now+30s) → true; 不调用 failJob; 不 ack-fail"
+  },
+  {
+    "case_id": "G35",
+    "contract_ref": "§6/generation-worker.ts:84-87",
+    "title_zh": "图片瞬态重试：retry_count=1 → requeue 60s",
+    "given": "provider 抛 provider_failed; retry_count=1",
+    "expect": "requeueImageJobForRetry(jobId, now+60s) → true; backoffMs=30000*2^1=60000"
+  },
+  {
+    "case_id": "G36",
+    "contract_ref": "§6/generation-worker.ts:84-87",
+    "title_zh": "图片瞬态重试：retry_count=2 → requeue 120s",
+    "given": "provider 抛 provider_failed; retry_count=2",
+    "expect": "requeueImageJobForRetry(jobId, now+120s) → true; backoffMs=30000*2^2=120000"
+  },
+  {
+    "case_id": "G37",
+    "contract_ref": "§6/generation-worker.ts:710",
+    "title_zh": "图片瞬态重试：retry_count>=3 → fail（max exceeded）",
+    "given": "provider 抛 provider_failed; retry_count=3 >= MAX_IMAGE_RETRIES",
+    "expect": "不调用 requeueImageJobForRetry; failClaimed(provider_failed)"
+  },
+  {
+    "case_id": "G38",
+    "contract_ref": "§6/generation-worker.ts:76",
+    "title_zh": "图片非瞬态错误：content_rejected → fail 不 requeue",
+    "given": "provider 抛 content_rejected; retry_count=0",
+    "expect": "不在 TRANSIENT_IMAGE_ERROR_CODES 中 → 不调用 requeue; failClaimed(content_rejected)"
+  },
+  {
+    "case_id": "G39",
+    "contract_ref": "settle-ops.ts:104-114",
+    "title_zh": "completeJob 多图槽位聚合：partially_succeeded",
+    "given": "4 个输出槽; 只产出 2 个 asset",
+    "expect": "slot 0-1 → succeeded + asset_id; slot 2-3 → failed; job status='partially_succeeded'"
+  },
+  {
+    "case_id": "G40",
+    "contract_ref": "settle-ops.ts:104-114",
+    "title_zh": "completeJob 全槽成功：不修正状态",
+    "given": "2 个输出槽; 产出 2 个 asset",
+    "expect": "slot 0-1 → succeeded; 不调用 updateJobStatus（保持 guard 设置的 succeeded）"
+  },
+  {
+    "case_id": "G41",
+    "contract_ref": "settle-ops.ts:104-114",
+    "title_zh": "completeJob 全槽失败：failed",
+    "given": "2 个输出槽; 0 个 asset",
+    "expect": "slot 0-1 → failed; job status='failed'"
+  },
+  {
+    "case_id": "G42",
+    "contract_ref": "internals.ts:21-62 syncRecordSummary",
+    "title_zh": "completeJob 全槽成功 + record 关联 → summary_status='success'",
+    "given": "firstSlot.scene_card_generation_record_id 非空; 所有槽 succeeded",
+    "expect": "scene_card_generation_records.summary_status='success'; version+1; scene_card_generation_record.summary_changed 事件"
+  },
+  {
+    "case_id": "G43",
+    "contract_ref": "internals.ts:39-46 aggregateSlotStatus",
+    "title_zh": "completeJob 部分成功 + record → summary_status='partial'",
+    "given": "firstSlot 关联 record; 部分 succeeded 部分 failed",
+    "expect": "record.summary_status='partial'; job status='partially_succeeded'"
+  },
+  {
+    "case_id": "G44",
+    "contract_ref": "settle-ops.ts:197 null-guard",
+    "title_zh": "completeJob 无 record 关联 → 零副作用",
+    "given": "firstSlot.scene_card_generation_record_id=null（音频/普通图片）",
+    "expect": "sceneCardRecordMapper.updateSummaryStatus 不被调用; findBySceneCardRecordId 不被调用"
+  },
+  {
+    "case_id": "G45",
+    "contract_ref": "internals.ts:67-113 syncStoryboardPreviewSummary",
+    "title_zh": "completeJob + storyboard_preview 关联 → summary_status 同步",
+    "given": "storyboard_previews.first_generation_job_id=jobId 命中; 槽全成功",
+    "expect": "storyboard_previews.summary_status='success'; version+1; storyboard_preview.summary_changed 事件"
+  },
+  {
+    "case_id": "G46",
+    "contract_ref": "internals.ts:75 null-guard",
+    "title_zh": "completeJob 无 storyboard_preview 关联 → 零副作用",
+    "given": "findFirst(first_generation_job_id=jobId) 返回 null",
+    "expect": "storyboardPreviewMapper.updateSummaryStatus 不被调用"
+  },
+  {
+    "case_id": "G47",
+    "contract_ref": "generation-output-slot-repo.ts:15-24",
+    "title_zh": "aggregateSlotStatus 纯函数：pending → generating",
+    "given": "槽状态含 pending",
+    "expect": "返回 'generating'（尚有未终态槽）"
+  },
+  {
+    "case_id": "G48",
+    "contract_ref": "generation-output-slot-repo.ts:28-43",
+    "title_zh": "resolveLogicalSlots：同 slot_index 重试 → succeeded 优先",
+    "given": "slot_index=0 有两次尝试（先 failed 后 succeeded）",
+    "expect": "逻辑槽保留 succeeded（succeeded 是永久终态）"
   }
 ]

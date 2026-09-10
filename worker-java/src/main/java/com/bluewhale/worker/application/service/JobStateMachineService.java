@@ -5,6 +5,8 @@ import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.ProjectEventEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
+import com.bluewhale.worker.domain.entity.SceneCardGenerationRecordEntity;
+import com.bluewhale.worker.domain.entity.StoryboardPreviewEntity;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
@@ -15,6 +17,8 @@ import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.mapper.ProjectEventMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
+import com.bluewhale.worker.infrastructure.mapper.SceneCardGenerationRecordMapper;
+import com.bluewhale.worker.infrastructure.mapper.StoryboardPreviewMapper;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -52,19 +56,25 @@ public class JobStateMachineService {
     private final GenerationJobLogMapper jobLogMapper;
     private final ProjectEventMapper projectEventMapper;
     private final GenerationOutputSlotMapper slotMapper;
+    private final SceneCardGenerationRecordMapper sceneCardRecordMapper;
+    private final StoryboardPreviewMapper storyboardPreviewMapper;
 
     public JobStateMachineService(
             GenerationJobMapper jobMapper,
             AssetMapper assetMapper,
             GenerationJobLogMapper jobLogMapper,
             ProjectEventMapper projectEventMapper,
-            GenerationOutputSlotMapper slotMapper
+            GenerationOutputSlotMapper slotMapper,
+            SceneCardGenerationRecordMapper sceneCardRecordMapper,
+            StoryboardPreviewMapper storyboardPreviewMapper
     ) {
         this.jobMapper = jobMapper;
         this.assetMapper = assetMapper;
         this.jobLogMapper = jobLogMapper;
         this.projectEventMapper = projectEventMapper;
         this.slotMapper = slotMapper;
+        this.sceneCardRecordMapper = sceneCardRecordMapper;
+        this.storyboardPreviewMapper = storyboardPreviewMapper;
     }
 
     // ========== 刀① media_extract 路径 ==========
@@ -290,6 +300,88 @@ public class JobStateMachineService {
         ));
     }
 
+    // ========== 图片路径（blade-③ IKELJA） ==========
+
+    /**
+     * 领取图片作业（claim-ops.ts:331-386 claimImageJobById）。
+     * <p>
+     * 两段式 CAS（契约 §3.1）：
+     * 1. SELECT candidate WHERE id=? AND type='image' AND source IN 白名单
+     *    AND is_delete=false AND next_action_at&lt;=now AND (queued OR processing+孤儿)
+     * 2. UPDATE CAS: status='processing', lease_owner=?, lease_expires_at=now+120s,
+     *    last_polled_at=now, fencing_token+1, version+1
+     * <p>
+     * 返回投影用增后 token（candidate.fencing_token + 1）。
+     * <b>套 source 白名单</b>（与 audio 不同：claimImageJobById :339 source IN CLAIMABLE_JOB_SOURCES）。
+     * <b>NO .catch on by-id</b>（契约 §3.1 不对称：DB 异常上抛）。
+     */
+    public Optional<ClaimedJobDto> claimImageJobById(String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        // 1. 候选查询（claim-ops.ts:335-354）
+        GenerationJobEntity candidate = jobMapper.findImageCandidate(jobIdLong);
+        if (candidate == null) {
+            return Optional.empty();
+        }
+
+        // 2. CAS 更新（claim-ops.ts:358-372）
+        LocalDateTime leaseExpiresAt = LocalDateTime.now().plusSeconds(LEASE_SECONDS);
+        int affected = jobMapper.claimImageCas(
+                jobIdLong,
+                workerId,
+                leaseExpiresAt,
+                candidate.getFencingToken(),
+                candidate.getStatus()
+        );
+
+        if (affected == 0) {
+            return Optional.empty();
+        }
+
+        // 3. 返回 snake_case 投影（claim-ops.ts:375-385）
+        long postIncrementToken = candidate.getFencingToken() + 1;
+        Map<String, Object> input = parseJson(candidate.getInput());
+
+        return Optional.of(new ClaimedJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                candidate.getType(),
+                input != null ? input : Map.of(),
+                candidate.getExpectedOutputCount() != null ? candidate.getExpectedOutputCount() : 1,
+                candidate.getRetryCount() != null ? candidate.getRetryCount() : 0,
+                candidate.getCancelRequestedAt() != null,
+                postIncrementToken
+        ));
+    }
+
+    /**
+     * 瞬态重试：图片作业回 queued（claim-ops.ts:561-578 requeueImageJobForRetry）。
+     * <p>
+     * WHERE id=? AND status='processing'（无 fence 入参——与 TS SQL 逐字一致，
+     * 契约附录 B 注：「无 fence 入参——Java 移植时以其 SQL 实况为准」）。
+     * <p>
+     * SET status='queued', lease_owner=null, lease_expires_at=null,
+     *     next_action_at=?, retry_count+1, fencing_token+1, version+1
+     * <p>
+     * DB 异常 → .catch → count=0 → false（不抛；claim-ops.ts:577）。
+     *
+     * @param jobId        作业 ID
+     * @param nextActionAt 下次可执行时间（caller 计算退避，generation-worker.ts:84-87）
+     * @return true = 重排成功；false = 守卫失败或 DB 异常
+     */
+    public boolean requeueImageJobForRetry(String jobId, LocalDateTime nextActionAt) {
+        Long jobIdLong = Long.parseLong(jobId);
+        try {
+            int affected = jobMapper.requeueImageCas(jobIdLong, nextActionAt);
+            return affected > 0;
+        } catch (Exception e) {
+            // .catch(() => ({count:0}))（claim-ops.ts:577）
+            log.warn("requeueImageJobForRetry DB 异常 jobId={}: {}", jobId, e.getMessage());
+            return false;
+        }
+    }
+
     /**
      * 完成作业（settle-ops.ts:53-206 completeJob + completeJobInTx）。
      * <p>
@@ -406,8 +498,16 @@ public class JobStateMachineService {
         }
 
         // 按修正一省略：settleReservationInTx（settle-ops.ts:228 整块删除）
-        // 按修正一省略：syncRecordSummary / syncStoryboardPreviewSummary
-        // （音频 job 不走 scene_card / storyboard 路径，此处不编造逻辑）
+
+        // 5. syncRecordSummary（settle-ops.ts:196-201）：firstSlot 关联 record 时回写
+        GenerationOutputSlotEntity firstSlot = slots.isEmpty() ? null : slots.get(0);
+        if (firstSlot != null && firstSlot.getSceneCardGenerationRecordId() != null) {
+            syncRecordSummary(firstSlot.getSceneCardGenerationRecordId());
+        }
+
+        // 6. syncStoryboardPreviewSummary（settle-ops.ts:203-204）：无条件调用，
+        //    内部 null-guard（findFirst 无命中 → 立即返回）
+        syncStoryboardPreviewSummary(jobIdLong);
 
         return true;
     }
@@ -497,7 +597,15 @@ public class JobStateMachineService {
         }
 
         // 按修正一省略：releaseReservationInTx（settle-ops.ts:333）
-        // 按修正一省略：syncRecordSummary / syncStoryboardPreviewSummary
+
+        // syncRecordSummary（settle-ops.ts:322-327）：firstSlot 关联 record 时回写
+        GenerationOutputSlotEntity firstFailSlot = slots.isEmpty() ? null : slots.get(0);
+        if (firstFailSlot != null && firstFailSlot.getSceneCardGenerationRecordId() != null) {
+            syncRecordSummary(firstFailSlot.getSceneCardGenerationRecordId());
+        }
+
+        // syncStoryboardPreviewSummary（settle-ops.ts:329-330）：无条件调用
+        syncStoryboardPreviewSummary(jobIdLong);
 
         return true;
     }
@@ -629,6 +737,124 @@ public class JobStateMachineService {
         } catch (JsonProcessingException e) {
             throw new RuntimeException("Failed to serialize to JSON", e);
         }
+    }
+
+    // ========== 摘要同步（generation-worker-internals.ts:18-113） ==========
+
+    /**
+     * 聚合 record 下全部输出槽状态，回写 SceneCardGenerationRecord.summary_status
+     * （internals.ts:21-62 syncRecordSummary 逐字移植）。
+     * <p>
+     * spec §4.4 状态机：全成功→success；部分→partial；全失败→failed；有 pending→generating。
+     * <p>
+     * 在 completeJob/failJob 事务内调用，保证槽位与 record 状态原子一致。
+     * null-guard：firstSlot.scene_card_generation_record_id == null → 不调用。
+     */
+    private void syncRecordSummary(Long recordId) {
+        List<GenerationOutputSlotEntity> slots = slotMapper.findBySceneCardRecordId(recordId);
+        if (slots.isEmpty()) return;
+
+        String summary = aggregateSlotStatus(resolveLogicalSlots(slots));
+        int affected = sceneCardRecordMapper.updateSummaryStatus(recordId, summary);
+        if (affected != 1) return;
+
+        // 回读 version 用于事件（internals.ts:51-61）
+        SceneCardGenerationRecordEntity record = sceneCardRecordMapper.selectById(recordId);
+        if (record != null && record.getProjectId() != null) {
+            appendProjectEvent(record.getProjectId(),
+                    "scene_card_generation_record.summary_changed",
+                    "scene_card_generation_record",
+                    recordId.toString(),
+                    record.getVersion(),
+                    "record_" + recordId.toString(),
+                    Map.of("record_id", recordId.toString(),
+                            "summary_status", summary));
+        }
+    }
+
+    /**
+     * 回写 StoryboardPreview.summary_status（internals.ts:67-113 syncStoryboardPreviewSummary）。
+     * <p>
+     * 按 first_generation_job_id 反查预览，聚合该 job 的 output_slots 推进汇总态。
+     * 与 syncRecordSummary 对偶——视频走 record 外键，图片 job 不设该外键故走本路径。
+     * <p>
+     * null-guard：findFirst 无命中 → 立即返回（internals.ts:75）。
+     */
+    private void syncStoryboardPreviewSummary(Long jobId) {
+        StoryboardPreviewEntity preview =
+                storyboardPreviewMapper.findByFirstGenerationJobId(jobId);
+        if (preview == null) return;
+
+        List<GenerationOutputSlotEntity> slots = slotMapper.findByJobId(jobId);
+        if (slots.isEmpty()) return;
+
+        String summary = aggregateSlotStatus(resolveLogicalSlots(slots));
+        int affected = storyboardPreviewMapper.updateSummaryStatus(preview.getId(), summary);
+        if (affected != 1) return;
+
+        if (preview.getProjectId() != null) {
+            // 回读 version（internals.ts:102-112）
+            StoryboardPreviewEntity updated =
+                    storyboardPreviewMapper.selectById(preview.getId());
+            int version = updated != null && updated.getVersion() != null
+                    ? updated.getVersion() : 0;
+            appendProjectEvent(preview.getProjectId(),
+                    "storyboard_preview.summary_changed",
+                    "storyboard_preview",
+                    preview.getId().toString(),
+                    version,
+                    "preview_" + preview.getId().toString(),
+                    Map.of("preview_id", preview.getId().toString(),
+                            "summary_status", summary));
+        }
+    }
+
+    /**
+     * 逻辑槽折叠（generation-output-slot-repo.ts:28-43 resolveLogicalSlots）。
+     * <p>
+     * 同一 slot_index 的历史尝试折叠为一个逻辑槽：
+     * succeeded 是永久终态——若当前逻辑槽已 succeeded 则保留；否则以最新尝试（id 最大）为准。
+     * 结果按 slot_index 升序排列。
+     */
+    static List<GenerationOutputSlotEntity> resolveLogicalSlots(
+            List<GenerationOutputSlotEntity> slots) {
+        // LinkedHashMap 保插入序；最后按 slotIndex 排序
+        Map<Integer, GenerationOutputSlotEntity> resolved = new java.util.LinkedHashMap<>();
+        for (GenerationOutputSlotEntity slot : slots) {
+            GenerationOutputSlotEntity current = resolved.get(slot.getSlotIndex());
+            if (current == null
+                    || !"succeeded".equals(current.getStatus())
+                    || "succeeded".equals(slot.getStatus())) {
+                resolved.put(slot.getSlotIndex(), slot);
+            }
+        }
+        return resolved.values().stream()
+                .sorted(java.util.Comparator.comparingInt(GenerationOutputSlotEntity::getSlotIndex))
+                .toList();
+    }
+
+    /**
+     * 槽位聚合汇总状态（generation-output-slot-repo.ts:15-24 aggregateSlotStatus）。
+     * <p>
+     * spec §4.4 状态机：
+     * - 全 succeeded → success
+     * - 全 failed/missing → failed
+     * - 至少一个 succeeded 且至少一个 failed/missing → partial
+     * - 存在 pending → generating（尚有未终态槽）
+     * <p>
+     * 注意：record/preview summary 四态（generating/partial/success/failed）与
+     * job status（succeeded/partially_succeeded/failed）是不同枚举，不混淆。
+     */
+    static String aggregateSlotStatus(List<GenerationOutputSlotEntity> resolvedSlots) {
+        if (resolvedSlots.isEmpty()) return "failed";
+        boolean hasPending = resolvedSlots.stream()
+                .anyMatch(s -> "pending".equals(s.getStatus()));
+        if (hasPending) return "generating";
+        long succeeded = resolvedSlots.stream()
+                .filter(s -> "succeeded".equals(s.getStatus())).count();
+        if (succeeded == resolvedSlots.size()) return "success";
+        if (succeeded == 0) return "failed";
+        return "partial";
     }
 
     /**

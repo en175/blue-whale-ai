@@ -204,6 +204,72 @@ public class TosMediaStorage {
         }
     }
 
+    /**
+     * 上传图片字节到 TOS（blade-③ image persistProviderMedia 路径）。
+     * <p>
+     * key 格式：{@code uploads/{userId}/image/{uuid去横线}.{ext}}（tos-storage.ts:182-183，
+     * 契约 §8：无前缀 uploads/{userId}/{type}/...）。
+     * <p>
+     * 扩展名按 MIME 映射（§8）：image/png→png, image/jpeg→jpg, image/gif→gif,
+     * image/webp→webp, 未知回退 jpg。
+     *
+     * @param data   图片字节
+     * @param mime   MIME 类型
+     * @return 上传结果
+     */
+    public UploadResult uploadImageBytes(byte[] data, String mime) {
+        return uploadImageBytes(data, mime, "0");
+    }
+
+    /**
+     * 上传图片字节到 TOS（带 userId，契约 §8 key 格式）。
+     */
+    public UploadResult uploadImageBytes(byte[] data, String mime, String userId) {
+        try {
+            String ext = mimeToExt(mime);
+            String uuid = java.util.UUID.randomUUID().toString().replace("-", "");
+            String storageKey = "uploads/" + userId + "/image/" + uuid + "." + ext;
+
+            ObjectMetaRequestOptions options = new ObjectMetaRequestOptions()
+                    .setHeaders(java.util.Map.of("Content-Type", mime));
+            PutObjectInput putInput = new PutObjectInput()
+                    .setBucket(bucket)
+                    .setKey(storageKey)
+                    .setContent(new ByteArrayInputStream(data))
+                    .setContentLength((long) data.length)
+                    .setOptions(options);
+            client.putObject(putInput);
+
+            PutObjectACLInput aclInput = new PutObjectACLInput()
+                    .setBucket(bucket)
+                    .setKey(storageKey)
+                    .setAcl(ACLType.ACL_PUBLIC_READ);
+            client.putObjectAcl(aclInput);
+
+            String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;
+            return new UploadResult(publicUrl, storageKey, mime, data.length);
+        } catch (Exception e) {
+            throw new MediaExtractError(
+                    MediaExtractError.UPLOAD_FAILED,
+                    "TOS 图片上传失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * MIME → 扩展名映射（契约 §8：未知 image 回退 jpg）。
+     */
+    private static String mimeToExt(String mime) {
+        if (mime == null) return "jpg";
+        return switch (mime.toLowerCase()) {
+            case "image/png" -> "png";
+            case "image/jpeg", "image/jpg" -> "jpg";
+            case "image/gif" -> "gif";
+            case "image/webp" -> "webp";
+            case "image/bmp" -> "bmp";
+            default -> "jpg";
+        };
+    }
+
     /** 上传结果（对齐 tos-media-extract.ts:86-91 返回形状）。 */
     public record UploadResult(String url, String storageKey, String mime, long size) {}
 

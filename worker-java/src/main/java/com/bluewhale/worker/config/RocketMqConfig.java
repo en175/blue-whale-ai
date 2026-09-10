@@ -2,8 +2,10 @@ package com.bluewhale.worker.config;
 
 import com.bluewhale.worker.application.consumer.AbstractGenerationConsumer;
 import com.bluewhale.worker.application.consumer.AudioConsumer;
+import com.bluewhale.worker.application.consumer.ImageConsumer;
 import com.bluewhale.worker.application.consumer.MediaExtractConsumer;
 import com.bluewhale.worker.application.processor.AudioJobProcessor;
+import com.bluewhale.worker.application.processor.ImageJobProcessor;
 import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 import org.apache.rocketmq.client.apis.ClientConfigurationBuilder;
@@ -127,6 +129,50 @@ public class RocketMqConfig {
         int concurrency = workerProps.concurrency().audio();
 
         return new AudioConsumer(
+                processor,
+                mqProps.topic(),
+                configBuilder.build(),
+                consumerGroup,
+                concurrency
+        );
+    }
+
+    /**
+     * image consumer（条件：enabled-tags 含 image）。
+     * <p>
+     * consumer group = "generation-image-worker" + groupSuffix（契约 §1）。
+     * tag = "image"（queue.constants.ts:5）。
+     * digitGuard = true（图片/音频做纯数字守卫，与 TS rocketmq-image.consumer.ts 一致）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    @Conditional(ImageEnabledCondition.class)
+    public ImageConsumer imageConsumer(
+            ImageJobProcessor processor,
+            WorkerProperties workerProps,
+            Environment env
+    ) {
+        RocketMqProperties mqProps = Binder.get(env)
+                .bind("rocketmq", RocketMqProperties.class)
+                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+
+        if (mqProps.endpoints().isBlank()) {
+            throw new IllegalStateException(
+                    "ROCKETMQ_ENDPOINTS 未配置：image consumer 无法启动");
+        }
+
+        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
+                .setEndpoints(mqProps.endpoints())
+                .enableSsl(mqProps.sslEnabled());
+
+        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
+            configBuilder.setCredentialProvider(
+                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
+        }
+
+        String consumerGroup = "generation-image-worker" + workerProps.groupSuffix();
+        int concurrency = workerProps.concurrency().image();
+
+        return new ImageConsumer(
                 processor,
                 mqProps.topic(),
                 configBuilder.build(),

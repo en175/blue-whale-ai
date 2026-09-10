@@ -217,6 +217,83 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("candidateStatus") String candidateStatus
     );
 
+    // ========== 图片路径（blade-③ IKELJA） ==========
+
+    /**
+     * 领取图片作业：候选查询（claim-ops.ts:335-354）。
+     * <p>
+     * 与 audio 不同：图片套 source 白名单（:339 source IN CLAIMABLE_JOB_SOURCES）。
+     * CLAIMABLE_JOB_SOURCES = ['bottom_dock','plan_apply','storyboard_preview']
+     * （-internals.ts:12-16）。
+     */
+    @Select("""
+            SELECT * FROM generation_jobs
+            WHERE id = #{jobId}
+              AND type = 'image'
+              AND source IN ('bottom_dock', 'plan_apply', 'storyboard_preview')
+              AND is_delete = false
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (
+                  status = 'processing'
+                  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+                )
+              )
+            ORDER BY id ASC
+            LIMIT 1
+            """)
+    GenerationJobEntity findImageCandidate(@Param("jobId") Long jobId);
+
+    /**
+     * 领取图片作业：CAS 更新（claim-ops.ts:358-372）。
+     * <p>
+     * 与 claimAudioCas 逐字一致（同 CAS 模式）。
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'processing',
+                lease_owner = #{workerId},
+                lease_expires_at = #{leaseExpiresAt},
+                last_polled_at = NOW(),
+                fencing_token = fencing_token + 1,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND fencing_token = #{fencingToken}
+              AND status = #{candidateStatus}
+            """)
+    int claimImageCas(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt,
+            @Param("fencingToken") Long fencingToken,
+            @Param("candidateStatus") String candidateStatus
+    );
+
+    /**
+     * 瞬态重试：图片作业回 queued（claim-ops.ts:561-578 requeueImageJobForRetry）。
+     * <p>
+     * WHERE id=? AND status='processing'（无 fence 入参——与 TS 逐字一致）。
+     * SET status='queued', lease_owner=null, lease_expires_at=null,
+     *     next_action_at=?, retry_count+1, fencing_token+1, version+1
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'queued',
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                next_action_at = #{nextActionAt},
+                retry_count = retry_count + 1,
+                fencing_token = fencing_token + 1,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+            """)
+    int requeueImageCas(
+            @Param("jobId") Long jobId,
+            @Param("nextActionAt") LocalDateTime nextActionAt
+    );
+
     // ========== 通用终态写入（settle-ops.ts:53-206 / 233-336） ==========
 
     /**

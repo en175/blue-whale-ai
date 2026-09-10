@@ -59,4 +59,17 @@ public interface GenerationOutputSlotMapper extends BaseMapper<GenerationOutputS
             WHERE id = #{slotId}
             """)
     int updateSlotStatus(@Param("slotId") Long slotId, @Param("status") String status);
+
+    /**
+     * 按 scene_card_generation_record_id 查槽位（internals.ts:25-29 syncRecordSummary）。
+     * <p>
+     * 返回全列，按 id asc（与 TS orderBy: {id: "asc"} 逐字一致）。
+     * 聚合在 Java 侧做（resolveLogicalSlots + aggregateSlotStatus）。
+     */
+    @Select("""
+            SELECT * FROM generation_output_slots
+            WHERE scene_card_generation_record_id = #{recordId}
+            ORDER BY id ASC
+            """)
+    List<GenerationOutputSlotEntity> findBySceneCardRecordId(@Param("recordId") Long recordId);
 }
