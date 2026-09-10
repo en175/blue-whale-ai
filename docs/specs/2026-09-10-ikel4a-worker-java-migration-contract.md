@@ -1,6 +1,6 @@
 # worker-java 迁移契约（IKEL4A / ADR-0084）
 
-- **状态**：**已冻结 + 修正一**（2026-09-10，IKEL4H 从代码逐项核对回填；同日修正一记录 cost_reservations 记账移出迁移范围）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
+- **状态**：**已冻结 + 修正一 + 修正二**（2026-09-10，IKEL4H 从代码逐项核对回填；修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
 
 ## 0. 修正一（2026-09-10）：cost_reservations 记账移出迁移范围（工单 IKEF1K）
 
@@ -13,6 +13,8 @@
   - §5 receipt→`actual_amount_fen`、`quotaToFen`、video 偏差 warn → 删
   - §6 audio/image/video 结算联动、§8 `publishVideoResult` settle 字段 → 删
   - §4 `claim` 投影中的 `reservedAmountFen`（video）→ 删
+
+**修正二（2026-09-10 用户二次拍板）**：薄执行器撤回，**Java 直连 DB 移植**。目标模型：TS 侧只发任务（建 job + 投 MQ + recovery 重投 + GC），Java 侧做任务（claim → 调上游 → 终态写），**双方只经数据库与 MQ 交互，无 HTTP**。§3 定位从「权威单源、不迁移」改为「**移植规格**」：Java 用 MyBatis-Plus 逐条实现并以金标测试套件对账；§4 endpoints **不采纳**，保留作移植职能清单（签名对照见附录 B）。刀① 不受影响；刀②③④ 开工前提 = IKEF1K 已合入 master。
 - **原则**：领域规则权威在 NestJS backend 侧；§3/§4 描述的实现**不迁移、只暴露**——Java 侧经 internal endpoints 使用，禁止二次实现。
 - 文件行号基线 = 本地 master `59ba3282`。
 
@@ -38,7 +40,7 @@
 - 领取 source 白名单：image/audio 共用 `CLAIMABLE_JOB_SOURCES = [bottom_dock, plan_apply, storyboard_preview]`（`-internals.ts:12-16`）；video 硬编码 `[bottom_dock, plan_apply, plan, scene_card]`（`claim-ops:139,261`）；**media_extract / audio claim-by-id 不过滤 source**。
 - **死列（不迁移、不参与对账）**：`evidence_reconcile_until`、`execution_deadline_at`（全仓无读写）；`next_poll_at`（写但领取用 `next_action_at`，疑似遗留）；`assets.content_sha256`（schema 有、代码从不写）。
 
-## 3. claim / 租约 / 终态写入（权威 = backend TS，internal endpoints 暴露）
+## 3. claim / 租约 / 终态写入（**移植规格**——修正二：Java 逐条实现 + 金标套件对账；刀切换前写入权威仍是 TS）
 
 ### 3.1 claim（两段式）
 1. 候选 findFirst：`status='queued' AND is_delete=false AND source IN 白名单 AND next_action_at<=now`（by-id 变体额外接受 `{status:'processing', lease_expires_at null 或 < now}` **孤儿接管**）。
@@ -59,7 +61,7 @@
 - 幂等：终态不可再被翻转（guard 要求 `processing`）；`settleReservation` 独立变体 guard 是**终态 status + fencing**（非 processing）。
 - `createAsset`（stays processing）与 `publishVideoResult` / `publishMediaExtractResult`（一步事务含 asset 创建 + settled + slot + 事件）三类写路径的字段清单见 §6/§8。
 
-## 4. internal endpoints（IKEL4J 交付；语义 = §3 函数原样封装，禁止顺手改）
+## 4. ~~internal endpoints~~（**修正二：不采纳**；下表保留为 §3 函数的移植职能清单，Java 以 MyBatis-Plus 对位实现）
 
 | 端点 | 封装 | 备注 |
 |---|---|---|
@@ -124,3 +126,29 @@
 - audio：`provider_credential_missing:370`、`model_unavailable:381`、`reference_asset_unavailable:395`；provider `new-api-audio-provider.ts:119-163`（同上优先级）、timeout `:101`、no-json `:140`。
 - video（`video-job-runner.ts`）：credential `:220`、`invalid_input:311/605`、`invalid_reference:652-670`、`invalid_reference_type:632/638`、`reference_asset_unavailable:679/769`、`unsupported_input:709/722`、poll 超时 `:273`、catch-all `:365`；提交超时 30s / 轮询 10s（`new-api-video-task-provider.ts:51-53`）。
 - media_extract（`media-extract-runner.ts`）：`invalid_input:210`、`source_asset_unavailable:221`、MediaExtractError/回退 `media_extract_failed:305`。
+
+## 附录 B：状态机移植对照表（WorkerRepo 逐字签名，`generation-worker-types.ts`；金标用例以此为准）
+
+**领取投影**：
+- `ClaimedJob`（types.ts:3-16）：`{ cancelRequested?, id, project_id, user_id, type, input, expected_output_count, retry_count, fencingToken }`（image/audio 用，snake_case 字段）
+- `ClaimedMediaExtractJob`（types.ts:65-72）：`{ id, projectId, userId, input, workerId, fencingToken }`
+- `ClaimedVideoJob`（types.ts:44-62）：追加 `pollCount, progress, providerTaskId, parentProviderTaskId`；`reservedAmountFen` 按修正一**不移植**
+
+**领取方法**（位置参 `jobId, workerId`，返回投影 | null；两段式 CAS 见 §3.1）：
+`claimVideoJobById` :84 / `claimImageJobById` :89 / `claimAudioJobById` :94 / `claimMediaExtractJobById` :163
+
+**写入方法**（input 对象均含 `workerId + fencingToken`，返回 `Promise<boolean>`，**guard fail 静默 false**）：
+| 方法 | 独有字段 | types.ts |
+|---|---|---|
+| `completeJob` | `assetIds: string[]` | :248 |
+| `completeJobAndSettle` | `+actualAmountFen?: bigint` —— 修正一后废弃，Java 只实现 `completeJob` 语义 | :256 |
+| `failJob` | `errorCode, errorMessage, details?, releaseNote?`（后两字段中 releaseNote 属账本面，不移植） | :267 |
+| `failVideoJob` | `code, message, details?, releaseNote?`（同上） | :146 |
+| `failMediaExtractJob` | `code, message, details?` | :188 |
+| `updateMediaExtractProgress` | `progress`（0-99 钳制 + 续租，§3.2） | :168 |
+| `markVideoSubmitted` | `providerTaskId`（+释放租约、next+5s） | :118 |
+| `rescheduleVideoPoll` | `progress`（poll_count+1） | :124 |
+| `cancelVideoBeforeDispatch` | （无独有字段；额外 DB 守卫 `provider_task_id IS NULL`） | :157 |
+| `requeueImageJobForRetry` | 位置参 `(jobId, nextActionAt: Date)`；**无 fence 入参——Java 移植时以其 SQL 实况为准，金标用例单列** | :114 |
+
+BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 列 BigInt；Java 用 `long`；`id/project_id/user_id` 字符串承载。
