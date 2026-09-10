@@ -952,7 +952,9 @@ public class JobStateMachineService {
     public boolean markVideoSubmitted(String jobId, String workerId,
                                       long fencingToken, String providerTaskId) {
         Long jobIdLong = Long.parseLong(jobId);
-        int affected = jobMapper.markVideoSubmitted(jobIdLong, workerId, fencingToken, providerTaskId);
+        // 与 TS video-ops.ts:10,15 同调：next = now + 5000ms，Java 侧计算（评审 C1）。
+        java.time.LocalDateTime nextPollAt = java.time.LocalDateTime.now().plusNanos(5_000L * 1_000_000);
+        int affected = jobMapper.markVideoSubmitted(jobIdLong, workerId, fencingToken, providerTaskId, nextPollAt);
         return affected == 1;
     }
 
@@ -964,7 +966,11 @@ public class JobStateMachineService {
     public boolean rescheduleVideoPoll(String jobId, String workerId,
                                        long fencingToken, int progress) {
         Long jobIdLong = Long.parseLong(jobId);
-        int affected = jobMapper.rescheduleVideoPoll(jobIdLong, workerId, fencingToken, progress);
+        // 评审 C2：钳制在 Java 侧做，逐字对齐 video-ops.ts:47 的 Math.max(0,Math.min(99,Math.round(..)))。
+        int clamped = Math.max(0, Math.min(99, progress));
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        java.time.LocalDateTime nextPollAt = now.plusNanos(5_000L * 1_000_000);
+        int affected = jobMapper.rescheduleVideoPoll(jobIdLong, workerId, fencingToken, clamped, now, nextPollAt);
         return affected == 1;
     }
 
@@ -1046,22 +1052,102 @@ public class JobStateMachineService {
                             "output_asset_ids", List.of(asset.getId().toString())));
         }
 
-        // 6. slot 聚合（与 completeJob 同构：视频通常单槽）
-        List<GenerationOutputSlotEntity> slots = slotMapper.findByJobId(jobIdLong);
-        if (!slots.isEmpty()) {
-            slotMapper.updateSlot(slots.get(0).getId(), "succeeded", asset.getId());
-            for (int i = 1; i < slots.size(); i++) {
-                slotMapper.updateSlotStatus(slots.get(i).getId(), "failed");
+        // 6. 单槽语义（评审 I2：TS video-ops.ts:129-131 findFirst slot_index=0，不扩多槽）
+        GenerationOutputSlotEntity videoSlot = slotMapper.findByJobId(jobIdLong).stream()
+                .filter(s -> s.getSlotIndex() != null && s.getSlotIndex() == 0)
+                .findFirst().orElse(null);
+        if (videoSlot != null) {
+            slotMapper.updateSlot(videoSlot.getId(), "succeeded", asset.getId());
+            if (videoSlot.getSceneCardGenerationRecordId() != null) {
+                syncRecordSummary(videoSlot.getSceneCardGenerationRecordId());
             }
         }
+        // 评审 I1：TS 视频路径**不调** syncStoryboardPreviewSummary（仅 record summary）。
 
-        // syncRecordSummary / syncStoryboardPreviewSummary
-        GenerationOutputSlotEntity firstSlot = slots.isEmpty() ? null : slots.get(0);
-        if (firstSlot != null && firstSlot.getSceneCardGenerationRecordId() != null) {
-            syncRecordSummary(firstSlot.getSceneCardGenerationRecordId());
+        // 7. output_attached 事件（video-ops.ts:175-194，评审补漏）
+        if (job != null && job.getProjectId() != null) {
+            appendProjectEvent(job.getProjectId(), "generation_job.output_attached",
+                    "generation_job_output",
+                    job.getId().toString() + ":" + (videoSlot != null ? videoSlot.getSlotIndex() : 0),
+                    0,
+                    "job_" + job.getId().toString(),
+                    Map.of("job_id", job.getId().toString(),
+                            "slot_id", videoSlot != null ? videoSlot.getId().toString() : "",
+                            "slot_index", videoSlot != null ? videoSlot.getSlotIndex() : 0,
+                            "status", "succeeded",
+                            "asset_id", asset.getId().toString(),
+                            "retry_of_slot_id", videoSlot != null && videoSlot.getRetryOfSlotId() != null
+                                    ? videoSlot.getRetryOfSlotId().toString() : "",
+                            "initial_placement_status", "pending"));
         }
-        syncStoryboardPreviewSummary(jobIdLong);
 
+        return true;
+    }
+
+    /**
+     * 失败视频作业（video-ops.ts:200-303 failVideoJob 独立实现，评审修复）。
+     * <p>
+     * 与通用 failJob 的逐字差异：守卫多清 next_poll_at；pending 槽逐个标 failed 且
+     * **每个带 record FK 的槽都回写 syncRecordSummary**（通用版仅 firstSlot）；
+     * 不调 syncStoryboardPreviewSummary。release 段按修正一省略。
+     */
+    @Transactional
+    public boolean failVideoJob(String jobId, String errorCode, String errorMessage,
+                                Map<String, Object> details,
+                                String workerId, long fencingToken) {
+        Long jobIdLong = Long.parseLong(jobId);
+        Map<String, Object> errorObj = new HashMap<>();
+        errorObj.put("code", errorCode);
+        errorObj.put("message", errorMessage);
+        if (details != null) {
+            errorObj.put("details", details);
+        }
+        int affected = jobMapper.failVideoGuard(jobIdLong, workerId, fencingToken, toJson(errorObj));
+        if (affected != 1) {
+            return false;
+        }
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        List<GenerationOutputSlotEntity> pendingSlots = slotMapper.findPendingByJobId(jobIdLong);
+        for (GenerationOutputSlotEntity slot : pendingSlots) {
+            slotMapper.updateSlotStatus(slot.getId(), "failed");
+            if (slot.getSceneCardGenerationRecordId() != null) {
+                syncRecordSummary(slot.getSceneCardGenerationRecordId());
+            }
+        }
+        GenerationJobLogEntity logEntry = new GenerationJobLogEntity();
+        logEntry.setGenerationJobId(jobIdLong);
+        logEntry.setEvent("failed");
+        logEntry.setStatus("failed");
+        logEntry.setMessage(errorCode + ": " + errorMessage);
+        logEntry.setOccurredAt(LocalDateTime.now());
+        jobLogMapper.insert(logEntry);
+        if (job != null && job.getProjectId() != null) {
+            appendProjectEvent(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(),
+                    "job_" + job.getId().toString(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "error", Map.of("code", errorCode, "message", errorMessage)));
+            for (GenerationOutputSlotEntity slot : pendingSlots) {
+                appendProjectEvent(job.getProjectId(), "generation_job.output_updated",
+                        "generation_job_output",
+                        job.getId().toString() + ":" + slot.getSlotIndex(),
+                        0,
+                        "job_" + job.getId().toString(),
+                        Map.of("job_id", job.getId().toString(),
+                                "slot_id", slot.getId().toString(),
+                                "slot_index", slot.getSlotIndex(),
+                                "status", "failed",
+                                "asset_id", "",
+                                "retry_of_slot_id", slot.getRetryOfSlotId() != null
+                                        ? slot.getRetryOfSlotId().toString() : "",
+                                "initial_placement_status", "pending",
+                                "error", Map.of("code", errorCode, "message", errorMessage)));
+            }
+        }
         return true;
     }
 
@@ -1075,20 +1161,7 @@ public class JobStateMachineService {
      */
     public boolean cancelVideoBeforeDispatch(String jobId, String workerId, long fencingToken) {
         Long jobIdLong = Long.parseLong(jobId);
-        int affected = jobMapper.cancelVideoBeforeDispatch(jobIdLong, workerId, fencingToken);
-        if (affected != 1) {
-            return false;
-        }
-
-        // log
-        GenerationJobLogEntity logEntry = new GenerationJobLogEntity();
-        logEntry.setGenerationJobId(jobIdLong);
-        logEntry.setEvent("cancelled");
-        logEntry.setStatus("cancelled");
-        logEntry.setMessage("任务已取消（派发前）");
-        logEntry.setOccurredAt(LocalDateTime.now());
-        jobLogMapper.insert(logEntry);
-
-        return true;
+        // 评审 I4：TS video-ops.ts:306-343 不写任何日志行——删除原多补的 cancelled log。
+        return jobMapper.cancelVideoBeforeDispatch(jobIdLong, workerId, fencingToken) == 1;
     }
 }

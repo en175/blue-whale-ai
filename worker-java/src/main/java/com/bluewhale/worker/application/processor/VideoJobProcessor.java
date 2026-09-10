@@ -357,7 +357,7 @@ public class VideoJobProcessor implements JobProcessor {
         Map<String, Object> details = new HashMap<>();
         details.put("raw", message);
         // 修正一：releaseNote 整体省略（video-job-runner.ts:545 releaseNote 参数删除）
-        stateMachine.failJob(claim.id(), code, message, details, claim.workerId(), claim.fencingToken());
+        stateMachine.failVideoJob(claim.id(), code, message, details, claim.workerId(), claim.fencingToken());
     }
 
     /**

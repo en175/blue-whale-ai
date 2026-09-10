@@ -436,22 +436,22 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     );
 
     /**
-     * 标记视频已提交（video-ops.ts:14-30 markVideoSubmitted）。
+     * 标记视频已提交（video-ops.ts:14-35 markVideoSubmitted 逐字）。
      * <p>
-     * 写入 provider_task_id + 释放租约 + next_action_at=now+5000ms。
-     * 金色 G09-G11 pin 这些字段。
-     * <p>
-     * SET provider_task_id=?, lease_owner=null, lease_expires_at=null,
-     *     next_action_at=now+5000ms, fencing_token+1, version+1
-     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
+     * 评审修复 C1：补 provider='new-api'、progress=1、next_poll_at；
+     * **去掉 fencing_token+1**（TS 不 bump——fence 只在 claim/requeue 递增，契约 §3.1）。
+     * 时刻值由 Java 计算传入（原 DATE_ADD ... MILLISECOND 为非法 MySQL 单位，潜伏语法炸点）。
+     * 金标 G09 pin 全 SET 列。
      */
     @Update("""
             UPDATE generation_jobs
-            SET provider_task_id = #{providerTaskId},
+            SET provider = 'new-api',
+                provider_task_id = #{providerTaskId},
+                progress = 1,
+                next_poll_at = #{nextPollAt},
+                next_action_at = #{nextPollAt},
                 lease_owner = NULL,
                 lease_expires_at = NULL,
-                next_action_at = DATE_ADD(NOW(), INTERVAL 5000 MILLISECOND),
-                fencing_token = fencing_token + 1,
                 version = version + 1
             WHERE id = #{jobId}
               AND status = 'processing'
@@ -462,26 +462,26 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("jobId") Long jobId,
             @Param("workerId") String workerId,
             @Param("fencingToken") Long fencingToken,
-            @Param("providerTaskId") String providerTaskId
+            @Param("providerTaskId") String providerTaskId,
+            @Param("nextPollAt") java.time.LocalDateTime nextPollAt
     );
 
     /**
-     * 重排视频轮询（video-ops.ts:32-57 rescheduleVideoPoll）。
+     * 重排视频轮询（video-ops.ts:37-58 rescheduleVideoPoll 逐字）。
      * <p>
-     * poll_count+1 + progress 保持 + 释放租约 + next_action_at=now+5000ms。
-     * <p>
-     * SET poll_count=poll_count+1, progress=?, lease_owner=null, lease_expires_at=null,
-     *     next_action_at=now+5000ms, fencing_token+1, version+1
-     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
+     * 评审修复 C2：progress 由 service 端钳制（Math.max(0,Math.min(99,round))）后传入；
+     * 补 last_polled_at、next_poll_at；**去掉 fencing_token+1**（TS 不 bump）。
+     * 时刻值 Java 计算（原 DATE_ADD MILLISECOND 非法语法一并消除）。金标 G10 pin 全列。
      */
     @Update("""
             UPDATE generation_jobs
             SET poll_count = COALESCE(poll_count, 0) + 1,
                 progress = #{progress},
+                last_polled_at = #{now},
+                next_poll_at = #{nextPollAt},
+                next_action_at = #{nextPollAt},
                 lease_owner = NULL,
                 lease_expires_at = NULL,
-                next_action_at = DATE_ADD(NOW(), INTERVAL 5000 MILLISECOND),
-                fencing_token = fencing_token + 1,
                 version = version + 1
             WHERE id = #{jobId}
               AND status = 'processing'
@@ -492,7 +492,9 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("jobId") Long jobId,
             @Param("workerId") String workerId,
             @Param("fencingToken") Long fencingToken,
-            @Param("progress") Integer progress
+            @Param("progress") Integer progress,
+            @Param("now") java.time.LocalDateTime now,
+            @Param("nextPollAt") java.time.LocalDateTime nextPollAt
     );
 
     /**
@@ -509,6 +511,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             SET status = 'succeeded',
                 progress = 100,
                 next_action_at = NULL,
+                next_poll_at = NULL,
                 lease_owner = NULL,
                 lease_expires_at = NULL,
                 version = version + 1
@@ -530,7 +533,31 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
      * <p>
      * <b>修正一</b>：release_note 不在范围（release 段整体省略）。
      */
-    // 复用 failJobGuard（settle-ops.ts:238-253），视频 fail 与之 SQL 完全一致。
+    /**
+     * 失败视频作业 CAS 守卫（video-ops.ts:209-221 failVideoJob 独立 SQL）。
+     * 与通用 failJobGuard 的差异（逐字核对后单独成条，评审修复）：
+     * 视频版多 `next_poll_at = NULL`（:217）。release_note/预留段按修正一省略。
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'failed',
+                error = #{errorJson},
+                next_action_at = NULL,
+                next_poll_at = NULL,
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+            """)
+    int failVideoGuard(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken,
+            @Param("errorJson") String errorJson
+    );
 
     /**
      * 取消视频作业（video-ops.ts:306-343 cancelVideoBeforeDispatch）。
@@ -548,6 +575,7 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             SET status = 'cancelled',
                 progress = 0,
                 next_action_at = NULL,
+                next_poll_at = NULL,
                 lease_owner = NULL,
                 lease_expires_at = NULL,
                 version = version + 1

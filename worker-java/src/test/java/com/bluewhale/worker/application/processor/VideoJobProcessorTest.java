@@ -81,7 +81,7 @@ class VideoJobProcessorTest {
         processor.handle("100");
 
         verify(stateMachine).cancelVideoBeforeDispatch(eq("100"), anyString(), eq(1L));
-        verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(), any(), anyString(), anyLong());
     }
 
     @Test
@@ -135,12 +135,12 @@ class VideoJobProcessorTest {
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("103"), anyString());
         doReturn(true).when(stateMachine)
-                .failJob(eq("103"), eq(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING),
+                .failVideoJob(eq("103"), eq(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING),
                         anyString(), any(), anyString(), eq(1L));
 
         processor.handle("103");
 
-        verify(stateMachine).failJob(eq("103"), eq(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING),
+        verify(stateMachine).failVideoJob(eq("103"), eq(GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING),
                 anyString(), any(), anyString(), eq(1L));
     }
 
@@ -218,12 +218,12 @@ class VideoJobProcessorTest {
         doReturn(new VideoTaskObservation("processing", 90, null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-107"));
         doReturn(true).when(stateMachine)
-                .failJob(eq("107"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+                .failVideoJob(eq("107"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
                         anyString(), any(), anyString(), eq(1L));
 
         processor.handle("107");
 
-        verify(stateMachine).failJob(eq("107"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
+        verify(stateMachine).failVideoJob(eq("107"), eq(GenerationError.ERROR_PROVIDER_TIMEOUT),
                 anyString(), any(), anyString(), eq(1L));
     }
 
@@ -261,12 +261,12 @@ class VideoJobProcessorTest {
                 new TaskError("content_rejected", "内容违规")))
                 .when(videoClient).poll(eq("token"), eq("task-109"));
         doReturn(true).when(stateMachine)
-                .failJob(eq("109"), eq("content_rejected"),
+                .failVideoJob(eq("109"), eq("content_rejected"),
                         eq("内容违规"), any(), anyString(), eq(1L));
 
         processor.handle("109");
 
-        verify(stateMachine).failJob(eq("109"), eq("content_rejected"),
+        verify(stateMachine).failVideoJob(eq("109"), eq("content_rejected"),
                 eq("内容违规"), any(), anyString(), eq(1L));
     }
 
@@ -280,12 +280,12 @@ class VideoJobProcessorTest {
         doReturn(new VideoTaskObservation("succeeded", 100, null, null, null))
                 .when(videoClient).poll(eq("token"), eq("task-110"));
         doReturn(true).when(stateMachine)
-                .failJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+                .failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_FAILED),
                         anyString(), any(), anyString(), eq(1L));
 
         processor.handle("110");
 
-        verify(stateMachine).failJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_FAILED),
+        verify(stateMachine).failVideoJob(eq("110"), eq(GenerationError.ERROR_PROVIDER_FAILED),
                 anyString(), any(), anyString(), eq(1L));
     }
 
