@@ -5,15 +5,6 @@ export type SkillLibraryCategory = string;
 export type SkillLibrarySort = "featured" | "most_used" | "newest";
 export type SkillLibraryLang = "zh" | "en";
 
-/** 成功激活埋点（契约 §11.3）：稳定 ID、用户、AgentRun、当次固定版本、来源。 */
-export interface SkillActivationInput {
-  creativeSkillId: string;
-  userId: string;
-  agentRunId: string;
-  skillVersion: number;
-  activationSource: "forced" | "auto";
-}
-
 export interface SkillLibraryView {
   creative_skill_id: string | null;
   name: string;
@@ -170,6 +161,4 @@ export interface SkillRepo {
     userId: string,
     name: string,
   ): Promise<"ok" | "conflict" | "reserved">;
-  /** 成功激活埋点（契约 §11.3）：只增不改，best-effort（失败/旧库缺表不阻塞主路径）。 */
-  recordActivation(rec: SkillActivationInput): Promise<void>;
 }

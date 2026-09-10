@@ -47,7 +47,7 @@ export async function handleAccessAsset(
 ) {
   const project = await deps.project.findOwnedById(projectId, userId);
   if (!project) throw new DomainError(RESOURCE_NOT_FOUND_CODE, "资源不存在");
-  const asset = await deps.assets.findAccessible(projectId, assetId, userId);
+  const asset = await deps.assets.findAccessible(assetId, userId);
   if (!asset) throw new DomainError(RESOURCE_NOT_FOUND_CODE, "资源不存在");
   if (!asset.storage_key || asset.storage_key.trim() === "") {
     throw new DomainError(ASSET_UNAVAILABLE_CODE, "资源不可用");
@@ -79,7 +79,7 @@ export async function handleContentAsset(
   if (!project) {
     return { ok: false, code: RESOURCE_NOT_FOUND_CODE, msg: "资源不存在" };
   }
-  const asset = await deps.assets.findAccessible(projectId, assetId, userId);
+  const asset = await deps.assets.findAccessible(assetId, userId);
   if (!asset) {
     return { ok: false, code: RESOURCE_NOT_FOUND_CODE, msg: "资源不存在" };
   }

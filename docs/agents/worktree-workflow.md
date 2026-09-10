@@ -126,9 +126,11 @@ scripts/commit-task-for-review.sh --amend -m "<new>"   # 覆盖 commit message
 
 Agent 不自动合入本地 `master`、不自动推送、不自动开 PR。
 
-## 合入用户本地集成区
+## 合入用户本地集成区（legacy）
 
-用户确认任务验收分支上的 commit 无问题后（若 review 发现问题，Agent 先走 `scripts/commit-task-for-review.sh --amend` 修订最后 commit 再确认），Agent 可以在明确确认下执行本地合入；用户也可以手动合入。Agent 执行时：
+> **本节已废止为默认步骤（2026-09-09 发布分支流程）**：PR 审合前不合入 master，本地集成区同理不提前吃未审代码——用户确认 commit 后直接推送 + 提 PR，本地 `master` 在服务端合并后由开工入口同步获得。`merge-task-to-local-master.sh` 仅作为用户显式本地整合需求的 legacy 通道保留（机制如下），彻底下线另行治理工单。
+
+用户显式要求本地合入时（若 review 发现问题，Agent 先走 `scripts/commit-task-for-review.sh --amend` 修订最后 commit 再确认），Agent 可以在明确确认下执行；用户也可以手动合入。Agent 执行时：
 
 1. 确认本地 `master` 工作区干净；不干净则报告状态并停止。
 2. 切回本地 `master`。
@@ -173,6 +175,8 @@ PR 合并后在该 Work Tree 运行 `scripts/cleanup-task-worktree.sh`，与普�
 ```bash
 scripts/cleanup-release-branch.sh --user-authorized <发布包装分支>
 ```
+
+> 发布批次分支（`release/YYYY.MM.DD_*`，见 `git-workflow.md`「发布分支（Release）流程」）合入 master 后的清理同走本入口——其白名单已含 `release/*`；批次创建走 `scripts/manage-release-branch.sh create`。
 
 ## 发布前同步
 

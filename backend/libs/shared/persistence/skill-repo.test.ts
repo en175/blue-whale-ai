@@ -411,48 +411,8 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
     expect(page.records.map((r) => r.name)).toEqual(["海报3"]);
   });
 
-  it("recordActivation 以稳定 ID/用户/AgentRun/版本/来源落一行埋点", async () => {
-    const create = vi.fn().mockResolvedValue({});
-    const prisma = {
-      creative_skill_activation: { create },
-    } as unknown as PrismaClient;
-
-    await createSkillRepo(prisma).recordActivation({
-      creativeSkillId: "deep_writing",
-      userId: "9",
-      agentRunId: "42",
-      skillVersion: 1,
-      activationSource: "forced",
-    });
-
-    expect(create).toHaveBeenCalledWith({
-      data: {
-        creative_skill_id: "deep_writing",
-        user_id: 9n,
-        agent_run_id: "42",
-        skill_version: 1,
-        activation_source: "forced",
-      },
-    });
-  });
-
-  it("recordActivation 写失败容错（旧库缺表不阻塞消息接纳主路径）", async () => {
-    const prisma = {
-      creative_skill_activation: {
-        create: vi.fn().mockRejectedValue(new Error("no such table")),
-      },
-    } as unknown as PrismaClient;
-
-    await expect(
-      createSkillRepo(prisma).recordActivation({
-        creativeSkillId: "deep_writing",
-        userId: "9",
-        agentRunId: "42",
-        skillVersion: 1,
-        activationSource: "forced",
-      }),
-    ).resolves.toBeUndefined();
-  });
+  // IKEEFV：recordActivation 与 creative_skill_activation 埋点表一并移除
+  //（写路径全仓零调用方），原两个埋点测试随删除下线。
 
   it("resolveOfficialSkillId 命中官方映射时返回 skill.id 字符串", async () => {
     const queryRawUnsafe = vi

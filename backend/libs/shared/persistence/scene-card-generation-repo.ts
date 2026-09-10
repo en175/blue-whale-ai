@@ -246,12 +246,14 @@ function validateReferenceAssetChanges(
 }
 
 /** IK70LQ：把结构化 reference_assets 按角色解析为 worker 读取的扁平字段（写入 job.input）。
- *  - asset mention → conversation_message_mentions.target_id（asset_id）；
  *  - storyboard_frame → generation_output_slots.asset_id；
  *  - scene_card mention 无 asset 映射，不进扁平字段（内容经投影进 prompt）；其首/尾帧角色
  *    已由 validateVideoReferenceConfiguration 前置拒绝，此处仅剩 reference 角色，跳过不降级。
  *  按 role 分配：first_frame→first_frame_asset_id（至多 1）、last_frame→last_frame_asset_id（至多 1）、
- *  reference→reference_asset_ids[]。身份已由 validateDerivedReferences/validateStoryboardFrames 校验。 */
+ *  reference→reference_asset_ids[]。身份已由 validateDerivedReferences/validateStoryboardFrames 校验。
+ *  IK70LQ→IKEEFV：asset mention → conversation_message_mentions.target_id 的映射已移除——
+ *  该表随旧内嵌引擎删除（写入点已没了，删除时全库 0 行），mention 目标不再可解析，
+ *  等价于旧「mention 行查不到 → 不降级进扁平字段」行为。SceneCard 迁移（IKDMQM）重定来源后恢复。 */
 async function resolveReferenceAssetsToFlat(
   tx: Prisma.TransactionClient,
   referenceAssets: ProviderPromptAsset[],
@@ -260,22 +262,10 @@ async function resolveReferenceAssetsToFlat(
   last_frame_asset_id?: string;
   reference_asset_ids?: string[];
 }> {
-  const assetMentionIds = referenceAssets
-    .filter(isMentionAsset)
-    .filter((asset) => asset.type === "asset")
-    .map((asset) => BigInt(asset.mention_id));
   const frameSlotIds = referenceAssets
     .filter(isFrameAsset)
     .map((asset) => BigInt(asset.slot_id));
   const mentionTargetById = new Map<bigint, bigint>();
-  if (assetMentionIds.length > 0) {
-    const mentions = await tx.conversation_message_mentions.findMany({
-      where: { id: { in: assetMentionIds } },
-      select: { id: true, target_id: true },
-    });
-    for (const mention of mentions)
-      mentionTargetById.set(mention.id, mention.target_id);
-  }
   const slotAssetById = new Map<bigint, bigint>();
   if (frameSlotIds.length > 0) {
     const slots = await tx.generation_output_slots.findMany({

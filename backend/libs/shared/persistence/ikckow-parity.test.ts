@@ -17,8 +17,9 @@ const standaloneSql = readFileSync(
   "utf8",
 );
 
-// IKCKOW：删除旧内嵌 Agent 引擎的 6 张纯旧运行表；agent_runs 与
-// creative_skill_activation 保留（InUse 禁删保护 + usage_count）。
+// IKCKOW：删除旧内嵌 Agent 引擎的 6 张纯旧运行表；agent_runs 保留（InUse 禁删保护）。
+// creative_skill_activation 当时随 usage_count 埋点保留，后由 IKEEFV（021 轨）删除——
+// 本测试只核对 013 轨与 baseline 的 IKCKOW 语义，021 轨的处置见 ikeefv-parity.test.ts。
 const DROPPED_TABLES = [
   "user_input_requests",
   "agent_provider_calls",
@@ -27,7 +28,7 @@ const DROPPED_TABLES = [
   "run_commits",
   "agent_advances",
 ];
-const KEPT_TABLES = ["agent_runs", "creative_skill_activation"];
+const KEPT_TABLES = ["agent_runs"];
 
 describe("IKCKOW 双轨迁移（删除 6 张旧 Agent 运行表）", () => {
   it.each(DROPPED_TABLES)("两轨都 DROP 旧表 %s", (table) => {
@@ -44,7 +45,7 @@ describe("IKCKOW 双轨迁移（删除 6 张旧 Agent 运行表）", () => {
     expect(standaloneSql).not.toContain(`DROP TABLE IF EXISTS \`${table}\``);
   });
 
-  it("baseline 不再建 6 张旧表、保留 2 张表", () => {
+  it("baseline 不再建 6 张旧表、保留 agent_runs", () => {
     for (const table of DROPPED_TABLES) {
       expect(baselineSql).not.toContain(`CREATE TABLE \`${table}\``);
     }

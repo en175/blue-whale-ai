@@ -249,26 +249,6 @@ model conversation_messages {
   @@index([project_id], map: "idx_message_project")
 }
 
-/// 用户消息接纳时冻结的有序显式引用事实。只增不改；当前可用性由读路径重算。
-model conversation_message_mentions {
-  id               BigInt   @id @default(autoincrement())
-  message_id       BigInt
-  conversation_id  BigInt
-  project_id       BigInt
-  accepted_user_id BigInt
-  mention_seq      Int
-  mention_type     String   @db.VarChar(24)
-  target_id        BigInt
-  target_version   Int?
-  display_name     String   @db.VarChar(255)
-  snapshot         Json
-  gmt_create       DateTime @default(now()) @db.DateTime(0)
-
-  @@unique([message_id, mention_seq], map: "uk_message_mention_sequence")
-  @@index([project_id, message_id], map: "idx_mention_project_message")
-  @@index([mention_type, target_id], map: "idx_mention_target")
-}
-
 /// SceneCard 稳定身份与当前版本。T04 仅建立引用所需的最小资源边界；创建/应用行为由 T11 交付。
 model scene_cards {
   id               BigInt   @id @default(autoincrement())
@@ -297,8 +277,6 @@ model agent_runs {
   engine                            String    @db.VarChar(64)
   engine_version                    String    @db.VarChar(64)
   adapter_schema_version            Int
-  current_checkpoint_id             BigInt?
-  confirmed_input_request_id        BigInt?
   input_sequence_no                 Int       @default(0)
   lease_owner                       String?   @db.VarChar(128)
   lease_expires_at                  DateTime? @db.DateTime(0)
@@ -308,9 +286,6 @@ model agent_runs {
   failure_message                   String?   @db.Text
   /// 手动重试计数（IK67GZ，契约 §8.3）：每次用户重试 failed→queued 递增。
   retry_count                       Int       @default(0)
-  /// 总结当前对话意图（IK60X1，资产契约 §15.2）：接纳 skill_summarize=true 的消息时置位，
-  /// Worker claim 到带标记的 Run 分流到总结管道。
-  skill_summarize                   Boolean   @default(false)
   run_pin                           Json?
   activated_creative_skill_versions Json?
   reasoning_summary                 String?   @db.VarChar(280)
@@ -542,20 +517,6 @@ model creative_skill_version {
   @@unique([creative_skill_id, display_version], map: "uk_creative_skill_version_semver")
 }
 
-/// 技能激活埋点（IKCKOW 保留）：usage_count「X 人使用」唯一数据源
-/// （COUNT(DISTINCT user_id)，见 skill-repo-internals mapUsageCounts），后续上线可能需要。
-model creative_skill_activation {
-  id                BigInt   @id @default(autoincrement())
-  creative_skill_id String   @db.VarChar(80)
-  user_id           BigInt
-  agent_run_id      String   @db.VarChar(64)
-  skill_version     Int      @default(1)
-  activation_source String   @db.VarChar(16)
-  gmt_create        DateTime @default(now()) @db.DateTime(0)
-
-  @@index([creative_skill_id, user_id], map: "idx_skill_user")
-}
-
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model users {
   id           BigInt   @id @default(autoincrement())
@@ -687,25 +648,6 @@ model generation_job_logs {
   occurred_at       DateTime @default(now()) @db.DateTime(0)
 
   @@index([generation_job_id, occurred_at], map: "idx_gen_job_log_job_time")
-}
-
-/// 总结当前对话名称冲突待确认会话（IK60X1，资产契约 §15.4）：
-/// 归属 conversation + user，保存 SKILL.md 草稿与提议名称；
-/// 同一会话至多一条（uk on conversation_id），新冲突覆盖旧记录；
-/// status='pending_name_confirm' 时分流该会话下一条用户消息到总结管道确认模式；
-/// 确认/取消/无关判定后 status 置 closed（行保留，逻辑关闭）。
-model skill_summarize_session {
-  id              BigInt   @id @default(autoincrement())
-  conversation_id BigInt
-  user_id         BigInt
-  draft_content   String   @db.Text
-  proposed_name   String   @db.VarChar(255)
-  status          String   @default("pending_name_confirm") @db.VarChar(32)
-  gmt_create      DateTime @default(now()) @db.DateTime(0)
-  gmt_modified    DateTime @default(now()) @db.DateTime(0)
-  is_delete       Int      @default(0) @db.TinyInt
-
-  @@unique([conversation_id], map: "uk_skill_summarize_session_conversation")
 }
 
 /// 计划应用回执（IK67H9/IK67H8，契约 §9 / CONTEXT L217-221）：一次成功应用 PlanMessage 的不可变事实。

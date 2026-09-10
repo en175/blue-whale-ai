@@ -178,27 +178,6 @@ CREATE TABLE `conversation_messages` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE `conversation_message_mentions` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `message_id` BIGINT NOT NULL,
-    `conversation_id` BIGINT NOT NULL,
-    `project_id` BIGINT NOT NULL,
-    `accepted_user_id` BIGINT NOT NULL,
-    `mention_seq` INTEGER NOT NULL,
-    `mention_type` VARCHAR(24) NOT NULL,
-    `target_id` BIGINT NOT NULL,
-    `target_version` INTEGER NULL,
-    `display_name` VARCHAR(255) NOT NULL,
-    `snapshot` JSON NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-
-    UNIQUE INDEX `uk_message_mention_sequence`(`message_id`, `mention_seq`),
-    INDEX `idx_mention_project_message`(`project_id`, `message_id`),
-    INDEX `idx_mention_target`(`mention_type`, `target_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateTable
 CREATE TABLE `scene_cards` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -226,8 +205,6 @@ CREATE TABLE `agent_runs` (
     `engine` VARCHAR(64) NOT NULL,
     `engine_version` VARCHAR(64) NOT NULL,
     `adapter_schema_version` INTEGER NOT NULL,
-    `current_checkpoint_id` BIGINT NULL,
-    `confirmed_input_request_id` BIGINT NULL,
     `input_sequence_no` INTEGER NOT NULL DEFAULT 0,
     `lease_owner` VARCHAR(128) NULL,
     `lease_expires_at` DATETIME(0) NULL,
@@ -236,7 +213,6 @@ CREATE TABLE `agent_runs` (
     `failure_code` VARCHAR(128) NULL,
     `failure_message` TEXT NULL,
     `retry_count` INTEGER NOT NULL DEFAULT 0,
-    `skill_summarize` BOOLEAN NOT NULL DEFAULT false,
     `run_pin` JSON NULL,
     `activated_creative_skill_versions` JSON NULL,
     `reasoning_summary` VARCHAR(280) NULL,
@@ -548,36 +524,6 @@ CREATE TABLE `creative_skill_version` (
 
     UNIQUE INDEX `uk_creative_skill_version_id`(`creative_skill_version_id`),
     UNIQUE INDEX `uk_creative_skill_version_semver`(`creative_skill_id`, `display_version`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateTable
-CREATE TABLE `creative_skill_activation` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `creative_skill_id` VARCHAR(80) NOT NULL,
-    `user_id` BIGINT NOT NULL,
-    `agent_run_id` VARCHAR(64) NOT NULL,
-    `skill_version` INTEGER NOT NULL DEFAULT 1,
-    `activation_source` VARCHAR(16) NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-
-    INDEX `idx_skill_user`(`creative_skill_id`, `user_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateTable
-CREATE TABLE `skill_summarize_session` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `conversation_id` BIGINT NOT NULL,
-    `user_id` BIGINT NOT NULL,
-    `draft_content` TEXT NOT NULL,
-    `proposed_name` VARCHAR(255) NOT NULL,
-    `status` VARCHAR(32) NOT NULL DEFAULT 'pending_name_confirm',
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `is_delete` TINYINT NOT NULL DEFAULT 0,
-
-    UNIQUE INDEX `uk_skill_summarize_session_conversation`(`conversation_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

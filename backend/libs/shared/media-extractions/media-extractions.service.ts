@@ -46,7 +46,7 @@ export class MediaExtractionsService {
 
     const project = await this.project.findOwnedById(projectId, userId);
     if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
-    const asset = await this.assets.findAccessible(projectId, sourceAssetId, userId);
+    const asset = await this.assets.findAccessible(sourceAssetId, userId);
     if (!asset) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
     if (asset.type !== "video") {
       return fail(FAILURE_CODE, "仅支持从视频资产提取音频");
