@@ -23,7 +23,7 @@ import java.util.logging.Logger;
 public class StubDataSourceConfig {
 
     @Bean
-    @Conditional(NoMediaExtractCondition.class)
+    @Conditional(TagsEnabledConditions.NoTagsEnabled.class)
     public DataSource stubDataSource() {
         return new DataSource() {
             @Override

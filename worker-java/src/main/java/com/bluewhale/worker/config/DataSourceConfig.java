@@ -25,7 +25,7 @@ import java.nio.charset.StandardCharsets;
 public class DataSourceConfig {
 
     @Bean
-    @Conditional(MediaExtractEnabledCondition.class)
+    @Conditional(TagsEnabledConditions.AnyTagsEnabled.class)
     public DataSource dataSource() {
         String databaseUrl = System.getenv("DATABASE_URL");
         if (databaseUrl == null || databaseUrl.isBlank()) {

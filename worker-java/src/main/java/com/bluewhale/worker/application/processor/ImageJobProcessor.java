@@ -116,7 +116,7 @@ public class ImageJobProcessor implements JobProcessor {
         try {
             claimOpt = stateMachine.claimImageJobById(jobId, workerId);
         } catch (Exception error) {
-            log.error("claimImageJobById 失败 jobId={}: {}", jobId, error.getMessage());
+            log.error("claimImageJobById 失败 jobId={}", jobId, error);
             throw error;
         }
         if (claimOpt.isEmpty()) return;
