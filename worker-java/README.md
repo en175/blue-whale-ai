@@ -72,6 +72,16 @@ docker run -e WORKER_ENABLED_TAGS=media_extract \
            -p 4002:4002 worker-java
 ```
 
+## 包结构（DDD 分层，包=统一后缀）
+
+```
+worker/
+├─ application/{consumer(*Consumer), processor(*Processor), service(*Service)}
+├─ domain/{entity(*Entity), dto(*Dto), error(*Error)}
+├─ infrastructure/{mapper(*Mapper), mq, media(*Extractor), storage(*Storage)}
+├─ config(*Config/*Properties/*Condition) + web(*Controller)
+```
+
 ## 现状进度（IKENZZZ / IKEL4L / IKEL4N）
 
 - [x] 工程骨架 / 配置绑定 / `/ready` / 消息契约测试（IKEL4L）

@@ -1,8 +1,8 @@
 package com.bluewhale.worker.config;
 
-import com.bluewhale.worker.messaging.AbstractGenerationConsumer;
-import com.bluewhale.worker.messaging.MediaExtractConsumer;
-import com.bluewhale.worker.processor.MediaExtractJobProcessor;
+import com.bluewhale.worker.application.consumer.AbstractGenerationConsumer;
+import com.bluewhale.worker.application.consumer.MediaExtractConsumer;
+import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 import org.apache.rocketmq.client.apis.ClientConfigurationBuilder;
 import org.apache.rocketmq.client.apis.StaticSessionCredentialsProvider;
