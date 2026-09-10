@@ -9,6 +9,7 @@ import com.bluewhale.worker.domain.entity.SceneCardGenerationRecordEntity;
 import com.bluewhale.worker.domain.entity.StoryboardPreviewEntity;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.dto.UpdateMediaExtractProgressDto;
 import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
@@ -875,4 +876,219 @@ public class JobStateMachineService {
             String workerId,
             long fencingToken
     ) {}
+
+    // ========== 刀④ 视频路径（blade-④ IKEL9A） ==========
+
+    /**
+     * 领取视频作业（claim-ops.ts:255-330 claimVideoJobById）。
+     * <p>
+     * 两段式 CAS（契约 §3.1）：
+     * 1. SELECT candidate WHERE id=? AND type='video' AND source IN 白名单
+     *    AND is_delete=false AND next_action_at&lt;=now AND (queued OR processing+孤儿)
+     * 2. UPDATE CAS: status='processing', lease_owner=?, lease_expires_at=now+120s,
+     *    last_polled_at=now, fencing_token+1, version+1
+     * <p>
+     * 投影为 ClaimedVideoJobDto（含 pollCount/progress/providerTaskId/parentProviderTaskId）。
+     * <p>
+     * parentProviderTaskId：retry_of_job_id 非空时查父 job 的 provider_task_id
+     * （IKEA26 防双扣：retry job 先查上游旧 task 状态）。
+     * <p>
+     * <b>修正一</b>：reservedAmountFen 不在投影范围。
+     */
+    public Optional<ClaimedVideoJobDto> claimVideoJobById(String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        // 1. 候选查询（claim-ops.ts:261-290）
+        GenerationJobEntity candidate = jobMapper.findVideoCandidate(jobIdLong);
+        if (candidate == null) {
+            return Optional.empty();
+        }
+
+        // 2. CAS 更新（claim-ops.ts:295-315）
+        LocalDateTime leaseExpiresAt = LocalDateTime.now().plusSeconds(LEASE_SECONDS);
+        int affected = jobMapper.claimVideoCas(
+                jobIdLong,
+                workerId,
+                leaseExpiresAt,
+                candidate.getFencingToken(),
+                candidate.getStatus()
+        );
+
+        if (affected == 0) {
+            return Optional.empty();
+        }
+
+        // 3. 返回投影（claim-ops.ts:318-330）
+        long postIncrementToken = candidate.getFencingToken() + 1;
+        Map<String, Object> input = parseJson(candidate.getInput());
+
+        // IKEA26：parentProviderTaskId = retry_of_job_id 关联的父 job 的 provider_task_id
+        String parentProviderTaskId = null;
+        if (candidate.getRetryOfJobId() != null) {
+            parentProviderTaskId = jobMapper.findProviderTaskId(candidate.getRetryOfJobId());
+        }
+
+        return Optional.of(new ClaimedVideoJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                input != null ? input : Map.of(),
+                candidate.getProviderTaskId(),
+                candidate.getCancelRequestedAt() != null,
+                workerId,
+                postIncrementToken,
+                candidate.getPollCount() != null ? candidate.getPollCount() : 0,
+                candidate.getProgress() != null ? candidate.getProgress() : 0,
+                parentProviderTaskId
+        ));
+    }
+
+    /**
+     * 标记视频已提交（video-ops.ts:14-30 markVideoSubmitted）。
+     * <p>
+     * 写入 provider_task_id + 释放租约 + next_action_at=now+5000ms。
+     * 金色 G09-G11 pin 这些字段。
+     */
+    public boolean markVideoSubmitted(String jobId, String workerId,
+                                      long fencingToken, String providerTaskId) {
+        Long jobIdLong = Long.parseLong(jobId);
+        int affected = jobMapper.markVideoSubmitted(jobIdLong, workerId, fencingToken, providerTaskId);
+        return affected == 1;
+    }
+
+    /**
+     * 重排视频轮询（video-ops.ts:32-57 rescheduleVideoPoll）。
+     * <p>
+     * poll_count+1 + progress 保持 + 释放租约 + next_action_at=now+5000ms。
+     */
+    public boolean rescheduleVideoPoll(String jobId, String workerId,
+                                       long fencingToken, int progress) {
+        Long jobIdLong = Long.parseLong(jobId);
+        int affected = jobMapper.rescheduleVideoPoll(jobIdLong, workerId, fencingToken, progress);
+        return affected == 1;
+    }
+
+    /**
+     * 发布视频结果（video-ops.ts:60-198 publishVideoResult）。
+     * <p>
+     * 事务：publishVideoGuard + createAsset + output_asset_ids + log + events。
+     * <p>
+     * <b>修正一</b>：settle 段整体省略（actual_amount_fen 不写）。
+     */
+    @Transactional
+    public boolean publishVideoResult(String jobId, String projectId, String userId,
+                                      String workerId, long fencingToken,
+                                      String url, String storageKey, String mime, Long size,
+                                      int width, int height, double duration) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        // 1. publishVideoGuard CAS
+        int guardAffected = jobMapper.publishVideoGuard(jobIdLong, workerId, fencingToken);
+        if (guardAffected != 1) {
+            return false;
+        }
+
+        // 2. createAsset（视频 type=video）
+        AssetEntity asset = new AssetEntity();
+        asset.setUserId(Long.parseLong(userId));
+        asset.setProjectId(Long.parseLong(projectId));
+        asset.setGenerationJobId(jobIdLong);
+        asset.setType("video");
+        asset.setUrl(url);
+        asset.setStorageKey(storageKey);
+        asset.setMime(mime);
+        asset.setSize(size);
+        asset.setWidth(width);
+        asset.setHeight(height);
+        if (duration > 0) {
+            asset.setDurationMs((int) Math.round(duration * 1000));
+        }
+        asset.setSource("generated");
+        asset.setStatus("normal");
+        asset.setGmtCreate(LocalDateTime.now());
+        asset.setGmtModified(LocalDateTime.now());
+        asset.setVersion(0);
+        asset.setIsDelete(false);
+        assetMapper.insert(asset);
+
+        // 3. output_asset_ids
+        String outputAssetIdsJson = "[" + asset.getId() + "]";
+        jobMapper.updateOutputAssetIds(jobIdLong, outputAssetIdsJson);
+
+        // 4. log
+        GenerationJobLogEntity logEntry = new GenerationJobLogEntity();
+        logEntry.setGenerationJobId(jobIdLong);
+        logEntry.setEvent("succeeded");
+        logEntry.setStatus("succeeded");
+        logEntry.setMessage("视频生成完成");
+        logEntry.setPayload(toJson(Map.of("asset_ids", List.of(asset.getId().toString()))));
+        logEntry.setOccurredAt(LocalDateTime.now());
+        jobLogMapper.insert(logEntry);
+
+        // 5. events
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        if (job != null && job.getProjectId() != null) {
+            appendProjectEvent(job.getProjectId(), "asset.created", "asset",
+                    asset.getId().toString(), asset.getVersion(),
+                    "job_" + job.getId().toString(),
+                    Map.of("asset_id", asset.getId().toString(),
+                            "generation_job_id", job.getId().toString(),
+                            "type", asset.getType(),
+                            "access_url", asset.getUrl()));
+            appendProjectEvent(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(),
+                    "job_" + job.getId().toString(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "output_asset_ids", List.of(asset.getId().toString())));
+        }
+
+        // 6. slot 聚合（与 completeJob 同构：视频通常单槽）
+        List<GenerationOutputSlotEntity> slots = slotMapper.findByJobId(jobIdLong);
+        if (!slots.isEmpty()) {
+            slotMapper.updateSlot(slots.get(0).getId(), "succeeded", asset.getId());
+            for (int i = 1; i < slots.size(); i++) {
+                slotMapper.updateSlotStatus(slots.get(i).getId(), "failed");
+            }
+        }
+
+        // syncRecordSummary / syncStoryboardPreviewSummary
+        GenerationOutputSlotEntity firstSlot = slots.isEmpty() ? null : slots.get(0);
+        if (firstSlot != null && firstSlot.getSceneCardGenerationRecordId() != null) {
+            syncRecordSummary(firstSlot.getSceneCardGenerationRecordId());
+        }
+        syncStoryboardPreviewSummary(jobIdLong);
+
+        return true;
+    }
+
+    /**
+     * 取消视频作业（video-ops.ts:306-343 cancelVideoBeforeDispatch）。
+     * <p>
+     * WHERE provider_task_id IS NULL（未提交上游才可取消）。
+     * SET status='cancelled', progress=0。
+     * <p>
+     * <b>修正一</b>：release refund_confirmed 段整体省略。
+     */
+    public boolean cancelVideoBeforeDispatch(String jobId, String workerId, long fencingToken) {
+        Long jobIdLong = Long.parseLong(jobId);
+        int affected = jobMapper.cancelVideoBeforeDispatch(jobIdLong, workerId, fencingToken);
+        if (affected != 1) {
+            return false;
+        }
+
+        // log
+        GenerationJobLogEntity logEntry = new GenerationJobLogEntity();
+        logEntry.setGenerationJobId(jobIdLong);
+        logEntry.setEvent("cancelled");
+        logEntry.setStatus("cancelled");
+        logEntry.setMessage("任务已取消（派发前）");
+        logEntry.setOccurredAt(LocalDateTime.now());
+        jobLogMapper.insert(logEntry);
+
+        return true;
+    }
 }

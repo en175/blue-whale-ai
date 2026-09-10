@@ -56,4 +56,10 @@ public final class GenerationError {
 
     /** 供应商配置错误。 */
     public static final String ERROR_PROVIDER_CONFIG = "provider_config";
+
+    /** 参考媒体无效（video-reference-validation.ts：mime/size/duration/dimensions 不合规）。 */
+    public static final String ERROR_INVALID_REFERENCE_MEDIA = "invalid_reference_media";
+
+    /** 参考素材超量（video-reference-validation.ts：图片 >9 / 视频 >3 / 音频 >3）。 */
+    public static final String ERROR_REFERENCE_LIMIT_EXCEEDED = "reference_limit_exceeded";
 }

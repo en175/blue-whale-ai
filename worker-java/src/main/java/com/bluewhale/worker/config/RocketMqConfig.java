@@ -4,9 +4,17 @@ import com.bluewhale.worker.application.consumer.AbstractGenerationConsumer;
 import com.bluewhale.worker.application.consumer.AudioConsumer;
 import com.bluewhale.worker.application.consumer.ImageConsumer;
 import com.bluewhale.worker.application.consumer.MediaExtractConsumer;
+import com.bluewhale.worker.application.consumer.VideoConsumer;
 import com.bluewhale.worker.application.processor.AudioJobProcessor;
 import com.bluewhale.worker.application.processor.ImageJobProcessor;
 import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
+import com.bluewhale.worker.application.processor.VideoJobProcessor;
+import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
+import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
+import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
+import com.bluewhale.worker.infrastructure.mq.RocketMqGenerationMessageProducer;
+import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
+import com.bluewhale.worker.application.service.AssetSourceService;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 import org.apache.rocketmq.client.apis.ClientConfigurationBuilder;
 import org.apache.rocketmq.client.apis.StaticSessionCredentialsProvider;
@@ -178,6 +186,105 @@ public class RocketMqConfig {
                 configBuilder.build(),
                 consumerGroup,
                 concurrency
+        );
+    }
+
+    // ========== 刀④ 视频路径（blade-④ IKEL9A） ==========
+
+    /**
+     * MQ 生产者（条件：enabled-tags 含 step）。
+     * <p>
+     * 视频 processor 自投延迟消息（scheduleNext 5s）到同一 topic/tag。
+     * producer 无 consumer group（video-queue.ts:79-98）。
+     */
+    @Bean(destroyMethod = "close")
+    @Conditional(VideoEnabledCondition.class)
+    public GenerationMessageProducer generationMessageProducer(
+            WorkerProperties workerProps,
+            Environment env
+    ) {
+        RocketMqProperties mqProps = Binder.get(env)
+                .bind("rocketmq", RocketMqProperties.class)
+                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+
+        if (mqProps.endpoints().isBlank()) {
+            throw new IllegalStateException(
+                    "ROCKETMQ_ENDPOINTS 未配置：video producer 无法启动");
+        }
+
+        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
+                .setEndpoints(mqProps.endpoints())
+                .enableSsl(mqProps.sslEnabled());
+
+        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
+            configBuilder.setCredentialProvider(
+                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
+        }
+
+        String tag = env.getProperty("rocketmq.tag", "step");
+        return RocketMqGenerationMessageProducer.create(configBuilder.build(), mqProps.topic(), tag);
+    }
+
+    /**
+     * new-api 视频客户端（条件：enabled-tags 含 step）。
+     */
+    @Bean
+    @Conditional(VideoEnabledCondition.class)
+    public NewApiVideoClient newApiVideoClient(Environment env) {
+        String baseUrl = env.getProperty("NEW_API_BASE_URL",
+                env.getProperty("new-api.base-url", ""));
+        return new NewApiVideoClient(baseUrl);
+    }
+
+    /**
+     * 视频媒体转存（条件：enabled-tags 含 step）。
+     * TOS 未配置 → null（VideoJobProcessor 降级直存 URL）。
+     */
+    @Bean
+    @Conditional(VideoEnabledCondition.class)
+    public TosVideoMediaRelay tosVideoMediaRelay() {
+        return TosVideoMediaRelay.fromEnv();
+    }
+
+    /**
+     * 视频消费者（条件：enabled-tags 含 step）。
+     * <p>
+     * consumer group = "generation-video-worker" + groupSuffix（契约 §1）。
+     * tag = "step"（queue.constants.ts:11）。
+     * 顺序消费（无 Semaphore，rocketmq-video.consumer.ts:60-74 for-await each）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    @Conditional(VideoEnabledCondition.class)
+    public VideoConsumer videoConsumer(
+            VideoJobProcessor processor,
+            WorkerProperties workerProps,
+            Environment env
+    ) {
+        RocketMqProperties mqProps = Binder.get(env)
+                .bind("rocketmq", RocketMqProperties.class)
+                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+
+        if (mqProps.endpoints().isBlank()) {
+            throw new IllegalStateException(
+                    "ROCKETMQ_ENDPOINTS 未配置：video consumer 无法启动");
+        }
+
+        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
+                .setEndpoints(mqProps.endpoints())
+                .enableSsl(mqProps.sslEnabled());
+
+        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
+            configBuilder.setCredentialProvider(
+                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
+        }
+
+        String consumerGroup = "generation-video-worker" + workerProps.groupSuffix();
+
+        return new VideoConsumer(
+                processor,
+                mqProps.topic(),
+                configBuilder.build(),
+                consumerGroup
         );
     }
 }

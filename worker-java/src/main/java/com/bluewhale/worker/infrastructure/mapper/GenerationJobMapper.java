@@ -381,4 +381,193 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             @Param("workerId") String workerId,
             @Param("fencingToken") Long fencingToken
     );
+
+    // ========== 视频路径（blade-④ IKEL9A） ==========
+
+    /**
+     * 领取视频作业：候选查询（claim-ops.ts:261-290 视频 source 白名单）。
+     * <p>
+     * 视频 source 白名单 = [bottom_dock, plan_apply, plan, scene_card]（契约 §2）。
+     * WHERE id=? AND type='video' AND source IN 白名单 AND is_delete=false
+     * AND next_action_at&lt;=now AND (queued OR processing+孤儿)
+     */
+    @Select("""
+            SELECT * FROM generation_jobs
+            WHERE id = #{jobId}
+              AND type = 'video'
+              AND source IN ('bottom_dock', 'plan_apply', 'plan', 'scene_card')
+              AND is_delete = false
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (
+                  status = 'processing'
+                  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+                )
+              )
+            ORDER BY id ASC
+            LIMIT 1
+            """)
+    GenerationJobEntity findVideoCandidate(@Param("jobId") Long jobId);
+
+    /**
+     * 领取视频作业：CAS 更新（claim-ops.ts:295-315）。
+     * <p>
+     * 与 claimAudioCas 逐字一致（同 CAS 模式）。
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'processing',
+                lease_owner = #{workerId},
+                lease_expires_at = #{leaseExpiresAt},
+                last_polled_at = NOW(),
+                fencing_token = fencing_token + 1,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND fencing_token = #{fencingToken}
+              AND status = #{candidateStatus}
+            """)
+    int claimVideoCas(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt,
+            @Param("fencingToken") Long fencingToken,
+            @Param("candidateStatus") String candidateStatus
+    );
+
+    /**
+     * 标记视频已提交（video-ops.ts:14-30 markVideoSubmitted）。
+     * <p>
+     * 写入 provider_task_id + 释放租约 + next_action_at=now+5000ms。
+     * 金色 G09-G11 pin 这些字段。
+     * <p>
+     * SET provider_task_id=?, lease_owner=null, lease_expires_at=null,
+     *     next_action_at=now+5000ms, fencing_token+1, version+1
+     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET provider_task_id = #{providerTaskId},
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                next_action_at = DATE_ADD(NOW(), INTERVAL 5000 MILLISECOND),
+                fencing_token = fencing_token + 1,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+            """)
+    int markVideoSubmitted(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken,
+            @Param("providerTaskId") String providerTaskId
+    );
+
+    /**
+     * 重排视频轮询（video-ops.ts:32-57 rescheduleVideoPoll）。
+     * <p>
+     * poll_count+1 + progress 保持 + 释放租约 + next_action_at=now+5000ms。
+     * <p>
+     * SET poll_count=poll_count+1, progress=?, lease_owner=null, lease_expires_at=null,
+     *     next_action_at=now+5000ms, fencing_token+1, version+1
+     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET poll_count = COALESCE(poll_count, 0) + 1,
+                progress = #{progress},
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                next_action_at = DATE_ADD(NOW(), INTERVAL 5000 MILLISECOND),
+                fencing_token = fencing_token + 1,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+            """)
+    int rescheduleVideoPoll(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken,
+            @Param("progress") Integer progress
+    );
+
+    /**
+     * 发布视频结果 CAS 守卫（video-ops.ts:60-100 publishVideoResult）。
+     * <p>
+     * SET status='succeeded', progress=100, next_action_at=null,
+     *     lease_owner=null, lease_expires_at=null, version+1
+     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
+     * <p>
+     * <b>修正一</b>：actual_amount_fen 不在范围（settle 段整体省略）。
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'succeeded',
+                progress = 100,
+                next_action_at = NULL,
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+            """)
+    int publishVideoGuard(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken
+    );
+
+    /**
+     * 失败视频作业 CAS 守卫（video-ops.ts:200-260 failVideoJob）。
+     * <p>
+     * 与 failJobGuard 逐字一致（同 CAS 模式），视频复用通用 fail 守卫。
+     * <p>
+     * <b>修正一</b>：release_note 不在范围（release 段整体省略）。
+     */
+    // 复用 failJobGuard（settle-ops.ts:238-253），视频 fail 与之 SQL 完全一致。
+
+    /**
+     * 取消视频作业（video-ops.ts:306-343 cancelVideoBeforeDispatch）。
+     * <p>
+     * WHERE id=? AND status='processing' AND lease_owner=? AND fencing_token=?
+     *       AND provider_task_id IS NULL（未提交上游才可取消，契约 §3.3）
+     * <p>
+     * SET status='cancelled', progress=0, next_action_at=null,
+     *     lease_owner=null, lease_expires_at=null, version+1
+     * <p>
+     * <b>修正一</b>：release refund_confirmed 段整体省略。
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'cancelled',
+                progress = 0,
+                next_action_at = NULL,
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND status = 'processing'
+              AND lease_owner = #{workerId}
+              AND fencing_token = #{fencingToken}
+              AND provider_task_id IS NULL
+            """)
+    int cancelVideoBeforeDispatch(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("fencingToken") Long fencingToken
+    );
+
+    /**
+     * 按 id 查 provider_task_id（IKEA26 parent-reuse 用：retry job 查父 job 的上游 task）。
+     */
+    @Select("""
+            SELECT provider_task_id FROM generation_jobs WHERE id = #{jobId}
+            """)
+    String findProviderTaskId(@Param("jobId") Long jobId);
 }

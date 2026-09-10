@@ -176,16 +176,65 @@ worker/
   - [x] config `ImageEnabledCondition`：@Conditional 按 tag 启停
   - [x] config `RocketMqConfig` 扩展：image consumer bean（Semaphore IMAGE_CONCURRENCY default 20，1-64）
   - [x] storage `TosMediaStorage` 扩展：`uploadImageBytes`（uploads/{userId}/image/{uuid}.{ext}）
-- [x] tests（**109 + 新增 62 = 171 全绿基线**）：
+- [x] tests（**171 + 新增 47 = 218 全绿基线**）：
   - 刀①② 已有 109 全绿
-  - 刀③ 新增 62：image consumer template 6 + processor 错误映射 15（含瞬态重试 G34-G38）
-    + 渠道映射矩阵 15 + 状态机金标镜像 23（claimImage G06-image + requeue G14-G16
-    + 多图槽聚合 G39-G41 + syncRecord G42-G44 + syncPreview G45-G46
-    + aggregateSlotStatus/resolveLogicalSlots G47-G48 纯函数 6） = **62**
+  - 刀③ 新增 62 = 171 全绿
+  - 刀④ 新增 47：video consumer template 6 + processor 22（G49-G70：cancel/submit/poll/
+    parent-reuse/transient判定/参考校验边界/尺寸换算/Seedance2识别）
+    + producer 4（delay 钳制 + message shape）
+    + reference boundary 9 + dimensions 5 + seedance2 4 + validateReferences 2 = **47**
+- [x] **video 执行路径**（IKEL9A 刀④）：
+  - [x] dto `ClaimedVideoJobDto`：视频专用投影（pollCount/progress/providerTaskId/parentProviderTaskId）
+  - [x] error `VideoProviderError`：视频供应商错误（含 code，video-job-runner.ts:185-193）
+  - [x] error `VideoInputError`：视频输入校验错误（含 code）
+  - [x] gateway `NewApiVideoClient`：OkHttp 视频生成客户端
+    - submit: POST /v1/video/generations（30s 超时，metadata.content 数组）
+    - poll: GET /v1/video/generations/{taskId}（10s 超时）
+    - 状态映射：success/succeeded/completed → succeeded; failed/failure/error/cancelled → failed
+    - 错误分类复用 NewApiErrorClassifier（content > quota > provider_failed）
+  - [x] storage `TosVideoMediaRelay`：视频转存（fetch → TOS PUT → public-read）
+    - key: generated/{userId}/video/{uuid}.{ext}（webm/mov/mp4）
+    - 上限 200MB
+  - [x] mq `GenerationMessageProducer`：MQ 生产者端口（视频 scheduleNext 自投延迟消息）
+  - [x] mq `RocketMqGenerationMessageProducer`：rocketmq-client-java Producer 实现
+    - delay 下限 1000ms（VIDEO_MIN_DELAY_MS）
+  - [x] processor `VideoJobProcessor`：完整视频编排（video-job-runner.ts:195-376 runVideoJobStep）
+    - 多步状态机：每步 = 一次 MQ 消费（submit 或 poll）
+    - cancel-before-dispatch：cancelRequested + providerTaskId==null → cancelVideoBeforeDispatch
+    - submit 阶段：buildSubmitRequest → submit → markVideoSubmitted → scheduleNext(5s)
+    - IKEA26 parent-reuse 防双扣：retry job 先查父 task → SUCCESS → publish without submit
+    - poll 阶段：transient → rescheduleVideoPoll(5s); ≥720 → provider_timeout
+    - succeeded+URL → relay → publishVideoResult
+    - 参考校验：video-reference-validation.ts 完整移植（Seedance 2.0 约束）
+    - 修正一：cost_reservations / actual_amount_fen / release_note 整体省略
+  - [x] consumer `VideoConsumer`：SEQUENTIAL 派发（无 Semaphore，for-await each）
+    - tag=step, digitGuard=false（视频 TS 仅检查 typeof jobId === "string"）
+    - group=generation-video-worker+suffix
+  - [x] service `JobStateMachineService` 扩展：
+    - `claimVideoJobById` → Optional<ClaimedVideoJobDto>（套 source 白名单 4 源 + parentProviderTaskId join）
+    - `markVideoSubmitted` → boolean（provider_task_id + 释放租约 + next+5s）
+    - `rescheduleVideoPoll` → boolean（poll_count+1 + 释放租约 + next+5s）
+    - `publishVideoResult` → boolean（@Transactional：guard + asset + slots + events）
+    - `cancelVideoBeforeDispatch` → boolean（WHERE provider_task_id IS NULL + cancelled + log）
+  - [x] config `VideoEnabledCondition`：@Conditional 按 tag "step" 启停
+  - [x] config `RocketMqConfig` 扩展：video consumer + producer + client + relay beans
+  - [x] mapper `GenerationJobMapper` 扩展：视频 claim/submit/reschedule/publish/cancel SQL
 - [ ] backend internal endpoints 客户端（待 IKEL4J 交付端点契约 §4 定稿）
-- [ ] 其他 1 消费者（step）
 
-### 刀② 上线前提
+### 刀②③④ 上线前提
 
-**IKEF1K（cost_reservations 整体下线）必须已合入 master**。
+**IKEF1K（cost_reservations 整体下线）+ IKEPGW 必须已合入 master**。
 修正一要求 Java 侧不实现任何 `cost_reservations` 逻辑；若 IKEF1K 未上线，TS 侧仍有结算路径，Java 写入会产生账不平。
+
+刀④ 额外：无（视频路径不引入新的外部依赖）。
+
+### 刀④ 环境变量清单
+
+| 变量名 | 必需 | 说明 | 默认值 |
+|---|---|---|---|
+| `WORKER_ENABLED_TAGS` | 灰度控制 | 逗号分隔启用 tag（`step`） | 空 = 不消费 |
+| `ROCKETMQ_TAG` | 否 | 视频 MQ tag | `step` |
+| `NEW_API_BASE_URL` | 是（step 启用时） | new-api 网关地址 | — |
+| `GENERATION_CREDENTIAL_SECRET` | 是（step 启用时） | 凭证密封密钥（≥16 字符） | — |
+| `VIDEO_POLL_INTERVAL_MS` | 否 | 视频轮询间隔（ms） | `5000` |
+| `MAX_VIDEO_POLLS` | 否 | 视频轮询上限 | `720` |
