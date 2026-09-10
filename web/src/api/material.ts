@@ -109,6 +109,8 @@ export interface CreateAssetParams {
   URL: string;
   Name: string;
   AssetType: MaterialAssetType;
+  /** 本地 assets 表 id，绑定画布原件与素材库条目 */
+  SourceAssetId?: string;
 }
 
 /** 列出素材请求 */

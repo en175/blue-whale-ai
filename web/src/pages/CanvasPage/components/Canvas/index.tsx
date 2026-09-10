@@ -102,9 +102,11 @@ interface FlowCanvasProps {
   onConnectGroupToTarget?: (memberIds: string[], targetId: string) => void;
   /** 源→组：外部节点拖到组左侧「+」，为该源到组内每个成员各建一条边 */
   onConnectSourceToGroup?: (sourceId: string, memberIds: string[]) => void;
+  /** 选择模式下右键画布空白 */
+  onPaneContextMenu?: (pt: { clientX: number; clientY: number }) => void;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onConnectGroupToTarget, onConnectSourceToGroup }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onConnectGroupToTarget, onConnectSourceToGroup, onPaneContextMenu }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -451,7 +453,13 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         onMoveEnd={(_e, v) => onViewportChangeRef.current?.(v)}
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={handleNodeDragStopInternal}
-        onContextMenu={(e) => e.preventDefault()}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          if (toolMode !== 'select') return;
+          const el = e.target as HTMLElement;
+          if (el.closest('.react-flow__node') || el.closest('.react-flow__edge')) return;
+          onPaneContextMenu?.({ clientX: e.clientX, clientY: e.clientY });
+        }}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         // 中键（button 1）任意模式均可平移（IKD0JT A1 R2）；拖动模式左键也平移，选择模式左键留给框选
@@ -525,7 +533,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onConnectGroupToTarget, onConnectSourceToGroup }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onConnectGroupToTarget, onConnectSourceToGroup, onPaneContextMenu }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -561,6 +569,7 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         onGroupFrameDragStop={onGroupFrameDragStop}
         onConnectGroupToTarget={onConnectGroupToTarget}
         onConnectSourceToGroup={onConnectSourceToGroup}
+        onPaneContextMenu={onPaneContextMenu}
       />
     </ReactFlowProvider>
   );

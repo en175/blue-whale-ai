@@ -179,7 +179,6 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     if (data.toolMode !== 'select') return;
     e.preventDefault();
     e.stopPropagation();
-    setContextMenu({ x: e.clientX, y: e.clientY });
   }, [data.toolMode]);
 
   const handleDelete = useCallback(() => {
@@ -624,27 +623,6 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
         <HandlePlus />
       </Handle>
 
-      {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}
-      {contextMenu &&
-        createPortal(
-          <div
-            className={styles.contextMenu}
-            style={{ top: contextMenu.y, left: contextMenu.x }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <button className={styles.contextItem} onClick={handleAddToChat}>
-              <span>添加到聊天</span>
-            </button>
-            {/* 共享资产概念下线，隐藏入口 */}
-            {/* <button className={styles.contextItem} onClick={handleSaveToAssets}>
-              <span>保存到共享资产</span>
-            </button> */}
-            <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
-              <span>删除</span>
-            </button>
-          </div>,
-          document.body,
-        )}
     </div>
   );
 }

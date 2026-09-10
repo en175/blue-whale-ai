@@ -144,6 +144,7 @@ export default function Assets() {
             URL: uploadResult.url,
             Name: finalName,
             AssetType: assetType,
+            SourceAssetId: String(uploadResult.asset_id),
           });
         } catch (err) {
           // API 错误已由请求层统一 toast，这里只收集本地校验类错误。

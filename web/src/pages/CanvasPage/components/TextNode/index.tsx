@@ -3,11 +3,11 @@
  * 富文本编辑与格式工具栏沿用既有实现
  * ============================================ */
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Palette, Plus } from 'lucide-react';
 import { sanitizeHtml } from '@/utils/sanitize';
 import { nodeTitleSizing } from '../nodeTitleSizing';
+import CanvasContextMenu from '../CanvasContextMenu';
 import styles from './index.module.css';
 import { PROMPT_TEXT_LIMITS } from '../../../../../../packages/contracts/src/prompt-text-limits';
 
@@ -51,6 +51,7 @@ interface TextNodeData {
   onDuplicate?: (id: string) => void;
   onAddToChat?: (id: string) => void;
   onSaveToAssets?: (id: string) => void;
+  onPaste?: (id: string) => void;
   /** Toast 提示（超字数上限等场景，由父级注入） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
 }
@@ -247,10 +248,11 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   /** 右键菜单 */
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (data.toolMode !== 'select') return;
+    if (editing) return;
     e.preventDefault();
     e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY });
-  }, [data.toolMode]);
+  }, [data.toolMode, editing]);
 
   const handleDelete = useCallback(() => {
     setContextMenu(null);
@@ -445,30 +447,26 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       </Handle>
       </div>
 
-      {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}
-      {contextMenu &&
-        createPortal(
-          <div
-            className={styles.contextMenu}
-            style={{ top: contextMenu.y, left: contextMenu.x }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-          <button className={styles.contextItem} onClick={handleAddToChat}>
-            <span>添加到聊天</span>
-          </button>
-          {/* 共享资产概念下线，入口已隐藏
-          <button className={styles.contextItem} onClick={handleSaveToAssets}>
-            <span>保存到共享资产</span>
-          </button> */}
-          <button className={styles.contextItem} onClick={handleDuplicate}>
-            <span>复制</span>
-          </button>
-          <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
-            <span>删除</span>
-          </button>
-          </div>,
-          document.body,
-        )}
+      {contextMenu && (
+        <CanvasContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={[
+            { key: 'chat', label: '添加到聊天' },
+            { key: 'duplicate', label: '创建副本' },
+            { key: 'paste', label: '粘贴' },
+            { key: 'delete', label: '删除', danger: true },
+          ]}
+          onClose={() => setContextMenu(null)}
+          onSelect={(key) => {
+            setContextMenu(null);
+            if (key === 'chat') handleAddToChat();
+            else if (key === 'duplicate') handleDuplicate();
+            else if (key === 'paste') data.onPaste?.(id);
+            else if (key === 'delete') handleDelete();
+          }}
+        />
+      )}
     </div>
   );
 }
