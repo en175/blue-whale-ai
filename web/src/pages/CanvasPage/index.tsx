@@ -156,6 +156,9 @@ export default function CanvasPage() {
   const [pickTarget, setPickTarget] = useState<'image' | 'video' | 'audio' | 'product' | 'asset' | null>(null);
   /** 视频草稿「到节点选择」的目标参考角色（IKDMQS）：首帧/尾帧由 Dock 入口显式指定，缺省普通参考 */
   const [pickRefRole, setPickRefRole] = useState<VideoRefRole | null>(null);
+  /** 跳过下一次 selectionChange 触发的面板关闭：命中「到节点选择」节点后，
+   *  pickMode 被清空可能早于 selectionChange，导致绑定面板被误关。 */
+  const skipPanelCloseRef = useRef(false);
   /** 商品卡选取目标节点ID（选中的图片注入哪个商品卡） */
   const [pickProductId, setPickProductId] = useState<string | null>(null);
   /** 资产卡选取目标节点ID（选中的图片注入哪个资产卡） */
@@ -166,6 +169,8 @@ export default function CanvasPage() {
   const [productPickResult, setProductPickResult] = useState<{ ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string } } | null>(null);
   /** 画布节点选取结果（ts 驱动注入资产卡） */
   const [assetPickResult, setAssetPickResult] = useState<{ ts: number; assetId: string; ref: CanvasGalleryRef } | null>(null);
+  /** 画布音频节点选取结果（ts 驱动注入音频对话框参考音频） */
+  const [audioPickResult, setAudioPickResult] = useState<{ ts: number; item: AudioRefItem } | null>(null);
   /** 角色库弹窗状态 */
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
   /** 角色库发起目标（决定选中结果注入哪个对话框） */
@@ -1533,6 +1538,19 @@ export default function CanvasPage() {
         };
         setAssetPickResult({ ts: Date.now(), assetId: targetId, ref: newRef });
       }
+    } else if (pickMode === 'audio' && isReadyMedia && data.mediaType === 'audio') {
+      // 音频生成面板发起的画布音频节点选取 → 注入面板参考音频
+      setAudioPickResult({
+        ts: Date.now(),
+        item: {
+          id: node.id,
+          kind: 'audio',
+          name: (data.fileName as string) || node.id,
+          src: data.src as string,
+          source: 'canvas',
+          assetId: readAssetId(data),
+        },
+      });
     }
     setPickMode(null);
     setPickTarget(null);
@@ -4636,6 +4654,7 @@ export default function CanvasPage() {
           <div className={styles.pickHint}>
             {pickMode === 'image' && '到节点选择：点击画布中的图片节点带入参考图，点击空白处取消'}
             {pickMode === 'video' && '到节点选择：点击画布中的视频节点带入参考视频，点击空白处取消'}
+            {pickMode === 'audio' && '到节点选择：点击画布中的音频节点带入参考音频，点击空白处取消'}
             {pickMode === 'product' && '到节点选择：点击画布中的图片节点带入商品图，点击空白处取消'}
             {pickMode === 'asset' && '到节点选择：点击画布中的图片节点带入参考图，点击空白处取消'}
           </div>
@@ -4662,6 +4681,10 @@ export default function CanvasPage() {
             onClose={() => { audioPanelHiddenRef.current = true; setShowAudioDialog(false); setPickMode(null); setPickTarget(null); }}
             onSend={handleAudioDialogSend}
             onToast={(type, msg) => showToast(type, msg)}
+            canvasMedia={canvasMedia}
+            onPickFromCanvas={() => { setPickMode('audio'); setPickTarget('audio'); }}
+            externalPick={audioPickResult}
+            pickMode={pickMode === 'audio'}
             onSwitchToMusic={() => {
               // 切走即结束草稿绑定并重置 seed：切回音频面板是干净的非草稿状态
               setAudioSeed({ ts: Date.now() });

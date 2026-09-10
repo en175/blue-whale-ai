@@ -693,6 +693,19 @@
   animation: popupFadeIn 0.15s ease;
 }
 
+.selectDropdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.selectDropdown::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.selectDropdown::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 3px;
+}
+
 .selectOption {
   display: block;
   width: 100%;

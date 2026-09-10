@@ -2,7 +2,7 @@
  * AudioDialog 音频生成底部对话框：纯文本描述 + 真实模型（fetchGenerationModels('audio')）
  * ============================================ */
 import { useEffect, useRef, useState } from 'react';
-import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2, Music2, Pause, XCircle } from 'lucide-react';
+import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2, Music2, Pause, XCircle, Upload, Move } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import type { MediaGenStatus } from '../MediaNode';
@@ -61,11 +61,30 @@ interface AudioDialogProps {
   };
   /** Toast 提示（IKDMQU Q3：恢复的模型不可用时提示，由父级注入） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
+  /** 画布媒体节点：供「从画布选择」参考音频 */
+  canvasMedia?: CanvasPickItem[];
+  /** 触发「从画布选择」模式：父级应设置 pickMode */
+  onPickFromCanvas?: () => void;
+  /** 外部注入的画布选择结果：父级点击音频节点后生成 */
+  externalPick?: { ts: number; item: AudioRefItem } | null;
+  /** 是否处于画布选择模式中：用于按钮高亮 */
+  pickMode?: boolean;
   /** 底部模式切换 → AI 音乐对话框（已废弃：仅保留 prop 兼容父级，不再渲染） */
   onSwitchToMusic?: () => void;
 }
 
-export default function AudioDialog({ onClose, onSend, initialText, initialModelId, draftBinding, onToast }: AudioDialogProps) {
+export default function AudioDialog({
+  onClose,
+  onSend,
+  initialText,
+  initialModelId,
+  draftBinding,
+  onToast,
+  canvasMedia = [],
+  onPickFromCanvas,
+  externalPick,
+  pickMode,
+}: AudioDialogProps) {
   const [text, setText] = useState(initialText ?? '');
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [modelId, setModelId] = useState(initialModelId ?? '');
@@ -77,13 +96,20 @@ export default function AudioDialog({ onClose, onSend, initialText, initialModel
   const [refs, setRefs] = useState<AudioRefItem[]>([]);
   /** 当前正在播放的参考项 id */
   const [playingId, setPlayingId] = useState<string | null>(null);
+  /** 来源菜单（本地上传 / 从画布选择） */
+  const [sourceOpen, setSourceOpen] = useState(false);
+  /** 画布选择面板 */
+  const [pickerOpen, setPickerOpen] = useState(false);
   const modelWrapRef = useRef<HTMLDivElement>(null);
+  const sourceWrapRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   if (!audioRef.current) audioRef.current = new Audio();
 
   useDismissOnOutside([
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
+    { open: sourceOpen, ref: sourceWrapRef, dismiss: () => setSourceOpen(false) },
+    { open: pickerOpen, ref: sourceWrapRef, dismiss: () => setPickerOpen(false) },
   ]);
 
   useEffect(() => {
@@ -134,15 +160,46 @@ export default function AudioDialog({ onClose, onSend, initialText, initialModel
     draftBinding?.onParamsChange({ modelId: id });
   };
 
-  /** 上传参考音频：本地文件选择，上限 MAX_AUDIO_REFS=3 */
+  /** 打开来源菜单（本地上传 / 从画布选择），上限 MAX_AUDIO_REFS=3 */
   const handlePickAudio = () => {
     if (readOnly) return;
     if (refs.length >= MAX_AUDIO_REFS) {
       onToast?.('warn', `参考音频最多 ${MAX_AUDIO_REFS} 段已超出`);
       return;
     }
+    setPickerOpen(false);
+    setSourceOpen((v) => !v);
+  };
+
+  const startLocalUpload = () => {
+    setSourceOpen(false);
     fileInputRef.current?.click();
   };
+
+  const startCanvasPick = () => {
+    setSourceOpen(false);
+    setPickerOpen(true);
+    onPickFromCanvas?.();
+  };
+
+  /** 添加参考项（去重 + 上限），画布选择后关闭面板 */
+  const addRef = (item: AudioRefItem) => {
+    setRefs((prev) => {
+      if (prev.some((r) => r.id === item.id && r.source === item.source)) return prev;
+      if (prev.length >= MAX_AUDIO_REFS) return prev;
+      return [...prev, item];
+    });
+    setPickerOpen(false);
+  };
+
+  /** 外部注入的画布选择结果：去重 + 上限保护 */
+  useEffect(() => {
+    if (!externalPick) return;
+    addRef(externalPick.item);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalPick]);
+
+  const canvasAudios = (canvasMedia ?? []).filter((m) => m.mediaType === 'audio');
 
   const handleAudioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -243,16 +300,60 @@ export default function AudioDialog({ onClose, onSend, initialText, initialModel
 
       {/* 顶部参考按钮行（与 ImageDialog/BottomDialog 统一占位视觉；参考上传功能待后续接入） */}
       <div className={styles.topRow}>
-        <div className={styles.refWrap}>
+        <div className={styles.refWrap} ref={sourceWrapRef}>
           {refs.length < MAX_AUDIO_REFS ? (
-            <button
-              className={styles.refBtn}
-              onClick={handlePickAudio}
-              disabled={readOnly}
-              title={readOnly ? '生成中只读' : '添加参考音频（最多 3 段）'}
-            >
-              <AudioLines size={20} strokeWidth={2} />
-            </button>
+            <>
+              <button
+                className={`${styles.refBtn} ${pickMode ? styles.refBtnPicking : ''}`}
+                onClick={handlePickAudio}
+                disabled={readOnly}
+                title={readOnly ? '生成中只读' : '添加参考音频（最多 3 段）'}
+              >
+                <AudioLines size={20} strokeWidth={2} />
+              </button>
+              {sourceOpen && (
+                <div className={styles.sourcePopup} onClick={(e) => e.stopPropagation()}>
+                  <button className={styles.sourceItem} onClick={startLocalUpload}>
+                    <Upload size={14} strokeWidth={2} />
+                    <span>本地上传</span>
+                  </button>
+                  <button className={styles.sourceItem} onClick={startCanvasPick}>
+                    <Move size={14} strokeWidth={2} />
+                    <span>从画布选择</span>
+                  </button>
+                </div>
+              )}
+              {pickerOpen && (
+                <div className={styles.pickerPanel} onClick={(e) => e.stopPropagation()}>
+                  <div className={styles.pickerHead}>
+                    <span>从画布选择音频</span>
+                    <button className={styles.pickerClose} onClick={() => setPickerOpen(false)} title="关闭">
+                      <X size={12} strokeWidth={2} />
+                    </button>
+                  </div>
+                  {canvasAudios.length === 0 ? (
+                    <div className={styles.pickerEmpty}>画布暂无可选音频</div>
+                  ) : (
+                    <div className={styles.pickerList}>
+                      {canvasAudios.map((it) => (
+                        <button
+                          key={it.id}
+                          className={styles.pickerItem}
+                          onClick={() =>
+                            addRef({ id: it.id, kind: 'audio', name: it.name, src: it.src, source: 'canvas' })
+                          }
+                        >
+                          <div className={styles.pickerAudio}>
+                            <AudioLines size={14} strokeWidth={2} />
+                          </div>
+                          <span className={styles.pickerName}>{it.name || it.id}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           ) : (
             <span className={styles.refCount} title={`参考音频最多 ${MAX_AUDIO_REFS} 段`}>
               已达上限
@@ -262,7 +363,7 @@ export default function AudioDialog({ onClose, onSend, initialText, initialModel
         {/* 已上传的参考音频 chip：点击播放/暂停 */}
         {refs.map((r) => (
           <button
-            key={r.id}
+            key={`${r.source}-${r.id}`}
             type="button"
             className={`${styles.audioChip} ${playingId === r.id ? styles.audioChipPlaying : ''}`}
             onClick={() => togglePlay(r)}

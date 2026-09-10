@@ -437,7 +437,15 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeDoubleClick={onNodeDoubleClick}
-        onNodeClick={onNodeClick ? (_e, node) => onNodeClick(node) : undefined}
+        onNodeClick={
+          onNodeClick
+            ? (_e, node) => {
+                // 阻止节点点击冒泡到 pane，避免「到节点选择」命中节点时误触画布空白关闭（视频/图片/音频生成面板）
+                _e.stopPropagation();
+                onNodeClick(node);
+              }
+            : undefined
+        }
         onPaneClick={onPaneClick}
         onSelectionChange={onSelectionChange}
         onMoveEnd={(_e, v) => onViewportChangeRef.current?.(v)}
