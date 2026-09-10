@@ -210,9 +210,10 @@ function validateCommon(
       return { code: ERROR_INVALID_INPUT, message: "target_node_id 无效" };
   }
   const params = body.parameters as GenerationParameters | undefined;
-  const maxPromptLength = type === "audio" ? 3000 : 4000;
-  // IKDLQF：携带 target_node_id 时 prompt 允许为空字符串（缺省按空串处理），长度上限不变；
+  // IKDLQF：携带 target_node_id 时 prompt 允许为空字符串（缺省按空串处理）；
   // 全部有效文本（附件 + 提示词）为空的拒绝在 handler 读取画布快照后按 composeTextAttachmentPrompt 结果判定。
+  // ADR-0085（IKESD6）：长度上限不再在此硬编码——校验位点在能力行查出的地方按
+  // features.max_prompt_length 判定（validateCommon 早于白名单查询，拿不到能力行）。
   if (
     !params ||
     (!isStr(params.prompt) && (params.prompt !== undefined || !hasTargetNode))
@@ -220,10 +221,7 @@ function validateCommon(
     return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
   }
   const promptText = isStr(params.prompt) ? params.prompt : "";
-  if (
-    (!hasTargetNode && promptText.trim() === "") ||
-    promptText.length > maxPromptLength
-  ) {
+  if (!hasTargetNode && promptText.trim() === "") {
     return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
   }
   if (type !== "audio") {
@@ -648,11 +646,13 @@ async function resolveTargetSnapshot(args: {
   promptText: string;
   projectId: string;
   deps: Pick<GenerationDeps, "canvas">;
+  /** ADR-0085：所选模型的 raw prompt 上限；组合闸取 max(契约预算, 模型值)。 */
+  maxPromptLength: number;
 }): Promise<
   | { ok: true; value: TargetSnapshot }
   | { ok: false; value: { message: string; code: string } }
 > {
-  const { type, body, promptText, projectId, deps } = args;
+  const { type, body, promptText, projectId, deps, maxPromptLength } = args;
   const targetNodeId =
     isStr(body.target_node_id) && body.target_node_id.trim() !== ""
       ? body.target_node_id
@@ -719,10 +719,14 @@ async function resolveTargetSnapshot(args: {
         value: { message: "prompt 无效", code: ERROR_INVALID_INPUT },
       };
     }
-    const composedMaxLength =
+    // ADR-0085：模型 raw 上限可超过契约预算（image-2=32000），组合闸跟随取大，
+    // 否则配了大上限的模型一挂文本附件就先撞组合闸，配置形同虚设。
+    const composedMaxLength = Math.max(
       type === "video"
         ? COMPOSED_VIDEO_PROMPT_MAX_LENGTH
-        : COMPOSED_IMAGE_PROMPT_MAX_LENGTH;
+        : COMPOSED_IMAGE_PROMPT_MAX_LENGTH,
+      maxPromptLength,
+    );
     if (composed.length > composedMaxLength) {
       return {
         ok: false,
@@ -789,6 +793,12 @@ export async function handleCreateGenerationJob(
   const capability = whitelist.find((m) => m.model_id === resolvedModelId);
   const maxReferenceImages =
     capability?.features?.max_reference_images ?? DEFAULT_MAX_REFERENCE_IMAGES;
+  // ADR-0085（IKESD6）：raw prompt 长度上限跟随模型目录（image-2 配 32000），
+  // 缺省回落旧硬编码（image/video 4000 / audio 3000）；错误码与旧 validateCommon 一致。
+  const maxPromptLength =
+    capability?.features?.max_prompt_length ?? (type === "audio" ? 3000 : 4000);
+  if (promptText.length > maxPromptLength)
+    return fail(400, "prompt 无效", { code: ERROR_INVALID_INPUT });
   // IKE7JP：Dock 提交时前置校验 resolution/size/aspect_ratio/duration 对能力目录合法性——
   // 越界值在接纳当下 4xx 返回（capability_unsupported_* 细分码 + 可用值文案），不拖到 worker 执行期。
   // 仅视频校验时长；图片无时长。SceneCard 路径已有同源 checkCapabilityLimit（下一步迁移共享）。
@@ -895,6 +905,7 @@ export async function handleCreateGenerationJob(
     promptText,
     projectId,
     deps,
+    maxPromptLength,
   });
   if (!target.ok) {
     return fail(400, target.value.message, { code: target.value.code });

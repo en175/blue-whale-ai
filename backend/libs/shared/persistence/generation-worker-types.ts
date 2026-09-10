@@ -22,6 +22,9 @@ export interface ImageCapabilitySnapshot {
   height: number | null;
   /** 参考图数量上限（features.max_reference_images 归一化；缺省与网关/ARK 一致的 10，IKA72G）。 */
   max_reference_images: number;
+  /** 图生图上游模型名别名（features.i2i_model_name 归一化，ADR-0085）；null=不分流。
+   *  仅换出站请求的 model 字段；job.input.model_id 恒为目录 canonical 名。 */
+  i2i_model_name: string | null;
   channel_parser: string;
   request_mapping: unknown;
   default_size: string;
