@@ -2,13 +2,21 @@
  * ImageDialog - 图片专属对话窗口
  * ============================================ */
 
-.dialog {
+/* 定位外壳：承载对话框的绝对定位与唤出动画。不加 overflow、不定高——
+ * configPanel 以它为包含块悬浮，避免被滚动对话框裁剪（IKEOLP，与 BottomDialog 同构） */
+.dialogWrap {
   position: absolute;
   bottom: var(--spacing-lg);
   left: 50%;
   transform: translateX(-50%);
   width: 740px;
   max-width: 90%;
+  z-index: 20;
+  animation: dialogFadeIn 0.2s ease;
+}
+
+.dialog {
+  position: relative;
   height: 200px;
   overflow-y: auto;
   box-sizing: border-box;
@@ -21,8 +29,6 @@
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  z-index: 20;
-  animation: dialogFadeIn 0.2s ease;
 }
 
 /* 唤出动画：与视频/音频对话窗一致，从底部上浮 + 淡入 */
@@ -36,7 +42,7 @@
   height: 66.66vh;
 }
 
-/* ---- 输入卡片：纯 flex 布局容器，padding/背景/圆角已上移到根 .dialog，与 BottomDialog/AudioDialog 统一 ---- */
+/* ---- 输入卡片：纯 flex 布局容器，padding/背景/圆角已上移到 .dialog，与 BottomDialog/AudioDialog 统一 ---- */
 .inputBox {
   display: flex;
   flex-direction: column;
@@ -448,7 +454,7 @@
   transform: rotate(180deg);
 }
 
-/* ---- 配置面板（悬浮于底栏上方，与视频面板一致；IKDXL4） ---- */
+/* ---- 配置面板（悬浮于底栏上方，与视频面板一致；IKDXL4；包含块为不带 overflow 的 .dialogWrap，不被 .dialog 滚动框裁剪，IKEOLP） ---- */
 .configPanel {
   position: absolute;
   /* 下缘贴字数统计上方：输入卡边框 1px + 底 padding 16px + 底栏 36px + 间距 8px + 字数统计行 11px + 余量 1px */

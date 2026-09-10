@@ -144,3 +144,25 @@ describe('BottomDialog nested overlays (IKBO6M)', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+/* IKEOLP：配置面板挂在 .dialog 滚动框之外的定位外壳 .dialogWrap 上——
+   若面板回到 overflow 容器内部，顶部会再次被裁剪（滚动容器顶部负向溢出不可滚动到达） */
+describe('BottomDialog 配置面板裁剪（IKEOLP）', () => {
+  it('配置面板不是滚动对话框 .dialog 的后代，而是挂在定位外壳上', async () => {
+    await renderDialog();
+    const configBtn = [...mountNode.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('16:9'),
+    );
+    expect(configBtn).toBeTruthy();
+    await act(async () => {
+      configBtn?.click();
+    });
+
+    const panel = mountNode.querySelector(`.${styles.configPanel}`);
+    const dialog = mountNode.querySelector(`.${styles.dialog}`);
+    expect(panel).not.toBeNull();
+    expect(dialog).not.toBeNull();
+    expect(dialog?.contains(panel)).toBe(false);
+    expect(panel?.closest(`.${styles.dialogWrap}`)).not.toBeNull();
+  });
+});
