@@ -19,6 +19,7 @@ import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay.StoredVideo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -64,6 +65,7 @@ import java.util.regex.Pattern;
  * 修正三：ARK provider 不移植——new-api 网关是唯一 provider。
  */
 @Component
+@Conditional(com.bluewhale.worker.config.VideoEnabledCondition.class)
 public class VideoJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(VideoJobProcessor.class);
