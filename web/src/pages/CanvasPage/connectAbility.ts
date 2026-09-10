@@ -1,0 +1,99 @@
+/* 连线创作能力集：素材能连哪种生成节点、组交集如何投影到三项菜单 */
+import type { Edge, Node } from '@xyflow/react';
+
+export type ConnectGenKind = 'image' | 'video' | 'text';
+
+export type ConnectSourceKind = 'image' | 'video' | 'audio' | 'text';
+
+const ABILITY: Record<ConnectSourceKind, ReadonlySet<ConnectGenKind>> = {
+  image: new Set(['image', 'video', 'text']),
+  video: new Set(['video', 'text']),
+  audio: new Set(['video']),
+  text: new Set(['image', 'video', 'text']),
+};
+
+function dataOf(node: Node): Record<string, unknown> {
+  return (node.data ?? {}) as Record<string, unknown>;
+}
+
+/** 空壳 / 生成中 / 待生成 / 失败草稿不能当上游素材 */
+export function isConnectableSource(node: Node | undefined): boolean {
+  if (!node) return false;
+  if (sourceKindOf(node) == null) return false;
+  return true;
+}
+
+export function sourceKindOf(node: Node | undefined): ConnectSourceKind | null {
+  if (!node) return null;
+  const d = dataOf(node);
+  if (d.emptyShell === true) return null;
+  if (node.type === 'textNode') {
+    if (d.textGen === true) {
+      const html = typeof d.html === 'string' ? d.html : '';
+      const text = typeof d.text === 'string' ? d.text : '';
+      const plain = html.replace(/<[^>]+>/g, '').trim() || text.trim();
+      return plain ? 'text' : null;
+    }
+    return 'text';
+  }
+  if (d.draft === true || d.genStatus === 'draft' || d.genStatus === 'generating') return null;
+  if (node.type !== 'mediaNode') return null;
+  if (d.assetMissing === true) return null;
+  const src = typeof d.src === 'string' ? d.src : '';
+  if (!src || src.startsWith('blob:')) return null;
+  if (d.mediaType === 'image' || d.mediaType === 'video' || d.mediaType === 'audio') return d.mediaType;
+  return null;
+}
+
+/** 目标是否为生成节点（待生成 / 生成中 / 文本生成宿主） */
+export function genKindOf(node: Node | undefined): ConnectGenKind | null {
+  if (!node) return null;
+  const d = dataOf(node);
+  if (node.type === 'textNode' && d.textGen === true) return 'text';
+  if (node.type !== 'mediaNode') return null;
+  if (d.draft === true || d.genStatus === 'draft' || d.genStatus === 'generating') {
+    if (d.mediaType === 'video') return 'video';
+    if (d.mediaType === 'image') return 'image';
+  }
+  return null;
+}
+
+export function availableGenKinds(sourceNodes: Node[]): Set<ConnectGenKind> {
+  const kinds: ConnectSourceKind[] = [];
+  for (const node of sourceNodes) {
+    const kind = sourceKindOf(node);
+    if (!kind) continue;
+    kinds.push(kind);
+  }
+  if (kinds.length === 0) return new Set();
+  let acc: Set<ConnectGenKind> | null = null;
+  for (const kind of kinds) {
+    const set = ABILITY[kind];
+    acc = acc == null ? new Set(set) : new Set([...acc].filter((k) => set.has(k)));
+  }
+  return acc ?? new Set();
+}
+
+export function canConnectSourcesToGen(sourceNodes: Node[], targetKind: ConnectGenKind): boolean {
+  return availableGenKinds(sourceNodes).has(targetKind);
+}
+
+/** 从 target 沿出边能否走到 source（再加 source→target 会成环） */
+export function wouldCreateCycle(sourceId: string, targetId: string, edges: Edge[]): boolean {
+  const outgoing = new Map<string, string[]>();
+  for (const edge of edges) {
+    const list = outgoing.get(edge.source) ?? [];
+    list.push(edge.target);
+    outgoing.set(edge.source, list);
+  }
+  const stack = [targetId];
+  const seen = new Set<string>();
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (id === sourceId) return true;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const next of outgoing.get(id) ?? []) stack.push(next);
+  }
+  return false;
+}

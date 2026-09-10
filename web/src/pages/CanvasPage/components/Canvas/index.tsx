@@ -58,6 +58,10 @@ interface FlowCanvasProps {
   onEdgesChange: (changes: EdgeChange[]) => void;
   /** 建立连线 */
   onConnect: (connection: Connection) => void;
+  /** 拖线在空白/非法目标松开（类型菜单由父级处理） */
+  onConnectEnd?: (event: MouseEvent | TouchEvent, state: { fromNode?: Node | null; toNode?: Node | null; isValid?: boolean | null }) => void;
+  /** 仅允许连到生成节点且能力匹配 */
+  isValidConnection?: (connection: Connection | { source: string | null; target: string | null }) => boolean;
   /** 加载画布文档后注入的视口（切换项目时应用） */
   viewport?: Viewport;
   /** 视口变更回调（拖拽/缩放结束），供自动保存使用 */
@@ -100,13 +104,14 @@ interface FlowCanvasProps {
   onGroupFrameDragStop?: (res: GroupFrameDragResult) => void;
   /** 组→目标：从组右侧「+」拖到某节点，为组内每个成员各建一条边到目标 */
   onConnectGroupToTarget?: (memberIds: string[], targetId: string) => void;
+  onConnectGroupDrop?: (memberIds: string[], targetId: string | null, client: { x: number; y: number }) => void;
   /** 源→组：外部节点拖到组左侧「+」，为该源到组内每个成员各建一条边 */
   onConnectSourceToGroup?: (sourceId: string, memberIds: string[]) => void;
   /** 选择模式下右键画布空白 */
   onPaneContextMenu?: (pt: { clientX: number; clientY: number }) => void;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onConnectGroupToTarget, onConnectSourceToGroup, onPaneContextMenu }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectEnd, isValidConnection, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -438,6 +443,8 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onConnectEnd={onConnectEnd}
+        isValidConnection={isValidConnection}
         onNodeDoubleClick={onNodeDoubleClick}
         onNodeClick={
           onNodeClick
@@ -523,6 +530,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             onGroupFrameDragStop={onGroupFrameDragStopRef.current}
             onFrameDragMembersChange={setFrameDragMemberIds}
             onConnectGroupToTarget={onConnectGroupToTarget ?? (() => {})}
+            onConnectGroupDrop={onConnectGroupDrop}
             onConnectSourceToGroup={onConnectSourceToGroup ?? (() => {})}
             isDraggingNode={isDraggingNode}
           />
@@ -533,7 +541,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onConnectGroupToTarget, onConnectSourceToGroup, onPaneContextMenu }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectEnd, isValidConnection, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -548,6 +556,8 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         edges={edges}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onConnectEnd={onConnectEnd}
+        isValidConnection={isValidConnection}
         viewport={viewport}
         onViewportChange={onViewportChange}
         onNodeDragStop={onNodeDragStop}
@@ -568,6 +578,7 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         onDownloadGroup={onDownloadGroup}
         onGroupFrameDragStop={onGroupFrameDragStop}
         onConnectGroupToTarget={onConnectGroupToTarget}
+        onConnectGroupDrop={onConnectGroupDrop}
         onConnectSourceToGroup={onConnectSourceToGroup}
         onPaneContextMenu={onPaneContextMenu}
       />

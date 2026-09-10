@@ -92,6 +92,15 @@ import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
 import { depositCanvasAssetToCharacterLibrary } from './characterLibraryDeposit';
 import { buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
+import {
+  availableGenKinds,
+  canConnectSourcesToGen,
+  genKindOf,
+  isConnectableSource,
+  wouldCreateCycle,
+  type ConnectGenKind,
+} from './connectAbility';
+import ConnectTypeMenu from './components/ConnectTypeMenu';
 import { checkFileBeforeUpload, isFileRejected } from '@/utils/fileSignature';
 import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 import { takeAgentHandoff } from '@/utils/agent-handoff';
@@ -195,6 +204,7 @@ export default function CanvasPage() {
   const [showMiniMap, setShowMiniMap] = useState(false);
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
+  const [connectMenu, setConnectMenu] = useState<{ sourceIds: string[]; x: number; y: number } | null>(null);
   const paneUploadRef = useRef<HTMLInputElement>(null);
   const paneUploadPosRef = useRef<{ x: number; y: number } | null>(null);
   const [showBottomDialog, setShowBottomDialog] = useState(false);
@@ -321,16 +331,28 @@ export default function CanvasPage() {
     }
     return true;
   };
-/** 单条连线的统一校验与落盘（供普通连线与组连线复用）：拒绝自环、生成中目标只读、
- *  图片/视频草稿目标的来源校验。返回是否成功建立。 */
+/** 单条连线：只允许素材 → 生成节点；能力不匹配或内容互连静默取消 */
+  const findCanvasNode = (id: string): Node | undefined =>
+    mediaNodesRef.current.find((n) => n.id === id)
+    ?? textNodesRef.current.find((n) => n.id === id)
+    ?? productNodesRef.current.find((n) => n.id === id)
+    ?? assetNodesRef.current.find((n) => n.id === id);
+
   const connectPair = (source: string, target: string): boolean => {
     if (!source || !target || source === target) return false;
     if (isGeneratingNode(target)) {
       showToast('warn', '生成中，输入连线只读');
       return false;
     }
-    const sourceData = mediaNodesRef.current.find((n) => n.id === source)?.data as Record<string, unknown> | undefined;
-    const targetData = mediaNodesRef.current.find((n) => n.id === target)?.data as Record<string, unknown> | undefined;
+    const sourceNode = findCanvasNode(source);
+    const targetNode = findCanvasNode(target);
+    if (!isConnectableSource(sourceNode)) return false;
+    const targetKind = genKindOf(targetNode);
+    if (!targetKind) return false;
+    if (!canConnectSourcesToGen([sourceNode!], targetKind)) return false;
+    if (wouldCreateCycle(source, target, edgesRef.current)) return false;
+    const sourceData = sourceNode?.data as Record<string, unknown> | undefined;
+    const targetData = targetNode?.data as Record<string, unknown> | undefined;
     if (sourceData?.emptyShell || targetData?.emptyShell) return false;
     if (!validateImageRefConnect(source, target)) return false;
     if (!validateVideoRefConnect(source, target)) return false;
@@ -1957,12 +1979,12 @@ export default function CanvasPage() {
     size?: string;
     duration?: number;
     mode?: string;
-  }): string => {
+  }, position?: { x: number; y: number }): string => {
     const nodeId = newNodeId('media-draft');
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
-      position: spawnDraftPosition(),
+      position: position ?? spawnDraftPosition(),
       selected: true,
       data: {
         src: '',
@@ -2000,6 +2022,159 @@ export default function CanvasPage() {
     setMediaNodes((prev) => [...deselect(prev), node]);
     setSelectRequest({ id: nodeId, ts: Date.now() });
     return nodeId;
+  };
+
+  /** 图片生成草稿卡，落在指定点 */
+  const createImageDraftCard = (position?: { x: number; y: number }): string => {
+    const nodeId = newNodeId('media-draft');
+    const node: Node = {
+      id: nodeId,
+      type: 'mediaNode',
+      position: position ?? spawnDraftPosition(),
+      selected: true,
+      data: {
+        src: '',
+        mediaType: 'image',
+        fileName: '图片草稿',
+        genStatus: 'draft',
+        draft: true,
+        prompt: '',
+        toolMode,
+        onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
+        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+        onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
+        onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+        onReEdit: (id: string) => actionsRef.current.reEdit(id),
+        onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onGenVideo: (id: string) => actionsRef.current.genVideo(id),
+        onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+        onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
+        onDownload: (id: string) => actionsRef.current.download(id),
+        onShowDetails: (id: string) => actionsRef.current.showDetails(id),
+        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
+        onMediaDims: handleMediaDims,
+      },
+    };
+    const deselect = (prev: Node[]) => prev.map((n) => (n.selected ? { ...n, selected: false } : n));
+    setTextNodes(deselect);
+    setProductNodes(deselect);
+    setAssetNodes(deselect);
+    setMediaNodes((prev) => [...deselect(prev), node]);
+    setSelectRequest({ id: nodeId, ts: Date.now() });
+    return nodeId;
+  };
+
+  /** 文本生成节点：身份保持可被连入，写了正文后也可作上游 */
+  const createTextGenDraft = (position?: { x: number; y: number }): string => {
+    const nodeId = newNodeId('text');
+    const node: Node = {
+      id: nodeId,
+      type: 'textNode',
+      position: position ?? spawnDraftPosition(),
+      selected: true,
+      data: {
+        html: '',
+        title: '文本生成',
+        textGen: true,
+        onDraftError: handleDraftError,
+        toolMode,
+        onDelete: (id: string) => {
+          setTextNodes((prev) => prev.filter((n) => n.id !== id));
+        },
+        onChange: (id: string, html: string) => {
+          setTextNodes((prev) =>
+            prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n)),
+          );
+        },
+        onTitleChange: (id: string, title: string) =>
+          setTextNodes((prev) => prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, title } } : n))),
+        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+        onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
+        onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
+        onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
+      },
+    };
+    pendingNodeIdsRef.current.add(nodeId);
+    historyRef.current?.pushAddNodes([nodeId]);
+    const deselect = (prev: Node[]) => prev.map((n) => (n.selected ? { ...n, selected: false } : n));
+    setMediaNodes(deselect);
+    setProductNodes(deselect);
+    setAssetNodes(deselect);
+    setTextNodes((prev) => [...deselect(prev), node]);
+    setSelectRequest({ id: nodeId, ts: Date.now() });
+    return nodeId;
+  };
+
+  const openConnectTypeMenu = (sourceIds: string[], clientX: number, clientY: number) => {
+    const sources = sourceIds.map(findCanvasNode).filter((n): n is Node => isConnectableSource(n));
+    if (sources.length === 0) return;
+    if (availableGenKinds(sources).size === 0) return;
+    setConnectMenu({ sourceIds: sources.map((n) => n.id), x: clientX, y: clientY });
+  };
+
+  const applyConnectType = (kind: ConnectGenKind) => {
+    if (!connectMenu) return;
+    const sourceIds = connectMenu.sourceIds;
+    const position = spawnNearScreen({ x: connectMenu.x, y: connectMenu.y });
+    setConnectMenu(null);
+    let targetId = '';
+    if (kind === 'video') {
+      targetId = createVideoDraftCard(undefined, position);
+      sourceIds.forEach((id) => addCanvasEdge(id, targetId, 'reference'));
+      openVideoDraftDialog(targetId);
+      return;
+    }
+    if (kind === 'image') {
+      targetId = createImageDraftCard(position);
+      sourceIds.forEach((id) => addCanvasEdge(id, targetId));
+      openImageDraftDialog(targetId);
+      return;
+    }
+    targetId = createTextGenDraft(position);
+    sourceIds.forEach((id) => addCanvasEdge(id, targetId));
+  };
+
+  const handleConnectEnd = (
+    event: MouseEvent | TouchEvent,
+    state: { fromNode?: Node | null; toNode?: Node | null; isValid?: boolean | null },
+  ) => {
+    if (state.isValid) return;
+    const from = state.fromNode;
+    if (!from || !isConnectableSource(from)) return;
+    if (state.toNode && genKindOf(state.toNode)) return;
+    const point = 'changedTouches' in event ? event.changedTouches[0] : event;
+    openConnectTypeMenu([from.id], point.clientX, point.clientY);
+  };
+
+  const handleConnectGroupDrop = (
+    memberIds: string[],
+    targetId: string | null,
+    client: { x: number; y: number },
+  ) => {
+    const sources = memberIds.filter((id) => isConnectableSource(findCanvasNode(id)));
+    if (sources.length === 0) return;
+    if (targetId) {
+      const kind = genKindOf(findCanvasNode(targetId));
+      if (kind) {
+        sources.forEach((id) => connectPair(id, targetId));
+        return;
+      }
+    }
+    openConnectTypeMenu(sources, client.x, client.y);
+  };
+
+  const isValidCanvasConnection = (connection: { source: string | null; target: string | null }) => {
+    if (!connection.source || !connection.target || connection.source === connection.target) return false;
+    const sourceNode = findCanvasNode(connection.source);
+    const targetNode = findCanvasNode(connection.target);
+    if (!isConnectableSource(sourceNode)) return false;
+    const kind = genKindOf(targetNode);
+    if (!kind) return false;
+    if (!canConnectSourcesToGen([sourceNode!], kind)) return false;
+    if (wouldCreateCycle(connection.source, connection.target, edgesRef.current)) return false;
+    return true;
   };
 
   /** 面板编辑实时写回视频草稿节点（IKDMQS）：参数随节点 data 进入自动保存，刷新后恢复 */
@@ -4814,6 +4989,8 @@ export default function CanvasPage() {
           edges={edges}
           onEdgesChange={guardEdgesChange}
           onConnect={handleConnect}
+          onConnectEnd={handleConnectEnd}
+          isValidConnection={isValidCanvasConnection}
           viewport={focusViewport ?? doc?.viewport}
           onViewportChange={setViewport}
           registerSpawnPosition={registerSpawnPosition}
@@ -4837,9 +5014,19 @@ export default function CanvasPage() {
           onDownloadGroup={handleDownloadGroupNodes}
           onGroupFrameDragStop={handleGroupFrameDragStop}
           onConnectGroupToTarget={handleConnectGroupToTarget}
+          onConnectGroupDrop={handleConnectGroupDrop}
           onConnectSourceToGroup={handleConnectSourceToGroup}
           onPaneContextMenu={(pt) => setPaneMenu({ x: pt.clientX, y: pt.clientY })}
         />
+        {connectMenu && (
+          <ConnectTypeMenu
+            x={connectMenu.x}
+            y={connectMenu.y}
+            enabled={availableGenKinds(connectMenu.sourceIds.map(findCanvasNode).filter((n): n is Node => !!n))}
+            onClose={() => setConnectMenu(null)}
+            onSelect={applyConnectType}
+          />
+        )}
         {paneMenu && (
           <CanvasContextMenu
             x={paneMenu.x}

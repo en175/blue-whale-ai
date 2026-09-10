@@ -452,7 +452,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             )}
           </div>
         )}
-        {!isEmptyShell && (
+        {!isEmptyShell && !isDraft && (
         <Handle type="source" position={Position.Right} className={styles.handle} style={{ ...HANDLE_STYLE, right: '-16px' }}>
         <HandlePlus />
       </Handle>

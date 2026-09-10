@@ -41,7 +41,9 @@ interface GroupOverlayProps {
   /** 整组拖动起止：上抛「冻结的本次拖动成员集合」（拖起时传集合，结束时传空集合），
    *  供父级在拖组途中维持成员的高 zIndex（逻辑框未随拖动更新，避免成员被误判出组）。 */
   onFrameDragMembersChange?: (ids: Set<string>) => void;
-  /** 组→目标：从组右侧「+」拖到某节点，为组内每个成员各建一条边到目标 */
+  /** 组→空白/节点：批量连线结束（targetId 为空表示落到空白或内容节点） */
+  onConnectGroupDrop?: (memberIds: string[], targetId: string | null, client: { x: number; y: number }) => void;
+  /** 组→已有节点：兼容旧回调，有 onConnectGroupDrop 时优先走 drop */
   onConnectGroupToTarget?: (memberIds: string[], targetId: string) => void;
   /** 源→组：外部节点拖到组左侧「+」，为该源到组内每个成员各建一条边 */
   onConnectSourceToGroup?: (sourceId: string, memberIds: string[]) => void;
@@ -74,6 +76,7 @@ export default function GroupOverlay({
   onGroupFrameDragStop,
   onFrameDragMembersChange,
   onConnectGroupToTarget,
+  onConnectGroupDrop,
   isDraggingNode,
 }: GroupOverlayProps) {
   const { flowToScreenPosition, screenToFlowPosition } = useReactFlow();
@@ -441,9 +444,13 @@ export default function GroupOverlay({
       if (paneRef.current) paneRef.current.style.cursor = '';
       if (!s) return;
       const targetId = targetNodeIdAt(e.clientX, e.clientY, s.memberIds);
-      if (targetId) onConnectGroupToTarget?.(s.memberIds, targetId);
+      if (onConnectGroupDrop) {
+        onConnectGroupDrop(s.memberIds, targetId, { x: e.clientX, y: e.clientY });
+      } else if (targetId) {
+        onConnectGroupToTarget?.(s.memberIds, targetId);
+      }
     },
-    [onConnectMove, targetNodeIdAt, onConnectGroupToTarget],
+    [onConnectMove, targetNodeIdAt, onConnectGroupToTarget, onConnectGroupDrop],
   );
 
   /** 按下组右侧「+」开始批量连线：冻结当前组成员，记录各成员右中点为连线起点 */
