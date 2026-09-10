@@ -51,6 +51,11 @@
   pointer-events: none !important;
 }
 
+/* 拖动画布时仍可从节点「+」拉线到空白弹出类型菜单 */
+.dragMode :global(.react-flow__handle) {
+  pointer-events: auto !important;
+}
+
 .dragMode :global(.react-flow__pane) {
   cursor: grab;
 }

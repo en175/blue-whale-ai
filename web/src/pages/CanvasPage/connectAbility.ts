@@ -1,11 +1,14 @@
-/* 连线创作能力集：素材能连哪种生成节点、组交集如何投影到三项菜单 */
+/* 连线创作能力集：素材能连哪种生成节点、组交集如何投影到菜单 */
 import type { Edge, Node } from '@xyflow/react';
 
-export type ConnectGenKind = 'image' | 'video' | 'text';
+export type ConnectGenKind = 'image' | 'video' | 'text' | 'audio';
 
 export type ConnectSourceKind = 'image' | 'video' | 'audio' | 'text';
 
-const ABILITY: Record<ConnectSourceKind, ReadonlySet<ConnectGenKind>> = {
+/** 图片/视频/文本生成仍按素材能力集交集；音频生成单独按组内介质组合判定 */
+type AbilityGenKind = Exclude<ConnectGenKind, 'audio'>;
+
+const ABILITY: Record<ConnectSourceKind, ReadonlySet<AbilityGenKind>> = {
   image: new Set(['image', 'video', 'text']),
   video: new Set(['video', 'text']),
   audio: new Set(['video']),
@@ -54,8 +57,19 @@ export function genKindOf(node: Node | undefined): ConnectGenKind | null {
   if (d.draft === true || d.genStatus === 'draft' || d.genStatus === 'generating') {
     if (d.mediaType === 'video') return 'video';
     if (d.mediaType === 'image') return 'image';
+    if (d.mediaType === 'audio') return 'audio';
   }
   return null;
+}
+
+/** 音频生成是否可选：纯图/纯音频置灰；图+视频、音频+图、音频+视频、三者混合可选 */
+export function isAudioGenEnabled(sourceKinds: ConnectSourceKind[]): boolean {
+  const hasImage = sourceKinds.includes('image');
+  const hasVideo = sourceKinds.includes('video');
+  const hasAudio = sourceKinds.includes('audio');
+  if (hasVideo && hasImage) return true;
+  if (hasAudio && (hasImage || hasVideo)) return true;
+  return false;
 }
 
 export function availableGenKinds(sourceNodes: Node[]): Set<ConnectGenKind> {
@@ -66,12 +80,14 @@ export function availableGenKinds(sourceNodes: Node[]): Set<ConnectGenKind> {
     kinds.push(kind);
   }
   if (kinds.length === 0) return new Set();
-  let acc: Set<ConnectGenKind> | null = null;
+  let acc: Set<AbilityGenKind> | null = null;
   for (const kind of kinds) {
     const set = ABILITY[kind];
     acc = acc == null ? new Set(set) : new Set([...acc].filter((k) => set.has(k)));
   }
-  return acc ?? new Set();
+  const result = new Set<ConnectGenKind>(acc ?? []);
+  if (isAudioGenEnabled(kinds)) result.add('audio');
+  return result;
 }
 
 export function canConnectSourcesToGen(sourceNodes: Node[], targetKind: ConnectGenKind): boolean {

@@ -205,6 +205,7 @@ export default function CanvasPage() {
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
   const [connectMenu, setConnectMenu] = useState<{ sourceIds: string[]; x: number; y: number } | null>(null);
+  const connectingSourceRef = useRef<string | null>(null);
   const paneUploadRef = useRef<HTMLInputElement>(null);
   const paneUploadPosRef = useRef<{ x: number; y: number } | null>(null);
   const [showBottomDialog, setShowBottomDialog] = useState(false);
@@ -2024,6 +2025,47 @@ export default function CanvasPage() {
     return nodeId;
   };
 
+  /** 音频生成草稿卡，落在指定点 */
+  const createAudioDraftCard = (position?: { x: number; y: number }): string => {
+    const nodeId = newNodeId('media-draft');
+    const node: Node = {
+      id: nodeId,
+      type: 'mediaNode',
+      position: position ?? spawnDraftPosition(),
+      selected: true,
+      data: {
+        src: '',
+        mediaType: 'audio',
+        fileName: '音频草稿',
+        genStatus: 'draft',
+        draft: true,
+        prompt: '',
+        toolMode,
+        onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
+        onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+        onAddToChat: (id: string) => actionsRef.current.addToChat(id),
+        onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
+        onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+        onReEdit: (id: string) => actionsRef.current.reEdit(id),
+        onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onGenVideo: (id: string) => actionsRef.current.genVideo(id),
+        onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+        onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
+        onDownload: (id: string) => actionsRef.current.download(id),
+        onShowDetails: (id: string) => actionsRef.current.showDetails(id),
+        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
+        onMediaDims: handleMediaDims,
+      },
+    };
+    const deselect = (prev: Node[]) => prev.map((n) => (n.selected ? { ...n, selected: false } : n));
+    setTextNodes(deselect);
+    setProductNodes(deselect);
+    setAssetNodes(deselect);
+    setMediaNodes((prev) => [...deselect(prev), node]);
+    setSelectRequest({ id: nodeId, ts: Date.now() });
+    return nodeId;
+  };
+
   /** 图片生成草稿卡，落在指定点 */
   const createImageDraftCard = (position?: { x: number; y: number }): string => {
     const nodeId = newNodeId('media-draft');
@@ -2132,18 +2174,27 @@ export default function CanvasPage() {
       openImageDraftDialog(targetId);
       return;
     }
+    if (kind === 'audio') {
+      targetId = createAudioDraftCard(position);
+      sourceIds.forEach((id) => addCanvasEdge(id, targetId));
+      openAudioDraftDialog(targetId);
+      return;
+    }
     targetId = createTextGenDraft(position);
     sourceIds.forEach((id) => addCanvasEdge(id, targetId));
   };
 
   const handleConnectEnd = (
     event: MouseEvent | TouchEvent,
-    state: { fromNode?: Node | null; toNode?: Node | null; isValid?: boolean | null },
+    state?: { fromNode?: Node | null; toNode?: Node | null; isValid?: boolean | null },
   ) => {
-    if (state.isValid) return;
-    const from = state.fromNode;
+    const fromId = state?.fromNode?.id ?? connectingSourceRef.current;
+    connectingSourceRef.current = null;
+    if (state?.isValid) return;
+    const from = fromId ? findCanvasNode(fromId) ?? state?.fromNode ?? undefined : undefined;
     if (!from || !isConnectableSource(from)) return;
-    if (state.toNode && genKindOf(state.toNode)) return;
+    const toNode = state?.toNode ? findCanvasNode(state.toNode.id) ?? state.toNode : null;
+    if (toNode && genKindOf(toNode)) return;
     const point = 'changedTouches' in event ? event.changedTouches[0] : event;
     openConnectTypeMenu([from.id], point.clientX, point.clientY);
   };
@@ -2158,6 +2209,22 @@ export default function CanvasPage() {
     if (targetId) {
       const kind = genKindOf(findCanvasNode(targetId));
       if (kind) {
+        const sourceNodes = sources
+          .map((id) => findCanvasNode(id))
+          .filter((n): n is Node => isConnectableSource(n));
+        // 音频生成按整组介质组合判定，不能拆成单源校验
+        if (!canConnectSourcesToGen(sourceNodes, kind)) return;
+        if (kind === 'audio') {
+          if (isGeneratingNode(targetId)) {
+            showToast('warn', '生成中，输入连线只读');
+            return;
+          }
+          sources.forEach((id) => {
+            if (wouldCreateCycle(id, targetId, edgesRef.current)) return;
+            addCanvasEdge(id, targetId);
+          });
+          return;
+        }
         sources.forEach((id) => connectPair(id, targetId));
         return;
       }
@@ -4989,6 +5056,7 @@ export default function CanvasPage() {
           edges={edges}
           onEdgesChange={guardEdgesChange}
           onConnect={handleConnect}
+          onConnectStart={(nodeId) => { connectingSourceRef.current = nodeId; }}
           onConnectEnd={handleConnectEnd}
           isValidConnection={isValidCanvasConnection}
           viewport={focusViewport ?? doc?.viewport}
