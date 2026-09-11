@@ -15,7 +15,7 @@
   <artifactId>worker-java</artifactId>
   <version>0.0.1-SNAPSHOT</version>
   <name>worker-java</name>
-  <description>Blue-Whale 生成执行服务（薄执行器，ADR-0084）。job 状态机权威在 NestJS backend，本服务只做：消费 MQ、调上游生成、经 internal endpoints 回报。</description>
+  <description>Blue-Whale 生成执行服务（Java 直连 DB 运行时，ADR-0084 修正二）。与 backend 仅经 DB+MQ 交互：消费 MQ → claim（CAS+fencing）→ 调上游生成 → 直写终态。</description>
 
   <properties>
     <java.version>21</java.version>

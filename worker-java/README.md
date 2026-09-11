@@ -21,7 +21,7 @@ Blue-Whale 生成执行服务（Java 薄执行器）。决策：[ADR-0084](../do
 
 ```bash
 mvn -B test          # 契约测试（GenerationMessageContractTest 是契约 §1 的可执行切片）
-mvn -B package
+mvn -B package       # 本机裸跑才需要；出镜像走 docker build（多阶段内置 mvn）
 java -jar target/worker-java-0.0.1-SNAPSHOT.jar
 curl localhost:4002/ready
 ```
@@ -64,8 +64,7 @@ curl localhost:4002/ready
 ### Docker 部署
 
 ```bash
-# 构建
-mvn -B package -DskipTests
+# 构建（多阶段 Dockerfile：镜像内完成 mvn package，无需外部预构建 jar）
 docker build -t worker-java .
 docker run -e WORKER_ENABLED_TAGS=media_extract \
            -e DATABASE_URL=mysql://... \
