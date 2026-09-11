@@ -214,7 +214,11 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     // 上游建组：组名 默认分组：<uid>。
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("http://gateway.test/api/material/CreateAssetGroup");
-    expect(JSON.parse(String(calls[0].init.body))).toEqual({ Name: "默认分组：9" });
+    // IKEXX8：网关文档 GroupType 必填——显式携带 AIGC，不赌上游默认值。
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      Name: "默认分组：9",
+      GroupType: "AIGC",
+    });
     // 本地落表：virtual 默认组。
     expect(prisma.client.material_groups.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -297,5 +301,125 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     expect(calls[0].url).toBe("http://gateway.test/api/material/CreateAssetGroup");
     expect(calls[1].url).toBe("http://gateway.test/api/material/DeleteAssetGroup");
     expect(JSON.parse(String(calls[1].init.body))).toEqual({ Id: "group-virt-1" });
+  });
+});
+
+describe("MaterialService —— 组查询分流 tryServeLocalGroupAction（IKEXX8）", () => {
+  const upstreamRow = {
+    id: 1n,
+    user_id: 9n,
+    material_group_id: "group-20260911103222-ps9db",
+    kind: "virtual",
+    name: "默认分组：9",
+    cover_url: null,
+    is_default: true,
+    gmt_create: new Date("2026-09-11T02:32:22Z"),
+    gmt_modified: new Date("2026-09-11T02:32:22Z"),
+  };
+
+  function makeGroupPrisma(overrides: {
+    count?: unknown;
+    findMany?: unknown;
+    findFirst?: unknown;
+  } = {}) {
+    const client = {
+      material_groups: {
+        count: overrides.count ?? vi.fn().mockResolvedValue(0),
+        findMany: overrides.findMany ?? vi.fn().mockResolvedValue([]),
+        findFirst: overrides.findFirst ?? vi.fn().mockResolvedValue(null),
+        upsert: vi.fn(),
+        updateMany: vi.fn(),
+      },
+    };
+    return { client };
+  }
+
+  it("ListAssetGroups GroupType=AIGC：读本地分页，返回上游同款信封（对齐 2026-09-11 实测样例），不调上游", async () => {
+    const calls = stubFetch(() => json({}));
+    const count = vi.fn().mockResolvedValue(1);
+    const findMany = vi.fn().mockResolvedValue([upstreamRow]);
+    const service = makeService(makeGroupPrisma({ count, findMany }));
+
+    const res = await service.tryServeLocalGroupAction("9", "ListAssetGroups", {
+      Filter: { GroupType: "AIGC" },
+      PageNumber: 1,
+      PageSize: 10,
+    });
+
+    expect(calls).toHaveLength(0);
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(200);
+    const body = res!.body as Record<string, any>;
+    expect(body.ResponseMetadata.Action).toBe("ListAssetGroups");
+    expect(body.ResponseMetadata.RequestId).toMatch(/^req_[0-9a-f-]{36}$/);
+    expect(body.Result).toEqual({
+      TotalCount: 1,
+      Items: [
+        {
+          Id: "group-20260911103222-ps9db",
+          Name: "默认分组：9",
+          GroupType: "AIGC",
+          CreateTime: "2026-09-11T02:32:22Z",
+          UpdateTime: "2026-09-11T02:32:22Z",
+        },
+      ],
+      PageNumber: 1,
+      PageSize: 10,
+    });
+  });
+
+  it("ListAssetGroups 无 Filter / LivenessFace / 陌生值：返回 null（透传上游）", async () => {
+    const service = makeService(makeGroupPrisma());
+    expect(
+      await service.tryServeLocalGroupAction("9", "ListAssetGroups", {
+        PageNumber: 1,
+        PageSize: 20,
+      }),
+    ).toBeNull();
+    expect(
+      await service.tryServeLocalGroupAction("9", "ListAssetGroups", {
+        Filter: { GroupType: "LivenessFace" },
+        PageNumber: 1,
+        PageSize: 20,
+      }),
+    ).toBeNull();
+    expect(
+      await service.tryServeLocalGroupAction("9", "ListAssetGroups", {
+        Filter: { GroupType: "Whatever" },
+      }),
+    ).toBeNull();
+  });
+
+  it("GetAssetGroup 命中本地虚拟组：返回详情信封；未命中返回 null（真人组透传）", async () => {
+    const serviceHit = makeService(
+      makeGroupPrisma({ findFirst: vi.fn().mockResolvedValue(upstreamRow) }),
+    );
+    const hit = await serviceHit.tryServeLocalGroupAction("9", "GetAssetGroup", {
+      Id: "group-20260911103222-ps9db",
+    });
+    expect(hit).not.toBeNull();
+    const body = hit!.body as Record<string, any>;
+    expect(body.ResponseMetadata.Action).toBe("GetAssetGroup");
+    expect(body.Result).toEqual({
+      Id: "group-20260911103222-ps9db",
+      Name: "默认分组：9",
+      GroupType: "AIGC",
+      CreateTime: "2026-09-11T02:32:22Z",
+      UpdateTime: "2026-09-11T02:32:22Z",
+    });
+
+    const serviceMiss = makeService(makeGroupPrisma());
+    expect(
+      await serviceMiss.tryServeLocalGroupAction("9", "GetAssetGroup", {
+        Id: "group-real-1",
+      }),
+    ).toBeNull();
+  });
+
+  it("非组查询 Action 不进分流：返回 null", async () => {
+    const service = makeService(makeGroupPrisma());
+    expect(
+      await service.tryServeLocalGroupAction("9", "ListAssets", { GroupId: "group-1" }),
+    ).toBeNull();
   });
 });
