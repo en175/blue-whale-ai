@@ -38,7 +38,7 @@ public class DataSourceConfig {
         config.setJdbcUrl(parsed.jdbcUrl());
         config.setUsername(parsed.username());
         config.setPassword(parsed.password());
-        config.setMaximumPoolSize(10); // 保守池大小（契约未指定，按工程惯例）
+        config.setMaximumPoolSize(20); // 保守池大小（契约未指定，按工程惯例）
         config.setConnectionTimeout(30_000);
         config.setIdleTimeout(600_000);
         config.setMaxLifetime(1_800_000);
