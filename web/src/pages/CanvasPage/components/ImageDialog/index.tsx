@@ -13,7 +13,7 @@ import {
   ArrowUp,
   MousePointerClick,
   FolderOpen,
-  Image as ImageIcon,
+  Plus,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
@@ -526,7 +526,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                 onClick={() => setSourceMenuOpen((v) => !v)}
                 title="从资产中选择 / 到节点选择"
               >
-                <ImageIcon size={18} strokeWidth={2} />
+                <Plus size={18} strokeWidth={2} />
               </button>
               {sourceMenuOpen && (
                 <>
