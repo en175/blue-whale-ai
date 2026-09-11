@@ -5,7 +5,6 @@ import com.bluewhale.worker.domain.error.ImageProviderError;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.MediaType;
-import okhttp3.MultipartBody;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -25,11 +24,13 @@ import java.util.concurrent.TimeUnit;
 /**
  * new-api 图片生成客户端（new-api-generation-ops.ts:22-175 逐字移植）。
  * <p>
- * 端点选择规则（new-api-generation-ops.ts:118-120 / 66-69）：
- * <ul>
- *   <li>有参考图 → POST /v1/images/edits（multipart，:66-69 editImagesWithReceipt）</li>
- *   <li>无参考图 → POST /v1/images/generations（JSON，:22-60 generateImagesWithReceipt）</li>
- * </ul>
+ * 端点选择规则（缺陷修复，对齐 TS 活路径）：
+ * <b>有无参考图都走 POST /v1/images/generations（JSON），参考图以 <code>image</code> 字段进 body</b>
+ * （new-api-generation-ops.ts:28-60 + ark-image-provider.ts:123「IKDMQE：有无参考图都走
+ * generations；edits 被 highwayapi 拒绝」）。图片-2 / banana2 上游挂在建桥 jiekouAI 渠道
+ * （blue-whale-api relay/channel/highwayapi/adaptor.go:44-46,113-116），该渠道设计上
+ * 拒绝 /v1/images/edits（模型名拼 URL 路径、body 透传），edits multipart 永远 500。
+ * editImagesWithReceipt 在 TS 生产零调用方（IKDMQE 改道后遗留死导出），移植时不得当活规则。
  * <p>
  * 请求头（契约 §5 / ADR-0080）：
  * <ul>
@@ -78,13 +79,10 @@ public class NewApiImageClient {
     }
 
     /**
-     * 图片生成（new-api-generation-ops.ts 完整移植）。
+     * 图片生成（new-api-generation-ops.ts:28-60 generateImagesWithReceipt 移植）。
      * <p>
-     * 端点选择（new-api-generation-ops.ts:66 vs :22）：
-     * <ul>
-     *   <li>sourceImages 非空 → /v1/images/edits（multipart）</li>
-     *   <li>sourceImages 为空 → /v1/images/generations（JSON）</li>
-     * </ul>
+     * 恒走 /v1/images/generations；sourceImages 非空时以 JSON <code>image</code> 字段
+     * 透传（单张=字符串、多张=数组，逐字对齐 ark-image-provider.ts referenceImageField）。
      *
      * @param token         per-job Bearer 凭证
      * @param model         模型 ID（capability.model_id，可能经渠道映射或契约 §11 别名分流）
@@ -94,7 +92,7 @@ public class NewApiImageClient {
      * @param quality       质量（banana 渠道才有，可选）
      * @param webSearch     是否启用网络搜索
      * @param sequential    是否顺序生成
-     * @param sourceImages  参考图 URL 列表（空 → generations，非空 → edits）
+     * @param sourceImages  参考图 URL 列表（非空 → body.image 透传；恒 generations）
      * @return 生成结果列表
      * @throws ImageProviderError 按错误分类抛错
      */
@@ -103,17 +101,10 @@ public class NewApiImageClient {
             String size, String quality, boolean webSearch, boolean sequential,
             List<String> sourceImages
     ) {
-        boolean useEdits = sourceImages != null && !sourceImages.isEmpty();
         String traceId = UUID.randomUUID().toString();
 
-        Request request;
-        if (useEdits) {
-            request = buildEditsRequest(token, model, prompt, n, size, quality,
-                    webSearch, sequential, sourceImages, traceId);
-        } else {
-            request = buildGenerationsRequest(token, model, prompt, n, size, quality,
-                    webSearch, sequential, traceId);
-        }
+        Request request = buildGenerationsRequest(token, model, prompt, n, size, quality,
+                webSearch, sequential, sourceImages, traceId);
 
         Response response;
         try {
@@ -163,12 +154,14 @@ public class NewApiImageClient {
     }
 
     /**
-     * 构建 JSON 请求 /v1/images/generations（new-api-generation-ops.ts:22-60）。
+     * 构建 JSON 请求 /v1/images/generations（new-api-generation-ops.ts:28-60）。
+     * body 字段序与 TS 逐字（model/prompt/response_format/stream/size/quality/image/n/tools/…），
+     * image：单张=URL 字符串、多张=URL 数组（ark-image-provider.ts referenceImageField 同形）。
      */
     private Request buildGenerationsRequest(
             String token, String model, String prompt, int n,
             String size, String quality, boolean webSearch, boolean sequential,
-            String traceId
+            List<String> sourceImages, String traceId
     ) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", model);
@@ -177,6 +170,9 @@ public class NewApiImageClient {
         payload.put("stream", false);
         if (size != null) payload.put("size", size);
         if (quality != null) payload.put("quality", quality);
+        if (sourceImages != null && !sourceImages.isEmpty()) {
+            payload.put("image", sourceImages.size() == 1 ? sourceImages.get(0) : sourceImages);
+        }
         payload.put("n", n);
         if (webSearch) payload.put("tools", List.of(Map.of("type", "web_search")));
         if (sequential) {
@@ -201,85 +197,6 @@ public class NewApiImageClient {
                 .header("X-Client-System", "bluewhale")
                 .header("Content-Type", "application/json")
                 .build();
-    }
-
-    /**
-     * 构建 multipart 请求 /v1/images/edits（new-api-generation-ops.ts:66-115）。
-     * <p>
-     * TS 逐字移植：imageField = images.length === 1 ? "image" : "image[]"（:93-94）。
-     */
-    private Request buildEditsRequest(
-            String token, String model, String prompt, int n,
-            String size, String quality, boolean webSearch, boolean sequential,
-            List<String> sourceImages, String traceId
-    ) {
-        if (sourceImages.isEmpty()) {
-            throw new ImageProviderError(GenerationError.ERROR_INVALID_INPUT,
-                    "图片编辑至少需要一张参考图");
-        }
-
-        MultipartBody.Builder builder = new MultipartBody.Builder()
-                .setType(MultipartBody.FORM);
-        builder.addFormDataPart("model", model);
-        builder.addFormDataPart("prompt", prompt);
-
-        // imageField（new-api-generation-ops.ts:93-94）
-        String imageField = sourceImages.size() == 1 ? "image" : "image[]";
-        // 评审修复：TS 侧 edits 传的是参考图**字节**（new-api-generation-ops.ts:114-123），
-        // 原实现误把 URL 字符串当文件体 → 网关 400。先 GET 下载再入 multipart。
-        for (int i = 0; i < sourceImages.size(); i++) {
-            byte[] imgBytes = downloadBytes(sourceImages.get(i));
-            builder.addFormDataPart(imageField, "ref_" + i + ".jpg",
-                    RequestBody.create(imgBytes, MediaType.get("image/jpeg")));
-        }
-
-        builder.addFormDataPart("n", String.valueOf(n));
-        builder.addFormDataPart("response_format", "url");
-        if (size != null) builder.addFormDataPart("size", size);
-        if (quality != null) builder.addFormDataPart("quality", quality);
-        if (webSearch) {
-            try {
-                builder.addFormDataPart("tools",
-                        JSON.writeValueAsString(List.of(Map.of("type", "web_search"))));
-            } catch (Exception e) {
-                log.debug("tools JSON 序列化失败(非关键): {}", e.getMessage());
-            }
-        }
-        if (sequential) {
-            builder.addFormDataPart("sequential_image_generation", "auto");
-            try {
-                builder.addFormDataPart("sequential_image_generation_options",
-                        JSON.writeValueAsString(Map.of("max_images", n)));
-            } catch (Exception e) {
-                log.debug("sequential_options JSON 序列化失败(非关键): {}", e.getMessage());
-            }
-        }
-
-        return new Request.Builder()
-                .url(baseUrl + "/v1/images/edits")
-                .post(builder.build())
-                .header("Authorization", "Bearer " + token)
-                .header("X-Trace-Id", traceId)
-                .header("X-Client-System", "bluewhale")
-                .build();
-    }
-
-    /** 下载参考图字节（同源 fetch；失败按 unsupported_input 抛，对齐 TS 参考图片读取失败语义）。 */
-    private byte[] downloadBytes(String url) {
-        try (Response r = httpClient.newCall(new Request.Builder().url(url).build()).execute()) {
-            if (!r.isSuccessful() || r.body() == null) {
-                String errBody = r.body() != null ? r.body().string() : "";
-                String truncated = errBody.length() > 300 ? errBody.substring(0, 300) + "…" : errBody;
-                throw new ImageProviderError(GenerationError.ERROR_UNSUPPORTED_INPUT,
-                        "参考图片读取失败: HTTP " + r.code() + " body=" + truncated);
-            }
-            return r.body().bytes();
-        } catch (ImageProviderError e) {
-            throw e;
-        } catch (Exception e) {
-            throw new ImageProviderError(GenerationError.ERROR_UNSUPPORTED_INPUT,
-                    "参考图片读取失败: " + e.getMessage());
-        }
     }
 
     /**
