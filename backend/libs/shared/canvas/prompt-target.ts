@@ -13,7 +13,7 @@ export function planError(nodeId: string, bindings: PromptBinding[], reason: str
   throw new BadRequestException(`方案 ${nodeId} 索引 ${bindings.map(b => `#${b.index}`).join("、") || "（正文）"}：${reason}`);
 }
 
-export function readPromptPlan(node: PromptTargetNode) {
+export function readPromptPlan(node: PromptTargetNode, targetType: "image" | "video" = "image") {
   const text = node.data?.promptMentions === undefined ? extractTextNodeText(node.data) : node.data.text;
   const mentions = promptMentionSchema.array().safeParse(node.data?.promptMentions ?? []);
   if (node.type !== "textNode" || !previewSourceSchema.safeParse(node.data?.promptSource).success
@@ -23,7 +23,7 @@ export function readPromptPlan(node: PromptTargetNode) {
   const bindings = promptBindingList(mentions.data);
   const materials = Array.isArray(node.data?.promptMaterials) ? node.data.promptMaterials as Array<{ assetId: string; mediaType: string }> : [];
   for (const binding of bindings) {
-    if (!materials.some(m => m.assetId === binding.assetId && m.mediaType === "image")) {
+    if (!materials.some(m => m.assetId === binding.assetId && (targetType === "video" ? ["image", "video", "audio"].includes(m.mediaType) : m.mediaType === "image"))) {
       planError(node.id, [binding], "图片目标仅支持图片素材，不能漏传正文引用");
     }
   }
@@ -39,11 +39,11 @@ export function validatePlanModel(nodeId: string, bindings: PromptBinding[], cou
 export function confirmPlanEdges(nodes: PromptTargetNode[], edges: CanvasEdge[], planNodeId: string, targetNodeId: string) {
   const node = nodes.find(n => n.id === planNodeId);
   const target = nodes.find(n => n.id === targetNodeId);
-  if (!node || !target || target.type !== "mediaNode" || target.data?.mediaType !== "image") {
-    throw new BadRequestException("方案或图片目标不存在");
+  if (!node || !target || target.type !== "mediaNode" || !["image", "video"].includes(String(target.data?.mediaType))) {
+    throw new BadRequestException("方案或生成目标不存在");
   }
   if (target.data?.genStatus === "generating") throw new BadRequestException("生成中，输入连线只读");
-  const plan = readPromptPlan(node);
+  const plan = readPromptPlan(node, target.data?.mediaType as "image" | "video");
   const next = edges.map(e => ({ ...e, ...(e.data ? { data: { ...e.data } } : {}) }));
   const oldPlanEdge = next.find(e => e.source === planNodeId && e.target === targetNodeId);
   if (oldPlanEdge?.data?.promptReference !== undefined) {
@@ -53,7 +53,7 @@ export function confirmPlanEdges(nodes: PromptTargetNode[], edges: CanvasEdge[],
   for (const assetId of new Set(plan.bindings.map(b => b.assetId))) {
     let edge = next.find(e => e.target === targetNodeId && nodes.some(n => n.type === "mediaNode" && n.id === e.source && nodeAssetId(n) === assetId));
     const source = edge ? nodes.find(n => n.id === edge!.source) : nodes.find(n => n.type === "mediaNode" && nodeAssetId(n) === assetId);
-    if (!source || source.data?.assetMissing || source.data?.mediaType !== "image" || source.data?.genStatus === "generating") planError(node.id, plan.bindings.filter(b => b.assetId === assetId), "素材缺失，请补充素材或移除对应引用后再生成");
+    if (!source || source.data?.assetMissing || !["image", "video", "audio"].includes(String(source.data?.mediaType)) || source.data?.genStatus === "generating") planError(node.id, plan.bindings.filter(b => b.assetId === assetId), "素材缺失，请补充素材或移除对应引用后再生成");
     if (!edge) {
       edge = { id: `e-${source.id}-${targetNodeId}`, source: source.id, target: targetNodeId, data: { inputSources: { manual: false, planNodeIds: [] } } };
       next.push(edge);
@@ -70,4 +70,19 @@ export function confirmPlanEdges(nodes: PromptTargetNode[], edges: CanvasEdge[],
     return source ? [nodeAssetId(source)] : [];
   }))];
   return { plan, edges: next, assetIds: ids };
+}
+
+/** Video reference validation uses the existing execution constraints before accepting any edges/job. */
+export function validateVideoPlan(nodeId: string, bindings: PromptBinding[], refs: Array<{ type: string; role: string }>, model: ModelCapabilityView | undefined, mode?: unknown) {
+  if (!model) planError(nodeId, bindings, "请选择可用视频模型");
+  const frames = refs.filter(r => r.role !== "reference");
+  const ordinary = refs.filter(r => r.role === "reference");
+  if (frames.some(r => r.type !== "image")) planError(nodeId, bindings, "首尾帧仅支持图片");
+  if (frames.length && ordinary.length) planError(nodeId, bindings, "首尾帧与普通参考不能混用");
+  if (mode === "keyframe" && ordinary.length) planError(nodeId, bindings, "首尾帧模式不支持普通参考，请调整模式或引用");
+  if ((mode === "all" || mode === "text2video") && frames.length) planError(nodeId, bindings, "当前模式不支持首尾帧，请调整模式或引用");
+  if (mode === "text2video" && ordinary.some(r => r.type !== "image")) planError(nodeId, bindings, "图生视频模式不支持视频或音频参考");
+  if (frames.some(r => r.role === "first_frame") && !(model.features.first_frame || model.features.first_last_frame)) planError(nodeId, bindings, "当前模型不支持首帧");
+  if (frames.some(r => r.role === "last_frame") && !(model.features.last_frame || model.features.first_last_frame)) planError(nodeId, bindings, "当前模型不支持尾帧");
+  validatePlanModel(nodeId, bindings, ordinary.filter(r => r.type === "image").length, model);
 }

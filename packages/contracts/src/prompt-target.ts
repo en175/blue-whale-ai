@@ -21,5 +21,13 @@ export const promptPlanSnapshotSchema = z.object({
   plans: z.array(z.object({ nodeId: z.string(), text: z.string(), mentions: z.array(promptMentionSchema) })),
   images: z.array(z.object({ assetId: z.string().regex(/^[1-9][0-9]*$/), url: z.string().url() })),
   providerPrompt: z.string().min(1),
+  videoReferences: z.array(z.object({
+    assetId: z.string().regex(/^[1-9][0-9]*$/).optional(),
+    materialId: z.string().min(1).optional(),
+    type: z.enum(["image", "video", "audio"]),
+    role: z.enum(["reference", "first_frame", "last_frame"]),
+    url: z.string().url(),
+    providerUrl: z.string().url(),
+  }).refine(ref => Boolean(ref.assetId) !== Boolean(ref.materialId), "Exactly one media identity is required")).optional(),
 });
 export type PromptPlanSnapshot = z.infer<typeof promptPlanSnapshotSchema>;

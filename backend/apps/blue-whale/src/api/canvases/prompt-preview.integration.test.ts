@@ -1,3 +1,5 @@
+import { runVideoJobStep } from "@lib/shared/generation-runtime/video-job-runner.js";
+import { createNewApiVideoTaskProvider } from "@lib/shared/generation-runtime/new-api-video-task-provider.js";
 import { UsageController } from "../usage/usage.controller.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { processJob } from "@lib/shared/generation/worker/generation-worker.js";
@@ -38,8 +40,15 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
   let activeRevision: string | undefined;
   let materialPayload: Record<string, unknown> | undefined;
   const prompt = "雪夜的城市\n保留换行与 <光影> & 细节。";
+  const videoRequests: Array<{ prompt: string; metadata: { content: unknown[] } }> = [];
   const agentRequests: Array<{ path: string; user: unknown; project: unknown }> = [];
   const agent = createServer((req, res) => {
+    if (req.url === "/v1/video/generations") {
+      let body = ""; req.on("data", chunk => { body += chunk; });
+      req.on("end", () => { videoRequests.push(JSON.parse(body)); res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ task_id: "iketsx-task", status: "queued" })); });
+      return;
+    }
+    if (req.url?.startsWith("/v1/video/generations/")) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ task_id: "iketsx-task", status: "succeeded", result_url: `${process.env.AGENT_SERVICE_BASE_URL}/b.mp4` })); return; }
     if (req.url === '/api/usage/token/') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ success: true, data: { user_quota: 1000000 } })); return; }
     if (req.url === '/a.png' || req.url === '/b.mp4') {
       res.setHeader('content-type', req.url === '/a.png' ? 'image/png' : 'video/mp4');
@@ -79,6 +88,11 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
       where: { provider_id_model_id: { provider_id: "iketsw-test", model_id: "iketsw-image" } },
       create: { provider_id: "iketsw-test", model_id: "iketsw-image", capability_type: "image", model_label: "IKETSW", supported_sizes: [{ id: "1024x1024", label: "1024x1024" }], supported_aspect_ratios: ["1:1"], supported_formats: ["png"], default_size: "1024x1024", default_aspect_ratio: "1:1", features: { reference_image: true, max_reference_images: 3 } },
       update: { features: { reference_image: true, max_reference_images: 3 } },
+    });
+    await prisma.client.generation_model_capability.upsert({
+      where: { provider_id_model_id: { provider_id: "iketsx-test", model_id: "doubao-seedance-2-0-260128" } },
+      create: { provider_id: "iketsx-test", model_id: "doubao-seedance-2-0-260128", capability_type: "video", model_label: "IKETSX", supported_sizes: [{ id: "720p", label: "720p" }], supported_aspect_ratios: ["16:9"], supported_formats: [], default_size: "720p", default_aspect_ratio: "16:9", supported_durations: { min: 4, max: 12, step: 1 }, default_duration: 5, features: { reference_image: true, max_reference_images: 9 } },
+      update: {},
     });
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
@@ -139,6 +153,105 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
     const canvas = await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json();
     expect(JSON.parse(canvas.data.nodes)).toEqual([result.data.node]);
     expect(agentRequests).toContainEqual({ path: `/v1/projects/${projectId}/sessions/${source.sessionId}/snapshot`, user: "987654", project: projectId });
+  });
+  it("IKETSX: video plan references all media and freezes indexed provider inputs", async () => {
+    projectId = (await projects.create("987654", "IKETSX mixed video")).id;
+    const assets = await Promise.all((["image", "video", "audio"] as const).map(type => prisma.client.assets.create({ data: {
+      user_id: 987654n, type, material_id: type === "image" ? `asset-iketsx-${projectId}` : null, url: `${process.env.AGENT_SERVICE_BASE_URL}/${type}`, ...(type === "video" ? { width: 1280, height: 720, duration_ms: 5000, mime: "video/mp4" } : {}),
+    } })));
+    materialPayload = { target_media: "image", assets: assets.map((a, i) => ({ asset_ref_id: `a${i}`, asset_id: String(a.id), media_type: a.type })),
+      shots: [{ shot_no: 1, title: "IMAGE 方案", prompt_text: "图A视频B音频C", asset_bindings: assets.map((_, i) => ({ asset_ref_id: `a${i}` })),
+        prompt_mentions: [{ start: 0, end: 2, asset_ref_id: "a0", index: 7 }, { start: 2, end: 5, asset_ref_id: "a1", index: 2 }, { start: 5, end: 8, asset_ref_id: "a2", index: 9 }] }] };
+    try {
+      const applied = (await (await apply()).json()).data;
+      expect(applied.node).toBeDefined();
+      const nodes = JSON.parse(applied.canvas.nodes);
+      nodes.push({ id: "video-target", type: "mediaNode", position: { x: 900, y: 300 }, data: { mediaType: "video", draft: true, genStatus: "draft", draftModelId: "doubao-seedance-2-0-260128", prompt: "保留草稿", draftMaterialRefs: [{ materialId: "asset-manual-character", mediaType: "image", role: "reference", url: "https://example.test/character.png" }] } });
+      const saved = (await (await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${applied.canvas.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes) }) })).json()).data;
+      const capabilityKey = { provider_id_model_id: { provider_id: "iketsx-test", model_id: "doubao-seedance-2-0-260128" } };
+      await prisma.client.generation_model_capability.update({ where: capabilityKey, data: { features: { reference_image: true, max_reference_images: 1 } } });
+      const overLimit = await fetch(`${base}/api/canvases/${projectId}/prompt-references`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ planNodeId: applied.node.id, targetNodeId: "video-target", expectedVersion: saved.version }) });
+      expect(await overLimit.text()).toContain("最多 1");
+      expect((await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data.edges).toBe(saved.edges);
+      await prisma.client.generation_model_capability.update({ where: capabilityKey, data: { features: { reference_image: true, max_reference_images: 9 } } });
+      const response = await fetch(`${base}/api/canvases/${projectId}/prompt-references`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ planNodeId: applied.node.id, targetNodeId: "video-target", expectedVersion: saved.version }) });
+      expect(response.status, await response.clone().text()).toBe(201);
+      const linked = (await response.json()).data;
+      expect(JSON.parse(linked.nodes)).toEqual(nodes);
+      expect(JSON.parse(linked.edges)).toHaveLength(4);
+      const submit = (references: Array<Record<string, unknown>>) => fetch(`${base}/api/projects/${projectId}/generation-jobs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "video", expected_output_count: 1, target_node_id: "video-target", references, parameters: { prompt: "保留草稿", model_id: "doubao-seedance-2-0-260128", aspect_ratio: "16:9", resolution: "720p", duration: 5 } }) });
+      const refs = assets.map(a => ({ asset_id: String(a.id), type: a.type, role: "reference" }));
+      let modeVersion = linked.version;
+      for (const mode of ["keyframe", "text2video", "all"]) {
+        nodes.find((n: { id: string }) => n.id === "video-target").data.draftMode = mode;
+        const savedMode = (await (await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${modeVersion}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes) }) })).json()).data;
+        modeVersion = savedMode.version;
+        if (mode !== "all") expect(await (await submit(refs)).text()).toContain("模式");
+      }
+      for (const invalid of [refs.slice(0, 2), refs.map((r, i) => i === 1 ? { ...r, type: "image" } : r), refs.map((r, i) => i === 0 ? { ...r, role: "first_frame" } : r)]) {
+        const rejected = await submit(invalid);
+        expect(await rejected.text()).toContain("索引");
+      }
+      await prisma.client.assets.update({ where: { id: assets[1]!.id }, data: { mime: "video/webm" } });
+      expect(await (await submit(refs)).text()).toContain("MP4");
+      await prisma.client.assets.update({ where: { id: assets[1]!.id }, data: { mime: "video/mp4", user_id: 12345n } });
+      expect(await (await submit(refs)).text()).toContain("#2");
+      await prisma.client.assets.update({ where: { id: assets[1]!.id }, data: { user_id: 987654n } });
+      const modelKey = { provider_id_model_id: { provider_id: "iketsx-test", model_id: "doubao-seedance-2-0-260128" } };
+      await prisma.client.generation_model_capability.update({ where: modelKey, data: { features: { reference_image: true, max_reference_images: 0 } } });
+      expect(await (await submit(refs)).text()).toContain("最多 0");
+      await prisma.client.generation_model_capability.update({ where: modelKey, data: { features: { reference_image: true, max_reference_images: 9 } } });
+      expect((await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records).toEqual([]);
+      const mixedRefs = [...refs, { material_id: "asset-manual-character", type: "image", role: "reference" }];
+      const generated = await submit(mixedRefs);
+      expect(generated.status, await generated.clone().text()).toBe(201);
+      expect((await generated.clone().json()).code, await generated.clone().text()).toBe(200);
+      const jobs = (await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records;
+      expect(jobs[0].input.prompt_plan_snapshot.providerPrompt).toBe("参考图1参考视频1参考音频1\n\n保留草稿");
+      expect(jobs[0].input.prompt_plan_snapshot.videoReferences).toEqual([...assets.map(a => ({ assetId: String(a.id), type: a.type, role: "reference", url: a.url, providerUrl: a.material_id ? `asset://${a.material_id}` : a.url })), { materialId: "asset-manual-character", type: "image", role: "reference", url: "https://example.test/character.png", providerUrl: "asset://asset-manual-character" }]);
+      await prisma.client.assets.updateMany({ where: { id: { in: assets.map(a => a.id) } }, data: { url: "https://changed.invalid/later", material_id: null } });
+      const jobId = (await generated.json()).data.generation_job_id;
+      const execute = () => runVideoJobStep({ repo: createWorkerRepo(prisma.client), workerId: "iketsx-worker", jobId,
+        credentialVault: { open: value => openGenerationCredential(value, "iketsw-isolated-test-secret") },
+        createProvider: token => createNewApiVideoTaskProvider({ baseUrl: process.env.AGENT_SERVICE_BASE_URL!, token }),
+        mediaRelay: { persist: async url => ({ url, storageKey: null, mime: "video/mp4", size: 100 }) },
+      });
+      if (process.env.IKETSX_JAVA) {
+        const { execFile } = await import("node:child_process");
+        const { promisify } = await import("node:util");
+        await promisify(execFile)("docker", ["run", "--rm", "-v", `${process.cwd()}/worker-java:/work`, "-v", "iketsx-maven-cache:/root/.m2", "-w", "/work",
+          "-e", `IKETSX_JOB_ID=${jobId}`, "-e", "IKETSX_JDBC_URL=jdbc:mysql://host.docker.internal:23416/iketsx?useSSL=false&allowPublicKeyRetrieval=true",
+          "-e", `IKETSX_PROVIDER_URL=${process.env.AGENT_SERVICE_BASE_URL!.replace("127.0.0.1", "host.docker.internal")}`,
+          "-e", "GENERATION_CREDENTIAL_SECRET=iketsw-isolated-test-secret", "maven:3.9-eclipse-temurin-21", "mvn", "-q", "-Dtest=PromptPlanVideoIntegrationTest", "test"], { timeout: 180000, maxBuffer: 2000000 });
+      } else {
+        await vi.waitFor(async () => expect(await execute()).toBe(jobId), { timeout: 3000 });
+      }
+      expect(videoRequests.at(-1)?.prompt).toBe("参考图1参考视频1参考音频1\n\n保留草稿");
+      expect(videoRequests.at(-1)?.metadata.content).toMatchObject([
+        { type: "image_url", image_url: { url: `asset://asset-iketsx-${projectId}` }, role: "reference_image" },
+        { type: "video_url", video_url: { url: assets[1]!.url }, role: "reference_video" },
+        { type: "audio_url", audio_url: { url: assets[2]!.url }, role: "reference_audio" },
+        { type: "image_url", image_url: { url: "asset://asset-manual-character" }, role: "reference_image" },
+      ]);
+      await vi.waitFor(async () => {
+        if (!process.env.IKETSX_JAVA) await execute();
+        const records = (await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records;
+        expect(records[0].status).toBe("succeeded");
+      }, { timeout: 10000, interval: 500 });
+    } finally { materialPayload = undefined; }
+  }, 240000);
+  it("IKETSX: pure text video plans need no media", async () => {
+    projectId = (await projects.create("987654", "IKETSX pure text")).id;
+    const applied = (await (await apply()).json()).data;
+    const nodes = JSON.parse(applied.canvas.nodes);
+    nodes.push({ id: "text-video", type: "mediaNode", position: { x: 900, y: 0 }, data: { mediaType: "video", draft: true, genStatus: "draft", draftModelId: "doubao-seedance-2-0-260128", prompt: "", draftMode: "all" } });
+    let canvas = (await (await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${applied.canvas.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes) }) })).json()).data;
+    canvas = (await (await fetch(`${base}/api/canvases/${projectId}/prompt-references`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ planNodeId: applied.node.id, targetNodeId: "text-video", expectedVersion: canvas.version }) })).json()).data;
+    expect(canvas).toBeDefined();
+    const response = await fetch(`${base}/api/projects/${projectId}/generation-jobs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "video", target_node_id: "text-video", expected_output_count: 1, parameters: { prompt: "", model_id: "doubao-seedance-2-0-260128", aspect_ratio: "16:9", resolution: "720p", duration: 5 } }) });
+    expect((await response.json()).code).toBe(200);
+    const jobs = (await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records;
+    expect(jobs[0].input.prompt_plan_snapshot).toMatchObject({ providerPrompt: prompt, videoReferences: [], images: [] });
   });
   it("IKETSW: reference a plan atomically adds direct material edges and preserves manual provenance", async () => {
     projectId = (await projects.create("987654", "IKETSW reference")).id;
@@ -264,17 +377,9 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
     expect(jobs[0].input.prompt_plan_snapshot).toMatchObject({ providerPrompt: prompt, images: [] });
   });
 
-  it.runIf(process.env.IKETSW_BROWSER)("IKETSW browser: apply, Dock reference and drag connect preserve drafts and restore inputs", async () => {
+  async function openPlanBrowser() {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
-    projectId = (await projects.create("987654", "IKETSW browser")).id;
-    const a = await prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } });
-    materialPayload = { target_media: "image", assets: [{ asset_ref_id: "a", asset_id: String(a.id), media_type: "image" }],
-      shots: [{ shot_no: 1, title: "方案", prompt_text: "素材A的雨夜", asset_bindings: [{ asset_ref_id: "a" }], prompt_mentions: [{ start: 0, end: 3, asset_ref_id: "a", index: 7 }] }] };
-    const targets = ["dock-target", "drag-target"].map((id, i) => ({ id, type: "mediaNode", position: { x: 350, y: 40 + i * 330 },
-      data: { mediaType: "image", draft: true, genStatus: "draft", draftModelId: "iketsw-image", draftSize: "1024x1024", draftRatio: "1:1", prompt: "已有草稿", targetRatio: "1:1" } }));
-    await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ nodes: JSON.stringify(targets), edges: "[]", viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }) });
     const vite = await createVite({ root: `${process.cwd()}/web`, server: { open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } } } });
     await vite.listen();
     const browser = await chromium.launch({ headless: true });
@@ -288,6 +393,25 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
       await plan.waitFor();
       await page.reload();
       await plan.waitFor();
+      return { page, plan, browser, vite };
+    } catch (error) {
+      await browser.close();
+      await vite.close();
+      throw error;
+    }
+  }
+
+  it.runIf(process.env.IKETSW_BROWSER)("IKETSW browser: apply, Dock reference and drag connect preserve drafts and restore inputs", async () => {
+    projectId = (await projects.create("987654", "IKETSW browser")).id;
+    const a = await prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } });
+    materialPayload = { target_media: "video", assets: [{ asset_ref_id: "a", asset_id: String(a.id), media_type: "image" }],
+      shots: [{ shot_no: 1, title: "VIDEO 方案", prompt_text: "素材A的雨夜", asset_bindings: [{ asset_ref_id: "a" }], prompt_mentions: [{ start: 0, end: 3, asset_ref_id: "a", index: 7 }] }] };
+    const targets = ["dock-target", "drag-target"].map((id, i) => ({ id, type: "mediaNode", position: { x: 350, y: 40 + i * 330 },
+      data: { mediaType: "image", draft: true, genStatus: "draft", draftModelId: "iketsw-image", draftSize: "1024x1024", draftRatio: "1:1", prompt: "已有草稿", targetRatio: "1:1" } }));
+    await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nodes: JSON.stringify(targets), edges: "[]", viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }) });
+    const { page, plan, browser, vite } = await openPlanBrowser();
+    try {
       const dock = page.locator('.react-flow__node-mediaNode[data-id="dock-target"]');
       await dock.locator('[data-testid="media-content"]').click();
       await page.locator('button[title="从资产中选择 / 到节点选择"]').click();
@@ -335,6 +459,83 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
       const jobs = (await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records;
       expect(jobs[0].input.prompt_plan_snapshot.providerPrompt).toBe("参考图1的雨夜\n\n已有草稿");
       await page.screenshot({ path: '/tmp/iketsw-browser.png', fullPage: true, animations: 'disabled' });
+    } finally { materialPayload = undefined; await browser.close(); await vite.close(); }
+  }, 60_000);
+  it.runIf(process.env.IKETSX_BROWSER)("IKETSX browser: apply, Dock reference and drag connect preserve drafts and restore inputs", async () => {
+    projectId = (await projects.create("987654", "IKETSX browser")).id;
+    const a = await prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } });
+    const b = await prisma.client.assets.create({ data: { user_id: 987654n, type: "video", url: `${process.env.AGENT_SERVICE_BASE_URL}/b.mp4`, width: 1280, height: 720, duration_ms: 5000, mime: "video/mp4" } });
+    const c = await prisma.client.assets.create({ data: { user_id: 987654n, type: "audio", url: `${process.env.AGENT_SERVICE_BASE_URL}/c.wav` } });
+    materialPayload = { target_media: "image", assets: [a, b, c].map((asset, i) => ({ asset_ref_id: `a${i}`, asset_id: String(asset.id), media_type: asset.type })),
+      shots: [{ shot_no: 1, title: "IMAGE 方案", prompt_text: "图A视频B音频C", asset_bindings: [0, 1, 2].map(i => ({ asset_ref_id: `a${i}` })), prompt_mentions: [{ start: 0, end: 2, asset_ref_id: "a0", index: 7 }, { start: 2, end: 5, asset_ref_id: "a1", index: 2 }, { start: 5, end: 8, asset_ref_id: "a2", index: 9 }] }] };
+    const targets = ["dock-target", "drag-target"].map((id, i) => ({ id, type: "mediaNode", position: { x: 350, y: 40 + i * 330 },
+      data: { mediaType: "video", draft: true, genStatus: "draft", draftModelId: "doubao-seedance-2-0-260128", draftResolution: "720p", draftDuration: 5, draftRatio: "16:9", draftMode: "all", prompt: "已有草稿", targetRatio: "16:9" } }));
+    await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nodes: JSON.stringify(targets), edges: "[]", viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }) });
+    const { page, plan, browser, vite } = await openPlanBrowser();
+    try {
+      const dock = page.locator('.react-flow__node-mediaNode[data-id="dock-target"]');
+      await dock.locator('[data-testid="media-content"]').click();
+      await page.locator('button[title="添加图片参考（从资产中选择 / 到节点选择 / 角色库）"]').click();
+      await page.getByRole("button", { name: "到节点选择", exact: true }).click();
+      const referenced = page.waitForResponse(r => r.url().endsWith('/prompt-references') && r.request().method() === 'POST');
+      await plan.locator('[data-testid="text-title"]').click();
+      await page.screenshot({ path: '/tmp/iketsx-reference-debug.png' });
+      expect((await referenced).status()).toBe(201);
+      await page.getByText("文本附件（1）").waitFor();
+      expect(await page.getByTestId("dock-video-ref").count()).toBe(3);
+      expect(await page.locator('[contenteditable=true]').last().innerText()).toBe("已有草稿");
+      await vi.waitFor(async () => expect(await page.locator('.react-flow__edge').count()).toBe(4));
+      await page.keyboard.press('Control+z');
+      await vi.waitFor(async () => expect(await page.locator('.react-flow__edge').count()).toBe(0));
+      await page.keyboard.press('Control+Shift+z');
+      await vi.waitFor(async () => expect(await page.locator('.react-flow__edge').count()).toBe(4));
+      await vi.waitFor(async () => {
+        const persisted = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+        expect(JSON.parse(persisted.edges)).toHaveLength(4);
+      });
+      await page.reload();
+      await plan.waitFor();
+      const drag = page.locator('.react-flow__node-mediaNode[data-id="drag-target"]');
+      await plan.locator('[data-testid="text-title"]').click();
+      const src = (await plan.locator('.react-flow__handle-right').boundingBox())!;
+      const dst = (await drag.locator('.react-flow__handle-left').boundingBox())!;
+      const connected = page.waitForResponse(r => r.url().endsWith('/prompt-references') && r.request().method() === 'POST');
+      await page.mouse.move(src.x + src.width / 2, src.y + src.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(dst.x + dst.width / 2, dst.y + dst.height / 2, { steps: 12 });
+      await page.mouse.up();
+      expect((await connected).status()).toBe(201);
+      const saved = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+      const edges = JSON.parse(saved.edges);
+      expect(edges.filter((e: { target: string }) => e.target === 'dock-target').map((e: { source: string }) => e.source).sort())
+        .toEqual(edges.filter((e: { target: string }) => e.target === 'drag-target').map((e: { source: string }) => e.source).sort());
+      await page.reload();
+      await dock.waitFor();
+      await dock.locator('[data-testid="media-content"]').click();
+      await page.getByText("文本附件（1）").waitFor();
+      expect(await page.getByTestId("dock-video-ref").count()).toBe(3);
+      expect(await page.locator('[contenteditable=true]').last().innerText()).toBe("已有草稿");
+      await page.screenshot({ path: '/tmp/iketsx-dock.png', fullPage: true, animations: 'disabled' });
+      const generated = page.waitForResponse(r => r.url().endsWith('/generation-jobs') && r.request().method() === 'POST');
+      await page.locator('button[title="发送"]').click();
+      expect((await (await generated).json()).code).toBe(200);
+      const jobs = (await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records;
+      expect(jobs[0].input.prompt_plan_snapshot.providerPrompt).toBe("参考图1参考视频1参考音频1\n\n已有草稿");
+      const jobId = jobs[0].job_id;
+      expect(jobId).toMatch(/^[0-9]+$/);
+      await vi.waitFor(async () => {
+        await runVideoJobStep({ repo: createWorkerRepo(prisma.client), workerId: "iketsx-browser-worker", jobId,
+          credentialVault: { open: value => openGenerationCredential(value, "iketsw-isolated-test-secret") },
+          createProvider: token => createNewApiVideoTaskProvider({ baseUrl: process.env.AGENT_SERVICE_BASE_URL!, token }),
+          mediaRelay: { persist: async url => ({ url, storageKey: null, mime: "video/mp4", size: 100 }) },
+        });
+        const records = (await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records;
+        expect(records[0].status).toBe("succeeded");
+      }, { timeout: 10000, interval: 500 });
+      await page.reload();
+      await dock.locator('video').waitFor();
+      await page.screenshot({ path: '/tmp/iketsx-browser.png', fullPage: true, animations: 'disabled' });
     } finally { materialPayload = undefined; await browser.close(); await vite.close(); }
   }, 60_000);
 

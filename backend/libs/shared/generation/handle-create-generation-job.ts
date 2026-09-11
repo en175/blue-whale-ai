@@ -889,9 +889,12 @@ export async function handleCreateGenerationJob(
     return fail(400, target.value.message, { code: target.value.code });
   }
 
-  const planSnapshot = type === "image" && target.value.canvas && target.value.targetNodeId
+  const parsedPlanRefs = parseReferences(body.references);
+  const planRefs = parsedPlanRefs.kind === "ok" ? parsedPlanRefs.items : [];
+  const planSnapshot = (type === "image" || type === "video") && target.value.canvas && target.value.targetNodeId
     ? await freezePromptPlans({ ...target.value.canvas, targetId: target.value.targetNodeId,
-        inputIds: assetIds(body.input_asset_ids), prompt: promptText, attachments: target.value.textAttachments,
+        type, references: planRefs,
+        inputIds: type === "video" ? planRefs.flatMap(r => r.asset_id ? [r.asset_id] : []) : assetIds(body.input_asset_ids), prompt: promptText, attachments: target.value.textAttachments,
         model: capability, userId, projectId, assets: deps.assets }) : undefined;
   const refs = resolveReferenceAssets(body, type, maxReferenceImages);
   if (!refs.ok) {

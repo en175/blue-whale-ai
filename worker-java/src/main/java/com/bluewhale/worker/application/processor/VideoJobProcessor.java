@@ -411,7 +411,11 @@ public class VideoJobProcessor implements JobProcessor {
         if (basePrompt.isEmpty()) basePrompt = strOrEmpty(input, "prompt_text");
         // text_attachments 简化处理：Java 侧不实现 composeTextAttachmentPrompt
         // （视频场景 text_attachments 罕见，basePrompt 即最终 prompt）
-        String prompt = basePrompt;
+        Map<?, ?> plan = input.get("prompt_plan_snapshot") instanceof Map<?, ?> snapshot ? snapshot : null;
+        if (input.containsKey("prompt_plan_snapshot") && (plan == null || !(plan.get("providerPrompt") instanceof String text) || text.isBlank() || !(plan.get("videoReferences") instanceof List<?>))) {
+            throw new VideoInputError(GenerationError.ERROR_INVALID_INPUT, "视频方案快照无效");
+        }
+        String prompt = plan != null ? (String) plan.get("providerPrompt") : basePrompt;
 
         // model（:587-592）
         String model = strOrEmpty(input, "model_id");
@@ -428,6 +432,25 @@ public class VideoJobProcessor implements JobProcessor {
                 || !Double.isFinite(duration) || duration <= 0 || dimensions == null) {
             log.warn("[IKE7JP] 前置校验遗漏：job {} 视频参数无效仍进入 worker", claim.id());
             throw new VideoInputError(GenerationError.ERROR_INVALID_INPUT, "视频生成参数无效");
+        }
+
+        if (plan != null) {
+            List<VideoReference> references = new ArrayList<>();
+            String first = null;
+            String last = null;
+            for (Object raw : (List<?>) plan.get("videoReferences")) {
+                if (!(raw instanceof Map<?, ?> ref) || !(ref.get("type") instanceof String type)
+                        || !List.of("image", "video", "audio").contains(type)
+                        || !(ref.get("providerUrl") instanceof String url) || url.isBlank()
+                        || !(ref.get("role") instanceof String role) || !List.of("reference", "first_frame", "last_frame").contains(role)) {
+                    throw new VideoInputError(GenerationError.ERROR_INVALID_INPUT, "视频素材快照无效");
+                }
+                if ("first_frame".equals(role)) first = url;
+                else if ("last_frame".equals(role)) last = url;
+                else references.add(new VideoReference(type, url));
+            }
+            return new VideoSubmitInput(model, prompt, duration,
+                    strOrEmpty(input, "resolution"), strOrEmpty(input, "aspect_ratio"), first, last, references);
         }
 
         // 参考素材解析（:608-650）
