@@ -1,6 +1,6 @@
 import { validateReferences } from "../generation-runtime/video-reference-validation.js";
 import { NewApiError } from "@blue-whale/core";
-import { promptReferenceRequestSchema } from "@blue-whale/contracts";
+import { promptReferenceRequestSchema, releaseRemovedPromptSources, type CanvasEdge } from "@blue-whale/contracts";
 import { createModelCapabilityRepo } from "@lib/shared/persistence/model-capability-repo.js";
 import { createWorkerAssetOps } from "@lib/shared/persistence/generation-worker-asset-ops.js";
 import { confirmPlanEdges, nodeAssetId, planError, validatePlanModel, validateVideoPlan } from "./prompt-target.js";
@@ -375,7 +375,7 @@ export class CanvasService {
       body.expectedVersion === undefined ? current.version : body.expectedVersion,
       viewport,
       nodes,
-      edgesProvided ? edges : current.edges,
+      edgesProvided ? JSON.stringify(releaseRemovedPromptSources(JSON.parse(current.edges ?? "[]") as CanvasEdge[], incomingEdges as CanvasEdge[])) : current.edges,
       editedMaterials.length ? { ownerId, items: editedMaterials } : undefined,
     );
     if (!saved) return { code: 412, msg: "Canvas 版本冲突", data: null } as const;

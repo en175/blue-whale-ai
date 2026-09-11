@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { promptMentionSchema, type PromptMention } from "./prompt-preview.js";
+import type { CanvasEdge } from "./canvas-edges.js";
 
 export const promptBindingsSchema = z.array(promptMentionSchema.pick({ index: true, assetId: true }));
 
@@ -17,6 +18,21 @@ export function promptBindingList(mentions: PromptMention[]): PromptBinding[] {
 }
 
 export interface PromptInputSources { manual: boolean; planNodeIds: string[] }
+
+/** Removing a plan releases only its contribution; explicit media disconnects stay disconnected. */
+export function releaseRemovedPromptSources<T extends CanvasEdge>(before: T[], after: T[]): T[] {
+  const removed = before.filter(edge => edge.data?.promptReference !== undefined
+    && !after.some(next => next.source === edge.source && next.target === edge.target));
+  if (!removed.length) return after;
+  return after.flatMap(edge => {
+    const sources = edge.data?.inputSources as PromptInputSources | undefined;
+    if (!sources || !Array.isArray(sources.planNodeIds)) return [edge];
+    const planNodeIds = sources.planNodeIds.filter(id => !removed.some(plan => plan.source === id && plan.target === edge.target));
+    if (planNodeIds.length === sources.planNodeIds.length) return [edge];
+    if (!sources.manual && !planNodeIds.length) return [];
+    return [{ ...edge, data: { ...edge.data, inputSources: { manual: sources.manual, planNodeIds } } }];
+  });
+}
 
 export const promptPlanSnapshotSchema = z.object({
   canvasVersion: z.number().int().nonnegative(),

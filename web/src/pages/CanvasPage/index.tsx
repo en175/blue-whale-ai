@@ -1,7 +1,7 @@
 /* ============================================
  * CanvasPage 画布编辑页：节点/连线/工具栏编排
  * ============================================ */
-import { promptBindingList, promptBindingsSchema, type PromptBinding } from '../../../../packages/contracts/src/prompt-target';
+import { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, type PromptBinding } from '../../../../packages/contracts/src/prompt-target';
 import { promptMentionSchema, validPromptMentions } from '../../../../packages/contracts/src/prompt-preview';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -410,6 +410,17 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [setEdges, submittingNodeId],
   );
+  const removeTargetInputs = (edgeIds: string[]) => {
+    if (applyingRef.current) return;
+    const before = edgesRef.current;
+    const after = releaseRemovedPromptSources(before, before.filter(edge => !edgeIds.includes(edge.id)));
+    historyRef.current?.pushReplaceEdges(before, after);
+    setEdges(after);
+  };
+  const removePlanAttachment = (targetId: string | undefined, planNodeId: string) => {
+    if (!targetId || isGeneratingNode(targetId)) return;
+    removeTargetInputs(edgesRef.current.filter(edge => edge.source === planNodeId && edge.target === targetId).map(edge => edge.id));
+  };
   /** 连线变更守卫（IKDMQQ）：生成中节点的入边删除变更被拦截（剪刀等 remove 路径统一收口）；
    *  放行的删边进撤销栈（IKD0JT），撤销可加回 */
   const guardEdgesChange: typeof onEdgesChange = (changes) => {
@@ -426,8 +437,9 @@ export default function CanvasPage() {
       const edge = edgesRef.current.find((e) => e.id === c.id);
       if (edge) removedEdges.push(edge);
     }
-    if (removedEdges.length > 0) historyRef.current?.pushRemoveEdges(removedEdges);
-    if (allowed.length > 0) onEdgesChange(allowed);
+    if (removedEdges.length > 0) removeTargetInputs(removedEdges.map(edge => edge.id));
+    const otherChanges = allowed.filter(change => change.type !== 'remove');
+    if (otherChanges.length > 0) onEdgesChange(otherChanges);
   };
   const [uploadedNodes] = useState<Node[]>([]);
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'warn'; msg: string } | null>(null);
@@ -3460,6 +3472,7 @@ export default function CanvasPage() {
     ];
     const removedNodes = allNodes.filter((n) => idSet.has(n.id));
     const removedEdges = edgesRef.current.filter((e) => idSet.has(e.source) || idSet.has(e.target));
+    const remainingEdges = releaseRemovedPromptSources(edgesRef.current, edgesRef.current.filter((e) => !idSet.has(e.source) && !idSet.has(e.target)));
 
     // blob 预览释放（http 素材 URL 无需 revoke）
     removedNodes.forEach((n) => {
@@ -3482,7 +3495,12 @@ export default function CanvasPage() {
     );
     // 动态成员模型：组矩形固定，删除节点不裁剪组（删掉的成员下次按坐标判定自然脱离）
     if (undoableNodes.length > 0) {
-      historyRef.current?.pushDelete(undoableNodes, undoableEdges);
+      historyRef.current?.pushDelete(undoableNodes, undoableEdges, undefined, {
+        before: edgesRef.current.filter(e =>
+          (undoableIds.has(e.source) || survivingIds.has(e.source)) &&
+          (undoableIds.has(e.target) || survivingIds.has(e.target))),
+        after: remainingEdges,
+      });
     }
 
     // 移除节点 + 清 pending 登记（未保存新增的删除一并清理）
@@ -3494,8 +3512,7 @@ export default function CanvasPage() {
     setAssetNodes(filter);
     // 立即清理悬空边（不等定时器）
     if (removedEdges.length > 0) {
-      const removedEdgeIds = new Set(removedEdges.map((e) => e.id));
-      setEdges((prev) => prev.filter((e) => !removedEdgeIds.has(e.id)));
+      setEdges(remainingEdges);
     }
   };
 
@@ -3661,6 +3678,7 @@ export default function CanvasPage() {
       .filter((n): n is Node => n?.type === 'textNode')
       .map((n) => ({
         nodeId: n.id,
+        isPromptPlan: Boolean(n.data.promptSource),
         title: typeof n.data.title === 'string' && n.data.title ? (n.data.title as string) : '文本节点',
         text: extractTextNodeText(n.data),
       }));
@@ -3791,7 +3809,8 @@ export default function CanvasPage() {
       setPendingImageCanvasRefs(next);
       return;
     }
-    setEdges((prev) => prev.filter((e) => !(e.source === sourceNodeId && e.target === draftId)));
+    if (isGeneratingNode(draftId)) return;
+    removeTargetInputs(edgesRef.current.filter(edge => edge.source === sourceNodeId && edge.target === draftId).map(edge => edge.id));
   };
 
   /** 草稿绑定面板的视频媒体参考（IKDMQS）：按连线角色实时分组推导，Dock 显示即提交输入（同源）。
@@ -3816,7 +3835,8 @@ export default function CanvasPage() {
       setPendingVideoCanvasRefs(next);
       return;
     }
-    setEdges((prev) => prev.filter((e) => !(e.source === sourceNodeId && e.target === draftId)));
+    if (isGeneratingNode(draftId)) return;
+    removeTargetInputs(edgesRef.current.filter(edge => edge.source === sourceNodeId && edge.target === draftId).map(edge => edge.id));
   };
 
   /** Dock 显式改变参考角色（IKDMQS）：改写连线的 edge.data.refRole。
@@ -5359,6 +5379,7 @@ export default function CanvasPage() {
         {/* 底部视频对话框（IKDMQS 统一草稿绑定；工具栏入口为无卡自由模式） */}
         {showBottomDialog && (
           <BottomDialog
+            onRemovePlan={id => removePlanAttachment(videoSeed?.targetNodeId, id)}
             pendingPlanSyncs={pendingPlanSyncs(videoSeed?.targetNodeId)}
             onSyncPlan={id => syncPlanToTarget(id, videoSeed?.targetNodeId)}
             syncingPlan={applying}
@@ -5430,6 +5451,7 @@ export default function CanvasPage() {
             attachments={imageDraftId ? imageDraftAttachments : imageSeed?.attachments}
             mediaRefs={imageDraftId ? imageDraftMediaRefs : undefined}
             invalidMediaRefs={invalidImageMediaRefs}
+            onRemovePlan={id => removePlanAttachment(imageSeed?.targetNodeId, id)}
             pendingPlanSyncs={pendingPlanSyncs(imageSeed?.targetNodeId)}
             onSyncPlan={id => syncPlanToTarget(id, imageSeed?.targetNodeId)}
             syncingPlan={applying}

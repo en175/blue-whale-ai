@@ -27,6 +27,9 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { ProjectsController } from "../projects/projects.controller.js";
 import { AgentV1ProxyController } from "../agent/agent-v1-proxy.controller.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
+import { AssetsController } from "../assets/assets.controller.js";
+import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 
 // Public HTTP seam, real production Canvas/Project services and disposable MySQL.
 // Authentication middleware supplies the already-authenticated identity; no Canvas API mocks.
@@ -50,9 +53,9 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
     }
     if (req.url?.startsWith("/v1/video/generations/")) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ task_id: "iketsx-task", status: "succeeded", result_url: `${process.env.AGENT_SERVICE_BASE_URL}/b.mp4` })); return; }
     if (req.url === '/api/usage/token/') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ success: true, data: { user_quota: 1000000 } })); return; }
-    if (req.url === '/a.png' || req.url === '/b.mp4') {
-      res.setHeader('content-type', req.url === '/a.png' ? 'image/png' : 'video/mp4');
-      res.end(readFileSync(new URL(req.url === '/a.png' ? '../../../../../../web/public/favicon.png' : '../../../../../../web/src/assets/home-hero/aurora.mp4', import.meta.url)));
+    if (req.url?.startsWith('/a.png') || req.url === '/b.mp4') {
+      res.setHeader('content-type', req.url?.startsWith('/a.png') ? 'image/png' : 'video/mp4');
+      res.end(readFileSync(new URL(req.url?.startsWith('/a.png') ? '../../../../../../web/public/favicon.png' : '../../../../../../web/src/assets/home-hero/aurora.mp4', import.meta.url)));
       return;
     }
     agentRequests.push({ path: req.url ?? "", user: req.headers["x-blue-whale-user-id"], project: req.headers["x-blue-whale-project-id"] });
@@ -101,8 +104,10 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
     Reflect.defineMetadata("design:paramtypes", [AccountService], UsageController);
+    Reflect.defineMetadata("design:paramtypes", [AssetService], AssetsController);
     class HarnessModule {}
-    Module({ controllers: [UsageController, CanvasesController, ProjectsController, AgentV1ProxyController, GenerationJobsController, GenerationModelsController, JobsController], providers: [
+    Module({ controllers: [AssetsController, UsageController, CanvasesController, ProjectsController, AgentV1ProxyController, GenerationJobsController, GenerationModelsController, JobsController], providers: [
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: AccountService, useValue: new AccountService() },
       { provide: JobsService, useValue: new JobsService(prisma, projects) },
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
@@ -495,7 +500,156 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
     } finally { materialPayload = undefined; }
   });
 
-  async function openPlanBrowser() {
+  it("IKETSZ: removing a plan releases only its exclusive inputs and preserves other targets", async () => {
+    projectId = (await projects.create("987654", "IKETSZ sources")).id;
+    const assets = await Promise.all([0, 1, 2].map(() => prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } })));
+    materialPayload = { target_media: "image", assets: assets.map((a, i) => ({ asset_ref_id: `a${i}`, asset_id: String(a.id), media_type: "image" })),
+      shots: [{ shot_no: 1, title: "共享方案", prompt_text: "甲乙丙", asset_bindings: assets.map((_, i) => ({ asset_ref_id: `a${i}` })),
+        prompt_mentions: assets.map((_, i) => ({ start: i, end: i + 1, index: i + 1, asset_ref_id: `a${i}` })) }] };
+    try {
+      const first = (await (await apply()).json()).data;
+      activeRevision = "second-plan";
+      materialPayload = { target_media: "image", assets: [{ asset_ref_id: "shared", asset_id: String(assets[1]!.id), media_type: "image" }],
+        shots: [{ shot_no: 1, title: "另一方案", prompt_text: "乙", asset_bindings: [{ asset_ref_id: "shared" }], prompt_mentions: [{ start: 0, end: 1, index: 9, asset_ref_id: "shared" }] }] };
+      const second = (await (await fetch(`${base}/api/canvases/${projectId}/prompt-previews/apply`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ source: { ...source, revisionId: activeRevision }, position: { x: 0, y: 300 } }) })).json()).data;
+      let canvas = second.canvas;
+      const nodes = JSON.parse(canvas.nodes);
+      nodes.find((n: { id: string }) => n.id === first.node.id).data.title = "待移除方案";
+      const media = assets.map(a => nodes.find((n: { data: { assetId?: string } }) => n.data.assetId === String(a.id)));
+      nodes.push(...["A", "B"].map(id => ({ id, type: "mediaNode", data: { mediaType: "image", draft: true, genStatus: "draft", draftModelId: "iketsw-image", draftSize: "1024x1024", draftRatio: "1:1" }, position: { x: 900, y: id === "A" ? 0 : 400 } })));
+      const save = async (edges: unknown[]) => {
+        const res = await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${canvas.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes), edges: JSON.stringify(edges) }) });
+        expect(res.status, await res.clone().text()).toBe(200); canvas = (await res.json()).data;
+      };
+      await save([{ id: "manual", source: media[2].id, target: "A" }]);
+      for (const [planNodeId, targetNodeId] of [[first.node.id, "A"], [first.node.id, "B"], [second.node.id, "A"]]) {
+        const res = await fetch(`${base}/api/canvases/${projectId}/prompt-references`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ planNodeId, targetNodeId, expectedVersion: canvas.version }) });
+        expect(res.status, await res.clone().text()).toBe(201); canvas = (await res.json()).data;
+      }
+      const before = JSON.parse(canvas.edges);
+      if (process.env.IKETSZ_BROWSER) {
+        const { page, browser, vite } = await openPlanBrowser(false);
+        try {
+          await page.locator('.react-flow__node-mediaNode[data-id="A"] [data-testid="media-content"]').click();
+          await page.getByRole('button', { name: '移除方案 待移除方案', exact: true }).click();
+          await vi.waitFor(async () => {
+            const stored = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+            expect(JSON.parse(stored.edges).some((e: { source: string; target: string }) => e.source === first.node.id && e.target === "A")).toBe(false);
+          });
+          await page.reload();
+          await page.locator('.react-flow__node-mediaNode[data-id="A"] [data-testid="media-content"]').click();
+          expect(await page.getByRole('button', { name: '移除方案 待移除方案', exact: true }).count()).toBe(0);
+        } finally { await browser.close(); await vite.close(); }
+      } else {
+        await save(before.filter((e: { source: string; target: string }) => !(e.source === first.node.id && e.target === "A")));
+      }
+      const restored = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+      const edges = JSON.parse(restored.edges);
+      expect(edges.filter((e: { target: string }) => e.target === "A").map((e: { source: string }) => e.source).sort()).toEqual([media[1].id, media[2].id, second.node.id].sort());
+      expect(edges.find((e: { id: string }) => e.id === "manual").data.inputSources).toEqual({ manual: true, planNodeIds: [] });
+      expect(edges.find((e: { source: string; target: string }) => e.source === media[1].id && e.target === "A").data.inputSources).toEqual({ manual: false, planNodeIds: [second.node.id] });
+      expect(edges.filter((e: { target: string }) => e.target === "B")).toEqual(before.filter((e: { target: string }) => e.target === "B"));
+      const restoredNodes = JSON.parse(restored.nodes);
+      expect(restoredNodes.map((n: { id: string }) => n.id).sort()).toEqual(nodes.map((n: { id: string }) => n.id).sort());
+      for (const original of nodes.filter((n: { type: string }) => n.type === "textNode")) {
+        expect(restoredNodes.find((n: { id: string }) => n.id === original.id).data).toMatchObject(original.data);
+      }
+      for (const original of media) expect(restoredNodes.find((n: { id: string }) => n.id === original.id).data.assetId).toBe(original.data.assetId);
+      if (process.env.IKETSZ_BROWSER) {
+        const { page, browser, vite } = await openPlanBrowser(false);
+        try {
+          await page.locator(`.react-flow__node-textNode[data-id="${second.node.id}"]`).click({ button: 'right' });
+          await page.getByText('删除', { exact: true }).click();
+          await vi.waitFor(async () => {
+            const stored = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+            expect(JSON.parse(stored.nodes).some((n: { id: string }) => n.id === second.node.id)).toBe(false);
+          });
+          const target = page.locator('.react-flow__node-mediaNode[data-id="A"] [data-testid="media-content"]');
+          await target.click();
+          expect(await page.getByTestId('dock-media-ref').count()).toBe(1);
+          const box = (await target.boundingBox())!;
+          await page.mouse.move(box.x + 50, box.y + 50); await page.mouse.down();
+          await page.mouse.move(box.x + 80, box.y + 70, { steps: 5 }); await page.mouse.up();
+          await vi.waitFor(async () => {
+            const stored = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+            expect(JSON.parse(stored.nodes).find((n: { id: string }) => n.id === "A").position.x).not.toBe(900);
+            expect(JSON.parse(stored.edges).filter((e: { target: string }) => e.target === "A")).toHaveLength(1);
+          });
+          await page.reload(); await target.click();
+          expect(await page.getByTestId('dock-media-ref').count()).toBe(1);
+        } finally { await browser.close(); await vite.close(); }
+      }
+    } finally { materialPayload = undefined; activeRevision = undefined; }
+  }, 30_000);
+
+  it("IKETSZ: public generation rejects disconnected, inaccessible and deleted plan assets until repaired", async () => {
+    projectId = (await projects.create("987654", "IKETSZ invalidation")).id;
+    const asset = await prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } });
+    materialPayload = { target_media: "video", assets: [{ asset_ref_id: "a", asset_id: String(asset.id), media_type: "image" }],
+      shots: [{ shot_no: 1, title: "共享方案", prompt_text: "素材A雨夜", asset_bindings: [{ asset_ref_id: "a" }], prompt_mentions: [{ start: 0, end: 3, asset_ref_id: "a", index: 7 }] }] };
+    try {
+      const applied = (await (await apply()).json()).data;
+      let canvas = applied.canvas;
+      const nodes = JSON.parse(canvas.nodes);
+      const plan = nodes.find((n: { id: string }) => n.id === applied.node.id);
+      nodes.push(...["image", "video", "history"].map(id => ({ id, type: "mediaNode", position: { x: 900, y: 0 }, data: { mediaType: id === "video" ? "video" : "image", genStatus: "draft", draftModelId: id === "video" ? "doubao-seedance-2-0-260128" : "iketsw-image" } })));
+      const save = async (edges: unknown[]) => {
+        const res = await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${canvas.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes), edges: JSON.stringify(edges) }) });
+        expect(res.status, await res.clone().text()).toBe(200); canvas = (await res.json()).data;
+      };
+      const reference = async (targetNodeId: string, syncBindings?: unknown[]) => {
+        const res = await fetch(`${base}/api/canvases/${projectId}/prompt-references`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ planNodeId: plan.id, targetNodeId, expectedVersion: canvas.version, syncBindings }) });
+        expect(res.status, await res.clone().text()).toBe(201); canvas = (await res.json()).data;
+      };
+      const submit = (id: string, ids = [String(asset.id)]) => fetch(`${base}/api/projects/${projectId}/generation-jobs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+        type: id === "video" ? "video" : "image", target_node_id: id, expected_output_count: 1,
+        ...(id === "video" ? (ids.length ? { references: ids.map(asset_id => ({ asset_id, type: "image", role: "reference" })) } : {}) : { input_asset_ids: ids }),
+        parameters: { prompt: "保留草稿", model_id: id === "video" ? "doubao-seedance-2-0-260128" : "iketsw-image", aspect_ratio: id === "video" ? "16:9" : "1:1", ...(id === "video" ? { resolution: "720p", duration: 5 } : {}) },
+      }) });
+      const jobs = async () => (await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records;
+      await save([]);
+      for (const id of ["image", "video", "history"]) await reference(id);
+      expect((await (await submit("history")).json()).code).toBe(200);
+      const oldSnapshot = (await jobs())[0].input.prompt_plan_snapshot;
+      const connected = JSON.parse(canvas.edges);
+      await save(connected.filter((e: { source: string; target: string }) => !(e.target === "image" && e.source !== plan.id)));
+      expect(await (await submit("image")).text()).toContain("#7");
+      expect(await (await submit("image", [])).text()).toContain("#7");
+      expect(JSON.parse(canvas.nodes).find((n: { id: string }) => n.id === plan.id)).toEqual(plan);
+      await save(connected);
+      await prisma.client.assets.update({ where: { id: asset.id }, data: { user_id: 12345n } });
+      for (const id of ["image", "video"]) expect(await (await submit(id)).text()).toContain("#7");
+      await prisma.client.assets.update({ where: { id: asset.id }, data: { user_id: 987654n } });
+      expect((await (await fetch(`${base}/api/assets/${asset.id}`, { method: "DELETE" })).json()).code).toBe(200);
+      for (const id of ["image", "video"]) expect(await (await submit(id)).text()).toContain("#7");
+      expect(await jobs()).toHaveLength(1);
+      expect((await jobs())[0].input.prompt_plan_snapshot).toEqual(oldSnapshot);
+      // Repair the shared plan explicitly; clearing a target's media list alone was rejected above.
+      plan.data.text = "修正后的纯文字方案"; plan.data.promptMentions = [];
+      await save(JSON.parse(canvas.edges));
+      for (const id of ["image", "video"]) expect(await (await submit(id, [])).text()).toContain("待同步");
+      await reference("image", []);
+      expect(await (await submit("video", [])).text()).toContain("待同步");
+      await reference("video", []);
+      for (const id of ["image", "video"]) expect((await (await submit(id, [])).json()).code).toBe(200);
+      expect((await jobs()).find((j: { input: { target_node_id: string } }) => j.input.target_node_id === "history").input.prompt_plan_snapshot).toEqual(oldSnapshot);
+      const repairedVideo = (await jobs()).find((j: { input: { target_node_id: string } }) => j.input.target_node_id === "video");
+      const execute = () => runVideoJobStep({ repo: createWorkerRepo(prisma.client), workerId: "iketsz-worker", jobId: repairedVideo.job_id,
+        credentialVault: { open: value => openGenerationCredential(value, "iketsw-isolated-test-secret") },
+        createProvider: token => createNewApiVideoTaskProvider({ baseUrl: process.env.AGENT_SERVICE_BASE_URL!, token }),
+        mediaRelay: { persist: async url => ({ url, storageKey: null, mime: "video/mp4", size: 100 }) },
+      });
+      await vi.waitFor(async () => expect(await execute()).toBe(repairedVideo.job_id), { timeout: 3000 });
+      expect(videoRequests.at(-1)?.prompt).toBe("修正后的纯文字方案\n\n保留草稿");
+      expect(videoRequests.at(-1)?.metadata.content).toEqual([]);
+      await vi.waitFor(async () => {
+        await execute();
+        expect((await jobs()).find((j: { job_id: string }) => j.job_id === repairedVideo.job_id).status).toBe("succeeded");
+      }, { timeout: 10000, interval: 500 });
+    } finally { materialPayload = undefined; }
+  }, 20_000);
+
+  async function openPlanBrowser(applyPreview = true) {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     const vite = await createVite({ root: `${process.cwd()}/web`, server: { open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } } } });
@@ -505,9 +659,11 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
       const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
       await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: { userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false } }, version: 0 })));
       await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
-      await page.getByRole("button", { name: "Agent", exact: true }).click();
-      await page.getByRole("button", { name: "手动应用", exact: true }).click();
-      const plan = page.locator(".react-flow__node-textNode");
+      if (applyPreview) {
+        await page.getByRole("button", { name: "Agent", exact: true }).click();
+        await page.getByRole("button", { name: "手动应用", exact: true }).click();
+      }
+      const plan = page.locator(".react-flow__node-textNode").first();
       await plan.waitFor();
       await page.reload();
       await plan.waitFor();
@@ -518,6 +674,95 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
       throw error;
     }
   }
+
+  it.runIf(process.env.IKETSZ_BROWSER)("IKETSZ browser: remove and restore plan inputs independently for image and video", async () => {
+    projectId = (await projects.create("987654", "IKETSZ browser")).id;
+    const asset = await prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png?case=iketsz-${projectId}` } });
+    materialPayload = { target_media: "video", assets: [{ asset_ref_id: "a", asset_id: String(asset.id), media_type: "image" }],
+      shots: [{ shot_no: 1, title: "共享方案", prompt_text: "素材A雨夜", asset_bindings: [{ asset_ref_id: "a" }], prompt_mentions: [{ start: 0, end: 3, asset_ref_id: "a", index: 7 }] }] };
+    const targets = ["image", "video"].map((type, i) => ({ id: type, type: "mediaNode", position: { x: 350, y: 40 + i * 330 },
+      data: { mediaType: type, draft: true, genStatus: "draft", draftModelId: type === "image" ? "iketsw-image" : "doubao-seedance-2-0-260128", draftSize: type === "image" ? "1024x1024" : "720p", draftRatio: type === "image" ? "1:1" : "16:9", draftMode: "all", draftDuration: 5, prompt: "已有草稿", targetRatio: "1:1" } }));
+    await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ nodes: JSON.stringify(targets), edges: "[]", viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }) });
+    const { page, plan, browser, vite } = await openPlanBrowser();
+    const read = async () => (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+    try {
+      let canvas = await read();
+      const planId = JSON.parse(canvas.nodes).find((n: { type: string }) => n.type === "textNode").id;
+      for (const targetNodeId of ["image", "video"]) {
+        const res = await fetch(`${base}/api/canvases/${projectId}/prompt-references`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ planNodeId: planId, targetNodeId, expectedVersion: canvas.version }) });
+        expect(res.status).toBe(201); canvas = (await res.json()).data;
+      }
+      await page.reload(); await plan.waitFor();
+      const target = (id: string) => page.locator(`.react-flow__node-mediaNode[data-id="${id}"] [data-testid="media-content"]`);
+      for (const type of ["image", "video"]) {
+        await target(type).click();
+        const mediaRef = page.getByTestId(type === "image" ? "dock-media-ref" : "dock-video-ref");
+        await mediaRef.getByRole("button", { name: type === "image" ? "移除" : "移除（断开连线）", exact: true }).click();
+        await page.getByText(/方案索引 #7 素材缺失/).waitFor();
+        expect(await (type === 'video' ? page.getByTestId('video-send') : page.locator('button[title="发送"]')).isDisabled()).toBe(true);
+        await vi.waitFor(async () => expect(JSON.parse((await read()).edges).filter((e: { target: string }) => e.target === type)).toHaveLength(1));
+        if (type === 'image') {
+          await page.reload(); await plan.waitFor();
+          await target('image').click();
+          await page.getByText(/方案索引 #7 素材缺失/).waitFor();
+          await target('video').click();
+          await vi.waitFor(async () => expect(await page.getByTestId('video-send').isEnabled(), (await page.locator('body').innerText()).slice(-2500)).toBe(true));
+          const materialId = JSON.parse((await read()).nodes).find((n: { data: { assetId?: string } }) => n.data.assetId === String(asset.id)).id;
+          const materialNode = page.locator(`.react-flow__node-mediaNode[data-id="${materialId}"]`);
+          await materialNode.locator('[data-testid="media-content"]').click();
+          const from = (await materialNode.locator('.react-flow__handle-right').boundingBox())!;
+          const to = (await page.locator('.react-flow__node-mediaNode[data-id="image"] .react-flow__handle-left').boundingBox())!;
+          await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+          await page.mouse.down(); await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 }); await page.mouse.up();
+          await target('image').click();
+        } else await page.keyboard.press('Control+z');
+        await vi.waitFor(async () => expect(await (type === 'video' ? page.getByTestId('video-send') : page.locator('button[title="发送"]')).isEnabled(), (await page.locator('body').innerText()).slice(-2500)).toBe(true));
+        const remove = page.getByRole("button", { name: /^移除方案 / });
+        expect(await remove.count()).toBe(1);
+        await remove.click();
+        await vi.waitFor(async () => expect(JSON.parse((await read()).edges).filter((e: { target: string }) => e.target === type)).toHaveLength(type === "image" ? 1 : 0));
+        expect(await plan.count()).toBe(1);
+        expect(JSON.parse((await read()).nodes).find((n: { id: string }) => n.id === type).data.prompt).toBe("已有草稿");
+        await page.keyboard.press('Control+z');
+        await vi.waitFor(async () => expect(JSON.parse((await read()).edges).filter((e: { target: string }) => e.target === type)).toHaveLength(2));
+        await page.keyboard.press('Control+Shift+z');
+        await vi.waitFor(async () => expect(JSON.parse((await read()).edges).filter((e: { target: string }) => e.target === type)).toHaveLength(type === "image" ? 1 : 0));
+        await page.keyboard.press('Control+z');
+        await vi.waitFor(async () => expect(JSON.parse((await read()).edges).filter((e: { target: string }) => e.target === type)).toHaveLength(2));
+        await page.reload(); await plan.waitFor();
+      }
+      expect(JSON.parse((await read()).nodes).filter((n: { data: { assetId?: string } }) => n.data.assetId === String(asset.id))).toHaveLength(1);
+      const canvasUrl = page.url();
+      await page.goto(new URL('/library', canvasUrl).href);
+      const assetCard = page.getByRole('button', { name: '查看图片资产详情', exact: true }).filter({ has: page.locator(`img[src="${asset.url}"]`) });
+      await assetCard.hover({ timeout: 5000 });
+      await assetCard.getByRole('button', { name: '删除资产', exact: true }).click();
+      const deleted = page.waitForResponse(response => response.url().endsWith(`/assets/${asset.id}`) && response.request().method() === 'DELETE');
+      await page.getByRole('button', { name: '确认删除', exact: true }).click();
+      expect((await (await deleted).json()).code).toBe(200);
+      await page.goto(canvasUrl); await plan.waitFor();
+      for (const type of ["image", "video"]) {
+        await target(type).click();
+        await page.getByText(/方案索引 #7 素材缺失/).waitFor();
+        expect(await (type === 'video' ? page.getByTestId('video-send') : page.locator('button[title="发送"]')).isDisabled()).toBe(true);
+      }
+      await page.screenshot({ path: '/tmp/iketsz-deleted-asset.png', fullPage: true });
+      await plan.locator('[data-placeholder="输入内容..."]').dblclick();
+      await plan.locator('[data-prompt-index="7"]').click();
+      await plan.getByRole('button', { name: '删除标签 #7', exact: true }).click();
+      await vi.waitFor(async () => expect(JSON.parse((await read()).nodes).find((n: { id: string }) => n.id === planId).data.promptMentions).toEqual([]));
+      for (const type of ['image', 'video']) {
+        await target(type).click();
+        if (type === 'image') {
+          // Explicit reconnection added a manual input; plan sync must not silently remove it.
+          await page.getByRole('button', { name: '移除失效参考', exact: true }).click();
+        }
+        await page.getByRole('button', { name: '同步素材到目标', exact: true }).click();
+        await vi.waitFor(async () => expect(await (type === 'video' ? page.getByTestId('video-send') : page.locator('button[title="发送"]')).isEnabled(), (await page.locator('body').innerText()).slice(-2500)).toBe(true));
+      }
+      await page.screenshot({ path: '/tmp/iketsz-repaired.png', fullPage: true });
+    } finally { materialPayload = undefined; await browser.close(); await vite.close(); }
+  }, 60_000);
 
   it.runIf(process.env.IKETSY_BROWSER)("IKETSY browser: edit material tags and confirm A without releasing B", async () => {
     projectId = (await projects.create("987654", "IKETSY browser")).id;
