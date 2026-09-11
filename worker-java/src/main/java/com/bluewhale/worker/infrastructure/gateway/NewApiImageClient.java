@@ -53,8 +53,10 @@ public class NewApiImageClient {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final MediaType JSON_TYPE = MediaType.get("application/json");
 
-    /** 默认超时 60s（图片生成比音频慢，new-api-client.ts DEFAULT_TIMEOUT_MS 同构）。 */
-    private static final int DEFAULT_TIMEOUT_MS = 60_000;
+    /** 默认超时 90s——逐字对齐 TS ark-image-provider.ts:102-111（IKDMQE 教训：出图是长调用，
+     *  2k 单图实测 ~19s、多图/大图更久；60s 会把 banana2-i2i 这类慢上游误杀成终态超时，
+     *  线上 job 1820 实证）。env NEW_API_IMAGE_TIMEOUT_MS 可覆盖，留 120s 租约内转存余量。 */
+    private static final int DEFAULT_TIMEOUT_MS = 90_000;
 
     private final OkHttpClient httpClient;
     private final String baseUrl;
@@ -63,14 +65,18 @@ public class NewApiImageClient {
         this(System.getenv("NEW_API_BASE_URL"));
     }
 
-    /** 测试用构造器：注入 base URL。 */
+    /** 测试用构造器：注入 base URL，超时走 env/默认。 */
     NewApiImageClient(String baseUrl) {
+        this(baseUrl, loadTimeoutMs());
+    }
+
+    /** 测试用构造器：注入读/写超时（毫秒）。 */
+    NewApiImageClient(String baseUrl, int timeoutMs) {
         if (baseUrl == null || baseUrl.isBlank()) {
             throw new IllegalStateException("NEW_API_BASE_URL 未配置");
         }
         this.baseUrl = baseUrl.replaceAll("/+$", "");
 
-        int timeoutMs = loadTimeoutMs();
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
@@ -110,7 +116,10 @@ public class NewApiImageClient {
         try {
             response = httpClient.newCall(request).execute();
         } catch (java.net.SocketTimeoutException e) {
-            throw new ImageProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+            // 对齐 TS：NewApiTimeoutError instanceof NewApiError → 非内容/非 quota →
+            // provider_failed（瞬态，worker 重试 3 次）。原 provider_timeout 终态是刀③偏差
+            // （那是 video poll 语义），慢上游一次超时就把 job 打死（本地 job 1820 实证）。
+            throw new ImageProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                     "new-api 图片生成超时");
         } catch (Exception e) {
             throw new ImageProviderError(GenerationError.ERROR_PROVIDER_FAILED,
@@ -218,7 +227,7 @@ public class NewApiImageClient {
         return result;
     }
 
-    private int loadTimeoutMs() {
+    private static int loadTimeoutMs() {
         String raw = System.getenv("NEW_API_IMAGE_TIMEOUT_MS");
         if (raw != null) {
             try {

@@ -40,6 +40,13 @@ class NewApiImageClientEndpointTest {
                 in.transferTo(buf);
             }
             lastBody.set(buf.toString(StandardCharsets.UTF_8));
+            if (lastBody.get().contains("sleep-trig")) {
+                try {
+                    Thread.sleep(3000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             byte[] resp = "{\"data\":[{\"url\":\"https://gen/x.png\"}]}"
                     .getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
@@ -90,5 +97,21 @@ class NewApiImageClientEndpointTest {
         assertThat(body).contains("\"image\":[\"https://a/1.png\",\"https://a/2.png\"]");
         assertThat(body.indexOf("\"quality\"")).isLessThan(body.indexOf("\"image\""));
         assertThat(body.indexOf("\"image\"")).isLessThan(body.indexOf("\"n\""));
+    }
+
+    @Test
+    @DisplayName("HTTP 超时 → provider_failed（瞬态可重试，对齐 TS；非 provider_timeout 终态——IKF12J 偏差③）")
+    void timeoutIsTransientProviderFailed() {
+        NewApiImageClient client = new NewApiImageClient(baseUrl, 300);
+        com.bluewhale.worker.domain.error.ImageProviderError error = null;
+        try {
+            client.generate("t", "nano-banana-2-i2i", "sleep-trig 猫", 1,
+                    null, null, false, false, List.of());
+        } catch (com.bluewhale.worker.domain.error.ImageProviderError e) {
+            error = e;
+        }
+        assertThat(error).isNotNull();
+        assertThat(error.getCode()).isEqualTo(
+                com.bluewhale.worker.domain.error.GenerationError.ERROR_PROVIDER_FAILED);
     }
 }
