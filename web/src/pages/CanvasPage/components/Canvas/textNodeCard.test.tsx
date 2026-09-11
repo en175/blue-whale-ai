@@ -244,8 +244,10 @@ describe('Canvas 文本节点卡片', () => {
     await act(async () => {
       content().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 90 }));
     });
+    // 标题行操作条「添加到对话」按钮 + 右键菜单四项（添加到聊天/创建副本/粘贴/删除）
+    // （c220ade0 画布交互优化：「复制」改为「创建副本」，新增「粘贴」；标题行常驻「添加到对话」） */
     const menuItems = [...document.body.querySelectorAll('button')].map((b) => b.textContent?.trim());
-    expect(menuItems).toEqual(expect.arrayContaining(['添加到聊天', '复制', '删除']));
+    expect(menuItems).toEqual(expect.arrayContaining(['添加到聊天', '创建副本', '粘贴', '删除']));
     const remove = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === '删除')!;
     await act(async () => { remove.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
     expect(callbacks.onDelete).toHaveBeenCalledWith(TEXT_ID);
