@@ -9,6 +9,7 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 生成作业 Mapper（契约 §3 / 附录 B：领取与终态写入）。
@@ -598,4 +599,79 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             SELECT provider_task_id FROM generation_jobs WHERE id = #{jobId}
             """)
     String findProviderTaskId(@Param("jobId") Long jobId);
+
+    // ========== recovery 到点/孤儿扫描（IKF3AT；claim-ops.ts:134-230 逐字移植） ==========
+    // 共同条件：is_delete=false + gmt_create 在 RECOVERY_MAX_AGE 窗口内（避免卡死任务被 60s 循环无限重放）
+    // + next_action_at<=now + （queued ∨ processing 且租约空/过期——孤儿由 claim-by-id 的过期租约接管语义接走）。
+    // 注：TS 的 resetStalledImageJobs 无活调用方（死代码），不移植（edits 死代码教训）。
+
+    /** 视频到点/孤儿（claim-ops.ts:134-160）：限 4 源白名单。 */
+    @Select("""
+            SELECT id FROM generation_jobs
+            WHERE type = 'video'
+              AND source IN ('bottom_dock', 'plan_apply', 'plan', 'scene_card')
+              AND is_delete = false
+              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
+              )
+            ORDER BY id ASC
+            LIMIT #{limit}
+            """)
+    List<Long> listDueVideoJobIds(@Param("limit") int limit,
+                                  @Param("maxAgeMinutes") int maxAgeMinutes);
+
+    /** 图片到点/孤儿（claim-ops.ts:163-195）：限 CLAIMABLE_JOB_SOURCES。 */
+    @Select("""
+            SELECT id FROM generation_jobs
+            WHERE type = 'image'
+              AND source IN ('bottom_dock', 'plan_apply', 'storyboard_preview')
+              AND is_delete = false
+              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
+              )
+            ORDER BY id ASC
+            LIMIT #{limit}
+            """)
+    List<Long> listDueImageJobIds(@Param("limit") int limit,
+                                  @Param("maxAgeMinutes") int maxAgeMinutes);
+
+    /** 音频到点/孤儿（claim-ops.ts:198-230）：**不套 source 白名单**（IKC9EJ 教训，防漏捞）。 */
+    @Select("""
+            SELECT id FROM generation_jobs
+            WHERE type = 'audio'
+              AND is_delete = false
+              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
+              )
+            ORDER BY id ASC
+            LIMIT #{limit}
+            """)
+    List<Long> listDueAudioJobIds(@Param("limit") int limit,
+                                  @Param("maxAgeMinutes") int maxAgeMinutes);
+
+    /** 媒体提取到点/孤儿：**不套 source 白名单**（source="dock" 不在白名单，套了漏真卡任务）。 */
+    @Select("""
+            SELECT id FROM generation_jobs
+            WHERE type = 'media_extract'
+              AND is_delete = false
+              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
+              )
+            ORDER BY id ASC
+            LIMIT #{limit}
+            """)
+    List<Long> listDueMediaExtractJobIds(@Param("limit") int limit,
+                                         @Param("maxAgeMinutes") int maxAgeMinutes);
 }

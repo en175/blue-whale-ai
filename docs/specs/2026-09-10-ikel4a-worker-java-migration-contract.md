@@ -97,9 +97,9 @@
   - 消费者级不 ack → broker 30s 重投属**传输层**，与上表叠加，Java 客户端需保持等价（不主动 nack）。
 - 按 job 类型的错误码赋值点清单（凭据缺失/模型不可用/参考素材/无结果/catch-all）：见附录 A（本文件末，冻结自 agent 核对记录，IKEL4J 实现端点时逐条对照）。
 
-## 7. recovery / asset-GC（留 TS 进程，Java 不接管，此处仅登记行为边界）
+## 7. recovery / asset-GC（**recovery 归 Java（IKF3AT）；asset-GC 留 TS**）
 
-- recovery（60s）：`listDue*JobIds`（批 100）选 `next_action_at<=now` 且 `queued` 或 `processing 且租约过期`；video 限 4 源白名单、24h 内；重发同 body。→ **它同时是 Java worker 崩溃时的降级网**。
+- recovery（60s）：**Java `RecoveryService` 实现**（TS `recovery.service.ts:38-106` 逐字移植；`@Scheduled` + 启动即扫一次）。`listDue*JobIds`（批 100）选 `next_action_at<=now` 且（`queued` ∨ `processing 且租约空/过期`）；source 白名单：video=4 源、image=CLAIMABLE_JOB_SOURCES、audio/media_extract 不套白名单；重发同 body 延迟 1s。**窗口：创建 2 小时内**（用户 2026-09-11 指示，TS 的 24h 改 2h；env `RECOVERY_MAX_AGE_MINUTES` 可覆盖，默认 120）。**开关**：只对 `WORKER_ENABLED_TAGS` 内 tag 重投（生产者 bean 带 @Conditional，缺失即跳过）；TS 侧 recovery 同时在跑时重复投递无害（claim-by-id CAS + null-claim ack 幂等）。**不移植** `resetStalledImageJobs`——TS 侧无活调用方（死代码），孤儿由 claim-by-id 的「processing + 租约过期可接管」语义接走。→ **TS 进程退役不再阻塞**。
 - asset-GC（1h）：`is_delete AND deleted_at<cutoff`（批 1000，延迟默认 7 天）→ live-ref 反查（`storage_key IN(...) AND is_delete=false`）→ 差集 `deleteMultiObjects`（404 视为幂等成功；partial Error 抛出）→ `deleteMany` → `operation_logs` 审计。
 
 ## 8. 资产 / TOS / 媒体处理等价标准
