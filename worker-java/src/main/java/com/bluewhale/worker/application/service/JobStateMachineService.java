@@ -51,9 +51,10 @@ public class JobStateMachineService {
 
     private static final int LEASE_SECONDS = 120; // 契约 §3.2：IMAGE_JOB_LEASE_SECONDS 默认 120s
 
-    /** image 专用租约（契约 §11 政策条款 2026-09-11）：读超时不重试后 HTTP 超时窗口拉到 240s，
-     *  租约必须盖住「超时 + 结果转存」，否则 recovery 把在跑的 job 当孤儿重投 = 双跑双扣。
-     *  env IMAGE_JOB_LEASE_SECONDS 可覆盖（顺带修复刀③把契约登记的 env 写死成常量的偏差）。 */
+    /** image 专用租约（契约 §11 政策条款 2026-09-11）：读超时不重试后 HTTP 超时窗口 300s，
+     *  租约必须盖住「超时 + 结果转存」（300 + 转存/边距 ⇒ 420s），否则 recovery 把在跑的 job
+     *  当孤儿重投 = 双跑双扣。env IMAGE_JOB_LEASE_SECONDS 可覆盖
+     *  （顺带修复刀③把契约登记的 env 写死成常量的偏差）。 */
     private static int imageLeaseSeconds() {
         String raw = System.getenv("IMAGE_JOB_LEASE_SECONDS");
         if (raw != null) {
@@ -64,7 +65,7 @@ public class JobStateMachineService {
                 // 宽容回落默认（与超时解析语义一致）
             }
         }
-        return 300;
+        return 420;
     }
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 

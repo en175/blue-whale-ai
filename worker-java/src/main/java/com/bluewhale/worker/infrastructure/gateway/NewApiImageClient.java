@@ -53,10 +53,11 @@ public class NewApiImageClient {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final MediaType JSON_TYPE = MediaType.get("application/json");
 
-    /** 默认读超时 240s（banana2/Gemini 系 i2i 实测可超 90s；env NEW_API_IMAGE_TIMEOUT_MS 可覆盖）。
-     *  配套：image claim 租约默认 300s（JobStateMachineService），必须 > 超时 + 转存余量，
-     *  否则 recovery 把在跑的 job 当孤儿重投 → 双跑双扣（比超时重试更糟）。 */
-    private static final int DEFAULT_TIMEOUT_MS = 240_000;
+    /** 默认读超时 300s（banana2/Gemini 系 i2i 实测 >240s 仍未返回，本地 job 1822 实证；
+     *  env NEW_API_IMAGE_TIMEOUT_MS 可覆盖）。配套：image claim 租约默认 420s
+     *  （JobStateMachineService），必须 > 超时 + 转存余量，否则 recovery 把在跑的 job
+     *  当孤儿重投 → 双跑双扣（比超时重试更糟）。 */
+    private static final int DEFAULT_TIMEOUT_MS = 300_000;
 
     private final OkHttpClient httpClient;
     private final String baseUrl;
