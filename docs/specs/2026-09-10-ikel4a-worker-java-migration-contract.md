@@ -177,4 +177,50 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 
 - **读超时与可疑 post-send IO 不重试**：请求已到达上游、可能已出图扣费，重试=双扣风险 → image HTTP 读超时、以及连接重置/流中断/SSL 中途失败等（无法证明 POST 未送达）一律归 `provider_timeout` **终态**（覆盖 §6「image 仅 provider_failed 瞬态」的入口来源：TS 旧链路把超时混进 provider_failed 一并重试，属其隐患，Node 退役中不回改）。**瞬态重试仅保留请求未达上游的连接层失败**（连接拒绝/连接超时/DNS → provider_failed）。
 - **拉大窗口消化慢上游**：`NEW_API_IMAGE_TIMEOUT_MS` 缺省 60s（刀③写死）→ **300s**（用户 2026-09-11 二次上调：240s 实测仍不够，本地 job 1822 在 240s 整超时）；image claim 租约必须盖住「超时+转存」→ 缺省 120s → **420s**，改读 `IMAGE_JOB_LEASE_SECONDS` env（顺带修复刀③把本节登记的 env 写死成常量——§3.2 的 120s 缺省仅约束非 image tag）。recovery 侧按 `lease_expires_at` 列判定，自动跟随，无需改 TS 代码。
-- 端点选择回归修正（同单）：恒 `/v1/images/generations` + JSON `image` 字段（单张=字符串、多张=数组）；jiekouAI 渠道设计上拒绝 edits（blue-whale-api `highwayapi/adaptor.go:44,113`），任何 edits 分支即回归（钉桩 `NewApiImageClientEndpointTest`）。
+- ~~端点选择回归修正（同单）：恒 `/v1/images/generations` + JSON `image` 字段（单张=字符串、多张=数组）；jiekouAI 渠道设计上拒绝 edits（blue-whale-api `highwayapi/adaptor.go:44,113`），任何 edits 分支即回归（钉桩 `NewApiImageClientEndpointTest`）。~~ **本条已被 §12 收窄**（2026-09-11，IKF4LI）：上游换官方协议后，`image_protocol=openai-images` 的行的图生图**必须**走 edits multipart；本条仅对 `image_protocol=inline-image` 的行（缺省值）继续成立。
+
+---
+
+## 12. 冻结增量（2026-09-11，IKF4LI）：出站图片协议目录化（`features.image_protocol`）
+
+上游 gpt-image-2 换官方 OpenAI Images 协议后，§11 定的「恒 generations + body.image」形态被上游**硬拒**，调用 100% 失败。**协议由能力行声明，不按模型名特判**；§11 的 `i2i_model_name` 对 gpt-image-2 作废（机制保留给 banana）。设计背景与取舍见 [ADR-0085](../adr/0085-catalog-input-modality-model-alias-and-per-model-prompt-length.md) 修订段。
+
+### 12.1 实测契约（2026-09-11，经 `api.master.xfai.cloud`，真实调用产生费用）
+
+| 探测 | 结果 |
+| --- | --- |
+| `POST /v1/images/generations` `{model,prompt}` | 200，`data[].b64_json`，耗时 **178s** |
+| `POST /v1/images/edits` multipart（model+prompt+`image` 文件） | 200，`data[].b64_json`，耗时 17s |
+| generations 带 `image` 字段 | 400 `Unknown parameter: 'image'` |
+| 带 `response_format` | 400 `Unknown parameter: 'response_format'` |
+| 带 `watermark` | 400 `Unknown parameter: 'watermark'` |
+| `size` | 须 `WIDTHxHEIGHT`，**宽高均须被 16 整除** |
+| `quality` | 仅 `low` / `medium` / `high` / `auto` |
+| `stream` / `tools` / `sequential_image_generation` | 静默接受（非官方字段，官方协议一律不发） |
+
+### 12.2 `features.image_protocol`（string，可选；缺省 `inline-image`）
+
+- **`openai-images`**：无参考图 → `POST /v1/images/generations`（JSON）；有参考图 → `POST /v1/images/edits`（multipart，参考图**由 worker 按 URL 下载成字节**后以 `image` 字段逐个追加）。只发官方字段 `model` / `prompt` / `n` / `size` / `quality`；**模型名恒为 `model_id`**——文生图与图生图是同一档位、**不换名**，端点分流代替换名。
+- **`inline-image`（缺省，未声明即此形态，现状零回归）**：恒 `POST /v1/images/generations`（JSON），参考图以 URL 字符串/数组进 body `image`；**仅此形态**下应用 §11 的 `i2i_model_name` 换名。
+- 未知值一律回落 `inline-image`：协议切错的代价是全量调用失败，宁可不切。
+- 读取时效沿用 §11：每次执行按 `model_id` 现查能力行，**禁止进程级缓存 features**。
+- **消费端目录投影**：`image_protocol` 与 `i2i_model_name` 同类（出站调用值）。本次只改 worker-java，backend 的 `handle-list-models` 仍只剥 `i2i_model_name`，`image_protocol` 会随 `features` 透出前端——无害（非密钥），如需与 `i2i_model_name` 一致剥除需另开 backend 单。
+
+### 12.3 响应形态（**无条件支持，与协议无关**）
+
+`data[]` 元素两种形态都必须支持：`url`（网关托管，banana/seedream 现用）与 `b64_json`（官方 GPT Image 系唯一形态）。b64 由客户端 base64 解码为字节、**按魔数嗅探 mime**（响应无 Content-Type 头）；解码失败、或两者皆无的元素丢弃，不炸整批（与 TS `filter` 同款宽容）。
+
+### 12.4 转存与降级
+
+- `b64_json` 形态**没有托管 URL 可降级**：TOS 未配置即硬失败「图片转存存储未配置」（对齐音频 data-direct，见 §8）。
+- `url` 形态维持 §8 现状：TOS 未配置 → 直存 URL（`storageKey=null`）。
+
+### 12.5 数据面（同一 migration：`023_ikf4li_official_openai_images_protocol.sql`，`prisma/schema` 与 `prisma/migrations` 双轨字节一致）
+
+- 主行 `gpt-image-2`（015 创建后停用未删，占着 uk_provider_model 干净名）**UPSERT 启回**并写入官方协议配置；`features` 去 `i2i_model_name`、加 `image_protocol=openai-images`；漂移名行 `gpt-image-2-text-to-image`（022 的合并主行）软删。
+- `nano-banana-2-t2i` 行显式写 `image_protocol=inline-image`（保留 `i2i_model_name`），读代码不必靠记默认值。
+- **改名不做引用迁移**：老画布节点/历史 job 里存的 `gpt-image-2-text-to-image` 不再被解析（用户 2026-09-11 拍板不加兼容别名），重跑需重选模型——与 ADR-0085 对软删行接受的同类代价。
+
+### 12.6 错误分类补充
+
+参考图下载失败发生在 **POST 上游之前**（零扣费风险）→ 归 `provider_failed` **瞬态可重试**，不违反 §11 的「post-send IO 不重试」政策（该政策约束的是无法证明 POST 未送达的 post-send 失败）。

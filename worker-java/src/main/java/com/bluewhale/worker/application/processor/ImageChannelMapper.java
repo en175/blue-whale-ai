@@ -1,5 +1,6 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.infrastructure.gateway.ImageProtocol;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -253,6 +254,25 @@ final class ImageChannelMapper {
             return null;
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /**
+     * 从 features JSON 提取 image_protocol（契约 §11 / IKF4LI）。
+     * <p>
+     * 读侧宽容：缺省 / 空白 / 未知值 → {@link ImageProtocol#INLINE_IMAGE}（现状不变；协议切错的
+     * 代价是全量调用失败，故宁可不切）。snake_case 与 camelCase 两种键形同 parseI2iModelName。
+     */
+    static ImageProtocol parseImageProtocol(String featuresJson) {
+        if (featuresJson == null || featuresJson.isBlank()) return ImageProtocol.INLINE_IMAGE;
+        try {
+            Map<String, Object> features = JSON.readValue(featuresJson,
+                    new TypeReference<Map<String, Object>>() {});
+            Object v = features.get("imageProtocol");
+            if (v == null) v = features.get("image_protocol");
+            return ImageProtocol.fromWire(v instanceof String s ? s : null);
+        } catch (Exception e) {
+            return ImageProtocol.INLINE_IMAGE;
         }
     }
 
