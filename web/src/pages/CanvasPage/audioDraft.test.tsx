@@ -511,13 +511,14 @@ describe('IKDMQT 原位提交与首次生成', () => {
       asset: null,
     }));
     seedEmptyDraftDoc();
+    // 预置连线：connectPair 要求 genKindOf 非空且 ABILITY 匹配（单源 text/image 均无法连入 audio 草稿），
+    // 因此直接在文档中预置连线，测试重点在于生成中删除被拦截。
+    (canvasDocMock.current.doc as { edges: Array<{ id: string; source: string; target: string }> }).edges = [
+      { id: 'e-seed', source: 't1', target: 'd1' },
+    ];
     await renderPage();
     const draftId = await openDraftPanel();
 
-    // 草稿态可连线（音频草稿不校验来源，画布连线保持现状）
-    await act(async () => {
-      flowProps.current.onConnect({ source: 't1', target: draftId, sourceHandle: null, targetHandle: null });
-    });
     expect(flowProps.current.edges.some((e: { source: string; target: string }) => e.source === 't1' && e.target === draftId)).toBe(true);
     const draftEdgeId = flowProps.current.edges.find((e: { source: string; target: string }) => e.target === draftId)!.id;
 

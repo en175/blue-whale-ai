@@ -3,6 +3,7 @@ package com.bluewhale.worker;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * 薄执行器生成服务入口（ADR-0084）。
@@ -14,6 +15,7 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
  */
 @SpringBootApplication
 @ConfigurationPropertiesScan
+@EnableScheduling // IKF3AT：RecoveryService 到点重投（TS 退役后不可缺的兜底）
 public class WorkerJavaApplication {
 
     public static void main(String[] args) {

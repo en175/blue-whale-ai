@@ -77,7 +77,9 @@ afterEach(async () => {
 describe('MediaNode selected toolbar', () => {
   it('hides @, generate-image and generate-video on an audio node', async () => {
     await renderNode('audio');
-    expect(labels()).toEqual(['重新编辑', '详情', '下载']);
+    // AudioPlayer 自定义播放按钮（无文字/无 title）也会被 labels() 拾取为空字符串；
+    // 工具条仍仅展示重新编辑/详情/下载，不出现 @/生成图片/生成视频。
+    expect(labels()).toEqual(['重新编辑', '详情', '下载', '']);
   });
 
   it('keeps @ and generate actions on an image node', async () => {
@@ -370,11 +372,17 @@ describe('MediaNode audio layout', () => {
   });
 
   it('keeps player controls reachable and out of the node drag path', async () => {
-    await renderNode('audio', { selected: false });
+    await renderNode('audio', { selected: false, data: { toolMode: 'select' } });
+    // 自定义 AudioPlayer 取代原生 controls：audio 元素仍在 DOM 中，
+    // 播放/暂停按钮与波形区携带 nodrag nopan 确保不落入节点拖拽路径。
     const audio = mountNode.querySelector('audio');
     expect(audio).toBeTruthy();
-    expect(audio!.getAttribute('controls')).not.toBeNull();
-    expect(audio!.className).toContain('nodrag');
+    const playBtn = mountNode.querySelector('button[aria-label="播放"], button[aria-label="暂停"]');
+    expect(playBtn).toBeTruthy();
+    expect(playBtn!.className).toContain('nodrag');
+    const waveBox = mountNode.querySelector('[class*="audioWaveBox"]');
+    expect(waveBox).toBeTruthy();
+    expect(waveBox!.className).toContain('nodrag');
   });
 
   it('keeps the square body for generating, failed and missing audio', async () => {

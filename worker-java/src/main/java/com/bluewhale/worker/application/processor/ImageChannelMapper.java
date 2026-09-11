@@ -238,6 +238,25 @@ final class ImageChannelMapper {
     }
 
     /**
+     * 从 features JSON 提取 i2i_model_name（契约 §11 / ADR-0085，IKESD6）。
+     * 读侧宽容：缺省 / 空白 / 非字符串 → null = 不分流（写侧闸门在 backend constants.ts）。
+     * snake_case 与 camelCase 两种键形同 parseMaxReferenceImages。
+     */
+    static String parseI2iModelName(String featuresJson) {
+        if (featuresJson == null || featuresJson.isBlank()) return null;
+        try {
+            Map<String, Object> features = JSON.readValue(featuresJson,
+                    new TypeReference<Map<String, Object>>() {});
+            Object v = features.get("i2iModelName");
+            if (v == null) v = features.get("i2i_model_name");
+            if (v instanceof String s && !s.isBlank()) return s.trim();
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
      * 从 supported_sizes JSON 匹配 sizeId（asset-ops.ts:111-126）。
      * @return [apiValue, width, height] 或 null
      */

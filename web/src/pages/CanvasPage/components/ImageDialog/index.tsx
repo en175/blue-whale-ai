@@ -22,8 +22,8 @@ import type { MediaGenStatus } from '../MediaNode';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import styles from './index.module.css';
 
-/** 输入框字数上限 */
-const MAX_INPUT = 1000;
+/** 输入框默认字数上限（模型目录未配 max_prompt_length 时沿用旧行为，ADR-0085） */
+const DEFAULT_MAX_INPUT = 1000;
 
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
 const MAX_VIDEOS = 3;
@@ -219,6 +219,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   /** 能力选项全部取自接口（无本地写死兜底）：模型列表未加载完时为空 */
   const modelOptions = modelList.map((m) => ({ key: m.model_id, label: m.model_label }));
   const currentGen = modelList.find((m) => m.model_id === selectedModel);
+  // ADR-0085（IKESD9）：prompt 上限跟随所选模型的目录配置，未下发回落默认
+  const maxInput = currentGen?.features?.max_prompt_length ?? DEFAULT_MAX_INPUT;
   const resolutionOptions = currentGen?.supported_sizes?.length
     ? currentGen.supported_sizes.map((s) => ({ key: s.id, label: s.label }))
     : [];
@@ -596,18 +598,18 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           placeholder={uploading ? '正在上传参考图...' : `描述你希望如何编辑这张图片。图片最多 ${maxImages} 张。`}
           value={inputValue}
           onChange={(e) => {
-            const v = e.target.value.slice(0, MAX_INPUT);
+            const v = e.target.value.slice(0, maxInput);
             setInputValue(v);
             syncDraftParams({ prompt: v });
           }}
           rows={3}
-          maxLength={MAX_INPUT}
+          maxLength={maxInput}
           disabled={uploading || readOnly}
         />
 
         {/* 字数统计 */}
-        <div className={`${styles.charCount} ${inputValue.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
-          {inputValue.length}/{MAX_INPUT}
+        <div className={`${styles.charCount} ${inputValue.length >= maxInput ? styles.charCountWarn : ''}`}>
+          {inputValue.length}/{maxInput}
         </div>
 
           {/* 底部状态栏 */}

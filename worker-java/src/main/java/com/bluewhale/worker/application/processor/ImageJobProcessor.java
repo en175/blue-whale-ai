@@ -309,11 +309,16 @@ public class ImageJobProcessor implements JobProcessor {
         }
 
         // 9. 调用 provider（generation-worker.ts:583-598 批量循环）
+        // 契约 §11 / ADR-0085（IKESD6）：行配了别名且本 job 带参考图 → 出站 model 换图生图上游名。
+        // 只换 HTTP body 的 model 字段；job.input.model_id 恒为 canonical（计费/重试/恢复不受影响）。
+        String i2iAlias = ImageChannelMapper.parseI2iModelName(cap.getFeatures());
+        String requestModel = (i2iAlias != null && !sourceImageUrls.isEmpty())
+                ? i2iAlias : cap.getModelId();
         List<GeneratedImage> allImages = new ArrayList<>();
         int remaining = n;
         for (int attempt = 0; remaining > 0 && attempt < n; attempt++) {
             List<GeneratedImage> batch = imageClient.generate(
-                    providerToken, cap.getModelId(), prompt, remaining,
+                    providerToken, requestModel, prompt, remaining,
                     finalSize, finalQuality,
                     input.get("web_search") instanceof Boolean b && b,
                     input.get("sequential_image_generation") instanceof Boolean b && b,

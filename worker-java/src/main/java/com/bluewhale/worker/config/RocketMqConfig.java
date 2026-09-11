@@ -225,6 +225,53 @@ public class RocketMqConfig {
         return RocketMqGenerationMessageProducer.create(configBuilder.build(), mqProps.topic(), tag);
     }
 
+    // ========== recovery 生产者（IKF3AT）：tag 与可消费 tag 同源（@Conditional），
+    // 未启用的 tag 不建生产者 → RecoveryService 侧 getIfAvailable()=null 直接跳过 = 灰度开关。
+
+    /** recovery 重投 image（条件：enabled-tags 含 image）。 */
+    @Bean(destroyMethod = "close")
+    @Conditional(ImageEnabledCondition.class)
+    public GenerationMessageProducer imageRecoveryProducer(Environment env) {
+        return createProducerForTag(env, "image");
+    }
+
+    /** recovery 重投 audio（条件：enabled-tags 含 audio）。 */
+    @Bean(destroyMethod = "close")
+    @Conditional(AudioEnabledCondition.class)
+    public GenerationMessageProducer audioRecoveryProducer(Environment env) {
+        return createProducerForTag(env, "audio");
+    }
+
+    /** recovery 重投 media_extract（条件：enabled-tags 含 media_extract）。 */
+    @Bean(destroyMethod = "close")
+    @Conditional(MediaExtractEnabledCondition.class)
+    public GenerationMessageProducer mediaExtractRecoveryProducer(Environment env) {
+        return createProducerForTag(env, "media_extract");
+    }
+
+    /** 按 tag 建 RocketMQ producer（校验与视频生产者同源语义）。 */
+    private GenerationMessageProducer createProducerForTag(Environment env, String tag) {
+        RocketMqProperties mqProps = Binder.get(env)
+                .bind("rocketmq", RocketMqProperties.class)
+                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+
+        if (mqProps.endpoints().isBlank()) {
+            throw new IllegalStateException(
+                    "ROCKETMQ_ENDPOINTS 未配置：recovery(" + tag + ") producer 无法启动");
+        }
+
+        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
+                .setEndpoints(mqProps.endpoints())
+                .enableSsl(mqProps.sslEnabled());
+
+        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
+            configBuilder.setCredentialProvider(
+                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
+        }
+
+        return RocketMqGenerationMessageProducer.create(configBuilder.build(), mqProps.topic(), tag);
+    }
+
     /**
      * new-api 视频客户端（条件：enabled-tags 含 step）。
      */

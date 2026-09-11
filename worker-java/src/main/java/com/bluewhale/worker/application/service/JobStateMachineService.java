@@ -50,6 +50,23 @@ public class JobStateMachineService {
     private static final Logger log = LoggerFactory.getLogger(JobStateMachineService.class);
 
     private static final int LEASE_SECONDS = 120; // 契约 §3.2：IMAGE_JOB_LEASE_SECONDS 默认 120s
+
+    /** image 专用租约（契约 §11 政策条款 2026-09-11）：读超时不重试后 HTTP 超时窗口 300s，
+     *  租约必须盖住「超时 + 结果转存」（300 + 转存/边距 ⇒ 420s），否则 recovery 把在跑的 job
+     *  当孤儿重投 = 双跑双扣。env IMAGE_JOB_LEASE_SECONDS 可覆盖
+     *  （顺带修复刀③把契约登记的 env 写死成常量的偏差）。 */
+    private static int imageLeaseSeconds() {
+        String raw = System.getenv("IMAGE_JOB_LEASE_SECONDS");
+        if (raw != null) {
+            try {
+                int n = Integer.parseInt(raw.trim());
+                if (n > 0) return n;
+            } catch (NumberFormatException ignored) {
+                // 宽容回落默认（与超时解析语义一致）
+            }
+        }
+        return 420;
+    }
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private final GenerationJobMapper jobMapper;
@@ -315,8 +332,9 @@ public class JobStateMachineService {
      * 两段式 CAS（契约 §3.1）：
      * 1. SELECT candidate WHERE id=? AND type='image' AND source IN 白名单
      *    AND is_delete=false AND next_action_at&lt;=now AND (queued OR processing+孤儿)
-     * 2. UPDATE CAS: status='processing', lease_owner=?, lease_expires_at=now+120s,
+     * 2. UPDATE CAS: status='processing', lease_owner=?, lease_expires_at=now+{image 租约},
      *    last_polled_at=now, fencing_token+1, version+1
+     *    （image 租约默认 420s，见 imageLeaseSeconds 注释；其余 tag 仍 120s）
      * <p>
      * 返回投影用增后 token（candidate.fencing_token + 1）。
      * <b>套 source 白名单</b>（与 audio 不同：claimImageJobById :339 source IN CLAIMABLE_JOB_SOURCES）。
@@ -331,8 +349,9 @@ public class JobStateMachineService {
             return Optional.empty();
         }
 
-        // 2. CAS 更新（claim-ops.ts:358-372）
-        LocalDateTime leaseExpiresAt = LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(LEASE_SECONDS);
+        // 2. CAS 更新（claim-ops.ts:358-372；租约用 image 专用值，理由见 imageLeaseSeconds 注释）
+        LocalDateTime leaseExpiresAt = LocalDateTime.now(java.time.ZoneOffset.UTC)
+                .plusSeconds(imageLeaseSeconds());
         int affected = jobMapper.claimImageCas(
                 jobIdLong,
                 workerId,

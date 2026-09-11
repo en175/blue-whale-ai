@@ -51,7 +51,7 @@
 4. 后续一切写：`WHERE ... status='processing' AND lease_owner=workerId AND fencing_token=<持有值>`（`fenceWhere`，`settle-ops:13-19`）。**guard fail 一律静默返回 false，不上抛**——stale worker 效应被吞、留给租约过期 + recovery。此语义 Java 必须复刻（不许加异常日志之外的行为）。
 
 ### 3.2 租约与心跳
-- TTL `IMAGE_JOB_LEASE_SECONDS` 默认 **120s**，全类型同值。
+- TTL `IMAGE_JOB_LEASE_SECONDS` 默认 **120s**，全类型同值（**image 例外：300s，见 §11 政策修订**）。
 - 真心跳仅 media_extract：`updateMediaExtractProgress` 写 progress(0–99) 同时续租（`media-extract-ops:26-43`）。
 - video 无心跳：`markVideoSubmitted` / `rescheduleVideoPoll` 写完即**释放租约**（lease_owner/expires 置 null）并设 `next_action_at=now+5000ms`，下轮以孤儿接管方式再 claim。轮询上限 `MAX_VIDEO_POLLS=720`（≈60 分钟）→ `ERROR_PROVIDER_TIMEOUT`。
 
@@ -91,15 +91,15 @@
 
 - 生成域 1xxx 全表以代码文件为准（`ERROR_QUOTA_EXHAUSTED`…`ERROR_OUTPUT_COUNT_MISMATCH`，1001–1037；未知回退数值 1000）。Java 侧从本契约文档生成常量表，禁止手抄新增。
 - **重试规则（决定 MQ ack/结算，双端必须一致）**：
-  - image：仅 `provider_failed` 且 `retry_count<3` → `.../requeue`（退避 30/60/120s，300s 封顶）；其余终态 fail。
+  - image：仅 `provider_failed` 且 `retry_count<3` → `.../requeue`（退避 30/60/120s，300s 封顶）；其余终态 fail。**（2026-09-11 起读超时/可疑 post-send IO 归终态、瞬态只留连接层失败，见 §11 政策修订）**
   - video：submit 阶段错误全终态；poll 阶段瞬态（`NewApiNetworkError`/`NewApiTimeoutError`/HTTP 429,500,502,503,504，但 `invalid_json_response`/`invalid_video_response` 除外）→ `.../reschedule`；`poll_count≥720` → `provider_timeout` 终态。
   - audio / media_extract：无 worker 级重试，全部终态 fail。
   - 消费者级不 ack → broker 30s 重投属**传输层**，与上表叠加，Java 客户端需保持等价（不主动 nack）。
 - 按 job 类型的错误码赋值点清单（凭据缺失/模型不可用/参考素材/无结果/catch-all）：见附录 A（本文件末，冻结自 agent 核对记录，IKEL4J 实现端点时逐条对照）。
 
-## 7. recovery / asset-GC（留 TS 进程，Java 不接管，此处仅登记行为边界）
+## 7. recovery / asset-GC（**recovery 归 Java（IKF3AT）；asset-GC 留 TS**）
 
-- recovery（60s）：`listDue*JobIds`（批 100）选 `next_action_at<=now` 且 `queued` 或 `processing 且租约过期`；video 限 4 源白名单、24h 内；重发同 body。→ **它同时是 Java worker 崩溃时的降级网**。
+- recovery（60s）：**Java `RecoveryService` 实现**（TS `recovery.service.ts:38-106` 逐字移植；`@Scheduled` + 启动即扫一次）。`listDue*JobIds`（批 100）选 `next_action_at<=now` 且（`queued` ∨ `processing 且租约空/过期`）；source 白名单：video=4 源、image=CLAIMABLE_JOB_SOURCES、audio/media_extract 不套白名单；重发同 body 延迟 1s。**窗口：创建 2 小时内**（用户 2026-09-11 指示，TS 的 24h 改 2h；env `RECOVERY_MAX_AGE_MINUTES` 可覆盖，默认 120）。**开关**：只对 `WORKER_ENABLED_TAGS` 内 tag 重投（生产者 bean 带 @Conditional，缺失即跳过）；TS 侧 recovery 同时在跑时重复投递无害（claim-by-id CAS + null-claim ack 幂等）。**不移植** `resetStalledImageJobs`——TS 侧无活调用方（死代码），孤儿由 claim-by-id 的「processing + 租约过期可接管」语义接走。→ **TS 进程退役不再阻塞**。
 - asset-GC（1h）：`is_delete AND deleted_at<cutoff`（批 1000，延迟默认 7 天）→ live-ref 反查（`storage_key IN(...) AND is_delete=false`）→ 差集 `deleteMultiObjects`（404 视为幂等成功；partial Error 抛出）→ `deleteMany` → `operation_logs` 审计。
 
 ## 8. 资产 / TOS / 媒体处理等价标准
@@ -160,3 +160,21 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 - **DATETIME 时基 = UTC naive**：Prisma/TS 写入均为 UTC 挂钟值；Java 侧一切写库时刻必须 `LocalDateTime.now(ZoneOffset.UTC)`。教训：用本地钟写 `next_action_at`/`lease_expires_at` 会让 requeue 单在服务端 `NOW()`（UTC）视角躲进未来 8 小时、claim 永不可见（1808 实锤）。金标镜像断言的时间窗基准同 UTC。
 - **invisible 窗与慢 handler**：`receive(10, 30s)` 下 handler 超 30s（如带参考图的 image 编辑）必然引发 broker 重投；重复投递由「lease 未过期 + fencing」在 claim 处静默拦截（1809 实锤：两次 handle、一次 CAS 生效、零重复副作用）。消费端 `ack 失败` WARN 属预期噪音，不作为故障告警。
 - **edits 参考图必须传字节**（`new-api-generation-ops.ts` 语义），传 URL 字符串网关 400；key 前缀 `uploads/{userId}/image/...` 的 userId 取自 job.user_id，禁止 0 兜底。
+
+## 11. 冻结增量（2026-09-10，IKESD6）：`features.i2i_model_name` 别名分流 + `features.max_prompt_length`
+
+冻结文档的**追加契约**，双端同步评审通过前 Java 侧照此实现（见 [ADR-0085](../adr/0085-catalog-input-modality-model-alias-and-per-model-prompt-length.md)）：
+
+- `generation_model_capability.features` 新增两键（通用机制，任何 image 行可配，无开关）：
+  - `i2i_model_name`（string，可选）：**上游模型名**（非行 id）。**分流由 Java image 链（刀③）在出站请求处实现**（IKESD6 拍板：Node worker 退役中，新功能不落旧版）：该行配了别名 **且** 本 job 带参考图（`input_asset_ids` 解析出的参考素材非空）→ HTTP body 的 `model` 用别名，否则用 `model_id`。未配别名的行行为与 §5 现状完全一致。**灰度含义**：image tag 仍在 TS 侧消费期间，别名不参与分流；切 Java 消费后自动生效。
+  - `max_prompt_length`（正整数，可选）：仅影响 **backend 创建时校验**（raw prompt 上限，缺省 image/video=4000、audio=3000；组合上限改为 `max(30000, 模型值)`）。**worker / Java 侧不消费**（worker 现状即不复校长度，见 §2 权威面），登记于此仅为表列语义完整。
+- **canonical 语义（Java 必须逐字复刻）**：别名 swap 只发生在出站 HTTP body 的 `model` 字段；`generation_jobs.input.model_id` 恒为**目录主行 model_id**（白名单、重试沿用 frozen input、恢复重投、计费对账、日志全部不受影响）。禁止在创建时把别名写进 frozen input。
+- **读取时效**：别名每次执行按 `model_id` 现查能力行（对齐刀③ claim 后查能力的既有模式）；**Java 侧禁止进程级缓存 features**，否则管理端改别名后灰度两侧行为分叉。
+- **消费端目录投影**：`/api/generation/models` 对前端**剥除** `i2i_model_name`（出站调用值，与像素/api_value 同哲学），仅透出 `max_prompt_length`。
+- 数据面变更（同一 migration）：`gpt-image-2-edit` / `nano-banana-2-i2i` 行软删（is_delete=1），其上游名改由主行 `features.i2i_model_name` 承载；uk_provider_model 含软删行，软删名永久不可复用（`create` 冲突语义不变）。
+
+**政策修订（2026-09-11，IKF12J 讨论，用户拍板）——image 超时与重试语义**：
+
+- **读超时与可疑 post-send IO 不重试**：请求已到达上游、可能已出图扣费，重试=双扣风险 → image HTTP 读超时、以及连接重置/流中断/SSL 中途失败等（无法证明 POST 未送达）一律归 `provider_timeout` **终态**（覆盖 §6「image 仅 provider_failed 瞬态」的入口来源：TS 旧链路把超时混进 provider_failed 一并重试，属其隐患，Node 退役中不回改）。**瞬态重试仅保留请求未达上游的连接层失败**（连接拒绝/连接超时/DNS → provider_failed）。
+- **拉大窗口消化慢上游**：`NEW_API_IMAGE_TIMEOUT_MS` 缺省 60s（刀③写死）→ **300s**（用户 2026-09-11 二次上调：240s 实测仍不够，本地 job 1822 在 240s 整超时）；image claim 租约必须盖住「超时+转存」→ 缺省 120s → **420s**，改读 `IMAGE_JOB_LEASE_SECONDS` env（顺带修复刀③把本节登记的 env 写死成常量——§3.2 的 120s 缺省仅约束非 image tag）。recovery 侧按 `lease_expires_at` 列判定，自动跟随，无需改 TS 代码。
+- 端点选择回归修正（同单）：恒 `/v1/images/generations` + JSON `image` 字段（单张=字符串、多张=数组）；jiekouAI 渠道设计上拒绝 edits（blue-whale-api `highwayapi/adaptor.go:44,113`），任何 edits 分支即回归（钉桩 `NewApiImageClientEndpointTest`）。
