@@ -87,7 +87,7 @@ public class NewApiImageClient {
      * </ul>
      *
      * @param token         per-job Bearer 凭证
-     * @param model         模型 ID（capability.model_id，可能经渠道映射）
+     * @param model         模型 ID（capability.model_id，可能经渠道映射或契约 §11 别名分流）
      * @param prompt        提示词
      * @param n             生成数量（1-4）
      * @param size          尺寸（provider 级别，经渠道映射后）

@@ -14,5 +14,5 @@
 
 - 被合并的图生图行（id 37 `gpt-image-2-edit`、id 34 `nano-banana-2-i2i`）**软删**；`uk_provider_model` 唯一键含软删行，这两个上游名永久不可再建同名列。旧主行 `gpt-image-2` / `gpt-image-2-light`（停用未删）占着干净名，故合并主行沿用 `gpt-image-2-text-to-image` 现名，model_id 与展示语义不再望文生义——label 才是用户看到的。
 - 测试站画布各有 1 个节点引用被软删的 edit 名，重跑会报「model_id 不在白名单」需重选模型（已确认接受；不改写用户画布 JSON）。
-- worker-java 迁移为同一张表同一 MQ（停一开一），别名分流语义已作为**冻结增量**写入 [IKEL4A 迁移契约](../specs/2026-09-10-ikel4a-worker-java-migration-contract.md)的 IKESD6 增补节（编号以该文档内 `IKESD6` 节为准），Java 侧必须逐字复刻 canonical 语义；TS worker 退役中不再实现分流。
+- worker-java 迁移为同一张表同一 MQ（停一开一），别名分流语义已作为**冻结增量**写入 [IKEL4A 迁移契约 §11](../specs/2026-09-10-ikel4a-worker-java-migration-contract.md)，Java 侧（刀③ image 链）必须逐字复刻 canonical 语义；TS worker 退役中不再实现分流。
 - 测试站目录数据自本次起以仓库 migration/seed 为准回写，消除「线上行只活在测试站」的漂移。
