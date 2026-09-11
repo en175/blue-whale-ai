@@ -1,3 +1,6 @@
+import { freezePromptPlans } from "./prompt-plan-snapshot.js";
+import type { CanvasEdge } from "@blue-whale/contracts";
+import type { PromptTargetNode } from "../canvas/prompt-target.js";
 import { createHash } from "node:crypto";
 
 import {
@@ -634,6 +637,7 @@ function resolveReferenceAssets(
 }
 
 interface TargetSnapshot {
+  canvas?: { nodes: PromptTargetNode[]; edges: CanvasEdge[]; version: number };
   targetNodeId: string | null;
   textAttachments: TextAttachmentSnapshot[];
 }
@@ -658,6 +662,7 @@ async function resolveTargetSnapshot(args: {
       ? body.target_node_id
       : null;
   let textAttachments: TextAttachmentSnapshot[] = [];
+  let canvasSnapshot: TargetSnapshot["canvas"];
   if (targetNodeId !== null) {
     const canvas = await deps.canvas.getByProject(projectId);
     const nodes = JSON.parse(canvas.nodes ?? "[]") as Array<{
@@ -665,6 +670,7 @@ async function resolveTargetSnapshot(args: {
       type?: unknown;
       data?: Record<string, unknown>;
     }>;
+    canvasSnapshot = { nodes: nodes as PromptTargetNode[], edges: JSON.parse(canvas.edges ?? "[]"), version: canvas.version! };
     const target = nodes.find((node) => node.id === targetNodeId);
     const typeLabel =
       type === "video" ? "视频" : type === "audio" ? "音频" : "图片";
@@ -737,7 +743,7 @@ async function resolveTargetSnapshot(args: {
       };
     }
   }
-  return { ok: true, value: { targetNodeId, textAttachments } };
+  return { ok: true, value: { targetNodeId, textAttachments, ...(canvasSnapshot ? { canvas: canvasSnapshot } : {}) } };
 }
 
 interface GenerationDeps {
@@ -870,6 +876,26 @@ export async function handleCreateGenerationJob(
       }
     }
   }
+  // 5. 画布目标快照（仅携带 target_node_id 时读画布）
+  const target = await resolveTargetSnapshot({
+    type,
+    body,
+    promptText,
+    projectId,
+    deps,
+    maxPromptLength,
+  });
+  if (!target.ok) {
+    return fail(400, target.value.message, { code: target.value.code });
+  }
+
+  const parsedPlanRefs = parseReferences(body.references);
+  const planRefs = parsedPlanRefs.kind === "ok" ? parsedPlanRefs.items : [];
+  const planSnapshot = (type === "image" || type === "video") && target.value.canvas && target.value.targetNodeId
+    ? await freezePromptPlans({ ...target.value.canvas, targetId: target.value.targetNodeId,
+        type, references: planRefs,
+        inputIds: type === "video" ? planRefs.flatMap(r => r.asset_id ? [r.asset_id] : []) : assetIds(body.input_asset_ids), prompt: promptText, attachments: target.value.textAttachments,
+        model: capability, userId, projectId, assets: deps.assets }) : undefined;
   const refs = resolveReferenceAssets(body, type, maxReferenceImages);
   if (!refs.ok) {
     return fail(400, refs.value.message, {
@@ -898,18 +924,6 @@ export async function handleCreateGenerationJob(
       });
     }
   }
-  // 5. 画布目标快照（仅携带 target_node_id 时读画布）
-  const target = await resolveTargetSnapshot({
-    type,
-    body,
-    promptText,
-    projectId,
-    deps,
-    maxPromptLength,
-  });
-  if (!target.ok) {
-    return fail(400, target.value.message, { code: target.value.code });
-  }
 
   // 6. 组装 job.input（策略按类型分派）
   const input = strategy.composeInput({
@@ -927,6 +941,7 @@ export async function handleCreateGenerationJob(
     input.provider_credential = internal.providerCredential;
   }
   input.expected_output_count = expectedOutputCount;
+  if (planSnapshot) input.prompt_plan_snapshot = planSnapshot;
 
   // 7. 幂等派生 actionIdentity + 事件类型
   const actionSeed = `${projectId}\0${idempotencyKey ?? ""}\0${Date.now()}`;

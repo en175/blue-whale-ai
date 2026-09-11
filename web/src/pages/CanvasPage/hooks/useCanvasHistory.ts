@@ -57,11 +57,13 @@ const slotOfNodeType = (type: string | undefined): NodeSlot => {
 type HistoryEntry =
   | { kind: 'move'; oldPositions: PositionRecord[]; newPositions: PositionRecord[] }
   /** 删除：undo = 节点连同悬空边塞回；redo = 再次删除。成员删除可能解散组，携带组状态快照 */
-  | { kind: 'delete'; nodes: Node[]; edges: Edge[]; groupsBefore?: CanvasGroup[]; groupsAfter?: CanvasGroup[] }
+  | { kind: 'delete'; nodes: Node[]; edges: Edge[]; edgeState?: { before: Edge[]; after: Edge[] }; groupsBefore?: CanvasGroup[]; groupsAfter?: CanvasGroup[] }
   /** 复制等新增：undo = 移除新节点；redo = 塞回（undo 时快照节点） */
   | { kind: 'addNodes'; ids: string[]; nodes: Node[] | null }
   /** 建立连线：undo = 删边；redo = 加边 */
   | { kind: 'addEdges'; edges: Edge[] }
+  /** 方案引用原子回放新增边及共享边来源，保持连线顺序。 */
+  | { kind: 'replaceEdges'; before: Edge[]; after: Edge[] }
   /** 删边：undo = 加回；redo = 再删 */
   | { kind: 'removeEdges'; edges: Edge[] }
   /** 成组：undo/redo 均恢复组状态快照（重组会把成员从其他组迁出，需整体回放） */
@@ -160,6 +162,10 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
   /** 撤销一条记录（就地改写 entry 补充 redo 所需的逆向数据） */
   const undoEntry = (entry: HistoryEntry): HistoryEntry => {
     switch (entry.kind) {
+      case 'replaceEdges': {
+        handlesRef.current.setEdges(() => entry.before);
+        return entry;
+      }
       case 'move': {
         entry.newPositions = collectPositions(new Set(entry.oldPositions.map((p) => p.id)));
         applyPositions(entry.oldPositions);
@@ -167,7 +173,8 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
       }
       case 'delete': {
         readdNodes(entry.nodes);
-        readdEdges(entry.edges);
+        if (entry.edgeState) handlesRef.current.setEdges(() => entry.edgeState!.before);
+        else readdEdges(entry.edges);
         if (entry.groupsBefore) handlesRef.current.setGroups(() => entry.groupsBefore!);
         return entry;
       }
@@ -223,12 +230,16 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
   /** 重做一条记录 */
   const redoEntry = (entry: HistoryEntry) => {
     switch (entry.kind) {
+      case 'replaceEdges':
+        handlesRef.current.setEdges(() => entry.after);
+        return;
       case 'move':
         applyPositions(entry.newPositions);
         return;
       case 'delete':
         removeNodeIds(entry.nodes.map((n) => n.id));
-        removeEdges(entry.edges);
+        if (entry.edgeState) handlesRef.current.setEdges(() => entry.edgeState!.after);
+        else removeEdges(entry.edges);
         if (entry.groupsAfter) handlesRef.current.setGroups(() => entry.groupsAfter!);
         return;
       case 'addNodes':
@@ -301,12 +312,14 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
       nodes: Node[],
       edges: Edge[],
       groups?: { before: CanvasGroup[]; after: CanvasGroup[] },
+      edgeState?: { before: Edge[]; after: Edge[] },
     ) => {
       if (nodes.length === 0 && edges.length === 0) return;
       push({
         kind: 'delete',
         nodes,
         edges,
+        edgeState,
         ...(groups ? { groupsBefore: groups.before, groupsAfter: groups.after } : {}),
       });
     },
@@ -377,6 +390,9 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     pushMove,
     pushDelete,
     pushAddNodes,
+    pushReplaceEdges: (before: Edge[], after: Edge[]) => {
+      if (JSON.stringify(before) !== JSON.stringify(after)) push({ kind: 'replaceEdges', before, after });
+    },
     pushAddEdges,
     pushRemoveEdges,
     pushCreateGroup,

@@ -26,6 +26,7 @@ import {
   ERROR_UNSUPPORTED_INPUT,
   ERROR_UNSUPPORTED_TYPE,
   textAttachmentSnapshotSchema,
+  promptPlanSnapshotSchema,
 } from "@blue-whale/contracts";
 import {
   mapImageChannelRequest,
@@ -290,6 +291,12 @@ async function processClaimedJob(
   }
 
   const input = (job.input ?? {}) as GenerationJobInput;
+  const parsedPlan = promptPlanSnapshotSchema.safeParse(input.prompt_plan_snapshot);
+  if (input.prompt_plan_snapshot !== undefined && !parsedPlan.success) {
+    await failClaimed(ERROR_INVALID_INPUT, "方案输入快照无效");
+    return job.id;
+  }
+  const planSnapshot = parsedPlan.success ? parsedPlan.data : undefined;
   const prompt = typeof input.prompt === "string" ? input.prompt : "";
   const modelId = typeof input.model_id === "string" ? input.model_id : "";
   // IKDLQF：图片任务允许空 prompt 仅凭非空白附件正文驱动（契约「接纳快照」）；
@@ -351,8 +358,13 @@ async function processClaimedJob(
     );
     return job.id;
   }
-  const sourceAssets =
-    referenceIds.length > 0
+  if (planSnapshot && JSON.stringify(planSnapshot.images.map(image => image.assetId)) !== JSON.stringify(referenceIds)) {
+    await failClaimed(ERROR_INVALID_REFERENCE, "方案素材快照与输入不一致");
+    return job.id;
+  }
+  const sourceAssets = planSnapshot
+    ? planSnapshot.images.map(image => ({ id: image.assetId, type: "image", url: image.url, mime: null, size: null, width: null, height: null, duration: null, material_id: null }))
+    : referenceIds.length > 0
       ? await repo.resolveInputAssets(referenceIds, job.user_id, job.project_id)
       : [];
   if (
@@ -564,10 +576,10 @@ async function processClaimedJob(
       model: cap.model_id,
       // IKDLQF：有文本附件时按契约组合（附件正文按序在前、忽略纯空白、非空 prompt 最后追加）；
       // 无附件时沿用原 prompt，与旧链路逐字节一致。
-      prompt:
+      prompt: planSnapshot?.providerPrompt ?? (
         textAttachments.length > 0
           ? composeImagePrompt(textAttachments, prompt)
-          : prompt,
+          : prompt),
       size: providerSize,
       ...(providerQuality ? { quality: providerQuality } : {}),
       webSearch: input.web_search === true,

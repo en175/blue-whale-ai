@@ -1,3 +1,4 @@
+import PromptSyncActions from '../PromptSyncActions';
 /* ============================================
  * BottomDialog 视频对话窗口：模型/时长/宽高比配置与发送
  * 统一草稿绑定模式：参考由「画布连线 + 草稿 material refs」合并推导（首帧/尾帧/普通参考）。
@@ -10,6 +11,7 @@ import {
   X,
   Image,
   Video,
+  AudioLines,
   SlidersHorizontal,
   ArrowUp,
   MousePointerClick,
@@ -85,6 +87,12 @@ interface BottomDialogProps {
   initialParams?: VideoGenSeedParams;
   /** 连线文本附件（IKDLQG）：草稿绑定模式由父级按连线实时推导传入 */
   attachments?: ImageTextAttachment[];
+  onRemovePlan?: (nodeId: string) => void;
+  planReferenceError?: string;
+  pendingPlanSyncs?: Array<{ nodeId: string; title: string }>;
+  onSyncPlan?: (nodeId: string) => void;
+  syncingPlan?: boolean;
+  planIndices?: string;
   /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；仅多附件时展示控件，缺省不渲染排序入口 */
   onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 到节点选择：进入画布节点选取模式（image 图片节点 / video 视频节点）；
@@ -145,8 +153,9 @@ const ROLE_LABELS: Record<VideoRefRole, string> = {
 
 /** 连线文本附件项（IKDLQG）：标题 + 正文预览，长文默认折叠可展开；与 ImageDialog 附件项同构，
  *  多附件且父级提供重排回调时展示上移/下移（IKDLQH） */
-function AttachmentItem({ attachment, move }: {
+function AttachmentItem({ attachment, move, onRemove }: {
   attachment: ImageTextAttachment;
+  onRemove?: () => void;
   move?: { isFirst: boolean; isLast: boolean; onMove: (delta: -1 | 1) => void };
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -155,6 +164,7 @@ function AttachmentItem({ attachment, move }: {
     <div className={styles.attachmentItem}>
       <div className={styles.attachmentHead}>
         <span className={styles.attachmentTitle}>{attachment.title}</span>
+        {onRemove && <button type="button" className={styles.attachmentMove} aria-label={`移除方案 ${attachment.title}`} title="移除方案" onClick={onRemove}><X size={12} /></button>}
         {move && (
           <span className={styles.attachmentMoves}>
             <button
@@ -231,7 +241,7 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMate
   };
   return (
     <div className={styles.mediaThumb} title={item.name} data-testid="dock-video-ref">
-      {item.mediaType === 'video'
+      {item.mediaType === 'audio' ? <AudioLines size={24} aria-label={item.name} /> : item.mediaType === 'video'
         ? <video src={item.url} className={styles.mediaThumbImg} muted />
         : <img src={item.url} alt={item.name} className={styles.mediaThumbImg} />}
       {/* 角色徽标：仅首帧/尾帧保留；普通参考不在图片上保留标签 */}
@@ -267,7 +277,7 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMate
   );
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast }: BottomDialogProps) {
   /** 富文本输入框（自由文本；胶囊机制保留给后续引用场景，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框内容的结构化形态（IKAFSX）：胶囊是指针，解引用只发生在发送那一刻。 */
@@ -344,11 +354,22 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
       }
     : null;
   /** 组合校验（IKDMQS）：与服务端 400 同口径 + 能力位；冲突时明确提示并禁用发送 */
-  const conflict = caps
-    ? videoRefConflict(videoMediaRefs, caps)
-      ?? (!supportsVideoReferenceModel(selectedModel) && videoMediaRefs.reference.some(ref => ref.mediaType === 'video')
-        ? '当前模型不支持视频参考，请更换模型或移除视频参考' : null)
-    : null;
+  const referenceConflict = planReferenceError ?? (caps
+    ? (videoMediaRefs.reference.filter(r => r.mediaType === 'image').length > (currentModel?.features.max_reference_images ?? 0)
+        ? '图片参考超出当前模型上限，请调整引用或模型' : videoMediaRefs.reference.filter(r => r.mediaType === 'audio').length > 3
+        ? '最多支持 3 个参考音频' : videoMediaRefs.reference.filter(r => r.mediaType === 'video').length > MAX_VIDEO_REFS
+        ? '最多支持 3 个参考视频' : videoRefConflict(videoMediaRefs, caps))
+      ?? (!supportsVideoReferenceModel(selectedModel) && videoMediaRefs.reference.some(ref => ref.mediaType !== 'image')
+        ? '当前模型不支持视频或音频参考，请更换模型或调整引用' : null)
+    : null);
+  const modeConflict = selectedMode === 'keyframe' && videoMediaRefs.reference.length > 0
+    ? '首尾帧模式不支持普通参考，请调整模式或引用'
+    : selectedMode === 'text2video' && videoMediaRefs.reference.some(r => r.mediaType !== 'image')
+      ? '图生视频模式不支持视频或音频参考'
+      : selectedMode !== 'keyframe' && (videoMediaRefs.first || videoMediaRefs.last)
+        ? '当前模式不支持首尾帧，请调整模式或引用' : null;
+  const inputConflict = referenceConflict ?? modeConflict;
+  const conflict = inputConflict && planIndices ? `方案索引 ${planIndices}：${inputConflict}` : inputConflict;
   const canAddFirst = !!(caps && canAddRefRole('first', videoMediaRefs, caps));
   /** 尾帧占位：首尾帧模式下与首帧并排常显（未填即显示），不依赖模型能力位与是否已有首帧——
    *  模型是否支持尾帧 / 首尾帧组合由 conflict（videoRefConflict）在发送时兜底提示，避免占位缺失导致无法上传尾帧。 */
@@ -361,7 +382,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
   const isKeyframe = selectedMode === 'keyframe';
   const isText2Video = selectedMode === 'text2video';
   /** 已连入的视频参考数（切换到首尾帧/图生视频时不兼容，需先移除） */
-  const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType === 'video').length;
+  const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image').length;
 
   /** 切换模式：目标模式与现有参考冲突时明确提示并阻止切换（保证「可见槽 = 实际参考」），否则写回草稿 */
   const handleModeChange = (key: string) => {
@@ -380,7 +401,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
         return;
       }
       if (key === 'text2video' && videoRefCount > 0) {
-        onToast?.('warn', '图生视频模式不支持视频参考，请先移除视频参考');
+        onToast?.('warn', '图生视频模式不支持视频或音频参考，请先调整引用');
         return;
       }
     }
@@ -841,6 +862,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
             <AttachmentItem
               key={a.nodeId}
               attachment={a}
+              onRemove={!readOnly && !syncingPlan && a.isPromptPlan && onRemovePlan ? () => onRemovePlan(a.nodeId) : undefined}
               move={
                 !readOnly && onReorderAttachments && attachments.length > 1
                   ? {
@@ -855,6 +877,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
         </div>
       )}
 
+      <PromptSyncActions plans={pendingPlanSyncs} disabled={readOnly || syncingPlan} onSync={onSyncPlan} />
       {configurationError && <div className={styles.refConflictHint} role="alert">{configurationError}</div>}
 
       {/* 输入框：胶囊跟文字同一行 */}

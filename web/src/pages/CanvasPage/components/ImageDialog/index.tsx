@@ -1,3 +1,4 @@
+import PromptSyncActions from '../PromptSyncActions';
 /* ============================================
  * ImageDialog 图片对话窗口：参考图上传/模型/清晰度/比例配置
  * ============================================ */
@@ -43,6 +44,7 @@ export interface UploadedFile {
 export interface ImageTextAttachment {
   /** 来源文本节点 id */
   nodeId: string;
+  isPromptPlan?: boolean;
   /** 来源节点标题 */
   title: string;
   /** 当次正文 */
@@ -64,6 +66,7 @@ interface ImageDialogProps {
   initialParams?: ImageGenSeedParams;
   /** 连线文本附件（IKDLQF）：仅图片媒体节点面板发起时携带，打开当下快照，只读展示 */
   attachments?: ImageTextAttachment[];
+  onRemovePlan?: (nodeId: string) => void;
   /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；仅多附件时展示控件，缺省不渲染排序入口 */
   onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 到节点选择：进入画布图片节点选取模式 */
@@ -89,6 +92,10 @@ interface ImageDialogProps {
   /** 连线图片参考（IKDMQR）：草稿绑定时由父级按连线实时推导传入，面板据此渲染参考区；
    *  传入了 mediaRefs 即为连线绑定模式，面板本地 files 不再参与展示与提交 */
   mediaRefs?: ImageMediaRef[];
+  planReferenceError?: string;
+  pendingPlanSyncs?: Array<{ nodeId: string; title: string }>;
+  onSyncPlan?: (nodeId: string) => void;
+  syncingPlan?: boolean;
   invalidMediaRefs?: Array<{ nodeId: string; name: string }>;
   /** 移除某个图片参考（IKDMQR）：携带来源节点 id，父级断开对应连线 */
   onRemoveMediaRef?: (sourceNodeId: string) => void;
@@ -114,8 +121,9 @@ function RatioIcon({ ratio }: { ratio: string }) {
 }
 
 /** 连线文本附件项：标题 + 正文预览，长文默认折叠可展开；多附件且父级提供重排回调时展示上移/下移（IKDLQH） */
-function AttachmentItem({ attachment, move }: {
+function AttachmentItem({ attachment, move, onRemove }: {
   attachment: ImageTextAttachment;
+  onRemove?: () => void;
   move?: { isFirst: boolean; isLast: boolean; onMove: (delta: -1 | 1) => void };
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -124,6 +132,7 @@ function AttachmentItem({ attachment, move }: {
     <div className={styles.attachmentItem}>
       <div className={styles.attachmentHead}>
         <span className={styles.attachmentTitle}>{attachment.title}</span>
+        {onRemove && <button type="button" className={styles.attachmentMove} aria-label={`移除方案 ${attachment.title}`} title="移除方案" onClick={onRemove}><X size={12} /></button>}
         {move && (
           <span className={styles.attachmentMoves}>
             <button
@@ -165,7 +174,7 @@ function AttachmentItem({ attachment, move }: {
   );
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast, draftBinding, mediaRefs, invalidMediaRefs, onRemoveMediaRef }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -239,7 +248,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
   /** 生成中只读（IKDMQQ）：任务执行期间目标参数冻结，保留查看与画布上的取消入口 */
   const readOnly = uploading || draftBinding?.submitting === true || draftBinding?.status === 'generating';
-  const configurationError = !modelsLoaded ? '正在加载模型配置'
+  const configurationError = planReferenceError ? planReferenceError
+    : !modelsLoaded ? '正在加载模型配置'
     : !currentGen ? '原生成模型已不可用，请重新选择模型'
     : selectedResolution && !resolutionOptions.some(option => option.key === selectedResolution)
       ? '原分辨率已不可用，请重新选择分辨率'
@@ -565,6 +575,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
               <AttachmentItem
                 key={a.nodeId}
                 attachment={a}
+                onRemove={!readOnly && !syncingPlan && a.isPromptPlan && onRemovePlan ? () => onRemovePlan(a.nodeId) : undefined}
                 move={
                   // 生成中只读（IKDMQQ）：排序同属输入编辑，一并禁用
                   !readOnly && onReorderAttachments && attachments.length > 1
@@ -588,6 +599,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         )}
 
         {/* 输入框 */}
+      <PromptSyncActions plans={pendingPlanSyncs} disabled={readOnly || syncingPlan} onSync={onSyncPlan} />
         {configurationError && <div role="alert">{configurationError}</div>}
         {invalidMediaRefs?.map(ref => <div key={ref.nodeId}>
           {ref.name}（不可用）
