@@ -55,22 +55,12 @@ afterEach(async () => {
 });
 
 describe('CharacterLibrary', () => {
-  it('loads assets only after opening a group', async () => {
+  // 5ec28c5d「虚拟人像库去分组」：不再有分组卡可点，组件渲染后自动选中首个分组
+  // 并加载其资产（原「点开分组才加载」的前提已废，用例改为钉新行为）。
+  it('loads assets for the auto-selected group without opening a group card', async () => {
     await renderLibrary();
 
     expect(listAssetGroups).toHaveBeenCalledTimes(1);
-    expect(listAssets).not.toHaveBeenCalled();
-
-    const groupCard = [...mountNode.querySelectorAll('span')]
-      .find((element) => element.textContent === '虚拟人像')
-      ?.closest(`.${styles.groupCard}`) as HTMLDivElement | null;
-    expect(groupCard).not.toBeNull();
-
-    await act(async () => {
-      groupCard?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
     expect(listAssets).toHaveBeenCalledWith({
       Filter: { GroupIds: ['group-1'], GroupType: 'AIGC' },
       PageNumber: 1,
