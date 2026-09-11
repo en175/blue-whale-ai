@@ -312,7 +312,7 @@ async function pickRefNode(slotTitle: string, nodeId: string) {
   await act(async () => {
     [...container.querySelectorAll('button')].find((b) => b.textContent === '到节点选择')!.click();
   });
-  await clickNode({ id: nodeId, type: 'mediaNode' });
+  await clickNode(flowProps.current.mediaNodes.find((n: Node) => n.id === nodeId)!);
 }
 
 /** 视频草稿节点集合（画布 state 中的实时形态） */
@@ -433,7 +433,7 @@ describe('IKDMQS 视频参考连线与显式角色', () => {
 });
 
 describe('IKDMQS 提交推导与组合约束', () => {
-  it('仅普通参考连线：提交 reference_asset_ids + target_node_id，先落盘后建任务', async () => {
+  it('仅普通参考连线：提交 references + target_node_id，先落盘后建任务', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await connect('m1', 'd1');
@@ -448,7 +448,7 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(projectId).toBe('p1');
     expect(payload.type).toBe('video');
     expect(payload.target_node_id).toBe('d1');
-    expect(payload.reference_asset_ids).toEqual(['a1']);
+    expect(payload.references).toEqual([{ asset_id: 'a1', type: 'image', role: 'reference' }]);
     expect(payload.first_frame_asset_id).toBeUndefined();
     // 原位承接 + 首次结果回填同一张卡（fetchJobStatus mock 秒回 succeeded）：
     // 节点数量与身份不变，草稿标记清除、结果 src/assetId 写入同节点
@@ -463,7 +463,7 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(flowProps.current.mediaNodes).toHaveLength(4);
   });
 
-  it('首帧+尾帧连线：提交 first/last_frame_asset_id，不携带 reference_asset_ids', async () => {
+  it('首尾帧选取暂存，发送时落线并提交带角色的 references', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
@@ -471,18 +471,20 @@ describe('IKDMQS 提交推导与组合约束', () => {
     // 经 Dock 首帧/尾帧入口显式指定（不按连入顺序猜测）
     await pickRefNode('添加首帧（从资产中选择 / 到节点选择 / 角色库）', 'm1');
     await pickRefNode('添加尾帧（从资产中选择 / 到节点选择 / 角色库）', 'm2');
-    await vi.waitFor(() => {
-      const roles = flowProps.current.edges.map((e: { data?: { refRole?: string } }) => e.data?.refRole);
-      expect(roles).toEqual(expect.arrayContaining(['first', 'last']));
-    });
+    expect(flowProps.current.edges).toHaveLength(0);
+    expect(container.querySelectorAll('[data-testid="dock-video-ref"]')).toHaveLength(2);
     await typePrompt('首尾帧驱动');
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
     expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1);
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
-    expect(payload.first_frame_asset_id).toBe('a1');
-    expect(payload.last_frame_asset_id).toBe('a2');
+    expect(payload.references).toEqual([
+      { asset_id: 'a1', type: 'image', role: 'first_frame' },
+      { asset_id: 'a2', type: 'image', role: 'last_frame' },
+    ]);
+    expect(flowProps.current.edges.map((e: { data?: { refRole?: string } }) => e.data?.refRole))
+      .toEqual(expect.arrayContaining(['first', 'last']));
     expect(payload.reference_asset_ids).toBeUndefined();
     expect(payload.target_node_id).toBe('d1');
   });

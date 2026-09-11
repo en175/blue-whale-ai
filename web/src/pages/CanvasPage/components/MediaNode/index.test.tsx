@@ -8,8 +8,10 @@ import MediaNode, { type MediaGenStatus } from './index';
 let root: Root;
 let mountNode: HTMLDivElement;
 
-function labels() {
-  return [...mountNode.querySelectorAll('button')].map((button) => button.textContent?.trim() || button.getAttribute('title') || '');
+function labels(toolbarOnly = false) {
+  return [...mountNode.querySelectorAll('button')]
+    .filter((button) => !toolbarOnly || !button.closest('[data-testid="media-content"]'))
+    .map((button) => button.textContent?.trim() || button.getAttribute('title') || '');
 }
 
 interface RenderExtra {
@@ -72,14 +74,13 @@ beforeEach(() => {
 afterEach(async () => {
   if (root) await act(async () => root.unmount());
   mountNode?.remove();
+  vi.restoreAllMocks();
 });
 
 describe('MediaNode selected toolbar', () => {
   it('hides @, generate-image and generate-video on an audio node', async () => {
     await renderNode('audio');
-    // AudioPlayer 自定义播放按钮（无文字/无 title）也会被 labels() 拾取为空字符串；
-    // 工具条仍仅展示重新编辑/详情/下载，不出现 @/生成图片/生成视频。
-    expect(labels()).toEqual(['重新编辑', '详情', '下载', '']);
+    expect(labels(true)).toEqual(['重新编辑', '详情', '下载']);
   });
 
   it('keeps @ and generate actions on an image node', async () => {
@@ -377,12 +378,36 @@ describe('MediaNode audio layout', () => {
     // 播放/暂停按钮与波形区携带 nodrag nopan 确保不落入节点拖拽路径。
     const audio = mountNode.querySelector('audio');
     expect(audio).toBeTruthy();
-    const playBtn = mountNode.querySelector('button[aria-label="播放"], button[aria-label="暂停"]');
-    expect(playBtn).toBeTruthy();
-    expect(playBtn!.className).toContain('nodrag');
-    const waveBox = mountNode.querySelector('[class*="audioWaveBox"]');
-    expect(waveBox).toBeTruthy();
-    expect(waveBox!.className).toContain('nodrag');
+    const playButton = contentCard().querySelector<HTMLButtonElement>('button[aria-label="播放"]')!;
+    expect(playButton).toBeTruthy();
+    expect(playButton.classList.contains('nodrag')).toBe(true);
+    expect(playButton.classList.contains('nopan')).toBe(true);
+    const play = vi.spyOn(audio!, 'play').mockImplementation(async () => {
+      Object.defineProperty(audio, 'paused', { configurable: true, value: false });
+      audio!.dispatchEvent(new Event('play'));
+    });
+    const pause = vi.spyOn(audio!, 'pause').mockImplementation(() => {
+      Object.defineProperty(audio, 'paused', { configurable: true, value: true });
+      audio!.dispatchEvent(new Event('pause'));
+    });
+    await act(async () => { playButton.click(); });
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(playButton.getAttribute('aria-label')).toBe('暂停');
+    await act(async () => { playButton.click(); });
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(playButton.getAttribute('aria-label')).toBe('播放');
+
+    // 波形负责进度跳转；操作区域同样排除节点拖动和画布平移。
+    const track = audio!.parentElement!.querySelector<HTMLElement>('div.nodrag.nopan')!;
+    expect(track).toBeTruthy();
+    vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 200 } as DOMRect);
+    Object.defineProperty(audio, 'duration', { configurable: true, value: 100 });
+    await act(async () => { audio!.dispatchEvent(new Event('loadedmetadata')); });
+    await act(async () => {
+      track.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, bubbles: true, cancelable: true }));
+      document.dispatchEvent(new MouseEvent('mouseup', { clientX: 100, bubbles: true }));
+    });
+    expect(audio!.currentTime).toBe(50);
   });
 
   it('keeps the square body for generating, failed and missing audio', async () => {

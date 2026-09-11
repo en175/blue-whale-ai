@@ -337,7 +337,7 @@ describe('IKDMQR Dock 选择 → 连线', () => {
     });
   };
 
-  it('Dock「到节点选择」选中画布图片节点建立对应参考，Dock 同步显示', async () => {
+  it('Dock 选取先显示暂存参考，发送时建立连线并消费同一资产', async () => {
     await renderPage();
     await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
@@ -346,13 +346,18 @@ describe('IKDMQR Dock 选择 → 连线', () => {
     await enterPickMode();
     expect(container.textContent).toContain('点击画布中的图片节点');
 
-    // 点击画布图片节点 → 存入待提交参考（发送时才建连线落盘；Dock 立即显示）
+    // 点击后只暂存参考，发送时再落线。
     const m1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')!;
     await act(async () => {
       flowProps.current.onNodeClick(m1);
     });
-    // 到节点选择的结果以待提交参考形式暂存，发送时才落成连线（与 Dock 显示同源推导）
+    expect(edgePairs()).toEqual([]);
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
+    await typePrompt('采用所选参考');
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    expect(edgePairs()).toEqual([`m1->${draftId}`]);
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].input_asset_ids).toEqual(['a1']);
     // 选取模式已退出
     expect(container.textContent).not.toContain('点击画布中的图片节点');
   });
@@ -458,6 +463,7 @@ describe('IKDMQR 画布连线来源校验', () => {
     await connect('v1', draftId);
     expect(edgePairs()).toEqual([]);
 
+    // 能力不匹配在拖线阶段静默拒绝；Dock 选择的非法来源提示由上方用例覆盖。
     // 文本节点来源（文本附件语义）不受媒体校验影响
     await connect('t1', draftId);
     expect(edgePairs()).toEqual([`t1->${draftId}`]);
