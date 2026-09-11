@@ -895,11 +895,6 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
         />
       </div>
 
-      {/* 字数统计 */}
-      <div className={`${styles.charCount} ${composedCount >= MAX_INPUT ? styles.charCountWarn : ''}`}>
-        {composedCount}/{MAX_INPUT}
-      </div>
-
       {/* 底部状态栏 */}
       <div className={styles.bottomBar}>
         {/* 左侧 */}
@@ -948,6 +943,10 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
 
         {/* 右侧：发送 */}
         <div className={styles.barRight}>
+          {/* 字数统计 */}
+          <div className={`${styles.charCount} ${composedCount >= MAX_INPUT ? styles.charCountWarn : ''}`}>
+            {composedCount}/{MAX_INPUT}
+          </div>
           <button
             data-testid="video-send"
             className={`${styles.sendBtn} ${canSend && !readOnly && !conflict ? styles.sendBtnActive : ''}`}
@@ -955,7 +954,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
             disabled={!canSend || readOnly || !!conflict}
             title={conflict ?? (readOnly ? '生成中，输入只读' : '发送')}
           >
-            <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
+            <ArrowUp size={12.8} fill="currentColor" strokeWidth={0} />
           </button>
         </div>
       </div>

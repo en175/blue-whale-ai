@@ -614,15 +614,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
             setInputValue(v);
             syncDraftParams({ prompt: v });
           }}
-          rows={4}
+          rows={3}
           maxLength={maxInput}
           disabled={uploading || readOnly}
         />
-
-        {/* 字数统计 */}
-        <div className={`${styles.charCount} ${inputValue.length >= maxInput ? styles.charCountWarn : ''}`}>
-          {inputValue.length}/{maxInput}
-        </div>
 
           {/* 底部状态栏 */}
           <div className={styles.bottomBar}>
@@ -643,13 +638,17 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
 
           {/* 右侧：发送按钮 */}
           <div className={styles.barRight}>
+            {/* 字数统计 */}
+            <div className={`${styles.charCount} ${inputValue.length >= maxInput ? styles.charCountWarn : ''}`}>
+              {inputValue.length}/{maxInput}
+            </div>
             <button
               className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}
               onClick={handleSend}
               disabled={!canSend}
               title={uploading ? '上传中...' : '发送'}
             >
-              <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
+              <ArrowUp size={12.8} fill="currentColor" strokeWidth={0} />
             </button>
           </div>
         </div>

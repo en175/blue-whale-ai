@@ -405,17 +405,12 @@ export default function AudioDialog({
         placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。"
         value={text}
         onChange={(e) => handleTextChange(e.target.value.slice(0, MAX_INPUT))}
-        rows={4}
+        rows={3}
         maxLength={MAX_INPUT}
         disabled={readOnly}
       />
 
       {modelUnavailable && <div role="alert">模型不可用，请选择可用模型后发送</div>}
-
-      {/* 字数统计 */}
-      <div className={`${styles.charCount} ${text.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
-        {text.length}/{MAX_INPUT}
-      </div>
 
       {/* 底部状态栏 */}
       <div className={styles.bottomBar}>
@@ -456,6 +451,10 @@ export default function AudioDialog({
           {readOnly && (
             <span className={styles.readOnlyHint}>生成中，参数只读；可在画布卡片上取消生成</span>
           )}
+          {/* 字数统计 */}
+          <div className={`${styles.charCount} ${text.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
+            {text.length}/{MAX_INPUT}
+          </div>
           <button
             className={`${styles.sendBtn} ${text.trim() && modelId ? styles.sendBtnActive : ''}`}
             data-testid="audio-send"
@@ -463,7 +462,7 @@ export default function AudioDialog({
             onClick={handleSend}
             title="发送"
           >
-            <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
+            <ArrowUp size={12.8} fill="currentColor" strokeWidth={0} />
           </button>
         </div>
       </div>

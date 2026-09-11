@@ -9,9 +9,9 @@
   transform: translateX(-50%);
   width: 740px;
   max-width: 90%;
-  /* 默认输入区保留四行，附件换行时面板向上增长。 */
+  /* 默认输入区保留三行，最多增长到四行，附件换行时面板向上增长。 */
   height: auto;
-  min-height: 250px;
+  min-height: 0;
   max-height: calc(100vh - 2 * var(--spacing-lg));
   overflow-y: auto;
   display: flex;
@@ -357,8 +357,10 @@
 .textarea {
   width: 100%;
   flex: 0 0 auto;
-  height: calc(6.4em + 2 * var(--spacing-sm));
-  min-height: calc(6.4em + 2 * var(--spacing-sm));
+  height: auto;
+  field-sizing: content;
+  min-height: calc(4.8em + 2 * var(--spacing-sm));
+  max-height: calc(6.4em + 2 * var(--spacing-sm));
   overflow-y: auto;
   padding: var(--spacing-sm) var(--spacing-md);
   border-radius: var(--radius-md);
@@ -375,6 +377,7 @@
 
 .dialogExpanded .textarea {
   flex: 1;
+  max-height: none;
 }
 
 .textarea::placeholder {
@@ -383,11 +386,10 @@
 
 /* ---- 字数统计 ---- */
 .charCount {
-  align-self: flex-end;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--color-text-tertiary);
   line-height: 1;
-  margin-top: auto;
 }
 
 .charCountWarn {
@@ -429,9 +431,9 @@
 
 /* 发送按钮（与图片对话框统一） */
 .sendBtn {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28.8px;
+  height: 28.8px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;

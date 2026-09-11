@@ -18,7 +18,7 @@
 .dialog {
   position: relative;
   height: auto;
-  min-height: 250px;
+  min-height: 0;
   max-height: calc(100vh - 2 * var(--spacing-lg));
   overflow-y: auto;
   box-sizing: border-box;
@@ -231,13 +231,16 @@
   font-family: inherit;
   display: block;
   flex: 0 0 auto;
-  height: 6.4em;
-  min-height: 6.4em;
+  height: auto;
+  field-sizing: content;
+  min-height: 4.8em;
+  max-height: 6.4em;
   overflow-y: auto;
 }
 
 .dialogExpanded .textarea {
   flex: 1;
+  max-height: none;
 }
 
 .textarea::placeholder {
@@ -246,11 +249,10 @@
 
 /* ---- 字数统计 ---- */
 .charCount {
-  align-self: flex-end;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--color-text-tertiary);
   line-height: 1;
-  margin-top: -4px;
 }
 
 .charCountWarn {
@@ -434,9 +436,9 @@
 
 /* 发送按钮 */
 .sendBtn {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28.8px;
+  height: 28.8px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -468,8 +470,8 @@
 /* ---- 配置面板（悬浮于底栏上方，与视频面板一致；IKDXL4；包含块为不带 overflow 的 .dialogWrap，不被 .dialog 滚动框裁剪，IKEOLP） ---- */
 .configPanel {
   position: absolute;
-  /* 下缘贴字数统计上方：输入卡边框 1px + 底 padding 16px + 底栏 36px + 间距 8px + 字数统计行 11px + 余量 1px */
-  bottom: 73px;
+  /* 下缘贴底栏上方，给缩小后的发送按钮保留间距。 */
+  bottom: 54px;
   left: 0;
   right: 0;
   margin: 0 auto;

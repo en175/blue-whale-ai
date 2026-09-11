@@ -18,9 +18,9 @@
 
 .dialog {
   position: relative;
-  /* 默认输入区保留四行，附件换行时面板向上增长。 */
+  /* 默认输入区保留三行，最多增长到四行，附件换行时面板向上增长。 */
   height: auto;
-  min-height: 250px;
+  min-height: 0;
   max-height: calc(100vh - 2 * var(--spacing-lg));
   overflow-y: auto;
   box-sizing: border-box;
@@ -43,12 +43,12 @@
   height: 66.66vh;
 }
 
-/* 默认四行；展开后填充窗口剩余高度。 */
+/* 默认三行，随内容增长到四行；展开后填充窗口剩余高度。 */
 .editorWrap {
   font-size: var(--font-size-md);
   flex: 0 0 auto;
-  height: 7.2em;
-  min-height: 7.2em;
+  height: auto;
+  min-height: 5.4em;
 }
 
 .dialogExpanded .editorWrap {
@@ -143,8 +143,14 @@
 }
 
 .editorArea {
-  height: 100%;
+  min-height: 5.4em;
+  max-height: 7.2em;
   overflow-y: auto;
+}
+
+.dialogExpanded .editorArea {
+  height: 100%;
+  max-height: none;
 }
 
 /* ---- 右上角操作（放大/收起 + 关闭） ---- */
@@ -505,9 +511,9 @@
 
 /* 发送按钮（与图片对话框统一） */
 .sendBtn {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28.8px;
+  height: 28.8px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -573,11 +579,10 @@
 
 /* ---- 字数统计 ---- */
 .charCount {
-  align-self: flex-end;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--color-text-tertiary);
   line-height: 1;
-  margin-top: auto;
 }
 
 .charCountWarn {
@@ -595,7 +600,7 @@
 /* ---- 配置面板（悬浮于底栏上方；包含块为不带 overflow 的 .dialogWrap，不被 .dialog 滚动框裁剪，IKEOLP） ---- */
 .configPanel {
   position: absolute;
-  bottom: 72px;
+  bottom: 54px;
   left: 0;
   right: 0;
   margin: 0 auto;
