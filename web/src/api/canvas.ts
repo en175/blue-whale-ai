@@ -35,6 +35,13 @@ export function applyPromptPreview(input: { projectId: string; source: PromptPre
   );
 }
 
+export function referencePromptPlan(input: { projectId: string; planNodeId: string; targetNodeId: string; expectedVersion: number }) {
+  const { projectId, ...body } = input;
+  return apiRequest<CanvasRecord>(`/api/canvases/${encodeURIComponent(projectId)}/prompt-references`, {
+    method: 'POST', silent: true, body: JSON.stringify(body),
+  });
+}
+
 /** 对话引用快照（IKDLQJ）：点击「添加到对话」当刻冻结的正文与来源，服务端不可变保存。 */
 export interface ConversationQuote {
   quoteId: string;

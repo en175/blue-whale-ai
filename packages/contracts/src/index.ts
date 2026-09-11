@@ -274,3 +274,5 @@ export {
   type AddSharedAssetToProjectRequest,
   type AddSharedAssetToProjectResult,
 } from "./shared-asset.js";
+
+export { promptBindingList, promptReferenceRequestSchema, promptBindingsSchema, promptPlanSnapshotSchema, type PromptBinding, type PromptInputSources, type PromptPlanSnapshot } from "./prompt-target.js";
