@@ -1,5 +1,6 @@
 package com.bluewhale.worker.application.service;
 
+import com.bluewhale.worker.config.WorkerProperties;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import org.slf4j.Logger;
@@ -47,7 +48,10 @@ public class RecoveryService {
     private final ObjectProvider<GenerationMessageProducer> imageProducer;
     private final ObjectProvider<GenerationMessageProducer> audioProducer;
     private final ObjectProvider<GenerationMessageProducer> mediaExtractProducer;
+    private final WorkerProperties workerProps;
     private final int maxAgeMinutes;
+    /** 空 tags 提示只打一次（避免安全拉起形态下每 60s 刷屏）。 */
+    private boolean emptyTagsLogged;
 
     public RecoveryService(
             GenerationJobMapper jobMapper,
@@ -59,6 +63,7 @@ public class RecoveryService {
             ObjectProvider<GenerationMessageProducer> audioProducer,
             @Qualifier("mediaExtractRecoveryProducer")
             ObjectProvider<GenerationMessageProducer> mediaExtractProducer,
+            WorkerProperties workerProps,
             @Value("${RECOVERY_MAX_AGE_MINUTES:120}") int maxAgeMinutes
     ) {
         this.jobMapper = jobMapper;
@@ -66,6 +71,7 @@ public class RecoveryService {
         this.imageProducer = imageProducer;
         this.audioProducer = audioProducer;
         this.mediaExtractProducer = mediaExtractProducer;
+        this.workerProps = workerProps;
         this.maxAgeMinutes = maxAgeMinutes;
     }
 
@@ -81,6 +87,15 @@ public class RecoveryService {
             fixedDelayString = "${GENERATION_RECOVERY_INTERVAL_MS:60000}"
     )
     public void recover() {
+        // 安全拉起形态（WORKER_ENABLED_TAGS 为空）：DataSource 是 stub（不连库），
+        // 此时扫库必抛异常 → 每 60s 错误刷屏。直接短路，保持「空 tags = 只起 /ready」的部署语义。
+        if (workerProps.enabledTags().isEmpty()) {
+            if (!emptyTagsLogged) {
+                emptyTagsLogged = true;
+                log.info("recovery 跳过：WORKER_ENABLED_TAGS 为空（安全拉起形态，不连库不扫库）");
+            }
+            return;
+        }
         try {
             reenqueue("video", videoProducer.getIfAvailable(),
                     jobMapper.listDueVideoJobIds(SCAN_LIMIT, maxAgeMinutes));

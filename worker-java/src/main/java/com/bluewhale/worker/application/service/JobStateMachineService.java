@@ -332,8 +332,9 @@ public class JobStateMachineService {
      * 两段式 CAS（契约 §3.1）：
      * 1. SELECT candidate WHERE id=? AND type='image' AND source IN 白名单
      *    AND is_delete=false AND next_action_at&lt;=now AND (queued OR processing+孤儿)
-     * 2. UPDATE CAS: status='processing', lease_owner=?, lease_expires_at=now+120s,
+     * 2. UPDATE CAS: status='processing', lease_owner=?, lease_expires_at=now+{image 租约},
      *    last_polled_at=now, fencing_token+1, version+1
+     *    （image 租约默认 420s，见 imageLeaseSeconds 注释；其余 tag 仍 120s）
      * <p>
      * 返回投影用增后 token（candidate.fencing_token + 1）。
      * <b>套 source 白名单</b>（与 audio 不同：claimImageJobById :339 source IN CLAIMABLE_JOB_SOURCES）。

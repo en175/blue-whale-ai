@@ -43,6 +43,10 @@ class RecoveryServiceTest {
 
     private RecoveryService service;
 
+    private static com.bluewhale.worker.config.WorkerProperties props(java.util.Set<String> tags) {
+        return new com.bluewhale.worker.config.WorkerProperties(tags, "-java", null);
+    }
+
     @BeforeEach
     void setUp() {
         when(videoProvider.getIfAvailable()).thenReturn(videoProducer);
@@ -54,7 +58,7 @@ class RecoveryServiceTest {
         when(jobMapper.listDueAudioJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueMediaExtractJobIds(anyInt(), anyInt())).thenReturn(List.of());
         service = new RecoveryService(jobMapper, videoProvider, imageProvider,
-                audioProvider, extractProvider, MAX_AGE_MINUTES);
+                audioProvider, extractProvider, props(java.util.Set.of("image")), MAX_AGE_MINUTES);
     }
 
     @Test
@@ -115,5 +119,17 @@ class RecoveryServiceTest {
         service.recover(); // 不抛
 
         verify(jobMapper, never()).listDueImageJobIds(anyInt(), anyInt());
+    }
+
+    @Test
+    @DisplayName("安全拉起（enabledTags 为空）→ 完全跳过扫库（stub DataSource 形态不刷错误日志）")
+    void skipsEntirelyWhenNoTagsEnabled() {
+        RecoveryService idle = new RecoveryService(jobMapper, videoProvider, imageProvider,
+                audioProvider, extractProvider, props(java.util.Set.of()), MAX_AGE_MINUTES);
+
+        idle.recover();
+
+        verifyNoInteractions(jobMapper);
+        verifyNoInteractions(imageProducer);
     }
 }
