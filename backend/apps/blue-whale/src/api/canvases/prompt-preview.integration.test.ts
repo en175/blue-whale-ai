@@ -1,3 +1,15 @@
+import { UsageController } from "../usage/usage.controller.js";
+import { AccountService } from "@lib/shared/account/account.service.js";
+import { processJob } from "@lib/shared/generation/worker/generation-worker.js";
+import { createWorkerRepo } from "@lib/shared/persistence/index.js";
+import { openGenerationCredential } from "@blue-whale/core";
+import { GenerationJobsController } from "../generation/generation-jobs.controller.js";
+import { GenerationModelsController } from "../generation/models.controller.js";
+import { JobsController } from "../jobs/jobs.controller.js";
+import { JobsService } from "@lib/shared/jobs/jobs.service.js";
+import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
+import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
+import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 import "reflect-metadata";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
@@ -5,7 +17,7 @@ import { Module } from "@nestjs/common";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 import { NestFactory } from "@nestjs/core";
 import { json } from "express";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CanvasesController } from "./canvases.controller.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -28,6 +40,7 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
   const prompt = "雪夜的城市\n保留换行与 <光影> & 细节。";
   const agentRequests: Array<{ path: string; user: unknown; project: unknown }> = [];
   const agent = createServer((req, res) => {
+    if (req.url === '/api/usage/token/') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ success: true, data: { user_quota: 1000000 } })); return; }
     if (req.url === '/a.png' || req.url === '/b.mp4') {
       res.setHeader('content-type', req.url === '/a.png' ? 'image/png' : 'video/mp4');
       res.end(readFileSync(new URL(req.url === '/a.png' ? '../../../../../../web/public/favicon.png' : '../../../../../../web/src/assets/home-hero/aurora.mp4', import.meta.url)));
@@ -51,18 +64,36 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
       } },
     }] }));
   });
+  const previousCredentialSecret = process.env.GENERATION_CREDENTIAL_SECRET;
   const previousDatabase = process.env.DATABASE_URL;
+  const previousNewApi = process.env.NEW_API_BASE_URL;
   const previousAgent = process.env.AGENT_SERVICE_BASE_URL;
   beforeAll(async () => {
+    process.env.GENERATION_CREDENTIAL_SECRET = "iketsw-isolated-test-secret";
     process.env.DATABASE_URL = process.env.IKDLQE_DATABASE_URL;
     await new Promise<void>(resolve => agent.listen(0, "127.0.0.1", resolve));
     process.env.AGENT_SERVICE_BASE_URL = `http://127.0.0.1:${(agent.address() as { port: number }).port}`;
+    process.env.NEW_API_BASE_URL = process.env.AGENT_SERVICE_BASE_URL;
     projectId = (await projects.create("987654", "IKDLQE integration")).id;
+    await prisma.client.generation_model_capability.upsert({
+      where: { provider_id_model_id: { provider_id: "iketsw-test", model_id: "iketsw-image" } },
+      create: { provider_id: "iketsw-test", model_id: "iketsw-image", capability_type: "image", model_label: "IKETSW", supported_sizes: [{ id: "1024x1024", label: "1024x1024" }], supported_aspect_ratios: ["1:1"], supported_formats: ["png"], default_size: "1024x1024", default_aspect_ratio: "1:1", features: { reference_image: true, max_reference_images: 3 } },
+      update: { features: { reference_image: true, max_reference_images: 3 } },
+    });
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService], AgentV1ProxyController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, GenerationCostEstimatorService, CanvasService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
+    Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
+    Reflect.defineMetadata("design:paramtypes", [AccountService], UsageController);
     class HarnessModule {}
-    Module({ controllers: [CanvasesController, ProjectsController, AgentV1ProxyController], providers: [
+    Module({ controllers: [UsageController, CanvasesController, ProjectsController, AgentV1ProxyController, GenerationJobsController, GenerationModelsController, JobsController], providers: [
+      { provide: AccountService, useValue: new AccountService() },
+      { provide: JobsService, useValue: new JobsService(prisma, projects) },
+      { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
+      { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
+      { provide: GenerationCostEstimatorService, useValue: new GenerationCostEstimatorService() },
       { provide: CanvasService, useValue: new CanvasService(prisma, projects) },
       { provide: ProjectService, useValue: projects },
       { provide: PrismaService, useValue: prisma },
@@ -72,7 +103,8 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
     app.useGlobalFilters(new AllExceptionsFilter());
     app.use(json({ limit: "16mb" }));
     app.setGlobalPrefix("api");
-    app.use((req: { user: unknown }, _res: unknown, next: () => void) => {
+    app.use((req: { user: unknown; headers: Record<string, string> }, _res: unknown, next: () => void) => {
+      req.headers.authorization ||= "Bearer sk-iketsw-test";
       req.user = { userId: "987654" };
       next();
     });
@@ -87,6 +119,10 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
     else process.env.DATABASE_URL = previousDatabase;
     if (previousAgent === undefined) delete process.env.AGENT_SERVICE_BASE_URL;
     else process.env.AGENT_SERVICE_BASE_URL = previousAgent;
+    if (previousCredentialSecret === undefined) delete process.env.GENERATION_CREDENTIAL_SECRET;
+    else process.env.GENERATION_CREDENTIAL_SECRET = previousCredentialSecret;
+    if (previousNewApi === undefined) delete process.env.NEW_API_BASE_URL;
+    else process.env.NEW_API_BASE_URL = previousNewApi;
     await prisma.client.$disconnect();
   });
   async function apply() {
@@ -104,6 +140,204 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
     expect(JSON.parse(canvas.data.nodes)).toEqual([result.data.node]);
     expect(agentRequests).toContainEqual({ path: `/v1/projects/${projectId}/sessions/${source.sessionId}/snapshot`, user: "987654", project: projectId });
   });
+  it("IKETSW: reference a plan atomically adds direct material edges and preserves manual provenance", async () => {
+    projectId = (await projects.create("987654", "IKETSW reference")).id;
+    const asset = await prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } });
+    materialPayload = { target_media: "image", assets: [{ asset_ref_id: "a", asset_id: String(asset.id), media_type: "image" }],
+      shots: [{ shot_no: 1, title: "方案", prompt_text: "素材A的雨夜", asset_bindings: [{ asset_ref_id: "a" }], prompt_mentions: [{ start: 0, end: 3, asset_ref_id: "a", index: 7 }] }] };
+    try {
+      const applied = await (await apply()).json();
+      const nodes = JSON.parse(applied.data.canvas.nodes);
+      const media = nodes.find((n: { type: string }) => n.type === "mediaNode");
+      nodes.push({ id: "target", type: "mediaNode", position: { x: 900, y: 300 }, data: { mediaType: "image", draft: true, genStatus: "draft", draftModelId: "iketsw-image", prompt: "保留草稿" } });
+      const saved = await (await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${applied.data.canvas.version}"` },
+        body: JSON.stringify({ nodes: JSON.stringify(nodes), edges: JSON.stringify([{ id: "manual", source: media.id, target: "target" }]), viewport: "{}" }) })).json();
+      const response = await fetch(`${base}/api/canvases/${projectId}/prompt-references`, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ planNodeId: applied.data.node.id, targetNodeId: "target", expectedVersion: saved.data.version }) });
+      expect(response.status).toBe(201);
+      const linked = (await response.json()).data;
+      expect(JSON.parse(linked.nodes)).toEqual(nodes);
+      expect(JSON.parse(linked.edges)).toEqual([
+        { id: "manual", source: media.id, target: "target", data: { inputSources: { manual: true, planNodeIds: [applied.data.node.id] } } },
+        expect.objectContaining({ source: applied.data.node.id, target: "target", data: { promptReference: { bindings: [{ index: 7, assetId: String(asset.id) }] } } }),
+      ]);
+      const readback = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+      expect(readback.edges).toBe(linked.edges);
+      const submit = (ids: string[], modelId = "iketsw-image") => fetch(`${base}/api/projects/${projectId}/generation-jobs`, {
+        method: "POST", headers: { "content-type": "application/json", authorization: "Bearer sk-iketsw-test" },
+        body: JSON.stringify({ type: "image", target_node_id: "target", input_asset_ids: ids, expected_output_count: 1, parameters: { prompt: "", model_id: modelId, aspect_ratio: "1:1" } }),
+      });
+      const missing = await submit([]);
+      expect(missing.status).toBe(400);
+      expect(await missing.text()).toContain("#7");
+      const stale = await fetch(`${base}/api/canvases/${projectId}/prompt-references`, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ planNodeId: applied.data.node.id, targetNodeId: "target", expectedVersion: saved.data.version }) });
+      expect(stale.status).toBe(412);
+      await prisma.client.assets.update({ where: { id: asset.id }, data: { is_delete: true } });
+      const deleted = await submit([String(asset.id)]);
+      expect(deleted.status).toBe(400);
+      expect(await deleted.text()).toContain("#7");
+      await prisma.client.assets.update({ where: { id: asset.id }, data: { is_delete: false } });
+      await prisma.client.generation_model_capability.update({ where: { provider_id_model_id: { provider_id: "iketsw-test", model_id: "iketsw-image" } }, data: { features: { reference_image: false, max_reference_images: 0 } } });
+      const unsupported = await submit([String(asset.id)]);
+      expect(unsupported.status).toBe(400);
+      expect(await unsupported.text()).toContain("#7");
+      await prisma.client.generation_model_capability.update({ where: { provider_id_model_id: { provider_id: "iketsw-test", model_id: "iketsw-image" } }, data: { features: { reference_image: true, max_reference_images: 3 } } });
+      const generated = await (await fetch(`${base}/api/projects/${projectId}/generation-jobs`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer sk-iketsw-test" },
+        body: JSON.stringify({ type: "image", target_node_id: "target", input_asset_ids: [String(asset.id)], expected_output_count: 1, parameters: { prompt: "保留草稿", model_id: "iketsw-image", aspect_ratio: "1:1" } }) })).json();
+      expect(generated.code).toBe(200);
+      const jobs = (await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records;
+      expect(jobs[0].input.prompt_plan_snapshot).toEqual({ canvasVersion: linked.version,
+        plans: [{ nodeId: applied.data.node.id, text: "素材A的雨夜", mentions: [{ start: 0, end: 3, index: 7, assetId: String(asset.id) }] }],
+        images: [{ assetId: String(asset.id), url: asset.url }], providerPrompt: "参考图1的雨夜\n\n保留草稿" });
+      // Provider execution must use the accepted snapshot even after the asset URL changes.
+      await prisma.client.assets.update({ where: { id: asset.id }, data: { url: `${asset.url}?edited-after-submit` } });
+      const requests: Array<Record<string, unknown>> = [];
+      await vi.waitFor(async () => expect(await processJob({ repo: createWorkerRepo(prisma.client), workerId: "iketsw-worker", jobId: generated.data.generation_job_id, userId: "987654",
+        credentialVault: { open: value => openGenerationCredential(value, "iketsw-isolated-test-secret") },
+        createImageProvider: () => ({ generate: async request => { requests.push(request); return [{ url: asset.url, width: 1024, height: 1024 }]; } }),
+        createAudioProvider: () => { throw new Error("unexpected audio"); },
+      })).toBe(generated.data.generation_job_id), { timeout: 3000 });
+      expect(requests).toEqual([expect.objectContaining({ prompt: "参考图1的雨夜\n\n保留草稿", sourceImage: { url: asset.url } })]);
+      expect((await (await fetch(`${base}/api/jobs/${generated.data.generation_job_id}`)).json()).data.status).toBe("succeeded");
+    } finally { materialPayload = undefined; }
+  });
+
+  it("IKETSW: shared plan sources deduplicate assets and attachment-only generation freezes current text", async () => {
+    projectId = (await projects.create("987654", "IKETSW shared sources")).id;
+    const asset = await prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } });
+    materialPayload = { target_media: "image", assets: [{ asset_ref_id: "a", asset_id: String(asset.id), media_type: "image" }],
+      shots: [1, 2].map(shot_no => ({ shot_no, title: "方案", prompt_text: "素材A雨夜", asset_bindings: [{ asset_ref_id: "a" }], prompt_mentions: [{ start: 0, end: 3, asset_ref_id: "a", index: 7 }] })) };
+    try {
+      const first = (await (await apply()).json()).data.node;
+      const second = (await (await fetch(`${base}/api/canvases/${projectId}/prompt-previews/apply`, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: { ...source, shotNo: 2 }, position: { x: 400, y: 20 } }) })).json()).data.node;
+      let canvas = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+      const nodes = JSON.parse(canvas.nodes);
+      nodes.push({ id: "target", type: "mediaNode", position: { x: 900, y: 0 }, data: { mediaType: "image", draft: true, genStatus: "draft", draftModelId: "iketsw-image", prompt: "" } });
+      canvas = (await (await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${canvas.version}"` },
+        body: JSON.stringify({ nodes: JSON.stringify(nodes) }) })).json()).data;
+      for (const plan of [first, second, first]) {
+        const response = await fetch(`${base}/api/canvases/${projectId}/prompt-references`, { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ planNodeId: plan.id, targetNodeId: "target", expectedVersion: canvas.version }) });
+        expect(response.status).toBe(201);
+        canvas = (await response.json()).data;
+      }
+      const edges = JSON.parse(canvas.edges);
+      expect(edges).toHaveLength(3);
+      expect(edges.find((e: { data: { inputSources?: unknown } }) => e.data.inputSources).data.inputSources).toEqual({ manual: false, planNodeIds: [first.id, second.id] });
+      nodes.find((n: { id: string }) => n.id === first.id).data.text = "素材A新的雨夜";
+      const edited = await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${canvas.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes) }) });
+      expect(edited.status).toBe(200);
+      const generate = () => fetch(`${base}/api/projects/${projectId}/generation-jobs`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer sk-iketsw-test" },
+        body: JSON.stringify({ type: "image", target_node_id: "target", input_asset_ids: [String(asset.id)], expected_output_count: 1, parameters: { prompt: "", model_id: "iketsw-image", aspect_ratio: "1:1" } }) });
+      canvas = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+      const disconnected = await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${canvas.version}"` },
+        body: JSON.stringify({ nodes: JSON.stringify(nodes), edges: JSON.stringify(edges.filter((e: { source: string }) => e.source === first.id || e.source === second.id)) }) });
+      expect(disconnected.status).toBe(200);
+      canvas = (await disconnected.json()).data;
+      const missing = await generate();
+      expect(missing.status).toBe(400);
+      expect(await missing.text()).toContain("#7");
+      const restored = await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${canvas.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes), edges: JSON.stringify(edges) }) });
+      expect(restored.status).toBe(200);
+      expect((await (await generate()).json()).code).toBe(200);
+      const jobs = (await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records;
+      expect(jobs[0].input.prompt_plan_snapshot.providerPrompt).toBe("参考图1新的雨夜\n\n参考图1雨夜");
+    } finally { materialPayload = undefined; }
+  });
+
+  it("IKETSW: a pure text plan can generate without a target prompt or media inputs", async () => {
+    projectId = (await projects.create("987654", "IKETSW pure text")).id;
+    const applied = (await (await apply()).json()).data;
+    const nodes = JSON.parse(applied.canvas.nodes);
+    nodes.push({ id: "target", type: "mediaNode", position: { x: 800, y: 0 }, data: { mediaType: "image", draft: true, draftModelId: "iketsw-image", prompt: "" } });
+    const saved = (await (await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${applied.canvas.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes) }) })).json()).data;
+    const referenced = await fetch(`${base}/api/canvases/${projectId}/prompt-references`, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ planNodeId: applied.node.id, targetNodeId: "target", expectedVersion: saved.version }) });
+    expect(referenced.status).toBe(201);
+    expect(JSON.parse((await referenced.json()).data.edges)).toHaveLength(1);
+    const generated = await fetch(`${base}/api/projects/${projectId}/generation-jobs`, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "image", target_node_id: "target", expected_output_count: 1, parameters: { prompt: "", model_id: "iketsw-image", aspect_ratio: "1:1" } }) });
+    expect((await generated.json()).code).toBe(200);
+    const jobs = (await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records;
+    expect(jobs[0].input.prompt_plan_snapshot).toMatchObject({ providerPrompt: prompt, images: [] });
+  });
+
+  it.runIf(process.env.IKETSW_BROWSER)("IKETSW browser: apply, Dock reference and drag connect preserve drafts and restore inputs", async () => {
+    const { chromium } = await import("playwright");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    projectId = (await projects.create("987654", "IKETSW browser")).id;
+    const a = await prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } });
+    materialPayload = { target_media: "image", assets: [{ asset_ref_id: "a", asset_id: String(a.id), media_type: "image" }],
+      shots: [{ shot_no: 1, title: "方案", prompt_text: "素材A的雨夜", asset_bindings: [{ asset_ref_id: "a" }], prompt_mentions: [{ start: 0, end: 3, asset_ref_id: "a", index: 7 }] }] };
+    const targets = ["dock-target", "drag-target"].map((id, i) => ({ id, type: "mediaNode", position: { x: 350, y: 40 + i * 330 },
+      data: { mediaType: "image", draft: true, genStatus: "draft", draftModelId: "iketsw-image", draftSize: "1024x1024", draftRatio: "1:1", prompt: "已有草稿", targetRatio: "1:1" } }));
+    await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nodes: JSON.stringify(targets), edges: "[]", viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }) });
+    const vite = await createVite({ root: `${process.cwd()}/web`, server: { open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } } } });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: { userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false } }, version: 0 })));
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+      await page.getByRole("button", { name: "Agent", exact: true }).click();
+      await page.getByRole("button", { name: "手动应用", exact: true }).click();
+      const plan = page.locator(".react-flow__node-textNode");
+      await plan.waitFor();
+      await page.reload();
+      await plan.waitFor();
+      const dock = page.locator('.react-flow__node-mediaNode[data-id="dock-target"]');
+      await dock.locator('[data-testid="media-content"]').click();
+      await page.locator('button[title="从资产中选择 / 到节点选择"]').click();
+      await page.getByRole("button", { name: "到节点选择", exact: true }).click();
+      const referenced = page.waitForResponse(r => r.url().endsWith('/prompt-references') && r.request().method() === 'POST');
+      await plan.locator('[data-testid="text-title"]').click();
+      await page.screenshot({ path: '/tmp/iketsw-reference-debug.png' });
+      expect((await referenced).status()).toBe(201);
+      await page.getByText("文本附件（1）").waitFor();
+      expect(await page.locator('textarea').inputValue()).toBe("已有草稿");
+      await vi.waitFor(async () => expect(await page.locator('.react-flow__edge').count()).toBe(2));
+      await page.keyboard.press('Control+z');
+      await vi.waitFor(async () => expect(await page.locator('.react-flow__edge').count()).toBe(0));
+      await page.keyboard.press('Control+Shift+z');
+      await vi.waitFor(async () => expect(await page.locator('.react-flow__edge').count()).toBe(2));
+      await vi.waitFor(async () => {
+        const persisted = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+        expect(JSON.parse(persisted.edges)).toHaveLength(2);
+      });
+      await page.reload();
+      await plan.waitFor();
+      const drag = page.locator('.react-flow__node-mediaNode[data-id="drag-target"]');
+      await plan.locator('[data-testid="text-title"]').click();
+      const src = (await plan.locator('.react-flow__handle-right').boundingBox())!;
+      const dst = (await drag.locator('.react-flow__handle-left').boundingBox())!;
+      const connected = page.waitForResponse(r => r.url().endsWith('/prompt-references') && r.request().method() === 'POST');
+      await page.mouse.move(src.x + src.width / 2, src.y + src.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(dst.x + dst.width / 2, dst.y + dst.height / 2, { steps: 12 });
+      await page.mouse.up();
+      expect((await connected).status()).toBe(201);
+      const saved = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+      const edges = JSON.parse(saved.edges);
+      expect(edges.filter((e: { target: string }) => e.target === 'dock-target').map((e: { source: string }) => e.source).sort())
+        .toEqual(edges.filter((e: { target: string }) => e.target === 'drag-target').map((e: { source: string }) => e.source).sort());
+      await page.reload();
+      await dock.waitFor();
+      await dock.locator('[data-testid="media-content"]').click();
+      await page.getByText("文本附件（1）").waitFor();
+      expect(await page.locator('textarea').inputValue()).toBe("已有草稿");
+      await page.screenshot({ path: '/tmp/iketsw-dock.png', fullPage: true, animations: 'disabled' });
+      const generated = page.waitForResponse(r => r.url().endsWith('/generation-jobs') && r.request().method() === 'POST');
+      await page.locator('button[title="发送"]').click();
+      expect((await (await generated).json()).code).toBe(200);
+      const jobs = (await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records;
+      expect(jobs[0].input.prompt_plan_snapshot.providerPrompt).toBe("参考图1的雨夜\n\n已有草稿");
+      await page.screenshot({ path: '/tmp/iketsw-browser.png', fullPage: true, animations: 'disabled' });
+    } finally { materialPayload = undefined; await browser.close(); await vite.close(); }
+  }, 60_000);
+
   it("reuses material A and atomically adds material B with persistent, numbered prompt bindings", async () => {
     projectId = (await projects.create("987654", "IKETSV materials")).id;
     const a = await prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } });

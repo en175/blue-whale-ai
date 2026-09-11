@@ -89,6 +89,7 @@ interface ImageDialogProps {
   /** 连线图片参考（IKDMQR）：草稿绑定时由父级按连线实时推导传入，面板据此渲染参考区；
    *  传入了 mediaRefs 即为连线绑定模式，面板本地 files 不再参与展示与提交 */
   mediaRefs?: ImageMediaRef[];
+  planReferenceError?: string;
   invalidMediaRefs?: Array<{ nodeId: string; name: string }>;
   /** 移除某个图片参考（IKDMQR）：携带来源节点 id，父级断开对应连线 */
   onRemoveMediaRef?: (sourceNodeId: string) => void;
@@ -165,7 +166,7 @@ function AttachmentItem({ attachment, move }: {
   );
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast, draftBinding, mediaRefs, invalidMediaRefs, onRemoveMediaRef }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -239,7 +240,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
   /** 生成中只读（IKDMQQ）：任务执行期间目标参数冻结，保留查看与画布上的取消入口 */
   const readOnly = uploading || draftBinding?.submitting === true || draftBinding?.status === 'generating';
-  const configurationError = !modelsLoaded ? '正在加载模型配置'
+  const configurationError = planReferenceError ? planReferenceError
+    : !modelsLoaded ? '正在加载模型配置'
     : !currentGen ? '原生成模型已不可用，请重新选择模型'
     : selectedResolution && !resolutionOptions.some(option => option.key === selectedResolution)
       ? '原分辨率已不可用，请重新选择分辨率'

@@ -62,6 +62,8 @@ type HistoryEntry =
   | { kind: 'addNodes'; ids: string[]; nodes: Node[] | null }
   /** 建立连线：undo = 删边；redo = 加边 */
   | { kind: 'addEdges'; edges: Edge[] }
+  /** 方案引用原子回放新增边及共享边来源，保持连线顺序。 */
+  | { kind: 'replaceEdges'; before: Edge[]; after: Edge[] }
   /** 删边：undo = 加回；redo = 再删 */
   | { kind: 'removeEdges'; edges: Edge[] }
   /** 成组：undo/redo 均恢复组状态快照（重组会把成员从其他组迁出，需整体回放） */
@@ -160,6 +162,10 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
   /** 撤销一条记录（就地改写 entry 补充 redo 所需的逆向数据） */
   const undoEntry = (entry: HistoryEntry): HistoryEntry => {
     switch (entry.kind) {
+      case 'replaceEdges': {
+        handlesRef.current.setEdges(() => entry.before);
+        return entry;
+      }
       case 'move': {
         entry.newPositions = collectPositions(new Set(entry.oldPositions.map((p) => p.id)));
         applyPositions(entry.oldPositions);
@@ -223,6 +229,9 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
   /** 重做一条记录 */
   const redoEntry = (entry: HistoryEntry) => {
     switch (entry.kind) {
+      case 'replaceEdges':
+        handlesRef.current.setEdges(() => entry.after);
+        return;
       case 'move':
         applyPositions(entry.newPositions);
         return;
@@ -377,6 +386,9 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
     pushMove,
     pushDelete,
     pushAddNodes,
+    pushReplaceEdges: (before: Edge[], after: Edge[]) => {
+      if (JSON.stringify(before) !== JSON.stringify(after)) push({ kind: 'replaceEdges', before, after });
+    },
     pushAddEdges,
     pushRemoveEdges,
     pushCreateGroup,

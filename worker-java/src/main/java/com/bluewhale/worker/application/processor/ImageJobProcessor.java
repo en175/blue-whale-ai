@@ -179,7 +179,17 @@ public class ImageJobProcessor implements JobProcessor {
      */
     private void processClaimedImageJob(ClaimedJobDto job) {
         Map<String, Object> input = job.input();
-        String prompt = strOrEmpty(input, "prompt");
+        Map<?, ?> planSnapshot = null;
+        if (input.containsKey("prompt_plan_snapshot")) {
+            if (!(input.get("prompt_plan_snapshot") instanceof Map<?, ?> snapshot)
+                    || !(snapshot.get("providerPrompt") instanceof String text) || text.isBlank()
+                    || !(snapshot.get("images") instanceof List<?>)) {
+                failClaimed(job, GenerationError.ERROR_INVALID_INPUT, "方案输入快照无效");
+                return;
+            }
+            planSnapshot = snapshot;
+        }
+        String prompt = planSnapshot == null ? strOrEmpty(input, "prompt") : (String) planSnapshot.get("providerPrompt");
         String modelId = strOrEmpty(input, "model_id");
 
         // 1. 校验输入（generation-worker.ts:295-305）
@@ -224,9 +234,31 @@ public class ImageJobProcessor implements JobProcessor {
         }
 
         // 4. 解析参考素材（generation-worker.ts:354-364）
-        Map<String, AssetEntity> sourceAssetsMap = referenceIds.isEmpty()
-                ? Map.of()
-                : assetSource.resolveInputAssets(referenceIds, job.user_id(), job.project_id());
+        Map<String, AssetEntity> sourceAssetsMap;
+        if (planSnapshot != null) {
+            List<?> images = (List<?>) planSnapshot.get("images");
+            sourceAssetsMap = new HashMap<>();
+            if (images.size() != referenceIds.size()) {
+                failClaimed(job, GenerationError.ERROR_INVALID_REFERENCE, "方案素材快照与输入不一致");
+                return;
+            }
+            for (int i = 0; i < images.size(); i++) {
+                if (!(images.get(i) instanceof Map<?, ?> image)
+                        || !referenceIds.get(i).equals(image.get("assetId"))
+                        || !(image.get("url") instanceof String url)
+                        || !(url.startsWith("https://") || url.startsWith("http://"))) {
+                    failClaimed(job, GenerationError.ERROR_INVALID_REFERENCE, "方案素材快照与输入不一致");
+                    return;
+                }
+                AssetEntity asset = new AssetEntity();
+                asset.setType("image");
+                asset.setUrl(url);
+                sourceAssetsMap.put(referenceIds.get(i), asset);
+            }
+        } else {
+            sourceAssetsMap = referenceIds.isEmpty() ? Map.of()
+                    : assetSource.resolveInputAssets(referenceIds, job.user_id(), job.project_id());
+        }
         // 校验完整性和类型（generation-worker.ts:358-364）
         if (sourceAssetsMap.size() != referenceIds.size()) {
             failClaimed(job, GenerationError.ERROR_INVALID_REFERENCE,

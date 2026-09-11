@@ -1,3 +1,8 @@
+import { NewApiError } from "@blue-whale/core";
+import { promptReferenceRequestSchema } from "@blue-whale/contracts";
+import { createModelCapabilityRepo } from "@lib/shared/persistence/model-capability-repo.js";
+import { createWorkerAssetOps } from "@lib/shared/persistence/generation-worker-asset-ops.js";
+import { confirmPlanEdges, planError, validatePlanModel } from "./prompt-target.js";
 import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
@@ -204,6 +209,34 @@ export class CanvasService {
       }
     }
     throw new ConflictException("画布正在被修改，请重试应用");
+  }
+
+  async referencePrompt(ownerId: string, projectId: string, body: unknown) {
+    if (!await this.project.findOwnedById(projectId, ownerId)) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
+    const parsed = promptReferenceRequestSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException("方案引用参数无效");
+    const { planNodeId, targetNodeId, expectedVersion, modelId } = parsed.data;
+    const canvas = await this.repo.getByProject(projectId);
+    if (canvas.version !== expectedVersion) throw new NewApiError("Canvas 版本冲突", 412);
+    const nodes = JSON.parse(canvas.nodes ?? "[]");
+    const result = confirmPlanEdges(nodes, JSON.parse(canvas.edges ?? "[]"), planNodeId, targetNodeId);
+    const models = await createModelCapabilityRepo(this.prisma.client).listEnabledByType("image");
+    const targetModel = modelId ?? nodes.find((n: { id: string }) => n.id === targetNodeId)?.data?.draftModelId;
+    const model = targetModel ? models.find(m => m.model_id === targetModel) : models.find(m => m.is_default) ?? models[0];
+    validatePlanModel(planNodeId, result.plan.bindings, result.assetIds.length, model);
+    const assets = await createWorkerAssetOps(this.prisma.client).resolveInputAssets(result.assetIds, ownerId, projectId);
+    for (const id of result.assetIds) {
+      if (!assets.some(a => a.id === id && a.type === "image")) planError(planNodeId, result.plan.bindings.filter(b => b.assetId === id), "素材已删除或无权访问");
+    }
+    try {
+      const saved = await this.repo.saveIfVersion(projectId, expectedVersion, canvas.viewport, canvas.nodes, JSON.stringify(result.edges),
+        { ownerId, items: result.assetIds.map(assetId => ({ assetId, mediaType: "image" })) });
+      if (!saved) throw new NewApiError("Canvas 版本冲突", 412);
+      return ok(saved);
+    } catch (error) {
+      if (error instanceof PromptMaterialUnavailableError) planError(planNodeId, result.plan.bindings.filter(b => b.assetId === error.assetId), "素材已删除或无权访问");
+      throw error;
+    }
   }
 
   async save(
