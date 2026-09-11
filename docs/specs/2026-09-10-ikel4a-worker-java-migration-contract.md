@@ -51,7 +51,7 @@
 4. 后续一切写：`WHERE ... status='processing' AND lease_owner=workerId AND fencing_token=<持有值>`（`fenceWhere`，`settle-ops:13-19`）。**guard fail 一律静默返回 false，不上抛**——stale worker 效应被吞、留给租约过期 + recovery。此语义 Java 必须复刻（不许加异常日志之外的行为）。
 
 ### 3.2 租约与心跳
-- TTL `IMAGE_JOB_LEASE_SECONDS` 默认 **120s**，全类型同值。
+- TTL `IMAGE_JOB_LEASE_SECONDS` 默认 **120s**，全类型同值（**image 例外：300s，见 §11 政策修订**）。
 - 真心跳仅 media_extract：`updateMediaExtractProgress` 写 progress(0–99) 同时续租（`media-extract-ops:26-43`）。
 - video 无心跳：`markVideoSubmitted` / `rescheduleVideoPoll` 写完即**释放租约**（lease_owner/expires 置 null）并设 `next_action_at=now+5000ms`，下轮以孤儿接管方式再 claim。轮询上限 `MAX_VIDEO_POLLS=720`（≈60 分钟）→ `ERROR_PROVIDER_TIMEOUT`。
 
@@ -91,7 +91,7 @@
 
 - 生成域 1xxx 全表以代码文件为准（`ERROR_QUOTA_EXHAUSTED`…`ERROR_OUTPUT_COUNT_MISMATCH`，1001–1037；未知回退数值 1000）。Java 侧从本契约文档生成常量表，禁止手抄新增。
 - **重试规则（决定 MQ ack/结算，双端必须一致）**：
-  - image：仅 `provider_failed` 且 `retry_count<3` → `.../requeue`（退避 30/60/120s，300s 封顶）；其余终态 fail。
+  - image：仅 `provider_failed` 且 `retry_count<3` → `.../requeue`（退避 30/60/120s，300s 封顶）；其余终态 fail。**（2026-09-11 起读超时/可疑 post-send IO 归终态、瞬态只留连接层失败，见 §11 政策修订）**
   - video：submit 阶段错误全终态；poll 阶段瞬态（`NewApiNetworkError`/`NewApiTimeoutError`/HTTP 429,500,502,503,504，但 `invalid_json_response`/`invalid_video_response` 除外）→ `.../reschedule`；`poll_count≥720` → `provider_timeout` 终态。
   - audio / media_extract：无 worker 级重试，全部终态 fail。
   - 消费者级不 ack → broker 30s 重投属**传输层**，与上表叠加，Java 客户端需保持等价（不主动 nack）。
@@ -175,6 +175,6 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 
 **政策修订（2026-09-11，IKF12J 讨论，用户拍板）——image 超时与重试语义**：
 
-- **读超时不重试**：请求已到达上游、可能已出图扣费，超时重试=双扣风险 → image HTTP 读超时归 `provider_timeout` **终态**（覆盖 §6「image 仅 provider_failed 瞬态」的入口来源：TS 旧链路把超时混进 provider_failed 一并重试，属其隐患，Node 退役中不回改）。**瞬态重试仅保留请求未达上游的连接层失败**（连接拒绝/连接超时/DNS → provider_failed）。
+- **读超时与可疑 post-send IO 不重试**：请求已到达上游、可能已出图扣费，重试=双扣风险 → image HTTP 读超时、以及连接重置/流中断/SSL 中途失败等（无法证明 POST 未送达）一律归 `provider_timeout` **终态**（覆盖 §6「image 仅 provider_failed 瞬态」的入口来源：TS 旧链路把超时混进 provider_failed 一并重试，属其隐患，Node 退役中不回改）。**瞬态重试仅保留请求未达上游的连接层失败**（连接拒绝/连接超时/DNS → provider_failed）。
 - **拉大窗口消化慢上游**：`NEW_API_IMAGE_TIMEOUT_MS` 缺省 60s（刀③写死）→ **240s**；image claim 租约必须盖住「超时+转存」→ 缺省 120s → **300s**，改读 `IMAGE_JOB_LEASE_SECONDS` env（顺带修复刀③把本节登记的 env 写死成常量——§3.2 的 120s 缺省仅约束非 image tag）。recovery 侧按 `lease_expires_at` 列判定，自动跟随，无需改 TS 代码。
 - 端点选择回归修正（同单）：恒 `/v1/images/generations` + JSON `image` 字段（单张=字符串、多张=数组）；jiekouAI 渠道设计上拒绝 edits（blue-whale-api `highwayapi/adaptor.go:44,113`），任何 edits 分支即回归（钉桩 `NewApiImageClientEndpointTest`）。

@@ -128,10 +128,16 @@ public class NewApiImageClient {
             }
             throw new ImageProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT,
                     "new-api 图片生成超时");
-        } catch (Exception e) {
-            // 连接被拒/DNS 等未达上游的 IO 失败 → 瞬态可重试（无扣费风险）。
+        } catch (java.net.ConnectException | java.net.UnknownHostException e) {
+            // 连接被拒 / DNS 失败：POST 未达上游、零扣费风险 → 瞬态可重试。
             throw new ImageProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                     "new-api 图片生成失败: " + e.getMessage());
+        } catch (Exception e) {
+            // 其余 IO（连接重置 / 流中断 / SSL 中途失败等）**可能发生在 POST 之后**，上游或已出图扣费
+            // → 终态不重试（宁可不重试也不双扣；评审 Important#1）。异常类名入 message 便于排查。
+            throw new ImageProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT,
+                    "new-api 图片生成失败（可能已扣费，不重试）: "
+                            + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
 
         try (response) {
