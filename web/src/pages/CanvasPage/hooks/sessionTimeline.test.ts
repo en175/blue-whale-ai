@@ -9,6 +9,7 @@ import fixture from '../__fixtures__/agent-session-replay-20260906.json';
 import type { SessionMessage, SessionRun } from '@/api/agentSessions';
 import {
   EMPTY_SESSION_STATE,
+  accountOfRun,
   applyLiveEvent,
   buildTurns,
   formatDuration,
@@ -433,5 +434,28 @@ describe('账', () => {
     const turns = buildTurns([{ id: 'u', role: 'user', content: '问', sequence_no: 1, inputBatchId: 'Z' }], null, state.accounts);
     expect(turns[0].account).toMatchObject({ outcome: 'failed', seconds: 4, failureText: '余额不足' });
     expect(turns[0].runId).toBe('run9');
+  });
+});
+
+// IKEV0V：聊天里改卡没改成时，那一轮是 completed，失败只写在 prompt_card_failure 里。
+describe('accountOfRun · prompt_card_failure', () => {
+  const run = {
+    run_id: 'r1',
+    status: 'completed',
+    created_at: '2026-09-11T00:00:00.000Z',
+    finished_at: '2026-09-11T00:00:05.000Z',
+    prompt_card_failure: { code: 'invalid_prompt_card', message: '这次没能写出生成卡，请重试或补充需求。' },
+  };
+
+  it('完成的轮带着改卡失败的那句话', () => {
+    expect(accountOfRun(run)?.cardFailureText).toBe('这次没能写出生成卡，请重试或补充需求。');
+  });
+
+  it('失败的轮不看它：整轮失败有自己的说明', () => {
+    expect(accountOfRun({ ...run, status: 'failed' })?.cardFailureText).toBeNull();
+  });
+
+  it('没有改卡失败就是 null', () => {
+    expect(accountOfRun({ ...run, prompt_card_failure: null })?.cardFailureText).toBeNull();
   });
 });

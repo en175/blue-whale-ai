@@ -529,6 +529,11 @@ export interface TurnAccount {
   contextCapacity: RunContextCapacity | null;
   /** 失败时后端的那句人话。 */
   failureText: string | null;
+  /**
+   * 这一轮完成了、但要写的生成卡没写出来时，后端的那句人话（IKEV0V）。只在聊天里改卡时出现：
+   * 那一轮照常 completed，侧边栏还挂着上一版。不写出来，用户会把旧卡当成这次改出来的。
+   */
+  cardFailureText: string | null;
 }
 
 /**
@@ -547,6 +552,7 @@ export function accountOfRun(run: SessionRun, fallbackFinishedAt: number | null 
     tokenUsage: parseRunTokenUsage(run.token_usage),
     contextCapacity: parseRunContextCapacity(run.context_capacity),
     failureText: run.failure?.message || null,
+    cardFailureText: run.status === 'completed' ? run.prompt_card_failure?.message || null : null,
   };
 }
 

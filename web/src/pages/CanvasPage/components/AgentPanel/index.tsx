@@ -1523,7 +1523,7 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
            进行中的回答就是「最后一轮还在长」，不再是挂在整个列表之后的全局区——运行中再发一句，
            回答仍然在自己的问题下面。 */
         <div className={styles.messageList} ref={listRef}>
-          {turns.map((turn) => (
+          {turns.map((turn, turnIndex) => (
             <div key={turn.key} className={styles.turn}>
               {turn.user.map((m) => (
                 <div key={m.id} className={styles.userBubble}>
@@ -1558,7 +1558,21 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
                     knownAssets={knownAssets}
                   />
                   {/* 这一轮的账挂在轮尾（IKDK5L）；还在跑的轮由输入框上方的状态行读秒。 */}
-                  {turn.account && !turn.live && <TurnFooter account={turn.account} />}
+                  {turn.account && !turn.live && (
+                    <TurnFooter
+                      account={turn.account}
+                      onRetryCard={
+                        // 聊天里改卡没改成（IKEV0V）：只在最后一轮、且没有别的轮在跑时给「再试一次」，
+                        // 它把这一轮用户的原话重发一遍。重试接口只接失败的轮，这一轮是完成的。
+                        turnIndex === turns.length - 1 && runningRunId === null && !streaming
+                          ? () => {
+                              const text = turn.user.map((m) => m.content).filter(Boolean).join('\n');
+                              if (text.trim()) void sendMessage([{ type: 'text', text }], undefined, undefined, undefined, text);
+                            }
+                          : undefined
+                      }
+                    />
+                  )}
                 </div>
               )}
             </div>
