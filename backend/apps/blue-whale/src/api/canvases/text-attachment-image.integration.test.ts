@@ -143,7 +143,11 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
 
   it("连线随 PUT 保存并在 GET 读取时恢复（缺省为空数组）", async () => {
     const projectId = (await projects.create("987654", "IKDLQF edges roundtrip")).id;
-    const edges = [{ id: "e1", source: "text-1", target: "media-1" }];
+    // e2 为媒体卡自环（素材原卡重新编辑引用自身）：合法保存并随 GET 原样恢复（契约 2026-09-11 修订）
+    const edges = [
+      { id: "e1", source: "text-1", target: "media-1" },
+      { id: "e2", source: "media-1", target: "media-1" },
+    ];
     const saved = await saveCanvas(projectId, [textNode("text-1", "正文"), mediaNode("media-1", "image")], edges, "missing");
     expect(saved.status).toBe(200);
     const canvas = await getCanvas(projectId);
@@ -154,7 +158,7 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     expect(reloaded.version).toBe(canvas.version);
   });
 
-  it("非法边（悬空端点/重复/自环/超 500 条）明确失败且零写入", async () => {
+  it("非法边（悬空端点/重复/超 500 条）明确失败且零写入", async () => {
     const projectId = (await projects.create("987654", "IKDLQF invalid edges")).id;
     const nodes = [textNode("text-1", "正文"), mediaNode("media-1", "image")];
     expect((await saveCanvas(projectId, nodes, [], "missing")).status).toBe(200);
@@ -171,16 +175,12 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
     expect(duplicate.status).toBe(400);
     expect((await duplicate.json()).message).toBe("同一对节点之间只允许一条连线，原内容未改动");
 
-    const selfLoop = await saveCanvas(projectId, nodes, [{ id: "e1", source: "text-1", target: "text-1" }], before.version);
-    expect(selfLoop.status).toBe(400);
-    expect((await selfLoop.json()).message).toBe("连线不能指向同一节点，原内容未改动");
-
     const manyNodeIds = Array.from({ length: 24 }, (_, i) => `n${i}`);
     const manyNodes = manyNodeIds.map((id) => textNode(id, "x"));
     const tooMany: Array<{ id: string; source: string; target: string }> = [];
     for (const source of manyNodeIds) {
       for (const target of manyNodeIds) {
-        if (source !== target && tooMany.length < 501) tooMany.push({ id: `e${tooMany.length}`, source, target });
+        if (tooMany.length < 501) tooMany.push({ id: `e${tooMany.length}`, source, target });
       }
     }
     const overLimit = await saveCanvas(projectId, manyNodes, tooMany, before.version);
