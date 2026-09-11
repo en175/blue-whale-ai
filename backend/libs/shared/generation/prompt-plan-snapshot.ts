@@ -89,7 +89,11 @@ export async function freezePromptPlans(args: {
     return { ...attachment, text };
   });
   const providerPrompt = composeTextAttachmentPrompt(compiled, args.prompt);
-  if (!providerPrompt.trim() || providerPrompt.length > (args.type === "video" ? COMPOSED_VIDEO_PROMPT_MAX_LENGTH : COMPOSED_IMAGE_PROMPT_MAX_LENGTH)) planError(plans[0]!.nodeId, plans[0]!.bindings, "标签转换后的提示词为空或超限");
+  const maxLength = Math.max(
+    args.type === "video" ? COMPOSED_VIDEO_PROMPT_MAX_LENGTH : COMPOSED_IMAGE_PROMPT_MAX_LENGTH,
+    args.model?.features.max_prompt_length ?? 0,
+  );
+  if (!providerPrompt.trim() || providerPrompt.length > maxLength) planError(plans[0]!.nodeId, plans[0]!.bindings, "标签转换后的提示词为空或超限");
   return { canvasVersion: args.version, plans: plans.map(({ nodeId, text, mentions }) => ({ nodeId, text, mentions })),
     ...(videoReferences ? { videoReferences } : {}),
     images: (videoReferences ? [] : inputIds).map(assetId => ({ assetId, url: resolved.find(a => a.id === assetId)!.url })), providerPrompt };
