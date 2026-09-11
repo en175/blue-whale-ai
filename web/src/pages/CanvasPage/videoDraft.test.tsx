@@ -274,8 +274,11 @@ async function connect(source: string, target: string) {
 }
 
 async function clickNode(node: { id: string; type: string; data?: Record<string, unknown> }) {
+  // 与真实 Canvas 行为对齐：onNodeClick 传入完整节点（含 data），
+  // 而非测试构造的局部对象——handleCanvasNodeClick 从 node.data 读取 assetId 等字段
+  const fullNode = flowProps.current.mediaNodes?.find((n: Node) => n.id === node.id);
   await act(async () => {
-    flowProps.current.onNodeClick(node as Node);
+    flowProps.current.onNodeClick((fullNode ?? node) as Node);
   });
 }
 
@@ -449,7 +452,7 @@ describe('IKDMQS 视频参考连线与显式角色', () => {
 });
 
 describe('IKDMQS 提交推导与组合约束', () => {
-  it('仅普通参考连线：提交 reference_asset_ids + target_node_id，先落盘后建任务', async () => {
+  it('仅普通参考连线：提交 references 数组含 reference 角色 + target_node_id，先落盘后建任务', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await connect('m1', 'd1');
@@ -464,8 +467,12 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(projectId).toBe('p1');
     expect(payload.type).toBe('video');
     expect(payload.target_node_id).toBe('d1');
-    expect(payload.reference_asset_ids).toEqual(['a1']);
+    // IKDJNZ 契约：提交走 references 单数组，不再使用旧扁平字段
+    expect(payload.references).toEqual([
+      { role: 'reference', type: 'image', asset_id: 'a1' },
+    ]);
     expect(payload.first_frame_asset_id).toBeUndefined();
+    expect(payload.reference_asset_ids).toBeUndefined();
     // 原位承接 + 首次结果回填同一张卡（fetchJobStatus mock 秒回 succeeded）：
     // 节点数量与身份不变，草稿标记清除、结果 src/assetId 写入同节点
     await vi.waitFor(() => {
@@ -479,28 +486,33 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(flowProps.current.mediaNodes).toHaveLength(4);
   });
 
-  it('首帧+尾帧连线：提交 first/last_frame_asset_id，不携带 reference_asset_ids', async () => {
+  it('首帧+尾帧连线：提交 references 数组含 first_frame/last_frame 角色，不携带旧扁平字段', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
     // 首帧/尾帧槽仅在首尾帧模式可见——先切换模式
     await switchToKeyframeMode();
     // 经 Dock 首帧/尾帧入口显式指定（不按连入顺序猜测）
+    // pickRefNode 存入 pendingVideoCanvasRefs，提交时 commitPendingVideoCanvasEdges 落成连线
     await pickRefNode('添加首帧（从资产中选择 / 到节点选择 / 角色库）', 'm1');
     await pickRefNode('添加尾帧（从资产中选择 / 到节点选择 / 角色库）', 'm2');
-    await vi.waitFor(() => {
-      const roles = flowProps.current.edges.map((e: { data?: { refRole?: string } }) => e.data?.refRole);
-      expect(roles).toEqual(expect.arrayContaining(['first', 'last']));
-    });
     await typePrompt('首尾帧驱动');
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
 
     expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1);
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
-    expect(payload.first_frame_asset_id).toBe('a1');
-    expect(payload.last_frame_asset_id).toBe('a2');
+    // IKDJNZ 契约：references 单数组，角色 first_frame / last_frame
+    expect(payload.references).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'first_frame', type: 'image', asset_id: 'a1' }),
+        expect.objectContaining({ role: 'last_frame', type: 'image', asset_id: 'a2' }),
+      ]),
+    );
+    // references 路径不携带旧扁平字段
     expect(payload.reference_asset_ids).toBeUndefined();
+    expect(payload.first_frame_asset_id).toBeUndefined();
+    expect(payload.last_frame_asset_id).toBeUndefined();
     expect(payload.target_node_id).toBe('d1');
   });
 
@@ -514,11 +526,12 @@ describe('IKDMQS 提交推导与组合约束', () => {
     // 画布连线默认按普通参考角色连入，与已有首帧形成混用
     await connect('m1', 'd1');
     await typePrompt('混用输入');
+    // videoRefConflict 返回「首尾帧与普通参考不能混用，请移除其中一类输入」（videoMediaRefs.ts:227）
+    // BottomDialog 在 refConflictHint div 中渲染冲突文本并禁用发送按钮（BottomDialog/index.tsx:832,932）
     await vi.waitFor(() => expect(container.textContent).toContain('首尾帧与普通参考不能混用'));
 
     // 发送按钮被冲突禁用
     expect(sendButton().disabled).toBe(true);
-    expect(container.textContent).toContain('首尾帧与普通参考不能混用');
     await act(async () => { sendButton().click(); });
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
   });
