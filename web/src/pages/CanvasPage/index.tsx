@@ -8,7 +8,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition, type SpawnBox } from './draftSpawn';
-import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, readAssetId, type ImageMediaRef } from './mediaRefs';
+import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, type ImageMediaRef } from './mediaRefs';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
   isVideoDraftNode,
@@ -90,7 +90,7 @@ import {
 import { uploadAssetFile } from '@/utils/upload';
 import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
-import { depositCanvasAssetToCharacterLibrary } from './characterLibraryDeposit';
+import { COMPLIANCE_SUCCESS_TOAST, depositCanvasAssetToCharacterLibrary, resolveCharacterLibraryMaterialId } from './characterLibraryDeposit';
 import { buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
 import {
   availableGenKinds,
@@ -1042,8 +1042,27 @@ export default function CanvasPage() {
     };
   };
 
+  /** 图片/视频已入虚拟人像库时回填 materialId 并点亮合规角标（音频不参与） */
+  const characterLibraryVerifiedPatch = (
+    data: Record<string, unknown>,
+    snapshotMaterialId?: string | null,
+    assetId?: string | number,
+  ): Record<string, unknown> => {
+    const verifiedId = resolveCharacterLibraryMaterialId({
+      mediaType: data.mediaType,
+      snapshotMaterialId,
+      nodeMaterialId: data.materialId,
+      assetId,
+    });
+    if (!verifiedId) return {};
+    const patch: Record<string, unknown> = {};
+    if (data.materialId !== verifiedId) patch.materialId = verifiedId;
+    if (data.compliancePassed !== true) patch.compliancePassed = true;
+    return patch;
+  };
+
   /** 水合期素材解析：所有素材一律用 assetId 匹配 snapshot 资产字典取 access_url，不走节点内嵌 src。
-   *  - 命中 → src 替换为 access_url
+   *  - 命中 → src 替换为 access_url；同时读 material_id，非空视为已入虚拟人像库
    *  - 无 assetId 或字典查不到 → 标缺失（媒体节点 assetMissing / 商品图与参考图 missing），渲染「素材已被删除」
    *  - 无旧素材的生成占位与 blob: 上传预览跳过；重新生成中的旧素材仍需刷新地址。 */
   const resolveNodeAssets = (node: Node): Node => {
@@ -1052,6 +1071,17 @@ export default function CanvasPage() {
       if (data.genStatus && readAssetId(data) === undefined) return node;
       if (typeof data.src === 'string' && (data.src as string).startsWith('blob:')) return node;
       const aid = (data.assetId ?? data.asset_id ?? data.assetID) as string | number | undefined;
+      // 真实人像库等素材库条目不在本地资产字典：保留已持久化的 src，不按 snapshot 标缺失
+      if (isMaterialLibraryId(aid == null ? undefined : String(aid))) {
+        const src = typeof data.src === 'string' ? data.src : '';
+        if (src && !src.startsWith('blob:')) {
+          const patch: Record<string, unknown> = {
+            ...characterLibraryVerifiedPatch(data, undefined, aid),
+          };
+          if (data.assetMissing) patch.assetMissing = undefined;
+          return Object.keys(patch).length === 0 ? node : { ...node, data: { ...data, ...patch } };
+        }
+      }
       const asset = aid != null && aid !== '' ? snapshotAssets[String(aid)] : undefined;
       const url = asset?.access_url;
       if (url) {
@@ -1059,9 +1089,10 @@ export default function CanvasPage() {
         const fill: Record<string, number> = {};
         if (typeof data.width !== 'number' && typeof asset?.width === 'number') fill.width = asset.width;
         if (typeof data.height !== 'number' && typeof asset?.height === 'number') fill.height = asset.height;
-        return data.src === url && !data.assetMissing && Object.keys(fill).length === 0
+        const verified = characterLibraryVerifiedPatch(data, asset.material_id, aid);
+        return data.src === url && !data.assetMissing && Object.keys(fill).length === 0 && Object.keys(verified).length === 0
           ? node
-          : { ...node, data: { ...data, ...fill, src: url, assetMissing: undefined } };
+          : { ...node, data: { ...data, ...fill, ...verified, src: url, assetMissing: undefined } };
       }
       return data.assetMissing ? node : { ...node, data: { ...data, assetMissing: true } };
     }
@@ -2592,7 +2623,28 @@ export default function CanvasPage() {
     const assetId = d.assetId != null ? String(d.assetId) : '';
     const url = typeof d.src === 'string' ? d.src : '';
     const mediaType = d.mediaType === 'video' || d.mediaType === 'audio' ? d.mediaType : 'image';
-    if (!assetId || !url || url.startsWith('blob:')) {
+    const verifiedId = resolveCharacterLibraryMaterialId({
+      mediaType,
+      nodeMaterialId: d.materialId,
+      assetId,
+    });
+    if (d.compliancePassed === true || verifiedId) {
+      showToast('success', COMPLIANCE_SUCCESS_TOAST);
+      if (d.compliancePassed !== true || (verifiedId && d.materialId !== verifiedId)) {
+        setMediaNodes((prev) =>
+          prev.map((n) => (n.id === id ? {
+            ...n,
+            data: {
+              ...n.data,
+              compliancePassed: true,
+              ...(verifiedId ? { materialId: verifiedId } : {}),
+            },
+          } : n)),
+        );
+      }
+      return;
+    }
+    if (!url || url.startsWith('blob:')) {
       showToast('warn', '素材尚未上传完成，请稍后重试');
       return;
     }
@@ -2600,29 +2652,31 @@ export default function CanvasPage() {
       prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, complianceBusy: true } } : n)),
     );
     try {
-      const alreadyBound = typeof d.materialId === 'string' && d.materialId.length > 0;
       const result = await depositCanvasAssetToCharacterLibrary({
         sourceAssetId: assetId,
         url,
         name: typeof d.fileName === 'string' ? d.fileName : '素材',
         mediaType,
-        alreadyBound,
       });
-      showToast('success', '校验通过');
-      if (result === 'deposited') {
-        setMediaNodes((prev) =>
-          prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, materialId: 'bound', complianceBusy: false } } : n)),
-        );
-      } else {
-        setMediaNodes((prev) =>
-          prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, complianceBusy: false } } : n)),
-        );
-      }
+      showToast('success', COMPLIANCE_SUCCESS_TOAST);
+      setMediaNodes((prev) =>
+        prev.map((n) => (n.id === id ? {
+          ...n,
+          data: {
+            ...n.data,
+            complianceBusy: false,
+            compliancePassed: true,
+            ...(result.materialId ? { materialId: result.materialId } : {}),
+          },
+        } : n)),
+      );
     } catch (err) {
       setMediaNodes((prev) =>
         prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, complianceBusy: false } } : n)),
       );
-      showToast('error', err instanceof Error ? err.message : '校验失败，请重试');
+      if (!isApiError(err)) {
+        showToast('error', err instanceof Error ? err.message : '校验失败，请重试');
+      }
     }
   };
 
@@ -2696,6 +2750,8 @@ export default function CanvasPage() {
     const nodes: Node[] = selectedAssets.map((asset) => {
       const fileNameFromUrl = assetDisplayName(asset);
       const nodeId = newNodeId('media');
+      const assetId = String(asset.id);
+      const materialId = isMaterialLibraryId(assetId) ? assetId : undefined;
       return {
         id: nodeId,
         type: 'mediaNode' as const,
@@ -2705,7 +2761,8 @@ export default function CanvasPage() {
           src: asset.url,
           fileName: fileNameFromUrl,
           mediaType: asset.type === 'video' ? 'video' : asset.type === 'audio' ? 'audio' : 'image',
-          assetId: String(asset.id),
+          assetId,
+          ...(materialId ? { materialId, ...(asset.type !== 'audio' ? { compliancePassed: true } : {}) } : {}),
           width: asset.width ?? undefined,
           height: asset.height ?? undefined,
           duration: asset.duration ?? undefined,
@@ -2736,8 +2793,10 @@ export default function CanvasPage() {
     nodes.forEach((node) => pendingNodeIdsRef.current.add(node.id));
     setMediaNodes((prev) => [...prev, ...nodes]);
 
-    // 幂等补关联：素材已属当前项目也无副作用；失败仅提示，不影响节点展示
+    // 幂等补关联：素材已属当前项目也无副作用；失败仅提示，不影响节点展示。
+    // 真实人像库条目是素材库 Asset- 前缀 ID，不能当本地 assets 表 id 去 link。
     selectedAssets.forEach((asset) => {
+      if (isMaterialLibraryId(String(asset.id))) return;
       linkAssetToProject(currentId, asset.id).catch((err) => {
         console.warn('资产关联项目失败：', err);
         showToast('warn', '资产关联项目失败，请稍后重试');
@@ -2810,6 +2869,7 @@ export default function CanvasPage() {
               name: assetDisplayName(a),
               assetId: String(a.id),
               mediaType: a.type === 'video' ? 'video' : 'image',
+              materialId: isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined,
             },
             role,
           ),
@@ -5273,11 +5333,6 @@ export default function CanvasPage() {
               setVideoAssetPickRole(role ?? 'reference');
               openAssetsPicker('videoDraft');
             }}
-            onOpenCharacterLibrary={(role) => {
-              setCharLibPickRole(role ?? 'reference');
-              setCharacterLibraryTarget('video');
-              setShowCharacterLibrary(true);
-            }}
             pickMode={pickTarget === 'video' && pickMode !== 'audio' && pickMode !== 'product' && pickMode !== 'asset' ? pickMode : null}
             videoDraftBinding={
               videoDraftId
@@ -5447,6 +5502,7 @@ export default function CanvasPage() {
                   : undefined
           }
           confirmText={assetsPickerTarget === 'toolbar' ? '插入画布' : '确定'}
+          showLivenessTab={assetsPickerTarget === 'toolbar' || assetsPickerTarget === 'videoDraft'}
         />
       )}
 

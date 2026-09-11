@@ -1,7 +1,7 @@
 /* ============================================
  * BottomDialog 视频对话窗口：模型/时长/宽高比配置与发送
  * 统一草稿绑定模式：参考由「画布连线 + 草稿 material refs」合并推导（首帧/尾帧/普通参考）。
- * 三类来源菜单：从资产中选择（落画布节点+连线）/ 到节点选择（建线）/ 角色库（入草稿 data）。
+ * 两类来源菜单：从资产中选择（落画布节点+连线）/ 到节点选择（建线）。
  * ============================================ */
 import { useState, useRef, useEffect } from 'react';
 import {
@@ -16,7 +16,6 @@ import {
   FolderOpen,
   Maximize2,
   Minimize2,
-  User,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { REF_LIMITS } from '@/utils/ref-overflow';
@@ -94,8 +93,6 @@ interface BottomDialogProps {
   onPickFromAssets?: (kind: 'image' | 'video', role?: VideoRefRole) => void;
   /** 画布选取模式进行中（image/video，对应按钮高亮提示） */
   pickMode?: 'image' | 'video' | null;
-  /** 打开角色库弹窗（role 为目标槽位角色） */
-  onOpenCharacterLibrary?: (role?: VideoRefRole) => void;
   /** 视频草稿绑定（IKDMQS）：面板编辑实时写回草稿节点；status 为 generating 时参数与输入只读 */
   videoDraftBinding: {
     status?: MediaGenStatus;
@@ -267,7 +264,7 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMate
   );
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast }: BottomDialogProps) {
   /** 富文本输入框（自由文本；胶囊机制保留给后续引用场景，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框内容的结构化形态（IKAFSX）：胶囊是指针，解引用只发生在发送那一刻。 */
@@ -301,7 +298,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
   const [duration, setDuration] = useState(0);
   const [modelOpen, setModelOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
-  /** 槽位来源菜单（按 kind+role 区分，一次只弹一个）：从资产中选择 / 到节点选择 / 角色库 */
+  /** 槽位来源菜单（按 kind+role 区分，一次只弹一个）：从资产中选择 / 到节点选择 */
   const [sourceMenuOpen, setSourceMenuOpen] = useState<{ kind: 'image' | 'video'; role: VideoRefRole } | null>(null);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const sizeWrapRef = useRef<HTMLDivElement>(null);
@@ -552,7 +549,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
   };
 
   /** 槽位来源菜单（统一草稿绑定）：按 kind+role 区分目标槽位，一次只弹一个；
-   *  三项来源：从资产中选择（落画布节点+连线）/ 到节点选择（建线）/ 角色库（入草稿 data） */
+   *  两项来源：从资产中选择（落画布节点+连线）/ 到节点选择（建线） */
   const renderSourceMenu = (
     kind: 'image' | 'video',
     role: VideoRefRole,
@@ -587,13 +584,6 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
               >
                 <MousePointerClick size={14} strokeWidth={2} />
                 <span>到节点选择</span>
-              </button>
-              <button
-                className={styles.sourceMenuItem}
-                onClick={() => { setSourceMenuOpen(null); onOpenCharacterLibrary?.(role); }}
-              >
-                <User size={14} strokeWidth={2} />
-                <span>角色库</span>
               </button>
             </div>
           </>
@@ -771,7 +761,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
                 lastSlotOpen={false}
               />
             ) : (
-              !readOnly && canAddFirst && renderSourceMenu('image', 'first', '添加首帧（从资产中选择 / 到节点选择 / 角色库）', Image, '首帧')
+              !readOnly && canAddFirst && renderSourceMenu('image', 'first', '添加首帧（从资产中选择 / 到节点选择）', Image, '首帧')
             )}
             {/* 尾帧（与首帧同一行）：有图时缩略图；无图时占位内展示「尾帧」文字 */}
             {videoMediaRefs.last ? (
@@ -785,7 +775,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
                 lastSlotOpen={false}
               />
             ) : (
-              !readOnly && canAddLast && renderSourceMenu('image', 'last', '添加尾帧（从资产中选择 / 到节点选择 / 角色库）', Image, '尾帧')
+              !readOnly && canAddLast && renderSourceMenu('image', 'last', '添加尾帧（从资产中选择 / 到节点选择）', Image, '尾帧')
             )}
           </div>
         ) : (
@@ -806,8 +796,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
             ))}
             {!readOnly && canAddReference && (
               <>
-                {renderSourceMenu('image', 'reference', '添加图片参考（从资产中选择 / 到节点选择 / 角色库）', Image)}
-                {!isText2Video && renderSourceMenu('video', 'reference', '添加视频参考（从资产中选择 / 到节点选择 / 角色库）', Video)}
+                {renderSourceMenu('image', 'reference', '添加图片参考（从资产中选择 / 到节点选择）', Image)}
+                {!isText2Video && renderSourceMenu('video', 'reference', '添加视频参考（从资产中选择 / 到节点选择）', Video)}
               </>
             )}
             {videoMediaRefs.reference.length > 0 && (

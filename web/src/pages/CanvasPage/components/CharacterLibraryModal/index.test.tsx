@@ -54,27 +54,25 @@ afterEach(async () => {
 });
 
 describe('CharacterLibraryModal', () => {
-  it('loads assets only after opening a group', async () => {
+  it('loads virtual portrait assets as a flat list without groups', async () => {
     await renderLibrary();
-
-    expect(listAssetGroups).toHaveBeenCalledTimes(1);
-    expect(listAssets).not.toHaveBeenCalled();
-
-    const groupCard = [...document.body.querySelectorAll('span')]
-      .find((element) => element.textContent === '虚拟人像')
-      ?.closest(`.${styles.groupCard}`) as HTMLDivElement | null;
-    expect(groupCard).not.toBeNull();
-
     await act(async () => {
-      groupCard?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
       await Promise.resolve();
     });
 
+    expect(listAssetGroups).toHaveBeenCalledWith({
+      Filter: { GroupType: 'AIGC' },
+      PageNumber: 1,
+      PageSize: 100,
+    });
     expect(listAssets).toHaveBeenCalledWith({
       Filter: { GroupIds: ['group-1'], GroupType: 'AIGC' },
       PageNumber: 1,
       PageSize: 100,
     });
+    expect(document.body.querySelector(`.${styles.groupCard}`)).toBeNull();
+    expect(document.body.textContent).not.toContain('点击查看素材');
     expect(document.body.querySelector('img[alt="人像图片"]')).not.toBeNull();
     expect(document.body.querySelector('video[src="https://example.test/video.mp4"]')).not.toBeNull();
     expect(document.body.textContent).toContain('图片');

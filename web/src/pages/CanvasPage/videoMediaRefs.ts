@@ -5,7 +5,7 @@
  * 角色随 edges JSON 原样持久化（服务端零改动，延续 IKDMQR）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
-import { readAssetId } from './mediaRefs';
+import { isMaterialLibraryId, readAssetId } from './mediaRefs';
 import { REF_LIMITS } from '@/utils/ref-overflow';
 
 /** 视频参考角色：reference 普通参考 / first 首帧 / last 尾帧 */
@@ -190,12 +190,19 @@ export function videoMediaRefsOf(
     if (seenAssetIds.has(assetId)) continue;
     if (role !== 'reference' && (role === 'first' ? refs.first : refs.last)) continue;
     seenAssetIds.add(assetId);
+    const materialId =
+      typeof data.materialId === 'string' && data.materialId
+        ? data.materialId
+        : isMaterialLibraryId(assetId)
+          ? assetId
+          : undefined;
     const item: VideoMediaRef = {
       nodeId: source.id,
       url: data.src as string,
       name: typeof data.fileName === 'string' && data.fileName ? data.fileName : source.id,
       assetId,
       mediaType: data.mediaType === 'video' ? 'video' : 'image',
+      materialId,
     };
     if (role === 'reference') refs.reference.push(item);
     else if (role === 'first') refs.first = item;

@@ -456,8 +456,8 @@ describe('IKDMQS 提交推导与组合约束', () => {
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
     // 经 Dock 首帧/尾帧入口显式指定（不按连入顺序猜测）
-    await pickRefNode('添加首帧（从资产中选择 / 到节点选择 / 角色库）', 'm1');
-    await pickRefNode('添加尾帧（从资产中选择 / 到节点选择 / 角色库）', 'm2');
+    await pickRefNode('添加首帧（从资产中选择 / 到节点选择）', 'm1');
+    await pickRefNode('添加尾帧（从资产中选择 / 到节点选择）', 'm2');
     await vi.waitFor(() => {
       const roles = flowProps.current.edges.map((e: { data?: { refRole?: string } }) => e.data?.refRole);
       expect(roles).toEqual(expect.arrayContaining(['first', 'last']));
@@ -479,7 +479,7 @@ describe('IKDMQS 提交推导与组合约束', () => {
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await connect('m1', 'd1');
     await waitModelReady();
-    await pickRefNode('添加首帧（从资产中选择 / 到节点选择 / 角色库）', 'm2');
+    await pickRefNode('添加首帧（从资产中选择 / 到节点选择）', 'm2');
     await typePrompt('混用输入');
     await vi.waitFor(() => expect(container.textContent).toContain('首尾帧与普通参考不能混用'));
 
