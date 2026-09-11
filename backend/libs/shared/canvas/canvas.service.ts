@@ -221,8 +221,7 @@ export class CanvasService {
     for (const edge of incomingEdges) {
       const parsed = canvasEdgeSchema.safeParse(edge);
       if (!parsed.success) throw new BadRequestException("画布连线格式无效，原内容未改动");
-      // 自环（source === target）合法：素材原卡重新编辑引用自身，按普通连线保存；
-      // 媒体参考消费在前端（连线→Dock 推导、提交时换算 input_asset_ids），服务端快照推导仅消费文本边（契约 IKDLQF 修订）。
+      if (parsed.data.source === parsed.data.target) throw new BadRequestException("连线不能指向同一节点，原内容未改动");
       if (!nodeIds.has(parsed.data.source) || !nodeIds.has(parsed.data.target)) throw new BadRequestException("连线端点必须引用本次保存的画布节点，原内容未改动");
       const pair = `${parsed.data.source}\0${parsed.data.target}`;
       if (seenPairs.has(pair)) throw new BadRequestException("同一对节点之间只允许一条连线，原内容未改动");
