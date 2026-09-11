@@ -53,10 +53,10 @@ public class NewApiImageClient {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final MediaType JSON_TYPE = MediaType.get("application/json");
 
-    /** 默认超时 90s——逐字对齐 TS ark-image-provider.ts:102-111（IKDMQE 教训：出图是长调用，
-     *  2k 单图实测 ~19s、多图/大图更久；60s 会把 banana2-i2i 这类慢上游误杀成终态超时，
-     *  线上 job 1820 实证）。env NEW_API_IMAGE_TIMEOUT_MS 可覆盖，留 120s 租约内转存余量。 */
-    private static final int DEFAULT_TIMEOUT_MS = 90_000;
+    /** 默认读超时 240s（banana2/Gemini 系 i2i 实测可超 90s；env NEW_API_IMAGE_TIMEOUT_MS 可覆盖）。
+     *  配套：image claim 租约默认 300s（JobStateMachineService），必须 > 超时 + 转存余量，
+     *  否则 recovery 把在跑的 job 当孤儿重投 → 双跑双扣（比超时重试更糟）。 */
+    private static final int DEFAULT_TIMEOUT_MS = 240_000;
 
     private final OkHttpClient httpClient;
     private final String baseUrl;
@@ -116,12 +116,20 @@ public class NewApiImageClient {
         try {
             response = httpClient.newCall(request).execute();
         } catch (java.net.SocketTimeoutException e) {
-            // 对齐 TS：NewApiTimeoutError instanceof NewApiError → 非内容/非 quota →
-            // provider_failed（瞬态，worker 重试 3 次）。原 provider_timeout 终态是刀③偏差
-            // （那是 video poll 语义），慢上游一次超时就把 job 打死（本地 job 1820 实证）。
-            throw new ImageProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+            // 2026-09-11 政策修订（IKF12J 讨论，用户拍板）：**读超时不重试**——请求已到达上游，
+            // 可能已出图扣费，重试=双扣；归 provider_timeout 终态，靠拉大超时窗口（240s）消化慢上游。
+            // 连接超时（请求未送达，零扣费风险）仍归 provider_failed 瞬态可重试。
+            // 注意：TS 旧行为把超时混进 provider_failed 一并重试，属其双扣隐患——Node 退役中不改，
+            // Java 侧按本政策执行（契约 §11 政策条款）。
+            String msg = String.valueOf(e.getMessage()).toLowerCase();
+            if (msg.contains("connect")) {
+                throw new ImageProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "new-api 图片连接超时: " + e.getMessage());
+            }
+            throw new ImageProviderError(GenerationError.ERROR_PROVIDER_TIMEOUT,
                     "new-api 图片生成超时");
         } catch (Exception e) {
+            // 连接被拒/DNS 等未达上游的 IO 失败 → 瞬态可重试（无扣费风险）。
             throw new ImageProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                     "new-api 图片生成失败: " + e.getMessage());
         }

@@ -100,12 +100,29 @@ class NewApiImageClientEndpointTest {
     }
 
     @Test
-    @DisplayName("HTTP 超时 → provider_failed（瞬态可重试，对齐 TS；非 provider_timeout 终态——IKF12J 偏差③）")
-    void timeoutIsTransientProviderFailed() {
+    @DisplayName("读超时 → provider_timeout 终态不重试（2026-09-11 政策：重试=双扣风险）")
+    void readTimeoutIsTerminalProviderTimeout() {
         NewApiImageClient client = new NewApiImageClient(baseUrl, 300);
         com.bluewhale.worker.domain.error.ImageProviderError error = null;
         try {
             client.generate("t", "nano-banana-2-i2i", "sleep-trig 猫", 1,
+                    null, null, false, false, List.of());
+        } catch (com.bluewhale.worker.domain.error.ImageProviderError e) {
+            error = e;
+        }
+        assertThat(error).isNotNull();
+        assertThat(error.getCode()).isEqualTo(
+                com.bluewhale.worker.domain.error.GenerationError.ERROR_PROVIDER_TIMEOUT);
+    }
+
+    @Test
+    @DisplayName("连接失败（请求未达上游，零扣费风险）→ provider_failed 瞬态可重试")
+    void connectFailureIsTransientProviderFailed() {
+        // 端口 1 无监听 → ConnectException（非 SocketTimeout）→ 通用 IO 分支归瞬态。
+        NewApiImageClient client = new NewApiImageClient("http://127.0.0.1:1", 300);
+        com.bluewhale.worker.domain.error.ImageProviderError error = null;
+        try {
+            client.generate("t", "nano-banana-2-i2i", "猫", 1,
                     null, null, false, false, List.of());
         } catch (com.bluewhale.worker.domain.error.ImageProviderError e) {
             error = e;

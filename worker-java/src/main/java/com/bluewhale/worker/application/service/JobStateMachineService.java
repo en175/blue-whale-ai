@@ -50,6 +50,22 @@ public class JobStateMachineService {
     private static final Logger log = LoggerFactory.getLogger(JobStateMachineService.class);
 
     private static final int LEASE_SECONDS = 120; // 契约 §3.2：IMAGE_JOB_LEASE_SECONDS 默认 120s
+
+    /** image 专用租约（契约 §11 政策条款 2026-09-11）：读超时不重试后 HTTP 超时窗口拉到 240s，
+     *  租约必须盖住「超时 + 结果转存」，否则 recovery 把在跑的 job 当孤儿重投 = 双跑双扣。
+     *  env IMAGE_JOB_LEASE_SECONDS 可覆盖（顺带修复刀③把契约登记的 env 写死成常量的偏差）。 */
+    private static int imageLeaseSeconds() {
+        String raw = System.getenv("IMAGE_JOB_LEASE_SECONDS");
+        if (raw != null) {
+            try {
+                int n = Integer.parseInt(raw.trim());
+                if (n > 0) return n;
+            } catch (NumberFormatException ignored) {
+                // 宽容回落默认（与超时解析语义一致）
+            }
+        }
+        return 300;
+    }
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private final GenerationJobMapper jobMapper;
@@ -331,8 +347,9 @@ public class JobStateMachineService {
             return Optional.empty();
         }
 
-        // 2. CAS 更新（claim-ops.ts:358-372）
-        LocalDateTime leaseExpiresAt = LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(LEASE_SECONDS);
+        // 2. CAS 更新（claim-ops.ts:358-372；租约用 image 专用值，理由见 imageLeaseSeconds 注释）
+        LocalDateTime leaseExpiresAt = LocalDateTime.now(java.time.ZoneOffset.UTC)
+                .plusSeconds(imageLeaseSeconds());
         int affected = jobMapper.claimImageCas(
                 jobIdLong,
                 workerId,

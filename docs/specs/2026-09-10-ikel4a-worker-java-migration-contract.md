@@ -172,3 +172,9 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 - **读取时效**：别名每次执行按 `model_id` 现查能力行（对齐刀③ claim 后查能力的既有模式）；**Java 侧禁止进程级缓存 features**，否则管理端改别名后灰度两侧行为分叉。
 - **消费端目录投影**：`/api/generation/models` 对前端**剥除** `i2i_model_name`（出站调用值，与像素/api_value 同哲学），仅透出 `max_prompt_length`。
 - 数据面变更（同一 migration）：`gpt-image-2-edit` / `nano-banana-2-i2i` 行软删（is_delete=1），其上游名改由主行 `features.i2i_model_name` 承载；uk_provider_model 含软删行，软删名永久不可复用（`create` 冲突语义不变）。
+
+**政策修订（2026-09-11，IKF12J 讨论，用户拍板）——image 超时与重试语义**：
+
+- **读超时不重试**：请求已到达上游、可能已出图扣费，超时重试=双扣风险 → image HTTP 读超时归 `provider_timeout` **终态**（覆盖 §6「image 仅 provider_failed 瞬态」的入口来源：TS 旧链路把超时混进 provider_failed 一并重试，属其隐患，Node 退役中不回改）。**瞬态重试仅保留请求未达上游的连接层失败**（连接拒绝/连接超时/DNS → provider_failed）。
+- **拉大窗口消化慢上游**：`NEW_API_IMAGE_TIMEOUT_MS` 缺省 60s（刀③写死）→ **240s**；image claim 租约必须盖住「超时+转存」→ 缺省 120s → **300s**，改读 `IMAGE_JOB_LEASE_SECONDS` env（顺带修复刀③把本节登记的 env 写死成常量——§3.2 的 120s 缺省仅约束非 image tag）。recovery 侧按 `lease_expires_at` 列判定，自动跟随，无需改 TS 代码。
+- 端点选择回归修正（同单）：恒 `/v1/images/generations` + JSON `image` 字段（单张=字符串、多张=数组）；jiekouAI 渠道设计上拒绝 edits（blue-whale-api `highwayapi/adaptor.go:44,113`），任何 edits 分支即回归（钉桩 `NewApiImageClientEndpointTest`）。
