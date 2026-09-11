@@ -1,4 +1,4 @@
-import { extractTextNodeText } from "@blue-whale/core";
+import { NewApiError, extractTextNodeText } from "@blue-whale/core";
 import { BadRequestException } from "@nestjs/common";
 import { CANVAS_EDGE_LIMITS, promptBindingList, promptBindingsSchema, promptMentionSchema, previewSourceSchema, validPromptMentions, type CanvasEdge, type PromptBinding } from "@blue-whale/contracts";
 import type { ModelCapabilityView } from "@lib/shared/persistence/model-capability-repo.js";
@@ -36,7 +36,7 @@ export function validatePlanModel(nodeId: string, bindings: PromptBinding[], cou
   if (count > model.features.max_reference_images) planError(nodeId, bindings, `参考图最多 ${model.features.max_reference_images} 张，请调整引用或模型`);
 }
 
-export function confirmPlanEdges(nodes: PromptTargetNode[], edges: CanvasEdge[], planNodeId: string, targetNodeId: string) {
+export function confirmPlanEdges(nodes: PromptTargetNode[], edges: CanvasEdge[], planNodeId: string, targetNodeId: string, syncBindings?: PromptBinding[]) {
   const node = nodes.find(n => n.id === planNodeId);
   const target = nodes.find(n => n.id === targetNodeId);
   if (!node || !target || target.type !== "mediaNode" || !["image", "video"].includes(String(target.data?.mediaType))) {
@@ -44,9 +44,21 @@ export function confirmPlanEdges(nodes: PromptTargetNode[], edges: CanvasEdge[],
   }
   if (target.data?.genStatus === "generating") throw new BadRequestException("生成中，输入连线只读");
   const plan = readPromptPlan(node, target.data?.mediaType as "image" | "video");
-  const next = edges.map(e => ({ ...e, ...(e.data ? { data: { ...e.data } } : {}) }));
+  let next = edges.map(e => ({ ...e, ...(e.data ? { data: { ...e.data } } : {}) }));
   const oldPlanEdge = next.find(e => e.source === planNodeId && e.target === targetNodeId);
-  if (oldPlanEdge?.data?.promptReference !== undefined) {
+  if (syncBindings !== undefined) {
+    if (!oldPlanEdge) throw new BadRequestException("方案尚未引用到该目标");
+    if (JSON.stringify(syncBindings) !== JSON.stringify(plan.bindings)) throw new NewApiError("方案素材已变化，请重新确认同步", 412);
+    const requiredIds = new Set(plan.bindings.map(b => b.assetId));
+    next = next.filter(edge => {
+      if (edge.target !== targetNodeId || edge === oldPlanEdge) return true;
+      const sources = edge.data?.inputSources as { manual: boolean; planNodeIds: string[] } | undefined;
+      if (!sources?.planNodeIds.includes(planNodeId) || requiredIds.has(nodeAssetId(nodes.find(n => n.id === edge.source)))) return true;
+      const remaining = sources.planNodeIds.filter(id => id !== planNodeId);
+      edge.data = { ...edge.data, inputSources: { manual: sources.manual, planNodeIds: remaining } };
+      return sources.manual || remaining.length > 0;
+    });
+  } else if (oldPlanEdge?.data?.promptReference !== undefined) {
     const confirmed = promptBindingsSchema.safeParse((oldPlanEdge.data.promptReference as { bindings?: unknown }).bindings);
     if (!confirmed.success || JSON.stringify(confirmed.data) !== JSON.stringify(plan.bindings)) planError(node.id, confirmed.success ? confirmed.data : plan.bindings, "素材待同步，请先同步素材到目标");
   }

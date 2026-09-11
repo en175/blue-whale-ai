@@ -40,9 +40,10 @@ function HandlePlus() {
 }
 
 interface TextNodeData {
+  promptSource?: unknown;
   promptMentions?: PromptMention[];
   promptMaterials?: Array<PromptMaterial & { url: string }>;
-  onPromptChange?: (id: string, text: string, mentions: PromptMention[]) => void;
+  onPromptChange?: (id: string, text: string, mentions: PromptMention[], materials?: Array<PromptMaterial & { url: string }>) => void;
   title?: string;
   onTitleChange?: (id: string, title: string) => void;
   onDraftError?: (id: string, error: string) => void;
@@ -63,7 +64,7 @@ interface TextNodeData {
 
 export default function TextNode({ id, data, selected }: NodeProps & { data: TextNodeData; selected?: boolean }) {
   const plainText = typeof data.text === 'string';
-  const hasPromptBindings = data.promptMentions !== undefined;
+  const hasPromptBindings = Boolean(data.promptSource) || data.promptMentions !== undefined;
   const [contentError, setContentError] = useState('');
   const [titleError, setTitleError] = useState('');
   const [expanded, setExpanded] = useState(false);
@@ -78,6 +79,15 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
   const initializedRef = useRef(false);
+  const draftMaterialsRef = useRef(data.promptMaterials);
+  useEffect(() => { draftMaterialsRef.current = data.promptMaterials; }, [data.promptMaterials]);
+
+  const [selectedMention, setSelectedMention] = useState<number | null>(null);
+  const canvasNodes = useStore(state => state.nodes);
+  const materialChoices = [...new Map(canvasNodes.filter(node => node.type === 'mediaNode' && node.data.assetId && !node.data.assetMissing && node.data.genStatus !== 'generating'
+    && ['image', 'video', 'audio'].includes(String(node.data.mediaType))).map(node => [String(node.data.assetId), {
+      assetId: String(node.data.assetId), mediaType: node.data.mediaType as PromptMaterial['mediaType'], url: String(node.data.src ?? ''), name: String(node.data.fileName || node.data.assetId),
+    }])).values()];
 
   const zoom = useStore((state) => state.transform[2]);
 
@@ -172,10 +182,50 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
     setContentError('');
     data.onDraftError?.(id, titleError);
-    if (prompt) data.onPromptChange?.(id, text, prompt.mentions);
+    if (prompt) data.onPromptChange?.(id, text, prompt.mentions, draftMaterialsRef.current);
     else if (plainText) data.onTextChange?.(id, text);
     else data.onChange?.(id, sanitizeHtml(editorRef.current?.innerHTML || ''));
   }, [data, id, plainText, titleError, hasPromptBindings]);
+
+  const editMaterial = (assetId: string, replaceIndex: number | null) => {
+    const editor = editorRef.current;
+    const material = materialChoices.find(item => item.assetId === assetId);
+    if (!editor || (assetId && !material)) return;
+    const materials = [...(draftMaterialsRef.current ?? [])];
+    if (material && !materials.some(item => item.assetId === material.assetId)) materials.push({ assetId: material.assetId, mediaType: material.mediaType, url: material.url });
+    if (replaceIndex !== null) {
+      for (const chip of editor.querySelectorAll<HTMLElement>('[data-prompt-index]')) {
+        if (Number(chip.dataset.promptIndex) !== replaceIndex) continue;
+        if (!material) chip.remove();
+        else chip.dataset.promptAsset = material.assetId;
+      }
+    } else if (material) {
+      editor.focus();
+      const range = savedRangeRef.current?.cloneRange() ?? document.createRange();
+      if (!editor.contains(range.commonAncestorContainer)) { range.selectNodeContents(editor); range.collapse(false); }
+      const current = readPromptMentions(editor);
+      const index = Math.max(0, ...current.mentions.map(m => m.index)) + 1;
+      const label = `素材#${index}`;
+      const fragment = document.createElement('div');
+      renderPromptMentions(fragment, label, [{ start: 0, end: label.length, assetId, index }], materials);
+      range.deleteContents();
+      const chip = fragment.querySelector<HTMLElement>('[data-prompt-asset]')!;
+      range.insertNode(chip);
+      range.setStartAfter(chip); range.collapse(true);
+      savedRangeRef.current = range;
+    }
+    draftMaterialsRef.current = materials;
+    const prompt = readPromptMentions(editor);
+    renderPromptMentions(editor, prompt.text, prompt.mentions, materials);
+    savedRangeRef.current = null;
+    setSelectedMention(null);
+    if (prompt.text.length > MAX_TEXT_LENGTH) {
+      const error = `正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`;
+      setContentError(error); data.onDraftError?.(id, error); return;
+    }
+    setContentError(''); data.onDraftError?.(id, titleError);
+    data.onPromptChange?.(id, prompt.text, prompt.mentions, materials);
+  };
 
   /** 执行格式化命令 */
   const execCmd = useCallback((cmd: string, value?: string) => {
@@ -417,6 +467,16 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         </div>
       ) : (
         <div className={`${styles.nodeBar} ${selected ? styles.nodeBarVisible : ''} nodrag nopan`}>
+          {hasPromptBindings && <>
+            <select aria-label={selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}
+              className={styles.materialSelect} value="" onPointerDown={event => event.stopPropagation()}
+              onMouseDown={() => saveSelection()}
+              onChange={event => editMaterial(event.target.value, selectedMention)}>
+              <option value="">{selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}</option>
+              {materialChoices.map(material => <option key={material.assetId} value={material.assetId}>{material.name}</option>)}
+            </select>
+            {selectedMention !== null && <button className={styles.toolBtn} onMouseDown={event => event.preventDefault()} onClick={() => editMaterial('', selectedMention)}>删除标签 #{selectedMention}</button>}
+          </>}
           <button className={styles.addToChatBtn} onClick={() => data.onAddToChat?.(id)}>
             <AtSign size={14} strokeWidth={2} />
             <span>添加到对话</span>
@@ -465,11 +525,16 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           onBlur={(e) => {
             // 如果焦点转移到工具栏/颜色面板，保持编辑状态
             const related = e.relatedTarget as HTMLElement | null;
-            if (related && related.closest(`.${styles.toolbar}`)) return;
+            if (related && related.closest(`.${styles.toolbar}, .${styles.nodeBar}`)) return;
             setIsFocused(false);
             setEditing(false);
           }}
           onInput={syncContent}
+          onClick={event => {
+            if (!hasPromptBindings) return;
+            const chip = (event.target as HTMLElement).closest<HTMLElement>('[data-prompt-index]');
+            setSelectedMention(chip ? Number(chip.dataset.promptIndex) : null);
+          }}
           onDoubleClick={(e) => {
             if (!isSelect) return;
             // 双击激活输入，并阻止画布双击居中缩放

@@ -1,3 +1,4 @@
+import PromptSyncActions from '../PromptSyncActions';
 /* ============================================
  * BottomDialog 视频对话窗口：模型/时长/宽高比配置与发送
  * 统一草稿绑定模式：参考由「画布连线 + 草稿 material refs」合并推导（首帧/尾帧/普通参考）。
@@ -87,6 +88,9 @@ interface BottomDialogProps {
   /** 连线文本附件（IKDLQG）：草稿绑定模式由父级按连线实时推导传入 */
   attachments?: ImageTextAttachment[];
   planReferenceError?: string;
+  pendingPlanSyncs?: Array<{ nodeId: string; title: string }>;
+  onSyncPlan?: (nodeId: string) => void;
+  syncingPlan?: boolean;
   planIndices?: string;
   /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；仅多附件时展示控件，缺省不渲染排序入口 */
   onReorderAttachments?: (orderedNodeIds: string[]) => void;
@@ -270,7 +274,7 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMate
   );
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, planReferenceError, planIndices, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast }: BottomDialogProps) {
   /** 富文本输入框（自由文本；胶囊机制保留给后续引用场景，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框内容的结构化形态（IKAFSX）：胶囊是指针，解引用只发生在发送那一刻。 */
@@ -869,6 +873,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
         </div>
       )}
 
+      <PromptSyncActions plans={pendingPlanSyncs} disabled={readOnly || syncingPlan} onSync={onSyncPlan} />
       {configurationError && <div className={styles.refConflictHint} role="alert">{configurationError}</div>}
 
       {/* 输入框：胶囊跟文字同一行 */}
