@@ -300,6 +300,34 @@ export default function AudioDialog({
 
       {/* 顶部参考按钮行（与 ImageDialog/BottomDialog 统一占位视觉；参考上传功能待后续接入） */}
       <div className={styles.topRow}>
+        {/* 已上传的参考音频 chip：点击播放/暂停 */}
+        {refs.map((r) => (
+          <button
+            key={`${r.source}-${r.id}`}
+            type="button"
+            className={`${styles.audioChip} ${playingId === r.id ? styles.audioChipPlaying : ''}`}
+            onClick={() => togglePlay(r)}
+            disabled={readOnly}
+            title={playingId === r.id ? '暂停' : `播放：${r.name}`}
+          >
+            <span className={styles.audioChipIcon}>
+              {playingId === r.id ? <Pause size={13} strokeWidth={2} /> : <Music2 size={13} strokeWidth={2} />}
+            </span>
+            <span className={styles.audioChipName}>{r.name}</span>
+            <span
+              role="button"
+              tabIndex={-1}
+              className={styles.audioChipRemove}
+              onClick={(ev) => {
+                ev.stopPropagation();
+                handleRemoveRef(r.id);
+              }}
+              title="移除"
+            >
+              <XCircle size={14} strokeWidth={2} />
+            </span>
+          </button>
+        ))}
         <div className={styles.refWrap} ref={sourceWrapRef}>
           {refs.length < MAX_AUDIO_REFS ? (
             <>
@@ -360,34 +388,6 @@ export default function AudioDialog({
             </span>
           )}
         </div>
-        {/* 已上传的参考音频 chip：点击播放/暂停 */}
-        {refs.map((r) => (
-          <button
-            key={`${r.source}-${r.id}`}
-            type="button"
-            className={`${styles.audioChip} ${playingId === r.id ? styles.audioChipPlaying : ''}`}
-            onClick={() => togglePlay(r)}
-            disabled={readOnly}
-            title={playingId === r.id ? '暂停' : `播放：${r.name}`}
-          >
-            <span className={styles.audioChipIcon}>
-              {playingId === r.id ? <Pause size={13} strokeWidth={2} /> : <Music2 size={13} strokeWidth={2} />}
-            </span>
-            <span className={styles.audioChipName}>{r.name}</span>
-            <span
-              role="button"
-              tabIndex={-1}
-              className={styles.audioChipRemove}
-              onClick={(ev) => {
-                ev.stopPropagation();
-                handleRemoveRef(r.id);
-              }}
-              title="移除"
-            >
-              <XCircle size={14} strokeWidth={2} />
-            </span>
-          </button>
-        ))}
         <input
           ref={fileInputRef}
           type="file"
@@ -405,7 +405,7 @@ export default function AudioDialog({
         placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。"
         value={text}
         onChange={(e) => handleTextChange(e.target.value.slice(0, MAX_INPUT))}
-        rows={2}
+        rows={4}
         maxLength={MAX_INPUT}
         disabled={readOnly}
       />

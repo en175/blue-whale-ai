@@ -484,40 +484,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         {/* 顶部：素材预览 + 右上角操作 */}
         <div className={styles.topRow}>
           <div className={styles.previewRow}>
-            {/* 左上角图标：媒体来源菜单（上传入口退役，IKDLQR/IKDLQL 方向；保留资产选择/节点选择，
-                画布资产改造融合）。图片达上限或生成中只读时隐藏 */}
-            {!imagesFull && !readOnly && (
-            <div className={styles.sourceWrap} ref={sourceWrapRef}>
-              <button
-                className={`${styles.previewItem} ${styles.previewPlaceholder} ${pickMode ? styles.previewPicking : ''}`}
-                onClick={() => setSourceMenuOpen((v) => !v)}
-                title="从资产中选择 / 到节点选择"
-              >
-                <ImageIcon size={18} strokeWidth={2} />
-              </button>
-              {sourceMenuOpen && (
-                <>
-                  <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(false)} />
-                  <div className={styles.sourceMenu}>
-                    <button
-                      className={styles.sourceMenuItem}
-                      onClick={() => { setSourceMenuOpen(false); onPickFromAssets?.(); }}
-                    >
-                      <FolderOpen size={14} strokeWidth={2} />
-                      <span>从资产中选择</span>
-                    </button>
-                    <button
-                      className={styles.sourceMenuItem}
-                      onClick={() => { setSourceMenuOpen(false); onPickFromCanvas?.(); }}
-                    >
-                      <MousePointerClick size={14} strokeWidth={2} />
-                      <span>到节点选择</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-            )}
             {edgeRefs
               ? edgeRefs.map((r) => (
                   <div key={r.nodeId} className={styles.previewItem} title={r.name} data-testid="dock-media-ref">
@@ -551,6 +517,40 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                 )}
               </div>
             ))}
+            {/* 附件队列末尾：媒体来源菜单（上传入口退役，IKDLQR/IKDLQL 方向；保留资产选择/节点选择，
+                画布资产改造融合）。图片达上限或生成中只读时隐藏 */}
+            {!imagesFull && !readOnly && (
+            <div className={styles.sourceWrap} ref={sourceWrapRef}>
+              <button
+                className={`${styles.previewItem} ${styles.previewPlaceholder} ${pickMode ? styles.previewPicking : ''}`}
+                onClick={() => setSourceMenuOpen((v) => !v)}
+                title="从资产中选择 / 到节点选择"
+              >
+                <ImageIcon size={18} strokeWidth={2} />
+              </button>
+              {sourceMenuOpen && (
+                <>
+                  <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(false)} />
+                  <div className={styles.sourceMenu}>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(false); onPickFromAssets?.(); }}
+                    >
+                      <FolderOpen size={14} strokeWidth={2} />
+                      <span>从资产中选择</span>
+                    </button>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(false); onPickFromCanvas?.(); }}
+                    >
+                      <MousePointerClick size={14} strokeWidth={2} />
+                      <span>到节点选择</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            )}
           </div>
 
           <div className={styles.topActions}>
@@ -614,7 +614,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
             setInputValue(v);
             syncDraftParams({ prompt: v });
           }}
-          rows={3}
+          rows={4}
           maxLength={maxInput}
           disabled={uploading || readOnly}
         />

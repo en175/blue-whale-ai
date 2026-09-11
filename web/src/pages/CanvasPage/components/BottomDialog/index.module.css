@@ -18,8 +18,10 @@
 
 .dialog {
   position: relative;
-  /* 与 ImageDialog/.AudioDialog 固定等高；内容超高时窗口内滚动 */
-  height: 200px;
+  /* 默认输入区保留四行，附件换行时面板向上增长。 */
+  height: auto;
+  min-height: 250px;
+  max-height: calc(100vh - 2 * var(--spacing-lg));
   overflow-y: auto;
   box-sizing: border-box;
   display: flex;
@@ -27,8 +29,6 @@
   background-color: #1e1e1e;
   border: 1px solid var(--color-border-primary);
   border-radius: 16px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   padding: var(--spacing-lg);
 }
@@ -43,10 +43,16 @@
   height: 66.66vh;
 }
 
-/* 输入区包裹层：填充窗口剩余高度，与图片对话窗尺寸对齐 */
+/* 默认四行；展开后填充窗口剩余高度。 */
 .editorWrap {
+  font-size: var(--font-size-md);
+  flex: 0 0 auto;
+  height: 7.2em;
+  min-height: 7.2em;
+}
+
+.dialogExpanded .editorWrap {
   flex: 1;
-  min-height: 0;
 }
 
 /* ---- 连线文本附件（IKDLQG，与 ImageDialog 附件区同构） ---- */
@@ -182,11 +188,11 @@
   flex-wrap: wrap;
 }
 
-/* 媒体缩略图（与按钮同尺寸正方形）——与 ImageDialog/AudioDialog 统一 56×56，圆角 12px */
+/* 媒体缩略图（与按钮同尺寸正方形）——与 ImageDialog/AudioDialog 统一 44.8×44.8，圆角 12px */
 .mediaThumb {
   position: relative;
-  width: 56px;
-  height: 56px;
+  width: 44.8px;
+  height: 44.8px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--color-border-secondary);
@@ -252,10 +258,10 @@
   pointer-events: none;
 }
 
-/* 上传按钮（与缩略图同尺寸正方形）——与 ImageDialog/AudioDialog 统一 56×56，圆角 12px */
+/* 上传按钮（与缩略图同尺寸正方形）——与 ImageDialog/AudioDialog 统一 44.8×44.8，圆角 12px */
 .mediaBtn {
-  width: 56px;
-  height: 56px;
+  width: 44.8px;
+  height: 44.8px;
   border-radius: 12px;
   display: flex;
   align-items: center;
@@ -571,7 +577,7 @@
   font-size: 11px;
   color: var(--color-text-tertiary);
   line-height: 1;
-  margin-top: -4px;
+  margin-top: auto;
 }
 
 .charCountWarn {
@@ -915,6 +921,8 @@
  * IKDMQS 草稿绑定参考角色区：首帧/尾帧/普通参考分组展示连线推导的输入
  * ============================================ */
 .refRoleArea {
+  flex-shrink: 0;
+  padding-right: 64px;
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm, 8px);
@@ -924,7 +932,7 @@
 
 .refSlot {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: var(--spacing-sm, 8px);
 }

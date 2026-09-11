@@ -17,7 +17,9 @@
 
 .dialog {
   position: relative;
-  height: 200px;
+  height: auto;
+  min-height: 250px;
+  max-height: calc(100vh - 2 * var(--spacing-lg));
   overflow-y: auto;
   box-sizing: border-box;
   display: flex;
@@ -27,8 +29,6 @@
   border-radius: 16px;
   padding: var(--spacing-lg);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
 
 /* 唤出动画：与视频/音频对话窗一致，从底部上浮 + 淡入 */
@@ -49,7 +49,7 @@
   gap: var(--spacing-md);
   position: relative;
   flex: 1;
-  min-height: 0;
+  min-height: auto;
 }
 
 .hiddenInput {
@@ -60,6 +60,8 @@
 /* topActions 已改为 absolute（与 BottomDialog/AudioDialog 统一），topRow 仅承载预览行 */
 .topRow {
   display: flex;
+  flex-shrink: 0;
+  padding-right: 64px;
   align-items: flex-start;
   gap: var(--spacing-sm);
 }
@@ -68,14 +70,15 @@
  * 参考图增多时整卡自然增高，底部控件不被覆盖。不加 overflow，避免裁切 sourceMenu 弹出层。 */
 .previewRow {
   display: flex;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: var(--spacing-sm);
 }
 
 .previewItem {
   position: relative;
-  width: 56px;
-  height: 56px;
+  width: 44.8px;
+  height: 44.8px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid #333;
@@ -227,8 +230,14 @@
   outline: none;
   font-family: inherit;
   display: block;
+  flex: 0 0 auto;
+  height: 6.4em;
+  min-height: 6.4em;
+  overflow-y: auto;
+}
+
+.dialogExpanded .textarea {
   flex: 1;
-  min-height: 0;
 }
 
 .textarea::placeholder {
@@ -345,6 +354,8 @@
 
 /* ---- 底部状态栏 ---- */
 .bottomBar {
+  margin-top: auto;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
