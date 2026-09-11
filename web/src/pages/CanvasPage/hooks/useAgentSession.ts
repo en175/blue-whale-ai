@@ -25,13 +25,16 @@ import {
   cancelSessionRun,
   retrySessionRun,
   subscribeSessionEvents,
+  fetchPromptCardRevisions,
   type SessionRecord,
   type SessionRun,
   type SessionContentBlock,
   type SseEvent,
   type PromptCardRecord,
+  type PromptCardRevision,
+  type GenerationCardBlock,
 } from '@/api/agentSessions';
-import { cardsFromRevision } from '@/api/promptCardMapping';
+import { cardsFromRevision, cardsOfRevision } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
 import { estimateOutputTokens, parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
@@ -76,6 +79,7 @@ const api = {
   retrySessionRun,
   setSessionCreativeSkills,
   subscribeSessionEvents,
+  fetchPromptCardRevisions,
 };
 
 /** 对话消息（UI 模型） */
@@ -144,34 +148,89 @@ const str = (v: unknown): string =>
   typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '';
 
 /**
+ * 已经拿到正文的修订版，按 revision_id（IKEV0V）。修订一旦提交就不会再变，所以放模块级、跨会话
+ * 共用。刻意不用 useRef：这个文件的 hook 数量一变，热更新就会撞上 React 的 hook 顺序检查
+ * （见 hydrateCards 的注释）。
+ */
+const revisionCache = new Map<string, PromptCardRevision>();
+
+/**
+ * 把这组卡里还没拿到正文的历史版本取回来，放进 revisionCache。有新取回的返回 true，调用方据此
+ * 重挂一次卡。当前生效的那一版不用取：快照里带着正文，attachCards 挂它时顺手缓存了。
+ */
+async function loadRevisionHistory(
+  projectId: string,
+  sessionId: string,
+  records: PromptCardRecord[] | undefined,
+): Promise<boolean> {
+  const missing = (records ?? []).flatMap((record) =>
+    (record.revisions ?? [])
+      .map((summary) => summary.revision_id)
+      .filter((id) => id !== record.active_revision_id && !revisionCache.has(id)),
+  );
+  if (missing.length === 0) return false;
+  const revisions = await api.fetchPromptCardRevisions(projectId, sessionId, missing);
+  for (const revision of revisions) revisionCache.set(revision.revision_id, revision);
+  return revisions.length > 0;
+}
+
+/**
+ * 把一个修订版的卡挂到写它的那一轮消息尾部。
+ *
+ * 幂等：同一批次可能因重连再次水合，**只替换这一批**，别把别的批次一起抹掉（审查 W·A7）。
+ * cardId 是 `${revision_id}#${shot_no}`，前缀就是这一批的身份：按前缀剥，剥掉的恰好是自己上一次
+ * 挂的那些。
+ */
+function placeCards(
+  messages: ChatMessage[],
+  cards: GenerationCardBlock[],
+  revisionId: string,
+  runId: string | undefined,
+  fallbackToLastAssistant: boolean,
+): ChatMessage[] {
+  if (cards.length === 0) return messages;
+  let idx = runId ? messages.findIndex((m) => m.role === 'assistant' && m.sourceRunId === runId) : -1;
+  if (idx < 0 && fallbackToLastAssistant) idx = messages.map((m) => m.role).lastIndexOf('assistant');
+  if (idx < 0) return messages;
+  const next = [...messages];
+  const mine = `${revisionId}#`;
+  const kept = (next[idx]!.blocks ?? []).filter((b) => b.type !== 'card' || !(b.card?.cardId ?? '').startsWith(mine));
+  const blocks: SessionContentBlock[] = cards.map((card) => ({ type: 'card', card }));
+  next[idx] = { ...next[idx]!, blocks: [...kept, ...blocks] };
+  return next;
+}
+
+/**
  * 把生成卡挂到产出它的那条助手消息上。
  *
  * 卡片正文不在消息里——agent 的助手消息只有正文文字，卡片走 prompt_cards。用 authoring_run_id
- * 对上消息的 source_run_id，把卡片块接在该消息的块尾；对不上就挂到最后一条助手消息，避免
- * 用户明明看到"已出卡"却什么都没有。
+ * 对上消息的 source_run_id，把卡片块接在该消息的块尾。
+ *
+ * - **当前生效的那一版**：对不上就挂到最后一条助手消息，避免用户明明看到"已出卡"却什么都没有。
+ * - **历史版本**（IKEV0V）：改过卡之后，上一版留在写它的那一轮下面——PRD 要求旧卡保留在对话历史中、
+ *   刷新后仍可查看。正文要先由 loadRevisionHistory 取回；还没取回的先不挂。**对不上就不挂**：
+ *   兜底挂到最后一条，正是「旧卡被当成这次的结果」。
  */
-function attachCards(messages: ChatMessage[], records: PromptCardRecord[] | undefined): ChatMessage[] {
-  const withCards = (records ?? []).filter((r) => r.active_revision?.payload?.shots?.length);
-  if (withCards.length === 0) return messages;
-
-  const next = [...messages];
-  for (const record of withCards) {
-    const cards = cardsFromRevision(record);
-    if (cards.length === 0) continue;
-    const blocks: SessionContentBlock[] = cards.map((card) => ({ type: 'card', card }));
-    const runId = record.active_revision?.authoring_run_id;
-    let idx = runId ? next.findIndex((m) => m.role === 'assistant' && m.sourceRunId === runId) : -1;
-    if (idx < 0) idx = next.map((m) => m.role).lastIndexOf('assistant');
-    if (idx < 0) continue;
-    // 幂等：同一批次可能因重连再次水合，**只替换这一批**，别把别的批次一起抹掉（审查 W·A7）。
-    // cardId 是 `${revision_id}#${shot_no}`，前缀就是这一批的身份：按前缀剥，
-    // 剥掉的恰好是自己上一次挂的那些。
-    const revisionId = record.active_revision?.revision_id;
-    const mine = revisionId ? `${revisionId}#` : null;
-    const kept = (next[idx]!.blocks ?? []).filter(
-      (b) => b.type !== 'card' || (mine !== null && !(b.card?.cardId ?? '').startsWith(mine)),
-    );
-    next[idx] = { ...next[idx]!, blocks: [...kept, ...blocks] };
+export function attachCards(
+  messages: ChatMessage[],
+  records: PromptCardRecord[] | undefined,
+  /** 已取回正文的修订版。只有测试会传；运行时用模块级那一份。 */
+  cache: Map<string, PromptCardRevision> = revisionCache,
+): ChatMessage[] {
+  let next = messages;
+  for (const record of records ?? []) {
+    const sessionId = record.session_id ?? '';
+    for (const summary of record.revisions ?? []) {
+      if (summary.revision_id === record.active_revision_id) continue;
+      const revision = cache.get(summary.revision_id);
+      if (!revision) continue;
+      next = placeCards(next, cardsOfRevision(sessionId, revision), revision.revision_id, summary.authoring_run_id, false);
+    }
+    const active = record.active_revision;
+    if (!active?.payload?.shots?.length) continue;
+    // 它下一次改卡后就成了历史版本，先缓存，到时候不必再取一遍。
+    cache.set(active.revision_id, active);
+    next = placeCards(next, cardsFromRevision(record), active.revision_id, active.authoring_run_id, true);
   }
   return next;
 }
@@ -413,6 +472,11 @@ export function useAgentSession(projectId: string, agentModel?: string) {
           const snap = await api.fetchSessionSnapshot(projectId, sid);
           if (sessionIdRef.current !== sid) return; // 期间切走了会话，丢弃
           commit((prev) => ({ ...prev, messages: attachCards(prev.messages, snap.prompt_cards) }));
+          // 历史版本的正文另取，取回来再挂一次（IKEV0V）。当前这一版已经在上面挂好了，这一步失败不影响它。
+          if (await loadRevisionHistory(projectId, sid, snap.prompt_cards)) {
+            if (sessionIdRef.current !== sid) return;
+            commit((prev) => ({ ...prev, messages: attachCards(prev.messages, snap.prompt_cards) }));
+          }
         } catch (e) {
           console.warn('回查生成卡失败:', e);
         }
@@ -633,6 +697,14 @@ export function useAgentSession(projectId: string, agentModel?: string) {
           })
           .catch((e) => console.warn('回读对话引用快照失败:', e));
       }
+      // IKEV0V：改过卡的会话，之前的版本要挂回各自那一轮。快照只带当前那一版的正文，历史版本另取；
+      // 失败只少几张旧卡，当前那一版已经挂好了。
+      loadRevisionHistory(projectId, session.session_id, snap.prompt_cards)
+        .then((changed) => {
+          if (!changed || connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return;
+          commit((prev) => ({ ...prev, messages: attachCards(prev.messages, snap.prompt_cards) }));
+        })
+        .catch((e) => console.warn('取回历史生成卡失败:', e));
       if (liveRun?.run_id) {
         if (liveRun.status === 'payment_required') {
           setStreaming(false);

@@ -154,8 +154,8 @@ export interface GenerationCardBlock {
   shotTitle: string;
   /** 时间范围，如 0-4s */
   timeRange?: string;
-  /** 画面描述 */
-  visual: string;
+  /** 画面描述。只有 V3 旧卡有；V4 起画面并进了提示词（IKEV0K）。 */
+  visual?: string;
   /** 分镜提示词 */
   prompt: string;
   /** 素材引用（@名称）。保留给旧数据与纯文本场景；有身份的引用走 assetRefItems。 */
@@ -238,11 +238,15 @@ export interface SessionRun {
  * 这里刻意保留 agent 的字段名与结构，不在传输层改形状：翻译成侧边栏卡片模型的动作
  * 集中在 useAgentSession 的映射函数里，只有一处需要跟着协议变。 */
 
-/** 单镜头（V3 $defs.shotCard） */
+/** 单镜头（V4 $defs.shotCard） */
 export interface PromptCardShot {
   shot_no: number;
   title: string;
-  frame_description: string;
+  /**
+   * 画面描述。卡结构 V4 起删除（IKEV0K）：每一镜只留一段提示词，画面、时长、口播字幕都写在里面。
+   * 只有 V3 的旧卡还带着它。
+   */
+  frame_description?: string;
   prompt_text: string;
   asset_bindings: { asset_ref_id: string; role?: string; strength?: string; note?: string }[];
   generation_suggestions?: {
@@ -273,20 +277,37 @@ export interface PromptCardRevisionPayload {
   assets: PromptCardAssetProvenance[];
 }
 
+/** 一个修订版：快照的 active_revision 与按版本号读取接口返回的元素是同一个形状 */
+export interface PromptCardRevision {
+  revision_id: string;
+  card_id: string;
+  authoring_run_id?: string;
+  revision_number: number;
+  schema_version: number;
+  payload: PromptCardRevisionPayload;
+}
+
+/** 修订版的身份与出处，不带正文（IKEV0V）。正文用 fetchPromptCardRevisions 按版本号取。 */
+export interface PromptCardRevisionSummary {
+  revision_id: string;
+  revision_number: number;
+  /** 写这一版的那一轮：卡挂到 source_run_id 与它相同的那条助手消息下面 */
+  authoring_run_id: string;
+  created_at: string;
+}
+
 /** 快照里的生成卡组：一个 Session 一组，active_revision 是当前生效版本 */
 export interface PromptCardRecord {
   card_id: string;
   session_id?: string;
   active_revision_id?: string;
   revision_count?: number;
-  active_revision?: {
-    revision_id: string;
-    card_id: string;
-    authoring_run_id?: string;
-    revision_number: number;
-    schema_version: number;
-    payload: PromptCardRevisionPayload;
-  } | null;
+  active_revision?: PromptCardRevision | null;
+  /**
+   * 这组卡的每一版，旧的在前（IKEV0V）。改过卡之后，上一版要留在写它的那一轮下面——PRD 要求
+   * 旧卡保留在对话历史中、刷新后仍可查看。老版本的 agent 不发这个字段。
+   */
+  revisions?: PromptCardRevisionSummary[];
 }
 
 /** 会话快照（水合入口） */
@@ -395,6 +416,34 @@ export function fetchSessionSnapshot(projectId: string, sessionId: string): Prom
   ).finally(() => snapshotPending.delete(key));
   snapshotPending.set(key, p);
   return p;
+}
+
+/** 按版本号读取接口一次最多接受的 id 数（agent 侧 MAX_REVISION_IDS_PER_READ）。 */
+const REVISION_IDS_PER_READ = 20;
+
+/**
+ * 按版本号取生成卡的历史修订 GET /projects/:id/sessions/:sid/prompt-card-revisions?revision_ids=（IKDOF0）。
+ *
+ * 快照只带当前生效的那一版正文；之前的版本要在这里取，否则改过一次卡，上一版就从对话里消失了
+ * （IKEV0V）。修订一旦提交就不会再变，调用方可以放心缓存。超过单次上限时分批取。
+ */
+export async function fetchPromptCardRevisions(
+  projectId: string,
+  sessionId: string,
+  revisionIds: string[],
+): Promise<PromptCardRevision[]> {
+  const batches: string[][] = [];
+  for (let i = 0; i < revisionIds.length; i += REVISION_IDS_PER_READ) {
+    batches.push(revisionIds.slice(i, i + REVISION_IDS_PER_READ));
+  }
+  const results = await Promise.all(
+    batches.map((ids) =>
+      sessionRequest<{ revisions?: PromptCardRevision[] }>(
+        `${agentPath('list_prompt_card_revisions', projectId, { session_id: sessionId })}?revision_ids=${encodeURIComponent(ids.join(','))}`,
+      ),
+    ),
+  );
+  return results.flatMap((result) => result.revisions ?? []);
 }
 
 /**
