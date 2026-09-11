@@ -339,7 +339,7 @@ describe('IKDMQR Dock 选择 → 连线', () => {
 
   it('Dock 选取先显示暂存参考，发送时建立连线并消费同一资产', async () => {
     await renderPage();
-    await createDraft();
+    const draftId = await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
     // Dock 进入选取模式
