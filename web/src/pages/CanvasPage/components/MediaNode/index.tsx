@@ -319,7 +319,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   };
 
   return (
-    <div className={`${styles.wrapper} ${selected ? styles.selected : ''}`} onContextMenu={handleContextMenu} style={{ ...nodeTitleSizing(zoom), width: contentBox.width }}>
+    <div
+      className={`${styles.wrapper} ${selected ? styles.selected : ''}`}
+      data-media-type={data.mediaType ?? 'image'}
+      onContextMenu={handleContextMenu}
+      style={{ ...nodeTitleSizing(zoom), width: contentBox.width }}
+    >
       {/* 选中态悬浮工具条：重新编辑/生成图片/生成视频/生成音频 + 详情/下载/@（位于外部标题上方） */}
       {selected && !data.genStatus && !data.assetMissing && !isEmptyShell && (
         <div className={`nodrag nopan ${styles.toolbar}`} onMouseDown={stop}>

@@ -212,7 +212,7 @@ export default function CanvasPage() {
   const [showImageDialog, setShowImageDialog] = useState(false);
   /** 「到节点选择」：画布节点选取模式（image/video/audio 对应三个底部对话框；product 商品卡选图） */
   const [pickMode, setPickMode] = useState<'image' | 'video' | 'audio' | 'product' | 'asset' | null>(null);
-  /** 选取发起对话框（决定选取结果注入哪个对话框；视频对话框可同时选图片/视频节点） */
+  /** 选取发起对话框（决定选取结果注入哪个对话框；视频对话框图片槽/首尾帧只选图片节点，视频槽只选视频节点） */
   const [pickTarget, setPickTarget] = useState<'image' | 'video' | 'audio' | 'product' | 'asset' | null>(null);
   /** 视频草稿「到节点选择」的目标参考角色（IKDMQS）：首帧/尾帧由 Dock 入口显式指定，缺省普通参考 */
   const [pickRefRole, setPickRefRole] = useState<VideoRefRole | null>(null);
@@ -1580,10 +1580,17 @@ export default function CanvasPage() {
       return;
     }
     // IKDMQS：视频草稿绑定面板的「到节点选择」建立来源→草稿连线，角色由发起入口显式指定
-    // （首帧/尾帧/普通参考）；普通参考对图片与视频来源均开放。
+    // （首帧/尾帧/普通参考）；首尾帧与图片参考槽只接受图片节点，视频参考槽仍只走视频入口。
     // 自由模式（工具栏入口无草稿卡）：来源存本地参考，不落画布不连线
     if (pickTarget === 'video' && (pickMode === 'image' || pickMode === 'video')) {
-      if (videoDraftId) {
+      const isFrameSlot = pickRefRole === 'first' || pickRefRole === 'last';
+      // 首尾帧 / 图片参考：点到非图片媒体时提示并保持选取，避免误带入视频节点
+      if ((isFrameSlot || pickMode === 'image') && (node.type !== 'mediaNode' || data.mediaType !== 'image')) {
+        if (node.type === 'mediaNode') {
+          showToast('warn', isFrameSlot ? '首尾帧仅支持图片素材' : '请选择图片节点');
+          return;
+        }
+      } else if (videoDraftId) {
         if (node.type === 'mediaNode' && validateVideoRefConnect(node.id, videoDraftId, pickRefRole ?? undefined)) {
           const d = (node.data ?? {}) as Record<string, unknown>;
           const assetId = readAssetId(d);
@@ -5037,7 +5044,7 @@ export default function CanvasPage() {
       />
 
       {/* 画布区域 */}
-      <div className={styles.canvasWrapper}>
+      <div className={`${styles.canvasWrapper} ${pickMode === 'image' ? styles.pickingImage : ''}`}>
         {applying && <div role="status" style={{ position: 'fixed', inset: 0, zIndex: 10000, cursor: 'wait' }}>正在应用预览…</div>}
       <FlowCanvas
           showMiniMap={showMiniMap}
@@ -5340,7 +5347,9 @@ export default function CanvasPage() {
         {/* 节点选取模式提示条 */}
         {pickMode && pickTarget && (showImageDialog || showBottomDialog || showAudioDialog || pickMode === 'product' || pickMode === 'asset') && (
           <div className={styles.pickHint}>
-            {pickMode === 'image' && '到节点选择：点击画布中的图片节点带入参考图，点击空白处取消'}
+            {pickMode === 'image' && ((pickRefRole === 'first' || pickRefRole === 'last')
+              ? '到节点选择：点击画布中的图片节点带入首帧/尾帧，点击空白处取消'
+              : '到节点选择：点击画布中的图片节点带入参考图，点击空白处取消')}
             {pickMode === 'video' && '到节点选择：点击画布中的视频节点带入参考视频，点击空白处取消'}
             {pickMode === 'audio' && '到节点选择：点击画布中的音频节点带入参考音频，点击空白处取消'}
             {pickMode === 'product' && '到节点选择：点击画布中的图片节点带入商品图，点击空白处取消'}

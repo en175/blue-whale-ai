@@ -16,6 +16,11 @@
   position: relative;
 }
 
+/* 到节点选择（图片 / 首尾帧）：非图片节点降亮，提示只能点图片节点 */
+.pickingImage :global(.react-flow__node:not(:has([data-media-type="image"]))) {
+  opacity: 0.35;
+}
+
 /* ---- 左下角按钮组 ---- */
 .bottomLeftActions {
   position: absolute;
