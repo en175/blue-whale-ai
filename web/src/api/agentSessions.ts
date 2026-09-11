@@ -232,6 +232,12 @@ export interface SessionRun {
   /** 终态真实用量；缺失时状态行退回按字符数估算。 */
   token_usage?: unknown;
   context_capacity?: unknown;
+  /**
+   * 这一轮要写生成卡、但没写出来（IKEV0V）。只在聊天里改卡时出现：那一轮照常 completed，
+   * 只是没有新卡，侧边栏还挂着上一版——不把这句显示出来，用户会把旧卡当成这次改出来的。
+   * 确认后首次写卡失败不走这里，那一轮是 failed，失败说明在 `failure` 里。
+   */
+  prompt_card_failure?: { code?: string; message?: string } | null;
 }
 
 /* ---- 生成卡批次（agent 侧 Prompt Card Revision Schema V3 的原样投影） ----

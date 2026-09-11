@@ -1977,3 +1977,22 @@
 .turnFooterFailed {
   color: var(--color-error);
 }
+
+/* 完成了、但卡没写出来（IKEV0V）：不是整轮失败，用提醒色，不用错误色。 */
+.turnFooterCardFailed {
+  color: var(--color-warning);
+}
+
+.turnFooterRetry {
+  flex: none;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--color-accent-agent);
+  cursor: pointer;
+}
+
+.turnFooterRetry:hover {
+  text-decoration: underline;
+}

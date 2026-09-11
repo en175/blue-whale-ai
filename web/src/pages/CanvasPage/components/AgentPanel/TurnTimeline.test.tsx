@@ -149,6 +149,7 @@ describe('TurnFooter', () => {
     tokenUsage: { input_tokens: 12217, cached_input_tokens: 7799, output_tokens: 791, reasoning_tokens: 452 },
     contextCapacity: { used_input_tokens: 6536, configured_max_tokens: 200000, ratio: 0.033, compaction_state: 'none' },
     failureText: null,
+    cardFailureText: null,
   };
 
   it('完成：只有符号和数字，不写「已完成」', async () => {
@@ -163,6 +164,35 @@ describe('TurnFooter', () => {
       root.render(createElement(TurnFooter, { account: { ...base, outcome: 'cancelled', seconds: 5, tokenUsage: null, contextCapacity: null } }));
     });
     expect(mountNode.textContent).toBe('⊘已取消5s');
+  });
+
+  // IKEV0V：聊天里改卡没改成，那一轮照常完成、侧边栏还挂着上一版。不交代的话，
+  // 用户会把旧卡当成这次改出来的。
+  it('完成了但卡没写出来：写后端那句话；给了 onRetryCard 才有「再试一次」，点了就调它', async () => {
+    const account = { ...base, cardFailureText: '这次没能写出生成卡，请重试。', tokenUsage: null, contextCapacity: null };
+    await render(createElement(TurnFooter, { account }));
+    expect(mountNode.textContent).toBe('!这次没能写出生成卡，请重试。17s');
+    expect(mountNode.querySelector('button')).toBeNull();
+
+    const onRetryCard = vi.fn();
+    await act(async () => {
+      root.render(createElement(TurnFooter, { account, onRetryCard }));
+    });
+    const button = mountNode.querySelector('button');
+    expect(button?.textContent).toBe('再试一次');
+    await act(async () => button!.click());
+    expect(onRetryCard).toHaveBeenCalledTimes(1);
+  });
+
+  it('失败的轮不看 cardFailureText：整轮失败的说明优先', async () => {
+    await render(
+      createElement(TurnFooter, {
+        account: { ...base, outcome: 'failed', failureText: '余额不足', cardFailureText: '这次没能写出生成卡，请重试。', tokenUsage: null, contextCapacity: null },
+        onRetryCard: vi.fn(),
+      }),
+    );
+    expect(mountNode.textContent).toBe('✕余额不足17s');
+    expect(mountNode.querySelector('button')).toBeNull();
   });
 
   it('一个数都没有、也没话可说时不画', async () => {
