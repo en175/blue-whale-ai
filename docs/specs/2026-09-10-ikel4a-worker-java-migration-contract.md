@@ -14,6 +14,8 @@
   - §6 audio/image/video 结算联动、§8 `publishVideoResult` settle 字段 → 删
   - §4 `claim` 投影中的 `reservedAmountFen`（video）→ 删
 
+**修正三（2026-09-10 用户拍板）**：模型上游**只保留 new-api 网关一套**，火山 ARK 直连通道（`ark-image-provider.ts`、`GENERATION_PROVIDER=ark`、`VOLC_ARK_*`）**整体下线、不迁移**。刀③ image 移植范围剔除 ark 兜底与 `ark-image-provider.ts:141-157` 分类路径；TS 侧清理由新子单承接，刀③ 开工前提追加「ARK 下线单已合入」。TOS 对象存储不属模型直连，**不受本修正影响**。
+
 **修正二（2026-09-10 用户二次拍板）**：薄执行器撤回，**Java 直连 DB 移植**。目标模型：TS 侧只发任务（建 job + 投 MQ + recovery 重投 + GC），Java 侧做任务（claim → 调上游 → 终态写），**双方只经数据库与 MQ 交互，无 HTTP**。§3 定位从「权威单源、不迁移」改为「**移植规格**」：Java 用 MyBatis-Plus 逐条实现并以金标测试套件对账；§4 endpoints **不采纳**，保留作移植职能清单（签名对照见附录 B）。刀① 不受影响；刀②③④ 开工前提 = IKEF1K 已合入 master。
 - **原则**：领域规则权威在 NestJS backend 侧；§3/§4 描述的实现**不迁移、只暴露**——Java 侧经 internal endpoints 使用，禁止二次实现。
 - 文件行号基线 = 本地 master `59ba3282`。
@@ -122,7 +124,7 @@
 
 ## 附录 A：按 job 类型的错误码赋值点（行号基线 `59ba3282`）
 
-- image（`generation-worker.ts`）：`unsupported_type:288`、`invalid_input:303`、`model_unavailable:338`、`invalid_reference:349/362`、`provider_credential_missing:502`、`invalid_reference_type:537/550`、`unsupported_input:558`、`no_result:600`、catch-all `:687-692`；provider 分类 `ark-image-provider.ts:141-157`（content_rejected > quota_exhausted > provider_failed）。
+- image（`generation-worker.ts`）：`unsupported_type:288`、`invalid_input:303`、`model_unavailable:338`、`invalid_reference:349/362`、`provider_credential_missing:502`、`invalid_reference_type:537/550`、`unsupported_input:558`、`no_result:600`、catch-all `:687-692`；~~provider 分类 `ark-image-provider.ts:141-157`~~（**修正三：ARK 直连整体下线，不移植**；new-api 通道自身分类路径保留）。
 - audio：`provider_credential_missing:370`、`model_unavailable:381`、`reference_asset_unavailable:395`；provider `new-api-audio-provider.ts:119-163`（同上优先级）、timeout `:101`、no-json `:140`。
 - video（`video-job-runner.ts`）：credential `:220`、`invalid_input:311/605`、`invalid_reference:652-670`、`invalid_reference_type:632/638`、`reference_asset_unavailable:679/769`、`unsupported_input:709/722`、poll 超时 `:273`、catch-all `:365`；提交超时 30s / 轮询 10s（`new-api-video-task-provider.ts:51-53`）。
 - media_extract（`media-extract-runner.ts`）：`invalid_input:210`、`source_asset_unavailable:221`、MediaExtractError/回退 `media_extract_failed:305`。
@@ -152,3 +154,9 @@
 | `requeueImageJobForRetry` | 位置参 `(jobId, nextActionAt: Date)`；**无 fence 入参——Java 移植时以其 SQL 实况为准，金标用例单列** | :114 |
 
 BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 列 BigInt；Java 用 `long`；`id/project_id/user_id` 字符串承载。
+
+## 10. 实施注记（本地全栈联调 2026-09-10 实锤，双端共同遵守）
+
+- **DATETIME 时基 = UTC naive**：Prisma/TS 写入均为 UTC 挂钟值；Java 侧一切写库时刻必须 `LocalDateTime.now(ZoneOffset.UTC)`。教训：用本地钟写 `next_action_at`/`lease_expires_at` 会让 requeue 单在服务端 `NOW()`（UTC）视角躲进未来 8 小时、claim 永不可见（1808 实锤）。金标镜像断言的时间窗基准同 UTC。
+- **invisible 窗与慢 handler**：`receive(10, 30s)` 下 handler 超 30s（如带参考图的 image 编辑）必然引发 broker 重投；重复投递由「lease 未过期 + fencing」在 claim 处静默拦截（1809 实锤：两次 handle、一次 CAS 生效、零重复副作用）。消费端 `ack 失败` WARN 属预期噪音，不作为故障告警。
+- **edits 参考图必须传字节**（`new-api-generation-ops.ts` 语义），传 URL 字符串网关 400；key 前缀 `uploads/{userId}/image/...` 的 userId 取自 job.user_id，禁止 0 兜底。
