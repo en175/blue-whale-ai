@@ -149,7 +149,7 @@ public class ImageJobProcessor implements JobProcessor {
         // 瞬态重试（generation-worker.ts:705-725）
         if (isTransientImageError(errorCode) && job.retry_count() < MAX_IMAGE_RETRIES) {
             long backoffMs = imageRetryBackoffMs(job.retry_count());
-            java.time.LocalDateTime nextActionAt = java.time.LocalDateTime.now()
+            java.time.LocalDateTime nextActionAt = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)
                     .plusNanos(backoffMs * 1_000_000L);
             boolean requeued = stateMachine.requeueImageJobForRetry(job.id(), nextActionAt);
             if (requeued) {
@@ -445,7 +445,7 @@ public class ImageJobProcessor implements JobProcessor {
 
         // TOS 上传
         try {
-            TosMediaStorage.UploadResult uploaded = tosService.uploadImageBytes(content, mime);
+            TosMediaStorage.UploadResult uploaded = tosService.uploadImageBytes(content, mime, userId);
             return new StoredImage(uploaded.url(), uploaded.storageKey(),
                     mime, (long) content.length, width, height);
         } catch (Exception e) {

@@ -225,8 +225,8 @@ class ImageJobProcessorErrorMappingTest {
         verify(stateMachine).requeueImageJobForRetry(eq("100"), captor.capture());
         LocalDateTime nextActionAt = captor.getValue();
         // nextActionAt ≈ now + 30s
-        assertThat(nextActionAt).isAfter(LocalDateTime.now().plusSeconds(25));
-        assertThat(nextActionAt).isBefore(LocalDateTime.now().plusSeconds(35));
+        assertThat(nextActionAt).isAfter(LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(25));
+        assertThat(nextActionAt).isBefore(LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(35));
 
         // 不应调用 failJob
         verify(stateMachine, never()).failJob(anyString(), anyString(), anyString(),
@@ -260,8 +260,8 @@ class ImageJobProcessorErrorMappingTest {
         verify(stateMachine).requeueImageJobForRetry(eq("100"), captor.capture());
         LocalDateTime nextActionAt = captor.getValue();
         // nextActionAt ≈ now + 60s
-        assertThat(nextActionAt).isAfter(LocalDateTime.now().plusSeconds(55));
-        assertThat(nextActionAt).isBefore(LocalDateTime.now().plusSeconds(65));
+        assertThat(nextActionAt).isAfter(LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(55));
+        assertThat(nextActionAt).isBefore(LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(65));
     }
 
     @Test
@@ -291,8 +291,8 @@ class ImageJobProcessorErrorMappingTest {
         verify(stateMachine).requeueImageJobForRetry(eq("100"), captor.capture());
         LocalDateTime nextActionAt = captor.getValue();
         // nextActionAt ≈ now + 120s
-        assertThat(nextActionAt).isAfter(LocalDateTime.now().plusSeconds(115));
-        assertThat(nextActionAt).isBefore(LocalDateTime.now().plusSeconds(125));
+        assertThat(nextActionAt).isAfter(LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(115));
+        assertThat(nextActionAt).isBefore(LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(125));
     }
 
     @Test

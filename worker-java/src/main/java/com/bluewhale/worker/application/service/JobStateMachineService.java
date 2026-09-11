@@ -93,7 +93,7 @@ public class JobStateMachineService {
         }
 
         // 2. CAS 更新（claim-ops.ts:472-486）
-        LocalDateTime leaseExpiresAt = LocalDateTime.now().plusSeconds(LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(LEASE_SECONDS);
         int affected = jobMapper.claimMediaExtractCas(
                 jobIdLong,
                 workerId,
@@ -126,7 +126,7 @@ public class JobStateMachineService {
     public boolean updateMediaExtractProgress(UpdateMediaExtractProgressDto input) {
         Long jobIdLong = Long.parseLong(input.jobId());
         int clampedProgress = Math.max(0, Math.min(99, Math.round((float) input.progress())));
-        LocalDateTime leaseExpiresAt = LocalDateTime.now().plusSeconds(LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(LEASE_SECONDS);
         int affected = jobMapper.updateMediaExtractProgress(
                 jobIdLong, input.workerId(), input.fencingToken(),
                 clampedProgress, leaseExpiresAt);
@@ -160,8 +160,8 @@ public class JobStateMachineService {
         }
         asset.setSource("generated");
         asset.setStatus("normal");
-        asset.setGmtCreate(LocalDateTime.now());
-        asset.setGmtModified(LocalDateTime.now());
+        asset.setGmtCreate(LocalDateTime.now(java.time.ZoneOffset.UTC));
+        asset.setGmtModified(LocalDateTime.now(java.time.ZoneOffset.UTC));
         asset.setVersion(0);
         asset.setIsDelete(false);
         assetMapper.insert(asset);
@@ -175,7 +175,7 @@ public class JobStateMachineService {
         logEntry.setStatus("succeeded");
         logEntry.setMessage("音频已提取");
         logEntry.setPayload(toJson(Map.of("asset_ids", List.of(asset.getId().toString()))));
-        logEntry.setOccurredAt(LocalDateTime.now());
+        logEntry.setOccurredAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
         jobLogMapper.insert(logEntry);
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
@@ -226,7 +226,7 @@ public class JobStateMachineService {
         logEntry.setEvent("failed");
         logEntry.setStatus("failed");
         logEntry.setMessage(input.code() + ": " + input.message());
-        logEntry.setOccurredAt(LocalDateTime.now());
+        logEntry.setOccurredAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
         jobLogMapper.insert(logEntry);
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
@@ -271,7 +271,7 @@ public class JobStateMachineService {
         }
 
         // 2. CAS 更新（claim-ops.ts:417-431）
-        LocalDateTime leaseExpiresAt = LocalDateTime.now().plusSeconds(LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(LEASE_SECONDS);
         int affected = jobMapper.claimAudioCas(
                 jobIdLong,
                 workerId,
@@ -326,7 +326,7 @@ public class JobStateMachineService {
         }
 
         // 2. CAS 更新（claim-ops.ts:358-372）
-        LocalDateTime leaseExpiresAt = LocalDateTime.now().plusSeconds(LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(LEASE_SECONDS);
         int affected = jobMapper.claimImageCas(
                 jobIdLong,
                 workerId,
@@ -564,7 +564,7 @@ public class JobStateMachineService {
         logEntry.setEvent("failed");
         logEntry.setStatus("failed");
         logEntry.setMessage(errorCode + ": " + errorMessage);
-        logEntry.setOccurredAt(LocalDateTime.now());
+        logEntry.setOccurredAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
         jobLogMapper.insert(logEntry);
 
         // 5. project_events（settle-ops.ts:280-319）
@@ -654,8 +654,8 @@ public class JobStateMachineService {
         }
         asset.setSource("generated");
         asset.setStatus("normal");
-        asset.setGmtCreate(LocalDateTime.now());
-        asset.setGmtModified(LocalDateTime.now());
+        asset.setGmtCreate(LocalDateTime.now(java.time.ZoneOffset.UTC));
+        asset.setGmtModified(LocalDateTime.now(java.time.ZoneOffset.UTC));
         asset.setVersion(0);
         asset.setIsDelete(false);
         assetMapper.insert(asset);
@@ -691,7 +691,7 @@ public class JobStateMachineService {
         if (payload != null) {
             logEntry.setPayload(toJson(payload));
         }
-        logEntry.setOccurredAt(LocalDateTime.now());
+        logEntry.setOccurredAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
         jobLogMapper.insert(logEntry);
     }
 
@@ -712,10 +712,10 @@ public class JobStateMachineService {
         event.setAggregateId(aggregateId);
         event.setAggregateVersion(aggregateVersion);
         event.setCorrelationId(correlationId);
-        event.setOccurredAt(LocalDateTime.now());
+        event.setOccurredAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
         event.setPayload(toJson(payload));
-        event.setGmtCreate(LocalDateTime.now());
-        event.setGmtModified(LocalDateTime.now());
+        event.setGmtCreate(LocalDateTime.now(java.time.ZoneOffset.UTC));
+        event.setGmtModified(LocalDateTime.now(java.time.ZoneOffset.UTC));
         event.setVersion(0);
         event.setIsDelete(0);
         projectEventMapper.insert(event);
@@ -905,7 +905,7 @@ public class JobStateMachineService {
         }
 
         // 2. CAS 更新（claim-ops.ts:295-315）
-        LocalDateTime leaseExpiresAt = LocalDateTime.now().plusSeconds(LEASE_SECONDS);
+        LocalDateTime leaseExpiresAt = LocalDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(LEASE_SECONDS);
         int affected = jobMapper.claimVideoCas(
                 jobIdLong,
                 workerId,
@@ -953,7 +953,7 @@ public class JobStateMachineService {
                                       long fencingToken, String providerTaskId) {
         Long jobIdLong = Long.parseLong(jobId);
         // 与 TS video-ops.ts:10,15 同调：next = now + 5000ms，Java 侧计算（评审 C1）。
-        java.time.LocalDateTime nextPollAt = java.time.LocalDateTime.now().plusNanos(5_000L * 1_000_000);
+        java.time.LocalDateTime nextPollAt = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).plusNanos(5_000L * 1_000_000);
         int affected = jobMapper.markVideoSubmitted(jobIdLong, workerId, fencingToken, providerTaskId, nextPollAt);
         return affected == 1;
     }
@@ -968,7 +968,7 @@ public class JobStateMachineService {
         Long jobIdLong = Long.parseLong(jobId);
         // 评审 C2：钳制在 Java 侧做，逐字对齐 video-ops.ts:47 的 Math.max(0,Math.min(99,Math.round(..)))。
         int clamped = Math.max(0, Math.min(99, progress));
-        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        java.time.LocalDateTime now = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC);
         java.time.LocalDateTime nextPollAt = now.plusNanos(5_000L * 1_000_000);
         int affected = jobMapper.rescheduleVideoPoll(jobIdLong, workerId, fencingToken, clamped, now, nextPollAt);
         return affected == 1;
@@ -1011,8 +1011,8 @@ public class JobStateMachineService {
         }
         asset.setSource("generated");
         asset.setStatus("normal");
-        asset.setGmtCreate(LocalDateTime.now());
-        asset.setGmtModified(LocalDateTime.now());
+        asset.setGmtCreate(LocalDateTime.now(java.time.ZoneOffset.UTC));
+        asset.setGmtModified(LocalDateTime.now(java.time.ZoneOffset.UTC));
         asset.setVersion(0);
         asset.setIsDelete(false);
         assetMapper.insert(asset);
@@ -1028,7 +1028,7 @@ public class JobStateMachineService {
         logEntry.setStatus("succeeded");
         logEntry.setMessage("视频生成完成");
         logEntry.setPayload(toJson(Map.of("asset_ids", List.of(asset.getId().toString()))));
-        logEntry.setOccurredAt(LocalDateTime.now());
+        logEntry.setOccurredAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
         jobLogMapper.insert(logEntry);
 
         // 5. events
@@ -1119,7 +1119,7 @@ public class JobStateMachineService {
         logEntry.setEvent("failed");
         logEntry.setStatus("failed");
         logEntry.setMessage(errorCode + ": " + errorMessage);
-        logEntry.setOccurredAt(LocalDateTime.now());
+        logEntry.setOccurredAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
         jobLogMapper.insert(logEntry);
         if (job != null && job.getProjectId() != null) {
             appendProjectEvent(job.getProjectId(), "generation_job.status_changed",

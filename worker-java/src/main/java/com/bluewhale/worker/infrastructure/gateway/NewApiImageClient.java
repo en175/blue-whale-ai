@@ -223,10 +223,12 @@ public class NewApiImageClient {
 
         // imageField（new-api-generation-ops.ts:93-94）
         String imageField = sourceImages.size() == 1 ? "image" : "image[]";
+        // 评审修复：TS 侧 edits 传的是参考图**字节**（new-api-generation-ops.ts:114-123），
+        // 原实现误把 URL 字符串当文件体 → 网关 400。先 GET 下载再入 multipart。
         for (int i = 0; i < sourceImages.size(); i++) {
-            String url = sourceImages.get(i);
+            byte[] imgBytes = downloadBytes(sourceImages.get(i));
             builder.addFormDataPart(imageField, "ref_" + i + ".jpg",
-                    RequestBody.create(url, MediaType.get("text/plain")));
+                    RequestBody.create(imgBytes, MediaType.get("image/jpeg")));
         }
 
         builder.addFormDataPart("n", String.valueOf(n));
@@ -254,6 +256,22 @@ public class NewApiImageClient {
                 .header("X-Trace-Id", traceId)
                 .header("X-Client-System", "bluewhale")
                 .build();
+    }
+
+    /** 下载参考图字节（同源 fetch；失败按 unsupported_input 抛，对齐 TS 参考图片读取失败语义）。 */
+    private byte[] downloadBytes(String url) {
+        try (Response r = httpClient.newCall(new Request.Builder().url(url).build()).execute()) {
+            if (!r.isSuccessful() || r.body() == null) {
+                throw new ImageProviderError(GenerationError.ERROR_UNSUPPORTED_INPUT,
+                        "参考图片读取失败: HTTP " + r.code());
+            }
+            return r.body().bytes();
+        } catch (ImageProviderError e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ImageProviderError(GenerationError.ERROR_UNSUPPORTED_INPUT,
+                    "参考图片读取失败: " + e.getMessage());
+        }
     }
 
     /**

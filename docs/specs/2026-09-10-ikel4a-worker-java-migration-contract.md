@@ -154,3 +154,9 @@
 | `requeueImageJobForRetry` | 位置参 `(jobId, nextActionAt: Date)`；**无 fence 入参——Java 移植时以其 SQL 实况为准，金标用例单列** | :114 |
 
 BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 列 BigInt；Java 用 `long`；`id/project_id/user_id` 字符串承载。
+
+## 10. 实施注记（本地全栈联调 2026-09-10 实锤，双端共同遵守）
+
+- **DATETIME 时基 = UTC naive**：Prisma/TS 写入均为 UTC 挂钟值；Java 侧一切写库时刻必须 `LocalDateTime.now(ZoneOffset.UTC)`。教训：用本地钟写 `next_action_at`/`lease_expires_at` 会让 requeue 单在服务端 `NOW()`（UTC）视角躲进未来 8 小时、claim 永不可见（1808 实锤）。金标镜像断言的时间窗基准同 UTC。
+- **invisible 窗与慢 handler**：`receive(10, 30s)` 下 handler 超 30s（如带参考图的 image 编辑）必然引发 broker 重投；重复投递由「lease 未过期 + fencing」在 claim 处静默拦截（1809 实锤：两次 handle、一次 CAS 生效、零重复副作用）。消费端 `ack 失败` WARN 属预期噪音，不作为故障告警。
+- **edits 参考图必须传字节**（`new-api-generation-ops.ts` 语义），传 URL 字符串网关 400；key 前缀 `uploads/{userId}/image/...` 的 userId 取自 job.user_id，禁止 0 兜底。
