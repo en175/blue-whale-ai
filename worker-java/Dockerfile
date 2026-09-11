@@ -4,7 +4,7 @@ FROM eclipse-temurin:21-jre
 
 # ffmpeg 安装（apt：debian-based temurin 镜像）
 # FfmpegExtractor 缺省 FFMPEG_PATH=ffmpeg，走 PATH 查找
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
