@@ -150,6 +150,7 @@ describe('TurnFooter', () => {
     contextCapacity: { used_input_tokens: 6536, configured_max_tokens: 200000, ratio: 0.033, compaction_state: 'none' },
     failureText: null,
     cardFailureText: null,
+    cardFailureRetryable: true,
   };
 
   it('完成：只有符号和数字，不写「已完成」', async () => {
@@ -182,6 +183,20 @@ describe('TurnFooter', () => {
     expect(button?.textContent).toBe('再试一次');
     await act(async () => button!.click());
     expect(onRetryCard).toHaveBeenCalledTimes(1);
+  });
+
+  // 素材不可用、没定做图还是视频：得用户先做点什么，再发一遍一样的话没用，不给按钮。
+  it('卡没写出来、但重发一遍也没用的：只写那句话，不给「再试一次」', async () => {
+    const account = {
+      ...base,
+      cardFailureText: '这组卡里用到的素材现在不可用了（授权已撤销或重新识别过），请重新授权或上传后再改。',
+      cardFailureRetryable: false,
+      tokenUsage: null,
+      contextCapacity: null,
+    };
+    await render(createElement(TurnFooter, { account, onRetryCard: vi.fn() }));
+    expect(mountNode.textContent).toContain('请重新授权或上传后再改');
+    expect(mountNode.querySelector('button')).toBeNull();
   });
 
   it('失败的轮不看 cardFailureText：整轮失败的说明优先', async () => {
