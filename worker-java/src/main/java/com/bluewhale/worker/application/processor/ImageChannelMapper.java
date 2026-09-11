@@ -1,7 +1,10 @@
 package com.bluewhale.worker.application.processor;
 
+import com.bluewhale.worker.infrastructure.gateway.ImageProtocol;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -17,6 +20,8 @@ import java.util.Map;
  * 映射为 provider 级别的 size 和 quality 字符串。
  */
 final class ImageChannelMapper {
+
+    private static final Logger log = LoggerFactory.getLogger(ImageChannelMapper.class);
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -254,6 +259,41 @@ final class ImageChannelMapper {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * 从 features JSON 提取 image_protocol（契约 §12 / IKF4LI）。
+     * <p>
+     * 读侧宽容但有痕：**缺省（键不存在）= 常态，静默回落** {@link ImageProtocol#INLINE_IMAGE}；
+     * **值存在却认不出 / features JSON 损坏 = 配置错误，回落的同时打 WARN**——静默咽掉会让
+     * 排查从「该模型整个挂了」开始，而根因埋在 DB 的 features 里（评审 Important#1）。
+     * <p>
+     * 回落方向恒为 inline-image：协议切错的代价是全量调用失败，宁可不切。
+     * snake_case 与 camelCase 两种键形同 parseI2iModelName。
+     */
+    static ImageProtocol parseImageProtocol(String featuresJson) {
+        if (featuresJson == null || featuresJson.isBlank()) return ImageProtocol.INLINE_IMAGE;
+
+        Object raw;
+        try {
+            Map<String, Object> features = JSON.readValue(featuresJson,
+                    new TypeReference<Map<String, Object>>() {});
+            raw = features.get("imageProtocol");
+            if (raw == null) raw = features.get("image_protocol");
+        } catch (Exception e) {
+            log.warn("features JSON 解析失败，图片出站协议回落 inline-image: {}", e.getMessage());
+            return ImageProtocol.INLINE_IMAGE;
+        }
+
+        if (raw == null) return ImageProtocol.INLINE_IMAGE; // 没配 = 缺省，不吵
+
+        ImageProtocol parsed = ImageProtocol.fromWire(raw instanceof String s ? s : null);
+        if (parsed == null) {
+            log.warn("image_protocol 取值不认识，回落 inline-image（该行出站形态可能与上游不符）: {}",
+                    raw);
+            return ImageProtocol.INLINE_IMAGE;
+        }
+        return parsed;
     }
 
     /**

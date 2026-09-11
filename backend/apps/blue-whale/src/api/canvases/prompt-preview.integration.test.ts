@@ -382,6 +382,41 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
     expect(jobs[0].input.prompt_plan_snapshot).toMatchObject({ providerPrompt: prompt, images: [] });
   });
 
+  it("IKE5G8: plan compilation respects the catalog prompt budget and still rejects overflow", async () => {
+    projectId = (await projects.create("987654", "IKE5G8 prompt budget")).id;
+    const asset = await prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } });
+    materialPayload = { target_media: "image", assets: [{ asset_ref_id: "a", asset_id: String(asset.id), media_type: "image" }],
+      shots: [{ shot_no: 1, title: "长度边界", prompt_text: "图", asset_bindings: [{ asset_ref_id: "a" }], prompt_mentions: [{ start: 0, end: 1, asset_ref_id: "a", index: 7 }] }] };
+    const capabilityKey = { provider_id_model_id: { provider_id: "iketsw-test", model_id: "iketsw-image" } };
+    const features = { reference_image: true, max_reference_images: 3 };
+    await prisma.client.generation_model_capability.update({ where: capabilityKey, data: { features: { ...features, max_prompt_length: 32000 } } });
+    try {
+      const applied = (await (await apply()).json()).data;
+      const nodes = JSON.parse(applied.canvas.nodes);
+      nodes.push({ id: "target", type: "mediaNode", position: { x: 800, y: 0 }, data: { mediaType: "image", draft: true, draftModelId: "iketsw-image", prompt: "" } });
+      const saved = (await (await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${applied.canvas.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes) }) })).json()).data;
+      const referenced = await fetch(`${base}/api/canvases/${projectId}/prompt-references`, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ planNodeId: applied.node.id, targetNodeId: "target", expectedVersion: saved.version }) });
+      expect(referenced.status).toBe(201);
+      const submit = (text: string) => fetch(`${base}/api/projects/${projectId}/generation-jobs`, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "image", target_node_id: "target", input_asset_ids: [String(asset.id)], expected_output_count: 1, parameters: { prompt: text, model_id: "iketsw-image", aspect_ratio: "1:1" } }) });
+      const compiledPlan = "参考图1";
+      const text = "字".repeat(32000 - compiledPlan.length - 2);
+      const accepted = await (await submit(text)).json();
+      expect(accepted.code, accepted.msg).toBe(200);
+      const jobs = (await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records;
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].input.prompt_plan_snapshot.providerPrompt).toBe(`${compiledPlan}\n\n${text}`);
+      const rejected = await (await submit(`${text}字`)).json();
+      expect(rejected.code).not.toBe(200);
+      expect(rejected.msg).toContain("标签转换后的提示词为空或超限");
+      expect((await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records).toHaveLength(1);
+    } finally {
+      materialPayload = undefined;
+      await prisma.client.generation_model_capability.update({ where: capabilityKey, data: { features } });
+    }
+  });
+
   it("IKETSY: a text-only plan can add an owned Canvas material and rejects forged metadata", async () => {
     projectId = (await projects.create("987654", "IKETSY text plan")).id;
     const applied = (await (await apply()).json()).data;

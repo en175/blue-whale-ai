@@ -8,6 +8,7 @@ import com.bluewhale.worker.domain.entity.GenerationModelCapabilityEntity;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageProviderError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
+import com.bluewhale.worker.infrastructure.gateway.ImageProtocol;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient.GeneratedImage;
 import com.bluewhale.worker.infrastructure.mapper.GenerationModelCapabilityMapper;
@@ -341,16 +342,22 @@ public class ImageJobProcessor implements JobProcessor {
         }
 
         // 9. 调用 provider（generation-worker.ts:583-598 批量循环）
-        // 契约 §11 / ADR-0085（IKESD6）：行配了别名且本 job 带参考图 → 出站 model 换图生图上游名。
-        // 只换 HTTP body 的 model 字段；job.input.model_id 恒为 canonical（计费/重试/恢复不受影响）。
+        // 契约 §11（IKF4LI）：出站形态由能力行 features 声明，不按模型名特判。
+        //  - image_protocol=openai-images：无参考图走 generations(JSON)、有参考图走 edits(multipart)；
+        //    模型名恒为 model_id，文生图/图生图同一档位，**不换名**。
+        //  - image_protocol=inline-image（缺省 = 现状）：恒 generations + body.image；
+        //    仅此形态下，行配了 i2i_model_name 且本 job 带参考图时换上游模型名（ADR-0085，banana）。
+        // 无论哪种形态，job.input.model_id 恒为 canonical（计费/重试/恢复不受影响）。
+        ImageProtocol protocol = ImageChannelMapper.parseImageProtocol(cap.getFeatures());
         String i2iAlias = ImageChannelMapper.parseI2iModelName(cap.getFeatures());
-        String requestModel = (i2iAlias != null && !sourceImageUrls.isEmpty())
+        String requestModel = (protocol == ImageProtocol.INLINE_IMAGE
+                && i2iAlias != null && !sourceImageUrls.isEmpty())
                 ? i2iAlias : cap.getModelId();
         List<GeneratedImage> allImages = new ArrayList<>();
         int remaining = n;
         for (int attempt = 0; remaining > 0 && attempt < n; attempt++) {
             List<GeneratedImage> batch = imageClient.generate(
-                    providerToken, requestModel, prompt, remaining,
+                    providerToken, protocol, requestModel, prompt, remaining,
                     finalSize, finalQuality,
                     input.get("web_search") instanceof Boolean b && b,
                     input.get("sequential_image_generation") instanceof Boolean b && b,
@@ -378,7 +385,7 @@ public class ImageJobProcessor implements JobProcessor {
         // 12. 逐张转存 + createAsset（generation-worker.ts:613-638）
         List<String> assetIds = new ArrayList<>();
         for (GeneratedImage img : allImages) {
-            StoredImage stored = persistProviderImage(img.url(), job.user_id());
+            StoredImage stored = persistProviderImage(img, job.user_id());
             log.info("[image] 转存完成 jobId={} storageKey={} size={} w={} h={}",
                     job.id(), stored.storageKey(), stored.size(), stored.width(), stored.height());
             // 宽度优先取 provider 返回值，回退 persistProviderImage 解析值
@@ -428,14 +435,32 @@ public class ImageJobProcessor implements JobProcessor {
     /**
      * 图片转存（generation-worker.ts:731-818 persistProviderMedia image 路径）。
      * <p>
-     * url → fetch 字节 → ImageIO 解析宽高 → TOS 上传。
-     * TOS 未配置 → 降级直存 URL（storageKey=null，generation-worker.ts:752-761）。
+     * 两种结果形态（IKF4LI）：
+     * <ul>
+     *   <li><b>b64_json</b>（官方 GPT Image 系唯一形态）：字节已在客户端解码，直接落 TOS。
+     *       没有托管 URL 可降级 → TOS 未配置即硬失败（对齐音频 data-direct 的
+     *       「转存存储未配置」语义）。</li>
+     *   <li><b>url</b>（inline 形态现用）：fetch 字节 → TOS 上传；TOS 未配置 → 降级直存 URL
+     *       （storageKey=null，generation-worker.ts:752-761）。</li>
+     * </ul>
      * <p>
      * 图像元数据等价标准（契约 §8）：仅消费 width/height，round(正有限数) 否则 null；
      * 解析失败静默、资产照常落库。Java ImageIO 不支持 webp → width/height null 回退，
      * 资产照常落库（等价标准满足 per §8，TS 也只消费 w/h 且容忍 null）。
      */
-    private StoredImage persistProviderImage(String sourceUrl, String userId) {
+    private StoredImage persistProviderImage(GeneratedImage image, String userId) {
+        if (image.content() != null) {
+            if (tosService == null) {
+                throw new ImageProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "图片转存存储未配置");
+            }
+            return uploadImageContent(image.content(), image.mime(), userId, "<b64_json>");
+        }
+        return persistProviderImageFromUrl(image.url(), userId);
+    }
+
+    /** url 形态转存：fetch 字节 → TOS 上传；TOS 未配置 → 降级直存 URL（:752-761）。 */
+    private StoredImage persistProviderImageFromUrl(String sourceUrl, String userId) {
         // 降级模式：TOS 未配置 → 直存 URL（generation-worker.ts:752-761）
         if (tosService == null) {
             return new StoredImage(sourceUrl, null, null, null, null, null);
@@ -481,6 +506,11 @@ public class ImageJobProcessor implements JobProcessor {
                     "生成结果媒体类型不匹配");
         }
 
+        return uploadImageContent(content, mime, userId, sourceUrl);
+    }
+
+    /** 字节 → TOS：ImageIO 解析宽高（失败静默 null）+ uploadImageBytes，两条转存路径共用。 */
+    private StoredImage uploadImageContent(byte[] content, String mime, String userId, String source) {
         // ImageIO 解析宽高（generation-worker.ts:785-794）
         // 契约 §8：解析失败静默 null，资产照常落库
         Integer width = null;
@@ -493,10 +523,9 @@ public class ImageJobProcessor implements JobProcessor {
             }
         } catch (Exception ignored) {
             // 静默：webp 等不支持格式 → null，资产照常落库（契约 §8 等价标准满足）
-            log.debug("[image] ImageIO 解析宽高失败(非关键，降级 null) sourceUrl={}", sourceUrl);
+            log.debug("[image] ImageIO 解析宽高失败(非关键，降级 null) source={}", source);
         }
 
-        // TOS 上传
         try {
             TosMediaStorage.UploadResult uploaded = tosService.uploadImageBytes(content, mime, userId);
             return new StoredImage(uploaded.url(), uploaded.storageKey(),

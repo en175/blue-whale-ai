@@ -8,6 +8,7 @@ import com.bluewhale.worker.domain.entity.GenerationModelCapabilityEntity;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageProviderError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
+import com.bluewhale.worker.infrastructure.gateway.ImageProtocol;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
 import com.bluewhale.worker.infrastructure.mapper.GenerationModelCapabilityMapper;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
@@ -29,20 +30,25 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * 图生图别名分流测试（契约 §11 / ADR-0085，IKESD6）。
+ * 出站协议 + 图生图别名分流测试（契约 §11 / ADR-0085 / IKF4LI）。
  * <p>
- * 规格：行配了 features.i2i_model_name **且** 本 job 带参考图 → 出站 HTTP body 的
- * model 用别名；否则用 capability.model_id（canonical）。canonical 不变量：
- * 只换出站请求字段，job.input.model_id 不动。
+ * 规格：
+ * <ul>
+ *   <li>{@code image_protocol=inline-image}（含缺省）——行配了 {@code features.i2i_model_name}
+ *       <strong>且</strong>本 job 带参考图时，出站 model 用别名（banana 现用）。</li>
+ *   <li>{@code image_protocol=openai-images}——官方协议，模型名恒为 canonical，
+ *       <strong>别名不生效</strong>（文生图/图生图同一档位，端点分流代替换名）。</li>
+ * </ul>
+ * canonical 不变量：只换出站请求字段，{@code job.input.model_id} 不动（计费/重试/恢复不受影响）。
  * <p>
  * 断言方式：generate stub 抛 provider_failed（retry_count=0 → requeue，不触发转存），
- * 用 ArgumentCaptor 钉住出站 model 实参。
+ * 用 ArgumentCaptor 钉住出站 protocol 与 model 实参。
  */
 @ExtendWith(MockitoExtension.class)
 class ImageJobProcessorI2iAliasTest {
 
-    private static final String MODEL_ID = "gpt-image-2-text-to-image";
-    private static final String ALIAS = "gpt-image-2-edit";
+    private static final String MODEL_ID = "nano-banana-2-t2i";
+    private static final String ALIAS = "nano-banana-2-i2i";
 
     @Mock private JobStateMachineService stateMachine;
     @Mock private AssetSourceService assetSource;
@@ -53,6 +59,9 @@ class ImageJobProcessorI2iAliasTest {
 
     private ImageJobProcessor processor;
 
+    /** 出站实参快照（protocol + model）。 */
+    private record Outbound(ImageProtocol protocol, String model) {}
+
     @BeforeEach
     void setUp() {
         processor = new ImageJobProcessor(
@@ -60,7 +69,7 @@ class ImageJobProcessorI2iAliasTest {
                 imageClient, capabilityMapper, tosService);
     }
 
-    private String captureOutboundModel(List<String> refs, String featuresJson) {
+    private Outbound captureOutbound(List<String> refs, String featuresJson) {
         Map<String, Object> input = new HashMap<>(Map.of(
                 "prompt", "hello", "model_id", MODEL_ID,
                 "provider_credential", "sealed-token"));
@@ -92,63 +101,100 @@ class ImageJobProcessorI2iAliasTest {
                     .thenReturn(byId);
         }
         when(credentialService.open("sealed-token")).thenReturn("token");
-        when(imageClient.generate(anyString(), anyString(), anyString(), anyInt(),
-                any(), any(), anyBoolean(), anyBoolean(), anyList()))
+        when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(), anyString(),
+                anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ImageProviderError(
                         GenerationError.ERROR_PROVIDER_FAILED, "stop after capture"));
         when(stateMachine.requeueImageJobForRetry(eq("100"), any())).thenReturn(true);
 
         processor.handle("100");
 
+        ArgumentCaptor<ImageProtocol> protocolCaptor = ArgumentCaptor.forClass(ImageProtocol.class);
         ArgumentCaptor<String> modelCaptor = ArgumentCaptor.forClass(String.class);
-        verify(imageClient).generate(anyString(), modelCaptor.capture(), anyString(),
-                anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList());
-        return modelCaptor.getValue();
+        verify(imageClient).generate(anyString(), protocolCaptor.capture(), modelCaptor.capture(),
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList());
+        return new Outbound(protocolCaptor.getValue(), modelCaptor.getValue());
     }
 
+    // ========== 缺省 / inline 形态 ==========
+
     @Test
-    @DisplayName("配了别名 + 带参考图 → 出站 model 用图生图别名")
-    void aliasWithReferencesSwaps() {
-        String model = captureOutboundModel(
+    @DisplayName("未声明协议（缺省）+ 别名 + 参考图 → 走 inline，出站 model 用别名")
+    void defaultProtocolWithReferencesSwapsAlias() {
+        Outbound out = captureOutbound(
                 List.of("101"),
                 "{\"i2i_model_name\": \"" + ALIAS + "\", \"max_reference_images\": 10}");
-        assertThat(model).isEqualTo(ALIAS);
+        assertThat(out.protocol()).isEqualTo(ImageProtocol.INLINE_IMAGE);
+        assertThat(out.model()).isEqualTo(ALIAS);
     }
 
     @Test
-    @DisplayName("配了别名 + 无参考图 → 出站 model 仍 canonical")
-    void aliasWithoutReferencesKeepsCanonical() {
-        String model = captureOutboundModel(
-                List.of(), "{\"i2i_model_name\": \"" + ALIAS + "\"}");
-        assertThat(model).isEqualTo(MODEL_ID);
+    @DisplayName("inline 形态 + 别名 + 无参考图 → 出站 model 仍 canonical")
+    void inlineAliasWithoutReferencesKeepsCanonical() {
+        Outbound out = captureOutbound(
+                List.of(), "{\"image_protocol\": \"inline-image\", \"i2i_model_name\": \"" + ALIAS + "\"}");
+        assertThat(out.protocol()).isEqualTo(ImageProtocol.INLINE_IMAGE);
+        assertThat(out.model()).isEqualTo(MODEL_ID);
     }
 
     @Test
-    @DisplayName("未配别名 + 带参考图 → canonical（单名行为不变）")
-    void noAliasWithReferencesKeepsCanonical() {
-        String model = captureOutboundModel(
+    @DisplayName("inline 形态 + 未配别名 + 参考图 → canonical（单名行为不变）")
+    void inlineNoAliasWithReferencesKeepsCanonical() {
+        Outbound out = captureOutbound(
                 List.of("101", "102"), "{\"max_reference_images\": 10}");
-        assertThat(model).isEqualTo(MODEL_ID);
+        assertThat(out.model()).isEqualTo(MODEL_ID);
     }
 
     @Test
     @DisplayName("脏别名（空白串 / 非字符串 / features 损坏 JSON）→ 宽容降级 canonical")
     void dirtyAliasDegradesToCanonical() {
-        assertThat(captureOutboundModel(List.of("101"), "{\"i2i_model_name\": \"  \"}"))
+        assertThat(captureOutbound(List.of("101"), "{\"i2i_model_name\": \"  \"}").model())
                 .isEqualTo(MODEL_ID);
         reset(stateMachine, assetSource, credentialService, imageClient, capabilityMapper);
-        assertThat(captureOutboundModel(List.of("101"), "{\"i2i_model_name\": 42}"))
+        assertThat(captureOutbound(List.of("101"), "{\"i2i_model_name\": 42}").model())
                 .isEqualTo(MODEL_ID);
         reset(stateMachine, assetSource, credentialService, imageClient, capabilityMapper);
-        assertThat(captureOutboundModel(List.of("101"), "{broken json"))
+        assertThat(captureOutbound(List.of("101"), "{broken json").model())
                 .isEqualTo(MODEL_ID);
     }
 
     @Test
     @DisplayName("camelCase 键形同样识别（与 TS toFeatures 双形兼容对齐）")
     void camelCaseAliasRecognized() {
-        String model = captureOutboundModel(
-                List.of("101"), "{\"i2iModelName\": \"" + ALIAS + "\"}");
-        assertThat(model).isEqualTo(ALIAS);
+        assertThat(captureOutbound(List.of("101"), "{\"i2iModelName\": \"" + ALIAS + "\"}").model())
+                .isEqualTo(ALIAS);
+    }
+
+    // ========== 官方协议（IKF4LI） ==========
+
+    @Test
+    @DisplayName("openai-images + 参考图 → 出站 protocol 为官方协议，模型名恒 canonical 不换别名")
+    void openAiProtocolIgnoresAlias() {
+        Outbound out = captureOutbound(List.of("101"),
+                "{\"image_protocol\": \"openai-images\", \"i2i_model_name\": \"" + ALIAS + "\"}");
+        assertThat(out.protocol()).isEqualTo(ImageProtocol.OPENAI_IMAGES);
+        assertThat(out.model()).isEqualTo(MODEL_ID);
+    }
+
+    @Test
+    @DisplayName("openai-images + 无参考图 → 同样是官方协议（端点由客户端按有无参考图选）")
+    void openAiProtocolWithoutReferences() {
+        Outbound out = captureOutbound(List.of(), "{\"image_protocol\": \"openai-images\"}");
+        assertThat(out.protocol()).isEqualTo(ImageProtocol.OPENAI_IMAGES);
+        assertThat(out.model()).isEqualTo(MODEL_ID);
+    }
+
+    @Test
+    @DisplayName("camelCase 键形 imageProtocol 同样识别")
+    void camelCaseProtocolRecognized() {
+        assertThat(captureOutbound(List.of(), "{\"imageProtocol\": \"openai-images\"}").protocol())
+                .isEqualTo(ImageProtocol.OPENAI_IMAGES);
+    }
+
+    @Test
+    @DisplayName("未知协议值 → 回落 inline（协议切错的代价是全量调用失败，宁可不切）")
+    void unknownProtocolFallsBackToInline() {
+        assertThat(captureOutbound(List.of(), "{\"image_protocol\": \"随便写的\"}").protocol())
+                .isEqualTo(ImageProtocol.INLINE_IMAGE);
     }
 }
