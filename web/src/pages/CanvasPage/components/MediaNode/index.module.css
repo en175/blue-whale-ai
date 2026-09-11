@@ -50,6 +50,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   user-select: none;
+  min-width: 0;
 }
 
 .titleMeta {
@@ -176,6 +177,22 @@
   height: 100%;
   object-fit: contain;
   background-color: #000;
+}
+
+/* 合规校验通过图标：跟在文件名后方，不遮挡图片 */
+.complianceBadge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+}
+
+.complianceBadge img {
+  display: block;
+  width: 14px;
+  height: 14px;
 }
 
 /* ============================================
