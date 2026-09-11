@@ -458,4 +458,11 @@ describe('accountOfRun · prompt_card_failure', () => {
   it('没有改卡失败就是 null', () => {
     expect(accountOfRun({ ...run, prompt_card_failure: null })?.cardFailureText).toBeNull();
   });
+
+  it('卡没写出来时按码查能不能重试：模型写错了能，素材不可用、没定媒介不能', () => {
+    expect(accountOfRun(run)?.cardFailureRetryable).toBe(true);
+    for (const code of ['asset_binding_unavailable', 'target_media_unresolved']) {
+      expect(accountOfRun({ ...run, prompt_card_failure: { code, message: '…' } })?.cardFailureRetryable).toBe(false);
+    }
+  });
 });

@@ -236,7 +236,7 @@ export function TurnFooter({ account, onRetryCard }: { account: TurnAccount; onR
         {cardFailed ? '!' : ACCOUNT_MARK[account.outcome]}
       </span>
       {label && <span>{label}</span>}
-      {cardFailed && onRetryCard && (
+      {cardFailed && account.cardFailureRetryable && onRetryCard && (
         <button type="button" className={styles.turnFooterRetry} onClick={onRetryCard}>
           再试一次
         </button>

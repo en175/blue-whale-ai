@@ -534,7 +534,24 @@ export interface TurnAccount {
    * 那一轮照常 completed，侧边栏还挂着上一版。不写出来，用户会把旧卡当成这次改出来的。
    */
   cardFailureText: string | null;
+  /**
+   * 这次没写出卡，再发一遍有没有用。按码查 agent 的失败码表（`docs/blueprint/agent-failure-codes-v1.md`
+   * 的「可重试」一列）——那张表写明「是否可重试不在线上传输，客户端按码查」。素材不可用、没定做图
+   * 还是视频这类，得用户先做点什么，给「再试一次」只会让他白按一次。
+   */
+  cardFailureRetryable: boolean;
 }
+
+/**
+ * 生成卡没写出来时，重发一遍也没用的那几个码（agent 失败码表里「可重试：否」、会出现在
+ * `prompt_card_failure` 上的）。表里新增这类码时同步加在这里。
+ */
+const NON_RETRYABLE_CARD_FAILURES: ReadonlySet<string> = new Set([
+  'asset_binding_unavailable',
+  'target_media_unresolved',
+  'understanding_not_confirmed',
+  'requirement_incomplete',
+]);
 
 /**
  * 一条已经结束的 Run → 账。起点取 `created_at`（用户等待是从提交开始算的，排队、记忆投影、
@@ -553,6 +570,7 @@ export function accountOfRun(run: SessionRun, fallbackFinishedAt: number | null 
     contextCapacity: parseRunContextCapacity(run.context_capacity),
     failureText: run.failure?.message || null,
     cardFailureText: run.status === 'completed' ? run.prompt_card_failure?.message || null : null,
+    cardFailureRetryable: !NON_RETRYABLE_CARD_FAILURES.has(run.prompt_card_failure?.code ?? ''),
   };
 }
 
