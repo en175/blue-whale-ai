@@ -118,10 +118,10 @@
 冻结文档的**追加契约**，双端同步评审通过前 Java 侧照此实现（见 [ADR-0085](../adr/0085-catalog-input-modality-model-alias-and-per-model-prompt-length.md)）：
 
 - `generation_model_capability.features` 新增两键（通用机制，任何 image 行可配，无开关）：
-  - `i2i_model_name`（string，可选）：**上游模型名**（非行 id）。worker 出站请求处：该行配了别名 **且** 本 job 带参考图（`input_asset_ids` 解析出的 sourceImages 非空）→ HTTP body 的 `model` 用别名，否则用 `model_id`。未配别名的行行为与 §5 现状完全一致。
+  - `i2i_model_name`（string，可选）：**上游模型名**（非行 id）。**分流由 Java image 链（刀③）在出站请求处实现**（IKESD6 拍板：Node worker 退役中，新功能不落旧版）：该行配了别名 **且** 本 job 带参考图（`input_asset_ids` 解析出的参考素材非空）→ HTTP body 的 `model` 用别名，否则用 `model_id`。未配别名的行行为与 §5 现状完全一致。**灰度含义**：image tag 仍在 TS 侧消费期间，别名不参与分流；切 Java 消费后自动生效。
   - `max_prompt_length`（正整数，可选）：仅影响 **backend 创建时校验**（raw prompt 上限，缺省 image/video=4000、audio=3000；组合上限改为 `max(30000, 模型值)`）。**worker / Java 侧不消费**（worker 现状即不复校长度，见 §2 权威面），登记于此仅为表列语义完整。
 - **canonical 语义（Java 必须逐字复刻）**：别名 swap 只发生在出站 HTTP body 的 `model` 字段；`generation_jobs.input.model_id` 恒为**目录主行 model_id**（白名单、重试沿用 frozen input、恢复重投、计费对账、日志全部不受影响）。禁止在创建时把别名写进 frozen input。
-- **读取时效**：别名每次执行按 `model_id` 现查能力行（TS 现状 = 每次 claim 后 `findFirst`，见 `generation-worker-asset-ops.ts:findImageCapability`）；**Java 侧禁止进程级缓存 features**，否则管理端改别名后 TS/Java 两侧灰度行为分叉。
+- **读取时效**：别名每次执行按 `model_id` 现查能力行（对齐刀③ claim 后查能力的既有模式）；**Java 侧禁止进程级缓存 features**，否则管理端改别名后灰度两侧行为分叉。
 - **消费端目录投影**：`/api/generation/models` 对前端**剥除** `i2i_model_name`（出站调用值，与像素/api_value 同哲学），仅透出 `max_prompt_length`。
 - 数据面变更（同一 migration）：`gpt-image-2-edit` / `nano-banana-2-i2i` 行软删（is_delete=1），其上游名改由主行 `features.i2i_model_name` 承载；uk_provider_model 含软删行，软删名永久不可复用（`create` 冲突语义不变）。
 

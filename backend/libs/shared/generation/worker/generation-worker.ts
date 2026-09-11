@@ -561,13 +561,7 @@ async function processClaimedJob(
     }
     const sequential = input.sequential_image_generation === true;
     const providerInput = {
-      // ADR-0085（IKESD6）：带参考图且行配了别名 → 出站 model 换图生图上游名。
-      // 只换这一处 HTTP body 字段；白名单/计费/重试/恢复全部仍走 canonical 的
-      // job.input.model_id（=cap.model_id），Java 迁移契约 §9 要求逐字复刻。
-      model:
-        sourceImages.length > 0 && cap.i2i_model_name
-          ? cap.i2i_model_name
-          : cap.model_id,
+      model: cap.model_id,
       // IKDLQF：有文本附件时按契约组合（附件正文按序在前、忽略纯空白、非空 prompt 最后追加）；
       // 无附件时沿用原 prompt，与旧链路逐字节一致。
       prompt:

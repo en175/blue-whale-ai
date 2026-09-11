@@ -127,11 +127,7 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
       const features = (cap.features ?? {}) as {
         maxReferenceImages?: number;
         max_reference_images?: number;
-        i2iModelName?: unknown;
-        i2i_model_name?: unknown;
       };
-      // ADR-0085：图生图别名——非空字符串才算配置，脏值降级 null=不分流（读侧宽容，写侧闸门在 constants.ts）。
-      const alias = features.i2iModelName ?? features.i2i_model_name;
       // IKA72G：能力快照带参考图上限（与创建校验同源；缺省与网关/ARK 一致的 10）。
       return {
         model_id: cap.model_id,
@@ -142,10 +138,6 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
           features.maxReferenceImages ??
           features.max_reference_images ??
           DEFAULT_MAX_REFERENCE_IMAGES,
-        i2i_model_name:
-          typeof alias === "string" && alias.trim().length > 0
-            ? alias.trim()
-            : null,
         channel_parser:
           typeof cap.channel_parser === "string" && cap.channel_parser.length > 0
             ? cap.channel_parser
