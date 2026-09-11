@@ -87,6 +87,7 @@ interface BottomDialogProps {
   initialParams?: VideoGenSeedParams;
   /** 连线文本附件（IKDLQG）：草稿绑定模式由父级按连线实时推导传入 */
   attachments?: ImageTextAttachment[];
+  onRemovePlan?: (nodeId: string) => void;
   planReferenceError?: string;
   pendingPlanSyncs?: Array<{ nodeId: string; title: string }>;
   onSyncPlan?: (nodeId: string) => void;
@@ -152,8 +153,9 @@ const ROLE_LABELS: Record<VideoRefRole, string> = {
 
 /** 连线文本附件项（IKDLQG）：标题 + 正文预览，长文默认折叠可展开；与 ImageDialog 附件项同构，
  *  多附件且父级提供重排回调时展示上移/下移（IKDLQH） */
-function AttachmentItem({ attachment, move }: {
+function AttachmentItem({ attachment, move, onRemove }: {
   attachment: ImageTextAttachment;
+  onRemove?: () => void;
   move?: { isFirst: boolean; isLast: boolean; onMove: (delta: -1 | 1) => void };
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -162,6 +164,7 @@ function AttachmentItem({ attachment, move }: {
     <div className={styles.attachmentItem}>
       <div className={styles.attachmentHead}>
         <span className={styles.attachmentTitle}>{attachment.title}</span>
+        {onRemove && <button type="button" className={styles.attachmentMove} aria-label={`移除方案 ${attachment.title}`} title="移除方案" onClick={onRemove}><X size={12} /></button>}
         {move && (
           <span className={styles.attachmentMoves}>
             <button
@@ -274,7 +277,7 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMate
   );
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast }: BottomDialogProps) {
   /** 富文本输入框（自由文本；胶囊机制保留给后续引用场景，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
   /** 输入框内容的结构化形态（IKAFSX）：胶囊是指针，解引用只发生在发送那一刻。 */
@@ -859,6 +862,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
             <AttachmentItem
               key={a.nodeId}
               attachment={a}
+              onRemove={!readOnly && !syncingPlan && a.isPromptPlan && onRemovePlan ? () => onRemovePlan(a.nodeId) : undefined}
               move={
                 !readOnly && onReorderAttachments && attachments.length > 1
                   ? {

@@ -44,6 +44,7 @@ export interface UploadedFile {
 export interface ImageTextAttachment {
   /** 来源文本节点 id */
   nodeId: string;
+  isPromptPlan?: boolean;
   /** 来源节点标题 */
   title: string;
   /** 当次正文 */
@@ -65,6 +66,7 @@ interface ImageDialogProps {
   initialParams?: ImageGenSeedParams;
   /** 连线文本附件（IKDLQF）：仅图片媒体节点面板发起时携带，打开当下快照，只读展示 */
   attachments?: ImageTextAttachment[];
+  onRemovePlan?: (nodeId: string) => void;
   /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；仅多附件时展示控件，缺省不渲染排序入口 */
   onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 到节点选择：进入画布图片节点选取模式 */
@@ -119,8 +121,9 @@ function RatioIcon({ ratio }: { ratio: string }) {
 }
 
 /** 连线文本附件项：标题 + 正文预览，长文默认折叠可展开；多附件且父级提供重排回调时展示上移/下移（IKDLQH） */
-function AttachmentItem({ attachment, move }: {
+function AttachmentItem({ attachment, move, onRemove }: {
   attachment: ImageTextAttachment;
+  onRemove?: () => void;
   move?: { isFirst: boolean; isLast: boolean; onMove: (delta: -1 | 1) => void };
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -129,6 +132,7 @@ function AttachmentItem({ attachment, move }: {
     <div className={styles.attachmentItem}>
       <div className={styles.attachmentHead}>
         <span className={styles.attachmentTitle}>{attachment.title}</span>
+        {onRemove && <button type="button" className={styles.attachmentMove} aria-label={`移除方案 ${attachment.title}`} title="移除方案" onClick={onRemove}><X size={12} /></button>}
         {move && (
           <span className={styles.attachmentMoves}>
             <button
@@ -170,7 +174,7 @@ function AttachmentItem({ attachment, move }: {
   );
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, pendingPlanSyncs, onSyncPlan, syncingPlan, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -571,6 +575,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
               <AttachmentItem
                 key={a.nodeId}
                 attachment={a}
+                onRemove={!readOnly && !syncingPlan && a.isPromptPlan && onRemovePlan ? () => onRemovePlan(a.nodeId) : undefined}
                 move={
                   // 生成中只读（IKDMQQ）：排序同属输入编辑，一并禁用
                   !readOnly && onReorderAttachments && attachments.length > 1
