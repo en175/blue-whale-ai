@@ -835,7 +835,6 @@ export default function CanvasPage() {
           onCopyImage: (id: string) => actionsRef.current.copyImage(id),
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-          onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
           onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
         };
         break;
@@ -2562,10 +2561,6 @@ export default function CanvasPage() {
       return;
     }
     handleAddTextNode(position, payload.text.replace(/\n/g, '<br/>'));
-  };
-
-  const applyClipboardAt = async (screenPt: { x: number; y: number }) => {
-    await applyClipboardAtFlow(spawnNearScreen(screenPt));
   };
 
   const handleCopyImage = async (id: string) => {

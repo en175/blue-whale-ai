@@ -83,7 +83,15 @@ export function availableGenKinds(sourceNodes: Node[]): Set<ConnectGenKind> {
   let acc: Set<AbilityGenKind> | null = null;
   for (const kind of kinds) {
     const set = ABILITY[kind];
-    acc = acc == null ? new Set(set) : new Set([...acc].filter((k) => set.has(k)));
+    if (acc == null) {
+      acc = new Set<AbilityGenKind>(set);
+    } else {
+      const next = new Set<AbilityGenKind>();
+      for (const item of acc) {
+        if (set.has(item)) next.add(item);
+      }
+      acc = next;
+    }
   }
   const result = new Set<ConnectGenKind>(acc ?? []);
   if (isAudioGenEnabled(kinds)) result.add('audio');

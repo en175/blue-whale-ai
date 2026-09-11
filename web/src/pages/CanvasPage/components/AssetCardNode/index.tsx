@@ -3,7 +3,6 @@
  * 从画布拖入/添加图片参考、生成图片唤起底部图片对话框、角色卡音色设置
  * ============================================ */
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { AtSign, Upload, WandSparkles, Info, Music, X, MousePointerClick, ImageOff, Plus } from 'lucide-react';
 import type { GenerationCardBlock } from '@/api/agentSessions';
@@ -180,11 +179,6 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     e.preventDefault();
     e.stopPropagation();
   }, [data.toolMode]);
-
-  const handleDelete = useCallback(() => {
-    setContextMenu(null);
-    data.onDelete?.(id);
-  }, [data, id]);
 
   /** 添加到 Agent 聊天 */
   const handleAddToChat = useCallback(() => {
