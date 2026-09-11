@@ -1943,6 +1943,8 @@ export default function CanvasPage() {
   actionsRef.current.openImageDialog = () => {
     if (!canOpenEditor()) return;
     setImageSeed(null);
+    // 空白新会话不携带上一轮选取事件（IKF5KE）
+    setImagePickResult(null);
     handleOpenImageDialog();
   };
 
@@ -5377,6 +5379,8 @@ export default function CanvasPage() {
             setImageDraftId(null);
             pendingImageCanvasRefsRef.current = [];
             setPendingImageCanvasRefs([]);
+            // 新会话不继承上一轮选取事件（IKF5KE）：已消费/残留事件一律清除
+            setImagePickResult(null);
             setImageSeed({ ts: Date.now(), text: '', files: [] });
             handleOpenImageDialog();
           }}
@@ -5536,12 +5540,13 @@ export default function CanvasPage() {
                 ? (ids) => handleReorderAttachments(imageSeed.targetNodeId!, ids)
                 : undefined
             }
-            onClose={() => { imagePanelHiddenRef.current = true; setShowImageDialog(false); setPickMode(null); setPickTarget(null); clearPendingImageCanvasRefs(); }}
+            onClose={() => { imagePanelHiddenRef.current = true; setShowImageDialog(false); setPickMode(null); setPickTarget(null); clearPendingImageCanvasRefs(); setImagePickResult(null); }}
             onSend={handleImageDialogSend}
             onPickFromCanvas={() => { setPickMode('image'); setPickTarget('image'); }}
             onPickFromAssets={() => openAssetsPicker('imageDialog')}
             pickMode={pickMode === 'image'}
             externalPick={imagePickResult}
+            onExternalPickConsumed={() => setImagePickResult(null)}
             onOpenCharacterLibrary={() => { setCharacterLibraryTarget('image'); setShowCharacterLibrary(true); }}
             onToast={(type, msg) => showToast(type, msg)}
           />
