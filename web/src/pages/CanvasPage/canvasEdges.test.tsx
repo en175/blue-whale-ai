@@ -247,6 +247,9 @@ describe('IKDLQF 连线受控化与目标生图接线', () => {
   });
 
   it('无变更不保存；连线变更进入自动保存签名并随下次保存上送', async () => {
+    // 新连线只允许进入生成节点；普通成品图不再是合法目标。
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    doc.nodes.find((n) => n.id === 'm1')!.data.draft = true;
     await renderPage();
 
     // 水合基线与当前内容一致：超过防抖窗口也不应发起保存
@@ -729,6 +732,9 @@ describe('IKDL9U review text input consistency', () => {
     expect(container.textContent).toContain('夜景');
   });
   it('pauses autosave for invalid drafts and resumes after correction', async () => {
+    // 新连线只允许进入生成节点；普通成品图不再是合法目标。
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    doc.nodes.find((n) => n.id === 'm1')!.data.draft = true;
     await renderPage();
     await act(async () => {
       flowProps.current.textNodes[0].data.onDraftError('t1', '正文超限');
