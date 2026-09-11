@@ -30,7 +30,7 @@ export interface PromptPreviewContent {
   promptOriginalTitle?: string;
 }
 
-/** Positions are editable; identity and the fixed index must remain in the trusted set. */
+/** Tags cannot overlap; repeated uses of an index must point to the same identity. */
 export function validPromptMentions(text: string, mentions: PromptMention[]): boolean {
   let end = 0;
   const identities = new Map<number, string>();

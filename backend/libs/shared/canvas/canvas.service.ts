@@ -3,7 +3,7 @@ import { NewApiError } from "@blue-whale/core";
 import { promptReferenceRequestSchema } from "@blue-whale/contracts";
 import { createModelCapabilityRepo } from "@lib/shared/persistence/model-capability-repo.js";
 import { createWorkerAssetOps } from "@lib/shared/persistence/generation-worker-asset-ops.js";
-import { confirmPlanEdges, planError, validatePlanModel, validateVideoPlan } from "./prompt-target.js";
+import { confirmPlanEdges, nodeAssetId, planError, validatePlanModel, validateVideoPlan } from "./prompt-target.js";
 import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
@@ -216,11 +216,11 @@ export class CanvasService {
     if (!await this.project.findOwnedById(projectId, ownerId)) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
     const parsed = promptReferenceRequestSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException("方案引用参数无效");
-    const { planNodeId, targetNodeId, expectedVersion, modelId } = parsed.data;
+    const { planNodeId, targetNodeId, expectedVersion, modelId, syncBindings } = parsed.data;
     const canvas = await this.repo.getByProject(projectId);
     if (canvas.version !== expectedVersion) throw new NewApiError("Canvas 版本冲突", 412);
     const nodes = JSON.parse(canvas.nodes ?? "[]");
-    const result = confirmPlanEdges(nodes, JSON.parse(canvas.edges ?? "[]"), planNodeId, targetNodeId);
+    const result = confirmPlanEdges(nodes, JSON.parse(canvas.edges ?? "[]"), planNodeId, targetNodeId, syncBindings);
     const target = nodes.find((n: { id: string }) => n.id === targetNodeId);
     const isVideo = target.data?.mediaType === "video";
     const models = await createModelCapabilityRepo(this.prisma.client).listEnabledByType(isVideo ? "video" : "image");
@@ -315,6 +315,7 @@ export class CanvasService {
         throw new BadRequestException(`文本超限（标题 ${limits.title}，正文 ${limits.text} 字），原内容未改动`);
       }
     }
+    const editedMaterials: Array<{ assetId: string; mediaType: "image" | "video" | "audio" }> = [];
     const current = await this.repo.getByProject(projectId);
     const previous = JSON.parse(current.nodes ?? "[]") as typeof incoming;
     if ([...previous, ...incoming].some(node => node.data?.promptSource !== undefined)) {
@@ -330,18 +331,40 @@ export class CanvasService {
             throw new BadRequestException("预览来源不可修改或重复，请使用应用入口");
           }
           seen.add(key);
-          if (JSON.stringify(node.data?.promptMaterials) !== JSON.stringify(old?.data?.promptMaterials)
-            || node.data?.promptOriginalTitle !== old?.data?.promptOriginalTitle) {
-            throw new BadRequestException("方案素材身份不可伪造，请使用应用入口");
+          if (node.data?.promptOriginalTitle !== old?.data?.promptOriginalTitle) {
+            throw new BadRequestException("方案原始标题不可修改");
           }
-          if (old?.data?.promptMentions !== undefined) {
+          if (old?.data?.promptMentions !== undefined || node.data?.promptMentions !== undefined) {
             const mentions = promptMentionSchema.array().safeParse(node.data?.promptMentions);
-            const trusted = await this.repo.getPromptSnapshot(projectId, node.data!.promptSource as PromptPreviewSource);
-            if (!mentions.success || !validPromptMentions(node.data!.text as string, mentions.data)
-              || mentions.data.some(mention => !trusted?.promptMentions?.some(item => item.assetId === mention.assetId && item.index === mention.index))) {
-              throw new BadRequestException("正文素材索引无效或绑定被伪造，原内容未改动");
+            if (!mentions.success || !validPromptMentions(node.data!.text as string, mentions.data)) {
+              throw new BadRequestException("正文素材索引无效，原内容未改动");
             }
-          } else if (node.data?.promptMentions !== undefined) {
+            const oldMentions = promptMentionSchema.array().parse(old?.data?.promptMentions ?? []);
+            const oldMaterials = (old?.data?.promptMaterials ?? []) as Array<{ assetId: string; mediaType: string; url: string }>;
+            const materials = Array.isArray(node.data?.promptMaterials) ? node.data.promptMaterials as typeof oldMaterials : [];
+            if (materials.some(m => !m || typeof m.assetId !== "string" || typeof m.mediaType !== "string" || typeof m.url !== "string")
+              || new Set(materials.map(m => m.assetId)).size !== materials.length) {
+              throw new BadRequestException("方案素材身份无效或重复");
+            }
+            // Existing display metadata stays immutable; newly chosen identities must be real, owned Canvas assets.
+            if (oldMaterials.some(material => !materials.some(m => m.assetId === material.assetId && m.mediaType === material.mediaType && m.url === material.url))) {
+              throw new BadRequestException("方案素材身份不可伪造，请重新选择素材");
+            }
+            const changed = mentions.data.filter(m => !oldMentions.some(old => old.index === m.index && old.assetId === m.assetId));
+            const added = materials.filter(m => !oldMaterials.some(old => old.assetId === m.assetId));
+            for (const assetId of new Set([...changed.map(m => m.assetId), ...added.map(m => m.assetId)])) {
+              const indices = mentions.data.filter(m => m.assetId === assetId);
+              if (!/^[1-9][0-9]*$/.test(assetId) || !incoming.some(n => n.type === "mediaNode" && nodeAssetId(n) === assetId)) {
+                planError(node.id, indices, "请从画布选择明确的素材");
+              }
+              const asset = await this.prisma.client.assets.findFirst({ where: { id: BigInt(assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal" } });
+              const material = materials.find(m => m.assetId === assetId);
+              if (!asset || !material || material.mediaType !== asset.type || material.url !== asset.url || !["image", "video", "audio"].includes(asset.type)) {
+                planError(node.id, indices, "素材已删除、无权访问或身份不一致");
+              }
+              editedMaterials.push({ assetId, mediaType: asset.type as "image" | "video" | "audio" });
+            }
+          } else if (node.data?.promptMentions !== undefined || JSON.stringify(node.data?.promptMaterials) !== JSON.stringify(old?.data?.promptMaterials)) {
             throw new BadRequestException("正文素材索引不可伪造，请使用应用入口");
           }
         }
@@ -353,6 +376,7 @@ export class CanvasService {
       viewport,
       nodes,
       edgesProvided ? edges : current.edges,
+      editedMaterials.length ? { ownerId, items: editedMaterials } : undefined,
     );
     if (!saved) return { code: 412, msg: "Canvas 版本冲突", data: null } as const;
     return ok(saved);

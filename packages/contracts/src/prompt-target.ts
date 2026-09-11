@@ -1,14 +1,16 @@
 import { z } from "zod";
 import { promptMentionSchema, type PromptMention } from "./prompt-preview.js";
 
+export const promptBindingsSchema = z.array(promptMentionSchema.pick({ index: true, assetId: true }));
+
 export const promptReferenceRequestSchema = z.object({
   planNodeId: z.string().min(1).max(128),
   targetNodeId: z.string().min(1).max(128),
   expectedVersion: z.number().int().nonnegative(),
   modelId: z.string().min(1).optional(),
+  syncBindings: promptBindingsSchema.optional(),
 }).strict();
 
-export const promptBindingsSchema = z.array(promptMentionSchema.pick({ index: true, assetId: true }));
 export type PromptBinding = z.infer<typeof promptBindingsSchema>[number];
 export function promptBindingList(mentions: PromptMention[]): PromptBinding[] {
   return [...new Map(mentions.map(m => [m.index, { index: m.index, assetId: m.assetId }])).values()].sort((a, b) => a.index - b.index);

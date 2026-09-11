@@ -1,3 +1,4 @@
+import type { PromptBinding } from '../../../packages/contracts/src/prompt-target';
 import type { PromptPreviewSource } from '../../../packages/contracts/src/prompt-preview';
 import type { LegacyCardHistoryItem, LegacyMigrationReport } from '../../../packages/contracts/src/legacy-card-migration';
 /* ============================================
@@ -35,7 +36,7 @@ export function applyPromptPreview(input: { projectId: string; source: PromptPre
   );
 }
 
-export function referencePromptPlan(input: { projectId: string; planNodeId: string; targetNodeId: string; expectedVersion: number }) {
+export function referencePromptPlan(input: { projectId: string; planNodeId: string; targetNodeId: string; expectedVersion: number; syncBindings?: PromptBinding[] }) {
   const { projectId, ...body } = input;
   return apiRequest<CanvasRecord>(`/api/canvases/${encodeURIComponent(projectId)}/prompt-references`, {
     method: 'POST', silent: true, body: JSON.stringify(body),

@@ -1,7 +1,7 @@
 /* ============================================
  * CanvasPage 画布编辑页：节点/连线/工具栏编排
  * ============================================ */
-import { promptBindingList, promptBindingsSchema } from '../../../../packages/contracts/src/prompt-target';
+import { promptBindingList, promptBindingsSchema, type PromptBinding } from '../../../../packages/contracts/src/prompt-target';
 import { promptMentionSchema, validPromptMentions } from '../../../../packages/contracts/src/prompt-preview';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -242,7 +242,7 @@ export default function CanvasPage() {
   /** 连线（受控持有：水合恢复、自动保存签名、目标节点附件推导共用，IKDLQF） */
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   /** 连线最新值（避免闭包陈旧：提交前落盘与附件推导用） */
-  const referencePlanRef = useRef<(source: string, target: string) => Promise<void>>(async () => {});
+  const referencePlanRef = useRef<(source: string, target: string, syncBindings?: PromptBinding[]) => Promise<void>>(async () => {});
   const edgesRef = useRef<Edge[]>([]);
   edgesRef.current = edges;
   /** 撤销/重做栈（IKD0JT A2）：在节点 refs 就绪后实例化并回填；
@@ -845,7 +845,7 @@ export default function CanvasPage() {
           onTitleChange: (id: string, title: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, title } } : n)),
           onDraftError: handleDraftError,
           onTextChange: (id: string, text: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text } } : n)),
-          onPromptChange: (id: string, text: string, promptMentions: import('../../../../packages/contracts/src/prompt-preview').PromptMention[]) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text, promptMentions } } : n)),
+          onPromptChange: (id: string, text: string, promptMentions: import('../../../../packages/contracts/src/prompt-preview').PromptMention[], promptMaterials?: Array<import('../../../../packages/contracts/src/prompt-preview').PromptMaterial & { url: string }>) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text, promptMentions, ...(promptMaterials ? { promptMaterials } : {}) } } : n)),
           onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
           onChange: (id: string, html: string) => {
             setTextNodes((prev) =>
@@ -3738,6 +3738,20 @@ export default function CanvasPage() {
     };
   }, [imageSeed?.targetNodeId, videoSeed?.targetNodeId, edges, mediaNodes, textNodes]);
 
+  const pendingPlanSyncs = (targetId: string | undefined) => edges.filter(edge => edge.target === targetId).flatMap(edge => {
+    const node = textNodes.find(node => node.id === edge.source && node.data.promptSource);
+    if (!node) return [];
+    const mentions = promptMentionSchema.array().safeParse(node.data.promptMentions ?? []);
+    if (!mentions.success || !validPromptMentions(extractTextNodeText(node.data), mentions.data)) return [];
+    const bindings = promptBindingList(mentions.data);
+    const confirmed = promptBindingsSchema.safeParse((edge.data?.promptReference as { bindings?: unknown } | undefined)?.bindings ?? (bindings.length ? undefined : []));
+    return confirmed.success && JSON.stringify(confirmed.data) === JSON.stringify(bindings) ? [] : [{ nodeId: node.id, title: String(node.data.title || '方案'), bindings }];
+  });
+  const syncPlanToTarget = (planNodeId: string, targetId: string | undefined) => {
+    const pending = pendingPlanSyncs(targetId).find(plan => plan.nodeId === planNodeId);
+    if (pending && targetId) void referencePlanRef.current(planNodeId, targetId, pending.bindings);
+  };
+
   /** 视频草稿绑定面板的文本附件实时跟随画布连线（IKDMQS，同图片草稿） */
   const videoDraftAttachments = useMemo(
     () => (videoDraftId ? textAttachmentsOf(videoDraftId) : undefined),
@@ -4260,7 +4274,7 @@ export default function CanvasPage() {
     }
   };
 
-  referencePlanRef.current = async (planNodeId, targetNodeId) => {
+  referencePlanRef.current = async (planNodeId, targetNodeId, syncBindings) => {
     const projectId = activeProjectRef.current;
     if (!projectId || applyingRef.current || isGeneratingNode(targetNodeId)) return;
     applyingRef.current = true;
@@ -4270,7 +4284,7 @@ export default function CanvasPage() {
       if (imageDraftIdRef.current === targetNodeId) commitPendingImageCanvasEdges(targetNodeId);
       if (videoDraftIdRef.current === targetNodeId) commitPendingVideoCanvasEdges(targetNodeId);
       if (!(await flushCanvasSave(projectId)) || versionRef.current === null) return;
-      const saved = await referencePlanMutation.mutateAsync({ projectId, planNodeId, targetNodeId, expectedVersion: versionRef.current });
+      const saved = await referencePlanMutation.mutateAsync({ projectId, planNodeId, targetNodeId, expectedVersion: versionRef.current, ...(syncBindings !== undefined ? { syncBindings } : {}) });
       if (activeProjectRef.current !== projectId) return;
       const next = (JSON.parse(saved.edges ?? '[]') as Edge[]).map(edge => ({
         ...edgesRef.current.find(old => old.id === edge.id), ...edge, type: 'custom',
@@ -5345,6 +5359,9 @@ export default function CanvasPage() {
         {/* 底部视频对话框（IKDMQS 统一草稿绑定；工具栏入口为无卡自由模式） */}
         {showBottomDialog && (
           <BottomDialog
+            pendingPlanSyncs={pendingPlanSyncs(videoSeed?.targetNodeId)}
+            onSyncPlan={id => syncPlanToTarget(id, videoSeed?.targetNodeId)}
+            syncingPlan={applying}
             planReferenceError={planReferenceErrors.video}
             planIndices={planReferenceErrors.videoIndices}
             key={videoSeed?.ts ?? 0}
@@ -5413,6 +5430,9 @@ export default function CanvasPage() {
             attachments={imageDraftId ? imageDraftAttachments : imageSeed?.attachments}
             mediaRefs={imageDraftId ? imageDraftMediaRefs : undefined}
             invalidMediaRefs={invalidImageMediaRefs}
+            pendingPlanSyncs={pendingPlanSyncs(imageSeed?.targetNodeId)}
+            onSyncPlan={id => syncPlanToTarget(id, imageSeed?.targetNodeId)}
+            syncingPlan={applying}
             planReferenceError={planReferenceErrors.image}
             onRemoveMediaRef={
               imageDraftId ? (nodeId) => handleRemoveImageMediaRef(imageDraftId, nodeId) : undefined

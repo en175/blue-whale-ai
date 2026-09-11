@@ -377,6 +377,124 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
     expect(jobs[0].input.prompt_plan_snapshot).toMatchObject({ providerPrompt: prompt, images: [] });
   });
 
+  it("IKETSY: a text-only plan can add an owned Canvas material and rejects forged metadata", async () => {
+    projectId = (await projects.create("987654", "IKETSY text plan")).id;
+    const applied = (await (await apply()).json()).data;
+    const asset = await prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } });
+    const nodes = JSON.parse(applied.canvas.nodes);
+    const node = nodes.find((n: { id: string }) => n.id === applied.node.id);
+    nodes.push({ id: "chosen", type: "mediaNode", data: { assetId: String(asset.id), mediaType: "image", src: asset.url }, position: { x: 0, y: 0 } });
+    node.data.promptMentions = [{ start: 0, end: 2, index: 1, assetId: String(asset.id) }];
+    node.data.promptMaterials = [{ assetId: String(asset.id), mediaType: "image", url: "https://forged.invalid/image.png" }];
+    const save = (version: number) => fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes) }) });
+    expect((await save(applied.canvas.version)).status).toBe(400);
+    expect((await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data.nodes).toBe(applied.canvas.nodes);
+    node.data.promptMaterials[0].url = asset.url;
+    const saved = await save(applied.canvas.version);
+    expect(saved.status, await saved.clone().text()).toBe(200);
+    const canvas = (await saved.json()).data;
+    node.data.promptMaterials.unshift({ ...node.data.promptMaterials[0], url: "https://forged.invalid/image.png" });
+    expect((await save(canvas.version)).status).toBe(400);
+    expect((await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data.nodes).toBe(canvas.nodes);
+  });
+
+  it("IKETSY: deleting a newly selected tag before saving keeps the edited plan saveable", async () => {
+    projectId = (await projects.create("987654", "IKETSY remove before save")).id;
+    const applied = (await (await apply()).json()).data;
+    const asset = await prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } });
+    const nodes = JSON.parse(applied.canvas.nodes);
+    const plan = nodes.find((n: { id: string }) => n.id === applied.node.id);
+    nodes.push({ id: "chosen", type: "mediaNode", data: { assetId: String(asset.id), mediaType: "image", src: asset.url }, position: { x: 0, y: 0 } });
+    plan.data.promptMentions = [];
+    plan.data.promptMaterials = [{ assetId: String(asset.id), mediaType: "image", url: asset.url }];
+    plan.data.text = "删除新标签后的正文";
+    const saved = await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${applied.canvas.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes) }) });
+    expect(saved.status, await saved.clone().text()).toBe(200);
+    const readback = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+    expect(JSON.parse(readback.nodes).find((n: { id: string }) => n.id === plan.id).data).toMatchObject({ text: "删除新标签后的正文", promptMentions: [] });
+  });
+
+  it("IKETSY: each target confirms edits independently and preserves shared inputs and historical snapshots", async () => {
+    projectId = (await projects.create("987654", "IKETSY sync")).id;
+    const assets = await Promise.all([0, 1].map(() => prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } })));
+    const [a, b] = assets.map(asset => String(asset.id));
+    materialPayload = { target_media: "image", assets: [{ asset_ref_id: "a", asset_id: a, media_type: "image" }],
+      shots: [{ shot_no: 1, title: "方案", prompt_text: "素材A雨夜", asset_bindings: [{ asset_ref_id: "a" }], prompt_mentions: [{ start: 0, end: 3, asset_ref_id: "a", index: 7 }] }] };
+    const read = async () => (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+    try {
+      const applied = (await (await apply()).json()).data;
+      let canvas = applied.canvas;
+      const nodes = JSON.parse(canvas.nodes);
+      const plan = nodes.find((n: { id: string }) => n.id === applied.node.id);
+      const media = nodes.find((n: { type: string }) => n.type === "mediaNode");
+      nodes.push({ id: "new-material", type: "mediaNode", position: { x: 0, y: 500 }, data: { mediaType: "image", assetId: b, src: assets[1]!.url } });
+      for (const id of ["A", "B"]) nodes.push({ id, type: "mediaNode", position: { x: 900, y: 0 }, data: { mediaType: "image", draft: true, draftModelId: "iketsw-image", prompt: "" } });
+      const save = async () => {
+        const res = await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${canvas.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes) }) });
+        expect(res.status, await res.clone().text()).toBe(200); canvas = (await res.json()).data;
+      };
+      await save();
+      const reference = (targetNodeId: string, syncBindings?: Array<{ index: number; assetId: string }>, expectedVersion = canvas.version) => fetch(`${base}/api/canvases/${projectId}/prompt-references`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ planNodeId: plan.id, targetNodeId, expectedVersion, ...(syncBindings ? { syncBindings } : {}) }),
+      });
+      for (const target of ["A", "B"]) { const res = await reference(target); expect(res.status).toBe(201); canvas = (await res.json()).data; }
+      const submit = (target: string, ids: string[]) => fetch(`${base}/api/projects/${projectId}/generation-jobs`, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "image", target_node_id: target, input_asset_ids: ids, expected_output_count: 1, parameters: { prompt: "", model_id: "iketsw-image", aspect_ratio: "1:1" } }) });
+      plan.data.text = "素材A新文字";
+      await save();
+      expect((await (await submit("A", [a!])).json()).code).toBe(200);
+      const oldJob = (await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records[0];
+      expect(oldJob.input.prompt_plan_snapshot.providerPrompt).toBe("参考图1新文字");
+      canvas = await read();
+      // Protect a shared source on A; B's old input is exclusively from this plan.
+      const sharedEdges = JSON.parse(canvas.edges);
+      sharedEdges.find((e: { source: string; target: string }) => e.source === media.id && e.target === "A").data.inputSources = { manual: true, planNodeIds: [plan.id, "other-plan"] };
+      canvas = (await (await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${canvas.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes), edges: JSON.stringify(sharedEdges) }) })).json()).data;
+      plan.data.promptMentions = [{ start: 0, end: 3, index: 7, assetId: b }];
+      plan.data.promptMaterials.push({ assetId: b, mediaType: "image", url: assets[1]!.url });
+      await save();
+      const before = canvas;
+      for (const target of ["A", "B"]) expect(await (await submit(target, [a!])).text()).toContain("待同步");
+      expect((await reference("A", [{ index: 7, assetId: a! }])).status).toBe(412);
+      expect((await reference("A", [{ index: 7, assetId: b! }], before.version - 1)).status).toBe(412);
+      await prisma.client.assets.update({ where: { id: assets[1]!.id }, data: { is_delete: true } });
+      expect(await (await reference("A", [{ index: 7, assetId: b! }])).text()).toContain("#7");
+      expect((await read()).edges).toBe(before.edges);
+      await prisma.client.assets.update({ where: { id: assets[1]!.id }, data: { is_delete: false } });
+      const modelKey = { provider_id_model_id: { provider_id: "iketsw-test", model_id: "iketsw-image" } };
+      await prisma.client.generation_model_capability.update({ where: modelKey, data: { features: { reference_image: true, max_reference_images: 1 } } });
+      expect(await (await reference("A", [{ index: 7, assetId: b! }])).text()).toContain("最多 1");
+      expect((await read()).edges).toBe(before.edges);
+      await prisma.client.generation_model_capability.update({ where: modelKey, data: { features: { reference_image: true, max_reference_images: 3 } } });
+      const synced = await reference("A", [{ index: 7, assetId: b! }]);
+      expect(synced.status, await synced.clone().text()).toBe(201);
+      canvas = (await synced.json()).data;
+      const edges = JSON.parse(canvas.edges);
+      expect(edges.find((e: { source: string; target: string }) => e.source === media.id && e.target === "A").data.inputSources).toEqual({ manual: true, planNodeIds: ["other-plan"] });
+      expect(edges.filter((e: { target: string }) => e.target === "B")).toEqual(JSON.parse(before.edges).filter((e: { target: string }) => e.target === "B"));
+      expect((await (await submit("A", [a!, b!])).json()).code).toBe(200);
+      expect(await (await submit("B", [a!])).text()).toContain("待同步");
+      canvas = await read();
+      const syncB = await reference("B", [{ index: 7, assetId: b! }]);
+      expect(syncB.status).toBe(201); canvas = (await syncB.json()).data;
+      expect(JSON.parse(canvas.edges).some((e: { source: string; target: string }) => e.source === media.id && e.target === "B")).toBe(false);
+      // Both public commands compete for one version: only one can commit.
+      const race = await Promise.all([
+        reference("B", [{ index: 7, assetId: b! }]),
+        fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${canvas.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes) }) }),
+      ]);
+      expect(race.filter(res => res.status === 412)).toHaveLength(1);
+      expect(race.filter(res => res.status < 300)).toHaveLength(1);
+      canvas = await read();
+      plan.data.text = "删除全部标签"; plan.data.promptMentions = [];
+      await save();
+      const empty = await reference("B", []); expect(empty.status).toBe(201); canvas = (await empty.json()).data;
+      expect(JSON.parse(canvas.edges).filter((e: { target: string }) => e.target === "B")).toEqual([expect.objectContaining({ source: plan.id, data: { promptReference: { bindings: [] } } })]);
+      expect((await (await submit("B", [])).json()).code).toBe(200);
+      expect((await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.records.find((job: { job_id: string }) => job.job_id === oldJob.job_id).input.prompt_plan_snapshot).toEqual(oldJob.input.prompt_plan_snapshot);
+    } finally { materialPayload = undefined; }
+  });
+
   async function openPlanBrowser() {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
@@ -400,6 +518,121 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
       throw error;
     }
   }
+
+  it.runIf(process.env.IKETSY_BROWSER)("IKETSY browser: edit material tags and confirm A without releasing B", async () => {
+    projectId = (await projects.create("987654", "IKETSY browser")).id;
+    const assets = await Promise.all([0, 1].map(() => prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } })));
+    const [a, b] = assets.map(asset => String(asset.id));
+    await prisma.client.project_asset.create({ data: { user_id: 987654n, project_id: BigInt(projectId), asset_id: assets[1]!.id, is_delete: 0 } });
+    materialPayload = { target_media: "image", assets: [{ asset_ref_id: "a", asset_id: a, media_type: "image" }],
+      shots: [{ shot_no: 1, title: "共享方案", prompt_text: "素材A雨夜", asset_bindings: [{ asset_ref_id: "a" }], prompt_mentions: [{ start: 0, end: 3, asset_ref_id: "a", index: 7 }] }] };
+    const targets = ["A", "B"].map((id, i) => ({ id, type: "mediaNode", position: { x: 350, y: 40 + i * 330 },
+      data: { mediaType: "image", draft: true, genStatus: "draft", draftModelId: "iketsw-image", draftSize: "1024x1024", draftRatio: "1:1", prompt: "已有草稿", targetRatio: "1:1" } }));
+    await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ nodes: JSON.stringify([...targets,
+      { id: "material-b", type: "mediaNode", position: { x: 0, y: 0 }, data: { assetId: b, src: assets[1]!.url, mediaType: "image", fileName: "素材B" } }]), edges: "[]", viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }) });
+    const { page, plan, browser, vite } = await openPlanBrowser();
+    const read = async () => (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+    try {
+      let canvas = await read();
+      const planId = JSON.parse(canvas.nodes).find((n: { type: string }) => n.type === "textNode").id;
+      for (const targetNodeId of ["A", "B"]) {
+        const res = await fetch(`${base}/api/canvases/${projectId}/prompt-references`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ planNodeId: planId, targetNodeId, expectedVersion: canvas.version }) });
+        expect(res.status).toBe(201); canvas = (await res.json()).data;
+      }
+      await page.reload(); await plan.waitFor();
+      const editor = plan.locator('[data-placeholder="输入内容..."]');
+      await editor.dblclick();
+      await plan.locator('[data-prompt-index="7"]').click();
+      await plan.getByLabel("替换素材 #7").selectOption(b!);
+      await vi.waitFor(async () => expect(JSON.parse((await read()).nodes).find((n: { id: string }) => n.id === planId).data.promptMentions[0].assetId).toBe(b));
+      const target = (id: string) => page.locator(`.react-flow__node-mediaNode[data-id="${id}"] [data-testid="media-content"]`);
+      await target("A").click();
+      expect(await page.locator('button[title="发送"]').isDisabled()).toBe(true);
+      await page.getByRole("button", { name: "同步素材到目标", exact: true }).click();
+      await vi.waitFor(async () => expect(await page.locator('button[title="发送"]').isEnabled()).toBe(true));
+      expect(await page.locator('textarea').inputValue()).toBe("已有草稿");
+      await page.reload(); await plan.waitFor();
+      await target("B").click();
+      expect(await page.locator('button[title="发送"]').isDisabled()).toBe(true);
+      await page.getByText(/素材待同步/).first().waitFor();
+      canvas = await read();
+      const edges = JSON.parse(canvas.edges);
+      expect(edges.find((e: { source: string; target: string }) => e.source === planId && e.target === "A").data.promptReference.bindings).toEqual([{ index: 7, assetId: b }]);
+      expect(edges.find((e: { source: string; target: string }) => e.source === planId && e.target === "B").data.promptReference.bindings).toEqual([{ index: 7, assetId: a }]);
+      await page.screenshot({ path: '/tmp/iketsy-browser.png', fullPage: true });
+      await editor.dblclick();
+      await plan.locator('[data-prompt-index="7"]').click();
+      await plan.getByRole("button", { name: "删除标签 #7", exact: true }).click();
+      await vi.waitFor(async () => expect(JSON.parse((await read()).nodes).find((n: { id: string }) => n.id === planId).data.promptMentions).toEqual([]));
+      await plan.getByLabel("新增素材标签").selectOption(b!);
+      await vi.waitFor(async () => expect(JSON.parse((await read()).nodes).find((n: { id: string }) => n.id === planId).data.promptMentions).toEqual([expect.objectContaining({ index: 1, assetId: b })]));
+      await page.reload(); await plan.waitFor();
+      await target("A").click();
+      expect(await page.locator('button[title="发送"]').isDisabled()).toBe(true);
+      await page.getByRole("button", { name: "同步素材到目标", exact: true }).waitFor();
+      // Delay, but do not replace, the real API request while another client saves an edit.
+      let releaseRequest!: () => void;
+      let requestStarted!: () => void;
+      const gate = new Promise<void>(resolve => { releaseRequest = resolve; });
+      const started = new Promise<void>(resolve => { requestStarted = resolve; });
+      await page.route('**/prompt-references', async route => { requestStarted(); await gate; await route.continue(); });
+      const staleSync = page.waitForResponse(res => res.url().endsWith('/prompt-references'));
+      await page.getByRole("button", { name: "同步素材到目标", exact: true }).click();
+      await started;
+      try {
+        const remote = await read();
+        const remoteNodes = JSON.parse(remote.nodes);
+        const remotePlan = remoteNodes.find((n: { id: string }) => n.id === planId);
+        remotePlan.data.promptMentions[0].index = 2;
+        const changed = await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${remote.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(remoteNodes) }) });
+        expect(changed.status).toBe(200);
+      } finally { releaseRequest(); }
+      expect((await staleSync).status()).toBe(412);
+      await vi.waitFor(async () => expect(await page.getByRole("status").filter({ hasText: '正在保存画布引用' }).count()).toBe(0));
+      expect(await plan.locator('[data-prompt-index="1"]').count()).toBe(1);
+      expect(await page.locator('button[title="发送"]').isDisabled()).toBe(true);
+      await page.unroute('**/prompt-references');
+
+
+    } finally { materialPayload = undefined; await browser.close(); await vite.close(); }
+  }, 60_000);
+
+  it.runIf(process.env.IKETSY_BROWSER)("IKETSY browser: shortening an over-limit draft preserves the newly selected material", async () => {
+    projectId = (await projects.create("987654", "IKETSY recover edit")).id;
+    const asset = await prisma.client.assets.create({ data: { user_id: 987654n, type: "image", url: `${process.env.AGENT_SERVICE_BASE_URL}/a.png` } });
+    await prisma.client.project_asset.create({ data: { user_id: 987654n, project_id: BigInt(projectId), asset_id: asset.id, is_delete: 0 } });
+    await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ nodes: JSON.stringify([
+      { id: "chosen", type: "mediaNode", data: { assetId: String(asset.id), src: asset.url, mediaType: "image", fileName: "素材B" }, position: { x: 0, y: 0 } },
+    ]), edges: "[]", viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }) });
+    const { page, plan, browser, vite } = await openPlanBrowser();
+    try {
+      const editor = plan.locator('[data-placeholder="输入内容..."]');
+      await editor.dblclick();
+      await editor.fill('字'.repeat(100_000));
+      await plan.getByLabel('新增素材标签').selectOption(String(asset.id));
+      await plan.getByText(/正文最多 100000 字/).waitFor();
+      // Select only the ordinary text; the real Backspace/input event retains the atomic material tag.
+      await editor.evaluate(element => {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let text: Node | null;
+        while ((text = walker.nextNode())) {
+          if ((text.textContent?.length ?? 0) < 100_000) continue;
+          const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 99_990);
+          const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range); break;
+        }
+        (element as HTMLElement).focus();
+      });
+      await page.keyboard.press('Backspace');
+      await vi.waitFor(async () => {
+        const canvas = (await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json()).data;
+        const saved = JSON.parse(canvas.nodes).find((n: { type: string }) => n.type === 'textNode');
+        expect(saved.data.promptMentions).toEqual([expect.objectContaining({ assetId: String(asset.id), index: 1 })]);
+        expect(saved.data.text.length).toBeLessThan(100);
+      }, { timeout: 5000 });
+      await page.reload(); await plan.waitFor();
+      expect(await plan.locator('[data-prompt-asset]').getAttribute('data-prompt-asset')).toBe(String(asset.id));
+    } finally { await browser.close(); await vite.close(); }
+  }, 60_000);
 
   it.runIf(process.env.IKETSW_BROWSER)("IKETSW browser: apply, Dock reference and drag connect preserve drafts and restore inputs", async () => {
     projectId = (await projects.create("987654", "IKETSW browser")).id;
@@ -780,7 +1013,7 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
       await prisma.client.assets.update({ where: { id: b.id }, data: { is_delete: false } });
       const nodes = JSON.parse(applied.canvas.nodes);
       const promptNode = nodes.find((node: { type: string }) => node.type === "textNode");
-      promptNode.data.promptMentions[0].assetId = String(b.id);
+      promptNode.data.promptMentions[0].assetId = "999999999";
       const forged = await fetch(`${base}/api/canvases/${projectId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${applied.canvas.version}"` }, body: JSON.stringify({ nodes: JSON.stringify(nodes) }) });
       expect(forged.status).toBe(400);
       const beforeDelete = await (await fetch(`${base}/api/canvases?projectId=${projectId}`)).json();
