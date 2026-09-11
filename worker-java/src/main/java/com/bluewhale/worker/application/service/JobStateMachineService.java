@@ -103,6 +103,7 @@ public class JobStateMachineService {
         );
 
         if (affected == 0) {
+            log.info("[media_extract] CAS claim 未命中(并发竞争) jobId={} expectedToken={}", jobId, candidate.getFencingToken());
             return Optional.empty();
         }
 
@@ -143,6 +144,8 @@ public class JobStateMachineService {
         int guardAffected = jobMapper.publishMediaExtractGuard(
                 jobIdLong, input.workerId(), input.fencingToken());
         if (guardAffected != 1) {
+            log.warn("[media_extract] publishMediaExtractResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    input.jobId(), input.workerId(), input.fencingToken());
             return false;
         }
 
@@ -218,6 +221,8 @@ public class JobStateMachineService {
         int guardAffected = jobMapper.failMediaExtractGuard(
                 jobIdLong, input.workerId(), input.fencingToken(), errorJson);
         if (guardAffected != 1) {
+            log.warn("[media_extract] failMediaExtractJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    input.jobId(), input.workerId(), input.fencingToken());
             return false;
         }
 
@@ -281,6 +286,7 @@ public class JobStateMachineService {
         );
 
         if (affected == 0) {
+            log.info("[audio] CAS claim 未命中(并发竞争) jobId={} expectedToken={}", jobId, candidate.getFencingToken());
             return Optional.empty();
         }
 
@@ -336,6 +342,7 @@ public class JobStateMachineService {
         );
 
         if (affected == 0) {
+            log.info("[image] CAS claim 未命中(并发竞争) jobId={} expectedToken={}", jobId, candidate.getFencingToken());
             return Optional.empty();
         }
 
@@ -378,7 +385,7 @@ public class JobStateMachineService {
             return affected > 0;
         } catch (Exception e) {
             // .catch(() => ({count:0}))（claim-ops.ts:577）
-            log.warn("requeueImageJobForRetry DB 异常 jobId={}: {}", jobId, e.getMessage());
+            log.warn("[image] requeueImageJobForRetry DB 异常 jobId={}: {}", jobId, e.getMessage(), e);
             return false;
         }
     }
@@ -408,6 +415,7 @@ public class JobStateMachineService {
         int guardAffected = jobMapper.completeJobGuard(
                 jobIdLong, workerId, fencingToken, outputAssetIdsJson);
         if (guardAffected != 1) {
+            log.warn("completeJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={}", jobId, workerId, fencingToken);
             return false;
         }
 
@@ -542,6 +550,7 @@ public class JobStateMachineService {
         int guardAffected = jobMapper.failJobGuard(
                 jobIdLong, workerId, fencingToken, errorJson);
         if (guardAffected != 1) {
+            log.warn("failJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={} errorCode={}", jobId, workerId, fencingToken, errorCode);
             return false;
         }
 
@@ -633,6 +642,7 @@ public class JobStateMachineService {
         int guardAffected = jobMapper.createAssetGuard(
                 jobIdLong, input.workerId(), input.fencingToken());
         if (guardAffected != 1) {
+            log.warn("createAsset 守卫未命中(stale/租约失效) jobId={} workerId={} token={}", input.generationJobId(), input.workerId(), input.fencingToken());
             return null;
         }
 
@@ -728,6 +738,7 @@ public class JobStateMachineService {
         try {
             return JSON_MAPPER.readValue(json, new TypeReference<Map<String, Object>>() {});
         } catch (JsonProcessingException e) {
+            log.debug("parseJson 失败(非关键，字段降级为空): {}", e.getMessage());
             return null;
         }
     }
@@ -915,6 +926,7 @@ public class JobStateMachineService {
         );
 
         if (affected == 0) {
+            log.info("[video] CAS claim 未命中(并发竞争) jobId={} expectedToken={}", jobId, candidate.getFencingToken());
             return Optional.empty();
         }
 
@@ -955,6 +967,9 @@ public class JobStateMachineService {
         // 与 TS video-ops.ts:10,15 同调：next = now + 5000ms，Java 侧计算（评审 C1）。
         java.time.LocalDateTime nextPollAt = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).plusNanos(5_000L * 1_000_000);
         int affected = jobMapper.markVideoSubmitted(jobIdLong, workerId, fencingToken, providerTaskId, nextPollAt);
+        if (affected != 1) {
+            log.warn("[video] markVideoSubmitted 守卫未命中(stale/租约失效) jobId={} workerId={} token={}", jobId, workerId, fencingToken);
+        }
         return affected == 1;
     }
 
@@ -971,6 +986,9 @@ public class JobStateMachineService {
         java.time.LocalDateTime now = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC);
         java.time.LocalDateTime nextPollAt = now.plusNanos(5_000L * 1_000_000);
         int affected = jobMapper.rescheduleVideoPoll(jobIdLong, workerId, fencingToken, clamped, now, nextPollAt);
+        if (affected != 1) {
+            log.warn("[video] rescheduleVideoPoll 守卫未命中(stale/租约失效) jobId={} workerId={} token={}", jobId, workerId, fencingToken);
+        }
         return affected == 1;
     }
 
@@ -991,6 +1009,7 @@ public class JobStateMachineService {
         // 1. publishVideoGuard CAS
         int guardAffected = jobMapper.publishVideoGuard(jobIdLong, workerId, fencingToken);
         if (guardAffected != 1) {
+            log.warn("[video] publishVideoResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}", jobId, workerId, fencingToken);
             return false;
         }
 
@@ -1104,6 +1123,7 @@ public class JobStateMachineService {
         }
         int affected = jobMapper.failVideoGuard(jobIdLong, workerId, fencingToken, toJson(errorObj));
         if (affected != 1) {
+            log.warn("[video] failVideoJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={} errorCode={}", jobId, workerId, fencingToken, errorCode);
             return false;
         }
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
@@ -1162,6 +1182,10 @@ public class JobStateMachineService {
     public boolean cancelVideoBeforeDispatch(String jobId, String workerId, long fencingToken) {
         Long jobIdLong = Long.parseLong(jobId);
         // 评审 I4：TS video-ops.ts:306-343 不写任何日志行——删除原多补的 cancelled log。
-        return jobMapper.cancelVideoBeforeDispatch(jobIdLong, workerId, fencingToken) == 1;
+        boolean ok = jobMapper.cancelVideoBeforeDispatch(jobIdLong, workerId, fencingToken) == 1;
+        if (!ok) {
+            log.warn("[video] cancelVideoBeforeDispatch 守卫未命中(stale/已提交上游) jobId={} workerId={} token={}", jobId, workerId, fencingToken);
+        }
+        return ok;
     }
 }

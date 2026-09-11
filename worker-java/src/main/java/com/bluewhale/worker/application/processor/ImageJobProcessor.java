@@ -122,9 +122,11 @@ public class ImageJobProcessor implements JobProcessor {
         if (claimOpt.isEmpty()) return;
 
         ClaimedJobDto job = claimOpt.get();
+        log.info("[image] 已领取 jobId={} type={} token={}", job.id(), job.type(), job.fencingToken());
 
         // cancelRequested → 取消（generation-worker.ts:237-241）
         if (job.cancelRequested()) {
+            log.info("[image] 取消已执行(cancelRequested) jobId={}", job.id());
             stateMachine.failJob(job.id(), GenerationError.ERROR_PROVIDER_FAILED,
                     "任务已取消", null, workerId, job.fencingToken());
             return;
@@ -153,6 +155,8 @@ public class ImageJobProcessor implements JobProcessor {
                     .plusNanos(backoffMs * 1_000_000L);
             boolean requeued = stateMachine.requeueImageJobForRetry(job.id(), nextActionAt);
             if (requeued) {
+                log.info("[image] 瞬时重试已排队 jobId={} attempt={}/{} nextFireAt={} code={}",
+                        job.id(), job.retry_count() + 1, MAX_IMAGE_RETRIES, nextActionAt, errorCode);
                 stateMachine.appendLog(job.id(), "retry_scheduled", "queued",
                         "瞬时失败第 " + (job.retry_count() + 1) + "/" + MAX_IMAGE_RETRIES
                                 + " 次重试已排队: " + errorCode + ": " + errorMsg,
@@ -163,8 +167,7 @@ public class ImageJobProcessor implements JobProcessor {
         }
 
         // 终态失败（generation-worker.ts:726）
-        log.error("processClaimedImageJob 异常 jobId={} code={}: {}",
-                job.id(), errorCode, errorMsg);
+        log.error("[image] 终态失败 jobId={} code={}: {}", job.id(), errorCode, errorMsg);
         Map<String, Object> details = new HashMap<>();
         details.put("raw", errorMsg);
         stateMachine.failJob(job.id(), errorCode, errorMsg, details,
@@ -252,6 +255,7 @@ public class ImageJobProcessor implements JobProcessor {
         try {
             providerToken = credentialService.open(sealedCredential);
         } catch (Exception e) {
+            log.debug("[image] 凭证解密失败 jobId={}: {}", job.id(), e.getMessage(), e);
             failClaimed(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
                     "图片任务凭证解密失败");
             return;
@@ -319,6 +323,7 @@ public class ImageJobProcessor implements JobProcessor {
             if (batch.isEmpty()) break;
             remaining = n - allImages.size();
         }
+        log.info("[image] 上游已返回 jobId={} count={} expected={}", job.id(), allImages.size(), n);
 
         // 10. 无结果 → no_result（generation-worker.ts:599-601）
         if (allImages.isEmpty()) {
@@ -337,6 +342,8 @@ public class ImageJobProcessor implements JobProcessor {
         List<String> assetIds = new ArrayList<>();
         for (GeneratedImage img : allImages) {
             StoredImage stored = persistProviderImage(img.url(), job.user_id());
+            log.info("[image] 转存完成 jobId={} storageKey={} size={} w={} h={}",
+                    job.id(), stored.storageKey(), stored.size(), stored.width(), stored.height());
             // 宽度优先取 provider 返回值，回退 persistProviderImage 解析值
             Integer width = positiveDimension(img.width());
             if (width == null) width = stored.width();
@@ -358,7 +365,10 @@ public class ImageJobProcessor implements JobProcessor {
                     workerId,
                     job.fencingToken()
             ));
-            if (assetId == null) return; // 守卫失败 → 退出（generation-worker.ts:637）
+            if (assetId == null) {
+                log.warn("[image] 终态失败(createAsset 守卫未命中) jobId={}", job.id());
+                return; // 守卫失败 → 退出（generation-worker.ts:637）
+            }
             assetIds.add(assetId);
         }
 
@@ -367,9 +377,12 @@ public class ImageJobProcessor implements JobProcessor {
         boolean completed = stateMachine.completeJob(
                 job.id(), assetIds, workerId, job.fencingToken());
         if (completed) {
+            log.info("[image] 发布成功 jobId={} assetCount={}", job.id(), assetIds.size());
             stateMachine.appendLog(job.id(), "succeeded", "succeeded",
                     "产出 " + assetIds.size() + " 个素材",
                     Map.of("asset_ids", assetIds));
+        } else {
+            log.warn("[image] 终态失败(completeJob 守卫未命中) jobId={} assetCount={}", job.id(), assetIds.size());
         }
     }
 
@@ -403,8 +416,10 @@ public class ImageJobProcessor implements JobProcessor {
             HttpResponse<byte[]> resp = fetchClient.send(req,
                     HttpResponse.BodyHandlers.ofByteArray());
             if (resp.statusCode() >= 400) {
+                String errBody = new String(resp.body(), java.nio.charset.StandardCharsets.UTF_8);
+                String truncated = errBody.length() > 300 ? errBody.substring(0, 300) + "…" : errBody;
                 throw new ImageProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                        "生成结果下载失败: " + resp.statusCode());
+                        "生成结果下载失败: HTTP " + resp.statusCode() + " body=" + truncated);
             }
             content = resp.body();
             String contentType = resp.headers().firstValue("content-type").orElse(null);
@@ -441,6 +456,7 @@ public class ImageJobProcessor implements JobProcessor {
             }
         } catch (Exception ignored) {
             // 静默：webp 等不支持格式 → null，资产照常落库（契约 §8 等价标准满足）
+            log.debug("[image] ImageIO 解析宽高失败(非关键，降级 null) sourceUrl={}", sourceUrl);
         }
 
         // TOS 上传

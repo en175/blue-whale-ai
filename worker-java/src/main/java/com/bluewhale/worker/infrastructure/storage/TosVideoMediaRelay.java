@@ -99,7 +99,9 @@ public class TosVideoMediaRelay {
                     .build();
             HttpResponse<byte[]> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofByteArray());
             if (resp.statusCode() >= 400) {
-                throw new RuntimeException("生成视频下载失败: " + resp.statusCode());
+                String errBody = new String(resp.body(), java.nio.charset.StandardCharsets.UTF_8);
+                String truncated = errBody.length() > 300 ? errBody.substring(0, 300) + "…" : errBody;
+                throw new RuntimeException("生成视频下载失败: HTTP " + resp.statusCode() + " body=" + truncated);
             }
             bytes = resp.body();
             String contentType = resp.headers().firstValue("content-type").orElse(null);

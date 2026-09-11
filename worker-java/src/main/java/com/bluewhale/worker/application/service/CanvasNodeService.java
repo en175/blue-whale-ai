@@ -148,7 +148,7 @@ public class CanvasNodeService {
             try {
                 result = mutator.mutate(nodes);
             } catch (Exception e) {
-                log.warn("canvas mutator 异常: {}", e.getMessage());
+                log.warn("canvas mutator 异常: {}", e.getMessage(), e);
                 return null;
             }
             if (result == null) return null;
@@ -195,6 +195,7 @@ public class CanvasNodeService {
             }
             return new ArrayList<>();
         } catch (JsonProcessingException e) {
+            log.debug("parseNodesJson 失败(非关键): {}", e.getMessage());
             return new ArrayList<>();
         }
     }
@@ -204,6 +205,7 @@ public class CanvasNodeService {
         try {
             return JSON_MAPPER.readValue(json, new TypeReference<List<Object>>() {});
         } catch (JsonProcessingException e) {
+            log.debug("parseJsonArray 失败(非关键): {}", e.getMessage());
             return null;
         }
     }

@@ -117,7 +117,7 @@ public abstract class AbstractGenerationConsumer implements Closeable {
             try {
                 consumer.close();
             } catch (Exception e) {
-                log.warn("关闭 SimpleConsumer 异常: {}", e.getMessage());
+                log.warn("关闭 SimpleConsumer 异常: {}", e.getMessage(), e);
             }
         }
         log.info("MQ 消费者已停止: tag={}", consumerTag);
@@ -158,7 +158,7 @@ public abstract class AbstractGenerationConsumer implements Closeable {
                 }
             } catch (Exception e) {
                 if (!running) return;
-                log.error("receive 失败，1s 后重试: {}", e.getMessage());
+                log.error("[{}] receive 失败，1s 后重试: {}", consumerTag, e.getMessage(), e);
                 try {
                     Thread.sleep(1_000);
                 } catch (InterruptedException ie) {
@@ -179,7 +179,7 @@ public abstract class AbstractGenerationConsumer implements Closeable {
         try {
             processMessage(message);
         } catch (Exception e) {
-            log.error("消息处理异常: {}", e.getMessage());
+            log.error("[{}] 消息处理异常 messageId={}: {}", consumerTag, message.getMessageId(), e.getMessage(), e);
         } finally {
             semaphore.release();
         }
@@ -193,7 +193,7 @@ public abstract class AbstractGenerationConsumer implements Closeable {
             try {
                 consumer.ack(message);
             } catch (Exception e) {
-                log.warn("ack 失败: {}", e.getMessage());
+                log.warn("[{}] ack 失败 messageId={}: {}", consumerTag, message.getMessageId(), e.getMessage(), e);
             }
         }
     }
@@ -209,6 +209,10 @@ public abstract class AbstractGenerationConsumer implements Closeable {
 
         // 毒丸：parse 返回 null → ack 丢弃（契约 §1）
         if (parsed == null) {
+            String rawPreview = body != null && body.length > 0
+                    ? new String(body, 0, Math.min(body.length, 120), java.nio.charset.StandardCharsets.UTF_8)
+                    : "<empty>";
+            log.warn("[{}] 毒丸丢弃(不可解析) bodyPreview={}", consumerTag, rawPreview);
             return true;
         }
 
@@ -218,8 +222,8 @@ public abstract class AbstractGenerationConsumer implements Closeable {
             return true;
         } catch (Exception e) {
             // 瞬时失败：不 ack → 不可见期后重投（与 TS 逐字一致）
-            log.warn("handle 失败，等待重投 jobId={}: {}",
-                    parsed.jobId(), e.getMessage());
+            log.warn("[{}] handle 失败，等待重投 jobId={}: {}",
+                    consumerTag, parsed.jobId(), e.getMessage(), e);
             return false;
         }
     }

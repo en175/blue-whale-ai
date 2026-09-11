@@ -66,7 +66,7 @@ public class RocketMqGenerationMessageProducer implements GenerationMessageProdu
         try {
             producer.send(message);
         } catch (Exception e) {
-            log.error("视频 MQ 消息发送失败 jobId={} delayMs={}: {}", jobId, effectiveDelay, e.getMessage());
+            log.error("[video] MQ 消息发送失败 jobId={} delayMs={}: {}", jobId, effectiveDelay, e.getMessage(), e);
             throw new RuntimeException("视频 MQ 消息发送失败: " + e.getMessage(), e);
         }
     }
@@ -76,7 +76,7 @@ public class RocketMqGenerationMessageProducer implements GenerationMessageProdu
         try {
             producer.close();
         } catch (Exception e) {
-            log.warn("关闭 RocketMQ Producer 异常: {}", e.getMessage());
+            log.warn("关闭 RocketMQ Producer 异常: {}", e.getMessage(), e);
         }
     }
 }

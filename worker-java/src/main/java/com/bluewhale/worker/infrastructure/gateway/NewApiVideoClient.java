@@ -186,8 +186,9 @@ public class NewApiVideoClient {
 
             if (!response.isSuccessful()) {
                 String code = NewApiErrorClassifier.classifyError(rawText, response.code());
+                String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
                 throw new VideoProviderError(code,
-                        "new-api 视频提交失败: " + response.code());
+                        "new-api 视频提交失败: HTTP " + response.code() + " body=" + truncated);
             }
 
             JsonNode parsed;
@@ -263,8 +264,9 @@ public class NewApiVideoClient {
             if (!response.isSuccessful()) {
                 // HTTP 错误码 → runner isTransientPollError 判定
                 String code = NewApiErrorClassifier.classifyError(rawText, response.code());
+                String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
                 throw new VideoProviderError(code,
-                        "new-api 视频轮询失败: " + response.code(),
+                        "new-api 视频轮询失败: HTTP " + response.code() + " body=" + truncated,
                         new HttpStatusException(response.code()));
             }
 

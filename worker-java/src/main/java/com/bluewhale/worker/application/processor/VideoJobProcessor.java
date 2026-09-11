@@ -143,15 +143,18 @@ public class VideoJobProcessor implements JobProcessor {
         try {
             claimOpt = stateMachine.claimVideoJobById(jobId, workerId);
         } catch (Exception error) {
-            log.error("claimVideoJobById 失败 jobId={}: {}", jobId, error.getMessage());
+            log.error("[video] claimVideoJobById 失败 jobId={}: {}", jobId, error.getMessage(), error);
             throw error;
         }
         if (claimOpt.isEmpty()) return;
 
         ClaimedVideoJobDto claim = claimOpt.get();
+        log.info("[video] 已领取 jobId={} token={} providerTaskId={} pollCount={}",
+                claim.id(), claim.fencingToken(), claim.providerTaskId(), claim.pollCount());
 
         // 2. cancel before dispatch（video-job-runner.ts:213-216）
         if (claim.cancelRequested() && claim.providerTaskId() == null) {
+            log.info("[video] 取消已执行(cancelBeforeDispatch) jobId={}", claim.id());
             stateMachine.cancelVideoBeforeDispatch(claim.id(), claim.workerId(), claim.fencingToken());
             return;
         }
@@ -167,6 +170,7 @@ public class VideoJobProcessor implements JobProcessor {
         try {
             providerToken = credentialService.open(sealedCredential);
         } catch (Exception e) {
+            log.debug("[video] 凭证解密失败 jobId={}: {}", claim.id(), e.getMessage(), e);
             failVideo(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
                     "视频任务凭证解密失败");
             return;
@@ -211,6 +215,7 @@ public class VideoJobProcessor implements JobProcessor {
 
             // submit（:237）
             SubmitResult submitted = videoClient.submit(providerToken, request);
+            log.info("[video] 上游已提交 jobId={} providerTaskId={}", claim.id(), submitted.taskId());
 
             // markVideoSubmitted（:238-242）
             boolean updated = stateMachine.markVideoSubmitted(
@@ -234,11 +239,13 @@ public class VideoJobProcessor implements JobProcessor {
         } catch (VideoProviderError pollError) {
             // isTransientPollError（video-job-runner.ts:386-413）
             if (isTransientPollError(pollError)) {
-                log.warn("video job 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询（IKEA26）",
-                        claim.id(), claim.pollCount(), pollError.getMessage());
+                log.warn("[video] 轮询瞬时错误 jobId={} pollCount={} err={}，重排继续轮询（IKEA26）",
+                        claim.id(), claim.pollCount(), pollError.getMessage(), pollError);
                 boolean updated = stateMachine.rescheduleVideoPoll(
                         claim.id(), claim.workerId(), claim.fencingToken(), claim.progress());
                 if (updated) {
+                    log.info("[video] 瞬时重试已排队 jobId={} pollCount={} nextDelayMs={}",
+                            claim.id(), claim.pollCount(), VIDEO_POLL_INTERVAL_MS);
                     scheduleNext(claim.id(), VIDEO_POLL_INTERVAL_MS);
                 }
                 return;
@@ -272,11 +279,15 @@ public class VideoJobProcessor implements JobProcessor {
                     ? observation.error().code() : GenerationError.ERROR_PROVIDER_FAILED;
             String message = observation.error() != null && observation.error().message() != null
                     ? observation.error().message() : "视频生成失败";
+            log.info("[video] 上游状态终态=failed jobId={} providerTaskId={} code={} pollCount={}",
+                    claim.id(), claim.providerTaskId(), code, claim.pollCount());
             failVideo(claim, code, message);
             return;
         }
 
         // succeeded（:297-355）
+        log.info("[video] 上游状态终态=succeeded jobId={} providerTaskId={} pollCount={}",
+                claim.id(), claim.providerTaskId(), claim.pollCount());
         if (observation.url() == null || observation.url().isEmpty()) {
             // video-job-runner.ts:297-299
             failVideo(claim, GenerationError.ERROR_PROVIDER_FAILED, "视频任务成功但未返回 URL");
@@ -299,8 +310,8 @@ public class VideoJobProcessor implements JobProcessor {
             observation = videoClient.poll(providerToken, claim.parentProviderTaskId());
         } catch (Exception error) {
             // D6：查询失败 → 当不存在（video-job-runner.ts:441-446）
-            log.warn("video job 重试查上游失败 jobId={} parentTask={} err={}，按不存在处理重新 submit（IKEA26）",
-                    claim.id(), claim.parentProviderTaskId(), error.getMessage());
+            log.warn("[video] 重试查上游失败 jobId={} parentTask={} err={}，按不存在处理重新 submit（IKEA26）",
+                    claim.id(), claim.parentProviderTaskId(), error.getMessage(), error);
             return false;
         }
 
@@ -332,6 +343,7 @@ public class VideoJobProcessor implements JobProcessor {
             // TOS 未配置 → 降级直存 URL（与 image 同构）
             stored = new StoredVideo(observation.url(), null, null, null);
         }
+        log.info("[video] 转存完成 jobId={} storageKey={} size={}", claim.id(), stored.storageKey(), stored.size());
 
         // videoDimensions（:469-476）
         int[] dimensions = resolveDimensions(claim.input());
@@ -344,11 +356,17 @@ public class VideoJobProcessor implements JobProcessor {
         double duration = resolveDuration(claim.input());
 
         // publishVideoResult（:504-512）
-        return stateMachine.publishVideoResult(
+        boolean published = stateMachine.publishVideoResult(
                 claim.id(), claim.project_id(), claim.user_id(),
                 claim.workerId(), claim.fencingToken(),
                 stored.url(), stored.storageKey(), stored.mime(), stored.size(),
                 dimensions[0], dimensions[1], duration);
+        if (published) {
+            log.info("[video] 发布成功 jobId={}", claim.id());
+        } else {
+            log.warn("[video] 终态失败(publishVideoResult 守卫未命中) jobId={}", claim.id());
+        }
+        return published;
     }
 
     /**
@@ -369,8 +387,9 @@ public class VideoJobProcessor implements JobProcessor {
         try {
             producer.enqueue(jobId, delayMs);
         } catch (Exception e) {
-            log.error("视频 scheduleNext 失败 jobId={}: {}", jobId, e.getMessage());
-            // 不抛——scheduleNext 失败不影响当前 step 状态（下次 recovery 兜底）
+            // Rule 6: error + rethrow as-is（不吞掉；recovery 兜底不够及时）
+            log.error("[video] scheduleNext MQ 发送失败 jobId={} delayMs={}: {}", jobId, delayMs, e.getMessage(), e);
+            throw e;
         }
     }
 

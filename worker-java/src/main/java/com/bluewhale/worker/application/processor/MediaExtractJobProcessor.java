@@ -98,13 +98,14 @@ public class MediaExtractJobProcessor implements JobProcessor {
         try {
             claimOpt = stateMachine.claimMediaExtract(jobId, workerId);
         } catch (Exception error) {
-            log.error("runMediaExtractStep claim 失败 jobId={}: {}",
-                    jobId, error.getMessage());
+            log.error("[media_extract] claim 失败 jobId={}: {}",
+                    jobId, error.getMessage(), error);
             throw error; // 保持不 ack → RocketMQ 重投
         }
         if (claimOpt.isEmpty()) return; // null = 无可认领 / 重复唤醒
 
         ClaimedMediaExtractJobDto claim = claimOpt.get();
+        log.info("[media_extract] 已领取 jobId={} token={}", claim.id(), claim.fencingToken());
 
         // 临时文件路径（media-extract-runner.ts:198-201）
         String runId = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
@@ -156,6 +157,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
 
             // 5. 上传 mp3（media-extract-runner.ts:262-266）
             TosMediaStorage.UploadResult stored = tosService.upload(outputPath, "audio/mpeg");
+            log.info("[media_extract] 转存完成 jobId={} storageKey={} size={}", claim.id(), stored.storageKey(), stored.size());
 
             // 6. 发布结果（media-extract-runner.ts:267-278）
             boolean published = stateMachine.publishMediaExtractResult(
@@ -174,8 +176,9 @@ public class MediaExtractJobProcessor implements JobProcessor {
             );
 
             if (!published) {
-                log.warn("runMediaExtractStep 发布守卫失败 jobId={}（stale worker 或已终态）", claim.id());
+                log.warn("[media_extract] 终态失败(发布守卫未命中) jobId={}（stale worker 或已终态）", claim.id());
             } else {
+                log.info("[media_extract] 发布成功 jobId={}", claim.id());
                 // 7. 画布节点更新（best-effort，失败不阻断：media-extract-runner.ts:284-301）
                 try {
                     canvasNodeService.updateMediaExtractNodeToAudio(
@@ -184,8 +187,8 @@ public class MediaExtractJobProcessor implements JobProcessor {
                             extractResult.duration()
                     );
                 } catch (Exception e) {
-                    log.warn("runMediaExtractStep 画布节点更新失败 jobId={}: {}",
-                            claim.id(), e.getMessage());
+                    log.warn("[media_extract] 画布节点更新失败(非阻断) jobId={}: {}",
+                            claim.id(), e.getMessage(), e);
                 }
             }
         } catch (Exception error) {
@@ -195,7 +198,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
                     : MediaExtractError.MEDIA_EXTRACT_FAILED;
             String message = error.getMessage() != null ? error.getMessage() : "媒体提取失败";
 
-            log.error("runMediaExtractStep 异常 jobId={} code={}: {}",
+            log.error("[media_extract] 终态失败 jobId={} code={}: {}",
                     claim.id(), code, error.getMessage(), error);
 
             failMediaExtract(claim, code, message);
@@ -221,7 +224,8 @@ public class MediaExtractJobProcessor implements JobProcessor {
             canvasNodeService.failMediaExtractNode(
                     claim.id(), claim.projectId(), code, message);
         } catch (Exception ignored) {
-            // 与 TS .catch(() => {}) 一致
+            // 与 TS .catch(() => {}) 一致；best-effort 不阻断
+            log.debug("[media_extract] failMediaExtractNode best-effort 失败 jobId={}", claim.id());
         }
     }
 
@@ -239,7 +243,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
         try {
             Files.deleteIfExists(path);
         } catch (IOException ignored) {
-            // 与 TS fs.rm({ force: true }).catch(() => {}) 一致
+            // 与 TS fs.rm({ force: true }).catch(() => {}) 一致；finally-cleanup 不阻断
         }
     }
 

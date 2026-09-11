@@ -132,8 +132,9 @@ public class NewApiImageClient {
 
             if (!response.isSuccessful()) {
                 String code = NewApiErrorClassifier.classifyError(rawText, response.code());
+                String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
                 throw new ImageProviderError(code,
-                        "new-api 图片生成失败: " + response.code());
+                        "new-api 图片生成失败: HTTP " + response.code() + " body=" + truncated);
             }
 
             JsonNode parsed;
@@ -239,14 +240,18 @@ public class NewApiImageClient {
             try {
                 builder.addFormDataPart("tools",
                         JSON.writeValueAsString(List.of(Map.of("type", "web_search"))));
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                log.debug("tools JSON 序列化失败(非关键): {}", e.getMessage());
+            }
         }
         if (sequential) {
             builder.addFormDataPart("sequential_image_generation", "auto");
             try {
                 builder.addFormDataPart("sequential_image_generation_options",
                         JSON.writeValueAsString(Map.of("max_images", n)));
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                log.debug("sequential_options JSON 序列化失败(非关键): {}", e.getMessage());
+            }
         }
 
         return new Request.Builder()
@@ -262,8 +267,10 @@ public class NewApiImageClient {
     private byte[] downloadBytes(String url) {
         try (Response r = httpClient.newCall(new Request.Builder().url(url).build()).execute()) {
             if (!r.isSuccessful() || r.body() == null) {
+                String errBody = r.body() != null ? r.body().string() : "";
+                String truncated = errBody.length() > 300 ? errBody.substring(0, 300) + "…" : errBody;
                 throw new ImageProviderError(GenerationError.ERROR_UNSUPPORTED_INPUT,
-                        "参考图片读取失败: HTTP " + r.code());
+                        "参考图片读取失败: HTTP " + r.code() + " body=" + truncated);
             }
             return r.body().bytes();
         } catch (ImageProviderError e) {
@@ -299,7 +306,9 @@ public class NewApiImageClient {
             try {
                 int n = Integer.parseInt(raw);
                 if (n > 0) return n;
-            } catch (NumberFormatException ignored) {}
+            } catch (NumberFormatException e) {
+                log.debug("NEW_API_IMAGE_TIMEOUT_MS 解析失败，使用默认值: {}", e.getMessage());
+            }
         }
         return DEFAULT_TIMEOUT_MS;
     }

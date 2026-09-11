@@ -97,7 +97,7 @@ public class VideoConsumer implements Closeable {
             try {
                 consumer.close();
             } catch (Exception e) {
-                log.warn("关闭 SimpleConsumer 异常: {}", e.getMessage());
+                log.warn("关闭 SimpleConsumer 异常: {}", e.getMessage(), e);
             }
         }
         log.info("MQ 视频消费者已停止: tag={}", TAG);
@@ -124,7 +124,7 @@ public class VideoConsumer implements Closeable {
                 }
             } catch (Exception e) {
                 if (!running) return;
-                log.error("receive 失败，1s 后重试: {}", e.getMessage());
+                log.error("[video] receive 失败，1s 后重试: {}", e.getMessage(), e);
                 try {
                     Thread.sleep(1_000);
                 } catch (InterruptedException ie) {
@@ -147,7 +147,7 @@ public class VideoConsumer implements Closeable {
             try {
                 consumer.ack(message);
             } catch (Exception e) {
-                log.warn("ack 失败: {}", e.getMessage());
+                log.warn("[video] ack 失败 messageId={}: {}", message.getMessageId(), e.getMessage(), e);
             }
         }
     }
@@ -165,6 +165,10 @@ public class VideoConsumer implements Closeable {
 
         // 毒丸：parse 返回 null → ack 丢弃
         if (parsed == null) {
+            String rawPreview = body != null && body.length > 0
+                    ? new String(body, 0, Math.min(body.length, 120), java.nio.charset.StandardCharsets.UTF_8)
+                    : "<empty>";
+            log.warn("[video] 毒丸丢弃(不可解析) bodyPreview={}", rawPreview);
             return true;
         }
 
@@ -172,7 +176,7 @@ public class VideoConsumer implements Closeable {
             processor.handle(parsed.jobId());
             return true;
         } catch (Exception e) {
-            log.warn("handle 失败，等待重投 jobId={}: {}", parsed.jobId(), e.getMessage());
+            log.warn("[video] handle 失败，等待重投 jobId={}: {}", parsed.jobId(), e.getMessage(), e);
             return false;
         }
     }

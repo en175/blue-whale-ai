@@ -84,16 +84,18 @@ public class AudioJobProcessor implements JobProcessor {
         try {
             claimOpt = stateMachine.claimAudioJobById(jobId, workerId);
         } catch (Exception error) {
-            log.error("claimAudioJobById 失败 jobId={}: {}", jobId, error.getMessage());
+            log.error("[audio] claimAudioJobById 失败 jobId={}: {}", jobId, error.getMessage(), error);
             throw error; // 保持不 ack → RocketMQ 重投
         }
         if (claimOpt.isEmpty()) return;
 
         ClaimedJobDto job = claimOpt.get();
+        log.info("[audio] 已领取 jobId={} type={} token={}", job.id(), job.type(), job.fencingToken());
 
         // cancelRequested → 取消（generation-worker.ts:237-241）
         // 音频不走 cancelVideoBeforeDispatch（视频专用），但按契约应检查
         if (job.cancelRequested()) {
+            log.info("[audio] 取消已执行(cancelRequested) jobId={}", job.id());
             // 音频无 cancel-before-dispatch 端点——直接 fail（与 TS cancelVideoBeforeDispatch 语义等价）
             stateMachine.failJob(job.id(), GenerationError.ERROR_PROVIDER_FAILED,
                     "任务已取消", null, workerId, job.fencingToken());
@@ -142,6 +144,7 @@ public class AudioJobProcessor implements JobProcessor {
         try {
             providerToken = credentialService.open(sealedCredential);
         } catch (Exception e) {
+            log.debug("[audio] 凭证解密失败 jobId={}: {}", job.id(), e.getMessage(), e);
             failClaimed(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
                     "音频任务凭证解密失败");
             return;
@@ -164,11 +167,16 @@ public class AudioJobProcessor implements JobProcessor {
         // 5. 调 TTS（generation-worker.ts:398-401）
         NewApiAudioClient.AudioResult audio = audioClient.generate(
                 providerToken, modelId, prompt, audioRefs.refs());
+        log.info("[audio] 上游已返回 jobId={} requestId={} dataLen={} url={}",
+                job.id(), audio.requestId(),
+                audio.data() != null ? audio.data().length : 0,
+                audio.url() != null ? audio.url() : "<null>");
 
         // 6. 转存（generation-worker.ts:404-411 persistProviderMedia data-direct）
         // data-direct 路径：base64 audio → PUT，mime 恒 audio/mpeg
         // TOS 未配置 → 硬失败「音频转存存储未配置」（generation-worker.ts:749-751）
         StoredMedia stored = persistAudioData(audio.data(), audio.url(), job.user_id());
+        log.info("[audio] 转存完成 jobId={} storageKey={} size={}", job.id(), stored.storageKey(), stored.size());
 
         // 7. createAsset（generation-worker.ts:412-425）
         String assetId = stateMachine.createAsset(new JobStateMachineService.CreateAssetInput(
@@ -186,14 +194,20 @@ public class AudioJobProcessor implements JobProcessor {
                 workerId,
                 job.fencingToken()
         ));
-        if (assetId == null) return; // 守卫失败 → 退出
+        if (assetId == null) {
+            log.warn("[audio] 终态失败(createAsset 守卫未命中) jobId={}", job.id());
+            return; // 守卫失败 → 退出
+        }
 
         // 8. completeJob（generation-worker.ts:445 finishJob）
         boolean completed = stateMachine.completeJob(
                 job.id(), List.of(assetId), workerId, job.fencingToken());
         if (completed) {
+            log.info("[audio] 发布成功 jobId={} assetId={}", job.id(), assetId);
             stateMachine.appendLog(job.id(), "succeeded", "succeeded",
                     "产出 1 个素材", Map.of("asset_ids", List.of(assetId)));
+        } else {
+            log.warn("[audio] 终态失败(completeJob 守卫未命中) jobId={} assetId={}", job.id(), assetId);
         }
     }
 
@@ -297,7 +311,7 @@ public class AudioJobProcessor implements JobProcessor {
             msg = e.getMessage() != null ? e.getMessage() : "unknown";
         }
 
-        log.error("processClaimedAudioJob 异常 jobId={} code={}: {}",
+        log.error("[audio] 终态失败 jobId={} code={}: {}",
                 job.id(), code, msg, e);
 
         failClaimed(job, code, msg);

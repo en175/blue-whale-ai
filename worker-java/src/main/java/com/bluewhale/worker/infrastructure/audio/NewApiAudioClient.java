@@ -154,8 +154,9 @@ public class NewApiAudioClient {
             // 非 2xx → 分类（new-api-audio-provider.ts:119-130）
             if (!response.isSuccessful()) {
                 String code = classifyError(rawText, response.code());
+                String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
                 throw new AudioProviderError(code,
-                        "new-api 音频生成失败: " + response.code());
+                        "new-api 音频生成失败: HTTP " + response.code() + " body=" + truncated);
             }
 
             // 解析 JSON（new-api-audio-provider.ts:132-168）
@@ -245,7 +246,9 @@ public class NewApiAudioClient {
             try {
                 int n = Integer.parseInt(raw);
                 if (n > 0) return n;
-            } catch (NumberFormatException ignored) {}
+            } catch (NumberFormatException e) {
+                log.debug("NEW_API_AUDIO_TIMEOUT_MS 解析失败，使用默认值: {}", e.getMessage());
+            }
         }
         return DEFAULT_TIMEOUT_MS;
     }
