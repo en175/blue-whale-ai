@@ -44,15 +44,19 @@ public enum ImageProtocol {
     }
 
     /**
-     * 字面值 → 枚举；未知值或缺省一律回落 {@link #INLINE_IMAGE}（现状不变，宁可不切协议
-     * 也不误切——协议切错的代价是全量调用失败）。
+     * 字面值 → 枚举；**不认识就返回 {@code null}**，由调用方决定回落与告警。
+     * <p>
+     * 刻意不在这里兜底：**「没配」与「配错」是两回事**——缺省（键不存在）是常态、不该吵；
+     * 值存在却认不出则是配置错误，被静默咽掉会让排查从「GPT Image 2 整个挂了」开始，
+     * 而根因埋在 DB 里。回落决策与告警留在 {@code ImageChannelMapper.parseImageProtocol}。
      */
     public static ImageProtocol fromWire(String raw) {
-        if (raw == null) return INLINE_IMAGE;
+        if (raw == null) return null;
         String value = raw.trim();
+        if (value.isEmpty()) return null;
         for (ImageProtocol protocol : values()) {
             if (protocol.wireValue.equalsIgnoreCase(value)) return protocol;
         }
-        return INLINE_IMAGE;
+        return null;
     }
 }

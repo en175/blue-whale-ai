@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class NewApiImageClientEndpointTest {
 
     /** 最小 PNG 头（嗅探只认魔数，不做解码）。 */
-    private static final byte[] PNG_BYTES = {
+    private static final byte[] PNG_MAGIC = {
             (byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D
     };
 
@@ -61,9 +61,9 @@ class NewApiImageClientEndpointTest {
         // 参考图素材端点（官方协议 multipart 前会先 GET 它）
         server.createContext("/ref.png", exchange -> {
             exchange.getResponseHeaders().add("Content-Type", "image/png");
-            exchange.sendResponseHeaders(200, PNG_BYTES.length);
+            exchange.sendResponseHeaders(200, PNG_MAGIC.length);
             try (OutputStream out = exchange.getResponseBody()) {
-                out.write(PNG_BYTES);
+                out.write(PNG_MAGIC);
             }
         });
 
@@ -157,7 +157,7 @@ class NewApiImageClientEndpointTest {
     @DisplayName("官方协议·b64_json 响应 → 解码为字节 + 魔数嗅探 mime，url 为 null")
     void openAiParsesB64JsonResponse() {
         responseJson.set("{\"data\":[{\"b64_json\":\""
-                + Base64.getEncoder().encodeToString(PNG_BYTES) + "\"}]}");
+                + Base64.getEncoder().encodeToString(PNG_MAGIC) + "\"}]}");
 
         List<GeneratedImage> images = new NewApiImageClient(baseUrl).generate("t",
                 ImageProtocol.OPENAI_IMAGES, "gpt-image-2", "猫", 1, null, null, false, false,
@@ -165,7 +165,7 @@ class NewApiImageClientEndpointTest {
 
         assertThat(images).hasSize(1);
         assertThat(images.get(0).url()).isNull();
-        assertThat(images.get(0).content()).isEqualTo(PNG_BYTES);
+        assertThat(images.get(0).content()).isEqualTo(PNG_MAGIC);
         assertThat(images.get(0).mime()).isEqualTo("image/png");
     }
 
@@ -173,7 +173,7 @@ class NewApiImageClientEndpointTest {
     @DisplayName("b64_json 解不开 → 丢弃该元素，不炸整批（与 url 缺失同款宽容）")
     void invalidB64ElementIsDropped() {
         responseJson.set("{\"data\":[{\"b64_json\":\"不是base64!!\"},"
-                + "{\"b64_json\":\"" + Base64.getEncoder().encodeToString(PNG_BYTES) + "\"}]}");
+                + "{\"b64_json\":\"" + Base64.getEncoder().encodeToString(PNG_MAGIC) + "\"}]}");
 
         List<GeneratedImage> images = new NewApiImageClient(baseUrl).generate("t",
                 ImageProtocol.OPENAI_IMAGES, "gpt-image-2", "猫", 1, null, null, false, false,
@@ -260,7 +260,7 @@ class NewApiImageClientEndpointTest {
     @Test
     @DisplayName("mime 嗅探：魔数优先于响应头，未知格式兜底 image/png")
     void sniffMimePrefersMagicBytes() {
-        assertThat(NewApiImageClient.sniffImageMime(PNG_BYTES, "image/webp")).isEqualTo("image/png");
+        assertThat(NewApiImageClient.sniffImageMime(PNG_MAGIC, "image/webp")).isEqualTo("image/png");
         assertThat(NewApiImageClient.sniffImageMime(
                 new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF}, null)).isEqualTo("image/jpeg");
         assertThat(NewApiImageClient.sniffImageMime(
