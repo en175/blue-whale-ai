@@ -24,6 +24,7 @@ import java.util.Base64;
  * </ul>
  */
 @Component
+@org.springframework.context.annotation.Conditional(com.bluewhale.worker.config.GenerationTagsCondition.class)
 public class GenerationCredentialService {
 
     /** 版本前缀（generation-credential.ts:8）。 */

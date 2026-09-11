@@ -45,6 +45,7 @@ import java.util.concurrent.TimeUnit;
  * 修正三：ARK provider（ark-image-provider.ts）不移植——new-api 网关是唯一 provider。
  */
 @Component
+@org.springframework.context.annotation.Conditional(com.bluewhale.worker.config.ImageEnabledCondition.class)
 public class NewApiImageClient {
 
     private static final Logger log = LoggerFactory.getLogger(NewApiImageClient.class);

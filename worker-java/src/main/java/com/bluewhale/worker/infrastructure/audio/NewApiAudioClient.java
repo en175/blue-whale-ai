@@ -38,6 +38,7 @@ import java.util.regex.Pattern;
  * 中文正则与 TS 逐字一致（error-codes.ts isContentPolicySignal / isQuotaSignal）。
  */
 @Component
+@org.springframework.context.annotation.Conditional(com.bluewhale.worker.config.AudioEnabledCondition.class)
 public class NewApiAudioClient {
 
     private static final Logger log = LoggerFactory.getLogger(NewApiAudioClient.class);
