@@ -75,8 +75,12 @@ interface ImageDialogProps {
   onPickFromAssets?: () => void;
   /** 画布选取模式进行中（左上角图标高亮提示） */
   pickMode?: boolean;
-  /** 外部注入参考素材（ts 驱动；画布节点单选 / 角色库多选，files 为一批） */
+  /** 外部注入参考素材（ts 驱动；画布节点单选 / 角色库多选，files 为一批）。
+   *  事件一次消费（IKF5KE）：面板处理一批后必须经 onExternalPickConsumed 通知父级清除，
+   *  否则已处理事件会在面板重挂载时重放（已删除附件复活） */
   externalPick?: { ts: number; files: UploadedFile[] } | null;
+  /** 外部选取事件已消费：父级据此清除事件，保证一批注入只生效一次 */
+  onExternalPickConsumed?: () => void;
   /** 打开角色库弹窗 */
   onOpenCharacterLibrary?: () => void;
   /** Toast 提示（上传超限等场景，由父级注入） */
@@ -174,7 +178,7 @@ function AttachmentItem({ attachment, move, onRemove }: {
   );
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -204,24 +208,29 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   ]);
 
   /** 外部注入参考素材（画布节点选取/角色库多选；去重 + 上限保护）。
-   *  连线绑定模式（IKDMQR）：参考由父级按连线推导，外部注入不参与（选取入口改为建立连线） */
+   *  连线绑定模式（IKDMQR）：参考由父级按连线推导，外部注入不参与（选取入口改为建立连线）。
+   *  一次消费（IKF5KE）：一批事件无论是否并入本地 files，处理后都通知父级清除，
+   *  防止已处理事件在面板关闭/重建后的新挂载上重放 */
   useEffect(() => {
-    if (!externalPick || mediaRefs) return;
-    setFiles((prev) => {
-      let next = prev;
-      for (const file of externalPick.files) {
-        const imgCount = next.filter((f) => f.type === 'image').length;
-        const vidCount = next.filter((f) => f.type === 'video').length;
-        const full = file.type === 'image' ? imgCount >= maxImages : vidCount >= MAX_VIDEOS;
-        if (full) {
-          onToast?.('warn', refOverflowToast([file.type], { image: maxImages, video: MAX_VIDEOS }));
-          break;
+    if (!externalPick) return;
+    if (!mediaRefs) {
+      setFiles((prev) => {
+        let next = prev;
+        for (const file of externalPick.files) {
+          const imgCount = next.filter((f) => f.type === 'image').length;
+          const vidCount = next.filter((f) => f.type === 'video').length;
+          const full = file.type === 'image' ? imgCount >= maxImages : vidCount >= MAX_VIDEOS;
+          if (full) {
+            onToast?.('warn', refOverflowToast([file.type], { image: maxImages, video: MAX_VIDEOS }));
+            break;
+          }
+          if (next.some((f) => f.id === file.id)) continue;
+          next = [...next, file];
         }
-        if (next.some((f) => f.id === file.id)) continue;
-        next = [...next, file];
-      }
-      return next;
-    });
+        return next;
+      });
+    }
+    onExternalPickConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalPick]);
 
