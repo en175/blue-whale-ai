@@ -8,6 +8,7 @@ import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageProviderError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
+import com.bluewhale.worker.infrastructure.gateway.ImageProtocol;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient.GeneratedImage;
 import com.bluewhale.worker.infrastructure.mapper.GenerationModelCapabilityMapper;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
@@ -186,8 +187,8 @@ class ImageJobProcessorErrorMappingTest {
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
         when(credentialService.open("sealed-token")).thenReturn("token");
-        when(imageClient.generate(anyString(), anyString(), anyString(), anyInt(),
-                any(), any(), anyBoolean(), anyBoolean(), anyList()))
+        when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenReturn(List.of());
 
         processor.handle("100");
@@ -211,8 +212,8 @@ class ImageJobProcessorErrorMappingTest {
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
         when(credentialService.open("sealed-token")).thenReturn("token");
-        when(imageClient.generate(anyString(), anyString(), anyString(), anyInt(),
-                any(), any(), anyBoolean(), anyBoolean(), anyList()))
+        when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ImageProviderError(
                         GenerationError.ERROR_PROVIDER_FAILED, "network error"));
         when(stateMachine.requeueImageJobForRetry(eq("100"), any(LocalDateTime.class)))
@@ -247,8 +248,8 @@ class ImageJobProcessorErrorMappingTest {
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
         when(credentialService.open("sealed-token")).thenReturn("token");
-        when(imageClient.generate(anyString(), anyString(), anyString(), anyInt(),
-                any(), any(), anyBoolean(), anyBoolean(), anyList()))
+        when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ImageProviderError(
                         GenerationError.ERROR_PROVIDER_FAILED, "network error"));
         when(stateMachine.requeueImageJobForRetry(eq("100"), any(LocalDateTime.class)))
@@ -278,8 +279,8 @@ class ImageJobProcessorErrorMappingTest {
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
         when(credentialService.open("sealed-token")).thenReturn("token");
-        when(imageClient.generate(anyString(), anyString(), anyString(), anyInt(),
-                any(), any(), anyBoolean(), anyBoolean(), anyList()))
+        when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ImageProviderError(
                         GenerationError.ERROR_PROVIDER_FAILED, "network error"));
         when(stateMachine.requeueImageJobForRetry(eq("100"), any(LocalDateTime.class)))
@@ -309,8 +310,8 @@ class ImageJobProcessorErrorMappingTest {
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
         when(credentialService.open("sealed-token")).thenReturn("token");
-        when(imageClient.generate(anyString(), anyString(), anyString(), anyInt(),
-                any(), any(), anyBoolean(), anyBoolean(), anyList()))
+        when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ImageProviderError(
                         GenerationError.ERROR_PROVIDER_FAILED, "network error"));
 
@@ -336,8 +337,8 @@ class ImageJobProcessorErrorMappingTest {
         GenerationModelCapabilityEntity cap = mockCapability("gpt-image-1");
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
         when(credentialService.open("sealed-token")).thenReturn("token");
-        when(imageClient.generate(anyString(), anyString(), anyString(), anyInt(),
-                any(), any(), anyBoolean(), anyBoolean(), anyList()))
+        when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
                 .thenThrow(new ImageProviderError(
                         GenerationError.ERROR_CONTENT_REJECTED, "copyright"));
 
