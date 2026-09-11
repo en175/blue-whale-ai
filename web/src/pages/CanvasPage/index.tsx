@@ -372,7 +372,7 @@ export default function CanvasPage() {
     const sourceData = sourceNode?.data as Record<string, unknown> | undefined;
     const targetData = targetNode?.data as Record<string, unknown> | undefined;
     if (sourceData?.emptyShell || targetData?.emptyShell) return false;
-    if (sourceNode?.type === 'textNode' && sourceData?.promptSource && targetKind === 'image') {
+    if (sourceNode?.type === 'textNode' && sourceData?.promptSource && (targetKind === 'image' || targetKind === 'video')) {
       void referencePlanRef.current(source, target);
       return true;
     }
@@ -1583,6 +1583,13 @@ export default function CanvasPage() {
     const data = (node.data ?? {}) as Record<string, unknown>;
     // IKDMQR：草稿绑定面板的「到节点选择」建立来源→草稿连线（与画布连线同一关系）；
     // 非法来源明确提示原因，不注入面板本地列表
+    if (pickTarget === 'video' && videoSeed?.targetNodeId && node.type === 'textNode' && data.promptSource) {
+      void referencePlanRef.current(node.id, videoSeed.targetNodeId);
+      setPickMode(null);
+      setPickTarget(null);
+      videoPanelHiddenRef.current = true;
+      return;
+    }
     if (pickMode === 'image' && pickTarget === 'image' && imageSeed?.targetNodeId && node.type === 'textNode' && data.promptSource) {
       void referencePlanRef.current(node.id, imageSeed.targetNodeId);
       setPickMode(null);
@@ -3701,25 +3708,35 @@ export default function CanvasPage() {
     [imageDraftId, edges, textNodes],
   );
 
-  const imagePlanReferenceError = useMemo(() => {
-    const targetId = imageSeed?.targetNodeId;
-    if (!targetId) return undefined;
-    const availableIds = imageMediaRefsOf(targetId, edges, mediaNodes).map(ref => ref.assetId);
-    for (const edge of edges.filter(e => e.target === targetId)) {
-      const plan = textNodes.find(n => n.id === edge.source && n.data.promptSource);
-      if (!plan || (plan.data.promptMentions === undefined && edge.data?.promptReference === undefined)) continue;
-      const text = extractTextNodeText(plan.data);
-      const mentions = promptMentionSchema.array().safeParse(plan.data.promptMentions ?? []);
-      if (!mentions.success || !validPromptMentions(text, mentions.data)) return '方案正文素材索引无效，请修正方案';
-      const bindings = promptBindingList(mentions.data);
-      const confirmed = promptBindingsSchema.safeParse((edge.data?.promptReference as { bindings?: unknown } | undefined)?.bindings ?? (bindings.length === 0 ? [] : undefined));
-      const label = (confirmed.success ? confirmed.data : bindings).map(b => `#${b.index}`).join('、');
-      if (!confirmed.success || JSON.stringify(confirmed.data) !== JSON.stringify(bindings)) return `方案索引 ${label} 素材待同步，请先同步素材到目标`;
-      const missing = bindings.filter(b => !availableIds.includes(b.assetId));
-      if (missing.length) return `方案索引 ${missing.map(b => `#${b.index}`).join('、')} 素材缺失，请恢复连线或修正方案`;
-    }
-    return undefined;
-  }, [imageSeed?.targetNodeId, edges, mediaNodes, textNodes]);
+  const planReferenceErrors = useMemo(() => {
+    const forTarget = (targetId: string | undefined, availableIds: string[]) => {
+      if (!targetId) return undefined;
+      for (const edge of edges.filter(e => e.target === targetId)) {
+        const plan = textNodes.find(n => n.id === edge.source && n.data.promptSource);
+        if (!plan || (plan.data.promptMentions === undefined && edge.data?.promptReference === undefined)) continue;
+        const text = extractTextNodeText(plan.data);
+        const mentions = promptMentionSchema.array().safeParse(plan.data.promptMentions ?? []);
+        if (!mentions.success || !validPromptMentions(text, mentions.data)) return '方案正文素材索引无效，请修正方案';
+        const bindings = promptBindingList(mentions.data);
+        const confirmed = promptBindingsSchema.safeParse((edge.data?.promptReference as { bindings?: unknown } | undefined)?.bindings ?? (bindings.length === 0 ? [] : undefined));
+        const label = (confirmed.success ? confirmed.data : bindings).map(b => `#${b.index}`).join('、');
+        if (!confirmed.success || JSON.stringify(confirmed.data) !== JSON.stringify(bindings)) return `方案索引 ${label} 素材待同步，请先同步素材到目标`;
+        const missing = bindings.filter(b => !availableIds.includes(b.assetId));
+        if (missing.length) return `方案索引 ${missing.map(b => `#${b.index}`).join('、')} 素材缺失，请恢复连线或修正方案`;
+      }
+      return undefined;
+    };
+    const videoRefs = videoSeed?.targetNodeId ? mergedVideoMediaRefsOf(videoSeed.targetNodeId, edges, mediaNodes) : { reference: [] };
+    return {
+      image: forTarget(imageSeed?.targetNodeId, imageSeed?.targetNodeId ? imageMediaRefsOf(imageSeed.targetNodeId, edges, mediaNodes).map(ref => ref.assetId) : []),
+      videoIndices: edges.filter(e => e.target === videoSeed?.targetNodeId).flatMap(e => {
+        const plan = textNodes.find(n => n.id === e.source && n.data.promptSource);
+        const mentions = promptMentionSchema.array().safeParse(plan?.data.promptMentions ?? []);
+        return mentions.success ? promptBindingList(mentions.data).map(m => `#${m.index}`) : [];
+      }).join('、'),
+      video: forTarget(videoSeed?.targetNodeId, [...videoRefs.reference, ...(videoRefs.first ? [videoRefs.first] : []), ...(videoRefs.last ? [videoRefs.last] : [])].map(ref => ref.assetId)),
+    };
+  }, [imageSeed?.targetNodeId, videoSeed?.targetNodeId, edges, mediaNodes, textNodes]);
 
   /** 视频草稿绑定面板的文本附件实时跟随画布连线（IKDMQS，同图片草稿） */
   const videoDraftAttachments = useMemo(
@@ -3854,7 +3871,7 @@ export default function CanvasPage() {
     if (!target) return;
     const next = patch.role;
     if (next !== 'reference') {
-      if (target.mediaType === 'video') {
+      if (target.mediaType !== 'image') {
         showToast('warn', '首尾帧仅支持图片素材');
         return;
       }
@@ -4251,6 +4268,7 @@ export default function CanvasPage() {
     (document.activeElement as HTMLElement | null)?.blur();
     try {
       if (imageDraftIdRef.current === targetNodeId) commitPendingImageCanvasEdges(targetNodeId);
+      if (videoDraftIdRef.current === targetNodeId) commitPendingVideoCanvasEdges(targetNodeId);
       if (!(await flushCanvasSave(projectId)) || versionRef.current === null) return;
       const saved = await referencePlanMutation.mutateAsync({ projectId, planNodeId, targetNodeId, expectedVersion: versionRef.current });
       if (activeProjectRef.current !== projectId) return;
@@ -4376,8 +4394,8 @@ export default function CanvasPage() {
         return;
       }
       // 视频参考仅部分模型支持（Seedance 2.0 系）：提交防线与面板 UI 禁用同一判定
-      if (!supportsVideoReferenceModel(opts.modelId) && draftRefs.reference.some((r) => r.mediaType === 'video')) {
-        showToast('warn', '当前模型不支持视频参考，请移除后重试');
+      if (!supportsVideoReferenceModel(opts.modelId) && draftRefs.reference.some((r) => r.mediaType !== 'image')) {
+        showToast('warn', '当前模型不支持视频或音频参考，请更换模型或调整引用');
         return;
       }
       const jobRefs = buildVideoJobReferences(draftRefs);
@@ -5327,6 +5345,8 @@ export default function CanvasPage() {
         {/* 底部视频对话框（IKDMQS 统一草稿绑定；工具栏入口为无卡自由模式） */}
         {showBottomDialog && (
           <BottomDialog
+            planReferenceError={planReferenceErrors.video}
+            planIndices={planReferenceErrors.videoIndices}
             key={videoSeed?.ts ?? 0}
             initialText={videoSeed?.text}
             initialParams={videoSeed?.params}
@@ -5393,7 +5413,7 @@ export default function CanvasPage() {
             attachments={imageDraftId ? imageDraftAttachments : imageSeed?.attachments}
             mediaRefs={imageDraftId ? imageDraftMediaRefs : undefined}
             invalidMediaRefs={invalidImageMediaRefs}
-            planReferenceError={imagePlanReferenceError}
+            planReferenceError={planReferenceErrors.image}
             onRemoveMediaRef={
               imageDraftId ? (nodeId) => handleRemoveImageMediaRef(imageDraftId, nodeId) : undefined
             }

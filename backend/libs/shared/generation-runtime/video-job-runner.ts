@@ -12,6 +12,7 @@ import {
   ERROR_REFERENCE_ASSET_UNAVAILABLE,
   ERROR_UNSUPPORTED_INPUT,
   textAttachmentSnapshotSchema,
+  promptPlanSnapshotSchema,
 } from "@blue-whale/contracts";
 import { videoDimensions, dimensionsFromSize } from "./video-dimensions.js";
 import {
@@ -580,7 +581,8 @@ async function buildSubmitRequest(
   const parsedAttachments = z
     .array(textAttachmentSnapshotSchema)
     .safeParse(claim.input.text_attachments ?? []);
-  const prompt = composeTextAttachmentPrompt(
+  const plan = claim.input.prompt_plan_snapshot === undefined ? undefined : promptPlanSnapshotSchema.parse(claim.input.prompt_plan_snapshot);
+  const prompt = plan?.providerPrompt ?? composeTextAttachmentPrompt(
     parsedAttachments.success ? parsedAttachments.data : [],
     basePrompt,
   );
@@ -603,6 +605,14 @@ async function buildSubmitRequest(
       `[IKE7JP] 前置校验遗漏：job ${claim.id} 视频参数无效仍进入 worker（prompt=${prompt ? "ok" : "missing"} model=${model ? "ok" : "missing"} duration=${duration} dimensions=${dimensions ? "ok" : "missing"}）`,
     );
     throw new VideoInputError(ERROR_INVALID_INPUT, "视频生成参数无效");
+  }
+
+  if (plan) {
+    if (!plan.videoReferences) throw new VideoInputError(ERROR_INVALID_INPUT, "视频方案快照无效");
+    return { model, prompt, duration, ...dimensions,
+      resolution: String(claim.input.resolution ?? params?.size ?? ""), ratio: String(claim.input.aspect_ratio ?? params?.aspect_ratio ?? ""),
+      references: plan.videoReferences.map(r => ({ type: r.type, url: r.providerUrl, ...(r.role === "reference" ? {} : { role: r.role }) })),
+    };
   }
 
   // IKDJNZ：单数组 references 优先（input 快照冻结，保序）；未提供回落旧字段路径。

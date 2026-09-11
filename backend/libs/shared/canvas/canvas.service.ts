@@ -1,8 +1,9 @@
+import { validateReferences } from "../generation-runtime/video-reference-validation.js";
 import { NewApiError } from "@blue-whale/core";
 import { promptReferenceRequestSchema } from "@blue-whale/contracts";
 import { createModelCapabilityRepo } from "@lib/shared/persistence/model-capability-repo.js";
 import { createWorkerAssetOps } from "@lib/shared/persistence/generation-worker-asset-ops.js";
-import { confirmPlanEdges, planError, validatePlanModel } from "./prompt-target.js";
+import { confirmPlanEdges, planError, validatePlanModel, validateVideoPlan } from "./prompt-target.js";
 import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
@@ -220,17 +221,32 @@ export class CanvasService {
     if (canvas.version !== expectedVersion) throw new NewApiError("Canvas 版本冲突", 412);
     const nodes = JSON.parse(canvas.nodes ?? "[]");
     const result = confirmPlanEdges(nodes, JSON.parse(canvas.edges ?? "[]"), planNodeId, targetNodeId);
-    const models = await createModelCapabilityRepo(this.prisma.client).listEnabledByType("image");
+    const target = nodes.find((n: { id: string }) => n.id === targetNodeId);
+    const isVideo = target.data?.mediaType === "video";
+    const models = await createModelCapabilityRepo(this.prisma.client).listEnabledByType(isVideo ? "video" : "image");
     const targetModel = modelId ?? nodes.find((n: { id: string }) => n.id === targetNodeId)?.data?.draftModelId;
     const model = targetModel ? models.find(m => m.model_id === targetModel) : models.find(m => m.is_default) ?? models[0];
-    validatePlanModel(planNodeId, result.plan.bindings, result.assetIds.length, model);
+    if (!isVideo) validatePlanModel(planNodeId, result.plan.bindings, result.assetIds.length, model);
     const assets = await createWorkerAssetOps(this.prisma.client).resolveInputAssets(result.assetIds, ownerId, projectId);
     for (const id of result.assetIds) {
-      if (!assets.some(a => a.id === id && a.type === "image")) planError(planNodeId, result.plan.bindings.filter(b => b.assetId === id), "素材已删除或无权访问");
+      if (!assets.some(a => a.id === id && (isVideo || a.type === "image"))) planError(planNodeId, result.plan.bindings.filter(b => b.assetId === id), "素材已删除或无权访问");
+    }
+    if (isVideo) {
+      const refs = result.assetIds.map(id => {
+        const asset = assets.find(a => a.id === id)!;
+        const edge = result.edges.find(e => e.target === targetNodeId && nodes.some((n: { id: string; data: Record<string, unknown> }) => n.id === e.source && String(n.data?.assetId) === id));
+        const role = edge?.data?.refRole === "first" ? "first_frame" : edge?.data?.refRole === "last" ? "last_frame" : "reference";
+        return { ...asset, role };
+      });
+      const materials = (Array.isArray(target.data?.draftMaterialRefs) ? target.data.draftMaterialRefs : []) as Array<{ materialId: string; mediaType: "image" | "video"; role: string }>;
+      const materialRefs = materials.map(m => ({ id: m.materialId, type: m.mediaType, role: m.role === "first" ? "first_frame" : m.role === "last" ? "last_frame" : "reference" }));
+      validateVideoPlan(planNodeId, result.plan.bindings, [...refs, ...materialRefs], model, target.data?.draftMode);
+      try { validateReferences(model!.model_id, refs.filter(r => r.role === "reference"), materialRefs.filter(r => r.role === "reference")); }
+      catch (error) { planError(planNodeId, result.plan.bindings, error instanceof Error ? error.message : "素材不受支持"); }
     }
     try {
       const saved = await this.repo.saveIfVersion(projectId, expectedVersion, canvas.viewport, canvas.nodes, JSON.stringify(result.edges),
-        { ownerId, items: result.assetIds.map(assetId => ({ assetId, mediaType: "image" })) });
+        { ownerId, items: assets.map(a => ({ assetId: a.id, mediaType: a.type as "image" | "video" | "audio" })) });
       if (!saved) throw new NewApiError("Canvas 版本冲突", 412);
       return ok(saved);
     } catch (error) {
