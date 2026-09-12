@@ -1,4 +1,6 @@
 import "reflect-metadata";
+import { randomBytes } from "node:crypto";
+import { openGenerationCredential } from "@blue-whale/core";
 import { Module } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { json } from "express";
@@ -7,6 +9,11 @@ import { CanvasesController } from "./canvases.controller.js";
 import { GenerationJobsController } from "../generation/generation-jobs.controller.js";
 import { GenerationModelsController } from "../generation/models.controller.js";
 import { ProjectsController } from "../projects/projects.controller.js";
+import { JobsController } from "../jobs/jobs.controller.js";
+import { JobsService } from "@lib/shared/jobs/jobs.service.js";
+import { createWorkerRepo } from "@lib/shared/persistence/generation-worker-repo.js";
+import { processImageJobById } from "@lib/shared/generation/worker/generation-worker.js";
+import type { GenerateImageInput } from "@lib/shared/generation/worker/image-provider.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -18,8 +25,8 @@ import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-esti
 // IKFA1M「生图正文素材索引与生成闭环」公开接口集成（契约 §7 服务端项）：
 // 真 NestFactory 挂载生产 Canvas/Generation 控制器与服务 + 隔离 MySQL（IKFA1M_DATABASE_URL 门控）。
 // 链路：POST generation-jobs（prompt_doc）→ 服务端复核/编译 → 库内冻结快照 → 重试消费。
-// 生成入队（RocketMQ）未配置时由控制器捕获记日志，不影响断言；供应商侧由 worker 单测替身覆盖。
-// 浏览器段（IKFA1M_BROWSER=1：草稿面板 → @ 插入标签 → 生成 → 刷新恢复）在同 describe 尾部。
+// 浏览器段直接派发同一任务 id 到生产 worker（MQ 传输不在此验收范围），使用真实仓储与记录式供应商。
+// IKFA1M_BROWSER=1：草稿面板 → @ 插入 → 接纳 → worker → 供应商 → 修改草稿 → 重试。
 describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public API (IKFA1M)", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -27,8 +34,11 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
   let app: Awaited<ReturnType<typeof NestFactory.create>>;
   let base = "";
   const previousDatabase = process.env.DATABASE_URL;
+  const previousSecret = process.env.GENERATION_CREDENTIAL_SECRET;
+  const credentialSecret = randomBytes(32).toString("hex");
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKFA1M_DATABASE_URL;
+    process.env.GENERATION_CREDENTIAL_SECRET = credentialSecret;
     const sizes = [{ id: "1024x1024", label: "1024x1024" }];
     await prisma.client.generation_model_capability.upsert({
       where: { provider_id_model_id: { provider_id: "ikfa1m-test", model_id: MODEL_ID } },
@@ -56,8 +66,10 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
     Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, GenerationCostEstimatorService, CanvasService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
+    Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
     class HarnessModule {}
-    Module({ controllers: [CanvasesController, GenerationJobsController, GenerationModelsController, ProjectsController], providers: [
+    Module({ controllers: [CanvasesController, GenerationJobsController, GenerationModelsController, ProjectsController, JobsController], providers: [
+      { provide: JobsService, useValue: new JobsService(prisma, projects) },
       { provide: CanvasService, useValue: canvasService },
       { provide: ProjectService, useValue: projects },
       { provide: PrismaService, useValue: prisma },
@@ -69,8 +81,9 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
     app.use(json({ limit: "16mb" }));
     app.setGlobalPrefix("api");
-    app.use((req: { user: unknown }, _res: unknown, next: () => void) => {
+    app.use((req: { user: unknown; headers: Record<string, string> }, _res: unknown, next: () => void) => {
       req.user = { userId: "987654" };
+      req.headers.authorization = "Bearer sk-ikfa1m-recording-provider";
       next();
     });
     await app.listen(0, "127.0.0.1");
@@ -80,6 +93,8 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
     await app?.close();
     if (previousDatabase === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previousDatabase;
+    if (previousSecret === undefined) delete process.env.GENERATION_CREDENTIAL_SECRET;
+    else process.env.GENERATION_CREDENTIAL_SECRET = previousSecret;
     await prisma.client.$disconnect();
   });
 
@@ -293,7 +308,7 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
 
   // 浏览器段（契约 §7）：真实浏览器 + 真实业务 API + 隔离 MySQL 走完整生图路径。
   // 草稿面板 @ 插入标签 → 发送（请求体含 prompt_doc）→ 库内冻结编译正文 → 刷新重开恢复标签。
-  it.runIf(process.env.IKFA1M_BROWSER)("browser: draft panel → @ mention → generate → reload restores chip", async () => {
+  it.runIf(process.env.IKFA1M_BROWSER)("browser: @ → API → DB → worker → provider → reload → edited draft → retry frozen input", async () => {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     const projectId = (await projects.create("987654", "IKFA1M browser")).id;
@@ -378,12 +393,56 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
       expect(frozen.prompt).toBe("让图片2微笑");
       expect((frozen.input_asset_ids as unknown[]).map(String)).toEqual([a, b]);
 
+      // 消费浏览器创建的真实任务；首次供应商无产出形成真实失败，随后通过公开接口重试。
+      const providerRequests: GenerateImageInput[] = [];
+      const worker = {
+        repo: createWorkerRepo(prisma.client),
+        workerId: "ikfa1m-browser-worker",
+        credentialVault: { open: (value: string) => openGenerationCredential(value, credentialSecret) },
+        createAudioProvider: () => { throw new Error("本测试只允许图片任务"); },
+        createImageProvider: (token: string) => {
+          expect(token).toBe("sk-ikfa1m-recording-provider");
+          return { generate: async (input: GenerateImageInput) => {
+            providerRequests.push(structuredClone(input));
+            return providerRequests.length === 1 ? [] : [{ url: "https://example.com/result.png", width: 1024, height: 1024 }];
+          } };
+        },
+      };
+      const firstJobId = jobRow!.id.toString();
+      // next_action_at 以数据库秒精度保存，按调度条件等待可领取，不改任务调度字段。
+      await vi.waitFor(async () => expect(await processImageJobById(firstJobId, worker)).toBe(firstJobId), { timeout: 3_000 });
+      expect((await readJob(firstJobId))!.status).toBe("failed");
+      expect(providerRequests).toHaveLength(1);
+      expect(providerRequests[0].prompt).toBe("让图片2微笑");
+      expect(providerRequests[0].sourceImages?.map((item) => item.url)).toEqual([
+        "https://example.com/role.png", "https://example.com/cloth.png",
+      ]);
+
       // 刷新重开面板：标签结构恢复（编号重新派生），不是拍平文本
       await page.reload();
       await draft.waitFor();
       await draft.locator('[data-testid="media-content"]').click();
       await page.locator('[data-testid="asset-ref-valid"]').waitFor();
       expect(await page.locator('[data-testid="asset-ref-valid"]').first().innerText()).toContain("图片2");
+      await editor.fill("后来的草稿正文");
+      await page.locator('[data-testid="dock-media-ref"]').nth(1).locator('button[title="移除"]').click();
+      await vi.waitFor(async () => {
+        const canvas = await prisma.client.canvas.findFirst({ where: { project_id: BigInt(projectId) } });
+        const nodes = canvas!.nodes_json as Array<{ id: string; data: { prompt?: string } }>;
+        expect(nodes.find((node) => node.id === "draft-1")!.data.prompt).toBe("后来的草稿正文");
+        expect(canvas!.edges_json).not.toEqual(expect.arrayContaining([expect.objectContaining({ source: "ref-b", target: "draft-1" })]));
+      }, { timeout: 10_000 });
+      const retryResponse = await page.request.post(`${base}/api/projects/${projectId}/generation-jobs/${firstJobId}/retry`, {
+        headers: { "idempotency-key": `ikfa1m-browser-retry-${firstJobId}` }, data: {},
+      });
+      const retried = await retryResponse.json();
+      expect(retried.code).toBe(200);
+      const retryJobId = String(retried.data.generation_job_id);
+      expect((await readJob(retryJobId))!.input).toEqual(frozen);
+      await vi.waitFor(async () => expect(await processImageJobById(retryJobId, worker)).toBe(retryJobId), { timeout: 3_000 });
+      expect((await readJob(retryJobId))!.status).toBe("succeeded");
+      expect(providerRequests).toHaveLength(2);
+      expect(providerRequests[1]).toEqual(providerRequests[0]);
       await page.screenshot({ path: "/tmp/ikfa1m-browser.png", fullPage: true });
     } finally { await browser.close(); await vite.close(); }
   }, 90_000);

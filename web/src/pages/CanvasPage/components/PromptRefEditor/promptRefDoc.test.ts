@@ -6,6 +6,7 @@ import {
   $getNodeByKey,
   $getRoot,
   $getSelection,
+  $isElementNode,
   $isRangeSelection,
   $nodesOfType,
   $setSelection,
@@ -89,8 +90,9 @@ describe('@ 查询原位替换为素材标签（A1：保留前后文字）', () 
     editor.update(() => {
       $buildFromPromptDoc(null, '让@猫的衣服');
       // 模拟 MentionPlugin 记录的锚点：'@' 在文本节点偏移 1，query='猫'，范围 [1, 3)
-      const textNode = $getRoot().getFirstChild()?.getFirstChild();
-      if (!textNode || !$isRangeSelection(null)) return;
+      const firstParagraph = $getRoot().getFirstChild();
+      const textNode = $isElementNode(firstParagraph) ? firstParagraph.getFirstChild() : null;
+      if (!textNode) return;
       const key = textNode.getKey();
       const selection = $createRangeSelection();
       selection.anchor.set(key, 1, 'text');
@@ -122,8 +124,10 @@ describe('@ 查询原位替换为素材标签（A1：保留前后文字）', () 
         '',
       );
       const root = $getRoot();
-      root.getFirstChild()?.append($createAssetRefNode('102', '图片2'));
-      root.getLastChild()?.append($createAssetRefNode('102', '图片2'));
+      const first = root.getFirstChild();
+      const last = root.getLastChild();
+      if ($isElementNode(first)) first.append($createAssetRefNode('102', '图片2'));
+      if ($isElementNode(last)) last.append($createAssetRefNode('102', '图片2'));
       const doc = $readPromptDoc();
       expect(doc.segments.filter((s) => s.kind === 'asset_ref')).toHaveLength(2);
       expect(doc.segments.map((s) => (s.kind === 'text' ? s.text : s.asset_id)).join('|')).toBe(

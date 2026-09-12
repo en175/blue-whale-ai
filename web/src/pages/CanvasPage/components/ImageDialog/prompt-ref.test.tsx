@@ -102,6 +102,23 @@ afterEach(() => {
 });
 
 describe('IKFA1M @ 菜单与插入（A1/A4）', () => {
+  it('从 @ 添加新图片成功后，在原位置插入标签并保存身份（A3）', async () => {
+    const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A] });
+    await typePromptRefRaw(container, '让@');
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
+    await act(async () => {
+      [...container.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent?.includes('从资产中选择'))!.click();
+    });
+    expect(readPromptRefText(container)).toBe('让');
+    await rerender([REF_A, REF_B], onParamsChange);
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('让图片2'));
+    expect(lastDocFromParams(onParamsChange).promptDoc?.segments).toEqual([
+      { kind: 'text', text: '让' },
+      { kind: 'asset_ref', asset_id: '102', label: '图片2' },
+    ]);
+  });
+
   it('句中输入 @：顶部列出已引用（名称+编号），选择后原位替换查询，前后文字不丢', async () => {
     const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A, REF_B] });
     await typePromptRefRaw(container, '让');
