@@ -190,7 +190,7 @@ public class AudioJobProcessor implements JobProcessor {
                 stored.size(),
                 null, // width
                 null, // height
-                audio.duration(),
+                audio.duration() != null ? (int) Math.round(audio.duration() * 1000) : null,
                 workerId,
                 job.fencingToken()
         ));

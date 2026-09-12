@@ -41,4 +41,42 @@ public enum JobStatus {
     public String toString() {
         return value;
     }
+
+    // ========== 槽位聚合工具（从 JobStateMachineService 随刀④ 迁入，便于 Finalizer/Sync 复用） ==========
+
+    /**
+     * 逻辑槽折叠（generation-output-slot-repo.ts:28-43 resolveLogicalSlots）。
+     * 同一 slot_index 的历史尝试折叠为一个逻辑槽：succeeded 永久终态保留；否则以最新尝试（id 最大）为准。
+     */
+    public static java.util.List<GenerationOutputSlotEntity> resolveLogicalSlots(
+            java.util.List<GenerationOutputSlotEntity> slots) {
+        java.util.Map<Integer, GenerationOutputSlotEntity> resolved = new java.util.LinkedHashMap<>();
+        for (GenerationOutputSlotEntity slot : slots) {
+            GenerationOutputSlotEntity current = resolved.get(slot.getSlotIndex());
+            if (current == null
+                    || !SUCCEEDED.value().equals(current.getStatus())
+                    || SUCCEEDED.value().equals(slot.getStatus())) {
+                resolved.put(slot.getSlotIndex(), slot);
+            }
+        }
+        return resolved.values().stream()
+                .sorted(java.util.Comparator.comparingInt(GenerationOutputSlotEntity::getSlotIndex))
+                .toList();
+    }
+
+    /**
+     * 槽位聚合汇总状态（generation-output-slot-repo.ts:15-24 aggregateSlotStatus）。
+     * 四态（generating/partial/success/failed）与 job status（succeeded/partially_succeeded/failed）不同枚举，不混淆。
+     */
+    public static String aggregateSlotStatus(java.util.List<GenerationOutputSlotEntity> resolvedSlots) {
+        if (resolvedSlots.isEmpty()) return "failed";
+        boolean hasPending = resolvedSlots.stream()
+                .anyMatch(s -> "pending".equals(s.getStatus()));
+        if (hasPending) return "generating";
+        long succeeded = resolvedSlots.stream()
+                .filter(s -> SUCCEEDED.value().equals(s.getStatus())).count();
+        if (succeeded == resolvedSlots.size()) return "success";
+        if (succeeded == 0) return "failed";
+        return "partial";
+    }
 }

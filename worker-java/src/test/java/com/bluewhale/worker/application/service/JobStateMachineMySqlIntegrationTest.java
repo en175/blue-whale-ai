@@ -738,7 +738,8 @@ class JobStateMachineMySqlIntegrationTest {
         @DisplayName("G15: processing→queued, next_action_at 设置, retry_count+1, fencing_token+1")
         void requeue_happy() {
             long jobId = seedClaimedJob(9L, "image", "bottom_dock", "worker-1", 1L);
-            LocalDateTime next = LocalDateTime.now(ZoneOffset.UTC).plusSeconds(30);
+            // 秒级对齐 + 预留 ≥1s 余量（MySQL DATETIME 截秒，避免 now+30 恰好落在下一秒造成毫秒进位）
+            LocalDateTime next = LocalDateTime.now(ZoneOffset.UTC).plusSeconds(29).truncatedTo(ChronoUnit.SECONDS);
 
             boolean ok = service.requeueImageJobForRetry(String.valueOf(jobId), next);
 
