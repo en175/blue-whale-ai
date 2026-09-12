@@ -152,6 +152,11 @@ function draftFileNameOf(type: unknown): string {
   return type === 'video' ? '视频草稿' : type === 'audio' ? '音频草稿' : '图片草稿';
 }
 
+/** 卡片名称已被用户自定义（IKFA8X）：显式 customName 标记，不靠名称内容推断 */
+function hasCustomName(node: Node | undefined): boolean {
+  return ((node?.data ?? {}) as Record<string, unknown>).customName === true;
+}
+
 /** 合并已落盘连线参考与「到节点选择」待提交参考（按 assetId 去重） */
 function mergePendingImageCanvasRefs(fromEdges: ImageMediaRef[], pending: ImageMediaRef[]): ImageMediaRef[] {
   const seen = new Set(fromEdges.map((r) => r.assetId));
@@ -2739,7 +2744,7 @@ export default function CanvasPage() {
                   emptyShell: false,
                   src: localSrc,
                   // 已自定义名称的空壳卡填充后不覆盖（IKFA8X）
-                  ...(n.data?.customName === true ? {} : { fileName: file.name }),
+                  ...(hasCustomName(n) ? {} : { fileName: file.name }),
                   mediaType,
                   toolMode,
                 },
@@ -3297,7 +3302,7 @@ export default function CanvasPage() {
           ? assetType
           : (originalType ?? 'image'),
         // 已自定义名称的卡不被自动命名覆盖（IKFA8X）
-        ...((node.data as Record<string, unknown> | undefined)?.customName === true ? {} : { fileName: `生成-${jobId}` }),
+        ...(hasCustomName(node) ? {} : { fileName: `生成-${jobId}` }),
         assetId: detail.asset?.id,
         width: detail.asset?.width ?? undefined,
         height: detail.asset?.height ?? undefined,
@@ -3356,7 +3361,7 @@ export default function CanvasPage() {
         progress: undefined,
         errorText: undefined,
         // 已自定义名称的草稿卡回退时保留名称（IKFA8X）
-        ...((node.data as Record<string, unknown> | undefined)?.customName === true ? {} : { fileName: draftFileNameOf(node.data?.mediaType) }),
+        ...(hasCustomName(node) ? {} : { fileName: draftFileNameOf(node.data?.mediaType) }),
       });
       return;
     }
@@ -3442,15 +3447,14 @@ export default function CanvasPage() {
     if (inPlaceNodeId) {
       const isDraftTarget =
         ((inPlaceNode!.data ?? {}) as Record<string, unknown>).draft === true;
-      const hasCustomName =
-        ((inPlaceNode!.data ?? {}) as Record<string, unknown>).customName === true;
+      const customNamed = hasCustomName(inPlaceNode);
       patchMediaNode(inPlaceNodeId, {
         genStatus: 'generating',
         progress: 0,
         errorText: undefined,
         // 草稿无素材可显示，改名提示生成内容（IKDMQQ）；已自定义名称的草稿不覆盖（IKFA8X）；
         // 成品卡保留原文件名——旧素材继续显示，生成中由状态角标标记（IKDMQU Q5）
-        ...(isDraftTarget && !hasCustomName
+        ...(isDraftTarget && !customNamed
           ? {
               fileName:
                 type === 'video' ? '视频生成中' : type === 'audio' ? '音频生成中' : '图片生成中',
@@ -3554,7 +3558,7 @@ export default function CanvasPage() {
                 genStatus: 'draft',
                 progress: undefined,
                 // 已自定义名称的草稿回退时保留名称（IKFA8X）
-                ...(((node.data ?? {}) as Record<string, unknown>).customName === true ? {} : { fileName: draftFileNameOf(type) }),
+                ...(hasCustomName(node) ? {} : { fileName: draftFileNameOf(type) }),
               });
             } else {
               patchMediaNode(nodeId, { genStatus: undefined, progress: undefined, errorText: undefined });

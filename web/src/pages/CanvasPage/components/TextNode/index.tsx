@@ -255,7 +255,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       const error = `正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`;
       setContentError(error); data.onDraftError?.(id, error); return;
     }
-    setContentError(''); data.onDraftError?.(id, titleError);
+    setContentError(''); data.onDraftError?.(id, '');
     data.onPromptChange?.(id, prompt.text, prompt.mentions, materials);
   };
 
