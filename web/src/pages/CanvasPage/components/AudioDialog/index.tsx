@@ -6,6 +6,7 @@ import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2, Music2, Paus
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import type { MediaGenStatus } from '../MediaNode';
+import type { FollowDialogAnchor } from '../../followDialog';
 import AtMentionMenu from '../AtMentionMenu';
 import { stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
 import styles from './index.module.css';
@@ -45,7 +46,7 @@ export interface CanvasPickItem {
   mediaType: 'image' | 'video' | 'audio';
 }
 
-interface AudioDialogProps {
+export interface AudioDialogProps {
   onClose: () => void;
   /** 发送：提示词 + 模型ID */
   onSend: (text: string, modelId: string, refs: AudioRefItem[]) => void | Promise<void>;
@@ -77,6 +78,8 @@ interface AudioDialogProps {
   mentionItems?: AtMentionItem[];
   /** 选中 @ 素材后写入参考区 */
   onMentionCanvas?: (item: AtMentionItem) => void;
+  /** 绑定草稿卡时悬浮跟随；缺省仍锚定底部 */
+  followAnchor?: FollowDialogAnchor | null;
 }
 
 export default function AudioDialog({
@@ -92,6 +95,7 @@ export default function AudioDialog({
   pickMode,
   mentionItems,
   onMentionCanvas,
+  followAnchor,
 }: AudioDialogProps) {
   const [text, setText] = useState(initialText ?? '');
   const mentionAnchorRef = useRef<HTMLDivElement>(null);
@@ -298,7 +302,11 @@ export default function AudioDialog({
   };
 
   return (
-    <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
+    <div
+      className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
+      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+    >
+      <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
       {/* 右上角操作：放大/收起 + 关闭 */}
       <div className={styles.topActions}>
         <button
@@ -497,6 +505,7 @@ export default function AudioDialog({
             <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

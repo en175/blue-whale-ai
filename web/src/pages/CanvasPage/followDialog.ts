@@ -10,7 +10,7 @@ const FOLLOW_DIALOG_HEIGHT = 220;
 const FOLLOW_GAP = 16;
 const FOLLOW_PAD = 12;
 
-/** 将节点 flow 坐标换算为画布容器内的对话框左上角，优先落在节点下方 */
+/** 将节点 flow 坐标换算为画布容器内的对话框左上角，始终落在节点下方 */
 export function computeFollowAnchor(opts: {
   nodeX: number;
   nodeY: number;
@@ -24,22 +24,14 @@ export function computeFollowAnchor(opts: {
 }): FollowDialogAnchor {
   const zoom = opts.viewport.zoom || 1;
   const dialogWidth = Math.min(opts.dialogWidth ?? FOLLOW_DIALOG_WIDTH, Math.max(280, opts.containerWidth * 0.9));
-  const dialogHeight = opts.dialogHeight ?? FOLLOW_DIALOG_HEIGHT;
   const nodeLeft = opts.nodeX * zoom + opts.viewport.x;
-  const nodeTop = opts.nodeY * zoom + opts.viewport.y;
   const nodeWidth = opts.nodeWidth * zoom;
   const nodeHeight = opts.nodeHeight * zoom;
-  const nodeBottom = nodeTop + nodeHeight;
+  const nodeBottom = opts.nodeY * zoom + opts.viewport.y + nodeHeight;
   let left = nodeLeft + nodeWidth / 2 - dialogWidth / 2;
-  let top = nodeBottom + FOLLOW_GAP;
-  if (top + dialogHeight > opts.containerHeight - FOLLOW_PAD) {
-    top = nodeTop - dialogHeight - FOLLOW_GAP;
-  }
   const maxLeft = opts.containerWidth - dialogWidth - FOLLOW_PAD;
-  const maxTop = opts.containerHeight - dialogHeight - FOLLOW_PAD;
   left = Math.max(FOLLOW_PAD, Math.min(left, Math.max(FOLLOW_PAD, maxLeft)));
-  top = Math.max(FOLLOW_PAD, Math.min(top, Math.max(FOLLOW_PAD, maxTop)));
-  return { left: Math.round(left), top: Math.round(top) };
+  return { left: Math.round(left), top: Math.round(nodeBottom + FOLLOW_GAP) };
 }
 
 /** 视频跟随输入框四模式（文生视频单独于现有 text2video=图生视频） */

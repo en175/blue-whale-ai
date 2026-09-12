@@ -1,7 +1,7 @@
 /* ============================================
  * 画布右键菜单：节点菜单与空白处菜单共用
  * ============================================ */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight } from 'lucide-react';
 import styles from './index.module.css';
@@ -25,6 +25,23 @@ interface CanvasContextMenuProps {
 
 export default function CanvasContextMenu({ x, y, items, onSelect, onClose }: CanvasContextMenuProps) {
   const [openSub, setOpenSub] = useState<string | null>(null);
+  const closeSubTimer = useRef<number | null>(null);
+
+  const openSubmenu = (key: string) => {
+    if (closeSubTimer.current != null) {
+      window.clearTimeout(closeSubTimer.current);
+      closeSubTimer.current = null;
+    }
+    setOpenSub(key);
+  };
+
+  const scheduleCloseSubmenu = () => {
+    if (closeSubTimer.current != null) window.clearTimeout(closeSubTimer.current);
+    closeSubTimer.current = window.setTimeout(() => {
+      setOpenSub(null);
+      closeSubTimer.current = null;
+    }, 200);
+  };
 
   useEffect(() => {
     const close = () => onClose();
@@ -33,6 +50,7 @@ export default function CanvasContextMenu({ x, y, items, onSelect, onClose }: Ca
     return () => {
       document.removeEventListener('click', close);
       document.removeEventListener('contextmenu', close, true);
+      if (closeSubTimer.current != null) window.clearTimeout(closeSubTimer.current);
     };
   }, [onClose]);
 
@@ -48,8 +66,8 @@ export default function CanvasContextMenu({ x, y, items, onSelect, onClose }: Ca
           <div
             key={item.key}
             className={styles.subWrap}
-            onMouseEnter={() => setOpenSub(item.key)}
-            onMouseLeave={() => setOpenSub(null)}
+            onMouseEnter={() => openSubmenu(item.key)}
+            onMouseLeave={scheduleCloseSubmenu}
           >
             <button type="button" className={styles.item} disabled={item.disabled}>
               <span>{item.label}</span>

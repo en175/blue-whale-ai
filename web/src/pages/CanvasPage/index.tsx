@@ -706,9 +706,11 @@ export default function CanvasPage() {
     ? imageDraftId
     : showBottomDialog && videoDraftId
       ? videoDraftId
-      : showTextGenDialog && textGenDraftId
-        ? textGenDraftId
-        : null;
+      : showAudioDialog && audioDraftId
+        ? audioDraftId
+        : showTextGenDialog && textGenDraftId
+          ? textGenDraftId
+          : null;
   const followNode = followTargetId
     ? mediaNodes.find((n) => n.id === followTargetId) ?? textNodes.find((n) => n.id === followTargetId) ?? null
     : null;
@@ -2918,33 +2920,6 @@ export default function CanvasPage() {
     }).catch((err) => {
       showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
     });
-  };
-
-  const addEmptyMediaShell = (mediaType: 'image' | 'video' | 'audio', position: { x: number; y: number }) => {
-    const nodeId = newNodeId('media');
-    pendingNodeIdsRef.current.add(nodeId);
-    setMediaNodes((prev) => [
-      ...prev,
-      {
-        id: nodeId,
-        type: 'mediaNode',
-        position,
-        data: {
-          emptyShell: true,
-          mediaType,
-          toolMode,
-          onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
-          onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-          onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-          onCopyImage: (id: string) => actionsRef.current.copyImage(id),
-          onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
-          onFillEmptyShell: (id: string, next: File) => actionsRef.current.fillEmptyShell(id, next),
-          onMediaDims: handleMediaDims,
-        },
-      },
-    ]);
-    historyRef.current?.pushAddNodes([nodeId]);
   };
 
   actionsRef.current = {
@@ -5644,10 +5619,17 @@ export default function CanvasPage() {
               if (key === 'upload') {
                 paneUploadPosRef.current = flow;
                 paneUploadRef.current?.click();
-              } else if (key === 'add-text') handleAddTextNode(flow);
-              else if (key === 'add-image') addEmptyMediaShell('image', flow);
-              else if (key === 'add-video') addEmptyMediaShell('video', flow);
-              else if (key === 'add-audio') addEmptyMediaShell('audio', flow);
+              }               else if (key === 'add-text') handleAddTextNode(flow);
+              else if (key === 'add-image') {
+                if (!canOpenEditor()) return;
+                openImageDraftDialog(createImageDraftCard(flow));
+              } else if (key === 'add-video') {
+                if (!canOpenEditor()) return;
+                openVideoDraftDialog(createVideoDraftCard(undefined, flow));
+              } else if (key === 'add-audio') {
+                if (!canOpenEditor()) return;
+                openAudioDraftDialog(createAudioDraftCard(flow));
+              }
               else if (key === 'undo') canvasHistory.undo();
               else if (key === 'redo') canvasHistory.redo();
             }}
@@ -5681,47 +5663,30 @@ export default function CanvasPage() {
           onUploadFile={handleUploadFile}
           onOpenAssetsPicker={() => openAssetsPicker('toolbar')}
           onToggleVideoDialog={() => {
-            // 自由模式：点击只打开面板不建卡；参数与参考本地暂存，发送时才落生成卡，关闭即丢弃
+            // 左侧工具栏：先建视频草稿卡，再打开跟随输入框；发送在原卡生成
             if (!canOpenEditor()) return;
             setPickMode(null);
             setPickTarget(null);
             setPickRefRole(null);
-            setVideoDraftId(null);
-            setVideoFreeRefs({ reference: [] });
-            pendingVideoCanvasRefsRef.current = { reference: [] };
-            setPendingVideoCanvasRefs({ reference: [] });
-            videoPanelHiddenRef.current = false;
-            setVideoSeed({ ts: Date.now() });
-            setShowBottomDialog(true);
-            setShowImageDialog(false);
-            setShowAudioDialog(false);
-            setShowMusicDialog(false);
+            const draftId = createVideoDraftCard();
+            openVideoDraftDialog(draftId);
           }}
           onToggleImageDialog={() => {
-            // 自由模式：点击只打开面板不建卡；参考图存面板本地，发送时才落生成卡
+            // 左侧工具栏：先建图片草稿卡，再打开跟随输入框；发送在原卡生成
             if (!canOpenEditor()) return;
             setPickMode(null);
             setPickTarget(null);
-            setImageDraftId(null);
-            pendingImageCanvasRefsRef.current = [];
-            setPendingImageCanvasRefs([]);
-            // 新会话不继承上一轮选取事件（IKF5KE）：已消费/残留事件一律清除
             setImagePickResult(null);
-            setImageSeed({ ts: Date.now(), text: '', files: [] });
-            handleOpenImageDialog();
+            const draftId = createImageDraftCard();
+            openImageDraftDialog(draftId);
           }}
           onToggleAudioDialog={() => {
-            // 自由模式：点击只打开面板不建卡；发送时才落生成卡
+            // 左侧工具栏：先建音频草稿卡，再打开跟随输入框；发送在原卡生成
             if (!canOpenEditor()) return;
             setPickMode(null);
             setPickTarget(null);
-            setAudioDraftId(null);
-            audioPanelHiddenRef.current = false;
-            setAudioSeed({ ts: Date.now() });
-            setShowAudioDialog(true);
-            setShowBottomDialog(false);
-            setShowImageDialog(false);
-            setShowMusicDialog(false);
+            const draftId = createAudioDraftCard();
+            openAudioDraftDialog(draftId);
           }}
           showVideoDialog={showBottomDialog}
           showImageDialog={showImageDialog}
@@ -5766,7 +5731,7 @@ export default function CanvasPage() {
           )}
         </div>
 
-        {/* 底部视频对话框（IKDMQS 统一草稿绑定；工具栏入口为无卡自由模式） */}
+        {/* 底部视频对话框（IKDMQS 统一草稿绑定；工具栏入口先建草稿卡再开跟随面板） */}
         {showBottomDialog && (
           <BottomDialog
             onRemovePlan={id => removePlanAttachment(videoSeed?.targetNodeId, id)}
