@@ -34,6 +34,8 @@ export const PromptRefContext = createContext<{
   numbering: ReadonlyMap<string, number>;
   meta: ReadonlyMap<string, AssetRefMeta>;
   readOnly: boolean;
+  /** 点击失效标签：交由调用方打开「替换为其他已引用项」菜单（IKFA1N B5） */
+  onInvalidTagClick?: (nodeKey: string) => void;
 }>({ numbering: new Map(), meta: new Map(), readOnly: false });
 
 function AssetRefChipComponent({
@@ -45,7 +47,7 @@ function AssetRefChipComponent({
   assetId: string;
   invalidLabel?: string;
 }) {
-  const { numbering, meta, readOnly } = useContext(PromptRefContext);
+  const { numbering, meta, readOnly, onInvalidTagClick } = useContext(PromptRefContext);
   const [editor] = useLexicalComposerContext();
   const handleRemove = () => {
     if (!editor.isEditable()) return;
@@ -60,8 +62,24 @@ function AssetRefChipComponent({
       <span
         className={`${styles.refChip} ${styles.refChipInvalid}`}
         contentEditable={false}
-        title={`${info?.name ?? assetId}：原参考已移除，删除该标签后可继续生成`}
+        title={`${info?.name ?? assetId}：原参考已移除。点击可替换为其他已引用素材，× 删除该提及`}
         data-testid="asset-ref-invalid"
+        role={onInvalidTagClick && !readOnly ? 'button' : undefined}
+        tabIndex={onInvalidTagClick && !readOnly ? 0 : undefined}
+        onMouseDown={(e) => {
+          // 不让点击落入编辑器选区（保持光标原位）
+          if (onInvalidTagClick && !readOnly) e.preventDefault();
+        }}
+        onClick={() => {
+          if (onInvalidTagClick && !readOnly && editor.isEditable()) onInvalidTagClick(nodeKey);
+        }}
+        onKeyDown={(e) => {
+          if (!onInvalidTagClick || readOnly || !editor.isEditable()) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onInvalidTagClick(nodeKey);
+          }
+        }}
       >
         <AlertTriangle size={12} strokeWidth={2} className={styles.refChipIcon} />
         <span className={styles.refChipLabel}>已失效：原{invalidLabel}</span>
@@ -70,7 +88,10 @@ function AssetRefChipComponent({
             type="button"
             className={styles.refChipRemove}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={handleRemove}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRemove();
+            }}
             title="删除该提及（附件保留）"
           >
             <X size={12} strokeWidth={2} />
@@ -126,6 +147,11 @@ export class AssetRefNode extends DecoratorNode<JSX.Element> {
 
   getAssetId(): string {
     return this.getLatest().__assetId;
+  }
+
+  /** 替换该次提及的身份（IKFA1N B5）：节点原地换绑 assetId，位置与其他提及不受影响 */
+  setAssetId(assetId: string): void {
+    this.getWritable().__assetId = assetId;
   }
 
   getLabel(): string | undefined {

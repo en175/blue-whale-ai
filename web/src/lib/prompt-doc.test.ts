@@ -102,17 +102,58 @@ describe('reconcilePromptDoc（编号重派生与失效标记）', () => {
     ]);
   });
 
-  it('失效标签不因素材加回而自动恢复（本票边界：自动修复在下一票）', () => {
+  it('身份回到当前有效集合 → 自动恢复并派生当次编号；多次提及全部恢复（B4/C4）', () => {
+    const doc: PromptDoc = {
+      version: 1,
+      segments: [
+        { kind: 'text', text: '让' },
+        { kind: 'asset_ref', asset_id: '102', label: '图片2', invalid_label: '图片2' },
+        { kind: 'text', text: '拿着' },
+        { kind: 'asset_ref', asset_id: '102', label: '图片2', invalid_label: '图片2' },
+        { kind: 'text', text: '的包' },
+      ],
+    };
+    // 102 以新输入顺序加回（末位 → 图片3）：失效标记清除，编号按当次输入派生
+    const result = reconcilePromptDoc(doc, ['101', '103', '102']);
+    expect(result.changed).toBe(true);
+    expect(result.doc.segments).toEqual([
+      { kind: 'text', text: '让' },
+      { kind: 'asset_ref', asset_id: '102', label: '图片3' },
+      { kind: 'text', text: '拿着' },
+      { kind: 'asset_ref', asset_id: '102', label: '图片3' },
+      { kind: 'text', text: '的包' },
+    ]);
+  });
+
+  it('加回的是其他身份（同名不同素材）→ 不恢复原失效标签（B3）', () => {
     const doc: PromptDoc = {
       version: 1,
       segments: [{ kind: 'asset_ref', asset_id: '102', label: '图片2', invalid_label: '图片2' }],
     };
-    const result = reconcilePromptDoc(doc, ['101', '102']);
+    // 104 与 102 同名（名称不参与判定）：102 的失效标签原样保留
+    const result = reconcilePromptDoc(doc, ['101', '103', '104']);
+    expect(result.changed).toBe(false);
     expect(result.doc.segments[0]).toEqual({
       kind: 'asset_ref',
       asset_id: '102',
       label: '图片2',
       invalid_label: '图片2',
+    });
+  });
+
+  it('失效→恢复→再失效：原编号随最新一轮有效展示刷新（状态由当前集合推导）', () => {
+    const start: PromptDoc = {
+      version: 1,
+      segments: [{ kind: 'asset_ref', asset_id: '102', label: '图片2', invalid_label: '图片2' }],
+    };
+    const restored = reconcilePromptDoc(start, ['101', '103', '102']).doc;
+    // 再次移除 102：失效展示的原编号是恢复后的当次编号（图片3），不是历史图片2
+    const removed = reconcilePromptDoc(restored, ['101', '103']).doc;
+    expect(removed.segments[0]).toEqual({
+      kind: 'asset_ref',
+      asset_id: '102',
+      label: '图片3',
+      invalid_label: '图片3',
     });
   });
 

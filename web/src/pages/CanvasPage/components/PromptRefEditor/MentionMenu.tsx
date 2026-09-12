@@ -15,6 +15,35 @@ export interface MentionRefItem {
   number: number;
 }
 
+/** 已引用项选项行（缩略图/名称/编号徽标）：@ 菜单与失效替换菜单共用（IKFA1N 去重） */
+export function MentionRefRow({ item, active, onPick, onHover, testId }: {
+  item: MentionRefItem;
+  active?: boolean;
+  onPick: (assetId: string) => void;
+  onHover?: () => void;
+  testId?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={`${styles.mentionItem} ${active ? styles.mentionItemActive : ''}`}
+      // 保持编辑器焦点与光标位置，点击不触发 blur
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => onPick(item.assetId)}
+      onMouseEnter={onHover}
+      data-testid={testId}
+    >
+      {item.url ? (
+        <img className={styles.mentionThumb} src={item.url} alt="" />
+      ) : (
+        <ImageIcon size={20} strokeWidth={1.5} />
+      )}
+      <span className={styles.mentionName} title={item.name}>{item.name}</span>
+      <span className={styles.mentionBadge}>图片{item.number}</span>
+    </button>
+  );
+}
+
 interface MentionMenuProps {
   /** 已按查询过滤的已引用项 */
   items: MentionRefItem[];
@@ -33,24 +62,14 @@ export default function MentionMenu({ items, activeIndex, canAddNew, onPick, onP
       <div className={styles.mentionSection}>已引用</div>
       {items.length === 0 && <div className={styles.mentionEmpty}>暂无已引用素材，可从下方添加新参考</div>}
       {items.map((item, index) => (
-        <button
+        <MentionRefRow
           key={item.assetId}
-          type="button"
-          className={`${styles.mentionItem} ${index === activeIndex ? styles.mentionItemActive : ''}`}
-          // 保持编辑器焦点与光标位置，点击不触发 blur
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onPick(item.assetId)}
-          onMouseEnter={() => onHoverIndex(index)}
-          data-testid="mention-ref-item"
-        >
-          {item.url ? (
-            <img className={styles.mentionThumb} src={item.url} alt="" />
-          ) : (
-            <ImageIcon size={20} strokeWidth={1.5} />
-          )}
-          <span className={styles.mentionName} title={item.name}>{item.name}</span>
-          <span className={styles.mentionBadge}>图片{item.number}</span>
-        </button>
+          item={item}
+          active={index === activeIndex}
+          onPick={onPick}
+          onHover={() => onHoverIndex(index)}
+          testId="mention-ref-item"
+        />
       ))}
       {canAddNew && (
         <>
