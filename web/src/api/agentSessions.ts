@@ -319,12 +319,30 @@ export interface PromptCardRecord {
 
 /* ============ 方案卡（IKF3KE） ============ */
 
-/** 这次的提示词按哪个模型家族、哪个大版本写。 */
+/**
+ * 这次的提示词按哪套写法编——图片到家族，视频要到大版本（2.0 与 2.5 是两套写法）。
+ *
+ * 服务端按平台模型目录核过：不在「当前可用」里的写不进来。`reason` / `alternatives` **不在
+ * 卡上显示**——理由和取舍在对话正文里跟用户说更清楚，卡上只留他能核对的那一层。
+ */
 export interface SolutionExecutionRoute {
   model_family: string;
   model_version?: string;
-  reason: string;
+  reason?: string;
   alternatives?: { route: string; tradeoff: string }[];
+}
+
+/**
+ * 出片参数：画幅、时长、分辨率。
+ *
+ * 值由模型从访谈里带出来，服务端按平台目录的值域核过——**用户判断不了「5.0 Pro 还是 4.5」，
+ * 但判断得了「30 秒」**，而平台上限只有 15 秒这件事，他有权在点确认之前看见。
+ * 没聊到的项整项不写，界面也就不显示。
+ */
+export interface SolutionDeliverySpec {
+  aspect_ratio?: string;
+  duration_seconds?: number;
+  resolution?: string;
 }
 
 /**
@@ -345,6 +363,7 @@ export interface SolutionCard {
   asset_roles?: { asset_ref_id: string; role: string }[];
   assumptions: string[];
   execution_route?: SolutionExecutionRoute;
+  delivery_spec?: SolutionDeliverySpec;
   next_steps?: string;
 }
 
