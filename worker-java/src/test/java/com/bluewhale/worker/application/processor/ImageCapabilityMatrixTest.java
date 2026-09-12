@@ -18,60 +18,60 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ImageCapabilityMatrixTest {
 
-    // ========== seedream 代码表 ==========
+    // ========== seedream 尺寸矩阵（IK629：数据源=能力行 request_mapping，原为代码表） ==========
+
+    /** 与迁移后 doubao-seedream-5-0-pro-260628 行 request_mapping 同形（取代表性子集）。 */
+    private static final String SEEDREAM_MAPPING =
+            "{\"matrix\":{\"1K\":{\"1:1\":\"1024x1024\",\"16:9\":\"1424x800\"},"
+                    + "\"2K\":{\"1:1\":\"2048x2048\",\"16:9\":\"2816x1584\"}}}";
 
     @Nested
-    @DisplayName("seedream 代码表（seedream-image-size.ts）")
-    class SeedreamSizeTable {
+    @DisplayName("seedream 尺寸矩阵（能力行 request_mapping）")
+    class SeedreamSizeMatrix {
 
         @Test
-        @DisplayName("hasSeedreamSizeTable: 已知模型 → true")
-        void knownModel() {
-            assertThat(ImageChannelMapper.hasSeedreamSizeTable(
-                    "doubao-seedream-5-0-pro-260628")).isTrue();
-            assertThat(ImageChannelMapper.hasSeedreamSizeTable(
-                    "doubao-seedream-5-0-260128")).isTrue();
-            assertThat(ImageChannelMapper.hasSeedreamSizeTable(
-                    "doubao-seedream-4-0-250828")).isTrue();
+        @DisplayName("hasSizeMatrix: 带 matrix 的能力行 → true")
+        void hasMatrix() {
+            assertThat(ImageChannelMapper.hasSizeMatrix(SEEDREAM_MAPPING)).isTrue();
         }
 
         @Test
-        @DisplayName("hasSeedreamSizeTable: 未知模型 → false")
-        void unknownModel() {
-            assertThat(ImageChannelMapper.hasSeedreamSizeTable("gpt-image-1")).isFalse();
-            assertThat(ImageChannelMapper.hasSeedreamSizeTable("unknown")).isFalse();
+        @DisplayName("hasSizeMatrix: 无 matrix / NULL / 空 matrix → false")
+        void noMatrix() {
+            assertThat(ImageChannelMapper.hasSizeMatrix(null)).isFalse();
+            assertThat(ImageChannelMapper.hasSizeMatrix("")).isFalse();
+            assertThat(ImageChannelMapper.hasSizeMatrix("{}")).isFalse();
+            assertThat(ImageChannelMapper.hasSizeMatrix("{\"matrix\":{}}")).isFalse();
         }
 
         @Test
-        @DisplayName("resolveSeedreamImageSize: pro 1K 1:1 → 1024x1024")
-        void pro1k_1to1() {
-            String size = ImageChannelMapper.resolveSeedreamImageSize(
-                    "doubao-seedream-5-0-pro-260628", "1K", "1:1");
-            assertThat(size).isEqualTo("1024x1024");
+        @DisplayName("命中：1K 1:1 → 1024x1024")
+        void hit1k11() {
+            assertThat(ImageChannelMapper.resolveSeedreamSize(SEEDREAM_MAPPING, "1K", "1:1"))
+                    .isEqualTo("1024x1024");
         }
 
         @Test
-        @DisplayName("resolveSeedreamImageSize: pro 2K 16:9 → 2816x1584")
-        void pro2k_16to9() {
-            String size = ImageChannelMapper.resolveSeedreamImageSize(
-                    "doubao-seedream-5-0-pro-260628", "2K", "16:9");
-            assertThat(size).isEqualTo("2816x1584");
+        @DisplayName("命中：2K 16:9 → 2816x1584")
+        void hit2k169() {
+            assertThat(ImageChannelMapper.resolveSeedreamSize(SEEDREAM_MAPPING, "2K", "16:9"))
+                    .isEqualTo("2816x1584");
         }
 
         @Test
-        @DisplayName("resolveSeedreamImageSize: 未知 ratio → null")
-        void unknownRatio() {
-            String size = ImageChannelMapper.resolveSeedreamImageSize(
-                    "doubao-seedream-5-0-pro-260628", "1K", "99:1");
-            assertThat(size).isNull();
+        @DisplayName("键大小写不敏感：小写 1k 亦命中")
+        void caseInsensitiveResolution() {
+            assertThat(ImageChannelMapper.resolveSeedreamSize(SEEDREAM_MAPPING, "1k", "1:1"))
+                    .isEqualTo("1024x1024");
         }
 
         @Test
-        @DisplayName("resolveSeedreamImageSize: 未知 resolution → null")
-        void unknownResolution() {
-            String size = ImageChannelMapper.resolveSeedreamImageSize(
-                    "doubao-seedream-5-0-pro-260628", "8K", "1:1");
-            assertThat(size).isNull();
+        @DisplayName("未命中：未知 ratio / 未知 resolution / NULL 入参 → null（无回落，调用方报错）")
+        void misses() {
+            assertThat(ImageChannelMapper.resolveSeedreamSize(SEEDREAM_MAPPING, "1K", "99:1")).isNull();
+            assertThat(ImageChannelMapper.resolveSeedreamSize(SEEDREAM_MAPPING, "8K", "1:1")).isNull();
+            assertThat(ImageChannelMapper.resolveSeedreamSize(null, "1K", "1:1")).isNull();
+            assertThat(ImageChannelMapper.resolveSeedreamSize(SEEDREAM_MAPPING, null, "1:1")).isNull();
         }
     }
 

@@ -317,9 +317,9 @@ public class ImageJobProcessor implements JobProcessor {
             finalSize = mapped.size();
             finalQuality = mapped.quality();
         } else if (providerSize != null && aspectRatio != null
-                && ImageChannelMapper.hasSeedreamSizeTable(cap.getModelId())) {
-            String resolved = ImageChannelMapper.resolveSeedreamImageSize(
-                    cap.getModelId(), providerSize, aspectRatio);
+                && ImageChannelMapper.hasSizeMatrix(cap.getRequestMapping())) {
+            String resolved = ImageChannelMapper.resolveSeedreamSize(
+                    cap.getRequestMapping(), providerSize, aspectRatio);
             if (resolved == null) {
                 failClaimed(job, GenerationError.ERROR_INVALID_REFERENCE_TYPE,
                         "模型、分辨率与宽高比组合不受支持");

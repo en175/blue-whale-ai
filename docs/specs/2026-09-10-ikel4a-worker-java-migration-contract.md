@@ -225,6 +225,15 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 
 参考图下载失败发生在 **POST 上游之前**（零扣费风险）→ 归 `provider_failed` **瞬态可重试**，不违反 §11 的「post-send IO 不重试」政策（该政策约束的是无法证明 POST 未送达的 post-send 失败）。
 
+### 12.7 尺寸映射一律走能力行（2026-09-12，IK629 补完）
+
+承接 §12「协议由能力行声明，不按模型名特判」：**尺寸映射同理，一律读 `generation_model_capability.request_mapping`，禁止在 worker 代码内按模型名写尺寸表。**
+
+- 迁移前盘点：`request_mapping` 三族中 gpt 的 `matrix`、banana 的 `size`/`quality` 均已落能力行；**唯独 seedream 的「分辨率 × 宽高比 → WxH」表硬编码在 `ImageChannelMapper.MODEL_SIZES`**（写死 4 个模型名）。后果：上游新增/调整模型尺寸必须改 Java 并重新发版。
+- 由此掩盖的一处事实：seedream 行 `supported_sizes[].api_value` 只写档位名（`"1K"`），**上游并不接受**（实测 400 `Invalid size '1K'. Expected WIDTHxHEIGHT`）——真值实际由代码表展开，即「数据库里的值不可用、真值在代码里」。
+- 迁移（2026-09-12，`024_ik629_seedream_size_to_catalog.sql`）：4 个启用中的 seedream 行写入 `request_mapping.matrix`（形状与 gpt 行一致，逐格取自原代码表），worker 改读能力行并删除代码表。
+- **新增图片模型时**：只写能力行（`channel_parser` + `request_mapping`），**不得新增代码内模型名分支或尺寸表**；代码只保留形状解析与查表能力。
+
 ## 13. 修正四（2026-09-12）：worker-java 代码组织规范成文
 
 背景：本契约此前只约定功能语义。代码整备批次把迁移中已成事实的编码约束成文如下，防止后续刀漂移（第 5 个生成类型产品已规划）。这些是可随演进调整**编码规范**，不是 ADR 级架构决策。
