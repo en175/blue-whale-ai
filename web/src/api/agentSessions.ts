@@ -170,6 +170,8 @@ export interface GenerationCardBlock {
   targetMedia?: 'image' | 'video';
   /** 画幅，如 `16:9`（`generation_suggestions.aspect_ratio`） */
   aspectRatio?: string;
+  /** 这张卡按哪套写法编的，如 `Seedance 2.5`（批次级的 `target_model`，每张卡都标）。 */
+  targetModel?: string;
   /** 单镜时长秒数原值（`duration_seconds`）。与 timeRange 并存：那个是累加出的区间，这个是本镜自己的长度。 */
   durationSeconds?: number;
 }
@@ -281,6 +283,13 @@ export interface PromptCardRevisionPayload {
   overview: string;
   shots: PromptCardShot[];
   assets: PromptCardAssetProvenance[];
+  /**
+   * 这一批提示词是按哪套写法编的（F32）。服务端按用户确认的出片路线填，模型不经手。
+   *
+   * 粒度到路线为止（`Seedance 2.5` / `Seedream`），不是目录里具体那一行——按 F34 它**不下传
+   * 生成面板**，用户最后在面板里点哪一行是他的事。只做展示与核对。老卡没有这一项。
+   */
+  target_model?: { family: string; version?: string };
 }
 
 /** 一个修订版：快照的 active_revision 与按版本号读取接口返回的元素是同一个形状 */

@@ -1326,6 +1326,14 @@
   flex-shrink: 0;
 }
 
+/* 按哪套写法编的（F32）。压低到和时间同一层——它是核对用的注脚，不是标题的一部分。 */
+.shotTargetModel {
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+
 .shotField {
   display: flex;
   align-items: flex-start;
