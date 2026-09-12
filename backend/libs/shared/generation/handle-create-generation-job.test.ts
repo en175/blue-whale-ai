@@ -490,7 +490,8 @@ function buildVideoDeps() {
     projects: { findOwnedById },
     models: { listEnabledByType },
     command: { createJob },
-    assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
+    // IKFA1O：prompt_doc 复核对 references 本地 asset 查存在性与类型——按传入 id 动态返回（默认 image）
+    assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: "image" }))) },
   } as unknown as HandlerDeps;
   return { deps, createJob };
 }
@@ -2019,20 +2020,17 @@ describe("handleCreateGenerationJob 正文素材标签 prompt_doc（IKFA1M）", 
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  it("视频类型携带 prompt_doc → 400 unsupported_input", async () => {
+  it("音频类型携带 prompt_doc → 400 unsupported_input（IKFA1O：仅 image/video 支持）", async () => {
     const { deps, createJob } = buildVideoDeps();
     const result = await handleCreateGenerationJob(
       "u1",
       "p1",
       {
-        type: "video",
+        type: "audio",
         expected_output_count: 1,
         parameters: {
-          prompt: "海浪",
-          model_id: "seedance-2",
-          aspect_ratio: "16:9",
-          resolution: "1080p",
-          duration: 5,
+          prompt: "海浪声",
+          model_id: "audio-model",
         },
         prompt_doc: DOC,
       },
@@ -2042,6 +2040,115 @@ describe("handleCreateGenerationJob 正文素材标签 prompt_doc（IKFA1M）", 
     expect(result.code).toBe(400);
     expect(result.data?.code).toBe("unsupported_input");
     expect(createJob).not.toHaveBeenCalled();
+  });
+});
+
+// IKFA1O：生视频正文素材标签——多媒体/首尾帧角色编译、素材库身份、快照冻结与旧任务兼容。
+describe("handleCreateGenerationJob 视频正文素材标签 prompt_doc（IKFA1O）", () => {
+  const VIDEO_DOC = {
+    version: 1,
+    segments: [
+      { kind: "text", text: "让" },
+      { kind: "asset_ref", asset_id: "2" },
+      { kind: "text", text: "的人物从" },
+      { kind: "asset_ref", asset_id: "101" },
+      { kind: "text", text: "走向" },
+      { kind: "asset_ref", asset_id: "102" },
+      { kind: "text", text: "，参考" },
+      { kind: "asset_ref", asset_id: "asset-v1" },
+      { kind: "text", text: "的运镜" },
+    ],
+  } as const;
+
+  /** 帧在前、普通参考保序（与 buildVideoJobReferences 同构）：首帧/尾帧 + 图片/图片/视频(素材库) */
+  const VIDEO_REFS = [
+    { role: "first_frame", asset_id: "101", type: "image" },
+    { role: "last_frame", asset_id: "102", type: "image" },
+    { role: "reference", asset_id: "1", type: "image" },
+    { role: "reference", asset_id: "2", type: "image" },
+    { role: "reference", material_id: "asset-v1", type: "video" },
+  ] as const;
+
+  it("合法 prompt_doc → 200：帧按角色、普通参考同类型编号编译，快照冻结原始结构（C1/A2）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, references: VIDEO_REFS, prompt_doc: VIDEO_DOC },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    // 帧身份编译为角色名；普通参考图片 1/2 同类型编号；素材库身份参与视频编号
+    expect(cmdArg.input.prompt).toBe("让图片2的人物从首帧走向尾帧，参考视频1的运镜");
+    expect(cmdArg.input.prompt_doc).toEqual(VIDEO_DOC);
+    expect(cmdArg.input.references).toEqual(VIDEO_REFS);
+  });
+
+  it("失效标签（invalid_label，含模式不兼容场景）→ 400 invalid_reference，不建任务（C2/D4）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: VIDEO_REFS,
+        prompt_doc: {
+          version: 1,
+          segments: [{ kind: "asset_ref", asset_id: "2", invalid_label: "图片1" }],
+        },
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("标签身份不在 references（asset_id ∪ material_id）→ 400 invalid_reference", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: VIDEO_REFS,
+        prompt_doc: {
+          version: 1,
+          segments: [{ kind: "asset_ref", asset_id: "999" }],
+        },
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("携带 prompt_doc 但未走单数组 references（旧字段路径）→ 400 unsupported_input", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, prompt_doc: VIDEO_DOC },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("unsupported_input");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("无 prompt_doc 的旧视频任务 → 行为不变：input 不带该字段，prompt 原样冻结（E5）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", { ...VIDEO_BODY, references: VIDEO_REFS }, null, deps);
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("人物走过街角");
+    expect(cmdArg.input).not.toHaveProperty("prompt_doc");
   });
 });
 

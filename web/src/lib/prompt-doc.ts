@@ -66,7 +66,7 @@ export function flattenPromptDoc(doc: PromptDoc, orderedAssetIds: readonly strin
     .join('');
 }
 
-const ASSET_ID_PATTERN = /^[1-9][0-9]*$/;
+const ASSET_ID_PATTERN = /^([1-9][0-9]*|asset-.{1,128})$/i;
 
 function isRefSegment(v: unknown): v is PromptDocRefSegment {
   if (typeof v !== 'object' || v === null) return false;
@@ -118,10 +118,23 @@ export function reconcilePromptDoc(
   doc: PromptDoc,
   orderedAssetIds: readonly string[],
 ): { doc: PromptDoc; changed: boolean } {
+  return reconcilePromptDocWith(doc, (assetId) => imageRefLabelOf(assetId, orderedAssetIds));
+}
+
+/**
+ * 泛化编号重派生与失效推导（IKFA1O 视频）：labelOf 返回身份的当前有效标签文案
+ * （首帧/尾帧/图片N/视频N/音频N），null = 失效——身份不在参考集合，或仍在集合但
+ * 当前模式/角色不接受（C2 模式失效）。失效→有效→失效状态完全由 labelOf 当前值推导：
+ * labelOf 恢复非 null 即自动恢复（模式切回兼容），仍为 null 则不误恢复（C5）。
+ */
+export function reconcilePromptDocWith(
+  doc: PromptDoc,
+  labelOf: (assetId: string) => string | null,
+): { doc: PromptDoc; changed: boolean } {
   let changed = false;
   const segments = doc.segments.map((segment) => {
     if (segment.kind !== 'asset_ref') return segment;
-    const label = imageRefLabelOf(segment.asset_id, orderedAssetIds);
+    const label = labelOf(segment.asset_id);
     if (label !== null) {
       if (segment.invalid_label === undefined) {
         if (segment.label === label) return segment;
@@ -135,10 +148,24 @@ export function reconcilePromptDoc(
     }
     if (segment.invalid_label !== undefined) return segment;
     changed = true;
-    const invalid = segment.label ?? '图片?';
+    const invalid = segment.label ?? '素材?';
     return { ...segment, label: invalid, invalid_label: invalid };
   });
   return changed ? { doc: { version: doc.version, segments }, changed } : { doc, changed };
+}
+
+/** 泛化拍平镜像（IKFA1O 视频）：有效标签按 labelOf 文案，失效标签保留原编号 */
+export function flattenPromptDocWith(
+  doc: PromptDoc,
+  labelOf: (assetId: string) => string | null,
+): string {
+  return doc.segments
+    .map((segment) => {
+      if (segment.kind === 'text') return segment.text;
+      if (segment.invalid_label !== undefined) return `已失效：原${segment.invalid_label}`;
+      return labelOf(segment.asset_id) ?? segment.label ?? '素材?';
+    })
+    .join('');
 }
 
 export function docHasAnyRef(doc: PromptDoc): boolean {

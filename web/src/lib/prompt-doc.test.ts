@@ -7,9 +7,11 @@ import {
   docHasAnyRef,
   docHasInvalidRef,
   flattenPromptDoc,
+  flattenPromptDocWith,
   imageRefLabelOf,
   imageRefNumberOf,
   reconcilePromptDoc,
+  reconcilePromptDocWith,
   restorePromptDoc,
   type PromptDoc,
 } from './prompt-doc';
@@ -179,5 +181,79 @@ describe('docHasAnyRef / docHasInvalidRef', () => {
         segments: [{ kind: 'asset_ref', asset_id: '1', invalid_label: '图片1' }],
       }),
     ).toBe(true);
+  });
+});
+
+/* ============ IKFA1O：泛化标签派生（视频角色/模式失效语义） ============ */
+
+/** 视频场景 labelOf 模拟：keyframe 模式只有帧身份有效，普通参考身份返回 null（模式不兼容） */
+const keyframeLabelOf = (id: string): string | null =>
+  id === '201' ? '首帧' : id === '202' ? '尾帧' : null;
+
+describe('reconcilePromptDocWith（泛化 labelOf，IKFA1O）', () => {
+  it('标签文案跟随 labelOf 派生：普通参考改为首帧后，同身份标签同步为首帧（C1）', () => {
+    const doc: PromptDoc = {
+      version: 1,
+      segments: [{ kind: 'asset_ref', asset_id: '201', label: '图片1' }],
+    };
+    const result = reconcilePromptDocWith(doc, keyframeLabelOf);
+    expect(result.changed).toBe(true);
+    expect(result.doc.segments[0]).toEqual({ kind: 'asset_ref', asset_id: '201', label: '首帧' });
+  });
+
+  it('身份在参考集合但 labelOf 返回 null（模式不兼容）→ 失效并保留原指向（C2）', () => {
+    const doc: PromptDoc = {
+      version: 1,
+      segments: [{ kind: 'asset_ref', asset_id: '101', label: '图片1' }],
+    };
+    const result = reconcilePromptDocWith(doc, keyframeLabelOf);
+    expect(result.doc.segments[0]).toEqual({
+      kind: 'asset_ref',
+      asset_id: '101',
+      label: '图片1',
+      invalid_label: '图片1',
+    });
+  });
+
+  it('失效标签身份仍在集合但模式仍不兼容（labelOf 仍 null）→ 不误恢复（C5）；模式切回兼容才恢复', () => {
+    const invalid: PromptDoc = {
+      version: 1,
+      segments: [{ kind: 'asset_ref', asset_id: '101', label: '图片1', invalid_label: '图片1' }],
+    };
+    expect(reconcilePromptDocWith(invalid, keyframeLabelOf).doc).toBe(invalid); // 仍不兼容：原样保留
+    const allLabelOf = (id: string): string | null => (id === '101' ? '图片1' : null);
+    const restored = reconcilePromptDocWith(invalid, allLabelOf);
+    expect(restored.doc.segments[0]).toEqual({ kind: 'asset_ref', asset_id: '101', label: '图片1' });
+  });
+
+  it('素材库身份（asset- 前缀）与视频编号文案同样派生', () => {
+    const refsLabelOf = (id: string): string | null =>
+      id === 'asset-x1' ? '视频2' : id === '401' ? '音频1' : null;
+    const doc: PromptDoc = {
+      version: 1,
+      segments: [
+        { kind: 'asset_ref', asset_id: 'asset-x1', label: '视频1' },
+        { kind: 'text', text: '和' },
+        { kind: 'asset_ref', asset_id: '401' },
+      ],
+    };
+    const result = reconcilePromptDocWith(doc, refsLabelOf);
+    expect(result.doc.segments[0]).toEqual({ kind: 'asset_ref', asset_id: 'asset-x1', label: '视频2' });
+    expect(result.doc.segments[2]).toEqual({ kind: 'asset_ref', asset_id: '401', label: '音频1' });
+  });
+});
+
+describe('flattenPromptDocWith（泛化拍平，IKFA1O）', () => {
+  it('有效标签按 labelOf 文案拍平，失效标签保留原编号（视频首尾帧/多类型）', () => {
+    const doc: PromptDoc = {
+      version: 1,
+      segments: [
+        { kind: 'text', text: '从' },
+        { kind: 'asset_ref', asset_id: '201', label: '首帧' },
+        { kind: 'text', text: '走向' },
+        { kind: 'asset_ref', asset_id: '999', label: '图片3', invalid_label: '图片3' },
+      ],
+    };
+    expect(flattenPromptDocWith(doc, keyframeLabelOf)).toBe('从首帧走向已失效：原图片3');
   });
 });

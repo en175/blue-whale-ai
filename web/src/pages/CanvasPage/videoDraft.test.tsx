@@ -46,15 +46,32 @@ vi.mock('./components/ProjectSelector', () => ({
 vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
 vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
-/** ChipTextEditor 打桩：textarea 输入透传 onChange（驱动 composed 与草稿提示词写回） */
-vi.mock('./components/ChipTextEditor', () => ({
-  default: ({ onChange }: { onChange?: (v: { segments: Array<{ kind: string; value: string }> }) => void }) =>
-    createElement('textarea', {
-      'data-testid': 'chip-editor',
-      onChange: (e: Event) =>
-        onChange?.({ segments: [{ kind: 'text', value: (e.target as HTMLTextAreaElement).value }] }),
+/** PromptRefEditor 打桩（IKFA1O 编辑器替换）：textarea 输入透传结构化 onChange（驱动草稿提示词写回） */
+vi.mock('./components/PromptRefEditor', async () => {
+  const { forwardRef, useImperativeHandle } = await import('react');
+  return {
+    default: forwardRef(function StubPromptRefEditor(
+      { onChange }: { onChange?: (doc: { version: number; segments: Array<{ kind: 'text'; text: string }> }) => void },
+      ref: React.Ref<unknown>,
+    ) {
+      useImperativeHandle(ref, () => ({
+        insertRefAtMention: () => {},
+        consumeMentionForPendingInsert: () => {},
+        insertRefAtPending: () => {},
+        dismissMention: () => {},
+        replaceRefAt: () => {},
+        clear: () => {},
+      }));
+      return createElement('textarea', {
+        'data-testid': 'chip-editor',
+        onChange: (e: Event) => {
+          const value = (e.target as HTMLTextAreaElement).value;
+          onChange?.({ version: 1, segments: value ? [{ kind: 'text', text: value }] : [] });
+        },
+      });
     }),
-}));
+  };
+});
 
 const apiMocks = vi.hoisted(() => ({
   fetchProjects: vi.fn(async () => [

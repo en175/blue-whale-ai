@@ -341,12 +341,16 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     return out;
   }, [edgeRefs, files]);
   const orderedAssetIds = useMemo(() => orderedImageRefs.map((r) => r.assetId), [orderedImageRefs]);
+  const refsLabels = useMemo(
+    () => new Map(orderedImageRefs.map((r) => [r.assetId, `图片${r.number}`] as const)),
+    [orderedImageRefs],
+  );
   const refsNumbering = useMemo(
     () => new Map(orderedImageRefs.map((r) => [r.assetId, r.number] as const)),
     [orderedImageRefs],
   );
   const refsMeta = useMemo(
-    () => new Map(orderedImageRefs.map((r) => [r.assetId, { url: r.url, name: r.name }] as const)),
+    () => new Map(orderedImageRefs.map((r) => [r.assetId, { url: r.url, name: r.name, mediaType: 'image' as const }] as const)),
     [orderedImageRefs],
   );
   /** 本地模式每个图片文件在最终输入中的编号（含无 assetId 待上传项） */
@@ -407,9 +411,18 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
   const mentionQuery = mention.open ? mention.query.trim().toLowerCase() : '';
   const mentionItems = orderedImageRefs.filter(
     (r) => !mentionQuery || r.name.toLowerCase().includes(mentionQuery) || `图片${r.number}`.includes(mentionQuery),
-  );
+  ).map((r) => ({ assetId: r.assetId, url: r.url, name: r.name, badge: `图片${r.number}`, mediaType: 'image' as const }));
+  /** 失效替换菜单可选项：全量有效参考（IKFA1N B5 语义，不与 @ 查询过滤耦合） */
+  const replaceItems = orderedImageRefs.map((r) => ({ assetId: r.assetId, url: r.url, name: r.name, badge: `图片${r.number}`, mediaType: 'image' as const }));
   /** 添加新参考入口与 previewRow 同源可见性：达上限或只读时不提供（不留下伪有效标签） */
   const canAddNewRef = !imagesFull && !readOnly;
+
+  const mentionNewRefEntries = canAddNewRef
+    ? [
+        { key: 'assets', label: '从资产中选择', icon: 'folder' as const, onPick: () => pickMentionNewRef('assets') },
+        { key: 'canvas', label: '到节点选择', icon: 'pointer' as const, onPick: () => pickMentionNewRef('canvas') },
+      ]
+    : [];
 
   const closeMention = () => {
     editorRef.current?.dismissMention();
@@ -432,25 +445,23 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     else onPickFromCanvas?.();
   };
 
-  const pickMentionEntry = (index: number) => {
-    if (index < mentionItems.length) {
-      pickMentionRef(mentionItems[index].assetId);
-      return;
-    }
-    pickMentionNewRef(index === mentionItems.length ? 'assets' : 'canvas');
-  };
-
   const handleMentionKey = (key: 'down' | 'up' | 'enter' | 'escape'): boolean => {
     if (!mention.open) return false;
     if (key === 'escape') {
       closeMention();
       return true;
     }
-    const total = mentionItems.length + (canAddNewRef ? 2 : 0);
+    const total = mentionItems.length + mentionNewRefEntries.length;
     if (total === 0) return false;
     if (key === 'down') setMentionIndex((i) => (i + 1) % total);
     else if (key === 'up') setMentionIndex((i) => (i - 1 + total) % total);
-    else if (key === 'enter') pickMentionEntry(Math.min(mentionIndex, total - 1));
+    else if (key === 'enter') {
+      if (mentionIndex < mentionItems.length) {
+        pickMentionRef(mentionItems[mentionIndex].assetId);
+      } else {
+        mentionNewRefEntries[mentionIndex - mentionItems.length]?.onPick();
+      }
+    }
     return true;
   };
 
@@ -574,9 +585,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
           <MentionMenu
             items={mentionItems}
             activeIndex={mentionIndex}
-            canAddNew={canAddNewRef}
+            newRefEntries={mentionNewRefEntries}
             onPick={pickMentionRef}
-            onPickNew={pickMentionNewRef}
             onHoverIndex={setMentionIndex}
           />
           {onMentionCanvas && !canvasMentionOpen && <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setCanvasMentionOpen(true)}>引用画布素材</button>}
@@ -604,7 +614,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
       {replaceTarget !== null && (
         <div className={styles.mentionDock} ref={replaceMenuRef}>
           <ReplaceRefMenu
-            items={orderedImageRefs}
+            items={replaceItems}
             onPick={(assetId) => {
               editorRef.current?.replaceRefAt(replaceTarget, assetId);
               setReplaceTarget(null);
@@ -862,8 +872,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
             initialText={initialText ?? ''}
             placeholder={uploading ? '正在上传参考图...' : `描述你希望如何编辑这张图片。图片最多 ${maxImages} 张。输入 @ 可引用已选素材。`}
             readOnly={uploading || readOnly}
-            orderedAssetIds={orderedAssetIds}
-            numbering={refsNumbering}
+            labelOf={(assetId) => refsLabels.get(assetId) ?? null}
+            reconcileKey={orderedAssetIds.join(',')}
+            labels={refsLabels}
             refsMeta={refsMeta}
             onChange={handleDocChange}
             onMentionChange={(state) => {

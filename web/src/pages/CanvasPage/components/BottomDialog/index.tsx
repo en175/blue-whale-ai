@@ -3,8 +3,10 @@ import PromptSyncActions from '../PromptSyncActions';
  * BottomDialog 视频对话窗口：模型/时长/宽高比配置与发送
  * 统一草稿绑定模式：参考由「画布连线 + 草稿 material refs」合并推导（首帧/尾帧/普通参考）。
  * 三类来源菜单：从资产中选择（落画布节点+连线）/ 到节点选择（建线）/ 角色库（入草稿 data）。
+ * IKFA1O：正文编辑接入 PromptRefEditor——图片/视频/音频以稳定身份插入正文标签，
+ * 首尾帧按角色显示，普通参考按同类型编号；模式不兼容时标签失效并阻止发送。
  * ============================================ */
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -23,7 +25,21 @@ import {
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { REF_LIMITS } from '@/utils/ref-overflow';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import ChipTextEditor, { type ChipTextEditorHandle } from '../ChipTextEditor';
+import {
+  docHasAnyRef,
+  docHasInvalidRef,
+  flattenPromptDocWith,
+  PROMPT_DOC_VERSION,
+  type PromptDoc,
+  type StoredPromptDoc,
+} from '@/lib/prompt-doc';
+import PromptRefEditor, {
+  type MentionState,
+  type PromptRefEditorHandle,
+} from '../PromptRefEditor';
+import MentionMenu from '../PromptRefEditor/MentionMenu';
+import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
+import { refIdOf, videoLabelMapOf } from '../../videoPromptRefs';
 import type { ImageTextAttachment } from '../ImageDialog';
 import type { MediaGenStatus } from '../MediaNode';
 import {
@@ -36,15 +52,8 @@ import {
   type VideoRefCapabilities,
   type VideoRefRole,
 } from '../../videoMediaRefs';
-import {
-  EMPTY_COMPOSED,
-  composedIsEmpty,
-  composedLength,
-  resolveComposed,
-  type ComposedValue,
-} from '../ChipTextEditor/composed';
 import AtMentionMenu from '../AtMentionMenu';
-import { trailingAtQueryFromComposed, type AtMentionItem } from '../../atMention';
+import { type AtMentionItem } from '../../atMention';
 import {
   VIDEO_FOLLOW_MODE_LABEL,
   VIDEO_FOLLOW_MODE_ORDER,
@@ -80,6 +89,8 @@ export interface VideoGenOptions {
 /** 视频草稿面板参数写回补丁（IKDMQS）：字段名对齐草稿节点 data 的持久化键 */
 export interface VideoDraftParamsPatch {
   prompt?: string;
+  /** IKFA1O：结构化正文与拍平镜像双写（防丢失，同生图契约） */
+  promptDoc?: StoredPromptDoc;
   modelId?: string;
   size?: string;
   ratio?: string;
@@ -89,9 +100,12 @@ export interface VideoDraftParamsPatch {
 
 interface BottomDialogProps {
   onClose: () => void;
-  onSend: (text: string, opts: VideoGenOptions) => void | Promise<void>;
+  /** 发送：提示词（拍平镜像）+ 参数 + 结构化正文（含素材标签时携带，IKFA1O） */
+  onSend: (text: string, opts: VideoGenOptions, promptDoc?: PromptDoc | null) => void | Promise<void>;
   /** 初始自由文本（视频节点「重新编辑」带入原提示词） */
   initialText?: string;
+  /** 初始结构化正文（IKFA1O 草稿恢复）：携带时优先于 initialText */
+  initialDoc?: PromptDoc | null;
   /** 初始生成参数（首页 AI视频 带入：选中首页所选的模型/比例/清晰度/时长/模式） */
   initialParams?: VideoGenSeedParams;
   /** 连线文本附件（IKDLQG）：草稿绑定模式由父级按连线实时推导传入 */
@@ -232,13 +246,16 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-/** 草稿绑定的参考项缩略图（IKDMQS）：连线推导/角色库 material 项 + 角色徽标 + 移除；
+/** 草稿绑定的参考项缩略图（IKDMQS）：连线推导/角色库 material 项 + 编号/角色徽标 + 移除；
  *  首帧/尾帧项提供「设为普通参考」，普通参考项提供「设为首帧/设为尾帧」（受能力与槽位约束，
  *  槽位不满足时入口不渲染，父级校验兜底并 toast 原因）；
- *  materialId 非空为角色库素材项：移除/改角色走 material 回调（操作草稿 data，非连线） */
-function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMaterial, onSetMaterialRole, firstSlotOpen, lastSlotOpen }: {
+ *  materialId 非空为角色库素材项：移除/改角色走 material 回调（操作草稿 data，非连线）。
+ *  IKFA1O：badge 为正文标签同源文案（图片N/视频N/音频N），附件区与正文/菜单一致编号 */
+function VideoRefThumb({ item, role, badge, readOnly, onRemove, onSetRole, onRemoveMaterial, onSetMaterialRole, firstSlotOpen, lastSlotOpen }: {
   item: VideoMediaRef;
   role: VideoRefRole;
+  /** 标签徽标文案（普通参考=同类型编号；帧由 ROLE_LABELS 展示，不重复） */
+  badge?: string;
   readOnly: boolean;
   onRemove?: (nodeId: string) => void;
   onSetRole?: (nodeId: string, role: VideoRefRole) => void;
@@ -261,12 +278,14 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMate
       {item.mediaType === 'audio' ? <AudioLines size={24} aria-label={item.name} /> : item.mediaType === 'video'
         ? <video src={item.url} className={styles.mediaThumbImg} muted />
         : <img src={item.url} alt={item.name} className={styles.mediaThumbImg} />}
-      {/* 角色徽标：仅首帧/尾帧保留；普通参考不在图片上保留标签 */}
-      {role !== 'reference' && (
+      {/* 角色徽标：首帧/尾帧显式角色；普通参考显示正文标签同源编号（IKFA1O 一致性） */}
+      {role !== 'reference' ? (
         <span data-role={role} className={`${styles.refRoleBadge} ${styles.refRoleBadgeFrame}`}>
           {ROLE_LABELS[role]}
         </span>
-      )}
+      ) : badge ? (
+        <span className={styles.refRoleBadge}>{badge}</span>
+      ) : null}
       {!readOnly && (
         <>
           <button className={styles.mediaThumbRemove} onClick={handleRemove} title={isMaterial ? '移除' : '移除（断开连线）'}>
@@ -294,19 +313,22 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMate
   );
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast, mentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
-  /** 富文本输入框（自由文本；胶囊机制保留给后续引用场景，发送时替换成完整 prompt） */
-  const chipEditorRef = useRef<ChipTextEditorHandle>(null);
+export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
+  /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
+  const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
+    initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
+  );
+  const editorRef = useRef<PromptRefEditorHandle>(null);
   const mentionAnchorRef = useRef<HTMLDivElement>(null);
-  const [mentionDismissed, setMentionDismissed] = useState(false);
-  /** 输入框内容的结构化形态（IKAFSX）：胶囊是指针，解引用只发生在发送那一刻。 */
-  const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
-  const mentionQuery = trailingAtQueryFromComposed(composed);
-  useEffect(() => {
-    if (mentionQuery === null) setMentionDismissed(false);
-  }, [mentionQuery]);
-  /** 计数口径：文字按字符数，一个胶囊算 1 个单位——不按它背后那几千字算。 */
-  const composedCount = composedLength(composed);
+  /** @ 菜单状态（已引用 + 添加新参考） */
+  const [mention, setMention] = useState<MentionState>({ open: false, query: '' });
+  const [mentionIndex, setMentionIndex] = useState(0);
+  /** 画布素材二级菜单（已引用之外的新素材经画布选取加入参考后插标签） */
+  const [canvasMentionOpen, setCanvasMentionOpen] = useState(false);
+  /** 失效标签替换菜单（IKFA1O 复用 IKFA1N 交互）：记录发起点击的标签节点 key */
+  const [replaceTarget, setReplaceTarget] = useState<string | null>(null);
+  const mentionMenuRef = useRef<HTMLDivElement>(null);
+  const replaceMenuRef = useRef<HTMLDivElement>(null);
   /** 附件正文有效（去空白非空）时允许空提示词提交（IKDLQG 契约：附件可单独驱动生成）；
    *  全部有效文本为空时沿用「提示词必填」 */
   const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
@@ -426,6 +448,32 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
   /** 已连入的视频参考数（切换到首尾帧/图生视频时不兼容，需先移除） */
   const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image').length;
 
+  /** IKFA1O 标签映射（唯一口径）：附件区徽标、@ 菜单、正文标签、发送拍平共用。
+   *  首尾帧按角色；普通参考按同类型编号；模式不接受的参考身份 → labelOf null（失效，C2/C5）。 */
+  const { labelOf, refItems } = useMemo(() => videoLabelMapOf(videoMediaRefs, selectedMode), [videoMediaRefs, selectedMode]);
+  const refLabels = useMemo(
+    () => new Map(refItems.flatMap((item) => (labelOf(item.id) ? [[item.id, labelOf(item.id)!] as const] : []))),
+    [refItems, labelOf],
+  );
+  const refsMeta = useMemo(() => {
+    const m = new Map<string, { url: string; name: string; mediaType: 'image' | 'video' | 'audio' }>();
+    for (const item of [videoMediaRefs.first, videoMediaRefs.last, ...videoMediaRefs.reference]) {
+      if (!item) continue;
+      m.set(refIdOf(item), { url: item.url, name: item.name, mediaType: item.mediaType });
+    }
+    return m;
+  }, [videoMediaRefs]);
+  const labelOfStable = useRef(labelOf);
+  labelOfStable.current = labelOf;
+  const reconcileKey = useMemo(
+    () => `${selectedMode}|${refItems.map((item) => `${item.id}:${item.role}:${item.type}`).join(',')}`,
+    [selectedMode, refItems],
+  );
+  /** 拍平镜像（IKFA1O）：字数统计与发送门槛共用；失效标签 → 已失效：原N */
+  const flatValue = useMemo(() => flattenPromptDocWith(promptDoc, (id) => labelOfStable.current(id)), [promptDoc, reconcileKey]);
+  /** 失效标签存在时阻止生成（模式不兼容或参考移除；点击替换/删除后可继续） */
+  const hasInvalidRef = docHasInvalidRef(promptDoc);
+
   /** 切换模式：目标模式与现有参考冲突时明确提示并阻止切换（保证「可见槽 = 实际参考」），否则写回草稿 */
   const handleModeChange = (key: string) => {
     setModeOpen(false);
@@ -459,9 +507,10 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
     : durationRange && (duration < durationRange.min || duration > durationRange.max
       || (duration - durationRange.min) % durationRange.step !== 0)
       ? '原时长不兼容，请重新选择时长'
+    : hasInvalidRef ? '正文有已失效的素材标签，请点击标签替换或删除后再发送'
     : null;
   const canSend = !readOnly && !videoDraftBinding.saveFailed && !configurationError
-    && (!composedIsEmpty(composed) || hasAttachmentText);
+    && (flatValue.trim().length > 0 || hasAttachmentText);
 
   /** 时长刻度（min..max 逐 step；模型能力未加载时无刻度） */
   const ticks: number[] = [];
@@ -498,12 +547,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
     return { modelId: m.model_id, ratio: nextRatio, size: nextSize, duration: nextDuration };
   };
 
-  // 初始自由文本（视频节点重新编辑带入原提示词）—— 先设文本，再插胶囊，避免覆盖
-  useEffect(() => {
-    if (initialText) {
-      chipEditorRef.current?.setText(initialText);
-    }
-  }, [initialText]);
+  // 初始自由文本（视频节点重新编辑带入原提示词）：initialDoc 优先（草稿恢复），纯文本兜底
+  // （PromptRefEditor 经 initialDoc/initialText 初始化，无需命令式 setText）
 
   // 加载视频模型能力列表：优先选中首页带入的模型，参数逐项按模型能力校验后应用
   useEffect(() => {
@@ -567,31 +612,34 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** 编辑器内容变化（IKDMQS 草稿绑定：提示词实时写回草稿节点） */
-  const handleComposedChange = (v: ComposedValue) => {
-    setComposed(v);
-    syncDraftParams({ prompt: resolveComposed(v) });
-  };
-
-  /** 发送：**解引用发生在这一刻**——编辑期胶囊一直是指针，此处才换成完整 prompt
-   *  （携带模型/宽高比/清晰度/时长）。参考由父级按连线+material refs 合并推导，
-   *  组合冲突（帧/参考混用、能力不支持）在此明确提示并阻止提交，不静默丢弃。 */
-  const submit = async (text: string, options: VideoGenOptions) => {
+  /** 提交防线（发送中防重入） */
+  const submit = async (text: string, options: VideoGenOptions, promptDocToSend: PromptDoc | null) => {
     if (sendingRef.current) return;
     sendingRef.current = true;
     setSending(true);
     try {
-      await onSend(text, options);
+      await onSend(text, options, promptDocToSend);
     } finally {
       sendingRef.current = false;
       setSending(false);
     }
   };
 
+  /** 编辑器内容变化（IKFA1O 结构化正文）：同步拍平镜像与结构（双写防丢失），失效/文案随 reconcile 落草稿 */
+  const handleDocChange = (doc: PromptDoc) => {
+    setPromptDoc(doc);
+    pendingNewRefInsert.current = false;
+    const flat = flattenPromptDocWith(doc, (id) => labelOfStable.current(id));
+    syncDraftParams({ prompt: flat, promptDoc: { version: PROMPT_DOC_VERSION, segments: doc.segments, flat } });
+  };
+
+  /** 发送：携带模型/宽高比/清晰度/时长与结构化正文（含素材标签时，IKFA1O）。
+   *  参考由父级按连线+material refs 合并推导，组合冲突（帧/参考混用、能力不支持、
+   *  失效标签）在此明确提示并阻止提交，不静默丢弃。 */
   const handleSend = () => {
     if (!canSend) return;
     if (readOnly) return;
-    const text = resolveComposed(composed).trim();
+    const text = flatValue.trim();
     if (!text && !hasAttachmentText) return;
     if (!currentModel) {
       console.warn('视频模型能力加载中，请稍后重试');
@@ -612,8 +660,98 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
       resolution: size.api_value ?? size.id,
       duration,
       mode: selectedMode,
-    });
+    }, docHasAnyRef(promptDoc) ? promptDoc : null);
   };
+
+  /** @ 菜单：已引用项按查询过滤（名称/标签可搜索）；项 = 当前模式下有效的参考（帧+普通） */
+  const mentionQueryText = mention.open ? mention.query.trim().toLowerCase() : '';
+  const mentionItems = useMemo(() => {
+    const out: Array<{ assetId: string; url: string; name: string; badge: string; mediaType: 'image' | 'video' | 'audio' }> = [];
+    for (const item of [videoMediaRefs.first, videoMediaRefs.last, ...videoMediaRefs.reference]) {
+      if (!item) continue;
+      const id = refIdOf(item);
+      const badge = labelOfStable.current(id);
+      if (!badge) continue; // 模式不接受或身份失效：不提供插入（不留下伪有效标签）
+      out.push({ assetId: id, url: item.url, name: item.name, badge, mediaType: item.mediaType });
+    }
+    return out.filter((r) => !mentionQueryText || r.name.toLowerCase().includes(mentionQueryText) || r.badge.includes(mentionQueryText));
+  }, [videoMediaRefs, mentionQueryText, reconcileKey]);
+  const closeMention = () => {
+    editorRef.current?.dismissMention();
+    setMention({ open: false, query: '' });
+    setCanvasMentionOpen(false);
+  };
+  const pickMentionRef = (assetId: string) => {
+    editorRef.current?.insertRefAtMention(assetId);
+    setMention({ open: false, query: '' });
+  };
+
+  /** 添加新参考入口（IKFA1O A3/A5）：按模式给出目标槽位的细分入口；
+   *  达上限或只读不提供（校验拒绝则参考集合不变、不插入标签） */
+  const pendingNewRefInsert = useRef(false);
+  const pickMentionNewRef = (kind: 'image' | 'video', role: VideoRefRole, source: 'assets' | 'canvas') => {
+    editorRef.current?.consumeMentionForPendingInsert();
+    pendingNewRefInsert.current = true;
+    setMention({ open: false, query: '' });
+    if (source === 'assets') onPickFromAssets?.(kind, role);
+    else onPickFromCanvas?.(kind, role);
+  };
+  /** @ 菜单添加新参考的细分入口（按模式与类型；上限复用 dock 添加判定） */
+  const mentionNewRefEntries = useMemo(() => {
+    if (readOnly) return [];
+    const entries: Array<{ key: string; label: string; icon: 'folder' | 'pointer'; onPick: () => void }> = [];
+    const push = (kind: 'image' | 'video', role: VideoRefRole, labelPrefix: string) => {
+      entries.push(
+        { key: `${labelPrefix}-assets`, label: `从资产中选择${labelPrefix}`, icon: 'folder', onPick: () => pickMentionNewRef(kind, role, 'assets') },
+        { key: `${labelPrefix}-canvas`, label: `到节点选择${labelPrefix}`, icon: 'pointer', onPick: () => pickMentionNewRef(kind, role, 'canvas') },
+      );
+    };
+    if (isKeyframe) {
+      if (!videoMediaRefs.first && canAddFirst) push('image', 'first', '首帧');
+      if (!videoMediaRefs.last && canAddLast) push('image', 'last', '尾帧');
+    } else {
+      if (canAddReference) push('image', 'reference', '图片参考');
+      if (canAddReference && !isText2Video) push('video', 'reference', '视频参考');
+    }
+    return entries;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, isKeyframe, isText2Video, canAddFirst, canAddLast, canAddReference, videoMediaRefs.first, videoMediaRefs.last]);
+
+  const handleMentionKey = (key: 'down' | 'up' | 'enter' | 'escape'): boolean => {
+    if (!mention.open) return false;
+    if (key === 'escape') {
+      closeMention();
+      return true;
+    }
+    const total = mentionItems.length + mentionNewRefEntries.length;
+    if (total === 0) return false;
+    if (key === 'down') setMentionIndex((i) => (i + 1) % total);
+    else if (key === 'up') setMentionIndex((i) => (i - 1 + total) % total);
+    else if (key === 'enter') {
+      if (mentionIndex < mentionItems.length) pickMentionRef(mentionItems[mentionIndex].assetId);
+      else mentionNewRefEntries[mentionIndex - mentionItems.length]?.onPick();
+    }
+    return true;
+  };
+
+  /** 新参考添加成功检测：有效身份集合出现新增 → 在记住的插入点落标签（A3） */
+  const prevRefIdsRef = useRef<Array<string>>([]);
+  useEffect(() => {
+    const ids = refItems.filter((item) => labelOfStable.current(item.id) !== null).map((item) => item.id);
+    const prev = prevRefIdsRef.current;
+    prevRefIdsRef.current = ids;
+    if (!pendingNewRefInsert.current) return;
+    const added = ids.filter((id) => !prev.includes(id));
+    if (added.length === 0) return;
+    pendingNewRefInsert.current = false;
+    editorRef.current?.insertRefAtPending(added[added.length - 1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reconcileKey]);
+
+  useDismissOnOutside([
+    { open: mention.open && !canvasMentionOpen, ref: mentionMenuRef, dismiss: () => closeMention() },
+    { open: replaceTarget !== null, ref: replaceMenuRef, dismiss: () => setReplaceTarget(null) },
+  ]);
 
   /** 槽位来源菜单（统一草稿绑定）：按 kind+role 区分目标槽位，一次只弹一个；
    *  三项来源：从资产中选择（落画布节点+连线）/ 到节点选择（建线）/ 角色库（入草稿 data） */
@@ -671,6 +809,57 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
       style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
     >
+      {/* @ 菜单（IKFA1O）：挂 .dialogWrap 层向上弹出（.dialog 滚动框会裁剪浮层）；
+          顶部已引用（当前模式允许的图片/视频/音频），下方添加新参考细分入口，
+          再下「引用画布素材」二级菜单（新素材经画布选取加参考后插标签） */}
+      {mention.open && !readOnly && (
+        <div className={styles.mentionDock} ref={mentionMenuRef}>
+          <MentionMenu
+            items={mentionItems}
+            activeIndex={mentionIndex}
+            newRefEntries={mentionNewRefEntries}
+            onPick={pickMentionRef}
+            onHoverIndex={setMentionIndex}
+          />
+          {onMentionCanvas && !canvasMentionOpen && (
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setCanvasMentionOpen(true)}>引用画布素材</button>
+          )}
+          {canvasMentionOpen && onMentionCanvas && (
+            <AtMentionMenu
+              anchorRef={mentionMenuRef}
+              items={canvasMentionItems ?? []}
+              editorQuery={mention.query}
+              onSelect={(item) => {
+                const id = item.assetId ?? '';
+                if (id && refLabels.has(id)) {
+                  // 已在参考区：直接插标签（多次提及不重复添加输入）
+                  pickMentionRef(id);
+                } else {
+                  // 新素材：加入参考（父级建立连线/暂存），添加成功后经 pendingInsert 落标签
+                  editorRef.current?.consumeMentionForPendingInsert();
+                  pendingNewRefInsert.current = true;
+                  setMention({ open: false, query: '' });
+                  onMentionCanvas(item);
+                }
+                setCanvasMentionOpen(false);
+              }}
+              onClose={() => setCanvasMentionOpen(false)}
+            />
+          )}
+        </div>
+      )}
+      {/* 失效标签替换菜单（IKFA1O 复用 IKFA1N 交互）：选择后仅替换发起点击的那次提及 */}
+      {replaceTarget !== null && (
+        <div className={styles.mentionDock} ref={replaceMenuRef}>
+          <ReplaceRefMenu
+            items={mentionItems}
+            onPick={(assetId) => {
+              editorRef.current?.replaceRefAt(replaceTarget, assetId);
+              setReplaceTarget(null);
+            }}
+          />
+        </div>
+      )}
       {/* 配置面板（展开悬浮于底栏上方）：挂在不带 overflow 的定位外壳 .dialogWrap 上，
           脱出 .dialog 滚动框，避免面板顶部被滚动容器裁剪（IKEOLP） */}
       {showConfig && (
@@ -862,6 +1051,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
                 key={r.materialId ?? r.nodeId}
                 item={r}
                 role="reference"
+                badge={refLabels.get(refIdOf(r))}
                 readOnly={readOnly}
                 onRemove={onRemoveVideoRef}
                 onSetRole={onSetVideoRefRole}
@@ -926,32 +1116,27 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
       <PromptSyncActions plans={pendingPlanSyncs} disabled={readOnly || syncingPlan} onSync={onSyncPlan} />
       {configurationError && <div className={styles.refConflictHint} role="alert">{configurationError}</div>}
 
-      {/* 输入框：胶囊跟文字同一行；输入 @ 弹出画布素材菜单 */}
+      {/* 输入框（IKFA1O 结构化正文）：任意光标处输入 @ 插入已引用素材标签；标签绑定稳定身份 */}
       <div className={styles.editorWrap} ref={mentionAnchorRef}>
-        <ChipTextEditor
-          ref={chipEditorRef}
-          placeholder="描述你希望生成的视频。输入 @ 引用画布素材。"
-          // 超限只提示、不动内容（IKAFSX）。原来这里会 `setText(truncated)`——那是「用纯文本
-          // 整体替换编辑器内容」，**所有胶囊当场湮灭、正文被从中间腰斩**，丢的远不止超出的部分。
-          // 而这个 1000 本身也是凭空定的：后端不校验 prompt 长度，模型能力接口里也没有这个字段。
-          // 拿到模型真实上限之前，它只是个提示，不足以据此删改用户内容。
-          onChange={handleComposedChange}
+        <PromptRefEditor
+          ref={editorRef}
+          initialDoc={initialDoc ?? null}
+          initialText={initialText ?? ''}
+          placeholder="描述你希望生成的视频。输入 @ 可引用已选素材。"
           readOnly={readOnly}
+          labelOf={(id) => labelOfStable.current(id)}
+          reconcileKey={reconcileKey}
+          labels={refLabels}
+          refsMeta={refsMeta}
+          onChange={handleDocChange}
+          onMentionChange={(state) => {
+            setMention(state);
+            if (state.open) setMentionIndex(0);
+          }}
+          onInvalidTagClick={readOnly ? undefined : (nodeKey) => setReplaceTarget(nodeKey)}
+          onMentionKey={handleMentionKey}
           className={styles.editorArea}
         />
-        {mentionQuery !== null && !mentionDismissed && !readOnly && onMentionCanvas && (
-          <AtMentionMenu
-            anchorRef={mentionAnchorRef}
-            items={mentionItems ?? []}
-            editorQuery={mentionQuery}
-            onSelect={(item) => {
-              chipEditorRef.current?.stripTrailingAtQuery();
-              setMentionDismissed(true);
-              onMentionCanvas(item);
-            }}
-            onClose={() => setMentionDismissed(true)}
-          />
-        )}
       </div>
 
       {/* 底部状态栏 */}
@@ -1008,8 +1193,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
         {/* 右侧：发送 */}
         <div className={styles.barRight}>
           {/* 字数统计 */}
-          <div className={`${styles.charCount} ${composedCount >= MAX_INPUT ? styles.charCountWarn : ''}`}>
-            {composedCount}/{MAX_INPUT}
+          <div className={`${styles.charCount} ${flatValue.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
+            {flatValue.length}/{MAX_INPUT}
           </div>
           <button
             data-testid="video-send"

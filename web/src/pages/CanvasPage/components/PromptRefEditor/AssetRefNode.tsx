@@ -27,16 +27,19 @@ export type SerializedAssetRefNode = Spread<
 export interface AssetRefMeta {
   url: string;
   name: string;
+  /** IKFA1O：素材媒体类型——仅图片显示缩略图（视频地址进 <img> 会裂图，音频无图） */
+  mediaType?: 'image' | 'video' | 'audio';
 }
 
-/** 编号与素材元信息：装饰组件按当前有效输入实时渲染（编号重派生不触发节点变更） */
+/** 标签文案与素材元信息：装饰组件按当前有效输入实时渲染（文案重派生不触发节点变更）。
+ *  IKFA1O 泛化：labels 直接给「图片1/视频1/首帧」等最终文案（图片=图片N，视频=角色/类型编号） */
 export const PromptRefContext = createContext<{
-  numbering: ReadonlyMap<string, number>;
+  labels: ReadonlyMap<string, string>;
   meta: ReadonlyMap<string, AssetRefMeta>;
   readOnly: boolean;
   /** 点击失效标签：交由调用方打开「替换为其他已引用项」菜单（IKFA1N B5） */
   onInvalidTagClick?: (nodeKey: string) => void;
-}>({ numbering: new Map(), meta: new Map(), readOnly: false });
+}>({ labels: new Map(), meta: new Map(), readOnly: false });
 
 function AssetRefChipComponent({
   nodeKey,
@@ -47,7 +50,7 @@ function AssetRefChipComponent({
   assetId: string;
   invalidLabel?: string;
 }) {
-  const { numbering, meta, readOnly, onInvalidTagClick } = useContext(PromptRefContext);
+  const { labels, meta, readOnly, onInvalidTagClick } = useContext(PromptRefContext);
   const [editor] = useLexicalComposerContext();
   const handleRemove = () => {
     if (!editor.isEditable()) return;
@@ -100,7 +103,7 @@ function AssetRefChipComponent({
       </span>
     );
   }
-  const n = numbering.get(assetId);
+  const label = labels.get(assetId);
   return (
     <span
       className={styles.refChip}
@@ -108,8 +111,8 @@ function AssetRefChipComponent({
       title={info?.name ?? assetId}
       data-testid="asset-ref-valid"
     >
-      {info?.url ? <img className={styles.refChipThumb} src={info.url} alt="" /> : null}
-      <span className={styles.refChipLabel}>图片{n ?? '?'}</span>
+      {info?.url && info.mediaType !== 'audio' && info.mediaType !== 'video' ? <img className={styles.refChipThumb} src={info.url} alt="" /> : null}
+      <span className={styles.refChipLabel}>{label ?? '素材?'}</span>
       {!readOnly && (
         <button
           type="button"
