@@ -6,7 +6,6 @@ export interface FollowDialogAnchor {
 }
 
 export const FOLLOW_DIALOG_WIDTH = 740;
-const FOLLOW_DIALOG_HEIGHT = 220;
 const FOLLOW_GAP = 16;
 const FOLLOW_PAD = 12;
 
