@@ -57,18 +57,10 @@ public class NewApiAudioClient {
 
     /** 测试用构造器：注入 base URL。 */
     NewApiAudioClient(String baseUrl) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalStateException("NEW_API_BASE_URL 未配置");
-        }
-        // 去尾斜杠（new-api-audio-provider.ts:58）
-        this.baseUrl = baseUrl.replaceAll("/+$", "");
+        this.baseUrl = com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport.normalizeBaseUrl(baseUrl);
 
         int timeoutMs = loadTimeoutMs();
-        this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .build();
+        this.httpClient = com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport.buildClient(10_000, timeoutMs, timeoutMs);
     }
 
     /**
@@ -106,15 +98,13 @@ public class NewApiAudioClient {
             throw new AudioProviderError(GenerationError.ERROR_PROVIDER_FAILED, "请求序列化失败");
         }
 
-        // 请求头（契约 §5 / ADR-0080）
-        Request request = new Request.Builder()
+        // 请求头（契约 §5 / ADR-0080）：标准三元组走共享装配，Content-Type 单独
+        Request.Builder requestBuilder = new Request.Builder()
                 .url(baseUrl + "/v1/audio/speech")
                 .post(RequestBody.create(bodyJson, JSON_TYPE))
-                .header("Authorization", "Bearer " + token)
-                .header("X-Trace-Id", traceId)
-                .header("X-Client-System", "bluewhale") // ADR-0080 白名单头
-                .header("Content-Type", "application/json")
-                .build();
+                .header("Content-Type", "application/json");
+        com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        Request request = requestBuilder.build();
 
         Response response;
         try {
