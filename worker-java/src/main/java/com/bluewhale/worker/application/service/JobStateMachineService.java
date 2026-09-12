@@ -55,7 +55,12 @@ public class JobStateMachineService {
     private final SceneCardGenerationRecordMapper sceneCardRecordMapper;
     private final StoryboardPreviewMapper storyboardPreviewMapper;
 
-    /** 兼容旧 7-mapper 构造（测试直连）：内部组装拆分后的组件。 */
+    /**
+     * 兼容旧 7-mapper 构造（测试直连）：内部组装拆分后的组件。
+     * <p>
+     * 生产装配走 Spring 构造注入（4-arg 构造 + 各组件 @Service）；
+     * 本 7-mapper 构造保留给 test 直连（Mockito / Testcontainers 手动装配）。
+     */
     public JobStateMachineService(
             GenerationJobMapper jobMapper,
             AssetMapper assetMapper,
@@ -74,6 +79,10 @@ public class JobStateMachineService {
                 slotMapper, projectEventMapper, sceneCardRecordMapper, storyboardPreviewMapper);
     }
 
+    /**
+     * 生产装配构造（Spring 构造注入）：拆分组件的门面组合。
+     * 参数最少的 public 构造 = 唯一被 Spring 选中的构造（其余非 private 构造是测试直连兼容）。
+     */
     public JobStateMachineService(
             GenerationJobMapper jobMapper,
             GenerationJobLogMapper jobLogMapper,
