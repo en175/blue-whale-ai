@@ -6,6 +6,8 @@ import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2, Music2, Paus
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import type { MediaGenStatus } from '../MediaNode';
+import AtMentionMenu from '../AtMentionMenu';
+import { stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
 import styles from './index.module.css';
 
 /** 输入框字数上限 */
@@ -71,6 +73,10 @@ interface AudioDialogProps {
   pickMode?: boolean;
   /** 底部模式切换 → AI 音乐对话框（已废弃：仅保留 prop 兼容父级，不再渲染） */
   onSwitchToMusic?: () => void;
+  /** 画布 @ 引用候选 */
+  mentionItems?: AtMentionItem[];
+  /** 选中 @ 素材后写入参考区 */
+  onMentionCanvas?: (item: AtMentionItem) => void;
 }
 
 export default function AudioDialog({
@@ -84,8 +90,13 @@ export default function AudioDialog({
   onPickFromCanvas,
   externalPick,
   pickMode,
+  mentionItems,
+  onMentionCanvas,
 }: AudioDialogProps) {
   const [text, setText] = useState(initialText ?? '');
+  const mentionAnchorRef = useRef<HTMLDivElement>(null);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
+  const mentionQuery = trailingAtQuery(text);
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [modelId, setModelId] = useState(initialModelId ?? '');
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -153,6 +164,10 @@ export default function AudioDialog({
     setText(value);
     draftBinding?.onParamsChange({ prompt: value });
   };
+
+  useEffect(() => {
+    if (mentionQuery === null) setMentionDismissed(false);
+  }, [mentionQuery]);
 
   const handleModelSelect = (id: string) => {
     setModelId(id);
@@ -399,16 +414,32 @@ export default function AudioDialog({
       </div>
 
       {/* 输入框 */}
+      <div className={styles.mentionAnchor} ref={mentionAnchorRef}>
       <textarea
         className={styles.textarea}
         data-testid="audio-input"
-        placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。"
+        placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。使用 @ 引用画布素材。"
         value={text}
         onChange={(e) => handleTextChange(e.target.value.slice(0, MAX_INPUT))}
         rows={2}
         maxLength={MAX_INPUT}
         disabled={readOnly}
       />
+      {mentionQuery !== null && !mentionDismissed && !readOnly && onMentionCanvas && (
+        <AtMentionMenu
+          anchorRef={mentionAnchorRef}
+          items={mentionItems ?? []}
+          editorQuery={mentionQuery}
+          disabledKinds={['image', 'video', 'text']}
+          onSelect={(item) => {
+            handleTextChange(stripTrailingAtQuery(text));
+            setMentionDismissed(true);
+            onMentionCanvas(item);
+          }}
+          onClose={() => setMentionDismissed(true)}
+        />
+      )}
+      </div>
 
       {modelUnavailable && <div role="alert">模型不可用，请选择可用模型后发送</div>}
 
