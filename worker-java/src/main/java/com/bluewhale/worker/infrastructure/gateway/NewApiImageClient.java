@@ -213,11 +213,12 @@ public class NewApiImageClient {
         if (size != null) payload.put("size", size);
         if (quality != null) payload.put("quality", quality);
 
-        return new Request.Builder()
+        Request.Builder requestBuilder = new Request.Builder()
                 .url(baseUrl + "/v1/images/generations")
                 .post(RequestBody.create(serialize(payload), JSON_TYPE))
-                .header("Content-Type", "application/json")
-                .build();
+                .header("Content-Type", "application/json");
+        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        return requestBuilder.build();
     }
 
     /**
@@ -244,10 +245,11 @@ public class NewApiImageClient {
                     RequestBody.create(image.content(), MediaType.get(image.mime())));
         }
 
-        return new Request.Builder()
+        Request.Builder requestBuilder = new Request.Builder()
                 .url(baseUrl + "/v1/images/edits")
-                .post(form.build())
-                .build();
+                .post(form.build());
+        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        return requestBuilder.build();
     }
 
     /**
@@ -318,11 +320,12 @@ public class NewApiImageClient {
                     Map.of("max_images", n));
         }
 
-        return new Request.Builder()
+        Request.Builder requestBuilder = new Request.Builder()
                 .url(baseUrl + "/v1/images/generations")
                 .post(RequestBody.create(serialize(payload), JSON_TYPE))
-                .header("Content-Type", "application/json")
-                .build();
+                .header("Content-Type", "application/json");
+        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        return requestBuilder.build();
     }
 
     // ========== 响应解析 ==========

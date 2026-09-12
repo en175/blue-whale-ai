@@ -44,6 +44,9 @@ class NewApiImageClientEndpointTest {
     private final AtomicReference<String> lastPath = new AtomicReference<>();
     private final AtomicReference<String> lastBody = new AtomicReference<>();
     private final AtomicReference<String> lastContentType = new AtomicReference<>();
+    private final AtomicReference<String> lastAuthorization = new AtomicReference<>();
+    private final AtomicReference<String> lastClientSystem = new AtomicReference<>();
+    private final AtomicReference<String> lastTraceId = new AtomicReference<>();
     private final AtomicReference<String> responseJson = new AtomicReference<>();
     private String baseUrl;
 
@@ -70,6 +73,9 @@ class NewApiImageClientEndpointTest {
         server.createContext("/", exchange -> {
             lastPath.set(exchange.getRequestURI().getPath());
             lastContentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            lastAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            lastClientSystem.set(exchange.getRequestHeaders().getFirst("X-Client-System"));
+            lastTraceId.set(exchange.getRequestHeaders().getFirst("X-Trace-Id"));
             ByteArrayOutputStream buf = new ByteArrayOutputStream();
             try (InputStream in = exchange.getRequestBody()) {
                 in.transferTo(buf);
@@ -118,6 +124,11 @@ class NewApiImageClientEndpointTest {
         assertThat(body).doesNotContain("\"tools\"");
         assertThat(body).doesNotContain("sequential_image_generation");
         assertThat(body).doesNotContain("\"image\"");
+        // 回归钉桩（刀③ NewApiHttpSupport 统一时曾漏加标准头 → 上游 401 Invalid token）：
+        // 三路客户端（image/video/audio）出站必须带鉴权与白名单头。
+        assertThat(lastAuthorization.get()).isEqualTo("Bearer t");
+        assertThat(lastClientSystem.get()).isEqualTo("bluewhale");
+        assertThat(lastTraceId.get()).isNotBlank();
     }
 
     @Test
