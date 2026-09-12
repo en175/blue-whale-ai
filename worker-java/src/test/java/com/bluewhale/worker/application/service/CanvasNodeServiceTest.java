@@ -4,10 +4,14 @@ import com.bluewhale.worker.domain.entity.CanvasEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.infrastructure.mapper.CanvasMapper;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -93,5 +97,37 @@ class CanvasNodeServiceTest {
 
         assertThat(result).isTrue();
         verify(canvasMapper).updateNodesCas(anyLong(), any(), anyString());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"true", "false", "null"})
+    @DisplayName("提取完成保留显式自定义名状态，同时清除生成态")
+    void completedExtraction_preservesExplicitCustomName(String customName) throws Exception {
+        CanvasEntity canvas = new CanvasEntity();
+        canvas.setId(1L);
+        canvas.setVersion(2);
+        String customField = "null".equals(customName) ? "" : ",\"customName\":" + customName;
+        canvas.setNodesJson("[{\"id\":\"media-extract-1834\",\"data\":{"
+                + "\"fileName\":\"我的配乐\",\"genStatus\":\"generating\",\"jobId\":\"1834\""
+                + customField + "}}]");
+        when(canvasMapper.findByProjectId(anyLong())).thenReturn(canvas);
+        when(canvasMapper.updateNodesCas(anyLong(), any(), anyString())).thenReturn(1);
+
+        assertThat(service.updateMediaExtractNodeToAudio(
+                "1834", "438", "https://tos/a.mp3", "audio/mpeg", 124563L, 3.9)).isTrue();
+
+        ArgumentCaptor<String> nodesJson = ArgumentCaptor.forClass(String.class);
+        verify(canvasMapper).updateNodesCas(anyLong(), any(), nodesJson.capture());
+        var data = new ObjectMapper().readTree(nodesJson.getValue()).get(0).get("data");
+        assertThat(data.get("fileName").asText()).isEqualTo("我的配乐");
+        if ("null".equals(customName)) {
+            assertThat(data.has("customName")).isFalse();
+        } else {
+            assertThat(data.has("customName")).isTrue();
+            assertThat(data.get("customName").booleanValue()).isEqualTo(Boolean.parseBoolean(customName));
+        }
+        assertThat(data.get("src").asText()).isEqualTo("https://tos/a.mp3");
+        assertThat(data.has("genStatus")).isFalse();
+        assertThat(data.has("jobId")).isFalse();
     }
 }

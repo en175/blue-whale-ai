@@ -14,7 +14,8 @@ import { typePromptRefText } from './testing/promptRefEditor';
    ImageDialog 用真实实现（沿用 imageDraft/failureRetry 组织方式）。 */
 
 vi.mock('./components/AgentPanel', () => ({
-  default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
+  default: ({ initialCardLabel }: { initialCardLabel?: string }) =>
+    createElement('div', { 'data-testid': 'agent-panel-stub' }, initialCardLabel),
 }));
 
 /** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
@@ -480,6 +481,21 @@ describe('IKFA8X 改名接线与独立性', () => {
     expect(textNode(created.id).data.customName).toBe(true);
   });
 
+  it('空文本卡改名后添加到对话使用当前名称，未命名时保持默认标签', async () => {
+    await renderPage();
+    await act(async () => { toolbarProps.current.onAddTextNode(); });
+    const id = flowProps.current.textNodes.at(-1)!.id;
+    const addToChat = async () => act(async () => {
+      (textNode(id).data.onAddToChat as (id: string) => void)(id);
+    });
+
+    await addToChat();
+    expect(container.querySelector('[data-testid="agent-panel-stub"]')?.textContent).toBe('文本节点');
+    await renameVia(id, 'text', '自定义空白文本');
+    await addToChat();
+    expect(container.querySelector('[data-testid="agent-panel-stub"]')?.textContent).toBe('自定义空白文本');
+  });
+
   it('复制继承名称与自定义状态，此后分别改名互不影响', async () => {
     await renderPage();
     await renameVia('img-a', 'media', '母版名');
@@ -591,6 +607,50 @@ describe('IKFA8X 生成生命周期保留自定义名', () => {
 });
 
 describe('IKFA8Y 改名同步当前参考显示', () => {
+  it.each(['列表选择', '画布点击'])('音频参考经%s选入后随源卡改名更新', async (entry) => {
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    await renderPage();
+    await act(async () => { toolbarProps.current.onToggleAudioDialog(); });
+    const pick = container.querySelector('button[title="添加参考音频（最多 3 段）"]')!;
+    await act(async () => { pick.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const fromCanvas = [...container.querySelectorAll('button')].find((b) => b.textContent === '从画布选择')!;
+    await act(async () => { fromCanvas.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {
+      if (entry === '画布点击') flowProps.current.onNodeClick(mediaNode('aud'));
+      else {
+        const source = [...container.querySelectorAll('button')].find((b) => b.textContent === '配乐.mp3')!;
+        source.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      }
+    });
+    expect(container.querySelector('button[title="播放：配乐.mp3"]')).not.toBeNull();
+
+    const assetId = mediaNode('aud').data.assetId;
+    const src = mediaNode('aud').data.src;
+    await renameVia('aud', 'media', '新配乐');
+    expect(container.querySelector('button[title="播放：新配乐"]')).not.toBeNull();
+    expect(container.querySelectorAll('button[title^="播放："]')).toHaveLength(1);
+    expect(mediaNode('aud').data.assetId).toBe(assetId);
+    expect(mediaNode('aud').data.src).toBe(src);
+  });
+
+  it('图片自由面板的文本附件随源卡改名更新，连线和正文保持不变', async () => {
+    // 已完成的生成卡保留其原始文本输入连线。
+    (canvasDocMock.current.doc as { edges: unknown[] }).edges = [{ id: 'text-ref', source: 't1', target: 'img-a' }];
+    await renderPage();
+    await renameVia('t1', 'text', '原附件标题');
+    await act(async () => {
+      (mediaNode('img-a').data.onGenImage as (id: string) => void)('img-a');
+    });
+    await vi.waitFor(() => expect(container.textContent).toContain('原附件标题'));
+    const edges = flowProps.current.edges;
+
+    await renameVia('t1', 'text', '新附件标题');
+    expect(container.textContent).toContain('新附件标题');
+    expect(container.textContent).not.toContain('原附件标题');
+    expect(container.textContent).toContain('正文');
+    expect(flowProps.current.edges).toEqual(edges);
+  });
+
   it('改名已被生成面板引用的卡片：参考显示同步新名称，连线与引用身份不变', async () => {
     await renderPage();
     const draftId = await openImageDraftPanel();
