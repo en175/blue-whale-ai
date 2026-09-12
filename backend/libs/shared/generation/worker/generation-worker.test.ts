@@ -1042,3 +1042,86 @@ describe("processNextJob 文本附件组合 prompt（IKDLQF）", () => {
     expect(providerArg.prompt).toBe("一只猫");
   });
 });
+
+// IKFA1M：正文素材标签冻结快照的执行端消费——worker 不重编译，直接消费接纳时冻结的
+// 编译后 prompt 与 input_asset_ids 顺序；记录式供应商替身钉住最终正文与图片顺序（D1/D5）。
+describe("processNextJob 正文素材标签快照消费（IKFA1M）", () => {
+  it("冻结的编译正文 + 保序 input_asset_ids + 文本附件：provider 收到精确最终请求", async () => {
+    // 模拟接纳已冻结：正文先提图片2 再提图片1，编译结果与媒体顺序 [101, 102] 对应
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j-img-doc",
+      project_id: "p1",
+      user_id: "u1",
+      type: "image",
+      input: {
+        prompt: "让图片2穿上图片1的衣服",
+        model_id: "m1",
+        provider_credential: "<sealed>",
+        input_asset_ids: ["101", "102"],
+        prompt_doc: {
+          version: 1,
+          segments: [
+            { kind: "text", text: "让" },
+            { kind: "asset_ref", asset_id: "102" },
+            { kind: "text", text: "穿上" },
+            { kind: "asset_ref", asset_id: "101" },
+            { kind: "text", text: "的衣服" },
+          ],
+        },
+        text_attachments: [{ node_id: "n1", title: "风格", text: "风格：水彩" }],
+      },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 31,
+    });
+    const resolveInputAssets = vi.fn().mockResolvedValue(
+      ["101", "102"].map((id) => ({
+        id,
+        type: "image",
+        url: `https://asset/${id}.png`,
+        mime: "image/png",
+        size: 1,
+        width: 512,
+        height: 512,
+        duration: null,
+      })),
+    );
+    const repo = {
+      claimNextJob,
+      resolveInputAssets,
+      findImageCapability: vi.fn().mockResolvedValue({
+        model_id: "m1",
+        api_size: null,
+        width: 512,
+        height: 512,
+      }),
+      createAsset: vi.fn().mockResolvedValue("a1"),
+      completeJobAndSettle: vi.fn().mockResolvedValue(true),
+      appendLog: vi.fn().mockResolvedValue(undefined),
+    } as unknown as WorkerRepo;
+    const generate = vi.fn().mockResolvedValue([
+      { url: "https://img.test/a.png", width: 512, height: 512, requestId: "req-1" },
+    ]);
+
+    const jobId = await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider: vi.fn().mockReturnValue({ generate }),
+      createAudioProvider: vi.fn(),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+    });
+
+    expect(jobId).toBe("j-img-doc");
+    const providerArg = generate.mock.calls[0]![0] as {
+      prompt: string;
+      sourceImages?: Array<{ url?: string }>;
+    };
+    // 最终正文 = 文本附件按序在前 + 冻结的编译正文（不重编译、不回读画布）
+    expect(providerArg.prompt).toBe("风格：水彩\n\n让图片2穿上图片1的衣服");
+    // 图片数组顺序 = 冻结的 input_asset_ids 顺序 → 图片1=101、图片2=102
+    expect(providerArg.sourceImages?.map((item) => item.url)).toEqual([
+      "https://asset/101.png",
+      "https://asset/102.png",
+    ]);
+  });
+});
