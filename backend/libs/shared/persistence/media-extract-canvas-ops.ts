@@ -126,6 +126,7 @@ export async function updateMediaExtractNodeToAudio(
     if (idx < 0) return null;
     // 保留占位节点的派生展示名（视频名(audio)）；占位节点缺失时兜底。
     const pendingFileName = nodes[idx]?.data?.fileName;
+    const customName = nodes[idx]?.data?.customName;
     nodes[idx] = {
       ...nodes[idx],
       data: {
@@ -135,6 +136,7 @@ export async function updateMediaExtractNodeToAudio(
           typeof pendingFileName === "string" && pendingFileName.length > 0
             ? pendingFileName
             : audioDisplayName(undefined),
+        ...(typeof customName === "boolean" ? { customName } : {}),
         ...(audioAssetId ? { assetId: audioAssetId } : {}),
         mime: input.mime,
         size: input.size,
