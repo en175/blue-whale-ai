@@ -330,8 +330,12 @@ export interface SolutionExecutionRoute {
 /**
  * 用户在任何一张生成卡被写出来之前，唯一读到并需要表态的东西。
  *
- * 八项，其中四项服务端保证非空（goal / target_media / assumptions / execution_route）；
+ * 八项，其中三项服务端保证非空（goal / target_media / assumptions）；
  * 其余没聊到就整项不写，界面也就不显示——空壳小标题比没有更糟。
+ *
+ * `execution_route` 2026-09-12 起可选：它曾经是第四项必填，而必填逼出来的是模型凭记忆写的
+ * 模型名——服务端手里没有平台模型目录、核不了它，写错了也没有下游会拦（生成时用户在 dock
+ * 手动选，这个标注不下传）。绑目录之后由服务端按平台当前可用的模型填。
  */
 export interface SolutionCard {
   goal: string;
@@ -340,7 +344,7 @@ export interface SolutionCard {
   constraints?: string[];
   asset_roles?: { asset_ref_id: string; role: string }[];
   assumptions: string[];
-  execution_route: SolutionExecutionRoute;
+  execution_route?: SolutionExecutionRoute;
   next_steps?: string;
 }
 

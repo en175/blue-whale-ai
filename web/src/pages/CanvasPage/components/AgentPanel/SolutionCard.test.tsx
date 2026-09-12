@@ -150,6 +150,23 @@ describe('方案卡在对话里', () => {
     expect(text).not.toContain('你给的素材各起什么作用');
   });
 
+  /**
+   * 出片路线 2026-09-12 起是可选项：模型不再凭记忆写它，改由服务端按平台模型目录填。
+   * 在绑目录做完之前，卡上很可能就是没有这一项——那时整项不显示，不能留一个空的小标题，
+   * 更不能因为读不到 `execution_route.model_family` 整张卡白屏（门只认这张卡上的按钮，
+   * 卡渲染不出来首卡就永远出不来）。
+   */
+  it('没有出片路线时整项不显示，卡照常渲染', () => {
+    const { execution_route: _route, ...withoutRoute } = card!;
+    sessionMock.turns = turnWith(understanding({ solution_card: withoutRoute }));
+    mount();
+
+    const text = solutionCard()!.textContent ?? '';
+    expect(text).toContain('给新品耳机做一条 15 秒短视频');
+    expect(text).not.toContain('用哪个模型出片');
+    expect(text).not.toContain('Seedance');
+  });
+
   it('待确认时三个按钮都在', () => {
     sessionMock.turns = turnWith(understanding());
     mount();
