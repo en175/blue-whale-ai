@@ -97,6 +97,7 @@ import {
   canConnectSourcesToGen,
   genKindOf,
   isConnectableSource,
+  sourceKindOf,
   wouldCreateCycle,
   type ConnectGenKind,
 } from './connectAbility';
@@ -126,6 +127,7 @@ import {
   readCanvasIdFromSearch,
   shouldReturnToProjectsAfterDelete,
 } from './canvasQuery';
+import type { AtMentionItem } from './atMention';
 import styles from './index.module.css';
 
 type ToolMode = 'drag' | 'select';
@@ -4779,6 +4781,126 @@ export default function CanvasPage() {
     [mediaNodes],
   );
 
+  /** 底部输入框 @ 菜单：当前画布可引用的图片/视频/音频/文本节点 */
+  const atMentionItems: AtMentionItem[] = useMemo(() => {
+    const items: AtMentionItem[] = [];
+    for (const node of mediaNodes) {
+      if (!isConnectableSource(node)) continue;
+      const kind = sourceKindOf(node);
+      if (kind !== 'image' && kind !== 'video' && kind !== 'audio') continue;
+      const data = (node.data ?? {}) as Record<string, unknown>;
+      items.push({
+        id: node.id,
+        kind,
+        name: typeof data.fileName === 'string' && data.fileName
+          ? data.fileName
+          : kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频',
+        thumbUrl: typeof data.src === 'string' ? data.src : undefined,
+        assetId: readAssetId(data),
+      });
+    }
+    for (const node of textNodes) {
+      if (!isConnectableSource(node)) continue;
+      const data = (node.data ?? {}) as Record<string, unknown>;
+      items.push({
+        id: node.id,
+        kind: 'text',
+        name: typeof data.title === 'string' && data.title ? data.title : '文本节点',
+      });
+    }
+    return items;
+  }, [mediaNodes, textNodes]);
+
+  /** 图片面板 @ 选中：图片写入参考，文本建连线成为附件 */
+  const handleImageAtMention = (item: AtMentionItem) => {
+    imagePanelHiddenRef.current = true;
+    if (item.kind === 'text') {
+      if (imageDraftId) connectPair(item.id, imageDraftId);
+      else showToast('warn', '文本参考需要绑定生成节点');
+      return;
+    }
+    if (item.kind !== 'image' && item.kind !== 'video') {
+      showToast('warn', '图片生成不支持该类型参考');
+      return;
+    }
+    if (imageDraftId) {
+      if (item.kind !== 'image') {
+        showToast('warn', '图片参考仅支持图片素材');
+        return;
+      }
+      if (!validateImageRefConnect(item.id, imageDraftId) || !item.assetId || !item.thumbUrl) return;
+      const next = [...pendingImageCanvasRefsRef.current, {
+        nodeId: item.id,
+        url: item.thumbUrl,
+        name: item.name,
+        assetId: item.assetId,
+      }];
+      pendingImageCanvasRefsRef.current = next;
+      setPendingImageCanvasRefs(next);
+      return;
+    }
+    setImagePickResult({
+      ts: Date.now(),
+      files: [{
+        id: `node-${item.id}`,
+        url: item.thumbUrl ?? '',
+        type: item.kind === 'video' ? 'video' : 'image',
+        name: item.name,
+        assetId: item.assetId,
+      }],
+    });
+  };
+
+  /** 视频面板 @ 选中：图/视频写入参考，文本建连线成为附件 */
+  const handleVideoAtMention = (item: AtMentionItem) => {
+    if (item.kind === 'text') {
+      if (videoDraftId) connectPair(item.id, videoDraftId);
+      else showToast('warn', '文本参考需要绑定生成节点');
+      return;
+    }
+    if (item.kind === 'audio') {
+      showToast('warn', '视频生成暂不支持音频参考');
+      return;
+    }
+    if (item.kind !== 'image' && item.kind !== 'video') return;
+    if (!item.assetId) return;
+    const refItem: VideoMediaRef = {
+      nodeId: item.id,
+      url: item.thumbUrl ?? '',
+      name: item.name,
+      assetId: item.assetId,
+      mediaType: item.kind,
+    };
+    if (videoDraftId) {
+      if (!validateVideoRefConnect(item.id, videoDraftId, 'reference')) return;
+      const prev = pendingVideoCanvasRefsRef.current;
+      const next = { ...prev, reference: [...prev.reference, refItem] };
+      pendingVideoCanvasRefsRef.current = next;
+      setPendingVideoCanvasRefs(next);
+      return;
+    }
+    appendVideoFreeRef(refItem, 'reference');
+  };
+
+  /** 音频面板 @ 选中：仅音频写入参考 */
+  const handleAudioAtMention = (item: AtMentionItem) => {
+    if (item.kind !== 'audio' || !item.thumbUrl) {
+      showToast('warn', '音频生成仅支持引用音频素材');
+      return;
+    }
+    setAudioPickResult({
+      ts: Date.now(),
+      item: {
+        id: item.id,
+        kind: 'audio',
+        name: item.name,
+        src: item.thumbUrl,
+        source: 'canvas',
+        assetId: item.assetId,
+      },
+    });
+  };
+
   /** 音频对话发送：创建音频生成任务（无参考素材）。
    *  草稿绑定模式（IKDMQT）：先等待在途保存并落盘当前画布编辑（同图片/视频草稿），
    *  再携带 target_node_id 提交；绑定以 audioDraftId 为准（seed 可能残留旧草稿值），
@@ -5294,6 +5416,8 @@ export default function CanvasPage() {
             onRemoveMaterialRef={videoDraftId ? ((materialId) => handleMaterialRefChange(videoDraftId, materialId, null)) : removeVideoFreeRef}
             onSetMaterialRefRole={videoDraftId ? ((materialId, role) => handleMaterialRefChange(videoDraftId, materialId, { role })) : changeVideoFreeRefRole}
             onToast={(type, msg) => showToast(type, msg)}
+            mentionItems={atMentionItems.filter((item) => item.id !== videoDraftId)}
+            onMentionCanvas={handleVideoAtMention}
           />
         )}
         {/* 底部图片对话框 */}
@@ -5334,6 +5458,8 @@ export default function CanvasPage() {
             externalPick={imagePickResult}
             onOpenCharacterLibrary={() => { setCharacterLibraryTarget('image'); setShowCharacterLibrary(true); }}
             onToast={(type, msg) => showToast(type, msg)}
+            mentionItems={atMentionItems.filter((item) => item.id !== imageDraftId)}
+            onMentionCanvas={handleImageAtMention}
           />
         )}
 
@@ -5373,6 +5499,8 @@ export default function CanvasPage() {
             onPickFromCanvas={() => { setPickMode('audio'); setPickTarget('audio'); }}
             externalPick={audioPickResult}
             pickMode={pickMode === 'audio'}
+            mentionItems={atMentionItems.filter((item) => item.id !== audioDraftId)}
+            onMentionCanvas={handleAudioAtMention}
             onSwitchToMusic={() => {
               // 切走即结束草稿绑定并重置 seed：切回音频面板是干净的非草稿状态
               setAudioSeed({ ts: Date.now() });

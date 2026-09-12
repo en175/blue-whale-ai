@@ -20,6 +20,8 @@ import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import type { ImageMediaRef } from '../../mediaRefs';
 import type { MediaGenStatus } from '../MediaNode';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
+import AtMentionMenu from '../AtMentionMenu';
+import { stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
 import styles from './index.module.css';
 
 /** 输入框字数上限 */
@@ -92,6 +94,10 @@ interface ImageDialogProps {
   invalidMediaRefs?: Array<{ nodeId: string; name: string }>;
   /** 移除某个图片参考（IKDMQR）：携带来源节点 id，父级断开对应连线 */
   onRemoveMediaRef?: (sourceNodeId: string) => void;
+  /** 画布 @ 引用候选（当前画布可引用节点） */
+  mentionItems?: AtMentionItem[];
+  /** 选中 @ 素材后写入参考区 */
+  onMentionCanvas?: (item: AtMentionItem) => void;
 }
 
 /** 首页带入的初始生成参数（各字段经模型能力校验后应用，不在能力内的项回退模型默认值） */
@@ -165,7 +171,7 @@ function AttachmentItem({ attachment, move }: {
   );
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast, draftBinding, mediaRefs, invalidMediaRefs, onRemoveMediaRef }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast, draftBinding, mediaRefs, invalidMediaRefs, onRemoveMediaRef, mentionItems, onMentionCanvas }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -186,6 +192,12 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const resWrapRef = useRef<HTMLDivElement>(null);
   const configPanelRef = useRef<HTMLDivElement>(null);
   const sourceWrapRef = useRef<HTMLDivElement>(null);
+  const mentionAnchorRef = useRef<HTMLDivElement>(null);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
+  const mentionQuery = trailingAtQuery(inputValue);
+  useEffect(() => {
+    if (mentionQuery === null) setMentionDismissed(false);
+  }, [mentionQuery]);
 
   useDismissOnOutside([
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
@@ -591,9 +603,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           {ref.name}（不可用）
           {!readOnly && <button type="button" onClick={() => onRemoveMediaRef?.(ref.nodeId)}>移除失效参考</button>}
         </div>)}
+        <div className={styles.mentionAnchor} ref={mentionAnchorRef}>
         <textarea
           className={styles.textarea}
-          placeholder={uploading ? '正在上传参考图...' : `描述你希望如何编辑这张图片。图片最多 ${maxImages} 张。`}
+          placeholder={uploading ? '正在上传参考图...' : `描述你希望如何编辑这张图片。图片最多 ${maxImages} 张。使用 @ 引用画布素材。`}
           value={inputValue}
           onChange={(e) => {
             const v = e.target.value.slice(0, MAX_INPUT);
@@ -604,6 +617,23 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           maxLength={MAX_INPUT}
           disabled={uploading || readOnly}
         />
+        {mentionQuery !== null && !mentionDismissed && !readOnly && onMentionCanvas && (
+          <AtMentionMenu
+            anchorRef={mentionAnchorRef}
+            items={mentionItems ?? []}
+            editorQuery={mentionQuery}
+            disabledKinds={['audio']}
+            onSelect={(item) => {
+              const next = stripTrailingAtQuery(inputValue);
+              setInputValue(next);
+              syncDraftParams({ prompt: next });
+              setMentionDismissed(true);
+              onMentionCanvas(item);
+            }}
+            onClose={() => setMentionDismissed(true)}
+          />
+        )}
+        </div>
 
         {/* 字数统计 */}
         <div className={`${styles.charCount} ${inputValue.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>

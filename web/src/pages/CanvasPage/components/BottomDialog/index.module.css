@@ -47,6 +47,7 @@
 .editorWrap {
   flex: 1;
   min-height: 0;
+  position: relative;
 }
 
 /* ---- 连线文本附件（IKDLQG，与 ImageDialog 附件区同构） ---- */

@@ -41,6 +41,8 @@ import {
   resolveComposed,
   type ComposedValue,
 } from '../ChipTextEditor/composed';
+import AtMentionMenu from '../AtMentionMenu';
+import { trailingAtQueryFromComposed, type AtMentionItem } from '../../atMention';
 import styles from './index.module.css';
 
 /** 模式选项（保留默认 all 以兼容草稿参数契约 draftMode；模式选择器 UI 已随旧自由模式退役） */
@@ -116,6 +118,10 @@ interface BottomDialogProps {
   onSetMaterialRefRole?: (materialId: string, role: VideoRefRole) => void;
   /** Toast 提示（上传超限/首尾帧校验等场景，由父级注入全局 sonner，位置/样式与 ImageDialog/AudioDialog 统一） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
+  /** 画布 @ 引用候选 */
+  mentionItems?: AtMentionItem[];
+  /** 选中 @ 素材后写入参考区 */
+  onMentionCanvas?: (item: AtMentionItem) => void;
 }
 
 /** 首页带入的初始生成参数（resolution 传 api_value 如 720p，模型列表加载后反查档位 id；
@@ -267,11 +273,17 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMate
   );
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast, mentionItems, onMentionCanvas }: BottomDialogProps) {
   /** 富文本输入框（自由文本；胶囊机制保留给后续引用场景，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
+  const mentionAnchorRef = useRef<HTMLDivElement>(null);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
   /** 输入框内容的结构化形态（IKAFSX）：胶囊是指针，解引用只发生在发送那一刻。 */
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
+  const mentionQuery = trailingAtQueryFromComposed(composed);
+  useEffect(() => {
+    if (mentionQuery === null) setMentionDismissed(false);
+  }, [mentionQuery]);
   /** 计数口径：文字按字符数，一个胶囊算 1 个单位——不按它背后那几千字算。 */
   const composedCount = composedLength(composed);
   /** 附件正文有效（去空白非空）时允许空提示词提交（IKDLQG 契约：附件可单独驱动生成）；
@@ -857,11 +869,11 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
 
       {configurationError && <div className={styles.refConflictHint} role="alert">{configurationError}</div>}
 
-      {/* 输入框：胶囊跟文字同一行 */}
-      <div className={styles.editorWrap}>
+      {/* 输入框：胶囊跟文字同一行；输入 @ 弹出画布素材菜单 */}
+      <div className={styles.editorWrap} ref={mentionAnchorRef}>
         <ChipTextEditor
           ref={chipEditorRef}
-          placeholder="描述你希望生成的视频。参考素材从画布连入或到节点选择，首帧/尾帧需显式指定。"
+          placeholder="描述你希望生成的视频。输入 @ 引用画布素材。"
           // 超限只提示、不动内容（IKAFSX）。原来这里会 `setText(truncated)`——那是「用纯文本
           // 整体替换编辑器内容」，**所有胶囊当场湮灭、正文被从中间腰斩**，丢的远不止超出的部分。
           // 而这个 1000 本身也是凭空定的：后端不校验 prompt 长度，模型能力接口里也没有这个字段。
@@ -870,6 +882,19 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
           readOnly={readOnly}
           className={styles.editorArea}
         />
+        {mentionQuery !== null && !mentionDismissed && !readOnly && onMentionCanvas && (
+          <AtMentionMenu
+            anchorRef={mentionAnchorRef}
+            items={mentionItems ?? []}
+            editorQuery={mentionQuery}
+            onSelect={(item) => {
+              chipEditorRef.current?.stripTrailingAtQuery();
+              setMentionDismissed(true);
+              onMentionCanvas(item);
+            }}
+            onClose={() => setMentionDismissed(true)}
+          />
+        )}
       </div>
 
       {/* 字数统计 */}

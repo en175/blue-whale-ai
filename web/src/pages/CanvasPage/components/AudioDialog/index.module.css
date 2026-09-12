@@ -349,6 +349,14 @@
 }
 
 /* ---- 输入框 ---- */
+.mentionAnchor {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .textarea {
   width: 100%;
   flex: 1;
