@@ -316,6 +316,52 @@ export interface PromptCardRecord {
   revisions?: PromptCardRevisionSummary[];
 }
 
+
+/* ============ 方案卡（IKF3KE） ============ */
+
+/** 这次的提示词按哪个模型家族、哪个大版本写。 */
+export interface SolutionExecutionRoute {
+  model_family: string;
+  model_version?: string;
+  reason: string;
+  alternatives?: { route: string; tradeoff: string }[];
+}
+
+/**
+ * 用户在任何一张生成卡被写出来之前，唯一读到并需要表态的东西。
+ *
+ * 八项，其中四项服务端保证非空（goal / target_media / assumptions / execution_route）；
+ * 其余没聊到就整项不写，界面也就不显示——空壳小标题比没有更糟。
+ */
+export interface SolutionCard {
+  goal: string;
+  target_media: 'image' | 'video';
+  direction?: string;
+  constraints?: string[];
+  asset_roles?: { asset_ref_id: string; role: string }[];
+  assumptions: string[];
+  execution_route: SolutionExecutionRoute;
+  next_steps?: string;
+}
+
+/** 方案卡所在的版本记录。一个会话一条血脉，一版一次提出或修改，同时最多一版 accepted。 */
+export interface RequirementUnderstanding {
+  understanding_id: string;
+  version: number;
+  session_id: string;
+  proposed_by_run_id: string;
+  target_media: 'image' | 'video';
+  proposed_summary: string;
+  /** 老版本（产卡门顺手提的那种）没有这一项，界面退回只显示摘要。 */
+  solution_card?: SolutionCard | null;
+  status: 'awaiting_confirmation' | 'accepted' | 'superseded';
+  accepted_summary?: string | null;
+  confirmation_evidence?: { action: 'confirm' | 'correct'; channel: string } | null;
+  created_at?: string;
+  updated_at?: string;
+  confirmed_at?: string | null;
+}
+
 /** 会话快照（水合入口） */
 export interface SessionSnapshot {
   session: SessionRecord & { title_source?: string; pending_message_count?: number };
@@ -324,6 +370,11 @@ export interface SessionSnapshot {
   latest_terminal_run?: SessionRun | null;
   /** 生成卡正文只在快照里，事件只带 card_id / revision 引用，拿到事件后必须回查这里 */
   prompt_cards?: PromptCardRecord[];
+  /**
+   * 方案卡的全部版本，新的在前（IKF3KE）。刷新之后那张待确认的卡还要在、按钮还要能点，
+   * 所以它随快照回来，不另发一次请求。已确认或已作废的版本也在里面——它们在对话里置灰留着。
+   */
+  requirement_understandings?: RequirementUnderstanding[];
   event_cursor?: string;
 }
 
@@ -696,6 +747,59 @@ export function sendSessionMessage(
  *
  * 幂等：没有在跑的东西时返回成功而非 404。
  */
+/**
+ * 用户点了方案卡上的「确认」（IKF3KE）。
+ *
+ * 这一下同时做两件事：把这一版记成用户确认过的，并起一轮把生成卡写出来。返回里的
+ * `scheduling` 就是那一轮——界面据此接上流，不然它不知道该等谁。
+ */
+export function confirmSolutionCard(
+  projectId: string,
+  sessionId: string,
+  understandingId: string,
+  version: number,
+): Promise<{ understanding: RequirementUnderstanding; scheduling?: { state: string; run?: SessionRun } | null }> {
+  return sessionRequest(
+    agentPath('confirm_requirement_understanding', projectId, {
+      session_id: sessionId,
+      understanding_id: understandingId,
+      version: String(version),
+    }),
+    {
+      method: agentMethod('confirm_requirement_understanding'),
+      headers: { 'Idempotency-Key': newIdempotencyKey() },
+      body: JSON.stringify({ action_id: newIdempotencyKey() }),
+    },
+  );
+}
+
+/**
+ * 用户点了「取消」或「补充」：这一版作废。
+ *
+ * 一个动作两个按钮，差别只在 `note`：点「补充」时带上他写的话，它当普通消息进下一轮，模型据此
+ * 重提一版；点「取消」不带，服务端替他说一句「先不按这个方案来」。
+ */
+export function voidSolutionCard(
+  projectId: string,
+  sessionId: string,
+  understandingId: string,
+  version: number,
+  note?: string,
+): Promise<{ understanding: RequirementUnderstanding; scheduling?: { state: string; run?: SessionRun } | null }> {
+  return sessionRequest(
+    agentPath('void_requirement_understanding', projectId, {
+      session_id: sessionId,
+      understanding_id: understandingId,
+      version: String(version),
+    }),
+    {
+      method: agentMethod('void_requirement_understanding'),
+      headers: { 'Idempotency-Key': newIdempotencyKey() },
+      body: JSON.stringify({ action_id: newIdempotencyKey(), ...(note ? { note } : {}) }),
+    },
+  );
+}
+
 export function cancelSession(projectId: string, sessionId: string): Promise<unknown> {
   return sessionRequest(
     agentPath('cancel_session', projectId, { session_id: sessionId }),

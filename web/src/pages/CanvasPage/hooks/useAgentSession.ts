@@ -26,6 +26,8 @@ import {
   retrySessionRun,
   subscribeSessionEvents,
   fetchPromptCardRevisions,
+  confirmSolutionCard,
+  voidSolutionCard,
   type SessionRecord,
   type SessionRun,
   type SessionContentBlock,
@@ -667,6 +669,8 @@ export function useAgentSession(projectId: string, agentModel?: string) {
       commit(() => ({
         ...EMPTY_SESSION_STATE,
         messages: restoredMessages,
+        // 刷新之后那张待确认的方案卡还要在、按钮还要能点（IKF3KE）。
+        understandings: snap.requirement_understandings ?? [],
         accounts,
         runningRunId: liveRun?.run_id ?? null,
         failedRunId: settledRun?.run_id && needsRetry(settledRun.status) ? settledRun.run_id : null,
@@ -1085,10 +1089,49 @@ export function useAgentSession(projectId: string, agentModel?: string) {
     [projectId, activeSkills.etag],
   );
 
+
+  /**
+   * 用户点了方案卡上的「确认」（IKF3KE）。
+   *
+   * 这一下就是这次改动的全部意义：在此之前，开门的是模型说的一句话。请求回执里带着它起的那一
+   * 轮，但这里不拿它做状态——`message.accepted` 与 `run.queued` 事件随后会到，和发消息那条路
+   * 同一套。失败就把错误交给调用方，卡留在原处让他再点一次。
+   */
+  const confirmSolution = useCallback(
+    async (understandingId: string, version: number) => {
+      const sid = sessionIdRef.current;
+      if (!sid) return false;
+      try {
+        await confirmSolutionCard(projectId, sid, understandingId, version);
+        return true;
+      } catch (e) {
+        console.warn('确认方案卡失败:', e);
+        return false;
+      }
+    },
+    [projectId],
+  );
+
+  /** 用户点了「取消」或「补充」：这一版作废。带上 note 就是「补充」，它当下一轮的输入。 */
+  const voidSolution = useCallback(
+    async (understandingId: string, version: number, note?: string) => {
+      const sid = sessionIdRef.current;
+      if (!sid) return false;
+      try {
+        await voidSolutionCard(projectId, sid, understandingId, version, note);
+        return true;
+      } catch (e) {
+        console.warn('作废方案卡失败:', e);
+        return false;
+      }
+    },
+    [projectId],
+  );
+
   /** 屏幕上唯一的东西：轮。历史轮与进行中的轮同一份。 */
   const turns = useMemo(
-    () => buildTurns(session.messages, session.live, session.accounts),
-    [session.messages, session.live, session.accounts],
+    () => buildTurns(session.messages, session.live, session.accounts, session.understandings),
+    [session.messages, session.live, session.accounts, session.understandings],
   );
 
   return {
@@ -1110,6 +1153,8 @@ export function useAgentSession(projectId: string, agentModel?: string) {
     sendError,
     paymentRequiredMessage,
     sendMessage,
+    confirmSolution,
+    voidSolution,
     stopRun,
     retryRun,
     resetChat,
