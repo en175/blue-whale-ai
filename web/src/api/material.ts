@@ -105,10 +105,13 @@ export interface DeleteAssetGroupParams {
 
 /** 上传素材请求 */
 export interface CreateAssetParams {
-  GroupId: string;
+  /** 素材组 id；虚拟人像库可不传，由后端自动归组 */
+  GroupId?: string;
   URL: string;
   Name: string;
   AssetType: MaterialAssetType;
+  /** 本地 assets 表 id，绑定画布原件与素材库条目 */
+  SourceAssetId?: string;
 }
 
 /** 列出素材请求 */
@@ -141,6 +144,10 @@ export interface VisualValidateResult {
 
 /* ---------- 底层：素材库专用请求 ---------- */
 
+/** 列表查询在途去重：StrictMode 双挂载/重复进入只发一次，完成后释放 */
+const materialListInflight = new Map<string, Promise<unknown>>();
+const MATERIAL_LIST_ACTIONS = new Set(['ListAssetGroups', 'ListAssets']);
+
 /**
  * 素材库专用请求：不套产品信封，直接读上游响应。
  * - 成功：HTTP 2xx + Result 字段
@@ -149,6 +156,24 @@ export interface VisualValidateResult {
  * - 失败统一 toast（与 http.ts doRequest 行为一致），页面无需重复展示
  */
 async function materialRequest<T>(
+  action: string,
+  body: unknown,
+  opts?: { silent?: boolean },
+): Promise<T> {
+  if (MATERIAL_LIST_ACTIONS.has(action)) {
+    const key = `${action}:${JSON.stringify(body ?? {})}`;
+    const existed = materialListInflight.get(key);
+    if (existed) return existed as Promise<T>;
+    const pending = materialRequestOnce<T>(action, body, opts).finally(() => {
+      materialListInflight.delete(key);
+    });
+    materialListInflight.set(key, pending);
+    return pending;
+  }
+  return materialRequestOnce<T>(action, body, opts);
+}
+
+async function materialRequestOnce<T>(
   action: string,
   body: unknown,
   opts?: { silent?: boolean },

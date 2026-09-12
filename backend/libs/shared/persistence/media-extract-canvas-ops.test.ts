@@ -1,3 +1,4 @@
+import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -169,5 +170,36 @@ describe("media-extract canvas ops", () => {
       genStatus: "failed",
       errorText: "视频没有音轨",
     });
+  });
+});
+
+describe("音频提取完成后的卡片名称", () => {
+  it.each([true, false, undefined])("保留显式 customName=%s，不恢复生成态", async (customName) => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      generation_jobs: { findUnique: vi.fn().mockResolvedValue({ output_asset_ids: [6041] }) },
+      canvas: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 1n, version: 2,
+          nodes_json: [{ id: "media-extract-1834", data: {
+            fileName: "我的配乐", genStatus: "generating", jobId: "1834",
+            ...(customName === undefined ? {} : { customName }),
+          } }],
+        }),
+        updateMany,
+      },
+    };
+
+    expect(await updateMediaExtractNodeToAudio(prisma as unknown as PrismaClient, {
+      jobId: "1834", projectId: "438", url: "https://tos/a.mp3",
+      mime: "audio/mpeg", size: 124563, duration: 3.9,
+    })).toBe(true);
+
+    const data = updateMany.mock.calls[0]![0].data.nodes_json[0].data;
+    expect(data).toMatchObject({ fileName: "我的配乐", src: "https://tos/a.mp3", assetId: "6041" });
+    if (customName === undefined) expect(data).not.toHaveProperty("customName");
+    else expect(data).toHaveProperty("customName", customName);
+    expect(data).not.toHaveProperty("genStatus");
+    expect(data).not.toHaveProperty("jobId");
   });
 });

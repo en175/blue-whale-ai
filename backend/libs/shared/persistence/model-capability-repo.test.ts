@@ -167,6 +167,67 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     expect(view.features.reference_image).toBe(false);
     expect(view.features.max_reference_images).toBe(10);
   });
+
+  // IKESD6 / ADR-0085：i2i_model_name / max_prompt_length 读侧归一（snake+camel 双收，脏值降级 null）。
+  it("i2i_model_name 与 max_prompt_length 正常解析（snake_case）", async () => {
+    const { repo } = repoWith([
+      buildRow({
+        features: { i2i_model_name: "gpt-image-2-edit", max_prompt_length: 32000 },
+      }),
+    ]);
+
+    const [view] = await repo.listEnabledByType("image");
+
+    expect(view.features.i2i_model_name).toBe("gpt-image-2-edit");
+    expect(view.features.max_prompt_length).toBe(32000);
+  });
+
+  it("camelCase 键形同样识别", async () => {
+    const { repo } = repoWith([
+      buildRow({ features: { i2iModelName: "m-edit", maxPromptLength: 500 } }),
+    ]);
+
+    const [view] = await repo.listEnabledByType("image");
+
+    expect(view.features.i2i_model_name).toBe("m-edit");
+    expect(view.features.max_prompt_length).toBe(500);
+  });
+
+  it("缺省 / 脏值（空白串、0、负数、非整数、字符串数字）一律降级 null=未配置", async () => {
+    const { repo } = repoWith([
+      buildRow({ features: {} }),
+      buildRow({
+        features: {
+          i2i_model_name: "   ",
+          max_prompt_length: 0,
+        },
+      }),
+      buildRow({
+        features: {
+          i2i_model_name: 42,
+          max_prompt_length: "32000",
+        },
+      }),
+      buildRow({
+        features: { i2i_model_name: "m-edit", max_prompt_length: 1.5 },
+      }),
+    ]);
+
+    const views = await repo.listEnabledByType("image");
+
+    expect(views.map((v) => v.features.i2i_model_name)).toEqual([
+      null,
+      null,
+      null,
+      "m-edit",
+    ]);
+    expect(views.map((v) => v.features.max_prompt_length)).toEqual([
+      null,
+      null,
+      null,
+      null,
+    ]);
+  });
 });
 
 function makeRow(overrides: Record<string, unknown> = {}) {

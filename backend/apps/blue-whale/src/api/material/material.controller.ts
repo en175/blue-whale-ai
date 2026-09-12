@@ -7,6 +7,8 @@
 //   由 AllExceptionsFilter 统一成产品 {code, msg, data} 信封。
 // - IKDJNZ 关联旁路：CreateAsset / DeleteAsset / DeleteAssetGroup 上游成功后同步维护
 //   本地 assets 的素材库关联字段（上游为权威，本地只做关联镜像；失败仅告警不阻断透传）。
+// - IKEXX8 组查询分流（契约 v2 §5）：ListAssetGroups(AIGC) / GetAssetGroup（本地命中）
+//   读 material_groups 返回上游同款信封、不打远程；其余（含真人组）透传不变，前端无感。
 import { Body, Controller, Headers, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
@@ -69,6 +71,20 @@ export class MaterialController {
           user.userId,
         );
         payload = { ...(payload as Record<string, unknown>), GroupId: groupId };
+      }
+    }
+
+    // IKEXX8：组查询分流——命中本地读规则（虚拟组列表/详情命中）直接回上游同款信封，不打远程；
+    // 未登录（无 user，理论不达）或未命中 → 走透传，行为与改造前一致。
+    if (user) {
+      const local = await this.material.tryServeLocalGroupAction(
+        user.userId,
+        action,
+        payload,
+      );
+      if (local) {
+        res.status(local.status).json(local.body);
+        return;
       }
     }
 
@@ -143,6 +159,8 @@ export class MaterialController {
       const id = isRecord(body) ? body.Id : undefined;
       if (typeof id === "string" && MATERIAL_GROUP_ID_PATTERN.test(id)) {
         await this.assets.clearMaterialGroupLink(userId, id);
+        // IKEXX8：上游删成功后软删本地虚拟组行（真人组无本地行=空操作；失败仅告警不阻断）。
+        await this.material.softDeleteLocalGroup(userId, id);
       }
       return;
     }

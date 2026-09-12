@@ -6,7 +6,7 @@
 | --- | --- |
 | 启动/调试本地服务（起环境、连数据库） | `.qoder/skills/start-local-services/SKILL.md`（`.claude`/`.zcode` 为同步副本）+ `docs/adr/0064-testsite-db-access-governance.md`（红线：本地配置禁现测试站连接串，应急只走 `scripts/tunnel-testsite-db.sh`） |
 | 代码理解（查结构 / 调用链 / 架构） | `docs/agents/code-intelligence.md`（渐进式；结构查询先 CBM，不可用才降级 grep/glob） |
-| 判断产品实现技术栈 / Python 工具是否需要处置 | [ADR-0068](docs/adr/0068-node-typescript-product-runtime-and-specialized-compute-boundary.md) + [ADR-0070](docs/adr/0070-product-runtime-stack-does-not-govern-engineering-control-plane.md) + [ADR-0074](docs/adr/0074-frontend-backend-separation-nestjs-product-api.md)；逐项结论见 [Python 存量处置清单](docs/specs/2026-08-09-ik7fi6-python-inventory-disposition.md) |
+| 判断产品实现技术栈 / Python 工具是否需要处置 | [ADR-0068](docs/adr/0068-node-typescript-product-runtime-and-specialized-compute-boundary.md) + [ADR-0070](docs/adr/0070-product-runtime-stack-does-not-govern-engineering-control-plane.md) + [ADR-0074](docs/adr/0074-frontend-backend-separation-nestjs-product-api.md) + [ADR-0084](docs/adr/0084-generation-worker-java-runtime.md)；逐项结论见 [Python 存量处置清单](docs/specs/2026-08-09-ik7fi6-python-inventory-disposition.md) |
 | Gitee 工作流（提交/分支/PR/发布/worktree） | `docs/agents/git-workflow.md`（渐进式） |
 | Gitee Issue / 任何 `mcp__gitee-ent__*` 调用 | `docs/agents/issue-tracker.md`（渐进式，首次调用前 Must Read） |
 | 测试验证（完成/提交/PR/合并前） | `docs/agents/testing-strategy.md`（收口与 PR 阶段均按影响面分层；仅产品影响路径或显式高风险跑全量；同一 HEAD 复用凭证） |
@@ -40,7 +40,7 @@
 7. **授权无二次弹框** — 只认当前对话中的人类授权；Agent 自动使用 `--user-authorized` 或一次性凭证（提交入口除外：worktree 工单分支 commit 本地可逆，出现即放行），Hook 只纠偏和硬拦，不返回 ASK。
 8. **文档驱动、Hook 兜底** — Agent 优先依据本文件及路由规则主动调用标准入口；Hook 只在检测到绕过、缺授权、缺模式或危险 Git 操作时阻断，禁止让 Hook 自动同步、选择策略或推进正常状态机。
 9. **同族工单串行、契约先行** — 同一契约章节的基础设施先合入，功能工单再开工；跨进程字段先在契约文档定死后实现。细则见 `docs/agents/git-workflow.md`（路由表 Must Read）。
-10. **产品实现技术栈红线** — 只约束直接交付用户能力的产品实现：Web UI 使用 Next.js App Router；浏览器业务 API 由独立 NestJS `backend/` 服务承载（见 ADR-0074）；独立 `agent-worker` / `generation-worker` 使用 Node.js LTS；共享领域、契约与持久化能力位于 TypeScript packages。禁止新增 Java/Python 产品运行时，或恢复已退役的 `blue_whale_server`、`blue_whale_agent_worker`；已迁出独立仓库的 `blue_whale_api`、`blue_whale_pay_web`、`blue_whale_pay_server` 不在本仓维护；专用计算例外按路由表中的 ADR-0068 判断。
+10. **产品实现技术栈红线** — 只约束直接交付用户能力的产品实现：Web UI 使用 Next.js App Router；浏览器业务 API 由独立 NestJS `backend/` 服务承载（见 ADR-0074）；generation 执行服务为 `worker-java/`（Java 直连 DB 运行时：claim/fencing/终态写入由 Java 权威实现，与 backend 仅经 DB+MQ 交互，金标套件对账——见 ADR-0084 修正二；系批准新建服务，非已退役 `blue_whale_server` 复活）；其余服务端与 Worker 进程使用 Node.js LTS；共享领域、契约与持久化能力位于 TypeScript packages。除 `worker-java` 外禁止新增 Java/Python 产品运行时，或恢复已退役的 `blue_whale_server`、`blue_whale_agent_worker`；已迁出独立仓库的 `blue_whale_api`、`blue_whale_pay_web`、`blue_whale_pay_server` 不在本仓维护；专用计算例外按路由表中的 ADR-0068 判断。
 11. **工程工具不受产品语言禁令** — Hook、Worktree、Git/PR/发布、Agent 授权与审计等工程协作控制面，以及产品测试、构建/数据库维护等长期工具和一次性脚本，不因产品采用 TypeScript 而必须改写。无关 Python 存量默认不阻塞普通功能工单，也不自动形成迁移任务；分类、触发条件与验收方式按路由表中的 ADR-0070 和处置清单执行。
 12. **验证按影响面与阶段分层** — 任务收口与创建/更新 PR 前都由选择器按影响面决定验证层级；PR 前必须运行 `--stage pr` 并通过发布门禁，但普通治理、Hook、Git、worktree、PR 和运维工具改动保持定向验证，只有产品影响路径或显式高风险进入全量。纯文档保持文档验证。同一 HEAD 的有效凭证直接复用，代码、基线或影响面变化后重新验证。细则见 `docs/agents/testing-strategy.md`。
 

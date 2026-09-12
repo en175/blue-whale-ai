@@ -12,6 +12,9 @@ function makeController(assetMock: {
     callAction: vi.fn(),
     // IKDE6X：虚拟组兜底——默认返回与传入一致的组 id 以免破坏既有断言；专项用例覆盖替换逻辑。
     ensureVirtualDefaultGroup: vi.fn().mockResolvedValue("group-1"),
+    // IKEXX8：组查询分流——默认未命中（null）走透传，不破坏既有用例；专项用例覆盖命中分支。
+    tryServeLocalGroupAction: vi.fn().mockResolvedValue(null),
+    softDeleteLocalGroup: vi.fn().mockResolvedValue(undefined),
   } as unknown as MaterialService;
   const assets = {
     linkAssetToMaterial: assetMock.linkAssetToMaterial ?? vi.fn(),
@@ -139,6 +142,29 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
     );
 
     expect(assets.clearMaterialGroupLink).toHaveBeenCalledWith("9", "group-del-1");
+    // IKEXX8：上游删成功后同步软删本地虚拟组行。
+    expect(material.softDeleteLocalGroup).toHaveBeenCalledWith("9", "group-del-1");
+  });
+
+  it("DeleteAssetGroup 上游失败（4xx）：不透传后不软删本地组（IKEXX8 负向守卫）", async () => {
+    const { controller, material, assets } = makeController({});
+    material.callAction.mockResolvedValue({
+      status: 400,
+      body: { ResponseError: { Code: "BadRequest", Message: "nope" } },
+    });
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
+
+    await controller.callAction(
+      "DeleteAssetGroup",
+      "Bearer sk-test",
+      { Id: "group-del-1" },
+      res,
+      { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null },
+    );
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(assets.clearMaterialGroupLink).not.toHaveBeenCalled();
+    expect(material.softDeleteLocalGroup).not.toHaveBeenCalled();
   });
 
   it("上游失败（4xx）：透传错误，旁路不执行", async () => {
@@ -297,5 +323,62 @@ describe("MaterialController IKDJNZ 关联旁路", () => {
     ).rejects.toThrow("upstream down");
     // 建组失败 → 不透传（无 GroupId）。
     expect(material.callAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("MaterialController IKEXX8 组查询分流", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const USER = { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null };
+
+  it("ListAssetGroups 命中本地分流：回上游同款信封，不透传、不触发关联旁路", async () => {
+    const { controller, material, assets } = makeController({});
+    const localResp = {
+      status: 200,
+      body: {
+        ResponseMetadata: { RequestId: "req_local", Action: "ListAssetGroups" },
+        Result: { TotalCount: 1, Items: [{ Id: "group-virt-1", Name: "默认分组：9", GroupType: "AIGC" }], PageNumber: 1, PageSize: 10 },
+      },
+    };
+    material.tryServeLocalGroupAction.mockResolvedValue(localResp);
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
+
+    await controller.callAction(
+      "ListAssetGroups",
+      "Bearer sk-test",
+      { Filter: { GroupType: "AIGC" }, PageNumber: 1, PageSize: 10 },
+      res,
+      USER,
+    );
+
+    expect(material.tryServeLocalGroupAction).toHaveBeenCalledWith(
+      "9",
+      "ListAssetGroups",
+      { Filter: { GroupType: "AIGC" }, PageNumber: 1, PageSize: 10 },
+    );
+    expect(material.callAction).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(localResp.body);
+    expect(assets.linkAssetToMaterial).not.toHaveBeenCalled();
+  });
+
+  it("GetAssetGroup 未命中（真人组）：分流返回 null，照常透传上游", async () => {
+    const { controller, material } = makeController({});
+    material.tryServeLocalGroupAction.mockResolvedValue(null);
+    material.callAction.mockResolvedValue({
+      status: 200,
+      body: { ResponseMetadata: {}, Result: { Id: "group-real-1", GroupType: "LivenessFace" } },
+    });
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;
+
+    await controller.callAction("GetAssetGroup", "Bearer sk-test", { Id: "group-real-1" }, res, USER);
+
+    expect(material.callAction).toHaveBeenCalledWith("Bearer sk-test", "GetAssetGroup", {
+      Id: "group-real-1",
+    });
+    expect(res.json).toHaveBeenCalledWith({
+      ResponseMetadata: {},
+      Result: { Id: "group-real-1", GroupType: "LivenessFace" },
+    });
   });
 });

@@ -5,7 +5,7 @@
  * 角色随 edges JSON 原样持久化（服务端零改动，延续 IKDMQR）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
-import { readAssetId } from './mediaRefs';
+import { cardNameOfNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
 import { REF_LIMITS } from '@/utils/ref-overflow';
 
 /** 视频参考角色：reference 普通参考 / first 首帧 / last 尾帧 */
@@ -22,7 +22,7 @@ export interface VideoMediaRef {
   url: string;
   name: string;
   assetId: string;
-  mediaType: 'image' | 'video';
+  mediaType: 'image' | 'video' | 'audio';
   materialId?: string;
 }
 
@@ -116,6 +116,23 @@ export function mergedVideoMediaRefsOf(
   );
 }
 
+/** 快照参考的名称刷新（IKFA8Y）：待提交的暂存参考按来源节点身份取当前名称。
+ *  只改展示名称；槽位、顺序、素材 ID 与角色沿用快照；角色库参考（materialId）与来源节点
+ *  已不在画布的参考保留原名称（取当前值 + 回落快照值，快照本身不被改写）。 */
+export function freshVideoCanvasRefs(refs: VideoMediaRefs, mediaNodes: Node[]): VideoMediaRefs {
+  const byId = new Map(mediaNodes.map((n) => [n.id, n]));
+  const fresh = (ref: VideoMediaRef): VideoMediaRef => {
+    if (ref.materialId != null) return ref;
+    const current = cardNameOfNode(byId.get(ref.nodeId));
+    return current === undefined || current === ref.name ? ref : { ...ref, name: current };
+  };
+  const next: VideoMediaRefs = { reference: refs.reference.map(fresh) };
+  if (refs.first) next.first = fresh(refs.first);
+  if (refs.last) next.last = fresh(refs.last);
+  if (refs.invalid) next.invalid = [...refs.invalid];
+  return next;
+}
+
 /** 当前模型是否支持视频参考（仅 Seedance 2.0 系）：UI 禁用与提交防线共用同一判定 */
 export function supportsVideoReferenceModel(modelId: string): boolean {
   return modelId === 'seedance-2' || /^doubao-seedance-2-0(?:-|$)/.test(modelId);
@@ -154,8 +171,8 @@ function baseSourceError(node: NonNullable<Node>): string | null {
 export function videoRefSourceError(node: Node | undefined, role: VideoRefRole): string | null {
   if (!node) return '素材不存在';
   const data = (node.data ?? {}) as Record<string, unknown>;
-  if (role !== 'reference' && data.mediaType === 'video') return '首尾帧仅支持图片素材';
-  if (data.mediaType !== 'image' && data.mediaType !== 'video') return '视频参考仅支持图片或视频素材';
+  if (role !== 'reference' && data.mediaType !== 'image') return '首尾帧仅支持图片素材';
+  if (data.mediaType !== 'image' && data.mediaType !== 'video' && data.mediaType !== 'audio') return '视频参考仅支持图片、视频或音频素材';
   return baseSourceError(node);
 }
 
@@ -190,12 +207,19 @@ export function videoMediaRefsOf(
     if (seenAssetIds.has(assetId)) continue;
     if (role !== 'reference' && (role === 'first' ? refs.first : refs.last)) continue;
     seenAssetIds.add(assetId);
+    const materialId =
+      typeof data.materialId === 'string' && data.materialId
+        ? data.materialId
+        : isMaterialLibraryId(assetId)
+          ? assetId
+          : undefined;
     const item: VideoMediaRef = {
       nodeId: source.id,
       url: data.src as string,
       name: typeof data.fileName === 'string' && data.fileName ? data.fileName : source.id,
       assetId,
-      mediaType: data.mediaType === 'video' ? 'video' : 'image',
+      mediaType: data.mediaType as 'image' | 'video' | 'audio',
+      materialId,
     };
     if (role === 'reference') refs.reference.push(item);
     else if (role === 'first') refs.first = item;
@@ -253,7 +277,7 @@ export function canAddRefRole(
  *  角色库 / 资产 / Dock 角色改写）必须调本函数，禁止各自复制 guard。 */
 export function checkAddVideoRef(
   role: VideoRefRole,
-  mediaType: 'image' | 'video',
+  mediaType: 'image' | 'video' | 'audio',
   assetId: string | undefined,
   refs: VideoMediaRefs,
 ): string | null {
@@ -274,7 +298,9 @@ export function checkAddVideoRef(
     if (mediaType === 'video') {
       const videoCount = refs.reference.filter((r) => r.mediaType === 'video').length;
       if (videoCount >= MAX_VIDEO_REFS) return `参考视频最多 ${MAX_VIDEO_REFS} 个`;
-    } else if (refs.reference.length >= REF_LIMITS.image) {
+    } else if (mediaType === 'audio') {
+      if (refs.reference.filter(r => r.mediaType === 'audio').length >= 3) return '参考音频最多 3 个';
+    } else if (refs.reference.filter(r => r.mediaType === 'image').length >= REF_LIMITS.image) {
       return `参考图最多 ${REF_LIMITS.image} 张`;
     }
   }
