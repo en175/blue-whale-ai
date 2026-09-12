@@ -60,7 +60,9 @@ public class CanvasNodeService {
         }
 
         final String finalAudioAssetId = audioAssetId;
-        return withCanvasUpdate(Long.parseLong(projectId), nodes -> {
+        // 安全拆箱：withCanvasUpdate 在「找不到节点 / 版本冲突耗尽」时返回 null（= 不写），
+        // 直接 `return withCanvasUpdate(...)` 会拆箱 null 抛 NPE（2026-09-12 job 1834 实证）。
+        Boolean updated = withCanvasUpdate(Long.parseLong(projectId), nodes -> {
             // media-extract-canvas-ops.ts:123-148
             String nodeId = "media-extract-" + jobId;
             int idx = findNodeIndex(nodes, nodeId);
@@ -99,6 +101,7 @@ public class CanvasNodeService {
 
             return true;
         });
+        return updated != null && updated;
     }
 
     /**
@@ -108,7 +111,8 @@ public class CanvasNodeService {
             String jobId, String projectId,
             String code, String message
     ) {
-        return withCanvasUpdate(Long.parseLong(projectId), nodes -> {
+        // 安全拆箱（同 updateMediaExtractNodeToAudio）：null = 未写入，不抛 NPE。
+        Boolean updated = withCanvasUpdate(Long.parseLong(projectId), nodes -> {
             String nodeId = "media-extract-" + jobId;
             int idx = findNodeIndex(nodes, nodeId);
             if (idx < 0) return null;
@@ -130,6 +134,7 @@ public class CanvasNodeService {
 
             return true;
         });
+        return updated != null && updated;
     }
 
     /**
