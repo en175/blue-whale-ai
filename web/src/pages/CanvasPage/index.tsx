@@ -118,6 +118,7 @@ import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
 import {
   applyIndependentGroupDrag,
+  bringGroupToFront,
   exclusiveMembersInGroup,
   groupFrameBBox,
   groupToNode,
@@ -3807,6 +3808,10 @@ export default function CanvasPage() {
     [setTextNodes, setMediaNodes, setProductNodes, setAssetNodes, setGroups],
   );
 
+  const handleBringGroupToFront = (groupId: string) => {
+    setGroups((prev) => bringGroupToFront(prev, groupId));
+  };
+
   /** 解组：仅移除组矩形，成员节点保留原位（成员本为按坐标动态判定） */
   const handleUngroup = (groupId: string) => {
     const group = groupsRef.current.find((g) => g.id === groupId);
@@ -5582,6 +5587,7 @@ export default function CanvasPage() {
           onDeleteGroup={handleDeleteGroup}
           onDownloadGroup={handleDownloadGroupNodes}
           onGroupFrameDragStop={handleGroupFrameDragStop}
+          onBringGroupToFront={handleBringGroupToFront}
           onConnectGroupToTarget={handleConnectGroupToTarget}
           onConnectGroupDrop={handleConnectGroupDrop}
           onConnectSourceToGroup={handleConnectSourceToGroup}

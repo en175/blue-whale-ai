@@ -4,6 +4,7 @@
  * 尺寸不再因成员增减而变化）。成员不是冻结名单，而是「当前位于矩形内的节点」——
  * 节点被拖出框即自动脱离，拖进框即自动加入（动态成员，用户体验为"固定范围容器"）。
  * 组与组互相独立：拖组只移动本组专属成员，叠到另一组上不得带走对方成员。
+ * 数组顺序即叠放层级（后创建 / 后拖动的在上）：上层组框与素材压住下层组框与素材。
  * 底框直接用 group.box 渲染，不随成员实时派生。
  * 持久化走「伪节点」：序列化为 type: 'groupFrame' 的节点混入 nodes JSON，
  * data.box 存矩形，水合时剥离还原（零后端契约变更）。
@@ -25,6 +26,29 @@ export const MIN_GROUP_MEMBERS = 2;
 
 /** 组框外扩留白（成员包围盒 → 底框可视边距） */
 export const GROUP_FRAME_PADDING = 48;
+
+/** 每一组占用的 zIndex 间隔：组框在层底，成员在组框之上，互不与邻组交错 */
+export const GROUP_LAYER_STRIDE = 100;
+
+/** 组框节点 zIndex（stackIndex 0 起，越大越靠上） */
+export function groupFrameZ(stackIndex: number): number {
+  return (stackIndex + 1) * GROUP_LAYER_STRIDE;
+}
+
+/** 组成员节点 zIndex：高于本组组框，低于上一层组框 */
+export function groupMemberZ(stackIndex: number): number {
+  return groupFrameZ(stackIndex) + 10;
+}
+
+/** 把指定组移到数组末尾（视觉与命中最上层） */
+export function bringGroupToFront(groups: CanvasGroup[], groupId: string): CanvasGroup[] {
+  const index = groups.findIndex((g) => g.id === groupId);
+  if (index < 0 || index === groups.length - 1) return groups;
+  const next = groups.slice();
+  const [group] = next.splice(index, 1);
+  next.push(group);
+  return next;
+}
 
 export interface GroupBBox {
   x: number;
@@ -108,7 +132,7 @@ export function membersInGroupBox(
   excludedIds: string[] = [],
 ): Node[] {
   const excluded = new Set(excludedIds);
-  return nodes.filter((n) => !excluded.has(n.id) && nodeInsideGroupBox(n, box));
+  return nodes.filter((n) => n.type !== 'groupFrame' && !excluded.has(n.id) && nodeInsideGroupBox(n, box));
 }
 
 /** 节点是否算某组成员（落在矩形内且不在排除名单） */
