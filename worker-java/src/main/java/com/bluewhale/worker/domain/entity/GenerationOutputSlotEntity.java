@@ -48,10 +48,12 @@ public class GenerationOutputSlotEntity {
     @TableField("gmt_modified")
     private LocalDateTime gmtModified;
 
-    @TableField("version")
+    // 表无此二列（schema.prisma 权威）：仅占位保持与其余 Entity 形状一致，MyBatis-Plus 忽略映射。
+    // 暴露字段会诱导 SQL 误引用，故标 @TableField(exist=false) 不参与 select/insert/update。
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
     private Integer version;
 
-    @TableField("is_delete")
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
     private Boolean isDelete;
 
     public Long getId() { return id; }
