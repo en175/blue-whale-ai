@@ -767,7 +767,7 @@ public class JobStateMachineService {
         try {
             return JSON_MAPPER.writeValueAsString(obj);
         } catch (JsonProcessingException e) {
-            throw new RuntimeException("Failed to serialize to JSON", e);
+            throw new IllegalStateException("Failed to serialize to JSON", e);
         }
     }
 

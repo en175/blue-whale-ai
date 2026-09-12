@@ -106,7 +106,7 @@ public class GenerationCredentialService {
             MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
             return sha256.digest(secret.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
-            throw new RuntimeException("SHA-256 不可用", e);
+            throw new IllegalStateException("SHA-256 不可用", e);
         }
     }
 }

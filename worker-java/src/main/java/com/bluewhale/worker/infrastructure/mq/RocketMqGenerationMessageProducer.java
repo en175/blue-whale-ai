@@ -67,7 +67,7 @@ public class RocketMqGenerationMessageProducer implements GenerationMessageProdu
             producer.send(message);
         } catch (Exception e) {
             log.error("[video] MQ 消息发送失败 jobId={} delayMs={}: {}", jobId, effectiveDelay, e.getMessage(), e);
-            throw new RuntimeException("视频 MQ 消息发送失败: " + e.getMessage(), e);
+            throw new IllegalStateException("视频 MQ 消息发送失败: " + e.getMessage(), e);
         }
     }
 

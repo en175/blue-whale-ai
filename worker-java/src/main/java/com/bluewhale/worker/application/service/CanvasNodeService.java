@@ -214,7 +214,7 @@ public class CanvasNodeService {
         try {
             return JSON_MAPPER.writeValueAsString(obj);
         } catch (JsonProcessingException e) {
-            throw new RuntimeException("JSON serialization failed", e);
+            throw new IllegalStateException("JSON serialization failed", e);
         }
     }
 
