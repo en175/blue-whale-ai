@@ -92,14 +92,15 @@ public class JobFinalizer {
                 Map.of("asset_ids", List.of(asset.getId().toString())));
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        // asset.created（asset-ops.ts:186-199，恒发，不依赖 project_id 判断）
-        eventPublisher.publish(Long.parseLong(projectId), "asset.created", "asset",
-                asset.getId().toString(), asset.getVersion(), "job_" + jobId,
-                Map.of("asset_id", asset.getId().toString(),
-                        "generation_job_id", jobId,
-                        "type", asset.getType(),
-                        "access_url", asset.getUrl()));
+        // 两个事件都在 job.project_id 守卫内（media-extract-ops.ts:102 逐字：asset.created 与
+        // status_changed 同处 `if (job.project_id != null)`；与通用 createAsset 的恒发不同）。
         if (job != null && job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
+                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
+                    Map.of("asset_id", asset.getId().toString(),
+                            "generation_job_id", job.getId().toString(),
+                            "type", asset.getType(),
+                            "access_url", asset.getUrl()));
             eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
                     "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
                     Map.of("job_id", job.getId().toString(),
