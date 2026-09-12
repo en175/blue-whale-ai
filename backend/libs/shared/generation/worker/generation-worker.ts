@@ -43,10 +43,10 @@ const logger = createLogger("generation-worker");
 
 export type WorkerDeps = {
   repo: WorkerRepo;
-  /** 按 job 密封凭证构建图片 provider（与 video 一致：sk token 来自 job，不来自请求闭包，
+  /** 按 job 明文凭证构建图片 provider（修正四：去密，与 video 一致：sk token 来自 job，不来自请求闭包，
    *  这样请求内即时调度与进程重启后的恢复扫描可用同一套逻辑）。 */
   createImageProvider: (token: string) => ImageProvider;
-  /** 按 job 密封凭证构建音频 provider(与 image/video 一致)。 */
+  /** 按 job 明文凭证构建音频 provider(修正四：去密，与 image/video 一致)。 */
   createAudioProvider: (token: string) => AudioProvider;
   /** 读取 job.input.provider_credential → sk token（修正四：明文直取）。 */
   credentialVault: { open: (ciphertext: string) => string };
