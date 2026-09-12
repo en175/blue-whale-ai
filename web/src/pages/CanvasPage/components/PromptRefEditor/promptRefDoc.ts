@@ -97,16 +97,15 @@ export function matchMentionQuery(textBeforeCaret: string): { query: string } | 
   return match ? { query: match[1] } : null;
 }
 
-/** 把 reconcile 后的 ref 片段序列写回节点（按文档顺序与节点一一对应）。调用方在 editor.update 内使用。 */
+/** 把 reconcile 后的 ref 片段序列写回节点（按文档顺序与节点一一对应）。调用方在 editor.update 内使用。
+ *  失效标记按片段双向同步：恢复（invalid_label 清除）与失效（写入）都会写回节点。 */
 export function $applyReconciledRefs(nodes: AssetRefNode[], segments: PromptDocSegment[]): void {
   const refs = segments.filter((s): s is Extract<PromptDocSegment, { kind: 'asset_ref' }> => s.kind === 'asset_ref');
   nodes.forEach((node, index) => {
     const seg = refs[index];
     if (!seg) return;
     if (node.getLabel() !== seg.label) node.setLabel(seg.label);
-    if (seg.invalid_label !== undefined && node.getInvalidLabel() !== seg.invalid_label) {
-      node.setInvalidLabel(seg.invalid_label);
-    }
+    if (node.getInvalidLabel() !== seg.invalid_label) node.setInvalidLabel(seg.invalid_label);
   });
 }
 

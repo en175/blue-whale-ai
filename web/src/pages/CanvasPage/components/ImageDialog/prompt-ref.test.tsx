@@ -37,6 +37,18 @@ const REF_A: ImageMediaRef = { nodeId: 'na', url: 'https://x/a.png', name: '角�
 const REF_B: ImageMediaRef = { nodeId: 'nb', url: 'https://x/b.png', name: '衣服图', assetId: '102' };
 const REF_C: ImageMediaRef = { nodeId: 'nc', url: 'https://x/c.png', name: '背景图', assetId: '103' };
 
+const DOC_AB: PromptDoc = {
+  version: 1,
+  segments: [
+    { kind: 'text', text: '让' },
+    { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+    { kind: 'text', text: '穿上' },
+    { kind: 'asset_ref', asset_id: '102', label: '图片2' },
+    { kind: 'text', text: '，背景参考' },
+    { kind: 'asset_ref', asset_id: '103', label: '图片3' },
+  ],
+};
+
 let root: Root;
 let container: HTMLDivElement;
 
@@ -217,18 +229,6 @@ describe('IKFA1M @ 菜单与插入（A1/A4）', () => {
 });
 
 describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
-  const DOC_AB: PromptDoc = {
-    version: 1,
-    segments: [
-      { kind: 'text', text: '让' },
-      { kind: 'asset_ref', asset_id: '101', label: '图片1' },
-      { kind: 'text', text: '穿上' },
-      { kind: 'asset_ref', asset_id: '102', label: '图片2' },
-      { kind: 'text', text: '，背景参考' },
-      { kind: 'asset_ref', asset_id: '103', label: '图片3' },
-    ],
-  };
-
   it('移除中间参考：剩余有效标签重编号，被移除标签显示失效且不转向（B1）', async () => {
     await renderDialog({ mediaRefs: [REF_A, REF_B, REF_C], initialDoc: DOC_AB });
     expect([...container.querySelectorAll('[data-testid="asset-ref-valid"]')]).toHaveLength(3);
@@ -244,7 +244,7 @@ describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
     expect([...container.querySelectorAll('[data-testid="asset-ref-invalid"]')]).toHaveLength(1);
     // 失效标签阻止生成并指出原因
     expect(sendButton().disabled).toBe(true);
-    expect(container.textContent).toContain('正文有已失效的素材标签，请删除后再发送');
+    expect(container.textContent).toContain('正文有已失效的素材标签，请点击标签替换或删除后再发送');
   });
 
   it('删除失效提及后可以继续生成；删除正文提及不删除附件（B2）', async () => {
@@ -286,6 +286,115 @@ describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
       expect([...container.querySelectorAll('[data-testid="asset-ref-valid"]')]).toHaveLength(1);
     });
     expect([...container.querySelectorAll('[data-testid="dock-media-ref"]')]).toHaveLength(1);
+  });
+});
+
+describe('IKFA1N 失效恢复与替换（B3/B4/B5/C4）', () => {
+  const REF_D_SAME_NAME: ImageMediaRef = { nodeId: 'nd', url: 'https://x/d.png', name: '衣服图', assetId: '104' };
+
+  it('身份重新加回有效集合：失效标签自动恢复并显示当次编号（B4/C4）', async () => {
+    const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A, REF_C], initialDoc: DOC_AB });
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeTruthy();
+    });
+    expect(sendButton().disabled).toBe(true);
+    // 重新加入 102（末位 → 图片3）：失效标签恢复为有效，附件区与正文同步
+    await rerender([REF_A, REF_C, REF_B], onParamsChange);
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeNull();
+    });
+    const valids = [...container.querySelectorAll('[data-testid="asset-ref-valid"]')].map((el) => el.textContent);
+    expect(valids.join('|')).toBe('图片1|图片3|图片2');
+    expect(readPromptRefText(container)).toBe('让图片1穿上图片3，背景参考图片2');
+    expect(sendButton().disabled).toBe(false);
+    // 草稿同步恢复后的结构（身份不变、失效标记清除、当次编号）
+    const patch = lastDocFromParams(onParamsChange);
+    expect(patch.promptDoc?.segments).toEqual([
+      { kind: 'text', text: '让' },
+      { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+      { kind: 'text', text: '穿上' },
+      { kind: 'asset_ref', asset_id: '102', label: '图片3' },
+      { kind: 'text', text: '，背景参考' },
+      { kind: 'asset_ref', asset_id: '103', label: '图片2' },
+    ]);
+  });
+
+  it('加回同名不同身份素材：原失效标签不恢复（B3）', async () => {
+    await renderDialog({ mediaRefs: [REF_A, REF_C], initialDoc: DOC_AB });
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeTruthy();
+    });
+    // 104 与 102 同名「衣服图」：名称不参与判定，102 失效标签原样保留
+    await rerender([REF_A, REF_C, REF_D_SAME_NAME]);
+    await act(async () => {});
+    expect(container.querySelector('[data-testid="asset-ref-invalid"]')!.textContent).toContain('已失效：原图片2');
+    expect(sendButton().disabled).toBe(true);
+  });
+
+  it('点击失效标签选择其他已引用项：仅该位置换绑，不批量改其他提及、不重复添加输入（B5）', async () => {
+    const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A, REF_C], initialDoc: DOC_AB });
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeTruthy();
+    });
+    // 点击失效标签主体 → 替换菜单列出当前已引用项（A=图片1、C=图片2）
+    const invalidChip = container.querySelector('[data-testid="asset-ref-invalid"]')!;
+    await act(async () => {
+      invalidChip.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    const menu = container.querySelector('[data-testid="replace-ref-menu"]');
+    expect(menu).toBeTruthy();
+    const items = [...container.querySelectorAll('[data-testid="replace-ref-item"]')];
+    expect(items).toHaveLength(2);
+    expect(items[0].textContent).toContain('角色图');
+    expect(items[1].textContent).toContain('背景图');
+    // 选择 C（背景图=图片2）：仅该次提及换绑为 103，菜单关闭
+    await act(async () => {
+      (items[1] as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="replace-ref-menu"]')).toBeNull();
+    });
+    expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeNull();
+    // 参考输入不重复添加（仍两项），其余提及身份不变
+    expect([...container.querySelectorAll('[data-testid="dock-media-ref"]')]).toHaveLength(2);
+    expect(readPromptRefText(container)).toBe('让图片1穿上图片2，背景参考图片2');
+    await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+    const patch = lastDocFromParams(onParamsChange);
+    expect(patch.promptDoc?.segments).toEqual([
+      { kind: 'text', text: '让' },
+      { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+      { kind: 'text', text: '穿上' },
+      { kind: 'asset_ref', asset_id: '103', label: '图片2' },
+      { kind: 'text', text: '，背景参考' },
+      { kind: 'asset_ref', asset_id: '103', label: '图片2' },
+    ]);
+  });
+
+  it('只替换一处：另一处失效提及仍阻止生成（B5）', async () => {
+    const twoInvalid: PromptDoc = {
+      version: 1,
+      segments: [
+        { kind: 'asset_ref', asset_id: '102', label: '图片2', invalid_label: '图片2' },
+        { kind: 'text', text: '和' },
+        { kind: 'asset_ref', asset_id: '102', label: '图片2', invalid_label: '图片2' },
+      ],
+    };
+    await renderDialog({ mediaRefs: [REF_A, REF_C], initialDoc: twoInvalid });
+    await vi.waitFor(() => {
+      expect([...container.querySelectorAll('[data-testid="asset-ref-invalid"]')]).toHaveLength(2);
+    });
+    const first = container.querySelector('[data-testid="asset-ref-invalid"]')!;
+    await act(async () => {
+      first.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await act(async () => {
+      (container.querySelector('[data-testid="replace-ref-item"]') as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => {
+      expect([...container.querySelectorAll('[data-testid="asset-ref-invalid"]')]).toHaveLength(1);
+    });
+    expect(sendButton().disabled).toBe(true);
+    expect(readPromptRefText(container)).toBe('图片1和已失效：原图片2');
   });
 });
 

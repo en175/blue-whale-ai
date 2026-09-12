@@ -34,7 +34,7 @@ import {
   type NodeKey,
 } from 'lexical';
 import { reconcilePromptDoc, type PromptDoc } from '@/lib/prompt-doc';
-import { $createAssetRefNode, AssetRefNode, PromptRefContext, type AssetRefMeta } from './AssetRefNode';
+import { $createAssetRefNode, $isAssetRefNode, AssetRefNode, PromptRefContext, type AssetRefMeta } from './AssetRefNode';
 import { $applyReconciledRefs, $buildFromPromptDoc, $readPromptDoc, $restoreMentionSelection, matchMentionQuery } from './promptRefDoc';
 import styles from './index.module.css';
 
@@ -52,6 +52,8 @@ export interface PromptRefEditorHandle {
   insertRefAtPending: (assetId: string) => void;
   /** 放弃本次 @ 查询（保留已输入的 @ 文本） */
   dismissMention: () => void;
+  /** 替换失效提及（IKFA1N B5）：把指定节点换绑为其他已引用素材，仅该处提及变化 */
+  replaceRefAt: (nodeKey: string, assetId: string) => void;
   /** 清空全部内容（发送后调用） */
   clear: () => void;
 }
@@ -71,6 +73,8 @@ interface PromptRefEditorProps {
   refsMeta: ReadonlyMap<string, AssetRefMeta>;
   onChange: (doc: PromptDoc) => void;
   onMentionChange?: (state: MentionState) => void;
+  /** 点击失效标签（IKFA1N）：交由调用方打开替换菜单，选中后经 replaceRefAt 换绑 */
+  onInvalidTagClick?: (nodeKey: string) => void;
   /** @ 菜单键盘导航：菜单打开时返回 true 消费按键（ArrowUp/Down/Enter/Escape） */
   onMentionKey?: (key: 'down' | 'up' | 'enter' | 'escape') => boolean;
   className?: string;
@@ -191,7 +195,7 @@ function MentionKeyPlugin({ onMentionKey }: { onMentionKey?: (key: 'down' | 'up'
 }
 
 const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(function PromptRefEditor(
-  { initialDoc, initialText, placeholder, readOnly, orderedAssetIds, numbering, refsMeta, onChange, onMentionChange, onMentionKey, className },
+  { initialDoc, initialText, placeholder, readOnly, orderedAssetIds, numbering, refsMeta, onChange, onMentionChange, onInvalidTagClick, onMentionKey, className },
   ref,
 ) {
   const editorRef = useRef<LexicalEditor | null>(null);
@@ -275,6 +279,18 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
       pendingInsertRef.current = null;
       onMentionChange?.({ open: false, query: '' });
     },
+    replaceRefAt: (nodeKey: string, assetId: string) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      const label = labelOf(assetId);
+      editor.update(() => {
+        const node = $getNodeByKey(nodeKey);
+        if (!$isAssetRefNode(node)) return;
+        node.setAssetId(assetId);
+        if (label !== undefined) node.setLabel(label);
+        node.setInvalidLabel(undefined);
+      });
+    },
     clear: () => {
       const editor = editorRef.current;
       if (!editor) return;
@@ -288,8 +304,8 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
   }), [onMentionChange]);
 
   const contextValue = useMemo(
-    () => ({ numbering, meta: refsMeta, readOnly: readOnly === true }),
-    [numbering, refsMeta, readOnly],
+    () => ({ numbering, meta: refsMeta, readOnly: readOnly === true, onInvalidTagClick }),
+    [numbering, refsMeta, readOnly, onInvalidTagClick],
   );
 
   const initialConfig = {
