@@ -60,6 +60,10 @@ interface TextNodeData {
   onPaste?: (id: string) => void;
   /** Toast 提示（超字数上限等场景，由父级注入） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
+  /** 文本生成节点：身份保持，可被连入，也可自己编写 */
+  textGen?: boolean;
+  /** 点击「自己编写内容」：进入框内编辑，不打开跟随输入框 */
+  onWriteSelf?: (id: string) => void;
 }
 
 export default function TextNode({ id, data, selected }: NodeProps & { data: TextNodeData; selected?: boolean }) {
@@ -71,8 +75,14 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState(data.title ?? '文本节点');
   const [isFocused, setIsFocused] = useState(false);
-  /** 双击进入编辑；单击/拖动为移动节点 */
+  /** 双击进入编辑；单击/拖动为移动节点。文本生成节点仅「自己编写」进入编辑 */
   const [editing, setEditing] = useState(false);
+  const [writingSelf, setWritingSelf] = useState(false);
+  const isTextGen = data.textGen === true;
+  const hasTextGenBody = Boolean(
+    (typeof data.text === 'string' && data.text.trim())
+    || (typeof data.html === 'string' && data.html.replace(/<[^>]+>/g, '').trim()),
+  );
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [currentColor, setCurrentColor] = useState('#ffffff');
@@ -497,8 +507,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
               }
               data.onTitleChange?.(id, titleDraft); setTitleEditing(false); setTitleError(''); data.onDraftError?.(id, contentError);
             }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') event.currentTarget.blur(); }} />
-            : <span className={styles.titleName} onDoubleClick={event => { event.stopPropagation(); if (data.onTitleChange) { setTitleDraft(data.title ?? '文本节点'); setTitleEditing(true); } }}>
-              {data.title || '文本节点'}
+            : <span className={styles.titleName} onDoubleClick={event => { event.stopPropagation(); if (data.onTitleChange) { setTitleDraft(data.title ?? (isTextGen ? '文本生成' : '文本节点')); setTitleEditing(true); } }}>
+              {data.title || (isTextGen ? '文本生成' : '文本节点')}
             </span>}
         </div>
       {plainText && <button className={`${styles.toolBtn} nodrag nopan`} onClick={() => setExpanded(value => !value)}>
@@ -515,12 +525,26 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         </Handle>
         )}
 
+        {isTextGen && !writingSelf && (
+          <button
+            type="button"
+            className={`${styles.writeSelfBtn} ${hasTextGenBody ? styles.writeSelfBtnCorner : ''} nodrag nopan`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setWritingSelf(true);
+              setEditing(true);
+              data.onWriteSelf?.(id);
+            }}
+          >
+            自己编写内容
+          </button>
+        )}
         <div
           ref={editorRef}
           className={`${styles.editor} ${editing ? 'nodrag nopan' : ''}`}
           contentEditable={editing ? (plainText && !hasPromptBindings ? 'plaintext-only' : true) : false}
           suppressContentEditableWarning
-          style={{ pointerEvents: isSelect ? 'auto' : 'none' }}
+          style={{ pointerEvents: isSelect && (!isTextGen || writingSelf) ? 'auto' : 'none' }}
           onFocus={() => setIsFocused(true)}
           onBlur={(e) => {
             // 如果焦点转移到工具栏/颜色面板，保持编辑状态
@@ -528,6 +552,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
             if (related && related.closest(`.${styles.toolbar}, .${styles.nodeBar}`)) return;
             setIsFocused(false);
             setEditing(false);
+            setWritingSelf(false);
           }}
           onInput={syncContent}
           onClick={event => {
@@ -537,8 +562,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           }}
           onDoubleClick={(e) => {
             if (!isSelect) return;
-            // 双击激活输入，并阻止画布双击居中缩放
             e.stopPropagation();
+            if (isTextGen && !writingSelf) return;
             setEditing(true);
           }}
           onMouseUp={handleEditorMouseUp}

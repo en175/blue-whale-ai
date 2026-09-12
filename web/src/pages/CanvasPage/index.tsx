@@ -10,6 +10,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition, type SpawnBox } from './draftSpawn';
+import {
+  computeFollowAnchor,
+  enabledVideoFollowModes,
+  type VideoFollowMode,
+} from './followDialog';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, type ImageMediaRef } from './mediaRefs';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
@@ -42,6 +47,7 @@ import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import BottomDialog, { type VideoGenOptions, type VideoGenSeedParams } from './components/BottomDialog';
 import ImageDialog, { type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
+import TextGenDialog from './components/TextGenDialog';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
@@ -214,6 +220,12 @@ export default function CanvasPage() {
   const paneUploadPosRef = useRef<{ x: number; y: number } | null>(null);
   const [showBottomDialog, setShowBottomDialog] = useState(false);
   const [showImageDialog, setShowImageDialog] = useState(false);
+  const [showTextGenDialog, setShowTextGenDialog] = useState(false);
+  const [textGenDraftId, setTextGenDraftId] = useState<string | null>(null);
+  const skipTextGenOpenRef = useRef(false);
+  const canvasWrapperRef = useRef<HTMLDivElement>(null);
+  const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
+  const [liveViewport, setLiveViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
   /** 「到节点选择」：画布节点选取模式（image/video/audio 对应三个底部对话框；product 商品卡选图） */
   const [pickMode, setPickMode] = useState<'image' | 'video' | 'audio' | 'product' | 'asset' | null>(null);
   /** 选取发起对话框（决定选取结果注入哪个对话框；视频对话框图片槽/首尾帧只选图片节点，视频槽只选视频节点） */
@@ -632,6 +644,16 @@ export default function CanvasPage() {
   }, [location.state, location.pathname, location.search, navigate]);
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
+  useEffect(() => { setLiveViewport(viewport); }, [viewport]);
+  useEffect(() => {
+    const el = canvasWrapperRef.current;
+    if (!el) return;
+    const update = () => setWrapperSize({ width: el.clientWidth, height: el.clientHeight });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   /** FlowCanvas 注册的屏幕点→flow 坐标转换（无参默认取视口中心），注册前回退原点附近 */
   const spawnPosRef = useRef<(screenPt?: { x: number; y: number }) => { x: number; y: number }>(
     () => ({ x: 300, y: 200 }),
@@ -673,6 +695,38 @@ export default function CanvasPage() {
     }
     return { x: n.position.x, y: n.position.y, width: 320, height: 340 };
   };
+  const followTargetId = showImageDialog && imageDraftId
+    ? imageDraftId
+    : showBottomDialog && videoDraftId
+      ? videoDraftId
+      : showTextGenDialog && textGenDraftId
+        ? textGenDraftId
+        : null;
+  const followNode = followTargetId
+    ? mediaNodes.find((n) => n.id === followTargetId) ?? textNodes.find((n) => n.id === followTargetId) ?? null
+    : null;
+  const followAnchor = followNode && wrapperSize.width > 0
+    ? computeFollowAnchor({
+        nodeX: followNode.position.x,
+        nodeY: followNode.position.y,
+        nodeWidth: nodeBoxOf(followNode).width,
+        nodeHeight: nodeBoxOf(followNode).height,
+        viewport: liveViewport,
+        containerWidth: wrapperSize.width,
+        containerHeight: wrapperSize.height,
+      })
+    : null;
+  const videoFollowModes: VideoFollowMode[] | undefined = videoDraftId && showBottomDialog
+    ? enabledVideoFollowModes(
+        edges
+          .filter((edge) => edge.target === videoDraftId)
+          .map((edge) => sourceKindOf(
+            mediaNodes.find((n) => n.id === edge.source)
+            ?? textNodes.find((n) => n.id === edge.source),
+          ))
+          .filter((kind): kind is NonNullable<typeof kind> => kind != null),
+      )
+    : undefined;
   /** 草稿卡出生位（IKDMQQ）：视口中心附近空位，避开底部 Dock 预留区与既有节点 */
   const spawnDraftPosition = () => {
     const center = spawnPosRef.current();
@@ -873,6 +927,10 @@ export default function CanvasPage() {
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
           onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
+          onWriteSelf: () => {
+            skipTextGenOpenRef.current = true;
+            setShowTextGenDialog(false);
+          },
         };
         break;
       case 'mediaNode':
@@ -889,6 +947,7 @@ export default function CanvasPage() {
           onRetryJob: (id: string) => actionsRef.current.retryJob(id),
           onReEdit: (id: string) => actionsRef.current.reEdit(id),
           onGenImage: (id: string) => actionsRef.current.genImage(id),
+          onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -1546,6 +1605,7 @@ export default function CanvasPage() {
     showDetails: (_id: string) => {},
     firePendingGen: () => {},
     firePendingVideoDraft: () => {},
+    img2img: (_id: string, _file: File) => {},
   });
   actionsRef.current = { ...actionsRef.current, duplicate: handleDuplicateNode, addToChat: handleAddToChatNode };
 
@@ -1617,6 +1677,13 @@ export default function CanvasPage() {
       }
       if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'audio') {
         openAudioDraftDialog(node.id);
+      }
+      if (node.type === 'textNode' && data.textGen === true) {
+        if (skipTextGenOpenRef.current) {
+          skipTextGenOpenRef.current = false;
+          return;
+        }
+        openTextGenDialog(node.id);
       }
       // IKDMQU P1：单选有生成记录的成品卡自动打开对应生成面板（编辑写回原卡，发送后原卡重新生成）；
       // 上传素材卡无生成记录，不自动打开（Q4）；重新生成中/失败态的卡 jobId 仍在，可打开查看或调整重发
@@ -1995,6 +2062,7 @@ export default function CanvasPage() {
       targetNodeId: nodeId,
       attachments: textAttachmentsOf(nodeId),
     });
+    setShowTextGenDialog(false);
     handleOpenImageDialog();
   };
 
@@ -2032,6 +2100,16 @@ export default function CanvasPage() {
     }
   }, [imageDraftId, imageSeed, mediaNodes]);
 
+  useEffect(() => {
+    if (!textGenDraftId) return;
+    const node = textNodes.find((n) => n.id === textGenDraftId);
+    const d = (node?.data ?? {}) as Record<string, unknown>;
+    if (!node || d.textGen !== true) {
+      setTextGenDraftId(null);
+      setShowTextGenDialog(false);
+    }
+  }, [textGenDraftId, textNodes]);
+
   /** 打开绑定指定草稿的视频面板（IKDMQS）：带入草稿已保存的参数与当前连线文本附件；
    *  preset 覆盖节点 data 读出的参数——新建草稿后 mediaNodesRef 尚未更新，种子参数经 preset 兜底 */
   const openVideoDraftDialog = (nodeId: string, preset?: VideoGenSeedParams) => {
@@ -2063,6 +2141,7 @@ export default function CanvasPage() {
     setShowImageDialog(false);
     setShowAudioDialog(false);
     setShowMusicDialog(false);
+    setShowTextGenDialog(false);
   };
 
   /** 新建视频草稿卡（IKDMQS 统一入口共用）：seed 字段写入草稿 data 持久化键并自动选中，返回节点 id；
@@ -2100,6 +2179,7 @@ export default function CanvasPage() {
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onReEdit: (id: string) => actionsRef.current.reEdit(id),
         onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -2141,6 +2221,7 @@ export default function CanvasPage() {
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onReEdit: (id: string) => actionsRef.current.reEdit(id),
         onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -2182,6 +2263,7 @@ export default function CanvasPage() {
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onReEdit: (id: string) => actionsRef.current.reEdit(id),
         onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -2229,6 +2311,10 @@ export default function CanvasPage() {
         onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
         onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
         onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
+        onWriteSelf: () => {
+          skipTextGenOpenRef.current = true;
+          setShowTextGenDialog(false);
+        },
       },
     };
     pendingNodeIdsRef.current.add(nodeId);
@@ -2240,6 +2326,33 @@ export default function CanvasPage() {
     setTextNodes((prev) => [...deselect(prev), node]);
     setSelectRequest({ id: nodeId, ts: Date.now() });
     return nodeId;
+  };
+
+  const openTextGenDialog = (nodeId: string) => {
+    skipTextGenOpenRef.current = false;
+    setTextGenDraftId(nodeId);
+    setShowTextGenDialog(true);
+    setShowImageDialog(false);
+    setShowBottomDialog(false);
+    setShowAudioDialog(false);
+    setShowMusicDialog(false);
+  };
+
+  const handleTextGenSend = (text: string, modelId: string) => {
+    if (!textGenDraftId) return;
+    const nodeId = textGenDraftId;
+    const attachments = textAttachmentsOf(nodeId);
+    const body = [attachments.map((item) => item.text).filter(Boolean).join('\n\n'), text]
+      .filter(Boolean)
+      .join('\n\n');
+    setTextNodes((prev) =>
+      prev.map((n) =>
+        n.id === nodeId
+          ? { ...n, data: { ...n.data, text: body, html: body, prompt: text, draftModelId: modelId } }
+          : n,
+      ),
+    );
+    setShowTextGenDialog(false);
   };
 
   const openConnectTypeMenu = (sourceIds: string[], clientX: number, clientY: number) => {
@@ -2275,6 +2388,7 @@ export default function CanvasPage() {
     }
     targetId = createTextGenDraft(position);
     sourceIds.forEach((id) => addCanvasEdge(id, targetId));
+    openTextGenDialog(targetId);
   };
 
   const handleConnectEnd = (
@@ -2513,7 +2627,7 @@ export default function CanvasPage() {
   const placeFileOnCanvas = (
     file: File,
     opts?: { position?: { x: number; y: number }; replaceNodeId?: string },
-  ): Promise<{ asset_id: string; url: string }> => {
+  ): Promise<{ asset_id: string; url: string; nodeId: string }> => {
     const isImage = file.type.startsWith('image/');
     const isVideo = file.type.startsWith('video/');
     const isAudio = file.type.startsWith('audio/');
@@ -2540,6 +2654,7 @@ export default function CanvasPage() {
       onRetryJob: (id: string) => actionsRef.current.retryJob(id),
       onReEdit: (id: string) => actionsRef.current.reEdit(id),
       onGenImage: (id: string) => actionsRef.current.genImage(id),
+      onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
       onGenVideo: (id: string) => actionsRef.current.genVideo(id),
       onGenAudio: (id: string) => actionsRef.current.genAudio(id),
       onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -2607,7 +2722,7 @@ export default function CanvasPage() {
             };
           }),
         );
-        return { asset_id: done.asset_id, url: done.url };
+        return { asset_id: done.asset_id, url: done.url, nodeId };
       })
       .catch((err) => {
         // 上传登记失败 = 添加失败：节点不留在画布，移除并释放 blob URL
@@ -2742,6 +2857,31 @@ export default function CanvasPage() {
     });
   };
 
+  /** 图片生成节点「图生图」：本地图落入画布、自动连线、进入参考清单 */
+  const handleImg2Img = (draftId: string, file: File) => {
+    if (!file.type.startsWith('image/')) {
+      showToast('warn', '图生图仅支持图片');
+      return;
+    }
+    const draft = mediaNodesRef.current.find((n) => n.id === draftId);
+    const center = draft
+      ? { x: draft.position.x - 360, y: draft.position.y }
+      : spawnDraftPosition();
+    const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
+    const position = nextDraftPosition({
+      center,
+      dockTop: center.y + 2000,
+      nodes: nodes.map(nodeBoxOf),
+    });
+    void placeFileOnCanvas(file, { position }).then((done) => {
+      addCanvasEdge(done.nodeId, draftId);
+      void actionsRef.current.complianceCheck(done.nodeId);
+      openImageDraftDialog(draftId);
+    }).catch((err) => {
+      showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
+    });
+  };
+
   const addEmptyMediaShell = (mediaType: 'image' | 'video' | 'audio', position: { x: number; y: number }) => {
     const nodeId = newNodeId('media');
     pendingNodeIdsRef.current.add(nodeId);
@@ -2784,6 +2924,7 @@ export default function CanvasPage() {
     copyImage: (id) => { void handleCopyImage(id); },
     complianceCheck: (id) => { void handleComplianceCheck(id); },
     fillEmptyShell: handleFillEmptyShell,
+    img2img: handleImg2Img,
   };
 
   /** 从资产 URL 提取展示名（无元数据字段时的兜底命名） */
@@ -2835,6 +2976,7 @@ export default function CanvasPage() {
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
           onReEdit: (id: string) => actionsRef.current.reEdit(id),
           onGenImage: (id: string) => actionsRef.current.genImage(id),
+          onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -3315,6 +3457,7 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onReEdit: (id: string) => actionsRef.current.reEdit(id),
         onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -4824,6 +4967,7 @@ export default function CanvasPage() {
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
               onReEdit: (id: string) => actionsRef.current.reEdit(id),
               onGenImage: (id: string) => actionsRef.current.genImage(id),
+              onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
               onGenVideo: (id: string) => actionsRef.current.genVideo(id),
               onGenAudio: (id: string) => actionsRef.current.genAudio(id),
               onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -5360,7 +5504,7 @@ export default function CanvasPage() {
       />
 
       {/* 画布区域 */}
-      <div className={`${styles.canvasWrapper} ${pickMode === 'image' ? styles.pickingImage : ''}`}>
+      <div ref={canvasWrapperRef} className={`${styles.canvasWrapper} ${pickMode === 'image' ? styles.pickingImage : ''}`}>
         {applying && <div role="status" style={{ position: 'fixed', inset: 0, zIndex: 10000, cursor: 'wait' }}>正在保存画布引用…</div>}
       <FlowCanvas
           showMiniMap={showMiniMap}
@@ -5379,6 +5523,7 @@ export default function CanvasPage() {
           isValidConnection={isValidCanvasConnection}
           viewport={focusViewport ?? doc?.viewport}
           onViewportChange={setViewport}
+          onViewportLive={setLiveViewport}
           registerSpawnPosition={registerSpawnPosition}
           hideZoomControl={showAgent}
           onNodeDragStop={handleNodeDragStop}
@@ -5627,6 +5772,8 @@ export default function CanvasPage() {
             onToast={(type, msg) => showToast(type, msg)}
             mentionItems={atMentionItems.filter((item) => item.id !== videoDraftId)}
             onMentionCanvas={handleVideoAtMention}
+            followAnchor={videoDraftId ? followAnchor : null}
+            enabledModes={videoFollowModes}
           />
         )}
         {/* 底部图片对话框 */}
@@ -5675,6 +5822,35 @@ export default function CanvasPage() {
             onToast={(type, msg) => showToast(type, msg)}
             mentionItems={atMentionItems.filter((item) => item.id !== imageDraftId)}
             onMentionCanvas={handleImageAtMention}
+            followAnchor={imageDraftId ? followAnchor : null}
+          />
+        )}
+        {showTextGenDialog && textGenDraftId && (
+          <TextGenDialog
+            key={textGenDraftId}
+            initialText={typeof (textNodes.find((n) => n.id === textGenDraftId)?.data as Record<string, unknown> | undefined)?.prompt === 'string'
+              ? String((textNodes.find((n) => n.id === textGenDraftId)?.data as Record<string, unknown>).prompt)
+              : ''}
+            attachments={textAttachmentsOf(textGenDraftId)}
+            followAnchor={followAnchor}
+            onClose={() => setShowTextGenDialog(false)}
+            onSend={handleTextGenSend}
+            onParamsChange={(patch) => {
+              setTextNodes((prev) =>
+                prev.map((n) =>
+                  n.id === textGenDraftId
+                    ? {
+                        ...n,
+                        data: {
+                          ...n.data,
+                          ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
+                          ...(patch.modelId !== undefined ? { draftModelId: patch.modelId } : {}),
+                        },
+                      }
+                    : n,
+                ),
+              );
+            }}
           />
         )}
 
