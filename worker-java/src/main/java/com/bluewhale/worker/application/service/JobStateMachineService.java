@@ -18,6 +18,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -81,8 +82,11 @@ public class JobStateMachineService {
 
     /**
      * 生产装配构造（Spring 构造注入）：拆分组件的门面组合。
-     * 参数最少的 public 构造 = 唯一被 Spring 选中的构造（其余非 private 构造是测试直连兼容）。
+     * <p>
+     * 存在 7-mapper 测试直连构造 → 必须显式 {@code @Autowired} 钉住本构造，
+     * 否则 Spring 因多构造器退回找无参构造（No default constructor）。
      */
+    @Autowired
     public JobStateMachineService(
             GenerationJobMapper jobMapper,
             GenerationJobLogMapper jobLogMapper,
