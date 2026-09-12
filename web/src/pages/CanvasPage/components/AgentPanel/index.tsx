@@ -298,6 +298,7 @@ const SOLUTION_FIELD_LABELS = {
   asset_roles: '你给的素材各起什么作用',
   assumptions: '我替你定的几项',
   execution_route: '用哪个模型出片',
+  delivery_spec: '出片参数',
   next_steps: '接下来怎么做',
 } as const;
 
@@ -339,6 +340,12 @@ function SolutionCardBlock({
   const card = understanding.solution_card ?? null;
   const pending = understanding.status === 'awaiting_confirmation';
   const route = card?.execution_route;
+  const spec = card?.delivery_spec;
+  const specParts = [
+    spec?.aspect_ratio,
+    spec?.duration_seconds !== undefined ? `${spec.duration_seconds} 秒` : undefined,
+    spec?.resolution,
+  ].filter((one): one is string => Boolean(one));
 
   const act = (run: () => void) => {
     setBusy(true);
@@ -394,13 +401,19 @@ function SolutionCardBlock({
               ))}
             </ul>
           </SolutionField>
+          {/* 服务端按平台模型目录核过的那一行。推荐理由与备选不上卡——那两样在对话正文里说更清楚。 */}
           {route && (
             <SolutionField label={SOLUTION_FIELD_LABELS.execution_route}>
               <div className={styles.solutionFieldValue}>
                 {route.model_family}
                 {route.model_version ? ` ${route.model_version}` : ''}
-                {route.reason ? `——${route.reason}` : ''}
               </div>
+            </SolutionField>
+          )}
+          {/* 出片参数：用户真能判断对错的那几项，值域来自平台目录。没聊到的不占位。 */}
+          {specParts.length > 0 && (
+            <SolutionField label={SOLUTION_FIELD_LABELS.delivery_spec}>
+              <div className={styles.solutionFieldValue}>{specParts.join(' · ')}</div>
             </SolutionField>
           )}
           {card.next_steps && (

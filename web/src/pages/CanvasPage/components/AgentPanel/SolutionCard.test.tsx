@@ -156,6 +156,41 @@ describe('方案卡在对话里', () => {
    * 更不能因为读不到 `execution_route.model_family` 整张卡白屏（门只认这张卡上的按钮，
    * 卡渲染不出来首卡就永远出不来）。
    */
+  /**
+   * 出片参数是用户**真能判断对错**的那几项（他判断不了「5.0 Pro 还是 4.5」，但判断得了
+   * 「30 秒」）。值由服务端按平台目录的值域核过，所以卡上出现什么就是平台给得了什么。
+   */
+  it('出片参数一行显示，没聊到的项不占位', () => {
+    sessionMock.turns = turnWith(
+      understanding({ solution_card: { ...card!, delivery_spec: { aspect_ratio: '9:16', duration_seconds: 25 } } }),
+    );
+    mount();
+
+    const text = solutionCard()!.textContent ?? '';
+    expect(text).toContain('出片参数');
+    expect(text).toContain('9:16 · 25 秒');
+  });
+
+  it('没有出片参数时整项不显示', () => {
+    sessionMock.turns = turnWith(understanding());
+    mount();
+    expect(solutionCard()!.textContent ?? '').not.toContain('出片参数');
+  });
+
+  /** 推荐理由不上卡：它在对话正文里说更清楚，卡上只留用户能核对的那一层（拍板一）。 */
+  it('出片路线只显示家族与版本，不显示推荐理由', () => {
+    sessionMock.turns = turnWith(
+      understanding({
+        solution_card: { ...card!, execution_route: { model_family: 'Seedance', model_version: '2.5', reason: '因为它更快' } },
+      }),
+    );
+    mount();
+
+    const text = solutionCard()!.textContent ?? '';
+    expect(text).toContain('Seedance 2.5');
+    expect(text).not.toContain('因为它更快');
+  });
+
   it('没有出片路线时整项不显示，卡照常渲染', () => {
     const { execution_route: _route, ...withoutRoute } = card!;
     sessionMock.turns = turnWith(understanding({ solution_card: withoutRoute }));
