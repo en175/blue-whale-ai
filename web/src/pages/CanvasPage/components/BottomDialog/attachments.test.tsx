@@ -33,6 +33,33 @@ const fetchGenerationModels = vi.hoisted(() =>
 
 vi.mock('@/api/generation', () => ({ fetchGenerationModels }));
 
+/** PromptRefEditor 打桩（IKFA1O 编辑器替换）：textarea 输入透传结构化 onChange */
+vi.mock('../PromptRefEditor', async () => {
+  const { forwardRef, useImperativeHandle } = await import('react');
+  return {
+    default: forwardRef(function StubPromptRefEditor(
+      { onChange }: { onChange?: (doc: { version: number; segments: Array<{ kind: 'text'; text: string }> }) => void },
+      ref: React.Ref<unknown>,
+    ) {
+      useImperativeHandle(ref, () => ({
+        insertRefAtMention: () => {},
+        consumeMentionForPendingInsert: () => {},
+        insertRefAtPending: () => {},
+        dismissMention: () => {},
+        replaceRefAt: () => {},
+        clear: () => {},
+      }));
+      return createElement('textarea', {
+        'data-testid': 'chip-editor',
+        onChange: (e: Event) => {
+          const value = (e.target as HTMLTextAreaElement).value;
+          onChange?.({ version: 1, segments: value ? [{ kind: 'text', text: value }] : [] });
+        },
+      });
+    }),
+  };
+});
+
 let root: Root;
 let container: HTMLDivElement;
 
@@ -133,7 +160,7 @@ describe('BottomDialog 文本附件（IKDLQG）', () => {
       resolution: '720p',
       duration: 5,
       mode: 'prompt',
-    });
+    }, null);
   });
 
   it('附件正文仅含空白时沿用提示词必填（发送禁用）', async () => {

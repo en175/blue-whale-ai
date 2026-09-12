@@ -614,7 +614,7 @@ export default function CanvasPage() {
   videoDraftIdRef.current = videoDraftId;
   /** 节点工具条/首页带入视频对话框的种子；
    *  params 是首页 AI视频 带入的生成参数（选中首页所选模型/比例/清晰度/时长/模式） */
-  const [videoSeed, setVideoSeed] = useState<{ ts: number; text?: string; params?: VideoGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
+  const [videoSeed, setVideoSeed] = useState<{ ts: number; text?: string; doc?: PromptDoc | null; params?: VideoGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
   /** 音频对话框的重挂载 key；草稿入口（IKDMQT）同时携带文字描述/模型/目标节点 */
   const [audioSeed, setAudioSeed] = useState<{ ts: number; text?: string; modelId?: string; targetNodeId?: string } | null>(null);
   /** 面板当前绑定的音频草稿节点 id（IKDMQT）：仅草稿入口（侧栏新建/点击草稿卡）设置；
@@ -2195,6 +2195,7 @@ export default function CanvasPage() {
     setVideoSeed({
       ts: Date.now(),
       text: typeof d.prompt === 'string' ? d.prompt : '',
+      doc: restorePromptDoc(d.promptDoc, d.prompt),
       params: {
         modelId: preset?.modelId ?? (typeof d.draftModelId === 'string' ? d.draftModelId : undefined),
         aspectRatio: preset?.aspectRatio ?? (typeof d.draftRatio === 'string' ? d.draftRatio : undefined),
@@ -2538,10 +2539,11 @@ export default function CanvasPage() {
   /** 面板编辑实时写回视频草稿节点（IKDMQS）：参数随节点 data 进入自动保存，刷新后恢复 */
   const handleVideoDraftParamsChange = (
     nodeId: string,
-    patch: { prompt?: string; modelId?: string; size?: string; ratio?: string; duration?: number; mode?: string },
+    patch: { prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string; duration?: number; mode?: string },
   ) => {
     const data: Record<string, unknown> = {};
     if (patch.prompt !== undefined) data.prompt = patch.prompt;
+    if (patch.promptDoc !== undefined) data.promptDoc = patch.promptDoc;
     if (patch.modelId !== undefined) data.draftModelId = patch.modelId;
     if (patch.size !== undefined) data.draftSize = patch.size;
     if (patch.duration !== undefined) data.draftDuration = patch.duration;
@@ -3476,7 +3478,7 @@ export default function CanvasPage() {
       mode?: string;
       references: Array<{ assetId: string; url: string; name: string; mediaType: 'image' | 'video'; role: VideoRefRole }>;
     },
-    /** IKFA1M：结构化正文（仅 image 且含素材标签时携带）；服务端编译并冻结 */
+    /** IKFA1M/IKFA1O：结构化正文（image/video 含素材标签时携带）；服务端编译并冻结 */
     promptDoc?: PromptDoc | null,
   ) => {
     if (!currentId) {
@@ -3596,7 +3598,7 @@ export default function CanvasPage() {
             }),
         ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
         // IKFA1M：正文素材标签仅图片生成且含标签时携带；纯文本不上送保持旧语义
-        ...(type === 'image' && promptDoc ? { prompt_doc: promptDoc } : {}),
+        ...((type === 'image' || type === 'video') && promptDoc ? { prompt_doc: promptDoc } : {}),
       })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
@@ -4748,7 +4750,7 @@ export default function CanvasPage() {
     clearPendingVideoCanvasRefs();
   };
 
-  const handleDialogSend = async (text: string, opts: VideoGenOptions) => {
+  const handleDialogSend = async (text: string, opts: VideoGenOptions, promptDoc?: PromptDoc | null) => {
     if (applyingRef.current) return;
     const targetNodeId = videoSeed?.targetNodeId;
     if (videoDraftId) commitPendingVideoCanvasEdges(videoDraftId);
@@ -4811,6 +4813,8 @@ export default function CanvasPage() {
         undefined,
         jobRefs.length > 0 ? { references: jobRefs } : undefined,
         targetNodeId,
+        undefined,
+        promptDoc ?? undefined,
       );
       finishFreeMode();
     }
@@ -5885,6 +5889,7 @@ export default function CanvasPage() {
             planIndices={planReferenceErrors.videoIndices}
             key={videoSeed?.ts ?? 0}
             initialText={videoSeed?.text}
+            initialDoc={videoSeed?.doc ?? null}
             initialParams={videoSeed?.params}
             attachments={videoDraftAttachments}
             onReorderAttachments={

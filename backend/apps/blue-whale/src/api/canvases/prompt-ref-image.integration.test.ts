@@ -186,7 +186,7 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
     expect((job!.input.input_asset_ids as unknown[]).map(String)).toEqual([a, b]);
   });
 
-  it("失效标签 / 无效身份 / 非法版本 / 视频携带 → 400 且零任务（服务端复核，D4）", async () => {
+  it("失效标签 / 无效身份 / 非法版本 / 音频携带 → 400 且零任务（服务端复核，D4）", async () => {
     const projectId = (await projects.create("987654", "IKFA1M bad doc")).id;
     const a = await createImageAsset(projectId, "a");
 
@@ -205,14 +205,15 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
     expect(badVersion.code).toBe(400);
     expect(badVersion.msg).toBe("prompt_doc 无效");
 
-    const videoType = await createJob(projectId, {
-      type: "video",
+    // IKFA1O 后仅 audio 拒绝；video 已支持（视频侧用例见 prompt-ref-video.integration.test.ts）
+    const audioType = await createJob(projectId, {
+      type: "audio",
       expected_output_count: 1,
-      parameters: { prompt: "海浪", model_id: MODEL_ID, aspect_ratio: "16:9", resolution: "720p", duration: 5 },
+      parameters: { prompt: "海浪声", model_id: MODEL_ID },
       prompt_doc: { version: 1, segments: [] },
     });
-    expect(videoType.code).toBe(400);
-    expect(videoType.msg).toBe("正文素材标签暂仅支持图片生成");
+    expect(audioType.code).toBe(400);
+    expect(audioType.msg).toBe("正文素材标签暂仅支持图片与视频生成");
 
     expect(await jobCount(projectId)).toBe(0);
   });

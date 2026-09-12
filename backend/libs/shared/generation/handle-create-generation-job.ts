@@ -16,11 +16,14 @@ import {
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
   compilePromptDoc,
+  compileVideoPromptDoc,
   fail,
   ok,
   promptDocSchema,
   validatePromptDocRefs,
+  validateVideoPromptDocRefs,
   type PromptDoc,
+  type PromptDocRefFailure,
   type TextAttachmentSnapshot,
   previewSourceSchema,
 } from "@blue-whale/contracts";
@@ -529,12 +532,17 @@ const videoStrategy: GenerationTypeStrategy = {
     targetNodeId,
     textAttachments,
     referenceAssetIds,
+    promptDoc,
   }) {
     const input: Record<string, unknown> = {
       prompt: promptText,
       aspect_ratio: params.aspect_ratio,
       model_id: resolvedModelId,
     };
+    // IKFA1O：编译正文已通过接纳校验；同时冻结原始结构供审计与重试。
+    if (promptDoc) {
+      input.prompt_doc = promptDoc;
+    }
     if (isStr(params.resolution)) input.resolution = params.resolution;
     if (params.duration !== undefined) input.duration = params.duration;
     // IKDJNZ：单数组 references 冻结进 input 快照（保序），Worker 执行时按 role 拆帧/参考并做关联转换。
@@ -794,9 +802,9 @@ export async function handleCreateGenerationJob(
   const strategy = strategies[type];
   if (!strategy)
     return fail(400, "暂不支持该生成类型", { code: ERROR_UNSUPPORTED_TYPE });
-  // IKFA1M：正文素材标签暂仅图片生成支持；其他类型携带一律拒绝，不静默忽略。
-  if (type !== "image" && body.prompt_doc !== undefined) {
-    return fail(400, "正文素材标签暂仅支持图片生成", {
+  // IKFA1M/IKFA1O：正文素材标签支持图片与视频生成；audio 携带一律拒绝，不静默忽略。
+  if (type === "audio" && body.prompt_doc !== undefined) {
+    return fail(400, "正文素材标签暂仅支持图片与视频生成", {
       code: ERROR_UNSUPPORTED_INPUT,
     });
   }
@@ -953,24 +961,67 @@ export async function handleCreateGenerationJob(
       });
     }
   }
-  // IKFA1M：正文素材标签服务端复核——失效标签阻止生成；标签身份必须在最终输入集合内
+  // IKFA1M/IKFA1O：正文素材标签服务端复核——失效标签阻止生成；标签身份必须在最终输入集合内
   // （该集合已过存在性/归属/类型复核），保存与提交之间的变化不能绕过校验。
+  // 视频按提交的 references 实际结构编译（帧→角色名、普通参考→同类型编号），不信任客户端 label 缓存。
   if (promptDoc) {
-    const refErr = validatePromptDocRefs(
-      promptDoc,
-      refs.value.referenceAssetIds.map(String),
-    );
-    if (refErr?.kind === "invalid_tag") {
-      return fail(400, "存在已失效的素材标签，请删除后再提交", {
-        code: ERROR_INVALID_REFERENCE,
-      });
+    /** 标签复核失败 → 统一 400 响应（invalid_tag / unknown_asset 两分支共用文案与错误码） */
+    const failPromptDocRefs = (failure: PromptDocRefFailure | null) => {
+      if (failure?.kind === "invalid_tag") {
+        return fail(400, "存在已失效的素材标签，请删除后再提交", {
+          code: ERROR_INVALID_REFERENCE,
+        });
+      }
+      if (failure?.kind === "unknown_asset") {
+        return fail(400, "正文素材标签指向无效的参考素材", {
+          code: ERROR_INVALID_REFERENCE,
+        });
+      }
+      return null;
+    };
+    if (type === "video") {
+      const parsed = parseReferences(body.references);
+      if (parsed.kind !== "ok") {
+        return fail(400, "视频正文素材标签请求必须携带单数组 references", {
+          code: ERROR_UNSUPPORTED_INPUT,
+        });
+      }
+      const refItems = parsed.items.map((item) => ({
+        id: String(item.asset_id ?? item.material_id),
+        role: item.role,
+        type: item.type,
+      }));
+      // IKFA1O：references 单数组不走 reference_asset_ids 既有存在性复核——
+      // 携带标签时补齐（与生图路径同一 deps）：本地 asset 必须存在/有权，且声明 type
+      // 与素材实际类型一致（编号由 type 派生，谎报 type 会错编 图片N/视频N/音频N）。
+      const localIds = parsed.items.filter((item) => item.asset_id !== undefined).map((item) => String(item.asset_id));
+      if (localIds.length > 0) {
+        const resolvedRefs = await deps.assets.resolveInputAssets(localIds, userId, projectId);
+        if (resolvedRefs.length !== localIds.length) {
+          return fail(400, "参考素材不存在或无权访问", {
+            code: ERROR_INVALID_REFERENCE,
+          });
+        }
+        const resolvedTypes = new Map(localIds.map((id, i) => [id, resolvedRefs[i]!.type]));
+        const mismatch = parsed.items.some(
+          (item) => item.asset_id !== undefined && resolvedTypes.get(String(item.asset_id)) !== item.type,
+        );
+        if (mismatch) {
+          return fail(400, "参考素材类型与声明不符", {
+            code: ERROR_INVALID_REFERENCE_TYPE,
+          });
+        }
+      }
+      const refErr = failPromptDocRefs(validateVideoPromptDocRefs(promptDoc, refItems));
+      if (refErr) return refErr;
+      promptText = compileVideoPromptDoc(promptDoc, refItems);
+    } else {
+      const refErr = failPromptDocRefs(
+        validatePromptDocRefs(promptDoc, refs.value.referenceAssetIds.map(String)),
+      );
+      if (refErr) return refErr;
+      promptText = compilePromptDoc(promptDoc, refs.value.referenceAssetIds.map(String));
     }
-    if (refErr?.kind === "unknown_asset") {
-      return fail(400, "正文素材标签指向无效的参考素材", {
-        code: ERROR_INVALID_REFERENCE,
-      });
-    }
-    promptText = compilePromptDoc(promptDoc, refs.value.referenceAssetIds.map(String));
     // 复用既有正文约束；后续附件组合也必须使用实际冻结的正文。
     const compiledError = strategy.validate({ ...body, parameters: { ...params, prompt: promptText } });
     if (compiledError) {
