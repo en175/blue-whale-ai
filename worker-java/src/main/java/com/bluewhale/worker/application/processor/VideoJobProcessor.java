@@ -160,20 +160,20 @@ public class VideoJobProcessor implements JobProcessor {
             return;
         }
 
-        // 3. 解封凭证（video-job-runner.ts:218-222）
-        Object sealedObj = claim.input().get("provider_credential");
-        if (!(sealedObj instanceof String sealedCredential) || sealedCredential.isEmpty()) {
+        // 3. 取明文凭证（修正四：去密，video-job-runner.ts:218-222）
+        Object credentialObj = claim.input().get("provider_credential");
+        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
             failVideo(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
                     "视频任务缺少供应商凭证");
             return;
         }
         String providerToken;
         try {
-            providerToken = credentialService.open(sealedCredential);
+            providerToken = credentialService.open(providerCredential);
         } catch (Exception e) {
-            log.debug("[video] 凭证解密失败 jobId={}: {}", claim.id(), e.getMessage(), e);
+            log.debug("[video] 凭证无效 jobId={}: {}", claim.id(), e.getMessage(), e);
             failVideo(claim, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "视频任务凭证解密失败");
+                    "视频任务凭证无效");
             return;
         }
 

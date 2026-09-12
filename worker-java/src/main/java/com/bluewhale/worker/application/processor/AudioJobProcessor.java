@@ -24,7 +24,7 @@ import java.util.Optional;
 /**
  * 音频作业处理器（generation-worker.ts:367-446 processClaimedJob audio 分支逐字移植）。
  * <p>
- * 编排流程：claim → 解封凭证 → 校验模型 → 解析参考素材 → 调 TTS → 转存 → createAsset → completeJob。
+ * 编排流程：claim → 取明文凭证 → 校验模型 → 解析参考素材 → 调 TTS → 转存 → createAsset → completeJob。
  * <p>
  * 错误码映射（附录 A audio + generation-worker.ts:370-395）：
  * <ul>
@@ -133,20 +133,20 @@ public class AudioJobProcessor implements JobProcessor {
             return;
         }
 
-        // 2. 解封凭证（generation-worker.ts:368-376）
-        Object sealedObj = input.get("provider_credential");
-        if (!(sealedObj instanceof String sealedCredential) || sealedCredential.isEmpty()) {
+        // 2. 取明文凭证（修正四：去密，generation-worker.ts:368-376）
+        Object credentialObj = input.get("provider_credential");
+        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
             failClaimed(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
                     "音频任务缺少供应商凭证");
             return;
         }
         String providerToken;
         try {
-            providerToken = credentialService.open(sealedCredential);
+            providerToken = credentialService.open(providerCredential);
         } catch (Exception e) {
-            log.debug("[audio] 凭证解密失败 jobId={}: {}", job.id(), e.getMessage(), e);
+            log.debug("[audio] 凭证无效 jobId={}: {}", job.id(), e.getMessage(), e);
             failClaimed(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "音频任务凭证解密失败");
+                    "音频任务凭证无效");
             return;
         }
 

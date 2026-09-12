@@ -1,11 +1,6 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
 import { Redis } from "ioredis";
-import {
-  loadGenerationCredentialSecret,
-  openGenerationCredential,
-  sealGenerationCredential,
-} from "@blue-whale/core";
 import { redisConnectionOptions } from "@lib/shared/rate-limit/redis-connection.js";
 
 /** 会话 7 天滑动过期（Redis TTL）。 */
@@ -31,7 +26,7 @@ type SessionPayload = {
   role: number;
   status: number;
   email: string | null;
-  /** AES-256-GCM 密封后的上游 sk-（明文不入 Redis）。 */
+  /** 上游 sk-（修正四：明文存 Redis，不再 AES 密封）。 */
   sealedSk: string;
   /** role/status 最近一次回源 new-api 复核的时间戳（ms）。 */
   verifiedAt: number;
@@ -83,10 +78,7 @@ export class SessionService implements OnModuleDestroy {
       role: input.role,
       status: input.status,
       email: input.email,
-      sealedSk: sealGenerationCredential(
-        input.sk,
-        loadGenerationCredentialSecret(),
-      ),
+      sealedSk: input.sk,
       verifiedAt: Date.now(),
     };
     // 会话键 + 按用户索引键同写同 TTL（EX），冻结时可枚举该用户全部会话。
@@ -126,12 +118,12 @@ export class SessionService implements OnModuleDestroy {
     );
     let sk: string;
     try {
-      sk = openGenerationCredential(
-        data.sealedSk,
-        loadGenerationCredentialSecret(),
-      );
+      if (typeof data.sealedSk !== "string" || data.sealedSk.length === 0) {
+        throw new Error("会话凭证缺失");
+      }
+      sk = data.sealedSk;
     } catch {
-      // 密封凭证损坏/密钥轮换：会话不可用，删除并要求重新登录（而非 503）。
+      // 凭证缺失/损坏：会话不可用，删除并要求重新登录（而非 503）。
       await this.redis.del(key);
       return null;
     }

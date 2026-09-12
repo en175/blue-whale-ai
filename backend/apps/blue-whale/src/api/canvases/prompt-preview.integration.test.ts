@@ -4,7 +4,6 @@ import { UsageController } from "../usage/usage.controller.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { processJob } from "@lib/shared/generation/worker/generation-worker.js";
 import { createWorkerRepo } from "@lib/shared/persistence/index.js";
-import { openGenerationCredential } from "@blue-whale/core";
 import { GenerationJobsController } from "../generation/generation-jobs.controller.js";
 import { GenerationModelsController } from "../generation/models.controller.js";
 import { JobsController } from "../jobs/jobs.controller.js";
@@ -76,12 +75,10 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
       } },
     }] }));
   });
-  const previousCredentialSecret = process.env.GENERATION_CREDENTIAL_SECRET;
   const previousDatabase = process.env.DATABASE_URL;
   const previousNewApi = process.env.NEW_API_BASE_URL;
   const previousAgent = process.env.AGENT_SERVICE_BASE_URL;
   beforeAll(async () => {
-    process.env.GENERATION_CREDENTIAL_SECRET = "iketsw-isolated-test-secret";
     process.env.DATABASE_URL = process.env.IKDLQE_DATABASE_URL;
     await new Promise<void>(resolve => agent.listen(0, "127.0.0.1", resolve));
     process.env.AGENT_SERVICE_BASE_URL = `http://127.0.0.1:${(agent.address() as { port: number }).port}`;
@@ -138,8 +135,6 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
     else process.env.DATABASE_URL = previousDatabase;
     if (previousAgent === undefined) delete process.env.AGENT_SERVICE_BASE_URL;
     else process.env.AGENT_SERVICE_BASE_URL = previousAgent;
-    if (previousCredentialSecret === undefined) delete process.env.GENERATION_CREDENTIAL_SECRET;
-    else process.env.GENERATION_CREDENTIAL_SECRET = previousCredentialSecret;
     if (previousNewApi === undefined) delete process.env.NEW_API_BASE_URL;
     else process.env.NEW_API_BASE_URL = previousNewApi;
     await prisma.client.$disconnect();
@@ -217,7 +212,7 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
       await prisma.client.assets.updateMany({ where: { id: { in: assets.map(a => a.id) } }, data: { url: "https://changed.invalid/later", material_id: null } });
       const jobId = (await generated.json()).data.generation_job_id;
       const execute = () => runVideoJobStep({ repo: createWorkerRepo(prisma.client), workerId: "iketsx-worker", jobId,
-        credentialVault: { open: value => openGenerationCredential(value, "iketsw-isolated-test-secret") },
+        credentialVault: { open: value => value },
         createProvider: token => createNewApiVideoTaskProvider({ baseUrl: process.env.AGENT_SERVICE_BASE_URL!, token }),
         mediaRelay: { persist: async url => ({ url, storageKey: null, mime: "video/mp4", size: 100 }) },
       });
@@ -227,7 +222,7 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
         await promisify(execFile)("docker", ["run", "--rm", "-v", `${process.cwd()}/worker-java:/work`, "-v", "iketsx-maven-cache:/root/.m2", "-w", "/work",
           "-e", `IKETSX_JOB_ID=${jobId}`, "-e", "IKETSX_JDBC_URL=jdbc:mysql://host.docker.internal:23416/iketsx?useSSL=false&allowPublicKeyRetrieval=true",
           "-e", `IKETSX_PROVIDER_URL=${process.env.AGENT_SERVICE_BASE_URL!.replace("127.0.0.1", "host.docker.internal")}`,
-          "-e", "GENERATION_CREDENTIAL_SECRET=iketsw-isolated-test-secret", "maven:3.9-eclipse-temurin-21", "mvn", "-q", "-Dtest=PromptPlanVideoIntegrationTest", "test"], { timeout: 180000, maxBuffer: 2000000 });
+          "maven:3.9-eclipse-temurin-21", "mvn", "-q", "-Dtest=PromptPlanVideoIntegrationTest", "test"], { timeout: 180000, maxBuffer: 2000000 });
       } else {
         await vi.waitFor(async () => expect(await execute()).toBe(jobId), { timeout: 3000 });
       }
@@ -312,7 +307,7 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
       await prisma.client.assets.update({ where: { id: asset.id }, data: { url: `${asset.url}?edited-after-submit` } });
       const requests: Array<Record<string, unknown>> = [];
       await vi.waitFor(async () => expect(await processJob({ repo: createWorkerRepo(prisma.client), workerId: "iketsw-worker", jobId: generated.data.generation_job_id, userId: "987654",
-        credentialVault: { open: value => openGenerationCredential(value, "iketsw-isolated-test-secret") },
+        credentialVault: { open: value => value },
         createImageProvider: () => ({ generate: async request => { requests.push(request); return [{ url: asset.url, width: 1024, height: 1024 }]; } }),
         createAudioProvider: () => { throw new Error("unexpected audio"); },
       })).toBe(generated.data.generation_job_id), { timeout: 3000 });
@@ -670,7 +665,7 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
       expect((await jobs()).find((j: { input: { target_node_id: string } }) => j.input.target_node_id === "history").input.prompt_plan_snapshot).toEqual(oldSnapshot);
       const repairedVideo = (await jobs()).find((j: { input: { target_node_id: string } }) => j.input.target_node_id === "video");
       const execute = () => runVideoJobStep({ repo: createWorkerRepo(prisma.client), workerId: "iketsz-worker", jobId: repairedVideo.job_id,
-        credentialVault: { open: value => openGenerationCredential(value, "iketsw-isolated-test-secret") },
+        credentialVault: { open: value => value },
         createProvider: token => createNewApiVideoTaskProvider({ baseUrl: process.env.AGENT_SERVICE_BASE_URL!, token }),
         mediaRelay: { persist: async url => ({ url, storageKey: null, mime: "video/mp4", size: 100 }) },
       });
@@ -1039,7 +1034,7 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
       expect(jobId).toMatch(/^[0-9]+$/);
       await vi.waitFor(async () => {
         await runVideoJobStep({ repo: createWorkerRepo(prisma.client), workerId: "iketsx-browser-worker", jobId,
-          credentialVault: { open: value => openGenerationCredential(value, "iketsw-isolated-test-secret") },
+          credentialVault: { open: value => value },
           createProvider: token => createNewApiVideoTaskProvider({ baseUrl: process.env.AGENT_SERVICE_BASE_URL!, token }),
           mediaRelay: { persist: async url => ({ url, storageKey: null, mime: "video/mp4", size: 100 }) },
         });

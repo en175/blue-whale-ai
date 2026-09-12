@@ -1,9 +1,8 @@
 # worker-java 迁移契约（IKEL4A / ADR-0084）
 
-- **状态**：**已冻结 + 修正一 + 修正二**（2026-09-10，IKEL4H 从代码逐项核对回填；修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
+- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四**（2026-09-10 IKEL4H 核对回填；修正一：cost_reservations 移出范围；修正二：架构改 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：2026-09-12 代码整备编码规范成文 §10 + 扩展契约附录 C；修正四：2026-09-12 凭证去密——Redis 会话 sealedSk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
 
 ## 0. 修正一（2026-09-10）：cost_reservations 记账移出迁移范围（工单 IKEF1K）
-
 - 决策：`cost_reservations` 预扣/结算/release 记账**整体下线**（IKEF1K），**Java 侧一概不实现**。本修正覆盖 §3.3、§4、§5、§6、§8 中所有结算/退款语义：`.../complete`、`.../fail`、`.../requeue` 端点实现必须封装**删除后**的逻辑，禁止先行按旧语义封装。
 - 实施顺序钉死：IKEF1K 删除（TS 产品路径 → release 批次）→ 本契约修正二（终态语义定稿）→ IKEL4J 端点 → 四刀。
 - **不受删除影响的外部事实（保留）**：new-api 网关按 token 真实扣费；`ERROR_QUOTA_EXHAUSTED` 识别（HTTP 402 / 文案正则，§5 优先级不变）；失败分类中该码仍是终态。receipt/consume-log 查询随 settle 一并消失；展示额度口径（quota/50000）是另一契约，不在本单。
@@ -81,7 +80,7 @@
 ## 5. new-api 网关与计费契约
 
 - 端点：`POST /v1/images/generations`、`POST /v1/images/edits`（multipart）、`POST /v1/video/generations`、`GET /v1/video/generations/{taskId}`、`POST /v1/audio/speech`、`GET /api/log/self?request_id=&type=2`、`GET /api/pricing`。
-- 请求头：`Authorization: Bearer <per-job 解封凭证>`（AES sealed credential）、`X-Trace-Id`、**`X-Client-System: bluewhale`**（ADR-0080 白名单头，缺了登录隔离会破）、`Content-Type`。
+- 请求头：`Authorization: Bearer <明文 sk token>`（**修正四：凭证去密**——2026-09-12 用户拍板，Redis 会话 sealedSk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖）、`X-Trace-Id`、**`X-Client-System: bluewhale`**（ADR-0080 白名单头，缺了登录隔离会破）、`Content-Type`。
 - **receipt**：响应头 `X-Oneapi-Request-Id` → `getConsumeLogByRequestId` 精确查本次扣费 quota → `quotaToFen` 得 `actual_amount_fen`（image/audio 结算路径）；查不到 → 落 0 + warn（非失败）。查询侧重试 500ms×3（`generation-worker.service.ts:23-43`）。video 不用 receipt，读 `TaskDto.quota`（终态时=实际扣费）；与预留偏差 >50% 出 warn（`video-job-runner.ts:321-334`）。
 - 换算：`quotaToFen = round(quota/500000 × 7.3 × 100)`（env `QUOTA_PER_UNIT`/`USD_EXCHANGE_RATE` 可覆盖）；仅记账，**≠ 展示额度契约（quota/50000）**，两口径勿混。
 - 预扣创建在主 API（`createJobWithinTx`，与 job 行同事务，`cost_reservations reserved`，provider 恒 `"volc"`，4 个版本字段缺省 `"dev"`）——worker/Java 均不建预扣。

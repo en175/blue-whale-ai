@@ -40,7 +40,7 @@ import java.util.LinkedHashSet;
 /**
  * 图片作业处理器（generation-worker.ts:499-685 image 分支逐字移植）。
  * <p>
- * 编排流程：claim → 校验输入 → 查能力 → 校验参考图 → 解封凭证 → 渠道映射 →
+ * 编排流程：claim → 校验输入 → 查能力 → 校验参考图 → 取明文凭证 → 渠道映射 →
  * 调 provider（支持批量循环）→ 转存 → createAsset 循环 → completeJob。
  * <p>
  * 错误码映射（附录 A image + generation-worker.ts）：
@@ -277,20 +277,20 @@ public class ImageJobProcessor implements JobProcessor {
             }
         }
 
-        // 5. 解封凭证（generation-worker.ts:500-507）
-        Object sealedObj = input.get("provider_credential");
-        if (!(sealedObj instanceof String sealedCredential) || sealedCredential.isEmpty()) {
+        // 5. 取明文凭证（修正四：去密，generation-worker.ts:500-507）
+        Object credentialObj = input.get("provider_credential");
+        if (!(credentialObj instanceof String providerCredential) || providerCredential.isEmpty()) {
             failClaimed(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
                     "图片任务缺少供应商凭证");
             return;
         }
         String providerToken;
         try {
-            providerToken = credentialService.open(sealedCredential);
+            providerToken = credentialService.open(providerCredential);
         } catch (Exception e) {
-            log.debug("[image] 凭证解密失败 jobId={}: {}", job.id(), e.getMessage(), e);
+            log.debug("[image] 凭证无效 jobId={}: {}", job.id(), e.getMessage(), e);
             failClaimed(job, GenerationError.ERROR_PROVIDER_CREDENTIAL_MISSING,
-                    "图片任务凭证解密失败");
+                    "图片任务凭证无效");
             return;
         }
 
