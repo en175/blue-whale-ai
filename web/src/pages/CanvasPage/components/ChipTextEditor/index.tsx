@@ -30,6 +30,7 @@ import {
   HISTORIC_TAG,
   HISTORY_PUSH_TAG,
   CLEAR_HISTORY_COMMAND,
+  TextNode,
   type RangeSelection,
   type NodeKey,
   type LexicalEditor,
@@ -62,6 +63,8 @@ export interface ChipTextEditorHandle {
   setText: (text: string) => void;
   /** 清空全部内容（发送后调用） */
   clear: () => void;
+  /** 去掉末尾尚未确认的 @检索词（选中素材引用后调用） */
+  stripTrailingAtQuery: () => void;
   /** 捕获本次提交内容，成功后仅移除这些节点，保留等待期间的新输入。 */
   captureSubmission: () => () => void;
   focus: () => void;
@@ -269,6 +272,25 @@ const ChipTextEditor = forwardRef<ChipTextEditorHandle, ChipTextEditorProps>(fun
         root.clear();
         root.append($createParagraphNode());
       }, { onUpdate: () => editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined) });
+    },
+    stripTrailingAtQuery: () => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.update(() => {
+        const nodes = $nodesOfType(TextNode);
+        for (let i = nodes.length - 1; i >= 0; i -= 1) {
+          const node = nodes[i];
+          const text = node.getTextContent();
+          const next = text.replace(/@([^\s@]*)$/, '');
+          if (next !== text) {
+            node.setTextContent(next);
+            node.selectEnd();
+            return;
+          }
+          if (text.trim().length > 0) return;
+        }
+      });
+      editor.focus();
     },
     captureSubmission: () => {
       const editor = editorRef.current;

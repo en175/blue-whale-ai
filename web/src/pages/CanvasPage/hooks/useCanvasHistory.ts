@@ -216,11 +216,13 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
       case 'groupMove': {
         applyPositions(entry.nodeOld);
         handlesRef.current.setGroups((prev) =>
-          prev.map((g) =>
-            g.id === entry.groupId
-              ? { ...g, box: { ...entry.oldBox }, excludedIds: [...entry.excludedBefore] }
-              : g,
-          ),
+          prev.map((g) => {
+            if (g.id === entry.groupId) {
+              return { ...g, box: { ...entry.oldBox }, excludedIds: [...entry.excludedBefore] };
+            }
+            const peer = entry.peerExclusions?.find((p) => p.groupId === g.id);
+            return peer ? { ...g, excludedIds: [...peer.excludedBefore] } : g;
+          }),
         );
         return entry;
       }
@@ -265,11 +267,13 @@ export function useCanvasHistory(handles: CanvasHistoryHandles) {
       case 'groupMove':
         applyPositions(entry.nodeNew);
         handlesRef.current.setGroups((prev) =>
-          prev.map((g) =>
-            g.id === entry.groupId
-              ? { ...g, box: { ...entry.newBox }, excludedIds: [...entry.excludedAfter] }
-              : g,
-          ),
+          prev.map((g) => {
+            if (g.id === entry.groupId) {
+              return { ...g, box: { ...entry.newBox }, excludedIds: [...entry.excludedAfter] };
+            }
+            const peer = entry.peerExclusions?.find((p) => p.groupId === g.id);
+            return peer ? { ...g, excludedIds: [...peer.excludedAfter] } : g;
+          }),
         );
         return;
     }

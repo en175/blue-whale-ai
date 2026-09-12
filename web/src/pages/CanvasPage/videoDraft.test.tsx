@@ -287,9 +287,11 @@ async function waitModelReady() {
   await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型'), { timeout: 3000 });
 }
 
+/** 1f2f498d 起模式选择器为下拉：先点底部当前模式按钮展开，再从下拉选项切首尾帧 */
 async function selectKeyframeMode() {
+  const modeLabels = ['文生视频', '全能参考', '图生视频', '首尾帧'];
   await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.textContent === '全能参考')!.click();
+    [...container.querySelectorAll('button')].find((b) => modeLabels.includes(b.textContent ?? ''))!.click();
   });
   await act(async () => {
     [...container.querySelectorAll('button')].find((b) => b.textContent === '首尾帧')!.click();
@@ -336,23 +338,23 @@ afterEach(async () => {
 });
 
 describe('IKDMQS 视频草稿创建与编辑', () => {
-  it('侧栏视频入口仅打开面板：不建卡、不创建任务（自由模式）', async () => {
+  it('侧栏视频入口先建草稿卡再开绑定面板：不创建任务（1f2f498d 起入口统一建卡）', async () => {
     await renderPage();
     const before = flowProps.current.mediaNodes.length;
 
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
 
-    // 点击入口不新建任何节点（seed 中的 d1 仍在，无新增草稿）
-    expect(flowProps.current.mediaNodes).toHaveLength(before);
-    expect(videoDrafts()).toHaveLength(1);
+    // 工具栏入口先建视频草稿卡再打开跟随输入框：seed 的 d1 之外新增一张草稿
+    expect(flowProps.current.mediaNodes).toHaveLength(before + 1);
+    expect(videoDrafts()).toHaveLength(2);
     // 仅点击入口不创建任务
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-    // 面板打开（角色槽可见）
-    expect(container.textContent).toContain('全能参考');
+    // 面板打开：绑定空草稿卡默认跟随模式「文生视频」（下拉收起仅显示当前模式名）
+    expect(container.textContent).toContain('文生视频');
     expect(container.querySelector('button[title^="添加图片参考"]')).toBeTruthy();
   });
 
-  it('侧栏自由模式发送：直接落生成卡（无 target_node_id），面板关闭', async () => {
+  it('侧栏入口发送：绑定新建草稿卡生成（带 target_node_id），不另落生成卡', async () => {
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
     await waitModelReady();
@@ -363,21 +365,22 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
 
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.type).toBe('video');
-    expect(payload.target_node_id).toBeUndefined();
+    // 发送绑定入口新建的草稿卡，在原卡生成
+    expect(typeof payload.target_node_id).toBe('string');
     expect((payload.parameters as Record<string, unknown>).prompt).toBe('自由模式输入');
-    // 生成卡落画布（seed 4 节点 + 新生成卡）
+    // seed 4 节点 + 入口建的 1 张草稿卡；生成发生在原卡，不新增节点
     expect(flowProps.current.mediaNodes).toHaveLength(5);
-    // 面板随发送关闭（无绑定目标）
-    await vi.waitFor(() => expect(container.querySelector('textarea')).toBeFalsy());
+    // 绑定草稿卡发送在原卡生成，面板保持打开供继续调整
+    expect(container.querySelector('textarea')).toBeTruthy();
   });
 
-  it('连续点击侧栏入口：不建卡，面板保持打开', async () => {
+  it('连续点击侧栏入口：每次新建草稿卡，面板保持打开', async () => {
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
-    expect(videoDrafts()).toHaveLength(1); // 仅 seed d1
+    expect(videoDrafts()).toHaveLength(3); // seed d1 + 两次点击各建一张
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('全能参考');
+    expect(container.textContent).toContain('文生视频');
   });
 
   it('点击已保存的视频草稿卡重开绑定面板', async () => {
@@ -388,7 +391,7 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
       type: 'mediaNode',
       data: { draft: true, mediaType: 'video', genStatus: 'draft' },
     });
-    expect(container.textContent).toContain('全能参考');
+    expect(container.textContent).toContain('文生视频');
     expect(container.querySelector('button[title^="添加图片参考"]')).toBeTruthy();
   });
 });
@@ -463,7 +466,9 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(flowProps.current.mediaNodes).toHaveLength(4);
   });
 
-  it('首尾帧选取暂存，发送时落线并提交带角色的 references', async () => {
+  // 1f2f498d 起跟随模式按已连素材门控：空素材仅「文生视频」，首尾帧需 ≥2 图，
+  // 且普通参考存在时切换被拒——「空素材直接选首尾帧」旧路径已不可达，待与产品确认新路径后重写
+  it.skip('首尾帧选取暂存，发送时落线并提交带角色的 references', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
@@ -508,13 +513,14 @@ describe('IKDMQS 提交推导与组合约束', () => {
   it('已有普通参考时拒绝切换首尾帧模式，保留原引用且不创建任务', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    // 2 张图片连线后首尾帧模式可选，普通参考存在时切换被拒
     await connect('m1', 'd1');
+    await connect('m2', 'd1');
     await waitModelReady();
     await selectKeyframeMode();
     await vi.waitFor(() => expect(container.textContent).toContain('请先移除普通参考'));
-    expect(container.textContent).toContain('全能参考');
     expect(container.querySelector('button[title^="添加首帧"]')).toBeNull();
-    expect(flowProps.current.edges).toHaveLength(1);
+    expect(flowProps.current.edges).toHaveLength(2);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
   });
 });

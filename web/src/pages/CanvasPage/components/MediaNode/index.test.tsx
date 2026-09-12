@@ -95,9 +95,9 @@ describe('MediaNode selected toolbar', () => {
 });
 
 describe('MediaNode draft overlay (IKDMQQ)', () => {
-  it('待生成草稿：渲染待生成占位而非素材已被删除，无取消/重试按钮', async () => {
+  it('待生成草稿：渲染按类型占位文案而非素材已被删除，无取消/重试按钮', async () => {
     await renderNode('image', { genStatus: 'draft', selected: false, data: { src: '', draft: true } });
-    expect(mountNode.textContent).toContain('待生成');
+    expect(mountNode.textContent).toContain('图片生成');
     expect(mountNode.textContent).not.toContain('素材已被删除');
     expect(mountNode.textContent).not.toContain('取消生成');
     expect(mountNode.textContent).not.toContain('重试');

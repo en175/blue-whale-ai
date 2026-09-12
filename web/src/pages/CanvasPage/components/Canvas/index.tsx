@@ -30,11 +30,14 @@ import ProductNode from '../ProductNode';
 import AssetCardNode from '../AssetCardNode';
 import CustomEdge from '../CustomEdge';
 import GroupOverlay from '../GroupOverlay';
+import GroupFrameNode from '../GroupFrameNode';
 import { canvasDeleteKeyAction, deleteSelectedCanvasNodes, isEditableKeyboardTarget } from './keyboardDelete';
 import { useCanvasPan } from './useCanvasPan';
 import {
   MIN_GROUP_MEMBERS,
-  membersInGroupBox,
+  exclusiveMembersInGroup,
+  groupFrameZ,
+  groupMemberZ,
   type CanvasGroup,
   type GroupFrameDragResult,
 } from '../../canvasGroups';
@@ -68,6 +71,8 @@ interface FlowCanvasProps {
   viewport?: Viewport;
   /** 视口变更回调（拖拽/缩放结束），供自动保存使用 */
   onViewportChange?: (v: Viewport) => void;
+  /** 平移/缩放过程中的视口（不落盘，仅供跟随输入框对齐） */
+  onViewportLive?: (v: Viewport) => void;
   /** 节点拖拽结束回调（同步坐标到父组件，触发自动保存）。多选整组拖拽时 draggedNodes 含同组全部节点 */
   onNodeDragStop?: (node: Node, draggedNodes: Node[]) => void;
   onDeleteNode: (id: string) => void;
@@ -104,6 +109,8 @@ interface FlowCanvasProps {
   onDownloadGroup?: (nodeIds: string[]) => void;
   /** 整组拖动结束（动态成员 + 固定矩形），父级落坐标/矩形并登记撤销 */
   onGroupFrameDragStop?: (res: GroupFrameDragResult) => void;
+  /** 拖组置顶：数组末尾为最上层，上层组框与素材压住下层 */
+  onBringGroupToFront?: (groupId: string) => void;
   /** 组→目标：从组右侧「+」拖到某节点，为组内每个成员各建一条边到目标 */
   onConnectGroupToTarget?: (memberIds: string[], targetId: string) => void;
   onConnectGroupDrop?: (memberIds: string[], targetId: string | null, client: { x: number; y: number }) => void;
@@ -113,7 +120,7 @@ interface FlowCanvasProps {
   onPaneContextMenu?: (pt: { clientX: number; clientY: number }) => void;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -131,11 +138,22 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === selectRequest.id })));
   }, [selectRequest, setNodes]);
 
-  const nodeTypes: NodeTypes = useMemo(() => ({ textNode: TextNode, mediaNode: MediaNode, productNode: ProductNode, assetNode: AssetCardNode }), []);
+  const nodeTypes: NodeTypes = useMemo(
+    () => ({
+      textNode: TextNode,
+      mediaNode: MediaNode,
+      productNode: ProductNode,
+      assetNode: AssetCardNode,
+      groupFrame: GroupFrameNode,
+    }),
+    [],
+  );
   const edgeTypes: EdgeTypes = useMemo(() => ({ custom: CustomEdge }), []);
   const { setCenter, setViewport, screenToFlowPosition } = useReactFlow();
   const onViewportChangeRef = useRef(onViewportChange);
   onViewportChangeRef.current = onViewportChange;
+  const onViewportLiveRef = useRef(onViewportLive);
+  onViewportLiveRef.current = onViewportLive;
 
   /** 波点缩放补偿：屏幕点半径 = size × zoom，取 size = 1/zoom 使屏幕点径恒定约 2px，
    * 缩小视图（如 58%）时波点依然清晰可见 */
@@ -346,31 +364,55 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const onGroupFrameDragStopRef = useRef(onGroupFrameDragStop);
   onGroupFrameDragStopRef.current = onGroupFrameDragStop;
 
-  /** 组成员视觉层级：组成员节点的 zIndex 抬到普通节点之上——ReactFlow 把全部节点
-   *  渲染在同一 renderer 层，节点间叠盖只靠 node.zIndex；组成员给更高的基础 zIndex，
-   *  使「组层内的素材」在视觉上高于未进组的素材。选中/拖拽时 ReactFlow 会在 base 之上
-   *  叠加 SELECTED_NODE_Z(1000)，不影响此基础排序。
-   *  拖动整组期间逻辑框 g.box 暂不更新（落盘在 dragStop），成员随偏移移出固定框会使
-   *  membersInGroupBox 漏判；故 GroupOverlay 在拖组起止上抛「冻结的本次拖动成员集合」，
-   *  并入 memberIds，保证拖组途中成员仍维持高 zIndex，不被组外素材盖住。 */
+  /** 组成员按组数组顺序分层：后创建/后拖动的组在上，组框与素材一起压住下层。
+   *  拖组途中逻辑框未落盘，成员用冻结集合维持所属层。 */
   const [frameDragMemberIds, setFrameDragMemberIds] = useState<Set<string>>(new Set());
+  const [frameDragOffset, setFrameDragOffset] = useState<{ id: string; x: number; y: number } | null>(null);
   /** 节点拖拽中标记：拖动节点（含拖组内成员出组）时隐藏框选悬浮条（成组/下载标签），
    *  这些标签只在静止框选状态出现，不应跟随被拖节点移动。 */
   const [isDraggingNode, setIsDraggingNode] = useState(false);
-  const memberIds = useMemo(() => {
-    const ids = new Set<string>(frameDragMemberIds);
-    groups?.forEach((g) => membersInGroupBox(nodes, g.box, g.excludedIds).forEach((n) => ids.add(n.id)));
-    return ids;
-  }, [groups, nodes, frameDragMemberIds]);
-  const nodesForFlow = useMemo(
-    () =>
-      nodes.map((n) => {
-        // 正在整组拖动的成员层级最高（压住其他组与节点），普通组员次之，组外节点最低
-        const z = frameDragMemberIds.has(n.id) ? 100 : memberIds.has(n.id) ? 10 : 0;
-        return { ...n, zIndex: z };
-      }),
-    [nodes, memberIds, frameDragMemberIds],
-  );
+  const memberStackById = useMemo(() => {
+    const stack = new Map<string, number>();
+    groups?.forEach((g, i) => {
+      exclusiveMembersInGroup(nodes, g, groups).forEach((n) => stack.set(n.id, i));
+    });
+    return stack;
+  }, [groups, nodes]);
+  const nodesForFlow = useMemo(() => {
+    const list = groups ?? [];
+    const topStack = Math.max(0, list.length - 1);
+    const content = nodes
+      .filter((n) => n.type !== 'groupFrame')
+      .map((n) => {
+        if (frameDragMemberIds.has(n.id)) {
+          return { ...n, zIndex: groupMemberZ(topStack) + 20 };
+        }
+        const stack = memberStackById.get(n.id);
+        return { ...n, zIndex: stack == null ? 0 : groupMemberZ(stack) };
+      });
+    const frames: Node[] = list.map((g, i) => {
+      const box =
+        frameDragOffset?.id === g.id
+          ? { ...g.box, x: g.box.x + frameDragOffset.x, y: g.box.y + frameDragOffset.y }
+          : g.box;
+      return {
+        id: g.id,
+        type: 'groupFrame',
+        position: { x: box.x, y: box.y },
+        width: box.w,
+        height: box.h,
+        style: { width: box.w, height: box.h, pointerEvents: 'none' },
+        zIndex: groupFrameZ(i),
+        draggable: false,
+        selectable: false,
+        connectable: false,
+        focusable: false,
+        deletable: false,
+        data: {},
+      };
+    });
+    return [...frames, ...content];
+  }, [nodes, groups, memberStackById, frameDragMemberIds, frameDragOffset]);
 
   /** 节点拖拽起：仅标记拖拽中（隐藏框选悬浮条）。组内节点可自由拖出组，拖出后按
    *  坐标动态脱离组；不再整组选中——整组拖动改由组框把手承担。 */
@@ -460,6 +502,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         }
         onPaneClick={onPaneClick}
         onSelectionChange={onSelectionChange}
+        onMove={(_e, v) => onViewportLiveRef.current?.(v)}
         onMoveEnd={(_e, v) => onViewportChangeRef.current?.(v)}
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={handleNodeDragStopInternal}
@@ -517,10 +560,8 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
          *  .react-flow 根有 position:relative + z-index:0，自成层叠上下文，会把整棵子树
          *  （含 .react-flow__renderer z4 与全部节点）压平到 0 层。若把 overlay 放在
          *  <ReactFlow> 之外做兄弟节点，其 frameLayer 会在外层与 0 比较而盖住所有节点。
-         *  放进内部后才能与 renderer 同上下文比较：
-         *  组框淡色底(z3) < 节点(z4) < 组框边框/排除节点覆盖(z5) < 徽标/按钮/连线把手(z10)；
-         *  组框淡色底在成员之下，组内素材保持清晰；组框边框在节点之上，组外素材盖不住组框轮廓。
-         *  组内成员节点经 nodesForFlow 抬高 zIndex，叠盖时高于组外素材。 */}
+         *  放进内部后徽标层才能与 renderer 同上下文比较。
+         *  组框是 groupFrame 节点，与素材共用 zIndex：上层组框压下层素材，上层素材再压本组组框。 */}
         {groups && (
           <GroupOverlay
             nodes={nodes}
@@ -532,6 +573,8 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             setNodes={setNodes}
             onGroupFrameDragStop={onGroupFrameDragStopRef.current}
             onFrameDragMembersChange={setFrameDragMemberIds}
+            onFrameDragOffsetChange={setFrameDragOffset}
+            onBringGroupToFront={onBringGroupToFront}
             onConnectGroupToTarget={onConnectGroupToTarget ?? (() => {})}
             onConnectGroupDrop={onConnectGroupDrop}
             onConnectSourceToGroup={onConnectSourceToGroup ?? (() => {})}
@@ -544,7 +587,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -564,6 +607,7 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         isValidConnection={isValidConnection}
         viewport={viewport}
         onViewportChange={onViewportChange}
+        onViewportLive={onViewportLive}
         onNodeDragStop={onNodeDragStop}
         onDeleteNode={onDeleteNode}
         onNodeClick={onNodeClick}
@@ -581,6 +625,7 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         onDeleteGroup={onDeleteGroup}
         onDownloadGroup={onDownloadGroup}
         onGroupFrameDragStop={onGroupFrameDragStop}
+        onBringGroupToFront={onBringGroupToFront}
         onConnectGroupToTarget={onConnectGroupToTarget}
         onConnectGroupDrop={onConnectGroupDrop}
         onConnectSourceToGroup={onConnectSourceToGroup}

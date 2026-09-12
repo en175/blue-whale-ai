@@ -219,6 +219,33 @@
   border-color: rgba(255, 255, 255, 0.35);
 }
 
+.writeSelfBtn {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #ddd;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  cursor: pointer;
+}
+
+.writeSelfBtn:hover {
+  color: #fff;
+  background-color: #3a3a3a;
+}
+
+.writeSelfBtnCorner {
+  top: 12px;
+  left: auto;
+  right: 12px;
+  transform: none;
+}
+
 /* 连接点：平时隐藏，悬停/选中/连接中可见（Handle 在 .contentCard 内，锚定其左右中点） */
 .handle {
   opacity: 0;

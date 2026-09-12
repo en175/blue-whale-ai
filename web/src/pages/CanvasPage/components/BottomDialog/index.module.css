@@ -16,6 +16,13 @@
   animation: dialogFadeIn 0.2s ease;
 }
 
+.dialogWrapFollow {
+  bottom: auto;
+  left: 0;
+  transform: none;
+  animation: dialogFadeInFollow 0.2s ease;
+}
+
 .dialog {
   position: relative;
   /* 默认输入区保留三行，最多增长到四行，附件换行时面板向上增长。 */
@@ -38,6 +45,11 @@
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
+@keyframes dialogFadeInFollow {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* 放大态：输入区高度占屏幕 2/3，仍锚定底部展示 */
 .dialogExpanded {
   height: 66.66vh;
@@ -49,10 +61,12 @@
   flex: 0 0 auto;
   height: auto;
   min-height: 5.4em;
+  position: relative;
 }
 
 .dialogExpanded .editorWrap {
   flex: 1;
+  min-height: 0;
 }
 
 /* ---- 连线文本附件（IKDLQG，与 ImageDialog 附件区同构） ---- */
@@ -470,6 +484,17 @@
   color: var(--color-accent-text);
   background-color: var(--color-bg-active);
   font-weight: 500;
+}
+
+.modeOptionDisabled {
+  color: #666;
+  cursor: default;
+  opacity: 0.45;
+}
+
+.modeOptionDisabled:hover {
+  color: #666;
+  background: transparent;
 }
 
 /* ---- 信息文字 ---- */

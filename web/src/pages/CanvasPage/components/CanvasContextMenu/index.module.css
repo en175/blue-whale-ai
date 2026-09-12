@@ -50,13 +50,22 @@
 
 .subMenu {
   position: absolute;
-  left: 100%;
+  left: calc(100% - 2px);
   top: 0;
   min-width: 140px;
-  margin-left: 4px;
+  padding: 6px;
   background-color: #2a2a2a;
   border: 1px solid #3a3a3a;
   border-radius: 12px;
-  padding: 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* 透明桥接主菜单与子菜单，鼠标斜向移入时不会掉出热区 */
+.subMenu::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: 0;
+  width: 12px;
+  height: 100%;
 }
