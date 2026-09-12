@@ -466,3 +466,62 @@ describe('accountOfRun · prompt_card_failure', () => {
     }
   });
 });
+
+/**
+ * 方案卡（IKF3KE）。
+ *
+ * 此前前端**故意**不为需求理解渲染任何东西（IKAI14 拆掉了旧 UI，确认由模型在对话里判断）。
+ * 确认权回到用户手里之后，它必须有数据、有位置：没有可点的东西，首卡就永远出不来。
+ */
+describe('方案卡的事件与归位', () => {
+  const version = (n: number, status: 'awaiting_confirmation' | 'accepted' | 'superseded', runId = 'run-1') => ({
+    understanding_id: 'und_1',
+    version: n,
+    session_id: 's1',
+    proposed_by_run_id: runId,
+    target_media: 'video' as const,
+    proposed_summary: `第 ${n} 版`,
+    status,
+  });
+
+  const event = (type: string, understanding: ReturnType<typeof version>) =>
+    ({ type, data: { payload: { understanding } } }) as never;
+
+  it('提出：落进状态，等着用户点', () => {
+    const next = reduceSessionEvent(EMPTY_SESSION_STATE, event('requirement_understanding.proposed.v1', version(1, 'awaiting_confirmation')));
+    expect(next.understandings).toHaveLength(1);
+    expect(next.understandings[0].status).toBe('awaiting_confirmation');
+  });
+
+  it('接纳：就地更新同一版，不再多出一张卡', () => {
+    const proposed = reduceSessionEvent(EMPTY_SESSION_STATE, event('requirement_understanding.proposed.v1', version(1, 'awaiting_confirmation')));
+    const accepted = reduceSessionEvent(proposed, event('requirement_understanding.accepted.v1', version(1, 'accepted')));
+    expect(accepted.understandings).toHaveLength(1);
+    expect(accepted.understandings[0].status).toBe('accepted');
+  });
+
+  it('作废：同上，那一版留着但不再等人点', () => {
+    const proposed = reduceSessionEvent(EMPTY_SESSION_STATE, event('requirement_understanding.proposed.v1', version(1, 'awaiting_confirmation')));
+    const voided = reduceSessionEvent(proposed, event('requirement_understanding.voided.v1', version(1, 'superseded')));
+    expect(voided.understandings[0].status).toBe('superseded');
+  });
+
+  it('重提一版：上一版不再是待确认——同时最多一张卡在等人点', () => {
+    const first = reduceSessionEvent(EMPTY_SESSION_STATE, event('requirement_understanding.proposed.v1', version(1, 'awaiting_confirmation')));
+    const second = reduceSessionEvent(first, event('requirement_understanding.proposed.v1', version(2, 'awaiting_confirmation')));
+    expect(second.understandings.map((u) => u.status)).toEqual(['superseded', 'awaiting_confirmation']);
+  });
+
+  it('挂回提出它的那一轮，而不是统统堆在最后', () => {
+    const messages = [
+      { id: 'm1', role: 'user', content: '做条短视频', sequence_no: 1, inputBatchId: 'b1' },
+      { id: 'm2', role: 'assistant', content: '你看一下方案', sequence_no: 2, inputBatchId: 'b1', sourceRunId: 'run-1' },
+      { id: 'm3', role: 'user', content: '确认方案卡', sequence_no: 3, inputBatchId: 'b2' },
+      { id: 'm4', role: 'assistant', content: '卡写好了', sequence_no: 4, inputBatchId: 'b2', sourceRunId: 'run-2' },
+    ] as never;
+    const turns = buildTurns(messages, null, {}, [version(1, 'accepted', 'run-1')]);
+    expect(turns).toHaveLength(2);
+    expect(turns[0].solutionCards.map((u) => u.version)).toEqual([1]);
+    expect(turns[1].solutionCards).toEqual([]);
+  });
+});

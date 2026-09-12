@@ -1,6 +1,6 @@
 {
   "$comment": "Generated from src/http/routes.ts (IKACK2). Do not edit by hand — run pnpm contract:routes. routes.test.ts fails if this drifts.",
-  "version": 3,
+  "version": 4,
   "base_path": "/v1/projects/{project_id}",
   "routes": [
     {
@@ -107,6 +107,11 @@
       "name": "correct_requirement_understanding",
       "method": "POST",
       "path": "/sessions/{session_id}/requirement-understandings/{understanding_id}/versions/{version}/actions/correct"
+    },
+    {
+      "name": "void_requirement_understanding",
+      "method": "POST",
+      "path": "/sessions/{session_id}/requirement-understandings/{understanding_id}/versions/{version}/actions/void"
     },
     {
       "name": "get_run",

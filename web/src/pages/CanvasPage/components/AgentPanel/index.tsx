@@ -26,7 +26,13 @@ import { fetchMySkills } from '@/api/skills';
 import { useAgentSession, type TurnOutcome } from '../../hooks/useAgentSession';
 import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
-import { fetchSessionCredits, type SessionContentBlock, type GenerationCardBlock, type OutboundAssetRef } from '@/api/agentSessions';
+import {
+  fetchSessionCredits,
+  type SessionContentBlock,
+  type GenerationCardBlock,
+  type OutboundAssetRef,
+  type RequirementUnderstanding,
+} from '@/api/agentSessions';
 import {
   commitSidebarAttachment,
   createAttachmentPreviewUrl,
@@ -278,6 +284,192 @@ function CardPreview({ preview }: { preview: PartialCardPreview | null }) {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+/** 方案卡上那八项的小标题。与服务端 `domain/solution-card.ts` 的那份一字不差：用户读到的措辞
+ *  和服务端校验的是同一份东西，两边分头写就是两份真相。 */
+const SOLUTION_FIELD_LABELS = {
+  goal: '这次要做什么',
+  target_media: '做图还是视频',
+  direction: '创意方向',
+  constraints: '必须守住的',
+  asset_roles: '你给的素材各起什么作用',
+  assumptions: '我替你定的几项',
+  execution_route: '用哪个模型出片',
+  next_steps: '接下来怎么做',
+} as const;
+
+function SolutionField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className={styles.solutionField}>
+      <div className={styles.solutionFieldLabel}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * 方案卡（IKF3KE）。
+ *
+ * 产卡之前用户唯一读到、也唯一需要表态的东西。它在对话流里，和生成卡同一个位置——这里没有
+ * 「侧边栏」这个概念，整个 Agent 面板才是相对画布的那一侧。
+ *
+ * 三个按钮各自的去向：确认 → 服务端接着把生成卡写出来；取消 → 这一版作废，回到对话；
+ * 补充 → 这一版作废，用户写的话当下一轮的输入，模型据此重提一版。取消与补充都作废，是为了不
+ * 留下「用户看过但没表态」的悬空版本。
+ *
+ * 已确认或已作废的版本留在原处、变灰、按钮消失：用户往回翻时要读得懂当时发生了什么。
+ */
+function SolutionCardBlock({
+  understanding,
+  disabled,
+  onConfirm,
+  onVoid,
+}: {
+  understanding: RequirementUnderstanding;
+  disabled: boolean;
+  onConfirm: () => void;
+  onVoid: (note?: string) => void;
+}) {
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const card = understanding.solution_card ?? null;
+  const pending = understanding.status === 'awaiting_confirmation';
+  const route = card?.execution_route;
+
+  const act = (run: () => void) => {
+    setBusy(true);
+    run();
+  };
+
+  return (
+    <div className={`${styles.solutionCard} ${pending ? '' : styles.solutionCardSettled}`}>
+      <div className={styles.solutionCardHead}>
+        <BookText size={12} strokeWidth={2} />
+        <span>方案卡</span>
+      </div>
+
+      {/* 老版本（产卡门顺手提的那种）没有结构化内容，退回只显示摘要——如实显示，好过什么都不显示。 */}
+      {!card && <div className={styles.solutionFieldValue}>{understanding.proposed_summary}</div>}
+
+      {card && (
+        <>
+          <SolutionField label={SOLUTION_FIELD_LABELS.goal}>
+            <div className={styles.solutionFieldValue}>{card.goal}</div>
+          </SolutionField>
+          <SolutionField label={SOLUTION_FIELD_LABELS.target_media}>
+            <div className={styles.solutionFieldValue}>{card.target_media === 'video' ? '视频' : '图片'}</div>
+          </SolutionField>
+          {card.direction && (
+            <SolutionField label={SOLUTION_FIELD_LABELS.direction}>
+              <div className={styles.solutionFieldValue}>{card.direction}</div>
+            </SolutionField>
+          )}
+          {card.constraints && card.constraints.length > 0 && (
+            <SolutionField label={SOLUTION_FIELD_LABELS.constraints}>
+              <ul className={styles.solutionList}>
+                {card.constraints.map((one, i) => (
+                  <li key={i}>{one}</li>
+                ))}
+              </ul>
+            </SolutionField>
+          )}
+          {card.asset_roles && card.asset_roles.length > 0 && (
+            <SolutionField label={SOLUTION_FIELD_LABELS.asset_roles}>
+              <ul className={styles.solutionList}>
+                {card.asset_roles.map((one) => (
+                  <li key={one.asset_ref_id}>{one.role}</li>
+                ))}
+              </ul>
+            </SolutionField>
+          )}
+          {/* 必填项：用户没说而模型替他定的，必须一眼看得见——这正是他最该核的地方。 */}
+          <SolutionField label={SOLUTION_FIELD_LABELS.assumptions}>
+            <ul className={styles.solutionList}>
+              {card.assumptions.map((one, i) => (
+                <li key={i}>{one}</li>
+              ))}
+            </ul>
+          </SolutionField>
+          {route && (
+            <SolutionField label={SOLUTION_FIELD_LABELS.execution_route}>
+              <div className={styles.solutionFieldValue}>
+                {route.model_family}
+                {route.model_version ? ` ${route.model_version}` : ''}
+                {route.reason ? `——${route.reason}` : ''}
+              </div>
+            </SolutionField>
+          )}
+          {card.next_steps && (
+            <SolutionField label={SOLUTION_FIELD_LABELS.next_steps}>
+              <div className={styles.solutionFieldValue}>{card.next_steps}</div>
+            </SolutionField>
+          )}
+        </>
+      )}
+
+      {pending && !noteOpen && (
+        <div className={styles.solutionActions}>
+          <button
+            type="button"
+            className={styles.solutionPrimaryBtn}
+            disabled={disabled || busy}
+            onClick={() => act(onConfirm)}
+          >
+            确认
+          </button>
+          <button
+            type="button"
+            className={styles.solutionGhostBtn}
+            disabled={disabled || busy}
+            onClick={() => act(() => onVoid())}
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            className={styles.solutionGhostBtn}
+            disabled={disabled || busy}
+            onClick={() => setNoteOpen(true)}
+          >
+            补充
+          </button>
+        </div>
+      )}
+
+      {pending && noteOpen && (
+        <>
+          <textarea
+            className={styles.solutionNote}
+            value={note}
+            autoFocus
+            placeholder="想补充或改哪里？写下来，我按这个重提一版。"
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <div className={styles.solutionActions}>
+            <button
+              type="button"
+              className={styles.solutionPrimaryBtn}
+              disabled={disabled || busy || !note.trim()}
+              onClick={() => act(() => onVoid(note.trim()))}
+            >
+              发给它
+            </button>
+            <button type="button" className={styles.solutionGhostBtn} disabled={busy} onClick={() => setNoteOpen(false)}>
+              返回
+            </button>
+          </div>
+        </>
+      )}
+
+      {!pending && (
+        <div className={styles.solutionSettledNote}>
+          {understanding.status === 'accepted' ? '已确认，生成卡按这个方案写' : '这一版已作废'}
+        </div>
+      )}
     </div>
   );
 }
@@ -591,6 +783,8 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
     sendError,
     paymentRequiredMessage,
     sendMessage,
+    confirmSolution,
+    voidSolution,
     stopRun,
     retryRun,
     resetChat,
@@ -1557,6 +1751,22 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
                     appliedCardIds={appliedIds}
                     knownAssets={knownAssets}
                   />
+                  {/* 方案卡（IKF3KE）：它就在这一轮的回答后面，和生成卡同一个位置。
+                      待确认的那一版带三个按钮；已确认或已作废的留在原处置灰。 */}
+                  {turn.solutionCards.map((understanding) => (
+                    <SolutionCardBlock
+                      key={`${understanding.understanding_id}:${understanding.version}`}
+                      understanding={understanding}
+                      // 有别的轮在跑时不给点：那一轮结束之前点了也白点，只会撞在相位上。
+                      disabled={runningRunId !== null || streaming}
+                      onConfirm={() => {
+                        void confirmSolution(understanding.understanding_id, understanding.version);
+                      }}
+                      onVoid={(note) => {
+                        void voidSolution(understanding.understanding_id, understanding.version, note);
+                      }}
+                    />
+                  ))}
                   {/* 这一轮的账挂在轮尾（IKDK5L）；还在跑的轮由输入框上方的状态行读秒。 */}
                   {turn.account && !turn.live && (
                     <TurnFooter
