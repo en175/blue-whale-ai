@@ -5,7 +5,7 @@
  * 角色随 edges JSON 原样持久化（服务端零改动，延续 IKDMQR）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
-import { isMaterialLibraryId, readAssetId } from './mediaRefs';
+import { cardNameOfNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
 import { REF_LIMITS } from '@/utils/ref-overflow';
 
 /** 视频参考角色：reference 普通参考 / first 首帧 / last 尾帧 */
@@ -114,6 +114,23 @@ export function mergedVideoMediaRefsOf(
     videoMediaRefsOf(targetNodeId, edges, mediaNodes),
     readDraftMaterialRefs(byId.get(targetNodeId)),
   );
+}
+
+/** 快照参考的名称刷新（IKFA8Y）：待提交的暂存参考按来源节点身份取当前名称。
+ *  只改展示名称；槽位、顺序、素材 ID 与角色沿用快照；角色库参考（materialId）与来源节点
+ *  已不在画布的参考保留原名称（取当前值 + 回落快照值，快照本身不被改写）。 */
+export function freshVideoCanvasRefs(refs: VideoMediaRefs, mediaNodes: Node[]): VideoMediaRefs {
+  const byId = new Map(mediaNodes.map((n) => [n.id, n]));
+  const fresh = (ref: VideoMediaRef): VideoMediaRef => {
+    if (ref.materialId != null) return ref;
+    const current = cardNameOfNode(byId.get(ref.nodeId));
+    return current === undefined || current === ref.name ? ref : { ...ref, name: current };
+  };
+  const next: VideoMediaRefs = { reference: refs.reference.map(fresh) };
+  if (refs.first) next.first = fresh(refs.first);
+  if (refs.last) next.last = fresh(refs.last);
+  if (refs.invalid) next.invalid = [...refs.invalid];
+  return next;
 }
 
 /** 当前模型是否支持视频参考（仅 Seedance 2.0 系）：UI 禁用与提交防线共用同一判定 */

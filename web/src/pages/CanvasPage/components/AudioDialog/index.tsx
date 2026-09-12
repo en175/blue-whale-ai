@@ -219,6 +219,10 @@ export default function AudioDialog({
   }, [externalPick]);
 
   const canvasAudios = (canvasMedia ?? []).filter((m) => m.mediaType === 'audio');
+  const currentRefs = refs.map((ref) => {
+    const node = ref.source === 'canvas' ? canvasAudios.find((item) => item.id === ref.id) : undefined;
+    return node && node.name !== ref.name ? { ...ref, name: node.name } : ref;
+  });
 
   const handleAudioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -293,7 +297,7 @@ export default function AudioDialog({
 
   const handleSend = () => {
     if (!text.trim() || !currentModel || readOnly || draftBinding?.saveFailed) return;
-    onSend(text.trim(), modelId, refs);
+    onSend(text.trim(), modelId, currentRefs);
     // 草稿绑定发送后保留输入（卡片原地转生成中，面板进入只读），非草稿保持清空
     if (!draftBinding) {
       setText('');
@@ -324,7 +328,7 @@ export default function AudioDialog({
       {/* 顶部参考按钮行（与 ImageDialog/BottomDialog 统一占位视觉；参考上传功能待后续接入） */}
       <div className={styles.topRow}>
         {/* 已上传的参考音频 chip：点击播放/暂停 */}
-        {refs.map((r) => (
+        {currentRefs.map((r) => (
           <button
             key={`${r.source}-${r.id}`}
             type="button"

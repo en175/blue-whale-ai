@@ -15,13 +15,14 @@ import {
   enabledVideoFollowModes,
   type VideoFollowMode,
 } from './followDialog';
-import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, type ImageMediaRef } from './mediaRefs';
+import { freshImageCanvasRefs, imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, type ImageMediaRef } from './mediaRefs';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
   isVideoDraftNode,
   MAX_VIDEO_REFS,
   readRefRole,
   readDraftMaterialRefs,
+  freshVideoCanvasRefs,
   mergedVideoMediaRefsOf,
   supportsVideoReferenceModel,
   videoRefConflict,
@@ -34,6 +35,7 @@ import {
 } from './videoMediaRefs';
 import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
+import { downloadFileNameOf } from './components/cardName';
 import type { MediaGenStatus } from './components/MediaNode';
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
 import {
@@ -152,27 +154,38 @@ function draftFileNameOf(type: unknown): string {
   return type === 'video' ? '视频草稿' : type === 'audio' ? '音频草稿' : '图片草稿';
 }
 
-/** 合并已落盘连线参考与「到节点选择」待提交参考（按 assetId 去重） */
-function mergePendingImageCanvasRefs(fromEdges: ImageMediaRef[], pending: ImageMediaRef[]): ImageMediaRef[] {
+/** 卡片名称已被用户自定义（IKFA8X）：显式 customName 标记，不靠名称内容推断 */
+function hasCustomName(node: Node | undefined): boolean {
+  return ((node?.data ?? {}) as Record<string, unknown>).customName === true;
+}
+
+/** 合并已落盘连线参考与「到节点选择」待提交参考（按 assetId 去重）；
+ *  待提交参考的名称是选取当刻的快照，按来源节点身份刷新为当前卡片名（IKFA8Y） */
+function mergePendingImageCanvasRefs(
+  fromEdges: ImageMediaRef[],
+  pending: ImageMediaRef[],
+  mediaNodes: Node[],
+): ImageMediaRef[] {
   const seen = new Set(fromEdges.map((r) => r.assetId));
-  const extra = pending.filter((r) => !seen.has(r.assetId));
+  const extra = freshImageCanvasRefs(pending, mediaNodes).filter((r) => !seen.has(r.assetId));
   return extra.length === 0 ? fromEdges : [...fromEdges, ...extra];
 }
 
-/** 合并视频已落盘参考与待提交画布选取参考 */
-function mergePendingVideoCanvasRefs(base: VideoMediaRefs, pending: VideoMediaRefs): VideoMediaRefs {
+/** 合并视频已落盘参考与待提交画布选取参考；待提交参考名称同样按来源节点身份刷新（IKFA8Y） */
+function mergePendingVideoCanvasRefs(base: VideoMediaRefs, pending: VideoMediaRefs, mediaNodes: Node[]): VideoMediaRefs {
   const merged: VideoMediaRefs = {
     reference: [...base.reference],
     first: base.first,
     last: base.last,
     invalid: base.invalid,
   };
-  if (pending.first && !merged.first) merged.first = pending.first;
-  if (pending.last && !merged.last) merged.last = pending.last;
+  const freshPending = freshVideoCanvasRefs(pending, mediaNodes);
+  if (freshPending.first && !merged.first) merged.first = freshPending.first;
+  if (freshPending.last && !merged.last) merged.last = freshPending.last;
   const seen = new Set(merged.reference.map((r) => r.assetId));
   if (merged.first) seen.add(merged.first.assetId);
   if (merged.last) seen.add(merged.last.assetId);
-  for (const item of pending.reference) {
+  for (const item of freshPending.reference) {
     if (seen.has(item.assetId)) continue;
     merged.reference.push(item);
     seen.add(item.assetId);
@@ -329,6 +342,7 @@ export default function CanvasPage() {
     const refs = mergePendingImageCanvasRefs(
       imageMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current),
       imageDraftIdRef.current === targetId ? pendingImageCanvasRefsRef.current : [],
+      mediaNodesRef.current,
     );
     const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>)!;
     if (refs.some((r) => r.assetId === assetId)) {
@@ -360,6 +374,7 @@ export default function CanvasPage() {
     const refs = mergePendingVideoCanvasRefs(
       mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current),
       videoDraftIdRef.current === targetId ? pendingVideoCanvasRefsRef.current : { reference: [] },
+      mediaNodesRef.current,
     );
     const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>);
     const mediaType = ((source.data ?? {}) as Record<string, unknown>).mediaType as 'image' | 'video';
@@ -921,7 +936,7 @@ export default function CanvasPage() {
         base.data = {
           ...base.data,
           onDelete: (id: string) => removeCanvasNodes([id]),
-          onTitleChange: (id: string, title: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, title } } : n)),
+          onTitleChange: (id: string, title: string) => actionsRef.current.renameCard(id, title),
           onDraftError: handleDraftError,
           onTextChange: (id: string, text: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text } } : n)),
           onPromptChange: (id: string, text: string, promptMentions: import('../../../../packages/contracts/src/prompt-preview').PromptMention[], promptMaterials?: Array<import('../../../../packages/contracts/src/prompt-preview').PromptMaterial & { url: string }>) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text, promptMentions, ...(promptMaterials ? { promptMaterials } : {}) } } : n)),
@@ -949,6 +964,7 @@ export default function CanvasPage() {
           ...base.data,
           onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+          onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
           onCopyImage: (id: string) => actionsRef.current.copyImage(id),
@@ -1423,6 +1439,7 @@ export default function CanvasPage() {
           );
         },
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+        onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
         onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
@@ -1454,6 +1471,21 @@ export default function CanvasPage() {
       pendingNodeIdsRef.current.add(copy.id);
       historyRef.current?.pushAddNodes([copy.id]);
       setMediaNodes((prev) => [...prev, copy]);
+    }
+  };
+
+  /**
+   * 卡片改名（IKFA8X）：名称写入当前节点（媒体 fileName / 文本 title）并置显式自定义标记
+   * customName——生成成功回填、取消/失败回退等自动命名路径据此前置跳过；
+   * 只作用于当前节点 id，同素材的其他卡与素材库名称不联动。
+   */
+  const renameCard = (id: string, name: string) => {
+    if (textNodesRef.current.some((n) => n.id === id)) {
+      setTextNodes((prev) => prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, title: name, customName: true } } : n)));
+      return;
+    }
+    if (mediaNodesRef.current.some((n) => n.id === id)) {
+      setMediaNodes((prev) => prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, fileName: name, customName: true } } : n)));
     }
   };
 
@@ -1534,7 +1566,7 @@ export default function CanvasPage() {
           ts,
         });
       } else {
-        const label = '文本节点';
+        const label = typeof t.data?.title === 'string' && t.data.title.trim() ? t.data.title : '文本节点';
         setAgentContext({ text: `@${label}`, label, ts });
         setShowAgent(true);
       }
@@ -1617,8 +1649,9 @@ export default function CanvasPage() {
     firePendingGen: () => {},
     firePendingVideoDraft: () => {},
     img2img: (_id: string, _file: File) => {},
+    renameCard: (_id: string, _name: string) => {},
   });
-  actionsRef.current = { ...actionsRef.current, duplicate: handleDuplicateNode, addToChat: handleAddToChatNode };
+  actionsRef.current = { ...actionsRef.current, duplicate: handleDuplicateNode, addToChat: handleAddToChatNode, renameCard };
 
   /** 唤起底部图片对话框（工具栏图片图标 / 资产卡「生成图片」共用） */
   const handleOpenImageDialog = () => {
@@ -2216,6 +2249,7 @@ export default function CanvasPage() {
         ...(seed?.mode != null ? { draftMode: seed.mode } : {}),
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+        onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
@@ -2258,6 +2292,7 @@ export default function CanvasPage() {
         toolMode,
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+        onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
@@ -2300,6 +2335,7 @@ export default function CanvasPage() {
         toolMode,
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+        onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
@@ -2346,8 +2382,7 @@ export default function CanvasPage() {
             prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n)),
           );
         },
-        onTitleChange: (id: string, title: string) =>
-          setTextNodes((prev) => prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, title } } : n))),
+        onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
@@ -2687,6 +2722,7 @@ export default function CanvasPage() {
     const mediaCallbacks = {
       onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
       onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+      onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
       onAddToChat: (id: string) => actionsRef.current.addToChat(id),
       onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
       onCopyImage: (id: string) => actionsRef.current.copyImage(id),
@@ -2717,7 +2753,8 @@ export default function CanvasPage() {
                   ...mediaCallbacks,
                   emptyShell: false,
                   src: localSrc,
-                  fileName: file.name,
+                  // 已自定义名称的空壳卡填充后不覆盖（IKFA8X）
+                  ...(hasCustomName(n) ? {} : { fileName: file.name }),
                   mediaType,
                   toolMode,
                 },
@@ -2984,6 +3021,7 @@ export default function CanvasPage() {
             setMediaNodes((prev) => prev.filter((n) => n.id !== id));
           },
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+          onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
           onCopyImage: (id: string) => actionsRef.current.copyImage(id),
@@ -3273,7 +3311,8 @@ export default function CanvasPage() {
         mediaType: (assetType === 'audio' || assetType === 'video' || assetType === 'image')
           ? assetType
           : (originalType ?? 'image'),
-        fileName: `生成-${jobId}`,
+        // 已自定义名称的卡不被自动命名覆盖（IKFA8X）
+        ...(hasCustomName(node) ? {} : { fileName: `生成-${jobId}` }),
         assetId: detail.asset?.id,
         width: detail.asset?.width ?? undefined,
         height: detail.asset?.height ?? undefined,
@@ -3331,7 +3370,8 @@ export default function CanvasPage() {
         genStatus: 'draft',
         progress: undefined,
         errorText: undefined,
-        fileName: draftFileNameOf(node.data?.mediaType),
+        // 已自定义名称的草稿卡回退时保留名称（IKFA8X）
+        ...(hasCustomName(node) ? {} : { fileName: draftFileNameOf(node.data?.mediaType) }),
       });
       return;
     }
@@ -3417,13 +3457,14 @@ export default function CanvasPage() {
     if (inPlaceNodeId) {
       const isDraftTarget =
         ((inPlaceNode!.data ?? {}) as Record<string, unknown>).draft === true;
+      const customNamed = hasCustomName(inPlaceNode);
       patchMediaNode(inPlaceNodeId, {
         genStatus: 'generating',
         progress: 0,
         errorText: undefined,
-        // 草稿无素材可显示，改名提示生成内容（IKDMQQ）；
+        // 草稿无素材可显示，改名提示生成内容（IKDMQQ）；已自定义名称的草稿不覆盖（IKFA8X）；
         // 成品卡保留原文件名——旧素材继续显示，生成中由状态角标标记（IKDMQU Q5）
-        ...(isDraftTarget
+        ...(isDraftTarget && !customNamed
           ? {
               fileName:
                 type === 'video' ? '视频生成中' : type === 'audio' ? '音频生成中' : '图片生成中',
@@ -3469,6 +3510,7 @@ export default function CanvasPage() {
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+        onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onReEdit: (id: string) => actionsRef.current.reEdit(id),
         onGenImage: (id: string) => actionsRef.current.genImage(id),
@@ -3525,7 +3567,8 @@ export default function CanvasPage() {
               patchMediaNode(nodeId, {
                 genStatus: 'draft',
                 progress: undefined,
-                fileName: draftFileNameOf(type),
+                // 已自定义名称的草稿回退时保留名称（IKFA8X）
+                ...(hasCustomName(node) ? {} : { fileName: draftFileNameOf(type) }),
               });
             } else {
               patchMediaNode(nodeId, { genStatus: undefined, progress: undefined, errorText: undefined });
@@ -4020,13 +4063,14 @@ export default function CanvasPage() {
   );
 
   /** 草稿绑定面板的图片媒体参考（IKDMQR）：按连线实时推导，Dock 显示即提交输入（同源）。
-   *  连线持久化后刷新/重开项目同样经此推导恢复展示。 */
+   *  连线持久化后刷新/重开项目同样经此推导恢复展示；名称随来源卡片改名即时同步（IKFA8Y）。 */
   const imageDraftMediaRefs = useMemo(
     () => {
       if (!imageDraftId) return undefined;
       return mergePendingImageCanvasRefs(
         imageMediaRefsOf(imageDraftId, edges, mediaNodes),
         pendingImageCanvasRefs,
+        mediaNodes,
       );
     },
     [imageDraftId, edges, mediaNodes, pendingImageCanvasRefs],
@@ -4056,13 +4100,14 @@ export default function CanvasPage() {
   };
 
   /** 草稿绑定面板的视频媒体参考（IKDMQS）：按连线角色实时分组推导，Dock 显示即提交输入（同源）。
-   *  角色随连线持久化，刷新/重开项目后经同一推导恢复展示。 */
+   *  角色随连线持久化，刷新/重开项目后经同一推导恢复展示；名称随来源卡片改名即时同步（IKFA8Y）。 */
   const videoDraftMediaRefs = useMemo(
     () => {
       if (!videoDraftId) return undefined;
       return mergePendingVideoCanvasRefs(
         mergedVideoMediaRefsOf(videoDraftId, edges, mediaNodes),
         pendingVideoCanvasRefs,
+        mediaNodes,
       );
     },
     [videoDraftId, edges, mediaNodes, pendingVideoCanvasRefs],
@@ -4093,6 +4138,7 @@ export default function CanvasPage() {
     const refs = mergePendingVideoCanvasRefs(
       mergedVideoMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current),
       pendingVideoCanvasRefsRef.current,
+      mediaNodesRef.current,
     );
     // 改角色 ≠ 添加素材：只需检查目标槽是否被**其他**素材占用
     if (role !== 'reference') {
@@ -4322,6 +4368,25 @@ export default function CanvasPage() {
     }
   };
 
+  /** 自由图片面板的文本附件按节点身份刷新标题，正文保持打开时的快照。 */
+  const imageSeedView = useMemo(() => {
+    if (!imageSeed || imageDraftId) return imageSeed;
+    const byId = new Map(textNodes.map((n) => [n.id, n]));
+    const attachments = imageSeed.attachments?.map((attachment) => {
+      const node = byId.get(attachment.nodeId);
+      if (!node) return attachment;
+      const title = typeof node.data?.title === 'string' && node.data.title ? node.data.title : '文本节点';
+      return title === attachment.title ? attachment : { ...attachment, title };
+    });
+    return { ...imageSeed, attachments };
+  }, [imageSeed, imageDraftId, textNodes]);
+
+  /** 视频自由模式参考（IKFA8Y）：参考名称按来源节点身份取当前名称 */
+  const videoFreeRefsView = useMemo(
+    () => freshVideoCanvasRefs(videoFreeRefs, mediaNodes),
+    [videoFreeRefs, mediaNodes],
+  );
+
   /** 触发浏览器文件下载 */
   const triggerFileDownload = (href: string, filename: string, revokeObjectUrl = false) => {
     const a = document.createElement('a');
@@ -4349,7 +4414,8 @@ export default function CanvasPage() {
     }
   };
 
-  /** 下载单个媒体节点：成功返回 true，无素材则 false */
+  /** 下载单个媒体节点：成功返回 true，无素材则 false。
+   *  文件名以当前卡片名称为基础，扩展名取真实文件类型（blob MIME 优先，节点 mime/素材地址兜底，IKFA8Y） */
   const downloadMediaById = async (id: string, notifyMissing: boolean): Promise<boolean> => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (node?.data?.assetMissing) {
@@ -4359,9 +4425,10 @@ export default function CanvasPage() {
     const src = node?.data?.src as string | undefined;
     if (!src) return false;
     const name = (node?.data?.fileName as string) || id;
+    const mime = node?.data?.mime as string | undefined;
     const blob = await fetchAssetBlob(src);
     if (blob) {
-      triggerFileDownload(URL.createObjectURL(blob), name, true);
+      triggerFileDownload(URL.createObjectURL(blob), downloadFileNameOf(name, blob.type || mime, src), true);
       return true;
     }
     window.open(src, '_blank', 'noopener');
@@ -4995,6 +5062,7 @@ export default function CanvasPage() {
               toolMode,
               onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
               onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+              onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
               onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
           onCopyImage: (id: string) => actionsRef.current.copyImage(id),
@@ -5120,6 +5188,7 @@ export default function CanvasPage() {
                 );
               },
               onDuplicate: (id: string) => actionsRef.current.duplicate(id),
+              onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
               onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
           onCopyImage: (id: string) => actionsRef.current.copyImage(id),
@@ -5790,7 +5859,7 @@ export default function CanvasPage() {
                     onParamsChange: () => {},
                   }
             }
-            videoMediaRefs={videoDraftId ? (videoDraftMediaRefs ?? { reference: [] }) : videoFreeRefs}
+            videoMediaRefs={videoDraftId ? (videoDraftMediaRefs ?? { reference: [] }) : videoFreeRefsView}
             onRemoveVideoRef={videoDraftId ? ((nodeId) => handleRemoveVideoRef(videoDraftId, nodeId)) : removeVideoFreeRef}
             onSetVideoRefRole={videoDraftId ? ((nodeId, role) => handleSetVideoRefRole(videoDraftId, nodeId, role)) : changeVideoFreeRefRole}
             onRemoveMaterialRef={videoDraftId ? ((materialId) => handleMaterialRefChange(videoDraftId, materialId, null)) : removeVideoFreeRef}
@@ -5807,9 +5876,9 @@ export default function CanvasPage() {
           <ImageDialog
             key={imageSeed?.ts ?? 0}
             initialText={imageSeed?.text}
-            initialFiles={imageSeed?.files}
+            initialFiles={imageSeedView?.files}
             initialParams={imageSeed?.params}
-            attachments={imageDraftId ? imageDraftAttachments : imageSeed?.attachments}
+            attachments={imageDraftId ? imageDraftAttachments : imageSeedView?.attachments}
             mediaRefs={imageDraftId ? imageDraftMediaRefs : undefined}
             invalidMediaRefs={invalidImageMediaRefs}
             onRemovePlan={id => removePlanAttachment(imageSeed?.targetNodeId, id)}
@@ -5848,6 +5917,7 @@ export default function CanvasPage() {
             onToast={(type, msg) => showToast(type, msg)}
             mentionItems={atMentionItems.filter((item) => item.id !== imageDraftId)}
             onMentionCanvas={handleImageAtMention}
+            currentNodes={mediaNodes}
             followAnchor={imageDraftId ? followAnchor : null}
           />
         )}

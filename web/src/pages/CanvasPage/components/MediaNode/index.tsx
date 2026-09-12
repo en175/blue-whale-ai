@@ -7,6 +7,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
+import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaNodeToolbarVisibility } from './toolbarVisibility';
@@ -102,6 +103,8 @@ interface MediaNodeData {
   onCancelJob?: (id: string) => void;
   /** 重试（失败节点） */
   onRetryJob?: (id: string) => void;
+  /** 卡片改名（IKFA8X）：提交归一化后的新名称；自定义状态由父级置 data.customName */
+  onTitleChange?: (id: string, name: string) => void;
   /** 重新编辑：打开图片对话框并带入提示词与图片 */
   onReEdit?: (id: string) => void;
   /** 生成图片：打开图片对话框并带入图片 */
@@ -129,9 +132,32 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const [isExtractSubmitting, setIsExtractSubmitting] = useState(false);
   const shellFileRef = useRef<HTMLInputElement>(null);
   const img2imgFileRef = useRef<HTMLInputElement>(null);
+  /** 名称原位编辑（IKFA8X）：draft 为输入框内容；error 仅展示，不阻断画布保存 */
+  const [nameEditing, setNameEditing] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameError, setNameError] = useState('');
 
   const zoom = useStore((state) => state.transform[2]);
   const isSelect = data.toolMode === 'select';
+
+  /** 提交名称：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName */
+  const commitName = useCallback(() => {
+    const result = commitCardName(nameDraft, data.fileName ?? '');
+    if (result.kind === 'invalid') {
+      setNameError(result.message);
+      return;
+    }
+    setNameError('');
+    setNameEditing(false);
+    if (result.kind === 'save') data.onTitleChange?.(id, result.value);
+  }, [data, id, nameDraft]);
+
+  /** Esc 取消：恢复编辑前名称；输入框随即卸载，不会再有失焦提交 */
+  const cancelName = useCallback(() => {
+    setNameDraft(data.fileName ?? '');
+    setNameError('');
+    setNameEditing(false);
+  }, [data.fileName]);
 
   // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
   useEffect(() => {
@@ -405,9 +431,43 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       <div className={styles.titleRow} data-testid="media-title">
         <div className={styles.titleLeft}>
           <Icon className={styles.titleIcon} strokeWidth={2} color="#888" />
-          <span className={styles.titleName} title={data.fileName || undefined}>
-            {data.fileName || (isEmptyShell ? (data.mediaType === 'video' ? '视频节点' : data.mediaType === 'audio' ? '音频节点' : '图片节点') : '')}
-          </span>
+          {nameEditing ? (
+            <input
+              className="nodrag nopan"
+              aria-label="卡片名称"
+              value={nameDraft}
+              autoFocus
+              onChange={(event) => setNameDraft(event.target.value)}
+              onBlur={commitName}
+              onKeyDown={(event) => {
+                // 名称输入期间隔离画布快捷键；输入法组合中的回车只确认候选词，不提交名称
+                event.stopPropagation();
+                if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  commitName();
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelName();
+                }
+              }}
+            />
+          ) : (
+            <span
+              className={styles.titleName}
+              title={data.fileName || undefined}
+              onDoubleClick={(event) => {
+                // 原位编辑，不触发节点双击居中放大
+                event.stopPropagation();
+                if (!data.onTitleChange) return;
+                setNameDraft(data.fileName ?? '');
+                setNameError('');
+                setNameEditing(true);
+              }}
+            >
+              {data.fileName || (isEmptyShell ? (data.mediaType === 'video' ? '视频节点' : data.mediaType === 'audio' ? '音频节点' : '图片节点') : '')}
+            </span>
+          )}
           {data.compliancePassed && (
             <span className={`nodrag nopan ${styles.complianceBadge}`} title="校验通过，可用于seedance2.0视频生成">
               <img src="/success.png" alt="" />
@@ -416,6 +476,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         </div>
         <span className={styles.titleMeta} title={titleMeta || undefined}>{titleMeta}</span>
       </div>
+      {nameError && <div role="alert" className="nodrag nopan">{nameError}</div>}
       <div className={`${styles.contentCard} ${isAudio ? styles.audioCard : ''}`} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
         {!data.isFirst && !isEmptyShell && (
           <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
