@@ -3,6 +3,7 @@ import PromptSyncActions from '../PromptSyncActions';
  * ImageDialog 图片对话窗口：参考图上传/模型/清晰度/比例配置
  * ============================================ */
 import { useState, useRef, useEffect } from 'react';
+import type { Node } from '@xyflow/react';
 import {
   X,
   ChevronDown,
@@ -19,6 +20,7 @@ import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
 import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import type { ImageMediaRef } from '../../mediaRefs';
+import { cardNameOfNode, localNodeIdOf } from '../../mediaRefs';
 import type { MediaGenStatus } from '../MediaNode';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import AtMentionMenu from '../AtMentionMenu';
@@ -110,6 +112,9 @@ interface ImageDialogProps {
   mentionItems?: AtMentionItem[];
   /** 选中 @ 素材后写入参考区 */
   onMentionCanvas?: (item: AtMentionItem) => void;
+  /** 当前画布媒体节点（IKFA8Y）：自由模式参考项按来源节点身份刷新名称，
+   *  卡片改名后参考显示同步新名称（不改变引用绑定与提交输入） */
+  currentNodes?: Node[];
   /** 绑定生成节点时悬浮跟随；缺省仍锚定底部 */
   followAnchor?: FollowDialogAnchor | null;
 }
@@ -187,7 +192,7 @@ function AttachmentItem({ attachment, move, onRemove }: {
   );
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, mentionItems, onMentionCanvas, followAnchor }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, mentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -221,6 +226,25 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
     { open: sourceMenuOpen, ref: sourceWrapRef, dismiss: () => setSourceMenuOpen(false) },
     { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
   ]);
+
+  /** 快照参考项名称刷新（IKFA8Y）：自由模式的参考名称取自选取当刻，卡片改名后按画布节点 id
+   *  重新取当前名称（只改展示名称；上传项与资产库项无画布节点，保持原名）。 */
+  useEffect(() => {
+    if (!currentNodes || currentNodes.length === 0) return;
+    const current = new Map(currentNodes.map((n) => [n.id, n]));
+    setFiles((prev) => {
+      let changed = false;
+      const next = prev.map((file) => {
+        const nodeId = localNodeIdOf(file.id);
+        if (!nodeId) return file;
+        const name = cardNameOfNode(current.get(nodeId));
+        if (name === undefined || name === file.name) return file;
+        changed = true;
+        return { ...file, name };
+      });
+      return changed ? next : prev;
+    });
+  }, [currentNodes]);
 
   /** 外部注入参考素材（画布节点选取/角色库多选；去重 + 上限保护）。
    *  连线绑定模式（IKDMQR）：参考由父级按连线推导，外部注入不参与（选取入口改为建立连线）。

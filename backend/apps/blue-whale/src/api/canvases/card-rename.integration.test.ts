@@ -427,13 +427,23 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       const customTitle = () => customCard.locator('[data-testid="media-title"]');
       const autoTitle = () => autoCard.locator('[data-testid="media-title"]');
 
+      // 独立发布沿用远程 release 的 textarea 输入框。
+      // 先全选清空再逐字键入，走浏览器真实输入路径
+      const promptEditor = () => page.locator('textarea').first();
+      async function fillPrompt(text: string) {
+        const editor = promptEditor();
+        await editor.click();
+        await page.keyboard.press("ControlOrMeta+A");
+        await page.keyboard.press("Backspace");
+        await page.waitForTimeout(150);
+        await editor.pressSequentially(text, { delay: 30 });
+      }
       /** 打开草稿绑定面板并发送（真实业务 API 建任务） */
       async function sendDraft(id: string, prompt: string) {
         await page.locator(`[data-id="${id}"] [data-testid="media-content"]`).click();
-        const textarea = page.locator("textarea");
-        await textarea.waitFor();
+        await promptEditor().waitFor();
         await page.getByText("IKFA8X Test", { exact: true }).waitFor();
-        await textarea.fill(prompt);
+        await fillPrompt(prompt);
         await page.locator('button[title="发送"]').click();
         await vi.waitFor(async () => {
           const job = await readJob(await latestJobId(projectId));
@@ -465,10 +475,9 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       // A15 重新生成失败：名称与重试入口保留
       await customCard.locator('[data-testid="media-content"]').click();
       await page.getByText("重新编辑", { exact: true }).click();
-      const textarea = page.locator("textarea");
-      await textarea.waitFor();
+      await promptEditor().waitFor();
       await page.getByText("IKFA8X Test", { exact: true }).waitFor();
-      await textarea.fill("换成深海");
+      await fillPrompt("换成深海");
       await page.locator('button[title="发送"]').click();
       const regenJobId = await (async () => {
         await vi.waitFor(async () => {
@@ -568,4 +577,183 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       await vite.close();
     }
   }, 60_000);
+
+  it.runIf(process.env.IKFA8X_BROWSER)("browser: 改名同步当前参考显示与下载命名（IKFA8Y A19–A22）", async () => {
+    const { chromium } = await import("playwright");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    const projectId = (await projects.create("987654", "IKFA8Y browser reference sync")).id;
+    const assetA = await createAsset(projectId, "image", "https://example.com/shared.png");
+    const assetV = await createAsset(projectId, "video", "https://example.com/clip.mp4");
+    // 两张卡共享同一 Asset 身份，改名只影响被选择的节点。
+    const initialNodes = [
+      mediaNode("img-a", "image", "上传图.png", assetA, 0, { mime: "image/png" }),
+      mediaNode("img-b", "image", "上传图.png", assetA, 380, { mime: "image/png" }),
+      mediaNode("vid", "video", "片头.mp4", assetV, 760, { mime: "video/mp4" }),
+      imageDraftNode("draft", "图片草稿", 1140),
+    ];
+    // 当前生成面板已引用两张卡：草稿绑定面板按连线实时推导参考
+    const initialEdges = [
+      { id: "e-img-a-draft", source: "img-a", target: "draft" },
+      { id: "e-vid-draft", source: "vid", target: "draft" },
+    ];
+    expect((await saveCanvas(projectId, initialNodes, initialEdges, "missing")).status).toBe(200);
+
+    // A21：改名前通过真实生成 API 创建历史输入；稍后验证改名与刷新不改写落库快照。
+    const created = await createJob(projectId, {
+      type: "image", expected_output_count: 1, input_asset_ids: [assetA],
+      parameters: { prompt: "参考上传图.png", model_id: MODEL_ID, aspect_ratio: "1:1" },
+    });
+    expect(created.code).toBe(200);
+    const historicalJobId = created.data.generation_job_id;
+    const historicalInput = (await readJob(historicalJobId))!.input;
+    expect(historicalInput.prompt).toBe("参考上传图.png");
+
+    const vite = await createVite({
+      root: `${process.cwd()}/web`,
+      server: { open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base }, "/agent": { target: base } } },
+    });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, acceptDownloads: true });
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
+        userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+      } }, version: 0 })));
+      // 独立 Agent 服务用契约快照夹具；画布改名、保存和刷新仍走真实业务 API + MySQL。
+      // 这里只验前端保留历史名称，不作为 Agent 真实落库证明。
+      const session = { session_id: "rename-session", title: "改名验收", phase: "idle", lifecycle: "active" };
+      const messages = [{
+        message_id: "old-user", sequence: 1, role: "user", input_batch_id: "old-batch",
+        content: [{ type: "asset_ref", asset_id: assetA, media_type: "image", display_label: "上传图.png" }],
+      }, {
+        message_id: "old-assistant", sequence: 2, role: "assistant", input_batch_id: "old-batch", source_run_id: "old-run",
+        content: [{ type: "text", text: "历史生成方案" }],
+      }];
+      const promptCards = [{
+        card_id: "old-card", session_id: session.session_id,
+        active_revision: { revision_id: "old-revision", authoring_run_id: "old-run", payload: {
+          schema_version: 3, target_media: "image", overview: "历史方案",
+          assets: [{ asset_ref_id: "original", asset_id: assetA, media_type: "image", display_label: "上传图.png" }],
+          shots: [{ shot_no: 1, title: "改名前的方案", frame_description: "海边", prompt_text: "参考上传图.png", asset_bindings: [{ asset_ref_id: "original" }] }],
+        } },
+      }];
+      await page.route(`**/api/agent/v1/projects/${projectId}/**`, async (route) => {
+        const path = new URL(route.request().url()).pathname;
+        if (path.endsWith("/events")) {
+          return route.fulfill({ contentType: "text/event-stream", body: ": connected\n\n" });
+        }
+        if (path.endsWith("/snapshot")) return route.fulfill({ json: { session, messages, prompt_cards: promptCards, event_cursor: "3" } });
+        return route.fulfill({ json: { items: path.endsWith("/sessions") ? [session] : [] } });
+      });
+      // 素材地址在测试域外：开发模式下前端经 Vite /__tos-fetch 代理取素材，
+      // 路由内按目标地址返回真实类型响应，走与生产一致的 fetch→blob→下载分支
+      await page.route("**/__tos-fetch**", (route) => {
+        const target = decodeURIComponent(new URL(route.request().url()).searchParams.get("url") ?? "");
+        const contentType = target.endsWith(".mp4") ? "video/mp4" : "image/png";
+        return route.fulfill({ status: 200, contentType, body: "stub-bytes" });
+      });
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+      await page.locator('[data-id="img-a"] [data-testid="media-title"]').waitFor();
+
+      const nameSpanOf = (id: string) => page.locator(`[data-id="${id}"] [data-testid="media-title"] span`).first();
+      /** 双击名称进入编辑、填值并回车保存 */
+      async function rename(id: string, value: string) {
+        await nameSpanOf(id).dblclick();
+        const input = page.locator(`[data-id="${id}"] [data-testid="media-title"] input`);
+        await input.waitFor();
+        await input.fill(value);
+        await input.press("Enter");
+      }
+      async function waitPersisted(id: string, name: string) {
+        await vi.waitFor(async () => {
+          const node = await canvasNode(projectId, id);
+          expect(node?.data.fileName).toBe(name);
+          expect(node?.data.customName).toBe(true);
+        }, { timeout: 10_000 });
+      }
+      /** 检查浏览器下载事件、实际文件字节与建议文件名，不替换 DOM 下载行为。 */
+      async function downloadVia(id: string) {
+        await page.locator(`[data-id="${id}"] [data-testid="media-content"]`).click();
+        const [download] = await Promise.all([
+          page.waitForEvent("download"),
+          page.locator(`[data-id="${id}"] button[title="下载"]`).click(),
+        ]);
+        expect(await download.failure()).toBeNull();
+        const { readFile } = await import("node:fs/promises");
+        expect(await readFile((await download.path())!, "utf8")).toBe("stub-bytes");
+        return download.suggestedFilename();
+      }
+
+      // A22：改名后下载用当前卡片名称 + 真实类型扩展名（素材地址 .png 决定扩展名）
+      expect(await downloadVia("img-a"), "原名下载：名称即卡片名").toBe("上传图.png");
+      await rename("img-a", "海边日落");
+      await waitPersisted("img-a", "海边日落");
+      expect(await downloadVia("img-a"), "改名后下载：当前卡片名 + 真实扩展名").toBe("海边日落.png");
+      // A22 边界：名称自带别的扩展名时按真实类型替换，不出现「.mp4.png」
+      await rename("img-a", "海边日落.mp4");
+      await waitPersisted("img-a", "海边日落.mp4");
+      expect(await downloadVia("img-a"), "名称带异类扩展名：按真实类型替换").toBe("海边日落.png");
+      // A22：同素材另一张卡下载名称不被联动
+      expect(await downloadVia("img-b"), "同素材其他卡不联动").toBe("上传图.png");
+      // 视频卡按各自真实类型命名
+      await rename("vid", "片头素材");
+      await waitPersisted("vid", "片头素材");
+      expect(await downloadVia("vid"), "视频按真实类型命名").toBe("片头素材.mp4");
+
+      // A19：改名已被当前生成面板引用的卡片 → 参考显示同步新名称，连线与引用身份不变
+      await page.locator('[data-id="draft"] [data-testid="media-content"]').click();
+      const dockRefNames = () => page.locator('[data-testid="dock-media-ref"] img').evaluateAll(
+        (imgs) => imgs.map((img) => img.getAttribute("alt")),
+      );
+      await vi.waitFor(async () => {
+        expect(await dockRefNames(), "面板参考显示当前卡片名").toEqual(["海边日落.mp4"]);
+      }, { timeout: 10_000 });
+      const edgePairs = async () => {
+        const canvas = await getCanvas(projectId);
+        return (JSON.parse(canvas.edges) as Array<{ source: string; target: string }>)
+          .map((e) => `${e.source}->${e.target}`).sort();
+      };
+      expect(await edgePairs(), "参考显示更新不改变连线").toEqual(["img-a->draft", "vid->draft"]);
+      const renamedNode = await canvasNode(projectId, "img-a");
+      expect(renamedNode?.data.assetId, "引用对象仍是原先明确选择的素材").toBe(assetA);
+      expect(renamedNode?.data.id ?? renamedNode?.id).toBe("img-a");
+
+      // A19+A22：保存成功并刷新恢复后，参考显示与下载都使用持久恢复的新名称
+      await page.reload();
+      await page.locator('[data-id="img-a"] [data-testid="media-title"]').waitFor();
+      expect(await nameSpanOf("img-a").textContent(), "刷新后恢复新名称").toBe("海边日落.mp4");
+      await page.locator('[data-id="draft"] [data-testid="media-content"]').click();
+      await vi.waitFor(async () => {
+        expect(await dockRefNames(), "刷新后参考显示仍为持久名称").toEqual(["海边日落.mp4"]);
+      }, { timeout: 10_000 });
+      expect(await downloadVia("img-a"), "刷新后下载仍用持久名称").toBe("海边日落.png");
+
+      // A20/A21：新加入聊天用当前名；已有聊天与生成方案仍显示历史名称。
+      await page.locator('[data-id="img-a"] [data-testid="media-content"]').click();
+      await page.locator('[data-id="img-a"] button[title="添加到 Agent 聊天"]').click();
+      const composer = page.locator('[contenteditable="true"][role="textbox"]').last();
+      await vi.waitFor(async () => expect(await composer.textContent()).toContain("海边日落.mp4"));
+      const bubbles = page.locator('[class*="userBubble"]');
+      await vi.waitFor(async () => expect(await bubbles.first().textContent()).toContain("上传图.png"));
+      await page.getByText("改名前的方案", { exact: true }).waitFor();
+      expect(await page.locator('[class*="_generationCard_"]').textContent()).toContain("参考上传图.png");
+      await page.reload();
+      await page.locator('[data-id="img-a"] [data-testid="media-title"]').waitFor();
+      // 重新打开 Agent 后从快照恢复，旧消息及方案不得变成当前卡名。
+      await page.locator('[data-id="img-a"] [data-testid="media-content"]').click();
+      await page.locator('[data-id="img-a"] button[title="添加到 Agent 聊天"]').click();
+      await vi.waitFor(async () => {
+        expect(await bubbles.first().textContent()).toContain("上传图.png");
+        expect(await composer.textContent()).toContain("海边日落.mp4");
+      });
+      await page.getByText("改名前的方案", { exact: true }).waitFor();
+      expect(await page.locator('[class*="_generationCard_"]').textContent()).toContain("参考上传图.png");
+      expect((await readJob(historicalJobId))!.input).toEqual(historicalInput);
+
+      await page.screenshot({ path: "/tmp/ikfa8y-reference-download.png", fullPage: true });
+    } finally {
+      await browser.close();
+      await vite.close();
+    }
+  }, 180_000);
 });
