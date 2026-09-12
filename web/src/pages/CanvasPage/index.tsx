@@ -10,6 +10,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition, type SpawnBox } from './draftSpawn';
+import {
+  computeFollowAnchor,
+  enabledVideoFollowModes,
+  type VideoFollowMode,
+} from './followDialog';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, type ImageMediaRef } from './mediaRefs';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
@@ -42,6 +47,7 @@ import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import BottomDialog, { type VideoGenOptions, type VideoGenSeedParams } from './components/BottomDialog';
 import ImageDialog, { type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
+import TextGenDialog from './components/TextGenDialog';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
@@ -99,6 +105,7 @@ import {
   canConnectSourcesToGen,
   genKindOf,
   isConnectableSource,
+  sourceKindOf,
   wouldCreateCycle,
   type ConnectGenKind,
 } from './connectAbility';
@@ -110,9 +117,16 @@ import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
 import {
+  applyIndependentGroupDrag,
+  bringGroupToFront,
+  exclusiveMembersInGroup,
   groupFrameBBox,
   groupToNode,
-  membersInGroupBox,
+  isolateNewGroupMembers,
+  isForeignGroupMember,
+  isGroupMember,
+  nodeInsideGroupBox,
+  nodePressesGroupEdge,
   parseGroupsFromNodes,
   MIN_GROUP_MEMBERS,
   GROUP_FRAME_PADDING,
@@ -128,6 +142,7 @@ import {
   readCanvasIdFromSearch,
   shouldReturnToProjectsAfterDelete,
 } from './canvasQuery';
+import type { AtMentionItem } from './atMention';
 import styles from './index.module.css';
 
 type ToolMode = 'drag' | 'select';
@@ -212,6 +227,12 @@ export default function CanvasPage() {
   const paneUploadPosRef = useRef<{ x: number; y: number } | null>(null);
   const [showBottomDialog, setShowBottomDialog] = useState(false);
   const [showImageDialog, setShowImageDialog] = useState(false);
+  const [showTextGenDialog, setShowTextGenDialog] = useState(false);
+  const [textGenDraftId, setTextGenDraftId] = useState<string | null>(null);
+  const skipTextGenOpenRef = useRef(false);
+  const canvasWrapperRef = useRef<HTMLDivElement>(null);
+  const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
+  const [liveViewport, setLiveViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
   /** 「到节点选择」：画布节点选取模式（image/video/audio 对应三个底部对话框；product 商品卡选图） */
   const [pickMode, setPickMode] = useState<'image' | 'video' | 'audio' | 'product' | 'asset' | null>(null);
   /** 选取发起对话框（决定选取结果注入哪个对话框；视频对话框图片槽/首尾帧只选图片节点，视频槽只选视频节点） */
@@ -630,6 +651,16 @@ export default function CanvasPage() {
   }, [location.state, location.pathname, location.search, navigate]);
   /** 当前视口（拖拽/缩放结束更新），自动保存时序列化提交 */
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1.1 });
+  useEffect(() => { setLiveViewport(viewport); }, [viewport]);
+  useEffect(() => {
+    const el = canvasWrapperRef.current;
+    if (!el) return;
+    const update = () => setWrapperSize({ width: el.clientWidth, height: el.clientHeight });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   /** FlowCanvas 注册的屏幕点→flow 坐标转换（无参默认取视口中心），注册前回退原点附近 */
   const spawnPosRef = useRef<(screenPt?: { x: number; y: number }) => { x: number; y: number }>(
     () => ({ x: 300, y: 200 }),
@@ -671,6 +702,40 @@ export default function CanvasPage() {
     }
     return { x: n.position.x, y: n.position.y, width: 320, height: 340 };
   };
+  const followTargetId = showImageDialog && imageDraftId
+    ? imageDraftId
+    : showBottomDialog && videoDraftId
+      ? videoDraftId
+      : showAudioDialog && audioDraftId
+        ? audioDraftId
+        : showTextGenDialog && textGenDraftId
+          ? textGenDraftId
+          : null;
+  const followNode = followTargetId
+    ? mediaNodes.find((n) => n.id === followTargetId) ?? textNodes.find((n) => n.id === followTargetId) ?? null
+    : null;
+  const followAnchor = followNode && wrapperSize.width > 0
+    ? computeFollowAnchor({
+        nodeX: followNode.position.x,
+        nodeY: followNode.position.y,
+        nodeWidth: nodeBoxOf(followNode).width,
+        nodeHeight: nodeBoxOf(followNode).height,
+        viewport: liveViewport,
+        containerWidth: wrapperSize.width,
+        containerHeight: wrapperSize.height,
+      })
+    : null;
+  const videoFollowModes: VideoFollowMode[] | undefined = videoDraftId && showBottomDialog
+    ? enabledVideoFollowModes(
+        edges
+          .filter((edge) => edge.target === videoDraftId)
+          .map((edge) => sourceKindOf(
+            mediaNodes.find((n) => n.id === edge.source)
+            ?? textNodes.find((n) => n.id === edge.source),
+          ))
+          .filter((kind): kind is NonNullable<typeof kind> => kind != null),
+      )
+    : undefined;
   /** 草稿卡出生位（IKDMQQ）：视口中心附近空位，避开底部 Dock 预留区与既有节点 */
   const spawnDraftPosition = () => {
     const center = spawnPosRef.current();
@@ -871,6 +936,10 @@ export default function CanvasPage() {
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
           onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
+          onWriteSelf: () => {
+            skipTextGenOpenRef.current = true;
+            setShowTextGenDialog(false);
+          },
         };
         break;
       case 'mediaNode':
@@ -887,6 +956,7 @@ export default function CanvasPage() {
           onRetryJob: (id: string) => actionsRef.current.retryJob(id),
           onReEdit: (id: string) => actionsRef.current.reEdit(id),
           onGenImage: (id: string) => actionsRef.current.genImage(id),
+          onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -1544,6 +1614,7 @@ export default function CanvasPage() {
     showDetails: (_id: string) => {},
     firePendingGen: () => {},
     firePendingVideoDraft: () => {},
+    img2img: (_id: string, _file: File) => {},
   });
   actionsRef.current = { ...actionsRef.current, duplicate: handleDuplicateNode, addToChat: handleAddToChatNode };
 
@@ -1615,6 +1686,13 @@ export default function CanvasPage() {
       }
       if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'audio') {
         openAudioDraftDialog(node.id);
+      }
+      if (node.type === 'textNode' && data.textGen === true) {
+        if (skipTextGenOpenRef.current) {
+          skipTextGenOpenRef.current = false;
+          return;
+        }
+        openTextGenDialog(node.id);
       }
       // IKDMQU P1：单选有生成记录的成品卡自动打开对应生成面板（编辑写回原卡，发送后原卡重新生成）；
       // 上传素材卡无生成记录，不自动打开（Q4）；重新生成中/失败态的卡 jobId 仍在，可打开查看或调整重发
@@ -1879,63 +1957,94 @@ export default function CanvasPage() {
     setMediaNodes(applyDraggedPositions);
     setProductNodes(applyDraggedPositions);
     setAssetNodes(applyDraggedPositions);
-    // 方向性规则（成员归属）：用户主动拖动节点 = 有意进出组，一律解除其排除记录——
-    //  - 拖进组矩形 → 吸收为成员（节点显示在玻璃上层）
-    //  - 拖出组矩形 → 本就脱离组，排除记录失效一并清掉
+    // 节点拖入/拖出组：只加入最上层命中组，其余重叠组写入排除。
+    // 扩组仅当「非本组原成员」压住组边线；组内成员移动不扩组。
     if (groupsRef.current.length > 0) {
-      setGroups((prev) =>
-        prev.map((g) => {
-          if (!g.excludedIds.some((id) => positions.has(id))) return g;
-          return { ...g, excludedIds: g.excludedIds.filter((id) => !positions.has(id)) };
-        }),
-      );
-    }
-
-    // 拖动节点压到某组边界时扩大该组：被拖节点矩形与组矩形相交（含贴边/压住边界线）
-    //  即把该节点包进来；后创建的组在上层优先。拖动前已是该组成员也允许扩大——
-    //  用户把组员拖到边界时组应随之外扩，使其仍在组内。
-    if (groupsRef.current.length > 0) {
-      // 收集每个组需要 union 的节点矩形
       const expandByGroup = new Map<string, { x: number; y: number; x2: number; y2: number }>();
+      const ownerByNode = new Map<string, string>();
+      const beforeById = new Map(before.map((n) => [n.id, n]));
       draggedNodes.forEach((n) => {
         const w = n.measured?.width ?? 200;
         const h = n.measured?.height ?? 120;
         const nx = n.position.x, ny = n.position.y;
-        // 倒序取首个相交的组（后创建的组在上层）
+        const startNode = beforeById.get(n.id) ?? n;
         for (let i = groupsRef.current.length - 1; i >= 0; i--) {
           const g = groupsRef.current[i];
-          if (g.excludedIds.includes(n.id)) continue;
-          // 用 <= / >= 把贴边也视为相交，提高灵敏度
+          const wasMember = isGroupMember(startNode, g);
+          if (wasMember) {
+            // 组内原成员移动不扩组；中心仍在组内则留在本组，已拖出则继续看其他组
+            if (nodeInsideGroupBox(n, g.box)) {
+              ownerByNode.set(n.id, g.id);
+              break;
+            }
+            continue;
+          }
           const intersects =
             nx <= g.box.x + g.box.w && nx + w >= g.box.x && ny <= g.box.y + g.box.h && ny + h >= g.box.y;
           if (!intersects) continue;
-          const cur = expandByGroup.get(g.id);
-          const x = Math.min(nx, cur?.x ?? g.box.x);
-          const y = Math.min(ny, cur?.y ?? g.box.y);
-          const x2 = Math.max(nx + w, cur?.x2 ?? g.box.x + g.box.w);
-          const y2 = Math.max(ny + h, cur?.y2 ?? g.box.y + g.box.h);
-          expandByGroup.set(g.id, { x, y, x2, y2 });
-          break;
+          if (nodePressesGroupEdge(n, g.box)) {
+            const cur = expandByGroup.get(g.id);
+            const x = Math.min(nx, cur?.x ?? g.box.x);
+            const y = Math.min(ny, cur?.y ?? g.box.y);
+            const x2 = Math.max(nx + w, cur?.x2 ?? g.box.x + g.box.w);
+            const y2 = Math.max(ny + h, cur?.y2 ?? g.box.y + g.box.h);
+            expandByGroup.set(g.id, { x, y, x2, y2 });
+            ownerByNode.set(n.id, g.id);
+            break;
+          }
+          if (nodeInsideGroupBox(n, g.box) && !g.excludedIds.includes(n.id)) {
+            ownerByNode.set(n.id, g.id);
+            break;
+          }
         }
       });
-      if (expandByGroup.size > 0) {
-        const pad = GROUP_FRAME_PADDING;
-        setGroups((prev) =>
+      const pad = GROUP_FRAME_PADDING;
+      const allAfter = before.map((n) => {
+        const p = positions.get(n.id);
+        return p ? { ...n, position: p } : n;
+      });
+      setGroups((prev) => {
+        const boxes = new Map(
           prev.map((g) => {
             const e = expandByGroup.get(g.id);
-            if (!e) return g;
-            return {
-              ...g,
-              box: {
+            if (!e) return [g.id, g.box] as const;
+            return [
+              g.id,
+              {
                 x: e.x - pad,
                 y: e.y - pad,
                 w: e.x2 - e.x + pad * 2,
                 h: e.y2 - e.y + pad * 2,
               },
-            };
+            ] as const;
           }),
         );
-      }
+        const nextMeta = prev.map((g) => ({ ...g, box: boxes.get(g.id) ?? g.box }));
+        return nextMeta.map((g) => {
+          const excluded = new Set(g.excludedIds);
+          draggedNodes.forEach((n) => {
+            const owner = ownerByNode.get(n.id);
+            const inside = nodeInsideGroupBox(n, g.box);
+            if (!inside) excluded.delete(n.id);
+            else if (owner === g.id) excluded.delete(n.id);
+            else excluded.add(n.id);
+          });
+          if (expandByGroup.has(g.id)) {
+            allAfter.forEach((n) => {
+              if (positions.has(n.id)) return;
+              if (nodeInsideGroupBox(n, g.box) && isForeignGroupMember(n, g.id, nextMeta)) {
+                excluded.add(n.id);
+              }
+            });
+          }
+          const e = expandByGroup.get(g.id);
+          const boxChanged = !!e;
+          const excludedChanged =
+            excluded.size !== g.excludedIds.length || [...excluded].some((id) => !g.excludedIds.includes(id));
+          if (!boxChanged && !excludedChanged) return g;
+          return { ...g, box: g.box, excludedIds: [...excluded] };
+        });
+      });
     }
   };
 
@@ -1993,6 +2102,7 @@ export default function CanvasPage() {
       targetNodeId: nodeId,
       attachments: textAttachmentsOf(nodeId),
     });
+    setShowTextGenDialog(false);
     handleOpenImageDialog();
   };
 
@@ -2030,6 +2140,16 @@ export default function CanvasPage() {
     }
   }, [imageDraftId, imageSeed, mediaNodes]);
 
+  useEffect(() => {
+    if (!textGenDraftId) return;
+    const node = textNodes.find((n) => n.id === textGenDraftId);
+    const d = (node?.data ?? {}) as Record<string, unknown>;
+    if (!node || d.textGen !== true) {
+      setTextGenDraftId(null);
+      setShowTextGenDialog(false);
+    }
+  }, [textGenDraftId, textNodes]);
+
   /** 打开绑定指定草稿的视频面板（IKDMQS）：带入草稿已保存的参数与当前连线文本附件；
    *  preset 覆盖节点 data 读出的参数——新建草稿后 mediaNodesRef 尚未更新，种子参数经 preset 兜底 */
   const openVideoDraftDialog = (nodeId: string, preset?: VideoGenSeedParams) => {
@@ -2061,6 +2181,7 @@ export default function CanvasPage() {
     setShowImageDialog(false);
     setShowAudioDialog(false);
     setShowMusicDialog(false);
+    setShowTextGenDialog(false);
   };
 
   /** 新建视频草稿卡（IKDMQS 统一入口共用）：seed 字段写入草稿 data 持久化键并自动选中，返回节点 id；
@@ -2098,6 +2219,7 @@ export default function CanvasPage() {
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onReEdit: (id: string) => actionsRef.current.reEdit(id),
         onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -2139,6 +2261,7 @@ export default function CanvasPage() {
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onReEdit: (id: string) => actionsRef.current.reEdit(id),
         onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -2180,6 +2303,7 @@ export default function CanvasPage() {
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
         onReEdit: (id: string) => actionsRef.current.reEdit(id),
         onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -2227,6 +2351,10 @@ export default function CanvasPage() {
         onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
         onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
         onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
+        onWriteSelf: () => {
+          skipTextGenOpenRef.current = true;
+          setShowTextGenDialog(false);
+        },
       },
     };
     pendingNodeIdsRef.current.add(nodeId);
@@ -2238,6 +2366,33 @@ export default function CanvasPage() {
     setTextNodes((prev) => [...deselect(prev), node]);
     setSelectRequest({ id: nodeId, ts: Date.now() });
     return nodeId;
+  };
+
+  const openTextGenDialog = (nodeId: string) => {
+    skipTextGenOpenRef.current = false;
+    setTextGenDraftId(nodeId);
+    setShowTextGenDialog(true);
+    setShowImageDialog(false);
+    setShowBottomDialog(false);
+    setShowAudioDialog(false);
+    setShowMusicDialog(false);
+  };
+
+  const handleTextGenSend = (text: string, modelId: string) => {
+    if (!textGenDraftId) return;
+    const nodeId = textGenDraftId;
+    const attachments = textAttachmentsOf(nodeId);
+    const body = [attachments.map((item) => item.text).filter(Boolean).join('\n\n'), text]
+      .filter(Boolean)
+      .join('\n\n');
+    setTextNodes((prev) =>
+      prev.map((n) =>
+        n.id === nodeId
+          ? { ...n, data: { ...n.data, text: body, html: body, prompt: text, draftModelId: modelId } }
+          : n,
+      ),
+    );
+    setShowTextGenDialog(false);
   };
 
   const openConnectTypeMenu = (sourceIds: string[], clientX: number, clientY: number) => {
@@ -2273,6 +2428,7 @@ export default function CanvasPage() {
     }
     targetId = createTextGenDraft(position);
     sourceIds.forEach((id) => addCanvasEdge(id, targetId));
+    openTextGenDialog(targetId);
   };
 
   const handleConnectEnd = (
@@ -2511,7 +2667,7 @@ export default function CanvasPage() {
   const placeFileOnCanvas = (
     file: File,
     opts?: { position?: { x: number; y: number }; replaceNodeId?: string },
-  ): Promise<{ asset_id: string; url: string }> => {
+  ): Promise<{ asset_id: string; url: string; nodeId: string }> => {
     const isImage = file.type.startsWith('image/');
     const isVideo = file.type.startsWith('video/');
     const isAudio = file.type.startsWith('audio/');
@@ -2538,6 +2694,7 @@ export default function CanvasPage() {
       onRetryJob: (id: string) => actionsRef.current.retryJob(id),
       onReEdit: (id: string) => actionsRef.current.reEdit(id),
       onGenImage: (id: string) => actionsRef.current.genImage(id),
+      onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
       onGenVideo: (id: string) => actionsRef.current.genVideo(id),
       onGenAudio: (id: string) => actionsRef.current.genAudio(id),
       onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -2605,7 +2762,7 @@ export default function CanvasPage() {
             };
           }),
         );
-        return { asset_id: done.asset_id, url: done.url };
+        return { asset_id: done.asset_id, url: done.url, nodeId };
       })
       .catch((err) => {
         // 上传登记失败 = 添加失败：节点不留在画布，移除并释放 blob URL
@@ -2740,31 +2897,29 @@ export default function CanvasPage() {
     });
   };
 
-  const addEmptyMediaShell = (mediaType: 'image' | 'video' | 'audio', position: { x: number; y: number }) => {
-    const nodeId = newNodeId('media');
-    pendingNodeIdsRef.current.add(nodeId);
-    setMediaNodes((prev) => [
-      ...prev,
-      {
-        id: nodeId,
-        type: 'mediaNode',
-        position,
-        data: {
-          emptyShell: true,
-          mediaType,
-          toolMode,
-          onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
-          onDuplicate: (id: string) => actionsRef.current.duplicate(id),
-          onAddToChat: (id: string) => actionsRef.current.addToChat(id),
-          onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-          onCopyImage: (id: string) => actionsRef.current.copyImage(id),
-          onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
-          onFillEmptyShell: (id: string, next: File) => actionsRef.current.fillEmptyShell(id, next),
-          onMediaDims: handleMediaDims,
-        },
-      },
-    ]);
-    historyRef.current?.pushAddNodes([nodeId]);
+  /** 图片生成节点「图生图」：本地图落入画布、自动连线、进入参考清单 */
+  const handleImg2Img = (draftId: string, file: File) => {
+    if (!file.type.startsWith('image/')) {
+      showToast('warn', '图生图仅支持图片');
+      return;
+    }
+    const draft = mediaNodesRef.current.find((n) => n.id === draftId);
+    const center = draft
+      ? { x: draft.position.x - 360, y: draft.position.y }
+      : spawnDraftPosition();
+    const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
+    const position = nextDraftPosition({
+      center,
+      dockTop: center.y + 2000,
+      nodes: nodes.map(nodeBoxOf),
+    });
+    void placeFileOnCanvas(file, { position }).then((done) => {
+      addCanvasEdge(done.nodeId, draftId);
+      void actionsRef.current.complianceCheck(done.nodeId);
+      openImageDraftDialog(draftId);
+    }).catch((err) => {
+      showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
+    });
   };
 
   actionsRef.current = {
@@ -2782,6 +2937,7 @@ export default function CanvasPage() {
     copyImage: (id) => { void handleCopyImage(id); },
     complianceCheck: (id) => { void handleComplianceCheck(id); },
     fillEmptyShell: handleFillEmptyShell,
+    img2img: handleImg2Img,
   };
 
   /** 从资产 URL 提取展示名（无元数据字段时的兜底命名） */
@@ -2833,6 +2989,7 @@ export default function CanvasPage() {
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
           onReEdit: (id: string) => actionsRef.current.reEdit(id),
           onGenImage: (id: string) => actionsRef.current.genImage(id),
+          onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -3313,6 +3470,7 @@ export default function CanvasPage() {
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onReEdit: (id: string) => actionsRef.current.reEdit(id),
         onGenImage: (id: string) => actionsRef.current.genImage(id),
+        onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -3581,35 +3739,51 @@ export default function CanvasPage() {
   /* ============ 成组交互（IKD0JT A3/A4） ============ */
 
   /** 成组：≥2 节点划定格组矩形（选中成员包围盒+留白），之后矩形固定、成员按坐标动态判定。
-   *  入参为画布内部节点对象（含 measured 实际尺寸），保证矩形真实框住全部选中节点——
-   *  父级数组缺 measured 时按缺省尺寸估算会导致框偏小、框不住节点。 */
+   *  新组与已有组互斥：选中节点从其他组排除，框内非选中节点写入新组排除名单。
+   *  入参为画布内部节点对象（含 measured 实际尺寸），保证矩形真实框住全部选中节点。 */
   const handleCreateGroup = (selectedNodes: Node[]) => {
     const members = selectedNodes.filter((n) => !(n.data as { emptyShell?: boolean } | undefined)?.emptyShell);
     if (members.length < MIN_GROUP_MEMBERS) return;
     const box = groupFrameBBox(members);
     if (!box) return;
+    const memberIds = new Set(members.map((n) => n.id));
+    const all = [
+      ...textNodesRef.current,
+      ...mediaNodesRef.current,
+      ...productNodesRef.current,
+      ...assetNodesRef.current,
+    ];
     const group: CanvasGroup = { id: newNodeId('group'), box, excludedIds: [] };
     const before = groupsRef.current;
-    const after = [...before, group];
+    const after = isolateNewGroupMembers(before, all, group, memberIds);
     setGroups(after);
-    historyRef.current?.pushCreateGroup(group, before, after);
+    historyRef.current?.pushCreateGroup(after[after.length - 1] ?? group, before, after);
   };
 
-  /** 整组拖动结束（动态成员 + 固定矩形）：由 GroupOverlay 上抛拖动期间的矩形与成员位移，
-   *  在此落父级坐标与组矩形（触发自动保存落盘），并登记撤销（矩形+成员同步回放）。
-   *  方向性规则：组盖到节点上 → 该节点排除（不吸收为成员、被玻璃盖住）；
-   *  排除名单随组矩形一并落盘与撤销。成员可为空，此时仅更新矩形。 */
+  /** 整组拖动结束：落盘矩形与本组独立成员位移，并同步其他组排除名单（叠住不吸收）。 */
   const handleGroupFrameDragStop = useCallback(
     (res: GroupFrameDragResult) => {
-      setGroups((prev) =>
-        prev.map((g) =>
-          g.id === res.groupId
-            ? { ...g, box: { ...res.newBox }, excludedIds: [...res.excludedAfter] }
-            : g,
-        ),
-      );
-      if (res.nodeNew.length === 0) return;
       const posNew = new Map(res.nodeNew.map((p) => [p.id, { x: p.x, y: p.y }]));
+      const nodesAfter = [
+        ...textNodesRef.current,
+        ...mediaNodesRef.current,
+        ...productNodesRef.current,
+        ...assetNodesRef.current,
+      ].map((n) => {
+        const p = posNew.get(n.id);
+        return p ? { ...n, position: { x: p.x, y: p.y } } : n;
+      });
+      const { groups: nextGroups, peerExclusions } = applyIndependentGroupDrag(
+        groupsRef.current,
+        nodesAfter,
+        res,
+      );
+      setGroups(nextGroups);
+      const recorded: GroupFrameDragResult = { ...res, peerExclusions };
+      if (res.nodeNew.length === 0) {
+        historyRef.current?.pushGroupMove(recorded);
+        return;
+      }
       const applyPos = (prev: Node[]) =>
         prev.map((n) => {
           const p = posNew.get(n.id);
@@ -3619,10 +3793,14 @@ export default function CanvasPage() {
       setMediaNodes(applyPos);
       setProductNodes(applyPos);
       setAssetNodes(applyPos);
-      historyRef.current?.pushGroupMove(res);
+      historyRef.current?.pushGroupMove(recorded);
     },
     [setTextNodes, setMediaNodes, setProductNodes, setAssetNodes, setGroups],
   );
+
+  const handleBringGroupToFront = (groupId: string) => {
+    setGroups((prev) => bringGroupToFront(prev, groupId));
+  };
 
   /** 解组：仅移除组矩形，成员节点保留原位（成员本为按坐标动态判定） */
   const handleUngroup = (groupId: string) => {
@@ -3642,7 +3820,7 @@ export default function CanvasPage() {
       ...productNodesRef.current,
       ...assetNodesRef.current,
     ];
-    const inside = membersInGroupBox(all, group.box, group.excludedIds).map((n) => n.id);
+    const inside = exclusiveMembersInGroup(all, group, groupsRef.current).map((n) => n.id);
     if (inside.length > 0) removeCanvasNodes(inside);
     setGroups((prev) => prev.filter((g) => g.id !== groupId));
     historyRef.current?.pushDeleteGroup(group, all.filter((n) => inside.includes(n.id)), []);
@@ -4822,6 +5000,7 @@ export default function CanvasPage() {
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
               onReEdit: (id: string) => actionsRef.current.reEdit(id),
               onGenImage: (id: string) => actionsRef.current.genImage(id),
+              onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
               onGenVideo: (id: string) => actionsRef.current.genVideo(id),
               onGenAudio: (id: string) => actionsRef.current.genAudio(id),
               onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
@@ -4979,6 +5158,126 @@ export default function CanvasPage() {
         })),
     [mediaNodes],
   );
+
+  /** 底部输入框 @ 菜单：当前画布可引用的图片/视频/音频/文本节点 */
+  const atMentionItems: AtMentionItem[] = useMemo(() => {
+    const items: AtMentionItem[] = [];
+    for (const node of mediaNodes) {
+      if (!isConnectableSource(node)) continue;
+      const kind = sourceKindOf(node);
+      if (kind !== 'image' && kind !== 'video' && kind !== 'audio') continue;
+      const data = (node.data ?? {}) as Record<string, unknown>;
+      items.push({
+        id: node.id,
+        kind,
+        name: typeof data.fileName === 'string' && data.fileName
+          ? data.fileName
+          : kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频',
+        thumbUrl: typeof data.src === 'string' ? data.src : undefined,
+        assetId: readAssetId(data),
+      });
+    }
+    for (const node of textNodes) {
+      if (!isConnectableSource(node)) continue;
+      const data = (node.data ?? {}) as Record<string, unknown>;
+      items.push({
+        id: node.id,
+        kind: 'text',
+        name: typeof data.title === 'string' && data.title ? data.title : '文本节点',
+      });
+    }
+    return items;
+  }, [mediaNodes, textNodes]);
+
+  /** 图片面板 @ 选中：图片写入参考，文本建连线成为附件 */
+  const handleImageAtMention = (item: AtMentionItem) => {
+    imagePanelHiddenRef.current = true;
+    if (item.kind === 'text') {
+      if (imageDraftId) connectPair(item.id, imageDraftId);
+      else showToast('warn', '文本参考需要绑定生成节点');
+      return;
+    }
+    if (item.kind !== 'image' && item.kind !== 'video') {
+      showToast('warn', '图片生成不支持该类型参考');
+      return;
+    }
+    if (imageDraftId) {
+      if (item.kind !== 'image') {
+        showToast('warn', '图片参考仅支持图片素材');
+        return;
+      }
+      if (!validateImageRefConnect(item.id, imageDraftId) || !item.assetId || !item.thumbUrl) return;
+      const next = [...pendingImageCanvasRefsRef.current, {
+        nodeId: item.id,
+        url: item.thumbUrl,
+        name: item.name,
+        assetId: item.assetId,
+      }];
+      pendingImageCanvasRefsRef.current = next;
+      setPendingImageCanvasRefs(next);
+      return;
+    }
+    setImagePickResult({
+      ts: Date.now(),
+      files: [{
+        id: `node-${item.id}`,
+        url: item.thumbUrl ?? '',
+        type: item.kind === 'video' ? 'video' : 'image',
+        name: item.name,
+        assetId: item.assetId,
+      }],
+    });
+  };
+
+  /** 视频面板 @ 选中：图/视频写入参考，文本建连线成为附件 */
+  const handleVideoAtMention = (item: AtMentionItem) => {
+    if (item.kind === 'text') {
+      if (videoDraftId) connectPair(item.id, videoDraftId);
+      else showToast('warn', '文本参考需要绑定生成节点');
+      return;
+    }
+    if (item.kind === 'audio') {
+      showToast('warn', '视频生成暂不支持音频参考');
+      return;
+    }
+    if (item.kind !== 'image' && item.kind !== 'video') return;
+    if (!item.assetId) return;
+    const refItem: VideoMediaRef = {
+      nodeId: item.id,
+      url: item.thumbUrl ?? '',
+      name: item.name,
+      assetId: item.assetId,
+      mediaType: item.kind,
+    };
+    if (videoDraftId) {
+      if (!validateVideoRefConnect(item.id, videoDraftId, 'reference')) return;
+      const prev = pendingVideoCanvasRefsRef.current;
+      const next = { ...prev, reference: [...prev.reference, refItem] };
+      pendingVideoCanvasRefsRef.current = next;
+      setPendingVideoCanvasRefs(next);
+      return;
+    }
+    appendVideoFreeRef(refItem, 'reference');
+  };
+
+  /** 音频面板 @ 选中：仅音频写入参考 */
+  const handleAudioAtMention = (item: AtMentionItem) => {
+    if (item.kind !== 'audio' || !item.thumbUrl) {
+      showToast('warn', '音频生成仅支持引用音频素材');
+      return;
+    }
+    setAudioPickResult({
+      ts: Date.now(),
+      item: {
+        id: item.id,
+        kind: 'audio',
+        name: item.name,
+        src: item.thumbUrl,
+        source: 'canvas',
+        assetId: item.assetId,
+      },
+    });
+  };
 
   /** 音频对话发送：创建音频生成任务（无参考素材）。
    *  草稿绑定模式（IKDMQT）：先等待在途保存并落盘当前画布编辑（同图片/视频草稿），
@@ -5238,7 +5537,7 @@ export default function CanvasPage() {
       />
 
       {/* 画布区域 */}
-      <div className={`${styles.canvasWrapper} ${pickMode === 'image' ? styles.pickingImage : ''}`}>
+      <div ref={canvasWrapperRef} className={`${styles.canvasWrapper} ${pickMode === 'image' ? styles.pickingImage : ''}`}>
         {applying && <div role="status" style={{ position: 'fixed', inset: 0, zIndex: 10000, cursor: 'wait' }}>正在保存画布引用…</div>}
       <FlowCanvas
           showMiniMap={showMiniMap}
@@ -5257,6 +5556,7 @@ export default function CanvasPage() {
           isValidConnection={isValidCanvasConnection}
           viewport={focusViewport ?? doc?.viewport}
           onViewportChange={setViewport}
+          onViewportLive={setLiveViewport}
           registerSpawnPosition={registerSpawnPosition}
           hideZoomControl={showAgent}
           onNodeDragStop={handleNodeDragStop}
@@ -5277,6 +5577,7 @@ export default function CanvasPage() {
           onDeleteGroup={handleDeleteGroup}
           onDownloadGroup={handleDownloadGroupNodes}
           onGroupFrameDragStop={handleGroupFrameDragStop}
+          onBringGroupToFront={handleBringGroupToFront}
           onConnectGroupToTarget={handleConnectGroupToTarget}
           onConnectGroupDrop={handleConnectGroupDrop}
           onConnectSourceToGroup={handleConnectSourceToGroup}
@@ -5318,10 +5619,17 @@ export default function CanvasPage() {
               if (key === 'upload') {
                 paneUploadPosRef.current = flow;
                 paneUploadRef.current?.click();
-              } else if (key === 'add-text') handleAddTextNode(flow);
-              else if (key === 'add-image') addEmptyMediaShell('image', flow);
-              else if (key === 'add-video') addEmptyMediaShell('video', flow);
-              else if (key === 'add-audio') addEmptyMediaShell('audio', flow);
+              }               else if (key === 'add-text') handleAddTextNode(flow);
+              else if (key === 'add-image') {
+                if (!canOpenEditor()) return;
+                openImageDraftDialog(createImageDraftCard(flow));
+              } else if (key === 'add-video') {
+                if (!canOpenEditor()) return;
+                openVideoDraftDialog(createVideoDraftCard(undefined, flow));
+              } else if (key === 'add-audio') {
+                if (!canOpenEditor()) return;
+                openAudioDraftDialog(createAudioDraftCard(flow));
+              }
               else if (key === 'undo') canvasHistory.undo();
               else if (key === 'redo') canvasHistory.redo();
             }}
@@ -5355,47 +5663,30 @@ export default function CanvasPage() {
           onUploadFile={handleUploadFile}
           onOpenAssetsPicker={() => openAssetsPicker('toolbar')}
           onToggleVideoDialog={() => {
-            // 自由模式：点击只打开面板不建卡；参数与参考本地暂存，发送时才落生成卡，关闭即丢弃
+            // 左侧工具栏：先建视频草稿卡，再打开跟随输入框；发送在原卡生成
             if (!canOpenEditor()) return;
             setPickMode(null);
             setPickTarget(null);
             setPickRefRole(null);
-            setVideoDraftId(null);
-            setVideoFreeRefs({ reference: [] });
-            pendingVideoCanvasRefsRef.current = { reference: [] };
-            setPendingVideoCanvasRefs({ reference: [] });
-            videoPanelHiddenRef.current = false;
-            setVideoSeed({ ts: Date.now() });
-            setShowBottomDialog(true);
-            setShowImageDialog(false);
-            setShowAudioDialog(false);
-            setShowMusicDialog(false);
+            const draftId = createVideoDraftCard();
+            openVideoDraftDialog(draftId);
           }}
           onToggleImageDialog={() => {
-            // 自由模式：点击只打开面板不建卡；参考图存面板本地，发送时才落生成卡
+            // 左侧工具栏：先建图片草稿卡，再打开跟随输入框；发送在原卡生成
             if (!canOpenEditor()) return;
             setPickMode(null);
             setPickTarget(null);
-            setImageDraftId(null);
-            pendingImageCanvasRefsRef.current = [];
-            setPendingImageCanvasRefs([]);
-            // 新会话不继承上一轮选取事件（IKF5KE）：已消费/残留事件一律清除
             setImagePickResult(null);
-            setImageSeed({ ts: Date.now(), text: '', files: [] });
-            handleOpenImageDialog();
+            const draftId = createImageDraftCard();
+            openImageDraftDialog(draftId);
           }}
           onToggleAudioDialog={() => {
-            // 自由模式：点击只打开面板不建卡；发送时才落生成卡
+            // 左侧工具栏：先建音频草稿卡，再打开跟随输入框；发送在原卡生成
             if (!canOpenEditor()) return;
             setPickMode(null);
             setPickTarget(null);
-            setAudioDraftId(null);
-            audioPanelHiddenRef.current = false;
-            setAudioSeed({ ts: Date.now() });
-            setShowAudioDialog(true);
-            setShowBottomDialog(false);
-            setShowImageDialog(false);
-            setShowMusicDialog(false);
+            const draftId = createAudioDraftCard();
+            openAudioDraftDialog(draftId);
           }}
           showVideoDialog={showBottomDialog}
           showImageDialog={showImageDialog}
@@ -5440,7 +5731,7 @@ export default function CanvasPage() {
           )}
         </div>
 
-        {/* 底部视频对话框（IKDMQS 统一草稿绑定；工具栏入口为无卡自由模式） */}
+        {/* 底部视频对话框（IKDMQS 统一草稿绑定；工具栏入口先建草稿卡再开跟随面板） */}
         {showBottomDialog && (
           <BottomDialog
             onRemovePlan={id => removePlanAttachment(videoSeed?.targetNodeId, id)}
@@ -5503,6 +5794,10 @@ export default function CanvasPage() {
             onRemoveMaterialRef={videoDraftId ? ((materialId) => handleMaterialRefChange(videoDraftId, materialId, null)) : removeVideoFreeRef}
             onSetMaterialRefRole={videoDraftId ? ((materialId, role) => handleMaterialRefChange(videoDraftId, materialId, { role })) : changeVideoFreeRefRole}
             onToast={(type, msg) => showToast(type, msg)}
+            mentionItems={atMentionItems.filter((item) => item.id !== videoDraftId)}
+            onMentionCanvas={handleVideoAtMention}
+            followAnchor={videoDraftId ? followAnchor : null}
+            enabledModes={videoFollowModes}
           />
         )}
         {/* 底部图片对话框 */}
@@ -5549,6 +5844,37 @@ export default function CanvasPage() {
             onExternalPickConsumed={() => setImagePickResult(null)}
             onOpenCharacterLibrary={() => { setCharacterLibraryTarget('image'); setShowCharacterLibrary(true); }}
             onToast={(type, msg) => showToast(type, msg)}
+            mentionItems={atMentionItems.filter((item) => item.id !== imageDraftId)}
+            onMentionCanvas={handleImageAtMention}
+            followAnchor={imageDraftId ? followAnchor : null}
+          />
+        )}
+        {showTextGenDialog && textGenDraftId && (
+          <TextGenDialog
+            key={textGenDraftId}
+            initialText={typeof (textNodes.find((n) => n.id === textGenDraftId)?.data as Record<string, unknown> | undefined)?.prompt === 'string'
+              ? String((textNodes.find((n) => n.id === textGenDraftId)?.data as Record<string, unknown>).prompt)
+              : ''}
+            attachments={textAttachmentsOf(textGenDraftId)}
+            followAnchor={followAnchor}
+            onClose={() => setShowTextGenDialog(false)}
+            onSend={handleTextGenSend}
+            onParamsChange={(patch) => {
+              setTextNodes((prev) =>
+                prev.map((n) =>
+                  n.id === textGenDraftId
+                    ? {
+                        ...n,
+                        data: {
+                          ...n.data,
+                          ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
+                          ...(patch.modelId !== undefined ? { draftModelId: patch.modelId } : {}),
+                        },
+                      }
+                    : n,
+                ),
+              );
+            }}
           />
         )}
 
@@ -5590,6 +5916,8 @@ export default function CanvasPage() {
             onPickFromCanvas={() => { setPickMode('audio'); setPickTarget('audio'); }}
             externalPick={audioPickResult}
             pickMode={pickMode === 'audio'}
+            mentionItems={atMentionItems.filter((item) => item.id !== audioDraftId)}
+            onMentionCanvas={handleAudioAtMention}
             onSwitchToMusic={() => {
               // 切走即结束草稿绑定并重置 seed：切回音频面板是干净的非草稿状态
               setAudioSeed({ ts: Date.now() });

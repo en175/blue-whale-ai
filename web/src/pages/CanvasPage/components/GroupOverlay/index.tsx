@@ -1,10 +1,10 @@
 /* ============================================
  * GroupOverlay 成组交互层（IKD0JT A3/A4）：
- * - 组底框：组矩形（成组时刻固定）虚线框（线宽按 zoom 反向补偿保持屏幕恒定）
+ * - 组底框：由 groupFrame 节点按数组顺序分层渲染（后拖动的组压住先有的组）
  * - 组徽标：底框左上角屏幕空间徽标，点击展开操作条（解组/删除）
  * - 成组入口：≥2 节点选中且未全部同组时，在选区上方浮现「成组」；框选后同时提供「下载」
  *   （Ctrl/Cmd+G 快捷键同效，见 Canvas 键盘处理）
- * - 动态成员：节点是否属于组 = 是否落在组矩形内（不存冻结名单）。
+ * - 动态成员：节点是否属于组 = 是否落在组矩形内且不属于其他组（组与组独立）。
  * - 整组拖动：拖起组顶部把手，实时移动「当前在框内的全部节点」+ 组矩形
  *   （矩形视觉经本地偏移跟随，结束时一次性上抛父级落盘 + 登记撤销）
  * 根层 pointer-events:none，仅徽标/按钮/操作条/把手可交互，不遮挡节点操作。
@@ -14,6 +14,7 @@ import { useReactFlow, useViewport, getBezierPath, Position, type Node } from '@
 import { Group, Ungroup, Trash2, Download, Plus } from 'lucide-react';
 import {
   memberBBox,
+  exclusiveMembersInGroup,
   membersInGroupBox,
   MIN_GROUP_MEMBERS,
   nodeInsideGroupBox,
@@ -41,6 +42,10 @@ interface GroupOverlayProps {
   /** 整组拖动起止：上抛「冻结的本次拖动成员集合」（拖起时传集合，结束时传空集合），
    *  供父级在拖组途中维持成员的高 zIndex（逻辑框未随拖动更新，避免成员被误判出组）。 */
   onFrameDragMembersChange?: (ids: Set<string>) => void;
+  /** 整组拖动时组框本地偏移，供组框节点跟手 */
+  onFrameDragOffsetChange?: (offset: { id: string; x: number; y: number } | null) => void;
+  /** 拖组/点组置顶 */
+  onBringGroupToFront?: (groupId: string) => void;
   /** 组→空白/节点：批量连线结束（targetId 为空表示落到空白或内容节点） */
   onConnectGroupDrop?: (memberIds: string[], targetId: string | null, client: { x: number; y: number }) => void;
   /** 组→已有节点：兼容旧回调，有 onConnectGroupDrop 时优先走 drop */
@@ -75,12 +80,14 @@ export default function GroupOverlay({
   setNodes,
   onGroupFrameDragStop,
   onFrameDragMembersChange,
+  onFrameDragOffsetChange,
+  onBringGroupToFront,
   onConnectGroupToTarget,
   onConnectGroupDrop,
   isDraggingNode,
 }: GroupOverlayProps) {
   const { flowToScreenPosition, screenToFlowPosition } = useReactFlow();
-  const { x: vx, y: vy, zoom } = useViewport();
+  const { zoom } = useViewport();
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState<DragOffset | null>(null);
 
@@ -90,34 +97,11 @@ export default function GroupOverlay({
       groups.map((g) => ({
         id: g.id,
         box: g.box,
-        count: membersInGroupBox(nodes, g.box, g.excludedIds).length,
+        count: exclusiveMembersInGroup(nodes, g, groups).length,
         excludedIds: g.excludedIds,
       })),
     [groups, nodes],
   );
-
-  /** 被排除节点的覆盖块（组盖住的节点）：组矩形内且在排除名单中的节点，
-   *  用独立淡色块盖在其上方（z 高于节点），视觉呈现「被组压在下层」——仅暗化不模糊，
-   *  保持被排除节点内容清晰可辨（用户语义：只需表现层级，不做成雾面）。 */
-  const excludedCovers = useMemo(() => {
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    const result: { key: string; groupId: string; x: number; y: number; w: number; h: number }[] = [];
-    groups.forEach((g) => {
-      g.excludedIds.forEach((id) => {
-        const n = byId.get(id);
-        if (!n || !nodeInsideGroupBox(n, g.box)) return;
-        result.push({
-          key: `${g.id}:${id}`,
-          groupId: g.id,
-          x: n.position.x,
-          y: n.position.y,
-          w: n.measured?.width ?? 200,
-          h: n.measured?.height ?? 120,
-        });
-      });
-    });
-    return result;
-  }, [groups, nodes]);
 
   /** 成组入口：≥2 选中且未全部落在同一组矩形内（已同组时徽标即操作入口） */
   const selectedNodes = useMemo(() => nodes.filter((n) => n.selected), [nodes]);
@@ -158,9 +142,6 @@ export default function GroupOverlay({
     document.addEventListener('mousedown', close, true);
     return () => document.removeEventListener('mousedown', close, true);
   }, [openGroupId]);
-
-  /** 虚线线宽按 zoom 反向补偿（zoom 0.2 → 8px flow 坐标 = 屏幕 1.6px） */
-  const borderWidth = Math.max(1, 1.5 / zoom);
 
   /** 整组拖动（IKD0JT A4 动态成员）：拖起组顶部把手，把「当前在矩形内的节点」整体平移。
    *  矩形/成员坐标经本地偏移即时跟随，结束时一次性上抛父级落盘 + 撤销。 */
@@ -234,7 +215,9 @@ export default function GroupOverlay({
       const dy = (e.clientY - s.startScreen.y) / zoomRef.current;
       s.dx = dx;
       s.dy = dy;
-      setDragOffset({ id: s.groupId, x: dx, y: dy });
+      const offset = { id: s.groupId, x: dx, y: dy };
+      setDragOffset(offset);
+      onFrameDragOffsetChange?.(offset);
       s.nodeNew.forEach((_, id) => {
         const start = s.nodeOld.get(id);
         if (start) s.nodeNew.set(id, { x: start.x + dx, y: start.y + dy });
@@ -246,7 +229,7 @@ export default function GroupOverlay({
         }),
       );
     },
-    [setNodes],
+    [setNodes, onFrameDragOffsetChange],
   );
 
   const endDrag = useCallback(() => {
@@ -263,6 +246,7 @@ export default function GroupOverlay({
     endFrameDrag();
     // 拖组结束：清空冻结成员集合，成员层级回归按落盘后的逻辑框判定
     onFrameDragMembersChange?.(new Set());
+    onFrameDragOffsetChange?.(null);
     if (isClick && s) {
       setOpenGroupId((prev) => (prev === s.groupId ? null : s.groupId));
     }
@@ -272,15 +256,15 @@ export default function GroupOverlay({
     window.setTimeout(() => {
       clickSuppressRef.current = false;
     }, 0);
-  }, [onFrameMove, endFrameDrag, onFrameDragMembersChange]);
+  }, [onFrameMove, endFrameDrag, onFrameDragMembersChange, onFrameDragOffsetChange]);
 
-  /** 按下开始拖动整组：冻结当前在矩形内且未被排除的成员作为本次拖动集合。
-   *  被排除节点（组此前盖住的）不随组移动；成员可为空（拖空框去圈节点）。
-   *  注：组框位于节点层之下收不到 pointer 事件，故由 window 捕获阶段命中测试后调用（见下）。 */
+  /** 按下开始拖动整组：冻结本组独立成员作为本次拖动集合。
+   *  其他组成员即使落在本矩形内也不带走；被排除节点不随组移动；成员可为空。
+   *  按下即置顶。组框节点 pointer-events:none，仍由 window 捕获阶段命中测试驱动。 */
   const startFrameDrag = useCallback(
     (clientX: number, clientY: number, g: CanvasGroup) => {
       const nodeOld = new Map<string, { x: number; y: number }>();
-      membersInGroupBox(nodesRef.current, g.box, g.excludedIds).forEach((n) => {
+      exclusiveMembersInGroup(nodesRef.current, g, groupsRef.current).forEach((n) => {
         nodeOld.set(n.id, { x: n.position.x, y: n.position.y });
       });
       draggingRef.current = true;
@@ -295,11 +279,13 @@ export default function GroupOverlay({
         nodeNew: new Map(nodeOld),
       };
       if (paneRef.current) paneRef.current.style.cursor = 'grabbing';
+      onBringGroupToFront?.(g.id);
       onFrameDragMembersChange?.(new Set(nodeOld.keys()));
+      onFrameDragOffsetChange?.({ id: g.id, x: 0, y: 0 });
       window.addEventListener('pointermove', onFrameMove);
       window.addEventListener('pointerup', endDrag);
     },
-    [onFrameMove, endDrag, onFrameDragMembersChange],
+    [onFrameMove, endDrag, onFrameDragMembersChange, onFrameDragOffsetChange, onBringGroupToFront],
   );
 
   /** 命中测试：屏幕点是否落在某组矩形的「空白区」。
@@ -310,7 +296,7 @@ export default function GroupOverlay({
       if (!(target instanceof Element)) return null;
       if (!target.closest('.react-flow')) return null;
       if (
-        target.closest('.react-flow__node') ||
+        (target.closest('.react-flow__node') && !target.closest('.react-flow__node-groupFrame')) ||
         target.closest('.react-flow__edge') ||
         target.closest('.react-flow__panel') ||
         target.closest(`.${styles.groupBadgeWrap}`) ||
@@ -427,7 +413,7 @@ export default function GroupOverlay({
       const nodeEl = el.closest('.react-flow__node') as HTMLElement | null;
       if (!nodeEl) return null;
       const id = nodeEl.getAttribute('data-id');
-      if (!id || memberIds.includes(id)) return null;
+      if (!id || memberIds.includes(id) || groupsRef.current.some((g) => g.id === id)) return null;
       return id;
     },
     [],
@@ -456,7 +442,10 @@ export default function GroupOverlay({
   /** 按下组右侧「+」开始批量连线：冻结当前组成员，记录各成员右中点为连线起点 */
   const startConnectDrag = useCallback(
     (groupId: string, box: GroupBBox, excludedIds: string[], clientX: number, clientY: number) => {
-      const members = membersInGroupBox(nodesRef.current, box, excludedIds);
+      const host = groupsRef.current.find((g) => g.id === groupId);
+      const members = host
+        ? exclusiveMembersInGroup(nodesRef.current, host, groupsRef.current)
+        : membersInGroupBox(nodesRef.current, box, excludedIds);
       const sources = members.map((n) => {
         const w = n.measured?.width ?? 200;
         const h = n.measured?.height ?? 120;
@@ -489,68 +478,7 @@ export default function GroupOverlay({
 
   return (
     <>
-      {/* 组框淡色底层（flow 坐标，随视口变换）：z3，位于节点 renderer(z4) 之下——
-       *  组内成员节点显示在淡色底之上，内容清晰不被蒙住。拖动不靠本层接事件（pane 会吃掉），
-       *  由 window 捕获阶段命中测试驱动，见 hitGroupAt。 */}
-      <div
-        className={styles.frameLayer}
-        style={{ transform: `translate(${vx}px, ${vy}px) scale(${zoom})` }}
-      >
-        {frames.map((f) => {
-          const box = boxFor(f);
-          return (
-            <div
-              key={f.id}
-              className={styles.frame}
-              style={{
-                left: box.x,
-                top: box.y,
-                width: box.w,
-                height: box.h,
-              }}
-            />
-          );
-        })}
-      </div>
-
-      {/* 组框边框顶层（flow 坐标，随视口变换）：z5，高于节点 renderer——仅重描虚线边，
-       *  使组框轮廓高于组外素材（组外节点不会盖住组框边线）。透明无模糊，不影响成员清晰度。
-       *  线宽按 zoom 反向补偿保持屏幕恒定。 */}
-      <div
-        className={styles.frameBorderLayer}
-        style={{ transform: `translate(${vx}px, ${vy}px) scale(${zoom})` }}
-      >
-        {frames.map((f) => {
-          const box = boxFor(f);
-          return (
-            <div
-              key={f.id}
-              className={styles.frameBorder}
-              style={{
-                left: box.x,
-                top: box.y,
-                width: box.w,
-                height: box.h,
-                borderWidth,
-              }}
-            />
-          );
-        })}
-      </div>
-
-      {/* 排除节点覆盖层（flow 坐标，随视口变换）：z 高于节点 renderer，
-       *  组盖住的被排除节点多叠一层淡色底以示区分（仅暗化不模糊，保持内容清晰） */}
-      <div
-        className={styles.coverLayer}
-        style={{ transform: `translate(${vx}px, ${vy}px) scale(${zoom})` }}
-      >
-        {excludedCovers.map((c) => (
-          <div key={c.key} className={styles.cover} style={{ left: c.x, top: c.y, width: c.w, height: c.h }} />
-        ))}
-      </div>
-
-      {/* 组徽标 + 操作条 + 成组按钮（屏幕空间，恒定尺寸，置于节点之上）。
-       *  ref 仅用于定位 .react-flow__pane 以承载光标反馈 */}
+      {/* 组框本体已作为 groupFrame 节点参与 zIndex 分层；此处只保留徽标/操作条。 */}
       <div className={styles.uiLayer} ref={uiLayerRef}>
         {frames.map((f) => {
           const box = boxFor(f);
@@ -563,6 +491,7 @@ export default function GroupOverlay({
                 title={open ? '收起' : '组操作'}
                 onClick={(e) => {
                   e.stopPropagation();
+                  onBringGroupToFront?.(f.id);
                   setOpenGroupId(open ? null : f.id);
                 }}
               >
@@ -588,7 +517,10 @@ export default function GroupOverlay({
                     title="下载组内全部素材"
                     onClick={(e) => {
                       e.stopPropagation();
-                      const members = membersInGroupBox(nodes, f.box, f.excludedIds);
+                      const host = groups.find((g) => g.id === f.id);
+                      const members = host
+                        ? exclusiveMembersInGroup(nodes, host, groups)
+                        : membersInGroupBox(nodes, f.box, f.excludedIds);
                       onDownloadNodes(members.map((n) => n.id));
                     }}
                   >

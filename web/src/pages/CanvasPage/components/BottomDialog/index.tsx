@@ -43,10 +43,19 @@ import {
   resolveComposed,
   type ComposedValue,
 } from '../ChipTextEditor/composed';
+import AtMentionMenu from '../AtMentionMenu';
+import { trailingAtQueryFromComposed, type AtMentionItem } from '../../atMention';
+import {
+  VIDEO_FOLLOW_MODE_LABEL,
+  VIDEO_FOLLOW_MODE_ORDER,
+  firstEnabledVideoMode,
+  type FollowDialogAnchor,
+  type VideoFollowMode,
+} from '../../followDialog';
 import styles from './index.module.css';
 
-/** 模式选项（保留默认 all 以兼容草稿参数契约 draftMode；模式选择器 UI 已随旧自由模式退役） */
-const modeOptions = [
+/** 底部自由模式沿用三项；跟随生成节点时扩为四项（含文生视频） */
+const dockModeOptions = [
   { key: 'all', label: '全能参考' },
   { key: 'keyframe', label: '首尾帧' },
   { key: 'text2video', label: '图生视频' },
@@ -124,6 +133,14 @@ interface BottomDialogProps {
   onSetMaterialRefRole?: (materialId: string, role: VideoRefRole) => void;
   /** Toast 提示（上传超限/首尾帧校验等场景，由父级注入全局 sonner，位置/样式与 ImageDialog/AudioDialog 统一） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
+  /** 画布 @ 引用候选 */
+  mentionItems?: AtMentionItem[];
+  /** 选中 @ 素材后写入参考区 */
+  onMentionCanvas?: (item: AtMentionItem) => void;
+  /** 绑定生成节点时悬浮跟随；缺省仍锚定底部 */
+  followAnchor?: FollowDialogAnchor | null;
+  /** 跟随节点时按已连素材给出可高亮模式；缺省不限制 */
+  enabledModes?: VideoFollowMode[];
 }
 
 /** 首页带入的初始生成参数（resolution 传 api_value 如 720p，模型列表加载后反查档位 id；
@@ -277,11 +294,17 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMate
   );
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast, mentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
   /** 富文本输入框（自由文本；胶囊机制保留给后续引用场景，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
+  const mentionAnchorRef = useRef<HTMLDivElement>(null);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
   /** 输入框内容的结构化形态（IKAFSX）：胶囊是指针，解引用只发生在发送那一刻。 */
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
+  const mentionQuery = trailingAtQueryFromComposed(composed);
+  useEffect(() => {
+    if (mentionQuery === null) setMentionDismissed(false);
+  }, [mentionQuery]);
   /** 计数口径：文字按字符数，一个胶囊算 1 个单位——不按它背后那几千字算。 */
   const composedCount = composedLength(composed);
   /** 附件正文有效（去空白非空）时允许空提示词提交（IKDLQG 契约：附件可单独驱动生成）；
@@ -295,7 +318,16 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
     ids.splice(index + delta, 0, moved);
     onReorderAttachments(ids);
   };
-  const [selectedMode, setSelectedMode] = useState(modeOptions[0].key);
+  const followModeOptions = VIDEO_FOLLOW_MODE_ORDER.map((key) => ({
+    key,
+    label: VIDEO_FOLLOW_MODE_LABEL[key],
+  }));
+  const modeOptions = enabledModes ? followModeOptions : dockModeOptions;
+  const [selectedMode, setSelectedMode] = useState(
+    initialParams?.mode && modeOptions.some((item) => item.key === initialParams.mode)
+      ? initialParams.mode
+      : modeOptions[0].key,
+  );
   const [modeOpen, setModeOpen] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   /** 放大态：输入区高度占屏幕 2/3；收起回底部默认高度 */
@@ -344,6 +376,16 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
   const syncDraftParams = (patch: VideoDraftParamsPatch) => {
     videoDraftBinding.onParamsChange(patch);
   };
+
+  useEffect(() => {
+    if (!enabledModes || enabledModes.length === 0) return;
+    if (enabledModes.includes(selectedMode as VideoFollowMode)) return;
+    const next = firstEnabledVideoMode(enabledModes);
+    setSelectedMode(next);
+    syncDraftParams({ mode: next });
+    onToast?.('warn', '已根据当前素材切换生成模式');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabledModes, selectedMode]);
   /** 当前模型与视频参考相关的能力位（模型未加载时为 null，约束入口按不可用处理） */
   const caps: VideoRefCapabilities | null = currentModel
     ? {
@@ -387,6 +429,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
   /** 切换模式：目标模式与现有参考冲突时明确提示并阻止切换（保证「可见槽 = 实际参考」），否则写回草稿 */
   const handleModeChange = (key: string) => {
     setModeOpen(false);
+    if (enabledModes && !enabledModes.includes(key as VideoFollowMode)) return;
     if (key === selectedMode) return;
     const hasFrames = !!(videoMediaRefs.first || videoMediaRefs.last);
     const hasRefs = videoMediaRefs.reference.length > 0;
@@ -624,7 +667,10 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
   };
 
   return (
-    <div className={styles.dialogWrap}>
+    <div
+      className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
+      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+    >
       {/* 配置面板（展开悬浮于底栏上方）：挂在不带 overflow 的定位外壳 .dialogWrap 上，
           脱出 .dialog 滚动框，避免面板顶部被滚动容器裁剪（IKEOLP） */}
       {showConfig && (
@@ -880,11 +926,11 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
       <PromptSyncActions plans={pendingPlanSyncs} disabled={readOnly || syncingPlan} onSync={onSyncPlan} />
       {configurationError && <div className={styles.refConflictHint} role="alert">{configurationError}</div>}
 
-      {/* 输入框：胶囊跟文字同一行 */}
-      <div className={styles.editorWrap}>
+      {/* 输入框：胶囊跟文字同一行；输入 @ 弹出画布素材菜单 */}
+      <div className={styles.editorWrap} ref={mentionAnchorRef}>
         <ChipTextEditor
           ref={chipEditorRef}
-          placeholder="描述你希望生成的视频。参考素材从画布连入或到节点选择，首帧/尾帧需显式指定。"
+          placeholder="描述你希望生成的视频。输入 @ 引用画布素材。"
           // 超限只提示、不动内容（IKAFSX）。原来这里会 `setText(truncated)`——那是「用纯文本
           // 整体替换编辑器内容」，**所有胶囊当场湮灭、正文被从中间腰斩**，丢的远不止超出的部分。
           // 而这个 1000 本身也是凭空定的：后端不校验 prompt 长度，模型能力接口里也没有这个字段。
@@ -893,6 +939,19 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
           readOnly={readOnly}
           className={styles.editorArea}
         />
+        {mentionQuery !== null && !mentionDismissed && !readOnly && onMentionCanvas && (
+          <AtMentionMenu
+            anchorRef={mentionAnchorRef}
+            items={mentionItems ?? []}
+            editorQuery={mentionQuery}
+            onSelect={(item) => {
+              chipEditorRef.current?.stripTrailingAtQuery();
+              setMentionDismissed(true);
+              onMentionCanvas(item);
+            }}
+            onClose={() => setMentionDismissed(true)}
+          />
+        )}
       </div>
 
       {/* 字数统计 */}
@@ -920,15 +979,20 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
             </button>
             {modeOpen && (
               <div className={styles.modeDropdown}>
-                {modeOptions.map((opt) => (
-                  <button
-                    key={opt.key}
-                    className={`${styles.modeOption} ${opt.key === selectedMode ? styles.modeOptionActive : ''}`}
-                    onClick={() => handleModeChange(opt.key)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+                {modeOptions.map((opt) => {
+                  const disabled = Boolean(enabledModes && !enabledModes.includes(opt.key as VideoFollowMode));
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      disabled={disabled}
+                      className={`${styles.modeOption} ${opt.key === selectedMode ? styles.modeOptionActive : ''} ${disabled ? styles.modeOptionDisabled : ''}`}
+                      onClick={() => handleModeChange(opt.key)}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>

@@ -6,6 +6,9 @@ import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2, Music2, Paus
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import type { MediaGenStatus } from '../MediaNode';
+import type { FollowDialogAnchor } from '../../followDialog';
+import AtMentionMenu from '../AtMentionMenu';
+import { stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
 import styles from './index.module.css';
 
 /** 输入框字数上限 */
@@ -43,7 +46,7 @@ export interface CanvasPickItem {
   mediaType: 'image' | 'video' | 'audio';
 }
 
-interface AudioDialogProps {
+export interface AudioDialogProps {
   onClose: () => void;
   /** 发送：提示词 + 模型ID */
   onSend: (text: string, modelId: string, refs: AudioRefItem[]) => void | Promise<void>;
@@ -71,6 +74,12 @@ interface AudioDialogProps {
   pickMode?: boolean;
   /** 底部模式切换 → AI 音乐对话框（已废弃：仅保留 prop 兼容父级，不再渲染） */
   onSwitchToMusic?: () => void;
+  /** 画布 @ 引用候选 */
+  mentionItems?: AtMentionItem[];
+  /** 选中 @ 素材后写入参考区 */
+  onMentionCanvas?: (item: AtMentionItem) => void;
+  /** 绑定草稿卡时悬浮跟随；缺省仍锚定底部 */
+  followAnchor?: FollowDialogAnchor | null;
 }
 
 export default function AudioDialog({
@@ -84,8 +93,14 @@ export default function AudioDialog({
   onPickFromCanvas,
   externalPick,
   pickMode,
+  mentionItems,
+  onMentionCanvas,
+  followAnchor,
 }: AudioDialogProps) {
   const [text, setText] = useState(initialText ?? '');
+  const mentionAnchorRef = useRef<HTMLDivElement>(null);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
+  const mentionQuery = trailingAtQuery(text);
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [modelId, setModelId] = useState(initialModelId ?? '');
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -153,6 +168,10 @@ export default function AudioDialog({
     setText(value);
     draftBinding?.onParamsChange({ prompt: value });
   };
+
+  useEffect(() => {
+    if (mentionQuery === null) setMentionDismissed(false);
+  }, [mentionQuery]);
 
   const handleModelSelect = (id: string) => {
     setModelId(id);
@@ -283,7 +302,11 @@ export default function AudioDialog({
   };
 
   return (
-    <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
+    <div
+      className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
+      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+    >
+      <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
       {/* 右上角操作：放大/收起 + 关闭 */}
       <div className={styles.topActions}>
         <button
@@ -399,16 +422,32 @@ export default function AudioDialog({
       </div>
 
       {/* 输入框 */}
+      <div className={styles.mentionAnchor} ref={mentionAnchorRef}>
       <textarea
         className={styles.textarea}
         data-testid="audio-input"
-        placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。"
+        placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。使用 @ 引用画布素材。"
         value={text}
         onChange={(e) => handleTextChange(e.target.value.slice(0, MAX_INPUT))}
         rows={2}
         maxLength={MAX_INPUT}
         disabled={readOnly}
       />
+      {mentionQuery !== null && !mentionDismissed && !readOnly && onMentionCanvas && (
+        <AtMentionMenu
+          anchorRef={mentionAnchorRef}
+          items={mentionItems ?? []}
+          editorQuery={mentionQuery}
+          disabledKinds={['image', 'video', 'text']}
+          onSelect={(item) => {
+            handleTextChange(stripTrailingAtQuery(text));
+            setMentionDismissed(true);
+            onMentionCanvas(item);
+          }}
+          onClose={() => setMentionDismissed(true)}
+        />
+      )}
+      </div>
 
       {modelUnavailable && <div role="alert">模型不可用，请选择可用模型后发送</div>}
 
@@ -466,6 +505,7 @@ export default function AudioDialog({
             <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

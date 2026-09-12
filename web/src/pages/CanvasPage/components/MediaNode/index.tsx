@@ -120,12 +120,15 @@ interface MediaNodeData {
   onCopyImage?: (id: string) => void;
   onComplianceCheck?: (id: string) => void;
   onFillEmptyShell?: (id: string, file: File) => void;
+  /** 图片生成节点：图生图上传本地素材 */
+  onImg2Img?: (id: string, file: File) => void;
 }
 
 export default function MediaNode({ id, data, selected }: NodeProps & { data: MediaNodeData; selected?: boolean }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isExtractSubmitting, setIsExtractSubmitting] = useState(false);
   const shellFileRef = useRef<HTMLInputElement>(null);
+  const img2imgFileRef = useRef<HTMLInputElement>(null);
 
   const zoom = useStore((state) => state.transform[2]);
   const isSelect = data.toolMode === 'select';
@@ -260,11 +263,37 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   /** 生成中 / 失败 / 素材缺失占位（音频与图片/视频共用内部内容） */
   const renderPlaceholder = () => {
     if (isDraft) {
-      /* 待生成草稿（IKDMQQ）：不是素材缺失，点击卡片打开面板继续编辑 */
+      const isImageDraft = data.mediaType === 'image';
+      const isVideoDraft = data.mediaType === 'video';
       return (
         <div className={styles.genBox}>
-          <Image size={22} strokeWidth={1.8} color="#666" />
-          <span className={styles.missingText}>待生成</span>
+          {isVideoDraft ? <Video size={22} strokeWidth={1.8} color="#666" /> : <Image size={22} strokeWidth={1.8} color="#666" />}
+          <span className={styles.missingText}>{isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成'}</span>
+          {isImageDraft && data.onImg2Img && (
+            <>
+              <button
+                type="button"
+                className={`${styles.genBtn} nodrag nopan`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  img2imgFileRef.current?.click();
+                }}
+              >
+                图生图
+              </button>
+              <input
+                ref={img2imgFileRef}
+                type="file"
+                hidden
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (file) data.onImg2Img?.(id, file);
+                }}
+              />
+            </>
+          )}
         </div>
       );
     }
