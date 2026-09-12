@@ -2245,6 +2245,71 @@ describe("video job runner 文本附件快照（IKDLQG）", () => {
     };
   }
 
+  // IKFA1P：正文含文本标签时接纳侧冻结编号清单最终正文（composed_prompt），worker 直接消费；
+  // 优先级链：prompt_plan_snapshot.providerPrompt > composed_prompt > 既有附件组合（TS 与 Java 一致）。
+  it("composed_prompt 存在 → submit prompt 优先消费编号清单，不现场组合附件", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "upstream-composed", status: "queued" });
+    const repo = buildAttachmentRepo({
+      prompt: "按文本1生成",
+      target_node_id: "media-2",
+      composed_prompt: "文本1：赛博朋克\n\n按文本1生成",
+      text_attachments: [{ node_id: "text-a", title: "风格", text: "赛博朋克" }],
+      model_id: "doubao-seedance-2-0-260128",
+      aspect_ratio: "16:9",
+      resolution: "720p",
+      duration: 5,
+    });
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-attachments",
+      jobId: "401",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect((submit.mock.calls[0][0] as { prompt: string }).prompt).toBe(
+      "文本1：赛博朋克\n\n按文本1生成",
+    );
+  });
+
+  it("方案快照 providerPrompt 优先于 composed_prompt", async () => {
+    const { runVideoJobStep } = await import("./video-job-runner.js");
+    const submit = vi.fn().mockResolvedValue({ taskId: "upstream-plan", status: "queued" });
+    const repo = buildAttachmentRepo({
+      prompt: "按文本1生成",
+      target_node_id: "media-2",
+      prompt_plan_snapshot: {
+        canvasVersion: 3,
+        plans: [{ nodeId: "text-plan", text: "方案", mentions: [] }],
+        videoReferences: [],
+        images: [],
+        providerPrompt: "方案编译正文",
+      },
+      composed_prompt: "文本1：赛博朋克\n\n按文本1生成",
+      text_attachments: [{ node_id: "text-a", title: "风格", text: "赛博朋克" }],
+      model_id: "doubao-seedance-2-0-260128",
+      aspect_ratio: "16:9",
+      resolution: "720p",
+      duration: 5,
+    });
+
+    await runVideoJobStep({
+      repo,
+      workerId: "worker-attachments",
+      jobId: "401",
+      createProvider: () => ({ submit, poll: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk-user") },
+      mediaRelay: { persist: vi.fn() },
+      scheduleNext: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect((submit.mock.calls[0][0] as { prompt: string }).prompt).toBe("方案编译正文");
+  });
+
   it("仅附件正文（prompt 为空串）→ submit prompt 由附件组合", async () => {
     const { runVideoJobStep } = await import("./video-job-runner.js");
     const submit = vi.fn().mockResolvedValue({ taskId: "upstream-attach", status: "queued" });

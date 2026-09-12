@@ -1,20 +1,20 @@
 /* ============================================
- * MentionMenu：@ 菜单（IKFA1M，IKFA1O 泛化多媒体）
+ * MentionMenu：@ 菜单（IKFA1M，IKFA1O 泛化多媒体，IKFA1P 文本附件）
  * 顶部「已引用」列出当前目标的有效参考（缩略图/类型图标/名称/标签徽标，可搜索）；
  * 下方保留素材分类入口（从资产中选择 / 到节点选择）——选择新素材添加成功后插入标签。
  * 纯展示组件：过滤由调用方完成，键盘导航下标扁平（refs + 添加入口）。
  * ============================================ */
-import { FolderOpen, Image as ImageIcon, MousePointerClick, Video as VideoIcon, AudioLines } from 'lucide-react';
+import { FileText, FolderOpen, Image as ImageIcon, MousePointerClick, Video as VideoIcon, AudioLines } from 'lucide-react';
 import styles from './index.module.css';
 
 export interface MentionRefItem {
   assetId: string;
   url: string;
   name: string;
-  /** 标签徽标文案（图片N/视频N/音频N/首帧/尾帧；IKFA1O 前为图片N 的 N） */
+  /** 标签徽标文案（图片N/视频N/音频N/首帧/尾帧/文本N；IKFA1O 前为图片N 的 N） */
   badge: string;
-  /** 素材媒体类型：缩略图渲染区分（图片显示缩略图，视频/音频显示类型图标） */
-  mediaType?: 'image' | 'video' | 'audio';
+  /** 素材媒体类型：缩略图渲染区分（图片显示缩略图，视频/音频/文本显示类型图标） */
+  mediaType?: 'image' | 'video' | 'audio' | 'text';
 }
 
 /** 已引用项选项行（缩略图/名称/徽标）：@ 菜单与失效替换菜单共用（IKFA1N 去重） */
@@ -28,6 +28,7 @@ export function MentionRefRow({ item, active, onPick, onHover, testId }: {
   const renderThumb = () => {
     if (item.mediaType === 'video') return <VideoIcon size={20} strokeWidth={1.5} />;
     if (item.mediaType === 'audio') return <AudioLines size={20} strokeWidth={1.5} />;
+    if (item.mediaType === 'text') return <FileText size={20} strokeWidth={1.5} />;
     if (item.url) return <img className={styles.mentionThumb} src={item.url} alt="" />;
     return <ImageIcon size={20} strokeWidth={1.5} />;
   };

@@ -127,6 +127,31 @@ class VideoJobProcessorTest {
     }
 
     @Test
+    @DisplayName("IKFA1P: composed_prompt 编号清单优先于 basePrompt（与 TS video-job-runner 同优先级链）")
+    void composedPromptTakesPriorityOverBasePrompt() {
+        Map<String, Object> input = new HashMap<>(baseInput());
+        input.put("target_node_id", "media-1");
+        input.put("composed_prompt", "文本1：赛博朋克\n\n按文本1生成");
+        input.put("text_attachments", java.util.List.of(
+                java.util.Map.of("node_id", "text-1", "title", "风格", "text", "赛博朋克")));
+        ClaimedVideoJobDto claim = videoClaim("110", false, null, 0, 0, null, input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("110"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new SubmitResult("task-ikfa1p", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markVideoSubmitted(eq("110"), anyString(), eq(1L), eq("task-ikfa1p"));
+
+        processor.handle("110");
+
+        var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
+        verify(videoClient).submit(eq("token"), captor.capture());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "文本1：赛博朋克\n\n按文本1生成", captor.getValue().prompt());
+    }
+
+    @Test
     @DisplayName("G52: 缺少凭证 → provider_credential_missing")
     void missingCredential() {
         Map<String, Object> input = new HashMap<>(baseInput());

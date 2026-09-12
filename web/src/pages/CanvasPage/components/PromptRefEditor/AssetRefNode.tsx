@@ -20,15 +20,16 @@ import { AlertTriangle, X } from 'lucide-react';
 import styles from './index.module.css';
 
 export type SerializedAssetRefNode = Spread<
-  { assetId: string; label?: string; invalidLabel?: string },
+  { assetId: string; label?: string; invalidLabel?: string; refKind?: 'asset' | 'text' },
   SerializedLexicalNode
 >;
 
 export interface AssetRefMeta {
   url: string;
   name: string;
-  /** IKFA1O：素材媒体类型——仅图片显示缩略图（视频地址进 <img> 会裂图，音频无图） */
-  mediaType?: 'image' | 'video' | 'audio';
+  /** IKFA1O：素材媒体类型——仅图片显示缩略图（视频地址进 <img> 会裂图，音频无图）；
+   *  IKFA1P：文本附件（来源画布文本节点），无缩略图显示文本图标 */
+  mediaType?: 'image' | 'video' | 'audio' | 'text';
 }
 
 /** 标签文案与素材元信息：装饰组件按当前有效输入实时渲染（文案重派生不触发节点变更）。
@@ -111,7 +112,7 @@ function AssetRefChipComponent({
       title={info?.name ?? assetId}
       data-testid="asset-ref-valid"
     >
-      {info?.url && info.mediaType !== 'audio' && info.mediaType !== 'video' ? <img className={styles.refChipThumb} src={info.url} alt="" /> : null}
+      {info?.url && info.mediaType !== 'audio' && info.mediaType !== 'video' && info.mediaType !== 'text' ? <img className={styles.refChipThumb} src={info.url} alt="" /> : null}
       <span className={styles.refChipLabel}>{label ?? '素材?'}</span>
       {!readOnly && (
         <button
@@ -132,20 +133,23 @@ export class AssetRefNode extends DecoratorNode<JSX.Element> {
   __assetId: string;
   __label: string | undefined;
   __invalidLabel: string | undefined;
+  /** IKFA1P：标签身份类型——asset（媒体资产）| text（来源画布文本节点）；默认 asset（旧序列化兼容） */
+  __refKind: 'asset' | 'text';
 
   static getType(): string {
     return 'asset-ref';
   }
 
   static clone(node: AssetRefNode): AssetRefNode {
-    return new AssetRefNode(node.__assetId, node.__label, node.__invalidLabel, node.__key);
+    return new AssetRefNode(node.__assetId, node.__label, node.__invalidLabel, node.__refKind, node.__key);
   }
 
-  constructor(assetId: string, label?: string, invalidLabel?: string, key?: NodeKey) {
+  constructor(assetId: string, label?: string, invalidLabel?: string, refKind: 'asset' | 'text' = 'asset', key?: NodeKey) {
     super(key);
     this.__assetId = assetId;
     this.__label = label;
     this.__invalidLabel = invalidLabel;
+    this.__refKind = refKind;
   }
 
   getAssetId(): string {
@@ -155,6 +159,15 @@ export class AssetRefNode extends DecoratorNode<JSX.Element> {
   /** 替换该次提及的身份（IKFA1N B5）：节点原地换绑 assetId，位置与其他提及不受影响 */
   setAssetId(assetId: string): void {
     this.getWritable().__assetId = assetId;
+  }
+
+  /** IKFA1P：标签身份类型（asset=媒体 / text=来源文本节点） */
+  getRefKind(): 'asset' | 'text' {
+    return this.getLatest().__refKind;
+  }
+
+  setRefKind(refKind: 'asset' | 'text'): void {
+    this.getWritable().__refKind = refKind;
   }
 
   getLabel(): string | undefined {
@@ -202,11 +215,12 @@ export class AssetRefNode extends DecoratorNode<JSX.Element> {
       assetId: this.__assetId,
       ...(this.__label !== undefined ? { label: this.__label } : {}),
       ...(this.__invalidLabel !== undefined ? { invalidLabel: this.__invalidLabel } : {}),
+      ...(this.__refKind !== 'asset' ? { refKind: this.__refKind } : {}),
     };
   }
 
   static importJSON(serialized: SerializedAssetRefNode): AssetRefNode {
-    return $createAssetRefNode(serialized.assetId, serialized.label, serialized.invalidLabel);
+    return $createAssetRefNode(serialized.assetId, serialized.label, serialized.invalidLabel, serialized.refKind ?? 'asset');
   }
 
   decorate(): JSX.Element {
@@ -224,8 +238,9 @@ export function $createAssetRefNode(
   assetId: string,
   label?: string,
   invalidLabel?: string,
+  refKind: 'asset' | 'text' = 'asset',
 ): AssetRefNode {
-  return new AssetRefNode(assetId, label, invalidLabel);
+  return new AssetRefNode(assetId, label, invalidLabel, refKind);
 }
 
 export function $isAssetRefNode(node: LexicalNode | null | undefined): node is AssetRefNode {

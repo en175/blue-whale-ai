@@ -6,13 +6,14 @@ import { describe, expect, it } from 'vitest';
 import {
   docHasAnyRef,
   docHasInvalidRef,
-  flattenPromptDoc,
   flattenPromptDocWith,
   imageRefLabelOf,
   imageRefNumberOf,
   reconcilePromptDoc,
   reconcilePromptDocWith,
   restorePromptDoc,
+  textRefLabelOf,
+  docHasTextRef,
   type PromptDoc,
 } from './prompt-doc';
 
@@ -37,21 +38,24 @@ describe('imageRefNumberOf / imageRefLabelOf（编号派生）', () => {
   });
 });
 
-describe('flattenPromptDoc（拍平镜像）', () => {
-  it('有效标签 → 图片N（先提图片2 也按真实顺序），文字原样', () => {
-    expect(flattenPromptDoc(DOC, ['101', '102'])).toBe('让图片2穿上图片1的衣服');
+describe('reconcilePromptDoc（生图编号重派生）', () => {
+  it('有效标签编号跟真实输入顺序（先提图片2 也按真实顺序派生）', () => {
+    const { doc } = reconcilePromptDoc(DOC, ['101', '102']);
+    expect(doc.segments).toEqual(DOC.segments.map((segment) =>
+      segment.kind === 'asset_ref' ? { ...segment, label: `图片${['101', '102'].indexOf(segment.asset_id) + 1}` } : segment));
   });
 
-  it('失效标签 → 已失效：原图片N', () => {
+  it('身份不在集合 → 失效保留原编号（已失效：原图片N 语义由 invalid_label 承载）', () => {
     const doc: PromptDoc = {
       version: 1,
       segments: [
         { kind: 'text', text: '让' },
-        { kind: 'asset_ref', asset_id: '102', invalid_label: '图片2' },
+        { kind: 'asset_ref', asset_id: '102', label: '图片2' },
         { kind: 'text', text: '微笑' },
       ],
     };
-    expect(flattenPromptDoc(doc, ['101'])).toBe('让已失效：原图片2微笑');
+    const { doc: invalid } = reconcilePromptDoc(doc, ['101']);
+    expect(invalid.segments[1]).toEqual({ kind: 'asset_ref', asset_id: '102', label: '图片2', invalid_label: '图片2' });
   });
 });
 
@@ -187,8 +191,10 @@ describe('docHasAnyRef / docHasInvalidRef', () => {
 /* ============ IKFA1O：泛化标签派生（视频角色/模式失效语义） ============ */
 
 /** 视频场景 labelOf 模拟：keyframe 模式只有帧身份有效，普通参考身份返回 null（模式不兼容） */
-const keyframeLabelOf = (id: string): string | null =>
-  id === '201' ? '首帧' : id === '202' ? '尾帧' : null;
+const keyframeLabelOf = (key: { kind: 'asset_ref' | 'text_ref'; id: string }): string | null => {
+  const id = key.id;
+  return id === '201' ? '首帧' : id === '202' ? '尾帧' : null;
+};
 
 describe('reconcilePromptDocWith（泛化 labelOf，IKFA1O）', () => {
   it('标签文案跟随 labelOf 派生：普通参考改为首帧后，同身份标签同步为首帧（C1）', () => {
@@ -221,14 +227,16 @@ describe('reconcilePromptDocWith（泛化 labelOf，IKFA1O）', () => {
       segments: [{ kind: 'asset_ref', asset_id: '101', label: '图片1', invalid_label: '图片1' }],
     };
     expect(reconcilePromptDocWith(invalid, keyframeLabelOf).doc).toBe(invalid); // 仍不兼容：原样保留
-    const allLabelOf = (id: string): string | null => (id === '101' ? '图片1' : null);
+    const allLabelOf = (key: { kind: 'asset_ref' | 'text_ref'; id: string }): string | null => (key.id === '101' ? '图片1' : null);
     const restored = reconcilePromptDocWith(invalid, allLabelOf);
     expect(restored.doc.segments[0]).toEqual({ kind: 'asset_ref', asset_id: '101', label: '图片1' });
   });
 
   it('素材库身份（asset- 前缀）与视频编号文案同样派生', () => {
-    const refsLabelOf = (id: string): string | null =>
-      id === 'asset-x1' ? '视频2' : id === '401' ? '音频1' : null;
+    const refsLabelOf = (key: { kind: 'asset_ref' | 'text_ref'; id: string }): string | null => {
+      const id = key.id;
+      return id === 'asset-x1' ? '视频2' : id === '401' ? '音频1' : null;
+    };
     const doc: PromptDoc = {
       version: 1,
       segments: [
@@ -255,5 +263,62 @@ describe('flattenPromptDocWith（泛化拍平，IKFA1O）', () => {
       ],
     };
     expect(flattenPromptDocWith(doc, keyframeLabelOf)).toBe('从首帧走向已失效：原图片3');
+  });
+});
+
+describe('text_ref 文本片段（IKFA1P 纯逻辑）', () => {
+  it('restorePromptDoc 恢复 text_ref 片段；镜像不一致按纯文本恢复（防丢失语义同媒体）', () => {
+    const stored = {
+      version: 1,
+      segments: [
+        { kind: 'text', text: '按' },
+        { kind: 'text_ref', node_id: 'text-1', label: '文本1' },
+        { kind: 'text_ref', node_id: 'text-2', invalid_label: '文本2' },
+      ],
+      flat: '按文本1已失效：原文本2',
+    };
+    expect(restorePromptDoc(stored, '按文本1已失效：原文本2')).toEqual({
+      version: 1,
+      segments: [
+        { kind: 'text', text: '按' },
+        { kind: 'text_ref', node_id: 'text-1', label: '文本1' },
+        { kind: 'text_ref', node_id: 'text-2', invalid_label: '文本2' },
+      ],
+    });
+    expect(restorePromptDoc(stored, '旧客户端改过的文字')).toBeNull();
+  });
+
+  it('textRefLabelOf：编号跟附件顺序；不在集合返回 null（失效）', () => {
+    expect(textRefLabelOf('text-b', ['text-a', 'text-b'])).toBe('文本2');
+    expect(textRefLabelOf('text-x', ['text-a'])).toBeNull();
+  });
+
+  it('reconcile 文本失效与恢复：身份不在附件集合失效、回到集合恢复并派生当次编号（B1/B4）', () => {
+    const labelOf = (key: { kind: 'asset_ref' | 'text_ref'; id: string }): string | null =>
+      key.kind === 'text_ref'
+        ? (key.id === 'text-b' ? '文本1' : null)
+        : null;
+    const doc: PromptDoc = { version: 1, segments: [{ kind: 'text_ref', node_id: 'text-b', label: '文本2' }] };
+    const invalid = reconcilePromptDocWith(doc, (key) => (key.kind === 'text_ref' && key.id === 'text-b' ? null : null)).doc;
+    expect(invalid.segments[0]).toEqual({ kind: 'text_ref', node_id: 'text-b', label: '文本2', invalid_label: '文本2' });
+    const restored = reconcilePromptDocWith(invalid as PromptDoc, labelOf);
+    expect(restored.doc.segments[0]).toEqual({ kind: 'text_ref', node_id: 'text-b', label: '文本1' });
+  });
+
+  it('flattenPromptDocWith 文本标签拍平；docHasTextRef / docHasAnyRef / docHasInvalidRef 认文本片段', () => {
+    const doc: PromptDoc = {
+      version: 1,
+      segments: [
+        { kind: 'text', text: '按' },
+        { kind: 'text_ref', node_id: 'text-a', label: '文本1' },
+        { kind: 'text', text: '与' },
+        { kind: 'text_ref', node_id: 'text-x', label: '文本2', invalid_label: '文本2' },
+      ],
+    };
+    expect(flattenPromptDocWith(doc, (key) => (key.kind === 'text_ref' && key.id === 'text-a' ? '文本1' : null)))
+      .toBe('按文本1与已失效：原文本2');
+    expect(docHasTextRef(doc)).toBe(true);
+    expect(docHasAnyRef(doc)).toBe(true);
+    expect(docHasInvalidRef(doc)).toBe(true);
   });
 });

@@ -6,7 +6,7 @@ import PromptSyncActions from '../PromptSyncActions';
  * IKFA1O：正文编辑接入 PromptRefEditor——图片/视频/音频以稳定身份插入正文标签，
  * 首尾帧按角色显示，普通参考按同类型编号；模式不兼容时标签失效并阻止发送。
  * ============================================ */
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -30,7 +30,9 @@ import {
   docHasInvalidRef,
   flattenPromptDocWith,
   PROMPT_DOC_VERSION,
+  textRefLabelOf,
   type PromptDoc,
+  type PromptRefKey,
   type StoredPromptDoc,
 } from '@/lib/prompt-doc';
 import PromptRefEditor, {
@@ -185,9 +187,11 @@ const ROLE_LABELS: Record<VideoRefRole, string> = {
 };
 
 /** 连线文本附件项（IKDLQG）：标题 + 正文预览，长文默认折叠可展开；与 ImageDialog 附件项同构，
+ * IKFA1P：badge 展示正文标签编号（文本N，与菜单/正文同源）。
  *  多附件且父级提供重排回调时展示上移/下移（IKDLQH） */
-function AttachmentItem({ attachment, move, onRemove }: {
+function AttachmentItem({ attachment, badge, move, onRemove }: {
   attachment: ImageTextAttachment;
+  badge?: string;
   onRemove?: () => void;
   move?: { isFirst: boolean; isLast: boolean; onMove: (delta: -1 | 1) => void };
 }) {
@@ -197,6 +201,7 @@ function AttachmentItem({ attachment, move, onRemove }: {
     <div className={styles.attachmentItem}>
       <div className={styles.attachmentHead}>
         <span className={styles.attachmentTitle}>{attachment.title}</span>
+        {badge && <span className={styles.attachmentBadge}>{badge}</span>}
         {onRemove && <button type="button" className={styles.attachmentMove} aria-label={`移除方案 ${attachment.title}`} title="移除方案" onClick={onRemove}><X size={12} /></button>}
         {move && (
           <span className={styles.attachmentMoves}>
@@ -454,28 +459,45 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image').length;
 
   /** IKFA1O 标签映射（唯一口径）：附件区徽标、@ 菜单、正文标签、发送拍平共用。
-   *  首尾帧按角色；普通参考按同类型编号；模式不接受的参考身份 → labelOf null（失效，C2/C5）。 */
-  const { labelOf, refItems } = useMemo(() => videoLabelMapOf(videoMediaRefs, selectedMode), [videoMediaRefs, selectedMode]);
+   *  首尾帧按角色；普通参考按同类型编号；模式不接受的参考身份 → labelOf null（失效，C2/C5）。
+   *  IKFA1P：文本附件并入同一映射（编号跟附件顺序 = 画布连入边序，与服务端 text_attachments 同源）。 */
+  const { labelOf: mediaLabelOf, refItems } = useMemo(() => videoLabelMapOf(videoMediaRefs, selectedMode), [videoMediaRefs, selectedMode]);
+  const orderedTextNodeIds = useMemo(() => (attachments ?? []).map((a) => a.nodeId), [attachments]);
+  const refLabelOf = useCallback((key: PromptRefKey): string | null =>
+    key.kind === 'text_ref'
+      ? textRefLabelOf(key.id, orderedTextNodeIds)
+      : mediaLabelOf(key.id), [mediaLabelOf, orderedTextNodeIds]);
+  const refLabelOfStable = useRef(refLabelOf);
+  refLabelOfStable.current = refLabelOf;
   const refLabels = useMemo(
-    () => new Map(refItems.flatMap((item) => (labelOf(item.id) ? [[item.id, labelOf(item.id)!] as const] : []))),
-    [refItems, labelOf],
+    () => new Map<string, string>([
+      ...refItems.flatMap((item) => {
+        const label = mediaLabelOf(item.id);
+        return label ? [[item.id, label] as const] : [];
+      }),
+      ...orderedTextNodeIds.map((id, i) => [id, `文本${i + 1}`] as const),
+    ]),
+    [refItems, mediaLabelOf, orderedTextNodeIds],
   );
   const refsMeta = useMemo(() => {
-    const m = new Map<string, { url: string; name: string; mediaType: 'image' | 'video' | 'audio' }>();
+    const m = new Map<string, { url: string; name: string; mediaType: 'image' | 'video' | 'audio' | 'text' }>();
     for (const item of [videoMediaRefs.first, videoMediaRefs.last, ...videoMediaRefs.reference]) {
       if (!item) continue;
       m.set(refIdOf(item), { url: item.url, name: item.name, mediaType: item.mediaType });
     }
+    for (const a of attachments ?? []) {
+      m.set(a.nodeId, { url: '', name: a.title, mediaType: 'text' });
+    }
     return m;
-  }, [videoMediaRefs]);
-  const labelOfStable = useRef(labelOf);
-  labelOfStable.current = labelOf;
+  }, [videoMediaRefs, attachments]);
+  const labelOfStable = useRef(mediaLabelOf);
+  labelOfStable.current = mediaLabelOf;
   const reconcileKey = useMemo(
-    () => `${selectedMode}|${refItems.map((item) => `${item.id}:${item.role}:${item.type}`).join(',')}`,
-    [selectedMode, refItems],
+    () => `${selectedMode}|${refItems.map((item) => `${item.id}:${item.role}:${item.type}`).join(',')}|${orderedTextNodeIds.join(',')}`,
+    [selectedMode, refItems, orderedTextNodeIds],
   );
-  /** 拍平镜像（IKFA1O）：字数统计与发送门槛共用；失效标签 → 已失效：原N */
-  const flatValue = useMemo(() => flattenPromptDocWith(promptDoc, (id) => labelOfStable.current(id)), [promptDoc, reconcileKey]);
+  /** 拍平镜像（IKFA1O/IKFA1P）：字数统计与发送门槛共用；失效标签 → 已失效：原N */
+  const flatValue = useMemo(() => flattenPromptDocWith(promptDoc, (key) => refLabelOfStable.current(key)), [promptDoc, reconcileKey]);
   /** 失效标签存在时阻止生成（模式不兼容或参考移除；点击替换/删除后可继续） */
   const hasInvalidRef = docHasInvalidRef(promptDoc);
 
@@ -639,7 +661,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   const handleDocChange = (doc: PromptDoc) => {
     setPromptDoc(doc);
     pendingNewRefInsert.current = false;
-    const flat = flattenPromptDocWith(doc, (id) => labelOfStable.current(id));
+    const flat = flattenPromptDocWith(doc, (key) => refLabelOfStable.current(key));
     syncDraftParams({ prompt: flat, promptDoc: { version: PROMPT_DOC_VERSION, segments: doc.segments, flat } });
   };
 
@@ -676,7 +698,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   /** @ 菜单：已引用项按查询过滤（名称/标签可搜索）；项 = 当前模式下有效的参考（帧+普通） */
   const mentionQueryText = mention.open ? mention.query.trim().toLowerCase() : '';
   const mentionItems = useMemo(() => {
-    const out: Array<{ assetId: string; url: string; name: string; badge: string; mediaType: 'image' | 'video' | 'audio' }> = [];
+    const out: Array<{ assetId: string; url: string; name: string; badge: string; mediaType: 'image' | 'video' | 'audio' | 'text' }> = [];
     for (const item of [videoMediaRefs.first, videoMediaRefs.last, ...videoMediaRefs.reference]) {
       if (!item) continue;
       const id = refIdOf(item);
@@ -684,15 +706,22 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       if (!badge) continue; // 模式不接受或身份失效：不提供插入（不留下伪有效标签）
       out.push({ assetId: id, url: item.url, name: item.name, badge, mediaType: item.mediaType });
     }
+    // IKFA1P：文本附件项（编号跟附件顺序，与服务端 text_attachments 同源）
+    for (let i = 0; i < (attachments ?? []).length; i += 1) {
+      const a = attachments![i]!;
+      out.push({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text' });
+    }
     return out.filter((r) => !mentionQueryText || r.name.toLowerCase().includes(mentionQueryText) || r.badge.includes(mentionQueryText));
-  }, [videoMediaRefs, mentionQueryText, reconcileKey]);
+  }, [videoMediaRefs, attachments, mentionQueryText, reconcileKey]);
   const closeMention = () => {
     editorRef.current?.dismissMention();
     setMention({ open: false, query: '' });
     setCanvasMentionOpen(false);
   };
   const pickMentionRef = (assetId: string) => {
-    editorRef.current?.insertRefAtMention(assetId);
+    // IKFA1P：文本身份（来源节点 id）与媒体身份空间不重叠——按当前附件集合分派标签类型
+    const kind: PromptRefKey['kind'] = orderedTextNodeIds.includes(assetId) ? 'text_ref' : 'asset_ref';
+    editorRef.current?.insertRefAtMention({ kind, id: assetId });
     setMention({ open: false, query: '' });
   };
 
@@ -744,19 +773,30 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     return true;
   };
 
-  /** 新参考添加成功检测：有效身份集合出现新增 → 在记住的插入点落标签（A3） */
+  /** 新参考添加成功检测：有效身份集合出现新增 → 在记住的插入点落标签（A3；IKFA1P 含新文本附件连入） */
   const prevRefIdsRef = useRef<Array<string>>([]);
+  const prevTextNodeIdsRef = useRef<Array<string>>([]);
   useEffect(() => {
     const ids = refItems.filter((item) => labelOfStable.current(item.id) !== null).map((item) => item.id);
     const prev = prevRefIdsRef.current;
     prevRefIdsRef.current = ids;
+    const prevText = prevTextNodeIdsRef.current;
+    prevTextNodeIdsRef.current = orderedTextNodeIds;
     if (!pendingNewRefInsert.current) return;
     const added = ids.filter((id) => !prev.includes(id));
-    if (added.length === 0) return;
-    pendingNewRefInsert.current = false;
-    editorRef.current?.insertRefAtPending(added[added.length - 1]);
+    if (added.length > 0) {
+      pendingNewRefInsert.current = false;
+      editorRef.current?.insertRefAtPending({ kind: 'asset_ref', id: added[added.length - 1] });
+      return;
+    }
+    // IKFA1P：画布新文本节点建连线成为附件 → 同一插入点落文本标签
+    const addedText = orderedTextNodeIds.filter((id) => !prevText.includes(id));
+    if (addedText.length > 0) {
+      pendingNewRefInsert.current = false;
+      editorRef.current?.insertRefAtPending({ kind: 'text_ref', id: addedText[addedText.length - 1] });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reconcileKey]);
+  }, [reconcileKey, orderedTextNodeIds]);
 
   useDismissOnOutside([
     { open: mention.open && !canvasMentionOpen, ref: mentionMenuRef, dismiss: () => closeMention() },
@@ -844,8 +884,12 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
                 if (id && refLabels.has(id)) {
                   // 已在参考区：直接插标签（多次提及不重复添加输入）
                   pickMentionRef(id);
+                } else if (item.kind === 'text' && orderedTextNodeIds.includes(item.id)) {
+                  // IKFA1P：已在附件中的文本 → 直接插标签（多次提及不重复建连线）
+                  pickMentionRef(item.id);
                 } else {
-                  // 新素材：加入参考（父级建立连线/暂存），添加成功后经 pendingInsert 落标签
+                  // 新素材：加入参考（父级建立连线/暂存），添加成功后经 pendingInsert 落标签；
+                  // IKFA1P：新文本走画布连线添加附件（pendingInsert 含文本检测）
                   editorRef.current?.consumeMentionForPendingInsert();
                   pendingNewRefInsert.current = true;
                   setMention({ open: false, query: '' });
@@ -864,7 +908,9 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
           <ReplaceRefMenu
             items={mentionItems}
             onPick={(assetId) => {
-              editorRef.current?.replaceRefAt(replaceTarget, assetId);
+              // IKFA1P：失效文本标签可替换为其他文本附件或媒体（按身份空间分派）
+              const kind: PromptRefKey['kind'] = orderedTextNodeIds.includes(assetId) ? 'text_ref' : 'asset_ref';
+              editorRef.current?.replaceRefAt(replaceTarget, { kind, id: assetId });
               setReplaceTarget(null);
             }}
           />
@@ -1105,9 +1151,11 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
         <div className={styles.attachments}>
           <span className={styles.configLabel}>文本附件（{attachments.length}）</span>
           {attachments.map((a, i) => (
+            /* IKFA1P：附件区展示正文标签编号（与 @ 菜单、正文标签同源） */
             <AttachmentItem
               key={a.nodeId}
               attachment={a}
+              badge={`文本${i + 1}`}
               onRemove={!readOnly && !syncingPlan && a.isPromptPlan && onRemovePlan ? () => onRemovePlan(a.nodeId) : undefined}
               move={
                 !readOnly && onReorderAttachments && attachments.length > 1
@@ -1134,7 +1182,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
           initialText={initialText ?? ''}
           placeholder="描述你希望生成的视频。输入 @ 可引用已选素材。"
           readOnly={readOnly}
-          labelOf={(id) => labelOfStable.current(id)}
+          labelOf={(key) => refLabelOfStable.current(key)}
           reconcileKey={reconcileKey}
           labels={refLabels}
           refsMeta={refsMeta}

@@ -1,6 +1,7 @@
 import { validateReferences } from "../generation-runtime/video-reference-validation.js";
-import { composeTextAttachmentPrompt } from "@blue-whale/core";
+import { composeTextAttachmentPrompt, composeTextAttachmentPromptIndexed } from "@blue-whale/core";
 import { COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, promptBindingsSchema, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@blue-whale/contracts";
+import { docHasTextRef, type PromptDoc } from "@blue-whale/contracts";
 import { nodeAssetId, planError, readPromptPlan, validatePlanModel, validateVideoPlan, type PromptTargetNode } from "../canvas/prompt-target.js";
 import type { ModelCapabilityView } from "../persistence/model-capability-repo.js";
 import type { WorkerRepo } from "../persistence/generation-worker-types.js";
@@ -10,6 +11,8 @@ export async function freezePromptPlans(args: {
   type?: "image" | "video";
   references?: Array<{ asset_id?: string; material_id?: string; type: "image" | "video" | "audio"; role: "reference" | "first_frame" | "last_frame" }>;
   inputIds: string[]; prompt: string; attachments: TextAttachmentSnapshot[];
+  /** IKFA1P：正文含文本标签时组合按编号清单格式（正文 文本N 与清单行号建立编号 ↔ 内容关系）。 */
+  promptDoc?: PromptDoc | null;
   model: ModelCapabilityView | undefined; userId: string; projectId: string;
   assets: Pick<WorkerRepo, "resolveInputAssets">;
 }): Promise<PromptPlanSnapshot | undefined> {
@@ -88,7 +91,11 @@ export async function freezePromptPlans(args: {
     }
     return { ...attachment, text };
   });
-  const providerPrompt = composeTextAttachmentPrompt(compiled, args.prompt);
+  // IKFA1P：正文含文本标签时按编号清单组合（正文 文本N 字样与附件清单行号对应）；
+  // 方案附件正文经上方标签替换后原样进入清单，保持既有方案绑定/同步约束。
+  const providerPrompt = args.promptDoc && docHasTextRef(args.promptDoc)
+    ? composeTextAttachmentPromptIndexed(compiled, args.prompt)
+    : composeTextAttachmentPrompt(compiled, args.prompt);
   const maxLength = Math.max(
     args.type === "video" ? COMPOSED_VIDEO_PROMPT_MAX_LENGTH : COMPOSED_IMAGE_PROMPT_MAX_LENGTH,
     args.model?.features.max_prompt_length ?? 0,

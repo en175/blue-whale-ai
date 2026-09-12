@@ -2165,3 +2165,144 @@ it.each([32000, 32001])("结构化正文遵循模型 32000 字边界：%i", asyn
   expect(result.code).toBe(length === 32000 ? 200 : 400);
   expect(createJob).toHaveBeenCalledTimes(length === 32000 ? 1 : 0);
 });
+
+/* IKFA1P：文本附件正文标签——文本身份复核（画布连线推导）、文本N 编译、
+   composed_prompt 编号清单冻结。语义权威：docs/specs/2026-09-13-ikfa1p-text-attachment-prompt-ref-contract.md */
+
+describe("handleCreateGenerationJob 文本附件正文标签 prompt_doc（IKFA1P）", () => {
+  /** media-1 附件顺序（edges 序）：[text-b(雨夜), text-a(赛博朋克), text-blank(空白)] */
+  const TEXT_DOC = {
+    version: 1,
+    segments: [
+      { kind: "text", text: "按" },
+      { kind: "text_ref", node_id: "text-a" },
+      { kind: "text", text: "修改，参考" },
+      { kind: "text_ref", node_id: "text-b" },
+      { kind: "text", text: "与空白附件" },
+      { kind: "text_ref", node_id: "text-blank" },
+    ],
+  } as const;
+
+  it("生图：文本+媒体混排合法 → 200，正文按附件顺序编译文本N，composed_prompt 冻结编号清单（D2/E4）", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY,
+      prompt_doc: TEXT_DOC,
+    }, null, deps);
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    // 编号跟附件顺序（text-b→文本1、text-a→文本2、text-blank→文本3），不跟正文出现顺序
+    expect(cmdArg.input.prompt).toBe("按文本2修改，参考文本1与空白附件文本3");
+    expect(cmdArg.input.prompt_doc).toEqual(TEXT_DOC);
+    // 编号清单：全部附件按序进入（含空白占位与未提及项），正文追加最后
+    expect(cmdArg.input.composed_prompt).toBe(
+      "文本1：雨夜\n\n文本2：赛博朋克\n\n文本3：   \n\n按文本2修改，参考文本1与空白附件文本3",
+    );
+  });
+
+  it("生图：文本身份不在附件集合 → 400 invalid_reference，不建任务（D4）", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY,
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", node_id: "text-gone" }] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("正文文本标签指向无效的文本附件");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("生图：正文含文本标签但未携带 target_node_id → 400（文本附件由目标连线推导）", async () => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...imageBody(0),
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", node_id: "text-a" }] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("正文文本标签指向无效的文本附件");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("生图：文本失效标签（invalid_label）→ 400 存在已失效的素材标签（阻止生成）", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY,
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", node_id: "text-a", invalid_label: "文本2" }] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("存在已失效的素材标签，请删除后再提交");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("生图：无文本标签的 prompt_doc → input 不冻结 composed_prompt（组合格式不变，回归）", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY,
+      prompt_doc: { version: 1, segments: [{ kind: "text", text: "海边日落" }] },
+    }, null, deps);
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input).not.toHaveProperty("composed_prompt");
+  });
+
+  /** 视频目标画布：media-v 的附件顺序 [text-x, text-y] */
+  const VIDEO_TEXT_CANVAS = {
+    nodes: JSON.stringify([
+      { id: "media-v", type: "mediaNode", data: { mediaType: "video" } },
+      { id: "text-x", type: "textNode", data: { title: "运镜", text: "手持跟拍" } },
+      { id: "text-y", type: "textNode", data: { title: "风格", text: "胶片感" } },
+    ]),
+    edges: JSON.stringify([
+      { id: "e1", source: "text-x", target: "media-v" },
+      { id: "e2", source: "text-y", target: "media-v" },
+    ]),
+  };
+
+  function buildVideoTargetDeps() {
+    const { deps, createJob } = buildVideoDeps();
+    const canvasDeps = buildTargetDeps(VIDEO_TEXT_CANVAS);
+    (deps as unknown as { canvas: unknown }).canvas = canvasDeps.getByProject ? { getByProject: canvasDeps.getByProject } : undefined;
+    // buildVideoDeps 的模型目录只含视频模型；canvas 直接注入
+    return { deps, createJob };
+  }
+
+  it("视频：references + 文本标签 → 200，帧/参考与文本N 混排编译，composed_prompt 冻结编号清单", async () => {
+    const { deps, createJob } = buildVideoTargetDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...VIDEO_BODY,
+      target_node_id: "media-v",
+      references: [{ role: "reference", asset_id: "1", type: "image" }],
+      prompt_doc: {
+        version: 1,
+        segments: [
+          { kind: "text", text: "让图片1按" },
+          { kind: "text_ref", node_id: "text-y" },
+          { kind: "text", text: "调整，再参考" },
+          { kind: "text_ref", node_id: "text-x" },
+        ],
+      },
+    }, null, deps);
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("让图片1按文本2调整，再参考文本1");
+    expect(cmdArg.input.composed_prompt).toBe(
+      "文本1：手持跟拍\n\n文本2：胶片感\n\n让图片1按文本2调整，再参考文本1",
+    );
+    expect(cmdArg.input.text_attachments).toEqual([
+      { node_id: "text-x", title: "运镜", text: "手持跟拍" },
+      { node_id: "text-y", title: "风格", text: "胶片感" },
+    ]);
+  });
+
+  it("视频：文本身份不在附件集合 → 400 invalid_reference，不建任务", async () => {
+    const { deps, createJob } = buildVideoTargetDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...VIDEO_BODY,
+      target_node_id: "media-v",
+      references: [{ role: "reference", asset_id: "1", type: "image" }],
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", node_id: "text-none" }] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("正文文本标签指向无效的文本附件");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+});

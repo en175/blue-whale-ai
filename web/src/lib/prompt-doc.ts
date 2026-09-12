@@ -3,7 +3,8 @@
  *
  * 与 packages/contracts/src/prompt-doc.ts 同语义（web 侧镜像；跨进程权威在契约包）。
  * 规则备忘：
- * - 稳定身份 = 本地 Asset id；展示编号（图片N）由身份在最终输入顺序中的位置派生，编号不是身份。
+ * - 稳定身份 = 本地 Asset id（媒体）/ 来源画布 textNode 节点 id（文本，IKFA1P）；
+ *   展示编号（图片N/文本N）由身份在最终输入顺序中的位置派生，编号不是身份。
  * - 标签位置由片段顺序隐式表达，不使用字符区间。
  * - 失效标签保留原身份与原编号（invalid_label）；身份重新加入当前有效集合时自动恢复（IKFA1N）。
  * - 草稿防丢失：结构化 promptDoc 与拍平镜像 prompt 双写；镜像不一致说明旧客户端改过，丢弃结构不猜造。
@@ -16,7 +17,7 @@ export interface PromptDocTextSegment {
   text: string;
 }
 
-export interface PromptDocRefSegment {
+export interface PromptDocAssetRefSegment {
   kind: 'asset_ref';
   asset_id: string;
   /** 展示编号缓存（图片N）：失效时作为「原编号」引用；权威编号永远按当前输入派生 */
@@ -24,6 +25,16 @@ export interface PromptDocRefSegment {
   /** 失效恢复信息：失效前的展示编号；存在即失效标签 */
   invalid_label?: string;
 }
+
+export interface PromptDocTextRefSegment {
+  kind: 'text_ref';
+  /** 来源画布文本节点 id（IKFA1P）：与媒体身份空间不重叠 */
+  node_id: string;
+  label?: string;
+  invalid_label?: string;
+}
+
+export type PromptDocRefSegment = PromptDocAssetRefSegment | PromptDocTextRefSegment;
 
 export type PromptDocSegment = PromptDocTextSegment | PromptDocRefSegment;
 
@@ -37,6 +48,18 @@ export interface StoredPromptDoc extends PromptDoc {
   flat: string;
 }
 
+/** 标签统一寻址键：编号映射按身份类型分派（媒体 → asset_id / 文本 → node_id） */
+export interface PromptRefKey {
+  kind: 'asset_ref' | 'text_ref';
+  id: string;
+}
+
+export function refKeyOf(segment: PromptDocRefSegment): PromptRefKey {
+  return segment.kind === 'text_ref'
+    ? { kind: 'text_ref', id: segment.node_id }
+    : { kind: 'asset_ref', id: segment.asset_id };
+}
+
 /** 有效图片编号：assetId 在最终输入顺序（保序）中的下标+1；不在集合返回 null */
 export function imageRefNumberOf(assetId: string, orderedAssetIds: readonly string[]): number | null {
   const index = orderedAssetIds.indexOf(assetId);
@@ -48,33 +71,38 @@ export function imageRefLabelOf(assetId: string, orderedAssetIds: readonly strin
   return n === null ? null : `图片${n}`;
 }
 
-/** 标签当前应展示的文案：失效 → 已失效：原图片N；有效 → 派生编号（缓存兜底） */
-export function refSegmentDisplayLabel(
-  segment: PromptDocRefSegment,
-  orderedAssetIds: readonly string[],
-): string {
-  if (segment.invalid_label !== undefined) return `已失效：原${segment.invalid_label}`;
-  return imageRefLabelOf(segment.asset_id, orderedAssetIds) ?? segment.label ?? '图片?';
-}
-
-/** 拍平镜像：文字原样；有效标签 → 图片N；失效标签 → 已失效：原图片N */
-export function flattenPromptDoc(doc: PromptDoc, orderedAssetIds: readonly string[]): string {
-  return doc.segments
-    .map((segment) =>
-      segment.kind === 'text' ? segment.text : refSegmentDisplayLabel(segment, orderedAssetIds),
-    )
-    .join('');
+/** 有效文本编号（IKFA1P）：nodeId 在当前文本附件顺序中的下标+1；不在集合返回 null */
+export function textRefLabelOf(nodeId: string, orderedTextNodeIds: readonly string[]): string | null {
+  const index = orderedTextNodeIds.indexOf(nodeId);
+  return index < 0 ? null : `文本${index + 1}`;
 }
 
 const ASSET_ID_PATTERN = /^([1-9][0-9]*|asset-.{1,128})$/i;
+const NODE_ID_MAX = 128;
 
-function isRefSegment(v: unknown): v is PromptDocRefSegment {
+function isAssetRefSegment(v: unknown): v is PromptDocAssetRefSegment {
   if (typeof v !== 'object' || v === null) return false;
   const s = v as Record<string, unknown>;
   if (s.kind !== 'asset_ref' || typeof s.asset_id !== 'string' || !ASSET_ID_PATTERN.test(s.asset_id)) return false;
   if (s.label !== undefined && typeof s.label !== 'string') return false;
   if (s.invalid_label !== undefined && typeof s.invalid_label !== 'string') return false;
   return true;
+}
+
+function isTextRefSegment(v: unknown): v is PromptDocTextRefSegment {
+  if (typeof v !== 'object' || v === null) return false;
+  const s = v as Record<string, unknown>;
+  if (s.kind !== 'text_ref' || typeof s.node_id !== 'string' || s.node_id.length === 0 || s.node_id.length > NODE_ID_MAX) return false;
+  if (s.label !== undefined && typeof s.label !== 'string') return false;
+  if (s.invalid_label !== undefined && typeof s.invalid_label !== 'string') return false;
+  return true;
+}
+
+function refExtras(raw: { label?: unknown; invalid_label?: unknown }): { label?: string; invalid_label?: string } {
+  const extras: { label?: string; invalid_label?: string } = {};
+  if (typeof raw.label === 'string') extras.label = raw.label;
+  if (typeof raw.invalid_label === 'string') extras.invalid_label = raw.invalid_label;
+  return extras;
 }
 
 /**
@@ -95,11 +123,12 @@ export function restorePromptDoc(stored: unknown, promptMirror: unknown): Prompt
       segments.push({ kind: 'text', text });
       continue;
     }
-    if (isRefSegment(raw)) {
-      const seg: PromptDocRefSegment = { kind: 'asset_ref', asset_id: raw.asset_id };
-      if (raw.label !== undefined) seg.label = raw.label;
-      if (raw.invalid_label !== undefined) seg.invalid_label = raw.invalid_label;
-      segments.push(seg);
+    if (isAssetRefSegment(raw)) {
+      segments.push({ kind: 'asset_ref', asset_id: raw.asset_id, ...refExtras(raw) });
+      continue;
+    }
+    if (isTextRefSegment(raw)) {
+      segments.push({ kind: 'text_ref', node_id: raw.node_id, ...refExtras(raw) });
       continue;
     }
     return null;
@@ -107,34 +136,30 @@ export function restorePromptDoc(stored: unknown, promptMirror: unknown): Prompt
   return { version: PROMPT_DOC_VERSION, segments };
 }
 
-/**
- * 编号重派生与失效推导：给定当前有效输入顺序，按身份对当前集合求值——
- * - 有效标签：同步展示编号缓存 label = 图片N；
- * - 身份已不在集合：转失效，invalid_label = 失效前展示编号（label 缓存），保留原身份不转向；
- * - 失效标签身份回到集合（重新加入同一身份，IKFA1N）：自动恢复，清除失效标记并派生当次编号；
- * - 失效标签身份仍不在集合：原样保留（原身份与原编号冻结，名称不参与判定）。
- */
+/** 编号重派生与失效推导（生图，IKFA1M）：按图片输入顺序派生编号 */
 export function reconcilePromptDoc(
   doc: PromptDoc,
   orderedAssetIds: readonly string[],
 ): { doc: PromptDoc; changed: boolean } {
-  return reconcilePromptDocWith(doc, (assetId) => imageRefLabelOf(assetId, orderedAssetIds));
+  return reconcilePromptDocWith(doc, (key) =>
+    key.kind === 'text_ref' ? null : imageRefLabelOf(key.id, orderedAssetIds));
 }
 
 /**
- * 泛化编号重派生与失效推导（IKFA1O 视频）：labelOf 返回身份的当前有效标签文案
- * （首帧/尾帧/图片N/视频N/音频N），null = 失效——身份不在参考集合，或仍在集合但
- * 当前模式/角色不接受（C2 模式失效）。失效→有效→失效状态完全由 labelOf 当前值推导：
- * labelOf 恢复非 null 即自动恢复（模式切回兼容），仍为 null 则不误恢复（C5）。
+ * 泛化编号重派生与失效推导（IKFA1O 视频 / IKFA1P 文本）：labelOf 按寻址键返回
+ * 身份的当前有效标签文案（首帧/尾帧/图片N/视频N/音频N/文本N），null = 失效——
+ * 身份不在当前集合，或仍在集合但当前模式/角色不接受（C2 模式失效）。
+ * 失效→有效→失效状态完全由 labelOf 当前值推导：labelOf 恢复非 null 即自动恢复
+ * （模式切回兼容 / 同身份重新连入），仍为 null 则不误恢复（C5）。
  */
 export function reconcilePromptDocWith(
   doc: PromptDoc,
-  labelOf: (assetId: string) => string | null,
+  labelOf: (key: PromptRefKey) => string | null,
 ): { doc: PromptDoc; changed: boolean } {
   let changed = false;
   const segments = doc.segments.map((segment) => {
-    if (segment.kind !== 'asset_ref') return segment;
-    const label = labelOf(segment.asset_id);
+    if (segment.kind === 'text') return segment;
+    const label = labelOf(refKeyOf(segment));
     if (label !== null) {
       if (segment.invalid_label === undefined) {
         if (segment.label === label) return segment;
@@ -154,24 +179,29 @@ export function reconcilePromptDocWith(
   return changed ? { doc: { version: doc.version, segments }, changed } : { doc, changed };
 }
 
-/** 泛化拍平镜像（IKFA1O 视频）：有效标签按 labelOf 文案，失效标签保留原编号 */
+/** 泛化拍平镜像（IKFA1O/IKFA1P）：有效标签按 labelOf 文案，失效标签保留原编号 */
 export function flattenPromptDocWith(
   doc: PromptDoc,
-  labelOf: (assetId: string) => string | null,
+  labelOf: (key: PromptRefKey) => string | null,
 ): string {
   return doc.segments
     .map((segment) => {
       if (segment.kind === 'text') return segment.text;
       if (segment.invalid_label !== undefined) return `已失效：原${segment.invalid_label}`;
-      return labelOf(segment.asset_id) ?? segment.label ?? '素材?';
+      return labelOf(refKeyOf(segment)) ?? segment.label ?? '素材?';
     })
     .join('');
 }
 
 export function docHasAnyRef(doc: PromptDoc): boolean {
-  return doc.segments.some((s) => s.kind === 'asset_ref');
+  return doc.segments.some((s) => s.kind !== 'text');
 }
 
 export function docHasInvalidRef(doc: PromptDoc): boolean {
-  return doc.segments.some((s) => s.kind === 'asset_ref' && s.invalid_label !== undefined);
+  return doc.segments.some((s) => s.kind !== 'text' && s.invalid_label !== undefined);
+}
+
+/** 正文是否包含文本标签（IKFA1P）：发送门槛与菜单展示共用 */
+export function docHasTextRef(doc: PromptDoc): boolean {
+  return doc.segments.some((s) => s.kind === 'text_ref');
 }

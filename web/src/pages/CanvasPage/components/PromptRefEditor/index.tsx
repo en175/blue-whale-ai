@@ -33,7 +33,7 @@ import {
   type LexicalEditor,
   type NodeKey,
 } from 'lexical';
-import { reconcilePromptDocWith, type PromptDoc } from '@/lib/prompt-doc';
+import { reconcilePromptDocWith, type PromptDoc, type PromptRefKey } from '@/lib/prompt-doc';
 import { $createAssetRefNode, $isAssetRefNode, AssetRefNode, PromptRefContext, type AssetRefMeta } from './AssetRefNode';
 import { $applyReconciledRefs, $buildFromPromptDoc, $readPromptDoc, $restoreMentionSelection, matchMentionQuery } from './promptRefDoc';
 import styles from './index.module.css';
@@ -45,15 +45,15 @@ export interface MentionState {
 
 export interface PromptRefEditorHandle {
   /** 已引用项：把本次 @ 查询原位替换为指定素材的标签；无进行中的查询时不动作 */
-  insertRefAtMention: (assetId: string) => void;
+  insertRefAtMention: (key: PromptRefKey) => void;
   /** 添加新参考入口：删除本次 @ 查询并记住插入点（新参考添加成功后由 insertRefAtPending 落标签） */
   consumeMentionForPendingInsert: () => void;
   /** 新参考添加成功后：在记住的插入点插入标签；插入点失效时退化为追加到末尾，不丢引用 */
-  insertRefAtPending: (assetId: string) => void;
+  insertRefAtPending: (key: PromptRefKey) => void;
   /** 放弃本次 @ 查询（保留已输入的 @ 文本） */
   dismissMention: () => void;
   /** 替换失效提及（IKFA1N B5）：把指定节点换绑为其他已引用素材，仅该处提及变化 */
-  replaceRefAt: (nodeKey: string, assetId: string) => void;
+  replaceRefAt: (nodeKey: string, key: PromptRefKey) => void;
   /** 清空全部内容（发送后调用） */
   clear: () => void;
 }
@@ -66,13 +66,14 @@ interface PromptRefEditorProps {
   placeholder?: string;
   readOnly?: boolean;
   /** 标签有效性判定（reconcile 用）：返回 null 表示该身份当前失效。
-   *  图片 = 身份在最终 input_asset_ids；视频 = 身份在参考集合且当前模式接受（IKFA1O） */
-  labelOf: (assetId: string) => string | null;
+   *  按寻址键分派（IKFA1P）：图片 = 身份在最终 input_asset_ids；视频 = 身份在参考集合
+   *  且当前模式接受（IKFA1O）；文本 = 来源节点在当前文本附件集合（IKFA1P） */
+  labelOf: (key: PromptRefKey) => string | null;
   /** labelOf 结果的稳定键（身份序列）：变化时触发 reconcile 重派生 */
   reconcileKey: string;
-  /** 展示文案：assetId → 标签文案（图片N/视频N/首帧等；与附件区/菜单/服务端编译同一映射） */
+  /** 展示文案：身份 → 标签文案（图片N/视频N/首帧/文本N 等；与附件区/菜单/服务端编译同一映射） */
   labels: ReadonlyMap<string, string>;
-  /** 素材元信息（缩略图/名称/媒体类型） */
+  /** 素材元信息（缩略图/名称/媒体类型）；文本项 name=来源节点标题、mediaType='text' */
   refsMeta: ReadonlyMap<string, AssetRefMeta>;
   onChange: (doc: PromptDoc) => void;
   onMentionChange?: (state: MentionState) => void;
@@ -161,14 +162,15 @@ function MentionPlugin({
   return null;
 }
 
-/** 文案重派生与失效标记：有效标签集合变化时，把 reconcile 结果写回标签节点（IKFA1O 泛化 labelOf） */
-function ReconcilePlugin({ labelOf, reconcileKey }: { labelOf: (assetId: string) => string | null; reconcileKey: string }) {
+/** 文案重派生与失效标记：有效标签集合变化时，把 reconcile 结果写回标签节点
+ *  （IKFA1O 泛化 + IKFA1P 按寻址键分派媒体/文本） */
+function ReconcilePlugin({ labelOf, reconcileKey }: { labelOf: (key: PromptRefKey) => string | null; reconcileKey: string }) {
   const [editor] = useLexicalComposerContext();
   const labelOfRef = useRef(labelOf);
   labelOfRef.current = labelOf;
   useEffect(() => {
     editor.update(() => {
-      const { doc, changed } = reconcilePromptDocWith($readPromptDoc(), (id) => labelOfRef.current(id));
+      const { doc, changed } = reconcilePromptDocWith($readPromptDoc(), (key) => labelOfRef.current(key));
       if (changed) $applyReconciledRefs($nodesOfType(AssetRefNode), doc.segments);
     }, { tag: 'prompt-ref-reconcile' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -207,18 +209,20 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
   const pendingInsertRef = useRef<{ key: NodeKey; offset: number } | null>(null);
   const labelsRef = useRef(labels);
   labelsRef.current = labels;
-  const labelOfCurrent = (assetId: string): string | undefined => labelsRef.current.get(assetId);
+  const labelOfCurrent = (key: PromptRefKey): string | undefined => labelsRef.current.get(key.id);
 
   useImperativeHandle(ref, () => ({
-    insertRefAtMention: (assetId: string) => {
+    insertRefAtMention: (key: PromptRefKey) => {
       const editor = editorRef.current;
       const anchor = mentionAnchorRef.current;
       if (!editor || !anchor) return;
-      const label = labelOfCurrent(assetId);
+      const label = labelOfCurrent(key);
       editor.update(() => {
         if (!$getNodeByKey(anchor.key)) return;
         // 恢复「@query」的选择范围并原位替换为标签，保留前后文字与段落
-        $restoreMentionSelection(anchor)?.insertNodes([$createAssetRefNode(assetId, label)]);
+        $restoreMentionSelection(anchor)?.insertNodes([
+          $createAssetRefNode(key.id, label, undefined, key.kind === 'text_ref' ? 'text' : 'asset'),
+        ]);
       });
       mentionAnchorRef.current = null;
       onMentionChange?.({ open: false, query: '' });
@@ -244,13 +248,15 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
       mentionAnchorRef.current = null;
       onMentionChange?.({ open: false, query: '' });
     },
-    insertRefAtPending: (assetId: string) => {
+    insertRefAtPending: (key: PromptRefKey) => {
       const editor = editorRef.current;
       const point = pendingInsertRef.current;
       pendingInsertRef.current = null;
       if (!editor) return;
-      const label = labelOfCurrent(assetId);
+      const label = labelOfCurrent(key);
       editor.update(() => {
+        // 节点构造必须在 editor.update 内同步执行（Lexical 约束）
+        const node = $createAssetRefNode(key.id, label, undefined, key.kind === 'text_ref' ? 'text' : 'asset');
         let inserted = false;
         if (point && $getNodeByKey(point.key)) {
           try {
@@ -260,7 +266,7 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
             $setSelection(selection);
             const sel = $getSelection();
             if ($isRangeSelection(sel)) {
-              sel.insertNodes([$createAssetRefNode(assetId, label)]);
+              sel.insertNodes([node]);
               inserted = true;
             }
           } catch {
@@ -271,7 +277,7 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
           // 插入点已失效（期间文本被改动）：退化为追加到末尾，不丢引用
           $getRoot().selectEnd();
           const sel = $getSelection();
-          if ($isRangeSelection(sel)) sel.insertNodes([$createAssetRefNode(assetId, label)]);
+          if ($isRangeSelection(sel)) sel.insertNodes([node]);
         }
       });
     },
@@ -280,14 +286,16 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
       pendingInsertRef.current = null;
       onMentionChange?.({ open: false, query: '' });
     },
-    replaceRefAt: (nodeKey: string, assetId: string) => {
+    replaceRefAt: (nodeKey: string, key: PromptRefKey) => {
       const editor = editorRef.current;
       if (!editor) return;
-      const label = labelOfCurrent(assetId);
+      const label = labelOfCurrent(key);
       editor.update(() => {
         const node = $getNodeByKey(nodeKey);
         if (!$isAssetRefNode(node)) return;
-        node.setAssetId(assetId);
+        // 换绑身份与身份类型（IKFA1P：文本/媒体可互替，仅该处提及变化）
+        node.setAssetId(key.id);
+        node.setRefKind(key.kind === 'text_ref' ? 'text' : 'asset');
         if (label !== undefined) node.setLabel(label);
         node.setInvalidLabel(undefined);
       });

@@ -582,7 +582,13 @@ async function buildSubmitRequest(
     .array(textAttachmentSnapshotSchema)
     .safeParse(claim.input.text_attachments ?? []);
   const plan = claim.input.prompt_plan_snapshot === undefined ? undefined : promptPlanSnapshotSchema.parse(claim.input.prompt_plan_snapshot);
-  const prompt = plan?.providerPrompt ?? composeTextAttachmentPrompt(
+  // IKFA1P：正文含文本标签时优先消费接纳时冻结的编号清单正文（composed_prompt），
+  // 编号清单格式只在接纳处实现一次；无该字段沿用既有组合，旧任务逐字节不变。
+  const composedPrompt =
+    typeof claim.input.composed_prompt === "string" && claim.input.composed_prompt.length > 0
+      ? claim.input.composed_prompt
+      : null;
+  const prompt = plan?.providerPrompt ?? composedPrompt ?? composeTextAttachmentPrompt(
     parsedAttachments.success ? parsedAttachments.data : [],
     basePrompt,
   );

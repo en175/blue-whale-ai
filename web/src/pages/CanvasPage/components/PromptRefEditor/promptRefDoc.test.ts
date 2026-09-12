@@ -130,7 +130,7 @@ describe('@ 查询原位替换为素材标签（A1：保留前后文字）', () 
       if ($isElementNode(last)) last.append($createAssetRefNode('102', '图片2'));
       const doc = $readPromptDoc();
       expect(doc.segments.filter((s) => s.kind === 'asset_ref')).toHaveLength(2);
-      expect(doc.segments.map((s) => (s.kind === 'text' ? s.text : s.asset_id)).join('|')).toBe(
+      expect(doc.segments.map((s) => (s.kind === 'text' ? s.text : s.kind === 'asset_ref' ? s.asset_id : s.node_id)).join('|')).toBe(
         '甲段|102|\n\n乙段|102',
       );
     });
