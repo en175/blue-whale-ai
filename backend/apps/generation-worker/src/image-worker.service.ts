@@ -7,8 +7,6 @@ import { createLogger } from "@blue-whale/core/logging";
 import {
   createNewApiClient,
   loadGenerationCostConfig,
-  loadGenerationCredentialSecret,
-  openGenerationCredential,
   quotaToFen,
 } from "@blue-whale/core";
 import { createWorkerRepo } from "@lib/shared/persistence/index.js";
@@ -36,7 +34,6 @@ export class ImageWorkerService {
 
   get deps(): WorkerDeps {
     if (!this.depsInstance) {
-      const credentialSecret = loadGenerationCredentialSecret();
       const baseUrl = process.env.NEW_API_BASE_URL ?? "";
       const costClient = baseUrl ? createNewApiClient({ baseUrl }) : null;
       const costConfig = loadGenerationCostConfig();
@@ -49,8 +46,7 @@ export class ImageWorkerService {
         createAudioProvider: (token: string) =>
           createNewApiAudioProvider({ baseUrl: baseUrl, token }),
         credentialVault: {
-          open: (ciphertext: string) =>
-            openGenerationCredential(ciphertext, credentialSecret),
+          open: (ciphertext: string) => ciphertext,
         },
         mediaStorage: tosConfig ? createTosStorage(tosConfig).uploads : null,
         ...(costClient

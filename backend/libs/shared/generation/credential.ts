@@ -1,11 +1,6 @@
-import {
-  GenerationCredentialConfigurationError,
-  NewApiError,
-  loadGenerationCredentialSecret,
-  sealGenerationCredential,
-} from "@blue-whale/core";
+import { NewApiError } from "@blue-whale/core";
 
-/** 把请求方 sk-token 密封成 job 凭证（worker 解密后调网关）。未携带/非 sk- → 空。 */
+/** 把请求方 sk-token 直接透传为 job 凭证（修正四：去密封，明文存 job.input.provider_credential）。未携带/非 sk- → 空。 */
 export function sealProviderCredential(
   authorization: string | undefined,
 ): { providerCredential?: string } {
@@ -13,17 +8,6 @@ export function sealProviderCredential(
     ? authorization.slice(7).trim()
     : undefined;
   if (!token?.startsWith("sk-")) return {};
-  try {
-    return {
-      providerCredential: sealGenerationCredential(
-        token,
-        loadGenerationCredentialSecret(),
-      ),
-    };
-  } catch (error) {
-    if (error instanceof GenerationCredentialConfigurationError) {
-      throw new NewApiError("生成服务暂不可用", 503);
-    }
-    throw error;
-  }
+  // 修正四：不再 AES 密封，明文透传（worker 直接取用）。原 seal 失败抛 503 分支已无意义。
+  return { providerCredential: token };
 }

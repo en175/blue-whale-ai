@@ -23,6 +23,10 @@
     <okhttp.version>4.12.0</okhttp.version>
     <mybatis-plus.version>3.5.7</mybatis-plus.version>
     <ve-tos-java-sdk.version>2.9.19</ve-tos-java-sdk.version>
+    <!-- 覆盖 Spring Boot 管理的 Testcontainers 版本：docker-java 3.4.0 与
+         Docker Desktop 4.81 (API 1.55) 存在 /info 400 兼容性问题；
+         Testcontainers 1.21.0 升级 docker-java 修复此问题。 -->
+    <testcontainers.version>1.21.0</testcontainers.version>
   </properties>
 
   <dependencies>
@@ -67,6 +71,16 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>mysql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>

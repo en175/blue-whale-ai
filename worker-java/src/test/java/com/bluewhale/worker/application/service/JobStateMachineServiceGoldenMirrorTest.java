@@ -476,12 +476,11 @@ class JobStateMachineServiceGoldenMirrorTest {
             a.setId(888L);
             return 1;
         });
-        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         String result = service.createAsset(new JobStateMachineService.CreateAssetInput(
                 "9", "42", "300", "audio",
                 "https://example.com/audio.mp3", "uploads/audio/abc.mp3",
-                "audio/mpeg", 1024L, null, null, 12.5,
+                "audio/mpeg", 1024L, null, null, 12500,
                 "worker-1", 5L
         ));
 

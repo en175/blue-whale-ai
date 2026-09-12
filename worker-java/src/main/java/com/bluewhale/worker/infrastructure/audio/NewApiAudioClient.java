@@ -2,6 +2,7 @@ package com.bluewhale.worker.infrastructure.audio;
 
 import com.bluewhale.worker.domain.error.AudioProviderError;
 import com.bluewhale.worker.domain.error.GenerationError;
+import com.bluewhale.worker.infrastructure.gateway.NewApiErrorClassifier;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.MediaType;
@@ -19,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Pattern;
 
 /**
  * new-api 音频 TTS 客户端（new-api-audio-provider.ts:55-190 逐字移植）。
@@ -35,7 +35,7 @@ import java.util.regex.Pattern;
  * </ul>
  * <p>
  * 错误分类优先级（§5 / IKDAJN）：content > quota > provider_failed。
- * 中文正则与 TS 逐字一致（error-codes.ts isContentPolicySignal / isQuotaSignal）。
+ * 分类逻辑统一复用 {@link NewApiErrorClassifier}（与图片/视频 client 同构，不再本地影子实现）。
  */
 @Component
 @org.springframework.context.annotation.Conditional(com.bluewhale.worker.config.AudioEnabledCondition.class)
@@ -48,24 +48,6 @@ public class NewApiAudioClient {
     /** 默认超时 30s（new-api-audio-provider.ts:42 DEFAULT_AUDIO_TIMEOUT_MS）。 */
     private static final int DEFAULT_TIMEOUT_MS = 30_000;
 
-    /**
-     * 内容策略正则（error-codes.ts isContentPolicySignal）。
-     * 与 TS 逐字一致：/(copyright|sensitive|版权|敏感|policy violation|policyviolation|content policy)/i
-     */
-    private static final Pattern CONTENT_POLICY_PATTERN = Pattern.compile(
-            "copyright|sensitive|版权|敏感|policy violation|policyviolation|content policy",
-            Pattern.CASE_INSENSITIVE
-    );
-
-    /**
-     * 额度信号正则（error-codes.ts isQuotaSignal）。
-     * 与 TS 逐字一致：/(预扣费额度失败|剩余额度|余额不足|额度不足|balance|payment_required)/i
-     */
-    private static final Pattern QUOTA_PATTERN = Pattern.compile(
-            "预扣费额度失败|剩余额度|余额不足|额度不足|balance|payment_required",
-            Pattern.CASE_INSENSITIVE
-    );
-
     private final OkHttpClient httpClient;
     private final String baseUrl;
 
@@ -75,18 +57,10 @@ public class NewApiAudioClient {
 
     /** 测试用构造器：注入 base URL。 */
     NewApiAudioClient(String baseUrl) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalStateException("NEW_API_BASE_URL 未配置");
-        }
-        // 去尾斜杠（new-api-audio-provider.ts:58）
-        this.baseUrl = baseUrl.replaceAll("/+$", "");
+        this.baseUrl = com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport.normalizeBaseUrl(baseUrl);
 
         int timeoutMs = loadTimeoutMs();
-        this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .build();
+        this.httpClient = com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport.buildClient(10_000, timeoutMs, timeoutMs);
     }
 
     /**
@@ -124,15 +98,13 @@ public class NewApiAudioClient {
             throw new AudioProviderError(GenerationError.ERROR_PROVIDER_FAILED, "请求序列化失败");
         }
 
-        // 请求头（契约 §5 / ADR-0080）
-        Request request = new Request.Builder()
+        // 请求头（契约 §5 / ADR-0080）：标准三元组走共享装配，Content-Type 单独
+        Request.Builder requestBuilder = new Request.Builder()
                 .url(baseUrl + "/v1/audio/speech")
                 .post(RequestBody.create(bodyJson, JSON_TYPE))
-                .header("Authorization", "Bearer " + token)
-                .header("X-Trace-Id", traceId)
-                .header("X-Client-System", "bluewhale") // ADR-0080 白名单头
-                .header("Content-Type", "application/json")
-                .build();
+                .header("Content-Type", "application/json");
+        com.bluewhale.worker.infrastructure.gateway.NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        Request request = requestBuilder.build();
 
         Response response;
         try {
@@ -154,7 +126,7 @@ public class NewApiAudioClient {
 
             // 非 2xx → 分类（new-api-audio-provider.ts:119-130）
             if (!response.isSuccessful()) {
-                String code = classifyError(rawText, response.code());
+                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
                 String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
                 throw new AudioProviderError(code,
                         "new-api 音频生成失败: HTTP " + response.code() + " body=" + truncated);
@@ -170,21 +142,17 @@ public class NewApiAudioClient {
                         "生成服务未返回有效 JSON");
             }
 
-            // 成功态错误信封（new-api-audio-provider.ts:142-163）
+            // 成功态错误信封（new-api-audio-provider.ts:142-163；IKDAJN 优先级收进共享分类器）
             JsonNode errorNode = parsed.get("error");
             if (errorNode != null && errorNode.has("message")) {
                 String errText = errorNode.get("message").asText();
-                // IKDAJN：版权/敏感优先于 quota
-                if (isContentPolicySignal(errText)) {
-                    throw new AudioProviderError(GenerationError.ERROR_CONTENT_REJECTED,
-                            "生成内容涉及版权或敏感信息");
-                }
-                if (isQuotaSignal(errText)) {
-                    throw new AudioProviderError(GenerationError.ERROR_QUOTA_EXHAUSTED,
-                            "new-api 音频生成余额不足");
-                }
-                throw new AudioProviderError(GenerationError.ERROR_PROVIDER_FAILED,
-                        "new-api 音频生成业务失败");
+                String code = NewApiErrorClassifier.classifySuccessEnvelope(errText);
+                String message = switch (code) {
+                    case GenerationError.ERROR_CONTENT_REJECTED -> "生成内容涉及版权或敏感信息";
+                    case GenerationError.ERROR_QUOTA_EXHAUSTED -> "new-api 音频生成余额不足";
+                    default -> "new-api 音频生成业务失败";
+                };
+                throw new AudioProviderError(code, message);
             }
 
             // 提取结果（new-api-audio-provider.ts:169-186）
@@ -216,29 +184,6 @@ public class NewApiAudioClient {
             throw new AudioProviderError(GenerationError.ERROR_NO_RESULT,
                     "生成服务未返回有效 JSON");
         }
-    }
-
-    /**
-     * 非 2xx 错误分类（new-api-audio-provider.ts:119-130 + §5 IKDAJN）。
-     * 优先级：content > quota > provider_failed。
-     */
-    String classifyError(String text, int httpStatus) {
-        // HTTP 402 → quota（§5：额度 HTTP 402）
-        if (isContentPolicySignal(text)) {
-            return GenerationError.ERROR_CONTENT_REJECTED;
-        }
-        if (httpStatus == 402 || isQuotaSignal(text)) {
-            return GenerationError.ERROR_QUOTA_EXHAUSTED;
-        }
-        return GenerationError.ERROR_PROVIDER_FAILED;
-    }
-
-    static boolean isContentPolicySignal(String text) {
-        return text != null && CONTENT_POLICY_PATTERN.matcher(text).find();
-    }
-
-    static boolean isQuotaSignal(String text) {
-        return text != null && QUOTA_PATTERN.matcher(text).find();
     }
 
     private int loadTimeoutMs() {

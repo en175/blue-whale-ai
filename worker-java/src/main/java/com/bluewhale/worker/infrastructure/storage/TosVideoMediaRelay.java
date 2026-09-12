@@ -1,5 +1,7 @@
 package com.bluewhale.worker.infrastructure.storage;
 
+import com.bluewhale.worker.domain.error.GenerationError;
+import com.bluewhale.worker.domain.error.VideoProviderError;
 import com.volcengine.tos.TOSV2;
 import com.volcengine.tos.TOSV2ClientBuilder;
 import com.volcengine.tos.comm.common.ACLType;
@@ -101,7 +103,8 @@ public class TosVideoMediaRelay {
             if (resp.statusCode() >= 400) {
                 String errBody = new String(resp.body(), java.nio.charset.StandardCharsets.UTF_8);
                 String truncated = errBody.length() > 300 ? errBody.substring(0, 300) + "…" : errBody;
-                throw new RuntimeException("生成视频下载失败: HTTP " + resp.statusCode() + " body=" + truncated);
+                throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                        "生成视频下载失败: HTTP " + resp.statusCode() + " body=" + truncated);
             }
             bytes = resp.body();
             String contentType = resp.headers().firstValue("content-type").orElse(null);
@@ -111,18 +114,19 @@ public class TosVideoMediaRelay {
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException("生成视频下载失败: " + e.getMessage(), e);
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "生成视频下载失败: " + e.getMessage(), e);
         }
 
         // 2. 校验（:88-93）
         if (!mime.startsWith("video/")) {
-            throw new RuntimeException("生成结果不是视频");
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成结果不是视频");
         }
         if (bytes.length == 0) {
-            throw new RuntimeException("生成视频为空");
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频为空");
         }
         if (bytes.length > MAX_VIDEO_BYTES) {
-            throw new RuntimeException("生成视频超过转存上限");
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED, "生成视频超过转存上限");
         }
 
         // 3. 上传（:95-113）
@@ -148,7 +152,8 @@ public class TosVideoMediaRelay {
                     .setAcl(ACLType.ACL_PUBLIC_READ);
             client.putObjectAcl(aclInput);
         } catch (Exception e) {
-            throw new RuntimeException("生成视频转存失败: " + e.getMessage(), e);
+            throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
+                    "生成视频转存失败: " + e.getMessage(), e);
         }
 
         String publicUrl = "https://" + bucket + "." + endpoint + "/" + storageKey;

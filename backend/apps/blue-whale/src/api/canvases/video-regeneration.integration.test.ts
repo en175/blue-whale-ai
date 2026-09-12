@@ -1,6 +1,5 @@
 import "reflect-metadata";
 import { createWorkerRepo } from "@lib/shared/persistence/index.js";
-import { openGenerationCredential } from "@blue-whale/core";
 import { processImageJobById } from "@lib/shared/generation/worker/generation-worker.js";
 import { runVideoJobStep, type VideoTaskProvider } from "@lib/shared/generation-runtime/video-job-runner.js";
 import { Module } from "@nestjs/common";
@@ -46,7 +45,6 @@ describe.skipIf(!process.env.IKDUHP_DATABASE_URL)("Video regeneration public API
   const previousDatabase = process.env.DATABASE_URL;
   beforeAll(async () => {
     mp4 = execFileSync(ffmpeg!, ["-f", "lavfi", "-i", "color=blue:s=1280x720:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "frag_keyframe+empty_moov", "-f", "mp4", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"] });
-    vi.stubEnv("GENERATION_CREDENTIAL_SECRET", secret);
     vi.stubEnv("ROCKETMQ_ENDPOINTS", "");
     process.env.DATABASE_URL = process.env.IKDUHP_DATABASE_URL;
     media.listen(0, "127.0.0.1");
@@ -134,7 +132,7 @@ describe.skipIf(!process.env.IKDUHP_DATABASE_URL)("Video regeneration public API
   async function step(jobId: string, provider: VideoTaskProvider) {
     await vi.waitFor(async () => {
       expect(await runVideoJobStep({ jobId, repo: createWorkerRepo(prisma.client), workerId: "ikduhp-worker",
-        credentialVault: { open: encrypted => openGenerationCredential(encrypted, secret) },
+        credentialVault: { open: encrypted => encrypted },
         createProvider: () => provider,
         mediaRelay: { persist: async url => ({ url, storageKey: null, mime: "video/mp4", size: 2048 }) },
       })).toBe(jobId);
@@ -348,7 +346,7 @@ describe.skipIf(!process.env.IKDUHP_DATABASE_URL)("Video regeneration public API
     const jobId = String(created.data.generation_job_id);
     await vi.waitFor(async () => {
       expect(await processImageJobById(jobId, { repo: createWorkerRepo(prisma.client), workerId: "ikduhp-image-worker",
-        credentialVault: { open: encrypted => openGenerationCredential(encrypted, secret) },
+        credentialVault: { open: encrypted => encrypted },
         createImageProvider: () => ({ generate: async () => [{ url: `${mediaBase}/${jobId}.png`, width: 1024, height: 1024 }] }),
         createAudioProvider: () => { throw new Error("unexpected audio job"); },
       })).not.toBeNull();

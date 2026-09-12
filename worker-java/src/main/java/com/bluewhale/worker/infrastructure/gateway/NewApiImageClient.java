@@ -21,7 +21,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 /**
  * new-api 图片生成客户端。
@@ -88,20 +87,10 @@ public class NewApiImageClient {
 
     /** 测试用构造器：注入读/写超时（毫秒）。 */
     NewApiImageClient(String baseUrl, int timeoutMs) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalStateException("NEW_API_BASE_URL 未配置");
-        }
-        this.baseUrl = baseUrl.replaceAll("/+$", "");
+        this.baseUrl = NewApiHttpSupport.normalizeBaseUrl(baseUrl);
 
-        this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .build();
-        this.sourceImageClient = new OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(SOURCE_IMAGE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                .build();
+        this.httpClient = NewApiHttpSupport.buildClient(10_000, timeoutMs, timeoutMs);
+        this.sourceImageClient = NewApiHttpSupport.buildClient(10_000, SOURCE_IMAGE_TIMEOUT_MS, SOURCE_IMAGE_TIMEOUT_MS);
     }
 
     /**
@@ -224,14 +213,12 @@ public class NewApiImageClient {
         if (size != null) payload.put("size", size);
         if (quality != null) payload.put("quality", quality);
 
-        return new Request.Builder()
+        Request.Builder requestBuilder = new Request.Builder()
                 .url(baseUrl + "/v1/images/generations")
                 .post(RequestBody.create(serialize(payload), JSON_TYPE))
-                .header("Authorization", "Bearer " + token)
-                .header("X-Trace-Id", traceId)
-                .header("X-Client-System", "bluewhale")
-                .header("Content-Type", "application/json")
-                .build();
+                .header("Content-Type", "application/json");
+        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        return requestBuilder.build();
     }
 
     /**
@@ -258,13 +245,11 @@ public class NewApiImageClient {
                     RequestBody.create(image.content(), MediaType.get(image.mime())));
         }
 
-        return new Request.Builder()
+        Request.Builder requestBuilder = new Request.Builder()
                 .url(baseUrl + "/v1/images/edits")
-                .post(form.build())
-                .header("Authorization", "Bearer " + token)
-                .header("X-Trace-Id", traceId)
-                .header("X-Client-System", "bluewhale")
-                .build();
+                .post(form.build());
+        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        return requestBuilder.build();
     }
 
     /**
@@ -335,14 +320,12 @@ public class NewApiImageClient {
                     Map.of("max_images", n));
         }
 
-        return new Request.Builder()
+        Request.Builder requestBuilder = new Request.Builder()
                 .url(baseUrl + "/v1/images/generations")
                 .post(RequestBody.create(serialize(payload), JSON_TYPE))
-                .header("Authorization", "Bearer " + token)
-                .header("X-Trace-Id", traceId)
-                .header("X-Client-System", "bluewhale")
-                .header("Content-Type", "application/json")
-                .build();
+                .header("Content-Type", "application/json");
+        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        return requestBuilder.build();
     }
 
     // ========== 响应解析 ==========

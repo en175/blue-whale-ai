@@ -76,32 +76,19 @@ public class NewApiVideoClient {
     private final String baseUrl;
 
     public NewApiVideoClient(String baseUrl) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalStateException("NEW_API_BASE_URL 未配置");
-        }
-        this.baseUrl = baseUrl.replaceAll("/+$", "");
-
-        this.submitClient = new OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(SUBMIT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                .writeTimeout(SUBMIT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                .build();
-
-        this.pollClient = new OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(POLL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                .writeTimeout(POLL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                .build();
+        this(baseUrl, null);
     }
 
-    /** 测试用构造器：注入共享 httpClient。 */
+    /** 测试用构造器：注入共享 httpClient（null = 自建）。 */
     NewApiVideoClient(String baseUrl, OkHttpClient sharedClient) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalStateException("NEW_API_BASE_URL 未配置");
+        this.baseUrl = NewApiHttpSupport.normalizeBaseUrl(baseUrl);
+        if (sharedClient != null) {
+            this.submitClient = sharedClient;
+            this.pollClient = sharedClient;
+        } else {
+            this.submitClient = NewApiHttpSupport.buildClient(10_000, SUBMIT_TIMEOUT_MS, SUBMIT_TIMEOUT_MS);
+            this.pollClient = NewApiHttpSupport.buildClient(10_000, POLL_TIMEOUT_MS, POLL_TIMEOUT_MS);
         }
-        this.baseUrl = baseUrl.replaceAll("/+$", "");
-        this.submitClient = sharedClient;
-        this.pollClient = sharedClient;
     }
 
     /**
@@ -159,14 +146,12 @@ public class NewApiVideoClient {
                     "请求序列化失败");
         }
 
-        Request request = new Request.Builder()
+        Request.Builder requestBuilder = new Request.Builder()
                 .url(baseUrl + "/v1/video/generations")
                 .post(RequestBody.create(bodyJson, JSON_TYPE))
-                .header("Authorization", "Bearer " + token)
-                .header("X-Trace-Id", traceId)
-                .header("X-Client-System", "bluewhale")
-                .header("Content-Type", "application/json")
-                .build();
+                .header("Content-Type", "application/json");
+        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        Request request = requestBuilder.build();
 
         Response response;
         try {
@@ -234,13 +219,11 @@ public class NewApiVideoClient {
     public VideoTaskObservation poll(String token, String taskId) {
         String traceId = UUID.randomUUID().toString();
 
-        Request request = new Request.Builder()
+        Request.Builder requestBuilder = new Request.Builder()
                 .url(baseUrl + "/v1/video/generations/" + encodePath(taskId))
-                .get()
-                .header("Authorization", "Bearer " + token)
-                .header("X-Trace-Id", traceId)
-                .header("X-Client-System", "bluewhale")
-                .build();
+                .get();
+        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
+        Request request = requestBuilder.build();
 
         Response response;
         try {
