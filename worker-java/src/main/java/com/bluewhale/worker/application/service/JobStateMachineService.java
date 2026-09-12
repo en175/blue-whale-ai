@@ -2,6 +2,7 @@ package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.entity.JobStatus;
 import com.bluewhale.worker.domain.entity.ProjectEventEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
@@ -191,8 +192,8 @@ public class JobStateMachineService {
 
         GenerationJobLogEntity logEntry = new GenerationJobLogEntity();
         logEntry.setGenerationJobId(jobIdLong);
-        logEntry.setEvent("succeeded");
-        logEntry.setStatus("succeeded");
+        logEntry.setEvent(JobStatus.SUCCEEDED.value());
+        logEntry.setStatus(JobStatus.SUCCEEDED.value());
         logEntry.setMessage("音频已提取");
         logEntry.setPayload(toJson(Map.of("asset_ids", List.of(asset.getId().toString()))));
         logEntry.setOccurredAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
@@ -245,8 +246,8 @@ public class JobStateMachineService {
 
         GenerationJobLogEntity logEntry = new GenerationJobLogEntity();
         logEntry.setGenerationJobId(jobIdLong);
-        logEntry.setEvent("failed");
-        logEntry.setStatus("failed");
+        logEntry.setEvent(JobStatus.FAILED.value());
+        logEntry.setStatus(JobStatus.FAILED.value());
         logEntry.setMessage(input.code() + ": " + input.message());
         logEntry.setOccurredAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
         jobLogMapper.insert(logEntry);
@@ -440,31 +441,31 @@ public class JobStateMachineService {
 
         // 2. 槽位聚合（settle-ops.ts:79-121）
         List<GenerationOutputSlotEntity> slots = slotMapper.findByJobId(jobIdLong);
-        String finalStatus = "succeeded";
+        String finalStatus = JobStatus.SUCCEEDED.value();
         if (!slots.isEmpty()) {
             // 成功 asset 绑定对应 slot_index（settle-ops.ts:85-93）
             for (int i = 0; i < assetIds.size(); i++) {
                 if (i < slots.size()) {
-                    slotMapper.updateSlot(slots.get(i).getId(), "succeeded",
+                    slotMapper.updateSlot(slots.get(i).getId(), JobStatus.SUCCEEDED.value(),
                             Long.parseLong(assetIds.get(i)));
                 }
             }
             // 未匹配到成功 asset 的剩余槽标 failed（settle-ops.ts:95-102）
             for (int i = assetIds.size(); i < slots.size(); i++) {
-                slotMapper.updateSlotStatus(slots.get(i).getId(), "failed");
+                slotMapper.updateSlotStatus(slots.get(i).getId(), JobStatus.FAILED.value());
             }
             // 聚合 job 状态（settle-ops.ts:104-114）
             boolean allSucceeded = assetIds.size() >= slots.size();
             boolean anySucceeded = !assetIds.isEmpty();
             if (allSucceeded) {
-                finalStatus = "succeeded";
+                finalStatus = JobStatus.SUCCEEDED.value();
             } else if (anySucceeded) {
-                finalStatus = "partially_succeeded";
+                finalStatus = JobStatus.PARTIALLY_SUCCEEDED.value();
             } else {
-                finalStatus = "failed";
+                finalStatus = JobStatus.FAILED.value();
             }
             // 修正占位状态（settle-ops.ts:116-121）
-            if (!"succeeded".equals(finalStatus)) {
+            if (!JobStatus.SUCCEEDED.value().equals(finalStatus)) {
                 jobMapper.updateJobStatus(jobIdLong, finalStatus);
             }
         }
@@ -501,7 +502,7 @@ public class JobStateMachineService {
                     Map.of("job_id", job.getId().toString(),
                             "slot_id", slot != null ? slot.getId().toString() : "",
                             "slot_index", slotIndex,
-                            "status", "succeeded",
+                            "status", JobStatus.SUCCEEDED.value(),
                             "asset_id", assetIds.get(i),
                             "retry_of_slot_id", slot != null && slot.getRetryOfSlotId() != null
                                     ? slot.getRetryOfSlotId().toString() : "",
@@ -518,7 +519,7 @@ public class JobStateMachineService {
                     Map.of("job_id", job.getId().toString(),
                             "slot_id", slot.getId().toString(),
                             "slot_index", slot.getSlotIndex(),
-                            "status", "failed",
+                            "status", JobStatus.FAILED.value(),
                             "asset_id", "",
                             "retry_of_slot_id", slot.getRetryOfSlotId() != null
                                     ? slot.getRetryOfSlotId().toString() : "",
@@ -576,7 +577,7 @@ public class JobStateMachineService {
         // 2. pending 槽位 → failed（settle-ops.ts:255-263）
         List<GenerationOutputSlotEntity> slots = slotMapper.findPendingByJobId(jobIdLong);
         for (GenerationOutputSlotEntity slot : slots) {
-            slotMapper.updateSlotStatus(slot.getId(), "failed");
+            slotMapper.updateSlotStatus(slot.getId(), JobStatus.FAILED.value());
         }
 
         // 3. 读回 job（settle-ops.ts:264-271）
@@ -589,8 +590,8 @@ public class JobStateMachineService {
         // 4. generation_job_logs（settle-ops.ts:272-279）
         GenerationJobLogEntity logEntry = new GenerationJobLogEntity();
         logEntry.setGenerationJobId(jobIdLong);
-        logEntry.setEvent("failed");
-        logEntry.setStatus("failed");
+        logEntry.setEvent(JobStatus.FAILED.value());
+        logEntry.setStatus(JobStatus.FAILED.value());
         logEntry.setMessage(errorCode + ": " + errorMessage);
         logEntry.setOccurredAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
         jobLogMapper.insert(logEntry);
@@ -616,7 +617,7 @@ public class JobStateMachineService {
                         Map.of("job_id", job.getId().toString(),
                                 "slot_id", slot.getId().toString(),
                                 "slot_index", slot.getSlotIndex(),
-                                "status", "failed",
+                                "status", JobStatus.FAILED.value(),
                                 "asset_id", "",
                                 "retry_of_slot_id", slot.getRetryOfSlotId() != null
                                         ? slot.getRetryOfSlotId().toString() : "",
@@ -854,8 +855,8 @@ public class JobStateMachineService {
         for (GenerationOutputSlotEntity slot : slots) {
             GenerationOutputSlotEntity current = resolved.get(slot.getSlotIndex());
             if (current == null
-                    || !"succeeded".equals(current.getStatus())
-                    || "succeeded".equals(slot.getStatus())) {
+                    || !JobStatus.SUCCEEDED.value().equals(current.getStatus())
+                    || JobStatus.SUCCEEDED.value().equals(slot.getStatus())) {
                 resolved.put(slot.getSlotIndex(), slot);
             }
         }
@@ -882,7 +883,7 @@ public class JobStateMachineService {
                 .anyMatch(s -> "pending".equals(s.getStatus()));
         if (hasPending) return "generating";
         long succeeded = resolvedSlots.stream()
-                .filter(s -> "succeeded".equals(s.getStatus())).count();
+                .filter(s -> JobStatus.SUCCEEDED.value().equals(s.getStatus())).count();
         if (succeeded == resolvedSlots.size()) return "success";
         if (succeeded == 0) return "failed";
         return "partial";
@@ -1062,8 +1063,8 @@ public class JobStateMachineService {
         // 4. log
         GenerationJobLogEntity logEntry = new GenerationJobLogEntity();
         logEntry.setGenerationJobId(jobIdLong);
-        logEntry.setEvent("succeeded");
-        logEntry.setStatus("succeeded");
+        logEntry.setEvent(JobStatus.SUCCEEDED.value());
+        logEntry.setStatus(JobStatus.SUCCEEDED.value());
         logEntry.setMessage("视频生成完成");
         logEntry.setPayload(toJson(Map.of("asset_ids", List.of(asset.getId().toString()))));
         logEntry.setOccurredAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
@@ -1095,7 +1096,7 @@ public class JobStateMachineService {
                 .filter(s -> s.getSlotIndex() != null && s.getSlotIndex() == 0)
                 .findFirst().orElse(null);
         if (videoSlot != null) {
-            slotMapper.updateSlot(videoSlot.getId(), "succeeded", asset.getId());
+            slotMapper.updateSlot(videoSlot.getId(), JobStatus.SUCCEEDED.value(), asset.getId());
             if (videoSlot.getSceneCardGenerationRecordId() != null) {
                 syncRecordSummary(videoSlot.getSceneCardGenerationRecordId());
             }
@@ -1112,7 +1113,7 @@ public class JobStateMachineService {
                     Map.of("job_id", job.getId().toString(),
                             "slot_id", videoSlot != null ? videoSlot.getId().toString() : "",
                             "slot_index", videoSlot != null ? videoSlot.getSlotIndex() : 0,
-                            "status", "succeeded",
+                            "status", JobStatus.SUCCEEDED.value(),
                             "asset_id", asset.getId().toString(),
                             "retry_of_slot_id", videoSlot != null && videoSlot.getRetryOfSlotId() != null
                                     ? videoSlot.getRetryOfSlotId().toString() : "",
@@ -1148,15 +1149,15 @@ public class JobStateMachineService {
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
         List<GenerationOutputSlotEntity> pendingSlots = slotMapper.findPendingByJobId(jobIdLong);
         for (GenerationOutputSlotEntity slot : pendingSlots) {
-            slotMapper.updateSlotStatus(slot.getId(), "failed");
+            slotMapper.updateSlotStatus(slot.getId(), JobStatus.FAILED.value());
             if (slot.getSceneCardGenerationRecordId() != null) {
                 syncRecordSummary(slot.getSceneCardGenerationRecordId());
             }
         }
         GenerationJobLogEntity logEntry = new GenerationJobLogEntity();
         logEntry.setGenerationJobId(jobIdLong);
-        logEntry.setEvent("failed");
-        logEntry.setStatus("failed");
+        logEntry.setEvent(JobStatus.FAILED.value());
+        logEntry.setStatus(JobStatus.FAILED.value());
         logEntry.setMessage(errorCode + ": " + errorMessage);
         logEntry.setOccurredAt(LocalDateTime.now(java.time.ZoneOffset.UTC));
         jobLogMapper.insert(logEntry);
@@ -1179,7 +1180,7 @@ public class JobStateMachineService {
                         Map.of("job_id", job.getId().toString(),
                                 "slot_id", slot.getId().toString(),
                                 "slot_index", slot.getSlotIndex(),
-                                "status", "failed",
+                                "status", JobStatus.FAILED.value(),
                                 "asset_id", "",
                                 "retry_of_slot_id", slot.getRetryOfSlotId() != null
                                         ? slot.getRetryOfSlotId().toString() : "",
