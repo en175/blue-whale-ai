@@ -29,6 +29,7 @@ import PromptRefEditor, {
   type PromptRefEditorHandle,
 } from '../PromptRefEditor';
 import MentionMenu from '../PromptRefEditor/MentionMenu';
+import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
 import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import type { ImageMediaRef } from '../../mediaRefs';
@@ -232,6 +233,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
   const sourceWrapRef = useRef<HTMLDivElement>(null);
   const mentionMenuRef = useRef<HTMLDivElement>(null);
   const [canvasMentionOpen, setCanvasMentionOpen] = useState(false);
+  /** 失效标签替换菜单（IKFA1N B5）：记录发起点击的标签节点 key，null 为关闭 */
+  const [replaceTarget, setReplaceTarget] = useState<string | null>(null);
+  const replaceMenuRef = useRef<HTMLDivElement>(null);
 
   useDismissOnOutside([
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
@@ -239,6 +243,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     { open: sourceMenuOpen, ref: sourceWrapRef, dismiss: () => setSourceMenuOpen(false) },
     { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
     { open: mention.open && !canvasMentionOpen, ref: mentionMenuRef, dismiss: () => closeMention() },
+    { open: replaceTarget !== null, ref: replaceMenuRef, dismiss: () => setReplaceTarget(null) },
   ]);
 
   /** 外部注入参考素材（画布节点选取/角色库多选；去重 + 上限保护）。
@@ -353,7 +358,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     : edgeRefs?.length && !currentGen.features.reference_image ? '当前模型不支持图片参考，请调整模型或参考'
     : edgeRefs && edgeRefs.length > Math.min(maxImages, currentGen.features.max_reference_images || maxImages)
       ? '参考图片数量超过模型支持上限，请调整参考'
-    : hasInvalidRef ? '正文有已失效的素材标签，请删除后再发送'
+    : hasInvalidRef ? '正文有已失效的素材标签，请点击标签替换或删除后再发送'
     : flatValue.length > maxInput ? `提示词超过 ${maxInput} 字上限，请精简后再发送`
     : null;
   const canSend = !uploading && !readOnly && !draftBinding?.saveFailed && !configurationError && (flatValue.trim().length > 0 || hasAttachmentText);
@@ -569,6 +574,18 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
             }}
             onClose={() => setCanvasMentionOpen(false)}
           />}
+        </div>
+      )}
+      {/* 失效标签替换菜单（IKFA1N B5）：与 @ 菜单同停靠位，选择后仅替换发起点击的那次提及 */}
+      {replaceTarget !== null && (
+        <div className={styles.mentionDock} ref={replaceMenuRef}>
+          <ReplaceRefMenu
+            items={orderedImageRefs}
+            onPick={(assetId) => {
+              editorRef.current?.replaceRefAt(replaceTarget, assetId);
+              setReplaceTarget(null);
+            }}
+          />
         </div>
       )}
       {/* 配置面板（可展开/收起）：挂在不带 overflow 的定位外壳 .dialogWrap 上，
@@ -829,6 +846,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
               setMention(state);
               if (state.open) setMentionIndex(0);
             }}
+            onInvalidTagClick={readOnly ? undefined : (nodeKey) => setReplaceTarget(nodeKey)}
             onMentionKey={handleMentionKey}
             className={styles.textarea}
           />

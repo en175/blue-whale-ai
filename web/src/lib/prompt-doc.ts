@@ -5,7 +5,7 @@
  * 规则备忘：
  * - 稳定身份 = 本地 Asset id；展示编号（图片N）由身份在最终输入顺序中的位置派生，编号不是身份。
  * - 标签位置由片段顺序隐式表达，不使用字符区间。
- * - 失效标签保留原身份与原编号（invalid_label），本票不做自动恢复。
+ * - 失效标签保留原身份与原编号（invalid_label）；身份重新加入当前有效集合时自动恢复（IKFA1N）。
  * - 草稿防丢失：结构化 promptDoc 与拍平镜像 prompt 双写；镜像不一致说明旧客户端改过，丢弃结构不猜造。
  * ============================================ */
 
@@ -108,10 +108,11 @@ export function restorePromptDoc(stored: unknown, promptMirror: unknown): Prompt
 }
 
 /**
- * 编号重派生与失效标记：给定当前有效输入顺序——
+ * 编号重派生与失效推导：给定当前有效输入顺序，按身份对当前集合求值——
  * - 有效标签：同步展示编号缓存 label = 图片N；
  * - 身份已不在集合：转失效，invalid_label = 失效前展示编号（label 缓存），保留原身份不转向；
- * - 已失效标签：原样保留（自动恢复在下一票 IKFA1N）。
+ * - 失效标签身份回到集合（重新加入同一身份，IKFA1N）：自动恢复，清除失效标记并派生当次编号；
+ * - 失效标签身份仍不在集合：原样保留（原身份与原编号冻结，名称不参与判定）。
  */
 export function reconcilePromptDoc(
   doc: PromptDoc,
@@ -119,16 +120,23 @@ export function reconcilePromptDoc(
 ): { doc: PromptDoc; changed: boolean } {
   let changed = false;
   const segments = doc.segments.map((segment) => {
-    if (segment.kind !== 'asset_ref' || segment.invalid_label !== undefined) return segment;
+    if (segment.kind !== 'asset_ref') return segment;
     const label = imageRefLabelOf(segment.asset_id, orderedAssetIds);
     if (label !== null) {
-      if (segment.label === label) return segment;
+      if (segment.invalid_label === undefined) {
+        if (segment.label === label) return segment;
+        changed = true;
+        return { ...segment, label };
+      }
       changed = true;
-      return { ...segment, label };
+      const restored = { ...segment, label };
+      delete restored.invalid_label;
+      return restored;
     }
+    if (segment.invalid_label !== undefined) return segment;
     changed = true;
     const invalid = segment.label ?? '图片?';
-    return { ...segment, label: segment.label ?? invalid, invalid_label: invalid };
+    return { ...segment, label: invalid, invalid_label: invalid };
   });
   return changed ? { doc: { version: doc.version, segments }, changed } : { doc, changed };
 }

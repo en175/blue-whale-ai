@@ -58,6 +58,15 @@
   color: #fca5a5;
 }
 
+/* 失效标签可点击换绑（IKFA1N B5）：携带 role=button 时展示可交互态 */
+.refChipInvalid[role='button'] {
+  cursor: pointer;
+}
+
+.refChipInvalid[role='button']:hover {
+  background: rgba(248, 113, 113, 0.24);
+}
+
 .refChipThumb {
   width: 18px;
   height: 18px;
