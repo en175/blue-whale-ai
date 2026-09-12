@@ -12,8 +12,12 @@ import {
   RESOURCE_NOT_FOUND_CODE,
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
+  compilePromptDoc,
   fail,
   ok,
+  promptDocSchema,
+  validatePromptDocRefs,
+  type PromptDoc,
   type TextAttachmentSnapshot,
   previewSourceSchema,
 } from "@blue-whale/contracts";
@@ -66,6 +70,9 @@ export interface CreateGenerationJobBody {
   references?: unknown;
   /** IKDLQF/IKDLQG/IKDMQT：生成目标画布节点 id（图片=image/视频=video/音频=audio 媒体节点），仅三类生成允许携带。 */
   target_node_id?: unknown;
+  /** IKFA1M：正文素材标签结构（PromptDoc v1）。仅 type=image 允许携带；
+   *  存在时以其编译结果替代 parameters.prompt 冻结进 input.prompt，原始结构冻结进 input.prompt_doc。 */
+  prompt_doc?: unknown;
   parameters?: unknown;
   expected_output_count?: unknown;
 }
@@ -460,6 +467,8 @@ interface ComposeInputContext {
   targetNodeId: string | null;
   textAttachments: TextAttachmentSnapshot[];
   referenceAssetIds: Array<string | number>;
+  /** IKFA1M：已通过结构与引用复核的正文素材标签（仅 image 携带）。 */
+  promptDoc: PromptDoc | null;
 }
 
 interface GenerationTypeStrategy {
@@ -482,12 +491,22 @@ const imageStrategy: GenerationTypeStrategy = {
     targetNodeId,
     textAttachments,
     referenceAssetIds,
+    promptDoc,
   }) {
     const input: Record<string, unknown> = {
       prompt: promptText,
       aspect_ratio: params.aspect_ratio,
       model_id: resolvedModelId,
     };
+    // IKFA1M：正文素材标签按真实输入顺序编译（图片N = input_asset_ids 下标+1），
+    // 编译结果替代 parameters.prompt 冻结；原始结构冻结进 prompt_doc 供审计与重试。
+    if (promptDoc) {
+      input.prompt = compilePromptDoc(
+        promptDoc,
+        referenceAssetIds.map(String),
+      );
+      input.prompt_doc = promptDoc;
+    }
     if (isStr(params.size)) input.size = params.size;
     input.web_search = params.web_search === true;
     input.sequential_image_generation =
@@ -770,6 +789,21 @@ export async function handleCreateGenerationJob(
   const strategy = strategies[type];
   if (!strategy)
     return fail(400, "暂不支持该生成类型", { code: ERROR_UNSUPPORTED_TYPE });
+  // IKFA1M：正文素材标签暂仅图片生成支持；其他类型携带一律拒绝，不静默忽略。
+  if (type !== "image" && body.prompt_doc !== undefined) {
+    return fail(400, "正文素材标签暂仅支持图片生成", {
+      code: ERROR_UNSUPPORTED_INPUT,
+    });
+  }
+  // IKFA1M：结构/版本契约校验（未知版本不猜造）；引用关系复核在参考图复核之后进行。
+  let promptDoc: PromptDoc | null = null;
+  if (body.prompt_doc !== undefined) {
+    const parsed = promptDocSchema.safeParse(body.prompt_doc);
+    if (!parsed.success) {
+      return fail(400, "prompt_doc 无效", { code: ERROR_INVALID_INPUT });
+    }
+    promptDoc = parsed.data;
+  }
   const validateErr = strategy.validate(body);
   if (validateErr) return fail(400, validateErr.message, { code: validateErr.code });
 
@@ -888,6 +922,24 @@ export async function handleCreateGenerationJob(
       });
     }
   }
+  // IKFA1M：正文素材标签服务端复核——失效标签阻止生成；标签身份必须在最终输入集合内
+  // （该集合已过存在性/归属/类型复核），保存与提交之间的变化不能绕过校验。
+  if (promptDoc) {
+    const refErr = validatePromptDocRefs(
+      promptDoc,
+      refs.value.referenceAssetIds.map(String),
+    );
+    if (refErr?.kind === "invalid_tag") {
+      return fail(400, "存在已失效的素材标签，请删除后再提交", {
+        code: ERROR_INVALID_REFERENCE,
+      });
+    }
+    if (refErr?.kind === "unknown_asset") {
+      return fail(400, "正文素材标签指向无效的参考素材", {
+        code: ERROR_INVALID_REFERENCE,
+      });
+    }
+  }
   // 5. 画布目标快照（仅携带 target_node_id 时读画布）
   const target = await resolveTargetSnapshot({
     type,
@@ -909,6 +961,7 @@ export async function handleCreateGenerationJob(
     targetNodeId: target.value.targetNodeId,
     textAttachments: target.value.textAttachments,
     referenceAssetIds: refs.value.referenceAssetIds,
+    promptDoc,
   });
   // 图片与视频一致：sk token 密封进 job.input.provider_credential，处理时由 worker 解出。
   // 这样进程内即时调度与重启后的恢复扫描共用同一套凭据来源。

@@ -28,6 +28,17 @@ export {
 } from "./canvas-edges.js";
 export { PROMPT_TEXT_LIMITS, COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH } from "./prompt-text-limits.js";
 export {
+  PROMPT_DOC_VERSION,
+  promptDocSchema,
+  promptDocSegmentSchema,
+  imageRefLabel,
+  validatePromptDocRefs,
+  compilePromptDoc,
+  type PromptDoc,
+  type PromptDocSegment,
+  type PromptDocRefFailure,
+} from "./prompt-doc.js";
+export {
   changePasswordRequestSchema,
   type ChangePasswordRequest,
 } from "./change-password.js";

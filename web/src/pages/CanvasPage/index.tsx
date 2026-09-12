@@ -40,6 +40,7 @@ import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import BottomDialog, { type VideoGenOptions, type VideoGenSeedParams } from './components/BottomDialog';
 import ImageDialog, { type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
+import { restorePromptDoc, type PromptDoc, type StoredPromptDoc } from '@/lib/prompt-doc';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
@@ -375,7 +376,7 @@ export default function CanvasPage() {
    *  params 是首页 AI图片 带入的生成参数（选中首页所选模型/清晰度/宽高比）；
    *  targetNodeId/attachments 仅图片媒体节点面板发起时存在（IKDLQF）：提交携带 target_node_id，
    *  附件在打开当下按连线快照，面板只读展示 */
-  const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[]; params?: ImageGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
+  const [imageSeed, setImageSeed] = useState<{ ts: number; text: string; files: UploadedFile[]; params?: ImageGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[]; promptDoc?: PromptDoc | null } | null>(null);
   /** 面板当前绑定的图片草稿节点 id（IKDMQQ）：仅草稿入口（侧栏新建/点击草稿卡）设置；
    *  草稿被删除/取消或成功转成品卡时由清理 effect 结束绑定并关闭面板 */
   const [imageDraftId, setImageDraftId] = useState<string | null>(null);
@@ -1572,6 +1573,8 @@ export default function CanvasPage() {
     setImageSeed({
       ts: Date.now(),
       text: typeof d.prompt === 'string' ? d.prompt : '',
+      // IKFA1M：结构化正文与拍平镜像一致才恢复标签；旧客户端改写过则按纯文本恢复，不猜造标签
+      promptDoc: restorePromptDoc(d.promptDoc, d.prompt),
       files: [],
       params: {
         modelId: typeof d.draftModelId === 'string' ? d.draftModelId : undefined,
@@ -1587,10 +1590,11 @@ export default function CanvasPage() {
   /** 面板编辑实时写回草稿节点（IKDMQQ）：参数随节点 data 进入自动保存，刷新后恢复 */
   const handleImageDraftParamsChange = (
     nodeId: string,
-    patch: { prompt?: string; modelId?: string; size?: string; ratio?: string },
+    patch: { prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string },
   ) => {
     const data: Record<string, unknown> = {};
     if (patch.prompt !== undefined) data.prompt = patch.prompt;
+    if (patch.promptDoc !== undefined) data.promptDoc = patch.promptDoc;
     if (patch.modelId !== undefined) data.draftModelId = patch.modelId;
     if (patch.size !== undefined) data.draftSize = patch.size;
     if (patch.ratio !== undefined) {
@@ -2109,11 +2113,38 @@ export default function CanvasPage() {
       return;
     }
     if (target === 'imageDialog') {
+      const images = selectedAssets.filter((a) => a.type === 'image');
+      if (images.length === 0) return;
+      // IKFA1M：草稿绑定模式下「从资产中选择」落画布节点并建立连线（与视频草稿同源；
+      //  此前该入口在绑定模式经 externalPick 被忽略，@ 菜单「添加新参考」依赖本路径生效）。
+      //  查重与上限与 validateImageRefConnect 同口径；拒绝项不进入参考集合。
+      if (imageDraftId) {
+        const current = imageMediaRefsOf(imageDraftId, edgesRef.current, mediaNodesRef.current);
+        const known = new Set(current.map((r) => r.assetId));
+        const accepted: AssetRecord[] = [];
+        let skippedDup = false;
+        let overflow = false;
+        for (const a of images) {
+          const id = String(a.id);
+          if (known.has(id)) { skippedDup = true; continue; }
+          if (known.size >= REF_LIMITS.image) { overflow = true; break; }
+          known.add(id);
+          accepted.push(a);
+        }
+        if (skippedDup) showToast('warn', '重复的素材已跳过');
+        if (overflow) showToast('warn', refOverflowToast(['image']));
+        if (accepted.length === 0) return;
+        const nodeIds = placeAssetsOnCanvas(accepted);
+        if (!nodeIds) {
+          showToast('error', '项目未就绪，请稍后重试');
+          return;
+        }
+        nodeIds.forEach((nid) => addCanvasEdge(nid, imageDraftId));
+        return;
+      }
       // 图片 dock：注入 ImageDialog 参考图（externalPick 既有上限保护与去重）
-      const files: UploadedFile[] = selectedAssets
-        .filter((a) => a.type === 'image')
+      const files: UploadedFile[] = images
         .map((a) => ({ id: `asset-${a.id}`, url: a.url, type: 'image' as const, name: assetDisplayName(a), assetId: a.id }));
-      if (files.length === 0) return;
       setImagePickResult({ ts: Date.now(), files });
       return;
     }
@@ -2375,6 +2406,8 @@ export default function CanvasPage() {
       mode?: string;
       references: Array<{ assetId: string; url: string; name: string; mediaType: 'image' | 'video'; role: VideoRefRole }>;
     },
+    /** IKFA1M：结构化正文（仅 image 且含素材标签时携带）；服务端编译并冻结 */
+    promptDoc?: PromptDoc | null,
   ) => {
     if (!currentId) {
       console.warn('未选中项目，无法创建生成任务');
@@ -2478,6 +2511,8 @@ export default function CanvasPage() {
           : undefined,
         // 仅从图片/视频媒体节点面板发起时携带（IKDLQF/IKDLQG）；其余入口连字段都不上送
         ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
+        // IKFA1M：正文素材标签仅图片生成且含标签时携带；纯文本不上送保持旧语义
+        ...(type === 'image' && promptDoc ? { prompt_doc: promptDoc } : {}),
       })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
@@ -3879,6 +3914,7 @@ export default function CanvasPage() {
     size: string,
     ratio: string,
     files: UploadedFile[],
+    promptDoc?: PromptDoc | null,
   ) => {
     if (applyingRef.current || saveBlocked) return;
     const targetNodeId = imageSeed?.targetNodeId;
@@ -3899,7 +3935,7 @@ export default function CanvasPage() {
         model_id: modelId,
         aspect_ratio: ratio,
         size,
-      }, inputAssetIds.length > 0 ? inputAssetIds : undefined, undefined, targetNodeId);
+      }, inputAssetIds.length > 0 ? inputAssetIds : undefined, undefined, targetNodeId, undefined, promptDoc);
     } catch (e) {
       showToast('error', '保存或提交失败，请重试');
       console.warn('图片生成前准备失败:', e);
@@ -4197,6 +4233,7 @@ export default function CanvasPage() {
           <ImageDialog
             key={imageSeed?.ts ?? 0}
             initialText={imageSeed?.text}
+            initialDoc={imageSeed?.promptDoc ?? null}
             initialFiles={imageSeed?.files}
             initialParams={imageSeed?.params}
             attachments={imageDraftId ? imageDraftAttachments : imageSeed?.attachments}

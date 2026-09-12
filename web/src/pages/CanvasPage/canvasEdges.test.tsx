@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { typePromptRefText } from './testing/promptRefEditor';
 import imageDialogStyles from './components/ImageDialog/index.module.css';
 import bottomDialogStyles from './components/BottomDialog/index.module.css';
 
@@ -206,14 +207,9 @@ function sendButton(): HTMLButtonElement {
   )!;
 }
 
-/** React 受控 textarea 赋值 */
+/** PromptRefEditor（IKFA1M）整体替换文本 */
 async function typePrompt(text: string) {
-  const textarea = container.querySelector('textarea')!;
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setter.call(textarea, text);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  await typePromptRefText(container, text);
 }
 
 beforeEach(() => {

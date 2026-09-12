@@ -632,3 +632,32 @@
   border: 1.5px solid currentColor;
   border-radius: 3px;
 }
+
+/* IKFA1M：正文编辑区（@ 菜单锚点）与参考编号角标 */
+.inputArea {
+  position: relative;
+  width: 100%;
+}
+
+/* @ 菜单 dock：脱出 .dialog 滚动框（200px 定高 + overflow，会裁剪上弹菜单），
+   挂在 .dialogWrap 层向上弹出（与 configPanel 同法，IKEOLP） */
+.mentionDock {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+}
+
+.previewBadge {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #bfdbfe;
+  font-size: 10px;
+  line-height: 16px;
+  pointer-events: none;
+  white-space: nowrap;
+}

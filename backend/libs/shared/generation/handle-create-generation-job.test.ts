@@ -1738,3 +1738,118 @@ describe("handleCreateGenerationJob 参考素材前置（IKE7JP）", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 });
+
+// IKFA1M：正文素材标签（prompt_doc）——结构/版本校验、失效与无效身份复核、编译冻结。
+describe("handleCreateGenerationJob 正文素材标签 prompt_doc（IKFA1M）", () => {
+  const DOC = {
+    version: 1,
+    segments: [
+      { kind: "text", text: "让" },
+      { kind: "asset_ref", asset_id: "2" },
+      { kind: "text", text: "穿上" },
+      { kind: "asset_ref", asset_id: "1" },
+      { kind: "text", text: "的衣服，再让" },
+      { kind: "asset_ref", asset_id: "2" },
+      { kind: "text", text: "微笑" },
+    ],
+  } as const;
+
+  it("合法 prompt_doc → 200：按真实输入顺序编译正文并冻结原始结构（D1/A4）", async () => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(2), prompt_doc: DOC },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    // 正文先提图片2 再提图片1；媒体顺序仍 input_asset_ids = [1, 2]
+    expect(cmdArg.input.prompt).toBe("让图片2穿上图片1的衣服，再让图片2微笑");
+    expect(cmdArg.input.prompt_doc).toEqual(DOC);
+    expect(cmdArg.input.input_asset_ids).toEqual([1, 2]);
+  });
+
+  it("无 prompt_doc → input 不带该字段，prompt 原样冻结（旧行为/E5）", async () => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", imageBody(1), null, deps);
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("海边日落");
+    expect(cmdArg.input).not.toHaveProperty("prompt_doc");
+  });
+
+  it("失效标签（invalid_label）→ 400 invalid_reference，不建任务", async () => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...imageBody(2),
+        prompt_doc: {
+          version: 1,
+          segments: [{ kind: "asset_ref", asset_id: "2", invalid_label: "图片2" }],
+        },
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("标签指向不在最终输入集合的身份 → 400 invalid_reference（服务端复核引用关系，D4）", async () => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(1), prompt_doc: DOC }, // DOC 引用 asset 2，但 input_asset_ids 只有 [1]
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("结构/版本非法 → 400 invalid_input", async () => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(1), prompt_doc: { version: 2, segments: [] } },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_input");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("视频类型携带 prompt_doc → 400 unsupported_input", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        type: "video",
+        expected_output_count: 1,
+        parameters: {
+          prompt: "海浪",
+          model_id: "seedance-2",
+          aspect_ratio: "16:9",
+          resolution: "1080p",
+          duration: 5,
+        },
+        prompt_doc: DOC,
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("unsupported_input");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+});

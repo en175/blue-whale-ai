@@ -1,0 +1,268 @@
+// @vitest-environment jsdom
+/* IKFA1M：ImageDialog 正文素材标签——@ 菜单/插入/编号一致性/失效阻止生成/删除提及 */
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import ImageDialog from './index';
+import type { ImageMediaRef } from '../../mediaRefs';
+import type { PromptDoc } from '@/lib/prompt-doc';
+import { readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
+
+const fetchGenerationModels = vi.hoisted(() =>
+  vi.fn(async () => [
+    {
+      model_id: 'm-test',
+      provider_id: 'prov',
+      model_label: '测试生图模型',
+      icon: null,
+      supported_sizes: [{ id: '2k', label: '2K' }],
+      supported_aspect_ratios: ['1:1'],
+      supported_formats: [],
+      supported_durations: null,
+      default_size: '2k',
+      default_format: null,
+      default_aspect_ratio: '1:1',
+      default_duration: null,
+      features: { reference_image: true, max_reference_images: 9 },
+      version: 1,
+      digest: '',
+    },
+  ]),
+);
+
+vi.mock('@/api/generation', () => ({ fetchGenerationModels }));
+
+const REF_A: ImageMediaRef = { nodeId: 'na', url: 'https://x/a.png', name: '角色图', assetId: '101' };
+const REF_B: ImageMediaRef = { nodeId: 'nb', url: 'https://x/b.png', name: '衣服图', assetId: '102' };
+const REF_C: ImageMediaRef = { nodeId: 'nc', url: 'https://x/c.png', name: '背景图', assetId: '103' };
+
+let root: Root;
+let container: HTMLDivElement;
+
+async function renderDialog(props: {
+  mediaRefs?: ImageMediaRef[];
+  initialDoc?: PromptDoc | null;
+  initialText?: string;
+  onSend?: ReturnType<typeof vi.fn>;
+  onParamsChange?: ReturnType<typeof vi.fn>;
+} = {}) {
+  const onSend = props.onSend ?? vi.fn();
+  const onParamsChange = props.onParamsChange ?? vi.fn();
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  await act(async () => {
+    root.render(
+      createElement(ImageDialog, {
+        onClose: vi.fn(),
+        onSend,
+        initialText: props.initialText,
+        initialDoc: props.initialDoc ?? null,
+        mediaRefs: props.mediaRefs,
+        draftBinding: props.mediaRefs ? { onParamsChange } : undefined,
+      } as Parameters<typeof ImageDialog>[0]),
+    );
+  });
+  await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
+  return { onSend, onParamsChange };
+}
+
+async function rerender(mediaRefs: ImageMediaRef[], onParamsChange?: ReturnType<typeof vi.fn>) {
+  await act(async () => {
+    root.render(
+      createElement(ImageDialog, {
+        onClose: vi.fn(),
+        onSend: vi.fn(),
+        mediaRefs,
+        draftBinding: { onParamsChange: onParamsChange ?? vi.fn() },
+      } as Parameters<typeof ImageDialog>[0]),
+    );
+  });
+}
+
+function sendButton(): HTMLButtonElement {
+  return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.getAttribute('title') === '发送',
+  )!;
+}
+
+function lastDocFromParams(onParamsChange: ReturnType<typeof vi.fn>): { prompt?: string; promptDoc?: { segments: unknown[]; flat: string } } {
+  const calls = onParamsChange.mock.calls.filter((c) => c[0]?.promptDoc !== undefined);
+  return calls[calls.length - 1]?.[0] ?? {};
+}
+
+beforeEach(() => {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+afterEach(() => {
+  act(() => root.unmount());
+  container.remove();
+  vi.clearAllMocks();
+});
+
+describe('IKFA1M @ 菜单与插入（A1/A4）', () => {
+  it('句中输入 @：顶部列出已引用（名称+编号），选择后原位替换查询，前后文字不丢', async () => {
+    const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A, REF_B] });
+    await typePromptRefRaw(container, '让');
+    await typePromptRefRaw(container, '@');
+    // 菜单出现：已引用两项，编号与附件区角标一致
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
+    const items = [...container.querySelectorAll('[data-testid="mention-ref-item"]')];
+    expect(items).toHaveLength(2);
+    expect(items[0].textContent).toContain('角色图');
+    expect(items[0].textContent).toContain('图片1');
+    expect(items[1].textContent).toContain('衣服图');
+    expect(items[1].textContent).toContain('图片2');
+    // 附件区角标同编号
+    const badges = [...container.querySelectorAll('[data-testid="dock-media-ref"]')].map((el) => el.textContent);
+    expect(badges[0]).toContain('图片1');
+    expect(badges[1]).toContain('图片2');
+
+    await typePromptRefRaw(container, '的衣服');
+    // 查询过滤：名称命中
+    await vi.waitFor(() => {
+      expect([...container.querySelectorAll('[data-testid="mention-ref-item"]')]).toHaveLength(0);
+    });
+
+    // 清空重输：选择第二项（先提图片2）
+    await typePromptRefText(container, '让的衣服');
+    await typePromptRefRaw(container, '@衣服');
+    await vi.waitFor(() => {
+      const filtered = [...container.querySelectorAll('[data-testid="mention-ref-item"]')];
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0].textContent).toContain('衣服图');
+    });
+    await act(async () => {
+      (container.querySelector('[data-testid="mention-ref-item"]') as HTMLButtonElement).click();
+    });
+    // 标签插入在光标处：文本投影保留前后文字，查询消失
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('让的衣服图片2'));
+    // 草稿同步结构：asset_ref 绑定 102，flat 与镜像一致
+    const patch = lastDocFromParams(onParamsChange);
+    expect(patch.prompt).toBe('让的衣服图片2');
+    expect(patch.promptDoc?.flat).toBe('让的衣服图片2');
+    expect(patch.promptDoc?.segments).toEqual([
+      { kind: 'text', text: '让的衣服' },
+      { kind: 'asset_ref', asset_id: '102', label: '图片2' },
+    ]);
+  });
+
+  it('同一素材可在正文多次提及（A4），各次提及指向同一输入', async () => {
+    await renderDialog({ mediaRefs: [REF_A] });
+    await typePromptRefRaw(container, '让');
+    await typePromptRefRaw(container, '@');
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-ref-item"]')).toBeTruthy());
+    await act(async () => {
+      (container.querySelector('[data-testid="mention-ref-item"]') as HTMLButtonElement).click();
+    });
+    await typePromptRefRaw(container, '微笑，再让');
+    await typePromptRefRaw(container, '@');
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-ref-item"]')).toBeTruthy());
+    await act(async () => {
+      (container.querySelector('[data-testid="mention-ref-item"]') as HTMLButtonElement).click();
+    });
+    await typePromptRefRaw(container, '招手');
+    expect(readPromptRefText(container)).toBe('让图片1微笑，再让图片1招手');
+    // 参考集合仍只有一份输入
+    expect([...container.querySelectorAll('[data-testid="dock-media-ref"]')]).toHaveLength(1);
+  });
+
+  it('发送：携带结构化正文（先提图片2 也绑定 102），拍平镜像进 text 位', async () => {
+    const { onSend } = await renderDialog({ mediaRefs: [REF_A, REF_B] });
+    await typePromptRefRaw(container, '让');
+    await typePromptRefRaw(container, '@衣服');
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-ref-item"]')).toBeTruthy());
+    await act(async () => {
+      (container.querySelector('[data-testid="mention-ref-item"]') as HTMLButtonElement).click();
+    });
+    await typePromptRefRaw(container, '微笑');
+    expect(sendButton().disabled).toBe(false);
+    await act(async () => {
+      sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    const call = onSend.mock.calls[0];
+    expect(call[0]).toBe('让图片2微笑');
+    expect(call[5]).toEqual({
+      version: 1,
+      segments: [
+        { kind: 'text', text: '让' },
+        { kind: 'asset_ref', asset_id: '102', label: '图片2' },
+        { kind: 'text', text: '微笑' },
+      ],
+    });
+  });
+});
+
+describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
+  const DOC_AB: PromptDoc = {
+    version: 1,
+    segments: [
+      { kind: 'text', text: '让' },
+      { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+      { kind: 'text', text: '穿上' },
+      { kind: 'asset_ref', asset_id: '102', label: '图片2' },
+      { kind: 'text', text: '，背景参考' },
+      { kind: 'asset_ref', asset_id: '103', label: '图片3' },
+    ],
+  };
+
+  it('移除中间参考：剩余有效标签重编号，被移除标签显示失效且不转向（B1）', async () => {
+    await renderDialog({ mediaRefs: [REF_A, REF_B, REF_C], initialDoc: DOC_AB });
+    expect([...container.querySelectorAll('[data-testid="asset-ref-valid"]')]).toHaveLength(3);
+    // 移除 B（父级断开连线 → mediaRefs 少一项）
+    await rerender([REF_A, REF_C]);
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('已失效：原图片2');
+    });
+    const valids = [...container.querySelectorAll('[data-testid="asset-ref-valid"]')].map((el) => el.textContent);
+    // A 仍图片1，C 重编号为图片2（身份不变）；失效标签单独展示
+    expect(valids.join('|')).toContain('图片1');
+    expect(valids.filter((t) => t?.includes('图片2'))).toHaveLength(1);
+    expect([...container.querySelectorAll('[data-testid="asset-ref-invalid"]')]).toHaveLength(1);
+    // 失效标签阻止生成并指出原因
+    expect(sendButton().disabled).toBe(true);
+    expect(container.textContent).toContain('正文有已失效的素材标签，请删除后再发送');
+  });
+
+  it('删除失效提及后可以继续生成；删除正文提及不删除附件（B2）', async () => {
+    await renderDialog({ mediaRefs: [REF_A, REF_C], initialDoc: DOC_AB });
+    // 打开时 reconcile：B 已失效
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeTruthy();
+    });
+    expect(sendButton().disabled).toBe(true);
+    // 点失效标签 × 删除该提及
+    const invalidChip = container.querySelector('[data-testid="asset-ref-invalid"]')!;
+    await act(async () => {
+      (invalidChip.querySelector('button') as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeNull();
+    });
+    // 附件区不受影响（仍两项），发送恢复可用
+    expect([...container.querySelectorAll('[data-testid="dock-media-ref"]')]).toHaveLength(2);
+    await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+  });
+
+  it('删除一次提及只删该处（附件与其他提及保留）', async () => {
+    const dup: PromptDoc = {
+      version: 1,
+      segments: [
+        { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+        { kind: 'text', text: '和' },
+        { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+      ],
+    };
+    await renderDialog({ mediaRefs: [REF_A], initialDoc: dup });
+    expect([...container.querySelectorAll('[data-testid="asset-ref-valid"]')]).toHaveLength(2);
+    const first = container.querySelector('[data-testid="asset-ref-valid"]')!;
+    await act(async () => {
+      (first.querySelector('button') as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => {
+      expect([...container.querySelectorAll('[data-testid="asset-ref-valid"]')]).toHaveLength(1);
+    });
+    expect([...container.querySelectorAll('[data-testid="dock-media-ref"]')]).toHaveLength(1);
+  });
+});

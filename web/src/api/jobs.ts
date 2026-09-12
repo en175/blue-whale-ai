@@ -3,6 +3,7 @@
  * 创建与重试需 Idempotency-Key（UUID）幂等头
  * ============================================ */
 import { apiRequest, isApiError, type ApiError } from './http';
+import type { PromptDoc } from '@/lib/prompt-doc';
 
 /** 可由普通生成端点创建的任务类型 */
 export type GenerationJobType = 'image' | 'video' | 'audio';
@@ -108,6 +109,8 @@ export interface CreateJobPayload {
   reference_materials?: Array<{ id: string; type: 'image' | 'video' }>;
   /** 生成目标画布节点 id（仅 image/video，IKDLQF/IKDLQG）：携带时服务端按最新画布推导连线文本附件并冻结进任务快照 */
   target_node_id?: string;
+  /** 正文素材标签结构（IKFA1M，仅 image）：服务端按真实输入顺序编译并冻结原始结构；纯文本不携带 */
+  prompt_doc?: PromptDoc;
 }
 
 /** 创建/重试任务返回 */
