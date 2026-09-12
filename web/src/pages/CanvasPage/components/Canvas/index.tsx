@@ -34,7 +34,7 @@ import { canvasDeleteKeyAction, deleteSelectedCanvasNodes, isEditableKeyboardTar
 import { useCanvasPan } from './useCanvasPan';
 import {
   MIN_GROUP_MEMBERS,
-  membersInGroupBox,
+  exclusiveMembersInGroup,
   type CanvasGroup,
   type GroupFrameDragResult,
 } from '../../canvasGroups';
@@ -363,7 +363,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const [isDraggingNode, setIsDraggingNode] = useState(false);
   const memberIds = useMemo(() => {
     const ids = new Set<string>(frameDragMemberIds);
-    groups?.forEach((g) => membersInGroupBox(nodes, g.box, g.excludedIds).forEach((n) => ids.add(n.id)));
+    groups?.forEach((g) => exclusiveMembersInGroup(nodes, g, groups).forEach((n) => ids.add(n.id)));
     return ids;
   }, [groups, nodes, frameDragMemberIds]);
   const nodesForFlow = useMemo(

@@ -117,9 +117,13 @@ import { defaultProjectName } from '@/lib/projectName';
 import { useCanvasDoc } from './hooks/useCanvasDoc';
 import { useCanvasHistory, type CanvasHistoryApi } from './hooks/useCanvasHistory';
 import {
+  applyIndependentGroupDrag,
+  exclusiveMembersInGroup,
   groupFrameBBox,
   groupToNode,
-  membersInGroupBox,
+  isolateNewGroupMembers,
+  isForeignGroupMember,
+  nodeInsideGroupBox,
   parseGroupsFromNodes,
   MIN_GROUP_MEMBERS,
   GROUP_FRAME_PADDING,
@@ -1948,63 +1952,81 @@ export default function CanvasPage() {
     setMediaNodes(applyDraggedPositions);
     setProductNodes(applyDraggedPositions);
     setAssetNodes(applyDraggedPositions);
-    // 方向性规则（成员归属）：用户主动拖动节点 = 有意进出组，一律解除其排除记录——
-    //  - 拖进组矩形 → 吸收为成员（节点显示在玻璃上层）
-    //  - 拖出组矩形 → 本就脱离组，排除记录失效一并清掉
+    // 节点拖入/拖出组：只加入最上层相交组，其余重叠组写入排除，保证组与组互斥。
+    // 压到组边界时该组外扩包住节点；扩大后新盖住的其他组成员一并排除。
     if (groupsRef.current.length > 0) {
-      setGroups((prev) =>
-        prev.map((g) => {
-          if (!g.excludedIds.some((id) => positions.has(id))) return g;
-          return { ...g, excludedIds: g.excludedIds.filter((id) => !positions.has(id)) };
-        }),
-      );
-    }
-
-    // 拖动节点压到某组边界时扩大该组：被拖节点矩形与组矩形相交（含贴边/压住边界线）
-    //  即把该节点包进来；后创建的组在上层优先。拖动前已是该组成员也允许扩大——
-    //  用户把组员拖到边界时组应随之外扩，使其仍在组内。
-    if (groupsRef.current.length > 0) {
-      // 收集每个组需要 union 的节点矩形
       const expandByGroup = new Map<string, { x: number; y: number; x2: number; y2: number }>();
+      const ownerByNode = new Map<string, string>();
       draggedNodes.forEach((n) => {
         const w = n.measured?.width ?? 200;
         const h = n.measured?.height ?? 120;
         const nx = n.position.x, ny = n.position.y;
-        // 倒序取首个相交的组（后创建的组在上层）
         for (let i = groupsRef.current.length - 1; i >= 0; i--) {
           const g = groupsRef.current[i];
-          if (g.excludedIds.includes(n.id)) continue;
-          // 用 <= / >= 把贴边也视为相交，提高灵敏度
           const intersects =
             nx <= g.box.x + g.box.w && nx + w >= g.box.x && ny <= g.box.y + g.box.h && ny + h >= g.box.y;
           if (!intersects) continue;
-          const cur = expandByGroup.get(g.id);
-          const x = Math.min(nx, cur?.x ?? g.box.x);
-          const y = Math.min(ny, cur?.y ?? g.box.y);
-          const x2 = Math.max(nx + w, cur?.x2 ?? g.box.x + g.box.w);
-          const y2 = Math.max(ny + h, cur?.y2 ?? g.box.y + g.box.h);
-          expandByGroup.set(g.id, { x, y, x2, y2 });
+          const sticksOut =
+            nx < g.box.x || ny < g.box.y || nx + w > g.box.x + g.box.w || ny + h > g.box.y + g.box.h;
+          if (sticksOut) {
+            const cur = expandByGroup.get(g.id);
+            const x = Math.min(nx, cur?.x ?? g.box.x);
+            const y = Math.min(ny, cur?.y ?? g.box.y);
+            const x2 = Math.max(nx + w, cur?.x2 ?? g.box.x + g.box.w);
+            const y2 = Math.max(ny + h, cur?.y2 ?? g.box.y + g.box.h);
+            expandByGroup.set(g.id, { x, y, x2, y2 });
+          }
+          ownerByNode.set(n.id, g.id);
           break;
         }
       });
-      if (expandByGroup.size > 0) {
-        const pad = GROUP_FRAME_PADDING;
-        setGroups((prev) =>
+      const pad = GROUP_FRAME_PADDING;
+      const allAfter = before.map((n) => {
+        const p = positions.get(n.id);
+        return p ? { ...n, position: p } : n;
+      });
+      setGroups((prev) => {
+        const boxes = new Map(
           prev.map((g) => {
             const e = expandByGroup.get(g.id);
-            if (!e) return g;
-            return {
-              ...g,
-              box: {
+            if (!e) return [g.id, g.box] as const;
+            return [
+              g.id,
+              {
                 x: e.x - pad,
                 y: e.y - pad,
                 w: e.x2 - e.x + pad * 2,
                 h: e.y2 - e.y + pad * 2,
               },
-            };
+            ] as const;
           }),
         );
-      }
+        const nextMeta = prev.map((g) => ({ ...g, box: boxes.get(g.id) ?? g.box }));
+        return nextMeta.map((g) => {
+          const excluded = new Set(g.excludedIds);
+          draggedNodes.forEach((n) => {
+            const owner = ownerByNode.get(n.id);
+            const inside = nodeInsideGroupBox(n, g.box);
+            if (!inside) excluded.delete(n.id);
+            else if (owner === g.id) excluded.delete(n.id);
+            else excluded.add(n.id);
+          });
+          if (expandByGroup.has(g.id)) {
+            allAfter.forEach((n) => {
+              if (positions.has(n.id)) return;
+              if (nodeInsideGroupBox(n, g.box) && isForeignGroupMember(n, g.id, nextMeta)) {
+                excluded.add(n.id);
+              }
+            });
+          }
+          const e = expandByGroup.get(g.id);
+          const boxChanged = !!e;
+          const excludedChanged =
+            excluded.size !== g.excludedIds.length || [...excluded].some((id) => !g.excludedIds.includes(id));
+          if (!boxChanged && !excludedChanged) return g;
+          return { ...g, box: g.box, excludedIds: [...excluded] };
+        });
+      });
     }
   };
 
@@ -3726,35 +3748,51 @@ export default function CanvasPage() {
   /* ============ 成组交互（IKD0JT A3/A4） ============ */
 
   /** 成组：≥2 节点划定格组矩形（选中成员包围盒+留白），之后矩形固定、成员按坐标动态判定。
-   *  入参为画布内部节点对象（含 measured 实际尺寸），保证矩形真实框住全部选中节点——
-   *  父级数组缺 measured 时按缺省尺寸估算会导致框偏小、框不住节点。 */
+   *  新组与已有组互斥：选中节点从其他组排除，框内非选中节点写入新组排除名单。
+   *  入参为画布内部节点对象（含 measured 实际尺寸），保证矩形真实框住全部选中节点。 */
   const handleCreateGroup = (selectedNodes: Node[]) => {
     const members = selectedNodes.filter((n) => !(n.data as { emptyShell?: boolean } | undefined)?.emptyShell);
     if (members.length < MIN_GROUP_MEMBERS) return;
     const box = groupFrameBBox(members);
     if (!box) return;
+    const memberIds = new Set(members.map((n) => n.id));
+    const all = [
+      ...textNodesRef.current,
+      ...mediaNodesRef.current,
+      ...productNodesRef.current,
+      ...assetNodesRef.current,
+    ];
     const group: CanvasGroup = { id: newNodeId('group'), box, excludedIds: [] };
     const before = groupsRef.current;
-    const after = [...before, group];
+    const after = isolateNewGroupMembers(before, all, group, memberIds);
     setGroups(after);
-    historyRef.current?.pushCreateGroup(group, before, after);
+    historyRef.current?.pushCreateGroup(after[after.length - 1] ?? group, before, after);
   };
 
-  /** 整组拖动结束（动态成员 + 固定矩形）：由 GroupOverlay 上抛拖动期间的矩形与成员位移，
-   *  在此落父级坐标与组矩形（触发自动保存落盘），并登记撤销（矩形+成员同步回放）。
-   *  方向性规则：组盖到节点上 → 该节点排除（不吸收为成员、被玻璃盖住）；
-   *  排除名单随组矩形一并落盘与撤销。成员可为空，此时仅更新矩形。 */
+  /** 整组拖动结束：落盘矩形与本组独立成员位移，并同步其他组排除名单（叠住不吸收）。 */
   const handleGroupFrameDragStop = useCallback(
     (res: GroupFrameDragResult) => {
-      setGroups((prev) =>
-        prev.map((g) =>
-          g.id === res.groupId
-            ? { ...g, box: { ...res.newBox }, excludedIds: [...res.excludedAfter] }
-            : g,
-        ),
-      );
-      if (res.nodeNew.length === 0) return;
       const posNew = new Map(res.nodeNew.map((p) => [p.id, { x: p.x, y: p.y }]));
+      const nodesAfter = [
+        ...textNodesRef.current,
+        ...mediaNodesRef.current,
+        ...productNodesRef.current,
+        ...assetNodesRef.current,
+      ].map((n) => {
+        const p = posNew.get(n.id);
+        return p ? { ...n, position: { x: p.x, y: p.y } } : n;
+      });
+      const { groups: nextGroups, peerExclusions } = applyIndependentGroupDrag(
+        groupsRef.current,
+        nodesAfter,
+        res,
+      );
+      setGroups(nextGroups);
+      const recorded: GroupFrameDragResult = { ...res, peerExclusions };
+      if (res.nodeNew.length === 0) {
+        historyRef.current?.pushGroupMove(recorded);
+        return;
+      }
       const applyPos = (prev: Node[]) =>
         prev.map((n) => {
           const p = posNew.get(n.id);
@@ -3764,7 +3802,7 @@ export default function CanvasPage() {
       setMediaNodes(applyPos);
       setProductNodes(applyPos);
       setAssetNodes(applyPos);
-      historyRef.current?.pushGroupMove(res);
+      historyRef.current?.pushGroupMove(recorded);
     },
     [setTextNodes, setMediaNodes, setProductNodes, setAssetNodes, setGroups],
   );
@@ -3787,7 +3825,7 @@ export default function CanvasPage() {
       ...productNodesRef.current,
       ...assetNodesRef.current,
     ];
-    const inside = membersInGroupBox(all, group.box, group.excludedIds).map((n) => n.id);
+    const inside = exclusiveMembersInGroup(all, group, groupsRef.current).map((n) => n.id);
     if (inside.length > 0) removeCanvasNodes(inside);
     setGroups((prev) => prev.filter((g) => g.id !== groupId));
     historyRef.current?.pushDeleteGroup(group, all.filter((n) => inside.includes(n.id)), []);

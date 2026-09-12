@@ -3,6 +3,7 @@
  * 组 = 一个固定矩形 box（成组时刻由成员包围盒+留白定格，之后位置随拖动更新、
  * 尺寸不再因成员增减而变化）。成员不是冻结名单，而是「当前位于矩形内的节点」——
  * 节点被拖出框即自动脱离，拖进框即自动加入（动态成员，用户体验为"固定范围容器"）。
+ * 组与组互相独立：拖组只移动本组专属成员，叠到另一组上不得带走对方成员。
  * 底框直接用 group.box 渲染，不随成员实时派生。
  * 持久化走「伪节点」：序列化为 type: 'groupFrame' 的节点混入 nodes JSON，
  * data.box 存矩形，水合时剥离还原（零后端契约变更）。
@@ -39,6 +40,13 @@ export interface PositionRecord {
   y: number;
 }
 
+/** 其他组排除名单在整组拖动前后的快照（组与组互斥，撤销需一并回放） */
+export interface PeerExclusionSnapshot {
+  groupId: string;
+  excludedBefore: string[];
+  excludedAfter: string[];
+}
+
 /** 整组拖动结束上抛的数据：矩形前后 + 拖动瞬间框内成员节点的位移 + 排除名单前后 */
 export interface GroupFrameDragResult {
   groupId: string;
@@ -50,6 +58,8 @@ export interface GroupFrameDragResult {
   excludedBefore: string[];
   /** 拖动结束后组的排除名单：新矩形内的非本次拖动成员节点（被组盖住、不算成员） */
   excludedAfter: string[];
+  /** 被本组压住/拖离的其他组排除名单变更 */
+  peerExclusions?: PeerExclusionSnapshot[];
 }
 
 /** 成员节点包围盒（节点 measured 尺寸缺省按 200×120 估算） */
@@ -99,6 +109,84 @@ export function membersInGroupBox(
 ): Node[] {
   const excluded = new Set(excludedIds);
   return nodes.filter((n) => !excluded.has(n.id) && nodeInsideGroupBox(n, box));
+}
+
+/** 节点是否算某组成员（落在矩形内且不在排除名单） */
+export function isGroupMember(node: Node, group: Pick<CanvasGroup, 'box' | 'excludedIds'>): boolean {
+  return !group.excludedIds.includes(node.id) && nodeInsideGroupBox(node, group.box);
+}
+
+/** 节点是否已是其他组的成员——组与组互相独立，这类节点不能被本组拖走或算作本组员 */
+export function isForeignGroupMember(node: Node, selfId: string, groups: CanvasGroup[]): boolean {
+  return groups.some((h) => h.id !== selfId && isGroupMember(node, h));
+}
+
+/** 本组独立成员：矩形内、未排除、且不属于任何其他组 */
+export function exclusiveMembersInGroup(
+  nodes: Node[],
+  group: CanvasGroup,
+  allGroups: CanvasGroup[],
+): Node[] {
+  return membersInGroupBox(nodes, group.box, group.excludedIds).filter(
+    (n) => !isForeignGroupMember(n, group.id, allGroups),
+  );
+}
+
+/** 整组拖动后同步其他组排除名单：本组带走的成员写入被压住的组，拖离则解除 */
+export function applyIndependentGroupDrag(
+  groups: CanvasGroup[],
+  nodesAfter: Node[],
+  res: Pick<GroupFrameDragResult, 'groupId' | 'newBox' | 'excludedAfter' | 'nodeNew'>,
+): { groups: CanvasGroup[]; peerExclusions: PeerExclusionSnapshot[] } {
+  const draggedIds = new Set(res.nodeNew.map((p) => p.id));
+  const byId = new Map(nodesAfter.map((n) => [n.id, n]));
+  const peerExclusions: PeerExclusionSnapshot[] = [];
+  const next = groups.map((g) => {
+    if (g.id === res.groupId) {
+      return { ...g, box: { ...res.newBox }, excludedIds: [...res.excludedAfter] };
+    }
+    const excluded = new Set(g.excludedIds);
+    draggedIds.forEach((id) => {
+      const n = byId.get(id);
+      if (!n) return;
+      if (nodeInsideGroupBox(n, g.box)) excluded.add(id);
+      else excluded.delete(id);
+    });
+    const after = [...excluded];
+    const changed =
+      after.length !== g.excludedIds.length || after.some((id, i) => id !== g.excludedIds[i]);
+    if (changed) {
+      peerExclusions.push({
+        groupId: g.id,
+        excludedBefore: [...g.excludedIds],
+        excludedAfter: after,
+      });
+    }
+    return changed ? { ...g, excludedIds: after } : g;
+  });
+  return { groups: next, peerExclusions };
+}
+
+/** 新建组时互斥：新组排除框内非选中节点；其他组排除本次成组成员 */
+export function isolateNewGroupMembers(
+  existing: CanvasGroup[],
+  nodes: Node[],
+  group: CanvasGroup,
+  memberIds: Set<string>,
+): CanvasGroup[] {
+  const created: CanvasGroup = {
+    ...group,
+    excludedIds: nodes
+      .filter((n) => !memberIds.has(n.id) && nodeInsideGroupBox(n, group.box))
+      .map((n) => n.id),
+  };
+  const others = existing.map((h) => {
+    const extra = nodes
+      .filter((n) => memberIds.has(n.id) && nodeInsideGroupBox(n, h.box) && !h.excludedIds.includes(n.id))
+      .map((n) => n.id);
+    return extra.length === 0 ? h : { ...h, excludedIds: [...h.excludedIds, ...extra] };
+  });
+  return [...others, created];
 }
 
 /** 组伪节点序列化形状（随 nodes JSON 持久化；position 存矩形左上角便于离线诊断） */

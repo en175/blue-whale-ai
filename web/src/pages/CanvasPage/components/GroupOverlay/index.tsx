@@ -4,7 +4,7 @@
  * - 组徽标：底框左上角屏幕空间徽标，点击展开操作条（解组/删除）
  * - 成组入口：≥2 节点选中且未全部同组时，在选区上方浮现「成组」；框选后同时提供「下载」
  *   （Ctrl/Cmd+G 快捷键同效，见 Canvas 键盘处理）
- * - 动态成员：节点是否属于组 = 是否落在组矩形内（不存冻结名单）。
+ * - 动态成员：节点是否属于组 = 是否落在组矩形内且不属于其他组（组与组独立）。
  * - 整组拖动：拖起组顶部把手，实时移动「当前在框内的全部节点」+ 组矩形
  *   （矩形视觉经本地偏移跟随，结束时一次性上抛父级落盘 + 登记撤销）
  * 根层 pointer-events:none，仅徽标/按钮/操作条/把手可交互，不遮挡节点操作。
@@ -14,6 +14,8 @@ import { useReactFlow, useViewport, getBezierPath, Position, type Node } from '@
 import { Group, Ungroup, Trash2, Download, Plus } from 'lucide-react';
 import {
   memberBBox,
+  exclusiveMembersInGroup,
+  isGroupMember,
   membersInGroupBox,
   MIN_GROUP_MEMBERS,
   nodeInsideGroupBox,
@@ -90,7 +92,7 @@ export default function GroupOverlay({
       groups.map((g) => ({
         id: g.id,
         box: g.box,
-        count: membersInGroupBox(nodes, g.box, g.excludedIds).length,
+        count: exclusiveMembersInGroup(nodes, g, groups).length,
         excludedIds: g.excludedIds,
       })),
     [groups, nodes],
@@ -106,6 +108,8 @@ export default function GroupOverlay({
       g.excludedIds.forEach((id) => {
         const n = byId.get(id);
         if (!n || !nodeInsideGroupBox(n, g.box)) return;
+        // 其他组的成员保持独立，不盖暗化层
+        if (groups.some((h) => h.id !== g.id && isGroupMember(n, h))) return;
         result.push({
           key: `${g.id}:${id}`,
           groupId: g.id,
@@ -274,13 +278,13 @@ export default function GroupOverlay({
     }, 0);
   }, [onFrameMove, endFrameDrag, onFrameDragMembersChange]);
 
-  /** 按下开始拖动整组：冻结当前在矩形内且未被排除的成员作为本次拖动集合。
-   *  被排除节点（组此前盖住的）不随组移动；成员可为空（拖空框去圈节点）。
+  /** 按下开始拖动整组：冻结本组独立成员作为本次拖动集合。
+   *  其他组成员即使落在本矩形内也不带走；被排除节点不随组移动；成员可为空。
    *  注：组框位于节点层之下收不到 pointer 事件，故由 window 捕获阶段命中测试后调用（见下）。 */
   const startFrameDrag = useCallback(
     (clientX: number, clientY: number, g: CanvasGroup) => {
       const nodeOld = new Map<string, { x: number; y: number }>();
-      membersInGroupBox(nodesRef.current, g.box, g.excludedIds).forEach((n) => {
+      exclusiveMembersInGroup(nodesRef.current, g, groupsRef.current).forEach((n) => {
         nodeOld.set(n.id, { x: n.position.x, y: n.position.y });
       });
       draggingRef.current = true;
@@ -456,7 +460,10 @@ export default function GroupOverlay({
   /** 按下组右侧「+」开始批量连线：冻结当前组成员，记录各成员右中点为连线起点 */
   const startConnectDrag = useCallback(
     (groupId: string, box: GroupBBox, excludedIds: string[], clientX: number, clientY: number) => {
-      const members = membersInGroupBox(nodesRef.current, box, excludedIds);
+      const host = groupsRef.current.find((g) => g.id === groupId);
+      const members = host
+        ? exclusiveMembersInGroup(nodesRef.current, host, groupsRef.current)
+        : membersInGroupBox(nodesRef.current, box, excludedIds);
       const sources = members.map((n) => {
         const w = n.measured?.width ?? 200;
         const h = n.measured?.height ?? 120;
@@ -588,7 +595,10 @@ export default function GroupOverlay({
                     title="下载组内全部素材"
                     onClick={(e) => {
                       e.stopPropagation();
-                      const members = membersInGroupBox(nodes, f.box, f.excludedIds);
+                      const host = groups.find((g) => g.id === f.id);
+                      const members = host
+                        ? exclusiveMembersInGroup(nodes, host, groups)
+                        : membersInGroupBox(nodes, f.box, f.excludedIds);
                       onDownloadNodes(members.map((n) => n.id));
                     }}
                   >
