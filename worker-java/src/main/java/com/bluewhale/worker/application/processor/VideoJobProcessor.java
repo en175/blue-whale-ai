@@ -115,6 +115,7 @@ public class VideoJobProcessor implements JobProcessor {
             GenerationCredentialService credentialService,
             NewApiVideoClient videoClient,
             TosVideoMediaRelay mediaRelay,
+            @org.springframework.beans.factory.annotation.Qualifier("generationMessageProducer")
             GenerationMessageProducer producer
     ) {
         this.stateMachine = stateMachine;
