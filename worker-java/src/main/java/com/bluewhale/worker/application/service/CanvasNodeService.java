@@ -84,6 +84,9 @@ public class CanvasNodeService {
             newData.put("src", url);
             newData.put("mediaType", "audio");
             newData.put("fileName", fileName);
+            if (existingData.get("customName") instanceof Boolean customName) {
+                newData.put("customName", customName);
+            }
             if (finalAudioAssetId != null) {
                 newData.put("assetId", finalAudioAssetId);
             }

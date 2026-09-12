@@ -15,7 +15,7 @@ import {
   enabledVideoFollowModes,
   type VideoFollowMode,
 } from './followDialog';
-import { cardNameOfNode, freshImageCanvasRefs, imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, localNodeIdOf, readAssetId, type ImageMediaRef } from './mediaRefs';
+import { freshImageCanvasRefs, imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, type ImageMediaRef } from './mediaRefs';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
   isVideoDraftNode,
@@ -1566,7 +1566,7 @@ export default function CanvasPage() {
           ts,
         });
       } else {
-        const label = '文本节点';
+        const label = typeof t.data?.title === 'string' && t.data.title.trim() ? t.data.title : '文本节点';
         setAgentContext({ text: `@${label}`, label, ts });
         setShowAgent(true);
       }
@@ -4368,19 +4368,18 @@ export default function CanvasPage() {
     }
   };
 
-  /** 图片面板初始参考的名称刷新（IKFA8Y）：自由模式不带草稿时参考为选取当刻快照，
-   *  卡片改名后按来源节点身份取当前名称（绑定模式由连线推导，恒为当前名） */
+  /** 自由图片面板的文本附件按节点身份刷新标题，正文保持打开时的快照。 */
   const imageSeedView = useMemo(() => {
     if (!imageSeed || imageDraftId) return imageSeed;
-    const byId = new Map(mediaNodes.map((n) => [n.id, n]));
-    const files = imageSeed.files.map((file) => {
-      const nodeId = localNodeIdOf(file.id);
-      if (!nodeId) return file;
-      const name = cardNameOfNode(byId.get(nodeId));
-      return name === undefined || name === file.name ? file : { ...file, name };
+    const byId = new Map(textNodes.map((n) => [n.id, n]));
+    const attachments = imageSeed.attachments?.map((attachment) => {
+      const node = byId.get(attachment.nodeId);
+      if (!node) return attachment;
+      const title = typeof node.data?.title === 'string' && node.data.title ? node.data.title : '文本节点';
+      return title === attachment.title ? attachment : { ...attachment, title };
     });
-    return { ...imageSeed, files };
-  }, [imageSeed, imageDraftId, mediaNodes]);
+    return { ...imageSeed, attachments };
+  }, [imageSeed, imageDraftId, textNodes]);
 
   /** 视频自由模式参考（IKFA8Y）：参考名称按来源节点身份取当前名称 */
   const videoFreeRefsView = useMemo(
@@ -5879,7 +5878,7 @@ export default function CanvasPage() {
             initialText={imageSeed?.text}
             initialFiles={imageSeedView?.files}
             initialParams={imageSeed?.params}
-            attachments={imageDraftId ? imageDraftAttachments : imageSeed?.attachments}
+            attachments={imageDraftId ? imageDraftAttachments : imageSeedView?.attachments}
             mediaRefs={imageDraftId ? imageDraftMediaRefs : undefined}
             invalidMediaRefs={invalidImageMediaRefs}
             onRemovePlan={id => removePlanAttachment(imageSeed?.targetNodeId, id)}
