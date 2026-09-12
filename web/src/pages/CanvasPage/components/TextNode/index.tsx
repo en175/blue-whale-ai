@@ -7,6 +7,7 @@ import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Palette, Plus } from 'lucide-react';
 import { sanitizeHtml } from '@/utils/sanitize';
 import { nodeTitleSizing } from '../nodeTitleSizing';
+import { commitCardName } from '../cardName';
 import CanvasContextMenu from '../CanvasContextMenu';
 import styles from './index.module.css';
 import { PROMPT_TEXT_LIMITS } from '../../../../../../packages/contracts/src/prompt-text-limits';
@@ -180,6 +181,27 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
   }, []);
 
+  /** 提交标题（IKFA8X）：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName；
+   *  名称错误仅就地提示，不进 onDraftError——未写入节点数据的名称草稿不阻断画布保存 */
+  const commitTitle = useCallback(() => {
+    const current = data.title ?? (isTextGen ? '文本生成' : '文本节点');
+    const result = commitCardName(titleDraft, current);
+    if (result.kind === 'invalid') {
+      setTitleError(result.message);
+      return;
+    }
+    setTitleError('');
+    setTitleEditing(false);
+    if (result.kind === 'save') data.onTitleChange?.(id, result.value);
+  }, [data, id, titleDraft, isTextGen]);
+
+  /** Esc 取消：恢复编辑前名称；输入框随即卸载，不会再有失焦提交 */
+  const cancelTitle = useCallback(() => {
+    setTitleDraft(data.title ?? (isTextGen ? '文本生成' : '文本节点'));
+    setTitleError('');
+    setTitleEditing(false);
+  }, [data.title, isTextGen]);
+
   /** 同步内容到父组件（净化后保存，防止 XSS 持久化） */
   const syncContent = useCallback(() => {
     const prompt = hasPromptBindings && editorRef.current ? readPromptMentions(editorRef.current) : undefined;
@@ -191,11 +213,11 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       return;
     }
     setContentError('');
-    data.onDraftError?.(id, titleError);
+    data.onDraftError?.(id, '');
     if (prompt) data.onPromptChange?.(id, text, prompt.mentions, draftMaterialsRef.current);
     else if (plainText) data.onTextChange?.(id, text);
     else data.onChange?.(id, sanitizeHtml(editorRef.current?.innerHTML || ''));
-  }, [data, id, plainText, titleError, hasPromptBindings]);
+  }, [data, id, plainText, hasPromptBindings]);
 
   const editMaterial = (assetId: string, replaceIndex: number | null) => {
     const editor = editorRef.current;
@@ -233,7 +255,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       const error = `正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`;
       setContentError(error); data.onDraftError?.(id, error); return;
     }
-    setContentError(''); data.onDraftError?.(id, titleError);
+    setContentError(''); data.onDraftError?.(id, '');
     data.onPromptChange?.(id, prompt.text, prompt.mentions, materials);
   };
 
@@ -500,14 +522,20 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           <FileText className={styles.titleIcon} strokeWidth={2} color="#888" />
           {titleEditing ? <input className="nodrag nopan" aria-label="文本节点标题" value={titleDraft} autoFocus
             onChange={event => setTitleDraft(event.target.value)}
-            onBlur={() => {
-              if (titleDraft.length > PROMPT_TEXT_LIMITS.title) {
-                const error = `标题最多 ${PROMPT_TEXT_LIMITS.title} 字，草稿已保留`;
-                setTitleError(error); data.onDraftError?.(id, error); return;
+            onBlur={commitTitle}
+            onKeyDown={event => {
+              // 名称输入期间隔离画布快捷键；输入法组合中的回车只确认候选词，不提交名称
+              event.stopPropagation();
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                commitTitle();
               }
-              data.onTitleChange?.(id, titleDraft); setTitleEditing(false); setTitleError(''); data.onDraftError?.(id, contentError);
-            }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') event.currentTarget.blur(); }} />
-            : <span className={styles.titleName} onDoubleClick={event => { event.stopPropagation(); if (data.onTitleChange) { setTitleDraft(data.title ?? (isTextGen ? '文本生成' : '文本节点')); setTitleEditing(true); } }}>
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                cancelTitle();
+              }
+            }} />
+            : <span className={styles.titleName} onDoubleClick={event => { event.stopPropagation(); if (data.onTitleChange) { setTitleDraft(data.title ?? (isTextGen ? '文本生成' : '文本节点')); setTitleError(''); setTitleEditing(true); } }}>
               {data.title || (isTextGen ? '文本生成' : '文本节点')}
             </span>}
         </div>
