@@ -4,7 +4,7 @@
 TypeScript `agent-worker`、`generation-worker` 组成；三者属于同一模块化单体代码库。
 独立 `product-api` 进程已退役，浏览器业务 API 折进 Next.js Route Handlers（ADR-0059）。
 `blue_whale_api`（new-api 二开，Go，承担 LLM 网关与计费）已迁出至独立仓库 `blue-whale-api`（`hangzhou-xuanfu_1/blue-whale-api`），保持独立且不在本仓改造。
-`blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写 入（不约束按 ADR-0084 新建的 `worker-java` 生成执行服务——薄执行器，非旧服务复活）；
+`blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写 入（不约束按 ADR-0084 新建的 `worker-java` 生成执行服务——直连 DB 执行器，非旧服务复活）；
 `blue_whale_pay_web` 与 `blue_whale_pay_server`（Java 支付）已迁出至独立仓库 `blue-whale-pay`（`hangzhou-xuanfu_1/blue-whale-pay`），其中 server 冻结、web 单独迭代。范围以
 [ADR-0055](docs/adr/0055-prelaunch-typescript-unification-scope.md) 为准。
 
@@ -583,7 +583,7 @@ _Avoid_: PlanMessage 的 `asset://<mention_id>`（那是内部正文引用协议
 _Avoid_: 把素材库素材引用写进 PlanMessage 正文、把 PlanMessage mention 协议原样发给供应商
 
 **GenerationJob（生成任务）**:
-一次持久化的图片、视频或音频后台任务。任务归属于 Project，页面刷新、浏览器关闭或服务重启后，
+一次持久化的图片、视频、音频或音频提取（media_extract）后台任务。任务归属于 Project，页面刷新、浏览器关闭或服务重启后，
 已接纳状态与结果仍可恢复；同一请求或供应商回调重放不得产生重复任务、结果或费用。
 GenerationJob 可以随业务事务原子创建，但只能在事务提交后进入执行队列；事务内禁止直接调用生成供应商。
 Worker 通过短租约领取任务；租约过期后可由新 Worker 重新领取，旧 Worker 的迟到写入由 fence 拒绝。
@@ -635,6 +635,20 @@ Product API 对单个 AgentAdvance 的唯一正式接纳边界；每次推进最
 AssistantMessage，或一组完整有序的 PlanMessage。同一 AgentRun 可随多次推进拥有多个 RunCommit，
 精确重放必须返回该推进首次接纳的相同结果。
 _Avoid_: 按 AgentRun 限制只能提交一次；跨 AgentAdvance 拼接结果；把临时交付文本当作正式提交。
+
+### 生成执行（worker-java）
+
+**ClaimedJob（已领取任务）**:
+Worker 依租约接管一个 GenerationJob 执行责任的独享视图，是**单一概念**：公共核心（任务身份、input、
+租约凭证、取消信号）+ 按媒体类型的 payload 扩展。新增生成类型 = 扩展一种 payload 并注册进生命周期，
+不是再造一个领取概念；投影差异随 MQ 契约演化，不代表概念分叉。
+_Avoid_: 按媒体类型把领取投影当独立概念各修一套；用 ClaimedJob 反转 GenerationJob 的状态权威；
+在领取视图上累积产品规则（规则权威在 GenerationJob / backend 侧）
+
+**Finalize（终态收口）**:
+GenerationJob 连同副作用（结果资产、slot 结果、执行日志、项目事件）写入终态的单一动作；收口后状态
+不可再翻转，迟到写入由 fence 拒绝。收口是一套生命周期动作的按类型变体，差异只在 payload 组装。
+_Avoid_: 按媒体类型分叉各自的 complete/fail 语义；把收口拆成多个非原子写；用 Finalize 复活终态任务
 
 ### Agent 运行配置
 
@@ -894,7 +908,7 @@ _Avoid_: 用户 JWT、root、能力券、把铸券令牌拿来下充值单
 ### 技术栈边界
 
 **产品实现**:
-直接向用户交付产品能力的代码，包括 Next.js Web、浏览器业务 Route Handlers、独立 Agent / Generation Workers，以及共享领域、契约与持久化 packages。实现语言统一为 TypeScript；浏览器代码在浏览器运行，服务端使用 Node.js LTS；generation-worker 生成执行按 ADR-0084 为独立 Java 薄执行器服务，领域规则权威仍在 TypeScript 侧。
+直接向用户交付产品能力的代码，包括 Next.js Web、浏览器业务 Route Handlers、独立 Agent / Generation Workers，以及共享领域、契约与持久化 packages。实现语言统一为 TypeScript；浏览器代码在浏览器运行，服务端使用 Node.js LTS；generation-worker 生成执行按 ADR-0084 为独立 `worker-java` 执行服务（契约 IKEL4A 修正二：TS 只发任务、Java 做任务，交互面 = 数据库 + MQ），领域规则权威仍在 TypeScript 侧。
 _Avoid_: TypeScript 运行时、把浏览器代码描述成运行在 Node.js、把仓库内所有可执行文件都算作产品实现
 
 **工程协作控制面**:

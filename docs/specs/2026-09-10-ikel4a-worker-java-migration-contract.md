@@ -1,6 +1,6 @@
 # worker-java 迁移契约（IKEL4A / ADR-0084）
 
-- **状态**：**已冻结 + 修正一 + 修正二**（2026-09-10，IKEL4H 从代码逐项核对回填；修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
+- **状态**：**已冻结 + 修正一 + 修正二 + 修正三**（2026-09-10，IKEL4H 从代码逐项核对回填；修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：2026-09-12 代码整备批次成文编码规范 §10 与扩展契约附录 C，不改写 §0–§9 功能语义）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
 
 ## 0. 修正一（2026-09-10）：cost_reservations 记账移出迁移范围（工单 IKEF1K）
 
@@ -120,6 +120,46 @@
 - [x] asset 字段 / TOS key / 宽高等价标准（§8）
 - [x] ffmpeg 参数与进度解析等价标准（§8）
 
+## 10. 修正三（2026-09-12）：worker-java 代码组织规范成文
+
+背景：本契约此前只约定功能语义。代码整备批次把迁移中已成事实的编码约束成文如下，防止后续刀漂移（第 5 个生成类型产品已规划）。这些是可随演进调整**编码规范**，不是 ADR 级架构决策。
+
+### 10.1 包分层与类名后缀
+
+- 分层：`application`（processor / consumer / service）、`domain`（entity / dto / error）、`infrastructure`（mapper / gateway / storage / media / audio / credential / mq）、`config`（装配）、`web`（健康检查）。
+- 后缀统一表：
+
+  | 后缀 | 所在层 | 含义与禁令 |
+  |---|---|---|
+  | `*Entity` | domain/entity | 持久化表投影 |
+  | `*Dto` | domain/dto | 跨层共享数据结构（含 MQ 契约投影） |
+  | `*Error` | domain/error | 领域**异常类**专用；常量表禁用此后缀（应命名 `*ErrorCodes`） |
+  | `*Mapper` | infrastructure/mapper | **仅 MyBatis mapper**。通道路由/参数解析类不得叫 `*Mapper`（用 `*Parser`/`*Router`） |
+  | `*Service` | application/service | 应用服务。infrastructure 内类不得叫 `*Service`（按职责用 `*Provider`/`*Storage`/`*Relay`/`*Client`） |
+  | `*Processor` / `*Consumer` | application | 作业处理 / MQ 消费 |
+
+- `domain` = **共享内核**，非严格 DDD 领域：Entity（变化轴 = 持久化 schema）、契约投影 Dto（变化轴 = MQ 契约/附录 B）、领域 Error 并存；类头注释必须写明所属变化轴。
+- 依赖方向：application / infrastructure 均可依赖 domain；**infrastructure 禁止 import application**（config 装配除外）。
+
+### 10.2 注释与文档义务
+
+- 注释以中文为主；Entity 全字段注释（以现状为达标线）。
+- Javadoc 义务线 = `application/service` + `domain` 的 public 方法；processor/consumer 内部靠中文行内注释即可。
+- 对 TS 源码的交叉引用（如 `claim-ops.ts:261`）保留，但收敛到类头注释或 `@see`，避免行级内联随 TS 侧演进批量过期。
+
+### 10.3 语言与风格约束
+
+- **不引入 Lombok**；手写访问器维持现状一致性。
+- 状态 / 类型 / MIME / 参考角色字符串一律枚举或常量表收口（`JobStatus`、`JobType`、`MediaMime`、`ReferenceRole` 等），禁止跨层裸字符串（§2 合法值清单为权威枚举来源）。
+- 禁裸 `RuntimeException`，抛领域 Error；消费者 catch-log-continue 统一收进基类模板方法。
+- 时间读取一律经注入的 `java.time.Clock`（UTC），禁散落 `LocalDateTime.now()`——租约/重试测试可确定化。
+
+### 10.4 重构期行为变更上界（整备批次纪律，后续整备刀同样适用）
+
+- 顺手微调仅限**实现级**：错误分类收敛、异常类型、日志文案、重试时序毛刺。
+- **不动**：状态机迁移语义（§3）、MQ 消息字段（§1）、DB 写入内容（§2/§8）。越界 → 另立契约修正工单单刀，不得夹带在重构 PR。
+- 每条微调必须进 PR「行为 diff 清单」；金标 expected 的任何重录必须对应清单一行。
+
 ## 附录 A：按 job 类型的错误码赋值点（行号基线 `59ba3282`）
 
 - image（`generation-worker.ts`）：`unsupported_type:288`、`invalid_input:303`、`model_unavailable:338`、`invalid_reference:349/362`、`provider_credential_missing:502`、`invalid_reference_type:537/550`、`unsupported_input:558`、`no_result:600`、catch-all `:687-692`；provider 分类 `ark-image-provider.ts:141-157`（content_rejected > quota_exhausted > provider_failed）。
@@ -152,3 +192,12 @@
 | `requeueImageJobForRetry` | 位置参 `(jobId, nextActionAt: Date)`；**无 fence 入参——Java 移植时以其 SQL 实况为准，金标用例单列** | :114 |
 
 BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 列 BigInt；Java 用 `long`；`id/project_id/user_id` 字符串承载。
+
+## 附录 C：新增媒体类型扩展契约（2026-09-12 刀④ 前置钉死）
+
+背景：第 5 个生成类型产品已规划。Java 侧拆分后必须满足「**加一个媒体类型 = 注册一套**」，否则新类型刀不得开工。
+
+- **ClaimedJob 是单概念**：领取投影 = 公共核心（身份 / input / 租约凭证 / 取消信号）+ 媒体 payload 扩展。现状 `ClaimedJobDto` / `ClaimedVideoJobDto` / `ClaimedMediaExtractJobDto` 三胞胎收敛为公共核心 + payload 形态（刀④落地）；新类型是加 payload，不是投影分叉。
+- **生命周期一套**：claim / complete / fail / publish（含 progress 心跳变体）按类型注册参数化实现；禁止按类型复制方法三元组。
+- 新类型的注册触点（**只许改这些位置**）：① MQ tag + 消费者组常量（§1 命名规则：同名 + `-java`）；② Consumer 配置子类（tag + 并发度，零 receive 逻辑）；③ Processor（实现 `JobProcessor`，只写媒体编排 + payload 组装）；④ `JobType` 枚举项 + payload Dto 字段；⑤ Finalizer 的 payload 组装策略注册；⑥ 附录 A 样式错误码赋值表 + 金标用例。**claim 两段式 CAS / fence / 终态事务核心代码禁止触碰。**
+- 新类型的 TS 侧字段与终态语义（§1/§3/§8）仍是对账权威：跨进程字段先在本附录契约定死后，TS、Java 双端才实现（红线：契约先行）。
