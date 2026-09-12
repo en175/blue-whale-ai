@@ -173,10 +173,10 @@ function MentionKeyPlugin({ onMentionKey }: { onMentionKey?: (key: 'down' | 'up'
   const [editor] = useLexicalComposerContext();
   useEffect(() => {
     if (!onMentionKey) return;
-    const bind = (command: LexicalCommand<KeyboardEvent | null>, key: 'down' | 'up' | 'enter' | 'escape') =>
-      editor.registerCommand(command, (event) => {
+    const bind = <T,>(command: LexicalCommand<T>, key: 'down' | 'up' | 'enter' | 'escape') =>
+      editor.registerCommand(command, (event: T) => {
         if (!onMentionKey(key)) return false;
-        event?.preventDefault();
+        (event as KeyboardEvent | null)?.preventDefault();
         return true;
       }, COMMAND_PRIORITY_HIGH);
     const unbinds = [
@@ -234,7 +234,7 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
           if ($isRangeSelection(collapsed) && collapsed.isCollapsed()) {
             pendingInsertRef.current = { key: collapsed.anchor.key, offset: collapsed.anchor.offset };
           }
-        });
+        }, { discrete: true });
       }
       mentionAnchorRef.current = null;
       onMentionChange?.({ open: false, query: '' });

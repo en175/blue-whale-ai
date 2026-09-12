@@ -1900,6 +1900,38 @@ describe("handleCreateGenerationJob 组合上限跟随模型值（IKESD6）", ()
 
 // IKFA1M：正文素材标签（prompt_doc）——结构/版本校验、失效与无效身份复核、编译冻结。
 describe("handleCreateGenerationJob 正文素材标签 prompt_doc（IKFA1M）", () => {
+  it.each([{ text: "", name: "空串" }, { text: " ", name: "空白" }, { text: "a".repeat(4001), name: "4001字" }])("拒绝空白或超长权威正文：$name", async ({ text }) => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...imageBody(0),
+      prompt_doc: { version: 1, segments: [{ kind: "text", text }] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("prompt 无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("目标没有文本附件时，空权威正文不能借非空镜像创建任务", async () => {
+    const { deps, createJob } = buildTargetDeps({ nodes: TARGET_CANVAS.nodes, edges: "[]" });
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY,
+      prompt_doc: { version: 1, segments: [] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("目标有文本附件时仍允许空权威正文", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY,
+      prompt_doc: { version: 1, segments: [] },
+    }, null, deps);
+    expect(result.code).toBe(200);
+    expect(createJob.mock.calls[0][0].input.prompt).toBe("");
+    expect(createJob.mock.calls[0][0].input.text_attachments.length).toBeGreaterThan(0);
+  });
+
   const DOC = {
     version: 1,
     segments: [

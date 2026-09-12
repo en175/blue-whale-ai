@@ -55,6 +55,7 @@
 - 新增可选顶层字段 `prompt_doc`（结构见 §1）。**仅 `type=image` 允许携带**；video/audio 携带 → `400 unsupported_input`。
 - `parameters.prompt` 语义不变，仍按现有规则校验（非空 / ≤4000 字）。新客户端将其填为**拍平镜像**（标签渲染为 `图片N`、失效标签渲染为 `已失效：原图片N` 的纯文本）。
 - **`prompt_doc` 存在时以它为权威编译源**：编译结果替代 `parameters.prompt` 进入任务快照 `input.prompt`；不做 `prompt` 与 `prompt_doc` 的一致性交叉校验（编译以结构为准，漂移无影响）。
+- 编译后的权威正文必须再次通过既有非空与长度约束；文本附件组合检查也使用该正文。有非空文本附件时仍允许空主提示词，不能借合法镜像绕过检查。
 
 ### 服务端复核（在参考图存在性/归属/类型复核之后执行）
 
@@ -108,4 +109,5 @@
 - 契约单测：`packages/contracts/src/prompt-doc.test.ts`（结构、编号、编译、校验）。
 - 接纳与快照：`backend/libs/shared/generation/handle-create-generation-job.ts` 及其单测；隔离库集成测试见 `backend/apps/blue-whale/src/api/canvases/` 同模式新增文件。
 - 执行端：worker 消费 `input.prompt`（已编译）+ `input_asset_ids`，记录式供应商替身断言最终正文与图片顺序。
+- 浏览器集成入口：设置专用本地 `IKFA1M_DATABASE_URL` 与 `IKFA1M_BROWSER=1`，运行 `pnpm exec vitest run backend/apps/blue-whale/src/api/canvases/prompt-ref-image.integration.test.ts`。浏览器创建的任务经真实仓储与 worker 到达记录式供应商；首次无产出失败，修改并保存草稿正文、移除参考后，通过公开重试接口再次执行并比较两次供应商输入。测试直接派发精确任务 id，不覆盖 MQ 传输、真实供应商或人工验收。
 - 关联：IKFA1J（父需求）、IKFA1M（本票）、IKFA1N/O/P（后续票）；产品语义见 `docs/specs/2026-09-12-generation-prompt-reference-index.md`。

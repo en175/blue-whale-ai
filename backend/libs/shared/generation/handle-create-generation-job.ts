@@ -499,13 +499,8 @@ const imageStrategy: GenerationTypeStrategy = {
       aspect_ratio: params.aspect_ratio,
       model_id: resolvedModelId,
     };
-    // IKFA1M：正文素材标签按真实输入顺序编译（图片N = input_asset_ids 下标+1），
-    // 编译结果替代 parameters.prompt 冻结；原始结构冻结进 prompt_doc 供审计与重试。
+    // 编译正文已通过接纳校验；同时冻结原始结构供审计与重试。
     if (promptDoc) {
-      input.prompt = compilePromptDoc(
-        promptDoc,
-        referenceAssetIds.map(String),
-      );
       input.prompt_doc = promptDoc;
     }
     if (isStr(params.size)) input.size = params.size;
@@ -820,7 +815,7 @@ export async function handleCreateGenerationJob(
   // 3. 模型白名单（别名解析 + 能力目录命中）
   const params = body.parameters as GenerationParameters;
   const expectedOutputCount = Number(body.expected_output_count);
-  const promptText = isStr(params.prompt) ? params.prompt : "";
+  let promptText = isStr(params.prompt) ? params.prompt : "";
   const resolvedModelId = resolveModelId(type, params.model_id);
   const whitelist = await deps.models.listEnabledByType(type);
   if (!whitelist.some((m) => m.model_id === resolvedModelId)) {
@@ -974,6 +969,12 @@ export async function handleCreateGenerationJob(
       return fail(400, "正文素材标签指向无效的参考素材", {
         code: ERROR_INVALID_REFERENCE,
       });
+    }
+    promptText = compilePromptDoc(promptDoc, refs.value.referenceAssetIds.map(String));
+    // 复用既有正文约束；后续附件组合也必须使用实际冻结的正文。
+    const compiledError = strategy.validate({ ...body, parameters: { ...params, prompt: promptText } });
+    if (compiledError) {
+      return fail(400, compiledError.message, { code: compiledError.code });
     }
   }
 

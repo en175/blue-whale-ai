@@ -208,12 +208,6 @@ function sendButton(): HTMLButtonElement {
   )!;
 }
 
-function promptTextarea(): HTMLElement {
-  const el = container.querySelector('[contenteditable]');
-  if (!el) throw new Error('PromptRefEditor 未挂载');
-  return el as HTMLElement;
-}
-
 /** PromptRefEditor（IKFA1M）整体替换文本 */
 async function typePrompt(text: string) {
   await typePromptRefText(container, text);
