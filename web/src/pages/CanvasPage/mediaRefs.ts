@@ -47,9 +47,35 @@ export function imageRefSourceError(node: Node | undefined): string | null {
   return null;
 }
 
+/** 来源节点 id → 当前卡片名称（无名称时回落节点 id）。快照参考刷新与连线推导共用同一取值口径 */
+export function cardNameOfNode(node: Node | undefined): string | undefined {
+  if (!node) return undefined;
+  const name = ((node.data ?? {}) as Record<string, unknown>).fileName;
+  return typeof name === 'string' && name ? name : node.id;
+}
+
+/** 面板参考项 id → 画布节点 id：画布节点带入的参考项 id 形如 `node-<节点id>`；资产库/角色库
+ *  素材项不做此编码。按节点身份刷新名称时统一走这里解码 */
+export function localNodeIdOf(fileId: string): string | null {
+  if (!fileId.startsWith('node-')) return null;
+  return fileId.slice('node-'.length) || null;
+}
+
+/** 快照参考的名称刷新（IKFA8Y）：选取当刻缓存的名称改为按来源节点身份取当前名称。
+ *  只改展示名称，引用绑定、素材 ID、节点 ID、顺序与角色全部沿用快照；来源节点已不在画布
+ *  （素材库参考等）时保留原名称。 */
+export function freshImageCanvasRefs(refs: ImageMediaRef[], mediaNodes: Node[]): ImageMediaRef[] {
+  const byId = new Map(mediaNodes.map((n) => [n.id, n]));
+  return refs.map((ref) => {
+    const name = cardNameOfNode(byId.get(ref.nodeId));
+    return name === undefined ? ref : { ...ref, name };
+  });
+}
+
 /** 目标节点的有效图片媒体参考：连线 target=该节点，按连线顺序；仅推导当前有效来源
  * （失效/悬空来源不展示也不消费，连线本身保留待来源恢复或用户断开）；
- *  同一素材（相同 assetId）多条连线只取首条（历史画布防御，与连线时重复校验同口径）。 */
+ *  同一素材（相同 assetId）多条连线只取首条（历史画布防御，与连线时重复校验同口径）。
+ *  名称恒取来源节点当前名（改名即时同步，见 IKFA8Y）。 */
 export function imageMediaRefsOf(
   targetNodeId: string,
   edges: Edge[],
@@ -70,7 +96,7 @@ export function imageMediaRefsOf(
     refs.push({
       nodeId: source.id,
       url: data.src as string,
-      name: typeof data.fileName === 'string' && data.fileName ? data.fileName : source.id,
+      name: cardNameOfNode(source)!,
       assetId,
     });
   }

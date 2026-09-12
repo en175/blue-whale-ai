@@ -15,13 +15,14 @@ import {
   enabledVideoFollowModes,
   type VideoFollowMode,
 } from './followDialog';
-import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, type ImageMediaRef } from './mediaRefs';
+import { cardNameOfNode, freshImageCanvasRefs, imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, localNodeIdOf, readAssetId, type ImageMediaRef } from './mediaRefs';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
   isVideoDraftNode,
   MAX_VIDEO_REFS,
   readRefRole,
   readDraftMaterialRefs,
+  freshVideoCanvasRefs,
   mergedVideoMediaRefsOf,
   supportsVideoReferenceModel,
   videoRefConflict,
@@ -34,6 +35,7 @@ import {
 } from './videoMediaRefs';
 import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
+import { downloadFileNameOf } from './components/cardName';
 import type { MediaGenStatus } from './components/MediaNode';
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
 import {
@@ -158,27 +160,33 @@ function hasCustomName(node: Node | undefined): boolean {
   return ((node?.data ?? {}) as Record<string, unknown>).customName === true;
 }
 
-/** 合并已落盘连线参考与「到节点选择」待提交参考（按 assetId 去重） */
-function mergePendingImageCanvasRefs(fromEdges: ImageMediaRef[], pending: ImageMediaRef[]): ImageMediaRef[] {
+/** 合并已落盘连线参考与「到节点选择」待提交参考（按 assetId 去重）；
+ *  待提交参考的名称是选取当刻的快照，按来源节点身份刷新为当前卡片名（IKFA8Y） */
+function mergePendingImageCanvasRefs(
+  fromEdges: ImageMediaRef[],
+  pending: ImageMediaRef[],
+  mediaNodes: Node[],
+): ImageMediaRef[] {
   const seen = new Set(fromEdges.map((r) => r.assetId));
-  const extra = pending.filter((r) => !seen.has(r.assetId));
+  const extra = freshImageCanvasRefs(pending, mediaNodes).filter((r) => !seen.has(r.assetId));
   return extra.length === 0 ? fromEdges : [...fromEdges, ...extra];
 }
 
-/** 合并视频已落盘参考与待提交画布选取参考 */
-function mergePendingVideoCanvasRefs(base: VideoMediaRefs, pending: VideoMediaRefs): VideoMediaRefs {
+/** 合并视频已落盘参考与待提交画布选取参考；待提交参考名称同样按来源节点身份刷新（IKFA8Y） */
+function mergePendingVideoCanvasRefs(base: VideoMediaRefs, pending: VideoMediaRefs, mediaNodes: Node[]): VideoMediaRefs {
   const merged: VideoMediaRefs = {
     reference: [...base.reference],
     first: base.first,
     last: base.last,
     invalid: base.invalid,
   };
-  if (pending.first && !merged.first) merged.first = pending.first;
-  if (pending.last && !merged.last) merged.last = pending.last;
+  const freshPending = freshVideoCanvasRefs(pending, mediaNodes);
+  if (freshPending.first && !merged.first) merged.first = freshPending.first;
+  if (freshPending.last && !merged.last) merged.last = freshPending.last;
   const seen = new Set(merged.reference.map((r) => r.assetId));
   if (merged.first) seen.add(merged.first.assetId);
   if (merged.last) seen.add(merged.last.assetId);
-  for (const item of pending.reference) {
+  for (const item of freshPending.reference) {
     if (seen.has(item.assetId)) continue;
     merged.reference.push(item);
     seen.add(item.assetId);
@@ -335,6 +343,7 @@ export default function CanvasPage() {
     const refs = mergePendingImageCanvasRefs(
       imageMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current),
       imageDraftIdRef.current === targetId ? pendingImageCanvasRefsRef.current : [],
+      mediaNodesRef.current,
     );
     const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>)!;
     if (refs.some((r) => r.assetId === assetId)) {
@@ -366,6 +375,7 @@ export default function CanvasPage() {
     const refs = mergePendingVideoCanvasRefs(
       mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current),
       videoDraftIdRef.current === targetId ? pendingVideoCanvasRefsRef.current : { reference: [] },
+      mediaNodesRef.current,
     );
     const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>);
     const mediaType = ((source.data ?? {}) as Record<string, unknown>).mediaType as 'image' | 'video';
@@ -4088,13 +4098,14 @@ export default function CanvasPage() {
   );
 
   /** 草稿绑定面板的图片媒体参考（IKDMQR）：按连线实时推导，Dock 显示即提交输入（同源）。
-   *  连线持久化后刷新/重开项目同样经此推导恢复展示。 */
+   *  连线持久化后刷新/重开项目同样经此推导恢复展示；名称随来源卡片改名即时同步（IKFA8Y）。 */
   const imageDraftMediaRefs = useMemo(
     () => {
       if (!imageDraftId) return undefined;
       return mergePendingImageCanvasRefs(
         imageMediaRefsOf(imageDraftId, edges, mediaNodes),
         pendingImageCanvasRefs,
+        mediaNodes,
       );
     },
     [imageDraftId, edges, mediaNodes, pendingImageCanvasRefs],
@@ -4124,13 +4135,14 @@ export default function CanvasPage() {
   };
 
   /** 草稿绑定面板的视频媒体参考（IKDMQS）：按连线角色实时分组推导，Dock 显示即提交输入（同源）。
-   *  角色随连线持久化，刷新/重开项目后经同一推导恢复展示。 */
+   *  角色随连线持久化，刷新/重开项目后经同一推导恢复展示；名称随来源卡片改名即时同步（IKFA8Y）。 */
   const videoDraftMediaRefs = useMemo(
     () => {
       if (!videoDraftId) return undefined;
       return mergePendingVideoCanvasRefs(
         mergedVideoMediaRefsOf(videoDraftId, edges, mediaNodes),
         pendingVideoCanvasRefs,
+        mediaNodes,
       );
     },
     [videoDraftId, edges, mediaNodes, pendingVideoCanvasRefs],
@@ -4161,6 +4173,7 @@ export default function CanvasPage() {
     const refs = mergePendingVideoCanvasRefs(
       mergedVideoMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current),
       pendingVideoCanvasRefsRef.current,
+      mediaNodesRef.current,
     );
     // 改角色 ≠ 添加素材：只需检查目标槽是否被**其他**素材占用
     if (role !== 'reference') {
@@ -4390,6 +4403,26 @@ export default function CanvasPage() {
     }
   };
 
+  /** 图片面板初始参考的名称刷新（IKFA8Y）：自由模式不带草稿时参考为选取当刻快照，
+   *  卡片改名后按来源节点身份取当前名称（绑定模式由连线推导，恒为当前名） */
+  const imageSeedView = useMemo(() => {
+    if (!imageSeed || imageDraftId) return imageSeed;
+    const byId = new Map(mediaNodes.map((n) => [n.id, n]));
+    const files = imageSeed.files.map((file) => {
+      const nodeId = localNodeIdOf(file.id);
+      if (!nodeId) return file;
+      const name = cardNameOfNode(byId.get(nodeId));
+      return name === undefined || name === file.name ? file : { ...file, name };
+    });
+    return { ...imageSeed, files };
+  }, [imageSeed, imageDraftId, mediaNodes]);
+
+  /** 视频自由模式参考（IKFA8Y）：参考名称按来源节点身份取当前名称 */
+  const videoFreeRefsView = useMemo(
+    () => freshVideoCanvasRefs(videoFreeRefs, mediaNodes),
+    [videoFreeRefs, mediaNodes],
+  );
+
   /** 触发浏览器文件下载 */
   const triggerFileDownload = (href: string, filename: string, revokeObjectUrl = false) => {
     const a = document.createElement('a');
@@ -4417,7 +4450,8 @@ export default function CanvasPage() {
     }
   };
 
-  /** 下载单个媒体节点：成功返回 true，无素材则 false */
+  /** 下载单个媒体节点：成功返回 true，无素材则 false。
+   *  文件名以当前卡片名称为基础，扩展名取真实文件类型（blob MIME 优先，节点 mime/素材地址兜底，IKFA8Y） */
   const downloadMediaById = async (id: string, notifyMissing: boolean): Promise<boolean> => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (node?.data?.assetMissing) {
@@ -4427,9 +4461,10 @@ export default function CanvasPage() {
     const src = node?.data?.src as string | undefined;
     if (!src) return false;
     const name = (node?.data?.fileName as string) || id;
+    const mime = node?.data?.mime as string | undefined;
     const blob = await fetchAssetBlob(src);
     if (blob) {
-      triggerFileDownload(URL.createObjectURL(blob), name, true);
+      triggerFileDownload(URL.createObjectURL(blob), downloadFileNameOf(name, blob.type || mime, src), true);
       return true;
     }
     window.open(src, '_blank', 'noopener');
@@ -5861,7 +5896,7 @@ export default function CanvasPage() {
                     onParamsChange: () => {},
                   }
             }
-            videoMediaRefs={videoDraftId ? (videoDraftMediaRefs ?? { reference: [] }) : videoFreeRefs}
+            videoMediaRefs={videoDraftId ? (videoDraftMediaRefs ?? { reference: [] }) : videoFreeRefsView}
             onRemoveVideoRef={videoDraftId ? ((nodeId) => handleRemoveVideoRef(videoDraftId, nodeId)) : removeVideoFreeRef}
             onSetVideoRefRole={videoDraftId ? ((nodeId, role) => handleSetVideoRefRole(videoDraftId, nodeId, role)) : changeVideoFreeRefRole}
             onRemoveMaterialRef={videoDraftId ? ((materialId) => handleMaterialRefChange(videoDraftId, materialId, null)) : removeVideoFreeRef}
@@ -5879,7 +5914,7 @@ export default function CanvasPage() {
             key={imageSeed?.ts ?? 0}
             initialText={imageSeed?.text}
             initialDoc={imageSeed?.promptDoc ?? null}
-            initialFiles={imageSeed?.files}
+            initialFiles={imageSeedView?.files}
             initialParams={imageSeed?.params}
             attachments={imageDraftId ? imageDraftAttachments : imageSeed?.attachments}
             mediaRefs={imageDraftId ? imageDraftMediaRefs : undefined}
@@ -5920,6 +5955,7 @@ export default function CanvasPage() {
             onToast={(type, msg) => showToast(type, msg)}
             mentionItems={atMentionItems.filter((item) => item.id !== imageDraftId)}
             onMentionCanvas={handleImageAtMention}
+            currentNodes={mediaNodes}
             followAnchor={imageDraftId ? followAnchor : null}
           />
         )}

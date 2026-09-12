@@ -84,25 +84,56 @@ const apiMocks = vi.hoisted(() => ({
   retryGenerationJob: vi.fn(async (_projectId: string, _jobId: number | string) => ({ generation_job_id: 'j-retry-new', cursor: 2 })),
   createMediaExtraction: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
-  fetchGenerationModels: vi.fn(async () => [
-    {
-      model_id: 'm-test',
-      provider_id: 'prov',
-      model_label: '测试生图模型',
-      icon: null,
-      supported_sizes: [{ id: '2k', label: '2K' }],
-      supported_aspect_ratios: ['1:1'],
-      supported_formats: [],
-      supported_durations: null,
-      default_size: '2k',
-      default_format: null,
-      default_aspect_ratio: '1:1',
-      default_duration: null,
-      features: {},
-      version: 1,
-      digest: '',
-    },
-  ]),
+  /** 按能力返回模型目录：图片面板取 image，视频面板取 video（IKFA8Y 视频参考用例需要视频模型） */
+  fetchGenerationModels: vi.fn(async (capability: string) => capability === 'video'
+    ? [{
+        model_id: 'seedance-2',
+        provider_id: 'prov',
+        model_label: '测试视频模型',
+        icon: null,
+        supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }],
+        supported_aspect_ratios: ['16:9'],
+        supported_formats: [],
+        supported_durations: { min: 4, max: 12, step: 1 },
+        default_size: '720p',
+        default_format: null,
+        default_aspect_ratio: '16:9',
+        default_duration: 5,
+        features: {
+          reference_image: true,
+          max_reference_images: 10,
+          watermark: false,
+          quantity_max: 1,
+          sequential_image_generation: false,
+          stream: false,
+          tools: false,
+          first_frame: true,
+          last_frame: true,
+          first_last_frame: true,
+          audio: false,
+        },
+        version: 1,
+        digest: '',
+      }]
+    : [
+        {
+          model_id: 'm-test',
+          provider_id: 'prov',
+          model_label: '测试生图模型',
+          icon: null,
+          supported_sizes: [{ id: '2k', label: '2K' }],
+          supported_aspect_ratios: ['1:1'],
+          supported_formats: [],
+          supported_durations: null,
+          default_size: '2k',
+          default_format: null,
+          default_aspect_ratio: '1:1',
+          default_duration: null,
+          features: { reference_image: true, max_reference_images: 9 },
+          version: 1,
+          digest: '',
+        },
+      ]),
 }));
 
 vi.mock('@/api/projects', () => ({
@@ -180,6 +211,7 @@ vi.mock('./hooks/useCanvasDoc', () => ({
  * - gen-auto：未自定义的生成中卡（自动命名回归基线）
  * - fail-custom：已自定义名称的首生成失败卡（重试用例）
  * - cancel-custom：已自定义名称的生成中草稿卡（取消回退用例）
+ * - vd1：待生成视频草稿卡（IKFA8Y 视频参考显示同步用例）
  */
 function seedRenameDoc() {
   canvasDocMock.current = {
@@ -191,23 +223,27 @@ function seedRenameDoc() {
         { id: 't1', type: 'textNode', position: { x: 0, y: 0 }, data: { html: '<p>正文</p>' } },
         {
           id: 'img-a', type: 'mediaNode', position: { x: 200, y: 0 },
-          data: { src: 'http://img/shared.png', mediaType: 'image', fileName: '上传图.png', assetId: 'a1' },
+          data: { src: 'http://img/shared.png', mediaType: 'image', fileName: '上传图.png', assetId: 'a1', mime: 'image/png' },
         },
         {
           id: 'img-b', type: 'mediaNode', position: { x: 560, y: 0 },
-          data: { src: 'http://img/shared.png', mediaType: 'image', fileName: '上传图.png', assetId: 'a1' },
+          data: { src: 'http://img/shared.png', mediaType: 'image', fileName: '上传图.png', assetId: 'a1', mime: 'image/png' },
         },
         {
           id: 'vid', type: 'mediaNode', position: { x: 920, y: 0 },
-          data: { src: 'http://img/clip.mp4', mediaType: 'video', fileName: '素材视频.mp4', assetId: 'a2' },
+          data: { src: 'http://img/clip.mp4', mediaType: 'video', fileName: '素材视频.mp4', assetId: 'a2', mime: 'video/mp4' },
         },
         {
           id: 'aud', type: 'mediaNode', position: { x: 1280, y: 0 },
-          data: { src: 'http://img/bgm.mp3', mediaType: 'audio', fileName: '配乐.mp3', assetId: 'a3' },
+          data: { src: 'http://img/bgm.mp3', mediaType: 'audio', fileName: '配乐.mp3', assetId: 'a3', mime: 'audio/mpeg' },
         },
         {
           id: 'd1', type: 'mediaNode', position: { x: 420, y: 400 },
           data: { src: '', mediaType: 'image', fileName: '图片草稿', genStatus: 'draft', draft: true, prompt: '' },
+        },
+        {
+          id: 'vd1', type: 'mediaNode', position: { x: 700, y: 600 },
+          data: { src: '', mediaType: 'video', fileName: '视频草稿', genStatus: 'draft', draft: true, prompt: '', draftMode: 'reference' },
         },
         {
           id: 'gen-custom', type: 'mediaNode', position: { x: 780, y: 400 },
@@ -278,6 +314,91 @@ function sendButton(): HTMLButtonElement {
   return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.getAttribute('title') === '发送',
   )!;
+}
+
+/** 下载捕获：拦下 <a download> 的点击，读回浏览器将要保存的文件名（同组下载既有做法） */
+let downloadedName = '';
+function stubDownloadCapture() {
+  downloadedName = '';
+  const realCreate = document.createElement.bind(document);
+  vi.spyOn(document, 'createElement').mockImplementation(((tag: string, options?: ElementCreationOptions) => {
+    const el = realCreate(tag, options);
+    if (tag === 'a') {
+      (el as HTMLAnchorElement).click = () => {
+        downloadedName = (el as HTMLAnchorElement).download;
+      };
+    }
+    return el;
+  }) as typeof document.createElement);
+}
+
+/** 媒体节点下载回调（节点工具条/右键菜单的下载入口），返回下载后的文件名 */
+async function downloadVia(id: string, type: string): Promise<string> {
+  const onDownload = mediaNode(id).data.onDownload as ((id: string) => Promise<void>) | undefined;
+  expect(typeof onDownload, `${id} 应已接入下载回调`).toBe('function');
+  const blob = new Blob(['x'], { type });
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, blob: async () => blob })));
+  vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:stub', revokeObjectURL: () => {} });
+  await act(async () => {
+    await onDownload!(id);
+  });
+  return downloadedName;
+}
+
+/** 图片草稿面板参考缩略项图片 alt（ImageDialog 按来源节点身份渲染，alt = 参考名称） */
+function dockRefNames(): string[] {
+  return [...container.querySelectorAll<HTMLImageElement>('[data-testid="dock-media-ref"] img')].map(
+    (img) => img.alt,
+  );
+}
+
+/** 图片自由面板参考项名称（无 dock 测试标识，取面板内预览项 img 的 alt） */
+function freePanelRefNames(): string[] {
+  const dialog = container.querySelector('[class*="dialog"]');
+  return [...(dialog?.querySelectorAll<HTMLImageElement>('img[alt]') ?? [])].map((img) => img.alt);
+}
+
+/** 视频面板参考缩略项标题（BottomDialog 按来源节点身份渲染，title = 参考名称） */
+function dockVideoRefNames(): string[] {
+  return [...container.querySelectorAll<HTMLElement>('[data-testid="dock-video-ref"]')].map(
+    (el) => el.getAttribute('title') ?? '',
+  );
+}
+
+/** 打开图片草稿卡 d1 的绑定生成面板 */
+async function openImageDraftPanel(): Promise<string> {
+  await act(async () => {
+    flowProps.current.onNodeClick(mediaNode('d1'));
+  });
+  await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
+  return 'd1';
+}
+
+/** 打开视频草稿卡 vd1 的绑定生成面板 */
+async function openVideoDraftPanel(): Promise<string> {
+  await act(async () => {
+    flowProps.current.onNodeClick(mediaNode('vd1'));
+  });
+  return 'vd1';
+}
+
+/** 视频草稿面板内「到节点选择」：进入选取模式后点画布节点作为普通参考（同画布连线语义） */
+async function pickNodeIntoVideoPanel(nodeId: string, role: '图片' | '视频' = '图片') {
+  const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+    (b.getAttribute('title') ?? '').startsWith(`添加${role}参考`),
+  )!;
+  await act(async () => {
+    entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+  const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.textContent === '到节点选择',
+  )!;
+  await act(async () => {
+    item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+  await act(async () => {
+    flowProps.current.onNodeClick(mediaNode(nodeId));
+  });
 }
 
 
@@ -466,5 +587,146 @@ describe('IKFA8X 生成生命周期保留自定义名', () => {
     await vi.waitFor(() => expect(mediaNode('cancel-custom').data.genStatus).toBe('draft'), { timeout: 5000 });
     expect(mediaNode('cancel-custom').data.fileName).toBe('等待中的草稿');
     expect(mediaNode('cancel-custom').data.customName).toBe(true);
+  });
+});
+
+describe('IKFA8Y 改名同步当前参考显示', () => {
+  it('改名已被生成面板引用的卡片：参考显示同步新名称，连线与引用身份不变', async () => {
+    await renderPage();
+    const draftId = await openImageDraftPanel();
+
+    // 画布连线建立图片参考：img-a（a1）→ 草稿
+    await act(async () => {
+      flowProps.current.onConnect({ source: 'img-a', target: draftId, sourceHandle: null, targetHandle: null });
+    });
+    await vi.waitFor(() => expect(dockRefNames()).toEqual(['上传图.png']));
+
+    // 改名来源卡片：参考显示同步新名称
+    await renameVia('img-a', 'media', '海边日落');
+    await vi.waitFor(() => expect(dockRefNames()).toEqual(['海边日落']));
+
+    // 引用对象与连线不变：仍是同一节点、同一素材
+    expect(flowProps.current.edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`))
+      .toEqual([`img-a->${draftId}`]);
+    expect(mediaNode('img-a').data.assetId).toBe('a1');
+    expect(mediaNode('img-a').data.src).toBe('http://img/shared.png');
+  });
+
+  it('同素材多张卡只更新改名节点的参考显示', async () => {
+    await renderPage();
+    const draftId = await openImageDraftPanel();
+    // img-a 与 img-b 同素材 a1：仅改名 img-a
+    await act(async () => {
+      flowProps.current.onConnect({ source: 'img-a', target: draftId, sourceHandle: null, targetHandle: null });
+    });
+    await renameVia('img-a', 'media', '只改这张');
+    await vi.waitFor(() => expect(dockRefNames()).toEqual(['只改这张']));
+    expect(mediaNode('img-b').data.fileName).toBe('上传图.png');
+  });
+
+  it('视频面板参考同样随改名同步（连线推导 + 选取当刻缓存两条路径）', async () => {
+    await renderPage();
+    const draftId = await openVideoDraftPanel();
+
+    // 连线来源：改名后按来源节点身份取当前名称（连线用视频素材，暂存选取用图片素材，避免同素材去重）
+    await act(async () => {
+      flowProps.current.onConnect({ source: 'vid', target: draftId, sourceHandle: null, targetHandle: null });
+    });
+    await vi.waitFor(() => expect(dockVideoRefNames()).toEqual(['素材视频.mp4']));
+    await renameVia('vid', 'media', '连线改名');
+    await vi.waitFor(() => expect(dockVideoRefNames()).toEqual(['连线改名']));
+
+    // 选取当刻缓存路径：先选取并入暂存参考，再改名
+    await pickNodeIntoVideoPanel('img-a');
+    await vi.waitFor(() => expect(dockVideoRefNames()).toEqual(['连线改名', '上传图.png']));
+    await renameVia('img-a', 'media', '暂存改名');
+    await vi.waitFor(() => expect(dockVideoRefNames()).toEqual(['连线改名', '暂存改名']));
+  });
+
+  it('改名后新选参考使用当前名称；已提交的生成记录保持当次输入', async () => {
+    await renderPage();
+    const draftId = await openImageDraftPanel();
+    // 连线建立参考后改名：参考显示用当前名称，提交输入仍是同一素材身份
+    await act(async () => {
+      flowProps.current.onConnect({ source: 'img-a', target: draftId, sourceHandle: null, targetHandle: null });
+    });
+    await vi.waitFor(() => expect(dockRefNames()).toEqual(['上传图.png']));
+    await renameVia('img-a', 'media', '改名后引用');
+    await vi.waitFor(() => expect(dockRefNames()).toEqual(['改名后引用']));
+
+    await typePrompt('把这张图重新画一遍');
+    await act(async () => {
+      sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+
+    // 历史生成请求冻结当次输入：素材身份不随后续改名变化，也不会重复提交
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
+    expect(payload.input_asset_ids).toEqual(['a1']);
+    await renameVia('img-a', 'media', '发送后再改');
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].input_asset_ids).toEqual(['a1']);
+    expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1);
+  });
+
+  it('图片自由面板（画布节点带入的参考）同步改名后的名称', async () => {
+    await renderPage();
+    await act(async () => {
+      (mediaNode('img-a').data.onGenImage as (id: string) => void)('img-a');
+    });
+    await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
+    expect(freePanelRefNames()).toEqual(['上传图.png']);
+
+    await renameVia('img-a', 'media', '自由面板改名');
+    await vi.waitFor(() => expect(freePanelRefNames()).toEqual(['自由面板改名']));
+  });
+});
+
+describe('IKFA8Y 下载以当前卡片名称命名', () => {
+  beforeEach(() => {
+    stubDownloadCapture();
+  });
+
+  it('改名后下载：用当前卡片名称 + 真实类型扩展名', async () => {
+    await renderPage();
+    await renameVia('img-a', 'media', '海边日落');
+    expect(await downloadVia('img-a', 'image/png')).toBe('海边日落.png');
+  });
+
+  it('卡片名称自带扩展名时不重复追加，扩展名与真实类型不一致时按真实类型纠正', async () => {
+    await renderPage();
+    // 未改名的上传卡本身带 .png：不重复追加
+    expect(await downloadVia('img-a', 'image/png')).toBe('上传图.png');
+    // 用户改名保留了旧扩展名：按真实类型替换，不产生「视频名.mp4.png」这类名实不符的文件
+    await renameVia('img-a', 'media', '海边日落.mp4');
+    expect(await downloadVia('img-a', 'image/png')).toBe('海边日落.png');
+  });
+
+  it('视频与音频按各自真实类型命名', async () => {
+    await renderPage();
+    await renameVia('vid', 'media', '片头');
+    expect(await downloadVia('vid', 'video/mp4')).toBe('片头.mp4');
+    await renameVia('aud', 'media', '旁白');
+    expect(await downloadVia('aud', 'audio/mpeg')).toBe('旁白.mp3');
+  });
+
+  it('同素材另一张卡的下载名称不被联动，素材库命名不受影响', async () => {
+    await renderPage();
+    await renameVia('img-a', 'media', '只改这张');
+    expect(await downloadVia('img-a', 'image/png')).toBe('只改这张.png');
+    expect(await downloadVia('img-b', 'image/png')).toBe('上传图.png');
+    expect(mediaNode('img-b').data.customName).toBeUndefined();
+  });
+
+  it('保存成功并刷新恢复后，下载仍使用持久恢复的新名称', async () => {
+    await renderPage();
+    await renameVia('img-a', 'media', '持久名');
+    await vi.waitFor(
+      () => {
+        const last = apiMocks.saveCanvasDoc.mock.calls.at(-1);
+        expect(last![1].nodes.find((n: Node) => n.id === 'img-a')!.data.fileName).toBe('持久名');
+      },
+      { timeout: 3000 },
+    );
+    expect(await downloadVia('img-a', 'image/png')).toBe('持久名.png');
   });
 });

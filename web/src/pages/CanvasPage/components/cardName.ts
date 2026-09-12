@@ -2,10 +2,78 @@
  * 卡片名称（IKFA8X）：图片/视频/音频/文本卡片双击改名共用规则。
  * 名称是节点级显示信息（媒体节点 data.fileName / 文本节点 data.title），
  * 用户自定义状态由显式 data.customName 标记，不靠名称内容推断。
+ * 下载文件名（IKFA8Y）：以当前卡片名称为基础，扩展名取自真实文件类型。
  * ============================================ */
 
 /** 卡片名称最大字符数（按 JS 字符串长度计；父规格 A08：100 可保存，101 拒绝） */
 export const CARD_NAME_MAX_LENGTH = 100;
+
+/** 完整 MIME → 该类型的等价扩展名集合（首项为规范写法，用于下载命名） */
+const MIME_EXTENSIONS: Record<string, string[]> = {
+  'image/jpeg': ['jpg', 'jpeg'],
+  'image/png': ['png'],
+  'image/webp': ['webp'],
+  'image/gif': ['gif'],
+  'image/avif': ['avif'],
+  'video/mp4': ['mp4'],
+  'video/webm': ['webm'],
+  'video/quicktime': ['mov'],
+  'audio/mpeg': ['mp3'],
+  'video/mpeg': ['mpeg', 'mpg'],
+  'audio/mp3': ['mp3'],
+  'audio/wav': ['wav'],
+  'audio/x-wav': ['wav'],
+  'audio/aac': ['aac'],
+  'audio/ogg': ['ogg'],
+  'audio/flac': ['flac'],
+  'audio/x-flac': ['flac'],
+};
+
+/** 取路径末段「看起来是文件扩展名」的一段（2–5 位字母数字，如 .png / .m4a）；无则空串 */
+function extensionOfPath(path: string): string {
+  const match = /\.([A-Za-z0-9]{2,5})$/.exec(path.trim());
+  return match ? match[1]!.toLowerCase() : '';
+}
+
+/** 真实文件类型对应的扩展名：优先 MIME（blob / 节点），其次素材地址路径；都拿不到返回空串 */
+export function mediaExtensionOf(mime?: string, src?: string): string {
+  const mediaType = (mime ?? '').split(';')[0]!.trim().toLowerCase();
+  const fromMime = MIME_EXTENSIONS[mediaType];
+  if (fromMime) return fromMime[0]!;
+  let path = (src ?? '').split(/[?#]/)[0]!;
+  try {
+    path = new URL(path).pathname;
+  } catch {
+    // 相对地址（blob: 等）按原串处理
+  }
+  return extensionOfPath(path);
+}
+
+/** 名称与实际扩展名须同属一种媒体类型（例如 jpg/jpeg、mpeg/mpg）。 */
+function isSameFileType(nameExt: string, realExt: string): boolean {
+  return nameExt === realExt || Object.values(MIME_EXTENSIONS).some(
+    (extensions) => extensions.includes(nameExt) && extensions.includes(realExt),
+  );
+}
+
+/**
+ * 下载文件名（IKFA8Y）：以卡片名称为基础，扩展名取真实文件类型。
+ * 名称已带同一扩展名（.jpg 与 .jpeg 互认）时不重复追加；带的是别的扩展名时按真实类型替换，
+ * 避免出现「海边日落.mp4.png」这类名实不符的名字；类型未知时原样使用卡片名称。
+ * 名称以点开头或全是点（如「.」「..png」）时退化为按卡片名主干拼一次扩展名，不产出多重点号。
+ */
+export function downloadFileNameOf(name: string, mime?: string, src?: string): string {
+  const trimmed = name.trim() || '下载';
+  const ext = mediaExtensionOf(mime, src);
+  if (!ext) return trimmed;
+  const suffix = extensionOfPath(trimmed);
+  const current = suffix === ext || suffix === 'txt' || Object.values(MIME_EXTENSIONS).some((extensions) => extensions.includes(suffix))
+    ? suffix : '';
+  const stem = (current ? trimmed.slice(0, -(current.length + 1)) : trimmed).replace(/^\.+/, '');
+  if (!stem) return `下载.${ext}`;
+  if (current && isSameFileType(current, ext)) return trimmed;
+  return `${stem}.${ext}`;
+}
 
 export type CardNameCommit =
   /** 有效新名称：保存去首尾空格后的值 */
