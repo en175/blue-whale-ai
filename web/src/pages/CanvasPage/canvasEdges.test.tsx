@@ -156,7 +156,8 @@ vi.mock('./hooks/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 
-/** 画布文档：文本节点 t1/t2 + 图片媒体节点 m1，连线 e1: t1 → m1 */
+/** 画布文档：文本节点 t1/t2 + 图片媒体节点 m1 + 图片草稿 d1，连线 e1: t1 → m1
+ *  d1 作为合法连线目标（connectPair 要求 genKindOf 非空）；m1 为成品卡，不再接受新连线。 */
 function seedDoc() {
   canvasDocMock.current = {
     doc: {
@@ -171,6 +172,12 @@ function seedDoc() {
           type: 'mediaNode',
           position: { x: 200, y: 0 },
           data: { src: 'http://img/m1.png', mediaType: 'image', fileName: '目标图', assetId: 'a1' },
+        },
+        {
+          id: 'd1',
+          type: 'mediaNode',
+          position: { x: 420, y: 160 },
+          data: { src: '', mediaType: 'image', fileName: '图片草稿', genStatus: 'draft', draft: true, prompt: '' },
         },
       ],
       edges: [{ id: 'e1', source: 't1', target: 'm1' }],
@@ -236,14 +243,18 @@ describe('IKDLQF 连线受控化与目标生图接线', () => {
   });
 
   it('无变更不保存；连线变更进入自动保存签名并随下次保存上送', async () => {
+    // 新连线只允许进入生成节点；普通成品图不再是合法目标。
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    doc.nodes.find((n) => n.id === 'm1')!.data.draft = true;
     await renderPage();
 
     // 水合基线与当前内容一致：超过防抖窗口也不应发起保存
     await act(async () => { await new Promise((r) => setTimeout(r, 1200)); });
     expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
 
+    // 连线目标须为草稿节点（connectPair 要求 genKindOf 非空；m1 为成品卡不再接受新连线）
     await act(async () => {
-      flowProps.current.onConnect({ source: 't2', target: 'm1', sourceHandle: null, targetHandle: null });
+      flowProps.current.onConnect({ source: 't2', target: 'd1', sourceHandle: null, targetHandle: null });
     });
 
     await vi.waitFor(
@@ -254,7 +265,7 @@ describe('IKDLQF 连线受控化与目标生图接线', () => {
     expect(payload.edges).toHaveLength(2);
     expect(payload.edges.map((e) => ({ source: e.source, target: e.target }))).toEqual([
       { source: 't1', target: 'm1' },
-      { source: 't2', target: 'm1' },
+      { source: 't2', target: 'd1' },
     ]);
   });
 
@@ -717,10 +728,14 @@ describe('IKDL9U review text input consistency', () => {
     expect(container.textContent).toContain('夜景');
   });
   it('pauses autosave for invalid drafts and resumes after correction', async () => {
+    // 新连线只允许进入生成节点；普通成品图不再是合法目标。
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    doc.nodes.find((n) => n.id === 'm1')!.data.draft = true;
     await renderPage();
     await act(async () => {
       flowProps.current.textNodes[0].data.onDraftError('t1', '正文超限');
-      flowProps.current.onConnect({ source: 't2', target: 'm1', sourceHandle: null, targetHandle: null });
+      // 连线目标须为草稿节点（m1 为成品卡不再接受新连线）
+      flowProps.current.onConnect({ source: 't2', target: 'd1', sourceHandle: null, targetHandle: null });
     });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 1100)); });
     expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();

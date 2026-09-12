@@ -26,6 +26,7 @@ import {
   ERROR_UNSUPPORTED_INPUT,
   ERROR_UNSUPPORTED_TYPE,
   textAttachmentSnapshotSchema,
+  promptPlanSnapshotSchema,
 } from "@blue-whale/contracts";
 import {
   mapImageChannelRequest,
@@ -47,7 +48,7 @@ export type WorkerDeps = {
   createImageProvider: (token: string) => ImageProvider;
   /** 按 job 密封凭证构建音频 provider(与 image/video 一致)。 */
   createAudioProvider: (token: string) => AudioProvider;
-  /** 解密 job.input.provider_credential → sk token。 */
+  /** 读取 job.input.provider_credential → sk token（修正四：明文直取）。 */
   credentialVault: { open: (ciphertext: string) => string };
   videoProvider?: VideoProvider;
   workerId: string;
@@ -290,6 +291,12 @@ async function processClaimedJob(
   }
 
   const input = (job.input ?? {}) as GenerationJobInput;
+  const parsedPlan = promptPlanSnapshotSchema.safeParse(input.prompt_plan_snapshot);
+  if (input.prompt_plan_snapshot !== undefined && !parsedPlan.success) {
+    await failClaimed(ERROR_INVALID_INPUT, "方案输入快照无效");
+    return job.id;
+  }
+  const planSnapshot = parsedPlan.success ? parsedPlan.data : undefined;
   const prompt = typeof input.prompt === "string" ? input.prompt : "";
   const modelId = typeof input.model_id === "string" ? input.model_id : "";
   // IKDLQF：图片任务允许空 prompt 仅凭非空白附件正文驱动（契约「接纳快照」）；
@@ -351,8 +358,13 @@ async function processClaimedJob(
     );
     return job.id;
   }
-  const sourceAssets =
-    referenceIds.length > 0
+  if (planSnapshot && JSON.stringify(planSnapshot.images.map(image => image.assetId)) !== JSON.stringify(referenceIds)) {
+    await failClaimed(ERROR_INVALID_REFERENCE, "方案素材快照与输入不一致");
+    return job.id;
+  }
+  const sourceAssets = planSnapshot
+    ? planSnapshot.images.map(image => ({ id: image.assetId, type: "image", url: image.url, mime: null, size: null, width: null, height: null, duration: null, material_id: null }))
+    : referenceIds.length > 0
       ? await repo.resolveInputAssets(referenceIds, job.user_id, job.project_id)
       : [];
   if (
@@ -365,15 +377,15 @@ async function processClaimedJob(
 
   try {
     if (job.type === "audio") {
-      const sealedCredential = job.input?.provider_credential;
-      if (typeof sealedCredential !== "string" || sealedCredential.length === 0) {
+      const providerCredential = job.input?.provider_credential;
+      if (typeof providerCredential !== "string" || providerCredential.length === 0) {
         await failClaimed(
           ERROR_PROVIDER_CREDENTIAL_MISSING,
           "音频任务缺少供应商凭证",
         );
         return job.id;
       }
-      const providerToken = credentialVault.open(sealedCredential);
+      const providerToken = credentialVault.open(providerCredential);
       const provider = deps.createAudioProvider(providerToken);
       providerTokenRef = providerToken;
       const cap = await repo.findImageCapability(modelId, null);
@@ -496,16 +508,16 @@ async function processClaimedJob(
       return job.id;
     }
 
-    // 图片：sk token 从 job 密封凭证解出（不依赖请求闭包），恢复扫描也能重放。
-    const sealedCredential = job.input?.provider_credential;
-    if (typeof sealedCredential !== "string" || sealedCredential.length === 0) {
+    // 图片：sk token 直接读 job.provider_credential（修正四：明文，不再解封）。
+    const providerCredential = job.input?.provider_credential;
+    if (typeof providerCredential !== "string" || providerCredential.length === 0) {
       await failClaimed(
         ERROR_PROVIDER_CREDENTIAL_MISSING,
         "图片任务缺少供应商凭证",
       );
       return job.id;
     }
-    const providerToken = credentialVault.open(sealedCredential);
+    const providerToken = credentialVault.open(providerCredential);
     const provider = createImageProvider(providerToken);
     providerTokenRef = providerToken;
 
@@ -564,10 +576,10 @@ async function processClaimedJob(
       model: cap.model_id,
       // IKDLQF：有文本附件时按契约组合（附件正文按序在前、忽略纯空白、非空 prompt 最后追加）；
       // 无附件时沿用原 prompt，与旧链路逐字节一致。
-      prompt:
+      prompt: planSnapshot?.providerPrompt ?? (
         textAttachments.length > 0
           ? composeImagePrompt(textAttachments, prompt)
-          : prompt,
+          : prompt),
       size: providerSize,
       ...(providerQuality ? { quality: providerQuality } : {}),
       webSearch: input.web_search === true,

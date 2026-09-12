@@ -766,6 +766,7 @@ model prompt_preview_snapshots {
   source_json Json
   title       String   @db.VarChar(200)
   text        String   @db.MediumText
+  content_json Json?
   gmt_create  DateTime @default(now()) @db.DateTime(0)
 
   @@unique([project_id, source_key], map: "uk_prompt_preview_source")

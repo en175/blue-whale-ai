@@ -615,7 +615,11 @@ describe('IKDXHS：首页生成节点保留可编辑配置', () => {
     expect(repeated.target_node_id).toBe(generatedId);
     expect(repeated.parameters.model_id).toBe('m-test');
     if (kind === 'image') expect(repeated.input_asset_ids).toEqual(['a2']);
-    else expect(repeated).toMatchObject({ first_frame_asset_id: 'a1', last_frame_asset_id: 'a2' });
+    // IKEXX8 视频参考改为 structured references 数组（首帧/尾帧角色随连线持久化）
+    else expect(repeated.references).toEqual([
+      { asset_id: 'a1', role: 'first_frame', type: 'image' },
+      { asset_id: 'a2', role: 'last_frame', type: 'image' },
+    ]);
   });
 });
 

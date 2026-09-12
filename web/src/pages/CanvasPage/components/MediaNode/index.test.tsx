@@ -8,8 +8,10 @@ import MediaNode, { type MediaGenStatus } from './index';
 let root: Root;
 let mountNode: HTMLDivElement;
 
-function labels() {
-  return [...mountNode.querySelectorAll('button')].map((button) => button.textContent?.trim() || button.getAttribute('title') || '');
+function labels(toolbarOnly = false) {
+  return [...mountNode.querySelectorAll('button')]
+    .filter((button) => !toolbarOnly || !button.closest('[data-testid="media-content"]'))
+    .map((button) => button.textContent?.trim() || button.getAttribute('title') || '');
 }
 
 interface RenderExtra {
@@ -72,12 +74,13 @@ beforeEach(() => {
 afterEach(async () => {
   if (root) await act(async () => root.unmount());
   mountNode?.remove();
+  vi.restoreAllMocks();
 });
 
 describe('MediaNode selected toolbar', () => {
   it('hides @, generate-image and generate-video on an audio node', async () => {
     await renderNode('audio');
-    expect(labels()).toEqual(['重新编辑', '详情', '下载']);
+    expect(labels(true)).toEqual(['重新编辑', '详情', '下载']);
   });
 
   it('keeps @ and generate actions on an image node', async () => {
@@ -92,9 +95,9 @@ describe('MediaNode selected toolbar', () => {
 });
 
 describe('MediaNode draft overlay (IKDMQQ)', () => {
-  it('待生成草稿：渲染待生成占位而非素材已被删除，无取消/重试按钮', async () => {
+  it('待生成草稿：渲染按类型占位文案而非素材已被删除，无取消/重试按钮', async () => {
     await renderNode('image', { genStatus: 'draft', selected: false, data: { src: '', draft: true } });
-    expect(mountNode.textContent).toContain('待生成');
+    expect(mountNode.textContent).toContain('图片生成');
     expect(mountNode.textContent).not.toContain('素材已被删除');
     expect(mountNode.textContent).not.toContain('取消生成');
     expect(mountNode.textContent).not.toContain('重试');
@@ -370,11 +373,41 @@ describe('MediaNode audio layout', () => {
   });
 
   it('keeps player controls reachable and out of the node drag path', async () => {
-    await renderNode('audio', { selected: false });
+    await renderNode('audio', { selected: false, data: { toolMode: 'select' } });
+    // 自定义 AudioPlayer 取代原生 controls：audio 元素仍在 DOM 中，
+    // 播放/暂停按钮与波形区携带 nodrag nopan 确保不落入节点拖拽路径。
     const audio = mountNode.querySelector('audio');
     expect(audio).toBeTruthy();
-    expect(audio!.getAttribute('controls')).not.toBeNull();
-    expect(audio!.className).toContain('nodrag');
+    const playButton = contentCard().querySelector<HTMLButtonElement>('button[aria-label="播放"]')!;
+    expect(playButton).toBeTruthy();
+    expect(playButton.classList.contains('nodrag')).toBe(true);
+    expect(playButton.classList.contains('nopan')).toBe(true);
+    const play = vi.spyOn(audio!, 'play').mockImplementation(async () => {
+      Object.defineProperty(audio, 'paused', { configurable: true, value: false });
+      audio!.dispatchEvent(new Event('play'));
+    });
+    const pause = vi.spyOn(audio!, 'pause').mockImplementation(() => {
+      Object.defineProperty(audio, 'paused', { configurable: true, value: true });
+      audio!.dispatchEvent(new Event('pause'));
+    });
+    await act(async () => { playButton.click(); });
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(playButton.getAttribute('aria-label')).toBe('暂停');
+    await act(async () => { playButton.click(); });
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(playButton.getAttribute('aria-label')).toBe('播放');
+
+    // 波形负责进度跳转；操作区域同样排除节点拖动和画布平移。
+    const track = audio!.parentElement!.querySelector<HTMLElement>('div.nodrag.nopan')!;
+    expect(track).toBeTruthy();
+    vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 200 } as DOMRect);
+    Object.defineProperty(audio, 'duration', { configurable: true, value: 100 });
+    await act(async () => { audio!.dispatchEvent(new Event('loadedmetadata')); });
+    await act(async () => {
+      track.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, bubbles: true, cancelable: true }));
+      document.dispatchEvent(new MouseEvent('mouseup', { clientX: 100, bubbles: true }));
+    });
+    expect(audio!.currentTime).toBe(50);
   });
 
   it('keeps the square body for generating, failed and missing audio', async () => {

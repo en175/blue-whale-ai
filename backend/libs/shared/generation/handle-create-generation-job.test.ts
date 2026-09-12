@@ -1739,6 +1739,165 @@ describe("handleCreateGenerationJob 参考素材前置（IKE7JP）", () => {
   });
 });
 
+// IKESD6 / ADR-0085：raw prompt 上限跟随模型目录 features.max_prompt_length，
+// 缺省回落旧硬编码（image/video 4000 / audio 3000）；错误码与文案不变。
+describe("handleCreateGenerationJob 按模型提示词上限（IKESD6）", () => {
+  function promptOf(len: number) {
+    return "a".repeat(len);
+  }
+
+  function imageBodyWithPrompt(prompt: string) {
+    return {
+      type: "image",
+      expected_output_count: 1,
+      parameters: { prompt, model_id: "gpt-image-2-text-to-image", aspect_ratio: "1:1" },
+    };
+  }
+
+  it("max_prompt_length=32000：5000 字 prompt → 200（旧 4000 硬编码会误拒）", async () => {
+    const { deps, createJob } = buildCapabilityDeps([
+      { model_id: "gpt-image-2-text-to-image", features: { max_prompt_length: 32000 } },
+    ]);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", imageBodyWithPrompt(promptOf(5000)), null, deps,
+    );
+
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("max_prompt_length=32000：32001 字 → 400 prompt 无效", async () => {
+    const { deps, createJob } = buildCapabilityDeps([
+      { model_id: "gpt-image-2-text-to-image", features: { max_prompt_length: 32000 } },
+    ]);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", imageBodyWithPrompt(promptOf(32001)), null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("prompt 无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("未配置：4001 字 → 400（缺省回落旧硬编码，行为回归）", async () => {
+    const { deps, createJob } = buildCapabilityDeps([
+      { model_id: "gpt-image-2-text-to-image", features: { reference_image: true } },
+    ]);
+
+    const result = await handleCreateGenerationJob(
+      "u1", "p1", imageBodyWithPrompt(promptOf(4001)), null, deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("prompt 无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("配置收紧（500）：501 字 → 400，500 字 → 200", async () => {
+    const { deps, createJob } = buildCapabilityDeps([
+      { model_id: "gpt-image-2-text-to-image", features: { max_prompt_length: 500 } },
+    ]);
+
+    const over = await handleCreateGenerationJob(
+      "u1", "p1", imageBodyWithPrompt(promptOf(501)), null, deps,
+    );
+    const exact = await handleCreateGenerationJob(
+      "u1", "p1", imageBodyWithPrompt(promptOf(500)), null, deps,
+    );
+
+    expect(over.code).toBe(400);
+    expect(exact.code).toBe(200);
+  });
+});
+
+// IKESD6 / ADR-0085：组合闸取 max(契约预算 30000, 模型值)——配了 32000 的模型
+// 挂文本附件不应先撞 30000（否则配置形同虚设）。
+describe("handleCreateGenerationJob 组合上限跟随模型值（IKESD6）", () => {
+  function buildTargetDepsWithPromptCap(opts: {
+    maxPromptLength?: number;
+    attachLen: number;
+  }) {
+    const findOwnedById = vi.fn().mockResolvedValue({ id: "1" });
+    const listEnabledByType = vi.fn().mockResolvedValue([
+      {
+        model_id: "seedream-5.0",
+        features: opts.maxPromptLength
+          ? { max_prompt_length: opts.maxPromptLength }
+          : undefined,
+      },
+    ]);
+    const createJob = vi.fn().mockResolvedValue({ generation_job_id: "1", cursor: 1 });
+    const getByProject = vi.fn().mockResolvedValue({
+      id: "9",
+      project_id: "1",
+      version: 3,
+      viewport: null,
+      nodes: JSON.stringify([
+        { id: "media-1", type: "mediaNode", data: { mediaType: "image" } },
+        { id: "text-a", type: "textNode", data: { title: "a", text: "甲".repeat(opts.attachLen) } },
+        { id: "text-b", type: "textNode", data: { title: "b", text: "乙".repeat(opts.attachLen) } },
+      ]),
+      edges: JSON.stringify([
+        { id: "e1", source: "text-a", target: "media-1" },
+        { id: "e2", source: "text-b", target: "media-1" },
+      ]),
+    });
+    const deps = {
+      projects: { findOwnedById },
+      models: { listEnabledByType },
+      command: { createJob },
+      canvas: { getByProject },
+      assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
+    } as unknown as HandlerDeps;
+    return { deps, createJob };
+  }
+
+  function emptyPromptOnTarget() {
+    return {
+      ...IMAGE_TARGET_BODY,
+      parameters: { ...IMAGE_TARGET_BODY.parameters, prompt: "" },
+    };
+  }
+
+  it("模型 32000：组合 30002（>旧闸 30000，≤模型值）→ 200 放行", async () => {
+    const { deps, createJob } = buildTargetDepsWithPromptCap({
+      maxPromptLength: 32_000,
+      attachLen: 15_000,
+    });
+
+    const result = await handleCreateGenerationJob("u1", "p1", emptyPromptOnTarget(), null, deps);
+
+    // 30000 + 2 个换行连接符 = 30002：旧组合闸必拒，跟随模型值后放行。
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("模型 32000：组合 40002 超闸 → 400 且文案上限取模型值", async () => {
+    const { deps, createJob } = buildTargetDepsWithPromptCap({
+      maxPromptLength: 32_000,
+      attachLen: 20_000,
+    });
+
+    const result = await handleCreateGenerationJob("u1", "p1", emptyPromptOnTarget(), null, deps);
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("文本附件与提示词组合后超过 32000 字上限");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("未配置：30002 组合仍撞旧闸 30000（回归）", async () => {
+    const { deps, createJob } = buildTargetDepsWithPromptCap({ attachLen: 15_000 });
+
+    const result = await handleCreateGenerationJob("u1", "p1", emptyPromptOnTarget(), null, deps);
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+});
+
 // IKFA1M：正文素材标签（prompt_doc）——结构/版本校验、失效与无效身份复核、编译冻结。
 describe("handleCreateGenerationJob 正文素材标签 prompt_doc（IKFA1M）", () => {
   it.each([{ text: "", name: "空串" }, { text: " ", name: "空白" }, { text: "a".repeat(4001), name: "4001字" }])("拒绝空白或超长权威正文：$name", async ({ text }) => {
@@ -1884,4 +2043,18 @@ describe("handleCreateGenerationJob 正文素材标签 prompt_doc（IKFA1M）", 
     expect(result.data?.code).toBe("unsupported_input");
     expect(createJob).not.toHaveBeenCalled();
   });
+});
+
+// IKFA1M 合并边界：权威正文必须同时遵循 release 的模型长度能力。
+it.each([32000, 32001])("结构化正文遵循模型 32000 字边界：%i", async (length) => {
+  const { deps, createJob } = buildCapabilityDeps([
+    { model_id: "gpt-image-2-text-to-image", features: { max_prompt_length: 32000 } },
+  ]);
+  const result = await handleCreateGenerationJob("u1", "p1", {
+    type: "image", expected_output_count: 1,
+    parameters: { prompt: "合法镜像", model_id: "gpt-image-2-text-to-image", aspect_ratio: "1:1" },
+    prompt_doc: { version: 1, segments: [{ kind: "text", text: "a".repeat(length) }] },
+  }, null, deps);
+  expect(result.code).toBe(length === 32000 ? 200 : 400);
+  expect(createJob).toHaveBeenCalledTimes(length === 32000 ? 1 : 0);
 });

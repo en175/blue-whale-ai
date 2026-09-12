@@ -1,8 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 
-// IKDE6X：素材库组 repo（Prisma-backed）。本地为组主、上游备份、双向维护。
-// 虚拟人像库组（每用户至多 1 个默认组）+ 真人像库组（每用户可多个）。
-// 组操作走上游为权威；本地表是镜像/备份。is_default 每用户 virtual 至多 1 个由应用层保证。
+// IKDE6X：素材库组 repo（Prisma-backed）。写权威=上游，本地表维护虚拟组镜像（IKEXX8 契约 v2）。
+// 虚拟人像库组（每用户至多 1 个默认组）读走本地；真人组不落表、查询仍透传上游。
+// is_default 每用户 virtual 至多 1 个由应用层保证。
 
 export interface MaterialGroupView {
   id: string;
@@ -12,6 +12,9 @@ export interface MaterialGroupView {
   name: string;
   coverUrl: string | null;
   isDefault: boolean;
+  /** IKEXX8：组查询分流信封需要 CreateTime/UpdateTime（上游同款，秒精度）。 */
+  createdAt: Date | null;
+  updatedAt: Date | null;
 }
 
 export interface CreateMaterialGroupInput {
@@ -30,6 +33,13 @@ export interface MaterialGroupRepo {
   findVirtualDefault(userId: string): Promise<MaterialGroupView | null>;
   /** 查某用户未删组列表（按 kind 过滤可选）。 */
   listByUser(userId: string, kind?: "virtual" | "real"): Promise<MaterialGroupView[]>;
+  /** IKEXX8：分页查某用户未删组（gmt_create desc, id desc），供 ListAssetGroups 本地分流。 */
+  pageByUser(
+    userId: string,
+    kind: "virtual" | "real",
+    page: number,
+    size: number,
+  ): Promise<{ total: number; rows: MaterialGroupView[] }>;
   /** 查某用户指定上游组 id 的镜像。无则 null。 */
   findByUserAndUpstream(userId: string, materialGroupId: string): Promise<MaterialGroupView | null>;
   /** 软删组（上游删除成功后调用，组删除双向维护）。 */
@@ -44,6 +54,8 @@ function toView(row: {
   name: string;
   cover_url: string | null;
   is_default: boolean;
+  gmt_create?: Date | null;
+  gmt_modified?: Date | null;
 }): MaterialGroupView {
   return {
     id: row.id.toString(),
@@ -53,6 +65,8 @@ function toView(row: {
     name: row.name,
     coverUrl: row.cover_url,
     isDefault: row.is_default,
+    createdAt: row.gmt_create ?? null,
+    updatedAt: row.gmt_modified ?? null,
   };
 }
 
@@ -107,6 +121,19 @@ export function createMaterialGroupRepo(prisma: PrismaClient): MaterialGroupRepo
         orderBy: { id: "asc" },
       });
       return rows.map(toView);
+    },
+    async pageByUser(userId, kind, page, size) {
+      const where = { user_id: BigInt(userId), kind, is_delete: false };
+      const [total, rows] = await Promise.all([
+        prisma.material_groups.count({ where }),
+        prisma.material_groups.findMany({
+          where,
+          orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+          skip: (page - 1) * size,
+          take: size,
+        }),
+      ]);
+      return { total, rows: rows.map(toView) };
     },
     async findByUserAndUpstream(userId, materialGroupId) {
       const row = await prisma.material_groups.findFirst({

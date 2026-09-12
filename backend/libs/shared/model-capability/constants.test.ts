@@ -64,3 +64,62 @@ describe("parseModelUpdateBody", () => {
     expect(parsed.ok).toBe(false);
   });
 });
+
+// IKESD6 / ADR-0085：features 扩展键写侧闸门（读侧宽容降级，写侧必须拒绝脏类型）。
+describe("features 扩展键闸门（i2i_model_name / max_prompt_length）", () => {
+  const createBase = {
+    model_id: "gpt-image-2-x",
+    capability_type: "image",
+    model_label: "GPT",
+    icon: null,
+  };
+
+  it("create：合法两新键通过", () => {
+    const parsed = parseModelCreateBody({
+      ...createBase,
+      features: { i2i_model_name: "gpt-image-2-edit", max_prompt_length: 32000 },
+    });
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("create：别名空串 / 非字符串 → 拒绝", () => {
+    expect(
+      parseModelCreateBody({ ...createBase, features: { i2i_model_name: " " } })
+        .ok,
+    ).toBe(false);
+    expect(
+      parseModelCreateBody({ ...createBase, features: { i2i_model_name: 42 } })
+        .ok,
+    ).toBe(false);
+  });
+
+  it("create：max_prompt_length 非正整数 / 越界 → 拒绝", () => {
+    for (const bad of [0, -1, 1.5, "32000", 65536]) {
+      expect(
+        parseModelCreateBody({
+          ...createBase,
+          features: { max_prompt_length: bad },
+        }).ok,
+      ).toBe(false);
+    }
+  });
+
+  it("update：camelCase 键形同样受闸门约束；null 放行（清除配置）", () => {
+    expect(
+      parseModelUpdateBody({ features: { maxPromptLength: 0 } }).ok,
+    ).toBe(false);
+    expect(
+      parseModelUpdateBody({
+        features: { i2i_model_name: null, max_prompt_length: null },
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("未知 features 键不受约束（行为袋向后兼容）", () => {
+    const parsed = parseModelCreateBody({
+      ...createBase,
+      features: { some_future_flag: true },
+    });
+    expect(parsed.ok).toBe(true);
+  });
+});

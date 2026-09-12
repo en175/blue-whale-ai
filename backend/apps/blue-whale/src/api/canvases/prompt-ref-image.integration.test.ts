@@ -1,6 +1,4 @@
 import "reflect-metadata";
-import { randomBytes } from "node:crypto";
-import { openGenerationCredential } from "@blue-whale/core";
 import { Module } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { json } from "express";
@@ -13,7 +11,7 @@ import { JobsController } from "../jobs/jobs.controller.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 import { createWorkerRepo } from "@lib/shared/persistence/generation-worker-repo.js";
 import { processImageJobById } from "@lib/shared/generation/worker/generation-worker.js";
-import type { GenerateImageInput } from "@lib/shared/generation/worker/image-provider.js";
+import { ImageProviderError, type GenerateImageInput } from "@lib/shared/generation/worker/image-provider.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -34,11 +32,8 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
   let app: Awaited<ReturnType<typeof NestFactory.create>>;
   let base = "";
   const previousDatabase = process.env.DATABASE_URL;
-  const previousSecret = process.env.GENERATION_CREDENTIAL_SECRET;
-  const credentialSecret = randomBytes(32).toString("hex");
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKFA1M_DATABASE_URL;
-    process.env.GENERATION_CREDENTIAL_SECRET = credentialSecret;
     const sizes = [{ id: "1024x1024", label: "1024x1024" }];
     await prisma.client.generation_model_capability.upsert({
       where: { provider_id_model_id: { provider_id: "ikfa1m-test", model_id: MODEL_ID } },
@@ -93,8 +88,6 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
     await app?.close();
     if (previousDatabase === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previousDatabase;
-    if (previousSecret === undefined) delete process.env.GENERATION_CREDENTIAL_SECRET;
-    else process.env.GENERATION_CREDENTIAL_SECRET = previousSecret;
     await prisma.client.$disconnect();
   });
 
@@ -393,18 +386,19 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
       expect(frozen.prompt).toBe("让图片2微笑");
       expect((frozen.input_asset_ids as unknown[]).map(String)).toEqual([a, b]);
 
-      // 消费浏览器创建的真实任务；首次供应商无产出形成真实失败，随后通过公开接口重试。
+      // 消费浏览器创建的真实任务；首次供应商返回非瞬时错误形成真实失败，随后通过公开接口重试。
       const providerRequests: GenerateImageInput[] = [];
       const worker = {
         repo: createWorkerRepo(prisma.client),
         workerId: "ikfa1m-browser-worker",
-        credentialVault: { open: (value: string) => openGenerationCredential(value, credentialSecret) },
+        credentialVault: { open: (value: string) => value },
         createAudioProvider: () => { throw new Error("本测试只允许图片任务"); },
         createImageProvider: (token: string) => {
           expect(token).toBe("sk-ikfa1m-recording-provider");
           return { generate: async (input: GenerateImageInput) => {
             providerRequests.push(structuredClone(input));
-            return providerRequests.length === 1 ? [] : [{ url: "https://example.com/result.png", width: 1024, height: 1024 }];
+            if (providerRequests.length === 1) throw new ImageProviderError("insufficient_quota", "记录供应商首次拒绝请求");
+            return [{ url: "https://example.com/result.png", width: 1024, height: 1024 }];
           } };
         },
       };

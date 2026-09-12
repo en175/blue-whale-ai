@@ -329,15 +329,15 @@ afterEach(async () => {
 });
 
 describe('IKDMQQ 图片草稿创建与编辑', () => {
-  it('侧栏图片入口仅打开面板：不建卡、不创建任务（自由模式）', async () => {
+  it('侧栏图片入口先建草稿卡再开绑定面板：不创建任务（1f2f498d 起入口统一建卡）', async () => {
     await renderPage();
     const before = flowProps.current.mediaNodes.length;
 
     await clickSidebarImage();
 
-    // 点击入口不新建任何节点、不建草稿
-    expect(flowProps.current.mediaNodes).toHaveLength(before);
-    expect(draftNodes()).toHaveLength(0);
+    // 工具栏入口先建图片草稿卡再打开跟随输入框
+    expect(flowProps.current.mediaNodes).toHaveLength(before + 1);
+    expect(draftNodes()).toHaveLength(1);
     // 仅点击入口不创建任务
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     // 面板打开（模型能力加载后空提示词、无附件时发送禁用）
@@ -346,7 +346,7 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
     expect(sendButton().disabled).toBe(true);
   });
 
-  it('侧栏自由模式发送：直接落生成卡（无 target_node_id）', async () => {
+  it('侧栏入口发送：绑定新建草稿卡生成（带 target_node_id），不另落生成卡', async () => {
     await renderPage();
     await clickSidebarImage();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
@@ -359,21 +359,22 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
 
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.type).toBe('image');
-    expect(payload.target_node_id).toBeUndefined();
+    // 发送绑定入口新建的草稿卡，在原卡生成
+    expect(typeof payload.target_node_id).toBe('string');
     expect(payload.parameters.prompt).toBe('自由模式画图');
     expect(payload.parameters.model_id).toBe('m-test');
-    // 生成卡落画布（seed m1 + 新生成卡）
+    // seed m1 + 入口建的 1 张草稿卡；生成发生在原卡，不新增节点
     expect(flowProps.current.mediaNodes).toHaveLength(2);
   });
 
-  it('连续点击侧栏入口：不建卡，面板保持打开', async () => {
+  it('连续点击侧栏入口：每次新建草稿卡，面板保持打开', async () => {
     await renderPage();
 
     await clickSidebarImage();
     await clickSidebarImage();
 
-    expect(flowProps.current.mediaNodes).toHaveLength(1);
-    expect(draftNodes()).toHaveLength(0);
+    expect(flowProps.current.mediaNodes).toHaveLength(3); // seed m1 + 两次点击各建一张
+    expect(draftNodes()).toHaveLength(2);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(promptTextarea()).toBeTruthy();
   });

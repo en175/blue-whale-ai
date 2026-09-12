@@ -1,0 +1,33 @@
+.menu {
+  position: fixed;
+  min-width: 160px;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+}
+
+.item {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  color: #eee;
+  font-size: 15px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.item:hover:not(:disabled) {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.item:disabled {
+  color: #666;
+  cursor: default;
+}

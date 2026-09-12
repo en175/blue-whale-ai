@@ -5,7 +5,7 @@
  * 角色随 edges JSON 原样持久化（服务端零改动，延续 IKDMQR）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
-import { readAssetId } from './mediaRefs';
+import { isMaterialLibraryId, readAssetId } from './mediaRefs';
 import { REF_LIMITS } from '@/utils/ref-overflow';
 
 /** 视频参考角色：reference 普通参考 / first 首帧 / last 尾帧 */
@@ -22,7 +22,7 @@ export interface VideoMediaRef {
   url: string;
   name: string;
   assetId: string;
-  mediaType: 'image' | 'video';
+  mediaType: 'image' | 'video' | 'audio';
   materialId?: string;
 }
 
@@ -154,8 +154,8 @@ function baseSourceError(node: NonNullable<Node>): string | null {
 export function videoRefSourceError(node: Node | undefined, role: VideoRefRole): string | null {
   if (!node) return '素材不存在';
   const data = (node.data ?? {}) as Record<string, unknown>;
-  if (role !== 'reference' && data.mediaType === 'video') return '首尾帧仅支持图片素材';
-  if (data.mediaType !== 'image' && data.mediaType !== 'video') return '视频参考仅支持图片或视频素材';
+  if (role !== 'reference' && data.mediaType !== 'image') return '首尾帧仅支持图片素材';
+  if (data.mediaType !== 'image' && data.mediaType !== 'video' && data.mediaType !== 'audio') return '视频参考仅支持图片、视频或音频素材';
   return baseSourceError(node);
 }
 
@@ -190,12 +190,19 @@ export function videoMediaRefsOf(
     if (seenAssetIds.has(assetId)) continue;
     if (role !== 'reference' && (role === 'first' ? refs.first : refs.last)) continue;
     seenAssetIds.add(assetId);
+    const materialId =
+      typeof data.materialId === 'string' && data.materialId
+        ? data.materialId
+        : isMaterialLibraryId(assetId)
+          ? assetId
+          : undefined;
     const item: VideoMediaRef = {
       nodeId: source.id,
       url: data.src as string,
       name: typeof data.fileName === 'string' && data.fileName ? data.fileName : source.id,
       assetId,
-      mediaType: data.mediaType === 'video' ? 'video' : 'image',
+      mediaType: data.mediaType as 'image' | 'video' | 'audio',
+      materialId,
     };
     if (role === 'reference') refs.reference.push(item);
     else if (role === 'first') refs.first = item;
@@ -253,7 +260,7 @@ export function canAddRefRole(
  *  角色库 / 资产 / Dock 角色改写）必须调本函数，禁止各自复制 guard。 */
 export function checkAddVideoRef(
   role: VideoRefRole,
-  mediaType: 'image' | 'video',
+  mediaType: 'image' | 'video' | 'audio',
   assetId: string | undefined,
   refs: VideoMediaRefs,
 ): string | null {
@@ -274,7 +281,9 @@ export function checkAddVideoRef(
     if (mediaType === 'video') {
       const videoCount = refs.reference.filter((r) => r.mediaType === 'video').length;
       if (videoCount >= MAX_VIDEO_REFS) return `参考视频最多 ${MAX_VIDEO_REFS} 个`;
-    } else if (refs.reference.length >= REF_LIMITS.image) {
+    } else if (mediaType === 'audio') {
+      if (refs.reference.filter(r => r.mediaType === 'audio').length >= 3) return '参考音频最多 3 个';
+    } else if (refs.reference.filter(r => r.mediaType === 'image').length >= REF_LIMITS.image) {
       return `参考图最多 ${REF_LIMITS.image} 张`;
     }
   }

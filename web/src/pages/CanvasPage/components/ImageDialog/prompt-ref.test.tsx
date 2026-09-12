@@ -4,6 +4,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog from './index';
+import type { AtMentionItem } from '../../atMention';
 import type { ImageMediaRef } from '../../mediaRefs';
 import type { PromptDoc } from '@/lib/prompt-doc';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
@@ -44,6 +45,8 @@ async function renderDialog(props: {
   initialDoc?: PromptDoc | null;
   initialText?: string;
   onSend?: ReturnType<typeof vi.fn>;
+  mentionItems?: AtMentionItem[];
+  onMentionCanvas?: ReturnType<typeof vi.fn>;
   onParamsChange?: ReturnType<typeof vi.fn>;
 } = {}) {
   const onSend = props.onSend ?? vi.fn();
@@ -56,6 +59,8 @@ async function renderDialog(props: {
       createElement(ImageDialog, {
         onClose: vi.fn(),
         onSend,
+        mentionItems: props.mentionItems,
+        onMentionCanvas: props.onMentionCanvas,
         initialText: props.initialText,
         initialDoc: props.initialDoc ?? null,
         mediaRefs: props.mediaRefs,
@@ -282,4 +287,20 @@ describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
     });
     expect([...container.querySelectorAll('[data-testid="dock-media-ref"]')]).toHaveLength(1);
   });
+});
+
+it('结构化编辑器保留画布文本引用入口，选择后消费查询且不伪造图片标签', async () => {
+  const onMentionCanvas = vi.fn();
+  const item: AtMentionItem = { id: 'text-1', kind: 'text', name: '水彩方案' };
+  await renderDialog({ mediaRefs: [REF_A], mentionItems: [item], onMentionCanvas });
+  await typePromptRefRaw(container, '让@水彩');
+  await act(async () => {
+    [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '引用画布素材')!.click();
+  });
+  await vi.waitFor(() => expect(document.body.textContent).toContain('水彩方案'));
+  await act(async () => {
+    [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.includes('水彩方案'))!.click();
+  });
+  expect(onMentionCanvas).toHaveBeenCalledWith(item);
+  expect(readPromptRefText(container)).toBe('让');
 });
