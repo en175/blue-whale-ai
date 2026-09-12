@@ -51,10 +51,6 @@ public class JobStateMachineService {
     private final GenerationJobLogMapper jobLogMapper;
     private final JobClaimService claimService;
     private final JobFinalizer finalizer;
-    private final GenerationOutputSlotMapper slotMapper;
-    private final ProjectEventMapper projectEventMapper;
-    private final SceneCardGenerationRecordMapper sceneCardRecordMapper;
-    private final StoryboardPreviewMapper storyboardPreviewMapper;
 
     /**
      * 兼容旧 7-mapper 构造（测试直连）：内部组装拆分后的组件。
@@ -74,10 +70,11 @@ public class JobStateMachineService {
         this(jobMapper, jobLogMapper,
                 new JobClaimService(jobMapper),
                 new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper,
-                        new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper, eventPublisherFor(sceneCardRecordMapper, projectEventMapper)),
-                        new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper, eventPublisherFor(sceneCardRecordMapper, projectEventMapper)),
-                        new ProjectEventPublisher(projectEventMapper)),
-                slotMapper, projectEventMapper, sceneCardRecordMapper, storyboardPreviewMapper);
+                        new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper,
+                                new ProjectEventPublisher(projectEventMapper)),
+                        new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper,
+                                new ProjectEventPublisher(projectEventMapper)),
+                        new ProjectEventPublisher(projectEventMapper)));
     }
 
     /**
@@ -93,34 +90,10 @@ public class JobStateMachineService {
             JobClaimService claimService,
             JobFinalizer finalizer
     ) {
-        this(jobMapper, jobLogMapper, claimService, finalizer,
-                null, null, null, null);
-    }
-
-    /** 兼容构造用：组装共享的 ProjectEventPublisher（同 mapper 下共享实例，避免重复 nextCursor）。 */
-    private static ProjectEventPublisher eventPublisherFor(SceneCardGenerationRecordMapper recordMapper,
-                                                          ProjectEventMapper projectEventMapper) {
-        return new ProjectEventPublisher(projectEventMapper);
-    }
-
-    private JobStateMachineService(
-            GenerationJobMapper jobMapper,
-            GenerationJobLogMapper jobLogMapper,
-            JobClaimService claimService,
-            JobFinalizer finalizer,
-            GenerationOutputSlotMapper slotMapper,
-            ProjectEventMapper projectEventMapper,
-            SceneCardGenerationRecordMapper sceneCardRecordMapper,
-            StoryboardPreviewMapper storyboardPreviewMapper
-    ) {
         this.jobMapper = jobMapper;
         this.jobLogMapper = jobLogMapper;
         this.claimService = claimService;
         this.finalizer = finalizer;
-        this.slotMapper = slotMapper;
-        this.projectEventMapper = projectEventMapper;
-        this.sceneCardRecordMapper = sceneCardRecordMapper;
-        this.storyboardPreviewMapper = storyboardPreviewMapper;
     }
 
     // ========== claim 族（委托 JobClaimService） ==========
@@ -213,25 +186,6 @@ public class JobStateMachineService {
                 input.workerId(), input.fencingToken());
     }
 
-    // ========== 摘要同步（complete/fail 事务内调用，供测试沿用） ==========
-
-    /**
-     * 聚合 record 下全部输出槽状态，回写 SceneCardGenerationRecord.summary_status
-     * （internals.ts:21-62 syncRecordSummary 逐字移植）。
-     */
-    public void syncRecordSummary(Long recordId) {
-        ProjectEventPublisher pub = new ProjectEventPublisher(projectEventMapper);
-        new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper, pub).sync(recordId);
-    }
-
-    /**
-     * 回写 StoryboardPreview.summary_status（internals.ts:67-113 syncStoryboardPreviewSummary）。
-     */
-    public void syncStoryboardPreviewSummary(Long jobId) {
-        ProjectEventPublisher pub = new ProjectEventPublisher(projectEventMapper);
-        new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper, pub).sync(jobId);
-    }
-
     // ========== 心跳 / 重排（DB 紧耦合，保留本类） ==========
 
     /**
@@ -308,14 +262,15 @@ public class JobStateMachineService {
         return ok;
     }
 
-    // ========== 槽位聚合工具（保留门面静态委托，测试直引） ==========
+    // ========== 槽位聚合工具（门面静态委托保签名；实现已迁 JobStatus） ==========
+    // 可见性沿用原版（包私有 static）——金标测试在同包，无需放宽为 public。
 
-    public static java.util.List<GenerationOutputSlotEntity> resolveLogicalSlots(
+    static java.util.List<GenerationOutputSlotEntity> resolveLogicalSlots(
             java.util.List<GenerationOutputSlotEntity> slots) {
         return com.bluewhale.worker.domain.entity.JobStatus.resolveLogicalSlots(slots);
     }
 
-    public static String aggregateSlotStatus(java.util.List<GenerationOutputSlotEntity> resolvedSlots) {
+    static String aggregateSlotStatus(java.util.List<GenerationOutputSlotEntity> resolvedSlots) {
         return com.bluewhale.worker.domain.entity.JobStatus.aggregateSlotStatus(resolvedSlots);
     }
 
