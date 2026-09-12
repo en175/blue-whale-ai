@@ -124,7 +124,9 @@ import {
   groupToNode,
   isolateNewGroupMembers,
   isForeignGroupMember,
+  isGroupMember,
   nodeInsideGroupBox,
+  nodePressesGroupEdge,
   parseGroupsFromNodes,
   MIN_GROUP_MEMBERS,
   GROUP_FRAME_PADDING,
@@ -1953,32 +1955,45 @@ export default function CanvasPage() {
     setMediaNodes(applyDraggedPositions);
     setProductNodes(applyDraggedPositions);
     setAssetNodes(applyDraggedPositions);
-    // 节点拖入/拖出组：只加入最上层相交组，其余重叠组写入排除，保证组与组互斥。
-    // 压到组边界时该组外扩包住节点；扩大后新盖住的其他组成员一并排除。
+    // 节点拖入/拖出组：只加入最上层命中组，其余重叠组写入排除。
+    // 扩组仅当「非本组原成员」压住组边线；组内成员移动不扩组。
     if (groupsRef.current.length > 0) {
       const expandByGroup = new Map<string, { x: number; y: number; x2: number; y2: number }>();
       const ownerByNode = new Map<string, string>();
+      const beforeById = new Map(before.map((n) => [n.id, n]));
       draggedNodes.forEach((n) => {
         const w = n.measured?.width ?? 200;
         const h = n.measured?.height ?? 120;
         const nx = n.position.x, ny = n.position.y;
+        const startNode = beforeById.get(n.id) ?? n;
         for (let i = groupsRef.current.length - 1; i >= 0; i--) {
           const g = groupsRef.current[i];
+          const wasMember = isGroupMember(startNode, g);
+          if (wasMember) {
+            // 组内原成员移动不扩组；中心仍在组内则留在本组，已拖出则继续看其他组
+            if (nodeInsideGroupBox(n, g.box)) {
+              ownerByNode.set(n.id, g.id);
+              break;
+            }
+            continue;
+          }
           const intersects =
             nx <= g.box.x + g.box.w && nx + w >= g.box.x && ny <= g.box.y + g.box.h && ny + h >= g.box.y;
           if (!intersects) continue;
-          const sticksOut =
-            nx < g.box.x || ny < g.box.y || nx + w > g.box.x + g.box.w || ny + h > g.box.y + g.box.h;
-          if (sticksOut) {
+          if (nodePressesGroupEdge(n, g.box)) {
             const cur = expandByGroup.get(g.id);
             const x = Math.min(nx, cur?.x ?? g.box.x);
             const y = Math.min(ny, cur?.y ?? g.box.y);
             const x2 = Math.max(nx + w, cur?.x2 ?? g.box.x + g.box.w);
             const y2 = Math.max(ny + h, cur?.y2 ?? g.box.y + g.box.h);
             expandByGroup.set(g.id, { x, y, x2, y2 });
+            ownerByNode.set(n.id, g.id);
+            break;
           }
-          ownerByNode.set(n.id, g.id);
-          break;
+          if (nodeInsideGroupBox(n, g.box) && !g.excludedIds.includes(n.id)) {
+            ownerByNode.set(n.id, g.id);
+            break;
+          }
         }
       });
       const pad = GROUP_FRAME_PADDING;

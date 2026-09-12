@@ -116,6 +116,20 @@ export function groupFrameBBox(nodes: Node[]): GroupBBox | null {
   };
 }
 
+/** 节点矩形是否压住组边线：与组框相交且未完全落在框内（仅此时才扩组） */
+export function nodePressesGroupEdge(node: Node, box: GroupBBox): boolean {
+  const w = node.measured?.width ?? 200;
+  const h = node.measured?.height ?? 120;
+  const left = node.position.x;
+  const top = node.position.y;
+  const right = left + w;
+  const bottom = top + h;
+  const intersects =
+    left <= box.x + box.w && right >= box.x && top <= box.y + box.h && bottom >= box.y;
+  if (!intersects) return false;
+  return left < box.x || top < box.y || right > box.x + box.w || bottom > box.y + box.h;
+}
+
 /** 节点是否落在组矩形内（以节点中心点判定，节点个体超宽/超高仍以中心为准） */
 export function nodeInsideGroupBox(node: Node, box: GroupBBox): boolean {
   const w = node.measured?.width ?? 200;
