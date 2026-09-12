@@ -30,7 +30,11 @@ export function cardsFromRevision(record: PromptCardRecord): GenerationCardBlock
  */
 export function cardsOfRevision(sessionId: string, revision: PromptCardRevision): GenerationCardBlock[] {
   if (!revision?.payload?.shots?.length) return [];
-  const { shots, assets, target_media } = revision.payload;
+  const { shots, assets, target_media, target_model } = revision.payload;
+  // 批次级的一项，每张卡都标（F32「每张生成卡标注目标模型与版本」）。老卡没有就整项不带。
+  const targetModel = target_model
+    ? `${target_model.family}${target_model.version ? ` ${target_model.version}` : ''}`
+    : undefined;
   const provenanceOf = new Map((assets ?? []).map((a) => [a.asset_ref_id, a]));
 
   let elapsed = 0;
@@ -69,6 +73,7 @@ export function cardsOfRevision(sessionId: string, revision: PromptCardRevision)
       ...(assetRefs.length > 0 ? { assetRefs, assetRefItems } : {}),
       ...(target_media ? { targetMedia: target_media } : {}),
       ...(aspectRatio ? { aspectRatio } : {}),
+      ...(targetModel ? { targetModel } : {}),
       ...(typeof seconds === 'number' && seconds > 0 ? { durationSeconds: seconds } : {}),
     };
   });

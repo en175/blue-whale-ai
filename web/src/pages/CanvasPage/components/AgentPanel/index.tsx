@@ -499,6 +499,8 @@ function GenerationCard({ card, onApply, disabled, applied }: {
     <div className={styles.generationCard}>
       <div className={styles.shotMeta}>
         <span className={styles.shotTitle}>{card.shotTitle}</span>
+        {/* 按哪套写法编的（F32）。只做展示与核对——它不下传生成面板，出片时模型由用户在那里选。 */}
+        {card.targetModel && <span className={styles.shotTargetModel}>{card.targetModel}</span>}
         <div className={styles.shotMetaRight}>
           <button type="button" className={styles.shotApplyBtn}
             disabled={disabled || !card.source}
