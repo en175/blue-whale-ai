@@ -1,9 +1,8 @@
 # worker-java 迁移契约（IKEL4A / ADR-0084）
 
-- **状态**：**已冻结 + 修正一 + 修正二**（2026-09-10，IKEL4H 从代码逐项核对回填；修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
+- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
 
 ## 0. 修正一（2026-09-10）：cost_reservations 记账移出迁移范围（工单 IKEF1K）
-
 - 决策：`cost_reservations` 预扣/结算/release 记账**整体下线**（IKEF1K），**Java 侧一概不实现**。本修正覆盖 §3.3、§4、§5、§6、§8 中所有结算/退款语义：`.../complete`、`.../fail`、`.../requeue` 端点实现必须封装**删除后**的逻辑，禁止先行按旧语义封装。
 - 实施顺序钉死：IKEF1K 删除（TS 产品路径 → release 批次）→ 本契约修正二（终态语义定稿）→ IKEL4J 端点 → 四刀。
 - **不受删除影响的外部事实（保留）**：new-api 网关按 token 真实扣费；`ERROR_QUOTA_EXHAUSTED` 识别（HTTP 402 / 文案正则，§5 优先级不变）；失败分类中该码仍是终态。receipt/consume-log 查询随 settle 一并消失；展示额度口径（quota/50000）是另一契约，不在本单。
@@ -81,7 +80,7 @@
 ## 5. new-api 网关与计费契约
 
 - 端点：`POST /v1/images/generations`、`POST /v1/images/edits`（multipart）、`POST /v1/video/generations`、`GET /v1/video/generations/{taskId}`、`POST /v1/audio/speech`、`GET /api/log/self?request_id=&type=2`、`GET /api/pricing`。
-- 请求头：`Authorization: Bearer <per-job 解封凭证>`（AES sealed credential）、`X-Trace-Id`、**`X-Client-System: bluewhale`**（ADR-0080 白名单头，缺了登录隔离会破）、`Content-Type`。
+- 请求头：`Authorization: Bearer <明文 sk token>`（**修正五：凭证去密**——2026-09-12 用户拍板，Redis 会话 sealedSk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖）、`X-Trace-Id`、**`X-Client-System: bluewhale`**（ADR-0080 白名单头，缺了登录隔离会破）、`Content-Type`。
 - **receipt**：响应头 `X-Oneapi-Request-Id` → `getConsumeLogByRequestId` 精确查本次扣费 quota → `quotaToFen` 得 `actual_amount_fen`（image/audio 结算路径）；查不到 → 落 0 + warn（非失败）。查询侧重试 500ms×3（`generation-worker.service.ts:23-43`）。video 不用 receipt，读 `TaskDto.quota`（终态时=实际扣费）；与预留偏差 >50% 出 warn（`video-job-runner.ts:321-334`）。
 - 换算：`quotaToFen = round(quota/500000 × 7.3 × 100)`（env `QUOTA_PER_UNIT`/`USD_EXCHANGE_RATE` 可覆盖）；仅记账，**≠ 展示额度契约（quota/50000）**，两口径勿混。
 - 预扣创建在主 API（`createJobWithinTx`，与 job 行同事务，`cost_reservations reserved`，provider 恒 `"volc"`，4 个版本字段缺省 `"dev"`）——worker/Java 均不建预扣。
@@ -225,3 +224,61 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 ### 12.6 错误分类补充
 
 参考图下载失败发生在 **POST 上游之前**（零扣费风险）→ 归 `provider_failed` **瞬态可重试**，不违反 §11 的「post-send IO 不重试」政策（该政策约束的是无法证明 POST 未送达的 post-send 失败）。
+
+### 12.7 尺寸映射一律走能力行（2026-09-12，IK629 补完）
+
+承接 §12「协议由能力行声明，不按模型名特判」：**尺寸映射同理，一律读 `generation_model_capability.request_mapping`，禁止在 worker 代码内按模型名写尺寸表。**
+
+- 迁移前盘点：`request_mapping` 三族中 gpt 的 `matrix`、banana 的 `size`/`quality` 均已落能力行；**唯独 seedream 的「分辨率 × 宽高比 → WxH」表硬编码在 `ImageChannelMapper.MODEL_SIZES`**（写死 4 个模型名）。后果：上游新增/调整模型尺寸必须改 Java 并重新发版。
+- 由此掩盖的一处事实：seedream 行 `supported_sizes[].api_value` 只写档位名（`"1K"`），**上游并不接受**（实测 400 `Invalid size '1K'. Expected WIDTHxHEIGHT`）——真值实际由代码表展开，即「数据库里的值不可用、真值在代码里」。
+- 迁移（2026-09-12，`024_ik629_seedream_size_to_catalog.sql`）：4 个启用中的 seedream 行写入 `request_mapping.matrix`（形状与 gpt 行一致，逐格取自原代码表），worker 改读能力行并删除代码表。
+- **新增图片模型时**：只写能力行（`channel_parser` + `request_mapping`），**不得新增代码内模型名分支或尺寸表**；代码只保留形状解析与查表能力。
+
+## 13. 修正四（2026-09-12）：worker-java 代码组织规范成文
+
+背景：本契约此前只约定功能语义。代码整备批次把迁移中已成事实的编码约束成文如下，防止后续刀漂移（第 5 个生成类型产品已规划）。这些是可随演进调整**编码规范**，不是 ADR 级架构决策。
+
+### 13.1 包分层与类名后缀
+
+- 分层：`application`（processor / consumer / service）、`domain`（entity / dto / error）、`infrastructure`（mapper / gateway / storage / media / audio / credential / mq）、`config`（装配）、`web`（健康检查）。
+- 后缀统一表：
+
+  | 后缀 | 所在层 | 含义与禁令 |
+  |---|---|---|
+  | `*Entity` | domain/entity | 持久化表投影 |
+  | `*Dto` | domain/dto | 跨层共享数据结构（含 MQ 契约投影） |
+  | `*Error` | domain/error | 领域**异常类**专用；常量表禁用此后缀（应命名 `*ErrorCodes`） |
+  | `*Mapper` | infrastructure/mapper | **仅 MyBatis mapper**。通道路由/参数解析类不得叫 `*Mapper`（用 `*Parser`/`*Router`） |
+  | `*Service` | application/service | 应用服务。infrastructure 内类不得叫 `*Service`（按职责用 `*Provider`/`*Storage`/`*Relay`/`*Client`） |
+  | `*Processor` / `*Consumer` | application | 作业处理 / MQ 消费 |
+
+- `domain` = **共享内核**，非严格 DDD 领域：Entity（变化轴 = 持久化 schema）、契约投影 Dto（变化轴 = MQ 契约/附录 B）、领域 Error 并存；类头注释必须写明所属变化轴。
+- 依赖方向：application / infrastructure 均可依赖 domain；**infrastructure 禁止 import application**（config 装配除外）。
+
+### 13.2 注释与文档义务
+
+- 注释以中文为主；Entity 全字段注释（以现状为达标线）。
+- Javadoc 义务线 = `application/service` + `domain` 的 public 方法；processor/consumer 内部靠中文行内注释即可。
+- 对 TS 源码的交叉引用（如 `claim-ops.ts:261`）保留，但收敛到类头注释或 `@see`，避免行级内联随 TS 侧演进批量过期。
+
+### 13.3 语言与风格约束
+
+- **不引入 Lombok**；手写访问器维持现状一致性。
+- 状态 / 类型 / MIME / 参考角色字符串一律枚举或常量表收口（`JobStatus`、`JobType`、`MediaMime`、`ReferenceRole` 等），禁止跨层裸字符串（§2 合法值清单为权威枚举来源）。
+- 禁裸 `RuntimeException`，抛领域 Error；消费者 catch-log-continue 统一收进基类模板方法。
+- 时间读取一律经注入的 `java.time.Clock`（UTC），禁散落 `LocalDateTime.now()`——租约/重试测试可确定化。
+
+### 13.4 重构期行为变更上界（整备批次纪律，后续整备刀同样适用）
+
+- 顺手微调仅限**实现级**：错误分类收敛、异常类型、日志文案、重试时序毛刺。
+- **不动**：状态机迁移语义（§3）、MQ 消息字段（§1）、DB 写入内容（§2/§8）。越界 → 另立契约修正工单单刀，不得夹带在重构 PR。
+- 每条微调必须进 PR「行为 diff 清单」；金标 expected 的任何重录必须对应清单一行。
+
+## 附录 C：新增媒体类型扩展契约（2026-09-12 刀④ 前置钉死）
+
+背景：第 5 个生成类型产品已规划。Java 侧拆分后必须满足「**加一个媒体类型 = 注册一套**」，否则新类型刀不得开工。
+
+- **ClaimedJob 是单概念**：领取投影 = 公共核心（身份 / input / 租约凭证 / 取消信号）+ 媒体 payload 扩展。现状 `ClaimedJobDto` / `ClaimedVideoJobDto` / `ClaimedMediaExtractJobDto` 三胞胎收敛为公共核心 + payload 形态（刀④落地）；新类型是加 payload，不是投影分叉。
+- **生命周期一套**：claim / complete / fail / publish（含 progress 心跳变体）按类型注册参数化实现；禁止按类型复制方法三元组。
+- 新类型的注册触点（**只许改这些位置**）：① MQ tag + 消费者组常量（§1 命名规则：同名 + `-java`）；② Consumer 配置子类（tag + 并发度，零 receive 逻辑）；③ Processor（实现 `JobProcessor`，只写媒体编排 + payload 组装）；④ `JobType` 枚举项 + payload Dto 字段；⑤ Finalizer 的 payload 组装策略注册；⑥ 附录 A 样式错误码赋值表 + 金标用例。**claim 两段式 CAS / fence / 终态事务核心代码禁止触碰。**
+- 新类型的 TS 侧字段与终态语义（§1/§3/§8）仍是对账权威：跨进程字段先在本附录契约定死后，TS、Java 双端才实现（红线：契约先行）。

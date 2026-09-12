@@ -48,7 +48,7 @@ export type WorkerDeps = {
   createImageProvider: (token: string) => ImageProvider;
   /** 按 job 密封凭证构建音频 provider(与 image/video 一致)。 */
   createAudioProvider: (token: string) => AudioProvider;
-  /** 解密 job.input.provider_credential → sk token。 */
+  /** 读取 job.input.provider_credential → sk token（修正四：明文直取）。 */
   credentialVault: { open: (ciphertext: string) => string };
   videoProvider?: VideoProvider;
   workerId: string;
@@ -377,15 +377,15 @@ async function processClaimedJob(
 
   try {
     if (job.type === "audio") {
-      const sealedCredential = job.input?.provider_credential;
-      if (typeof sealedCredential !== "string" || sealedCredential.length === 0) {
+      const providerCredential = job.input?.provider_credential;
+      if (typeof providerCredential !== "string" || providerCredential.length === 0) {
         await failClaimed(
           ERROR_PROVIDER_CREDENTIAL_MISSING,
           "音频任务缺少供应商凭证",
         );
         return job.id;
       }
-      const providerToken = credentialVault.open(sealedCredential);
+      const providerToken = credentialVault.open(providerCredential);
       const provider = deps.createAudioProvider(providerToken);
       providerTokenRef = providerToken;
       const cap = await repo.findImageCapability(modelId, null);
@@ -508,16 +508,16 @@ async function processClaimedJob(
       return job.id;
     }
 
-    // 图片：sk token 从 job 密封凭证解出（不依赖请求闭包），恢复扫描也能重放。
-    const sealedCredential = job.input?.provider_credential;
-    if (typeof sealedCredential !== "string" || sealedCredential.length === 0) {
+    // 图片：sk token 直接读 job.provider_credential（修正四：明文，不再解封）。
+    const providerCredential = job.input?.provider_credential;
+    if (typeof providerCredential !== "string" || providerCredential.length === 0) {
       await failClaimed(
         ERROR_PROVIDER_CREDENTIAL_MISSING,
         "图片任务缺少供应商凭证",
       );
       return job.id;
     }
-    const providerToken = credentialVault.open(sealedCredential);
+    const providerToken = credentialVault.open(providerCredential);
     const provider = createImageProvider(providerToken);
     providerTokenRef = providerToken;
 

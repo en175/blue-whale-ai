@@ -8,7 +8,7 @@ import org.springframework.core.type.AnnotatedTypeMetadata;
  * 条件：WORKER_ENABLED_TAGS 含 audio / image / step 任一——即需要调上游模型
  * （new-api）与解封 per-job 凭证的刀。纯 media_extract 部署不实例化
  * NewApiImageClient / NewApiAudioClient / GenerationCredentialService，
- * 避免 extract-only 环境因未注入 NEW_API_BASE_URL / GENERATION_CREDENTIAL_SECRET 而拒绝启动
+ * 避免 extract-only 环境因未注入 NEW_API_BASE_URL 而拒绝启动（修正四：GENERATION_CREDENTIAL_SECRET 已废弃）
  * （二轮评审 Important×3；README 承诺与实现对齐）。
  */
 public class GenerationTagsCondition implements Condition {

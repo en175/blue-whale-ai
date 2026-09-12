@@ -1,6 +1,5 @@
 import "reflect-metadata";
 import { createWorkerRepo } from "@lib/shared/persistence/index.js";
-import { openGenerationCredential } from "@blue-whale/core";
 import { processImageJobById } from "@lib/shared/generation/worker/generation-worker.js";
 import { ImageProviderError, type ImageProvider } from "@lib/shared/generation/worker/image-provider.js";
 import { Module } from "@nestjs/common";
@@ -41,7 +40,6 @@ describe.skipIf(!process.env.IKDUHN_DATABASE_URL)("Image regeneration public API
   });
   const previousDatabase = process.env.DATABASE_URL;
   beforeAll(async () => {
-    vi.stubEnv("GENERATION_CREDENTIAL_SECRET", secret);
     vi.stubEnv("ROCKETMQ_ENDPOINTS", "");
     process.env.DATABASE_URL = process.env.IKDUHN_DATABASE_URL;
     media.listen(0, "127.0.0.1");
@@ -122,7 +120,7 @@ describe.skipIf(!process.env.IKDUHN_DATABASE_URL)("Image regeneration public API
     await vi.waitFor(async () => {
       const result = await processImageJobById(jobId, {
       repo: createWorkerRepo(prisma.client), workerId: "ikduhn-worker",
-      credentialVault: { open: encrypted => openGenerationCredential(encrypted, secret) },
+      credentialVault: { open: encrypted => encrypted },
       createImageProvider: () => provider,
       createAudioProvider: () => { throw new Error("unexpected audio job"); },
       });

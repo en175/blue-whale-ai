@@ -30,57 +30,38 @@ final class ImageChannelMapper {
 
     private ImageChannelMapper() {}
 
-    // ========== seedream 代码表（seedream-image-size.ts:21-108） ==========
+    // ========== seedream 尺寸换算（IK629：数据源由代码表迁至能力行 request_mapping） ==========
 
-    private static final String[] RATIOS = {
-            "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"
-    };
-
-    private static final Map<String, Map<String, Map<String, String>>> MODEL_SIZES;
-
-    static {
-        Map<String, Map<String, Map<String, String>>> m = new LinkedHashMap<>();
-        m.put("doubao-seedream-5-0-pro-260628", Map.of(
-                "1K", sizeTable("1024x1024","1152x864","864x1152","1424x800","800x1424","1248x832","832x1248","1568x672"),
-                "2K", sizeTable("2048x2048","2368x1776","1776x2368","2816x1584","1584x2816","2496x1664","1664x2496","3136x1344")
-        ));
-        m.put("doubao-seedream-5-0-260128", Map.of(
-                "2K", sizeTable("2048x2048","2304x1728","1728x2304","2848x1600","1600x2848","2496x1664","1664x2496","3136x1344"),
-                "3K", sizeTable("3072x3072","3456x2592","2592x3456","4096x2304","2304x4096","3744x2496","2496x3744","4704x2016"),
-                "4K", sizeTable("4096x4096","4704x3520","3520x4704","5504x3040","3040x5504","4992x3328","3328x4992","6240x2656")
-        ));
-        m.put("doubao-seedream-4-5-251128", Map.of(
-                "2K", sizeTable("2048x2048","2304x1728","1728x2304","2848x1600","1600x2848","2496x1664","1664x2496","3136x1344"),
-                "4K", sizeTable("4096x4096","4704x3520","3520x4704","5504x3040","3040x5504","4992x3328","3328x4992","6240x2656")
-        ));
-        m.put("doubao-seedream-4-0-250828", Map.of(
-                "1K", sizeTable("1024x1024","1152x864","864x1152","1312x736","736x1312","1248x832","832x1248","1568x672"),
-                "2K", sizeTable("2048x2048","2304x1728","1728x2304","2848x1600","1600x2848","2496x1664","1664x2496","3136x1344"),
-                "4K", sizeTable("4096x4096","4704x3520","3520x4704","5504x3040","3040x5504","4992x3328","3328x4992","6240x2656")
-        ));
-        MODEL_SIZES = Collections.unmodifiableMap(m);
+    /** 能力行是否带尺寸矩阵（形状与 gpt 行的 request_mapping.matrix 一致）。 */
+    static boolean hasSizeMatrix(String requestMappingJson) {
+        Object matrix = parseJsonObj(requestMappingJson).get("matrix");
+        return matrix instanceof Map<?, ?> m && !m.isEmpty();
     }
 
-    private static Map<String, String> sizeTable(String... values) {
-        Map<String, String> table = new LinkedHashMap<>();
-        for (int i = 0; i < RATIOS.length && i < values.length; i++) {
-            table.put(RATIOS[i], values[i]);
+    /**
+     * seedream 族尺寸换算：读能力行 {@code request_mapping.matrix[分辨率][宽高比]}。
+     * <p>
+     * IK629（2026-09-12）：原为代码内 MODEL_SIZES 表（写死模型名），现改读能力行——
+     * 逐格值等价，上游新增/调整模型不再需要改代码发版（契约 §12「协议由能力行声明」）。
+     */
+    static String resolveSeedreamSize(String requestMappingJson, String resolution, String ratio) {
+        if (resolution == null || ratio == null) return null;
+        Object matrix = parseJsonObj(requestMappingJson).get("matrix");
+        if (!(matrix instanceof Map<?, ?> raw)) return null;
+        Map<String, Map<String, String>> parsed = castMatrix(raw);
+
+        Map<String, String> resTable = parsed.get(resolution.toUpperCase());
+        if (resTable == null) {
+            // 键大小写兜底：能力行可能写 "1k" 而非 "1K"
+            for (Map.Entry<String, Map<String, String>> e : parsed.entrySet()) {
+                if (e.getKey().toUpperCase().equals(resolution.toUpperCase())) {
+                    resTable = e.getValue();
+                    break;
+                }
+            }
         }
-        return table;
-    }
-
-    /** seedream 族按代码表换算（seedream-image-size.ts:110-117）。 */
-    static String resolveSeedreamImageSize(String modelId, String resolution, String ratio) {
-        Map<String, Map<String, String>> modelTable = MODEL_SIZES.get(modelId);
-        if (modelTable == null) return null;
-        Map<String, String> resTable = modelTable.get(resolution.toUpperCase());
         if (resTable == null) return null;
-        return resTable.get(ratio);
-    }
-
-    /** 模型是否在 seedream 分辨率查表族内（seedream-image-size.ts:120-122）。 */
-    static boolean hasSeedreamSizeTable(String modelId) {
-        return MODEL_SIZES.containsKey(modelId);
+        return lookupIgnoreCase(resTable, ratio);
     }
 
     // ========== 渠道映射（image-channel-parser.ts） ==========
