@@ -66,6 +66,35 @@ export type ModelUpdatePayload = {
   sort_order?: number;
 };
 
+/** 上游模型名长度与 model_id 列宽对齐；prompt 上限取一个足够宽的工程硬顶。 */
+const I2I_MODEL_NAME_MAX = 128;
+const MAX_PROMPT_LENGTH_LIMIT = 65_535;
+
+/** features 已知扩展键的写入闸门（IKESD6）：i2i_model_name / max_prompt_length。
+ *  读侧（toFeatures）对脏值宽容降级 null，写侧必须拒绝——否则管理端下次整包提交
+ *  会把错误类型固化回库。兼容 snake_case / camelCase 两种键形。 */
+function featuresFieldErr(features: unknown): string | null {
+  if (!isPlainObject(features)) return null;
+  const alias = features.i2i_model_name ?? features.i2iModelName;
+  if (alias !== undefined && alias !== null) {
+    if (typeof alias !== "string" || alias.trim().length === 0)
+      return "图生图模型名(i2i_model_name)须为非空字符串或 null";
+    if (alias.length > I2I_MODEL_NAME_MAX)
+      return `图生图模型名(i2i_model_name)超长（≤${I2I_MODEL_NAME_MAX}字符）`;
+  }
+  const len = features.max_prompt_length ?? features.maxPromptLength;
+  if (len !== undefined && len !== null) {
+    if (
+      typeof len !== "number" ||
+      !Number.isInteger(len) ||
+      len < 1 ||
+      len > MAX_PROMPT_LENGTH_LIMIT
+    )
+      return `提示词上限(max_prompt_length)须为 1–${MAX_PROMPT_LENGTH_LIMIT} 的整数或 null`;
+  }
+  return null;
+}
+
 type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -235,6 +264,8 @@ export function parseModelCreateBody(
     ) ??
     jsonField(body.features, "特性(features)", "features");
   if (jsonErr) return { ok: false, error: jsonErr };
+  const featuresErr = featuresFieldErr(body.features);
+  if (featuresErr) return { ok: false, error: featuresErr };
 
   if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
     return { ok: false, error: "启用(enabled)须为布尔值" };
@@ -402,6 +433,8 @@ export function parseModelUpdateBody(
     ) ??
     jsonField(body.features, "特性(features)", "features");
   if (jsonErr) return { ok: false, error: jsonErr };
+  const featuresErr = featuresFieldErr(body.features);
+  if (featuresErr) return { ok: false, error: featuresErr };
 
   const parsedMapping = parseParserAndMapping(body, "update");
   if (!parsedMapping.ok) return parsedMapping;

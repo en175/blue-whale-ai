@@ -1,3 +1,4 @@
+import PromptSyncActions from '../PromptSyncActions';
 /* ============================================
  * ImageDialog 图片对话窗口：参考图上传/模型/清晰度/比例配置
  * ============================================ */
@@ -12,7 +13,7 @@ import {
   ArrowUp,
   MousePointerClick,
   FolderOpen,
-  Image as ImageIcon,
+  Plus,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
@@ -20,10 +21,13 @@ import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import type { ImageMediaRef } from '../../mediaRefs';
 import type { MediaGenStatus } from '../MediaNode';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
+import AtMentionMenu from '../AtMentionMenu';
+import { stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
+import type { FollowDialogAnchor } from '../../followDialog';
 import styles from './index.module.css';
 
-/** 输入框字数上限 */
-const MAX_INPUT = 1000;
+/** 输入框默认字数上限（模型目录未配 max_prompt_length 时沿用旧行为，ADR-0085） */
+const DEFAULT_MAX_INPUT = 1000;
 
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
 const MAX_VIDEOS = 3;
@@ -43,6 +47,7 @@ export interface UploadedFile {
 export interface ImageTextAttachment {
   /** 来源文本节点 id */
   nodeId: string;
+  isPromptPlan?: boolean;
   /** 来源节点标题 */
   title: string;
   /** 当次正文 */
@@ -64,6 +69,7 @@ interface ImageDialogProps {
   initialParams?: ImageGenSeedParams;
   /** 连线文本附件（IKDLQF）：仅图片媒体节点面板发起时携带，打开当下快照，只读展示 */
   attachments?: ImageTextAttachment[];
+  onRemovePlan?: (nodeId: string) => void;
   /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；仅多附件时展示控件，缺省不渲染排序入口 */
   onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 到节点选择：进入画布图片节点选取模式 */
@@ -72,8 +78,12 @@ interface ImageDialogProps {
   onPickFromAssets?: () => void;
   /** 画布选取模式进行中（左上角图标高亮提示） */
   pickMode?: boolean;
-  /** 外部注入参考素材（ts 驱动；画布节点单选 / 角色库多选，files 为一批） */
+  /** 外部注入参考素材（ts 驱动；画布节点单选 / 角色库多选，files 为一批）。
+   *  事件一次消费（IKF5KE）：面板处理一批后必须经 onExternalPickConsumed 通知父级清除，
+   *  否则已处理事件会在面板重挂载时重放（已删除附件复活） */
   externalPick?: { ts: number; files: UploadedFile[] } | null;
+  /** 外部选取事件已消费：父级据此清除事件，保证一批注入只生效一次 */
+  onExternalPickConsumed?: () => void;
   /** 打开角色库弹窗 */
   onOpenCharacterLibrary?: () => void;
   /** Toast 提示（上传超限等场景，由父级注入） */
@@ -89,9 +99,19 @@ interface ImageDialogProps {
   /** 连线图片参考（IKDMQR）：草稿绑定时由父级按连线实时推导传入，面板据此渲染参考区；
    *  传入了 mediaRefs 即为连线绑定模式，面板本地 files 不再参与展示与提交 */
   mediaRefs?: ImageMediaRef[];
+  planReferenceError?: string;
+  pendingPlanSyncs?: Array<{ nodeId: string; title: string }>;
+  onSyncPlan?: (nodeId: string) => void;
+  syncingPlan?: boolean;
   invalidMediaRefs?: Array<{ nodeId: string; name: string }>;
   /** 移除某个图片参考（IKDMQR）：携带来源节点 id，父级断开对应连线 */
   onRemoveMediaRef?: (sourceNodeId: string) => void;
+  /** 画布 @ 引用候选（当前画布可引用节点） */
+  mentionItems?: AtMentionItem[];
+  /** 选中 @ 素材后写入参考区 */
+  onMentionCanvas?: (item: AtMentionItem) => void;
+  /** 绑定生成节点时悬浮跟随；缺省仍锚定底部 */
+  followAnchor?: FollowDialogAnchor | null;
 }
 
 /** 首页带入的初始生成参数（各字段经模型能力校验后应用，不在能力内的项回退模型默认值） */
@@ -114,8 +134,9 @@ function RatioIcon({ ratio }: { ratio: string }) {
 }
 
 /** 连线文本附件项：标题 + 正文预览，长文默认折叠可展开；多附件且父级提供重排回调时展示上移/下移（IKDLQH） */
-function AttachmentItem({ attachment, move }: {
+function AttachmentItem({ attachment, move, onRemove }: {
   attachment: ImageTextAttachment;
+  onRemove?: () => void;
   move?: { isFirst: boolean; isLast: boolean; onMove: (delta: -1 | 1) => void };
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -124,6 +145,7 @@ function AttachmentItem({ attachment, move }: {
     <div className={styles.attachmentItem}>
       <div className={styles.attachmentHead}>
         <span className={styles.attachmentTitle}>{attachment.title}</span>
+        {onRemove && <button type="button" className={styles.attachmentMove} aria-label={`移除方案 ${attachment.title}`} title="移除方案" onClick={onRemove}><X size={12} /></button>}
         {move && (
           <span className={styles.attachmentMoves}>
             <button
@@ -165,7 +187,7 @@ function AttachmentItem({ attachment, move }: {
   );
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onToast, draftBinding, mediaRefs, invalidMediaRefs, onRemoveMediaRef }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, mentionItems, onMentionCanvas, followAnchor }: ImageDialogProps) {
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -186,6 +208,12 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const resWrapRef = useRef<HTMLDivElement>(null);
   const configPanelRef = useRef<HTMLDivElement>(null);
   const sourceWrapRef = useRef<HTMLDivElement>(null);
+  const mentionAnchorRef = useRef<HTMLDivElement>(null);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
+  const mentionQuery = trailingAtQuery(inputValue);
+  useEffect(() => {
+    if (mentionQuery === null) setMentionDismissed(false);
+  }, [mentionQuery]);
 
   useDismissOnOutside([
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
@@ -195,30 +223,37 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   ]);
 
   /** 外部注入参考素材（画布节点选取/角色库多选；去重 + 上限保护）。
-   *  连线绑定模式（IKDMQR）：参考由父级按连线推导，外部注入不参与（选取入口改为建立连线） */
+   *  连线绑定模式（IKDMQR）：参考由父级按连线推导，外部注入不参与（选取入口改为建立连线）。
+   *  一次消费（IKF5KE）：一批事件无论是否并入本地 files，处理后都通知父级清除，
+   *  防止已处理事件在面板关闭/重建后的新挂载上重放 */
   useEffect(() => {
-    if (!externalPick || mediaRefs) return;
-    setFiles((prev) => {
-      let next = prev;
-      for (const file of externalPick.files) {
-        const imgCount = next.filter((f) => f.type === 'image').length;
-        const vidCount = next.filter((f) => f.type === 'video').length;
-        const full = file.type === 'image' ? imgCount >= maxImages : vidCount >= MAX_VIDEOS;
-        if (full) {
-          onToast?.('warn', refOverflowToast([file.type], { image: maxImages, video: MAX_VIDEOS }));
-          break;
+    if (!externalPick) return;
+    if (!mediaRefs) {
+      setFiles((prev) => {
+        let next = prev;
+        for (const file of externalPick.files) {
+          const imgCount = next.filter((f) => f.type === 'image').length;
+          const vidCount = next.filter((f) => f.type === 'video').length;
+          const full = file.type === 'image' ? imgCount >= maxImages : vidCount >= MAX_VIDEOS;
+          if (full) {
+            onToast?.('warn', refOverflowToast([file.type], { image: maxImages, video: MAX_VIDEOS }));
+            break;
+          }
+          if (next.some((f) => f.id === file.id)) continue;
+          next = [...next, file];
         }
-        if (next.some((f) => f.id === file.id)) continue;
-        next = [...next, file];
-      }
-      return next;
-    });
+        return next;
+      });
+    }
+    onExternalPickConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalPick]);
 
   /** 能力选项全部取自接口（无本地写死兜底）：模型列表未加载完时为空 */
   const modelOptions = modelList.map((m) => ({ key: m.model_id, label: m.model_label }));
   const currentGen = modelList.find((m) => m.model_id === selectedModel);
+  // ADR-0085（IKESD9）：prompt 上限跟随所选模型的目录配置，未下发回落默认
+  const maxInput = currentGen?.features?.max_prompt_length ?? DEFAULT_MAX_INPUT;
   const resolutionOptions = currentGen?.supported_sizes?.length
     ? currentGen.supported_sizes.map((s) => ({ key: s.id, label: s.label }))
     : [];
@@ -237,7 +272,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
   /** 生成中只读（IKDMQQ）：任务执行期间目标参数冻结，保留查看与画布上的取消入口 */
   const readOnly = uploading || draftBinding?.submitting === true || draftBinding?.status === 'generating';
-  const configurationError = !modelsLoaded ? '正在加载模型配置'
+  const configurationError = planReferenceError ? planReferenceError
+    : !modelsLoaded ? '正在加载模型配置'
     : !currentGen ? '原生成模型已不可用，请重新选择模型'
     : selectedResolution && !resolutionOptions.some(option => option.key === selectedResolution)
       ? '原分辨率已不可用，请重新选择分辨率'
@@ -352,7 +388,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   };
 
   return (
-    <div className={styles.dialogWrap}>
+    <div
+      className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
+      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+    >
       {/* 配置面板（可展开/收起）：挂在不带 overflow 的定位外壳 .dialogWrap 上，
           脱出 .dialog 滚动框，避免面板顶部被滚动容器裁剪（IKEOLP） */}
       {showConfig && (
@@ -472,40 +511,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         {/* 顶部：素材预览 + 右上角操作 */}
         <div className={styles.topRow}>
           <div className={styles.previewRow}>
-            {/* 左上角图标：媒体来源菜单（上传入口退役，IKDLQR/IKDLQL 方向；保留资产选择/节点选择，
-                画布资产改造融合）。图片达上限或生成中只读时隐藏 */}
-            {!imagesFull && !readOnly && (
-            <div className={styles.sourceWrap} ref={sourceWrapRef}>
-              <button
-                className={`${styles.previewItem} ${styles.previewPlaceholder} ${pickMode ? styles.previewPicking : ''}`}
-                onClick={() => setSourceMenuOpen((v) => !v)}
-                title="从资产中选择 / 到节点选择"
-              >
-                <ImageIcon size={18} strokeWidth={2} />
-              </button>
-              {sourceMenuOpen && (
-                <>
-                  <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(false)} />
-                  <div className={styles.sourceMenu}>
-                    <button
-                      className={styles.sourceMenuItem}
-                      onClick={() => { setSourceMenuOpen(false); onPickFromAssets?.(); }}
-                    >
-                      <FolderOpen size={14} strokeWidth={2} />
-                      <span>从资产中选择</span>
-                    </button>
-                    <button
-                      className={styles.sourceMenuItem}
-                      onClick={() => { setSourceMenuOpen(false); onPickFromCanvas?.(); }}
-                    >
-                      <MousePointerClick size={14} strokeWidth={2} />
-                      <span>到节点选择</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-            )}
             {edgeRefs
               ? edgeRefs.map((r) => (
                   <div key={r.nodeId} className={styles.previewItem} title={r.name} data-testid="dock-media-ref">
@@ -539,6 +544,40 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                 )}
               </div>
             ))}
+            {/* 附件队列末尾：媒体来源菜单（上传入口退役，IKDLQR/IKDLQL 方向；保留资产选择/节点选择，
+                画布资产改造融合）。图片达上限或生成中只读时隐藏 */}
+            {!imagesFull && !readOnly && (
+            <div className={styles.sourceWrap} ref={sourceWrapRef}>
+              <button
+                className={`${styles.previewItem} ${styles.previewPlaceholder} ${pickMode ? styles.previewPicking : ''}`}
+                onClick={() => setSourceMenuOpen((v) => !v)}
+                title="从资产中选择 / 到节点选择"
+              >
+                <Plus size={18} strokeWidth={2} />
+              </button>
+              {sourceMenuOpen && (
+                <>
+                  <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(false)} />
+                  <div className={styles.sourceMenu}>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(false); onPickFromAssets?.(); }}
+                    >
+                      <FolderOpen size={14} strokeWidth={2} />
+                      <span>从资产中选择</span>
+                    </button>
+                    <button
+                      className={styles.sourceMenuItem}
+                      onClick={() => { setSourceMenuOpen(false); onPickFromCanvas?.(); }}
+                    >
+                      <MousePointerClick size={14} strokeWidth={2} />
+                      <span>到节点选择</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            )}
           </div>
 
           <div className={styles.topActions}>
@@ -563,6 +602,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
               <AttachmentItem
                 key={a.nodeId}
                 attachment={a}
+                onRemove={!readOnly && !syncingPlan && a.isPromptPlan && onRemovePlan ? () => onRemovePlan(a.nodeId) : undefined}
                 move={
                   // 生成中只读（IKDMQQ）：排序同属输入编辑，一并禁用
                   !readOnly && onReorderAttachments && attachments.length > 1
@@ -586,28 +626,42 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
         )}
 
         {/* 输入框 */}
+      <PromptSyncActions plans={pendingPlanSyncs} disabled={readOnly || syncingPlan} onSync={onSyncPlan} />
         {configurationError && <div role="alert">{configurationError}</div>}
         {invalidMediaRefs?.map(ref => <div key={ref.nodeId}>
           {ref.name}（不可用）
           {!readOnly && <button type="button" onClick={() => onRemoveMediaRef?.(ref.nodeId)}>移除失效参考</button>}
         </div>)}
+        <div className={styles.mentionAnchor} ref={mentionAnchorRef}>
         <textarea
           className={styles.textarea}
-          placeholder={uploading ? '正在上传参考图...' : `描述你希望如何编辑这张图片。图片最多 ${maxImages} 张。`}
+          placeholder={uploading ? '正在上传参考图...' : `描述你希望如何编辑这张图片。图片最多 ${maxImages} 张。使用 @ 引用画布素材。`}
           value={inputValue}
           onChange={(e) => {
-            const v = e.target.value.slice(0, MAX_INPUT);
+            const v = e.target.value.slice(0, maxInput);
             setInputValue(v);
             syncDraftParams({ prompt: v });
           }}
           rows={3}
-          maxLength={MAX_INPUT}
+          maxLength={maxInput}
           disabled={uploading || readOnly}
         />
-
-        {/* 字数统计 */}
-        <div className={`${styles.charCount} ${inputValue.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
-          {inputValue.length}/{MAX_INPUT}
+        {mentionQuery !== null && !mentionDismissed && !readOnly && onMentionCanvas && (
+          <AtMentionMenu
+            anchorRef={mentionAnchorRef}
+            items={mentionItems ?? []}
+            editorQuery={mentionQuery}
+            disabledKinds={['audio']}
+            onSelect={(item) => {
+              const next = stripTrailingAtQuery(inputValue);
+              setInputValue(next);
+              syncDraftParams({ prompt: next });
+              setMentionDismissed(true);
+              onMentionCanvas(item);
+            }}
+            onClose={() => setMentionDismissed(true)}
+          />
+        )}
         </div>
 
           {/* 底部状态栏 */}
@@ -629,13 +683,17 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
 
           {/* 右侧：发送按钮 */}
           <div className={styles.barRight}>
+            {/* 字数统计 */}
+            <div className={`${styles.charCount} ${inputValue.length >= maxInput ? styles.charCountWarn : ''}`}>
+              {inputValue.length}/{maxInput}
+            </div>
             <button
               className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}
               onClick={handleSend}
               disabled={!canSend}
               title={uploading ? '上传中...' : '发送'}
             >
-              <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
+              <ArrowUp size={12.8} fill="currentColor" strokeWidth={0} />
             </button>
           </div>
         </div>

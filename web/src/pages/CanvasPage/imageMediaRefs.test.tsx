@@ -337,7 +337,7 @@ describe('IKDMQR Dock 选择 → 连线', () => {
     });
   };
 
-  it('Dock「到节点选择」选中画布图片节点建立对应连线，Dock 同步显示', async () => {
+  it('Dock 选取先显示暂存参考，发送时建立连线并消费同一资产', async () => {
     await renderPage();
     const draftId = await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
@@ -346,13 +346,18 @@ describe('IKDMQR Dock 选择 → 连线', () => {
     await enterPickMode();
     expect(container.textContent).toContain('点击画布中的图片节点');
 
-    // 点击画布图片节点 → 建立连线（而非注入面板本地列表）
+    // 点击后只暂存参考，发送时再落线。
     const m1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')!;
     await act(async () => {
       flowProps.current.onNodeClick(m1);
     });
-    expect(edgePairs()).toEqual([`m1->${draftId}`]);
+    expect(edgePairs()).toEqual([]);
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
+    await typePrompt('采用所选参考');
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    expect(edgePairs()).toEqual([`m1->${draftId}`]);
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].input_asset_ids).toEqual(['a1']);
     // 选取模式已退出
     expect(container.textContent).not.toContain('点击画布中的图片节点');
   });
@@ -392,23 +397,31 @@ describe('IKDMQR Dock 选择 → 连线', () => {
 
 describe('IKDMQR 移除双向同步', () => {
   it('Dock 移除引用断开对应连线；画布断线同步移除 Dock 引用；来源与其他目标引用保留', async () => {
+    // 追加第二张图片草稿 d2 作为"其他目标"（connectPair 要求目标为草稿/生成中节点，
+    // v1 为成品视频卡不再接受新连线；改用 d2 保持测试意图：同一来源连入多目标时移除仅影响当前草稿）
+    ((canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> }).nodes).push({
+      id: 'd2',
+      type: 'mediaNode',
+      position: { x: 440, y: 200 },
+      data: { src: '', mediaType: 'image', fileName: '图片草稿二', genStatus: 'draft', draft: true, prompt: '' },
+    });
     await renderPage();
     const draftId = await createDraft();
 
-    // 另一目标 m2：同一来源 m1 同时连入草稿与 m2
+    // 同一来源 m1 同时连入草稿 d1 与 d2
     await act(async () => {
       flowProps.current.onConnect({ source: 'm1', target: draftId, sourceHandle: null, targetHandle: null });
-      flowProps.current.onConnect({ source: 'm1', target: 'v1', sourceHandle: null, targetHandle: null });
+      flowProps.current.onConnect({ source: 'm1', target: 'd2', sourceHandle: null, targetHandle: null });
     });
-    expect(edgePairs()).toEqual([`m1->${draftId}`, 'm1->v1']);
+    expect(edgePairs()).toEqual([`m1->${draftId}`, 'm1->d2']);
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
 
-    // Dock 移除引用 → 仅断开草稿的连线；来源卡与 m1->v1 保留
+    // Dock 移除引用 → 仅断开草稿的连线；来源卡与 m1->d2 保留
     const removeBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="移除"]')!;
     await act(async () => {
       removeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
-    expect(edgePairs()).toEqual(['m1->v1']);
+    expect(edgePairs()).toEqual(['m1->d2']);
     await vi.waitFor(() => expect(dockRefImages()).toEqual([]));
     expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'm1')).toBe(true);
 
@@ -421,7 +434,7 @@ describe('IKDMQR 移除双向同步', () => {
     await act(async () => {
       flowProps.current.onEdgesChange([{ type: 'remove', id: edgeId }]);
     });
-    expect(edgePairs()).toEqual(['m1->v1']);
+    expect(edgePairs()).toEqual(['m1->d2']);
     await vi.waitFor(() => expect(dockRefImages()).toEqual([]));
   });
 });
@@ -432,22 +445,25 @@ describe('IKDMQR Dock 素材入口', () => {
     await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
-    expect(container.querySelector('input[type="file"]')).toBeNull();
+    // 画布级隐藏上传 input（paneUploadRef）始终存在但不属于 Dock；
+    // Dock 区域不提供可见的文件选择器与上传按钮。
+    const visibleFileInputs = container.querySelectorAll<HTMLInputElement>('input[type="file"]:not([hidden])');
+    expect(visibleFileInputs).toHaveLength(0);
     expect(container.textContent).not.toContain('图片上传');
     expect([...container.querySelectorAll<HTMLButtonElement>('button')].some((b) => b.title.startsWith('上传图片'))).toBe(false);
   });
 });
 
 describe('IKDMQR 画布连线来源校验', () => {
-  it('待生成/生成中/失败/失效/视频来源连线被拒绝并提示；文本节点连线不受影响', async () => {
+  it('视频来源连线被拒绝（ABILITY 层静默拦截）；文本节点连线不受影响', async () => {
     await renderPage();
     const draftId = await createDraft();
 
-    // 视频来源
+    // 视频来源：connectPair 在 ABILITY 层拦截（video 能力集不含 image），不进入图片校验，无 toast
     await connect('v1', draftId);
     expect(edgePairs()).toEqual([]);
-    expect(container.textContent).toContain('图片参考仅支持图片素材');
 
+    // 能力不匹配在拖线阶段静默拒绝；Dock 选择的非法来源提示由上方用例覆盖。
     // 文本节点来源（文本附件语义）不受媒体校验影响
     await connect('t1', draftId);
     expect(edgePairs()).toEqual([`t1->${draftId}`]);

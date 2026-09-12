@@ -1,7 +1,6 @@
 import { Body, Controller, Get, Headers, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
 import {
-  GenerationCredentialConfigurationError,
   NewApiError,
   type NewApiLoginResult,
 } from "@blue-whale/core";
@@ -109,13 +108,7 @@ export class AuthController {
         sk: result.token,
       });
     } catch (error) {
-      if (error instanceof GenerationCredentialConfigurationError) {
-        throw new NewApiError(
-          "会话服务暂不可用",
-          503,
-          "session_service_unavailable",
-        );
-      }
+      // 修正四：createSession 不再 seal sk（明文存 Redis），无 GenerationCredentialConfigurationError。
       throw error;
     }
   }

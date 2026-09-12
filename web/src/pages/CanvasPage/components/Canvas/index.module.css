@@ -37,12 +37,23 @@
   cursor: default;
 }
 
+/* 框选矩形配色：覆盖库默认蓝色变量为亮灰色（深色画布上清晰且不刺眼） */
+.canvasContainer {
+  --xy-selection-background-color: rgba(220, 220, 220, 0.10);
+  --xy-selection-border: 1px dashed rgba(220, 220, 220, 0.65);
+}
+
 /* 拖动模式：节点不拦截鼠标，画布任意位置按下即可平移 */
 .dragMode :global(.react-flow__node),
 .dragMode :global(.react-flow__node *),
 .dragMode :global(.react-flow__nodesselection),
 .dragMode :global(.react-flow__nodesselection *) {
   pointer-events: none !important;
+}
+
+/* 拖动画布时仍可从节点「+」拉线到空白弹出类型菜单 */
+.dragMode :global(.react-flow__handle) {
+  pointer-events: auto !important;
 }
 
 .dragMode :global(.react-flow__pane) {

@@ -25,6 +25,11 @@ export function readAssetId(data: Record<string, unknown> | undefined): string |
   return raw == null || raw === '' ? undefined : String(raw);
 }
 
+/** 素材库 ID（Asset- 前缀），提交走 material_id，不能当本地 assets 表 id 去 link */
+export function isMaterialLibraryId(id: string | number | undefined): boolean {
+  return typeof id === 'string' && /^asset-/i.test(id);
+}
+
 /** 来源节点能否作为图片参考：返回 null 表示可连入，否则为用户可读拒绝原因。
  *  仅接受已有有效结果的图片媒体节点；待生成/生成中/失败/失效/上传中/无资产身份均拒绝。 */
 export function imageRefSourceError(node: Node | undefined): string | null {

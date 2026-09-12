@@ -131,23 +131,23 @@ describe('videoRefConflict 组合校验（与服务端 400 同口径 + 能力位
     nodeId: id, url: `http://img/${id}.png`, name: id, assetId, mediaType: 'image',
   });
 
-  it('空输入与合法组合（纯参考 / 首帧 / 首尾帧）不阻止', () => {
+  it('空输入与合法组合（纯参考 / 完整首尾帧）不阻止', () => {
     expect(videoRefConflict({ reference: [] }, allCaps)).toBeNull();
     expect(videoRefConflict({ reference: [ref('m1')] }, allCaps)).toBeNull();
-    expect(videoRefConflict({ reference: [], first: ref('f1') }, allCaps)).toBeNull();
     expect(videoRefConflict({ reference: [], first: ref('f1'), last: ref('f2') }, allCaps)).toBeNull();
   });
 
-  it('尾帧无首帧、首尾帧与普通参考混用被阻止并给出原因', () => {
-    expect(videoRefConflict({ reference: [], last: ref('f2') }, allCaps)).toBe('尾帧必须与首帧一起使用，请先指定首帧或移除尾帧');
+  it('首尾帧缺项或与普通参考混用时被阻止并给出原因', () => {
+    expect(videoRefConflict({ reference: [], last: ref('f2') }, allCaps)).toBe('请补充首帧');
+    expect(videoRefConflict({ reference: [], first: ref('f1') }, allCaps)).toBe('请补充尾帧');
     expect(videoRefConflict({ reference: [ref('m1')], first: ref('f1') }, allCaps)).toBe('首尾帧与普通参考不能混用，请移除其中一类输入');
     expect(videoRefConflict({ reference: [ref('m1')], first: ref('f1'), last: ref('f2') }, allCaps)).toBe('首尾帧与普通参考不能混用，请移除其中一类输入');
   });
 
-  it('能力位不支持的首尾帧组合被阻止', () => {
-    expect(videoRefConflict({ reference: [], first: ref('f1'), last: ref('f2') }, { ...allCaps, firstLastFrame: false })).toBe('当前模型不支持同时使用首帧和尾帧');
-    expect(videoRefConflict({ reference: [], first: ref('f1') }, { ...allCaps, firstFrame: false })).toBe('当前模型不支持首帧引用，请移除首帧');
-    expect(videoRefConflict({ reference: [], first: ref('f1'), last: ref('f2') }, { ...allCaps, lastFrame: false })).toBe('当前模型不支持尾帧引用，请移除尾帧');
+  it('首尾帧不按不可靠能力位拦截，普通参考仍校验能力', () => {
+    expect(videoRefConflict({ reference: [], first: ref('f1'), last: ref('f2') }, { ...allCaps, firstLastFrame: false })).toBeNull();
+    expect(videoRefConflict({ reference: [], first: ref('f1'), last: ref('f2') }, { ...allCaps, firstFrame: false })).toBeNull();
+    expect(videoRefConflict({ reference: [], first: ref('f1'), last: ref('f2') }, { ...allCaps, lastFrame: false })).toBeNull();
     expect(videoRefConflict({ reference: [ref('m1')] }, { ...allCaps, referenceImage: false })).toBe('当前模型不支持图片参考，请移除普通参考');
   });
 });
@@ -163,12 +163,12 @@ describe('canAddRefRole 角色槽可用性', () => {
     expect(canAddRefRole('first', { reference: [] }, { ...allCaps, firstFrame: false })).toBe(false);
   });
 
-  it('尾帧槽：能力支持 + 已有首帧 + 空闲才可加（尾帧必须配首帧）', () => {
-    expect(canAddRefRole('last', { reference: [] }, allCaps)).toBe(false);
+  it('尾帧槽：能力支持且空闲即可添加，不要求先添加首帧', () => {
+    expect(canAddRefRole('last', { reference: [] }, allCaps)).toBe(true);
     expect(canAddRefRole('last', { reference: [], first: ref('f1') }, allCaps)).toBe(true);
     expect(canAddRefRole('last', { reference: [], first: ref('f1'), last: ref('f2') }, allCaps)).toBe(false);
-    // 服务端要求尾帧与首帧同传，last 实际依赖 firstLastFrame 组合能力
-    expect(canAddRefRole('last', { reference: [], first: ref('f1') }, { ...allCaps, firstLastFrame: false })).toBe(false);
+    // 添加阶段独立占槽；提交时再要求首尾帧齐全。
+    expect(canAddRefRole('last', { reference: [], first: ref('f1') }, { ...allCaps, firstLastFrame: false })).toBe(true);
     expect(canAddRefRole('last', { reference: [], first: ref('f1') }, { ...allCaps, lastFrame: false })).toBe(false);
   });
 
