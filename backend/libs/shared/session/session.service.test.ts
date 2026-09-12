@@ -131,8 +131,8 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
     const token = await service.createSession(BASE);
     expect(token).toMatch(/^sess_[A-Za-z0-9_-]+$/);
     const raw = [...redis.store.values()][0];
-    expect(raw).toContain("sealedSk");
-    expect(raw).toContain("sk-upstream-secret");
+    // 字段名与值均为明文（修正四）；断言 JSON 字段存在而非子串
+    expect(JSON.parse(raw)).toMatchObject({ sk: "sk-upstream-secret" });
     // 会话键 + 按用户索引键各一条
     expect(redis.store.size).toBe(2);
     expect(redis.store.has(`user_session:8:${hash(token)}`)).toBe(true);
@@ -203,7 +203,7 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
     const token = await service.createSession(BASE);
     const key = `session:${hash(token)}`;
     const data = JSON.parse(redis.store.get(key)!);
-    data.sealedSk = null; // 修正四：明文 sk 为 null → 视为凭证缺失
+    data.sk = null; // 修正四：明文 sk 为 null → 视为凭证缺失
     redis.store.set(key, JSON.stringify(data));
     expect(await service.resolveSession(token)).toBeNull();
     expect(redis.store.has(key)).toBe(false);

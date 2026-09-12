@@ -162,13 +162,8 @@ public class JobFinalizer {
                     "completeJob 守卫通过后任务 " + jobId + " 不存在，数据损坏");
         }
 
-        // 摘要同步（settle-ops.ts:322-330：firstSlot 关联 record 时回写；storyboard 无条件调用）
-        GenerationOutputSlotEntity firstSlot = slots.isEmpty() ? null : slots.get(0);
-        if (firstSlot != null && firstSlot.getSceneCardGenerationRecordId() != null) {
-            recordSync.sync(firstSlot.getSceneCardGenerationRecordId());
-        }
-        previewSync.sync(jobIdLong);
-
+        // 无 project_id → 提前返回（不写事件、不写摘要；settle-ops.ts:130 逐字：
+        // project_id === null 早退发生在两个 sync 之前，非「无条件调用」）。
         if (job.getProjectId() == null) {
             return true;
         }
@@ -211,6 +206,14 @@ public class JobFinalizer {
                                     ? slot.getRetryOfSlotId().toString() : "",
                             "initial_placement_status", "pending"));
         }
+
+        // 摘要同步（settle-ops.ts:196-204：firstSlot 关联 record 时回写；storyboard 无条件调用）
+        GenerationOutputSlotEntity firstSlot = slots.isEmpty() ? null : slots.get(0);
+        if (firstSlot != null && firstSlot.getSceneCardGenerationRecordId() != null) {
+            recordSync.sync(firstSlot.getSceneCardGenerationRecordId());
+        }
+        previewSync.sync(jobIdLong);
+
         return true;
     }
 
