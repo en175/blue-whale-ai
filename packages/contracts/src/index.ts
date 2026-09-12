@@ -34,9 +34,13 @@ export {
   imageRefLabel,
   validatePromptDocRefs,
   compilePromptDoc,
+  videoRefLabel,
+  validateVideoPromptDocRefs,
+  compileVideoPromptDoc,
   type PromptDoc,
   type PromptDocSegment,
   type PromptDocRefFailure,
+  type VideoRefItem,
 } from "./prompt-doc.js";
 export {
   changePasswordRequestSchema,

@@ -33,7 +33,7 @@ import {
   type LexicalEditor,
   type NodeKey,
 } from 'lexical';
-import { reconcilePromptDoc, type PromptDoc } from '@/lib/prompt-doc';
+import { reconcilePromptDocWith, type PromptDoc } from '@/lib/prompt-doc';
 import { $createAssetRefNode, $isAssetRefNode, AssetRefNode, PromptRefContext, type AssetRefMeta } from './AssetRefNode';
 import { $applyReconciledRefs, $buildFromPromptDoc, $readPromptDoc, $restoreMentionSelection, matchMentionQuery } from './promptRefDoc';
 import styles from './index.module.css';
@@ -65,11 +65,14 @@ interface PromptRefEditorProps {
   initialText?: string;
   placeholder?: string;
   readOnly?: boolean;
-  /** 当前有效输入顺序（失效判定与 reconcile 用；= 最终 input_asset_ids 顺序） */
-  orderedAssetIds: readonly string[];
-  /** 展示编号：assetId → 图片N 的 N（与附件区/菜单/服务端编译同一映射） */
-  numbering: ReadonlyMap<string, number>;
-  /** 素材元信息（缩略图/名称） */
+  /** 标签有效性判定（reconcile 用）：返回 null 表示该身份当前失效。
+   *  图片 = 身份在最终 input_asset_ids；视频 = 身份在参考集合且当前模式接受（IKFA1O） */
+  labelOf: (assetId: string) => string | null;
+  /** labelOf 结果的稳定键（身份序列）：变化时触发 reconcile 重派生 */
+  reconcileKey: string;
+  /** 展示文案：assetId → 标签文案（图片N/视频N/首帧等；与附件区/菜单/服务端编译同一映射） */
+  labels: ReadonlyMap<string, string>;
+  /** 素材元信息（缩略图/名称/媒体类型） */
   refsMeta: ReadonlyMap<string, AssetRefMeta>;
   onChange: (doc: PromptDoc) => void;
   onMentionChange?: (state: MentionState) => void;
@@ -158,17 +161,18 @@ function MentionPlugin({
   return null;
 }
 
-/** 编号重派生与失效标记：有效输入变化时，把 reconcile 结果写回标签节点 */
-function ReconcilePlugin({ orderedAssetIds }: { orderedAssetIds: readonly string[] }) {
+/** 文案重派生与失效标记：有效标签集合变化时，把 reconcile 结果写回标签节点（IKFA1O 泛化 labelOf） */
+function ReconcilePlugin({ labelOf, reconcileKey }: { labelOf: (assetId: string) => string | null; reconcileKey: string }) {
   const [editor] = useLexicalComposerContext();
-  const orderedKey = orderedAssetIds.join(',');
+  const labelOfRef = useRef(labelOf);
+  labelOfRef.current = labelOf;
   useEffect(() => {
     editor.update(() => {
-      const { doc, changed } = reconcilePromptDoc($readPromptDoc(), orderedAssetIds);
+      const { doc, changed } = reconcilePromptDocWith($readPromptDoc(), (id) => labelOfRef.current(id));
       if (changed) $applyReconciledRefs($nodesOfType(AssetRefNode), doc.segments);
     }, { tag: 'prompt-ref-reconcile' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor, orderedKey]);
+  }, [editor, reconcileKey]);
   return null;
 }
 
@@ -195,25 +199,22 @@ function MentionKeyPlugin({ onMentionKey }: { onMentionKey?: (key: 'down' | 'up'
 }
 
 const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(function PromptRefEditor(
-  { initialDoc, initialText, placeholder, readOnly, orderedAssetIds, numbering, refsMeta, onChange, onMentionChange, onInvalidTagClick, onMentionKey, className },
+  { initialDoc, initialText, placeholder, readOnly, labelOf, reconcileKey, labels, refsMeta, onChange, onMentionChange, onInvalidTagClick, onMentionKey, className },
   ref,
 ) {
   const editorRef = useRef<LexicalEditor | null>(null);
   const mentionAnchorRef = useRef<{ key: NodeKey; offset: number; query: string } | null>(null);
   const pendingInsertRef = useRef<{ key: NodeKey; offset: number } | null>(null);
-  const numberingRef = useRef(numbering);
-  numberingRef.current = numbering;
-  const labelOf = (assetId: string): string | undefined => {
-    const n = numberingRef.current.get(assetId);
-    return n === undefined ? undefined : `图片${n}`;
-  };
+  const labelsRef = useRef(labels);
+  labelsRef.current = labels;
+  const labelOfCurrent = (assetId: string): string | undefined => labelsRef.current.get(assetId);
 
   useImperativeHandle(ref, () => ({
     insertRefAtMention: (assetId: string) => {
       const editor = editorRef.current;
       const anchor = mentionAnchorRef.current;
       if (!editor || !anchor) return;
-      const label = labelOf(assetId);
+      const label = labelOfCurrent(assetId);
       editor.update(() => {
         if (!$getNodeByKey(anchor.key)) return;
         // 恢复「@query」的选择范围并原位替换为标签，保留前后文字与段落
@@ -248,7 +249,7 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
       const point = pendingInsertRef.current;
       pendingInsertRef.current = null;
       if (!editor) return;
-      const label = labelOf(assetId);
+      const label = labelOfCurrent(assetId);
       editor.update(() => {
         let inserted = false;
         if (point && $getNodeByKey(point.key)) {
@@ -282,7 +283,7 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
     replaceRefAt: (nodeKey: string, assetId: string) => {
       const editor = editorRef.current;
       if (!editor) return;
-      const label = labelOf(assetId);
+      const label = labelOfCurrent(assetId);
       editor.update(() => {
         const node = $getNodeByKey(nodeKey);
         if (!$isAssetRefNode(node)) return;
@@ -304,8 +305,8 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
   }), [onMentionChange]);
 
   const contextValue = useMemo(
-    () => ({ numbering, meta: refsMeta, readOnly: readOnly === true, onInvalidTagClick }),
-    [numbering, refsMeta, readOnly, onInvalidTagClick],
+    () => ({ labels, meta: refsMeta, readOnly: readOnly === true, onInvalidTagClick }),
+    [labels, refsMeta, readOnly, onInvalidTagClick],
   );
 
   const initialConfig = {
@@ -322,7 +323,7 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
       <EditablePlugin readOnly={readOnly} />
       <MentionPlugin onMentionChange={onMentionChange} mentionAnchorRef={mentionAnchorRef} />
       <MentionKeyPlugin onMentionKey={onMentionKey} />
-      <ReconcilePlugin orderedAssetIds={orderedAssetIds} />
+      <ReconcilePlugin labelOf={labelOf} reconcileKey={reconcileKey} />
       <HistoryPlugin />
       <OnChangePlugin
         onChange={(editorState) => {
