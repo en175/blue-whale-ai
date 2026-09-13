@@ -715,6 +715,8 @@ async function resolveTargetSnapshot(args: {
   promptText: string;
   projectId: string;
   deps: Pick<GenerationDeps, "canvas">;
+  /** 正文文本标签已复核的同次画布读取；编号与最终冻结不得读取不同版本。 */
+  canvas?: Awaited<ReturnType<CanvasRepo["getByProject"]>>;
   /** ADR-0085：所选模型的 raw prompt 上限；组合闸取 max(契约预算, 模型值)。 */
   maxPromptLength: number;
   /** IKFA1P：含 text_ref 时文本附件按编号清单格式组合（与最终冻结的供应商正文一致）。 */
@@ -731,7 +733,7 @@ async function resolveTargetSnapshot(args: {
   let textAttachments: TextAttachmentSnapshot[] = [];
   let canvasSnapshot: TargetSnapshot["canvas"];
   if (targetNodeId !== null) {
-    const canvas = await deps.canvas.getByProject(projectId);
+    const canvas = args.canvas ?? await deps.canvas.getByProject(projectId);
     const nodes = JSON.parse(canvas.nodes ?? "[]") as Array<{
       id?: unknown;
       type?: unknown;
@@ -939,27 +941,6 @@ export async function handleCreateGenerationJob(
       }
     }
   }
-  // 5. 画布目标快照（仅携带 target_node_id 时读画布）
-  const target = await resolveTargetSnapshot({
-    type,
-    body,
-    promptText,
-    projectId,
-    deps,
-    maxPromptLength,
-    promptDoc,
-  });
-  if (!target.ok) {
-    return fail(400, target.value.message, { code: target.value.code });
-  }
-
-  const parsedPlanRefs = parseReferences(body.references);
-  const planRefs = parsedPlanRefs.kind === "ok" ? parsedPlanRefs.items : [];
-  const planSnapshot = (type === "image" || type === "video") && target.value.canvas && target.value.targetNodeId
-    ? await freezePromptPlans({ ...target.value.canvas, targetId: target.value.targetNodeId,
-        type, references: planRefs,
-        inputIds: type === "video" ? planRefs.flatMap(r => r.asset_id ? [r.asset_id] : []) : assetIds(body.input_asset_ids), prompt: promptText, attachments: target.value.textAttachments,
-        promptDoc, model: capability, userId, projectId, assets: deps.assets }) : undefined;
   const refs = resolveReferenceAssets(body, type, maxReferenceImages);
   if (!refs.ok) {
     return fail(400, refs.value.message, {
@@ -991,6 +972,7 @@ export async function handleCreateGenerationJob(
   // IKFA1M/IKFA1O：正文素材标签服务端复核——失效标签阻止生成；标签身份必须在最终输入集合内
   // （该集合已过存在性/归属/类型复核），保存与提交之间的变化不能绕过校验。
   // 视频按提交的 references 实际结构编译（帧→角色名、普通参考→同类型编号），不信任客户端 label 缓存。
+  let promptCanvas: Awaited<ReturnType<CanvasRepo["getByProject"]>> | undefined;
   if (promptDoc) {
     /** 标签复核失败 → 统一 400 响应（invalid_tag / unknown_asset / unknown_text 分支共用文案与错误码） */
     const failPromptDocRefs = (failure: PromptDocRefFailure | null) => {
@@ -1011,14 +993,18 @@ export async function handleCreateGenerationJob(
       }
       return null;
     };
+    let videoRefItems: Parameters<typeof validateVideoPromptDocRefs>[1] | null = null;
     if (type === "video") {
       const parsed = parseReferences(body.references);
-      if (parsed.kind !== "ok") {
+      const textOnlyDoc = docHasTextRef(promptDoc)
+        && !promptDoc.segments.some((segment) => segment.kind === "asset_ref");
+      if (parsed.kind !== "ok" && !(parsed.kind === "absent" && textOnlyDoc)) {
         return fail(400, "视频正文素材标签请求必须携带单数组 references", {
           code: ERROR_UNSUPPORTED_INPUT,
         });
       }
-      const refItems = parsed.items.map((item) => ({
+      const items = parsed.kind === "ok" ? parsed.items : [];
+      videoRefItems = items.map((item) => ({
         id: String(item.asset_id ?? item.material_id),
         role: item.role,
         type: item.type,
@@ -1026,7 +1012,7 @@ export async function handleCreateGenerationJob(
       // IKFA1O：references 单数组不走 reference_asset_ids 既有存在性复核——
       // 携带标签时补齐（与生图路径同一 deps）：本地 asset 必须存在/有权，且声明 type
       // 与素材实际类型一致（编号由 type 派生，谎报 type 会错编 图片N/视频N/音频N）。
-      const localIds = parsed.items.filter((item) => item.asset_id !== undefined).map((item) => String(item.asset_id));
+      const localIds = items.filter((item) => item.asset_id !== undefined).map((item) => String(item.asset_id));
       if (localIds.length > 0) {
         const resolvedRefs = await deps.assets.resolveInputAssets(localIds, userId, projectId);
         if (resolvedRefs.length !== localIds.length) {
@@ -1035,7 +1021,7 @@ export async function handleCreateGenerationJob(
           });
         }
         const resolvedTypes = new Map(localIds.map((id, i) => [id, resolvedRefs[i]!.type]));
-        const mismatch = parsed.items.some(
+        const mismatch = items.some(
           (item) => item.asset_id !== undefined && resolvedTypes.get(String(item.asset_id)) !== item.type,
         );
         if (mismatch) {
@@ -1044,59 +1030,35 @@ export async function handleCreateGenerationJob(
           });
         }
       }
-      // IKFA1P：文本身份复核与编号依据接纳当下的文本附件（画布连线推导，读取来源最新文字），
-      // 在 references 结构/存在性复核之后执行（契约 §5 复核链顺序）；
-      // 未绑定生成目标（文本附件由目标连线推导）→ 400。
-      let orderedTextNodeIds: string[] = [];
-      if (docHasTextRef(promptDoc)) {
-        const textTargetNodeId =
-          isStr(body.target_node_id) && body.target_node_id.trim() !== ""
-            ? body.target_node_id
-            : null;
-        if (textTargetNodeId === null) {
-          return fail(400, "正文文本标签指向无效的文本附件", {
-            code: ERROR_INVALID_REFERENCE,
-          });
-        }
-        const canvas = await deps.canvas.getByProject(projectId);
-        orderedTextNodeIds = textAttachmentsFromCanvas(
-          JSON.parse(canvas.nodes ?? "[]") as Array<{
-            id?: unknown;
-            type?: unknown;
-            data?: Record<string, unknown>;
-          }>,
-          JSON.parse(canvas.edges ?? "[]"),
-          textTargetNodeId,
-        ).map((attachment) => attachment.node_id);
+    }
+    // 图/视频共用文本身份复核；保留媒体存在性复核在前，复用同次画布读取冻结全文。
+    let orderedTextNodeIds: string[] = [];
+    if (docHasTextRef(promptDoc)) {
+      const textTargetNodeId =
+        isStr(body.target_node_id) && body.target_node_id.trim() !== ""
+          ? body.target_node_id
+          : null;
+      if (textTargetNodeId === null) {
+        return fail(400, "正文文本标签指向无效的文本附件", {
+          code: ERROR_INVALID_REFERENCE,
+        });
       }
-      const refErr = failPromptDocRefs(validateVideoPromptDocRefs(promptDoc, refItems, orderedTextNodeIds));
+      promptCanvas = await deps.canvas.getByProject(projectId);
+      orderedTextNodeIds = textAttachmentsFromCanvas(
+        JSON.parse(promptCanvas.nodes ?? "[]") as Array<{
+          id?: unknown;
+          type?: unknown;
+          data?: Record<string, unknown>;
+        }>,
+        JSON.parse(promptCanvas.edges ?? "[]"),
+        textTargetNodeId,
+      ).map((attachment) => attachment.node_id);
+    }
+    if (videoRefItems !== null) {
+      const refErr = failPromptDocRefs(validateVideoPromptDocRefs(promptDoc, videoRefItems, orderedTextNodeIds));
       if (refErr) return refErr;
-      promptText = compileVideoPromptDoc(promptDoc, refItems, orderedTextNodeIds.length > 0 ? orderedTextNodeIds : undefined);
+      promptText = compileVideoPromptDoc(promptDoc, videoRefItems, orderedTextNodeIds.length > 0 ? orderedTextNodeIds : undefined);
     } else {
-      // IKFA1P：文本身份复核与编号依据接纳当下的文本附件（画布连线推导，读取来源最新文字）；
-      // 生图媒体存在性复核已在前置步骤完成（契约 §5 复核链顺序）；未绑定生成目标 → 400。
-      let orderedTextNodeIds: string[] = [];
-      if (docHasTextRef(promptDoc)) {
-        const textTargetNodeId =
-          isStr(body.target_node_id) && body.target_node_id.trim() !== ""
-            ? body.target_node_id
-            : null;
-        if (textTargetNodeId === null) {
-          return fail(400, "正文文本标签指向无效的文本附件", {
-            code: ERROR_INVALID_REFERENCE,
-          });
-        }
-        const canvas = await deps.canvas.getByProject(projectId);
-        orderedTextNodeIds = textAttachmentsFromCanvas(
-          JSON.parse(canvas.nodes ?? "[]") as Array<{
-            id?: unknown;
-            type?: unknown;
-            data?: Record<string, unknown>;
-          }>,
-          JSON.parse(canvas.edges ?? "[]"),
-          textTargetNodeId,
-        ).map((attachment) => attachment.node_id);
-      }
       const refErr = failPromptDocRefs(
         validatePromptDocRefs(promptDoc, refs.value.referenceAssetIds.map(String), orderedTextNodeIds),
       );
@@ -1109,6 +1071,28 @@ export async function handleCreateGenerationJob(
       return fail(400, compiledError.message, { code: compiledError.code });
     }
   }
+  // 5. 画布目标快照（仅携带 target_node_id 时读画布）
+  const target = await resolveTargetSnapshot({
+    ...(promptCanvas ? { canvas: promptCanvas } : {}),
+    type,
+    body,
+    promptText,
+    projectId,
+    deps,
+    maxPromptLength,
+    promptDoc,
+  });
+  if (!target.ok) {
+    return fail(400, target.value.message, { code: target.value.code });
+  }
+
+  const parsedPlanRefs = parseReferences(body.references);
+  const planRefs = parsedPlanRefs.kind === "ok" ? parsedPlanRefs.items : [];
+  const planSnapshot = (type === "image" || type === "video") && target.value.canvas && target.value.targetNodeId
+    ? await freezePromptPlans({ ...target.value.canvas, targetId: target.value.targetNodeId,
+        type, references: planRefs,
+        inputIds: type === "video" ? planRefs.flatMap(r => r.asset_id ? [r.asset_id] : []) : assetIds(body.input_asset_ids), prompt: promptText, attachments: target.value.textAttachments,
+        promptDoc, model: capability, userId, projectId, assets: deps.assets }) : undefined;
 
   // 6. 组装 job.input（策略按类型分派）
   const input = strategy.composeInput({

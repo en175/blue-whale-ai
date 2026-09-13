@@ -625,7 +625,7 @@ describe.skipIf(!process.env.IKFA1P_DATABASE_URL)("Text attachment prompt ref do
   }, 120_000);
 
   // 浏览器段（视频路径）：@ 文本与媒体混排插入 → 发送 → worker 供应商编号清单正文。
-  it.runIf(process.env.IKFA1P_BROWSER)("browser(生视频)：@ 文本混排插入 → API → DB → worker 编号清单", async () => {
+  it.runIf(process.env.IKFA1P_BROWSER).each([true, false])("browser(生视频，媒体参考=%s)：@ 文本插入 → 刷新 → API → DB → worker 编号清单", async (withMedia) => {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     const projectId = (await projects.create("987654", "IKFA1P browser video")).id;
@@ -642,7 +642,7 @@ describe.skipIf(!process.env.IKFA1P_DATABASE_URL)("Text attachment prompt ref do
     const seeded = await (await fetch(`${base}/api/canvases/${projectId}`, {
       method: "PUT",
       headers: { "content-type": "application/json", "if-match": '"missing"' },
-      body: JSON.stringify({ nodes: JSON.stringify(nodes), edges: JSON.stringify(edges), viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }),
+      body: JSON.stringify({ nodes: JSON.stringify(nodes.filter((node) => withMedia || node.id !== "ref-img")), edges: JSON.stringify(edges.filter((edge) => withMedia || edge.id !== "e-img")), viewport: JSON.stringify({ x: 0, y: 0, zoom: 1 }) }),
     })).status;
     expect(seeded).toBe(200);
 
@@ -674,16 +674,28 @@ describe.skipIf(!process.env.IKFA1P_DATABASE_URL)("Text attachment prompt ref do
       await page.keyboard.type("按@");
       await page.locator('[data-testid="mention-menu"]').waitFor();
       const items = page.locator('[data-testid="mention-ref-item"]');
-      expect((await items.allInnerTexts()).map((t) => t.replace(/\n/g, ""))).toEqual(["角色图图片1", "运镜文本1"]);
-      await items.nth(1).click();
+      expect((await items.allInnerTexts()).map((t) => t.replace(/\n/g, ""))).toEqual(withMedia ? ["角色图图片1", "运镜文本1"] : ["运镜文本1"]);
+      await items.nth(withMedia ? 1 : 0).click();
       await page.keyboard.type("运镜");
       expect((await editor.innerText()).replace(/\n/g, "")).toContain("按文本1运镜");
 
+      // 等待草稿落库再刷新，验证视频文本身份和正文恢复（C4）。
+      await vi.waitFor(async () => {
+        const row = await prisma.client.canvas.findFirst({ where: { project_id: BigInt(projectId) } });
+        const saved = (row!.nodes_json as Array<{ id: string; data: Record<string, unknown> }>).find((node) => node.id === "draft-v");
+        expect(saved?.data.prompt).toBe("按文本1运镜");
+      }, { timeout: 10_000 });
+      await page.reload();
+      await draft.waitFor();
+      await draft.locator('[data-testid="media-content"]').click();
+      await page.locator('[data-testid="asset-ref-valid"]').first().waitFor();
+      expect((await editor.innerText()).replace(/\n/g, "")).toBe("按文本1运镜");
       await page.locator('[data-testid="video-send"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(1), { timeout: 10_000 });
       const body = generationRequests[0]!;
       expect(body.target_node_id).toBe("draft-v");
-      expect(Array.isArray(body.references)).toBe(true);
+      if (withMedia) expect(Array.isArray(body.references)).toBe(true);
+      else expect(body).not.toHaveProperty("references");
       expect(body.prompt_doc).toEqual({
         version: 1,
         segments: [

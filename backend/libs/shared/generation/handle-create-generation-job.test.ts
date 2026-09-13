@@ -2265,6 +2265,69 @@ describe("handleCreateGenerationJob 文本附件正文标签 prompt_doc（IKFA1P
     return { deps, createJob };
   }
 
+  it("视频仅文本标签：不传媒体 references 也能冻结完整文本（IKFA1J）", async () => {
+    const { deps, createJob } = buildVideoTargetDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...VIDEO_BODY,
+      target_node_id: "media-v",
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", node_id: "text-x" }] },
+    }, null, deps);
+    expect(result.code).toBe(200);
+    const input = createJob.mock.calls[0][0].input;
+    expect(input.prompt).toBe("文本1");
+    expect(input.composed_prompt).toBe("文本1：手持跟拍\n\n文本2：胶片感\n\n文本1");
+    expect(input).not.toHaveProperty("references");
+  });
+
+  it.each([
+    { node_id: "text-none" },
+    { node_id: "text-x", invalid_label: "文本1" },
+  ])("视频仅文本标签仍拒绝无效身份 %j（IKFA1J）", async (ref) => {
+    const { deps, createJob } = buildVideoTargetDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...VIDEO_BODY,
+      target_node_id: "media-v",
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", ...ref }] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["image", "reorder"], ["image", "remove"],
+    ["video", "reorder"], ["video", "remove"],
+  ])("%s：文本附件并发 %s 不得使标签与冻结正文错配（IKFA1J）", async (type, change) => {
+    const video = type === "video";
+    const initial = video ? VIDEO_TEXT_CANVAS : TARGET_CANVAS;
+    const { deps, createJob, getByProject } = buildTargetDeps(initial);
+    if (video) deps.models = buildVideoDeps().deps.models;
+    const mentioned = video ? "text-x" : "text-b";
+    const edges = JSON.parse(initial.edges) as Array<{ source: string }>;
+    const changed = {
+      ...initial,
+      edges: JSON.stringify(change === "remove"
+        ? edges.filter((edge) => edge.source !== mentioned)
+        : [...edges].reverse()),
+    };
+    // 模拟读取后其他请求更新画布；若接纳二次读取，将拿到另一个版本。
+    getByProject.mockResolvedValueOnce({ ...initial, version: 3 })
+      .mockResolvedValue({ ...changed, version: 4 });
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...(video ? { ...VIDEO_BODY, target_node_id: "media-v" } : IMAGE_TARGET_BODY),
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", node_id: mentioned }] },
+    }, null, deps);
+    expect(result.code).toBe(200);
+    const input = createJob.mock.calls[0][0].input;
+    expect(input.prompt).toBe("文本1");
+    expect(input.text_attachments[0]).toEqual(expect.objectContaining({
+      node_id: mentioned, text: video ? "手持跟拍" : "雨夜",
+    }));
+    expect(input.composed_prompt).toBe(video
+      ? "文本1：手持跟拍\n\n文本2：胶片感\n\n文本1"
+      : "文本1：雨夜\n\n文本2：赛博朋克\n\n文本3：   \n\n文本1");
+  });
+
   it("视频：references + 文本标签 → 200，帧/参考与文本N 混排编译，composed_prompt 冻结编号清单", async () => {
     const { deps, createJob } = buildVideoTargetDeps();
     const result = await handleCreateGenerationJob("u1", "p1", {
