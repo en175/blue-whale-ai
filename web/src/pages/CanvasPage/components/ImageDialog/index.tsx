@@ -11,9 +11,6 @@ import {
   Minimize2,
   SlidersHorizontal,
   ArrowUp,
-  MousePointerClick,
-  FolderOpen,
-  Plus,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import {
@@ -41,6 +38,7 @@ import { cardNameOfNode, localNodeIdOf } from '../../mediaRefs';
 import type { MediaGenStatus } from '../MediaNode';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import AtMentionMenu from '../AtMentionMenu';
+import RefSourceMenu from '../RefSourceMenu';
 import { type AtMentionItem } from '../../atMention';
 import type { FollowDialogAnchor } from '../../followDialog';
 import styles from './index.module.css';
@@ -178,12 +176,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
   const [files, setFiles] = useState<UploadedFile[]>(initialFiles ?? []);
   /** 上传中状态：禁用发送按钮和输入框 */
   const [uploading, setUploading] = useState(false);
-  /** 媒体入口按钮弹菜单：从资产中选择 / 到节点选择 */
-  const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const resWrapRef = useRef<HTMLDivElement>(null);
   const configPanelRef = useRef<HTMLDivElement>(null);
-  const sourceWrapRef = useRef<HTMLDivElement>(null);
   const mentionMenuRef = useRef<HTMLDivElement>(null);
   /** 失效标签替换菜单（IKFA1N B5）：记录发起点击的标签节点 key，null 为关闭 */
   const [replaceTarget, setReplaceTarget] = useState<string | null>(null);
@@ -192,7 +187,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
   useDismissOnOutside([
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
     { open: resOpen, ref: resWrapRef, dismiss: () => setResOpen(false) },
-    { open: sourceMenuOpen, ref: sourceWrapRef, dismiss: () => setSourceMenuOpen(false) },
     { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
     { open: replaceTarget !== null, ref: replaceMenuRef, dismiss: () => setReplaceTarget(null) },
   ]);
@@ -752,39 +746,14 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
                 onInsertRef={!readOnly ? () => insertRefByKey(a.nodeId) : undefined}
               />
             )))}
-            {/* 附件队列末尾：媒体来源菜单（上传入口退役，IKDLQR/IKDLQL 方向；保留资产选择/节点选择，
-                画布资产改造融合）。图片达上限或生成中只读时隐藏 */}
+            {/* 附件队列末尾：统一附件来源入口（IKFE8T，上传入口已退役）——
+                「从资产中选择 / 从节点添加素材」两项菜单；图片达上限或生成中只读时隐藏 */}
             {!imagesFull && !readOnly && (
-            <div className={styles.sourceWrap} ref={sourceWrapRef}>
-              <button
-                className={`${styles.previewItem} ${styles.previewPlaceholder} ${pickMode ? styles.previewPicking : ''}`}
-                onClick={() => setSourceMenuOpen((v) => !v)}
-                title="从资产中选择 / 到节点选择"
-              >
-                <Plus size={18} strokeWidth={2} />
-              </button>
-              {sourceMenuOpen && (
-                <>
-                  <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(false)} />
-                  <div className={styles.sourceMenu}>
-                    <button
-                      className={styles.sourceMenuItem}
-                      onClick={() => { setSourceMenuOpen(false); onPickFromAssets?.(); }}
-                    >
-                      <FolderOpen size={14} strokeWidth={2} />
-                      <span>从资产中选择</span>
-                    </button>
-                    <button
-                      className={styles.sourceMenuItem}
-                      onClick={() => { setSourceMenuOpen(false); onPickFromCanvas?.(); }}
-                    >
-                      <MousePointerClick size={14} strokeWidth={2} />
-                      <span>到节点选择</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+              <RefSourceMenu
+                onPickFromAssets={() => onPickFromAssets?.()}
+                onPickFromCanvas={() => onPickFromCanvas?.()}
+                pickMode={pickMode}
+              />
             )}
           </div>
 
