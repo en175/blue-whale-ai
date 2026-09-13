@@ -169,6 +169,24 @@ describe('RefThumbnail 三态交互（IKFCKK）', () => {
   });
 });
 
+describe('RefThumbnail 角色徽标（IKFCKQ 视频面板首帧/尾帧）', () => {
+  it('badgeText 渲染文字徽标并优先于 number；悬停同样淡出（编号圆钮三态一致）', async () => {
+    await renderSingle({ kind: 'image', url: 'https://x/f.png', number: 1, badgeText: '首帧' });
+    const badge = mountNode.querySelector('[data-testid="ref-thumb-badge"]');
+    expect(badge?.textContent).toBe('首帧');
+    const el = thumb();
+    hover(el);
+    expect(hoverState()).toBe('true');
+    unhover(el);
+    expect(hoverState()).toBe('false');
+  });
+
+  it('badgeText 缺省回退数字圆钮（既有编号口径不变）', async () => {
+    await renderSingle({ kind: 'image', url: 'https://x/a.png', number: 2 });
+    expect(mountNode.querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('2');
+  });
+});
+
 describe('RefThumbnail 四类素材预览形态（IKFCKK）', () => {
   it('图片：object-fit contain 静态放大，原始宽高比不裁剪', async () => {
     await renderSingle({ kind: 'image', url: 'https://x/a.png', number: 1 });

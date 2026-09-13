@@ -21,7 +21,8 @@ export const hasAnyMediaRef = (refs: VideoMediaRefs): boolean =>
   refs.reference.length > 0 || Boolean(refs.first || refs.last);
 
 /** 视频媒体参考项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入提交字段；
- *  materialId 非空表示角色库素材（asset- 前缀素材库 ID，提交走 *_material_id/referenceMaterials） */
+ *  materialId 非空表示角色库素材（asset- 前缀素材库 ID，提交走 *_material_id/referenceMaterials）；
+ *  duration 为来源节点回填的媒体时长（秒，IKFCKQ 音频缩略图预览卡片显示用，缺失不携带） */
 export interface VideoMediaRef {
   nodeId: string;
   url: string;
@@ -29,6 +30,7 @@ export interface VideoMediaRef {
   assetId: string;
   mediaType: 'image' | 'video' | 'audio';
   materialId?: string;
+  duration?: number;
 }
 
 /** 目标视频草稿的分组参考：首帧/尾帧各至多一项（连线时校验，推导时防御性取首条） */
@@ -226,6 +228,7 @@ export function videoMediaRefsOf(
       assetId,
       mediaType: data.mediaType as 'image' | 'video' | 'audio',
       materialId,
+      duration: typeof data.duration === 'number' && data.duration > 0 ? data.duration : undefined,
     };
     if (role === 'reference') refs.reference.push(item);
     else if (role === 'first') refs.first = item;

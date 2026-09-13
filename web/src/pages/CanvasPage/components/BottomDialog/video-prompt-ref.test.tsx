@@ -128,6 +128,16 @@ describe('IKFA1O @ 菜单多媒体索引（A2）', () => {
     expect(readPromptRefText(container)).toBe('结合视频1');
   });
 
+  it('IKFCKQ 缩略图 @ 按钮与手动 @ 选择产出同一种素材标签 chip', async () => {
+    await renderDialog({ videoMediaRefs: ALL_REFS });
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="插入引用"]')!;
+    await act(async () => { atBtn.click(); });
+    // 无记忆光标（未输入过正文）→ 追加末尾，chip 文案与手动 @ 选择一致（首个缩略图为图片1）
+    expect(readPromptRefText(container)).toBe('图片1');
+    await typePromptRefRaw(container, '结尾');
+    expect(readPromptRefText(container)).toBe('图片1结尾');
+  });
+
   it('搜索按名称过滤已引用项', async () => {
     await renderDialog({ videoMediaRefs: ALL_REFS });
     await typePromptRefRaw(container, '@301');

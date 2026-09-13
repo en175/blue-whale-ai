@@ -79,6 +79,27 @@ describe('videoLabelMapOf（图生视频模式 text2video）', () => {
   });
 });
 
+describe('videoLabelMapOf numberMap（IKFCKQ 缩略图编号与标签同源）', () => {
+  it('普通参考按类型连续编号；模式不接受与帧角色不在其中', () => {
+    const all = videoLabelMapOf(ALL_REFS, 'all');
+    expect(all.numberMap.get('101')).toBe(1);
+    expect(all.numberMap.get('102')).toBe(2);
+    expect(all.numberMap.get('301')).toBe(1);
+    expect(all.numberMap.get('401')).toBe(1);
+    expect(all.numberMap.get('asset-x1')).toBe(2);
+
+    // text2video：仅图片参与编号，视频/音频（模式不接受）不占用数字
+    const t2v = videoLabelMapOf(ALL_REFS, 'text2video');
+    expect(t2v.numberMap.get('101')).toBe(1);
+    expect(t2v.numberMap.get('102')).toBe(2);
+    expect(t2v.numberMap.has('301')).toBe(false);
+
+    // keyframe：帧按角色显示（不参与数字编号），普通参考模式不接受
+    const kf = videoLabelMapOf({ ...KEYFRAME_REFS, reference: ALL_REFS.reference }, 'keyframe');
+    expect(kf.numberMap.size).toBe(0);
+  });
+});
+
 describe('videoLabelMapOf（文生视频模式 prompt，IKFC1T）', () => {
   it('任何媒体参考（普通参考与首尾帧）均不接受 → 全部 null；refItems 提交投影不受模式影响', () => {
     const { labelOf, refItems } = videoLabelMapOf(

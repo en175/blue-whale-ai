@@ -638,7 +638,8 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await connect('t1', 'd1');
 
     await expectMode('文生视频');
-    expect(container.textContent).toContain('文本附件（1）');
+    // IKFCKQ：文本附件以 FileText 缩略图进参考栏（独立区块下线）
+    expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1);
     await waitModelReady();
     expect(sendButton().disabled).toBe(false);
   });
@@ -663,8 +664,8 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
 
     await expectMode('全能参考');
     expect(container.textContent).toContain('已根据当前素材切换生成模式');
-    // 自动切换保留文本附件与提示词
-    expect(container.textContent).toContain('文本附件（1）');
+    // 自动切换保留文本附件与提示词（缩略图仍在参考栏）
+    expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1);
     await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('all'));
     await vi.waitFor(() => expect(draftDataOf('d1').prompt).toBe('海边日落'));
 
@@ -709,8 +710,8 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await openModeMenu();
     expect(modeOption('文生视频')!.disabled).toBe(true);
 
-    // 移除部分参考：仍有媒体参考，文生视频保持置灰
-    const removeButtons = () => container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除（断开连线）"]');
+    // 移除部分参考：仍有媒体参考，文生视频保持置灰（IKFCKQ：× 为共享缩略图按钮，title=移除）
+    const removeButtons = () => container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]');
     await act(async () => { removeButtons()[0]!.click(); });
     await openModeMenu();
     expect(modeOption('文生视频')!.disabled).toBe(true);

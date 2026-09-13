@@ -19,6 +19,8 @@ export interface RefThumbnailProps {
   name: string;
   /** 编号圆钮数字（面板按保序引用派生，删除/换位后紧凑重派生）；缺省不显示圆钮 */
   number?: number;
+  /** 角色徽标文字（IKFCKQ 视频面板首帧/尾帧：按角色标识不参与数字编号）；优先于 number 显示 */
+  badgeText?: string;
   /** × 立即删除（走调用方「断开引用、保留来源」链路，无确认弹窗）；缺省不渲染 × */
   onRemove?: () => void;
   /** @ 插入提示词（调用方复用 insertRefAtPending 记忆光标路径）；缺省不渲染 @ */
@@ -97,6 +99,7 @@ export function RefThumbnail({
   url,
   name,
   number,
+  badgeText,
   onRemove,
   onInsertRef,
   audioDuration,
@@ -155,8 +158,8 @@ export function RefThumbnail({
       {kind === 'video' && url ? <video src={url} muted playsInline preload="metadata" /> : null}
       {kind === 'audio' ? <AudioLines className={styles.kindIcon} aria-hidden="true" /> : null}
       {kind === 'text' ? <FileText className={styles.kindIcon} aria-hidden="true" /> : null}
-      {number != null && (
-        <span className={styles.badge} data-testid="ref-thumb-badge">{number}</span>
+      {(badgeText ?? number) != null && (
+        <span className={styles.badge} data-testid="ref-thumb-badge">{badgeText ?? number}</span>
       )}
       {onRemove && (
         <button
