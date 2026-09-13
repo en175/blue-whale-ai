@@ -259,8 +259,9 @@ function RefCursorNavPlugin() {
   useEffect(() => {
     const $collapseTo = (node: LexicalNode, offset: number, type: 'text' | 'node' | 'element') => {
       const sel = $createRangeSelection();
-      sel.anchor.set(node.getKey(), offset, type);
-      sel.focus.set(node.getKey(), offset, type);
+      // 'node' 是运行时合法光标类型（装饰节点锚定），Lexical 公开类型未收录，收敛断言不改行为
+      sel.anchor.set(node.getKey(), offset, type as 'text' | 'element');
+      sel.focus.set(node.getKey(), offset, type as 'text' | 'element');
       $setSelection(sel);
     };
     const $placeBefore = (ref: AssetRefNode) => {

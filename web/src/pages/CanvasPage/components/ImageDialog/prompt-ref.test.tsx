@@ -341,8 +341,8 @@ describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
         const ref = $nodesOfType(AssetRefNode)[0]!;
         const target = side === 'before' ? ref.getPreviousSibling() : side === 'after' ? ref.getNextSibling() : ref;
         const sel = $createRangeSelection();
-        sel.anchor.set(target!.getKey(), offset, type);
-        sel.focus.set(target!.getKey(), offset, type);
+        sel.anchor.set(target!.getKey(), offset, type as 'text' | 'element');
+        sel.focus.set(target!.getKey(), offset, type as 'text' | 'element');
         $setSelection(sel);
       }, { tag: SKIP_DOM_SELECTION_TAG });
     });
