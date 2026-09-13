@@ -491,3 +491,41 @@ describe('IKFE8U 视频面板统一附件入口', () => {
     expect(container.textContent).not.toContain('点击空白处取消');
   });
 });
+
+
+describe('IKFEWF 文本选取边界', () => {
+  it('普通文本通过视频入口建立附件且重复选取不重复连线', async () => {
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    doc.nodes.push({ id: 't1', type: 'textNode', position: { x: 0, y: 500 }, data: { text: '普通文本上下文' } });
+    await renderPage();
+    await openBoundPanel();
+    await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
+    await clickNode('t1');
+    expect(edgePairs()).toEqual([`t1->${currentVideoDraftId()}`]);
+    await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
+    await clickNode('t1');
+    expect(edgePairs()).toHaveLength(1);
+  });
+
+  it.each([false, true])('首尾帧槽拒绝文本（方案=%s）并保持选取', async (plan) => {
+    const doc = canvasDocMock.current.doc as { nodes: Node[]; edges: unknown[] };
+    doc.nodes.push({ id: 't1', type: 'textNode', position: { x: 0, y: 500 }, data: { text: '文本上下文', ...(plan ? { promptSource: { kind: 'plan' } } : {}) } });
+    doc.nodes.push({ id: 'm3', type: 'mediaNode', position: { x: 0, y: 700 }, data: { src: 'http://img/m3.png', mediaType: 'image', assetId: 'a5' } });
+    canvasDocMock.current.assets.a5 = { asset_id: 5, type: 'image', access_url: 'http://img/m3.png', width: 100, height: 100 };
+    // 保留两张图片以满足既有首尾帧模式门控，混用参考仍受原有提交限制。
+    doc.edges = [{ id: 'e3', source: 'm3', target: 'd1' }, { id: 'e1', source: 'm1', target: 'd1', data: { refRole: 'first' } }, { id: 'e2', source: 'm2', target: 'd1', data: { refRole: 'last' } }];
+    doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'keyframe';
+    await renderPage();
+    await clickNode('d1');
+    await switchMode('首尾帧');
+    const remove = container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]')[1]!;
+    await act(async () => remove.click());
+    const slot = [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.title.includes('尾帧') && b.title.includes('从资产'))!;
+    await clickMenuItem(slot, '从节点添加素材');
+    await clickNode('t1');
+    expect(toastText()).toContain('首尾帧仅支持图片素材');
+    expect(flowProps.current.edges.some((e: { source: string }) => e.source === 't1')).toBe(false);
+    await clickNode('m2');
+    expect(flowProps.current.edges.some((e: { source: string; data?: { refRole?: string } }) => e.source === 'm2' && e.data?.refRole === 'last')).toBe(true);
+  });
+});
