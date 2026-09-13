@@ -130,6 +130,7 @@ import {
   nodeInsideGroupBox,
   nodePressesGroupEdge,
   parseGroupsFromNodes,
+  selectionHasUngroupableCards,
   MIN_GROUP_MEMBERS,
   GROUP_FRAME_PADDING,
   type CanvasGroup,
@@ -3799,6 +3800,10 @@ export default function CanvasPage() {
   const handleCreateGroup = (selectedNodes: Node[]) => {
     const members = selectedNodes.filter((n) => !(n.data as { emptyShell?: boolean } | undefined)?.emptyShell);
     if (members.length < MIN_GROUP_MEMBERS) return;
+    if (selectionHasUngroupableCards(members)) {
+      showToast('warn', '风格卡、角色卡、物体卡、环境卡、商品卡无法成组');
+      return;
+    }
     const box = groupFrameBBox(members);
     if (!box) return;
     const memberIds = new Set(members.map((n) => n.id));
