@@ -18,6 +18,9 @@ export interface AssetView {
   project_id: string | null;
   mime: string | null;
   model: string | null;
+  /** IKEXX8：素材库关联两列成对吐出（IKDJNZ 落的数据；未关联为 null）。 */
+  material_id: string | null;
+  material_group_id: string | null;
 }
 
 export interface AssetPage {
@@ -267,6 +270,8 @@ function toAssetView(
     generation_job_id: bigint | null;
     project_id: bigint | null;
     mime: string | null;
+    material_id?: string | null;
+    material_group_id?: string | null;
   },
   modelByJobId: Map<string, string>,
 ): AssetView {
@@ -288,6 +293,8 @@ function toAssetView(
       a.generation_job_id == null
         ? null
         : (modelByJobId.get(a.generation_job_id.toString()) ?? null),
+    material_id: a.material_id ?? null,
+    material_group_id: a.material_group_id ?? null,
   };
 }
 
@@ -515,6 +522,9 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         project_id: row.project_id == null ? null : row.project_id.toString(),
         mime: row.mime ?? null,
         model: null,
+        // IKEXX8：跨项目复制出的新 asset 无素材库关联（未关联为 null）。
+        material_id: row.material_id ?? null,
+        material_group_id: row.material_group_id ?? null,
       };
     },
     async createPendingUpload(input) {

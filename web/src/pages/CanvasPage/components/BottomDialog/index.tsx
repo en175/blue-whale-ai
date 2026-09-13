@@ -1,3 +1,4 @@
+import PromptSyncActions from '../PromptSyncActions';
 /* ============================================
  * BottomDialog 视频对话窗口：模型/时长/宽高比配置与发送
  * 统一草稿绑定模式：参考由「画布连线 + 草稿 material refs」合并推导（首帧/尾帧/普通参考）。
@@ -10,6 +11,7 @@ import {
   X,
   Image,
   Video,
+  AudioLines,
   SlidersHorizontal,
   ArrowUp,
   MousePointerClick,
@@ -26,6 +28,7 @@ import type { ImageTextAttachment } from '../ImageDialog';
 import type { MediaGenStatus } from '../MediaNode';
 import {
   canAddRefRole,
+  hasAnyMediaRef,
   MAX_VIDEO_REFS,
   supportsVideoReferenceModel,
   videoRefConflict,
@@ -41,10 +44,20 @@ import {
   resolveComposed,
   type ComposedValue,
 } from '../ChipTextEditor/composed';
+import AtMentionMenu from '../AtMentionMenu';
+import { trailingAtQueryFromComposed, type AtMentionItem } from '../../atMention';
+import {
+  VIDEO_FOLLOW_MODE_LABEL,
+  VIDEO_FOLLOW_MODE_ORDER,
+  firstEnabledVideoMode,
+  type FollowDialogAnchor,
+  type VideoFollowMode,
+} from '../../followDialog';
 import styles from './index.module.css';
 
-/** 模式选项（保留默认 all 以兼容草稿参数契约 draftMode；模式选择器 UI 已随旧自由模式退役） */
-const modeOptions = [
+/** 模式选项：自由态与跟随态同构四项（IKFC1T 文生视频置首 = 新建默认）；跟随态由 enabledModes 门控 */
+const dockModeOptions = [
+  { key: 'prompt', label: '文生视频' },
   { key: 'all', label: '全能参考' },
   { key: 'keyframe', label: '首尾帧' },
   { key: 'text2video', label: '图生视频' },
@@ -62,7 +75,7 @@ export interface VideoGenOptions {
   resolution: string;
   /** 时长（秒） */
   duration: number;
-  /** 参考模式：all 全能参考 / keyframe 首尾帧 / text2video 图生视频 */
+  /** 参考模式：prompt 文生视频 / all 全能参考 / keyframe 首尾帧 / text2video 图生视频（IKFC1T） */
   mode: string;
 }
 
@@ -85,6 +98,12 @@ interface BottomDialogProps {
   initialParams?: VideoGenSeedParams;
   /** 连线文本附件（IKDLQG）：草稿绑定模式由父级按连线实时推导传入 */
   attachments?: ImageTextAttachment[];
+  onRemovePlan?: (nodeId: string) => void;
+  planReferenceError?: string;
+  pendingPlanSyncs?: Array<{ nodeId: string; title: string }>;
+  onSyncPlan?: (nodeId: string) => void;
+  syncingPlan?: boolean;
+  planIndices?: string;
   /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；仅多附件时展示控件，缺省不渲染排序入口 */
   onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 到节点选择：进入画布节点选取模式（image 图片节点 / video 视频节点）；
@@ -116,6 +135,14 @@ interface BottomDialogProps {
   onSetMaterialRefRole?: (materialId: string, role: VideoRefRole) => void;
   /** Toast 提示（上传超限/首尾帧校验等场景，由父级注入全局 sonner，位置/样式与 ImageDialog/AudioDialog 统一） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
+  /** 画布 @ 引用候选 */
+  mentionItems?: AtMentionItem[];
+  /** 选中 @ 素材后写入参考区 */
+  onMentionCanvas?: (item: AtMentionItem) => void;
+  /** 绑定生成节点时悬浮跟随；缺省仍锚定底部 */
+  followAnchor?: FollowDialogAnchor | null;
+  /** 跟随节点时按已连素材给出可高亮模式；缺省不限制 */
+  enabledModes?: VideoFollowMode[];
 }
 
 /** 首页带入的初始生成参数（resolution 传 api_value 如 720p，模型列表加载后反查档位 id；
@@ -129,7 +156,7 @@ export interface VideoGenSeedParams {
   resolution?: string;
   /** 时长（秒） */
   duration?: number;
-  /** 参考模式：all 全能参考 / keyframe 首尾帧 / text2video 图生视频 */
+  /** 参考模式：prompt 文生视频 / all 全能参考 / keyframe 首尾帧 / text2video 图生视频（IKFC1T） */
   mode?: string;
 }
 
@@ -145,8 +172,9 @@ const ROLE_LABELS: Record<VideoRefRole, string> = {
 
 /** 连线文本附件项（IKDLQG）：标题 + 正文预览，长文默认折叠可展开；与 ImageDialog 附件项同构，
  *  多附件且父级提供重排回调时展示上移/下移（IKDLQH） */
-function AttachmentItem({ attachment, move }: {
+function AttachmentItem({ attachment, move, onRemove }: {
   attachment: ImageTextAttachment;
+  onRemove?: () => void;
   move?: { isFirst: boolean; isLast: boolean; onMove: (delta: -1 | 1) => void };
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -155,6 +183,7 @@ function AttachmentItem({ attachment, move }: {
     <div className={styles.attachmentItem}>
       <div className={styles.attachmentHead}>
         <span className={styles.attachmentTitle}>{attachment.title}</span>
+        {onRemove && <button type="button" className={styles.attachmentMove} aria-label={`移除方案 ${attachment.title}`} title="移除方案" onClick={onRemove}><X size={12} /></button>}
         {move && (
           <span className={styles.attachmentMoves}>
             <button
@@ -231,7 +260,7 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMate
   };
   return (
     <div className={styles.mediaThumb} title={item.name} data-testid="dock-video-ref">
-      {item.mediaType === 'video'
+      {item.mediaType === 'audio' ? <AudioLines size={24} aria-label={item.name} /> : item.mediaType === 'video'
         ? <video src={item.url} className={styles.mediaThumbImg} muted />
         : <img src={item.url} alt={item.name} className={styles.mediaThumbImg} />}
       {/* 角色徽标：仅首帧/尾帧保留；普通参考不在图片上保留标签 */}
@@ -267,11 +296,17 @@ function VideoRefThumb({ item, role, readOnly, onRemove, onSetRole, onRemoveMate
   );
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast, mentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
   /** 富文本输入框（自由文本；胶囊机制保留给后续引用场景，发送时替换成完整 prompt） */
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
+  const mentionAnchorRef = useRef<HTMLDivElement>(null);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
   /** 输入框内容的结构化形态（IKAFSX）：胶囊是指针，解引用只发生在发送那一刻。 */
   const [composed, setComposed] = useState<ComposedValue>(EMPTY_COMPOSED);
+  const mentionQuery = trailingAtQueryFromComposed(composed);
+  useEffect(() => {
+    if (mentionQuery === null) setMentionDismissed(false);
+  }, [mentionQuery]);
   /** 计数口径：文字按字符数，一个胶囊算 1 个单位——不按它背后那几千字算。 */
   const composedCount = composedLength(composed);
   /** 附件正文有效（去空白非空）时允许空提示词提交（IKDLQG 契约：附件可单独驱动生成）；
@@ -285,7 +320,16 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
     ids.splice(index + delta, 0, moved);
     onReorderAttachments(ids);
   };
-  const [selectedMode, setSelectedMode] = useState(modeOptions[0].key);
+  const followModeOptions = VIDEO_FOLLOW_MODE_ORDER.map((key) => ({
+    key,
+    label: VIDEO_FOLLOW_MODE_LABEL[key],
+  }));
+  const modeOptions = enabledModes ? followModeOptions : dockModeOptions;
+  const [selectedMode, setSelectedMode] = useState(
+    initialParams?.mode && modeOptions.some((item) => item.key === initialParams.mode)
+      ? initialParams.mode
+      : modeOptions[0].key,
+  );
   const [modeOpen, setModeOpen] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   /** 放大态：输入区高度占屏幕 2/3；收起回底部默认高度 */
@@ -334,6 +378,16 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
   const syncDraftParams = (patch: VideoDraftParamsPatch) => {
     videoDraftBinding.onParamsChange(patch);
   };
+
+  useEffect(() => {
+    if (!enabledModes || enabledModes.length === 0) return;
+    if (enabledModes.includes(selectedMode as VideoFollowMode)) return;
+    const next = firstEnabledVideoMode(enabledModes);
+    setSelectedMode(next);
+    syncDraftParams({ mode: next });
+    onToast?.('warn', '已根据当前素材切换生成模式');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabledModes, selectedMode]);
   /** 当前模型与视频参考相关的能力位（模型未加载时为 null，约束入口按不可用处理） */
   const caps: VideoRefCapabilities | null = currentModel
     ? {
@@ -344,32 +398,52 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
       }
     : null;
   /** 组合校验（IKDMQS）：与服务端 400 同口径 + 能力位；冲突时明确提示并禁用发送 */
-  const conflict = caps
-    ? videoRefConflict(videoMediaRefs, caps)
-      ?? (!supportsVideoReferenceModel(selectedModel) && videoMediaRefs.reference.some(ref => ref.mediaType === 'video')
-        ? '当前模型不支持视频参考，请更换模型或移除视频参考' : null)
-    : null;
+  const referenceConflict = planReferenceError ?? (caps
+    ? (videoMediaRefs.reference.filter(r => r.mediaType === 'image').length > (currentModel?.features.max_reference_images ?? 0)
+        ? '图片参考超出当前模型上限，请调整引用或模型' : videoMediaRefs.reference.filter(r => r.mediaType === 'audio').length > 3
+        ? '最多支持 3 个参考音频' : videoMediaRefs.reference.filter(r => r.mediaType === 'video').length > MAX_VIDEO_REFS
+        ? '最多支持 3 个参考视频' : videoRefConflict(videoMediaRefs, caps))
+      ?? (!supportsVideoReferenceModel(selectedModel) && videoMediaRefs.reference.some(ref => ref.mediaType !== 'image')
+        ? '当前模型不支持视频或音频参考，请更换模型或调整引用' : null)
+    : null);
+  const modeConflict = selectedMode === 'prompt' && hasAnyMediaRef(videoMediaRefs)
+    ? '文生视频模式不支持媒体参考，请移除参考或切换模式'
+    : selectedMode === 'keyframe' && videoMediaRefs.reference.length > 0
+    ? '首尾帧模式不支持普通参考，请调整模式或引用'
+    : selectedMode === 'text2video' && videoMediaRefs.reference.some(r => r.mediaType !== 'image')
+      ? '图生视频模式不支持视频或音频参考'
+      : selectedMode !== 'keyframe' && (videoMediaRefs.first || videoMediaRefs.last)
+        ? '当前模式不支持首尾帧，请调整模式或引用' : null;
+  const inputConflict = referenceConflict ?? modeConflict;
+  const conflict = inputConflict && planIndices ? `方案索引 ${planIndices}：${inputConflict}` : inputConflict;
   const canAddFirst = !!(caps && canAddRefRole('first', videoMediaRefs, caps));
   /** 尾帧占位：首尾帧模式下与首帧并排常显（未填即显示），不依赖模型能力位与是否已有首帧——
    *  模型是否支持尾帧 / 首尾帧组合由 conflict（videoRefConflict）在发送时兜底提示，避免占位缺失导致无法上传尾帧。 */
   const canAddLast = !videoMediaRefs.last;
   const canAddReference = !!caps?.referenceImage;
 
-  /** 参考模式（与首页底部操作同步）：全能参考(all) / 首尾帧(keyframe) / 图生视频(text2video)。
-   *  首尾帧模式才展示首帧/尾帧槽（同一行）；其余模式仅展示普通参考；图生视频不收视频参考。 */
+  /** 参考模式（与首页底部操作同步）：文生视频(prompt) / 全能参考(all) / 首尾帧(keyframe) / 图生视频(text2video)。
+   *  首尾帧模式才展示首帧/尾帧槽（同一行）；其余模式仅展示普通参考；图生视频不收视频参考；
+   *  文生视频保留参考添加入口（媒体实际成为参考时由 enabledModes 自动切全能参考，IKFC1T）。 */
   const currentMode = modeOptions.find((m) => m.key === selectedMode);
   const isKeyframe = selectedMode === 'keyframe';
   const isText2Video = selectedMode === 'text2video';
   /** 已连入的视频参考数（切换到首尾帧/图生视频时不兼容，需先移除） */
-  const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType === 'video').length;
+  const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image').length;
 
-  /** 切换模式：目标模式与现有参考冲突时明确提示并阻止切换（保证「可见槽 = 实际参考」），否则写回草稿 */
+  /** 模式切换与当前参考保持兼容；文生视频存在任一媒体参考时不可选。 */
   const handleModeChange = (key: string) => {
     setModeOpen(false);
+    if (enabledModes && !enabledModes.includes(key as VideoFollowMode)) return;
     if (key === selectedMode) return;
     const hasFrames = !!(videoMediaRefs.first || videoMediaRefs.last);
     const hasRefs = videoMediaRefs.reference.length > 0;
-    if (key === 'keyframe') {
+    if (key === 'prompt') {
+      if (hasAnyMediaRef(videoMediaRefs)) {
+        onToast?.('warn', '文生视频模式不支持媒体参考，请先移除参考');
+        return;
+      }
+    } else if (key === 'keyframe') {
       if (hasRefs || videoRefCount > 0) {
         onToast?.('warn', '首尾帧模式仅支持首帧与尾帧，请先移除普通参考');
         return;
@@ -380,7 +454,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
         return;
       }
       if (key === 'text2video' && videoRefCount > 0) {
-        onToast?.('warn', '图生视频模式不支持视频参考，请先移除视频参考');
+        onToast?.('warn', '图生视频模式不支持视频或音频参考，请先调整引用');
         return;
       }
     }
@@ -457,7 +531,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
           setSelectedSize(size?.id ?? initialParams?.resolution ?? '');
           setSelectedRatio(initialParams?.aspectRatio ?? '');
           setDuration(initialParams?.duration ?? 0);
-          setSelectedMode(initialParams?.mode ?? 'all');
+          setSelectedMode(initialParams?.mode ?? 'prompt');
           return;
         }
         if (!list.length) return;
@@ -603,22 +677,12 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
   };
 
   return (
-    <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
-      {/* 右上角操作：放大/收起 + 关闭 */}
-      <div className={styles.topActions}>
-        <button
-          className={styles.iconBtn}
-          onClick={() => setExpanded((v) => !v)}
-          title={expanded ? '收起' : '展开'}
-        >
-          {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
-        </button>
-        <button className={styles.iconBtn} onClick={onClose} title="关闭">
-          <X size={16} strokeWidth={2} />
-        </button>
-      </div>
-
-      {/* 配置面板（展开悬浮于底栏上方） */}
+    <div
+      className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
+      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+    >
+      {/* 配置面板（展开悬浮于底栏上方）：挂在不带 overflow 的定位外壳 .dialogWrap 上，
+          脱出 .dialog 滚动框，避免面板顶部被滚动容器裁剪（IKEOLP） */}
       {showConfig && (
         <div className={styles.configPanel} ref={configPanelRef}>
           {/* 关闭按钮 */}
@@ -751,6 +815,21 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
         </div>
       )}
 
+      <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
+      {/* 右上角操作：放大/收起 + 关闭 */}
+      <div className={styles.topActions}>
+        <button
+          className={styles.iconBtn}
+          onClick={() => setExpanded((v) => !v)}
+          title={expanded ? '收起' : '展开'}
+        >
+          {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
+        </button>
+        <button className={styles.iconBtn} onClick={onClose} title="关闭">
+          <X size={16} strokeWidth={2} />
+        </button>
+      </div>
+
       {/* 顶部媒体行（统一草稿绑定：按模式门控展示。「连线 + material」合并推导参考）
           首尾帧模式：首帧 + 尾帧同一行；全能参考/图生视频：普通参考（图生视频不收视频参考）。
           角色由「模式 + 目标槽」决定，不再提供跨模式角色切换（避免槽隐藏后参考丢失）。 */}
@@ -839,6 +918,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
             <AttachmentItem
               key={a.nodeId}
               attachment={a}
+              onRemove={!readOnly && !syncingPlan && a.isPromptPlan && onRemovePlan ? () => onRemovePlan(a.nodeId) : undefined}
               move={
                 !readOnly && onReorderAttachments && attachments.length > 1
                   ? {
@@ -853,13 +933,14 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
         </div>
       )}
 
+      <PromptSyncActions plans={pendingPlanSyncs} disabled={readOnly || syncingPlan} onSync={onSyncPlan} />
       {configurationError && <div className={styles.refConflictHint} role="alert">{configurationError}</div>}
 
-      {/* 输入框：胶囊跟文字同一行 */}
-      <div className={styles.editorWrap}>
+      {/* 输入框：胶囊跟文字同一行；输入 @ 弹出画布素材菜单 */}
+      <div className={styles.editorWrap} ref={mentionAnchorRef}>
         <ChipTextEditor
           ref={chipEditorRef}
-          placeholder="描述你希望生成的视频。参考素材从画布连入或到节点选择，首帧/尾帧需显式指定。"
+          placeholder="描述你希望生成的视频。输入 @ 引用画布素材。"
           // 超限只提示、不动内容（IKAFSX）。原来这里会 `setText(truncated)`——那是「用纯文本
           // 整体替换编辑器内容」，**所有胶囊当场湮灭、正文被从中间腰斩**，丢的远不止超出的部分。
           // 而这个 1000 本身也是凭空定的：后端不校验 prompt 长度，模型能力接口里也没有这个字段。
@@ -868,11 +949,19 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
           readOnly={readOnly}
           className={styles.editorArea}
         />
-      </div>
-
-      {/* 字数统计 */}
-      <div className={`${styles.charCount} ${composedCount >= MAX_INPUT ? styles.charCountWarn : ''}`}>
-        {composedCount}/{MAX_INPUT}
+        {mentionQuery !== null && !mentionDismissed && !readOnly && onMentionCanvas && (
+          <AtMentionMenu
+            anchorRef={mentionAnchorRef}
+            items={mentionItems ?? []}
+            editorQuery={mentionQuery}
+            onSelect={(item) => {
+              chipEditorRef.current?.stripTrailingAtQuery();
+              setMentionDismissed(true);
+              onMentionCanvas(item);
+            }}
+            onClose={() => setMentionDismissed(true)}
+          />
+        )}
       </div>
 
       {/* 底部状态栏 */}
@@ -895,15 +984,20 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
             </button>
             {modeOpen && (
               <div className={styles.modeDropdown}>
-                {modeOptions.map((opt) => (
-                  <button
-                    key={opt.key}
-                    className={`${styles.modeOption} ${opt.key === selectedMode ? styles.modeOptionActive : ''}`}
-                    onClick={() => handleModeChange(opt.key)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+                {modeOptions.map((opt) => {
+                  const disabled = Boolean(enabledModes && !enabledModes.includes(opt.key as VideoFollowMode));
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      disabled={disabled}
+                      className={`${styles.modeOption} ${opt.key === selectedMode ? styles.modeOptionActive : ''} ${disabled ? styles.modeOptionDisabled : ''}`}
+                      onClick={() => handleModeChange(opt.key)}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -923,6 +1017,10 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
 
         {/* 右侧：发送 */}
         <div className={styles.barRight}>
+          {/* 字数统计 */}
+          <div className={`${styles.charCount} ${composedCount >= MAX_INPUT ? styles.charCountWarn : ''}`}>
+            {composedCount}/{MAX_INPUT}
+          </div>
           <button
             data-testid="video-send"
             className={`${styles.sendBtn} ${canSend && !readOnly && !conflict ? styles.sendBtnActive : ''}`}
@@ -930,9 +1028,10 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
             disabled={!canSend || readOnly || !!conflict}
             title={conflict ?? (readOnly ? '生成中，输入只读' : '发送')}
           >
-            <ArrowUp size={16} fill="currentColor" strokeWidth={0} />
+            <ArrowUp size={12.8} fill="currentColor" strokeWidth={0} />
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

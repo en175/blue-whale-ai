@@ -367,6 +367,16 @@
   pointer-events: none;
 }
 
+/* 音频素材占位：无封面，用音符图标居中 */
+.audioPlaceholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--color-text-tertiary);
+}
+
 /* 图片加载完成后解除 1:1 占位，按真实宽高比撑开（视频保持 1:1） */
 .assetThumbMeasured {
   aspect-ratio: auto;

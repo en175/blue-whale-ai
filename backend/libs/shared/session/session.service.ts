@@ -1,11 +1,6 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
 import { Redis } from "ioredis";
-import {
-  loadGenerationCredentialSecret,
-  openGenerationCredential,
-  sealGenerationCredential,
-} from "@lib/core";
 import { redisConnectionOptions } from "@lib/shared/rate-limit/redis-connection.js";
 
 /** 会话 7 天滑动过期（Redis TTL）。 */
@@ -19,7 +14,7 @@ export interface ResolvedSession {
   role: number;
   status: number;
   email: string | null;
-  /** 解密后的上游执行凭证（sk-），AuthGuard 回注请求头代打 new-api。 */
+  /** 上游执行凭证（sk-，修正四：明文），AuthGuard 回注请求头代打 new-api。 */
   sk: string;
   /** role/status 是否已过期、需要回源 new-api 复核。 */
   needsRecheck: boolean;
@@ -31,15 +26,15 @@ type SessionPayload = {
   role: number;
   status: number;
   email: string | null;
-  /** AES-256-GCM 密封后的上游 sk-（明文不入 Redis）。 */
-  sealedSk: string;
+  /** 上游 sk-（修正四：明文存 Redis，不再 AES 密封）。 */
+  sk: string;
   /** role/status 最近一次回源 new-api 复核的时间戳（ms）。 */
   verifiedAt: number;
 };
 
 /**
  * 登录态会话（ADR-0062 #19 凭证分层）。浏览器只持 HttpOnly 会话 cookie 里的 `sess_` 令牌，
- * 会话映射存 Redis（7 天滑动 TTL），上游 sk- 密封后随会话存放，仅在内存解密供 BFF 代打 new-api。
+ * 会话映射存 Redis（7 天滑动 TTL），上游 sk- 明文随会话存放（修正四：去密），供 BFF 回注请求头代打 new-api。
  */
 @Injectable()
 export class SessionService implements OnModuleDestroy {
@@ -66,7 +61,7 @@ export class SessionService implements OnModuleDestroy {
     return `user_session:${userId}:${hash}`;
   }
 
-  /** 密封 sk- 并写会话，返回下发给浏览器的会话令牌（明文不入 Redis）。 */
+  /** 写会话（sk- 明文存 Redis，修正四），返回下发给浏览器的会话令牌。 */
   async createSession(input: {
     userId: number;
     username: string;
@@ -83,10 +78,7 @@ export class SessionService implements OnModuleDestroy {
       role: input.role,
       status: input.status,
       email: input.email,
-      sealedSk: sealGenerationCredential(
-        input.sk,
-        loadGenerationCredentialSecret(),
-      ),
+      sk: input.sk,
       verifiedAt: Date.now(),
     };
     // 会话键 + 按用户索引键同写同 TTL（EX），冻结时可枚举该用户全部会话。
@@ -126,12 +118,12 @@ export class SessionService implements OnModuleDestroy {
     );
     let sk: string;
     try {
-      sk = openGenerationCredential(
-        data.sealedSk,
-        loadGenerationCredentialSecret(),
-      );
+      if (typeof data.sk !== "string" || data.sk.length === 0) {
+        throw new Error("会话凭证缺失");
+      }
+      sk = data.sk;
     } catch {
-      // 密封凭证损坏/密钥轮换：会话不可用，删除并要求重新登录（而非 503）。
+      // 凭证缺失/损坏：会话不可用，删除并要求重新登录（而非 503）。
       await this.redis.del(key);
       return null;
     }

@@ -142,6 +142,9 @@ export interface SnapshotAsset {
   access_url: string;
   width: number | null;
   height: number | null;
+  /** 已关联虚拟人像库则为素材库 id，未关联为 null */
+  material_id?: string | null;
+  material_group_id?: string | null;
 }
 
 /** GET /api/projects/:id/snapshot 返回：项目信息 + 画布 + 资产字典 + 任务摘要 */

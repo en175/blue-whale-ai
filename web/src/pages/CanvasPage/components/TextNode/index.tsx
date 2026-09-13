@@ -3,13 +3,16 @@
  * 富文本编辑与格式工具栏沿用既有实现
  * ============================================ */
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Palette, Plus } from 'lucide-react';
 import { sanitizeHtml } from '@/utils/sanitize';
 import { nodeTitleSizing } from '../nodeTitleSizing';
+import { commitCardName } from '../cardName';
+import CanvasContextMenu from '../CanvasContextMenu';
 import styles from './index.module.css';
 import { PROMPT_TEXT_LIMITS } from '@lib/contracts/prompt-text-limits';
+import { promptMentionSchema, validPromptMentions, type PromptMention, type PromptMaterial } from '@lib/contracts/prompt-preview';
+import { renderPromptMentions, readPromptMentions } from './promptMentions';
 
 /** 文字节点最大字数（按纯文本计，含粘贴） */
 const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
@@ -38,6 +41,10 @@ function HandlePlus() {
 }
 
 interface TextNodeData {
+  promptSource?: unknown;
+  promptMentions?: PromptMention[];
+  promptMaterials?: Array<PromptMaterial & { url: string }>;
+  onPromptChange?: (id: string, text: string, mentions: PromptMention[], materials?: Array<PromptMaterial & { url: string }>) => void;
   title?: string;
   onTitleChange?: (id: string, title: string) => void;
   onDraftError?: (id: string, error: string) => void;
@@ -51,26 +58,47 @@ interface TextNodeData {
   onDuplicate?: (id: string) => void;
   onAddToChat?: (id: string) => void;
   onSaveToAssets?: (id: string) => void;
+  onPaste?: (id: string) => void;
   /** Toast 提示（超字数上限等场景，由父级注入） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
+  /** 文本生成节点：身份保持，可被连入，也可自己编写 */
+  textGen?: boolean;
+  /** 点击「自己编写内容」：进入框内编辑，不打开跟随输入框 */
+  onWriteSelf?: (id: string) => void;
 }
 
 export default function TextNode({ id, data, selected }: NodeProps & { data: TextNodeData; selected?: boolean }) {
   const plainText = typeof data.text === 'string';
+  const hasPromptBindings = Boolean(data.promptSource) || data.promptMentions !== undefined;
   const [contentError, setContentError] = useState('');
   const [titleError, setTitleError] = useState('');
   const [expanded, setExpanded] = useState(false);
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState(data.title ?? '文本节点');
   const [isFocused, setIsFocused] = useState(false);
-  /** 双击进入编辑；单击/拖动为移动节点 */
+  /** 双击进入编辑；单击/拖动为移动节点。文本生成节点仅「自己编写」进入编辑 */
   const [editing, setEditing] = useState(false);
+  const [writingSelf, setWritingSelf] = useState(false);
+  const isTextGen = data.textGen === true;
+  const hasTextGenBody = Boolean(
+    (typeof data.text === 'string' && data.text.trim())
+    || (typeof data.html === 'string' && data.html.replace(/<[^>]+>/g, '').trim()),
+  );
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [currentColor, setCurrentColor] = useState('#ffffff');
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
   const initializedRef = useRef(false);
+  const draftMaterialsRef = useRef(data.promptMaterials);
+  useEffect(() => { draftMaterialsRef.current = data.promptMaterials; }, [data.promptMaterials]);
+
+  const [selectedMention, setSelectedMention] = useState<number | null>(null);
+  const canvasNodes = useStore(state => state.nodes);
+  const materialChoices = [...new Map(canvasNodes.filter(node => node.type === 'mediaNode' && node.data.assetId && !node.data.assetMissing && node.data.genStatus !== 'generating'
+    && ['image', 'video', 'audio'].includes(String(node.data.mediaType))).map(node => [String(node.data.assetId), {
+      assetId: String(node.data.assetId), mediaType: node.data.mediaType as PromptMaterial['mediaType'], url: String(node.data.src ?? ''), name: String(node.data.fileName || node.data.assetId),
+    }])).values()];
 
   const zoom = useStore((state) => state.transform[2]);
 
@@ -96,7 +124,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   // Keep the complete source, including legacy over-limit content. Never truncate on load.
   useEffect(() => {
     if (!initializedRef.current && editorRef.current) {
-      if (plainText) editorRef.current.textContent = data.text ?? '';
+      if (hasPromptBindings) renderPromptMentions(editorRef.current, data.text ?? '', data.promptMentions ?? [], data.promptMaterials ?? []);
+      else if (plainText) editorRef.current.textContent = data.text ?? '';
       else editorRef.current.innerHTML = sanitizeHtml(data.html || '');
       initializedRef.current = true;
     }
@@ -104,9 +133,10 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
 
   useEffect(() => {
     if (plainText && !editing && !contentError && editorRef.current) {
-      editorRef.current.textContent = data.text ?? '';
+      if (hasPromptBindings) renderPromptMentions(editorRef.current, data.text ?? '', data.promptMentions ?? [], data.promptMaterials ?? []);
+      else editorRef.current.textContent = data.text ?? '';
     }
-  }, [plainText, editing, contentError, data.text]);
+  }, [plainText, editing, contentError, data.text, hasPromptBindings, data.promptMentions, data.promptMaterials]);
 
   // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
   useEffect(() => {
@@ -151,9 +181,31 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
   }, []);
 
+  /** 提交标题（IKFA8X）：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName；
+   *  名称错误仅就地提示，不进 onDraftError——未写入节点数据的名称草稿不阻断画布保存 */
+  const commitTitle = useCallback(() => {
+    const current = data.title ?? (isTextGen ? '文本生成' : '文本节点');
+    const result = commitCardName(titleDraft, current);
+    if (result.kind === 'invalid') {
+      setTitleError(result.message);
+      return;
+    }
+    setTitleError('');
+    setTitleEditing(false);
+    if (result.kind === 'save') data.onTitleChange?.(id, result.value);
+  }, [data, id, titleDraft, isTextGen]);
+
+  /** Esc 取消：恢复编辑前名称；输入框随即卸载，不会再有失焦提交 */
+  const cancelTitle = useCallback(() => {
+    setTitleDraft(data.title ?? (isTextGen ? '文本生成' : '文本节点'));
+    setTitleError('');
+    setTitleEditing(false);
+  }, [data.title, isTextGen]);
+
   /** 同步内容到父组件（净化后保存，防止 XSS 持久化） */
   const syncContent = useCallback(() => {
-    const text = editorRef.current?.innerText ?? '';
+    const prompt = hasPromptBindings && editorRef.current ? readPromptMentions(editorRef.current) : undefined;
+    const text = prompt?.text ?? editorRef.current?.innerText ?? '';
     if (text.length > MAX_TEXT_LENGTH) {
       const error = `正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`;
       setContentError(error);
@@ -161,10 +213,51 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       return;
     }
     setContentError('');
-    data.onDraftError?.(id, titleError);
-    if (plainText) data.onTextChange?.(id, text);
+    data.onDraftError?.(id, '');
+    if (prompt) data.onPromptChange?.(id, text, prompt.mentions, draftMaterialsRef.current);
+    else if (plainText) data.onTextChange?.(id, text);
     else data.onChange?.(id, sanitizeHtml(editorRef.current?.innerHTML || ''));
-  }, [data, id, plainText, titleError]);
+  }, [data, id, plainText, hasPromptBindings]);
+
+  const editMaterial = (assetId: string, replaceIndex: number | null) => {
+    const editor = editorRef.current;
+    const material = materialChoices.find(item => item.assetId === assetId);
+    if (!editor || (assetId && !material)) return;
+    const materials = [...(draftMaterialsRef.current ?? [])];
+    if (material && !materials.some(item => item.assetId === material.assetId)) materials.push({ assetId: material.assetId, mediaType: material.mediaType, url: material.url });
+    if (replaceIndex !== null) {
+      for (const chip of editor.querySelectorAll<HTMLElement>('[data-prompt-index]')) {
+        if (Number(chip.dataset.promptIndex) !== replaceIndex) continue;
+        if (!material) chip.remove();
+        else chip.dataset.promptAsset = material.assetId;
+      }
+    } else if (material) {
+      editor.focus();
+      const range = savedRangeRef.current?.cloneRange() ?? document.createRange();
+      if (!editor.contains(range.commonAncestorContainer)) { range.selectNodeContents(editor); range.collapse(false); }
+      const current = readPromptMentions(editor);
+      const index = Math.max(0, ...current.mentions.map(m => m.index)) + 1;
+      const label = `素材#${index}`;
+      const fragment = document.createElement('div');
+      renderPromptMentions(fragment, label, [{ start: 0, end: label.length, assetId, index }], materials);
+      range.deleteContents();
+      const chip = fragment.querySelector<HTMLElement>('[data-prompt-asset]')!;
+      range.insertNode(chip);
+      range.setStartAfter(chip); range.collapse(true);
+      savedRangeRef.current = range;
+    }
+    draftMaterialsRef.current = materials;
+    const prompt = readPromptMentions(editor);
+    renderPromptMentions(editor, prompt.text, prompt.mentions, materials);
+    savedRangeRef.current = null;
+    setSelectedMention(null);
+    if (prompt.text.length > MAX_TEXT_LENGTH) {
+      const error = `正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`;
+      setContentError(error); data.onDraftError?.(id, error); return;
+    }
+    setContentError(''); data.onDraftError?.(id, '');
+    data.onPromptChange?.(id, prompt.text, prompt.mentions, materials);
+  };
 
   /** 执行格式化命令 */
   const execCmd = useCallback((cmd: string, value?: string) => {
@@ -247,10 +340,11 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   /** 右键菜单 */
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (data.toolMode !== 'select') return;
+    if (editing) return;
     e.preventDefault();
     e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY });
-  }, [data.toolMode]);
+  }, [data.toolMode, editing]);
 
   const handleDelete = useCallback(() => {
     setContextMenu(null);
@@ -280,13 +374,43 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     saveSelection();
   }, [saveSelection]);
 
+  const handleCopy = useCallback((e: React.ClipboardEvent, cut = false) => {
+    if (!hasPromptBindings || !editorRef.current) return;
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (!editorRef.current.contains(range.commonAncestorContainer)) return;
+    const fragment = document.createElement('div');
+    fragment.append(range.cloneContents());
+    const content = readPromptMentions(fragment);
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', content.text);
+    e.clipboardData.setData('application/x-blue-whale-prompt', JSON.stringify({ nodeId: id, ...content }));
+    if (cut) { document.execCommand('delete'); syncContent(); }
+  }, [hasPromptBindings, id, syncContent]);
+
   /** Paste the entire actual text; over-limit drafts remain visible and are not persisted. */
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     e.preventDefault();
-    document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
+    let inserted = false;
+    if (hasPromptBindings) {
+      try {
+        const content = JSON.parse(e.clipboardData.getData('application/x-blue-whale-prompt'));
+        const mentions = promptMentionSchema.array().safeParse(content.mentions);
+        if (content.nodeId === id && typeof content.text === 'string' && mentions.success
+          && validPromptMentions(content.text, mentions.data)
+          && mentions.data.every(mention => data.promptMaterials?.some(item => item.assetId === mention.assetId))) {
+          const fragment = document.createElement('div');
+          renderPromptMentions(fragment, content.text, mentions.data, data.promptMaterials ?? []);
+          document.execCommand('insertHTML', false, fragment.innerHTML);
+          inserted = true;
+        }
+      } catch { /* External clipboard content is pasted as plain text. */ }
+    }
+    if (!inserted) document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
     saveSelection();
     syncContent();
-  }, [saveSelection, syncContent]);
+  }, [saveSelection, syncContent, hasPromptBindings, id, data.promptMaterials]);
 
   /** 编辑器键盘操作后保存选区并同步 */
   const handleEditorKeyUp = useCallback(() => {
@@ -375,6 +499,16 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         </div>
       ) : (
         <div className={`${styles.nodeBar} ${selected ? styles.nodeBarVisible : ''} nodrag nopan`}>
+          {hasPromptBindings && <>
+            <select aria-label={selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}
+              className={styles.materialSelect} value="" onPointerDown={event => event.stopPropagation()}
+              onMouseDown={() => saveSelection()}
+              onChange={event => editMaterial(event.target.value, selectedMention)}>
+              <option value="">{selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}</option>
+              {materialChoices.map(material => <option key={material.assetId} value={material.assetId}>{material.name}</option>)}
+            </select>
+            {selectedMention !== null && <button className={styles.toolBtn} onMouseDown={event => event.preventDefault()} onClick={() => editMaterial('', selectedMention)}>删除标签 #{selectedMention}</button>}
+          </>}
           <button className={styles.addToChatBtn} onClick={() => data.onAddToChat?.(id)}>
             <AtSign size={14} strokeWidth={2} />
             <span>添加到对话</span>
@@ -388,15 +522,21 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           <FileText className={styles.titleIcon} strokeWidth={2} color="#888" />
           {titleEditing ? <input className="nodrag nopan" aria-label="文本节点标题" value={titleDraft} autoFocus
             onChange={event => setTitleDraft(event.target.value)}
-            onBlur={() => {
-              if (titleDraft.length > PROMPT_TEXT_LIMITS.title) {
-                const error = `标题最多 ${PROMPT_TEXT_LIMITS.title} 字，草稿已保留`;
-                setTitleError(error); data.onDraftError?.(id, error); return;
+            onBlur={commitTitle}
+            onKeyDown={event => {
+              // 名称输入期间隔离画布快捷键；输入法组合中的回车只确认候选词，不提交名称
+              event.stopPropagation();
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                commitTitle();
               }
-              data.onTitleChange?.(id, titleDraft); setTitleEditing(false); setTitleError(''); data.onDraftError?.(id, contentError);
-            }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') event.currentTarget.blur(); }} />
-            : <span className={styles.titleName} onDoubleClick={event => { event.stopPropagation(); if (data.onTitleChange) { setTitleDraft(data.title ?? '文本节点'); setTitleEditing(true); } }}>
-              {data.title || '文本节点'}
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                cancelTitle();
+              }
+            }} />
+            : <span className={styles.titleName} onDoubleClick={event => { event.stopPropagation(); if (data.onTitleChange) { setTitleDraft(data.title ?? (isTextGen ? '文本生成' : '文本节点')); setTitleError(''); setTitleEditing(true); } }}>
+              {data.title || (isTextGen ? '文本生成' : '文本节点')}
             </span>}
         </div>
       {plainText && <button className={`${styles.toolBtn} nodrag nopan`} onClick={() => setExpanded(value => !value)}>
@@ -413,30 +553,52 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         </Handle>
         )}
 
+        {isTextGen && !writingSelf && (
+          <button
+            type="button"
+            className={`${styles.writeSelfBtn} ${hasTextGenBody ? styles.writeSelfBtnCorner : ''} nodrag nopan`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setWritingSelf(true);
+              setEditing(true);
+              data.onWriteSelf?.(id);
+            }}
+          >
+            自己编写内容
+          </button>
+        )}
         <div
           ref={editorRef}
           className={`${styles.editor} ${editing ? 'nodrag nopan' : ''}`}
-          contentEditable={editing ? (plainText ? 'plaintext-only' : true) : false}
+          contentEditable={editing ? (plainText && !hasPromptBindings ? 'plaintext-only' : true) : false}
           suppressContentEditableWarning
-          style={{ pointerEvents: isSelect ? 'auto' : 'none' }}
+          style={{ pointerEvents: isSelect && (!isTextGen || writingSelf) ? 'auto' : 'none' }}
           onFocus={() => setIsFocused(true)}
           onBlur={(e) => {
             // 如果焦点转移到工具栏/颜色面板，保持编辑状态
             const related = e.relatedTarget as HTMLElement | null;
-            if (related && related.closest(`.${styles.toolbar}`)) return;
+            if (related && related.closest(`.${styles.toolbar}, .${styles.nodeBar}`)) return;
             setIsFocused(false);
             setEditing(false);
+            setWritingSelf(false);
           }}
           onInput={syncContent}
+          onClick={event => {
+            if (!hasPromptBindings) return;
+            const chip = (event.target as HTMLElement).closest<HTMLElement>('[data-prompt-index]');
+            setSelectedMention(chip ? Number(chip.dataset.promptIndex) : null);
+          }}
           onDoubleClick={(e) => {
             if (!isSelect) return;
-            // 双击激活输入，并阻止画布双击居中缩放
             e.stopPropagation();
+            if (isTextGen && !writingSelf) return;
             setEditing(true);
           }}
           onMouseUp={handleEditorMouseUp}
           onKeyUp={handleEditorKeyUp}
           onPaste={handlePaste}
+          onCopy={e => handleCopy(e)}
+          onCut={e => handleCopy(e, true)}
           data-placeholder="输入内容..."
         />
 
@@ -445,30 +607,26 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       </Handle>
       </div>
 
-      {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}
-      {contextMenu &&
-        createPortal(
-          <div
-            className={styles.contextMenu}
-            style={{ top: contextMenu.y, left: contextMenu.x }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-          <button className={styles.contextItem} onClick={handleAddToChat}>
-            <span>添加到聊天</span>
-          </button>
-          {/* 共享资产概念下线，入口已隐藏
-          <button className={styles.contextItem} onClick={handleSaveToAssets}>
-            <span>保存到共享资产</span>
-          </button> */}
-          <button className={styles.contextItem} onClick={handleDuplicate}>
-            <span>复制</span>
-          </button>
-          <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
-            <span>删除</span>
-          </button>
-          </div>,
-          document.body,
-        )}
+      {contextMenu && (
+        <CanvasContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={[
+            { key: 'chat', label: '添加到聊天' },
+            { key: 'duplicate', label: '创建副本' },
+            { key: 'paste', label: '粘贴' },
+            { key: 'delete', label: '删除', danger: true },
+          ]}
+          onClose={() => setContextMenu(null)}
+          onSelect={(key) => {
+            setContextMenu(null);
+            if (key === 'chat') handleAddToChat();
+            else if (key === 'duplicate') handleDuplicate();
+            else if (key === 'paste') data.onPaste?.(id);
+            else if (key === 'delete') handleDelete();
+          }}
+        />
+      )}
     </div>
   );
 }

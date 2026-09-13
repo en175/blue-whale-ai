@@ -34,10 +34,15 @@ function toConsumerModel(view: CatalogRow) {
   const {
     channel_parser: _parser,
     request_mapping: _mapping,
+    features,
     ...rest
   } = view;
+  // IKESD6 / ADR-0085：i2i_model_name 是出站调用值，与像素/api_value 同哲学对消费端剥除；
+  // max_prompt_length 留给前端动态上限用，原样透出。
+  const { i2i_model_name: _alias, ...publicFeatures } = features;
   return {
     ...rest,
+    features: publicFeatures,
     supported_sizes: view.supported_sizes.map((size) => ({
       id: size.id,
       label: size.label,

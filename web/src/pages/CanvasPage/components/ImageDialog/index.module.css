@@ -2,14 +2,31 @@
  * ImageDialog - 图片专属对话窗口
  * ============================================ */
 
-.dialog {
+/* 定位外壳：承载对话框的绝对定位与唤出动画。不加 overflow、不定高——
+ * configPanel 以它为包含块悬浮，避免被滚动对话框裁剪（IKEOLP，与 BottomDialog 同构） */
+.dialogWrap {
   position: absolute;
   bottom: var(--spacing-lg);
   left: 50%;
   transform: translateX(-50%);
   width: 740px;
   max-width: 90%;
-  height: 200px;
+  z-index: 20;
+  animation: dialogFadeIn 0.2s ease;
+}
+
+.dialogWrapFollow {
+  bottom: auto;
+  left: 0;
+  transform: none;
+  animation: dialogFadeInFollow 0.2s ease;
+}
+
+.dialog {
+  position: relative;
+  height: auto;
+  min-height: 0;
+  max-height: calc(100vh - 2 * var(--spacing-lg));
   overflow-y: auto;
   box-sizing: border-box;
   display: flex;
@@ -19,10 +36,6 @@
   border-radius: 16px;
   padding: var(--spacing-lg);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  z-index: 20;
-  animation: dialogFadeIn 0.2s ease;
 }
 
 /* 唤出动画：与视频/音频对话窗一致，从底部上浮 + 淡入 */
@@ -31,19 +44,24 @@
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
+@keyframes dialogFadeInFollow {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* 放大态：输入区高度占屏幕 2/3，仍锚定底部展示 */
 .dialogExpanded {
   height: 66.66vh;
 }
 
-/* ---- 输入卡片：纯 flex 布局容器，padding/背景/圆角已上移到根 .dialog，与 BottomDialog/AudioDialog 统一 ---- */
+/* ---- 输入卡片：纯 flex 布局容器，padding/背景/圆角已上移到 .dialog，与 BottomDialog/AudioDialog 统一 ---- */
 .inputBox {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
   position: relative;
   flex: 1;
-  min-height: 0;
+  min-height: auto;
 }
 
 .hiddenInput {
@@ -54,6 +72,8 @@
 /* topActions 已改为 absolute（与 BottomDialog/AudioDialog 统一），topRow 仅承载预览行 */
 .topRow {
   display: flex;
+  flex-shrink: 0;
+  padding-right: 64px;
   align-items: flex-start;
   gap: var(--spacing-sm);
 }
@@ -62,14 +82,15 @@
  * 参考图增多时整卡自然增高，底部控件不被覆盖。不加 overflow，避免裁切 sourceMenu 弹出层。 */
 .previewRow {
   display: flex;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: var(--spacing-sm);
 }
 
 .previewItem {
   position: relative;
-  width: 56px;
-  height: 56px;
+  width: 44.8px;
+  height: 44.8px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid #333;
@@ -209,6 +230,14 @@
 /* ---- 参考素材数量提示已合并回 placeholder，无需单独样式 ---- */
 
 /* ---- 输入框 ---- */
+.mentionAnchor {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .textarea {
   width: 100%;
   resize: none;
@@ -221,8 +250,17 @@
   outline: none;
   font-family: inherit;
   display: block;
+  flex: 0 0 auto;
+  height: auto;
+  field-sizing: content;
+  min-height: 4.8em;
+  max-height: 6.4em;
+  overflow-y: auto;
+}
+
+.dialogExpanded .textarea {
   flex: 1;
-  min-height: 0;
+  max-height: none;
 }
 
 .textarea::placeholder {
@@ -231,11 +269,10 @@
 
 /* ---- 字数统计 ---- */
 .charCount {
-  align-self: flex-end;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--color-text-tertiary);
   line-height: 1;
-  margin-top: -4px;
 }
 
 .charCountWarn {
@@ -339,6 +376,8 @@
 
 /* ---- 底部状态栏 ---- */
 .bottomBar {
+  margin-top: auto;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -417,9 +456,9 @@
 
 /* 发送按钮 */
 .sendBtn {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28.8px;
+  height: 28.8px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -448,11 +487,11 @@
   transform: rotate(180deg);
 }
 
-/* ---- 配置面板（悬浮于底栏上方，与视频面板一致；IKDXL4） ---- */
+/* ---- 配置面板（悬浮于底栏上方，与视频面板一致；IKDXL4；包含块为不带 overflow 的 .dialogWrap，不被 .dialog 滚动框裁剪，IKEOLP） ---- */
 .configPanel {
   position: absolute;
-  /* 下缘贴字数统计上方：输入卡边框 1px + 底 padding 16px + 底栏 36px + 间距 8px + 字数统计行 11px + 余量 1px */
-  bottom: 73px;
+  /* 下缘贴底栏上方，给缩小后的发送按钮保留间距。 */
+  bottom: 54px;
   left: 0;
   right: 0;
   margin: 0 auto;
@@ -552,6 +591,8 @@
   top: calc(100% + 4px);
   left: 0;
   right: 0;
+  max-height: 180px;
+  overflow-y: auto;
   background-color: #262626;
   border: 1px solid #363636;
   border-radius: 12px;
@@ -560,6 +601,19 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.selectDropdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.selectDropdown::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.selectDropdown::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 3px;
 }
 
 .selectOption {

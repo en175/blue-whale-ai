@@ -2,15 +2,33 @@
  * BottomDialog - 画布底部对话框
  * ============================================ */
 
-.dialog {
+/* 定位外壳：承载对话框的绝对定位与唤出动画。不加 overflow、不定高——
+ * configPanel 以它为包含块悬浮，避免被滚动对话框裁剪（IKEOLP；
+ * 同 IKA715 原则：弹出层路径上的容器不加 overflow） */
+.dialogWrap {
   position: absolute;
   bottom: var(--spacing-lg);
   left: 50%;
   transform: translateX(-50%);
   width: 740px;
   max-width: 90%;
-  /* 与 ImageDialog/.AudioDialog 固定等高；内容超高时窗口内滚动 */
-  height: 200px;
+  z-index: 10;
+  animation: dialogFadeIn 0.2s ease;
+}
+
+.dialogWrapFollow {
+  bottom: auto;
+  left: 0;
+  transform: none;
+  animation: dialogFadeInFollow 0.2s ease;
+}
+
+.dialog {
+  position: relative;
+  /* 默认输入区保留三行，最多增长到四行，附件换行时面板向上增长。 */
+  height: auto;
+  min-height: 0;
+  max-height: calc(100vh - 2 * var(--spacing-lg));
   overflow-y: auto;
   box-sizing: border-box;
   display: flex;
@@ -18,12 +36,8 @@
   background-color: #1e1e1e;
   border: 1px solid var(--color-border-primary);
   border-radius: 16px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   padding: var(--spacing-lg);
-  z-index: 10;
-  animation: dialogFadeIn 0.2s ease;
 }
 
 @keyframes dialogFadeIn {
@@ -31,13 +45,26 @@
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
+@keyframes dialogFadeInFollow {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* 放大态：输入区高度占屏幕 2/3，仍锚定底部展示 */
 .dialogExpanded {
   height: 66.66vh;
 }
 
-/* 输入区包裹层：填充窗口剩余高度，与图片对话窗尺寸对齐 */
+/* 默认三行，随内容增长到四行；展开后填充窗口剩余高度。 */
 .editorWrap {
+  font-size: var(--font-size-md);
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 5.4em;
+  position: relative;
+}
+
+.dialogExpanded .editorWrap {
   flex: 1;
   min-height: 0;
 }
@@ -130,8 +157,14 @@
 }
 
 .editorArea {
-  height: 100%;
+  min-height: 5.4em;
+  max-height: 7.2em;
   overflow-y: auto;
+}
+
+.dialogExpanded .editorArea {
+  height: 100%;
+  max-height: none;
 }
 
 /* ---- 右上角操作（放大/收起 + 关闭） ---- */
@@ -175,11 +208,11 @@
   flex-wrap: wrap;
 }
 
-/* 媒体缩略图（与按钮同尺寸正方形）——与 ImageDialog/AudioDialog 统一 56×56，圆角 12px */
+/* 媒体缩略图（与按钮同尺寸正方形）——与 ImageDialog/AudioDialog 统一 44.8×44.8，圆角 12px */
 .mediaThumb {
   position: relative;
-  width: 56px;
-  height: 56px;
+  width: 44.8px;
+  height: 44.8px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--color-border-secondary);
@@ -245,10 +278,10 @@
   pointer-events: none;
 }
 
-/* 上传按钮（与缩略图同尺寸正方形）——与 ImageDialog/AudioDialog 统一 56×56，圆角 12px */
+/* 上传按钮（与缩略图同尺寸正方形）——与 ImageDialog/AudioDialog 统一 44.8×44.8，圆角 12px */
 .mediaBtn {
-  width: 56px;
-  height: 56px;
+  width: 44.8px;
+  height: 44.8px;
   border-radius: 12px;
   display: flex;
   align-items: center;
@@ -453,6 +486,17 @@
   font-weight: 500;
 }
 
+.modeOptionDisabled {
+  color: #666;
+  cursor: default;
+  opacity: 0.45;
+}
+
+.modeOptionDisabled:hover {
+  color: #666;
+  background: transparent;
+}
+
 /* ---- 信息文字 ---- */
 .barDivider {
   font-size: var(--font-size-sm);
@@ -492,9 +536,9 @@
 
 /* 发送按钮（与图片对话框统一） */
 .sendBtn {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28.8px;
+  height: 28.8px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -560,11 +604,10 @@
 
 /* ---- 字数统计 ---- */
 .charCount {
-  align-self: flex-end;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--color-text-tertiary);
   line-height: 1;
-  margin-top: -4px;
 }
 
 .charCountWarn {
@@ -579,10 +622,10 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 配置面板（悬浮于底栏上方） ---- */
+/* ---- 配置面板（悬浮于底栏上方；包含块为不带 overflow 的 .dialogWrap，不被 .dialog 滚动框裁剪，IKEOLP） ---- */
 .configPanel {
   position: absolute;
-  bottom: 72px;
+  bottom: 54px;
   left: 0;
   right: 0;
   margin: 0 auto;
@@ -684,6 +727,19 @@
   padding: var(--spacing-xs);
   z-index: 6;
   animation: popupFadeIn 0.15s ease;
+}
+
+.selectDropdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.selectDropdown::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.selectDropdown::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 3px;
 }
 
 .selectOption {
@@ -895,6 +951,8 @@
  * IKDMQS 草稿绑定参考角色区：首帧/尾帧/普通参考分组展示连线推导的输入
  * ============================================ */
 .refRoleArea {
+  flex-shrink: 0;
+  padding-right: 64px;
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm, 8px);
@@ -904,7 +962,7 @@
 
 .refSlot {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: var(--spacing-sm, 8px);
 }

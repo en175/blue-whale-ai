@@ -6,8 +6,8 @@ import type { GenerationModel } from '@/api/generation';
 import BottomDialog from './index';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
 
-/* IKDMQS 视频草稿绑定模式：角色槽渲染 / 能力约束 / 角色切换 / 组合冲突 /
-   生成中只读 / 移除上传与角色库入口。ChipTextEditor 打桩为 textarea。 */
+/* IKDMQS 视频草稿绑定模式：模式与角色槽渲染 / 能力约束 / 来源菜单 / 组合冲突 /
+   生成中只读 / 移除参考与禁用本地上传。ChipTextEditor 打桩为 textarea。 */
 
 const { fetchGenerationModels } = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(),
@@ -90,10 +90,11 @@ const handlers = {
 
 interface RenderOptions {
   mediaRefs?: VideoMediaRefs;
+  mode?: 'all' | 'keyframe' | 'prompt';
   status?: 'draft' | 'generating' | 'failed' | 'cancelled';
 }
 
-async function renderDialog({ mediaRefs, status }: RenderOptions = {}) {
+async function renderDialog({ mediaRefs, status, mode }: RenderOptions = {}) {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
@@ -101,6 +102,7 @@ async function renderDialog({ mediaRefs, status }: RenderOptions = {}) {
     root.render(
       createElement(BottomDialog, {
         onClose: vi.fn(),
+        initialParams: { mode },
         onSend: handlers.onSend,
         onPickFromCanvas: handlers.onPickFromCanvas,
         onPickFromAssets: handlers.onPickFromAssets,
@@ -158,30 +160,29 @@ afterEach(async () => {
 });
 
 describe('IKDMQS 草稿绑定模式渲染', () => {
-  it('按角色分组渲染连线推导项：首帧/尾帧/普通参考槽与角色徽标；隐藏模式选择器与上传入口', async () => {
-    const mediaRefs: VideoMediaRefs = {
-      reference: [ref('m1'), ref('v1', 'video')],
-      first: ref('f1'),
-      last: ref('f2'),
-    };
-    await renderDialog({ mediaRefs });
-
-    expect(mountNode.textContent).toContain('首帧');
-    expect(mountNode.textContent).toContain('尾帧');
-    expect(mountNode.textContent).toContain('普通参考');
-    const roles = [...mountNode.querySelectorAll('[data-testid="dock-video-ref"] [data-role]')].map(
-      (n) => n.getAttribute('data-role'),
-    );
-    expect(roles).toEqual(['first', 'last', 'reference', 'reference']);
-    // 模式选择器隐藏（角色槽显式表达取代模式预设）
-    expect(mountNode.textContent).not.toContain('全能参考');
-    // 无本地上传：不渲染文件选择 input
+  it('首尾帧模式恢复首帧和尾帧，普通参考入口与本地上传不显示', async () => {
+    await renderDialog({ mode: 'keyframe', mediaRefs: {
+      reference: [], first: ref('f1'), last: ref('f2'),
+    } });
+    const roles = [...mountNode.querySelectorAll('[data-testid="dock-video-ref"] [data-role]')]
+      .map((n) => n.getAttribute('data-role'));
+    expect(roles).toEqual(['first', 'last']);
+    expect(menuItem('首尾帧')).toBeTruthy();
+    expect(slotButton('添加图片参考（从资产中选择 / 到节点选择 / 角色库）')).toBeUndefined();
     expect(mountNode.querySelector('input[type="file"]')).toBeNull();
   });
 
+  it('全能参考显示图片和视频缩略图，不显示普通参考角色徽标', async () => {
+    // IKFC1T：dock 默认改为文生视频，本套用例显式回到全能参考场景
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1'), ref('v1', 'video')] } });
+    expect(mountNode.querySelectorAll('[data-testid="dock-video-ref"]')).toHaveLength(2);
+    expect(mountNode.querySelector('[data-role="reference"]')).toBeNull();
+    expect(menuItem('全能参考')).toBeTruthy();
+  });
+
   it('统一草稿绑定：媒体入口为来源菜单（资产/节点/角色库，无上传）', async () => {
-    await renderDialog();
-    expect(mountNode.textContent).not.toContain('全能参考');
+    await renderDialog({ mode: 'all' });
+    expect(menuItem('全能参考')).toBeTruthy();
     // 图片/视频按钮改为弹出来源菜单（画布资产改造融合），不再直达「到节点选择」
     const entryButtons = [...mountNode.querySelectorAll('button')].filter(
       (b) => b.title === '添加图片参考（从资产中选择 / 到节点选择 / 角色库）'
@@ -203,27 +204,30 @@ describe('IKDMQS 草稿绑定模式渲染', () => {
 });
 
 describe('IKDMQS 角色槽能力约束', () => {
-  it('无首帧时尾帧入口不渲染；首帧入口可点开来源菜单', async () => {
-    await renderDialog({ mediaRefs: { reference: [] } });
-    // 全能力模型：首帧可加；尾帧需先有首帧（不可加时入口直接不渲染）
+  it('切换首尾帧模式后，空首帧和尾帧入口同时显示', async () => {
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [] } });
+    await act(async () => { menuItem('全能参考')!.click(); });
+    await act(async () => { menuItem('首尾帧')!.click(); });
     expect(slotButton('添加首帧（从资产中选择 / 到节点选择 / 角色库）')).toBeTruthy();
-    expect(slotButton('添加尾帧（从资产中选择 / 到节点选择 / 角色库）')).toBeUndefined();
+    expect(slotButton('添加尾帧（从资产中选择 / 到节点选择 / 角色库）')).toBeTruthy();
   });
 
-  it('无帧能力模型：首帧/尾帧入口均不渲染', async () => {
+  it('无首帧能力时首帧入口隐藏，尾帧空槽仍显示', async () => {
     fetchGenerationModels.mockResolvedValue([noFrameModel]);
-    await renderDialog({ mediaRefs: { reference: [] } });
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [] } });
     expect(slotButton('添加首帧（从资产中选择 / 到节点选择 / 角色库）')).toBeUndefined();
-    expect(slotButton('添加尾帧（从资产中选择 / 到节点选择 / 角色库）')).toBeUndefined();
+    expect(slotButton('添加尾帧（从资产中选择 / 到节点选择 / 角色库）')).toBeTruthy();
   });
 });
 
 describe('IKDMQS 角色显式指定与移除', () => {
   it('首帧槽来源菜单「到节点选择」按首帧角色发起；普通参考按 reference 角色', async () => {
-    await renderDialog({ mediaRefs: { reference: [] } });
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [] } });
     await act(async () => { slotButton('添加首帧（从资产中选择 / 到节点选择 / 角色库）')!.click(); });
     await act(async () => { menuItem('到节点选择')!.click(); });
     expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('image', 'first');
+    await act(async () => { menuItem('首尾帧')!.click(); });
+    await act(async () => { menuItem('全能参考')!.click(); });
     await act(async () => { slotButton('添加图片参考（从资产中选择 / 到节点选择 / 角色库）')!.click(); });
     await act(async () => { menuItem('到节点选择')!.click(); });
     expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('image', 'reference');
@@ -233,7 +237,7 @@ describe('IKDMQS 角色显式指定与移除', () => {
   });
 
   it('来源菜单携带槽位角色：资产库/角色库入口按目标槽位发起', async () => {
-    await renderDialog({ mediaRefs: { reference: [] } });
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [] } });
     await act(async () => { slotButton('添加首帧（从资产中选择 / 到节点选择 / 角色库）')!.click(); });
     await act(async () => { menuItem('从资产中选择')!.click(); });
     expect(handlers.onPickFromAssets).toHaveBeenCalledWith('image', 'first');
@@ -243,7 +247,7 @@ describe('IKDMQS 角色显式指定与移除', () => {
   });
 
   it('移除参考回调携带来源节点 id（父级断开连线）', async () => {
-    await renderDialog({ mediaRefs: { reference: [], first: ref('f1') } });
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1') } });
     const removeBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除（断开连线）"]')!;
     await act(async () => { removeBtn.click(); });
     expect(handlers.onRemoveVideoRef).toHaveBeenCalledWith('f1');
@@ -262,7 +266,7 @@ describe('IKDMQS 组合冲突与只读', () => {
   });
 
   it('生成中只读：参考可见但无添加/移除入口，发送禁用并提示', async () => {
-    await renderDialog({ mediaRefs: { reference: [ref('m1')] }, status: 'generating' });
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1')] }, status: 'generating' });
     expect(mountNode.querySelector('[data-testid="dock-video-ref"]')).toBeTruthy();
     expect(mountNode.querySelector('button[title="移除（断开连线）"]')).toBeNull();
     expect(slotButton('添加图片参考（从资产中选择 / 到节点选择 / 角色库）')).toBeUndefined();
@@ -271,8 +275,8 @@ describe('IKDMQS 组合冲突与只读', () => {
     expect(sendButton().getAttribute('title')).toBe('生成中，输入只读');
   });
 
-  it('合法输入（仅首尾帧或仅普通参考）不提示冲突，可发送', async () => {
-    await renderDialog({ mediaRefs: { reference: [], first: ref('f1'), last: ref('f2') } });
+  it('完整首尾帧不提示冲突，按首尾帧模式发送', async () => {
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1'), last: ref('f2') } });
     expect(mountNode.textContent).not.toContain('不能混用');
     await typePrompt('首尾帧驱动视频');
     expect(sendButton().disabled).toBe(false);
@@ -280,5 +284,6 @@ describe('IKDMQS 组合冲突与只读', () => {
     expect(handlers.onSend).toHaveBeenCalledTimes(1);
     const [, opts] = handlers.onSend.mock.calls[0]!;
     expect(opts.modelId).toBe('m-full');
+    expect(opts.mode).toBe('keyframe');
   });
 });

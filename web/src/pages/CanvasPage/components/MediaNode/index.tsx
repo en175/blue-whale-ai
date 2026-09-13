@@ -3,17 +3,18 @@
  * 统一外部常驻标题 + 独立圆角内容主体
  * 内容区尺度：图片/视频按真实比例（短边 280、长边 ≤840），音频恒 280×280 方形
  * ============================================ */
-import { useState, useCallback, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
+import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaNodeToolbarVisibility } from './toolbarVisibility';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
 import AudioPlayer from './AudioPlayer';
 import { nodeTitleSizing } from '../nodeTitleSizing';
+import CanvasContextMenu from '../CanvasContextMenu';
 import styles from './index.module.css';
 
 /** 连接点统一样式：透明背景（加号图标由 children 渲染） */
@@ -70,6 +71,14 @@ interface MediaNodeData {
   prompt?: string;
   /** 资产 ID（上传完成后存储） */
   assetId?: string | number;
+  /** 已绑定的素材库 id（asset- 前缀），用于入库去重 */
+  materialId?: string;
+  /** 空壳占位：待用户上传，不连线不成组无右键 */
+  emptyShell?: boolean;
+  /** 合规校验进行中 */
+  complianceBusy?: boolean;
+  /** 合规校验已通过（展示成功角标，随画布持久化） */
+  compliancePassed?: boolean;
   /** 派生标记：资产在 snapshot 资产字典中查不到（素材已被删除），水合期计算 */
   assetMissing?: boolean;
   /** MIME 类型（上传完成后存储，如 "image/jpeg"） */
@@ -94,6 +103,8 @@ interface MediaNodeData {
   onCancelJob?: (id: string) => void;
   /** 重试（失败节点） */
   onRetryJob?: (id: string) => void;
+  /** 卡片改名（IKFA8X）：提交归一化后的新名称；自定义状态由父级置 data.customName */
+  onTitleChange?: (id: string, name: string) => void;
   /** 重新编辑：打开图片对话框并带入提示词与图片 */
   onReEdit?: (id: string) => void;
   /** 生成图片：打开图片对话框并带入图片 */
@@ -108,14 +119,45 @@ interface MediaNodeData {
   onDownload?: (id: string) => void;
   /** 查看媒体资产详情 */
   onShowDetails?: (id: string) => void;
+  onPaste?: (id: string) => void;
+  onCopyImage?: (id: string) => void;
+  onComplianceCheck?: (id: string) => void;
+  onFillEmptyShell?: (id: string, file: File) => void;
+  /** 图片生成节点：图生图上传本地素材 */
+  onImg2Img?: (id: string, file: File) => void;
 }
 
 export default function MediaNode({ id, data, selected }: NodeProps & { data: MediaNodeData; selected?: boolean }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isExtractSubmitting, setIsExtractSubmitting] = useState(false);
+  const shellFileRef = useRef<HTMLInputElement>(null);
+  const img2imgFileRef = useRef<HTMLInputElement>(null);
+  /** 名称原位编辑（IKFA8X）：draft 为输入框内容；error 仅展示，不阻断画布保存 */
+  const [nameEditing, setNameEditing] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameError, setNameError] = useState('');
 
   const zoom = useStore((state) => state.transform[2]);
   const isSelect = data.toolMode === 'select';
+
+  /** 提交名称：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName */
+  const commitName = useCallback(() => {
+    const result = commitCardName(nameDraft, data.fileName ?? '');
+    if (result.kind === 'invalid') {
+      setNameError(result.message);
+      return;
+    }
+    setNameError('');
+    setNameEditing(false);
+    if (result.kind === 'save') data.onTitleChange?.(id, result.value);
+  }, [data, id, nameDraft]);
+
+  /** Esc 取消：恢复编辑前名称；输入框随即卸载，不会再有失焦提交 */
+  const cancelName = useCallback(() => {
+    setNameDraft(data.fileName ?? '');
+    setNameError('');
+    setNameEditing(false);
+  }, [data.fileName]);
 
   // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
   useEffect(() => {
@@ -129,13 +171,18 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     };
   }, [contextMenu]);
 
-  /** 右键菜单 */
+  const isEmptyShell = data.emptyShell === true;
+  const blockNodeMenu =
+    isEmptyShell || data.genStatus === 'draft' || data.genStatus === 'generating';
+
+  /** 右键菜单：空壳 / 生成中 / 待生成不弹 */
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (data.toolMode !== 'select') return;
     e.preventDefault();
     e.stopPropagation();
+    if (blockNodeMenu) return;
     setContextMenu({ x: e.clientX, y: e.clientY });
-  }, [data.toolMode]);
+  }, [data.toolMode, blockNodeMenu]);
 
   const handleDelete = useCallback(() => {
     setContextMenu(null);
@@ -152,6 +199,11 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleAddToChat = useCallback(() => {
     setContextMenu(null);
     data.onAddToChat?.(id);
+  }, [data, id]);
+
+  const acceptShellFile = useCallback((file: File | undefined) => {
+    if (!file) return;
+    data.onFillEmptyShell?.(id, file);
   }, [data, id]);
 
   /** 保存到共享资产（共享资产下线，入口已隐藏） */
@@ -237,11 +289,37 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   /** 生成中 / 失败 / 素材缺失占位（音频与图片/视频共用内部内容） */
   const renderPlaceholder = () => {
     if (isDraft) {
-      /* 待生成草稿（IKDMQQ）：不是素材缺失，点击卡片打开面板继续编辑 */
+      const isImageDraft = data.mediaType === 'image';
+      const isVideoDraft = data.mediaType === 'video';
       return (
         <div className={styles.genBox}>
-          <Image size={22} strokeWidth={1.8} color="#666" />
-          <span className={styles.missingText}>待生成</span>
+          {isVideoDraft ? <Video size={22} strokeWidth={1.8} color="#666" /> : <Image size={22} strokeWidth={1.8} color="#666" />}
+          <span className={styles.missingText}>{isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成'}</span>
+          {isImageDraft && data.onImg2Img && (
+            <>
+              <button
+                type="button"
+                className={`${styles.genBtn} nodrag nopan`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  img2imgFileRef.current?.click();
+                }}
+              >
+                图生图
+              </button>
+              <input
+                ref={img2imgFileRef}
+                type="file"
+                hidden
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (file) data.onImg2Img?.(id, file);
+                }}
+              />
+            </>
+          )}
         </div>
       );
     }
@@ -298,9 +376,14 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   };
 
   return (
-    <div className={`${styles.wrapper} ${selected ? styles.selected : ''}`} onContextMenu={handleContextMenu} style={{ ...nodeTitleSizing(zoom), width: contentBox.width }}>
+    <div
+      className={`${styles.wrapper} ${selected ? styles.selected : ''}`}
+      data-media-type={data.mediaType ?? 'image'}
+      onContextMenu={handleContextMenu}
+      style={{ ...nodeTitleSizing(zoom), width: contentBox.width }}
+    >
       {/* 选中态悬浮工具条：重新编辑/生成图片/生成视频/生成音频 + 详情/下载/@（位于外部标题上方） */}
-      {selected && !data.genStatus && !data.assetMissing && (
+      {selected && !data.genStatus && !data.assetMissing && !isEmptyShell && (
         <div className={`nodrag nopan ${styles.toolbar}`} onMouseDown={stop}>
           <button className={styles.toolBtn} onClick={handleReEdit} title="带入原提示词与图片，打开图片对话框">
             <RefreshCcw size={14} strokeWidth={2} />
@@ -348,23 +431,87 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       <div className={styles.titleRow} data-testid="media-title">
         <div className={styles.titleLeft}>
           <Icon className={styles.titleIcon} strokeWidth={2} color="#888" />
-          <span className={styles.titleName} title={data.fileName || undefined}>{data.fileName || ''}</span>
+          {nameEditing ? (
+            <input
+              className="nodrag nopan"
+              aria-label="卡片名称"
+              value={nameDraft}
+              autoFocus
+              onChange={(event) => setNameDraft(event.target.value)}
+              onBlur={commitName}
+              onKeyDown={(event) => {
+                // 名称输入期间隔离画布快捷键；输入法组合中的回车只确认候选词，不提交名称
+                event.stopPropagation();
+                if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  commitName();
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelName();
+                }
+              }}
+            />
+          ) : (
+            <span
+              className={styles.titleName}
+              title={data.fileName || undefined}
+              onDoubleClick={(event) => {
+                // 原位编辑，不触发节点双击居中放大
+                event.stopPropagation();
+                if (!data.onTitleChange) return;
+                setNameDraft(data.fileName ?? '');
+                setNameError('');
+                setNameEditing(true);
+              }}
+            >
+              {data.fileName || (isEmptyShell ? (data.mediaType === 'video' ? '视频节点' : data.mediaType === 'audio' ? '音频节点' : '图片节点') : '')}
+            </span>
+          )}
+          {data.compliancePassed && (
+            <span className={`nodrag nopan ${styles.complianceBadge}`} title="校验通过，可用于seedance2.0视频生成">
+              <img src="/success.png" alt="" />
+            </span>
+          )}
         </div>
         <span className={styles.titleMeta} title={titleMeta || undefined}>{titleMeta}</span>
       </div>
-      <div className={styles.contentCard} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
-        {!data.isFirst && (
+      {nameError && <div role="alert" className="nodrag nopan">{nameError}</div>}
+      <div className={`${styles.contentCard} ${isAudio ? styles.audioCard : ''}`} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
+        {!data.isFirst && !isEmptyShell && (
           <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
           <HandlePlus />
         </Handle>
         )}
-        {/* IKDMQU Q5：重新生成中的成品卡继续显示旧素材，仅叠加状态角标；
-            IKDMQV：重新生成失败/取消同样保留旧素材（Q5「失败或取消后仍保留旧素材与最新编辑内容」），
-            失败原因与重试入口收进底部角标；无旧素材的失败（草稿首生成、提取任务）仍走占位 genBox */}
-        {isDraft || (isGenDone && !hasMediaSrc) || data.assetMissing || (isGenerating && !hasMediaSrc) ? (
+        {isEmptyShell ? (
+          <button
+            type="button"
+            className={`${styles.emptyShell} nodrag nopan`}
+            onClick={() => shellFileRef.current?.click()}
+          >
+            <Icon size={22} strokeWidth={1.8} color="#888" />
+            <span className={styles.emptyShellHint}>点击上传素材</span>
+            <input
+              ref={shellFileRef}
+              type="file"
+              hidden
+              accept={
+                data.mediaType === 'video'
+                  ? 'video/*'
+                  : data.mediaType === 'audio'
+                    ? 'audio/*'
+                    : 'image/*'
+              }
+              onChange={(e) => {
+                acceptShellFile(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+            />
+          </button>
+        ) : isDraft || (isGenDone && !hasMediaSrc) || data.assetMissing || (isGenerating && !hasMediaSrc) ? (
           renderPlaceholder()
         ) : isAudio ? (
-          <AudioPlayer src={data.src || ''} fileName={data.fileName} />
+          <AudioPlayer src={data.src || ''} fileName={data.fileName} onDownload={() => data.onDownload?.(id)} />
         ) : data.mediaType === 'video' ? (
           <video
             className={styles.mediaVideo}
@@ -407,35 +554,37 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             )}
           </div>
         )}
+        {!isEmptyShell && !isDraft && (
         <Handle type="source" position={Position.Right} className={styles.handle} style={{ ...HANDLE_STYLE, right: '-16px' }}>
         <HandlePlus />
       </Handle>
+        )}
       </div>
 
-      {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}
-      {contextMenu &&
-        createPortal(
-          <div
-            className={styles.contextMenu}
-            style={{ top: contextMenu.y, left: contextMenu.x }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-          <button className={styles.contextItem} onClick={handleAddToChat}>
-            <span>添加到聊天</span>
-          </button>
-          {/* 共享资产概念下线，隐藏入口 */}
-          {/* <button className={styles.contextItem} onClick={handleSaveToAssets}>
-            <span>保存到共享资产</span>
-          </button> */}
-          <button className={styles.contextItem} onClick={handleDuplicate}>
-            <span>复制</span>
-          </button>
-          <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
-            <span>删除</span>
-          </button>
-          </div>,
-          document.body,
-        )}
+      {contextMenu && (
+        <CanvasContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={[
+            { key: 'chat', label: '添加到聊天' },
+            { key: 'compliance', label: '合规校验', loading: data.complianceBusy },
+            ...(data.mediaType === 'image' ? [{ key: 'copyImage', label: '复制图片' }] : []),
+            { key: 'duplicate', label: '创建副本' },
+            { key: 'paste', label: '粘贴' },
+            { key: 'delete', label: '删除', danger: true },
+          ]}
+          onClose={() => setContextMenu(null)}
+          onSelect={(key) => {
+            setContextMenu(null);
+            if (key === 'chat') handleAddToChat();
+            else if (key === 'compliance') data.onComplianceCheck?.(id);
+            else if (key === 'copyImage') data.onCopyImage?.(id);
+            else if (key === 'duplicate') handleDuplicate();
+            else if (key === 'paste') data.onPaste?.(id);
+            else if (key === 'delete') handleDelete();
+          }}
+        />
+      )}
     </div>
   );
 }

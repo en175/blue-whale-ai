@@ -1,3 +1,4 @@
+import type { PromptBinding } from '@lib/contracts/prompt-target';
 import type { PromptPreviewSource } from '@lib/contracts/prompt-preview';
 import type { LegacyCardHistoryItem, LegacyMigrationReport } from '@lib/contracts/legacy-card-migration';
 /* ============================================
@@ -33,6 +34,13 @@ export function applyPromptPreview(input: { projectId: string; source: PromptPre
       body: JSON.stringify({ source: input.source, position: input.position }),
     },
   );
+}
+
+export function referencePromptPlan(input: { projectId: string; planNodeId: string; targetNodeId: string; expectedVersion: number; syncBindings?: PromptBinding[] }) {
+  const { projectId, ...body } = input;
+  return apiRequest<CanvasRecord>(`/api/canvases/${encodeURIComponent(projectId)}/prompt-references`, {
+    method: 'POST', silent: true, body: JSON.stringify(body),
+  });
 }
 
 /** 对话引用快照（IKDLQJ）：点击「添加到对话」当刻冻结的正文与来源，服务端不可变保存。 */

@@ -579,9 +579,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   };
 
   const handleInputChange = (value: string) => {
-    const next = limitPromptInput(value, inputValue);
+    const next = limitPromptInput(value, inputValue, activePromptCap);
     setInputValue(next.value);
-    if (next.reachedLimit) showToast(`输入内容最多 ${MAX_INPUT} 个字符`);
+    if (next.reachedLimit) showToast(`输入内容最多 ${activePromptCap} 个字符`);
   };
 
   /** 三个 textarea 共用的 composition 事件处理 */
@@ -613,6 +613,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   // AI图片 比例/清晰度选项：取自所选模型能力（接口为唯一数据源）
   const selectedImageModel = imageModelList.find((m) => m.model_id === imageModel);
+  // ADR-0085（IKESD9）：生图 tab 的 prompt 上限跟随所选模型目录配置，其余 tab 保持默认
+  const imagePromptCap = selectedImageModel?.features?.max_prompt_length ?? MAX_INPUT;
+  const activePromptCap = isImageTab ? imagePromptCap : MAX_INPUT;
   const imageRatioKeys = selectedImageModel
     ? ratiosForSelectedSize(selectedImageModel, imageResolution)
     : [];
@@ -1290,8 +1293,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   onCompositionStart={handleCompositionStart}
                   onCompositionEnd={handleCompositionEnd}
                   rows={2}
+                  maxLength={imagePromptCap}
                 />
-                <span className={styles.textareaCount}>{inputValue.length}/{MAX_INPUT}</span>
+                <span className={styles.textareaCount}>{inputValue.length}/{imagePromptCap}</span>
               </div>
             </div>
 

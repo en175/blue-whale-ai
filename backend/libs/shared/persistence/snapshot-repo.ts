@@ -54,6 +54,9 @@ export interface SnapshotAssetRow {
   url: string;
   /** assets.project_id 在部署 schema 非空（默认 0）；理论可空时按全局 asset 处理。 */
   project_id: string | null;
+  /** IKEXX8：素材库关联两列成对携带（未关联为 null）。 */
+  material_id: string | null;
+  material_group_id: string | null;
 }
 
 export interface SnapshotJobAggregate {
@@ -250,6 +253,8 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           type: a.type,
           url: a.url,
           project_id: rowProjectId,
+          material_id: a.material_id ?? null,
+          material_group_id: a.material_group_id ?? null,
         });
       }
 
