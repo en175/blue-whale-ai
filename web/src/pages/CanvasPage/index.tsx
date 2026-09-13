@@ -161,41 +161,6 @@ function hasCustomName(node: Node | undefined): boolean {
   return ((node?.data ?? {}) as Record<string, unknown>).customName === true;
 }
 
-/** 合并视频已落盘参考与待提交画布选取参考；待提交参考名称同样按来源节点身份刷新（IKFA8Y） */
-function mergePendingVideoCanvasRefs(base: VideoMediaRefs, pending: VideoMediaRefs, mediaNodes: Node[]): VideoMediaRefs {
-  const merged: VideoMediaRefs = {
-    reference: [...base.reference],
-    first: base.first,
-    last: base.last,
-    invalid: base.invalid,
-  };
-  const freshPending = freshVideoCanvasRefs(pending, mediaNodes);
-  if (freshPending.first && !merged.first) merged.first = freshPending.first;
-  if (freshPending.last && !merged.last) merged.last = freshPending.last;
-  const seen = new Set(merged.reference.map((r) => r.assetId));
-  if (merged.first) seen.add(merged.first.assetId);
-  if (merged.last) seen.add(merged.last.assetId);
-  for (const item of freshPending.reference) {
-    if (seen.has(item.assetId)) continue;
-    merged.reference.push(item);
-    seen.add(item.assetId);
-  }
-  return merged;
-}
-
-/** 从待提交视频参考中移除某个来源节点 */
-function stripPendingVideoCanvasRef(prev: VideoMediaRefs, nodeId: string): VideoMediaRefs {
-  const next: VideoMediaRefs = { reference: prev.reference.filter((r) => r.nodeId !== nodeId) };
-  if (prev.first?.nodeId !== nodeId) next.first = prev.first;
-  if (prev.last?.nodeId !== nodeId) next.last = prev.last;
-  return next;
-}
-
-function pendingVideoCanvasHasNode(pending: VideoMediaRefs, nodeId: string): boolean {
-  return pending.first?.nodeId === nodeId || pending.last?.nodeId === nodeId
-    || pending.reference.some((r) => r.nodeId === nodeId);
-}
-
 export default function CanvasPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -359,11 +324,7 @@ export default function CanvasPage() {
       showToast('warn', err);
       return false;
     }
-    const refs = mergePendingVideoCanvasRefs(
-      mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current),
-      videoDraftIdRef.current === targetId ? pendingVideoCanvasRefsRef.current : { reference: [] },
-      mediaNodesRef.current,
-    );
+    const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
     const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>);
     const mediaType = ((source.data ?? {}) as Record<string, unknown>).mediaType as 'image' | 'video';
     const msg = checkAddVideoRef(role, mediaType, assetId, refs);
@@ -601,12 +562,6 @@ export default function CanvasPage() {
   /** 工具栏自由模式（无草稿卡）的视频参考：本地暂存首帧/尾帧/普通参考，
    *  发送时随任务一次性提交，关闭面板即丢弃（不落画布不连线） */
   const [videoFreeRefs, setVideoFreeRefs] = useState<VideoMediaRefs>({ reference: [] });
-  /** 视频对话框「到节点选择」的待提交参考：展示在面板中，发送时才建连线并随画布保存落盘 */
-  const [pendingVideoCanvasRefs, setPendingVideoCanvasRefs] = useState<VideoMediaRefs>({ reference: [] });
-  const pendingVideoCanvasRefsRef = useRef<VideoMediaRefs>({ reference: [] });
-  pendingVideoCanvasRefsRef.current = pendingVideoCanvasRefs;
-  const videoDraftIdRef = useRef<string | null>(null);
-  videoDraftIdRef.current = videoDraftId;
   /** 节点工具条/首页带入视频对话框的种子；
    *  params 是首页 AI视频 带入的生成参数（选中首页所选模型/比例/清晰度/时长/模式） */
   const [videoSeed, setVideoSeed] = useState<{ ts: number; text?: string; doc?: PromptDoc | null; params?: VideoGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
@@ -1776,26 +1731,9 @@ export default function CanvasPage() {
         }
       } else if (videoDraftId) {
         if (node.type === 'mediaNode' && validateVideoRefConnect(node.id, videoDraftId, pickRefRole ?? undefined)) {
-          const d = (node.data ?? {}) as Record<string, unknown>;
-          const assetId = readAssetId(d);
-          if (assetId != null) {
-            const item: VideoMediaRef = {
-              nodeId: node.id,
-              url: String(d.src ?? ''),
-              name: typeof d.fileName === 'string' && d.fileName ? d.fileName : node.id,
-              assetId: String(assetId),
-              mediaType: d.mediaType === 'video' ? 'video' : 'image',
-            };
-            const role = pickRefRole ?? 'reference';
-            const prev = pendingVideoCanvasRefsRef.current;
-            const next: VideoMediaRefs = {
-              reference: role === 'reference' ? [...prev.reference, item] : [...prev.reference],
-              first: role === 'first' ? item : prev.first,
-              last: role === 'last' ? item : prev.last,
-            };
-            pendingVideoCanvasRefsRef.current = next;
-            setPendingVideoCanvasRefs(next);
-          }
+          // IKFDFW：有效参考接纳后立即建立来源→草稿连线（角色随发起入口）并进入既有自动保存，
+          // 不再经待提交暂存等发送——关闭/切换/刷新均按连线恢复
+          addCanvasEdge(node.id, videoDraftId, pickRefRole ?? 'reference');
         }
       } else if (node.type === 'mediaNode') {
         const role = pickRefRole ?? 'reference';
@@ -2176,10 +2114,6 @@ export default function CanvasPage() {
    *  preset 覆盖节点 data 读出的参数——新建草稿后 mediaNodesRef 尚未更新，种子参数经 preset 兜底 */
   const openVideoDraftDialog = (nodeId: string, preset?: VideoGenSeedParams) => {
     if (!canOpenEditor(nodeId)) return;
-    if (videoDraftIdRef.current !== nodeId) {
-      pendingVideoCanvasRefsRef.current = { reference: [] };
-      setPendingVideoCanvasRefs({ reference: [] });
-    }
     videoPanelHiddenRef.current = false;
     editingTargetRef.current = nodeId;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
@@ -4184,31 +4118,21 @@ export default function CanvasPage() {
   const videoDraftMediaRefs = useMemo(
     () => {
       if (!videoDraftId) return undefined;
-      return mergePendingVideoCanvasRefs(
-        mergedVideoMediaRefsOf(videoDraftId, edges, mediaNodes),
-        pendingVideoCanvasRefs,
-        mediaNodes,
-      );
+      return mergedVideoMediaRefsOf(videoDraftId, edges, mediaNodes);
     },
-    [videoDraftId, edges, mediaNodes, pendingVideoCanvasRefs],
+    [videoDraftId, edges, mediaNodes],
   );
 
   /** 视频跟随输入框模式门控（IKFC1T）：按「实际成为当前目标参考」的媒体集合判定（连线 +
-   *  角色库 material + 到节点选择暂存合并，与面板显示/提交输入同源）；文本附件不属于媒体参考，
+   *  角色库 material，与面板显示/提交输入同源）；文本附件不属于媒体参考，
    *  不参与判定。存在任一媒体参考时文生视频不可选；移除全部参考后恢复可选但不自动切回。 */
   const videoFollowModes: VideoFollowMode[] | undefined = videoDraftId && showBottomDialog && videoDraftMediaRefs
     ? enabledVideoFollowModes(videoDraftMediaRefs)
     : undefined;
 
-  /** Dock 移除视频参考（IKDMQS）：断开对应连线（首帧/尾帧/普通参考同一路径） */
+  /** Dock 移除视频参考（IKDMQS）：断开对应连线（首帧/尾帧/普通参考同一路径）——仅改变关系，
+   *  不删除来源素材卡，也不影响其他目标对同一来源的引用（按 (source,target) 精确匹配）。 */
   const handleRemoveVideoRef = (draftId: string, sourceNodeId: string) => {
-    const pending = pendingVideoCanvasRefsRef.current;
-    if (pendingVideoCanvasHasNode(pending, sourceNodeId)) {
-      const next = stripPendingVideoCanvasRef(pending, sourceNodeId);
-      pendingVideoCanvasRefsRef.current = next;
-      setPendingVideoCanvasRefs(next);
-      return;
-    }
     if (isGeneratingNode(draftId)) return;
     removeTargetInputs(edgesRef.current.filter(edge => edge.source === sourceNodeId && edge.target === draftId).map(edge => edge.id));
   };
@@ -4588,7 +4512,6 @@ export default function CanvasPage() {
     setApplying(true);
     (document.activeElement as HTMLElement | null)?.blur();
     try {
-      if (videoDraftIdRef.current === targetNodeId) commitPendingVideoCanvasEdges(targetNodeId);
       if (!(await flushCanvasSave(projectId)) || versionRef.current === null) return;
       const saved = await referencePlanMutation.mutateAsync({ projectId, planNodeId, targetNodeId, expectedVersion: versionRef.current, ...(syncBindings !== undefined ? { syncBindings } : {}) });
       if (activeProjectRef.current !== projectId) return;
@@ -4645,23 +4568,9 @@ export default function CanvasPage() {
    *  携带 targetNodeId 时（IKDLQG/IKDMQS）：先等待在途保存并落盘当前画布编辑
    *  （同 IKDLQE 应用预览的保存串行化），保证服务端按连线推导附件时读到最新正文，再携带 target_node_id 提交。
    *  自由模式（工具栏入口无草稿卡）：参考读本地暂存 refs，直接创建生成卡（无 target），发送后关闭面板 */
-  const clearPendingVideoCanvasRefs = () => {
-    pendingVideoCanvasRefsRef.current = { reference: [] };
-    setPendingVideoCanvasRefs({ reference: [] });
-  };
-  /** 发送时把「到节点选择」的待提交视频参考落成连线，再随 flushCanvasSave 写入接口 */
-  const commitPendingVideoCanvasEdges = (draftId: string) => {
-    const pending = pendingVideoCanvasRefsRef.current;
-    if (pending.first) addCanvasEdge(pending.first.nodeId, draftId, 'first');
-    if (pending.last) addCanvasEdge(pending.last.nodeId, draftId, 'last');
-    for (const item of pending.reference) addCanvasEdge(item.nodeId, draftId, 'reference');
-    clearPendingVideoCanvasRefs();
-  };
-
   const handleDialogSend = async (text: string, opts: VideoGenOptions, promptDoc?: PromptDoc | null) => {
     if (applyingRef.current) return;
     const targetNodeId = videoSeed?.targetNodeId;
-    if (videoDraftId) commitPendingVideoCanvasEdges(videoDraftId);
     if (targetNodeId && currentId) {
       const projectId = currentId;
       applyingRef.current = true;
@@ -5296,11 +5205,9 @@ export default function CanvasPage() {
       mediaType: item.kind,
     };
     if (videoDraftId) {
+      // IKFDFW：@ 选取与画布选取同一语义——校验通过立即建连线并自动保存
       if (!validateVideoRefConnect(item.id, videoDraftId, 'reference')) return;
-      const prev = pendingVideoCanvasRefsRef.current;
-      const next = { ...prev, reference: [...prev.reference, refItem] };
-      pendingVideoCanvasRefsRef.current = next;
-      setPendingVideoCanvasRefs(next);
+      addCanvasEdge(item.id, videoDraftId, 'reference');
       return;
     }
     appendVideoFreeRef(refItem, 'reference');
@@ -5834,7 +5741,6 @@ export default function CanvasPage() {
               videoPanelHiddenRef.current = true;
               setShowBottomDialog(false);
               setVideoFreeRefs({ reference: [] });
-              clearPendingVideoCanvasRefs();
               setPickMode(null);
               setPickTarget(null);
               setPickRefRole(null);
