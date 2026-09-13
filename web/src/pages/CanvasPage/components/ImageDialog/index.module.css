@@ -306,6 +306,17 @@
   border-radius: 12px;
 }
 
+/* IKFA1P：附件区正文标签编号徽标（文本N，与菜单/正文同源） */
+.attachmentBadge {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border, #2c2c2c);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 18px;
+  flex: none;
+}
+
 .attachmentTitle {
   font-size: var(--font-size-sm);
   font-weight: 500;
@@ -679,4 +690,33 @@
   display: block;
   border: 1.5px solid currentColor;
   border-radius: 3px;
+}
+
+/* IKFA1M：正文编辑区（@ 菜单锚点）与参考编号角标 */
+.inputArea {
+  position: relative;
+  width: 100%;
+}
+
+/* @ 菜单 dock：脱出 .dialog 滚动框（200px 定高 + overflow，会裁剪上弹菜单），
+   挂在 .dialogWrap 层向上弹出（与 configPanel 同法，IKEOLP） */
+.mentionDock {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+}
+
+.previewBadge {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #bfdbfe;
+  font-size: 10px;
+  line-height: 16px;
+  pointer-events: none;
+  white-space: nowrap;
 }

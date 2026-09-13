@@ -123,7 +123,7 @@ describe('ImageDialog 文本附件', () => {
     await act(async () => {
       sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
-    expect(onSend).toHaveBeenCalledWith('', 'm-test', '2k', '1:1', []);
+    expect(onSend).toHaveBeenCalledWith('', 'm-test', '2k', '1:1', [], null);
   });
 
   it('附件正文仅含空白时沿用提示词必填（发送禁用）', async () => {

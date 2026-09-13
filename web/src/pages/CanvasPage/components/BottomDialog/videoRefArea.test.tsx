@@ -7,7 +7,7 @@ import BottomDialog from './index';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
 
 /* IKDMQS 视频草稿绑定模式：模式与角色槽渲染 / 能力约束 / 来源菜单 / 组合冲突 /
-   生成中只读 / 移除参考与禁用本地上传。ChipTextEditor 打桩为 textarea。 */
+   生成中只读 / 移除参考与禁用本地上传。PromptRefEditor 打桩为 textarea（IKFA1O 编辑器替换）。 */
 
 const { fetchGenerationModels } = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(),
@@ -17,14 +17,31 @@ vi.mock('@/api/generation', () => ({
   fetchGenerationModels,
 }));
 
-vi.mock('../ChipTextEditor', () => ({
-  default: ({ onChange }: { onChange?: (v: { segments: Array<{ kind: string; value: string }> }) => void }) =>
-    createElement('textarea', {
-      'data-testid': 'chip-editor',
-      onChange: (e: Event) =>
-        onChange?.({ segments: [{ kind: 'text', value: (e.target as HTMLTextAreaElement).value }] }),
+vi.mock('../PromptRefEditor', async () => {
+  const { forwardRef, useImperativeHandle } = await import('react');
+  return {
+    default: forwardRef(function StubPromptRefEditor(
+      { onChange }: { onChange?: (doc: { version: number; segments: Array<{ kind: 'text'; text: string }> }) => void },
+      ref: React.Ref<unknown>,
+    ) {
+      useImperativeHandle(ref, () => ({
+        insertRefAtMention: () => {},
+        consumeMentionForPendingInsert: () => {},
+        insertRefAtPending: () => {},
+        dismissMention: () => {},
+        replaceRefAt: () => {},
+        clear: () => {},
+      }));
+      return createElement('textarea', {
+        'data-testid': 'chip-editor',
+        onChange: (e: Event) => {
+          const value = (e.target as HTMLTextAreaElement).value;
+          onChange?.({ version: 1, segments: value ? [{ kind: 'text', text: value }] : [] });
+        },
+      });
     }),
-}));
+  };
+});
 
 const baseFeatures = {
   reference_image: true,

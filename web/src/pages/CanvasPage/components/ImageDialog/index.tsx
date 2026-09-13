@@ -2,7 +2,7 @@ import PromptSyncActions from '../PromptSyncActions';
 /* ============================================
  * ImageDialog 图片对话窗口：参考图上传/模型/清晰度/比例配置
  * ============================================ */
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import type { Node } from '@xyflow/react';
 import {
   X,
@@ -17,6 +17,22 @@ import {
   Plus,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import {
+  PROMPT_DOC_VERSION,
+  docHasAnyRef,
+  docHasInvalidRef,
+  flattenPromptDocWith,
+  imageRefLabelOf,
+  textRefLabelOf,
+  type PromptDoc,
+  type PromptRefKey,
+  type StoredPromptDoc,
+} from '@/lib/prompt-doc';
+import PromptRefEditor, {
+  type MentionState,
+  type PromptRefEditorHandle,
+} from '../PromptRefEditor';
+import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
 import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import type { ImageMediaRef } from '../../mediaRefs';
@@ -24,7 +40,7 @@ import { cardNameOfNode, localNodeIdOf } from '../../mediaRefs';
 import type { MediaGenStatus } from '../MediaNode';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import AtMentionMenu from '../AtMentionMenu';
-import { stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
+import { type AtMentionItem } from '../../atMention';
 import type { FollowDialogAnchor } from '../../followDialog';
 import styles from './index.module.css';
 
@@ -38,8 +54,12 @@ export const IMAGE_COMPOSED_PROMPT_OVER_LIMIT = '当前参考提示词内容超�
 export function composeImageSendPrompt(
   attachments: ImageTextAttachment[] | undefined,
   input: string,
+  promptDoc?: PromptDoc | null,
 ): string {
-  const parts = (attachments ?? []).map((item) => item.text).filter((text) => text.trim().length > 0);
+  const indexed = promptDoc?.segments.some((segment) => segment.kind === 'text_ref');
+  const parts = indexed
+    ? (attachments ?? []).map((item, i) => `文本${i + 1}：${item.text}`)
+    : (attachments ?? []).map((item) => item.text).filter((text) => text.trim().length > 0);
   if (input.trim().length > 0) parts.push(input);
   return parts.join('\n\n');
 }
@@ -74,10 +94,12 @@ const ATTACHMENT_COLLAPSE_LENGTH = 120;
 
 interface ImageDialogProps {
   onClose: () => void;
-  /** 发送：提示词 + 模型ID + 分辨率档位 id（如 2k） + 宽高比 + 参考素材列表（异步：上传完成后 resolve） */
-  onSend: (text: string, modelId: string, size: string, ratio: string, files: UploadedFile[]) => Promise<void> | void;
+  /** 发送：提示词（拍平镜像）+ 模型ID + 分辨率档位 id（如 2k） + 宽高比 + 参考素材列表 + 结构化正文（含素材标签时携带，IKFA1M）（异步：上传完成后 resolve） */
+  onSend: (text: string, modelId: string, size: string, ratio: string, files: UploadedFile[], promptDoc?: PromptDoc | null) => Promise<void> | void;
   /** 初始提示词（节点「重新编辑」带入原生成提示词） */
   initialText?: string;
+  /** 初始结构化正文（IKFA1M 草稿恢复）：携带时优先于 initialText */
+  initialDoc?: PromptDoc | null;
   /** 初始参考素材（节点操作带入被点节点图片） */
   initialFiles?: UploadedFile[];
   /** 初始生成参数（首页 AI图片 带入：选中首页所选的模型/清晰度/宽高比） */
@@ -109,7 +131,7 @@ interface ImageDialogProps {
     restoreExisting?: boolean;
     saveFailed?: boolean;
     submitting?: boolean;
-    onParamsChange: (patch: { prompt?: string; modelId?: string; size?: string; ratio?: string }) => void;
+    onParamsChange: (patch: { prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string }) => void;
   };
   /** 连线图片参考（IKDMQR）：草稿绑定时由父级按连线实时推导传入，面板据此渲染参考区；
    *  传入了 mediaRefs 即为连线绑定模式，面板本地 files 不再参与展示与提交 */
@@ -151,9 +173,11 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-/** 连线文本附件项：标题 + 正文预览，长文默认折叠可展开；多附件且父级提供重排回调时展示上移/下移（IKDLQH） */
-function AttachmentItem({ attachment, move, onRemove }: {
+/** 连线文本附件项：标题 + 正文预览，长文默认折叠可展开；多附件且父级提供重排回调时展示上移/下移（IKDLQH）；
+ *  IKFA1P：badge 展示正文标签编号（文本N），与 @ 菜单、正文标签同源。 */
+function AttachmentItem({ attachment, badge, move, onRemove }: {
   attachment: ImageTextAttachment;
+  badge?: string;
   onRemove?: () => void;
   move?: { isFirst: boolean; isLast: boolean; onMove: (delta: -1 | 1) => void };
 }) {
@@ -163,6 +187,7 @@ function AttachmentItem({ attachment, move, onRemove }: {
     <div className={styles.attachmentItem}>
       <div className={styles.attachmentHead}>
         <span className={styles.attachmentTitle}>{attachment.title}</span>
+        {badge && <span className={styles.attachmentBadge}>{badge}</span>}
         {onRemove && <button type="button" className={styles.attachmentMove} aria-label={`移除方案 ${attachment.title}`} title="移除方案" onClick={onRemove}><X size={12} /></button>}
         {move && (
           <span className={styles.attachmentMoves}>
@@ -205,8 +230,14 @@ function AttachmentItem({ attachment, move, onRemove }: {
   );
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialFiles, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, mentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
-  const [inputValue, setInputValue] = useState(initialText ?? '');
+export default function ImageDialog({ onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, mentionItems: canvasMentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
+  /** 结构化正文（IKFA1M）：文字与素材标签的片段序列；标签绑定稳定身份，编号按当前输入派生 */
+  const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
+    initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
+  );
+  const editorRef = useRef<PromptRefEditorHandle>(null);
+  /** @ 菜单状态（已引用 + 素材分类） */
+  const [mention, setMention] = useState<MentionState>({ open: false, query: '' });
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [selectedModel, setSelectedModel] = useState('');
@@ -226,18 +257,17 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   const resWrapRef = useRef<HTMLDivElement>(null);
   const configPanelRef = useRef<HTMLDivElement>(null);
   const sourceWrapRef = useRef<HTMLDivElement>(null);
-  const mentionAnchorRef = useRef<HTMLDivElement>(null);
-  const [mentionDismissed, setMentionDismissed] = useState(false);
-  const mentionQuery = trailingAtQuery(inputValue);
-  useEffect(() => {
-    if (mentionQuery === null) setMentionDismissed(false);
-  }, [mentionQuery]);
+  const mentionMenuRef = useRef<HTMLDivElement>(null);
+  /** 失效标签替换菜单（IKFA1N B5）：记录发起点击的标签节点 key，null 为关闭 */
+  const [replaceTarget, setReplaceTarget] = useState<string | null>(null);
+  const replaceMenuRef = useRef<HTMLDivElement>(null);
 
   useDismissOnOutside([
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
     { open: resOpen, ref: resWrapRef, dismiss: () => setResOpen(false) },
     { open: sourceMenuOpen, ref: sourceWrapRef, dismiss: () => setSourceMenuOpen(false) },
     { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
+    { open: replaceTarget !== null, ref: replaceMenuRef, dismiss: () => setReplaceTarget(null) },
   ]);
 
   /** 快照参考项名称刷新（IKFA8Y）：自由模式的参考名称取自选取当刻，卡片改名后按画布节点 id
@@ -304,6 +334,82 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
   /** 连线绑定模式（IKDMQR）：参考区渲染连线推导的 mediaRefs；否则渲染面板本地 files */
   const edgeRefs = mediaRefs ?? null;
   const imagesFull = edgeRefs ? edgeRefs.length >= maxImages : imageCount >= maxImages;
+
+  /** 有效图片参考（保序去重）+ 展示编号（IKFA1M）：
+   *  编号 = 素材在最终 input_asset_ids 中的下标+1——连线模式 = 连线顺序（与服务端同源推导）；
+   *  本地模式 = 图片文件顺序（含待上传项占位，与 collectImageInputAssetIds 保序一致）。
+   *  附件区角标、@ 菜单、正文标签、服务端编译共用同一映射。 */
+  const orderedImageRefs = useMemo(() => {
+    const out: Array<{ assetId: string; url: string; name: string; number: number }> = [];
+    if (edgeRefs) {
+      edgeRefs.forEach((r) => {
+        if (out.some((x) => x.assetId === r.assetId)) return;
+        out.push({ assetId: r.assetId, url: r.url, name: r.name, number: out.length + 1 });
+      });
+      return out;
+    }
+    let n = 0;
+    for (const f of files) {
+      if (f.type !== 'image') continue;
+      n += 1;
+      if (f.assetId == null) continue;
+      const assetId = String(f.assetId);
+      if (out.some((x) => x.assetId === assetId)) continue;
+      out.push({ assetId, url: f.url, name: f.name, number: n });
+    }
+    return out;
+  }, [edgeRefs, files]);
+  const orderedAssetIds = useMemo(() => orderedImageRefs.map((r) => r.assetId), [orderedImageRefs]);
+  /** IKFA1P：文本附件标签映射（唯一口径）——附件顺序 = 画布连入边序（与服务端 text_attachments 同源） */
+  const orderedTextNodeIds = useMemo(() => (attachments ?? []).map((a) => a.nodeId), [attachments]);
+  const refsLabels = useMemo(
+    () => new Map<string, string>([
+      ...orderedImageRefs.map((r) => [r.assetId, `图片${r.number}`] as const),
+      ...orderedTextNodeIds.map((id, i) => [id, `文本${i + 1}`] as const),
+    ]),
+    [orderedImageRefs, orderedTextNodeIds],
+  );
+  const refsNumbering = useMemo(
+    () => new Map(orderedImageRefs.map((r) => [r.assetId, r.number] as const)),
+    [orderedImageRefs],
+  );
+  const refsMeta = useMemo(
+    () => new Map<string, { url: string; name: string; mediaType: 'image' | 'text' }>([
+      ...orderedImageRefs.map((r) => [r.assetId, { url: r.url, name: r.name, mediaType: 'image' as const }] as const),
+      ...(attachments ?? []).map((a) => [a.nodeId, { url: '', name: a.title, mediaType: 'text' as const }] as const),
+    ]),
+    [orderedImageRefs, attachments],
+  );
+  /** 标签有效性判定（按寻址键分派，IKFA1P）：媒体 → 图片输入顺序；文本 → 当前附件集合 */
+  const refLabelOf = (key: PromptRefKey): string | null =>
+    key.kind === 'text_ref'
+      ? textRefLabelOf(key.id, orderedTextNodeIds)
+      : imageRefLabelOf(key.id, orderedAssetIds);
+  /** 本地模式每个图片文件在最终输入中的编号（含无 assetId 待上传项） */
+  const fileNumberOf = useMemo(() => {
+    const m = new Map<string, number>();
+    let n = 0;
+    for (const f of files) {
+      if (f.type !== 'image') continue;
+      n += 1;
+      m.set(f.id, n);
+    }
+    return m;
+  }, [files]);
+  const orderedAssetIdsRef = useRef(orderedAssetIds);
+  orderedAssetIdsRef.current = orderedAssetIds;
+  const orderedTextNodeIdsRef = useRef(orderedTextNodeIds);
+  orderedTextNodeIdsRef.current = orderedTextNodeIds;
+  /** 拍平镜像（IKFA1M/IKFA1P）：标签 → 图片N/文本N / 已失效：原N；字数统计与发送门槛共用 */
+  const flatValue = useMemo(
+    () => flattenPromptDocWith(promptDoc, (key) =>
+      key.kind === 'text_ref'
+        ? textRefLabelOf(key.id, orderedTextNodeIds)
+        : imageRefLabelOf(key.id, orderedAssetIds)),
+    [promptDoc, orderedAssetIds, orderedTextNodeIds],
+  );
+  /** 失效标签存在时阻止生成（可删除失效提及后继续；自动/交互修复在下一票 IKFA1N） */
+  const hasInvalidRef = docHasInvalidRef(promptDoc);
   /** 附件正文有效（去空白非空）时允许空提示词提交（IKDLQF 契约：附件可单独驱动生成）；
    *  全部有效文本为空时沿用「提示词必填」 */
   const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
@@ -320,13 +426,70 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
     : edgeRefs?.length && !currentGen.features.reference_image ? '当前模型不支持图片参考，请调整模型或参考'
     : edgeRefs && edgeRefs.length > Math.min(maxImages, currentGen.features.max_reference_images || maxImages)
       ? '参考图片数量超过模型支持上限，请调整参考'
+    : hasInvalidRef ? '正文有已失效的素材标签，请点击标签替换或删除后再发送'
+    : flatValue.length > maxInput ? `提示词超过 ${maxInput} 字上限，请精简后再发送`
     : null;
-  const canSend = !uploading && !readOnly && !draftBinding?.saveFailed && !configurationError && (inputValue.trim().length > 0 || hasAttachmentText);
+  const canSend = !uploading && !readOnly && !draftBinding?.saveFailed && !configurationError && (flatValue.trim().length > 0 || hasAttachmentText);
 
   /** 草稿绑定参数同步（IKDMQQ）：面板内的模型/分辨率/比例/提示词变更实时写回草稿节点 */
-  const syncDraftParams = (patch: { prompt?: string; modelId?: string; size?: string; ratio?: string }) => {
+  const syncDraftParams = (patch: { prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string }) => {
     draftBinding?.onParamsChange(patch);
   };
+
+  const pendingNewRefInsert = useRef(false);
+  const prevAssetIdsRef = useRef(orderedAssetIds);
+  const prevTextNodeIdsRef = useRef(orderedTextNodeIds);
+
+  /** 结构化正文变更（IKFA1M/IKFA1P）：同步拍平镜像与结构（双写防丢失），失效/编号随 reconcile 落草稿 */
+  const handleDocChange = (doc: PromptDoc) => {
+    setPromptDoc(doc);
+    pendingNewRefInsert.current = false;
+    const flat = flattenPromptDocWith(doc, (key) =>
+      key.kind === 'text_ref'
+        ? textRefLabelOf(key.id, orderedTextNodeIdsRef.current)
+        : imageRefLabelOf(key.id, orderedAssetIdsRef.current));
+    syncDraftParams({ prompt: flat, promptDoc: { version: PROMPT_DOC_VERSION, segments: doc.segments, flat } });
+  };
+
+  /** 失效替换菜单可选项：全量有效参考与文本附件（IKFA1N B5 语义，不与 @ 查询过滤耦合） */
+  const replaceItems = [
+    ...orderedImageRefs.map((r) => ({ assetId: r.assetId, url: r.url, name: r.name, badge: `图片${r.number}`, mediaType: 'image' as const })),
+    ...(attachments ?? []).map((a, i) => ({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text' as const })),
+  ];
+  const closeMention = () => {
+    editorRef.current?.dismissMention();
+    setMention({ open: false, query: '' });
+  };
+
+  const pickMentionRef = (assetId: string) => {
+    // IKFA1P：文本身份（来源节点 id）与媒体身份空间不重叠——按当前附件集合分派标签类型
+    const kind: PromptRefKey['kind'] = orderedTextNodeIdsRef.current.includes(assetId) ? 'text_ref' : 'asset_ref';
+    editorRef.current?.insertRefAtMention({ kind, id: assetId });
+    setMention({ open: false, query: '' });
+  };
+
+
+  /** 新参考添加成功检测：有效身份集合出现新增 → 在记住的插入点落标签（A3；IKFA1P 含新文本附件连入） */
+  useEffect(() => {
+    const prev = prevAssetIdsRef.current;
+    prevAssetIdsRef.current = orderedAssetIds;
+    const prevText = prevTextNodeIdsRef.current;
+    prevTextNodeIdsRef.current = orderedTextNodeIds;
+    if (!pendingNewRefInsert.current) return;
+    const added = orderedAssetIds.filter((id) => !prev.includes(id));
+    if (added.length > 0) {
+      pendingNewRefInsert.current = false;
+      editorRef.current?.insertRefAtPending({ kind: 'asset_ref', id: added[added.length - 1] });
+      return;
+    }
+    // IKFA1P：画布新文本节点建连线成为附件 → 同一插入点落文本标签
+    const addedText = orderedTextNodeIds.filter((id) => !prevText.includes(id));
+    if (addedText.length > 0) {
+      pendingNewRefInsert.current = false;
+      editorRef.current?.insertRefAtPending({ kind: 'text_ref', id: addedText[addedText.length - 1] });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderedAssetIds, orderedTextNodeIds]);
 
   /** 选中模型后应用其默认清晰度/宽高比，返回实际应用值（供草稿参数同步） */
   const applyModelDefaults = (m: GenerationModel) => {
@@ -414,15 +577,19 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
       console.warn('图片模型能力加载中，请稍后重试');
       return;
     }
-    if (composeImageSendPrompt(attachments, inputValue).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+    if (composeImageSendPrompt(attachments, flatValue, promptDoc).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
       onToast?.('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
       return;
     }
     setUploading(true);
     try {
-      await onSend(inputValue, selectedModel, selectedResolution, selectedRatio, files);
+      // 结构化正文仅在含素材标签时携带；纯文本沿用旧语义（不上送 prompt_doc）
+      await onSend(flatValue, selectedModel, selectedResolution, selectedRatio, files, docHasAnyRef(promptDoc) ? promptDoc : null);
       // 草稿绑定：保留提示词展示（草稿身份卡承载当次输入）；其余入口维持发送后清空
-      if (!draftBinding) setInputValue('');
+      if (!draftBinding) {
+        editorRef.current?.clear();
+        setPromptDoc({ version: PROMPT_DOC_VERSION, segments: [] });
+      }
     } finally {
       setUploading(false);
     }
@@ -433,6 +600,52 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
       style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
     >
+      {/* @ 菜单：挂在 .dialogWrap 层向上弹出（.dialog 是 200px 滚动框会裁剪浮层，IKFA1M） */}
+      {mention.open && (
+        <div className={styles.mentionDock} ref={mentionMenuRef}>
+          <AtMentionMenu
+            renderInline
+            anchorRef={mentionMenuRef}
+            items={canvasMentionItems ?? []}
+            editorQuery={mention.query}
+            referencedItems={replaceItems.map(r => ({
+              id: r.assetId, assetId: r.assetId, name: r.name, thumbUrl: r.url,
+              kind: r.mediaType, badge: r.badge,
+            }))}
+            onSelectReferenced={(item) => pickMentionRef(item.id)}
+            disabledKinds={['audio']}
+            onSelect={(item) => {
+              if (item.kind === 'image' && item.assetId && orderedAssetIds.includes(item.assetId)) {
+                pickMentionRef(item.assetId);
+              } else if (item.kind === 'text' && orderedTextNodeIds.includes(item.id)) {
+                // IKFA1P：已在附件中的文本 → 直接插标签（多次提及不重复建连线）
+                pickMentionRef(item.id);
+              } else {
+                // IKFA1P：新文本走画布连线添加附件（pendingNewRefInsert 含文本检测）；新图片加入参考
+                editorRef.current?.consumeMentionForPendingInsert();
+                pendingNewRefInsert.current = item.kind === 'image' || item.kind === 'text';
+                setMention({ open: false, query: '' });
+                onMentionCanvas?.(item);
+              }
+            }}
+            onClose={closeMention}
+          />
+        </div>
+      )}
+      {/* 失效标签替换菜单（IKFA1N B5）：与 @ 菜单同停靠位，选择后仅替换发起点击的那次提及 */}
+      {replaceTarget !== null && (
+        <div className={styles.mentionDock} ref={replaceMenuRef}>
+          <ReplaceRefMenu
+            items={replaceItems}
+            onPick={(assetId) => {
+              // IKFA1P：失效文本标签可替换为其他文本附件或媒体（按身份空间分派）
+              const kind: PromptRefKey['kind'] = orderedTextNodeIdsRef.current.includes(assetId) ? 'text_ref' : 'asset_ref';
+              editorRef.current?.replaceRefAt(replaceTarget, { kind, id: assetId });
+              setReplaceTarget(null);
+            }}
+          />
+        </div>
+      )}
       {/* 配置面板（可展开/收起）：挂在不带 overflow 的定位外壳 .dialogWrap 上，
           脱出 .dialog 滚动框，避免面板顶部被滚动容器裁剪（IKEOLP） */}
       {showConfig && (
@@ -477,7 +690,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                             syncDraftParams({ modelId: m.key });
                           }
                           setModelOpen(false);
-                        }}
+              }}
                       >
                         {m.label}
                       </button>
@@ -512,7 +725,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                           if (currentGen) setSelectedRatio(nextRatio);
                           syncDraftParams({ size: r.key, ratio: nextRatio });
                           setResOpen(false);
-                        }}
+              }}
                       >
                         {r.label}
                       </button>
@@ -556,6 +769,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
               ? edgeRefs.map((r) => (
                   <div key={r.nodeId} className={styles.previewItem} title={r.name} data-testid="dock-media-ref">
                     <img src={r.url} alt={r.name} />
+                    <span className={styles.previewBadge}>图片{refsNumbering.get(r.assetId) ?? '?'}</span>
                     {!readOnly && (
                       <button
                         className={styles.previewRemove}
@@ -574,6 +788,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
                 ) : (
                   <img src={f.url} alt={f.name} />
                 )}
+                {f.type === 'image' && <span className={styles.previewBadge}>图片{fileNumberOf.get(f.id) ?? '?'}</span>}
                 {!readOnly && (
                   <button
                     className={styles.previewRemove}
@@ -643,6 +858,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
               <AttachmentItem
                 key={a.nodeId}
                 attachment={a}
+                badge={`文本${i + 1}`}
                 onRemove={!readOnly && !syncingPlan && a.isPromptPlan && onRemovePlan ? () => onRemovePlan(a.nodeId) : undefined}
                 move={
                   // 生成中只读（IKDMQQ）：排序同属输入编辑，一并禁用
@@ -673,36 +889,25 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           {ref.name}（不可用）
           {!readOnly && <button type="button" onClick={() => onRemoveMediaRef?.(ref.nodeId)}>移除失效参考</button>}
         </div>)}
-        <div className={styles.mentionAnchor} ref={mentionAnchorRef}>
-        <textarea
-          className={styles.textarea}
-          placeholder={uploading ? '正在上传参考图...' : `描述你希望如何编辑这张图片。图片最多 ${maxImages} 张。使用 @ 引用画布素材。`}
-          value={inputValue}
-          onChange={(e) => {
-            const v = e.target.value.slice(0, maxInput);
-            setInputValue(v);
-            syncDraftParams({ prompt: v });
-          }}
-          rows={3}
-          maxLength={maxInput}
-          disabled={uploading || readOnly}
-        />
-        {mentionQuery !== null && !mentionDismissed && !readOnly && onMentionCanvas && (
-          <AtMentionMenu
-            anchorRef={mentionAnchorRef}
-            items={mentionItems ?? []}
-            editorQuery={mentionQuery}
-            disabledKinds={['audio']}
-            onSelect={(item) => {
-              const next = stripTrailingAtQuery(inputValue);
-              setInputValue(next);
-              syncDraftParams({ prompt: next });
-              setMentionDismissed(true);
-              onMentionCanvas(item);
+        {/* 正文编辑（IKFA1M）：任意光标处输入 @ 插入已引用素材标签；标签绑定稳定身份 */}
+        <div className={styles.inputArea}>
+          <PromptRefEditor
+            ref={editorRef}
+            initialDoc={initialDoc ?? null}
+            initialText={initialText ?? ''}
+            placeholder={uploading ? '正在上传参考图...' : `描述你希望如何编辑这张图片。图片最多 ${maxImages} 张。输入 @ 可引用已选素材。`}
+            readOnly={uploading || readOnly}
+            labelOf={refLabelOf}
+            reconcileKey={`${orderedAssetIds.join(',')}|${orderedTextNodeIds.join(',')}`}
+            labels={refsLabels}
+            refsMeta={refsMeta}
+            onChange={handleDocChange}
+            onMentionChange={(state) => {
+              setMention(state);
             }}
-            onClose={() => setMentionDismissed(true)}
+            onInvalidTagClick={readOnly ? undefined : (nodeKey) => setReplaceTarget(nodeKey)}
+            className={styles.textarea}
           />
-        )}
         </div>
 
           {/* 底部状态栏 */}
@@ -725,8 +930,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
           {/* 右侧：发送按钮 */}
           <div className={styles.barRight}>
             {/* 字数统计 */}
-            <div className={`${styles.charCount} ${inputValue.length >= maxInput ? styles.charCountWarn : ''}`}>
-              {inputValue.length}/{maxInput}
+            <div className={`${styles.charCount} ${flatValue.length >= maxInput ? styles.charCountWarn : ''}`}>
+              {flatValue.length}/{maxInput}
             </div>
             <button
               className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}

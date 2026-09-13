@@ -490,7 +490,8 @@ function buildVideoDeps() {
     projects: { findOwnedById },
     models: { listEnabledByType },
     command: { createJob },
-    assets: { resolveInputAssets: vi.fn().mockResolvedValue([]) },
+    // IKFA1O：prompt_doc 复核对 references 本地 asset 查存在性与类型——按传入 id 动态返回（默认 image）
+    assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: "image" }))) },
   } as unknown as HandlerDeps;
   return { deps, createJob };
 }
@@ -1894,6 +1895,477 @@ describe("handleCreateGenerationJob 组合上限跟随模型值（IKESD6）", ()
 
     expect(result.code).toBe(400);
     expect(result.msg).toBe("文本附件与提示词组合后超过 30000 字上限");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+});
+
+// IKFA1M：正文素材标签（prompt_doc）——结构/版本校验、失效与无效身份复核、编译冻结。
+describe("handleCreateGenerationJob 正文素材标签 prompt_doc（IKFA1M）", () => {
+  it.each([{ text: "", name: "空串" }, { text: " ", name: "空白" }, { text: "a".repeat(4001), name: "4001字" }])("拒绝空白或超长权威正文：$name", async ({ text }) => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...imageBody(0),
+      prompt_doc: { version: 1, segments: [{ kind: "text", text }] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("prompt 无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("目标没有文本附件时，空权威正文不能借非空镜像创建任务", async () => {
+    const { deps, createJob } = buildTargetDeps({ nodes: TARGET_CANVAS.nodes, edges: "[]" });
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY,
+      prompt_doc: { version: 1, segments: [] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("目标有文本附件时仍允许空权威正文", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY,
+      prompt_doc: { version: 1, segments: [] },
+    }, null, deps);
+    expect(result.code).toBe(200);
+    expect(createJob.mock.calls[0][0].input.prompt).toBe("");
+    expect(createJob.mock.calls[0][0].input.text_attachments.length).toBeGreaterThan(0);
+  });
+
+  const DOC = {
+    version: 1,
+    segments: [
+      { kind: "text", text: "让" },
+      { kind: "asset_ref", asset_id: "2" },
+      { kind: "text", text: "穿上" },
+      { kind: "asset_ref", asset_id: "1" },
+      { kind: "text", text: "的衣服，再让" },
+      { kind: "asset_ref", asset_id: "2" },
+      { kind: "text", text: "微笑" },
+    ],
+  } as const;
+
+  it("合法 prompt_doc → 200：按真实输入顺序编译正文并冻结原始结构（D1/A4）", async () => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(2), prompt_doc: DOC },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    // 正文先提图片2 再提图片1；媒体顺序仍 input_asset_ids = [1, 2]
+    expect(cmdArg.input.prompt).toBe("让图片2穿上图片1的衣服，再让图片2微笑");
+    expect(cmdArg.input.prompt_doc).toEqual(DOC);
+    expect(cmdArg.input.input_asset_ids).toEqual([1, 2]);
+  });
+
+  it("无 prompt_doc → input 不带该字段，prompt 原样冻结（旧行为/E5）", async () => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", imageBody(1), null, deps);
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("海边日落");
+    expect(cmdArg.input).not.toHaveProperty("prompt_doc");
+  });
+
+  it("失效标签（invalid_label）→ 400 invalid_reference，不建任务", async () => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...imageBody(2),
+        prompt_doc: {
+          version: 1,
+          segments: [{ kind: "asset_ref", asset_id: "2", invalid_label: "图片2" }],
+        },
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("标签指向不在最终输入集合的身份 → 400 invalid_reference（服务端复核引用关系，D4）", async () => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(1), prompt_doc: DOC }, // DOC 引用 asset 2，但 input_asset_ids 只有 [1]
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("结构/版本非法 → 400 invalid_input", async () => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(1), prompt_doc: { version: 2, segments: [] } },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_input");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("音频类型携带 prompt_doc → 400 unsupported_input（IKFA1O：仅 image/video 支持）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        type: "audio",
+        expected_output_count: 1,
+        parameters: {
+          prompt: "海浪声",
+          model_id: "audio-model",
+        },
+        prompt_doc: DOC,
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("unsupported_input");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+});
+
+// IKFA1O：生视频正文素材标签——多媒体/首尾帧角色编译、素材库身份、快照冻结与旧任务兼容。
+describe("handleCreateGenerationJob 视频正文素材标签 prompt_doc（IKFA1O）", () => {
+  const VIDEO_DOC = {
+    version: 1,
+    segments: [
+      { kind: "text", text: "让" },
+      { kind: "asset_ref", asset_id: "2" },
+      { kind: "text", text: "的人物从" },
+      { kind: "asset_ref", asset_id: "101" },
+      { kind: "text", text: "走向" },
+      { kind: "asset_ref", asset_id: "102" },
+      { kind: "text", text: "，参考" },
+      { kind: "asset_ref", asset_id: "asset-v1" },
+      { kind: "text", text: "的运镜" },
+    ],
+  } as const;
+
+  /** 帧在前、普通参考保序（与 buildVideoJobReferences 同构）：首帧/尾帧 + 图片/图片/视频(素材库) */
+  const VIDEO_REFS = [
+    { role: "first_frame", asset_id: "101", type: "image" },
+    { role: "last_frame", asset_id: "102", type: "image" },
+    { role: "reference", asset_id: "1", type: "image" },
+    { role: "reference", asset_id: "2", type: "image" },
+    { role: "reference", material_id: "asset-v1", type: "video" },
+  ] as const;
+
+  it("合法 prompt_doc → 200：帧按角色、普通参考同类型编号编译，快照冻结原始结构（C1/A2）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, references: VIDEO_REFS, prompt_doc: VIDEO_DOC },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    // 帧身份编译为角色名；普通参考图片 1/2 同类型编号；素材库身份参与视频编号
+    expect(cmdArg.input.prompt).toBe("让图片2的人物从首帧走向尾帧，参考视频1的运镜");
+    expect(cmdArg.input.prompt_doc).toEqual(VIDEO_DOC);
+    expect(cmdArg.input.references).toEqual(VIDEO_REFS);
+  });
+
+  it("失效标签（invalid_label，含模式不兼容场景）→ 400 invalid_reference，不建任务（C2/D4）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: VIDEO_REFS,
+        prompt_doc: {
+          version: 1,
+          segments: [{ kind: "asset_ref", asset_id: "2", invalid_label: "图片1" }],
+        },
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("标签身份不在 references（asset_id ∪ material_id）→ 400 invalid_reference", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: VIDEO_REFS,
+        prompt_doc: {
+          version: 1,
+          segments: [{ kind: "asset_ref", asset_id: "999" }],
+        },
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("携带 prompt_doc 但未走单数组 references（旧字段路径）→ 400 unsupported_input", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, prompt_doc: VIDEO_DOC },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("unsupported_input");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("无 prompt_doc 的旧视频任务 → 行为不变：input 不带该字段，prompt 原样冻结（E5）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", { ...VIDEO_BODY, references: VIDEO_REFS }, null, deps);
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("人物走过街角");
+    expect(cmdArg.input).not.toHaveProperty("prompt_doc");
+  });
+});
+
+// IKFA1M 合并边界：权威正文必须同时遵循 release 的模型长度能力。
+it.each([32000, 32001])("结构化正文遵循模型 32000 字边界：%i", async (length) => {
+  const { deps, createJob } = buildCapabilityDeps([
+    { model_id: "gpt-image-2-text-to-image", features: { max_prompt_length: 32000 } },
+  ]);
+  const result = await handleCreateGenerationJob("u1", "p1", {
+    type: "image", expected_output_count: 1,
+    parameters: { prompt: "合法镜像", model_id: "gpt-image-2-text-to-image", aspect_ratio: "1:1" },
+    prompt_doc: { version: 1, segments: [{ kind: "text", text: "a".repeat(length) }] },
+  }, null, deps);
+  expect(result.code).toBe(length === 32000 ? 200 : 400);
+  expect(createJob).toHaveBeenCalledTimes(length === 32000 ? 1 : 0);
+});
+
+/* IKFA1P：文本附件正文标签——文本身份复核（画布连线推导）、文本N 编译、
+   composed_prompt 编号清单冻结。语义权威：docs/specs/2026-09-13-ikfa1p-text-attachment-prompt-ref-contract.md */
+
+describe("handleCreateGenerationJob 文本附件正文标签 prompt_doc（IKFA1P）", () => {
+  /** media-1 附件顺序（edges 序）：[text-b(雨夜), text-a(赛博朋克), text-blank(空白)] */
+  const TEXT_DOC = {
+    version: 1,
+    segments: [
+      { kind: "text", text: "按" },
+      { kind: "text_ref", node_id: "text-a" },
+      { kind: "text", text: "修改，参考" },
+      { kind: "text_ref", node_id: "text-b" },
+      { kind: "text", text: "与空白附件" },
+      { kind: "text_ref", node_id: "text-blank" },
+    ],
+  } as const;
+
+  it("生图：文本+媒体混排合法 → 200，正文按附件顺序编译文本N，composed_prompt 冻结编号清单（D2/E4）", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY,
+      prompt_doc: TEXT_DOC,
+    }, null, deps);
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    // 编号跟附件顺序（text-b→文本1、text-a→文本2、text-blank→文本3），不跟正文出现顺序
+    expect(cmdArg.input.prompt).toBe("按文本2修改，参考文本1与空白附件文本3");
+    expect(cmdArg.input.prompt_doc).toEqual(TEXT_DOC);
+    // 编号清单：全部附件按序进入（含空白占位与未提及项），正文追加最后
+    expect(cmdArg.input.composed_prompt).toBe(
+      "文本1：雨夜\n\n文本2：赛博朋克\n\n文本3：   \n\n按文本2修改，参考文本1与空白附件文本3",
+    );
+  });
+
+  it("生图：文本身份不在附件集合 → 400 invalid_reference，不建任务（D4）", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY,
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", node_id: "text-gone" }] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("正文文本标签指向无效的文本附件");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("生图：正文含文本标签但未携带 target_node_id → 400（文本附件由目标连线推导）", async () => {
+    const { deps, createJob } = buildImageDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...imageBody(0),
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", node_id: "text-a" }] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("正文文本标签指向无效的文本附件");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("生图：文本失效标签（invalid_label）→ 400 存在已失效的素材标签（阻止生成）", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY,
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", node_id: "text-a", invalid_label: "文本2" }] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("存在已失效的素材标签，请删除后再提交");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("生图：无文本标签的 prompt_doc → input 不冻结 composed_prompt（组合格式不变，回归）", async () => {
+    const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...IMAGE_TARGET_BODY,
+      prompt_doc: { version: 1, segments: [{ kind: "text", text: "海边日落" }] },
+    }, null, deps);
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input).not.toHaveProperty("composed_prompt");
+  });
+
+  /** 视频目标画布：media-v 的附件顺序 [text-x, text-y] */
+  const VIDEO_TEXT_CANVAS = {
+    nodes: JSON.stringify([
+      { id: "media-v", type: "mediaNode", data: { mediaType: "video" } },
+      { id: "text-x", type: "textNode", data: { title: "运镜", text: "手持跟拍" } },
+      { id: "text-y", type: "textNode", data: { title: "风格", text: "胶片感" } },
+    ]),
+    edges: JSON.stringify([
+      { id: "e1", source: "text-x", target: "media-v" },
+      { id: "e2", source: "text-y", target: "media-v" },
+    ]),
+  };
+
+  function buildVideoTargetDeps() {
+    const { deps, createJob } = buildVideoDeps();
+    const canvasDeps = buildTargetDeps(VIDEO_TEXT_CANVAS);
+    (deps as unknown as { canvas: unknown }).canvas = canvasDeps.getByProject ? { getByProject: canvasDeps.getByProject } : undefined;
+    // buildVideoDeps 的模型目录只含视频模型；canvas 直接注入
+    return { deps, createJob };
+  }
+
+  it("视频仅文本标签：不传媒体 references 也能冻结完整文本（IKFA1J）", async () => {
+    const { deps, createJob } = buildVideoTargetDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...VIDEO_BODY,
+      target_node_id: "media-v",
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", node_id: "text-x" }] },
+    }, null, deps);
+    expect(result.code).toBe(200);
+    const input = createJob.mock.calls[0][0].input;
+    expect(input.prompt).toBe("文本1");
+    expect(input.composed_prompt).toBe("文本1：手持跟拍\n\n文本2：胶片感\n\n文本1");
+    expect(input).not.toHaveProperty("references");
+  });
+
+  it.each([
+    { node_id: "text-none" },
+    { node_id: "text-x", invalid_label: "文本1" },
+  ])("视频仅文本标签仍拒绝无效身份 %j（IKFA1J）", async (ref) => {
+    const { deps, createJob } = buildVideoTargetDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...VIDEO_BODY,
+      target_node_id: "media-v",
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", ...ref }] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["image", "reorder"], ["image", "remove"],
+    ["video", "reorder"], ["video", "remove"],
+  ])("%s：文本附件并发 %s 不得使标签与冻结正文错配（IKFA1J）", async (type, change) => {
+    const video = type === "video";
+    const initial = video ? VIDEO_TEXT_CANVAS : TARGET_CANVAS;
+    const { deps, createJob, getByProject } = buildTargetDeps(initial);
+    if (video) deps.models = buildVideoDeps().deps.models;
+    const mentioned = video ? "text-x" : "text-b";
+    const edges = JSON.parse(initial.edges) as Array<{ source: string }>;
+    const changed = {
+      ...initial,
+      edges: JSON.stringify(change === "remove"
+        ? edges.filter((edge) => edge.source !== mentioned)
+        : [...edges].reverse()),
+    };
+    // 模拟读取后其他请求更新画布；若接纳二次读取，将拿到另一个版本。
+    getByProject.mockResolvedValueOnce({ ...initial, version: 3 })
+      .mockResolvedValue({ ...changed, version: 4 });
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...(video ? { ...VIDEO_BODY, target_node_id: "media-v" } : IMAGE_TARGET_BODY),
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", node_id: mentioned }] },
+    }, null, deps);
+    expect(result.code).toBe(200);
+    const input = createJob.mock.calls[0][0].input;
+    expect(input.prompt).toBe("文本1");
+    expect(input.text_attachments[0]).toEqual(expect.objectContaining({
+      node_id: mentioned, text: video ? "手持跟拍" : "雨夜",
+    }));
+    expect(input.composed_prompt).toBe(video
+      ? "文本1：手持跟拍\n\n文本2：胶片感\n\n文本1"
+      : "文本1：雨夜\n\n文本2：赛博朋克\n\n文本3：   \n\n文本1");
+  });
+
+  it("视频：references + 文本标签 → 200，帧/参考与文本N 混排编译，composed_prompt 冻结编号清单", async () => {
+    const { deps, createJob } = buildVideoTargetDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...VIDEO_BODY,
+      target_node_id: "media-v",
+      references: [{ role: "reference", asset_id: "1", type: "image" }],
+      prompt_doc: {
+        version: 1,
+        segments: [
+          { kind: "text", text: "让图片1按" },
+          { kind: "text_ref", node_id: "text-y" },
+          { kind: "text", text: "调整，再参考" },
+          { kind: "text_ref", node_id: "text-x" },
+        ],
+      },
+    }, null, deps);
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("让图片1按文本2调整，再参考文本1");
+    expect(cmdArg.input.composed_prompt).toBe(
+      "文本1：手持跟拍\n\n文本2：胶片感\n\n让图片1按文本2调整，再参考文本1",
+    );
+    expect(cmdArg.input.text_attachments).toEqual([
+      { node_id: "text-x", title: "运镜", text: "手持跟拍" },
+      { node_id: "text-y", title: "风格", text: "胶片感" },
+    ]);
+  });
+
+  it("视频：文本身份不在附件集合 → 400 invalid_reference，不建任务", async () => {
+    const { deps, createJob } = buildVideoTargetDeps();
+    const result = await handleCreateGenerationJob("u1", "p1", {
+      ...VIDEO_BODY,
+      target_node_id: "media-v",
+      references: [{ role: "reference", asset_id: "1", type: "image" }],
+      prompt_doc: { version: 1, segments: [{ kind: "text_ref", node_id: "text-none" }] },
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("正文文本标签指向无效的文本附件");
     expect(createJob).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { typePromptRefText } from './testing/promptRefEditor';
 
 /* IKDMQR 图片参考连线与 Dock 双向同步：
    连线 → Dock 显示同一输入并随提交消费；Dock 选择/移除 ↔ 画布连线双向同步；
@@ -207,18 +208,9 @@ function sendButton(): HTMLButtonElement {
   )!;
 }
 
-function promptTextarea(): HTMLTextAreaElement {
-  return container.querySelector('textarea')!;
-}
-
-/** React 受控 textarea 赋值 */
+/** PromptRefEditor（IKFA1M）整体替换文本 */
 async function typePrompt(text: string) {
-  const textarea = promptTextarea();
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setter.call(textarea, text);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  await typePromptRefText(container, text);
 }
 
 /** 点击画布草稿卡 d1 打开绑定面板（草稿绑定路径），返回草稿节点 id */

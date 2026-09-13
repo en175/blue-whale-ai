@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { promptRefReadOnly, readPromptRefText, typePromptRefText } from './testing/promptRefEditor';
 import { setGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 
 /* IKDMQU 成功卡原卡编辑与重新生成：P1 单选成品卡自动开面板 / Q4 上传素材不自动开 /
@@ -262,17 +263,13 @@ function sendButton(): HTMLButtonElement {
   )!;
 }
 
-function promptTextarea(): HTMLTextAreaElement {
-  return container.querySelector('textarea')!;
+function promptTextarea(): HTMLElement | null {
+  return container.querySelector('[contenteditable]');
 }
 
+/** PromptRefEditor（IKFA1M）整体替换文本 */
 async function typePrompt(text: string) {
-  const textarea = promptTextarea();
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setter.call(textarea, text);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  await typePromptRefText(container, text);
 }
 
 function nodeOf(id: string): Node {
@@ -315,7 +312,7 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
 
     // 面板打开且绑定原卡：恢复原提示词
     expect(promptTextarea()).toBeTruthy();
-    await vi.waitFor(() => expect(promptTextarea().value).toBe('原提示词'));
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('原提示词'));
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     // 连线文本附件实时展示
     await vi.waitFor(() => expect(container.textContent).toContain('文本附件（1）'));
@@ -324,7 +321,7 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
   it('上传素材卡（无生成记录）点击不自动打开面板（Q4）', async () => {
     await renderPage();
     await clickNode('u1');
-    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.querySelector('[contenteditable]')).toBeNull();
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
   });
 
@@ -352,13 +349,13 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
     await act(async () => {
       flowProps.current.onPaneClick();
     });
-    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.querySelector('[contenteditable]')).toBeNull();
     // 编辑已实时写回节点，隐藏不丢弃
     expect(nodeOf('g1').data.prompt).toBe('编辑中内容');
 
     // 重新选中恢复编辑
     await clickNode('g1');
-    await vi.waitFor(() => expect(promptTextarea().value).toBe('编辑中内容'));
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('编辑中内容'));
 
     // 多选隐藏
     await act(async () => {
@@ -367,7 +364,7 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
         edges: [],
       });
     });
-    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.querySelector('[contenteditable]')).toBeNull();
   });
 
   it('空选中过渡事件不隐藏面板（IKDMQV：取消旧选中→选中新卡的过渡不再误关）', async () => {
@@ -385,7 +382,7 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
     await act(async () => {
       flowProps.current.onPaneClick();
     });
-    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.querySelector('[contenteditable]')).toBeNull();
     await act(async () => {
       flowProps.current.onSelectionChange({ nodes: [nodeOf('g1')], edges: [] });
     });
@@ -403,7 +400,7 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
     expect(audioInput).toBeTruthy();
     expect(container.querySelector('[data-testid="audio-send"]')).toBeTruthy();
     // 图片面板不打开
-    expect(container.querySelectorAll('textarea')).toHaveLength(1);
+    expect(container.querySelector('[contenteditable]')).toBeNull();
     await vi.waitFor(() => expect(audioInput!.value).toBe('原音频描述'));
   });
 });
@@ -427,7 +424,7 @@ describe('IKDMQU Q1/Q5/Q6/Q8：原卡重新生成', () => {
       await act(async () => flowProps.current.onPaneClick());
       await clickNode('g1');
       await vi.waitFor(() => expect(promptTextarea()).toBeTruthy());
-      expect(promptTextarea().disabled).toBe(true);
+      expect(promptRefReadOnly(container)).toBe(true);
       expect(sendButton().disabled).toBe(true);
       await act(async () => toolbarProps.current.onToggleImageDialog());
       expect(flowProps.current.mediaNodes).toHaveLength(2);
@@ -441,7 +438,7 @@ describe('IKDMQU Q1/Q5/Q6/Q8：原卡重新生成', () => {
       await act(async () => release());
     }
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
-    expect(apiMocks.createGenerationJob.mock.calls[0]![1].parameters.prompt).toBe('本次提交 A');
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].parameters.prompt).toBe('一只蓝鲸在海里\n\n本次提交 A');
     expect(nodeOf('g1').data.prompt).toBe('本次提交 A');
   });
 
@@ -463,7 +460,7 @@ describe('IKDMQU Q1/Q5/Q6/Q8：原卡重新生成', () => {
     const [projectId, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(projectId).toBe('p1');
     expect(payload.target_node_id).toBe('g1');
-    expect(payload.parameters.prompt).toBe('重画一版');
+    expect(payload.parameters.prompt).toBe('一只蓝鲸在海里\n\n重画一版');
 
     // 原卡承接：卡片数不变（g1/u1，t1 为文本节点）、生成中、旧素材保留
     expect(flowProps.current.mediaNodes).toHaveLength(2);
@@ -560,7 +557,7 @@ describe('IKDMQU Q10：保存失败暂停切换编辑目标', () => {
       flowProps.current.onPaneClick();
     });
     await clickNode('g2');
-    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.querySelector('[contenteditable]')).toBeNull();
 
     // 重开当前绑定目标（g1）不算切换：面板恢复，未保存内容保留、可继续触发保存重试
     await clickNode('g1');

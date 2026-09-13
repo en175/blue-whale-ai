@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { typePromptRefText } from './testing/promptRefEditor';
 import imageDialogStyles from './components/ImageDialog/index.module.css';
 import bottomDialogStyles from './components/BottomDialog/index.module.css';
 
@@ -213,14 +214,9 @@ function sendButton(): HTMLButtonElement {
   )!;
 }
 
-/** React 受控 textarea 赋值 */
+/** PromptRefEditor（IKFA1M）整体替换文本 */
 async function typePrompt(text: string) {
-  const textarea = container.querySelector('textarea')!;
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setter.call(textarea, text);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  await typePromptRefText(container, text);
 }
 
 beforeEach(() => {
@@ -336,7 +332,7 @@ describe('IKDLQF 连线受控化与目标生图接线', () => {
     expect(payload.type).toBe('image');
     expect(payload.target_node_id).toBe('m1');
     expect(payload.input_asset_ids).toEqual(['a1']);
-    expect(payload.parameters.prompt).toBe('');
+    expect(payload.parameters.prompt).toBe('一只蓝鲸在海里游');
 
     // 保存串行化：先落盘（含未防抖编辑与连线）再创建任务
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);

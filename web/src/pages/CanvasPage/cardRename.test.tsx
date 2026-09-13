@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { typePromptRefText } from './testing/promptRefEditor';
 
 /* IKFA8X 卡片名称：四类卡片改名接线（名称 + 显式 customName 标记）/ 新建文本立即可改 /
    复制继承与独立 / 生成生命周期（首次生成、重新生成、失败重试、取消回退）保留自定义名、
@@ -316,9 +317,6 @@ function sendButton(): HTMLButtonElement {
   )!;
 }
 
-function promptTextarea(): HTMLTextAreaElement {
-  return container.querySelector('textarea')!;
-}
 /** 下载捕获：拦下 <a download> 的点击，读回浏览器将要保存的文件名（同组下载既有做法） */
 let downloadedName = '';
 function stubDownloadCapture() {
@@ -407,12 +405,7 @@ async function pickNodeIntoVideoPanel(nodeId: string, role: '图片' | '视频' 
 
 
 async function typePrompt(text: string) {
-  const textarea = promptTextarea();
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setter.call(textarea, text);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  await typePromptRefText(container, text);
 }
 
 beforeEach(() => {
