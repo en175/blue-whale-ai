@@ -576,6 +576,42 @@ describe('IKFCKT 参考栏拖拽换位', () => {
     return event;
   }
 
+  it('混排保存至目标草稿并在关闭重开及画布重新挂载后恢复', async () => {
+    const doc = canvasDocMock.current.doc as { nodes: Node[]; edges: Array<{ id: string; source: string; target: string }> };
+    doc.edges.push({ id: 'media-edge', source: 'm1', target: 'd1' }, { id: 'text-edge', source: 't1', target: 'd1' }, { id: 'text-edge2', source: 't2', target: 'd1' });
+    await renderPage();
+    const open = async () => {
+      await act(async () => flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1')));
+      await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-media-ref"]')).toHaveLength(1));
+    };
+    await open();
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 100, right: 100, top: 0, bottom: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect);
+    const text = container.querySelector('[data-testid="dock-text-ref"]')!;
+    const media = container.querySelector('[data-testid="dock-media-ref"]')!;
+    await act(async () => text.dispatchEvent(dragEvent('dragstart', 0)));
+    await act(async () => media.dispatchEvent(dragEvent('drop', 10)));
+    const order = () => [...container.querySelectorAll('[data-testid="dock-media-ref"], [data-testid="dock-text-ref"]')].map(el => el.getAttribute('title'));
+    expect(order()).toEqual(['故事文案', '目标图', '配色参考']);
+    const text2 = container.querySelectorAll('[data-testid="dock-text-ref"]')[1]!;
+    await act(async () => text2.dispatchEvent(dragEvent('dragstart', 0)));
+    await act(async () => text.dispatchEvent(dragEvent('drop', 10)));
+    expect(order()).toEqual(['配色参考', '故事文案', '目标图']);
+    expect([...container.querySelectorAll('[data-testid="dock-text-ref"] [data-testid="ref-thumb-badge"]')].map(el => el.textContent)).toEqual(['1', '2']);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1200)); });
+    const payload = apiMocks.saveCanvasDoc.mock.calls.at(-1)![1];
+    expect(payload.nodes.find(n => n.id === 'd1')!.data.referenceStripOrder).toEqual(['text:t2', 'text:t1', 'media:node:m1']);
+    expect(payload.edges.filter(e => e.target === 'd1').map(e => e.source)).toEqual(['t2', 't1', 'm1']);
+    await act(async () => container.querySelector<HTMLButtonElement>('button[title="关闭"]')!.click());
+    await open();
+    expect(order()).toEqual(['配色参考', '故事文案', '目标图']);
+    await act(async () => root.unmount());
+    container.remove();
+    canvasDocMock.current.doc = { ...doc, ...payload, id: 11, version: 4 };
+    await renderPage();
+    await open();
+    expect(order()).toEqual(['配色参考', '故事文案', '目标图']);
+  });
+
   it('图片面板拖拽文本附件换位：边序重排随自动保存上送（拼接顺序随之），角标与新序联动', async () => {
     // 追加第二条文本连线：附件顺序 = 连入边序 [t1, t2]
     const doc = canvasDocMock.current.doc as { nodes: Node[]; edges: Array<{ id: string; source: string; target: string }> };
@@ -612,5 +648,52 @@ describe('IKFCKT 参考栏拖拽换位', () => {
       .filter((e) => e.target === 'm1')
       .map((e) => e.source);
     expect(sources).toEqual(['t2', 't1']);
+  });
+});
+
+describe('IKFCJG 跨来源视频参考提交顺序', () => {
+  it('material 拖到画布图片前后，编号与请求 references 使用相同顺序', async () => {
+    seedVideoDoc();
+    const doc = canvasDocMock.current.doc as { nodes: Node[]; edges: Array<Record<string, string>> };
+    Object.assign(doc.nodes.find(n => n.id === 'v1')!.data, {
+      src: '', draft: true, genStatus: 'draft', draftMode: 'all', prompt: '组合图片1和图片2',
+      draftMaterialRefs: [{ materialId: 'asset-lib1', url: 'http://img/lib.png', name: '角色立绘', mediaType: 'image', role: 'reference' }],
+      promptDoc: { version: 1, flat: '组合图片1和图片2', segments: [
+        { kind: 'text', text: '组合' }, { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+        { kind: 'text', text: '和' }, { kind: 'asset_ref', asset_id: 'asset-lib1', label: '图片2' },
+      ] },
+    });
+    doc.nodes.push({ id: 'source-image', type: 'mediaNode', position: { x: 0, y: 200 }, data: { src: 'http://img/101.png', mediaType: 'image', assetId: '101', fileName: '画布图片' } });
+    doc.edges.push({ id: 'image-video', source: 'source-image', target: 'v1', role: 'reference' });
+    canvasDocMock.current.assets['101'] = { asset_id: 101, type: 'image', access_url: 'http://img/101.png', width: 100, height: 100 };
+    const models = await apiMocks.fetchGenerationModels();
+    apiMocks.fetchGenerationModels.mockResolvedValueOnce(models.map(model => ({ ...model, features: { reference_image: true, max_reference_images: 9 } })));
+    await renderPage();
+    await act(async () => flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')));
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-video-ref"]')).toHaveLength(2));
+    await vi.waitFor(() => expect(sendButton()?.disabled).toBe(false));
+    const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 100, right: 100, top: 0, bottom: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect);
+    const drag = (type: string) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, { dataTransfer: { setData: () => {}, effectAllowed: '', dropEffect: '' }, clientX: 10 });
+      return event;
+    };
+    try {
+      const thumbs = [...container.querySelectorAll('[data-testid="dock-video-ref"]')];
+      await act(async () => thumbs[1]!.dispatchEvent(drag('dragstart')));
+      await act(async () => thumbs[0]!.dispatchEvent(drag('drop')));
+      expect([...container.querySelectorAll('[data-testid="dock-video-ref"]')].map(el => el.getAttribute('title'))).toEqual(['角色立绘', '画布图片']);
+      expect([...container.querySelectorAll('[data-testid="dock-video-ref"] [data-testid="ref-thumb-badge"]')].map(el => el.textContent)).toEqual(['1', '2']);
+      await act(async () => sendButton().click());
+      await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+      const payload = apiMocks.createGenerationJob.mock.calls[0]![1];
+      expect(payload.references).toEqual([{ material_id: 'asset-lib1', type: 'image', role: 'reference' }, { asset_id: '101', type: 'image', role: 'reference' }]);
+      expect(payload.parameters.prompt).toBe('组合图片2和图片1');
+      expect(payload.prompt_doc.segments.filter((s: { kind: string }) => s.kind === 'asset_ref')).toEqual([
+        { kind: 'asset_ref', asset_id: '101', label: '图片2' }, { kind: 'asset_ref', asset_id: 'asset-lib1', label: '图片1' },
+      ]);
+    } finally {
+      rect.mockRestore();
+    }
   });
 });

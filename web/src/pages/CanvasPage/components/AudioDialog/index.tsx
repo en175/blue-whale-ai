@@ -13,7 +13,7 @@ import type { FollowDialogAnchor } from '../../followDialog';
 import AtMentionMenu from '../AtMentionMenu';
 import { audioRefToMentionItem, stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
 import RefThumbnail from '../RefThumbnail';
-import { splitReorder, useRefStripDrag } from '../RefThumbnail/strip-dnd';
+import { useMixedRefStrip, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
 import type { ImageTextAttachment } from '../ImageDialog';
 import styles from './index.module.css';
 
@@ -52,7 +52,7 @@ export interface CanvasPickItem {
   mediaType: 'image' | 'video' | 'audio';
 }
 
-export interface AudioDialogProps {
+export interface AudioDialogProps extends RefStripOrderProps {
   onClose: () => void;
   /** 发送：提示词 + 模型ID */
   onSend: (text: string, modelId: string, refs: AudioRefItem[]) => void | Promise<void>;
@@ -110,6 +110,8 @@ export default function AudioDialog({
   attachments,
   onRemoveAttachment,
   onReorderAttachments,
+  stripOrder,
+  onStripOrderChange,
   followAnchor,
 }: AudioDialogProps) {
   const [text, setText] = useState(initialText ?? '');
@@ -276,15 +278,12 @@ export default function AudioDialog({
     });
   };
 
-  /** IKFCKT 参考栏拖拽换位：统一序列 = 参考音频 + 文本附件；参考音频为面板本地序（setRefs
-   *  重排、编号重派生），文本按新相对序重排连入边序（顺序即生成上下文拼接顺序） */
+  const mixedStrip = useMixedRefStrip(refs.map(r => `${r.source}:${r.id}`), (attachments ?? []).map(a => a.nodeId), { stripOrder, onStripOrderChange });
   const handleStripReorder = (from: number, to: number) => {
-    const refIds = refs.map((r) => r.id);
-    const textKeys = (attachments ?? []).map((a) => a.nodeId);
-    const { nextMedia: nextRefIds, nextText: nextTextKeys, mediaChanged: refChanged, textChanged } = splitReorder(refIds, textKeys, from, to);
+    const { nextMedia: nextRefIds, nextText: nextTextKeys, mediaChanged: refChanged, textChanged } = mixedStrip.reorder(from, to);
     if (refChanged) {
       setRefs((prev) => nextRefIds.flatMap((id) => {
-        const found = prev.find((r) => r.id === id);
+        const found = prev.find((r) => `${r.source}:${r.id}` === id);
         return found ? [found] : [];
       }));
     }
@@ -338,7 +337,7 @@ export default function AudioDialog({
         {/* 参考音频缩略图：编号按参考顺序派生；× 移除面板参考（本地上传回收 blob URL）；
             @ 与手动 @ 选择走同一 onMentionCanvas 入口（结果等价——素材进入参考区，
             仅画布来源有素材身份，与图片/视频面板「无素材身份不提供 @」同口径） */}
-        {currentRefs.map((r, i) => (
+        {mixedStrip.render(currentRefs.map((r, i) => (
           <RefThumbnail
             key={`${r.source}-${r.id}`}
             data-testid="audio-ref-thumb"
@@ -352,26 +351,23 @@ export default function AudioDialog({
                 ? () => onMentionCanvas(audioRefToMentionItem(r))
                 : undefined
             }
-            dragProps={stripDrag.itemProps(i)}
+            dragProps={stripDrag.itemProps(mixedStrip.index(i))}
           />
-        ))}
-        {/* 文本附件（IKFCKS）：画布文本卡连线以 FileText 缩略图进参考栏统一序列，
-            「文本N」独立编号、悬停 200ms 正文预览；× 仅断开当前连线（保留画布原文本卡），
-            文本附件作为创作上下文，具体生成内容由提示词决定（无契约变更） */}
-        {(attachments ?? []).map((a, i) => (
+        )),
+        (attachments ?? []).map((a, i) => (
           <RefThumbnail
             key={a.nodeId}
             data-testid="dock-text-ref"
             kind="text"
             name={a.title}
-            number={i + 1}
+            number={mixedStrip.order.filter(key => key.startsWith('text:')).indexOf(`text:${a.nodeId}`) + 1}
             textPreview={a.text}
-            dragProps={stripDrag.itemProps(currentRefs.length + i)}
+            dragProps={stripDrag.itemProps(mixedStrip.index(currentRefs.length + i))}
             onRemove={
               !readOnly && onRemoveAttachment ? () => onRemoveAttachment(a.nodeId) : undefined
             }
           />
-        ))}
+        )))}
         <div className={styles.refWrap} ref={sourceWrapRef}>
           {refs.length < MAX_AUDIO_REFS ? (
             <>
