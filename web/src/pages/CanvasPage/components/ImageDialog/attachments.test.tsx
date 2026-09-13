@@ -162,7 +162,7 @@ describe('IKFCKN 文本附件进参考栏', () => {
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it('悬停满 200ms 浮出正文内容预览；移出立即消失', async () => {
+  it('悬停满 200ms 浮出正文内容预览；移出图标后延迟窗口内保持、超时关闭（IKFCX4）', async () => {
     await renderDialog({ attachments: [{ nodeId: 't1', title: '故事文案', text: '一只蓝鲸在海里' }] });
 
     const el = textThumbs()[0]!;
@@ -176,10 +176,44 @@ describe('IKFCKN 文本附件进参考栏', () => {
     });
     expect(preview()).toBeTruthy();
     expect(preview()!.textContent).toContain('一只蓝鲸在海里');
+    // 预览无标题：来源名称不进浮层（图标本体的 title 提示不属于浮层内容）
+    expect(preview()!.textContent).not.toContain('故事文案');
     await act(async () => {
       unhover(el);
     });
+    expect(preview(), '移出图标后短窗内不关闭（给移入浮层留时间）').toBeTruthy();
+    await act(async () => {
+      await wait(300);
+    });
+    expect(preview(), '未移入浮层则延迟后关闭').toBeNull();
+  });
+
+  it('同名文本卡不串用内容：多附件各自悬浮显示各自正文（IKFCX4）', async () => {
+    await renderDialog({
+      attachments: [
+        { nodeId: 't1', title: '雨夜', text: '赛博朋克，霓虹灯' },
+        { nodeId: 't2', title: '雨夜', text: '青石板路，油纸伞' },
+      ],
+    });
+    const thumbs = textThumbs();
+    expect(thumbs).toHaveLength(2);
+
+    await act(async () => {
+      hover(thumbs[0]!);
+      await wait(250);
+    });
+    expect(preview()!.textContent).toContain('赛博朋克，霓虹灯');
+    await act(async () => {
+      unhover(thumbs[0]!);
+      await wait(300);
+    });
     expect(preview()).toBeNull();
+
+    await act(async () => {
+      hover(thumbs[1]!);
+      await wait(250);
+    });
+    expect(preview()!.textContent).toContain('青石板路，油纸伞');
   });
 
   it('无文本附件时参考栏不出现文本缩略图', async () => {

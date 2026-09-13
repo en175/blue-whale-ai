@@ -4409,15 +4409,17 @@ export default function CanvasPage() {
     }
   };
 
-  /** 自由图片面板的文本附件按节点身份刷新标题，正文保持打开时的快照。 */
+  /** 自由图片面板的文本附件按节点身份刷新标题与正文（IKFCX4）：来源改名/改文后再次预览即用当前值；
+   *  草稿绑定分支（imageDraftAttachments）实时跟随连线，本视图兜底 imageDraftId 解绑后的快照窗口。 */
   const imageSeedView = useMemo(() => {
     if (!imageSeed || imageDraftId) return imageSeed;
     const byId = new Map(textNodes.map((n) => [n.id, n]));
     const attachments = imageSeed.attachments?.map((attachment) => {
       const node = byId.get(attachment.nodeId);
       if (!node) return attachment;
-      const title = typeof node.data?.title === 'string' && node.data.title ? node.data.title : '文本节点';
-      return title === attachment.title ? attachment : { ...attachment, title };
+      const title = typeof node.data?.title === 'string' && node.data.title ? (node.data.title as string) : '文本节点';
+      const text = extractTextNodeText(node.data);
+      return title === attachment.title && text === attachment.text ? attachment : { ...attachment, title, text };
     });
     return { ...imageSeed, attachments };
   }, [imageSeed, imageDraftId, textNodes]);
