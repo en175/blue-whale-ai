@@ -15,7 +15,7 @@ import {
   enabledVideoFollowModes,
   type VideoFollowMode,
 } from './followDialog';
-import { freshImageCanvasRefs, imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, type ImageMediaRef } from './mediaRefs';
+import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
   isVideoDraftNode,
@@ -159,18 +159,6 @@ function draftFileNameOf(type: unknown): string {
 /** 卡片名称已被用户自定义（IKFA8X）：显式 customName 标记，不靠名称内容推断 */
 function hasCustomName(node: Node | undefined): boolean {
   return ((node?.data ?? {}) as Record<string, unknown>).customName === true;
-}
-
-/** 合并已落盘连线参考与「到节点选择」待提交参考（按 assetId 去重）；
- *  待提交参考的名称是选取当刻的快照，按来源节点身份刷新为当前卡片名（IKFA8Y） */
-function mergePendingImageCanvasRefs(
-  fromEdges: ImageMediaRef[],
-  pending: ImageMediaRef[],
-  mediaNodes: Node[],
-): ImageMediaRef[] {
-  const seen = new Set(fromEdges.map((r) => r.assetId));
-  const extra = freshImageCanvasRefs(pending, mediaNodes).filter((r) => !seen.has(r.assetId));
-  return extra.length === 0 ? fromEdges : [...fromEdges, ...extra];
 }
 
 /** 合并视频已落盘参考与待提交画布选取参考；待提交参考名称同样按来源节点身份刷新（IKFA8Y） */
@@ -343,11 +331,7 @@ export default function CanvasPage() {
       showToast('warn', err);
       return false;
     }
-    const refs = mergePendingImageCanvasRefs(
-      imageMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current),
-      imageDraftIdRef.current === targetId ? pendingImageCanvasRefsRef.current : [],
-      mediaNodesRef.current,
-    );
+    const refs = imageMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
     const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>)!;
     if (refs.some((r) => r.assetId === assetId)) {
       const planEdge = edgesRef.current.find(e => e.target === targetId && readAssetId((findCanvasNode(e.source)?.data ?? {}) as Record<string, unknown>) === assetId);
@@ -617,15 +601,10 @@ export default function CanvasPage() {
   /** 工具栏自由模式（无草稿卡）的视频参考：本地暂存首帧/尾帧/普通参考，
    *  发送时随任务一次性提交，关闭面板即丢弃（不落画布不连线） */
   const [videoFreeRefs, setVideoFreeRefs] = useState<VideoMediaRefs>({ reference: [] });
-  /** 对话框「到节点选择」的待提交参考：展示在面板中，发送时才建连线并随画布保存落盘 */
-  const [pendingImageCanvasRefs, setPendingImageCanvasRefs] = useState<ImageMediaRef[]>([]);
-  const pendingImageCanvasRefsRef = useRef<ImageMediaRef[]>([]);
-  pendingImageCanvasRefsRef.current = pendingImageCanvasRefs;
+  /** 视频对话框「到节点选择」的待提交参考：展示在面板中，发送时才建连线并随画布保存落盘 */
   const [pendingVideoCanvasRefs, setPendingVideoCanvasRefs] = useState<VideoMediaRefs>({ reference: [] });
   const pendingVideoCanvasRefsRef = useRef<VideoMediaRefs>({ reference: [] });
   pendingVideoCanvasRefsRef.current = pendingVideoCanvasRefs;
-  const imageDraftIdRef = useRef<string | null>(null);
-  imageDraftIdRef.current = imageDraftId;
   const videoDraftIdRef = useRef<string | null>(null);
   videoDraftIdRef.current = videoDraftId;
   /** 节点工具条/首页带入视频对话框的种子；
@@ -1772,19 +1751,10 @@ export default function CanvasPage() {
       return;
     }
     if (pickMode === 'image' && pickTarget === 'image' && imageDraftId) {
+      // IKFDFT：有效参考接纳后立即建立来源→草稿连线并进入既有自动保存，
+      // 不再经待提交暂存等发送——关闭/切换/刷新均按连线恢复
       if (node.type === 'mediaNode' && validateImageRefConnect(node.id, imageDraftId)) {
-        const data = (node.data ?? {}) as Record<string, unknown>;
-        const assetId = readAssetId(data);
-        if (assetId) {
-          const next = [...pendingImageCanvasRefsRef.current, {
-            nodeId: node.id,
-            url: String(data.src ?? ''),
-            name: typeof data.fileName === 'string' && data.fileName ? data.fileName : node.id,
-            assetId,
-          }];
-          pendingImageCanvasRefsRef.current = next;
-          setPendingImageCanvasRefs(next);
-        }
+        addCanvasEdge(node.id, imageDraftId);
       }
       setPickMode(null);
       setPickTarget(null);
@@ -2135,10 +2105,6 @@ export default function CanvasPage() {
   /** 打开绑定指定草稿的图片面板（IKDMQQ）：带入草稿已保存的参数与当前连线文本附件 */
   const openImageDraftDialog = (nodeId: string) => {
     if (!canOpenEditor(nodeId)) return;
-    if (imageDraftIdRef.current !== nodeId) {
-      pendingImageCanvasRefsRef.current = [];
-      setPendingImageCanvasRefs([]);
-    }
     editingTargetRef.current = nodeId;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
@@ -4192,13 +4158,9 @@ export default function CanvasPage() {
   const imageDraftMediaRefs = useMemo(
     () => {
       if (!imageDraftId) return undefined;
-      return mergePendingImageCanvasRefs(
-        imageMediaRefsOf(imageDraftId, edges, mediaNodes),
-        pendingImageCanvasRefs,
-        mediaNodes,
-      );
+      return imageMediaRefsOf(imageDraftId, edges, mediaNodes);
     },
-    [imageDraftId, edges, mediaNodes, pendingImageCanvasRefs],
+    [imageDraftId, edges, mediaNodes],
   );
   const invalidImageMediaRefs = useMemo(() => {
     if (!imageDraftId) return [];
@@ -4213,13 +4175,6 @@ export default function CanvasPage() {
   /** Dock 移除图片参考（IKDMQR）：断开对应连线——仅改变关系，不删除来源素材卡，
    *  也不影响其他目标对同一来源的引用（按 (source,target) 精确匹配）。 */
   const handleRemoveImageMediaRef = (draftId: string, sourceNodeId: string) => {
-    const pending = pendingImageCanvasRefsRef.current;
-    if (pending.some((r) => r.nodeId === sourceNodeId)) {
-      const next = pending.filter((r) => r.nodeId !== sourceNodeId);
-      pendingImageCanvasRefsRef.current = next;
-      setPendingImageCanvasRefs(next);
-      return;
-    }
     if (isGeneratingNode(draftId)) return;
     removeTargetInputs(edgesRef.current.filter(edge => edge.source === sourceNodeId && edge.target === draftId).map(edge => edge.id));
   };
@@ -4633,7 +4588,6 @@ export default function CanvasPage() {
     setApplying(true);
     (document.activeElement as HTMLElement | null)?.blur();
     try {
-      if (imageDraftIdRef.current === targetNodeId) commitPendingImageCanvasEdges(targetNodeId);
       if (videoDraftIdRef.current === targetNodeId) commitPendingVideoCanvasEdges(targetNodeId);
       if (!(await flushCanvasSave(projectId)) || versionRef.current === null) return;
       const saved = await referencePlanMutation.mutateAsync({ projectId, planNodeId, targetNodeId, expectedVersion: versionRef.current, ...(syncBindings !== undefined ? { syncBindings } : {}) });
@@ -4691,21 +4645,11 @@ export default function CanvasPage() {
    *  携带 targetNodeId 时（IKDLQG/IKDMQS）：先等待在途保存并落盘当前画布编辑
    *  （同 IKDLQE 应用预览的保存串行化），保证服务端按连线推导附件时读到最新正文，再携带 target_node_id 提交。
    *  自由模式（工具栏入口无草稿卡）：参考读本地暂存 refs，直接创建生成卡（无 target），发送后关闭面板 */
-  const clearPendingImageCanvasRefs = () => {
-    pendingImageCanvasRefsRef.current = [];
-    setPendingImageCanvasRefs([]);
-  };
   const clearPendingVideoCanvasRefs = () => {
     pendingVideoCanvasRefsRef.current = { reference: [] };
     setPendingVideoCanvasRefs({ reference: [] });
   };
-  /** 发送时把「到节点选择」的待提交参考落成连线，再随 flushCanvasSave 写入接口 */
-  const commitPendingImageCanvasEdges = (draftId: string) => {
-    for (const ref of pendingImageCanvasRefsRef.current) {
-      addCanvasEdge(ref.nodeId, draftId);
-    }
-    clearPendingImageCanvasRefs();
-  };
+  /** 发送时把「到节点选择」的待提交视频参考落成连线，再随 flushCanvasSave 写入接口 */
   const commitPendingVideoCanvasEdges = (draftId: string) => {
     const pending = pendingVideoCanvasRefsRef.current;
     if (pending.first) addCanvasEdge(pending.first.nodeId, draftId, 'first');
@@ -5314,15 +5258,9 @@ export default function CanvasPage() {
         showToast('warn', '图片参考仅支持图片素材');
         return;
       }
+      // IKFDFT：@ 选取与画布选取同一语义——校验通过立即建连线并自动保存
       if (!validateImageRefConnect(item.id, imageDraftId) || !item.assetId || !item.thumbUrl) return;
-      const next = [...pendingImageCanvasRefsRef.current, {
-        nodeId: item.id,
-        url: item.thumbUrl,
-        name: item.name,
-        assetId: item.assetId,
-      }];
-      pendingImageCanvasRefsRef.current = next;
-      setPendingImageCanvasRefs(next);
+      addCanvasEdge(item.id, imageDraftId);
       return;
     }
     setImagePickResult({
@@ -5552,7 +5490,6 @@ export default function CanvasPage() {
     applyingRef.current = true;
     setSubmittingNodeId(targetNodeId ?? null);
     try {
-      if (imageDraftId && targetNodeId === imageDraftId) commitPendingImageCanvasEdges(imageDraftId);
       const inputAssetIds = await collectImageInputAssetIds(
         targetNodeId,
         files,
@@ -5984,7 +5921,7 @@ export default function CanvasPage() {
                   }
                 : undefined
             }
-            onClose={() => { imagePanelHiddenRef.current = true; setShowImageDialog(false); setPickMode(null); setPickTarget(null); clearPendingImageCanvasRefs(); setImagePickResult(null); }}
+            onClose={() => { imagePanelHiddenRef.current = true; setShowImageDialog(false); setPickMode(null); setPickTarget(null); setImagePickResult(null); }}
             onSend={handleImageDialogSend}
             onPickFromCanvas={() => { setPickMode('image'); setPickTarget('image'); }}
             onPickFromAssets={() => openAssetsPicker('imageDialog')}

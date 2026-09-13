@@ -61,17 +61,6 @@ export function localNodeIdOf(fileId: string): string | null {
   return fileId.slice('node-'.length) || null;
 }
 
-/** 快照参考的名称刷新（IKFA8Y）：选取当刻缓存的名称改为按来源节点身份取当前名称。
- *  只改展示名称，引用绑定、素材 ID、节点 ID、顺序与角色全部沿用快照；来源节点已不在画布
- *  （素材库参考等）时保留原名称。 */
-export function freshImageCanvasRefs(refs: ImageMediaRef[], mediaNodes: Node[]): ImageMediaRef[] {
-  const byId = new Map(mediaNodes.map((n) => [n.id, n]));
-  return refs.map((ref) => {
-    const name = cardNameOfNode(byId.get(ref.nodeId));
-    return name === undefined ? ref : { ...ref, name };
-  });
-}
-
 /** 目标节点的有效图片媒体参考：连线 target=该节点，按连线顺序；仅推导当前有效来源
  * （失效/悬空来源不展示也不消费，连线本身保留待来源恢复或用户断开）；
  *  同一素材（相同 assetId）多条连线只取首条（历史画布防御，与连线时重复校验同口径）。
