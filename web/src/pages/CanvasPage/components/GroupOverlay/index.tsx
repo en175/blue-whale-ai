@@ -46,9 +46,9 @@ interface GroupOverlayProps {
   onFrameDragOffsetChange?: (offset: { id: string; x: number; y: number } | null) => void;
   /** 拖组/点组置顶 */
   onBringGroupToFront?: (groupId: string) => void;
-  /** 组→空白/节点：批量连线结束（targetId 为空表示落到空白或内容节点） */
+  /** 组拖线松手：只弹可选菜单，不接到已有节点（targetId 仍上报，父级忽略） */
   onConnectGroupDrop?: (memberIds: string[], targetId: string | null, client: { x: number; y: number }) => void;
-  /** 组→已有节点：兼容旧回调，有 onConnectGroupDrop 时优先走 drop */
+  /** 组→已有节点：兼容旧回调；组拖线现只走菜单，不再接到节点 */
   onConnectGroupToTarget?: (memberIds: string[], targetId: string) => void;
   /** 源→组：外部节点拖到组左侧「+」，为该源到组内每个成员各建一条边 */
   onConnectSourceToGroup?: (sourceId: string, memberIds: string[]) => void;
@@ -556,7 +556,7 @@ export default function GroupOverlay({
               key={`connect-${f.id}`}
               className={styles.connectHandle}
               style={{ left: pt.x, top: pt.y }}
-              title="拖动为组内全部素材连线"
+              title="拖动后选择生成类型"
               onPointerDown={(e) => {
                 if (e.button !== 0) return;
                 e.preventDefault();

@@ -64,7 +64,7 @@ interface FlowCanvasProps {
   /** 开始从节点手柄拖线（记下源节点，松手时即使 fromNode 缺失也能弹出菜单） */
   onConnectStart?: (nodeId: string | null) => void;
   /** 拖线在空白/非法目标松开（类型菜单由父级处理） */
-  onConnectEnd?: (event: MouseEvent | TouchEvent, state: { fromNode?: Node | null; toNode?: Node | null; isValid?: boolean | null }) => void;
+  onConnectEnd?: (event: MouseEvent | TouchEvent, state: { fromNode?: Node | null; toNode?: Node | null; isValid?: boolean | null; toHandle?: { nodeId?: string | null } | null }) => void;
   /** 仅允许连到生成节点且能力匹配 */
   isValidConnection?: (connection: Connection | { source: string | null; target: string | null }) => boolean;
   /** 加载画布文档后注入的视口（切换项目时应用） */
