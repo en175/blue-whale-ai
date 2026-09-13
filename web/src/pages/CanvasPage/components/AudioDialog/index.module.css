@@ -135,7 +135,8 @@
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   animation: popupFadeIn 0.15s ease;
-  z-index: 30;
+  /* 低于共享来源菜单及遮罩，选取中重新点 + 仍可切换来源。 */
+  z-index: 20;
 }
 
 .pickerHead {

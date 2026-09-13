@@ -391,6 +391,9 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
       await nodeById("d2").locator('[data-testid="media-content"]').click();
       await editor.waitFor();
       await vi.waitFor(async () => expect(await dockRefs.count(), "B 不串入 A 的参考").toBe(0));
+      // 发布基线跟随面板覆盖 A：先关闭 B，再以真实点击返回 A。
+      await page.locator('button[title="关闭"]').dispatchEvent("click");
+      await vi.waitFor(async () => expect(await editor.count()).toBe(0));
       await nodeById(draftId).locator('[data-testid="media-content"]').click();
       await editor.waitFor();
       await vi.waitFor(async () => expect(await dockRefs.count(), "切回 A 恢复全部参考").toBe(2));
