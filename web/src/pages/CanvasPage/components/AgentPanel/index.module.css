@@ -1326,6 +1326,14 @@
   flex-shrink: 0;
 }
 
+/* 按哪套写法编的（F32）。压低到和时间同一层——它是核对用的注脚，不是标题的一部分。 */
+.shotTargetModel {
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+
 .shotField {
   display: flex;
   align-items: flex-start;
@@ -1969,4 +1977,147 @@
 /* 失败：整行带上语气——只染一个符号在一屏灰字里看不见。 */
 .turnFooterFailed {
   color: var(--color-error);
+}
+
+/* 完成了、但卡没写出来（IKEV0V）：不是整轮失败，用提醒色，不用错误色。 */
+.turnFooterCardFailed {
+  color: var(--color-warning);
+}
+
+.turnFooterRetry {
+  flex: none;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--color-accent-agent);
+  cursor: pointer;
+}
+
+.turnFooterRetry:hover {
+  text-decoration: underline;
+}
+
+/* ---- 方案卡（IKF3KE）：用户在任何一张生成卡被写出来之前，唯一要表态的东西 ---- */
+.solutionCard {
+  border: 1px solid var(--color-accent-primary);
+  background-color: #242425;
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 已确认或已作废的那几版留在原处但变灰、按钮消失：历史要读得懂，
+   而不是「卡突然没了、也不知道当时点了什么」。 */
+.solutionCardSettled {
+  border-color: var(--color-border-secondary);
+  opacity: 0.55;
+}
+
+.solutionCardHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-accent-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.solutionCardSettled .solutionCardHead {
+  color: var(--color-text-secondary);
+}
+
+.solutionField {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.solutionFieldLabel {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.solutionFieldValue {
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.solutionList {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.solutionActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.solutionPrimaryBtn {
+  padding: 6px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--color-accent-primary);
+  background-color: rgba(80, 140, 255, 0.2);
+  color: var(--color-accent-primary);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.solutionPrimaryBtn:hover:not(:disabled) {
+  background-color: rgba(80, 140, 255, 0.32);
+}
+
+.solutionGhostBtn {
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border-secondary);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.solutionGhostBtn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+}
+
+.solutionPrimaryBtn:disabled,
+.solutionGhostBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.solutionNote {
+  width: 100%;
+  min-height: 64px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-secondary);
+  background-color: #1c1c1d;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.solutionSettledNote {
+  color: var(--color-text-secondary);
+  font-size: 11px;
 }
