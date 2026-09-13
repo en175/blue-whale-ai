@@ -10,6 +10,8 @@
 
 本契约定死跨进程字段与双端语义，并修订既有两篇契约被本切片反转的旧口径（见 §1）。前端展示与交互语义（文本图标、可进入浮层预览、× 仅断边）沿用 [IKFCJG 三态交互契约](2026-09-13-ikfcjg-attachment-thumbnail-interaction-contract.md) 及其 T3/IKFCKS 切片，本文不重复。
 
+本文记录 IKFCXE 初始交付切片。后续用户已授权的音频正文索引标签验收修复扩展以 [IKFCJG 契约 §10](2026-09-13-ikfcjg-attachment-thumbnail-interaction-contract.md#10-音频正文接纳与执行闭环ikfcjg-验收修复) 为准；涉及正文接纳、冻结字段和执行优先级时，该节优先于本文初始边界。
+
 ## 1. 对既有契约的修订
 
 - [IKDMQT 音频草稿契约](2026-09-07-ikdmqt-audio-draft-contract.md) 中「音频任务不推导文本附件……不冻结 `text_attachments`」「音频草稿对文本节点连线无附件语义」两条自本切片起废止：音频草稿目标与图片/视频同构推导并冻结文本附件，任务输入随连线改变。
@@ -28,12 +30,12 @@
 - 目标必须是 `mediaNode` 且 `mediaType === "audio"`，否则 400（沿用 IKDMQT 目标校验）。
 - 主提示词为空（trim 后）仍 400「prompt 无效」，即便附件正文非空——音频不引入仅附件生成；图片/视频既有的非空白附件驱动规则不变。
 - 组合长度闸：`composeTextAttachmentPrompt(附件, prompt)` 结果超过 `max(COMPOSED_AUDIO_PROMPT_MAX_LENGTH, 模型 capability.max_prompt_length)` → 400。`COMPOSED_AUDIO_PROMPT_MAX_LENGTH = 30000`（UTF-16 code units）定入 `packages/contracts/src/prompt-text-limits.ts`，与图片/视频同值并列，取大逻辑一致。
-- `prompt_doc`（正文索引标签）对音频一律拒绝，不静默忽略——本切片不新增音频正文索引标签编辑器。
+- IKFCXE 初始切片不新增音频正文索引标签编辑器，当时 `prompt_doc` 对音频一律拒绝；该历史限制已由 IKFCJG §10 授权扩展替代，最终按该节复核、编译并冻结音频 `prompt_doc`。
 
 ## 4. 执行消费（TS worker 与 worker-java 双端对齐）
 
 - 双端消费同一 `input` 快照：解析 `text_attachments`，快照形状损坏（非数组/元素缺约定字段）整体按无附件处理，不阻断任务。
-- 组合规则与图片/视频同源：非空白附件正文在前、主提示词在后，`"\n\n"` 连接，不改写正文；空白附件跳过。
+- 初始组合规则与图片/视频同源：非空白附件正文在前、主提示词在后，`"\n\n"` 连接，不改写正文；空白附件跳过。IKFCJG §10 扩展后，双端优先消费非空白 `composed_prompt` 冻结正文，仅在该字段不可用时回退本条组合规则。
 - 不因存在附件强制改为朗读任务：环境音/配音/旁白意图由主提示词决定，应用不统一改写用户意图。
 - 空主提示词的音频任务在执行侧同样拒绝（`hasNonBlankAttachment` 仅对 image 放行），与接纳侧口径一致。
 - 重试复制原 `input` 快照，不回读当前文本卡；提交后来源的修改或移除不改写已提交任务。
