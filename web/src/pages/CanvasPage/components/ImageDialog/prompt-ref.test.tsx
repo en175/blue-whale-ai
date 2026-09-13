@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 /* IKFA1M：ImageDialog 正文素材标签——@ 菜单/插入/编号一致性/失效阻止生成/删除提及 */
 import { act, createElement } from 'react';
+import { $getRoot, $isTextNode, SKIP_DOM_SELECTION_TAG } from 'lexical';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog from './index';
 import type { ImageMediaRef } from '../../mediaRefs';
 import type { PromptDoc } from '@/lib/prompt-doc';
-import { readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
+import { promptRefEditorInstance, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -426,4 +427,42 @@ it('菜单内搜索同时显示已引用和画布同一素材，选择画布项�
   await vi.waitFor(() => expect(readPromptRefText(container)).toBe('让图片1'));
   expect(onMentionCanvas).not.toHaveBeenCalled();
   expect(container.querySelectorAll('[data-testid="dock-media-ref"]')).toHaveLength(1);
+});
+
+
+it.each(['正文', 'Esc', '外部'])('取消 @（%s）后恢复正文编辑，旧触发符不重开，删除重输才唤起', async (method) => {
+  await renderDialog({ mediaRefs: [REF_A] });
+  await typePromptRefRaw(container, '让@');
+  const host = container.querySelector('[contenteditable]') as HTMLElement;
+  expect(document.activeElement).toBe(container.querySelector('input[placeholder="搜索"]'));
+  await act(async () => {
+    if (method === 'Esc') document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    else (method === '正文' ? host : document.body).dispatchEvent(new Event('pointerdown', { bubbles: true }));
+  });
+  const editor = promptRefEditorInstance(container);
+  const edit = async (change: () => void) => {
+    await act(async () => editor.update(change, { tag: SKIP_DOM_SELECTION_TAG }));
+  };
+  await edit(() => { $getRoot().selectStart(); });
+  await edit(() => { $getRoot().selectEnd(); });
+  expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull();
+  await act(async () => host.focus());
+  expect(document.activeElement).toBe(host);
+  await typePromptRefRaw(container, '继续');
+  expect(readPromptRefText(container)).toBe('让@继续');
+  expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull();
+  // 改动 @ 之前的正文也不能让原来的触发符复活。
+  await edit(() => {
+    const node = $getRoot().getFirstDescendant();
+    if ($isTextNode(node)) { node.spliceText(0, 0, '先'); node.selectEnd(); }
+  });
+  expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull();
+  await edit(() => {
+    const node = $getRoot().getFirstDescendant();
+    if ($isTextNode(node)) { node.spliceText(2, 3, ''); node.selectEnd(); }
+  });
+  expect(readPromptRefText(container)).toBe('先让');
+  await typePromptRefRaw(container, '@');
+  expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy();
+  expect(document.activeElement).toBe(container.querySelector('input[placeholder="搜索"]'));
 });

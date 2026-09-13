@@ -129,7 +129,7 @@ function MentionPlugin({
       openRef.current = state.open;
       onMentionChange?.(state);
     };
-    return editor.registerUpdateListener(({ editorState, tags }) => {
+    return editor.registerUpdateListener(({ editorState, prevEditorState, tags }) => {
       // 编号重派生/初始化等非编辑更新不重新检测（避免覆盖刚插入标签后的状态）
       if (tags.has('prompt-ref-reconcile')) return;
       editorState.read(() => {
@@ -148,6 +148,22 @@ function MentionPlugin({
         const match = matchMentionQuery(before);
         if (match) {
           const offset = anchor.offset - match.query.length - 1;
+          const current = mentionAnchorRef.current;
+          const continuing = current?.key === node.getKey() && current.offset === offset;
+          if (!continuing) {
+            // 关闭后只允许新插入的 @ 开启查询；光标移动、修改旧查询都不能重开。
+            const text = node.getTextContent();
+            const previous = prevEditorState.read(() => $getNodeByKey(node.getKey())?.getTextContent() ?? '');
+            let start = 0;
+            while (start < previous.length && start < text.length && previous[start] === text[start]) start++;
+            let end = text.length;
+            let previousEnd = previous.length;
+            while (end > start && previousEnd > start && text[end - 1] === previous[previousEnd - 1]) {
+              end--;
+              previousEnd--;
+            }
+            if (offset < start || offset >= end) return;
+          }
           mentionAnchorRef.current = { key: node.getKey(), offset, query: match.query };
           openRef.current = true;
           onMentionChange?.({ open: true, query: match.query });
