@@ -10,7 +10,7 @@ import {
   type AudioProvider,
   type SeedAudioReference,
 } from "@lib/shared/generation-runtime/index.js";
-import { composeImagePrompt } from "@blue-whale/core";
+import { composeImagePrompt, composeTextAttachmentPrompt } from "@blue-whale/core";
 import { createLogger } from "@blue-whale/core/logging";
 import { z } from "zod";
 import {
@@ -408,9 +408,15 @@ async function processClaimedJob(
         await failClaimed(ERROR_REFERENCE_ASSET_UNAVAILABLE, audioRefs.message);
         return job.id;
       }
+      // IKFCXE：文本附件作为创作上下文与主提示词共同进入生成——组合语义与图片/视频同源
+      //（composeTextAttachmentPrompt：非空白附件正文在前、主提示词在后，"\n\n" 连接，不改写正文）；
+      // 不因存在附件强制改为朗读任务，环境音/配音意图由主提示词决定。
+      // 主提示词为空的音频任务已在前置「缺少 prompt 或 model_id」校验拒绝
+      //（hasNonBlankAttachment 仅对 image 放行，音频不接受仅附件驱动）。
+      const audioPrompt = composeTextAttachmentPrompt(textAttachments, prompt);
       const audio = await provider.generate({
         model: cap.model_id,
-        prompt,
+        prompt: audioPrompt,
         ...(audioRefs.refs.length > 0 ? { references: audioRefs.refs } : {}),
       });
       // audio.data 为原始字节;url 为空串,persistProviderMedia 走 data 直传路径。

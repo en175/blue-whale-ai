@@ -1754,6 +1754,17 @@ export default function CanvasPage() {
       imagePanelHiddenRef.current = true;
       return;
     }
+    // IKFCXE：音频草稿面板的「到节点选择」选中文本卡 → 建立来源→草稿连线（与画布拖线同一关系）；
+    // 绑定以 audioDraftId 为准（seed 可能残留旧草稿值）；拖线（connectPair）对音频目标走 addCanvasEdge
+    // 本地建边（referencePromptPlan 服务端仅放行图片/视频目标），此处与拖线同款——普通文本卡与
+    // 方案卡均可（与拖线准入一致，图片/视频分支的 promptSource 限定是方案 API 的服务端约束，不适用于音频）。
+    if (pickMode === 'audio' && pickTarget === 'audio' && audioDraftId && node.type === 'textNode') {
+      addCanvasEdge(node.id, audioDraftId);
+      setPickMode(null);
+      setPickTarget(null);
+      audioPanelHiddenRef.current = true;
+      return;
+    }
     if (pickMode === 'image' && pickTarget === 'image' && imageDraftId) {
       if (node.type === 'mediaNode' && validateImageRefConnect(node.id, imageDraftId)) {
         const data = (node.data ?? {}) as Record<string, unknown>;

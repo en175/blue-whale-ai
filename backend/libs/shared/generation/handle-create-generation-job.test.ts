@@ -1399,11 +1399,13 @@ describe("handleCreateGenerationJob target_node_id 音频目标（IKDMQT）", ()
 
     expect(result.code).toBe(200);
     const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
-    // e6（text-a → media-4）存在但不被音频消费：无 text_attachments 字段
+    // IKFCXE：e6（text-a → media-4）按画布边序推导冻结——附件正文与主提示词共同进入任务快照
     expect(cmdArg.input.target_node_id).toBe("media-4");
     expect(cmdArg.input.prompt).toBe("哼一段轻快的旋律");
     expect(cmdArg.input.model_id).toBe("audio-model");
-    expect(cmdArg.input).not.toHaveProperty("text_attachments");
+    expect(cmdArg.input.text_attachments).toEqual([
+      { node_id: "text-a", title: "风格", text: "赛博朋克" },
+    ]);
   });
 
   it("目标是视频 mediaNode → 400 不是音频媒体节点，不建任务", async () => {
