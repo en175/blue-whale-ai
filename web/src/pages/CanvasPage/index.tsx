@@ -4185,9 +4185,9 @@ export default function CanvasPage() {
     });
   }, [imageDraftId, edges, mediaNodes]);
 
-  /** Dock 移除图片参考（IKDMQR）：断开对应连线——仅改变关系，不删除来源素材卡，
-   *  也不影响其他目标对同一来源的引用（按 (source,target) 精确匹配）。 */
-  const handleRemoveImageMediaRef = (draftId: string, sourceNodeId: string) => {
+  /** 面板/Dock 移除媒体参考（图片 IKDMQR / 视频 IKDMQS / 音频 IKFDFZ 共用）：断开对应连线——
+   *  仅改变关系，不删除来源素材卡，也不影响其他目标对同一来源的引用（按 (source,target) 精确匹配）。 */
+  const removeRefEdges = (draftId: string, sourceNodeId: string) => {
     if (isGeneratingNode(draftId)) return;
     removeTargetInputs(edgesRef.current.filter(edge => edge.source === sourceNodeId && edge.target === draftId).map(edge => edge.id));
   };
@@ -4224,13 +4224,6 @@ export default function CanvasPage() {
       assetId: r.assetId,
     }))
     : undefined;
-
-  /** 面板移除音频参考（IKFDFZ）：断开对应连线——仅改变关系，不删除来源素材卡，
-   *  也不影响其他目标对同一来源的引用（按 (source,target) 精确匹配）。 */
-  const handleRemoveAudioRef = (draftId: string, sourceNodeId: string) => {
-    if (isGeneratingNode(draftId)) return;
-    removeTargetInputs(edgesRef.current.filter(edge => edge.source === sourceNodeId && edge.target === draftId).map(edge => edge.id));
-  };
 
   /** 面板「从画布选择」列表添加参考（IKFDFZ）：与画布选取/@ 同一校验与建线语义 */
   const handleAddAudioCanvasRef = (nodeId: string) => {
@@ -4296,13 +4289,6 @@ export default function CanvasPage() {
   const videoFollowModes: VideoFollowMode[] | undefined = videoDraftId && showBottomDialog && videoDraftMediaRefs
     ? enabledVideoFollowModes(videoDraftMediaRefs)
     : undefined;
-
-  /** Dock 移除视频参考（IKDMQS）：断开对应连线（首帧/尾帧/普通参考同一路径）——仅改变关系，
-   *  不删除来源素材卡，也不影响其他目标对同一来源的引用（按 (source,target) 精确匹配）。 */
-  const handleRemoveVideoRef = (draftId: string, sourceNodeId: string) => {
-    if (isGeneratingNode(draftId)) return;
-    removeTargetInputs(edgesRef.current.filter(edge => edge.source === sourceNodeId && edge.target === draftId).map(edge => edge.id));
-  };
 
   /** 移除角色库 material 参考（IKDMQS 来源补齐）：从草稿 data.draftMaterialRefs 过滤对应项。
    *  IKFCKT：改角色分支随死 wiring 处置下线（角色由模式+目标槽决定），收窄为纯移除 */
@@ -5950,7 +5936,7 @@ export default function CanvasPage() {
                   }
             }
             videoMediaRefs={videoDraftId ? (videoDraftMediaRefs ?? { reference: [] }) : videoFreeRefsView}
-            onRemoveVideoRef={videoDraftId ? ((nodeId) => handleRemoveVideoRef(videoDraftId, nodeId)) : removeVideoFreeRef}
+            onRemoveVideoRef={videoDraftId ? ((nodeId) => removeRefEdges(videoDraftId, nodeId)) : removeVideoFreeRef}
             onRemoveMaterialRef={videoDraftId ? ((materialId) => removeDraftMaterialRef(videoDraftId, materialId)) : removeVideoFreeRef}
             onReorderMediaRefs={videoDraftId ? ((keys) => handleReorderVideoMediaRefs(videoDraftId, keys)) : reorderVideoFreeRefs}
             onToast={(type, msg) => showToast(type, msg)}
@@ -5979,7 +5965,7 @@ export default function CanvasPage() {
             syncingPlan={applying}
             planReferenceError={planReferenceErrors.image}
             onRemoveMediaRef={
-              imageDraftId ? (nodeId) => handleRemoveImageMediaRef(imageDraftId, nodeId) : undefined
+              imageDraftId ? (nodeId) => removeRefEdges(imageDraftId, nodeId) : undefined
             }
             onReorderMediaRefs={
               imageDraftId ? ((ids) => reorderTargetEdges(imageDraftId, ids)) : undefined
@@ -6089,7 +6075,7 @@ export default function CanvasPage() {
             pickMode={pickMode === 'audio'}
             draftRefs={audioDraftRefItems}
             draftRefInvalid={audioDraftMediaRefs?.invalid.length ? audioDraftMediaRefs.invalid : undefined}
-            onRemoveDraftRef={audioDraftId ? ((nodeId) => handleRemoveAudioRef(audioDraftId, nodeId)) : undefined}
+            onRemoveDraftRef={audioDraftId ? ((nodeId) => removeRefEdges(audioDraftId, nodeId)) : undefined}
             onAddCanvasRef={audioDraftId ? handleAddAudioCanvasRef : undefined}
             onAdoptLocalFile={audioDraftId ? ((file) => adoptAudioLocalFile(audioDraftId, file)) : undefined}
             mentionItems={atMentionItems.filter((item) => item.id !== audioDraftId)}
