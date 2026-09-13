@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canAddRefRole,
   isVideoDraftNode,
+  readDraftMaterialRefs,
   readRefRole,
   videoMediaRefsOf,
   videoRefConflict,
@@ -123,6 +124,34 @@ describe('videoMediaRefsOf 连线推导分组参考', () => {
       reference: [],
       first: { nodeId: 'm1', url: 'http://img/m1.png', name: '图m1', assetId: 'a1', mediaType: 'image' },
     });
+  });
+});
+
+describe('readDraftMaterialRefs 角色库草稿参考解析（IKFC1T 修复防回归）', () => {
+  it('合法项完整解析；断言写法回归（raw 取到 data 整体）会在此暴露', () => {
+    const node = mediaNode('d1', {
+      draftMaterialRefs: [
+        { materialId: 'asset-1', url: 'http://img/1.png', name: '角色立绘', mediaType: 'image', role: 'reference' },
+        { materialId: 'asset-2', url: 'http://img/2.png', mediaType: 'video', role: 'first' },
+      ],
+    });
+    expect(readDraftMaterialRefs(node)).toEqual([
+      { materialId: 'asset-1', url: 'http://img/1.png', name: '角色立绘', mediaType: 'image', role: 'reference' },
+      { materialId: 'asset-2', url: 'http://img/2.png', name: 'asset-2', mediaType: 'video', role: 'first' },
+    ]);
+  });
+
+  it('字段缺失/形态非法逐项跳过；无字段返回空数组', () => {
+    expect(readDraftMaterialRefs(undefined)).toEqual([]);
+    expect(readDraftMaterialRefs(mediaNode('d1', {}))).toEqual([]);
+    expect(readDraftMaterialRefs(mediaNode('d1', { draftMaterialRefs: 'not-array' }))).toEqual([]);
+    expect(readDraftMaterialRefs(mediaNode('d1', {
+      draftMaterialRefs: [
+        { url: 'http://img/x.png', mediaType: 'image', role: 'reference' }, // 缺 materialId
+        { materialId: 'asset-3', mediaType: 'audio', role: 'reference' },   // 非法类型
+        { materialId: 'asset-4', url: 'http://img/4.png', mediaType: 'image', role: 'hero' }, // 非法角色
+      ],
+    }))).toEqual([]);
   });
 });
 

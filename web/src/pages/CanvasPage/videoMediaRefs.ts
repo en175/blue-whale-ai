@@ -15,6 +15,11 @@ export type VideoRefRole = 'reference' | 'first' | 'last';
  *  与图片 Dock 同口径——能力侧约束由服务端校验兜底） */
 export const MAX_VIDEO_REFS = 3;
 
+/** IKFC1T：目标是否存在任一有效媒体参考（普通参考或首尾帧；invalid 单列不计）——
+ *  文生视频门控（enabledVideoFollowModes）与面板模式冲突判定共用谓词 */
+export const hasAnyMediaRef = (refs: VideoMediaRefs): boolean =>
+  refs.reference.length > 0 || Boolean(refs.first || refs.last);
+
 /** 视频媒体参考项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入提交字段；
  *  materialId 非空表示角色库素材（asset- 前缀素材库 ID，提交走 *_material_id/referenceMaterials） */
 export interface VideoMediaRef {
@@ -44,10 +49,11 @@ export interface VideoMaterialRefData {
   role: VideoRefRole;
 }
 
-/** 防御性解析草稿 data.draftMaterialRefs：字段缺失或形态非法返回空数组（兼容旧快照，零迁移） */
+/** 防御性解析草稿 data.draftMaterialRefs：字段缺失或形态非法返回空数组（兼容旧快照，零迁移）。
+ *  IKFC1T 修复：断言写法错误导致 raw 取到 node.data 整体（非数组恒早退），角色库参考从未被读到 */
 export function readDraftMaterialRefs(node: Node | undefined): VideoMaterialRefData[] {
   if (!node) return [];
-  const raw = (node.data ?? {}) as Record<string, unknown>['draftMaterialRefs'];
+  const raw = ((node.data ?? {}) as Record<string, unknown>).draftMaterialRefs;
   if (!Array.isArray(raw)) return [];
   const items: VideoMaterialRefData[] = [];
   for (const item of raw) {

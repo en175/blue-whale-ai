@@ -159,7 +159,8 @@ describe('BottomDialog 文本附件（IKDLQG）', () => {
       aspectRatio: '16:9',
       resolution: '720p',
       duration: 5,
-      mode: 'all',
+      // IKFC1T：无媒体输入的附件驱动提交即文生视频模式（新建默认 prompt）
+      mode: 'prompt',
     }, null);
   });
 
