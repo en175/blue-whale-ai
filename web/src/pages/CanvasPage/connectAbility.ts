@@ -62,15 +62,16 @@ export function genKindOf(node: Node | undefined): ConnectGenKind | null {
   return null;
 }
 
-/** 音频生成是否可选：纯图/纯音频置灰；图+视频、音频+图、音频+视频、三者混合可选；
- *  文本卡作为创作上下文连入音频面板（IKFCKS），含文本的组合可选 */
+/** 音频生成是否可选：纯图置灰（音频面板不提供图片入口）；纯音频可选（IKFDFZ 音频参考
+ *  走画布连线，参考音频是音频生成的核心输入）；图+视频、音频+图、音频+视频、三者混合可选
+ *  （多选成员逐个判定，图片成员仍被拒）；文本卡作为创作上下文连入音频面板（IKFCKS），含文本的组合可选 */
 export function isAudioGenEnabled(sourceKinds: ConnectSourceKind[]): boolean {
   const hasImage = sourceKinds.includes('image');
   const hasVideo = sourceKinds.includes('video');
   const hasAudio = sourceKinds.includes('audio');
   const hasText = sourceKinds.includes('text');
+  if (hasAudio) return true;
   if (hasVideo && hasImage) return true;
-  if (hasAudio && (hasImage || hasVideo)) return true;
   if (hasText) return true;
   return false;
 }

@@ -70,7 +70,7 @@ export interface AudioDialogProps extends RefStripOrderProps {
     restoreExisting?: boolean;
     submitting?: boolean;
     saveFailed?: boolean;
-    onParamsChange: (patch: { prompt?: string; modelId?: string; promptDoc?: PromptDoc | null; refs?: AudioRefItem[] }) => void;
+    onParamsChange: (patch: { prompt?: string; modelId?: string; promptDoc?: PromptDoc | null }) => void;
   };
   /** Toast 提示（IKDMQU Q3：恢复的模型不可用时提示，由父级注入） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
@@ -78,10 +78,20 @@ export interface AudioDialogProps extends RefStripOrderProps {
   canvasMedia?: CanvasPickItem[];
   /** 触发「从画布选择」模式：父级应设置 pickMode */
   onPickFromCanvas?: () => void;
-  /** 外部注入的画布选择结果：父级点击音频节点后生成 */
+  /** 外部注入的画布选择结果：父级点击音频节点后生成（自由模式面板用；
+   *  草稿模式的画布选取由父级直接建连线，不再经此通道） */
   externalPick?: { ts: number; item: AudioRefItem } | null;
   /** 是否处于画布选择模式中：用于按钮高亮 */
   pickMode?: boolean;
+  /** 草稿模式的画布参考（IKFDFZ）：父级从「来源→草稿」连线实时推导（id 为来源节点 id），
+   *  与本地上传项合并展示/提交——显示输入 = 实际任务输入 */
+  draftRefs?: AudioRefItem[];
+  /** 连线推导中失效来源（IKFDFZ）：保留原因提示并阻止发送，用户恢复素材或断开连线后解除 */
+  draftRefInvalid?: Array<{ nodeId: string; name: string; reason: string }>;
+  /** 移除画布参考（IKFDFZ）：断开对应连线（保留来源素材与其他目标关系） */
+  onRemoveDraftRef?: (nodeId: string) => void;
+  /** 面板「从画布选择」列表添加参考（IKFDFZ）：草稿模式经父级校验后建连线；自由模式缺省走本地注入 */
+  onAddCanvasRef?: (nodeId: string) => void;
   /** 底部模式切换 → AI 音乐对话框（已废弃：仅保留 prop 兼容父级，不再渲染） */
   onSwitchToMusic?: () => void;
   /** 画布 @ 引用候选 */
@@ -111,6 +121,10 @@ export default function AudioDialog({
   onPickFromCanvas,
   externalPick,
   pickMode,
+  draftRefs,
+  draftRefInvalid,
+  onRemoveDraftRef,
+  onAddCanvasRef,
   mentionItems,
   onMentionCanvas,
   attachments,
@@ -129,7 +143,7 @@ export default function AudioDialog({
   const [modelOpen, setModelOpen] = useState(false);
   /** 放大态：输入区高度占屏幕 2/3；收起回底部默认高度 */
   const [expanded, setExpanded] = useState(false);
-  /** 参考音频列表（本地上传） */
+  /** 参考音频列表（本地上传 + 自由模式的画布拾取；草稿模式的画布参考经 draftRefs 连线推导） */
   const [refs, setRefs] = useState<AudioRefItem[]>(initialRefs ?? []);
   /** 来源菜单（本地上传 / 从画布选择） */
   const [sourceOpen, setSourceOpen] = useState(false);
@@ -141,8 +155,8 @@ export default function AudioDialog({
 
   /** 参考音频时长探测（IKFCKS：放大预览「图标+名称+时长」卡片用；播放随 chip 下线） */
   const durationSources = useMemo(
-    () => refs.map((r) => ({ key: `${r.source}-${r.id}`, src: r.src })),
-    [refs],
+    () => [...(draftRefs ?? []), ...refs].map((r) => ({ key: `${r.source}-${r.id}`, src: r.src })),
+    [draftRefs, refs],
   );
   const durations = useAudioDurations(durationSources);
 
@@ -195,10 +209,13 @@ export default function AudioDialog({
     draftBinding?.onParamsChange({ modelId: id });
   };
 
-  /** 打开来源菜单（本地上传 / 从画布选择），上限 MAX_AUDIO_REFS=3 */
+  /** 画布参考（连线推导）+ 本地上传/自由拾取的合计上限口径 */
+  const totalRefCount = (draftRefs?.length ?? 0) + refs.length;
+
+  /** 打开来源菜单（本地上传 / 从画布选择），上限 MAX_AUDIO_REFS=3（连线推导 + 本地合计） */
   const handlePickAudio = () => {
     if (readOnly) return;
-    if (refs.length >= MAX_AUDIO_REFS) {
+    if (totalRefCount >= MAX_AUDIO_REFS) {
       onToast?.('warn', `参考音频最多 ${MAX_AUDIO_REFS} 段已超出`);
       return;
     }
@@ -217,28 +234,42 @@ export default function AudioDialog({
     onPickFromCanvas?.();
   };
 
-  /** 添加参考项（去重 + 上限），画布选择后关闭面板 */
+  /** 添加参考项（去重 + 上限合计口径，超限明确提示不静默丢弃），画布选择后关闭面板 */
   const addRef = (item: AudioRefItem) => {
-    setRefs((prev) => {
-      if (prev.some((r) => r.id === item.id && r.source === item.source)) return prev;
-      if (prev.length >= MAX_AUDIO_REFS) return prev;
-      return [...prev, item];
-    });
+    if (refs.some((r) => r.id === item.id && r.source === item.source)) {
+      setPickerOpen(false);
+      return;
+    }
+    if (totalRefCount >= MAX_AUDIO_REFS) {
+      onToast?.('warn', `参考音频最多 ${MAX_AUDIO_REFS} 段已超出`);
+      setPickerOpen(false);
+      return;
+    }
+    setRefs((prev) => [...prev, item]);
     setPickerOpen(false);
   };
 
-  /** 外部注入的画布选择结果：去重 + 上限保护 */
+  /** 外部注入的画布选择结果：去重 + 上限保护（自由模式通道；草稿模式画布选取由父级建线） */
   useEffect(() => {
     if (!externalPick) return;
     addRef(externalPick.item);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalPick]);
 
+  /** 画布选取结束（点到节点或空白取消）后收起面板内的选择列表（IKFDFZ：
+   *  草稿模式画布选取由父级直接建线，不经 addRef 的收起路径） */
+  useEffect(() => {
+    if (!pickMode) setPickerOpen(false);
+  }, [pickMode]);
+
   const canvasAudios = (canvasMedia ?? []).filter((m) => m.mediaType === 'audio');
   const namedRefs = refs.map((ref) => {
     const node = ref.source === 'canvas' ? canvasAudios.find((item) => item.id === ref.id) : undefined;
     return node && node.name !== ref.name ? { ...ref, name: node.name } : ref;
   });
+  /** 面板展示/提交的完整参考：画布参考（draftRefs，父级连线推导，名称随来源节点即时刷新）
+   *  + 本地上传/自由拾取项；顺序统一由参考栏 stripOrder 决定 */
+  const allRefs = [...(draftRefs ?? []), ...namedRefs];
 
   const handleAudioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -251,8 +282,11 @@ export default function AudioDialog({
       return false;
     });
     if (valid.length === 0) return;
-    const remaining = MAX_AUDIO_REFS - refs.length;
+    const remaining = MAX_AUDIO_REFS - totalRefCount;
     const accepted = valid.slice(0, remaining);
+    if (accepted.length < valid.length) {
+      onToast?.('warn', `参考音频最多 ${MAX_AUDIO_REFS} 段已超出`);
+    }
     const next: AudioRefItem[] = accepted.map((f, i) => ({
       id: `local-${Date.now()}-${i}`,
       kind: 'audio',
@@ -264,7 +298,13 @@ export default function AudioDialog({
     setRefs((prev) => [...prev, ...next]);
   };
 
+  /** 移除参考（IKFDFZ）：画布参考断开对应连线（保留来源素材与其他目标关系）；
+   *  本地上传回收 blob URL 并仅移除面板本地项 */
   const handleRemoveRef = (id: string) => {
+    if ((draftRefs ?? []).some((r) => r.id === id)) {
+      onRemoveDraftRef?.(id);
+      return;
+    }
     setRefs((prev) => {
       const item = prev.find((r) => r.id === id);
       if (item?.source === 'local' && item.src.startsWith('blob:')) {
@@ -274,11 +314,9 @@ export default function AudioDialog({
     });
   };
 
-  const mixedStrip = useMixedRefStrip(refs.map(r => `${r.source}:${r.id}`), (attachments ?? []).map(a => a.nodeId), { stripOrder, onStripOrderChange });
-  const currentRefs = orderRefStripItems(namedRefs, r => `media:${r.source}:${r.id}`, mixedStrip.order);
+  const mixedStrip = useMixedRefStrip(allRefs.map(r => `${r.source}:${r.id}`), (attachments ?? []).map(a => a.nodeId), { stripOrder, onStripOrderChange });
+  const currentRefs = orderRefStripItems(allRefs, r => `media:${r.source}:${r.id}`, mixedStrip.order);
   const orderedAttachments = orderRefStripItems(attachments ?? [], a => `text:${a.nodeId}`, mixedStrip.order);
-  const refsSignature = JSON.stringify(currentRefs.map(({ file: _file, ...r }) => r));
-  useEffect(() => { draftBinding?.onParamsChange({ refs: currentRefs.filter(r => r.assetId) }); }, [refsSignature]); // eslint-disable-line react-hooks/exhaustive-deps
   const invalidPrompt = (promptDoc !== null && docHasInvalidRef(promptDoc)) || text.length > MAX_INPUT;
   const handleStripReorder = (from: number, to: number) => {
     const { nextMedia: nextRefIds, nextText: nextTextKeys, mediaChanged: refChanged, textChanged } = mixedStrip.reorder(from, to);
@@ -302,8 +340,13 @@ export default function AudioDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** 连线来源失效（IKFDFZ）：保留参考与原因提示并阻止发送，恢复素材或断开连线后解除 */
+  const invalidDraftRefs = (draftRefInvalid ?? []).length > 0;
+  /** 发送防线（IKFDFZ）：正常路径添加侧已拦超限；异常预置/迁移数据超上限时明确阻止，
+   *  不静默截断（与服务端 ≤3 契约同口径） */
+  const overflowRefs = currentRefs.length > MAX_AUDIO_REFS;
   const handleSend = () => {
-    if (!text.trim() || !currentModel || readOnly || invalidPrompt || draftBinding?.saveFailed) return;
+    if (!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || overflowRefs || draftBinding?.saveFailed) return;
     onSend(text.trim(), modelId, currentRefs, promptDoc);
     // 草稿绑定发送后保留输入（卡片原地转生成中，面板进入只读），非草稿保持清空
     if (!draftBinding) {
@@ -338,7 +381,7 @@ export default function AudioDialog({
       <div className={styles.topRow}>
         {/* 参考音频缩略图：编号按参考顺序派生；× 移除面板参考（本地上传回收 blob URL）；
             @ 与手动 @ 使用共享正文编辑器；已选项只插入标签，未落库项不提供身份。 */}
-        {mixedStrip.render(namedRefs.map((r, i) => (
+        {mixedStrip.render(allRefs.map((r, i) => (
           <RefThumbnail
             key={`${r.source}-${r.id}`}
             data-testid="audio-ref-thumb"
@@ -371,7 +414,7 @@ export default function AudioDialog({
           />
         )))}
         <div className={styles.refWrap} ref={sourceWrapRef}>
-          {refs.length < MAX_AUDIO_REFS ? (
+          {totalRefCount < MAX_AUDIO_REFS ? (
             <>
               <button
                 className={`${styles.refBtn} ${pickMode ? styles.refBtnPicking : ''}`}
@@ -409,9 +452,15 @@ export default function AudioDialog({
                         <button
                           key={it.id}
                           className={styles.pickerItem}
-                          onClick={() =>
-                            addRef({ id: it.id, kind: 'audio', name: it.name, src: it.src, source: 'canvas', assetId: it.assetId })
-                          }
+                          onClick={() => {
+                            // 草稿模式经父级校验后建连线（IKFDFZ）；自由模式注入面板本地列表
+                            if (onAddCanvasRef) {
+                              onAddCanvasRef(it.id);
+                              setPickerOpen(false);
+                              return;
+                            }
+                            addRef({ id: it.id, kind: 'audio', name: it.name, src: it.src, source: 'canvas', assetId: it.assetId });
+                          }}
                         >
                           <div className={styles.pickerAudio}>
                             <AudioLines size={14} strokeWidth={2} />
@@ -449,6 +498,16 @@ export default function AudioDialog({
           onChange={(doc, value) => { setPromptDoc(doc); setText(value); draftBinding?.onParamsChange({ prompt: value, promptDoc: doc }); }} />
       </div>
       {invalidPrompt && <div role="alert">正文有已失效的素材标签或超过字数上限，请调整后发送</div>}
+      {overflowRefs && (
+        <div role="alert" data-testid="audio-ref-overflow">
+          {`参考音频最多 ${MAX_AUDIO_REFS} 段，请移除多余参考后发送`}
+        </div>
+      )}
+      {invalidDraftRefs && (
+        <div role="alert" data-testid="audio-ref-invalid">
+          {draftRefInvalid!.map((item) => `${item.name}：${item.reason}，请恢复素材或移除后发送`).join('；')}
+        </div>
+      )}
 
       {modelUnavailable && <div role="alert">模型不可用，请选择可用模型后发送</div>}
 
@@ -498,7 +557,7 @@ export default function AudioDialog({
           <button
             className={`${styles.sendBtn} ${text.trim() && modelId ? styles.sendBtnActive : ''}`}
             data-testid="audio-send"
-            disabled={!text.trim() || !currentModel || readOnly || invalidPrompt || draftBinding?.saveFailed}
+            disabled={!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || overflowRefs || draftBinding?.saveFailed}
             onClick={handleSend}
             title="发送"
           >

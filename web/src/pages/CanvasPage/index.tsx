@@ -16,6 +16,7 @@ import {
   type VideoFollowMode,
 } from './followDialog';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
+import { audioMediaRefsOf, audioRefSourceError, checkAddAudioRef, isAudioDraftNode } from './audioMediaRefs';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
   isVideoDraftNode,
@@ -334,6 +335,33 @@ export default function CanvasPage() {
     }
     return true;
   };
+  /** 音频草稿参考连线校验（IKFDFZ）：仅当目标是音频草稿且来源是媒体节点时介入——
+   *  仅有效音频媒体结果可连入（服务端契约允许单图片参考，但音频面板不提供图片入口）；
+   *  重复素材（按 assetId 归一）与超上限明确拒绝，不静默丢弃输入。
+   *  文本卡等来源与非草稿目标沿用既有语义（文本附件），本函数放行。 */
+  const validateAudioRefConnect = (sourceId: string, targetId: string): boolean => {
+    const target = mediaNodesRef.current.find((n) => n.id === targetId);
+    if (!isAudioDraftNode(target)) return true;
+    if (isGeneratingNode(targetId)) {
+      showToast('warn', '生成中，输入连线只读');
+      return false;
+    }
+    const source = mediaNodesRef.current.find((n) => n.id === sourceId);
+    if (!source) return true;
+    const err = audioRefSourceError(source);
+    if (err) {
+      showToast('warn', err);
+      return false;
+    }
+    const refs = audioMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current).refs;
+    const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>);
+    const msg = checkAddAudioRef(assetId, refs);
+    if (msg) {
+      showToast('warn', msg);
+      return false;
+    }
+    return true;
+  };
 /** 单条连线：只允许素材 → 生成节点；能力不匹配或内容互连静默取消 */
   const findCanvasNode = (id: string): Node | undefined =>
     mediaNodesRef.current.find((n) => n.id === id)
@@ -363,6 +391,7 @@ export default function CanvasPage() {
     }
     if (!validateImageRefConnect(source, target)) return false;
     if (!validateVideoRefConnect(source, target)) return false;
+    if (!validateAudioRefConnect(source, target)) return false;
     addCanvasEdge(source, target);
     return true;
   };
@@ -1818,18 +1847,26 @@ export default function CanvasPage() {
         setAssetPickResult({ ts: Date.now(), assetId: targetId, ref: newRef });
       }
     } else if (pickMode === 'audio' && isReadyMedia && data.mediaType === 'audio') {
-      // 音频生成面板发起的画布音频节点选取 → 注入面板参考音频
-      setAudioPickResult({
-        ts: Date.now(),
-        item: {
-          id: node.id,
-          kind: 'audio',
-          name: (data.fileName as string) || node.id,
-          src: data.src as string,
-          source: 'canvas',
-          assetId: readAssetId(data),
-        },
-      });
+      // 音频生成面板发起的画布音频节点选取：草稿模式（IKFDFZ）校验通过立即建立来源→草稿连线
+      // 并进入既有自动保存（关闭/切换/刷新均按连线恢复）；自由模式注入面板本地列表随发送一次性提交
+      if (audioDraftId) {
+        if (validateAudioRefConnect(node.id, audioDraftId)) {
+          addCanvasEdge(node.id, audioDraftId);
+        }
+        audioPanelHiddenRef.current = true; // 命中节点后防 selection 变化把面板当「切换到其他卡」关闭（同图片/视频分支）
+      } else {
+        setAudioPickResult({
+          ts: Date.now(),
+          item: {
+            id: node.id,
+            kind: 'audio',
+            name: (data.fileName as string) || node.id,
+            src: data.src as string,
+            source: 'canvas',
+            assetId: readAssetId(data),
+          },
+        });
+      }
     }
     setPickMode(null);
     setPickTarget(null);
@@ -2485,7 +2522,9 @@ export default function CanvasPage() {
     }
   }, [videoDraftId, videoSeed, mediaNodes]);
 
-  /** 打开绑定指定草稿的音频面板（IKDMQT）：带入草稿已保存的文字描述与模型 */
+  /** 打开绑定指定草稿的音频面板（IKDMQT）：带入草稿已保存的文字描述与模型。
+   *  IKFDFZ：媒体参考改为「来源→草稿」连线持久化；存量 data.audioRefs 的画布项
+   *  首次打开时迁移为连线（按节点 id 找回来源），迁移后清空旧字段——画布项不再经 seed 恢复 */
   const openAudioDraftDialog = (nodeId: string) => {
     if (!canOpenEditor(nodeId)) return;
     audioPanelHiddenRef.current = false;
@@ -2494,13 +2533,24 @@ export default function CanvasPage() {
     const d = (node?.data ?? {}) as Record<string, unknown>;
     setAudioDraftId(nodeId);
     setAudioPickResult(null);
+    const legacyRefs = Array.isArray(d.audioRefs) ? d.audioRefs as AudioRefItem[] : [];
+    if (legacyRefs.length > 0) {
+      // 迁移是「表达形式转换」而非添加入口（数据在旧机制下已被接纳），不走 checkAddAudioRef——
+      // 失效/重复来源按连线模型落到 invalid/去重兜底，不静默丢弃存量数据
+      for (const item of legacyRefs) {
+        if (item.source !== 'canvas') continue;
+        if (!mediaNodesRef.current.some((n) => n.id === item.id)) continue;
+        addCanvasEdge(item.id, nodeId);
+      }
+      patchMediaNode(nodeId, { audioRefs: [] });
+    }
     setAudioSeed({
       ts: Date.now(),
       text: typeof d.prompt === 'string' ? d.prompt : '',
       modelId: typeof d.draftModelId === 'string' ? d.draftModelId : undefined,
       targetNodeId: nodeId,
       doc: restorePromptDoc(d.promptDoc, d.prompt),
-      refs: Array.isArray(d.audioRefs) ? d.audioRefs as AudioRefItem[] : [],
+      refs: [],
     });
     setShowAudioDialog(true);
     setShowBottomDialog(false);
@@ -2508,15 +2558,15 @@ export default function CanvasPage() {
     setShowMusicDialog(false);
   };
 
-  /** 面板编辑实时写回音频草稿节点（IKDMQT）：参数随节点 data 进入自动保存，刷新后恢复 */
+  /** 面板编辑实时写回音频草稿节点（IKDMQT）：参数随节点 data 进入自动保存，刷新后恢复。
+   *  媒体参考不经此链路（IKFDFZ 起走连线，随画布自动保存） */
   const handleAudioDraftParamsChange = (
     nodeId: string,
-    patch: { prompt?: string; modelId?: string; promptDoc?: PromptDoc | null; refs?: AudioRefItem[] },
+    patch: { prompt?: string; modelId?: string; promptDoc?: PromptDoc | null },
   ) => {
     const data: Record<string, unknown> = {};
     if (patch.prompt !== undefined) data.prompt = patch.prompt;
     if (patch.promptDoc !== undefined) data.promptDoc = patch.promptDoc ? { ...patch.promptDoc, flat: patch.prompt ?? '' } : null;
-    if (patch.refs !== undefined) data.audioRefs = patch.refs;
     if (patch.modelId !== undefined) data.draftModelId = patch.modelId;
     if (Object.keys(data).length === 0) return;
     patchMediaNode(nodeId, data);
@@ -4123,6 +4173,43 @@ export default function CanvasPage() {
     [videoDraftId, edges, mediaNodes],
   );
 
+  /** 草稿绑定面板的音频媒体参考（IKFDFZ）：从「来源→草稿」连线实时推导，面板显示即提交
+   *  references 输入（同源）；连线随画布自动保存持久化，刷新/重开经同一推导恢复展示；
+   *  失效来源保留原因提示并阻止发送，名称随来源卡片改名即时同步。 */
+  const audioDraftMediaRefs = useMemo(
+    () => {
+      if (!audioDraftId) return undefined;
+      return audioMediaRefsOf(audioDraftId, edges, mediaNodes);
+    },
+    [audioDraftId, edges, mediaNodes],
+  );
+
+  /** 音频草稿参考的 AudioRefItem 形态（面板展示/提交共用） */
+  const audioDraftRefItems: AudioRefItem[] | undefined = audioDraftMediaRefs
+    ? audioDraftMediaRefs.refs.map((r) => ({
+      id: r.nodeId,
+      kind: 'audio' as const,
+      name: r.name,
+      src: r.url,
+      source: 'canvas' as const,
+      assetId: r.assetId,
+    }))
+    : undefined;
+
+  /** 面板移除音频参考（IKFDFZ）：断开对应连线——仅改变关系，不删除来源素材卡，
+   *  也不影响其他目标对同一来源的引用（按 (source,target) 精确匹配）。 */
+  const handleRemoveAudioRef = (draftId: string, sourceNodeId: string) => {
+    if (isGeneratingNode(draftId)) return;
+    removeTargetInputs(edgesRef.current.filter(edge => edge.source === sourceNodeId && edge.target === draftId).map(edge => edge.id));
+  };
+
+  /** 面板「从画布选择」列表添加参考（IKFDFZ）：与画布选取/@ 同一校验与建线语义 */
+  const handleAddAudioCanvasRef = (nodeId: string) => {
+    if (!audioDraftId) return;
+    if (!validateAudioRefConnect(nodeId, audioDraftId)) return;
+    addCanvasEdge(nodeId, audioDraftId);
+  };
+
   /** 视频跟随输入框模式门控（IKFC1T）：按「实际成为当前目标参考」的媒体集合判定（连线 +
    *  角色库 material，与面板显示/提交输入同源）；文本附件不属于媒体参考，
    *  不参与判定。存在任一媒体参考时文生视频不可选；移除全部参考后恢复可选但不自动切回。 */
@@ -5224,6 +5311,13 @@ export default function CanvasPage() {
       showToast('warn', '音频生成仅支持引用音频素材');
       return;
     }
+    // IKFDFZ：@ 选取与画布选取同一语义——草稿校验通过立即建连线并自动保存；自由模式注入面板本地列表
+    if (audioDraftId) {
+      if (validateAudioRefConnect(item.id, audioDraftId)) {
+        addCanvasEdge(item.id, audioDraftId);
+      }
+      return;
+    }
     setAudioPickResult({
       ts: Date.now(),
       item: {
@@ -5276,7 +5370,7 @@ export default function CanvasPage() {
         resolved.push({ ...ref, assetId: uploaded.asset_id, src: uploaded.url, file: undefined });
       }
       if (targetNodeId) {
-        handleAudioDraftParamsChange(targetNodeId, { refs: resolved, prompt: text, promptDoc });
+        handleAudioDraftParamsChange(targetNodeId, { prompt: text, promptDoc });
         if (!(await flushCanvasSave(projectId))) return;
       }
       startGenerationJob('audio', { prompt: text, model_id: modelId }, undefined,
@@ -5913,6 +6007,10 @@ export default function CanvasPage() {
             onPickFromCanvas={() => { setPickMode('audio'); setPickTarget('audio'); }}
             externalPick={audioPickResult}
             pickMode={pickMode === 'audio'}
+            draftRefs={audioDraftRefItems}
+            draftRefInvalid={audioDraftMediaRefs?.invalid.length ? audioDraftMediaRefs.invalid : undefined}
+            onRemoveDraftRef={audioDraftId ? ((nodeId) => handleRemoveAudioRef(audioDraftId, nodeId)) : undefined}
+            onAddCanvasRef={audioDraftId ? handleAddAudioCanvasRef : undefined}
             mentionItems={atMentionItems.filter((item) => item.id !== audioDraftId)}
             onMentionCanvas={handleAudioAtMention}
             attachments={audioDraftAttachments}
