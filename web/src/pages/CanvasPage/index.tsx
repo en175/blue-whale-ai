@@ -265,6 +265,8 @@ export default function CanvasPage() {
   const [assetPickResult, setAssetPickResult] = useState<{ ts: number; assetId: string; ref: CanvasGalleryRef } | null>(null);
   /** 画布音频节点选取结果（ts 驱动注入音频对话框参考音频） */
   const [audioPickResult, setAudioPickResult] = useState<{ ts: number; item: AudioRefItem } | null>(null);
+  /** AI 音乐面板 @ 选中结果（ts 驱动注入 MusicDialog 参考音频，IKFCKS） */
+  const [musicPickResult, setMusicPickResult] = useState<{ ts: number; item: AudioRefItem } | null>(null);
   /** 角色库弹窗状态 */
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
   /** 角色库发起目标（决定选中结果注入哪个对话框） */
@@ -4096,6 +4098,13 @@ export default function CanvasPage() {
     [videoDraftId, edges, textNodes],
   );
 
+  /** 音频草稿绑定面板的文本附件实时跟随画布连线（IKFCKS：画布文本卡连线 → FileText 缩略图进参考栏） */
+  const audioDraftAttachments = useMemo(
+    () => (audioDraftId ? textAttachmentsOf(audioDraftId) : undefined),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [audioDraftId, edges, textNodes],
+  );
+
   /** 草稿绑定面板的图片媒体参考（IKDMQR）：按连线实时推导，Dock 显示即提交输入（同源）。
    *  连线持久化后刷新/重开项目同样经此推导恢复展示；名称随来源卡片改名即时同步（IKFA8Y）。 */
   const imageDraftMediaRefs = useMemo(
@@ -5401,6 +5410,25 @@ export default function CanvasPage() {
     });
   };
 
+  /** AI 音乐面板 @ 选中（IKFCKS）：仅音频写入参考（与音频面板同链路，注入 MusicDialog） */
+  const handleMusicAtMention = (item: AtMentionItem) => {
+    if (item.kind !== 'audio' || !item.thumbUrl) {
+      showToast('warn', 'AI 音乐仅支持引用音频素材');
+      return;
+    }
+    setMusicPickResult({
+      ts: Date.now(),
+      item: {
+        id: item.id,
+        kind: 'audio',
+        name: item.name,
+        src: item.thumbUrl,
+        source: 'canvas',
+        assetId: item.assetId,
+      },
+    });
+  };
+
   /** 音频对话发送：创建音频生成任务（无参考素材）。
    *  草稿绑定模式（IKDMQT）：先等待在途保存并落盘当前画布编辑（同图片/视频草稿），
    *  再携带 target_node_id 提交；绑定以 audioDraftId 为准（seed 可能残留旧草稿值），
@@ -6039,6 +6067,8 @@ export default function CanvasPage() {
             pickMode={pickMode === 'audio'}
             mentionItems={atMentionItems.filter((item) => item.id !== audioDraftId)}
             onMentionCanvas={handleAudioAtMention}
+            attachments={audioDraftAttachments}
+            onRemoveAttachment={(id) => removePlanAttachment(audioDraftId ?? undefined, id)}
             onSwitchToMusic={() => {
               // 切走即结束草稿绑定并重置 seed：切回音频面板是干净的非草稿状态
               setAudioSeed({ ts: Date.now() });
@@ -6055,6 +6085,9 @@ export default function CanvasPage() {
             onClose={() => setShowMusicDialog(false)}
             onSend={handleMusicDialogSend}
             canvasMedia={canvasMedia}
+            mentionItems={atMentionItems}
+            onMentionCanvas={handleMusicAtMention}
+            externalPick={musicPickResult}
             onSwitchToAudio={() => {
               setShowMusicDialog(false);
               setShowAudioDialog(true);
