@@ -31,8 +31,13 @@ export function isMaterialLibraryId(id: string | number | undefined): boolean {
 }
 
 /** 来源有效性（不含媒体类型检查，图片/视频/音频参考共用）：待生成/生成中/失败/失效/
- *  上传中/无资产的来源均不可用，返回用户可读拒绝原因；可用返回 null */
-export function baseSourceError(node: NonNullable<Node>): string | null {
+ *  上传中/无资产的来源均不可用，返回用户可读拒绝原因；可用返回 null。
+ *  extraCheck 在资产身份判定之前插入额外拒绝原因（供需要 genStatus 优先于媒体类型的调用方
+ *  保持既有提示顺序），不需要的调用方不传。 */
+export function baseSourceError(
+  node: NonNullable<Node>,
+  extraCheck?: (data: Record<string, unknown>) => string | null,
+): string | null {
   const data = (node.data ?? {}) as Record<string, unknown>;
   if (data.genStatus === 'draft') return '待生成的草稿不能作为参考';
   if (data.genStatus === 'generating') return '生成中的卡片不能作为参考';
@@ -41,25 +46,19 @@ export function baseSourceError(node: NonNullable<Node>): string | null {
   const src = typeof data.src === 'string' ? data.src : '';
   if (src.startsWith('blob:')) return '素材上传中，请稍候再选择';
   if (!src) return '素材已被删除';
+  const extra = extraCheck?.(data);
+  if (extra) return extra;
   if (readAssetId(data) === undefined) return '素材未关联资产，无法作为参考';
   return null;
 }
 
 /** 来源节点能否作为图片参考：返回 null 表示可连入，否则为用户可读拒绝原因。
  *  仅接受已有有效结果的图片媒体节点；待生成/生成中/失败/失效/上传中/无资产身份均拒绝。
- *  检查顺序为既有语义（genStatus 优先于媒体类型），baseSourceError 共享末段判定。 */
+ *  检查顺序为既有语义（genStatus 优先于媒体类型），媒体类型经 baseSourceError 的
+ *  extraCheck 插入资产身份判定之前，与旧内联级联顺序一致。 */
 export function imageRefSourceError(node: Node | undefined): string | null {
   if (!node) return '素材不存在';
-  const data = (node.data ?? {}) as Record<string, unknown>;
-  if (data.genStatus === 'draft' || data.genStatus === 'generating' || data.genStatus === 'failed' || data.genStatus === 'cancelled') {
-    return baseSourceError(node);
-  }
-  if (data.assetMissing) return '素材已被删除';
-  const src = typeof data.src === 'string' ? data.src : '';
-  if (src.startsWith('blob:')) return '素材上传中，请稍候再选择';
-  if (!src) return '素材已被删除';
-  if (data.mediaType !== 'image') return '图片参考仅支持图片素材';
-  return baseSourceError(node);
+  return baseSourceError(node, (data) => (data.mediaType !== 'image' ? '图片参考仅支持图片素材' : null));
 }
 
 /** 来源节点 id → 当前卡片名称（无名称时回落节点 id）。快照参考刷新与连线推导共用同一取值口径 */
