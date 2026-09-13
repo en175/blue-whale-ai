@@ -420,9 +420,8 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
     });
 
     expect(readPromptRefText(container)).toBe('恢复的提示词');
-    // 连线文本附件按当前画布实时展示
-    await vi.waitFor(() => expect(container.textContent).toContain('文本附件（1）'));
-    expect(container.textContent).toContain('故事文案');
+    // 连线文本附件按当前画布实时展示（IKFCKN：FileText 缩略图进参考栏）
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1));
     // 模型/比例/分辨率按草稿参数恢复
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     expect(container.textContent).toContain('1:1');
