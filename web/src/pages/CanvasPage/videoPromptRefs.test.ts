@@ -78,3 +78,18 @@ describe('videoLabelMapOf（图生视频模式 text2video）', () => {
     expect(labelOf('202')).toBeNull();
   });
 });
+
+describe('videoLabelMapOf（文生视频模式 prompt，IKFC1T）', () => {
+  it('任何媒体参考（普通参考与首尾帧）均不接受 → 全部 null；refItems 提交投影不受模式影响', () => {
+    const { labelOf, refItems } = videoLabelMapOf(
+      { ...ALL_REFS, first: KEYFRAME_REFS.first, last: KEYFRAME_REFS.last },
+      'prompt',
+    );
+    expect(labelOf('101')).toBeNull();
+    expect(labelOf('301')).toBeNull();
+    expect(labelOf('401')).toBeNull();
+    expect(labelOf('201')).toBeNull();
+    expect(labelOf('202')).toBeNull();
+    expect(refItems.length).toBeGreaterThan(0);
+  });
+});

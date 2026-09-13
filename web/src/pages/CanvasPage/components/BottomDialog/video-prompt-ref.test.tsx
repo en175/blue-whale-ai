@@ -71,7 +71,7 @@ async function renderDialog(opts: RenderOpts = {}) {
         onClose: vi.fn(),
         onSend,
         initialDoc: opts.initialDoc ?? null,
-        initialParams: opts.initialParams,
+        initialParams: opts.initialParams ?? { mode: 'all' },
         enabledModes: opts.enabledModes as never,
         videoDraftBinding: { onParamsChange },
         videoMediaRefs: opts.videoMediaRefs ?? { reference: [] },

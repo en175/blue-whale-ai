@@ -107,7 +107,7 @@ const handlers = {
 
 interface RenderOptions {
   mediaRefs?: VideoMediaRefs;
-  mode?: 'all' | 'keyframe';
+  mode?: 'all' | 'keyframe' | 'prompt';
   status?: 'draft' | 'generating' | 'failed' | 'cancelled';
 }
 
@@ -190,14 +190,15 @@ describe('IKDMQS 草稿绑定模式渲染', () => {
   });
 
   it('全能参考显示图片和视频缩略图，不显示普通参考角色徽标', async () => {
-    await renderDialog({ mediaRefs: { reference: [ref('m1'), ref('v1', 'video')] } });
+    // IKFC1T：dock 默认改为文生视频，本套用例显式回到全能参考场景
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1'), ref('v1', 'video')] } });
     expect(mountNode.querySelectorAll('[data-testid="dock-video-ref"]')).toHaveLength(2);
     expect(mountNode.querySelector('[data-role="reference"]')).toBeNull();
     expect(menuItem('全能参考')).toBeTruthy();
   });
 
   it('统一草稿绑定：媒体入口为来源菜单（资产/节点/角色库，无上传）', async () => {
-    await renderDialog();
+    await renderDialog({ mode: 'all' });
     expect(menuItem('全能参考')).toBeTruthy();
     // 图片/视频按钮改为弹出来源菜单（画布资产改造融合），不再直达「到节点选择」
     const entryButtons = [...mountNode.querySelectorAll('button')].filter(
@@ -221,7 +222,7 @@ describe('IKDMQS 草稿绑定模式渲染', () => {
 
 describe('IKDMQS 角色槽能力约束', () => {
   it('切换首尾帧模式后，空首帧和尾帧入口同时显示', async () => {
-    await renderDialog({ mediaRefs: { reference: [] } });
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [] } });
     await act(async () => { menuItem('全能参考')!.click(); });
     await act(async () => { menuItem('首尾帧')!.click(); });
     expect(slotButton('添加首帧（从资产中选择 / 到节点选择 / 角色库）')).toBeTruthy();
@@ -282,7 +283,7 @@ describe('IKDMQS 组合冲突与只读', () => {
   });
 
   it('生成中只读：参考可见但无添加/移除入口，发送禁用并提示', async () => {
-    await renderDialog({ mediaRefs: { reference: [ref('m1')] }, status: 'generating' });
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1')] }, status: 'generating' });
     expect(mountNode.querySelector('[data-testid="dock-video-ref"]')).toBeTruthy();
     expect(mountNode.querySelector('button[title="移除（断开连线）"]')).toBeNull();
     expect(slotButton('添加图片参考（从资产中选择 / 到节点选择 / 角色库）')).toBeUndefined();
