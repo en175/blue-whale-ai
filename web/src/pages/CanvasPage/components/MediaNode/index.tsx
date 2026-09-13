@@ -173,9 +173,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   const isEmptyShell = data.emptyShell === true;
   const blockNodeMenu =
-    isEmptyShell || data.genStatus === 'draft' || data.genStatus === 'generating';
+    isEmptyShell || data.genStatus === 'generating';
 
-  /** 右键菜单：空壳 / 生成中 / 待生成不弹 */
+  /** 右键菜单：空壳 / 生成中不弹；草稿可弹（仅创建副本 / 删除） */
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (data.toolMode !== 'select') return;
     e.preventDefault();
@@ -565,22 +565,23 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         <CanvasContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          items={[
-            { key: 'chat', label: '添加到聊天' },
-            { key: 'compliance', label: '合规校验', loading: data.complianceBusy },
-            ...(data.mediaType === 'image' ? [{ key: 'copyImage', label: '复制图片' }] : []),
-            { key: 'duplicate', label: '创建副本' },
-            { key: 'paste', label: '粘贴' },
-            { key: 'delete', label: '删除', danger: true },
-          ]}
+          items={isDraft
+            ? [
+                { key: 'duplicate', label: '创建副本' },
+                { key: 'delete', label: '删除', danger: true },
+              ]
+            : [
+                { key: 'chat', label: '添加到聊天' },
+                { key: 'compliance', label: 'Seedance2.0合规校验', loading: data.complianceBusy },
+                { key: 'duplicate', label: '创建副本' },
+                { key: 'delete', label: '删除', danger: true },
+              ]}
           onClose={() => setContextMenu(null)}
           onSelect={(key) => {
             setContextMenu(null);
             if (key === 'chat') handleAddToChat();
             else if (key === 'compliance') data.onComplianceCheck?.(id);
-            else if (key === 'copyImage') data.onCopyImage?.(id);
             else if (key === 'duplicate') handleDuplicate();
-            else if (key === 'paste') data.onPaste?.(id);
             else if (key === 'delete') handleDelete();
           }}
         />
