@@ -5,7 +5,7 @@
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { arrayMove, splitReorder, useRefStripDrag } from './strip-dnd';
+import { arrayMove, useRefStripDrag, useMixedRefStrip } from './strip-dnd';
 import RefThumbnail from './index';
 
 /** jsdom 无 DragEvent 且 rect 恒 0：手工挂 dataTransfer / clientX，rect 按需 mock */
@@ -88,24 +88,6 @@ describe('arrayMove（IKFCKT）', () => {
     expect(arrayMove(list, 0, 5)).toEqual(['a', 'b']);
     expect(arrayMove(list, -1, 0)).toEqual(['a', 'b']);
     expect(list).toEqual(['a', 'b']);
-  });
-});
-
-describe('splitReorder 统一序列类型拆分（IKFCKT）', () => {
-  it('跨类型拖拽：媒体段与文本段各自保序提取，子序变化精确标记', () => {
-    // 统一序列 [m1, m2, t1, t2]：拖 t2(index 3) 到 m1(index 0) 前 → [t2, m1, m2, t1]
-    const r = splitReorder(['m1', 'm2'], ['t1', 't2'], 3, 0);
-    expect(r.nextMedia).toEqual(['m1', 'm2']);
-    expect(r.nextText).toEqual(['t2', 't1']);
-    expect(r.mediaChanged).toBe(false);
-    expect(r.textChanged).toBe(true);
-  });
-  it('同类型拖拽：仅对应段变化', () => {
-    const r = splitReorder(['m1', 'm2'], ['t1'], 0, 1);
-    expect(r.nextMedia).toEqual(['m2', 'm1']);
-    expect(r.nextText).toEqual(['t1']);
-    expect(r.mediaChanged).toBe(true);
-    expect(r.textChanged).toBe(false);
   });
 });
 
@@ -213,5 +195,54 @@ describe('RefThumbnail dragProps 透传（IKFCKT）', () => {
     act(() => { atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(onInsertRef).toHaveBeenCalledTimes(1);
     expect(dragStartSpy).not.toHaveBeenCalled();
+  });
+});
+
+function MixedHost({ media, text, saved, onChange }: { media: string[]; text: string[]; saved?: string[]; onChange?: (order: string[]) => void }) {
+  const strip = useMixedRefStrip(media, text, { stripOrder: saved, onStripOrderChange: onChange });
+  return createElement('div', null,
+    createElement('button', { onClick: () => strip.reorder(2, 0) }, 'move'),
+    ...strip.render(media.map(id => createElement('span', { 'data-item': true }, `media:${id}`)), text.map(id => createElement('span', { 'data-item': true }, `text:${id}`))),
+  );
+}
+
+describe('混排序列的源同步', () => {
+  it('父级回写媒体边子序时，不把已前移的素材库参考推回末尾', async () => {
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    root = createRoot(mountNode);
+    const saved = ['media:material:m', 'text:t', 'media:node:a', 'media:node:b'];
+    await act(async () => root.render(createElement(MixedHost, { media: ['node:a', 'node:b', 'material:m'], text: ['t'], saved })));
+    await act(async () => root.render(createElement(MixedHost, { media: ['node:b', 'node:a', 'material:m'], text: ['t'], saved })));
+    expect([...mountNode.querySelectorAll('[data-item]')].map(el => el.textContent)).toEqual(['media:material:m', 'text:t', 'media:node:b', 'media:node:a']);
+  });
+
+  it('已保存混排的参考增删会同步新的持久化顺序', async () => {
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    root = createRoot(mountNode);
+    const onChange = vi.fn();
+    const saved = ['text:t', 'media:a', 'media:b'];
+    await act(async () => root.render(createElement(MixedHost, { media: ['a', 'b'], text: ['t'], saved, onChange })));
+    expect(onChange).not.toHaveBeenCalled();
+    await act(async () => root.render(createElement(MixedHost, { media: ['a', 'c'], text: ['t'], saved, onChange })));
+    expect(onChange).toHaveBeenLastCalledWith(['text:t', 'media:a', 'media:c']);
+  });
+
+  it('跨类型混排后增删保留相对位置，外部类型内重排只替换该类型的槽位', async () => {
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    root = createRoot(mountNode);
+    const render = async (media: string[], text: string[]) => act(async () => root.render(createElement(MixedHost, { media, text })));
+    const order = () => [...mountNode.querySelectorAll('[data-item]')].map(el => el.textContent);
+    await render(['a', 'b'], ['t']);
+    act(() => mountNode.querySelector('button')!.click());
+    expect(order()).toEqual(['text:t', 'media:a', 'media:b']);
+    await render(['a', 'b', 'c'], ['t']);
+    expect(order()).toEqual(['text:t', 'media:a', 'media:b', 'media:c']);
+    await render(['a', 'c'], ['t']);
+    expect(order()).toEqual(['text:t', 'media:a', 'media:c']);
+    await render(['c', 'a'], ['t']);
+    expect(order()).toEqual(['text:t', 'media:c', 'media:a']);
   });
 });

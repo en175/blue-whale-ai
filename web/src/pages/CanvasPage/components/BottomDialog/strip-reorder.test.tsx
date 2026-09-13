@@ -154,6 +154,7 @@ describe('BottomDialog 参考栏拖拽换位（IKFCKT）', () => {
     const onReorderMediaRefs = vi.fn();
     await renderDialog({
       mediaRefs: { reference: [edgeRef('r1'), edgeRef('r2'), materialRef('asset-9')] },
+      mode: 'all',
       onReorderMediaRefs,
     });
     wideRect();
@@ -161,6 +162,7 @@ describe('BottomDialog 参考栏拖拽换位（IKFCKT）', () => {
     // 统一序列 [r1, r2, asset-9]：拖 material 项到最前 → 新 key 序 [asset-9, r1, r2]
     dragAndDrop(thumbs[2]!, thumbs[0]!, 'before');
     expect(onReorderMediaRefs).toHaveBeenCalledWith(['asset-9', 'r1', 'r2']);
+    expect(refThumbs().map(el => el.querySelector('[data-testid="ref-thumb-badge"]')?.textContent)).toEqual(['1', '2', '3']);
   });
 
   it('文本附件换位：onReorderAttachments 携带新 nodeId 序列', async () => {
@@ -194,6 +196,16 @@ describe('BottomDialog 参考栏拖拽换位（IKFCKT）', () => {
     wideRect();
     dragAndDrop(textThumbs()[1]!, textThumbs()[0]!, 'before');
     expect(onReorderAttachments).toHaveBeenCalledWith(['t2', 't1']);
+  });
+
+  it('文本跨到普通参考前，DOM改变并能连续拖回', async () => {
+    await renderDialog({ mediaRefs: { reference: [edgeRef('r1')] }, attachments: [attachment('t1', '文本一')] });
+    const order = () => [...mountNode.querySelectorAll('[data-testid="dock-video-ref"], [data-testid="dock-text-ref"]')].map(el => el.getAttribute('title'));
+    wideRect();
+    dragAndDrop(textThumbs()[0]!, refThumbs()[0]!, 'before');
+    expect(order()).toEqual(['文本一', '图r1']);
+    dragAndDrop(textThumbs()[0]!, refThumbs()[0]!, 'after');
+    expect(order()).toEqual(['图r1', '文本一']);
   });
 
   it('生成中只读：draggable=false 且不换位', async () => {

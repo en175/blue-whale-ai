@@ -48,6 +48,7 @@ import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import BottomDialog, { type VideoGenOptions, type VideoGenSeedParams } from './components/BottomDialog';
+import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
 import ImageDialog, { type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
 import { restorePromptDoc, type PromptDoc, type StoredPromptDoc } from '@/lib/prompt-doc';
 import TextGenDialog from './components/TextGenDialog';
@@ -4037,6 +4038,28 @@ export default function CanvasPage() {
     });
   };
 
+  /** Cross-kind presentation order is saved on this target's existing canvas node data. */
+  const refStripOrderOf = (targetId: string | null | undefined): string[] | undefined => {
+    const value = mediaNodes.find(node => node.id === targetId)?.data.referenceStripOrder;
+    if (Array.isArray(value) && value.every(key => typeof key === 'string')) return value;
+    if (!targetId) return undefined;
+    // Existing connected targets already have a durable mixed input order in their incoming edges.
+    return edges.filter(edge => edge.target === targetId).map(edge =>
+      textNodes.some(node => node.id === edge.source) ? `text:${edge.source}` : `media:node:${edge.source}`,
+    );
+  };
+  const handleRefStripOrderChange = (targetId: string, orderedKeys: string[]) => {
+    if (isGeneratingNode(targetId)) return;
+    patchMediaNode(targetId, { referenceStripOrder: orderedKeys });
+    const sources = orderedKeys.flatMap(key => {
+      const source = key.startsWith('text:') ? key.slice(5)
+        : key.startsWith('media:node:') ? key.slice(11)
+        : key.startsWith('media:canvas:') ? key.slice(13) : undefined;
+      return source && edgesRef.current.some(edge => edge.target === targetId && edge.source === source) ? [source] : [];
+    });
+    if (sources.length) reorderTargetEdges(targetId, sources);
+  };
+
   /** 目标面板文本附件重排（IKDLQH；IKFCKT 起由参考栏拖拽换位消费）：经 reorderTargetEdges
    *  重排文本边序，并同步面板 seed 的附件快照顺序（保持 ts 不重挂载面板）。重排随自动保存持久化。
    *  面板快照与当前连线不一致（如打开期间来源被断开）时不重排。 */
@@ -4714,9 +4737,14 @@ export default function CanvasPage() {
     };
     // 草稿绑定模式按连线+material 合并推导；自由模式（工具栏入口无草稿卡）读本地暂存参考
     const freeMode = !videoDraftId;
-    const draftRefs = videoDraftId
+    const sourceDraftRefs = videoDraftId
       ? mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current)
       : videoFreeRefs;
+    const savedStripOrder = videoDraftId ? mediaNodesRef.current.find(node => node.id === videoDraftId)?.data.referenceStripOrder : undefined;
+    const draftRefs = {
+      ...sourceDraftRefs,
+      reference: orderRefStripItems(sourceDraftRefs.reference, videoRefStripKey, Array.isArray(savedStripOrder) ? savedStripOrder : []),
+    };
     // 自由模式发送后任务落生成卡：面板无绑定目标，关闭并清空本地参考（关闭即丢弃语义）
     const finishFreeMode = () => {
       if (!freeMode) return;
@@ -5827,6 +5855,8 @@ export default function CanvasPage() {
         {/* 底部视频对话框（IKDMQS 统一草稿绑定；工具栏入口先建草稿卡再开跟随面板） */}
         {showBottomDialog && (
           <BottomDialog
+            stripOrder={refStripOrderOf(videoDraftId)}
+            onStripOrderChange={videoDraftId ? keys => handleRefStripOrderChange(videoDraftId, keys) : undefined}
             onRemoveAttachment={id => removeVideoTextAttachment(videoDraftId ?? videoSeed?.targetNodeId, id)}
             pendingPlanSyncs={pendingPlanSyncs(videoSeed?.targetNodeId)}
             onSyncPlan={id => syncPlanToTarget(id, videoSeed?.targetNodeId)}
@@ -5896,6 +5926,8 @@ export default function CanvasPage() {
         {/* 底部图片对话框 */}
         {showImageDialog && (
           <ImageDialog
+            stripOrder={refStripOrderOf(imageDraftId)}
+            onStripOrderChange={imageDraftId ? keys => handleRefStripOrderChange(imageDraftId, keys) : undefined}
             key={imageSeed?.ts ?? 0}
             initialText={imageSeed?.text}
             initialDoc={imageSeed?.promptDoc ?? null}
@@ -5992,6 +6024,8 @@ export default function CanvasPage() {
         {/* 底部音频对话框 */}
         {showAudioDialog && (
           <AudioDialog
+            stripOrder={refStripOrderOf(audioDraftId)}
+            onStripOrderChange={audioDraftId ? keys => handleRefStripOrderChange(audioDraftId, keys) : undefined}
             key={audioSeed?.ts ?? 0}
             initialText={audioSeed?.text}
             initialModelId={audioSeed?.modelId}

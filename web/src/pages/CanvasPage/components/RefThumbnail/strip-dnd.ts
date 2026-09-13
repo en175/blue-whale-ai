@@ -1,11 +1,11 @@
 /* ============================================
  * 参考栏拖拽排序（IKFCKT）：统一序列换位的共享交互层（轻量 HTML5 DnD，零新依赖）。
- * 面板把参考栏构造为统一序列（媒体项 + 文本项拼接），itemProps(index) 逐项透传到
+ * 面板按稳定身份顺序构造真实混排参考栏，itemProps(index) 逐项透传到
  * RefThumbnail 根节点；drop 落点按目标项水平前/后半决定插入位，换位回调交回面板，
  * 面板按类型提取新相对顺序分别落到顺序权威源（连入边序 / 草稿 material 序 / 本地 state）。
  * 编号（角标与正文 chip）全部派生显示，重排后经既有 reconcile 链路自动同步。
  * ============================================ */
-import { useRef, useState } from 'react';
+import { cloneElement, useEffect, useRef, useState, type ReactElement } from 'react';
 
 /** 统一序列换位：from/to 为目标槽位（to = 移除被拖项后的最终下标）；越界或原地不动返回原序副本 */
 export function arrayMove<T>(list: readonly T[], from: number, to: number): T[] {
@@ -18,23 +18,82 @@ export function arrayMove<T>(list: readonly T[], from: number, to: number): T[] 
   return next;
 }
 
-/** 统一序列（媒体段 + 文本段拼接）换位后按类型提取子序：返回两段新相对序与各自是否变化；
- *  跨类型拖拽只改变类型内相对顺序（编号按类型独立），子序未变时对应回调不应触发 */
-export function splitReorder(
-  mediaKeys: readonly string[],
-  textKeys: readonly string[],
-  from: number,
-  to: number,
-): { nextMedia: string[]; nextText: string[]; mediaChanged: boolean; textChanged: boolean } {
-  const mediaSet = new Set(mediaKeys);
-  const next = arrayMove([...mediaKeys, ...textKeys], from, to);
-  const nextMedia = next.filter((k) => mediaSet.has(k));
-  const nextText = next.filter((k) => !mediaSet.has(k));
+/** Serializable, target-local presentation order. Media IDs include their source namespace. */
+export interface RefStripOrderProps {
+  stripOrder?: string[];
+  onStripOrderChange?: (orderedKeys: string[]) => void;
+}
+
+/** Keep cross-kind slots while reconciling source additions, removals and external within-kind order. */
+export function reconcileStripOrder(order: readonly string[], media: readonly string[], text: readonly string[]): string[] {
+  const keys = [...media.map(id => `media:${id}`), ...text.map(id => `text:${id}`)];
+  const live = new Set(keys);
+  const next = [...new Set(order)].filter(key => live.has(key));
+  next.push(...keys.filter(key => !next.includes(key)));
+  return next;
+}
+
+/** Project live items into the same stable order used by the DOM and outgoing references. */
+export function orderRefStripItems<T>(items: readonly T[], keyOf: (item: T) => string, order: readonly string[]): T[] {
+  const positions = new Map(order.map((key, index) => [key, index]));
+  return [...items].sort((a, b) => (positions.get(keyOf(a)) ?? order.length) - (positions.get(keyOf(b)) ?? order.length));
+}
+
+export const videoRefStripKey = (ref: { nodeId: string; materialId?: string }): string =>
+  ref.materialId != null ? `media:material:${ref.materialId}` : `media:node:${ref.nodeId}`;
+
+export function useMixedRefStrip(media: string[], text: string[], { stripOrder, onStripOrderChange }: RefStripOrderProps) {
+  const source = [...media.map(id => `media:${id}`), ...text.map(id => `text:${id}`)];
+  const signature = JSON.stringify([media, text, stripOrder]);
+  const [state, setState] = useState(() => ({ ordered: Boolean(stripOrder), signature, media, text, saved: stripOrder, order: reconcileStripOrder(stripOrder ?? [], media, text) }));
+  let order = state.order;
+  if (state.signature !== signature) {
+    order = reconcileStripOrder(JSON.stringify(state.saved) !== JSON.stringify(stripOrder) ? stripOrder ?? [] : state.ordered ? order : [], media, text);
+    // Edge and material authorities report their own sub-orders. Preserve other source slots.
+    const mediaNamespace = (id: string) => id.includes(':') ? id.slice(0, id.indexOf(':')) : '';
+    const commonMedia = media.filter(id => state.media.includes(id));
+    const previousCommonMedia = state.media.filter(id => media.includes(id));
+    const namespacesMoved = JSON.stringify(commonMedia.map(mediaNamespace)) !== JSON.stringify(previousCommonMedia.map(mediaNamespace));
+    const groups: Array<[string, string[], string[]]> = namespacesMoved
+      ? [['media:', media, state.media]]
+      : [...new Set([...media, ...state.media].map(mediaNamespace))].map(namespace => [
+          `media:${namespace ? `${namespace}:` : ''}`,
+          media.filter(id => mediaNamespace(id) === namespace),
+          state.media.filter(id => mediaNamespace(id) === namespace),
+        ]);
+    groups.push(['text:', text, state.text]);
+    for (const [prefix, ids, previous] of groups) {
+      const retained = ids.filter(id => previous.includes(id));
+      const oldRetained = previous.filter(id => ids.includes(id));
+      if (JSON.stringify(retained) !== JSON.stringify(oldRetained)) {
+        const queue = ids.map(id => `${prefix.startsWith('media:') ? 'media:' : 'text:'}${id}`);
+        order = order.map(key => key.startsWith(prefix) ? queue.shift()! : key);
+      }
+    }
+    setState({ ordered: state.ordered || Boolean(stripOrder), signature, media, text, saved: stripOrder, order });
+  }
+  const serializedOrder = JSON.stringify(order);
+  const savedOrder = JSON.stringify(stripOrder);
+  const publishedOrder = useRef(savedOrder);
+  useEffect(() => {
+    if (!state.ordered || !onStripOrderChange || serializedOrder === savedOrder || serializedOrder === publishedOrder.current) return;
+    publishedOrder.current = serializedOrder;
+    onStripOrderChange(order);
+  }, [state.ordered, onStripOrderChange, serializedOrder, savedOrder, order]);
   return {
-    nextMedia,
-    nextText,
-    mediaChanged: nextMedia.join(',') !== mediaKeys.join(','),
-    textChanged: nextText.join(',') !== textKeys.join(','),
+    order,
+    index: (sourceIndex: number) => order.indexOf(source[sourceIndex]!),
+    render: (mediaElements: ReactElement[], textElements: ReactElement[]) => {
+      const elements = [...mediaElements, ...textElements];
+      return order.map(key => cloneElement(elements[source.indexOf(key)]!, { key }));
+    },
+    reorder: (from: number, to: number) => {
+      const next = arrayMove(order, from, to);
+      setState({ ordered: true, signature, media, text, saved: stripOrder, order: next });
+      const nextMedia = next.filter(key => key.startsWith('media:')).map(key => key.slice(6));
+      const nextText = next.filter(key => key.startsWith('text:')).map(key => key.slice(5));
+      return { nextMedia, nextText, mediaChanged: JSON.stringify(nextMedia) !== JSON.stringify(media), textChanged: JSON.stringify(nextText) !== JSON.stringify(text) };
+    },
   };
 }
 

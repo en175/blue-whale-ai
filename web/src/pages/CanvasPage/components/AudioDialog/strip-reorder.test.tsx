@@ -130,8 +130,10 @@ describe('AudioDialog 参考栏拖拽换位（IKFCKT）', () => {
     // → 音频 [n1] 不变、文本 [t2, t1]
     dragAndDrop(textThumbs()[1]!, audioThumbs()[0]!, 'before');
     expect(onReorderAttachments).toHaveBeenCalledWith(['t2', 't1']);
+    expect([...container.querySelectorAll('[data-testid="audio-ref-thumb"], [data-testid="dock-text-ref"]')].map(el => el.getAttribute('title'))).toEqual(['文本二', REF.name, '文本一']);
     // 音频编号不受文本换位影响（音频N 独立编号）
     expect(badgeOf(audioThumbs()[0]!)).toBe('1');
+    expect(textThumbs().map(badgeOf)).toEqual(['1', '2']);
   });
 
   it('生成中只读：draggable=false 且不换位', async () => {

@@ -76,9 +76,10 @@
 ## 9. 拖拽排序（T5 / IKFCKT 定稿）
 
 - **实现形态**：轻量 HTML5 DnD（共享层 `RefThumbnail/strip-dnd.ts` 的 `arrayMove` + `useRefStripDrag`，零新依赖）；`RefThumbnail` 经 `dragProps` 透传拖拽属性到根节点，`img`/`video` 设 `draggable={false}` 防原生图片拖拽劫持手势。按钮点击（mousedown 未移动不触发 dragstart）与拖拽手势天然区分。
-- **统一序列语义**：各面板参考栏构造统一序列 = 媒体项段 + 文本项段拼接（两段保持类型聚合渲染）；拖拽落点在统一序列上计算换位，再按类型提取新相对顺序分别落到顺序权威源。跨类型拖拽只改变类型内相对顺序（编号按类型独立），类型子序未变不触发回调。
+- **统一序列语义**：各面板以稳定身份序驱动真实 DOM 混排，文本可拖到媒体之前或之间；拖拽索引取实际混排序列，不依赖 CSS order。换位后独立提取媒体与文本子序，继续通过既有回调更新各自权威源；子序未变不触发对应类型回调。跨类型位置仍保存，即使两类子序都没有变化。
 - **顺序权威源分派**：连线媒体（图片/视频/音频面板）= 重排目标连入边序（`reorderTargetEdges`，其余边相对位置不变）；视频角色库 material 参考 = 重排草稿 `draftMaterialRefs` 数组序；视频自由模式暂存参考 = 数组整体重排；图片本地文件与音乐/音频面板本地参考 = 面板本地 state；文本附件 = 重排文本连入边序（顺序即生成上下文拼接顺序，与服务端 `text_attachments` 推导同源，契约语义不变）。
-- **编号与正文同步**：编号为派生值（§2），重排权威源后角标与正文 chip 文案经既有 reconcile 链路自动更新；无额外同步逻辑。
+- **目标顺序持久化**：使用现有画布节点 `data.referenceStripOrder: string[]` 保存参考条顺序，不新增数据库表或 API 字段。键为 `text:<nodeId>`、`media:node:<nodeId>`、`media:file:<fileId>`、`media:material:<materialId>`、`media:canvas:<audioId>`、`media:local:<audioId>`；ID 作为完整后缀保留，不按名称或位置推断。组件接口为 `stripOrder?: string[]` / `onStripOrderChange?: (orderedKeys: string[]) => void`。旧目标无此字段时按现有连入边序恢复；绑定目标的混合连入边同步重排，其他目标不变。参考增删时移除失效 key、追加新 key；外部子源重排只替换该子源占据的槽位。未绑定面板沿用本地 state；此字段不使本地 blob 或尚未持久化的参考自动持久化。
+- **编号、正文与请求同步**：编号为派生值（§2），缩略图与正文标签以统一序列中的类型内顺序紧凑重编号，既有 reconcile 链路同步正文。视频媒体的连线与 material 参考虽分开保存，其显示投影和 `references` 请求投影通过同一稳定 key 顺序排列；后端沿用已有请求顺序，不需读取 UI 顺序字段。文本子序仍通过连入边序控制生成上下文拼接。
 - **首尾帧角色槽**（视频面板 keyframe 模式）：首帧/尾帧为固定角色槽（徽标不参与数字编号），不参与拖拽换位；该模式下拖拽域为文本附件序列。
 - **只读态**：生成中/提交中（readOnly）整条参考栏禁拖（`draggable=false`）。
 - **随 T5 定稿处置下线**：BottomDialog 死 prop `onSetVideoRefRole` / `onSetMaterialRefRole`（IKFCKQ 起无 UI 消费）及其 CanvasPage 侧孤儿实现（`handleSetVideoRefRole` / `changeVideoFreeRefRole`）一并移除——角色由「模式 + 目标槽」决定，无跨槽切换入口。

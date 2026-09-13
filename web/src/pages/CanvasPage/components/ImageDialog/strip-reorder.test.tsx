@@ -125,6 +125,7 @@ describe('ImageDialog 参考栏拖拽换位（IKFCKT）', () => {
     dragAndDrop(thumbs[1]!, thumbs[0]!, 'before');
     expect(onReorderMediaRefs).toHaveBeenCalledTimes(1);
     expect(onReorderMediaRefs).toHaveBeenCalledWith(['n2', 'n1']);
+    expect(mediaThumbs().map(badgeOf)).toEqual(['1', '2']);
   });
 
   it('本地模式媒体换位：files 内部重排，编号角标随新序紧凑重派生', async () => {
@@ -170,6 +171,16 @@ describe('ImageDialog 参考栏拖拽换位（IKFCKT）', () => {
     expect(onReorderMediaRefs).not.toHaveBeenCalled();
     expect(onReorderAttachments).toHaveBeenCalledTimes(1);
     expect(onReorderAttachments).toHaveBeenCalledWith(['t2', 't1']);
+  });
+
+  it('跨类型拖拽真正改变 DOM，且可拖回原位', async () => {
+    await renderDialog({ mediaRefs: [{ nodeId: 'same', assetId: 'a1', url: 'https://x/1.png', name: '图片A' }], attachments: [attachment('same', '文本B')] });
+    const order = () => [...container.querySelectorAll('[data-testid="dock-media-ref"], [data-testid="dock-text-ref"]')].map(el => el.getAttribute('title'));
+    wideRect();
+    dragAndDrop(textThumbs()[0]!, mediaThumbs()[0]!, 'before');
+    expect(order()).toEqual(['文本B', '图片A']);
+    dragAndDrop(textThumbs()[0]!, mediaThumbs()[0]!, 'after');
+    expect(order()).toEqual(['图片A', '文本B']);
   });
 
   it('生成中只读态：draggable=false，拖拽不换位', async () => {

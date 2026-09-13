@@ -40,7 +40,7 @@ import PromptRefEditor, {
 import MentionMenu from '../PromptRefEditor/MentionMenu';
 import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
 import RefThumbnail from '../RefThumbnail';
-import { arrayMove, splitReorder, useRefStripDrag, type StripDragItemProps } from '../RefThumbnail/strip-dnd';
+import { useMixedRefStrip, orderRefStripItems, videoRefStripKey, useRefStripDrag, type RefStripOrderProps, type StripDragItemProps } from '../RefThumbnail/strip-dnd';
 import { refIdOf, videoLabelMapOf } from '../../videoPromptRefs';
 import type { ImageTextAttachment } from '../ImageDialog';
 import type { MediaGenStatus } from '../MediaNode';
@@ -102,7 +102,7 @@ export interface VideoDraftParamsPatch {
   mode?: string;
 }
 
-interface BottomDialogProps {
+interface BottomDialogProps extends RefStripOrderProps {
   onClose: () => void;
   /** 发送：提示词（拍平镜像）+ 参数 + 结构化正文（含素材标签时携带，IKFA1O） */
   onSend: (text: string, opts: VideoGenOptions, promptDoc?: PromptDoc | null) => void | Promise<void>;
@@ -188,7 +188,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
   /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -318,12 +318,20 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   /** 已连入的视频参考数（切换到首尾帧/图生视频时不兼容，需先移除） */
   const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image').length;
 
+  const mixedStrip = useMixedRefStrip(
+    isKeyframe ? [] : videoMediaRefs.reference.map(r => videoRefStripKey(r).slice(6)),
+    (attachments ?? []).map(a => a.nodeId), { stripOrder, onStripOrderChange },
+  );
+  const orderedVideoMediaRefs = useMemo(() => ({
+    ...videoMediaRefs,
+    reference: orderRefStripItems(videoMediaRefs.reference, videoRefStripKey, mixedStrip.order),
+  }), [videoMediaRefs, mixedStrip.order]);
   /** IKFA1O 标签映射（唯一口径）：附件区徽标、@ 菜单、正文标签、发送拍平共用。
    *  首尾帧按角色；普通参考按同类型编号；模式不接受的参考身份 → labelOf null（失效，C2/C5）。
    *  IKFA1P：文本附件并入同一映射（编号跟附件顺序 = 画布连入边序，与服务端 text_attachments 同源）。
    *  IKFCKQ：numberMap 为普通参考的同类型数字编号（缩略图圆钮与 label 同源派生）。 */
-  const { labelOf: mediaLabelOf, refItems, numberMap: refNumberMap } = useMemo(() => videoLabelMapOf(videoMediaRefs, selectedMode), [videoMediaRefs, selectedMode]);
-  const orderedTextNodeIds = useMemo(() => (attachments ?? []).map((a) => a.nodeId), [attachments]);
+  const { labelOf: mediaLabelOf, refItems, numberMap: refNumberMap } = useMemo(() => videoLabelMapOf(orderedVideoMediaRefs, selectedMode), [orderedVideoMediaRefs, selectedMode]);
+  const orderedTextNodeIds = useMemo(() => mixedStrip.order.filter(key => key.startsWith('text:')).map(key => key.slice(5)), [mixedStrip.order]);
   const refLabelOf = useCallback((key: PromptRefKey): string | null =>
     key.kind === 'text_ref'
       ? textRefLabelOf(key.id, orderedTextNodeIds)
@@ -750,20 +758,9 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     />
   );
 
-  /** IKFCKT 参考栏拖拽换位：统一序列 = 普通参考 + 文本附件（首尾帧模式仅文本域）；
-   *  换位后按类型提取新相对顺序——媒体回传 onReorderMediaRefs（父级拆分连线边序与
-   *  material 序）、文本回传 onReorderAttachments（顺序即生成上下文拼接顺序）。 */
   const handleStripReorder = (from: number, to: number) => {
-    if (isKeyframe) {
-      const ids = (attachments ?? []).map((a) => a.nodeId);
-      const nextText = arrayMove(ids, from, to);
-      if (nextText.join(',') !== ids.join(',')) onReorderAttachments?.(nextText);
-      return;
-    }
-    const refKeys = videoMediaRefs.reference.map((r) => r.materialId ?? r.nodeId);
-    const textKeys = (attachments ?? []).map((a) => a.nodeId);
-    const { nextMedia, nextText, mediaChanged, textChanged } = splitReorder(refKeys, textKeys, from, to);
-    if (mediaChanged) onReorderMediaRefs?.(nextMedia);
+    const { nextMedia, nextText, mediaChanged, textChanged } = mixedStrip.reorder(from, to);
+    if (mediaChanged) onReorderMediaRefs?.(nextMedia.map(key => key.slice(key.indexOf(':') + 1)));
     if (textChanged) onReorderAttachments?.(nextText);
   };
   const stripDrag = useRefStripDrag({ disabled: readOnly, onReorder: handleStripReorder });
@@ -773,13 +770,13 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
    *  方案附件素材同步期间禁移除）；
    *  IKFCKT：dragProps 按统一序列 stripIndex 传入（base = 普通参考数；首尾帧模式无普通参考 base=0；
    *  i 为文本段内编号下标）；附件顺序仍决定生成上下文拼接顺序 */
-  const renderTextThumb = (a: ImageTextAttachment, i: number, stripIndex: number) => (
+  const renderTextThumb = (a: ImageTextAttachment, stripIndex: number) => (
     <RefThumbnail
       key={a.nodeId}
       data-testid="dock-text-ref"
       kind="text"
       name={a.title}
-      number={i + 1}
+      number={orderedTextNodeIds.indexOf(a.nodeId) + 1}
       textPreview={a.text}
       onRemove={
         !readOnly && (!a.isPromptPlan || !syncingPlan) && onRemoveAttachment
@@ -787,10 +784,10 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
           : undefined
       }
       onInsertRef={!readOnly ? () => insertRefByKey(a.nodeId) : undefined}
-      dragProps={stripDrag.itemProps(stripIndex)}
+      dragProps={stripDrag.itemProps(mixedStrip.index(stripIndex))}
     />
   );
-  const textThumbsAt = (base: number) => (attachments ?? []).map((a, i) => renderTextThumb(a, i, base + i));
+  const textThumbsAt = (base: number) => (attachments ?? []).map((a, i) => renderTextThumb(a, base + i));
 
   return (
     <div
@@ -1020,12 +1017,14 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
             ) : (
               !readOnly && canAddLast && renderSourceMenu('image', 'last', '添加尾帧（从资产中选择 / 到节点选择 / 角色库）', Image, '尾帧')
             )}
-            {textThumbsAt(0)}
+            {mixedStrip.render([], textThumbsAt(0))}
           </div>
         ) : (
           <div className={styles.refSlot}>
-            {videoMediaRefs.reference.map((r, i) => renderRefThumb(r, r.materialId ?? r.nodeId, undefined, stripDrag.itemProps(i)))}
-            {textThumbsAt(videoMediaRefs.reference.length)}
+            {mixedStrip.render(
+              videoMediaRefs.reference.map((r, i) => renderRefThumb(r, r.materialId != null ? `material:${r.materialId}` : `node:${r.nodeId}`, undefined, stripDrag.itemProps(mixedStrip.index(i)))),
+              textThumbsAt(videoMediaRefs.reference.length),
+            )}
             {!readOnly && canAddReference && (
               <>
                 {renderSourceMenu('image', 'reference', '添加图片参考（从资产中选择 / 到节点选择 / 角色库）', Image)}

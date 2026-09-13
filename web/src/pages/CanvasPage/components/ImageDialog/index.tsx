@@ -34,7 +34,7 @@ import PromptRefEditor, {
 import MentionMenu from '../PromptRefEditor/MentionMenu';
 import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
 import RefThumbnail from '../RefThumbnail';
-import { splitReorder, useRefStripDrag } from '../RefThumbnail/strip-dnd';
+import { useMixedRefStrip, orderRefStripItems, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
 import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import type { ImageMediaRef } from '../../mediaRefs';
@@ -74,7 +74,7 @@ export interface ImageTextAttachment {
   text: string;
 }
 
-interface ImageDialogProps {
+interface ImageDialogProps extends RefStripOrderProps {
   onClose: () => void;
   /** 发送：提示词（拍平镜像）+ 模型ID + 分辨率档位 id（如 2k） + 宽高比 + 参考素材列表 + 结构化正文（含素材标签时携带，IKFA1M）（异步：上传完成后 resolve） */
   onSend: (text: string, modelId: string, size: string, ratio: string, files: UploadedFile[], promptDoc?: PromptDoc | null) => Promise<void> | void;
@@ -158,7 +158,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, onReorderMediaRefs, onReorderAttachments, mentionItems: canvasMentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, mentionItems: canvasMentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
   /** 结构化正文（IKFA1M）：文字与素材标签的片段序列；标签绑定稳定身份，编号按当前输入派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -264,6 +264,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
   const maxImages = REF_LIMITS.image;
   /** 连线绑定模式（IKDMQR）：参考区渲染连线推导的 mediaRefs；否则渲染面板本地 files */
   const edgeRefs = mediaRefs ?? null;
+  const mixedStrip = useMixedRefStrip(
+    edgeRefs ? edgeRefs.map(r => `node:${r.nodeId}`) : files.map(f => `file:${f.id}`),
+    (attachments ?? []).map(a => a.nodeId), { stripOrder, onStripOrderChange },
+  );
   const imagesFull = edgeRefs ? edgeRefs.length >= maxImages : imageCount >= maxImages;
 
   /** 有效图片参考（保序去重）+ 展示编号（IKFA1M）：
@@ -273,7 +277,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
   const orderedImageRefs = useMemo(() => {
     const out: Array<{ assetId: string; url: string; name: string; number: number }> = [];
     if (edgeRefs) {
-      edgeRefs.forEach((r) => {
+      orderRefStripItems(edgeRefs, r => `media:node:${r.nodeId}`, mixedStrip.order).forEach((r) => {
         if (out.some((x) => x.assetId === r.assetId)) return;
         out.push({ assetId: r.assetId, url: r.url, name: r.name, number: out.length + 1 });
       });
@@ -289,10 +293,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
       out.push({ assetId, url: f.url, name: f.name, number: n });
     }
     return out;
-  }, [edgeRefs, files]);
+  }, [edgeRefs, files, mixedStrip.order]);
   const orderedAssetIds = useMemo(() => orderedImageRefs.map((r) => r.assetId), [orderedImageRefs]);
   /** IKFA1P：文本附件标签映射（唯一口径）——附件顺序 = 画布连入边序（与服务端 text_attachments 同源） */
-  const orderedTextNodeIds = useMemo(() => (attachments ?? []).map((a) => a.nodeId), [attachments]);
+  const orderedTextNodeIds = useMemo(() => mixedStrip.order.filter(key => key.startsWith('text:')).map(key => key.slice(5)), [mixedStrip.order]);
   const refsLabels = useMemo(
     () => new Map<string, string>([
       ...orderedImageRefs.map((r) => [r.assetId, `图片${r.number}`] as const),
@@ -552,14 +556,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
-  /** 参考栏拖拽换位（IKFCKT）：统一序列 = 媒体项 + 文本项拼接；换位后按类型提取新相对顺序
-   *  分别落顺序权威源——连线媒体重排连入媒体边序（编号=边序派生，自动紧凑重编号）、本地文件
-   *  重排 files、文本重排文本连入边序（顺序即生成上下文拼接顺序）。跨类型拖拽只改变类型内
-   *  相对顺序（编号按类型独立），子序未变不触发回调。 */
   const handleStripReorder = (from: number, to: number) => {
-    const mediaKeys = edgeRefs ? edgeRefs.map((r) => r.nodeId) : files.map((f) => f.id);
-    const textKeys = (attachments ?? []).map((a) => a.nodeId);
-    const { nextMedia, nextText, mediaChanged, textChanged } = splitReorder(mediaKeys, textKeys, from, to);
+    const result = mixedStrip.reorder(from, to);
+    const { nextText, mediaChanged, textChanged } = result;
+    const nextMedia = result.nextMedia.map(key => key.slice(key.indexOf(':') + 1));
     if (mediaChanged) {
       if (edgeRefs) {
         onReorderMediaRefs?.(nextMedia);
@@ -766,8 +766,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
           <div className={styles.previewRow}>
             {/* IKFCKK：附件条替换为共享参考缩略图（三态交互），编号圆钮仅显示数字、
                 底部「图片N」文字标签随旧自绘实现下线；× 走既有断开引用链路、@ 复用记忆光标插入。
-                IKFCKT：媒体与文本拼接为统一序列支持拖拽换位（dragProps 按统一 index 派发） */}
-            {edgeRefs
+                IKFCKT：媒体与文本按稳定身份序混排，dragProps 使用实际 DOM 对应的统一 index */}
+            {mixedStrip.render(edgeRefs
               ? edgeRefs.map((r, i) => (
                   <RefThumbnail
                     key={r.nodeId}
@@ -778,7 +778,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
                     number={refsNumbering.get(r.assetId)}
                     onRemove={!readOnly ? () => onRemoveMediaRef?.(r.nodeId) : undefined}
                     onInsertRef={!readOnly ? () => insertRefByKey(r.assetId) : undefined}
-                    dragProps={stripDrag.itemProps(i)}
+                    dragProps={stripDrag.itemProps(mixedStrip.index(i))}
                   />
                 ))
               : files.map((f, i) => (
@@ -790,21 +790,18 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
                     number={f.type === 'image' ? fileNumberOf.get(f.id) : undefined}
                     onRemove={!readOnly ? () => handleRemoveFile(f.id) : undefined}
                     onInsertRef={!readOnly && f.assetId != null ? () => insertRefByKey(String(f.assetId)) : undefined}
-                    dragProps={stripDrag.itemProps(i)}
+                    dragProps={stripDrag.itemProps(mixedStrip.index(i))}
                   />
-                ))}
-            {/* IKFCKN：文本附件以 FileText 图标缩略图进参考栏统一序列——参与「文本N」独立编号（角标仅数字）、
-                × 仅断开当前连线（保留画布原文本卡；方案附件沿用素材同步期间禁移除的既有约束）、
-                @ 复用记忆光标插入、悬停 200ms 正文预览；附件顺序仍决定生成上下文拼接顺序 */}
-            {(attachments ?? []).map((a, i) => (
+                )),
+            (attachments ?? []).map((a, i) => (
               <RefThumbnail
                 key={a.nodeId}
                 data-testid="dock-text-ref"
                 kind="text"
                 name={a.title}
-                number={i + 1}
+                number={orderedTextNodeIds.indexOf(a.nodeId) + 1}
                 textPreview={a.text}
-                dragProps={stripDrag.itemProps((edgeRefs ? edgeRefs.length : files.length) + i)}
+                dragProps={stripDrag.itemProps(mixedStrip.index((edgeRefs ? edgeRefs.length : files.length) + i))}
                 onRemove={
                   !readOnly && (!a.isPromptPlan || !syncingPlan) && onRemoveAttachment
                     ? () => onRemoveAttachment(a.nodeId)
@@ -812,7 +809,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
                 }
                 onInsertRef={!readOnly ? () => insertRefByKey(a.nodeId) : undefined}
               />
-            ))}
+            )))}
             {/* 附件队列末尾：媒体来源菜单（上传入口退役，IKDLQR/IKDLQL 方向；保留资产选择/节点选择，
                 画布资产改造融合）。图片达上限或生成中只读时隐藏 */}
             {!imagesFull && !readOnly && (
