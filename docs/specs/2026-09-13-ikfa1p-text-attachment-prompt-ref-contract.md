@@ -66,7 +66,9 @@ prompt = prompt_plan_snapshot.providerPrompt ?? input.composed_prompt ?? 既有�
 
 在既有复核链（参考存在性/归属/类型 → 媒体标签复核 → 编译）之后追加：
 
+- 仅含文本标签（无 `asset_ref`）的视频正文可以省略媒体 `references`，使用空媒体映射；仍复核文本目标、来源身份和失效状态。含媒体标签时仍必须携带合法单数组 `references`；显式空数组及非法数组沿既有规则拒绝。
 - 正文含 `text_ref` 时，须携带 `target_node_id`（文本附件由画布连线推导）；未携带 → `400 invalid_reference`（正文文本标签指向无效的文本附件）。
+- 文本身份复核、编号编译、目标检查、方案编译和最终文本冻结必须使用同一次画布读取。并发修改不允许造成正文编号与附件清单跨版本混用；下一次请求重新读取最新画布。
 - `text_ref.node_id` 必须在接纳当下推导的文本附件集合内；不在 → `400 invalid_reference`（同文案）。保存与提交之间的连线变化以接纳当下复核为准（D4）。
 - 带 `invalid_label` 的文本标签 → `400 invalid_reference`（存在已失效的素材标签，请删除后再提交；沿用既有文案）。
 - 编译后正文（含 `文本N` 字样）再次通过既有非空/长度/组合约束；组合长度上限沿用 `max(契约预算, 模型 raw 上限)`。
@@ -95,5 +97,5 @@ prompt = prompt_plan_snapshot.providerPrompt ?? input.composed_prompt ?? 既有�
 - 组件：ImageDialog / BottomDialog 测试（文本插入、失效恢复、发送携带 prompt_doc）。
 - 接纳与快照：`backend/libs/shared/generation/handle-create-generation-job.test.ts`（文本复核、composed_prompt 冻结）。
 - worker：generation-worker / video-job-runner 的 composed_prompt 优先级。
-- 集成：`backend/apps/blue-whale/src/api/canvases/prompt-ref-text.integration.test.ts`；`IKFA1P_DATABASE_URL` 门控 API 级，`IKFA1P_BROWSER=1` 增开真实浏览器→公开 API→隔离库→记录式供应商（生图+生视频：改来源再生成、重复提及、删除/修复、刷新、与媒体及方案混用、重试冻结）。
+- 集成：`backend/apps/blue-whale/src/api/canvases/prompt-ref-text.integration.test.ts`；`IKFA1P_DATABASE_URL` 门控 API 级，`IKFA1P_BROWSER=1` 增开真实浏览器→公开 API→隔离库→记录式供应商（生图：改来源再生成、删除/恢复、刷新及重试冻结；生视频：有/无媒体参考的文本插入、刷新恢复与供应商编号清单）。方案混用另由 API 集成覆盖；重复提及由组件测试覆盖，不代表所有组合已完成浏览器验收。
 - 关联：IKFA1J（父需求）、IKFA1M/N/O（前置票）。
