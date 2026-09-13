@@ -374,6 +374,11 @@ export interface SolutionCard {
   execution_route?: SolutionExecutionRoute;
   delivery_spec?: SolutionDeliverySpec;
   next_steps?: string;
+  /**
+   * 这张卡管的范围（决策十六）。没写就是整条；会话已经交付过卡之后再提的每一张都是续写，
+   * 只管接下来要追加的那一段或那几镜，`label` 是用户读到的「第 2 段」「补 1 镜」。
+   */
+  scope?: { kind: 'whole' | 'continuation'; label: string };
 }
 
 /** 方案卡所在的版本记录。一个会话一条血脉，一版一次提出或修改，同时最多一版 accepted。 */
