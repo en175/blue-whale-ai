@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { typePromptRefText } from './testing/promptRefEditor';
-import imageDialogStyles from './components/ImageDialog/index.module.css';
 import bottomDialogStyles from './components/BottomDialog/index.module.css';
 
 /* IKDLQF 接线测试：连线受控化（水合恢复/自动保存签名）、图片面板附件展示、
@@ -308,9 +307,8 @@ describe('IKDLQF 连线受控化与目标生图接线', () => {
       media.data.onGenImage('m1');
     });
 
-    // 面板打开即展示当前附件（来源标题 + 正文预览）
-    await vi.waitFor(() => expect(container.textContent).toContain('故事文案'));
-    expect(container.textContent).toContain('一只蓝鲸在海里');
+    // 面板打开即展示当前附件（IKFCKN：FileText 缩略图进参考栏，正文在悬停预览）
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1));
 
     // 模型能力就位后，空提示词 + 非空附件正文即可发送（契约：附件可单独驱动生成）
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
@@ -507,47 +505,12 @@ describe('IKDLQG 视频目标接线', () => {
 });
 
 /* IKDLQH 多附件排序接线：面板重排回调 → 该目标文本附件边原地重排（其他边相对位置不变）→
-   自动保存/提交前落盘上送新顺序。面板用真实 ImageDialog/BottomDialog 实现。 */
-
-/** 两个文本节点连入图片目标 m1；t1 同时连入图片目标 m2（验证多目标顺序独立） */
-function seedMultiAttachmentDoc() {
-  canvasDocMock.current = {
-    doc: {
-      id: 11,
-      version: 3,
-      viewport: { x: 0, y: 0, zoom: 1 },
-      nodes: [
-        { id: 't1', type: 'textNode', position: { x: 0, y: 0 }, data: { title: '甲', text: '正文甲' } },
-        { id: 't2', type: 'textNode', position: { x: 40, y: 40 }, data: { title: '乙', text: '正文乙' } },
-        { id: 't3', type: 'textNode', position: { x: 80, y: 80 }, data: { title: '丙', text: '正文丙' } },
-        {
-          id: 'm1',
-          type: 'mediaNode',
-          position: { x: 200, y: 0 },
-          data: { src: 'http://img/m1.png', mediaType: 'image', fileName: '目标图一', assetId: 'a1' },
-        },
-        {
-          id: 'm2',
-          type: 'mediaNode',
-          position: { x: 400, y: 0 },
-          data: { src: 'http://img/m2.png', mediaType: 'image', fileName: '目标图二', assetId: 'a2' },
-        },
-      ],
-      edges: [
-        { id: 'e1', source: 't1', target: 'm1' },
-        { id: 'e2', source: 't2', target: 'm1' },
-        { id: 'e3', source: 't1', target: 'm2' },
-        { id: 'e4', source: 't3', target: 'm2' },
-      ],
-    },
-    assets: {
-      a1: { asset_id: 1, type: 'image', access_url: 'http://img/m1.png', width: 100, height: 100 },
-      a2: { asset_id: 2, type: 'image', access_url: 'http://img/m2.png', width: 100, height: 100 },
-    },
-    refetch: () => Promise.resolve([]),
-    acceptDoc: vi.fn(),
-  };
-}
+   自动保存/提交前落盘上送新顺序。面板用真实 BottomDialog 实现。
+   IKFCKN：图片面板旧「文本附件（N）」区块（含上移/下移）整体下线，图片面板排序用例随之移除，
+   排序能力的补位由 T5 拖拽排序切片承接；本组保留视频面板（BottomDialog）驱动。
+   注：handleReorderAttachments 的「快照与连线不一致不重排」守卫仍在（服务防御），
+   但现存 UI 已无该路径（图片面板排序入口下线；视频面板自 IKDMQS 统一草稿绑定后实时跟随、
+   无快照不一致场景），待 T2/T5 面板交互定稿时一并处置。 */
 
 /** 两个文本节点连入视频目标 v1 */
 function seedMultiVideoDoc() {
@@ -596,69 +559,6 @@ const edgePairs = (list: Array<{ source: string; target: string }>) =>
   list.map((e) => `${e.source}->${e.target}`);
 
 describe('IKDLQH 多附件排序接线', () => {
-  it('图片面板重排：附件列表与 edges 同步为新顺序，自动保存上送；其他目标边序不受影响', async () => {
-    seedMultiAttachmentDoc();
-    await renderPage();
-
-    const media = flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1');
-    await act(async () => {
-      media.data.onGenImage('m1');
-    });
-    await vi.waitFor(() => expect(container.textContent).toContain('文本附件（2）'));
-    expect(panelAttachmentTitles(imageDialogStyles)).toEqual(['甲', '乙']);
-
-    // 首项「下移」：m1 的附件变为 乙→甲
-    await act(async () => {
-      panelMoveButton(imageDialogStyles, 0, '下移').dispatchEvent(
-        new MouseEvent('click', { bubbles: true, cancelable: true }),
-      );
-    });
-
-    // 面板同序重渲染（不重挂载）
-    expect(panelAttachmentTitles(imageDialogStyles)).toEqual(['乙', '甲']);
-    // edges 中 m1 入边原地重排；m2 的入边（e3、e4）相对顺序不变
-    expect(edgePairs(flowProps.current.edges)).toEqual(['t2->m1', 't1->m1', 't1->m2', 't3->m2']);
-
-    // 自动保存上送新顺序
-    await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1), { timeout: 3000 });
-    expect(edgePairs(apiMocks.saveCanvasDoc.mock.calls[0]![1].edges)).toEqual([
-      't2->m1', 't1->m1', 't1->m2', 't3->m2',
-    ]);
-  });
-
-  it('重排后点击生成：提交前落盘携带新顺序（签名一致不再重复保存），随后携带 target_node_id 创建', async () => {
-    seedMultiAttachmentDoc();
-    await renderPage();
-
-    const media = flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1');
-    await act(async () => {
-      media.data.onGenImage('m1');
-    });
-    await vi.waitFor(() => expect(container.textContent).toContain('文本附件（2）'));
-    await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
-
-    await act(async () => {
-      panelMoveButton(imageDialogStyles, 1, '上移').dispatchEvent(
-        new MouseEvent('click', { bubbles: true, cancelable: true }),
-      );
-    });
-    expect(edgePairs(flowProps.current.edges.slice(0, 2))).toEqual(['t2->m1', 't1->m1']);
-
-    // 立即发送（不等 800ms 防抖）：flush 落盘新顺序后再创建任务
-    await act(async () => {
-      sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    expect(apiMocks.saveCanvasDoc.mock.invocationCallOrder[0]!).toBeLessThan(
-      apiMocks.createGenerationJob.mock.invocationCallOrder[0]!,
-    );
-    expect(edgePairs(apiMocks.saveCanvasDoc.mock.calls[0]![1].edges.slice(0, 2))).toEqual([
-      't2->m1', 't1->m1',
-    ]);
-    expect(apiMocks.createGenerationJob.mock.calls[0]![1].target_node_id).toBe('m1');
-  });
-
   it('视频面板重排：末项上移后提交，落盘新顺序并携带 target_node_id', async () => {
     seedMultiVideoDoc();
     await renderPage();
@@ -690,31 +590,6 @@ describe('IKDLQH 多附件排序接线', () => {
     expect(edgePairs(apiMocks.saveCanvasDoc.mock.calls[0]![1].edges)).toEqual(['t2->v1', 't1->v1']);
     expect(apiMocks.createGenerationJob.mock.calls[0]![1].target_node_id).toBe('v1');
   });
-
-  it('面板打开期间来源被断开：面板快照与连线不一致时不重排、不报错', async () => {
-    seedMultiAttachmentDoc();
-    await renderPage();
-
-    const media = flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1');
-    await act(async () => {
-      media.data.onGenImage('m1');
-    });
-    await vi.waitFor(() => expect(container.textContent).toContain('文本附件（2）'));
-
-    // 画布上断开 t1→m1（面板快照仍是 [t1, t2]）
-    await act(async () => {
-      flowProps.current.onEdgesChange([{ type: 'remove', id: 'e1' }]);
-    });
-    expect(edgePairs(flowProps.current.edges)).toEqual(['t2->m1', 't1->m2', 't3->m2']);
-
-    // 过期面板点击「上移」（请求序列 [t2, t1] 与当前连线 [t2] 不一致）→ 不重排
-    await act(async () => {
-      panelMoveButton(imageDialogStyles, 1, '上移').dispatchEvent(
-        new MouseEvent('click', { bubbles: true, cancelable: true }),
-      );
-    });
-    expect(edgePairs(flowProps.current.edges)).toEqual(['t2->m1', 't1->m2', 't3->m2']);
-  });
 });
 
 
@@ -724,8 +599,17 @@ describe('IKDL9U review text input consistency', () => {
     doc.nodes[0].data = { title: '旧文本', html: '<div>蓝鲸 &amp; 海</div><div>夜景</div>' };
     await renderPage();
     await act(async () => flowProps.current.mediaNodes[0].data.onGenImage('m1'));
-    expect(container.textContent).toContain('蓝鲸 & 海');
-    expect(container.textContent).toContain('夜景');
+    // IKFCKN：进栏后正文经悬停 200ms 预览展示（legacy HTML 先提取纯文本）
+    const thumb = container.querySelector('[data-testid="dock-text-ref"]')!;
+    await act(async () => {
+      thumb.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => { setTimeout(resolve, 250); });
+    });
+    const previewText = document.querySelector('[data-testid="ref-thumb-preview"]')?.textContent ?? '';
+    expect(previewText).toContain('蓝鲸 & 海');
+    expect(previewText).toContain('夜景');
   });
   it('pauses autosave for invalid drafts and resumes after correction', async () => {
     // 新连线只允许进入生成节点；普通成品图不再是合法目标。

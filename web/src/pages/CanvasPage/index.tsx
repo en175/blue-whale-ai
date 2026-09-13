@@ -458,6 +458,14 @@ export default function CanvasPage() {
     if (!targetId || isGeneratingNode(targetId)) return;
     removeTargetInputs(edgesRef.current.filter(edge => edge.source === planNodeId && edge.target === targetId).map(edge => edge.id));
   };
+  /** 图片面板移除文本附件（IKFCKN）：× 仅断开当前连线（保留画布原文本卡，走既有 removePlanAttachment 断边链路），
+   *  并同步自由模式的附件快照（快照渲染自 imageSeed，断边不会自动反映到面板）。
+   *  生成中守卫与断边链路对齐：守卫命中时边保留，快照也保持一致（防面板与画布脱节） */
+  const removeImageTextAttachment = (targetId: string | undefined, nodeId: string) => {
+    if (targetId && isGeneratingNode(targetId)) return;
+    removePlanAttachment(targetId, nodeId);
+    setImageSeed((s) => (s ? { ...s, attachments: s.attachments?.filter((a) => a.nodeId !== nodeId) } : s));
+  };
   /** 连线变更守卫（IKDMQQ）：生成中节点的入边删除变更被拦截（剪刀等 remove 路径统一收口）；
    *  放行的删边进撤销栈（IKD0JT），撤销可加回 */
   const guardEdgesChange: typeof onEdgesChange = (changes) => {
@@ -5925,7 +5933,7 @@ export default function CanvasPage() {
             attachments={imageDraftId ? imageDraftAttachments : imageSeedView?.attachments}
             mediaRefs={imageDraftId ? imageDraftMediaRefs : undefined}
             invalidMediaRefs={invalidImageMediaRefs}
-            onRemovePlan={id => removePlanAttachment(imageSeed?.targetNodeId, id)}
+            onRemoveAttachment={id => removeImageTextAttachment(imageDraftId ?? imageSeed?.targetNodeId, id)}
             pendingPlanSyncs={pendingPlanSyncs(imageSeed?.targetNodeId)}
             onSyncPlan={id => syncPlanToTarget(id, imageSeed?.targetNodeId)}
             syncingPlan={applying}
@@ -5943,11 +5951,6 @@ export default function CanvasPage() {
                       ?.genStatus as MediaGenStatus | undefined,
                     onParamsChange: (patch) => handleImageDraftParamsChange(imageDraftId, patch),
                   }
-                : undefined
-            }
-            onReorderAttachments={
-              imageSeed?.targetNodeId
-                ? (ids) => handleReorderAttachments(imageSeed.targetNodeId!, ids)
                 : undefined
             }
             onClose={() => { imagePanelHiddenRef.current = true; setShowImageDialog(false); setPickMode(null); setPickTarget(null); clearPendingImageCanvasRefs(); setImagePickResult(null); }}

@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
-import { typePromptRefText } from './testing/promptRefEditor';
+import { readPromptRefText, typePromptRefRaw, typePromptRefText } from './testing/promptRefEditor';
 
 /* IKDMQR 图片参考连线与 Dock 双向同步：
    连线 → Dock 显示同一输入并随提交消费；Dock 选择/移除 ↔ 画布连线双向同步；
@@ -294,9 +294,8 @@ describe('IKDMQR 连线 → Dock 同步与提交消费', () => {
     await connect('t1', draftId);
     await connect('m1', draftId);
 
-    // 文本附件区照常展示；图片参考区显示连线素材
-    await vi.waitFor(() => expect(container.textContent).toContain('文本附件（1）'));
-    expect(container.textContent).toContain('故事文案');
+    // 参考栏文本缩略图照常展示（IKFCKN 进栏，旧「文本附件（N）」区块下线）；图片参考区显示连线素材
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1));
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
 
     // 空提示词 + 非空附件正文即可发送；提交同时携带文本目标与图片参考
@@ -309,6 +308,36 @@ describe('IKDMQR 连线 → Dock 同步与提交消费', () => {
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.target_node_id).toBe(draftId);
     expect(payload.input_asset_ids).toEqual(['a1']);
+  });
+
+  it('点击文本缩略图 ×：仅断开当前连线（画布原文本卡保留），正文提及随之失效（IKFCKN）', async () => {
+    await renderPage();
+    const draftId = await createDraft();
+
+    await connect('t1', draftId);
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1));
+
+    // 正文经 @ 菜单插入文本标签（建立对 t1 的提及）
+    await typePrompt('按');
+    await typePromptRefRaw(container, '@');
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-ref-item"]')).toBeTruthy());
+    await act(async () => {
+      (container.querySelector('[data-testid="mention-ref-item"]') as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('按文本1'));
+
+    // 点击 ×：仅断开当前连线，不删画布文本卡
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="dock-text-ref"] button[title="移除"]')!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await vi.waitFor(() => expect(edgePairs()).not.toContain(`t1->${draftId}`));
+    expect(flowProps.current.textNodes.some((n: Node) => n.id === 't1')).toBe(true);
+    // 面板实时跟随：缩略图消失；正文提及沿用既有失效生命周期（灰显原编号、阻止发送）
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="dock-text-ref"]')).toBeNull());
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('按已失效：原文本1'));
+    expect(sendButton().disabled).toBe(true);
   });
 });
 
@@ -624,7 +653,7 @@ describe('IKDMQR 参考关系持久化恢复', () => {
       flowProps.current.onNodeClick(draft);
     });
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
-    expect(container.textContent).toContain('文本附件（1）');
+    expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1);
 
     // 提交输入与 Dock 显示一致（先落盘后建任务）
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));

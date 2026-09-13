@@ -641,13 +641,21 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
     await act(async () => {
       (mediaNode('img-a').data.onGenImage as (id: string) => void)('img-a');
     });
-    await vi.waitFor(() => expect(container.textContent).toContain('原附件标题'));
+    // IKFCKN：进栏后附件标题承载在文本缩略图 title（正文在悬停预览）
+    const textThumb = () => container.querySelector('[data-testid="dock-text-ref"]') as HTMLElement | null;
+    await vi.waitFor(() => expect(textThumb()?.getAttribute('title')).toBe('原附件标题'));
     const edges = flowProps.current.edges;
 
     await renameVia('t1', 'text', '新附件标题');
-    expect(container.textContent).toContain('新附件标题');
-    expect(container.textContent).not.toContain('原附件标题');
-    expect(container.textContent).toContain('正文');
+    await vi.waitFor(() => expect(textThumb()?.getAttribute('title')).toBe('新附件标题'));
+    // 正文快照不随改名变化：悬停预览仍展示原文
+    await act(async () => {
+      textThumb()!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => { setTimeout(resolve, 250); });
+    });
+    expect(document.querySelector('[data-testid="ref-thumb-preview"]')?.textContent).toContain('正文');
     expect(flowProps.current.edges).toEqual(edges);
   });
 
