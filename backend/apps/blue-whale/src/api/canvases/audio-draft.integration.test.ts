@@ -278,6 +278,27 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
       { role: "reference", type: "audio", asset_id: audioA },
     ]);
 
+    // 合法上限：满 3 段音频同样通过并按提交顺序冻结（边界值 = 契约上限，不只测上限之下）
+    const audioC = await createAudioAsset(projectId, "https://example.com/ikfdfz-c.mp3");
+    const atCap = await createJob(projectId, {
+      type: "audio",
+      target_node_id: "a4",
+      expected_output_count: 1,
+      parameters: audioParameters,
+      references: [
+        { role: "reference", type: "audio", asset_id: audioC },
+        { role: "reference", type: "audio", asset_id: audioA },
+        { role: "reference", type: "audio", asset_id: audioB },
+      ],
+    });
+    expect(atCap.code).toBe(200);
+    const capJob = await readJob(atCap.data.generation_job_id);
+    expect(capJob!.input.references).toEqual([
+      { role: "reference", type: "audio", asset_id: audioC },
+      { role: "reference", type: "audio", asset_id: audioA },
+      { role: "reference", type: "audio", asset_id: audioB },
+    ]);
+
     // 超限（>3）/ 音频与图片混用 / 视频参考：服务端按契约明确拒绝，不静默截断
     const before = await prisma.client.generation_jobs.count({ where: { project_id: BigInt(projectId) } });
     const overflow = await createJob(projectId, {

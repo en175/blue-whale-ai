@@ -367,6 +367,46 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     expect(container.querySelector('[data-testid="audio-input"]')?.textContent).toContain('空白隐藏描述');
   });
 
+  it('保存失败：选择保留并显示未保存，阻止切换其他目标与发送，允许关闭重开原目标，重试成功恢复', async () => {
+    seedDoc({ secondDraft: true });
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+    await typePrompt('保存前编辑');
+
+    // 保存持续失败：选取仍立即建线并保留在页面
+    apiMocks.saveCanvasDoc.mockImplementation(() => Promise.reject(new Error('boom')));
+    await pickCanvasNode('u1');
+    expect(edgePairs()).toEqual(['u1->d1']);
+
+    // 自动保存失败：显示未保存；连线与面板参考保留
+    await vi.waitFor(() => expect(container.textContent).toContain('保存失败，请重试'), { timeout: 3000 });
+    expect(edgePairs()).toEqual(['u1->d1']);
+    expect(refNames()).toEqual(['海浪声']);
+
+    // 阻止切换其他编辑目标（B 不打开，A 面板保持）；阻止发送（提示词非空，仅因未保存被禁）
+    await clickNode('d2');
+    expect(refNames()).toEqual(['海浪声']);
+    expect(container.querySelector('[data-testid="audio-input"]')?.textContent).toContain('保存前编辑');
+    expect(sendButton().disabled).toBe(true);
+
+    // 允许关闭并重开原目标：编辑仍在
+    await closePanel();
+    expect(container.querySelector('[data-testid="audio-send"]')).toBeNull();
+    await clickNode('d1');
+    await vi.waitFor(() => expect(refNames()).toEqual(['海浪声']), { timeout: 3000 });
+
+    // 重试成功：落盘载荷含参考连线，恢复可切换可发送
+    apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]', edges: '[]' }));
+    const retry = [...container.querySelectorAll('button')].find((b) => b.textContent === '重试保存')!;
+    await act(async () => { retry.click(); });
+    await vi.waitFor(() => expect(container.textContent).toContain('已保存'));
+    expect(lastSavedPayload().edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`)).toEqual(['u1->d1']);
+    expect(sendButton().disabled).toBe(false);
+    await clickNode('d2');
+    await vi.waitFor(() => expect(refNames()).toEqual([]));
+  });
+
   it('A→B→A 目标隔离：A 的参考与提示词保留，B 不串入 A；B 独立积累自己的参考', async () => {
     seedDoc({ secondDraft: true });
     await renderPage();
