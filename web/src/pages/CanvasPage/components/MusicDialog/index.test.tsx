@@ -186,3 +186,20 @@ describe('MusicDialog 参考缩略图条（IKFCKS）', () => {
     expect(refs).toEqual([CANVAS_REF]);
   });
 });
+
+describe('MusicDialog 曲风键盘语义', () => {
+  it('Enter 发送，Shift+Enter 保留换行', async () => {
+    const onSend = vi.fn();
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    await act(async () => root.render(createElement(MusicDialog, { onClose: vi.fn(), onSend, canvasMedia: [], onSwitchToAudio: vi.fn() })));
+    await typeText('轻快爵士');
+    const input = container.querySelector<HTMLElement>('[contenteditable="true"]')!;
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', shiftKey: true, bubbles: true, cancelable: true })));
+    expect(onSend).not.toHaveBeenCalled();
+    expect(readPromptRefText(container)).toBe('轻快爵士\n');
+    await typeText('舒缓节奏');
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true })));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0][0]).toBe('轻快爵士\n舒缓节奏');
+  });
+});

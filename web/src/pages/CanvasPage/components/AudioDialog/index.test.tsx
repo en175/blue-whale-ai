@@ -8,7 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AudioDialog, { type AudioRefItem } from './index';
 import type { ImageTextAttachment } from '../ImageDialog';
-import { readPromptRefText, typePromptRefText, promptRefEditorInstance } from '../../testing/promptRefEditor';
+import { readPromptRefText, typePromptRefText, typePromptRefRaw, promptRefEditorInstance } from '../../testing/promptRefEditor';
 import type { AtMentionItem } from '../../atMention';
 
 const fetchGenerationModels = vi.hoisted(() =>
@@ -279,5 +279,39 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
     expect(atButton('雨声')).not.toBeNull();
     await act(async () => atButton('雨声')!.click());
     expect(readPromptRefText(container)).toBe('音频1');
+  });
+});
+
+describe('IKFCJG 异步失效换绑', () => {
+  it('失效 A 换绑未加入参考栏的 B：成功后原位替换，下一次手动 @ 不复用旧换绑点', async () => {
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    const b: AudioRefItem = { ...CANVAS_REF, id: 'b', assetId: '602', name: '风声' };
+    const onMentionCanvas = vi.fn();
+    const onSend = vi.fn();
+    const props = { onClose: vi.fn(), onSend, initialRefs: [CANVAS_REF], initialDoc: {
+      version: 1 as const, segments: [{ kind: 'text' as const, text: '前' }, { kind: 'asset_ref' as const, asset_id: '601', label: '音频1' }, { kind: 'text' as const, text: '后' }],
+    }, mentionItems: [{ id: 'b', kind: 'audio' as const, name: '风声', assetId: '602', thumbUrl: b.src }], onMentionCanvas };
+    await act(async () => root.render(createElement(AudioDialog, props)));
+    await act(async () => removeButton('雨声白噪音')!.click());
+    await act(async () => container.querySelector<HTMLElement>('[data-testid="asset-ref-invalid"]')!.click());
+    const search = document.querySelector<HTMLInputElement>('input[placeholder="搜索"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, '风声');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="at-mention-canvas-item"]')].find(n => n.textContent === '风声')!.click());
+    expect(onMentionCanvas).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="asset-ref-invalid"]')).not.toBeNull();
+    await act(async () => root.render(createElement(AudioDialog, { ...props, externalPick: { ts: 1, item: b } })));
+    expect(readPromptRefText(container)).toBe('前音频1后');
+    expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeNull();
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.disabled).toBe(false);
+    await typePromptRefRaw(container, '@风声');
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="at-mention-canvas-item"]')].find(n => n.textContent === '风声')!.click());
+    expect(readPromptRefText(container)).toBe('前音频1后音频1');
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.click());
+    expect(onSend.mock.calls[0][3].segments.filter((s: { kind: string }) => s.kind === 'asset_ref')).toEqual([
+      { kind: 'asset_ref', asset_id: '602', label: '音频1' }, { kind: 'asset_ref', asset_id: '602', label: '音频1' },
+    ]);
   });
 });

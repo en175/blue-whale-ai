@@ -18,16 +18,17 @@ interface Props {
   mentionItems?: AtMentionItem[];
   onMentionCanvas?: (item: AtMentionItem) => void;
   onChange: (doc: PromptDoc, text: string) => void;
+  onSubmit?: () => void;
 }
 export interface AudioPromptEditorHandle { insert: (key: PromptRefKey) => void; clear: () => void }
 
 /** 音频与曲风共享正文编辑：身份取自已接纳参考；新选择成功出现在参考区后才落标签。 */
 export default forwardRef<AudioPromptEditorHandle, Props>(function AudioPromptEditor(
-  { refs, attachments = [], initialDoc, initialText, readOnly, placeholder, className, mentionItems = [], onMentionCanvas, onChange }, ref,
+  { refs, attachments = [], initialDoc, initialText, readOnly, placeholder, className, mentionItems = [], onMentionCanvas, onChange, onSubmit }, ref,
 ) {
   const editor = useRef<PromptRefEditorHandle>(null);
   const anchor = useRef<HTMLDivElement>(null);
-  const pending = useRef<PromptRefKey | null>(null);
+  const pending = useRef<{ key: PromptRefKey; replacement: string | null } | null>(null);
   const [mention, setMention] = useState<MentionState>({ open: false, query: '' });
   const [replacement, setReplacement] = useState<string | null>(null);
   const labels = new Map<string, string>();
@@ -47,9 +48,12 @@ export default forwardRef<AudioPromptEditorHandle, Props>(function AudioPromptEd
     return valid ? labels.get(key.id) ?? null : null;
   };
   useEffect(() => {
-    if (pending.current && labelOf(pending.current)) {
-      editor.current?.insertRefAtPending(pending.current);
+    const accepted = pending.current;
+    if (accepted && labelOf(accepted.key)) {
+      if (accepted.replacement) editor.current?.replaceRefAt(accepted.replacement, accepted.key);
+      else editor.current?.insertRefAtPending(accepted.key);
       pending.current = null;
+      setReplacement(null);
     }
     // 身份序列变化才确认本次异步添加成功。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -66,7 +70,13 @@ export default forwardRef<AudioPromptEditorHandle, Props>(function AudioPromptEd
     return [...selected, ...mentionItems.filter(item => !selected.some(s => s.kind === item.kind && s.id === item.id))];
   }, [refs, attachments, mentionItems]);
   const close = () => { editor.current?.dismissMention(); setReplacement(null); setMention({ open: false, query: '' }); };
-  return <div ref={anchor}>
+  return <div ref={anchor} onKeyDownCapture={event => {
+    if (!onSubmit || readOnly || mention.open || event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    if (!(event.target instanceof HTMLElement) || event.target.getAttribute('contenteditable') !== 'true') return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSubmit();
+  }}>
     <PromptRefEditor ref={editor} initialDoc={initialDoc} initialText={initialText} readOnly={readOnly}
       placeholder={placeholder} className={className} labels={labels} refsMeta={meta}
       labelOf={labelOf} reconcileKey={signature}
@@ -82,7 +92,7 @@ export default forwardRef<AudioPromptEditorHandle, Props>(function AudioPromptEd
           close();
         } else if (onMentionCanvas && key.id && (item.kind === 'text' || refs.length < 3)) {
           editor.current?.consumeMentionForPendingInsert();
-          pending.current = key;
+          pending.current = { key, replacement };
           onMentionCanvas(item);
           setMention({ open: false, query: '' });
         }
