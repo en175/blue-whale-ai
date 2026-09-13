@@ -259,8 +259,10 @@ function RefCursorNavPlugin() {
   useEffect(() => {
     const $collapseTo = (node: LexicalNode, offset: number, type: 'text' | 'node' | 'element') => {
       const sel = $createRangeSelection();
-      sel.anchor.set(node.getKey(), offset, type);
-      sel.focus.set(node.getKey(), offset, type);
+      // 'node' 落非文本兄弟边界为 Lexical 运行时支持的取值，Point.set 类型签名未覆盖——受控收窄
+      const pointType = type as 'text' | 'element';
+      sel.anchor.set(node.getKey(), offset, pointType);
+      sel.focus.set(node.getKey(), offset, pointType);
       $setSelection(sel);
     };
     const $placeBefore = (ref: AssetRefNode) => {
