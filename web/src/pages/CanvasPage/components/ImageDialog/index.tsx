@@ -34,6 +34,7 @@ import PromptRefEditor, {
 import MentionMenu from '../PromptRefEditor/MentionMenu';
 import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
 import RefThumbnail from '../RefThumbnail';
+import { splitReorder, useRefStripDrag } from '../RefThumbnail/strip-dnd';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
 import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import type { ImageMediaRef } from '../../mediaRefs';
@@ -123,6 +124,10 @@ interface ImageDialogProps {
   invalidMediaRefs?: Array<{ nodeId: string; name: string }>;
   /** 移除某个图片参考（IKDMQR）：携带来源节点 id，父级断开对应连线 */
   onRemoveMediaRef?: (sourceNodeId: string) => void;
+  /** 参考栏拖拽换位（IKFCKT）：连线模式媒体换位 = 按新顺序重排目标连入媒体边序（编号=边序派生自动重编号） */
+  onReorderMediaRefs?: (orderedNodeIds: string[]) => void;
+  /** 参考栏拖拽换位（IKFCKT）：文本附件换位 = 按新顺序重排文本连入边序（顺序即生成上下文拼接顺序） */
+  onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 画布 @ 引用候选（当前画布可引用节点） */
   mentionItems?: AtMentionItem[];
   /** 选中 @ 素材后写入参考区 */
@@ -153,7 +158,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, mentionItems: canvasMentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, onReorderMediaRefs, onReorderAttachments, mentionItems: canvasMentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
   /** 结构化正文（IKFA1M）：文字与素材标签的片段序列；标签绑定稳定身份，编号按当前输入派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -547,6 +552,28 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
+  /** 参考栏拖拽换位（IKFCKT）：统一序列 = 媒体项 + 文本项拼接；换位后按类型提取新相对顺序
+   *  分别落顺序权威源——连线媒体重排连入媒体边序（编号=边序派生，自动紧凑重编号）、本地文件
+   *  重排 files、文本重排文本连入边序（顺序即生成上下文拼接顺序）。跨类型拖拽只改变类型内
+   *  相对顺序（编号按类型独立），子序未变不触发回调。 */
+  const handleStripReorder = (from: number, to: number) => {
+    const mediaKeys = edgeRefs ? edgeRefs.map((r) => r.nodeId) : files.map((f) => f.id);
+    const textKeys = (attachments ?? []).map((a) => a.nodeId);
+    const { nextMedia, nextText, mediaChanged, textChanged } = splitReorder(mediaKeys, textKeys, from, to);
+    if (mediaChanged) {
+      if (edgeRefs) {
+        onReorderMediaRefs?.(nextMedia);
+      } else {
+        setFiles((prev) => nextMedia.flatMap((id) => {
+          const found = prev.find((f) => f.id === id);
+          return found ? [found] : [];
+        }));
+      }
+    }
+    if (textChanged) onReorderAttachments?.(nextText);
+  };
+  const stripDrag = useRefStripDrag({ disabled: readOnly, onReorder: handleStripReorder });
+
   /** 发送（清晰度传分辨率档位 id，对应生成接口 parameters.size） */
   const handleSend = async () => {
     if (!canSend) return;
@@ -738,9 +765,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
         <div className={styles.topRow}>
           <div className={styles.previewRow}>
             {/* IKFCKK：附件条替换为共享参考缩略图（三态交互），编号圆钮仅显示数字、
-                底部「图片N」文字标签随旧自绘实现下线；× 走既有断开引用链路、@ 复用记忆光标插入 */}
+                底部「图片N」文字标签随旧自绘实现下线；× 走既有断开引用链路、@ 复用记忆光标插入。
+                IKFCKT：媒体与文本拼接为统一序列支持拖拽换位（dragProps 按统一 index 派发） */}
             {edgeRefs
-              ? edgeRefs.map((r) => (
+              ? edgeRefs.map((r, i) => (
                   <RefThumbnail
                     key={r.nodeId}
                     data-testid="dock-media-ref"
@@ -750,9 +778,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
                     number={refsNumbering.get(r.assetId)}
                     onRemove={!readOnly ? () => onRemoveMediaRef?.(r.nodeId) : undefined}
                     onInsertRef={!readOnly ? () => insertRefByKey(r.assetId) : undefined}
+                    dragProps={stripDrag.itemProps(i)}
                   />
                 ))
-              : files.map((f) => (
+              : files.map((f, i) => (
                   <RefThumbnail
                     key={f.id}
                     kind={f.type}
@@ -761,6 +790,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
                     number={f.type === 'image' ? fileNumberOf.get(f.id) : undefined}
                     onRemove={!readOnly ? () => handleRemoveFile(f.id) : undefined}
                     onInsertRef={!readOnly && f.assetId != null ? () => insertRefByKey(String(f.assetId)) : undefined}
+                    dragProps={stripDrag.itemProps(i)}
                   />
                 ))}
             {/* IKFCKN：文本附件以 FileText 图标缩略图进参考栏统一序列——参与「文本N」独立编号（角标仅数字）、
@@ -774,6 +804,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
                 name={a.title}
                 number={i + 1}
                 textPreview={a.text}
+                dragProps={stripDrag.itemProps((edgeRefs ? edgeRefs.length : files.length) + i)}
                 onRemove={
                   !readOnly && (!a.isPromptPlan || !syncingPlan) && onRemoveAttachment
                     ? () => onRemoveAttachment(a.nodeId)

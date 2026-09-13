@@ -101,9 +101,7 @@ const handlers = {
   onPickFromAssets: vi.fn(),
   onOpenCharacterLibrary: vi.fn(),
   onRemoveVideoRef: vi.fn(),
-  onSetVideoRefRole: vi.fn(),
   onRemoveMaterialRef: vi.fn(),
-  onSetMaterialRefRole: vi.fn(),
   onToast: vi.fn(),
 };
 
@@ -127,9 +125,7 @@ async function renderDialog({ mediaRefs, status, mode }: RenderOptions = {}) {
         onPickFromAssets: handlers.onPickFromAssets,
         onOpenCharacterLibrary: handlers.onOpenCharacterLibrary,
         onRemoveVideoRef: handlers.onRemoveVideoRef,
-        onSetVideoRefRole: handlers.onSetVideoRefRole,
         onRemoveMaterialRef: handlers.onRemoveMaterialRef,
-        onSetMaterialRefRole: handlers.onSetMaterialRefRole,
         onToast: handlers.onToast,
         videoMediaRefs: mediaRefs ?? { reference: [] },
         videoDraftBinding: {

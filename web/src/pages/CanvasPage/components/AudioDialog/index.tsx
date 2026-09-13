@@ -13,6 +13,7 @@ import type { FollowDialogAnchor } from '../../followDialog';
 import AtMentionMenu from '../AtMentionMenu';
 import { audioRefToMentionItem, stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
 import RefThumbnail from '../RefThumbnail';
+import { splitReorder, useRefStripDrag } from '../RefThumbnail/strip-dnd';
 import type { ImageTextAttachment } from '../ImageDialog';
 import styles from './index.module.css';
 
@@ -87,6 +88,8 @@ export interface AudioDialogProps {
   attachments?: ImageTextAttachment[];
   /** 移除文本附件（IKFCKS）：× 仅断开当前连线（保留画布原文本卡） */
   onRemoveAttachment?: (nodeId: string) => void;
+  /** 参考栏拖拽换位（IKFCKT）：文本附件新顺序 = 重排文本连入边序（顺序即生成上下文拼接顺序） */
+  onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 绑定草稿卡时悬浮跟随；缺省仍锚定底部 */
   followAnchor?: FollowDialogAnchor | null;
 }
@@ -106,6 +109,7 @@ export default function AudioDialog({
   onMentionCanvas,
   attachments,
   onRemoveAttachment,
+  onReorderAttachments,
   followAnchor,
 }: AudioDialogProps) {
   const [text, setText] = useState(initialText ?? '');
@@ -272,6 +276,22 @@ export default function AudioDialog({
     });
   };
 
+  /** IKFCKT 参考栏拖拽换位：统一序列 = 参考音频 + 文本附件；参考音频为面板本地序（setRefs
+   *  重排、编号重派生），文本按新相对序重排连入边序（顺序即生成上下文拼接顺序） */
+  const handleStripReorder = (from: number, to: number) => {
+    const refIds = refs.map((r) => r.id);
+    const textKeys = (attachments ?? []).map((a) => a.nodeId);
+    const { nextMedia: nextRefIds, nextText: nextTextKeys, mediaChanged: refChanged, textChanged } = splitReorder(refIds, textKeys, from, to);
+    if (refChanged) {
+      setRefs((prev) => nextRefIds.flatMap((id) => {
+        const found = prev.find((r) => r.id === id);
+        return found ? [found] : [];
+      }));
+    }
+    if (textChanged) onReorderAttachments?.(nextTextKeys);
+  };
+  const stripDrag = useRefStripDrag({ disabled: readOnly, onReorder: handleStripReorder });
+
   /** 组件卸载时 revoke 所有 blob URL，防内存泄漏 */
   useEffect(() => {
     return () => {
@@ -332,6 +352,7 @@ export default function AudioDialog({
                 ? () => onMentionCanvas(audioRefToMentionItem(r))
                 : undefined
             }
+            dragProps={stripDrag.itemProps(i)}
           />
         ))}
         {/* 文本附件（IKFCKS）：画布文本卡连线以 FileText 缩略图进参考栏统一序列，
@@ -345,6 +366,7 @@ export default function AudioDialog({
             name={a.title}
             number={i + 1}
             textPreview={a.text}
+            dragProps={stripDrag.itemProps(currentRefs.length + i)}
             onRemove={
               !readOnly && onRemoveAttachment ? () => onRemoveAttachment(a.nodeId) : undefined
             }

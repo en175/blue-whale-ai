@@ -4011,8 +4011,25 @@ export default function CanvasPage() {
         text: extractTextNodeText(n.data),
       }));
 
-  /** 目标面板附件重排（IKDLQH）：把该目标文本附件边子序列原地重排为新顺序（其余边相对位置不变，
-   *  各目标顺序独立），并同步面板 seed 的附件快照顺序（保持 ts 不重挂载面板）。重排随自动保存持久化。
+  /** 目标连入边子序列重排（IKFCKT 从 IKDLQH 泛化）：orderedSources 是 target 连入边 source 的
+   *  子集（文本边 / 媒体边 / 混合），按新顺序回填这些边占据的原槽位（其余边相对位置不变，各目标独立） */
+  const reorderTargetEdges = (targetNodeId: string, orderedSources: string[]) => {
+    setEdges((prev) => {
+      const slots = prev
+        .map((e, i) => (e.target === targetNodeId && orderedSources.includes(e.source) ? i : -1))
+        .filter((i) => i >= 0);
+      if (slots.length !== orderedSources.length) return prev;
+      const edgeBySource = new Map(slots.map((i) => [prev[i]!.source, prev[i]!]));
+      const next = [...prev];
+      slots.forEach((slot, k) => {
+        next[slot] = edgeBySource.get(orderedSources[k]!)!;
+      });
+      return next;
+    });
+  };
+
+  /** 目标面板文本附件重排（IKDLQH；IKFCKT 起由参考栏拖拽换位消费）：经 reorderTargetEdges
+   *  重排文本边序，并同步面板 seed 的附件快照顺序（保持 ts 不重挂载面板）。重排随自动保存持久化。
    *  面板快照与当前连线不一致（如打开期间来源被断开）时不重排。 */
   const handleReorderAttachments = (targetNodeId: string, orderedNodeIds: string[]) => {
     const liveIds = textAttachmentsOf(targetNodeId).map((a) => a.nodeId);
@@ -4021,18 +4038,7 @@ export default function CanvasPage() {
       !orderedNodeIds.every((id) => liveIds.includes(id))
     )
       return;
-    setEdges((prev) => {
-      const slots = prev
-        .map((e, i) => (e.target === targetNodeId && orderedNodeIds.includes(e.source) ? i : -1))
-        .filter((i) => i >= 0);
-      if (slots.length !== orderedNodeIds.length) return prev;
-      const edgeBySource = new Map(slots.map((i) => [prev[i]!.source, prev[i]!]));
-      const next = [...prev];
-      slots.forEach((slot, k) => {
-        next[slot] = edgeBySource.get(orderedNodeIds[k]!)!;
-      });
-      return next;
-    });
+    reorderTargetEdges(targetNodeId, orderedNodeIds);
     const syncAttachments = (atts: ImageTextAttachment[] | undefined) => {
       if (!atts) return atts;
       const byId = new Map(atts.map((a) => [a.nodeId, a]));
@@ -4044,6 +4050,37 @@ export default function CanvasPage() {
     setVideoSeed((s) =>
       s?.targetNodeId === targetNodeId ? { ...s, attachments: syncAttachments(s.attachments) } : s,
     );
+  };
+
+  /** 视频面板普通参考拖拽换位（IKFCKT）：key 序列按子源拆分——连线项重排连入媒体边序、
+   *  material 项重排草稿 draftMaterialRefs 数组序；与面板显示序列不一致时不重排 */
+  const handleReorderVideoMediaRefs = (draftId: string, orderedKeys: string[]) => {
+    const current = mergedVideoMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current);
+    const currentKeys = current.reference.map((r) => r.materialId ?? r.nodeId);
+    if (currentKeys.length !== orderedKeys.length || !orderedKeys.every((k) => currentKeys.includes(k))) return;
+    const materialIds = new Set(current.reference.filter((r) => r.materialId != null).map((r) => r.materialId!));
+    const edgeIds = orderedKeys.filter((k) => !materialIds.has(k));
+    const materialOrdered = orderedKeys.filter((k) => materialIds.has(k));
+    if (edgeIds.length) reorderTargetEdges(draftId, edgeIds);
+    if (materialOrdered.length) {
+      const node = mediaNodesRef.current.find((n) => n.id === draftId);
+      const existing = readDraftMaterialRefs(node);
+      const existingIds = existing.map((m) => m.materialId);
+      if (existingIds.length === materialOrdered.length && materialOrdered.every((id) => existingIds.includes(id))) {
+        const byId = new Map(existing.map((m) => [m.materialId, m]));
+        patchMediaNode(draftId, { draftMaterialRefs: materialOrdered.map((id) => byId.get(id)!) });
+      }
+    }
+  };
+
+  /** 视频面板自由模式参考拖拽换位（IKFCKT）：暂存参考数组整体重排（首尾帧槽不在此序列） */
+  const reorderVideoFreeRefs = (orderedKeys: string[]) => {
+    setVideoFreeRefs((prev) => {
+      if (orderedKeys.length !== prev.reference.length) return prev;
+      const byKey = new Map(prev.reference.map((r) => [r.materialId ?? r.nodeId, r]));
+      if (!orderedKeys.every((k) => byKey.has(k))) return prev;
+      return { ...prev, reference: orderedKeys.map((k) => byKey.get(k)!) };
+    });
   };
 
   /** 草稿绑定时面板文本附件实时跟随画布连线（IKDMQQ）；非草稿绑定沿用打开当下快照。
@@ -4183,85 +4220,12 @@ export default function CanvasPage() {
     removeTargetInputs(edgesRef.current.filter(edge => edge.source === sourceNodeId && edge.target === draftId).map(edge => edge.id));
   };
 
-  /** Dock 显式改变参考角色（IKDMQS）：改写连线的 edge.data.refRole。
-   *  帧位占用/尾帧配首帧约束与服务端同口径，冲突时明确提示不静默替换。 */
-  const handleSetVideoRefRole = (draftId: string, sourceNodeId: string, role: VideoRefRole) => {
-    const source = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
-    const sourceErr = source ? videoRefSourceError(source, role) : null;
-    if (sourceErr) {
-      showToast('warn', sourceErr);
-      return;
-    }
-    const refs = mergePendingVideoCanvasRefs(
-      mergedVideoMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current),
-      pendingVideoCanvasRefsRef.current,
-      mediaNodesRef.current,
-    );
-    // 改角色 ≠ 添加素材：只需检查目标槽是否被**其他**素材占用
-    if (role !== 'reference') {
-      const occupiedByOther =
-        (role === 'first' ? refs.first : refs.last)?.nodeId !== undefined &&
-        (role === 'first' ? refs.first : refs.last)?.nodeId !== sourceNodeId;
-      if (occupiedByOther) {
-        showToast('warn', role === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
-        return;
-      }
-    }
-    const pending = pendingVideoCanvasRefsRef.current;
-    if (pendingVideoCanvasHasNode(pending, sourceNodeId)) {
-      const item =
-        [pending.first, pending.last].find((r) => r?.nodeId === sourceNodeId)
-        ?? pending.reference.find((r) => r.nodeId === sourceNodeId);
-      if (!item) return;
-      const stripped = stripPendingVideoCanvasRef(pending, sourceNodeId);
-      const next: VideoMediaRefs = {
-        reference: role === 'reference' ? [...stripped.reference, item] : [...stripped.reference],
-        first: role === 'first' ? item : stripped.first,
-        last: role === 'last' ? item : stripped.last,
-      };
-      pendingVideoCanvasRefsRef.current = next;
-      setPendingVideoCanvasRefs(next);
-      return;
-    }
-    setEdges((prev) =>
-      prev.map((e) =>
-        e.source === sourceNodeId && e.target === draftId
-          ? { ...e, data: role === 'reference' ? undefined : { refRole: role } }
-          : e,
-      ),
-    );
-  };
-
-  /** 角色库 material 参考变更（IKDMQS 来源补齐）：移除（patch 为 null）或改角色——操作草稿
-   *  data.draftMaterialRefs（非连线）；校验口径与 handleSetVideoRefRole 一致（首帧占用/尾帧配首帧） */
-  const handleMaterialRefChange = (
-    draftId: string,
-    materialId: string,
-    patch: { role: VideoRefRole } | null,
-  ) => {
+  /** 移除角色库 material 参考（IKDMQS 来源补齐）：从草稿 data.draftMaterialRefs 过滤对应项。
+   *  IKFCKT：改角色分支随死 wiring 处置下线（角色由模式+目标槽决定），收窄为纯移除 */
+  const removeDraftMaterialRef = (draftId: string, materialId: string) => {
     const existing = readDraftMaterialRefs(mediaNodesRef.current.find((n) => n.id === draftId));
-    if (patch === null) {
-      patchMediaNode(draftId, {
-        draftMaterialRefs: existing.filter((m) => m.materialId !== materialId),
-      });
-      return;
-    }
-    const target = existing.find((m) => m.materialId === materialId);
-    if (!target) return;
-    const next = patch.role;
-    if (next !== 'reference') {
-      if (target.mediaType !== 'image') {
-        showToast('warn', '首尾帧仅支持图片素材');
-        return;
-      }
-      const refs = mergedVideoMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current);
-      if (refs[next] && refs[next]!.materialId !== materialId) {
-        showToast('warn', next === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
-        return;
-      }
-    }
     patchMediaNode(draftId, {
-      draftMaterialRefs: existing.map((m) => (m.materialId === materialId ? { ...m, role: next } : m)),
+      draftMaterialRefs: existing.filter((m) => m.materialId !== materialId),
     });
   };
 
@@ -4293,44 +4257,6 @@ export default function CanvasPage() {
       const next: VideoMediaRefs = { reference: prev.reference.filter((r) => r.nodeId !== key) };
       if (prev.first?.nodeId !== key) next.first = prev.first;
       if (prev.last?.nodeId !== key) next.last = prev.last;
-      return next;
-    });
-  };
-
-  /** 自由模式改变参考角色：校验口径与 handleSetVideoRefRole / handleMaterialRefChange 一致
-   *  （首帧占用/尾帧配首帧/首尾帧仅图片） */
-  const changeVideoFreeRefRole = (key: string, role: VideoRefRole): void => {
-    const refs = videoFreeRefs;
-    const target =
-      [refs.first, refs.last].find((r) => r?.nodeId === key) ??
-      refs.reference.find((r) => r.nodeId === key);
-    if (!target) return;
-    if (role !== 'reference' && target.mediaType === 'video') {
-      showToast('warn', '首尾帧仅支持图片素材');
-      return;
-    }
-    if (role === 'first' && refs.first && refs.first.nodeId !== key) {
-      showToast('warn', '首帧已指定，请先移除现有首帧');
-      return;
-    }
-    if (role === 'last') {
-      if (refs.last && refs.last.nodeId !== key) {
-        showToast('warn', '尾帧已指定，请先移除现有尾帧');
-        return;
-      }
-    }
-    setVideoFreeRefs((prev) => {
-      const strip = (s: VideoMediaRefs): VideoMediaRefs => {
-        const next: VideoMediaRefs = { reference: s.reference.filter((r) => r.nodeId !== key) };
-        if (s.first?.nodeId !== key) next.first = s.first;
-        if (s.last?.nodeId !== key) next.last = s.last;
-        return next;
-      };
-      const moved = { ...target };
-      const next = strip(prev);
-      if (role === 'first') next.first = moved;
-      else if (role === 'last') next.last = moved;
-      else next.reference = [...next.reference, moved];
       return next;
     });
   };
@@ -5949,9 +5875,8 @@ export default function CanvasPage() {
             }
             videoMediaRefs={videoDraftId ? (videoDraftMediaRefs ?? { reference: [] }) : videoFreeRefsView}
             onRemoveVideoRef={videoDraftId ? ((nodeId) => handleRemoveVideoRef(videoDraftId, nodeId)) : removeVideoFreeRef}
-            onSetVideoRefRole={videoDraftId ? ((nodeId, role) => handleSetVideoRefRole(videoDraftId, nodeId, role)) : changeVideoFreeRefRole}
-            onRemoveMaterialRef={videoDraftId ? ((materialId) => handleMaterialRefChange(videoDraftId, materialId, null)) : removeVideoFreeRef}
-            onSetMaterialRefRole={videoDraftId ? ((materialId, role) => handleMaterialRefChange(videoDraftId, materialId, { role })) : changeVideoFreeRefRole}
+            onRemoveMaterialRef={videoDraftId ? ((materialId) => removeDraftMaterialRef(videoDraftId, materialId)) : removeVideoFreeRef}
+            onReorderMediaRefs={videoDraftId ? ((keys) => handleReorderVideoMediaRefs(videoDraftId, keys)) : reorderVideoFreeRefs}
             onToast={(type, msg) => showToast(type, msg)}
             mentionItems={atMentionItems.filter((item) => item.id !== videoDraftId)}
             onMentionCanvas={handleVideoAtMention}
@@ -5977,6 +5902,14 @@ export default function CanvasPage() {
             planReferenceError={planReferenceErrors.image}
             onRemoveMediaRef={
               imageDraftId ? (nodeId) => handleRemoveImageMediaRef(imageDraftId, nodeId) : undefined
+            }
+            onReorderMediaRefs={
+              imageDraftId ? ((ids) => reorderTargetEdges(imageDraftId, ids)) : undefined
+            }
+            onReorderAttachments={
+              imageSeed?.targetNodeId
+                ? (ids) => handleReorderAttachments(imageSeed.targetNodeId!, ids)
+                : undefined
             }
             draftBinding={
               imageDraftId
@@ -6076,6 +6009,9 @@ export default function CanvasPage() {
             onMentionCanvas={handleAudioAtMention}
             attachments={audioDraftAttachments}
             onRemoveAttachment={(id) => removePlanAttachment(audioDraftId ?? undefined, id)}
+            onReorderAttachments={
+              audioDraftId ? ((ids) => handleReorderAttachments(audioDraftId, ids)) : undefined
+            }
             onSwitchToMusic={() => {
               // 切走即结束草稿绑定并重置 seed：切回音频面板是干净的非草稿状态
               setAudioSeed({ ts: Date.now() });

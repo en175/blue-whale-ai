@@ -150,3 +150,16 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ---- 拖拽排序（IKFCKT）：拖起项半透明 + 目标项前/后半插入指示线 ---- */
+.thumb[data-strip-dragging='true'] {
+  opacity: 0.4;
+}
+
+.thumb[data-strip-over='before'] {
+  box-shadow: -2px 0 0 0 var(--color-accent-active);
+}
+
+.thumb[data-strip-over='after'] {
+  box-shadow: 2px 0 0 0 var(--color-accent-active);
+}
