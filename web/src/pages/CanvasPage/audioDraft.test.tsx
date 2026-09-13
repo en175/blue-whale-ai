@@ -61,6 +61,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchQuota: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
+  referencePromptPlan: vi.fn(async () => ({ id: 11, version: 5, viewport: '{}', nodes: '[]', edges: '[]' })),
   saveCanvasDoc: vi.fn(async (
     _projectId: string,
     _payload: { viewport: unknown; nodes: Node[]; edges: Array<{ id: string; source: string; target: string }> },
@@ -141,6 +142,7 @@ vi.mock('@/api/assets', () => ({
 /* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
+  referencePromptPlan: apiMocks.referencePromptPlan,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
   legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
@@ -657,5 +659,79 @@ describe('IKDMQT 保存失败暂停生成', () => {
     expect(draft.data.draft).toBe(true);
     expect(draft.data.genStatus).toBe('draft');
     expect(draft.data.prompt).toBe('轻快的海浪声');
+  });
+});
+
+describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => {
+  /** 给 seed 的 t1 文本卡补 promptSource（到节点选择建线的来源资格，与图片/视频同口径） */
+  function markTextSource() {
+    (canvasDocMock.current.doc as { nodes: Array<{ id: string; data: Record<string, unknown> }> })
+      .nodes.find((n) => n.id === 't1')!.data.promptSource = { sessionId: 's1', revisionId: 'r1', shotNo: 1 };
+  }
+
+  /** 经音频面板真实入口进入画布选择模式：添加参考按钮 → 来源菜单 → 从画布选择 */
+  async function enterCanvasPick() {
+    await vi.waitFor(() => {
+      const btn = [...container.querySelectorAll('button')].find((b) => (b.title ?? '').startsWith('添加参考音频'));
+      expect(btn).toBeTruthy();
+    });
+    await act(async () => {
+      [...container.querySelectorAll('button')].find((b) => (b.title ?? '').startsWith('添加参考音频'))!.click();
+    });
+    await vi.waitFor(() => {
+      const item = [...container.querySelectorAll('button')].find((b) => b.textContent === '从画布选择');
+      expect(item).toBeTruthy();
+    });
+    await act(async () => {
+      [...container.querySelectorAll('button')].find((b) => b.textContent === '从画布选择')!.click();
+    });
+  }
+
+  it('pickMode 音频下点击带 promptSource 的文本卡 → 建立来源→草稿连线（与图片/视频同一关系）', async () => {
+    // 前序用例可能将 saveCanvasDoc 改为 reject（clearAllMocks 不重置实现），恢复成功落盘
+    apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
+    apiMocks.referencePromptPlan.mockResolvedValueOnce({
+      id: 11, version: 5, viewport: '{}', nodes: '[]',
+      edges: JSON.stringify([{ id: 'e-t1-d1', source: 't1', target: 'd1' }]),
+    });
+    seedEmptyDraftDoc();
+    markTextSource();
+    await renderPage();
+    await openDraftPanel();
+
+    await enterCanvasPick();
+
+    // 点击带 promptSource 的文本卡（非 mediaNode，直接以节点对象触发）
+    const textNode = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find((n) => n.id === 't1')!;
+    await act(async () => {
+      flowProps.current.onNodeClick(textNode);
+    });
+
+    // 与图片/视频同款建线：referencePromptPlan(planNodeId=t1, targetNodeId=d1)
+    await vi.waitFor(() => expect(apiMocks.referencePromptPlan).toHaveBeenCalledTimes(1));
+    expect(apiMocks.referencePromptPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: 'p1', planNodeId: 't1', targetNodeId: 'd1' }),
+    );
+    // 服务端返回的连线进入画布
+    await vi.waitFor(() => {
+      expect(flowProps.current.edges.some((e: { source: string; target: string }) => e.source === 't1' && e.target === 'd1')).toBe(true);
+    });
+  });
+
+  it('无 promptSource 的普通文本卡不建线（来源资格与图片/视频同口径）', async () => {
+    apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
+    seedEmptyDraftDoc();
+    await renderPage();
+    await openDraftPanel();
+
+    await enterCanvasPick();
+
+    const textNode = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find((n) => n.id === 't1')!;
+    await act(async () => {
+      flowProps.current.onNodeClick(textNode);
+    });
+
+    expect(apiMocks.referencePromptPlan).not.toHaveBeenCalled();
+    expect(flowProps.current.edges.some((e: { source: string; target: string }) => e.target === 'd1')).toBe(false);
   });
 });

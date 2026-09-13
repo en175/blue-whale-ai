@@ -1760,6 +1760,15 @@ export default function CanvasPage() {
       imagePanelHiddenRef.current = true;
       return;
     }
+    // IKFCXE：音频草稿面板的「到节点选择」选中文本卡 → 建立来源→草稿连线（与图片/视频同一关系）；
+    // 绑定以 audioDraftId 为准（seed 可能残留旧草稿值）；连线驱动后端接纳推导文本附件快照
+    if (pickMode === 'audio' && pickTarget === 'audio' && audioDraftId && node.type === 'textNode' && data.promptSource) {
+      void referencePlanRef.current(node.id, audioDraftId);
+      setPickMode(null);
+      setPickTarget(null);
+      audioPanelHiddenRef.current = true;
+      return;
+    }
     if (pickMode === 'image' && pickTarget === 'image' && imageDraftId) {
       if (node.type === 'mediaNode' && validateImageRefConnect(node.id, imageDraftId)) {
         const data = (node.data ?? {}) as Record<string, unknown>;
