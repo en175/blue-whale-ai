@@ -742,17 +742,6 @@ export default function CanvasPage() {
         containerHeight: wrapperSize.height,
       })
     : null;
-  const videoFollowModes: VideoFollowMode[] | undefined = videoDraftId && showBottomDialog
-    ? enabledVideoFollowModes(
-        edges
-          .filter((edge) => edge.target === videoDraftId)
-          .map((edge) => sourceKindOf(
-            mediaNodes.find((n) => n.id === edge.source)
-            ?? textNodes.find((n) => n.id === edge.source),
-          ))
-          .filter((kind): kind is NonNullable<typeof kind> => kind != null),
-      )
-    : undefined;
   /** 草稿卡出生位（IKDMQQ）：视口中心附近空位，避开底部 Dock 预留区与既有节点 */
   const spawnDraftPosition = () => {
     const center = spawnPosRef.current();
@@ -4125,6 +4114,13 @@ export default function CanvasPage() {
     },
     [videoDraftId, edges, mediaNodes, pendingVideoCanvasRefs],
   );
+
+  /** 视频跟随输入框模式门控（IKFC1T）：按「实际成为当前目标参考」的媒体集合判定（连线 +
+   *  角色库 material + 到节点选择暂存合并，与面板显示/提交输入同源）；文本附件不属于媒体参考，
+   *  不参与判定。存在任一媒体参考时文生视频不可选；移除全部参考后恢复可选但不自动切回。 */
+  const videoFollowModes: VideoFollowMode[] | undefined = videoDraftId && showBottomDialog && videoDraftMediaRefs
+    ? enabledVideoFollowModes(videoDraftMediaRefs)
+    : undefined;
 
   /** Dock 移除视频参考（IKDMQS）：断开对应连线（首帧/尾帧/普通参考同一路径） */
   const handleRemoveVideoRef = (draftId: string, sourceNodeId: string) => {

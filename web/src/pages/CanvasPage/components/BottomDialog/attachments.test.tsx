@@ -132,7 +132,7 @@ describe('BottomDialog 文本附件（IKDLQG）', () => {
       aspectRatio: '16:9',
       resolution: '720p',
       duration: 5,
-      mode: 'all',
+      mode: 'prompt',
     });
   });
 

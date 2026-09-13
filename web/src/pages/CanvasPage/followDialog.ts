@@ -1,5 +1,7 @@
 /* 跟随输入框定位，以及视频生成节点四模式判定 */
 
+import { hasAnyMediaRef, type VideoMediaRefs } from './videoMediaRefs';
+
 export interface FollowDialogAnchor {
   left: number;
   top: number;
@@ -45,17 +47,20 @@ export const VIDEO_FOLLOW_MODE_LABEL: Record<VideoFollowMode, string> = {
   keyframe: '首尾帧',
 };
 
-/** 按已连素材类型判定可高亮的视频模式 */
-export function enabledVideoFollowModes(sourceKinds: Array<'image' | 'video' | 'audio' | 'text'>): VideoFollowMode[] {
-  const imageCount = sourceKinds.filter((kind) => kind === 'image').length;
-  const hasMedia = sourceKinds.some((kind) => kind === 'image' || kind === 'video' || kind === 'audio');
-  const onlyText = sourceKinds.length > 0 && sourceKinds.every((kind) => kind === 'text');
-  const empty = sourceKinds.length === 0;
+/** 按当前目标的媒体参考集合判定可选视频模式（IKFC1T）：
+ *  判定输入 = 实际成为当前目标参考的媒体（连线 + 角色库 material + 到节点选择暂存合并，
+ *  与面板显示/提交输入同源）；invalid 不计入，文本附件不属于媒体参考。
+ *  无媒体 → 文生视频与全能参考可选（all 保持可选保证删除全部参考后不自动切回）；
+ *  存在任一媒体 → 文生视频不可选；图片 ≥1 开图生视频、≥2 开首尾帧（帧按图片计）。 */
+export function enabledVideoFollowModes(refs: VideoMediaRefs): VideoFollowMode[] {
+  const imageCount =
+    refs.reference.filter((r) => r.mediaType === 'image').length + (refs.first ? 1 : 0) + (refs.last ? 1 : 0);
+  const hasMedia = hasAnyMediaRef(refs);
   const enabled: VideoFollowMode[] = [];
-  if (empty || onlyText) enabled.push('prompt');
+  if (!hasMedia) enabled.push('prompt', 'all');
   if (hasMedia) enabled.push('all');
-  if (imageCount >= 1) enabled.push('text2video');
-  if (imageCount >= 2) enabled.push('keyframe');
+  if (hasMedia && imageCount >= 1) enabled.push('text2video');
+  if (hasMedia && imageCount >= 2) enabled.push('keyframe');
   return enabled;
 }
 
