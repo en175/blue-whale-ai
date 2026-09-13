@@ -96,8 +96,8 @@ hotfix/*     ← 生产紧急修复（直接进 master，见下）
 
 ## Codebase Memory MCP
 
-- 创建 task worktree 后，必须先对该 worktree 跑 `index_repository(repo_path=<task-worktree>)` 并确认 `index_status=ready`。
-- 不得用主 checkout 索引替代。
+首次只读探索即执行 [仓库代码探索协议](../../agent-rules/code-discovery.md)，无需等待创建分支。
+创建 task worktree 后重新确认当前目录对应的独立索引；建索引不替代查询。失败、覆盖不足及子代理交接均按同一协议处理。
 
 ## 远程-本地同步
 
@@ -139,5 +139,5 @@ hotfix/*     ← 生产紧急修复（直接进 master，见下）
 - 平台中立的**阻断型** `PreToolUse` / `PostToolUse` 契约必须在 ZCode / Claude Code / Codex 三端同步检查：`.zcode/config.json`、`.claude/settings.json`、`.codex/hooks.json` 的事件、matcher、Hook 数量和权威 Gate 必须等价。
 - Codex 统一经 `.codex/hooks/run-claude-pretool.sh` 复用 `.claude/hooks/` 权威 Gate；其 `Edit|Write` matcher 收到的实际输入是 `tool_name=apply_patch`、`tool_input.command=<patch>`，wrapper 只做目标路径适配，不复制分支或工作树策略。
 - 涉及一次性凭证消费时，ZCode / Claude Code / Codex 的 `PostToolUse` matcher 也必须同步；Pre 按 `tool_use_id` 原子占用但不消费，只有 `tool_response.isError=false` 的明确成功结果才消费，失败或畸形结果释放占用并保留凭证。
-- 两类事件显式排除于阻断等价比较：提醒型 `Grep|Glob` 只注入代码发现 context、不阻断，且 Codex 无对应 CBM MCP；`SessionStart` 只负责会话启动/恢复时注入 context，不是工具调用 Gate，各平台生命周期挂载也不同。
+- 两类事件显式排除于阻断等价比较：提醒型 `Grep|Glob` 只注入代码发现 context、不阻断，按客户端实际事件与能力适配；`SessionStart` 只负责会话启动/恢复时注入 context，不是工具调用 Gate，各平台生命周期挂载也不同。
 - 机制兜底：`python3 scripts/check-hook-contracts.py` 校验三端静态契约，`bash scripts/probe-codex-write-hook.sh` 探测 Codex 写入运行时链路，`bash scripts/test-hooks.sh` 运行完整黑盒夹具。深读见 `docs/agents/hooks/README.md`「变更检查清单」。

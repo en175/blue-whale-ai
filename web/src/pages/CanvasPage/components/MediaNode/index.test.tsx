@@ -8,8 +8,10 @@ import MediaNode, { type MediaGenStatus } from './index';
 let root: Root;
 let mountNode: HTMLDivElement;
 
-function labels() {
-  return [...mountNode.querySelectorAll('button')].map((button) => button.textContent?.trim() || button.getAttribute('title') || '');
+function labels(toolbarOnly = false) {
+  return [...mountNode.querySelectorAll('button')]
+    .filter((button) => !toolbarOnly || !button.closest('[data-testid="media-content"]'))
+    .map((button) => button.textContent?.trim() || button.getAttribute('title') || '');
 }
 
 interface RenderExtra {
@@ -72,12 +74,13 @@ beforeEach(() => {
 afterEach(async () => {
   if (root) await act(async () => root.unmount());
   mountNode?.remove();
+  vi.restoreAllMocks();
 });
 
 describe('MediaNode selected toolbar', () => {
   it('hides @, generate-image and generate-video on an audio node', async () => {
     await renderNode('audio');
-    expect(labels()).toEqual(['重新编辑', '详情', '下载']);
+    expect(labels(true)).toEqual(['重新编辑', '详情', '下载']);
   });
 
   it('keeps @ and generate actions on an image node', async () => {
@@ -92,9 +95,9 @@ describe('MediaNode selected toolbar', () => {
 });
 
 describe('MediaNode draft overlay (IKDMQQ)', () => {
-  it('待生成草稿：渲染待生成占位而非素材已被删除，无取消/重试按钮', async () => {
+  it('待生成草稿：渲染按类型占位文案而非素材已被删除，无取消/重试按钮', async () => {
     await renderNode('image', { genStatus: 'draft', selected: false, data: { src: '', draft: true } });
-    expect(mountNode.textContent).toContain('待生成');
+    expect(mountNode.textContent).toContain('图片生成');
     expect(mountNode.textContent).not.toContain('素材已被删除');
     expect(mountNode.textContent).not.toContain('取消生成');
     expect(mountNode.textContent).not.toContain('重试');
@@ -370,11 +373,41 @@ describe('MediaNode audio layout', () => {
   });
 
   it('keeps player controls reachable and out of the node drag path', async () => {
-    await renderNode('audio', { selected: false });
+    await renderNode('audio', { selected: false, data: { toolMode: 'select' } });
+    // 自定义 AudioPlayer 取代原生 controls：audio 元素仍在 DOM 中，
+    // 播放/暂停按钮与波形区携带 nodrag nopan 确保不落入节点拖拽路径。
     const audio = mountNode.querySelector('audio');
     expect(audio).toBeTruthy();
-    expect(audio!.getAttribute('controls')).not.toBeNull();
-    expect(audio!.className).toContain('nodrag');
+    const playButton = contentCard().querySelector<HTMLButtonElement>('button[aria-label="播放"]')!;
+    expect(playButton).toBeTruthy();
+    expect(playButton.classList.contains('nodrag')).toBe(true);
+    expect(playButton.classList.contains('nopan')).toBe(true);
+    const play = vi.spyOn(audio!, 'play').mockImplementation(async () => {
+      Object.defineProperty(audio, 'paused', { configurable: true, value: false });
+      audio!.dispatchEvent(new Event('play'));
+    });
+    const pause = vi.spyOn(audio!, 'pause').mockImplementation(() => {
+      Object.defineProperty(audio, 'paused', { configurable: true, value: true });
+      audio!.dispatchEvent(new Event('pause'));
+    });
+    await act(async () => { playButton.click(); });
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(playButton.getAttribute('aria-label')).toBe('暂停');
+    await act(async () => { playButton.click(); });
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(playButton.getAttribute('aria-label')).toBe('播放');
+
+    // 波形负责进度跳转；操作区域同样排除节点拖动和画布平移。
+    const track = audio!.parentElement!.querySelector<HTMLElement>('div.nodrag.nopan')!;
+    expect(track).toBeTruthy();
+    vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 200 } as DOMRect);
+    Object.defineProperty(audio, 'duration', { configurable: true, value: 100 });
+    await act(async () => { audio!.dispatchEvent(new Event('loadedmetadata')); });
+    await act(async () => {
+      track.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, bubbles: true, cancelable: true }));
+      document.dispatchEvent(new MouseEvent('mouseup', { clientX: 100, bubbles: true }));
+    });
+    expect(audio!.currentTime).toBe(50);
   });
 
   it('keeps the square body for generating, failed and missing audio', async () => {
@@ -428,5 +461,163 @@ describe('MediaNode browser-measured dims fill-in', () => {
       video.dispatchEvent(new Event('loadedmetadata'));
     });
     expect(onMediaDims).toHaveBeenCalledWith('video-node', { width: 1920, height: 1080, duration: 12.4 });
+  });
+});
+
+/** React 受控输入框填值：绕过 value tracker 后派发 input 事件 */
+async function typeInto(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+  await act(async () => {
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+async function keyOn(target: EventTarget, key: string, init: KeyboardEventInit = {}) {
+  await act(async () => {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
+  });
+}
+
+describe('MediaNode card rename (IKFA8X)', () => {
+  function titleInput(): HTMLInputElement | null {
+    return titleRow().querySelector('input');
+  }
+
+  async function startRename() {
+    await act(async () => {
+      titleRow().querySelector('span')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+    });
+  }
+
+  it('双击名称原位进入编辑，输入框带出当前名称', async () => {
+    await renderNode('image', { data: { fileName: '海边日落.png', onTitleChange: vi.fn() } });
+    expect(titleInput()).toBeNull();
+    await startRename();
+    expect(titleInput()?.value).toBe('海边日落.png');
+  });
+
+  it('回车保存去掉首尾空格后的名称并退出编辑', async () => {
+    const onTitleChange = vi.fn();
+    await renderNode('image', { data: { fileName: '海边日落.png', onTitleChange } });
+    await startRename();
+    await typeInto(titleInput()!, '  我的封面图  ');
+    await keyOn(titleInput()!, 'Enter');
+    expect(onTitleChange).toHaveBeenCalledWith('image-node', '我的封面图');
+    expect(titleInput()).toBeNull();
+  });
+
+  it('失焦（点击别处）同样保存名称', async () => {
+    const onTitleChange = vi.fn();
+    await renderNode('video', { data: { fileName: '片段.mp4', onTitleChange } });
+    await startRename();
+    await typeInto(titleInput()!, '成片');
+    await act(async () => {
+      titleInput()!.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+    expect(onTitleChange).toHaveBeenCalledWith('video-node', '成片');
+    expect(titleInput()).toBeNull();
+  });
+
+  it('回车保存后的失焦不重复提交', async () => {
+    const onTitleChange = vi.fn();
+    await renderNode('image', { data: { fileName: 'a.png', onTitleChange } });
+    await startRename();
+    await typeInto(titleInput()!, 'b.png');
+    await keyOn(titleInput()!, 'Enter');
+    // Enter 提交后输入框卸载，随后的 blur 不再派发（无第二次回调）
+    expect(onTitleChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('Esc 恢复编辑前名称，随后的失焦不再保存取消内容', async () => {
+    const onTitleChange = vi.fn();
+    await renderNode('image', { data: { fileName: '海边日落.png', onTitleChange } });
+    await startRename();
+    await typeInto(titleInput()!, '被放弃的名字');
+    await keyOn(titleInput()!, 'Escape');
+    expect(onTitleChange).not.toHaveBeenCalled();
+    expect(titleInput()).toBeNull();
+    expect(titleRow().textContent).toContain('海边日落.png');
+  });
+
+  it('空白或全空格提交保留原名', async () => {
+    const onTitleChange = vi.fn();
+    await renderNode('image', { data: { fileName: '海边日落.png', onTitleChange } });
+    await startRename();
+    await typeInto(titleInput()!, '   ');
+    await keyOn(titleInput()!, 'Enter');
+    expect(onTitleChange).not.toHaveBeenCalled();
+    expect(titleInput()).toBeNull();
+    expect(titleRow().textContent).toContain('海边日落.png');
+  });
+
+  it('名称未变化时提交不触发回调', async () => {
+    const onTitleChange = vi.fn();
+    await renderNode('image', { data: { fileName: '海边日落.png', onTitleChange } });
+    await startRename();
+    await keyOn(titleInput()!, 'Enter');
+    expect(onTitleChange).not.toHaveBeenCalled();
+    expect(titleInput()).toBeNull();
+  });
+
+  it('100 个字符可保存', async () => {
+    const onTitleChange = vi.fn();
+    await renderNode('image', { data: { fileName: 'a.png', onTitleChange } });
+    const name = '鲸'.repeat(100);
+    await startRename();
+    await typeInto(titleInput()!, name);
+    await keyOn(titleInput()!, 'Enter');
+    expect(onTitleChange).toHaveBeenCalledWith('image-node', name);
+  });
+
+  it('101 个字符提示超长：保留编辑内容、不保存、不截断', async () => {
+    const onTitleChange = vi.fn();
+    await renderNode('image', { data: { fileName: 'a.png', onTitleChange } });
+    const name = '鲸'.repeat(101);
+    await startRename();
+    await typeInto(titleInput()!, name);
+    await keyOn(titleInput()!, 'Enter');
+    expect(onTitleChange).not.toHaveBeenCalled();
+    expect(mountNode.querySelector('[role="alert"]')?.textContent).toContain('100');
+    // 保留编辑内容继续修改
+    expect(titleInput()?.value).toBe(name);
+  });
+
+  it('超长报错后失焦不写入，修正后仍可正常保存', async () => {
+    const onTitleChange = vi.fn();
+    await renderNode('image', { data: { fileName: 'a.png', onTitleChange } });
+    await startRename();
+    await typeInto(titleInput()!, '鲸'.repeat(101));
+    await act(async () => {
+      titleInput()!.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+    expect(onTitleChange).not.toHaveBeenCalled();
+    // 修正到 100 内后保存成功并清除报错
+    await typeInto(titleInput()!, '修正后的名字');
+    await keyOn(titleInput()!, 'Enter');
+    expect(onTitleChange).toHaveBeenCalledWith('image-node', '修正后的名字');
+    expect(mountNode.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('中文输入法组合期间的回车不提交', async () => {
+    const onTitleChange = vi.fn();
+    await renderNode('image', { data: { fileName: 'a.png', onTitleChange } });
+    await startRename();
+    await typeInto(titleInput()!, '拼音');
+    await keyOn(titleInput()!, 'Enter', { isComposing: true });
+    expect(onTitleChange).not.toHaveBeenCalled();
+    expect(titleInput()).not.toBeNull();
+    // 组合结束后的回车正常提交
+    await keyOn(titleInput()!, 'Enter');
+    expect(onTitleChange).toHaveBeenCalledWith('image-node', '拼音');
+  });
+
+  it('待生成草稿卡同样可改名', async () => {
+    const onTitleChange = vi.fn();
+    await renderNode('video', { genStatus: 'draft', data: { fileName: '视频草稿', onTitleChange } });
+    await startRename();
+    await typeInto(titleInput()!, '片头动画');
+    await keyOn(titleInput()!, 'Enter');
+    expect(onTitleChange).toHaveBeenCalledWith('video-node', '片头动画');
   });
 });

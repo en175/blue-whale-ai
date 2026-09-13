@@ -41,6 +41,10 @@ export interface ModelFeatures {
   first_last_frame: boolean;
   /** 视频带音频（video features.audio）。图片恒 false。 */
   audio: boolean;
+  /** 图生图上游模型名别名（ADR-0085）：有参考图时 worker 出站改用它；null=不分流。 */
+  i2i_model_name: string | null;
+  /** 该档 raw prompt 上限（ADR-0085）；null=回落按类型的硬缺省。 */
+  max_prompt_length: number | null;
 }
 
 export interface ModelCapabilityView {
@@ -105,6 +109,10 @@ type FeaturesJson = {
   firstLastFrame?: boolean;
   first_last_frame?: boolean;
   audio?: boolean;
+  i2iModelName?: unknown;
+  i2i_model_name?: unknown;
+  maxPromptLength?: unknown;
+  max_prompt_length?: unknown;
 };
 
 type DurationRangeJson = {
@@ -122,6 +130,16 @@ function toSizes(json: unknown): ModelSizeOption[] {
     width: o.width ?? null,
     height: o.height ?? null,
   }));
+}
+
+/** ADR-0085 读侧宽容：脏值（非非空串 / 非正整数）一律降级 null = 未配置，
+ *  写侧闸门在 constants.ts featuresFieldErr 拒绝。 */
+function pickAlias(v: unknown): string | null {
+  return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+}
+
+function pickPositiveInt(v: unknown): number | null {
+  return typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : null;
 }
 
 function toFeatures(json: unknown): ModelFeatures {
@@ -144,6 +162,8 @@ function toFeatures(json: unknown): ModelFeatures {
     last_frame: f.lastFrame === true || f.last_frame === true,
     first_last_frame: f.firstLastFrame === true || f.first_last_frame === true,
     audio: f.audio === true,
+    i2i_model_name: pickAlias(f.i2iModelName ?? f.i2i_model_name),
+    max_prompt_length: pickPositiveInt(f.maxPromptLength ?? f.max_prompt_length),
   };
 }
 

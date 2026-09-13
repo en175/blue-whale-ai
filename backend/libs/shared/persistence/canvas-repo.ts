@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { PromptPreviewSource } from "@blue-whale/contracts";
+import type { PromptPreviewSource, PromptPreviewContent, PromptMaterial } from "@blue-whale/contracts";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 /** Canvas db port（Prisma-backed），复用部署的 canvas 表（project_id 唯一 / viewport_json / nodes_json / edges_json）。
@@ -17,8 +17,8 @@ export interface CanvasView {
 }
 
 export interface CanvasRepo {
-  getPromptSnapshot(projectId: string, source: PromptPreviewSource): Promise<{ title: string; text: string } | null>;
-  rememberPromptSnapshot(projectId: string, source: PromptPreviewSource, content: { title: string; text: string }): Promise<{ title: string; text: string }>;
+  getPromptSnapshot(projectId: string, source: PromptPreviewSource): Promise<PromptPreviewContent | null>;
+  rememberPromptSnapshot(projectId: string, source: PromptPreviewSource, content: PromptPreviewContent): Promise<PromptPreviewContent>;
 
   getByProject(projectId: string): Promise<CanvasView>;
   save(
@@ -34,7 +34,22 @@ export interface CanvasRepo {
     viewport: string | null,
     nodes: string | null,
     edges: string | null,
+    materials?: { ownerId: string; items: PromptMaterial[] },
   ): Promise<CanvasView | null>;
+}
+
+export class PromptMaterialUnavailableError extends Error {
+  constructor(readonly assetId: string) { super("Prompt material unavailable"); }
+}
+
+async function linkPromptMaterials(tx: Prisma.TransactionClient, projectId: bigint, context?: { ownerId: string; items: PromptMaterial[] }) {
+  if (!context) return;
+  for (const material of [...context.items].sort((a, b) => a.assetId.localeCompare(b.assetId))) {
+    const rows = await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM assets WHERE id = ${BigInt(material.assetId)} AND user_id = ${BigInt(context.ownerId)} AND is_delete = false AND status = 'normal' AND type = ${material.mediaType} FOR UPDATE`;
+    if (rows.length !== 1) throw new PromptMaterialUnavailableError(material.assetId);
+    const key = { user_id: BigInt(context.ownerId), project_id: projectId, asset_id: BigInt(material.assetId) };
+    await tx.project_asset.upsert({ where: { user_id_asset_id_project_id: key }, create: { ...key, is_delete: 0 }, update: { is_delete: 0 } });
+  }
 }
 
 function emptyView(projectId: string): CanvasView {
@@ -107,19 +122,21 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
   });
   return {
     async getPromptSnapshot(projectId, source) {
-      return prisma.prompt_preview_snapshots.findUnique({
+      const row = await prisma.prompt_preview_snapshots.findUnique({
         where: { project_id_source_key: snapshotWhere(projectId, source) },
-        select: { title: true, text: true },
+        select: { title: true, text: true, content_json: true },
       });
+      return row ? (row.content_json as unknown as PromptPreviewContent | null) ?? { title: row.title, text: row.text } : null;
     },
     async rememberPromptSnapshot(projectId, source, content) {
       const key = snapshotWhere(projectId, source);
       await prisma.prompt_preview_snapshots.createMany({
-        data: [{ ...key, source_json: source, ...content }], skipDuplicates: true,
+        data: [{ ...key, source_json: source, title: content.title, text: content.text, content_json: content as unknown as Prisma.InputJsonValue }], skipDuplicates: true,
       });
-      return prisma.prompt_preview_snapshots.findUniqueOrThrow({
-        where: { project_id_source_key: key }, select: { title: true, text: true },
+      const row = await prisma.prompt_preview_snapshots.findUniqueOrThrow({
+        where: { project_id_source_key: key }, select: { title: true, text: true, content_json: true },
       });
+      return (row.content_json as unknown as PromptPreviewContent | null) ?? { title: row.title, text: row.text };
     },
     async getByProject(projectId) {
       const row = await prisma.canvas.findFirst({
@@ -143,7 +160,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
         return toView(row);
       });
     },
-    async saveIfVersion(projectId, expectedVersion, viewport, nodes, edges) {
+    async saveIfVersion(projectId, expectedVersion, viewport, nodes, edges, materials) {
       const pid = BigInt(projectId);
       const data = {
         viewport_json: viewport ? JSON.parse(viewport) : null,
@@ -156,6 +173,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
             const row = await tx.canvas.create({
               data: { project_id: pid, ...data },
             });
+            await linkPromptMaterials(tx, pid, materials);
             await markOutputSlotsPlaced(tx, pid, data.nodes_json);
             return toView(row);
           });
@@ -177,6 +195,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
           data: { ...data, version: { increment: 1 } },
         });
         if (result.count !== 1) return null;
+        await linkPromptMaterials(tx, pid, materials);
         await markOutputSlotsPlaced(tx, pid, data.nodes_json);
         const row = await tx.canvas.findFirst({ where: { project_id: pid } });
         return row ? toView(row) : null;

@@ -6,25 +6,44 @@ import type { GenerationModel } from '@/api/generation';
 import BottomDialog from './index';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
 
-/* IKDMQS 视频草稿绑定模式：角色槽渲染 / 能力约束 / 角色切换 / 组合冲突 /
-   生成中只读 / 移除上传与角色库入口。ChipTextEditor 打桩为 textarea。 */
+/* IKDMQS 视频草稿绑定模式：模式与角色槽渲染 / 能力约束 / 来源菜单 / 组合冲突 /
+   生成中只读 / 移除参考与禁用本地上传。PromptRefEditor 打桩为 textarea（IKFA1O 编辑器替换）。 */
 
-const { fetchGenerationModels } = vi.hoisted(() => ({
+const { fetchGenerationModels, editorPendingCalls } = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(),
+  /** IKFCKQ：缩略图 @ 按钮走 insertRefAtPending（记忆光标路径），桩记录调用供断言 */
+  editorPendingCalls: [] as Array<{ kind: string; id: string }>,
 }));
 
 vi.mock('@/api/generation', () => ({
   fetchGenerationModels,
 }));
 
-vi.mock('../ChipTextEditor', () => ({
-  default: ({ onChange }: { onChange?: (v: { segments: Array<{ kind: string; value: string }> }) => void }) =>
-    createElement('textarea', {
-      'data-testid': 'chip-editor',
-      onChange: (e: Event) =>
-        onChange?.({ segments: [{ kind: 'text', value: (e.target as HTMLTextAreaElement).value }] }),
+vi.mock('../PromptRefEditor', async () => {
+  const { forwardRef, useImperativeHandle } = await import('react');
+  return {
+    default: forwardRef(function StubPromptRefEditor(
+      { onChange }: { onChange?: (doc: { version: number; segments: Array<{ kind: 'text'; text: string }> }) => void },
+      ref: React.Ref<unknown>,
+    ) {
+      useImperativeHandle(ref, () => ({
+        insertRefAtMention: () => {},
+        consumeMentionForPendingInsert: () => {},
+        insertRefAtPending: (key: { kind: string; id: string }) => { editorPendingCalls.push(key); },
+        dismissMention: () => {},
+        replaceRefAt: () => {},
+        clear: () => {},
+      }));
+      return createElement('textarea', {
+        'data-testid': 'chip-editor',
+        onChange: (e: Event) => {
+          const value = (e.target as HTMLTextAreaElement).value;
+          onChange?.({ version: 1, segments: value ? [{ kind: 'text', text: value }] : [] });
+        },
+      });
     }),
-}));
+  };
+});
 
 const baseFeatures = {
   reference_image: true,
@@ -66,7 +85,7 @@ const noFrameModel: GenerationModel = {
   features: { ...baseFeatures, first_frame: false, last_frame: false, first_last_frame: false },
 };
 
-const ref = (id: string, mediaType: 'image' | 'video' = 'image'): VideoMediaRef => ({
+const ref = (id: string, mediaType: 'image' | 'video' | 'audio' = 'image'): VideoMediaRef => ({
   nodeId: id,
   url: `http://img/${id}.png`,
   name: `图${id}`,
@@ -82,18 +101,17 @@ const handlers = {
   onPickFromAssets: vi.fn(),
   onOpenCharacterLibrary: vi.fn(),
   onRemoveVideoRef: vi.fn(),
-  onSetVideoRefRole: vi.fn(),
   onRemoveMaterialRef: vi.fn(),
-  onSetMaterialRefRole: vi.fn(),
   onToast: vi.fn(),
 };
 
 interface RenderOptions {
   mediaRefs?: VideoMediaRefs;
+  mode?: 'all' | 'keyframe' | 'prompt';
   status?: 'draft' | 'generating' | 'failed' | 'cancelled';
 }
 
-async function renderDialog({ mediaRefs, status }: RenderOptions = {}) {
+async function renderDialog({ mediaRefs, status, mode }: RenderOptions = {}) {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
@@ -101,14 +119,13 @@ async function renderDialog({ mediaRefs, status }: RenderOptions = {}) {
     root.render(
       createElement(BottomDialog, {
         onClose: vi.fn(),
+        initialParams: { mode },
         onSend: handlers.onSend,
         onPickFromCanvas: handlers.onPickFromCanvas,
         onPickFromAssets: handlers.onPickFromAssets,
         onOpenCharacterLibrary: handlers.onOpenCharacterLibrary,
         onRemoveVideoRef: handlers.onRemoveVideoRef,
-        onSetVideoRefRole: handlers.onSetVideoRefRole,
         onRemoveMaterialRef: handlers.onRemoveMaterialRef,
-        onSetMaterialRefRole: handlers.onSetMaterialRefRole,
         onToast: handlers.onToast,
         videoMediaRefs: mediaRefs ?? { reference: [] },
         videoDraftBinding: {
@@ -150,6 +167,7 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   fetchGenerationModels.mockResolvedValue([fullModel]);
   vi.clearAllMocks();
+  editorPendingCalls.length = 0;
 });
 
 afterEach(async () => {
@@ -158,30 +176,30 @@ afterEach(async () => {
 });
 
 describe('IKDMQS 草稿绑定模式渲染', () => {
-  it('按角色分组渲染连线推导项：首帧/尾帧/普通参考槽与角色徽标；隐藏模式选择器与上传入口', async () => {
-    const mediaRefs: VideoMediaRefs = {
-      reference: [ref('m1'), ref('v1', 'video')],
-      first: ref('f1'),
-      last: ref('f2'),
-    };
-    await renderDialog({ mediaRefs });
-
-    expect(mountNode.textContent).toContain('首帧');
-    expect(mountNode.textContent).toContain('尾帧');
-    expect(mountNode.textContent).toContain('普通参考');
-    const roles = [...mountNode.querySelectorAll('[data-testid="dock-video-ref"] [data-role]')].map(
-      (n) => n.getAttribute('data-role'),
-    );
-    expect(roles).toEqual(['first', 'last', 'reference', 'reference']);
-    // 模式选择器隐藏（角色槽显式表达取代模式预设）
-    expect(mountNode.textContent).not.toContain('全能参考');
-    // 无本地上传：不渲染文件选择 input
+  it('首尾帧模式恢复首帧和尾帧，普通参考入口与本地上传不显示', async () => {
+    await renderDialog({ mode: 'keyframe', mediaRefs: {
+      reference: [], first: ref('f1'), last: ref('f2'),
+    } });
+    // IKFCKQ：共享缩略图角色徽标（首帧/尾帧按角色标识，不参与数字编号）
+    const badges = [...mountNode.querySelectorAll('[data-testid="dock-video-ref"] [data-testid="ref-thumb-badge"]')]
+      .map((n) => n.textContent);
+    expect(badges).toEqual(['首帧', '尾帧']);
+    expect(menuItem('首尾帧')).toBeTruthy();
+    expect(slotButton('添加图片参考（从资产中选择 / 到节点选择 / 角色库）')).toBeUndefined();
     expect(mountNode.querySelector('input[type="file"]')).toBeNull();
   });
 
+  it('全能参考显示图片和视频缩略图，不显示普通参考角色徽标', async () => {
+    // IKFC1T：dock 默认改为文生视频，本套用例显式回到全能参考场景
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1'), ref('v1', 'video')] } });
+    expect(mountNode.querySelectorAll('[data-testid="dock-video-ref"]')).toHaveLength(2);
+    expect(mountNode.querySelector('[data-role="reference"]')).toBeNull();
+    expect(menuItem('全能参考')).toBeTruthy();
+  });
+
   it('统一草稿绑定：媒体入口为来源菜单（资产/节点/角色库，无上传）', async () => {
-    await renderDialog();
-    expect(mountNode.textContent).not.toContain('全能参考');
+    await renderDialog({ mode: 'all' });
+    expect(menuItem('全能参考')).toBeTruthy();
     // 图片/视频按钮改为弹出来源菜单（画布资产改造融合），不再直达「到节点选择」
     const entryButtons = [...mountNode.querySelectorAll('button')].filter(
       (b) => b.title === '添加图片参考（从资产中选择 / 到节点选择 / 角色库）'
@@ -203,27 +221,30 @@ describe('IKDMQS 草稿绑定模式渲染', () => {
 });
 
 describe('IKDMQS 角色槽能力约束', () => {
-  it('无首帧时尾帧入口不渲染；首帧入口可点开来源菜单', async () => {
-    await renderDialog({ mediaRefs: { reference: [] } });
-    // 全能力模型：首帧可加；尾帧需先有首帧（不可加时入口直接不渲染）
+  it('切换首尾帧模式后，空首帧和尾帧入口同时显示', async () => {
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [] } });
+    await act(async () => { menuItem('全能参考')!.click(); });
+    await act(async () => { menuItem('首尾帧')!.click(); });
     expect(slotButton('添加首帧（从资产中选择 / 到节点选择 / 角色库）')).toBeTruthy();
-    expect(slotButton('添加尾帧（从资产中选择 / 到节点选择 / 角色库）')).toBeUndefined();
+    expect(slotButton('添加尾帧（从资产中选择 / 到节点选择 / 角色库）')).toBeTruthy();
   });
 
-  it('无帧能力模型：首帧/尾帧入口均不渲染', async () => {
+  it('无首帧能力时首帧入口隐藏，尾帧空槽仍显示', async () => {
     fetchGenerationModels.mockResolvedValue([noFrameModel]);
-    await renderDialog({ mediaRefs: { reference: [] } });
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [] } });
     expect(slotButton('添加首帧（从资产中选择 / 到节点选择 / 角色库）')).toBeUndefined();
-    expect(slotButton('添加尾帧（从资产中选择 / 到节点选择 / 角色库）')).toBeUndefined();
+    expect(slotButton('添加尾帧（从资产中选择 / 到节点选择 / 角色库）')).toBeTruthy();
   });
 });
 
 describe('IKDMQS 角色显式指定与移除', () => {
   it('首帧槽来源菜单「到节点选择」按首帧角色发起；普通参考按 reference 角色', async () => {
-    await renderDialog({ mediaRefs: { reference: [] } });
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [] } });
     await act(async () => { slotButton('添加首帧（从资产中选择 / 到节点选择 / 角色库）')!.click(); });
     await act(async () => { menuItem('到节点选择')!.click(); });
     expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('image', 'first');
+    await act(async () => { menuItem('首尾帧')!.click(); });
+    await act(async () => { menuItem('全能参考')!.click(); });
     await act(async () => { slotButton('添加图片参考（从资产中选择 / 到节点选择 / 角色库）')!.click(); });
     await act(async () => { menuItem('到节点选择')!.click(); });
     expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('image', 'reference');
@@ -233,7 +254,7 @@ describe('IKDMQS 角色显式指定与移除', () => {
   });
 
   it('来源菜单携带槽位角色：资产库/角色库入口按目标槽位发起', async () => {
-    await renderDialog({ mediaRefs: { reference: [] } });
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [] } });
     await act(async () => { slotButton('添加首帧（从资产中选择 / 到节点选择 / 角色库）')!.click(); });
     await act(async () => { menuItem('从资产中选择')!.click(); });
     expect(handlers.onPickFromAssets).toHaveBeenCalledWith('image', 'first');
@@ -243,8 +264,9 @@ describe('IKDMQS 角色显式指定与移除', () => {
   });
 
   it('移除参考回调携带来源节点 id（父级断开连线）', async () => {
-    await renderDialog({ mediaRefs: { reference: [], first: ref('f1') } });
-    const removeBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除（断开连线）"]')!;
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1') } });
+    // IKFCKQ：× 为共享缩略图按钮（title=移除），走既有断开连线回调
+    const removeBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]')!;
     await act(async () => { removeBtn.click(); });
     expect(handlers.onRemoveVideoRef).toHaveBeenCalledWith('f1');
   });
@@ -261,18 +283,19 @@ describe('IKDMQS 组合冲突与只读', () => {
     expect(handlers.onSend).not.toHaveBeenCalled();
   });
 
-  it('生成中只读：参考可见但无添加/移除入口，发送禁用并提示', async () => {
-    await renderDialog({ mediaRefs: { reference: [ref('m1')] }, status: 'generating' });
+  it('生成中只读：参考可见但无添加/移除/@ 入口，发送禁用并提示', async () => {
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1')] }, status: 'generating' });
     expect(mountNode.querySelector('[data-testid="dock-video-ref"]')).toBeTruthy();
-    expect(mountNode.querySelector('button[title="移除（断开连线）"]')).toBeNull();
+    expect(mountNode.querySelector('button[title="移除"]')).toBeNull();
+    expect(mountNode.querySelector('button[title="插入引用"]')).toBeNull();
     expect(slotButton('添加图片参考（从资产中选择 / 到节点选择 / 角色库）')).toBeUndefined();
     expect(mountNode.textContent).toContain('生成中，参数与连线只读');
     expect(sendButton().disabled).toBe(true);
     expect(sendButton().getAttribute('title')).toBe('生成中，输入只读');
   });
 
-  it('合法输入（仅首尾帧或仅普通参考）不提示冲突，可发送', async () => {
-    await renderDialog({ mediaRefs: { reference: [], first: ref('f1'), last: ref('f2') } });
+  it('完整首尾帧不提示冲突，按首尾帧模式发送', async () => {
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1'), last: ref('f2') } });
     expect(mountNode.textContent).not.toContain('不能混用');
     await typePrompt('首尾帧驱动视频');
     expect(sendButton().disabled).toBe(false);
@@ -280,5 +303,52 @@ describe('IKDMQS 组合冲突与只读', () => {
     expect(handlers.onSend).toHaveBeenCalledTimes(1);
     const [, opts] = handlers.onSend.mock.calls[0]!;
     expect(opts.modelId).toBe('m-full');
+    expect(opts.mode).toBe('keyframe');
+  });
+});
+
+/* IKFCKQ：视频面板参考栏接入共享缩略图——三类媒体形态与编号口径 /
+   @ 按钮记忆光标插入 / material 项移除草稿参考 / 音频时长透传预览 */
+describe('IKFCKQ 共享缩略图接入', () => {
+  it('普通参考按类型独立编号（图片N/视频N/音频N 圆钮仅数字），媒体形态按 kind 渲染', async () => {
+    await renderDialog({ mode: 'all', mediaRefs: {
+      reference: [ref('m1'), ref('a1', 'audio'), ref('v1', 'video'), ref('m2')],
+    } });
+    const thumbs = [...mountNode.querySelectorAll('[data-testid="dock-video-ref"]')];
+    expect(thumbs).toHaveLength(4);
+    // 编号与正文标签同源：图片 1、音频 1、视频 1、图片 2（类型独立连续编号）
+    const badges = thumbs.map((t) => t.querySelector('[data-testid="ref-thumb-badge"]')?.textContent);
+    expect(badges).toEqual(['1', '1', '1', '2']);
+    expect(thumbs[0]!.querySelector('img')).toBeTruthy();
+    expect(thumbs[1]!.querySelector('video')).toBeNull();
+    expect(thumbs[1]!.querySelector('svg')).toBeTruthy();
+    expect(thumbs[2]!.querySelector('video')).toBeTruthy();
+    expect(thumbs[0]!.querySelector('img')!.getAttribute('alt')).toBe('图m1');
+  });
+
+  it('缩略图 @ 按钮走 insertRefAtPending 记忆光标路径（媒体身份 asset_ref）', async () => {
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1')] } });
+    const atBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="插入引用"]')!;
+    await act(async () => { atBtn.click(); });
+    expect(editorPendingCalls).toEqual([{ kind: 'asset_ref', id: 'a-m1' }]);
+  });
+
+  it('首尾帧模式：帧槽 @ 按钮同样开放，角色徽标不参与数字编号', async () => {
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1') } });
+    const thumb = mountNode.querySelector('[data-testid="dock-video-ref"]')!;
+    expect(thumb.querySelector('[data-testid="ref-thumb-badge"]')!.textContent).toBe('首帧');
+    const atBtn = thumb.querySelector<HTMLButtonElement>('button[title="插入引用"]')!;
+    await act(async () => { atBtn.click(); });
+    expect(editorPendingCalls).toEqual([{ kind: 'asset_ref', id: 'a-f1' }]);
+  });
+
+  it('角色库 material 项：× 走移除 material 回调（操作草稿 data，非断连线）', async () => {
+    await renderDialog({ mode: 'all', mediaRefs: {
+      reference: [{ ...ref('mat1'), materialId: 'asset-x1' }],
+    } });
+    const removeBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]')!;
+    await act(async () => { removeBtn.click(); });
+    expect(handlers.onRemoveVideoRef).not.toHaveBeenCalled();
+    expect(handlers.onRemoveMaterialRef).toHaveBeenCalledWith('asset-x1');
   });
 });

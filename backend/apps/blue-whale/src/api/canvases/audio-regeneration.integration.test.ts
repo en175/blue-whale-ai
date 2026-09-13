@@ -1,6 +1,5 @@
 import "reflect-metadata";
 import { createWorkerRepo } from "@lib/shared/persistence/index.js";
-import { openGenerationCredential } from "@blue-whale/core";
 import { processAudioJobById, processImageJobById } from "@lib/shared/generation/worker/generation-worker.js";
 import { AudioProviderError, type AudioProvider } from "@lib/shared/generation-runtime/audio-provider.js";
 import { runVideoJobStep } from "@lib/shared/generation-runtime/video-job-runner.js";
@@ -68,7 +67,6 @@ describe.skipIf(!process.env.IKDUHQ_DATABASE_URL)("Audio regeneration public API
   beforeAll(async () => {
     mp3 = execFileSync(ffmpeg!, ["-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-f", "mp3", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"] });
     mp4 = execFileSync(ffmpeg!, ["-f", "lavfi", "-i", "color=blue:s=1280x720:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "frag_keyframe+empty_moov", "-f", "mp4", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"] });
-    vi.stubEnv("GENERATION_CREDENTIAL_SECRET", secret);
     process.env.DATABASE_URL = process.env.IKDUHQ_DATABASE_URL;
     media.listen(0, "127.0.0.1");
     await once(media, "listening");
@@ -149,7 +147,7 @@ describe.skipIf(!process.env.IKDUHQ_DATABASE_URL)("Audio regeneration public API
   async function runAudio(jobId: string, provider: AudioProvider) {
     await vi.waitFor(async () => {
       expect(await processAudioJobById(jobId, { repo: createWorkerRepo(prisma.client), workerId: "ikduhq-worker",
-        credentialVault: { open: encrypted => openGenerationCredential(encrypted, secret) },
+        credentialVault: { open: encrypted => encrypted },
         createAudioProvider: () => provider,
         createImageProvider: () => { throw new Error("unexpected image job"); },
         mediaStorage: {
@@ -180,7 +178,7 @@ describe.skipIf(!process.env.IKDUHQ_DATABASE_URL)("Audio regeneration public API
     expect(created.code).toBe(200);
     const jobId = String(created.data.generation_job_id);
     const deps = { repo: createWorkerRepo(prisma.client), workerId: "ikduhq-other-worker",
-      credentialVault: { open: (encrypted: string) => openGenerationCredential(encrypted, secret) } };
+      credentialVault: { open: (encrypted: string) => encrypted } };
     if (type === "image") {
       expect(await processImageJobById(jobId, { ...deps,
         createImageProvider: () => ({ generate: async () => [{ url: `${mediaBase}/${jobId}.png`, width: 1024, height: 1024 }] }),

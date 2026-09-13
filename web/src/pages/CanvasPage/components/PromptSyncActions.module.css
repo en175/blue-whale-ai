@@ -1,0 +1,30 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 6px 0;
+  color: #e6bd76;
+  font-size: 12px;
+}
+
+.title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row button {
+  flex-shrink: 0;
+  border: 1px solid #706040;
+  border-radius: 6px;
+  background: #302b20;
+  color: #f4d59d;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+
+.row button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}

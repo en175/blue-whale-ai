@@ -15,9 +15,18 @@
   animation: dialogFadeIn 0.2s ease;
 }
 
+.dialogWrapFollow {
+  bottom: auto;
+  left: 0;
+  transform: none;
+  animation: dialogFadeInFollow 0.2s ease;
+}
+
 .dialog {
   position: relative;
-  height: 200px;
+  height: auto;
+  min-height: 0;
+  max-height: calc(100vh - 2 * var(--spacing-lg));
   overflow-y: auto;
   box-sizing: border-box;
   display: flex;
@@ -27,14 +36,17 @@
   border-radius: 16px;
   padding: var(--spacing-lg);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
 
 /* 唤出动画：与视频/音频对话窗一致，从底部上浮 + 淡入 */
 @keyframes dialogFadeIn {
   from { opacity: 0; transform: translateX(-50%) translateY(8px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes dialogFadeInFollow {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* 放大态：输入区高度占屏幕 2/3，仍锚定底部展示 */
@@ -49,7 +61,7 @@
   gap: var(--spacing-md);
   position: relative;
   flex: 1;
-  min-height: 0;
+  min-height: auto;
 }
 
 .hiddenInput {
@@ -60,6 +72,8 @@
 /* topActions 已改为 absolute（与 BottomDialog/AudioDialog 统一），topRow 仅承载预览行 */
 .topRow {
   display: flex;
+  flex-shrink: 0;
+  padding-right: 64px;
   align-items: flex-start;
   gap: var(--spacing-sm);
 }
@@ -68,10 +82,13 @@
  * 参考图增多时整卡自然增高，底部控件不被覆盖。不加 overflow，避免裁切 sourceMenu 弹出层。 */
 .previewRow {
   display: flex;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: var(--spacing-sm);
 }
 
+/* IKFCKK：附件条已替换为共享 RefThumbnail（56×56 圆角 12），本类仅保留给
+ * 尾部「+」占位按钮，尺寸与共享缩略图对齐 */
 .previewItem {
   position: relative;
   width: 56px;
@@ -81,14 +98,6 @@
   border: 1px solid #333;
   background-color: #2a2a2a;
   flex-shrink: 0;
-}
-
-.previewItem img,
-.previewItem video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
 }
 
 .previewPlaceholder {
@@ -163,27 +172,6 @@
   background-color: var(--color-bg-hover);
 }
 
-.previewRemove {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  background-color: rgba(0, 0, 0, 0.6);
-  border: none;
-  cursor: pointer;
-  transition: background-color var(--transition-fast);
-}
-
-.previewRemove:hover {
-  background-color: rgba(229, 72, 77, 0.85);
-}
-
 .topActions {
   position: absolute;
   top: var(--spacing-sm);
@@ -215,6 +203,14 @@
 /* ---- 参考素材数量提示已合并回 placeholder，无需单独样式 ---- */
 
 /* ---- 输入框 ---- */
+.mentionAnchor {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .textarea {
   width: 100%;
   resize: none;
@@ -227,8 +223,17 @@
   outline: none;
   font-family: inherit;
   display: block;
+  flex: 0 0 auto;
+  height: auto;
+  field-sizing: content;
+  min-height: 4.8em;
+  max-height: 6.4em;
+  overflow-y: auto;
+}
+
+.dialogExpanded .textarea {
   flex: 1;
-  min-height: 0;
+  max-height: none;
 }
 
 .textarea::placeholder {
@@ -237,11 +242,10 @@
 
 /* ---- 字数统计 ---- */
 .charCount {
-  align-self: flex-end;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--color-text-tertiary);
   line-height: 1;
-  margin-top: -4px;
 }
 
 .charCountWarn {
@@ -256,95 +260,10 @@
   line-height: 1.4;
 }
 
-/* ---- 连线文本附件（IKDLQF，只读） ---- */
-.attachments {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-  max-height: 160px;
-  overflow-y: auto;
-}
-
-.attachmentItem {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: var(--spacing-sm) var(--spacing-md);
-  background: #242424;
-  border: 1px solid #2c2c2c;
-  border-radius: 12px;
-}
-
-.attachmentTitle {
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--color-text-secondary);
-}
-
-.attachmentHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacing-sm);
-}
-
-.attachmentMoves {
-  display: flex;
-  gap: 2px;
-}
-
-.attachmentMove {
-  display: flex;
-  align-items: center;
-  border: none;
-  background: transparent;
-  padding: 2px;
-  border-radius: 4px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.attachmentMove:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  background: #2c2c2c;
-}
-
-.attachmentMove:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-
-.attachmentText {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-tertiary);
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.attachmentTextCollapsed {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-
-.attachmentToggle {
-  align-self: flex-start;
-  border: none;
-  background: transparent;
-  padding: 0;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.attachmentToggle:hover {
-  color: var(--color-text-primary);
-}
-
 /* ---- 底部状态栏 ---- */
 .bottomBar {
+  margin-top: auto;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -423,9 +342,9 @@
 
 /* 发送按钮 */
 .sendBtn {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28.8px;
+  height: 28.8px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -457,8 +376,8 @@
 /* ---- 配置面板（悬浮于底栏上方，与视频面板一致；IKDXL4；包含块为不带 overflow 的 .dialogWrap，不被 .dialog 滚动框裁剪，IKEOLP） ---- */
 .configPanel {
   position: absolute;
-  /* 下缘贴字数统计上方：输入卡边框 1px + 底 padding 16px + 底栏 36px + 间距 8px + 字数统计行 11px + 余量 1px */
-  bottom: 73px;
+  /* 下缘贴底栏上方，给缩小后的发送按钮保留间距。 */
+  bottom: 54px;
   left: 0;
   right: 0;
   margin: 0 auto;
@@ -558,6 +477,8 @@
   top: calc(100% + 4px);
   left: 0;
   right: 0;
+  max-height: 180px;
+  overflow-y: auto;
   background-color: #262626;
   border: 1px solid #363636;
   border-radius: 12px;
@@ -566,6 +487,19 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.selectDropdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.selectDropdown::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.selectDropdown::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 3px;
 }
 
 .selectOption {
@@ -631,4 +565,19 @@
   display: block;
   border: 1.5px solid currentColor;
   border-radius: 3px;
+}
+
+/* IKFA1M：正文编辑区（@ 菜单锚点）与参考编号角标 */
+.inputArea {
+  position: relative;
+  width: 100%;
+}
+
+/* @ 菜单 dock：脱出 .dialog 滚动框（200px 定高 + overflow，会裁剪上弹菜单），
+   挂在 .dialogWrap 层向上弹出（与 configPanel 同法，IKEOLP） */
+.mentionDock {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
 }

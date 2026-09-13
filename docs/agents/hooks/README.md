@@ -217,7 +217,7 @@ bash scripts/test-hooks.sh     # 退出码 0 = 全用例通过
 - [ ] `chmod +x` 已执行
 - [ ] `.zcode/config.json`、`.claude/settings.json`、`.codex/hooks.json`、`.kimi-code/hooks.toml` 同步更新（事件 + matcher + Hook 数量 + 权威 Gate）；**阻断型 Pre/Post 必须四端同步**
 - [ ] Codex command 经 `.codex/hooks/run-claude-pretool.sh` 指向 `.claude/hooks/` 权威 Gate；`apply_patch` 只做输入适配，不复制策略
-- [ ] 提醒型 `Grep|Glob` 或 `SessionStart` 未同步时，排除理由仍分别满足“非阻断且 Codex 无对应 CBM MCP”与“会话 context 注入而非工具 Gate”
+- [ ] 提醒型 `Grep|Glob` 或 `SessionStart` 未同步时，排除理由仍分别满足“非阻断且按客户端实际事件适配”与“会话 context 注入而非工具 Gate”
 - [ ] 至少 1 个**应当被拦**的测试用例 + 1 个**应当放行**的测试用例跑过
 - [ ] **输入 JSON 字段类型以 MCP `tools/list` schema 为准**（不要凭直觉只写字符串值——`project_id` / `program_id` / `parent_id` 在 schema 里是 number，PR #11 / IJZ5WA 复现过 string-only 正则漏 number 形态的假绿）
 - [ ] 跑 `python3 scripts/check-hook-contracts.py`、`bash scripts/probe-codex-write-hook.sh`、`bash scripts/test-hooks.sh`，全部退出 0 才提交
@@ -273,3 +273,26 @@ scripts/cleanup-task-worktree.sh
 ```
 
 > 人在 Gitee 网页手动合并时，也可以直接勾「删除源分支」。
+
+
+## CBM 五端探索提醒
+
+行为权威：[仓库代码探索协议](../../../agent-rules/code-discovery.md)。根规则只有短入口。
+
+共享实现为 `.claude/hooks/lib/cbm_context.py`，两个既有 shell 入口调用它。输入 `cwd` 与脚本所属仓库的 Git common directory 必须一致，非本仓静默放行；不因为用户级官方 Hook 存在而跳过项目提醒。不会调用索引、修改 Git 状态或阻断工具。
+
+| 客户端 | 配置 | 上下文通道 |
+| --- | --- | --- |
+| Claude Code | `.claude/settings.json` | SessionStart、SubagentStart、PreToolUse；JSON additionalContext |
+| Codex | `.codex/hooks.json` | 同上，通过现有 wrapper；仍须客户端信任项目 Hook |
+| ZCode | `.zcode/config.json` | 同上，严格 JSON；Bash 搜索纳入 matcher |
+| Kimi Code CLI | `.kimi-code/hooks.toml` 经既有安装器挂载 | UserPromptSubmit 返回文本；SessionStart/SubagentStart 是观察事件，不作注入通道 |
+| Qoder CLI | `.qoder/settings.json` | 项目级 SessionStart、SubagentStart、PreToolUse；JSON additionalContext |
+
+Kimi 运行 `scripts/install-kimi-hooks.sh` 幂等更新已有 managed block；其他仓库没有本项目脚本与标记时不生效。新增提醒不改变其他安全 Hook 的行为。五端统一行为，不要求事件数相等；阻断型旧契约仍由原检查器独立守护。
+
+子代理工具与上下文继承必须实际确认；不能查询的子代理由父代理传入规则及证据。恢复或切换目录后按协议重新核验 project，不假定客户端会触发 CwdChanged。
+
+自动验证：`python3 -m unittest scripts.tests.test_cbm_context`、`python3 scripts/check-hook-contracts.py`（完整 TOML 检查需 Python 3.11+）。测试验证提醒载荷、隔离与不阻断；客户端验收另需真实会话的输入和调用记录，不能以测试通过代替。
+
+官方参考：[Kimi Hooks](https://moonshotai.github.io/kimi-code/en/customization/hooks)、[Qoder Hooks](https://docs.qoder.com/cli/hooks)、[CBM](https://github.com/DeusData/codebase-memory-mcp)。版本差异以本机实测为准。

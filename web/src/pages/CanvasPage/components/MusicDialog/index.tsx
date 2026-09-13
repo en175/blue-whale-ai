@@ -1,12 +1,18 @@
 /* ============================================
  * MusicDialog AI 音乐底部对话框：参考音频（本地上传/画布选择）+ 曲风描述 +
  * 歌词（纯伴奏开启时不可填）+ 倍速；底部模式可切换回音频生成对话框
+ * IKFCKS：参考预览行替换为共享参考缩略图（三态交互）；曲风描述支持 @ 引用画布音频
  * ============================================ */
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, AudioLines, Upload, Move, ChevronDown, Music, ArrowUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
+import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { AudioRefItem, CanvasPickItem } from '../AudioDialog';
+import AtMentionMenu from '../AtMentionMenu';
+import { audioRefToMentionItem, stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
+import RefThumbnail from '../RefThumbnail';
+import { arrayMove, useRefStripDrag } from '../RefThumbnail/strip-dnd';
 import styles from './index.module.css';
 
 /** 输入框字数上限 */
@@ -39,9 +45,23 @@ interface MusicDialogProps {
   canvasMedia: CanvasPickItem[];
   /** 底部模式切换 → 音频生成对话框 */
   onSwitchToAudio: () => void;
+  /** 画布 @ 引用候选（IKFCKS：曲风描述 @ 菜单，仅音频可选） */
+  mentionItems?: AtMentionItem[];
+  /** 选中 @ 素材后写入参考区（缩略图 @ 与手动 @ 选择同一入口） */
+  onMentionCanvas?: (item: AtMentionItem) => void;
+  /** 外部注入的画布选择结果（@ 菜单选中音频 → 父级生成 → 注入参考区） */
+  externalPick?: { ts: number; item: AudioRefItem } | null;
 }
 
-export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAudio }: MusicDialogProps) {
+export default function MusicDialog({
+  onClose,
+  onSend,
+  canvasMedia,
+  onSwitchToAudio,
+  mentionItems,
+  onMentionCanvas,
+  externalPick,
+}: MusicDialogProps) {
   const [text, setText] = useState('');
   const [lyrics, setLyrics] = useState('');
   const [refs, setRefs] = useState<AudioRefItem[]>([]);
@@ -53,11 +73,26 @@ export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAu
   const [speedOpen, setSpeedOpen] = useState(false);
   const [instrumental, setInstrumental] = useState(false);
   const [speed, setSpeed] = useState(1);
+  /** @ 菜单当次会话关闭标记（再输入 @ 重新打开） */
+  const [mentionDismissed, setMentionDismissed] = useState(false);
+  const mentionAnchorRef = useRef<HTMLDivElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const sourceWrapRef = useRef<HTMLDivElement>(null);
   const modeWrapRef = useRef<HTMLDivElement>(null);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const speedWrapRef = useRef<HTMLDivElement>(null);
+
+  const mentionQuery = trailingAtQuery(text);
+  useEffect(() => {
+    if (mentionQuery === null) setMentionDismissed(false);
+  }, [mentionQuery]);
+
+  /** 参考音频时长探测（放大预览「图标+名称+时长」卡片用） */
+  const durationSources = useMemo(
+    () => refs.map((r) => ({ key: `${r.source}-${r.id}`, src: r.src })),
+    [refs],
+  );
+  const durations = useAudioDurations(durationSources);
 
   useDismissOnOutside([
     { open: sourceOpen, ref: sourceWrapRef, dismiss: () => setSourceOpen(false) },
@@ -119,6 +154,18 @@ export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAu
       return prev.filter((r) => !(r.id === id && r.source === source));
     });
   };
+
+  /** IKFCKT 参考条拖拽换位：顺序为面板本地序（编号随新序重派生，发送按新序携带） */
+  const stripDrag = useRefStripDrag({
+    onReorder: (from, to) => setRefs((prev) => arrayMove(prev, from, to)),
+  });
+
+  /** 外部注入的画布选择结果（@ 菜单选中音频 → 父级生成事件）：去重 + 上限保护 */
+  useEffect(() => {
+    if (!externalPick) return;
+    addRef(externalPick.item);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalPick]);
 
   const canvasAudios = canvasMedia.filter((m) => m.mediaType === 'audio');
 
@@ -223,37 +270,58 @@ export default function MusicDialog({ onClose, onSend, canvasMedia, onSwitchToAu
         onChange={handleFileChange}
       />
 
-      {/* 参考预览 */}
+      {/* 参考预览：IKFCKS 替换为共享参考缩略图（编号圆钮 + 悬停 ×/@ + 200ms 图标名称时长卡片），
+          自绘预览行（常显删除 + 「音频N」文字标签）下线；× 仅移除面板参考（本地上传回收 blob URL），
+          @ 与手动 @ 选择走同一 onMentionCanvas 入口（仅画布来源有素材身份）。
+          IKFCKT：参考条支持拖拽换位（面板本地序；编号随新序重派生） */}
       {refs.length > 0 && (
         <div className={styles.previewArea}>
-          {refs.map((r) => (
-            <div key={`${r.source}-${r.id}`} className={styles.previewItem}>
-              <div className={styles.previewAudio}>
-                <AudioLines size={16} strokeWidth={2} />
-              </div>
-              <button
-                className={styles.previewRemove}
-                onClick={() => removeRef(r.id, r.source)}
-                title="移除"
-              >
-                <X size={10} strokeWidth={2} />
-              </button>
-              <span className={styles.previewLabel}>音频{r.source === 'canvas' ? '·画布' : ''}</span>
-            </div>
+          {refs.map((r, i) => (
+            <RefThumbnail
+              key={`${r.source}-${r.id}`}
+              data-testid="music-ref-thumb"
+              kind="audio"
+              name={r.name}
+              number={i + 1}
+              audioDuration={durations.get(`${r.source}-${r.id}`)}
+              onRemove={() => removeRef(r.id, r.source)}
+              onInsertRef={
+                r.source === 'canvas' && onMentionCanvas
+                  ? () => onMentionCanvas(audioRefToMentionItem(r))
+                  : undefined
+              }
+              dragProps={stripDrag.itemProps(i)}
+            />
           ))}
         </div>
       )}
 
-      {/* 曲风描述 */}
-      <textarea
-        className={styles.textarea}
-        placeholder="描述音乐曲风、情绪、节奏和乐器等..."
-        value={text}
-        onChange={(e) => setText(e.target.value.slice(0, MAX_INPUT))}
-        onKeyDown={handleKeyDown}
-        rows={2}
-        maxLength={MAX_INPUT}
-      />
+      {/* 曲风描述（IKFCKS：支持 @ 引用画布音频素材） */}
+      <div className={styles.mentionAnchor} ref={mentionAnchorRef}>
+        <textarea
+          className={styles.textarea}
+          placeholder="描述音乐曲风、情绪、节奏和乐器等... 使用 @ 引用画布素材。"
+          value={text}
+          onChange={(e) => setText(e.target.value.slice(0, MAX_INPUT))}
+          onKeyDown={handleKeyDown}
+          rows={2}
+          maxLength={MAX_INPUT}
+        />
+        {mentionQuery !== null && !mentionDismissed && onMentionCanvas && (
+          <AtMentionMenu
+            anchorRef={mentionAnchorRef}
+            items={mentionItems ?? []}
+            editorQuery={mentionQuery}
+            disabledKinds={['image', 'video', 'text']}
+            onSelect={(item) => {
+              setText((prev) => stripTrailingAtQuery(prev));
+              setMentionDismissed(true);
+              onMentionCanvas(item);
+            }}
+            onClose={() => setMentionDismissed(true)}
+          />
+        )}
+      </div>
       <div className={`${styles.charCount} ${text.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
         {text.length}/{MAX_INPUT}
       </div>

@@ -1,0 +1,359 @@
+[
+ {
+  "case_id": "G01",
+  "contract_ref": "§3.1",
+  "title_zh": "图片 claimNextJob findFirst 完整谓词",
+  "given": "generation_jobs 中存在一条 type=image, status=queued, is_delete=false, source 在白名单内, next_action_at<=now 的候选行",
+  "expect": "findFirst 被调用时 where 含 status='queued', is_delete=false, source IN ['bottom_dock','plan_apply','storyboard_preview'], next_action_at={lte: now}"
+ },
+ {
+  "case_id": "G02",
+  "contract_ref": "§3.1",
+  "title_zh": "视频 claimNextVideoJob findFirst 完整谓词（含孤儿 OR）",
+  "given": "generation_jobs 中存在一条 type=video, status=queued, source 在白名单内, next_action_at<=now 的候选行",
+  "expect": "findFirst 被调用时 where 含 type='video', source IN ['bottom_dock','plan_apply','plan','scene_card'], is_delete=false, next_action_at={lte: now}, OR 包含 queued 与 processing+孤儿（lease_expires_at null 或 < now）两分支"
+ },
+ {
+  "case_id": "G03",
+  "contract_ref": "§3.1",
+  "title_zh": "claimNextJob CAS SET 完整字段",
+  "given": "候选行 id=300, fencing_token=0n; workerId='worker-1'; IMAGE_JOB_LEASE_SECONDS=120",
+  "expect": "updateMany where={id:300n, status:'queued', fencing_token:0n}; data={status:'processing', lease_owner:'worker-1', lease_expires_at: now+120s, last_polled_at: now, fencing_token:{increment:1}, version:{increment:1}}"
+ },
+ {
+  "case_id": "G04",
+  "contract_ref": "§3.1",
+  "title_zh": "claimJobById CAS where 含 user_id",
+  "given": "调用 claimJobById('300','9','worker-1')；候选行 id=300, user_id=9n",
+  "expect": "findFirst where 含 id=300n, user_id=9n, status='queued'; CAS updateMany where 含 user_id=9n"
+ },
+ {
+  "case_id": "G05",
+  "contract_ref": "§3.1",
+  "title_zh": "孤儿接管：processing + lease_expires_at=null（视频）",
+  "given": "候选行 status='processing', lease_expires_at=null, fencing_token=4n",
+  "expect": "claimVideoJobById 返回非 null 且 fencingToken=5; CAS where 含 status='processing'（不强制 queued）"
+ },
+ {
+  "case_id": "G06",
+  "contract_ref": "§3.1",
+  "title_zh": "孤儿接管：processing + 过期租约（图片）",
+  "given": "候选行 status='processing', lease_expires_at < now, fencing_token=2n",
+  "expect": "claimImageJobById 返回非 null 且 fencingToken=3; findFirst where 的 OR 包含 processing+孤儿分支"
+ },
+ {
+  "case_id": "G07",
+  "contract_ref": "§3.1",
+  "title_zh": "updateMany reject 兜底 → claim 返回 null",
+  "given": "findFirst 返回候选行；updateMany 抛 DB 异常（reject）",
+  "expect": "claimNextJob 返回 null（不抛）——源码 .catch(()=>({count:0}))"
+ },
+ {
+  "case_id": "G08",
+  "contract_ref": "§3.2",
+  "title_zh": "markVideoSubmitted guard-fail（stale token）",
+  "given": "updateMany 返回 count=0（fencing_token 不一致或 job 已非 processing）",
+  "expect": "markVideoSubmitted 返回 false"
+ },
+ {
+  "case_id": "G09",
+  "contract_ref": "§3.2",
+  "title_zh": "rescheduleVideoPoll happy：钳制+续租+释放",
+  "given": "input progress=42; updateMany 返回 count=1",
+  "expect": "data.progress=42; data.poll_count={increment:1}; data.next_poll_at=now+5s; data.next_action_at=now+5s; data.lease_owner=null; data.lease_expires_at=null; data.version={increment:1}; 返回 true"
+ },
+ {
+  "case_id": "G10",
+  "contract_ref": "§3.2",
+  "title_zh": "rescheduleVideoPoll progress 钳制 >99 与 <0",
+  "given": "input progress=150 和 progress=-5 各一次",
+  "expect": "data.progress 分别被钳制为 99 和 0（Math.max(0, Math.min(99, Math.round(x))))"
+ },
+ {
+  "case_id": "G11",
+  "contract_ref": "§3.2",
+  "title_zh": "rescheduleVideoPoll guard-fail（stale token）",
+  "given": "updateMany 返回 count=0",
+  "expect": "返回 false"
+ },
+ {
+  "case_id": "G12",
+  "contract_ref": "§3.3",
+  "title_zh": "cancelVideoBeforeDispatch stale token → false",
+  "given": "事务内 updateMany 返回 count=0",
+  "expect": "返回 false; cost_reservations.updateMany（释放预留）不被调用"
+ },
+ {
+  "case_id": "G13",
+  "contract_ref": "§3.3",
+  "title_zh": "cancelVideoBeforeDispatch provider_task_id 非空不命中",
+  "given": "job 已提交上游（provider_task_id 非空）；CAS where 硬编码 provider_task_id=null",
+  "expect": "updateMany 返回 count=0 → 返回 false; 释放预留不执行; CAS where 断言含 provider_task_id:null"
+ },
+ {
+  "case_id": "G14",
+  "contract_ref": "§3.1",
+  "title_zh": "requeueImageJobForRetry count=0 → false",
+  "given": "job 不在 processing 态；updateMany 返回 count=0",
+  "expect": "返回 false"
+ },
+ {
+  "case_id": "G15",
+  "contract_ref": "§3.1",
+  "title_zh": "requeueImageJobForRetry happy data 完整",
+  "given": "jobId='300', nextActionAt=now+30s; updateMany 返回 count=1",
+  "expect": "where={id:300n, status:'processing'}; data={status:'queued', lease_owner:null, lease_expires_at:null, next_action_at:入参透传, retry_count:{increment:1}, fencing_token:{increment:1}, version:{increment:1}}; 返回 true"
+ },
+ {
+  "case_id": "G16",
+  "contract_ref": "§3.1",
+  "title_zh": "requeueImageJobForRetry updateMany reject 兜底",
+  "given": "updateMany 抛 DB 异常",
+  "expect": "返回 false（不抛）——源码 .catch(()=>({count:0}))"
+ },
+ {
+  "case_id": "G17",
+  "contract_ref": "§3.3",
+  "title_zh": "completeJob CAS data 完整字段",
+  "given": "守卫通过（count=1）；无输出槽；job project_id 非空",
+  "expect": "CAS data={status:'succeeded', progress:100, output_asset_ids:[Number(id)], next_action_at:null, lease_owner:null, lease_expires_at:null, version:{increment:1}}"
+ },
+ {
+  "case_id": "G18",
+  "contract_ref": "§3.2",
+  "title_zh": "updateMediaExtractProgress 钳制 150→99 与 -5→0",
+  "given": "input progress=150 和 progress=-5 各一次; updateMany 返回 count=1",
+  "expect": "data.progress 分别被钳制为 99 和 0"
+ },
+ {
+  "case_id": "G19",
+  "contract_ref": "§3.2",
+  "title_zh": "updateMediaExtractProgress 续租 lease_expires_at≈now+120s",
+  "given": "input progress=50; IMAGE_JOB_LEASE_SECONDS=120",
+  "expect": "data={progress:50, last_polled_at:now, lease_expires_at:now+120s, version:{increment:1}}"
+ },
+ {
+  "case_id": "G20",
+  "contract_ref": "§3.1",
+  "title_zh": "音频 claimAudioJobById 孤儿接管（processing + 过期租约）",
+  "given": "候选行 status='processing', lease_expires_at < now, fencing_token=2n",
+  "expect": "claimAudioJobById 返回非 null 且 fencingToken=3; findFirst where 的 OR 包含 processing+孤儿分支; 不套 source 白名单（IKCR78）"
+ },
+ {
+  "case_id": "G21",
+  "contract_ref": "§3.1/附录B",
+  "title_zh": "音频 claim 投影 snake_case（ClaimedJobDto）",
+  "given": "候选行 type=audio, expected_output_count=1, retry_count=0, cancel_requested_at=null",
+  "expect": "投影字段 id/project_id/user_id/type/input/expected_output_count/retry_count/cancelRequested/fencingToken 完整"
+ },
+ {
+  "case_id": "G22",
+  "contract_ref": "§3.3/asset-ops",
+  "title_zh": "createAsset fence guard 通过 → asset.id 返回",
+  "given": "createAssetGuard 返回 count=1; asset insert 成功",
+  "expect": "返回 asset.id.toString(); asset.source='generated'; asset.status='normal'; asset.created 事件写入"
+ },
+ {
+  "case_id": "G23",
+  "contract_ref": "§3.3/asset-ops",
+  "title_zh": "createAsset fence guard 失败 → null（stale worker）",
+  "given": "createAssetGuard 返回 count=0",
+  "expect": "返回 null; asset insert 不执行"
+ },
+ {
+  "case_id": "G24",
+  "contract_ref": "§3.3/settle-ops",
+  "title_zh": "completeJob happy path（修正一：无 cost_reservations）",
+  "given": "completeJobGuard count=1; 无 output_slots; job.project_id 非空",
+  "expect": "CAS data={status:'succeeded', progress:100, output_asset_ids, next_action_at:null, lease:null, version+1}; generation_job.status_changed 事件; 无 settleReservation（修正一）"
+ },
+ {
+  "case_id": "G25",
+  "contract_ref": "§3.3/settle-ops",
+  "title_zh": "failJob happy path（修正一：无 releaseReservation）",
+  "given": "failJobGuard count=1; 无 pending slots; job.project_id 非空",
+  "expect": "status='failed'; error JSON; generation_job_logs; generation_job.status_changed 事件; 无 releaseReservationInTx（修正一）"
+ },
+ {
+  "case_id": "G27",
+  "contract_ref": "附录A/image:303",
+  "title_zh": "图片 invalid_input：缺少 prompt 或 model_id",
+  "given": "input 中 prompt 为空或 model_id 为空",
+  "expect": "failClaimed(ERROR_INVALID_INPUT, '缺少 prompt 或 model_id')"
+ },
+ {
+  "case_id": "G28",
+  "contract_ref": "附录A/image:338",
+  "title_zh": "图片 model_unavailable：capability 缺失",
+  "given": "findImageCapability(modelId, sizeId) 返回 null",
+  "expect": "failClaimed(ERROR_MODEL_UNAVAILABLE, '未开通或不受支持的模型: ...')"
+ },
+ {
+  "case_id": "G29",
+  "contract_ref": "附录A/image:349",
+  "title_zh": "图片 invalid_reference：参考图数量超限",
+  "given": "referenceIds.length > maxReferenceCount（capability.features.maxReferenceImages）",
+  "expect": "failClaimed(ERROR_INVALID_REFERENCE, '当前模型最多支持 N 张参考图')"
+ },
+ {
+  "case_id": "G30",
+  "contract_ref": "附录A/image:362",
+  "title_zh": "图片 invalid_reference：参考素材不存在或类型不匹配",
+  "given": "resolveInputAssets 返回数量 < referenceIds.length 或存在非 image 类型",
+  "expect": "failClaimed(ERROR_INVALID_REFERENCE, '参考素材不存在或无权访问')"
+ },
+ {
+  "case_id": "G31",
+  "contract_ref": "附录A/image:502",
+  "title_zh": "图片 provider_credential_missing：凭证缺失",
+  "given": "input.provider_credential 非字符串或为空",
+  "expect": "failClaimed(ERROR_PROVIDER_CREDENTIAL_MISSING, '图片任务缺少供应商凭证')"
+ },
+ {
+  "case_id": "G32",
+  "contract_ref": "附录A/image:537",
+  "title_zh": "图片 invalid_reference_type：渠道映射失败",
+  "given": "mapImageChannelRequest 返回 ok=false（gpt/banana 矩阵无匹配且无回退）",
+  "expect": "failClaimed(ERROR_INVALID_REFERENCE_TYPE, '模型、分辨率与宽高比组合不受支持')"
+ },
+ {
+  "case_id": "G33",
+  "contract_ref": "附录A/image:600",
+  "title_zh": "图片 no_result：provider 返回 0 张",
+  "given": "provider.generate 返回空数组",
+  "expect": "failClaimed(ERROR_NO_RESULT, '生成服务未返回结果')"
+ },
+ {
+  "case_id": "G34",
+  "contract_ref": "§6/generation-worker.ts:705-725",
+  "title_zh": "图片瞬态重试：provider_failed + retry_count=0 → requeue 30s",
+  "given": "provider 抛 provider_failed; retry_count=0 < MAX_IMAGE_RETRIES(3)",
+  "expect": "requeueImageJobForRetry(jobId, now+30s) → true; 不调用 failJob; 不 ack-fail"
+ },
+ {
+  "case_id": "G35",
+  "contract_ref": "§6/generation-worker.ts:84-87",
+  "title_zh": "图片瞬态重试：retry_count=1 → requeue 60s",
+  "given": "provider 抛 provider_failed; retry_count=1",
+  "expect": "requeueImageJobForRetry(jobId, now+60s) → true; backoffMs=30000*2^1=60000"
+ },
+ {
+  "case_id": "G36",
+  "contract_ref": "§6/generation-worker.ts:84-87",
+  "title_zh": "图片瞬态重试：retry_count=2 → requeue 120s",
+  "given": "provider 抛 provider_failed; retry_count=2",
+  "expect": "requeueImageJobForRetry(jobId, now+120s) → true; backoffMs=30000*2^2=120000"
+ },
+ {
+  "case_id": "G37",
+  "contract_ref": "§6/generation-worker.ts:710",
+  "title_zh": "图片瞬态重试：retry_count>=3 → fail（max exceeded）",
+  "given": "provider 抛 provider_failed; retry_count=3 >= MAX_IMAGE_RETRIES",
+  "expect": "不调用 requeueImageJobForRetry; failClaimed(provider_failed)"
+ },
+ {
+  "case_id": "G38",
+  "contract_ref": "§6/generation-worker.ts:76",
+  "title_zh": "图片非瞬态错误：content_rejected → fail 不 requeue",
+  "given": "provider 抛 content_rejected; retry_count=0",
+  "expect": "不在 TRANSIENT_IMAGE_ERROR_CODES 中 → 不调用 requeue; failClaimed(content_rejected)"
+ },
+ {
+  "case_id": "G39",
+  "contract_ref": "settle-ops.ts:104-114",
+  "title_zh": "completeJob 多图槽位聚合：partially_succeeded",
+  "given": "4 个输出槽; 只产出 2 个 asset",
+  "expect": "slot 0-1 → succeeded + asset_id; slot 2-3 → failed; job status='partially_succeeded'"
+ },
+ {
+  "case_id": "G40",
+  "contract_ref": "settle-ops.ts:104-114",
+  "title_zh": "completeJob 全槽成功：不修正状态",
+  "given": "2 个输出槽; 产出 2 个 asset",
+  "expect": "slot 0-1 → succeeded; 不调用 updateJobStatus（保持 guard 设置的 succeeded）"
+ },
+ {
+  "case_id": "G41",
+  "contract_ref": "settle-ops.ts:104-114",
+  "title_zh": "completeJob 全槽失败：failed",
+  "given": "2 个输出槽; 0 个 asset",
+  "expect": "slot 0-1 → failed; job status='failed'"
+ },
+ {
+  "case_id": "G42",
+  "contract_ref": "internals.ts:21-62 syncRecordSummary",
+  "title_zh": "completeJob 全槽成功 + record 关联 → summary_status='success'",
+  "given": "firstSlot.scene_card_generation_record_id 非空; 所有槽 succeeded",
+  "expect": "scene_card_generation_records.summary_status='success'; version+1; scene_card_generation_record.summary_changed 事件"
+ },
+ {
+  "case_id": "G43",
+  "contract_ref": "internals.ts:39-46 aggregateSlotStatus",
+  "title_zh": "completeJob 部分成功 + record → summary_status='partial'",
+  "given": "firstSlot 关联 record; 部分 succeeded 部分 failed",
+  "expect": "record.summary_status='partial'; job status='partially_succeeded'"
+ },
+ {
+  "case_id": "G44",
+  "contract_ref": "settle-ops.ts:197 null-guard",
+  "title_zh": "completeJob 无 record 关联 → 零副作用",
+  "given": "firstSlot.scene_card_generation_record_id=null（音频/普通图片）",
+  "expect": "sceneCardRecordMapper.updateSummaryStatus 不被调用; findBySceneCardRecordId 不被调用"
+ },
+ {
+  "case_id": "G45",
+  "contract_ref": "internals.ts:67-113 syncStoryboardPreviewSummary",
+  "title_zh": "completeJob + storyboard_preview 关联 → summary_status 同步",
+  "given": "storyboard_previews.first_generation_job_id=jobId 命中; 槽全成功",
+  "expect": "storyboard_previews.summary_status='success'; version+1; storyboard_preview.summary_changed 事件"
+ },
+ {
+  "case_id": "G46",
+  "contract_ref": "internals.ts:75 null-guard",
+  "title_zh": "completeJob 无 storyboard_preview 关联 → 零副作用",
+  "given": "findFirst(first_generation_job_id=jobId) 返回 null",
+  "expect": "storyboardPreviewMapper.updateSummaryStatus 不被调用"
+ },
+ {
+  "case_id": "G47",
+  "contract_ref": "generation-output-slot-repo.ts:15-24",
+  "title_zh": "aggregateSlotStatus 纯函数：pending → generating",
+  "given": "槽状态含 pending",
+  "expect": "返回 'generating'（尚有未终态槽）"
+ },
+ {
+  "case_id": "G48",
+  "contract_ref": "generation-output-slot-repo.ts:28-43",
+  "title_zh": "resolveLogicalSlots：同 slot_index 重试 → succeeded 优先",
+  "given": "slot_index=0 有两次尝试（先 failed 后 succeeded）",
+  "expect": "逻辑槽保留 succeeded（succeeded 是永久终态）"
+ },
+ {
+  "case_id": "G71",
+  "contract_ref": "§3.2/评审C1",
+  "title_zh": "markVideoSubmitted SQL 钉桩：provider='new-api'/progress=1/next_poll_at=next_action_at=now+5s(Java计算)/lease清空/version+1；fencing_token 不得递增；禁 DATE_ADD…MILLISECOND",
+  "given": "CAS 命中",
+  "expect": "SET 全列断言 + 无 fence bump + 无非法 INTERVAL"
+ },
+ {
+  "case_id": "G72",
+  "contract_ref": "§3.2/评审C2",
+  "title_zh": "rescheduleVideoPoll：progress 钳制(150→99,-5→0)在 Java 侧；last_polled_at=#{now}；next_poll_at/next_action_at=+5s；无 fence bump；poll_count+1",
+  "given": "progress=150/-5",
+  "expect": "捕获参数 ==99/==0；SQL 含 last_polled_at/next_poll_at；无 fencing_token+1"
+ },
+ {
+  "case_id": "G73",
+  "contract_ref": "§3.3/评审I4",
+  "title_zh": "cancelVideoBeforeDispatch：成功路径零日志行（TS video-ops.ts:306-343 无 log）；SQL 含 next_poll_at=NULL",
+  "given": "CAS count=1",
+  "expect": "jobLogMapper 零交互"
+ },
+ {
+  "case_id": "G74",
+  "contract_ref": "§3.3/评审I1I2+补漏",
+  "title_zh": "publishVideoResult：单槽 findFirst(slot_index=0)；record summary 仅当 slot 带 FK；绝不调 storyboard；补 output_attached 事件(video-ops.ts:175-194)",
+  "given": "1 slot 无 record FK",
+  "expect": "updateSlot 一次绑定 assetId；sceneCard/storyboard mapper 零交互；output_attached 事件断言"
+ }
+]

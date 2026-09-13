@@ -1,9 +1,8 @@
 # worker-java 迁移契约（IKEL4A / ADR-0084）
 
-- **状态**：**已冻结 + 修正一 + 修正二**（2026-09-10，IKEL4H 从代码逐项核对回填；修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
+- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
 
 ## 0. 修正一（2026-09-10）：cost_reservations 记账移出迁移范围（工单 IKEF1K）
-
 - 决策：`cost_reservations` 预扣/结算/release 记账**整体下线**（IKEF1K），**Java 侧一概不实现**。本修正覆盖 §3.3、§4、§5、§6、§8 中所有结算/退款语义：`.../complete`、`.../fail`、`.../requeue` 端点实现必须封装**删除后**的逻辑，禁止先行按旧语义封装。
 - 实施顺序钉死：IKEF1K 删除（TS 产品路径 → release 批次）→ 本契约修正二（终态语义定稿）→ IKEL4J 端点 → 四刀。
 - **不受删除影响的外部事实（保留）**：new-api 网关按 token 真实扣费；`ERROR_QUOTA_EXHAUSTED` 识别（HTTP 402 / 文案正则，§5 优先级不变）；失败分类中该码仍是终态。receipt/consume-log 查询随 settle 一并消失；展示额度口径（quota/50000）是另一契约，不在本单。
@@ -13,6 +12,8 @@
   - §5 receipt→`actual_amount_fen`、`quotaToFen`、video 偏差 warn → 删
   - §6 audio/image/video 结算联动、§8 `publishVideoResult` settle 字段 → 删
   - §4 `claim` 投影中的 `reservedAmountFen`（video）→ 删
+
+**修正三（2026-09-10 用户拍板）**：模型上游**只保留 new-api 网关一套**，火山 ARK 直连通道（`ark-image-provider.ts`、`GENERATION_PROVIDER=ark`、`VOLC_ARK_*`）**整体下线、不迁移**。刀③ image 移植范围剔除 ark 兜底与 `ark-image-provider.ts:141-157` 分类路径；TS 侧清理由新子单承接，刀③ 开工前提追加「ARK 下线单已合入」。TOS 对象存储不属模型直连，**不受本修正影响**。
 
 **修正二（2026-09-10 用户二次拍板）**：薄执行器撤回，**Java 直连 DB 移植**。目标模型：TS 侧只发任务（建 job + 投 MQ + recovery 重投 + GC），Java 侧做任务（claim → 调上游 → 终态写），**双方只经数据库与 MQ 交互，无 HTTP**。§3 定位从「权威单源、不迁移」改为「**移植规格**」：Java 用 MyBatis-Plus 逐条实现并以金标测试套件对账；§4 endpoints **不采纳**，保留作移植职能清单（签名对照见附录 B）。刀① 不受影响；刀②③④ 开工前提 = IKEF1K 已合入 master。
 - **原则**：领域规则权威在 NestJS backend 侧；§3/§4 描述的实现**不迁移、只暴露**——Java 侧经 internal endpoints 使用，禁止二次实现。
@@ -49,7 +50,7 @@
 4. 后续一切写：`WHERE ... status='processing' AND lease_owner=workerId AND fencing_token=<持有值>`（`fenceWhere`，`settle-ops:13-19`）。**guard fail 一律静默返回 false，不上抛**——stale worker 效应被吞、留给租约过期 + recovery。此语义 Java 必须复刻（不许加异常日志之外的行为）。
 
 ### 3.2 租约与心跳
-- TTL `IMAGE_JOB_LEASE_SECONDS` 默认 **120s**，全类型同值。
+- TTL `IMAGE_JOB_LEASE_SECONDS` 默认 **120s**，全类型同值（**image 例外：300s，见 §11 政策修订**）。
 - 真心跳仅 media_extract：`updateMediaExtractProgress` 写 progress(0–99) 同时续租（`media-extract-ops:26-43`）。
 - video 无心跳：`markVideoSubmitted` / `rescheduleVideoPoll` 写完即**释放租约**（lease_owner/expires 置 null）并设 `next_action_at=now+5000ms`，下轮以孤儿接管方式再 claim。轮询上限 `MAX_VIDEO_POLLS=720`（≈60 分钟）→ `ERROR_PROVIDER_TIMEOUT`。
 
@@ -79,7 +80,7 @@
 ## 5. new-api 网关与计费契约
 
 - 端点：`POST /v1/images/generations`、`POST /v1/images/edits`（multipart）、`POST /v1/video/generations`、`GET /v1/video/generations/{taskId}`、`POST /v1/audio/speech`、`GET /api/log/self?request_id=&type=2`、`GET /api/pricing`。
-- 请求头：`Authorization: Bearer <per-job 解封凭证>`（AES sealed credential）、`X-Trace-Id`、**`X-Client-System: bluewhale`**（ADR-0080 白名单头，缺了登录隔离会破）、`Content-Type`。
+- 请求头：`Authorization: Bearer <明文 sk token>`（**修正五：凭证去密**——2026-09-12 用户拍板，Redis 会话 sealedSk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖）、`X-Trace-Id`、**`X-Client-System: bluewhale`**（ADR-0080 白名单头，缺了登录隔离会破）、`Content-Type`。
 - **receipt**：响应头 `X-Oneapi-Request-Id` → `getConsumeLogByRequestId` 精确查本次扣费 quota → `quotaToFen` 得 `actual_amount_fen`（image/audio 结算路径）；查不到 → 落 0 + warn（非失败）。查询侧重试 500ms×3（`generation-worker.service.ts:23-43`）。video 不用 receipt，读 `TaskDto.quota`（终态时=实际扣费）；与预留偏差 >50% 出 warn（`video-job-runner.ts:321-334`）。
 - 换算：`quotaToFen = round(quota/500000 × 7.3 × 100)`（env `QUOTA_PER_UNIT`/`USD_EXCHANGE_RATE` 可覆盖）；仅记账，**≠ 展示额度契约（quota/50000）**，两口径勿混。
 - 预扣创建在主 API（`createJobWithinTx`，与 job 行同事务，`cost_reservations reserved`，provider 恒 `"volc"`，4 个版本字段缺省 `"dev"`）——worker/Java 均不建预扣。
@@ -89,15 +90,15 @@
 
 - 生成域 1xxx 全表以代码文件为准（`ERROR_QUOTA_EXHAUSTED`…`ERROR_OUTPUT_COUNT_MISMATCH`，1001–1037；未知回退数值 1000）。Java 侧从本契约文档生成常量表，禁止手抄新增。
 - **重试规则（决定 MQ ack/结算，双端必须一致）**：
-  - image：仅 `provider_failed` 且 `retry_count<3` → `.../requeue`（退避 30/60/120s，300s 封顶）；其余终态 fail。
+  - image：仅 `provider_failed` 且 `retry_count<3` → `.../requeue`（退避 30/60/120s，300s 封顶）；其余终态 fail。**（2026-09-11 起读超时/可疑 post-send IO 归终态、瞬态只留连接层失败，见 §11 政策修订）**
   - video：submit 阶段错误全终态；poll 阶段瞬态（`NewApiNetworkError`/`NewApiTimeoutError`/HTTP 429,500,502,503,504，但 `invalid_json_response`/`invalid_video_response` 除外）→ `.../reschedule`；`poll_count≥720` → `provider_timeout` 终态。
   - audio / media_extract：无 worker 级重试，全部终态 fail。
   - 消费者级不 ack → broker 30s 重投属**传输层**，与上表叠加，Java 客户端需保持等价（不主动 nack）。
 - 按 job 类型的错误码赋值点清单（凭据缺失/模型不可用/参考素材/无结果/catch-all）：见附录 A（本文件末，冻结自 agent 核对记录，IKEL4J 实现端点时逐条对照）。
 
-## 7. recovery / asset-GC（留 TS 进程，Java 不接管，此处仅登记行为边界）
+## 7. recovery / asset-GC（**recovery 归 Java（IKF3AT）；asset-GC 留 TS**）
 
-- recovery（60s）：`listDue*JobIds`（批 100）选 `next_action_at<=now` 且 `queued` 或 `processing 且租约过期`；video 限 4 源白名单、24h 内；重发同 body。→ **它同时是 Java worker 崩溃时的降级网**。
+- recovery（60s）：**Java `RecoveryService` 实现**（TS `recovery.service.ts:38-106` 逐字移植；`@Scheduled` + 启动即扫一次）。`listDue*JobIds`（批 100）选 `next_action_at<=now` 且（`queued` ∨ `processing 且租约空/过期`）；source 白名单：video=4 源、image=CLAIMABLE_JOB_SOURCES、audio/media_extract 不套白名单；重发同 body 延迟 1s。**窗口：创建 2 小时内**（用户 2026-09-11 指示，TS 的 24h 改 2h；env `RECOVERY_MAX_AGE_MINUTES` 可覆盖，默认 120）。**开关**：只对 `WORKER_ENABLED_TAGS` 内 tag 重投（生产者 bean 带 @Conditional，缺失即跳过）；TS 侧 recovery 同时在跑时重复投递无害（claim-by-id CAS + null-claim ack 幂等）。**不移植** `resetStalledImageJobs`——TS 侧无活调用方（死代码），孤儿由 claim-by-id 的「processing + 租约过期可接管」语义接走。→ **TS 进程退役不再阻塞**。
 - asset-GC（1h）：`is_delete AND deleted_at<cutoff`（批 1000，延迟默认 7 天）→ live-ref 反查（`storage_key IN(...) AND is_delete=false`）→ 差集 `deleteMultiObjects`（404 视为幂等成功；partial Error 抛出）→ `deleteMany` → `operation_logs` 审计。
 
 ## 8. 资产 / TOS / 媒体处理等价标准
@@ -122,7 +123,7 @@
 
 ## 附录 A：按 job 类型的错误码赋值点（行号基线 `59ba3282`）
 
-- image（`generation-worker.ts`）：`unsupported_type:288`、`invalid_input:303`、`model_unavailable:338`、`invalid_reference:349/362`、`provider_credential_missing:502`、`invalid_reference_type:537/550`、`unsupported_input:558`、`no_result:600`、catch-all `:687-692`；provider 分类 `ark-image-provider.ts:141-157`（content_rejected > quota_exhausted > provider_failed）。
+- image（`generation-worker.ts`）：`unsupported_type:288`、`invalid_input:303`、`model_unavailable:338`、`invalid_reference:349/362`、`provider_credential_missing:502`、`invalid_reference_type:537/550`、`unsupported_input:558`、`no_result:600`、catch-all `:687-692`；~~provider 分类 `ark-image-provider.ts:141-157`~~（**修正三：ARK 直连整体下线，不移植**；new-api 通道自身分类路径保留）。
 - audio：`provider_credential_missing:370`、`model_unavailable:381`、`reference_asset_unavailable:395`；provider `new-api-audio-provider.ts:119-163`（同上优先级）、timeout `:101`、no-json `:140`。
 - video（`video-job-runner.ts`）：credential `:220`、`invalid_input:311/605`、`invalid_reference:652-670`、`invalid_reference_type:632/638`、`reference_asset_unavailable:679/769`、`unsupported_input:709/722`、poll 超时 `:273`、catch-all `:365`；提交超时 30s / 轮询 10s（`new-api-video-task-provider.ts:51-53`）。
 - media_extract（`media-extract-runner.ts`）：`invalid_input:210`、`source_asset_unavailable:221`、MediaExtractError/回退 `media_extract_failed:305`。
@@ -152,3 +153,132 @@
 | `requeueImageJobForRetry` | 位置参 `(jobId, nextActionAt: Date)`；**无 fence 入参——Java 移植时以其 SQL 实况为准，金标用例单列** | :114 |
 
 BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 列 BigInt；Java 用 `long`；`id/project_id/user_id` 字符串承载。
+
+## 10. 实施注记（本地全栈联调 2026-09-10 实锤，双端共同遵守）
+
+- **DATETIME 时基 = UTC naive**：Prisma/TS 写入均为 UTC 挂钟值；Java 侧一切写库时刻必须 `LocalDateTime.now(ZoneOffset.UTC)`。教训：用本地钟写 `next_action_at`/`lease_expires_at` 会让 requeue 单在服务端 `NOW()`（UTC）视角躲进未来 8 小时、claim 永不可见（1808 实锤）。金标镜像断言的时间窗基准同 UTC。
+- **invisible 窗与慢 handler**：`receive(10, 30s)` 下 handler 超 30s（如带参考图的 image 编辑）必然引发 broker 重投；重复投递由「lease 未过期 + fencing」在 claim 处静默拦截（1809 实锤：两次 handle、一次 CAS 生效、零重复副作用）。消费端 `ack 失败` WARN 属预期噪音，不作为故障告警。
+- **edits 参考图必须传字节**（`new-api-generation-ops.ts` 语义），传 URL 字符串网关 400；key 前缀 `uploads/{userId}/image/...` 的 userId 取自 job.user_id，禁止 0 兜底。
+
+## 11. 冻结增量（2026-09-10，IKESD6）：`features.i2i_model_name` 别名分流 + `features.max_prompt_length`
+
+冻结文档的**追加契约**，双端同步评审通过前 Java 侧照此实现（见 [ADR-0085](../adr/0085-catalog-input-modality-model-alias-and-per-model-prompt-length.md)）：
+
+- `generation_model_capability.features` 新增两键（通用机制，任何 image 行可配，无开关）：
+  - `i2i_model_name`（string，可选）：**上游模型名**（非行 id）。**分流由 Java image 链（刀③）在出站请求处实现**（IKESD6 拍板：Node worker 退役中，新功能不落旧版）：该行配了别名 **且** 本 job 带参考图（`input_asset_ids` 解析出的参考素材非空）→ HTTP body 的 `model` 用别名，否则用 `model_id`。未配别名的行行为与 §5 现状完全一致。**灰度含义**：image tag 仍在 TS 侧消费期间，别名不参与分流；切 Java 消费后自动生效。
+  - `max_prompt_length`（正整数，可选）：仅影响 **backend 创建时校验**（raw prompt 上限，缺省 image/video=4000、audio=3000；组合上限改为 `max(30000, 模型值)`）。**worker / Java 侧不消费**（worker 现状即不复校长度，见 §2 权威面），登记于此仅为表列语义完整。
+- **canonical 语义（Java 必须逐字复刻）**：别名 swap 只发生在出站 HTTP body 的 `model` 字段；`generation_jobs.input.model_id` 恒为**目录主行 model_id**（白名单、重试沿用 frozen input、恢复重投、计费对账、日志全部不受影响）。禁止在创建时把别名写进 frozen input。
+- **读取时效**：别名每次执行按 `model_id` 现查能力行（对齐刀③ claim 后查能力的既有模式）；**Java 侧禁止进程级缓存 features**，否则管理端改别名后灰度两侧行为分叉。
+- **消费端目录投影**：`/api/generation/models` 对前端**剥除** `i2i_model_name`（出站调用值，与像素/api_value 同哲学），仅透出 `max_prompt_length`。
+- 数据面变更（同一 migration）：`gpt-image-2-edit` / `nano-banana-2-i2i` 行软删（is_delete=1），其上游名改由主行 `features.i2i_model_name` 承载；uk_provider_model 含软删行，软删名永久不可复用（`create` 冲突语义不变）。
+
+**政策修订（2026-09-11，IKF12J 讨论，用户拍板）——image 超时与重试语义**：
+
+- **读超时与可疑 post-send IO 不重试**：请求已到达上游、可能已出图扣费，重试=双扣风险 → image HTTP 读超时、以及连接重置/流中断/SSL 中途失败等（无法证明 POST 未送达）一律归 `provider_timeout` **终态**（覆盖 §6「image 仅 provider_failed 瞬态」的入口来源：TS 旧链路把超时混进 provider_failed 一并重试，属其隐患，Node 退役中不回改）。**瞬态重试仅保留请求未达上游的连接层失败**（连接拒绝/连接超时/DNS → provider_failed）。
+- **拉大窗口消化慢上游**：`NEW_API_IMAGE_TIMEOUT_MS` 缺省 60s（刀③写死）→ **300s**（用户 2026-09-11 二次上调：240s 实测仍不够，本地 job 1822 在 240s 整超时）；image claim 租约必须盖住「超时+转存」→ 缺省 120s → **420s**，改读 `IMAGE_JOB_LEASE_SECONDS` env（顺带修复刀③把本节登记的 env 写死成常量——§3.2 的 120s 缺省仅约束非 image tag）。recovery 侧按 `lease_expires_at` 列判定，自动跟随，无需改 TS 代码。
+- ~~端点选择回归修正（同单）：恒 `/v1/images/generations` + JSON `image` 字段（单张=字符串、多张=数组）；jiekouAI 渠道设计上拒绝 edits（blue-whale-api `highwayapi/adaptor.go:44,113`），任何 edits 分支即回归（钉桩 `NewApiImageClientEndpointTest`）。~~ **本条已被 §12 收窄**（2026-09-11，IKF4LI）：上游换官方协议后，`image_protocol=openai-images` 的行的图生图**必须**走 edits multipart；本条仅对 `image_protocol=inline-image` 的行（缺省值）继续成立。
+
+---
+
+## 12. 冻结增量（2026-09-11，IKF4LI）：出站图片协议目录化（`features.image_protocol`）
+
+上游 gpt-image-2 换官方 OpenAI Images 协议后，§11 定的「恒 generations + body.image」形态被上游**硬拒**，调用 100% 失败。**协议由能力行声明，不按模型名特判**；§11 的 `i2i_model_name` 对 gpt-image-2 作废（机制保留给 banana）。设计背景与取舍见 [ADR-0085](../adr/0085-catalog-input-modality-model-alias-and-per-model-prompt-length.md) 修订段。
+
+### 12.1 实测契约（2026-09-11，经 `api.master.xfai.cloud`，真实调用产生费用）
+
+| 探测 | 结果 |
+| --- | --- |
+| `POST /v1/images/generations` `{model,prompt}` | 200，`data[].b64_json`，耗时 **178s** |
+| `POST /v1/images/edits` multipart（model+prompt+`image` 文件） | 200，`data[].b64_json`，耗时 17s |
+| generations 带 `image` 字段 | 400 `Unknown parameter: 'image'` |
+| 带 `response_format` | 400 `Unknown parameter: 'response_format'` |
+| 带 `watermark` | 400 `Unknown parameter: 'watermark'` |
+| `size` | 须 `WIDTHxHEIGHT`，**宽高均须被 16 整除** |
+| `quality` | 仅 `low` / `medium` / `high` / `auto` |
+| `stream` / `tools` / `sequential_image_generation` | 静默接受（非官方字段，官方协议一律不发） |
+
+### 12.2 `features.image_protocol`（string，可选；缺省 `inline-image`）
+
+- **`openai-images`**：无参考图 → `POST /v1/images/generations`（JSON）；有参考图 → `POST /v1/images/edits`（multipart，参考图**由 worker 按 URL 下载成字节**后以 `image` 字段逐个追加）。只发官方字段 `model` / `prompt` / `n` / `size` / `quality`；**模型名恒为 `model_id`**——文生图与图生图是同一档位、**不换名**，端点分流代替换名。
+- **`inline-image`（缺省，未声明即此形态，现状零回归）**：恒 `POST /v1/images/generations`（JSON），参考图以 URL 字符串/数组进 body `image`；**仅此形态**下应用 §11 的 `i2i_model_name` 换名。
+- 未知值一律回落 `inline-image`：协议切错的代价是全量调用失败，宁可不切。**「没配」与「配错」必须可区分**：键不存在 = 缺省（常态，静默）；键存在但取值认不出、或 features JSON 损坏 = 配置错误（回落的同时打 WARN）——静默咽掉会让排查从「该模型整个挂了」开始而根因埋在 DB 里。回落决策与告警在 `ImageChannelMapper.parseImageProtocol`，`ImageProtocol.fromWire` 对认不出的值返回 `null` 不做兜底。
+- **⚠️ 交叉约束：`image_protocol=openai-images` 的行必须配 `channel_parser=gpt`。** `channel_parser=banana` 会把 `quality` 映射成 `"1k"` 一类的值，而官方协议只认 `low`/`medium`/`high`/`auto`，且该值会被**原样发出** → 必然 400，且错误来自上游、与真正原因（两个配置轴矛盾）隔了一层。**刻意不在 worker 侧过滤非法 `quality`**：过滤等于静默降级成默认质量，比让上游报错更糟——矛盾配置就该响。`features.image_protocol` 目前**无 backend 写入闸门**（`featuresFieldErr` 只校验 `i2i_model_name` / `max_prompt_length`），交叉校验待另开 backend 单。
+- 读取时效沿用 §11：每次执行按 `model_id` 现查能力行，**禁止进程级缓存 features**。
+- **消费端目录投影**：`image_protocol` 与 `i2i_model_name` 同类（出站调用值）。本次只改 worker-java，backend 的 `handle-list-models` 仍只剥 `i2i_model_name`，`image_protocol` 会随 `features` 透出前端——无害（非密钥），如需与 `i2i_model_name` 一致剥除需另开 backend 单。
+
+### 12.3 响应形态（**无条件支持，与协议无关**）
+
+`data[]` 元素两种形态都必须支持：`url`（网关托管，banana/seedream 现用）与 `b64_json`（官方 GPT Image 系唯一形态）。b64 由客户端 base64 解码为字节、**按魔数嗅探 mime**（响应无 Content-Type 头）；解码失败、或两者皆无的元素丢弃，不炸整批（与 TS `filter` 同款宽容）。
+
+### 12.4 转存与降级
+
+- `b64_json` 形态**没有托管 URL 可降级**：TOS 未配置即硬失败「图片转存存储未配置」（对齐音频 data-direct，见 §8）。
+- `url` 形态维持 §8 现状：TOS 未配置 → 直存 URL（`storageKey=null`）。
+
+### 12.5 数据面（同一 migration：`023_ikf4li_official_openai_images_protocol.sql`，`prisma/schema` 与 `prisma/migrations` 双轨字节一致）
+
+- 主行 `gpt-image-2`（015 创建后停用未删，占着 uk_provider_model 干净名）**UPSERT 启回**并写入官方协议配置；`features` 去 `i2i_model_name`、加 `image_protocol=openai-images`；漂移名行 `gpt-image-2-text-to-image`（022 的合并主行）软删。
+- `nano-banana-2-t2i` 行显式写 `image_protocol=inline-image`（保留 `i2i_model_name`），读代码不必靠记默认值。
+- **改名不做引用迁移**：老画布节点/历史 job 里存的 `gpt-image-2-text-to-image` 不再被解析（用户 2026-09-11 拍板不加兼容别名），重跑需重选模型——与 ADR-0085 对软删行接受的同类代价。
+
+### 12.6 错误分类补充
+
+参考图下载失败发生在 **POST 上游之前**（零扣费风险）→ 归 `provider_failed` **瞬态可重试**，不违反 §11 的「post-send IO 不重试」政策（该政策约束的是无法证明 POST 未送达的 post-send 失败）。
+
+### 12.7 尺寸映射一律走能力行（2026-09-12，IK629 补完）
+
+承接 §12「协议由能力行声明，不按模型名特判」：**尺寸映射同理，一律读 `generation_model_capability.request_mapping`，禁止在 worker 代码内按模型名写尺寸表。**
+
+- 迁移前盘点：`request_mapping` 三族中 gpt 的 `matrix`、banana 的 `size`/`quality` 均已落能力行；**唯独 seedream 的「分辨率 × 宽高比 → WxH」表硬编码在 `ImageChannelMapper.MODEL_SIZES`**（写死 4 个模型名）。后果：上游新增/调整模型尺寸必须改 Java 并重新发版。
+- 由此掩盖的一处事实：seedream 行 `supported_sizes[].api_value` 只写档位名（`"1K"`），**上游并不接受**（实测 400 `Invalid size '1K'. Expected WIDTHxHEIGHT`）——真值实际由代码表展开，即「数据库里的值不可用、真值在代码里」。
+- 迁移（2026-09-12，`024_ik629_seedream_size_to_catalog.sql`）：4 个启用中的 seedream 行写入 `request_mapping.matrix`（形状与 gpt 行一致，逐格取自原代码表），worker 改读能力行并删除代码表。
+- **新增图片模型时**：只写能力行（`channel_parser` + `request_mapping`），**不得新增代码内模型名分支或尺寸表**；代码只保留形状解析与查表能力。
+
+## 13. 修正四（2026-09-12）：worker-java 代码组织规范成文
+
+背景：本契约此前只约定功能语义。代码整备批次把迁移中已成事实的编码约束成文如下，防止后续刀漂移（第 5 个生成类型产品已规划）。这些是可随演进调整**编码规范**，不是 ADR 级架构决策。
+
+### 13.1 包分层与类名后缀
+
+- 分层：`application`（processor / consumer / service）、`domain`（entity / dto / error）、`infrastructure`（mapper / gateway / storage / media / audio / credential / mq）、`config`（装配）、`web`（健康检查）。
+- 后缀统一表：
+
+  | 后缀 | 所在层 | 含义与禁令 |
+  |---|---|---|
+  | `*Entity` | domain/entity | 持久化表投影 |
+  | `*Dto` | domain/dto | 跨层共享数据结构（含 MQ 契约投影） |
+  | `*Error` | domain/error | 领域**异常类**专用；常量表禁用此后缀（应命名 `*ErrorCodes`） |
+  | `*Mapper` | infrastructure/mapper | **仅 MyBatis mapper**。通道路由/参数解析类不得叫 `*Mapper`（用 `*Parser`/`*Router`） |
+  | `*Service` | application/service | 应用服务。infrastructure 内类不得叫 `*Service`（按职责用 `*Provider`/`*Storage`/`*Relay`/`*Client`） |
+  | `*Processor` / `*Consumer` | application | 作业处理 / MQ 消费 |
+
+- `domain` = **共享内核**，非严格 DDD 领域：Entity（变化轴 = 持久化 schema）、契约投影 Dto（变化轴 = MQ 契约/附录 B）、领域 Error 并存；类头注释必须写明所属变化轴。
+- 依赖方向：application / infrastructure 均可依赖 domain；**infrastructure 禁止 import application**（config 装配除外）。
+
+### 13.2 注释与文档义务
+
+- 注释以中文为主；Entity 全字段注释（以现状为达标线）。
+- Javadoc 义务线 = `application/service` + `domain` 的 public 方法；processor/consumer 内部靠中文行内注释即可。
+- 对 TS 源码的交叉引用（如 `claim-ops.ts:261`）保留，但收敛到类头注释或 `@see`，避免行级内联随 TS 侧演进批量过期。
+
+### 13.3 语言与风格约束
+
+- **不引入 Lombok**；手写访问器维持现状一致性。
+- 状态 / 类型 / MIME / 参考角色字符串一律枚举或常量表收口（`JobStatus`、`JobType`、`MediaMime`、`ReferenceRole` 等），禁止跨层裸字符串（§2 合法值清单为权威枚举来源）。
+- 禁裸 `RuntimeException`，抛领域 Error；消费者 catch-log-continue 统一收进基类模板方法。
+- 时间读取一律经注入的 `java.time.Clock`（UTC），禁散落 `LocalDateTime.now()`——租约/重试测试可确定化。
+
+### 13.4 重构期行为变更上界（整备批次纪律，后续整备刀同样适用）
+
+- 顺手微调仅限**实现级**：错误分类收敛、异常类型、日志文案、重试时序毛刺。
+- **不动**：状态机迁移语义（§3）、MQ 消息字段（§1）、DB 写入内容（§2/§8）。越界 → 另立契约修正工单单刀，不得夹带在重构 PR。
+- 每条微调必须进 PR「行为 diff 清单」；金标 expected 的任何重录必须对应清单一行。
+
+## 附录 C：新增媒体类型扩展契约（2026-09-12 刀④ 前置钉死）
+
+背景：第 5 个生成类型产品已规划。Java 侧拆分后必须满足「**加一个媒体类型 = 注册一套**」，否则新类型刀不得开工。
+
+- **ClaimedJob 是单概念**：领取投影 = 公共核心（身份 / input / 租约凭证 / 取消信号）+ 媒体 payload 扩展。现状 `ClaimedJobDto` / `ClaimedVideoJobDto` / `ClaimedMediaExtractJobDto` 三胞胎收敛为公共核心 + payload 形态（刀④落地）；新类型是加 payload，不是投影分叉。
+- **生命周期一套**：claim / complete / fail / publish（含 progress 心跳变体）按类型注册参数化实现；禁止按类型复制方法三元组。
+- 新类型的注册触点（**只许改这些位置**）：① MQ tag + 消费者组常量（§1 命名规则：同名 + `-java`）；② Consumer 配置子类（tag + 并发度，零 receive 逻辑）；③ Processor（实现 `JobProcessor`，只写媒体编排 + payload 组装）；④ `JobType` 枚举项 + payload Dto 字段；⑤ Finalizer 的 payload 组装策略注册；⑥ 附录 A 样式错误码赋值表 + 金标用例。**claim 两段式 CAS / fence / 终态事务核心代码禁止触碰。**
+- 新类型的 TS 侧字段与终态语义（§1/§3/§8）仍是对账权威：跨进程字段先在本附录契约定死后，TS、Java 双端才实现（红线：契约先行）。
