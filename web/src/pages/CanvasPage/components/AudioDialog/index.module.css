@@ -96,31 +96,6 @@
   position: relative;
 }
 
-.refBtn {
-  width: 44.8px;
-  height: 44.8px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-tertiary);
-  background-color: #2a2a2a;
-  border: 1px solid var(--color-border-primary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.refBtn:hover {
-  color: var(--color-text-primary);
-  border-color: var(--color-border-hover);
-}
-
-/* 画布选取模式进行中：参考按钮高亮 */
-.refBtnPicking {
-  color: var(--color-accent-text, #4c6ef5);
-  border: 1px dashed var(--color-accent-text, #4c6ef5);
-}
-
 /* 菜单打开时的透明遮罩：点击外部关闭 */
 .menuOverlay {
   position: fixed;
@@ -141,48 +116,9 @@
   color: var(--color-text-tertiary);
 }
 
-/* ---- 来源弹出（本地上传 / 从画布选择） ---- */
-.sourcePopup {
-  position: absolute;
-  /* IKFCXE：向下弹出——面板容器 .dialog 为 overflow-y: auto，向上超出内容区的弹层
-     会被裁剪不可见（ImageDialog previewRow 同坑注释）；向下落在输入区上，z-index 压顶 */
-  top: calc(100% + 10px);
-  left: -8px;
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  padding: var(--spacing-xs);
-  background-color: #2a2a2a;
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  animation: popupFadeIn 0.15s ease;
-  white-space: nowrap;
-  z-index: 30;
-}
-
 @keyframes popupFadeIn {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
-}
-
-.sourceItem {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.sourceItem:hover {
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
 }
 
 /* ---- 画布选择面板 ---- */
@@ -286,11 +222,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* ---- 隐藏文件输入 ---- */
-.hiddenInput {
-  display: none;
 }
 
 /* ---- 输入框 ---- */

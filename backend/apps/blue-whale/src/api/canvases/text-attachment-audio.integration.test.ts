@@ -395,9 +395,9 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
 
       // 从画布选择文本卡：+ → 从画布选择 → 点击画布 text-2 → 附件 +1（选择交互建线）
       async function pickFromCanvas() {
-        const add = page.locator('button[title^="添加参考音频"]');
+        const add = page.locator('button[title="从资产中选择 / 从节点添加素材"]');
         await add.click({ timeout: 5000 });
-        await page.getByRole("button", { name: "从画布选择" }).click({ timeout: 5000 });
+        await page.getByRole("button", { name: "从节点添加素材", exact: true }).click({ timeout: 5000 });
       }
       await pickFromCanvas();
       // pickMode 激活标志：画布顶部出现「到节点选择」提示条

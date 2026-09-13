@@ -11,6 +11,10 @@ import { JobsController } from "../jobs/jobs.controller.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
+import { ProjectAssetsController } from "../project-assets/project-assets.controller.js";
+import { AssetsController } from "../assets/assets.controller.js";
+import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
@@ -65,8 +69,12 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
+    Reflect.defineMetadata("design:paramtypes", [AssetService], AssetsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, AssetService, AssetStorageService], ProjectAssetsController);
     class HarnessModule {}
-    Module({ controllers: [CanvasesController, GenerationJobsController, GenerationModelsController, ProjectsController, JobsController], providers: [
+    Module({ controllers: [ProjectAssetsController, AssetsController, CanvasesController, GenerationJobsController, GenerationModelsController, ProjectsController, JobsController], providers: [
+      { provide: AssetStorageService, useValue: new AssetStorageService() },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: CanvasService, useValue: canvasService },
       { provide: ProjectService, useValue: projects },
       { provide: PrismaService, useValue: prisma },
@@ -531,6 +539,7 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+      page.setDefaultTimeout(10_000);
       const generationRequests: Array<Record<string, unknown>> = [];
       page.on("request", (request) => {
         if (request.method() === "POST" && /\/api\/projects\/\d+\/generation-jobs$/.test(request.url())) {
@@ -554,8 +563,8 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
       /** 「添加参考音频」→「从画布选择」进入选取模式后点击来源节点（跟随面板与素材卡
        *  在 Playwright 命中检测上重叠，统一 DOM 派发直触发，真实链路不变） */
       async function pickAudioNode(sourceId: string) {
-        await page.locator('button[title="添加参考音频（最多 3 段）"]').dispatchEvent("click");
-        await page.getByText("从画布选择", { exact: true }).dispatchEvent("click");
+        await page.locator('button[title="从资产中选择 / 从节点添加素材"]').dispatchEvent("click");
+        await page.getByText("从节点添加素材", { exact: true }).dispatchEvent("click");
         await nodeById(sourceId).locator('[data-testid="media-content"]').dispatchEvent("click");
       }
 
@@ -627,4 +636,73 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
       await page.screenshot({ path: "/tmp/ikfdfz-browser.png", fullPage: true });
     } finally { await browser.close(); await vite.close(); }
   }, 240_000);
+  it.runIf(process.env.IKDMQT_BROWSER)("browser: IKFE8V audio asset source persists identity and deduplicates", async () => {
+    const { chromium } = await import("playwright");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    const projectId = (await projects.create("987654", "IKFE8V assets")).id;
+    const imageAsset = await prisma.client.assets.create({ data: { user_id: BigInt(987654), project_id: BigInt(projectId), type: "image", url: "https://example.com/image.png", size: BigInt(100) } });
+    await prisma.client.assets.create({ data: { user_id: BigInt(987654), project_id: BigInt(projectId), type: "video", url: "https://example.com/video.mp4", size: BigInt(100) } });
+    const assetId = await createAudioAsset(projectId, `https://example.com/ikfe8v-library-${projectId}.mp3`);
+    expect((await saveCanvas(projectId, [audioDraftNode("d1"), { ...audioDraftNode("d2"), position: { x: 940, y: 160 } }, { id: "image", type: "mediaNode", position: { x: 50, y: 500 }, data: { src: "https://example.com/image.png", mediaType: "image", assetId: imageAsset.id.toString(), fileName: "不支持的图片" } }, { id: "di", type: "mediaNode", position: { x: 940, y: 600 }, data: { src: "", mediaType: "image", draft: true, genStatus: "draft", prompt: "" } }], [], "missing", JSON.stringify({ x: 0, y: 0, zoom: 0.7 }))).status).toBe(200);
+    const vite = await createVite({ root: `${process.cwd()}/web`, server: { open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } } } });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+      page.setDefaultTimeout(10_000);
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: { userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false } }, version: 0 })));
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+      const node = (id: string) => page.locator(`.react-flow__node[data-id="${id}"] [data-testid="media-content"]`);
+      const thumbs = page.locator('[data-testid="audio-ref-thumb"]');
+      await node("d1").click();
+      const entry = page.locator('button[title="从资产中选择 / 从节点添加素材"]');
+      const entryStyle = () => entry.evaluate(el => { const s = getComputedStyle(el); return { width: s.width, height: s.height, borderRadius: s.borderRadius, background: s.backgroundColor }; });
+      const audioEntryStyle = await entryStyle();
+      async function pickAsset() {
+        await page.locator('button[title="从资产中选择 / 从节点添加素材"]').click();
+        await page.screenshot({ path: "/tmp/ikfe8v-audio-menu.png", fullPage: true });
+        expect(await page.getByText("本地上传", { exact: true }).count()).toBe(0);
+        await page.getByText("从资产中选择", { exact: true }).click();
+        await page.getByRole("button", { name: "选择音频素材", exact: true }).first().waitFor();
+        expect(await page.getByRole("button", { name: "选择图片素材", exact: true }).count()).toBe(0);
+        expect(await page.getByRole("button", { name: "选择视频素材", exact: true }).count()).toBe(0);
+        await page.getByRole("button", { name: "选择音频素材", exact: true }).filter({ has: page.locator(`audio[src*="ikfe8v-library-${projectId}.mp3"]`) }).click();
+        await page.getByRole("button", { name: "确定（1）", exact: true }).click();
+      }
+      await page.locator('button[title="从资产中选择 / 从节点添加素材"]').click();
+      await page.getByText("从节点添加素材", { exact: true }).click();
+      await node("image").dispatchEvent("click");
+      await page.getByText("音频参考仅支持音频素材", { exact: true }).waitFor();
+      expect(await thumbs.count()).toBe(0);
+      expect(JSON.parse((await getCanvas(projectId)).edges)).toEqual([]);
+      await pickAsset();
+      await vi.waitFor(async () => expect(await thumbs.count()).toBe(1));
+      await vi.waitFor(async () => {
+        const saved = await getCanvas(projectId);
+        const nodes = JSON.parse(saved.nodes);
+        const edges = JSON.parse(saved.edges);
+        expect(edges).toHaveLength(1);
+        expect(nodes.find((n: { id: string }) => n.id === edges[0].source).data.assetId).toBe(assetId);
+        expect(edges[0].target).toBe("d1");
+      }, { timeout: 10_000 });
+      await pickAsset();
+      expect(await thumbs.count()).toBe(1);
+      await page.reload(); await node("d1").click();
+      await vi.waitFor(async () => expect(await thumbs.count()).toBe(1));
+      await node("d2").click();
+      await vi.waitFor(async () => expect(await thumbs.count()).toBe(0));
+      await node("d1").click();
+      await thumbs.locator('button[title="移除"]').dispatchEvent("click");
+      await vi.waitFor(async () => expect(JSON.parse((await getCanvas(projectId)).edges)).toEqual([]));
+      const savedRow = await prisma.client.canvas.findFirst({ where: { project_id: BigInt(projectId) } });
+      expect(savedRow!.edges_json).toEqual([]);
+      await node("di").click();
+      await entry.waitFor();
+      await page.mouse.move(0, 0);
+      expect(await entryStyle()).toEqual(audioEntryStyle);
+      await entry.click();
+      await page.getByText("从节点添加素材", { exact: true }).waitFor();
+      await page.screenshot({ path: "/tmp/ikfe8v-image-menu.png", fullPage: true });
+    } finally { await browser.close(); await vite.close(); }
+  }, 120_000);
 });

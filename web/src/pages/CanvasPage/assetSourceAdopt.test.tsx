@@ -13,7 +13,7 @@ import type { AssetRecord } from '@/api/assets';
 /* IKFDG2 画布外参考建来源卡片并持久关联：
    资产库选择的持久素材——画布已有同身份节点时复用来源卡片不重复建卡，无明确来源时建卡并连线，
    连线随既有自动保存落盘（无需发送）；同名不同身份不误用。
-   音频面板本地上传：上传成功取得持久 Asset 身份后才建卡建线；失败明确提示不伪装成已保存引用。
+   IKFE8V：音频改为从资产选择，取消不建卡建线；保存失败仍保留未保存提示并阻止发送。
    FlowCanvas/CanvasToolbar/CanvasHeader/AssetsPickerModal 打桩透出 props；三类面板用真实实现。 */
 
 vi.mock('./components/AgentPanel', () => ({
@@ -353,29 +353,10 @@ async function pickFromAssets(entryTitle: string, assets: AssetRecord[]) {
   });
 }
 
-/** 音频面板本地上传：点添加参考 → 菜单「本地上传」 → 注入文件触发 change */
-async function uploadLocalAudio(files: File[]) {
-  const addBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => (b.getAttribute('title') ?? '').includes('添加参考音频'),
-  )!;
-  await act(async () => {
-    addBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  });
-  const localBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent === '本地上传',
-  )!;
-  await act(async () => {
-    localBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  });
-  const input = container.querySelector<HTMLInputElement>('input[type="file"][accept=".mp3,audio/mpeg"]')!;
-  Object.defineProperty(input, 'files', { value: files, configurable: true });
-  await act(async () => {
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+/** 音频统一入口：从资产选择已有持久身份，接纳与画布保存沿用原链路。 */
+async function pickAudioAsset() {
+  await pickFromAssets('从资产中选择 / 从节点添加素材', [{ id: 'au9', type: 'audio', url: 'http://audio/au9.mp3', width: null, height: null, duration: 25, source: 'uploaded', model: null, created_at: null } as AssetRecord]);
 }
-
-const mp3File = (name: string) =>
-  new File([new Uint8Array([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0])], name, { type: 'audio/mpeg' });
 
 /** 面板参考缩略图名称列表（audio-ref-thumb / dock-media-ref） */
 function refNames(testid: string): string[] {
@@ -515,12 +496,12 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
      入口。首帧角色的连线持久化与发送路由由 videoRefPersist「首尾帧草稿保存恢复」「首帧生成请求
      角色校验」既有用例覆盖，本票改动对 refRole 仅透传不改变语义。 */
 
-  it('音频草稿本地上传成功：即时上传取得持久身份，建来源卡片并连线，节点与边随自动保存落盘且面板显示', async () => {
+  it('音频草稿资产选择成功：复用持久身份，建来源卡片并连线，节点与边随自动保存落盘且面板显示', async () => {
     await renderPage();
     await clickNode('da1');
     await vi.waitFor(() => expect(container.textContent).toContain('测试音频模型'));
 
-    await uploadLocalAudio([mp3File('本地参考.mp3')]);
+    await pickAudioAsset();
 
     await vi.waitFor(() => expect(edgePairs().length).toBe(1), { timeout: 3000 });
     const newNode = flowProps.current.mediaNodes.find(
@@ -539,30 +520,21 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
   });
 
-  it('音频本地上传失败：明确提示失败，不建来源卡不建连线，不伪装成已保存引用', async () => {
-    uploadMocks.uploadAssetFile.mockRejectedValueOnce(new Error('上传失败'));
-    await renderPage();
-    await clickNode('da1');
-    await vi.waitFor(() => expect(container.textContent).toContain('测试音频模型'));
-
+  it('音频统一入口取消资产选择：不建卡、不建线、不发起上传', async () => {
+    await renderPage(); await clickNode('da1');
     const before = mediaNodeCount();
-    await uploadLocalAudio([mp3File('坏文件.mp3')]);
-
-    await vi.waitFor(() => expect(container.textContent).toContain('失败'));
+    await pickFromAssets('从资产中选择 / 从节点添加素材', []);
     expect(mediaNodeCount()).toBe(before);
     expect(edgePairs()).toEqual([]);
-    expect(flowProps.current.mediaNodes.every(
-      (n: Node) => (n.data as Record<string, unknown>)?.assetId !== 'au9',
-    )).toBe(true);
-    expect(refNames('audio-ref-thumb')).toEqual([]);
+    expect(uploadMocks.uploadAssetFile).not.toHaveBeenCalled();
   });
 
-  it('音频本地上传成功后关闭重开原目标：参考经连线完整恢复，不恢复选取模式', async () => {
+  it('音频资产选择成功后关闭重开原目标：参考经连线完整恢复，不恢复选取模式', async () => {
     await renderPage();
     await clickNode('da1');
     await vi.waitFor(() => expect(container.textContent).toContain('测试音频模型'));
 
-    await uploadLocalAudio([mp3File('本地参考.mp3')]);
+    await pickAudioAsset();
     await vi.waitFor(() => expect(refNames('audio-ref-thumb').length).toBe(1), { timeout: 3000 });
 
     await closePanel();
@@ -578,14 +550,14 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await clickNode('da1');
     await vi.waitFor(() => expect(container.textContent).toContain('测试音频模型'));
 
-    await uploadLocalAudio([mp3File('第一段.mp3')]);
+    await pickAudioAsset();
     await vi.waitFor(() => expect(edgePairs().length).toBe(1), { timeout: 3000 });
     const firstNode = flowProps.current.mediaNodes.find(
       (n: Node) => (n.data as Record<string, unknown>)?.assetId === 'au9',
     );
 
-    // 第二次上传 md5 去重命中同一持久资产：不重复建卡，查重提示不建线
-    await uploadLocalAudio([mp3File('第一段-副本.mp3')]);
+    // 第二次选择同一持久资产：不重复建卡，查重提示不建线
+    await pickAudioAsset();
     await vi.waitFor(() => expect(container.textContent).toContain('重复的素材已跳过'), { timeout: 3000 });
     expect(edgePairs().length).toBe(1);
     const sameAssetNodes = flowProps.current.mediaNodes.filter(
@@ -617,9 +589,9 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await clickNode('da1');
     await vi.waitFor(() => expect(refNames('audio-ref-thumb').length).toBe(3));
 
-    // 满 3 段：添加参考入口整体隐藏（无按钮可发起本地上传/画布选择），无上传无新线
+    // 满 3 段：添加参考入口整体隐藏（无按钮可发起资产/节点选择），无上传无新线
     const addBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (b) => (b.getAttribute('title') ?? '').includes('添加参考音频'),
+      (b) => (b.getAttribute('title') ?? '').includes('从资产中选择 / 从节点添加素材'),
     );
     expect(addBtn).toBeUndefined();
     expect(edgePairs().length).toBe(3);
@@ -628,7 +600,7 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
   });
 
   it('接纳复用已有来源后画布保存失败：连线保留并显示未保存，阻止发送；重试成功后落盘且不重复创建来源', async () => {
-    // 画布预置与上传产物同身份（au9）的音频成品：本地上传 md5 命中后复用该节点建线
+    // 画布预置与上传产物同身份（au9）的音频成品：资产选择后复用该节点建线
     const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> };
     doc.nodes.push({
       id: 'au9', type: 'mediaNode', position: { x: 650, y: 100 },
@@ -655,7 +627,7 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
       await vi.waitFor(() => expect(container.textContent).toContain('测试音频模型'));
 
       const before = mediaNodeCount();
-      await uploadLocalAudio([mp3File('同内容副本.mp3')]);
+      await pickAudioAsset();
       await vi.waitFor(() => expect(edgePairs()).toEqual(['au9->da1']), { timeout: 3000 });
       expect(mediaNodeCount()).toBe(before);
 

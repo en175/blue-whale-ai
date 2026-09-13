@@ -611,9 +611,9 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
   it.each(['列表选择', '画布点击'])('音频参考经%s选入后随源卡改名更新', async (entry) => {
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleAudioDialog(); });
-    const pick = container.querySelector('button[title="添加参考音频（最多 3 段）"]')!;
+    const pick = container.querySelector('button[title="从资产中选择 / 从节点添加素材"]')!;
     await act(async () => { pick.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const fromCanvas = [...container.querySelectorAll('button')].find((b) => b.textContent === '从画布选择')!;
+    const fromCanvas = [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材')!;
     await act(async () => { fromCanvas.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => {
       if (entry === '画布点击') flowProps.current.onNodeClick(mediaNode('aud'));
