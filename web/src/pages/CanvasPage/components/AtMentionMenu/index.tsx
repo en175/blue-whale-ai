@@ -125,11 +125,38 @@ export default function AtMentionMenu({
       ref={rootRef}
       className={`${styles.portal} ${renderInline ? styles.inline : ''}`}
       data-testid="mention-menu"
+      data-canvas-keyboard-scope="mention"
       onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing) return;
+        const target = e.target as HTMLElement;
+        const button = target.closest<HTMLButtonElement>('button');
+        const kind = button?.dataset.mentionKind;
+        const flyout = rootRef.current?.querySelector<HTMLElement>('[data-mention-flyout]');
+        const inFlyout = !!flyout?.contains(target);
+        if ((e.key === 'Enter' || e.key === 'ArrowRight') && kind) {
+          e.preventDefault();
+          e.stopPropagation();
+          flyout?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+          return;
+        }
+        if (e.key === 'ArrowLeft' && inFlyout) {
+          e.preventDefault();
+          e.stopPropagation();
+          rootRef.current?.querySelector<HTMLButtonElement>(`[data-mention-kind="${hovered}"]`)?.focus();
+          return;
+        }
+        if (e.key === 'Enter' && button) {
+          e.preventDefault();
+          e.stopPropagation();
+          button.click();
+          return;
+        }
         if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-        const buttons = [...(rootRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])];
+        const scope = inFlyout ? flyout : rootRef.current?.querySelector('[data-mention-main]');
+        const buttons = [...(scope?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])];
         if (!buttons.length) return;
         e.preventDefault();
+        e.stopPropagation();
         const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
         const next = current < 0
           ? (e.key === 'ArrowDown' ? 0 : buttons.length - 1)
@@ -140,7 +167,7 @@ export default function AtMentionMenu({
       onMouseDown={(e) => e.stopPropagation()}
       onMouseLeave={() => setHovered(null)}
     >
-      <div className={styles.panel}>
+      <div className={styles.panel} data-mention-main>
         <label className={styles.search}>
           <Search size={15} strokeWidth={2} />
           <input
@@ -211,6 +238,7 @@ export default function AtMentionMenu({
                   type="button"
                   className={`${styles.kindRow} ${hovered === kind && !off ? styles.kindRowActive : ''} ${off ? styles.kindRowDisabled : ''}`}
                   disabled={off}
+                  data-mention-kind={kind}
                   onFocus={() => setHovered(off ? null : kind)}
                   onClick={() => setHovered(off ? null : kind)}
                   onMouseEnter={() => setHovered(off ? null : kind)}
@@ -230,7 +258,7 @@ export default function AtMentionMenu({
 
       {!searching && hovered && (
         <div className={styles.flyoutWrap} onMouseEnter={() => setHovered(hovered)}>
-        <div className={styles.flyout}>
+        <div className={styles.flyout} data-mention-flyout>
           {flyoutItems.length === 0 ? (
             <div className={styles.empty}>画布暂无该类型素材</div>
           ) : (

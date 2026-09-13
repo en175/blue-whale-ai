@@ -62,3 +62,46 @@ it('搜索框向上导航从最后一个可选项开始，跳过禁用分类', a
   await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })));
   expect(document.activeElement?.textContent).toBe('文本');
 });
+
+async function key(key: string) {
+  await act(async () => document.activeElement!.dispatchEvent(
+    new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+  ));
+}
+
+it('画布捕获监听存在时，Enter 仍确认已引用素材', async () => {
+  const { canvasDeleteKeyAction } = await import('../Canvas/keyboardDelete');
+  const capture = (event: KeyboardEvent) => {
+    if (canvasDeleteKeyAction(event.key, event.target) === 'block') {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+  document.addEventListener('keydown', capture, true);
+  try {
+    const { onSelectReferenced } = await render();
+    await key('ArrowDown');
+    await key('Enter');
+    expect(onSelectReferenced).toHaveBeenCalledTimes(1);
+  } finally {
+    document.removeEventListener('keydown', capture, true);
+  }
+});
+
+it('分类右键进入、左键返回，Enter 进入并确认素材', async () => {
+  const { onSelect } = await render();
+  await key('ArrowDown');
+  await key('ArrowDown');
+  expect(document.activeElement?.textContent).toBe('图片');
+  await key('ArrowRight');
+  expect(document.activeElement?.textContent).toBe('图片节点 1');
+  await key('ArrowLeft');
+  expect(document.activeElement?.textContent).toBe('图片');
+  await key('ArrowDown');
+  expect(document.activeElement?.textContent).toBe('音频');
+  await key('ArrowUp');
+  await key('Enter');
+  expect(document.activeElement?.textContent).toBe('图片节点 1');
+  await key('Enter');
+  expect(onSelect).toHaveBeenCalledWith(image);
+});
