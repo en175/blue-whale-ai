@@ -71,6 +71,7 @@ export type WorkerDeps = {
 /** IKDLQF：job.input 快照上冻结的文本附件（契约「接纳快照」）；旧任务无此字段，视为无附件。 */
 type GenerationJobInput = Record<string, unknown> & {
   text_attachments?: unknown;
+  composed_prompt?: unknown;
 };
 
 /** 瞬时失败码：网络不可达 / 结果转存失败等——重试有意义。quota/config/校验类不算瞬时。 */
@@ -576,10 +577,13 @@ async function processClaimedJob(
       model: cap.model_id,
       // IKDLQF：有文本附件时按契约组合（附件正文按序在前、忽略纯空白、非空 prompt 最后追加）；
       // 无附件时沿用原 prompt，与旧链路逐字节一致。
+      // IKFA1P：正文含文本标签时优先消费接纳时冻结的编号清单正文（composed_prompt）。
       prompt: planSnapshot?.providerPrompt ?? (
-        textAttachments.length > 0
-          ? composeImagePrompt(textAttachments, prompt)
-          : prompt),
+        typeof input.composed_prompt === "string" && input.composed_prompt.length > 0
+          ? input.composed_prompt
+          : textAttachments.length > 0
+            ? composeImagePrompt(textAttachments, prompt)
+            : prompt),
       size: providerSize,
       ...(providerQuality ? { quality: providerQuality } : {}),
       webSearch: input.web_search === true,

@@ -16,7 +16,11 @@ export const PROMPT_DOC_VERSION = 1;
  *  或素材库 asset- 前缀 id（IKFA1O 视频多媒体标签；与 materialId() 同口径，大小写不敏感）。 */
 const assetIdSchema = z.string().regex(/^([1-9][0-9]*|asset-.{1,128})$/i);
 
-/** 正文片段：文字 | 素材标签。标签位置由片段顺序隐式表达，不使用字符区间。 */
+/** IKFA1P：文本标签稳定身份 = 来源画布 textNode 的节点 id（如 text-<时间戳>-<序号>）。
+ *  不限定格式（非空字符串 ≤128），与媒体身份空间（纯数字 / asset- 前缀）天然不重叠。 */
+const textNodeIdSchema = z.string().min(1).max(128);
+
+/** 正文片段：文字 | 素材标签 | 文本标签（IKFA1P）。标签位置由片段顺序隐式表达，不使用字符区间。 */
 export const promptDocSegmentSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("text"), text: z.string() }).strict(),
   z
@@ -33,6 +37,15 @@ export const promptDocSegmentSchema = z.discriminatedUnion("kind", [
        * 存在即表示该提及已失效——失效标签不允许提交生成（阻止生成由服务端复核），
        * 也不因编号被复用而转向其他素材。
        */
+      invalid_label: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("text_ref"),
+      node_id: textNodeIdSchema,
+      /** 展示编号缓存（文本N）/ 失效恢复信息：语义与 asset_ref 完全同构 */
+      label: z.string().min(1).optional(),
       invalid_label: z.string().min(1).optional(),
     })
     .strict(),
@@ -61,18 +74,32 @@ export function imageRefLabel(
 
 export type PromptDocRefFailure =
   | { kind: "invalid_tag"; assetId: string }
-  | { kind: "unknown_asset"; assetId: string };
+  | { kind: "unknown_asset"; assetId: string }
+  /** IKFA1P：文本标签身份不在接纳当下的文本附件集合 */
+  | { kind: "unknown_text"; nodeId: string };
 
 /**
  * 接纳前校验（服务端复核）：存在失效标签或标签指向不在最终输入集合的身份时返回首个问题。
  * orderedAssetIds 必须已通过存在性/归属/类型校验（与参考图同一复核链路）。
+ * IKFA1P：orderedTextNodeIds 为当前文本附件顺序（缺省 = 无文本附件上下文），
+ * text_ref 身份不在其中 → unknown_text。
  */
 export function validatePromptDocRefs(
   doc: PromptDoc,
   orderedAssetIds: readonly string[],
+  orderedTextNodeIds: readonly string[] = [],
 ): PromptDocRefFailure | null {
   for (const segment of doc.segments) {
-    if (segment.kind !== "asset_ref") continue;
+    if (segment.kind === "text") continue;
+    if (segment.kind === "text_ref") {
+      if (segment.invalid_label !== undefined) {
+        return { kind: "invalid_tag", assetId: segment.node_id };
+      }
+      if (!orderedTextNodeIds.includes(segment.node_id)) {
+        return { kind: "unknown_text", nodeId: segment.node_id };
+      }
+      continue;
+    }
     if (segment.invalid_label !== undefined) {
       return { kind: "invalid_tag", assetId: segment.asset_id };
     }
@@ -84,17 +111,28 @@ export function validatePromptDocRefs(
 }
 
 /**
- * 编译：把每个标签替换为其展示编号（图片N），文字原样拼接，得到发送给模型的正文。
+ * 编译：把每个标签替换为其展示编号（图片N / 文本N），文字原样拼接，得到发送给模型的正文。
  * 同一素材多次提及编译为同一编号；未提及的参考不参与正文（保持既有输入语义）。
  * 调用方必须先过 validatePromptDocRefs——失效或未知身份不可编译。
+ * IKFA1P：正文含 text_ref 时必须传 orderedTextNodeIds（文本附件顺序），否则抛错。
  */
 export function compilePromptDoc(
   doc: PromptDoc,
   orderedAssetIds: readonly string[],
+  orderedTextNodeIds?: readonly string[],
 ): string {
   return doc.segments
     .map((segment) => {
       if (segment.kind === "text") return segment.text;
+      if (segment.kind === "text_ref") {
+        const label = textRefLabel(segment.node_id, orderedTextNodeIds ?? []);
+        if (segment.invalid_label !== undefined || label === null) {
+          throw new Error(
+            "compilePromptDoc 要求先通过 validatePromptDocRefs：失效或未知身份的标签不可编译",
+          );
+        }
+        return label;
+      }
       const label = imageRefLabel(segment.asset_id, orderedAssetIds);
       if (segment.invalid_label !== undefined || label === null) {
         throw new Error(
@@ -104,6 +142,27 @@ export function compilePromptDoc(
       return label;
     })
     .join("");
+}
+
+/* ============================================
+ * IKFA1P：文本附件正文标签
+ *
+ * 身份 = 来源画布 textNode 节点 id；编号（文本N）由身份在当前有效
+ * 文本附件顺序（画布连入目标的边序，与前端附件区同源）中的位置派生。
+ * ============================================ */
+
+/** 文本展示编号派生：文本N = node_id 在当前文本附件顺序中的下标 + 1；不在集合返回 null（失效）。 */
+export function textRefLabel(
+  nodeId: string,
+  orderedTextNodeIds: readonly string[] | undefined,
+): string | null {
+  const index = (orderedTextNodeIds ?? []).indexOf(nodeId);
+  return index < 0 ? null : `文本${index + 1}`;
+}
+
+/** 正文是否包含文本标签（IKFA1P）：接纳/worker 据此切换编号清单组合格式。 */
+export function docHasTextRef(doc: PromptDoc): boolean {
+  return doc.segments.some((segment) => segment.kind === "text_ref");
 }
 
 /* ============================================
@@ -155,13 +214,24 @@ export function videoRefLabel(
 /**
  * 视频接纳前校验：存在失效标签或标签身份不在 references（asset_id ∪ material_id）时返回首个问题。
  * refs 必须已通过既有 references 结构与存在性/归属校验（与参考素材同一复核链路）。
+ * IKFA1P：orderedTextNodeIds 为当前文本附件顺序（缺省 = 无文本附件上下文）。
  */
 export function validateVideoPromptDocRefs(
   doc: PromptDoc,
   refs: readonly VideoRefItem[],
+  orderedTextNodeIds: readonly string[] = [],
 ): PromptDocRefFailure | null {
   for (const segment of doc.segments) {
-    if (segment.kind !== "asset_ref") continue;
+    if (segment.kind === "text") continue;
+    if (segment.kind === "text_ref") {
+      if (segment.invalid_label !== undefined) {
+        return { kind: "invalid_tag", assetId: segment.node_id };
+      }
+      if (!orderedTextNodeIds.includes(segment.node_id)) {
+        return { kind: "unknown_text", nodeId: segment.node_id };
+      }
+      continue;
+    }
     if (segment.invalid_label !== undefined) {
       return { kind: "invalid_tag", assetId: segment.asset_id };
     }
@@ -174,15 +244,26 @@ export function validateVideoPromptDocRefs(
 
 /**
  * 视频正文编译：帧标签 → 首帧/尾帧；普通参考标签 → 同类型编号（图片N/视频N/音频N）；
- * 文字原样拼接。调用方必须先过 validateVideoPromptDocRefs。
+ * 文本标签 → 文本N（IKFA1P，须传 orderedTextNodeIds）；文字原样拼接。
+ * 调用方必须先过 validateVideoPromptDocRefs。
  */
 export function compileVideoPromptDoc(
   doc: PromptDoc,
   refs: readonly VideoRefItem[],
+  orderedTextNodeIds?: readonly string[],
 ): string {
   return doc.segments
     .map((segment) => {
       if (segment.kind === "text") return segment.text;
+      if (segment.kind === "text_ref") {
+        const label = textRefLabel(segment.node_id, orderedTextNodeIds);
+        if (segment.invalid_label !== undefined || label === null) {
+          throw new Error(
+            "compileVideoPromptDoc 要求先通过 validateVideoPromptDocRefs：失效或未知身份的标签不可编译",
+          );
+        }
+        return label;
+      }
       const label = videoRefLabel(segment.asset_id, refs);
       if (segment.invalid_label !== undefined || label === null) {
         throw new Error(

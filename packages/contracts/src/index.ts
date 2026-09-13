@@ -32,6 +32,8 @@ export {
   promptDocSchema,
   promptDocSegmentSchema,
   imageRefLabel,
+  textRefLabel,
+  docHasTextRef,
   validatePromptDocRefs,
   compilePromptDoc,
   videoRefLabel,

@@ -416,7 +416,11 @@ public class VideoJobProcessor implements JobProcessor {
         if (input.containsKey("prompt_plan_snapshot") && (plan == null || !(plan.get("providerPrompt") instanceof String text) || text.isBlank() || !(plan.get("videoReferences") instanceof List<?>))) {
             throw new VideoInputError(GenerationError.ERROR_INVALID_INPUT, "视频方案快照无效");
         }
-        String prompt = plan != null ? (String) plan.get("providerPrompt") : basePrompt;
+        // IKFA1P：正文含文本标签时接纳侧冻结编号清单最终正文（composed_prompt），优先消费；
+        // 优先级链与 TS video-job-runner 一致：providerPrompt > composed_prompt > 既有组合。
+        String composedPrompt = input.get("composed_prompt") instanceof String cp && !cp.isBlank() ? cp : null;
+        String prompt = plan != null ? (String) plan.get("providerPrompt")
+                : composedPrompt != null ? composedPrompt : basePrompt;
 
         // model（:587-592）
         String model = strOrEmpty(input, "model_id");

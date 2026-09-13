@@ -39,12 +39,20 @@ export function $readPromptDoc(): PromptDoc {
   };
   const walk = (node: LexicalNode) => {
     if ($isAssetRefNode(node)) {
-      const seg: PromptDocSegment = {
-        kind: 'asset_ref',
-        asset_id: node.getAssetId(),
-        ...(node.getLabel() !== undefined ? { label: node.getLabel() } : {}),
-        ...(node.getInvalidLabel() !== undefined ? { invalid_label: node.getInvalidLabel() } : {}),
-      };
+      // IKFA1P：文本标签（refKind=text）序列化为 text_ref 片段（身份 = 来源节点 id）
+      const seg: PromptDocSegment = node.getRefKind() === 'text'
+        ? {
+            kind: 'text_ref',
+            node_id: node.getAssetId(),
+            ...(node.getLabel() !== undefined ? { label: node.getLabel() } : {}),
+            ...(node.getInvalidLabel() !== undefined ? { invalid_label: node.getInvalidLabel() } : {}),
+          }
+        : {
+            kind: 'asset_ref',
+            asset_id: node.getAssetId(),
+            ...(node.getLabel() !== undefined ? { label: node.getLabel() } : {}),
+            ...(node.getInvalidLabel() !== undefined ? { invalid_label: node.getInvalidLabel() } : {}),
+          };
       segments.push(seg);
       return;
     }
@@ -87,7 +95,14 @@ export function $buildFromPromptDoc(doc: PromptDoc | null | undefined, fallbackT
       });
       continue;
     }
-    paragraph.append($createAssetRefNode(segment.asset_id, segment.label, segment.invalid_label));
+    paragraph.append(
+      $createAssetRefNode(
+        segment.kind === 'text_ref' ? segment.node_id : segment.asset_id,
+        segment.label,
+        segment.invalid_label,
+        segment.kind === 'text_ref' ? 'text' : 'asset',
+      ),
+    );
   }
 }
 
@@ -98,9 +113,10 @@ export function matchMentionQuery(textBeforeCaret: string): { query: string } | 
 }
 
 /** 把 reconcile 后的 ref 片段序列写回节点（按文档顺序与节点一一对应）。调用方在 editor.update 内使用。
- *  失效标记按片段双向同步：恢复（invalid_label 清除）与失效（写入）都会写回节点。 */
+ *  失效标记按片段双向同步：恢复（invalid_label 清除）与失效（写入）都会写回节点。
+ *  IKFA1P：text_ref 与 asset_ref 一并按序对应（两类节点同为 AssetRefNode）。 */
 export function $applyReconciledRefs(nodes: AssetRefNode[], segments: PromptDocSegment[]): void {
-  const refs = segments.filter((s): s is Extract<PromptDocSegment, { kind: 'asset_ref' }> => s.kind === 'asset_ref');
+  const refs = segments.filter((s): s is Exclude<PromptDocSegment, { kind: 'text' }> => s.kind !== 'text');
   nodes.forEach((node, index) => {
     const seg = refs[index];
     if (!seg) return;

@@ -973,6 +973,19 @@ describe("processNextJob 文本附件组合 prompt（IKDLQF）", () => {
     return { jobId, generate, completeJobAndSettle };
   }
 
+  // IKFA1P：正文含文本标签时接纳侧冻结编号清单最终正文（composed_prompt），worker 直接消费；
+  // 优先级链：prompt_plan_snapshot.providerPrompt > composed_prompt > 既有附件组合。
+  it("composed_prompt 存在 → provider prompt 优先消费编号清单，不现场组合附件", async () => {
+    const { generate } = await runImageJob({
+      prompt: "按文本1生成",
+      composed_prompt: "文本1：赛博朋克\n\n按文本1生成",
+      text_attachments: [{ node_id: "n1", title: "风格", text: "赛博朋克" }],
+    });
+
+    const providerArg = generate.mock.calls[0]![0] as { prompt: string };
+    expect(providerArg.prompt).toBe("文本1：赛博朋克\n\n按文本1生成");
+  });
+
   it("带 text_attachments：provider 收到的 prompt 与 composeImagePrompt(冻结附件, 冻结 prompt) 精确相等", async () => {
     const textAttachments = [
       { node_id: "n1", title: "背景", text: "背景：雨夜" },

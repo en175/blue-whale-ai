@@ -88,6 +88,17 @@
   border-radius: 12px;
 }
 
+/* IKFA1P：附件区正文标签编号徽标（文本N，与菜单/正文同源） */
+.attachmentBadge {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border, #2c2c2c);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 18px;
+  flex: none;
+}
+
 .attachmentTitle {
   font-size: var(--font-size-sm);
   font-weight: 500;

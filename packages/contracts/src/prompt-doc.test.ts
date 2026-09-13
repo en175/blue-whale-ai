@@ -3,8 +3,10 @@ import {
   PROMPT_DOC_VERSION,
   compilePromptDoc,
   compileVideoPromptDoc,
+  docHasTextRef,
   imageRefLabel,
   promptDocSchema,
+  textRefLabel,
   validatePromptDocRefs,
   validateVideoPromptDocRefs,
   videoRefLabel,
@@ -262,5 +264,141 @@ describe("compileVideoPromptDoc（视频正文编译，IKFA1O）", () => {
       segments: [{ kind: "asset_ref", asset_id: "999" }],
     });
     expect(() => compileVideoPromptDoc(unknown, VIDEO_REFS)).toThrow();
+  });
+});
+
+/* IKFA1P：文本附件正文标签——text_ref 结构、文本N 编号、与媒体标签混排编译、
+   文本身份复核。语义权威：docs/specs/2026-09-13-ikfa1p-text-attachment-prompt-ref-contract.md */
+
+const TEXT_NODES = ["text-1770000000000-3", "text-1770000000005-7"];
+
+describe("text_ref（文本片段结构，IKFA1P）", () => {
+  it("合法结构通过：node_id 为来源画布文本节点 id", () => {
+    expect(
+      promptDocSchema.safeParse({
+        version: 1,
+        segments: [{ kind: "text_ref", node_id: TEXT_NODES[0] }],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("node_id 空串 / 超长拒绝；与媒体身份混排通过", () => {
+    expect(
+      promptDocSchema.safeParse({ version: 1, segments: [{ kind: "text_ref", node_id: "" }] })
+        .success,
+    ).toBe(false);
+    expect(
+      promptDocSchema.safeParse({
+        version: 1,
+        segments: [
+          { kind: "text", text: "按" },
+          { kind: "text_ref", node_id: TEXT_NODES[0] },
+          { kind: "text", text: "修改" },
+          { kind: "asset_ref", asset_id: "101" },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("strict 语义：text_ref 未知字段拒绝", () => {
+    expect(
+      promptDocSchema.safeParse({
+        version: 1,
+        segments: [{ kind: "text_ref", node_id: "n1", extra: 1 }],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("textRefLabel / docHasTextRef（文本编号派生，IKFA1P）", () => {
+  it("文本N = node_id 在文本附件顺序中的下标 + 1；不在集合返回 null", () => {
+    expect(textRefLabel(TEXT_NODES[1], TEXT_NODES)).toBe("文本2");
+    expect(textRefLabel("text-gone", TEXT_NODES)).toBeNull();
+    expect(textRefLabel(TEXT_NODES[0], undefined)).toBeNull();
+  });
+
+  it("docHasTextRef 只认 text_ref 片段", () => {
+    expect(docHasTextRef(promptDocSchema.parse({ version: 1, segments: [{ kind: "text", text: "文本1" }] }))).toBe(false);
+    expect(
+      docHasTextRef(promptDocSchema.parse({ version: 1, segments: [{ kind: "asset_ref", asset_id: "1" }] })),
+    ).toBe(false);
+    expect(
+      docHasTextRef(promptDocSchema.parse({ version: 1, segments: [{ kind: "text_ref", node_id: "n1" }] })),
+    ).toBe(true);
+  });
+});
+
+describe("validate/compile 文本扩展（IKFA1P）", () => {
+  const MIXED = promptDocSchema.parse({
+    version: 1,
+    segments: [
+      { kind: "text", text: "按" },
+      { kind: "text_ref", node_id: TEXT_NODES[0] },
+      { kind: "text", text: "修改" },
+      { kind: "asset_ref", asset_id: "101" },
+      { kind: "text", text: "，再参考" },
+      { kind: "text_ref", node_id: TEXT_NODES[1] },
+    ],
+  });
+
+  it("生图：文本身份不在附件集合 → unknown_text；附件顺序缺省同样 unknown_text", () => {
+    expect(validatePromptDocRefs(MIXED, ["101"], TEXT_NODES)).toBeNull();
+    expect(validatePromptDocRefs(MIXED, ["101"], [TEXT_NODES[0]])).toEqual({
+      kind: "unknown_text",
+      nodeId: TEXT_NODES[1],
+    });
+    expect(validatePromptDocRefs(MIXED, ["101"])).toEqual({
+      kind: "unknown_text",
+      nodeId: TEXT_NODES[0],
+    });
+  });
+
+  it("生图：文本失效标签 → invalid_tag（阻止生成）", () => {
+    const doc = promptDocSchema.parse({
+      version: 1,
+      segments: [{ kind: "text_ref", node_id: TEXT_NODES[0], invalid_label: "文本1" }],
+    });
+    expect(validatePromptDocRefs(doc, [], TEXT_NODES)).toEqual({
+      kind: "invalid_tag",
+      assetId: TEXT_NODES[0],
+    });
+  });
+
+  it("生图编译：文本N 与图片N 混排、多次提及同一编号（E4）", () => {
+    const doc = promptDocSchema.parse({
+      version: 1,
+      segments: [
+        { kind: "text", text: "按" },
+        { kind: "text_ref", node_id: TEXT_NODES[0] },
+        { kind: "text", text: "改，再提" },
+        { kind: "text_ref", node_id: TEXT_NODES[0] },
+        { kind: "text", text: "和" },
+        { kind: "asset_ref", asset_id: "101" },
+      ],
+    });
+    expect(compilePromptDoc(doc, ["101"], TEXT_NODES)).toBe("按文本1改，再提文本1和图片1");
+  });
+
+  it("生图编译：含 text_ref 但未传附件顺序直接抛错", () => {
+    expect(() => compilePromptDoc(MIXED, ["101"])).toThrow();
+  });
+
+  it("视频：文本与首尾帧/普通参考混排编译；unknown_text 复核同生图", () => {
+    const doc = promptDocSchema.parse({
+      version: 1,
+      segments: [
+        { kind: "text", text: "让" },
+        { kind: "asset_ref", asset_id: "201" },
+        { kind: "text", text: "按" },
+        { kind: "text_ref", node_id: TEXT_NODES[1] },
+        { kind: "text", text: "调整" },
+      ],
+    });
+    expect(compileVideoPromptDoc(doc, VIDEO_REFS, TEXT_NODES)).toBe("让首帧按文本2调整");
+    expect(validateVideoPromptDocRefs(doc, VIDEO_REFS)).toEqual({
+      kind: "unknown_text",
+      nodeId: TEXT_NODES[1],
+    });
+    expect(() => compileVideoPromptDoc(doc, VIDEO_REFS)).toThrow();
   });
 });
