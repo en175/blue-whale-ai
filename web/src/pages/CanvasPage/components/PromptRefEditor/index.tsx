@@ -27,6 +27,7 @@ import {
   COMMAND_PRIORITY_HIGH,
   KEY_ARROW_DOWN_COMMAND,
   KEY_ARROW_UP_COMMAND,
+  KEY_BACKSPACE_COMMAND,
   KEY_ENTER_COMMAND,
   KEY_ESCAPE_COMMAND,
   type LexicalCommand,
@@ -216,6 +217,36 @@ function MentionKeyPlugin({ onMentionKey }: { onMentionKey?: (key: 'down' | 'up'
   return null;
 }
 
+/** 标签退格删除：Lexical 默认删字行为不处理 DecoratorNode 标签（标签无叉叉，退格是唯一删除途径）。
+ *  光标折叠且前一兄弟是标签时删除该标签，其余按键交还默认处理。 */
+function BackspaceRefPlugin() {
+  const [editor] = useLexicalComposerContext();
+  useEffect(() => {
+    return editor.registerCommand(
+      KEY_BACKSPACE_COMMAND,
+      (event) => {
+        let deleted = false;
+        editor.update(() => {
+          const selection = $getSelection();
+          if (!$isRangeSelection(selection) || !selection.isCollapsed()) return;
+          const anchor = selection.anchor;
+          if (anchor.type === 'text' && anchor.offset > 0) return;
+          const prev = anchor.getNode().getPreviousSibling();
+          if ($isAssetRefNode(prev)) {
+            prev.remove();
+            deleted = true;
+          }
+        });
+        if (!deleted) return false;
+        event?.preventDefault();
+        return true;
+      },
+      COMMAND_PRIORITY_HIGH,
+    );
+  }, [editor]);
+  return null;
+}
+
 const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(function PromptRefEditor(
   { initialDoc, initialText, placeholder, readOnly, labelOf, reconcileKey, labels, refsMeta, onChange, onMentionChange, onInvalidTagClick, onMentionKey, className },
   ref,
@@ -358,6 +389,7 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
       <EditablePlugin readOnly={readOnly} />
       <MentionPlugin onMentionChange={onMentionChange} mentionAnchorRef={mentionAnchorRef} />
       <MentionKeyPlugin onMentionKey={onMentionKey} />
+      <BackspaceRefPlugin />
       <ReconcilePlugin labelOf={labelOf} reconcileKey={reconcileKey} />
       <HistoryPlugin />
       <OnChangePlugin

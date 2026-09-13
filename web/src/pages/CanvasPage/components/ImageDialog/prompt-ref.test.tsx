@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 /* IKFA1M：ImageDialog 正文素材标签——@ 菜单/插入/编号一致性/失效阻止生成/删除提及 */
 import { act, createElement } from 'react';
-import { $getRoot, $isTextNode, SKIP_DOM_SELECTION_TAG } from 'lexical';
+import { $createRangeSelection, $getRoot, $isTextNode, $nodesOfType, $setSelection, KEY_BACKSPACE_COMMAND, SKIP_DOM_SELECTION_TAG } from 'lexical';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment } from './index';
 import type { AtMentionItem } from '../../atMention';
 import type { ImageMediaRef } from '../../mediaRefs';
 import type { PromptDoc } from '@/lib/prompt-doc';
+import { AssetRefNode } from '../PromptRefEditor/AssetRefNode';
 import { promptRefEditorInstance, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
 const fetchGenerationModels = vi.hoisted(() =>
@@ -268,10 +269,12 @@ describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
       expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeTruthy();
     });
     expect(sendButton().disabled).toBe(true);
-    // 点失效标签 × 删除该提及
-    const invalidChip = container.querySelector('[data-testid="asset-ref-invalid"]')!;
+    // 删除该失效提及（标签不带叉叉，删除走退格键；jsdom 无法驱动按键，经编辑器实例等价删除）
+    const editor = promptRefEditorInstance(container);
     await act(async () => {
-      (invalidChip.querySelector('button') as HTMLButtonElement).click();
+      editor.update(() => {
+        $nodesOfType(AssetRefNode).find((n) => n.getInvalidLabel() !== undefined)?.remove();
+      });
     });
     await vi.waitFor(() => {
       expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeNull();
@@ -279,6 +282,40 @@ describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
     // 附件区不受影响（仍两项），发送恢复可用
     expect([...container.querySelectorAll('[data-testid="dock-media-ref"]')]).toHaveLength(2);
     await vi.waitFor(() => expect(sendButton().disabled).toBe(false));
+  });
+
+  it('标签无叉叉：回退键删除标签后的提及', async () => {
+    await renderDialog({
+      mediaRefs: [REF_A],
+      initialDoc: {
+        version: 1,
+        segments: [
+          { kind: 'text', text: '前' },
+          { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+          { kind: 'text', text: '后' },
+        ],
+      },
+    });
+    expect(container.querySelector('[data-testid="asset-ref-valid"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="asset-ref-valid"] button')).toBeNull();
+    const editor = promptRefEditorInstance(container);
+    // 光标精确折叠在标签之后的文本起点，等价「标签后按一次退格键」
+    await act(async () => {
+      editor.update(() => {
+        const after = $nodesOfType(AssetRefNode)[0]!.getNextSibling();
+        const sel = $createRangeSelection();
+        sel.anchor.set(after!.getKey(), 0, 'text');
+        sel.focus.set(after!.getKey(), 0, 'text');
+        $setSelection(sel);
+      });
+    });
+    await act(async () => {
+      editor.dispatchCommand(KEY_BACKSPACE_COMMAND, new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
+    });
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="asset-ref-valid"]')).toBeNull();
+    });
+    expect(readPromptRefText(container)).toBe('前后');
   });
 
   it('删除一次提及只删该处（附件与其他提及保留）', async () => {
@@ -292,9 +329,12 @@ describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
     };
     await renderDialog({ mediaRefs: [REF_A], initialDoc: dup });
     expect([...container.querySelectorAll('[data-testid="asset-ref-valid"]')]).toHaveLength(2);
-    const first = container.querySelector('[data-testid="asset-ref-valid"]')!;
+    // 删除第一个提及（原经标签叉叉，现统一走退格键；同上经编辑器实例等价删除）
+    const editor = promptRefEditorInstance(container);
     await act(async () => {
-      (first.querySelector('button') as HTMLButtonElement).click();
+      editor.update(() => {
+        $nodesOfType(AssetRefNode)[0]!.remove();
+      });
     });
     await vi.waitFor(() => {
       expect([...container.querySelectorAll('[data-testid="asset-ref-valid"]')]).toHaveLength(1);
