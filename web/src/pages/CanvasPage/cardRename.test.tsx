@@ -383,16 +383,17 @@ async function openVideoDraftPanel(): Promise<string> {
   return 'vd1';
 }
 
-/** 视频草稿面板内「到节点选择」：进入选取模式后点画布节点作为普通参考（同画布连线语义） */
-async function pickNodeIntoVideoPanel(nodeId: string, role: '图片' | '视频' = '图片') {
+/** 视频草稿面板内「从节点添加素材」（IKFE8U 统一入口）：进入选取模式后点画布节点作为普通参考（同画布连线语义） */
+async function pickNodeIntoVideoPanel(nodeId: string, _role: '图片' | '视频' = '图片') {
+  // IKFE8U：普通参考区单「+」统一入口，不再按媒体类型区分按钮（role 仅保留调用签名兼容）
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
-    (b.getAttribute('title') ?? '').startsWith(`添加${role}参考`),
+    b.getAttribute('title') === '从资产中选择 / 从节点添加素材',
   )!;
   await act(async () => {
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
   const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent === '到节点选择',
+    (b) => b.textContent === '从节点添加素材',
   )!;
   await act(async () => {
     item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -610,9 +611,9 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
   it.each(['列表选择', '画布点击'])('音频参考经%s选入后随源卡改名更新', async (entry) => {
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleAudioDialog(); });
-    const pick = container.querySelector('button[title="添加参考音频（最多 3 段）"]')!;
+    const pick = container.querySelector('button[title="从资产中选择 / 从节点添加素材"]')!;
     await act(async () => { pick.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const fromCanvas = [...container.querySelectorAll('button')].find((b) => b.textContent === '从画布选择')!;
+    const fromCanvas = [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材')!;
     await act(async () => { fromCanvas.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => {
       if (entry === '画布点击') flowProps.current.onNodeClick(mediaNode('aud'));

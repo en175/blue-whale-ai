@@ -30,10 +30,14 @@ export function isMaterialLibraryId(id: string | number | undefined): boolean {
   return typeof id === 'string' && /^asset-/i.test(id);
 }
 
-/** 来源节点能否作为图片参考：返回 null 表示可连入，否则为用户可读拒绝原因。
- *  仅接受已有有效结果的图片媒体节点；待生成/生成中/失败/失效/上传中/无资产身份均拒绝。 */
-export function imageRefSourceError(node: Node | undefined): string | null {
-  if (!node) return '素材不存在';
+/** 来源有效性（不含媒体类型检查，图片/视频/音频参考共用）：待生成/生成中/失败/失效/
+ *  上传中/无资产的来源均不可用，返回用户可读拒绝原因；可用返回 null。
+ *  extraCheck 在资产身份判定之前插入额外拒绝原因（供需要 genStatus 优先于媒体类型的调用方
+ *  保持既有提示顺序），不需要的调用方不传。 */
+export function baseSourceError(
+  node: NonNullable<Node>,
+  extraCheck?: (data: Record<string, unknown>) => string | null,
+): string | null {
   const data = (node.data ?? {}) as Record<string, unknown>;
   if (data.genStatus === 'draft') return '待生成的草稿不能作为参考';
   if (data.genStatus === 'generating') return '生成中的卡片不能作为参考';
@@ -42,9 +46,19 @@ export function imageRefSourceError(node: Node | undefined): string | null {
   const src = typeof data.src === 'string' ? data.src : '';
   if (src.startsWith('blob:')) return '素材上传中，请稍候再选择';
   if (!src) return '素材已被删除';
-  if (data.mediaType !== 'image') return '图片参考仅支持图片素材';
+  const extra = extraCheck?.(data);
+  if (extra) return extra;
   if (readAssetId(data) === undefined) return '素材未关联资产，无法作为参考';
   return null;
+}
+
+/** 来源节点能否作为图片参考：返回 null 表示可连入，否则为用户可读拒绝原因。
+ *  仅接受已有有效结果的图片媒体节点；待生成/生成中/失败/失效/上传中/无资产身份均拒绝。
+ *  检查顺序为既有语义（genStatus 优先于媒体类型），媒体类型经 baseSourceError 的
+ *  extraCheck 插入资产身份判定之前，与旧内联级联顺序一致。 */
+export function imageRefSourceError(node: Node | undefined): string | null {
+  if (!node) return '素材不存在';
+  return baseSourceError(node, (data) => (data.mediaType !== 'image' ? '图片参考仅支持图片素材' : null));
 }
 
 /** 来源节点 id → 当前卡片名称（无名称时回落节点 id）。快照参考刷新与连线推导共用同一取值口径 */
@@ -59,17 +73,6 @@ export function cardNameOfNode(node: Node | undefined): string | undefined {
 export function localNodeIdOf(fileId: string): string | null {
   if (!fileId.startsWith('node-')) return null;
   return fileId.slice('node-'.length) || null;
-}
-
-/** 快照参考的名称刷新（IKFA8Y）：选取当刻缓存的名称改为按来源节点身份取当前名称。
- *  只改展示名称，引用绑定、素材 ID、节点 ID、顺序与角色全部沿用快照；来源节点已不在画布
- *  （素材库参考等）时保留原名称。 */
-export function freshImageCanvasRefs(refs: ImageMediaRef[], mediaNodes: Node[]): ImageMediaRef[] {
-  const byId = new Map(mediaNodes.map((n) => [n.id, n]));
-  return refs.map((ref) => {
-    const name = cardNameOfNode(byId.get(ref.nodeId));
-    return name === undefined ? ref : { ...ref, name };
-  });
 }
 
 /** 目标节点的有效图片媒体参考：连线 target=该节点，按连线顺序；仅推导当前有效来源

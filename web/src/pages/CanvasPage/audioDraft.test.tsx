@@ -657,21 +657,21 @@ describe('IKDMQT 保存失败暂停生成', () => {
 });
 
 describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => {
-  /** 经音频面板真实入口进入画布选择模式：添加参考按钮 → 来源菜单 → 从画布选择 */
+  /** 经音频面板真实入口进入画布选择模式：添加参考按钮 → 来源菜单 → 从节点添加素材 */
   async function enterCanvasPick() {
     await vi.waitFor(() => {
-      const btn = [...container.querySelectorAll('button')].find((b) => (b.title ?? '').startsWith('添加参考音频'));
+      const btn = [...container.querySelectorAll('button')].find((b) => (b.title ?? '').startsWith('从资产中选择 / 从节点添加素材'));
       expect(btn).toBeTruthy();
     });
     await act(async () => {
-      [...container.querySelectorAll('button')].find((b) => (b.title ?? '').startsWith('添加参考音频'))!.click();
+      [...container.querySelectorAll('button')].find((b) => (b.title ?? '').startsWith('从资产中选择 / 从节点添加素材'))!.click();
     });
     await vi.waitFor(() => {
-      const item = [...container.querySelectorAll('button')].find((b) => b.textContent === '从画布选择');
+      const item = [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材');
       expect(item).toBeTruthy();
     });
     await act(async () => {
-      [...container.querySelectorAll('button')].find((b) => b.textContent === '从画布选择')!.click();
+      [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材')!.click();
     });
   }
 
@@ -735,8 +735,14 @@ describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => 
 });
 
  describe('IKFCJG 恢复音频引用请求', () => {
-  it('结构与音频参考恢复后携带真实 references 和 prompt_doc', async () => {
+  it('结构与音频参考恢复后携带真实 references 和 prompt_doc（IKFDFZ：存量 audioRefs 打开时迁移为连线）', async () => {
     seedDraftDoc();
+    // 存量 audioRefs 的画布项须有对应画布来源节点（迁移按节点 id 找回来源建线）
+    (canvasDocMock.current.doc as { nodes: Node[] }).nodes.push({
+      id: 'r1', type: 'mediaNode', position: { x: 100, y: 0 },
+      data: { src: 'https://x/a.mp3', mediaType: 'audio', fileName: '雨声', assetId: '601' },
+    });
+    canvasDocMock.current.assets = { '601': { asset_id: 601, type: 'audio', access_url: 'https://x/a.mp3' } };
     const draft = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find((n: Node) => n.id === 'd1')!;
     Object.assign(draft.data, {
       prompt: '音频1',
@@ -745,7 +751,7 @@ describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => 
     });
     await renderPage(); await openDraftPanel(); await waitModelReady();
     expect(readPromptRefText(container)).toBe('音频1');
-    expect(container.querySelector('[data-testid="audio-ref-thumb"]')!.getAttribute('title')).toBe('雨声');
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="audio-ref-thumb"]')!.getAttribute('title')).toBe('雨声'));
     await act(async () => sendButton().click());
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     expect(apiMocks.createGenerationJob.mock.calls[0][1]).toMatchObject({
@@ -762,8 +768,8 @@ describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => 
     Object.assign(node.data, { mediaType: 'audio', src: 'http://audio/a.mp3', assetId: '601', fileName: '雨声' });
     canvasDocMock.current.assets = { '601': { asset_id: 601, type: 'audio', access_url: 'http://audio/a.mp3' } };
     await renderPage(); await openDraftPanel(); await waitModelReady();
-    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.title.startsWith('添加参考音频'))!.click());
-    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '从画布选择')!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.title.startsWith('从资产中选择 / 从节点添加素材'))!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '从节点添加素材')!.click());
     await act(async () => flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')));
     await vi.waitFor(() => expect(container.querySelector('[data-testid="audio-ref-thumb"]')).not.toBeNull());
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="移除 雨声"]')!.click());

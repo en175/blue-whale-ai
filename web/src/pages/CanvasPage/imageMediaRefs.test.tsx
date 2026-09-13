@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { REF_SOURCE_ENTRY_TITLE } from './components/RefSourceMenu';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from './testing/promptRefEditor';
 
 /* IKDMQR 图片参考连线与 Dock 双向同步：
@@ -228,6 +229,22 @@ function connect(source: string, target: string) {
   });
 }
 
+/** Dock 媒体入口已改为来源菜单（画布资产改造融合）：先点入口按钮弹菜单，再点「从节点添加素材」项进入选取模式 */
+const enterPickMode = async () => {
+  const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
+  )!;
+  await act(async () => {
+    entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+  const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.textContent === '从节点添加素材',
+  )!;
+  await act(async () => {
+    item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+};
+
 const edgePairs = () =>
   flowProps.current.edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`);
 
@@ -342,23 +359,7 @@ describe('IKDMQR 连线 → Dock 同步与提交消费', () => {
 });
 
 describe('IKDMQR Dock 选择 → 连线', () => {
-  /** Dock 媒体入口已改为来源菜单（画布资产改造融合）：先点入口按钮弹菜单，再点「到节点选择」项进入选取模式 */
-  const enterPickMode = async () => {
-    const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (b) => b.getAttribute('title') === '从资产中选择 / 到节点选择',
-    )!;
-    await act(async () => {
-      entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-    const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (b) => b.textContent === '到节点选择',
-    )!;
-    await act(async () => {
-      item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-  };
-
-  it('Dock 选取先显示暂存参考，发送时建立连线并消费同一资产', async () => {
+  it('Dock 选取立即建立连线并随自动保存上送，发送消费同一资产（IKFDFT）', async () => {
     await renderPage();
     const draftId = await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
@@ -367,20 +368,28 @@ describe('IKDMQR Dock 选择 → 连线', () => {
     await enterPickMode();
     expect(container.textContent).toContain('点击画布中的图片节点');
 
-    // 点击后只暂存参考，发送时再落线。
+    // 点击后立即建立来源→目标连线，不再等待发送
     const m1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')!;
     await act(async () => {
       flowProps.current.onNodeClick(m1);
     });
-    expect(edgePairs()).toEqual([]);
+    expect(edgePairs()).toEqual([`m1->${draftId}`]);
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
+
+    // 连线随自动保存上送（未发送生成）
+    await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalled(), { timeout: 3000 });
+    const saved = apiMocks.saveCanvasDoc.mock.calls.at(-1)![1];
+    expect(saved.edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`)).toEqual([`m1->${draftId}`]);
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+
+    // 选取模式已退出
+    expect(container.textContent).not.toContain('点击画布中的图片节点');
+
+    // 发送仍消费同一资产（先落盘后建任务）
     await typePrompt('采用所选参考');
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
-    expect(edgePairs()).toEqual([`m1->${draftId}`]);
     expect(apiMocks.createGenerationJob.mock.calls[0]![1].input_asset_ids).toEqual(['a1']);
-    // 选取模式已退出
-    expect(container.textContent).not.toContain('点击画布中的图片节点');
   });
 
   it('Dock 选取非法来源（待生成草稿/视频）明确提示且不建立连线', async () => {

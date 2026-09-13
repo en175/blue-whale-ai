@@ -922,8 +922,8 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
     try {
       const dock = page.locator('.react-flow__node-mediaNode[data-id="dock-target"]');
       await dock.locator('[data-testid="media-content"]').click();
-      await page.locator('button[title="从资产中选择 / 到节点选择"]').click();
-      await page.getByRole("button", { name: "到节点选择", exact: true }).click();
+      await page.locator('button[title="从资产中选择 / 从节点添加素材"]').click();
+      await page.getByRole("button", { name: "从节点添加素材", exact: true }).click();
       const referenced = page.waitForResponse(r => r.url().endsWith('/prompt-references') && r.request().method() === 'POST');
       await plan.locator('[data-testid="text-title"]').click();
       await page.screenshot({ path: '/tmp/iketsw-reference-debug.png' });
@@ -984,8 +984,8 @@ describe.skipIf(!process.env.IKDLQE_DATABASE_URL)("Prompt preview public API", (
     try {
       const dock = page.locator('.react-flow__node-mediaNode[data-id="dock-target"]');
       await dock.locator('[data-testid="media-content"]').click();
-      await page.locator('button[title="添加图片参考（从资产中选择 / 到节点选择 / 角色库）"]').click();
-      await page.getByRole("button", { name: "到节点选择", exact: true }).click();
+      await page.locator('button[title="从资产中选择 / 从节点添加素材"]').click();
+      await page.getByRole("button", { name: "从节点添加素材", exact: true }).click();
       const referenced = page.waitForResponse(r => r.url().endsWith('/prompt-references') && r.request().method() === 'POST');
       await plan.locator('[data-testid="text-title"]').click();
       await page.screenshot({ path: '/tmp/iketsx-reference-debug.png' });

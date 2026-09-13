@@ -343,8 +343,8 @@ describe.skipIf(!process.env.IKFA1N_DATABASE_URL)("Image prompt ref invalidation
       expect(await chipsOf("invalid").innerText()).toContain("已失效：原图片1");
       expect((await chipsOf("valid").allInnerTexts()).join("|")).toBe("图片1");
       const pickFromCanvas = async (refId: string) => {
-        await page.locator('button[title="从资产中选择 / 到节点选择"]').click();
-        await page.locator("button", { hasText: "到节点选择" }).click();
+        await page.locator('button[title="从资产中选择 / 从节点添加素材"]').click();
+        await page.locator("button", { hasText: "从节点添加素材" }).click();
         await node(refId).click();
       };
       await pickFromCanvas("ref-e");

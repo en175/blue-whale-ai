@@ -23,11 +23,14 @@ function mediaNode(id: string, mediaType: 'image' | 'video' | 'audio'): Node {
   };
 }
 
-describe('isAudioGenEnabled（IKFCKS 文本上下文放行）', () => {
-  it('既有组合规则回归：纯图/纯音频/纯视频不可选', () => {
+describe('isAudioGenEnabled（IKFCKS 文本上下文放行；IKFDFZ 纯音频放行）', () => {
+  it('既有组合规则回归：纯图/纯视频不可选（音频面板不提供图片入口）', () => {
     expect(isAudioGenEnabled(['image'])).toBe(false);
-    expect(isAudioGenEnabled(['audio'])).toBe(false);
     expect(isAudioGenEnabled(['video'])).toBe(false);
+  });
+
+  it('IKFDFZ：纯音频可选——参考音频是音频生成的核心输入，走画布连线', () => {
+    expect(isAudioGenEnabled(['audio'])).toBe(true);
   });
 
   it('既有组合规则回归：图+视频、音频+图、音频+视频可选', () => {

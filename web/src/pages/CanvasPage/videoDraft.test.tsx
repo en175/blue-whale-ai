@@ -317,7 +317,7 @@ async function selectKeyframeMode() {
   });
 }
 
-/** 经 Dock 槽位入口选取来源节点建立指定角色的连线（真实路径：+ 按钮弹来源菜单 →「到节点选择」→ 画布节点点击） */
+/** 经 Dock 槽位入口选取来源节点建立指定角色的连线（真实路径：+ 按钮弹来源菜单 →「从节点添加素材」→ 画布节点点击） */
 async function pickRefNode(slotTitle: string, nodeId: string) {
   await vi.waitFor(() => {
     const btn = [...container.querySelectorAll('button')].find((b) => b.title === slotTitle);
@@ -327,11 +327,11 @@ async function pickRefNode(slotTitle: string, nodeId: string) {
     [...container.querySelectorAll('button')].find((b) => b.title === slotTitle)!.click();
   });
   await vi.waitFor(() => {
-    const item = [...container.querySelectorAll('button')].find((b) => b.textContent === '到节点选择');
+    const item = [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材');
     expect(item).toBeTruthy();
   });
   await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.textContent === '到节点选择')!.click();
+    [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材')!.click();
   });
   await clickNode(flowProps.current.mediaNodes.find((n: Node) => n.id === nodeId)!);
 }
@@ -370,7 +370,7 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     // 面板打开：绑定空草稿卡默认跟随模式「文生视频」（下拉收起仅显示当前模式名）
     expect(container.textContent).toContain('文生视频');
-    expect(container.querySelector('button[title^="添加图片参考"]')).toBeTruthy();
+    expect(container.querySelector('button[title="从资产中选择 / 从节点添加素材"]')).toBeTruthy();
   });
 
   it('侧栏入口发送：绑定新建草稿卡生成（带 target_node_id），不另落生成卡', async () => {
@@ -414,7 +414,7 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
       data: { draft: true, mediaType: 'video', genStatus: 'draft' },
     });
     expect(container.textContent).toContain('文生视频');
-    expect(container.querySelector('button[title^="添加图片参考"]')).toBeTruthy();
+    expect(container.querySelector('button[title="从资产中选择 / 从节点添加素材"]')).toBeTruthy();
   });
 });
 
@@ -496,8 +496,8 @@ describe('IKDMQS 提交推导与组合约束', () => {
     await waitModelReady();
     await selectKeyframeMode();
     // 经 Dock 首帧/尾帧入口显式指定（不按连入顺序猜测）
-    await pickRefNode('添加首帧（从资产中选择 / 到节点选择 / 角色库）', 'm1');
-    await pickRefNode('添加尾帧（从资产中选择 / 到节点选择 / 角色库）', 'm2');
+    await pickRefNode('添加首帧（从资产中选择 / 从节点添加素材）', 'm1');
+    await pickRefNode('添加尾帧（从资产中选择 / 从节点添加素材）', 'm2');
     expect(flowProps.current.edges).toHaveLength(0);
     expect(container.querySelectorAll('[data-testid="dock-video-ref"]')).toHaveLength(2);
     await typePrompt('首尾帧驱动');
@@ -594,7 +594,7 @@ describe('IKDWL8 视频失效引用保护', () => {
 });
 
 /* IKFC1T 文生视频入口与媒体参考自动切换：新建默认文生视频（仅提示词省略 references）、
-   文本附件不触发切换、三个接入路径（连线/角色库/到节点选择暂存）触发自动切全能参考并保留输入、
+   文本附件不触发切换、三个接入路径（连线/从节点添加素材落线）触发自动切全能参考并保留输入、
    存在媒体参考时文生视频置灰（部分删除仍置灰，全部删除恢复可选但不自动切回）、草稿恢复保持已存模式。 */
 const MODE_LABELS = ['文生视频', '全能参考', '图生视频', '首尾帧'];
 
@@ -687,15 +687,15 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     expect(flowProps.current.edges).toHaveLength(0);
   });
 
-  it('到节点选择暂存参考：暂存即成为当前参考，自动切全能参考', async () => {
+  it('从节点添加素材参考：选取即落线成为当前参考（IKFDFW），自动切全能参考', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
     await expectMode('文生视频');
 
-    await pickRefNode('添加图片参考（从资产中选择 / 到节点选择 / 角色库）', 'm1');
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
 
-    expect(flowProps.current.edges).toHaveLength(0); // 暂存未落线
+    expect(flowProps.current.edges).toHaveLength(1); // IKFDFW：选取即建连线，不再经暂存
     await expectMode('全能参考');
   });
 
