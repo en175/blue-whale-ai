@@ -202,9 +202,9 @@ async function renderPage() {
   });
 }
 
-/** 面板参考区预览图 alt 列表（自由面板渲染面板本地 files） */
+/** 面板参考区预览图 alt 列表（自由面板渲染面板本地 files；IKFCKK 起为共享缩略图，挂参考行内） */
 function refImages(): string[] {
-  return [...container.querySelectorAll<HTMLImageElement>(`.${dialogStyles.previewItem} img`)].map(
+  return [...container.querySelectorAll<HTMLImageElement>(`.${dialogStyles.previewRow} img`)].map(
     (img) => img.alt,
   );
 }

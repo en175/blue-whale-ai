@@ -87,23 +87,17 @@
   gap: var(--spacing-sm);
 }
 
+/* IKFCKK：附件条已替换为共享 RefThumbnail（56×56 圆角 12），本类仅保留给
+ * 尾部「+」占位按钮，尺寸与共享缩略图对齐 */
 .previewItem {
   position: relative;
-  width: 44.8px;
-  height: 44.8px;
+  width: 56px;
+  height: 56px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid #333;
   background-color: #2a2a2a;
   flex-shrink: 0;
-}
-
-.previewItem img,
-.previewItem video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
 }
 
 .previewPlaceholder {
@@ -176,27 +170,6 @@
 .sourceMenuItem:hover {
   color: var(--color-text-primary);
   background-color: var(--color-bg-hover);
-}
-
-.previewRemove {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  background-color: rgba(0, 0, 0, 0.6);
-  border: none;
-  cursor: pointer;
-  transition: background-color var(--transition-fast);
-}
-
-.previewRemove:hover {
-  background-color: rgba(229, 72, 77, 0.85);
 }
 
 .topActions {
@@ -705,18 +678,4 @@
   bottom: calc(100% + 6px);
   left: 0;
   z-index: 40;
-}
-
-.previewBadge {
-  position: absolute;
-  left: 2px;
-  bottom: 2px;
-  padding: 0 4px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.65);
-  color: #bfdbfe;
-  font-size: 10px;
-  line-height: 16px;
-  pointer-events: none;
-  white-space: nowrap;
 }

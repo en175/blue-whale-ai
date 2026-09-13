@@ -295,6 +295,10 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
           const sel = $getSelection();
           if ($isRangeSelection(sel)) sel.insertNodes([node]);
         }
+      }, {
+        // 插入后编辑器聚焦、光标落在插入内容之后（IKFCKK：@ 按钮插入不打断输入节奏）；
+        // focus 须在本次 update 提交后调用（提交前调用会被 pending 队列吞掉，焦点不落 DOM）
+        onUpdate: () => editor.focus(),
       });
     },
     dismissMention: () => {
