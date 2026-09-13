@@ -11,15 +11,6 @@
         ]
       },
       {
-        "matcher": "Grep|Glob",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/cbm-discovery-gate.sh"
-          }
-        ]
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -82,20 +73,11 @@
         ]
       },
       {
-        "matcher": "Bash|Grep",
+        "matcher": "Bash|Grep|Glob|exec_command|Shell",
         "hooks": [
           {
             "type": "command",
-            "command": "graphify hook-guard search"
-          }
-        ]
-      },
-      {
-        "matcher": "Read|Glob",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "graphify hook-guard read"
+            "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/cbm-discovery-gate.sh"
           }
         ]
       }
@@ -148,20 +130,31 @@
     ],
     "SessionStart": [
       {
-        "matcher": "startup|resume",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/cbm-session-reminder.sh"
-          }
-        ]
-      },
-      {
         "matcher": "startup|clear|compact|resume",
         "hooks": [
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/superpowers-session-start.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/cbm-session-reminder.sh"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/cbm-session-reminder.sh"
           }
         ]
       }
