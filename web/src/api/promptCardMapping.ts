@@ -1,4 +1,4 @@
-import type { GenerationCardBlock, PromptCardRecord } from './agentSessions';
+import type { GenerationCardBlock, PromptCardRecord, PromptCardRevision } from './agentSessions';
 
 /**
  * 生成卡批次（agent V3）→ 侧边栏卡片块。
@@ -21,9 +21,20 @@ import type { GenerationCardBlock, PromptCardRecord } from './agentSessions';
  *   查不到的引用直接丢掉——宁可不显示，也不要把内部 id 甩给用户看。
  */
 export function cardsFromRevision(record: PromptCardRecord): GenerationCardBlock[] {
-  const revision = record.active_revision;
+  return record.active_revision ? cardsOfRevision(record.session_id ?? '', record.active_revision) : [];
+}
+
+/**
+ * 任意一个修订版 → 侧边栏卡片块。当前生效的那一版和历史版本（IKEV0V）走同一条翻译，
+ * 卡片 id 都是 `${revision_id}#${shot_no}`，所以两版的卡互不覆盖。
+ */
+export function cardsOfRevision(sessionId: string, revision: PromptCardRevision): GenerationCardBlock[] {
   if (!revision?.payload?.shots?.length) return [];
-  const { shots, assets, target_media } = revision.payload;
+  const { shots, assets, target_media, target_model } = revision.payload;
+  // 批次级的一项，每张卡都标（F32「每张生成卡标注目标模型与版本」）。老卡没有就整项不带。
+  const targetModel = target_model
+    ? `${target_model.family}${target_model.version ? ` ${target_model.version}` : ''}`
+    : undefined;
   const provenanceOf = new Map((assets ?? []).map((a) => [a.asset_ref_id, a]));
 
   let elapsed = 0;
@@ -52,15 +63,17 @@ export function cardsFromRevision(record: PromptCardRecord): GenerationCardBlock
     return {
       // 版本内唯一且跨重渲染稳定：应用状态按这个 id 记，重编某一镜后旧 id 自然失效
       cardId: `${revision.revision_id}#${shot.shot_no}`,
-      source: { sessionId: record.session_id ?? '', revisionId: revision.revision_id, shotNo: shot.shot_no },
+      source: { sessionId, revisionId: revision.revision_id, shotNo: shot.shot_no },
       shotNo: shot.shot_no,
       shotTitle: shot.title || `镜头 ${shot.shot_no}`,
       ...(timeRange ? { timeRange } : {}),
-      visual: shot.frame_description,
+      // 卡结构 V4 起没有画面字段（IKEV0K），只有 V3 旧卡带着；没有就不给，画布卡上那一行自己不画。
+      ...(shot.frame_description ? { visual: shot.frame_description } : {}),
       prompt: shot.prompt_text,
       ...(assetRefs.length > 0 ? { assetRefs, assetRefItems } : {}),
       ...(target_media ? { targetMedia: target_media } : {}),
       ...(aspectRatio ? { aspectRatio } : {}),
+      ...(targetModel ? { targetModel } : {}),
       ...(typeof seconds === 'number' && seconds > 0 ? { durationSeconds: seconds } : {}),
     };
   });

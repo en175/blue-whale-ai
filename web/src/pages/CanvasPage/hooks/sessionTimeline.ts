@@ -13,7 +13,13 @@
  * 这个文件是纯函数：不碰 React、不碰网络，事件进、状态出。夹具回归（IKDK5M）就是把测试站
  * 录下的事件逐条喂进来，断言 `buildTurns` 的形状。
  */
-import type { GenerationCardBlock, SessionContentBlock, SessionMessage, SessionRun } from '@/api/agentSessions';
+import type {
+  GenerationCardBlock,
+  RequirementUnderstanding,
+  SessionContentBlock,
+  SessionMessage,
+  SessionRun,
+} from '@/api/agentSessions';
 import { mergeConfirmedUser as mergeUserMessage } from './userMessageProjection';
 import type { PartialCardPreview } from './partialCardPreview';
 import { toPartialCardPreview } from './partialCardPreview';
@@ -529,7 +535,29 @@ export interface TurnAccount {
   contextCapacity: RunContextCapacity | null;
   /** 失败时后端的那句人话。 */
   failureText: string | null;
+  /**
+   * 这一轮完成了、但要写的生成卡没写出来时，后端的那句人话（IKEV0V）。只在聊天里改卡时出现：
+   * 那一轮照常 completed，侧边栏还挂着上一版。不写出来，用户会把旧卡当成这次改出来的。
+   */
+  cardFailureText: string | null;
+  /**
+   * 这次没写出卡，再发一遍有没有用。按码查 agent 的失败码表（`docs/blueprint/agent-failure-codes-v1.md`
+   * 的「可重试」一列）——那张表写明「是否可重试不在线上传输，客户端按码查」。素材不可用、没定做图
+   * 还是视频这类，得用户先做点什么，给「再试一次」只会让他白按一次。
+   */
+  cardFailureRetryable: boolean;
 }
+
+/**
+ * 生成卡没写出来时，重发一遍也没用的那几个码（agent 失败码表里「可重试：否」、会出现在
+ * `prompt_card_failure` 上的）。表里新增这类码时同步加在这里。
+ */
+const NON_RETRYABLE_CARD_FAILURES: ReadonlySet<string> = new Set([
+  'asset_binding_unavailable',
+  'target_media_unresolved',
+  'understanding_not_confirmed',
+  'requirement_incomplete',
+]);
 
 /**
  * 一条已经结束的 Run → 账。起点取 `created_at`（用户等待是从提交开始算的，排队、记忆投影、
@@ -547,6 +575,8 @@ export function accountOfRun(run: SessionRun, fallbackFinishedAt: number | null 
     tokenUsage: parseRunTokenUsage(run.token_usage),
     contextCapacity: parseRunContextCapacity(run.context_capacity),
     failureText: run.failure?.message || null,
+    cardFailureText: run.status === 'completed' ? run.prompt_card_failure?.message || null : null,
+    cardFailureRetryable: !NON_RETRYABLE_CARD_FAILURES.has(run.prompt_card_failure?.code ?? ''),
   };
 }
 
@@ -564,6 +594,13 @@ export interface Turn {
   live: LiveRun | null;
   runId: string | null;
   account: TurnAccount | null;
+  /**
+   * 这一轮提出的方案卡，旧的在前（IKF3KE）。
+   *
+   * 按提出它的那一轮归位，和生成卡同一个做法：用户往回翻时，卡就在当时那段对话下面，而不是
+   * 统统堆在最后。被确认或作废的版本照样留着（置灰），否则历史读起来会缺一块。
+   */
+  solutionCards: RequirementUnderstanding[];
 }
 
 /**
@@ -576,13 +613,23 @@ export function buildTurns(
   messages: readonly ChatMessage[],
   live: LiveRun | null,
   accounts: Readonly<Record<string, TurnAccount>>,
+  understandings: readonly RequirementUnderstanding[] = [],
 ): Turn[] {
   const ordered = [...messages].sort((a, b) => a.sequence_no - b.sequence_no);
   const turns: Turn[] = [];
   const byBatch = new Map<string, Turn>();
 
   const newTurn = (batchId: string | null, key: string): Turn => {
-    const turn: Turn = { key, batchId, user: [], assistant: null, live: null, runId: null, account: null };
+    const turn: Turn = {
+      key,
+      batchId,
+      user: [],
+      assistant: null,
+      live: null,
+      runId: null,
+      account: null,
+      solutionCards: [],
+    };
     turns.push(turn);
     if (batchId) byBatch.set(batchId, turn);
     return turn;
@@ -653,6 +700,14 @@ export function buildTurns(
       }
     }
   }
+  // 方案卡挂回提出它的那一轮。提出它的 Run 已经不在时间线上（很旧的会话）就挂到最后一轮，
+  // 总比不显示好——那张卡也许正等着用户点。
+  const byVersion = [...understandings].sort((a, b) => a.version - b.version);
+  for (const understanding of byVersion) {
+    const owner =
+      turns.find(turn => turn.runId === understanding.proposed_by_run_id) ?? turns[turns.length - 1] ?? null;
+    if (owner) owner.solutionCards.push(understanding);
+  }
   return turns;
 }
 
@@ -664,6 +719,8 @@ export function buildTurns(
  */
 export interface SessionState {
   messages: ChatMessage[];
+  /** 方案卡的全部版本（IKF3KE）。快照水合一次，之后由事件增量更新。 */
+  understandings: RequirementUnderstanding[];
   live: LiveRun | null;
   accounts: Record<string, TurnAccount>;
   runningRunId: string | null;
@@ -674,6 +731,7 @@ export interface SessionState {
 
 export const EMPTY_SESSION_STATE: SessionState = {
   messages: [],
+  understandings: [],
   live: null,
   accounts: {},
   runningRunId: null,
@@ -781,6 +839,31 @@ export function reduceSessionEvent(state: SessionState, ev: TimelineEvent, now: 
   const { data, payload, at } = envelope(ev);
   const when = at ?? now;
   const t = ev.type;
+
+  /* ---- 方案卡的提出、接纳与作废（IKF3KE） ----
+   * 三条事件带的都是同一份版本记录，按 (understanding_id, version) 就地更新，没有就追加。
+   * 此前前端**故意**不为需求理解渲染任何东西（IKAI14 拆掉了旧 UI，确认由模型在对话里判断）。
+   * 现在确认权回到用户手里，它必须有形态：不然用户没有可点的东西，首卡永远出不来。 */
+  if (
+    t === 'requirement_understanding.proposed.v1' ||
+    t === 'requirement_understanding.accepted.v1' ||
+    t === 'requirement_understanding.voided.v1'
+  ) {
+    const understanding = payload.understanding as RequirementUnderstanding | undefined;
+    if (!understanding?.understanding_id) return state;
+    const rest = state.understandings.filter(
+      one => !(one.understanding_id === understanding.understanding_id && one.version === understanding.version),
+    );
+    // 一个会话同时最多一版待确认：这一版一落，之前那些待确认的就不再等用户了。
+    const settled = rest.map(one =>
+      one.understanding_id === understanding.understanding_id &&
+      one.version !== understanding.version &&
+      one.status === 'awaiting_confirmation'
+        ? { ...one, status: 'superseded' as const }
+        : one,
+    );
+    return { ...state, understandings: [...settled, understanding].sort((a, b) => a.version - b.version) };
+  }
 
   /* ---- 用户消息确认：替换乐观气泡；调度到了 Run 就进入运行态 ---- */
   if (t === 'message.accepted') {

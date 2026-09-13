@@ -9,7 +9,15 @@ let root: Root;
 let mountNode: HTMLDivElement;
 
 function labels() {
-  return [...mountNode.querySelectorAll('button')].map((button) => button.textContent?.trim() || button.getAttribute('title') || '');
+  return [...mountNode.querySelectorAll('button')].map(
+    (button) =>
+      button.textContent?.trim() ||
+      button.getAttribute('title') ||
+      // 纯图标按钮用 aria-label 标名字（音频的播放键就是）。只看 text/title 会把它读成空字符串，
+      // 断言里就冒出一个来历不明的 ''。
+      button.getAttribute('aria-label') ||
+      '',
+  );
 }
 
 interface RenderExtra {
@@ -77,7 +85,8 @@ afterEach(async () => {
 describe('MediaNode selected toolbar', () => {
   it('hides @, generate-image and generate-video on an audio node', async () => {
     await renderNode('audio');
-    expect(labels()).toEqual(['重新编辑', '详情', '下载']);
+    // 播放键是音频播放器自己的（2026-09-09「画布操作优化」），不属于选中工具栏，但同在节点里。
+    expect(labels()).toEqual(['重新编辑', '详情', '下载', '播放']);
   });
 
   it('keeps @ and generate actions on an image node', async () => {
@@ -369,12 +378,22 @@ describe('MediaNode audio layout', () => {
     expect(parseFloat(contentCard().style.height)).toBe(280);
   });
 
+  // 原生 <audio controls> 已换成自绘播放器（2026-09-09「画布操作优化」）：唱片封面 + 播放键 +
+  // 进度条。这一条要守的东西没变——**控件点得到，且点它不会把节点拖走**，所以断言跟着换成
+  // 新控件上的 nodrag，而不是换成「有没有 controls 属性」。
   it('keeps player controls reachable and out of the node drag path', async () => {
     await renderNode('audio', { selected: false });
     const audio = mountNode.querySelector('audio');
     expect(audio).toBeTruthy();
-    expect(audio!.getAttribute('controls')).not.toBeNull();
-    expect(audio!.className).toContain('nodrag');
+
+    const play = [...mountNode.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '播放');
+    expect(play).toBeTruthy();
+    expect(play!.className).toContain('nodrag');
+
+    // 进度条同理：拖它是调播放进度，不是拖节点。
+    const slider = mountNode.querySelector('input[type="range"]') ?? mountNode.querySelector('[class*="audioProgress"]');
+    expect(slider).toBeTruthy();
+    expect((slider as HTMLElement).className).toContain('nodrag');
   });
 
   it('keeps the square body for generating, failed and missing audio', async () => {
