@@ -39,7 +39,6 @@ import PromptRefEditor, {
   type MentionState,
   type PromptRefEditorHandle,
 } from '../PromptRefEditor';
-import MentionMenu from '../PromptRefEditor/MentionMenu';
 import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
 import { refIdOf, videoLabelMapOf } from '../../videoPromptRefs';
 import type { ImageTextAttachment } from '../ImageDialog';
@@ -327,11 +326,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   );
   const editorRef = useRef<PromptRefEditorHandle>(null);
   const mentionAnchorRef = useRef<HTMLDivElement>(null);
-  /** @ 菜单状态（已引用 + 添加新参考） */
+  /** @ 菜单状态（已引用 + 素材分类） */
   const [mention, setMention] = useState<MentionState>({ open: false, query: '' });
-  const [mentionIndex, setMentionIndex] = useState(0);
-  /** 画布素材二级菜单（已引用之外的新素材经画布选取加入参考后插标签） */
-  const [canvasMentionOpen, setCanvasMentionOpen] = useState(false);
   /** 失效标签替换菜单（IKFA1O 复用 IKFA1N 交互）：记录发起点击的标签节点 key */
   const [replaceTarget, setReplaceTarget] = useState<string | null>(null);
   const mentionMenuRef = useRef<HTMLDivElement>(null);
@@ -695,8 +691,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     }, docHasAnyRef(promptDoc) ? promptDoc : null);
   };
 
-  /** @ 菜单：已引用项按查询过滤（名称/标签可搜索）；项 = 当前模式下有效的参考（帧+普通） */
-  const mentionQueryText = mention.open ? mention.query.trim().toLowerCase() : '';
+  /** 当前模式下有效的参考（帧、普通素材与文本）；过滤统一由菜单完成。 */
   const mentionItems = useMemo(() => {
     const out: Array<{ assetId: string; url: string; name: string; badge: string; mediaType: 'image' | 'video' | 'audio' | 'text' }> = [];
     for (const item of [videoMediaRefs.first, videoMediaRefs.last, ...videoMediaRefs.reference]) {
@@ -711,12 +706,11 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       const a = attachments![i]!;
       out.push({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text' });
     }
-    return out.filter((r) => !mentionQueryText || r.name.toLowerCase().includes(mentionQueryText) || r.badge.includes(mentionQueryText));
-  }, [videoMediaRefs, attachments, mentionQueryText, reconcileKey]);
+    return out;
+  }, [videoMediaRefs, attachments, reconcileKey]);
   const closeMention = () => {
     editorRef.current?.dismissMention();
     setMention({ open: false, query: '' });
-    setCanvasMentionOpen(false);
   };
   const pickMentionRef = (assetId: string) => {
     // IKFA1P：文本身份（来源节点 id）与媒体身份空间不重叠——按当前附件集合分派标签类型
@@ -725,54 +719,14 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     setMention({ open: false, query: '' });
   };
 
-  /** 添加新参考入口（IKFA1O A3/A5）：按模式给出目标槽位的细分入口；
-   *  达上限或只读不提供（校验拒绝则参考集合不变、不插入标签） */
+  /** 寻址键分派（IKFA1P 唯一口径）：文本附件来源节点 id → text_ref，其余 → asset_ref */
+  const refKeyOf = (assetId: string): PromptRefKey => ({
+    kind: orderedTextNodeIds.includes(assetId) ? 'text_ref' : 'asset_ref',
+    id: assetId,
+  });
+
+  /** 新画布素材添加成功后，回到原 @ 位置插入标签。 */
   const pendingNewRefInsert = useRef(false);
-  const pickMentionNewRef = (kind: 'image' | 'video', role: VideoRefRole, source: 'assets' | 'canvas') => {
-    editorRef.current?.consumeMentionForPendingInsert();
-    pendingNewRefInsert.current = true;
-    setMention({ open: false, query: '' });
-    if (source === 'assets') onPickFromAssets?.(kind, role);
-    else onPickFromCanvas?.(kind, role);
-  };
-  /** @ 菜单添加新参考的细分入口（按模式与类型；上限复用 dock 添加判定） */
-  const mentionNewRefEntries = useMemo(() => {
-    if (readOnly) return [];
-    const entries: Array<{ key: string; label: string; icon: 'folder' | 'pointer'; onPick: () => void }> = [];
-    const push = (kind: 'image' | 'video', role: VideoRefRole, labelPrefix: string) => {
-      entries.push(
-        { key: `${labelPrefix}-assets`, label: `从资产中选择${labelPrefix}`, icon: 'folder', onPick: () => pickMentionNewRef(kind, role, 'assets') },
-        { key: `${labelPrefix}-canvas`, label: `到节点选择${labelPrefix}`, icon: 'pointer', onPick: () => pickMentionNewRef(kind, role, 'canvas') },
-      );
-    };
-    if (isKeyframe) {
-      if (!videoMediaRefs.first && canAddFirst) push('image', 'first', '首帧');
-      if (!videoMediaRefs.last && canAddLast) push('image', 'last', '尾帧');
-    } else {
-      if (canAddReference) push('image', 'reference', '图片参考');
-      if (canAddReference && !isText2Video) push('video', 'reference', '视频参考');
-    }
-    return entries;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readOnly, isKeyframe, isText2Video, canAddFirst, canAddLast, canAddReference, videoMediaRefs.first, videoMediaRefs.last]);
-
-  const handleMentionKey = (key: 'down' | 'up' | 'enter' | 'escape'): boolean => {
-    if (!mention.open) return false;
-    if (key === 'escape') {
-      closeMention();
-      return true;
-    }
-    const total = mentionItems.length + mentionNewRefEntries.length;
-    if (total === 0) return false;
-    if (key === 'down') setMentionIndex((i) => (i + 1) % total);
-    else if (key === 'up') setMentionIndex((i) => (i - 1 + total) % total);
-    else if (key === 'enter') {
-      if (mentionIndex < mentionItems.length) pickMentionRef(mentionItems[mentionIndex].assetId);
-      else mentionNewRefEntries[mentionIndex - mentionItems.length]?.onPick();
-    }
-    return true;
-  };
-
   /** 新参考添加成功检测：有效身份集合出现新增 → 在记住的插入点落标签（A3；IKFA1P 含新文本附件连入） */
   const prevRefIdsRef = useRef<Array<string>>([]);
   const prevTextNodeIdsRef = useRef<Array<string>>([]);
@@ -799,7 +753,6 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   }, [reconcileKey, orderedTextNodeIds]);
 
   useDismissOnOutside([
-    { open: mention.open && !canvasMentionOpen, ref: mentionMenuRef, dismiss: () => closeMention() },
     { open: replaceTarget !== null, ref: replaceMenuRef, dismiss: () => setReplaceTarget(null) },
   ]);
 
@@ -860,46 +813,38 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
     >
       {/* @ 菜单（IKFA1O）：挂 .dialogWrap 层向上弹出（.dialog 滚动框会裁剪浮层）；
-          顶部已引用（当前模式允许的图片/视频/音频），下方添加新参考细分入口，
-          再下「引用画布素材」二级菜单（新素材经画布选取加参考后插标签） */}
+          顶部统一搜索与已引用，下方保留原有四类画布素材入口 */}
       {mention.open && !readOnly && (
         <div className={styles.mentionDock} ref={mentionMenuRef}>
-          <MentionMenu
-            items={mentionItems}
-            activeIndex={mentionIndex}
-            newRefEntries={mentionNewRefEntries}
-            onPick={pickMentionRef}
-            onHoverIndex={setMentionIndex}
+          <AtMentionMenu
+            renderInline
+            anchorRef={mentionMenuRef}
+            items={canvasMentionItems ?? []}
+            editorQuery={mention.query}
+            referencedItems={mentionItems.map(r => ({
+              id: r.assetId, assetId: r.assetId, name: r.name, thumbUrl: r.url,
+              kind: r.mediaType, badge: r.badge,
+            }))}
+            onSelectReferenced={(item) => pickMentionRef(item.id)}
+            onSelect={(item) => {
+              const id = item.assetId ?? '';
+              if (id && refLabels.has(id)) {
+                // 已在参考区：直接插标签（多次提及不重复添加输入）
+                pickMentionRef(id);
+              } else if (item.kind === 'text' && orderedTextNodeIds.includes(item.id)) {
+                // IKFA1P：已在附件中的文本 → 直接插标签（多次提及不重复建连线）
+                pickMentionRef(item.id);
+              } else {
+                // 新素材：加入参考（父级建立连线/暂存），添加成功后经 pendingInsert 落标签；
+                // IKFA1P：新文本走画布连线添加附件（pendingInsert 含文本检测）
+                editorRef.current?.consumeMentionForPendingInsert();
+                pendingNewRefInsert.current = true;
+                setMention({ open: false, query: '' });
+                onMentionCanvas?.(item);
+              }
+            }}
+            onClose={closeMention}
           />
-          {onMentionCanvas && !canvasMentionOpen && (
-            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setCanvasMentionOpen(true)}>引用画布素材</button>
-          )}
-          {canvasMentionOpen && onMentionCanvas && (
-            <AtMentionMenu
-              anchorRef={mentionMenuRef}
-              items={canvasMentionItems ?? []}
-              editorQuery={mention.query}
-              onSelect={(item) => {
-                const id = item.assetId ?? '';
-                if (id && refLabels.has(id)) {
-                  // 已在参考区：直接插标签（多次提及不重复添加输入）
-                  pickMentionRef(id);
-                } else if (item.kind === 'text' && orderedTextNodeIds.includes(item.id)) {
-                  // IKFA1P：已在附件中的文本 → 直接插标签（多次提及不重复建连线）
-                  pickMentionRef(item.id);
-                } else {
-                  // 新素材：加入参考（父级建立连线/暂存），添加成功后经 pendingInsert 落标签；
-                  // IKFA1P：新文本走画布连线添加附件（pendingInsert 含文本检测）
-                  editorRef.current?.consumeMentionForPendingInsert();
-                  pendingNewRefInsert.current = true;
-                  setMention({ open: false, query: '' });
-                  onMentionCanvas(item);
-                }
-                setCanvasMentionOpen(false);
-              }}
-              onClose={() => setCanvasMentionOpen(false)}
-            />
-          )}
         </div>
       )}
       {/* 失效标签替换菜单（IKFA1O 复用 IKFA1N 交互）：选择后仅替换发起点击的那次提及 */}
@@ -954,7 +899,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
                         const gen = modelList.find((x) => x.model_id === m.key);
                         if (gen) syncDraftParams(applyModelDefaults(gen));
                         setModelOpen(false);
-                      }}
+            }}
                     >
                       {m.label}
                     </button>
@@ -986,7 +931,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
                         setSelectedSize(s.key);
                         syncDraftParams({ size: s.key });
                         setSizeOpen(false);
-                      }}
+            }}
                     >
                       {s.label}
                     </button>
@@ -1189,10 +1134,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
           onChange={handleDocChange}
           onMentionChange={(state) => {
             setMention(state);
-            if (state.open) setMentionIndex(0);
           }}
           onInvalidTagClick={readOnly ? undefined : (nodeKey) => setReplaceTarget(nodeKey)}
-          onMentionKey={handleMentionKey}
           className={styles.editorArea}
         />
       </div>

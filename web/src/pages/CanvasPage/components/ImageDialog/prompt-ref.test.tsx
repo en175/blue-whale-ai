@@ -115,13 +115,16 @@ afterEach(() => {
 
 describe('IKFA1M @ 菜单与插入（A1/A4）', () => {
   it('从 @ 添加新图片成功后，在原位置插入标签并保存身份（A3）', async () => {
-    const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A] });
-    await typePromptRefRaw(container, '让@');
+    const item: AtMentionItem = { id: 'nb', assetId: '102', kind: 'image', name: '衣服图' };
+    const onMentionCanvas = vi.fn();
+    const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A], mentionItems: [item], onMentionCanvas });
+    await typePromptRefRaw(container, '让@衣服');
     await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
     await act(async () => {
       [...container.querySelectorAll<HTMLButtonElement>('button')]
-        .find((button) => button.textContent?.includes('从资产中选择'))!.click();
+        .find((button) => button.textContent === '衣服图')!.click();
     });
+    expect(onMentionCanvas).toHaveBeenCalledWith(item);
     expect(readPromptRefText(container)).toBe('让');
     await rerender([REF_A, REF_B], onParamsChange);
     await vi.waitFor(() => expect(readPromptRefText(container)).toBe('让图片2'));
@@ -398,13 +401,29 @@ it('结构化编辑器保留画布文本引用入口，选择后消费查询且�
   const item: AtMentionItem = { id: 'text-1', kind: 'text', name: '水彩方案' };
   await renderDialog({ mediaRefs: [REF_A], mentionItems: [item], onMentionCanvas });
   await typePromptRefRaw(container, '让@水彩');
-  await act(async () => {
-    [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '引用画布素材')!.click();
-  });
   await vi.waitFor(() => expect(document.body.textContent).toContain('水彩方案'));
   await act(async () => {
     [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.includes('水彩方案'))!.click();
   });
   expect(onMentionCanvas).toHaveBeenCalledWith(item);
   expect(readPromptRefText(container)).toBe('让');
+});
+
+it('菜单内搜索同时显示已引用和画布同一素材，选择画布项直接插入且不重复添加引用', async () => {
+  const onMentionCanvas = vi.fn();
+  const item: AtMentionItem = { id: 'na', assetId: '101', kind: 'image', name: '角色图' };
+  await renderDialog({ mediaRefs: [REF_A], mentionItems: [item], onMentionCanvas });
+  await typePromptRefRaw(container, '让@');
+  const input = container.querySelector('input[placeholder="搜索"]') as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '角色');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const menu = container.querySelector('[data-testid="mention-menu"]')!;
+  const matches = [...menu.querySelectorAll<HTMLButtonElement>('button')].filter(b => b.textContent?.includes('角色图'));
+  expect(matches).toHaveLength(2);
+  await act(async () => matches[1].click());
+  await vi.waitFor(() => expect(readPromptRefText(container)).toBe('让图片1'));
+  expect(onMentionCanvas).not.toHaveBeenCalled();
+  expect(container.querySelectorAll('[data-testid="dock-media-ref"]')).toHaveLength(1);
 });
