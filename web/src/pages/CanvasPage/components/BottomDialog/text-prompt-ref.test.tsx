@@ -56,6 +56,7 @@ async function renderDialog(opts: RenderOpts = {}) {
     root.render(
       createElement(BottomDialog, {
         onClose: vi.fn(),
+        initialParams: { mode: 'all' },
         onSend,
         initialDoc: opts.initialDoc ?? null,
         attachments: opts.attachments,
@@ -73,6 +74,7 @@ async function rerender(opts: RenderOpts = {}) {
     root.render(
       createElement(BottomDialog, {
         onClose: vi.fn(),
+        initialParams: { mode: 'all' },
         onSend: vi.fn(),
         attachments: opts.attachments,
         videoDraftBinding: { onParamsChange: vi.fn() },

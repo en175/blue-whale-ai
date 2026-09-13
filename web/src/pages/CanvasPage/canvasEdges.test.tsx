@@ -332,7 +332,7 @@ describe('IKDLQF 连线受控化与目标生图接线', () => {
     expect(payload.type).toBe('image');
     expect(payload.target_node_id).toBe('m1');
     expect(payload.input_asset_ids).toEqual(['a1']);
-    expect(payload.parameters.prompt).toBe('');
+    expect(payload.parameters.prompt).toBe('一只蓝鲸在海里游');
 
     // 保存串行化：先落盘（含未防抖编辑与连线）再创建任务
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);

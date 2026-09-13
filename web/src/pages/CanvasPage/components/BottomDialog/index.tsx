@@ -719,12 +719,6 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     setMention({ open: false, query: '' });
   };
 
-  /** 寻址键分派（IKFA1P 唯一口径）：文本附件来源节点 id → text_ref，其余 → asset_ref */
-  const refKeyOf = (assetId: string): PromptRefKey => ({
-    kind: orderedTextNodeIds.includes(assetId) ? 'text_ref' : 'asset_ref',
-    id: assetId,
-  });
-
   /** 新画布素材添加成功后，回到原 @ 位置插入标签。 */
   const pendingNewRefInsert = useRef(false);
   /** 新参考添加成功检测：有效身份集合出现新增 → 在记住的插入点落标签（A3；IKFA1P 含新文本附件连入） */

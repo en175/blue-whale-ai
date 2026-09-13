@@ -32,6 +32,7 @@ export const refIdOf = (item: VideoMediaRef): string => item.materialId ?? item.
 /** 模式是否接受该参考（与 BottomDialog modeConflict 同口径的结构判定）：
  *  keyframe 只收首尾帧；all 不收帧；text2video 不收帧且普通参考仅图片 */
 function modeAccepts(mode: string, role: VideoPromptRefItem['role'], type: VideoPromptRefItem['type']): boolean {
+  if (mode === 'prompt') return false;
   if (role !== 'reference') return mode === 'keyframe';
   if (mode === 'keyframe') return false;
   if (mode === 'text2video') return type === 'image';

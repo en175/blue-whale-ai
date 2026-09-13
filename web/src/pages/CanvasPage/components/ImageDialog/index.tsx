@@ -40,7 +40,7 @@ import { cardNameOfNode, localNodeIdOf } from '../../mediaRefs';
 import type { MediaGenStatus } from '../MediaNode';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import AtMentionMenu from '../AtMentionMenu';
-import { stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
+import { type AtMentionItem } from '../../atMention';
 import type { FollowDialogAnchor } from '../../followDialog';
 import styles from './index.module.css';
 
@@ -54,8 +54,12 @@ export const IMAGE_COMPOSED_PROMPT_OVER_LIMIT = '当前参考提示词内容超�
 export function composeImageSendPrompt(
   attachments: ImageTextAttachment[] | undefined,
   input: string,
+  promptDoc?: PromptDoc | null,
 ): string {
-  const parts = (attachments ?? []).map((item) => item.text).filter((text) => text.trim().length > 0);
+  const indexed = promptDoc?.segments.some((segment) => segment.kind === 'text_ref');
+  const parts = indexed
+    ? (attachments ?? []).map((item, i) => `文本${i + 1}：${item.text}`)
+    : (attachments ?? []).map((item) => item.text).filter((text) => text.trim().length > 0);
   if (input.trim().length > 0) parts.push(input);
   return parts.join('\n\n');
 }
@@ -226,7 +230,7 @@ function AttachmentItem({ attachment, badge, move, onRemove }: {
   );
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, mentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, mentionItems: canvasMentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
   /** 结构化正文（IKFA1M）：文字与素材标签的片段序列；标签绑定稳定身份，编号按当前输入派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -573,7 +577,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
       console.warn('图片模型能力加载中，请稍后重试');
       return;
     }
-    if (composeImageSendPrompt(attachments, inputValue).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+    if (composeImageSendPrompt(attachments, flatValue, promptDoc).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
       onToast?.('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
       return;
     }
@@ -906,11 +910,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
           />
         </div>
 
-        {/* 字数统计 */}
-        <div className={`${styles.charCount} ${flatValue.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
-          {flatValue.length}/{MAX_INPUT}
-        </div>
-
           {/* 底部状态栏 */}
           <div className={styles.bottomBar}>
             {/* 左侧 */}
@@ -931,8 +930,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
           {/* 右侧：发送按钮 */}
           <div className={styles.barRight}>
             {/* 字数统计 */}
-            <div className={`${styles.charCount} ${inputValue.length >= maxInput ? styles.charCountWarn : ''}`}>
-              {inputValue.length}/{maxInput}
+            <div className={`${styles.charCount} ${flatValue.length >= maxInput ? styles.charCountWarn : ''}`}>
+              {flatValue.length}/{maxInput}
             </div>
             <button
               className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}

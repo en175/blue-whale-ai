@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog from './index';
 import type { ImageMediaRef } from '../../mediaRefs';
+import type { AtMentionItem } from '../../atMention';
 import type { PromptDoc } from '@/lib/prompt-doc';
 import { promptRefEditorInstance, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
@@ -53,6 +54,8 @@ let root: Root;
 let container: HTMLDivElement;
 
 async function renderDialog(props: {
+  mentionItems?: AtMentionItem[];
+  onMentionCanvas?: (item: AtMentionItem) => void;
   mediaRefs?: ImageMediaRef[];
   initialDoc?: PromptDoc | null;
   initialText?: string;
@@ -72,6 +75,8 @@ async function renderDialog(props: {
         initialText: props.initialText,
         initialDoc: props.initialDoc ?? null,
         mediaRefs: props.mediaRefs,
+        mentionItems: props.mentionItems,
+        onMentionCanvas: props.onMentionCanvas,
         draftBinding: props.mediaRefs ? { onParamsChange } : undefined,
       } as Parameters<typeof ImageDialog>[0]),
     );

@@ -78,3 +78,10 @@ describe('videoLabelMapOf（图生视频模式 text2video）', () => {
     expect(labelOf('202')).toBeNull();
   });
 });
+
+ it('文生视频模式不接受媒体标签，切回全能参考恢复同一身份', () => {
+  const refs = { ...KEYFRAME_REFS, reference: ALL_REFS.reference };
+  const { labelOf, refItems } = videoLabelMapOf(refs, 'prompt');
+  expect(refItems.every((item) => labelOf(item.id) === null)).toBe(true);
+  expect(videoLabelMapOf(refs, 'all').labelOf('101')).toBe('图片1');
+});

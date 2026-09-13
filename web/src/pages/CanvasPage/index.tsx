@@ -3572,7 +3572,7 @@ export default function CanvasPage() {
       createGenerationJob(currentId, {
         type,
         expected_output_count: 1,
-        parameters: type === 'image'
+        parameters: type === 'image' && !promptDoc
           ? {
               ...parameters,
               prompt: composeImageSendPrompt(
@@ -5550,6 +5550,7 @@ export default function CanvasPage() {
     const composedPrompt = composeImageSendPrompt(
       targetNodeId ? textAttachmentsOf(targetNodeId) : undefined,
       text,
+      promptDoc,
     );
     if (composedPrompt.length > IMAGE_COMPOSED_PROMPT_LIMIT) {
       showToast('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);

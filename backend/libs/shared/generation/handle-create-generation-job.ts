@@ -1067,6 +1067,9 @@ export async function handleCreateGenerationJob(
     }
     // 复用既有正文约束；后续附件组合也必须使用实际冻结的正文。
     const compiledError = strategy.validate({ ...body, parameters: { ...params, prompt: promptText } });
+    if (promptText.length > maxPromptLength) {
+      return fail(400, "prompt 无效", { code: ERROR_INVALID_INPUT });
+    }
     if (compiledError) {
       return fail(400, compiledError.message, { code: compiledError.code });
     }
