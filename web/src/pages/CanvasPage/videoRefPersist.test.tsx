@@ -46,7 +46,11 @@ const apiMocks = vi.hoisted(() => ({
   fetchQuota: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
-  saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
+  saveCanvasDoc: vi.fn(async (
+    _projectId: string,
+    _payload: { viewport: unknown; nodes: Node[]; edges: Array<{ id: string; source: string; target: string; data?: { refRole?: string } }> },
+    _version: number | null,
+  ) => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
   createGenerationJob: vi.fn(async (_projectId: string, _payload: Record<string, any>) => ({ generation_job_id: 'j1', cursor: 1 })),
   fetchJobStatus: vi.fn(async () => ({
     job_id: 'j1',
