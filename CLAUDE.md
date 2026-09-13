@@ -5,7 +5,7 @@
 | 场景（碰这类操作前 Must Read） | 规则文件（加载方式） |
 | --- | --- |
 | 启动/调试本地服务（起环境、连数据库） | `.qoder/skills/start-local-services/SKILL.md`（`.claude`/`.zcode` 为同步副本）+ `docs/adr/0064-testsite-db-access-governance.md`（红线：本地配置禁现测试站连接串，应急只走 `scripts/tunnel-testsite-db.sh`） |
-| 代码理解（查结构 / 调用链 / 架构） | `docs/agents/code-intelligence.md`（渐进式；结构查询先 CBM，不可用才降级 grep/glob） |
+| 代码理解（查结构 / 调用链 / 架构） | `agent-rules/code-discovery.md`（首次只读探索即生效；结构查询先 CBM，worktree 切换校验索引） |
 | 判断产品实现技术栈 / Python 工具是否需要处置 | [ADR-0068](docs/adr/0068-node-typescript-product-runtime-and-specialized-compute-boundary.md) + [ADR-0070](docs/adr/0070-product-runtime-stack-does-not-govern-engineering-control-plane.md) + [ADR-0074](docs/adr/0074-frontend-backend-separation-nestjs-product-api.md) + [ADR-0084](docs/adr/0084-generation-worker-java-runtime.md)；逐项结论见 [Python 存量处置清单](docs/specs/2026-08-09-ik7fi6-python-inventory-disposition.md) |
 | Gitee 工作流（提交/分支/PR/发布/worktree） | `docs/agents/git-workflow.md`（渐进式） |
 | Gitee Issue / 任何 `mcp__gitee-ent__*` 调用 | `docs/agents/issue-tracker.md`（渐进式，首次调用前 Must Read） |
@@ -88,13 +88,3 @@
 ### Domain docs
 
 单上下文（根 `CONTEXT.md` + `docs/adr/`）。见 `docs/agents/domain.md`。
-
-## graphify
-
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
-
-Rules:
-- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

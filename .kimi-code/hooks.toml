@@ -20,8 +20,7 @@ matcher = "Edit|Write"
 command = 'bash "$HOME/.kimi-code/hooks/blue-whale-hook.sh" block-master-edit.sh'
 
 [[hooks]]
-event = "PreToolUse"
-matcher = "Grep|Glob"
+event = "UserPromptSubmit"
 command = 'bash "$HOME/.kimi-code/hooks/blue-whale-hook.sh" cbm-discovery-gate.sh'
 
 [[hooks]]

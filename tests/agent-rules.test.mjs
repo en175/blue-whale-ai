@@ -149,3 +149,12 @@ test("typecheck generates the Prisma client before compiling a fresh worktree", 
     /^pnpm --filter @blue-whale\/backend exec prisma generate && /,
   );
 });
+
+test("CBM exploration has one policy before worktree creation", () => {
+  assert.match(read('CLAUDE.md'), /agent-rules\/code-discovery.md/);
+  assert.match(read('AGENTS.md'), /agent-rules\/code-discovery.md/);
+  for (const path of ['CLAUDE.md', 'AGENTS.md']) {
+    assert.doesNotMatch(read(path), /first run `graphify/);
+  }
+  assert.doesNotMatch(read('docs/agents/worktree-workflow.md'), /MCP 不可用或索引失败时，必须停止/);
+});

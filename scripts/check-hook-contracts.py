@@ -148,6 +148,8 @@ def kimi_normalized_contracts(config: dict[str, object]) -> Counter[Contract]:
                 f"无法解析阻断 Hook event={event} matcher={matcher} "
                 f"command={item.get('command')}"
             )
+        if event == "UserPromptSubmit" and gate == "cbm-discovery-gate.sh":
+            continue
         contracts[(str(event), str(matcher), gate)] += 1
     return contracts
 
@@ -187,6 +189,10 @@ def normalized_contracts(
                         f"无法解析阻断 Hook event={event} matcher={matcher} "
                         f"command={command}"
                     )
+                if (event == "SubagentStart" and gate == "cbm-session-reminder.sh") or (
+                    event == "PreToolUse" and gate == "cbm-discovery-gate.sh"
+                ):
+                    continue
                 contracts[(event, matcher, gate)] += 1
     return contracts
 
