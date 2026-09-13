@@ -60,6 +60,8 @@ async function renderDialog(props: {
   mentionItems?: AtMentionItem[];
   onMentionCanvas?: ReturnType<typeof vi.fn>;
   onParamsChange?: ReturnType<typeof vi.fn>;
+  onRemoveMediaRef?: ReturnType<typeof vi.fn>;
+  draftStatus?: 'generating';
 } = {}) {
   const onSend = props.onSend ?? vi.fn();
   const onParamsChange = props.onParamsChange ?? vi.fn();
@@ -76,7 +78,8 @@ async function renderDialog(props: {
         initialText: props.initialText,
         initialDoc: props.initialDoc ?? null,
         mediaRefs: props.mediaRefs,
-        draftBinding: props.mediaRefs ? { onParamsChange } : undefined,
+        draftBinding: props.mediaRefs ? { onParamsChange, status: props.draftStatus } : undefined,
+        onRemoveMediaRef: props.onRemoveMediaRef,
       } as Parameters<typeof ImageDialog>[0]),
     );
   });
@@ -150,8 +153,9 @@ describe('IKFA1M @ 菜单与插入（A1/A4）', () => {
     expect(items[1].textContent).toContain('图片2');
     // 附件区角标同编号
     const badges = [...container.querySelectorAll('[data-testid="dock-media-ref"]')].map((el) => el.textContent);
-    expect(badges[0]).toContain('图片1');
-    expect(badges[1]).toContain('图片2');
+    // IKFCKK：编号圆钮只显示数字（底部「图片N」文字标签已移除），与菜单编号一致
+    expect(badges[0]).toBe('1');
+    expect(badges[1]).toBe('2');
 
     await typePromptRefRaw(container, '的衣服');
     // 查询过滤：名称命中
@@ -412,4 +416,47 @@ it('结构化编辑器保留画布文本引用入口，选择后消费查询且�
   });
   expect(onMentionCanvas).toHaveBeenCalledWith(item);
   expect(readPromptRefText(container)).toBe('让');
+});
+
+/* IKFCKK：附件条共享缩略图集成——× 走既有断开连线链路、@ 与手动 @ 选择产出同一素材标签 */
+describe('IKFCKK 附件条三态集成', () => {
+  it('点击 × 立即删除：仅断开当前引用（onRemoveMediaRef 携带来源节点），无确认弹窗', async () => {
+    const onRemoveMediaRef = vi.fn();
+    await renderDialog({ mediaRefs: [REF_A, REF_B], onRemoveMediaRef });
+    const removeBtns = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="移除"]')];
+    expect(removeBtns).toHaveLength(2);
+    await act(async () => {
+      removeBtns[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onRemoveMediaRef).toHaveBeenCalledTimes(1);
+    expect(onRemoveMediaRef).toHaveBeenCalledWith('nb');
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('点击 @ 按钮与手动 @ 选择产出同一种素材标签：无记忆光标追加末尾、光标落在标签后', async () => {
+    const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A, REF_B] });
+    await typePromptRefRaw(container, '让');
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="插入引用"]')!;
+    await act(async () => {
+      atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(readPromptRefText(container)).toBe('让图片1');
+    // 插入后光标落在标签之后：继续输入接在其后
+    await typePromptRefRaw(container, '微笑');
+    expect(readPromptRefText(container)).toBe('让图片1微笑');
+    // 与手动 @ 选择同一种 chip：草稿同步的结构化正文一致（asset_ref 绑定 101）
+    const patch = onParamsChange.mock.calls.filter((c) => c[0]?.promptDoc !== undefined).pop()?.[0];
+    expect(patch.promptDoc.segments).toEqual([
+      { kind: 'text', text: '让' },
+      { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+      { kind: 'text', text: '微笑' },
+    ]);
+  });
+
+  it('生成中只读：缩略图保留，× 与 @ 均不渲染', async () => {
+    await renderDialog({ mediaRefs: [REF_A], draftStatus: 'generating' });
+    expect(container.querySelector('[data-testid="dock-media-ref"] img')).toBeTruthy();
+    expect(container.querySelector('[data-testid="dock-media-ref"] button[title="移除"]')).toBeNull();
+    expect(container.querySelector('[data-testid="dock-media-ref"] button[title="插入引用"]')).toBeNull();
+  });
 });
