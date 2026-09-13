@@ -1,14 +1,19 @@
 /* ============================================
  * AudioDialog 音频生成底部对话框：纯文本描述 + 真实模型（fetchGenerationModels('audio')）
+ * IKFCKS：参考音频 chip 替换为共享参考缩略图（三态交互，播放随 chip 下线）；
+ *  画布文本卡连线作为文本附件以 FileText 缩略图进参考栏（× 仅断开连线）
  * ============================================ */
-import { useEffect, useRef, useState } from 'react';
-import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2, Music2, Pause, XCircle, Upload, Move } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2, Upload, Move } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
+import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { MediaGenStatus } from '../MediaNode';
 import type { FollowDialogAnchor } from '../../followDialog';
 import AtMentionMenu from '../AtMentionMenu';
-import { stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
+import { audioRefToMentionItem, stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
+import RefThumbnail from '../RefThumbnail';
+import type { ImageTextAttachment } from '../ImageDialog';
 import styles from './index.module.css';
 
 /** 输入框字数上限 */
@@ -78,6 +83,10 @@ export interface AudioDialogProps {
   mentionItems?: AtMentionItem[];
   /** 选中 @ 素材后写入参考区 */
   onMentionCanvas?: (item: AtMentionItem) => void;
+  /** 连线文本附件（IKFCKS）：音频草稿的画布文本卡连线实时推导，FileText 缩略图进参考栏 */
+  attachments?: ImageTextAttachment[];
+  /** 移除文本附件（IKFCKS）：× 仅断开当前连线（保留画布原文本卡） */
+  onRemoveAttachment?: (nodeId: string) => void;
   /** 绑定草稿卡时悬浮跟随；缺省仍锚定底部 */
   followAnchor?: FollowDialogAnchor | null;
 }
@@ -95,6 +104,8 @@ export default function AudioDialog({
   pickMode,
   mentionItems,
   onMentionCanvas,
+  attachments,
+  onRemoveAttachment,
   followAnchor,
 }: AudioDialogProps) {
   const [text, setText] = useState(initialText ?? '');
@@ -109,8 +120,6 @@ export default function AudioDialog({
   const [expanded, setExpanded] = useState(false);
   /** 参考音频列表（本地上传） */
   const [refs, setRefs] = useState<AudioRefItem[]>([]);
-  /** 当前正在播放的参考项 id */
-  const [playingId, setPlayingId] = useState<string | null>(null);
   /** 来源菜单（本地上传 / 从画布选择） */
   const [sourceOpen, setSourceOpen] = useState(false);
   /** 画布选择面板 */
@@ -118,8 +127,13 @@ export default function AudioDialog({
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const sourceWrapRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  if (!audioRef.current) audioRef.current = new Audio();
+
+  /** 参考音频时长探测（IKFCKS：放大预览「图标+名称+时长」卡片用；播放随 chip 下线） */
+  const durationSources = useMemo(
+    () => refs.map((r) => ({ key: `${r.source}-${r.id}`, src: r.src })),
+    [refs],
+  );
+  const durations = useAudioDurations(durationSources);
 
   useDismissOnOutside([
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
@@ -248,28 +262,7 @@ export default function AudioDialog({
     setRefs((prev) => [...prev, ...next]);
   };
 
-  /** 点击参考 chip 播放/暂停（同一次点击的音频只允许一个在播） */
-  const togglePlay = (item: AudioRefItem) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (playingId === item.id) {
-      audio.pause();
-      setPlayingId(null);
-      return;
-    }
-    audio.src = item.src;
-    audio.currentTime = 0;
-    audio.play().catch(() => {
-      // 播放失败（如格式不被浏览器支持）静默忽略，不阻塞移除/发送
-    });
-    setPlayingId(item.id);
-  };
-
   const handleRemoveRef = (id: string) => {
-    if (playingId === id) {
-      audioRef.current?.pause();
-      setPlayingId(null);
-    }
     setRefs((prev) => {
       const item = prev.find((r) => r.id === id);
       if (item?.source === 'local' && item.src.startsWith('blob:')) {
@@ -279,15 +272,9 @@ export default function AudioDialog({
     });
   };
 
-  /** 组件卸载时 revoke 所有 blob URL 并停播，防内存泄漏 */
+  /** 组件卸载时 revoke 所有 blob URL，防内存泄漏 */
   useEffect(() => {
-    const audio = audioRef.current;
-    const onEnded = () => setPlayingId(null);
-    audio?.addEventListener('ended', onEnded);
     return () => {
-      audio?.removeEventListener('ended', onEnded);
-      audio?.pause();
-      audioRef.current = null;
       refs.forEach((r) => {
         if (r.source === 'local' && r.src.startsWith('blob:')) URL.revokeObjectURL(r.src);
       });
@@ -325,35 +312,43 @@ export default function AudioDialog({
         </button>
       </div>
 
-      {/* 顶部参考按钮行（与 ImageDialog/BottomDialog 统一占位视觉；参考上传功能待后续接入） */}
+      {/* 顶部参考缩略图条（IKFCKS）：音频参考 + 文本附件统一走共享参考缩略图，
+          三态交互（编号圆钮 / 悬停 ×/@ / 200ms 放大预览）；播放 chip 随替换下线 */}
       <div className={styles.topRow}>
-        {/* 已上传的参考音频 chip：点击播放/暂停 */}
-        {currentRefs.map((r) => (
-          <button
+        {/* 参考音频缩略图：编号按参考顺序派生；× 移除面板参考（本地上传回收 blob URL）；
+            @ 与手动 @ 选择走同一 onMentionCanvas 入口（结果等价——素材进入参考区，
+            仅画布来源有素材身份，与图片/视频面板「无素材身份不提供 @」同口径） */}
+        {currentRefs.map((r, i) => (
+          <RefThumbnail
             key={`${r.source}-${r.id}`}
-            type="button"
-            className={`${styles.audioChip} ${playingId === r.id ? styles.audioChipPlaying : ''}`}
-            onClick={() => togglePlay(r)}
-            disabled={readOnly}
-            title={playingId === r.id ? '暂停' : `播放：${r.name}`}
-          >
-            <span className={styles.audioChipIcon}>
-              {playingId === r.id ? <Pause size={13} strokeWidth={2} /> : <Music2 size={13} strokeWidth={2} />}
-            </span>
-            <span className={styles.audioChipName}>{r.name}</span>
-            <span
-              role="button"
-              tabIndex={-1}
-              className={styles.audioChipRemove}
-              onClick={(ev) => {
-                ev.stopPropagation();
-                handleRemoveRef(r.id);
-              }}
-              title="移除"
-            >
-              <XCircle size={14} strokeWidth={2} />
-            </span>
-          </button>
+            data-testid="audio-ref-thumb"
+            kind="audio"
+            name={r.name}
+            number={i + 1}
+            audioDuration={durations.get(`${r.source}-${r.id}`)}
+            onRemove={!readOnly ? () => handleRemoveRef(r.id) : undefined}
+            onInsertRef={
+              !readOnly && r.source === 'canvas' && onMentionCanvas
+                ? () => onMentionCanvas(audioRefToMentionItem(r))
+                : undefined
+            }
+          />
+        ))}
+        {/* 文本附件（IKFCKS）：画布文本卡连线以 FileText 缩略图进参考栏统一序列，
+            「文本N」独立编号、悬停 200ms 正文预览；× 仅断开当前连线（保留画布原文本卡），
+            文本附件作为创作上下文，具体生成内容由提示词决定（无契约变更） */}
+        {(attachments ?? []).map((a, i) => (
+          <RefThumbnail
+            key={a.nodeId}
+            data-testid="dock-text-ref"
+            kind="text"
+            name={a.title}
+            number={i + 1}
+            textPreview={a.text}
+            onRemove={
+              !readOnly && onRemoveAttachment ? () => onRemoveAttachment(a.nodeId) : undefined
+            }
+          />
         ))}
         <div className={styles.refWrap} ref={sourceWrapRef}>
           {refs.length < MAX_AUDIO_REFS ? (

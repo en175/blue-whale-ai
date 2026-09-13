@@ -29,6 +29,7 @@
 - 点击 × 立即删除、无确认弹窗；仅断开当前草稿的引用（连线模式断开画布连线 / 暂存项直接移除 / 本地上传项从面板列表移除），不删画布来源卡片、不调后端删除接口。
 - 正文中对应提及沿用既有置失效生命周期（灰显「已失效：原图片N」、可换绑或单删、阻止发送，IKFA1N 契约）。
 - 只读态（生成中/提交中）不渲染 × 与 @。
+- **音频面板（T3 / IKFCKS）**：参考音频的 × 从面板参考列表移除（本地上传项回收 blob URL）；文本附件的 × 仅断开画布连线（走既有 `removePlanAttachment` 断边链路，保留画布原文本卡），与图片面板同款。播放 chip（点击播放/暂停 + 常显移除）随替换下线——预览确认为只读形态（图标+名称+时长卡片），播放能力不在参考栏交互内。
 
 ## 4. @ 插入语义
 
@@ -38,6 +39,7 @@
 - 插入后编辑器聚焦、光标落在插入内容之后（`insertRefAtPending` 在 update 提交后调用 `editor.focus()`；@ 按钮 `onMouseDown` 阻止编辑器失焦）。
 - 面板按身份空间分派寻址键（`refKeyOf`）：来源节点 id 在文本附件集合 → `text_ref`，否则 `asset_ref`（IKFA1P 语义）。
 - 无素材身份的项（如未上传完成的本地项）不提供 @ 入口。
+- **音频面板等价语义（T3 / IKFCKS）**：AudioDialog 与 MusicDialog 的正文为纯 textarea（无 `PromptRefEditor` chip 机制），其「手动 @ 选择」的既有结果 = 素材进入参考区（`onMentionCanvas` 入口，经 externalPick 注入）。缩略图 @ 按钮与手动 @ 选择走**同一 `onMentionCanvas` 回调**（`audioRefToMentionItem` 转换为同一种素材项形态），结果等价、幂等；仅画布来源参考提供 @（本地 blob 上传项无画布身份，同「无素材身份不提供 @」口径）。MusicDialog 随 T3 补齐曲风描述 @ 菜单（仅音频可选，交互与 AudioDialog 同款）。
 
 ## 5. 悬浮放大预览规格
 
@@ -46,7 +48,7 @@
 - 预览内容（沿用 AssetChip 预览常量：内容最大 280×280px、`object-fit: contain` 不裁剪、8px 内边距 + 圆角 + 阴影 + 深色背景）：
   - 图片：静态放大；
   - 视频：`autoPlay muted loop`（静音是自动播放的浏览器硬前提，VideoMentionChip 先例）；
-  - 音频：图标 + 名称 + 时长卡片（宽约 300px，对齐 audioPreview 规格）；
+  - 音频：图标 + 名称 + 时长卡片（宽约 300px，对齐 audioPreview 规格）；时长由面板层探测（`useAudioDurations`：一次性 `Audio` 元素 `preload='metadata'` 读 duration，读到即入表；探测失败缺省不显示时长），共享组件不引入媒体探测职责；
   - 文本：正文内容卡片（超限滚动）。
 
 ## 6. 视觉参数
@@ -66,5 +68,6 @@
 
 - 组件级（唯一新接缝）：`web/src/pages/CanvasPage/components/RefThumbnail/index.test.tsx`——三态切换（含 200ms 延时与移出即逝）、四类素材预览形态、pointer-events 穿透、× 删除回调、紧凑重编号、@ 两路插入（有/无记忆光标，含聚焦与光标位置的行为断言）。
 - 面板集成：`ImageDialog/prompt-ref.test.tsx` 扩展（× 走断开连线回调、@ 与手动 @ 选择等价、只读态按钮不渲染）；既有 `imageMediaRefs.test.tsx`、`cardRename.test.tsx`、`attachments.test.tsx`、`text-prompt-ref.test.tsx` 全绿验证外部契约（`dock-media-ref` testid、`img alt`、`button[title="移除"]`）保持。
+- 音频面板集成（T3 / IKFCKS）：`MusicDialog/index.test.tsx`、`AudioDialog/index.test.tsx`（缩略图替换/新建、× 断边回调、@ 同一入口等价、只读态、发送参数回归）+ `connectAbility.test.ts`（文本卡 → 音频生成连线放行与既有组合回归）；`cardRename.test.tsx` 音频参考改名锚点随 chip 下线切换为缩略图 title。
 - 视觉像素值与过渡时长不进单测，留浏览器验收。
-- 切片：T1 IKFCKK（本切片，共享组件 + 图片面板）；T2/T3/T4（视频面板 BottomDialog、音频面板 MusicDialog + AudioDialog、文本附件进栏）依赖本切片；T5（拖拽排序）收尾。父工单：IKFCJG。
+- 切片：T1 IKFCKK（共享组件 + 图片面板，已合入）；T2 IKFCKQ（视频面板 BottomDialog，已合入）；T4 IKFCKN（文本附件进栏，已合入）；T3 IKFCKS（音频面板 MusicDialog 替换 + AudioDialog 新建，本切片——含画布文本卡连线进音频面板的连线能力放行：`isAudioGenEnabled` 对含文本组合可选，文本卡作为创作上下文，不进生成请求）；T5 IKFCKT（拖拽排序）收尾。父工单：IKFCJG。

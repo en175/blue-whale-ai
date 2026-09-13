@@ -234,7 +234,7 @@
   display: none;
 }
 
-/* ---- 参考预览区 ---- */
+/* ---- 参考预览区：共享参考缩略图容器（单项样式由 RefThumbnail 组件承载，IKFCKS） ---- */
 .previewArea {
   display: flex;
   flex-wrap: wrap;
@@ -242,57 +242,9 @@
   margin-bottom: var(--spacing-sm);
 }
 
-.previewItem {
+/* ---- @ 菜单锚点（曲风描述容器，IKFCKS） ---- */
+.mentionAnchor {
   position: relative;
-  width: 56px;
-  height: 56px;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  border: 1px solid var(--color-border-secondary);
-  flex-shrink: 0;
-}
-
-.previewAudio {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: #2a2a2a;
-  color: var(--color-text-tertiary);
-}
-
-.previewRemove {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  background-color: rgba(0, 0, 0, 0.6);
-  border: none;
-  cursor: pointer;
-  transition: background-color var(--transition-fast);
-}
-
-.previewRemove:hover {
-  background-color: rgba(250, 82, 82, 0.8);
-}
-
-.previewLabel {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 1px 0;
-  font-size: var(--font-size-xs);
-  text-align: center;
-  color: #fff;
-  background-color: rgba(0, 0, 0, 0.5);
 }
 
 /* ---- 输入框 ---- */

@@ -608,7 +608,6 @@ describe('IKFA8X 生成生命周期保留自定义名', () => {
 
 describe('IKFA8Y 改名同步当前参考显示', () => {
   it.each(['列表选择', '画布点击'])('音频参考经%s选入后随源卡改名更新', async (entry) => {
-    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleAudioDialog(); });
     const pick = container.querySelector('button[title="添加参考音频（最多 3 段）"]')!;
@@ -622,13 +621,15 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
         source.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       }
     });
-    expect(container.querySelector('button[title="播放：配乐.mp3"]')).not.toBeNull();
+    // IKFCKS：参考音频以共享缩略图展示（播放 chip 下线），名称承载在缩略图 title
+    const audioThumb = () => container.querySelector('[data-testid="audio-ref-thumb"]') as HTMLElement | null;
+    expect(audioThumb()?.getAttribute('title')).toBe('配乐.mp3');
 
     const assetId = mediaNode('aud').data.assetId;
     const src = mediaNode('aud').data.src;
     await renameVia('aud', 'media', '新配乐');
-    expect(container.querySelector('button[title="播放：新配乐"]')).not.toBeNull();
-    expect(container.querySelectorAll('button[title^="播放："]')).toHaveLength(1);
+    await vi.waitFor(() => expect(audioThumb()?.getAttribute('title')).toBe('新配乐'));
+    expect(container.querySelectorAll('[data-testid="audio-ref-thumb"]')).toHaveLength(1);
     expect(mediaNode('aud').data.assetId).toBe(assetId);
     expect(mediaNode('aud').data.src).toBe(src);
   });
