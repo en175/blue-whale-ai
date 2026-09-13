@@ -4630,8 +4630,14 @@ export default function CanvasPage() {
       historyRef.current?.pushReplaceEdges(edgesRef.current, next);
       edgesRef.current = next;
       setEdges(next);
+      // IKFC26：方案绑定媒体时服务端同步切换目标草稿模式（文生视频 → 全能参考），
+      // 本地节点以服务端返回为准跟随，防止下一次自动保存把切换结果覆盖回旧模式
+      const savedNodes = JSON.parse(saved.nodes ?? '[]') as Node[];
+      const serverMode = (savedNodes.find(n => n.id === targetNodeId)?.data as Record<string, unknown> | undefined)?.draftMode;
+      const localMode = (mediaNodesRef.current.find(n => n.id === targetNodeId)?.data as Record<string, unknown> | undefined)?.draftMode;
+      if (typeof serverMode === 'string' && serverMode !== localMode) patchMediaNode(targetNodeId, { draftMode: serverMode });
       versionRef.current = saved.version;
-      lastSavedRef.current = JSON.stringify(JSON.parse(saved.viewport ?? 'null')) + serializeNodes(JSON.parse(saved.nodes ?? '[]')) + serializeEdges(next);
+      lastSavedRef.current = JSON.stringify(JSON.parse(saved.viewport ?? 'null')) + serializeNodes(savedNodes) + serializeEdges(next);
       setSaveStatus('saved');
       setSaveEpoch(value => value + 1);
     } catch (error) {

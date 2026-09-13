@@ -68,6 +68,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchQuota: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
+  referencePromptPlan: vi.fn(),
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
   legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
@@ -141,6 +142,7 @@ vi.mock('@/api/assets', () => ({
 
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
+  referencePromptPlan: apiMocks.referencePromptPlan,
   listLegacyCardHistory: apiMocks.listLegacyCardHistory,
   createConversationQuote: apiMocks.createConversationQuote,
   legacyCardHistoryOptions: apiMocks.legacyCardHistoryOptions,
@@ -727,6 +729,103 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     // 已保存文生视频草稿 + 无媒体：恢复文生视频
     doc.edges = [];
     await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await expectMode('文生视频');
+  });
+});
+
+/* IKFC26 方案绑定媒体同步视频模式：方案把媒体实际绑定到文生视频目标后，服务端随连线一并
+   持久化切换（文生视频 → 全能参考）；前端绑定回调以服务端返回为准同步本地节点，
+   面板重开恢复与持久化一致的模式，后续自动保存不把切换结果覆盖回旧模式；纯文本方案不触发切换。 */
+describe('IKFC26 方案绑定媒体同步视频模式', () => {
+  /** 画布加方案节点（promptSource 方案，媒体索引可选）并把视频草稿置为文生视频；
+   *  方案素材索引 assetId 须为纯数字（promptMentionSchema 契约），自建 m9 承载 */
+  function seedPlanDoc(mediaMentions: boolean) {
+    seedDoc();
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    doc.nodes.push({
+      id: 'm9',
+      type: 'mediaNode',
+      position: { x: 600, y: 600 },
+      data: { src: 'http://img/m9.png', mediaType: 'image', fileName: '方案素材', assetId: '101' },
+    });
+    doc.nodes.push({
+      id: 'plan1',
+      type: 'textNode',
+      position: { x: 0, y: 600 },
+      data: mediaMentions
+        ? {
+            title: '方案', text: '图A的故事', promptSource: { sessionId: 's1', revisionId: 'r1', shotNo: 1 },
+            promptMentions: [{ start: 0, end: 2, index: 1, assetId: '101' }],
+            promptMaterials: [{ assetId: '101', mediaType: 'image', url: 'http://img/m9.png' }],
+          }
+        : {
+            title: '方案', text: '只有文字', promptSource: { sessionId: 's1', revisionId: 'r1', shotNo: 1 },
+            promptMentions: [], promptMaterials: [],
+          },
+    });
+    doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'prompt';
+    // 素材字典补 101：水合按字典推导 assetMissing，缺失会被判「素材已被删除」排除出参考
+    canvasDocMock.current.assets = {
+      ...canvasDocMock.current.assets,
+      101: { asset_id: 101, type: 'image', access_url: 'http://img/m9.png', width: 100, height: 100 },
+    };
+  }
+
+  /** 方案绑定 API 返回：服务端按切换规则写回目标 draftMode，素材边/方案边随 edges 返回 */
+  function mockReferenceSaved(draftModeAfter: 'all' | 'prompt', withMaterialEdges: boolean) {
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    const nodes = doc.nodes.map(n => n.id === 'd1' ? { ...n, data: { ...n.data, draftMode: draftModeAfter } } : n);
+    const edges = withMaterialEdges
+      ? [
+          { id: 'e-m9-d1', source: 'm9', target: 'd1', data: { inputSources: { manual: false, planNodeIds: ['plan1'] } } },
+          { id: 'e-plan1-d1', source: 'plan1', target: 'd1', data: { promptReference: { bindings: [{ index: 1, assetId: '101' }] } } },
+        ]
+      : [{ id: 'e-plan1-d1', source: 'plan1', target: 'd1', data: { promptReference: { bindings: [] } } }];
+    apiMocks.referencePromptPlan.mockImplementation(async () => ({
+      id: 11, project_id: 1, version: 4, viewport: '{}',
+      nodes: JSON.stringify(nodes), edges: JSON.stringify(edges),
+    }));
+  }
+
+  it('方案绑定媒体：本地跟随服务端切全能参考，面板重开恢复一致，后续自动保存不回退', async () => {
+    seedPlanDoc(true);
+    mockReferenceSaved('all', true);
+    await renderPage();
+    await connect('plan1', 'd1'); // 画布拖方案到视频目标（面板未开，服务端路径）
+
+    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('all'));
+    await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(2));
+
+    // 面板重开：恢复显示与持久化一致的全能参考（素材连线在，门控同向）
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await expectMode('全能参考');
+
+    // 绑定后再编辑触发自动保存：提交的节点保留切换结果（不把服务端切换覆盖回旧模式）
+    await typePrompt('绑定后再编辑');
+    await vi.waitFor(() => {
+      const last = apiMocks.saveCanvasDoc.mock.calls.at(-1) as unknown as [string, { nodes: Node[] }] | undefined;
+      expect(last).toBeTruthy();
+      expect(last![1].nodes.find((n: Node) => n.id === 'd1')!.data.draftMode).toBe('all');
+    }, { timeout: 3000 });
+
+    // 生成提交使用目标实际参考：完整携带方案绑定引入的素材引用
+    await waitModelReady();
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]! as unknown as [string, Record<string, unknown>];
+    expect(payload.references).toEqual([{ asset_id: '101', type: 'image', role: 'reference' }]);
+  });
+
+  it('方案仅文本：服务端不切换，本地保持文生视频，重开面板恢复文生视频', async () => {
+    seedPlanDoc(false);
+    mockReferenceSaved('prompt', false);
+    await renderPage();
+    await connect('plan1', 'd1');
+
+    await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(1));
+    expect(draftDataOf('d1').draftMode).toBe('prompt');
+
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await expectMode('文生视频');
   });
