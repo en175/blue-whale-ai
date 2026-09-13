@@ -93,7 +93,7 @@ export class AuthController {
     );
   }
 
-  /** 会话签发：new-api sk- 密封入 Redis，浏览器只拿 HttpOnly 会话 cookie。 */
+  /** 会话签发：new-api sk- 明文入 Redis（修正四：去密），浏览器只拿 HttpOnly 会话 cookie。 */
   private async establishSession(result: NewApiLoginResult): Promise<string> {
     if (result.userId == null || !result.username) {
       throw new NewApiError("账户服务响应异常", 502, "invalid_identity");
