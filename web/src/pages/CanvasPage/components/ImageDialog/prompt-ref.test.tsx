@@ -466,3 +466,12 @@ it.each(['正文', 'Esc', '外部'])('取消 @（%s）后恢复正文编辑，�
   expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy();
   expect(document.activeElement).toBe(container.querySelector('input[placeholder="搜索"]'));
 });
+
+it('真实菜单键盘确认把已引用素材插入正文', async () => {
+  await renderDialog({ mediaRefs: [REF_A] });
+  await typePromptRefRaw(container, '让@');
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })));
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+  await vi.waitFor(() => expect(readPromptRefText(container)).toBe('让图片1'));
+  expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull();
+});

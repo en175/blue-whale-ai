@@ -105,3 +105,19 @@ it('分类右键进入、左键返回，Enter 进入并确认素材', async () =
   await key('Enter');
   expect(onSelect).toHaveBeenCalledWith(image);
 });
+
+it('从末尾分类循环回已引用时清除分类高亮并关闭子菜单', async () => {
+  await render();
+  await key('ArrowUp');
+  const category = document.activeElement as HTMLButtonElement;
+  expect(category.textContent).toBe('文本');
+  expect(document.querySelector('[data-mention-flyout]')).toBeTruthy();
+  const activeClass = category.className;
+  await key('ArrowDown');
+  expect(document.activeElement?.getAttribute('data-testid')).toBe('mention-ref-item');
+  expect(document.querySelector('[data-mention-flyout]')).toBeNull();
+  expect(category.className).not.toBe(activeClass);
+  await key('ArrowUp');
+  expect(document.activeElement).toBe(category);
+  expect(document.querySelector('[data-mention-flyout]')).toBeTruthy();
+});
