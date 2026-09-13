@@ -290,7 +290,7 @@ export default function MusicDialog({
 
       {/* 曲风描述（IKFCKS：支持 @ 引用画布音频素材） */}
       <div className={styles.mentionAnchor}>
-        <AudioPromptEditor ref={editorRef} refs={refs} className={styles.textarea}
+        <AudioPromptEditor ref={editorRef} refs={refs} className={styles.textarea} onSubmit={handleSend}
           placeholder="描述音乐曲风、情绪、节奏和乐器等... 使用 @ 引用画布素材。"
           mentionItems={mentionItems?.filter(item => item.kind !== 'text')} onMentionCanvas={onMentionCanvas}
           onChange={(doc, value) => { setPromptDoc(doc); setText(value); }} />
