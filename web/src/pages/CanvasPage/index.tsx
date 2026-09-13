@@ -20,6 +20,7 @@ import { audioMediaRefsOf, audioRefSourceError, checkAddAudioRef, isAudioDraftNo
 import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
+  asVideoRefMediaType,
   isVideoDraftNode,
   MAX_VIDEO_REFS,
   readRefRole,
@@ -1781,7 +1782,7 @@ export default function CanvasPage() {
                 url: String(d.src ?? ''),
                 name: typeof d.fileName === 'string' && d.fileName ? d.fileName : node.id,
                 assetId: String(assetId),
-                mediaType: d.mediaType === 'video' ? 'video' : d.mediaType === 'audio' ? 'audio' : 'image',
+                mediaType: asVideoRefMediaType(d.mediaType),
               },
               role,
             );
@@ -3110,7 +3111,7 @@ export default function CanvasPage() {
               url: a.url,
               name: assetDisplayName(a),
               assetId: String(a.id),
-              mediaType: a.type === 'image' ? 'image' : a.type === 'video' ? 'video' : 'audio',
+              mediaType: asVideoRefMediaType(a.type),
               materialId: isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined,
             },
             role,

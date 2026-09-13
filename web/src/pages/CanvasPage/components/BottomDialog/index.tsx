@@ -627,12 +627,12 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   /** 统一附件来源入口（IKFE8U，复用 IKFE8T 图片面板基准）：按 kind+role 对接目标槽位，
    *  单「+」展开「从资产中选择 / 从节点添加素材」两项菜单（角色库菜单项退役）；
    *  kind 为槽位类型边界——'image' 仅图片（首尾帧槽 / 图生视频普通参考）、
-   *  'video' 全能参考（图/视频/音频）；pickMode 进行中「+」高亮。 */
+   *  'video' 全能参考（图/视频/音频）；pickMode 与发起槽位 kind 精确匹配时「+」高亮。 */
   const renderSourceMenu = (kind: 'image' | 'video', role: VideoRefRole, label?: string) => (
     <RefSourceMenu
       onPickFromAssets={() => onPickFromAssets?.(kind, role)}
       onPickFromCanvas={() => onPickFromCanvas?.(kind, role)}
-      pickMode={pickMode === 'image' || pickMode === 'video'}
+      pickMode={pickMode === kind}
       label={label}
       entryTitle={label ? `添加${label}（从资产中选择 / 从节点添加素材）` : undefined}
     />

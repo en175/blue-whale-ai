@@ -141,7 +141,7 @@ vi.mock('@/api/assets', () => ({
   completeUpload: vi.fn(),
   fetchAllAssets: vi.fn(async () => []),
   fetchAssetDetail: vi.fn(),
-  linkAssetToProject: vi.fn().mockResolvedValue(undefined),
+  linkAssetToProject: vi.fn(async () => undefined),
 }));
 
 vi.mock('@/api/canvas', () => ({
@@ -452,6 +452,31 @@ describe('IKFE8U 视频面板统一附件入口', () => {
     expect(sourceEntryButton()).toBeUndefined();
     expect([...container.querySelectorAll('button')].some((b) => (b.title ?? '').startsWith('添加图片参考'))).toBe(false);
     expect([...container.querySelectorAll('button')].some((b) => (b.title ?? '').startsWith('添加视频参考'))).toBe(false);
+  });
+
+  it('全能参考从资产中选择确认：音频接纳落画布建线，音频满额跳过并提示（IKFE8U 音频联算）', async () => {
+    await renderPage();
+    await openBoundPanel();
+    await switchMode('全能参考');
+
+    // 打桩弹窗的 onSelect 直通真实 handleAssetsPickerSelect：资产落画布节点并按 reference 角色连线
+    const audioAsset = (i: number) => ({
+      id: 900 + i, type: 'audio' as const, url: `http://aud/pick${i}.mp3`, width: null, height: null, duration: 12,
+    });
+    await clickMenuItem(sourceEntryButton()!, '从资产中选择');
+    await act(async () => {
+      assetsPickerProps.current.onSelect([audioAsset(0), audioAsset(1)]);
+    });
+    await vi.waitFor(() => expect(edgePairs().length).toBe(2));
+    await vi.waitFor(() => expect(dockRefCount()).toBe(2));
+
+    // 音频上限 3（REF_LIMITS.audio）：已 2，再选 2 只入 1 并提示超限
+    await clickMenuItem(sourceEntryButton()!, '从资产中选择');
+    await act(async () => {
+      assetsPickerProps.current.onSelect([audioAsset(2), audioAsset(3)]);
+    });
+    expect(toastText()).toContain('参考音频最多 3 段');
+    await vi.waitFor(() => expect(edgePairs().length).toBe(3));
   });
 
   it('选取模式提示条：全能参考提示图片/视频/音频可选（文案与统一入口一致）', async () => {
