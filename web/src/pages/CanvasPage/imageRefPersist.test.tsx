@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { REF_SOURCE_ENTRY_TITLE } from './components/RefSourceMenu';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from './testing/promptRefEditor';
 import type { GenerationModel, ModelFeatures } from '@/api/generation';
 
@@ -233,16 +234,16 @@ function dockRefImages(): string[] {
   );
 }
 
-/** Dock 媒体入口已改为来源菜单（画布资产改造融合）：先点入口按钮弹菜单，再点「到节点选择」项进入选取模式 */
+/** Dock 媒体入口已改为来源菜单（画布资产改造融合）：先点入口按钮弹菜单，再点「从节点添加素材」项进入选取模式 */
 const enterPickMode = async () => {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.getAttribute('title') === '从资产中选择 / 到节点选择',
+    (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
   )!;
   await act(async () => {
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
   const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent === '到节点选择',
+    (b) => b.textContent === '从节点添加素材',
   )!;
   await act(async () => {
     item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -284,7 +285,7 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     });
   }
 
-  /** 到节点选择：进入选取模式并点击来源节点（每次选取后模式退出，连续选取需重新进入） */
+  /** 从节点添加素材：进入选取模式并点击来源节点（每次选取后模式退出，连续选取需重新进入） */
   async function pickFromCanvas(sourceId: string) {
     await enterPickMode();
     await clickNode(sourceId);

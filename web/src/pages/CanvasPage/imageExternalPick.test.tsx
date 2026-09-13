@@ -8,10 +8,11 @@ import type { Node } from '@xyflow/react';
 import type { AssetRecord } from '@/api/assets';
 import CanvasPage from './index';
 import { typePromptRefText } from './testing/promptRefEditor';
+import { REF_SOURCE_ENTRY_TITLE } from './components/RefSourceMenu';
 import dialogStyles from './components/ImageDialog/index.module.css';
 
 /* IKF5KE 自由生图面板参考选取事件的一次消费语义：
-   到节点选择/从资产中选择注入的参考在删除并关闭（或工具栏直接重建）后不得随旧事件重放；
+   从节点添加素材/从资产中选择注入的参考在删除并关闭（或工具栏直接重建）后不得随旧事件重放；
    本轮主动重选仍可加入；生成请求只携带本轮实际保留的参考。
    FlowCanvas/CanvasToolbar/AssetsPickerModal 打桩透出 props；ImageDialog 用真实实现。 */
 
@@ -221,23 +222,23 @@ async function openFreePanel() {
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 }
 
-/** 面板来源菜单：进入「到节点选择」选取模式 */
+/** 面板来源菜单：进入「从节点添加素材」选取模式 */
 async function enterPickMode() {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.getAttribute('title') === '从资产中选择 / 到节点选择',
+    (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
   )!;
   await act(async () => {
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
   const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent === '到节点选择',
+    (b) => b.textContent === '从节点添加素材',
   )!;
   await act(async () => {
     item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
 }
 
-/** 画布点击图片节点 m1（到节点选择命中） */
+/** 画布点击图片节点 m1（从节点添加素材命中） */
 async function pickNodeM1() {
   const m1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')!;
   await act(async () => {
@@ -248,7 +249,7 @@ async function pickNodeM1() {
 /** 面板来源菜单：「从资产中选择」确认回填 */
 async function pickFromAssets(assets: AssetRecord[]) {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.getAttribute('title') === '从资产中选择 / 到节点选择',
+    (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
   )!;
   await act(async () => {
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));

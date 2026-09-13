@@ -3,6 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment, type UploadedFile } from './index';
+import { REF_SOURCE_ENTRY_TITLE } from '../RefSourceMenu';
 import thumbStyles from '../RefThumbnail/index.module.css';
 
 /* IKDLQF/IKFCKN：ImageDialog 文本附件——以 FileText 图标缩略图进入参考栏统一序列，
@@ -68,7 +69,7 @@ const mediaThumbs = () => [...container.querySelectorAll('[data-testid="ref-thum
 /** 参考栏子节点的 testid 序列（校验媒体在前、文本在后、末尾「+」占位） */
 const rowTestids = () =>
   [...(container.querySelector('[class*="previewRow"]')?.children ?? [])].map((el) =>
-    el.getAttribute('data-testid') ?? (el.querySelector('[class*="previewPlaceholder"]') ? '+' : '?'),
+    el.getAttribute('data-testid') ?? (el.querySelector(`button[title="${REF_SOURCE_ENTRY_TITLE}"]`) ? '+' : '?'),
   );
 
 // React 的 onMouseEnter/Leave 由根委托的 mouseover/mouseout 合成派发（与 RefThumbnail 组件测试同法）
