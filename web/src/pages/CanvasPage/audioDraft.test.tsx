@@ -61,6 +61,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchQuota: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
+  referencePromptPlan: vi.fn(async () => ({ id: 11, version: 5, viewport: '{}', nodes: '[]', edges: '[]' })),
   saveCanvasDoc: vi.fn(async (
     _projectId: string,
     _payload: { viewport: unknown; nodes: Node[]; edges: Array<{ id: string; source: string; target: string }> },
@@ -141,6 +142,7 @@ vi.mock('@/api/assets', () => ({
 /* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
+  referencePromptPlan: apiMocks.referencePromptPlan,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
   legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
@@ -657,5 +659,72 @@ describe('IKDMQT 保存失败暂停生成', () => {
     expect(draft.data.draft).toBe(true);
     expect(draft.data.genStatus).toBe('draft');
     expect(draft.data.prompt).toBe('轻快的海浪声');
+  });
+});
+
+describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => {
+  /** 经音频面板真实入口进入画布选择模式：添加参考按钮 → 来源菜单 → 从画布选择 */
+  async function enterCanvasPick() {
+    await vi.waitFor(() => {
+      const btn = [...container.querySelectorAll('button')].find((b) => (b.title ?? '').startsWith('添加参考音频'));
+      expect(btn).toBeTruthy();
+    });
+    await act(async () => {
+      [...container.querySelectorAll('button')].find((b) => (b.title ?? '').startsWith('添加参考音频'))!.click();
+    });
+    await vi.waitFor(() => {
+      const item = [...container.querySelectorAll('button')].find((b) => b.textContent === '从画布选择');
+      expect(item).toBeTruthy();
+    });
+    await act(async () => {
+      [...container.querySelectorAll('button')].find((b) => b.textContent === '从画布选择')!.click();
+    });
+  }
+
+  it('pickMode 音频下点击文本卡 → 建立来源→草稿连线（与画布拖线同一本地建边；普通卡与方案卡均可）', async () => {
+    // 前序用例可能将 saveCanvasDoc 改为 reject（clearAllMocks 不重置实现），恢复成功落盘
+    apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
+    seedEmptyDraftDoc();
+    await renderPage();
+    await openDraftPanel();
+
+    await enterCanvasPick();
+
+    // 点击普通文本卡（无 promptSource；音频建线准入与拖线一致，不限方案卡）
+    const textNode = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find((n) => n.id === 't1')!;
+    await act(async () => {
+      flowProps.current.onNodeClick(textNode);
+    });
+
+    // 与画布拖线同款本地建边（addCanvasEdge，自动保存持久）；不走 referencePromptPlan
+    //（该服务端链路仅放行图片/视频目标）
+    await vi.waitFor(() => {
+      expect(flowProps.current.edges.some((e: { id: string; source: string; target: string }) =>
+        e.id === 'e-t1-d1' && e.source === 't1' && e.target === 'd1')).toBe(true);
+    });
+    expect(apiMocks.referencePromptPlan).not.toHaveBeenCalled();
+  });
+
+  it('重复选择同一文本卡只保留一条连线（去重）', async () => {
+    apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
+    seedEmptyDraftDoc();
+    await renderPage();
+    await openDraftPanel();
+
+    await enterCanvasPick();
+    const textNode = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find((n) => n.id === 't1')!;
+    await act(async () => {
+      flowProps.current.onNodeClick(textNode);
+    });
+    await vi.waitFor(() => {
+      expect(flowProps.current.edges.filter((e: { source: string; target: string }) => e.source === 't1' && e.target === 'd1')).toHaveLength(1);
+    });
+
+    // 重新进入选择模式再选同一文本卡：addCanvasEdge 同源去重，连线数量不变
+    await enterCanvasPick();
+    await act(async () => {
+      flowProps.current.onNodeClick(textNode);
+    });
+    expect(flowProps.current.edges.filter((e: { source: string; target: string }) => e.source === 't1' && e.target === 'd1')).toHaveLength(1);
   });
 });
