@@ -15,7 +15,7 @@ import {
   enabledVideoFollowModes,
   type VideoFollowMode,
 } from './followDialog';
-import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
+import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError } from './mediaRefs';
 import { audioMediaRefsOf, audioRefSourceError, checkAddAudioRef, isAudioDraftNode } from './audioMediaRefs';
 import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
@@ -2993,16 +2993,37 @@ export default function CanvasPage() {
   /** 资产库选择弹窗 → 确认选中的已有资产批量落到画布（多选）：
    *  直接以 /api/assets 返回的 id 作为 assetId 建媒体节点，不走 TOS 上传；
    *  后台补 link 关联，确保素材进入当前项目 snapshot 字典（刷新后不判缺失）。
-   *  返回新建节点 id 列表（项目未就绪时 null，由调用方决定是否提示）。 */
-  const placeAssetsOnCanvas = (selectedAssets: AssetRecord[]): string[] | null => {
+   *  reuseExisting（IKFDG2 参考接纳路径）：画布已有同 assetId 的同类型有效媒体节点时复用该来源卡片，
+   *  不重复建卡——按持久身份精确匹配，不按名称/外观/位置猜测。
+   *  返回接纳节点 id 列表（含复用节点；项目未就绪时 null，由调用方决定是否提示）。 */
+  const placeAssetsOnCanvas = (
+    selectedAssets: AssetRecord[],
+    opts?: { reuseExisting?: boolean },
+  ): string[] | null => {
     if (!currentId) return null;
 
-    const nodes: Node[] = selectedAssets.map((asset) => {
+    const adoptedIds: string[] = [];
+    const nodes: Node[] = [];
+    for (const asset of selectedAssets) {
+      const assetId = String(asset.id);
+      const mediaType = asset.type === 'video' ? 'video' : asset.type === 'audio' ? 'audio' : 'image';
+      if (opts?.reuseExisting) {
+        const existing = mediaNodesRef.current.find(
+          (n) =>
+            n.type === 'mediaNode' &&
+            ((n.data ?? {}) as Record<string, unknown>).mediaType === mediaType &&
+            readAssetId((n.data ?? {}) as Record<string, unknown>) === assetId &&
+            baseSourceError(n) === null,
+        );
+        if (existing) {
+          adoptedIds.push(existing.id);
+          continue;
+        }
+      }
       const fileNameFromUrl = assetDisplayName(asset);
       const nodeId = newNodeId('media');
-      const assetId = String(asset.id);
       const materialId = isMaterialLibraryId(assetId) ? assetId : undefined;
-      return {
+      nodes.push({
         id: nodeId,
         type: 'mediaNode' as const,
         // 多节点在视口中心 ±80px 范围内自然错乱堆叠，与单节点添加行为一致
@@ -3010,7 +3031,7 @@ export default function CanvasPage() {
         data: {
           src: asset.url,
           fileName: fileNameFromUrl,
-          mediaType: asset.type === 'video' ? 'video' : asset.type === 'audio' ? 'audio' : 'image',
+          mediaType,
           assetId,
           ...(materialId ? { materialId, ...(asset.type !== 'audio' ? { compliancePassed: true } : {}) } : {}),
           width: asset.width ?? undefined,
@@ -3039,8 +3060,8 @@ export default function CanvasPage() {
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
           onMediaDims: handleMediaDims,
         },
-      };
-    });
+      });
+    }
 
     nodes.forEach((node) => pendingNodeIdsRef.current.add(node.id));
     setMediaNodes((prev) => [...prev, ...nodes]);
@@ -3054,7 +3075,7 @@ export default function CanvasPage() {
         showToast('warn', '资产关联项目失败，请稍后重试');
       });
     });
-    return nodes.map((n) => n.id);
+    return [...adoptedIds, ...nodes.map((n) => n.id)];
   };
 
   /** 资产选择弹窗统一确认路由（IKC3RY 模块D 八入口）：
@@ -3128,7 +3149,7 @@ export default function CanvasPage() {
         );
         return;
       }
-      const nodeIds = placeAssetsOnCanvas(accepted);
+      const nodeIds = placeAssetsOnCanvas(accepted, { reuseExisting: true });
       if (!nodeIds) {
         showToast('error', '项目未就绪，请稍后重试');
         return;
@@ -3158,7 +3179,7 @@ export default function CanvasPage() {
         if (skippedDup) showToast('warn', '重复的素材已跳过');
         if (overflow) showToast('warn', refOverflowToast(['image']));
         if (accepted.length === 0) return;
-        const nodeIds = placeAssetsOnCanvas(accepted);
+        const nodeIds = placeAssetsOnCanvas(accepted, { reuseExisting: true });
         if (!nodeIds) {
           showToast('error', '项目未就绪，请稍后重试');
           return;
@@ -4243,6 +4264,57 @@ export default function CanvasPage() {
     if (!audioDraftId) return;
     if (!validateAudioRefConnect(nodeId, audioDraftId)) return;
     addCanvasEdge(nodeId, audioDraftId);
+  };
+
+  /** 面板本地上传即时接纳（IKFDG2）：上传成功取得持久 Asset 身份后建来源卡片（画布已有同身份
+   *  节点则复用）并连线到当前音频草稿，随画布自动保存落盘，无需发送生成；上传或接纳失败明确
+   *  提示，不建立有效引用。自由模式不经此路径（无目标可连线，保持面板本地暂存）。 */
+  const adoptAudioLocalFile = async (draftId: string, file: File): Promise<boolean> => {
+    const refs = audioMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current).refs;
+    const limitMsg = checkAddAudioRef(undefined, refs);
+    if (limitMsg) {
+      showToast('warn', limitMsg);
+      return false;
+    }
+    let done: UploadCompleteData;
+    try {
+      done = await uploadAssetFile(file, { projectId: currentId || undefined });
+    } catch (err) {
+      showToast('error', isFileRejected(err) ? err.message : `「${file.name}」上传失败，请重试`);
+      return false;
+    }
+    // 上传期间连线可能变化：按最新连线重新推导查重（含 md5 命中同内容），不建第二条线也不重复建卡
+    const dupMsg = checkAddAudioRef(done.asset_id, audioMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current).refs);
+    if (dupMsg) {
+      showToast('warn', dupMsg);
+      return false;
+    }
+    // 接纳期间草稿可能被删除：无目标则放弃建卡并明确提示（素材已入资产库，可在资产库再次选用）
+    if (!mediaNodesRef.current.some((n) => n.id === draftId)) {
+      showToast('warn', `「${file.name}」已上传，但目标草稿已被移除，未建立引用`);
+      return false;
+    }
+    const nodeIds = placeAssetsOnCanvas(
+      [{
+        id: done.asset_id,
+        type: 'audio',
+        url: done.url,
+        width: null,
+        height: null,
+        duration: done.duration ?? null,
+        size: done.size ?? null,
+        source: 'uploaded',
+        model: null,
+        created_at: null,
+      } as AssetRecord],
+      { reuseExisting: true },
+    );
+    if (!nodeIds) {
+      showToast('error', '项目未就绪，请稍后重试');
+      return false;
+    }
+    addCanvasEdge(nodeIds[0], draftId);
+    return true;
   };
 
   /** 视频跟随输入框模式门控（IKFC1T）：按「实际成为当前目标参考」的媒体集合判定（连线 +
@@ -6055,6 +6127,7 @@ export default function CanvasPage() {
             draftRefInvalid={audioDraftMediaRefs?.invalid.length ? audioDraftMediaRefs.invalid : undefined}
             onRemoveDraftRef={audioDraftId ? ((nodeId) => handleRemoveAudioRef(audioDraftId, nodeId)) : undefined}
             onAddCanvasRef={audioDraftId ? handleAddAudioCanvasRef : undefined}
+            onAdoptLocalFile={audioDraftId ? ((file) => adoptAudioLocalFile(audioDraftId, file)) : undefined}
             mentionItems={atMentionItems.filter((item) => item.id !== audioDraftId)}
             onMentionCanvas={handleAudioAtMention}
             followAnchor={audioDraftId ? followAnchor : null}
