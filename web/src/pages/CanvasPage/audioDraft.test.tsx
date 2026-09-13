@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { typePromptRefText, readPromptRefText, promptRefReadOnly } from './testing/promptRefEditor';
 
 /* IKDMQT 音频生成草稿：侧栏建卡 / 重复创建 / 参数写回与水合恢复 / 原位提交回填 /
    生成中只读（面板 + 连线）/ 保存失败阻断生成 / 401 回退与失败保留。
@@ -301,14 +302,7 @@ function promptTextarea(): HTMLTextAreaElement {
 }
 
 /** React 受控 textarea 赋值 */
-async function typePrompt(text: string) {
-  const textarea = promptTextarea();
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setter.call(textarea, text);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-}
+async function typePrompt(text: string) { await typePromptRefText(container, text); }
 
 /** 点击侧栏音频入口后，画布上最新加入的音频草稿节点 */
 function draftNodes(): Node[] {
@@ -453,7 +447,7 @@ describe('IKDMQT 音频草稿创建与编辑', () => {
     });
 
     // 描述与模型按草稿参数恢复（草稿带入的 a-test 优先于列表默认）
-    await vi.waitFor(() => expect(promptTextarea().value).toBe('恢复的描述'));
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('恢复的描述'));
     await vi.waitFor(() => expect(container.textContent).toContain('测试音频模型'));
     // 音频面板无文本附件区（音频草稿不消费文本连线）
     expect(container.textContent).not.toContain('文本附件');
@@ -536,7 +530,7 @@ describe('IKDMQT 原位提交与首次生成', () => {
     });
 
     // 面板只读：描述输入与发送禁用，提示可见
-    expect(promptTextarea().disabled).toBe(true);
+    expect(promptRefReadOnly(container)).toBe(true);
     expect(sendButton().disabled).toBe(true);
     expect(container.textContent).toContain('生成中，参数只读');
 
@@ -634,7 +628,7 @@ describe('IKDMQT 原位提交与首次生成', () => {
     await act(async () => {
       flowProps.current.onNodeClick(failed);
     });
-    expect(promptTextarea().disabled).toBe(false);
+    expect(promptRefReadOnly(container)).toBe(false);
   });
 });
 
@@ -726,5 +720,55 @@ describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => 
       flowProps.current.onNodeClick(textNode);
     });
     expect(flowProps.current.edges.filter((e: { source: string; target: string }) => e.source === 't1' && e.target === 'd1')).toHaveLength(1);
+  });
+});
+
+ describe('IKFCJG 音频草稿结构', () => {
+  it('正文结构与拍平镜像随草稿一起保存', async () => {
+    seedDraftDoc();
+    await renderPage();
+    await openDraftPanel();
+    await waitModelReady();
+    await typePrompt('生成声音');
+    expect(flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1').data.promptDoc).toMatchObject({ version: 1, flat: '生成声音' });
+  });
+});
+
+ describe('IKFCJG 恢复音频引用请求', () => {
+  it('结构与音频参考恢复后携带真实 references 和 prompt_doc', async () => {
+    seedDraftDoc();
+    const draft = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find((n: Node) => n.id === 'd1')!;
+    Object.assign(draft.data, {
+      prompt: '音频1',
+      audioRefs: [{ id: 'r1', source: 'canvas', assetId: '601', kind: 'audio', name: '雨声', src: 'https://x/a.mp3' }],
+      promptDoc: { version: 1, flat: '音频1', segments: [{ kind: 'asset_ref', asset_id: '601', label: '音频1' }] },
+    });
+    await renderPage(); await openDraftPanel(); await waitModelReady();
+    expect(readPromptRefText(container)).toBe('音频1');
+    expect(container.querySelector('[data-testid="audio-ref-thumb"]')!.getAttribute('title')).toBe('雨声');
+    await act(async () => sendButton().click());
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    expect(apiMocks.createGenerationJob.mock.calls[0][1]).toMatchObject({
+      references: [{ role: 'reference', asset_id: '601', type: 'audio' }],
+      prompt_doc: { version: 1, segments: [{ kind: 'asset_ref', asset_id: '601', label: '音频1' }] },
+    });
+  });
+});
+
+ describe('IKFCJG 音频引用删除恢复', () => {
+  it('删除刚选中的音频再重开面板，不回放旧 externalPick', async () => {
+    seedEmptyDraftDoc();
+    const node = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find(n => n.id === 'm1')!;
+    Object.assign(node.data, { mediaType: 'audio', src: 'http://audio/a.mp3', assetId: '601', fileName: '雨声' });
+    canvasDocMock.current.assets = { '601': { asset_id: 601, type: 'audio', access_url: 'http://audio/a.mp3' } };
+    await renderPage(); await openDraftPanel(); await waitModelReady();
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.title.startsWith('添加参考音频'))!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '从画布选择')!.click());
+    await act(async () => flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')));
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="audio-ref-thumb"]')).not.toBeNull());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="移除 雨声"]')!.click());
+    expect(container.querySelector('[data-testid="audio-ref-thumb"]')).toBeNull();
+    await openDraftPanel();
+    expect(container.querySelector('[data-testid="audio-ref-thumb"]')).toBeNull();
   });
 });

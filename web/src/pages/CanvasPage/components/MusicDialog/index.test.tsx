@@ -5,6 +5,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readPromptRefText, typePromptRefRaw } from '../../testing/promptRefEditor';
 import MusicDialog from './index';
 import type { AudioRefItem } from '../AudioDialog';
 import type { AtMentionItem } from '../../atMention';
@@ -67,14 +68,7 @@ function atButton(name: string): HTMLButtonElement | null {
 }
 
 /** textarea 原生输入驱动（React onChange 监听 input 事件） */
-async function typeText(text: string) {
-  const textarea = container.querySelector('textarea')!;
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setter.call(textarea, text);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-}
+async function typeText(value: string) { await typePromptRefRaw(container, value); }
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -137,15 +131,8 @@ describe('MusicDialog 参考缩略图条（IKFCKS）', () => {
     await act(async () => {
       atButton('鼓点采样')!.click();
     });
-    expect(onMentionCanvas).toHaveBeenCalledTimes(1);
-    // audioRefToMentionItem：与手动 @ 菜单选中同一种素材项形态（id/kind/name/thumbUrl/assetId）
-    expect(onMentionCanvas).toHaveBeenCalledWith({
-      id: 'n1',
-      kind: 'audio',
-      name: '鼓点采样',
-      thumbUrl: 'https://x/drum.mp3',
-      assetId: '501',
-    });
+    expect(onMentionCanvas).not.toHaveBeenCalled();
+    expect(readPromptRefText(container)).toBe('音频1');
   });
 
   it('曲风描述输入 @ 弹出菜单：仅音频可选，选中后剥掉 @ 检索词并回调同一入口', async () => {
@@ -166,8 +153,7 @@ describe('MusicDialog 参考缩略图条（IKFCKS）', () => {
       rows[0]!.click();
     });
     expect(onMentionCanvas).toHaveBeenCalledWith(MENTION_AUDIO);
-    const textarea = container.querySelector('textarea')! as HTMLTextAreaElement;
-    expect(textarea.value).toBe('');
+    expect(readPromptRefText(container)).toBe('');
   });
 
   it('发送参数回归：refs 随 onSend 透传', async () => {

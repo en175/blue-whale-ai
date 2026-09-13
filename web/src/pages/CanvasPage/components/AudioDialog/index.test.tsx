@@ -2,11 +2,13 @@
 /* IKFCKS：AudioDialog 新建参考缩略图条——参考音频 chip（点击播放形态）替换为共享参考缩略图、
  *  画布文本卡连线附件以 FileText 缩略图进栏（× 仅断开连线）、@ 与手动 @ 选择同一入口、
  *  生成中只读不渲染 × / @、发送参数回归 */
+import { $getRoot, $isTextNode } from 'lexical';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AudioDialog, { type AudioRefItem } from './index';
 import type { ImageTextAttachment } from '../ImageDialog';
+import { readPromptRefText, typePromptRefText, promptRefEditorInstance } from '../../testing/promptRefEditor';
 import type { AtMentionItem } from '../../atMention';
 
 const fetchGenerationModels = vi.hoisted(() =>
@@ -140,14 +142,9 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
     await act(async () => {
       atButton('雨声白噪音')!.click();
     });
-    expect(onMentionCanvas).toHaveBeenCalledTimes(1);
-    expect(onMentionCanvas).toHaveBeenCalledWith({
-      id: 'n1',
-      kind: 'audio',
-      name: '雨声白噪音',
-      thumbUrl: 'https://x/rain.mp3',
-      assetId: '601',
-    });
+    expect(onMentionCanvas).not.toHaveBeenCalled();
+    expect(readPromptRefText(container)).toBe('音频1');
+    expect(container.querySelector('[data-testid=asset-ref-valid]')).not.toBeNull();
   });
 
   it('生成中只读：× 与 @ 均不渲染（参考只读展示）', async () => {
@@ -201,12 +198,7 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
         }),
       );
     });
-    const textarea = container.querySelector('textarea[data-testid="audio-input"]')!;
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-    await act(async () => {
-      setter.call(textarea, '生成深夜城市白噪音');
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    await typePromptRefText(container, '生成深夜城市白噪音');
     await act(async () => {
       container.querySelector<HTMLButtonElement>('button[data-testid="audio-send"]')!.click();
     });
@@ -215,5 +207,77 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
     expect(text).toBe('生成深夜城市白噪音');
     expect(modelId).toBe('m-audio');
     expect(refs).toEqual([CANVAS_REF]);
+  });
+});
+
+ describe('IKFCJG 音频正文引用', () => {
+  it('文本附件缩略图 @ 插入真实 text_ref，移除后标签失效并阻发', async () => {
+    await renderDialog({ attachments: [TEXT_ATTACHMENT] });
+    expect(atButton('旁白文案')).not.toBeNull();
+    await act(async () => atButton('旁白文案')!.click());
+    expect(readPromptRefText(container)).toBe('文本1');
+    await act(async () => root.render(createElement(AudioDialog, { onClose: vi.fn(), onSend: vi.fn(), attachments: [] })));
+    expect(readPromptRefText(container)).toContain('已失效');
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.disabled).toBe(true);
+  });
+  it('恢复混排序：DOM 编号正文与发送同源', async () => {
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    const b = { ...CANVAS_REF, id: 'b', assetId: '602', name: '风声' };
+    const onSend = vi.fn();
+    await act(async () => root.render(createElement(AudioDialog, {
+      onClose: vi.fn(), onSend, initialText: '参考', initialRefs: [CANVAS_REF, b],
+      stripOrder: ['media:canvas:b', 'media:canvas:n1'],
+      initialDoc: { version: 1, segments: [{ kind: 'asset_ref', asset_id: '601', label: '音频1' }] },
+    } as Parameters<typeof AudioDialog>[0])));
+    expect(audioThumbs().map(n => n.title)).toEqual(['风声', '雨声白噪音']);
+    expect(audioThumbs().map(n => n.querySelector('[data-testid="ref-thumb-badge"]')!.textContent)).toEqual(['1', '2']);
+    expect(readPromptRefText(container)).toBe('音频2');
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.click());
+    expect(onSend.mock.calls[0][2]).toEqual([b, CANVAS_REF]);
+    expect(onSend.mock.calls[0][3].segments[0]).toMatchObject({ kind: 'asset_ref', asset_id: '601' });
+  });
+});
+
+ describe('IKFCJG 真实正文光标引用', () => {
+  it('手动 @ 在正文中间原位替换，保留前后文字且不重复附件', async () => {
+    await renderDialog();
+    await typePromptRefText(container, '前@雨声后');
+    await act(async () => promptRefEditorInstance(container).update(() => {
+      const text = $getRoot().getAllTextNodes()[0];
+      if ($isTextNode(text)) text.select(4, 4);
+    }));
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="at-mention-canvas-item"]')).not.toBeNull());
+    const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '雨声白噪音')!;
+    await act(async () => button.click());
+    expect(readPromptRefText(container)).toBe('前音频1后');
+    expect(audioThumbs()).toHaveLength(1);
+  });
+  it('本地未落库项没有可插入身份', async () => {
+    await renderDialog();
+    await act(async () => root.render(createElement(AudioDialog, { onClose: vi.fn(), onSend: vi.fn(), externalPick: { ts: 2, item: { ...CANVAS_REF, id: 'local', source: 'local', assetId: undefined, name: '本地音频' } } })));
+    expect(atButton('本地音频')).toBeNull();
+  });
+ });
+
+ describe('IKFCJG 缩略图光标插入', () => {
+  it('缩略图 @ 在中间光标插入，保留后文', async () => {
+    await renderDialog();
+    await typePromptRefText(container, '前后');
+    await act(async () => promptRefEditorInstance(container).update(() => { $getRoot().getAllTextNodes()[0].select(1, 1); }));
+    await act(async () => atButton('雨声白噪音')!.click());
+    expect(readPromptRefText(container)).toBe('前音频1后');
+  });
+});
+
+ describe('IKFCJG 画布列表选择身份', () => {
+  it('从面板画布列表选择已落库音频后能插入正文标签', async () => {
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    await act(async () => root.render(createElement(AudioDialog, { onClose: vi.fn(), onSend: vi.fn(), canvasMedia: [{ id: 'n1', src: CANVAS_REF.src, name: '雨声', mediaType: 'audio', assetId: '601' }] } as Parameters<typeof AudioDialog>[0])));
+    await act(async () => container.querySelector<HTMLButtonElement>('[title="添加参考音频（最多 3 段）"]')!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '从画布选择')!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '雨声')!.click());
+    expect(atButton('雨声')).not.toBeNull();
+    await act(async () => atButton('雨声')!.click());
+    expect(readPromptRefText(container)).toBe('音频1');
   });
 });

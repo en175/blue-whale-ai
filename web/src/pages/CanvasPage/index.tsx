@@ -627,7 +627,7 @@ export default function CanvasPage() {
    *  params 是首页 AI视频 带入的生成参数（选中首页所选模型/比例/清晰度/时长/模式） */
   const [videoSeed, setVideoSeed] = useState<{ ts: number; text?: string; doc?: PromptDoc | null; params?: VideoGenSeedParams; targetNodeId?: string; attachments?: ImageTextAttachment[] } | null>(null);
   /** 音频对话框的重挂载 key；草稿入口（IKDMQT）同时携带文字描述/模型/目标节点 */
-  const [audioSeed, setAudioSeed] = useState<{ ts: number; text?: string; modelId?: string; targetNodeId?: string } | null>(null);
+  const [audioSeed, setAudioSeed] = useState<{ ts: number; text?: string; modelId?: string; targetNodeId?: string; doc?: PromptDoc | null; refs?: AudioRefItem[] } | null>(null);
   /** 面板当前绑定的音频草稿节点 id（IKDMQT）：仅草稿入口（侧栏新建/点击草稿卡）设置；
    *  生命周期与图片/视频草稿绑定一致 */
   const [audioDraftId, setAudioDraftId] = useState<string | null>(null);
@@ -2601,11 +2601,14 @@ export default function CanvasPage() {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const d = (node?.data ?? {}) as Record<string, unknown>;
     setAudioDraftId(nodeId);
+    setAudioPickResult(null);
     setAudioSeed({
       ts: Date.now(),
       text: typeof d.prompt === 'string' ? d.prompt : '',
       modelId: typeof d.draftModelId === 'string' ? d.draftModelId : undefined,
       targetNodeId: nodeId,
+      doc: restorePromptDoc(d.promptDoc, d.prompt),
+      refs: Array.isArray(d.audioRefs) ? d.audioRefs as AudioRefItem[] : [],
     });
     setShowAudioDialog(true);
     setShowBottomDialog(false);
@@ -2616,10 +2619,12 @@ export default function CanvasPage() {
   /** 面板编辑实时写回音频草稿节点（IKDMQT）：参数随节点 data 进入自动保存，刷新后恢复 */
   const handleAudioDraftParamsChange = (
     nodeId: string,
-    patch: { prompt?: string; modelId?: string },
+    patch: { prompt?: string; modelId?: string; promptDoc?: PromptDoc | null; refs?: AudioRefItem[] },
   ) => {
     const data: Record<string, unknown> = {};
     if (patch.prompt !== undefined) data.prompt = patch.prompt;
+    if (patch.promptDoc !== undefined) data.promptDoc = patch.promptDoc ? { ...patch.promptDoc, flat: patch.prompt ?? '' } : null;
+    if (patch.refs !== undefined) data.audioRefs = patch.refs;
     if (patch.modelId !== undefined) data.draftModelId = patch.modelId;
     if (Object.keys(data).length === 0) return;
     patchMediaNode(nodeId, data);
@@ -3604,7 +3609,7 @@ export default function CanvasPage() {
             }
           : parameters,
         input_asset_ids: inputAssetIds,
-        ...(type === 'video' && videoRefs?.references && videoRefs.references.length > 0
+        ...((type === 'video' || type === 'audio') && videoRefs?.references && videoRefs.references.length > 0
           ? { references: videoRefs.references }
           : {
               first_frame_asset_id: videoRefs?.firstFrameAssetId,
@@ -3619,8 +3624,8 @@ export default function CanvasPage() {
                 : undefined,
             }),
         ...(targetNodeId ? { target_node_id: targetNodeId } : {}),
-        // IKFA1M：正文素材标签仅图片生成且含标签时携带；纯文本不上送保持旧语义
-        ...((type === 'image' || type === 'video') && promptDoc ? { prompt_doc: promptDoc } : {}),
+        // 结构化正文由接纳侧统一复核、编译并冻结。
+        ...(promptDoc ? { prompt_doc: promptDoc } : {}),
       })
         .then((created) => {
           if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
@@ -5272,6 +5277,7 @@ export default function CanvasPage() {
         .filter((n) => n.data?.src)
         .map((n) => ({
           id: n.id,
+          assetId: readAssetId(n.data),
           src: n.data.src as string,
           name: (n.data.fileName as string) || n.id,
           mediaType: (n.data.mediaType as 'image' | 'video' | 'audio') ?? 'image',
@@ -5380,8 +5386,13 @@ export default function CanvasPage() {
     appendVideoFreeRef(refItem, 'reference');
   };
 
-  /** 音频面板 @ 选中：仅音频写入参考 */
+  /** 音频面板 @ 选中：音频写入参考，文本连入当前目标。 */
   const handleAudioAtMention = (item: AtMentionItem) => {
+    if (item.kind === 'text') {
+      if (audioDraftId) connectPair(item.id, audioDraftId);
+      else showToast('warn', '文本参考需要绑定生成节点');
+      return;
+    }
     if (item.kind !== 'audio' || !item.thumbUrl) {
       showToast('warn', '音频生成仅支持引用音频素材');
       return;
@@ -5418,31 +5429,39 @@ export default function CanvasPage() {
     });
   };
 
-  /** 音频对话发送：创建音频生成任务（无参考素材）。
+  /** 音频对话发送：冻结正文与实际参考素材，创建音频生成任务。
    *  草稿绑定模式（IKDMQT）：先等待在途保存并落盘当前画布编辑（同图片/视频草稿），
    *  再携带 target_node_id 提交；绑定以 audioDraftId 为准（seed 可能残留旧草稿值），
    *  工具条等非草稿入口沿用直接提交 */
-  const handleAudioDialogSend = async (text: string, modelId: string, _refs: AudioRefItem[]) => {
-    if (applyingRef.current || saveBlocked || saveStatus === 'error') return;
-    const targetNodeId =
-      audioDraftId && audioSeed?.targetNodeId === audioDraftId ? audioDraftId : undefined;
-    if (targetNodeId && currentId) {
-      const projectId = currentId;
-      applyingRef.current = true;
-      setSubmittingNodeId(targetNodeId);
-      try {
-        if (!(await flushCanvasSave(projectId))) return; // 等待期间项目已切换，中止提交
-      } catch (e) {
-        // 落盘失败则不提交：任务目标节点尚未持久化，提交会因目标不存在被拒
-        showToast('error', '保存失败，请重试');
-        console.warn('生成前画布落盘失败:', e);
-        return;
-      } finally {
-        applyingRef.current = false;
-        setSubmittingNodeId(null);
+  const handleAudioDialogSend = async (text: string, modelId: string, refs: AudioRefItem[], promptDoc?: PromptDoc | null) => {
+    if (applyingRef.current || saveBlocked || saveStatus === 'error' || !currentId) return;
+    const projectId = currentId;
+    const targetNodeId = audioDraftId && audioSeed?.targetNodeId === audioDraftId ? audioDraftId : undefined;
+    applyingRef.current = true;
+    setSubmittingNodeId(targetNodeId ?? null);
+    try {
+      const resolved: AudioRefItem[] = [];
+      for (const ref of refs) {
+        if (ref.assetId) { resolved.push(ref); continue; }
+        const file = ref.file ?? await fetchUrlAsFile(ref.src, ref.name, 'audio/mpeg');
+        const uploaded = file ? await uploadFileToAsset(file, 'audio') : null;
+        if (!uploaded) { showToast('error', '参考音频上传失败，请重试'); return; }
+        resolved.push({ ...ref, assetId: uploaded.asset_id, src: uploaded.url, file: undefined });
       }
+      if (targetNodeId) {
+        handleAudioDraftParamsChange(targetNodeId, { refs: resolved, prompt: text, promptDoc });
+        if (!(await flushCanvasSave(projectId))) return;
+      }
+      startGenerationJob('audio', { prompt: text, model_id: modelId }, undefined,
+        resolved.length ? { references: resolved.map(ref => ({ role: 'reference', type: 'audio', asset_id: String(ref.assetId) })) } : undefined,
+        targetNodeId, undefined, promptDoc);
+    } catch (e) {
+      showToast('error', '保存失败，请重试');
+      console.warn('音频生成前准备失败:', e);
+    } finally {
+      applyingRef.current = false;
+      setSubmittingNodeId(null);
     }
-    startGenerationJob('audio', { prompt: text, model_id: modelId }, undefined, undefined, targetNodeId);
   };
 
   /** AI 音乐对话发送 */
@@ -6056,6 +6075,8 @@ export default function CanvasPage() {
             onStripOrderChange={audioDraftId ? keys => handleRefStripOrderChange(audioDraftId, keys) : undefined}
             key={audioSeed?.ts ?? 0}
             initialText={audioSeed?.text}
+            initialDoc={audioSeed?.doc}
+            initialRefs={audioSeed?.refs}
             initialModelId={audioSeed?.modelId}
             draftBinding={
               audioDraftId

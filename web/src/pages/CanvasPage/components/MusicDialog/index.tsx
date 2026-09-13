@@ -9,8 +9,9 @@ import { toast } from 'sonner';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { AudioRefItem, CanvasPickItem } from '../AudioDialog';
-import AtMentionMenu from '../AtMentionMenu';
-import { audioRefToMentionItem, stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
+import type { AtMentionItem } from '../../atMention';
+import { docHasInvalidRef, type PromptDoc } from '@/lib/prompt-doc';
+import AudioPromptEditor, { type AudioPromptEditorHandle } from '../AudioDialog/AudioPromptEditor';
 import RefThumbnail from '../RefThumbnail';
 import { arrayMove, useRefStripDrag } from '../RefThumbnail/strip-dnd';
 import styles from './index.module.css';
@@ -40,7 +41,7 @@ const MAX_REFS = 3;
 
 interface MusicDialogProps {
   onClose: () => void;
-  onSend: (text: string, model: string, opts: MusicGenOptions, refs: AudioRefItem[]) => void;
+  onSend: (text: string, model: string, opts: MusicGenOptions, refs: AudioRefItem[], promptDoc?: PromptDoc | null) => void;
   /** 画布媒体节点（从画布选择的数据源） */
   canvasMedia: CanvasPickItem[];
   /** 底部模式切换 → 音频生成对话框 */
@@ -63,6 +64,9 @@ export default function MusicDialog({
   externalPick,
 }: MusicDialogProps) {
   const [text, setText] = useState('');
+  const [promptDoc, setPromptDoc] = useState<PromptDoc | null>(null);
+  const editorRef = useRef<AudioPromptEditorHandle>(null);
+  const invalidPrompt = (promptDoc !== null && docHasInvalidRef(promptDoc)) || text.length > MAX_INPUT;
   const [lyrics, setLyrics] = useState('');
   const [refs, setRefs] = useState<AudioRefItem[]>([]);
   const [sourceOpen, setSourceOpen] = useState(false);
@@ -73,19 +77,11 @@ export default function MusicDialog({
   const [speedOpen, setSpeedOpen] = useState(false);
   const [instrumental, setInstrumental] = useState(false);
   const [speed, setSpeed] = useState(1);
-  /** @ 菜单当次会话关闭标记（再输入 @ 重新打开） */
-  const [mentionDismissed, setMentionDismissed] = useState(false);
-  const mentionAnchorRef = useRef<HTMLDivElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const sourceWrapRef = useRef<HTMLDivElement>(null);
   const modeWrapRef = useRef<HTMLDivElement>(null);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const speedWrapRef = useRef<HTMLDivElement>(null);
-
-  const mentionQuery = trailingAtQuery(text);
-  useEffect(() => {
-    if (mentionQuery === null) setMentionDismissed(false);
-  }, [mentionQuery]);
 
   /** 参考音频时长探测（放大预览「图标+名称+时长」卡片用） */
   const durationSources = useMemo(
@@ -142,6 +138,7 @@ export default function MusicDialog({
       name: f.name,
       src: URL.createObjectURL(f),
       source: 'local',
+      file: f,
     }));
     setRefs((prev) => [...prev, ...items].slice(0, MAX_REFS));
     if (e.target) e.target.value = '';
@@ -170,7 +167,7 @@ export default function MusicDialog({
   const canvasAudios = canvasMedia.filter((m) => m.mediaType === 'audio');
 
   const handleSend = () => {
-    if (!text.trim()) return;
+    if (!text.trim() || invalidPrompt) return;
     onSend(
       text.trim(),
       currentModel?.label ?? model,
@@ -181,15 +178,10 @@ export default function MusicDialog({
         lyrics: instrumental ? '' : lyrics.trim(),
       },
       refs,
+      promptDoc,
     );
+    editorRef.current?.clear();
     setText('');
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
   };
 
   return (
@@ -241,7 +233,7 @@ export default function MusicDialog({
                       key={it.id}
                       className={styles.pickerItem}
                       onClick={() =>
-                        addRef({ id: it.id, kind: 'audio', name: it.name, src: it.src, source: 'canvas' })
+                        addRef({ id: it.id, kind: 'audio', name: it.name, src: it.src, source: 'canvas', assetId: it.assetId })
                       }
                     >
                       <div className={styles.pickerAudio}>
@@ -286,8 +278,8 @@ export default function MusicDialog({
               audioDuration={durations.get(`${r.source}-${r.id}`)}
               onRemove={() => removeRef(r.id, r.source)}
               onInsertRef={
-                r.source === 'canvas' && onMentionCanvas
-                  ? () => onMentionCanvas(audioRefToMentionItem(r))
+                r.assetId
+                  ? () => editorRef.current?.insert({ kind: 'asset_ref', id: String(r.assetId) })
                   : undefined
               }
               dragProps={stripDrag.itemProps(i)}
@@ -297,31 +289,13 @@ export default function MusicDialog({
       )}
 
       {/* 曲风描述（IKFCKS：支持 @ 引用画布音频素材） */}
-      <div className={styles.mentionAnchor} ref={mentionAnchorRef}>
-        <textarea
-          className={styles.textarea}
+      <div className={styles.mentionAnchor}>
+        <AudioPromptEditor ref={editorRef} refs={refs} className={styles.textarea}
           placeholder="描述音乐曲风、情绪、节奏和乐器等... 使用 @ 引用画布素材。"
-          value={text}
-          onChange={(e) => setText(e.target.value.slice(0, MAX_INPUT))}
-          onKeyDown={handleKeyDown}
-          rows={2}
-          maxLength={MAX_INPUT}
-        />
-        {mentionQuery !== null && !mentionDismissed && onMentionCanvas && (
-          <AtMentionMenu
-            anchorRef={mentionAnchorRef}
-            items={mentionItems ?? []}
-            editorQuery={mentionQuery}
-            disabledKinds={['image', 'video', 'text']}
-            onSelect={(item) => {
-              setText((prev) => stripTrailingAtQuery(prev));
-              setMentionDismissed(true);
-              onMentionCanvas(item);
-            }}
-            onClose={() => setMentionDismissed(true)}
-          />
-        )}
+          mentionItems={mentionItems?.filter(item => item.kind !== 'text')} onMentionCanvas={onMentionCanvas}
+          onChange={(doc, value) => { setPromptDoc(doc); setText(value); }} />
       </div>
+      {invalidPrompt && <div role="alert">正文有已失效的素材标签或超过字数上限，请调整后发送</div>}
       <div className={`${styles.charCount} ${text.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>
         {text.length}/{MAX_INPUT}
       </div>
@@ -451,7 +425,7 @@ export default function MusicDialog({
         <div className={styles.barRight}>
           <button
             className={`${styles.sendBtn} ${text.trim() ? styles.sendBtnActive : ''}`}
-            disabled={!text.trim()}
+            disabled={!text.trim() || invalidPrompt}
             onClick={handleSend}
             title="发送"
           >

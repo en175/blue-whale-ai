@@ -1,5 +1,5 @@
 /* ============================================
- * AudioDialog 音频生成底部对话框：纯文本描述 + 真实模型（fetchGenerationModels('audio')）
+ * AudioDialog 音频生成底部对话框：结构化正文引用 + 真实模型（fetchGenerationModels('audio')）
  * IKFCKS：参考音频 chip 替换为共享参考缩略图（三态交互，播放随 chip 下线）；
  *  画布文本卡连线作为文本附件以 FileText 缩略图进参考栏（× 仅断开连线）
  * ============================================ */
@@ -10,10 +10,11 @@ import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { MediaGenStatus } from '../MediaNode';
 import type { FollowDialogAnchor } from '../../followDialog';
-import AtMentionMenu from '../AtMentionMenu';
-import { audioRefToMentionItem, stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
+import type { AtMentionItem } from '../../atMention';
+import { docHasInvalidRef, type PromptDoc } from '@/lib/prompt-doc';
+import AudioPromptEditor, { type AudioPromptEditorHandle } from './AudioPromptEditor';
 import RefThumbnail from '../RefThumbnail';
-import { useMixedRefStrip, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
+import { orderRefStripItems, useMixedRefStrip, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
 import type { ImageTextAttachment } from '../ImageDialog';
 import styles from './index.module.css';
 
@@ -50,14 +51,17 @@ export interface CanvasPickItem {
   src: string;
   name: string;
   mediaType: 'image' | 'video' | 'audio';
+  assetId?: string;
 }
 
 export interface AudioDialogProps extends RefStripOrderProps {
   onClose: () => void;
   /** 发送：提示词 + 模型ID */
-  onSend: (text: string, modelId: string, refs: AudioRefItem[]) => void | Promise<void>;
+  onSend: (text: string, modelId: string, refs: AudioRefItem[], promptDoc?: PromptDoc | null) => void | Promise<void>;
   /** 初始文字描述（草稿打开时带入已保存 prompt） */
   initialText?: string;
+  initialDoc?: PromptDoc | null;
+  initialRefs?: AudioRefItem[];
   /** 初始模型（节点打开时带入已保存 draftModelId） */
   initialModelId?: string;
   /** 草稿绑定（IKDMQT）：面板编辑实时写回草稿节点；status 为 generating 时参数只读 */
@@ -66,7 +70,7 @@ export interface AudioDialogProps extends RefStripOrderProps {
     restoreExisting?: boolean;
     submitting?: boolean;
     saveFailed?: boolean;
-    onParamsChange: (patch: { prompt?: string; modelId?: string }) => void;
+    onParamsChange: (patch: { prompt?: string; modelId?: string; promptDoc?: PromptDoc | null; refs?: AudioRefItem[] }) => void;
   };
   /** Toast 提示（IKDMQU Q3：恢复的模型不可用时提示，由父级注入） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
@@ -98,6 +102,8 @@ export default function AudioDialog({
   onClose,
   onSend,
   initialText,
+  initialDoc,
+  initialRefs,
   initialModelId,
   draftBinding,
   onToast,
@@ -115,9 +121,8 @@ export default function AudioDialog({
   followAnchor,
 }: AudioDialogProps) {
   const [text, setText] = useState(initialText ?? '');
-  const mentionAnchorRef = useRef<HTMLDivElement>(null);
-  const [mentionDismissed, setMentionDismissed] = useState(false);
-  const mentionQuery = trailingAtQuery(text);
+  const editorRef = useRef<AudioPromptEditorHandle>(null);
+  const [promptDoc, setPromptDoc] = useState<PromptDoc | null>(initialDoc ?? null);
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [modelId, setModelId] = useState(initialModelId ?? '');
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -125,7 +130,7 @@ export default function AudioDialog({
   /** 放大态：输入区高度占屏幕 2/3；收起回底部默认高度 */
   const [expanded, setExpanded] = useState(false);
   /** 参考音频列表（本地上传） */
-  const [refs, setRefs] = useState<AudioRefItem[]>([]);
+  const [refs, setRefs] = useState<AudioRefItem[]>(initialRefs ?? []);
   /** 来源菜单（本地上传 / 从画布选择） */
   const [sourceOpen, setSourceOpen] = useState(false);
   /** 画布选择面板 */
@@ -184,15 +189,6 @@ export default function AudioDialog({
   /** 草稿绑定生成中（IKDMQT）：描述/模型/发送只读，保留查看与画布上的取消入口 */
   const readOnly = draftBinding?.submitting || draftBinding?.status === 'generating';
 
-  const handleTextChange = (value: string) => {
-    setText(value);
-    draftBinding?.onParamsChange({ prompt: value });
-  };
-
-  useEffect(() => {
-    if (mentionQuery === null) setMentionDismissed(false);
-  }, [mentionQuery]);
-
   const handleModelSelect = (id: string) => {
     setModelId(id);
     setModelOpen(false);
@@ -239,7 +235,7 @@ export default function AudioDialog({
   }, [externalPick]);
 
   const canvasAudios = (canvasMedia ?? []).filter((m) => m.mediaType === 'audio');
-  const currentRefs = refs.map((ref) => {
+  const namedRefs = refs.map((ref) => {
     const node = ref.source === 'canvas' ? canvasAudios.find((item) => item.id === ref.id) : undefined;
     return node && node.name !== ref.name ? { ...ref, name: node.name } : ref;
   });
@@ -279,6 +275,11 @@ export default function AudioDialog({
   };
 
   const mixedStrip = useMixedRefStrip(refs.map(r => `${r.source}:${r.id}`), (attachments ?? []).map(a => a.nodeId), { stripOrder, onStripOrderChange });
+  const currentRefs = orderRefStripItems(namedRefs, r => `media:${r.source}:${r.id}`, mixedStrip.order);
+  const orderedAttachments = orderRefStripItems(attachments ?? [], a => `text:${a.nodeId}`, mixedStrip.order);
+  const refsSignature = JSON.stringify(currentRefs.map(({ file: _file, ...r }) => r));
+  useEffect(() => { draftBinding?.onParamsChange({ refs: currentRefs.filter(r => r.assetId) }); }, [refsSignature]); // eslint-disable-line react-hooks/exhaustive-deps
+  const invalidPrompt = (promptDoc !== null && docHasInvalidRef(promptDoc)) || text.length > MAX_INPUT;
   const handleStripReorder = (from: number, to: number) => {
     const { nextMedia: nextRefIds, nextText: nextTextKeys, mediaChanged: refChanged, textChanged } = mixedStrip.reorder(from, to);
     if (refChanged) {
@@ -302,10 +303,11 @@ export default function AudioDialog({
   }, []);
 
   const handleSend = () => {
-    if (!text.trim() || !currentModel || readOnly || draftBinding?.saveFailed) return;
-    onSend(text.trim(), modelId, currentRefs);
+    if (!text.trim() || !currentModel || readOnly || invalidPrompt || draftBinding?.saveFailed) return;
+    onSend(text.trim(), modelId, currentRefs, promptDoc);
     // 草稿绑定发送后保留输入（卡片原地转生成中，面板进入只读），非草稿保持清空
     if (!draftBinding) {
+      editorRef.current?.clear();
       setText('');
       setRefs([]);
     }
@@ -335,20 +337,19 @@ export default function AudioDialog({
           三态交互（编号圆钮 / 悬停 ×/@ / 200ms 放大预览）；播放 chip 随替换下线 */}
       <div className={styles.topRow}>
         {/* 参考音频缩略图：编号按参考顺序派生；× 移除面板参考（本地上传回收 blob URL）；
-            @ 与手动 @ 选择走同一 onMentionCanvas 入口（结果等价——素材进入参考区，
-            仅画布来源有素材身份，与图片/视频面板「无素材身份不提供 @」同口径） */}
-        {mixedStrip.render(currentRefs.map((r, i) => (
+            @ 与手动 @ 使用共享正文编辑器；已选项只插入标签，未落库项不提供身份。 */}
+        {mixedStrip.render(namedRefs.map((r, i) => (
           <RefThumbnail
             key={`${r.source}-${r.id}`}
             data-testid="audio-ref-thumb"
             kind="audio"
             name={r.name}
-            number={i + 1}
+            number={currentRefs.findIndex(ref => ref.id === r.id && ref.source === r.source) + 1}
             audioDuration={durations.get(`${r.source}-${r.id}`)}
             onRemove={!readOnly ? () => handleRemoveRef(r.id) : undefined}
             onInsertRef={
-              !readOnly && r.source === 'canvas' && onMentionCanvas
-                ? () => onMentionCanvas(audioRefToMentionItem(r))
+              !readOnly && r.assetId
+                ? () => editorRef.current?.insert({ kind: 'asset_ref', id: String(r.assetId) })
                 : undefined
             }
             dragProps={stripDrag.itemProps(mixedStrip.index(i))}
@@ -362,6 +363,7 @@ export default function AudioDialog({
             name={a.title}
             number={mixedStrip.order.filter(key => key.startsWith('text:')).indexOf(`text:${a.nodeId}`) + 1}
             textPreview={a.text}
+            onInsertRef={!readOnly ? () => editorRef.current?.insert({ kind: 'text_ref', id: a.nodeId }) : undefined}
             dragProps={stripDrag.itemProps(mixedStrip.index(currentRefs.length + i))}
             onRemove={
               !readOnly && onRemoveAttachment ? () => onRemoveAttachment(a.nodeId) : undefined
@@ -408,7 +410,7 @@ export default function AudioDialog({
                           key={it.id}
                           className={styles.pickerItem}
                           onClick={() =>
-                            addRef({ id: it.id, kind: 'audio', name: it.name, src: it.src, source: 'canvas' })
+                            addRef({ id: it.id, kind: 'audio', name: it.name, src: it.src, source: 'canvas', assetId: it.assetId })
                           }
                         >
                           <div className={styles.pickerAudio}>
@@ -439,32 +441,14 @@ export default function AudioDialog({
       </div>
 
       {/* 输入框 */}
-      <div className={styles.mentionAnchor} ref={mentionAnchorRef}>
-      <textarea
-        className={styles.textarea}
-        data-testid="audio-input"
-        placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。使用 @ 引用画布素材。"
-        value={text}
-        onChange={(e) => handleTextChange(e.target.value.slice(0, MAX_INPUT))}
-        rows={3}
-        maxLength={MAX_INPUT}
-        disabled={readOnly}
-      />
-      {mentionQuery !== null && !mentionDismissed && !readOnly && onMentionCanvas && (
-        <AtMentionMenu
-          anchorRef={mentionAnchorRef}
-          items={mentionItems ?? []}
-          editorQuery={mentionQuery}
-          disabledKinds={['image', 'video', 'text']}
-          onSelect={(item) => {
-            handleTextChange(stripTrailingAtQuery(text));
-            setMentionDismissed(true);
-            onMentionCanvas(item);
-          }}
-          onClose={() => setMentionDismissed(true)}
-        />
-      )}
+      <div className={styles.mentionAnchor} data-testid="audio-input">
+        <AudioPromptEditor ref={editorRef} refs={currentRefs} attachments={orderedAttachments}
+          initialText={initialText} initialDoc={initialDoc} readOnly={readOnly} className={styles.textarea}
+          placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。使用 @ 引用画布素材。"
+          mentionItems={mentionItems} onMentionCanvas={onMentionCanvas}
+          onChange={(doc, value) => { setPromptDoc(doc); setText(value); draftBinding?.onParamsChange({ prompt: value, promptDoc: doc }); }} />
       </div>
+      {invalidPrompt && <div role="alert">正文有已失效的素材标签或超过字数上限，请调整后发送</div>}
 
       {modelUnavailable && <div role="alert">模型不可用，请选择可用模型后发送</div>}
 
@@ -514,7 +498,7 @@ export default function AudioDialog({
           <button
             className={`${styles.sendBtn} ${text.trim() && modelId ? styles.sendBtnActive : ''}`}
             data-testid="audio-send"
-            disabled={!text.trim() || !currentModel || readOnly || draftBinding?.saveFailed}
+            disabled={!text.trim() || !currentModel || readOnly || invalidPrompt || draftBinding?.saveFailed}
             onClick={handleSend}
             title="发送"
           >
