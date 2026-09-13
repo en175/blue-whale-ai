@@ -17,6 +17,7 @@ import {
 } from './followDialog';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
 import { audioMediaRefsOf, audioRefSourceError, checkAddAudioRef, isAudioDraftNode } from './audioMediaRefs';
+import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
   isVideoDraftNode,
@@ -1808,7 +1809,14 @@ export default function CanvasPage() {
       showToast('warn', '素材上传中，请稍候再选择');
       return;
     }
-    if (pickMode === 'image' && isReadyMedia && data.mediaType !== 'video') {
+    if (pickMode === 'image' && isReadyMedia) {
+      // IKFE8T：图片面板统一入口类型边界——画布保留视频/音频节点但禁选并提示
+      // （与节点面板 imageRefSourceError 同口径文案），保持选取模式等用户改选合法来源
+      const typeErr = panelCanvasRefError('image', data.mediaType);
+      if (typeErr) {
+        showToast('warn', typeErr);
+        return;
+      }
       setImagePickResult({
         ts: Date.now(),
         files: [{
@@ -1819,7 +1827,7 @@ export default function CanvasPage() {
           assetId: readNodeAssetId(data),
         }],
       });
-      imagePanelHiddenRef.current = true; // 到节点选择命中节点后，避免紧随的 selection 变化把图片面板当作「切换到其他卡」关闭
+      imagePanelHiddenRef.current = true; // 从节点添加素材命中后，避免紧随的 selection 变化把图片面板当作「切换到其他卡」关闭
     } else if (pickMode === 'product' && isReadyMedia && data.mediaType === 'image') {
       // 商品卡发起的图片节点选取 → ts 驱动注入目标商品卡（仅图片，商品卡不支持视频）
       const targetId = pickProductId;
@@ -6076,7 +6084,7 @@ export default function CanvasPage() {
           onSelect={handleAssetsPickerSelect}
           mediaTypes={
             assetsPickerTarget === 'imageDialog'
-              ? ['image']
+              ? [...PANEL_REF_MEDIA_TYPES.image.types]
               : assetsPickerTarget === 'videoDraft'
                 ? videoAssetPickRole === 'first' || videoAssetPickRole === 'last'
                   ? ['image']

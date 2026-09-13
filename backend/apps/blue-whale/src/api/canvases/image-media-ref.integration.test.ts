@@ -323,10 +323,10 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
         const canvas = await getCanvas(projectId);
         return (JSON.parse(canvas.edges) as Array<{ source: string; target: string }>).map((e) => `${e.source}->${e.target}`);
       };
-      /** Dock「到节点选择」：来源菜单两步入场（IKDLQR 起上传退役，入口合并为来源菜单） */
+      /** Dock「从节点添加素材」：来源菜单两步入场（IKDLQR 起上传退役，入口合并为来源菜单；IKFE8T 起文案统一） */
       async function enterPickMode() {
-        await page.locator('button[title="从资产中选择 / 到节点选择"]').click();
-        await page.getByText("到节点选择", { exact: true }).click();
+        await page.locator('button[title="从资产中选择 / 从节点添加素材"]').click();
+        await page.getByText("从节点添加素材", { exact: true }).click();
         await page.getByText("点击画布中的图片节点").waitFor();
       }
       /** 画布拖线：从 source 节点右连接点拖到 target 节点左连接点。
@@ -357,7 +357,7 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
       expect(await edges.count()).toBe(0);
       expect(generationRequests, "建卡不创建生成任务").toEqual([]);
 
-      // 1) 添加路径 A（Dock 选择）：到节点选择 → 点击 m1 → 立即建立连线，Dock 显示同一输入（IKFDFT）
+      // 1) 添加路径 A（Dock 选择）：从节点添加素材 → 点击 m1 → 立即建立连线，Dock 显示同一输入（IKFDFT）
       await enterPickMode();
       await nodeById("m1").locator('[data-testid="media-content"]').click();
       await vi.waitFor(async () => expect(await edges.count(), "Dock 选择立即建立连线").toBe(1));
