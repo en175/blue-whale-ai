@@ -607,11 +607,8 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     const draftId = await createDraft();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
+    // IKFA1J 起 @ 检索直接弹出 AtMentionMenu（原「引用画布素材」二级入口已随素材菜单改版移除）
     await typePromptRefRaw(container, '参考@素');
-    const canvasEntry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (b) => b.textContent === '引用画布素材',
-    )!;
-    await act(async () => { canvasEntry.click(); });
     // AtMentionMenu 经 portal 挂在 body；带检索词时直接列匹配项（无检索词则按类型分组悬停展开）
     await vi.waitFor(() => expect(document.body.querySelector('[data-testid="at-mention-canvas-item"]')).toBeTruthy());
     const item = [...document.body.querySelectorAll<HTMLButtonElement>('[data-testid="at-mention-canvas-item"]')].find(

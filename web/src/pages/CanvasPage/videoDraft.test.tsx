@@ -594,7 +594,7 @@ describe('IKDWL8 视频失效引用保护', () => {
 });
 
 /* IKFC1T 文生视频入口与媒体参考自动切换：新建默认文生视频（仅提示词省略 references）、
-   文本附件不触发切换、三个接入路径（连线/角色库/到节点选择暂存）触发自动切全能参考并保留输入、
+   文本附件不触发切换、三个接入路径（连线/角色库/到节点选择落线）触发自动切全能参考并保留输入、
    存在媒体参考时文生视频置灰（部分删除仍置灰，全部删除恢复可选但不自动切回）、草稿恢复保持已存模式。 */
 const MODE_LABELS = ['文生视频', '全能参考', '图生视频', '首尾帧'];
 
@@ -687,7 +687,7 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     expect(flowProps.current.edges).toHaveLength(0);
   });
 
-  it('到节点选择暂存参考：暂存即成为当前参考，自动切全能参考', async () => {
+  it('到节点选择参考：选取即落线成为当前参考（IKFDFW），自动切全能参考', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
@@ -695,7 +695,7 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
 
     await pickRefNode('添加图片参考（从资产中选择 / 到节点选择 / 角色库）', 'm1');
 
-    expect(flowProps.current.edges).toHaveLength(0); // 暂存未落线
+    expect(flowProps.current.edges).toHaveLength(1); // IKFDFW：选取即建连线，不再经暂存
     await expectMode('全能参考');
   });
 

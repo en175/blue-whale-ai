@@ -88,11 +88,11 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
     await prisma.client.$disconnect();
   });
 
-  function videoDraftNode(id: string, prompt = "") {
+  function videoDraftNode(id: string, prompt = "", draftMode?: string, x = 420, y = 160) {
     return {
       id,
       type: "mediaNode",
-      position: { x: 420, y: 160 },
+      position: { x, y },
       data: {
         src: "",
         mediaType: "video",
@@ -104,6 +104,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
         draftSize: "720p",
         draftRatio: "16:9",
         draftDuration: 5,
+        ...(draftMode ? { draftMode } : {}),
       },
     };
   }
@@ -478,4 +479,228 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
       await page.screenshot({ path: "/tmp/ikdmqs-browser.png", fullPage: true });
     } finally { await browser.close(); await vite.close(); }
   }, 180_000);
+
+  // 浏览器段（IKFDFW 视频参考即时保存与角色恢复）：真实浏览器 + 真实业务 API + 隔离 MySQL。
+  // 场景：Dock 普通参考（图/视频）选取立即建线并落盘（不等发送）→ 关闭重开 → A→B→A →
+  // 保存失败保留/阻断/重试 → Dock 移除断线且其他目标引用保持 → 刷新恢复 → 提交角色路由与 DB 冻结。
+  // 首尾帧「从零添加」槽位受模式门控限制（空素材不可达），以预置 keyframe 草稿验证角色恢复。
+  it.runIf(process.env.IKDMQS_BROWSER)("browser: IKFDFW video ref pick immediate persist, restore, failure retry, role routing", async () => {
+    const { chromium } = await import("playwright");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    // 提交段用 Seedance 2.0 系模型（视频参考仅该系支持；MODEL_ID 非 seedance 系会被提交防线拦截）。
+    // seedance-2 是前端别名，白名单按解析后的正式 id 校验，能力行与草稿都用正式 id。
+    const SEEDANCE_MODEL_ID = "doubao-seedance-2-0-260128";
+    await prisma.client.generation_model_capability.upsert({
+      where: { provider_id_model_id: { provider_id: "ikdmqs-test", model_id: SEEDANCE_MODEL_ID } },
+      create: {
+        provider_id: "ikdmqs-test",
+        model_id: SEEDANCE_MODEL_ID,
+        capability_type: "video",
+        model_label: "Seedance 2.0",
+        supported_sizes: [{ id: "720p", label: "720p", api_value: "720p" }],
+        supported_aspect_ratios: ["16:9"],
+        supported_formats: ["mp4"],
+        default_size: "720p",
+        default_aspect_ratio: "16:9",
+        default_duration: 5,
+        supported_durations: { min: 4, max: 12, step: 1 },
+        features: {
+          reference_image: true,
+          max_reference_images: 10,
+          first_frame: true,
+          last_frame: true,
+          first_last_frame: true,
+        },
+      },
+      update: {},
+    });
+    const projectId = (await projects.create("987654", "IKFDFW browser")).id;
+    const imageAsset = await createAsset(projectId, "image", "https://example.com/ikfdfw-ref-one.png");
+    const videoAsset = await createAsset(projectId, "video", "https://example.com/ikfdfw-ref-video.mp4");
+    const frameFirstAsset = await createAsset(projectId, "image", "https://example.com/ikfdfw-frame-first.png");
+    const frameLastAsset = await createAsset(projectId, "image", "https://example.com/ikfdfw-frame-last.png");
+    expect(
+      (await saveCanvas(
+        projectId,
+        [
+          // 布局：d2 草稿居中（跟随面板悬停其附近），素材卡沿左右两列分布避开面板遮挡
+          readyImageNode("m1", imageAsset, "普通参考图", 60, 520),
+          { id: "v1", type: "mediaNode", position: { x: 60, y: 760 }, data: { src: `https://example.com/v1.mp4`, mediaType: "video", fileName: "参考视频", assetId: videoAsset } },
+          readyImageNode("f1", frameFirstAsset, "首帧图", 1150, 80),
+          readyImageNode("f2", frameLastAsset, "尾帧图", 1150, 620),
+          videoDraftNode("dk", "", "keyframe", 700, 900),
+          { ...videoDraftNode("d2"), data: { ...videoDraftNode("d2").data, draftModelId: SEEDANCE_MODEL_ID } },
+        ],
+        [
+          { id: "e-f1-dk", source: "f1", target: "dk", data: { refRole: "first" } },
+          { id: "e-f2-dk", source: "f2", target: "dk", data: { refRole: "last" } },
+        ],
+        "missing",
+        JSON.stringify({ x: 0, y: 0, zoom: 0.7 }),
+      )).status,
+    ).toBe(200);
+
+    const vite = await createVite({ root: `${process.cwd()}/web`, server: {
+      open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } },
+    } });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+      const generationRequests: Array<Record<string, unknown>> = [];
+      page.on("request", (request) => {
+        if (request.method() === "POST" && /\/api\/projects\/\d+\/generation-jobs$/.test(request.url())) {
+          generationRequests.push(request.postDataJSON() as Record<string, unknown>);
+        }
+      });
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
+        userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+      } }, version: 0 })));
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+
+      const edges = page.locator(".react-flow__edge");
+      const dockRefs = page.locator('[data-testid="dock-video-ref"]');
+      const editor = page.locator('[contenteditable="true"]');
+      const nodeById = (id: string) => page.locator(`.react-flow__node[data-id="${id}"]`);
+      const savedPairs = async () => {
+        const canvas = await getCanvas(projectId);
+        return (JSON.parse(canvas.edges) as Array<{ source: string; target: string; data?: { refRole?: string } }>)
+          .map((e) => `${e.source}->${e.target}${e.data?.refRole ? `:${e.data.refRole}` : ""}`);
+      };
+      /** Dock 普通参考槽「到节点选择」：来源菜单两步入场（IKDLQR 起上传退役，入口合并为来源菜单）；
+       *  跟随面板悬停草稿卡附近，素材卡与面板在 Playwright 命中检测上重叠，统一 DOM 派发直触发（真实链路不变） */
+      async function pickFromCanvas(slotTitle: string, sourceId: string) {
+        await page.locator(`button[title="${slotTitle}"]`).dispatchEvent("click");
+        await page.getByText("到节点选择", { exact: true }).dispatchEvent("click");
+        await nodeById(sourceId).locator('[data-testid="media-content"]').dispatchEvent("click");
+      }
+
+      await nodeById("m1").locator("img").waitFor();
+      await nodeById("f1").locator("img").waitFor();
+
+      // 1) 打开普通草稿 d2：图片参考选取 → 立即建线（IKFDFW：不等待发送）
+      await nodeById("d2").locator('[data-testid="media-content"]').click();
+      await editor.waitFor();
+      await pickFromCanvas("添加图片参考（从资产中选择 / 到节点选择 / 角色库）", "m1");
+      await vi.waitFor(async () => expect(await edges.count(), "图片选取立即建线").toBe(3));
+      await vi.waitFor(async () => expect(await dockRefs.count()).toBe(1));
+
+      // 1b) 不等待发送：连线随既有自动保存落盘（真实业务 API + 隔离库回读证明）
+      await vi.waitFor(async () => {
+        expect(await savedPairs(), "参考连线未发送即落盘").toContain("m1->d2");
+      }, { timeout: 10_000 });
+      expect(generationRequests, "保存参考不创建生成任务").toEqual([]);
+
+      // 2) 视频参考槽再选 v1：第二条连线，Dock 两项按边序
+      await pickFromCanvas("添加视频参考（从资产中选择 / 到节点选择 / 角色库）", "v1");
+      await vi.waitFor(async () => expect(await edges.count()).toBe(4));
+      await vi.waitFor(async () => expect(await dockRefs.count()).toBe(2));
+
+      // 3) A→B→A：点 keyframe 草稿 dk（首尾帧角色恢复，B 不串入）→ 点回 d2 完整恢复
+      await nodeById("dk").locator('[data-testid="media-content"]').click();
+      await editor.waitFor();
+      await vi.waitFor(async () => expect(await dockRefs.count(), "B 显示首尾帧而非 A 的普通参考").toBe(2));
+      await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-video-ref"][title="首帧图"]').count()).toBe(1));
+      await nodeById("d2").locator('[data-testid="media-content"]').click();
+      await editor.waitFor();
+      await vi.waitFor(async () => expect(await dockRefs.count(), "切回 A 恢复全部普通参考").toBe(2));
+
+      // 4) 关闭重开：参考恢复（视频面板点击空白不自动关闭，关闭走右上角 ×）
+      await page.locator('button[title="关闭"]').dispatchEvent("click");
+      await vi.waitFor(async () => expect(await editor.count(), "关闭后面板退出").toBe(0));
+      await nodeById("d2").locator('[data-testid="media-content"]').click();
+      await editor.waitFor();
+      await vi.waitFor(async () => expect(await dockRefs.count(), "重开恢复全部参考").toBe(2));
+
+      // 5) 保存失败：保留选择并显示未保存，阻止发送，重试成功后落盘
+      let failSave = true;
+      await page.route("**/api/canvases/*", async (route) => {
+        if (failSave && route.request().method() === "PUT") return route.abort();
+        return route.continue();
+      });
+      await editor.click();
+      await page.keyboard.type("失败保留");
+      await page.getByText("保存失败，请重试").first().waitFor();
+      expect(await dockRefs.count(), "保存失败保留当前页面选择").toBe(2);
+      expect(await page.locator('[data-testid="video-send"]').isDisabled(), "保存失败时阻止发送").toBe(true);
+      // 允许关闭并重开原目标：编辑仍在
+      await page.locator('button[title="关闭"]').dispatchEvent("click");
+      await nodeById("d2").locator('[data-testid="media-content"]').click();
+      await editor.waitFor();
+      await vi.waitFor(async () => expect(await dockRefs.count(), "重开原目标保留选择").toBe(2));
+      failSave = false;
+      await page.getByRole("button", { name: "重试保存" }).click();
+      await page.getByText("已保存").first().waitFor();
+
+      // 6) Dock 移除图片参考：仅断开 m1 连线，其他目标（dk 首帧）引用保持
+      const removeButtons = dockRefs.locator('button[title="移除"]');
+      await removeButtons.first().click();
+      await vi.waitFor(async () => expect(await edges.count()).toBe(3));
+      await vi.waitFor(async () => expect(await dockRefs.count()).toBe(1));
+      await vi.waitFor(async () => {
+        expect((await savedPairs()).sort(), "断线落盘且其他目标引用保持").toEqual(["f1->dk:first", "f2->dk:last", "v1->d2"]);
+      }, { timeout: 10_000 });
+
+      // 7) 刷新恢复：连线与角色恢复，Dock 显示一致（从未生成）
+      await page.reload();
+      await nodeById("d2").waitFor();
+      await vi.waitFor(async () => expect(await edges.count(), "刷新恢复全部连线").toBe(3));
+      await nodeById("d2").locator('[data-testid="media-content"]').click();
+      await editor.waitFor();
+      await vi.waitFor(async () => expect(await dockRefs.count(), "刷新后恢复视频参考").toBe(1));
+      await nodeById("dk").locator('[data-testid="media-content"]').click();
+      await editor.waitFor();
+      await vi.waitFor(async () => expect(await dockRefs.count(), "刷新后恢复首尾帧").toBe(2));
+
+      // 8) 提交（普通参考）：references 按角色路由，DB 冻结输入 = Dock 显示
+      await nodeById("d2").locator('[data-testid="media-content"]').click();
+      await editor.waitFor();
+      await vi.waitFor(async () => expect(await dockRefs.count()).toBe(1));
+      await editor.click();
+      await page.keyboard.type("参考驱动生成");
+      await page.locator('[data-testid="video-send"]').click();
+      await vi.waitFor(() => expect(generationRequests).toHaveLength(1), { timeout: 10_000 });
+      const sent = generationRequests[0]!;
+      expect(sent.target_node_id).toBe("d2");
+      expect(sent.references).toEqual([{ asset_id: videoAsset, type: "video", role: "reference" }]);
+      await vi.waitFor(async () => {
+        const row = await prisma.client.generation_jobs.findFirst({
+          where: { project_id: BigInt(projectId) }, orderBy: { id: "desc" },
+        });
+        expect(row).not.toBeNull();
+        const job = await readJob(row!.id.toString());
+        // DB 冻结输入 = 请求 references（IKFA1O 契约：references 数组原样冻结）
+        expect((job!.input.references as Array<{ asset_id: string; role: string }>)
+          .some((r) => r.asset_id === videoAsset && r.role === "reference")).toBe(true);
+      }, { timeout: 10_000 });
+
+      // 9) 首尾帧草稿提交（角色端到端）：references 按 first_frame/last_frame 路由，DB 冻结一致
+      await nodeById("dk").locator('[data-testid="media-content"]').dispatchEvent("click");
+      await editor.waitFor();
+      await vi.waitFor(async () => expect(await dockRefs.count(), "首尾帧草稿恢复两项").toBe(2));
+      await editor.click();
+      await page.keyboard.type("首尾帧端到端");
+      await page.locator('[data-testid="video-send"]').click();
+      await vi.waitFor(() => expect(generationRequests).toHaveLength(2), { timeout: 10_000 });
+      const frameSent = generationRequests[1]!;
+      expect(frameSent.target_node_id).toBe("dk");
+      expect(frameSent.references).toEqual([
+        { asset_id: frameFirstAsset, type: "image", role: "first_frame" },
+        { asset_id: frameLastAsset, type: "image", role: "last_frame" },
+      ]);
+      await vi.waitFor(async () => {
+        // MySQL JSON 列存储规范化（键值间加空格），不可用精确子串匹配；取最新任务内存判定目标
+        const row = await prisma.client.generation_jobs.findFirst({
+          where: { project_id: BigInt(projectId) }, orderBy: { id: "desc" },
+        });
+        expect(row).not.toBeNull();
+        const job = await readJob(row!.id.toString());
+        expect(job!.input.target_node_id).toBe("dk");
+        const roles = (job!.input.references as Array<{ role: string }>).map((r) => r.role).sort();
+        expect(roles).toEqual(["first_frame", "last_frame"]);
+      }, { timeout: 10_000 });
+
+      await page.screenshot({ path: "/tmp/ikfdfw-browser.png", fullPage: true });
+    } finally { await browser.close(); await vite.close(); }
+  }, 240_000);
 });
