@@ -31,7 +31,6 @@ import PromptRefEditor, {
   type MentionState,
   type PromptRefEditorHandle,
 } from '../PromptRefEditor';
-import MentionMenu from '../PromptRefEditor/MentionMenu';
 import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
 import RefThumbnail from '../RefThumbnail';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
@@ -159,9 +158,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
   );
   const editorRef = useRef<PromptRefEditorHandle>(null);
-  /** @ 菜单状态（已引用 + 添加新参考） */
+  /** @ 菜单状态（已引用 + 素材分类） */
   const [mention, setMention] = useState<MentionState>({ open: false, query: '' });
-  const [mentionIndex, setMentionIndex] = useState(0);
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [selectedModel, setSelectedModel] = useState('');
@@ -182,7 +180,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
   const configPanelRef = useRef<HTMLDivElement>(null);
   const sourceWrapRef = useRef<HTMLDivElement>(null);
   const mentionMenuRef = useRef<HTMLDivElement>(null);
-  const [canvasMentionOpen, setCanvasMentionOpen] = useState(false);
   /** 失效标签替换菜单（IKFA1N B5）：记录发起点击的标签节点 key，null 为关闭 */
   const [replaceTarget, setReplaceTarget] = useState<string | null>(null);
   const replaceMenuRef = useRef<HTMLDivElement>(null);
@@ -192,7 +189,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     { open: resOpen, ref: resWrapRef, dismiss: () => setResOpen(false) },
     { open: sourceMenuOpen, ref: sourceWrapRef, dismiss: () => setSourceMenuOpen(false) },
     { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
-    { open: mention.open && !canvasMentionOpen, ref: mentionMenuRef, dismiss: () => closeMention() },
     { open: replaceTarget !== null, ref: replaceMenuRef, dismiss: () => setReplaceTarget(null) },
   ]);
 
@@ -377,35 +373,14 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     syncDraftParams({ prompt: flat, promptDoc: { version: PROMPT_DOC_VERSION, segments: doc.segments, flat } });
   };
 
-  /** @ 菜单：已引用项按查询过滤（名称/编号可搜索）；媒体项在前、文本附件项在后（IKFA1P） */
-  const mentionQuery = mention.open ? mention.query.trim().toLowerCase() : '';
-  const mentionItems = [
-    ...orderedImageRefs
-      .filter((r) => !mentionQuery || r.name.toLowerCase().includes(mentionQuery) || `图片${r.number}`.includes(mentionQuery))
-      .map((r) => ({ assetId: r.assetId, url: r.url, name: r.name, badge: `图片${r.number}`, mediaType: 'image' as const })),
-    ...(attachments ?? [])
-      .map((a, i) => ({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text' as const }))
-      .filter((r) => !mentionQuery || r.name.toLowerCase().includes(mentionQuery) || r.badge.includes(mentionQuery)),
-  ];
   /** 失效替换菜单可选项：全量有效参考与文本附件（IKFA1N B5 语义，不与 @ 查询过滤耦合） */
   const replaceItems = [
     ...orderedImageRefs.map((r) => ({ assetId: r.assetId, url: r.url, name: r.name, badge: `图片${r.number}`, mediaType: 'image' as const })),
     ...(attachments ?? []).map((a, i) => ({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text' as const })),
   ];
-  /** 添加新参考入口与 previewRow 同源可见性：达上限或只读时不提供（不留下伪有效标签） */
-  const canAddNewRef = !imagesFull && !readOnly;
-
-  const mentionNewRefEntries = canAddNewRef
-    ? [
-        { key: 'assets', label: '从资产中选择', icon: 'folder' as const, onPick: () => pickMentionNewRef('assets') },
-        { key: 'canvas', label: '到节点选择', icon: 'pointer' as const, onPick: () => pickMentionNewRef('canvas') },
-      ]
-    : [];
-
   const closeMention = () => {
     editorRef.current?.dismissMention();
     setMention({ open: false, query: '' });
-    setCanvasMentionOpen(false);
   };
 
   /** 寻址键分派（IKFA1P）：文本身份（来源节点 id）与媒体身份空间不重叠——按当前附件集合定 kind */
@@ -423,36 +398,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
    *  路径——有记忆光标原位插入、无记录追加末尾，插入后编辑器聚焦 */
   const insertRefByKey = (assetId: string) => {
     editorRef.current?.insertRefAtPending(refKeyOf(assetId));
-  };
-
-  /** @ 菜单选择「添加新参考」：删除本次 @ 查询并记住插入点，走既有添加流程；
-   *  添加成功（参考集合出现新身份）后在该位置插入标签；校验拒绝则集合不变、不插入 */
-  const pickMentionNewRef = (source: 'assets' | 'canvas') => {
-    editorRef.current?.consumeMentionForPendingInsert();
-    pendingNewRefInsert.current = true;
-    setMention({ open: false, query: '' });
-    if (source === 'assets') onPickFromAssets?.();
-    else onPickFromCanvas?.();
-  };
-
-  const handleMentionKey = (key: 'down' | 'up' | 'enter' | 'escape'): boolean => {
-    if (!mention.open) return false;
-    if (key === 'escape') {
-      closeMention();
-      return true;
-    }
-    const total = mentionItems.length + mentionNewRefEntries.length;
-    if (total === 0) return false;
-    if (key === 'down') setMentionIndex((i) => (i + 1) % total);
-    else if (key === 'up') setMentionIndex((i) => (i - 1 + total) % total);
-    else if (key === 'enter') {
-      if (mentionIndex < mentionItems.length) {
-        pickMentionRef(mentionItems[mentionIndex].assetId);
-      } else {
-        mentionNewRefEntries[mentionIndex - mentionItems.length]?.onPick();
-      }
-    }
-    return true;
   };
 
   /** 新参考添加成功检测：有效身份集合出现新增 → 在记住的插入点落标签（A3；IKFA1P 含新文本附件连入） */
@@ -574,18 +519,16 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
       {/* @ 菜单：挂在 .dialogWrap 层向上弹出（.dialog 是 200px 滚动框会裁剪浮层，IKFA1M） */}
       {mention.open && (
         <div className={styles.mentionDock} ref={mentionMenuRef}>
-          <MentionMenu
-            items={mentionItems}
-            activeIndex={mentionIndex}
-            newRefEntries={mentionNewRefEntries}
-            onPick={pickMentionRef}
-            onHoverIndex={setMentionIndex}
-          />
-          {onMentionCanvas && !canvasMentionOpen && <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setCanvasMentionOpen(true)}>引用画布素材</button>}
-          {canvasMentionOpen && onMentionCanvas && <AtMentionMenu
+          <AtMentionMenu
+            renderInline
             anchorRef={mentionMenuRef}
             items={canvasMentionItems ?? []}
             editorQuery={mention.query}
+            referencedItems={replaceItems.map(r => ({
+              id: r.assetId, assetId: r.assetId, name: r.name, thumbUrl: r.url,
+              kind: r.mediaType, badge: r.badge,
+            }))}
+            onSelectReferenced={(item) => pickMentionRef(item.id)}
             disabledKinds={['audio']}
             onSelect={(item) => {
               if (item.kind === 'image' && item.assetId && orderedAssetIds.includes(item.assetId)) {
@@ -598,12 +541,11 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
                 editorRef.current?.consumeMentionForPendingInsert();
                 pendingNewRefInsert.current = item.kind === 'image' || item.kind === 'text';
                 setMention({ open: false, query: '' });
-                onMentionCanvas(item);
+                onMentionCanvas?.(item);
               }
-              setCanvasMentionOpen(false);
             }}
-            onClose={() => setCanvasMentionOpen(false)}
-          />}
+            onClose={closeMention}
+          />
         </div>
       )}
       {/* 失效标签替换菜单（IKFA1N B5）：与 @ 菜单同停靠位，选择后仅替换发起点击的那次提及 */}
@@ -662,7 +604,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
                             syncDraftParams({ modelId: m.key });
                           }
                           setModelOpen(false);
-                        }}
+              }}
                       >
                         {m.label}
                       </button>
@@ -697,7 +639,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
                           if (currentGen) setSelectedRatio(nextRatio);
                           syncDraftParams({ size: r.key, ratio: nextRatio });
                           setResOpen(false);
-                        }}
+              }}
                       >
                         {r.label}
                       </button>
@@ -861,10 +803,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
             onChange={handleDocChange}
             onMentionChange={(state) => {
               setMention(state);
-              if (state.open) setMentionIndex(0);
             }}
             onInvalidTagClick={readOnly ? undefined : (nodeKey) => setReplaceTarget(nodeKey)}
-            onMentionKey={handleMentionKey}
             className={styles.textarea}
           />
         </div>
