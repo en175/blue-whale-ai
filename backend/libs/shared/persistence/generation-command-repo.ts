@@ -1,5 +1,5 @@
-import { NewApiError } from "@blue-whale/core";
-import { promptPlanSnapshotSchema } from "@blue-whale/contracts";
+import { NewApiError } from "@lib/core";
+import { promptPlanSnapshotSchema } from "@lib/contracts";
 import {
   findPlacement,
   SCENE_CARD_FALLBACK_HEIGHT,

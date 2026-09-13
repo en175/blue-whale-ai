@@ -1,8 +1,8 @@
 import { validateReferences } from "../generation-runtime/video-reference-validation.js";
-import { NewApiError } from "@blue-whale/core";
-import { promptReferenceRequestSchema, releaseRemovedPromptSources, type CanvasEdge } from "@blue-whale/contracts";
+import { NewApiError } from "@lib/core";
+import { promptReferenceRequestSchema, releaseRemovedPromptSources, type CanvasEdge } from "@lib/contracts";
 import { createModelCapabilityRepo } from "@lib/shared/persistence/model-capability-repo.js";
-import { createWorkerAssetOps } from "@lib/shared/persistence/generation-worker-asset-ops.js";
+import { createAssetOwnershipOps } from "@lib/shared/persistence/asset-ownership-repo.js";
 import { confirmPlanEdges, nodeAssetId, planError, syncDraftModeOnPlanMedia, validatePlanModel, validateVideoPlan } from "./prompt-target.js";
 import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
@@ -12,7 +12,7 @@ import { CANVAS_EDGE_LIMITS, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE,
 import { createCanvasRepo, createConversationQuoteRepo, createLegacyCardHistoryRepo, type CanvasView, type ConversationQuoteRow, type LegacyCardHistoryRow } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
-import { promptMentionSchema, validPromptMentions, type PromptPreviewContent, type PromptPreviewSource } from "@blue-whale/contracts";
+import { promptMentionSchema, validPromptMentions, type PromptPreviewContent, type PromptPreviewSource } from "@lib/contracts";
 import { PromptMaterialUnavailableError } from "@lib/shared/persistence/canvas-repo.js";
 
 /** 对话引用快照视图（IKDLQJ）：主键字符串化；来源损坏时按无来源处理，不丢正文。 */
@@ -227,7 +227,7 @@ export class CanvasService {
     const targetModel = modelId ?? nodes.find((n: { id: string }) => n.id === targetNodeId)?.data?.draftModelId;
     const model = targetModel ? models.find(m => m.model_id === targetModel) : models.find(m => m.is_default) ?? models[0];
     if (!isVideo) validatePlanModel(planNodeId, result.plan.bindings, result.assetIds.length, model);
-    const assets = await createWorkerAssetOps(this.prisma.client).resolveInputAssets(result.assetIds, ownerId, projectId);
+    const assets = await createAssetOwnershipOps(this.prisma.client).resolveInputAssets(result.assetIds, ownerId, projectId);
     for (const id of result.assetIds) {
       if (!assets.some(a => a.id === id && (isVideo || a.type === "image"))) planError(planNodeId, result.plan.bindings.filter(b => b.assetId === id), "素材已删除或无权访问");
     }

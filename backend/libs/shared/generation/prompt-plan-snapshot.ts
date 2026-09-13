@@ -1,9 +1,9 @@
 import { validateReferences } from "../generation-runtime/video-reference-validation.js";
-import { composeTextAttachmentPrompt } from "@blue-whale/core";
-import { COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, promptBindingsSchema, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@blue-whale/contracts";
+import { composeTextAttachmentPrompt } from "@lib/core";
+import { COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, promptBindingsSchema, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@lib/contracts";
 import { nodeAssetId, planError, readPromptPlan, validatePlanModel, validateVideoPlan, type PromptTargetNode } from "../canvas/prompt-target.js";
 import type { ModelCapabilityView } from "../persistence/model-capability-repo.js";
-import type { WorkerRepo } from "../persistence/generation-worker-types.js";
+import type { AssetOwnershipOps } from "../persistence/asset-ownership-types.js";
 
 export async function freezePromptPlans(args: {
   nodes: PromptTargetNode[]; edges: CanvasEdge[]; version: number; targetId: string;
@@ -11,7 +11,7 @@ export async function freezePromptPlans(args: {
   references?: Array<{ asset_id?: string; material_id?: string; type: "image" | "video" | "audio"; role: "reference" | "first_frame" | "last_frame" }>;
   inputIds: string[]; prompt: string; attachments: TextAttachmentSnapshot[];
   model: ModelCapabilityView | undefined; userId: string; projectId: string;
-  assets: Pick<WorkerRepo, "resolveInputAssets">;
+  assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
 }): Promise<PromptPlanSnapshot | undefined> {
   const { nodes, edges, targetId, inputIds, attachments } = args;
   const planNodes = attachments.flatMap(a => {

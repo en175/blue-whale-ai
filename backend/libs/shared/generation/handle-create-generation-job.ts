@@ -1,5 +1,5 @@
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
-import type { CanvasEdge } from "@blue-whale/contracts";
+import type { CanvasEdge } from "@lib/contracts";
 import type { PromptTargetNode } from "../canvas/prompt-target.js";
 import { createHash } from "node:crypto";
 
