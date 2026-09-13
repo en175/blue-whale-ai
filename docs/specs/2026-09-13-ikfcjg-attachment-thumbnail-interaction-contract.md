@@ -70,4 +70,15 @@
 - 面板集成：`ImageDialog/prompt-ref.test.tsx` 扩展（× 走断开连线回调、@ 与手动 @ 选择等价、只读态按钮不渲染）；既有 `imageMediaRefs.test.tsx`、`cardRename.test.tsx`、`attachments.test.tsx`、`text-prompt-ref.test.tsx` 全绿验证外部契约（`dock-media-ref` testid、`img alt`、`button[title="移除"]`）保持。
 - 音频面板集成（T3 / IKFCKS）：`MusicDialog/index.test.tsx`、`AudioDialog/index.test.tsx`（缩略图替换/新建、× 断边回调、@ 同一入口等价、只读态、发送参数回归）+ `connectAbility.test.ts`（文本卡 → 音频生成连线放行与既有组合回归）；`cardRename.test.tsx` 音频参考改名锚点随 chip 下线切换为缩略图 title。
 - 视觉像素值与过渡时长不进单测，留浏览器验收。
-- 切片：T1 IKFCKK（共享组件 + 图片面板，已合入）；T2 IKFCKQ（视频面板 BottomDialog，已合入）；T4 IKFCKN（文本附件进栏，已合入）；T3 IKFCKS（音频面板 MusicDialog 替换 + AudioDialog 新建，本切片——含画布文本卡连线进音频面板的连线能力放行：`isAudioGenEnabled` 对含文本组合可选，文本卡作为创作上下文，不进生成请求）；T5 IKFCKT（拖拽排序）收尾。父工单：IKFCJG。
+- 切片：T1 IKFCKK（共享组件 + 图片面板，已合入）；T2 IKFCKQ（视频面板 BottomDialog，已合入）；T4 IKFCKN（文本附件进栏，已合入）；T3 IKFCKS（音频面板 MusicDialog 替换 + AudioDialog 新建，已合入——含画布文本卡连线进音频面板的连线能力放行：`isAudioGenEnabled` 对含文本组合可选，文本卡作为创作上下文，不进生成请求）；T5 IKFCKT（拖拽排序，本切片定稿见 §9）。父工单：IKFCJG。
+
+
+## 9. 拖拽排序（T5 / IKFCKT 定稿）
+
+- **实现形态**：轻量 HTML5 DnD（共享层 `RefThumbnail/strip-dnd.ts` 的 `arrayMove` + `useRefStripDrag`，零新依赖）；`RefThumbnail` 经 `dragProps` 透传拖拽属性到根节点，`img`/`video` 设 `draggable={false}` 防原生图片拖拽劫持手势。按钮点击（mousedown 未移动不触发 dragstart）与拖拽手势天然区分。
+- **统一序列语义**：各面板参考栏构造统一序列 = 媒体项段 + 文本项段拼接（两段保持类型聚合渲染）；拖拽落点在统一序列上计算换位，再按类型提取新相对顺序分别落到顺序权威源。跨类型拖拽只改变类型内相对顺序（编号按类型独立），类型子序未变不触发回调。
+- **顺序权威源分派**：连线媒体（图片/视频/音频面板）= 重排目标连入边序（`reorderTargetEdges`，其余边相对位置不变）；视频角色库 material 参考 = 重排草稿 `draftMaterialRefs` 数组序；视频自由模式暂存参考 = 数组整体重排；图片本地文件与音乐/音频面板本地参考 = 面板本地 state；文本附件 = 重排文本连入边序（顺序即生成上下文拼接顺序，与服务端 `text_attachments` 推导同源，契约语义不变）。
+- **编号与正文同步**：编号为派生值（§2），重排权威源后角标与正文 chip 文案经既有 reconcile 链路自动更新；无额外同步逻辑。
+- **首尾帧角色槽**（视频面板 keyframe 模式）：首帧/尾帧为固定角色槽（徽标不参与数字编号），不参与拖拽换位；该模式下拖拽域为文本附件序列。
+- **只读态**：生成中/提交中（readOnly）整条参考栏禁拖（`draggable=false`）。
+- **随 T5 定稿处置下线**：BottomDialog 死 prop `onSetVideoRefRole` / `onSetMaterialRefRole`（IKFCKQ 起无 UI 消费）及其 CanvasPage 侧孤儿实现（`handleSetVideoRefRole` / `changeVideoFreeRefRole`）一并移除——角色由「模式 + 目标槽」决定，无跨槽切换入口。
