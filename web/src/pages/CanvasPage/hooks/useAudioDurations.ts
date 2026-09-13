@@ -12,41 +12,80 @@ export interface AudioDurationSource {
   src: string;
 }
 
+interface AudioDurationEntry {
+  src: string;
+  dispose: () => void;
+  duration?: number;
+}
+
 /** 批量探测音频时长（秒）：读到即增量入表；探测失败（地址失效/格式不支持）不入表，
  *  预览卡片缺省不显示时长 */
 export function useAudioDurations(sources: readonly AudioDurationSource[]): Map<string, number> {
   const [durations, setDurations] = useState<Map<string, number>>(() => new Map());
-  /** 已建过探测元素/已入表的 key：重复渲染或列表增删不重探 */
-  const probedKeysRef = useRef<Set<string>>(new Set());
+  /** key 对应的探测资源或已完成缓存：重复渲染及重排不重探 */
+  const entriesRef = useRef<Map<string, AudioDurationEntry>>(new Map());
 
   useEffect(() => {
-    const cleanups: Array<() => void> = [];
+    const sourceByKey = new Map(sources.map(({ key, src }) => [key, src]));
+    const removedKeys = new Set<string>();
+
+    for (const [key, entry] of entriesRef.current) {
+      const nextSrc = sourceByKey.get(key);
+      if (nextSrc === entry.src) continue;
+      entry.dispose();
+      entriesRef.current.delete(key);
+      removedKeys.add(key);
+    }
+
     for (const { key, src } of sources) {
-      if (!src || probedKeysRef.current.has(key)) continue;
-      probedKeysRef.current.add(key);
+      if (!src || entriesRef.current.has(key)) continue;
       const audio = new Audio();
       audio.preload = 'metadata';
+      let disposed = false;
+      const entry: AudioDurationEntry = {
+        src,
+        dispose: () => {
+          if (disposed) return;
+          disposed = true;
+          audio.removeEventListener('loadedmetadata', onLoaded);
+          // 规范释放：置空 src 属性会以页面 URL 发起媒体加载，须移除属性并 load() 复位
+          audio.removeAttribute('src');
+          audio.load();
+        },
+      };
       const onLoaded = () => {
-        if (Number.isFinite(audio.duration)) {
-          setDurations((prev) => {
-            if (prev.get(key) === audio.duration) return prev;
-            const next = new Map(prev);
-            next.set(key, audio.duration);
-            return next;
-          });
-        }
+        if (entriesRef.current.get(key) !== entry || !Number.isFinite(audio.duration)) return;
+        entry.duration = audio.duration;
+        entry.dispose();
+        setDurations((prev) => {
+          if (prev.get(key) === entry.duration) return prev;
+          const next = new Map(prev);
+          next.set(key, entry.duration!);
+          return next;
+        });
       };
       audio.addEventListener('loadedmetadata', onLoaded, { once: true });
       audio.src = src;
-      cleanups.push(() => {
-        audio.removeEventListener('loadedmetadata', onLoaded);
-        // 规范卸载：置空 src 属性会以页面 URL 发起一次媒体加载，须移除属性并 load() 复位
-        audio.removeAttribute('src');
-        audio.load();
+      entriesRef.current.set(key, entry);
+    }
+
+    if (removedKeys.size > 0) {
+      setDurations((prev) => {
+        if (![...removedKeys].some((key) => prev.has(key))) return prev;
+        const next = new Map(prev);
+        for (const key of removedKeys) next.delete(key);
+        return next;
       });
     }
-    return () => cleanups.forEach((fn) => fn());
   }, [sources]);
+
+  useEffect(
+    () => () => {
+      for (const entry of entriesRef.current.values()) entry.dispose();
+      entriesRef.current.clear();
+    },
+    [],
+  );
 
   return durations;
 }
