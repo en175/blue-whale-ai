@@ -410,17 +410,18 @@ public class VideoJobProcessor implements JobProcessor {
         // prompt（:571-586）
         String basePrompt = strOrEmpty(input, "prompt");
         if (basePrompt.isEmpty()) basePrompt = strOrEmpty(input, "prompt_text");
-        // text_attachments 简化处理：Java 侧不实现 composeTextAttachmentPrompt
-        // （视频场景 text_attachments 罕见，basePrompt 即最终 prompt）
+        // IKDLQG（IKFCXC 补齐组合）：目标驱动视频任务的快照携带 text_attachments（接纳时冻结的
+        // 当次正文），提交时按契约确定性组合；存量任务无该字段，prompt 逐字节不变。
         Map<?, ?> plan = input.get("prompt_plan_snapshot") instanceof Map<?, ?> snapshot ? snapshot : null;
         if (input.containsKey("prompt_plan_snapshot") && (plan == null || !(plan.get("providerPrompt") instanceof String text) || text.isBlank() || !(plan.get("videoReferences") instanceof List<?>))) {
             throw new VideoInputError(GenerationError.ERROR_INVALID_INPUT, "视频方案快照无效");
         }
         // IKFA1P：正文含文本标签时接纳侧冻结编号清单最终正文（composed_prompt），优先消费；
-        // 优先级链与 TS video-job-runner 一致：providerPrompt > composed_prompt > 既有组合。
+        // 优先级链与 TS video-job-runner 一致：providerPrompt > composed_prompt > 附件组合。
         String composedPrompt = input.get("composed_prompt") instanceof String cp && !cp.isBlank() ? cp : null;
         String prompt = plan != null ? (String) plan.get("providerPrompt")
-                : composedPrompt != null ? composedPrompt : basePrompt;
+                : composedPrompt != null ? composedPrompt
+                : TextAttachmentPrompts.composeTextAttachmentPrompt(TextAttachmentPrompts.textAttachments(input), basePrompt);
 
         // model（:587-592）
         String model = strOrEmpty(input, "model_id");
