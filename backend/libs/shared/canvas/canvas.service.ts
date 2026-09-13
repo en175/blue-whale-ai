@@ -3,7 +3,7 @@ import { NewApiError } from "@blue-whale/core";
 import { promptReferenceRequestSchema, releaseRemovedPromptSources, type CanvasEdge } from "@blue-whale/contracts";
 import { createModelCapabilityRepo } from "@lib/shared/persistence/model-capability-repo.js";
 import { createWorkerAssetOps } from "@lib/shared/persistence/generation-worker-asset-ops.js";
-import { confirmPlanEdges, nodeAssetId, planError, validatePlanModel, validateVideoPlan } from "./prompt-target.js";
+import { confirmPlanEdges, nodeAssetId, planError, syncDraftModeOnPlanMedia, validatePlanModel, validateVideoPlan } from "./prompt-target.js";
 import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
@@ -244,8 +244,10 @@ export class CanvasService {
       try { validateReferences(model!.model_id, refs.filter(r => r.role === "reference"), materialRefs.filter(r => r.role === "reference")); }
       catch (error) { planError(planNodeId, result.plan.bindings, error instanceof Error ? error.message : "素材不受支持"); }
     }
+    // IKFC26：校验按既有 draftMode 口径执行（validateVideoPlan 对 prompt 无特判），模式切换仅影响持久化
+    const nextNodes = isVideo ? syncDraftModeOnPlanMedia(nodes, targetNodeId, result.plan.bindings) : nodes;
     try {
-      const saved = await this.repo.saveIfVersion(projectId, expectedVersion, canvas.viewport, canvas.nodes, JSON.stringify(result.edges),
+      const saved = await this.repo.saveIfVersion(projectId, expectedVersion, canvas.viewport, nextNodes === nodes ? canvas.nodes : JSON.stringify(nextNodes), JSON.stringify(result.edges),
         { ownerId, items: assets.map(a => ({ assetId: a.id, mediaType: a.type as "image" | "video" | "audio" })) });
       if (!saved) throw new NewApiError("Canvas 版本冲突", 412);
       return ok(saved);
