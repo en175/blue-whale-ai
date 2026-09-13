@@ -436,16 +436,9 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
       await vi.waitFor(async () => expect(await page.locator(`.react-flow__edge[data-id="e-m2-${draftId}"]`).count(), "画布拖线建立 m2→草稿 连线").toBe(1));
       await vi.waitFor(async () => expect(await dockRefs.count(), "连线后 Dock 同步显示").toBe(2));
 
-      // 8) 文本附件回归：t1 → 草稿拖线，文本缩略图进参考栏（IKFCKN 起替代旧「文本附件（N）」区块）
-      // t1 与草稿相邻，两连接点几乎垂直对齐且把点仅伸出卡体 16px——物理拖线偶发未挂接，
-      // 与真实用户重拖一致地补拖一次（连接语义不变：connectPair 校验通过后 addCanvasEdge）
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        await dragConnect("t1", draftId);
-        try {
-          await vi.waitFor(async () => expect(await edges.count()).toBe(3), { timeout: 2_000 });
-          break;
-        } catch { if (attempt === 1) throw new Error("t1→草稿拖线两次均未挂接"); }
-      }
+      // IKFEWF：从统一来源菜单接纳普通文本，后续刷新与任务快照继续验证同一身份。
+      await enterPickMode();
+      await nodeById("t1").dispatchEvent("click");
       await vi.waitFor(async () => expect(await edges.count()).toBe(3));
       await vi.waitFor(async () => expect(await dockTexts.count(), "文本附件进参考栏").toBe(1));
       expect(await dockTexts.first().getAttribute("title")).toBe("故事文案");
