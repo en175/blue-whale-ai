@@ -2,7 +2,7 @@
 /* IKFCKS：AudioDialog 新建参考缩略图条——参考音频 chip（点击播放形态）替换为共享参考缩略图、
  *  画布文本卡连线附件以 FileText 缩略图进栏（× 仅断开连线）、@ 与手动 @ 选择同一入口、
  *  生成中只读不渲染 × / @、发送参数回归 */
-import { $getRoot, $isTextNode } from 'lexical';
+import { $getRoot } from 'lexical';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -241,15 +241,14 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
  describe('IKFCJG 真实正文光标引用', () => {
   it('手动 @ 在正文中间原位替换，保留前后文字且不重复附件', async () => {
     await renderDialog();
-    await typePromptRefText(container, '前@雨声后');
-    await act(async () => promptRefEditorInstance(container).update(() => {
-      const text = $getRoot().getAllTextNodes()[0];
-      if ($isTextNode(text)) text.select(4, 4);
-    }));
-    await vi.waitFor(() => expect(document.querySelector('[data-testid="at-mention-canvas-item"]')).not.toBeNull());
-    const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '雨声白噪音')!;
+    // IKFA1J 起 @ 检索直接弹出 AtMentionMenu（经 portal 挂在 body），原「引用画布素材」二级入口已随素材菜单改版移除
+    await typePromptRefRaw(container, '前@雨声');
+    await vi.waitFor(() => expect(document.body.querySelector('[data-testid="at-mention-canvas-item"]')).toBeTruthy());
+    const button = [...document.body.querySelectorAll<HTMLButtonElement>('[data-testid="at-mention-canvas-item"]')].find(
+      (b) => b.textContent === '雨声白噪音',
+    )!;
     await act(async () => button.click());
-    expect(readPromptRefText(container)).toBe('前音频1后');
+    expect(readPromptRefText(container)).toBe('前音频1');
     expect(audioThumbs()).toHaveLength(1);
   });
   it('本地未落库项没有可插入身份', async () => {
