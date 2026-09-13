@@ -21,17 +21,22 @@ import {
   $getRoot,
   $getSelection,
   $isRangeSelection,
+  $isTextNode,
   $nodesOfType,
   $setSelection,
+  CLICK_COMMAND,
   CLEAR_HISTORY_COMMAND,
   COMMAND_PRIORITY_HIGH,
   KEY_ARROW_DOWN_COMMAND,
   KEY_ARROW_UP_COMMAND,
+  KEY_ARROW_LEFT_COMMAND,
+  KEY_ARROW_RIGHT_COMMAND,
   KEY_BACKSPACE_COMMAND,
   KEY_ENTER_COMMAND,
   KEY_ESCAPE_COMMAND,
   type LexicalCommand,
   type LexicalEditor,
+  type LexicalNode,
   type NodeKey,
 } from 'lexical';
 import { reconcilePromptDocWith, type PromptDoc, type PromptRefKey } from '@/lib/prompt-doc';
@@ -247,6 +252,89 @@ function BackspaceRefPlugin() {
   return null;
 }
 
+/** 标签光标吸附：Lexical 默认把光标停在 DecoratorNode 标签的边界点上——该点不可见（光标「被吞」）
+ *  且再次按键看似不动（卡在标签里）。左右键与点击标签时直接落到标签前后的可见文本位置。 */
+function RefCursorNavPlugin() {
+  const [editor] = useLexicalComposerContext();
+  useEffect(() => {
+    const $collapseTo = (node: LexicalNode, offset: number, type: 'text' | 'node' | 'element') => {
+      const sel = $createRangeSelection();
+      sel.anchor.set(node.getKey(), offset, type);
+      sel.focus.set(node.getKey(), offset, type);
+      $setSelection(sel);
+    };
+    const $placeBefore = (ref: AssetRefNode) => {
+      const prev = ref.getPreviousSibling();
+      if (prev && $isTextNode(prev)) $collapseTo(prev, prev.getTextContentSize(), 'text');
+      else if (prev) $collapseTo(prev, 0, 'node');
+      else {
+        const parent = ref.getParent();
+        if (parent) $collapseTo(parent, 0, 'element');
+      }
+    };
+    const $placeAfter = (ref: AssetRefNode) => {
+      const next = ref.getNextSibling();
+      if (next && $isTextNode(next)) $collapseTo(next, 0, 'text');
+      else if (next) $collapseTo(next, 0, 'node');
+      else {
+        const parent = ref.getParent();
+        if (parent) $collapseTo(parent, parent.getChildrenSize(), 'element');
+      }
+    };
+    const $collapsedAnchorRef = (): AssetRefNode | null => {
+      const selection = $getSelection();
+      if (!$isRangeSelection(selection) || !selection.isCollapsed()) return null;
+      const node = selection.anchor.getNode();
+      return $isAssetRefNode(node) ? node : null;
+    };
+    const $moveAcross = (event: KeyboardEvent, direction: 'before' | 'after'): boolean => {
+      let handled = false;
+      editor.update(() => {
+        const selection = $getSelection();
+        if (!$isRangeSelection(selection) || !selection.isCollapsed()) return;
+        const anchor = selection.anchor;
+        const node = anchor.getNode();
+        const onRef = $isAssetRefNode(node);
+        const ref = onRef
+          ? node
+          : $isTextNode(node) &&
+              (direction === 'after' ? anchor.offset >= node.getTextContentSize() : anchor.offset <= 0)
+            ? ((direction === 'after' ? node.getNextSibling() : node.getPreviousSibling()) as AssetRefNode | null)
+            : null;
+        if (!$isAssetRefNode(ref)) return;
+        if (direction === 'after') $placeAfter(ref);
+        else $placeBefore(ref);
+        handled = true;
+      });
+      if (!handled) return false;
+      event?.preventDefault();
+      return true;
+    };
+    const unbinds = [
+      editor.registerCommand(KEY_ARROW_RIGHT_COMMAND, (event: KeyboardEvent) => $moveAcross(event, 'after'), COMMAND_PRIORITY_HIGH),
+      editor.registerCommand(KEY_ARROW_LEFT_COMMAND, (event: KeyboardEvent) => $moveAcross(event, 'before'), COMMAND_PRIORITY_HIGH),
+      editor.registerCommand(CLICK_COMMAND, (event: MouseEvent) => {
+        const target = event.target as HTMLElement | null;
+        if (!target || !target.closest('span[data-lexical-decorator]')) return false;
+        let handled = false;
+        editor.update(() => {
+          const ref = $collapsedAnchorRef();
+          if (!ref) return;
+          const hostEl = editor.getElementByKey(ref.getKey());
+          const rect = hostEl?.getBoundingClientRect();
+          const before = !rect || event.clientX < rect.left + rect.width / 2;
+          if (before) $placeBefore(ref);
+          else $placeAfter(ref);
+          handled = true;
+        });
+        return handled;
+      }, COMMAND_PRIORITY_HIGH),
+    ];
+    return () => unbinds.forEach((unbind) => unbind());
+  }, [editor]);
+  return null;
+}
+
 const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(function PromptRefEditor(
   { initialDoc, initialText, placeholder, readOnly, labelOf, reconcileKey, labels, refsMeta, onChange, onMentionChange, onInvalidTagClick, onMentionKey, className },
   ref,
@@ -390,6 +478,7 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
       <MentionPlugin onMentionChange={onMentionChange} mentionAnchorRef={mentionAnchorRef} />
       <MentionKeyPlugin onMentionKey={onMentionKey} />
       <BackspaceRefPlugin />
+      <RefCursorNavPlugin />
       <ReconcilePlugin labelOf={labelOf} reconcileKey={reconcileKey} />
       <HistoryPlugin />
       <OnChangePlugin

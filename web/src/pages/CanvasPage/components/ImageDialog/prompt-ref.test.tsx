@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /* IKFA1M：ImageDialog 正文素材标签——@ 菜单/插入/编号一致性/失效阻止生成/删除提及 */
 import { act, createElement } from 'react';
-import { $createRangeSelection, $getRoot, $isTextNode, $nodesOfType, $setSelection, KEY_BACKSPACE_COMMAND, SKIP_DOM_SELECTION_TAG } from 'lexical';
+import { $createRangeSelection, $getRoot, $getSelection, $isRangeSelection, $isTextNode, $nodesOfType, $setSelection, KEY_ARROW_LEFT_COMMAND, KEY_ARROW_RIGHT_COMMAND, KEY_BACKSPACE_COMMAND, SKIP_DOM_SELECTION_TAG } from 'lexical';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment } from './index';
@@ -317,6 +317,62 @@ describe('IKFA1M 失效与删除（B1 基础/阻止生成）', () => {
     });
     expect(readPromptRefText(container)).toBe('前后');
   });
+
+  const DOC_REF_BETWEEN: PromptDoc = {
+    version: 1,
+    segments: [
+      { kind: 'text', text: '前' },
+      { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+      { kind: 'text', text: '后' },
+    ],
+  };
+
+  function anchorOf(editor: ReturnType<typeof promptRefEditorInstance>) {
+    return editor.read(() => {
+      const s = $getSelection();
+      if (!$isRangeSelection(s)) return null;
+      return { type: s.anchor.type, offset: s.anchor.offset };
+    });
+  }
+
+  async function collapseTo(editor: ReturnType<typeof promptRefEditorInstance>, side: 'before' | 'ref' | 'after', offset: number, type: 'text' | 'node') {
+    await act(async () => {
+      editor.update(() => {
+        const ref = $nodesOfType(AssetRefNode)[0]!;
+        const target = side === 'before' ? ref.getPreviousSibling() : side === 'after' ? ref.getNextSibling() : ref;
+        const sel = $createRangeSelection();
+        sel.anchor.set(target!.getKey(), offset, type);
+        sel.focus.set(target!.getKey(), offset, type);
+        $setSelection(sel);
+      }, { tag: SKIP_DOM_SELECTION_TAG });
+    });
+  }
+
+  async function pressArrow(editor: ReturnType<typeof promptRefEditorInstance>, key: 'ArrowLeft' | 'ArrowRight') {
+    const command = key === 'ArrowLeft' ? KEY_ARROW_LEFT_COMMAND : KEY_ARROW_RIGHT_COMMAND;
+    await act(async () => {
+      editor.dispatchCommand(command, new KeyboardEvent('keydown', { key, bubbles: true }));
+    });
+  }
+
+  it('Right 在标签前文本末尾：一步跨到标签后文本开头', async () => {
+    await renderDialog({ mediaRefs: [REF_A], initialDoc: DOC_REF_BETWEEN });
+    const editor = promptRefEditorInstance(container);
+    await collapseTo(editor, 'before', 1, 'text');
+    await pressArrow(editor, 'ArrowRight');
+    await vi.waitFor(() => expect(anchorOf(editor)).toEqual({ type: 'text', offset: 0 }));
+  });
+
+  it('Left 在标签后文本开头：一步跨回标签前文本末尾', async () => {
+    await renderDialog({ mediaRefs: [REF_A], initialDoc: DOC_REF_BETWEEN });
+    const editor = promptRefEditorInstance(container);
+    await collapseTo(editor, 'after', 0, 'text');
+    await pressArrow(editor, 'ArrowLeft');
+    await vi.waitFor(() => expect(anchorOf(editor)).toEqual({ type: 'text', offset: 1 }));
+  });
+
+  // 「光标停在标签边界点（node 点）→ 左右键立即跳出」两分支与上面共用同一落点逻辑，
+  // jsdom 无法构造 node 点选区（selection 被清空），该场景由浏览器人工验证覆盖。
 
   it('删除一次提及只删该处（附件与其他提及保留）', async () => {
     const dup: PromptDoc = {
