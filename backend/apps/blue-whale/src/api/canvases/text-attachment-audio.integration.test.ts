@@ -335,20 +335,25 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
   });
 
   // 浏览器段（工单「验收证据」节）：真实浏览器 + 真实业务 API + 隔离 MySQL 走完整音频提交路径。
-  // 覆盖：从画布选择建线（到节点选择）、重复来源去重、同名卡不串用（完整正文预览）、
-  // × 移除断线（仅断当前目标）、发送冻结（附件正文 + 主提示词共同入库）、刷新恢复关系。
-  it.runIf(process.env.IKFCXE_BROWSER)("browser: pick → dedupe → same-title preview → remove → send freezes → reload restores", async () => {
+  // 覆盖：从画布选择建线（到节点选择）、重复来源去重、同名卡不串用（完整正文预览）、长文浮层滚动至末尾、
+  // 移入浮层保持/移出关闭、切换目标后返回恢复、× 移除断线（仅断当前目标）、发送冻结（附件正文 + 主提示词共同入库）、刷新恢复关系。
+  it.runIf(process.env.IKFCXE_BROWSER)("browser: pick → dedupe → same-title preview → long-text scroll/hover-into → target switch → remove → send freezes → reload restores", async () => {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     const projectId = (await projects.create("987654", "IKFCXE browser")).id;
-    // 播种：t1 已连线（正文A）、t2 未连线同标题（正文B——同名卡身份靠 node_id 区分）；
+    // 播种：t1 已连线两目标（正文A）、t2 未连线同标题长正文（同名卡身份靠 node_id 区分；
+    // 多段落 + 末尾标记用于浮层滚动到底验收）；media-2 承载切换目标验收。
     // 生成目标为成品卡身份（jobId），点击卡自动打开音频草稿面板。
+    const longBody = Array.from({ length: 24 }, (_, i) => `第${i + 1}段落：雷声滚过屋顶，雨点砸在窗台上。`).join("\n");
+    const LONG_TAIL_MARK = "末尾标记-QZ3";
     const seeded = await saveCanvas(projectId, [
       { id: "text-1", type: "textNode", position: { x: 140, y: 160 }, data: { title: "雨夜", text: "雨夜街道，两个人争吵" } },
-      { id: "text-2", type: "textNode", position: { x: 140, y: 420 }, data: { title: "雨夜", text: "远处有雷声" } },
+      { id: "text-2", type: "textNode", position: { x: 140, y: 420 }, data: { title: "雨夜", text: `${longBody}\n远处有雷声\n${LONG_TAIL_MARK}` } },
       { id: "media-1", type: "mediaNode", position: { x: 900, y: 120 }, data: { mediaType: "audio", fileName: "目标音频", jobId: "ikfcxe-seed-job", draftModelId: MODEL_ID } },
+      { id: "media-2", type: "mediaNode", position: { x: 900, y: 460 }, data: { mediaType: "audio", fileName: "目标音频二", jobId: "ikfcxe-seed-job-2", draftModelId: MODEL_ID } },
     ], [
       { id: "e-t1-m1", source: "text-1", target: "media-1" },
+      { id: "e-t1-m2", source: "text-1", target: "media-2" },
     ], "missing", JSON.stringify({ x: 0, y: 0, zoom: 1 }));
     expect(seeded.status).toBe(200);
 
@@ -371,10 +376,12 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
       const text2 = page.locator('.react-flow__node-textNode[data-id="text-2"]');
       const media = page.locator('.react-flow__node-mediaNode[data-id="media-1"]');
+      const media2 = page.locator('.react-flow__node-mediaNode[data-id="media-2"]');
       await text2.waitFor();
       await media.waitFor();
+      await media2.waitFor();
       await vi.waitFor(async () => {
-        expect(await page.locator(".react-flow__edge").count(), "播种连线应渲染").toBe(1);
+        expect(await page.locator(".react-flow__edge").count(), "播种连线应渲染").toBe(2);
       });
       expect(generationRequests).toEqual([]);
 
@@ -400,9 +407,43 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       await text2.click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(2));
 
-      // 同名卡不串用：第二个缩略图预览的是 text-2 自己的正文
+      // 切换目标后返回：media-2 面板只有自己的关系（text-1），返回 media-1 恢复两枚附件
+      await media2.locator('[data-testid="media-content"]').click();
+      await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
+      await media.locator('[data-testid="media-content"]').click();
+      await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(2));
+
+      // 同名卡不串用：第二个缩略图预览的是 text-2 自己的正文；浮层不带来源标题
       await page.locator('[data-testid="dock-text-ref"]').nth(1).hover();
       await vi.waitFor(async () => expect(await overlay.innerText()).toContain("远处有雷声"));
+      expect(await overlay.innerText(), "浮层无标题（来源名称不进浮层）").not.toContain("雨夜");
+
+      // 长文滚动至末尾（IKFCVS 测试决策：长文可读至末尾而非截断摘要）
+      const scrollable = await overlay.evaluate((el) => {
+        const inner = el.firstElementChild as HTMLElement | null;
+        return inner ? { scrollHeight: inner.scrollHeight, clientHeight: inner.clientHeight } : null;
+      });
+      expect(scrollable, "长文超出浮层上限形成滚动区").not.toBeNull();
+      expect(scrollable!.scrollHeight).toBeGreaterThan(scrollable!.clientHeight);
+      await overlay.evaluate((el) => {
+        const inner = el.firstElementChild as HTMLElement;
+        inner.scrollTop = inner.scrollHeight;
+      });
+      await overlay.locator(`text=${LONG_TAIL_MARK}`).waitFor();
+      const tailVisible = await overlay.evaluate((el) => {
+        const inner = el.firstElementChild as HTMLElement;
+        return Math.abs(inner.scrollHeight - inner.scrollTop - inner.clientHeight) < 8;
+      });
+      expect(tailVisible, "长文本可滚动至末尾").toBe(true);
+
+      // 移入浮层保持打开 / 移出图标与浮层后关闭（IKFCVS 用户故事 14/15）
+      const overlayBox = (await overlay.boundingBox())!;
+      await page.mouse.move(overlayBox.x + overlayBox.width / 2, overlayBox.y + overlayBox.height / 2);
+      await page.waitForTimeout(400);
+      expect(await overlay.count(), "鼠标移入浮层保持打开").toBe(1);
+      await page.mouse.move(120, 60);
+      await page.waitForTimeout(400);
+      expect(await overlay.count(), "移出图标与浮层后关闭").toBe(0);
 
       // 重复选择同一来源去重：再选 text-2，数量不变
       await pickFromCanvas();
@@ -415,7 +456,7 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       await page.locator('[data-testid="dock-text-ref"]').nth(1).locator('button[title="移除"]').click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
       await vi.waitFor(async () => {
-        expect(await page.locator(".react-flow__edge").count(), "断线后画布连线归 1").toBe(1);
+        expect(await page.locator(".react-flow__edge").count(), "断线后画布连线归 2（text-1 仍连两目标）").toBe(2);
       });
 
       // 发送：主提示词非空（音频不允许仅附件发送）；请求体携带 target_node_id 且 type=audio
@@ -443,7 +484,7 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       await text2.waitFor();
       await media.waitFor();
       await vi.waitFor(async () => {
-        expect(await page.locator(".react-flow__edge").count(), "刷新后连线恢复渲染").toBe(1);
+        expect(await page.locator(".react-flow__edge").count(), "刷新后连线恢复渲染").toBe(2);
       });
       await media.locator('[data-testid="media-content"]').click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
