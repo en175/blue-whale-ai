@@ -403,7 +403,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
       }, { timeout: 10_000 });
       await page.reload();
       await nodeById(draftId).waitFor();
-      await vi.waitFor(async () => expect(await edges.count(), "刷新恢复全部连线").toBe(3));
+      await vi.waitFor(async () => expect(await edges.count(), "刷新恢复全部连线").toBe(4));
       await nodeById(draftId).locator('[data-testid="media-content"]').click();
       await vi.waitFor(async () => expect(await dockRefs.count(), "刷新后 Dock 显示首尾帧").toBe(2));
       await page.getByText("文本附件（1）").waitFor();
@@ -517,6 +517,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
     const projectId = (await projects.create("987654", "IKFDFW browser")).id;
     const imageAsset = await createAsset(projectId, "image", "https://example.com/ikfdfw-ref-one.png");
     const videoAsset = await createAsset(projectId, "video", "https://example.com/ikfdfw-ref-video.mp4");
+    const audioAsset = await createAsset(projectId, "audio", "https://example.com/ikfdfw-ref-audio.mp3");
     const frameFirstAsset = await createAsset(projectId, "image", "https://example.com/ikfdfw-frame-first.png");
     const frameLastAsset = await createAsset(projectId, "image", "https://example.com/ikfdfw-frame-last.png");
     expect(
@@ -526,6 +527,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
           // 布局：d2 草稿居中（跟随面板悬停其附近），素材卡沿左右两列分布避开面板遮挡
           readyImageNode("m1", imageAsset, "普通参考图", 60, 520),
           { id: "v1", type: "mediaNode", position: { x: 60, y: 760 }, data: { src: `https://example.com/v1.mp4`, mediaType: "video", fileName: "参考视频", assetId: videoAsset } },
+          { id: "s1", type: "mediaNode", position: { x: 60, y: 1000 }, data: { src: `https://example.com/s1.mp3`, mediaType: "audio", fileName: "参考音频", assetId: audioAsset } },
           readyImageNode("f1", frameFirstAsset, "首帧图", 1150, 80),
           readyImageNode("f2", frameLastAsset, "尾帧图", 1150, 620),
           videoDraftNode("dk", "", "keyframe", 700, 900),
@@ -567,11 +569,11 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
         return (JSON.parse(canvas.edges) as Array<{ source: string; target: string; data?: { refRole?: string } }>)
           .map((e) => `${e.source}->${e.target}${e.data?.refRole ? `:${e.data.refRole}` : ""}`);
       };
-      /** Dock 普通参考槽「到节点选择」：来源菜单两步入场（IKDLQR 起上传退役，入口合并为来源菜单）；
+      /** Dock 普通参考槽「从节点添加素材」（IKFE8U 起统一入口）：来源菜单两步入场；
        *  跟随面板悬停草稿卡附近，素材卡与面板在 Playwright 命中检测上重叠，统一 DOM 派发直触发（真实链路不变） */
       async function pickFromCanvas(slotTitle: string, sourceId: string) {
         await page.locator(`button[title="${slotTitle}"]`).dispatchEvent("click");
-        await page.getByText("到节点选择", { exact: true }).dispatchEvent("click");
+        await page.getByText("从节点添加素材", { exact: true }).dispatchEvent("click");
         await nodeById(sourceId).locator('[data-testid="media-content"]').dispatchEvent("click");
       }
 
@@ -581,7 +583,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
       // 1) 打开普通草稿 d2：图片参考选取 → 立即建线（IKFDFW：不等待发送）
       await nodeById("d2").locator('[data-testid="media-content"]').click();
       await editor.waitFor();
-      await pickFromCanvas("添加图片参考（从资产中选择 / 到节点选择 / 角色库）", "m1");
+      await pickFromCanvas("从资产中选择 / 从节点添加素材", "m1");
       await vi.waitFor(async () => expect(await edges.count(), "图片选取立即建线").toBe(3));
       await vi.waitFor(async () => expect(await dockRefs.count()).toBe(1));
 
@@ -592,9 +594,17 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
       expect(generationRequests, "保存参考不创建生成任务").toEqual([]);
 
       // 2) 视频参考槽再选 v1：第二条连线，Dock 两项按边序
-      await pickFromCanvas("添加视频参考（从资产中选择 / 到节点选择 / 角色库）", "v1");
+      await pickFromCanvas("从资产中选择 / 从节点添加素材", "v1");
       await vi.waitFor(async () => expect(await edges.count()).toBe(4));
       await vi.waitFor(async () => expect(await dockRefs.count()).toBe(2));
+
+      // 2b) IKFE8U 统一入口音频接纳：同一「+」选音频节点 s1 → 第三条连线，Dock 三项
+      await pickFromCanvas("从资产中选择 / 从节点添加素材", "s1");
+      await vi.waitFor(async () => expect(await edges.count(), "音频选取立即建线").toBe(5));
+      await vi.waitFor(async () => expect(await dockRefs.count()).toBe(3));
+      await vi.waitFor(async () => {
+        expect(await savedPairs(), "音频参考连线落盘").toContain("s1->d2");
+      }, { timeout: 10_000 });
 
       // 3) A→B→A：点 keyframe 草稿 dk（首尾帧角色恢复，B 不串入）→ 点回 d2 完整恢复
       await nodeById("dk").locator('[data-testid="media-content"]').click();
@@ -603,14 +613,14 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-video-ref"][title="首帧图"]').count()).toBe(1));
       await nodeById("d2").locator('[data-testid="media-content"]').click();
       await editor.waitFor();
-      await vi.waitFor(async () => expect(await dockRefs.count(), "切回 A 恢复全部普通参考").toBe(2));
+      await vi.waitFor(async () => expect(await dockRefs.count(), "切回 A 恢复全部普通参考").toBe(3));
 
       // 4) 关闭重开：参考恢复（视频面板点击空白不自动关闭，关闭走右上角 ×）
       await page.locator('button[title="关闭"]').dispatchEvent("click");
       await vi.waitFor(async () => expect(await editor.count(), "关闭后面板退出").toBe(0));
       await nodeById("d2").locator('[data-testid="media-content"]').click();
       await editor.waitFor();
-      await vi.waitFor(async () => expect(await dockRefs.count(), "重开恢复全部参考").toBe(2));
+      await vi.waitFor(async () => expect(await dockRefs.count(), "重开恢复全部参考").toBe(3));
 
       // 5) 保存失败：保留选择并显示未保存，阻止发送，重试成功后落盘
       let failSave = true;
@@ -621,13 +631,13 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
       await editor.click();
       await page.keyboard.type("失败保留");
       await page.getByText("保存失败，请重试").first().waitFor();
-      expect(await dockRefs.count(), "保存失败保留当前页面选择").toBe(2);
+      expect(await dockRefs.count(), "保存失败保留当前页面选择").toBe(3);
       expect(await page.locator('[data-testid="video-send"]').isDisabled(), "保存失败时阻止发送").toBe(true);
       // 允许关闭并重开原目标：编辑仍在
       await page.locator('button[title="关闭"]').dispatchEvent("click");
       await nodeById("d2").locator('[data-testid="media-content"]').click();
       await editor.waitFor();
-      await vi.waitFor(async () => expect(await dockRefs.count(), "重开原目标保留选择").toBe(2));
+      await vi.waitFor(async () => expect(await dockRefs.count(), "重开原目标保留选择").toBe(3));
       failSave = false;
       await page.getByRole("button", { name: "重试保存" }).click();
       await page.getByText("已保存").first().waitFor();
@@ -635,19 +645,19 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
       // 6) Dock 移除图片参考：仅断开 m1 连线，其他目标（dk 首帧）引用保持
       const removeButtons = dockRefs.locator('button[title="移除"]');
       await removeButtons.first().click();
-      await vi.waitFor(async () => expect(await edges.count()).toBe(3));
-      await vi.waitFor(async () => expect(await dockRefs.count()).toBe(1));
+      await vi.waitFor(async () => expect(await edges.count()).toBe(4));
+      await vi.waitFor(async () => expect(await dockRefs.count()).toBe(2));
       await vi.waitFor(async () => {
-        expect((await savedPairs()).sort(), "断线落盘且其他目标引用保持").toEqual(["f1->dk:first", "f2->dk:last", "v1->d2"]);
+        expect((await savedPairs()).sort(), "断线落盘且其他目标引用保持").toEqual(["f1->dk:first", "f2->dk:last", "s1->d2", "v1->d2"]);
       }, { timeout: 10_000 });
 
       // 7) 刷新恢复：连线与角色恢复，Dock 显示一致（从未生成）
       await page.reload();
       await nodeById("d2").waitFor();
-      await vi.waitFor(async () => expect(await edges.count(), "刷新恢复全部连线").toBe(3));
+      await vi.waitFor(async () => expect(await edges.count(), "刷新恢复全部连线").toBe(4));
       await nodeById("d2").locator('[data-testid="media-content"]').click();
       await editor.waitFor();
-      await vi.waitFor(async () => expect(await dockRefs.count(), "刷新后恢复视频参考").toBe(1));
+      await vi.waitFor(async () => expect(await dockRefs.count(), "刷新后恢复视频与音频参考").toBe(2));
       await nodeById("dk").locator('[data-testid="media-content"]').click();
       await editor.waitFor();
       await vi.waitFor(async () => expect(await dockRefs.count(), "刷新后恢复首尾帧").toBe(2));
@@ -655,14 +665,17 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
       // 8) 提交（普通参考）：references 按角色路由，DB 冻结输入 = Dock 显示
       await nodeById("d2").locator('[data-testid="media-content"]').click();
       await editor.waitFor();
-      await vi.waitFor(async () => expect(await dockRefs.count()).toBe(1));
+      await vi.waitFor(async () => expect(await dockRefs.count()).toBe(2));
       await editor.click();
       await page.keyboard.type("参考驱动生成");
       await page.locator('[data-testid="video-send"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(1), { timeout: 10_000 });
       const sent = generationRequests[0]!;
       expect(sent.target_node_id).toBe("d2");
-      expect(sent.references).toEqual([{ asset_id: videoAsset, type: "video", role: "reference" }]);
+      expect(sent.references).toEqual([
+        { asset_id: videoAsset, type: "video", role: "reference" },
+        { asset_id: audioAsset, type: "audio", role: "reference" },
+      ]);
       await vi.waitFor(async () => {
         const row = await prisma.client.generation_jobs.findFirst({
           where: { project_id: BigInt(projectId) }, orderBy: { id: "desc" },
@@ -670,8 +683,9 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
         expect(row).not.toBeNull();
         const job = await readJob(row!.id.toString());
         // DB 冻结输入 = 请求 references（IKFA1O 契约：references 数组原样冻结）
-        expect((job!.input.references as Array<{ asset_id: string; role: string }>)
-          .some((r) => r.asset_id === videoAsset && r.role === "reference")).toBe(true);
+        const frozenRefs = job!.input.references as Array<{ asset_id: string; type: string; role: string }>;
+        expect(frozenRefs.some((r) => r.asset_id === videoAsset && r.role === "reference")).toBe(true);
+        expect(frozenRefs.some((r) => r.asset_id === audioAsset && r.type === "audio" && r.role === "reference"), "音频参考随任务冻结").toBe(true);
       }, { timeout: 10_000 });
 
       // 9) 首尾帧草稿提交（角色端到端）：references 按 first_frame/last_frame 路由，DB 冻结一致

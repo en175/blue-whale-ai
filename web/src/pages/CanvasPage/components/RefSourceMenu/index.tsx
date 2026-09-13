@@ -10,6 +10,10 @@ interface RefSourceMenuProps {
   onPickFromCanvas: () => void;
   /** 画布选取模式进行中（「+」高亮提示） */
   pickMode?: boolean;
+  /** 具名槽位文字（IKFE8U 视频首尾帧：「首帧」/「尾帧」）；普通参考缺省纯「+」 */
+  label?: string;
+  /** 覆盖入口按钮 title（具名槽位传「添加首帧（…）」等便于定位与提示） */
+  entryTitle?: string;
 }
 
 /** 统一入口按钮 title（测试定位与组件渲染共用同一来源，文案调整不散落） */
@@ -19,7 +23,7 @@ export const REF_SOURCE_ENTRY_TITLE = '从资产中选择 / 从节点添加素�
  *  「从资产中选择」接资产库选择、「从节点添加素材」接画布节点选取。
  *  布局与样式遵循图片面板基准；视频/音频面板复用时由宿主在回调里
  *  对接目标槽位（首尾帧等角色），本组件不感知面板类型。 */
-export default function RefSourceMenu({ onPickFromAssets, onPickFromCanvas, pickMode }: RefSourceMenuProps) {
+export default function RefSourceMenu({ onPickFromAssets, onPickFromCanvas, pickMode, label, entryTitle }: RefSourceMenuProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -30,11 +34,18 @@ export default function RefSourceMenu({ onPickFromAssets, onPickFromCanvas, pick
   return (
     <div className={styles.sourceWrap} ref={wrapRef}>
       <button
-        className={`${styles.trigger} ${pickMode ? styles.picking : ''}`}
+        className={`${styles.trigger} ${label ? styles.triggerSlotted : ''} ${pickMode ? styles.picking : ''}`}
         onClick={() => setOpen((v) => !v)}
-        title={REF_SOURCE_ENTRY_TITLE}
+        title={entryTitle ?? REF_SOURCE_ENTRY_TITLE}
       >
-        <Plus size={18} strokeWidth={2} />
+        {label ? (
+          <>
+            <Plus size={16} strokeWidth={2} />
+            <span className={styles.triggerLabel}>{label}</span>
+          </>
+        ) : (
+          <Plus size={18} strokeWidth={2} />
+        )}
       </button>
       {open && (
         <>
