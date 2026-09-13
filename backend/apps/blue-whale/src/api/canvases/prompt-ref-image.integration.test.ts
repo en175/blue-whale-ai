@@ -31,6 +31,7 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
   const MODEL_ID = "ikfa1m-image-model";
+  const AUDIO_MODEL_ID = "ikfa1m-audio-model";
   let app: Awaited<ReturnType<typeof NestFactory.create>>;
   let base = "";
   const previousDatabase = process.env.DATABASE_URL;
@@ -60,6 +61,23 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
         default_size: "1024x1024",
         features: { reference_image: true, max_reference_images: 9 },
       },
+    });
+    // IKFCXE 起音频支持正文素材标签：D4 用例需要一条音频能力行承载合法接纳断言
+    await prisma.client.generation_model_capability.upsert({
+      where: { provider_id_model_id: { provider_id: "ikfa1m-test", model_id: AUDIO_MODEL_ID } },
+      create: {
+        provider_id: "ikfa1m-test",
+        model_id: AUDIO_MODEL_ID,
+        capability_type: "audio",
+        model_label: "IKFA1M Audio Test",
+        supported_sizes: [],
+        supported_aspect_ratios: [],
+        supported_formats: ["mp3"],
+        default_size: "mp3",
+        default_aspect_ratio: "1:1",
+        features: {},
+      },
+      update: { features: {} },
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
@@ -186,7 +204,7 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
     expect((job!.input.input_asset_ids as unknown[]).map(String)).toEqual([a, b]);
   });
 
-  it("失效标签 / 无效身份 / 非法版本 / 音频携带 → 400 且零任务（服务端复核，D4）", async () => {
+  it("失效标签 / 无效身份 / 非法版本 → 400 不建任务；音频空结构 prompt_doc 合法接纳（服务端复核，D4）", async () => {
     const projectId = (await projects.create("987654", "IKFA1M bad doc")).id;
     const a = await createImageAsset(projectId, "a");
 
@@ -205,17 +223,22 @@ describe.skipIf(!process.env.IKFA1M_DATABASE_URL)("Image prompt ref doc public A
     expect(badVersion.code).toBe(400);
     expect(badVersion.msg).toBe("prompt_doc 无效");
 
-    // IKFA1O 后仅 audio 拒绝；video 已支持（视频侧用例见 prompt-ref-video.integration.test.ts）
+    // IKFCXE 起音频支持正文素材标签（旧「音频携带一律 400」守卫已随该票退役）：
+    // 纯文本 prompt_doc 合法接纳，编译正文与原始结构随任务冻结（与单测「音频纯文本 prompt_doc 可接纳且冻结结构」同口径）
+    const audioDoc = { version: 1, segments: [{ kind: "text", text: "海浪声" }] };
     const audioType = await createJob(projectId, {
       type: "audio",
       expected_output_count: 1,
-      parameters: { prompt: "海浪声", model_id: MODEL_ID },
-      prompt_doc: { version: 1, segments: [] },
+      parameters: { prompt: "任意占位（编译正文覆盖）", model_id: AUDIO_MODEL_ID },
+      prompt_doc: audioDoc,
     });
-    expect(audioType.code).toBe(400);
-    expect(audioType.msg).toBe("正文素材标签暂仅支持图片与视频生成");
+    expect(audioType.code).toBe(200);
+    const audioJob = await readJob(audioType.data.generation_job_id);
+    expect(audioJob!.input.prompt_doc).toEqual(audioDoc);
+    expect(audioJob!.input.prompt).toBe("海浪声");
 
-    expect(await jobCount(projectId)).toBe(0);
+    // 前三个拒绝用例零任务；音频合法接纳建 1 个
+    expect(await jobCount(projectId)).toBe(1);
   });
 
   it("标签指向他人/不存在素材 → 参考复核先拒绝（invalid_reference），不建任务（D4）", async () => {

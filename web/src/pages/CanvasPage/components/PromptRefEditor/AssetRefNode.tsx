@@ -9,14 +9,13 @@ import type { JSX } from 'react';
 import { createContext, useContext } from 'react';
 import {
   DecoratorNode,
-  $getNodeByKey,
   type LexicalNode,
   type NodeKey,
   type SerializedLexicalNode,
   type Spread,
 } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import styles from './index.module.css';
 
 export type SerializedAssetRefNode = Spread<
@@ -53,12 +52,6 @@ function AssetRefChipComponent({
 }) {
   const { labels, meta, readOnly, onInvalidTagClick } = useContext(PromptRefContext);
   const [editor] = useLexicalComposerContext();
-  const handleRemove = () => {
-    if (!editor.isEditable()) return;
-    editor.update(() => {
-      $getNodeByKey(nodeKey)?.remove();
-    });
-  };
   const info = meta.get(assetId);
   // 失效：显示原编号，身份保留不转向；有效：按当前输入派生编号
   if (invalidLabel !== undefined) {
@@ -66,7 +59,7 @@ function AssetRefChipComponent({
       <span
         className={`${styles.refChip} ${styles.refChipInvalid}`}
         contentEditable={false}
-        title={`${info?.name ?? assetId}：原参考已移除。点击可替换为其他已引用素材，× 删除该提及`}
+        title={`${info?.name ?? assetId}：原参考已移除。点击可替换为其他已引用素材，退格键删除该提及`}
         data-testid="asset-ref-invalid"
         role={onInvalidTagClick && !readOnly ? 'button' : undefined}
         tabIndex={onInvalidTagClick && !readOnly ? 0 : undefined}
@@ -87,20 +80,6 @@ function AssetRefChipComponent({
       >
         <AlertTriangle size={12} strokeWidth={2} className={styles.refChipIcon} />
         <span className={styles.refChipLabel}>已失效：原{invalidLabel}</span>
-        {!readOnly && (
-          <button
-            type="button"
-            className={styles.refChipRemove}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleRemove();
-            }}
-            title="删除该提及（附件保留）"
-          >
-            <X size={12} strokeWidth={2} />
-          </button>
-        )}
       </span>
     );
   }
@@ -114,17 +93,6 @@ function AssetRefChipComponent({
     >
       {info?.url && info.mediaType !== 'audio' && info.mediaType !== 'video' && info.mediaType !== 'text' ? <img className={styles.refChipThumb} src={info.url} alt="" /> : null}
       <span className={styles.refChipLabel}>{label ?? '素材?'}</span>
-      {!readOnly && (
-        <button
-          type="button"
-          className={styles.refChipRemove}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={handleRemove}
-          title="删除该提及（附件保留）"
-        >
-          <X size={12} strokeWidth={2} />
-        </button>
-      )}
     </span>
   );
 }

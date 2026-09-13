@@ -35,21 +35,25 @@
   user-select: none;
 }
 
-/* 素材标签胶囊 */
+/* 素材标签胶囊：深色 + 线框（与 AssetCardNode .gcRef 同规范），删除走退格键 */
 .refChip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   margin: 0 2px;
-  padding: 1px 6px 1px 3px;
-  border-radius: 999px;
-  background: rgba(96, 165, 250, 0.16);
-  border: 1px solid rgba(96, 165, 250, 0.4);
-  color: #bfdbfe;
+  padding: 1px 6px 1px 5px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #e8e8ec;
   font-size: 12px;
   line-height: 20px;
   vertical-align: middle;
   user-select: none;
+}
+
+.refChip:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .refChipInvalid {
@@ -70,7 +74,7 @@
 .refChipThumb {
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: 4px;
   object-fit: cover;
 }
 
@@ -80,25 +84,6 @@
 
 .refChipLabel {
   white-space: nowrap;
-}
-
-.refChipRemove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  opacity: 0.75;
-}
-
-.refChipRemove:hover {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.12);
 }
 
 /* @ 菜单：已引用 + 添加新参考 */
