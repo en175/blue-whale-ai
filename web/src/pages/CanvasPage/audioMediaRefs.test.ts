@@ -110,7 +110,7 @@ describe('audioMediaRefsOf 连线推导音频参考', () => {
     const dangling = [{ id: 'x', type: 'mediaNode', position: { x: 0, y: 0 } }] as Node[];
     expect(audioMediaRefsOf('d1', [{ id: 'e1', source: 'x', target: 'd1' }] as Edge[], dangling).refs).toEqual([]);
     expect(audioMediaRefsOf('d1', [{ id: 'e1', source: 'x', target: 'd1' }] as Edge[], dangling).invalid)
-      .toEqual([{ nodeId: 'x', name: 'x', reason: '素材已被删除' }]);
+      .toEqual([{ nodeId: 'x', name: 'x', reason: '音频参考仅支持音频素材' }]);
   });
 });
 

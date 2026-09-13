@@ -345,6 +345,28 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     expect(container.querySelector('[data-testid="audio-input"]')?.textContent).toContain('环境音');
   });
 
+  it('空白隐藏重开：点击画布空白隐藏面板，参考与提示词保留，重开原目标恢复', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+    await typePrompt('空白隐藏描述');
+
+    await pickCanvasNode('u1');
+    await pickCanvasNode('u2');
+    await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声']), { timeout: 3000 });
+
+    // 画布空白点击隐藏面板（Q9：隐藏不丢弃，绑定保留供重开原目标）
+    await act(async () => {
+      flowProps.current.onPaneClick();
+    });
+    expect(refNames()).toEqual([]);
+
+    await clickNode('d1');
+    await waitModelReady();
+    await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声']), { timeout: 3000 });
+    expect(container.querySelector('[data-testid="audio-input"]')?.textContent).toContain('空白隐藏描述');
+  });
+
   it('A→B→A 目标隔离：A 的参考与提示词保留，B 不串入 A；B 独立积累自己的参考', async () => {
     seedDoc({ secondDraft: true });
     await renderPage();

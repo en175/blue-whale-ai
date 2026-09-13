@@ -4,7 +4,7 @@
  * 音频参考无角色槽（服务端契约 role 恒 reference），随连线顺序持久化（服务端零改动）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
-import { cardNameOfNode, readAssetId } from './mediaRefs';
+import { baseSourceError, cardNameOfNode, readAssetId } from './mediaRefs';
 
 /** 参考音频上限（与服务端 seed-audio 契约一致：音频 ≤3、图片 ≤1、不可混用；
  *  前端音频面板不提供图片入口——后端图片能力不等于新增入口） */
@@ -25,22 +25,14 @@ export function isAudioDraftNode(node: Node | undefined): boolean {
   return data.draft === true && data.mediaType === 'audio';
 }
 
-/** 来源有效性：与图片/视频参考同口径（仅有效媒体结果）；音频参考仅接受音频素材——
- *  服务端契约允许单图片参考，但音频面板不提供图片入口（画布选取/@/面板列表/拖线均不放行），
- *  非音频来源给出用户可读拒绝原因，不静默丢弃。 */
+/** 来源有效性：与图片/视频参考同口径（仅有效媒体结果，baseSourceError 共享）；音频参考仅
+ *  接受音频素材——服务端契约允许单图片参考，但音频面板不提供图片入口（画布选取/@/面板列表/
+ *  拖线均不放行），非音频来源给出用户可读拒绝原因，不静默丢弃。 */
 export function audioRefSourceError(node: Node | undefined): string | null {
   if (!node) return '素材不存在';
   const data = (node.data ?? {}) as Record<string, unknown>;
-  if (data.genStatus === 'draft') return '待生成的草稿不能作为参考';
-  if (data.genStatus === 'generating') return '生成中的卡片不能作为参考';
-  if (data.genStatus === 'failed' || data.genStatus === 'cancelled') return '生成失败的卡片不能作为参考';
-  if (data.assetMissing) return '素材已被删除';
-  const src = typeof data.src === 'string' ? data.src : '';
-  if (src.startsWith('blob:')) return '素材上传中，请稍候再选择';
-  if (!src) return '素材已被删除';
   if (data.mediaType !== 'audio') return '音频参考仅支持音频素材';
-  if (readAssetId(data) === undefined) return '素材未关联资产，无法作为参考';
-  return null;
+  return baseSourceError(node);
 }
 
 /** 目标节点的音频媒体参考：连线 target=该节点，按连线顺序；失效来源保留原因并阻止提交，

@@ -2535,6 +2535,8 @@ export default function CanvasPage() {
     setAudioPickResult(null);
     const legacyRefs = Array.isArray(d.audioRefs) ? d.audioRefs as AudioRefItem[] : [];
     if (legacyRefs.length > 0) {
+      // 迁移是「表达形式转换」而非添加入口（数据在旧机制下已被接纳），不走 checkAddAudioRef——
+      // 失效/重复来源按连线模型落到 invalid/去重兜底，不静默丢弃存量数据
       for (const item of legacyRefs) {
         if (item.source !== 'canvas') continue;
         if (!mediaNodesRef.current.some((n) => n.id === item.id)) continue;

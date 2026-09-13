@@ -342,8 +342,11 @@ export default function AudioDialog({
 
   /** 连线来源失效（IKFDFZ）：保留参考与原因提示并阻止发送，恢复素材或断开连线后解除 */
   const invalidDraftRefs = (draftRefInvalid ?? []).length > 0;
+  /** 发送防线（IKFDFZ）：正常路径添加侧已拦超限；异常预置/迁移数据超上限时明确阻止，
+   *  不静默截断（与服务端 ≤3 契约同口径） */
+  const overflowRefs = currentRefs.length > MAX_AUDIO_REFS;
   const handleSend = () => {
-    if (!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || draftBinding?.saveFailed) return;
+    if (!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || overflowRefs || draftBinding?.saveFailed) return;
     onSend(text.trim(), modelId, currentRefs, promptDoc);
     // 草稿绑定发送后保留输入（卡片原地转生成中，面板进入只读），非草稿保持清空
     if (!draftBinding) {
@@ -495,6 +498,11 @@ export default function AudioDialog({
           onChange={(doc, value) => { setPromptDoc(doc); setText(value); draftBinding?.onParamsChange({ prompt: value, promptDoc: doc }); }} />
       </div>
       {invalidPrompt && <div role="alert">正文有已失效的素材标签或超过字数上限，请调整后发送</div>}
+      {overflowRefs && (
+        <div role="alert" data-testid="audio-ref-overflow">
+          {`参考音频最多 ${MAX_AUDIO_REFS} 段，请移除多余参考后发送`}
+        </div>
+      )}
       {invalidDraftRefs && (
         <div role="alert" data-testid="audio-ref-invalid">
           {draftRefInvalid!.map((item) => `${item.name}：${item.reason}，请恢复素材或移除后发送`).join('；')}
@@ -549,7 +557,7 @@ export default function AudioDialog({
           <button
             className={`${styles.sendBtn} ${text.trim() && modelId ? styles.sendBtnActive : ''}`}
             data-testid="audio-send"
-            disabled={!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || draftBinding?.saveFailed}
+            disabled={!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || overflowRefs || draftBinding?.saveFailed}
             onClick={handleSend}
             title="发送"
           >
