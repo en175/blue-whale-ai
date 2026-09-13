@@ -20,9 +20,9 @@ vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-const flowProps: { current: Record<string, unknown> } = { current: {} };
+const flowProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/Canvas', () => ({
-  default: (props: Record<string, unknown>) => {
+  default: (props: Record<string, any>) => {
     flowProps.current = props;
     return createElement('div', { 'data-testid': 'flow-canvas' });
   },
@@ -40,9 +40,9 @@ vi.mock('./components/ProjectSelector', () => ({
   default: () => createElement('div', { 'data-testid': 'project-selector' }),
 }));
 
-const pickerProps: { current: Record<string, unknown> } = { current: {} };
+const pickerProps: { current: Record<string, any> } = { current: {} };
 vi.mock('./components/AssetsPickerModal', () => ({
-  default: (props: Record<string, unknown>) => {
+  default: (props: Record<string, any>) => {
     pickerProps.current = props;
     return createElement('div', { 'data-testid': 'assets-picker-stub' });
   },
@@ -65,7 +65,7 @@ const apiMocks = vi.hoisted(() => ({
     _payload: { viewport: unknown; nodes: Node[]; edges: Array<{ id: string; source: string; target: string; data?: unknown }> },
     _version: number | null,
   ) => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
-  createGenerationJob: vi.fn(async (_projectId: string, _payload: Record<string, unknown>) => ({ generation_job_id: 'j1', cursor: 1 })),
+  createGenerationJob: vi.fn(async (_projectId: string, _payload: Record<string, any>) => ({ generation_job_id: 'j1', cursor: 1 })),
   fetchJobStatus: vi.fn(async () => ({
     job_id: 'j1',
     status: 'succeeded',
@@ -221,8 +221,8 @@ function audioModel(): GenerationModel {
     provider_id: 'prov',
     model_label: '测试音频模型',
     icon: null,
-    supported_sizes: null,
-    supported_aspect_ratios: null,
+    supported_sizes: [],
+    supported_aspect_ratios: [],
     supported_formats: [],
     supported_durations: null,
     default_size: null,
@@ -484,7 +484,7 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await closePanel();
     await clickNode('d1');
     await vi.waitFor(() => expect(refNames('dock-media-ref').length).toBe(2));
-    expect(edgePairs().every((pair) => pair.endsWith('->d1'))).toBe(true);
+    expect(edgePairs().every((pair: string) => pair.endsWith('->d1'))).toBe(true);
   });
 
   it('视频面板普通参考资产库选择：已有同身份图片节点复用建线，画布外新素材建来源卡建线', async () => {
