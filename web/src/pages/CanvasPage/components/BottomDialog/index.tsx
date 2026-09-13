@@ -2,7 +2,9 @@ import PromptSyncActions from '../PromptSyncActions';
 /* ============================================
  * BottomDialog 视频对话窗口：模型/时长/宽高比配置与发送
  * 统一草稿绑定模式：参考由「画布连线 + 草稿 material refs」合并推导（首帧/尾帧/普通参考）。
- * 三类来源菜单：从资产中选择（落画布节点+连线）/ 到节点选择（建线）/ 角色库（入草稿 data）。
+ * 统一附件来源入口（IKFE8U 复用 IKFE8T 基准）：普通参考区单「+」展开两项菜单
+ * ——从资产中选择（落画布节点+连线）/ 从节点添加素材（建线）；角色库菜单项退役
+ * （存量 material 参考仍随草稿 data 展示与移除），首尾帧为具名槽位（仅图片）。
  * IKFA1O：正文编辑接入 PromptRefEditor——图片/视频/音频以稳定身份插入正文标签，
  * 首尾帧按角色显示，普通参考按同类型编号；模式不兼容时标签失效并阻止发送。
  * ============================================ */
@@ -10,15 +12,10 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   ChevronDown,
   X,
-  Image,
-  Video,
   SlidersHorizontal,
   ArrowUp,
-  MousePointerClick,
-  FolderOpen,
   Maximize2,
   Minimize2,
-  User,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { REF_LIMITS } from '@/utils/ref-overflow';
@@ -39,6 +36,7 @@ import PromptRefEditor, {
 } from '../PromptRefEditor';
 import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
 import RefThumbnail from '../RefThumbnail';
+import RefSourceMenu from '../RefSourceMenu';
 import { useMixedRefStrip, orderRefStripItems, videoRefStripKey, useRefStripDrag, type RefStripOrderProps, type StripDragItemProps } from '../RefThumbnail/strip-dnd';
 import { refIdOf, videoLabelMapOf } from '../../videoPromptRefs';
 import type { ImageTextAttachment } from '../ImageDialog';
@@ -124,15 +122,14 @@ interface BottomDialogProps extends RefStripOrderProps {
   /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；IKFCKT 拖拽换位消费
    *  （顺序即生成上下文拼接顺序；上移/下移 UI 随独立文本附件区块下线，能力由拖拽补位） */
   onReorderAttachments?: (orderedNodeIds: string[]) => void;
-  /** 到节点选择：进入画布节点选取模式（image 图片节点 / video 视频节点）；
+  /** 从节点添加素材：进入画布节点选取模式；kind 为槽位类型边界——
+   *  'image' 仅图片（首尾帧槽 / 图生视频普通参考）、'video' 全能参考（图/视频/音频）；
    *  role 为视频草稿目标参考角色（首帧/尾帧显式指定，IKDMQS），缺省普通参考 */
   onPickFromCanvas?: (kind: 'image' | 'video', role?: VideoRefRole) => void;
   /** 从资产中选择：打开资产库选择弹窗（按 kind 过滤媒体类型；role 为目标槽位角色） */
   onPickFromAssets?: (kind: 'image' | 'video', role?: VideoRefRole) => void;
-  /** 画布选取模式进行中（image/video，对应按钮高亮提示） */
+  /** 画布选取模式进行中（image/video，入口「+」高亮提示） */
   pickMode?: 'image' | 'video' | null;
-  /** 打开角色库弹窗（role 为目标槽位角色） */
-  onOpenCharacterLibrary?: (role?: VideoRefRole) => void;
   /** 视频草稿绑定（IKDMQS）：面板编辑实时写回草稿节点；status 为 generating 时参数与输入只读 */
   videoDraftBinding: {
     status?: MediaGenStatus;
@@ -187,7 +184,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
   /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -228,19 +225,15 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   const [duration, setDuration] = useState(0);
   const [modelOpen, setModelOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
-  /** 槽位来源菜单（按 kind+role 区分，一次只弹一个）：从资产中选择 / 到节点选择 / 角色库 */
-  const [sourceMenuOpen, setSourceMenuOpen] = useState<{ kind: 'image' | 'video'; role: VideoRefRole } | null>(null);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const sizeWrapRef = useRef<HTMLDivElement>(null);
   const modeWrapRef = useRef<HTMLDivElement>(null);
   const configPanelRef = useRef<HTMLDivElement>(null);
-  const sourceMenuRef = useRef<HTMLDivElement>(null);
 
   useDismissOnOutside([
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
     { open: sizeOpen, ref: sizeWrapRef, dismiss: () => setSizeOpen(false) },
     { open: modeOpen, ref: modeWrapRef, dismiss: () => setModeOpen(false) },
-    { open: sourceMenuOpen !== null, ref: sourceMenuRef, dismiss: () => setSourceMenuOpen(null) },
     { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
   ]);
 
@@ -631,56 +624,19 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     { open: replaceTarget !== null, ref: replaceMenuRef, dismiss: () => setReplaceTarget(null) },
   ]);
 
-  /** 槽位来源菜单（统一草稿绑定）：按 kind+role 区分目标槽位，一次只弹一个；
-   *  三项来源：从资产中选择（落画布节点+连线）/ 到节点选择（建线）/ 角色库（入草稿 data） */
-  const renderSourceMenu = (
-    kind: 'image' | 'video',
-    role: VideoRefRole,
-    title: string,
-    Icon: typeof Image,
-    label?: string,
-  ) => {
-    const isOpen = sourceMenuOpen?.kind === kind && sourceMenuOpen.role === role;
-    return (
-      <div className={styles.sourceWrap} ref={isOpen ? sourceMenuRef : undefined}>
-        <button
-          className={`${styles.mediaBtn} ${pickMode === kind ? styles.mediaBtnPicking : ''}`}
-          title={title}
-          onClick={() => setSourceMenuOpen(isOpen ? null : { kind, role })}
-        >
-          {label ? <span className={styles.mediaBtnLabel}>{label}</span> : <Icon size={18} strokeWidth={2} />}
-        </button>
-        {isOpen && (
-          <>
-            <div className={styles.menuOverlay} onClick={() => setSourceMenuOpen(null)} />
-            <div className={styles.sourceMenu}>
-              <button
-                className={styles.sourceMenuItem}
-                onClick={() => { setSourceMenuOpen(null); onPickFromAssets?.(kind, role); }}
-              >
-                <FolderOpen size={14} strokeWidth={2} />
-                <span>从资产中选择</span>
-              </button>
-              <button
-                className={styles.sourceMenuItem}
-                onClick={() => { setSourceMenuOpen(null); onPickFromCanvas?.(kind, role); }}
-              >
-                <MousePointerClick size={14} strokeWidth={2} />
-                <span>到节点选择</span>
-              </button>
-              <button
-                className={styles.sourceMenuItem}
-                onClick={() => { setSourceMenuOpen(null); onOpenCharacterLibrary?.(role); }}
-              >
-                <User size={14} strokeWidth={2} />
-                <span>角色库</span>
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    );
-  };
+  /** 统一附件来源入口（IKFE8U，复用 IKFE8T 图片面板基准）：按 kind+role 对接目标槽位，
+   *  单「+」展开「从资产中选择 / 从节点添加素材」两项菜单（角色库菜单项退役）；
+   *  kind 为槽位类型边界——'image' 仅图片（首尾帧槽 / 图生视频普通参考）、
+   *  'video' 全能参考（图/视频/音频）；pickMode 进行中「+」高亮。 */
+  const renderSourceMenu = (kind: 'image' | 'video', role: VideoRefRole, label?: string) => (
+    <RefSourceMenu
+      onPickFromAssets={() => onPickFromAssets?.(kind, role)}
+      onPickFromCanvas={() => onPickFromCanvas?.(kind, role)}
+      pickMode={pickMode === 'image' || pickMode === 'video'}
+      label={label}
+      entryTitle={label ? `添加${label}（从资产中选择 / 从节点添加素材）` : undefined}
+    />
+  );
 
   /** IKFCKQ 参考缩略图接入共享组件：× 走「断开引用、保留来源」既有链路
    *  （连线项断开连线 / 角色库项移除草稿 material 参考），@ 复用记忆光标插入且仅对
@@ -944,17 +900,17 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       <div className={styles.refRoleArea}>
         {isKeyframe ? (
           <div className={styles.refSlot}>
-            {/* 首帧：有图时共享缩略图（角色徽标「首帧」）；无图时占位内展示「首帧」文字 */}
+            {/* 首帧：有图时共享缩略图（角色徽标「首帧」）；无图时统一入口具名槽位（仅图片） */}
             {videoMediaRefs.first ? (
               renderRefThumb(videoMediaRefs.first, undefined, '首帧')
             ) : (
-              !readOnly && canAddFirst && renderSourceMenu('image', 'first', '添加首帧（从资产中选择 / 到节点选择 / 角色库）', Image, '首帧')
+              !readOnly && canAddFirst && renderSourceMenu('image', 'first', '首帧')
             )}
-            {/* 尾帧（与首帧同一行）：有图时共享缩略图；无图时占位内展示「尾帧」文字 */}
+            {/* 尾帧（与首帧同一行）：有图时共享缩略图；无图时统一入口具名槽位（仅图片） */}
             {videoMediaRefs.last ? (
               renderRefThumb(videoMediaRefs.last, undefined, '尾帧')
             ) : (
-              !readOnly && canAddLast && renderSourceMenu('image', 'last', '添加尾帧（从资产中选择 / 到节点选择 / 角色库）', Image, '尾帧')
+              !readOnly && canAddLast && renderSourceMenu('image', 'last', '尾帧')
             )}
             {mixedStrip.render([], textThumbsAt(0))}
           </div>
@@ -964,11 +920,10 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
               videoMediaRefs.reference.map((r, i) => renderRefThumb(r, r.materialId != null ? `material:${r.materialId}` : `node:${r.nodeId}`, undefined, stripDrag.itemProps(mixedStrip.index(i)))),
               textThumbsAt(videoMediaRefs.reference.length),
             )}
+            {/* 普通参考区单「+」（IKFE8U）：全能参考收图/视频/音频（类型边界在来源与画布校验），
+                图生视频仅图片；文生视频保留入口（媒体实际成为参考时自动切全能参考，IKFC1T） */}
             {!readOnly && canAddReference && (
-              <>
-                {renderSourceMenu('image', 'reference', '添加图片参考（从资产中选择 / 到节点选择 / 角色库）', Image)}
-                {!isText2Video && renderSourceMenu('video', 'reference', '添加视频参考（从资产中选择 / 到节点选择 / 角色库）', Video)}
-              </>
+              renderSourceMenu(isText2Video ? 'image' : 'video', 'reference')
             )}
             {videoMediaRefs.reference.length > 0 && (
               <span className={styles.fileCount}>

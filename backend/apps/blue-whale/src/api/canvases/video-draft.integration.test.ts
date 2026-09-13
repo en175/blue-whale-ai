@@ -567,11 +567,11 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
         return (JSON.parse(canvas.edges) as Array<{ source: string; target: string; data?: { refRole?: string } }>)
           .map((e) => `${e.source}->${e.target}${e.data?.refRole ? `:${e.data.refRole}` : ""}`);
       };
-      /** Dock 普通参考槽「到节点选择」：来源菜单两步入场（IKDLQR 起上传退役，入口合并为来源菜单）；
+      /** Dock 普通参考槽「从节点添加素材」（IKFE8U 起统一入口）：来源菜单两步入场；
        *  跟随面板悬停草稿卡附近，素材卡与面板在 Playwright 命中检测上重叠，统一 DOM 派发直触发（真实链路不变） */
       async function pickFromCanvas(slotTitle: string, sourceId: string) {
         await page.locator(`button[title="${slotTitle}"]`).dispatchEvent("click");
-        await page.getByText("到节点选择", { exact: true }).dispatchEvent("click");
+        await page.getByText("从节点添加素材", { exact: true }).dispatchEvent("click");
         await nodeById(sourceId).locator('[data-testid="media-content"]').dispatchEvent("click");
       }
 
@@ -581,7 +581,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
       // 1) 打开普通草稿 d2：图片参考选取 → 立即建线（IKFDFW：不等待发送）
       await nodeById("d2").locator('[data-testid="media-content"]').click();
       await editor.waitFor();
-      await pickFromCanvas("添加图片参考（从资产中选择 / 到节点选择 / 角色库）", "m1");
+      await pickFromCanvas("从资产中选择 / 从节点添加素材", "m1");
       await vi.waitFor(async () => expect(await edges.count(), "图片选取立即建线").toBe(3));
       await vi.waitFor(async () => expect(await dockRefs.count()).toBe(1));
 
@@ -592,7 +592,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
       expect(generationRequests, "保存参考不创建生成任务").toEqual([]);
 
       // 2) 视频参考槽再选 v1：第二条连线，Dock 两项按边序
-      await pickFromCanvas("添加视频参考（从资产中选择 / 到节点选择 / 角色库）", "v1");
+      await pickFromCanvas("从资产中选择 / 从节点添加素材", "v1");
       await vi.waitFor(async () => expect(await edges.count()).toBe(4));
       await vi.waitFor(async () => expect(await dockRefs.count()).toBe(2));
 
