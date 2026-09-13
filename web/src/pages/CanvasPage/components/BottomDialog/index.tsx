@@ -113,7 +113,9 @@ interface BottomDialogProps extends RefStripOrderProps {
   initialParams?: VideoGenSeedParams;
   /** 连线文本附件（IKDLQG）：草稿绑定模式由父级按连线实时推导传入 */
   attachments?: ImageTextAttachment[];
-  onRemovePlan?: (nodeId: string) => void;
+  /** 移除文本附件（IKFCXC）：× 仅断开当前目标连线（保留来源卡与其他目标关系，与画布断线同一结果）；
+   *  方案附件沿用素材同步期间禁移除约束（与 ImageDialog 同口径） */
+  onRemoveAttachment?: (nodeId: string) => void;
   planReferenceError?: string;
   pendingPlanSyncs?: Array<{ nodeId: string; title: string }>;
   onSyncPlan?: (nodeId: string) => void;
@@ -185,7 +187,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
   /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -710,7 +712,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   const stripDrag = useRefStripDrag({ disabled: readOnly, onReorder: handleStripReorder });
 
   /** IKFCKQ 文本附件进参考栏：FileText 图标缩略图 + 文本N 独立编号 + 悬停 ×/@ 与正文预览；
-   *  × 沿用方案附件既有移除链路（普通文本附件增删经画布连线，素材同步期间禁移除）；
+   *  IKFCXC：× 统一走「断开当前目标连线、保留来源与其他目标关系」链路（与 ImageDialog 同口径，
+   *  方案附件素材同步期间禁移除）；
    *  IKFCKT：dragProps 按统一序列 stripIndex 传入（base = 普通参考数；首尾帧模式无普通参考 base=0；
    *  i 为文本段内编号下标）；附件顺序仍决定生成上下文拼接顺序 */
   const renderTextThumb = (a: ImageTextAttachment, stripIndex: number) => (
@@ -722,8 +725,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       number={orderedTextNodeIds.indexOf(a.nodeId) + 1}
       textPreview={a.text}
       onRemove={
-        !readOnly && !syncingPlan && a.isPromptPlan && onRemovePlan
-          ? () => onRemovePlan(a.nodeId)
+        !readOnly && (!a.isPromptPlan || !syncingPlan) && onRemoveAttachment
+          ? () => onRemoveAttachment(a.nodeId)
           : undefined
       }
       onInsertRef={!readOnly ? () => insertRefByKey(a.nodeId) : undefined}
