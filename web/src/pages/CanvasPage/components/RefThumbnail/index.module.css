@@ -95,7 +95,7 @@
   opacity: 1;
 }
 
-/* ---- 悬浮放大预览浮层：上方居中、视口内收敛；纯展示鼠标穿透；卡片沿用 AssetChip 常量 ---- */
+/* ---- 悬浮放大预览浮层：上方居中、视口内收敛；媒体预览纯展示鼠标穿透，文本预览由 TSX inline 覆盖为可移入阅读；卡片沿用 AssetChip 常量 ---- */
 .preview {
   z-index: var(--z-tooltip);
   display: flex;
