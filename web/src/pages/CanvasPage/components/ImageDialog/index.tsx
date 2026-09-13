@@ -34,6 +34,7 @@ import PromptRefEditor, {
 } from '../PromptRefEditor';
 import MentionMenu from '../PromptRefEditor/MentionMenu';
 import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
+import RefThumbnail from '../RefThumbnail';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
 import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
 import type { ImageMediaRef } from '../../mediaRefs';
@@ -469,11 +470,21 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     setCanvasMentionOpen(false);
   };
 
+  /** 寻址键分派（IKFA1P）：文本身份（来源节点 id）与媒体身份空间不重叠——按当前附件集合定 kind */
+  const refKeyOf = (assetId: string): PromptRefKey => ({
+    kind: orderedTextNodeIdsRef.current.includes(assetId) ? 'text_ref' : 'asset_ref',
+    id: assetId,
+  });
+
   const pickMentionRef = (assetId: string) => {
-    // IKFA1P：文本身份（来源节点 id）与媒体身份空间不重叠——按当前附件集合分派标签类型
-    const kind: PromptRefKey['kind'] = orderedTextNodeIdsRef.current.includes(assetId) ? 'text_ref' : 'asset_ref';
-    editorRef.current?.insertRefAtMention({ kind, id: assetId });
+    editorRef.current?.insertRefAtMention(refKeyOf(assetId));
     setMention({ open: false, query: '' });
+  };
+
+  /** 缩略图 @ 按钮（IKFCKK）：与手动 @ 选择同一种素材标签 chip，走 insertRefAtPending
+   *  路径——有记忆光标原位插入、无记录追加末尾，插入后编辑器聚焦 */
+  const insertRefByKey = (assetId: string) => {
+    editorRef.current?.insertRefAtPending(refKeyOf(assetId));
   };
 
   /** @ 菜单选择「添加新参考」：删除本次 @ 查询并记住插入点，走既有添加流程；
@@ -672,9 +683,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
           <ReplaceRefMenu
             items={replaceItems}
             onPick={(assetId) => {
-              // IKFA1P：失效文本标签可替换为其他文本附件或媒体（按身份空间分派）
-              const kind: PromptRefKey['kind'] = orderedTextNodeIdsRef.current.includes(assetId) ? 'text_ref' : 'asset_ref';
-              editorRef.current?.replaceRefAt(replaceTarget, { kind, id: assetId });
+              editorRef.current?.replaceRefAt(replaceTarget, refKeyOf(assetId));
               setReplaceTarget(null);
             }}
           />
@@ -799,41 +808,32 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
         {/* 顶部：素材预览 + 右上角操作 */}
         <div className={styles.topRow}>
           <div className={styles.previewRow}>
+            {/* IKFCKK：附件条替换为共享参考缩略图（三态交互），编号圆钮仅显示数字、
+                底部「图片N」文字标签随旧自绘实现下线；× 走既有断开引用链路、@ 复用记忆光标插入 */}
             {edgeRefs
               ? edgeRefs.map((r) => (
-                  <div key={r.nodeId} className={styles.previewItem} title={r.name} data-testid="dock-media-ref">
-                    <img src={r.url} alt={r.name} />
-                    <span className={styles.previewBadge}>图片{refsNumbering.get(r.assetId) ?? '?'}</span>
-                    {!readOnly && (
-                      <button
-                        className={styles.previewRemove}
-                        onClick={() => onRemoveMediaRef?.(r.nodeId)}
-                        title="移除"
-                      >
-                        <X size={10} strokeWidth={2.5} />
-                      </button>
-                    )}
-                  </div>
+                  <RefThumbnail
+                    key={r.nodeId}
+                    data-testid="dock-media-ref"
+                    kind="image"
+                    url={r.url}
+                    name={r.name}
+                    number={refsNumbering.get(r.assetId)}
+                    onRemove={!readOnly ? () => onRemoveMediaRef?.(r.nodeId) : undefined}
+                    onInsertRef={!readOnly ? () => insertRefByKey(r.assetId) : undefined}
+                  />
                 ))
               : files.map((f) => (
-              <div key={f.id} className={styles.previewItem} title={f.name}>
-                {f.type === 'video' ? (
-                  <video src={f.url} muted preload="metadata" />
-                ) : (
-                  <img src={f.url} alt={f.name} />
-                )}
-                {f.type === 'image' && <span className={styles.previewBadge}>图片{fileNumberOf.get(f.id) ?? '?'}</span>}
-                {!readOnly && (
-                  <button
-                    className={styles.previewRemove}
-                    onClick={() => handleRemoveFile(f.id)}
-                    title="移除"
-                  >
-                    <X size={10} strokeWidth={2.5} />
-                  </button>
-                )}
-              </div>
-            ))}
+                  <RefThumbnail
+                    key={f.id}
+                    kind={f.type}
+                    url={f.url}
+                    name={f.name}
+                    number={f.type === 'image' ? fileNumberOf.get(f.id) : undefined}
+                    onRemove={!readOnly ? () => handleRemoveFile(f.id) : undefined}
+                    onInsertRef={!readOnly && f.assetId != null ? () => insertRefByKey(String(f.assetId)) : undefined}
+                  />
+                ))}
             {/* 附件队列末尾：媒体来源菜单（上传入口退役，IKDLQR/IKDLQL 方向；保留资产选择/节点选择，
                 画布资产改造融合）。图片达上限或生成中只读时隐藏 */}
             {!imagesFull && !readOnly && (
