@@ -300,6 +300,7 @@ const SOLUTION_FIELD_LABELS = {
   execution_route: '用哪个模型出片',
   delivery_spec: '出片参数',
   next_steps: '接下来怎么做',
+  scope: '这张卡管的范围',
 } as const;
 
 function SolutionField({ label, children }: { label: string; children: React.ReactNode }) {
@@ -370,6 +371,12 @@ function SolutionCardBlock({
           <SolutionField label={SOLUTION_FIELD_LABELS.target_media}>
             <div className={styles.solutionFieldValue}>{card.target_media === 'video' ? '视频' : '图片'}</div>
           </SolutionField>
+          {/* 续写的卡（决策十六）：只管接下来追加的那一段，用户得知道这张卡不是整条。整条是默认，不占位。 */}
+          {card.scope?.kind === 'continuation' && (
+            <SolutionField label={SOLUTION_FIELD_LABELS.scope}>
+              <div className={styles.solutionFieldValue}>{card.scope.label}</div>
+            </SolutionField>
+          )}
           {card.direction && (
             <SolutionField label={SOLUTION_FIELD_LABELS.direction}>
               <div className={styles.solutionFieldValue}>{card.direction}</div>

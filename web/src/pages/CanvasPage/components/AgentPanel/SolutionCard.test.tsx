@@ -171,6 +171,23 @@ describe('方案卡在对话里', () => {
     expect(text).toContain('9:16 · 25 秒');
   });
 
+  /** 续写的卡只管接下来追加的那一段（决策十六）：用户得看见这张卡不是整条；整条是默认，不占位。 */
+  it('续写的卡显示「这张卡管的范围：第 2 段」，整条的卡不显示这一行', () => {
+    sessionMock.turns = turnWith(
+      understanding({ solution_card: { ...card!, scope: { kind: 'continuation', label: '第 2 段' } } }),
+    );
+    mount();
+    const text = solutionCard()!.textContent ?? '';
+    expect(text).toContain('这张卡管的范围');
+    expect(text).toContain('第 2 段');
+  });
+
+  it('没写范围（整条）时不显示那一行', () => {
+    sessionMock.turns = turnWith(understanding());
+    mount();
+    expect(solutionCard()!.textContent ?? '').not.toContain('这张卡管的范围');
+  });
+
   it('没有出片参数时整项不显示', () => {
     sessionMock.turns = turnWith(understanding());
     mount();
