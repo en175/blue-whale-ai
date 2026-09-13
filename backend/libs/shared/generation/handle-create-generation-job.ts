@@ -935,7 +935,7 @@ export async function handleCreateGenerationJob(
     textAttachments: target.value.textAttachments,
     referenceAssetIds: refs.value.referenceAssetIds,
   });
-  // 图片与视频一致：sk token 密封进 job.input.provider_credential，处理时由 worker 解出。
+  // 图片与视频一致：sk token 明文写进 job.input.provider_credential（修正四：凭证去密），处理时由 worker 直接取用。
   // 这样进程内即时调度与重启后的恢复扫描共用同一套凭据来源。
   if (internal.providerCredential) {
     input.provider_credential = internal.providerCredential;

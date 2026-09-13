@@ -40,7 +40,7 @@ export interface RegenerateSceneCardInput {
   reference_mode: VideoReferenceMode;
   reference_assets: ProviderPromptAsset[];
   capability_snapshot_version: CapabilitySnapshotVersion;
-  /** 密封的供应商 sk token（与 Dock 生成链路一致）；worker 解密后调网关。 */
+  /** 明文供应商 sk token（修正四：去密，与 Dock 生成链路一致）；worker 直接取用调网关。 */
   provider_credential?: string;
   /** IK7G9X：建新 job 时的记账快照（真实预估金额 + 定价口径版本）。 */
   costReservation?: CostReservationSnapshot;
