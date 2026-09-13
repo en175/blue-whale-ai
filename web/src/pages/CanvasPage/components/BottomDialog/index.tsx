@@ -28,6 +28,7 @@ import type { ImageTextAttachment } from '../ImageDialog';
 import type { MediaGenStatus } from '../MediaNode';
 import {
   canAddRefRole,
+  hasAnyMediaRef,
   MAX_VIDEO_REFS,
   supportsVideoReferenceModel,
   videoRefConflict,
@@ -54,8 +55,9 @@ import {
 } from '../../followDialog';
 import styles from './index.module.css';
 
-/** 底部自由模式沿用三项；跟随生成节点时扩为四项（含文生视频） */
+/** 模式选项：自由态与跟随态同构四项（IKFC1T 文生视频置首 = 新建默认）；跟随态由 enabledModes 门控 */
 const dockModeOptions = [
+  { key: 'prompt', label: '文生视频' },
   { key: 'all', label: '全能参考' },
   { key: 'keyframe', label: '首尾帧' },
   { key: 'text2video', label: '图生视频' },
@@ -73,7 +75,7 @@ export interface VideoGenOptions {
   resolution: string;
   /** 时长（秒） */
   duration: number;
-  /** 参考模式：all 全能参考 / keyframe 首尾帧 / text2video 图生视频 */
+  /** 参考模式：prompt 文生视频 / all 全能参考 / keyframe 首尾帧 / text2video 图生视频（IKFC1T） */
   mode: string;
 }
 
@@ -154,7 +156,7 @@ export interface VideoGenSeedParams {
   resolution?: string;
   /** 时长（秒） */
   duration?: number;
-  /** 参考模式：all 全能参考 / keyframe 首尾帧 / text2video 图生视频 */
+  /** 参考模式：prompt 文生视频 / all 全能参考 / keyframe 首尾帧 / text2video 图生视频（IKFC1T） */
   mode?: string;
 }
 
@@ -404,7 +406,9 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
       ?? (!supportsVideoReferenceModel(selectedModel) && videoMediaRefs.reference.some(ref => ref.mediaType !== 'image')
         ? '当前模型不支持视频或音频参考，请更换模型或调整引用' : null)
     : null);
-  const modeConflict = selectedMode === 'keyframe' && videoMediaRefs.reference.length > 0
+  const modeConflict = selectedMode === 'prompt' && hasAnyMediaRef(videoMediaRefs)
+    ? '文生视频模式不支持媒体参考，请移除参考或切换模式'
+    : selectedMode === 'keyframe' && videoMediaRefs.reference.length > 0
     ? '首尾帧模式不支持普通参考，请调整模式或引用'
     : selectedMode === 'text2video' && videoMediaRefs.reference.some(r => r.mediaType !== 'image')
       ? '图生视频模式不支持视频或音频参考'
@@ -418,22 +422,28 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
   const canAddLast = !videoMediaRefs.last;
   const canAddReference = !!caps?.referenceImage;
 
-  /** 参考模式（与首页底部操作同步）：全能参考(all) / 首尾帧(keyframe) / 图生视频(text2video)。
-   *  首尾帧模式才展示首帧/尾帧槽（同一行）；其余模式仅展示普通参考；图生视频不收视频参考。 */
+  /** 参考模式（与首页底部操作同步）：文生视频(prompt) / 全能参考(all) / 首尾帧(keyframe) / 图生视频(text2video)。
+   *  首尾帧模式才展示首帧/尾帧槽（同一行）；其余模式仅展示普通参考；图生视频不收视频参考；
+   *  文生视频保留参考添加入口（媒体实际成为参考时由 enabledModes 自动切全能参考，IKFC1T）。 */
   const currentMode = modeOptions.find((m) => m.key === selectedMode);
   const isKeyframe = selectedMode === 'keyframe';
   const isText2Video = selectedMode === 'text2video';
   /** 已连入的视频参考数（切换到首尾帧/图生视频时不兼容，需先移除） */
   const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image').length;
 
-  /** 切换模式：目标模式与现有参考冲突时明确提示并阻止切换（保证「可见槽 = 实际参考」），否则写回草稿 */
+  /** 模式切换与当前参考保持兼容；文生视频存在任一媒体参考时不可选。 */
   const handleModeChange = (key: string) => {
     setModeOpen(false);
     if (enabledModes && !enabledModes.includes(key as VideoFollowMode)) return;
     if (key === selectedMode) return;
     const hasFrames = !!(videoMediaRefs.first || videoMediaRefs.last);
     const hasRefs = videoMediaRefs.reference.length > 0;
-    if (key === 'keyframe') {
+    if (key === 'prompt') {
+      if (hasAnyMediaRef(videoMediaRefs)) {
+        onToast?.('warn', '文生视频模式不支持媒体参考，请先移除参考');
+        return;
+      }
+    } else if (key === 'keyframe') {
       if (hasRefs || videoRefCount > 0) {
         onToast?.('warn', '首尾帧模式仅支持首帧与尾帧，请先移除普通参考');
         return;
@@ -521,7 +531,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialPara
           setSelectedSize(size?.id ?? initialParams?.resolution ?? '');
           setSelectedRatio(initialParams?.aspectRatio ?? '');
           setDuration(initialParams?.duration ?? 0);
-          setSelectedMode(initialParams?.mode ?? 'all');
+          setSelectedMode(initialParams?.mode ?? 'prompt');
           return;
         }
         if (!list.length) return;

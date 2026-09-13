@@ -68,6 +68,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchQuota: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
+  referencePromptPlan: vi.fn(),
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
   legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
@@ -141,6 +142,7 @@ vi.mock('@/api/assets', () => ({
 
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
+  referencePromptPlan: apiMocks.referencePromptPlan,
   listLegacyCardHistory: apiMocks.listLegacyCardHistory,
   createConversationQuote: apiMocks.createConversationQuote,
   legacyCardHistoryOptions: apiMocks.legacyCardHistoryOptions,
@@ -365,6 +367,9 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
 
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.type).toBe('video');
+    // IKFC1T：新建默认文生视频，仅提示词提交——省略 references 字段，不发 references: []
+    expect(payload.references).toBeUndefined();
+    expect('references' in payload).toBe(false);
     // 发送绑定入口新建的草稿卡，在原卡生成
     expect(typeof payload.target_node_id).toBe('string');
     expect((payload.parameters as Record<string, unknown>).prompt).toBe('自由模式输入');
@@ -568,5 +573,260 @@ describe('IKDWL8 视频失效引用保护', () => {
     expect(flowProps.current.edges).toHaveLength(0);
     expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'm1')).toBe(true);
     expect(sendButton().disabled).toBe(false);
+  });
+});
+
+/* IKFC1T 文生视频入口与媒体参考自动切换：新建默认文生视频（仅提示词省略 references）、
+   文本附件不触发切换、三个接入路径（连线/角色库/到节点选择暂存）触发自动切全能参考并保留输入、
+   存在媒体参考时文生视频置灰（部分删除仍置灰，全部删除恢复可选但不自动切回）、草稿恢复保持已存模式。 */
+const MODE_LABELS = ['文生视频', '全能参考', '图生视频', '首尾帧'];
+
+function modeButton(): HTMLButtonElement {
+  return [...container.querySelectorAll('button')].find((b) => MODE_LABELS.includes(b.textContent ?? ''))!;
+}
+
+async function expectMode(label: string) {
+  await vi.waitFor(() => expect(modeButton().textContent).toBe(label));
+}
+
+/** 展开模式下拉（幂等）：下拉已展开（出现多个模式按钮）时不再点击——jsdom click 不触发
+ *  mousedown 关不掉了 useDismissOnOutside，二次点击会误选下拉首项 */
+async function openModeMenu() {
+  const modeButtons = () => [...container.querySelectorAll('button')].filter((b) => MODE_LABELS.includes(b.textContent ?? ''));
+  if (modeButtons().length > 1) return; // 已展开（收起态仅当前模式一个按钮）
+  await act(async () => { modeButtons()[0]!.click(); });
+}
+
+function modeOption(label: string): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll('button')].find((b) => b.textContent === label);
+}
+
+function draftDataOf(nodeId: string): Record<string, unknown> {
+  return flowProps.current.mediaNodes.find((n: Node) => n.id === nodeId)!.data as Record<string, unknown>;
+}
+
+describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
+  it('文本附件不触发模式切换：连入文本节点后保持文生视频，附件驱动可提交', async () => {
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    doc.nodes.push({
+      id: 't1',
+      type: 'textNode',
+      position: { x: 0, y: 600 },
+      data: { title: '故事文案', text: '一只蓝鲸的深海旅程' },
+    });
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await expectMode('文生视频');
+
+    await connect('t1', 'd1');
+
+    await expectMode('文生视频');
+    expect(container.textContent).toContain('文本附件（1）');
+    await waitModelReady();
+    expect(sendButton().disabled).toBe(false);
+  });
+
+  it('画布连线图片成为参考：自动切全能参考并保留输入（提示词与文本附件），提交携带完整引用', async () => {
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    doc.nodes.push({
+      id: 't1',
+      type: 'textNode',
+      position: { x: 0, y: 600 },
+      data: { title: '故事文案', text: '一只蓝鲸的深海旅程' },
+    });
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await expectMode('文生视频');
+    await typePrompt('海边日落');
+    await connect('t1', 'd1'); // 文本附件先入（不触发切换）
+    await expectMode('文生视频');
+
+    await connect('m1', 'd1');
+
+    await expectMode('全能参考');
+    expect(container.textContent).toContain('已根据当前素材切换生成模式');
+    // 自动切换保留文本附件与提示词
+    expect(container.textContent).toContain('文本附件（1）');
+    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('all'));
+    await vi.waitFor(() => expect(draftDataOf('d1').prompt).toBe('海边日落'));
+
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
+    expect(payload.references).toEqual([{ asset_id: 'a1', type: 'image', role: 'reference' }]);
+  });
+
+  it('角色库 material 参考成为参考（草稿 data，无连线）：打开面板即自动切全能参考', async () => {
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    doc.nodes.find(n => n.id === 'd1')!.data.draftMaterialRefs = [
+      { materialId: 'asset-lib1', url: 'http://img/lib1.png', name: '角色立绘', mediaType: 'image', role: 'reference' },
+    ];
+    await renderPage();
+    // 面板未开：角色库参考不触发任何行为；打开后按实际参考判定
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await expectMode('全能参考');
+    expect(flowProps.current.edges).toHaveLength(0);
+  });
+
+  it('到节点选择暂存参考：暂存即成为当前参考，自动切全能参考', async () => {
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await expectMode('文生视频');
+
+    await pickRefNode('添加图片参考（从资产中选择 / 到节点选择 / 角色库）', 'm1');
+
+    expect(flowProps.current.edges).toHaveLength(0); // 暂存未落线
+    await expectMode('全能参考');
+  });
+
+  it('存在媒体参考时文生视频置灰；部分删除仍置灰；全部删除恢复可选但不自动切回', async () => {
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await connect('m1', 'd1');
+    await connect('m2', 'd1');
+    await expectMode('全能参考');
+
+    await openModeMenu();
+    expect(modeOption('文生视频')!.disabled).toBe(true);
+
+    // 移除部分参考：仍有媒体参考，文生视频保持置灰
+    const removeButtons = () => container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除（断开连线）"]');
+    await act(async () => { removeButtons()[0]!.click(); });
+    await openModeMenu();
+    expect(modeOption('文生视频')!.disabled).toBe(true);
+
+    // 全部移除：文生视频恢复可选，当前模式保持全能参考（不自动切回，不代用户改模式）
+    await act(async () => { removeButtons()[0]!.click(); });
+    await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(0));
+    await openModeMenu();
+    expect(modeOption('文生视频')!.disabled).toBe(false);
+    expect(modeButton().textContent).toBe('全能参考');
+  });
+
+  it('草稿恢复保持已保存模式：首尾帧草稿恢复首尾帧，文生视频草稿无媒体恢复文生视频', async () => {
+    const doc = canvasDocMock.current.doc as { nodes: Node[]; edges: unknown[] };
+    // 已保存首尾帧草稿：模式与首尾帧连线一并恢复
+    doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'keyframe';
+    doc.edges = [
+      { id: 'f1', source: 'm1', target: 'd1', data: { refRole: 'first' } },
+      { id: 'f2', source: 'm2', target: 'd1', data: { refRole: 'last' } },
+    ];
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await expectMode('首尾帧');
+
+    // 已保存文生视频草稿 + 画布连线加入媒体（面板关闭时）：重开面板自动切全能参考
+    doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'prompt';
+    doc.edges = [{ id: 'r1', source: 'm1', target: 'd1' }];
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await expectMode('全能参考');
+    expect(container.textContent).toContain('已根据当前素材切换生成模式');
+
+    // 已保存文生视频草稿 + 无媒体：恢复文生视频
+    doc.edges = [];
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await expectMode('文生视频');
+  });
+});
+
+/* IKFC26 方案绑定媒体同步视频模式：方案把媒体实际绑定到文生视频目标后，服务端随连线一并
+   持久化切换（文生视频 → 全能参考）；前端绑定回调以服务端返回为准同步本地节点，
+   面板重开恢复与持久化一致的模式，后续自动保存不把切换结果覆盖回旧模式；纯文本方案不触发切换。 */
+describe('IKFC26 方案绑定媒体同步视频模式', () => {
+  /** 画布加方案节点（promptSource 方案，媒体索引可选）并把视频草稿置为文生视频；
+   *  方案素材索引 assetId 须为纯数字（promptMentionSchema 契约），自建 m9 承载 */
+  function seedPlanDoc(mediaMentions: boolean) {
+    seedDoc();
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    doc.nodes.push({
+      id: 'm9',
+      type: 'mediaNode',
+      position: { x: 600, y: 600 },
+      data: { src: 'http://img/m9.png', mediaType: 'image', fileName: '方案素材', assetId: '101' },
+    });
+    doc.nodes.push({
+      id: 'plan1',
+      type: 'textNode',
+      position: { x: 0, y: 600 },
+      data: mediaMentions
+        ? {
+            title: '方案', text: '图A的故事', promptSource: { sessionId: 's1', revisionId: 'r1', shotNo: 1 },
+            promptMentions: [{ start: 0, end: 2, index: 1, assetId: '101' }],
+            promptMaterials: [{ assetId: '101', mediaType: 'image', url: 'http://img/m9.png' }],
+          }
+        : {
+            title: '方案', text: '只有文字', promptSource: { sessionId: 's1', revisionId: 'r1', shotNo: 1 },
+            promptMentions: [], promptMaterials: [],
+          },
+    });
+    doc.nodes.find(n => n.id === 'd1')!.data.draftMode = 'prompt';
+    // 素材字典补 101：水合按字典推导 assetMissing，缺失会被判「素材已被删除」排除出参考
+    canvasDocMock.current.assets = {
+      ...canvasDocMock.current.assets,
+      101: { asset_id: 101, type: 'image', access_url: 'http://img/m9.png', width: 100, height: 100 },
+    };
+  }
+
+  /** 方案绑定 API 返回：服务端按切换规则写回目标 draftMode，素材边/方案边随 edges 返回 */
+  function mockReferenceSaved(draftModeAfter: 'all' | 'prompt', withMaterialEdges: boolean) {
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    const nodes = doc.nodes.map(n => n.id === 'd1' ? { ...n, data: { ...n.data, draftMode: draftModeAfter } } : n);
+    const edges = withMaterialEdges
+      ? [
+          { id: 'e-m9-d1', source: 'm9', target: 'd1', data: { inputSources: { manual: false, planNodeIds: ['plan1'] } } },
+          { id: 'e-plan1-d1', source: 'plan1', target: 'd1', data: { promptReference: { bindings: [{ index: 1, assetId: '101' }] } } },
+        ]
+      : [{ id: 'e-plan1-d1', source: 'plan1', target: 'd1', data: { promptReference: { bindings: [] } } }];
+    apiMocks.referencePromptPlan.mockImplementation(async () => ({
+      id: 11, project_id: 1, version: 4, viewport: '{}',
+      nodes: JSON.stringify(nodes), edges: JSON.stringify(edges),
+    }));
+  }
+
+  it('方案绑定媒体：本地跟随服务端切全能参考，面板重开恢复一致，后续自动保存不回退', async () => {
+    seedPlanDoc(true);
+    mockReferenceSaved('all', true);
+    await renderPage();
+    await connect('plan1', 'd1'); // 画布拖方案到视频目标（面板未开，服务端路径）
+
+    await vi.waitFor(() => expect(draftDataOf('d1').draftMode).toBe('all'));
+    await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(2));
+
+    // 面板重开：恢复显示与持久化一致的全能参考（素材连线在，门控同向）
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await expectMode('全能参考');
+
+    // 绑定后再编辑触发自动保存：提交的节点保留切换结果（不把服务端切换覆盖回旧模式）
+    await typePrompt('绑定后再编辑');
+    await vi.waitFor(() => {
+      const last = apiMocks.saveCanvasDoc.mock.calls.at(-1) as unknown as [string, { nodes: Node[] }] | undefined;
+      expect(last).toBeTruthy();
+      expect(last![1].nodes.find((n: Node) => n.id === 'd1')!.data.draftMode).toBe('all');
+    }, { timeout: 3000 });
+
+    // 生成提交使用目标实际参考：完整携带方案绑定引入的素材引用
+    await waitModelReady();
+    await act(async () => { sendButton().click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]! as unknown as [string, Record<string, unknown>];
+    expect(payload.references).toEqual([{ asset_id: '101', type: 'image', role: 'reference' }]);
+  });
+
+  it('方案仅文本：服务端不切换，本地保持文生视频，重开面板恢复文生视频', async () => {
+    seedPlanDoc(false);
+    mockReferenceSaved('prompt', false);
+    await renderPage();
+    await connect('plan1', 'd1');
+
+    await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(1));
+    expect(draftDataOf('d1').draftMode).toBe('prompt');
+
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await expectMode('文生视频');
   });
 });

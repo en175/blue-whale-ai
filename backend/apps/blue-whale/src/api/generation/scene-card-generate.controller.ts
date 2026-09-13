@@ -116,7 +116,7 @@ export class SceneCardGenerateController {
 
   /** POST /api/projects/:projectId/scene-cards/:sceneCardId/storyboard-preview
    *  User 从 SceneCard 显式触发分镜预览（CONTEXT L43-47，可选旁路）：建 type=image 的 GenerationJob，
-   *  其 N 个 output_slot 即有序画格。与 Dock 图片链路一致：Bearer <sk-token> 做额度预检与凭证密封。 */
+   *  其 N 个 output_slot 即有序画格。与 Dock 图片链路一致：Bearer <sk-token> 做额度预检，凭证明文透传（修正四：去密）。 */
   @Post("storyboard-preview")
   async storyboardPreview(
     @CurrentUser() user: AuthenticatedUser,

@@ -84,6 +84,17 @@ export function confirmPlanEdges(nodes: PromptTargetNode[], edges: CanvasEdge[],
   return { plan, edges: next, assetIds: ids };
 }
 
+/** IKFC26：方案绑定把媒体实际引入目标后同步视频草稿模式——目标为文生视频（draftMode=prompt）
+ *  且方案素材索引含媒体时切为全能参考（all），与前端门控自动切换同向（IKFC1T 契约 §2 服务端对等）；
+ *  仅 prompt → all 单向，不切回；文本附件不属媒体引用（bindings 为空不触发）；其他模式与
+ *  无 draftMode 旧草稿原样保留（后者由前端门控在面板打开时纠正）。无需切换时原样返回同一引用。 */
+export function syncDraftModeOnPlanMedia(nodes: PromptTargetNode[], targetNodeId: string, bindings: PromptBinding[]): PromptTargetNode[] {
+  if (bindings.length === 0) return nodes;
+  const target = nodes.find(n => n.id === targetNodeId);
+  if (target?.data?.draftMode !== "prompt") return nodes;
+  return nodes.map(n => n.id === targetNodeId ? { ...n, data: { ...n.data, draftMode: "all" } } : n);
+}
+
 /** Video reference validation uses the existing execution constraints before accepting any edges/job. */
 export function validateVideoPlan(nodeId: string, bindings: PromptBinding[], refs: Array<{ type: string; role: string }>, model: ModelCapabilityView | undefined, mode?: unknown) {
   if (!model) planError(nodeId, bindings, "请选择可用视频模型");
