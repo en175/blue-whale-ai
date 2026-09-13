@@ -151,6 +151,80 @@ class VideoJobProcessorTest {
                 "文本1：赛博朋克\n\n按文本1生成", captor.getValue().prompt());
     }
 
+    // ========== IKFCXC：文本附件确定性组合（供应商边界，packages/core 契约移植）==========
+
+    @Test
+    @DisplayName("IKFCXC: 纯附件驱动（prompt 空）→ 供应商收到组合正文，不再 invalid_input")
+    void textAttachmentsDrivePromptWhenBasePromptEmpty() {
+        Map<String, Object> input = new HashMap<>(baseInput());
+        input.put("prompt", "");
+        input.put("target_node_id", "media-1");
+        input.put("text_attachments", List.of(
+                Map.of("node_id", "text-1", "title", "雨夜", "text", "赛博朋克"),
+                Map.of("node_id", "text-2", "title", "配色", "text", "深蓝与银白")));
+        ClaimedVideoJobDto claim = videoClaim("111", false, null, 0, 0, null, input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("111"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new SubmitResult("task-ikfcxc-1", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markVideoSubmitted(eq("111"), anyString(), eq(1L), eq("task-ikfcxc-1"));
+
+        processor.handle("111");
+
+        var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
+        verify(videoClient).submit(eq("token"), captor.capture());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "赛博朋克\n\n深蓝与银白", captor.getValue().prompt());
+    }
+
+    @Test
+    @DisplayName("IKFCXC: 附件 + 非空 prompt → 附件在前、prompt 追加末尾；空白附件文本过滤")
+    void textAttachmentsComposeWithBasePrompt() {
+        Map<String, Object> input = new HashMap<>(baseInput());
+        input.put("text_attachments", List.of(
+                Map.of("node_id", "text-1", "title", "雨夜", "text", "赛博朋克"),
+                Map.of("node_id", "text-2", "title", "空白", "text", "   ")));
+        ClaimedVideoJobDto claim = videoClaim("112", false, null, 0, 0, null, input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("112"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new SubmitResult("task-ikfcxc-2", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markVideoSubmitted(eq("112"), anyString(), eq(1L), eq("task-ikfcxc-2"));
+
+        processor.handle("112");
+
+        var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
+        verify(videoClient).submit(eq("token"), captor.capture());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "赛博朋克\n\n一只猫在跑步", captor.getValue().prompt());
+    }
+
+    @Test
+    @DisplayName("IKFCXC: 快照形状损坏 → 按无附件处理退回 basePrompt（不阻断提交）")
+    void corruptedTextAttachmentsFallbackToBasePrompt() {
+        Map<String, Object> input = new HashMap<>(baseInput());
+        input.put("text_attachments", List.of(
+                Map.of("node_id", "text-1", "title", "缺正文")));
+        ClaimedVideoJobDto claim = videoClaim("113", false, null, 0, 0, null, input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("113"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new SubmitResult("task-ikfcxc-3", "queued")).when(videoClient)
+                .submit(anyString(), any(VideoSubmitInput.class));
+        doReturn(true).when(stateMachine)
+                .markVideoSubmitted(eq("113"), anyString(), eq(1L), eq("task-ikfcxc-3"));
+
+        processor.handle("113");
+
+        var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
+        verify(videoClient).submit(eq("token"), captor.capture());
+        org.junit.jupiter.api.Assertions.assertEquals("一只猫在跑步", captor.getValue().prompt());
+    }
+
     @Test
     @DisplayName("G52: 缺少凭证 → provider_credential_missing")
     void missingCredential() {

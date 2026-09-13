@@ -76,7 +76,7 @@ interface RenderProps {
   attachments?: ImageTextAttachment[];
   mediaRefs?: VideoMediaRefs;
   onSend?: ReturnType<typeof vi.fn>;
-  onRemovePlan?: ReturnType<typeof vi.fn>;
+  onRemoveAttachment?: ReturnType<typeof vi.fn>;
   syncingPlan?: boolean;
   status?: 'draft' | 'generating';
 }
@@ -92,7 +92,7 @@ async function renderDialog(props: RenderProps = {}) {
         onClose: vi.fn(),
         onSend,
         attachments: props.attachments,
-        onRemovePlan: props.onRemovePlan,
+        onRemoveAttachment: props.onRemoveAttachment,
         syncingPlan: props.syncingPlan,
         videoMediaRefs: props.mediaRefs ?? { reference: [] },
         videoDraftBinding: { status: props.status, onParamsChange: vi.fn() },
@@ -160,7 +160,8 @@ describe('BottomDialog 文本附件提交契约（IKDLQG）', () => {
 });
 
 /* IKFCKQ：文本附件进参考栏——FileText 图标缩略图与媒体同序列、文本N 独立编号、
-   × 走方案附件既有移除链路、@ 与手动 @ 选择同一插入机制（text_ref 身份） */
+   @ 与手动 @ 选择同一插入机制（text_ref 身份）。
+   IKFCXC：× 统一走 onRemoveAttachment 断边链路（方案与普通附件同口径，方案附件素材同步期间禁移除）。 */
 describe('IKFCKQ 文本附件进参考栏', () => {
   it('附件以图标缩略图进参考栏统一序列，编号独立于媒体（文本N 圆钮仅数字）', async () => {
     await renderDialog({
@@ -179,10 +180,10 @@ describe('IKFCKQ 文本附件进参考栏', () => {
     expect(container.textContent).not.toContain('文本附件（');
   });
 
-  it('方案附件 × 走 onRemovePlan 既有链路；普通附件不提供 ×（增删经画布连线）', async () => {
-    const onRemovePlan = vi.fn();
+  it('方案与普通附件 × 都走 onRemoveAttachment 断边链路（IKFCXC：面板移除与画布断线同结果）', async () => {
+    const onRemoveAttachment = vi.fn();
     await renderDialog({
-      onRemovePlan,
+      onRemoveAttachment,
       attachments: [
         { nodeId: 't1', title: '方案卡', text: '方案正文', isPromptPlan: true },
         { nodeId: 't2', title: '普通文本卡', text: '普通正文' },
@@ -190,24 +191,34 @@ describe('IKFCKQ 文本附件进参考栏', () => {
     });
     const removeBtns = textThumbs().map((t) => t.querySelector<HTMLButtonElement>('button[title="移除"]'));
     expect(removeBtns[0]).toBeTruthy();
-    expect(removeBtns[1]).toBeNull();
+    expect(removeBtns[1], '普通文本附件同样提供面板移除').toBeTruthy();
     await act(async () => { removeBtns[0]!.click(); });
-    expect(onRemovePlan).toHaveBeenCalledWith('t1');
+    await act(async () => { removeBtns[1]!.click(); });
+    expect(onRemoveAttachment).toHaveBeenCalledWith('t1');
+    expect(onRemoveAttachment).toHaveBeenCalledWith('t2');
   });
 
-  it('素材同步期间方案附件禁移除（syncingPlan 无 ×）', async () => {
+  it('素材同步期间方案附件禁移除，普通附件不受限（与 ImageDialog 同口径）', async () => {
+    const onRemoveAttachment = vi.fn();
     await renderDialog({
       syncingPlan: true,
-      onRemovePlan: vi.fn(),
-      attachments: [{ nodeId: 't1', title: '方案卡', text: '方案正文', isPromptPlan: true }],
+      onRemoveAttachment,
+      attachments: [
+        { nodeId: 't1', title: '方案卡', text: '方案正文', isPromptPlan: true },
+        { nodeId: 't2', title: '普通文本卡', text: '普通正文' },
+      ],
     });
-    expect(container.querySelector('[data-testid="dock-text-ref"] button[title="移除"]')).toBeNull();
+    const removeBtns = textThumbs().map((t) => t.querySelector<HTMLButtonElement>('button[title="移除"]'));
+    expect(removeBtns[0]).toBeNull();
+    expect(removeBtns[1], '普通附件在素材同步期间仍可断边').toBeTruthy();
+    await act(async () => { removeBtns[1]!.click(); });
+    expect(onRemoveAttachment).toHaveBeenCalledWith('t2');
   });
 
   it('生成中只读：文本缩略图可见但无 × 与 @ 入口', async () => {
     await renderDialog({
       status: 'generating',
-      onRemovePlan: vi.fn(),
+      onRemoveAttachment: vi.fn(),
       attachments: [{ nodeId: 't1', title: '方案卡', text: '方案正文', isPromptPlan: true }],
     });
     expect(container.querySelector('[data-testid="dock-text-ref"]')).toBeTruthy();
