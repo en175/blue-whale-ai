@@ -6005,6 +6005,7 @@ export default function CanvasPage() {
             pickMode={pickMode === 'audio'}
             mentionItems={atMentionItems.filter((item) => item.id !== audioDraftId)}
             onMentionCanvas={handleAudioAtMention}
+            followAnchor={audioDraftId ? followAnchor : null}
             onSwitchToMusic={() => {
               // 切走即结束草稿绑定并重置 seed：切回音频面板是干净的非草稿状态
               setAudioSeed({ ts: Date.now() });

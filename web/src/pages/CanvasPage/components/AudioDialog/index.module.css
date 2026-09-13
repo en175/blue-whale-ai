@@ -22,11 +22,12 @@
 
 .dialog {
   position: relative;
-  /* 默认输入区保留三行，最多增长到四行，附件换行时面板向上增长。 */
+  /* 默认输入区保留三行，最多增长到四行，附件换行时面板向上增长。
+   * 弹出层（来源菜单 / 画布选择）挂在本卡片内向下展开，路径上不加 overflow，避免被裁切。 */
   height: auto;
   min-height: 0;
   max-height: calc(100vh - 2 * var(--spacing-lg));
-  overflow-y: auto;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   background-color: #1e1e1e;
@@ -94,6 +95,7 @@
 
 .refWrap {
   position: relative;
+  z-index: 30;
 }
 
 .refBtn {
@@ -141,19 +143,21 @@
   color: var(--color-text-tertiary);
 }
 
-/* ---- 来源弹出（本地上传 / 从画布选择） ---- */
+/* ---- 来源弹出（本地上传 / 从画布选择）：向下展开，避免贴节点时被卡片裁切 ---- */
 .sourcePopup {
   position: absolute;
-  bottom: calc(100% + 10px);
-  left: -8px;
+  top: calc(100% + 6px);
+  left: 0;
   display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 128px;
   padding: var(--spacing-xs);
-  background-color: #2a2a2a;
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
+  background-color: #262626;
+  border: 1px solid #363636;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   animation: popupFadeIn 0.15s ease;
   white-space: nowrap;
   z-index: 30;
@@ -167,14 +171,15 @@
 .sourceItem {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-radius: var(--radius-sm);
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
   cursor: pointer;
+  text-align: left;
   transition: all var(--transition-fast);
 }
 
@@ -186,8 +191,8 @@
 /* ---- 画布选择面板 ---- */
 .pickerPanel {
   position: absolute;
-  bottom: calc(100% + 10px);
-  left: -8px;
+  top: calc(100% + 6px);
+  left: 0;
   width: 240px;
   padding: var(--spacing-sm);
   background-color: #2a2a2a;
@@ -195,7 +200,7 @@
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   animation: popupFadeIn 0.15s ease;
-  z-index: 6;
+  z-index: 30;
 }
 
 .pickerHead {
