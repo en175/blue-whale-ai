@@ -468,6 +468,13 @@ export default function CanvasPage() {
     removePlanAttachment(targetId, nodeId);
     setImageSeed((s) => (s ? { ...s, attachments: s.attachments?.filter((a) => a.nodeId !== nodeId) } : s));
   };
+  /** 视频面板移除文本附件（IKFCXC）：同图片面板链路——× 仅断开当前目标连线
+   *  （保留来源卡与其他目标关系，与画布断线同一结果），并同步自由模式的附件快照（videoSeed） */
+  const removeVideoTextAttachment = (targetId: string | undefined, nodeId: string) => {
+    if (targetId && isGeneratingNode(targetId)) return;
+    removePlanAttachment(targetId, nodeId);
+    setVideoSeed((s) => (s ? { ...s, attachments: s.attachments?.filter((a) => a.nodeId !== nodeId) } : s));
+  };
   /** 连线变更守卫（IKDMQQ）：生成中节点的入边删除变更被拦截（剪刀等 remove 路径统一收口）；
    *  放行的删边进撤销栈（IKD0JT），撤销可加回 */
   const guardEdgesChange: typeof onEdgesChange = (changes) => {
@@ -5885,7 +5892,7 @@ export default function CanvasPage() {
         {/* 底部视频对话框（IKDMQS 统一草稿绑定；工具栏入口先建草稿卡再开跟随面板） */}
         {showBottomDialog && (
           <BottomDialog
-            onRemovePlan={id => removePlanAttachment(videoSeed?.targetNodeId, id)}
+            onRemoveAttachment={id => removeVideoTextAttachment(videoDraftId ?? videoSeed?.targetNodeId, id)}
             pendingPlanSyncs={pendingPlanSyncs(videoSeed?.targetNodeId)}
             onSyncPlan={id => syncPlanToTarget(id, videoSeed?.targetNodeId)}
             syncingPlan={applying}
