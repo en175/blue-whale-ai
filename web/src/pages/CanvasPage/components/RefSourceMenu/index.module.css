@@ -30,6 +30,18 @@
   border: 1px dashed var(--color-accent-text, #4c6ef5);
 }
 
+/* 具名槽位形态（IKFE8U 视频首尾帧）：「+」与槽位文字竖排 */
+.triggerSlotted {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.triggerLabel {
+  font-size: var(--font-size-xs, 11px);
+  line-height: 1;
+  white-space: nowrap;
+}
+
 /* 「+」包裹层：菜单定位锚点 */
 .sourceWrap {
   position: relative;

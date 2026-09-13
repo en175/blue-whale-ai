@@ -494,12 +494,12 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
 
     const before = mediaNodeCount();
     // 复用：a1 已有画布节点 m1
-    await pickFromAssets('添加图片参考', [assetOf('a1', 'image', 'http://img/m1.png')]);
+    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a1', 'image', 'http://img/m1.png')]);
     expect(mediaNodeCount()).toBe(before);
     expect(edgePairs()).toEqual(['m1->dv1']);
 
     // 新素材：建来源卡并连线
-    await pickFromAssets('添加图片参考', [assetOf('a6', 'image', 'http://img/m6.png')]);
+    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a6', 'image', 'http://img/m6.png')]);
     expect(mediaNodeCount()).toBe(before + 1);
     const newNode = flowProps.current.mediaNodes.find(
       (n: Node) => (n.data as Record<string, unknown>)?.assetId === 'a6',

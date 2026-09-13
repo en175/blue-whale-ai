@@ -263,7 +263,7 @@ function frameBadges(): string[] {
   return [...container.querySelectorAll<HTMLElement>('[data-testid="ref-thumb-badge"]')].map((el) => el.textContent ?? '');
 }
 
-/** 经 Dock 槽位入口选取来源节点建立指定角色的连线（真实路径：槽位 + 按钮弹来源菜单 →「到节点选择」→ 画布节点点击） */
+/** 经 Dock 槽位入口选取来源节点建立指定角色的连线（真实路径：槽位 + 按钮弹来源菜单 →「从节点添加素材」→ 画布节点点击） */
 async function pickRefNode(slotTitle: string, nodeId: string) {
   await vi.waitFor(() => {
     const btn = [...container.querySelectorAll('button')].find((b) => b.title === slotTitle);
@@ -273,11 +273,11 @@ async function pickRefNode(slotTitle: string, nodeId: string) {
     [...container.querySelectorAll('button')].find((b) => b.title === slotTitle)!.click();
   });
   await vi.waitFor(() => {
-    const item = [...container.querySelectorAll('button')].find((b) => b.textContent === '到节点选择');
+    const item = [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材');
     expect(item).toBeTruthy();
   });
   await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.textContent === '到节点选择')!.click();
+    [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材')!.click();
   });
   await clickNode(nodeId);
 }
@@ -359,10 +359,10 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await clickNode('d1');
     await waitModelReady();
 
-    await pickRefNode('添加图片参考（从资产中选择 / 到节点选择 / 角色库）', 'm1');
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
     expect(edgePairs()).toEqual(['m1->d1']);
     expect(edgeRoles()).toEqual(['reference']);
-    await pickRefNode('添加视频参考（从资产中选择 / 到节点选择 / 角色库）', 'v1');
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'v1');
     expect(edgePairs()).toEqual(['m1->d1', 'v1->d1']);
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图', '参考视频']), { timeout: 3000 });
 
@@ -456,8 +456,8 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await clickNode('d1');
     await waitModelReady();
 
-    await pickRefNode('添加图片参考（从资产中选择 / 到节点选择 / 角色库）', 'm1');
-    await pickRefNode('添加视频参考（从资产中选择 / 到节点选择 / 角色库）', 'v1');
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'v1');
     await typePrompt('多媒体参考');
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
@@ -502,7 +502,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await clickNode('d1');
     await waitModelReady();
 
-    await pickRefNode('添加图片参考（从资产中选择 / 到节点选择 / 角色库）', 'm1');
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
     await typePrompt('空白点击保留');
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图']));
 
@@ -520,7 +520,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await vi.waitFor(() => expect(panelVisible()).toBe(true));
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图']));
     expect(readPromptRefText(container)).toBe('空白点击保留');
-    expect(container.textContent).not.toContain('到节点选择：点击画布中的');
+    expect(container.textContent).not.toContain('点击画布中的');
   });
 
   it('A→B→A 切换编辑目标：A 的参考与提示词完整恢复，B 不串入', async () => {
@@ -529,8 +529,8 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await clickNode('d1');
     await waitModelReady();
 
-    await pickRefNode('添加图片参考（从资产中选择 / 到节点选择 / 角色库）', 'm1');
-    await pickRefNode('添加视频参考（从资产中选择 / 到节点选择 / 角色库）', 'v1');
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'v1');
     await typePrompt('A 的提示词');
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图', '参考视频']));
 
@@ -555,7 +555,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
 
     // 保存持续失败：选取仍立即建线并保留在页面
     apiMocks.saveCanvasDoc.mockImplementation(() => Promise.reject(new Error('boom')));
-    await pickRefNode('添加图片参考（从资产中选择 / 到节点选择 / 角色库）', 'm1');
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
     expect(edgePairs()).toEqual(['m1->d1']);
 
     // 自动保存失败：显示未保存；连线与 Dock 参考保留
@@ -596,7 +596,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await clickNode('d1');
     await waitModelReady();
 
-    await pickRefNode('添加视频参考（从资产中选择 / 到节点选择 / 角色库）', 'v1');
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'v1');
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['参考视频']));
     await typePrompt('参考绘制');
     expect(sendButton().disabled).toBe(false);
@@ -620,7 +620,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await clickNode('d1');
     await waitModelReady();
 
-    await pickRefNode('添加图片参考（从资产中选择 / 到节点选择 / 角色库）', 'm1');
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图']));
     // B 目标对同一来源独立引用（m2→d2），移除 A 的引用不应影响
     await act(async () => {
@@ -657,8 +657,8 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await clickNode('d1');
     await waitModelReady();
 
-    await pickRefNode('添加图片参考（从资产中选择 / 到节点选择 / 角色库）', 'm1');
-    await pickRefNode('添加图片参考（从资产中选择 / 到节点选择 / 角色库）', 'm2');
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
+    await pickRefNode('从资产中选择 / 从节点添加素材', 'm2');
     expect(edgePairs()).toEqual(['m1->d1', 'm2->d1']);
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图', '次图']));
     await typePrompt('两张参考');
