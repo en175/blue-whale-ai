@@ -227,6 +227,94 @@ describe('RefThumbnail 四类素材预览形态（IKFCKK）', () => {
   });
 });
 
+describe('RefThumbnail 文本预览可交互（IKFCX4）', () => {
+  it('文本浮层不穿透鼠标（可移入滚动阅读），媒体浮层保持穿透', async () => {
+    await renderSingle({ kind: 'text', name: '长文案', number: 1, textPreview: '第一行\n第二行' });
+    await act(async () => {
+      hover(thumb());
+      await wait(230);
+    });
+    await vi.waitFor(() => expect(preview()).toBeTruthy());
+    expect((preview() as HTMLElement).style.pointerEvents, '文本浮层可交互').not.toBe('none');
+    // 正文卡片保持滚动样式（长文滚动至末尾由浏览器段验证真实滚动）
+    const card = preview()!.firstElementChild as HTMLElement;
+    expect(card.className).toContain('textCard');
+  });
+
+  it('媒体浮层穿透不回退：移出图标立即关闭', async () => {
+    await renderSingle({ kind: 'image', url: 'https://x/a.png', number: 1 });
+    await act(async () => {
+      hover(thumb());
+      await wait(230);
+    });
+    await vi.waitFor(() => expect(preview()).toBeTruthy());
+    expect((preview() as HTMLElement).style.pointerEvents).toBe('none');
+    unhover(thumb());
+    expect(preview(), '媒体预览移出立即消失（IKFCJG 穿透规格不变）').toBeNull();
+  });
+
+  it('移出图标后关闭延迟内浮层保持；移入浮层取消关闭持续打开', async () => {
+    await renderSingle({ kind: 'text', name: '长文案', number: 1, textPreview: '长正文内容' });
+    await act(async () => {
+      hover(thumb());
+      await wait(230);
+    });
+    await vi.waitFor(() => expect(preview()).toBeTruthy());
+    unhover(thumb());
+    await act(async () => {
+      await wait(60);
+    });
+    expect(preview(), '移出图标后短窗内不关闭（给移入浮层留时间）').toBeTruthy();
+    hover(preview()!);
+    await act(async () => {
+      await wait(300);
+    });
+    expect(preview(), '鼠标在浮层内保持打开').toBeTruthy();
+  });
+
+  it('移出图标且未移入浮层，超过延迟后自动关闭', async () => {
+    await renderSingle({ kind: 'text', name: '长文案', number: 1, textPreview: '长正文内容' });
+    await act(async () => {
+      hover(thumb());
+      await wait(230);
+    });
+    await vi.waitFor(() => expect(preview()).toBeTruthy());
+    unhover(thumb());
+    await act(async () => {
+      await wait(300);
+    });
+    expect(preview(), '未移入浮层则延迟后关闭').toBeNull();
+  });
+
+  it('移出浮层后延迟关闭；浮层移回图标往返不中断阅读', async () => {
+    await renderSingle({ kind: 'text', name: '长文案', number: 1, textPreview: '长正文内容' });
+    await act(async () => {
+      hover(thumb());
+      await wait(230);
+    });
+    await vi.waitFor(() => expect(preview()).toBeTruthy());
+    unhover(thumb());
+    hover(preview()!);
+    // 浮层 → 图标往返：离开浮层回到图标，取消中的关闭被图标侧接管，浮层保持打开
+    unhover(preview()!);
+    hover(thumb());
+    await act(async () => {
+      await wait(300);
+    });
+    expect(preview(), '浮层与图标间往返不中断阅读').toBeTruthy();
+    // 真正移出两者后：延迟窗口内保持，超时关闭
+    unhover(thumb());
+    await act(async () => {
+      await wait(60);
+    });
+    expect(preview(), '移出两者后短窗内不关闭').toBeTruthy();
+    await act(async () => {
+      await wait(300);
+    });
+    expect(preview(), '移出两者后延迟关闭').toBeNull();
+  });
+});
+
 describe('RefThumbnail 删除与紧凑重编号（IKFCKK）', () => {
   it('× 立即删除回调，无确认弹窗', async () => {
     const onRemove = vi.fn();

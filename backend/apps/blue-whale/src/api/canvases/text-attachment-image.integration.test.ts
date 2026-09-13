@@ -384,7 +384,9 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
       await text.waitFor();
       await media.waitFor();
 
-      // 拖线：文本节点 source handle（右）→ 图片节点 target handle（左），命中证据用 RF valid/connectingto 标记
+      // 拖线：文本节点 source handle（右）→ 图片节点 target handle（左）。
+      // 命中证据用行为级断言（边渲染 + PUT 落库 + GET 边形状），不用 RF 内部 hover 类名
+      // （IKFCVS 测试决策：样式类名不作为业务正确性证据；类名随 RF 版本与节点形态漂移）
       await text.locator('[data-testid="text-title"]').click();
       const connectSaved = page.waitForResponse((response) =>
         response.request().method() === "PUT" && response.url().includes("/api/canvases/"));
@@ -394,11 +396,6 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
       await page.mouse.down();
       const dstPoint = { x: dstBox.x + dstBox.width / 2, y: dstBox.y + dstBox.height / 2 };
       await page.mouse.move(dstPoint.x, dstPoint.y, { steps: 12 });
-      const dstValid = await page.evaluate(({ x, y }) => {
-        const el = document.elementFromPoint(x, y);
-        return el ? el.className.includes("valid") && el.className.includes("connectingto") : false;
-      }, dstPoint);
-      expect(dstValid, "落点连接点应被 RF 标记为有效连接目标").toBe(true);
       await page.mouse.up();
       await vi.waitFor(async () => {
         expect(await page.locator(".react-flow__edge").count(), "连线应渲染（showEdges 默认可见）").toBe(1);
@@ -411,13 +408,15 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
       // 连线与到此为止的编辑均不触发任何生成
       expect(generationRequests).toEqual([]);
 
-      // 从图片节点工具条打开面板：附件区展示来源标题与正文，目标提示词留白
+      // 从图片节点工具条打开面板：文本附件以图标进参考栏（IKFCKN 起旧独立正文块下线），
+      // 悬浮浮层显示来源完整正文，目标提示词留白
       await media.locator('[data-testid="media-content"]').click();
       await media.getByRole("button", { name: "生成图片" }).click();
-      await page.getByText("文本附件（1）").waitFor();
-      const attachments = page.locator('div:has-text("文本附件（1）")').last();
-      expect(await attachments.innerText()).toContain("雨夜");
-      expect(await attachments.innerText()).toContain("赛博朋克");
+      await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
+      await page.locator('[data-testid="dock-text-ref"]').first().hover();
+      const overlay = page.locator('[data-testid="ref-thumb-preview"]');
+      await overlay.waitFor();
+      expect(await overlay.innerText()).toContain("赛博朋克");
       expect(await page.locator("textarea").inputValue(), "目标提示词留白").toBe("");
 
       // 第一次发送：请求体携带 target_node_id，库内冻结附件快照与当时画布一致，prompt 冻结为 ""
@@ -447,8 +446,10 @@ describe.skipIf(!process.env.IKDLQF_DATABASE_URL)("Text attachment image public 
       // 再次从面板发送：新任务读取最新正文，历史任务快照不改写
       await media.locator('[data-testid="media-content"]').click();
       await media.getByRole("button", { name: "生成图片" }).click();
-      await page.getByText("文本附件（1）").waitFor();
-      expect(await page.locator('div:has-text("文本附件（1）")').last().innerText()).toContain("霓虹都市");
+      await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
+      await page.locator('[data-testid="dock-text-ref"]').first().hover();
+      await overlay.waitFor();
+      expect(await overlay.innerText()).toContain("霓虹都市");
       await page.locator('button[title="发送"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(2), { timeout: 10_000 });
       expect(generationRequests[1].body.target_node_id).toBe("media-1");
