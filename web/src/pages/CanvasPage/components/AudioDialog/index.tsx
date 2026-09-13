@@ -92,6 +92,9 @@ export interface AudioDialogProps extends RefStripOrderProps {
   onRemoveDraftRef?: (nodeId: string) => void;
   /** 面板「从画布选择」列表添加参考（IKFDFZ）：草稿模式经父级校验后建连线；自由模式缺省走本地注入 */
   onAddCanvasRef?: (nodeId: string) => void;
+  /** 本地上传即时接纳（IKFDG2，草稿绑定模式）：父级上传取得持久 Asset 身份后建来源卡片并连线，
+   *  随画布自动保存落盘；失败父级已明确提示。返回 false 表示未接纳（不进入面板本地暂存）。 */
+  onAdoptLocalFile?: (file: File) => Promise<boolean>;
   /** 底部模式切换 → AI 音乐对话框（已废弃：仅保留 prop 兼容父级，不再渲染） */
   onSwitchToMusic?: () => void;
   /** 画布 @ 引用候选 */
@@ -125,6 +128,7 @@ export default function AudioDialog({
   draftRefInvalid,
   onRemoveDraftRef,
   onAddCanvasRef,
+  onAdoptLocalFile,
   mentionItems,
   onMentionCanvas,
   attachments,
@@ -145,6 +149,8 @@ export default function AudioDialog({
   const [expanded, setExpanded] = useState(false);
   /** 参考音频列表（本地上传 + 自由模式的画布拾取；草稿模式的画布参考经 draftRefs 连线推导） */
   const [refs, setRefs] = useState<AudioRefItem[]>(initialRefs ?? []);
+  /** 本地上传即时接纳进行中（IKFDG2）：防重入，期间不再开来源菜单 */
+  const [adopting, setAdopting] = useState(false);
   /** 来源菜单（本地上传 / 从画布选择） */
   const [sourceOpen, setSourceOpen] = useState(false);
   /** 画布选择面板 */
@@ -214,7 +220,7 @@ export default function AudioDialog({
 
   /** 打开来源菜单（本地上传 / 从画布选择），上限 MAX_AUDIO_REFS=3（连线推导 + 本地合计） */
   const handlePickAudio = () => {
-    if (readOnly) return;
+    if (readOnly || adopting) return;
     if (totalRefCount >= MAX_AUDIO_REFS) {
       onToast?.('warn', `参考音频最多 ${MAX_AUDIO_REFS} 段已超出`);
       return;
@@ -271,7 +277,7 @@ export default function AudioDialog({
    *  + 本地上传/自由拾取项；顺序统一由参考栏 stripOrder 决定 */
   const allRefs = [...(draftRefs ?? []), ...namedRefs];
 
-  const handleAudioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAudioFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (!files.length) return;
@@ -286,6 +292,20 @@ export default function AudioDialog({
     const accepted = valid.slice(0, remaining);
     if (accepted.length < valid.length) {
       onToast?.('warn', `参考音频最多 ${MAX_AUDIO_REFS} 段已超出`);
+    }
+    // 草稿绑定（IKFDG2）：本地上传即时接纳——父级上传取得持久 Asset 身份后建来源卡并连线，
+    // 成功项经 draftRefs 连线推导展示，不进入面板本地暂存（无目标可丢失）；
+    // 失败父级已明确提示，不伪装成已保存引用
+    if (onAdoptLocalFile && draftBinding) {
+      setAdopting(true);
+      try {
+        for (const f of accepted) {
+          await onAdoptLocalFile(f);
+        }
+      } finally {
+        setAdopting(false);
+      }
+      return;
     }
     const next: AudioRefItem[] = accepted.map((f, i) => ({
       id: `local-${Date.now()}-${i}`,
