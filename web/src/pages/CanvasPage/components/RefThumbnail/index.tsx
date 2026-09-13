@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FloatingPortal, autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
 import { AtSign, AudioLines, FileText, X } from 'lucide-react';
 import styles from './index.module.css';
+import type { StripDragItemProps } from './strip-dnd';
 
 export type RefThumbnailKind = 'image' | 'video' | 'audio' | 'text';
 
@@ -29,6 +30,9 @@ export interface RefThumbnailProps {
   audioDuration?: number;
   /** 文本预览正文 */
   textPreview?: string;
+  /** 拖拽排序（IKFCKT）：外层拖拽属性透传根节点（useRefStripDrag().itemProps 生成）；
+   *  与三态交互正交——按钮点击（mousedown 未移动不触发 dragstart）与拖拽手势天然区分 */
+  dragProps?: StripDragItemProps;
   'data-testid'?: string;
   className?: string;
 }
@@ -104,6 +108,7 @@ export function RefThumbnail({
   onInsertRef,
   audioDuration,
   textPreview,
+  dragProps,
   className,
   'data-testid': testId,
 }: RefThumbnailProps) {
@@ -153,9 +158,11 @@ export function RefThumbnail({
       title={name}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      {...dragProps}
     >
-      {kind === 'image' && url ? <img src={url} alt={name} /> : null}
-      {kind === 'video' && url ? <video src={url} muted playsInline preload="metadata" /> : null}
+      {/* draggable=false：图片/视频原生拖拽会劫持手势（拖出图片 ghost 而非缩略图项），统一由根节点承载 */}
+      {kind === 'image' && url ? <img src={url} alt={name} draggable={false} /> : null}
+      {kind === 'video' && url ? <video src={url} muted playsInline preload="metadata" draggable={false} /> : null}
       {kind === 'audio' ? <AudioLines className={styles.kindIcon} aria-hidden="true" /> : null}
       {kind === 'text' ? <FileText className={styles.kindIcon} aria-hidden="true" /> : null}
       {(badgeText ?? number) != null && (

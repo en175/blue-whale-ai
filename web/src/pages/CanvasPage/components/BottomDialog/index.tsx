@@ -39,6 +39,7 @@ import PromptRefEditor, {
 } from '../PromptRefEditor';
 import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
 import RefThumbnail from '../RefThumbnail';
+import { arrayMove, splitReorder, useRefStripDrag, type StripDragItemProps } from '../RefThumbnail/strip-dnd';
 import { refIdOf, videoLabelMapOf } from '../../videoPromptRefs';
 import type { ImageTextAttachment } from '../ImageDialog';
 import type { MediaGenStatus } from '../MediaNode';
@@ -118,8 +119,8 @@ interface BottomDialogProps {
   onSyncPlan?: (nodeId: string) => void;
   syncingPlan?: boolean;
   planIndices?: string;
-  /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列。
-   *  IKFCKQ 起无 UI 消费（上移/下移随独立文本附件区块下线），排序能力由 T5 拖拽切片承接 */
+  /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；IKFCKT 拖拽换位消费
+   *  （顺序即生成上下文拼接顺序；上移/下移 UI 随独立文本附件区块下线，能力由拖拽补位） */
   onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 到节点选择：进入画布节点选取模式（image 图片节点 / video 视频节点）；
    *  role 为视频草稿目标参考角色（首帧/尾帧显式指定，IKDMQS），缺省普通参考 */
@@ -142,14 +143,12 @@ interface BottomDialogProps {
   videoMediaRefs: VideoMediaRefs;
   /** 移除某个视频参考：携带来源节点 id，父级断开对应连线 */
   onRemoveVideoRef?: (sourceNodeId: string) => void;
-  /** 显式改变参考角色：父级改写连线 edge.data.refRole。
-   *  IKFCKQ 起无 UI 消费（角色切换入口随自绘 VideoRefThumb 下线，该 UI 在下线前也从不渲染），待 T5 拖拽切片定稿时一并处置 */
-  onSetVideoRefRole?: (sourceNodeId: string, role: VideoRefRole) => void;
   /** 移除角色库 material 参考（materialId，父级从草稿 data.draftMaterialRefs 过滤） */
   onRemoveMaterialRef?: (materialId: string) => void;
-  /** 改变角色库 material 参考角色（父级改写草稿 data.draftMaterialRefs 对应项 role）。
-   *  IKFCKQ 起无 UI 消费（同 onSetVideoRefRole），待 T5 拖拽切片定稿时一并处置 */
-  onSetMaterialRefRole?: (materialId: string, role: VideoRefRole) => void;
+  /** 参考栏拖拽换位（IKFCKT）：普通参考新顺序（nodeId / materialId 混合 key）；父级按子源拆分重排
+   *  ——草稿模式 = 连线边序 + 草稿 material 序分别回填，自由模式 = 暂存参考数组整体重排。
+   *  首帧/尾帧为角色槽（徽标不参与数字编号），不参与拖拽换位 */
+  onReorderMediaRefs?: (orderedKeys: string[]) => void;
   /** Toast 提示（上传超限/首尾帧校验等场景，由父级注入全局 sonner，位置/样式与 ImageDialog/AudioDialog 统一） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
   /** 画布 @ 引用候选 */
@@ -186,7 +185,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onRemoveMaterialRef, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
   /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -675,8 +674,9 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   /** IKFCKQ 参考缩略图接入共享组件：× 走「断开引用、保留来源」既有链路
    *  （连线项断开连线 / 角色库项移除草稿 material 参考），@ 复用记忆光标插入且仅对
    *  标签有效身份开放（与 @ 菜单同口径，不留下伪有效标签）；首帧/尾帧按角色徽标、
-   *  普通参考按同类型编号（与正文标签同源 numberMap），三态交互与放大预览由组件承载 */
-  const renderRefThumb = (item: VideoMediaRef, key?: string, badgeText?: string) => (
+   *  普通参考按同类型编号（与正文标签同源 numberMap），三态交互与放大预览由组件承载。
+   *  IKFCKT：dragProps 由渲染处按统一序列 index 传入（首尾帧槽不传 = 固定角色不参与拖拽） */
+  const renderRefThumb = (item: VideoMediaRef, key?: string, badgeText?: string, dragProps?: StripDragItemProps) => (
     <RefThumbnail
       key={key}
       data-testid="dock-video-ref"
@@ -690,13 +690,33 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
         ? () => (item.materialId != null ? onRemoveMaterialRef?.(item.materialId) : onRemoveVideoRef?.(item.nodeId))
         : undefined}
       onInsertRef={!readOnly && refLabels.has(refIdOf(item)) ? () => insertRefByKey(refIdOf(item)) : undefined}
+      dragProps={dragProps}
     />
   );
 
+  /** IKFCKT 参考栏拖拽换位：统一序列 = 普通参考 + 文本附件（首尾帧模式仅文本域）；
+   *  换位后按类型提取新相对顺序——媒体回传 onReorderMediaRefs（父级拆分连线边序与
+   *  material 序）、文本回传 onReorderAttachments（顺序即生成上下文拼接顺序）。 */
+  const handleStripReorder = (from: number, to: number) => {
+    if (isKeyframe) {
+      const ids = (attachments ?? []).map((a) => a.nodeId);
+      const nextText = arrayMove(ids, from, to);
+      if (nextText.join(',') !== ids.join(',')) onReorderAttachments?.(nextText);
+      return;
+    }
+    const refKeys = videoMediaRefs.reference.map((r) => r.materialId ?? r.nodeId);
+    const textKeys = (attachments ?? []).map((a) => a.nodeId);
+    const { nextMedia, nextText, mediaChanged, textChanged } = splitReorder(refKeys, textKeys, from, to);
+    if (mediaChanged) onReorderMediaRefs?.(nextMedia);
+    if (textChanged) onReorderAttachments?.(nextText);
+  };
+  const stripDrag = useRefStripDrag({ disabled: readOnly, onReorder: handleStripReorder });
+
   /** IKFCKQ 文本附件进参考栏：FileText 图标缩略图 + 文本N 独立编号 + 悬停 ×/@ 与正文预览；
    *  × 沿用方案附件既有移除链路（普通文本附件增删经画布连线，素材同步期间禁移除）；
-   *  附件顺序仍决定生成上下文拼接顺序（拖拽换位随 T5 切片落） */
-  const textThumbs = (attachments ?? []).map((a, i) => (
+   *  IKFCKT：dragProps 按统一序列 stripIndex 传入（base = 普通参考数；首尾帧模式无普通参考 base=0；
+   *  i 为文本段内编号下标）；附件顺序仍决定生成上下文拼接顺序 */
+  const renderTextThumb = (a: ImageTextAttachment, i: number, stripIndex: number) => (
     <RefThumbnail
       key={a.nodeId}
       data-testid="dock-text-ref"
@@ -710,8 +730,10 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
           : undefined
       }
       onInsertRef={!readOnly ? () => insertRefByKey(a.nodeId) : undefined}
+      dragProps={stripDrag.itemProps(stripIndex)}
     />
-  ));
+  );
+  const textThumbsAt = (base: number) => (attachments ?? []).map((a, i) => renderTextThumb(a, i, base + i));
 
   return (
     <div
@@ -933,12 +955,12 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
             ) : (
               !readOnly && canAddLast && renderSourceMenu('image', 'last', '添加尾帧（从资产中选择 / 到节点选择 / 角色库）', Image, '尾帧')
             )}
-            {textThumbs}
+            {textThumbsAt(0)}
           </div>
         ) : (
           <div className={styles.refSlot}>
-            {videoMediaRefs.reference.map((r) => renderRefThumb(r, r.materialId ?? r.nodeId))}
-            {textThumbs}
+            {videoMediaRefs.reference.map((r, i) => renderRefThumb(r, r.materialId ?? r.nodeId, undefined, stripDrag.itemProps(i)))}
+            {textThumbsAt(videoMediaRefs.reference.length)}
             {!readOnly && canAddReference && (
               <>
                 {renderSourceMenu('image', 'reference', '添加图片参考（从资产中选择 / 到节点选择 / 角色库）', Image)}

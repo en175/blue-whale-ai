@@ -12,6 +12,7 @@ import type { AudioRefItem, CanvasPickItem } from '../AudioDialog';
 import AtMentionMenu from '../AtMentionMenu';
 import { audioRefToMentionItem, stripTrailingAtQuery, trailingAtQuery, type AtMentionItem } from '../../atMention';
 import RefThumbnail from '../RefThumbnail';
+import { arrayMove, useRefStripDrag } from '../RefThumbnail/strip-dnd';
 import styles from './index.module.css';
 
 /** 输入框字数上限 */
@@ -154,6 +155,11 @@ export default function MusicDialog({
     });
   };
 
+  /** IKFCKT 参考条拖拽换位：顺序为面板本地序（编号随新序重派生，发送按新序携带） */
+  const stripDrag = useRefStripDrag({
+    onReorder: (from, to) => setRefs((prev) => arrayMove(prev, from, to)),
+  });
+
   /** 外部注入的画布选择结果（@ 菜单选中音频 → 父级生成事件）：去重 + 上限保护 */
   useEffect(() => {
     if (!externalPick) return;
@@ -266,7 +272,8 @@ export default function MusicDialog({
 
       {/* 参考预览：IKFCKS 替换为共享参考缩略图（编号圆钮 + 悬停 ×/@ + 200ms 图标名称时长卡片），
           自绘预览行（常显删除 + 「音频N」文字标签）下线；× 仅移除面板参考（本地上传回收 blob URL），
-          @ 与手动 @ 选择走同一 onMentionCanvas 入口（仅画布来源有素材身份） */}
+          @ 与手动 @ 选择走同一 onMentionCanvas 入口（仅画布来源有素材身份）。
+          IKFCKT：参考条支持拖拽换位（面板本地序；编号随新序重派生） */}
       {refs.length > 0 && (
         <div className={styles.previewArea}>
           {refs.map((r, i) => (
@@ -283,6 +290,7 @@ export default function MusicDialog({
                   ? () => onMentionCanvas(audioRefToMentionItem(r))
                   : undefined
               }
+              dragProps={stripDrag.itemProps(i)}
             />
           ))}
         </div>

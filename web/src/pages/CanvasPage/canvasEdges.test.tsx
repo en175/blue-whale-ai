@@ -563,3 +563,54 @@ describe('IKDL9U review text input consistency', () => {
     expect(container.textContent).toContain('正文超限');
   });
 });
+
+describe('IKFCKT 参考栏拖拽换位', () => {
+  /** jsdom 无 DragEvent 且 rect 恒 0：手工挂 dataTransfer / clientX，rect mock 出前半落点 */
+  function dragEvent(type: 'dragstart' | 'dragover' | 'drop', clientX: number) {
+    const event = new Event(type, { bubbles: true, cancelable: true }) as Event & {
+      dataTransfer: { setData: () => void; effectAllowed: string; dropEffect: string };
+      clientX: number;
+    };
+    event.dataTransfer = { setData: () => {}, effectAllowed: '', dropEffect: '' };
+    event.clientX = clientX;
+    return event;
+  }
+
+  it('图片面板拖拽文本附件换位：边序重排随自动保存上送（拼接顺序随之），角标与新序联动', async () => {
+    // 追加第二条文本连线：附件顺序 = 连入边序 [t1, t2]
+    const doc = canvasDocMock.current.doc as { nodes: Node[]; edges: Array<{ id: string; source: string; target: string }> };
+    doc.edges.push({ id: 'e2', source: 't2', target: 'm1' });
+    await renderPage();
+
+    const media = flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1');
+    await act(async () => { media.data.onGenImage('m1'); });
+
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(2));
+    await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
+
+    const titles = () =>
+      [...container.querySelectorAll('[data-testid="dock-text-ref"]')].map((el) => el.getAttribute('title'));
+    expect(titles()).toEqual(['故事文案', '配色参考']);
+
+    // 拖拽换位：「配色参考」（t2）拖到「故事文案」（t1）前半
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+      left: 0, width: 100, right: 100, top: 0, bottom: 0, height: 0, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect);
+    const thumbs = [...container.querySelectorAll('[data-testid="dock-text-ref"]')];
+    await act(async () => { thumbs[1]!.dispatchEvent(dragEvent('dragstart', 0)); });
+    await act(async () => { thumbs[0]!.dispatchEvent(dragEvent('dragover', 10)); });
+    await act(async () => { thumbs[0]!.dispatchEvent(dragEvent('drop', 10)); });
+
+    // 面板附件与新序联动（角标按新序紧凑重派生）
+    await vi.waitFor(() => expect(titles()).toEqual(['配色参考', '故事文案']));
+
+    // 边序重排随自动保存上送：t2 连线排在 t1 前（服务端按连线序推导 text_attachments，拼接顺序随之）
+    await act(async () => { await new Promise((r) => setTimeout(r, 1200)); });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
+    const payload = apiMocks.saveCanvasDoc.mock.calls.at(-1)![1];
+    const sources = (payload.edges as Array<{ source: string; target: string }>)
+      .filter((e) => e.target === 'm1')
+      .map((e) => e.source);
+    expect(sources).toEqual(['t2', 't1']);
+  });
+});
