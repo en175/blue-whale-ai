@@ -163,7 +163,7 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
     expect(saved.data.assetId).toBeUndefined();
   });
 
-  it("对音频草稿 target_node_id 建任务：冻结 prompt/model_id/target_node_id，文本连线不推导不冻结", async () => {
+  it("对音频草稿 target_node_id 建任务：冻结 prompt/model_id/target_node_id，文本连线推导冻结（IKFCXE）", async () => {
     const projectId = (await projects.create("987654", "IKDMQT freeze")).id;
     expect(
       (await saveCanvas(
@@ -185,8 +185,10 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
     expect(job!.input.prompt).toBe("海浪与海鸥");
     expect(job!.input.model_id).toBe(MODEL_ID);
     expect(job!.input.target_node_id).toBe("a2");
-    // 音频无文本附件能力：连线存在也不消费
-    expect(job!.input).not.toHaveProperty("text_attachments");
+    // IKFCXE：音频与图片/视频同构——连线文本卡推导冻结为创作上下文快照
+    expect(job!.input.text_attachments).toEqual([
+      { node_id: "t1", title: "故事文案", text: "故事文案正文" },
+    ]);
   });
 
   it("目标类型不匹配与目标缺失：400 明确失败，不建任务", async () => {
@@ -234,7 +236,8 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
       input_asset_ids: ["1"],
     });
     expect(withRefs.code).toBe(400);
-    expect(withRefs.msg).toContain("音频生成一期不支持参考素材");
+    // IKE4GC 起文案为现行口径（音频仅支持单数组 references），旧 IKDMQT 文案已废弃
+    expect(withRefs.msg).toContain("音频生成暂不支持旧参考字段");
     expect(await prisma.client.generation_jobs.count({ where: { project_id: BigInt(projectId) } })).toBe(0);
   });
 
