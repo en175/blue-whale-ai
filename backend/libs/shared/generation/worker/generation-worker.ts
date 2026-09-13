@@ -411,7 +411,7 @@ async function processClaimedJob(
       // IKFCXE：文本附件作为创作上下文与主提示词共同进入生成——组合语义与图片/视频同源
       //（composeTextAttachmentPrompt：非空白附件正文在前、主提示词在后，"\n\n" 连接，不改写正文）；
       // 不因存在附件强制改为朗读任务，环境音/配音意图由主提示词决定。
-      // 主提示词为空的音频任务已在 305 行前校验拒绝（hasNonBlankAttachment 仅对 image 放行）。
+      // 主提示词为空的音频任务已在前置校验拒绝（hasNonBlankAttachment 仅对 image 放行）。
       // 正文文本标签的编号清单已在接纳时冻结，执行与重试不得重新拼接覆盖它。
       const audioPrompt = typeof input.composed_prompt === "string" && input.composed_prompt.trim().length > 0
         ? input.composed_prompt

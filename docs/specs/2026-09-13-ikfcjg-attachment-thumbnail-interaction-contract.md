@@ -71,6 +71,7 @@
 - 音频面板集成（T3 / IKFCKS）：`MusicDialog/index.test.tsx`、`AudioDialog/index.test.tsx`（缩略图替换/新建、× 断边回调、@ 同一入口等价、只读态、发送参数回归）+ `connectAbility.test.ts`（文本卡 → 音频生成连线放行与既有组合回归）；`cardRename.test.tsx` 音频参考改名锚点随 chip 下线切换为缩略图 title。
 - 视觉像素值与过渡时长不进单测，留浏览器验收。
 - 切片：T1 IKFCKK（共享组件 + 图片面板，已合入）；T2 IKFCKQ（视频面板 BottomDialog，已合入）；T4 IKFCKN（文本附件进栏，已合入）；T3 IKFCKS（音频面板 MusicDialog 替换 + AudioDialog 新建，已合入——含画布文本卡连线进音频面板的连线能力放行：`isAudioGenEnabled` 对含文本组合可选，文本卡作为创作上下文，由接纳侧按连线冻结全文进入任务快照）；T5 IKFCKT（拖拽排序，本切片定稿见 §9）。父工单：IKFCJG。
+  - ⚠️ 修订（2026-09-13 [IKFCXE 音频文本上下文契约](2026-09-13-ikfcxe-audio-text-context-contract.md)）：T3 原描述中「文本卡作为创作上下文，不进生成请求」仅适用于 IKFCKS 交付时点；自 IKFCXE 起音频文本附件冻结进任务快照并进入生成请求。
 
 
 ## 9. 拖拽排序（T5 / IKFCKT 定稿）

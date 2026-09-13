@@ -144,7 +144,9 @@
 /* ---- 来源弹出（本地上传 / 从画布选择） ---- */
 .sourcePopup {
   position: absolute;
-  bottom: calc(100% + 10px);
+  /* IKFCXE：向下弹出——面板容器 .dialog 为 overflow-y: auto，向上超出内容区的弹层
+     会被裁剪不可见（ImageDialog previewRow 同坑注释）；向下落在输入区上，z-index 压顶 */
+  top: calc(100% + 10px);
   left: -8px;
   display: flex;
   align-items: center;

@@ -657,12 +657,6 @@ describe('IKDMQT 保存失败暂停生成', () => {
 });
 
 describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => {
-  /** 给 seed 的 t1 文本卡补 promptSource（到节点选择建线的来源资格，与图片/视频同口径） */
-  function markTextSource() {
-    (canvasDocMock.current.doc as { nodes: Array<{ id: string; data: Record<string, unknown> }> })
-      .nodes.find((n) => n.id === 't1')!.data.promptSource = { sessionId: 's1', revisionId: 'r1', shotNo: 1 };
-  }
-
   /** 经音频面板真实入口进入画布选择模式：添加参考按钮 → 来源菜单 → 从画布选择 */
   async function enterCanvasPick() {
     await vi.waitFor(() => {
@@ -681,52 +675,51 @@ describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => 
     });
   }
 
-  it('pickMode 音频下点击带 promptSource 的文本卡 → 建立来源→草稿连线（与图片/视频同一关系）', async () => {
+  it('pickMode 音频下点击文本卡 → 建立来源→草稿连线（与画布拖线同一本地建边；普通卡与方案卡均可）', async () => {
     // 前序用例可能将 saveCanvasDoc 改为 reject（clearAllMocks 不重置实现），恢复成功落盘
     apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
-    apiMocks.referencePromptPlan.mockResolvedValueOnce({
-      id: 11, version: 5, viewport: '{}', nodes: '[]',
-      edges: JSON.stringify([{ id: 'e-t1-d1', source: 't1', target: 'd1' }]),
-    });
     seedEmptyDraftDoc();
-    markTextSource();
     await renderPage();
     await openDraftPanel();
 
     await enterCanvasPick();
 
-    // 点击带 promptSource 的文本卡（非 mediaNode，直接以节点对象触发）
+    // 点击普通文本卡（无 promptSource；音频建线准入与拖线一致，不限方案卡）
     const textNode = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find((n) => n.id === 't1')!;
     await act(async () => {
       flowProps.current.onNodeClick(textNode);
     });
 
-    // 与图片/视频同款建线：referencePromptPlan(planNodeId=t1, targetNodeId=d1)
-    await vi.waitFor(() => expect(apiMocks.referencePromptPlan).toHaveBeenCalledTimes(1));
-    expect(apiMocks.referencePromptPlan).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: 'p1', planNodeId: 't1', targetNodeId: 'd1' }),
-    );
-    // 服务端返回的连线进入画布
+    // 与画布拖线同款本地建边（addCanvasEdge，自动保存持久）；不走 referencePromptPlan
+    //（该服务端链路仅放行图片/视频目标）
     await vi.waitFor(() => {
-      expect(flowProps.current.edges.some((e: { source: string; target: string }) => e.source === 't1' && e.target === 'd1')).toBe(true);
+      expect(flowProps.current.edges.some((e: { id: string; source: string; target: string }) =>
+        e.id === 'e-t1-d1' && e.source === 't1' && e.target === 'd1')).toBe(true);
     });
+    expect(apiMocks.referencePromptPlan).not.toHaveBeenCalled();
   });
 
-  it('无 promptSource 的普通文本卡不建线（来源资格与图片/视频同口径）', async () => {
+  it('重复选择同一文本卡只保留一条连线（去重）', async () => {
     apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
     seedEmptyDraftDoc();
     await renderPage();
     await openDraftPanel();
 
     await enterCanvasPick();
-
     const textNode = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find((n) => n.id === 't1')!;
     await act(async () => {
       flowProps.current.onNodeClick(textNode);
     });
+    await vi.waitFor(() => {
+      expect(flowProps.current.edges.filter((e: { source: string; target: string }) => e.source === 't1' && e.target === 'd1')).toHaveLength(1);
+    });
 
-    expect(apiMocks.referencePromptPlan).not.toHaveBeenCalled();
-    expect(flowProps.current.edges.some((e: { source: string; target: string }) => e.target === 'd1')).toBe(false);
+    // 重新进入选择模式再选同一文本卡：addCanvasEdge 同源去重，连线数量不变
+    await enterCanvasPick();
+    await act(async () => {
+      flowProps.current.onNodeClick(textNode);
+    });
+    expect(flowProps.current.edges.filter((e: { source: string; target: string }) => e.source === 't1' && e.target === 'd1')).toHaveLength(1);
   });
 });
 

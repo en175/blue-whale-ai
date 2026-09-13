@@ -461,20 +461,19 @@ export default function CanvasPage() {
     if (!targetId || isGeneratingNode(targetId)) return;
     removeTargetInputs(edgesRef.current.filter(edge => edge.source === planNodeId && edge.target === targetId).map(edge => edge.id));
   };
-  /** 图片面板移除文本附件（IKFCKN）：× 仅断开当前连线（保留画布原文本卡，走既有 removePlanAttachment 断边链路），
-   *  并同步自由模式的附件快照（快照渲染自 imageSeed，断边不会自动反映到面板）。
-   *  生成中守卫与断边链路对齐：守卫命中时边保留，快照也保持一致（防面板与画布脱节） */
-  const removeImageTextAttachment = (targetId: string | undefined, nodeId: string) => {
+  /** 图片/视频面板移除文本附件（IKFCKN/IKFCXC）：× 仅断开当前目标连线（保留画布原文本卡与其他目标关系，
+   *  走既有 removePlanAttachment 断边链路，与画布断线同一结果），并同步自由模式的附件快照
+   *  （快照渲染自 seed，断边不会自动反映到面板）。
+   *  生成中守卫与断边链路对齐：守卫命中时边保留，快照也保持一致（防面板与画布脱节）。
+   *  setSeed 由调用方在 JSX 回调中传入——声明处先于 useState 定义，直接引用 setter 会撞 TDZ。 */
+  const removeTextAttachment = <S extends { attachments?: ImageTextAttachment[] }>(
+    setSeed: (updater: (s: S | null) => S | null) => void,
+    targetId: string | undefined,
+    nodeId: string,
+  ) => {
     if (targetId && isGeneratingNode(targetId)) return;
     removePlanAttachment(targetId, nodeId);
-    setImageSeed((s) => (s ? { ...s, attachments: s.attachments?.filter((a) => a.nodeId !== nodeId) } : s));
-  };
-  /** 视频面板移除文本附件（IKFCXC）：同图片面板链路——× 仅断开当前目标连线
-   *  （保留来源卡与其他目标关系，与画布断线同一结果），并同步自由模式的附件快照（videoSeed） */
-  const removeVideoTextAttachment = (targetId: string | undefined, nodeId: string) => {
-    if (targetId && isGeneratingNode(targetId)) return;
-    removePlanAttachment(targetId, nodeId);
-    setVideoSeed((s) => (s ? { ...s, attachments: s.attachments?.filter((a) => a.nodeId !== nodeId) } : s));
+    setSeed((s) => (s ? { ...s, attachments: s.attachments?.filter((a) => a.nodeId !== nodeId) } : s));
   };
   /** 连线变更守卫（IKDMQQ）：生成中节点的入边删除变更被拦截（剪刀等 remove 路径统一收口）；
    *  放行的删边进撤销栈（IKD0JT），撤销可加回 */
@@ -1761,10 +1760,12 @@ export default function CanvasPage() {
       imagePanelHiddenRef.current = true;
       return;
     }
-    // IKFCXE：音频草稿面板的「到节点选择」选中文本卡 → 建立来源→草稿连线（与图片/视频同一关系）；
-    // 绑定以 audioDraftId 为准（seed 可能残留旧草稿值）；连线驱动后端接纳推导文本附件快照
-    if (pickMode === 'audio' && pickTarget === 'audio' && audioDraftId && node.type === 'textNode' && data.promptSource) {
-      void referencePlanRef.current(node.id, audioDraftId);
+    // IKFCXE：音频草稿面板的「到节点选择」选中文本卡 → 建立来源→草稿连线（与画布拖线同一关系）；
+    // 绑定以 audioDraftId 为准（seed 可能残留旧草稿值）；拖线（connectPair）对音频目标走 addCanvasEdge
+    // 本地建边（referencePromptPlan 服务端仅放行图片/视频目标），此处与拖线同款——普通文本卡与
+    // 方案卡均可（与拖线准入一致，图片/视频分支的 promptSource 限定是方案 API 的服务端约束，不适用于音频）。
+    if (pickMode === 'audio' && pickTarget === 'audio' && audioDraftId && node.type === 'textNode') {
+      addCanvasEdge(node.id, audioDraftId);
       setPickMode(null);
       setPickTarget(null);
       audioPanelHiddenRef.current = true;
@@ -5876,7 +5877,7 @@ export default function CanvasPage() {
           <BottomDialog
             stripOrder={refStripOrderOf(videoDraftId)}
             onStripOrderChange={videoDraftId ? keys => handleRefStripOrderChange(videoDraftId, keys) : undefined}
-            onRemoveAttachment={id => removeVideoTextAttachment(videoDraftId ?? videoSeed?.targetNodeId, id)}
+            onRemoveAttachment={id => removeTextAttachment(setVideoSeed, videoDraftId ?? videoSeed?.targetNodeId, id)}
             pendingPlanSyncs={pendingPlanSyncs(videoSeed?.targetNodeId)}
             onSyncPlan={id => syncPlanToTarget(id, videoSeed?.targetNodeId)}
             syncingPlan={applying}
@@ -5955,7 +5956,7 @@ export default function CanvasPage() {
             attachments={imageDraftId ? imageDraftAttachments : imageSeedView?.attachments}
             mediaRefs={imageDraftId ? imageDraftMediaRefs : undefined}
             invalidMediaRefs={invalidImageMediaRefs}
-            onRemoveAttachment={id => removeImageTextAttachment(imageDraftId ?? imageSeed?.targetNodeId, id)}
+            onRemoveAttachment={id => removeTextAttachment(setImageSeed, imageDraftId ?? imageSeed?.targetNodeId, id)}
             pendingPlanSyncs={pendingPlanSyncs(imageSeed?.targetNodeId)}
             onSyncPlan={id => syncPlanToTarget(id, imageSeed?.targetNodeId)}
             syncingPlan={applying}
@@ -6034,7 +6035,7 @@ export default function CanvasPage() {
               ? '到节点选择：点击画布中的图片节点带入首帧/尾帧，点击空白处取消'
               : '到节点选择：点击画布中的图片节点或方案节点，带入完整参考，点击空白处取消')}
             {pickMode === 'video' && '到节点选择：点击画布中的视频节点带入参考视频，点击空白处取消'}
-            {pickMode === 'audio' && '到节点选择：点击画布中的音频节点带入参考音频，点击空白处取消'}
+            {pickMode === 'audio' && '到节点选择：点击画布中的音频节点带入参考音频，点击文本卡带入创作上下文，点击空白处取消'}
             {pickMode === 'product' && '到节点选择：点击画布中的图片节点带入商品图，点击空白处取消'}
             {pickMode === 'asset' && '到节点选择：点击画布中的图片节点或方案节点，带入完整参考，点击空白处取消'}
           </div>
