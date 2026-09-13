@@ -109,10 +109,11 @@ describe('IKFA1P 生图文本附件索引（A2 文本部分）', () => {
     expect(readPromptRefText(container)).toBe('按文本1');
   });
 
-  it('文本项可按标题搜索；附件区展示同源编号徽标', async () => {
+  it('文本项可按标题搜索；参考栏文本缩略图展示同源编号（角标仅数字）', async () => {
     await renderDialog({ attachments: [ATT_STYLE, ATT_POSE] });
-    expect(container.textContent).toContain('文本附件（2）');
-    expect([...container.querySelectorAll('[class*="attachmentBadge"]')].map((e) => e.textContent)).toEqual(['文本1', '文本2']);
+    // IKFCKN：文本附件进参考栏，编号圆钮仅显示数字（与 @ 菜单「文本N」同源）
+    const badges = [...container.querySelectorAll('[data-testid="dock-text-ref"] [data-testid="ref-thumb-badge"]')].map((e) => e.textContent);
+    expect(badges).toEqual(['1', '2']);
     await typePromptRefRaw(container, '@姿势');
     await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
     const items = mentionMenuItems();
@@ -129,8 +130,8 @@ describe('IKFA1P 生图文本附件索引（A2 文本部分）', () => {
     await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
     await act(async () => mentionMenuItems()[0]!.click());
     expect(readPromptRefText(container)).toBe('先文本1再文本1');
-    // 附件区仍只有一份
-    expect(container.textContent).toContain('文本附件（1）');
+    // 参考栏文本缩略图仍只有一份
+    expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1);
   });
 });
 

@@ -7,7 +7,6 @@ import type { Node } from '@xyflow/react';
 import {
   X,
   ChevronDown,
-  ChevronUp,
   Maximize2,
   Minimize2,
   SlidersHorizontal,
@@ -74,9 +73,6 @@ export interface ImageTextAttachment {
   text: string;
 }
 
-/** 附件正文超过该长度默认折叠（可展开读全） */
-const ATTACHMENT_COLLAPSE_LENGTH = 120;
-
 interface ImageDialogProps {
   onClose: () => void;
   /** 发送：提示词（拍平镜像）+ 模型ID + 分辨率档位 id（如 2k） + 宽高比 + 参考素材列表 + 结构化正文（含素材标签时携带，IKFA1M）（异步：上传完成后 resolve） */
@@ -91,9 +87,8 @@ interface ImageDialogProps {
   initialParams?: ImageGenSeedParams;
   /** 连线文本附件（IKDLQF）：仅图片媒体节点面板发起时携带，打开当下快照，只读展示 */
   attachments?: ImageTextAttachment[];
-  onRemovePlan?: (nodeId: string) => void;
-  /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；仅多附件时展示控件，缺省不渲染排序入口 */
-  onReorderAttachments?: (orderedNodeIds: string[]) => void;
+  /** 移除文本附件（IKFCKN）：× 仅断开当前连线（保留画布原文本卡），自由模式同步移除附件快照 */
+  onRemoveAttachment?: (nodeId: string) => void;
   /** 到节点选择：进入画布图片节点选取模式 */
   onPickFromCanvas?: () => void;
   /** 从资产中选择：打开资产库选择弹窗（仅图片） */
@@ -158,64 +153,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-/** 连线文本附件项：标题 + 正文预览，长文默认折叠可展开；多附件且父级提供重排回调时展示上移/下移（IKDLQH）；
- *  IKFA1P：badge 展示正文标签编号（文本N），与 @ 菜单、正文标签同源。 */
-function AttachmentItem({ attachment, badge, move, onRemove }: {
-  attachment: ImageTextAttachment;
-  badge?: string;
-  onRemove?: () => void;
-  move?: { isFirst: boolean; isLast: boolean; onMove: (delta: -1 | 1) => void };
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const collapsible = attachment.text.length > ATTACHMENT_COLLAPSE_LENGTH;
-  return (
-    <div className={styles.attachmentItem}>
-      <div className={styles.attachmentHead}>
-        <span className={styles.attachmentTitle}>{attachment.title}</span>
-        {badge && <span className={styles.attachmentBadge}>{badge}</span>}
-        {onRemove && <button type="button" className={styles.attachmentMove} aria-label={`移除方案 ${attachment.title}`} title="移除方案" onClick={onRemove}><X size={12} /></button>}
-        {move && (
-          <span className={styles.attachmentMoves}>
-            <button
-              type="button"
-              title="上移"
-              className={styles.attachmentMove}
-              disabled={move.isFirst}
-              onClick={() => move.onMove(-1)}
-            >
-              <ChevronUp size={12} strokeWidth={2} />
-            </button>
-            <button
-              type="button"
-              title="下移"
-              className={styles.attachmentMove}
-              disabled={move.isLast}
-              onClick={() => move.onMove(1)}
-            >
-              <ChevronDown size={12} strokeWidth={2} />
-            </button>
-          </span>
-        )}
-      </div>
-      <span
-        className={`${styles.attachmentText} ${collapsible && !expanded ? styles.attachmentTextCollapsed : ''}`}
-      >
-        {attachment.text}
-      </span>
-      {collapsible && (
-        <button
-          type="button"
-          className={styles.attachmentToggle}
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? '收起' : '展开'}
-        </button>
-      )}
-    </div>
-  );
-}
-
-export default function ImageDialog({ onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, mentionItems: canvasMentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, mentionItems: canvasMentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
   /** 结构化正文（IKFA1M）：文字与素材标签的片段序列；标签绑定稳定身份，编号按当前输入派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -609,15 +547,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
-  /** 附件排序（IKDLQH）：与相邻项交换后把新 nodeId 序列交给父级；列表仍渲染自 props（父级同步同序快照） */
-  const handleAttachmentMove = (index: number, delta: -1 | 1) => {
-    if (!attachments || !onReorderAttachments) return;
-    const ids = attachments.map((a) => a.nodeId);
-    const [moved] = ids.splice(index, 1);
-    ids.splice(index + delta, 0, moved);
-    onReorderAttachments(ids);
-  };
-
   /** 发送（清晰度传分辨率档位 id，对应生成接口 parameters.size） */
   const handleSend = async () => {
     if (!canSend) return;
@@ -834,6 +763,25 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
                     onInsertRef={!readOnly && f.assetId != null ? () => insertRefByKey(String(f.assetId)) : undefined}
                   />
                 ))}
+            {/* IKFCKN：文本附件以 FileText 图标缩略图进参考栏统一序列——参与「文本N」独立编号（角标仅数字）、
+                × 仅断开当前连线（保留画布原文本卡；方案附件沿用素材同步期间禁移除的既有约束）、
+                @ 复用记忆光标插入、悬停 200ms 正文预览；附件顺序仍决定生成上下文拼接顺序 */}
+            {(attachments ?? []).map((a, i) => (
+              <RefThumbnail
+                key={a.nodeId}
+                data-testid="dock-text-ref"
+                kind="text"
+                name={a.title}
+                number={i + 1}
+                textPreview={a.text}
+                onRemove={
+                  !readOnly && (!a.isPromptPlan || !syncingPlan) && onRemoveAttachment
+                    ? () => onRemoveAttachment(a.nodeId)
+                    : undefined
+                }
+                onInsertRef={!readOnly ? () => insertRefByKey(a.nodeId) : undefined}
+              />
+            ))}
             {/* 附件队列末尾：媒体来源菜单（上传入口退役，IKDLQR/IKDLQL 方向；保留资产选择/节点选择，
                 画布资产改造融合）。图片达上限或生成中只读时隐藏 */}
             {!imagesFull && !readOnly && (
@@ -883,31 +831,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
             </button>
           </div>
         </div>
-
-        {/* 连线文本附件（IKDLQF）：只读展示，增删通过画布连线建立/断开进行；多附件可上移/下移排序（IKDLQH） */}
-        {attachments && attachments.length > 0 && (
-          <div className={styles.attachments}>
-            <span className={styles.configLabel}>文本附件（{attachments.length}）</span>
-            {attachments.map((a, i) => (
-              <AttachmentItem
-                key={a.nodeId}
-                attachment={a}
-                badge={`文本${i + 1}`}
-                onRemove={!readOnly && !syncingPlan && a.isPromptPlan && onRemovePlan ? () => onRemovePlan(a.nodeId) : undefined}
-                move={
-                  // 生成中只读（IKDMQQ）：排序同属输入编辑，一并禁用
-                  !readOnly && onReorderAttachments && attachments.length > 1
-                    ? {
-                        isFirst: i === 0,
-                        isLast: i === attachments.length - 1,
-                        onMove: (delta) => handleAttachmentMove(i, delta),
-                      }
-                    : undefined
-                }
-              />
-            ))}
-          </div>
-        )}
 
         {/* 生成中只读提示（IKDMQQ）：任务执行期间参数冻结，取消入口在画布卡片上 */}
         {readOnly && (
