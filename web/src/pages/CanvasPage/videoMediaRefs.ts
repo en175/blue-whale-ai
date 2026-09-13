@@ -5,7 +5,7 @@
  * 角色随 edges JSON 原样持久化（服务端零改动，延续 IKDMQR）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
-import { cardNameOfNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
+import { baseSourceError, cardNameOfNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
 import { REF_LIMITS } from '@/utils/ref-overflow';
 
 /** 视频参考角色：reference 普通参考 / first 首帧 / last 尾帧 */
@@ -158,20 +158,6 @@ export function isVideoDraftNode(node: Node | undefined): boolean {
 export function readRefRole(edge: Edge): VideoRefRole {
   const role = (edge.data as Record<string, unknown> | undefined)?.refRole;
   return role === 'first' || role === 'last' ? role : 'reference';
-}
-
-/** 来源有效性（不含媒体类型检查）：与图片参考同口径——待生成/生成中/失败/失效/上传中/无资产均不可用 */
-function baseSourceError(node: NonNullable<Node>): string | null {
-  const data = (node.data ?? {}) as Record<string, unknown>;
-  if (data.genStatus === 'draft') return '待生成的草稿不能作为参考';
-  if (data.genStatus === 'generating') return '生成中的卡片不能作为参考';
-  if (data.genStatus === 'failed' || data.genStatus === 'cancelled') return '生成失败的卡片不能作为参考';
-  if (data.assetMissing) return '素材已被删除';
-  const src = typeof data.src === 'string' ? data.src : '';
-  if (src.startsWith('blob:')) return '素材上传中，请稍候再选择';
-  if (!src) return '素材已被删除';
-  if (readAssetId(data) === undefined) return '素材未关联资产，无法作为参考';
-  return null;
 }
 
 /** 视频参考来源校验：返回 null 表示可用，否则为用户可读拒绝原因。

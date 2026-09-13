@@ -735,8 +735,14 @@ describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => 
 });
 
  describe('IKFCJG 恢复音频引用请求', () => {
-  it('结构与音频参考恢复后携带真实 references 和 prompt_doc', async () => {
+  it('结构与音频参考恢复后携带真实 references 和 prompt_doc（IKFDFZ：存量 audioRefs 打开时迁移为连线）', async () => {
     seedDraftDoc();
+    // 存量 audioRefs 的画布项须有对应画布来源节点（迁移按节点 id 找回来源建线）
+    (canvasDocMock.current.doc as { nodes: Node[] }).nodes.push({
+      id: 'r1', type: 'mediaNode', position: { x: 100, y: 0 },
+      data: { src: 'https://x/a.mp3', mediaType: 'audio', fileName: '雨声', assetId: '601' },
+    });
+    canvasDocMock.current.assets = { '601': { asset_id: 601, type: 'audio', access_url: 'https://x/a.mp3' } };
     const draft = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find((n: Node) => n.id === 'd1')!;
     Object.assign(draft.data, {
       prompt: '音频1',
@@ -745,7 +751,7 @@ describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => 
     });
     await renderPage(); await openDraftPanel(); await waitModelReady();
     expect(readPromptRefText(container)).toBe('音频1');
-    expect(container.querySelector('[data-testid="audio-ref-thumb"]')!.getAttribute('title')).toBe('雨声');
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="audio-ref-thumb"]')!.getAttribute('title')).toBe('雨声'));
     await act(async () => sendButton().click());
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     expect(apiMocks.createGenerationJob.mock.calls[0][1]).toMatchObject({
