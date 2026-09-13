@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 /* IKFA1M：ImageDialog 正文素材标签——@ 菜单/插入/编号一致性/失效阻止生成/删除提及 */
 import { act, createElement } from 'react';
+import { $getRoot, $isTextNode, SKIP_DOM_SELECTION_TAG } from 'lexical';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment } from './index';
 import type { AtMentionItem } from '../../atMention';
 import type { ImageMediaRef } from '../../mediaRefs';
 import type { PromptDoc } from '@/lib/prompt-doc';
-import { readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
+import { promptRefEditorInstance, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -129,13 +130,16 @@ afterEach(() => {
 
 describe('IKFA1M @ 菜单与插入（A1/A4）', () => {
   it('从 @ 添加新图片成功后，在原位置插入标签并保存身份（A3）', async () => {
-    const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A] });
-    await typePromptRefRaw(container, '让@');
+    const item: AtMentionItem = { id: 'nb', assetId: '102', kind: 'image', name: '衣服图' };
+    const onMentionCanvas = vi.fn();
+    const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A], mentionItems: [item], onMentionCanvas });
+    await typePromptRefRaw(container, '让@衣服');
     await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
     await act(async () => {
       [...container.querySelectorAll<HTMLButtonElement>('button')]
-        .find((button) => button.textContent?.includes('从资产中选择'))!.click();
+        .find((button) => button.textContent === '衣服图')!.click();
     });
+    expect(onMentionCanvas).toHaveBeenCalledWith(item);
     expect(readPromptRefText(container)).toBe('让');
     await rerender([REF_A, REF_B], onParamsChange);
     await vi.waitFor(() => expect(readPromptRefText(container)).toBe('让图片2'));
@@ -413,9 +417,6 @@ it('结构化编辑器保留画布文本引用入口，选择后消费查询且�
   const item: AtMentionItem = { id: 'text-1', kind: 'text', name: '水彩方案' };
   await renderDialog({ mediaRefs: [REF_A], mentionItems: [item], onMentionCanvas });
   await typePromptRefRaw(container, '让@水彩');
-  await act(async () => {
-    [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '引用画布素材')!.click();
-  });
   await vi.waitFor(() => expect(document.body.textContent).toContain('水彩方案'));
   await act(async () => {
     [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.includes('水彩方案'))!.click();
@@ -519,4 +520,71 @@ describe('IKFCKK 附件条三态集成', () => {
     expect(container.querySelector('[data-testid="dock-media-ref"] button[title="移除"]')).toBeNull();
     expect(container.querySelector('[data-testid="dock-media-ref"] button[title="插入引用"]')).toBeNull();
   });
+});
+
+
+it('菜单内搜索同时显示已引用和画布同一素材，选择画布项直接插入且不重复添加引用', async () => {
+  const onMentionCanvas = vi.fn();
+  const item: AtMentionItem = { id: 'na', assetId: '101', kind: 'image', name: '角色图' };
+  await renderDialog({ mediaRefs: [REF_A], mentionItems: [item], onMentionCanvas });
+  await typePromptRefRaw(container, '让@');
+  const input = container.querySelector('input[placeholder="搜索"]') as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '角色');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const menu = container.querySelector('[data-testid="mention-menu"]')!;
+  const matches = [...menu.querySelectorAll<HTMLButtonElement>('button')].filter(b => b.textContent?.includes('角色图'));
+  expect(matches).toHaveLength(2);
+  await act(async () => matches[1].click());
+  await vi.waitFor(() => expect(readPromptRefText(container)).toBe('让图片1'));
+  expect(onMentionCanvas).not.toHaveBeenCalled();
+  expect(container.querySelectorAll('[data-testid="dock-media-ref"]')).toHaveLength(1);
+});
+
+
+it.each(['正文', 'Esc', '外部'])('取消 @（%s）后恢复正文编辑，旧触发符不重开，删除重输才唤起', async (method) => {
+  await renderDialog({ mediaRefs: [REF_A] });
+  await typePromptRefRaw(container, '让@');
+  const host = container.querySelector('[contenteditable]') as HTMLElement;
+  expect(document.activeElement).toBe(container.querySelector('input[placeholder="搜索"]'));
+  await act(async () => {
+    if (method === 'Esc') document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    else (method === '正文' ? host : document.body).dispatchEvent(new Event('pointerdown', { bubbles: true }));
+  });
+  const editor = promptRefEditorInstance(container);
+  const edit = async (change: () => void) => {
+    await act(async () => editor.update(change, { tag: SKIP_DOM_SELECTION_TAG }));
+  };
+  await edit(() => { $getRoot().selectStart(); });
+  await edit(() => { $getRoot().selectEnd(); });
+  expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull();
+  await act(async () => host.focus());
+  expect(document.activeElement).toBe(host);
+  await typePromptRefRaw(container, '继续');
+  expect(readPromptRefText(container)).toBe('让@继续');
+  expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull();
+  // 改动 @ 之前的正文也不能让原来的触发符复活。
+  await edit(() => {
+    const node = $getRoot().getFirstDescendant();
+    if ($isTextNode(node)) { node.spliceText(0, 0, '先'); node.selectEnd(); }
+  });
+  expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull();
+  await edit(() => {
+    const node = $getRoot().getFirstDescendant();
+    if ($isTextNode(node)) { node.spliceText(2, 3, ''); node.selectEnd(); }
+  });
+  expect(readPromptRefText(container)).toBe('先让');
+  await typePromptRefRaw(container, '@');
+  expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy();
+  expect(document.activeElement).toBe(container.querySelector('input[placeholder="搜索"]'));
+});
+
+it('真实菜单键盘确认把已引用素材插入正文', async () => {
+  await renderDialog({ mediaRefs: [REF_A] });
+  await typePromptRefRaw(container, '让@');
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })));
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+  await vi.waitFor(() => expect(readPromptRefText(container)).toBe('让图片1'));
+  expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull();
 });

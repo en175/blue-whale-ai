@@ -27,6 +27,8 @@ export function isEditableKeyboardTarget(target: EventTarget | null): boolean {
  * - Enter：继续拦截，避免误触发（输入框内忽略）
  */
 export function canvasDeleteKeyAction(key: string, target: EventTarget | null): CanvasDeleteKeyAction {
+  // 引用菜单自行处理键盘，避免确认素材被画布快捷键截断。
+  if (target instanceof Element && target.closest('[data-canvas-keyboard-scope="mention"]')) return 'ignore';
   if (key === 'Delete' || key === 'Backspace') {
     return isEditableKeyboardTarget(target) ? 'ignore' : 'delete-selected';
   }

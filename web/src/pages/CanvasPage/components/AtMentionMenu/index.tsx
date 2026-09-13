@@ -37,10 +37,17 @@ function ItemThumb({ item }: { item: AtMentionItem }) {
   );
 }
 
+export interface ReferencedMentionItem extends AtMentionItem {
+  badge: string;
+}
+
 interface AtMentionMenuProps {
   /** 定位锚点（输入框容器） */
   anchorRef: React.RefObject<HTMLElement | null>;
   items: AtMentionItem[];
+  renderInline?: boolean;
+  referencedItems?: ReferencedMentionItem[];
+  onSelectReferenced?: (item: ReferencedMentionItem) => void;
   /** 编辑器 @ 后已输入的检索词 */
   editorQuery: string;
   disabledKinds?: AtMentionKind[];
@@ -52,6 +59,9 @@ export default function AtMentionMenu({
   anchorRef,
   items,
   editorQuery,
+  renderInline = false,
+  referencedItems = [],
+  onSelectReferenced,
   disabledKinds,
   onSelect,
   onClose,
@@ -59,10 +69,16 @@ export default function AtMentionMenu({
   const rootRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState(editorQuery);
   const [hovered, setHovered] = useState<AtMentionKind | null>(null);
+  const [availableHeight, setAvailableHeight] = useState(480);
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const disabled = new Set(disabledKinds ?? []);
   const searching = query.trim().length > 0;
   const matched = filterAtMentionItems(items, query);
+  const normalizedQuery = query.trim().toLowerCase();
+  // 两个分区独立过滤，不跨分区去重。
+  const matchedRefs = referencedItems.filter(item => !normalizedQuery
+    || item.name.toLowerCase().includes(normalizedQuery)
+    || item.badge.toLowerCase().includes(normalizedQuery));
 
   useEffect(() => {
     setQuery(editorQuery);
@@ -72,14 +88,18 @@ export default function AtMentionMenu({
     const anchor = anchorRef.current;
     if (!anchor) return;
     const rect = anchor.getBoundingClientRect();
+    if (renderInline) {
+      setAvailableHeight(Math.max(100, rect.bottom - 8));
+      return;
+    }
     const width = 228;
-    const estHeight = searching ? 220 : 250;
+    const estHeight = Math.min(rootRef.current?.offsetHeight || 300, window.innerHeight - 16);
     let left = rect.left;
     let top = rect.bottom + 6;
     if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
     if (top + estHeight > window.innerHeight - 8) top = Math.max(8, rect.top - estHeight - 6);
     setPos({ top, left });
-  }, [anchorRef, searching, matched.length]);
+  }, [anchorRef, renderInline, searching, matched.length, matchedRefs.length]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -100,15 +120,61 @@ export default function AtMentionMenu({
 
   const flyoutItems = hovered ? items.filter((item) => item.kind === hovered) : [];
 
-  return createPortal(
+  const menu = (
     <div
       ref={rootRef}
-      className={styles.portal}
-      style={{ top: pos.top, left: pos.left }}
+      className={`${styles.portal} ${renderInline ? styles.inline : ''}`}
+      data-testid="mention-menu"
+      data-canvas-keyboard-scope="mention"
+      onFocus={(e) => {
+        const target = e.target as HTMLElement;
+        // 焦点回到一级素材或搜索框时，结束上一个分类的展开状态。
+        if (target.closest('[data-mention-main]') && !target.closest('[data-mention-kind]')) {
+          setHovered(null);
+        }
+      }}
+      onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing) return;
+        const target = e.target as HTMLElement;
+        const button = target.closest<HTMLButtonElement>('button');
+        const kind = button?.dataset.mentionKind;
+        const flyout = rootRef.current?.querySelector<HTMLElement>('[data-mention-flyout]');
+        const inFlyout = !!flyout?.contains(target);
+        if ((e.key === 'Enter' || e.key === 'ArrowRight') && kind) {
+          e.preventDefault();
+          e.stopPropagation();
+          flyout?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+          return;
+        }
+        if (e.key === 'ArrowLeft' && inFlyout) {
+          e.preventDefault();
+          e.stopPropagation();
+          rootRef.current?.querySelector<HTMLButtonElement>(`[data-mention-kind="${hovered}"]`)?.focus();
+          return;
+        }
+        if (e.key === 'Enter' && button) {
+          e.preventDefault();
+          e.stopPropagation();
+          button.click();
+          return;
+        }
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        const scope = inFlyout ? flyout : rootRef.current?.querySelector('[data-mention-main]');
+        const buttons = [...(scope?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])];
+        if (!buttons.length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        const next = current < 0
+          ? (e.key === 'ArrowDown' ? 0 : buttons.length - 1)
+          : (current + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+        buttons[next].focus();
+      }}
+      style={renderInline ? { maxHeight: availableHeight } : { top: pos.top, left: pos.left }}
       onMouseDown={(e) => e.stopPropagation()}
       onMouseLeave={() => setHovered(null)}
     >
-      <div className={styles.panel}>
+      <div className={styles.panel} data-mention-main>
         <label className={styles.search}>
           <Search size={15} strokeWidth={2} />
           <input
@@ -120,8 +186,24 @@ export default function AtMentionMenu({
           />
         </label>
 
+        <div className={styles.results}>
+        {matchedRefs.length > 0 && (
+          <section aria-label="已引用">
+            <div className={styles.sectionLabel}>已引用</div>
+            {matchedRefs.map(item => (
+              <button key={item.id} type="button" className={styles.itemRow}
+                data-testid="mention-ref-item"
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => onSelectReferenced?.(item)}>
+                <ItemThumb item={item} />
+                <span className={styles.itemName} title={item.name}>{item.name}</span>
+                <span className={styles.badge}>{item.badge}</span>
+              </button>
+            ))}
+          </section>
+        )}
         {searching ? (
-          matched.length === 0 ? (
+          matched.length === 0 && matchedRefs.length === 0 ? (
             <div className={styles.empty}>未找到匹配素材</div>
           ) : (
             <div>
@@ -163,6 +245,10 @@ export default function AtMentionMenu({
                   key={kind}
                   type="button"
                   className={`${styles.kindRow} ${hovered === kind && !off ? styles.kindRowActive : ''} ${off ? styles.kindRowDisabled : ''}`}
+                  disabled={off}
+                  data-mention-kind={kind}
+                  onFocus={() => setHovered(off ? null : kind)}
+                  onClick={() => setHovered(off ? null : kind)}
                   onMouseEnter={() => setHovered(off ? null : kind)}
                 >
                   <span className={styles.kindIcon}>
@@ -175,11 +261,12 @@ export default function AtMentionMenu({
             })}
           </>
         )}
+        </div>
       </div>
 
       {!searching && hovered && (
         <div className={styles.flyoutWrap} onMouseEnter={() => setHovered(hovered)}>
-        <div className={styles.flyout}>
+        <div className={styles.flyout} data-mention-flyout>
           {flyoutItems.length === 0 ? (
             <div className={styles.empty}>画布暂无该类型素材</div>
           ) : (
@@ -199,7 +286,7 @@ export default function AtMentionMenu({
         </div>
         </div>
       )}
-    </div>,
-    document.body,
+    </div>
   );
+  return renderInline ? menu : createPortal(menu, document.body);
 }
