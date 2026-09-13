@@ -131,7 +131,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isExtractSubmitting, setIsExtractSubmitting] = useState(false);
   const shellFileRef = useRef<HTMLInputElement>(null);
-  const img2imgFileRef = useRef<HTMLInputElement>(null);
   /** 名称原位编辑（IKFA8X）：draft 为输入框内容；error 仅展示，不阻断画布保存 */
   const [nameEditing, setNameEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
@@ -295,31 +294,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         <div className={styles.genBox}>
           {isVideoDraft ? <Video size={22} strokeWidth={1.8} color="#666" /> : <Image size={22} strokeWidth={1.8} color="#666" />}
           <span className={styles.missingText}>{isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成'}</span>
-          {isImageDraft && data.onImg2Img && (
-            <>
-              <button
-                type="button"
-                className={`${styles.genBtn} nodrag nopan`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  img2imgFileRef.current?.click();
-                }}
-              >
-                图生图
-              </button>
-              <input
-                ref={img2imgFileRef}
-                type="file"
-                hidden
-                accept="image/*"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = '';
-                  if (file) data.onImg2Img?.(id, file);
-                }}
-              />
-            </>
-          )}
         </div>
       );
     }

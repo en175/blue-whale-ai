@@ -30,6 +30,19 @@ import styles from './index.module.css';
 
 /** 输入框默认字数上限（模型目录未配 max_prompt_length 时沿用旧行为，ADR-0085） */
 const DEFAULT_MAX_INPUT = 1000;
+/** 参考文本与输入文本拼接后的提交上限 */
+export const IMAGE_COMPOSED_PROMPT_LIMIT = 1000;
+export const IMAGE_COMPOSED_PROMPT_OVER_LIMIT = '当前参考提示词内容超出1000字限制，请重新编辑。';
+
+/** 参考文本在前、输入文本在后，跳过空白附件，以空行拼接为提交 prompt */
+export function composeImageSendPrompt(
+  attachments: ImageTextAttachment[] | undefined,
+  input: string,
+): string {
+  const parts = (attachments ?? []).map((item) => item.text).filter((text) => text.trim().length > 0);
+  if (input.trim().length > 0) parts.push(input);
+  return parts.join('\n\n');
+}
 
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
 const MAX_VIDEOS = 3;
@@ -399,6 +412,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialFiles
     if (!canSend) return;
     if (!currentGen) {
       console.warn('图片模型能力加载中，请稍后重试');
+      return;
+    }
+    if (composeImageSendPrompt(attachments, inputValue).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+      onToast?.('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
       return;
     }
     setUploading(true);

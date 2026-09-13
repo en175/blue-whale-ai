@@ -48,7 +48,7 @@ import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import BottomDialog, { type VideoGenOptions, type VideoGenSeedParams } from './components/BottomDialog';
-import ImageDialog, { type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
+import ImageDialog, { composeImageSendPrompt, IMAGE_COMPOSED_PROMPT_LIMIT, IMAGE_COMPOSED_PROMPT_OVER_LIMIT, type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
 import TextGenDialog from './components/TextGenDialog';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
@@ -3536,7 +3536,15 @@ export default function CanvasPage() {
       createGenerationJob(currentId, {
         type,
         expected_output_count: 1,
-        parameters,
+        parameters: type === 'image'
+          ? {
+              ...parameters,
+              prompt: composeImageSendPrompt(
+                targetNodeId ? textAttachmentsOf(targetNodeId) : undefined,
+                parameters.prompt,
+              ),
+            }
+          : parameters,
         input_asset_ids: inputAssetIds,
         ...(type === 'video' && videoRefs?.references && videoRefs.references.length > 0
           ? { references: videoRefs.references }
@@ -5494,6 +5502,14 @@ export default function CanvasPage() {
     const targetNodeId = imageSeed?.targetNodeId;
     const projectId = currentId;
     if (!projectId) return;
+    const composedPrompt = composeImageSendPrompt(
+      targetNodeId ? textAttachmentsOf(targetNodeId) : undefined,
+      text,
+    );
+    if (composedPrompt.length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+      showToast('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+      return;
+    }
     applyingRef.current = true;
     setSubmittingNodeId(targetNodeId ?? null);
     try {
