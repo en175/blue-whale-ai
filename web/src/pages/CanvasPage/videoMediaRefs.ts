@@ -15,6 +15,12 @@ export type VideoRefRole = 'reference' | 'first' | 'last';
  *  与图片 Dock 同口径——能力侧约束由服务端校验兜底） */
 export const MAX_VIDEO_REFS = 3;
 
+/** 媒体类型归一（IKFE8U）：画布节点 data / 资产记录的 mediaType 收敛为参考三类型；
+ *  调用方已按类型过滤，未知值归图片与历史展示口径一致 */
+export function asVideoRefMediaType(type: unknown): 'image' | 'video' | 'audio' {
+  return type === 'video' ? 'video' : type === 'audio' ? 'audio' : 'image';
+}
+
 /** IKFC1T：目标是否存在任一有效媒体参考（普通参考或首尾帧；invalid 单列不计）——
  *  文生视频门控（enabledVideoFollowModes）与面板模式冲突判定共用谓词 */
 export const hasAnyMediaRef = (refs: VideoMediaRefs): boolean =>

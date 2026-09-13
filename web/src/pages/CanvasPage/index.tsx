@@ -20,6 +20,7 @@ import { audioMediaRefsOf, audioRefSourceError, checkAddAudioRef, isAudioDraftNo
 import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
+  asVideoRefMediaType,
   isVideoDraftNode,
   MAX_VIDEO_REFS,
   readRefRole,
@@ -30,7 +31,6 @@ import {
   videoRefConflict,
   videoRefSourceError,
   checkAddVideoRef,
-  type VideoMaterialRefData,
   type VideoMediaRef,
   type VideoMediaRefs,
   type VideoRefRole,
@@ -225,10 +225,8 @@ export default function CanvasPage() {
   const [musicPickResult, setMusicPickResult] = useState<{ ts: number; item: AudioRefItem } | null>(null);
   /** 角色库弹窗状态 */
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
-  /** 角色库发起目标（决定选中结果注入哪个对话框） */
-  const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'video' | 'asset' | null>(null);
-  /** 角色库为视频草稿面板打开时的目标槽位角色（material 参考仅存草稿 data） */
-  const [charLibPickRole, setCharLibPickRole] = useState<VideoRefRole>('reference');
+  /** 角色库发起目标（决定选中结果注入哪个对话框）；IKFE8U 起视频面板无发起入口 */
+  const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'asset' | null>(null);
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
   const [showEdges, setShowEdges] = useState(true);
@@ -328,7 +326,7 @@ export default function CanvasPage() {
     }
     const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
     const assetId = readAssetId((source.data ?? {}) as Record<string, unknown>);
-    const mediaType = ((source.data ?? {}) as Record<string, unknown>).mediaType as 'image' | 'video';
+    const mediaType = ((source.data ?? {}) as Record<string, unknown>).mediaType as 'image' | 'video' | 'audio';
     const msg = checkAddVideoRef(role, mediaType, assetId, refs);
     if (msg) {
       showToast('warn', msg);
@@ -495,8 +493,11 @@ export default function CanvasPage() {
     setAssetsPickerTarget(target);
     setShowAssetsPicker(true);
   };
-  /** 视频草稿面板「从资产中选择」的目标槽位角色：first/last 仅图片，reference 图+视频 */
+  /** 视频草稿面板「从资产中选择」的目标槽位角色：first/last 仅图片，reference 按模式过滤 */
   const [videoAssetPickRole, setVideoAssetPickRole] = useState<VideoRefRole>('reference');
+  /** 同一入口的槽位类型边界（IKFE8U）：'video' 全能参考（图/视频/音频）、'image' 仅图片
+   *  （首尾帧槽 / 图生视频普通参考）——资产弹窗 mediaTypes 过滤与确认接纳共用 */
+  const [videoAssetPickKind, setVideoAssetPickKind] = useState<'image' | 'video'>('video');
   /** 资产库选择 → Agent 面板待发附件（ts 驱动注入，画布侧已落节点） */
   const [agentAssetPicks, setAgentAssetPicks] = useState<{ ts: number; blocks: SessionContentBlock[] } | null>(null);
   const [assetsModalDefaultTab, setAssetsModalDefaultTab] = useState<string | undefined>(undefined);
@@ -1748,15 +1749,16 @@ export default function CanvasPage() {
       imagePanelHiddenRef.current = true; // 到节点选择命中节点后，避免紧随的 selection 变化把图片面板当作「切换到其他卡」关闭
       return;
     }
-    // IKDMQS：视频草稿绑定面板的「到节点选择」建立来源→草稿连线，角色由发起入口显式指定
-    // （首帧/尾帧/普通参考）；首尾帧与图片参考槽只接受图片节点，视频参考槽仍只走视频入口。
+    // IKDMQS：视频草稿绑定面板的「从节点添加素材」建立来源→草稿连线，角色由发起入口显式指定
+    // （首帧/尾帧/普通参考）；首尾帧与图生视频普通参考仅接受图片（IKFE8U 统一入口类型边界），
+    // 全能参考普通参考经 videoRefSourceError 收图/视频/音频。
     // 自由模式（工具栏入口无草稿卡）：来源存本地参考，不落画布不连线
     if (pickTarget === 'video' && (pickMode === 'image' || pickMode === 'video')) {
       const isFrameSlot = pickRefRole === 'first' || pickRefRole === 'last';
-      // 首尾帧 / 图片参考：点到非图片媒体时提示并保持选取，避免误带入视频节点
+      // 仅图片槽（首尾帧 / 图生视频普通参考）：点到非图片媒体时提示并保持选取，避免误带入视频节点
       if ((isFrameSlot || pickMode === 'image') && (node.type !== 'mediaNode' || data.mediaType !== 'image')) {
         if (node.type === 'mediaNode') {
-          showToast('warn', isFrameSlot ? '首尾帧仅支持图片素材' : '请选择图片节点');
+          showToast('warn', isFrameSlot ? '首尾帧仅支持图片素材' : PANEL_REF_MEDIA_TYPES.videoText2Video.canvasRefError);
           return;
         }
       } else if (videoDraftId) {
@@ -1780,7 +1782,7 @@ export default function CanvasPage() {
                 url: String(d.src ?? ''),
                 name: typeof d.fileName === 'string' && d.fileName ? d.fileName : node.id,
                 assetId: String(assetId),
-                mediaType: d.mediaType === 'video' ? 'video' : 'image',
+                mediaType: asVideoRefMediaType(d.mediaType),
               },
               role,
             );
@@ -3074,13 +3076,14 @@ export default function CanvasPage() {
 
     if (target === 'videoDraft') {
       // 视频草稿面板「从资产中选择」（IKDMQS 来源补齐）：素材落画布节点并按槽位角色连线，
-      // 节点可复用可持久化；首/尾帧槽仅图片且多选只取首张，普通参考按图9/视频3联算上限并查重。
+      // 节点可复用可持久化；首/尾帧槽仅图片且多选只取首张，普通参考按图9/视频3/音频3联算上限并查重
+      // （IKFE8U 全能参考扩展音频；列表过滤见 AssetsPickerModal mediaTypes，此处为接纳防线）。
       // 自由模式（工具栏入口无草稿卡）：资产存本地参考，不落画布不连线
       const role = videoAssetPickRole;
       const refs = videoDraftId
         ? mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current)
         : videoFreeRefs;
-      let accepted = selectedAssets.filter((a) => a.type === 'image' || a.type === 'video');
+      let accepted = selectedAssets.filter((a) => a.type === 'image' || a.type === 'video' || a.type === 'audio');
       if (role === 'first' || role === 'last') {
         if (refs[role]) {
           showToast('warn', role === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
@@ -3091,11 +3094,12 @@ export default function CanvasPage() {
         if (accepted.length > 1) showToast('warn', '首尾帧仅支持一张图片，已取首张');
         accepted = accepted.slice(0, 1);
       } else {
-        // 普通参考：图 9/视频 3 与连线+material 合并联算；assetId 查重跳过
+        // 普通参考：图 9/视频 3/音频 3 与连线+material 合并联算；assetId 查重跳过
         const known = new Set(refs.reference.map((r) => r.assetId));
         let imgSlots = REF_LIMITS.image - refs.reference.filter((r) => r.mediaType === 'image').length;
         let vidSlots = MAX_VIDEO_REFS - refs.reference.filter((r) => r.mediaType === 'video').length;
-        const overflowKinds: Array<'image' | 'video'> = [];
+        let audSlots = REF_LIMITS.audio - refs.reference.filter((r) => r.mediaType === 'audio').length;
+        const overflowKinds: Array<'image' | 'video' | 'audio'> = [];
         let skippedDup = false;
         const filtered: AssetRecord[] = [];
         for (const a of accepted) {
@@ -3104,12 +3108,14 @@ export default function CanvasPage() {
             continue;
           }
           const isImage = a.type === 'image';
-          if (isImage ? imgSlots <= 0 : vidSlots <= 0) {
-            overflowKinds.push(isImage ? 'image' : 'video');
+          const isVideo = a.type === 'video';
+          if ((isImage && imgSlots <= 0) || (isVideo && vidSlots <= 0) || (!isImage && !isVideo && audSlots <= 0)) {
+            overflowKinds.push(a.type as 'image' | 'video' | 'audio');
             continue;
           }
           if (isImage) imgSlots -= 1;
-          else vidSlots -= 1;
+          else if (isVideo) vidSlots -= 1;
+          else audSlots -= 1;
           known.add(String(a.id));
           filtered.push(a);
         }
@@ -3126,7 +3132,7 @@ export default function CanvasPage() {
               url: a.url,
               name: assetDisplayName(a),
               assetId: String(a.id),
-              mediaType: a.type === 'video' ? 'video' : 'image',
+              mediaType: asVideoRefMediaType(a.type),
               materialId: isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined,
             },
             role,
@@ -5919,18 +5925,14 @@ export default function CanvasPage() {
               setPickTarget(null);
               setPickRefRole(null);
               setVideoAssetPickRole('reference');
-              setCharLibPickRole('reference');
+              setVideoAssetPickKind('video');
             }}
             onSend={handleDialogSend}
             onPickFromCanvas={(kind, role) => { setPickMode(kind); setPickTarget('video'); setPickRefRole(role ?? null); }}
-            onPickFromAssets={(_kind, role) => {
+            onPickFromAssets={(kind, role) => {
               setVideoAssetPickRole(role ?? 'reference');
+              setVideoAssetPickKind(kind);
               openAssetsPicker('videoDraft');
-            }}
-            onOpenCharacterLibrary={(role) => {
-              setCharLibPickRole(role ?? 'reference');
-              setCharacterLibraryTarget('video');
-              setShowCharacterLibrary(true);
             }}
             pickMode={pickTarget === 'video' && pickMode !== 'audio' && pickMode !== 'product' && pickMode !== 'asset' ? pickMode : null}
             videoDraftBinding={
@@ -6045,13 +6047,13 @@ export default function CanvasPage() {
           />
         )}
 
-        {/* 节点选取模式提示条 */}
+        {/* 节点选取模式提示条（IKFE8U：视频面板与图片面板统一「从节点添加素材」文案） */}
         {pickMode && pickTarget && (showImageDialog || showBottomDialog || showAudioDialog || pickMode === 'product' || pickMode === 'asset') && (
           <div className={styles.pickHint}>
             {pickMode === 'image' && ((pickRefRole === 'first' || pickRefRole === 'last')
-              ? '到节点选择：点击画布中的图片节点带入首帧/尾帧，点击空白处取消'
-              : '到节点选择：点击画布中的图片节点或方案节点，带入完整参考，点击空白处取消')}
-            {pickMode === 'video' && '到节点选择：点击画布中的视频节点带入参考视频，点击空白处取消'}
+              ? '从节点添加素材：点击画布中的图片节点带入首帧/尾帧，点击空白处取消'
+              : '从节点添加素材：点击画布中的图片节点或方案节点，带入完整参考，点击空白处取消')}
+            {pickMode === 'video' && '从节点添加素材：点击画布中的图片、视频或音频节点带入参考，点击空白处取消'}
             {pickMode === 'audio' && '到节点选择：点击画布中的音频节点带入参考音频，点击文本卡带入创作上下文，点击空白处取消'}
             {pickMode === 'product' && '到节点选择：点击画布中的图片节点带入商品图，点击空白处取消'}
             {pickMode === 'asset' && '到节点选择：点击画布中的图片节点或方案节点，带入完整参考，点击空白处取消'}
@@ -6161,7 +6163,9 @@ export default function CanvasPage() {
               : assetsPickerTarget === 'videoDraft'
                 ? videoAssetPickRole === 'first' || videoAssetPickRole === 'last'
                   ? ['image']
-                  : ['image', 'video']
+                  : videoAssetPickKind === 'image'
+                    ? [...PANEL_REF_MEDIA_TYPES.videoText2Video.types]
+                    : [...PANEL_REF_MEDIA_TYPES.videoAll.types]
                 : assetsPickerTarget === 'agentPanel'
                   ? ['image', 'video']
                   : undefined
@@ -6192,12 +6196,12 @@ export default function CanvasPage() {
           onClose={() => {
             setShowCharacterLibrary(false);
             setCharacterLibraryTarget(null);
-            setCharLibPickRole('reference');
           }}
-          enableRealPersonTab={characterLibraryTarget === 'video'}
           onSelectAssets={(assets: MaterialAsset[]) => {
             // 虚拟/真人人像库统一多选确认后注入到对应对话框
             // 素材库 asset- 前缀 ID 在发送时走 referenceMaterials（后端转 asset:// URI 引用）
+            // IKFE8U：视频面板角色库入口退役（统一入口两项菜单），仅保留图片/资产卡注入路径；
+            // 视频草稿存量 draftMaterialRefs 仍随草稿 data 展示、移除与提交
             const ts = Date.now();
             if (characterLibraryTarget === 'image') {
               // 图片对话框：批量注入参考图
@@ -6211,85 +6215,6 @@ export default function CanvasPage() {
                   assetId: a.Id,
                 }));
               if (images.length > 0) setImagePickResult({ ts, files: images });
-            } else if (characterLibraryTarget === 'video') {
-              // 视频草稿面板（IKDMQS 来源补齐）：角色库素材（asset- 前缀 materialId）无法落画布，
-              // 仅存草稿 data.draftMaterialRefs 并在面板槽位展示；首/尾帧槽仅图片且只取首张，
-              // 普通参考按图9/视频3与连线+material 合并联算上限并按 materialId 查重。
-              // 自由模式（工具栏入口无草稿卡）：material 参考存本地 refs
-              const role = charLibPickRole;
-              const refs = videoDraftId
-                ? mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current)
-                : videoFreeRefs;
-              const writeMaterialRefs = (items: VideoMaterialRefData[]) => {
-                if (videoDraftId) {
-                  const node = mediaNodesRef.current.find((n) => n.id === videoDraftId);
-                  patchMediaNode(videoDraftId, { draftMaterialRefs: [...readDraftMaterialRefs(node), ...items] });
-                } else {
-                  items.forEach((m) =>
-                    appendVideoFreeRef(
-                      {
-                        nodeId: m.materialId,
-                        url: m.url,
-                        name: m.name,
-                        assetId: m.materialId,
-                        mediaType: m.mediaType,
-                        materialId: m.materialId,
-                      },
-                      m.role,
-                    ),
-                  );
-                }
-              };
-              if (role === 'first' || role === 'last') {
-                if (refs[role]) {
-                  showToast('warn', role === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
-                  return;
-                }
-                const images = assets.filter((a) => a.AssetType === 'Image');
-                if (images.length === 0) return;
-                if (images.length > 1) showToast('warn', '首尾帧仅支持一张图片，已取首张');
-                writeMaterialRefs([
-                  { materialId: images[0].Id, url: images[0].URL, name: `角色-${images[0].Name}`, mediaType: 'image' as const, role },
-                ]);
-                return;
-              }
-              const known = new Set(
-                videoDraftId
-                  ? readDraftMaterialRefs(mediaNodesRef.current.find((n) => n.id === videoDraftId)).map((m) => m.materialId)
-                  : videoFreeRefs.reference.filter((r) => r.materialId).map((r) => r.materialId!),
-              );
-              let imgSlots = REF_LIMITS.image - refs.reference.filter((r) => r.mediaType === 'image').length;
-              let vidSlots = MAX_VIDEO_REFS - refs.reference.filter((r) => r.mediaType === 'video').length;
-              const overflowKinds: Array<'image' | 'video'> = [];
-              let skippedDup = false;
-              const accepted: VideoMaterialRefData[] = [];
-              for (const a of assets) {
-                if (a.AssetType !== 'Image' && a.AssetType !== 'Video') continue;
-                if (known.has(a.Id)) {
-                  skippedDup = true;
-                  continue;
-                }
-                const isImage = a.AssetType === 'Image';
-                if (isImage ? imgSlots <= 0 : vidSlots <= 0) {
-                  overflowKinds.push(isImage ? 'image' : 'video');
-                  continue;
-                }
-                if (isImage) imgSlots -= 1;
-                else vidSlots -= 1;
-                known.add(a.Id);
-                accepted.push({
-                  materialId: a.Id,
-                  url: a.URL,
-                  name: `角色-${a.Name}`,
-                  mediaType: isImage ? 'image' : 'video',
-                  role: 'reference',
-                });
-              }
-              if (skippedDup) showToast('warn', '重复的素材已跳过');
-              if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds));
-              if (accepted.length > 0) {
-                writeMaterialRefs(accepted);
-              }
             } else if (characterLibraryTarget === 'asset') {
               // 资产卡添加参考图（单张注入）
               const image = assets.find((a) => a.AssetType === 'Image');
