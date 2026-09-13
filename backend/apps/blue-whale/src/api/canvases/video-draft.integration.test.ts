@@ -403,7 +403,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
       }, { timeout: 10_000 });
       await page.reload();
       await nodeById(draftId).waitFor();
-      await vi.waitFor(async () => expect(await edges.count(), "刷新恢复全部连线").toBe(4));
+      await vi.waitFor(async () => expect(await edges.count(), "刷新恢复全部连线").toBe(3));
       await nodeById(draftId).locator('[data-testid="media-content"]').click();
       await vi.waitFor(async () => expect(await dockRefs.count(), "刷新后 Dock 显示首尾帧").toBe(2));
       await page.getByText("文本附件（1）").waitFor();
@@ -717,4 +717,39 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
       await page.screenshot({ path: "/tmp/ikfdfw-browser.png", fullPage: true });
     } finally { await browser.close(); await vite.close(); }
   }, 240_000);
+  it.runIf(process.env.IKDMQS_BROWSER)("browser: IKFEWF ordinary text pick persists and reloads", async () => {
+    const { chromium } = await import("playwright");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    const projectId = (await projects.create("987654", "IKFEWF text source")).id;
+    expect((await saveCanvas(projectId, [
+      textNode("t1", "普通文本上下文", "普通文本", 60, 40),
+      videoDraftNode("d1", "", "all", 700, 80),
+    ], [], "missing")).status).toBe(200);
+    const vite = await createVite({ root: `${process.cwd()}/web`, server: { open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } } } });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      page.setDefaultTimeout(10_000);
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: { userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false } }, version: 0 })));
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+      const target = page.locator('.react-flow__node[data-id="d1"] [data-testid="media-content"]');
+      await target.click();
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await page.locator('button[title="从资产中选择 / 从节点添加素材"]').click();
+        if (attempt === 0) await page.screenshot({ path: "/tmp/ikfewf-video-menu.png", fullPage: true });
+        await page.getByText("从节点添加素材", { exact: true }).click();
+        await page.locator('.react-flow__node[data-id="t1"]').dispatchEvent("click");
+        await vi.waitFor(async () => {
+          const row = await prisma.client.canvas.findFirst({ where: { project_id: BigInt(projectId) } });
+          const edges = row!.edges_json as Array<{ source: string; target: string }>;
+          expect(edges.map(e => [e.source, e.target])).toEqual([["t1", "d1"]]);
+        }, { timeout: 10_000 });
+      }
+      await page.reload(); await target.click();
+      await page.locator('[data-testid="dock-text-ref"]').waitFor();
+      await page.screenshot({ path: "/tmp/ikfewf-video-text.png", fullPage: true });
+    } finally { await browser.close(); await vite.close(); }
+  }, 120_000);
+
 });

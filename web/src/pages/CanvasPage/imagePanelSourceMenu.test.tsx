@@ -388,3 +388,17 @@ describe('IKFE8T 图片面板统一附件来源入口', () => {
     await vi.waitFor(() => expect(refImages()).toEqual(['素材图一']));
   });
 });
+
+
+it('IKFEWF 普通文本从图片入口建立附件且重复选取不重复连线', async () => {
+  const doc = canvasDocMock.current.doc as { nodes: Node[] };
+  doc.nodes.push({ id: 't1', type: 'textNode', position: { x: 0, y: 500 }, data: { text: '普通文本上下文' } });
+  await renderPage();
+  await openBoundPanel();
+  await clickMenuItem('从节点添加素材');
+  await clickNode('t1');
+  expect(flowProps.current.edges.filter((e: { source: string }) => e.source === 't1')).toHaveLength(1);
+  await clickMenuItem('从节点添加素材');
+  await clickNode('t1');
+  expect(flowProps.current.edges.filter((e: { source: string }) => e.source === 't1')).toHaveLength(1);
+});

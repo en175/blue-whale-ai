@@ -1715,18 +1715,25 @@ export default function CanvasPage() {
     const data = (node.data ?? {}) as Record<string, unknown>;
     // IKDMQR：草稿绑定面板的「到节点选择」建立来源→草稿连线（与画布连线同一关系）；
     // 非法来源明确提示原因，不注入面板本地列表
-    if (pickTarget === 'video' && videoSeed?.targetNodeId && node.type === 'textNode' && data.promptSource) {
-      void referencePlanRef.current(node.id, videoSeed.targetNodeId);
-      setPickMode(null);
-      setPickTarget(null);
-      videoPanelHiddenRef.current = true;
+    // 槽位限制先于文本引用路由，避免方案文本绕过首尾帧的仅图片约束。
+    if (pickTarget === 'video' && (pickRefRole === 'first' || pickRefRole === 'last')
+      && (node.type !== 'mediaNode' || data.mediaType !== 'image')) {
+      showToast('warn', '首尾帧仅支持图片素材');
       return;
     }
-    if (pickMode === 'image' && pickTarget === 'image' && imageSeed?.targetNodeId && node.type === 'textNode' && data.promptSource) {
-      void referencePlanRef.current(node.id, imageSeed.targetNodeId);
+    if (node.type === 'textNode' && (pickTarget === 'image' || pickTarget === 'video')) {
+      const targetId = pickTarget === 'image' ? imageDraftId : videoDraftId;
+      if (!targetId) {
+        showToast('warn', '文本参考需要绑定生成节点');
+        return;
+      }
+      // 与画布拖线同一准入路径：普通文本建附件边，方案文本保留方案引用语义。
+      if (!connectPair(node.id, targetId)) return;
+      if (pickTarget === 'image') imagePanelHiddenRef.current = true;
+      else videoPanelHiddenRef.current = true;
       setPickMode(null);
       setPickTarget(null);
-      imagePanelHiddenRef.current = true;
+      setPickRefRole(null);
       return;
     }
     if (pickMode === 'audio' && pickTarget === 'audio') {
