@@ -4,7 +4,7 @@
  *  画布文本卡连线作为文本附件以 FileText 缩略图进参考栏（× 仅断开连线）
  * ============================================ */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2, Upload, Move } from 'lucide-react';
+import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
@@ -14,6 +14,7 @@ import type { AtMentionItem } from '../../atMention';
 import { docHasInvalidRef, type PromptDoc } from '@/lib/prompt-doc';
 import AudioPromptEditor, { type AudioPromptEditorHandle } from './AudioPromptEditor';
 import RefThumbnail from '../RefThumbnail';
+import RefSourceMenu from '../RefSourceMenu';
 import { orderRefStripItems, useMixedRefStrip, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
 import type { ImageTextAttachment } from '../ImageDialog';
 import styles from './index.module.css';
@@ -22,12 +23,6 @@ import styles from './index.module.css';
 const MAX_INPUT = 1000;
 /** 参考音频上限（与首页 Audio tab 一致） */
 const MAX_AUDIO_REFS = 3;
-
-/** 仅允许 MP3：按 MIME 与扩展名双判据（兼容 audio/mp3 的浏览器变体） */
-const isMp3File = (file: File): boolean => {
-  const type = (file.type || '').toLowerCase();
-  return type === 'audio/mpeg' || type === 'audio/mp3' || /\.mp3$/i.test(file.name);
-};
 
 /** 参考素材类型（保留给 MusicDialog 共享类型） */
 type RefKind = 'audio' | 'image';
@@ -78,9 +73,13 @@ export interface AudioDialogProps extends RefStripOrderProps {
   canvasMedia?: CanvasPickItem[];
   /** 触发「从画布选择」模式：父级应设置 pickMode */
   onPickFromCanvas?: () => void;
+  onPickFromAssets?: () => void;
   /** 外部注入的画布选择结果：父级点击音频节点后生成（自由模式面板用；
    *  草稿模式的画布选取由父级直接建连线，不再经此通道） */
   externalPick?: { ts: number; item: AudioRefItem } | null;
+  /** 资产弹窗一次确认的音频，消费后清空，防止重开重放。 */
+  externalAssetPick?: { ts: number; items: AudioRefItem[] } | null;
+  onAssetPickConsumed?: () => void;
   /** 是否处于画布选择模式中：用于按钮高亮 */
   pickMode?: boolean;
   /** 草稿模式的画布参考（IKFDFZ）：父级从「来源→草稿」连线实时推导（id 为来源节点 id），
@@ -92,9 +91,6 @@ export interface AudioDialogProps extends RefStripOrderProps {
   onRemoveDraftRef?: (nodeId: string) => void;
   /** 面板「从画布选择」列表添加参考（IKFDFZ）：草稿模式经父级校验后建连线；自由模式缺省走本地注入 */
   onAddCanvasRef?: (nodeId: string) => void;
-  /** 本地上传即时接纳（IKFDG2，草稿绑定模式）：父级上传取得持久 Asset 身份后建来源卡片并连线，
-   *  随画布自动保存落盘；失败父级已明确提示。返回 false 表示未接纳（不进入面板本地暂存）。 */
-  onAdoptLocalFile?: (file: File) => Promise<boolean>;
   /** 底部模式切换 → AI 音乐对话框（已废弃：仅保留 prop 兼容父级，不再渲染） */
   onSwitchToMusic?: () => void;
   /** 画布 @ 引用候选 */
@@ -122,13 +118,15 @@ export default function AudioDialog({
   onToast,
   canvasMedia = [],
   onPickFromCanvas,
+  onPickFromAssets,
   externalPick,
+  externalAssetPick,
+  onAssetPickConsumed,
   pickMode,
   draftRefs,
   draftRefInvalid,
   onRemoveDraftRef,
   onAddCanvasRef,
-  onAdoptLocalFile,
   mentionItems,
   onMentionCanvas,
   attachments,
@@ -149,15 +147,10 @@ export default function AudioDialog({
   const [expanded, setExpanded] = useState(false);
   /** 参考音频列表（本地上传 + 自由模式的画布拾取；草稿模式的画布参考经 draftRefs 连线推导） */
   const [refs, setRefs] = useState<AudioRefItem[]>(initialRefs ?? []);
-  /** 本地上传即时接纳进行中（IKFDG2）：防重入，期间不再开来源菜单 */
-  const [adopting, setAdopting] = useState(false);
-  /** 来源菜单（本地上传 / 从画布选择） */
-  const [sourceOpen, setSourceOpen] = useState(false);
   /** 画布选择面板 */
   const [pickerOpen, setPickerOpen] = useState(false);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const sourceWrapRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   /** 参考音频时长探测（IKFCKS：放大预览「图标+名称+时长」卡片用；播放随 chip 下线） */
   const durationSources = useMemo(
@@ -168,7 +161,6 @@ export default function AudioDialog({
 
   useDismissOnOutside([
     { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
-    { open: sourceOpen, ref: sourceWrapRef, dismiss: () => setSourceOpen(false) },
     { open: pickerOpen, ref: sourceWrapRef, dismiss: () => setPickerOpen(false) },
   ]);
 
@@ -218,31 +210,14 @@ export default function AudioDialog({
   /** 画布参考（连线推导）+ 本地上传/自由拾取的合计上限口径 */
   const totalRefCount = (draftRefs?.length ?? 0) + refs.length;
 
-  /** 打开来源菜单（本地上传 / 从画布选择），上限 MAX_AUDIO_REFS=3（连线推导 + 本地合计） */
-  const handlePickAudio = () => {
-    if (readOnly || adopting) return;
-    if (totalRefCount >= MAX_AUDIO_REFS) {
-      onToast?.('warn', `参考音频最多 ${MAX_AUDIO_REFS} 段已超出`);
-      return;
-    }
-    setPickerOpen(false);
-    setSourceOpen((v) => !v);
-  };
-
-  const startLocalUpload = () => {
-    setSourceOpen(false);
-    fileInputRef.current?.click();
-  };
-
   const startCanvasPick = () => {
-    setSourceOpen(false);
     setPickerOpen(true);
     onPickFromCanvas?.();
   };
 
   /** 添加参考项（去重 + 上限合计口径，超限明确提示不静默丢弃），画布选择后关闭面板 */
   const addRef = (item: AudioRefItem) => {
-    if (refs.some((r) => r.id === item.id && r.source === item.source)) {
+    if (refs.some((r) => (r.id === item.id && r.source === item.source) || (r.assetId != null && item.assetId != null && String(r.assetId) === String(item.assetId)))) {
       setPickerOpen(false);
       return;
     }
@@ -262,6 +237,25 @@ export default function AudioDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalPick]);
 
+  useEffect(() => {
+    if (!externalAssetPick) return;
+    if (!draftBinding && !readOnly) {
+      const next = [...refs];
+      for (const item of externalAssetPick.items) {
+        if (next.some(ref => String(ref.assetId) === String(item.assetId))) continue;
+        if (next.length >= MAX_AUDIO_REFS) {
+          onToast?.('warn', `参考音频最多 ${MAX_AUDIO_REFS} 段已超出`);
+          break;
+        }
+        next.push(item);
+      }
+      setRefs(next);
+    }
+    onAssetPickConsumed?.();
+    // 每次弹窗确认仅消费一次，后续编辑不重放。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalAssetPick]);
+
   /** 画布选取结束（点到节点或空白取消）后收起面板内的选择列表（IKFDFZ：
    *  草稿模式画布选取由父级直接建线，不经 addRef 的收起路径） */
   useEffect(() => {
@@ -276,47 +270,6 @@ export default function AudioDialog({
   /** 面板展示/提交的完整参考：画布参考（draftRefs，父级连线推导，名称随来源节点即时刷新）
    *  + 本地上传/自由拾取项；顺序统一由参考栏 stripOrder 决定 */
   const allRefs = [...(draftRefs ?? []), ...namedRefs];
-
-  const handleAudioFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (!files.length) return;
-    // 仅允许 MP3：非 mp3 明确提示并跳过（选择器 accept 已尽量过滤，此处兜底）
-    const valid = files.filter((f) => {
-      if (isMp3File(f)) return true;
-      onToast?.('warn', `「${f.name}」不是 MP3 格式，已跳过`);
-      return false;
-    });
-    if (valid.length === 0) return;
-    const remaining = MAX_AUDIO_REFS - totalRefCount;
-    const accepted = valid.slice(0, remaining);
-    if (accepted.length < valid.length) {
-      onToast?.('warn', `参考音频最多 ${MAX_AUDIO_REFS} 段已超出`);
-    }
-    // 草稿绑定（IKFDG2）：本地上传即时接纳——父级上传取得持久 Asset 身份后建来源卡并连线，
-    // 成功项经 draftRefs 连线推导展示，不进入面板本地暂存（无目标可丢失）；
-    // 失败父级已明确提示，不伪装成已保存引用
-    if (onAdoptLocalFile && draftBinding) {
-      setAdopting(true);
-      try {
-        for (const f of accepted) {
-          await onAdoptLocalFile(f);
-        }
-      } finally {
-        setAdopting(false);
-      }
-      return;
-    }
-    const next: AudioRefItem[] = accepted.map((f, i) => ({
-      id: `local-${Date.now()}-${i}`,
-      kind: 'audio',
-      name: f.name,
-      src: URL.createObjectURL(f),
-      source: 'local',
-      file: f,
-    }));
-    setRefs((prev) => [...prev, ...next]);
-  };
 
   /** 移除参考（IKFDFZ）：画布参考断开对应连线（保留来源素材与其他目标关系）；
    *  本地上传回收 blob URL 并仅移除面板本地项 */
@@ -436,25 +389,12 @@ export default function AudioDialog({
         <div className={styles.refWrap} ref={sourceWrapRef}>
           {totalRefCount < MAX_AUDIO_REFS ? (
             <>
-              <button
-                className={`${styles.refBtn} ${pickMode ? styles.refBtnPicking : ''}`}
-                onClick={handlePickAudio}
-                disabled={readOnly}
-                title={readOnly ? '生成中只读' : '添加参考音频（最多 3 段）'}
-              >
-                <AudioLines size={20} strokeWidth={2} />
-              </button>
-              {sourceOpen && (
-                <div className={styles.sourcePopup} onClick={(e) => e.stopPropagation()}>
-                  <button className={styles.sourceItem} onClick={startLocalUpload}>
-                    <Upload size={14} strokeWidth={2} />
-                    <span>本地上传</span>
-                  </button>
-                  <button className={styles.sourceItem} onClick={startCanvasPick}>
-                    <Move size={14} strokeWidth={2} />
-                    <span>从画布选择</span>
-                  </button>
-                </div>
+              {!readOnly && (
+                <RefSourceMenu
+                  pickMode={pickMode}
+                  onPickFromAssets={() => { setPickerOpen(false); onPickFromAssets?.(); }}
+                  onPickFromCanvas={startCanvasPick}
+                />
               )}
               {pickerOpen && (
                 <div className={styles.pickerPanel} onClick={(e) => e.stopPropagation()}>
@@ -499,14 +439,6 @@ export default function AudioDialog({
             </span>
           )}
         </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".mp3,audio/mpeg"
-          multiple
-          className={styles.hiddenInput}
-          onChange={handleAudioFileChange}
-        />
       </div>
 
       {/* 输入框 */}
