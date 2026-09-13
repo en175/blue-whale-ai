@@ -4,7 +4,7 @@ import { act, createElement } from 'react';
 import { $getRoot, $isTextNode, SKIP_DOM_SELECTION_TAG } from 'lexical';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import ImageDialog from './index';
+import ImageDialog, { type ImageTextAttachment } from './index';
 import type { ImageMediaRef } from '../../mediaRefs';
 import type { AtMentionItem } from '../../atMention';
 import type { PromptDoc } from '@/lib/prompt-doc';
@@ -57,10 +57,14 @@ async function renderDialog(props: {
   mentionItems?: AtMentionItem[];
   onMentionCanvas?: (item: AtMentionItem) => void;
   mediaRefs?: ImageMediaRef[];
+  attachments?: ImageTextAttachment[];
+  onRemoveAttachment?: ReturnType<typeof vi.fn>;
   initialDoc?: PromptDoc | null;
   initialText?: string;
   onSend?: ReturnType<typeof vi.fn>;
   onParamsChange?: ReturnType<typeof vi.fn>;
+  onRemoveMediaRef?: ReturnType<typeof vi.fn>;
+  draftStatus?: 'generating';
 } = {}) {
   const onSend = props.onSend ?? vi.fn();
   const onParamsChange = props.onParamsChange ?? vi.fn();
@@ -77,7 +81,12 @@ async function renderDialog(props: {
         mediaRefs: props.mediaRefs,
         mentionItems: props.mentionItems,
         onMentionCanvas: props.onMentionCanvas,
-        draftBinding: props.mediaRefs ? { onParamsChange } : undefined,
+        attachments: props.attachments,
+        onRemoveAttachment: props.onRemoveAttachment,
+        draftBinding: (props.mediaRefs || props.attachments)
+          ? { onParamsChange, status: props.draftStatus }
+          : undefined,
+        onRemoveMediaRef: props.onRemoveMediaRef,
       } as Parameters<typeof ImageDialog>[0]),
     );
   });
@@ -154,8 +163,9 @@ describe('IKFA1M @ 菜单与插入（A1/A4）', () => {
     expect(items[1].textContent).toContain('图片2');
     // 附件区角标同编号
     const badges = [...container.querySelectorAll('[data-testid="dock-media-ref"]')].map((el) => el.textContent);
-    expect(badges[0]).toContain('图片1');
-    expect(badges[1]).toContain('图片2');
+    // IKFCKK：编号圆钮只显示数字（底部「图片N」文字标签已移除），与菜单编号一致
+    expect(badges[0]).toBe('1');
+    expect(badges[1]).toBe('2');
 
     await typePromptRefRaw(container, '的衣服');
     // 查询过滤：名称命中
@@ -479,4 +489,101 @@ it('真实菜单键盘确认把已引用素材插入正文', async () => {
   await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
   await vi.waitFor(() => expect(readPromptRefText(container)).toBe('让图片1'));
   expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull();
+});
+
+/* IKFCKN：文本附件进参考栏——@ 与手动 @ 选择产出同一种 文本N 标签 chip、× 断开连线、只读态不渲染 */
+describe('IKFCKN 文本附件进参考栏', () => {
+  const ATT_A: ImageTextAttachment = { nodeId: 'text-a', title: '风格要求', text: '赛博朋克，霓虹灯' };
+  const ATT_B: ImageTextAttachment = { nodeId: 'text-b', title: '姿势说明', text: '站立微笑' };
+
+  it('点击文本缩略图 @ 按钮与手动 @ 选择产出同一种标签：无记忆光标追加末尾、绑定 text_ref', async () => {
+    const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A], attachments: [ATT_A, ATT_B] });
+    await typePromptRefRaw(container, '让');
+    const atBtns = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-text-ref"] button[title="插入引用"]')];
+    expect(atBtns).toHaveLength(2);
+    await act(async () => {
+      atBtns[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    // 无记忆光标追加末尾：产出「文本2」标签（第二项附件）
+    expect(readPromptRefText(container)).toBe('让文本2');
+    // 与手动 @ 选择同一种 chip：text_ref 绑定来源节点 id
+    const patch = onParamsChange.mock.calls.filter((c) => c[0]?.promptDoc !== undefined).pop()?.[0];
+    expect(patch.promptDoc.segments).toEqual([
+      { kind: 'text', text: '让' },
+      { kind: 'text_ref', node_id: 'text-b', label: '文本2' },
+    ]);
+  });
+
+  it('点击文本缩略图 × ：仅断开当前连线（onRemoveAttachment 携带来源节点 id），无确认弹窗', async () => {
+    const onRemoveAttachment = vi.fn();
+    await renderDialog({ attachments: [ATT_A, ATT_B], onRemoveAttachment });
+    const removeBtns = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-text-ref"] button[title="移除"]')];
+    expect(removeBtns).toHaveLength(2);
+    await act(async () => {
+      removeBtns[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onRemoveAttachment).toHaveBeenCalledTimes(1);
+    expect(onRemoveAttachment).toHaveBeenCalledWith('text-a');
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('草稿绑定（连线）模式下文本缩略图与媒体缩略图同排渲染、编号独立派生', async () => {
+    await renderDialog({ mediaRefs: [REF_A, REF_B], attachments: [ATT_A] });
+    const row = [...container.querySelectorAll('[data-testid="dock-media-ref"], [data-testid="dock-text-ref"]')];
+    expect(row.map((el) => el.getAttribute('data-testid'))).toEqual(['dock-media-ref', 'dock-media-ref', 'dock-text-ref']);
+    // 媒体编号（1/2）与文本编号（1）独立派生
+    expect(row[0].querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('1');
+    expect(row[1].querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('2');
+    expect(row[2].querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('1');
+  });
+
+  it('生成中只读：文本缩略图保留，× 与 @ 均不渲染', async () => {
+    await renderDialog({ attachments: [ATT_A], draftStatus: 'generating' });
+    expect(container.querySelector('[data-testid="dock-text-ref"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="dock-text-ref"] button[title="移除"]')).toBeNull();
+    expect(container.querySelector('[data-testid="dock-text-ref"] button[title="插入引用"]')).toBeNull();
+  });
+});
+
+/* IKFCKK：附件条共享缩略图集成——× 走既有断开连线链路、@ 与手动 @ 选择产出同一素材标签 */
+describe('IKFCKK 附件条三态集成', () => {
+  it('点击 × 立即删除：仅断开当前引用（onRemoveMediaRef 携带来源节点），无确认弹窗', async () => {
+    const onRemoveMediaRef = vi.fn();
+    await renderDialog({ mediaRefs: [REF_A, REF_B], onRemoveMediaRef });
+    const removeBtns = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="移除"]')];
+    expect(removeBtns).toHaveLength(2);
+    await act(async () => {
+      removeBtns[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onRemoveMediaRef).toHaveBeenCalledTimes(1);
+    expect(onRemoveMediaRef).toHaveBeenCalledWith('nb');
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('点击 @ 按钮与手动 @ 选择产出同一种素材标签：无记忆光标追加末尾、光标落在标签后', async () => {
+    const { onParamsChange } = await renderDialog({ mediaRefs: [REF_A, REF_B] });
+    await typePromptRefRaw(container, '让');
+    const atBtn = container.querySelector<HTMLButtonElement>('[data-testid="dock-media-ref"] button[title="插入引用"]')!;
+    await act(async () => {
+      atBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(readPromptRefText(container)).toBe('让图片1');
+    // 插入后光标落在标签之后：继续输入接在其后
+    await typePromptRefRaw(container, '微笑');
+    expect(readPromptRefText(container)).toBe('让图片1微笑');
+    // 与手动 @ 选择同一种 chip：草稿同步的结构化正文一致（asset_ref 绑定 101）
+    const patch = onParamsChange.mock.calls.filter((c) => c[0]?.promptDoc !== undefined).pop()?.[0];
+    expect(patch.promptDoc.segments).toEqual([
+      { kind: 'text', text: '让' },
+      { kind: 'asset_ref', asset_id: '101', label: '图片1' },
+      { kind: 'text', text: '微笑' },
+    ]);
+  });
+
+  it('生成中只读：缩略图保留，× 与 @ 均不渲染', async () => {
+    await renderDialog({ mediaRefs: [REF_A], draftStatus: 'generating' });
+    expect(container.querySelector('[data-testid="dock-media-ref"] img')).toBeTruthy();
+    expect(container.querySelector('[data-testid="dock-media-ref"] button[title="移除"]')).toBeNull();
+    expect(container.querySelector('[data-testid="dock-media-ref"] button[title="插入引用"]')).toBeNull();
+  });
 });

@@ -87,23 +87,17 @@
   gap: var(--spacing-sm);
 }
 
+/* IKFCKK：附件条已替换为共享 RefThumbnail（56×56 圆角 12），本类仅保留给
+ * 尾部「+」占位按钮，尺寸与共享缩略图对齐 */
 .previewItem {
   position: relative;
-  width: 44.8px;
-  height: 44.8px;
+  width: 56px;
+  height: 56px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid #333;
   background-color: #2a2a2a;
   flex-shrink: 0;
-}
-
-.previewItem img,
-.previewItem video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
 }
 
 .previewPlaceholder {
@@ -176,27 +170,6 @@
 .sourceMenuItem:hover {
   color: var(--color-text-primary);
   background-color: var(--color-bg-hover);
-}
-
-.previewRemove {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  background-color: rgba(0, 0, 0, 0.6);
-  border: none;
-  cursor: pointer;
-  transition: background-color var(--transition-fast);
-}
-
-.previewRemove:hover {
-  background-color: rgba(229, 72, 77, 0.85);
 }
 
 .topActions {
@@ -285,104 +258,6 @@
   font-size: 12px;
   color: var(--color-text-tertiary);
   line-height: 1.4;
-}
-
-/* ---- 连线文本附件（IKDLQF，只读） ---- */
-.attachments {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-  max-height: 160px;
-  overflow-y: auto;
-}
-
-.attachmentItem {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: var(--spacing-sm) var(--spacing-md);
-  background: #242424;
-  border: 1px solid #2c2c2c;
-  border-radius: 12px;
-}
-
-/* IKFA1P：附件区正文标签编号徽标（文本N，与菜单/正文同源） */
-.attachmentBadge {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
-  border: 1px solid var(--color-border, #2c2c2c);
-  border-radius: 999px;
-  padding: 0 6px;
-  line-height: 18px;
-  flex: none;
-}
-
-.attachmentTitle {
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--color-text-secondary);
-}
-
-.attachmentHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacing-sm);
-}
-
-.attachmentMoves {
-  display: flex;
-  gap: 2px;
-}
-
-.attachmentMove {
-  display: flex;
-  align-items: center;
-  border: none;
-  background: transparent;
-  padding: 2px;
-  border-radius: 4px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.attachmentMove:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  background: #2c2c2c;
-}
-
-.attachmentMove:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-
-.attachmentText {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-tertiary);
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.attachmentTextCollapsed {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-
-.attachmentToggle {
-  align-self: flex-start;
-  border: none;
-  background: transparent;
-  padding: 0;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.attachmentToggle:hover {
-  color: var(--color-text-primary);
 }
 
 /* ---- 底部状态栏 ---- */
@@ -705,18 +580,4 @@
   bottom: calc(100% + 6px);
   left: 0;
   z-index: 40;
-}
-
-.previewBadge {
-  position: absolute;
-  left: 2px;
-  bottom: 2px;
-  padding: 0 4px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.65);
-  color: #bfdbfe;
-  font-size: 10px;
-  line-height: 16px;
-  pointer-events: none;
-  white-space: nowrap;
 }

@@ -314,8 +314,8 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
     expect(promptTextarea()).toBeTruthy();
     await vi.waitFor(() => expect(readPromptRefText(container)).toBe('原提示词'));
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
-    // 连线文本附件实时展示
-    await vi.waitFor(() => expect(container.textContent).toContain('文本附件（1）'));
+    // 连线文本附件实时展示（IKFCKN：FileText 缩略图进参考栏）
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1));
   });
 
   it('上传素材卡（无生成记录）点击不自动打开面板（Q4）', async () => {
@@ -396,12 +396,14 @@ describe('IKDMQU P1/P2/Q4：成品卡面板绑定与编辑', () => {
     await renderPage();
     await clickNode('au1');
 
-    const audioInput = container.querySelector<HTMLTextAreaElement>('[data-testid="audio-input"]');
+    const audioInput = container.querySelector<HTMLElement>('[data-testid="audio-input"]');
     expect(audioInput).toBeTruthy();
     expect(container.querySelector('[data-testid="audio-send"]')).toBeTruthy();
-    // 图片面板不打开
-    expect(container.querySelector('[contenteditable]')).toBeNull();
-    await vi.waitFor(() => expect(audioInput!.value).toBe('原音频描述'));
+    // 唯一正文编辑器位于音频面板，不能再用 contenteditable 判断是图片面板。
+    const audioEditor = audioInput!.querySelector('[contenteditable="true"]');
+    expect(audioEditor).toBeTruthy();
+    expect([...container.querySelectorAll('[contenteditable="true"]')]).toEqual([audioEditor]);
+    await vi.waitFor(() => expect(readPromptRefText(audioInput!)).toBe('原音频描述'));
   });
 });
 

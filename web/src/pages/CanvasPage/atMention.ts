@@ -1,4 +1,5 @@
 import type { ComposedValue } from './components/ChipTextEditor/composed';
+import type { AudioRefItem } from './components/AudioDialog';
 
 /** 画布 @ 引用可选素材类型 */
 export type AtMentionKind = 'image' | 'video' | 'audio' | 'text';
@@ -12,6 +13,18 @@ export interface AtMentionItem {
   thumbUrl?: string;
   /** 媒体节点资产 ID，写入参考时复用 */
   assetId?: string;
+}
+
+/** 画布来源参考音频 → @ 菜单同形态素材项（IKFCKS：缩略图 @ 与手动 @ 选择走同一
+ *  onMentionCanvas 入口，结果等价——素材进入参考区；本地 blob 上传项无画布身份不适用） */
+export function audioRefToMentionItem(ref: AudioRefItem): AtMentionItem {
+  return {
+    id: ref.id,
+    kind: 'audio',
+    name: ref.name,
+    thumbUrl: ref.src,
+    ...(ref.assetId != null ? { assetId: String(ref.assetId) } : {}),
+  };
 }
 
 const AT_QUERY_RE = /@([^\s@]*)$/;

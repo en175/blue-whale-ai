@@ -1392,18 +1392,20 @@ const AUDIO_TARGET_BODY = {
 };
 
 describe("handleCreateGenerationJob target_node_id 音频目标（IKDMQT）", () => {
-  it("合法音频目标 → 200 冻结 target_node_id，文本连线不推导不冻结", async () => {
+  it("合法音频目标 → 200 冻结 target_node_id 与文本连线全文", async () => {
     const { deps, createJob } = buildAudioTargetDeps(TARGET_CANVAS);
 
     const result = await handleCreateGenerationJob("u1", "p1", AUDIO_TARGET_BODY, null, deps);
 
     expect(result.code).toBe(200);
     const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
-    // e6（text-a → media-4）存在但不被音频消费：无 text_attachments 字段
+    // IKFCXE：e6（text-a → media-4）按画布边序推导冻结——附件正文与主提示词共同进入任务快照
     expect(cmdArg.input.target_node_id).toBe("media-4");
     expect(cmdArg.input.prompt).toBe("哼一段轻快的旋律");
     expect(cmdArg.input.model_id).toBe("audio-model");
-    expect(cmdArg.input).not.toHaveProperty("text_attachments");
+    expect(cmdArg.input.text_attachments).toEqual([
+      { node_id: "text-a", title: "风格", text: "赛博朋克" },
+    ]);
   });
 
   it("目标是视频 mediaNode → 400 不是音频媒体节点，不建任务", async () => {
@@ -2020,26 +2022,12 @@ describe("handleCreateGenerationJob 正文素材标签 prompt_doc（IKFA1M）", 
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  it("音频类型携带 prompt_doc → 400 unsupported_input（IKFA1O：仅 image/video 支持）", async () => {
-    const { deps, createJob } = buildVideoDeps();
-    const result = await handleCreateGenerationJob(
-      "u1",
-      "p1",
-      {
-        type: "audio",
-        expected_output_count: 1,
-        parameters: {
-          prompt: "海浪声",
-          model_id: "audio-model",
-        },
-        prompt_doc: DOC,
-      },
-      null,
-      deps,
-    );
-    expect(result.code).toBe(400);
-    expect(result.data?.code).toBe("unsupported_input");
-    expect(createJob).not.toHaveBeenCalled();
+  it("音频纯文本 prompt_doc 可接纳且冻结结构", async () => {
+    const { deps, createJob } = buildDeps();
+    const doc = { version: 1, segments: [{ kind: "text", text: "海浪声" }] };
+    const result = await handleCreateGenerationJob("u1", "p1", { ...AUDIO_BODY, prompt_doc: doc }, null, deps);
+    expect(result.code).toBe(200);
+    expect(createJob.mock.calls[0][0].input).toMatchObject({ prompt: "海浪声", prompt_doc: doc });
   });
 });
 
@@ -2369,3 +2357,44 @@ describe("handleCreateGenerationJob 文本附件正文标签 prompt_doc（IKFA1P
     expect(createJob).not.toHaveBeenCalled();
   });
 });
+
+ describe('IKFCJG 音频正文引用接纳', () => {
+  it('音频 asset_ref 按 references 编号编译并冻结', async () => {
+    const { deps, createJob } = buildDeps();
+    vi.mocked(deps.assets.resolveInputAssets).mockResolvedValue([{ type: 'audio' }] as never);
+    const doc = { version: 1, segments: [{ kind: 'asset_ref', asset_id: '42', label: '伪造编号' }] };
+    const result = await handleCreateGenerationJob('u1', 'p1', { ...AUDIO_BODY, references: [{ role: 'reference', asset_id: '42', type: 'audio' }], prompt_doc: doc }, null, deps);
+    expect(result.code).toBe(200);
+    expect(createJob.mock.calls[0][0].input).toMatchObject({ prompt: '音频1', prompt_doc: doc });
+  });
+  it('音频 text_ref 冻结权威全文与编号清单', async () => {
+    const { deps, createJob } = buildAudioTargetDeps(TARGET_CANVAS);
+    const doc = { version: 1, segments: [{ kind: 'text_ref', node_id: 'text-a' }] };
+    const result = await handleCreateGenerationJob('u1', 'p1', { ...AUDIO_TARGET_BODY, prompt_doc: doc }, null, deps);
+    expect(result.code).toBe(200);
+    expect(createJob.mock.calls[0][0].input).toMatchObject({ prompt: '文本1', prompt_doc: doc, composed_prompt: '文本1：赛博朋克\n\n文本1' });
+  });
+});
+
+ describe('IKFCJG 音频正文安全校验', () => {
+  it.each([
+    { name: '未引用素材', segment: { kind: 'asset_ref', asset_id: '99' }, actualType: 'audio', error: 'invalid_reference' },
+    { name: '伪造类型', segment: { kind: 'asset_ref', asset_id: '42' }, actualType: 'image', error: 'invalid_reference_type' },
+    { name: '失效标签', segment: { kind: 'asset_ref', asset_id: '42', invalid_label: '音频1' }, actualType: 'audio', error: 'invalid_reference' },
+  ])('$name 拒绝且不创建任务', async ({ segment, actualType, error }) => {
+    const { deps, createJob } = buildDeps();
+    vi.mocked(deps.assets.resolveInputAssets).mockResolvedValue([{ type: actualType }] as never);
+    const result = await handleCreateGenerationJob('u1', 'p1', { ...AUDIO_BODY,
+      references: [{ role: 'reference', asset_id: '42', type: 'audio' }],
+      prompt_doc: { version: 1, segments: [segment] },
+    }, null, deps);
+    expect(result.code).toBe(400); expect(result.data?.code).toBe(error); expect(createJob).not.toHaveBeenCalled();
+  });
+  it('未连入当前目标的 text_ref 拒绝', async () => {
+    const { deps, createJob } = buildAudioTargetDeps(TARGET_CANVAS);
+    const result = await handleCreateGenerationJob('u1', 'p1', { ...AUDIO_TARGET_BODY,
+      prompt_doc: { version: 1, segments: [{ kind: 'text_ref', node_id: 'text-b' }] },
+    }, null, deps);
+    expect(result.code).toBe(400); expect(result.data?.code).toBe('invalid_reference'); expect(createJob).not.toHaveBeenCalled();
+  });
+ });

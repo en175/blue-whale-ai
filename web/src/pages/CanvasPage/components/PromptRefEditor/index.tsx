@@ -48,8 +48,8 @@ export interface PromptRefEditorHandle {
   insertRefAtMention: (key: PromptRefKey) => void;
   /** 添加新参考入口：删除本次 @ 查询并记住插入点（新参考添加成功后由 insertRefAtPending 落标签） */
   consumeMentionForPendingInsert: () => void;
-  /** 新参考添加成功后：在记住的插入点插入标签；插入点失效时退化为追加到末尾，不丢引用 */
-  insertRefAtPending: (key: PromptRefKey) => void;
+  /** 在记住的插入点插入标签；音频缩略图可显式选择当前光标，均无有效位置时追加到末尾。 */
+  insertRefAtPending: (key: PromptRefKey, atCurrentSelection?: boolean) => void;
   /** 放弃本次 @ 查询（保留已输入的 @ 文本） */
   dismissMention: () => void;
   /** 替换失效提及（IKFA1N B5）：把指定节点换绑为其他已引用素材，仅该处提及变化 */
@@ -264,7 +264,7 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
       mentionAnchorRef.current = null;
       onMentionChange?.({ open: false, query: '' });
     },
-    insertRefAtPending: (key: PromptRefKey) => {
+    insertRefAtPending: (key: PromptRefKey, atCurrentSelection = false) => {
       const editor = editorRef.current;
       const point = pendingInsertRef.current;
       pendingInsertRef.current = null;
@@ -289,12 +289,23 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
             inserted = false;
           }
         }
+        if (!inserted && !point && atCurrentSelection) {
+          const selection = $getSelection();
+          if ($isRangeSelection(selection)) {
+            selection.insertNodes([node]);
+            inserted = true;
+          }
+        }
         if (!inserted) {
           // 插入点已失效（期间文本被改动）：退化为追加到末尾，不丢引用
           $getRoot().selectEnd();
           const sel = $getSelection();
           if ($isRangeSelection(sel)) sel.insertNodes([node]);
         }
+      }, {
+        // 插入后编辑器聚焦、光标落在插入内容之后（IKFCKK：@ 按钮插入不打断输入节奏）；
+        // focus 须在本次 update 提交后调用（提交前调用会被 pending 队列吞掉，焦点不落 DOM）
+        onUpdate: () => editor.focus(),
       });
     },
     dismissMention: () => {

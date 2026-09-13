@@ -9,11 +9,9 @@ import PromptSyncActions from '../PromptSyncActions';
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   ChevronDown,
-  ChevronUp,
   X,
   Image,
   Video,
-  AudioLines,
   SlidersHorizontal,
   ArrowUp,
   MousePointerClick,
@@ -40,6 +38,8 @@ import PromptRefEditor, {
   type PromptRefEditorHandle,
 } from '../PromptRefEditor';
 import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
+import RefThumbnail from '../RefThumbnail';
+import { useMixedRefStrip, orderRefStripItems, videoRefStripKey, useRefStripDrag, type RefStripOrderProps, type StripDragItemProps } from '../RefThumbnail/strip-dnd';
 import { refIdOf, videoLabelMapOf } from '../../videoPromptRefs';
 import type { ImageTextAttachment } from '../ImageDialog';
 import type { MediaGenStatus } from '../MediaNode';
@@ -101,7 +101,7 @@ export interface VideoDraftParamsPatch {
   mode?: string;
 }
 
-interface BottomDialogProps {
+interface BottomDialogProps extends RefStripOrderProps {
   onClose: () => void;
   /** 发送：提示词（拍平镜像）+ 参数 + 结构化正文（含素材标签时携带，IKFA1O） */
   onSend: (text: string, opts: VideoGenOptions, promptDoc?: PromptDoc | null) => void | Promise<void>;
@@ -119,7 +119,8 @@ interface BottomDialogProps {
   onSyncPlan?: (nodeId: string) => void;
   syncingPlan?: boolean;
   planIndices?: string;
-  /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；仅多附件时展示控件，缺省不渲染排序入口 */
+  /** 调整文本附件顺序（IKDLQH）：回调携带重排后来源 nodeId 序列；IKFCKT 拖拽换位消费
+   *  （顺序即生成上下文拼接顺序；上移/下移 UI 随独立文本附件区块下线，能力由拖拽补位） */
   onReorderAttachments?: (orderedNodeIds: string[]) => void;
   /** 到节点选择：进入画布节点选取模式（image 图片节点 / video 视频节点）；
    *  role 为视频草稿目标参考角色（首帧/尾帧显式指定，IKDMQS），缺省普通参考 */
@@ -142,12 +143,12 @@ interface BottomDialogProps {
   videoMediaRefs: VideoMediaRefs;
   /** 移除某个视频参考：携带来源节点 id，父级断开对应连线 */
   onRemoveVideoRef?: (sourceNodeId: string) => void;
-  /** 显式改变参考角色：父级改写连线 edge.data.refRole */
-  onSetVideoRefRole?: (sourceNodeId: string, role: VideoRefRole) => void;
   /** 移除角色库 material 参考（materialId，父级从草稿 data.draftMaterialRefs 过滤） */
   onRemoveMaterialRef?: (materialId: string) => void;
-  /** 改变角色库 material 参考角色（父级改写草稿 data.draftMaterialRefs 对应项 role） */
-  onSetMaterialRefRole?: (materialId: string, role: VideoRefRole) => void;
+  /** 参考栏拖拽换位（IKFCKT）：普通参考新顺序（nodeId / materialId 混合 key）；父级按子源拆分重排
+   *  ——草稿模式 = 连线边序 + 草稿 material 序分别回填，自由模式 = 暂存参考数组整体重排。
+   *  首帧/尾帧为角色槽（徽标不参与数字编号），不参与拖拽换位 */
+  onReorderMediaRefs?: (orderedKeys: string[]) => void;
   /** Toast 提示（上传超限/首尾帧校验等场景，由父级注入全局 sonner，位置/样式与 ImageDialog/AudioDialog 统一） */
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
   /** 画布 @ 引用候选 */
@@ -175,74 +176,6 @@ export interface VideoGenSeedParams {
   mode?: string;
 }
 
-/** 附件正文超过该长度默认折叠（可展开读全） */
-const ATTACHMENT_COLLAPSE_LENGTH = 120;
-
-/** 角色徽标文案（IKDMQS 显式角色：用户可见的输入用途） */
-const ROLE_LABELS: Record<VideoRefRole, string> = {
-  reference: '普通参考',
-  first: '首帧',
-  last: '尾帧',
-};
-
-/** 连线文本附件项（IKDLQG）：标题 + 正文预览，长文默认折叠可展开；与 ImageDialog 附件项同构，
- * IKFA1P：badge 展示正文标签编号（文本N，与菜单/正文同源）。
- *  多附件且父级提供重排回调时展示上移/下移（IKDLQH） */
-function AttachmentItem({ attachment, badge, move, onRemove }: {
-  attachment: ImageTextAttachment;
-  badge?: string;
-  onRemove?: () => void;
-  move?: { isFirst: boolean; isLast: boolean; onMove: (delta: -1 | 1) => void };
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const collapsible = attachment.text.length > ATTACHMENT_COLLAPSE_LENGTH;
-  return (
-    <div className={styles.attachmentItem}>
-      <div className={styles.attachmentHead}>
-        <span className={styles.attachmentTitle}>{attachment.title}</span>
-        {badge && <span className={styles.attachmentBadge}>{badge}</span>}
-        {onRemove && <button type="button" className={styles.attachmentMove} aria-label={`移除方案 ${attachment.title}`} title="移除方案" onClick={onRemove}><X size={12} /></button>}
-        {move && (
-          <span className={styles.attachmentMoves}>
-            <button
-              type="button"
-              title="上移"
-              className={styles.attachmentMove}
-              disabled={move.isFirst}
-              onClick={() => move.onMove(-1)}
-            >
-              <ChevronUp size={12} strokeWidth={2} />
-            </button>
-            <button
-              type="button"
-              title="下移"
-              className={styles.attachmentMove}
-              disabled={move.isLast}
-              onClick={() => move.onMove(1)}
-            >
-              <ChevronDown size={12} strokeWidth={2} />
-            </button>
-          </span>
-        )}
-      </div>
-      <span
-        className={`${styles.attachmentText} ${collapsible && !expanded ? styles.attachmentTextCollapsed : ''}`}
-      >
-        {attachment.text}
-      </span>
-      {collapsible && (
-        <button
-          type="button"
-          className={styles.attachmentToggle}
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? '收起' : '展开'}
-        </button>
-      )}
-    </div>
-  );
-}
-
 /** 宽高比图标：按比例绘制小矩形 */
 function RatioIcon({ ratio }: { ratio: string }) {
   const [w, h] = ratio.split(':').map(Number);
@@ -252,74 +185,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-/** 草稿绑定的参考项缩略图（IKDMQS）：连线推导/角色库 material 项 + 编号/角色徽标 + 移除；
- *  首帧/尾帧项提供「设为普通参考」，普通参考项提供「设为首帧/设为尾帧」（受能力与槽位约束，
- *  槽位不满足时入口不渲染，父级校验兜底并 toast 原因）；
- *  materialId 非空为角色库素材项：移除/改角色走 material 回调（操作草稿 data，非连线）。
- *  IKFA1O：badge 为正文标签同源文案（图片N/视频N/音频N），附件区与正文/菜单一致编号 */
-function VideoRefThumb({ item, role, badge, readOnly, onRemove, onSetRole, onRemoveMaterial, onSetMaterialRole, firstSlotOpen, lastSlotOpen }: {
-  item: VideoMediaRef;
-  role: VideoRefRole;
-  /** 标签徽标文案（普通参考=同类型编号；帧由 ROLE_LABELS 展示，不重复） */
-  badge?: string;
-  readOnly: boolean;
-  onRemove?: (nodeId: string) => void;
-  onSetRole?: (nodeId: string, role: VideoRefRole) => void;
-  onRemoveMaterial?: (materialId: string) => void;
-  onSetMaterialRole?: (materialId: string, role: VideoRefRole) => void;
-  firstSlotOpen: boolean;
-  lastSlotOpen: boolean;
-}) {
-  const isMaterial = item.materialId != null;
-  const handleRemove = () => {
-    if (isMaterial) onRemoveMaterial?.(item.materialId!);
-    else onRemove?.(item.nodeId);
-  };
-  const handleSetRole = (next: VideoRefRole) => {
-    if (isMaterial) onSetMaterialRole?.(item.materialId!, next);
-    else onSetRole?.(item.nodeId, next);
-  };
-  return (
-    <div className={styles.mediaThumb} title={item.name} data-testid="dock-video-ref">
-      {item.mediaType === 'audio' ? <AudioLines size={24} aria-label={item.name} /> : item.mediaType === 'video'
-        ? <video src={item.url} className={styles.mediaThumbImg} muted />
-        : <img src={item.url} alt={item.name} className={styles.mediaThumbImg} />}
-      {/* 角色徽标：首帧/尾帧显式角色；普通参考显示正文标签同源编号（IKFA1O 一致性） */}
-      {role !== 'reference' ? (
-        <span data-role={role} className={`${styles.refRoleBadge} ${styles.refRoleBadgeFrame}`}>
-          {ROLE_LABELS[role]}
-        </span>
-      ) : badge ? (
-        <span className={styles.refRoleBadge}>{badge}</span>
-      ) : null}
-      {!readOnly && (
-        <>
-          <button className={styles.mediaThumbRemove} onClick={handleRemove} title={isMaterial ? '移除' : '移除（断开连线）'}>
-            <X size={10} strokeWidth={2} />
-          </button>
-          {(isMaterial ? onSetMaterialRole : onSetRole) && (
-            <span className={styles.refRoleSwitch}>
-              {role === 'reference' ? (
-                <>
-                  {firstSlotOpen && (
-                    <button type="button" onClick={() => handleSetRole('first')}>设为首帧</button>
-                  )}
-                  {lastSlotOpen && (
-                    <button type="button" onClick={() => handleSetRole('last')}>设为尾帧</button>
-                  )}
-                </>
-              ) : (
-                <button type="button" onClick={() => handleSetRole('reference')}>设为普通参考</button>
-              )}
-            </span>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onReorderAttachments, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onSetVideoRefRole, onRemoveMaterialRef, onSetMaterialRefRole, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemovePlan, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, onOpenCharacterLibrary, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
   /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -335,14 +201,6 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   /** 附件正文有效（去空白非空）时允许空提示词提交（IKDLQG 契约：附件可单独驱动生成）；
    *  全部有效文本为空时沿用「提示词必填」 */
   const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
-  /** 附件排序（IKDLQH）：与相邻项交换后把新 nodeId 序列交给父级；列表仍渲染自 props（父级同步同序快照） */
-  const handleAttachmentMove = (index: number, delta: -1 | 1) => {
-    if (!attachments || !onReorderAttachments) return;
-    const ids = attachments.map((a) => a.nodeId);
-    const [moved] = ids.splice(index, 1);
-    ids.splice(index + delta, 0, moved);
-    onReorderAttachments(ids);
-  };
   const followModeOptions = VIDEO_FOLLOW_MODE_ORDER.map((key) => ({
     key,
     label: VIDEO_FOLLOW_MODE_LABEL[key],
@@ -454,11 +312,20 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   /** 已连入的视频参考数（切换到首尾帧/图生视频时不兼容，需先移除） */
   const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image').length;
 
+  const mixedStrip = useMixedRefStrip(
+    isKeyframe ? [] : videoMediaRefs.reference.map(r => videoRefStripKey(r).slice(6)),
+    (attachments ?? []).map(a => a.nodeId), { stripOrder, onStripOrderChange },
+  );
+  const orderedVideoMediaRefs = useMemo(() => ({
+    ...videoMediaRefs,
+    reference: orderRefStripItems(videoMediaRefs.reference, videoRefStripKey, mixedStrip.order),
+  }), [videoMediaRefs, mixedStrip.order]);
   /** IKFA1O 标签映射（唯一口径）：附件区徽标、@ 菜单、正文标签、发送拍平共用。
    *  首尾帧按角色；普通参考按同类型编号；模式不接受的参考身份 → labelOf null（失效，C2/C5）。
-   *  IKFA1P：文本附件并入同一映射（编号跟附件顺序 = 画布连入边序，与服务端 text_attachments 同源）。 */
-  const { labelOf: mediaLabelOf, refItems } = useMemo(() => videoLabelMapOf(videoMediaRefs, selectedMode), [videoMediaRefs, selectedMode]);
-  const orderedTextNodeIds = useMemo(() => (attachments ?? []).map((a) => a.nodeId), [attachments]);
+   *  IKFA1P：文本附件并入同一映射（编号跟附件顺序 = 画布连入边序，与服务端 text_attachments 同源）。
+   *  IKFCKQ：numberMap 为普通参考的同类型数字编号（缩略图圆钮与 label 同源派生）。 */
+  const { labelOf: mediaLabelOf, refItems, numberMap: refNumberMap } = useMemo(() => videoLabelMapOf(orderedVideoMediaRefs, selectedMode), [orderedVideoMediaRefs, selectedMode]);
+  const orderedTextNodeIds = useMemo(() => mixedStrip.order.filter(key => key.startsWith('text:')).map(key => key.slice(5)), [mixedStrip.order]);
   const refLabelOf = useCallback((key: PromptRefKey): string | null =>
     key.kind === 'text_ref'
       ? textRefLabelOf(key.id, orderedTextNodeIds)
@@ -714,9 +581,20 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   };
   const pickMentionRef = (assetId: string) => {
     // IKFA1P：文本身份（来源节点 id）与媒体身份空间不重叠——按当前附件集合分派标签类型
-    const kind: PromptRefKey['kind'] = orderedTextNodeIds.includes(assetId) ? 'text_ref' : 'asset_ref';
-    editorRef.current?.insertRefAtMention({ kind, id: assetId });
+    editorRef.current?.insertRefAtMention(refKeyOf(assetId));
     setMention({ open: false, query: '' });
+  };
+
+  /** 寻址键分派（IKFA1P 唯一口径）：文本附件来源节点 id → text_ref，其余 → asset_ref */
+  const refKeyOf = (assetId: string): PromptRefKey => ({
+    kind: orderedTextNodeIds.includes(assetId) ? 'text_ref' : 'asset_ref',
+    id: assetId,
+  });
+
+  /** 缩略图 @ 按钮（IKFCKQ）：与手动 @ 选择同一插入机制（insertRefAtPending 记忆光标路径）——
+   *  有记忆光标原位插入、无记录追加末尾，插入后编辑器聚焦 */
+  const insertRefByKey = (assetId: string) => {
+    editorRef.current?.insertRefAtPending(refKeyOf(assetId));
   };
 
   /** 新画布素材添加成功后，回到原 @ 位置插入标签。 */
@@ -801,6 +679,59 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     );
   };
 
+  /** IKFCKQ 参考缩略图接入共享组件：× 走「断开引用、保留来源」既有链路
+   *  （连线项断开连线 / 角色库项移除草稿 material 参考），@ 复用记忆光标插入且仅对
+   *  标签有效身份开放（与 @ 菜单同口径，不留下伪有效标签）；首帧/尾帧按角色徽标、
+   *  普通参考按同类型编号（与正文标签同源 numberMap），三态交互与放大预览由组件承载。
+   *  IKFCKT：dragProps 由渲染处按统一序列 index 传入（首尾帧槽不传 = 固定角色不参与拖拽） */
+  const renderRefThumb = (item: VideoMediaRef, key?: string, badgeText?: string, dragProps?: StripDragItemProps) => (
+    <RefThumbnail
+      key={key}
+      data-testid="dock-video-ref"
+      kind={item.mediaType}
+      url={item.url}
+      name={item.name}
+      badgeText={badgeText}
+      number={refNumberMap.get(refIdOf(item))}
+      audioDuration={item.duration}
+      onRemove={!readOnly
+        ? () => (item.materialId != null ? onRemoveMaterialRef?.(item.materialId) : onRemoveVideoRef?.(item.nodeId))
+        : undefined}
+      onInsertRef={!readOnly && refLabels.has(refIdOf(item)) ? () => insertRefByKey(refIdOf(item)) : undefined}
+      dragProps={dragProps}
+    />
+  );
+
+  const handleStripReorder = (from: number, to: number) => {
+    const { nextMedia, nextText, mediaChanged, textChanged } = mixedStrip.reorder(from, to);
+    if (mediaChanged) onReorderMediaRefs?.(nextMedia.map(key => key.slice(key.indexOf(':') + 1)));
+    if (textChanged) onReorderAttachments?.(nextText);
+  };
+  const stripDrag = useRefStripDrag({ disabled: readOnly, onReorder: handleStripReorder });
+
+  /** IKFCKQ 文本附件进参考栏：FileText 图标缩略图 + 文本N 独立编号 + 悬停 ×/@ 与正文预览；
+   *  × 沿用方案附件既有移除链路（普通文本附件增删经画布连线，素材同步期间禁移除）；
+   *  IKFCKT：dragProps 按统一序列 stripIndex 传入（base = 普通参考数；首尾帧模式无普通参考 base=0；
+   *  i 为文本段内编号下标）；附件顺序仍决定生成上下文拼接顺序 */
+  const renderTextThumb = (a: ImageTextAttachment, stripIndex: number) => (
+    <RefThumbnail
+      key={a.nodeId}
+      data-testid="dock-text-ref"
+      kind="text"
+      name={a.title}
+      number={orderedTextNodeIds.indexOf(a.nodeId) + 1}
+      textPreview={a.text}
+      onRemove={
+        !readOnly && !syncingPlan && a.isPromptPlan && onRemovePlan
+          ? () => onRemovePlan(a.nodeId)
+          : undefined
+      }
+      onInsertRef={!readOnly ? () => insertRefByKey(a.nodeId) : undefined}
+      dragProps={stripDrag.itemProps(mixedStrip.index(stripIndex))}
+    />
+  );
+  const textThumbsAt = (base: number) => (attachments ?? []).map((a, i) => renderTextThumb(a, base + i));
+
   return (
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
@@ -848,8 +779,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
             items={mentionItems}
             onPick={(assetId) => {
               // IKFA1P：失效文本标签可替换为其他文本附件或媒体（按身份空间分派）
-              const kind: PromptRefKey['kind'] = orderedTextNodeIds.includes(assetId) ? 'text_ref' : 'asset_ref';
-              editorRef.current?.replaceRefAt(replaceTarget, { kind, id: assetId });
+              editorRef.current?.replaceRefAt(replaceTarget, refKeyOf(assetId));
               setReplaceTarget(null);
             }}
           />
@@ -1010,52 +940,26 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       <div className={styles.refRoleArea}>
         {isKeyframe ? (
           <div className={styles.refSlot}>
-            {/* 首帧：有图时缩略图（含角色徽标）；无图时占位内展示「首帧」文字 */}
+            {/* 首帧：有图时共享缩略图（角色徽标「首帧」）；无图时占位内展示「首帧」文字 */}
             {videoMediaRefs.first ? (
-              <VideoRefThumb
-                item={videoMediaRefs.first}
-                role="first"
-                readOnly={readOnly}
-                onRemove={onRemoveVideoRef}
-                onRemoveMaterial={onRemoveMaterialRef}
-                firstSlotOpen={false}
-                lastSlotOpen={false}
-              />
+              renderRefThumb(videoMediaRefs.first, undefined, '首帧')
             ) : (
               !readOnly && canAddFirst && renderSourceMenu('image', 'first', '添加首帧（从资产中选择 / 到节点选择 / 角色库）', Image, '首帧')
             )}
-            {/* 尾帧（与首帧同一行）：有图时缩略图；无图时占位内展示「尾帧」文字 */}
+            {/* 尾帧（与首帧同一行）：有图时共享缩略图；无图时占位内展示「尾帧」文字 */}
             {videoMediaRefs.last ? (
-              <VideoRefThumb
-                item={videoMediaRefs.last}
-                role="last"
-                readOnly={readOnly}
-                onRemove={onRemoveVideoRef}
-                onRemoveMaterial={onRemoveMaterialRef}
-                firstSlotOpen={false}
-                lastSlotOpen={false}
-              />
+              renderRefThumb(videoMediaRefs.last, undefined, '尾帧')
             ) : (
               !readOnly && canAddLast && renderSourceMenu('image', 'last', '添加尾帧（从资产中选择 / 到节点选择 / 角色库）', Image, '尾帧')
             )}
+            {mixedStrip.render([], textThumbsAt(0))}
           </div>
         ) : (
           <div className={styles.refSlot}>
-            {videoMediaRefs.reference.map((r) => (
-              <VideoRefThumb
-                key={r.materialId ?? r.nodeId}
-                item={r}
-                role="reference"
-                badge={refLabels.get(refIdOf(r))}
-                readOnly={readOnly}
-                onRemove={onRemoveVideoRef}
-                onSetRole={onSetVideoRefRole}
-                onRemoveMaterial={onRemoveMaterialRef}
-                onSetMaterialRole={onSetMaterialRefRole}
-                firstSlotOpen={false}
-                lastSlotOpen={false}
-              />
-            ))}
+            {mixedStrip.render(
+              videoMediaRefs.reference.map((r, i) => renderRefThumb(r, r.materialId != null ? `material:${r.materialId}` : `node:${r.nodeId}`, undefined, stripDrag.itemProps(mixedStrip.index(i)))),
+              textThumbsAt(videoMediaRefs.reference.length),
+            )}
             {!readOnly && canAddReference && (
               <>
                 {renderSourceMenu('image', 'reference', '添加图片参考（从资产中选择 / 到节点选择 / 角色库）', Image)}
@@ -1084,31 +988,6 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
         {conflict && <div className={styles.refConflictHint} role="alert">{conflict}</div>}
         {readOnly && <div className={styles.readOnlyHint}>{sending || videoDraftBinding.submitting ? '正在保存并提交，参数与连线只读' : '生成中，参数与连线只读；可在画布卡片上取消生成'}</div>}
       </div>
-
-      {/* 连线文本附件（IKDLQG）：只读展示，增删通过画布连线建立/断开进行；多附件可上移/下移排序（IKDLQH） */}
-      {attachments && attachments.length > 0 && (
-        <div className={styles.attachments}>
-          <span className={styles.configLabel}>文本附件（{attachments.length}）</span>
-          {attachments.map((a, i) => (
-            /* IKFA1P：附件区展示正文标签编号（与 @ 菜单、正文标签同源） */
-            <AttachmentItem
-              key={a.nodeId}
-              attachment={a}
-              badge={`文本${i + 1}`}
-              onRemove={!readOnly && !syncingPlan && a.isPromptPlan && onRemovePlan ? () => onRemovePlan(a.nodeId) : undefined}
-              move={
-                !readOnly && onReorderAttachments && attachments.length > 1
-                  ? {
-                      isFirst: i === 0,
-                      isLast: i === attachments.length - 1,
-                      onMove: (delta) => handleAttachmentMove(i, delta),
-                    }
-                  : undefined
-              }
-            />
-          ))}
-        </div>
-      )}
 
       <PromptSyncActions plans={pendingPlanSyncs} disabled={readOnly || syncingPlan} onSync={onSyncPlan} />
       {configurationError && <div className={styles.refConflictHint} role="alert">{configurationError}</div>}

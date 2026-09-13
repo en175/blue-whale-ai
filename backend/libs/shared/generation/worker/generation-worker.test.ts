@@ -276,6 +276,154 @@ describe("processNextJob 音频分支（IK9ILQ）", () => {
     );
   });
 
+  // IKFCXE：音频文本附件执行消费——完整附件正文与主提示词共同送达供应商适配边界
+  //（记录式 generate 替身钉住 text_prompt：附件按序在前、主提示词最后追加、"\n\n" 连接，
+  // 不改写正文、不添加朗读指令——环境音/配音意图由主提示词决定）。
+  it.each([
+    { name: "无预编译快照", composed: undefined, expected: "雨夜街道，两个人争吵\n\n远处有雷声\n\n生成环境音" },
+    { name: "错误类型快照", composed: 123, expected: "雨夜街道，两个人争吵\n\n远处有雷声\n\n生成环境音" },
+    { name: "空白快照", composed: "   ", expected: "雨夜街道，两个人争吵\n\n远处有雷声\n\n生成环境音" },
+    { name: "冻结编号正文", composed: "文本1：雨夜街道，两个人争吵\n\n基于文本1生成环境音", expected: "文本1：雨夜街道，两个人争吵\n\n基于文本1生成环境音" },
+  ])("音频任务上下文：$name", async ({ composed, expected }) => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j-audio-att",
+      project_id: "p1",
+      user_id: "u1",
+      type: "audio",
+      input: {
+        prompt: "生成环境音",
+        composed_prompt: composed,
+        model_id: "seed-audio-1.0",
+        provider_credential: "<sealed>",
+        text_attachments: [
+          { node_id: "n1", title: "场景", text: "雨夜街道，两个人争吵" },
+          { node_id: "n2", title: "空白附件", text: "   " },
+          { node_id: "n3", title: "氛围", text: "远处有雷声" },
+        ],
+      },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 5,
+    });
+    const findImageCapability = vi.fn().mockResolvedValue({
+      model_id: "seed-audio-1.0",
+    });
+    const repo = {
+      claimNextJob,
+      findImageCapability,
+      createAsset: vi.fn().mockResolvedValue("a1"),
+      completeJobAndSettle: vi.fn().mockResolvedValue(true),
+      appendLog: vi.fn().mockResolvedValue(undefined),
+    } as unknown as WorkerRepo;
+    const generate = vi.fn().mockResolvedValue({
+      data: new Uint8Array([1, 2, 3]),
+      mime: "audio/mpeg",
+    });
+    const createAudioProvider = vi.fn().mockReturnValue({ generate });
+
+    const jobId = await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider: vi.fn(),
+      createAudioProvider,
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      mediaStorage: buildStorage(),
+      fetchImpl: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    expect(jobId).toBe("j-audio-att");
+    expect(generate).toHaveBeenCalledWith({
+      model: "seed-audio-1.0",
+      prompt: expected,
+    });
+  });
+
+  it("无 text_attachments 的旧音频任务：provider prompt 逐字节不变（回归）", async () => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j-audio-legacy",
+      project_id: "p1",
+      user_id: "u1",
+      type: "audio",
+      input: {
+        prompt: "海浪",
+        model_id: "seed-audio-1.0",
+        provider_credential: "<sealed>",
+      },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 5,
+    });
+    const repo = {
+      claimNextJob,
+      findImageCapability: vi.fn().mockResolvedValue({ model_id: "seed-audio-1.0" }),
+      createAsset: vi.fn().mockResolvedValue("a1"),
+      completeJobAndSettle: vi.fn().mockResolvedValue(true),
+      appendLog: vi.fn().mockResolvedValue(undefined),
+    } as unknown as WorkerRepo;
+    const generate = vi.fn().mockResolvedValue({
+      data: new Uint8Array([1, 2, 3]),
+      mime: "audio/mpeg",
+    });
+
+    await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider: vi.fn(),
+      createAudioProvider: vi.fn().mockReturnValue({ generate }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      mediaStorage: buildStorage(),
+      fetchImpl: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    const providerArg = generate.mock.calls[0]![0] as { prompt: string };
+    expect(providerArg.prompt).toBe("海浪");
+  });
+
+  it("音频任务 prompt 为空且仅有附件 → 执行侧保持既有校验拒绝（不引入仅附件生成）", async () => {
+    const claimNextJob = vi.fn().mockResolvedValue({
+      id: "j-audio-empty",
+      project_id: "p1",
+      user_id: "u1",
+      type: "audio",
+      input: {
+        prompt: "",
+        model_id: "seed-audio-1.0",
+        provider_credential: "<sealed>",
+        text_attachments: [
+          { node_id: "n1", title: "场景", text: "雨夜街道，两个人争吵" },
+        ],
+      },
+      expected_output_count: 1,
+      retry_count: 0,
+      fencingToken: 5,
+    });
+    const failJob = vi.fn().mockResolvedValue(true);
+    const repo = {
+      claimNextJob,
+      failJob,
+      appendLog: vi.fn(),
+    } as unknown as WorkerRepo;
+
+    const jobId = await processNextJob({
+      repo,
+      workerId: "worker-1",
+      createImageProvider: vi.fn(),
+      createAudioProvider: vi.fn().mockReturnValue({ generate: vi.fn() }),
+      credentialVault: { open: vi.fn().mockReturnValue("sk") },
+      mediaStorage: buildStorage(),
+      fetchImpl: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    expect(jobId).toBe("j-audio-empty");
+    expect(failJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: "j-audio-empty",
+        errorCode: "invalid_input",
+        errorMessage: "缺少 prompt 或 model_id",
+      }),
+    );
+  });
+
   it("音频任务带 references：重复来源（本地 url 相同）只保留首个（IKE4GC 去重）", async () => {
     const claimNextJob = vi.fn().mockResolvedValue({
       id: "j4",

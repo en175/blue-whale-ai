@@ -125,6 +125,20 @@ describe('videoMediaRefsOf 连线推导分组参考', () => {
       first: { nodeId: 'm1', url: 'http://img/m1.png', name: '图m1', assetId: 'a1', mediaType: 'image' },
     });
   });
+
+  it('来源节点回填的正数时长随参考携带（IKFCKQ 音频缩略图预览）；缺失或非法不携带', () => {
+    const withDuration = [
+      readyImage('m1', 'a1', { duration: 95 }),
+      readyImage('bad1', 'a6', { duration: 0 }),
+      readyImage('bad2', 'a7', { duration: 'x' }),
+    ];
+    const edges = [edge('e1', 'm1', 'd1'), edge('e2', 'bad1', 'd1'), edge('e3', 'bad2', 'd1')];
+    const refs = videoMediaRefsOf('d1', edges, withDuration);
+    expect(refs.reference[0]).toMatchObject({ nodeId: 'm1', duration: 95 });
+    expect(refs.reference[1]).toMatchObject({ nodeId: 'bad1' });
+    expect(refs.reference[1]!.duration).toBeUndefined();
+    expect(refs.reference[2]!.duration).toBeUndefined();
+  });
 });
 
 describe('readDraftMaterialRefs 角色库草稿参考解析（IKFC1T 修复防回归）', () => {

@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import {
   COMPOSED_IMAGE_PROMPT_MAX_LENGTH,
   COMPOSED_VIDEO_PROMPT_MAX_LENGTH,
+  COMPOSED_AUDIO_PROMPT_MAX_LENGTH,
   ERROR_INVALID_INPUT,
   ERROR_INVALID_REFERENCE,
   ERROR_INVALID_REFERENCE_TYPE,
@@ -588,17 +589,23 @@ const audioStrategy: GenerationTypeStrategy = {
   validate(body) {
     return validateCommon(body, "audio") ?? validateAudioReferences(body);
   },
-  composeInput({ body, resolvedModelId, promptText, targetNodeId }) {
+  composeInput({ body, resolvedModelId, promptText, targetNodeId, textAttachments, promptDoc }) {
     const input: Record<string, unknown> = {
       prompt: promptText,
       model_id: resolvedModelId,
     };
+    if (promptDoc) input.prompt_doc = promptDoc;
     // IKE4GC：音频参考素材冻结进 input 快照（保序）；Worker 执行时转 seed-audio references
     //   （audio→audio_url、image→image_url、已关联素材→asset://），不改 prompt。
     const parsed = parseReferences(body.references);
     if (parsed.kind === "ok") input.references = parsed.items;
-    // IKDMQT：音频草稿目标冻结进快照（执行与重试只读，不回读画布）；无文本附件。
-    if (targetNodeId !== null) input.target_node_id = targetNodeId;
+    // IKDMQT：音频草稿目标冻结进快照（执行与重试只读，不回读画布）。
+    // IKFCXE：音频目标与图片/视频同构——连线推导的文本附件正文一并冻结，
+    //   执行与重试消费该快照（附件作为创作上下文与主提示词共同进入生成）。
+    if (targetNodeId !== null) {
+      input.target_node_id = targetNodeId;
+      input.text_attachments = textAttachments;
+    }
     return input;
   },
 };
@@ -706,8 +713,8 @@ function textAttachmentsFromCanvas(
   return attachments;
 }
 
-/** IKDLQF/IKDLQG/IKDMQT：携带 target_node_id 时，接纳当下读取最新 Canvas 校验目标节点；
- *  文本附件推导仅图片/视频（音频无文本附件能力，IKDMQT），空 prompt 由组合校验拒绝。
+/** IKDLQF/IKDLQG/IKDMQT/IKFCXE：携带 target_node_id 时，接纳当下读取最新 Canvas 校验目标节点；
+ *  文本附件推导覆盖图片/视频/音频（IKFCXE 解除音频限制），空 prompt 由组合校验拒绝。
  *  IKFA1P：正文含文本标签时组合按编号清单格式（长度校验跟随实际组合结果）。 */
 async function resolveTargetSnapshot(args: {
   type: GenerationType;
@@ -756,14 +763,20 @@ async function resolveTargetSnapshot(args: {
         },
       };
     }
-    // IKDMQT：音频无文本附件能力——不遍历文本连线（textAttachments 保持空），
-    // 空 prompt 由下方组合校验拒绝；图片/视频沿用文本附件推导与冻结。
-    if (type !== "audio") {
-      textAttachments = textAttachmentsFromCanvas(
-        nodes,
-        JSON.parse(canvas.edges ?? "[]"),
-        targetNodeId,
-      );
+    // IKFCXE：音频与图片/视频同源推导文本附件（画布边序），冻结进 input.text_attachments；
+    // 附件是创作上下文，不改变主提示词的必要性——音频不允许仅凭附件正文驱动生成。
+    textAttachments = textAttachmentsFromCanvas(
+      nodes,
+      JSON.parse(canvas.edges ?? "[]"),
+      targetNodeId,
+    );
+    // IKFCXE：主提示词为空时保持既有音频校验（不引入"仅附件生成"），
+    // 附件正文不得单独充当音频输入；图片/视频仍允许非空白附件驱动。
+    if (type === "audio" && promptText.trim() === "") {
+      return {
+        ok: false,
+        value: { message: "prompt 无效", code: ERROR_INVALID_INPUT },
+      };
     }
     // IKFA1P：正文含文本标签时按编号清单组合（建立 文本N ↔ 内容 关系），长度闸跟随实际格式。
     const composed = promptDoc && docHasTextRef(promptDoc)
@@ -777,10 +790,13 @@ async function resolveTargetSnapshot(args: {
     }
     // ADR-0085：模型 raw 上限可超过契约预算（image-2=32000），组合闸跟随取大，
     // 否则配了大上限的模型一挂文本附件就先撞组合闸，配置形同虚设。
+    // IKFCXE：音频组合预算与图片/视频同值并列，取大逻辑一致。
     const composedMaxLength = Math.max(
       type === "video"
         ? COMPOSED_VIDEO_PROMPT_MAX_LENGTH
-        : COMPOSED_IMAGE_PROMPT_MAX_LENGTH,
+        : type === "audio"
+          ? COMPOSED_AUDIO_PROMPT_MAX_LENGTH
+          : COMPOSED_IMAGE_PROMPT_MAX_LENGTH,
       maxPromptLength,
     );
     if (composed.length > composedMaxLength) {
@@ -830,12 +846,6 @@ export async function handleCreateGenerationJob(
   const strategy = strategies[type];
   if (!strategy)
     return fail(400, "暂不支持该生成类型", { code: ERROR_UNSUPPORTED_TYPE });
-  // IKFA1M/IKFA1O：正文素材标签支持图片与视频生成；audio 携带一律拒绝，不静默忽略。
-  if (type === "audio" && body.prompt_doc !== undefined) {
-    return fail(400, "正文素材标签暂仅支持图片与视频生成", {
-      code: ERROR_UNSUPPORTED_INPUT,
-    });
-  }
   // IKFA1M：结构/版本契约校验（未知版本不猜造）；引用关系复核在参考图复核之后进行。
   let promptDoc: PromptDoc | null = null;
   if (body.prompt_doc !== undefined) {
@@ -994,12 +1004,12 @@ export async function handleCreateGenerationJob(
       return null;
     };
     let videoRefItems: Parameters<typeof validateVideoPromptDocRefs>[1] | null = null;
-    if (type === "video") {
+    if (type === "video" || type === "audio") {
       const parsed = parseReferences(body.references);
-      const textOnlyDoc = docHasTextRef(promptDoc)
+      const textOnlyDoc = (type === "audio" || docHasTextRef(promptDoc))
         && !promptDoc.segments.some((segment) => segment.kind === "asset_ref");
       if (parsed.kind !== "ok" && !(parsed.kind === "absent" && textOnlyDoc)) {
-        return fail(400, "视频正文素材标签请求必须携带单数组 references", {
+        return fail(400, `${type === "audio" ? "音频" : "视频"}正文素材标签请求必须携带单数组 references`, {
           code: ERROR_UNSUPPORTED_INPUT,
         });
       }
