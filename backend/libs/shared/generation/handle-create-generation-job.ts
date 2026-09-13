@@ -589,11 +589,12 @@ const audioStrategy: GenerationTypeStrategy = {
   validate(body) {
     return validateCommon(body, "audio") ?? validateAudioReferences(body);
   },
-  composeInput({ body, resolvedModelId, promptText, targetNodeId, textAttachments }) {
+  composeInput({ body, resolvedModelId, promptText, targetNodeId, textAttachments, promptDoc }) {
     const input: Record<string, unknown> = {
       prompt: promptText,
       model_id: resolvedModelId,
     };
+    if (promptDoc) input.prompt_doc = promptDoc;
     // IKE4GC：音频参考素材冻结进 input 快照（保序）；Worker 执行时转 seed-audio references
     //   （audio→audio_url、image→image_url、已关联素材→asset://），不改 prompt。
     const parsed = parseReferences(body.references);
@@ -845,12 +846,6 @@ export async function handleCreateGenerationJob(
   const strategy = strategies[type];
   if (!strategy)
     return fail(400, "暂不支持该生成类型", { code: ERROR_UNSUPPORTED_TYPE });
-  // IKFA1M/IKFA1O：正文素材标签支持图片与视频生成；audio 携带一律拒绝，不静默忽略。
-  if (type === "audio" && body.prompt_doc !== undefined) {
-    return fail(400, "正文素材标签暂仅支持图片与视频生成", {
-      code: ERROR_UNSUPPORTED_INPUT,
-    });
-  }
   // IKFA1M：结构/版本契约校验（未知版本不猜造）；引用关系复核在参考图复核之后进行。
   let promptDoc: PromptDoc | null = null;
   if (body.prompt_doc !== undefined) {
@@ -1009,12 +1004,12 @@ export async function handleCreateGenerationJob(
       return null;
     };
     let videoRefItems: Parameters<typeof validateVideoPromptDocRefs>[1] | null = null;
-    if (type === "video") {
+    if (type === "video" || type === "audio") {
       const parsed = parseReferences(body.references);
-      const textOnlyDoc = docHasTextRef(promptDoc)
+      const textOnlyDoc = (type === "audio" || docHasTextRef(promptDoc))
         && !promptDoc.segments.some((segment) => segment.kind === "asset_ref");
       if (parsed.kind !== "ok" && !(parsed.kind === "absent" && textOnlyDoc)) {
-        return fail(400, "视频正文素材标签请求必须携带单数组 references", {
+        return fail(400, `${type === "audio" ? "音频" : "视频"}正文素材标签请求必须携带单数组 references`, {
           code: ERROR_UNSUPPORTED_INPUT,
         });
       }

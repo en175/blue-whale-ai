@@ -20,7 +20,7 @@
 
 ## 2. 编号体系（派生值）
 
-- 编号按类型独立（图片N/视频N/音频N/文本N），为**派生值**：身份在保序引用列表中的下标 + 1；不改动 promptDoc 契约与后端。
+- 编号按类型独立（图片N/视频N/音频N/文本N），为**派生值**：身份在保序引用列表中的下标 + 1；沿用 promptDoc v1 身份契约，音频接纳与执行扩展见 §10。
 - 角标只显示数字（两位数时圆钮自动加宽为胶囊形）；删除或换位后紧凑重编号，经既有 reconcile 链路自动同步正文 chip 文案。
 - 面板不参与编号身份的素材（如图片面板的视频上传项）不显示圆钮。
 
@@ -39,7 +39,7 @@
 - 插入后编辑器聚焦、光标落在插入内容之后（`insertRefAtPending` 在 update 提交后调用 `editor.focus()`；@ 按钮 `onMouseDown` 阻止编辑器失焦）。
 - 面板按身份空间分派寻址键（`refKeyOf`）：来源节点 id 在文本附件集合 → `text_ref`，否则 `asset_ref`（IKFA1P 语义）。
 - 无素材身份的项（如未上传完成的本地项）不提供 @ 入口。
-- **音频面板等价语义（T3 / IKFCKS）**：AudioDialog 与 MusicDialog 的正文为纯 textarea（无 `PromptRefEditor` chip 机制），其「手动 @ 选择」的既有结果 = 素材进入参考区（`onMentionCanvas` 入口，经 externalPick 注入）。缩略图 @ 按钮与手动 @ 选择走**同一 `onMentionCanvas` 回调**（`audioRefToMentionItem` 转换为同一种素材项形态），结果等价、幂等；仅画布来源参考提供 @（本地 blob 上传项无画布身份，同「无素材身份不提供 @」口径）。MusicDialog 随 T3 补齐曲风描述 @ 菜单（仅音频可选，交互与 AudioDialog 同款）。
+- **音频正文引用（本次验收修复替代旧 textarea 边界）**：AudioDialog 与 MusicDialog 曲风描述复用 `AudioPromptEditor` / `PromptRefEditor`，已选音频或文本附件的 @ 直接插入正文 chip，不重复添加附件；手动 @ 新选项先添加参考，成功后在原查询位置插入。无落库 assetId 的本地项无 @ 入口。MusicDialog 的歌词仍为普通文本。
 
 ## 5. 悬浮放大预览规格
 
@@ -70,7 +70,7 @@
 - 面板集成：`ImageDialog/prompt-ref.test.tsx` 扩展（× 走断开连线回调、@ 与手动 @ 选择等价、只读态按钮不渲染）；既有 `imageMediaRefs.test.tsx`、`cardRename.test.tsx`、`attachments.test.tsx`、`text-prompt-ref.test.tsx` 全绿验证外部契约（`dock-media-ref` testid、`img alt`、`button[title="移除"]`）保持。
 - 音频面板集成（T3 / IKFCKS）：`MusicDialog/index.test.tsx`、`AudioDialog/index.test.tsx`（缩略图替换/新建、× 断边回调、@ 同一入口等价、只读态、发送参数回归）+ `connectAbility.test.ts`（文本卡 → 音频生成连线放行与既有组合回归）；`cardRename.test.tsx` 音频参考改名锚点随 chip 下线切换为缩略图 title。
 - 视觉像素值与过渡时长不进单测，留浏览器验收。
-- 切片：T1 IKFCKK（共享组件 + 图片面板，已合入）；T2 IKFCKQ（视频面板 BottomDialog，已合入）；T4 IKFCKN（文本附件进栏，已合入）；T3 IKFCKS（音频面板 MusicDialog 替换 + AudioDialog 新建，已合入——含画布文本卡连线进音频面板的连线能力放行：`isAudioGenEnabled` 对含文本组合可选，文本卡作为创作上下文，不进生成请求）；T5 IKFCKT（拖拽排序，本切片定稿见 §9）。父工单：IKFCJG。
+- 切片：T1 IKFCKK（共享组件 + 图片面板，已合入）；T2 IKFCKQ（视频面板 BottomDialog，已合入）；T4 IKFCKN（文本附件进栏，已合入）；T3 IKFCKS（音频面板 MusicDialog 替换 + AudioDialog 新建，已合入——含画布文本卡连线进音频面板的连线能力放行：`isAudioGenEnabled` 对含文本组合可选，文本卡作为创作上下文，由接纳侧按连线冻结全文进入任务快照）；T5 IKFCKT（拖拽排序，本切片定稿见 §9）。父工单：IKFCJG。
 
 
 ## 9. 拖拽排序（T5 / IKFCKT 定稿）
@@ -83,3 +83,12 @@
 - **首尾帧角色槽**（视频面板 keyframe 模式）：首帧/尾帧为固定角色槽（徽标不参与数字编号），不参与拖拽换位；该模式下拖拽域为文本附件序列。
 - **只读态**：生成中/提交中（readOnly）整条参考栏禁拖（`draggable=false`）。
 - **随 T5 定稿处置下线**：BottomDialog 死 prop `onSetVideoRefRole` / `onSetMaterialRefRole`（IKFCKQ 起无 UI 消费）及其 CanvasPage 侧孤儿实现（`handleSetVideoRefRole` / `changeVideoFreeRefRole`）一并移除——角色由「模式 + 目标槽」决定，无跨槽切换入口。
+
+
+## 10. 音频正文接纳与执行闭环（IKFCJG 验收修复）
+
+- AudioDialog `onSend(text, modelId, refs, promptDoc?)`、MusicDialog `onSend(text, model, options, refs, promptDoc?)` 保留既有参数并追加结构化正文。音频与曲风输入上限仍为 1000 字；超限或存在失效标签阻止发送。MusicDialog 仍为既有 mock 入口，本次不新增音乐供应商。
+- 音频草稿同时保存 `data.prompt` 与 `data.promptDoc`（含 flat 镜像）；恢复复用 `restorePromptDoc`。`data.audioRefs` 保存已落库音频身份及稳定 source/id，blob/File 不作为可恢复身份；本地文件发送时通过现有上传换取资产后再保存。恢复、缩略图编号、正文 labelMap 和发送 refs 都按 `referenceStripOrder` 同一投影排列；文本编号仍按文本连入边序对应全文快照。
+- 音频生成复用现有 `references` 单数组和 `prompt_doc` 字段。接纳按真实资产归属/媒体类型及当前目标文本连线复核，拒绝失效、未引用、错类型和未连入标签；按 references 与文本附件权威序编译正文，冻结 `prompt_doc`、`text_attachments`。不新增生成协议字段。
+- 含 text_ref 时复用接纳侧已有 `composed_prompt` 冻结完整编号清单与主提示词；Node / Java audio Worker 优先消费非空白 composed_prompt，否则沿用全文附件加主提示词组合。重试只消费原任务冻结字段，不重读后续画布编辑，不在 Worker 解析或重编 PromptDoc。
+- 受控供应商断言仅证明实际请求 prompt 含完整正文、编号及主提示词；浏览器到真实业务 API、隔离数据库及刷新恢复验证交互/持久化，不代表真实模型效果或人工验收。

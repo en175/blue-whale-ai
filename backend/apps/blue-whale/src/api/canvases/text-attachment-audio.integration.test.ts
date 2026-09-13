@@ -341,12 +341,14 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
 
       // 发送：主提示词非空（音频不允许仅附件发送，前端禁用与后端拒绝一致）；
       // 请求体携带 target_node_id 且 type=audio
-      await page.fill('[data-testid="audio-input"]', "生成环境音");
+      await page.locator('[data-testid="audio-input"] [contenteditable]').fill('生成环境音，参考');
+      await page.getByRole('button', { name: '插入引用 雨夜', exact: true }).click();
+      await vi.waitFor(async () => expect(await page.locator('[data-testid="asset-ref-valid"]').innerText()).toBe('文本1'));
       await page.locator('[data-testid="audio-send"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(1), { timeout: 10_000 });
       expect(generationRequests[0].body.type).toBe("audio");
       expect(generationRequests[0].body.target_node_id).toBe("media-1");
-      expect((generationRequests[0].body.parameters as Record<string, unknown>).prompt).toBe("生成环境音");
+      expect((generationRequests[0].body.parameters as Record<string, unknown>).prompt).toBe("生成环境音，参考文本1");
 
       // 库内冻结：附件完整正文与主提示词共同进入任务快照
       await vi.waitFor(async () => expect(await jobCount(projectId)).toBe(1), { timeout: 10_000 });
@@ -355,7 +357,10 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       });
       const input = rows[0].input as Record<string, unknown>;
       expect(input.target_node_id).toBe("media-1");
-      expect(input.prompt).toBe("生成环境音");
+      expect(input.prompt).toBe("生成环境音，参考文本1");
+      expect(input.composed_prompt).toBe("文本1：雨夜街道，两个人争吵\n\n生成环境音，参考文本1");
+      expect(input.prompt_doc).toEqual(generationRequests[0].body.prompt_doc);
+      expect((input.prompt_doc as { segments: unknown[] }).segments).toContainEqual({ kind: "text_ref", node_id: "text-1", label: "文本1" });
       expect(input.text_attachments).toEqual([
         { node_id: "text-1", title: "雨夜", text: "雨夜街道，两个人争吵" },
       ]);
@@ -369,6 +374,7 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       });
       await media.locator('[data-testid="media-content"]').click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
+      await vi.waitFor(async () => expect(await page.locator('[data-testid="asset-ref-valid"]').innerText()).toBe("文本1"));
       await page.screenshot({ path: "/tmp/ikfcxe-browser.png", fullPage: true });
     } finally {
       await browser.close();
@@ -376,4 +382,3 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     }
   }, 120_000);
 });
-

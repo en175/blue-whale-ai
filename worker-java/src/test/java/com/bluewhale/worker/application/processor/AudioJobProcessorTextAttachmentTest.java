@@ -11,6 +11,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.Arguments;
+import java.util.stream.Stream;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -61,11 +65,19 @@ class AudioJobProcessorTextAttachmentTest {
                 .thenReturn(true);
     }
 
-    @Test
-    @DisplayName("带 text_attachments：generate 收到 附件正文+主提示词 组合（快照顺序，附件在前）")
-    void composedPromptWithAttachments() {
+    static Stream<Arguments> audioPromptSnapshots() {
+        String fallback = "雨夜街道，两个人争吵\n\n远处有雷声\n\n生成环境音";
+        String frozen = "文本1：雨夜街道，两个人争吵\n\n基于文本1生成环境音";
+        return Stream.of(Arguments.of(123, fallback), Arguments.of("   ", fallback), Arguments.of(frozen, frozen));
+    }
+
+    @ParameterizedTest
+    @MethodSource("audioPromptSnapshots")
+    @DisplayName("音频优先消费冻结编号正文，损坏或空白快照回退附件组合")
+    void composedPromptWithAttachments(Object composed, String expected) {
         ClaimedJobDto job = claimWithInput(Map.of(
                 "prompt", "生成环境音",
+                "composed_prompt", composed,
                 "model_id", "seed-audio-1.0",
                 "provider_credential", "v1.aaa.bbb.ccc",
                 "text_attachments", List.of(
@@ -82,7 +94,7 @@ class AudioJobProcessorTextAttachmentTest {
 
         // 完整附件正文与主提示词共同送达供应商（空白附件跳过、"\n\n" 连接、主提示词最后）
         verify(audioClient).generate(eq("sk-token"), eq("seed-audio-1.0"),
-                eq("雨夜街道，两个人争吵\n\n远处有雷声\n\n生成环境音"), any());
+                eq(expected), any());
         verify(stateMachine).completeJob(eq("100"), eq(List.of("a1")), anyString(), eq(5L));
     }
 

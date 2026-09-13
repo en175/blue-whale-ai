@@ -279,7 +279,12 @@ describe("processNextJob 音频分支（IK9ILQ）", () => {
   // IKFCXE：音频文本附件执行消费——完整附件正文与主提示词共同送达供应商适配边界
   //（记录式 generate 替身钉住 text_prompt：附件按序在前、主提示词最后追加、"\n\n" 连接，
   // 不改写正文、不添加朗读指令——环境音/配音意图由主提示词决定）。
-  it("音频任务带 text_attachments：provider 收到附件正文+主提示词组合（快照顺序，附件在前）", async () => {
+  it.each([
+    { name: "无预编译快照", composed: undefined, expected: "雨夜街道，两个人争吵\n\n远处有雷声\n\n生成环境音" },
+    { name: "错误类型快照", composed: 123, expected: "雨夜街道，两个人争吵\n\n远处有雷声\n\n生成环境音" },
+    { name: "空白快照", composed: "   ", expected: "雨夜街道，两个人争吵\n\n远处有雷声\n\n生成环境音" },
+    { name: "冻结编号正文", composed: "文本1：雨夜街道，两个人争吵\n\n基于文本1生成环境音", expected: "文本1：雨夜街道，两个人争吵\n\n基于文本1生成环境音" },
+  ])("音频任务上下文：$name", async ({ composed, expected }) => {
     const claimNextJob = vi.fn().mockResolvedValue({
       id: "j-audio-att",
       project_id: "p1",
@@ -287,6 +292,7 @@ describe("processNextJob 音频分支（IK9ILQ）", () => {
       type: "audio",
       input: {
         prompt: "生成环境音",
+        composed_prompt: composed,
         model_id: "seed-audio-1.0",
         provider_credential: "<sealed>",
         text_attachments: [
@@ -328,7 +334,7 @@ describe("processNextJob 音频分支（IK9ILQ）", () => {
     expect(jobId).toBe("j-audio-att");
     expect(generate).toHaveBeenCalledWith({
       model: "seed-audio-1.0",
-      prompt: "雨夜街道，两个人争吵\n\n远处有雷声\n\n生成环境音",
+      prompt: expected,
     });
   });
 

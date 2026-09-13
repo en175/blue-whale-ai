@@ -169,8 +169,10 @@ public class AudioJobProcessor implements JobProcessor {
         // （VideoJobProcessor.textAttachments/composeTextAttachmentPrompt：快照损坏或无字段按无附件处理，
         // 非空白附件正文在前、主提示词在后，"\n\n" 连接，不改写正文）；不因存在附件强制改为朗读任务，
         // 环境音/配音意图由主提示词决定；主提示词为空的任务已在第 1 步校验拒绝。
-        String audioPrompt = VideoJobProcessor.composeTextAttachmentPrompt(
-                VideoJobProcessor.textAttachments(input), prompt);
+        // 正文文本标签的编号清单已在接纳时冻结，执行与重试不得重新拼接覆盖它。
+        String audioPrompt = input.get("composed_prompt") instanceof String composed && !composed.isBlank()
+                ? composed
+                : VideoJobProcessor.composeTextAttachmentPrompt(VideoJobProcessor.textAttachments(input), prompt);
         NewApiAudioClient.AudioResult audio = audioClient.generate(
                 providerToken, modelId, audioPrompt, audioRefs.refs());
         log.info("[audio] 上游已返回 jobId={} requestId={} dataLen={} url={}",

@@ -3,6 +3,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { typePromptRefText } from '../../testing/promptRefEditor';
 import MusicDialog from './index';
 import type { AudioRefItem } from '../AudioDialog';
 
@@ -78,12 +79,7 @@ describe('MusicDialog 参考条拖拽换位（IKFCKT）', () => {
     expect(after.map((el) => el.getAttribute('title'))).toEqual(['环境音', '鼓点采样']);
     expect(after.map(badgeOf)).toEqual(['1', '2']);
 
-    const textarea = container.querySelector('textarea')!;
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-    await act(async () => {
-      setter.call(textarea, '轻快的曲风');
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    await typePromptRefText(container, '轻快的曲风');
     await act(async () => {
       container.querySelector<HTMLButtonElement>('button[title="发送"]')!.click();
     });
