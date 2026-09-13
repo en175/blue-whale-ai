@@ -161,7 +161,7 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
   });
 
   it('× 移除面板参考后紧凑重编号', async () => {
-    const second: AudioRefItem = { ...CANVAS_REF, id: 'n2', name: '风声' };
+    const second: AudioRefItem = { ...CANVAS_REF, id: 'n2', assetId: 602, name: '风声' };
     await renderDialog();
     await act(async () => {
       root.render(
@@ -272,8 +272,8 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
   it('从面板画布列表选择已落库音频后能插入正文标签', async () => {
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
     await act(async () => root.render(createElement(AudioDialog, { onClose: vi.fn(), onSend: vi.fn(), canvasMedia: [{ id: 'n1', src: CANVAS_REF.src, name: '雨声', mediaType: 'audio', assetId: '601' }] } as Parameters<typeof AudioDialog>[0])));
-    await act(async () => container.querySelector<HTMLButtonElement>('[title="添加参考音频（最多 3 段）"]')!.click());
-    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '从画布选择')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[title="从资产中选择 / 从节点添加素材"]')!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '从节点添加素材')!.click());
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '雨声')!.click());
     expect(atButton('雨声')).not.toBeNull();
     await act(async () => atButton('雨声')!.click());
@@ -312,5 +312,23 @@ describe('IKFCJG 异步失效换绑', () => {
     expect(onSend.mock.calls[0][3].segments.filter((s: { kind: string }) => s.kind === 'asset_ref')).toEqual([
       { kind: 'asset_ref', asset_id: '602', label: '音频1' }, { kind: 'asset_ref', asset_id: '602', label: '音频1' },
     ]);
+  });
+});
+
+describe('IKFE8V 自由音频面板资产接纳', () => {
+  it('资产与节点同身份去重，移除后重开不重放已消费的选择', async () => {
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    const selected = { ...CANVAS_REF, id: 'asset-601' };
+    const consumed = vi.fn();
+    const props = { onClose: vi.fn(), onSend: vi.fn(), onAssetPickConsumed: consumed };
+    await act(async () => root.render(createElement(AudioDialog, { ...props, externalAssetPick: { ts: 1, items: [selected, selected] } })));
+    expect(audioThumbs()).toHaveLength(1);
+    expect(consumed).toHaveBeenCalledTimes(1);
+    await act(async () => root.render(createElement(AudioDialog, { ...props, externalAssetPick: null, externalPick: { ts: 2, item: CANVAS_REF } })));
+    expect(audioThumbs()).toHaveLength(1);
+    await act(async () => removeButton('雨声白噪音')!.click());
+    expect(audioThumbs()).toHaveLength(0);
+    await act(async () => root.render(createElement(AudioDialog, { ...props, key: 'reopen' })));
+    expect(audioThumbs()).toHaveLength(0);
   });
 });

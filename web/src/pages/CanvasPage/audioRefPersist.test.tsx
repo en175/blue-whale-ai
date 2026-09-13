@@ -256,17 +256,17 @@ function refNames(): string[] {
   return [...container.querySelectorAll<HTMLElement>('[data-testid="audio-ref-thumb"]')].map((el) => el.title);
 }
 
-/** 经「添加参考音频」→「从画布选择」进入画布选取模式（面板列表与 pick 模式同时激活） */
+/** 经「添加参考音频」→「从节点添加素材」进入画布选取模式（面板列表与 pick 模式同时激活） */
 async function startCanvasPick() {
   await vi.waitFor(() => {
-    const btn = [...container.querySelectorAll('button')].find((b) => b.title === '添加参考音频（最多 3 段）');
+    const btn = [...container.querySelectorAll('button')].find((b) => b.title === '从资产中选择 / 从节点添加素材');
     expect(btn).toBeTruthy();
   });
   await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.title === '添加参考音频（最多 3 段）')!.click();
+    [...container.querySelectorAll('button')].find((b) => b.title === '从资产中选择 / 从节点添加素材')!.click();
   });
   await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.textContent === '从画布选择')!.click();
+    [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材')!.click();
   });
 }
 
@@ -437,7 +437,7 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     });
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声', '雨声']), { timeout: 3000 });
     await vi.waitFor(() => expect(container.textContent).toContain('已达上限'));
-    expect([...container.querySelectorAll('button')].some((b) => b.title === '添加参考音频（最多 3 段）')).toBe(false);
+    expect([...container.querySelectorAll('button')].some((b) => b.title === '从资产中选择 / 从节点添加素材')).toBe(false);
   });
 
   it('失效来源（生成中）保留连线并提示原因阻止发送；移除后恢复发送', async () => {

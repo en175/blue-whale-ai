@@ -221,6 +221,8 @@ export default function CanvasPage() {
   const [assetPickResult, setAssetPickResult] = useState<{ ts: number; assetId: string; ref: CanvasGalleryRef } | null>(null);
   /** 画布音频节点选取结果（ts 驱动注入音频对话框参考音频） */
   const [audioPickResult, setAudioPickResult] = useState<{ ts: number; item: AudioRefItem } | null>(null);
+  const [audioAssetPickResult, setAudioAssetPickResult] = useState<{ ts: number; items: AudioRefItem[] } | null>(null);
+  const [audioAssetPickTarget, setAudioAssetPickTarget] = useState<{ nodeId: string | null; seed: number | undefined } | null>(null);
   /** AI 音乐面板 @ 选中结果（ts 驱动注入 MusicDialog 参考音频，IKFCKS） */
   const [musicPickResult, setMusicPickResult] = useState<{ ts: number; item: AudioRefItem } | null>(null);
   /** 角色库弹窗状态 */
@@ -487,7 +489,7 @@ export default function CanvasPage() {
   const [showAssetsPicker, setShowAssetsPicker] = useState(false);
   /** 资产选择弹窗的打开来源（决定 mediaTypes 过滤与确认后的去向）：
    *  toolbar 画布工具栏（全类型落画布）/ videoDraft 视频草稿面板（落画布+按槽位连线）/ imageDialog 图片 dock / agentPanel Agent 面板 */
-  const [assetsPickerTarget, setAssetsPickerTarget] = useState<'toolbar' | 'videoDraft' | 'imageDialog' | 'agentPanel'>('toolbar');
+  const [assetsPickerTarget, setAssetsPickerTarget] = useState<'toolbar' | 'videoDraft' | 'imageDialog' | 'audioDialog' | 'agentPanel'>('toolbar');
   /** 打开资产选择弹窗（记录来源入口，确认时按来源路由） */
   const openAssetsPicker = (target: typeof assetsPickerTarget) => {
     setAssetsPickerTarget(target);
@@ -1724,6 +1726,15 @@ export default function CanvasPage() {
       setPickTarget(null);
       imagePanelHiddenRef.current = true;
       return;
+    }
+    if (pickMode === 'audio' && pickTarget === 'audio') {
+      if (node.type === 'mediaNode') {
+        const error = audioRefSourceError(node);
+        if (error) { showToast('warn', error); return; }
+      } else if (node.type === 'textNode' && !audioDraftId) {
+        showToast('warn', '文本参考需要绑定生成节点');
+        return;
+      }
     }
     // IKFCXE：音频草稿面板的「到节点选择」选中文本卡 → 建立来源→草稿连线（与画布拖线同一关系）；
     // 绑定以 audioDraftId 为准（seed 可能残留旧草稿值）；拖线（connectPair）对音频目标走 addCanvasEdge
@@ -3148,6 +3159,33 @@ export default function CanvasPage() {
       nodeIds.forEach((nid) => addCanvasEdge(nid, videoDraftId, role));
       return;
     }
+    if (target === 'audioDialog') {
+      // 弹窗确认只能接纳到打开时的面板，切换/关闭/生成中均不创建来源或连线。
+      if (!showAudioDialog || !audioAssetPickTarget || audioAssetPickTarget.nodeId !== audioDraftId
+        || audioAssetPickTarget.seed !== audioSeed?.ts || (audioDraftId && isGeneratingNode(audioDraftId))) return;
+      const audios = selectedAssets.filter(a => a.type === 'audio');
+      if (!audioDraftId) {
+        setAudioAssetPickResult({ ts: Date.now(), items: audios.map(a => ({
+          id: `asset-${a.id}`, kind: 'audio', name: assetDisplayName(a), src: a.url,
+          source: 'canvas', assetId: a.id,
+        })) });
+        return;
+      }
+      const current = [...audioMediaRefsOf(audioDraftId, edgesRef.current, mediaNodesRef.current).refs];
+      const accepted: AssetRecord[] = [];
+      for (const asset of audios) {
+        const id = String(asset.id);
+        const error = checkAddAudioRef(id, current);
+        if (error) { showToast('warn', error); continue; }
+        current.push({ nodeId: `asset-${id}`, assetId: id, url: asset.url, name: assetDisplayName(asset) });
+        accepted.push(asset);
+      }
+      if (!accepted.length) return;
+      const nodeIds = placeAssetsOnCanvas(accepted, { reuseExisting: true });
+      if (!nodeIds) { showToast('error', '项目未就绪，请稍后重试'); return; }
+      nodeIds.forEach(id => addCanvasEdge(id, audioDraftId));
+      return;
+    }
     if (target === 'imageDialog') {
       const images = selectedAssets.filter((a) => a.type === 'image');
       if (images.length === 0) return;
@@ -4243,57 +4281,6 @@ export default function CanvasPage() {
     if (!audioDraftId) return;
     if (!validateAudioRefConnect(nodeId, audioDraftId)) return;
     addCanvasEdge(nodeId, audioDraftId);
-  };
-
-  /** 面板本地上传即时接纳（IKFDG2）：上传成功取得持久 Asset 身份后建来源卡片（画布已有同身份
-   *  节点则复用）并连线到当前音频草稿，随画布自动保存落盘，无需发送生成；上传或接纳失败明确
-   *  提示，不建立有效引用。自由模式不经此路径（无目标可连线，保持面板本地暂存）。 */
-  const adoptAudioLocalFile = async (draftId: string, file: File): Promise<boolean> => {
-    const refs = audioMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current).refs;
-    const limitMsg = checkAddAudioRef(undefined, refs);
-    if (limitMsg) {
-      showToast('warn', limitMsg);
-      return false;
-    }
-    let done: UploadCompleteData;
-    try {
-      done = await uploadAssetFile(file, { projectId: currentId || undefined });
-    } catch (err) {
-      showToast('error', isFileRejected(err) ? err.message : `「${file.name}」上传失败，请重试`);
-      return false;
-    }
-    // 上传期间连线可能变化：按最新连线重新推导查重（含 md5 命中同内容），不建第二条线也不重复建卡
-    const dupMsg = checkAddAudioRef(done.asset_id, audioMediaRefsOf(draftId, edgesRef.current, mediaNodesRef.current).refs);
-    if (dupMsg) {
-      showToast('warn', dupMsg);
-      return false;
-    }
-    // 接纳期间草稿可能被删除：无目标则放弃建卡并明确提示（素材已入资产库，可在资产库再次选用）
-    if (!mediaNodesRef.current.some((n) => n.id === draftId)) {
-      showToast('warn', `「${file.name}」已上传，但目标草稿已被移除，未建立引用`);
-      return false;
-    }
-    const nodeIds = placeAssetsOnCanvas(
-      [{
-        id: done.asset_id,
-        type: 'audio',
-        url: done.url,
-        width: null,
-        height: null,
-        duration: done.duration ?? null,
-        size: done.size ?? null,
-        source: 'uploaded',
-        model: null,
-        created_at: null,
-      } as AssetRecord],
-      { reuseExisting: true },
-    );
-    if (!nodeIds) {
-      showToast('error', '项目未就绪，请稍后重试');
-      return false;
-    }
-    addCanvasEdge(nodeIds[0], draftId);
-    return true;
   };
 
   /** 视频跟随输入框模式门控（IKFC1T）：按「实际成为当前目标参考」的媒体集合判定（连线 +
@@ -6087,13 +6074,20 @@ export default function CanvasPage() {
             onToast={(type, msg) => showToast(type, msg)}
             canvasMedia={canvasMedia}
             onPickFromCanvas={() => { setPickMode('audio'); setPickTarget('audio'); }}
+            onPickFromAssets={() => {
+              audioPanelHiddenRef.current = true; // 来源切换不因刚选过的素材节点而隐藏目标面板
+              setPickMode(null); setPickTarget(null);
+              setAudioAssetPickTarget({ nodeId: audioDraftId, seed: audioSeed?.ts });
+              openAssetsPicker('audioDialog');
+            }}
+            externalAssetPick={audioAssetPickResult}
+            onAssetPickConsumed={() => setAudioAssetPickResult(null)}
             externalPick={audioPickResult}
             pickMode={pickMode === 'audio'}
             draftRefs={audioDraftRefItems}
             draftRefInvalid={audioDraftMediaRefs?.invalid.length ? audioDraftMediaRefs.invalid : undefined}
             onRemoveDraftRef={audioDraftId ? ((nodeId) => handleRemoveAudioRef(audioDraftId, nodeId)) : undefined}
             onAddCanvasRef={audioDraftId ? handleAddAudioCanvasRef : undefined}
-            onAdoptLocalFile={audioDraftId ? ((file) => adoptAudioLocalFile(audioDraftId, file)) : undefined}
             mentionItems={atMentionItems.filter((item) => item.id !== audioDraftId)}
             onMentionCanvas={handleAudioAtMention}
             attachments={audioDraftAttachments}
@@ -6160,6 +6154,8 @@ export default function CanvasPage() {
           mediaTypes={
             assetsPickerTarget === 'imageDialog'
               ? [...PANEL_REF_MEDIA_TYPES.image.types]
+              : assetsPickerTarget === 'audioDialog'
+                ? [...PANEL_REF_MEDIA_TYPES.audio.types]
               : assetsPickerTarget === 'videoDraft'
                 ? videoAssetPickRole === 'first' || videoAssetPickRole === 'last'
                   ? ['image']
