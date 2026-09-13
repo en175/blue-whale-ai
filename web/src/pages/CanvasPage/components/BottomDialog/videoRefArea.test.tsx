@@ -9,8 +9,10 @@ import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
 /* IKDMQS 视频草稿绑定模式：模式与角色槽渲染 / 能力约束 / 来源菜单 / 组合冲突 /
    生成中只读 / 移除参考与禁用本地上传。PromptRefEditor 打桩为 textarea（IKFA1O 编辑器替换）。 */
 
-const { fetchGenerationModels } = vi.hoisted(() => ({
+const { fetchGenerationModels, editorPendingCalls } = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(),
+  /** IKFCKQ：缩略图 @ 按钮走 insertRefAtPending（记忆光标路径），桩记录调用供断言 */
+  editorPendingCalls: [] as Array<{ kind: string; id: string }>,
 }));
 
 vi.mock('@/api/generation', () => ({
@@ -27,7 +29,7 @@ vi.mock('../PromptRefEditor', async () => {
       useImperativeHandle(ref, () => ({
         insertRefAtMention: () => {},
         consumeMentionForPendingInsert: () => {},
-        insertRefAtPending: () => {},
+        insertRefAtPending: (key: { kind: string; id: string }) => { editorPendingCalls.push(key); },
         dismissMention: () => {},
         replaceRefAt: () => {},
         clear: () => {},
@@ -83,7 +85,7 @@ const noFrameModel: GenerationModel = {
   features: { ...baseFeatures, first_frame: false, last_frame: false, first_last_frame: false },
 };
 
-const ref = (id: string, mediaType: 'image' | 'video' = 'image'): VideoMediaRef => ({
+const ref = (id: string, mediaType: 'image' | 'video' | 'audio' = 'image'): VideoMediaRef => ({
   nodeId: id,
   url: `http://img/${id}.png`,
   name: `图${id}`,
@@ -169,6 +171,7 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   fetchGenerationModels.mockResolvedValue([fullModel]);
   vi.clearAllMocks();
+  editorPendingCalls.length = 0;
 });
 
 afterEach(async () => {
@@ -181,9 +184,10 @@ describe('IKDMQS 草稿绑定模式渲染', () => {
     await renderDialog({ mode: 'keyframe', mediaRefs: {
       reference: [], first: ref('f1'), last: ref('f2'),
     } });
-    const roles = [...mountNode.querySelectorAll('[data-testid="dock-video-ref"] [data-role]')]
-      .map((n) => n.getAttribute('data-role'));
-    expect(roles).toEqual(['first', 'last']);
+    // IKFCKQ：共享缩略图角色徽标（首帧/尾帧按角色标识，不参与数字编号）
+    const badges = [...mountNode.querySelectorAll('[data-testid="dock-video-ref"] [data-testid="ref-thumb-badge"]')]
+      .map((n) => n.textContent);
+    expect(badges).toEqual(['首帧', '尾帧']);
     expect(menuItem('首尾帧')).toBeTruthy();
     expect(slotButton('添加图片参考（从资产中选择 / 到节点选择 / 角色库）')).toBeUndefined();
     expect(mountNode.querySelector('input[type="file"]')).toBeNull();
@@ -265,7 +269,8 @@ describe('IKDMQS 角色显式指定与移除', () => {
 
   it('移除参考回调携带来源节点 id（父级断开连线）', async () => {
     await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1') } });
-    const removeBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除（断开连线）"]')!;
+    // IKFCKQ：× 为共享缩略图按钮（title=移除），走既有断开连线回调
+    const removeBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]')!;
     await act(async () => { removeBtn.click(); });
     expect(handlers.onRemoveVideoRef).toHaveBeenCalledWith('f1');
   });
@@ -282,10 +287,11 @@ describe('IKDMQS 组合冲突与只读', () => {
     expect(handlers.onSend).not.toHaveBeenCalled();
   });
 
-  it('生成中只读：参考可见但无添加/移除入口，发送禁用并提示', async () => {
+  it('生成中只读：参考可见但无添加/移除/@ 入口，发送禁用并提示', async () => {
     await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1')] }, status: 'generating' });
     expect(mountNode.querySelector('[data-testid="dock-video-ref"]')).toBeTruthy();
-    expect(mountNode.querySelector('button[title="移除（断开连线）"]')).toBeNull();
+    expect(mountNode.querySelector('button[title="移除"]')).toBeNull();
+    expect(mountNode.querySelector('button[title="插入引用"]')).toBeNull();
     expect(slotButton('添加图片参考（从资产中选择 / 到节点选择 / 角色库）')).toBeUndefined();
     expect(mountNode.textContent).toContain('生成中，参数与连线只读');
     expect(sendButton().disabled).toBe(true);
@@ -302,5 +308,51 @@ describe('IKDMQS 组合冲突与只读', () => {
     const [, opts] = handlers.onSend.mock.calls[0]!;
     expect(opts.modelId).toBe('m-full');
     expect(opts.mode).toBe('keyframe');
+  });
+});
+
+/* IKFCKQ：视频面板参考栏接入共享缩略图——三类媒体形态与编号口径 /
+   @ 按钮记忆光标插入 / material 项移除草稿参考 / 音频时长透传预览 */
+describe('IKFCKQ 共享缩略图接入', () => {
+  it('普通参考按类型独立编号（图片N/视频N/音频N 圆钮仅数字），媒体形态按 kind 渲染', async () => {
+    await renderDialog({ mode: 'all', mediaRefs: {
+      reference: [ref('m1'), ref('a1', 'audio'), ref('v1', 'video'), ref('m2')],
+    } });
+    const thumbs = [...mountNode.querySelectorAll('[data-testid="dock-video-ref"]')];
+    expect(thumbs).toHaveLength(4);
+    // 编号与正文标签同源：图片 1、音频 1、视频 1、图片 2（类型独立连续编号）
+    const badges = thumbs.map((t) => t.querySelector('[data-testid="ref-thumb-badge"]')?.textContent);
+    expect(badges).toEqual(['1', '1', '1', '2']);
+    expect(thumbs[0]!.querySelector('img')).toBeTruthy();
+    expect(thumbs[1]!.querySelector('video')).toBeNull();
+    expect(thumbs[1]!.querySelector('svg')).toBeTruthy();
+    expect(thumbs[2]!.querySelector('video')).toBeTruthy();
+    expect(thumbs[0]!.querySelector('img')!.getAttribute('alt')).toBe('图m1');
+  });
+
+  it('缩略图 @ 按钮走 insertRefAtPending 记忆光标路径（媒体身份 asset_ref）', async () => {
+    await renderDialog({ mode: 'all', mediaRefs: { reference: [ref('m1')] } });
+    const atBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="插入引用"]')!;
+    await act(async () => { atBtn.click(); });
+    expect(editorPendingCalls).toEqual([{ kind: 'asset_ref', id: 'a-m1' }]);
+  });
+
+  it('首尾帧模式：帧槽 @ 按钮同样开放，角色徽标不参与数字编号', async () => {
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1') } });
+    const thumb = mountNode.querySelector('[data-testid="dock-video-ref"]')!;
+    expect(thumb.querySelector('[data-testid="ref-thumb-badge"]')!.textContent).toBe('首帧');
+    const atBtn = thumb.querySelector<HTMLButtonElement>('button[title="插入引用"]')!;
+    await act(async () => { atBtn.click(); });
+    expect(editorPendingCalls).toEqual([{ kind: 'asset_ref', id: 'a-f1' }]);
+  });
+
+  it('角色库 material 项：× 走移除 material 回调（操作草稿 data，非断连线）', async () => {
+    await renderDialog({ mode: 'all', mediaRefs: {
+      reference: [{ ...ref('mat1'), materialId: 'asset-x1' }],
+    } });
+    const removeBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]')!;
+    await act(async () => { removeBtn.click(); });
+    expect(handlers.onRemoveVideoRef).not.toHaveBeenCalled();
+    expect(handlers.onRemoveMaterialRef).toHaveBeenCalledWith('asset-x1');
   });
 });

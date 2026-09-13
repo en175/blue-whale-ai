@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { typePromptRefText } from './testing/promptRefEditor';
-import bottomDialogStyles from './components/BottomDialog/index.module.css';
 
 /* IKDLQF 接线测试：连线受控化（水合恢复/自动保存签名）、图片面板附件展示、
    目标节点提交的保存串行化与 target_node_id 携带。
@@ -426,10 +425,9 @@ describe('IKDLQG 视频目标接线', () => {
       media.data.onGenVideo('v1');
     });
 
-    // 面板打开即展示当前附件（来源标题 + 正文预览）
-    await vi.waitFor(() => expect(container.textContent).toContain('文本附件（1）'));
-    expect(container.textContent).toContain('故事文案');
-    expect(container.textContent).toContain('一只蓝鲸在海里');
+    // 面板打开即展示当前附件（IKFCKQ：FileText 缩略图进参考栏，标题在缩略图 title）
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1));
+    expect(container.querySelector('[data-testid="dock-text-ref"]')!.getAttribute('title')).toBe('故事文案');
 
     // 模型能力就位后，空提示词 + 非空附件正文即可发送（契约：附件可单独驱动生成）
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
@@ -473,8 +471,8 @@ describe('IKDLQG 视频目标接线', () => {
       media.data.onReEdit('v1');
     });
 
-    await vi.waitFor(() => expect(container.textContent).toContain('文本附件（1）'));
-    expect(container.textContent).toContain('故事文案');
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1));
+    expect(container.querySelector('[data-testid="dock-text-ref"]')!.getAttribute('title')).toBe('故事文案');
 
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     await act(async () => {
@@ -496,8 +494,8 @@ describe('IKDLQG 视频目标接线', () => {
     });
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
-    // 无目标节点：不展示附件区，空提示词保持发送禁用（无附件语义）
-    expect(container.textContent).not.toContain('文本附件');
+    // 无目标节点：不展示附件缩略图，空提示词保持发送禁用（无附件语义）
+    expect(container.querySelector('[data-testid="dock-text-ref"]')).toBeNull();
     expect(sendButton().disabled).toBe(true);
     expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
@@ -506,91 +504,11 @@ describe('IKDLQG 视频目标接线', () => {
 
 /* IKDLQH 多附件排序接线：面板重排回调 → 该目标文本附件边原地重排（其他边相对位置不变）→
    自动保存/提交前落盘上送新顺序。面板用真实 BottomDialog 实现。
-   IKFCKN：图片面板旧「文本附件（N）」区块（含上移/下移）整体下线，图片面板排序用例随之移除，
-   排序能力的补位由 T5 拖拽排序切片承接；本组保留视频面板（BottomDialog）驱动。
+   IKFCKN：图片面板旧「文本附件（N）」区块（含上移/下移）整体下线，图片面板排序用例随之移除。
+   IKFCKQ：视频面板同样接入共享缩略图，上移/下移入口随独立区块下线，视频面板排序用例移除；
+   排序能力的补位由 T5 拖拽排序切片承接。
    注：handleReorderAttachments 的「快照与连线不一致不重排」守卫仍在（服务防御），
-   但现存 UI 已无该路径（图片面板排序入口下线；视频面板自 IKDMQS 统一草稿绑定后实时跟随、
-   无快照不一致场景），待 T2/T5 面板交互定稿时一并处置。 */
-
-/** 两个文本节点连入视频目标 v1 */
-function seedMultiVideoDoc() {
-  canvasDocMock.current = {
-    doc: {
-      id: 11,
-      version: 3,
-      viewport: { x: 0, y: 0, zoom: 1 },
-      nodes: [
-        { id: 't1', type: 'textNode', position: { x: 0, y: 0 }, data: { title: '甲', text: '正文甲' } },
-        { id: 't2', type: 'textNode', position: { x: 40, y: 40 }, data: { title: '乙', text: '正文乙' } },
-        {
-          id: 'v1',
-          type: 'mediaNode',
-          position: { x: 200, y: 0 },
-          data: { src: 'http://vid/v1.mp4', mediaType: 'video', fileName: '目标视频', assetId: 'a9', jobId: 'j1', draftModelId: 'm-test', draftSize: '2k', draftRatio: '1:1' },
-        },
-      ],
-      edges: [
-        { id: 'e1', source: 't1', target: 'v1' },
-        { id: 'e2', source: 't2', target: 'v1' },
-      ],
-    },
-    assets: {
-      a9: { asset_id: 9, type: 'video', access_url: 'http://vid/v1.mp4', width: 100, height: 100 },
-    },
-    refetch: () => Promise.resolve([]),
-    acceptDoc: vi.fn(),
-  };
-}
-
-/** 面板附件项按 DOM 顺序取标题（dialogStyles 为对应面板 CSS 模块） */
-function panelAttachmentTitles(dialogStyles: Record<string, string>) {
-  return [...container.querySelectorAll(`.${dialogStyles.attachmentItem}`)].map(
-    (el) => el.querySelector(`.${dialogStyles.attachmentTitle}`)!.textContent,
-  );
-}
-function panelMoveButton(dialogStyles: Record<string, string>, index: number, direction: '上移' | '下移') {
-  return [
-    ...container
-      .querySelectorAll(`.${dialogStyles.attachmentItem}`)
-      [index]!.querySelectorAll<HTMLButtonElement>('button'),
-  ].find((b) => b.getAttribute('title') === direction)!;
-}
-const edgePairs = (list: Array<{ source: string; target: string }>) =>
-  list.map((e) => `${e.source}->${e.target}`);
-
-describe('IKDLQH 多附件排序接线', () => {
-  it('视频面板重排：末项上移后提交，落盘新顺序并携带 target_node_id', async () => {
-    seedMultiVideoDoc();
-    await renderPage();
-
-    const media = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1');
-    await act(async () => {
-      media.data.onGenVideo('v1');
-    });
-    await vi.waitFor(() => expect(container.textContent).toContain('文本附件（2）'));
-    expect(panelAttachmentTitles(bottomDialogStyles)).toEqual(['甲', '乙']);
-    await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
-
-    await act(async () => {
-      panelMoveButton(bottomDialogStyles, 1, '上移').dispatchEvent(
-        new MouseEvent('click', { bubbles: true, cancelable: true }),
-      );
-    });
-    expect(panelAttachmentTitles(bottomDialogStyles)).toEqual(['乙', '甲']);
-    expect(edgePairs(flowProps.current.edges)).toEqual(['t2->v1', 't1->v1']);
-
-    await act(async () => {
-      sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    expect(apiMocks.saveCanvasDoc.mock.invocationCallOrder[0]!).toBeLessThan(
-      apiMocks.createGenerationJob.mock.invocationCallOrder[0]!,
-    );
-    expect(edgePairs(apiMocks.saveCanvasDoc.mock.calls[0]![1].edges)).toEqual(['t2->v1', 't1->v1']);
-    expect(apiMocks.createGenerationJob.mock.calls[0]![1].target_node_id).toBe('v1');
-  });
-});
+   但现存 UI 已无该路径（两侧面板排序入口均已下线），待 T5 拖拽交互定稿时一并处置。 */
 
 
 describe('IKDL9U review text input consistency', () => {

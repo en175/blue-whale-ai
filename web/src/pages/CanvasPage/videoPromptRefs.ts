@@ -18,6 +18,8 @@ export interface VideoLabelMap {
   labelOf: (id: string) => string | null;
   /** 当前参考集合的提交投影（帧在前、reference 保序）：编译/一致性核对用 */
   refItems: VideoPromptRefItem[];
+  /** 普通参考的类型内数字编号（IKFCKQ 缩略图圆钮与 label 同源派生；帧角色与失效身份不在其中） */
+  numberMap: Map<string, number>;
 }
 
 const TYPE_LABELS: Record<VideoPromptRefItem['type'], string> = {
@@ -48,6 +50,7 @@ export function videoLabelMapOf(refs: VideoMediaRefs, mode: string): VideoLabelM
     refItems.push({ id: refIdOf(item), role: 'reference', type: item.mediaType });
   }
   const labels = new Map<string, string>();
+  const numberMap = new Map<string, number>();
   const typeCounters = new Map<VideoPromptRefItem['type'], number>();
   for (const item of refItems) {
     if (!modeAccepts(mode, item.role, item.type)) continue;
@@ -61,7 +64,8 @@ export function videoLabelMapOf(refs: VideoMediaRefs, mode: string): VideoLabelM
     }
     const next = (typeCounters.get(item.type) ?? 0) + 1;
     typeCounters.set(item.type, next);
+    numberMap.set(item.id, next);
     labels.set(item.id, `${TYPE_LABELS[item.type]}${next}`);
   }
-  return { labelOf: (id) => labels.get(id) ?? null, refItems };
+  return { labelOf: (id) => labels.get(id) ?? null, refItems, numberMap };
 }
