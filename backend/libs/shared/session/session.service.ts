@@ -5,7 +5,7 @@ import {
   loadGenerationCredentialSecret,
   openGenerationCredential,
   sealGenerationCredential,
-} from "@blue-whale/core";
+} from "@lib/core";
 import { redisConnectionOptions } from "@lib/shared/rate-limit/redis-connection.js";
 
 /** 会话 7 天滑动过期（Redis TTL）。 */

@@ -4,7 +4,7 @@ import {
   SCENE_CARD_WIDTH,
   type CostReservationSnapshot,
   type Rect,
-} from "@blue-whale/core";
+} from "@lib/core";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { transactionWithUniqueRetry } from "./conversation-repo.js";

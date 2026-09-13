@@ -9,7 +9,7 @@ import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, F
 import { sanitizeHtml } from '@/utils/sanitize';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import styles from './index.module.css';
-import { PROMPT_TEXT_LIMITS } from '../../../../../../packages/contracts/src/prompt-text-limits';
+import { PROMPT_TEXT_LIMITS } from '@lib/contracts/prompt-text-limits';
 
 /** 文字节点最大字数（按纯文本计，含粘贴） */
 const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;

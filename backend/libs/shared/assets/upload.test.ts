@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DomainError, RESOURCE_NOT_FOUND_CODE } from "@blue-whale/contracts";
+import { DomainError, RESOURCE_NOT_FOUND_CODE } from "@lib/contracts";
 
 import {
   handleCompleteAsset,

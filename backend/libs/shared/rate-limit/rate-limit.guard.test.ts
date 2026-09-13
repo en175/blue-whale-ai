@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { RATE_LIMITED } from "@blue-whale/contracts";
+import { RATE_LIMITED } from "@lib/contracts";
 import { RateLimitGuard } from "./rate-limit.guard.js";
 import type { RateLimitOptions } from "./decorators/rate-limit.decorator.js";
 

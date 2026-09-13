@@ -8,8 +8,8 @@ import {
   Query,
   UseGuards,
 } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
-import { createLogger } from "@blue-whale/core/logging";
+import { NewApiError } from "@lib/core";
+import { createLogger } from "@lib/core/logging";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
 import { AccountService } from "@lib/shared/account/account.service.js";

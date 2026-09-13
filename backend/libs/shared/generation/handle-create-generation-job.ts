@@ -16,8 +16,8 @@ import {
   ok,
   type TextAttachmentSnapshot,
   previewSourceSchema,
-} from "@blue-whale/contracts";
-import { composeTextAttachmentPrompt, extractTextNodeText } from "@blue-whale/core";
+} from "@lib/contracts";
+import { composeTextAttachmentPrompt, extractTextNodeText } from "@lib/core";
 import {
   DEFAULT_MAX_REFERENCE_IMAGES,
   type CanvasRepo,
@@ -25,7 +25,7 @@ import {
   type GenerationCommandRepo,
   type ModelCapabilityRepo,
   type ProjectRepo,
-  type WorkerRepo,
+  type AssetOwnershipOps,
 } from "@lib/shared/persistence/index.js";
 
 import type { GenerationCostEstimator } from "./cost-estimator.js";
@@ -744,7 +744,7 @@ interface GenerationDeps {
   /** IKDLQF：携带 target_node_id 时于接纳当下读取最新画布推导有序文本附件。 */
   canvas: Pick<CanvasRepo, "getByProject">;
   /** IKE7JP：提交时复用 worker resolveInputAssets 查参考素材存在性/类型（归属逻辑单份）。 */
-  assets: Pick<WorkerRepo, "resolveInputAssets">;
+  assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
   /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额；缺省沿用旧行为（0 + dev）。 */
   costEstimator?: GenerationCostEstimator;
 }

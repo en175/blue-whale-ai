@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { NewApiError } from "@blue-whale/core";
-import { RATE_LIMITED } from "@blue-whale/contracts";
+import { NewApiError } from "@lib/core";
+import { RATE_LIMITED } from "@lib/contracts";
 import type { Request } from "express";
 import { RateLimiter } from "./rate-limiter.js";
 import {

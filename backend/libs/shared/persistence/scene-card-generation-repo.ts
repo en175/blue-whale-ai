@@ -4,13 +4,13 @@ import type {
   FrozenGenerationParameters,
   ProviderPromptAsset,
   VideoReferenceMode,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import {
   canonicalizeJsonValue,
   referenceModeToRequiredFeature,
   validateVideoReferenceConfiguration,
-} from "@blue-whale/contracts";
-import type { CostReservationSnapshot } from "@blue-whale/core";
+} from "@lib/contracts";
+import type { CostReservationSnapshot } from "@lib/core";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";

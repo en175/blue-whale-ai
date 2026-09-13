@@ -1,7 +1,7 @@
 // IKBQEE / ADR-0078：账号域错误投影单测——网关英文/中文 message 归一为账号域数值码 + 中文。
 import { describe, expect, it } from "vitest";
 
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 import { projectAccountError } from "./change-password-error.js";
 
 describe("projectAccountError", () => {

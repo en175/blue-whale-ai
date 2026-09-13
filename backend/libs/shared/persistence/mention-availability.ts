@@ -4,7 +4,7 @@
 import type {
   MentionAvailability,
   MentionFailureReason,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 
 export interface MentionClassification {
   availability: MentionAvailability;

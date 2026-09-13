@@ -1,6 +1,6 @@
 import { BadRequestException, BadGatewayException, NotFoundException } from "@nestjs/common";
 import { z } from "zod";
-import { PROMPT_TEXT_LIMITS as limits, previewSourceSchema, type PromptPreviewSource } from "@blue-whale/contracts";
+import { PROMPT_TEXT_LIMITS as limits, previewSourceSchema, type PromptPreviewSource } from "@lib/contracts";
 import { agentServiceBaseUrl, agentServiceToken, agentTenantId } from "../../../apps/blue-whale/src/api/agent/agent-service-env.js";
 
 export function sourceKey(source: unknown): string | null {

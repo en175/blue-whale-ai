@@ -55,8 +55,8 @@ vi.mock("ioredis", () => ({
 }));
 
 import { Reflector } from "@nestjs/core";
-import { NewApiError, type NewApiLoginResult } from "@blue-whale/core";
-import { ACCOUNT_LOCKED } from "@blue-whale/contracts";
+import { NewApiError, type NewApiLoginResult } from "@lib/core";
+import { ACCOUNT_LOCKED } from "@lib/contracts";
 import type { Response } from "express";
 import type { AccountService } from "@lib/shared/account/account.service.js";
 import type { PrismaService } from "@lib/shared/prisma/prisma.service.js";

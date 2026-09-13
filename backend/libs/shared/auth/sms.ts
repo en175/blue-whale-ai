@@ -1,4 +1,4 @@
-import { signVolcengineRequest } from "@blue-whale/core";
+import { signVolcengineRequest } from "@lib/core";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 /** SMS provider 抽象 + 两个实现（对齐 Java SmsProvider / VolcengineSmsProvider / ConsoleSmsProvider）。 */

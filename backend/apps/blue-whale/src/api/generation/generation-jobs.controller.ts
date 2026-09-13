@@ -17,7 +17,7 @@ import {
   enqueueVideoGenerationJob,
 } from "@lib/shared/generation/video-queue.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
-import { ERROR_ENQUEUE_FAILED } from "@blue-whale/contracts";
+import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 

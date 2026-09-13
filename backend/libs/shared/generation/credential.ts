@@ -3,7 +3,7 @@ import {
   NewApiError,
   loadGenerationCredentialSecret,
   sealGenerationCredential,
-} from "@blue-whale/core";
+} from "@lib/core";
 
 /** 把请求方 sk-token 密封成 job 凭证（worker 解密后调网关）。未携带/非 sk- → 空。 */
 export function sealProviderCredential(

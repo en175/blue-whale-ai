@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 
 import { MATERIAL_ACTIONS, MaterialService } from "./material.service.js";
 

@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
-import { syncStoryboardPreviewSummary } from "./generation-worker-internals.js";
+import { syncStoryboardPreviewSummary } from "./storyboard-summary-repo.js";
 import { appendProjectEvent } from "./product-event-repo.js";
 
 /** 图片供应商为长调用：取消确认撤销本任务写入权，不依赖供应商支持中断。 */

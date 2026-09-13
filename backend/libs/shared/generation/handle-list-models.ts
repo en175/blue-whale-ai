@@ -1,4 +1,4 @@
-import { ok } from "@blue-whale/contracts";
+import { ok } from "@lib/contracts";
 import type { ModelCapabilityView } from "@lib/shared/persistence/index.js";
 
 import {

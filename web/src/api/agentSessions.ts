@@ -1,4 +1,4 @@
-import type { PromptPreviewSource } from '../../../packages/contracts/src/prompt-preview';
+import type { PromptPreviewSource } from '@lib/contracts/prompt-preview';
 /* ============================================
  * agentSessions 接口：Agent 会话（session 维度，唯一有 worker 执行 Run 的对话服务）
  * 基址 /api/agent/v1/projects/:id/sessions

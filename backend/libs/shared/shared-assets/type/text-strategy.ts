@@ -1,5 +1,5 @@
-import type { SaveSharedAssetRequest } from "@blue-whale/contracts";
-import type { SharedAssetTextSnapshot } from "@blue-whale/contracts";
+import type { SaveSharedAssetRequest } from "@lib/contracts";
+import type { SharedAssetTextSnapshot } from "@lib/contracts";
 import {
   sharedAssetSnapshotOf,
   stripHtml,

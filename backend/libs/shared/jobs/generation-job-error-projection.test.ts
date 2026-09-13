@@ -40,7 +40,7 @@ import {
   GENERATION_ERROR_NUMERIC_CODES,
   GENERATION_ERROR_UNKNOWN_NUMERIC_CODE,
   errorCodeToNumeric,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { messageFor, projectPublicError } from "./generation-job-error-projection.js";
 
 describe("error-codes", () => {

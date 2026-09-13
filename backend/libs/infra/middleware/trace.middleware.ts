@@ -20,7 +20,7 @@ import {
   TRACEPARENT_HEADER,
   runWithRequestContext,
   createLogger,
-} from "@blue-whale/core/logging";
+} from "@lib/core/logging";
 
 const traceLogger = createLogger("trace-middleware");
 

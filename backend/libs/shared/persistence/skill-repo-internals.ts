@@ -4,7 +4,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   agentRunPinSchema,
   type AgentRunPin,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 
 import type {
   SkillLibraryLang,
