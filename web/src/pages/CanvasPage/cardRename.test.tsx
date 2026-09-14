@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { typePromptRefText } from './testing/promptRefEditor';
 
 /* IKFA8X 卡片名称：四类卡片改名接线（名称 + 显式 customName 标记）/ 新建文本立即可改 /
    复制继承与独立 / 生成生命周期（首次生成、重新生成、失败重试、取消回退）保留自定义名、
@@ -316,9 +317,6 @@ function sendButton(): HTMLButtonElement {
   )!;
 }
 
-function promptTextarea(): HTMLTextAreaElement {
-  return container.querySelector('textarea')!;
-}
 /** 下载捕获：拦下 <a download> 的点击，读回浏览器将要保存的文件名（同组下载既有做法） */
 let downloadedName = '';
 function stubDownloadCapture() {
@@ -385,16 +383,17 @@ async function openVideoDraftPanel(): Promise<string> {
   return 'vd1';
 }
 
-/** 视频草稿面板内「到节点选择」：进入选取模式后点画布节点作为普通参考（同画布连线语义） */
-async function pickNodeIntoVideoPanel(nodeId: string, role: '图片' | '视频' = '图片') {
+/** 视频草稿面板内「从节点添加素材」（IKFE8U 统一入口）：进入选取模式后点画布节点作为普通参考（同画布连线语义） */
+async function pickNodeIntoVideoPanel(nodeId: string, _role: '图片' | '视频' = '图片') {
+  // IKFE8U：普通参考区单「+」统一入口，不再按媒体类型区分按钮（role 仅保留调用签名兼容）
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
-    (b.getAttribute('title') ?? '').startsWith(`添加${role}参考`),
+    b.getAttribute('title') === '从资产中选择 / 从节点添加素材',
   )!;
   await act(async () => {
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
   const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent === '到节点选择',
+    (b) => b.textContent === '从节点添加素材',
   )!;
   await act(async () => {
     item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -407,12 +406,7 @@ async function pickNodeIntoVideoPanel(nodeId: string, role: '图片' | '视频' 
 
 
 async function typePrompt(text: string) {
-  const textarea = promptTextarea();
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setter.call(textarea, text);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  await typePromptRefText(container, text);
 }
 
 beforeEach(() => {
@@ -615,12 +609,11 @@ describe('IKFA8X 生成生命周期保留自定义名', () => {
 
 describe('IKFA8Y 改名同步当前参考显示', () => {
   it.each(['列表选择', '画布点击'])('音频参考经%s选入后随源卡改名更新', async (entry) => {
-    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleAudioDialog(); });
-    const pick = container.querySelector('button[title="添加参考音频（最多 3 段）"]')!;
+    const pick = container.querySelector('button[title="从资产中选择 / 从节点添加素材"]')!;
     await act(async () => { pick.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const fromCanvas = [...container.querySelectorAll('button')].find((b) => b.textContent === '从画布选择')!;
+    const fromCanvas = [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材')!;
     await act(async () => { fromCanvas.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => {
       if (entry === '画布点击') flowProps.current.onNodeClick(mediaNode('aud'));
@@ -629,13 +622,15 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
         source.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       }
     });
-    expect(container.querySelector('button[title="播放：配乐.mp3"]')).not.toBeNull();
+    // IKFCKS：参考音频以共享缩略图展示（播放 chip 下线），名称承载在缩略图 title
+    const audioThumb = () => container.querySelector('[data-testid="audio-ref-thumb"]') as HTMLElement | null;
+    expect(audioThumb()?.getAttribute('title')).toBe('配乐.mp3');
 
     const assetId = mediaNode('aud').data.assetId;
     const src = mediaNode('aud').data.src;
     await renameVia('aud', 'media', '新配乐');
-    expect(container.querySelector('button[title="播放：新配乐"]')).not.toBeNull();
-    expect(container.querySelectorAll('button[title^="播放："]')).toHaveLength(1);
+    await vi.waitFor(() => expect(audioThumb()?.getAttribute('title')).toBe('新配乐'));
+    expect(container.querySelectorAll('[data-testid="audio-ref-thumb"]')).toHaveLength(1);
     expect(mediaNode('aud').data.assetId).toBe(assetId);
     expect(mediaNode('aud').data.src).toBe(src);
   });
@@ -648,13 +643,21 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
     await act(async () => {
       (mediaNode('img-a').data.onGenImage as (id: string) => void)('img-a');
     });
-    await vi.waitFor(() => expect(container.textContent).toContain('原附件标题'));
+    // IKFCKN：进栏后附件标题承载在文本缩略图 title（正文在悬停预览）
+    const textThumb = () => container.querySelector('[data-testid="dock-text-ref"]') as HTMLElement | null;
+    await vi.waitFor(() => expect(textThumb()?.getAttribute('title')).toBe('原附件标题'));
     const edges = flowProps.current.edges;
 
     await renameVia('t1', 'text', '新附件标题');
-    expect(container.textContent).toContain('新附件标题');
-    expect(container.textContent).not.toContain('原附件标题');
-    expect(container.textContent).toContain('正文');
+    await vi.waitFor(() => expect(textThumb()?.getAttribute('title')).toBe('新附件标题'));
+    // 正文快照不随改名变化：悬停预览仍展示原文
+    await act(async () => {
+      textThumb()!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => { setTimeout(resolve, 250); });
+    });
+    expect(document.querySelector('[data-testid="ref-thumb-preview"]')?.textContent).toContain('正文');
     expect(flowProps.current.edges).toEqual(edges);
   });
 

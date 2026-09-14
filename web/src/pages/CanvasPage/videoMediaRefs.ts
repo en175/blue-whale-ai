@@ -5,7 +5,7 @@
  * 角色随 edges JSON 原样持久化（服务端零改动，延续 IKDMQR）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
-import { cardNameOfNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
+import { baseSourceError, cardNameOfNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
 import { REF_LIMITS } from '@/utils/ref-overflow';
 
 /** 视频参考角色：reference 普通参考 / first 首帧 / last 尾帧 */
@@ -15,13 +15,20 @@ export type VideoRefRole = 'reference' | 'first' | 'last';
  *  与图片 Dock 同口径——能力侧约束由服务端校验兜底） */
 export const MAX_VIDEO_REFS = 3;
 
+/** 媒体类型归一（IKFE8U）：画布节点 data / 资产记录的 mediaType 收敛为参考三类型；
+ *  调用方已按类型过滤，未知值归图片与历史展示口径一致 */
+export function asVideoRefMediaType(type: unknown): 'image' | 'video' | 'audio' {
+  return type === 'video' ? 'video' : type === 'audio' ? 'audio' : 'image';
+}
+
 /** IKFC1T：目标是否存在任一有效媒体参考（普通参考或首尾帧；invalid 单列不计）——
  *  文生视频门控（enabledVideoFollowModes）与面板模式冲突判定共用谓词 */
 export const hasAnyMediaRef = (refs: VideoMediaRefs): boolean =>
   refs.reference.length > 0 || Boolean(refs.first || refs.last);
 
 /** 视频媒体参考项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入提交字段；
- *  materialId 非空表示角色库素材（asset- 前缀素材库 ID，提交走 *_material_id/referenceMaterials） */
+ *  materialId 非空表示角色库素材（asset- 前缀素材库 ID，提交走 *_material_id/referenceMaterials）；
+ *  duration 为来源节点回填的媒体时长（秒，IKFCKQ 音频缩略图预览卡片显示用，缺失不携带） */
 export interface VideoMediaRef {
   nodeId: string;
   url: string;
@@ -29,6 +36,7 @@ export interface VideoMediaRef {
   assetId: string;
   mediaType: 'image' | 'video' | 'audio';
   materialId?: string;
+  duration?: number;
 }
 
 /** 目标视频草稿的分组参考：首帧/尾帧各至多一项（连线时校验，推导时防御性取首条） */
@@ -158,20 +166,6 @@ export function readRefRole(edge: Edge): VideoRefRole {
   return role === 'first' || role === 'last' ? role : 'reference';
 }
 
-/** 来源有效性（不含媒体类型检查）：与图片参考同口径——待生成/生成中/失败/失效/上传中/无资产均不可用 */
-function baseSourceError(node: NonNullable<Node>): string | null {
-  const data = (node.data ?? {}) as Record<string, unknown>;
-  if (data.genStatus === 'draft') return '待生成的草稿不能作为参考';
-  if (data.genStatus === 'generating') return '生成中的卡片不能作为参考';
-  if (data.genStatus === 'failed' || data.genStatus === 'cancelled') return '生成失败的卡片不能作为参考';
-  if (data.assetMissing) return '素材已被删除';
-  const src = typeof data.src === 'string' ? data.src : '';
-  if (src.startsWith('blob:')) return '素材上传中，请稍候再选择';
-  if (!src) return '素材已被删除';
-  if (readAssetId(data) === undefined) return '素材未关联资产，无法作为参考';
-  return null;
-}
-
 /** 视频参考来源校验：返回 null 表示可用，否则为用户可读拒绝原因。
  *  有效性口径与图片参考一致（仅有效媒体结果）；普通参考接受图片与视频，首尾帧槽只接受图片。 */
 export function videoRefSourceError(node: Node | undefined, role: VideoRefRole): string | null {
@@ -226,6 +220,7 @@ export function videoMediaRefsOf(
       assetId,
       mediaType: data.mediaType as 'image' | 'video' | 'audio',
       materialId,
+      duration: typeof data.duration === 'number' && data.duration > 0 ? data.duration : undefined,
     };
     if (role === 'reference') refs.reference.push(item);
     else if (role === 'first') refs.first = item;

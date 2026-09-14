@@ -517,6 +517,10 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         edgeTypes={edgeTypes}
         // 中键（button 1）任意模式均可平移（IKD0JT A1 R2）；拖动模式左键也平移，选择模式左键留给框选
         panOnDrag={isDrag ? [0, 1] : [1]}
+        // 拖节点/连线/框选到边缘时不自动跟平移，画布只走手动平移规则
+        autoPanOnNodeDrag={false}
+        autoPanOnConnect={false}
+        autoPanOnSelection={false}
         // 滚轮=平移；缩放交给平台原生修饰键+滚轮与触控板捏合（库默认为滚轮缩放，此处刻意相反，见 ADR-0081）
         panOnScroll
         zoomOnScroll={false}

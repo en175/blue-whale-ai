@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { promptRefReadOnly, readPromptRefText, typePromptRefText } from './testing/promptRefEditor';
 
 /* IKDMQQ 图片生成草稿：侧栏建卡 / 重复创建 / 参数同步与水合恢复 / 原位提交回填 /
    生成中只读（面板 + 连线）/ 保存失败阻断生成与项目切换 / 失败保留卡片与原因。
@@ -283,18 +284,15 @@ function sendButton(): HTMLButtonElement {
   )!;
 }
 
-function promptTextarea(): HTMLTextAreaElement {
-  return container.querySelector('textarea')!;
+function promptTextarea(): HTMLElement {
+  const el = container.querySelector('[contenteditable]');
+  if (!el) throw new Error('PromptRefEditor 未挂载');
+  return el as HTMLElement;
 }
 
-/** React 受控 textarea 赋值 */
+/** PromptRefEditor（IKFA1M）整体替换文本 */
 async function typePrompt(text: string) {
-  const textarea = promptTextarea();
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setter.call(textarea, text);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  await typePromptRefText(container, text);
 }
 
 /** 点击侧栏图片入口后，画布上最新加入的草稿节点 */
@@ -421,10 +419,9 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
       flowProps.current.onNodeClick(draft);
     });
 
-    expect(promptTextarea().value).toBe('恢复的提示词');
-    // 连线文本附件按当前画布实时展示
-    await vi.waitFor(() => expect(container.textContent).toContain('文本附件（1）'));
-    expect(container.textContent).toContain('故事文案');
+    expect(readPromptRefText(container)).toBe('恢复的提示词');
+    // 连线文本附件按当前画布实时展示（IKFCKN：FileText 缩略图进参考栏）
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1));
     // 模型/比例/分辨率按草稿参数恢复
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     expect(container.textContent).toContain('1:1');
@@ -505,7 +502,7 @@ describe('IKDMQQ 原位提交与首次生成', () => {
     });
 
     // 面板只读：输入框与发送禁用
-    expect(promptTextarea().disabled).toBe(true);
+    expect(promptRefReadOnly(container)).toBe(true);
     expect(sendButton().disabled).toBe(true);
 
     // 向生成中节点新建连线被拦截
@@ -578,7 +575,7 @@ describe('IKDMQQ 原位提交与首次生成', () => {
     await act(async () => {
       flowProps.current.onNodeClick(failed);
     });
-    expect(promptTextarea().disabled).toBe(false);
+    expect(promptRefReadOnly(container)).toBe(false);
   });
 });
 

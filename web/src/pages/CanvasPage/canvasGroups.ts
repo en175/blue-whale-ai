@@ -24,6 +24,19 @@ export interface CanvasGroup {
 /** 组框成员最小数量（成组动作最少选中的节点数） */
 export const MIN_GROUP_MEMBERS = 2;
 
+/** 不可成组的资产卡类型：风格卡 / 角色卡 / 物体卡 / 环境卡 */
+const UNGROUPABLE_ASSET_KINDS = new Set(['style', 'character', 'object', 'environment']);
+
+/** 选区是否包含不可成组的卡片（风格卡、角色卡、物体卡、环境卡、商品卡） */
+export function selectionHasUngroupableCards(nodes: Node[]): boolean {
+  return nodes.some((n) => {
+    if (n.type === 'productNode') return true;
+    if (n.type !== 'assetNode') return false;
+    const kind = (n.data as { kind?: string } | undefined)?.kind;
+    return !!kind && UNGROUPABLE_ASSET_KINDS.has(kind);
+  });
+}
+
 /** 组框外扩留白（成员包围盒 → 底框可视边距） */
 export const GROUP_FRAME_PADDING = 48;
 

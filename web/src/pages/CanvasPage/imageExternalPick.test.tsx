@@ -7,10 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { AssetRecord } from '@/api/assets';
 import CanvasPage from './index';
+import { typePromptRefText } from './testing/promptRefEditor';
+import { REF_SOURCE_ENTRY_TITLE } from './components/RefSourceMenu';
 import dialogStyles from './components/ImageDialog/index.module.css';
 
 /* IKF5KE 自由生图面板参考选取事件的一次消费语义：
-   到节点选择/从资产中选择注入的参考在删除并关闭（或工具栏直接重建）后不得随旧事件重放；
+   从节点添加素材/从资产中选择注入的参考在删除并关闭（或工具栏直接重建）后不得随旧事件重放；
    本轮主动重选仍可加入；生成请求只携带本轮实际保留的参考。
    FlowCanvas/CanvasToolbar/AssetsPickerModal 打桩透出 props；ImageDialog 用真实实现。 */
 
@@ -117,7 +119,7 @@ vi.mock('@/api/assets', () => ({
   completeUpload: vi.fn(),
   fetchAllAssets: vi.fn(async () => []),
   fetchAssetDetail: vi.fn(),
-  linkAssetToProject: vi.fn(),
+  linkAssetToProject: vi.fn(async () => undefined),
 }));
 
 vi.mock('@/api/canvas', () => ({
@@ -201,15 +203,15 @@ async function renderPage() {
   });
 }
 
-/** 面板参考区预览图 alt 列表（自由面板渲染面板本地 files） */
+/** 面板参考区预览图 alt 列表（自由面板渲染面板本地 files；IKFCKK 起为共享缩略图，挂参考行内） */
 function refImages(): string[] {
-  return [...container.querySelectorAll<HTMLImageElement>(`.${dialogStyles.previewItem} img`)].map(
+  return [...container.querySelectorAll<HTMLImageElement>(`.${dialogStyles.previewRow} img`)].map(
     (img) => img.alt,
   );
 }
 
 function panelOpen(): boolean {
-  return container.querySelector('textarea') !== null;
+  return container.querySelector('[contenteditable]') !== null;
 }
 
 /** 工具栏打开/重建自由生图面板 */
@@ -220,23 +222,23 @@ async function openFreePanel() {
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 }
 
-/** 面板来源菜单：进入「到节点选择」选取模式 */
+/** 面板来源菜单：进入「从节点添加素材」选取模式 */
 async function enterPickMode() {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.getAttribute('title') === '从资产中选择 / 到节点选择',
+    (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
   )!;
   await act(async () => {
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
   const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent === '到节点选择',
+    (b) => b.textContent === '从节点添加素材',
   )!;
   await act(async () => {
     item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
 }
 
-/** 画布点击图片节点 m1（到节点选择命中） */
+/** 画布点击图片节点 m1（从节点添加素材命中） */
 async function pickNodeM1() {
   const m1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')!;
   await act(async () => {
@@ -247,7 +249,7 @@ async function pickNodeM1() {
 /** 面板来源菜单：「从资产中选择」确认回填 */
 async function pickFromAssets(assets: AssetRecord[]) {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.getAttribute('title') === '从资产中选择 / 到节点选择',
+    (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
   )!;
   await act(async () => {
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -282,12 +284,7 @@ async function closePanel() {
 }
 
 async function typePrompt(text: string) {
-  const textarea = container.querySelector('textarea')!;
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setter.call(textarea, text);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  await typePromptRefText(container, text);
 }
 
 async function clickSend() {
@@ -385,14 +382,15 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
     expect(refImages()).toEqual(['素材图一']);
   });
 
-  it('从资产中选择在草稿绑定模式下不注入面板本地参考，重开后亦不重放', async () => {
+  it('从资产中选择加入草稿参考，删除后重开不重放', async () => {
     await renderPage();
     await openFreePanel();
-    // 1f2f498d 起工具栏入口先建草稿卡，面板为绑定模式（mediaRefs 存在）时 ImageDialog 跳过外部注入路径，
-    // 「从资产中选择」暂无面板内效果（产品缝隙待决策）；本用例锁定现状并保留 IKF5KE 防重放验证
+    // 绑定模式经父级建立参考连线；删除后不能由旧选取事件再次注入。
     await pickFromAssets([
       { id: 7, type: 'image', url: 'http://img/asset7.png', width: 100, height: 100, duration: null, source: null, model: null, created_at: null },
     ]);
+    expect(refImages()).toEqual(['asset7.png']);
+    await removeFirstRef();
     expect(refImages()).toEqual([]);
 
     await closePanel();

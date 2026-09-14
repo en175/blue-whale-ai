@@ -154,8 +154,8 @@ export interface GenerationCardBlock {
   shotTitle: string;
   /** 时间范围，如 0-4s */
   timeRange?: string;
-  /** 画面描述 */
-  visual: string;
+  /** 画面描述。只有 V3 旧卡有；V4 起画面并进了提示词（IKEV0K）。 */
+  visual?: string;
   /** 分镜提示词 */
   prompt: string;
   /** 素材引用（@名称）。保留给旧数据与纯文本场景；有身份的引用走 assetRefItems。 */
@@ -170,6 +170,8 @@ export interface GenerationCardBlock {
   targetMedia?: 'image' | 'video';
   /** 画幅，如 `16:9`（`generation_suggestions.aspect_ratio`） */
   aspectRatio?: string;
+  /** 这张卡按哪套写法编的，如 `Seedance 2.5`（批次级的 `target_model`，每张卡都标）。 */
+  targetModel?: string;
   /** 单镜时长秒数原值（`duration_seconds`）。与 timeRange 并存：那个是累加出的区间，这个是本镜自己的长度。 */
   durationSeconds?: number;
 }
@@ -232,17 +234,27 @@ export interface SessionRun {
   /** 终态真实用量；缺失时状态行退回按字符数估算。 */
   token_usage?: unknown;
   context_capacity?: unknown;
+  /**
+   * 这一轮要写生成卡、但没写出来（IKEV0V）。只在聊天里改卡时出现：那一轮照常 completed，
+   * 只是没有新卡，侧边栏还挂着上一版——不把这句显示出来，用户会把旧卡当成这次改出来的。
+   * 确认后首次写卡失败不走这里，那一轮是 failed，失败说明在 `failure` 里。
+   */
+  prompt_card_failure?: { code?: string; message?: string } | null;
 }
 
 /* ---- 生成卡批次（agent 侧 Prompt Card Revision Schema V3 的原样投影） ----
  * 这里刻意保留 agent 的字段名与结构，不在传输层改形状：翻译成侧边栏卡片模型的动作
  * 集中在 useAgentSession 的映射函数里，只有一处需要跟着协议变。 */
 
-/** 单镜头（V3 $defs.shotCard） */
+/** 单镜头（V4 $defs.shotCard） */
 export interface PromptCardShot {
   shot_no: number;
   title: string;
-  frame_description: string;
+  /**
+   * 画面描述。卡结构 V4 起删除（IKEV0K）：每一镜只留一段提示词，画面、时长、口播字幕都写在里面。
+   * 只有 V3 的旧卡还带着它。
+   */
+  frame_description?: string;
   prompt_text: string;
   asset_bindings: { asset_ref_id: string; role?: string; strength?: string; note?: string }[];
   generation_suggestions?: {
@@ -271,6 +283,32 @@ export interface PromptCardRevisionPayload {
   overview: string;
   shots: PromptCardShot[];
   assets: PromptCardAssetProvenance[];
+  /**
+   * 这一批提示词是按哪套写法编的（F32）。服务端按用户确认的出片路线填，模型不经手。
+   *
+   * 粒度到路线为止（`Seedance 2.5` / `Seedream`），不是目录里具体那一行——按 F34 它**不下传
+   * 生成面板**，用户最后在面板里点哪一行是他的事。只做展示与核对。老卡没有这一项。
+   */
+  target_model?: { family: string; version?: string };
+}
+
+/** 一个修订版：快照的 active_revision 与按版本号读取接口返回的元素是同一个形状 */
+export interface PromptCardRevision {
+  revision_id: string;
+  card_id: string;
+  authoring_run_id?: string;
+  revision_number: number;
+  schema_version: number;
+  payload: PromptCardRevisionPayload;
+}
+
+/** 修订版的身份与出处，不带正文（IKEV0V）。正文用 fetchPromptCardRevisions 按版本号取。 */
+export interface PromptCardRevisionSummary {
+  revision_id: string;
+  revision_number: number;
+  /** 写这一版的那一轮：卡挂到 source_run_id 与它相同的那条助手消息下面 */
+  authoring_run_id: string;
+  created_at: string;
 }
 
 /** 快照里的生成卡组：一个 Session 一组，active_revision 是当前生效版本 */
@@ -279,14 +317,86 @@ export interface PromptCardRecord {
   session_id?: string;
   active_revision_id?: string;
   revision_count?: number;
-  active_revision?: {
-    revision_id: string;
-    card_id: string;
-    authoring_run_id?: string;
-    revision_number: number;
-    schema_version: number;
-    payload: PromptCardRevisionPayload;
-  } | null;
+  active_revision?: PromptCardRevision | null;
+  /**
+   * 这组卡的每一版，旧的在前（IKEV0V）。改过卡之后，上一版要留在写它的那一轮下面——PRD 要求
+   * 旧卡保留在对话历史中、刷新后仍可查看。老版本的 agent 不发这个字段。
+   */
+  revisions?: PromptCardRevisionSummary[];
+}
+
+
+/* ============ 方案卡（IKF3KE） ============ */
+
+/**
+ * 这次的提示词按哪套写法编——图片到家族，视频要到大版本（2.0 与 2.5 是两套写法）。
+ *
+ * 服务端按平台模型目录核过：不在「当前可用」里的写不进来。`reason` / `alternatives` **不在
+ * 卡上显示**——理由和取舍在对话正文里跟用户说更清楚，卡上只留他能核对的那一层。
+ */
+export interface SolutionExecutionRoute {
+  model_family: string;
+  model_version?: string;
+  reason?: string;
+  alternatives?: { route: string; tradeoff: string }[];
+}
+
+/**
+ * 出片参数：画幅、时长、分辨率。
+ *
+ * 值由模型从访谈里带出来，服务端按平台目录的值域核过——**用户判断不了「5.0 Pro 还是 4.5」，
+ * 但判断得了「30 秒」**，而平台上限只有 15 秒这件事，他有权在点确认之前看见。
+ * 没聊到的项整项不写，界面也就不显示。
+ */
+export interface SolutionDeliverySpec {
+  aspect_ratio?: string;
+  duration_seconds?: number;
+  resolution?: string;
+}
+
+/**
+ * 用户在任何一张生成卡被写出来之前，唯一读到并需要表态的东西。
+ *
+ * 八项，其中三项服务端保证非空（goal / target_media / assumptions）；
+ * 其余没聊到就整项不写，界面也就不显示——空壳小标题比没有更糟。
+ *
+ * `execution_route` 2026-09-12 起可选：它曾经是第四项必填，而必填逼出来的是模型凭记忆写的
+ * 模型名——服务端手里没有平台模型目录、核不了它，写错了也没有下游会拦（生成时用户在 dock
+ * 手动选，这个标注不下传）。绑目录之后由服务端按平台当前可用的模型填。
+ */
+export interface SolutionCard {
+  goal: string;
+  target_media: 'image' | 'video';
+  direction?: string;
+  constraints?: string[];
+  asset_roles?: { asset_ref_id: string; role: string }[];
+  assumptions: string[];
+  execution_route?: SolutionExecutionRoute;
+  delivery_spec?: SolutionDeliverySpec;
+  next_steps?: string;
+  /**
+   * 这张卡管的范围（决策十六）。没写就是整条；会话已经交付过卡之后再提的每一张都是续写，
+   * 只管接下来要追加的那一段或那几镜，`label` 是用户读到的「第 2 段」「补 1 镜」。
+   */
+  scope?: { kind: 'whole' | 'continuation'; label: string };
+}
+
+/** 方案卡所在的版本记录。一个会话一条血脉，一版一次提出或修改，同时最多一版 accepted。 */
+export interface RequirementUnderstanding {
+  understanding_id: string;
+  version: number;
+  session_id: string;
+  proposed_by_run_id: string;
+  target_media: 'image' | 'video';
+  proposed_summary: string;
+  /** 老版本（产卡门顺手提的那种）没有这一项，界面退回只显示摘要。 */
+  solution_card?: SolutionCard | null;
+  status: 'awaiting_confirmation' | 'accepted' | 'superseded';
+  accepted_summary?: string | null;
+  confirmation_evidence?: { action: 'confirm' | 'correct'; channel: string } | null;
+  created_at?: string;
+  updated_at?: string;
+  confirmed_at?: string | null;
 }
 
 /** 会话快照（水合入口） */
@@ -297,6 +407,11 @@ export interface SessionSnapshot {
   latest_terminal_run?: SessionRun | null;
   /** 生成卡正文只在快照里，事件只带 card_id / revision 引用，拿到事件后必须回查这里 */
   prompt_cards?: PromptCardRecord[];
+  /**
+   * 方案卡的全部版本，新的在前（IKF3KE）。刷新之后那张待确认的卡还要在、按钮还要能点，
+   * 所以它随快照回来，不另发一次请求。已确认或已作废的版本也在里面——它们在对话里置灰留着。
+   */
+  requirement_understandings?: RequirementUnderstanding[];
   event_cursor?: string;
 }
 
@@ -395,6 +510,34 @@ export function fetchSessionSnapshot(projectId: string, sessionId: string): Prom
   ).finally(() => snapshotPending.delete(key));
   snapshotPending.set(key, p);
   return p;
+}
+
+/** 按版本号读取接口一次最多接受的 id 数（agent 侧 MAX_REVISION_IDS_PER_READ）。 */
+const REVISION_IDS_PER_READ = 20;
+
+/**
+ * 按版本号取生成卡的历史修订 GET /projects/:id/sessions/:sid/prompt-card-revisions?revision_ids=（IKDOF0）。
+ *
+ * 快照只带当前生效的那一版正文；之前的版本要在这里取，否则改过一次卡，上一版就从对话里消失了
+ * （IKEV0V）。修订一旦提交就不会再变，调用方可以放心缓存。超过单次上限时分批取。
+ */
+export async function fetchPromptCardRevisions(
+  projectId: string,
+  sessionId: string,
+  revisionIds: string[],
+): Promise<PromptCardRevision[]> {
+  const batches: string[][] = [];
+  for (let i = 0; i < revisionIds.length; i += REVISION_IDS_PER_READ) {
+    batches.push(revisionIds.slice(i, i + REVISION_IDS_PER_READ));
+  }
+  const results = await Promise.all(
+    batches.map((ids) =>
+      sessionRequest<{ revisions?: PromptCardRevision[] }>(
+        `${agentPath('list_prompt_card_revisions', projectId, { session_id: sessionId })}?revision_ids=${encodeURIComponent(ids.join(','))}`,
+      ),
+    ),
+  );
+  return results.flatMap((result) => result.revisions ?? []);
 }
 
 /**
@@ -641,6 +784,59 @@ export function sendSessionMessage(
  *
  * 幂等：没有在跑的东西时返回成功而非 404。
  */
+/**
+ * 用户点了方案卡上的「确认」（IKF3KE）。
+ *
+ * 这一下同时做两件事：把这一版记成用户确认过的，并起一轮把生成卡写出来。返回里的
+ * `scheduling` 就是那一轮——界面据此接上流，不然它不知道该等谁。
+ */
+export function confirmSolutionCard(
+  projectId: string,
+  sessionId: string,
+  understandingId: string,
+  version: number,
+): Promise<{ understanding: RequirementUnderstanding; scheduling?: { state: string; run?: SessionRun } | null }> {
+  return sessionRequest(
+    agentPath('confirm_requirement_understanding', projectId, {
+      session_id: sessionId,
+      understanding_id: understandingId,
+      version: String(version),
+    }),
+    {
+      method: agentMethod('confirm_requirement_understanding'),
+      headers: { 'Idempotency-Key': newIdempotencyKey() },
+      body: JSON.stringify({ action_id: newIdempotencyKey() }),
+    },
+  );
+}
+
+/**
+ * 用户点了「取消」或「补充」：这一版作废。
+ *
+ * 一个动作两个按钮，差别只在 `note`：点「补充」时带上他写的话，它当普通消息进下一轮，模型据此
+ * 重提一版；点「取消」不带，服务端替他说一句「先不按这个方案来」。
+ */
+export function voidSolutionCard(
+  projectId: string,
+  sessionId: string,
+  understandingId: string,
+  version: number,
+  note?: string,
+): Promise<{ understanding: RequirementUnderstanding; scheduling?: { state: string; run?: SessionRun } | null }> {
+  return sessionRequest(
+    agentPath('void_requirement_understanding', projectId, {
+      session_id: sessionId,
+      understanding_id: understandingId,
+      version: String(version),
+    }),
+    {
+      method: agentMethod('void_requirement_understanding'),
+      headers: { 'Idempotency-Key': newIdempotencyKey() },
+      body: JSON.stringify({ action_id: newIdempotencyKey(), ...(note ? { note } : {}) }),
+    },
+  );
+}
+
 export function cancelSession(projectId: string, sessionId: string): Promise<unknown> {
   return sessionRequest(
     agentPath('cancel_session', projectId, { session_id: sessionId }),

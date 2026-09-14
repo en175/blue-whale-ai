@@ -33,6 +33,7 @@
 - 仅面板点击「生成」提交任务；建卡、编辑均不创建任务。提交先 `flushCanvasSave` 串行化落盘，失败则 toast「保存失败，请重试」并中止提交（沿用 IKDMQQ，保存失败暂停生成与项目切换已在 IKDMQQ 落地，本切片复用）。
 - 提交携带 `target_node_id = 草稿节点 id`。服务端 `target_node_id` 约定扩展：`type === "audio"` 允许携带；接纳时读取最新画布校验目标为 `mediaNode` 且 `mediaType === "audio"`，否则 400。
 - 音频任务不推导文本附件：目标校验块对音频不遍历文本连线、不冻结 `text_attachments`；`prompt` 为空时 400（音频无附件兜底，空描述即无效输入）。
+  - ⚠️ 修订（2026-09-13 [IKFCXE](2026-09-13-ikfcxe-audio-text-context-contract.md)）：「不推导文本附件、不冻结 `text_attachments」自 IKFCXE 起废止——音频草稿目标与图片/视频同构冻结文本附件；「`prompt` 为空时 400」继续有效。
 - 快照冻结：`generation_jobs.input` 落 `{ prompt, model_id, target_node_id, expected_output_count }`；执行与重试只读快照（沿用既有语义）。
 - 原位模式：目标节点 `draft: true` 时前端不新建 media-gen 占位节点，草稿节点原地 patch 为 `genStatus: "generating"`（保留 id、位置与连线）；成功结果回填同一节点（`assetId`/`src`/时长），清除 `draft` 标记，节点转为普通成品卡；`draftModelId` 保留为生成参数记录。节点数量、身份、位置、连线全程不变。
 - 创建失败回退：配额/401 回到 `genStatus: "draft"`（401 沿用登录恢复重试）；其他错误置 `genStatus: "failed"` + `errorText`，保留卡片、`draft` 标记与全部参数。任务执行失败同样保留。
@@ -42,6 +43,7 @@
 - `genStatus: "generating"` 的草稿身份卡：面板进入只读（描述输入、模型选择、发送均禁用），保留查看与节点上的既有「取消生成」入口。
 - 输入连线只读：`isGeneratingNode` 拦截（`onConnect` 与入边 remove 变更）已按 `genStatus` 通用判定，音频草稿生成中天然被拦。
 - 音频草稿对文本节点连线无附件语义：画布连线行为保持现状（可连线但不消费、面板不显示），任务输入不因连线改变。
+  - ⚠️ 修订（2026-09-13 [IKFCXE](2026-09-13-ikfcxe-audio-text-context-contract.md)）：文本连线自 IKFCXE 起具有附件语义并进入任务输入（冻结、组合、执行消费），本条废止。
 
 ## 验证
 

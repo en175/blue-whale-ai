@@ -79,7 +79,7 @@
 }
 
 /* IKA715：预览行保持换行；卡片高度自适应（.inputBox min-height），
- * 参考图增多时整卡自然增高，底部控件不被覆盖。不加 overflow，避免裁切 sourceMenu 弹出层。 */
+ * 参考图增多时整卡自然增高，底部控件不被覆盖。不加 overflow，避免裁切来源菜单弹出层。 */
 .previewRow {
   display: flex;
   align-items: flex-start;
@@ -87,117 +87,8 @@
   gap: var(--spacing-sm);
 }
 
-.previewItem {
-  position: relative;
-  width: 44.8px;
-  height: 44.8px;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid #333;
-  background-color: #2a2a2a;
-  flex-shrink: 0;
-}
-
-.previewItem img,
-.previewItem video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.previewPlaceholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #888;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.previewPlaceholder:hover {
-  color: #ddd;
-  background-color: #333;
-}
-
-/* 画布选取模式进行中：左上角图标高亮 */
-.previewPicking {
-  color: var(--color-accent-text, #4c6ef5);
-  border: 1px dashed var(--color-accent-text, #4c6ef5);
-}
-
-/* 左上角图标包裹层：菜单定位锚点 */
-.sourceWrap {
-  position: relative;
-}
-
-/* 菜单打开时的透明遮罩：点击外部关闭 */
-.menuOverlay {
-  position: fixed;
-  inset: 0;
-  z-index: 25;
-  background: transparent;
-}
-
-/* 「图片上传 / 到节点选择」弹菜单 */
-.sourceMenu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  min-width: 128px;
-  background-color: #262626;
-  border: 1px solid #363636;
-  border-radius: 10px;
-  padding: var(--spacing-xs);
-  z-index: 30;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-}
-
-.sourceMenuItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all var(--transition-fast);
-}
-
-.sourceMenuItem:hover {
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-hover);
-}
-
-.previewRemove {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  background-color: rgba(0, 0, 0, 0.6);
-  border: none;
-  cursor: pointer;
-  transition: background-color var(--transition-fast);
-}
-
-.previewRemove:hover {
-  background-color: rgba(229, 72, 77, 0.85);
-}
+/* IKFCKK：附件条已替换为共享 RefThumbnail（56×56 圆角 12），尾部「+」占位按钮
+ * 与来源菜单样式已迁至共享组件 RefSourceMenu（IKFE8T）。 */
 
 .topActions {
   position: absolute;
@@ -285,93 +176,6 @@
   font-size: 12px;
   color: var(--color-text-tertiary);
   line-height: 1.4;
-}
-
-/* ---- 连线文本附件（IKDLQF，只读） ---- */
-.attachments {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-  max-height: 160px;
-  overflow-y: auto;
-}
-
-.attachmentItem {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: var(--spacing-sm) var(--spacing-md);
-  background: #242424;
-  border: 1px solid #2c2c2c;
-  border-radius: 12px;
-}
-
-.attachmentTitle {
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--color-text-secondary);
-}
-
-.attachmentHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacing-sm);
-}
-
-.attachmentMoves {
-  display: flex;
-  gap: 2px;
-}
-
-.attachmentMove {
-  display: flex;
-  align-items: center;
-  border: none;
-  background: transparent;
-  padding: 2px;
-  border-radius: 4px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.attachmentMove:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  background: #2c2c2c;
-}
-
-.attachmentMove:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-
-.attachmentText {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-tertiary);
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.attachmentTextCollapsed {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-
-.attachmentToggle {
-  align-self: flex-start;
-  border: none;
-  background: transparent;
-  padding: 0;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.attachmentToggle:hover {
-  color: var(--color-text-primary);
 }
 
 /* ---- 底部状态栏 ---- */
@@ -679,4 +483,19 @@
   display: block;
   border: 1.5px solid currentColor;
   border-radius: 3px;
+}
+
+/* IKFA1M：正文编辑区（@ 菜单锚点）与参考编号角标 */
+.inputArea {
+  position: relative;
+  width: 100%;
+}
+
+/* @ 菜单 dock：脱出 .dialog 滚动框（200px 定高 + overflow，会裁剪上弹菜单），
+   挂在 .dialogWrap 层向上弹出（与 configPanel 同法，IKEOLP） */
+.mentionDock {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
 }
