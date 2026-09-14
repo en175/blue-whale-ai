@@ -336,3 +336,75 @@ describe('IKFE8V 自由音频面板资产接纳', () => {
     expect(audioThumbs()).toHaveLength(0);
   });
 });
+
+describe('IKFR51 音频文本参考', () => {
+  const imageRef: AudioRefItem = {
+    id: 'image-1', assetId: '701', kind: 'image', mediaType: 'image', source: 'canvas',
+    src: 'https://x/scene.png', name: '场景图', textNodeId: 'text-1',
+  };
+
+  async function mountRefs(draftRefs: AudioRefItem[], onSend = vi.fn(), onLocateTextSource = vi.fn()) {
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    await act(async () => root.render(createElement(AudioDialog, {
+      onClose: vi.fn(), onSend, onLocateTextSource, draftRefs, initialText: '生成环境音',
+    })));
+    return onSend;
+  }
+
+  it('文本带入图片显示真实缩略图和预览，保留来源定位与锁定', async () => {
+    const locate = vi.fn();
+    await mountRefs([imageRef], vi.fn(), locate);
+    const thumb = audioThumbs()[0];
+    expect(thumb.querySelector('img')?.getAttribute('src')).toBe(imageRef.src);
+    expect(thumb.dataset.locked).toBe('true');
+    expect(removeButton(imageRef.name)).toBeNull();
+    await act(async () => thumb.querySelector<HTMLButtonElement>('[title="此素材由文本索引提供，请修改来源文本"]')!.click());
+    expect(locate).toHaveBeenCalledWith('text-1');
+    await act(async () => thumb.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+    await act(async () => new Promise(resolve => setTimeout(resolve, 250)));
+    expect(document.querySelector('[data-testid="ref-thumb-preview"] img')?.getAttribute('src')).toBe(imageRef.src);
+  });
+
+  it.each([
+    { name: '图片与音频混用', images: 1, audios: 1, imageMax: 1, audioMax: 3, error: '音频与图片参考不可混用' },
+    { name: '图片超过分类上限', images: 2, audios: 0, imageMax: 1, audioMax: 3, error: '参考图最多 1 个' },
+    { name: '音频超过分类上限', images: 0, audios: 2, imageMax: 3, audioMax: 1, error: '参考音频最多 1 个' },
+    { name: '图片合法且多于音频上限', images: 2, audios: 0, imageMax: 3, audioMax: 1, error: null },
+    { name: '音频合法', images: 0, audios: 3, imageMax: 1, audioMax: 3, error: null },
+  ])('$name：按实际分类限制发送', async ({ images, audios, imageMax, audioMax, error }) => {
+    const model = (await fetchGenerationModels())[0];
+    fetchGenerationModels.mockResolvedValueOnce([{ ...model, features: { image_reference_max: imageMax, audio_reference_max: audioMax } }]);
+    const refs = [
+      ...Array.from({ length: images }, (_, i) => ({ ...imageRef, id: `image-${i}`, assetId: String(701 + i) })),
+      ...Array.from({ length: audios }, (_, i) => ({ ...CANVAS_REF, id: `audio-${i}`, assetId: String(801 + i) })),
+    ];
+    const onSend = await mountRefs(refs);
+    const send = container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!;
+    expect(send.disabled).toBe(error !== null);
+    if (error) expect(container.querySelector('[data-testid="audio-ref-overflow"]')?.textContent).toContain(error);
+    await act(async () => send.click());
+    expect(onSend).toHaveBeenCalledTimes(error ? 0 : 1);
+    if (!error) expect(onSend.mock.calls[0][2]).toEqual(refs);
+  });
+
+  it('切换模型后重新校验图片上限，恢复合法模型可发送', async () => {
+    const model = (await fetchGenerationModels())[0];
+    fetchGenerationModels.mockResolvedValueOnce([
+      { ...model, features: { image_reference_max: 2 } },
+      { ...model, model_id: 'strict', model_label: '严格模型', features: { image_reference_max: 1 } },
+    ]);
+    await mountRefs([imageRef, { ...imageRef, id: 'image-2', assetId: '702' }]);
+    const send = container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!;
+    const clickLabel = async (label: string) => act(async () => {
+      [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === label)!.click();
+    });
+    expect(send.disabled).toBe(false);
+    await clickLabel('测试音频模型');
+    await clickLabel('严格模型');
+    expect(send.disabled).toBe(true);
+    expect(container.textContent).toContain('参考图最多 1 个');
+    await clickLabel('严格模型');
+    await clickLabel('测试音频模型');
+    expect(send.disabled).toBe(false);
+  });
+});
