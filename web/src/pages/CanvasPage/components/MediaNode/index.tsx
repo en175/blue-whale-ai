@@ -93,6 +93,12 @@ interface MediaNodeData {
   size?: number;
   /** 生成参数透传的目标比例（如 "16:9"），仅决定占位形状，不作原始分辨率展示 */
   targetRatio?: string;
+  /** IKFM3S §4：「输入已更新」派生标记（渲染期注入，不持久化）：来源文本输入变化未被成功使用 */
+  inputStale?: boolean;
+  /** IKFM3S §4：第一条文本入边的来源文本卡 id（徽标定位入口） */
+  inputSourceNodeId?: string | null;
+  /** IKFM3S §6：定位来源文本卡（平移居中 + 选中高亮） */
+  onLocateInputSource?: (sourceNodeId: string) => void;
   /** 浏览器量得真实媒体尺寸后回填（缺失或不一致时才回调） */
   onMediaDims?: (id: string, dims: MediaDims) => void;
   onDelete?: (id: string) => void;
@@ -450,6 +456,22 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         </div>
         <span className={styles.titleMeta} title={titleMeta || undefined}>{titleMeta}</span>
       </div>
+      {/* IKFM3S §4：文本输入更新徽标（卡片右上角显眼提示；点击定位来源文本卡）。
+          放标题行外层避免 titleRow overflow 裁剪。 */}
+      {data.inputStale === true && (
+        <button
+          type="button"
+          className={`nodrag nopan ${styles.inputStaleBadge}`}
+          data-testid="input-stale-badge"
+          title="输入已更新：来源文本已修改，重新生成以使用最新输入"
+          onClick={(event) => {
+            event.stopPropagation();
+            if (data.inputSourceNodeId) data.onLocateInputSource?.(data.inputSourceNodeId);
+          }}
+        >
+          输入已更新
+        </button>
+      )}
       {nameError && <div role="alert" className="nodrag nopan">{nameError}</div>}
       <div className={`${styles.contentCard} ${isAudio ? styles.audioCard : ''}`} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
         {!data.isFirst && !isEmptyShell && (

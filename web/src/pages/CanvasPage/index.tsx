@@ -18,6 +18,7 @@ import {
   type VideoFollowMode,
 } from './followDialog';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError } from './mediaRefs';
+import { mergedImageRefsOf, imageTextIndexSendError, nextUsedInputState, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
 import { audioMediaRefsOf, audioRefSourceError, checkAddAudioRef, isAudioDraftNode } from './audioMediaRefs';
 import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
@@ -999,6 +1000,8 @@ export default function CanvasPage() {
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
           onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
           onMediaDims: handleMediaDims,
+          // IKFM3S §6：「输入已更新」徽标定位来源文本卡
+          onLocateInputSource: (sourceNodeId: string) => locateTextSource(sourceNodeId),
         };
         break;
       case 'productNode':
@@ -3541,6 +3544,10 @@ export default function CanvasPage() {
         // draftModelId/draftSize/draftRatio 保留为该卡的生成参数记录（再次编辑复制切片复用）
         draft: undefined,
       });
+      // IKFM3S §4：成功任务把快照冻结的文本输入签名回写目标（刷新持久、提示按签名派生清除）；
+      // 乱序保护（nextUsedInputState）：仅更新的 jobId 覆盖——旧任务成功不清除更晚编辑的提示。
+      const nextUsed = nextUsedInputState((node.data ?? {}) as Record<string, unknown>, detail.text_input_signature, jobId);
+      if (nextUsed) patchMediaNode(nodeId, nextUsed);
       if (pendingDeleteJobNodesRef.current.has(nodeId)) {
         // 删除等待终态期间任务抢先成功：停止删除保留作品，用户需要时再操作一次
         pendingDeleteJobNodesRef.current.delete(nodeId);
@@ -4402,15 +4409,30 @@ export default function CanvasPage() {
     [audioDraftId, edges, textNodes],
   );
 
-  /** 草稿绑定面板的图片媒体参考（IKDMQR）：按连线实时推导，Dock 显示即提交输入（同源）。
-   *  连线持久化后刷新/重开项目同样经此推导恢复展示；名称随来源卡片改名即时同步（IKFA8Y）。 */
+  /** 草稿绑定面板的图片媒体参考（IKDMQR 按连线推导 + IKFM3S §2 文本带入参考追加）：
+ *  直接参考在前、文本索引素材在后（同 assetId 去重保首见），Dock 显示即提交输入（同源）。
+ *  连线持久化后刷新/重开项目同样经此推导恢复展示；名称随来源卡片改名即时同步（IKFA8Y）。 */
   const imageDraftMediaRefs = useMemo(
     () => {
       if (!imageDraftId) return undefined;
-      return imageMediaRefsOf(imageDraftId, edges, mediaNodes);
+      return mergedImageRefsOf(imageDraftId, edges, [...mediaNodes, ...textNodes]);
     },
-    [imageDraftId, edges, mediaNodes],
+    [imageDraftId, edges, mediaNodes, textNodes],
   );
+  /** IKFM3S §3：文本索引发送校验（失效/类型/超限，与业务 API 同口径）——面板持续显示并阻止发送 */
+  const imageDraftTextIndexError = useMemo(
+    () => (imageDraftId ? imageTextIndexSendError(imageDraftId, edges, [...mediaNodes, ...textNodes], DEFAULT_IMAGE_REFERENCE_LIMIT) : undefined),
+    [imageDraftId, edges, mediaNodes, textNodes],
+  );
+  /** IKFM3S §6：定位来源文本卡（平移居中 + 选中高亮） */
+  const locateTextSource = useCallback((nodeId: string) => {
+    const target = findCanvasNode(nodeId);
+    if (!target) return;
+    const width = (target as Node & { measured?: { width?: number } }).measured?.width ?? 360;
+    const height = (target as Node & { measured?: { height?: number } }).measured?.height ?? 270;
+    setFocusViewport({ x: window.innerWidth / 2 - (target.position.x + width / 2), y: window.innerHeight / 2 - (target.position.y + height / 2), zoom: 1 });
+    setSelectRequest({ id: nodeId, ts: Date.now() });
+  }, []);
   const invalidImageMediaRefs = useMemo(() => {
     if (!imageDraftId) return [];
     return edges.filter(edge => edge.target === imageDraftId).flatMap(edge => {
@@ -5793,7 +5815,8 @@ export default function CanvasPage() {
     }
   };
 
-  /** 收集图片参考 assetId：绑定模式（IKDMQR 草稿 + IKDMQU 成品卡）按连线推导（与 Dock 显示同源）；
+  /** 收集图片参考 assetId：绑定模式（IKDMQR 草稿 + IKDMQU 成品卡）按连线推导（与 Dock 显示同源；
+   *  IKFM3S §2 含文本带入参考的合并推导，与后端权威并入同源）；
    *  其余入口（生成图片带入原图/资产卡等）沿用面板 files——有 assetId 直用，否则上传取 ID */
   const collectImageInputAssetIds = async (
     targetNodeId: string | undefined,
@@ -5805,7 +5828,11 @@ export default function CanvasPage() {
       (useEdgeRefs || textAttachmentsOf(targetNodeId).some(a => findCanvasNode(a.nodeId)?.data?.promptSource) || isImageDraftNode(mediaNodesRef.current.find((n) => n.id === targetNodeId)))
     ) {
       const ids: string[] = [];
-      for (const ref of imageMediaRefsOf(targetNodeId, edgesRef.current, mediaNodesRef.current)) {
+      for (const ref of mergedImageRefsOf(
+        targetNodeId,
+        edgesRef.current,
+        [...mediaNodesRef.current, ...textNodesRef.current],
+      )) {
         if (!ids.includes(ref.assetId)) ids.push(ref.assetId);
       }
       return ids;
@@ -5845,6 +5872,19 @@ export default function CanvasPage() {
     const targetNodeId = imageSeed?.targetNodeId;
     const projectId = currentId;
     if (!projectId) return;
+    // IKFM3S §3：文本索引发送校验（失效/类型/超限与业务 API 同口径，不能仅靠按钮禁用）
+    if (targetNodeId) {
+      const syncError = imageTextIndexSendError(
+        targetNodeId,
+        edgesRef.current,
+        [...mediaNodesRef.current, ...textNodesRef.current],
+        DEFAULT_IMAGE_REFERENCE_LIMIT,
+      );
+      if (syncError) {
+        showToast('warn', syncError);
+        return;
+      }
+    }
     const composedPrompt = composeImageSendPrompt(
       targetNodeId ? textAttachmentsOf(targetNodeId) : undefined,
       text,
@@ -6294,6 +6334,8 @@ export default function CanvasPage() {
             onRemoveMediaRef={
               imageDraftId ? (nodeId) => removeRefEdges(imageDraftId, nodeId) : undefined
             }
+            onLocateTextSource={locateTextSource}
+            textIndexError={imageDraftTextIndexError ?? undefined}
             onReorderMediaRefs={
               imageDraftId ? ((ids) => reorderTargetEdges(imageDraftId, ids)) : undefined
             }

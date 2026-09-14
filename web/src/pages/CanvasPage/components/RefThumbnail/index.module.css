@@ -163,3 +163,19 @@
 .thumb[data-strip-over='after'] {
   box-shadow: 2px 0 0 0 var(--color-accent-active);
 }
+
+/* IKFM3S：锁定条目（文本索引提供）的定位来源按钮——与移除同位，指向来源文本卡 */
+.actLocate {
+  top: 3px;
+  right: 3px;
+}
+
+.actLocate:hover {
+  background-color: rgba(59, 130, 246, 0.85);
+}
+
+/* IKFM3S：锁定条目（文本索引提供）可见标记——橙色虚线描边区分直接参考 */
+.thumbLocked {
+  outline: 1.5px dashed rgba(249, 115, 22, 0.85);
+  outline-offset: 1px;
+}

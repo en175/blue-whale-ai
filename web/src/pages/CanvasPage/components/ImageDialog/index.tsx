@@ -139,6 +139,10 @@ interface ImageDialogProps extends RefStripOrderProps {
   invalidMediaRefs?: Array<{ nodeId: string; name: string }>;
   /** 移除某个图片参考（IKDMQR）：携带来源节点 id，父级断开对应连线 */
   onRemoveMediaRef?: (sourceNodeId: string) => void;
+  /** IKFM3S：文本索引提供的锁定参考定位来源文本卡（平移居中 + 短暂高亮） */
+  onLocateTextSource?: (textNodeId: string) => void;
+  /** IKFM3S §3：文本索引发送校验错误（失效/类型/超限），面板持续显示并阻止发送 */
+  textIndexError?: string;
   /** 参考栏拖拽换位（IKFCKT）：连线模式媒体换位 = 按新顺序重排目标连入媒体边序（编号=边序派生自动重编号） */
   onReorderMediaRefs?: (orderedNodeIds: string[]) => void;
   /** 参考栏拖拽换位（IKFCKT）：文本附件换位 = 按新顺序重排文本连入边序（顺序即生成上下文拼接顺序） */
@@ -173,7 +177,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function ImageDialog({ onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, mentionItems: canvasMentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
+export default function ImageDialog({ onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, onLocateTextSource, textIndexError, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, mentionItems: canvasMentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {
   /** 结构化正文（IKFA1M）：文字与素材标签的片段序列；标签绑定稳定身份，编号按当前输入派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -367,6 +371,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     : selectedRatio && !ratioOptions.includes(selectedRatio)
       ? '原比例与当前配置不兼容，请重新选择比例'
     : invalidMediaRefs?.length ? '参考素材不可用，请调整参考后发送'
+    : textIndexError ? textIndexError
     : edgeRefs?.length && !currentGen.features.reference_image ? '当前模型不支持图片参考，请调整模型或参考'
     : edgeRefs && edgeRefs.length > Math.min(maxImages, currentGen.features.max_reference_images || maxImages)
       ? '参考图片数量超过模型支持上限，请调整参考'
@@ -737,7 +742,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
                     url={r.url}
                     name={r.name}
                     number={refsNumbering.get(r.assetId)}
-                    onRemove={!readOnly ? () => onRemoveMediaRef?.(r.nodeId) : undefined}
+                    locked={r.textNodeId != null}
+                    onLocate={r.textNodeId != null && onLocateTextSource ? () => onLocateTextSource(r.textNodeId!) : undefined}
+                    onRemove={!readOnly && r.textNodeId == null ? () => onRemoveMediaRef?.(r.nodeId) : undefined}
                     onInsertRef={!readOnly ? () => insertRefByKey(r.assetId) : undefined}
                     dragProps={stripDrag.itemProps(mixedStrip.index(i))}
                   />
