@@ -37,6 +37,16 @@ export function selectionHasUngroupableCards(nodes: Node[]): boolean {
   });
 }
 
+/** 选区是否包含待生成草稿或生成中节点（不可成组） */
+export function selectionHasUngroupableGenNodes(nodes: Node[]): boolean {
+  return nodes.some((n) => {
+    const data = n.data as { draft?: boolean; genStatus?: string } | undefined;
+    if (!data) return false;
+    if (data.draft === true) return true;
+    return data.genStatus === 'draft' || data.genStatus === 'generating';
+  });
+}
+
 /** 组框外扩留白（成员包围盒 → 底框可视边距） */
 export const GROUP_FRAME_PADDING = 48;
 

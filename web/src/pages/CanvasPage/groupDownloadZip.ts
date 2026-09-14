@@ -48,6 +48,33 @@ export async function blobToUint8Array(blob: Blob): Promise<Uint8Array> {
   return new Uint8Array(buf);
 }
 
+function bytesStartWith(bytes: Uint8Array, signature: number[]): boolean {
+  if (bytes.length < signature.length) return false;
+  return signature.every((b, i) => bytes[i] === b);
+}
+
+function asciiAt(bytes: Uint8Array, offset: number, text: string): boolean {
+  if (bytes.length < offset + text.length) return false;
+  for (let i = 0; i < text.length; i++) {
+    if (bytes[offset + i] !== text.charCodeAt(i)) return false;
+  }
+  return true;
+}
+
+/** 从文件头识别真实媒体 MIME，避免 zip 内条目扩展名与内容不符导致「格式错误」 */
+export async function sniffMediaMime(blob: Blob): Promise<string | undefined> {
+  const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+  if (bytesStartWith(head, [0xff, 0xd8, 0xff])) return 'image/jpeg';
+  if (bytesStartWith(head, [0x89, 0x50, 0x4e, 0x47])) return 'image/png';
+  if (bytesStartWith(head, [0x47, 0x49, 0x46, 0x38])) return 'image/gif';
+  if (asciiAt(head, 0, 'RIFF') && asciiAt(head, 8, 'WEBP')) return 'image/webp';
+  if (asciiAt(head, 0, 'RIFF') && asciiAt(head, 8, 'WAVE')) return 'audio/wav';
+  if (asciiAt(head, 4, 'ftyp')) return 'video/mp4';
+  if (bytesStartWith(head, [0x1a, 0x45, 0xdf, 0xa3])) return 'video/webm';
+  if (asciiAt(head, 0, 'ID3') || (head[0] === 0xff && (head[1] & 0xe0) === 0xe0)) return 'audio/mpeg';
+  return undefined;
+}
+
 /** 把若干文件打成无压缩 zip，一次下载即可带出全部素材 */
 export async function buildStoreZip(files: { name: string; data: Uint8Array }[]): Promise<Blob> {
   const locals: Uint8Array[] = [];
