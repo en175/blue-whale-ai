@@ -26,10 +26,15 @@ RUN npm ci
 WORKDIR /src
 # contracts 源码依赖 zod；装到仓库根 node_modules，tsc 从 backend/libs/contracts 上溯即可解析。
 RUN npm install zod@4.4.3 --no-package-lock --omit=dev
-# backend/libs/*/tsconfig.json extends ../../tsconfig.base.json；Vite 编这些文件时要读到仓库根这份。
+# backend/tsconfig.json extends ../tsconfig.base.json；Vite 编这些文件时要读到仓库根这份。
 COPY tsconfig.base.json tsconfig.json ./
 COPY backend/libs/contracts ./backend/libs/contracts
 COPY backend/libs/core ./backend/libs/core
+# backend/libs/** 下没有自带 tsconfig.json，rolldown 的 builtin:vite-transform 会从
+# /src/backend/libs/*/x.ts 逐级上溯找 tsconfig，落到 /src/backend/ 这一层。缺这份直接
+# 报 `Tsconfig not found /src/backend`（1312c474 把 packages/* 并入 backend/libs 时删掉了
+# 各包原带的 tsconfig.json，但这里没补上）。
+COPY backend/tsconfig.json ./backend/
 COPY web ./web
 
 WORKDIR /src/web
