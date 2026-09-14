@@ -1407,9 +1407,7 @@ export default function CanvasPage() {
         html: html ?? '',
         onDraftError: handleDraftError,
         toolMode,
-        onDelete: (id: string) => {
-          setTextNodes((prev) => prev.filter((n) => n.id !== id));
-        },
+        onDelete: (id: string) => removeCanvasNodes([id]),
         onChange: (id: string, html: string) => {
           setTextNodes((prev) =>
             prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n))
@@ -2364,9 +2362,7 @@ export default function CanvasPage() {
         textGen: true,
         onDraftError: handleDraftError,
         toolMode,
-        onDelete: (id: string) => {
-          setTextNodes((prev) => prev.filter((n) => n.id !== id));
-        },
+        onDelete: (id: string) => removeCanvasNodes([id]),
         onChange: (id: string, html: string) => {
           setTextNodes((prev) =>
             prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n)),
@@ -5355,9 +5351,7 @@ export default function CanvasPage() {
             data: {
               html: snapshot.html,
               toolMode,
-              onDelete: (id: string) => {
-                setTextNodes((prev) => prev.filter((n) => n.id !== id));
-              },
+              onDelete: (id: string) => removeCanvasNodes([id]),
               onChange: (id: string, html: string) => {
                 setTextNodes((prev) =>
                   prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n))
