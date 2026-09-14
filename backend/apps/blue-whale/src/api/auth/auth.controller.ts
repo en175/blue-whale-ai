@@ -1,7 +1,6 @@
 import { Body, Controller, Get, Headers, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
 import {
-  GenerationCredentialConfigurationError,
   NewApiError,
   type NewApiLoginResult,
 } from "@blue-whale/core";
@@ -94,7 +93,7 @@ export class AuthController {
     );
   }
 
-  /** 会话签发：new-api sk- 密封入 Redis，浏览器只拿 HttpOnly 会话 cookie。 */
+  /** 会话签发：new-api sk- 明文入 Redis（修正四：去密），浏览器只拿 HttpOnly 会话 cookie。 */
   private async establishSession(result: NewApiLoginResult): Promise<string> {
     if (result.userId == null || !result.username) {
       throw new NewApiError("账户服务响应异常", 502, "invalid_identity");
@@ -109,13 +108,7 @@ export class AuthController {
         sk: result.token,
       });
     } catch (error) {
-      if (error instanceof GenerationCredentialConfigurationError) {
-        throw new NewApiError(
-          "会话服务暂不可用",
-          503,
-          "session_service_unavailable",
-        );
-      }
+      // 修正四：createSession 不再 seal sk（明文存 Redis），无 GenerationCredentialConfigurationError。
       throw error;
     }
   }

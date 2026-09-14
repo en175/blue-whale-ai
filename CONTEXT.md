@@ -4,7 +4,7 @@
 TypeScript `agent-worker`、`generation-worker` 组成；三者属于同一模块化单体代码库。
 独立 `product-api` 进程已退役，浏览器业务 API 折进 Next.js Route Handlers（ADR-0059）。
 `blue_whale_api`（new-api 二开，Go，承担 LLM 网关与计费）已迁出至独立仓库 `blue-whale-api`（`hangzhou-xuanfu_1/blue-whale-api`），保持独立且不在本仓改造。
-`blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写 入（不约束按 ADR-0084 新建的 `worker-java` 生成执行服务——薄执行器，非旧服务复活）；
+`blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写 入（不约束按 ADR-0084 新建的 `worker-java` 生成执行服务——直连 DB 执行器，非旧服务复活）；
 `blue_whale_pay_web` 与 `blue_whale_pay_server`（Java 支付）已迁出至独立仓库 `blue-whale-pay`（`hangzhou-xuanfu_1/blue-whale-pay`），其中 server 冻结、web 单独迭代。范围以
 [ADR-0055](docs/adr/0055-prelaunch-typescript-unification-scope.md) 为准。
 
@@ -23,6 +23,21 @@ _Avoid_: 提示词版本历史、独立新卡、修改即生成
 **原卡重新生成**:
 用户手动发送节点编辑草稿，为同一个媒体节点生成替换素材的创作动作，不新增结果卡。
 _Avoid_: 再次编辑立即复制草稿、自动重新生成、提示词历史恢复
+
+**画布参考选取模式**:
+用户为当前生成目标从画布连续添加参考节点的交互状态，适用于图片、视频与音频生成面板；每次有效选取立即成为该目标的参考。
+模式只在本次交互期间持续，退出、刷新或切换画布后不恢复模式，已添加参考仍保留。
+_Avoid_: 普通画布多选、暂选后批量确认、刷新后恢复选取模式、Agent 对话引用
+
+**参考缩略图**:
+生成面板参考栏中已选素材的统一展示单元，图片/视频/音频/文本四类形态（后两类为图标占位），三态交互：默认显示编号圆钮（仅数字）、悬停浮出 × 删除与 @ 插入、悬停满 200ms 浮出放大预览。
+编号是派生值（身份在保序引用列表中的下标 + 1，按类型独立），删除或换位后紧凑重派生，与正文提及编号同源；× 仅断开当前引用、保留画布来源卡片。
+_Avoid_: 常驻删除按钮、底部「图片N」文字标签、独立于正文提及的编号体系、删除来源素材
+
+**悬浮放大预览**:
+悬停参考缩略图满 200ms 在其上方居中浮出的纯展示浮层：图片按原始宽高比放大、视频静音循环播放、音频显示名称与时长、文本显示正文；鼠标穿透、移出立即消失。
+它是缩略图三态的第三态，不承载任何交互，不遮挡 × 与 @ 按钮。
+_Avoid_: 可交互编辑的预览、模态遮罩、阻断参考栏操作的浮层
 
 ### Prompt 创作（IKDL9U 已确认目标，待实现）
 
@@ -53,6 +68,13 @@ _Avoid_: 始终回读节点最新内容的历史记录、文本修改自动重�
 用户将文本节点“添加到对话”时提供给 Agent 的当时正文，用于基于画布上的实际编辑继续讨论。
 Agent 据此修改得到新的 Prompt 预览，而不直接覆盖原文本节点。
 _Avoid_: 仅提供原始卡片版本指针、自动回写画布正文
+
+### Prompt 方案素材（IKE5G8 讨论中，已确认部分）
+
+**方案素材绑定**:
+Prompt 方案正文中的素材标签与具体素材之间的显式对应关系，是方案内容的一部分。
+它不同于生成目标的输入连线；方案用于目标时，绑定素材分别成为该目标的直接媒体输入。
+_Avoid_: 素材名称字符串、沿文本历史隐式携带媒体、应用即生成
 
 ### 既有领域术语
 
@@ -205,6 +227,12 @@ _Avoid_: 把工具包写成独立的 Provider Registry 运行时组件；把入�
 模型能力目录中一条能力的生成种类，仅四种：图片（image）、视频（video）、文生文（text）、
 音频（audio）。四种在管理目录中并列；一条能力的能力类型在创建后不可改。
 _Avoid_: 把音频生成当成视频特性；用 features.audio 表示音频模型（那是「视频带音轨」）；档位
+
+**运行模态（Generation Modality）**:
+图片能力档的两种工作方式：文生图（仅提示词）与图生图（提示词 + 参考图）。模态不是能力——
+同一档能力同时覆盖两种模态，任务创建时是否带参考图决定本次走哪种；一档能力若不支持参考图，
+就只有文生图一种模态。上游按模态拆分的模型名对用户不可见（详见 [ADR-0085](docs/adr/0085-catalog-input-modality-model-alias-and-per-model-prompt-length.md)）。
+_Avoid_: 把文生图 / 图生图各开一档能力；把模态当第五种能力类型；用开关决定模态（分流只由数据与输入驱动）
 
 **尺寸选项（Size Option）**:
 User 在图片或视频生成中选择的分辨率档，如 `1K` / `2K` 或 `720p`。它是目录提供的展示选择，
@@ -583,7 +611,7 @@ _Avoid_: PlanMessage 的 `asset://<mention_id>`（那是内部正文引用协议
 _Avoid_: 把素材库素材引用写进 PlanMessage 正文、把 PlanMessage mention 协议原样发给供应商
 
 **GenerationJob（生成任务）**:
-一次持久化的图片、视频或音频后台任务。任务归属于 Project，页面刷新、浏览器关闭或服务重启后，
+一次持久化的图片、视频、音频或音频提取（media_extract）后台任务。任务归属于 Project，页面刷新、浏览器关闭或服务重启后，
 已接纳状态与结果仍可恢复；同一请求或供应商回调重放不得产生重复任务、结果或费用。
 GenerationJob 可以随业务事务原子创建，但只能在事务提交后进入执行队列；事务内禁止直接调用生成供应商。
 Worker 通过短租约领取任务；租约过期后可由新 Worker 重新领取，旧 Worker 的迟到写入由 fence 拒绝。
@@ -635,6 +663,20 @@ Product API 对单个 AgentAdvance 的唯一正式接纳边界；每次推进最
 AssistantMessage，或一组完整有序的 PlanMessage。同一 AgentRun 可随多次推进拥有多个 RunCommit，
 精确重放必须返回该推进首次接纳的相同结果。
 _Avoid_: 按 AgentRun 限制只能提交一次；跨 AgentAdvance 拼接结果；把临时交付文本当作正式提交。
+
+### 生成执行（worker-java）
+
+**ClaimedJob（已领取任务）**:
+Worker 依租约接管一个 GenerationJob 执行责任的独享视图，是**单一概念**：公共核心（任务身份、input、
+租约凭证、取消信号）+ 按媒体类型的 payload 扩展。新增生成类型 = 扩展一种 payload 并注册进生命周期，
+不是再造一个领取概念；投影差异随 MQ 契约演化，不代表概念分叉。
+_Avoid_: 按媒体类型把领取投影当独立概念各修一套；用 ClaimedJob 反转 GenerationJob 的状态权威；
+在领取视图上累积产品规则（规则权威在 GenerationJob / backend 侧）
+
+**Finalize（终态收口）**:
+GenerationJob 连同副作用（结果资产、slot 结果、执行日志、项目事件）写入终态的单一动作；收口后状态
+不可再翻转，迟到写入由 fence 拒绝。收口是一套生命周期动作的按类型变体，差异只在 payload 组装。
+_Avoid_: 按媒体类型分叉各自的 complete/fail 语义；把收口拆成多个非原子写；用 Finalize 复活终态任务
 
 ### Agent 运行配置
 
@@ -894,7 +936,7 @@ _Avoid_: 用户 JWT、root、能力券、把铸券令牌拿来下充值单
 ### 技术栈边界
 
 **产品实现**:
-直接向用户交付产品能力的代码，包括 Next.js Web、浏览器业务 Route Handlers、独立 Agent / Generation Workers，以及共享领域、契约与持久化 packages。实现语言统一为 TypeScript；浏览器代码在浏览器运行，服务端使用 Node.js LTS；generation-worker 生成执行按 ADR-0084 为独立 Java 薄执行器服务，领域规则权威仍在 TypeScript 侧。
+直接向用户交付产品能力的代码，包括 Next.js Web、浏览器业务 Route Handlers、独立 Agent / Generation Workers，以及共享领域、契约与持久化 packages。实现语言统一为 TypeScript；浏览器代码在浏览器运行，服务端使用 Node.js LTS；generation-worker 生成执行按 ADR-0084 为独立 `worker-java` 执行服务（契约 IKEL4A 修正二：TS 只发任务、Java 做任务，交互面 = 数据库 + MQ），领域规则权威仍在 TypeScript 侧。
 _Avoid_: TypeScript 运行时、把浏览器代码描述成运行在 Node.js、把仓库内所有可执行文件都算作产品实现
 
 **工程协作控制面**:
