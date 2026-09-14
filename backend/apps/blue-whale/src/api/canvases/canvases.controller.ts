@@ -17,6 +17,11 @@ export class CanvasesController {
     return this.canvas.applyPreview(user.userId, projectId, body);
   }
 
+  @Post(":projectId/prompt-references")
+  referencePrompt(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string, @Body() body: unknown) {
+    return this.canvas.referencePrompt(user.userId, projectId, body);
+  }
+
   @Post(":projectId/conversation-quotes")
   createConversationQuote(
     @CurrentUser() user: AuthenticatedUser,

@@ -5,7 +5,7 @@ export {
   type CapabilityParamFailure,
   type GenerationParamCheckInput,
 } from "./capability-param-validation.js";
-export { previewSourceSchema, applyPreviewSchema, type PromptPreviewSource } from "./prompt-preview.js";
+export { previewSourceSchema, applyPreviewSchema, promptMentionSchema, validPromptMentions, type PromptPreviewSource, type PromptPreviewContent, type PromptMention, type PromptMaterial } from "./prompt-preview.js";
 export {
   legacyCardHistoryItemSchema,
   legacyMigrationFailureSchema,
@@ -26,7 +26,24 @@ export {
   type CanvasEdge,
   type TextAttachmentSnapshot,
 } from "./canvas-edges.js";
-export { PROMPT_TEXT_LIMITS, COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH } from "./prompt-text-limits.js";
+export { PROMPT_TEXT_LIMITS, COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, COMPOSED_AUDIO_PROMPT_MAX_LENGTH } from "./prompt-text-limits.js";
+export {
+  PROMPT_DOC_VERSION,
+  promptDocSchema,
+  promptDocSegmentSchema,
+  imageRefLabel,
+  textRefLabel,
+  docHasTextRef,
+  validatePromptDocRefs,
+  compilePromptDoc,
+  videoRefLabel,
+  validateVideoPromptDocRefs,
+  compileVideoPromptDoc,
+  type PromptDoc,
+  type PromptDocSegment,
+  type PromptDocRefFailure,
+  type VideoRefItem,
+} from "./prompt-doc.js";
 export {
   changePasswordRequestSchema,
   type ChangePasswordRequest,
@@ -274,3 +291,5 @@ export {
   type AddSharedAssetToProjectRequest,
   type AddSharedAssetToProjectResult,
 } from "./shared-asset.js";
+
+export { releaseRemovedPromptSources, promptBindingList, promptReferenceRequestSchema, promptBindingsSchema, promptPlanSnapshotSchema, type PromptBinding, type PromptInputSources, type PromptPlanSnapshot } from "./prompt-target.js";

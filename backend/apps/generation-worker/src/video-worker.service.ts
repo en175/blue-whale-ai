@@ -4,8 +4,6 @@ import { createWorkerRepo } from "@lib/shared/persistence/index.js";
 import { createLogger } from "@blue-whale/core/logging";
 import {
   loadGenerationCostConfig,
-  loadGenerationCredentialSecret,
-  openGenerationCredential,
   quotaToFen,
 } from "@blue-whale/core";
 import {
@@ -27,7 +25,6 @@ const logger = createLogger("generation-worker");
 export class VideoWorkerService {
   private readonly workerId = `generation-${hostname()}-${process.pid}`;
   private readonly baseUrl = process.env.NEW_API_BASE_URL ?? "";
-  private readonly credentialSecret = loadGenerationCredentialSecret();
   private readonly costConfig = loadGenerationCostConfig();
 
   constructor(private readonly prisma: PrismaService) {}
@@ -56,8 +53,7 @@ export class VideoWorkerService {
       createProvider: (token) =>
         createNewApiVideoTaskProvider({ baseUrl: this.baseUrl, token }),
       credentialVault: {
-        open: (ciphertext) =>
-          openGenerationCredential(ciphertext, this.credentialSecret),
+        open: (ciphertext) => ciphertext,
       },
       mediaRelay,
       scheduleNext: (id, delayMs) => enqueueVideoGenerationJob(id, { delayMs }),

@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionService } from "./session.service.js";
 
-const SECRET = "test-session-secret-1234567890";
 const TTL_SECONDS = 7 * 24 * 60 * 60;
 
 /** 内存版 ioredis（按 key 存字符串，记录 expire/set 调用）。vi.hoisted 保证 mock 提升时可见。 */
@@ -118,7 +117,6 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
   let redis: FakeRedis;
 
   beforeEach(() => {
-    process.env.GENERATION_CREDENTIAL_SECRET = SECRET;
     service = new SessionService();
     redis = (service as unknown as { redis: FakeRedis }).redis;
     redis.store.clear();
@@ -126,16 +124,15 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
   });
 
   afterEach(() => {
-    delete process.env.GENERATION_CREDENTIAL_SECRET;
+    vi.unstubAllEnvs();
   });
 
-  it("createSession 签发 sess_ 令牌、密封 sk- 写入（明文 sk 不出 Redis）", async () => {
+  it("createSession 签发 sess_ 令牌、明文 sk- 写入 Redis（修正四：不再密封）", async () => {
     const token = await service.createSession(BASE);
     expect(token).toMatch(/^sess_[A-Za-z0-9_-]+$/);
-    expect(token).not.toContain("sk-upstream-secret");
     const raw = [...redis.store.values()][0];
-    expect(raw).toContain("sealedSk");
-    expect(raw).not.toContain("sk-upstream-secret");
+    // 字段名与值均为明文（修正四）；断言 JSON 字段存在而非子串
+    expect(JSON.parse(raw)).toMatchObject({ sk: "sk-upstream-secret" });
     // 会话键 + 按用户索引键各一条
     expect(redis.store.size).toBe(2);
     expect(redis.store.has(`user_session:8:${hash(token)}`)).toBe(true);
@@ -202,11 +199,11 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
     expect(after?.needsRecheck).toBe(false);
   });
 
-  it("密封 sk- 损坏 → 返回 null 并删会话（不 503）", async () => {
+  it("sk- 缺失 → 返回 null 并删会话（不 503）", async () => {
     const token = await service.createSession(BASE);
     const key = `session:${hash(token)}`;
     const data = JSON.parse(redis.store.get(key)!);
-    data.sealedSk = "v1.invalid.invalid.invalid";
+    data.sk = null; // 修正四：明文 sk 为 null → 视为凭证缺失
     redis.store.set(key, JSON.stringify(data));
     expect(await service.resolveSession(token)).toBeNull();
     expect(redis.store.has(key)).toBe(false);

@@ -1,7 +1,7 @@
 # 素材库组落地设计（IKDE6X）
 
 > 需求：IKDE6X 人像库去分组与上传智能校验。本文档只覆盖**后端**素材库组相关设计。
-> 版本：v1（2026-09-08）。
+> 版本：**v2（2026-09-11，IKEXX8 修订）**——组查询由「全量走本地」改为**分流**（虚拟组读本地、真人组仍透传上游），撤回真人组镜像；v1（2026-09-08）见 git 历史。
 > 前置阅读：[`docs/api/material-library.md`](./material-library.md)（素材库透传镜像、上游信封）、[`docs/api/2026-09-07-material-association-api.md`](./2026-09-07-material-association-api.md)（素材关联改造 IKDJNZ）。
 
 > ⚠️ 排除项：**D2 上传智能校验后端不做**；**角色库弹窗前端逻辑不负责**；「从资产选择复制入库」= 纯前端动作，后端不做、覆盖判断由前端自主决定。
@@ -14,9 +14,9 @@
 
 1. **虚拟人像库去分组平铺**（D1）：虚拟人像库取消二级文件夹，素材平铺。对前端而言「虚拟组」不可见。
 2. **角色库弹窗**（D3）：视频生成选参考时，素材按文件类型（图片/视频/音频）平铺展示；真人人像保留分组。
-3. **组查询提速与可控**：组信息落本地表，查询走本地，不每次透传 newapi。
+3. **虚拟组查询提速与可控**（v2 收窄）：**虚拟组**信息落本地表、查询走本地，不每次透传 newapi；**真人组**仍以上游为唯一数据源、查询保持透传（真人组由刷脸认证流程序列生成、产品侧无建组入口，镜像必漂，v1 的真人组双向维护方案作废）。
 
-因此把**素材库组**落成本地表：本地为组主、上游备份、双向维护。
+因此：**写权威恒为上游**；本地表只维护**虚拟组镜像**（上游建组成功后落表），虚拟组读路径走本地。
 
 ---
 
@@ -94,11 +94,11 @@ model material_groups {
 
 ---
 
-## 3. 真人组：每用户可多个
+## 3. 真人组：不落本地表（v2 修订，原「本地镜像」方案撤回）
 
-- 每用户可有**多个**真人组，保留分组结构。
-- `cover_url` 封面图（真人组用），本地镜像，可空。
-- 沿用上游 `group-...` 组 id，本地落 `material_groups`（`kind=real, is_default=false`）。
+- 每用户可有**多个**真人组，保留分组结构——但数据源**只有上游**。
+- 真人组由刷脸认证流程在上游生成（`GetVisualValidateResult` 出 `GroupId`），产品侧无建组入口；v1 计划的真人组镜像没有可靠的写入钩子，镜像必漂，**撤回**。
+- 本地表 `kind=real` 列与 `cover_url` 保留（schema 不回滚），但当前无写入方；真人组查询走透传（见 §5）。
 
 ---
 
@@ -106,25 +106,29 @@ model material_groups {
 
 | 动作 | 上游 | 本地 | 说明 |
 |---|---|---|---|
-| 建组（虚拟默认） | `CreateAssetGroup` | 写 `material_groups`（virtual, is_default=1） | 见 §2.2 |
-| 建组（真人） | `CreateAssetGroup` | 写 `material_groups`（real） | 上游成功后本地镜像 |
-| 删除组 | `DeleteAssetGroup` | 软删 `material_groups`（is_delete=1） | 上游成功后本地同步删除 |
-| 改组名 | `UpdateAssetGroup` | 更新 `material_groups.name` | 双向维护 |
+| 建组（虚拟默认） | `CreateAssetGroup`（带 `GroupType:"AIGC"`） | 写 `material_groups`（virtual, is_default=1） | 见 §2.2；本地落表失败补偿删上游组 |
+| 删除组 | `DeleteAssetGroup`（先远程） | 软删 `material_groups`（is_delete=1，仅虚拟行有实体，真人=空操作） | 上游成功后本地同步删除 |
+| 建组（真人）/ 改组名 | 仅上游 | **不落/不同步（v2 撤回）** | 真人组不镜像；产品不支持改名，`UpdateAssetGroup` 不接 |
 
-**一致性原则**：组操作走上游为权威；本地表是备份/镜像，读路径为准。上游成功 → 本地同步；本地删除 → 上游也删。失败兜底：本地同步失败仅告警不阻断上游透传（对齐素材库「上游为权威」语义）。
+**一致性原则（v2）**：**写权威=上游，虚拟组读权威=本地**。上游 2xx → 本地同步；本地同步失败仅告警、不阻断透传（半程失败容忍，接受短暂漂移，不做分布式事务）。
 
 ---
 
-## 5. 组查询走本地
+## 5. 组查询分流（v2 重写：原「全量走本地」改为按类型分流）
 
-- **组查询接口改走本地 `material_groups` 表**，不再透传 newapi 的 `ListAssetGroups`。
-- 前端查询组（角色库弹窗按类型平铺、真人人像分组）由本地表返回，按 `kind` 过滤、`user_id` 归属隔离。
+全部复用 `POST /api/material/{Action}` 透传入口，**零新增路由**，请求/响应形状与上游完全一致（前端无感）：
+
+- `ListAssetGroups`：`Filter.GroupType==="AIGC"` → 读本地 `material_groups`（`kind=virtual` 未删，`user_id` 隔离，`gmt_create desc, id desc`，`PageNumber/PageSize` 分页 + `TotalCount`）；**其余一律透传上游**（无 Filter / `LivenessFace` / 陌生值，保守兜底）。
+- `GetAssetGroup`：`Id` 命中本地虚拟组 → 本地返回；未命中（真人组等）→ 透传上游。
+- 本地合成信封对齐上游实测形状（2026-09-11 样例）：`Result.Items[] = { Id, Name, GroupType:"AIGC", CreateTime, UpdateTime }`（时间 ISO8601 秒精度 Z）；`ResponseMetadata.RequestId` 本地造 `req_<uuid>`。
+- 存量：上游已有、本地无行的历史虚拟组**不回填**（用户裁定，2026-09-11）；真人组因透传上游天然无存量问题。
+- 素材读路径（同单扩展）：`/api/assets` 列表、单资产详情、`GET /api/projects/:id/snapshot` 的 assets 均成对返回 `material_id`/`material_group_id`（snake_case，未关联为 null）；access/content 与 Agent resolve 内部投影不加。
 
 ---
 
 ## 6. 相关现状（改造基线）
 
-- 素材库透传镜像：`backend/libs/shared/material/material.service.ts`（白名单 13 个 Action，含 `CreateAssetGroup/ListAssetGroups/GetAssetGroup/DeleteAssetGroup/UpdateAssetGroup`）。
+- 素材库透传镜像：`backend/libs/shared/material/material.service.ts`（白名单 12 个 Action，含 `CreateAssetGroup/ListAssetGroups/GetAssetGroup/DeleteAssetGroup/UpdateAssetGroup`）。
 - 关联旁路：`material.controller.ts`（`CreateAsset` 剥离 `SourceAssetId` + 成功回写 `material_id/material_group_id`；`DeleteAsset`/`DeleteAssetGroup` 清关联）。
 - `assets` 表已含 `material_id`/`material_group_id`（IKDJNZ），无校验状态列。
 - 虚拟/真人像库数据：上游（material 透传零表），本地无落表（除 `assets.material_id/group_id` 镜像）。
@@ -137,27 +141,28 @@ model material_groups {
 2. 再次上传同用户 → 复用已建虚拟默认组，不重复建。
 3. 上传到虚拟人像：请求体 `GroupId` 被后端强制替换为虚拟默认组，前端传的 GroupId 不生效。
 4. 虚拟默认组名 = `默认分组：<userId>`。
-5. 真人组：可建多个，`cover_url` 可设置，本地镜像。
-6. 组查询接口返回本地表数据（按 `kind`/`user_id` 过滤），不触发 newapi 组查询。
-7. 删除组（上游成功）→ 本地软删 `material_groups`。
+5. 真人组（v2）：不落本地表，查询透传上游行为与改造前一致。
+6. 组查询分流（v2）：`ListAssetGroups(AIGC)` 与 `GetAssetGroup` 本地命中不触发 newapi 调用、信封与上游实测样例一致；无 Filter / `LivenessFace` 透传行为与改造前 diff 一致。
+7. 删除组（上游成功）→ 本地软删 `material_groups`（真人组无行=空操作）；本地失败仅告警不阻断。
 8. 字段命名统一 snake_case，跟 `assets`/`shared_assets` 等表一致。
 
 ---
 
 ## 8. 实现范围（重要）
 
-本契约对素材库组做了**较完整**的设计（组表落地、虚拟组自动建组、组查询走本地、真人组镜像、双维护）。但当前已交付的后端改动（IKDJNZ 分支扫尾、group 设计对应工单）**只实现了**：
+本契约 v1 对素材库组做了**较完整**的设计（组表落地、虚拟组自动建组、组查询走本地、真人组镜像、双维护）；v2（IKEXX8）撤回真人镜像、组查询改分流。IKE0OH（表落地）交付：
 
 - **组表落地**（`material_groups`，schema + migration + 双轨 + 快照）；
 - **虚拟组自动建组**（`MaterialService.ensureVirtualDefaultGroup` + controller `CreateAsset` 未传 GroupId 时兜底替换）；
 - **组表 repo**（upsert / findVirtualDefault / listByUser / findByUserAndUpstream / softDelete）。
 
-**未接入（留待后续工单，本单不实现）**：
+**IKEXX8（v2）接线**：
 
-| 契约条目 | 说明 |
+| 契约条目 | 状态 |
 |---|---|
-| §5 组查询走本地 | `listLocalGroups`（service 层）已备留，但 controller 无组查询路由接线，`ListAssetGroups` 仍透传上游；后续由前端组查询诉求驱动接线 |
-| §3 真人组镜像 | 建组/改名/删组的真人组本地镜像钩子（repo 的 `findByUserAndUpstream`/`softDelete` 已备，暂无调用方） |
-| §4 组操作双向维护 | 删除/改名的本地同步暂由 IKDE6X 后续子任务或既有旁路承接 |
+| §5 组查询分流 | ✅ 已接：`MaterialService.tryServeLocalGroupAction` + controller 特判（AIGC 本地 / 其余透传；GetAssetGroup 命中分流）；`listLocalGroups` 被 `pageByUser` 分流取代删除 |
+| §3 真人组镜像 | ❌ 撤回（v2）：无可靠写入钩子，真人组保持透传 |
+| §4 建组补 GroupType / 删组本地软删 | ✅ 已接：`ensureVirtualDefaultGroup` 显式 `GroupType:"AIGC"`；`DeleteAssetGroup` 2xx 旁路 `softDeleteLocalGroup`（失败仅告警） |
+| 素材读路径 `material_id`/`material_group_id`（§5 末条） | ✅ 已接：`AssetView`（列表+单详情+insertCopy）与 snapshot `SnapshotAssetSummary` 成对吐出 |
 
-> 结论：本单交付「虚拟组自动建组（前端不感知）+ 组表落地」的**最小闭环**；组查询走本地、真人组镜像同步属后续范围。契约 §5 验收第 6/7 条暂不满足，待后续接线后关闭。
+> 结论：契约 v2 全部范围已由 IKE0OH + IKEXX8 两单闭环；验收要点（§7）按 v2 口径逐条满足。

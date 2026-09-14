@@ -18,7 +18,6 @@ import { ModelCapabilityReadService } from "@lib/shared/generation/model-capabil
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 
 import { createWorkerRepo } from "@lib/shared/persistence/index.js";
-import { openGenerationCredential } from "@blue-whale/core";
 import { ERROR_UNSUPPORTED_INPUT } from "@blue-whale/contracts";
 import { processImageJobById, processAudioJobById, type WorkerDeps } from "@lib/shared/generation/worker/generation-worker.js";
 import { ImageProviderError, type GenerateImageInput } from "@lib/shared/generation/worker/image-provider.js";
@@ -51,12 +50,9 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
   let app: Awaited<ReturnType<typeof NestFactory.create>>;
   let base = "";
   const previousDatabase = process.env.DATABASE_URL;
-  const previousSecret = process.env.GENERATION_CREDENTIAL_SECRET;
-  const credentialSecret = "ikdwl8-isolated-test-credential";
   const providerRequests: GenerateImageInput[] = [];
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKDMQW_DATABASE_URL;
-    process.env.GENERATION_CREDENTIAL_SECRET = credentialSecret;
     await prisma.client.generation_model_capability.upsert({
       where: { provider_id_model_id: { provider_id: "ikdmqw-test", model_id: IMAGE_MODEL } },
       create: {
@@ -138,8 +134,6 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
     await app?.close();
     if (previousDatabase === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previousDatabase;
-    if (previousSecret === undefined) delete process.env.GENERATION_CREDENTIAL_SECRET;
-    else process.env.GENERATION_CREDENTIAL_SECRET = previousSecret;
     await prisma.client.$disconnect();
   });
 
@@ -204,7 +198,7 @@ describe.skipIf(!process.env.IKDMQW_DATABASE_URL)("Generation cancel & delete ra
       expect((await cancelJob(String(row.project_id), jobId)).code).toBe(200);
     }
     const repo = createWorkerRepo(prisma.client);
-    const credentialVault = { open: (cipher: string) => openGenerationCredential(cipher, credentialSecret) };
+    const credentialVault = { open: (cipher: string) => cipher };
     const deps: WorkerDeps = {
       repo, workerId: "ikdwl8-integration", credentialVault,
       createImageProvider: (token) => {

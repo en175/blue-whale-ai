@@ -6,8 +6,6 @@ import { createLogger } from "@blue-whale/core/logging";
 import {
   createNewApiClient,
   loadGenerationCostConfig,
-  loadGenerationCredentialSecret,
-  openGenerationCredential,
   quotaToFen,
 } from "@blue-whale/core";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
@@ -57,7 +55,6 @@ export class GenerationWorkerService {
 
   get deps(): WorkerDeps {
     if (!this.depsInstance) {
-      const credentialSecret = loadGenerationCredentialSecret();
       const baseUrl = process.env.NEW_API_BASE_URL ?? "";
       const costClient = baseUrl ? createNewApiClient({ baseUrl }) : null;
       const costConfig = loadGenerationCostConfig();
@@ -72,8 +69,7 @@ export class GenerationWorkerService {
             token,
           }),
         credentialVault: {
-          open: (ciphertext: string) =>
-            openGenerationCredential(ciphertext, credentialSecret),
+          open: (ciphertext: string) => ciphertext,
         },
         videoProvider: createNewApiVideoProvider({
           baseUrl: process.env.NEW_API_BASE_URL ?? "",

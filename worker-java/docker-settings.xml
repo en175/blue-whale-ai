@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 容器内 Maven 镜像配置：依赖拉取走阿里云公共仓（代理 central）。
+     不加此文件时 go-offline 层直连 Maven Central，境内构建 15 分钟未完成即中断；
+     加后同一层约 1–2 分钟。火山流水线如自带内网仓配置，可删 COPY 行回退默认。 -->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+  <mirrors>
+    <mirror>
+      <id>aliyun-public</id>
+      <name>Aliyun Public (proxies central)</name>
+      <url>https://maven.aliyun.com/repository/public</url>
+      <mirrorOf>central</mirrorOf>
+    </mirror>
+  </mirrors>
+</settings>

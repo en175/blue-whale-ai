@@ -10,7 +10,7 @@ import {
   type AudioProvider,
   type SeedAudioReference,
 } from "@lib/shared/generation-runtime/index.js";
-import { composeImagePrompt } from "@blue-whale/core";
+import { composeImagePrompt, composeTextAttachmentPrompt } from "@blue-whale/core";
 import { createLogger } from "@blue-whale/core/logging";
 import { z } from "zod";
 import {
@@ -26,6 +26,7 @@ import {
   ERROR_UNSUPPORTED_INPUT,
   ERROR_UNSUPPORTED_TYPE,
   textAttachmentSnapshotSchema,
+  promptPlanSnapshotSchema,
 } from "@blue-whale/contracts";
 import {
   mapImageChannelRequest,
@@ -42,12 +43,12 @@ const logger = createLogger("generation-worker");
 
 export type WorkerDeps = {
   repo: WorkerRepo;
-  /** 按 job 密封凭证构建图片 provider（与 video 一致：sk token 来自 job，不来自请求闭包，
+  /** 按 job 明文凭证构建图片 provider（修正四：去密，与 video 一致：sk token 来自 job，不来自请求闭包，
    *  这样请求内即时调度与进程重启后的恢复扫描可用同一套逻辑）。 */
   createImageProvider: (token: string) => ImageProvider;
-  /** 按 job 密封凭证构建音频 provider(与 image/video 一致)。 */
+  /** 按 job 明文凭证构建音频 provider(修正四：去密，与 image/video 一致)。 */
   createAudioProvider: (token: string) => AudioProvider;
-  /** 解密 job.input.provider_credential → sk token。 */
+  /** 读取 job.input.provider_credential → sk token（修正四：明文直取）。 */
   credentialVault: { open: (ciphertext: string) => string };
   videoProvider?: VideoProvider;
   workerId: string;
@@ -70,6 +71,7 @@ export type WorkerDeps = {
 /** IKDLQF：job.input 快照上冻结的文本附件（契约「接纳快照」）；旧任务无此字段，视为无附件。 */
 type GenerationJobInput = Record<string, unknown> & {
   text_attachments?: unknown;
+  composed_prompt?: unknown;
 };
 
 /** 瞬时失败码：网络不可达 / 结果转存失败等——重试有意义。quota/config/校验类不算瞬时。 */
@@ -290,6 +292,12 @@ async function processClaimedJob(
   }
 
   const input = (job.input ?? {}) as GenerationJobInput;
+  const parsedPlan = promptPlanSnapshotSchema.safeParse(input.prompt_plan_snapshot);
+  if (input.prompt_plan_snapshot !== undefined && !parsedPlan.success) {
+    await failClaimed(ERROR_INVALID_INPUT, "方案输入快照无效");
+    return job.id;
+  }
+  const planSnapshot = parsedPlan.success ? parsedPlan.data : undefined;
   const prompt = typeof input.prompt === "string" ? input.prompt : "";
   const modelId = typeof input.model_id === "string" ? input.model_id : "";
   // IKDLQF：图片任务允许空 prompt 仅凭非空白附件正文驱动（契约「接纳快照」）；
@@ -351,8 +359,13 @@ async function processClaimedJob(
     );
     return job.id;
   }
-  const sourceAssets =
-    referenceIds.length > 0
+  if (planSnapshot && JSON.stringify(planSnapshot.images.map(image => image.assetId)) !== JSON.stringify(referenceIds)) {
+    await failClaimed(ERROR_INVALID_REFERENCE, "方案素材快照与输入不一致");
+    return job.id;
+  }
+  const sourceAssets = planSnapshot
+    ? planSnapshot.images.map(image => ({ id: image.assetId, type: "image", url: image.url, mime: null, size: null, width: null, height: null, duration: null, material_id: null }))
+    : referenceIds.length > 0
       ? await repo.resolveInputAssets(referenceIds, job.user_id, job.project_id)
       : [];
   if (
@@ -365,15 +378,15 @@ async function processClaimedJob(
 
   try {
     if (job.type === "audio") {
-      const sealedCredential = job.input?.provider_credential;
-      if (typeof sealedCredential !== "string" || sealedCredential.length === 0) {
+      const providerCredential = job.input?.provider_credential;
+      if (typeof providerCredential !== "string" || providerCredential.length === 0) {
         await failClaimed(
           ERROR_PROVIDER_CREDENTIAL_MISSING,
           "音频任务缺少供应商凭证",
         );
         return job.id;
       }
-      const providerToken = credentialVault.open(sealedCredential);
+      const providerToken = credentialVault.open(providerCredential);
       const provider = deps.createAudioProvider(providerToken);
       providerTokenRef = providerToken;
       const cap = await repo.findImageCapability(modelId, null);
@@ -395,9 +408,17 @@ async function processClaimedJob(
         await failClaimed(ERROR_REFERENCE_ASSET_UNAVAILABLE, audioRefs.message);
         return job.id;
       }
+      // IKFCXE：文本附件作为创作上下文与主提示词共同进入生成——组合语义与图片/视频同源
+      //（composeTextAttachmentPrompt：非空白附件正文在前、主提示词在后，"\n\n" 连接，不改写正文）；
+      // 不因存在附件强制改为朗读任务，环境音/配音意图由主提示词决定。
+      // 主提示词为空的音频任务已在 305 行前校验拒绝（hasNonBlankAttachment 仅对 image 放行）。
+      // 正文文本标签的编号清单已在接纳时冻结，执行与重试不得重新拼接覆盖它。
+      const audioPrompt = typeof input.composed_prompt === "string" && input.composed_prompt.trim().length > 0
+        ? input.composed_prompt
+        : composeTextAttachmentPrompt(textAttachments, prompt);
       const audio = await provider.generate({
         model: cap.model_id,
-        prompt,
+        prompt: audioPrompt,
         ...(audioRefs.refs.length > 0 ? { references: audioRefs.refs } : {}),
       });
       // audio.data 为原始字节;url 为空串,persistProviderMedia 走 data 直传路径。
@@ -496,16 +517,16 @@ async function processClaimedJob(
       return job.id;
     }
 
-    // 图片：sk token 从 job 密封凭证解出（不依赖请求闭包），恢复扫描也能重放。
-    const sealedCredential = job.input?.provider_credential;
-    if (typeof sealedCredential !== "string" || sealedCredential.length === 0) {
+    // 图片：sk token 直接读 job.provider_credential（修正四：明文，不再解封）。
+    const providerCredential = job.input?.provider_credential;
+    if (typeof providerCredential !== "string" || providerCredential.length === 0) {
       await failClaimed(
         ERROR_PROVIDER_CREDENTIAL_MISSING,
         "图片任务缺少供应商凭证",
       );
       return job.id;
     }
-    const providerToken = credentialVault.open(sealedCredential);
+    const providerToken = credentialVault.open(providerCredential);
     const provider = createImageProvider(providerToken);
     providerTokenRef = providerToken;
 
@@ -564,10 +585,13 @@ async function processClaimedJob(
       model: cap.model_id,
       // IKDLQF：有文本附件时按契约组合（附件正文按序在前、忽略纯空白、非空 prompt 最后追加）；
       // 无附件时沿用原 prompt，与旧链路逐字节一致。
-      prompt:
-        textAttachments.length > 0
-          ? composeImagePrompt(textAttachments, prompt)
-          : prompt,
+      // IKFA1P：正文含文本标签时优先消费接纳时冻结的编号清单正文（composed_prompt）。
+      prompt: planSnapshot?.providerPrompt ?? (
+        typeof input.composed_prompt === "string" && input.composed_prompt.length > 0
+          ? input.composed_prompt
+          : textAttachments.length > 0
+            ? composeImagePrompt(textAttachments, prompt)
+            : prompt),
       size: providerSize,
       ...(providerQuality ? { quality: providerQuality } : {}),
       webSearch: input.web_search === true,
