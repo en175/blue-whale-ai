@@ -5744,7 +5744,14 @@ export default function CanvasPage() {
         ? handoff.files.map(f => ({ url: f.url, name: f.name, mediaType: 'image' as const, file: f.file, assetId: f.assetId, role: 'reference' as VideoRefRole }))
         : handoff.refs.map((r, i) => ({ url: r.preview, name: r.file?.name ?? `参考${i + 1}`, mediaType: r.type, file: r.file, assetId: r.assetId,
             role: (handoff.mode === 'keyframe' ? (i === 0 ? 'first' : 'last') : 'reference') as VideoRefRole }));
-      const references = [];
+      const references: Array<{
+        assetId: string;
+        url: string;
+        name: string;
+        mediaType: 'image' | 'video';
+        role: VideoRefRole;
+        materialId?: string;
+      }> = [];
       try {
         for (const item of items) {
           let assetId = item.assetId == null ? undefined : String(item.assetId);
