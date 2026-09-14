@@ -610,14 +610,14 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
 
     // 切换不支持视频参考的模型（非 Seedance 2.0 系）：参考保留不删除，原因明确，发送被阻止
     await switchModel('测试视频模型', '普通视频模型');
-    await vi.waitFor(() => expect(container.textContent).toContain('当前模型不支持视频或音频参考，请更换模型或调整引用'));
+    await vi.waitFor(() => expect(container.textContent).toContain('当前模型不支持视频素材参考'));
     expect(sendButton().disabled).toBe(true);
     expect(dockRefNames()).toEqual(['参考视频']);
     expect(edgePairs()).toEqual(['v1->d1']);
 
     // 换回兼容模型：恢复可发送
     await switchModel('普通视频模型', '测试视频模型');
-    await vi.waitFor(() => expect(container.textContent).not.toContain('当前模型不支持视频或音频参考'));
+    await vi.waitFor(() => expect(container.textContent).not.toContain('当前模型不支持视频素材参考'));
     expect(sendButton().disabled).toBe(false);
   });
 
@@ -673,7 +673,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
 
     // 上限不足：参考保留不截断，说明原因并阻止发送
     await switchModel('测试视频模型', '单参考视频模型');
-    await vi.waitFor(() => expect(container.textContent).toContain('图片参考超出当前模型上限（最多 1 张），请调整引用或模型'));
+    await vi.waitFor(() => expect(container.textContent).toContain('参考图最多 1 张'));
     expect(sendButton().disabled).toBe(true);
     expect(dockRefNames()).toEqual(['首图', '次图']);
     expect(edgePairs()).toEqual(['m1->d1', 'm2->d1']);
@@ -682,7 +682,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     const removeButtons = () => [...container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]')];
     await act(async () => { removeButtons()[0]!.click(); });
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['次图']));
-    await vi.waitFor(() => expect(container.textContent).not.toContain('图片参考超出当前模型上限'));
+    await vi.waitFor(() => expect(container.textContent).not.toContain('参考图最多 1 张'));
     expect(sendButton().disabled).toBe(false);
   });
 

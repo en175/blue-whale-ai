@@ -43,7 +43,6 @@ import type { MediaGenStatus } from '../MediaNode';
 import {
   canAddRefRole,
   hasAnyMediaRef,
-  supportsVideoReferenceModel,
   videoRefConflict,
   type VideoMediaRef,
   type VideoMediaRefs,
@@ -56,6 +55,7 @@ import {
   imageReferenceMaxOfCap,
   supportsAudioReferenceOf,
   supportsVideoReferenceOf,
+  checkReferenceLimits,
 } from '@/lib/model-reference-limits';
 import AtMentionMenu from '../AtMentionMenu';
 import { type AtMentionItem } from '../../atMention';
@@ -282,22 +282,18 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
         audioReference: supportsAudioReferenceOf(currentModel.features),
         videoReferenceMax: videoReferenceMaxOf(currentModel.features),
         audioReferenceMax: audioReferenceMaxOf(currentModel.features),
-        imageReferenceMax: imageReferenceMaxOfCap(currentModel.features),
         imageMax: imageReferenceMaxOfCap(currentModel.features),
       }
     : null;
-  /** 组合校验（IKDMQS）：与服务端 400 同口径 + 能力位（ADR-0086：分类上限读能力行，不硬编码 3/9）；
-   *  冲突时明确提示并禁用发送 */
+  /** 组合校验（IKDMQS）：与服务端 400 同口径（ADR-0086：分类上限/素材总时长读能力行，走共享纯函数
+   *  checkReferenceLimits，与 backend handle-create-generation-job 同源语义）+ 结构约束 videoRefConflict；
+   *  冲突时明确提示并禁用发送。 */
   const referenceConflict = planReferenceError ?? (caps
-    ? (videoMediaRefs.reference.filter(r => r.mediaType === 'image').length > caps.imageMax
-        ? `图片参考超出当前模型上限（最多 ${caps.imageMax} 张），请调整引用或模型`
-        : videoMediaRefs.reference.filter(r => r.mediaType === 'audio').length > caps.audioReferenceMax
-        ? `最多支持 ${caps.audioReferenceMax} 个参考音频`
-        : videoMediaRefs.reference.filter(r => r.mediaType === 'video').length > caps.videoReferenceMax
-        ? `最多支持 ${caps.videoReferenceMax} 个参考视频`
-        : videoRefConflict(videoMediaRefs, caps))
-      ?? (!supportsVideoReferenceModel(selectedModel, caps) && videoMediaRefs.reference.some(ref => ref.mediaType !== 'image')
-        ? '当前模型不支持视频或音频参考，请更换模型或调整引用' : null)
+    ? (checkReferenceLimits(
+        currentModel?.features,
+        videoMediaRefs.reference.map((r) => ({ type: r.mediaType, duration: r.duration })),
+        'video',
+      ) ?? videoRefConflict(videoMediaRefs, caps))
     : null);
   const modeConflict = selectedMode === 'prompt' && hasAnyMediaRef(videoMediaRefs)
     ? '文生视频模式不支持媒体参考，请移除参考或切换模式'

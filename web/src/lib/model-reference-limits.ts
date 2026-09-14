@@ -61,9 +61,12 @@ export function checkReferenceLimits(
     if (audioCount > 0 && imageCount > 0) return '音频与图片参考不可混用';
     return null;
   }
-  // 视频
+  // 视频：普通参考按类型分类上限（图/视频/音频各自上限）+ 素材总时长。
+  const imageRefs = references.filter((r) => r.type === 'image');
   const videoRefs = references.filter((r) => r.type === 'video');
   const audioRefs = references.filter((r) => r.type === 'audio');
+  if (imageRefs.length > imageReferenceMaxOfCap(f))
+    return `参考图最多 ${imageReferenceMaxOfCap(f)} 张`;
   if (videoRefs.length > 0 && !supportsVideoReferenceOf(f))
     return '当前模型不支持视频素材参考';
   if (audioRefs.length > 0 && !supportsAudioReferenceOf(f))

@@ -313,10 +313,13 @@ export function checkReferenceLimits(
       return "音频与图片参考不可混用";
     return null;
   }
-  // 视频生成：普通参考按类型分类上限；视频素材需 video_reference 位；音频素材需 audio_reference 位；
-  // 总时长（所有参考素材之和）≤ max_reference_duration_sec。
+  // 视频生成：普通参考按类型分类上限（图/视频/音频各自上限）；视频素材需 video_reference 位、
+  // 音频素材需 audio_reference 位；总时长（所有参考素材之和）≤ max_reference_duration_sec。
+  const imageRefs = references.filter((r) => r.type === "image");
   const videoRefs = references.filter((r) => r.type === "video");
   const audioRefs = references.filter((r) => r.type === "audio");
+  if (imageRefs.length > features.max_reference_images)
+    return `参考图最多 ${features.max_reference_images} 张`;
   if (videoRefs.length > 0 && !features.video_reference)
     return "当前模型不支持视频素材参考";
   if (audioRefs.length > 0 && !features.audio_reference)
