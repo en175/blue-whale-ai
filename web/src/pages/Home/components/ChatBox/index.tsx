@@ -20,7 +20,7 @@ import { createProject } from '@/api/projects';
 import { setGenHandoff } from '@/utils/gen-handoff';
 import { setAgentHandoff } from '@/utils/agent-handoff';
 import { classifyRefOverflow, classifyRefOverflows, refOverflowToast } from '@/utils/ref-overflow';
-import { videoReferenceMaxOf, imageReferenceMaxOfCap } from '@/lib/model-reference-limits';
+import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOfCap, supportsVideoReferenceOf } from '@/lib/model-reference-limits';
 import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput, MAX_PROMPT_INPUT_LENGTH } from './promptInput';
@@ -39,12 +39,11 @@ const videoModes = [
   { key: 'text2video', label: '图生视频' },
 ];
 
-/** 智能体 tab 附件分类型上限：视频/音频固定 3（图片随创作模型能力，见组件内 agentMaxImages） */
-const MAX_AGENT_VIDEOS = 3;
-const MAX_AGENT_AUDIO = 3;
-
 /** 输入框字数上限（与画布对话框一致） */
 const MAX_INPUT = MAX_PROMPT_INPUT_LENGTH;
+
+/** AI视频首尾帧槽位素材项（仅图片；普通参考与槽位互转时复用） */
+type KeyframeRefItem = { file?: File; preview: string; type: 'image'; assetId?: string | number };
 
 /** 生成时间戳项目名（与画布新建项目命名一致） */
 function makeProjectName(): string {
@@ -512,8 +511,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const handleAgentFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     let imgRoom = Math.max(0, agentMaxImages - agentImageCount);
-    let vidRoom = Math.max(0, MAX_AGENT_VIDEOS - agentVideoCount);
-    let audRoom = Math.max(0, MAX_AGENT_AUDIO - agentAudioCount);
+    let vidRoom = Math.max(0, agentMaxVideos - agentVideoCount);
+    let audRoom = Math.max(0, agentMaxAudios - agentAudioCount);
     const items = files
       .filter((file) => {
         if (file.type.startsWith('image/')) {
@@ -549,8 +548,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       files.filter((f) => !f.type.startsWith('image/') && !f.type.startsWith('video/')).length -
       items.filter((i) => i.kind === 'audio').length;
     if (droppedImages > 0) showToast(`附件图片最多 ${agentMaxImages} 张`);
-    else if (droppedVideos > 0) showToast(`附件视频最多 ${MAX_AGENT_VIDEOS} 个`);
-    else if (droppedAudio > 0) showToast(`附件音频最多 ${MAX_AGENT_AUDIO} 个`);
+    else if (droppedVideos > 0) showToast(`附件视频最多 ${agentMaxVideos} 个`);
+    else if (droppedAudio > 0) showToast(`附件音频最多 ${agentMaxAudios} 个`);
     setAgentFiles((prev) => [...prev, ...items]);
     e.target.value = '';
   };
@@ -629,17 +628,20 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     selectedVideoModel?.supported_sizes.map((s) => ({ key: s.id, label: s.label })) ?? [];
   const videoDurationRange = selectedVideoModel?.supported_durations ?? null;
 
-  // 上传上限（与画布弹窗同规则）：图片数走接口 max_reference_images（首尾帧固定 2），视频最多 3
-  /** 智能体 tab 附件分类型上限：图片随所选创作模型（video capability）读接口 max_reference_images（能力未加载完时为 0）；视频/音频固定 3 */
+  // 上传上限（与画布弹窗同规则）：图片/视频/音频均读能力行（ADR-0086），能力未加载完时图片为 0、视频/音频回落缺省
+  /** 智能体 tab 附件分类型上限：随所选创作模型（video capability）读能力行
+   *  （max_reference_images / video_reference_max / audio_reference_max） */
   const selectedCreationModel = videoModelList.find((m) => m.model_id === creationModel);
   const agentMaxImages = selectedCreationModel?.features?.max_reference_images ?? 0;
+  const agentMaxVideos = videoReferenceMaxOf(selectedCreationModel?.features);
+  const agentMaxAudios = audioReferenceMaxOf(selectedCreationModel?.features);
   const agentImageCount = agentFiles.filter((f) => f.kind === 'image').length;
   const agentVideoCount = agentFiles.filter((f) => f.kind === 'video').length;
   const agentAudioCount = agentFiles.filter((f) => f.kind === 'audio').length;
   const agentAllFull =
     agentImageCount >= agentMaxImages &&
-    agentVideoCount >= MAX_AGENT_VIDEOS &&
-    agentAudioCount >= MAX_AGENT_AUDIO;
+    agentVideoCount >= agentMaxVideos &&
+    agentAudioCount >= agentMaxAudios;
   const videoRefImageCount = refFiles.filter((r) => r.type === 'image').length;
   const videoRefVideoCount = refFiles.filter((r) => r.type === 'video').length;
   const videoMaxImages =
@@ -665,6 +667,36 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const imageMaxImages = imageReferenceMaxOfCap(selectedImageModel?.features);
 
   // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
+  /** 切换 AI视频模式（ADR-0086 对齐画布）：切首尾帧把普通参考里的图片转为首帧/尾帧槽，
+   *  切回全能参考/图生视频把首尾帧槽转回普通参考——素材智能转换，不让用户手动搬。
+   *  首尾帧只收图片：普通参考含视频时拒绝切换（明确提示，不静默丢弃）。 */
+  const handleVideoModeChange = (key: string) => {
+    setShowVideoModeDrop(false);
+    if (key === videoMode) return;
+    if (key === 'firstlast') {
+      const videos = refFiles.filter((f) => f.type === 'video');
+      if (videos.length > 0) {
+        showToast('首尾帧模式仅支持图片素材，请先移除视频参考');
+        return;
+      }
+      if (refFiles.length > 2) {
+        showToast('首尾帧模式最多 2 张图片（首帧 + 尾帧），请先减少参考');
+        return;
+      }
+      const images = refFiles.filter((f): f is KeyframeRefItem => f.type === 'image');
+      if (images.length > 0) {
+        setKeyframeRefs({ first: images[0], last: images[1] });
+        setRefFiles([]);
+      }
+    } else if (videoMode === 'firstlast') {
+      // 切离首尾帧：首帧/尾帧转回普通参考（图片），清空槽位
+      const restored = [keyframeRefs.first, keyframeRefs.last].filter(Boolean) as KeyframeRefItem[];
+      if (restored.length > 0) setRefFiles((prev) => [...prev, ...restored]);
+      setKeyframeRefs({});
+    }
+    setVideoMode(key);
+  };
+
   const handleRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     // 首尾帧模式：每个槽位只接受一张图片，写入目标槽（本地上传已限定 accept=image/*）
@@ -681,9 +713,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     }
     let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
     let vidRoom = Math.max(0, videoMaxVideos - videoRefVideoCount);
+    // ADR-0086：模型不接受视频素材参考（features.video_reference=false）时直接拒绝，不静默丢弃。
+    const videoRefUnsupported =
+      files.some((f) => f.type.startsWith('video/')) && !supportsVideoReferenceOf(selectedVideoModel?.features);
     const newFiles = files
       .filter((f) => {
         if (f.type.startsWith('video/')) {
+          if (videoRefUnsupported) return false;
           if (vidRoom <= 0) return false;
           vidRoom -= 1;
           return true;
@@ -703,15 +739,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       acceptedImages: newFiles.filter((f) => f.type === 'image').length,
       acceptedVideos: newFiles.filter((f) => f.type === 'video').length,
     });
-    if (overflow === 'image') showToast(`参考图最多 ${videoMaxImages} 张，请减少图片`);
+    if (videoRefUnsupported && overflow === null) showToast('当前模型不支持视频素材参考，请更换模型');
+    else if (overflow === 'image') showToast(`参考图最多 ${videoMaxImages} 张，请减少图片`);
     else if (overflow === 'video') showToast(`参考视频最多 ${videoMaxVideos} 个`);
     setRefFiles((prev) => [...prev, ...newFiles]);
     // 重置 input 以便重复选择相同文件
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const removeRefFile = (index: number) => {
-    setRefFiles((prev) => {
+  const removeRefFile = (index: number) => {    setRefFiles((prev) => {
       const copy = [...prev];
       // 资产选择项的 preview 是永久 URL，仅释放本地上传的 objectURL
       if (copy[index].file) URL.revokeObjectURL(copy[index].preview);
@@ -865,8 +901,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         agentFiles.filter((f) => f.assetId != null).map((f) => String(f.assetId)),
       );
       let imgRoom = Math.max(0, agentMaxImages - agentImageCount);
-      let vidRoom = Math.max(0, MAX_AGENT_VIDEOS - agentVideoCount);
-      let audRoom = Math.max(0, MAX_AGENT_AUDIO - agentAudioCount);
+      let vidRoom = Math.max(0, agentMaxVideos - agentVideoCount);
+      let audRoom = Math.max(0, agentMaxAudios - agentAudioCount);
       const eligible = assets
         .filter((a) => a.type === 'image' || a.type === 'video' || a.type === 'audio')
         .filter((a) => !existing.has(String(a.id)));
@@ -895,7 +931,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           assetId: a.id,
         }));
       if (eligible.length > items.length) {
-        showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${MAX_AGENT_VIDEOS} 个 / 音频 ${MAX_AGENT_AUDIO} 个）`);
+        showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${agentMaxVideos} 个 / 音频 ${agentMaxAudios} 个）`);
       }
       if (items.length === 0) return;
       setAgentFiles((prev) => [...prev, ...items]);
@@ -1149,7 +1185,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                         <button
                           key={m.key}
                           className={`${styles.dropdownItem} ${videoMode === m.key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => { setVideoMode(m.key); setShowVideoModeDrop(false); }}
+                          onClick={() => handleVideoModeChange(m.key)}
                         >
                           {m.label}
                         </button>
@@ -1463,7 +1499,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   className={styles.refCard}
                   onClick={() => {
                     if (agentAllFull) {
-                      showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${MAX_AGENT_VIDEOS} 个 / 音频 ${MAX_AGENT_AUDIO} 个）`);
+                      showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${agentMaxVideos} 个 / 音频 ${agentMaxAudios} 个）`);
                       return;
                     }
                     toggleRefMenu('agent');
