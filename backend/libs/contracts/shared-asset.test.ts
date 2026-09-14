@@ -30,9 +30,9 @@ describe("saveSharedAssetRequestSchema（assetType + kind 两层判别联合）"
     expect(goods.assetType).toBe("goods");
     const text = saveSharedAssetRequestSchema.parse({
       assetType: "text",
-      snapshot: { html: "<p>文案</p>" },
+      snapshot: { text: "# 文案\n\n**粗**" },
     });
-    expect(text.snapshot.html).toBe("<p>文案</p>");
+    expect(text.snapshot.text).toBe("# 文案\n\n**粗**");
   });
 
   it("媒体：assetType=media + kind + sourceAssetId，name 可选", () => {

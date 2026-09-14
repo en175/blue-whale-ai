@@ -17,7 +17,7 @@ let props: ComponentProps<typeof FlowCanvas>;
 
 interface TextCallbacks {
   onDraftError: ReturnType<typeof vi.fn>;
-  onChange: ReturnType<typeof vi.fn>;
+  onTextChange: ReturnType<typeof vi.fn>;
   onTitleChange: ReturnType<typeof vi.fn>;
   onAddToChat: ReturnType<typeof vi.fn>;
   onDelete: ReturnType<typeof vi.fn>;
@@ -70,11 +70,11 @@ async function finishGesture() {
  * 每个用例只挂载一次：画布对同 id 文本节点只同步新增与移除，重复渲染不会替换已注入的回调。
  */
 async function renderText(
-  overrides: { html?: string; title?: string; toolMode?: 'drag' | 'select'; selected?: boolean; zoom?: number } = {},
+  overrides: { text?: string; html?: string; title?: string; toolMode?: 'drag' | 'select'; selected?: boolean; zoom?: number } = {},
 ): Promise<TextCallbacks> {
   const callbacks: TextCallbacks = {
     onDraftError: vi.fn(),
-    onChange: vi.fn(),
+    onTextChange: vi.fn(),
     onTitleChange: vi.fn(),
     onAddToChat: vi.fn(),
     onDelete: vi.fn(),
@@ -91,7 +91,8 @@ async function renderText(
       type: 'textNode',
       position: { x: 50, y: 60 },
       selected: overrides.selected ?? false,
-      data: { html: overrides.html ?? '', ...(overrides.title !== undefined ? { title: overrides.title } : {}), toolMode, ...callbacks },
+      // IKFM3L：正文统一为 Markdown 源（text 权威），html 仅存量兼容兜底
+      data: { ...(overrides.text !== undefined ? { text: overrides.text } : { html: overrides.html ?? '' }), ...(overrides.title !== undefined ? { title: overrides.title } : {}), toolMode, ...callbacks },
     }],
   };
   await act(async () => { root.render(createElement(FlowCanvas, next)); });
@@ -179,14 +180,14 @@ describe('Canvas 文本节点卡片', () => {
     expect(callbacks.onAddToChat).toHaveBeenCalledWith(TEXT_ID);
   });
 
-  it('双击进入编辑，输入内容经原有通路保存', async () => {
-    const callbacks = await renderText({ html: '<p>原内容</p>' });
+  it('双击进入编辑，输入内容经统一通路保存为 Markdown 源', async () => {
+    const callbacks = await renderText({ text: '原内容' });
     await startEditing();
     await act(async () => {
       editor().innerHTML = '<p>原内容</p><p>补充的一段</p>';
       editor().dispatchEvent(new Event('input', { bubbles: true }));
     });
-    expect(callbacks.onChange).toHaveBeenCalledWith(TEXT_ID, expect.stringContaining('补充的一段'));
+    expect(callbacks.onTextChange).toHaveBeenCalledWith(TEXT_ID, '原内容\n\n补充的一段');
   });
 
   it('编辑时格式工具栏与节点操作同处一层，不叠成多行', async () => {
@@ -428,8 +429,8 @@ describe('Canvas 文本节点标题分段缩放', () => {
     await renderText({ zoom, html: '<p>一段正文</p>' });
     expect(titleVar('--node-title-name') * zoom).toBeCloseTo(nameScreen, 2);
     expect(titleVar('--node-title-icon') * zoom).toBeCloseTo(iconScreen, 2);
-    // 名称与正文大小策略独立：正文编辑区不随标题变量缩放
-    expect(title().textContent).toBe('文本节点');
+    // 名称与正文大小策略独立：正文编辑区不随标题变量缩放；统一后标题行含「展开全文」入口
+    expect(title().textContent).toContain('文本节点');
   });
 
   it('缩放与选中、拖动组合时位置与标题稳定，操作条仍可达', async () => {
@@ -447,7 +448,7 @@ describe('Canvas 文本节点标题分段缩放', () => {
 
     await renderText({ selected: true, zoom: 1.5, html: '<p>组合操作正文</p>' });
     expect(node().style.transform).toBe(draggedPosition);
-    expect(title().textContent).toBe('文本节点');
+    expect(title().textContent).toContain('文本节点');
     expect(node().textContent).toContain('组合操作正文');
     expect(actions()).toContain('添加到对话');
   });
@@ -458,17 +459,16 @@ it('reports invalid text to the canvas and clears the error after correction', a
   const callbacks = await renderText();
   await startEditing();
   await act(async () => {
-    Object.defineProperty(editor(), 'innerText', { configurable: true, value: '长'.repeat(100001) });
+    editor().textContent = '长'.repeat(100001);
     editor().dispatchEvent(new Event('input', { bubbles: true }));
   });
-  expect(callbacks.onChange).not.toHaveBeenCalled();
+  expect(callbacks.onTextChange).not.toHaveBeenCalled();
   expect(callbacks.onDraftError).toHaveBeenLastCalledWith(TEXT_ID, expect.stringContaining('100000'));
   expect(node().textContent).toContain('草稿已保留');
   await act(async () => {
-    Object.defineProperty(editor(), 'innerText', { configurable: true, value: '修正正文' });
-    editor().innerHTML = '修正正文';
+    editor().textContent = '修正正文';
     editor().dispatchEvent(new Event('input', { bubbles: true }));
   });
   expect(callbacks.onDraftError).toHaveBeenLastCalledWith(TEXT_ID, '');
-  expect(callbacks.onChange).toHaveBeenLastCalledWith(TEXT_ID, '修正正文');
+  expect(callbacks.onTextChange).toHaveBeenLastCalledWith(TEXT_ID, '修正正文');
 });

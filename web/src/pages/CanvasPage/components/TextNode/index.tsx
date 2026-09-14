@@ -1,10 +1,11 @@
 /* ============================================
  * TextNode 文本节点：外置常驻标题 + 固定 360×270 正文容器（内部滚动）
- * 富文本编辑与格式工具栏沿用既有实现
+ * IKFM3L 统一正文契约 v1：普通新增、Agent 应用与历史卡共用 Markdown 编辑
+ * 与格式工具栏；正文以受限 Markdown 源（data.text）为唯一权威，html 仅存量兼容。
  * ============================================ */
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Palette, Plus } from 'lucide-react';
+import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Plus } from 'lucide-react';
 import { sanitizeHtml } from '@/utils/sanitize';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import { commitCardName } from '../cardName';
@@ -12,7 +13,9 @@ import CanvasContextMenu from '../CanvasContextMenu';
 import styles from './index.module.css';
 import { PROMPT_TEXT_LIMITS } from '@lib/contracts/prompt-text-limits';
 import { promptMentionSchema, validPromptMentions, type PromptMention, type PromptMaterial } from '@lib/contracts/prompt-preview';
+import { markdownToSanitizedHtml } from '@lib/contracts/text-node-markdown';
 import { renderPromptMentions, readPromptMentions } from './promptMentions';
+import { applyMarkdownInputRule } from './markdownInputRules';
 
 /** 文字节点最大字数（按纯文本计，含粘贴） */
 const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
@@ -49,12 +52,12 @@ interface TextNodeData {
   onTitleChange?: (id: string, title: string) => void;
   onDraftError?: (id: string, error: string) => void;
   onTextChange?: (id: string, text: string) => void;
+  /** 存量兼容：升级前的 HTML 正文，统一后不再写入（契约 §1） */
   html?: string;
   text?: string;
   toolMode?: 'drag' | 'select';
   isFirst?: boolean;
   onDelete?: (id: string) => void;
-  onChange?: (id: string, html: string) => void;
   onDuplicate?: (id: string) => void;
   onAddToChat?: (id: string) => void;
   onSaveToAssets?: (id: string) => void;
@@ -68,7 +71,6 @@ interface TextNodeData {
 }
 
 export default function TextNode({ id, data, selected }: NodeProps & { data: TextNodeData; selected?: boolean }) {
-  const plainText = typeof data.text === 'string';
   const hasPromptBindings = Boolean(data.promptSource) || data.promptMentions !== undefined;
   const [contentError, setContentError] = useState('');
   const [titleError, setTitleError] = useState('');
@@ -85,8 +87,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     || (typeof data.html === 'string' && data.html.replace(/<[^>]+>/g, '').trim()),
   );
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [showColorPicker, setShowColorPicker] = useState(false);
-  const [currentColor, setCurrentColor] = useState('#ffffff');
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
   const initializedRef = useRef(false);
@@ -101,9 +101,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }])).values()];
 
   const zoom = useStore((state) => state.transform[2]);
-
-  /** 预设颜色 */
-  const COLORS = ['#ffffff', '#e8e8e8', '#ff4d4f', '#ff7a45', '#ffa940', '#ffec3d', '#73d13d', '#36cfc9', '#40a9ff', '#597ef7', '#9254de', '#ff85c0'];
 
   const isSelect = data.toolMode === 'select';
 
@@ -124,19 +121,18 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   // Keep the complete source, including legacy over-limit content. Never truncate on load.
   useEffect(() => {
     if (!initializedRef.current && editorRef.current) {
-      if (hasPromptBindings) renderPromptMentions(editorRef.current, data.text ?? '', data.promptMentions ?? [], data.promptMaterials ?? []);
-      else if (plainText) editorRef.current.textContent = data.text ?? '';
+      if (typeof data.text === 'string') renderPromptMentions(editorRef.current, data.text, data.promptMentions ?? [], data.promptMaterials ?? []);
       else editorRef.current.innerHTML = sanitizeHtml(data.html || '');
       initializedRef.current = true;
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 非编辑态：权威正文变化时按 Markdown 渲染重放（编辑中的 DOM 是权威，不覆盖）
   useEffect(() => {
-    if (plainText && !editing && !contentError && editorRef.current) {
-      if (hasPromptBindings) renderPromptMentions(editorRef.current, data.text ?? '', data.promptMentions ?? [], data.promptMaterials ?? []);
-      else editorRef.current.textContent = data.text ?? '';
+    if (!editing && !contentError && editorRef.current && typeof data.text === 'string') {
+      renderPromptMentions(editorRef.current, data.text, data.promptMentions ?? [], data.promptMaterials ?? []);
     }
-  }, [plainText, editing, contentError, data.text, hasPromptBindings, data.promptMentions, data.promptMaterials]);
+  }, [editing, contentError, data.text, data.promptMentions, data.promptMaterials]);
 
   // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
   useEffect(() => {
@@ -149,17 +145,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       document.removeEventListener('contextmenu', close, true);
     };
   }, [contextMenu]);
-
-  // 点击其他区域关闭颜色选择器
-  useEffect(() => {
-    if (!showColorPicker) return;
-    const close = () => setShowColorPicker(false);
-    const timer = setTimeout(() => document.addEventListener('click', close), 100);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('click', close);
-    };
-  }, [showColorPicker]);
 
   /** 保存当前选区 */
   const saveSelection = useCallback(() => {
@@ -202,11 +187,11 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     setTitleEditing(false);
   }, [data.title, isTextGen]);
 
-  /** 同步内容到父组件（净化后保存，防止 XSS 持久化） */
+  /** 同步内容到父组件：编辑器 DOM 序列化为 Markdown 源（契约 §1 权威正文） */
   const syncContent = useCallback(() => {
-    const prompt = hasPromptBindings && editorRef.current ? readPromptMentions(editorRef.current) : undefined;
-    const text = prompt?.text ?? editorRef.current?.innerText ?? '';
-    if (text.length > MAX_TEXT_LENGTH) {
+    if (!editorRef.current) return;
+    const content = readPromptMentions(editorRef.current);
+    if (content.text.length > MAX_TEXT_LENGTH) {
       const error = `正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`;
       setContentError(error);
       data.onDraftError?.(id, error);
@@ -214,10 +199,9 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
     setContentError('');
     data.onDraftError?.(id, '');
-    if (prompt) data.onPromptChange?.(id, text, prompt.mentions, draftMaterialsRef.current);
-    else if (plainText) data.onTextChange?.(id, text);
-    else data.onChange?.(id, sanitizeHtml(editorRef.current?.innerHTML || ''));
-  }, [data, id, plainText, hasPromptBindings]);
+    if (hasPromptBindings) data.onPromptChange?.(id, content.text, content.mentions, draftMaterialsRef.current);
+    else data.onTextChange?.(id, content.text);
+  }, [data, id, hasPromptBindings]);
 
   const editMaterial = (assetId: string, replaceIndex: number | null) => {
     const editor = editorRef.current;
@@ -267,66 +251,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     saveSelection();
     syncContent();
   }, [restoreSelection, saveSelection, syncContent]);
-
-  /** 设置文字颜色（手动包裹 span，替代 execCommand foreColor 的不稳定行为） */
-  const setColor = useCallback((color: string) => {
-    setCurrentColor(color);
-    setShowColorPicker(false);
-
-    // 聚焦编辑器并恢复选区
-    editorRef.current?.focus();
-    restoreSelection();
-
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) {
-      console.warn('[TextNode] setColor: no selection');
-      return;
-    }
-    const range = sel.getRangeAt(0);
-    if (!editorRef.current?.contains(range.commonAncestorContainer)) {
-      console.warn('[TextNode] setColor: selection outside editor');
-      return;
-    }
-
-    // 确保选区非空
-    if (range.collapsed) {
-      console.warn('[TextNode] setColor: collapsed selection');
-      return;
-    }
-
-    console.log('[TextNode] setColor: applying', color, 'to', range.toString());
-
-    // 创建带颜色的 span 包裹选中内容
-    const span = document.createElement('span');
-    span.style.color = color;
-
-    try {
-      span.appendChild(range.extractContents());
-      range.insertNode(span);
-      // 重新选中包裹后的内容
-      const newRange = document.createRange();
-      newRange.selectNodeContents(span);
-      sel.removeAllRanges();
-      sel.addRange(newRange);
-      console.log('[TextNode] setColor: success');
-    } catch (err) {
-      console.warn('[TextNode] setColor: DOM approach failed, fallback', err);
-      // 备选方案：尝试 execCommand
-      document.execCommand('styleWithCSS', false, 'true');
-      document.execCommand('foreColor', false, color);
-    }
-
-    saveSelection();
-    syncContent();
-  }, [restoreSelection, saveSelection, syncContent]);
-
-  /** 切换颜色选择器 */
-  const toggleColorPicker = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    saveSelection();
-    setShowColorPicker(prev => !prev);
-  }, [saveSelection]);
 
   /** 设置标题 */
   const setHeading = useCallback((level: string) => {
@@ -389,7 +313,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     if (cut) { document.execCommand('delete'); syncContent(); }
   }, [hasPromptBindings, id, syncContent]);
 
-  /** Paste the entire actual text; over-limit drafts remain visible and are not persisted. */
+  /** Paste Markdown or internal chip content; over-limit drafts remain visible and are not persisted. */
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     e.preventDefault();
     let inserted = false;
@@ -405,12 +329,21 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           document.execCommand('insertHTML', false, fragment.innerHTML);
           inserted = true;
         }
-      } catch { /* External clipboard content is pasted as plain text. */ }
+      } catch { /* External clipboard content is pasted as Markdown. */ }
     }
-    if (!inserted) document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
+    if (!inserted) document.execCommand('insertHTML', false, markdownToSanitizedHtml(e.clipboardData.getData('text/plain')));
     saveSelection();
     syncContent();
   }, [saveSelection, syncContent, hasPromptBindings, id, data.promptMaterials]);
+
+  /** 输入后应用 Markdown 语法规则（契约 §2 输入路径），再同步内容 */
+  const handleEditorInput = useCallback((e: React.FormEvent<HTMLDivElement>) => {
+    const native = e.nativeEvent as InputEvent;
+    if (native.inputType === 'insertText' && editorRef.current && native.data) {
+      applyMarkdownInputRule(editorRef.current, native.data);
+    }
+    syncContent();
+  }, [syncContent]);
 
   /** 编辑器键盘操作后保存选区并同步 */
   const handleEditorKeyUp = useCallback(() => {
@@ -425,37 +358,12 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       style={nodeTitleSizing(zoom)}
     >
       {/* 同一层操作位置：编辑时是格式工具栏，其余是节点操作条，两者不叠成多行 */}
-      {isFocused && !plainText ? (
+      {isFocused ? (
         <div
           className={`${styles.toolbar} nodrag nopan`}
           onMouseDown={(e) => e.preventDefault()}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {/* 文字颜色选择（放在第一位） */}
-          <div className={styles.colorWrap}>
-            <button className={`${styles.toolBtn} ${styles.colorBtn}`} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onClick={toggleColorPicker} title="文字颜色">
-              <Palette size={12} strokeWidth={2} />
-              <span className={styles.colorIndicator} style={{ backgroundColor: currentColor }} />
-            </button>
-            {showColorPicker && (
-              <div className={styles.colorPicker} onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}>
-                <div className={styles.colorGrid}>
-                  {COLORS.map(color => (
-                    <button
-                      key={color}
-                      className={`${styles.colorSwatch} ${color === currentColor ? styles.colorSwatchActive : ''}`}
-                      style={{ backgroundColor: color }}
-                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                      onClick={() => setColor(color)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className={styles.divider} />
-
           <button className={styles.toolBtn} onClick={() => setHeading('h1')} title="标题1">
             <Heading1 size={14} strokeWidth={2} />
           </button>
@@ -539,9 +447,9 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
               {data.title || (isTextGen ? '文本生成' : '文本节点')}
             </span>}
         </div>
-      {plainText && <button className={`${styles.toolBtn} nodrag nopan`} onClick={() => setExpanded(value => !value)}>
+      <button className={`${styles.toolBtn} nodrag nopan`} onClick={() => setExpanded(value => !value)}>
         {expanded ? '收起全文' : '展开全文'}
-      </button>}
+      </button>
       </div>
 
       {(contentError || titleError) && <div role="alert" className="nodrag nopan">{contentError || titleError}</div>}
@@ -570,7 +478,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         <div
           ref={editorRef}
           className={`${styles.editor} ${editing ? 'nodrag nopan' : ''}`}
-          contentEditable={editing ? (plainText && !hasPromptBindings ? 'plaintext-only' : true) : false}
+          contentEditable={editing ? true : false}
           suppressContentEditableWarning
           style={{
             pointerEvents: isSelect && (!isTextGen || writingSelf) ? 'auto' : 'none',
@@ -578,14 +486,14 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           }}
           onFocus={() => setIsFocused(true)}
           onBlur={(e) => {
-            // 如果焦点转移到工具栏/颜色面板，保持编辑状态
+            // 如果焦点转移到工具栏/操作条，保持编辑状态
             const related = e.relatedTarget as HTMLElement | null;
             if (related && related.closest(`.${styles.toolbar}, .${styles.nodeBar}`)) return;
             setIsFocused(false);
             setEditing(false);
             setWritingSelf(false);
           }}
-          onInput={syncContent}
+          onInput={handleEditorInput}
           onClick={event => {
             if (!hasPromptBindings) return;
             const chip = (event.target as HTMLElement).closest<HTMLElement>('[data-prompt-index]');

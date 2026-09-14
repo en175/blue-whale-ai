@@ -312,7 +312,9 @@ export class CanvasService {
         throw new BadRequestException("方案素材身份不可伪造，请使用应用入口");
       }
       if (node.type !== "textNode") continue;
+      // IKFM3L 契约 §1：text 是权威正文（Markdown 源），html 为存量兼容字段，两者同限长
       if ((typeof node.data?.text === "string" && node.data.text.length > limits.text)
+        || (typeof node.data?.html === "string" && node.data.html.length > limits.text)
         || (typeof node.data?.title === "string" && node.data.title.length > limits.title)) {
         throw new BadRequestException(`文本超限（标题 ${limits.title}，正文 ${limits.text} 字），原内容未改动`);
       }

@@ -3,6 +3,7 @@
  * ============================================ */
 import { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, type PromptBinding } from '@lib/contracts/prompt-target';
 import { promptMentionSchema, validPromptMentions } from '@lib/contracts/prompt-preview';
+import { unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
@@ -912,7 +913,13 @@ export default function CanvasPage() {
   const attachCallbacks = (node: Node): Node => {
     const base: Node = { ...node, position: node.position ?? { x: 0, y: 0 }, data: { ...node.data, toolMode } };
     switch (node.type) {
-      case 'textNode':
+      case 'textNode': {
+        // IKFM3L 契约 §5：历史卡读时归一化——html 升级为 Markdown 源，text/html 并存以 text 为准；
+        // 身份、标题、位置与关系不动，归一化结果随防抖保存自然落盘
+        if (typeof base.data.html === 'string') {
+          base.data.text = unifiedTextNodeText(base.data);
+          delete base.data.html;
+        }
         base.data = {
           ...base.data,
           onDelete: (id: string) => removeCanvasNodes([id]),
@@ -921,11 +928,6 @@ export default function CanvasPage() {
           onTextChange: (id: string, text: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text } } : n)),
           onPromptChange: (id: string, text: string, promptMentions: import('@lib/contracts/prompt-preview').PromptMention[], promptMaterials?: Array<import('@lib/contracts/prompt-preview').PromptMaterial & { url: string }>) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text, promptMentions, ...(promptMaterials ? { promptMaterials } : {}) } } : n)),
           onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
-          onChange: (id: string, html: string) => {
-            setTextNodes((prev) =>
-              prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n))
-            );
-          },
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
@@ -939,6 +941,7 @@ export default function CanvasPage() {
           },
         };
         break;
+      }
       case 'mediaNode':
         base.data = {
           ...base.data,
@@ -1313,10 +1316,15 @@ export default function CanvasPage() {
     versionRef.current = doc.version;
     setViewport(doc.viewport);
     const hydratedAll = [...t, ...m, ...p, ...a];
-    lastSavedRef.current =
-      JSON.stringify(doc.viewport) +
-      serializeNodes([...hydratedAll, ...hydratedGroups.map((g) => groupToNode(g))]) +
-      serializeEdges(hydratedEdges);
+    // IKFM3L：html→text 归一化使本地态与服务器形态产生差异，置空签名驱动一次自动保存把升级落盘
+    const upgradedTextNodes = contentNodes.some(
+      (node) => node.type === 'textNode' && typeof (node.data as Record<string, unknown> | undefined)?.html === 'string',
+    );
+    lastSavedRef.current = upgradedTextNodes
+      ? ''
+      : JSON.stringify(doc.viewport) +
+        serializeNodes([...hydratedAll, ...hydratedGroups.map((g) => groupToNode(g))]) +
+        serializeEdges(hydratedEdges);
     // 水合恢复：「生成中」媒体节点恢复任务轮询。
     // IK9R8X：jobId 后端返回字符串，兼容 string/number 双形态（历史画布文档已持久化字符串）。
     m
@@ -1400,20 +1408,22 @@ export default function CanvasPage() {
     return () => window.clearTimeout(timer);
   }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch]);
 
-  /** 创建文本节点 */
-  const handleAddTextNode = (position?: { x: number; y: number }, html?: string) => {
+  /** 创建文本节点（正文为受限 Markdown 源，契约 §5 新建一律 v1 形态） */
+  const handleAddTextNode = (position?: { x: number; y: number }, text?: string) => {
     const newNode: Node = {
       id: newNodeId('text'),
       type: 'textNode',
       position: position ?? spawnPosition(),
       data: {
-        html: html ?? '',
+        text: text ?? '',
         onDraftError: handleDraftError,
         toolMode,
-        onDelete: (id: string) => removeCanvasNodes([id]),
-        onChange: (id: string, html: string) => {
+        onDelete: (id: string) => {
+          setTextNodes((prev) => prev.filter((n) => n.id !== id));
+        },
+        onTextChange: (id: string, text: string) => {
           setTextNodes((prev) =>
-            prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n))
+            prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, text } } : n))
           );
         },
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
@@ -2360,15 +2370,17 @@ export default function CanvasPage() {
       position: position ?? spawnDraftPosition(),
       selected: true,
       data: {
-        html: '',
+        text: '',
         title: '文本生成',
         textGen: true,
         onDraftError: handleDraftError,
         toolMode,
-        onDelete: (id: string) => removeCanvasNodes([id]),
-        onChange: (id: string, html: string) => {
+        onDelete: (id: string) => {
+          setTextNodes((prev) => prev.filter((n) => n.id !== id));
+        },
+        onTextChange: (id: string, text: string) => {
           setTextNodes((prev) =>
-            prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n)),
+            prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, text } } : n)),
           );
         },
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
@@ -2414,7 +2426,7 @@ export default function CanvasPage() {
     setTextNodes((prev) =>
       prev.map((n) =>
         n.id === nodeId
-          ? { ...n, data: { ...n.data, text: body, html: body, prompt: text, draftModelId: modelId } }
+          ? { ...n, data: { ...n.data, text: body, prompt: text, draftModelId: modelId } }
           : n,
       ),
     );
@@ -2869,7 +2881,7 @@ export default function CanvasPage() {
       }
       return;
     }
-    handleAddTextNode(position, payload.text.replace(/\n/g, '<br/>'));
+    handleAddTextNode(position, payload.text);
   };
 
   const handleCopyImage = async (id: string) => {
@@ -5246,17 +5258,17 @@ export default function CanvasPage() {
     );
   };
 
-  /** 文本节点保存到共享资产 */
+  /** 文本节点保存到共享资产（正文为 Markdown 源；存量 html 资产回读时升级） */
   const handleSaveTextToAssets = async (nodeId: string) => {
     const node = textNodesRef.current.find((n) => n.id === nodeId);
     if (!node) return;
-    const html = (node.data?.html as string) || '';
-    if (!html) {
+    const text = unifiedTextNodeText(node.data ?? {});
+    if (!text) {
       showToast('error', '文本内容为空，无法保存');
       return;
     }
     await doSaveSharedAsset(
-      { assetType: 'text', snapshot: { html } },
+      { assetType: 'text', snapshot: { text } },
       '已保存文本到共享资产',
     );
   };
@@ -5447,19 +5459,21 @@ export default function CanvasPage() {
           return true;
         }
         case 'text': {
-          // 文本：构造文本节点
-          const snapshot = item.snapshot as { html: string };
+          // 文本：构造文本节点（存量 html 快照升级为 Markdown 源）
+          const snapshot = item.snapshot as { html?: string; text?: string };
           const node: Node = {
             id: newNodeId('text'),
             type: 'textNode',
             position: spawnPosition(),
             data: {
-              html: snapshot.html,
+              text: unifiedTextNodeText(snapshot),
               toolMode,
-              onDelete: (id: string) => removeCanvasNodes([id]),
-              onChange: (id: string, html: string) => {
+              onDelete: (id: string) => {
+                setTextNodes((prev) => prev.filter((n) => n.id !== id));
+              },
+              onTextChange: (id: string, text: string) => {
                 setTextNodes((prev) =>
-                  prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n))
+                  prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, text } } : n))
                 );
               },
               onDuplicate: (id: string) => actionsRef.current.duplicate(id),
