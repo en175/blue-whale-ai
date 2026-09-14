@@ -1,7 +1,7 @@
 import { validateReferences } from "../generation-runtime/video-reference-validation.js";
 import { composeTextAttachmentPrompt, composeTextAttachmentPromptIndexed } from "@lib/core";
 import { COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, promptBindingsSchema, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@lib/contracts";
-import { docHasTextRef, type PromptDoc } from "@lib/contracts";
+import { docHasTextRef, textIndexOfTarget, type PromptDoc } from "@lib/contracts";
 import { nodeAssetId, planError, readPromptPlan, validatePlanModel, validateVideoPlan, type PromptTargetNode } from "../canvas/prompt-target.js";
 import type { ModelCapabilityView } from "../persistence/model-capability-repo.js";
 import type { AssetOwnershipOps } from "../persistence/asset-ownership-types.js";
@@ -37,8 +37,9 @@ export async function freezePromptPlans(args: {
     }
     if (args.type !== "video") validatePlanModel(plan.nodeId, plan.bindings, inputIds.length, args.model);
   }
-  if (directIds.length !== inputIds.length || directIds.some(id => !inputIds.includes(id)) || new Set(inputIds).size !== inputIds.length) {
-    planError(plans[0]!.nodeId, plans.flatMap(p => p.bindings), "参考清单与目标直接连线不一致");
+  const expectedIds = [...new Set([...directIds, ...textIndexOfTarget(nodes, edges, targetId).refs.map(ref => ref.assetId)])];
+  if (expectedIds.length !== inputIds.length || expectedIds.some(id => !inputIds.includes(id)) || new Set(inputIds).size !== inputIds.length) {
+    planError(plans[0]!.nodeId, plans.flatMap(p => p.bindings), "参考清单与目标连线及文本索引不一致");
   }
   const resolved = await args.assets.resolveInputAssets(inputIds, args.userId, args.projectId);
   for (const id of inputIds) {

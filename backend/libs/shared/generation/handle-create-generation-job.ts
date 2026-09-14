@@ -19,6 +19,9 @@ import {
   resolveVideoTaskType,
   type VideoTaskType,
   compilePromptDoc,
+  imageRefLabel,
+  videoRefLabel,
+  mediaMentionSchema,
   compileVideoPromptDoc,
   docHasTextRef,
   fail,
@@ -1163,6 +1166,7 @@ async function resolveTargetSnapshot(args: {
   promptDoc: PromptDoc | null;
   /** IKFM3S：图片目标的文本索引派生结果——附件冻结 media 映射用（缺省无媒体）。 */
   textIndex?: TargetTextIndex;
+  referenceAssetIds: readonly string[];
 }): Promise<
   | { ok: true; value: TargetSnapshot }
   | { ok: false; value: { message: string; code: string } }
@@ -1205,12 +1209,32 @@ async function resolveTargetSnapshot(args: {
       JSON.parse(canvas.edges ?? "[]"),
       targetNodeId,
     );
-    // IKFM3S §5：文本带入参考按来源文本卡冻结进附件（有效身份映射，worker 不消费）。
+    // IKFM3S §5：以最终参考编号编译绑定区间；worker 直接消费冻结正文。
     if (args.textIndex && args.textIndex.refs.length > 0) {
       const mediaByTextNode = textAttachmentMediaOf(args.textIndex);
+      const parsed = parseReferences(body.references);
+      const finalRefs = parsed.kind === "ok" ? parsed.items.map((item) => ({
+        id: String(item.asset_id ?? item.material_id), role: item.role, type: item.type,
+      })) : [];
       textAttachments = textAttachments.map((attachment) => {
         const media = mediaByTextNode.get(attachment.node_id);
-        return media && media.length > 0 ? { ...attachment, media } : attachment;
+        if (!media?.length) return attachment;
+        const data = nodes.find((node) => node.id === attachment.node_id)?.data;
+        const mentions = (Array.isArray(data?.mediaMentions) ? data.mediaMentions : [])
+          .flatMap((raw) => {
+            const parsedMention = mediaMentionSchema.safeParse(raw);
+            return parsedMention.success ? [parsedMention.data] : [];
+          }).sort((a, b) => b.start - a.start);
+        // 区间基于 Markdown 源；从后向前替换避免编号长度变化移动后续区间。
+        let text = typeof data?.text === "string" ? data.text : attachment.text;
+        for (const mention of mentions) {
+          if (!media.some((item) => item.node_id === mention.nodeId && item.asset_id === mention.assetId)) continue;
+          const label = type === "image"
+            ? imageRefLabel(mention.assetId, args.referenceAssetIds)
+            : videoRefLabel(mention.assetId, finalRefs);
+          if (label !== null) text = text.slice(0, mention.start) + label + text.slice(mention.end);
+        }
+        return { ...attachment, text, media };
       });
     }
     // IKFCXE：主提示词为空时保持既有音频校验（不引入"仅附件生成"），
@@ -1589,7 +1613,7 @@ export async function handleCreateGenerationJob(
         validatePromptDocRefs(promptDoc, referenceAssetIds.map(String), orderedTextNodeIds),
       );
       if (refErr) return refErr;
-      promptText = compilePromptDoc(promptDoc, refs.value.referenceAssetIds.map(String), orderedTextNodeIds.length > 0 ? orderedTextNodeIds : undefined);
+      promptText = compilePromptDoc(promptDoc, referenceAssetIds.map(String), orderedTextNodeIds.length > 0 ? orderedTextNodeIds : undefined);
     }
     // 复用既有正文约束；后续附件组合也必须使用实际冻结的正文。
     const compiledError = strategy.validate({ ...effectiveBody, parameters: { ...params, prompt: promptText } });
@@ -1608,6 +1632,7 @@ export async function handleCreateGenerationJob(
       : {}),
     type,
     body: effectiveBody,
+    referenceAssetIds: referenceAssetIds.map(String),
     promptText,
     projectId,
     deps,
@@ -1626,7 +1651,7 @@ export async function handleCreateGenerationJob(
   const planSnapshot = (type === "image" || type === "video") && target.value.canvas && target.value.targetNodeId
     ? await freezePromptPlans({ ...target.value.canvas, targetId: target.value.targetNodeId,
         type, references: planRefs,
-        inputIds: type === "video" ? planRefs.flatMap(r => r.asset_id ? [r.asset_id] : []) : assetIds(body.input_asset_ids), prompt: promptText, attachments: target.value.textAttachments,
+        inputIds: type === "video" ? planRefs.flatMap(r => r.asset_id ? [r.asset_id] : []) : referenceAssetIds.map(String), prompt: promptText, attachments: target.value.textAttachments,
         promptDoc, model: capability, userId, projectId, assets: deps.assets }) : undefined;
 
   // 6. 组装 job.input（策略按类型分派；IKFM3W：视频用合并后的 references 冻结）
