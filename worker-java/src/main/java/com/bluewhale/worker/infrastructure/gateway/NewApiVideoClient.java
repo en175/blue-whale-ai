@@ -317,8 +317,8 @@ public class NewApiVideoClient {
                         + (failReason != null ? failReason : "") + " "
                         + (taskError != null && taskError.message() != null ? taskError.message() : "");
                 String code;
-                if (NewApiErrorClassifier.isReferenceCopyrightSignal(upstreamText)) {
-                    // IKFL53：参考内容版权拒绝 → 1038「参考内容可能涉及版权限制」（先于输出/敏感判定）。
+                if (NewApiErrorClassifier.isCopyrightSignal(upstreamText)) {
+                    // IKFL53：版权拒绝 → 1038「参考内容可能涉及版权限制」（先于输出/敏感判定）。
                     code = GenerationError.ERROR_CONTENT_REJECTED_REFERENCE;
                 } else if (NewApiErrorClassifier.isContentPolicySignal(upstreamText)) {
                     code = GenerationError.ERROR_CONTENT_REJECTED;

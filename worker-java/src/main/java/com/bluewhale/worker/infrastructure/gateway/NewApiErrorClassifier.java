@@ -17,12 +17,13 @@ public final class NewApiErrorClassifier {
     private NewApiErrorClassifier() {}
 
     /**
-     * 参考/输出版权信号正则（IKFL53：copyright/版权 原因 → 1038「参考内容可能涉及版权限制」）。
-     * 用户口径：上游 copyright-restrictions 原因独立成「参考内容可能涉及版权限制」，
-     * 与「生成内容未通过安全审核」（sensitive/敏感/审核 类）按关键词分开。
+     * 版权拒绝信号正则（IKFL53：copyright/版权 原因 → 1038「参考内容可能涉及版权限制」）。
+     * 用户口径：上游 copyright-restrictions 原因独立成「参考内容可能涉及版权限制」（对外文案如此），
+     * 与「生成内容未通过安全审核」（sensitive/敏感/审核 类 → 1018）按关键词分开。
+     * 注意：本正则不要求出现"参考"字样——按关键词 copyright/版权 判定，非「参考 vs 输出」区分。
      */
-    private static final Pattern REFERENCE_COPYRIGHT_PATTERN = Pattern.compile(
-            "copyright|版权|output video may be related to copyright",
+    private static final Pattern COPYRIGHT_PATTERN = Pattern.compile(
+            "copyright|版权",
             Pattern.CASE_INSENSITIVE
     );
 
@@ -47,10 +48,10 @@ public final class NewApiErrorClassifier {
 
     /**
      * 非 2xx 错误分类（new-api-audio-provider.ts:119-130 + §5 IKDAJN）。
-     * 优先级：参考版权 1038 > 输出/敏感 1018 > quota > provider_failed。
+     * 优先级：版权 1038 > 输出/敏感 1018 > quota > provider_failed。
      */
     public static String classifyError(String text, int httpStatus) {
-        if (isReferenceCopyrightSignal(text)) {
+        if (isCopyrightSignal(text)) {
             return GenerationError.ERROR_CONTENT_REJECTED_REFERENCE;
         }
         if (isContentPolicySignal(text)) {
@@ -64,10 +65,10 @@ public final class NewApiErrorClassifier {
 
     /**
      * 成功态 error 信封分类（new-api-audio-provider.ts:142-163 + 图片 provider 同构）。
-     * 优先级：参考版权 1038 > 输出/敏感 1018 > quota > provider_failed。
+     * 优先级：版权 1038 > 输出/敏感 1018 > quota > provider_failed。
      */
     public static String classifySuccessEnvelope(String errorText) {
-        if (isReferenceCopyrightSignal(errorText)) {
+        if (isCopyrightSignal(errorText)) {
             return GenerationError.ERROR_CONTENT_REJECTED_REFERENCE;
         }
         if (isContentPolicySignal(errorText)) {
@@ -80,16 +81,11 @@ public final class NewApiErrorClassifier {
     }
 
     /**
-     * 内容拒绝信号细分（IKFL53）：
-     * 版权/参考版权（copyright|版权）→ 1038；sensitive/敏感/审核 类 → 1018。
+     * 版权拒绝信号（IKFL53）：copyright/版权 → 1038「参考内容可能涉及版权限制」。
+     * 对外文案用「参考内容」字样是产品口径，判定仅按 copyright/版权 关键词，不要求参考字样。
      */
-    public static boolean isReferenceCopyrightSignal(String text) {
-        return text != null && REFERENCE_COPYRIGHT_PATTERN.matcher(text).find();
-    }
-
-    /** 显式输出内容/敏感 → 1018（版权 1038 已提前拦）。 */
-    public static boolean isOutputSensitiveSignal(String text) {
-        return text != null && text.matches("(?i).*(sensitive|敏感).*");
+    public static boolean isCopyrightSignal(String text) {
+        return text != null && COPYRIGHT_PATTERN.matcher(text).find();
     }
 
     public static boolean isContentPolicySignal(String text) {
