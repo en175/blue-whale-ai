@@ -242,9 +242,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   useEffect(() => {
     const m = videoModelList.find((x) => x.model_id === videoModel);
     if (!m) return;
-    // ADR-0086：首尾帧任务官方强制 ratio=adaptive（输出跟随首帧图比例），比例内置不暴露给用户——
-    // 切模型/切模式后统一强制，不参与「不在能力列表就回落默认」的校准。
-    if (isKeyframe) {
+    // IKFQ5S：首尾帧仅在**支持 adaptive 的模型**（2.5）内置该档；2.0 上游不接受 adaptive
+    // （实测 400 unsupported ratio），走其固定比例档。
+    if (isKeyframe && m.supported_aspect_ratios.includes('adaptive')) {
       setAspectRatio('adaptive');
     } else if (m.supported_aspect_ratios.length && !m.supported_aspect_ratios.includes(aspectRatio)) {
       setAspectRatio(
@@ -692,8 +692,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         setKeyframeRefs({ first: images[0], last: images[1] });
         setRefFiles([]);
       }
-      // ADR-0086：首尾帧比例内置 adaptive（输出跟随首帧图），不让用户感知/选择。
-      setAspectRatio('adaptive');
+      // IKFQ5S：仅支持 adaptive 的模型才内置该档；2.0 保持用户可选固定比例。
+      const km = videoModelList.find((x) => x.model_id === videoModel);
+      if (km?.supported_aspect_ratios.includes('adaptive')) setAspectRatio('adaptive');
     } else if (videoMode === 'firstlast') {
       // 切离首尾帧：首帧/尾帧转回普通参考（图片），清空槽位
       const restored = [keyframeRefs.first, keyframeRefs.last].filter(Boolean) as KeyframeRefItem[];
@@ -1220,7 +1221,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 </div>
 
                 {/* 宽高比下拉（ADR-0086：首尾帧任务官方强制 adaptive、比例内置不暴露，整块不渲染） */}
-                {!isKeyframe && (
+                {!(isKeyframe && !!selectedVideoModel?.supported_aspect_ratios?.includes('adaptive')) && (
                   <div className={styles.dropdownWrap} ref={ratioRef}>
                     <button
                       className={styles.paramBtn}

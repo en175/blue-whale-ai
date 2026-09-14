@@ -583,6 +583,63 @@ describe('IKDMQS 提交推导与组合约束', () => {
   });
 });
 
+describe('IKFQ5S 首尾帧 adaptive 按模型门控', () => {
+  /** 构造视频模型能力项（IKFQ5S：比例档按参数给，用于区分支持/不支持 adaptive 的模型）。 */
+  const videoModelWith = (ratios: string[]) => ({
+    model_id: 'seedance-2',
+    provider_id: 'prov',
+    model_label: '测试视频模型',
+    icon: null,
+    supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }],
+    supported_aspect_ratios: ratios,
+    supported_formats: [],
+    supported_durations: { min: 4, max: 12, step: 1 },
+    default_size: '720p',
+    default_format: null,
+    default_aspect_ratio: ratios[0],
+    default_duration: 5,
+    features: {
+      reference_image: true,
+      max_reference_images: 10,
+      watermark: false,
+      quantity_max: 1,
+      sequential_image_generation: false,
+      stream: false,
+      tools: false,
+      first_frame: true,
+      last_frame: true,
+      first_last_frame: true,
+      audio: false,
+    },
+    is_default: true,
+    version: 1,
+    digest: '',
+  });
+
+  async function openKeyframeWith(ratios: string[]) {
+    apiMocks.fetchGenerationModels.mockImplementation(async () => [videoModelWith(ratios)]);
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await connect('m1', 'd1');
+    await connect('m2', 'd1');
+    await waitModelReady();
+    await selectKeyframeMode();
+  }
+
+  it('模型不支持 adaptive（2.0）：首尾帧仍用固定比例（状态栏可见），不内置 adaptive', async () => {
+    await openKeyframeWith(['16:9', '9:16', '1:1']);
+    // 状态栏「模型|比例|分辨率|时长」——比例项照常出现且是固定档
+    expect(container.textContent).toContain('测试视频模型|16:9|720p');
+    expect(container.textContent).not.toContain('adaptive');
+  });
+
+  it('模型支持 adaptive（2.5）：首尾帧隐去比例项（内置 adaptive，用户不可见）', async () => {
+    await openKeyframeWith(['16:9', 'adaptive']);
+    // 状态栏比例项被隐去：模型名后直接跟分辨率
+    expect(container.textContent).toContain('测试视频模型|720p');
+  });
+});
+
 describe('IKDMQS 生成中连线只读', () => {
   it('生成中的视频草稿：新建连线被拦截并提示', async () => {
     await renderPage();

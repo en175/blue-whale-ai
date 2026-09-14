@@ -58,7 +58,7 @@ INSERT INTO generation_model_capability (
       JSON_OBJECT('id', '720p', 'label', '720P', 'api_value', '720p', 'width', 1280, 'height', 720),
       JSON_OBJECT('id', '1080p', 'label', '1080P', 'api_value', '1080p', 'width', 1920, 'height', 1080)
     ),
-    JSON_ARRAY('16:9', '9:16', '1:1', 'adaptive'),
+    JSON_ARRAY('16:9', '9:16', '1:1'),
     JSON_ARRAY(5, 10),
     JSON_ARRAY('mp4'),
     '720p',
