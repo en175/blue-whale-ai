@@ -115,7 +115,7 @@ describe('audioMediaRefsOf 连线推导音频参考', () => {
 });
 
 describe('checkAddAudioRef 统一添加校验', () => {
-  const ref = (nodeId: string, assetId: string) => ({ nodeId, url: `http://aud/${nodeId}.mp3`, name: nodeId, assetId });
+  const ref = (nodeId: string, assetId: string) => ({ nodeId, url: `http://aud/${nodeId}.mp3`, name: nodeId, assetId, mediaType: 'audio' as const });
 
   it('重复素材（相同 assetId）明确拒绝', () => {
     expect(checkAddAudioRef('a1', [ref('u1', 'a1'), ref('u2', 'a2')])).toBe('重复的素材已跳过');
