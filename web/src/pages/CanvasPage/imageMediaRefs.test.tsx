@@ -248,6 +248,16 @@ const enterPickMode = async () => {
 const edgePairs = () =>
   flowProps.current.edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`);
 
+/** IKFR4X 结束持续选取会话：点击提示条「完成选取」按钮（编辑/发送须先结束会话） */
+async function finishPick() {
+  const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.textContent === '完成选取',
+  )!;
+  await act(async () => {
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+}
+
 /** Dock 参考图预览项的图片 alt 列表（草稿绑定面板按连线推导渲染） */
 function dockRefImages(): string[] {
   return [...container.querySelectorAll<HTMLImageElement>('[data-testid="dock-media-ref"] img')].map(
@@ -382,7 +392,10 @@ describe('IKDMQR Dock 选择 → 连线', () => {
     expect(saved.edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`)).toEqual([`m1->${draftId}`]);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
 
-    // 选取模式已退出
+    // IKFR4X：持续会话仍进行（完成入口可见），发送前先完成选取
+    expect(container.textContent).toContain('完成选取');
+    await finishPick();
+    // 选取模式已退出（提示条文案消失）
     expect(container.textContent).not.toContain('点击画布中的图片节点');
 
     // 发送仍消费同一资产（先落盘后建任务）

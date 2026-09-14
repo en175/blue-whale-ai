@@ -283,6 +283,16 @@ async function closePanel() {
   });
 }
 
+/** IKFR4X 结束持续选取会话：点击提示条「完成选取」按钮（编辑/发送须先结束会话） */
+async function finishPick() {
+  const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.textContent === '完成选取',
+  )!;
+  await act(async () => {
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+}
+
 async function typePrompt(text: string) {
   await typePromptRefText(container, text);
 }
@@ -425,10 +435,11 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
   it('生成请求只包含本轮实际保留的参考：删除后不携带，保留时携带', async () => {
     await renderPage();
 
-    // 选取后删空：发送不携带任何参考
+    // 选取后删空：发送不携带任何参考（IKFR4X：编辑/发送前先完成持续会话）
     await openFreePanel();
     await enterPickMode();
     await pickNodeM1();
+    await finishPick();
     await vi.waitFor(() => expect(refImages()).toEqual(['素材图一']));
     await removeFirstRef();
     await typePrompt('画一只蓝鲸');
@@ -440,6 +451,7 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
     await openFreePanel();
     await enterPickMode();
     await pickNodeM1();
+    await finishPick();
     await vi.waitFor(() => expect(refImages()).toEqual(['素材图一']));
     await typePrompt('参考这张图重绘');
     await clickSend();
