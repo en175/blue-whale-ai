@@ -39,7 +39,7 @@ import RefThumbnail from '../RefThumbnail';
 import RefSourceMenu from '../RefSourceMenu';
 import { useMixedRefStrip, orderRefStripItems, videoRefStripKey, useRefStripDrag, type RefStripOrderProps, type StripDragItemProps } from '../RefThumbnail/strip-dnd';
 import { refIdOf, videoLabelMapOf } from '../../videoPromptRefs';
-import type { ImageTextAttachment } from '../ImageDialog';
+import { composeImageSendPrompt, IMAGE_COMPOSED_PROMPT_LIMIT, IMAGE_COMPOSED_PROMPT_OVER_LIMIT, type ImageTextAttachment } from '../ImageDialog';
 import type { MediaGenStatus } from '../MediaNode';
 import {
   canAddRefRole,
@@ -537,6 +537,10 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     }
     if (conflict) {
       onToast?.('warn', conflict);
+      return;
+    }
+    if (composeImageSendPrompt(attachments, flatValue, promptDoc).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+      onToast?.('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
       return;
     }
     const size = currentModel.supported_sizes.find((s) => s.id === selectedSize);
