@@ -311,6 +311,15 @@ export class CanvasService {
         && node.data?.promptSource === undefined) {
         throw new BadRequestException("方案素材身份不可伪造，请使用应用入口");
       }
+      // IKFM3S §4：输入更新状态字段只做形态校验、宽松放行（系统 UX 状态，伪造仅影响本画布提示显示）
+      if (node.type === "mediaNode") {
+        const signature = node.data?.usedInputSignature;
+        const jobId = node.data?.usedInputJobId;
+        if ((signature !== undefined && (typeof signature !== "string" || signature.length === 0 || signature.length > 128))
+          || (jobId !== undefined && (typeof jobId !== "number" || !Number.isInteger(jobId) || jobId <= 0))) {
+          throw new BadRequestException("输入更新状态字段无效，原内容未改动");
+        }
+      }
       if (node.type !== "textNode") continue;
       // IKFM3L 契约 §1：text 是权威正文（Markdown 源），html 为存量兼容字段，两者同限长
       if ((typeof node.data?.text === "string" && node.data.text.length > limits.text)

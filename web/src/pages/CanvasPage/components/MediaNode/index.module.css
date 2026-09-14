@@ -543,3 +543,24 @@
 .emptyShellHint {
   color: #888;
 }
+
+/* IKFM3S §4：「输入已更新」徽标——卡片标题行右上角显眼提示（橙色胶囊），点击定位来源文本卡 */
+.inputStaleBadge {
+  position: absolute;
+  bottom: calc(100% + 2px);
+  right: 0;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #fff;
+  background: #f97316;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(249, 115, 22, 0.45);
+}
+
+.inputStaleBadge:hover {
+  background: #ea680c;
+}

@@ -8,7 +8,7 @@
  * ============================================ */
 import { useEffect, useRef, useState } from 'react';
 import { FloatingPortal, autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
-import { AtSign, AudioLines, FileText, X } from 'lucide-react';
+import { AtSign, AudioLines, Crosshair, FileText, X } from 'lucide-react';
 import styles from './index.module.css';
 import type { StripDragItemProps } from './strip-dnd';
 
@@ -24,6 +24,10 @@ export interface RefThumbnailProps {
   number?: number;
   /** 角色徽标文字（IKFCKQ 视频面板首帧/尾帧：按角色标识不参与数字编号）；优先于 number 显示 */
   badgeText?: string;
+  /** 锁定（IKFM3S）：素材由文本索引提供，不可在目标直接移除——不渲染 ×，渲染定位来源按钮 */
+  locked?: boolean;
+  /** 锁定条目的定位来源入口（IKFM3S §6）；与 locked 配对使用 */
+  onLocate?: () => void;
   /** × 立即删除（走调用方「断开引用、保留来源」链路，无确认弹窗）；缺省不渲染 × */
   onRemove?: () => void;
   /** @ 插入提示词（调用方复用 insertRefAtPending 记忆光标路径）；缺省不渲染 @ */
@@ -115,6 +119,8 @@ export function RefThumbnail({
   name,
   number,
   badgeText,
+  locked,
+  onLocate,
   onRemove,
   onInsertRef,
   audioDuration,
@@ -193,10 +199,11 @@ export function RefThumbnail({
   return (
     <div
       ref={refs.setReference}
-      className={`${styles.thumb} ${className ?? ''}`}
+      className={`${styles.thumb} ${locked ? styles.thumbLocked : ''} ${className ?? ''}`}
       data-testid={testId ?? 'ref-thumb'}
       data-hovered={hovered}
-      title={name}
+      data-locked={locked ? 'true' : undefined}
+      title={locked ? `${name}（来自文本）` : name}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       {...dragProps}
@@ -209,7 +216,18 @@ export function RefThumbnail({
       {(badgeText ?? number) != null && (
         <span className={styles.badge} data-testid="ref-thumb-badge">{badgeText ?? number}</span>
       )}
-      {onRemove && (
+      {locked && onLocate && (
+        <button
+          type="button"
+          className={`${styles.act} ${styles.actLocate}`}
+          title="此素材由文本索引提供，请修改来源文本"
+          aria-label={`定位来源文本 ${name}`}
+          onClick={onLocate}
+        >
+          <Crosshair size={10} strokeWidth={2.5} />
+        </button>
+      )}
+      {!locked && onRemove && (
         <button
           type="button"
           className={`${styles.act} ${styles.actRemove}`}

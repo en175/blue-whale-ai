@@ -26,6 +26,7 @@ import { useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import ZoomControl from '../ZoomControl';
 import TextNode from '../TextNode';
 import MediaNode from '../MediaNode';
+import { imageInputStale, firstTextSourceOf } from '../../textIndexSync';
 import ProductNode from '../ProductNode';
 import AssetCardNode from '../AssetCardNode';
 import CustomEdge from '../CustomEdge';
@@ -409,7 +410,21 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
           return { ...n, zIndex: groupMemberZ(topStack) + 20 };
         }
         const stack = memberStackById.get(n.id);
-        return { ...n, zIndex: stack == null ? 0 : groupMemberZ(stack) };
+        const zIndex = stack == null ? 0 : groupMemberZ(stack);
+        // IKFM3S §4：「输入已更新」徽标派生注入（图片目标 + 文本入边 + 签名不一致），
+        // 纯渲染期派生不持久化；来源文本卡 id 一并注入供定位入口。
+        if (n.type === 'mediaNode' && imageInputStale(n.id, edges, nodes)) {
+          return {
+            ...n,
+            zIndex,
+            data: {
+              ...n.data,
+              inputStale: true,
+              inputSourceNodeId: firstTextSourceOf(n.id, edges, nodes),
+            },
+          };
+        }
+        return { ...n, zIndex };
       });
     const frames: Node[] = list.map((g, i) => {
       const box =
@@ -433,7 +448,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       };
     });
     return [...frames, ...content];
-  }, [nodes, groups, memberStackById, frameDragMemberIds, frameDragOffset]);
+  }, [nodes, groups, memberStackById, frameDragMemberIds, frameDragOffset, edges]);
 
   /** 节点拖拽起：仅标记拖拽中（隐藏框选悬浮条）。组内节点可自由拖出组，拖出后按
    *  坐标动态脱离组；不再整组选中——整组拖动改由组框把手承担。 */

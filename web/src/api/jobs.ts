@@ -154,6 +154,8 @@ export interface JobDetail {
   progress: number;
   /** 产物信息，succeeded 时有值 */
   asset: JobAsset | null;
+  /** 文本输入签名投影（IKFM3S）：succeeded 时前端回写目标节点 usedInputSignature；无则 null */
+  text_input_signature?: string | null;
   error?: JobError | null;
 }
 

@@ -9,6 +9,7 @@ export {
 } from "./capability-param-validation.js";
 export { previewSourceSchema, applyPreviewSchema, promptMentionSchema, validPromptMentions, type PromptPreviewSource, type PromptPreviewContent, type PromptMention, type PromptMaterial } from "./prompt-preview.js";
 export { mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, deriveMediaMentionLabels, deriveMediaMentionLabelsInOrder, invalidMediaMentionLabel, MEDIA_TYPE_LABEL, MEDIA_MENTION_LIMITS, TEXT_INDEX_EDGE_MARKER, type MediaMention, type MediaRef, type MediaMentionType } from "./text-node-media.js";
+export { IMAGE_TEXT_INDEX_ACCEPTED_MEDIA_TYPES, TEXT_INDEX_INVALID_MESSAGE, TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE, textIndexOverflowMessage, checkTextIndexSyncInput, mergeTextProvidedReferences, textIndexOfTarget, textInputSignatureOf, type TargetTextIndex, type TargetTextInputEntry, type TextIndexCanvasNode, type TextIndexSyncError, type TextProvidedRef } from "./text-index-sync.js";
 export {
   legacyCardHistoryItemSchema,
   legacyMigrationFailureSchema,
@@ -26,8 +27,10 @@ export {
   CANVAS_EDGE_LIMITS,
   canvasEdgeSchema,
   textAttachmentSnapshotSchema,
+  textAttachmentMediaSchema,
   type CanvasEdge,
   type TextAttachmentSnapshot,
+  type TextAttachmentMedia,
 } from "./canvas-edges.js";
 export { PROMPT_TEXT_LIMITS, COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, COMPOSED_AUDIO_PROMPT_MAX_LENGTH } from "./prompt-text-limits.js";
 export {
