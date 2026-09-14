@@ -17,7 +17,16 @@ function buildDeps() {
   });
   const listEnabledByType = vi
     .fn()
-    .mockResolvedValue([{ model_id: "seed-audio-1.0" }]);
+    .mockResolvedValue([
+      {
+        model_id: "seed-audio-1.0",
+        features: {
+          audio_reference_max: 3,
+          image_reference_max: 1,
+          max_reference_images: 10,
+        },
+      },
+    ]);
   const createJob = vi.fn().mockResolvedValue({
     generation_job_id: "1",
     cursor: 1,
@@ -2398,3 +2407,88 @@ describe("handleCreateGenerationJob 文本附件正文标签 prompt_doc（IKFA1P
     expect(result.code).toBe(400); expect(result.data?.code).toBe('invalid_reference'); expect(createJob).not.toHaveBeenCalled();
   });
  });
+
+// ADR-0086：视频普通参考的分类上限——图数按能力行 max_reference_images 校验（此前只查图/视频总数 12，
+// 改分类上限后图数一度无人管；本用例锁住图上限与文案）。
+describe('handleCreateGenerationJob 视频参考分类上限（ADR-0086）', () => {
+  const videoDepsWithFeatures = (features: Record<string, unknown>) => {
+    const createJob = vi.fn().mockResolvedValue({ generation_job_id: '1', cursor: 1 });
+    const deps = {
+      projects: { findOwnedById: vi.fn().mockResolvedValue({ id: '1', name: '项目', thumb: null, created_at: '2026-08-18T00:00:00.000Z' }) },
+      models: {
+        listEnabledByType: vi.fn().mockResolvedValue([
+          {
+            model_id: 'doubao-seedance-2-0-260128',
+            supported_aspect_ratios: ['16:9', '9:16', '1:1', 'adaptive'],
+            features: {
+              reference_image: true,
+              max_reference_images: 10,
+              quantity_max: 1,
+              video_reference: false,
+              video_reference_max: 3,
+              audio_reference: false,
+              audio_reference_max: 3,
+              image_reference_max: 1,
+              max_reference_duration_sec: null,
+              ...features,
+            },
+          },
+        ]),
+      },
+      command: { createJob },
+      assets: { resolveInputAssets: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, type: 'image' }))) },
+    } as unknown as HandlerDeps;
+    return { deps, createJob };
+  };
+
+  const imageRef = (i: number) => ({ role: 'reference' as const, asset_id: String(i), type: 'image' as const });
+
+  it('视频普通参考图片数超能力行 max_reference_images → 400 参考图最多 N 张', async () => {
+    const { deps, createJob } = videoDepsWithFeatures({ max_reference_images: 3 });
+    const result = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: [1, 2, 3, 4].map(imageRef),
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toContain('参考图最多 3 张');
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('恰好达到图上限（3 张）放行', async () => {
+    const { deps } = videoDepsWithFeatures({ max_reference_images: 3 });
+    const result = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: [1, 2, 3].map(imageRef),
+    }, null, deps);
+    expect(result.code).toBe(200);
+  });
+
+  it('普通参考含视频素材但模型 video_reference=false → 400 不支持视频素材参考', async () => {
+    const { deps, createJob } = videoDepsWithFeatures({});
+    const result = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: [{ role: 'reference', asset_id: '9', type: 'video' }],
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toContain('当前模型不支持视频素材参考');
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('参考素材总时长超能力行上限 → 400（capacity 行 max_reference_duration_sec=15，两条 10s 视频共 20s）', async () => {
+    const { deps, createJob } = videoDepsWithFeatures({
+      max_reference_duration_sec: 15,
+      video_reference: true,
+      video_reference_max: 3,
+    });
+    const result = await handleCreateGenerationJob('u1', 'p1', {
+      ...VIDEO_BODY,
+      references: [
+        { role: 'reference', asset_id: '9', type: 'video', duration: 10 },
+        { role: 'reference', asset_id: '10', type: 'video', duration: 10 },
+      ],
+    }, null, deps);
+    expect(result.code).toBe(400);
+    expect(result.msg).toContain('参考素材总时长超过 15 秒');
+    expect(createJob).not.toHaveBeenCalled();
+  });
+});

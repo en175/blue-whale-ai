@@ -6,20 +6,18 @@
   "scripts": {
     "build": "prisma generate && tsc -b && tsc-alias",
     "start": "node dist/apps/blue-whale/src/main.js",
-    "start:worker": "node dist/apps/generation-worker/src/main.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@blue-whale/contracts": "workspace:*",
-    "@blue-whale/core": "workspace:*",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
-    "@nestjs/schedule": "^5.0.0",
     "@nestjs/terminus": "^11.0.0",
     "@prisma/adapter-mariadb": "^7.9.0",
     "@prisma/client": "^7.9.0",
+    "@volcengine/openapi": "^1.36.2",
     "@volcengine/tos-sdk": "^2.9.1",
+    "jose": "^6.2.4",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "cookie-parser": "^1.4.7",

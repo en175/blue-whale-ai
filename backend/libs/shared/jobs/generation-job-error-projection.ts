@@ -7,7 +7,7 @@
 //
 // 错误码**常量与文案**的唯一来源在 contracts/error-codes.ts（跨包共享，高内聚）。
 // 本文件只含 backend 的投影判定，不做错误码 re-export——需要 ERROR_* 常量的消费方应直接从
-// @blue-whale/contracts 引，不要经过本文件（避免双重来源）。
+// @lib/contracts 引，不要经过本文件（避免双重来源）。
 import {
   ERROR_AUDIO_GENERATION_FAILED,
   ERROR_IMAGE_GENERATION_FAILED,
@@ -21,7 +21,7 @@ import {
   errorCodeToNumeric,
   messageOf,
   type PublicGenerationError,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 
 /** 全部 canonical 错误码集合（投影白名单）。
  *  即生成域数值表中所有已登记字符串码——单一来源（contracts），此处不重复定义。 */

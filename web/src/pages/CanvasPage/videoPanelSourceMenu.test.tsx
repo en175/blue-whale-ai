@@ -470,7 +470,7 @@ describe('IKFE8U 视频面板统一附件入口', () => {
     await vi.waitFor(() => expect(edgePairs().length).toBe(2));
     await vi.waitFor(() => expect(dockRefCount()).toBe(2));
 
-    // 音频上限 3（REF_LIMITS.audio）：已 2，再选 2 只入 1 并提示超限
+    // 音频上限 3（能力行 audio_reference_max 缺省）：已 2，再选 2 只入 1 并提示超限
     await clickMenuItem(sourceEntryButton()!, '从资产中选择');
     await act(async () => {
       assetsPickerProps.current.onSelect([audioAsset(2), audioAsset(3)]);

@@ -7,7 +7,7 @@ import {
   ok,
   saveSharedAssetRequestSchema,
   sharedAssetListQuerySchema,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { SharedAssetError } from "@lib/shared/shared-assets/shared-asset-error.js";

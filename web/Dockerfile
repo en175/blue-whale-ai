@@ -13,7 +13,7 @@
 #   docker build -f web/Dockerfile -t blue-whale-web:latest .
 #
 # 火山流水线必须把 contextPath 设为仓库根（空或 .），Dockerfile 仍用 web/Dockerfile。
-# 画布/会话源码相对引用 packages/contracts 与 packages/core，context=web/ 会编不过。
+# 画布/会话源码经 @lib/* 引用 backend/libs/{contracts,core}，context=web/ 会编不过。
 
 FROM node:24-alpine AS builder
 WORKDIR /src
@@ -24,12 +24,12 @@ WORKDIR /src/web
 RUN npm ci
 
 WORKDIR /src
-# contracts 源码依赖 zod；装到仓库根 node_modules，tsc 从 packages/contracts 上溯即可解析。
+# contracts 源码依赖 zod；装到仓库根 node_modules，tsc 从 backend/libs/contracts 上溯即可解析。
 RUN npm install zod@4.4.3 --no-package-lock --omit=dev
-# packages/*/tsconfig.json extends ../../tsconfig.base.json；Vite 编这些文件时要读到仓库根这份。
+# backend/libs/*/tsconfig.json extends ../../tsconfig.base.json；Vite 编这些文件时要读到仓库根这份。
 COPY tsconfig.base.json tsconfig.json ./
-COPY packages/contracts ./packages/contracts
-COPY packages/core ./packages/core
+COPY backend/libs/contracts ./backend/libs/contracts
+COPY backend/libs/core ./backend/libs/core
 COPY web ./web
 
 WORKDIR /src/web

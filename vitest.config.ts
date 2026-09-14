@@ -2,22 +2,16 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vitest/config";
 
-// backend/libs vitest 设施（IK9ILQ 音频生成接入设计承诺：核心逻辑单测）。
-// 根配置：不破坏既有 `pnpm test:unit` = `vitest run packages` 行为——
-// include 同时保留 packages 与 backend；`@lib/*` 别名对齐 backend/tsconfig.json paths。
+// backend/libs vitest 设施：`@lib/*` 别名对齐 backend/tsconfig.json paths。
+// packages/ 层已并入 backend/libs（ADR-0077 落地），不再有独立包引用。
 export default defineConfig({
   resolve: {
     alias: {
       "@lib": fileURLToPath(new URL("./backend/libs", import.meta.url)),
-      // 源码直解析（IK9RSS）：backend 测试 import @blue-whale/core/logging
-      // 时 dist 不一定存在，直接指向 src。packages 测试依赖 pnpm
-      // workspace symlink 已能解析，此处不破坏。
-      "@blue-whale/core/logging": fileURLToPath(
-        new URL("./packages/core/src/logging.ts", import.meta.url),
-      ),
     },
   },
   test: {
-    include: ["packages/**/*.test.ts", "backend/**/*.test.ts"],
+    // tests/*.test.mjs 是 node:test 套件（由 node --test 单独跑），不是 vitest 用例。
+    include: ["backend/**/*.test.ts"],
   },
 });

@@ -1,5 +1,5 @@
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
-import type { CanvasEdge } from "@blue-whale/contracts";
+import type { CanvasEdge } from "@lib/contracts";
 import type { PromptTargetNode } from "../canvas/prompt-target.js";
 import { createHash } from "node:crypto";
 
@@ -28,20 +28,22 @@ import {
   type PromptDocRefFailure,
   type TextAttachmentSnapshot,
   previewSourceSchema,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import {
   composeTextAttachmentPrompt,
   composeTextAttachmentPromptIndexed,
   extractTextNodeText,
-} from "@blue-whale/core";
+} from "@lib/core";
 import {
   DEFAULT_MAX_REFERENCE_IMAGES,
   type CanvasRepo,
   type CreateJobInput,
   type GenerationCommandRepo,
   type ModelCapabilityRepo,
+  type ModelCapabilityView,
+  type ModelFeatures,
   type ProjectRepo,
-  type WorkerRepo,
+  type AssetOwnershipOps,
 } from "@lib/shared/persistence/index.js";
 
 import type { GenerationCostEstimator } from "./cost-estimator.js";
@@ -96,6 +98,8 @@ export interface ReferenceItemInput {
   material_id?: string;
   /** IKDJNZ：图片/视频参考 + 参考音频（role 仅 reference）。 */
   type: "image" | "video" | "audio";
+  /** ADR-0086：来源素材时长（秒，可选）——总时长限制校验用。 */
+  duration?: number;
 }
 
 /** 素材库引用（MaterialReference）：仅格式校验（Asset- 前缀），存在性/状态由上游强校验。 */
@@ -161,10 +165,15 @@ function parseReferences(
     if (aid !== null && mid !== null) return { kind: "invalid" };
     // 首尾帧必须是图片；参考音频只能作普通参考（不能当首尾帧）。
     if (role !== "reference" && type !== "image") return { kind: "invalid" };
+    // ADR-0086：解析可选 duration（来源素材时长，秒）——总时长限制校验用。
+    const { duration } = item as Record<string, unknown>;
     items.push({
       role,
       ...(aid !== null ? { asset_id: aid } : { material_id: mid as string }),
       type,
+      ...(typeof duration === "number" && Number.isFinite(duration) && duration > 0
+        ? { duration }
+        : {}),
     });
   }
   return { kind: "ok", items };
@@ -244,9 +253,11 @@ function validateCommon(
     return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
   }
   if (type !== "audio") {
+    // ADR-0086：aspect_ratio 支持任务类型强制的 adaptive（首帧/首尾帧/编辑/延长）；非 adaptive 仍须数字:数字。
     if (
       !isStr(params.aspect_ratio) ||
-      !/^[1-9][0-9]*:[1-9][0-9]*$/.test(params.aspect_ratio)
+      (params.aspect_ratio !== "adaptive" &&
+        !/^[1-9][0-9]*:[1-9][0-9]*$/.test(params.aspect_ratio))
     ) {
       return { code: ERROR_INVALID_INPUT, message: "aspect_ratio 无效" };
     }
@@ -267,12 +278,72 @@ function validateCommon(
   return null;
 }
 
+/** ADR-0086：参考素材分类上限校验（读能力行 features）。服务端与前端同源（后端透出 features 全键）。
+ *  返回 null 表示通过，否则为用户可读失败原因（含真实上限）。 */
+export function checkReferenceLimits(
+  features: Pick<
+    ModelFeatures,
+    | "max_reference_images"
+    | "video_reference"
+    | "video_reference_max"
+    | "audio_reference"
+    | "audio_reference_max"
+    | "image_reference_max"
+    | "max_reference_duration_sec"
+  >,
+  references: Array<{ type: "image" | "video" | "audio"; duration?: number | undefined }>,
+  kind: "image" | "video" | "audio",
+): string | null {
+  // 图生成：只收图片参考，上限 max_reference_images。
+  if (kind === "image") {
+    const imageCount = references.filter((r) => r.type === "image").length;
+    if (imageCount > features.max_reference_images)
+      return `参考图最多 ${features.max_reference_images} 张`;
+    return null;
+  }
+  // 音频生成：只收 audio/image，不可混用，音频≤audio_reference_max、图≤image_reference_max。
+  if (kind === "audio") {
+    const audioCount = references.filter((r) => r.type === "audio").length;
+    const imageCount = references.filter((r) => r.type === "image").length;
+    if (audioCount > features.audio_reference_max)
+      return `参考音频最多 ${features.audio_reference_max} 个`;
+    if (imageCount > features.image_reference_max)
+      return `参考图最多 ${features.image_reference_max} 个`;
+    if (audioCount > 0 && imageCount > 0)
+      return "音频与图片参考不可混用";
+    return null;
+  }
+  // 视频生成：普通参考按类型分类上限（图/视频/音频各自上限）；视频素材需 video_reference 位、
+  // 音频素材需 audio_reference 位；总时长（所有参考素材之和）≤ max_reference_duration_sec。
+  const imageRefs = references.filter((r) => r.type === "image");
+  const videoRefs = references.filter((r) => r.type === "video");
+  const audioRefs = references.filter((r) => r.type === "audio");
+  if (imageRefs.length > features.max_reference_images)
+    return `参考图最多 ${features.max_reference_images} 张`;
+  if (videoRefs.length > 0 && !features.video_reference)
+    return "当前模型不支持视频素材参考";
+  if (audioRefs.length > 0 && !features.audio_reference)
+    return "当前模型不支持音频素材参考";
+  if (videoRefs.length > features.video_reference_max)
+    return `参考视频最多 ${features.video_reference_max} 个`;
+  if (audioRefs.length > features.audio_reference_max)
+    return `参考音频最多 ${features.audio_reference_max} 个`;
+  if (features.max_reference_duration_sec != null) {
+    const total = references.reduce((sum, r) => sum + (r.duration ?? 0), 0);
+    if (total > features.max_reference_duration_sec)
+      return `参考素材总时长超过 ${features.max_reference_duration_sec} 秒，请减少素材`;
+  }
+  return null;
+}
+
 /** IKE4GC：音频生成参考素材——仅接受单数组 references（audio|image，role 强制 reference）。
- *  音频/图片生成无首尾帧概念；音频参考 ≤3、图片参考 ≤1、二者不可混用（seed-audio 官方限制）。
+ *  音频/图片生成无首尾帧概念；分类上限由能力行（features.audio_reference_max / image_reference_max）驱动
+ *  （ADR-0086），旧硬编码 ≤3/≤1 退役。不可混用（seed-audio 官方限制）。
  *  旧参考字段（reference_asset_ids/input_asset_ids/reference_materials/首尾帧字段）对音频仍不支持，
  *  且与 references 互斥。 */
 function validateAudioReferences(
   body: CreateGenerationJobBody,
+  features?: ModelFeatures,
 ): { code: string; message: string } | null {
   const parsed = parseReferences(body.references);
   if (parsed.kind === "invalid") {
@@ -316,17 +387,16 @@ function validateAudioReferences(
       };
     }
   }
-  const audioCount = parsed.items.filter((r) => r.type === "audio").length;
-  const imageCount = parsed.items.filter((r) => r.type === "image").length;
-  if (audioCount > 3)
-    return { code: ERROR_INVALID_REFERENCE, message: "参考音频最多 3 个" };
-  if (imageCount > 1)
-    return { code: ERROR_INVALID_REFERENCE, message: "参考图最多 1 个" };
-  if (audioCount > 0 && imageCount > 0)
-    return {
-      code: ERROR_INVALID_REFERENCE,
-      message: "音频与图片参考不可混用",
-    };
+  const limitErr = features
+    ? checkReferenceLimits(
+        features,
+        parsed.items
+          .filter((r): r is ReferenceItemInput & { type: "audio" | "image" } => true)
+          .map((r) => ({ type: r.type, duration: r.duration })),
+        "audio",
+      )
+    : null;
+  if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
   return null;
 }
 
@@ -347,10 +417,18 @@ function validateRejectMaterialReferences(
   return null;
 }
 
-/** 视频特有校验：首尾帧 / 普通参考 asset 互斥（≤12）+ 素材库引用（asset∨material 并集互斥/配对）。 */
+/** 视频特有校验：首尾帧 / 普通参考 asset 互斥 + 素材库引用（asset∨material 并集互斥/配对）。
+ *  ADR-0086：普通参考按类型分类上限改读能力行（video_reference / video_reference_max /
+ *  audio_reference / audio_reference_max / max_reference_duration_sec），旧「参考素材最多 12」退役。
+ *  capability 传入时以其 supported_aspect_ratios 判定「模型是否支持自适应比例」（首尾帧强制 adaptive）。 */
 function validateVideo(
   body: CreateGenerationJobBody,
+  capability?: ModelCapabilityView,
 ): { code: string; message: string } | null {
+  const features = capability?.features;
+  const supportsAdaptive =
+    Array.isArray(capability?.supported_aspect_ratios) &&
+    capability.supported_aspect_ratios.includes("adaptive");
   const inputAssetIds = Array.isArray(body.input_asset_ids)
     ? body.input_asset_ids
     : [];
@@ -412,12 +490,34 @@ function validateVideo(
     }
     const roleErr = validateReferenceRoles(parsed.items);
     if (roleErr) return { code: ERROR_INVALID_REFERENCE, message: roleErr };
-    // 普通参考数量上限沿用 Seedance 约束（首尾帧不计入；参考音频不占图/视频额度）。
-    const refCount = parsed.items.filter(
-      (r) => r.role === "reference" && r.type !== "audio",
-    ).length;
-    if (refCount > 12)
-      return { code: ERROR_INVALID_REFERENCE, message: "参考素材最多 12 个" };
+    // ADR-0086：普通参考按类型分类上限（能力行驱动）。视频素材需 video_reference 位、音频需
+    // audio_reference 位、总时长 ≤ max_reference_duration_sec；缺省能力行时回落旧 12 上限。
+    const limitErr = features
+      ? checkReferenceLimits(
+          features,
+          parsed.items
+            .filter((r) => r.role === "reference")
+            .map((r) => ({ type: r.type, duration: r.duration })),
+          "video",
+        )
+      : parsed.items.filter((r) => r.role === "reference" && r.type !== "audio").length > 12
+        ? "参考素材最多 12 个"
+        : null;
+    if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
+    // ADR-0086：任务类型约束——首帧/首尾帧模式强制 adaptive 比例（官方要求，输出跟随首帧图）。
+    // 仅当模型能力行 supported_aspect_ratios 含 adaptive 时强制（2.0/2.5 均含；未配 adaptive 的第三方档位不适用）。
+    if (
+      supportsAdaptive &&
+      parsed.items.some((r) => r.role === "first_frame" || r.role === "last_frame")
+    ) {
+      const params = body.parameters as GenerationParameters | undefined;
+      if (!isStr(params?.aspect_ratio) || params.aspect_ratio !== "adaptive") {
+        return {
+          code: ERROR_INVALID_INPUT,
+          message: "首帧/首尾帧模式仅支持自适应比例（adaptive）",
+        };
+      }
+    }
     return null;
   }
   const firstFrameAssetId2 = assetId(body.first_frame_asset_id);
@@ -457,11 +557,28 @@ function validateVideo(
     };
   }
   // IKDJNZ：参考音频不占图/视频额度——12 上限只计图/视频并集；音频引用单独统计。
+  // ADR-0086：视频素材上限由能力行驱动（video_reference_max），缺省回落旧 12（图/视频并集）。
   const imageVideoRefCount = uniqueRefs.filter(
     (r) => r.type !== "audio",
   ).length;
-  if (imageVideoRefCount > 12) {
+  const videoRefCount = uniqueRefs.filter((r) => r.type === "video").length;
+  const audioRefCount = uniqueRefs.filter((r) => r.type === "audio").length;
+  if (features) {
+    const limitErr = checkReferenceLimits(
+      features,
+      uniqueRefs.map((r) => ({ type: r.type })),
+      "video",
+    );
+    if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
+  } else if (imageVideoRefCount > 12) {
     return { code: ERROR_INVALID_REFERENCE, message: "参考素材最多 12 个" };
+  }
+  // ADR-0086：音频参考能力位（features.audio_reference 关 → 拒绝音频素材）；缺省能力行保留旧行为。
+  if (features && !features.audio_reference && audioRefCount > 0) {
+    return { code: ERROR_INVALID_REFERENCE, message: "当前模型不支持音频素材参考" };
+  }
+  if (features && !features.video_reference && videoRefCount > 0) {
+    return { code: ERROR_INVALID_REFERENCE, message: "当前模型不支持视频素材参考" };
   }
   return null;
 }
@@ -528,6 +645,7 @@ const imageStrategy: GenerationTypeStrategy = {
 
 const videoStrategy: GenerationTypeStrategy = {
   validate(body) {
+    // ADR-0086：分类上限校验读能力行（白名单解析后以 capability.features 重跑，见 pipeline）。
     return validateCommon(body, "video") ?? validateVideo(body);
   },
   composeInput({
@@ -587,6 +705,7 @@ const videoStrategy: GenerationTypeStrategy = {
 
 const audioStrategy: GenerationTypeStrategy = {
   validate(body) {
+    // ADR-0086：音频参考分类上限读能力行（白名单解析后以 capability.features 重跑，见 pipeline）。
     return validateCommon(body, "audio") ?? validateAudioReferences(body);
   },
   composeInput({ body, resolvedModelId, promptText, targetNodeId, textAttachments, promptDoc }) {
@@ -820,7 +939,7 @@ interface GenerationDeps {
   /** IKDLQF：携带 target_node_id 时于接纳当下读取最新画布推导有序文本附件。 */
   canvas: Pick<CanvasRepo, "getByProject">;
   /** IKE7JP：提交时复用 worker resolveInputAssets 查参考素材存在性/类型（归属逻辑单份）。 */
-  assets: Pick<WorkerRepo, "resolveInputAssets">;
+  assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
   /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额；缺省沿用旧行为（0 + dev）。 */
   costEstimator?: GenerationCostEstimator;
 }
@@ -841,7 +960,8 @@ export async function handleCreateGenerationJob(
   const owned = await deps.projects.findOwnedById(projectId, userId);
   if (!owned) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
 
-  // 2. 类型分派 + 校验
+  // 2. 类型分派 + 校验（ADR-0086：视频/音频参考限制校验读能力行 features，先于模型白名单解析前
+  //    以旧默认值运行，白名单解析后以 capability.features 重跑一次）
   const type = body.type as GenerationType;
   const strategy = strategies[type];
   if (!strategy)
@@ -874,6 +994,16 @@ export async function handleCreateGenerationJob(
   const capability = whitelist.find((m) => m.model_id === resolvedModelId);
   const maxReferenceImages =
     capability?.features?.max_reference_images ?? DEFAULT_MAX_REFERENCE_IMAGES;
+  // ADR-0086：视频/音频参考分类限制校验读能力行 features——strategy.validate 前以旧默认值兜底，
+  // 此处拿到白名单 capability 后以真实 features 重跑（超限在接纳当下 400，含模型真实上限文案）。
+  if (capability && (type === "video" || type === "audio")) {
+    const revalidated =
+      type === "video"
+        ? validateVideo(body, capability)
+        : validateAudioReferences(body, capability.features);
+    if (revalidated)
+      return fail(400, revalidated.message, { code: revalidated.code });
+  }
   // ADR-0085（IKESD6）：raw prompt 长度上限跟随模型目录（image-2 配 32000），
   // 缺省回落旧硬编码（image/video 4000 / audio 3000）；错误码与旧 validateCommon 一致。
   const maxPromptLength =
@@ -938,10 +1068,11 @@ export async function handleCreateGenerationJob(
   // IKE7JP：视频 resolution/aspect_ratio 组合必须能换算成像素（与 worker videoDimensions 同源），
   // 否则 worker 会在执行期才失败——越界在接纳当下 400（invalid_input），不拖到执行期。
   // 图片路径无此概念（走上方交叉格校验）。
+  // ADR-0086：adaptive 自适应比例无固定宽高（首帧/编辑/延长任务强制），放行不换算像素。
   if (type === "video" && capability) {
     const resolution = isStr(params.resolution) ? params.resolution : "";
     const ratio = isStr(params.aspect_ratio) ? params.aspect_ratio : "";
-    if (resolution && ratio) {
+    if (resolution && ratio && ratio !== "adaptive") {
       const dimensions =
         videoDimensions(resolution, ratio) ?? dimensionsFromSize(resolution);
       if (!dimensions) {

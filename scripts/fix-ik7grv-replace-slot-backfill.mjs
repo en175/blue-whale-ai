@@ -10,7 +10,7 @@
 //   - Snapshot 投影按该外键过滤，这些输出槽（含重试槽）恒不投影。
 // IK7GRT（commit 6ddbea89）已修复 replace 路径的新数据，本脚本一次性回填历史脏数据。
 //
-// 三步修复，口径严格对齐生产重算 syncRecordSummary（generation-worker-internals.ts:21-62）：
+// 三步修复，口径严格对齐生产重算 syncRecordSummary（storyboard-summary-repo.ts（worker 退役后由 syncStoryboardPreviewSummary 承担））：
 //   Step 1 回填：递归沿 retry_of_slot_id 链收集每个脏 record 首个 job 衍生的全部 slot
 //                （原始 + 各层重试），把其中 record 关联为 NULL 的绑回 record.id。
 //   Step 2 重算：回填后同事务内按 scene_card_generation_record_id = record.id 取该 record

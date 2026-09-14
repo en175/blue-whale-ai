@@ -18,7 +18,6 @@ import {
   Minimize2,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { REF_LIMITS } from '@/utils/ref-overflow';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import {
   docHasAnyRef,
@@ -44,8 +43,6 @@ import type { MediaGenStatus } from '../MediaNode';
 import {
   canAddRefRole,
   hasAnyMediaRef,
-  MAX_VIDEO_REFS,
-  supportsVideoReferenceModel,
   videoRefConflict,
   isLibraryOnlyVideoRef,
   type VideoMediaRef,
@@ -53,6 +50,14 @@ import {
   type VideoRefCapabilities,
   type VideoRefRole,
 } from '../../videoMediaRefs';
+import {
+  audioReferenceMaxOf,
+  videoReferenceMaxOf,
+  imageReferenceMaxOfCap,
+  supportsAudioReferenceOf,
+  supportsVideoReferenceOf,
+  checkReferenceLimits,
+} from '@/lib/model-reference-limits';
 import AtMentionMenu from '../AtMentionMenu';
 import { type AtMentionItem } from '../../atMention';
 import {
@@ -143,6 +148,8 @@ interface BottomDialogProps extends RefStripOrderProps {
   videoMediaRefs: VideoMediaRefs;
   /** 移除某个视频参考：携带来源节点 id，父级断开对应连线 */
   onRemoveVideoRef?: (sourceNodeId: string) => void;
+  /** IKFJJT：把普通参考批量转为首帧/尾帧角色槽（切首尾帧自动转换；nodeId 为边来源或素材库 materialId） */
+  onAssignRefRoles?: (assignments: Array<{ nodeId: string; role: VideoRefRole }>) => void;
   /** 移除角色库 material 参考（materialId，父级从草稿 data.draftMaterialRefs 过滤） */
   onRemoveMaterialRef?: (materialId: string) => void;
   /** 参考栏拖拽换位（IKFCKT）：普通参考新顺序（nodeId / materialId 混合 key）；父级按子源拆分重排
@@ -185,7 +192,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
   /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -265,23 +272,29 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     onToast?.('warn', '已根据当前素材切换生成模式');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabledModes, selectedMode]);
-  /** 当前模型与视频参考相关的能力位（模型未加载时为 null，约束入口按不可用处理） */
+  /** 当前模型与视频参考相关的能力位 + 分类上限（ADR-0086；模型未加载时为 null，约束入口按不可用处理） */
   const caps: VideoRefCapabilities | null = currentModel
     ? {
         firstFrame: currentModel.features.first_frame,
         lastFrame: currentModel.features.last_frame,
         firstLastFrame: currentModel.features.first_last_frame,
         referenceImage: currentModel.features.reference_image,
+        videoReference: supportsVideoReferenceOf(currentModel.features),
+        audioReference: supportsAudioReferenceOf(currentModel.features),
+        videoReferenceMax: videoReferenceMaxOf(currentModel.features),
+        audioReferenceMax: audioReferenceMaxOf(currentModel.features),
+        imageMax: imageReferenceMaxOfCap(currentModel.features),
       }
     : null;
-  /** 组合校验（IKDMQS）：与服务端 400 同口径 + 能力位；冲突时明确提示并禁用发送 */
+  /** 组合校验（IKDMQS）：与服务端 400 同口径（ADR-0086：分类上限/素材总时长读能力行，走共享纯函数
+   *  checkReferenceLimits，与 backend handle-create-generation-job 同源语义）+ 结构约束 videoRefConflict；
+   *  冲突时明确提示并禁用发送。 */
   const referenceConflict = planReferenceError ?? (caps
-    ? (videoMediaRefs.reference.filter(r => r.mediaType === 'image').length > (currentModel?.features.max_reference_images ?? 0)
-        ? '图片参考超出当前模型上限，请调整引用或模型' : videoMediaRefs.reference.filter(r => r.mediaType === 'audio').length > 3
-        ? '最多支持 3 个参考音频' : videoMediaRefs.reference.filter(r => r.mediaType === 'video').length > MAX_VIDEO_REFS
-        ? '最多支持 3 个参考视频' : videoRefConflict(videoMediaRefs, caps))
-      ?? (!supportsVideoReferenceModel(selectedModel) && videoMediaRefs.reference.some(ref => ref.mediaType !== 'image')
-        ? '当前模型不支持视频或音频参考，请更换模型或调整引用' : null)
+    ? (checkReferenceLimits(
+        currentModel?.features,
+        videoMediaRefs.reference.map((r) => ({ type: r.mediaType, duration: r.duration })),
+        'video',
+      ) ?? videoRefConflict(videoMediaRefs, caps))
     : null);
   const modeConflict = selectedMode === 'prompt' && hasAnyMediaRef(videoMediaRefs)
     ? '文生视频模式不支持媒体参考，请移除参考或切换模式'
@@ -366,35 +379,67 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     if (enabledModes && !enabledModes.includes(key as VideoFollowMode)) return;
     if (key === selectedMode) return;
     const hasFrames = !!(videoMediaRefs.first || videoMediaRefs.last);
-    const hasRefs = videoMediaRefs.reference.length > 0;
     if (key === 'prompt') {
       if (hasAnyMediaRef(videoMediaRefs)) {
         onToast?.('warn', '文生视频模式不支持媒体参考，请先移除参考');
         return;
       }
     } else if (key === 'keyframe') {
-      if (hasRefs || videoRefCount > 0) {
-        onToast?.('warn', '首尾帧模式仅支持首帧与尾帧，请先移除普通参考');
+      // IKFJJT：普通参考切首尾帧——已连图片自动转为首帧/尾帧槽（第 1 张首帧、第 2 张尾帧），
+      // 不再要求用户先移除（旧行为「请先移除普通参考」与「图片≥2 才解锁首尾帧」互锁，永远切不进）。
+      const imageRefs = videoMediaRefs.reference.filter((r) => r.mediaType === 'image');
+      const nonImageRefs = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image');
+      if (nonImageRefs.length > 0) {
+        onToast?.('warn', '首尾帧模式仅支持图片素材，请先移除视频/音频参考');
         return;
+      }
+      if (imageRefs.length > 2) {
+        onToast?.('warn', '首尾帧模式最多 2 张图片（首帧 + 尾帧），请先减少参考');
+        return;
+      }
+      if (imageRefs.length > 0) {
+        onAssignRefRoles?.(
+          imageRefs.slice(0, 2).map((r, i) => ({ nodeId: r.nodeId, role: i === 0 ? 'first' : 'last' })),
+        );
       }
     } else {
+      // all（全能参考）/ text2video（图生视频）：首帧/尾帧转回普通参考（IKFJJT：与切首尾帧对称）。
+      // 首尾帧槽只收图片，转回后即图片普通参考，两种模式都接受。
       if (hasFrames) {
-        onToast?.('warn', `${key === 'text2video' ? '图生视频' : '全能参考'}模式不支持首尾帧，请先移除首帧/尾帧`);
-        return;
-      }
-      if (key === 'text2video' && videoRefCount > 0) {
+        const frames = [videoMediaRefs.first, videoMediaRefs.last].filter(
+          (f): f is VideoMediaRef => !!f,
+        );
+        onAssignRefRoles?.(frames.map((f) => ({ nodeId: f.nodeId, role: 'reference' })));
+      } else if (key === 'text2video' && videoRefCount > 0) {
         onToast?.('warn', '图生视频模式不支持视频或音频参考，请先调整引用');
         return;
       }
     }
     setSelectedMode(key);
+    // ADR-0086：首尾帧任务官方强制 adaptive（输出跟随首帧图比例），切模式即内置默认，不让用户感知比例。
+    if (key === 'keyframe') {
+      setSelectedRatio('adaptive');
+      syncDraftParams({ mode: key, ratio: 'adaptive' });
+      return;
+    }
+    // 离开首尾帧：若当前是 adaptive（首尾帧内置值）且新模型比例列表不含 adaptive，回落到模型默认/首个比例。
+    if (selectedRatio === 'adaptive' && currentModel && !currentModel.supported_aspect_ratios.includes('adaptive')) {
+      const fallbackRatio =
+        currentModel.default_aspect_ratio && currentModel.supported_aspect_ratios.includes(currentModel.default_aspect_ratio)
+          ? currentModel.default_aspect_ratio
+          : (currentModel.supported_aspect_ratios[0] ?? '');
+      setSelectedRatio(fallbackRatio);
+      syncDraftParams({ mode: key, ratio: fallbackRatio });
+      return;
+    }
     syncDraftParams({ mode: key });
   };
 
   const configurationError = !modelsLoaded ? '正在加载模型配置'
     : !currentModel ? '原生成模型不可用，请重新选择模型'
     : !sizeOptions.some(option => option.key === selectedSize) ? '原分辨率不可用，请重新选择分辨率'
-    : !ratioOptions.includes(selectedRatio) ? '原比例不兼容，请重新选择比例'
+    // ADR-0086：首尾帧比例内置 adaptive（不暴露给用户），跳过比例合法性校验，避免误报「原比例不兼容」。
+    : !isKeyframe && !ratioOptions.includes(selectedRatio) ? '原比例不兼容，请重新选择比例'
     : durationRange && (duration < durationRange.min || duration > durationRange.max
       || (duration - durationRange.min) % durationRange.step !== 0)
       ? '原时长不兼容，请重新选择时长'
@@ -409,11 +454,16 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     for (let v = durationRange.min; v <= durationRange.max; v += durationRange.step) ticks.push(v);
   }
 
-  /** 选中模型后应用其默认清晰度/宽高比/时长，返回实际应用值（供草稿参数同步） */
+  /** 选中模型后应用其默认清晰度/宽高比/时长，返回实际应用值（供草稿参数同步）。
+   *  ADR-0086：首尾帧任务官方强制 adaptive（输出跟随首帧图比例），比例内置不暴露给用户——代码直接固定，
+   *  不依赖模型能力行是否列了 adaptive（2.0/2.5 首尾帧均强制）。 */
   const applyModelDefaults = (m: GenerationModel) => {
     setSelectedModel(m.model_id);
     let nextRatio = selectedRatio;
-    if (m.supported_aspect_ratios.length) {
+    if (isKeyframe) {
+      nextRatio = 'adaptive';
+      setSelectedRatio(nextRatio);
+    } else if (m.supported_aspect_ratios.length) {
       nextRatio =
         m.default_aspect_ratio && m.supported_aspect_ratios.includes(m.default_aspect_ratio)
           ? m.default_aspect_ratio
@@ -451,13 +501,15 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
         setModelsLoaded(true);
         // 已有节点配置原样恢复，禁止因模型能力变化自动改写最新编辑。
         if (videoDraftBinding.restoreExisting || initialParams?.modelId) {
+          const restoredMode = initialParams?.mode ?? 'prompt';
           setSelectedModel(initialParams?.modelId ?? '');
           const model = list.find(m => m.model_id === initialParams?.modelId);
           const size = model?.supported_sizes.find(s => s.id === initialParams?.resolution || s.api_value === initialParams?.resolution);
           setSelectedSize(size?.id ?? initialParams?.resolution ?? '');
-          setSelectedRatio(initialParams?.aspectRatio ?? '');
+          // ADR-0086：首尾帧比例内置 adaptive，恢复时不吃历史固定比例（旧草稿可能存 16:9/空）。
+          setSelectedRatio(restoredMode === 'keyframe' ? 'adaptive' : (initialParams?.aspectRatio ?? ''));
           setDuration(initialParams?.duration ?? 0);
-          setSelectedMode(initialParams?.mode ?? 'prompt');
+          setSelectedMode(restoredMode);
           return;
         }
         if (!list.length) return;
@@ -493,6 +545,11 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
           }
           if (initialParams.mode && modeOptions.some((o) => o.key === initialParams.mode)) {
             setSelectedMode(initialParams.mode);
+            // ADR-0086：首尾帧比例内置 adaptive，覆盖首页带入的固定比例。
+            if (initialParams.mode === 'keyframe') {
+              setSelectedRatio('adaptive');
+              patch.ratio = 'adaptive';
+            }
           }
         }
         // 草稿绑定：把实际生效的完整参数写回草稿节点（含首次默认落值）
@@ -862,24 +919,28 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
             </>
           )}
 
-          {/* 宽高比 */}
-          <span className={styles.configLabel}>宽高比</span>
-          <div className={styles.ratioGroup}>
-            {ratioOptions.map((r) => (
-              <button
-                key={r}
-                className={`${styles.ratioBtn} ${r === selectedRatio ? styles.ratioBtnActive : ''}`}
-                disabled={readOnly}
-                onClick={() => {
-                  setSelectedRatio(r);
-                  syncDraftParams({ ratio: r });
-                }}
-              >
-                <RatioIcon ratio={r} />
-                <span>{r}</span>
-              </button>
-            ))}
-          </div>
+          {/* 宽高比（ADR-0086：首尾帧任务官方强制 adaptive、输出跟随首帧图，比例内置不渲染，用户不可见不可改） */}
+          {!isKeyframe && (
+            <>
+              <span className={styles.configLabel}>宽高比</span>
+              <div className={styles.ratioGroup}>
+                {ratioOptions.map((r) => (
+                  <button
+                    key={r}
+                    className={`${styles.ratioBtn} ${r === selectedRatio ? styles.ratioBtnActive : ''}`}
+                    disabled={readOnly}
+                    onClick={() => {
+                      setSelectedRatio(r);
+                      syncDraftParams({ ratio: r });
+                    }}
+                  >
+                    <RatioIcon ratio={r} />
+                    <span>{r}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -931,7 +992,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
             )}
             {videoMediaRefs.reference.length > 0 && (
               <span className={styles.fileCount}>
-                {videoMediaRefs.reference.length}/{REF_LIMITS.image + MAX_VIDEO_REFS}
+                {videoMediaRefs.reference.length}/{caps ? (caps.imageMax ?? 9) + (caps.videoReferenceMax ?? 3) : 12}
               </span>
             )}
           </div>
@@ -1014,12 +1075,16 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
             )}
           </div>
 
-          {/* 配置信息（点击展开配置面板） */}
+          {/* 配置信息（点击展开配置面板）。ADR-0086：首尾帧比例内置 adaptive，不在状态栏暴露这项。 */}
           <button className={styles.configBtn} onClick={() => setShowConfig(!showConfig)}>
             <SlidersHorizontal size={14} strokeWidth={2} />
             <span>{currentModel?.model_label ?? '选择模型'}</span>
-            <span className={styles.barDivider}>|</span>
-            <span>{selectedRatio}</span>
+            {!isKeyframe && (
+              <>
+                <span className={styles.barDivider}>|</span>
+                <span>{selectedRatio}</span>
+              </>
+            )}
             <span className={styles.barDivider}>|</span>
             <span>{currentSizeLabel}</span>
             <span className={styles.barDivider}>|</span>

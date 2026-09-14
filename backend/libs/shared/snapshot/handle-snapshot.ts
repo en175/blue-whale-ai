@@ -5,7 +5,7 @@ import {
   type LegacyMigrationReport,
   type PublicGenerationError,
   type ResultEnvelope,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { projectPublicError } from "@lib/shared/jobs/generation-job-error-projection.js";
 import { wireInteger, type WireInteger } from "@lib/shared/wire-integer.js";
 import type { ProjectService } from "@lib/shared/project/project.service.js";

@@ -5,8 +5,8 @@ import {
   HttpException,
   HttpStatus,
 } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
-import { DomainError } from "@blue-whale/contracts";
+import { NewApiError } from "@lib/core";
+import { DomainError } from "@lib/contracts";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
 import type { Request, Response } from "express";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";

@@ -1,4 +1,4 @@
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 
 /** 把请求方 sk-token 直接透传为 job 凭证（修正四：去密封，明文存 job.input.provider_credential）。未携带/非 sk- → 空。 */
 export function sealProviderCredential(

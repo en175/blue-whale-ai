@@ -19,7 +19,8 @@ import { type SkillRecord } from '@/api/skills';
 import { createProject } from '@/api/projects';
 import { setGenHandoff } from '@/utils/gen-handoff';
 import { setAgentHandoff } from '@/utils/agent-handoff';
-import { classifyRefOverflow, classifyRefOverflows, refOverflowToast, REF_LIMITS } from '@/utils/ref-overflow';
+import { classifyRefOverflow, classifyRefOverflows, refOverflowToast } from '@/utils/ref-overflow';
+import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOfCap, supportsVideoReferenceOf } from '@/lib/model-reference-limits';
 import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput, MAX_PROMPT_INPUT_LENGTH } from './promptInput';
@@ -38,15 +39,11 @@ const videoModes = [
   { key: 'text2video', label: '图生视频' },
 ];
 
-/** 视频最大上传数量（接口未下发该字段，前端统一 3） */
-const MAX_VIDEOS = 3;
-
-/** 智能体 tab 附件分类型上限：视频/音频固定 3（图片随创作模型能力，见组件内 agentMaxImages） */
-const MAX_AGENT_VIDEOS = 3;
-const MAX_AGENT_AUDIO = 3;
-
 /** 输入框字数上限（与画布对话框一致） */
 const MAX_INPUT = MAX_PROMPT_INPUT_LENGTH;
+
+/** AI视频首尾帧槽位素材项（仅图片；普通参考与槽位互转时复用） */
+type KeyframeRefItem = { file?: File; preview: string; type: 'image'; assetId?: string | number };
 
 /** 生成时间戳项目名（与画布新建项目命名一致） */
 function makeProjectName(): string {
@@ -245,7 +242,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   useEffect(() => {
     const m = videoModelList.find((x) => x.model_id === videoModel);
     if (!m) return;
-    if (m.supported_aspect_ratios.length && !m.supported_aspect_ratios.includes(aspectRatio)) {
+    // ADR-0086：首尾帧任务官方强制 ratio=adaptive（输出跟随首帧图比例），比例内置不暴露给用户——
+    // 切模型/切模式后统一强制，不参与「不在能力列表就回落默认」的校准。
+    if (isKeyframe) {
+      setAspectRatio('adaptive');
+    } else if (m.supported_aspect_ratios.length && !m.supported_aspect_ratios.includes(aspectRatio)) {
       setAspectRatio(
         m.default_aspect_ratio && m.supported_aspect_ratios.includes(m.default_aspect_ratio)
           ? m.default_aspect_ratio
@@ -270,7 +271,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoModelList, videoModel]);
+  }, [videoModelList, videoModel, isKeyframe]);
 
   // 并发加载三种能力的模型列表
   useEffect(() => {
@@ -514,8 +515,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const handleAgentFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     let imgRoom = Math.max(0, agentMaxImages - agentImageCount);
-    let vidRoom = Math.max(0, MAX_AGENT_VIDEOS - agentVideoCount);
-    let audRoom = Math.max(0, MAX_AGENT_AUDIO - agentAudioCount);
+    let vidRoom = Math.max(0, agentMaxVideos - agentVideoCount);
+    let audRoom = Math.max(0, agentMaxAudios - agentAudioCount);
     const items = files
       .filter((file) => {
         if (file.type.startsWith('image/')) {
@@ -551,8 +552,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       files.filter((f) => !f.type.startsWith('image/') && !f.type.startsWith('video/')).length -
       items.filter((i) => i.kind === 'audio').length;
     if (droppedImages > 0) showToast(`附件图片最多 ${agentMaxImages} 张`);
-    else if (droppedVideos > 0) showToast(`附件视频最多 ${MAX_AGENT_VIDEOS} 个`);
-    else if (droppedAudio > 0) showToast(`附件音频最多 ${MAX_AGENT_AUDIO} 个`);
+    else if (droppedVideos > 0) showToast(`附件视频最多 ${agentMaxVideos} 个`);
+    else if (droppedAudio > 0) showToast(`附件音频最多 ${agentMaxAudios} 个`);
     setAgentFiles((prev) => [...prev, ...items]);
     e.target.value = '';
   };
@@ -631,25 +632,29 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     selectedVideoModel?.supported_sizes.map((s) => ({ key: s.id, label: s.label })) ?? [];
   const videoDurationRange = selectedVideoModel?.supported_durations ?? null;
 
-  // 上传上限（与画布弹窗同规则）：图片数走接口 max_reference_images（首尾帧固定 2），视频最多 3
-  /** 智能体 tab 附件分类型上限：图片随所选创作模型（video capability）读接口 max_reference_images（能力未加载完时为 0）；视频/音频固定 3 */
+  // 上传上限（与画布弹窗同规则）：图片/视频/音频均读能力行（ADR-0086），能力未加载完时图片为 0、视频/音频回落缺省
+  /** 智能体 tab 附件分类型上限：随所选创作模型（video capability）读能力行
+   *  （max_reference_images / video_reference_max / audio_reference_max） */
   const selectedCreationModel = videoModelList.find((m) => m.model_id === creationModel);
   const agentMaxImages = selectedCreationModel?.features?.max_reference_images ?? 0;
+  const agentMaxVideos = videoReferenceMaxOf(selectedCreationModel?.features);
+  const agentMaxAudios = audioReferenceMaxOf(selectedCreationModel?.features);
   const agentImageCount = agentFiles.filter((f) => f.kind === 'image').length;
   const agentVideoCount = agentFiles.filter((f) => f.kind === 'video').length;
   const agentAudioCount = agentFiles.filter((f) => f.kind === 'audio').length;
   const agentAllFull =
     agentImageCount >= agentMaxImages &&
-    agentVideoCount >= MAX_AGENT_VIDEOS &&
-    agentAudioCount >= MAX_AGENT_AUDIO;
+    agentVideoCount >= agentMaxVideos &&
+    agentAudioCount >= agentMaxAudios;
   const videoRefImageCount = refFiles.filter((r) => r.type === 'image').length;
   const videoRefVideoCount = refFiles.filter((r) => r.type === 'video').length;
   const videoMaxImages =
     videoMode === 'firstlast'
       ? 2
-      : (selectedVideoModel?.features?.max_reference_images ?? 0);
+      : (selectedVideoModel?.features?.max_reference_images ?? 10);
+  const videoMaxVideos = videoReferenceMaxOf(selectedVideoModel?.features);
   const videoImagesFull = videoRefImageCount >= videoMaxImages;
-  const videoVideosFull = videoRefVideoCount >= MAX_VIDEOS;
+  const videoVideosFull = videoRefVideoCount >= videoMaxVideos;
   /** 首尾帧模式发送校验：添加阶段允许先只传一个（首帧/尾帧），但发送时必须首帧与尾帧齐全。
    *  keyframeSendHint 非空表示不完整，用于发送按钮 title 与点击时的 toast 提示缺项。 */
   const keyframeSendHint = isKeyframe
@@ -661,10 +666,52 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           ? '请补充尾帧'
           : ''
     : '';
-  /** AI 图片参考图上限：产品约定 9 张（与画布 ImageDialog REF_LIMITS.image 一致），取接口值和约定的较小值 */
-  const imageMaxImages = Math.min(selectedImageModel?.features?.max_reference_images ?? 0, REF_LIMITS.image);
+  /** AI 图片参考图上限（ADR-0086：读能力行 max_reference_images，缺省 DEFAULT_MAX_REFERENCE_IMAGES=10，
+   *  不再 min 到旧写死 9）。 */
+  const imageMaxImages = imageReferenceMaxOfCap(selectedImageModel?.features);
 
   // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
+  /** 切换 AI视频模式（ADR-0086 对齐画布）：切首尾帧把普通参考里的图片转为首帧/尾帧槽，
+   *  切回全能参考/图生视频把首尾帧槽转回普通参考——素材智能转换，不让用户手动搬。
+   *  首尾帧只收图片：普通参考含视频时拒绝切换（明确提示，不静默丢弃）。 */
+  const handleVideoModeChange = (key: string) => {
+    setShowVideoModeDrop(false);
+    if (key === videoMode) return;
+    if (key === 'firstlast') {
+      const videos = refFiles.filter((f) => f.type === 'video');
+      if (videos.length > 0) {
+        showToast('首尾帧模式仅支持图片素材，请先移除视频参考');
+        return;
+      }
+      if (refFiles.length > 2) {
+        showToast('首尾帧模式最多 2 张图片（首帧 + 尾帧），请先减少参考');
+        return;
+      }
+      const images = refFiles.filter((f): f is KeyframeRefItem => f.type === 'image');
+      if (images.length > 0) {
+        setKeyframeRefs({ first: images[0], last: images[1] });
+        setRefFiles([]);
+      }
+      // ADR-0086：首尾帧比例内置 adaptive（输出跟随首帧图），不让用户感知/选择。
+      setAspectRatio('adaptive');
+    } else if (videoMode === 'firstlast') {
+      // 切离首尾帧：首帧/尾帧转回普通参考（图片），清空槽位
+      const restored = [keyframeRefs.first, keyframeRefs.last].filter(Boolean) as KeyframeRefItem[];
+      if (restored.length > 0) setRefFiles((prev) => [...prev, ...restored]);
+      setKeyframeRefs({});
+      // 离开首尾帧：adaptive 内置值若新模型比例列表不含，回落模型默认/首个比例。
+      const m = videoModelList.find((x) => x.model_id === videoModel);
+      if (aspectRatio === 'adaptive' && m && !m.supported_aspect_ratios.includes('adaptive')) {
+        setAspectRatio(
+          m.default_aspect_ratio && m.supported_aspect_ratios.includes(m.default_aspect_ratio)
+            ? m.default_aspect_ratio
+            : (m.supported_aspect_ratios[0] ?? ''),
+        );
+      }
+    }
+    setVideoMode(key);
+  };
+
   const handleRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     // 首尾帧模式：每个槽位只接受一张图片，写入目标槽（本地上传已限定 accept=image/*）
@@ -680,10 +727,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       return;
     }
     let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
-    let vidRoom = Math.max(0, MAX_VIDEOS - videoRefVideoCount);
+    let vidRoom = Math.max(0, videoMaxVideos - videoRefVideoCount);
+    // ADR-0086：模型不接受视频素材参考（features.video_reference=false）时直接拒绝，不静默丢弃。
+    const videoRefUnsupported =
+      files.some((f) => f.type.startsWith('video/')) && !supportsVideoReferenceOf(selectedVideoModel?.features);
     const newFiles = files
       .filter((f) => {
         if (f.type.startsWith('video/')) {
+          if (videoRefUnsupported) return false;
           if (vidRoom <= 0) return false;
           vidRoom -= 1;
           return true;
@@ -703,15 +754,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       acceptedImages: newFiles.filter((f) => f.type === 'image').length,
       acceptedVideos: newFiles.filter((f) => f.type === 'video').length,
     });
-    if (overflow === 'image') showToast(`参考图最多 ${videoMaxImages} 张，请减少图片`);
-    else if (overflow === 'video') showToast(`参考视频最多 ${MAX_VIDEOS} 个`);
+    if (videoRefUnsupported && overflow === null) showToast('当前模型不支持视频素材参考，请更换模型');
+    else if (overflow === 'image') showToast(`参考图最多 ${videoMaxImages} 张，请减少图片`);
+    else if (overflow === 'video') showToast(`参考视频最多 ${videoMaxVideos} 个`);
     setRefFiles((prev) => [...prev, ...newFiles]);
     // 重置 input 以便重复选择相同文件
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const removeRefFile = (index: number) => {
-    setRefFiles((prev) => {
+  const removeRefFile = (index: number) => {    setRefFiles((prev) => {
       const copy = [...prev];
       // 资产选择项的 preview 是永久 URL，仅释放本地上传的 objectURL
       if (copy[index].file) URL.revokeObjectURL(copy[index].preview);
@@ -793,9 +844,13 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       refFiles.filter((r) => r.assetId != null).map((r) => String(r.assetId)),
     );
     let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
-    let vidRoom = Math.max(0, MAX_VIDEOS - videoRefVideoCount);
+    let vidRoom = Math.max(0, videoMaxVideos - videoRefVideoCount);
+    // ADR-0086：模型不接受视频素材参考时跳过视频（与本地上传/资产路径同口径，不静默加入）
+    const videoRefUnsupported = !supportsVideoReferenceOf(selectedVideoModel?.features);
     const eligible = assets.filter((a) => a.AssetType === 'Image' || a.AssetType === 'Video');
-    const unique = eligible.filter((a) => !existing.has(String(a.Id)));
+    const unique = eligible
+      .filter((a) => !(videoRefUnsupported && a.AssetType === 'Video'))
+      .filter((a) => !existing.has(String(a.Id)));
     const items = unique
       .filter((a) => {
         if (a.AssetType === 'Image') {
@@ -819,7 +874,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       acceptedImages: items.filter((i) => i.type === 'image').length,
       acceptedVideos: items.filter((i) => i.type === 'video').length,
     });
-    if (overflows.length > 0) parts.push(refOverflowToast(overflows, { image: videoMaxImages, video: MAX_VIDEOS }));
+    if (overflows.length > 0) parts.push(refOverflowToast(overflows, { image: videoMaxImages, video: videoMaxVideos }));
+    if (videoRefUnsupported && assets.some((a) => a.AssetType === 'Video')) parts.push('当前模型不支持视频素材参考，已跳过视频素材');
     if (unique.length < eligible.length) parts.push('重复的素材已跳过');
     if (parts.length > 0) showToast(parts.join('；'));
     if (items.length === 0) return;
@@ -865,8 +921,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         agentFiles.filter((f) => f.assetId != null).map((f) => String(f.assetId)),
       );
       let imgRoom = Math.max(0, agentMaxImages - agentImageCount);
-      let vidRoom = Math.max(0, MAX_AGENT_VIDEOS - agentVideoCount);
-      let audRoom = Math.max(0, MAX_AGENT_AUDIO - agentAudioCount);
+      let vidRoom = Math.max(0, agentMaxVideos - agentVideoCount);
+      let audRoom = Math.max(0, agentMaxAudios - agentAudioCount);
       const eligible = assets
         .filter((a) => a.type === 'image' || a.type === 'video' || a.type === 'audio')
         .filter((a) => !existing.has(String(a.id)));
@@ -895,7 +951,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           assetId: a.id,
         }));
       if (eligible.length > items.length) {
-        showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${MAX_AGENT_VIDEOS} 个 / 音频 ${MAX_AGENT_AUDIO} 个）`);
+        showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${agentMaxVideos} 个 / 音频 ${agentMaxAudios} 个）`);
       }
       if (items.length === 0) return;
       setAgentFiles((prev) => [...prev, ...items]);
@@ -918,9 +974,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         refFiles.filter((r) => r.assetId != null).map((r) => String(r.assetId)),
       );
       let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
-      let vidRoom = Math.max(0, MAX_VIDEOS - videoRefVideoCount);
+      let vidRoom = Math.max(0, videoMaxVideos - videoRefVideoCount);
+      // ADR-0086：模型不接受视频素材参考时跳过视频（与本地上传路径同口径，不静默加入）
+      const videoRefUnsupported = !supportsVideoReferenceOf(selectedVideoModel?.features);
       const eligible = assets
         .filter((a) => a.type === 'image' || a.type === 'video')
+        .filter((a) => !(videoRefUnsupported && a.type === 'video'))
         .filter((a) => !existing.has(String(a.id)));
       const items = eligible
         .filter((a) => {
@@ -938,8 +997,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           type: (a.type === 'video' ? 'video' : 'image') as 'image' | 'video',
           assetId: a.id,
         }));
-      if (eligible.length > items.length) {
-        showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${MAX_VIDEOS} 个）`);
+      if (videoRefUnsupported && assets.some((a) => a.type === 'video')) {
+        showToast('当前模型不支持视频素材参考，已跳过视频素材');
+      } else if (eligible.length > items.length) {
+        showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${videoMaxVideos} 个）`);
       }
       if (items.length === 0) return;
       setRefFiles((prev) => [...prev, ...items]);
@@ -1068,7 +1129,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   className={styles.refCard}
                   onClick={() => {
                     if (videoImagesFull && videoVideosFull) {
-                      showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${MAX_VIDEOS} 个）`);
+                      showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${videoMaxVideos} 个）`);
                       return;
                     }
                     toggleRefMenu('video');
@@ -1085,7 +1146,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 <textarea
                   ref={textareaRef}
                   className={styles.textarea}
-                  placeholder={`通过直接控制提示词快速生成单段片段。\n上传参考：图片最多 ${videoMaxImages} 张 / 视频最多 ${MAX_VIDEOS} 个；首尾帧模式可上传首帧与尾帧参考。`}
+                  placeholder={`通过直接控制提示词快速生成单段片段。\n上传参考：图片最多 ${videoMaxImages} 张 / 视频最多 ${videoMaxVideos} 个；首尾帧模式可上传首帧与尾帧参考。`}
                   value={inputValue}
                   onChange={(e) => handleInputChange(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -1149,7 +1210,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                         <button
                           key={m.key}
                           className={`${styles.dropdownItem} ${videoMode === m.key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => { setVideoMode(m.key); setShowVideoModeDrop(false); }}
+                          onClick={() => handleVideoModeChange(m.key)}
                         >
                           {m.label}
                         </button>
@@ -1158,31 +1219,33 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   )}
                 </div>
 
-                {/* 宽高比下拉 */}
-                <div className={styles.dropdownWrap} ref={ratioRef}>
-                  <button
-                    className={styles.paramBtn}
-                    onClick={() => setShowRatioDrop(!showRatioDrop)}
-                  >
-                    <RatioIcon ratio={aspectRatio} />
-                    <span>{aspectRatio}</span>
-                    <ChevronDown size={12} strokeWidth={2} />
-                  </button>
-                  {showRatioDrop && (
-                    <div className={styles.dropdownMenuDown}>
-                      {videoRatioKeys.map((key) => (
-                        <button
-                          key={key}
-                          className={`${styles.dropdownItem} ${aspectRatio === key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => { setAspectRatio(key); setShowRatioDrop(false); }}
-                        >
-                          <RatioIcon ratio={key} />
-                          <span>{key}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                {/* 宽高比下拉（ADR-0086：首尾帧任务官方强制 adaptive、比例内置不暴露，整块不渲染） */}
+                {!isKeyframe && (
+                  <div className={styles.dropdownWrap} ref={ratioRef}>
+                    <button
+                      className={styles.paramBtn}
+                      onClick={() => setShowRatioDrop(!showRatioDrop)}
+                    >
+                      <RatioIcon ratio={aspectRatio} />
+                      <span>{aspectRatio}</span>
+                      <ChevronDown size={12} strokeWidth={2} />
+                    </button>
+                    {showRatioDrop && (
+                      <div className={styles.dropdownMenuDown}>
+                        {videoRatioKeys.map((key) => (
+                          <button
+                            key={key}
+                            className={`${styles.dropdownItem} ${aspectRatio === key ? styles.dropdownItemActive : ''}`}
+                            onClick={() => { setAspectRatio(key); setShowRatioDrop(false); }}
+                          >
+                            <RatioIcon ratio={key} />
+                            <span>{key}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* 分辨率下拉 */}
                 <div className={styles.dropdownWrap} ref={resRef}>
@@ -1463,7 +1526,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   className={styles.refCard}
                   onClick={() => {
                     if (agentAllFull) {
-                      showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${MAX_AGENT_VIDEOS} 个 / 音频 ${MAX_AGENT_AUDIO} 个）`);
+                      showToast(`附件已到上限（图片 ${agentMaxImages} 张 / 视频 ${agentMaxVideos} 个 / 音频 ${agentMaxAudios} 个）`);
                       return;
                     }
                     toggleRefMenu('agent');

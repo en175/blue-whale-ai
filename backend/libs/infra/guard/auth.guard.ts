@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 import type { Request, Response } from "express";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { SessionService } from "@lib/shared/session/session.service.js";

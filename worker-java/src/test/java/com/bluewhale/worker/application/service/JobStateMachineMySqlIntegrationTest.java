@@ -711,6 +711,11 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(slotMapper.selectById(slot1).getStatus()).isEqualTo("failed");
             // log
             assertThat(countLogs(jobId)).isEqualTo(1);
+            // IKFL53：失败日志保留 payload（code/message/details）
+            GenerationJobLogEntity failedLog = jobLogMapper.selectList(
+                    new LambdaQueryWrapper<GenerationJobLogEntity>()
+                            .eq(GenerationJobLogEntity::getGenerationJobId, jobId)).get(0);
+            assertThat(failedLog.getPayload()).contains("provider_failed").contains("上游挂了");
             // 事件：status_changed + output_updated×2 = 3
             assertThat(countEvents(99L)).isEqualTo(3);
         }

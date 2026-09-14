@@ -12,6 +12,13 @@ import { typePromptRefText } from './testing/promptRefEditor';
    目标节点提交的保存串行化与 target_node_id 携带。
    FlowCanvas/CanvasToolbar 打桩透出 props；ImageDialog 用真实实现验证附件区。 */
 
+// IKFJJT 合并 0915 适配：视频提交前会对参考图做合规入库（ensureVideoImageRefsCompliance →
+// depositCanvasAssetToCharacterLibrary）。测试环境固定返回 materialId，避免真实调素材入库 API。
+vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./characterLibraryDeposit')>()),
+  depositCanvasAssetToCharacterLibrary: vi.fn(async () => ({ materialId: 'asset-compliance-test' })),
+}));
+
 vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
@@ -688,7 +695,7 @@ describe('IKFCJG 跨来源视频参考提交顺序', () => {
       await act(async () => sendButton().click());
       await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
       const payload = apiMocks.createGenerationJob.mock.calls[0]![1];
-      expect(payload.references).toEqual([{ material_id: 'asset-lib1', type: 'image', role: 'reference' }, { asset_id: '101', type: 'image', role: 'reference' }]);
+      expect(payload.references).toEqual([{ material_id: 'asset-lib1', type: 'image', role: 'reference' }, { material_id: 'asset-compliance-test', type: 'image', role: 'reference' }]);
       expect(payload.parameters.prompt).toBe('组合图片2和图片1');
       expect(payload.prompt_doc.segments.filter((s: { kind: string }) => s.kind === 'asset_ref')).toEqual([
         { kind: 'asset_ref', asset_id: '101', label: '图片2' }, { kind: 'asset_ref', asset_id: 'asset-lib1', label: '图片1' },

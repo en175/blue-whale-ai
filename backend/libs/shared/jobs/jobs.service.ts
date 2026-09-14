@@ -4,7 +4,7 @@ import {
   errorCodeToNumeric,
   fail,
   ok,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { createJobRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";

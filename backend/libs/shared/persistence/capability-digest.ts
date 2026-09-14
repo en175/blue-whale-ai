@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { canonicalizeJsonValue } from "@blue-whale/contracts";
+import { canonicalizeJsonValue } from "@lib/contracts";
 
 /** 能力快照 digest：sha256(canonicalizeJsonValue(view))，row.version 无全局版本号时兜底。
  *  agent-run 冻结与 plan-application 复算共用本函数；两处算法漂移会导致能力检查误判。 */

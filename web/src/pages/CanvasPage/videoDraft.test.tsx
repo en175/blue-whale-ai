@@ -11,6 +11,13 @@ import CanvasPage from './index';
    无效来源拒绝 / 移除断线 / 生成中连线只读。
    FlowCanvas/CanvasToolbar 打桩透出 props；BottomDialog 用真实实现（ChipTextEditor 打桩）。 */
 
+// IKFJJT 合并 0915 适配：视频提交前会对参考图做合规入库（ensureVideoImageRefsCompliance →
+// depositCanvasAssetToCharacterLibrary）。测试环境固定返回 materialId，避免真实调素材入库 API。
+vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./characterLibraryDeposit')>()),
+  depositCanvasAssetToCharacterLibrary: vi.fn(async () => ({ materialId: 'asset-compliance-test' })),
+}));
+
 vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
@@ -307,14 +314,18 @@ async function waitModelReady() {
 }
 
 /** 1f2f498d 起模式选择器为下拉：先点底部当前模式按钮展开，再从下拉选项切首尾帧 */
-async function selectKeyframeMode() {
+async function selectMode(label: string) {
   const modeLabels = ['文生视频', '全能参考', '图生视频', '首尾帧'];
   await act(async () => {
     [...container.querySelectorAll('button')].find((b) => modeLabels.includes(b.textContent ?? ''))!.click();
   });
   await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.textContent === '首尾帧')!.click();
+    [...container.querySelectorAll('button')].find((b) => b.textContent === label)!.click();
   });
+}
+
+async function selectKeyframeMode() {
+  await selectMode('首尾帧');
 }
 
 /** 经 Dock 槽位入口选取来源节点建立指定角色的连线（真实路径：+ 按钮弹来源菜单 →「从节点添加素材」→ 画布节点点击） */
@@ -473,7 +484,7 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(projectId).toBe('p1');
     expect(payload.type).toBe('video');
     expect(payload.target_node_id).toBe('d1');
-    expect(payload.references).toEqual([{ asset_id: 'a1', type: 'image', role: 'reference' }]);
+    expect(payload.references).toEqual([{ material_id: 'asset-compliance-test', type: 'image', role: 'reference' }]);
     expect(payload.first_frame_asset_id).toBeUndefined();
     // 原位承接 + 首次结果回填同一张卡（fetchJobStatus mock 秒回 succeeded）：
     // 节点数量与身份不变，草稿标记清除、结果 src/assetId 写入同节点
@@ -507,8 +518,8 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1);
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.references).toEqual([
-      { asset_id: 'a1', type: 'image', role: 'first_frame' },
-      { asset_id: 'a2', type: 'image', role: 'last_frame' },
+      { material_id: 'asset-compliance-test', type: 'image', role: 'first_frame' },
+      { material_id: 'asset-compliance-test', type: 'image', role: 'last_frame' },
     ]);
     expect(flowProps.current.edges.map((e: { data?: { refRole?: string } }) => e.data?.refRole))
       .toEqual(expect.arrayContaining(['first', 'last']));
@@ -532,18 +543,43 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
   });
 
-  it('已有普通参考时拒绝切换首尾帧模式，保留原引用且不创建任务', async () => {
+  it('已有 2 张普通参考图片时切换首尾帧模式：自动转为首帧/尾帧槽（IKFJJT）', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
-    // 2 张图片连线后首尾帧模式可选，普通参考存在时切换被拒
+    // 2 张图片连线后首尾帧模式可选；切换时自动把第 1/2 张转为首帧/尾帧（不再要求先移除）
     await connect('m1', 'd1');
     await connect('m2', 'd1');
     await waitModelReady();
     await selectKeyframeMode();
-    await vi.waitFor(() => expect(container.textContent).toContain('请先移除普通参考'));
-    expect(container.querySelector('button[title^="添加首帧"]')).toBeNull();
+    // 连线保留并带上角色：m1→first、m2→last
+    await vi.waitFor(() => {
+      const edges = flowProps.current.edges as Array<{ source: string; data?: { refRole?: string } }>;
+      expect(edges.find((e) => e.source === 'm1')?.data?.refRole).toBe('first');
+      expect(edges.find((e) => e.source === 'm2')?.data?.refRole).toBe('last');
+    });
     expect(flowProps.current.edges).toHaveLength(2);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+  });
+
+  it('首尾帧模式切回全能参考：首帧/尾帧转回普通参考（IKFJJT 对称转换）', async () => {
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await connect('m1', 'd1');
+    await connect('m2', 'd1');
+    await waitModelReady();
+    await selectKeyframeMode();
+    await vi.waitFor(() => {
+      const edges = flowProps.current.edges as Array<{ source: string; data?: { refRole?: string } }>;
+      expect(edges.find((e) => e.source === 'm1')?.data?.refRole).toBe('first');
+    });
+    // 切回全能参考：首尾帧转回普通参考（refRole 字段移除 = 缺省 reference）
+    await selectMode('全能参考');
+    await vi.waitFor(() => {
+      const edges = flowProps.current.edges as Array<{ source: string; data?: { refRole?: string } }>;
+      expect(edges.find((e) => e.source === 'm1')?.data?.refRole).toBeUndefined();
+      expect(edges.find((e) => e.source === 'm2')?.data?.refRole).toBeUndefined();
+    });
+    expect(flowProps.current.edges).toHaveLength(2);
   });
 });
 
@@ -672,7 +708,7 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
-    expect(payload.references).toEqual([{ asset_id: 'a1', type: 'image', role: 'reference' }]);
+    expect(payload.references).toEqual([{ material_id: 'asset-compliance-test', type: 'image', role: 'reference' }]);
   });
 
   it('角色库 material 参考成为参考（草稿 data，无连线）：打开面板即自动切全能参考', async () => {
@@ -832,7 +868,7 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]! as unknown as [string, Record<string, unknown>];
-    expect(payload.references).toEqual([{ asset_id: '101', type: 'image', role: 'reference' }]);
+    expect(payload.references).toEqual([{ material_id: 'asset-compliance-test', type: 'image', role: 'reference' }]);
   });
 
   it('方案仅文本：服务端不切换，本地保持文生视频，重开面板恢复文生视频', async () => {

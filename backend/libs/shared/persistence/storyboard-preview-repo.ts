@@ -5,8 +5,8 @@ import type {
   ProviderPromptAsset,
   StoryboardFrameView,
   StoryboardPreviewParameters,
-} from "@blue-whale/contracts";
-import type { CostReservationSnapshot } from "@blue-whale/core";
+} from "@lib/contracts";
+import type { CostReservationSnapshot } from "@lib/core";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
