@@ -3,6 +3,7 @@
  * ============================================ */
 import { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, type PromptBinding } from '../../../../packages/contracts/src/prompt-target';
 import { promptMentionSchema, validPromptMentions } from '../../../../packages/contracts/src/prompt-preview';
+import { unifiedTextNodeText } from '../../../../packages/contracts/src/text-node-markdown';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
@@ -27,6 +28,7 @@ import {
   readDraftMaterialRefs,
   freshVideoCanvasRefs,
   mergedVideoMediaRefsOf,
+  listVideoImageRefs,
   supportsVideoReferenceModel,
   videoRefConflict,
   videoRefSourceError,
@@ -907,7 +909,13 @@ export default function CanvasPage() {
   const attachCallbacks = (node: Node): Node => {
     const base: Node = { ...node, position: node.position ?? { x: 0, y: 0 }, data: { ...node.data, toolMode } };
     switch (node.type) {
-      case 'textNode':
+      case 'textNode': {
+        // IKFM3L 契约 §5：历史卡读时归一化——html 升级为 Markdown 源，text/html 并存以 text 为准；
+        // 身份、标题、位置与关系不动，归一化结果随防抖保存自然落盘
+        if (typeof base.data.html === 'string') {
+          base.data.text = unifiedTextNodeText(base.data);
+          delete base.data.html;
+        }
         base.data = {
           ...base.data,
           onDelete: (id: string) => removeCanvasNodes([id]),
@@ -916,11 +924,6 @@ export default function CanvasPage() {
           onTextChange: (id: string, text: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text } } : n)),
           onPromptChange: (id: string, text: string, promptMentions: import('../../../../packages/contracts/src/prompt-preview').PromptMention[], promptMaterials?: Array<import('../../../../packages/contracts/src/prompt-preview').PromptMaterial & { url: string }>) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text, promptMentions, ...(promptMaterials ? { promptMaterials } : {}) } } : n)),
           onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
-          onChange: (id: string, html: string) => {
-            setTextNodes((prev) =>
-              prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n))
-            );
-          },
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
@@ -934,6 +937,7 @@ export default function CanvasPage() {
           },
         };
         break;
+      }
       case 'mediaNode':
         base.data = {
           ...base.data,
@@ -1308,10 +1312,15 @@ export default function CanvasPage() {
     versionRef.current = doc.version;
     setViewport(doc.viewport);
     const hydratedAll = [...t, ...m, ...p, ...a];
-    lastSavedRef.current =
-      JSON.stringify(doc.viewport) +
-      serializeNodes([...hydratedAll, ...hydratedGroups.map((g) => groupToNode(g))]) +
-      serializeEdges(hydratedEdges);
+    // IKFM3L：html→text 归一化使本地态与服务器形态产生差异，置空签名驱动一次自动保存把升级落盘
+    const upgradedTextNodes = contentNodes.some(
+      (node) => node.type === 'textNode' && typeof (node.data as Record<string, unknown> | undefined)?.html === 'string',
+    );
+    lastSavedRef.current = upgradedTextNodes
+      ? ''
+      : JSON.stringify(doc.viewport) +
+        serializeNodes([...hydratedAll, ...hydratedGroups.map((g) => groupToNode(g))]) +
+        serializeEdges(hydratedEdges);
     // 水合恢复：「生成中」媒体节点恢复任务轮询。
     // IK9R8X：jobId 后端返回字符串，兼容 string/number 双形态（历史画布文档已持久化字符串）。
     m
@@ -1395,22 +1404,22 @@ export default function CanvasPage() {
     return () => window.clearTimeout(timer);
   }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch]);
 
-  /** 创建文本节点 */
-  const handleAddTextNode = (position?: { x: number; y: number }, html?: string) => {
+  /** 创建文本节点（正文为受限 Markdown 源，契约 §5 新建一律 v1 形态） */
+  const handleAddTextNode = (position?: { x: number; y: number }, text?: string) => {
     const newNode: Node = {
       id: newNodeId('text'),
       type: 'textNode',
       position: position ?? spawnPosition(),
       data: {
-        html: html ?? '',
+        text: text ?? '',
         onDraftError: handleDraftError,
         toolMode,
         onDelete: (id: string) => {
           setTextNodes((prev) => prev.filter((n) => n.id !== id));
         },
-        onChange: (id: string, html: string) => {
+        onTextChange: (id: string, text: string) => {
           setTextNodes((prev) =>
-            prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n))
+            prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, text } } : n))
           );
         },
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
@@ -2357,7 +2366,7 @@ export default function CanvasPage() {
       position: position ?? spawnDraftPosition(),
       selected: true,
       data: {
-        html: '',
+        text: '',
         title: '文本生成',
         textGen: true,
         onDraftError: handleDraftError,
@@ -2365,9 +2374,9 @@ export default function CanvasPage() {
         onDelete: (id: string) => {
           setTextNodes((prev) => prev.filter((n) => n.id !== id));
         },
-        onChange: (id: string, html: string) => {
+        onTextChange: (id: string, text: string) => {
           setTextNodes((prev) =>
-            prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n)),
+            prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, text } } : n)),
           );
         },
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
@@ -2413,7 +2422,7 @@ export default function CanvasPage() {
     setTextNodes((prev) =>
       prev.map((n) =>
         n.id === nodeId
-          ? { ...n, data: { ...n.data, text: body, html: body, prompt: text, draftModelId: modelId } }
+          ? { ...n, data: { ...n.data, text: body, prompt: text, draftModelId: modelId } }
           : n,
       ),
     );
@@ -2868,7 +2877,7 @@ export default function CanvasPage() {
       }
       return;
     }
-    handleAddTextNode(position, payload.text.replace(/\n/g, '<br/>'));
+    handleAddTextNode(position, payload.text);
   };
 
   const handleCopyImage = async (id: string) => {
@@ -2886,9 +2895,22 @@ export default function CanvasPage() {
     }
   };
 
-  const handleComplianceCheck = async (id: string) => {
+  const patchNodeCompliance = (id: string, patch: Record<string, unknown>) => {
+    setMediaNodes((prev) => {
+      const next = prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n));
+      mediaNodesRef.current = next;
+      return next;
+    });
+  };
+
+  /** 图片/视频合规入库；成功后节点展示 success.png 通过图标 */
+  const ensureMediaNodeCompliance = async (
+    id: string,
+    opts?: { toastSuccess?: boolean },
+  ): Promise<string | undefined> => {
+    const toastSuccess = opts?.toastSuccess !== false;
     const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node) return;
+    if (!node) return undefined;
     const d = (node.data ?? {}) as Record<string, unknown>;
     const assetId = d.assetId != null ? String(d.assetId) : '';
     const url = typeof d.src === 'string' ? d.src : '';
@@ -2898,29 +2920,16 @@ export default function CanvasPage() {
       nodeMaterialId: d.materialId,
       assetId,
     });
-    if (d.compliancePassed === true || verifiedId) {
-      showToast('success', COMPLIANCE_SUCCESS_TOAST);
-      if (d.compliancePassed !== true || (verifiedId && d.materialId !== verifiedId)) {
-        setMediaNodes((prev) =>
-          prev.map((n) => (n.id === id ? {
-            ...n,
-            data: {
-              ...n.data,
-              compliancePassed: true,
-              ...(verifiedId ? { materialId: verifiedId } : {}),
-            },
-          } : n)),
-        );
-      }
-      return;
+    if (verifiedId) {
+      if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
+      patchNodeCompliance(id, { complianceBusy: false, compliancePassed: true, materialId: verifiedId });
+      return verifiedId;
     }
     if (!url || url.startsWith('blob:')) {
       showToast('warn', '素材尚未上传完成，请稍后重试');
-      return;
+      return undefined;
     }
-    setMediaNodes((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, complianceBusy: true } } : n)),
-    );
+    patchNodeCompliance(id, { complianceBusy: true });
     try {
       const result = await depositCanvasAssetToCharacterLibrary({
         sourceAssetId: assetId,
@@ -2928,26 +2937,97 @@ export default function CanvasPage() {
         name: typeof d.fileName === 'string' ? d.fileName : '素材',
         mediaType,
       });
-      showToast('success', COMPLIANCE_SUCCESS_TOAST);
-      setMediaNodes((prev) =>
-        prev.map((n) => (n.id === id ? {
-          ...n,
-          data: {
-            ...n.data,
-            complianceBusy: false,
-            compliancePassed: true,
-            ...(result.materialId ? { materialId: result.materialId } : {}),
-          },
-        } : n)),
-      );
+      if (!result.materialId) {
+        patchNodeCompliance(id, { complianceBusy: false });
+        showToast('error', '校验失败，请重试');
+        return undefined;
+      }
+      if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
+      patchNodeCompliance(id, {
+        complianceBusy: false,
+        compliancePassed: true,
+        materialId: result.materialId,
+      });
+      return result.materialId;
     } catch (err) {
-      setMediaNodes((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, complianceBusy: false } } : n)),
-      );
+      patchNodeCompliance(id, { complianceBusy: false });
       if (!isApiError(err)) {
         showToast('error', err instanceof Error ? err.message : '校验失败，请重试');
       }
+      return undefined;
     }
+  };
+
+  const handleComplianceCheck = async (id: string) => {
+    await ensureMediaNodeCompliance(id, { toastSuccess: true });
+  };
+
+  /** 视频生成前补齐参考图合规；通过后回写节点 materialId 与通过图标 */
+  const ensureVideoImageRefsCompliance = async (
+    refs: VideoMediaRefs,
+  ): Promise<VideoMediaRefs | null> => {
+    const images = listVideoImageRefs(refs);
+    if (images.length === 0) return refs;
+
+    const materialByKey = new Map<string, string>();
+    for (const item of images) {
+      if (materialByKey.has(item.nodeId)) continue;
+      if (item.materialId && isMaterialLibraryId(item.materialId)) {
+        materialByKey.set(item.nodeId, item.materialId);
+        const canvasNode = mediaNodesRef.current.find((n) => n.id === item.nodeId);
+        if (canvasNode) {
+          const d = (canvasNode.data ?? {}) as Record<string, unknown>;
+          if (d.compliancePassed !== true || d.materialId !== item.materialId) {
+            patchNodeCompliance(item.nodeId, {
+              compliancePassed: true,
+              materialId: item.materialId,
+            });
+          }
+        }
+        continue;
+      }
+      const node = mediaNodesRef.current.find((n) => n.id === item.nodeId);
+      if (node) {
+        const materialId = await ensureMediaNodeCompliance(item.nodeId, { toastSuccess: false });
+        if (!materialId) return null;
+        materialByKey.set(item.nodeId, materialId);
+        continue;
+      }
+      if (!item.url || item.url.startsWith('blob:')) {
+        showToast('warn', '素材尚未上传完成，请稍后重试');
+        return null;
+      }
+      try {
+        const result = await depositCanvasAssetToCharacterLibrary({
+          sourceAssetId: item.assetId,
+          url: item.url,
+          name: item.name,
+          mediaType: 'image',
+        });
+        if (!result.materialId) {
+          showToast('error', '校验失败，请重试');
+          return null;
+        }
+        materialByKey.set(item.nodeId, result.materialId);
+      } catch (err) {
+        if (!isApiError(err)) {
+          showToast('error', err instanceof Error ? err.message : '校验失败，请重试');
+        }
+        return null;
+      }
+    }
+
+    const withMaterial = (item: VideoMediaRef): VideoMediaRef => {
+      if (item.mediaType !== 'image') return item;
+      const materialId = materialByKey.get(item.nodeId);
+      return materialId ? { ...item, materialId } : item;
+    };
+    return {
+      ...refs,
+      first: refs.first ? withMaterial(refs.first) : undefined,
+      last: refs.last ? withMaterial(refs.last) : undefined,
+      reference: refs.reference.map(withMaterial),
+    };
   };
 
   const handleFillEmptyShell = (id: string, file: File) => {
@@ -3539,7 +3619,14 @@ export default function CanvasPage() {
     targetNodeId?: string,
     initialDraft?: {
       mode?: string;
-      references: Array<{ assetId: string; url: string; name: string; mediaType: 'image' | 'video'; role: VideoRefRole }>;
+      references: Array<{
+        assetId: string;
+        url: string;
+        name: string;
+        mediaType: 'image' | 'video';
+        role: VideoRefRole;
+        materialId?: string;
+      }>;
     },
     /** IKFA1M/IKFA1O：结构化正文（image/video 含素材标签时携带）；服务端编译并冻结 */
     promptDoc?: PromptDoc | null,
@@ -3584,9 +3671,19 @@ export default function CanvasPage() {
       if (!source) {
         source = attachCallbacks({
           id: newNodeId('media'), type: 'mediaNode', position: spawnPosition(),
-          data: { src: ref.url, fileName: ref.name, mediaType: ref.mediaType, assetId: ref.assetId },
+          data: {
+            src: ref.url,
+            fileName: ref.name,
+            mediaType: ref.mediaType,
+            assetId: ref.assetId,
+            ...(ref.materialId ? { materialId: ref.materialId, compliancePassed: true } : {}),
+          },
         });
         referenceNodes.push(source);
+      } else if (ref.materialId) {
+        patchMediaNode(source.id, { materialId: ref.materialId, compliancePassed: true });
+      } else if (ref.materialId) {
+        patchMediaNode(source.id, { materialId: ref.materialId, compliancePassed: true });
       }
       addCanvasEdge(source.id, nodeId, ref.role);
     }
@@ -4816,17 +4913,26 @@ export default function CanvasPage() {
         showToast('warn', '当前模型不支持视频或音频参考，请更换模型或调整引用');
         return;
       }
-      const jobRefs = buildVideoJobReferences(draftRefs);
-      startGenerationJob(
-        'video',
-        parameters,
-        undefined,
-        jobRefs.length > 0 ? { references: jobRefs } : undefined,
-        targetNodeId,
-        undefined,
-        promptDoc ?? undefined,
-      );
-      finishFreeMode();
+      applyingRef.current = true;
+      if (targetNodeId) setSubmittingNodeId(targetNodeId);
+      try {
+        const compliantRefs = await ensureVideoImageRefsCompliance(draftRefs);
+        if (!compliantRefs) return;
+        const jobRefs = buildVideoJobReferences(compliantRefs);
+        startGenerationJob(
+          'video',
+          parameters,
+          undefined,
+          jobRefs.length > 0 ? { references: jobRefs } : undefined,
+          targetNodeId,
+          undefined,
+          promptDoc ?? undefined,
+        );
+        finishFreeMode();
+      } finally {
+        applyingRef.current = false;
+        setSubmittingNodeId(null);
+      }
     }
   };
 
@@ -5046,17 +5152,17 @@ export default function CanvasPage() {
     );
   };
 
-  /** 文本节点保存到共享资产 */
+  /** 文本节点保存到共享资产（正文为 Markdown 源；存量 html 资产回读时升级） */
   const handleSaveTextToAssets = async (nodeId: string) => {
     const node = textNodesRef.current.find((n) => n.id === nodeId);
     if (!node) return;
-    const html = (node.data?.html as string) || '';
-    if (!html) {
+    const text = unifiedTextNodeText(node.data ?? {});
+    if (!text) {
       showToast('error', '文本内容为空，无法保存');
       return;
     }
     await doSaveSharedAsset(
-      { assetType: 'text', snapshot: { html } },
+      { assetType: 'text', snapshot: { text } },
       '已保存文本到共享资产',
     );
   };
@@ -5247,21 +5353,21 @@ export default function CanvasPage() {
           return true;
         }
         case 'text': {
-          // 文本：构造文本节点
-          const snapshot = item.snapshot as { html: string };
+          // 文本：构造文本节点（存量 html 快照升级为 Markdown 源）
+          const snapshot = item.snapshot as { html?: string; text?: string };
           const node: Node = {
             id: newNodeId('text'),
             type: 'textNode',
             position: spawnPosition(),
             data: {
-              html: snapshot.html,
+              text: unifiedTextNodeText(snapshot),
               toolMode,
               onDelete: (id: string) => {
                 setTextNodes((prev) => prev.filter((n) => n.id !== id));
               },
-              onChange: (id: string, html: string) => {
+              onTextChange: (id: string, text: string) => {
                 setTextNodes((prev) =>
-                  prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, html } } : n))
+                  prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, text } } : n))
                 );
               },
               onDuplicate: (id: string) => actionsRef.current.duplicate(id),
@@ -5645,7 +5751,14 @@ export default function CanvasPage() {
         ? handoff.files.map(f => ({ url: f.url, name: f.name, mediaType: 'image' as const, file: f.file, assetId: f.assetId, role: 'reference' as VideoRefRole }))
         : handoff.refs.map((r, i) => ({ url: r.preview, name: r.file?.name ?? `参考${i + 1}`, mediaType: r.type, file: r.file, assetId: r.assetId,
             role: (handoff.mode === 'keyframe' ? (i === 0 ? 'first' : 'last') : 'reference') as VideoRefRole }));
-      const references = [];
+      const references: Array<{
+        assetId: string;
+        url: string;
+        name: string;
+        mediaType: 'image' | 'video';
+        role: VideoRefRole;
+        materialId?: string;
+      }> = [];
       try {
         for (const item of items) {
           let assetId = item.assetId == null ? undefined : String(item.assetId);
@@ -5669,10 +5782,24 @@ export default function CanvasPage() {
           startGenerationJob('image', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.ratio, size: handoff.size },
             references.map(r => r.assetId), undefined, undefined, { references });
         } else {
+          const videoRefs: typeof references = [];
+          for (const ref of references) {
+            if (ref.mediaType !== 'image') {
+              videoRefs.push(ref);
+              continue;
+            }
+            const result = await depositCanvasAssetToCharacterLibrary({
+              sourceAssetId: ref.assetId,
+              url: ref.url,
+              name: ref.name,
+              mediaType: 'image',
+            });
+            videoRefs.push({ ...ref, materialId: result.materialId });
+          }
           startGenerationJob('video', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.aspectRatio,
             resolution: handoff.resolution, duration: handoff.duration }, undefined,
-            { references: buildVideoJobReferencesFromList(references) },
-            undefined, { references, mode: handoff.mode });
+            { references: buildVideoJobReferencesFromList(videoRefs) },
+            undefined, { references: videoRefs, mode: handoff.mode });
         }
       } catch (error) {
         console.warn('首页生成参考准备失败:', error);
