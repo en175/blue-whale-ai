@@ -122,9 +122,34 @@ function checkCapabilityLimit(
     features: unknown;
   },
 ): string | null {
-  const ratios = Array.isArray(capability.supported_aspect_ratios)
-    ? capability.supported_aspect_ratios
-    : [];
+  const f = (capability.features ?? {}) as Record<string, unknown>;
+  // IKFPYX：任务类型约束（scene-card 与 Dock 提交同源口径）——首帧/首尾帧按 features.task_types
+  // 覆盖比例/时长；未配则回落基础能力行。VideoReferenceMode 无 edit/prolong，故不涉及 duration=-1。
+  const taskType =
+    referenceMode === "first_and_last_frame"
+      ? "first_last_frame"
+      : referenceMode === "first_frame" || referenceMode === "last_frame"
+        ? "first_frame"
+        : "default";
+  const taskMap = f.task_types ?? f.taskTypes;
+  const taskEntry =
+    taskMap && typeof taskMap === "object" && !Array.isArray(taskMap)
+      ? ((taskMap as Record<string, unknown>)[taskType] as
+          | Record<string, unknown>
+          | undefined)
+      : undefined;
+  const taskRatios = Array.isArray(taskEntry?.allowed_ratios)
+    ? (taskEntry.allowed_ratios as string[])
+    : null;
+  const taskDurations = Array.isArray(taskEntry?.allowed_durations)
+    ? (taskEntry.allowed_durations as number[])
+    : null;
+
+  const ratios =
+    taskRatios ??
+    (Array.isArray(capability.supported_aspect_ratios)
+      ? (capability.supported_aspect_ratios as string[])
+      : []);
   if (!ratios.includes(parameters.aspect_ratio))
     return `aspect_ratio ${parameters.aspect_ratio} 不在能力支持范围`;
   const sizes = Array.isArray(capability.supported_sizes)
@@ -140,7 +165,7 @@ function checkCapabilityLimit(
   )
     return `size ${parameters.size} 不在能力支持范围`;
   // DB 存在两种形态：档位数组 [3,5,10]（种子数据即此形态）与 {min,max} 范围对象。
-  const durations = capability.supported_durations;
+  const durations = taskDurations ?? capability.supported_durations;
   if (Array.isArray(durations)) {
     if (!durations.includes(parameters.duration))
       return `duration ${parameters.duration} 不在能力支持档位`;
@@ -155,7 +180,6 @@ function checkCapabilityLimit(
     )
       return `duration ${parameters.duration} 超出能力范围`;
   }
-  const f = (capability.features ?? {}) as Record<string, unknown>;
   const quantityMax = Number(f.quantity_max ?? f.quantityMax ?? 1);
   if (parameters.count > quantityMax)
     return `count ${parameters.count} 超过 quantity_max ${quantityMax}`;
