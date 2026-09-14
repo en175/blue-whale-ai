@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { RESOURCE_NOT_FOUND_CODE, fail, ok } from "@blue-whale/contracts";
+import { RESOURCE_NOT_FOUND_CODE, fail, ok } from "@lib/contracts";
 import type {
   GenerationCommandRepo,
   ProjectRepo,

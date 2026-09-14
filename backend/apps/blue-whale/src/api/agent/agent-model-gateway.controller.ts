@@ -12,7 +12,7 @@ import {
   TRACE_ID_HEADER,
   generateTraceId,
   getCurrentTraceId,
-} from "@blue-whale/core/logging";
+} from "@lib/core/logging";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";

@@ -1,4 +1,4 @@
-import type { PromptMention, PromptMaterial } from '../../../../../../packages/contracts/src/prompt-preview';
+import type { PromptMention, PromptMaterial } from '@lib/contracts/prompt-preview';
 
 /** Construct tags from trusted identity metadata; never inject source HTML. */
 export function renderPromptMentions(editor: HTMLElement, text: string, mentions: PromptMention[], materials: Array<PromptMaterial & { url: string }>) {

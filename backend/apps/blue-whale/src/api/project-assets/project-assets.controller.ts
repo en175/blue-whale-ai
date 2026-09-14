@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
-import { fail, ok } from "@blue-whale/contracts";
+import { fail, ok } from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";

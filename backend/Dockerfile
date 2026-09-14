@@ -1,6 +1,6 @@
 # blue-whale 主 API 镜像（NestJS Product API，apps/blue-whale）。
 #
-# 与 backend/Dockerfile.worker 同构构建：tsc -b + tsc-alias → node dist。
+# tsc -b + tsc-alias → node dist（node worker 已退役，镜像只跑主 API）。
 # 环境变量（DATABASE_URL/REDIS_*/JWT_SECRET/NEW_API_*/VOLC_* 等）全部由火山流水线
 # docker run 注入，镜像零密钥。
 #
@@ -14,10 +14,8 @@ WORKDIR /app
 # ffmpeg-static 二进制走 npmmirror 镜像（避免 postinstall 从 GitHub 下载，国内构建超时）
 ENV FFMPEG_BINARIES_URL=https://registry.npmmirror.com/-/binary/ffmpeg-static
 
-# workspace 根 + 各 package.json（pnpm install 解析 workspace:*）
+# workspace 根 + backend package.json（pnpm install 解析 workspace:*；contracts/core 已并入 backend/libs）
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
-COPY packages/contracts/package.json packages/contracts/
-COPY packages/core/package.json packages/core/
 COPY backend/package.json backend/
 COPY backend/tsconfig.json backend/
 
@@ -28,8 +26,6 @@ RUN pnpm install --frozen-lockfile --filter "@blue-whale/backend..."
 
 # 源码 + tsconfig
 COPY tsconfig.json tsconfig.base.json ./
-COPY packages/contracts packages/contracts
-COPY packages/core packages/core
 COPY backend/prisma backend/prisma
 COPY backend/prisma.config.ts backend/
 COPY backend backend

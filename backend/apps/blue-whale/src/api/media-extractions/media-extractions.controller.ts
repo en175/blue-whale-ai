@@ -4,7 +4,7 @@ import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { enqueueMediaExtractJob } from "@lib/shared/generation/video-queue.js";
 import { MediaExtractionsService } from "@lib/shared/media-extractions/media-extractions.service.js";
-import { ERROR_ENQUEUE_FAILED } from "@blue-whale/contracts";
+import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
 @Controller("projects/:projectId/media-extractions")

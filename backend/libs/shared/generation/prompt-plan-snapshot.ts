@@ -1,10 +1,10 @@
 import { validateReferences } from "../generation-runtime/video-reference-validation.js";
-import { composeTextAttachmentPrompt, composeTextAttachmentPromptIndexed } from "@blue-whale/core";
-import { COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, promptBindingsSchema, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@blue-whale/contracts";
-import { docHasTextRef, type PromptDoc } from "@blue-whale/contracts";
+import { composeTextAttachmentPrompt, composeTextAttachmentPromptIndexed } from "@lib/core";
+import { COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, promptBindingsSchema, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@lib/contracts";
+import { docHasTextRef, type PromptDoc } from "@lib/contracts";
 import { nodeAssetId, planError, readPromptPlan, validatePlanModel, validateVideoPlan, type PromptTargetNode } from "../canvas/prompt-target.js";
 import type { ModelCapabilityView } from "../persistence/model-capability-repo.js";
-import type { WorkerRepo } from "../persistence/generation-worker-types.js";
+import type { AssetOwnershipOps } from "../persistence/asset-ownership-types.js";
 
 export async function freezePromptPlans(args: {
   nodes: PromptTargetNode[]; edges: CanvasEdge[]; version: number; targetId: string;
@@ -14,7 +14,7 @@ export async function freezePromptPlans(args: {
   /** IKFA1P：正文含文本标签时组合按编号清单格式（正文 文本N 与清单行号建立编号 ↔ 内容关系）。 */
   promptDoc?: PromptDoc | null;
   model: ModelCapabilityView | undefined; userId: string; projectId: string;
-  assets: Pick<WorkerRepo, "resolveInputAssets">;
+  assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
 }): Promise<PromptPlanSnapshot | undefined> {
   const { nodes, edges, targetId, inputIds, attachments } = args;
   const planNodes = attachments.flatMap(a => {

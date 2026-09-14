@@ -10,8 +10,8 @@ import { nodeTitleSizing } from '../nodeTitleSizing';
 import { commitCardName } from '../cardName';
 import CanvasContextMenu from '../CanvasContextMenu';
 import styles from './index.module.css';
-import { PROMPT_TEXT_LIMITS } from '../../../../../../packages/contracts/src/prompt-text-limits';
-import { promptMentionSchema, validPromptMentions, type PromptMention, type PromptMaterial } from '../../../../../../packages/contracts/src/prompt-preview';
+import { PROMPT_TEXT_LIMITS } from '@lib/contracts/prompt-text-limits';
+import { promptMentionSchema, validPromptMentions, type PromptMention, type PromptMaterial } from '@lib/contracts/prompt-preview';
 import { renderPromptMentions, readPromptMentions } from './promptMentions';
 
 /** 文字节点最大字数（按纯文本计，含粘贴） */

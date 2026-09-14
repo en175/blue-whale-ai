@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
-import { DomainError, RESOURCE_NOT_FOUND_CODE, ok } from "@blue-whale/contracts";
+import { NewApiError } from "@lib/core";
+import { DomainError, RESOURCE_NOT_FOUND_CODE, ok } from "@lib/contracts";
 import { assetDurationSeconds } from "@lib/shared/persistence/index.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";

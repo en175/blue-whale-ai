@@ -1,8 +1,8 @@
 /* ============================================
  * CanvasPage 画布编辑页：节点/连线/工具栏编排
  * ============================================ */
-import { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, type PromptBinding } from '../../../../packages/contracts/src/prompt-target';
-import { promptMentionSchema, validPromptMentions } from '../../../../packages/contracts/src/prompt-preview';
+import { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, type PromptBinding } from '@lib/contracts/prompt-target';
+import { promptMentionSchema, validPromptMentions } from '@lib/contracts/prompt-preview';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
@@ -915,7 +915,7 @@ export default function CanvasPage() {
           onTitleChange: (id: string, title: string) => actionsRef.current.renameCard(id, title),
           onDraftError: handleDraftError,
           onTextChange: (id: string, text: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text } } : n)),
-          onPromptChange: (id: string, text: string, promptMentions: import('../../../../packages/contracts/src/prompt-preview').PromptMention[], promptMaterials?: Array<import('../../../../packages/contracts/src/prompt-preview').PromptMaterial & { url: string }>) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text, promptMentions, ...(promptMaterials ? { promptMaterials } : {}) } } : n)),
+          onPromptChange: (id: string, text: string, promptMentions: import('@lib/contracts/prompt-preview').PromptMention[], promptMaterials?: Array<import('@lib/contracts/prompt-preview').PromptMaterial & { url: string }>) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text, promptMentions, ...(promptMaterials ? { promptMaterials } : {}) } } : n)),
           onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
           onChange: (id: string, html: string) => {
             setTextNodes((prev) =>

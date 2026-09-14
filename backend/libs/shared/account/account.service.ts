@@ -9,7 +9,7 @@ import {
   type NewApiLoginResult,
   type NewApiRegisterInput,
   type NewApiUsage,
-} from "@blue-whale/core";
+} from "@lib/core";
 
 type NewApiClient = ReturnType<typeof createNewApiClient>;
 

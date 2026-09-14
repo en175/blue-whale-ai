@@ -11,7 +11,7 @@ import {
   createMaterialLibraryClient,
   type MaterialLibraryClient,
   type MaterialLibraryResponse,
-} from "@blue-whale/core";
+} from "@lib/core";
 import {
   createMaterialGroupRepo,
   type MaterialGroupRepo,

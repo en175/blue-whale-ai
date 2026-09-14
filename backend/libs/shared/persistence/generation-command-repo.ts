@@ -1,12 +1,12 @@
-import { NewApiError } from "@blue-whale/core";
-import { promptPlanSnapshotSchema } from "@blue-whale/contracts";
+import { NewApiError } from "@lib/core";
+import { promptPlanSnapshotSchema } from "@lib/contracts";
 import {
   findPlacement,
   SCENE_CARD_FALLBACK_HEIGHT,
   SCENE_CARD_WIDTH,
   type CostReservationSnapshot,
   type Rect,
-} from "@blue-whale/core";
+} from "@lib/core";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { transactionWithUniqueRetry } from "./conversation-repo.js";

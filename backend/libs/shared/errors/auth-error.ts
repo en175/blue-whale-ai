@@ -1,4 +1,4 @@
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 
 /** new-api 账户服务鉴权错误 → 401/403/502/503 统一映射（对齐 lib/account/bff 语义）。 */
 const AUTH_MESSAGES = new Map<number, string>([

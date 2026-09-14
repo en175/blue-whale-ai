@@ -1,7 +1,7 @@
 import {
   ERROR_INVALID_REFERENCE,
   ERROR_INVALID_REFERENCE_TYPE,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 
 /**
  * 素材库引用（MaterialReference）：视频生成输入里对上游素材库素材的引用。

@@ -32,12 +32,6 @@ importers:
 
   backend:
     dependencies:
-      '@blue-whale/contracts':
-        specifier: workspace:*
-        version: link:../packages/contracts
-      '@blue-whale/core':
-        specifier: workspace:*
-        version: link:../packages/core
       '@nestjs/common':
         specifier: ^11.0.0
         version: 11.1.29(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0)
@@ -47,9 +41,6 @@ importers:
       '@nestjs/platform-express':
         specifier: ^11.0.0
         version: 11.1.29(@nestjs/common@11.1.29(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@11.1.29)(supports-color@7.2.0)
-      '@nestjs/schedule':
-        specifier: ^5.0.0
-        version: 5.0.1(@nestjs/common@11.1.29(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@11.1.29)
       '@nestjs/terminus':
         specifier: ^11.0.0
         version: 11.1.1(@grpc/grpc-js@1.14.4)(@grpc/proto-loader@0.8.1)(@nestjs/common@11.1.29(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@11.1.29)(@prisma/client@7.9.0(prisma@7.9.0(@types/react-dom@19.2.4(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@5.9.3))(typescript@5.9.3))(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -59,6 +50,9 @@ importers:
       '@prisma/client':
         specifier: ^7.9.0
         version: 7.9.0(prisma@7.9.0(@types/react-dom@19.2.4(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@5.9.3))(typescript@5.9.3)
+      '@volcengine/openapi':
+        specifier: ^1.36.2
+        version: 1.36.2(supports-color@7.2.0)
       '@volcengine/tos-sdk':
         specifier: ^2.9.1
         version: 2.9.1(@types/express@5.0.6)(supports-color@7.2.0)
@@ -80,6 +74,9 @@ importers:
       ioredis:
         specifier: ^5.11.1
         version: 5.11.1(supports-color@7.2.0)
+      jose:
+        specifier: ^6.2.4
+        version: 6.2.12
       mariadb:
         specifier: ^3.5.3
         version: 3.5.3
@@ -120,24 +117,6 @@ importers:
       typescript:
         specifier: 5.9.3
         version: 5.9.3
-
-  packages/contracts:
-    dependencies:
-      '@blue-whale/core':
-        specifier: workspace:*
-        version: link:../core
-      zod:
-        specifier: 4.4.3
-        version: 4.4.3
-
-  packages/core:
-    dependencies:
-      '@volcengine/openapi':
-        specifier: ^1.36.2
-        version: 1.36.2(supports-color@7.2.0)
-      jose:
-        specifier: ^6.2.4
-        version: 6.2.4
 
 packages:
 
@@ -710,12 +689,6 @@ packages:
       '@nestjs/common': ^11.0.0
       '@nestjs/core': ^11.0.0
 
-  '@nestjs/schedule@5.0.1':
-    resolution: {integrity: sha512-kFoel84I4RyS2LNPH6yHYTKxB16tb3auAEciFuc788C3ph6nABkUfzX5IE+unjVaRX+3GuruJwurNepMlHXpQg==}
-    peerDependencies:
-      '@nestjs/common': ^10.0.0 || ^11.0.0
-      '@nestjs/core': ^10.0.0 || ^11.0.0
-
   '@nestjs/terminus@11.1.1':
     resolution: {integrity: sha512-Ssql79H+EQY/Wg108eJqN4NiNsO/tLrj+qbzOWSQUf2JE4vJQ2RG3WTqUOrYjfjWmVHD3+Ys0+azed7LSMKScw==}
     peerDependencies:
@@ -1248,9 +1221,6 @@ packages:
   '@types/lodash@4.17.24':
     resolution: {integrity: sha512-gIW7lQLZbue7lRSWEFql49QJJWThrTFFeIMJdp3eH4tKoxm1OvEPg02rm4wCCSHS0cL3/Fizimb35b7k8atwsQ==}
 
-  '@types/luxon@3.4.2':
-    resolution: {integrity: sha512-TifLZlFudklWlMBfhubvgqTXRzLDI5pCbGa4P8a3wPyUQSW+1xQ5eDsreP9DWHX3tjq1ke96uYG/nwundroWcA==}
-
   '@types/node@10.17.60':
     resolution: {integrity: sha512-F0KIgDJfy2nA3zMLmWGKxcH2ZVEtCZXHHdOQs2gSaQ27+lNeEfGxzkIw90aXswATX7AZ33tahPbzy6KAfUreVw==}
 
@@ -1691,9 +1661,6 @@ packages:
       buffer:
         optional: true
 
-  cron@3.5.0:
-    resolution: {integrity: sha512-0eYZqCnapmxYcV06uktql93wNWdlTmmBFP2iYz+JPVcQqlyFYcn1lFuIk4R54pkOmE7mcldTAPZv6X5XA4Q46A==}
-
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
@@ -1765,8 +1732,8 @@ packages:
     resolution: {integrity: sha512-23XHcCF+coGYevirZceTVD7NdJOqVn+49IHyxgszm+JIiHLoB2TkmPtsYkNWT1pvRSGkc35L6NHs0yHkN2SumA==}
     engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
 
-  dayjs@1.11.21:
-    resolution: {integrity: sha512-98IT+HOahAisibz/yjKbzuOBwYcjJ7BCLPzARyHiyEBmRz4fatF+KPJszEHXsGYjUG234aH/cOjW1wwTbKUZlA==}
+  dayjs@1.11.23:
+    resolution: {integrity: sha512-QDTCU0M0MxR3hQfnlDJfwekQiaanm1ubOD231u73WBckQ/fsamwRLiE2GBz6D3a/xF1NgfiDLJjXBa1hYOYTtQ==}
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -2303,8 +2270,8 @@ packages:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
 
-  jose@6.2.4:
-    resolution: {integrity: sha512-N8acGzVsQy6M/fjFcxtysNc4Q379TcM5dM/qKkNtsHFji88yANnXTr7BLeP75iPnFwBfQzM/jg2BZ9+HZrHCZA==}
+  jose@6.2.12:
+    resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -2468,10 +2435,6 @@ packages:
   lru.min@1.1.4:
     resolution: {integrity: sha512-DqC6n3QQ77zdFpCMASA1a3Jlb64Hv2N2DciFGkO/4L9+q/IpIAuRlKOvCXabtRW6cQf8usbmM6BE/TOPysCdIA==}
     engines: {bun: '>=1.0.0', deno: '>=1.30.0', node: '>=8.0.0'}
-
-  luxon@3.5.0:
-    resolution: {integrity: sha512-rh+Zjr6DNfUYR3bPwJEnuwDdqMbxZW7LOQfUN4B54+Cl+0o5zaU9RJ6bcidfDtC1cWCZXQ+nvX8bf6bAji37QQ==}
-    engines: {node: '>=12'}
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
@@ -3784,12 +3747,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@nestjs/schedule@5.0.1(@nestjs/common@11.1.29(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@11.1.29)':
-    dependencies:
-      '@nestjs/common': 11.1.29(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0)
-      '@nestjs/core': 11.1.29(@nestjs/common@11.1.29(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/platform-express@11.1.29)(reflect-metadata@0.2.2)(rxjs@7.8.2)
-      cron: 3.5.0
-
   '@nestjs/terminus@11.1.1(@grpc/grpc-js@1.14.4)(@grpc/proto-loader@0.8.1)(@nestjs/common@11.1.29(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@11.1.29)(@prisma/client@7.9.0(prisma@7.9.0(@types/react-dom@19.2.4(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@5.9.3))(typescript@5.9.3))(reflect-metadata@0.2.2)(rxjs@7.8.2)':
     dependencies:
       '@nestjs/common': 11.1.29(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0)
@@ -4208,8 +4165,6 @@ snapshots:
 
   '@types/lodash@4.17.24': {}
 
-  '@types/luxon@3.4.2': {}
-
   '@types/node@10.17.60': {}
 
   '@types/node@24.13.3':
@@ -4453,7 +4408,7 @@ snapshots:
       axios: 0.21.4(debug@4.4.3(supports-color@7.2.0))
       crc: 4.3.2
       crypto-js: 4.2.0
-      dayjs: 1.11.21
+      dayjs: 1.11.23
       debug: 4.4.3(supports-color@7.2.0)
       form-data: 3.0.5
       lodash.get: 4.4.2
@@ -4711,7 +4666,7 @@ snapshots:
 
   cliui@8.0.1:
     dependencies:
-      string-width: 4.2.0
+      string-width: 4.2.3
       strip-ansi: 6.0.1
       wrap-ansi: 7.0.0
 
@@ -4765,11 +4720,6 @@ snapshots:
       vary: 1.1.2
 
   crc@4.3.2: {}
-
-  cron@3.5.0:
-    dependencies:
-      '@types/luxon': 3.4.2
-      luxon: 3.5.0
 
   cross-spawn@7.0.6:
     dependencies:
@@ -4843,7 +4793,7 @@ snapshots:
       - '@noble/hashes'
     optional: true
 
-  dayjs@1.11.21: {}
+  dayjs@1.11.23: {}
 
   debug@4.4.3(supports-color@7.2.0):
     dependencies:
@@ -5427,7 +5377,7 @@ snapshots:
 
   jiti@2.7.0: {}
 
-  jose@6.2.4: {}
+  jose@6.2.12: {}
 
   js-tokens@4.0.0: {}
 
@@ -5562,8 +5512,6 @@ snapshots:
       yallist: 3.1.1
 
   lru.min@1.1.4: {}
-
-  luxon@3.5.0: {}
 
   magic-string@0.30.21:
     dependencies:
