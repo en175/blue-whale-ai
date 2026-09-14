@@ -136,6 +136,9 @@ interface BottomDialogProps extends RefStripOrderProps {
   onPickFromAssets?: (kind: 'image' | 'video', role?: VideoRefRole) => void;
   /** 画布选取模式进行中（image/video，入口「+」高亮提示） */
   pickMode?: 'image' | 'video' | null;
+  /** IKFR4Y 持续选取会话锁定：模式中隔离提示词编辑、模式与模型切换及生成（须先完成选取）；
+   *  Dock 参考移除、来源入口与关闭不受限 */
+  pickLocked?: boolean;
   /** 视频草稿绑定（IKDMQS）：面板编辑实时写回草稿节点；status 为 generating 时参数与输入只读 */
   videoDraftBinding: {
     status?: MediaGenStatus;
@@ -196,7 +199,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, textIndexError, onLocateTextSource, onPickFromCanvas, onPickFromAssets, pickMode, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, textIndexError, onLocateTextSource, onPickFromCanvas, onPickFromAssets, pickMode, pickLocked, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
   /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -454,7 +457,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       ? '原时长不兼容，请重新选择时长'
     : hasInvalidRef ? '正文有已失效的素材标签，请点击标签替换或删除后再发送'
     : null;
-  const canSend = !readOnly && !videoDraftBinding.saveFailed && !configurationError
+  const canSend = !readOnly && !pickLocked && !videoDraftBinding.saveFailed && !configurationError
     && (flatValue.trim().length > 0 || hasAttachmentText);
 
   /** 时长刻度（min..max 逐 step；模型能力未加载时无刻度） */
@@ -1039,7 +1042,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
           initialDoc={initialDoc ?? null}
           initialText={initialText ?? ''}
           placeholder="描述你希望生成的视频。输入 @ 可引用已选素材。"
-          readOnly={readOnly}
+          readOnly={readOnly || pickLocked}
           labelOf={(key) => refLabelOfStable.current(key)}
           reconcileKey={reconcileKey}
           labels={refLabels}
@@ -1061,7 +1064,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
           <div className={styles.modeWrap} ref={modeWrapRef}>
             <button
               className={styles.modeBtn}
-              disabled={readOnly}
+              disabled={readOnly || pickLocked}
+              title={pickLocked ? '选取进行中，完成选取后再切换模式' : undefined}
               onClick={() => setModeOpen((v) => !v)}
             >
               <span>{currentMode?.label ?? '选择模式'}</span>
@@ -1092,7 +1096,12 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
           </div>
 
           {/* 配置信息（点击展开配置面板）。IKFQ5S：仅首尾帧 + 模型支持 adaptive 时才在状态栏隐去比例。 */}
-          <button className={styles.configBtn} onClick={() => setShowConfig(!showConfig)}>
+          <button
+            className={styles.configBtn}
+            disabled={pickLocked}
+            title={pickLocked ? '选取进行中，完成选取后再调整模型配置' : undefined}
+            onClick={() => setShowConfig(!showConfig)}
+          >
             <SlidersHorizontal size={14} strokeWidth={2} />
             <span>{currentModel?.model_label ?? '选择模型'}</span>
             {!forceAdaptive && (
