@@ -1,4 +1,4 @@
-/* 文本索引下游同步（IKFM3S/IKFM3W）前端同源实现单测：合并参考、提示判定、发送校验、定位来源。 */
+/* 文本索引下游同步（IKFM3S/IKFM3W/IKFM41）前端同源实现单测：合并参考、提示判定、发送校验、定位来源。 */
 import { describe, expect, it } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import {
@@ -12,6 +12,8 @@ import {
   mergedImageRefsOf,
   mergedVideoRefsWithTextIndex,
   videoTextIndexSendError,
+  mergedAudioRefsWithTextIndex,
+  audioTextIndexSendError,
 } from './textIndexSync';
 
 function mediaNode(id: string, assetId: string, extra: Record<string, unknown> = {}): Node {
@@ -236,5 +238,89 @@ describe('mediaInputStale 视频目标（IKFM3W §10）', () => {
     const mediaNodes = [videoSourceNode('vmedia-1', '9100', 'image')];
     const edges = [edge('vtext-1', 'gen-v'), VIDEO_INDEX_EDGE];
     expect(mediaInputStale('gen-v', edges, [videoTarget('gen-v'), ...mediaNodes, VIDEO_TEXT], 'image')).toBe(false);
+  });
+});
+
+/* ---- 音频目标（IKFM41 §11）---- */
+
+function audioSourceNode(id: string, assetId: string, mediaType: 'audio' | 'image' = 'audio'): Node {
+  return {
+    id,
+    type: 'mediaNode',
+    position: { x: 0, y: 0 },
+    data: { assetId, src: `https://example.com/${id}.mp3`, fileName: id, mediaType },
+  };
+}
+function audioTarget(id: string, extra: Record<string, unknown> = {}): Node {
+  return { id, type: 'mediaNode', position: { x: 0, y: 0 }, data: { mediaType: 'audio', draft: true, ...extra } };
+}
+
+const AUDIO_TEXT = textNode('atext-1', {
+  text: '用音频1配音',
+  mediaMentions: [{ start: 1, end: 4, nodeId: 'amedia-1', assetId: '9100' }],
+  mediaRefs: [{ nodeId: 'amedia-1', assetId: '9100', mediaType: 'audio', name: '甲音频', url: 'https://example.com/m1.mp3' }],
+});
+const AUDIO_INDEX_EDGE = edge('amedia-1', 'atext-1', { textIndex: true });
+
+describe('mergedAudioRefsWithTextIndex（IKFM41 §11）', () => {
+  it('直接参考在前、文本带入追加并带 textNodeId 锁定；同 assetId 去重保首见', () => {
+    const mediaNodes = [audioSourceNode('amedia-2', '9200'), audioSourceNode('amedia-1', '9100')];
+    const edges = [edge('atext-1', 'gen-a'), edge('amedia-2', 'gen-a'), AUDIO_INDEX_EDGE];
+    const { refs } = mergedAudioRefsWithTextIndex('gen-a', edges, mediaNodes, [AUDIO_TEXT]);
+    expect(refs.map((r) => r.assetId)).toEqual(['9200', '9100']);
+    expect(refs[0]!.textNodeId).toBeUndefined();
+    expect(refs[0]).toMatchObject({ mediaType: 'audio' });
+    expect(refs[1]).toMatchObject({ nodeId: 'amedia-1', textNodeId: 'atext-1', mediaType: 'audio' });
+    // 同素材直接参考连线优先显示单条（可移除直接来源，文本来源保留决定锁定态）
+    const dupEdges = [edge('atext-1', 'gen-a'), edge('amedia-1', 'gen-a'), AUDIO_INDEX_EDGE];
+    const dupRefs = mergedAudioRefsWithTextIndex('gen-a', dupEdges, mediaNodes, [AUDIO_TEXT]).refs;
+    expect(dupRefs).toHaveLength(1);
+    expect(dupRefs[0]!.textNodeId).toBeUndefined();
+  });
+
+  it('文本带入 image 素材保留实际类型进入参考栏（图片素材进入音频参考的唯一通道）', () => {
+    const text = textNode('atext-2', {
+      text: '用图片1配乐',
+      mediaMentions: [{ start: 1, end: 4, nodeId: 'amedia-3', assetId: '9300' }],
+      mediaRefs: [{ nodeId: 'amedia-3', assetId: '9300', mediaType: 'image', name: '丙图', url: 'https://example.com/m3.png' }],
+    });
+    const mediaNodes = [audioSourceNode('amedia-3', '9300', 'image')];
+    const edges = [edge('atext-2', 'gen-a'), edge('amedia-3', 'atext-2', { textIndex: true })];
+    const { refs } = mergedAudioRefsWithTextIndex('gen-a', edges, mediaNodes, [text]);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toMatchObject({ mediaType: 'image', textNodeId: 'atext-2' });
+  });
+});
+
+describe('audioTextIndexSendError（IKFM41 §11）', () => {
+  it('音频索引合法放行；失效索引与不支持类型（video）分别阻止', () => {
+    const mediaNodes = [audioSourceNode('amedia-1', '9100')];
+    const edges = [edge('atext-1', 'gen-a'), AUDIO_INDEX_EDGE];
+    expect(audioTextIndexSendError('gen-a', edges, mediaNodes, [AUDIO_TEXT])).toBeNull();
+    // 关系线被删 → 失效索引
+    expect(audioTextIndexSendError('gen-a', [edge('atext-1', 'gen-a')], mediaNodes, [AUDIO_TEXT])).toContain('失效');
+    // 视频素材进音频目标 → 不支持类型（audio/image 混用由后端容量校验文案拦截）
+    const videoText = textNode('atext-3', {
+      text: '用视频1配音',
+      mediaMentions: [{ start: 1, end: 4, nodeId: 'amedia-4', assetId: '9400' }],
+      mediaRefs: [{ nodeId: 'amedia-4', assetId: '9400', mediaType: 'video', name: '丁视频', url: 'https://example.com/m4.mp4' }],
+    });
+    const videoNodes = [{ ...audioSourceNode('amedia-4', '9400'), data: { assetId: '9400', src: 'u', fileName: 'amedia-4', mediaType: 'video' } } as Node];
+    const videoEdges = [edge('atext-3', 'gen-a'), edge('amedia-4', 'atext-3', { textIndex: true })];
+    expect(audioTextIndexSendError('gen-a', videoEdges, videoNodes, [videoText])).toContain('不支持的媒体类型');
+  });
+});
+
+describe('mediaInputStale 音频目标（IKFM41 §11）', () => {
+  it('音频目标文本入边存在且未成功使用时提示；成功签名回写后清除', () => {
+    const mediaNodes = [audioSourceNode('amedia-1', '9100')];
+    const edges = [edge('atext-1', 'gen-a'), AUDIO_INDEX_EDGE];
+    expect(mediaInputStale('gen-a', edges, [audioTarget('gen-a'), ...mediaNodes, AUDIO_TEXT], 'audio')).toBe(true);
+    const signature = imageTargetSignature('gen-a', edges, [...mediaNodes, AUDIO_TEXT, audioTarget('gen-a')]);
+    const synced = audioTarget('gen-a', { usedInputSignature: signature });
+    expect(mediaInputStale('gen-a', edges, [synced, ...mediaNodes, AUDIO_TEXT], 'audio')).toBe(false);
+    // 正文变化 → 签名不一致重新提示
+    const edited = textNode('atext-1', { ...AUDIO_TEXT.data, text: '改用音频1配音吧' } as Record<string, unknown>);
+    expect(mediaInputStale('gen-a', edges, [synced, ...mediaNodes, edited], 'audio')).toBe(true);
   });
 });

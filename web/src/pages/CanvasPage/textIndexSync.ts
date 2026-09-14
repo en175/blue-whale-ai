@@ -1,15 +1,17 @@
 /* ============================================
- * 文本索引下游同步（IKFM3S/IKFM3W）：契约 §1/§2/§4/§10 的前端同源实现——
+ * 文本索引下游同步（IKFM3S/IKFM3W/IKFM41）：契约 §1/§2/§4/§10/§11 的前端同源实现——
  * 目标参考 = 直接参考 ∪ 文本带入参考（纯派生），「显示输入 = 实际任务输入」；
  * 派生/合并/签名全部复用 @lib/contracts/text-index-sync（与后端共用唯一实现）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
 import {
+  AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
   IMAGE_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
   TEXT_INDEX_INVALID_MESSAGE,
   TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE,
   VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE,
   textIndexOverflowMessage,
+  checkAudioTextIndexSyncInput,
   checkTextIndexSyncInput,
   checkVideoTextIndexSyncInput,
   textIndexOfTarget,
@@ -18,6 +20,7 @@ import {
   type TextProvidedRef,
 } from '@lib/contracts/text-index-sync';
 import { imageMediaRefsOf, type ImageMediaRef } from './mediaRefs';
+import { audioMediaRefsOf, type AudioMediaRef } from './audioMediaRefs';
 import { mergedVideoMediaRefsOf, type VideoMediaRef, type VideoMediaRefs } from './videoMediaRefs';
 
 /** 图片参考缺省上限（= 后端 DEFAULT_MAX_REFERENCE_IMAGES；模型未配 features.max_reference_images
@@ -79,12 +82,12 @@ export function firstTextSourceOf(targetNodeId: string, edges: Edge[], nodes: No
 }
 
 /** 「输入已更新」提示判定（契约 §4，派生不存布尔）：目标存在文本入边且当前签名
- *  与最近成功使用签名不一致。图片（任务 3）/视频（IKFM3W §10）同一派生判定。 */
+ *  与最近成功使用签名不一致。图片（任务 3）/视频（IKFM3W §10）/音频（IKFM41 §11）同一派生判定。 */
 export function mediaInputStale(
   targetNodeId: string,
   edges: Edge[],
   nodes: Node[],
-  mediaType: 'image' | 'video',
+  mediaType: 'image' | 'video' | 'audio',
 ): boolean {
   const target = nodes.find((node) => node.id === targetNodeId);
   if (!target || target.type !== 'mediaNode') return false;
@@ -186,5 +189,56 @@ export function videoTextIndexSendError(
   if (!error) return null;
   if (error.kind === 'invalid_index') return TEXT_INDEX_INVALID_MESSAGE;
   if (error.kind === 'frame_conflict') return VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE;
+  return TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE;
+}
+
+/* ---- 音频目标（契约 §11，IKFM41）：同一来源模型与并入/签名实现，恒普通参考无角色槽 ---- */
+
+/** 音频目标的合并参考（契约 §11）：直接参考（连线推导）在前、文本带入参考追加尾部
+ *  （同 assetId 去重保首见，mediaType 保留——image 素材仅经文本带入进入音频参考）。
+ *  Dock 展示与生成提交共用（显示输入 = 实际任务输入）。 */
+export function mergedAudioRefsWithTextIndex(
+  targetNodeId: string,
+  edges: Edge[],
+  mediaNodes: Node[],
+  textNodes: Node[],
+): { refs: AudioMediaRef[]; invalid: Array<{ nodeId: string; name: string; reason: string }> } {
+  const base = audioMediaRefsOf(targetNodeId, edges, mediaNodes);
+  const index = textIndexOfTarget(canvasOf([...mediaNodes, ...textNodes]), edges, targetNodeId);
+  if (index.refs.length === 0) return base;
+  const seen = new Set(base.refs.map((ref) => ref.assetId));
+  const appended: AudioMediaRef[] = [];
+  for (const item of index.refs) {
+    if (seen.has(item.assetId)) continue;
+    seen.add(item.assetId);
+    appended.push({
+      nodeId: item.sourceNodeId,
+      url: item.url,
+      name: item.name,
+      assetId: item.assetId,
+      mediaType: item.mediaType === 'image' ? 'image' : 'audio',
+      textNodeId: item.textNodeId,
+    });
+  }
+  return appended.length > 0 ? { ...base, refs: [...base.refs, ...appended] } : base;
+}
+
+/** 音频目标发送前校验（契约 §11，与业务 API 同口径）：失效索引 / 不支持类型（video）
+ *  阻止发送。容量与 audio/image 混用由后端 400 权威（checkReferenceLimits("audio") 文案），
+ *  返回 null 放行。 */
+export function audioTextIndexSendError(
+  targetNodeId: string,
+  edges: Edge[],
+  mediaNodes: Node[],
+  textNodes: Node[],
+): string | null {
+  const index = textIndexOfTarget(canvasOf([...mediaNodes, ...textNodes]), edges, targetNodeId);
+  if (index.refs.length === 0 && index.invalid.length === 0) return null;
+  const error = checkAudioTextIndexSyncInput({
+    index,
+    acceptedMediaTypes: AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
+  });
+  if (!error) return null;
+  if (error.kind === 'invalid_index') return TEXT_INDEX_INVALID_MESSAGE;
   return TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE;
 }

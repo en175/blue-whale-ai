@@ -89,3 +89,17 @@ v1.1（2026-09-15）按 §9 授权扩展视频生成目标；§1–§8 全部沿
 - **容量与能力校验在合并后执行**：沿用既有 `checkReferenceLimits(features, references, "video")`（图/视频/音频分类上限、`video_reference`/`audio_reference` 能力位、参考总时长），文案与错误码沿用；前端视频面板同源（`@/lib/model-reference-limits` 同名实现）。
 - **冻结**：`input.references` 为合并后最终序（帧在前、普通参考保序）；`text_attachments[].media` 与 `input.text_input_signature` 与图片目标同构（§5/§4）；重试沿用「原样复制 input」。
 - **前端交互**：视频面板参考栏锁定标记、定位来源与 §6 图片面板同构（锁定条目不渲染移除入口）；「输入已更新」徽标扩展至视频目标（同一派生判定）；参考编号沿用视频面板既有 numberMap（同类型编号），文本卡显示编号不当作目标素材序号。
+
+## 11. 音频目标扩展（IKFM41，v1.2）
+
+v1.2（2026-09-15）按 §9 授权扩展音频生成目标；§1–§8 全部沿用（同一派生/签名/冻结实现），本节只新增目标类型语义。音频既有的「正文创作上下文」（IKFCXE `text_attachments` 组合与 IKFCJG §10 `prompt_doc` 冻结）语义不变：正文仍进组合提示词，本节带入的是正文 @ 索引解析出的**实际媒体素材**进参考栏，两者并存不冲突、不把普通创作正文当作逐字朗读稿。
+
+- **适用范围**：`type=audio` 且携带 `target_node_id`。引用来源模型（直接参考 ∪ 文本带入参考，纯派生）与 §1 完全一致。
+- **角色语义**：音频参考无角色槽，文本带入参考恒 `role=reference`（与既有音频参考连线模型一致）；同 assetId 去重保首见（音频参考只有本地画布素材，无 `material_id` 空间）。
+- **接受的媒体类型**：`audio` 与 `image`（与既有 `validateAudioReferences` 接受范围一致；前端音频面板不提供图片添加入口的边界不变，文本带入是图片素材进入音频参考的唯一通道）。`video` 不接受 → `400 invalid_reference_type`（文案沿用 §3「文本索引包含目标不支持的媒体类型」）。
+- **音频与图片不可混用沿用既有 seed-audio 限制**：合并后 audio/image 两类并存（文本带入内混用、或文本带入与直接参考跨来源混用）→ `400 invalid_reference`「音频与图片参考不可混用」（既有 `checkReferenceLimits(…, "audio")` 文案与错误码）；不静默丢任一类素材后发送。
+- **并入规则**：直接参考（references 单数组保序）在前，文本带入按派生序追加尾部为 `{ role: "reference", asset_id, type }`；references 缺失且文本带入非空时以文本带入项新建单数组。音频本就禁旧参考字段（`validateAudioReferences` 拦截），无视频 §10 的旧字段防御分支。
+- **容量校验在合并后执行**：沿用既有 `checkReferenceLimits(features, references, "audio")`（audio ≤ `audio_reference_max`、image ≤ `image_reference_max`、不可混用），文案与错误码沿用；无能力行时维持 `validateAudioReferences` 旧口径（不查分类上限）。
+- **文本带入素材存在性/类型复核**：与视频 §10 同口径——`resolveInputAssets` 存在性/归属复核 + 声明 `mediaType` 与素材实际类型一致，保存与提交之间的素材替换不能绕过校验。
+- **冻结**：`input.references` 为合并后最终序（直接参考保序、文本带入追加）；`text_attachments[].media` 与 `input.text_input_signature` 与图片/视频目标同构（§5/§4）；重试沿用「原样复制 input」。
+- **前端交互**：音频面板参考栏锁定标记、定位来源与 §6 图片面板同构（锁定条目不渲染移除入口）；「输入已更新」徽标扩展至音频目标（同一派生判定）；参考编号沿用音频面板既有参考顺序编号，文本卡显示编号不当作目标素材序号。

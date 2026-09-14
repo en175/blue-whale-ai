@@ -170,6 +170,20 @@ export type TextIndexSyncError =
   | { kind: "unsupported_media_type"; mediaTypes: MediaMentionType[] }
   | { kind: "reference_overflow"; max: number };
 
+/** 文本带入素材中不被目标接受的媒体类型（去重；§3/§10/§11 类型校验共用） */
+function unsupportedMediaTypesOf(
+  index: Pick<TargetTextIndex, "refs">,
+  acceptedMediaTypes: readonly MediaMentionType[],
+): MediaMentionType[] {
+  return [
+    ...new Set(
+      index.refs
+        .filter((ref) => !acceptedMediaTypes.includes(ref.mediaType))
+        .map((ref) => ref.mediaType),
+    ),
+  ];
+}
+
 /** 能力校验（契约 §3）：失效索引、不支持的媒体类型、容量超限均阻止发送，不静默丢素材。 */
 export function checkTextIndexSyncInput(args: {
   index: Pick<TargetTextIndex, "refs" | "invalid">;
@@ -179,13 +193,7 @@ export function checkTextIndexSyncInput(args: {
   maxReferences: number;
 }): TextIndexSyncError | null {
   if (args.index.invalid.length > 0) return { kind: "invalid_index" };
-  const unsupported = [
-    ...new Set(
-      args.index.refs
-        .filter((ref) => !args.acceptedMediaTypes.includes(ref.mediaType))
-        .map((ref) => ref.mediaType),
-    ),
-  ];
+  const unsupported = unsupportedMediaTypesOf(args.index, args.acceptedMediaTypes);
   if (unsupported.length > 0) return { kind: "unsupported_media_type", mediaTypes: unsupported };
   if (args.mergedReferenceCount > args.maxReferences) {
     return { kind: "reference_overflow", max: args.maxReferences };
@@ -234,10 +242,9 @@ export interface TextProvidedVideoReference {
   type: MediaMentionType;
 }
 
-/** 视频参考并入（契约 §10）：文本带入按派生序转为普通参考项，与直接参考同 assetId
- *  去重保首见（material_id 空间不参与——文本带入只有本地画布素材）。返回本次追加项，
- *  调用方拼接 `[...directItems, ...added]` 得到合并最终序（后端权威并入、前端预演共用）。 */
-export function textProvidedVideoReferences(
+/** 文本带入追加项的通用实现（§10/§11 共用）：按派生序转为普通参考项，与直接参考
+ *  同 assetId 去重保首见（material_id 空间不参与——文本带入只有本地画布素材）。 */
+function appendTextProvidedReferences(
   directItems: ReadonlyArray<VideoReferenceLikeItem>,
   refs: ReadonlyArray<TextProvidedRef>,
 ): TextProvidedVideoReference[] {
@@ -253,6 +260,15 @@ export function textProvidedVideoReferences(
     added.push({ role: "reference", asset_id: ref.assetId, type: ref.mediaType });
   }
   return added;
+}
+
+/** 视频参考并入（契约 §10）：返回本次追加项，调用方拼接 `[...directItems, ...added]`
+ *  得到合并最终序（后端权威并入、前端预演共用）。 */
+export function textProvidedVideoReferences(
+  directItems: ReadonlyArray<VideoReferenceLikeItem>,
+  refs: ReadonlyArray<TextProvidedRef>,
+): TextProvidedVideoReference[] {
+  return appendTextProvidedReferences(directItems, refs);
 }
 
 export const VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE =
@@ -276,13 +292,44 @@ export function checkVideoTextIndexSyncInput(args: {
 }): VideoTextIndexSyncError | null {
   if (args.index.invalid.length > 0) return { kind: "invalid_index" };
   if (args.hasFrameRole && args.index.refs.length > 0) return { kind: "frame_conflict" };
-  const unsupported = [
-    ...new Set(
-      args.index.refs
-        .filter((ref) => !args.acceptedMediaTypes.includes(ref.mediaType))
-        .map((ref) => ref.mediaType),
-    ),
-  ];
+  const unsupported = unsupportedMediaTypesOf(args.index, args.acceptedMediaTypes);
+  if (unsupported.length > 0) return { kind: "unsupported_media_type", mediaTypes: unsupported };
+  return null;
+}
+
+/* ---- 音频目标扩展（契约 §11，IKFM41 v1.2）：来源模型/签名/冻结与 §1/§4/§5 同一实现，
+   仅新增目标类型语义；音频参考无角色槽（恒 reference），容量与 audio/image 混用
+   沿既有 checkReferenceLimits(…, "audio")，不在本包重复。 ---- */
+
+/** 音频目标接受的文本带入媒体类型（契约 §11：audio|image 与 validateAudioReferences 一致；
+ *  前端音频面板不提供图片添加入口的边界不变，文本带入是图片素材进入音频参考的唯一通道） */
+export const AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES: readonly MediaMentionType[] = ["audio", "image"];
+
+/** 文本带入追加进音频单数组的项（契约 §11：与视频 §10 同构，恒 role=reference） */
+export type TextProvidedAudioReference = TextProvidedVideoReference;
+
+/** 音频参考并入（契约 §11）：直接参考保序在前、文本带入按派生序追加尾部（同 assetId
+ *  去重保首见），与视频同一实现。返回本次追加项，调用方拼接得到合并最终序。 */
+export function textProvidedAudioReferences(
+  directItems: ReadonlyArray<VideoReferenceLikeItem>,
+  refs: ReadonlyArray<TextProvidedRef>,
+): TextProvidedAudioReference[] {
+  return appendTextProvidedReferences(directItems, refs);
+}
+
+/** 音频目标发送前校验错误（契约 §11；判定顺序：失效 → 类型；容量与 audio/image 混用
+ *  由既有 checkReferenceLimits(…, "audio") 在合并后接管） */
+export type AudioTextIndexSyncError =
+  | { kind: "invalid_index" }
+  | { kind: "unsupported_media_type"; mediaTypes: MediaMentionType[] };
+
+/** 音频目标能力校验（契约 §11）：失效索引、不支持的媒体类型均阻止发送。 */
+export function checkAudioTextIndexSyncInput(args: {
+  index: Pick<TargetTextIndex, "refs" | "invalid">;
+  acceptedMediaTypes: readonly MediaMentionType[];
+}): AudioTextIndexSyncError | null {
+  if (args.index.invalid.length > 0) return { kind: "invalid_index" };
+  const unsupported = unsupportedMediaTypesOf(args.index, args.acceptedMediaTypes);
   if (unsupported.length > 0) return { kind: "unsupported_media_type", mediaTypes: unsupported };
   return null;
 }

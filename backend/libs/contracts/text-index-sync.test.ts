@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
   IMAGE_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
   TEXT_INDEX_INVALID_MESSAGE,
   TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE,
   VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE,
+  checkAudioTextIndexSyncInput,
   checkTextIndexSyncInput,
   checkVideoTextIndexSyncInput,
   mergeTextProvidedReferences,
   textIndexOfTarget,
   textInputSignatureOf,
+  textProvidedAudioReferences,
   textProvidedVideoReferences,
   type TargetTextInputEntry,
   type TextIndexCanvasNode,
@@ -317,5 +320,72 @@ describe("checkVideoTextIndexSyncInput（契约 §10 视频校验）", () => {
 
   it("提供视频互斥文案常量", () => {
     expect(VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE).toContain("首尾帧");
+  });
+});
+
+describe("textProvidedAudioReferences（契约 §11 音频并入）", () => {
+  const provided = (assetId: string, mediaType: TextProvidedRef["mediaType"] = "audio"): TextProvidedRef => ({
+    textNodeId: "text-1",
+    sourceNodeId: `media-${assetId}`,
+    assetId,
+    mediaType,
+    name: assetId,
+    url: "u",
+  });
+
+  it("直接参考已含的 assetId 去重；追加项恒为普通参考并保留类型（audio|image）", () => {
+    const added = textProvidedAudioReferences(
+      [
+        { role: "reference", asset_id: "9100", type: "audio" },
+        { role: "reference", asset_id: "9200", type: "image" },
+      ],
+      [provided("9100"), provided("9200"), provided("9300", "image"), provided("9300", "image")],
+    );
+    expect(added).toEqual([{ role: "reference", asset_id: "9300", type: "image" }]);
+  });
+
+  it("无直接参考时全量追加；空输入返回空", () => {
+    expect(textProvidedAudioReferences([], [provided("9100"), provided("9200", "image")])).toEqual([
+      { role: "reference", asset_id: "9100", type: "audio" },
+      { role: "reference", asset_id: "9200", type: "image" },
+    ]);
+    expect(textProvidedAudioReferences([], [])).toEqual([]);
+  });
+});
+
+describe("checkAudioTextIndexSyncInput（契约 §11 音频校验）", () => {
+  const ref = (mediaType: TextProvidedRef["mediaType"]): TextProvidedRef => ({
+    textNodeId: "text-1",
+    sourceNodeId: "media-1",
+    assetId: "9100",
+    mediaType,
+    name: "n",
+    url: "u",
+  });
+
+  it("失效索引最优先阻止", () => {
+    expect(
+      checkAudioTextIndexSyncInput({
+        index: { refs: [ref("audio")], invalid: [{ textNodeId: "t", sourceNodeId: "m", name: "n" }] },
+        acceptedMediaTypes: AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
+      }),
+    ).toEqual({ kind: "invalid_index" });
+  });
+
+  it("video 类型阻止；audio/image 放行（容量与混用由既有 checkReferenceLimits 接管）", () => {
+    expect(
+      checkAudioTextIndexSyncInput({
+        index: { refs: [ref("video"), ref("audio")], invalid: [] },
+        acceptedMediaTypes: AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
+      }),
+    ).toEqual({ kind: "unsupported_media_type", mediaTypes: ["video"] });
+    // audio 与 image 并存不在本函数拦截——混用是 seed-audio 模型限制，走合并后容量校验
+    expect(
+      checkAudioTextIndexSyncInput({
+        index: { refs: [ref("audio"), ref("image")], invalid: [] },
+        acceptedMediaTypes: AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
+      }),
+    ).toBeNull();
+    expect(AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES).toEqual(["audio", "image"]);
   });
 });
