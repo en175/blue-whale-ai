@@ -3323,7 +3323,7 @@ export default function CanvasPage() {
         const id = String(asset.id);
         const error = checkAddAudioRef(id, current);
         if (error) { showToast('warn', error); continue; }
-        current.push({ nodeId: `asset-${id}`, assetId: id, url: asset.url, name: assetDisplayName(asset) });
+        current.push({ nodeId: `asset-${id}`, assetId: id, url: asset.url, name: assetDisplayName(asset), mediaType: 'audio' });
         accepted.push(asset);
       }
       if (!accepted.length) return;
