@@ -4,6 +4,7 @@
 import { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, type PromptBinding } from '@lib/contracts/prompt-target';
 import { promptMentionSchema, validPromptMentions } from '@lib/contracts/prompt-preview';
 import { unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
+import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
@@ -389,6 +390,11 @@ export default function CanvasPage() {
     const targetData = targetNode.data as Record<string, unknown> | undefined;
     if (sourceData?.emptyShell || targetData?.emptyShell) return false;
     if (wouldCreateCycle(source, target, edgesRef.current)) return false;
+    // IKFM3Q 契约 §4：媒体→文本卡的关系线只由正文 @ 索引建立；手工拖线拒绝，不出现无索引的线
+    if (sourceNode?.type === 'mediaNode' && targetNode.type === 'textNode') {
+      showToast('warn', '媒体到文本卡的关系线由正文 @ 索引建立');
+      return false;
+    }
     const targetKind = genKindOf(targetNode);
     if (targetKind) {
       if (!canConnectSourcesToGen([sourceNode!], targetKind)) return false;
@@ -438,24 +444,51 @@ export default function CanvasPage() {
     historyRef.current?.pushReplaceEdges(before, after);
     setEdges(after);
   };
+  /** 正文媒体索引关系线（IKFM3Q 契约 §4）：事件驱动建删——TextNode 显式插入/重绑定建线、
+   *  最后标签删除线；不做全量派生同步，被手动删除的线不得在此自动补回。 */
+  const syncTextIndexEdges = (textId: string, delta: { added: string[]; removed: string[] }) => {
+    if (applyingRef.current) return;
+    const removeIds = delta.removed.map(source => `e-${source}-${textId}`).filter(id => edgesRef.current.some(edge => edge.id === id));
+    if (removeIds.length > 0) removeTargetInputs(removeIds);
+    const additions = delta.added.filter(source => !edgesRef.current.some(edge => edge.source === source && edge.target === textId));
+    if (additions.length === 0) return;
+    const newEdges: Edge[] = additions.map(source => ({
+      id: `e-${source}-${textId}`,
+      source,
+      target: textId,
+      sourceHandle: null,
+      targetHandle: null,
+      type: 'custom',
+      style: { stroke: '#444' },
+      data: { textIndex: true },
+    }));
+    historyRef.current?.pushAddEdges(newEdges);
+    const next = [...edgesRef.current, ...newEdges];
+    edgesRef.current = next;
+    setEdges(next);
+  };
+  /** 文本卡 media 索引变更：区间与展示快照写入节点 data，关系线按 delta 建删（契约 §4） */
+  const handleMediaIndexChange = (id: string, mediaMentions: MediaMention[], mediaRefs: MediaRef[], delta: { added: string[]; removed: string[] }) => {
+    setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, mediaMentions, mediaRefs } } : n));
+    syncTextIndexEdges(id, delta);
+  };
   const removePlanAttachment = (targetId: string | undefined, planNodeId: string) => {
     if (!targetId || isGeneratingNode(targetId)) return;
     removeTargetInputs(edgesRef.current.filter(edge => edge.source === planNodeId && edge.target === targetId).map(edge => edge.id));
   };
-  /** 图片面板移除文本附件（IKFCKN）：× 仅断开当前连线（保留画布原文本卡，走既有 removePlanAttachment 断边链路），
-   *  并同步自由模式的附件快照（快照渲染自 imageSeed，断边不会自动反映到面板）。
-   *  生成中守卫与断边链路对齐：守卫命中时边保留，快照也保持一致（防面板与画布脱节） */
-  const removeImageTextAttachment = (targetId: string | undefined, nodeId: string) => {
+  /** 图片/视频面板移除文本附件（IKFCKN/IKFCXC）：× 仅断开当前目标连线（保留画布原文本卡与其他目标关系，
+   *  走既有 removePlanAttachment 断边链路，与画布断线同一结果），并同步自由模式的附件快照
+   *  （快照渲染自 seed，断边不会自动反映到面板）。
+   *  生成中守卫与断边链路对齐：守卫命中时边保留，快照也保持一致（防面板与画布脱节）。
+   *  setSeed 由调用方在 JSX 回调中传入——声明处先于 useState 定义，直接引用 setter 会撞 TDZ。 */
+  const removeTextAttachment = <S extends { attachments?: ImageTextAttachment[] }>(
+    setSeed: (updater: (s: S | null) => S | null) => void,
+    targetId: string | undefined,
+    nodeId: string,
+  ) => {
     if (targetId && isGeneratingNode(targetId)) return;
     removePlanAttachment(targetId, nodeId);
-    setImageSeed((s) => (s ? { ...s, attachments: s.attachments?.filter((a) => a.nodeId !== nodeId) } : s));
-  };
-  /** 视频面板移除文本附件（IKFCXC）：同图片面板链路——× 仅断开当前目标连线
-   *  （保留来源卡与其他目标关系，与画布断线同一结果），并同步自由模式的附件快照（videoSeed） */
-  const removeVideoTextAttachment = (targetId: string | undefined, nodeId: string) => {
-    if (targetId && isGeneratingNode(targetId)) return;
-    removePlanAttachment(targetId, nodeId);
-    setVideoSeed((s) => (s ? { ...s, attachments: s.attachments?.filter((a) => a.nodeId !== nodeId) } : s));
+    setSeed((s) => (s ? { ...s, attachments: s.attachments?.filter((a) => a.nodeId !== nodeId) } : s));
   };
   /** 连线变更守卫（IKDMQQ）：生成中节点的入边删除变更被拦截（剪刀等 remove 路径统一收口）；
    *  放行的删边进撤销栈（IKD0JT），撤销可加回 */
@@ -927,6 +960,7 @@ export default function CanvasPage() {
           onDraftError: handleDraftError,
           onTextChange: (id: string, text: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text } } : n)),
           onPromptChange: (id: string, text: string, promptMentions: import('@lib/contracts/prompt-preview').PromptMention[], promptMaterials?: Array<import('@lib/contracts/prompt-preview').PromptMaterial & { url: string }>) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text, promptMentions, ...(promptMaterials ? { promptMaterials } : {}) } } : n)),
+          onMediaIndexChange: handleMediaIndexChange,
           onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
@@ -1418,14 +1452,13 @@ export default function CanvasPage() {
         text: text ?? '',
         onDraftError: handleDraftError,
         toolMode,
-        onDelete: (id: string) => {
-          setTextNodes((prev) => prev.filter((n) => n.id !== id));
-        },
+        onDelete: (id: string) => removeCanvasNodes([id]),
         onTextChange: (id: string, text: string) => {
           setTextNodes((prev) =>
             prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, text } } : n))
           );
         },
+        onMediaIndexChange: handleMediaIndexChange,
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
@@ -1451,6 +1484,10 @@ export default function CanvasPage() {
       pendingNodeIdsRef.current.add(copy.id);
       historyRef.current?.pushAddNodes([copy.id]);
       setTextNodes((prev) => [...prev, copy]);
+      // IKFM3Q 契约 §4：副本随正文复制 media 索引；来源节点仍在画布的关系线同步复制（副本获得有效索引）
+      const mentionedSources = [...new Set(((copy.data.mediaMentions ?? []) as MediaMention[]).map(mention => mention.nodeId))]
+        .filter(source => findCanvasNode(source));
+      if (mentionedSources.length > 0) syncTextIndexEdges(copy.id, { added: mentionedSources, removed: [] });
       return;
     }
     const m = mediaNodesRef.current.find((n) => n.id === id);
@@ -2375,14 +2412,13 @@ export default function CanvasPage() {
         textGen: true,
         onDraftError: handleDraftError,
         toolMode,
-        onDelete: (id: string) => {
-          setTextNodes((prev) => prev.filter((n) => n.id !== id));
-        },
+        onDelete: (id: string) => removeCanvasNodes([id]),
         onTextChange: (id: string, text: string) => {
           setTextNodes((prev) =>
             prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, text } } : n)),
           );
         },
+        onMediaIndexChange: handleMediaIndexChange,
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
@@ -5468,14 +5504,13 @@ export default function CanvasPage() {
             data: {
               text: unifiedTextNodeText(snapshot),
               toolMode,
-              onDelete: (id: string) => {
-                setTextNodes((prev) => prev.filter((n) => n.id !== id));
-              },
+              onDelete: (id: string) => removeCanvasNodes([id]),
               onTextChange: (id: string, text: string) => {
                 setTextNodes((prev) =>
                   prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, text } } : n))
                 );
               },
+              onMediaIndexChange: handleMediaIndexChange,
               onDuplicate: (id: string) => actionsRef.current.duplicate(id),
               onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
               onAddToChat: (id: string) => actionsRef.current.addToChat(id),
@@ -6176,7 +6211,7 @@ export default function CanvasPage() {
           <BottomDialog
             stripOrder={refStripOrderOf(videoDraftId)}
             onStripOrderChange={videoDraftId ? keys => handleRefStripOrderChange(videoDraftId, keys) : undefined}
-            onRemoveAttachment={id => removeVideoTextAttachment(videoDraftId ?? videoSeed?.targetNodeId, id)}
+            onRemoveAttachment={id => removeTextAttachment(setVideoSeed, videoDraftId ?? videoSeed?.targetNodeId, id)}
             pendingPlanSyncs={pendingPlanSyncs(videoSeed?.targetNodeId)}
             onSyncPlan={id => syncPlanToTarget(id, videoSeed?.targetNodeId)}
             syncingPlan={applying}
@@ -6251,7 +6286,7 @@ export default function CanvasPage() {
             attachments={imageDraftId ? imageDraftAttachments : imageSeedView?.attachments}
             mediaRefs={imageDraftId ? imageDraftMediaRefs : undefined}
             invalidMediaRefs={invalidImageMediaRefs}
-            onRemoveAttachment={id => removeImageTextAttachment(imageDraftId ?? imageSeed?.targetNodeId, id)}
+            onRemoveAttachment={id => removeTextAttachment(setImageSeed, imageDraftId ?? imageSeed?.targetNodeId, id)}
             pendingPlanSyncs={pendingPlanSyncs(imageSeed?.targetNodeId)}
             onSyncPlan={id => syncPlanToTarget(id, imageSeed?.targetNodeId)}
             syncingPlan={applying}
