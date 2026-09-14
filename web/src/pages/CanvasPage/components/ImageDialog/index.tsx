@@ -359,6 +359,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
   const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
   /** 生成中只读（IKDMQQ）：任务执行期间目标参数冻结，保留查看与画布上的取消入口 */
   const readOnly = uploading || draftBinding?.submitting === true || draftBinding?.status === 'generating';
+  /** IKFR4X 持续选取会话锁定：模式中隔离提示词编辑、模型切换与生成（须先完成选取）；
+   *  Dock 参考移除、来源入口与关闭不受限（规格 AC-07） */
+  const pickLocked = pickMode === true;
   const configurationError = planReferenceError ? planReferenceError
     : !modelsLoaded ? '正在加载模型配置'
     : !currentGen ? '原生成模型已不可用，请重新选择模型'
@@ -373,7 +376,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     : hasInvalidRef ? '正文有已失效的素材标签，请点击标签替换或删除后再发送'
     : flatValue.length > maxInput ? `提示词超过 ${maxInput} 字上限，请精简后再发送`
     : null;
-  const canSend = !uploading && !readOnly && !draftBinding?.saveFailed && !configurationError && (flatValue.trim().length > 0 || hasAttachmentText);
+  const canSend = !uploading && !readOnly && !pickLocked && !draftBinding?.saveFailed && !configurationError && (flatValue.trim().length > 0 || hasAttachmentText);
 
   /** 草稿绑定参数同步（IKDMQQ）：面板内的模型/分辨率/比例/提示词变更实时写回草稿节点 */
   const syncDraftParams = (patch: { prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string }) => {
@@ -817,7 +820,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
             initialDoc={initialDoc ?? null}
             initialText={initialText ?? ''}
             placeholder={uploading ? '正在上传参考图...' : `描述你希望如何编辑这张图片。图片最多 ${maxImages} 张。输入 @ 可引用已选素材。`}
-            readOnly={uploading || readOnly}
+            readOnly={uploading || readOnly || pickLocked}
             labelOf={refLabelOf}
             reconcileKey={`${orderedAssetIds.join(',')}|${orderedTextNodeIds.join(',')}`}
             labels={refsLabels}
@@ -838,6 +841,8 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
               <button
                 className={styles.configBtn}
                 onClick={() => setShowConfig(!showConfig)}
+                disabled={pickLocked}
+                title={pickLocked ? '选取进行中，完成选取后再调整模型配置' : undefined}
               >
               <SlidersHorizontal size={14} strokeWidth={2} />
               <span>{currentModel?.label ?? (selectedModel || '选择模型')}</span>
