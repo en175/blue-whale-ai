@@ -242,7 +242,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   useEffect(() => {
     const m = videoModelList.find((x) => x.model_id === videoModel);
     if (!m) return;
-    if (m.supported_aspect_ratios.length && !m.supported_aspect_ratios.includes(aspectRatio)) {
+    // ADR-0086：首尾帧任务官方强制 ratio=adaptive（输出跟随首帧图比例），比例内置不暴露给用户——
+    // 切模型/切模式后统一强制，不参与「不在能力列表就回落默认」的校准。
+    if (isKeyframe) {
+      setAspectRatio('adaptive');
+    } else if (m.supported_aspect_ratios.length && !m.supported_aspect_ratios.includes(aspectRatio)) {
       setAspectRatio(
         m.default_aspect_ratio && m.supported_aspect_ratios.includes(m.default_aspect_ratio)
           ? m.default_aspect_ratio
@@ -267,7 +271,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoModelList, videoModel]);
+  }, [videoModelList, videoModel, isKeyframe]);
 
   // 并发加载三种能力的模型列表
   useEffect(() => {
@@ -688,11 +692,22 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         setKeyframeRefs({ first: images[0], last: images[1] });
         setRefFiles([]);
       }
+      // ADR-0086：首尾帧比例内置 adaptive（输出跟随首帧图），不让用户感知/选择。
+      setAspectRatio('adaptive');
     } else if (videoMode === 'firstlast') {
       // 切离首尾帧：首帧/尾帧转回普通参考（图片），清空槽位
       const restored = [keyframeRefs.first, keyframeRefs.last].filter(Boolean) as KeyframeRefItem[];
       if (restored.length > 0) setRefFiles((prev) => [...prev, ...restored]);
       setKeyframeRefs({});
+      // 离开首尾帧：adaptive 内置值若新模型比例列表不含，回落模型默认/首个比例。
+      const m = videoModelList.find((x) => x.model_id === videoModel);
+      if (aspectRatio === 'adaptive' && m && !m.supported_aspect_ratios.includes('adaptive')) {
+        setAspectRatio(
+          m.default_aspect_ratio && m.supported_aspect_ratios.includes(m.default_aspect_ratio)
+            ? m.default_aspect_ratio
+            : (m.supported_aspect_ratios[0] ?? ''),
+        );
+      }
     }
     setVideoMode(key);
   };
@@ -1194,31 +1209,33 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   )}
                 </div>
 
-                {/* 宽高比下拉 */}
-                <div className={styles.dropdownWrap} ref={ratioRef}>
-                  <button
-                    className={styles.paramBtn}
-                    onClick={() => setShowRatioDrop(!showRatioDrop)}
-                  >
-                    <RatioIcon ratio={aspectRatio} />
-                    <span>{aspectRatio}</span>
-                    <ChevronDown size={12} strokeWidth={2} />
-                  </button>
-                  {showRatioDrop && (
-                    <div className={styles.dropdownMenuDown}>
-                      {videoRatioKeys.map((key) => (
-                        <button
-                          key={key}
-                          className={`${styles.dropdownItem} ${aspectRatio === key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => { setAspectRatio(key); setShowRatioDrop(false); }}
-                        >
-                          <RatioIcon ratio={key} />
-                          <span>{key}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                {/* 宽高比下拉（ADR-0086：首尾帧任务官方强制 adaptive、比例内置不暴露，整块不渲染） */}
+                {!isKeyframe && (
+                  <div className={styles.dropdownWrap} ref={ratioRef}>
+                    <button
+                      className={styles.paramBtn}
+                      onClick={() => setShowRatioDrop(!showRatioDrop)}
+                    >
+                      <RatioIcon ratio={aspectRatio} />
+                      <span>{aspectRatio}</span>
+                      <ChevronDown size={12} strokeWidth={2} />
+                    </button>
+                    {showRatioDrop && (
+                      <div className={styles.dropdownMenuDown}>
+                        {videoRatioKeys.map((key) => (
+                          <button
+                            key={key}
+                            className={`${styles.dropdownItem} ${aspectRatio === key ? styles.dropdownItemActive : ''}`}
+                            onClick={() => { setAspectRatio(key); setShowRatioDrop(false); }}
+                          >
+                            <RatioIcon ratio={key} />
+                            <span>{key}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* 分辨率下拉 */}
                 <div className={styles.dropdownWrap} ref={resRef}>
