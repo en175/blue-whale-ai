@@ -210,8 +210,20 @@ describe('Canvas 文本节点卡片', () => {
 
   // IKDLQE: truncation was retired; complete paste and over-limit drafts are covered by real-browser integration.
 
-  it('滚轮在正文内遵循内部阅读语义，不缩放画布', async () => {
+  it('非编辑态滚轮在正文上平移画布', async () => {
     await renderText({ html: '<p>需要滚动才能读完的正文</p>' });
+    const viewportTransform = () =>
+      container.querySelector<HTMLElement>('.react-flow__viewport')!.style.transform;
+    expect(viewportTransform()).toBe('translate(0px,0px) scale(1)');
+    await act(async () => {
+      editor().dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
+    });
+    expect(viewportTransform()).toBe('translate(0px,-60px) scale(1)');
+  });
+
+  it('编辑态滚轮留在正文内，不平移画布', async () => {
+    await renderText({ html: '<p>需要滚动才能读完的正文</p>' });
+    await startEditing();
     const viewportTransform = () =>
       container.querySelector<HTMLElement>('.react-flow__viewport')!.style.transform;
     expect(viewportTransform()).toBe('translate(0px,0px) scale(1)');

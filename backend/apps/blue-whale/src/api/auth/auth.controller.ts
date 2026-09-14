@@ -3,8 +3,8 @@ import type { Request, Response } from "express";
 import {
   NewApiError,
   type NewApiLoginResult,
-} from "@blue-whale/core";
-import { ACCOUNT_LOCKED, FAILURE_CODE, ok } from "@blue-whale/contracts";
+} from "@lib/core";
+import { ACCOUNT_LOCKED, FAILURE_CODE, ok } from "@lib/contracts";
 import { createAuthRepo } from "@lib/shared/persistence/index.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { AccountService } from "@lib/shared/account/account.service.js";

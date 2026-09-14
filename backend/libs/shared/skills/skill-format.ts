@@ -1,6 +1,6 @@
 import { createControlledChatClient } from "./controlled-chat-client.js";
-import { ok, skillError } from "@blue-whale/contracts";
-import { parseSkillMd } from "@blue-whale/core";
+import { ok, skillError } from "@lib/contracts";
+import { parseSkillMd } from "@lib/core";
 
 export type SkillFormatChatClient = {
   complete(input: { rules: string; draft: string }): Promise<string>;

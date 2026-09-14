@@ -1,6 +1,4 @@
 packages:
-  - "apps/*"
-  - "packages/*"
   - "backend"
 
 nodeVersion: 24.18.0

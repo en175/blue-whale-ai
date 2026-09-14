@@ -54,6 +54,9 @@ public final class GenerationError {
     /** 内容策略拒绝（copyright/sensitive 优先，§5）。 */
     public static final String ERROR_CONTENT_REJECTED = "content_rejected";
 
+    /** 参考内容版权拒绝（IKFL53：与输出审核 1018 分开，1038「参考内容可能涉及版权限制」）。 */
+    public static final String ERROR_CONTENT_REJECTED_REFERENCE = "content_rejected_reference";
+
     /** 供应商配置错误。 */
     public static final String ERROR_PROVIDER_CONFIG = "provider_config";
 

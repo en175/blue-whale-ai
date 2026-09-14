@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
-import { ok, skillError } from "@blue-whale/contracts";
+import { ok, skillError } from "@lib/contracts";
 import type { SkillLibraryView, SkillMineView } from "@lib/shared/persistence/index.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { SkillAdminService } from "@lib/shared/skills/skill-admin.service.js";

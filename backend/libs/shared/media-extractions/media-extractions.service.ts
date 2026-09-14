@@ -6,7 +6,7 @@ import {
   RESOURCE_NOT_FOUND_CODE,
   fail,
   ok,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import {
   createGenerationCommandRepo,
   placeMediaExtractPendingNode,

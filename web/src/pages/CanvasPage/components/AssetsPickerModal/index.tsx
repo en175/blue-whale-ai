@@ -1,7 +1,7 @@
 /* ============================================
  * AssetsPickerModal 画布「资产库选择」弹窗
  * 工具栏加号 → 资产库选择入口：GET /api/assets 分页拉取 + tab 筛选
- * 画布工具栏 / 视频对话「从资产中选择」额外展示「真实人像库」（素材库 LivenessFace 平铺）
+ * 画布工具栏 / 视频对话「从资产中选择」额外展示「真人人像库」（分组+素材，与资产页一致）
  * 多选 + 确认：卡片点击勾选/取消，确认后批量回调落画布
  * ============================================ */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -16,12 +16,14 @@ import {
 } from '@/api/assets';
 import { isApiError } from '@/api/http';
 import {
-  listAssetGroups,
-  listAssets,
+  createAsset as createMaterialAsset,
   type MaterialAsset,
   type MaterialAssetType,
 } from '@/api/material';
+import { isFileRejected } from '@/utils/fileSignature';
+import { uploadAssetFile } from '@/utils/upload';
 import AssetMasonry from '@/pages/Assets/components/AssetMasonry';
+import CharacterLibrary from '@/pages/Assets/components/CharacterLibrary';
 import { appendUniqueAssets } from '@/pages/Assets/assetGrid';
 import assetStyles from '@/pages/Assets/index.module.css';
 import Skeleton from '@/components/Skeleton';
@@ -41,7 +43,6 @@ const pickerTabs: { key: 'all' | PickerMediaType; label: string }[] = [
 ];
 
 const PICKER_PAGE_SIZE = 30;
-const LIVENESS_PAGE_SIZE = 100;
 
 export interface AssetsPickerModalProps {
   onClose: () => void;
@@ -56,7 +57,7 @@ export interface AssetsPickerModalProps {
   mediaTypes?: PickerMediaType[];
   /** 确认按钮文案（默认「插入画布」，首页/dock 参考入口可传「确定」等） */
   confirmText?: string;
-  /** 是否展示「真实人像库」tab（仅画布工具栏、视频对话「从资产中选择」） */
+  /** 是否展示「真人人像库」tab（仅画布工具栏、视频对话「从资产中选择」） */
   showLivenessTab?: boolean;
 }
 
@@ -81,43 +82,6 @@ function materialToPickerRecord(asset: MaterialAsset): AssetRecord {
   };
 }
 
-/** 跨组聚合真人人像：先查全部分组再按组分页拉 Active 素材，展示层拍平 */
-async function loadLivenessPickerAssets(mediaTypes?: PickerMediaType[]): Promise<AssetRecord[]> {
-  const groups = await listAssetGroups({
-    Filter: { GroupType: 'LivenessFace' },
-    PageNumber: 1,
-    PageSize: LIVENESS_PAGE_SIZE,
-  });
-  const groupIds = (groups.Items ?? []).map((group) => group.Id).filter(Boolean);
-  if (groupIds.length === 0) return [];
-
-  const collected: MaterialAsset[] = [];
-  let pageNumber = 1;
-  let totalCount = Number.POSITIVE_INFINITY;
-  while (collected.length < totalCount) {
-    const result = await listAssets({
-      Filter: { GroupIds: groupIds, GroupType: 'LivenessFace' },
-      PageNumber: pageNumber,
-      PageSize: LIVENESS_PAGE_SIZE,
-    });
-    const items = result.Items ?? [];
-    collected.push(...items);
-    totalCount = result.TotalCount ?? collected.length;
-    if (items.length < LIVENESS_PAGE_SIZE) break;
-    pageNumber += 1;
-    if (pageNumber > 20) break;
-  }
-
-  return collected
-    .filter((asset) => asset.Status === 'Active' && Boolean(asset.URL))
-    .map(materialToPickerRecord)
-    .filter((asset) =>
-      !mediaTypes || mediaTypes.length === 0
-        ? asset.type === 'image' || asset.type === 'video' || asset.type === 'audio'
-        : mediaTypes.includes(asset.type as PickerMediaType),
-    );
-}
-
 export default function AssetsPickerModal({
   onClose,
   onSelect,
@@ -139,7 +103,7 @@ export default function AssetsPickerModal({
       );
     }
     if (showLivenessTab) {
-      tabs = [...tabs, { key: 'liveness', label: '真实人像库' }];
+      tabs = [...tabs, { key: 'liveness', label: '真人人像库' }];
     }
     return tabs;
   }, [mediaTypes, showLivenessTab]);
@@ -150,10 +114,10 @@ export default function AssetsPickerModal({
   /** 已勾选资产记录（id → record，跨 tab 保留：tab 仅是筛选视图，确认时统一提交） */
   const [selectedMap, setSelectedMap] = useState<ReadonlyMap<string, AssetRecord>>(() => new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  const [livenessAssets, setLivenessAssets] = useState<AssetRecord[]>([]);
-  const [livenessLoading, setLivenessLoading] = useState(false);
-  const [livenessError, setLivenessError] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [livenessGroupId, setLivenessGroupId] = useState<string | null>(null);
+  const [livenessRefreshTick, setLivenessRefreshTick] = useState(0);
+  const [uploading, setUploading] = useState(false);
 
   const assetType = isLivenessTab || activeTab === 'all' ? '' : activeTab;
   const {
@@ -185,12 +149,10 @@ export default function AssetsPickerModal({
         : assets,
     [assets, mediaTypes],
   );
-  const visibleAssets = isLivenessTab ? livenessAssets : localVisibleAssets;
+  const visibleAssets = localVisibleAssets;
   const assetTotal = assetPages?.at(-1)?.total ?? 0;
-  const loading = isLivenessTab
-    ? livenessLoading
-    : isPending || (!assetPages && isError);
-  const listError = isLivenessTab ? livenessError : isError;
+  const loading = isLivenessTab ? false : isPending || (!assetPages && isError);
+  const listError = isLivenessTab ? false : isError;
 
   const loadNextPage = useCallback(async () => {
     if (isLivenessTab || !hasNextPage || isFetchingNextPage) return;
@@ -213,27 +175,60 @@ export default function AssetsPickerModal({
     [selectedMap],
   );
 
-  useEffect(() => {
-    if (!isLivenessTab) return;
-    let cancelled = false;
-    setLivenessLoading(true);
-    setLivenessError(false);
-    void loadLivenessPickerAssets(mediaTypes)
-      .then((records) => {
-        if (!cancelled) setLivenessAssets(records);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        if (!isApiError(err)) toast.error('加载失败');
-        setLivenessError(true);
-      })
-      .finally(() => {
-        if (!cancelled) setLivenessLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isLivenessTab, mediaTypes]);
+  const handleLivenessDetailViewChange = useCallback((inDetail: boolean, groupId: string | null) => {
+    setLivenessGroupId(inDetail ? groupId : null);
+  }, []);
+
+  const handleLivenessUpload = useCallback(() => {
+    if (uploading) return;
+    if (!livenessGroupId) {
+      toast.error('请先进入分组再上传');
+      return;
+    }
+    fileInputRef.current?.click();
+  }, [livenessGroupId, uploading]);
+
+  const handleLivenessFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || uploading) return;
+    const list = Array.from(files);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!livenessGroupId) {
+      toast.error('请先进入分组再上传');
+      return;
+    }
+
+    setUploading(true);
+    const errors: string[] = [];
+    for (const file of list) {
+      let assetKind: 'Image' | 'Video' | 'Audio';
+      if (file.type.startsWith('image/')) assetKind = 'Image';
+      else if (file.type.startsWith('video/')) assetKind = 'Video';
+      else {
+        errors.push(`${file.name}：仅支持图片和视频`);
+        continue;
+      }
+      try {
+        const uploadResult = await uploadAssetFile(file);
+        const rawName = file.name;
+        const finalName = rawName.length > 30 ? rawName.slice(0, 30) : rawName;
+        if (rawName.length > 30) toast('当前上传素材名称过长，已截取', { style: { textAlign: 'center' } });
+        await createMaterialAsset({
+          GroupId: livenessGroupId,
+          URL: uploadResult.url,
+          Name: finalName,
+          AssetType: assetKind,
+          SourceAssetId: String(uploadResult.asset_id),
+        });
+      } catch (err) {
+        if (isFileRejected(err)) errors.push(err.message);
+        else if (!isApiError(err)) errors.push(`上传失败：${file.name}`);
+      }
+    }
+    if (errors.length) toast.error(errors.join('；'));
+    setUploading(false);
+    setLivenessRefreshTick((tick) => tick + 1);
+  };
 
   /** 卡片点击切换勾选（保存完整记录，跨 tab 提交时不丢） */
   const handleToggleSelect = useCallback((asset: AssetRecord) => {
@@ -245,6 +240,14 @@ export default function AssetsPickerModal({
       return next;
     });
   }, []);
+
+  const handleToggleLivenessAsset = useCallback((asset: MaterialAsset) => {
+    const record = materialToPickerRecord(asset);
+    if (mediaTypes && mediaTypes.length > 0 && !mediaTypes.includes(record.type as PickerMediaType)) {
+      return;
+    }
+    handleToggleSelect(record);
+  }, [handleToggleSelect, mediaTypes]);
 
   /** Esc 关闭 */
   useEffect(() => {
@@ -284,25 +287,46 @@ export default function AssetsPickerModal({
         </div>
 
         <div ref={scrollRef} className={styles.body}>
-          {loading && (
+          {isLivenessTab && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.webm"
+                className={styles.hiddenInput}
+                onChange={handleLivenessFileChange}
+              />
+              <CharacterLibrary
+                groupType="LivenessFace"
+                refreshTick={livenessRefreshTick}
+                onDetailViewChange={handleLivenessDetailViewChange}
+                onUpload={handleLivenessUpload}
+                pickerSelectedIds={selectedIds}
+                onPickerToggleAsset={handleToggleLivenessAsset}
+                pickerMediaTypes={mediaTypes}
+              />
+            </>
+          )}
+          {!isLivenessTab && loading && (
             <div className={assetStyles.skeletonGrid}>
               {Array.from({ length: 10 }, (_, index) => (
                 <Skeleton key={index} className={assetStyles.cardSkeleton} />
               ))}
             </div>
           )}
-          {!loading && listError && gridItems.length === 0 && (
+          {!isLivenessTab && !loading && listError && gridItems.length === 0 && (
             <div className={assetStyles.empty}>资产加载失败，请稍后重试</div>
           )}
-          {!loading && !listError && gridItems.length === 0 && (
+          {!isLivenessTab && !loading && !listError && gridItems.length === 0 && (
             <div className={assetStyles.empty}>暂无素材</div>
           )}
-          {!loading && gridItems.length > 0 && (
+          {!isLivenessTab && !loading && gridItems.length > 0 && (
             <>
               <AssetMasonry
                 key={activeTab}
                 items={gridItems}
-                totalItems={isLivenessTab ? gridItems.length : hasNextPage ? assetTotal : gridItems.length}
+                totalItems={hasNextPage ? assetTotal : gridItems.length}
                 onLoadMore={loadNextPage}
                 scrollContainerRef={scrollRef}
                 selectedIds={selectedIds}
@@ -311,13 +335,10 @@ export default function AssetsPickerModal({
                 pageSize={PICKER_PAGE_SIZE}
                 libraryMode
               />
-              {!isLivenessTab && isFetchingNextPage && (
+              {isFetchingNextPage && (
                 <div className={assetStyles.loadState} role="status">加载中…</div>
               )}
-              {!isLivenessTab && !hasNextPage && localVisibleAssets.length > 0 && (
-                <div className={assetStyles.loadState}>已加载全部素材</div>
-              )}
-              {isLivenessTab && livenessAssets.length > 0 && (
+              {!hasNextPage && localVisibleAssets.length > 0 && (
                 <div className={assetStyles.loadState}>已加载全部素材</div>
               )}
             </>
@@ -327,7 +348,11 @@ export default function AssetsPickerModal({
         {/* 底部操作栏：取消 + 确认（展示已选数量，未勾选时禁用） */}
         <div className={styles.footer}>
           <span className={styles.selectHint}>
-            {selectedAssets.length > 0 ? `已选 ${selectedAssets.length} 项` : '点击素材进行选择，可多选'}
+            {selectedAssets.length > 0
+              ? `已选 ${selectedAssets.length} 项`
+              : isLivenessTab
+                ? '进入分组后点击素材进行选择，可多选'
+                : '点击素材进行选择，可多选'}
           </span>
           <div className={styles.footerActions}>
             <button className={styles.cancelBtn} onClick={onClose}>取消</button>

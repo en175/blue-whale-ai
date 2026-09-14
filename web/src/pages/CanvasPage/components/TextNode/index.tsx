@@ -15,10 +15,10 @@ import CanvasContextMenu from '../CanvasContextMenu';
 import AtMentionMenu from '../AtMentionMenu';
 import type { AtMentionItem } from '../../atMention';
 import styles from './index.module.css';
-import { PROMPT_TEXT_LIMITS } from '../../../../../../packages/contracts/src/prompt-text-limits';
-import { promptMentionSchema, validPromptMentions, type PromptMention, type PromptMaterial } from '../../../../../../packages/contracts/src/prompt-preview';
-import { markdownToSanitizedHtml } from '../../../../../../packages/contracts/src/text-node-markdown';
-import { type MediaMention, type MediaRef } from '../../../../../../packages/contracts/src/text-node-media';
+import { PROMPT_TEXT_LIMITS } from '@lib/contracts/prompt-text-limits';
+import { promptMentionSchema, validPromptMentions, type PromptMention, type PromptMaterial } from '@lib/contracts/prompt-preview';
+import { markdownToSanitizedHtml } from '@lib/contracts/text-node-markdown';
+import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { renderPromptMentions, readPromptMentions, applyMediaMentionState, createMediaMentionChip } from './promptMentions';
 import { applyMarkdownInputRule } from './markdownInputRules';
 
@@ -653,8 +653,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       </div>
 
       {(contentError || titleError) && <div role="alert" className="nodrag nopan">{contentError || titleError}</div>}
-      {/* 固定正文容器：360×270（含内边距），超出的正文在内部上下滚动 */}
-      <div className={`${styles.contentCard} nowheel`} data-testid="text-content" style={expanded ? { height: 540, maxHeight: '70vh' } : undefined}>
+      {/* 固定正文容器：360×270（含内边距）。仅编辑态拦截滚轮做正文滚动，非编辑态交给画布平移（IKFMQO TC_CX_001/015） */}
+      <div className={`${styles.contentCard}${editing ? ' nowheel' : ''}`} data-testid="text-content" style={expanded ? { height: 540, maxHeight: '70vh' } : undefined}>
         {/* IKFM3Q 契约 §4：每张文本卡都可能承接媒体索引关系线，target 连接点常驻
            （isFirst 首卡与其余卡一致；连接点默认透明，悬停/连接中才可见，无视觉成本；
            媒体→文本卡手工拖线仍被 connectPair 拒绝，既有规则面不变） */}
@@ -681,7 +681,10 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           className={`${styles.editor} ${editing ? 'nodrag nopan' : ''}`}
           contentEditable={editing ? true : false}
           suppressContentEditableWarning
-          style={{ pointerEvents: isSelect && (!isTextGen || writingSelf) ? 'auto' : 'none' }}
+          style={{
+            pointerEvents: isSelect && (!isTextGen || writingSelf) ? 'auto' : 'none',
+            overflowY: editing ? 'auto' : 'hidden',
+          }}
           onFocus={() => setIsFocused(true)}
           onBlur={(e) => {
             // 如果焦点转移到工具栏/操作条/@菜单/标签操作层/素材预览，保持编辑状态

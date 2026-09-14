@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { Body, Controller, Headers, Post } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { SkillService } from "@lib/shared/skills/skills.service.js";

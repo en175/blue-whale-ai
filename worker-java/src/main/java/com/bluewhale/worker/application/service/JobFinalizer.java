@@ -257,7 +257,9 @@ public class JobFinalizer {
         }
         previewSync.sync(jobIdLong);
 
-        insertLog(jobIdLong, JobStatus.FAILED, errorCode + ": " + errorMessage, null);
+        insertLog(jobIdLong, JobStatus.FAILED, errorCode + ": " + errorMessage,
+                Map.of("code", errorCode, "message", errorMessage,
+                        "details", details != null ? details : Map.of()));
 
         if (job.getProjectId() != null) {
             eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
@@ -325,7 +327,7 @@ public class JobFinalizer {
     public boolean publishVideoResult(String jobId, String projectId, String userId,
                                       String workerId, long fencingToken,
                                       String url, String storageKey, String mime, Long size,
-                                      int width, int height, double duration) {
+                                      Integer width, Integer height, double duration) {
         Long jobIdLong = Long.parseLong(jobId);
 
         int guardAffected = jobMapper.publishVideoGuard(jobIdLong, workerId, fencingToken);
@@ -419,7 +421,9 @@ public class JobFinalizer {
                 recordSync.sync(slot.getSceneCardGenerationRecordId());
             }
         }
-        insertLog(jobIdLong, JobStatus.FAILED, errorCode + ": " + errorMessage, null);
+        insertLog(jobIdLong, JobStatus.FAILED, errorCode + ": " + errorMessage,
+                Map.of("code", errorCode, "message", errorMessage,
+                        "details", details != null ? details : Map.of()));
         if (job != null && job.getProjectId() != null) {
             eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
                     "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
@@ -472,7 +476,9 @@ public class JobFinalizer {
             return false;
         }
 
-        insertLog(jobIdLong, JobStatus.FAILED, errorCode + ": " + errorMessage, null);
+        insertLog(jobIdLong, JobStatus.FAILED, errorCode + ": " + errorMessage,
+                Map.of("code", errorCode, "message", errorMessage,
+                        "details", details != null ? details : Map.of()));
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
         if (job != null && job.getProjectId() != null) {

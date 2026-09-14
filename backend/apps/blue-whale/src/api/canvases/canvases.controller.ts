@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, Param, Post, Put, Query } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";

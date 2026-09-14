@@ -70,8 +70,13 @@ export type ModelUpdatePayload = {
 const I2I_MODEL_NAME_MAX = 128;
 const MAX_PROMPT_LENGTH_LIMIT = 65_535;
 
-/** features 已知扩展键的写入闸门（IKESD6）：i2i_model_name / max_prompt_length。
- *  读侧（toFeatures）对脏值宽容降级 null，写侧必须拒绝——否则管理端下次整包提交
+/** ADR-0086：参考素材限制键的上限（防运营误配海量值污染前端/校验）。 */
+const MAX_REFERENCE_COUNT = 1_000;
+
+/** features 已知扩展键的写入闸门（IKESD6）：i2i_model_name / max_prompt_length；
+ *  ADR-0086 追加参考素材限制键 video_reference / video_reference_max / audio_reference /
+ *  audio_reference_max / image_reference_max / max_reference_duration_sec / task_types。
+ *  读侧（toFeatures）对脏值宽容降级默认，写侧必须拒绝——否则管理端下次整包提交
  *  会把错误类型固化回库。兼容 snake_case / camelCase 两种键形。 */
 function featuresFieldErr(features: unknown): string | null {
   if (!isPlainObject(features)) return null;
@@ -91,6 +96,32 @@ function featuresFieldErr(features: unknown): string | null {
       len > MAX_PROMPT_LENGTH_LIMIT
     )
       return `提示词上限(max_prompt_length)须为 1–${MAX_PROMPT_LENGTH_LIMIT} 的整数或 null`;
+  }
+  // ADR-0086 布尔能力位
+  for (const key of ["video_reference", "audio_reference"] as const) {
+    const v = features[key] ?? features[key === "video_reference" ? "videoReference" : "audioReference"];
+    if (v !== undefined && v !== null && typeof v !== "boolean")
+      return `${key}须为布尔值`;
+  }
+  // ADR-0086 数量上限（非负整数，可显式 0 禁用）
+  for (const key of ["video_reference_max", "audio_reference_max", "image_reference_max"] as const) {
+    const v = features[key] ?? features[key === "video_reference_max" ? "videoReferenceMax" : key === "audio_reference_max" ? "audioReferenceMax" : "imageReferenceMax"];
+    if (v !== undefined && v !== null) {
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > MAX_REFERENCE_COUNT)
+        return `${key}须为 0–${MAX_REFERENCE_COUNT} 的非负整数或 null`;
+    }
+  }
+  // ADR-0086 参考素材总时长上限（正数秒或 null）
+  const dur = features.max_reference_duration_sec ?? features.maxReferenceDurationSec;
+  if (dur !== undefined && dur !== null) {
+    if (typeof dur !== "number" || !Number.isFinite(dur) || dur <= 0 || dur > 86_400)
+      return `参考素材总时长上限(max_reference_duration_sec)须为正数秒（≤86400）或 null`;
+  }
+  // ADR-0086 task_types 对象
+  const taskTypes = features.task_types ?? features.taskTypes;
+  if (taskTypes !== undefined && taskTypes !== null) {
+    if (!isPlainObject(taskTypes))
+      return "任务类型约束(task_types)须为 JSON 对象";
   }
   return null;
 }

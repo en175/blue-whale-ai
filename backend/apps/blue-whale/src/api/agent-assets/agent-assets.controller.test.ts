@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Reflector } from "@nestjs/core";
-import { RATE_LIMITED } from "@blue-whale/contracts";
+import { RATE_LIMITED } from "@lib/contracts";
 import { RateLimitGuard } from "@lib/shared/rate-limit/rate-limit.guard.js";
 import {
   RATE_LIMIT_KEY,

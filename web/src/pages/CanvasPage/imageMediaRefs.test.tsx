@@ -499,8 +499,8 @@ describe('IKDMQR 画布连线来源校验', () => {
     expect(edgePairs()).toEqual([`t1->${draftId}`]);
   });
 
-  it('同一素材（相同 assetId）重复连入被拒绝；参考图超过 9 张上限被拒绝', async () => {
-    // 画布上另一张同 assetId 的复制卡 + 9 张独立素材
+  it('同一素材（相同 assetId）重复连入被拒绝；参考图超过上限被拒绝（缺省能力行 10）', async () => {
+    // 画布上另一张同 assetId 的复制卡 + 10 张独立素材（缺省上限 DEFAULT_MAX_REFERENCE_IMAGES=10，ADR-0086）
     canvasDocMock.current = {
       doc: {
         id: 11,
@@ -510,7 +510,7 @@ describe('IKDMQR 画布连线来源校验', () => {
           { id: 'm1', type: 'mediaNode', position: { x: 200, y: 0 }, data: { src: 'http://img/m1.png', mediaType: 'image', fileName: '素材图一', assetId: 'a1' } },
           { id: 'm1-copy', type: 'mediaNode', position: { x: 220, y: 0 }, data: { src: 'http://img/m1.png', mediaType: 'image', fileName: '素材图一 副本', assetId: 'a1' } },
           { id: 'd1', type: 'mediaNode', position: { x: 420, y: 160 }, data: { src: '', mediaType: 'image', fileName: '图片草稿', genStatus: 'draft', draft: true, prompt: '' } },
-          ...Array.from({ length: 9 }, (_, i) => ({
+          ...Array.from({ length: 10 }, (_, i) => ({
             id: `mx${i}`, type: 'mediaNode', position: { x: 300 + i * 10, y: 0 },
             data: { src: `http://img/mx${i}.png`, mediaType: 'image', fileName: `素材${i}`, assetId: `ax${i}` },
           })),
@@ -519,7 +519,7 @@ describe('IKDMQR 画布连线来源校验', () => {
       },
       assets: Object.fromEntries([
         ['a1', { asset_id: 1, type: 'image', access_url: 'http://img/m1.png' }],
-        ...Array.from({ length: 9 }, (_, i) => [`ax${i}`, { asset_id: 100 + i, type: 'image', access_url: `http://img/mx${i}.png` }]),
+        ...Array.from({ length: 10 }, (_, i) => [`ax${i}`, { asset_id: 100 + i, type: 'image', access_url: `http://img/mx${i}.png` }]),
       ]),
       refetch: () => Promise.resolve([]),
       acceptDoc: vi.fn(),
@@ -533,14 +533,14 @@ describe('IKDMQR 画布连线来源校验', () => {
     expect(edgePairs()).toEqual([`m1->${draftId}`]);
     expect(container.textContent).toContain('该素材已连入当前草稿');
 
-    // 连满 9 张后第 10 张（新素材）按上限拒绝
-    for (let i = 0; i < 8; i += 1) {
+    // 连满 10 张后第 11 张（新素材）按上限拒绝
+    for (let i = 0; i < 9; i += 1) {
       await connect(`mx${i}`, draftId);
     }
-    expect(edgePairs()).toHaveLength(9);
-    await connect('mx8', draftId);
-    expect(edgePairs()).toHaveLength(9);
-    expect(container.textContent).toContain('图片最多 9 张');
+    expect(edgePairs()).toHaveLength(10);
+    await connect('mx9', draftId);
+    expect(edgePairs()).toHaveLength(10);
+    expect(container.textContent).toContain('图片最多 10 张');
   });
 
   it('重复校验兼容 assetId/asset_id/assetID 三形态（asset_id 形态来源去重不误判）', async () => {

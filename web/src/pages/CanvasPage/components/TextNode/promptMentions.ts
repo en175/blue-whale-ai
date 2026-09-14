@@ -1,6 +1,6 @@
-import type { PromptMention, PromptMaterial } from '../../../../../../packages/contracts/src/prompt-preview';
-import { parseMarkdownBlocks, renderMarkdownInline } from '../../../../../../packages/contracts/src/text-node-markdown';
-import { deriveMediaMentionLabels, deriveMediaMentionLabelsInOrder, type MediaMention, type MediaRef } from '../../../../../../packages/contracts/src/text-node-media';
+import type { PromptMention, PromptMaterial } from '@lib/contracts/prompt-preview';
+import { parseMarkdownBlocks, renderMarkdownInline } from '@lib/contracts/text-node-markdown';
+import { deriveMediaMentionLabels, deriveMediaMentionLabelsInOrder, type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 
 /* IKFM3L 统一文本卡正文契约 v1：正文是受限 Markdown 源（data.text），
    mention 区间 [start,end) 锚定 Markdown 源字符串下标（契约 §3）。

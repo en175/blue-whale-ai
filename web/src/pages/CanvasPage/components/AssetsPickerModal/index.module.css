@@ -82,6 +82,10 @@
   padding: 16px 20px;
 }
 
+.hiddenInput {
+  display: none;
+}
+
 /* ---- 底部操作栏：已选数量提示 + 取消/确认 ---- */
 .footer {
   display: flex;

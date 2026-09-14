@@ -350,6 +350,33 @@ class VideoJobProcessorTest {
     }
 
     @Test
+    @DisplayName("ADR-0086 回归：adaptive 比例（无固定宽高）生成成功后仍能发布，width/height 传 null")
+    void adaptivePublishSucceedsWithNullDimensions() {
+        Map<String, Object> input = baseInput();
+        input.put("aspect_ratio", "adaptive");   // adaptive → resolveDimensions 返回 null
+        ClaimedVideoJobDto claim = videoClaim("109a", false, "task-109a", 1, 0, null, input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("109a"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://video.mp4", null, null))
+                .when(videoClient).poll(eq("token"), eq("task-109a"));
+        doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 1024L))
+                .when(mediaRelay).persist(eq("http://video.mp4"), anyString());
+        doReturn(true).when(stateMachine)
+                .publishVideoResult(anyString(), anyString(), anyString(), anyString(), anyLong(),
+                        anyString(), anyString(), anyString(), any(), isNull(), isNull(), anyDouble());
+
+        processor.handle("109a");
+
+        // 发布被调用且尺寸为 null（不因「视频尺寸无效」失败）
+        verify(stateMachine).publishVideoResult(anyString(), anyString(), anyString(), anyString(),
+                anyLong(), eq("http://tos/video.mp4"), eq("key"), eq("video/mp4"), eq(1024L),
+                isNull(), isNull(), anyDouble());
+        verify(stateMachine, never()).failVideoJob(anyString(), anyString(), anyString(),
+                any(), anyString(), anyLong());
+    }
+
+    @Test
     @DisplayName("G58: poll failed → failVideoJob with upstream code")
     void pollFailed() {
         ClaimedVideoJobDto claim = videoClaim("109", false, "task-109", 3, 0, null);
@@ -367,6 +394,30 @@ class VideoJobProcessorTest {
 
         verify(stateMachine).failVideoJob(eq("109"), eq("content_rejected"),
                 eq("内容违规"), any(), anyString(), eq(1L));
+    }
+
+    @Test
+    @DisplayName("G58a: poll FAILURE + 顶层 fail_reason 版权拒绝 → failVideoJob(content_rejected_reference, 上游原文)")
+    void pollFailedWithTopLevelFailReason() {
+        ClaimedVideoJobDto claim = videoClaim("109a", false, "task-109a", 3, 0, null);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("109a"), anyString());
+        doReturn("token").when(credentialService).open(anyString());
+        // IKFL53：new-api tasks 表 FAILURE 状态把终端错误放顶层 fail_reason，无 data.error。
+        doReturn(new VideoTaskObservation("failed", 100, null, null,
+                new TaskError("content_rejected_reference",
+                        "The request failed because the output video may be related to copyright restrictions. Request id: req-2048")))
+                .when(videoClient).poll(eq("token"), eq("task-109a"));
+        doReturn(true).when(stateMachine)
+                .failVideoJob(eq("109a"), eq("content_rejected_reference"),
+                        eq("The request failed because the output video may be related to copyright restrictions. Request id: req-2048"),
+                        any(), anyString(), eq(1L));
+
+        processor.handle("109a");
+
+        verify(stateMachine).failVideoJob(eq("109a"), eq("content_rejected_reference"),
+                eq("The request failed because the output video may be related to copyright restrictions. Request id: req-2048"),
+                any(), anyString(), eq(1L));
     }
 
     @Test
@@ -927,6 +978,65 @@ class VideoJobProcessorTest {
             VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
                     VideoInputError.class, () -> processor.buildSubmitRequest(claim));
             assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_REFERENCE);
+        }
+    }
+
+    // ========== IKFPYX：任务类型判定与 duration=-1 收窄 ==========
+
+    @org.junit.jupiter.api.Nested
+    @DisplayName("IKFPYX 任务类型判定与 duration=-1 收窄")
+    class TaskTypeTests {
+
+        @Test
+        @DisplayName("首帧 / 首尾帧按 references 角色判定")
+        void resolveByFrameRoles() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "first_frame", "type", "image")), ""))
+                    .isEqualTo("first_frame");
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "first_frame", "type", "image"),
+                            Map.of("role", "last_frame", "type", "image")), ""))
+                    .isEqualTo("first_last_frame");
+        }
+
+        @Test
+        @DisplayName("参考视频 + 延长意图 → prolong（优先于编辑词）")
+        void resolveProlongBeforeEdit() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "向后延长这个视频"))
+                    .isEqualTo("prolong");
+        }
+
+        @Test
+        @DisplayName("参考视频 + 编辑意图 → edit")
+        void resolveEdit() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "把背景改成海边"))
+                    .isEqualTo("edit");
+        }
+
+        @Test
+        @DisplayName("参考视频但无意图关键词 → default；仅图片参考 → default")
+        void resolveDefault() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "参考它的运镜"))
+                    .isEqualTo("default");
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "image")), "修改一下"))
+                    .isEqualTo("default");
+        }
+
+        @Test
+        @DisplayName("非 edit/prolong 任务传 duration=-1 → invalid_input（收窄后不再通用放行）")
+        void autoDurationRejectedForNonEdit() {
+            Map<String, Object> input = baseInput();
+            input.put("duration", -1);
+            input.put("references", List.of(Map.of("role", "reference", "type", "image")));
+            ClaimedVideoJobDto claim = videoClaim("301", false, null, 0, 0, null, input);
+
+            VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
+                    VideoInputError.class, () -> processor.buildSubmitRequest(claim));
+            assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_INPUT);
         }
     }
 

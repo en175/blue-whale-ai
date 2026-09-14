@@ -13,10 +13,10 @@
     "build:node": "tsc -b --pretty false",
     "typecheck": "pnpm --filter @blue-whale/backend exec prisma generate && tsc -b --force --pretty false",
     "lint": "pnpm lint:node",
-    "lint:node": "eslint packages",
+    "lint:node": "eslint backend web/src",
     "test": "pnpm test:node",
     "test:node": "pnpm test:unit",
-    "test:unit": "vitest run packages",
+    "test:unit": "vitest run backend",
     "test:backend": "vitest run backend",
     "test:ci": "pnpm test:unit",
     "verify": "bash scripts/verify-typescript-baseline.sh"

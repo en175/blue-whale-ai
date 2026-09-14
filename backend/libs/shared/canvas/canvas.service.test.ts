@@ -1,7 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 
-import { CANVAS_EDGE_LIMITS } from "@blue-whale/contracts";
+import { CANVAS_EDGE_LIMITS } from "@lib/contracts";
 
 import { CanvasService } from "./canvas.service.js";
 

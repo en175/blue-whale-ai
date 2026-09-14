@@ -32,7 +32,7 @@ import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
 import RefThumbnail from '../RefThumbnail';
 import { useMixedRefStrip, orderRefStripItems, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/lib/image-size-ratios';
-import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
+import { refOverflowToast } from '@/utils/ref-overflow';
 import type { ImageMediaRef } from '../../mediaRefs';
 import { cardNameOfNode, localNodeIdOf } from '../../mediaRefs';
 import type { MediaGenStatus } from '../MediaNode';
@@ -63,8 +63,9 @@ export function composeImageSendPrompt(
   return parts.join('\n\n');
 }
 
-/** 视频最大上传数量（接口未下发该字段，前端统一 3） */
-const MAX_VIDEOS = 3;
+/** 图片面板普通参考中视频素材上限（ADR-0086：读能力行 video_reference_max，缺省 3；
+ *  旧写死 MAX_VIDEOS=3 退役）。 */
+export const MAX_VIDEOS = 3;
 
 export interface UploadedFile {
   id: string;
@@ -267,8 +268,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
   const currentResolutionLabel =
     resolutionOptions.find((r) => r.key === selectedResolution)?.label ?? selectedResolution;
   const imageCount = files.filter((f) => f.type === 'image').length;
-  /** 参考图上限固定 9 张（产品约定），不随模型能力接口的 max_reference_images 波动 */
-  const maxImages = REF_LIMITS.image;
+  /** 参考图上限（ADR-0086：读能力行 features.max_reference_images，缺省回落 DEFAULT_MAX_REFERENCE_IMAGES=10；
+   *  旧写死 9 张退役）。连线绑定模式仍以服务端 max_reference_images 校验兜底。 */
+  const maxImages = currentGen?.features?.max_reference_images ?? 10;
   /** 连线绑定模式（IKDMQR）：参考区渲染连线推导的 mediaRefs；否则渲染面板本地 files */
   const edgeRefs = mediaRefs ?? null;
   const mixedStrip = useMixedRefStrip(

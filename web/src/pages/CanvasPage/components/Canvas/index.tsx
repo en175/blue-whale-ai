@@ -125,6 +125,8 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const extraIdsRef = useRef<Set<string>>(new Set());
   const textIdsRef = useRef<Set<string>>(new Set());
+  /** 上次已从父层接受的文本坐标：仅当父层坐标变化时才回写（撤销/拖结束），避免 html 刷新把拖动位置打回 */
+  const textParentPosRef = useRef(new Map<string, { x: number; y: number }>());
   const mediaIdsRef = useRef<Set<string>>(new Set());
   const productIdsRef = useRef<Set<string>>(new Set());
   const assetIdsRef = useRef<Set<string>>(new Set());
@@ -210,22 +212,41 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     extraIdsRef.current = newIds;
   }, [extraNodes, setNodes]);
 
-  /** 合并文本节点（新增追加；外部删除同步移除） */
+  /** 合并文本节点（新增/删除同步；父层坐标回写含撤销，拖动中不覆盖内部位置） */
   useEffect(() => {
     const newIds = new Set(textNodes.map((n) => n.id));
     const currentIds = textIdsRef.current;
     const added = textNodes.filter((n) => !currentIds.has(n.id));
+    const updated = textNodes.filter((n) => currentIds.has(n.id));
     const removed = [...currentIds].filter((id) => !newIds.has(id));
 
-    const dataById = new Map(textNodes.map(node => [node.id, node.data]));
-    setNodes((prev) => {
-      const kept = prev.filter(node => !removed.includes(node.id)).map(node => {
-        const data = dataById.get(node.id);
-        return data ? { ...node, data } : node;
+    if (added.length > 0 || updated.length > 0 || removed.length > 0) {
+      setNodes((prev) => {
+        let result = removed.length > 0 ? prev.filter((n) => !removed.includes(n.id)) : prev;
+        if (updated.length > 0) {
+          result = result.map((node) => {
+            const update = updated.find((u) => u.id === node.id);
+            if (!update) return node;
+            const prevPos = textParentPosRef.current.get(node.id);
+            const parentMoved = !prevPos
+              || prevPos.x !== update.position.x
+              || prevPos.y !== update.position.y;
+            return {
+              ...node,
+              ...update,
+              position: node.dragging ? node.position : parentMoved ? update.position : node.position,
+              selected: node.selected,
+              dragging: node.dragging,
+              measured: node.measured,
+            };
+          });
+        }
+        if (added.length > 0) result = [...result, ...added];
+        return result;
       });
-      return [...kept, ...added];
-    });
+    }
     textIdsRef.current = newIds;
+    textParentPosRef.current = new Map(textNodes.map((n) => [n.id, { x: n.position.x, y: n.position.y }]));
   }, [textNodes, setNodes]);
 
   /** 合并媒体节点（新增追加；上传登记后同步更新 src；外部删除同步移除） */

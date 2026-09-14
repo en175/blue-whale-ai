@@ -31,12 +31,24 @@ const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelType[] }
   last_frame: { label: '尾帧 last_frame', types: ['video'] },
   first_last_frame: { label: '首尾帧 first_last_frame', types: ['video'] },
   audio: { label: '音频 audio', types: ['video'] },
+  /** ADR-0086：视频生成是否接受视频素材作普通参考（替代 seedance-2 前缀特判）。 */
+  video_reference: { label: '视频素材参考 video_reference', types: ['video'] },
+  /** ADR-0086：视频生成是否接受音频素材作参考（2.0 关 / 2.5 开）。 */
+  audio_reference: { label: '音频素材参考 audio_reference', types: ['video'] },
 };
 
 const FEATURE_NUMBER_LABELS: Record<string, { label: string; types?: ModelType[]; placeholder: string }> = {
   max_reference_images: { label: '参考图上限 max_reference_images', types: ['image', 'video'], placeholder: '如 10' },
   quantity_max: { label: '单次生成数量 quantity_max', types: ['image'], placeholder: '如 1' },
   max_prompt_length: { label: '提示词上限 max_prompt_length', types: ['image', 'video'], placeholder: '如 32000' },
+  /** ADR-0086：普通参考中视频素材上限。 */
+  video_reference_max: { label: '视频参考上限 video_reference_max', types: ['video'], placeholder: '如 3' },
+  /** ADR-0086：音频生成中音频参考上限。 */
+  audio_reference_max: { label: '音频参考上限 audio_reference_max', types: ['audio', 'video'], placeholder: '如 3' },
+  /** ADR-0086：音频生成中图片参考上限。 */
+  image_reference_max: { label: '音频图参考上限 image_reference_max', types: ['audio'], placeholder: '如 1' },
+  /** ADR-0086：输入参考素材总时长上限（秒；2.0=15 / 2.5=30；空=不限）。 */
+  max_reference_duration_sec: { label: '参考素材总时长上限秒 max_reference_duration_sec', types: ['video', 'audio'], placeholder: '如 15（留空 = 不限）' },
 };
 
 /** ADR-0085（IKESD9）：字符串型能力键——i2i_model_name 存的是上游模型名，非行 id。 */

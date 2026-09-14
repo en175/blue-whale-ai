@@ -4,7 +4,6 @@ import { ModelCapabilityReadService } from "./model-capability.service.js";
 import { GenerationCostEstimatorService } from "./cost-estimator.service.js";
 import { SceneCardGenerationService } from "./scene-card-generation.service.js";
 import { StoryboardPreviewService } from "./storyboard-preview.service.js";
-import { GenerationWorkerService } from "./generation-worker.service.js";
 
 @Global()
 @Module({
@@ -14,7 +13,6 @@ import { GenerationWorkerService } from "./generation-worker.service.js";
     GenerationCostEstimatorService,
     SceneCardGenerationService,
     StoryboardPreviewService,
-    GenerationWorkerService,
   ],
   exports: [
     GenerationCommandService,
@@ -22,7 +20,6 @@ import { GenerationWorkerService } from "./generation-worker.service.js";
     GenerationCostEstimatorService,
     SceneCardGenerationService,
     StoryboardPreviewService,
-    GenerationWorkerService,
   ],
 })
 export class GenerationModule {}

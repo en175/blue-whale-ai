@@ -1,5 +1,5 @@
-import type { SaveSharedAssetRequest } from "@blue-whale/contracts";
-import type { SharedAssetGoodsSnapshot } from "@blue-whale/contracts";
+import type { SaveSharedAssetRequest } from "@lib/contracts";
+import type { SharedAssetGoodsSnapshot } from "@lib/contracts";
 import {
   sha256,
   sharedAssetSnapshotOf,

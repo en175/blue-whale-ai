@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { PromptPreviewSource, PromptPreviewContent, PromptMaterial } from "@blue-whale/contracts";
+import type { PromptPreviewSource, PromptPreviewContent, PromptMaterial } from "@lib/contracts";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 /** Canvas db port（Prisma-backed），复用部署的 canvas 表（project_id 唯一 / viewport_json / nodes_json / edges_json）。

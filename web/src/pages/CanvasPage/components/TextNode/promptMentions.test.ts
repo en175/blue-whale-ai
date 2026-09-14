@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import type { PromptMention, PromptMaterial } from '../../../../../../packages/contracts/src/prompt-preview';
-import type { MediaMention, MediaRef } from '../../../../../../packages/contracts/src/text-node-media';
+import type { PromptMention, PromptMaterial } from '@lib/contracts/prompt-preview';
+import type { MediaMention, MediaRef } from '@lib/contracts/text-node-media';
 import { applyMediaMentionState, createMediaMentionChip, readPromptMentions, renderPromptMentions } from './promptMentions';
 
 /* IKFM3L 统一正文契约 v1：Markdown 源 + mention 区间 → DOM → Markdown 源 的往返保真

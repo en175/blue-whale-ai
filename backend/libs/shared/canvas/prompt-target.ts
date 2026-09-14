@@ -1,6 +1,6 @@
-import { NewApiError, extractTextNodeText } from "@blue-whale/core";
+import { NewApiError, extractTextNodeText } from "@lib/core";
 import { BadRequestException } from "@nestjs/common";
-import { CANVAS_EDGE_LIMITS, promptBindingList, promptBindingsSchema, promptMentionSchema, previewSourceSchema, validPromptMentions, type CanvasEdge, type PromptBinding } from "@blue-whale/contracts";
+import { CANVAS_EDGE_LIMITS, promptBindingList, promptBindingsSchema, promptMentionSchema, previewSourceSchema, validPromptMentions, type CanvasEdge, type PromptBinding } from "@lib/contracts";
 import type { ModelCapabilityView } from "@lib/shared/persistence/model-capability-repo.js";
 
 export interface PromptTargetNode { id: string; type: string; data?: Record<string, unknown> }

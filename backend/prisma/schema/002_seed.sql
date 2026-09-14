@@ -58,7 +58,7 @@ INSERT INTO generation_model_capability (
       JSON_OBJECT('id', '720p', 'label', '720P', 'api_value', '720p', 'width', 1280, 'height', 720),
       JSON_OBJECT('id', '1080p', 'label', '1080P', 'api_value', '1080p', 'width', 1920, 'height', 1080)
     ),
-    JSON_ARRAY('16:9', '9:16', '1:1'),
+    JSON_ARRAY('16:9', '9:16', '1:1', 'adaptive'),
     JSON_ARRAY(5, 10),
     JSON_ARRAY('mp4'),
     '720p',
@@ -71,10 +71,72 @@ INSERT INTO generation_model_capability (
       'quantity_max', 1,
       'sequential_image_generation', FALSE,
       'stream', FALSE,
-      'tools', FALSE
+      'tools', FALSE,
+      'first_frame', TRUE,
+      'last_frame', TRUE,
+      'first_last_frame', TRUE,
+      'audio', FALSE,
+      'video_reference', FALSE,
+      'video_reference_max', 3,
+      'audio_reference', FALSE,
+      'audio_reference_max', 3,
+      'image_reference_max', 1,
+      'max_reference_duration_sec', 15,
+      'task_types', JSON_OBJECT(
+        'default', JSON_OBJECT('allowed_ratios', JSON_ARRAY('16:9', '9:16', '1:1'), 'allowed_durations', JSON_ARRAY(5, 10)),
+        'first_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('16:9', '9:16', '1:1')),
+        'first_last_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('16:9', '9:16', '1:1'))
+      )
     ),
     TRUE,
     20,
+    'seedream',
+    NULL
+  ),
+  (
+    'new-api',
+    'doubao-seedance-2-5-260628',
+    'video',
+    '豆包 Seedance 2.5',
+    JSON_ARRAY(
+      JSON_OBJECT('id', '480p', 'label', '480P', 'api_value', '480p', 'width', 854, 'height', 480),
+      JSON_OBJECT('id', '720p', 'label', '720P', 'api_value', '720p', 'width', 1280, 'height', 720),
+      JSON_OBJECT('id', '1080p', 'label', '1080P', 'api_value', '1080p', 'width', 1920, 'height', 1080)
+    ),
+    JSON_ARRAY('21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'),
+    JSON_OBJECT('min', 4, 'max', 30, 'step', 1),
+    JSON_ARRAY('mp4', 'mov'),
+    '720p',
+    'mp4',
+    '16:9',
+    4,
+    JSON_OBJECT(
+      'reference_image', TRUE,
+      'watermark', FALSE,
+      'quantity_max', 1,
+      'sequential_image_generation', FALSE,
+      'stream', FALSE,
+      'tools', TRUE,
+      'first_frame', TRUE,
+      'last_frame', TRUE,
+      'first_last_frame', TRUE,
+      'audio', TRUE,
+      'video_reference', TRUE,
+      'video_reference_max', 10,
+      'audio_reference', TRUE,
+      'audio_reference_max', 10,
+      'image_reference_max', 30,
+      'max_reference_duration_sec', 30,
+      'task_types', JSON_OBJECT(
+        'default', JSON_OBJECT('allowed_ratios', JSON_ARRAY('21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'), 'allowed_durations', JSON_ARRAY(4, 5, 6, 8, 10, 12, 15, 20, 25, 30)),
+        'first_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive')),
+        'first_last_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive')),
+        'edit', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive'), 'allowed_durations', JSON_ARRAY(-1)),
+        'prolong', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive'), 'allowed_durations', JSON_ARRAY(4, 5, 6, 8, 10, 12, 15, 20, 25, 30, -1))
+      )
+    ),
+    TRUE,
+    21,
     'seedream',
     NULL
   ),
@@ -133,7 +195,14 @@ INSERT INTO generation_model_capability (
     'png',
     '1:1',
     NULL,
-    JSON_OBJECT('quantity_max', 1),
+    JSON_OBJECT(
+      'quantity_max', 1,
+      'max_reference_images', 16,
+      'reference_image', TRUE,
+      'video_reference_max', 0,
+      'audio_reference_max', 0,
+      'image_reference_max', 1
+    ),
     TRUE,
     40,
     'gpt',

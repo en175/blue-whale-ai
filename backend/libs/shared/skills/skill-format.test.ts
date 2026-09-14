@@ -1,4 +1,4 @@
-import { DomainError, SKILL_ERROR_SPECS } from "@blue-whale/contracts";
+import { DomainError, SKILL_ERROR_SPECS } from "@lib/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import { handleFormatSkillDraft } from "./skill-format.js";
