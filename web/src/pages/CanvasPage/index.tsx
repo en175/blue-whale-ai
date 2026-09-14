@@ -239,6 +239,18 @@ export default function CanvasPage() {
   const videoPickSessionActive = pickTarget === 'video'
     && (pickMode === 'image' || pickMode === 'video')
     && videoPickSession !== undefined;
+  /** IKFR4Z 音频持续选取会话：undefined=无会话；string=发起时绑定的音频草稿节点 id；null=自由面板会话。
+   *  会话身份 = 发起瞬间的画布与生成目标（快照），普通节点选中变化不改变该绑定；音频参考无槽位角色
+   *  （服务端契约恒 reference），会话内所有合法来源连续并入。纯界面交互态不持久化 */
+  const [audioPickSession, setAudioPickSession] = useState<string | null | undefined>(undefined);
+  /** IKFR4Z 结束音频持续选取会话：保留已建参考与原目标 Dock，恢复普通编辑（不生成、不二次确认） */
+  const endAudioPickSession = useCallback(() => {
+    setAudioPickSession(undefined);
+    setPickMode(null);
+    setPickTarget(null);
+  }, []);
+  /** IKFR4Z 音频持续选取会话进行中（派生布尔，会话身份三条件单点收敛） */
+  const audioPickSessionActive = pickMode === 'audio' && pickTarget === 'audio' && audioPickSession !== undefined;
   /** 商品卡选取目标节点ID（选中的图片注入哪个商品卡） */
   const [pickProductId, setPickProductId] = useState<string | null>(null);
   /** 资产卡选取目标节点ID（选中的图片注入哪个资产卡） */
@@ -1882,6 +1894,60 @@ export default function CanvasPage() {
     appendVideoFreeRef(videoFreeRefItemOf(node), 'reference');
   };
 
+  /** IKFR4Z 音频持续选取会话点击处理：会话绑定发起时的目标（快照），命中有效来源即时并入并保持模式；
+   *  拒绝（类型/失效/重复/超限）由校验函数 toast 原因，同样保持模式；目标失效防御性结束，不写向其他目标。
+   *  草稿绑定会话按连线即时并入（与拖线同路径）、文本走 addCanvasEdge 建附件边（IKFCXE 音频目标
+   *  不经 referencePlanRef）；自由面板会话沿用面板本地参考注入通道与上限保护（无持久化承诺） */
+  const handleAudioPickSessionClick = (node: Node) => {
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    if (typeof audioPickSession === 'string') {
+      if (!mediaNodesRef.current.some((n) => n.id === audioPickSession)) {
+        endAudioPickSession();
+        return;
+      }
+      if (node.type === 'textNode') {
+        // 与旧单次选取同一准入路径（普通文本/方案卡均可建附件边），addCanvasEdge 幂等去重
+        addCanvasEdge(node.id, audioPickSession);
+        return;
+      }
+      if (node.type === 'mediaNode') {
+        // 拒绝（类型/失效/重复/超限）已在 validate 内 toast 明确原因；addCanvasEdge 幂等去重
+        if (validateAudioRefConnect(node.id, audioPickSession)) {
+          addCanvasEdge(node.id, audioPickSession);
+        }
+        return;
+      }
+      showToast('warn', '音频参考仅支持音频素材');
+      return;
+    }
+    // 自由面板会话（无草稿绑定）：文本参考无绑定目标，与旧单次语义同口径提示
+    if (node.type === 'textNode') {
+      showToast('warn', '文本参考需要绑定生成节点');
+      return;
+    }
+    if (node.type !== 'mediaNode') {
+      showToast('warn', '音频参考仅支持音频素材');
+      return;
+    }
+    // 自由面板注入沿用 externalPick 通道，面板 addRef 内统一去重与上限提示
+    const err = audioRefSourceError(node);
+    if (err) {
+      showToast('warn', err);
+      return;
+    }
+    setAudioPickResult({
+      ts: Date.now(),
+      item: {
+        id: node.id,
+        kind: 'audio',
+        name: (data.fileName as string) || node.id,
+        src: data.src as string,
+        source: 'canvas',
+        assetId: readAssetId(data),
+      },
+    });
+  };
+
   /** 画布节点单击：选取模式下点击对应类型节点带入对话框，其他节点取消选取；
    *  非选取模式点击草稿身份卡（IKDMQQ 图片 / IKDMQS 视频 / IKDMQT 音频）：打开绑定面板继续编辑（待生成/生成中查看/失败修改） */
   const handleCanvasNodeClick = (node: Node) => {
@@ -1913,6 +1979,12 @@ export default function CanvasPage() {
     // 首尾帧槽位连续替换），其余入口的单次选取语义不受影响
     if (videoPickSessionActive) {
       handleVideoPickSessionClick(node);
+      return;
+    }
+    // IKFR4Z 音频持续选取会话同款拦截：会话期间点击一律服务选取（合法来源连续并入），
+    // 其余入口的单次选取语义不受影响
+    if (audioPickSessionActive) {
+      handleAudioPickSessionClick(node);
       return;
     }
     if (!pickMode || !pickTarget) {
@@ -1974,26 +2046,8 @@ export default function CanvasPage() {
       setPickRefRole(null);
       return;
     }
-    if (pickMode === 'audio' && pickTarget === 'audio') {
-      if (node.type === 'mediaNode') {
-        const error = audioRefSourceError(node);
-        if (error) { showToast('warn', error); return; }
-      } else if (node.type === 'textNode' && !audioDraftId) {
-        showToast('warn', '文本参考需要绑定生成节点');
-        return;
-      }
-    }
-    // IKFCXE：音频草稿面板的「到节点选择」选中文本卡 → 建立来源→草稿连线（与画布拖线同一关系）；
-    // 绑定以 audioDraftId 为准（seed 可能残留旧草稿值）；拖线（connectPair）对音频目标走 addCanvasEdge
-    // 本地建边（referencePromptPlan 服务端仅放行图片/视频目标），此处与拖线同款——普通文本卡与
-    // 方案卡均可（与拖线准入一致，图片/视频分支的 promptSource 限定是方案 API 的服务端约束，不适用于音频）。
-    if (pickMode === 'audio' && pickTarget === 'audio' && audioDraftId && node.type === 'textNode') {
-      addCanvasEdge(node.id, audioDraftId);
-      setPickMode(null);
-      setPickTarget(null);
-      audioPanelHiddenRef.current = true;
-      return;
-    }
+    // IKFCXE 音频面板文本参考与媒体参考选取已并入 IKFR4Z 持续会话分支（addCanvasEdge 同路径），
+    // 此处仅剩视频面板的文本选取与商品/资产入口
     // IKDMQS：视频草稿绑定面板的「从节点添加素材」建立来源→草稿连线，角色由发起入口显式指定
     // （首帧/尾帧/普通参考）；首尾帧与图生视频普通参考仅接受图片（IKFE8U 统一入口类型边界），
     // 全能参考普通参考经 videoRefSourceError 收图/视频/音频。
@@ -2083,28 +2137,8 @@ export default function CanvasPage() {
         };
         setAssetPickResult({ ts: Date.now(), assetId: targetId, ref: newRef });
       }
-    } else if (pickMode === 'audio' && isReadyMedia && data.mediaType === 'audio') {
-      // 音频生成面板发起的画布音频节点选取：草稿模式（IKFDFZ）校验通过立即建立来源→草稿连线
-      // 并进入既有自动保存（关闭/切换/刷新均按连线恢复）；自由模式注入面板本地列表随发送一次性提交
-      if (audioDraftId) {
-        if (validateAudioRefConnect(node.id, audioDraftId)) {
-          addCanvasEdge(node.id, audioDraftId);
-        }
-        audioPanelHiddenRef.current = true; // 命中节点后防 selection 变化把面板当「切换到其他卡」关闭（同图片/视频分支）
-      } else {
-        setAudioPickResult({
-          ts: Date.now(),
-          item: {
-            id: node.id,
-            kind: 'audio',
-            name: (data.fileName as string) || node.id,
-            src: data.src as string,
-            source: 'canvas',
-            assetId: readAssetId(data),
-          },
-        });
-      }
     }
+    // 音频面板选取（含自由面板注入）已并入 IKFR4Z 持续会话分支，此处仅剩商品/资产入口
     setPickMode(null);
     setPickTarget(null);
     setPickProductId(null);
@@ -2112,10 +2146,10 @@ export default function CanvasPage() {
   };
 
   /** 画布空白处单击：取消节点选取模式；
-   *  IKFR4X 图片 / IKFR4Y 视频持续选取会话中不退出、不隐藏原目标 Dock（平移缩放照常，规格 AC-06） */
+   *  IKFR4X 图片 / IKFR4Y 视频 / IKFR4Z 音频持续选取会话中不退出、不隐藏原目标面板（平移缩放照常，规格 AC-06） */
   const handleCanvasPaneClick = () => {
     cancelAgentCandidate();
-    if (imagePickSessionActive || videoPickSessionActive) return;
+    if (imagePickSessionActive || videoPickSessionActive || audioPickSessionActive) return;
     imagePanelHiddenRef.current = true;
     videoPanelHiddenRef.current = true;
     audioPanelHiddenRef.current = true;
@@ -2417,6 +2451,26 @@ export default function CanvasPage() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [videoPickSession, endVideoPickSession]);
+
+  /** IKFR4Z 会话随面板结束：音频面板不可见（关闭 Dock / 空白隐藏 / 目标删除清理 / 切换其他面板）
+   *  即结束持续选取会话；已建参考与连线保留，重开面板为普通模式（不恢复会话，刷新/切换画布同理不恢复） */
+  useEffect(() => {
+    if (audioPickSession === undefined) return;
+    if (!showAudioDialog) endAudioPickSession();
+  }, [showAudioDialog, audioPickSession, endAudioPickSession]);
+
+  /** IKFR4Z：Esc 结束音频持续选取会话（输入框/编辑器内的 Esc 保持原语义，如卡片名称编辑） */
+  useEffect(() => {
+    if (audioPickSession === undefined) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (isEditableKeyboardTarget(e.target)) return;
+      e.preventDefault();
+      endAudioPickSession();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [audioPickSession, endAudioPickSession]);
 
   useEffect(() => {
     if (!textGenDraftId) return;
@@ -2818,9 +2872,11 @@ export default function CanvasPage() {
 
   /** 打开绑定指定草稿的音频面板（IKDMQT）：带入草稿已保存的文字描述与模型。
    *  IKFDFZ：媒体参考改为「来源→草稿」连线持久化；存量 data.audioRefs 的画布项
-   *  首次打开时迁移为连线（按节点 id 找回来源），迁移后清空旧字段——画布项不再经 seed 恢复 */
+   *  首次打开时迁移为连线（按节点 id 找回来源），迁移后清空旧字段——画布项不再经 seed 恢复；
+   *  IKFR4Z：重开/切换面板即结束残留的持续选取会话（重开为普通模式，不恢复选取） */
   const openAudioDraftDialog = (nodeId: string) => {
     if (!canOpenEditor(nodeId)) return;
+    endAudioPickSession();
     audioPanelHiddenRef.current = false;
     editingTargetRef.current = nodeId;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
@@ -4625,6 +4681,15 @@ export default function CanvasPage() {
       .map((e) => e.source);
   }, [videoPickSessionActive, videoPickSession, pickRefRole, edges, textNodes]);
 
+  /** IKFR4Z 会话勾选标识：音频持续选取会话进行中，已并入原目标的媒体来源节点集合（连线推导，
+   *  与 Dock 参考同源；音频参考无角色槽，全部连线来源计入）。文本附件来源无素材勾选语义，不计入。
+   *  仅会话活跃时计算——普通模式不标记，勾选只表达当前目标与选择上下文 */
+  const audioPickMarkedIds = useMemo(() => {
+    if (!audioPickSessionActive || typeof audioPickSession !== 'string') return [] as string[];
+    const textIds = new Set(textNodes.map((n) => n.id));
+    return edges.filter((e) => e.target === audioPickSession && !textIds.has(e.source)).map((e) => e.source);
+  }, [audioPickSessionActive, audioPickSession, edges, textNodes]);
+
   /** 草稿绑定面板的图片媒体参考（IKDMQR）：按连线实时推导，Dock 显示即提交输入（同源）。
    *  连线持久化后刷新/重开项目同样经此推导恢复展示；名称随来源卡片改名即时同步（IKFA8Y）。 */
   const imageDraftMediaRefs = useMemo(
@@ -6260,8 +6325,12 @@ export default function CanvasPage() {
           onNodeClick={handleCanvasNodeClick}
           onPaneClick={handleCanvasPaneClick}
           onSelectionChange={handleSelectionChange}
-          refPickActive={imagePickSessionActive || videoPickSessionActive}
-          refPickMarkedIds={videoPickSessionActive ? videoPickMarkedIds : imagePickMarkedIds}
+          refPickActive={imagePickSessionActive || videoPickSessionActive || audioPickSessionActive}
+          refPickMarkedIds={
+            audioPickSessionActive ? audioPickMarkedIds
+              : videoPickSessionActive ? videoPickMarkedIds
+                : imagePickMarkedIds
+          }
           selectRequest={selectRequest}
           productPickResult={productPickResult}
           assetPickResult={assetPickResult}
@@ -6600,6 +6669,11 @@ export default function CanvasPage() {
                 : '从节点添加素材：连续点击画布中的图片、视频或音频节点带入参考；空白点击不退出，完成后点「完成选取」或按 Esc'}</span>
               <button type="button" className={styles.pickHintFinish} onClick={endVideoPickSession}>完成选取</button>
             </div>
+          ) : audioPickSessionActive ? (
+            <div className={`${styles.pickHint} ${styles.pickHintSession}`}>
+              <span>从节点添加素材：连续点击画布中的音频节点或文本卡带入参考；空白点击不退出，完成后点「完成选取」或按 Esc</span>
+              <button type="button" className={styles.pickHintFinish} onClick={endAudioPickSession}>完成选取</button>
+            </div>
           ) : (
           <div className={styles.pickHint}>
             {pickMode === 'image' && ((pickRefRole === 'first' || pickRefRole === 'last')
@@ -6635,11 +6709,11 @@ export default function CanvasPage() {
                   }
                 : undefined
             }
-            onClose={() => { audioPanelHiddenRef.current = true; setShowAudioDialog(false); setPickMode(null); setPickTarget(null); }}
+            onClose={() => { audioPanelHiddenRef.current = true; setShowAudioDialog(false); endAudioPickSession(); }}
             onSend={handleAudioDialogSend}
             onToast={(type, msg) => showToast(type, msg)}
             canvasMedia={canvasMedia}
-            onPickFromCanvas={() => { setPickMode('audio'); setPickTarget('audio'); }}
+            onPickFromCanvas={() => { endImagePickSession(); endVideoPickSession(); setPickMode('audio'); setPickTarget('audio'); setAudioPickSession(audioDraftId ?? null); }}
             onPickFromAssets={() => {
               audioPanelHiddenRef.current = true; // 来源切换不因刚选过的素材节点而隐藏目标面板
               setPickMode(null); setPickTarget(null);
