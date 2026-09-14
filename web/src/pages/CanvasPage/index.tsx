@@ -50,10 +50,10 @@ import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
 import BottomDialog, { type VideoGenOptions, type VideoGenSeedParams } from './components/BottomDialog';
+import ImageDialog, { composeImageSendPrompt, IMAGE_COMPOSED_PROMPT_LIMIT, IMAGE_COMPOSED_PROMPT_OVER_LIMIT, type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
-import ImageDialog, { type UploadedFile, type ImageGenSeedParams, type ImageTextAttachment } from './components/ImageDialog';
-import { restorePromptDoc, type PromptDoc, type StoredPromptDoc } from '@/lib/prompt-doc';
 import TextGenDialog from './components/TextGenDialog';
+import { restorePromptDoc, type PromptDoc, type StoredPromptDoc } from '@/lib/prompt-doc';
 import AudioDialog, { type CanvasPickItem, type AudioRefItem } from './components/AudioDialog';
 import MusicDialog, { type MusicGenOptions } from './components/MusicDialog';
 import SharedAssetsModal from './components/SharedAssetsModal';
@@ -134,6 +134,7 @@ import {
   nodeInsideGroupBox,
   nodePressesGroupEdge,
   parseGroupsFromNodes,
+  selectionHasUngroupableCards,
   MIN_GROUP_MEMBERS,
   GROUP_FRAME_PADDING,
   type CanvasGroup,
@@ -363,7 +364,7 @@ export default function CanvasPage() {
     }
     return true;
   };
-/** 单条连线：只允许素材 → 生成节点；能力不匹配或内容互连静默取消 */
+/** 单条连线：可接到已有节点（含成品图）；目标若是生成节点则再做能力与参考校验 */
   const findCanvasNode = (id: string): Node | undefined =>
     mediaNodesRef.current.find((n) => n.id === id)
     ?? textNodesRef.current.find((n) => n.id === id)
@@ -378,21 +379,22 @@ export default function CanvasPage() {
     }
     const sourceNode = findCanvasNode(source);
     const targetNode = findCanvasNode(target);
-    if (!isConnectableSource(sourceNode)) return false;
-    const targetKind = genKindOf(targetNode);
-    if (!targetKind) return false;
-    if (!canConnectSourcesToGen([sourceNode!], targetKind)) return false;
-    if (wouldCreateCycle(source, target, edgesRef.current)) return false;
+    if (!isConnectableSource(sourceNode) || !targetNode) return false;
     const sourceData = sourceNode?.data as Record<string, unknown> | undefined;
-    const targetData = targetNode?.data as Record<string, unknown> | undefined;
+    const targetData = targetNode.data as Record<string, unknown> | undefined;
     if (sourceData?.emptyShell || targetData?.emptyShell) return false;
-    if (sourceNode?.type === 'textNode' && sourceData?.promptSource && (targetKind === 'image' || targetKind === 'video')) {
-      void referencePlanRef.current(source, target);
-      return true;
+    if (wouldCreateCycle(source, target, edgesRef.current)) return false;
+    const targetKind = genKindOf(targetNode);
+    if (targetKind) {
+      if (!canConnectSourcesToGen([sourceNode!], targetKind)) return false;
+      if (sourceNode?.type === 'textNode' && sourceData?.promptSource && (targetKind === 'image' || targetKind === 'video')) {
+        void referencePlanRef.current(source, target);
+        return true;
+      }
+      if (!validateImageRefConnect(source, target)) return false;
+      if (!validateVideoRefConnect(source, target)) return false;
+      if (!validateAudioRefConnect(source, target)) return false;
     }
-    if (!validateImageRefConnect(source, target)) return false;
-    if (!validateVideoRefConnect(source, target)) return false;
-    if (!validateAudioRefConnect(source, target)) return false;
     addCanvasEdge(source, target);
     return true;
   };
@@ -406,8 +408,7 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [setEdges, submittingNodeId],
   );
-  /** 组→目标：从组右侧「+」拖到某节点，为组内每个成员各建一条边到目标（目标引用全部成员输出）。
-   *  目标须为组外节点（组内节点不允许单独连线，命中已在 GroupOverlay 过滤）。 */
+  /** 组→目标（兼容旧回调）：组拖线现已统一走 handleConnectGroupDrop 弹可选菜单，不再接到已有节点。 */
   const handleConnectGroupToTarget = useCallback(
     (memberIds: string[], targetId: string) => {
       if (memberIds.length === 0 || !targetId) return;
@@ -2455,51 +2456,62 @@ export default function CanvasPage() {
     openTextGenDialog(targetId);
   };
 
+  /** 屏幕点下的画布内容节点 id。加号在节点盒外，连线预览也会盖住把手，需穿透叠层查找。 */
+  const canvasNodeIdAtScreen = (clientX: number, clientY: number): string | null => {
+    const stacked = document.elementsFromPoint(clientX, clientY);
+    for (const el of stacked) {
+      if (!(el instanceof Element)) continue;
+      const handleEl = el.closest('.react-flow__handle') as HTMLElement | null;
+      if (handleEl) {
+        const handleNodeId = handleEl.getAttribute('data-nodeid') || handleEl.getAttribute('data-node-id');
+        if (handleNodeId && findCanvasNode(handleNodeId)) return handleNodeId;
+      }
+      const nodeEl = el.closest('.react-flow__node') as HTMLElement | null;
+      if (!nodeEl) continue;
+      const id = nodeEl.getAttribute('data-id');
+      if (id && findCanvasNode(id)) return id;
+    }
+    return null;
+  };
+
   const handleConnectEnd = (
     event: MouseEvent | TouchEvent,
-    state?: { fromNode?: Node | null; toNode?: Node | null; isValid?: boolean | null },
+    state?: {
+      fromNode?: Node | null;
+      toNode?: Node | null;
+      isValid?: boolean | null;
+      toHandle?: { nodeId?: string | null } | null;
+    },
   ) => {
     const fromId = state?.fromNode?.id ?? connectingSourceRef.current;
     connectingSourceRef.current = null;
-    if (state?.isValid) return;
     const from = fromId ? findCanvasNode(fromId) ?? state?.fromNode ?? undefined : undefined;
     if (!from || !isConnectableSource(from)) return;
-    const toNode = state?.toNode ? findCanvasNode(state.toNode.id) ?? state.toNode : null;
-    if (toNode && genKindOf(toNode)) return;
     const point = 'changedTouches' in event ? event.changedTouches[0] : event;
+    const handleNodeId = state?.toHandle?.nodeId ?? null;
+    const droppedId =
+      (handleNodeId && handleNodeId !== from.id && findCanvasNode(handleNodeId) ? handleNodeId : null)
+      ?? (state?.toNode && state.toNode.id !== from.id && findCanvasNode(state.toNode.id) ? state.toNode.id : null)
+      ?? canvasNodeIdAtScreen(point.clientX, point.clientY);
+    // 落到其他节点或加号：视为连线，不弹可选菜单
+    if (droppedId && droppedId !== from.id) {
+      connectPair(from.id, droppedId);
+      return;
+    }
+    // 库已建成有效连线但没命中检测时，也不弹菜单
+    if (state?.isValid) return;
+    // 未连到其他节点：松手展示可选菜单
     openConnectTypeMenu([from.id], point.clientX, point.clientY);
   };
 
   const handleConnectGroupDrop = (
     memberIds: string[],
-    targetId: string | null,
+    _targetId: string | null,
     client: { x: number; y: number },
   ) => {
     const sources = memberIds.filter((id) => isConnectableSource(findCanvasNode(id)));
     if (sources.length === 0) return;
-    if (targetId) {
-      const kind = genKindOf(findCanvasNode(targetId));
-      if (kind) {
-        const sourceNodes = sources
-          .map((id) => findCanvasNode(id))
-          .filter((n): n is Node => isConnectableSource(n));
-        // 音频生成按整组介质组合判定，不能拆成单源校验
-        if (!canConnectSourcesToGen(sourceNodes, kind)) return;
-        if (kind === 'audio') {
-          if (isGeneratingNode(targetId)) {
-            showToast('warn', '生成中，输入连线只读');
-            return;
-          }
-          sources.forEach((id) => {
-            if (wouldCreateCycle(id, targetId, edgesRef.current)) return;
-            addCanvasEdge(id, targetId);
-          });
-          return;
-        }
-        sources.forEach((id) => connectPair(id, targetId));
-        return;
-      }
-    }
+    // 组连线只能弹可选菜单，不能接到已有节点
     openConnectTypeMenu(sources, client.x, client.y);
   };
 
@@ -2507,11 +2519,13 @@ export default function CanvasPage() {
     if (!connection.source || !connection.target || connection.source === connection.target) return false;
     const sourceNode = findCanvasNode(connection.source);
     const targetNode = findCanvasNode(connection.target);
-    if (!isConnectableSource(sourceNode)) return false;
-    const kind = genKindOf(targetNode);
-    if (!kind) return false;
-    if (!canConnectSourcesToGen([sourceNode!], kind)) return false;
+    if (!isConnectableSource(sourceNode) || !targetNode) return false;
+    const sourceData = sourceNode?.data as Record<string, unknown> | undefined;
+    const targetData = targetNode.data as Record<string, unknown> | undefined;
+    if (sourceData?.emptyShell || targetData?.emptyShell) return false;
     if (wouldCreateCycle(connection.source, connection.target, edgesRef.current)) return false;
+    const kind = genKindOf(targetNode);
+    if (kind && !canConnectSourcesToGen([sourceNode!], kind)) return false;
     return true;
   };
 
@@ -3621,7 +3635,15 @@ export default function CanvasPage() {
       createGenerationJob(currentId, {
         type,
         expected_output_count: 1,
-        parameters,
+        parameters: !promptDoc
+          ? {
+              ...parameters,
+              prompt: composeImageSendPrompt(
+                targetNodeId ? textAttachmentsOf(targetNodeId) : undefined,
+                parameters.prompt,
+              ),
+            }
+          : parameters,
         input_asset_ids: inputAssetIds,
         ...((type === 'video' || type === 'audio') && videoRefs?.references && videoRefs.references.length > 0
           ? { references: videoRefs.references }
@@ -3878,6 +3900,10 @@ export default function CanvasPage() {
   const handleCreateGroup = (selectedNodes: Node[]) => {
     const members = selectedNodes.filter((n) => !(n.data as { emptyShell?: boolean } | undefined)?.emptyShell);
     if (members.length < MIN_GROUP_MEMBERS) return;
+    if (selectionHasUngroupableCards(members)) {
+      showToast('warn', '风格卡、角色卡、物体卡、环境卡、商品卡无法成组');
+      return;
+    }
     const box = groupFrameBBox(members);
     if (!box) return;
     const memberIds = new Set(members.map((n) => n.id));
@@ -4724,6 +4750,15 @@ export default function CanvasPage() {
   const handleDialogSend = async (text: string, opts: VideoGenOptions, promptDoc?: PromptDoc | null) => {
     if (applyingRef.current) return;
     const targetNodeId = videoSeed?.targetNodeId;
+    const composedPrompt = composeImageSendPrompt(
+      targetNodeId ? textAttachmentsOf(targetNodeId) : undefined,
+      text,
+      promptDoc,
+    );
+    if (composedPrompt.length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+      showToast('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+      return;
+    }
     if (targetNodeId && currentId) {
       const projectId = currentId;
       applyingRef.current = true;
@@ -5424,6 +5459,15 @@ export default function CanvasPage() {
     if (applyingRef.current || saveBlocked || saveStatus === 'error' || !currentId) return;
     const projectId = currentId;
     const targetNodeId = audioDraftId && audioSeed?.targetNodeId === audioDraftId ? audioDraftId : undefined;
+    const composedPrompt = composeImageSendPrompt(
+      targetNodeId ? textAttachmentsOf(targetNodeId) : undefined,
+      text,
+      promptDoc,
+    );
+    if (composedPrompt.length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+      showToast('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+      return;
+    }
     applyingRef.current = true;
     setSubmittingNodeId(targetNodeId ?? null);
     try {
@@ -5554,6 +5598,15 @@ export default function CanvasPage() {
     const targetNodeId = imageSeed?.targetNodeId;
     const projectId = currentId;
     if (!projectId) return;
+    const composedPrompt = composeImageSendPrompt(
+      targetNodeId ? textAttachmentsOf(targetNodeId) : undefined,
+      text,
+      promptDoc,
+    );
+    if (composedPrompt.length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+      showToast('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+      return;
+    }
     applyingRef.current = true;
     setSubmittingNodeId(targetNodeId ?? null);
     try {
@@ -6083,6 +6136,7 @@ export default function CanvasPage() {
             onAddCanvasRef={audioDraftId ? handleAddAudioCanvasRef : undefined}
             mentionItems={atMentionItems.filter((item) => item.id !== audioDraftId)}
             onMentionCanvas={handleAudioAtMention}
+            followAnchor={audioDraftId ? followAnchor : null}
             attachments={audioDraftAttachments}
             onRemoveAttachment={(id) => removePlanAttachment(audioDraftId ?? undefined, id)}
             onReorderAttachments={

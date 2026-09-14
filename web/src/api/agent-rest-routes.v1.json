@@ -1,6 +1,6 @@
 {
   "$comment": "Generated from src/http/routes.ts (IKACK2). Do not edit by hand — run pnpm contract:routes. routes.test.ts fails if this drifts.",
-  "version": 2,
+  "version": 4,
   "base_path": "/v1/projects/{project_id}",
   "routes": [
     {
@@ -74,6 +74,11 @@
       "path": "/sessions/{session_id}/runs"
     },
     {
+      "name": "list_prompt_card_revisions",
+      "method": "GET",
+      "path": "/sessions/{session_id}/prompt-card-revisions"
+    },
+    {
       "name": "analyze_assets",
       "method": "POST",
       "path": "/sessions/{session_id}/asset-analyses"
@@ -104,6 +109,11 @@
       "path": "/sessions/{session_id}/requirement-understandings/{understanding_id}/versions/{version}/actions/correct"
     },
     {
+      "name": "void_requirement_understanding",
+      "method": "POST",
+      "path": "/sessions/{session_id}/requirement-understandings/{understanding_id}/versions/{version}/actions/void"
+    },
+    {
       "name": "get_run",
       "method": "GET",
       "path": "/runs/{run_id}"
@@ -127,6 +137,11 @@
       "name": "skip_run",
       "method": "POST",
       "path": "/runs/{run_id}/skip"
+    },
+    {
+      "name": "continue_run",
+      "method": "POST",
+      "path": "/runs/{run_id}/continue"
     }
   ]
 }

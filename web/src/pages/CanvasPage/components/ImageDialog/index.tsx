@@ -45,6 +45,23 @@ import styles from './index.module.css';
 
 /** 输入框默认字数上限（模型目录未配 max_prompt_length 时沿用旧行为，ADR-0085） */
 const DEFAULT_MAX_INPUT = 1000;
+/** 参考文本与输入文本拼接后的提交上限 */
+export const IMAGE_COMPOSED_PROMPT_LIMIT = 1000;
+export const IMAGE_COMPOSED_PROMPT_OVER_LIMIT = '当前参考提示词内容超出1000字限制，请重新编辑。';
+
+/** 参考文本在前、输入文本在后，跳过空白附件，以空行拼接为提交 prompt */
+export function composeImageSendPrompt(
+  attachments: ImageTextAttachment[] | undefined,
+  input: string,
+  promptDoc?: PromptDoc | null,
+): string {
+  const indexed = promptDoc?.segments.some((segment) => segment.kind === 'text_ref');
+  const parts = indexed
+    ? (attachments ?? []).map((item, i) => `文本${i + 1}：${item.text}`)
+    : (attachments ?? []).map((item) => item.text).filter((text) => text.trim().length > 0);
+  if (input.trim().length > 0) parts.push(input);
+  return parts.join('\n\n');
+}
 
 /** 视频最大上传数量（接口未下发该字段，前端统一 3） */
 const MAX_VIDEOS = 3;
@@ -520,6 +537,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
       console.warn('图片模型能力加载中，请稍后重试');
       return;
     }
+    if (composeImageSendPrompt(attachments, flatValue, promptDoc).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+      onToast?.('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+      return;
+    }
     setUploading(true);
     try {
       // 结构化正文仅在含素材标签时携带；纯文本沿用旧语义（不上送 prompt_doc）
@@ -535,8 +556,10 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
   };
 
   return (
-    <div className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
-      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}>
+    <div
+      className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
+      style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+    >
       {/* @ 菜单：挂在 .dialogWrap 层向上弹出（.dialog 是 200px 滚动框会裁剪浮层，IKFA1M） */}
       {mention.open && (
         <div className={styles.mentionDock} ref={mentionMenuRef}>
@@ -805,7 +828,6 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
             className={styles.textarea}
           />
         </div>
-
 
           {/* 底部状态栏 */}
           <div className={styles.bottomBar}>

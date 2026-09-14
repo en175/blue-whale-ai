@@ -686,8 +686,8 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
 
     await typePromptRefRaw(container, '参考@首');
     // AtMentionMenu 经 portal 挂在 body；带检索词时直接列匹配项
-    await vi.waitFor(() => expect(document.body.querySelector('[data-testid="at-mention-canvas-item"]')).toBeTruthy());
-    const item = [...document.body.querySelectorAll<HTMLButtonElement>('[data-testid="at-mention-canvas-item"]')].find(
+    await vi.waitFor(() => expect(document.body.querySelector('[data-testid="mention-menu"] button')).toBeTruthy());
+    const item = [...document.body.querySelectorAll<HTMLButtonElement>('[data-testid="mention-menu"] button')].find(
       (b) => b.textContent?.includes('首图'),
     )!;
     await act(async () => { item.click(); });

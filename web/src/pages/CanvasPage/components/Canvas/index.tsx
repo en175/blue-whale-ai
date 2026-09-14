@@ -64,7 +64,7 @@ interface FlowCanvasProps {
   /** 开始从节点手柄拖线（记下源节点，松手时即使 fromNode 缺失也能弹出菜单） */
   onConnectStart?: (nodeId: string | null) => void;
   /** 拖线在空白/非法目标松开（类型菜单由父级处理） */
-  onConnectEnd?: (event: MouseEvent | TouchEvent, state: { fromNode?: Node | null; toNode?: Node | null; isValid?: boolean | null }) => void;
+  onConnectEnd?: (event: MouseEvent | TouchEvent, state: { fromNode?: Node | null; toNode?: Node | null; isValid?: boolean | null; toHandle?: { nodeId?: string | null } | null }) => void;
   /** 仅允许连到生成节点且能力匹配 */
   isValidConnection?: (connection: Connection | { source: string | null; target: string | null }) => boolean;
   /** 加载画布文档后注入的视口（切换项目时应用） */
@@ -517,6 +517,10 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         edgeTypes={edgeTypes}
         // 中键（button 1）任意模式均可平移（IKD0JT A1 R2）；拖动模式左键也平移，选择模式左键留给框选
         panOnDrag={isDrag ? [0, 1] : [1]}
+        // 拖节点/连线/框选到边缘时不自动跟平移，画布只走手动平移规则
+        autoPanOnNodeDrag={false}
+        autoPanOnConnect={false}
+        autoPanOnSelection={false}
         // 滚轮=平移；缩放交给平台原生修饰键+滚轮与触控板捏合（库默认为滚轮缩放，此处刻意相反，见 ADR-0081）
         panOnScroll
         zoomOnScroll={false}

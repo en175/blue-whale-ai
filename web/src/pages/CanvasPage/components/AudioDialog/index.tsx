@@ -11,12 +11,12 @@ import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { MediaGenStatus } from '../MediaNode';
 import type { FollowDialogAnchor } from '../../followDialog';
 import type { AtMentionItem } from '../../atMention';
-import { docHasInvalidRef, type PromptDoc } from '@/lib/prompt-doc';
+import { docHasAnyRef, docHasInvalidRef, type PromptDoc } from '@/lib/prompt-doc';
 import AudioPromptEditor, { type AudioPromptEditorHandle } from './AudioPromptEditor';
 import RefThumbnail from '../RefThumbnail';
 import RefSourceMenu from '../RefSourceMenu';
 import { orderRefStripItems, useMixedRefStrip, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
-import type { ImageTextAttachment } from '../ImageDialog';
+import { composeImageSendPrompt, IMAGE_COMPOSED_PROMPT_LIMIT, IMAGE_COMPOSED_PROMPT_OVER_LIMIT, type ImageTextAttachment } from '../ImageDialog';
 import styles from './index.module.css';
 
 /** 输入框字数上限 */
@@ -320,7 +320,12 @@ export default function AudioDialog({
   const overflowRefs = currentRefs.length > MAX_AUDIO_REFS;
   const handleSend = () => {
     if (!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || overflowRefs || draftBinding?.saveFailed) return;
-    onSend(text.trim(), modelId, currentRefs, promptDoc);
+    const promptDocToSend = promptDoc && docHasAnyRef(promptDoc) ? promptDoc : null;
+    if (composeImageSendPrompt(attachments, text.trim(), promptDocToSend).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+      onToast?.('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+      return;
+    }
+    onSend(text.trim(), modelId, currentRefs, promptDocToSend);
     // 草稿绑定发送后保留输入（卡片原地转生成中，面板进入只读），非草稿保持清空
     if (!draftBinding) {
       editorRef.current?.clear();

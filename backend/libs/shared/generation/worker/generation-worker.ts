@@ -43,10 +43,10 @@ const logger = createLogger("generation-worker");
 
 export type WorkerDeps = {
   repo: WorkerRepo;
-  /** 按 job 密封凭证构建图片 provider（与 video 一致：sk token 来自 job，不来自请求闭包，
+  /** 按 job 明文凭证构建图片 provider（修正四：去密，与 video 一致：sk token 来自 job，不来自请求闭包，
    *  这样请求内即时调度与进程重启后的恢复扫描可用同一套逻辑）。 */
   createImageProvider: (token: string) => ImageProvider;
-  /** 按 job 密封凭证构建音频 provider(与 image/video 一致)。 */
+  /** 按 job 明文凭证构建音频 provider(修正四：去密，与 image/video 一致)。 */
   createAudioProvider: (token: string) => AudioProvider;
   /** 读取 job.input.provider_credential → sk token（修正四：明文直取）。 */
   credentialVault: { open: (ciphertext: string) => string };
@@ -411,7 +411,7 @@ async function processClaimedJob(
       // IKFCXE：文本附件作为创作上下文与主提示词共同进入生成——组合语义与图片/视频同源
       //（composeTextAttachmentPrompt：非空白附件正文在前、主提示词在后，"\n\n" 连接，不改写正文）；
       // 不因存在附件强制改为朗读任务，环境音/配音意图由主提示词决定。
-      // 主提示词为空的音频任务已在前置校验拒绝（hasNonBlankAttachment 仅对 image 放行）。
+      // 主提示词为空的音频任务已在 305 行前校验拒绝（hasNonBlankAttachment 仅对 image 放行）。
       // 正文文本标签的编号清单已在接纳时冻结，执行与重试不得重新拼接覆盖它。
       const audioPrompt = typeof input.composed_prompt === "string" && input.composed_prompt.trim().length > 0
         ? input.composed_prompt

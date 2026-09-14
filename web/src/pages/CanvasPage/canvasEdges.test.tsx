@@ -329,7 +329,7 @@ describe('IKDLQF 连线受控化与目标生图接线', () => {
     expect(payload.type).toBe('image');
     expect(payload.target_node_id).toBe('m1');
     expect(payload.input_asset_ids).toEqual(['a1']);
-    expect(payload.parameters.prompt).toBe('');
+    expect(payload.parameters.prompt).toBe('一只蓝鲸在海里游');
 
     // 保存串行化：先落盘（含未防抖编辑与连线）再创建任务
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
@@ -450,7 +450,8 @@ describe('IKDLQG 视频目标接线', () => {
     expect(payload.target_node_id).toBe('v1');
     // 原位重新生成：视频节点自身不再作为参考素材（旧自由模式语义已随统一迁移退役）
     expect(payload.reference_asset_ids).toBeUndefined();
-    expect(payload.parameters.prompt).toBe('');
+    // 音视频与图片同口径（!647）：无结构化正文时，连线文本节点的正文拼入 prompt
+    expect(payload.parameters.prompt).toBe('一只蓝鲸在海里游');
 
     // 保存串行化：先落盘（含未防抖编辑与连线）再创建任务
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);

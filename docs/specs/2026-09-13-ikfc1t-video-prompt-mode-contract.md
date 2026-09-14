@@ -6,7 +6,7 @@
 
 ## 背景与范围
 
-工单 IKFC1T（父需求 IKF93U）：画布视频生成以独立「文生视频」模式为新建默认，媒体参考（图片/视频/音频）实际成为当前视频目标参考时自动切为全能参考；交付完整手动创作路径（模式选择、参考接入、草稿恢复、提交边界）。方案绑定引入媒体的服务端同步由后续任务完成，不在本契约范围。
+工单 IKFC1T（父需求 IKF93U）：画布视频生成以独立「文生视频」模式为新建默认，媒体参考（图片/视频/音频）实际成为当前视频目标参考时自动切为全能参考；交付完整手动创作路径（模式选择、参考接入、草稿恢复、提交边界）。IKFC26 同时交付方案绑定引入媒体的服务端模式同步。
 
 前置事实：`prompt`（文生视频）标识已由「画布输入窗口跟随」合入（`followDialog.ts` 四模式体系），新建视频实际已默认文生视频。本契约固化其跨进程含义并补齐缺口。
 
@@ -43,11 +43,15 @@
 
 - 草稿模式持久化链不变：面板实时写 `data.draftMode`；恢复经 `openVideoDraftDialog` 读回；生成卡记录 `draftMode` 供重新编辑带回。
 - 恢复保持已保存模式含义；引用使用显式素材与节点身份（数字 assetId / `asset-` 前缀 materialId / 文本节点 id），切换目标不串用模式或参考。
-- 后端 `validateVideoPlan` 对 `'prompt'` **无特判**（宽容通过，不新增拒绝分支）：模式兼容由前端自动切换保证；方案绑定路径的 draftMode 读取照旧，其媒体引入同步为后续任务。
+- 后端 `validateVideoPlan` 对 `'prompt'` **无特判**（宽容通过，不新增拒绝分支）：方案绑定校验成功后，目标 draftMode 为 prompt 且方案绑定包含媒体时切为 all，与连线同版本保存；前端以服务端返回模式同步本地，防止自动保存回退。
 
 ## 6. 验证与关联
 
-- 纯函数：`web/src/pages/CanvasPage/followDialog.test.ts`（门控新口径）、`videoPromptRefs.test.ts`（prompt 标签失效）。
+- 纯函数：`web/src/pages/CanvasPage/followDialog.test.ts`（门控新口径）、`videoMediaRefs.test.ts`（角色库参考读取）、`videoPromptRefs.test.ts`（prompt 标签失效）。
 - 画布流程层：`web/src/pages/CanvasPage/videoDraft.test.tsx`（新建默认、仅提示词提交省略 references、文本附件不切换、连线/角色库/暂存触发自动切换、置灰与不切回、草稿恢复）；组件层 `videoRefArea.test.tsx` 维持来源菜单/角色槽覆盖。
 - 测试边界：供应商为替身，不声明真实视频生成或人工验收通过。
-- 关联：IKF93U（父需求）、IKDMQS/IKDMQU（草稿绑定与跟随输入框）、IKFA1O/IKFA1P（正文素材标签前置契约）。
+- 关联：IKF93U（父需求）、IKDMQS/IKDMQU（草稿绑定与跟随输入框）、IKFC26（方案绑定模式同步）。
+
+## 7. 独立发布基线
+
+本次发布以远程 release/2026.09.15 的 19f836a8 为基线，仅移植 IKFC1T 与 IKFC26 的模式及引用协调实现，保留该基线现有提示词编辑器。未发布的 IKFA1J 正文素材索引改造及其专属标签测试不包含在本次范围。

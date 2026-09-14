@@ -2,7 +2,7 @@
 /* IKFCKS：AudioDialog 新建参考缩略图条——参考音频 chip（点击播放形态）替换为共享参考缩略图、
  *  画布文本卡连线附件以 FileText 缩略图进栏（× 仅断开连线）、@ 与手动 @ 选择同一入口、
  *  生成中只读不渲染 × / @、发送参数回归 */
-import { $getRoot, $getSelection, $isRangeSelection } from 'lexical';
+import { $getRoot, $isTextNode, SKIP_DOM_SELECTION_TAG } from 'lexical';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -241,18 +241,16 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
  describe('IKFCJG 真实正文光标引用', () => {
   it('手动 @ 在正文中间原位替换，保留前后文字且不重复附件', async () => {
     await renderDialog();
-    // IKFA1J 起 @ 检索直接弹出 AtMentionMenu（经 portal 挂在 body），原「引用画布素材」二级入口已随素材菜单改版移除
-    // 菜单只在「新插入 @query」时开启（光标移动不重开）：先录后文，再在中间光标处插入查询串
     await typePromptRefText(container, '前后');
-    await act(async () => promptRefEditorInstance(container).update(() => { $getRoot().getAllTextNodes()[0].select(1, 1); }));
     await act(async () => promptRefEditorInstance(container).update(() => {
-      const sel = $getSelection();
-      if ($isRangeSelection(sel)) sel.insertRawText('@雨声');
-    }));
-    await vi.waitFor(() => expect(document.body.querySelector('[data-testid="at-mention-canvas-item"]')).toBeTruthy());
-    const button = [...document.body.querySelectorAll<HTMLButtonElement>('[data-testid="at-mention-canvas-item"]')].find(
-      (b) => b.textContent === '雨声白噪音',
-    )!;
+      const text = $getRoot().getAllTextNodes()[0];
+      if ($isTextNode(text)) {
+        text.spliceText(1, 0, '@雨声');
+        text.select(4, 4);
+      }
+    }, { tag: SKIP_DOM_SELECTION_TAG }));
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="mention-menu"]')).not.toBeNull());
+    const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '雨声白噪音')!;
     await act(async () => button.click());
     expect(readPromptRefText(container)).toBe('前音频1后');
     expect(audioThumbs()).toHaveLength(1);
@@ -304,7 +302,7 @@ describe('IKFCJG 异步失效换绑', () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, '风声');
       search.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="at-mention-canvas-item"]')].find(n => n.textContent === '风声')!.click());
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(n => n.textContent === '风声')!.click());
     expect(onMentionCanvas).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[data-testid="asset-ref-invalid"]')).not.toBeNull();
     await act(async () => root.render(createElement(AudioDialog, { ...props, externalPick: { ts: 1, item: b } })));
@@ -312,7 +310,7 @@ describe('IKFCJG 异步失效换绑', () => {
     expect(container.querySelector('[data-testid="asset-ref-invalid"]')).toBeNull();
     expect(container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.disabled).toBe(false);
     await typePromptRefRaw(container, '@风声');
-    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="at-mention-canvas-item"]')].find(n => n.textContent === '风声')!.click());
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(n => n.textContent === '风声')!.click());
     expect(readPromptRefText(container)).toBe('前音频1后音频1');
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.click());
     expect(onSend.mock.calls[0][3].segments.filter((s: { kind: string }) => s.kind === 'asset_ref')).toEqual([

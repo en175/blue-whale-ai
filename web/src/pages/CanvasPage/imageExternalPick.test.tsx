@@ -1,5 +1,3 @@
-import { linkAssetToProject } from '@/api/assets';
-import { typePromptRefText } from './testing/promptRefEditor';
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -9,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { AssetRecord } from '@/api/assets';
 import CanvasPage from './index';
+import { typePromptRefText } from './testing/promptRefEditor';
 import { REF_SOURCE_ENTRY_TITLE } from './components/RefSourceMenu';
 import dialogStyles from './components/ImageDialog/index.module.css';
 
@@ -120,7 +119,7 @@ vi.mock('@/api/assets', () => ({
   completeUpload: vi.fn(),
   fetchAllAssets: vi.fn(async () => []),
   fetchAssetDetail: vi.fn(),
-  linkAssetToProject: vi.fn().mockResolvedValue(undefined),
+  linkAssetToProject: vi.fn(async () => undefined),
 }));
 
 vi.mock('@/api/canvas', () => ({
@@ -212,7 +211,7 @@ function refImages(): string[] {
 }
 
 function panelOpen(): boolean {
-  return container.querySelector('[contenteditable="true"]') !== null;
+  return container.querySelector('[contenteditable]') !== null;
 }
 
 /** 工具栏打开/重建自由生图面板 */
@@ -298,7 +297,6 @@ async function clickSend() {
 }
 
 beforeEach(() => {
-  vi.mocked(linkAssetToProject).mockResolvedValue({ projectId: 'p1', assetId: '7' });
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   sessionStorage.clear();
@@ -384,17 +382,20 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
     expect(refImages()).toEqual(['素材图一']);
   });
 
-  it('绑定草稿从资产添加图片后，删除并重开不重放旧参考', async () => {
+  it('从资产中选择加入草稿参考，删除后重开不重放', async () => {
     await renderPage();
     await openFreePanel();
+    // 绑定模式经父级建立参考连线；删除后不能由旧选取事件再次注入。
     await pickFromAssets([
       { id: 7, type: 'image', url: 'http://img/asset7.png', width: 100, height: 100, duration: null, source: null, model: null, created_at: null },
     ]);
-    await vi.waitFor(() => expect(refImages()).toHaveLength(1));
+    expect(refImages()).toEqual(['asset7.png']);
     await removeFirstRef();
     expect(refImages()).toEqual([]);
+
     await closePanel();
     await openFreePanel();
+    // 已消费的选择事件在新挂载上不重放（IKF5KE）
     expect(refImages()).toEqual([]);
   });
 

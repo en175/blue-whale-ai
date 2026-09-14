@@ -39,7 +39,7 @@ import RefThumbnail from '../RefThumbnail';
 import RefSourceMenu from '../RefSourceMenu';
 import { useMixedRefStrip, orderRefStripItems, videoRefStripKey, useRefStripDrag, type RefStripOrderProps, type StripDragItemProps } from '../RefThumbnail/strip-dnd';
 import { refIdOf, videoLabelMapOf } from '../../videoPromptRefs';
-import type { ImageTextAttachment } from '../ImageDialog';
+import { composeImageSendPrompt, IMAGE_COMPOSED_PROMPT_LIMIT, IMAGE_COMPOSED_PROMPT_OVER_LIMIT, type ImageTextAttachment } from '../ImageDialog';
 import type { MediaGenStatus } from '../MediaNode';
 import {
   canAddRefRole,
@@ -359,8 +359,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   /** 失效标签存在时阻止生成（模式不兼容或参考移除；点击替换/删除后可继续） */
   const hasInvalidRef = docHasInvalidRef(promptDoc);
 
-  /** 切换模式：目标模式与现有参考冲突时明确提示并阻止切换（保证「可见槽 = 实际参考」），否则写回草稿。
-   *  IKFC1T：文生视频在存在任一媒体参考（含首尾帧）时不可选（enabledModes 门控置灰，此处兜底）。 */
+  /** 切换模式：目标模式与现有参考冲突时明确提示并阻止切换（保证「可见槽 = 实际参考」），否则写回草稿 */
   const handleModeChange = (key: string) => {
     setModeOpen(false);
     if (enabledModes && !enabledModes.includes(key as VideoFollowMode)) return;
@@ -538,6 +537,10 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     }
     if (conflict) {
       onToast?.('warn', conflict);
+      return;
+    }
+    if (composeImageSendPrompt(attachments, flatValue, promptDoc).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+      onToast?.('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
       return;
     }
     const size = currentModel.supported_sizes.find((s) => s.id === selectedSize);

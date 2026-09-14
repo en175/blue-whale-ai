@@ -3,7 +3,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import ImageDialog, { type ImageTextAttachment } from './index';
+import ImageDialog, { composeImageSendPrompt, type ImageTextAttachment } from './index';
 import type { PromptDoc } from '@/lib/prompt-doc';
 import { readPromptRefText, typePromptRefRaw } from '../../testing/promptRefEditor';
 
@@ -203,4 +203,10 @@ describe('IKFA1P 生图发送携带（D2/D5）', () => {
     // 拍平镜像作为正文上送（服务端以结构为权威重新编译）
     expect(onSend.mock.calls[0][0]).toBe('按文本1生成');
   });
+});
+
+it('文本索引参与组合长度计算，空白附件保留编号位置', () => {
+  const doc: PromptDoc = { version: 1, segments: [{ kind: 'text_ref', node_id: ATT_POSE.nodeId, label: '文本2' }] };
+  expect(composeImageSendPrompt([{ ...ATT_STYLE, text: '' }, ATT_POSE], '按文本2', doc))
+    .toBe('文本1：\n\n文本2：站立微笑\n\n按文本2');
 });

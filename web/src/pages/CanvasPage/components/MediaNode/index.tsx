@@ -131,7 +131,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isExtractSubmitting, setIsExtractSubmitting] = useState(false);
   const shellFileRef = useRef<HTMLInputElement>(null);
-  const img2imgFileRef = useRef<HTMLInputElement>(null);
   /** 名称原位编辑（IKFA8X）：draft 为输入框内容；error 仅展示，不阻断画布保存 */
   const [nameEditing, setNameEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
@@ -173,9 +172,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   const isEmptyShell = data.emptyShell === true;
   const blockNodeMenu =
-    isEmptyShell || data.genStatus === 'draft' || data.genStatus === 'generating';
+    isEmptyShell || data.genStatus === 'generating';
 
-  /** 右键菜单：空壳 / 生成中 / 待生成不弹 */
+  /** 右键菜单：空壳 / 生成中不弹；草稿可弹（仅创建副本 / 删除） */
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (data.toolMode !== 'select') return;
     e.preventDefault();
@@ -295,31 +294,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         <div className={styles.genBox}>
           {isVideoDraft ? <Video size={22} strokeWidth={1.8} color="#666" /> : <Image size={22} strokeWidth={1.8} color="#666" />}
           <span className={styles.missingText}>{isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成'}</span>
-          {isImageDraft && data.onImg2Img && (
-            <>
-              <button
-                type="button"
-                className={`${styles.genBtn} nodrag nopan`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  img2imgFileRef.current?.click();
-                }}
-              >
-                图生图
-              </button>
-              <input
-                ref={img2imgFileRef}
-                type="file"
-                hidden
-                accept="image/*"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = '';
-                  if (file) data.onImg2Img?.(id, file);
-                }}
-              />
-            </>
-          )}
         </div>
       );
     }
@@ -565,22 +539,23 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         <CanvasContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          items={[
-            { key: 'chat', label: '添加到聊天' },
-            { key: 'compliance', label: '合规校验', loading: data.complianceBusy },
-            ...(data.mediaType === 'image' ? [{ key: 'copyImage', label: '复制图片' }] : []),
-            { key: 'duplicate', label: '创建副本' },
-            { key: 'paste', label: '粘贴' },
-            { key: 'delete', label: '删除', danger: true },
-          ]}
+          items={isDraft
+            ? [
+                { key: 'duplicate', label: '创建副本' },
+                { key: 'delete', label: '删除', danger: true },
+              ]
+            : [
+                { key: 'chat', label: '添加到聊天' },
+                { key: 'compliance', label: 'Seedance2.0合规校验', loading: data.complianceBusy },
+                { key: 'duplicate', label: '创建副本' },
+                { key: 'delete', label: '删除', danger: true },
+              ]}
           onClose={() => setContextMenu(null)}
           onSelect={(key) => {
             setContextMenu(null);
             if (key === 'chat') handleAddToChat();
             else if (key === 'compliance') data.onComplianceCheck?.(id);
-            else if (key === 'copyImage') data.onCopyImage?.(id);
             else if (key === 'duplicate') handleDuplicate();
-            else if (key === 'paste') data.onPaste?.(id);
             else if (key === 'delete') handleDelete();
           }}
         />

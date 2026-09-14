@@ -79,6 +79,13 @@ describe('videoLabelMapOf（图生视频模式 text2video）', () => {
   });
 });
 
+it('文生视频模式不接受媒体标签，切回全能参考恢复同一身份', () => {
+  const refs = { ...KEYFRAME_REFS, reference: ALL_REFS.reference };
+  const { labelOf, refItems } = videoLabelMapOf(refs, 'prompt');
+  expect(refItems.every((item) => labelOf(item.id) === null)).toBe(true);
+  expect(videoLabelMapOf(refs, 'all').labelOf('101')).toBe('图片1');
+});
+
 describe('videoLabelMapOf numberMap（IKFCKQ 缩略图编号与标签同源）', () => {
   it('普通参考按类型连续编号；模式不接受与帧角色不在其中', () => {
     const all = videoLabelMapOf(ALL_REFS, 'all');

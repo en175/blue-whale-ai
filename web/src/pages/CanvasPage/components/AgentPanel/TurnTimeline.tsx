@@ -208,23 +208,39 @@ const ACCOUNT_CLASS: Record<TurnAccount['outcome'], string> = {
  * 此前这笔账常驻输入框上方，滚动之后和任何一条消息都对不上。放到它所属的那一轮尾部，
  * 用户回看时才知道「这一轮是怎么结束的」。完成的轮不写「已完成」——回答就在上面，
  * 不必再说一遍；取消与失败要写，那是这一轮唯一的交代。
+ *
+ * **完成了、但要写的生成卡没写出来**也要写（IKEV0V）：这只发生在聊天里改卡时，那一轮照常完成，
+ * 侧边栏还挂着上一版。不交代的话，用户会把旧卡当成这次改出来的。`onRetryCard` 只给最后一轮：
+ * 它把这一轮用户的原话重发一遍——重试接口只接失败的轮，这一轮是完成的，走不了那条。
  */
-export function TurnFooter({ account }: { account: TurnAccount }) {
+export function TurnFooter({ account, onRetryCard }: { account: TurnAccount; onRetryCard?: () => void }) {
   const meta: string[] = [];
   if (account.seconds !== null) meta.push(formatElapsed(account.seconds));
   if (account.tokenUsage) meta.push(`↓ ${formatTokens(account.tokenUsage.output_tokens)}`);
   const context = account.contextCapacity;
   if (context) meta.push(`上下文 ${Math.round(Math.min(1, Math.max(0, context.ratio)) * 100)}%`);
   if (context?.compaction_state === 'compacted') meta.push('已压缩历史');
+  const cardFailed = account.outcome === 'completed' && Boolean(account.cardFailureText);
   const label =
-    account.outcome === 'failed' ? account.failureText ?? '未能完成' : account.outcome === 'cancelled' ? '已取消' : null;
+    account.outcome === 'failed'
+      ? account.failureText ?? '未能完成'
+      : account.outcome === 'cancelled'
+        ? '已取消'
+        : cardFailed
+          ? account.cardFailureText
+          : null;
   if (!label && meta.length === 0) return null;
   return (
-    <div className={`${styles.turnFooter} ${ACCOUNT_CLASS[account.outcome]}`}>
+    <div className={`${styles.turnFooter} ${cardFailed ? styles.turnFooterCardFailed ?? '' : ACCOUNT_CLASS[account.outcome]}`}>
       <span className={styles.turnFooterMark} aria-hidden="true">
-        {ACCOUNT_MARK[account.outcome]}
+        {cardFailed ? '!' : ACCOUNT_MARK[account.outcome]}
       </span>
       {label && <span>{label}</span>}
+      {cardFailed && account.cardFailureRetryable && onRetryCard && (
+        <button type="button" className={styles.turnFooterRetry} onClick={onRetryCard}>
+          再试一次
+        </button>
+      )}
       {meta.length > 0 && (
         <span className={styles.turnFooterMeta} title="这一轮的耗时 · 输出 token · 上下文占用">
           {meta.join(' · ')}
