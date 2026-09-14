@@ -626,6 +626,201 @@ class VideoJobProcessorTest {
                 () -> processor.validateReferences("seedance-2", images));
     }
 
+    // ========== IKFFWH：素材库引用（material_id → asset:// 载体）==========
+
+    @Nested
+    @DisplayName("素材库引用透传（IKFFWH）")
+    class MaterialReferenceTests {
+
+        @Test
+        @DisplayName("复现 1997：references 仅含 material_id → 提交带 asset:// 参考图")
+        void reproducesJob1997() {
+            Map<String, Object> input = baseInput();
+            input.put("prompt", "改成蓝色发卡");
+            input.put("references", List.of(Map.of(
+                    "role", "reference", "type", "image",
+                    "material_id", "asset-20260914090122-ftvfj")));
+            ClaimedVideoJobDto claim = videoClaim("1997", false, null, 0, 0, null, input);
+
+            VideoSubmitInput request = processor.buildSubmitRequest(claim);
+
+            assertThat(request.references()).containsExactly(new VideoReference(
+                    "image", "asset://asset-20260914090122-ftvfj", null));
+        }
+
+        @Test
+        @DisplayName("小写 asset- 前缀素材库 id 同样透传（前缀大小写不敏感）")
+        void lowercaseMaterialId_passes() {
+            Map<String, Object> input = baseInput();
+            input.put("references", List.of(Map.of(
+                    "role", "reference", "type", "image",
+                    "material_id", "asset-20260820153209-6c9z8")));
+            ClaimedVideoJobDto claim = videoClaim("202", false, null, 0, 0, null, input);
+
+            VideoSubmitInput request = processor.buildSubmitRequest(claim);
+
+            assertThat(request.references()).containsExactly(new VideoReference(
+                    "image", "asset://asset-20260820153209-6c9z8", null));
+        }
+
+        @Test
+        @DisplayName("素材库帧：asset- 素材作首尾帧 → 带 role 并入 references，独立帧字段为空")
+        void materialFrames_mergeWithRole() {
+            Map<String, Object> input = baseInput();
+            input.put("references", List.of(
+                    Map.of("role", "first_frame", "type", "image", "material_id", "asset-face-1"),
+                    Map.of("role", "last_frame", "type", "image", "material_id", "asset-last-1")));
+            ClaimedVideoJobDto claim = videoClaim("203", false, null, 0, 0, null, input);
+
+            VideoSubmitInput request = processor.buildSubmitRequest(claim);
+
+            assertThat(request.firstFrameImage()).isNull();
+            assertThat(request.lastFrameImage()).isNull();
+            assertThat(request.references()).containsExactly(
+                    new VideoReference("image", "asset://asset-face-1", "first_frame"),
+                    new VideoReference("image", "asset://asset-last-1", "last_frame"));
+        }
+
+        @Test
+        @DisplayName("单数组混排保序：帧在前；普通参考本地在前、素材库在后（对齐 TS IKDJNZ）")
+        void singleReferences_mixedOrder() {
+            Map<String, Object> input = baseInput();
+            input.put("references", List.of(
+                    Map.of("role", "first_frame", "type", "image", "asset_id", "11"),
+                    Map.of("role", "reference", "type", "image", "material_id", "asset-mat-1"),
+                    Map.of("role", "reference", "type", "image", "asset_id", "12"),
+                    Map.of("role", "last_frame", "type", "image", "material_id", "asset-last-1")));
+            ClaimedVideoJobDto claim = videoClaim("204", false, null, 0, 0, null, input);
+            doReturn(Map.of(
+                    "11", imageAsset("11", "https://tos.test/f.png"),
+                    "12", imageAsset("12", "https://tos.test/r.png")))
+                    .when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
+
+            VideoSubmitInput request = processor.buildSubmitRequest(claim);
+
+            assertThat(request.references()).containsExactly(
+                    new VideoReference("image", "https://tos.test/f.png", "first_frame"),
+                    new VideoReference("image", "asset://asset-last-1", "last_frame"),
+                    new VideoReference("image", "https://tos.test/r.png", null),
+                    new VideoReference("image", "asset://asset-mat-1", null));
+        }
+
+        @Test
+        @DisplayName("回归：未关联的本地 asset_id 参考照旧走 TOS url")
+        void unlinkedLocalReference_keepsUrl() {
+            Map<String, Object> input = baseInput();
+            input.put("references", List.of(
+                    Map.of("role", "reference", "type", "image", "asset_id", "11")));
+            ClaimedVideoJobDto claim = videoClaim("205", false, null, 0, 0, null, input);
+            doReturn(Map.of("11", imageAsset("11", "https://tos.test/a.png")))
+                    .when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
+
+            VideoSubmitInput request = processor.buildSubmitRequest(claim);
+
+            assertThat(request.references()).containsExactly(
+                    new VideoReference("image", "https://tos.test/a.png", null));
+        }
+
+        @Test
+        @DisplayName("本地素材命中素材库关联 → 转 asset://；未关联保留本地 url")
+        void linkedAsset_convertsToAssetUri() {
+            Map<String, Object> input = baseInput();
+            input.put("reference_asset_ids", List.of("11", "12"));
+            ClaimedVideoJobDto claim = videoClaim("206", false, null, 0, 0, null, input);
+            doReturn(Map.of(
+                    "11", linkedImageAsset("11", "https://tos.test/a.png", "asset-linked-1"),
+                    "12", imageAsset("12", "https://tos.test/b.png")))
+                    .when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
+
+            VideoSubmitInput request = processor.buildSubmitRequest(claim);
+
+            assertThat(request.references()).containsExactly(
+                    new VideoReference("image", "https://tos.test/b.png", null),
+                    new VideoReference("image", "asset://asset-linked-1", null));
+        }
+
+        @Test
+        @DisplayName("关联首帧本地素材 → firstFrameImage 走 asset://")
+        void linkedFirstFrame_resolvesToAssetUri() {
+            Map<String, Object> input = baseInput();
+            input.put("first_frame_asset_id", "11");
+            ClaimedVideoJobDto claim = videoClaim("207", false, null, 0, 0, null, input);
+            doReturn(Map.of("11",
+                    linkedImageAsset("11", "https://tos.test/first.png", "asset-face-1")))
+                    .when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
+
+            VideoSubmitInput request = processor.buildSubmitRequest(claim);
+
+            assertThat(request.firstFrameImage()).isEqualTo("asset://asset-face-1");
+        }
+
+        @Test
+        @DisplayName("关联的非图片帧素材 → unsupported_input（首尾帧必须图片不因关联豁免）")
+        void linkedNonImageFrame_rejected() {
+            Map<String, Object> input = baseInput();
+            input.put("references", List.of(
+                    Map.of("role", "first_frame", "type", "image", "asset_id", "11")));
+            ClaimedVideoJobDto claim = videoClaim("208", false, null, 0, 0, null, input);
+            AssetEntity videoFrame = new AssetEntity();
+            videoFrame.setId(11L);
+            videoFrame.setType("video");
+            videoFrame.setUrl("https://tos.test/first.mp4");
+            videoFrame.setMaterialId("asset-vid-1");
+            doReturn(Map.of("11", videoFrame))
+                    .when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
+
+            org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
+                    () -> processor.buildSubmitRequest(claim));
+        }
+
+        @Test
+        @DisplayName("显式素材库引用与本地关联同 id → 去重保留首次出现")
+        void materialRefs_dedup() {
+            Map<String, Object> input = baseInput();
+            input.put("references", List.of(
+                    Map.of("role", "reference", "type", "image", "asset_id", "11"),
+                    Map.of("role", "reference", "type", "image", "material_id", "asset-same"),
+                    Map.of("role", "reference", "type", "video", "material_id", "asset-other")));
+            ClaimedVideoJobDto claim = videoClaim("209", false, null, 0, 0, null, input);
+            doReturn(Map.of("11", linkedImageAsset("11", "https://tos.test/a.png", "asset-same")))
+                    .when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
+
+            VideoSubmitInput request = processor.buildSubmitRequest(claim);
+
+            assertThat(request.references()).containsExactly(
+                    new VideoReference("image", "asset://asset-same", null),
+                    new VideoReference("video", "asset://asset-other", null));
+        }
+
+        @Test
+        @DisplayName("素材库引用计入数量并集：10 张素材库图 → reference_limit_exceeded")
+        void materialRefs_countTowardLimit() {
+            List<Map<String, String>> refs = new java.util.ArrayList<>();
+            for (int i = 0; i < 10; i++) {
+                refs.add(Map.of("role", "reference", "type", "image",
+                        "material_id", "asset-img-" + i));
+            }
+            Map<String, Object> input = baseInput();
+            input.put("references", refs);
+            ClaimedVideoJobDto claim = videoClaim("210", false, null, 0, 0, null, input);
+
+            org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
+                    () -> processor.buildSubmitRequest(claim));
+        }
+
+        @Test
+        @DisplayName("素材库 id 形态非法 → invalid_reference")
+        void invalidMaterialId_rejected() {
+            Map<String, Object> input = baseInput();
+            input.put("references", List.of(Map.of(
+                    "role", "reference", "type", "image", "material_id", "not-a-material")));
+            ClaimedVideoJobDto claim = videoClaim("211", false, null, 0, 0, null, input);
+
+            org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
+                    () -> processor.buildSubmitRequest(claim));
+        }
+    }
+
     // ========== 工具方法 ==========
 
     private ClaimedVideoJobDto videoClaim(String id, boolean cancelRequested,
@@ -667,6 +862,21 @@ class VideoJobProcessorTest {
         a.setWidth(width);
         a.setHeight(height);
         a.setMime(mime);
+        return a;
+    }
+
+    private AssetEntity imageAsset(String id, String url) {
+        AssetEntity a = new AssetEntity();
+        a.setId(Long.parseLong(id));
+        a.setType("image");
+        a.setUrl(url);
+        return a;
+    }
+
+    /** 已关联素材库的本地图片素材（assets.material_id 非空 → 生成走 asset://）。 */
+    private AssetEntity linkedImageAsset(String id, String url, String materialId) {
+        AssetEntity a = imageAsset(id, url);
+        a.setMaterialId(materialId);
         return a;
     }
 }
