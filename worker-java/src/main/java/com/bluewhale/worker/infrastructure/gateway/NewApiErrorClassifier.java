@@ -17,8 +17,19 @@ public final class NewApiErrorClassifier {
     private NewApiErrorClassifier() {}
 
     /**
+     * 参考/输出版权信号正则（IKFL53：copyright/版权 原因 → 1038「参考内容可能涉及版权限制」）。
+     * 用户口径：上游 copyright-restrictions 原因独立成「参考内容可能涉及版权限制」，
+     * 与「生成内容未通过安全审核」（sensitive/敏感/审核 类）按关键词分开。
+     */
+    private static final Pattern REFERENCE_COPYRIGHT_PATTERN = Pattern.compile(
+            "copyright|版权|output video may be related to copyright",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    /**
      * 内容策略正则（error-codes.ts isContentPolicySignal）。
      * 与 TS 逐字一致：/(copyright|sensitive|版权|敏感|policy violation|policyviolation|content policy)/i
+     * IKFL53：版权信号（1038）先于敏感/审核 1018 判定；sensitive/敏感/policy violation 走 1018。
      */
     private static final Pattern CONTENT_POLICY_PATTERN = Pattern.compile(
             "copyright|sensitive|版权|敏感|policy violation|policyviolation|content policy",
@@ -36,9 +47,12 @@ public final class NewApiErrorClassifier {
 
     /**
      * 非 2xx 错误分类（new-api-audio-provider.ts:119-130 + §5 IKDAJN）。
-     * 优先级：content > quota > provider_failed。
+     * 优先级：参考版权 1038 > 输出/敏感 1018 > quota > provider_failed。
      */
     public static String classifyError(String text, int httpStatus) {
+        if (isReferenceCopyrightSignal(text)) {
+            return GenerationError.ERROR_CONTENT_REJECTED_REFERENCE;
+        }
         if (isContentPolicySignal(text)) {
             return GenerationError.ERROR_CONTENT_REJECTED;
         }
@@ -50,9 +64,12 @@ public final class NewApiErrorClassifier {
 
     /**
      * 成功态 error 信封分类（new-api-audio-provider.ts:142-163 + 图片 provider 同构）。
-     * 优先级：content > quota > provider_failed。
+     * 优先级：参考版权 1038 > 输出/敏感 1018 > quota > provider_failed。
      */
     public static String classifySuccessEnvelope(String errorText) {
+        if (isReferenceCopyrightSignal(errorText)) {
+            return GenerationError.ERROR_CONTENT_REJECTED_REFERENCE;
+        }
         if (isContentPolicySignal(errorText)) {
             return GenerationError.ERROR_CONTENT_REJECTED;
         }
@@ -60,6 +77,19 @@ public final class NewApiErrorClassifier {
             return GenerationError.ERROR_QUOTA_EXHAUSTED;
         }
         return GenerationError.ERROR_PROVIDER_FAILED;
+    }
+
+    /**
+     * 内容拒绝信号细分（IKFL53）：
+     * 版权/参考版权（copyright|版权）→ 1038；sensitive/敏感/审核 类 → 1018。
+     */
+    public static boolean isReferenceCopyrightSignal(String text) {
+        return text != null && REFERENCE_COPYRIGHT_PATTERN.matcher(text).find();
+    }
+
+    /** 显式输出内容/敏感 → 1018（版权 1038 已提前拦）。 */
+    public static boolean isOutputSensitiveSignal(String text) {
+        return text != null && text.matches("(?i).*(sensitive|敏感).*");
     }
 
     public static boolean isContentPolicySignal(String text) {

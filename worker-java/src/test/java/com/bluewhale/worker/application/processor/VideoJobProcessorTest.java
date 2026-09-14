@@ -370,7 +370,7 @@ class VideoJobProcessorTest {
     }
 
     @Test
-    @DisplayName("G58a: poll FAILURE + 顶层 fail_reason 版权拒绝 → failVideoJob(content_rejected, 上游原文)")
+    @DisplayName("G58a: poll FAILURE + 顶层 fail_reason 版权拒绝 → failVideoJob(content_rejected_reference, 上游原文)")
     void pollFailedWithTopLevelFailReason() {
         ClaimedVideoJobDto claim = videoClaim("109a", false, "task-109a", 3, 0, null);
         doReturn(Optional.of(claim)).when(stateMachine)
@@ -378,18 +378,18 @@ class VideoJobProcessorTest {
         doReturn("token").when(credentialService).open(anyString());
         // IKFL53：new-api tasks 表 FAILURE 状态把终端错误放顶层 fail_reason，无 data.error。
         doReturn(new VideoTaskObservation("failed", 100, null, null,
-                new TaskError("content_rejected",
-                        "The request failed because the output video may be related to copyright restrictions")))
+                new TaskError("content_rejected_reference",
+                        "The request failed because the output video may be related to copyright restrictions. Request id: req-2048")))
                 .when(videoClient).poll(eq("token"), eq("task-109a"));
         doReturn(true).when(stateMachine)
-                .failVideoJob(eq("109a"), eq("content_rejected"),
-                        eq("The request failed because the output video may be related to copyright restrictions"),
+                .failVideoJob(eq("109a"), eq("content_rejected_reference"),
+                        eq("The request failed because the output video may be related to copyright restrictions. Request id: req-2048"),
                         any(), anyString(), eq(1L));
 
         processor.handle("109a");
 
-        verify(stateMachine).failVideoJob(eq("109a"), eq("content_rejected"),
-                eq("The request failed because the output video may be related to copyright restrictions"),
+        verify(stateMachine).failVideoJob(eq("109a"), eq("content_rejected_reference"),
+                eq("The request failed because the output video may be related to copyright restrictions. Request id: req-2048"),
                 any(), anyString(), eq(1L));
     }
 

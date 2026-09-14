@@ -15,6 +15,7 @@ import {
   ERROR_CAPABILITY_UNSUPPORTED_RATIO,
   ERROR_CAPABILITY_UNSUPPORTED_DURATION,
   ERROR_INVALID_REFERENCE,
+  ERROR_CONTENT_REJECTED_REFERENCE,
   ACCOUNT_ERROR_PASSWORD_INCORRECT,
   ACCOUNT_ERROR_NUMERIC_CODES,
   RESOURCE_NOT_FOUND_CODE,
@@ -69,6 +70,14 @@ describe("单一码表（IKDZGM / ADR-0083）", () => {
   it("IKE7JP：invalid_reference 登记数值码 1034 且一码一文案", () => {
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_INVALID_REFERENCE]).toBe(1034);
     expect(ERROR_CODES[1034]).toBe("参考素材无效，请重新选择");
+  });
+
+  it("IKFL53：content_rejected_reference 登记数值码 1038 且一码一文案", () => {
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CONTENT_REJECTED_REFERENCE]).toBe(1038);
+    expect(ERROR_CODES[1038]).toBe("参考内容可能涉及版权限制");
+    // 落在 web 端生成域错误窗口（1000-1099，isGenerationDomainError）
+    expect(1038).toBeGreaterThanOrEqual(1000);
+    expect(1038).toBeLessThanOrEqual(1099);
   });
 
   it("全局业务码已登记；未知码 messageOf 给缺省文案", () => {

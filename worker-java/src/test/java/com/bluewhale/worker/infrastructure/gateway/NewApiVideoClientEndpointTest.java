@@ -122,7 +122,7 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
-    @DisplayName("IKFL53: poll FAILURE + 顶层 fail_reason 版权拒绝 → content_rejected + 上游原文透出")
+    @DisplayName("IKFL53: poll FAILURE + 顶层 fail_reason 版权拒绝 → content_rejected_reference + 上游原文透出")
     void pollTopLevelFailReasonCopyrightMapsToContentRejected() throws Exception {
         String copyrightText = "The request failed because the output video may be related to copyright restrictions. Request id: req-2048";
         server.createContext("/v1/video/generations/task-2048", exchange -> {
@@ -139,8 +139,52 @@ class NewApiVideoClientEndpointTest {
                 new NewApiVideoClient(baseUrl).poll("t", "task-2048");
         assertThat(observation.status()).isEqualTo("failed");
         assertThat(observation.error()).isNotNull();
-        assertThat(observation.error().code()).isEqualTo("content_rejected");
+        assertThat(observation.error().code()).isEqualTo("content_rejected_reference");
         // message 保留上游原文，不再默认「视频生成失败」
         assertThat(observation.error().message()).contains("copyright restrictions");
+    }
+
+    @Test
+    @DisplayName("IKFL53: poll data.error 输出敏感码 → content_rejected(1018)")
+    void pollDataErrorOutputSensitiveMapsToContentRejected() throws Exception {
+        server.createContext("/v1/video/generations/task-sensitive", exchange -> {
+            byte[] resp = ("{\"task_id\":\"task-sensitive\",\"status\":\"FAILURE\"," +
+                    "\"error\":{\"code\":\"OutputVideoSensitiveContentDetected.PolicyViolation\"," +
+                    "\"message\":\"The output video contains sensitive content.\"}}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoTaskObservation observation =
+                new NewApiVideoClient(baseUrl).poll("t", "task-sensitive");
+        assertThat(observation.status()).isEqualTo("failed");
+        assertThat(observation.error()).isNotNull();
+        assertThat(observation.error().code()).isEqualTo("content_rejected");
+        assertThat(observation.error().message()).contains("sensitive content");
+    }
+
+    @Test
+    @DisplayName("IKFL53: poll data.error + 顶层 fail_reason 双源合并 → 版权1038 优先于 quota")
+    void pollMergedTwoSourceSignalCopyrightWins() throws Exception {
+        server.createContext("/v1/video/generations/task-merge", exchange -> {
+            byte[] resp = ("{\"task_id\":\"task-merge\",\"status\":\"FAILURE\"," +
+                    "\"fail_reason\":\"This content violates copyright restrictions\"," +
+                    "\"error\":{\"code\":\"account_balance_insufficient\",\"message\":\"余额不足\"}}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoTaskObservation observation =
+                new NewApiVideoClient(baseUrl).poll("t", "task-merge");
+        assertThat(observation.status()).isEqualTo("failed");
+        assertThat(observation.error()).isNotNull();
+        // 合并信号里 copyright 优先于 quota → 1038
+        assertThat(observation.error().code()).isEqualTo("content_rejected_reference");
     }
 }
