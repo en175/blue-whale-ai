@@ -9,6 +9,13 @@ import CanvasPage from './index';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from './testing/promptRefEditor';
 import type { GenerationModel, ModelFeatures } from '@/api/generation';
 
+// IKFJJT 合并 0915 适配：视频提交前会对参考图做合规入库（ensureVideoImageRefsCompliance →
+// depositCanvasAssetToCharacterLibrary）。测试环境固定返回 materialId，避免真实调素材入库 API。
+vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./characterLibraryDeposit')>()),
+  depositCanvasAssetToCharacterLibrary: vi.fn(async () => ({ materialId: 'asset-compliance-test' })),
+}));
+
 vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
@@ -160,6 +167,13 @@ function videoModel(
       last_frame: true,
       first_last_frame: true,
       audio: false,
+      // ADR-0086：seedance-2 系视频参考能力位——测试模型默认支持视频/音频参考，可被用例覆盖
+      video_reference: modelId === 'seedance-2',
+      video_reference_max: 3,
+      audio_reference: modelId === 'seedance-2',
+      audio_reference_max: 3,
+      image_reference_max: 1,
+      max_reference_duration_sec: 15,
       ...features,
     },
     is_default: modelId === 'seedance-2',
@@ -446,8 +460,8 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.target_node_id).toBe('d1');
     expect(payload.references).toEqual([
-      { asset_id: 'a1', type: 'image', role: 'first_frame' },
-      { asset_id: 'a2', type: 'image', role: 'last_frame' },
+      { material_id: 'asset-compliance-test', type: 'image', role: 'first_frame' },
+      { material_id: 'asset-compliance-test', type: 'image', role: 'last_frame' },
     ]);
   });
 
@@ -465,7 +479,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.target_node_id).toBe('d1');
     expect(payload.references).toEqual([
-      { asset_id: 'a1', type: 'image', role: 'reference' },
+      { material_id: 'asset-compliance-test', type: 'image', role: 'reference' },
       { asset_id: 'a3', type: 'video', role: 'reference' },
     ]);
   });
@@ -590,7 +604,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
   it('切换不支持视频参考的模型：保留全部参考、说明原因并阻止发送，换回兼容模型恢复', async () => {
     apiGenerationMocks.fetchGenerationModels.mockImplementation(async (): Promise<GenerationModel[]> => [
       videoModel('seedance-2', '测试视频模型'),
-      videoModel('other-video', '普通视频模型'),
+      videoModel('other-video', '普通视频模型', { video_reference: false, audio_reference: false }),
     ]);
     await renderPage();
     await clickNode('d1');
@@ -603,14 +617,14 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
 
     // 切换不支持视频参考的模型（非 Seedance 2.0 系）：参考保留不删除，原因明确，发送被阻止
     await switchModel('测试视频模型', '普通视频模型');
-    await vi.waitFor(() => expect(container.textContent).toContain('当前模型不支持视频或音频参考，请更换模型或调整引用'));
+    await vi.waitFor(() => expect(container.textContent).toContain('当前模型不支持视频素材参考'));
     expect(sendButton().disabled).toBe(true);
     expect(dockRefNames()).toEqual(['参考视频']);
     expect(edgePairs()).toEqual(['v1->d1']);
 
     // 换回兼容模型：恢复可发送
     await switchModel('普通视频模型', '测试视频模型');
-    await vi.waitFor(() => expect(container.textContent).not.toContain('当前模型不支持视频或音频参考'));
+    await vi.waitFor(() => expect(container.textContent).not.toContain('当前模型不支持视频素材参考'));
     expect(sendButton().disabled).toBe(false);
   });
 
@@ -651,7 +665,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
   it('切换参考数量上限不足的模型：保留全部参考并说明原因，用户删除超限项后恢复发送', async () => {
     apiGenerationMocks.fetchGenerationModels.mockImplementation(async (): Promise<GenerationModel[]> => [
       videoModel('seedance-2', '测试视频模型'),
-      videoModel('cap1-video', '单参考视频模型', { max_reference_images: 1 }),
+      videoModel('cap1-video', '单参考视频模型', { max_reference_images: 1, video_reference_max: 0, audio_reference_max: 0 }),
     ]);
     await renderPage();
     await clickNode('d1');
@@ -666,7 +680,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
 
     // 上限不足：参考保留不截断，说明原因并阻止发送
     await switchModel('测试视频模型', '单参考视频模型');
-    await vi.waitFor(() => expect(container.textContent).toContain('图片参考超出当前模型上限，请调整引用或模型'));
+    await vi.waitFor(() => expect(container.textContent).toContain('参考图最多 1 张'));
     expect(sendButton().disabled).toBe(true);
     expect(dockRefNames()).toEqual(['首图', '次图']);
     expect(edgePairs()).toEqual(['m1->d1', 'm2->d1']);
@@ -675,7 +689,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     const removeButtons = () => [...container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]')];
     await act(async () => { removeButtons()[0]!.click(); });
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['次图']));
-    await vi.waitFor(() => expect(container.textContent).not.toContain('图片参考超出当前模型上限'));
+    await vi.waitFor(() => expect(container.textContent).not.toContain('参考图最多 1 张'));
     expect(sendButton().disabled).toBe(false);
   });
 

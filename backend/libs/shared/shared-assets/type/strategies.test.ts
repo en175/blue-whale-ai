@@ -3,7 +3,7 @@ import {
   ASSET_UNAVAILABLE_CODE,
   RESOURCE_NOT_FOUND_CODE,
   SHARED_ASSET_EMPTY_CARD_CODE,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { StyleCardStrategy } from "./card-strategies.js";
 import { MediaStrategy } from "./media-strategies.js";
 import { SceneStrategy } from "./scene-strategy.js";

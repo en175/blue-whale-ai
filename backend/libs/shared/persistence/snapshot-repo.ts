@@ -3,11 +3,11 @@ import {
   classifyPlanApplicationAvailability,
   type ConversationMentionType,
   type MentionFailureReason,
-} from "@blue-whale/core";
+} from "@lib/core";
 import {
   type CapabilitySnapshotVersion,
   type DerivedReference,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 
 import { publicGenerationInput } from "./generation-input.js";
 import { classifyMentionAvailability } from "./mention-availability.js";

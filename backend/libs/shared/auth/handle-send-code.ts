@@ -1,5 +1,5 @@
-import { FAILURE_CODE, fail, ok } from "@blue-whale/contracts";
-import { type RequestSmsCodeDeps, requestSmsCode } from "@blue-whale/core";
+import { FAILURE_CODE, fail, ok } from "@lib/contracts";
+import { type RequestSmsCodeDeps, requestSmsCode } from "@lib/core";
 
 const PHONE_RE = /^1[3-9]\d{9}$/;
 

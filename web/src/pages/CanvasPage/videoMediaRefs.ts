@@ -6,14 +6,9 @@
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
 import { baseSourceError, cardNameOfNode, isMaterialLibraryId, readAssetId } from './mediaRefs';
-import { REF_LIMITS } from '@/utils/ref-overflow';
 
 /** 视频参考角色：reference 普通参考 / first 首帧 / last 尾帧 */
 export type VideoRefRole = 'reference' | 'first' | 'last';
-
-/** 普通参考中视频素材上限（能力接口无视频参考数量位；沿用前端固定 3，图片上限沿用 REF_LIMITS.image，
- *  与图片 Dock 同口径——能力侧约束由服务端校验兜底） */
-export const MAX_VIDEO_REFS = 3;
 
 /** 媒体类型归一（IKFE8U）：画布节点 data / 资产记录的 mediaType 收敛为参考三类型；
  *  调用方已按类型过滤，未知值归图片与历史展示口径一致 */
@@ -167,8 +162,11 @@ export function freshVideoCanvasRefs(refs: VideoMediaRefs, mediaNodes: Node[]): 
   return next;
 }
 
-/** 当前模型是否支持视频参考（仅 Seedance 2.0 系）：UI 禁用与提交防线共用同一判定 */
-export function supportsVideoReferenceModel(modelId: string): boolean {
+/** 当前模型是否支持视频参考（ADR-0086：由能力行 features.video_reference 驱动，替代旧 seedance-2 前缀特判）。
+ *  UI 禁用与提交防线共用同一判定。 */
+export function supportsVideoReferenceModel(modelId: string, caps?: VideoRefCapabilities | null): boolean {
+  // 兼容旧调用点：能力位缺省（未传 caps 或 caps 未带该位）时维持 seedance-2 前缀特判。
+  if (caps?.videoReference !== undefined) return caps.videoReference;
   return modelId === 'seedance-2' || /^doubao-seedance-2-0(?:-|$)/.test(modelId);
 }
 
@@ -249,12 +247,25 @@ export function videoMediaRefsOf(
   return refs;
 }
 
-/** 模型能力（GenerationModel.features 中与视频参考相关的位） */
+/** 模型能力（GenerationModel.features 中与视频参考相关的位 + 分类上限，ADR-0086） */
 export interface VideoRefCapabilities {
   firstFrame: boolean;
   lastFrame: boolean;
   firstLastFrame: boolean;
   referenceImage: boolean;
+  /** ADR-0086：视频生成是否接受视频素材作普通参考（替代 seedance-2 前缀特判）。
+   *  以下 ADR-0086 字段可选：旧调用点/测试未传时由消费处回落缺省（与后端缺省一致）。 */
+  videoReference?: boolean;
+  /** ADR-0086：视频生成是否接受音频素材作参考。 */
+  audioReference?: boolean;
+  /** ADR-0086：普通参考中视频素材上限（缺省 3）。 */
+  videoReferenceMax?: number;
+  /** ADR-0086：音频生成中音频参考上限（缺省 3）。 */
+  audioReferenceMax?: number;
+  /** ADR-0086：音频生成中图片参考上限（缺省 1）。 */
+  imageReferenceMax?: number;
+  /** ADR-0086：普通参考中图片素材上限（缺省 9）。 */
+  imageMax?: number;
 }
 
 /** 视频参考组合校验：返回 null 表示当前输入可提交，否则为用户可读的阻止原因。
@@ -294,6 +305,7 @@ export function canAddRefRole(
 }
 
 /** 统一校验「向视频草稿添加参考素材」：重复素材 / 槽位已占 / 首尾帧收视频 / 普通参考超限。
+ *  ADR-0086：分类上限由能力行（videoReferenceMax / audioReferenceMax / imageMax）驱动，不再硬编码 3/9。
  *  返回 null 表示可添加；否则为用户可读的拒绝原因——所有添加入口（连线 / 到节点选择 /
  *  角色库 / 资产 / Dock 角色改写）必须调本函数，禁止各自复制 guard。 */
 export function checkAddVideoRef(
@@ -301,6 +313,7 @@ export function checkAddVideoRef(
   mediaType: 'image' | 'video' | 'audio',
   assetId: string | undefined,
   refs: VideoMediaRefs,
+  caps?: VideoRefCapabilities | null,
 ): string | null {
   // 首尾帧槽只收图片
   if (role !== 'reference' && mediaType !== 'image') return '首尾帧仅支持图片素材';
@@ -314,15 +327,18 @@ export function checkAddVideoRef(
       [refs.first, refs.last].some((r) => r?.assetId === assetId);
     if (occupied) return role !== 'reference' ? '素材重复' : '重复的素材已跳过';
   }
-  // 普通参考上限
+  // 普通参考上限（ADR-0086：读能力行，缺省回落旧 3/3/9）
   if (role === 'reference') {
+    const videoMax = caps?.videoReferenceMax ?? 3;
+    const audioMax = caps?.audioReferenceMax ?? 3;
+    const imageMax = caps?.imageMax ?? 9;
     if (mediaType === 'video') {
       const videoCount = refs.reference.filter((r) => r.mediaType === 'video').length;
-      if (videoCount >= MAX_VIDEO_REFS) return `参考视频最多 ${MAX_VIDEO_REFS} 个`;
+      if (videoCount >= videoMax) return `参考视频最多 ${videoMax} 个`;
     } else if (mediaType === 'audio') {
-      if (refs.reference.filter(r => r.mediaType === 'audio').length >= 3) return '参考音频最多 3 个';
-    } else if (refs.reference.filter(r => r.mediaType === 'image').length >= REF_LIMITS.image) {
-      return `参考图最多 ${REF_LIMITS.image} 张`;
+      if (refs.reference.filter(r => r.mediaType === 'audio').length >= audioMax) return `参考音频最多 ${audioMax} 个`;
+    } else if (refs.reference.filter(r => r.mediaType === 'image').length >= imageMax) {
+      return `参考图最多 ${imageMax} 张`;
     }
   }
   return null;

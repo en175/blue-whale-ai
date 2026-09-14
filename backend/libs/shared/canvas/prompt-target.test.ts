@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { PromptBinding } from "@blue-whale/contracts";
+import type { PromptBinding } from "@lib/contracts";
 import { syncDraftModeOnPlanMedia } from "./prompt-target.js";
 
 // IKFC26：方案绑定媒体 → 文生视频目标切全能参考（服务端与前端门控同向，仅 prompt → all 单向）。

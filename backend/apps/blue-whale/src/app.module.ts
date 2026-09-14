@@ -1,6 +1,5 @@
 import { Module } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
-import { ScheduleModule } from "@nestjs/schedule";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 import { AuthGuard } from "@lib/infra/guard/auth.guard.js";
 import { TransformInterceptor } from "@lib/infra/interceptors/transform.interceptor.js";
@@ -50,7 +49,6 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
 
 @Module({
   imports: [
-    ScheduleModule.forRoot(),
     PrismaModule,
     AccountModule,
     AssetModule,

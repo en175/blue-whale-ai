@@ -1,6 +1,6 @@
-import type { PromptBinding } from '../../../packages/contracts/src/prompt-target';
-import type { PromptPreviewSource } from '../../../packages/contracts/src/prompt-preview';
-import type { LegacyCardHistoryItem, LegacyMigrationReport } from '../../../packages/contracts/src/legacy-card-migration';
+import type { PromptBinding } from '@lib/contracts/prompt-target';
+import type { PromptPreviewSource } from '@lib/contracts/prompt-preview';
+import type { LegacyCardHistoryItem, LegacyMigrationReport } from '@lib/contracts/legacy-card-migration';
 /* ============================================
  * canvas 接口：画布加载 GET /api/canvases + 保存 PUT /api/canvases/:projectId
  * nodes/viewport 均为 JSON 字符串；保存支持 If-Match 乐观锁（412 版本冲突）

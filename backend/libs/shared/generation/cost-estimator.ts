@@ -13,7 +13,7 @@ import {
   quotaToFen,
   type CostReservationSnapshot,
   type NewApiPricingItem,
-} from "@blue-whale/core";
+} from "@lib/core";
 
 export interface CostEstimatorClient {
   /** 拉定价目录（默认匿名可访问；token 可传用户 sk- 以对齐用户分组）。 */

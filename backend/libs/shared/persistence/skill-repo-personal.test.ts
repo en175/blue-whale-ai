@@ -1,7 +1,7 @@
 // IK74V8：从 skill-repo.test.ts 拆出（≤800 行硬线）。用例逐块搬运，断言不变。
 import type {PrismaClient} from "@prisma/client";
 import {describe, expect, it, vi} from "vitest";
-import {agentRunPinSchema, type AgentRunPin} from "@blue-whale/contracts";
+import {agentRunPinSchema, type AgentRunPin} from "@lib/contracts";
 import {createSkillRepo, SkillInUseError} from "./skill-repo.js";
 
 // SkillRepo 资产边界（契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §2/§3/§6/§11）：

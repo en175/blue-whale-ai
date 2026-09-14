@@ -1,6 +1,6 @@
 import { Controller, Get, Headers, Query } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
-import { ok } from "@blue-whale/contracts";
+import { NewApiError } from "@lib/core";
+import { ok } from "@lib/contracts";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import {
   mapPaymentMethodLabel,

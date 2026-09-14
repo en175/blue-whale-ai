@@ -1,8 +1,8 @@
 /* ============================================
  * CanvasPage 画布编辑页：节点/连线/工具栏编排
  * ============================================ */
-import { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, type PromptBinding } from '../../../../packages/contracts/src/prompt-target';
-import { promptMentionSchema, validPromptMentions } from '../../../../packages/contracts/src/prompt-preview';
+import { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, type PromptBinding } from '@lib/contracts/prompt-target';
+import { promptMentionSchema, validPromptMentions } from '@lib/contracts/prompt-preview';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
@@ -22,7 +22,6 @@ import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } fr
 import {
   asVideoRefMediaType,
   isVideoDraftNode,
-  MAX_VIDEO_REFS,
   readRefRole,
   readDraftMaterialRefs,
   freshVideoCanvasRefs,
@@ -36,7 +35,7 @@ import {
   type VideoMediaRefs,
   type VideoRefRole,
 } from './videoMediaRefs';
-import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
+import { refOverflowToast } from '@/utils/ref-overflow';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf } from './components/cardName';
 import type { MediaGenStatus } from './components/MediaNode';
@@ -308,8 +307,8 @@ export default function CanvasPage() {
       showToast('warn', '该素材已连入当前草稿');
       return false;
     }
-    if (refs.length >= REF_LIMITS.image) {
-      showToast('warn', refOverflowToast(['image']));
+    if (refs.length >= 10) {
+      showToast('warn', refOverflowToast(['image'], { image: 10 }));
       return false;
     }
     return true;
@@ -916,7 +915,7 @@ export default function CanvasPage() {
           onTitleChange: (id: string, title: string) => actionsRef.current.renameCard(id, title),
           onDraftError: handleDraftError,
           onTextChange: (id: string, text: string) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text } } : n)),
-          onPromptChange: (id: string, text: string, promptMentions: import('../../../../packages/contracts/src/prompt-preview').PromptMention[], promptMaterials?: Array<import('../../../../packages/contracts/src/prompt-preview').PromptMaterial & { url: string }>) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text, promptMentions, ...(promptMaterials ? { promptMaterials } : {}) } } : n)),
+          onPromptChange: (id: string, text: string, promptMentions: import('@lib/contracts/prompt-preview').PromptMention[], promptMaterials?: Array<import('@lib/contracts/prompt-preview').PromptMaterial & { url: string }>) => setTextNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, text, promptMentions, ...(promptMaterials ? { promptMaterials } : {}) } } : n)),
           onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
           onChange: (id: string, html: string) => {
             setTextNodes((prev) =>
@@ -3199,11 +3198,12 @@ export default function CanvasPage() {
         if (accepted.length > 1) showToast('warn', '首尾帧仅支持一张图片，已取首张');
         accepted = accepted.slice(0, 1);
       } else {
-        // 普通参考：图 9/视频 3/音频 3 与连线+material 合并联算；assetId 查重跳过
+        // 普通参考：图/视频/音频分类上限与连线+material 合并联算（ADR-0086：读能力行，
+        // 缺省回落旧 9/3/3）；assetId 查重跳过
         const known = new Set(refs.reference.map((r) => r.assetId));
-        let imgSlots = REF_LIMITS.image - refs.reference.filter((r) => r.mediaType === 'image').length;
-        let vidSlots = MAX_VIDEO_REFS - refs.reference.filter((r) => r.mediaType === 'video').length;
-        let audSlots = REF_LIMITS.audio - refs.reference.filter((r) => r.mediaType === 'audio').length;
+        let imgSlots = 9 - refs.reference.filter((r) => r.mediaType === 'image').length;
+        let vidSlots = 3 - refs.reference.filter((r) => r.mediaType === 'video').length;
+        let audSlots = 3 - refs.reference.filter((r) => r.mediaType === 'audio').length;
         const overflowKinds: Array<'image' | 'video' | 'audio'> = [];
         let skippedDup = false;
         const filtered: AssetRecord[] = [];
@@ -3226,7 +3226,7 @@ export default function CanvasPage() {
         }
         accepted = filtered;
         if (skippedDup) showToast('warn', '重复的素材已跳过');
-        if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds));
+        if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds, { image: 9, video: 3, audio: 3 }));
         if (accepted.length === 0) return;
       }
       if (!videoDraftId) {
@@ -3295,7 +3295,7 @@ export default function CanvasPage() {
         for (const a of images) {
           const id = String(a.id);
           if (known.has(id)) { skippedDup = true; continue; }
-          if (known.size >= REF_LIMITS.image) { overflow = true; break; }
+          if (known.size >= 10) { overflow = true; break; }
           known.add(id);
           accepted.push(a);
         }
@@ -4415,6 +4415,57 @@ export default function CanvasPage() {
     });
   };
 
+  /** IKFJJT：把视频草稿的参考批量改角色（模式切换自动转换用）。
+   *  普通参考⇄首尾帧互转：切首尾帧时图片转 first/last 槽（第 1 张 first、第 2 张 last）；
+   *  切回全能参考/图生视频时首尾帧转回普通参考（role='reference'）。
+   *  边参考改 edge.data.refRole（随连线持久化；reference 删该字段，与 addCanvasEdge 写入口径一致），
+   *  素材库参考改草稿 data.draftMaterialRefs[].role（随草稿持久化）。 */
+  const assignVideoRefRoles = (
+    draftId: string,
+    assignments: Array<{ nodeId: string; role: VideoRefRole }>,
+  ) => {
+    if (assignments.length === 0) return;
+    const roleByKey = new Map(assignments.map((a) => [a.nodeId, a.role]));
+
+    // 1) 边参考：改 (source → draft) 的 data.refRole（沿用 addCanvasEdge 的 history 模式持久化）
+    const prevEdges = edgesRef.current;
+    let edgesChanged = false;
+    const nextEdges = prevEdges.map((e) => {
+      if (e.target !== draftId) return e;
+      const role = roleByKey.get(e.source);
+      if (!role) return e;
+      const currentRole = (e.data as Record<string, unknown> | undefined)?.refRole;
+      // reference = 缺省角色（不写 data.refRole），与 addCanvasEdge 一致；其余显式写入。
+      if (role === 'reference') {
+        if (currentRole === undefined) return e;
+        edgesChanged = true;
+        const { refRole: _drop, ...restData } = (e.data ?? {}) as Record<string, unknown>;
+        return { ...e, data: restData };
+      }
+      if (currentRole === role) return e;
+      edgesChanged = true;
+      return { ...e, data: { ...e.data, refRole: role } };
+    });
+    if (edgesChanged) {
+      historyRef.current?.pushReplaceEdges(prevEdges, nextEdges);
+      edgesRef.current = nextEdges;
+      setEdges(nextEdges);
+    }
+
+    // 2) 素材库参考：改草稿 draftMaterialRefs[].role
+    const draftNode = mediaNodesRef.current.find((n) => n.id === draftId);
+    const existing = readDraftMaterialRefs(draftNode);
+    if (existing.length > 0) {
+      const nextMaterials = existing.map((m) => {
+        const role = roleByKey.get(m.materialId);
+        return role ? { ...m, role } : m;
+      });
+      if (nextMaterials.some((m, i) => m.role !== existing[i]!.role)) {
+        patchMediaNode(draftId, { draftMaterialRefs: nextMaterials });
+      }
+    }
+  };
+
   /* ============ 视频自由模式（工具栏入口，无草稿卡）：参考本地暂存与变更 ============ */
 
   /** 自由模式追加参考（到节点选择/从资产中选择/角色库共用）：校验口径与草稿连线一致——
@@ -4443,6 +4494,30 @@ export default function CanvasPage() {
       const next: VideoMediaRefs = { reference: prev.reference.filter((r) => r.nodeId !== key) };
       if (prev.first?.nodeId !== key) next.first = prev.first;
       if (prev.last?.nodeId !== key) next.last = prev.last;
+      return next;
+    });
+  };
+
+  /** IKFJJT：自由模式（无画布连线）把参考批量改角色——模式切换转换用（普通参考⇄首尾帧）。
+   *  直接按 nodeId 覆写本地 refs 的角色，未命中项保持原角色。 */
+  const assignVideoFreeRefRoles = (
+    assignments: Array<{ nodeId: string; role: VideoRefRole }>,
+  ): void => {
+    if (assignments.length === 0) return;
+    const roleByKey = new Map(assignments.map((a) => [a.nodeId, a.role]));
+    setVideoFreeRefs((prev) => {
+      const all: Array<{ item: VideoMediaRef; role: VideoRefRole }> = [
+        ...prev.reference.map((item) => ({ item, role: 'reference' as const })),
+        ...(prev.first ? [{ item: prev.first, role: 'first' as const }] : []),
+        ...(prev.last ? [{ item: prev.last, role: 'last' as const }] : []),
+      ];
+      const next: VideoMediaRefs = { reference: [] };
+      for (const { item, role } of all) {
+        const targetRole = roleByKey.get(item.nodeId) ?? role;
+        if (targetRole === 'first') next.first = item;
+        else if (targetRole === 'last') next.last = item;
+        else next.reference.push(item);
+      }
       return next;
     });
   };
@@ -4901,7 +4976,8 @@ export default function CanvasPage() {
         showToast('warn', conflict);
         return;
       }
-      // 视频参考仅部分模型支持（Seedance 2.0 系）：提交防线与面板 UI 禁用同一判定
+      // 视频参考仅部分模型支持（ADR-0086：读能力行 features.video_reference；旧 seedance-2 前缀特判
+      // 作为缺省兜底）：提交防线与面板 UI 禁用同一判定
       if (!supportsVideoReferenceModel(opts.modelId) && draftRefs.reference.some((r) => r.mediaType !== 'image')) {
         showToast('warn', '当前模型不支持视频或音频参考，请更换模型或调整引用');
         return;
@@ -6106,6 +6182,7 @@ export default function CanvasPage() {
             }
             videoMediaRefs={videoDraftId ? (videoDraftMediaRefs ?? { reference: [] }) : videoFreeRefsView}
             onRemoveVideoRef={videoDraftId ? ((nodeId) => removeRefEdges(videoDraftId, nodeId)) : removeVideoFreeRef}
+            onAssignRefRoles={videoDraftId ? ((assignments) => assignVideoRefRoles(videoDraftId, assignments)) : assignVideoFreeRefRoles}
             onRemoveMaterialRef={videoDraftId ? ((materialId) => removeDraftMaterialRef(videoDraftId, materialId)) : removeVideoFreeRef}
             onReorderMediaRefs={videoDraftId ? ((keys) => handleReorderVideoMediaRefs(videoDraftId, keys)) : reorderVideoFreeRefs}
             onToast={(type, msg) => showToast(type, msg)}

@@ -4,7 +4,7 @@ import {
   getCurrentTraceId,
   TRACE_ID_HEADER,
   TRACE_ID_PATTERN,
-} from "@blue-whale/core/logging";
+} from "@lib/core/logging";
 
 import { traceMiddleware } from "./trace.middleware.js";
 

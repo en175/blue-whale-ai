@@ -3,7 +3,7 @@
  * ============================================ */
 import { infiniteQueryOptions } from '@tanstack/react-query';
 import { apiRequest, type ApiRequestInit } from './http';
-import type { LegacyMigrationReport } from '../../../packages/contracts/src/legacy-card-migration';
+import type { LegacyMigrationReport } from '@lib/contracts/legacy-card-migration';
 
 /** GET /api/projects 返回项 */
 export interface ProjectRecord {

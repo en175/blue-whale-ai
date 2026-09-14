@@ -3,7 +3,7 @@ import type {
   SharedAssetKind,
   SharedAssetSnapshot,
   SharedAssetType,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 
 /** 共享资产内部行：snapshot 为类型数据的自包含快照（不依赖来源表）。
  *  asset_type 为第一层（节点大类），kind 为第二层（节点判别字段，goods/scene/text 为 null）。 */

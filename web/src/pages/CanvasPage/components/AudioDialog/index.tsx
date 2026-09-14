@@ -21,9 +21,6 @@ import styles from './index.module.css';
 
 /** 输入框字数上限 */
 const MAX_INPUT = 1000;
-/** 参考音频上限（与首页 Audio tab 一致） */
-const MAX_AUDIO_REFS = 3;
-
 /** 参考素材类型（保留给 MusicDialog 共享类型） */
 type RefKind = 'audio' | 'image';
 
@@ -198,6 +195,8 @@ export default function AudioDialog({
 
   const currentModel = models.find((m) => m.model_id === modelId);
   const modelUnavailable = modelsLoaded && !currentModel;
+  /** 参考音频上限（ADR-0086：读能力行 audio_reference_max，缺省 3；与后端 validateAudioReferences 同源） */
+  const maxAudioRefs = currentModel?.features?.audio_reference_max ?? 3;
   /** 草稿绑定生成中（IKDMQT）：描述/模型/发送只读，保留查看与画布上的取消入口 */
   const readOnly = draftBinding?.submitting || draftBinding?.status === 'generating';
 
@@ -221,8 +220,8 @@ export default function AudioDialog({
       setPickerOpen(false);
       return;
     }
-    if (totalRefCount >= MAX_AUDIO_REFS) {
-      onToast?.('warn', `参考音频最多 ${MAX_AUDIO_REFS} 段已超出`);
+    if (totalRefCount >= maxAudioRefs) {
+      onToast?.('warn', `参考音频最多 ${maxAudioRefs} 段已超出`);
       setPickerOpen(false);
       return;
     }
@@ -243,8 +242,8 @@ export default function AudioDialog({
       const next = [...refs];
       for (const item of externalAssetPick.items) {
         if (next.some(ref => String(ref.assetId) === String(item.assetId))) continue;
-        if (next.length >= MAX_AUDIO_REFS) {
-          onToast?.('warn', `参考音频最多 ${MAX_AUDIO_REFS} 段已超出`);
+        if (next.length >= maxAudioRefs) {
+          onToast?.('warn', `参考音频最多 ${maxAudioRefs} 段已超出`);
           break;
         }
         next.push(item);
@@ -317,7 +316,7 @@ export default function AudioDialog({
   const invalidDraftRefs = (draftRefInvalid ?? []).length > 0;
   /** 发送防线（IKFDFZ）：正常路径添加侧已拦超限；异常预置/迁移数据超上限时明确阻止，
    *  不静默截断（与服务端 ≤3 契约同口径） */
-  const overflowRefs = currentRefs.length > MAX_AUDIO_REFS;
+  const overflowRefs = currentRefs.length > maxAudioRefs;
   const handleSend = () => {
     if (!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || overflowRefs || draftBinding?.saveFailed) return;
     const promptDocToSend = promptDoc && docHasAnyRef(promptDoc) ? promptDoc : null;
@@ -392,7 +391,7 @@ export default function AudioDialog({
           />
         )))}
         <div className={styles.refWrap} ref={sourceWrapRef}>
-          {totalRefCount < MAX_AUDIO_REFS ? (
+          {totalRefCount < maxAudioRefs ? (
             <>
               {!readOnly && (
                 <RefSourceMenu
@@ -439,7 +438,7 @@ export default function AudioDialog({
               )}
             </>
           ) : (
-            <span className={styles.refCount} title={`参考音频最多 ${MAX_AUDIO_REFS} 段`}>
+            <span className={styles.refCount} title={`参考音频最多 ${maxAudioRefs} 段`}>
               已达上限
             </span>
           )}
@@ -457,7 +456,7 @@ export default function AudioDialog({
       {invalidPrompt && <div role="alert">正文有已失效的素材标签或超过字数上限，请调整后发送</div>}
       {overflowRefs && (
         <div role="alert" data-testid="audio-ref-overflow">
-          {`参考音频最多 ${MAX_AUDIO_REFS} 段，请移除多余参考后发送`}
+          {`参考音频最多 ${maxAudioRefs} 段，请移除多余参考后发送`}
         </div>
       )}
       {invalidDraftRefs && (

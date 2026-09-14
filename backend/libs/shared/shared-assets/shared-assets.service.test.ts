@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SHARED_ASSET_TYPE_UNSUPPORTED_CODE } from "@blue-whale/contracts";
+import { SHARED_ASSET_TYPE_UNSUPPORTED_CODE } from "@lib/contracts";
 import { SharedAssetError } from "./shared-asset-error.js";
 import { SharedAssetService } from "./shared-assets.service.js";
 import { SharedAssetTypeRegistry } from "./type/shared-asset-type.registry.js";

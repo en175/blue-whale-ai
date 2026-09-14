@@ -15,6 +15,13 @@ import { setGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
    音频成品卡绑定音频面板（原落入图片分支的缺陷修复）。
    FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props；ImageDialog/AudioDialog 用真实实现。 */
 
+// IKFJJT 合并 0915 适配：视频提交前会对参考图做合规入库（ensureVideoImageRefsCompliance →
+// depositCanvasAssetToCharacterLibrary）。测试环境固定返回 materialId，避免真实调素材入库 API。
+vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./characterLibraryDeposit')>()),
+  depositCanvasAssetToCharacterLibrary: vi.fn(async () => ({ materialId: 'asset-compliance-test' })),
+}));
+
 vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
@@ -619,8 +626,8 @@ describe('IKDXHS：首页生成节点保留可编辑配置', () => {
     if (kind === 'image') expect(repeated.input_asset_ids).toEqual(['a2']);
     // IKEXX8 视频参考改为 structured references 数组（首帧/尾帧角色随连线持久化）
     else expect(repeated.references).toEqual([
-      { asset_id: 'a1', role: 'first_frame', type: 'image' },
-      { asset_id: 'a2', role: 'last_frame', type: 'image' },
+      { material_id: 'asset-compliance-test', role: 'first_frame', type: 'image' },
+      { material_id: 'asset-compliance-test', role: 'last_frame', type: 'image' },
     ]);
   });
 });
