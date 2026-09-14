@@ -94,6 +94,24 @@ public class VideoJobProcessor implements JobProcessor {
     static final Pattern SEEDANCE2_PATTERN = Pattern.compile(
             "^seedance-2$|^doubao-seedance-2-0(?:-|$)");
 
+    /** 素材库素材 id 形态（material-reference.ts:57 `^[Aa]sset-.{1,128}$`，大小写不敏感前缀）。 */
+    static final Pattern MATERIAL_ID_PATTERN = Pattern.compile("^[Aa]sset-.{1,128}$");
+
+    /**
+     * 素材库引用（material-reference.ts:11-15 MaterialReference 逐字移植）。
+     * <p>
+     * 零本地落表：类型由创建任务时声明（素材无处可查，只能随请求携带），Worker 转成
+     * {@code asset://<素材ID>} 载体交给网关；存在性/状态/物理约束由上游强校验。
+     */
+    record MaterialRef(String id, String type) {}
+
+    /**
+     * 单数组 references 元素（video-job-runner.ts:833-838 SingleReferenceItem 逐字移植）。
+     * <p>
+     * role ∈ first_frame / last_frame / reference；assetId 与 materialId 二选一（由 readReferences 收敛）。
+     */
+    record SingleRef(String role, String type, String assetId, String materialId) {}
+
     /** resolution → height 解析（video-dimensions.ts:8）。 */
     private static final Pattern RESOLUTION_PATTERN = Pattern.compile("^([0-9]+)p$");
     /** aspect_ratio → w:h 解析（video-dimensions.ts:9）。 */
@@ -459,63 +477,78 @@ public class VideoJobProcessor implements JobProcessor {
                     strOrEmpty(input, "resolution"), strOrEmpty(input, "aspect_ratio"), first, last, references);
         }
 
-        // 参考素材解析（:608-650）
-        // 简化路径：直接读 reference_asset_ids / first_frame_asset_id / last_frame_asset_id
-        // 单数组 references 路径（:608-649 readReferences）简化处理
-        List<?> singleRefsRaw = input.get("references") instanceof List<?> l ? l : null;
+        // 参考素材解析（video-job-runner.ts:608-650）
+        // IKDJNZ：单数组 references 优先（input 快照冻结，保序）；未提供回落旧字段路径。
+        // IKFFWH：素材库引用（references[].material_id → asset://<id> 载体）此前整段漏移植，
+        //   本段与 TS video-job-runner.ts:608-752 对齐；旧字段 material 形态（first_frame_material_id /
+        //   last_frame_material_id / reference_materials）已退役——产品侧只发单数组 references。
+        List<SingleRef> singleRefsRaw = readReferences(input.get("references"));
 
         String firstFrameAssetId = readAssetId(input.get("first_frame_asset_id"));
         String lastFrameAssetId = readAssetId(input.get("last_frame_asset_id"));
-        List<String> referenceAssetIds = readAssetIds(input.get("reference_asset_ids"));
+        List<String> referenceAssetIds = uniqueStrings(readAssetIds(input.get("reference_asset_ids")));
+        String firstFrameMaterialId = null;
+        String lastFrameMaterialId = null;
+        List<MaterialRef> referenceMaterials = new ArrayList<>();
 
         if (singleRefsRaw != null) {
-            // 单数组路径：按 role 拆帧/参考（:620-649）
+            // 单数组路径：按 role 拆帧/参考（:620-649）；asset_id（本地）与 material_id（素材库）二选一。
             firstFrameAssetId = null;
             lastFrameAssetId = null;
             referenceAssetIds = new ArrayList<>();
-            for (Object item : singleRefsRaw) {
-                if (!(item instanceof Map<?, ?> ref)) continue;
-                Map<?, ?> refMap = ref;
-                String role = refMap.get("role") instanceof String s ? s : null;
-                String assetId = readAssetId(refMap.get("asset_id"));
-                String type = refMap.get("type") instanceof String s ? s : null;
+            firstFrameMaterialId = null;
+            lastFrameMaterialId = null;
+            referenceMaterials = new ArrayList<>();
+            for (SingleRef ref : singleRefsRaw) {
+                boolean isFirstFrame = "first_frame".equals(ref.role());
+                boolean isLastFrame = "last_frame".equals(ref.role());
 
-                if ("first_frame".equals(role)) {
-                    if (!"image".equals(type)) {
-                        throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_TYPE,
-                                "首尾帧素材必须是图片");
-                    }
-                    if (assetId != null) firstFrameAssetId = assetId;
-                } else if ("last_frame".equals(role)) {
-                    if (!"image".equals(type)) {
-                        throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_TYPE,
-                                "首尾帧素材必须是图片");
-                    }
-                    if (assetId != null) lastFrameAssetId = assetId;
+                // IKDJNZ review：worker 侧也守住「首尾帧必须图片」（retry 冻结快照可能含历史脏行）。
+                if ((isFirstFrame || isLastFrame) && !"image".equals(ref.type())) {
+                    throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_TYPE,
+                            "首尾帧素材必须是图片");
+                }
+
+                if (ref.assetId() != null) {
+                    if (isFirstFrame) firstFrameAssetId = ref.assetId();
+                    else if (isLastFrame) lastFrameAssetId = ref.assetId();
+                    else referenceAssetIds.add(ref.assetId());
+                } else if (isFirstFrame) {
+                    firstFrameMaterialId = ref.materialId();
+                } else if (isLastFrame) {
+                    lastFrameMaterialId = ref.materialId();
                 } else {
-                    if (assetId != null) referenceAssetIds.add(assetId);
+                    referenceMaterials.add(new MaterialRef(ref.materialId(), ref.type()));
                 }
             }
             referenceAssetIds = uniqueStrings(referenceAssetIds);
         }
 
+        // 首帧/尾帧各只能指定一个来源（:651-656）
+        if (firstFrameAssetId != null && firstFrameMaterialId != null) {
+            throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE, "首帧只能指定一个来源");
+        }
+        if (lastFrameAssetId != null && lastFrameMaterialId != null) {
+            throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE, "尾帧只能指定一个来源");
+        }
+
         // 首尾帧互斥校验（:651-663）
-        boolean hasFirstFrame = firstFrameAssetId != null;
-        boolean hasLastFrame = lastFrameAssetId != null;
-        boolean hasReferences = !referenceAssetIds.isEmpty();
+        boolean hasFirstFrame = firstFrameAssetId != null || firstFrameMaterialId != null;
+        boolean hasLastFrame = lastFrameAssetId != null || lastFrameMaterialId != null;
+        boolean hasReferences = !referenceAssetIds.isEmpty() || !referenceMaterials.isEmpty();
 
         if (hasLastFrame && !hasFirstFrame) {
             throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE,
                     "尾帧必须与首帧一起使用");
         }
 
-        // 旧字段路径互斥校验（:666-671）
+        // 旧字段路径互斥校验（:666-671）：单数组允许首尾帧与普通参考并存（保序），旧字段路径不允许。
         if (singleRefsRaw == null && (hasFirstFrame || hasLastFrame) && hasReferences) {
             throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE,
                     "首尾帧模式不能与普通参考素材混用");
         }
 
-        // 解析素材（:672-683）
+        // 解析本地素材（:672-683）——素材库引用零落表，不进 assetsMap。
         List<String> allAssetIds = uniqueStrings(mergeLists(
                 firstFrameAssetId != null ? List.of(firstFrameAssetId) : List.of(),
                 lastFrameAssetId != null ? List.of(lastFrameAssetId) : List.of(),
@@ -530,10 +563,10 @@ public class VideoJobProcessor implements JobProcessor {
                     "参考素材不存在或无权访问");
         }
 
-        // 首尾帧类型校验（:756-764）
         AssetEntity firstFrame = firstFrameAssetId != null ? assetsMap.get(firstFrameAssetId) : null;
         AssetEntity lastFrame = lastFrameAssetId != null ? assetsMap.get(lastFrameAssetId) : null;
 
+        // 首尾帧类型校验（:756-764）：本地帧素材必须是图片（关联转素材库不豁免）。
         if (firstFrame != null && !"image".equals(firstFrame.getType())) {
             throw new VideoInputError(GenerationError.ERROR_UNSUPPORTED_INPUT, "首尾帧素材必须是图片");
         }
@@ -541,9 +574,34 @@ public class VideoJobProcessor implements JobProcessor {
             throw new VideoInputError(GenerationError.ERROR_UNSUPPORTED_INPUT, "首尾帧素材必须是图片");
         }
 
-        // 参考素材校验（:765-775 validateReferences）
-        List<AssetEntity> referenceAssets = new ArrayList<>();
+        // IKDJNZ：本地 Asset 命中素材库关联（assets.material_id 由素材库 CreateAsset 回写）→
+        //   生成时改走素材库 id（asset://），不走本地 url；未关联照旧本地 url（:687-727）。
+        String firstFrameMaterialResolved = firstFrameMaterialId != null
+                ? firstFrameMaterialId : linkedMaterialId(firstFrame);
+        String lastFrameMaterialResolved = lastFrameMaterialId != null
+                ? lastFrameMaterialId : linkedMaterialId(lastFrame);
+
+        // 参考素材：命中关联的本地 asset 转素材库引用，未命中的保留本地引用（:729-746）。
+        List<MaterialRef> materialRefsFromAssets = new ArrayList<>();
+        List<String> unlinkedReferenceAssetIds = new ArrayList<>();
         for (String id : referenceAssetIds) {
+            AssetEntity asset = assetsMap.get(id);
+            String linked = linkedMaterialId(asset);
+            if (linked != null) {
+                materialRefsFromAssets.add(new MaterialRef(linked, materialTypeOf(asset)));
+            } else {
+                unlinkedReferenceAssetIds.add(id);
+            }
+        }
+
+        // 合并素材库引用（显式声明 + 关联转换），按 id 去重保留首次出现（:748-752）。
+        List<MaterialRef> allMaterials = new ArrayList<>(referenceMaterials);
+        allMaterials.addAll(materialRefsFromAssets);
+        List<MaterialRef> mergedMaterials = uniqueMaterialRefs(allMaterials);
+
+        // 参考素材校验（:765-775 validateReferences）：本地 Asset + 素材库引用的数量并集
+        List<AssetEntity> referenceAssets = new ArrayList<>();
+        for (String id : unlinkedReferenceAssetIds) {
             AssetEntity asset = assetsMap.get(id);
             if (asset == null) {
                 throw new VideoInputError(GenerationError.ERROR_REFERENCE_ASSET_UNAVAILABLE,
@@ -551,19 +609,38 @@ public class VideoJobProcessor implements JobProcessor {
             }
             referenceAssets.add(asset);
         }
-        List<VideoReference> references = validateReferences(model, referenceAssets);
+        List<VideoReference> references = validateReferences(model, referenceAssets, mergedMaterials);
 
-        // 构建请求（:819-829）
+        // 构建请求（:789-829）：本地帧解析 TOS URL，素材库帧走 asset:// 载体。
         String resolution = input.get("resolution") instanceof String s ? s
                 : (params != null && params.get("size") instanceof String s ? s : null);
         String ratio = input.get("aspect_ratio") instanceof String s ? s
                 : (params != null && params.get("aspect_ratio") instanceof String s ? s : null);
 
+        String firstFrameImage = firstFrameMaterialResolved != null
+                ? "asset://" + firstFrameMaterialResolved
+                : (firstFrame != null ? firstFrame.getUrl() : null);
+        String lastFrameImage = lastFrameMaterialResolved != null
+                ? "asset://" + lastFrameMaterialResolved
+                : (lastFrame != null ? lastFrame.getUrl() : null);
+
+        if (singleRefsRaw != null) {
+            // 单数组语义：帧作为带 role 的 reference 条目并入（保序），避免帧/参考互斥守卫拒绝并存（:801-817）。
+            List<VideoReference> merged = new ArrayList<>();
+            if (firstFrameImage != null) {
+                merged.add(new VideoReference("image", firstFrameImage, "first_frame"));
+            }
+            if (lastFrameImage != null) {
+                merged.add(new VideoReference("image", lastFrameImage, "last_frame"));
+            }
+            merged.addAll(references);
+            return new VideoSubmitInput(model, prompt, duration, resolution, ratio,
+                    null, null, merged);
+        }
+
         return new VideoSubmitInput(
                 model, prompt, duration, resolution, ratio,
-                firstFrame != null ? firstFrame.getUrl() : null,
-                lastFrame != null ? lastFrame.getUrl() : null,
-                references
+                firstFrameImage, lastFrameImage, references
         );
     }
 
@@ -574,7 +651,8 @@ public class VideoJobProcessor implements JobProcessor {
      * <p>
      * 图片/视频/音频计数 + 视频物理校验 + Seedance 2.0 约束。
      */
-    List<VideoReference> validateReferences(String model, List<AssetEntity> assets) {
+    List<VideoReference> validateReferences(String model, List<AssetEntity> assets,
+                                            List<MaterialRef> materials) {
         int imageCount = 0;
         int videoCount = 0;
         int audioCount = 0;
@@ -601,6 +679,19 @@ public class VideoJobProcessor implements JobProcessor {
             }
         }
 
+        // 素材库引用：并入图/视频/音频数量并集与 Seedance 2.0 约束；
+        // 物理校验只作用于本地 Asset（素材库素材由上游强校验）。(video-reference-validation.ts:56-67)
+        for (MaterialRef material : materials) {
+            if ("image".equals(material.type())) {
+                imageCount++;
+            } else if ("video".equals(material.type())) {
+                videoCount++;
+            } else {
+                audioCount++;
+            }
+            references.add(new VideoReference(material.type(), "asset://" + material.id()));
+        }
+
         // 计数校验（:69-81）
         if (imageCount > MAX_REFERENCE_IMAGES || videoCount > MAX_REFERENCE_VIDEOS) {
             throw new VideoInputError(GenerationError.ERROR_REFERENCE_LIMIT_EXCEEDED,
@@ -624,6 +715,11 @@ public class VideoJobProcessor implements JobProcessor {
         }
 
         return references;
+    }
+
+    /** 便捷重载：无素材库引用时只校验本地 Asset（materials 传空表）。 */
+    List<VideoReference> validateReferences(String model, List<AssetEntity> assets) {
+        return validateReferences(model, assets, List.of());
     }
 
     /**
@@ -797,8 +893,99 @@ public class VideoJobProcessor implements JobProcessor {
         return model != null && SEEDANCE2_PATTERN.matcher(model).find();
     }
 
+    /** 素材 id 解析（material-reference.ts:52-57 readAssetId）：接受 JSON 数字与纯数字串形态。 */
     private static String readAssetId(Object value) {
+        if (value instanceof Number n) {
+            long asLong = n.longValue();
+            return asLong > 0 && n.doubleValue() == asLong ? String.valueOf(asLong) : null;
+        }
         return (value instanceof String s && !s.isEmpty()) ? s : null;
+    }
+
+    /**
+     * 解析单数组 references（video-job-runner.ts:832-876 readReferences 逐字移植）。
+     * <p>
+     * 未提供（null）→ 返回 null，回落旧字段路径；形状/枚举非法 → invalid_reference(_type)。
+     * worker 侧不信任冻结快照：非数组不得静默退化成「无参考提交」（那正是 IKFFWH 的症状）。
+     */
+    private static List<SingleRef> readReferences(Object value) {
+        if (value == null) return null;
+        if (!(value instanceof List<?> list)) {
+            throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE, "参考素材引用无效");
+        }
+        List<SingleRef> items = new ArrayList<>();
+        for (Object candidate : list) {
+            if (!(candidate instanceof Map<?, ?> map)) {
+                throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE, "参考素材引用无效");
+            }
+            String role = map.get("role") instanceof String s ? s : null;
+            if (!"first_frame".equals(role) && !"last_frame".equals(role) && !"reference".equals(role)) {
+                throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE, "参考素材引用无效");
+            }
+            String type = map.get("type") instanceof String s ? s : null;
+            if (!"image".equals(type) && !"video".equals(type) && !"audio".equals(type)) {
+                throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE_TYPE,
+                        "参考素材引用类型无效");
+            }
+            if (map.containsKey("asset_id")) {
+                String assetId = readAssetId(map.get("asset_id"));
+                if (assetId == null) {
+                    throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE, "参考素材引用无效");
+                }
+                items.add(new SingleRef(role, type, assetId, null));
+            } else if (map.containsKey("material_id")) {
+                String materialId = readMaterialId(map.get("material_id"));
+                if (materialId == null) {
+                    throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE, "素材库引用 ID 无效");
+                }
+                items.add(new SingleRef(role, type, null, materialId));
+            } else {
+                throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE, "参考素材引用无效");
+            }
+        }
+        return items;
+    }
+
+    /**
+     * 解析素材库素材 id（material-reference.ts:59-63 readMaterialId）。
+     * <p>
+     * 缺省 → null；形态非法 → invalid_reference（`^[Aa]sset-.{1,128}$`，前缀大小写不敏感）。
+     */
+    private static String readMaterialId(Object value) {
+        if (value == null) return null;
+        if (value instanceof String s && MATERIAL_ID_PATTERN.matcher(s).matches()) return s;
+        throw new VideoInputError(GenerationError.ERROR_INVALID_REFERENCE, "素材库引用 ID 无效");
+    }
+
+    /** 本地 Asset 的素材库关联（assets.material_id 非空即命中，video-job-runner.ts:691-695 isLinked）。 */
+    private static String linkedMaterialId(AssetEntity asset) {
+        if (asset == null) return null;
+        String materialId = asset.getMaterialId();
+        return (materialId != null && !materialId.isEmpty()) ? materialId : null;
+    }
+
+    /** 本地 Asset 转素材库引用时的类型归一（video-job-runner.ts:736-741）。 */
+    private static String materialTypeOf(AssetEntity asset) {
+        String type = asset != null ? asset.getType() : null;
+        if ("video".equals(type)) return "video";
+        if ("audio".equals(type)) return "audio";
+        return "image";
+    }
+
+    /** 素材库引用按 id 去重（保留首次出现，material-reference.ts:86-92 uniqueMaterialRefs）。 */
+    private static List<MaterialRef> uniqueMaterialRefs(List<MaterialRef> refs) {
+        List<MaterialRef> result = new ArrayList<>();
+        for (MaterialRef ref : refs) {
+            boolean seen = false;
+            for (MaterialRef existing : result) {
+                if (existing.id().equals(ref.id())) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen) result.add(ref);
+        }
+        return result;
     }
 
     @SuppressWarnings("unchecked")
