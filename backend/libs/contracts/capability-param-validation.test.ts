@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   checkGenerationParamLimit,
+  resolveVideoTaskType,
   toGenerationParamCheckInput,
   type CapabilityLimitInput,
 } from "./capability-param-validation.js";
@@ -197,5 +198,132 @@ describe("toGenerationParamCheckInput", () => {
     expect(
       toGenerationParamCheckInput({ aspect_ratio: "16:9" }),
     ).toBeNull();
+  });
+});
+
+// IKFPYX：任务类型约束闭环——features.task_types 命中时覆盖基础比例/时长校验，
+// 并放行 duration=-1（自动时长，仅 edit/prolong 合法）；未命中回落基础能力行。
+describe("checkGenerationParamLimit 任务类型约束（IKFPYX）", () => {
+  /** 2.5 形态：基础比例含 adaptive，任务类型各有约束。 */
+  const taskCapability: CapabilityLimitInput = {
+    supported_sizes: [{ id: "1080p", api_value: "1080p" }],
+    supported_aspect_ratios: ["16:9", "9:16", "adaptive"],
+    supported_durations: { min: 4, max: 30, step: 1 },
+    task_types: {
+      default: { allowed_ratios: ["16:9", "9:16", "adaptive"], allowed_durations: [4, 5, 10, 30] },
+      first_frame: { allowed_ratios: ["adaptive"] },
+      first_last_frame: { allowed_ratios: ["adaptive"] },
+      edit: { allowed_ratios: ["adaptive"], allowed_durations: [-1] },
+      prolong: { allowed_ratios: ["adaptive"], allowed_durations: [4, 5, 10, -1] },
+    },
+  };
+
+  it("首帧任务：非 adaptive 比例被拒（任务约束覆盖基础比例）", () => {
+    const err = checkGenerationParamLimit(taskCapability, {
+      size: "1080p",
+      aspect_ratio: "16:9",
+      duration: 5,
+      task_type: "first_frame",
+    });
+    expect(err?.field).toBe("aspect_ratio");
+    expect(err?.reason).toContain("adaptive");
+  });
+
+  it("首帧任务：adaptive 比例放行（duration 走基础范围）", () => {
+    expect(
+      checkGenerationParamLimit(taskCapability, {
+        size: "1080p",
+        aspect_ratio: "adaptive",
+        duration: 5,
+        task_type: "first_frame",
+      }),
+    ).toBeNull();
+  });
+
+  it("edit 任务：duration=-1 放行（任务 allowed_durations 含 -1）", () => {
+    expect(
+      checkGenerationParamLimit(taskCapability, {
+        size: "1080p",
+        aspect_ratio: "adaptive",
+        duration: -1,
+        task_type: "edit",
+      }),
+    ).toBeNull();
+  });
+
+  it("edit 任务：duration=5 被拒（该任务只允许 -1）", () => {
+    const err = checkGenerationParamLimit(taskCapability, {
+      size: "1080p",
+      aspect_ratio: "adaptive",
+      duration: 5,
+      task_type: "edit",
+    });
+    expect(err?.field).toBe("duration");
+  });
+
+  it("default 任务：duration=-1 被拒（基础范围只收正数）", () => {
+    const err = checkGenerationParamLimit(taskCapability, {
+      size: "1080p",
+      aspect_ratio: "16:9",
+      duration: -1,
+      task_type: "default",
+    });
+    expect(err?.field).toBe("duration");
+  });
+
+  it("prolong 任务：duration=-1 与 4/10 均可（清单同时含两者）", () => {
+    for (const d of [-1, 4, 10]) {
+      expect(
+        checkGenerationParamLimit(taskCapability, {
+          size: "1080p",
+          aspect_ratio: "adaptive",
+          duration: d,
+          task_type: "prolong",
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it("未配 task_types → 回落基础能力行（-1 仍被拒）", () => {
+    const plain: CapabilityLimitInput = {
+      supported_sizes: [{ id: "1080p", api_value: "1080p" }],
+      supported_aspect_ratios: ["16:9", "adaptive"],
+      supported_durations: { min: 4, max: 30, step: 1 },
+    };
+    expect(
+      checkGenerationParamLimit(plain, {
+        size: "1080p",
+        aspect_ratio: "adaptive",
+        duration: -1,
+        task_type: "edit",
+      })?.field,
+    ).toBe("duration");
+  });
+});
+
+describe("resolveVideoTaskType（IKFPYX）", () => {
+  const ref = (role: string, type: string) => ({ role, type });
+
+  it("首帧 / 首尾帧按 references 角色判定", () => {
+    expect(resolveVideoTaskType([ref("first_frame", "image")], "")).toBe("first_frame");
+    expect(
+      resolveVideoTaskType([ref("first_frame", "image"), ref("last_frame", "image")], ""),
+    ).toBe("first_last_frame");
+  });
+
+  it("参考视频 + 延长意图 → prolong（优先于编辑）", () => {
+    expect(resolveVideoTaskType([ref("reference", "video")], "向后延长这个视频")).toBe("prolong");
+  });
+
+  it("参考视频 + 编辑意图 → edit", () => {
+    expect(resolveVideoTaskType([ref("reference", "video")], "把背景改成海边")).toBe("edit");
+  });
+
+  it("参考视频但无意图关键词 → default", () => {
+    expect(resolveVideoTaskType([ref("reference", "video")], "参考它的运镜")).toBe("default");
+  });
+
+  it("无参考视频（仅图片参考）→ default（即使提示词含编辑词）", () => {
+    expect(resolveVideoTaskType([ref("reference", "image")], "修改一下")).toBe("default");
   });
 });

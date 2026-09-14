@@ -16,6 +16,8 @@ import {
   RESOURCE_NOT_FOUND_CODE,
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
+  resolveVideoTaskType,
+  type VideoTaskType,
   compilePromptDoc,
   compileVideoPromptDoc,
   docHasTextRef,
@@ -1022,6 +1024,16 @@ export async function handleCreateGenerationJob(
       params.resolution !== undefined ||
       (type === "video" && params.duration !== undefined))
   ) {
+    // IKFPYX：视频任务类型判定（首帧/首尾帧按 references 角色；edit/prolong 需参考视频 + 提示词意图）——
+    // 命中 features.task_types 时按其比例/时长约束校验（含 duration=-1 放行），否则回落基础能力行。
+    let videoTaskType: VideoTaskType | undefined;
+    if (type === "video") {
+      const parsedRefs = parseReferences(body.references);
+      videoTaskType = resolveVideoTaskType(
+        parsedRefs.kind === "ok" ? parsedRefs.items : [],
+        promptText,
+      );
+    }
     const checked = toGenerationParamCheckInput({
       resolution: params.resolution,
       size: params.size,
@@ -1034,8 +1046,9 @@ export async function handleCreateGenerationJob(
           supported_sizes: capability.supported_sizes,
           supported_aspect_ratios: capability.supported_aspect_ratios,
           supported_durations: capability.supported_durations,
+          task_types: capability.features?.task_types,
         },
-        checked,
+        videoTaskType ? { ...checked, task_type: videoTaskType } : checked,
       );
       if (limitErr) {
         return fail(400, limitErr.reason, {

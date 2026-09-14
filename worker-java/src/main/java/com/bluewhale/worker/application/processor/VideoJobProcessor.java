@@ -454,12 +454,17 @@ public class VideoJobProcessor implements JobProcessor {
         String aspectRatio = strOrEmpty(input, "aspect_ratio");
         boolean adaptive = "adaptive".equals(aspectRatio);
 
-        // 校验（:598-606）。ADR-0086：duration=-1（模型自动选时长，仅 edit 任务合法，接纳侧 task_types 校验）
-        // 与 adaptive 比例（首帧/编辑/延长）放行；其余须 duration>0 且非 adaptive 时尺寸可换算。
-        if (prompt.isEmpty() || model.isEmpty()
-                || !Double.isFinite(duration) || (duration <= 0 && duration != -1)
+        // 校验（:598-606）。ADR-0086：adaptive 比例（首帧/编辑/延长）放行；IKFPYX：duration=-1
+        // （模型自动选时长）**仅 edit/prolong 任务合法**（与 backend resolveVideoTaskType 同源口径），
+        // 其余任务须 duration>0 且非 adaptive 时尺寸可换算。
+        String taskType = resolveVideoTaskType(input.get("references"), prompt);
+        boolean autoDurationAllowed = "edit".equals(taskType) || "prolong".equals(taskType);
+        boolean durationOk = Double.isFinite(duration)
+                && (duration > 0 || (duration == -1 && autoDurationAllowed));
+        if (prompt.isEmpty() || model.isEmpty() || !durationOk
                 || (!adaptive && dimensions == null)) {
-            log.warn("[IKE7JP] 前置校验遗漏：job {} 视频参数无效仍进入 worker", claim.id());
+            log.warn("[IKE7JP] 前置校验遗漏：job {} 视频参数无效仍进入 worker（taskType={} duration={}）",
+                    claim.id(), taskType, duration);
             throw new VideoInputError(GenerationError.ERROR_INVALID_INPUT, "视频生成参数无效");
         }
 
@@ -854,6 +859,40 @@ public class VideoJobProcessor implements JobProcessor {
             return dimensionsFromSize(size);
         }
         return null;
+    }
+
+    /** IKFPYX：编辑意图关键词（官方：「编辑视频、增加/加上、删除/去掉、修改/替换/改成」）。 */
+    private static final List<String> EDIT_INTENT_KEYWORDS = List.of(
+            "编辑视频", "编辑", "增加", "加上", "删除", "去掉", "修改", "替换", "改成");
+
+    /** IKFPYX：延长意图关键词（官方：「向前/向后延长、延续、续写」）。 */
+    private static final List<String> PROLONG_INTENT_KEYWORDS = List.of(
+            "延长", "延续", "续写", "向前", "向后");
+
+    /** IKFPYX：判定视频任务类型（与 backend `contracts/capability-param-validation.ts`
+     *  resolveVideoTaskType 同源口径，两端不得各自发明）。
+     *  优先级：首尾帧角色 > 单帧角色 > 参考视频 + 提示词意图（延长先于编辑，后者词面更宽）> default。 */
+    static String resolveVideoTaskType(Object referencesRaw, String prompt) {
+        boolean hasFirst = false;
+        boolean hasLast = false;
+        boolean hasVideoRef = false;
+        if (referencesRaw instanceof List<?> list) {
+            for (Object raw : list) {
+                if (!(raw instanceof Map<?, ?> ref)) continue;
+                String role = ref.get("role") instanceof String r ? r : "";
+                String type = ref.get("type") instanceof String t ? t : "";
+                if ("first_frame".equals(role)) hasFirst = true;
+                else if ("last_frame".equals(role)) hasLast = true;
+                else if ("reference".equals(role) && "video".equals(type)) hasVideoRef = true;
+            }
+        }
+        if (hasFirst && hasLast) return "first_last_frame";
+        if (hasFirst || hasLast) return "first_frame";
+        if (!hasVideoRef) return "default";
+        String p = prompt == null ? "" : prompt;
+        for (String w : PROLONG_INTENT_KEYWORDS) if (p.contains(w)) return "prolong";
+        for (String w : EDIT_INTENT_KEYWORDS) if (p.contains(w)) return "edit";
+        return "default";
     }
 
     static int[] videoDimensions(String resolution, String aspectRatio) {

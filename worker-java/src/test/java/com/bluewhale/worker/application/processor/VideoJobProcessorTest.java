@@ -954,6 +954,65 @@ class VideoJobProcessorTest {
         }
     }
 
+    // ========== IKFPYX：任务类型判定与 duration=-1 收窄 ==========
+
+    @org.junit.jupiter.api.Nested
+    @DisplayName("IKFPYX 任务类型判定与 duration=-1 收窄")
+    class TaskTypeTests {
+
+        @Test
+        @DisplayName("首帧 / 首尾帧按 references 角色判定")
+        void resolveByFrameRoles() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "first_frame", "type", "image")), ""))
+                    .isEqualTo("first_frame");
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "first_frame", "type", "image"),
+                            Map.of("role", "last_frame", "type", "image")), ""))
+                    .isEqualTo("first_last_frame");
+        }
+
+        @Test
+        @DisplayName("参考视频 + 延长意图 → prolong（优先于编辑词）")
+        void resolveProlongBeforeEdit() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "向后延长这个视频"))
+                    .isEqualTo("prolong");
+        }
+
+        @Test
+        @DisplayName("参考视频 + 编辑意图 → edit")
+        void resolveEdit() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "把背景改成海边"))
+                    .isEqualTo("edit");
+        }
+
+        @Test
+        @DisplayName("参考视频但无意图关键词 → default；仅图片参考 → default")
+        void resolveDefault() {
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "video")), "参考它的运镜"))
+                    .isEqualTo("default");
+            assertThat(VideoJobProcessor.resolveVideoTaskType(
+                    List.of(Map.of("role", "reference", "type", "image")), "修改一下"))
+                    .isEqualTo("default");
+        }
+
+        @Test
+        @DisplayName("非 edit/prolong 任务传 duration=-1 → invalid_input（收窄后不再通用放行）")
+        void autoDurationRejectedForNonEdit() {
+            Map<String, Object> input = baseInput();
+            input.put("duration", -1);
+            input.put("references", List.of(Map.of("role", "reference", "type", "image")));
+            ClaimedVideoJobDto claim = videoClaim("301", false, null, 0, 0, null, input);
+
+            VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
+                    VideoInputError.class, () -> processor.buildSubmitRequest(claim));
+            assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_INPUT);
+        }
+    }
+
     // ========== 工具方法 ==========
 
     private ClaimedVideoJobDto videoClaim(String id, boolean cancelRequested,
