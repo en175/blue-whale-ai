@@ -402,13 +402,30 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       }
     }
     setSelectedMode(key);
+    // ADR-0086：首尾帧任务官方强制 adaptive（输出跟随首帧图比例），切模式即内置默认，不让用户感知比例。
+    if (key === 'keyframe') {
+      setSelectedRatio('adaptive');
+      syncDraftParams({ mode: key, ratio: 'adaptive' });
+      return;
+    }
+    // 离开首尾帧：若当前是 adaptive（首尾帧内置值）且新模型比例列表不含 adaptive，回落到模型默认/首个比例。
+    if (selectedRatio === 'adaptive' && currentModel && !currentModel.supported_aspect_ratios.includes('adaptive')) {
+      const fallbackRatio =
+        currentModel.default_aspect_ratio && currentModel.supported_aspect_ratios.includes(currentModel.default_aspect_ratio)
+          ? currentModel.default_aspect_ratio
+          : (currentModel.supported_aspect_ratios[0] ?? '');
+      setSelectedRatio(fallbackRatio);
+      syncDraftParams({ mode: key, ratio: fallbackRatio });
+      return;
+    }
     syncDraftParams({ mode: key });
   };
 
   const configurationError = !modelsLoaded ? '正在加载模型配置'
     : !currentModel ? '原生成模型不可用，请重新选择模型'
     : !sizeOptions.some(option => option.key === selectedSize) ? '原分辨率不可用，请重新选择分辨率'
-    : !ratioOptions.includes(selectedRatio) ? '原比例不兼容，请重新选择比例'
+    // ADR-0086：首尾帧比例内置 adaptive（不暴露给用户），跳过比例合法性校验，避免误报「原比例不兼容」。
+    : !isKeyframe && !ratioOptions.includes(selectedRatio) ? '原比例不兼容，请重新选择比例'
     : durationRange && (duration < durationRange.min || duration > durationRange.max
       || (duration - durationRange.min) % durationRange.step !== 0)
       ? '原时长不兼容，请重新选择时长'
@@ -424,12 +441,12 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   }
 
   /** 选中模型后应用其默认清晰度/宽高比/时长，返回实际应用值（供草稿参数同步）。
-   *  ADR-0086：模型支持 adaptive 比例时，首尾帧模式强制 adaptive（官方要求），比例选择隐藏。 */
+   *  ADR-0086：首尾帧任务官方强制 adaptive（输出跟随首帧图比例），比例内置不暴露给用户——代码直接固定，
+   *  不依赖模型能力行是否列了 adaptive（2.0/2.5 首尾帧均强制）。 */
   const applyModelDefaults = (m: GenerationModel) => {
     setSelectedModel(m.model_id);
     let nextRatio = selectedRatio;
-    const supportsAdaptive = m.supported_aspect_ratios?.includes('adaptive');
-    if (isKeyframe && supportsAdaptive) {
+    if (isKeyframe) {
       nextRatio = 'adaptive';
       setSelectedRatio(nextRatio);
     } else if (m.supported_aspect_ratios.length) {
@@ -470,13 +487,15 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
         setModelsLoaded(true);
         // 已有节点配置原样恢复，禁止因模型能力变化自动改写最新编辑。
         if (videoDraftBinding.restoreExisting || initialParams?.modelId) {
+          const restoredMode = initialParams?.mode ?? 'prompt';
           setSelectedModel(initialParams?.modelId ?? '');
           const model = list.find(m => m.model_id === initialParams?.modelId);
           const size = model?.supported_sizes.find(s => s.id === initialParams?.resolution || s.api_value === initialParams?.resolution);
           setSelectedSize(size?.id ?? initialParams?.resolution ?? '');
-          setSelectedRatio(initialParams?.aspectRatio ?? '');
+          // ADR-0086：首尾帧比例内置 adaptive，恢复时不吃历史固定比例（旧草稿可能存 16:9/空）。
+          setSelectedRatio(restoredMode === 'keyframe' ? 'adaptive' : (initialParams?.aspectRatio ?? ''));
           setDuration(initialParams?.duration ?? 0);
-          setSelectedMode(initialParams?.mode ?? 'prompt');
+          setSelectedMode(restoredMode);
           return;
         }
         if (!list.length) return;
@@ -512,6 +531,11 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
           }
           if (initialParams.mode && modeOptions.some((o) => o.key === initialParams.mode)) {
             setSelectedMode(initialParams.mode);
+            // ADR-0086：首尾帧比例内置 adaptive，覆盖首页带入的固定比例。
+            if (initialParams.mode === 'keyframe') {
+              setSelectedRatio('adaptive');
+              patch.ratio = 'adaptive';
+            }
           }
         }
         // 草稿绑定：把实际生效的完整参数写回草稿节点（含首次默认落值）
@@ -881,39 +905,27 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
             </>
           )}
 
-          {/* 宽高比（ADR-0086：首尾帧模式 + 模型支持 adaptive 时强制自适应，隐藏选择） */}
-          <span className={styles.configLabel}>宽高比</span>
-          {isKeyframe && currentModel?.supported_aspect_ratios?.includes('adaptive') ? (
-            <div className={styles.ratioGroup}>
-              <button
-                type="button"
-                className={`${styles.ratioBtn} ${styles.ratioBtnActive}`}
-                disabled={readOnly}
-                onClick={() => {
-                  setSelectedRatio('adaptive');
-                  syncDraftParams({ ratio: 'adaptive' });
-                }}
-              >
-                <span>自适应</span>
-              </button>
-            </div>
-          ) : (
-          <div className={styles.ratioGroup}>
-            {ratioOptions.map((r) => (
-              <button
-                key={r}
-                className={`${styles.ratioBtn} ${r === selectedRatio ? styles.ratioBtnActive : ''}`}
-                disabled={readOnly}
-                onClick={() => {
-                  setSelectedRatio(r);
-                  syncDraftParams({ ratio: r });
-                }}
-              >
-                <RatioIcon ratio={r} />
-                <span>{r}</span>
-              </button>
-            ))}
-          </div>
+          {/* 宽高比（ADR-0086：首尾帧任务官方强制 adaptive、输出跟随首帧图，比例内置不渲染，用户不可见不可改） */}
+          {!isKeyframe && (
+            <>
+              <span className={styles.configLabel}>宽高比</span>
+              <div className={styles.ratioGroup}>
+                {ratioOptions.map((r) => (
+                  <button
+                    key={r}
+                    className={`${styles.ratioBtn} ${r === selectedRatio ? styles.ratioBtnActive : ''}`}
+                    disabled={readOnly}
+                    onClick={() => {
+                      setSelectedRatio(r);
+                      syncDraftParams({ ratio: r });
+                    }}
+                  >
+                    <RatioIcon ratio={r} />
+                    <span>{r}</span>
+                  </button>
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -1049,12 +1061,16 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
             )}
           </div>
 
-          {/* 配置信息（点击展开配置面板） */}
+          {/* 配置信息（点击展开配置面板）。ADR-0086：首尾帧比例内置 adaptive，不在状态栏暴露这项。 */}
           <button className={styles.configBtn} onClick={() => setShowConfig(!showConfig)}>
             <SlidersHorizontal size={14} strokeWidth={2} />
             <span>{currentModel?.model_label ?? '选择模型'}</span>
-            <span className={styles.barDivider}>|</span>
-            <span>{selectedRatio}</span>
+            {!isKeyframe && (
+              <>
+                <span className={styles.barDivider}>|</span>
+                <span>{selectedRatio}</span>
+              </>
+            )}
             <span className={styles.barDivider}>|</span>
             <span>{currentSizeLabel}</span>
             <span className={styles.barDivider}>|</span>

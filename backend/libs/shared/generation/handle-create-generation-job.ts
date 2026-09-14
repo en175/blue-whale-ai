@@ -40,6 +40,7 @@ import {
   type CreateJobInput,
   type GenerationCommandRepo,
   type ModelCapabilityRepo,
+  type ModelCapabilityView,
   type ModelFeatures,
   type ProjectRepo,
   type AssetOwnershipOps,
@@ -415,11 +416,16 @@ function validateRejectMaterialReferences(
 
 /** 视频特有校验：首尾帧 / 普通参考 asset 互斥 + 素材库引用（asset∨material 并集互斥/配对）。
  *  ADR-0086：普通参考按类型分类上限改读能力行（video_reference / video_reference_max /
- *  audio_reference / audio_reference_max / max_reference_duration_sec），旧「参考素材最多 12」退役。 */
+ *  audio_reference / audio_reference_max / max_reference_duration_sec），旧「参考素材最多 12」退役。
+ *  capability 传入时以其 supported_aspect_ratios 判定「模型是否支持自适应比例」（首尾帧强制 adaptive）。 */
 function validateVideo(
   body: CreateGenerationJobBody,
-  features?: ModelFeatures,
+  capability?: ModelCapabilityView,
 ): { code: string; message: string } | null {
+  const features = capability?.features;
+  const supportsAdaptive =
+    Array.isArray(capability?.supported_aspect_ratios) &&
+    capability.supported_aspect_ratios.includes("adaptive");
   const inputAssetIds = Array.isArray(body.input_asset_ids)
     ? body.input_asset_ids
     : [];
@@ -495,11 +501,11 @@ function validateVideo(
         ? "参考素材最多 12 个"
         : null;
     if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
-    // ADR-0086：任务类型约束——首帧/首尾帧模式强制 adaptive 比例（官方要求，前端 keyframe 模式只发 adaptive）。
-    // 仅当模型能力行 supported_aspect_ratios 含 adaptive 时才强制（2.5 才支持自适应；2.0 无 adaptive 不适用）。
+    // ADR-0086：任务类型约束——首帧/首尾帧模式强制 adaptive 比例（官方要求，输出跟随首帧图）。
+    // 仅当模型能力行 supported_aspect_ratios 含 adaptive 时强制（2.0/2.5 均含；未配 adaptive 的第三方档位不适用）。
     if (
-      parsed.items.some((r) => r.role === "first_frame" || r.role === "last_frame") &&
-      features?.task_types
+      supportsAdaptive &&
+      parsed.items.some((r) => r.role === "first_frame" || r.role === "last_frame")
     ) {
       const params = body.parameters as GenerationParameters | undefined;
       if (!isStr(params?.aspect_ratio) || params.aspect_ratio !== "adaptive") {
@@ -990,7 +996,7 @@ export async function handleCreateGenerationJob(
   if (capability && (type === "video" || type === "audio")) {
     const revalidated =
       type === "video"
-        ? validateVideo(body, capability.features)
+        ? validateVideo(body, capability)
         : validateAudioReferences(body, capability.features);
     if (revalidated)
       return fail(400, revalidated.message, { code: revalidated.code });
