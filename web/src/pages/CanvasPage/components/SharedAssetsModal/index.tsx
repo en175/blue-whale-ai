@@ -5,7 +5,7 @@
  * ============================================ */
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { markdownToSanitizedHtml, unifiedTextNodeText } from '../../../../../../packages/contracts/src/text-node-markdown';
+import { markdownToSanitizedHtml, unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
 import {
   X,
   Search,
