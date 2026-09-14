@@ -9,7 +9,7 @@ import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type Reac
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import QRCodeStyling from 'qr-code-styling';
-import { Plus, FolderOpen, Trash2, ArrowLeft, X, Loader2, Video, Music, RotateCw } from 'lucide-react';
+import { Plus, FolderOpen, Trash2, ArrowLeft, X, Loader2, Video, Music, RotateCw, Check } from 'lucide-react';
 import {
   createAssetGroup,
   listAssetGroups,
@@ -129,7 +129,7 @@ function GroupFormModal({
  * 真人认证二维码弹窗：H5Link 渲染为二维码，手机扫码打开 H5 刷脸页。
  * 认证结果由外层轮询（startAuthPolling），此处关闭弹窗不打断轮询（卡片保持「认证中…」）。
  * 二维码 15 分钟倒计时过期；「重新生成」按钮重新创建会话换新码。
- * 关闭入口仅右上角 ×；底部保留「在当前设备打开」+「重新生成二维码」。
+ * 关闭入口仅右上角 ×；底部保留「重新生成二维码」。
  */
 const QR_EXPIRE_SECONDS = 15 * 60;
 
@@ -199,12 +199,6 @@ function AuthQrModal({
           )}
         </div>
         <div className={styles.qrCountdown}>二维码有效期15分钟</div>
-        <button
-          className={styles.qrOpenBtn}
-          onClick={() => window.open(h5Link, '_blank')}
-        >
-          在当前设备打开
-        </button>
         <button
           className={styles.qrResetBtn}
           onClick={onCreateSession}
@@ -346,21 +340,40 @@ function AssetCardOverlays({
   );
 }
 
+function materialMediaKind(assetType: MaterialAsset['AssetType']): 'image' | 'video' | 'audio' {
+  if (assetType === 'Video') return 'video';
+  if (assetType === 'Audio') return 'audio';
+  return 'image';
+}
+
 function GroupDetail({
   group,
   assets,
   onBack,
   onDeleteAsset,
   onUpload,
+  pickerSelectedIds,
+  onPickerToggleAsset,
+  pickerMediaTypes,
 }: {
   group: MaterialGroup;
   assets: MaterialAsset[];
   onBack: () => void;
   onDeleteAsset: (asset: MaterialAsset) => void;
   onUpload?: () => void;
+  pickerSelectedIds?: ReadonlySet<string>;
+  onPickerToggleAsset?: (asset: MaterialAsset) => void;
+  pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
 }) {
   const [previewAsset, setPreviewAsset] = useState<MaterialAsset | null>(null);
   const closePreview = () => setPreviewAsset(null);
+  const pickerMode = Boolean(onPickerToggleAsset);
+
+  const isPickerSelectable = (asset: MaterialAsset) => {
+    if (asset.Status !== 'Active' || !asset.URL) return false;
+    if (!pickerMediaTypes || pickerMediaTypes.length === 0) return true;
+    return pickerMediaTypes.includes(materialMediaKind(asset.AssetType));
+  };
 
   return (
     <div className={styles.detailView}>
@@ -382,12 +395,29 @@ function GroupDetail({
             </div>
           </div>
         )}
-        {assets.map((asset) => (
-          <div key={asset.Id} className={styles.assetCard}
-            onClick={() => setPreviewAsset(asset)}>
+        {assets.map((asset) => {
+          const selectedFlag = pickerSelectedIds?.has(asset.Id) ?? false;
+          const selectable = !pickerMode || isPickerSelectable(asset);
+          return (
+          <div
+            key={asset.Id}
+            className={`${styles.assetCard} ${pickerMode && !selectable ? styles.assetCardDisabled : ''} ${selectedFlag ? styles.assetCardSelected : ''}`}
+            onClick={() => {
+              if (pickerMode) {
+                if (selectable) onPickerToggleAsset?.(asset);
+                return;
+              }
+              setPreviewAsset(asset);
+            }}
+          >
             {asset.URL && asset.AssetType === 'Image' ? (
               <MeasuredThumb src={asset.URL} alt={asset.Name}>
                 <AssetCardOverlays asset={asset} onDeleteAsset={onDeleteAsset} onClosePreview={closePreview} />
+                {pickerMode && selectable && (
+                  <div className={`${styles.checkToggle} ${selectedFlag ? styles.checkToggleOn : ''}`}>
+                    {selectedFlag && <Check size={14} strokeWidth={2.5} />}
+                  </div>
+                )}
               </MeasuredThumb>
             ) : (
               <div className={styles.assetThumb}>
@@ -405,10 +435,16 @@ function GroupDetail({
                   <div className={styles.empty}>资源不可用</div>
                 )}
                 <AssetCardOverlays asset={asset} onDeleteAsset={onDeleteAsset} onClosePreview={closePreview} />
+                {pickerMode && selectable && (
+                  <div className={`${styles.checkToggle} ${selectedFlag ? styles.checkToggleOn : ''}`}>
+                    {selectedFlag && <Check size={14} strokeWidth={2.5} />}
+                  </div>
+                )}
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
         {!onUpload && assets.length === 0 && (
           <div className={styles.empty}>该分组暂无素材</div>
         )}
@@ -586,11 +622,18 @@ export default function CharacterLibrary({
   onDetailViewChange,
   onUpload,
   refreshTick,
+  pickerSelectedIds,
+  onPickerToggleAsset,
+  pickerMediaTypes,
 }: {
   groupType?: GroupType;
   onDetailViewChange?: (inDetail: boolean, groupId: string | null) => void;
   onUpload?: () => void;
   refreshTick?: number;
+  /** 画布资产选择弹窗：勾选素材（仅真人人像库分组详情） */
+  pickerSelectedIds?: ReadonlySet<string>;
+  onPickerToggleAsset?: (asset: MaterialAsset) => void;
+  pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
 }) {
   const isLiveness = groupType === 'LivenessFace';
 
@@ -611,6 +654,9 @@ export default function CharacterLibrary({
       onDetailViewChange={onDetailViewChange}
       onUpload={onUpload}
       refreshTick={refreshTick}
+      pickerSelectedIds={pickerSelectedIds}
+      onPickerToggleAsset={onPickerToggleAsset}
+      pickerMediaTypes={pickerMediaTypes}
     />
   );
 }
@@ -620,11 +666,17 @@ function LivenessLibrary({
   onDetailViewChange,
   onUpload,
   refreshTick,
+  pickerSelectedIds,
+  onPickerToggleAsset,
+  pickerMediaTypes,
 }: {
   groupType?: GroupType;
   onDetailViewChange?: (inDetail: boolean, groupId: string | null) => void;
   onUpload?: () => void;
   refreshTick?: number;
+  pickerSelectedIds?: ReadonlySet<string>;
+  onPickerToggleAsset?: (asset: MaterialAsset) => void;
+  pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
 }) {
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [groupAssets, setGroupAssets] = useState<Map<string, MaterialAsset[]>>(new Map());
@@ -783,7 +835,7 @@ function LivenessLibrary({
           { silent: true },
         );
         setShowCreateModal(false);
-        // 展示二维码弹窗：手机扫码打开 H5 刷脸页；桌面端可点「在当前设备打开」
+        // 展示二维码弹窗：手机扫码打开 H5 刷脸页
         setAuthSession({ H5Link: session.H5Link, BytedToken: session.BytedToken, Name: name });
         startAuthPolling(session.BytedToken);
       } catch (err) {
@@ -892,6 +944,9 @@ function LivenessLibrary({
           onBack={() => setDetailGroupId(null)}
           onDeleteAsset={handleDeleteAsset}
           onUpload={onUpload}
+          pickerSelectedIds={pickerSelectedIds}
+          onPickerToggleAsset={onPickerToggleAsset}
+          pickerMediaTypes={pickerMediaTypes}
         />
 
         {/* 删除确认弹窗：详情视图内点击删除时立即弹出 */}
