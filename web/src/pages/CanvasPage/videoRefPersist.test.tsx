@@ -9,6 +9,13 @@ import CanvasPage from './index';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from './testing/promptRefEditor';
 import type { GenerationModel, ModelFeatures } from '@/api/generation';
 
+// IKFJJT 合并 0915 适配：视频提交前会对参考图做合规入库（ensureVideoImageRefsCompliance →
+// depositCanvasAssetToCharacterLibrary）。测试环境固定返回 materialId，避免真实调素材入库 API。
+vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./characterLibraryDeposit')>()),
+  depositCanvasAssetToCharacterLibrary: vi.fn(async () => ({ materialId: 'asset-compliance-test' })),
+}));
+
 vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
@@ -453,8 +460,8 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.target_node_id).toBe('d1');
     expect(payload.references).toEqual([
-      { asset_id: 'a1', type: 'image', role: 'first_frame' },
-      { asset_id: 'a2', type: 'image', role: 'last_frame' },
+      { material_id: 'asset-compliance-test', type: 'image', role: 'first_frame' },
+      { material_id: 'asset-compliance-test', type: 'image', role: 'last_frame' },
     ]);
   });
 
@@ -472,7 +479,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.target_node_id).toBe('d1');
     expect(payload.references).toEqual([
-      { asset_id: 'a1', type: 'image', role: 'reference' },
+      { material_id: 'asset-compliance-test', type: 'image', role: 'reference' },
       { asset_id: 'a3', type: 'video', role: 'reference' },
     ]);
   });
