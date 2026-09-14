@@ -545,8 +545,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       </div>
 
       {(contentError || titleError) && <div role="alert" className="nodrag nopan">{contentError || titleError}</div>}
-      {/* 固定正文容器：360×270（含内边距），超出的正文在内部上下滚动 */}
-      <div className={`${styles.contentCard} nowheel`} data-testid="text-content" style={expanded ? { height: 540, maxHeight: '70vh' } : undefined}>
+      {/* 固定正文容器：360×270（含内边距）。仅编辑态拦截滚轮做正文滚动，非编辑态交给画布平移（IKFMQO TC_CX_001/015） */}
+      <div className={`${styles.contentCard}${editing ? ' nowheel' : ''}`} data-testid="text-content" style={expanded ? { height: 540, maxHeight: '70vh' } : undefined}>
         {!data.isFirst && (
           <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
           <HandlePlus />
@@ -572,7 +572,10 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           className={`${styles.editor} ${editing ? 'nodrag nopan' : ''}`}
           contentEditable={editing ? (plainText && !hasPromptBindings ? 'plaintext-only' : true) : false}
           suppressContentEditableWarning
-          style={{ pointerEvents: isSelect && (!isTextGen || writingSelf) ? 'auto' : 'none' }}
+          style={{
+            pointerEvents: isSelect && (!isTextGen || writingSelf) ? 'auto' : 'none',
+            overflowY: editing ? 'auto' : 'hidden',
+          }}
           onFocus={() => setIsFocused(true)}
           onBlur={(e) => {
             // 如果焦点转移到工具栏/颜色面板，保持编辑状态
