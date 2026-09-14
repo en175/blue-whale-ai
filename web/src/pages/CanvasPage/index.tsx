@@ -4409,6 +4409,30 @@ export default function CanvasPage() {
     });
   };
 
+  /** IKFJJT：自由模式（无画布连线）把参考批量改角色——模式切换转换用（普通参考⇄首尾帧）。
+   *  直接按 nodeId 覆写本地 refs 的角色，未命中项保持原角色。 */
+  const assignVideoFreeRefRoles = (
+    assignments: Array<{ nodeId: string; role: VideoRefRole }>,
+  ): void => {
+    if (assignments.length === 0) return;
+    const roleByKey = new Map(assignments.map((a) => [a.nodeId, a.role]));
+    setVideoFreeRefs((prev) => {
+      const all: Array<{ item: VideoMediaRef; role: VideoRefRole }> = [
+        ...prev.reference.map((item) => ({ item, role: 'reference' as const })),
+        ...(prev.first ? [{ item: prev.first, role: 'first' as const }] : []),
+        ...(prev.last ? [{ item: prev.last, role: 'last' as const }] : []),
+      ];
+      const next: VideoMediaRefs = { reference: [] };
+      for (const { item, role } of all) {
+        const targetRole = roleByKey.get(item.nodeId) ?? role;
+        if (targetRole === 'first') next.first = item;
+        else if (targetRole === 'last') next.last = item;
+        else next.reference.push(item);
+      }
+      return next;
+    });
+  };
+
   /** 重新编辑（IKDMQU）：三类媒体卡统一走绑定面板——编辑实时写回本卡、发送后原卡重新生成（Q1）；
    *  图片/视频参数与参考连线经 openXxxDraftDialog 恢复；音频此前落入图片分支，本切片补齐绑定 */
   const handleNodeReEdit = (id: string) => {
@@ -6039,7 +6063,7 @@ export default function CanvasPage() {
             }
             videoMediaRefs={videoDraftId ? (videoDraftMediaRefs ?? { reference: [] }) : videoFreeRefsView}
             onRemoveVideoRef={videoDraftId ? ((nodeId) => removeRefEdges(videoDraftId, nodeId)) : removeVideoFreeRef}
-            onAssignRefRoles={videoDraftId ? ((assignments) => assignVideoRefRoles(videoDraftId, assignments)) : undefined}
+            onAssignRefRoles={videoDraftId ? ((assignments) => assignVideoRefRoles(videoDraftId, assignments)) : assignVideoFreeRefRoles}
             onRemoveMaterialRef={videoDraftId ? ((materialId) => removeDraftMaterialRef(videoDraftId, materialId)) : removeVideoFreeRef}
             onReorderMediaRefs={videoDraftId ? ((keys) => handleReorderVideoMediaRefs(videoDraftId, keys)) : reorderVideoFreeRefs}
             onToast={(type, msg) => showToast(type, msg)}
