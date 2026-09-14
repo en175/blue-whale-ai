@@ -3,10 +3,13 @@ import {
   IMAGE_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
   TEXT_INDEX_INVALID_MESSAGE,
   TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE,
+  VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE,
   checkTextIndexSyncInput,
+  checkVideoTextIndexSyncInput,
   mergeTextProvidedReferences,
   textIndexOfTarget,
   textInputSignatureOf,
+  textProvidedVideoReferences,
   type TargetTextInputEntry,
   type TextIndexCanvasNode,
   type TextProvidedRef,
@@ -221,5 +224,98 @@ describe("textInputSignatureOf", () => {
     const ba = textInputSignatureOf([entry("t2", "b", []), entry("t1", "a", [])]);
     expect(ab).not.toBe(ba);
     expect(textInputSignatureOf([])).toBe(textInputSignatureOf([]));
+  });
+});
+
+describe("textProvidedVideoReferences（契约 §10 视频并入）", () => {
+  const provided = (assetId: string, mediaType: TextProvidedRef["mediaType"] = "image"): TextProvidedRef => ({
+    textNodeId: "text-1",
+    sourceNodeId: `media-${assetId}`,
+    assetId,
+    mediaType,
+    name: assetId,
+    url: "u",
+  });
+
+  it("直接参考已含的 assetId 去重；追加项恒为普通参考并保留类型", () => {
+    const added = textProvidedVideoReferences(
+      [
+        { role: "first_frame", asset_id: "9100", type: "image" },
+        { role: "reference", asset_id: "9200", type: "image" },
+      ],
+      [provided("9100"), provided("9200"), provided("9300", "video"), provided("9300", "video")],
+    );
+    expect(added).toEqual([{ role: "reference", asset_id: "9300", type: "video" }]);
+  });
+
+  it("material_id 直接参考不参与 assetId 去重；无直接参考时全量追加", () => {
+    const added = textProvidedVideoReferences(
+      [{ role: "reference", material_id: "asset-2026", type: "image" }],
+      [provided("9100"), provided("9200", "audio")],
+    );
+    expect(added).toEqual([
+      { role: "reference", asset_id: "9100", type: "image" },
+      { role: "reference", asset_id: "9200", type: "audio" },
+    ]);
+    expect(textProvidedVideoReferences([], [])).toEqual([]);
+  });
+});
+
+describe("checkVideoTextIndexSyncInput（契约 §10 视频校验）", () => {
+  const ref = (mediaType: TextProvidedRef["mediaType"]): TextProvidedRef => ({
+    textNodeId: "text-1",
+    sourceNodeId: "media-1",
+    assetId: "9100",
+    mediaType,
+    name: "n",
+    url: "u",
+  });
+
+  it("失效索引最优先阻止", () => {
+    expect(
+      checkVideoTextIndexSyncInput({
+        index: { refs: [ref("image")], invalid: [{ textNodeId: "t", sourceNodeId: "m", name: "n" }] },
+        acceptedMediaTypes: ["image"],
+        hasFrameRole: true,
+      }),
+    ).toEqual({ kind: "invalid_index" });
+  });
+
+  it("帧角色存在且文本带入非空 → frame_conflict；帧存在但文本带入为空不冲突", () => {
+    expect(
+      checkVideoTextIndexSyncInput({
+        index: { refs: [ref("image")], invalid: [] },
+        acceptedMediaTypes: ["image"],
+        hasFrameRole: true,
+      }),
+    ).toEqual({ kind: "frame_conflict" });
+    expect(
+      checkVideoTextIndexSyncInput({
+        index: { refs: [], invalid: [] },
+        acceptedMediaTypes: ["image"],
+        hasFrameRole: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("不支持的媒体类型阻止并列出类型；合法输入放行", () => {
+    expect(
+      checkVideoTextIndexSyncInput({
+        index: { refs: [ref("video"), ref("audio")], invalid: [] },
+        acceptedMediaTypes: ["image"],
+        hasFrameRole: false,
+      }),
+    ).toEqual({ kind: "unsupported_media_type", mediaTypes: ["video", "audio"] });
+    expect(
+      checkVideoTextIndexSyncInput({
+        index: { refs: [ref("image"), ref("video")], invalid: [] },
+        acceptedMediaTypes: ["image", "video"],
+        hasFrameRole: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("提供视频互斥文案常量", () => {
+    expect(VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE).toContain("首尾帧");
   });
 });

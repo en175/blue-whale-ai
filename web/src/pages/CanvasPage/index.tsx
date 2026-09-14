@@ -18,7 +18,7 @@ import {
   type VideoFollowMode,
 } from './followDialog';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, isMaterialLibraryId, readAssetId, baseSourceError } from './mediaRefs';
-import { mergedImageRefsOf, imageTextIndexSendError, nextUsedInputState, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
+import { mergedImageRefsOf, imageTextIndexSendError, mergedVideoRefsWithTextIndex, videoTextIndexSendError, nextUsedInputState, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
 import { audioMediaRefsOf, audioRefSourceError, checkAddAudioRef, isAudioDraftNode } from './audioMediaRefs';
 import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
@@ -3009,7 +3009,8 @@ export default function CanvasPage() {
   const ensureVideoImageRefsCompliance = async (
     refs: VideoMediaRefs,
   ): Promise<VideoMediaRefs | null> => {
-    const images = listVideoImageRefs(refs);
+    // IKFM3W §10：文本带入参考按 asset_id 提交（与后端并入去重同空间），不参与 material 化
+    const images = listVideoImageRefs(refs).filter((item) => item.textNodeId == null);
     if (images.length === 0) return refs;
 
     const materialByKey = new Map<string, string>();
@@ -4450,14 +4451,20 @@ export default function CanvasPage() {
     removeTargetInputs(edgesRef.current.filter(edge => edge.source === sourceNodeId && edge.target === draftId).map(edge => edge.id));
   };
 
-  /** 草稿绑定面板的视频媒体参考（IKDMQS）：按连线角色实时分组推导，Dock 显示即提交输入（同源）。
+  /** 草稿绑定面板的视频媒体参考（IKDMQS 按连线角色分组 + IKFM3W §10 文本带入参考追加）：
+   *  直接参考在前、文本索引素材追加为普通参考尾部（同 assetId 去重），Dock 显示即提交输入（同源）。
    *  角色随连线持久化，刷新/重开项目后经同一推导恢复展示；名称随来源卡片改名即时同步（IKFA8Y）。 */
   const videoDraftMediaRefs = useMemo(
     () => {
       if (!videoDraftId) return undefined;
-      return mergedVideoMediaRefsOf(videoDraftId, edges, mediaNodes);
+      return mergedVideoRefsWithTextIndex(videoDraftId, edges, mediaNodes, textNodes);
     },
-    [videoDraftId, edges, mediaNodes],
+    [videoDraftId, edges, mediaNodes, textNodes],
+  );
+  /** IKFM3W §10：视频目标文本索引发送校验（失效/帧互斥与业务 API 同口径）——面板持续显示并阻止发送 */
+  const videoDraftTextIndexError = useMemo(
+    () => (videoDraftId ? videoTextIndexSendError(videoDraftId, edges, mediaNodes, textNodes) : undefined),
+    [videoDraftId, edges, mediaNodes, textNodes],
   );
 
   /** 草稿绑定面板的音频媒体参考（IKFDFZ）：从「来源→草稿」连线实时推导，面板显示即提交
@@ -5042,10 +5049,10 @@ export default function CanvasPage() {
       resolution: opts.resolution,
       duration: opts.duration,
     };
-    // 草稿绑定模式按连线+material 合并推导；自由模式（工具栏入口无草稿卡）读本地暂存参考
+    // 草稿绑定模式按连线+material+文本带入合并推导（IKFM3W §10）；自由模式（工具栏入口无草稿卡）读本地暂存参考
     const freeMode = !videoDraftId;
     const sourceDraftRefs = videoDraftId
-      ? mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current)
+      ? mergedVideoRefsWithTextIndex(videoDraftId, edgesRef.current, mediaNodesRef.current, textNodesRef.current)
       : videoFreeRefs;
     const savedStripOrder = videoDraftId ? mediaNodesRef.current.find(node => node.id === videoDraftId)?.data.referenceStripOrder : undefined;
     const draftRefs = {
@@ -5059,6 +5066,20 @@ export default function CanvasPage() {
       setVideoFreeRefs({ reference: [] });
     };
     {
+      // IKFM3W §10：文本索引发送校验（失效/帧互斥与业务 API 同口径，不能仅靠按钮禁用）——
+      // 帧互斥文案对文本带入场景给出改文本/调模式的指引，优先于通用互斥提示
+      if (targetNodeId) {
+        const syncError = videoTextIndexSendError(
+          targetNodeId,
+          edgesRef.current,
+          mediaNodesRef.current,
+          textNodesRef.current,
+        );
+        if (syncError) {
+          showToast('warn', syncError);
+          return;
+        }
+      }
       // 组合校验与 Dock 同源（videoRefConflict）：能力位由面板按所选模型约束，此处提交防线
       // 传全能力位只校验互斥语义（帧↔参考混用、尾帧配首帧），能力位不支持由服务端 400 兜底
       const conflict = videoRefConflict(draftRefs, {
@@ -6257,6 +6278,8 @@ export default function CanvasPage() {
             syncingPlan={applying}
             planReferenceError={planReferenceErrors.video}
             planIndices={planReferenceErrors.videoIndices}
+            textIndexError={videoDraftTextIndexError ?? undefined}
+            onLocateTextSource={locateTextSource}
             key={videoSeed?.ts ?? 0}
             initialText={videoSeed?.text}
             initialDoc={videoSeed?.doc ?? null}

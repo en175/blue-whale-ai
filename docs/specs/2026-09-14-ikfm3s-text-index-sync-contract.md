@@ -76,3 +76,16 @@
 - 任务 4/5 在本契约字段上扩展目标类型与角色语义，不重定义来源模型、签名与冻结字段。
 - worker 只消费冻结快照，本契约不改变其输入形态，零适配。
 - 不引入文本卡附件列表、文本互引、自动生成或改写运行中任务/已有结果。
+
+## 10. 视频目标扩展（IKFM3W，v1.1）
+
+v1.1（2026-09-15）按 §9 授权扩展视频生成目标；§1–§8 全部沿用（同一派生/签名/冻结实现），本节只新增目标类型与角色语义。
+
+- **适用范围**：`type=video` 且携带 `target_node_id`。引用来源模型（直接参考 ∪ 文本带入参考，纯派生）与 §1 完全一致。
+- **角色语义**：文本带入参考一律为普通参考（`role=reference`），不推断首帧/尾帧角色、不进入帧槽；同 assetId 去重保首见（`material_id` 空间不参与去重——文本带入只有本地画布素材）。
+- **接受的媒体类型按目标模型能力位**：`image` 恒接受；`video` 需 `features.video_reference`；`audio` 需 `features.audio_reference`。不接受类型 → `400 invalid_reference_type`（文案沿用 §3「文本索引包含目标不支持的媒体类型」）。
+- **首尾帧互斥**：目标已有帧角色（references 含 `first_frame`/`last_frame`，或携带旧帧字段）且文本带入参考非空 → `400 invalid_reference`「首尾帧模式不能与文本带入参考混用，请调整参考或修改来源文本」；不静默丢素材、不把帧素材降级为普通参考。
+- **并入规则**：直接参考（references 单数组保序）在前，文本带入按派生序追加尾部为 `{ role: "reference", asset_id, type }`；references 缺失且无任何旧参考字段时以文本带入项新建单数组；旧参考字段（`reference_asset_ids`/首尾帧/素材库）与文本带入并存 → `400 invalid_reference`（防御性拒绝，新客户端提交一律走单数组不触发）。
+- **容量与能力校验在合并后执行**：沿用既有 `checkReferenceLimits(features, references, "video")`（图/视频/音频分类上限、`video_reference`/`audio_reference` 能力位、参考总时长），文案与错误码沿用；前端视频面板同源（`@/lib/model-reference-limits` 同名实现）。
+- **冻结**：`input.references` 为合并后最终序（帧在前、普通参考保序）；`text_attachments[].media` 与 `input.text_input_signature` 与图片目标同构（§5/§4）；重试沿用「原样复制 input」。
+- **前端交互**：视频面板参考栏锁定标记、定位来源与 §6 图片面板同构（锁定条目不渲染移除入口）；「输入已更新」徽标扩展至视频目标（同一派生判定）；参考编号沿用视频面板既有 numberMap（同类型编号），文本卡显示编号不当作目标素材序号。

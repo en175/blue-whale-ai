@@ -146,6 +146,10 @@ interface BottomDialogProps extends RefStripOrderProps {
   };
   /** 合并推导的视频参考分组（连线 + material refs）：参考区按角色渲染 */
   videoMediaRefs: VideoMediaRefs;
+  /** IKFM3W §10：文本索引提供的锁定参考定位来源文本卡（平移居中 + 短暂高亮） */
+  onLocateTextSource?: (textNodeId: string) => void;
+  /** IKFM3W §10：文本索引发送校验错误（失效/帧互斥），面板持续显示并阻止发送 */
+  textIndexError?: string;
   /** 移除某个视频参考：携带来源节点 id，父级断开对应连线 */
   onRemoveVideoRef?: (sourceNodeId: string) => void;
   /** IKFJJT：把普通参考批量转为首帧/尾帧角色槽（切首尾帧自动转换；nodeId 为边来源或素材库 materialId） */
@@ -192,7 +196,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, textIndexError, onLocateTextSource, onPickFromCanvas, onPickFromAssets, pickMode, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
   /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -288,8 +292,9 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     : null;
   /** 组合校验（IKDMQS）：与服务端 400 同口径（ADR-0086：分类上限/素材总时长读能力行，走共享纯函数
    *  checkReferenceLimits，与 backend handle-create-generation-job 同源语义）+ 结构约束 videoRefConflict；
-   *  冲突时明确提示并禁用发送。 */
-  const referenceConflict = planReferenceError ?? (caps
+   *  冲突时明确提示并禁用发送。IKFM3W §10：文本索引错误（失效/帧互斥）最优先——失效素材须先修复
+   *  来源文本，帧互斥文案指向改文本/调模式而非通用移除提示。 */
+  const referenceConflict = textIndexError ?? planReferenceError ?? (caps
     ? (checkReferenceLimits(
         currentModel?.features,
         videoMediaRefs.reference.map((r) => ({ type: r.mediaType, duration: r.duration })),
@@ -711,7 +716,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
    *  （连线项断开连线 / 角色库项移除草稿 material 参考），@ 复用记忆光标插入且仅对
    *  标签有效身份开放（与 @ 菜单同口径，不留下伪有效标签）；首帧/尾帧按角色徽标、
    *  普通参考按同类型编号（与正文标签同源 numberMap），三态交互与放大预览由组件承载。
-   *  IKFCKT：dragProps 由渲染处按统一序列 index 传入（首尾帧槽不传 = 固定角色不参与拖拽） */
+   *  IKFCKT：dragProps 由渲染处按统一序列 index 传入（首尾帧槽不传 = 固定角色不参与拖拽）。
+   *  IKFM3W §10：文本带入条目锁定（不渲染 ×、渲染定位来源入口），与图片面板同构。 */
   const renderRefThumb = (item: VideoMediaRef, key?: string, badgeText?: string, dragProps?: StripDragItemProps) => (
     <RefThumbnail
       key={key}
@@ -722,7 +728,9 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       badgeText={badgeText}
       number={refNumberMap.get(refIdOf(item))}
       audioDuration={item.duration}
-      onRemove={!readOnly
+      locked={item.textNodeId != null}
+      onLocate={item.textNodeId != null && onLocateTextSource ? () => onLocateTextSource(item.textNodeId!) : undefined}
+      onRemove={!readOnly && item.textNodeId == null
         ? () => (isLibraryOnlyVideoRef(item) ? onRemoveMaterialRef?.(item.materialId) : onRemoveVideoRef?.(item.nodeId))
         : undefined}
       onInsertRef={!readOnly && refLabels.has(refIdOf(item)) ? () => insertRefByKey(refIdOf(item)) : undefined}
