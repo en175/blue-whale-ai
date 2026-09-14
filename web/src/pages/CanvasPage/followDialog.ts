@@ -51,16 +51,19 @@ export const VIDEO_FOLLOW_MODE_LABEL: Record<VideoFollowMode, string> = {
  *  判定输入 = 实际成为当前目标参考的媒体（连线 + 角色库 material + 到节点选择暂存合并，
  *  与面板显示/提交输入同源）；invalid 不计入，文本附件不属于媒体参考。
  *  无媒体 → 文生视频与全能参考可选（all 保持可选保证删除全部参考后不自动切回）；
- *  存在任一媒体 → 文生视频不可选；图片 ≥1 开图生视频、≥2 开首尾帧（帧按图片计）。 */
+ *  存在任一媒体 → 文生视频不可选；图片 ≥1 开图生视频、≥2 开首尾帧（帧按图片计）。
+ *  IKFJJT：已处于首尾帧（存在首帧/尾帧槽）时 keyframe 恒可选——去掉一帧后不把模式踢走，
+ *  用户可自行补齐或改选；缺帧由发送期校验提示补全。 */
 export function enabledVideoFollowModes(refs: VideoMediaRefs): VideoFollowMode[] {
   const imageCount =
     refs.reference.filter((r) => r.mediaType === 'image').length + (refs.first ? 1 : 0) + (refs.last ? 1 : 0);
   const hasMedia = hasAnyMediaRef(refs);
+  const hasFrameSlot = Boolean(refs.first || refs.last);
   const enabled: VideoFollowMode[] = [];
   if (!hasMedia) enabled.push('prompt', 'all');
   if (hasMedia) enabled.push('all');
   if (hasMedia && imageCount >= 1) enabled.push('text2video');
-  if (hasMedia && imageCount >= 2) enabled.push('keyframe');
+  if ((hasMedia && imageCount >= 2) || hasFrameSlot) enabled.push('keyframe');
   return enabled;
 }
 

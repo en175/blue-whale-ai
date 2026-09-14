@@ -45,8 +45,9 @@ describe('IKFC1T enabledVideoFollowModes（媒体参考集合口径）', () => {
     expect(enabledVideoFollowModes(refsOf([ref('a1', 'audio')]))).toEqual(['all']);
   });
 
-  it('首尾帧按图片计入：单帧开图生视频、双帧开首尾帧', () => {
-    expect(enabledVideoFollowModes(refsOf([], { first: ref('f1') }))).toEqual(['all', 'text2video']);
+  it('首尾帧按图片计入，且已存在帧槽时 keyframe 恒可选（IKFJJT：去掉一帧不把模式踢走）', () => {
+    // 存在首帧槽即保留 keyframe 可选（旧行为仅双帧可选，去掉一帧会被自动切走）
+    expect(enabledVideoFollowModes(refsOf([], { first: ref('f1') }))).toEqual(['all', 'text2video', 'keyframe']);
     expect(
       enabledVideoFollowModes(refsOf([], { first: ref('f1'), last: ref('f2') })),
     ).toEqual(['all', 'text2video', 'keyframe']);
