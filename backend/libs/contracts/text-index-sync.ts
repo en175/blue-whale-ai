@@ -218,3 +218,71 @@ export function textInputSignatureOf(inputs: ReadonlyArray<TargetTextInputEntry>
   );
   return fnv1a32Hex(normalized, 0x811c9dc5) + fnv1a32Hex(normalized, 0x97c29b3d);
 }
+
+/* ---- 视频目标扩展（契约 §10，IKFM3W v1.1）：来源模型/签名/冻结与 §1/§4/§5 同一实现，
+   仅新增普通参考角色语义与首尾帧互斥；容量上限沿用既有 checkReferenceLimits，不在本包重复。 ---- */
+
+/** 视频单数组直接参考项的宽松形状（后端 ReferenceItemInput / 前端 GenerationRefItem 兼容） */
+export interface VideoReferenceLikeItem {
+  asset_id?: unknown;
+}
+
+/** 文本带入追加进视频单数组的项（契约 §10：恒为普通参考，不推断帧角色） */
+export interface TextProvidedVideoReference {
+  role: "reference";
+  asset_id: string;
+  type: MediaMentionType;
+}
+
+/** 视频参考并入（契约 §10）：文本带入按派生序转为普通参考项，与直接参考同 assetId
+ *  去重保首见（material_id 空间不参与——文本带入只有本地画布素材）。返回本次追加项，
+ *  调用方拼接 `[...directItems, ...added]` 得到合并最终序（后端权威并入、前端预演共用）。 */
+export function textProvidedVideoReferences(
+  directItems: ReadonlyArray<VideoReferenceLikeItem>,
+  refs: ReadonlyArray<TextProvidedRef>,
+): TextProvidedVideoReference[] {
+  const seen = new Set(
+    directItems
+      .map((item) => (typeof item.asset_id === "string" || typeof item.asset_id === "number" ? String(item.asset_id) : null))
+      .filter((id): id is string => id !== null),
+  );
+  const added: TextProvidedVideoReference[] = [];
+  for (const ref of refs) {
+    if (seen.has(ref.assetId)) continue;
+    seen.add(ref.assetId);
+    added.push({ role: "reference", asset_id: ref.assetId, type: ref.mediaType });
+  }
+  return added;
+}
+
+export const VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE =
+  "首尾帧模式不能与文本带入参考混用，请调整参考或修改来源文本";
+
+/** 视频目标发送前校验错误（契约 §10；判定顺序：失效 → 帧互斥 → 类型；容量由既有
+ *  checkReferenceLimits 在合并后接管） */
+export type VideoTextIndexSyncError =
+  | { kind: "invalid_index" }
+  | { kind: "frame_conflict" }
+  | { kind: "unsupported_media_type"; mediaTypes: MediaMentionType[] };
+
+/** 视频目标能力校验（契约 §10）：失效索引、首尾帧互斥、不支持的媒体类型均阻止发送。
+ *  acceptedMediaTypes 由调用方按目标模型能力位构造（image 恒接受；video 需
+ *  features.video_reference；audio 需 features.audio_reference）。 */
+export function checkVideoTextIndexSyncInput(args: {
+  index: Pick<TargetTextIndex, "refs" | "invalid">;
+  acceptedMediaTypes: readonly MediaMentionType[];
+  /** 目标已有帧角色（references 含 first_frame/last_frame 或携带旧帧字段） */
+  hasFrameRole: boolean;
+}): VideoTextIndexSyncError | null {
+  if (args.index.invalid.length > 0) return { kind: "invalid_index" };
+  if (args.hasFrameRole && args.index.refs.length > 0) return { kind: "frame_conflict" };
+  const unsupported = [
+    ...new Set(
+      args.index.refs
+        .filter((ref) => !args.acceptedMediaTypes.includes(ref.mediaType))
+        .map((ref) => ref.mediaType),
+    ),
+  ];
+  if (unsupported.length > 0) return { kind: "unsupported_media_type", mediaTypes: unsupported };
+  return null;
+}
