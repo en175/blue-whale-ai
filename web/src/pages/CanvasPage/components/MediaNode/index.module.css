@@ -44,6 +44,7 @@
 }
 
 .titleName {
+  flex: 1;
   font-size: var(--node-title-name);
   color: #888;
   overflow: hidden;

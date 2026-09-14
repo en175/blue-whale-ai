@@ -197,6 +197,21 @@ describe("projectPublicError", () => {
     expect(out!.message).toBe("参考素材无效，请重新选择");
   });
 
+  it("IKFL53: content_rejected_reference → 1038 + 文案「参考内容可能涉及版权限制」", () => {
+    // 版权拒绝任务 DB error.code=content_rejected_reference → 后端投影到 1038 + 中文文案，
+    // 不返上游 copyright 英文原文（含 Request id）。
+    const out = projectPublicError(
+      {
+        code: "content_rejected_reference",
+        message:
+          "The request failed because the output video may be related to copyright restrictions. Request id: req-2048",
+      },
+      "video",
+    );
+    expect(out!.code).toBe(1038);
+    expect(out!.message).toBe("参考内容可能涉及版权限制");
+  });
+
   it("白名单外码 fallback 到类型兜底：码表文案（视频生成失败）", () => {
     const out = projectPublicError({ code: "some_new_code" }, "video");
     expect(out!.code).toBe(1021); // video_generation_failed

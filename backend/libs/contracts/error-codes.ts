@@ -55,6 +55,8 @@ export const ERROR_STORAGE_FAILED = "storage_failed";
 export const ERROR_ALL_OUTPUTS_FAILED = "all_outputs_failed";
 
 export const ERROR_CONTENT_REJECTED = "content_rejected";
+/** IKFL53：参考内容版权拒绝（与输出内容审核 1018 分开，用户可见「参考内容可能涉及版权限制」）。 */
+export const ERROR_CONTENT_REJECTED_REFERENCE = "content_rejected_reference";
 export const ERROR_CONTENT_REVIEW_UNAVAILABLE = "content_review_unavailable";
 
 export const ERROR_MEDIA_EXTRACT_FAILED = "media_extract_failed";
@@ -107,6 +109,7 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_STORAGE_FAILED]: 1016,
   [ERROR_ALL_OUTPUTS_FAILED]: 1017,
   [ERROR_CONTENT_REJECTED]: 1018,
+  [ERROR_CONTENT_REJECTED_REFERENCE]: 1038,
   [ERROR_CONTENT_REVIEW_UNAVAILABLE]: 1019,
   [ERROR_MEDIA_EXTRACT_FAILED]: 1020,
   [ERROR_VIDEO_GENERATION_FAILED]: 1021,
@@ -365,6 +368,7 @@ export const ERROR_CODES: Record<number, string> = {
   1016: "生成结果存储失败",
   1017: "所有输出均生成失败",
   1018: "生成内容未通过安全审核",
+  1038: "参考内容可能涉及版权限制", // content_rejected_reference
   1019: "内容审核不可用",
   1020: "音频提取失败",
   1021: "视频生成失败",

@@ -31,7 +31,7 @@ export function buildVideoJobReferences(refs: VideoMediaRefs): GenerationRefItem
 
 /** 首页交接等扁平列表组装 */
 export function buildVideoJobReferencesFromList(
-  list: Array<{ assetId: string; mediaType: 'image' | 'video'; role: VideoRefRole }>,
+  list: Array<{ assetId: string; mediaType: 'image' | 'video'; role: VideoRefRole; materialId?: string }>,
 ): GenerationRefItem[] {
   return list.map((item) => toJobRef(item, canvasRoleToJobRole(item.role)));
 }
