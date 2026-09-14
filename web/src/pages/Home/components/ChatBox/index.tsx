@@ -19,7 +19,8 @@ import { type SkillRecord } from '@/api/skills';
 import { createProject } from '@/api/projects';
 import { setGenHandoff } from '@/utils/gen-handoff';
 import { setAgentHandoff } from '@/utils/agent-handoff';
-import { classifyRefOverflow, classifyRefOverflows, refOverflowToast, REF_LIMITS } from '@/utils/ref-overflow';
+import { classifyRefOverflow, classifyRefOverflows, refOverflowToast } from '@/utils/ref-overflow';
+import { videoReferenceMaxOf, imageReferenceMaxOfCap } from '@/lib/model-reference-limits';
 import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput, MAX_PROMPT_INPUT_LENGTH } from './promptInput';
@@ -37,9 +38,6 @@ const videoModes = [
   { key: 'firstlast', label: '首尾帧' },
   { key: 'text2video', label: '图生视频' },
 ];
-
-/** 视频最大上传数量（接口未下发该字段，前端统一 3） */
-const MAX_VIDEOS = 3;
 
 /** 智能体 tab 附件分类型上限：视频/音频固定 3（图片随创作模型能力，见组件内 agentMaxImages） */
 const MAX_AGENT_VIDEOS = 3;
@@ -647,9 +645,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const videoMaxImages =
     videoMode === 'firstlast'
       ? 2
-      : (selectedVideoModel?.features?.max_reference_images ?? 0);
+      : (selectedVideoModel?.features?.max_reference_images ?? 10);
+  const videoMaxVideos = videoReferenceMaxOf(selectedVideoModel?.features);
   const videoImagesFull = videoRefImageCount >= videoMaxImages;
-  const videoVideosFull = videoRefVideoCount >= MAX_VIDEOS;
+  const videoVideosFull = videoRefVideoCount >= videoMaxVideos;
   /** 首尾帧模式发送校验：添加阶段允许先只传一个（首帧/尾帧），但发送时必须首帧与尾帧齐全。
    *  keyframeSendHint 非空表示不完整，用于发送按钮 title 与点击时的 toast 提示缺项。 */
   const keyframeSendHint = isKeyframe
@@ -661,8 +660,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           ? '请补充尾帧'
           : ''
     : '';
-  /** AI 图片参考图上限：产品约定 9 张（与画布 ImageDialog REF_LIMITS.image 一致），取接口值和约定的较小值 */
-  const imageMaxImages = Math.min(selectedImageModel?.features?.max_reference_images ?? 0, REF_LIMITS.image);
+  /** AI 图片参考图上限（ADR-0086：读能力行 max_reference_images，缺省 DEFAULT_MAX_REFERENCE_IMAGES=10，
+   *  不再 min 到旧写死 9）。 */
+  const imageMaxImages = imageReferenceMaxOfCap(selectedImageModel?.features);
 
   // 处理参考文件上传（按类型剩余名额截断：图片走接口上限，视频最多 3）
   const handleRefFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -680,7 +680,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       return;
     }
     let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
-    let vidRoom = Math.max(0, MAX_VIDEOS - videoRefVideoCount);
+    let vidRoom = Math.max(0, videoMaxVideos - videoRefVideoCount);
     const newFiles = files
       .filter((f) => {
         if (f.type.startsWith('video/')) {
@@ -704,7 +704,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       acceptedVideos: newFiles.filter((f) => f.type === 'video').length,
     });
     if (overflow === 'image') showToast(`参考图最多 ${videoMaxImages} 张，请减少图片`);
-    else if (overflow === 'video') showToast(`参考视频最多 ${MAX_VIDEOS} 个`);
+    else if (overflow === 'video') showToast(`参考视频最多 ${videoMaxVideos} 个`);
     setRefFiles((prev) => [...prev, ...newFiles]);
     // 重置 input 以便重复选择相同文件
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -793,7 +793,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       refFiles.filter((r) => r.assetId != null).map((r) => String(r.assetId)),
     );
     let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
-    let vidRoom = Math.max(0, MAX_VIDEOS - videoRefVideoCount);
+    let vidRoom = Math.max(0, videoMaxVideos - videoRefVideoCount);
     const eligible = assets.filter((a) => a.AssetType === 'Image' || a.AssetType === 'Video');
     const unique = eligible.filter((a) => !existing.has(String(a.Id)));
     const items = unique
@@ -819,7 +819,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       acceptedImages: items.filter((i) => i.type === 'image').length,
       acceptedVideos: items.filter((i) => i.type === 'video').length,
     });
-    if (overflows.length > 0) parts.push(refOverflowToast(overflows, { image: videoMaxImages, video: MAX_VIDEOS }));
+    if (overflows.length > 0) parts.push(refOverflowToast(overflows, { image: videoMaxImages, video: videoMaxVideos }));
     if (unique.length < eligible.length) parts.push('重复的素材已跳过');
     if (parts.length > 0) showToast(parts.join('；'));
     if (items.length === 0) return;
@@ -918,7 +918,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         refFiles.filter((r) => r.assetId != null).map((r) => String(r.assetId)),
       );
       let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
-      let vidRoom = Math.max(0, MAX_VIDEOS - videoRefVideoCount);
+      let vidRoom = Math.max(0, videoMaxVideos - videoRefVideoCount);
       const eligible = assets
         .filter((a) => a.type === 'image' || a.type === 'video')
         .filter((a) => !existing.has(String(a.id)));
@@ -939,7 +939,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           assetId: a.id,
         }));
       if (eligible.length > items.length) {
-        showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${MAX_VIDEOS} 个）`);
+        showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${videoMaxVideos} 个）`);
       }
       if (items.length === 0) return;
       setRefFiles((prev) => [...prev, ...items]);
@@ -1068,7 +1068,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   className={styles.refCard}
                   onClick={() => {
                     if (videoImagesFull && videoVideosFull) {
-                      showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${MAX_VIDEOS} 个）`);
+                      showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${videoMaxVideos} 个）`);
                       return;
                     }
                     toggleRefMenu('video');
@@ -1085,7 +1085,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 <textarea
                   ref={textareaRef}
                   className={styles.textarea}
-                  placeholder={`通过直接控制提示词快速生成单段片段。\n上传参考：图片最多 ${videoMaxImages} 张 / 视频最多 ${MAX_VIDEOS} 个；首尾帧模式可上传首帧与尾帧参考。`}
+                  placeholder={`通过直接控制提示词快速生成单段片段。\n上传参考：图片最多 ${videoMaxImages} 张 / 视频最多 ${videoMaxVideos} 个；首尾帧模式可上传首帧与尾帧参考。`}
                   value={inputValue}
                   onChange={(e) => handleInputChange(e.target.value)}
                   onKeyDown={handleKeyDown}

@@ -17,7 +17,16 @@ function buildDeps() {
   });
   const listEnabledByType = vi
     .fn()
-    .mockResolvedValue([{ model_id: "seed-audio-1.0" }]);
+    .mockResolvedValue([
+      {
+        model_id: "seed-audio-1.0",
+        features: {
+          audio_reference_max: 3,
+          image_reference_max: 1,
+          max_reference_images: 10,
+        },
+      },
+    ]);
   const createJob = vi.fn().mockResolvedValue({
     generation_job_id: "1",
     cursor: 1,

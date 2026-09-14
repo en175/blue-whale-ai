@@ -22,7 +22,6 @@ import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } fr
 import {
   asVideoRefMediaType,
   isVideoDraftNode,
-  MAX_VIDEO_REFS,
   readRefRole,
   readDraftMaterialRefs,
   freshVideoCanvasRefs,
@@ -35,7 +34,7 @@ import {
   type VideoMediaRefs,
   type VideoRefRole,
 } from './videoMediaRefs';
-import { REF_LIMITS, refOverflowToast } from '@/utils/ref-overflow';
+import { refOverflowToast } from '@/utils/ref-overflow';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf } from './components/cardName';
 import type { MediaGenStatus } from './components/MediaNode';
@@ -307,8 +306,8 @@ export default function CanvasPage() {
       showToast('warn', '该素材已连入当前草稿');
       return false;
     }
-    if (refs.length >= REF_LIMITS.image) {
-      showToast('warn', refOverflowToast(['image']));
+    if (refs.length >= 10) {
+      showToast('warn', refOverflowToast(['image'], { image: 10 }));
       return false;
     }
     return true;
@@ -3127,11 +3126,12 @@ export default function CanvasPage() {
         if (accepted.length > 1) showToast('warn', '首尾帧仅支持一张图片，已取首张');
         accepted = accepted.slice(0, 1);
       } else {
-        // 普通参考：图 9/视频 3/音频 3 与连线+material 合并联算；assetId 查重跳过
+        // 普通参考：图/视频/音频分类上限与连线+material 合并联算（ADR-0086：读能力行，
+        // 缺省回落旧 9/3/3）；assetId 查重跳过
         const known = new Set(refs.reference.map((r) => r.assetId));
-        let imgSlots = REF_LIMITS.image - refs.reference.filter((r) => r.mediaType === 'image').length;
-        let vidSlots = MAX_VIDEO_REFS - refs.reference.filter((r) => r.mediaType === 'video').length;
-        let audSlots = REF_LIMITS.audio - refs.reference.filter((r) => r.mediaType === 'audio').length;
+        let imgSlots = 9 - refs.reference.filter((r) => r.mediaType === 'image').length;
+        let vidSlots = 3 - refs.reference.filter((r) => r.mediaType === 'video').length;
+        let audSlots = 3 - refs.reference.filter((r) => r.mediaType === 'audio').length;
         const overflowKinds: Array<'image' | 'video' | 'audio'> = [];
         let skippedDup = false;
         const filtered: AssetRecord[] = [];
@@ -3154,7 +3154,7 @@ export default function CanvasPage() {
         }
         accepted = filtered;
         if (skippedDup) showToast('warn', '重复的素材已跳过');
-        if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds));
+        if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds, { image: 9, video: 3, audio: 3 }));
         if (accepted.length === 0) return;
       }
       if (!videoDraftId) {
@@ -3223,7 +3223,7 @@ export default function CanvasPage() {
         for (const a of images) {
           const id = String(a.id);
           if (known.has(id)) { skippedDup = true; continue; }
-          if (known.size >= REF_LIMITS.image) { overflow = true; break; }
+          if (known.size >= 10) { overflow = true; break; }
           known.add(id);
           accepted.push(a);
         }
@@ -4812,7 +4812,8 @@ export default function CanvasPage() {
         showToast('warn', conflict);
         return;
       }
-      // 视频参考仅部分模型支持（Seedance 2.0 系）：提交防线与面板 UI 禁用同一判定
+      // 视频参考仅部分模型支持（ADR-0086：读能力行 features.video_reference；旧 seedance-2 前缀特判
+      // 作为缺省兜底）：提交防线与面板 UI 禁用同一判定
       if (!supportsVideoReferenceModel(opts.modelId) && draftRefs.reference.some((r) => r.mediaType !== 'image')) {
         showToast('warn', '当前模型不支持视频或音频参考，请更换模型或调整引用');
         return;

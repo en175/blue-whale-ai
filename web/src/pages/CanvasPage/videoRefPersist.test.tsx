@@ -160,6 +160,13 @@ function videoModel(
       last_frame: true,
       first_last_frame: true,
       audio: false,
+      // ADR-0086：seedance-2 系视频参考能力位——测试模型默认支持视频/音频参考，可被用例覆盖
+      video_reference: modelId === 'seedance-2',
+      video_reference_max: 3,
+      audio_reference: modelId === 'seedance-2',
+      audio_reference_max: 3,
+      image_reference_max: 1,
+      max_reference_duration_sec: 15,
       ...features,
     },
     is_default: modelId === 'seedance-2',
@@ -590,7 +597,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
   it('切换不支持视频参考的模型：保留全部参考、说明原因并阻止发送，换回兼容模型恢复', async () => {
     apiGenerationMocks.fetchGenerationModels.mockImplementation(async (): Promise<GenerationModel[]> => [
       videoModel('seedance-2', '测试视频模型'),
-      videoModel('other-video', '普通视频模型'),
+      videoModel('other-video', '普通视频模型', { video_reference: false, audio_reference: false }),
     ]);
     await renderPage();
     await clickNode('d1');
@@ -651,7 +658,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
   it('切换参考数量上限不足的模型：保留全部参考并说明原因，用户删除超限项后恢复发送', async () => {
     apiGenerationMocks.fetchGenerationModels.mockImplementation(async (): Promise<GenerationModel[]> => [
       videoModel('seedance-2', '测试视频模型'),
-      videoModel('cap1-video', '单参考视频模型', { max_reference_images: 1 }),
+      videoModel('cap1-video', '单参考视频模型', { max_reference_images: 1, video_reference_max: 0, audio_reference_max: 0 }),
     ]);
     await renderPage();
     await clickNode('d1');
@@ -666,7 +673,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
 
     // 上限不足：参考保留不截断，说明原因并阻止发送
     await switchModel('测试视频模型', '单参考视频模型');
-    await vi.waitFor(() => expect(container.textContent).toContain('图片参考超出当前模型上限，请调整引用或模型'));
+    await vi.waitFor(() => expect(container.textContent).toContain('图片参考超出当前模型上限（最多 1 张），请调整引用或模型'));
     expect(sendButton().disabled).toBe(true);
     expect(dockRefNames()).toEqual(['首图', '次图']);
     expect(edgePairs()).toEqual(['m1->d1', 'm2->d1']);

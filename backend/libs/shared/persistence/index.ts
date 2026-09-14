@@ -69,6 +69,9 @@ export {
 export {
   createModelCapabilityRepo,
   DEFAULT_MAX_REFERENCE_IMAGES,
+  DEFAULT_VIDEO_REFERENCE_MAX,
+  DEFAULT_AUDIO_REFERENCE_MAX,
+  DEFAULT_IMAGE_REFERENCE_MAX,
   type ModelCapabilityRepo,
   type ModelCapabilityView,
   type ModelSizeOption,
