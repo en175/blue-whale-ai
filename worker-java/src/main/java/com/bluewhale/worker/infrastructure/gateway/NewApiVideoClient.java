@@ -277,16 +277,21 @@ public class NewApiVideoClient {
                         "new-api 视频任务响应无效");
             }
 
-            // error 解析（:294-310）
-            JsonNode rawError = data.get("error");
-            TaskError taskError = null;
-            if (rawError != null && rawError.isObject()) {
-                Object errCode = rawError.has("code") && (rawError.get("code").isTextual() || rawError.get("code").isNumber())
-                        ? (rawError.get("code").isTextual() ? rawError.get("code").asText() : rawError.get("code").asText()) : null;
-                String errMsg = rawError.has("message") && rawError.get("message").isTextual()
-                        ? rawError.get("message").asText() : "视频生成失败";
-                taskError = new TaskError(errCode != null ? errCode.toString() : null, errMsg);
+            // error 解析（:294-310）。
+            // IKFL53：兼容两层信封——旧 new-api 在顶层带 fail_reason（tasks 表 FAILURE 的终端错误），
+            // 新响应把 error 对象放 data.error。两处都读、取非空合并，避免因 error 放哪层而丢分类信号。
+            JsonNode rawError = data.has("error") && data.get("error").isObject() ? data.get("error") : null;
+            if (rawError == null && parsed.has("error") && parsed.get("error").isObject()) {
+                rawError = parsed.get("error");
             }
+            TaskError taskError = null;
+            if (rawError != null) {
+                String errCode = nodeTextOrNull(rawError, "code");
+                String errMsg = nodeTextOrNull(rawError, "message");
+                taskError = new TaskError(errCode, errMsg != null ? errMsg : "视频生成失败");
+            }
+            // fail_reason（顶层优先，IKFL53）：new-api tasks 表 FAILURE 状态把终端错误放这。
+            String failReason = firstTextOrNull(parsed, data, "fail_reason");
 
             // quota（:312，IK7G9X）
             Double quota = data.has("quota") && data.get("quota").isNumber()
@@ -303,10 +308,14 @@ public class NewApiVideoClient {
                 return new VideoTaskObservation("succeeded", 100, url, quota, null);
             }
             if (FAILED_STATUSES.containsKey(normalizedStatus)) {
-                // 错误码分类（new-api-video-task-provider.ts:91-97）
+                // 错误码分类（new-api-video-task-provider.ts:91-97）。
+                // IKFL53：信号源 = data.error（code+message）+ fail_reason 全文，缺一补一。
                 String upstreamCode = taskError != null ? taskError.code() : null;
+                String message = taskError != null && taskError.message() != null
+                        ? taskError.message() : (failReason != null ? failReason : "视频生成失败");
                 String upstreamText = (upstreamCode != null ? upstreamCode : "") + " "
-                        + (taskError != null ? taskError.message() : "");
+                        + (failReason != null ? failReason : "") + " "
+                        + (taskError != null && taskError.message() != null ? taskError.message() : "");
                 String code;
                 if (NewApiErrorClassifier.isContentPolicySignal(upstreamText)) {
                     code = GenerationError.ERROR_CONTENT_REJECTED;
@@ -316,7 +325,7 @@ public class NewApiVideoClient {
                     code = upstreamCode != null ? upstreamCode : GenerationError.ERROR_PROVIDER_FAILED;
                 }
                 return new VideoTaskObservation("failed", 100, null, quota,
-                        new TaskError(code, taskError != null ? taskError.message() : "视频生成失败"));
+                        new TaskError(code, message));
             }
 
             // queued / processing（:109-115）
@@ -346,6 +355,21 @@ public class NewApiVideoClient {
     private static String textOrNull(JsonNode node, String field) {
         JsonNode v = node.get(field);
         return (v != null && v.isTextual()) ? v.asText() : null;
+    }
+
+    /** 节点内字段取文本（textual/数值都可读，IKFL53 防 code 解析失败丢信号）。 */
+    private static String nodeTextOrNull(JsonNode node, String field) {
+        JsonNode v = node.get(field);
+        if (v == null) return null;
+        if (v.isTextual()) return v.asText();
+        if (v.isNumber()) return v.asText();
+        return null;
+    }
+
+    /** 从多个节点中按序取第一个文本字段（fail_reason 顶层优先，IKFL53）。 */
+    private static String firstTextOrNull(JsonNode primary, JsonNode secondary, String field) {
+        String v = textOrNull(primary, field);
+        return v != null ? v : textOrNull(secondary, field);
     }
 
     private static String encodePath(String value) {

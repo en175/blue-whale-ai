@@ -3,6 +3,7 @@ package com.bluewhale.worker.infrastructure.gateway;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.SubmitResult;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoReference;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoSubmitInput;
+import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoTaskObservation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
@@ -118,5 +119,28 @@ class NewApiVideoClientEndpointTest {
                 .isEqualTo("https://tos.test/first.png");
         assertThat(content.get(1).get("role").asText()).isEqualTo("last_frame");
         assertThat(content.get(2).get("role").asText()).isEqualTo("reference_image");
+    }
+
+    @Test
+    @DisplayName("IKFL53: poll FAILURE + 顶层 fail_reason 版权拒绝 → content_rejected + 上游原文透出")
+    void pollTopLevelFailReasonCopyrightMapsToContentRejected() throws Exception {
+        String copyrightText = "The request failed because the output video may be related to copyright restrictions. Request id: req-2048";
+        server.createContext("/v1/video/generations/task-2048", exchange -> {
+            byte[] resp = ("{\"task_id\":\"task-2048\",\"status\":\"FAILURE\"," +
+                    "\"fail_reason\":\"" + copyrightText + "\"}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoTaskObservation observation =
+                new NewApiVideoClient(baseUrl).poll("t", "task-2048");
+        assertThat(observation.status()).isEqualTo("failed");
+        assertThat(observation.error()).isNotNull();
+        assertThat(observation.error().code()).isEqualTo("content_rejected");
+        // message 保留上游原文，不再默认「视频生成失败」
+        assertThat(observation.error().message()).contains("copyright restrictions");
     }
 }
