@@ -63,7 +63,7 @@ import {
 import { itemsFromBlocks, itemsFromLive, type TimelineItem, type Turn } from '../../hooks/sessionTimeline';
 import { ASSET_MENTION_ATTR, collectKnownAssets, rehypeAssetMentions, type KnownAsset } from './assetMentions';
 import { AssetMentionChip } from './AssetMentionChip';
-import { ThinkingBlock, ToolCallRow, TurnFooter } from './TurnTimeline';
+import { ThinkingBlock, ThoughtBlock, ToolCallRow, TurnFooter, WaitingRow } from './TurnTimeline';
 
 /** 父组件没传已应用集合时的空集。提到模块级是为了保持引用稳定，避免每次渲染都造一个新 Set。 */
 const EMPTY_APPLIED_IDS: ReadonlySet<string> = new Set<string>();
@@ -562,7 +562,9 @@ function AssistantTurnBody({
   if (items.length === 0) return null;
   const live = turn.live !== null && !turn.live.ended;
   // 正文还没出来时思考展开：那段等待正是它要填的；正文一出现就收起。
-  const hasBody = items.some((item) => item.kind === 'text' || item.kind === 'tool' || item.kind === 'card');
+  const hasBody = items.some(
+    (item) => item.kind === 'text' || item.kind === 'tool' || item.kind === 'card' || item.kind === 'thought',
+  );
   const ordinals: Record<string, number> = {};
   const keyOf = (item: TimelineItem): string => {
     if (item.kind === 'card') {
@@ -581,8 +583,12 @@ function AssistantTurnBody({
             return (
               <ThinkingBlock key={key} steps={item.steps} reasoning={item.reasoning} live={item.live} autoOpen={live && !hasBody} />
             );
+          case 'thought':
+            return <ThoughtBlock key={key} item={item} />;
           case 'tool':
             return <ToolCallRow key={key} item={item} />;
+          case 'waiting':
+            return <WaitingRow key={key} item={item} />;
           case 'text':
             return <Markdown key={key} text={item.text} assets={knownAssets} />;
           case 'card': {

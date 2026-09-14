@@ -1,12 +1,12 @@
 /**
- * 一轮时间线里的三种叶子组件（IKDK5K / IKDK5L）：思考块、工具行、轮尾的账。
+ * 一轮时间线里的叶子组件（IKDK5K / IKDK5L / IKFLB9）：思考块、一段思考、工具行、等待行、轮尾的账。
  *
  * 单独成文件是为了能在 jsdom 里直接渲染它们做回归——AgentPanel/index.tsx 牵着编辑器、
  * 弹窗和一堆接口，在测试里立不起来。条目的编排（AssistantTurnBody）仍在那边，因为它要用
  * 生成卡与 Markdown。
  */
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, ChevronUp, Loader2, Minus, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Clock, Loader2, Minus, X } from 'lucide-react';
 import styles from './index.module.css';
 import { formatElapsed, formatTokens } from '../../hooks/runStatusLine';
 import {
@@ -113,6 +113,81 @@ export function ThinkingBlock({
   );
 }
 
+/**
+ * 一段思考（IKFLB9）：模型在这一刻想了什么、想了多久，落在它发生的位置上。
+ *
+ * 此前思考是整轮一块、固定在最前，工具行之间的那几十秒没有任何东西——测试站项目 462 写卡那一行
+ * 记 1m 9s，点开只有两条 <0.1s。现在每一段想各占一行，时长和工具行、等待行一起加起来就是这一轮。
+ *
+ * 默认收起；正在想的那一段展开，想完就收——那段等待正是它要填的。用户点过就以用户为准。
+ * 投影把整段话都拦下时（原话讲的全是内部的东西）只剩一行「思考了 12s」，没有可展开的内容。
+ */
+export function ThoughtBlock({ item }: { item: Extract<TimelineItem, { kind: 'thought' }> }) {
+  const [override, setOverride] = useState<boolean | null>(null);
+  const hasText = item.text.trim() !== '';
+  const open = hasText && (override ?? item.running);
+  const now = useNow(item.running && item.startedAt !== null);
+  const elapsedMs =
+    item.elapsedMs ?? (item.running && item.startedAt !== null ? Math.floor((now - item.startedAt) / 1000) * 1000 : null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(true);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el || !open || !stickRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [item.text, open]);
+  return (
+    <div className={styles.thinkingBlock}>
+      <button
+        type="button"
+        className={styles.thinkingToggle}
+        onClick={hasText ? () => setOverride(!open) : undefined}
+        disabled={!hasText}
+        aria-expanded={hasText ? open : undefined}
+      >
+        <span className={`${styles.thinkingMark} ${item.running ? styles.thinkingMarkLive : ''}`} aria-hidden="true">
+          ✶
+        </span>
+        <span>{item.running ? '思考中' : '思考了'}</span>
+        {elapsedMs !== null && elapsedMs > 0 && <span className={styles.toolCallElapsed}>{formatDuration(elapsedMs)}</span>}
+        {hasText && (open ? <ChevronUp size={12} strokeWidth={2.5} /> : <ChevronDown size={12} strokeWidth={2.5} />)}
+      </button>
+      {open && (
+        <div
+          ref={bodyRef}
+          className={styles.thinkingReasoning}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+          }}
+        >
+          {item.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 等待行（IKFLB9）：两段之间没有任何输出的那段时间，比如工具返回之后模型把结果读一遍。
+ *
+ * 只在落库之后出现（服务端补缝算出来的），一秒以内的不画（见 MIN_VISIBLE_WAITING_MS）。画得比工具行
+ * 更淡：它不是做了一件事，是在等一件事。
+ */
+export function WaitingRow({ item }: { item: Extract<TimelineItem, { kind: 'waiting' }> }) {
+  return (
+    <div className={`${styles.toolCall} ${styles.toolCallWaiting}`}>
+      <div className={styles.toolCallHead}>
+        <span className={styles.toolCallMark} aria-hidden="true">
+          <Clock size={12} strokeWidth={2.5} />
+        </span>
+        <span className={styles.toolCallLabel}>{settledStepLabel(item.summary)}</span>
+        <span className={styles.toolCallElapsed}>{formatDuration(item.elapsedMs)}</span>
+      </div>
+    </div>
+  );
+}
+
 const TOOL_STATUS_CLASS: Record<ToolStatus, string> = {
   running: styles.toolCallRunning ?? '',
   completed: styles.toolCallDone ?? '',
@@ -166,6 +241,7 @@ export function ToolCallRow({ item }: { item: Extract<TimelineItem, { kind: 'too
           <ToolStatusMark status={item.status} />
         </span>
         <span className={styles.toolCallLabel}>{toolLabel(item.summary, item.status)}</span>
+        {item.calls > 1 && <span className={styles.toolCallElapsed}>×{item.calls}</span>}
         {elapsedMs !== null && elapsedMs > 0 && <span className={styles.toolCallElapsed}>{formatDuration(elapsedMs)}</span>}
         {hasSubsteps && (
           <span className={styles.toolCallChevron} aria-hidden="true">

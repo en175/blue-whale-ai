@@ -126,7 +126,8 @@ describe('夹具重放：读图轮进行中的形状', () => {
     expect(live.runId).toBe(state.runningRunId);
     expect(live.batchId).toBe(turns[0].user[0].inputBatchId);
     const items = itemsOf(turns[0], live.text);
-    expect(kinds(items)).toEqual(['reasoning', 'text', 'tool']);
+    // 思考落在它发生的位置，是一段 thought；轮级步骤不再画成顶上的「思考过程」块（IKFLB9）。
+    expect(kinds(items)).toEqual(['thought', 'text', 'tool']);
     const tool = items[2];
     if (tool.kind !== 'tool') throw new Error('应是工具行');
     expect(tool.status).toBe('running');
@@ -166,7 +167,7 @@ describe('夹具重放：读图轮进行中的形状', () => {
   it('打字动画没追上断点时，工具行不提前跳出来', () => {
     const state = replay(events.slice(0, completed + 1));
     const [turn] = turnsOf(state);
-    expect(kinds(itemsOf(turn, '我先把'))).toEqual(['reasoning', 'text']);
+    expect(kinds(itemsOf(turn, '我先把'))).toEqual(['thought', 'text']);
   });
 
   it('终态：进行中的那份让位给服务端消息，账记在这一轮上', () => {
@@ -375,6 +376,71 @@ describe('条目投影', () => {
     );
     if (items[0].kind !== 'tool') throw new Error('应是工具行');
     expect(toolLabel(items[0].summary, items[0].status)).toBe('已跳过编排分镜与提示词');
+  });
+});
+
+function reasoningDelta(runId: string, text: string, at: number): TimelineEvent {
+  return { type: 'assistant.reasoning.delta', data: { occurred_at: iso(at), run_id: runId, payload: { stream_id: `reasoning_${runId}`, text } } };
+}
+
+describe('思考段与等待行（IKFLB9）', () => {
+  it('进行中：每一段思考落在它发生的位置，被正文或工具行打断就结束、记下时长', () => {
+    let live = startLiveRun('run1', 'A', T0);
+    for (const ev of [
+      reasoningDelta('run1', '先看图。', 100),
+      reasoningDelta('run1', '再想构图。', 1_100),
+      delta('run1', '我先读一下。', 2_000),
+      activity('run1', '正在读取图片', 2_100, 'read_asset'),
+      { type: 'tool.activity', data: { occurred_at: iso(2_300), run_id: 'run1', payload: { tool: 'read_asset', status: 'completed', summary: '正在读取图片', elapsed_ms: 200 } } },
+      reasoningDelta('run1', '图里是一只猫。', 5_000),
+    ]) {
+      live = applyLiveEvent(live, ev, 0);
+    }
+
+    const items = itemsFromLive(live, live.text);
+    expect(kinds(items)).toEqual(['thought', 'text', 'tool', 'thought']);
+    expect(items[0]).toMatchObject({ kind: 'thought', text: '先看图。再想构图。', running: false, elapsedMs: 1_900 });
+    expect(items[3]).toMatchObject({ kind: 'thought', text: '图里是一只猫。', running: true, elapsedMs: null });
+  });
+
+  it('本地固化的消息与服务端同形：思考段按顺序成块，思考过程块里不再带原话', () => {
+    const state = replay([
+      runEvent('run.started', 'run1', 'A', 0),
+      reasoningDelta('run1', '想。', 100),
+      delta('run1', '好。', 1_000),
+      runEvent('run.cancelled', 'run1', 'A', 2_000),
+    ]);
+    const blocks = state.messages.find((m) => m.sourceRunId === 'run1')?.blocks ?? [];
+    expect(blocks.map((b) => b.type)).toEqual(['reasoning', 'text']);
+    expect(blocks[0]).toMatchObject({ text: '想。', started_ms: 100, ended_ms: 1_000 });
+  });
+
+  it('落库消息：思考段与等待行按顺序画，一秒以内的等待不画，顶上的思考过程块不再画', () => {
+    const items = itemsFromBlocks(
+      [
+        { type: 'thinking', thinking: { steps: ['正在理解创作需求'] } },
+        { type: 'reasoning', text: '先想构图。', started_ms: 0, ended_ms: 57_600 },
+        { type: 'tool_call', tool: 'skill_read', summary: '正在查阅对应的创作方法', status: 'ok', started_ms: 57_600, ended_ms: 57_604, calls: 3 },
+        { type: 'waiting', summary: '正在根据生成结果整理回复', started_ms: 57_604, ended_ms: 57_900 },
+        { type: 'reasoning', text: '', started_ms: 57_900, ended_ms: 60_000 },
+        { type: 'waiting', summary: '正在根据生成结果整理回复', started_ms: 60_000, ended_ms: 62_100 },
+        { type: 'text', text: '卡写好了。' },
+      ],
+      '卡写好了。',
+    );
+
+    expect(kinds(items)).toEqual(['thought', 'tool', 'thought', 'waiting', 'text']);
+    expect(items[1]).toMatchObject({ kind: 'tool', calls: 3 });
+    expect(items[2]).toMatchObject({ kind: 'thought', text: '', elapsedMs: 2_100 });
+    expect(items[3]).toEqual({ kind: 'waiting', summary: '正在根据生成结果整理回复', elapsedMs: 2_100 });
+  });
+
+  it('老记录没有思考段：思考过程块照旧画，原话还在里面', () => {
+    const items = itemsFromBlocks(
+      [{ type: 'thinking', thinking: { steps: ['正在理解创作需求'], reasoning: '老的原话' } }, { type: 'text', text: '好' }],
+      '好',
+    );
+    expect(items[0]).toMatchObject({ kind: 'reasoning', reasoning: '老的原话' });
   });
 });
 

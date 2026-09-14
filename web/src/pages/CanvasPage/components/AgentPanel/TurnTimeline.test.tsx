@@ -44,6 +44,7 @@ const readImage = (over: Partial<ToolItem> = {}): ToolItem => ({
   status: 'completed',
   startedAt: null,
   elapsedMs: 8460,
+  calls: 1,
   substeps: [
     { summary: '正在打开素材文件', status: 'completed', elapsedMs: 242 },
     { summary: '正在读取_smoke.jpg（图片 400×400）', status: 'completed', elapsedMs: 8170 },

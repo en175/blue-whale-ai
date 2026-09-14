@@ -57,6 +57,15 @@ export interface SessionContentBlock {
   started_ms?: number;
   ended_ms?: number | null;
   substeps?: { id: string; summary: string; started_ms: number; ended_ms: number | null }[];
+  /** 模型一步里并发调了几次同一个工具，合成这一行（IKFLB9）。 */
+  calls?: number;
+  /*
+   * `type: 'reasoning'`（IKFLB9）：模型的一段思考，按发生顺序夹在正文与工具行之间，原话在 `text`，
+   * 起止在 `started_ms` / `ended_ms`。有了它，`thinking` 块里就不再带 `reasoning`。
+   *
+   * `type: 'waiting'`（IKFLB9）：两段之间没有任何输出的时间（例如工具返回之后模型读结果），
+   * 名字在 `summary`。有了它，一轮里各段的时长加起来等于总时长。
+   */
   /**
    * 思考过程块（可折叠展示）。
    *

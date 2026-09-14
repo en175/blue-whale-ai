@@ -1914,6 +1914,15 @@
   color: var(--color-text-tertiary);
 }
 
+/* 等待行（IKFLB9）：不是做了一件事，是在等一件事，比工具行再淡一档。 */
+.toolCallWaiting {
+  color: var(--color-text-tertiary);
+}
+
+.thinkingToggle:disabled {
+  cursor: default;
+}
+
 .toolCallSubsteps {
   display: flex;
   flex-direction: column;
