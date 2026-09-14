@@ -6,6 +6,7 @@ export {
   type GenerationParamCheckInput,
 } from "./capability-param-validation.js";
 export { previewSourceSchema, applyPreviewSchema, promptMentionSchema, validPromptMentions, type PromptPreviewSource, type PromptPreviewContent, type PromptMention, type PromptMaterial } from "./prompt-preview.js";
+export { mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, deriveMediaMentionLabels, deriveMediaMentionLabelsInOrder, invalidMediaMentionLabel, MEDIA_TYPE_LABEL, MEDIA_MENTION_LIMITS, TEXT_INDEX_EDGE_MARKER, type MediaMention, type MediaRef, type MediaMentionType } from "./text-node-media.js";
 export {
   legacyCardHistoryItemSchema,
   legacyMigrationFailureSchema,

@@ -12,7 +12,7 @@ import { CANVAS_EDGE_LIMITS, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE,
 import { createCanvasRepo, createConversationQuoteRepo, createLegacyCardHistoryRepo, type CanvasView, type ConversationQuoteRow, type LegacyCardHistoryRow } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
-import { promptMentionSchema, validPromptMentions, type PromptPreviewContent, type PromptPreviewSource } from "@blue-whale/contracts";
+import { promptMentionSchema, validPromptMentions, mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, type PromptPreviewContent, type PromptPreviewSource } from "@blue-whale/contracts";
 import { PromptMaterialUnavailableError } from "@lib/shared/persistence/canvas-repo.js";
 
 /** 对话引用快照视图（IKDLQJ）：主键字符串化；来源损坏时按无来源处理，不丢正文。 */
@@ -322,6 +322,52 @@ export class CanvasService {
     const editedMaterials: Array<{ assetId: string; mediaType: "image" | "video" | "audio" }> = [];
     const current = await this.repo.getByProject(projectId);
     const previous = JSON.parse(current.nodes ?? "[]") as typeof incoming;
+    // IKFM3Q 正文媒体索引契约 §7：mediaMentions/mediaRefs 同现同缺、区间与覆盖有效；
+    // 新增身份素材真实可及且与来源节点身份一致；存量身份展示元数据不可变（失效身份豁免正文编辑）
+    for (const node of incoming) {
+      const hasMentions = node.data?.mediaMentions !== undefined;
+      const hasRefs = node.data?.mediaRefs !== undefined;
+      if (!hasMentions && !hasRefs) continue;
+      if (node.type !== "textNode" || hasMentions !== hasRefs) {
+        throw new BadRequestException("正文媒体索引字段无效，原内容未改动");
+      }
+      const mentions = mediaMentionSchema.array().safeParse(node.data?.mediaMentions);
+      const refs = mediaRefSchema.array().safeParse(node.data?.mediaRefs);
+      const text = typeof node.data?.text === "string" ? node.data.text : "";
+      if (!mentions.success || !refs.success || !validMediaMentions(text, mentions.data) || !mediaRefsCoverMentions(mentions.data, refs.data)) {
+        throw new BadRequestException("正文媒体索引无效，原内容未改动");
+      }
+      // 契约 §1：media 索引与 Agent 方案绑定（promptMentions）区间互不重叠
+      const promptMentions = promptMentionSchema.array().safeParse(node.data?.promptMentions ?? []);
+      const combined = [...mentions.data, ...(promptMentions.success ? promptMentions.data : [])].sort((a, b) => a.start - b.start);
+      let covered = 0;
+      for (const range of combined) {
+        if (range.start < covered) throw new BadRequestException("正文媒体索引与方案绑定区间重叠，原内容未改动");
+        covered = range.end;
+      }
+      const old = previous.find(item => item.id === node.id);
+      const oldRefs = mediaRefSchema.array().safeParse(old?.data?.mediaRefs ?? []);
+      const oldByNode = new Map((oldRefs.success ? oldRefs.data : []).map(ref => [ref.nodeId, ref]));
+      for (const ref of refs.data) {
+        const before = oldByNode.get(ref.nodeId);
+        if (before) {
+          if (JSON.stringify(before) !== JSON.stringify(ref)) {
+            throw new BadRequestException("媒体素材展示信息不可修改，原内容未改动");
+          }
+          continue;
+        }
+        // 新增身份：素材真实可及（归属/未删/正常/类型/地址一致），与 promptMaterials 新增校验同口径
+        const asset = await this.prisma.client.assets.findFirst({ where: { id: BigInt(ref.assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal" } });
+        if (!asset || asset.type !== ref.mediaType || asset.url !== ref.url) {
+          throw new BadRequestException("媒体素材已删除、无权访问或身份不一致，原内容未改动");
+        }
+        // 来源节点在本次保存中存在时必须是同身份 mediaNode；节点不存在即来源已删的失效身份，豁免（契约 §7.3）
+        const source = incoming.find(item => item.id === ref.nodeId);
+        if (source && (source.type !== "mediaNode" || nodeAssetId(source) !== ref.assetId || String(source.data?.mediaType ?? "") !== ref.mediaType)) {
+          throw new BadRequestException("媒体素材与来源节点身份不一致，原内容未改动");
+        }
+      }
+    }
     if ([...previous, ...incoming].some(node => node.data?.promptSource !== undefined)) {
       if (body.expectedVersion === undefined) throw new BadRequestException("保存预览节点必须携带 If-Match");
       if (body.expectedVersion !== current.version) return { code: 412, msg: "Canvas 版本冲突", data: null } as const;
