@@ -5,7 +5,7 @@
  * ============================================ */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus } from 'lucide-react';
+import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
@@ -93,6 +93,8 @@ interface MediaNodeData {
   size?: number;
   /** 生成参数透传的目标比例（如 "16:9"），仅决定占位形状，不作原始分辨率展示 */
   targetRatio?: string;
+  /** IKFR4X 持续选取会话勾选标记（渲染期派生注入，不持久化）：已并入当前选取目标的来源 */
+  pickMarked?: boolean;
   /** 浏览器量得真实媒体尺寸后回填（缺失或不一致时才回调） */
   onMediaDims?: (id: string, dims: MediaDims) => void;
   onDelete?: (id: string) => void;
@@ -450,6 +452,16 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         </div>
         <span className={styles.titleMeta} title={titleMeta || undefined}>{titleMeta}</span>
       </div>
+      {/* IKFR4X 持续选取会话勾选标识：已并入当前目标的来源节点，卡片右上角绿底白勾（纯展示不挡点击） */}
+      {data.pickMarked === true && (
+        <span
+          className={`nodrag nopan ${styles.pickMarkedBadge}`}
+          data-testid="pick-mark-badge"
+          title="已加入当前参考"
+        >
+          <Check size={12} strokeWidth={3} />
+        </span>
+      )}
       {nameError && <div role="alert" className="nodrag nopan">{nameError}</div>}
       <div className={`${styles.contentCard} ${isAudio ? styles.audioCard : ''}`} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
         {!data.isFirst && !isEmptyShell && (

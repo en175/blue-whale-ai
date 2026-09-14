@@ -338,6 +338,13 @@ function toastText(): string {
   return container.textContent ?? '';
 }
 
+/** IKFR4Y 结束持续选取会话：Esc（输入框外的 Esc 保持原语义，此处直发 window） */
+async function pressEscape() {
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  });
+}
+
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
@@ -388,9 +395,11 @@ describe('IKFE8U 视频面板统一附件入口', () => {
   it('图生视频从资产中选择：列表过滤仅图片（隐藏视频/音频）', async () => {
     await renderPage();
     await openBoundPanel();
-    // 图生视频需 ≥1 图（enabledModes 门控）：先经统一入口加一张图（自动切全能参考）再切模式
+    // 图生视频需 ≥1 图（enabledModes 门控）：先经统一入口加一张图（自动切全能参考）再切模式；
+    // IKFR4Y 选取后会话保持（模式入口锁定），先完成会话再切换
     await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
     await clickNode('m1');
+    await pressEscape();
     await switchMode('图生视频');
 
     await clickMenuItem(sourceEntryButton()!, '从资产中选择');
@@ -405,10 +414,8 @@ describe('IKFE8U 视频面板统一附件入口', () => {
     await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
     await clickNode('m1');
     expect(edgePairs()).toEqual(['m1->' + currentVideoDraftId()]);
-    // 选取模式在命中后结束，逐个重新发起
-    await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
+    // IKFR4Y 持续会话：命中后模式保持，无需重新进入即可连续选取
     await clickNode('v1');
-    await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
     await clickNode('s1');
 
     expect(edgePairs().sort()).toEqual(['m1->' + currentVideoDraftId(), 's1->' + currentVideoDraftId(), 'v1->' + currentVideoDraftId()]);
@@ -420,6 +427,8 @@ describe('IKFE8U 视频面板统一附件入口', () => {
     await openBoundPanel();
     await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
     await clickNode('m1');
+    // IKFR4Y 会话保持：先完成会话再切换模式
+    await pressEscape();
     await switchMode('图生视频');
 
     await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
@@ -427,7 +436,7 @@ describe('IKFE8U 视频面板统一附件入口', () => {
 
     expect(toastText()).toContain('图生视频参考仅支持图片素材');
     expect(edgePairs()).toEqual(['m1->' + currentVideoDraftId()]);
-    await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
+    // 同一会话内改选合法图片仍可接纳（模式保持）
     await clickNode('m2');
     expect(edgePairs().sort()).toEqual(['m1->' + currentVideoDraftId(), 'm2->' + currentVideoDraftId()]);
   });
@@ -479,15 +488,18 @@ describe('IKFE8U 视频面板统一附件入口', () => {
     await vi.waitFor(() => expect(edgePairs().length).toBe(3));
   });
 
-  it('选取模式提示条：全能参考提示图片/视频/音频可选（文案与统一入口一致）', async () => {
+  it('选取模式提示条：进入即持续会话文案，命中后不退出（IKFR4Y 语义）', async () => {
     await renderPage();
     await openBoundPanel();
     await switchMode('全能参考');
 
     await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
-    expect(container.textContent).toContain('从节点添加素材：点击画布中的图片、视频或音频节点带入参考');
-    // 命中后提示条退出
+    // 发起即持续语义：连续选取文案 + 完成选取按钮
+    expect(container.textContent).toContain('连续点击画布中的图片、视频或音频节点带入参考');
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent === '完成选取')).toBe(true);
+    // 命中后会话保持（提示条不退出）
     await clickNode('m1');
+    expect(container.textContent).toContain('完成选取');
     expect(container.textContent).not.toContain('点击空白处取消');
   });
 });
@@ -502,7 +514,7 @@ describe('IKFEWF 文本选取边界', () => {
     await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
     await clickNode('t1');
     expect(edgePairs()).toEqual([`t1->${currentVideoDraftId()}`]);
-    await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
+    // IKFR4Y 会话保持：同一会话内重复选择同一文本卡幂等（不重复连线）
     await clickNode('t1');
     expect(edgePairs()).toHaveLength(1);
   });

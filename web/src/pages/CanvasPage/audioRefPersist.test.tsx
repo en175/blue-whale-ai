@@ -241,8 +241,10 @@ async function typePrompt(text: string) {
   await typePromptRefText(container, text);
 }
 
+/** 点击画布媒体/文本节点（打开/切换绑定面板、会话选取命中） */
 async function clickNode(id: string) {
-  const node = flowProps.current.mediaNodes.find((n: Node) => n.id === id);
+  const node = flowProps.current.mediaNodes.find((n: Node) => n.id === id)
+    ?? flowProps.current.textNodes.find((n: Node) => n.id === id)!;
   await act(async () => {
     flowProps.current.onNodeClick(node);
   });
@@ -256,7 +258,7 @@ function refNames(): string[] {
   return [...container.querySelectorAll<HTMLElement>('[data-testid="audio-ref-thumb"]')].map((el) => el.title);
 }
 
-/** 经「添加参考音频」→「从节点添加素材」进入画布选取模式（面板列表与 pick 模式同时激活） */
+/** 进入画布选取模式（面板列表与 pick 模式同时激活）；IKFR4Z 起为持续选取会话的发起入口 */
 async function startCanvasPick() {
   await vi.waitFor(() => {
     const btn = [...container.querySelectorAll('button')].find((b) => b.title === '从资产中选择 / 从节点添加素材');
@@ -270,10 +272,25 @@ async function startCanvasPick() {
   });
 }
 
-/** 选取是一次性模式：每选一个节点前重新进入画布选取，再点击来源节点（真实路径） */
-async function pickCanvasNode(nodeId: string) {
-  await startCanvasPick();
-  await clickNode(nodeId);
+/** IKFR4Z 结束持续选取会话：Esc（输入框外的 Esc 保持原语义，此处直发 window） */
+async function pressEscape() {
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  });
+}
+
+/** IKFR4Z 完成选取按钮是否存在（会话提示条专属，普通模式无） */
+function finishButton(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.textContent === '完成选取',
+  );
+}
+
+/** IKFR4Z 点击提示条「完成选取」结束会话（编辑/发送/切换须先结束会话） */
+async function finishPick() {
+  await act(async () => {
+    finishButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
 }
 
 async function waitModelReady() {
@@ -312,9 +329,11 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await clickNode('d1');
     await waitModelReady();
 
-    await pickCanvasNode('u1');
+    // IKFR4Z 持续会话：入口进入一次，连续点击多份允许来源，模式保持
+    await startCanvasPick();
+    await clickNode('u1');
     expect(edgePairs()).toEqual(['u1->d1']);
-    await pickCanvasNode('u2');
+    await clickNode('u2');
     expect(edgePairs()).toEqual(['u1->d1', 'u2->d1']);
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声']), { timeout: 3000 });
 
@@ -332,8 +351,9 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await waitModelReady();
     await typePrompt('环境音');
 
-    await pickCanvasNode('u1');
-    await pickCanvasNode('u2');
+    await startCanvasPick();
+    await clickNode('u1');
+    await clickNode('u2');
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声']), { timeout: 3000 });
 
     await closePanel();
@@ -343,6 +363,8 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await waitModelReady();
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声']), { timeout: 3000 });
     expect(container.querySelector('[data-testid="audio-input"]')?.textContent).toContain('环境音');
+    // 重开为普通模式，不恢复持续选取会话
+    expect(finishButton()).toBeUndefined();
   });
 
   it('空白隐藏重开：点击画布空白隐藏面板，参考与提示词保留，重开原目标恢复', async () => {
@@ -351,11 +373,18 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await waitModelReady();
     await typePrompt('空白隐藏描述');
 
-    await pickCanvasNode('u1');
-    await pickCanvasNode('u2');
+    await startCanvasPick();
+    await clickNode('u1');
+    await clickNode('u2');
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声']), { timeout: 3000 });
 
-    // 画布空白点击隐藏面板（Q9：隐藏不丢弃，绑定保留供重开原目标）
+    // IKFR4Z 会话中空白点击不退出、不隐藏面板（AC-03/06：空白点击、平移缩放保持原目标和 Dock）
+    await act(async () => {
+      flowProps.current.onPaneClick();
+    });
+    expect(refNames()).toEqual(['海浪声', '风声']);
+    // 完成会话后空白点击恢复 Q9 普通语义：隐藏面板（隐藏不丢弃，绑定保留供重开原目标）
+    await pressEscape();
     await act(async () => {
       flowProps.current.onPaneClick();
     });
@@ -365,6 +394,7 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await waitModelReady();
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声']), { timeout: 3000 });
     expect(container.querySelector('[data-testid="audio-input"]')?.textContent).toContain('空白隐藏描述');
+    expect(finishButton()).toBeUndefined();
   });
 
   it('保存失败：选择保留并显示未保存，阻止切换其他目标与发送，允许关闭重开原目标，重试成功恢复', async () => {
@@ -374,9 +404,10 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await waitModelReady();
     await typePrompt('保存前编辑');
 
-    // 保存持续失败：选取仍立即建线并保留在页面
+    // 保存持续失败：选取仍立即建线并保留在页面（IKFR4Z 会话保持，与保存状态独立）
     apiMocks.saveCanvasDoc.mockImplementation(() => Promise.reject(new Error('boom')));
-    await pickCanvasNode('u1');
+    await startCanvasPick();
+    await clickNode('u1');
     expect(edgePairs()).toEqual(['u1->d1']);
 
     // 自动保存失败：显示未保存；连线与面板参考保留
@@ -403,6 +434,7 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('已保存'));
     expect(lastSavedPayload().edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`)).toEqual(['u1->d1']);
     expect(sendButton().disabled).toBe(false);
+    // 关闭重开已是普通模式（会话随面板关闭结束），恢复可切换
     await clickNode('d2');
     await vi.waitFor(() => expect(refNames()).toEqual([]));
   });
@@ -414,9 +446,12 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await waitModelReady();
     await typePrompt('A 目标描述');
 
-    await pickCanvasNode('u1');
-    await pickCanvasNode('u2');
+    // IKFR4Z 一次进入连续选取两段；完成会话后恢复普通编辑（切换目标不在会话中发生）
+    await startCanvasPick();
+    await clickNode('u1');
+    await clickNode('u2');
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声']), { timeout: 3000 });
+    await pressEscape();
 
     // 切换到 B：面板干净，不带入 A 的参考与提示词
     await clickNode('d2');
@@ -424,7 +459,9 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     expect(refNames()).toEqual([]);
     expect(container.querySelector('[data-testid="audio-input"]')?.textContent).not.toContain('A 目标描述');
 
-    await pickCanvasNode('u3');
+    await startCanvasPick();
+    await clickNode('u3');
+    await pressEscape();
     expect(edgePairs()).toEqual(['u1->d1', 'u2->d1', 'u3->d2']);
 
     // 切回 A：A 的两项参考完整恢复，B 的参考不串入
@@ -466,8 +503,9 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await waitModelReady();
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声']), { timeout: 3000 });
 
-    // 重复素材（同 assetId）拒绝：明确提示且不建第二条线
-    await pickCanvasNode('u1');
+    // 重复素材（同 assetId）拒绝：明确提示且不建第二条线（IKFR4Z 会话保持，提示后可继续）
+    await startCanvasPick();
+    await clickNode('u1');
     expect(edgePairs()).toEqual(['u1->d1', 'u2->d1']);
     await vi.waitFor(() => expect(container.textContent).toContain('重复的素材已跳过'));
 
@@ -509,8 +547,9 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await clickNode('d1');
     await waitModelReady();
 
-    await pickCanvasNode('u1');
-    await pickCanvasNode('u2');
+    await startCanvasPick();
+    await clickNode('u1');
+    await clickNode('u2');
     // 其他目标也引用 u1：移除 A 的引用不影响 B 的连线
     await act(async () => {
       flowProps.current.onConnect({ source: 'u1', target: 'd2' });
@@ -518,17 +557,22 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声']), { timeout: 3000 });
 
     const removeButtons = () => [...container.querySelectorAll<HTMLButtonElement>('[data-testid="audio-ref-thumb"] button[title="移除"]')];
+    // 会话中 Dock 移除仍可用（AC-07）：断开 A 对应连线，B 的引用保持
     await act(async () => { removeButtons().at(-1)!.click(); });
     expect(edgePairs()).toEqual(['u1->d1', 'u1->d2']);
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声']));
+    // 腾出容量后同一模式内可再次添加（AC-02）
+    await clickNode('u0');
+    expect(edgePairs()).toEqual(['u1->d1', 'u1->d2', 'u0->d1']);
     await vi.waitFor(() => {
       expect(lastSavedPayload().edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`))
-        .toEqual(['u1->d1', 'u1->d2']);
+        .toEqual(['u1->d1', 'u1->d2', 'u0->d1']);
     }, { timeout: 3000 });
 
+    await pressEscape();
     await closePanel();
     await clickNode('d1');
-    await vi.waitFor(() => expect(refNames()).toEqual(['海浪声']), { timeout: 3000 });
+    await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '备用']), { timeout: 3000 });
   });
 
   it('画布拖线：音频→音频草稿建线持久化；图片→音频草稿不建线（音频面板不提供图片入口）', async () => {
@@ -554,9 +598,14 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await waitModelReady();
     await typePrompt('生成一段海边的环境音');
 
-    await pickCanvasNode('u1');
-    await pickCanvasNode('u2');
+    await startCanvasPick();
+    await clickNode('u1');
+    await clickNode('u2');
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声']), { timeout: 3000 });
+    // 会话中发送被隔离（AC-07），完成会话后恢复可发送
+    expect(sendButton().disabled).toBe(true);
+    await pressEscape();
+    expect(sendButton().disabled).toBe(false);
 
     await act(async () => {
       sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -573,5 +622,294 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     // 不携带旧参考字段
     expect(payload.input_asset_ids).toBeUndefined();
     expect(payload.reference_asset_ids).toBeUndefined();
+  });
+});
+
+describe('IKFR4Z 音频参考持续选取与保存恢复闭环', () => {
+  function pickLock(): boolean {
+    return flowProps.current.refPickActive === true;
+  }
+
+  function pickMarks(): string[] {
+    return (flowProps.current.refPickMarkedIds ?? []) as string[];
+  }
+
+  /** 音频面板在本页是否可见：会话中编辑器只读（contenteditable=false），以发送按钮为准 */
+  function panelOpen(): boolean {
+    return container.querySelector('[data-testid="audio-send"]') !== null;
+  }
+
+  it('一次进入连续选取两段：逐条建线保持模式，Dock 与勾选同步，自动保存上送', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await startCanvasPick();
+    expect(pickLock()).toBe(true);
+    expect(finishButton()).toBeTruthy();
+    await clickNode('u1');
+    expect(edgePairs()).toEqual(['u1->d1']);
+    expect(pickLock()).toBe(true);
+    await clickNode('u2');
+    expect(edgePairs()).toEqual(['u1->d1', 'u2->d1']);
+    // 勾选只含当前目标参考来源（与 Dock 同源）
+    expect([...pickMarks()].sort()).toEqual(['u1', 'u2']);
+    await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声']), { timeout: 3000 });
+
+    await vi.waitFor(() => {
+      expect(lastSavedPayload().edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`))
+        .toEqual(['u1->d1', 'u2->d1']);
+    }, { timeout: 3000 });
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+  });
+
+  it('重复点击已选节点：不新增、不移除，提示已跳过且模式持续', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await startCanvasPick();
+    await clickNode('u1');
+    await clickNode('u1');
+    expect(edgePairs()).toEqual(['u1->d1']);
+    expect(pickMarks()).toEqual(['u1']);
+    await vi.waitFor(() => expect(container.textContent).toContain('重复的素材已跳过'));
+    expect(pickLock()).toBe(true);
+  });
+
+  it('数量上限明确提示：满 3 段后不写入不退出，腾出容量后同模式可继续', async () => {
+    seedDoc({ edges: [
+      { id: 'e-u1-d1', source: 'u1', target: 'd1' },
+      { id: 'e-u2-d1', source: 'u2', target: 'd1' },
+    ] });
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await startCanvasPick();
+    // 补满第 3 段
+    await clickNode('u3');
+    expect(edgePairs()).toEqual(['u1->d1', 'u2->d1', 'u3->d1']);
+    // 第 4 段：明确提示、不写入、不退出
+    await clickNode('u0');
+    await vi.waitFor(() => expect(container.textContent).toContain('参考音频最多 3 段'));
+    expect(edgePairs()).toEqual(['u1->d1', 'u2->d1', 'u3->d1']);
+    expect(pickLock()).toBe(true);
+    // 面板移除腾出容量后，同一模式继续选取有效
+    const removeButtons = () => [...container.querySelectorAll<HTMLButtonElement>('[data-testid="audio-ref-thumb"] button[title="移除"]')];
+    await act(async () => { removeButtons().at(-1)!.click(); });
+    await clickNode('u0');
+    expect(edgePairs()).toEqual(['u1->d1', 'u2->d1', 'u0->d1']);
+    expect(pickLock()).toBe(true);
+  });
+
+  it('非法来源明确提示原因：不写入、不退出、不关闭面板，改选合法来源可继续', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await startCanvasPick();
+    // 图片节点：音频面板类型边界（audioRefSourceError 同口径文案）
+    await clickNode('m1');
+    expect(edgePairs()).toEqual([]);
+    expect(pickLock()).toBe(true);
+    expect(panelOpen()).toBe(true);
+    await vi.waitFor(() => expect(container.textContent).toContain('音频参考仅支持音频素材'));
+
+    // 改选合法来源仍然生效，模式继续
+    await clickNode('u1');
+    expect(edgePairs()).toEqual(['u1->d1']);
+    expect(pickMarks()).toEqual(['u1']);
+  });
+
+  it('会话选文本卡：建附件边并保持模式，文本来源不计入勾选，可继续选媒体', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await startCanvasPick();
+    await clickNode('t1');
+    expect(edgePairs()).toEqual(['t1->d1']);
+    expect(pickLock()).toBe(true);
+    // 文本附件来源无素材勾选语义，不计入勾选集合
+    expect(pickMarks()).toEqual([]);
+    await clickNode('u1');
+    expect(edgePairs()).toEqual(['t1->d1', 'u1->d1']);
+    expect(pickMarks()).toEqual(['u1']);
+  });
+
+  it('Dock 移除：勾选同步消失，同模式可立即再次选择', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await startCanvasPick();
+    await clickNode('u1');
+    expect(pickMarks()).toEqual(['u1']);
+
+    // 会话中 Dock 移除仍可用：断开当前目标对应连线，勾选同步
+    const removeBtn = container.querySelector<HTMLButtonElement>('[data-testid="audio-ref-thumb"] button[title="移除"]')!;
+    expect(removeBtn.disabled).toBe(false);
+    await act(async () => {
+      removeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await vi.waitFor(() => expect(refNames()).toEqual([]));
+    expect(edgePairs()).toEqual([]);
+    expect(pickMarks()).toEqual([]);
+    expect(pickLock()).toBe(true);
+
+    // 同一模式内立即再次选择
+    await clickNode('u1');
+    expect(edgePairs()).toEqual(['u1->d1']);
+    expect(pickMarks()).toEqual(['u1']);
+  });
+
+  it('模式内空白点击不退出：面板与模式保持，继续选取有效', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await startCanvasPick();
+    await clickNode('u1');
+    await act(async () => {
+      flowProps.current.onPaneClick();
+    });
+    expect(pickLock()).toBe(true);
+    expect(panelOpen()).toBe(true);
+    expect(edgePairs()).toEqual(['u1->d1']);
+
+    // 空白点击后继续选取仍有效
+    await clickNode('u2');
+    expect(edgePairs()).toEqual(['u1->d1', 'u2->d1']);
+  });
+
+  it('完成按钮退出：保留参考与原目标 Dock，恢复普通编辑与普通切换', async () => {
+    seedDoc({ secondDraft: true });
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await startCanvasPick();
+    await clickNode('u1');
+    // 会话内普通选中变化不关闭/切换原目标面板（选取进行中 selection 被隔离）
+    await act(async () => {
+      flowProps.current.onSelectionChange({ nodes: [flowProps.current.mediaNodes.find((n: Node) => n.id === 'u1')!], edges: [] });
+    });
+    expect(panelOpen()).toBe(true);
+    await finishPick();
+    expect(pickLock()).toBe(false);
+    expect(finishButton()).toBeUndefined();
+    // 原目标面板保持、参考保留
+    expect(panelOpen()).toBe(true);
+    await vi.waitFor(() => expect(refNames()).toEqual(['海浪声']), { timeout: 3000 });
+    expect(edgePairs()).toEqual(['u1->d1']);
+    // 未触发生成
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+
+    // 恢复普通编辑：点击其他草稿卡可正常切换面板
+    await clickNode('d2');
+    await vi.waitFor(() => expect(refNames()).toEqual([]));
+  });
+
+  it('Esc 退出：保留参考与面板，画布交互锁解除', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await startCanvasPick();
+    await clickNode('u1');
+    await pressEscape();
+    expect(pickLock()).toBe(false);
+    expect(panelOpen()).toBe(true);
+    expect(edgePairs()).toEqual(['u1->d1']);
+    await vi.waitFor(() => expect(refNames()).toEqual(['海浪声']), { timeout: 3000 });
+  });
+
+  it('关闭面板直接退出且保留参考：重开为普通模式', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await startCanvasPick();
+    await clickNode('u1');
+    await closePanel();
+    expect(panelOpen()).toBe(false);
+    expect(pickLock()).toBe(false);
+    expect(edgePairs()).toEqual(['u1->d1']);
+
+    // 重开：参考恢复，普通模式（无会话提示与完成按钮）
+    await clickNode('d1');
+    await waitModelReady();
+    await vi.waitFor(() => expect(panelOpen()).toBe(true));
+    await vi.waitFor(() => expect(refNames()).toEqual(['海浪声']), { timeout: 3000 });
+    expect(finishButton()).toBeUndefined();
+  });
+
+  it('活动目标被删除：结束模式并关闭面板，后续点击不写入已删目标', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await startCanvasPick();
+    await clickNode('u1');
+    expect(pickLock()).toBe(true);
+
+    // 删除活动目标：模式与面板一并结束（旧会话不得写向其他目标）
+    await act(async () => {
+      flowProps.current.onDeleteNode('d1');
+    });
+    await vi.waitFor(() => expect(panelOpen()).toBe(false));
+    expect(pickLock()).toBe(false);
+    expect(finishButton()).toBeUndefined();
+
+    // 后续点击来源节点走普通分支，不产生指向已删目标的连线
+    await clickNode('u1');
+    expect(edgePairs().some((p: string) => p.endsWith('->d1'))).toBe(false);
+  });
+
+  it('会话中操作隔离：提示词只读、模型入口与发送禁用，Dock 移除可用', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+    await typePrompt('会话前输入');
+
+    await startCanvasPick();
+    // 会话中先选取一段：Dock 出现参考项后验证移除入口仍可用
+    await clickNode('u1');
+    await vi.waitFor(() => expect(refNames()).toEqual(['海浪声']), { timeout: 3000 });
+    // 提示词编辑被隔离（Lexical readOnly → contenteditable=false）
+    const editor = container.querySelector('[contenteditable]')!;
+    expect(editor.getAttribute('contenteditable')).toBe('false');
+    // 模型入口与发送被隔离
+    const modelBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => (b.textContent ?? '').includes('测试音频模型'),
+    )!;
+    expect(modelBtn.disabled).toBe(true);
+    expect(sendButton().disabled).toBe(true);
+    // Dock 移除与退出仍可用
+    expect(finishButton()!.disabled).toBe(false);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="audio-ref-thumb"] button[title="移除"]')).toBeTruthy();
+
+    // 退出后恢复编辑
+    await finishPick();
+    const restored = container.querySelector('[contenteditable]')!;
+    expect(restored.getAttribute('contenteditable')).toBe('true');
+    expect(sendButton().disabled).toBe(false);
+  });
+
+  it('会话中切换编辑目标被隔离：点击其他草稿卡不切换面板', async () => {
+    seedDoc({ secondDraft: true });
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await startCanvasPick();
+    await clickNode('u1');
+    // 点击另一草稿卡：仍为原目标选参考（草稿卡不是合法音频来源，提示后保持）
+    await clickNode('d2');
+    expect(pickLock()).toBe(true);
+    expect(edgePairs()).toEqual(['u1->d1']);
+    await vi.waitFor(() => expect(refNames()).toEqual(['海浪声']), { timeout: 3000 });
+    await vi.waitFor(() => expect(container.textContent).toContain('待生成的草稿不能作为参考'));
   });
 });
