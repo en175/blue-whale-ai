@@ -46,7 +46,7 @@ public class NewApiAudioClient {
     private static final MediaType JSON_TYPE = MediaType.get("application/json");
 
     /** 默认超时 30s（new-api-audio-provider.ts:42 DEFAULT_AUDIO_TIMEOUT_MS）。 */
-    private static final int DEFAULT_TIMEOUT_MS = 30_000;
+    private static final int DEFAULT_TIMEOUT_MS = 90_000;
 
     private final OkHttpClient httpClient;
     private final String baseUrl;
