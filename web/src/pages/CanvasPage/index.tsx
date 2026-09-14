@@ -4326,6 +4326,47 @@ export default function CanvasPage() {
     });
   };
 
+  /** IKFJJT：把视频草稿的普通参考批量改角色（切首尾帧自动转换用）。
+   *  普通参考切首尾帧时，把已连入的图片按序转为首帧/尾帧槽——边参考改 edge.data.refRole
+   *  （随连线持久化），素材库参考改草稿 data.draftMaterialRefs[].role（随草稿持久化）。
+   *  images 按序：第 1 张 → first，第 2 张 → last。 */
+  const assignVideoRefRoles = (
+    draftId: string,
+    assignments: Array<{ nodeId: string; role: VideoRefRole }>,
+  ) => {
+    if (assignments.length === 0) return;
+    const roleByKey = new Map(assignments.map((a) => [a.nodeId, a.role]));
+
+    // 1) 边参考：改 (source → draft) 的 data.refRole（沿用 addCanvasEdge 的 history 模式持久化）
+    const prevEdges = edgesRef.current;
+    let edgesChanged = false;
+    const nextEdges = prevEdges.map((e) => {
+      if (e.target !== draftId) return e;
+      const role = roleByKey.get(e.source);
+      if (!role || (e.data as Record<string, unknown> | undefined)?.refRole === role) return e;
+      edgesChanged = true;
+      return { ...e, data: { ...e.data, refRole: role } };
+    });
+    if (edgesChanged) {
+      historyRef.current?.pushReplaceEdges(prevEdges, nextEdges);
+      edgesRef.current = nextEdges;
+      setEdges(nextEdges);
+    }
+
+    // 2) 素材库参考：改草稿 draftMaterialRefs[].role
+    const draftNode = mediaNodesRef.current.find((n) => n.id === draftId);
+    const existing = readDraftMaterialRefs(draftNode);
+    if (existing.length > 0) {
+      const nextMaterials = existing.map((m) => {
+        const role = roleByKey.get(m.materialId);
+        return role ? { ...m, role } : m;
+      });
+      if (nextMaterials.some((m, i) => m.role !== existing[i]!.role)) {
+        patchMediaNode(draftId, { draftMaterialRefs: nextMaterials });
+      }
+    }
+  };
+
   /* ============ 视频自由模式（工具栏入口，无草稿卡）：参考本地暂存与变更 ============ */
 
   /** 自由模式追加参考（到节点选择/从资产中选择/角色库共用）：校验口径与草稿连线一致——
@@ -5988,6 +6029,7 @@ export default function CanvasPage() {
             }
             videoMediaRefs={videoDraftId ? (videoDraftMediaRefs ?? { reference: [] }) : videoFreeRefsView}
             onRemoveVideoRef={videoDraftId ? ((nodeId) => removeRefEdges(videoDraftId, nodeId)) : removeVideoFreeRef}
+            onAssignRefRoles={videoDraftId ? ((assignments) => assignVideoRefRoles(videoDraftId, assignments)) : undefined}
             onRemoveMaterialRef={videoDraftId ? ((materialId) => removeDraftMaterialRef(videoDraftId, materialId)) : removeVideoFreeRef}
             onReorderMediaRefs={videoDraftId ? ((keys) => handleReorderVideoMediaRefs(videoDraftId, keys)) : reorderVideoFreeRefs}
             onToast={(type, msg) => showToast(type, msg)}

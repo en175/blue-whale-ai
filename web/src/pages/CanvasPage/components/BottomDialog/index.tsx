@@ -147,6 +147,8 @@ interface BottomDialogProps extends RefStripOrderProps {
   videoMediaRefs: VideoMediaRefs;
   /** 移除某个视频参考：携带来源节点 id，父级断开对应连线 */
   onRemoveVideoRef?: (sourceNodeId: string) => void;
+  /** IKFJJT：把普通参考批量转为首帧/尾帧角色槽（切首尾帧自动转换；nodeId 为边来源或素材库 materialId） */
+  onAssignRefRoles?: (assignments: Array<{ nodeId: string; role: VideoRefRole }>) => void;
   /** 移除角色库 material 参考（materialId，父级从草稿 data.draftMaterialRefs 过滤） */
   onRemoveMaterialRef?: (materialId: string) => void;
   /** 参考栏拖拽换位（IKFCKT）：普通参考新顺序（nodeId / materialId 混合 key）；父级按子源拆分重排
@@ -189,7 +191,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
   return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
-export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
+export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, onPickFromCanvas, onPickFromAssets, pickMode, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
   /** 结构化正文（IKFA1O）：文字与素材标签的片段序列；标签绑定稳定身份，文案按当前参考+模式派生 */
   const [promptDoc, setPromptDoc] = useState<PromptDoc>(() =>
     initialDoc ?? { version: PROMPT_DOC_VERSION, segments: initialText ? [{ kind: 'text' as const, text: initialText }] : [] },
@@ -380,16 +382,28 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     if (enabledModes && !enabledModes.includes(key as VideoFollowMode)) return;
     if (key === selectedMode) return;
     const hasFrames = !!(videoMediaRefs.first || videoMediaRefs.last);
-    const hasRefs = videoMediaRefs.reference.length > 0;
     if (key === 'prompt') {
       if (hasAnyMediaRef(videoMediaRefs)) {
         onToast?.('warn', '文生视频模式不支持媒体参考，请先移除参考');
         return;
       }
     } else if (key === 'keyframe') {
-      if (hasRefs || videoRefCount > 0) {
-        onToast?.('warn', '首尾帧模式仅支持首帧与尾帧，请先移除普通参考');
+      // IKFJJT：普通参考切首尾帧——已连图片自动转为首帧/尾帧槽（第 1 张首帧、第 2 张尾帧），
+      // 不再要求用户先移除（旧行为「请先移除普通参考」与「图片≥2 才解锁首尾帧」互锁，永远切不进）。
+      const imageRefs = videoMediaRefs.reference.filter((r) => r.mediaType === 'image');
+      const nonImageRefs = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image');
+      if (nonImageRefs.length > 0) {
+        onToast?.('warn', '首尾帧模式仅支持图片素材，请先移除视频/音频参考');
         return;
+      }
+      if (imageRefs.length > 2) {
+        onToast?.('warn', '首尾帧模式最多 2 张图片（首帧 + 尾帧），请先减少参考');
+        return;
+      }
+      if (imageRefs.length > 0) {
+        onAssignRefRoles?.(
+          imageRefs.slice(0, 2).map((r, i) => ({ nodeId: r.nodeId, role: i === 0 ? 'first' : 'last' })),
+        );
       }
     } else {
       if (hasFrames) {

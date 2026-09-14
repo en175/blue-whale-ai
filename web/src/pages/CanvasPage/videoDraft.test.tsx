@@ -532,16 +532,20 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
   });
 
-  it('已有普通参考时拒绝切换首尾帧模式，保留原引用且不创建任务', async () => {
+  it('已有 2 张普通参考图片时切换首尾帧模式：自动转为首帧/尾帧槽（IKFJJT）', async () => {
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
-    // 2 张图片连线后首尾帧模式可选，普通参考存在时切换被拒
+    // 2 张图片连线后首尾帧模式可选；切换时自动把第 1/2 张转为首帧/尾帧（不再要求先移除）
     await connect('m1', 'd1');
     await connect('m2', 'd1');
     await waitModelReady();
     await selectKeyframeMode();
-    await vi.waitFor(() => expect(container.textContent).toContain('请先移除普通参考'));
-    expect(container.querySelector('button[title^="添加首帧"]')).toBeNull();
+    // 连线保留并带上角色：m1→first、m2→last
+    await vi.waitFor(() => {
+      const edges = flowProps.current.edges as Array<{ source: string; data?: { refRole?: string } }>;
+      expect(edges.find((e) => e.source === 'm1')?.data?.refRole).toBe('first');
+      expect(edges.find((e) => e.source === 'm2')?.data?.refRole).toBe('last');
+    });
     expect(flowProps.current.edges).toHaveLength(2);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
   });
