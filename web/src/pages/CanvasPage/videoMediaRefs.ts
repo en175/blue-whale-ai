@@ -253,18 +253,19 @@ export interface VideoRefCapabilities {
   lastFrame: boolean;
   firstLastFrame: boolean;
   referenceImage: boolean;
-  /** ADR-0086：视频生成是否接受视频素材作普通参考（替代 seedance-2 前缀特判）。 */
-  videoReference: boolean;
+  /** ADR-0086：视频生成是否接受视频素材作普通参考（替代 seedance-2 前缀特判）。
+   *  以下 ADR-0086 字段可选：旧调用点/测试未传时由消费处回落缺省（与后端缺省一致）。 */
+  videoReference?: boolean;
   /** ADR-0086：视频生成是否接受音频素材作参考。 */
-  audioReference: boolean;
-  /** ADR-0086：普通参考中视频素材上限。 */
-  videoReferenceMax: number;
-  /** ADR-0086：音频生成中音频参考上限。 */
-  audioReferenceMax: number;
-  /** ADR-0086：音频生成中图片参考上限。 */
-  imageReferenceMax: number;
-  /** ADR-0086：普通参考中图片素材上限。 */
-  imageMax: number;
+  audioReference?: boolean;
+  /** ADR-0086：普通参考中视频素材上限（缺省 3）。 */
+  videoReferenceMax?: number;
+  /** ADR-0086：音频生成中音频参考上限（缺省 3）。 */
+  audioReferenceMax?: number;
+  /** ADR-0086：音频生成中图片参考上限（缺省 1）。 */
+  imageReferenceMax?: number;
+  /** ADR-0086：普通参考中图片素材上限（缺省 9）。 */
+  imageMax?: number;
 }
 
 /** 视频参考组合校验：返回 null 表示当前输入可提交，否则为用户可读的阻止原因。
