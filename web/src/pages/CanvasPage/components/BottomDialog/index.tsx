@@ -406,11 +406,14 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
         );
       }
     } else {
+      // all（全能参考）/ text2video（图生视频）：首帧/尾帧转回普通参考（IKFJJT：与切首尾帧对称）。
+      // 首尾帧槽只收图片，转回后即图片普通参考，两种模式都接受。
       if (hasFrames) {
-        onToast?.('warn', `${key === 'text2video' ? '图生视频' : '全能参考'}模式不支持首尾帧，请先移除首帧/尾帧`);
-        return;
-      }
-      if (key === 'text2video' && videoRefCount > 0) {
+        const frames = [videoMediaRefs.first, videoMediaRefs.last].filter(
+          (f): f is VideoMediaRef => !!f,
+        );
+        onAssignRefRoles?.(frames.map((f) => ({ nodeId: f.nodeId, role: 'reference' })));
+      } else if (key === 'text2video' && videoRefCount > 0) {
         onToast?.('warn', '图生视频模式不支持视频或音频参考，请先调整引用');
         return;
       }

@@ -307,14 +307,18 @@ async function waitModelReady() {
 }
 
 /** 1f2f498d 起模式选择器为下拉：先点底部当前模式按钮展开，再从下拉选项切首尾帧 */
-async function selectKeyframeMode() {
+async function selectMode(label: string) {
   const modeLabels = ['文生视频', '全能参考', '图生视频', '首尾帧'];
   await act(async () => {
     [...container.querySelectorAll('button')].find((b) => modeLabels.includes(b.textContent ?? ''))!.click();
   });
   await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.textContent === '首尾帧')!.click();
+    [...container.querySelectorAll('button')].find((b) => b.textContent === label)!.click();
   });
+}
+
+async function selectKeyframeMode() {
+  await selectMode('首尾帧');
 }
 
 /** 经 Dock 槽位入口选取来源节点建立指定角色的连线（真实路径：+ 按钮弹来源菜单 →「从节点添加素材」→ 画布节点点击） */
@@ -548,6 +552,27 @@ describe('IKDMQS 提交推导与组合约束', () => {
     });
     expect(flowProps.current.edges).toHaveLength(2);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+  });
+
+  it('首尾帧模式切回全能参考：首帧/尾帧转回普通参考（IKFJJT 对称转换）', async () => {
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await connect('m1', 'd1');
+    await connect('m2', 'd1');
+    await waitModelReady();
+    await selectKeyframeMode();
+    await vi.waitFor(() => {
+      const edges = flowProps.current.edges as Array<{ source: string; data?: { refRole?: string } }>;
+      expect(edges.find((e) => e.source === 'm1')?.data?.refRole).toBe('first');
+    });
+    // 切回全能参考：首尾帧转回普通参考（refRole 字段移除 = 缺省 reference）
+    await selectMode('全能参考');
+    await vi.waitFor(() => {
+      const edges = flowProps.current.edges as Array<{ source: string; data?: { refRole?: string } }>;
+      expect(edges.find((e) => e.source === 'm1')?.data?.refRole).toBeUndefined();
+      expect(edges.find((e) => e.source === 'm2')?.data?.refRole).toBeUndefined();
+    });
+    expect(flowProps.current.edges).toHaveLength(2);
   });
 });
 

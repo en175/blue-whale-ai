@@ -4326,10 +4326,11 @@ export default function CanvasPage() {
     });
   };
 
-  /** IKFJJT：把视频草稿的普通参考批量改角色（切首尾帧自动转换用）。
-   *  普通参考切首尾帧时，把已连入的图片按序转为首帧/尾帧槽——边参考改 edge.data.refRole
-   *  （随连线持久化），素材库参考改草稿 data.draftMaterialRefs[].role（随草稿持久化）。
-   *  images 按序：第 1 张 → first，第 2 张 → last。 */
+  /** IKFJJT：把视频草稿的参考批量改角色（模式切换自动转换用）。
+   *  普通参考⇄首尾帧互转：切首尾帧时图片转 first/last 槽（第 1 张 first、第 2 张 last）；
+   *  切回全能参考/图生视频时首尾帧转回普通参考（role='reference'）。
+   *  边参考改 edge.data.refRole（随连线持久化；reference 删该字段，与 addCanvasEdge 写入口径一致），
+   *  素材库参考改草稿 data.draftMaterialRefs[].role（随草稿持久化）。 */
   const assignVideoRefRoles = (
     draftId: string,
     assignments: Array<{ nodeId: string; role: VideoRefRole }>,
@@ -4343,7 +4344,16 @@ export default function CanvasPage() {
     const nextEdges = prevEdges.map((e) => {
       if (e.target !== draftId) return e;
       const role = roleByKey.get(e.source);
-      if (!role || (e.data as Record<string, unknown> | undefined)?.refRole === role) return e;
+      if (!role) return e;
+      const currentRole = (e.data as Record<string, unknown> | undefined)?.refRole;
+      // reference = 缺省角色（不写 data.refRole），与 addCanvasEdge 一致；其余显式写入。
+      if (role === 'reference') {
+        if (currentRole === undefined) return e;
+        edgesChanged = true;
+        const { refRole: _drop, ...restData } = (e.data ?? {}) as Record<string, unknown>;
+        return { ...e, data: restData };
+      }
+      if (currentRole === role) return e;
       edgesChanged = true;
       return { ...e, data: { ...e.data, refRole: role } };
     });
