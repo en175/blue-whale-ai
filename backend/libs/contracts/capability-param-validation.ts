@@ -101,6 +101,8 @@ export function checkGenerationParamLimit(
   }
   if (params.duration !== undefined) {
     const d = Number(params.duration);
+    // ADR-0086：duration=-1 是上游哨兵值 = 模型自动选时长（仅 edit 任务合法，由 task_types 覆盖层校验）；
+    // 基础能力范围（4-30）不认 -1，-1 只在任务类型约束层放行，此处保持严格正数 + 范围。
     if (!Number.isFinite(d) || d <= 0) {
       return { field: "duration", code: ERROR_CAPABILITY_UNSUPPORTED_DURATION, reason: "时长必须为正数" };
     }

@@ -423,11 +423,16 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     for (let v = durationRange.min; v <= durationRange.max; v += durationRange.step) ticks.push(v);
   }
 
-  /** 选中模型后应用其默认清晰度/宽高比/时长，返回实际应用值（供草稿参数同步） */
+  /** 选中模型后应用其默认清晰度/宽高比/时长，返回实际应用值（供草稿参数同步）。
+   *  ADR-0086：模型支持 adaptive 比例时，首尾帧模式强制 adaptive（官方要求），比例选择隐藏。 */
   const applyModelDefaults = (m: GenerationModel) => {
     setSelectedModel(m.model_id);
     let nextRatio = selectedRatio;
-    if (m.supported_aspect_ratios.length) {
+    const supportsAdaptive = m.supported_aspect_ratios?.includes('adaptive');
+    if (isKeyframe && supportsAdaptive) {
+      nextRatio = 'adaptive';
+      setSelectedRatio(nextRatio);
+    } else if (m.supported_aspect_ratios.length) {
       nextRatio =
         m.default_aspect_ratio && m.supported_aspect_ratios.includes(m.default_aspect_ratio)
           ? m.default_aspect_ratio
@@ -876,8 +881,23 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
             </>
           )}
 
-          {/* 宽高比 */}
+          {/* 宽高比（ADR-0086：首尾帧模式 + 模型支持 adaptive 时强制自适应，隐藏选择） */}
           <span className={styles.configLabel}>宽高比</span>
+          {isKeyframe && currentModel?.supported_aspect_ratios?.includes('adaptive') ? (
+            <div className={styles.ratioGroup}>
+              <button
+                type="button"
+                className={`${styles.ratioBtn} ${styles.ratioBtnActive}`}
+                disabled={readOnly}
+                onClick={() => {
+                  setSelectedRatio('adaptive');
+                  syncDraftParams({ ratio: 'adaptive' });
+                }}
+              >
+                <span>自适应</span>
+              </button>
+            </div>
+          ) : (
           <div className={styles.ratioGroup}>
             {ratioOptions.map((r) => (
               <button
@@ -894,6 +914,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
               </button>
             ))}
           </div>
+          )}
         </div>
       )}
 

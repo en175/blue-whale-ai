@@ -448,12 +448,17 @@ public class VideoJobProcessor implements JobProcessor {
         // duration（:593）
         double duration = resolveDuration(input);
 
-        // dimensions（:594-597）
+        // dimensions（:594-597）；ADR-0086：adaptive 比例无固定宽高，resolveDimensions 返回 null
+        // 但任务类型（首帧/编辑/延长）本就只接受 adaptive——此处 adaptive 放行，仅非 adaptive 需像素换算。
         int[] dimensions = resolveDimensions(input);
+        String aspectRatio = strOrEmpty(input, "aspect_ratio");
+        boolean adaptive = "adaptive".equals(aspectRatio);
 
-        // 校验（:598-606）
+        // 校验（:598-606）。ADR-0086：duration=-1（模型自动选时长，仅 edit 任务合法，接纳侧 task_types 校验）
+        // 与 adaptive 比例（首帧/编辑/延长）放行；其余须 duration>0 且非 adaptive 时尺寸可换算。
         if (prompt.isEmpty() || model.isEmpty()
-                || !Double.isFinite(duration) || duration <= 0 || dimensions == null) {
+                || !Double.isFinite(duration) || (duration <= 0 && duration != -1)
+                || (!adaptive && dimensions == null)) {
             log.warn("[IKE7JP] 前置校验遗漏：job {} 视频参数无效仍进入 worker", claim.id());
             throw new VideoInputError(GenerationError.ERROR_INVALID_INPUT, "视频生成参数无效");
         }
@@ -854,6 +859,8 @@ public class VideoJobProcessor implements JobProcessor {
     static int[] videoDimensions(String resolution, String aspectRatio) {
         Matcher resMatcher = RESOLUTION_PATTERN.matcher(resolution);
         if (!resMatcher.matches()) return null;
+        // ADR-0086：adaptive 自适应比例无固定宽高比，不换算像素（输出与输入素材一致，由上游决定）。
+        if ("adaptive".equals(aspectRatio)) return null;
         Matcher ratioMatcher = RATIO_PATTERN.matcher(aspectRatio);
         if (!ratioMatcher.matches()) return null;
 

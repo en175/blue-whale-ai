@@ -34,7 +34,7 @@
 | Seedance 2.0 | false | 3 | **false** | 3 | **15** | 4–15 | 720p/1080p/**4K**（现缺 4K 补）| default/allowed_ratios=[16:9,9:16,1:1], allowed_durations=[4..15] |
 | Seedance 2.0 Fast | false | 3 | false | 3 | 15 | 4–15 | 按官方 | default 同上 |
 | Seedance 2.0 Mini | false | 3 | false | 3 | 15 | 4–15 | 按官方 | default 同上 |
-| Seedance 2.5 | **true** | **10** | **true** | **10** | **30** | 4–30 | 按官方 | default；first_frame/first_last_frame 仅 auto 比例；edit 仅 auto 比例+auto 时长；prolong 仅 auto 比例 |
+| Seedance 2.5 | `doubao-seedance-2-5-260628` | **30** | 1 | **480p/720p/1080p**（无 4K）| **21:9/16:9/4:3/1:1/3:4/9:16/adaptive** | **4–30（含 -1 自动）** | mp4/mov | 默认（参考生视频/文生视频）ratio/duration 无特殊限制；首帧/首尾帧/edit/prolong 仅 `adaptive` 比例；edit 另需 duration=-1 | 视频参考 **10**（`video_reference=true`）、音频参考 **10**（`audio_reference=true`）、图参考 **30**、素材总时长 **≤30s**、支持纯音频参考 | 新增行（本地库已配，生产按此后台加）|
 
 ### 音频
 

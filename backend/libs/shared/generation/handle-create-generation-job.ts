@@ -252,9 +252,11 @@ function validateCommon(
     return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
   }
   if (type !== "audio") {
+    // ADR-0086：aspect_ratio 支持任务类型强制的 adaptive（首帧/首尾帧/编辑/延长）；非 adaptive 仍须数字:数字。
     if (
       !isStr(params.aspect_ratio) ||
-      !/^[1-9][0-9]*:[1-9][0-9]*$/.test(params.aspect_ratio)
+      (params.aspect_ratio !== "adaptive" &&
+        !/^[1-9][0-9]*:[1-9][0-9]*$/.test(params.aspect_ratio))
     ) {
       return { code: ERROR_INVALID_INPUT, message: "aspect_ratio 无效" };
     }
@@ -493,6 +495,20 @@ function validateVideo(
         ? "参考素材最多 12 个"
         : null;
     if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
+    // ADR-0086：任务类型约束——首帧/首尾帧模式强制 adaptive 比例（官方要求，前端 keyframe 模式只发 adaptive）。
+    // 仅当模型能力行 supported_aspect_ratios 含 adaptive 时才强制（2.5 才支持自适应；2.0 无 adaptive 不适用）。
+    if (
+      parsed.items.some((r) => r.role === "first_frame" || r.role === "last_frame") &&
+      features?.task_types
+    ) {
+      const params = body.parameters as GenerationParameters | undefined;
+      if (!isStr(params?.aspect_ratio) || params.aspect_ratio !== "adaptive") {
+        return {
+          code: ERROR_INVALID_INPUT,
+          message: "首帧/首尾帧模式仅支持自适应比例（adaptive）",
+        };
+      }
+    }
     return null;
   }
   const firstFrameAssetId2 = assetId(body.first_frame_asset_id);
@@ -1043,10 +1059,11 @@ export async function handleCreateGenerationJob(
   // IKE7JP：视频 resolution/aspect_ratio 组合必须能换算成像素（与 worker videoDimensions 同源），
   // 否则 worker 会在执行期才失败——越界在接纳当下 400（invalid_input），不拖到执行期。
   // 图片路径无此概念（走上方交叉格校验）。
+  // ADR-0086：adaptive 自适应比例无固定宽高（首帧/编辑/延长任务强制），放行不换算像素。
   if (type === "video" && capability) {
     const resolution = isStr(params.resolution) ? params.resolution : "";
     const ratio = isStr(params.aspect_ratio) ? params.aspect_ratio : "";
-    if (resolution && ratio) {
+    if (resolution && ratio && ratio !== "adaptive") {
       const dimensions =
         videoDimensions(resolution, ratio) ?? dimensionsFromSize(resolution);
       if (!dimensions) {
