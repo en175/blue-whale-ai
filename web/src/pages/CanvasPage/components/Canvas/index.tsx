@@ -26,7 +26,7 @@ import { useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import ZoomControl from '../ZoomControl';
 import TextNode from '../TextNode';
 import MediaNode from '../MediaNode';
-import { imageInputStale, firstTextSourceOf } from '../../textIndexSync';
+import { mediaInputStale, firstTextSourceOf } from '../../textIndexSync';
 import ProductNode from '../ProductNode';
 import AssetCardNode from '../AssetCardNode';
 import CustomEdge from '../CustomEdge';
@@ -411,9 +411,16 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         }
         const stack = memberStackById.get(n.id);
         const zIndex = stack == null ? 0 : groupMemberZ(stack);
-        // IKFM3S §4：「输入已更新」徽标派生注入（图片目标 + 文本入边 + 签名不一致），
-        // 纯渲染期派生不持久化；来源文本卡 id 一并注入供定位入口。
-        if (n.type === 'mediaNode' && imageInputStale(n.id, edges, nodes)) {
+        // IKFM3S §4 / IKFM3W §10：「输入已更新」徽标派生注入（图片/视频目标 + 文本入边 +
+        // 签名不一致），纯渲染期派生不持久化；来源文本卡 id 一并注入供定位入口。
+        const staleMediaType = n.type === 'mediaNode'
+          ? (n.data as Record<string, unknown> | undefined)?.mediaType
+          : undefined;
+        if (
+          n.type === 'mediaNode' &&
+          (staleMediaType === 'image' || staleMediaType === 'video') &&
+          mediaInputStale(n.id, edges, nodes, staleMediaType)
+        ) {
           return {
             ...n,
             zIndex,
