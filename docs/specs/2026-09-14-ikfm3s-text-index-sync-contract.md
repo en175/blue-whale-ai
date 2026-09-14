@@ -51,7 +51,8 @@
 
 - `job.input.input_asset_ids` = §2 合并去重后的最终序（冻结；`prompt_doc` 标签编号按该序派生，前端拍平镜像同源）。
 - `job.input.text_attachments` 每项扩展冻结当时有效身份映射：`media: Array<{ node_id, asset_id, media_type }>`（node_id = 素材来源画布节点 id，与索引契约身份同源；缺省 = 无有效媒体，兼容旧快照）。
-- 重试沿用既有「原样复制 input」语义，签名与媒体映射随快照冻结；重试成功同样触发 §4 回写。
+- `text_attachments[].text` 在接纳时按最终参考列表编译：仅替换 `mediaMentions` 中绑定 `(nodeId, assetId)` 的区间，图片按最终素材序，视频/音频按最终 references 同类型序编号。普通文字及 Markdown 保持原样；不同文本卡的局部编号独立映射。`prompt_doc` 编译与方案快照使用同一最终参考列表。
+- 重试沿用既有「原样复制 input」语义，编译后的正文、签名与媒体映射随快照冻结；签名仍取原始画布正文，重试成功同样触发 §4 回写。
 
 ## 6. 参考栏交互（图片面板）
 

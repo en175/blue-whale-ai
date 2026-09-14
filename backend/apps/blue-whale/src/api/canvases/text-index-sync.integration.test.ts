@@ -188,7 +188,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       headers: { "content-type": "application/json", "if-match": version === "missing" ? '"missing"' : `"${version}"` },
       body: JSON.stringify({ nodes: JSON.stringify(nodes), edges: JSON.stringify(edges), viewport: "{}" }),
     });
-    expect(response.status).toBe(200);
+    expect(response.status, await response.clone().text()).toBe(200);
     return (await response.json()).data;
   }
   async function createJob(projectId: string, body: unknown) {
@@ -258,7 +258,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       {
         node_id: "text-1",
         title: "文本",
-        text: "用图片1出图",
+        text: "用图片2出图",
         media: [{ node_id: "media-1", asset_id: imageAssetId, media_type: "image" }],
       },
     ]);
@@ -268,6 +268,73 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         { nodeId: "text-1", text: "用图片1出图", identities: [{ sourceNodeId: "media-1", assetId: imageAssetId, mediaType: "image" }] },
       ]),
     );
+  });
+
+  it("正文标签按最终并入列表编译并冻结", async () => {
+    const { projectId, imageAssetId, directAssetId } = await seedIndexedCanvas("IKFR50 prompt doc");
+    const created = await createJob(projectId, {
+      ...imageJobBody("gen-1", "重绘", [directAssetId]),
+      prompt_doc: { version: 1, segments: [
+        { kind: "text", text: "重绘" },
+        { kind: "asset_ref", asset_id: imageAssetId },
+      ] },
+    });
+    expect(created.code).toBe(200);
+    const job = await readJob(created.data.generation_job_id);
+    expect(job!.input.prompt).toBe("重绘图片2");
+    expect(job!.input.input_asset_ids).toEqual([directAssetId, imageAssetId]);
+  });
+
+  it("各文本卡独立重编号，重复绑定区间与 Markdown 保留，普通编号不替换", async () => {
+    const { projectId, imageAssetId, directAssetId } = await seedIndexedCanvas("IKFR50 bound ranges");
+    const canvas = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const nodes = canvas!.nodes_json as unknown as Array<{ id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }>;
+    const source = nodes.find((node) => node.id === "text-1")!;
+    const text = "**图片1**，图片1；普通图片1";
+    source.data.text = text;
+    source.data.mediaMentions = [text.indexOf("图片1"), text.indexOf("图片1", 5)].map((start) => ({
+      start, end: start + 3, nodeId: "media-1", assetId: imageAssetId,
+    }));
+    nodes.push({ ...source, id: "text-2", data: {
+      title: "另一个文本", text: "图片1",
+      mediaMentions: [{ start: 0, end: 3, nodeId: "media-2", assetId: directAssetId }],
+      mediaRefs: [{ nodeId: "media-2", assetId: directAssetId, mediaType: "image", name: "乙图", url: "https://example.com/m2.png" }],
+    } });
+    await saveCanvas(projectId, nodes, [
+      ...(canvas!.edges_json as unknown as unknown[]),
+      { id: "e-text2", source: "text-2", target: "gen-1" },
+      { id: "e-index2", source: "media-2", target: "text-2", data: { textIndex: true } },
+    ], canvas!.version);
+    const created = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId]));
+    expect(created.code).toBe(200);
+    const job = await readJob(created.data.generation_job_id);
+    expect((job!.input.text_attachments as Array<{ text: string }>).map((item) => item.text))
+      .toEqual(["**图片2**，图片2；普通图片1", "图片1"]);
+  });
+
+  it("方案快照包含文本带入素材及目标编号正文", async () => {
+    const { projectId, imageAssetId, directAssetId } = await seedIndexedCanvas("IKFR50 plan snapshot");
+    const canvas = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const nodes = canvas!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
+    // 预置已应用的历史方案；普通保存 API 不允许伪造 promptSource。
+    const planNodes = [...nodes, {
+      id: "plan-1", type: "textNode", position: { x: 0, y: 500 }, data: {
+        text: "电影质感", promptSource: { sessionId: "test-session", revisionId: "test-revision", shotNo: 1 },
+        promptMentions: [], promptMaterials: [],
+      },
+    }];
+    const planEdges = [...(canvas!.edges_json as unknown as unknown[]), {
+      id: "e-plan", source: "plan-1", target: "gen-1",
+    }];
+    await prisma.client.canvas.update({ where: { project_id: BigInt(projectId) }, data: {
+      nodes_json: JSON.parse(JSON.stringify(planNodes)), edges_json: JSON.parse(JSON.stringify(planEdges)),
+    } });
+    const created = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId]));
+    expect(created.code).toBe(200);
+    const job = await readJob(created.data.generation_job_id);
+    const snapshot = job!.input.prompt_plan_snapshot as { images: Array<{ assetId: string }>; providerPrompt: string };
+    expect(snapshot.images.map((item) => item.assetId)).toEqual([directAssetId, imageAssetId]);
+    expect(snapshot.providerPrompt).toContain("用图片2出图");
   });
 
   it("重试复用原快照：合并参考、media 映射与签名原样复制，不重读画布", async () => {
@@ -460,13 +527,19 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       // 3) 发送：请求体含文本带入素材（前端同源预演，与 Dock 显示一致）
       await editor.click();
       await page.keyboard.type("参考这张图重新绘制");
+      const acceptedResponse = page.waitForResponse((response) =>
+        response.request().method() === "POST" && response.url().endsWith(`/api/projects/${projectId}/generation-jobs`));
       await page.locator('button[title="发送"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(1), { timeout: 10_000 });
       expect(generationRequests[0].target_node_id).toBe("d1");
       expect(generationRequests[0].input_asset_ids).toEqual([directAssetId, indexedAssetId]);
 
       // 4) DB 翻 succeeded 模拟供应商终态：轮询拿签名回写 → 徽标清除
-      const jobRow = await prisma.client.generation_jobs.findFirst({ where: { project_id: BigInt(projectId) }, orderBy: { id: "desc" } });
+      const response = await acceptedResponse;
+      expect(response.ok()).toBe(true);
+      const accepted = await response.json();
+      expect(accepted.code).toBe(200);
+      const jobRow = await prisma.client.generation_jobs.findUnique({ where: { id: BigInt(accepted.data.generation_job_id) } });
       expect(jobRow).not.toBeNull();
       const outputAsset = await prisma.client.assets.create({ data: { user_id: 987654n, project_id: BigInt(projectId), type: "image", url: "https://example.com/out.png", width: 640, height: 480 } });
       await prisma.client.generation_jobs.update({
@@ -568,7 +641,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       {
         node_id: "text-1",
         title: "文本",
-        text: "用图片1出片",
+        text: "用图片2出片",
         media: [{ node_id: "media-1", asset_id: indexedAssetId, media_type: "image" }],
       },
     ]);
@@ -835,6 +908,8 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         const sendBtn = page.locator('[data-testid="video-send"]');
         expect(await sendBtn.isDisabled(), `发送按钮不应禁用（title=${await sendBtn.getAttribute("title")}）`).toBe(false);
       });
+      const acceptedResponse = page.waitForResponse((response) =>
+        response.request().method() === "POST" && response.url().endsWith(`/api/projects/${projectId}/generation-jobs`));
       await page.locator('[data-testid="video-send"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(1), { timeout: 15_000 });
       expect(generationRequests[0].type).toBe("video");
@@ -845,7 +920,11 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       ]);
 
       // 4) DB 翻 succeeded 模拟供应商终态：轮询拿签名回写 → 徽标清除 + 落盘核对
-      const jobRow = await prisma.client.generation_jobs.findFirst({ where: { project_id: BigInt(projectId) }, orderBy: { id: "desc" } });
+      const response = await acceptedResponse;
+      expect(response.ok()).toBe(true);
+      const accepted = await response.json();
+      expect(accepted.code).toBe(200);
+      const jobRow = await prisma.client.generation_jobs.findUnique({ where: { id: BigInt(accepted.data.generation_job_id) } });
       expect(jobRow).not.toBeNull();
       const frozen = jobRow!.input as Record<string, unknown>;
       expect(frozen.references).toEqual([
@@ -956,7 +1035,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       {
         node_id: "text-1",
         title: "文本",
-        text: "用音频1配音",
+        text: "用音频2配音",
         media: [{ node_id: "media-1", asset_id: indexedAssetId, media_type: "audio" }],
       },
     ]);
@@ -1234,6 +1313,8 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         const sendBtn = page.locator('[data-testid="audio-send"]');
         expect(await sendBtn.isDisabled(), `发送按钮不应禁用（title=${await sendBtn.getAttribute("title")}）`).toBe(false);
       });
+      const acceptedResponse = page.waitForResponse((response) =>
+        response.request().method() === "POST" && response.url().endsWith(`/api/projects/${projectId}/generation-jobs`));
       await page.locator('[data-testid="audio-send"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(1), { timeout: 15_000 });
       expect(generationRequests[0].type).toBe("audio");
@@ -1244,7 +1325,11 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       ]);
 
       // 4) DB 翻 succeeded 模拟供应商终态：轮询拿签名回写 → 徽标清除 + 落盘核对
-      const jobRow = await prisma.client.generation_jobs.findFirst({ where: { project_id: BigInt(projectId) }, orderBy: { id: "desc" } });
+      const response = await acceptedResponse;
+      expect(response.ok()).toBe(true);
+      const accepted = await response.json();
+      expect(accepted.code).toBe(200);
+      const jobRow = await prisma.client.generation_jobs.findUnique({ where: { id: BigInt(accepted.data.generation_job_id) } });
       expect(jobRow).not.toBeNull();
       const frozen = jobRow!.input as Record<string, unknown>;
       expect(frozen.references).toEqual([
