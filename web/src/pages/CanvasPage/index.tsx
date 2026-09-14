@@ -3636,7 +3636,7 @@ export default function CanvasPage() {
       createGenerationJob(currentId, {
         type,
         expected_output_count: 1,
-        parameters: type === 'image' && !promptDoc
+        parameters: !promptDoc
           ? {
               ...parameters,
               prompt: composeImageSendPrompt(
@@ -4751,6 +4751,15 @@ export default function CanvasPage() {
   const handleDialogSend = async (text: string, opts: VideoGenOptions, promptDoc?: PromptDoc | null) => {
     if (applyingRef.current) return;
     const targetNodeId = videoSeed?.targetNodeId;
+    const composedPrompt = composeImageSendPrompt(
+      targetNodeId ? textAttachmentsOf(targetNodeId) : undefined,
+      text,
+      promptDoc,
+    );
+    if (composedPrompt.length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+      showToast('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+      return;
+    }
     if (targetNodeId && currentId) {
       const projectId = currentId;
       applyingRef.current = true;
@@ -5451,6 +5460,15 @@ export default function CanvasPage() {
     if (applyingRef.current || saveBlocked || saveStatus === 'error' || !currentId) return;
     const projectId = currentId;
     const targetNodeId = audioDraftId && audioSeed?.targetNodeId === audioDraftId ? audioDraftId : undefined;
+    const composedPrompt = composeImageSendPrompt(
+      targetNodeId ? textAttachmentsOf(targetNodeId) : undefined,
+      text,
+      promptDoc,
+    );
+    if (composedPrompt.length > IMAGE_COMPOSED_PROMPT_LIMIT) {
+      showToast('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
+      return;
+    }
     applyingRef.current = true;
     setSubmittingNodeId(targetNodeId ?? null);
     try {
