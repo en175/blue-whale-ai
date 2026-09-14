@@ -80,8 +80,8 @@ describe('audioMediaRefsOf 连线推导音频参考', () => {
 
   it('按连线顺序推导目标的有效音频参考；非音频来源与失效来源进 invalid 并保留原因；悬空/其他目标连线跳过', () => {
     expect(audioMediaRefsOf('d1', edges, nodes).refs).toEqual([
-      { nodeId: 'u2', url: 'http://aud/u2.mp3', name: '音u2', assetId: 'a2' },
-      { nodeId: 'u1', url: 'http://aud/u1.mp3', name: '音u1', assetId: 'a1' },
+      { nodeId: 'u2', url: 'http://aud/u2.mp3', name: '音u2', assetId: 'a2', mediaType: 'audio' },
+      { nodeId: 'u1', url: 'http://aud/u1.mp3', name: '音u1', assetId: 'a1', mediaType: 'audio' },
     ]);
     const invalid = audioMediaRefsOf('d1', edges, nodes).invalid;
     expect(invalid).toContainEqual({ nodeId: 'pic', name: '音pic', reason: '音频参考仅支持音频素材' });
@@ -98,14 +98,14 @@ describe('audioMediaRefsOf 连线推导音频参考', () => {
       { id: 'e2', source: 'u1', target: 'd1' },
     ] as Edge[];
     expect(audioMediaRefsOf('d1', dupEdges, dup).refs).toEqual([
-      { nodeId: 'u1-copy', url: 'http://aud/u1-copy.mp3', name: '音u1-copy', assetId: 'a1' },
+      { nodeId: 'u1-copy', url: 'http://aud/u1-copy.mp3', name: '音u1-copy', assetId: 'a1', mediaType: 'audio' },
     ]);
   });
 
   it('fileName 缺省时回退节点 id；assetId 数字形态字符串化；data 为 undefined 的悬空节点不抛错', () => {
     const bare = [mediaNode('u9', { src: 'http://aud/u9.mp3', mediaType: 'audio', assetId: 42 })];
     expect(audioMediaRefsOf('d1', [{ id: 'e1', source: 'u9', target: 'd1' }] as Edge[], bare).refs).toEqual([
-      { nodeId: 'u9', url: 'http://aud/u9.mp3', name: 'u9', assetId: '42' },
+      { nodeId: 'u9', url: 'http://aud/u9.mp3', name: 'u9', assetId: '42', mediaType: 'audio' },
     ]);
     const dangling = [{ id: 'x', type: 'mediaNode', position: { x: 0, y: 0 } }] as Node[];
     expect(audioMediaRefsOf('d1', [{ id: 'e1', source: 'x', target: 'd1' }] as Edge[], dangling).refs).toEqual([]);
@@ -115,7 +115,7 @@ describe('audioMediaRefsOf 连线推导音频参考', () => {
 });
 
 describe('checkAddAudioRef 统一添加校验', () => {
-  const ref = (nodeId: string, assetId: string) => ({ nodeId, url: `http://aud/${nodeId}.mp3`, name: nodeId, assetId });
+  const ref = (nodeId: string, assetId: string) => ({ nodeId, url: `http://aud/${nodeId}.mp3`, name: nodeId, assetId, mediaType: 'audio' as const });
 
   it('重复素材（相同 assetId）明确拒绝', () => {
     expect(checkAddAudioRef('a1', [ref('u1', 'a1'), ref('u2', 'a2')])).toBe('重复的素材已跳过');

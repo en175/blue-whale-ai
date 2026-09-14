@@ -18,6 +18,21 @@ import { ModelCapabilityReadService } from "@lib/shared/generation/model-capabil
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 import { textInputSignatureOf, VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE } from "@lib/contracts";
 
+// 入队函数在测试中被 stub（对齐 audio-draft.integration.test.ts 先例）：任务停在 queued，
+// 终态由测试直接翻 DB——音频 IKCR78 fail-fast（无 MQ 入队异常 → markFailed「任务入队失败」）
+// 会终止前端轮询、阻断签名回写断言；图片/视频入队失败仅记日志不受影响。
+vi.mock("@lib/shared/generation/video-queue.js", () => ({
+  enqueueVideoGenerationJob: vi.fn(async () => {}),
+  enqueueImageGenerationJob: vi.fn(async () => {}),
+  enqueueAudioGenerationJob: vi.fn(async () => {}),
+  enqueueMediaExtractJob: vi.fn(async () => {}),
+  loadRocketMqConfig: vi.fn(() => ({
+    endpoints: "", sslEnabled: false, topic: "generation-video", tag: "step",
+  })),
+  createRocketMqVideoProducer: vi.fn(() => ({ enqueue: vi.fn(async () => {}) })),
+  closeVideoGenerationQueue: vi.fn(async () => {}),
+}));
+
 /* IKFM3S 文本索引下游同步契约 v1 集成（隔离 MySQL，IKFM3S_DATABASE_URL 门控）：
    真实保存 + 提交 API → 数据库核对——契约见 docs/specs/2026-09-14-ikfm3s-text-index-sync-contract.md。
    - 权威并入：文本带入素材追加 input_asset_ids 尾部、text_attachments[].media 与 text_input_signature 冻结；
@@ -34,6 +49,8 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
   const VIDEO_MODEL_ID = "ikfm3w-video-model";
   const VIDEO_LIMIT_MODEL_ID = "ikfm3w-video-limit-model";
   const VIDEO_NOVID_MODEL_ID = "ikfm3w-video-novid-model";
+  const AUDIO_MODEL_ID = "ikfm41-audio-model";
+  const AUDIO_LIMIT_MODEL_ID = "ikfm41-audio-limit-model";
   let app: Awaited<ReturnType<typeof NestFactory.create>>;
   let base = "";
   const previousDatabase = process.env.DATABASE_URL;
@@ -102,6 +119,29 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         update: { features, supported_durations: [5, 10, 1], default_duration: 5 },
       });
     }
+    // IKFM41：音频目标测试模型（契约 §11）——缺省分类上限（audio 3 / image 1）、
+    // 超限档（audio_reference_max=1 联算超限）。
+    for (const [modelId, label, features] of [
+      [AUDIO_MODEL_ID, "IKFM41 Audio", {}],
+      [AUDIO_LIMIT_MODEL_ID, "IKFM41 Audio Limit", { audio_reference_max: 1 }],
+    ] as const) {
+      await prisma.client.generation_model_capability.upsert({
+        where: { provider_id_model_id: { provider_id: "ikfm3s-test", model_id: modelId } },
+        create: {
+          provider_id: "ikfm3s-test",
+          model_id: modelId,
+          capability_type: "audio",
+          model_label: label,
+          supported_sizes: [],
+          supported_aspect_ratios: [],
+          supported_formats: ["mp3"],
+          default_size: "mp3",
+          default_aspect_ratio: "1:1",
+          features,
+        },
+        update: { features },
+      });
+    }
     const canvasService = new CanvasService(prisma, projects);
     const jobsService = new JobsService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
@@ -138,7 +178,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     await prisma.client.$disconnect();
   });
 
-  async function createAsset(projectId: bigint, type: "image" | "video", url: string) {
+  async function createAsset(projectId: bigint, type: "image" | "video" | "audio", url: string) {
     const asset = await prisma.client.assets.create({ data: { user_id: 987654n, project_id: projectId, type, url, width: 640, height: 480 } });
     return asset.id.toString();
   }
@@ -838,6 +878,405 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       await nodeById("d1").waitFor();
       await vi.waitFor(async () => expect(await badge.count(), "正文变化后提示重现（刷新恢复）").toBe(1));
       await page.screenshot({ path: "/tmp/ikfm3w-badge-reappear.png", fullPage: true });
+    } finally { await browser.close(); await vite.close(); }
+  }, 180_000);
+
+  /* ---- IKFM41（契约 §11 音频目标扩展）---- */
+
+  function audioJobBody(targetNodeId: string, prompt: string, references?: unknown[], modelId = AUDIO_MODEL_ID) {
+    return {
+      type: "audio",
+      target_node_id: targetNodeId,
+      expected_output_count: 1,
+      ...(references ? { references } : {}),
+      parameters: { prompt, model_id: modelId },
+    };
+  }
+
+  /** 夹具：音频目标 gen-a + 文本卡 text-1（正文索引 media-1）+ 直接参考 media-2（音频）。
+   *  refMediaType 控制 text-1 索引的素材类型（audio 默认 / image / video 变体）；
+   *  directMediaType 控制直接参考类型（audio 默认 / image 跨来源混用变体）；
+   *  withImageMention 额外并入 image 索引（文本带入内混用变体）。 */
+  async function seedAudioIndexedCanvas(
+    projectName: string,
+    options: { refMediaType?: "audio" | "image" | "video"; directMediaType?: "audio" | "image"; dropIndexEdge?: boolean; withImageMention?: boolean } = {},
+  ) {
+    const project = await projects.create("987654", projectName);
+    const projectId = project.id;
+    const refMediaType = options.refMediaType ?? "audio";
+    const directMediaType = options.directMediaType ?? "audio";
+    const indexedAssetId = await createAsset(projectId, refMediaType, "https://example.com/a1.mp3");
+    const directAssetId = await createAsset(projectId, directMediaType, "https://example.com/a2.mp3");
+    const imageAssetId = await createAsset(projectId, "image", "https://example.com/a3.png");
+    const mentions = [{ start: 1, end: 4, nodeId: "media-1", assetId: indexedAssetId }];
+    const mediaRefs = [{ nodeId: "media-1", assetId: indexedAssetId, mediaType: refMediaType, name: "甲音频", url: "https://example.com/a1.mp3" }];
+    if (options.withImageMention) {
+      mentions.push({ start: 6, end: 8, nodeId: "media-3", assetId: imageAssetId });
+      mediaRefs.push({ nodeId: "media-3", assetId: imageAssetId, mediaType: "image", name: "丙图", url: "https://example.com/a3.png" });
+    }
+    const nodes = [
+      { id: "gen-a", type: "mediaNode", position: { x: 800, y: 0 }, data: { mediaType: "audio", draft: true } },
+      { id: "media-1", type: "mediaNode", position: { x: 0, y: 0 }, data: { assetId: indexedAssetId, mediaType: refMediaType, src: "https://example.com/a1.mp3", fileName: "甲音频" } },
+      { id: "media-2", type: "mediaNode", position: { x: 0, y: 300 }, data: { assetId: directAssetId, mediaType: directMediaType, src: "https://example.com/a2.mp3", fileName: "乙音频" } },
+      ...(options.withImageMention
+        ? [{ id: "media-3", type: "mediaNode", position: { x: 0, y: 600 }, data: { assetId: imageAssetId, mediaType: "image", src: "https://example.com/a3.png", fileName: "丙图" } }]
+        : []),
+      {
+        id: "text-1", type: "textNode", position: { x: 400, y: 0 },
+        data: {
+          title: "文本",
+          text: options.withImageMention ? "用音频1配音图2一起" : "用音频1配音",
+          mediaMentions: mentions,
+          mediaRefs,
+        },
+      },
+    ];
+    const edges = [
+      { id: "e-text", source: "text-1", target: "gen-a" },
+      { id: "e-direct", source: "media-2", target: "gen-a" },
+      ...(options.withImageMention ? [{ id: "e-index-3", source: "media-3", target: "text-1", data: { textIndex: true } }] : []),
+      ...(options.dropIndexEdge ? [] : [{ id: "e-index", source: "media-1", target: "text-1", data: { textIndex: true } }]),
+    ];
+    await saveCanvas(projectId, nodes, edges, "missing");
+    return { projectId, indexedAssetId, directAssetId, imageAssetId };
+  }
+  const directAudioRefs = (directAssetId: string) => [{ role: "reference", asset_id: directAssetId, type: "audio" }];
+
+  it("音频权威并入：文本带入追加为普通参考，media 映射与签名冻结进快照", async () => {
+    const { projectId, indexedAssetId, directAssetId } = await seedAudioIndexedCanvas("IKFM41 merge");
+    const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId)));
+    expect(created.code).toBe(200);
+    const job = await readJob(created.data.generation_job_id);
+    // 直接参考在前、文本带入追加尾部（role=reference、类型保留），references 缺失项被权威并入
+    expect(job!.input.references).toEqual([
+      { role: "reference", asset_id: directAssetId, type: "audio" },
+      { role: "reference", asset_id: indexedAssetId, type: "audio" },
+    ]);
+    expect(job!.input.text_attachments).toEqual([
+      {
+        node_id: "text-1",
+        title: "文本",
+        text: "用音频1配音",
+        media: [{ node_id: "media-1", asset_id: indexedAssetId, media_type: "audio" }],
+      },
+    ]);
+    expect(job!.input.text_input_signature).toBe(
+      textInputSignatureOf([
+        { nodeId: "text-1", text: "用音频1配音", identities: [{ sourceNodeId: "media-1", assetId: indexedAssetId, mediaType: "audio" }] },
+      ]),
+    );
+  });
+
+  it("音频 references 缺失时以文本带入新建单数组（无直接参考目标）", async () => {
+    const project = await projects.create("987654", "IKFM41 create refs");
+    const projectId = project.id;
+    const indexedAssetId = await createAsset(projectId, "audio", "https://example.com/ai.mp3");
+    const nodes = [
+      { id: "gen-a", type: "mediaNode", position: { x: 800, y: 0 }, data: { mediaType: "audio", draft: true } },
+      { id: "media-1", type: "mediaNode", position: { x: 0, y: 0 }, data: { assetId: indexedAssetId, mediaType: "audio", src: "https://example.com/ai.mp3", fileName: "甲音频" } },
+      {
+        id: "text-1", type: "textNode", position: { x: 400, y: 0 },
+        data: {
+          title: "文本", text: "用音频1配音",
+          mediaMentions: [{ start: 1, end: 4, nodeId: "media-1", assetId: indexedAssetId }],
+          mediaRefs: [{ nodeId: "media-1", assetId: indexedAssetId, mediaType: "audio", name: "甲音频", url: "https://example.com/ai.mp3" }],
+        },
+      },
+    ];
+    const edges = [
+      { id: "e-text", source: "text-1", target: "gen-a" },
+      { id: "e-index", source: "media-1", target: "text-1", data: { textIndex: true } },
+    ];
+    await saveCanvas(projectId, nodes, edges, "missing");
+    const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音"));
+    expect(created.code).toBe(200);
+    const job = await readJob(created.data.generation_job_id);
+    expect(job!.input.references).toEqual([{ role: "reference", asset_id: indexedAssetId, type: "audio" }]);
+  });
+
+  it("音频同源预演：references 已含文本素材时序不变；同 assetId 去重", async () => {
+    const { projectId, indexedAssetId, directAssetId } = await seedAudioIndexedCanvas("IKFM41 premerged");
+    const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", [
+      { role: "reference", asset_id: directAssetId, type: "audio" },
+      { role: "reference", asset_id: indexedAssetId, type: "audio" },
+    ]));
+    expect(created.code).toBe(200);
+    const job = await readJob(created.data.generation_job_id);
+    expect(job!.input.references).toEqual([
+      { role: "reference", asset_id: directAssetId, type: "audio" },
+      { role: "reference", asset_id: indexedAssetId, type: "audio" },
+    ]);
+  });
+
+  it("音频失效索引（textIndex 关系线缺失）阻止发送且零建任务", async () => {
+    const { projectId } = await seedAudioIndexedCanvas("IKFM41 invalid", { dropIndexEdge: true });
+    const before = await jobCount(projectId);
+    const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音"));
+    expect(created.code).toBe(400);
+    expect(created.msg).toBe("文本索引存在失效素材，请修复来源文本后提交");
+    expect(await jobCount(projectId)).toBe(before);
+  });
+
+  it("音频不支持类型：文本索引视频素材进音频目标 → 400 阻止（不静默丢素材）", async () => {
+    const { projectId } = await seedAudioIndexedCanvas("IKFM41 unsupported", { refMediaType: "video" });
+    const before = await jobCount(projectId);
+    const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音"));
+    expect(created.code).toBe(400);
+    expect(created.msg).toBe("文本索引包含目标不支持的媒体类型，请修改来源文本");
+    expect(await jobCount(projectId)).toBe(before);
+  });
+
+  it("音频与图片不可混用：文本带入内混用 → 400 阻止", async () => {
+    const { projectId } = await seedAudioIndexedCanvas("IKFM41 mix refs", { withImageMention: true });
+    const before = await jobCount(projectId);
+    const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音"));
+    expect(created.code).toBe(400);
+    expect(created.msg).toBe("音频与图片参考不可混用");
+    expect(await jobCount(projectId)).toBe(before);
+  });
+
+  it("音频与图片不可混用：文本带入音频 + 直接参考图片跨来源混用 → 400 阻止", async () => {
+    const { projectId, directAssetId } = await seedAudioIndexedCanvas("IKFM41 mix direct", { directMediaType: "image" });
+    const before = await jobCount(projectId);
+    const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", [
+      { role: "reference", asset_id: directAssetId, type: "image" },
+    ]));
+    expect(created.code).toBe(400);
+    expect(created.msg).toBe("音频与图片参考不可混用");
+    expect(await jobCount(projectId)).toBe(before);
+  });
+
+  it("音频分类超限：直接参考 + 文本带入联算超 audio_reference_max → 400", async () => {
+    const { projectId, directAssetId } = await seedAudioIndexedCanvas("IKFM41 overflow");
+    const before = await jobCount(projectId);
+    const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId), AUDIO_LIMIT_MODEL_ID));
+    expect(created.code).toBe(400);
+    expect(created.msg).toBe("参考音频最多 1 个");
+    expect(await jobCount(projectId)).toBe(before);
+  });
+
+  it("混合目标独立处理：同文本音频素材音频目标正常、图片目标分别报错（不静默丢素材）", async () => {
+    const { projectId } = await seedAudioIndexedCanvas("IKFM41 mixed targets");
+    // 追加图片目标 gen-i，同文本 text-1 连接：音频目标正常同步提交，
+    // 图片目标对同一文本的音频素材分别报错——互不影响
+    const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const nodes = canvasRow!.nodes_json as unknown as unknown[];
+    const edges = [
+      ...(canvasRow!.edges_json as unknown as unknown[]),
+      { id: "e-text-i", source: "text-1", target: "gen-i" },
+    ];
+    await saveCanvas(projectId, [...nodes, { id: "gen-i", type: "mediaNode", position: { x: 800, y: 400 }, data: { mediaType: "image", draft: true } }], edges, canvasRow!.version);
+    const audioOk = await createJob(projectId, audioJobBody("gen-a", "暮色背景音"));
+    expect(audioOk.code).toBe(200);
+    const imageBlocked = await createJob(projectId, imageJobBody("gen-i", "暮色"));
+    expect(imageBlocked.code).toBe(400);
+    expect(imageBlocked.msg).toBe("文本索引包含目标不支持的媒体类型，请修改来源文本");
+  });
+
+  it("断开文本→音频目标连线仅解除该来源：文本带入消失、直接参考与素材卡保留", async () => {
+    const { projectId, indexedAssetId, directAssetId } = await seedAudioIndexedCanvas("IKFM41 unlink");
+    // 断开 text-1 → gen-a 边（保留 media-1→text-1 关系线与 media-2 直接参考连线）
+    const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const keptEdges = (canvasRow!.edges_json as unknown as Array<{ id: string }>).filter((edge) => edge.id !== "e-text");
+    await saveCanvas(projectId, canvasRow!.nodes_json as unknown as unknown[], keptEdges, canvasRow!.version);
+    const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId)));
+    expect(created.code).toBe(200);
+    const job = await readJob(created.data.generation_job_id);
+    // 文本带入项随边解除消失，直接参考保留；无文本入边 → 附件为空集合（target_node_id
+    // 仍冻结空数组）、签名不写入
+    expect(job!.input.references).toEqual([{ role: "reference", asset_id: directAssetId, type: "audio" }]);
+    expect(job!.input.text_attachments).toEqual([]);
+    expect(job!.input.text_input_signature).toBeUndefined();
+    // 素材卡（含被索引素材）仍在画布——断边只解除来源，不删素材
+    const after = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const nodeIds = (after!.nodes_json as unknown as Array<{ id: string }>).map((node) => node.id);
+    expect(nodeIds).toContain("media-1");
+    expect(nodeIds).toContain("text-1");
+    // 同 assetId 不重复进入：断边后提交的 references 不含 indexedAssetId
+    expect(JSON.stringify(job!.input.references)).not.toContain(indexedAssetId);
+  });
+
+  it("音频重试复用原快照：references、media 映射与签名原样复制，不重读画布", async () => {
+    const { projectId, directAssetId } = await seedAudioIndexedCanvas("IKFM41 retry");
+    const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId)));
+    expect(created.code).toBe(200);
+    const original = await readJob(created.data.generation_job_id);
+    const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const retryNodes = canvasRow!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
+    retryNodes.find((node) => node.id === "text-1")!.data.text = "提交后改的正文";
+    await saveCanvas(projectId, retryNodes, canvasRow!.edges_json as unknown as unknown[], canvasRow!.version);
+    await prisma.client.generation_output_slots.updateMany({
+      where: { generation_job_id: BigInt(created.data.generation_job_id) },
+      data: { status: "failed" },
+    });
+    await prisma.client.generation_jobs.update({ where: { id: BigInt(created.data.generation_job_id) }, data: { status: "failed" } });
+    const retried = await fetch(`${base}/api/projects/${projectId}/generation-jobs/${created.data.generation_job_id}/retry`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": `ikfm41-${created.data.generation_job_id}-${Date.now()}` },
+      body: "{}",
+    });
+    const retryBody = (await retried.json()) as { code: number; data?: { generation_job_id: string } };
+    expect(retryBody.code).toBe(200);
+    const retryJob = await readJob(retryBody.data!.generation_job_id);
+    expect(retryJob!.input.references).toEqual(original!.input.references);
+    expect(retryJob!.input.text_attachments).toEqual(original!.input.text_attachments);
+    expect(retryJob!.input.text_input_signature).toBe(original!.input.text_input_signature);
+  });
+
+  it("音频回归：普通文本连线（无媒体索引）不新建 references，创作上下文与签名照旧", async () => {
+    const project = await projects.create("987654", "IKFM41 plain");
+    const projectId = project.id;
+    const nodes = [
+      { id: "gen-a", type: "mediaNode", position: { x: 800, y: 0 }, data: { mediaType: "audio", draft: true } },
+      { id: "text-1", type: "textNode", position: { x: 400, y: 0 }, data: { title: "文本", text: "赛博朋克" } },
+    ];
+    await saveCanvas(projectId, nodes, [{ id: "e1", source: "text-1", target: "gen-a" }], "missing");
+    const created = await createJob(projectId, audioJobBody("gen-a", "赛博朋克"));
+    expect(created.code).toBe(200);
+    const job = await readJob(created.data.generation_job_id);
+    expect(job!.input.references).toBeUndefined();
+    expect(job!.input.text_attachments).toEqual([{ node_id: "text-1", title: "文本", text: "赛博朋克" }]);
+    expect(job!.input.text_input_signature).toBe(
+      textInputSignatureOf([{ nodeId: "text-1", text: "赛博朋克", identities: [] }]),
+    );
+  });
+
+  it("音频文本带入素材被软删后提交被存在性复核拒绝；类型替换被类型复核拒绝", async () => {
+    const { projectId, indexedAssetId, directAssetId } = await seedAudioIndexedCanvas("IKFM41 missing");
+    await prisma.client.assets.update({ where: { id: BigInt(indexedAssetId) }, data: { is_delete: true } });
+    const blocked = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId)));
+    expect(blocked.code).toBe(400);
+    expect(blocked.msg).toBe("参考素材不存在或无权访问");
+    // 恢复素材但替换为 video 类型（文本声明 audio）：类型复核拒绝
+    await prisma.client.assets.update({ where: { id: BigInt(indexedAssetId) }, data: { is_delete: false, type: "video" } });
+    const mismatch = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId)));
+    expect(mismatch.code).toBe(400);
+    expect(mismatch.msg).toBe("参考素材类型与声明不符");
+  });
+
+  it.runIf(process.env.IKFM3S_BROWSER)("browser audio: 锁定参考进音频面板、发送冻结、提示清除与重现", async () => {
+    const { chromium } = await import("playwright");
+    const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
+    const projectId = (await projects.create("987654", "IKFM41 browser")).id;
+    const indexedAssetId = await createAsset(projectId, "audio", "https://example.com/indexed.mp3");
+    const directAssetId = await createAsset(projectId, "audio", "https://example.com/direct.mp3");
+    const nodes = [
+      { id: "m1", type: "mediaNode", position: { x: 100, y: 80 }, data: { assetId: indexedAssetId, mediaType: "audio", src: "https://example.com/indexed.mp3", fileName: "索引音频" } },
+      { id: "m2", type: "mediaNode", position: { x: 100, y: 320 }, data: { assetId: directAssetId, mediaType: "audio", src: "https://example.com/direct.mp3", fileName: "直接音频" } },
+      { id: "t1", type: "textNode", position: { x: 520, y: 200 }, data: {
+        title: "文案", text: "用音频1配音",
+        mediaMentions: [{ start: 1, end: 4, nodeId: "m1", assetId: indexedAssetId }],
+        mediaRefs: [{ nodeId: "m1", assetId: indexedAssetId, mediaType: "audio", name: "索引音频", url: "https://example.com/indexed.mp3" }],
+      } },
+      { id: "d1", type: "mediaNode", position: { x: 960, y: 120 }, data: { mediaType: "audio", draft: true, fileName: "音频生成" } },
+    ];
+    const edges = [
+      { id: "e-index", source: "m1", target: "t1", data: { textIndex: true } },
+      { id: "e-direct", source: "m2", target: "d1" },
+    ];
+    expect((await saveCanvas(projectId, nodes, edges, "missing")).version).toBeDefined();
+
+    const vite = await createVite({ root: `${process.cwd()}/web`, server: {
+      open: false, host: "127.0.0.1", port: 0, proxy: { "/api": { target: base } },
+    } });
+    await vite.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
+      const generationRequests: Array<Record<string, unknown>> = [];
+      page.on("request", (request) => {
+        if (request.method() === "POST" && /\/api\/projects\/\d+\/generation-jobs$/.test(request.url())) {
+          generationRequests.push(request.postDataJSON() as Record<string, unknown>);
+        }
+      });
+      await page.addInitScript(() => localStorage.setItem("bw-auth", JSON.stringify({ state: { user: {
+        userId: 987654, username: "integration", email: "", phone: "", hasPassword: true, isAdmin: false,
+      } }, version: 0 })));
+      page.on("pageerror", (error) => console.log("[ikfm41 pageerror]", String(error).slice(0, 600)));
+      page.on("console", (message) => {
+        if (message.type() === "error") console.log("[ikfm41 console.error]", message.text().slice(0, 600));
+      });
+      await page.goto(`${vite.resolvedUrls!.local[0]}canvas?project=${projectId}`);
+      const nodeById = (id: string) => page.locator(`.react-flow__node[data-id="${id}"]`);
+      const audioRefs = page.locator('[data-testid="audio-ref-thumb"]');
+      const editor = page.locator('[data-testid="audio-input"] [contenteditable="true"]');
+      const badge = page.locator('[data-testid="input-stale-badge"]');
+
+      await nodeById("m1").waitFor();
+      await nodeById("t1").waitFor();
+      await nodeById("d1").waitFor();
+
+      // 1) 文本卡连到音频目标：真实拖线 t1 → d1 → 音频目标右上角「输入已更新」
+      const src = page.locator('.react-flow__node[data-id="t1"] .react-flow__handle-right');
+      const dst = page.locator('.react-flow__node[data-id="d1"] .react-flow__handle-left');
+      const sb = (await src.boundingBox())!;
+      const db = (await dst.boundingBox())!;
+      await page.mouse.move(sb.x + sb.width * 0.75, sb.y + sb.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(db.x + db.width * 0.25, db.y + db.height / 2, { steps: 24 });
+      await page.mouse.up();
+      await vi.waitFor(async () => expect(await badge.count(), "文本连线后音频目标显示输入已更新").toBe(1));
+      await page.screenshot({ path: "/tmp/ikfm41-badge.png", fullPage: true });
+
+      // 2) 打开音频面板：文本带入素材以锁定条目进参考栏（无移除入口、有定位入口）
+      await nodeById("d1").locator('[data-testid="media-content"]').click();
+      await editor.waitFor();
+      await vi.waitFor(async () => expect(await audioRefs.count(), "直接参考 + 文本带入参考").toBe(2));
+      const locked = audioRefs.filter({ has: page.locator('button[title="此素材由文本索引提供，请修改来源文本"]') });
+      const removable = audioRefs.filter({ has: page.locator('button[title="移除"]') });
+      await vi.waitFor(async () => expect(await locked.count(), "文本带入条目锁定（定位入口）").toBe(1));
+      await vi.waitFor(async () => expect(await removable.count(), "直接参考可移除").toBe(1));
+
+      // 3) 发送：请求体 references 含文本带入素材（前端同源预演，asset_id 空间追加尾部）
+      await editor.click();
+      await page.keyboard.type("用这两段音频出一段配乐");
+      await vi.waitFor(async () => {
+        const sendBtn = page.locator('[data-testid="audio-send"]');
+        expect(await sendBtn.isDisabled(), `发送按钮不应禁用（title=${await sendBtn.getAttribute("title")}）`).toBe(false);
+      });
+      await page.locator('[data-testid="audio-send"]').click();
+      await vi.waitFor(() => expect(generationRequests).toHaveLength(1), { timeout: 15_000 });
+      expect(generationRequests[0].type).toBe("audio");
+      expect(generationRequests[0].target_node_id).toBe("d1");
+      expect(generationRequests[0].references).toEqual([
+        { role: "reference", asset_id: directAssetId, type: "audio" },
+        { role: "reference", asset_id: indexedAssetId, type: "audio" },
+      ]);
+
+      // 4) DB 翻 succeeded 模拟供应商终态：轮询拿签名回写 → 徽标清除 + 落盘核对
+      const jobRow = await prisma.client.generation_jobs.findFirst({ where: { project_id: BigInt(projectId) }, orderBy: { id: "desc" } });
+      expect(jobRow).not.toBeNull();
+      const frozen = jobRow!.input as Record<string, unknown>;
+      expect(frozen.references).toEqual([
+        { role: "reference", asset_id: directAssetId, type: "audio" },
+        { role: "reference", asset_id: indexedAssetId, type: "audio" },
+      ]);
+      expect((frozen.text_attachments as Array<Record<string, unknown>>)[0]!.media).toEqual([
+        { node_id: "m1", asset_id: indexedAssetId, media_type: "audio" },
+      ]);
+      expect(typeof frozen.text_input_signature).toBe("string");
+      const outputAsset = await prisma.client.assets.create({ data: { user_id: 987654n, project_id: BigInt(projectId), type: "audio", url: "https://example.com/out.mp3", width: 640, height: 480 } });
+      await prisma.client.generation_jobs.update({
+        where: { id: jobRow!.id },
+        data: { status: "succeeded", progress: 100, output_asset_ids: [outputAsset.id] },
+      });
+      await vi.waitFor(async () => expect(await badge.count(), "成功使用最新输入后清除提示").toBe(0), { timeout: 15_000 });
+      await vi.waitFor(async () => {
+        const canvas = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+        const saved = (canvas!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>).find((n) => n.id === "d1");
+        expect(saved!.data.usedInputSignature).toBe(frozen.text_input_signature);
+        expect(saved!.data.usedInputJobId).toBe(Number(jobRow!.id));
+      }, { timeout: 10_000 });
+
+      // 5) 修改来源正文（真实保存 API）→ 刷新画布：提示重现且刷新后保留
+      const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+      const savedNodes = canvasRow!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
+      savedNodes.find((n) => n.id === "t1")!.data.text = "改用音频1配音吧";
+      await saveCanvas(projectId, savedNodes, canvasRow!.edges_json as unknown as unknown[], canvasRow!.version);
+      await page.reload();
+      await nodeById("d1").waitFor();
+      await vi.waitFor(async () => expect(await badge.count(), "正文变化后提示重现（刷新恢复）").toBe(1));
+      await page.screenshot({ path: "/tmp/ikfm41-badge-reappear.png", fullPage: true });
     } finally { await browser.close(); await vite.close(); }
   }, 180_000);
 });
