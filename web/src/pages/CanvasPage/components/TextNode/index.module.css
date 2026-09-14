@@ -250,6 +250,10 @@
 .handle {
   opacity: 0;
   transition: opacity 0.15s ease;
+  /* 覆盖 react-flow__handle-left/right 的 translate(-50%, -50%)：
+     水平定位交给 inline left/right（锚定正文左右中点），仅保留垂直居中 */
+  top: 50%;
+  transform: translate(0, -50%);
 }
 
 .wrapper:hover .handle,

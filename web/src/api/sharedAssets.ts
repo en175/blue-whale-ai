@@ -46,10 +46,11 @@ export interface SharedAssetGoodsSnapshot {
   images: Array<{ id: string; src: string; enabled?: boolean }>;
 }
 
-/** 文本快照 */
+/** 文本快照（统一正文契约 v1：text 为 Markdown 源；html 仅存量资产兼容） */
 export interface SharedAssetTextSnapshot {
-  /** 富文本 HTML */
-  html: string;
+  text: string;
+  /** 存量兼容：升级前保存的 HTML 快照 */
+  html?: string;
 }
 
 /** 场景卡快照 */
@@ -286,10 +287,10 @@ export function buildGoodsSaveRequest(data: {
   };
 }
 
-/** 从文本节点数据构建文本保存请求 */
-export function buildTextSaveRequest(html: string): SaveSharedAssetTextRequest {
+/** 从文本节点数据构建文本保存请求（统一正文契约 v1：text 为 Markdown 源） */
+export function buildTextSaveRequest(text: string): SaveSharedAssetTextRequest {
   return {
     assetType: 'text',
-    snapshot: { html },
+    snapshot: { text },
   };
 }
