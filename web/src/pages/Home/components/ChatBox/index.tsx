@@ -845,8 +845,12 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     );
     let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
     let vidRoom = Math.max(0, videoMaxVideos - videoRefVideoCount);
+    // ADR-0086：模型不接受视频素材参考时跳过视频（与本地上传/资产路径同口径，不静默加入）
+    const videoRefUnsupported = !supportsVideoReferenceOf(selectedVideoModel?.features);
     const eligible = assets.filter((a) => a.AssetType === 'Image' || a.AssetType === 'Video');
-    const unique = eligible.filter((a) => !existing.has(String(a.Id)));
+    const unique = eligible
+      .filter((a) => !(videoRefUnsupported && a.AssetType === 'Video'))
+      .filter((a) => !existing.has(String(a.Id)));
     const items = unique
       .filter((a) => {
         if (a.AssetType === 'Image') {
@@ -871,6 +875,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       acceptedVideos: items.filter((i) => i.type === 'video').length,
     });
     if (overflows.length > 0) parts.push(refOverflowToast(overflows, { image: videoMaxImages, video: videoMaxVideos }));
+    if (videoRefUnsupported && assets.some((a) => a.AssetType === 'Video')) parts.push('当前模型不支持视频素材参考，已跳过视频素材');
     if (unique.length < eligible.length) parts.push('重复的素材已跳过');
     if (parts.length > 0) showToast(parts.join('；'));
     if (items.length === 0) return;
@@ -970,8 +975,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       );
       let imgRoom = Math.max(0, videoMaxImages - videoRefImageCount);
       let vidRoom = Math.max(0, videoMaxVideos - videoRefVideoCount);
+      // ADR-0086：模型不接受视频素材参考时跳过视频（与本地上传路径同口径，不静默加入）
+      const videoRefUnsupported = !supportsVideoReferenceOf(selectedVideoModel?.features);
       const eligible = assets
         .filter((a) => a.type === 'image' || a.type === 'video')
+        .filter((a) => !(videoRefUnsupported && a.type === 'video'))
         .filter((a) => !existing.has(String(a.id)));
       const items = eligible
         .filter((a) => {
@@ -989,7 +997,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           type: (a.type === 'video' ? 'video' : 'image') as 'image' | 'video',
           assetId: a.id,
         }));
-      if (eligible.length > items.length) {
+      if (videoRefUnsupported && assets.some((a) => a.type === 'video')) {
+        showToast('当前模型不支持视频素材参考，已跳过视频素材');
+      } else if (eligible.length > items.length) {
         showToast(`参考素材已到上限（图片 ${videoMaxImages} 张 / 视频 ${videoMaxVideos} 个）`);
       }
       if (items.length === 0) return;
