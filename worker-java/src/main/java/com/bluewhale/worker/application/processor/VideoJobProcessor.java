@@ -364,12 +364,11 @@ public class VideoJobProcessor implements JobProcessor {
         }
         log.info("[video] 转存完成 jobId={} storageKey={} size={}", claim.id(), stored.storageKey(), stored.size());
 
-        // videoDimensions（:469-476）
+        // videoDimensions（:469-476）；ADR-0086：adaptive 比例无固定宽高（首帧/编辑/延长任务），
+        // 尺寸可空——不再视为失败（asset 的 width/height 列可空），否则生成成功的 adaptive 视频发布不出去。
         int[] dimensions = resolveDimensions(claim.input());
-        if (dimensions == null) {
-            failVideo(claim, GenerationError.ERROR_INVALID_INPUT, "视频尺寸无效");
-            return false;
-        }
+        Integer width = dimensions != null ? dimensions[0] : null;
+        Integer height = dimensions != null ? dimensions[1] : null;
 
         // duration（:510）
         double duration = resolveDuration(claim.input());
@@ -379,7 +378,7 @@ public class VideoJobProcessor implements JobProcessor {
                 claim.id(), claim.project_id(), claim.user_id(),
                 claim.workerId(), claim.fencingToken(),
                 stored.url(), stored.storageKey(), stored.mime(), stored.size(),
-                dimensions[0], dimensions[1], duration);
+                width, height, duration);
         if (published) {
             log.info("[video] 发布成功 jobId={}", claim.id());
         } else {

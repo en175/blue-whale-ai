@@ -136,7 +136,7 @@ public class JobStateMachineService {
     public boolean publishVideoResult(String jobId, String projectId, String userId,
                                       String workerId, long fencingToken,
                                       String url, String storageKey, String mime, Long size,
-                                      int width, int height, double duration) {
+                                      Integer width, Integer height, double duration) {
         return finalizer.publishVideoResult(
                 jobId, projectId, userId, workerId, fencingToken,
                 url, storageKey, mime, size, width, height, duration);

@@ -327,7 +327,7 @@ public class JobFinalizer {
     public boolean publishVideoResult(String jobId, String projectId, String userId,
                                       String workerId, long fencingToken,
                                       String url, String storageKey, String mime, Long size,
-                                      int width, int height, double duration) {
+                                      Integer width, Integer height, double duration) {
         Long jobIdLong = Long.parseLong(jobId);
 
         int guardAffected = jobMapper.publishVideoGuard(jobIdLong, workerId, fencingToken);
