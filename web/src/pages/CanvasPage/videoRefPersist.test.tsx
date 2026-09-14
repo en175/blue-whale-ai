@@ -250,9 +250,10 @@ async function typePrompt(text: string) {
   await typePromptRefText(container, text);
 }
 
-/** 点击画布媒体节点（打开/切换绑定面板） */
+/** 点击画布媒体/文本节点（打开/切换绑定面板、会话选取命中） */
 async function clickNode(id: string) {
-  const node = flowProps.current.mediaNodes.find((n: Node) => n.id === id);
+  const node = flowProps.current.mediaNodes.find((n: Node) => n.id === id)
+    ?? flowProps.current.textNodes.find((n: Node) => n.id === id)!;
   await act(async () => {
     flowProps.current.onNodeClick(node);
   });
@@ -294,6 +295,31 @@ async function pickRefNode(slotTitle: string, nodeId: string) {
     [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材')!.click();
   });
   await clickNode(nodeId);
+}
+
+/** IKFR4Y 仅发起持续选取会话（槽位 + 按钮弹来源菜单 →「从节点添加素材」），不点击画布节点 */
+async function enterPick(slotTitle: string) {
+  await vi.waitFor(() => {
+    const btn = [...container.querySelectorAll('button')].find((b) => b.title === slotTitle);
+    expect(btn).toBeTruthy();
+  });
+  await act(async () => {
+    [...container.querySelectorAll('button')].find((b) => b.title === slotTitle)!.click();
+  });
+  await vi.waitFor(() => {
+    const item = [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材');
+    expect(item).toBeTruthy();
+  });
+  await act(async () => {
+    [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材')!.click();
+  });
+}
+
+/** IKFR4Y 结束持续选取会话：Esc（输入框外的 Esc 保持原语义，此处直发 window） */
+async function pressEscape() {
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  });
 }
 
 /** 等待视频模型能力加载完成（发送前置条件） */
@@ -373,10 +399,12 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await clickNode('d1');
     await waitModelReady();
 
-    await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
+    // IKFR4Y 持续会话：入口进入一次，连续点击多份允许来源，模式保持
+    await enterPick('从资产中选择 / 从节点添加素材');
+    await clickNode('m1');
     expect(edgePairs()).toEqual(['m1->d1']);
     expect(edgeRoles()).toEqual(['reference']);
-    await pickRefNode('从资产中选择 / 从节点添加素材', 'v1');
+    await clickNode('v1');
     expect(edgePairs()).toEqual(['m1->d1', 'v1->d1']);
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图', '参考视频']), { timeout: 3000 });
 
@@ -470,8 +498,11 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await clickNode('d1');
     await waitModelReady();
 
-    await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
-    await pickRefNode('从资产中选择 / 从节点添加素材', 'v1');
+    // IKFR4Y 一次进入连续选取；完成选取后恢复编辑再生成
+    await enterPick('从资产中选择 / 从节点添加素材');
+    await clickNode('m1');
+    await clickNode('v1');
+    await pressEscape();
     await typePrompt('多媒体参考');
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
@@ -517,10 +548,13 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await waitModelReady();
 
     await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
+    // IKFR4Y 选取后会话保持，编辑只读；先完成会话再编辑提示词
+    await pressEscape();
     await typePrompt('空白点击保留');
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图']));
 
-    // 视频底部对话框点击画布空白不自动关闭（CanvasPage 既有语义），编辑与连线保留
+    // 视频底部对话框点击画布空白不自动关闭（CanvasPage 既有语义），编辑与连线保留；
+    // IKFR4Y 会话中空白点击同样不退出（模式保持），编辑在会话中只读、退出后可用
     await act(async () => {
       flowProps.current.onPaneClick();
     });
@@ -543,8 +577,11 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await clickNode('d1');
     await waitModelReady();
 
-    await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
-    await pickRefNode('从资产中选择 / 从节点添加素材', 'v1');
+    // IKFR4Y 一次进入连续选取两份；完成选取后恢复编辑（切换目标不在会话中发生）
+    await enterPick('从资产中选择 / 从节点添加素材');
+    await clickNode('m1');
+    await clickNode('v1');
+    await pressEscape();
     await typePrompt('A 的提示词');
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图', '参考视频']));
 
@@ -567,10 +604,11 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await waitModelReady();
     await typePrompt('保存前编辑');
 
-    // 保存持续失败：选取仍立即建线并保留在页面
+    // 保存持续失败：选取仍立即建线并保留在页面（IKFR4Y 会话保持，与保存状态独立）
     apiMocks.saveCanvasDoc.mockImplementation(() => Promise.reject(new Error('boom')));
     await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
     expect(edgePairs()).toEqual(['m1->d1']);
+    await pressEscape();
 
     // 自动保存失败：显示未保存；连线与 Dock 参考保留
     await vi.waitFor(() => expect(container.textContent).toContain('保存失败，请重试'), { timeout: 3000 });
@@ -612,6 +650,8 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
 
     await pickRefNode('从资产中选择 / 从节点添加素材', 'v1');
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['参考视频']));
+    // IKFR4Y 会话保持，先完成会话再编辑与切换模型
+    await pressEscape();
     await typePrompt('参考绘制');
     expect(sendButton().disabled).toBe(false);
 
@@ -671,10 +711,13 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await clickNode('d1');
     await waitModelReady();
 
-    await pickRefNode('从资产中选择 / 从节点添加素材', 'm1');
-    await pickRefNode('从资产中选择 / 从节点添加素材', 'm2');
+    // IKFR4Y 一次进入连续选取两份；完成选取后恢复编辑再验证上限切换
+    await enterPick('从资产中选择 / 从节点添加素材');
+    await clickNode('m1');
+    await clickNode('m2');
     expect(edgePairs()).toEqual(['m1->d1', 'm2->d1']);
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图', '次图']));
+    await pressEscape();
     await typePrompt('两张参考');
     expect(sendButton().disabled).toBe(false);
 
@@ -709,5 +752,395 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     // 立即建立连线（不等待发送）；Dock 显示同一参考
     expect(edgePairs()).toEqual(['m1->d1']);
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图']));
+  });
+});
+
+describe('IKFR4Y 视频参考持续选取与首尾帧连续替换', () => {
+  function pickLock(): boolean {
+    return flowProps.current.refPickActive === true;
+  }
+
+  function pickMarks(): string[] {
+    return (flowProps.current.refPickMarkedIds ?? []) as string[];
+  }
+
+  /** 完成选取按钮是否存在（会话提示条专属，普通模式无） */
+  function finishButton(): HTMLButtonElement | undefined {
+    return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent === '完成选取',
+    );
+  }
+
+  async function finishPick() {
+    await act(async () => {
+      finishButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+  }
+
+  /** 视频面板在本页是否可见：会话中编辑器只读（contenteditable=false），以发送按钮为准 */
+  function panelOpen(): boolean {
+    return container.querySelector('[data-testid="video-send"]') !== null;
+  }
+
+  /** 关闭当前绑定面板（右上角 ×） */
+  async function closePanel() {
+    const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.getAttribute('title') === '关闭',
+    )!;
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+  }
+
+  /** 追加媒体节点（含资产映射，assets 在 useCanvasDoc 打桩顶层）；默认图片 */
+  function pushMediaNode(id: string, assetId: string, name: string, mediaType: 'image' | 'video' = 'image') {
+    const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> };
+    doc.nodes.push({
+      id, type: 'mediaNode', position: { x: 0, y: 700 },
+      data: { src: `http://img/${id}.png`, mediaType, fileName: name, assetId },
+    });
+    (canvasDocMock.current.assets as Record<string, unknown>)[assetId] =
+      { asset_id: Number(assetId.slice(1)), type: mediaType, access_url: `http://img/${id}.png`, width: 100, height: 100 };
+  }
+
+  function pushTextNode(id: string, text: string) {
+    (canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> }).nodes.push({
+      id, type: 'textNode', position: { x: 0, y: 900 }, data: { text },
+    });
+  }
+
+  /** keyframe 草稿 seed：2 张图片普通参考保证首尾帧模式可达（IKFJJT 门控），帧槽全空入口可发起 */
+  function seedKeyframeSlots() {
+    seedDoc('keyframe');
+    const doc = canvasDocMock.current.doc as { edges: unknown[] };
+    doc.edges = [
+      { id: 'e-m1-d1', source: 'm1', target: 'd1' },
+      { id: 'e-m2-d1', source: 'm2', target: 'd1' },
+    ];
+  }
+
+  /** Dock 移除按钮（当前全部参考项） */
+  const dockRemoveButtons = () =>
+    [...container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]')];
+
+  it('一次进入连续选取图片+视频：逐条建线保持模式，Dock 与勾选同步，自动保存上送', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await enterPick('从资产中选择 / 从节点添加素材');
+    expect(pickLock()).toBe(true);
+    expect(finishButton()).toBeTruthy();
+    await clickNode('m1');
+    expect(edgePairs()).toEqual(['m1->d1']);
+    expect(pickLock()).toBe(true);
+    await clickNode('v1');
+    expect(edgePairs()).toEqual(['m1->d1', 'v1->d1']);
+    // 勾选只含当前目标普通参考来源（与 Dock 同源）
+    expect([...pickMarks()].sort()).toEqual(['m1', 'v1']);
+    await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图', '参考视频']));
+
+    await vi.waitFor(() => {
+      const saved = apiMocks.saveCanvasDoc.mock.calls.at(-1)![1];
+      expect(saved.edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`))
+        .toEqual(['m1->d1', 'v1->d1']);
+    }, { timeout: 3000 });
+  });
+
+  it('重复选择不重复：提示已跳过且模式持续；视频满额明确提示不写入不退出', async () => {
+    pushMediaNode('v2', 'a6', '参考视频二', 'video');
+    pushMediaNode('v3', 'a7', '参考视频三', 'video');
+    pushMediaNode('v4', 'a8', '参考视频四', 'video');
+    const doc = canvasDocMock.current.doc as { edges: unknown[] };
+    doc.edges = [
+      { id: 'e-v1-d1', source: 'v1', target: 'd1' },
+      { id: 'e-v2-d1', source: 'v2', target: 'd1' },
+      { id: 'e-v3-d1', source: 'v3', target: 'd1' },
+    ];
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await enterPick('从资产中选择 / 从节点添加素材');
+    // 重复选择已并入的图片：不新增不移除，提示后模式持续
+    await clickNode('m1');
+    await clickNode('m1');
+    expect(edgePairs()).toHaveLength(4); // v1/v2/v3 + m1
+    expect(pickLock()).toBe(true);
+
+    // 视频满额（上限 3）：明确提示、不写入、不退出
+    await clickNode('v4');
+    expect(container.textContent).toContain('参考视频最多 3 个');
+    expect(edgePairs()).toHaveLength(4);
+    expect(pickLock()).toBe(true);
+    // 改选合法来源可继续
+    await clickNode('m2');
+    expect(edgePairs()).toHaveLength(5);
+  });
+
+  it('普通参考会话选文本卡：建附件边并保持模式，非法来源提示后继续选取', async () => {
+    pushTextNode('t1', '普通文本上下文');
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await enterPick('从资产中选择 / 从节点添加素材');
+    await clickNode('t1');
+    expect(edgePairs()).toEqual(['t1->d1']);
+    expect(pickLock()).toBe(true);
+    // 文本来源无素材勾选语义，不计入勾选集合
+    expect(pickMarks()).toEqual([]);
+    await clickNode('m1');
+    expect(edgePairs()).toEqual(['t1->d1', 'm1->d1']);
+  });
+
+  it('首帧槽位连续替换 A→B→再选 B：最终仅 B 占用，其他参考不动，保存与重开恢复', async () => {
+    seedKeyframeSlots();
+    pushMediaNode('m3', 'a5', '替换图一');
+    pushMediaNode('m4', 'a6', '替换图二');
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+    await vi.waitFor(() => expect(frameBadges()).toEqual([]));
+
+    await enterPick('添加首帧（从资产中选择 / 从节点添加素材）');
+    expect(pickLock()).toBe(true);
+    // 选 A：占用首帧槽
+    await clickNode('m3');
+    expect(edgePairs().sort()).toEqual(['m1->d1', 'm2->d1', 'm3->d1']);
+    expect(edgeRoles().sort()).toEqual(['first', 'reference', 'reference']);
+    // 勾选只标当前槽位占用者，不混入普通参考来源
+    expect(pickMarks()).toEqual(['m3']);
+    // 选 B：替换当前槽位，A 的连线断开，其他参考保持
+    await clickNode('m4');
+    expect(edgePairs().sort()).toEqual(['m1->d1', 'm2->d1', 'm4->d1']);
+    expect(edgeRoles().sort()).toEqual(['first', 'reference', 'reference']);
+    expect(pickMarks()).toEqual(['m4']);
+    // 再选 B：幂等，不新增不误删
+    await clickNode('m4');
+    expect(edgePairs().sort()).toEqual(['m1->d1', 'm2->d1', 'm4->d1']);
+
+    // Dock 徽标与勾选同步；替换结果随自动保存上送
+    await vi.waitFor(() => expect(dockRefNames()).toEqual(['替换图二']));
+    expect(frameBadges()).toEqual(['首帧']);
+    await vi.waitFor(() => {
+      const saved = apiMocks.saveCanvasDoc.mock.calls.at(-1)![1];
+      expect(saved.edges.map((e: { source: string; data?: { refRole?: string } }) => `${e.source}:${e.data?.refRole ?? 'reference'}`).sort())
+        .toEqual(['m1:reference', 'm2:reference', 'm4:first']);
+    }, { timeout: 3000 });
+
+    // 关闭重开：首帧槽按替换后结果恢复，不恢复选取模式
+    await pressEscape();
+    await closePanel();
+    await clickNode('d1');
+    await vi.waitFor(() => expect(dockRefNames()).toEqual(['替换图二']));
+    expect(frameBadges()).toEqual(['首帧']);
+    expect(finishButton()).toBeUndefined();
+  });
+
+  it('尾帧槽位连续替换：同款语义，首帧与普通参考不动', async () => {
+    seedKeyframeSlots();
+    pushMediaNode('m3', 'a5', '替换图一');
+    pushMediaNode('m4', 'a6', '替换图二');
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await enterPick('添加尾帧（从资产中选择 / 从节点添加素材）');
+    await clickNode('m3');
+    expect(edgeRoles().sort()).toEqual(['last', 'reference', 'reference']);
+    expect(pickMarks()).toEqual(['m3']);
+    await clickNode('m4');
+    expect(edgePairs().sort()).toEqual(['m1->d1', 'm2->d1', 'm4->d1']);
+    expect(edgeRoles().sort()).toEqual(['last', 'reference', 'reference']);
+    expect(pickMarks()).toEqual(['m4']);
+    // 尾帧替换不影响首帧槽：从首帧入口选图占首帧后，尾帧会话继续替换不动首帧
+    expect(frameBadges()).toEqual(['尾帧']);
+  });
+
+  it('首尾帧会话拒绝视频素材与文本：不写入保持模式，不绕过仅图片限制', async () => {
+    seedKeyframeSlots();
+    pushTextNode('t1', '文本上下文');
+    pushMediaNode('m3', 'a5', '替换图一');
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await enterPick('添加首帧（从资产中选择 / 从节点添加素材）');
+    // 视频素材：拒绝并保持
+    await clickNode('v1');
+    expect(container.textContent).toContain('首尾帧仅支持图片素材');
+    expect(edgePairs().sort()).toEqual(['m1->d1', 'm2->d1']);
+    expect(pickLock()).toBe(true);
+    // 文本卡：同样拒绝，不建附件边
+    await clickNode('t1');
+    expect(container.textContent).toContain('首尾帧仅支持图片素材');
+    expect(flowProps.current.edges.some((e: { source: string }) => e.source === 't1')).toBe(false);
+    expect(pickLock()).toBe(true);
+    // 改选合法图片：占槽成功
+    await clickNode('m3');
+    expect(edgeRoles().sort()).toEqual(['first', 'reference', 'reference']);
+  });
+
+  it('会话中 Dock 移除：勾选同步消失，同模式可立即再次选择', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await enterPick('从资产中选择 / 从节点添加素材');
+    await clickNode('m1');
+    expect(pickMarks()).toEqual(['m1']);
+
+    await act(async () => { dockRemoveButtons()[0]!.click(); });
+    expect(edgePairs()).toEqual([]);
+    expect(pickMarks()).toEqual([]);
+    expect(pickLock()).toBe(true);
+
+    // 同一模式内立即再次选择
+    await clickNode('m1');
+    expect(edgePairs()).toEqual(['m1->d1']);
+    expect(pickMarks()).toEqual(['m1']);
+  });
+
+  it('空白点击不退出：面板与模式保持，继续选取有效', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await enterPick('从资产中选择 / 从节点添加素材');
+    await clickNode('m1');
+    await act(async () => {
+      flowProps.current.onPaneClick();
+    });
+    expect(pickLock()).toBe(true);
+    expect(panelOpen()).toBe(true);
+    expect(edgePairs()).toEqual(['m1->d1']);
+
+    await clickNode('v1');
+    expect(edgePairs()).toEqual(['m1->d1', 'v1->d1']);
+  });
+
+  it('完成按钮退出：保留参考与原目标 Dock，恢复编辑与普通切换；迟到选中事件不串目标', async () => {
+    pushDraftNode('d2');
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await enterPick('从资产中选择 / 从节点添加素材');
+    await clickNode('m1');
+    // 会话内普通选中变化不关闭/切换原目标 Dock（选取进行中 selection 被隔离）
+    await act(async () => {
+      flowProps.current.onSelectionChange({ nodes: [flowProps.current.mediaNodes.find((n: Node) => n.id === 'm2')!], edges: [] });
+    });
+    expect(panelOpen()).toBe(true);
+
+    await finishPick();
+    expect(pickLock()).toBe(false);
+    expect(finishButton()).toBeUndefined();
+    expect(panelOpen()).toBe(true);
+    await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图']));
+    expect(edgePairs()).toEqual(['m1->d1']);
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+
+    // 恢复普通编辑：点击其他草稿卡可正常切换面板
+    await clickNode('d2');
+    await vi.waitFor(() => expect(dockRefNames()).toEqual([]));
+  });
+
+  it('Esc 退出与关闭面板退出：保留参考，重开为普通模式（不恢复会话）', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    // Esc：保留参考与面板
+    await enterPick('从资产中选择 / 从节点添加素材');
+    await clickNode('m1');
+    await pressEscape();
+    expect(pickLock()).toBe(false);
+    expect(panelOpen()).toBe(true);
+    expect(edgePairs()).toEqual(['m1->d1']);
+
+    // 关闭面板：会话随面板结束；重开不恢复选取模式
+    await closePanel();
+    expect(pickLock()).toBe(false);
+    await clickNode('d1');
+    await vi.waitFor(() => expect(panelOpen()).toBe(true));
+    await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图']));
+    expect(finishButton()).toBeUndefined();
+    expect(container.textContent).not.toContain('点击画布中的');
+  });
+
+  it('会话中操作隔离：提示词只读、模式与模型入口禁用、发送禁用，Dock 移除可用', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+    await typePrompt('会话前的编辑');
+
+    await enterPick('从资产中选择 / 从节点添加素材');
+    // 提示词只读（会话中无 contenteditable 编辑面）
+    expect(container.querySelector('[contenteditable="true"]')).toBeNull();
+    // 模式入口与模型配置入口禁用（须先完成选取）
+    const modeBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => (b.textContent ?? '').includes('文生视频') && !(b.textContent ?? '').includes('|'),
+    )!;
+    expect(modeBtn.disabled).toBe(true);
+    const configBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => (b.textContent ?? '').includes('|'),
+    )!;
+    expect(configBtn.disabled).toBe(true);
+    // 发送禁用（既有提示词非空，仅因会话锁定被禁）
+    expect(sendButton().disabled).toBe(true);
+
+    // Dock 移除不受限：选取后可移除
+    await clickNode('m1');
+    expect(dockRemoveButtons()[0]!.disabled).toBe(false);
+
+    // 完成选取后恢复编辑与发送
+    await finishPick();
+    expect(container.querySelector('[contenteditable="true"]')).not.toBeNull();
+    expect(sendButton().disabled).toBe(false);
+  });
+
+  it('会话中保存失败：参考与模式保持并显示未保存，完成选取后参考保留', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+    await typePrompt('保存前编辑');
+
+    apiMocks.saveCanvasDoc.mockImplementation(() => Promise.reject(new Error('boom')));
+    await enterPick('从资产中选择 / 从节点添加素材');
+    await clickNode('m1');
+    expect(edgePairs()).toEqual(['m1->d1']);
+    // 保存失败：参考与模式保持，显示未保存
+    await vi.waitFor(() => expect(container.textContent).toContain('保存失败，请重试'), { timeout: 3000 });
+    expect(pickLock()).toBe(true);
+    expect(dockRefNames()).toEqual(['首图']);
+
+    // 完成选取：参考保留，未保存状态仍在（可走既有重试链路）
+    await finishPick();
+    expect(edgePairs()).toEqual(['m1->d1']);
+    expect(dockRefNames()).toEqual(['首图']);
+  });
+
+  it('活动目标被删除：结束会话并关闭面板，后续点击不写入已删目标', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    await enterPick('从资产中选择 / 从节点添加素材');
+    await clickNode('m1');
+    expect(pickLock()).toBe(true);
+
+    // 删除活动目标：会话与面板一并结束（旧会话不得写向其他目标）
+    await act(async () => {
+      flowProps.current.onDeleteNode('d1');
+    });
+    await vi.waitFor(() => expect(panelOpen()).toBe(false));
+    expect(pickLock()).toBe(false);
+    expect(finishButton()).toBeUndefined();
+
+    // 后续点击来源节点走普通分支，不产生指向已删目标的连线
+    await clickNode('m1');
+    expect(edgePairs().some((p: string) => p.endsWith('->d1'))).toBe(false);
   });
 });

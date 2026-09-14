@@ -21,6 +21,7 @@ import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from './refSourceTypes';
 import { cancelledTerminalAction, hasGenerationRecord, isInPlaceRegenTarget } from './mediaReEdit';
 import {
   asVideoRefMediaType,
+  isLibraryOnlyVideoRef,
   isVideoDraftNode,
   readRefRole,
   readDraftMaterialRefs,
@@ -223,6 +224,21 @@ export default function CanvasPage() {
   }, []);
   /** IKFR4X 图片持续选取会话进行中（派生布尔，会话身份三条件单点收敛） */
   const imagePickSessionActive = pickMode === 'image' && pickTarget === 'image' && imagePickSession !== undefined;
+  /** IKFR4Y 视频持续选取会话：undefined=无会话；string=发起时绑定的视频草稿节点 id；null=自由面板会话。
+   *  会话角色由 pickRefRole 快照承载（发起入口指定，会话期间无其他写入点）；首尾帧入口发起的
+   *  会话槽位已占时以最后一次有效选择替换（IKFR4Y），普通参考入口连续并入。纯界面交互态不持久化 */
+  const [videoPickSession, setVideoPickSession] = useState<string | null | undefined>(undefined);
+  /** IKFR4Y 结束视频持续选取会话：保留已建参考与原目标 Dock，恢复普通编辑（不生成、不二次确认） */
+  const endVideoPickSession = useCallback(() => {
+    setVideoPickSession(undefined);
+    setPickMode(null);
+    setPickTarget(null);
+    setPickRefRole(null);
+  }, []);
+  /** IKFR4Y 视频持续选取会话进行中（派生布尔：视频目标 + 发起槽位类型 + 会话三条件单点收敛） */
+  const videoPickSessionActive = pickTarget === 'video'
+    && (pickMode === 'image' || pickMode === 'video')
+    && videoPickSession !== undefined;
   /** 商品卡选取目标节点ID（选中的图片注入哪个商品卡） */
   const [pickProductId, setPickProductId] = useState<string | null>(null);
   /** 资产卡选取目标节点ID（选中的图片注入哪个资产卡） */
@@ -446,6 +462,9 @@ export default function CanvasPage() {
     const before = edgesRef.current;
     const after = releaseRemovedPromptSources(before, before.filter(edge => !edgeIds.includes(edge.id)));
     historyRef.current?.pushReplaceEdges(before, after);
+    // IKFR4Y：同步 ref——首尾帧槽位替换在同一次点击里先移除旧槽位边再建新边，
+    // 下游 addCanvasEdge 读 edgesRef.current 必须已见移除结果（与 addCanvasEdge 自身同步口径一致）
+    edgesRef.current = after;
     setEdges(after);
   };
   const removePlanAttachment = (targetId: string | undefined, planNodeId: string) => {
@@ -1728,6 +1747,141 @@ export default function CanvasPage() {
     });
   };
 
+  /** IKFR4Y 首尾帧槽位替换共用前置校验（绑定/自由面板同口径）：有效性 → 幂等（同素材重复点击
+   *  不新增不误删）→ 按「排除当前槽位」的参考视图调 checkAddVideoRef（槽位已占不阻断合法替换）。
+   *  返回 null 表示拒绝（已 toast）或幂等跳过；否则给出可替换的当前占用者 */
+  const checkVideoFrameReplace = (
+    node: Node,
+    refs: VideoMediaRefs,
+    role: 'first' | 'last',
+  ): { current: VideoMediaRef | undefined } | null => {
+    const err = videoRefSourceError(node, role);
+    if (err) {
+      showToast('warn', err);
+      return null;
+    }
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    const assetId = readAssetId(data);
+    if (assetId == null) {
+      showToast('warn', '素材不存在');
+      return null;
+    }
+    const current = role === 'first' ? refs.first : refs.last;
+    if (current?.assetId === assetId) return null;
+    const slotCleared: VideoMediaRefs =
+      role === 'first' ? { ...refs, first: undefined } : { ...refs, last: undefined };
+    const msg = checkAddVideoRef(role, data.mediaType as 'image', assetId, slotCleared);
+    if (msg) {
+      showToast('warn', msg);
+      return null;
+    }
+    return { current };
+  };
+
+  /** IKFR4Y 首尾帧槽位替换（绑定草稿会话）：以最后一次有效选择替换当前槽位，其他槽位与参考不动；
+   *  旧占用者移除与 Dock 移除同口径分派（isLibraryOnlyVideoRef 才移 material 引用，画布来源断边，
+   *  含合规回写 materialId 的连线占用者仍走断边），替换结果随既有连线自动保存持久化 */
+  const replaceVideoFrameRefFromCanvas = (node: Node, targetId: string, role: 'first' | 'last') => {
+    const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
+    const check = checkVideoFrameReplace(node, refs, role);
+    if (!check) return;
+    if (check.current) {
+      if (isLibraryOnlyVideoRef(check.current)) {
+        removeDraftMaterialRef(targetId, check.current.materialId);
+      } else {
+        removeRefEdges(targetId, check.current.nodeId);
+      }
+    }
+    addCanvasEdge(node.id, targetId, role);
+  };
+
+  /** IKFR4Y 自由面板参考项构造（画布节点 → 本地 VideoMediaRef，首尾帧替换与普通参考追加共用） */
+  const videoFreeRefItemOf = (node: Node): VideoMediaRef => {
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    return {
+      nodeId: node.id,
+      url: String(data.src ?? ''),
+      name: typeof data.fileName === 'string' && data.fileName ? data.fileName : node.id,
+      assetId: String(readAssetId(data)),
+      mediaType: asVideoRefMediaType(data.mediaType),
+    };
+  };
+
+  /** IKFR4Y 首尾帧槽位替换（自由面板会话）：本地参考直接覆盖槽位，校验口径与绑定会话一致 */
+  const replaceVideoFreeFrameRef = (node: Node, role: 'first' | 'last') => {
+    if (!checkVideoFrameReplace(node, videoFreeRefs, role)) return;
+    const item = videoFreeRefItemOf(node);
+    setVideoFreeRefs((prev) => (role === 'first' ? { ...prev, first: item } : { ...prev, last: item }));
+  };
+
+  /** IKFR4Y 视频持续选取会话点击处理：会话绑定发起时的目标（快照），命中有效来源即时并入/替换并保持
+   *  模式；拒绝（类型/失效/重复/超限）toast 原因后同样保持模式；目标失效防御性结束，不写向其他目标。
+   *  普通参考会话按连线即时并入（与拖线同路径）、文本走 connectPair 建附件边；
+   *  首尾帧会话以最后一次有效选择替换当前槽位，文本与非图片媒体不得绕过仅图片限制 */
+  const handleVideoPickSessionClick = (node: Node) => {
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    const role = pickRefRole ?? 'reference';
+    const isFrameSession = role === 'first' || role === 'last';
+    if (typeof videoPickSession === 'string') {
+      if (!mediaNodesRef.current.some((n) => n.id === videoPickSession)) {
+        endVideoPickSession();
+        return;
+      }
+      if (node.type === 'textNode') {
+        if (isFrameSession) {
+          showToast('warn', '首尾帧仅支持图片素材');
+          return;
+        }
+        // 与画布拖线同一准入路径（文本附件边）：拒绝时内部已提示，模式保持
+        connectPair(node.id, videoPickSession);
+        return;
+      }
+      if (node.type === 'mediaNode') {
+        if (isFrameSession) {
+          replaceVideoFrameRefFromCanvas(node, videoPickSession, role);
+          return;
+        }
+        // 图生视频普通参考入口仅收图片（与既有单次选取同口径文案）
+        if (pickMode === 'image' && data.mediaType !== 'image') {
+          showToast('warn', PANEL_REF_MEDIA_TYPES.videoText2Video.canvasRefError);
+          return;
+        }
+        // 拒绝（类型/失效/重复/超限）已在 validate 内 toast 明确原因；addCanvasEdge 幂等去重
+        if (validateVideoRefConnect(node.id, videoPickSession, 'reference')) {
+          addCanvasEdge(node.id, videoPickSession, 'reference');
+        }
+        return;
+      }
+      showToast('warn', '视频参考仅支持图片、视频或音频素材');
+      return;
+    }
+    // 自由面板会话（无草稿绑定；web 端视频面板当前恒绑定草稿卡，此分支随三态结构完整性
+    // 保留，与 IKFR4X 图片版对称）：文本参考无绑定目标，与旧单次语义同口径提示
+    if (node.type === 'textNode') {
+      showToast('warn', '文本参考需要绑定生成节点');
+      return;
+    }
+    if (node.type !== 'mediaNode') {
+      showToast('warn', '视频参考仅支持图片、视频或音频素材');
+      return;
+    }
+    if (isFrameSession) {
+      replaceVideoFreeFrameRef(node, role);
+      return;
+    }
+    if (pickMode === 'image' && data.mediaType !== 'image') {
+      showToast('warn', PANEL_REF_MEDIA_TYPES.videoText2Video.canvasRefError);
+      return;
+    }
+    const err = videoRefSourceError(node, 'reference');
+    if (err) {
+      showToast('warn', err);
+      return;
+    }
+    if (readAssetId(data) == null) return;
+    appendVideoFreeRef(videoFreeRefItemOf(node), 'reference');
+  };
+
   /** 画布节点单击：选取模式下点击对应类型节点带入对话框，其他节点取消选取；
    *  非选取模式点击草稿身份卡（IKDMQQ 图片 / IKDMQS 视频 / IKDMQT 音频）：打开绑定面板继续编辑（待生成/生成中查看/失败修改） */
   const handleCanvasNodeClick = (node: Node) => {
@@ -1753,6 +1907,12 @@ export default function CanvasPage() {
     // 不落入下方普通选中/面板打开分支；视频/音频/商品/资产入口的单次选取语义不受影响
     if (imagePickSessionActive) {
       handleImagePickSessionClick(node);
+      return;
+    }
+    // IKFR4Y 视频持续选取会话同款拦截：会话期间点击一律服务选取（普通参考连续并入、
+    // 首尾帧槽位连续替换），其余入口的单次选取语义不受影响
+    if (videoPickSessionActive) {
+      handleVideoPickSessionClick(node);
       return;
     }
     if (!pickMode || !pickTarget) {
@@ -1952,10 +2112,10 @@ export default function CanvasPage() {
   };
 
   /** 画布空白处单击：取消节点选取模式；
-   *  IKFR4X 图片持续选取会话中不退出、不隐藏原目标 Dock（平移缩放照常，规格 AC-06） */
+   *  IKFR4X 图片 / IKFR4Y 视频持续选取会话中不退出、不隐藏原目标 Dock（平移缩放照常，规格 AC-06） */
   const handleCanvasPaneClick = () => {
     cancelAgentCandidate();
-    if (imagePickSessionActive) return;
+    if (imagePickSessionActive || videoPickSessionActive) return;
     imagePanelHiddenRef.current = true;
     videoPanelHiddenRef.current = true;
     audioPanelHiddenRef.current = true;
@@ -2238,6 +2398,26 @@ export default function CanvasPage() {
     return () => window.removeEventListener('keydown', handler);
   }, [imagePickSession, endImagePickSession]);
 
+  /** IKFR4Y 会话随面板结束：视频面板不可见（关闭 Dock / 目标删除清理 / 切换其他面板）即结束持续
+   *  选取会话；已建参考与连线保留，重开面板为普通模式（不恢复会话，刷新/切换画布同理不恢复） */
+  useEffect(() => {
+    if (videoPickSession === undefined) return;
+    if (!showBottomDialog) endVideoPickSession();
+  }, [showBottomDialog, videoPickSession, endVideoPickSession]);
+
+  /** IKFR4Y：Esc 结束视频持续选取会话（输入框/编辑器内的 Esc 保持原语义，如卡片名称编辑） */
+  useEffect(() => {
+    if (videoPickSession === undefined) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (isEditableKeyboardTarget(e.target)) return;
+      e.preventDefault();
+      endVideoPickSession();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [videoPickSession, endVideoPickSession]);
+
   useEffect(() => {
     if (!textGenDraftId) return;
     const node = textNodes.find((n) => n.id === textGenDraftId);
@@ -2249,9 +2429,11 @@ export default function CanvasPage() {
   }, [textGenDraftId, textNodes]);
 
   /** 打开绑定指定草稿的视频面板（IKDMQS）：带入草稿已保存的参数与当前连线文本附件；
-   *  preset 覆盖节点 data 读出的参数——新建草稿后 mediaNodesRef 尚未更新，种子参数经 preset 兜底 */
+   *  preset 覆盖节点 data 读出的参数——新建草稿后 mediaNodesRef 尚未更新，种子参数经 preset 兜底；
+   *  IKFR4Y：重开/切换面板即结束残留的持续选取会话（重开为普通模式，不恢复选取） */
   const openVideoDraftDialog = (nodeId: string, preset?: VideoGenSeedParams) => {
     if (!canOpenEditor(nodeId)) return;
+    endVideoPickSession();
     videoPanelHiddenRef.current = false;
     editingTargetRef.current = nodeId;
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
@@ -4431,6 +4613,18 @@ export default function CanvasPage() {
     return edges.filter((e) => e.target === imagePickSession && !textIds.has(e.source)).map((e) => e.source);
   }, [imagePickSessionActive, imagePickSession, edges, textNodes]);
 
+  /** IKFR4Y 会话勾选标识：视频持续选取会话进行中，已并入当前目标且与发起槽位同角色的来源节点集合
+   *  （连线推导，与 Dock 参考同源）。首尾帧会话只标当前槽位占用者，普通参考会话只标普通参考来源，
+   *  不混入其他槽位/目标的参考；文本附件来源无素材勾选语义，不计入。仅会话活跃时计算 */
+  const videoPickMarkedIds = useMemo(() => {
+    if (!videoPickSessionActive || typeof videoPickSession !== 'string') return [] as string[];
+    const textIds = new Set(textNodes.map((n) => n.id));
+    const role = pickRefRole ?? 'reference';
+    return edges
+      .filter((e) => e.target === videoPickSession && !textIds.has(e.source) && readRefRole(e) === role)
+      .map((e) => e.source);
+  }, [videoPickSessionActive, videoPickSession, pickRefRole, edges, textNodes]);
+
   /** 草稿绑定面板的图片媒体参考（IKDMQR）：按连线实时推导，Dock 显示即提交输入（同源）。
    *  连线持久化后刷新/重开项目同样经此推导恢复展示；名称随来源卡片改名即时同步（IKFA8Y）。 */
   const imageDraftMediaRefs = useMemo(
@@ -6066,8 +6260,8 @@ export default function CanvasPage() {
           onNodeClick={handleCanvasNodeClick}
           onPaneClick={handleCanvasPaneClick}
           onSelectionChange={handleSelectionChange}
-          refPickActive={imagePickSessionActive}
-          refPickMarkedIds={imagePickMarkedIds}
+          refPickActive={imagePickSessionActive || videoPickSessionActive}
+          refPickMarkedIds={videoPickSessionActive ? videoPickMarkedIds : imagePickMarkedIds}
           selectRequest={selectRequest}
           productPickResult={productPickResult}
           assetPickResult={assetPickResult}
@@ -6264,17 +6458,19 @@ export default function CanvasPage() {
               setPickMode(null);
               setPickTarget(null);
               setPickRefRole(null);
+              setVideoPickSession(undefined);
               setVideoAssetPickRole('reference');
               setVideoAssetPickKind('video');
             }}
             onSend={handleDialogSend}
-            onPickFromCanvas={(kind, role) => { setPickMode(kind); setPickTarget('video'); setPickRefRole(role ?? null); }}
+            onPickFromCanvas={(kind, role) => { endImagePickSession(); setPickMode(kind); setPickTarget('video'); setPickRefRole(role ?? null); setVideoPickSession(videoDraftId ?? null); }}
             onPickFromAssets={(kind, role) => {
               setVideoAssetPickRole(role ?? 'reference');
               setVideoAssetPickKind(kind);
               openAssetsPicker('videoDraft');
             }}
             pickMode={pickTarget === 'video' && pickMode !== 'audio' && pickMode !== 'product' && pickMode !== 'asset' ? pickMode : null}
+            pickLocked={videoPickSessionActive}
             videoDraftBinding={
               videoDraftId
                 ? {
@@ -6389,12 +6585,20 @@ export default function CanvasPage() {
         )}
 
         {/* 节点选取模式提示条（IKFE8U：视频面板与图片面板统一「从节点添加素材」文案；
-            IKFR4X 图片持续会话：文案改为持续语义并提供「完成选取」退出入口） */}
+            IKFR4X 图片持续会话：文案改为持续语义并提供「完成选取」退出入口；
+            IKFR4Y 视频持续会话同款退出入口，首尾帧入口为槽位连续替换语义） */}
         {pickMode && pickTarget && (showImageDialog || showBottomDialog || showAudioDialog || pickMode === 'product' || pickMode === 'asset') && (
           imagePickSessionActive ? (
             <div className={`${styles.pickHint} ${styles.pickHintSession}`}>
               <span>从节点添加素材：连续点击画布中的图片节点带入参考；空白点击不退出，完成后点「完成选取」或按 Esc</span>
               <button type="button" className={styles.pickHintFinish} onClick={endImagePickSession}>完成选取</button>
+            </div>
+          ) : videoPickSessionActive ? (
+            <div className={`${styles.pickHint} ${styles.pickHintSession}`}>
+              <span>{(pickRefRole === 'first' || pickRefRole === 'last')
+                ? '从节点添加素材：连续点击画布中的图片节点替换当前首帧/尾帧槽位；空白点击不退出，完成后点「完成选取」或按 Esc'
+                : '从节点添加素材：连续点击画布中的图片、视频或音频节点带入参考；空白点击不退出，完成后点「完成选取」或按 Esc'}</span>
+              <button type="button" className={styles.pickHintFinish} onClick={endVideoPickSession}>完成选取</button>
             </div>
           ) : (
           <div className={styles.pickHint}>
