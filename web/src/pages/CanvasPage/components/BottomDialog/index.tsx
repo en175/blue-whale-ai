@@ -992,7 +992,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
             )}
             {videoMediaRefs.reference.length > 0 && (
               <span className={styles.fileCount}>
-                {videoMediaRefs.reference.length}/{caps ? caps.imageMax + caps.videoReferenceMax : 12}
+                {videoMediaRefs.reference.length}/{caps ? (caps.imageMax ?? 9) + (caps.videoReferenceMax ?? 3) : 12}
               </span>
             )}
           </div>

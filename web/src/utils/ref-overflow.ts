@@ -36,7 +36,7 @@ export function classifyRefOverflows(params: {
  */
 export function refOverflowToast(
   kinds: ('image' | 'video' | 'audio')[],
-  limits: Partial<Record<'image' | 'video' | 'audio', number>>,
+  limits: Partial<Record<'image' | 'video' | 'audio', number>> = {},
 ): string {
   const parts: string[] = [];
   for (const k of kinds) {
