@@ -116,7 +116,8 @@ public class NewApiVideoClient {
                 case "audio" -> "audio_url";
                 default -> "video_url";
             };
-            String role = switch (ref.type()) {
+            // IKDJNZ：单数组 references 的帧条目自带 first_frame/last_frame；普通参考无 role，按 type 推导。
+            String role = ref.role() != null ? ref.role() : switch (ref.type()) {
                 case "image" -> "reference_image";
                 case "audio" -> "reference_audio";
                 default -> "reference_video";
@@ -397,6 +398,15 @@ public class NewApiVideoClient {
     /**
      * 视频参考素材（video-job-runner.ts:81-87 VideoReference 逐字移植）。
      * type: image | video | audio
+     * <p>
+     * role：单数组 references 语义下帧条目带 first_frame/last_frame（IKDJNZ）；普通参考为 null，
+     * 提交时按 type 推导 reference_image/reference_video/reference_audio。
      */
-    public record VideoReference(String type, String url) {}
+    public record VideoReference(String type, String url, String role) {
+
+        /** 无显式 role 的普通参考：提交时按 type 推导默认角色。 */
+        public VideoReference(String type, String url) {
+            this(type, url, null);
+        }
+    }
 }
