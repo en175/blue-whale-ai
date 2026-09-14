@@ -1,9 +1,11 @@
 export {
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
+  resolveVideoTaskType,
   type CapabilityLimitInput,
   type CapabilityParamFailure,
   type GenerationParamCheckInput,
+  type VideoTaskType,
 } from "./capability-param-validation.js";
 export { previewSourceSchema, applyPreviewSchema, promptMentionSchema, validPromptMentions, type PromptPreviewSource, type PromptPreviewContent, type PromptMention, type PromptMaterial } from "./prompt-preview.js";
 export {
