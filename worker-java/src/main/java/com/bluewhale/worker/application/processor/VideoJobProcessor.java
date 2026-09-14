@@ -455,9 +455,10 @@ public class VideoJobProcessor implements JobProcessor {
         boolean adaptive = "adaptive".equals(aspectRatio);
 
         // 校验（:598-606）。ADR-0086：adaptive 比例（首帧/编辑/延长）放行；IKFPYX：duration=-1
-        // （模型自动选时长）**仅 edit/prolong 任务合法**（与 backend resolveVideoTaskType 同源口径），
-        // 其余任务须 duration>0 且非 adaptive 时尺寸可换算。
-        String taskType = resolveVideoTaskType(input.get("references"), prompt);
+        // （模型自动选时长）**仅 edit/prolong 任务合法**，其余任务须 duration>0 且非 adaptive 时尺寸可换算。
+        // 判定用**主提示词**（basePrompt）而非组合后 prompt：官方口径是「提示词中需包含关键词」，
+        // 文本附件属创作上下文不计入；与 backend handle-create-generation-job 用的 params.prompt 同源。
+        String taskType = resolveVideoTaskType(input.get("references"), basePrompt);
         boolean autoDurationAllowed = "edit".equals(taskType) || "prolong".equals(taskType);
         boolean durationOk = Double.isFinite(duration)
                 && (duration > 0 || (duration == -1 && autoDurationAllowed));

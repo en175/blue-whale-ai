@@ -327,3 +327,33 @@ describe("resolveVideoTaskType（IKFPYX）", () => {
     expect(resolveVideoTaskType([ref("reference", "image")], "修改一下")).toBe("default");
   });
 });
+
+describe("task_types.default 约束生效（IKFPYX）", () => {
+  const cap: CapabilityLimitInput = {
+    supported_sizes: [{ id: "1080p", api_value: "1080p" }],
+    supported_aspect_ratios: ["16:9", "adaptive"],
+    supported_durations: { min: 4, max: 30, step: 1 },
+    task_types: { default: { allowed_durations: [4, 5, 10, 30] } },
+  };
+
+  it("default 任务按配置的时长清单校验：7 秒被拒（基础范围本可放行）", () => {
+    const err = checkGenerationParamLimit(cap, {
+      size: "1080p",
+      aspect_ratio: "16:9",
+      duration: 7,
+      task_type: "default",
+    });
+    expect(err?.field).toBe("duration");
+  });
+
+  it("default 任务清单内（10 秒）放行", () => {
+    expect(
+      checkGenerationParamLimit(cap, {
+        size: "1080p",
+        aspect_ratio: "16:9",
+        duration: 10,
+        task_type: "default",
+      }),
+    ).toBeNull();
+  });
+});

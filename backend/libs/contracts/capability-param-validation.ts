@@ -66,12 +66,13 @@ function readNumberArray(v: unknown): number[] | null {
     : null;
 }
 
-/** 取该任务类型的约束（无该类型配置/非法形态 → null = 回落基础能力校验）。 */
+/** 取该任务类型的约束（未传任务类型/无该类型配置/非法形态 → null = 回落基础能力校验）。
+ *  注：`default` 也照常取用——配了 default 约束就应按它校验（否则该配置形同虚设）。 */
 function taskTypeConstraint(
   capability: CapabilityLimitInput,
   taskType: VideoTaskType | undefined,
 ): Record<string, unknown> | null {
-  if (!taskType || taskType === "default") return null;
+  if (!taskType) return null;
   const map = capability.task_types;
   if (!map || typeof map !== "object" || Array.isArray(map)) return null;
   const entry = (map as Record<string, unknown>)[taskType];
