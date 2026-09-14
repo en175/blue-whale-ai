@@ -96,6 +96,7 @@ export function mergeVideoMaterialRefs(
     if (seenMaterialIds.has(m.materialId)) continue;
     seenMaterialIds.add(m.materialId);
     const item: VideoMediaRef = {
+      // 纯角色库项没有画布节点：nodeId 与 materialId 同值，删除时据此与「连线参考」区分
       nodeId: m.materialId,
       url: m.url,
       name: m.name,
@@ -114,6 +115,14 @@ export function mergeVideoMaterialRefs(
     }
   }
   return merged;
+}
+
+/** 是否为草稿 data 里的纯角色库参考（无画布连线）。
+ *  连线推导的参考也可能带合规 materialId，但不能按「有 materialId」当成角色库项去删。 */
+export function isLibraryOnlyVideoRef(
+  item: Pick<VideoMediaRef, 'nodeId' | 'materialId'>,
+): item is { nodeId: string; materialId: string } {
+  return item.materialId != null && item.nodeId === item.materialId;
 }
 
 /** 边推导 + 角色库 material 的合并推导（显示输入 = 实际任务输入的唯一口径）：

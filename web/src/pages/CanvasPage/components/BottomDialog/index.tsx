@@ -47,6 +47,7 @@ import {
   MAX_VIDEO_REFS,
   supportsVideoReferenceModel,
   videoRefConflict,
+  isLibraryOnlyVideoRef,
   type VideoMediaRef,
   type VideoMediaRefs,
   type VideoRefCapabilities,
@@ -657,7 +658,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       number={refNumberMap.get(refIdOf(item))}
       audioDuration={item.duration}
       onRemove={!readOnly
-        ? () => (item.materialId != null ? onRemoveMaterialRef?.(item.materialId) : onRemoveVideoRef?.(item.nodeId))
+        ? () => (isLibraryOnlyVideoRef(item) ? onRemoveMaterialRef?.(item.materialId) : onRemoveVideoRef?.(item.nodeId))
         : undefined}
       onInsertRef={!readOnly && refLabels.has(refIdOf(item)) ? () => insertRefByKey(refIdOf(item)) : undefined}
       dragProps={dragProps}
@@ -942,7 +943,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
               type="button"
               disabled={readOnly}
               aria-label={`移除失效引用 ${ref.name}`}
-              onClick={() => (ref.materialId != null ? onRemoveMaterialRef?.(ref.materialId) : onRemoveVideoRef?.(ref.nodeId))}
+              onClick={() => (isLibraryOnlyVideoRef(ref) ? onRemoveMaterialRef?.(ref.materialId) : onRemoveVideoRef?.(ref.nodeId))}
             >移除引用</button>
           </div>
         ))}

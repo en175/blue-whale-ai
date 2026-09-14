@@ -341,7 +341,7 @@ describe('IKFCKQ 共享缩略图接入', () => {
 
   it('角色库 material 项：× 走移除 material 回调（操作草稿 data，非断连线）', async () => {
     await renderDialog({ mode: 'all', mediaRefs: {
-      reference: [{ ...ref('mat1'), materialId: 'asset-x1' }],
+      reference: [{ ...ref('asset-x1'), assetId: 'asset-x1', materialId: 'asset-x1' }],
     } });
     const removeBtn = mountNode.querySelector<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]')!;
     await act(async () => { removeBtn.click(); });
