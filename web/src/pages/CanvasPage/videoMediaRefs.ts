@@ -130,6 +130,17 @@ export function mergedVideoMediaRefsOf(
   );
 }
 
+/** 视频参考中需要合规入库的图片（首帧 / 尾帧 / 普通参考图） */
+export function listVideoImageRefs(refs: VideoMediaRefs): VideoMediaRef[] {
+  const images: VideoMediaRef[] = [];
+  if (refs.first?.mediaType === 'image') images.push(refs.first);
+  if (refs.last?.mediaType === 'image') images.push(refs.last);
+  for (const item of refs.reference) {
+    if (item.mediaType === 'image') images.push(item);
+  }
+  return images;
+}
+
 /** 快照参考的名称刷新（IKFA8Y）：待提交的暂存参考按来源节点身份取当前名称。
  *  只改展示名称；槽位、顺序、素材 ID 与角色沿用快照；角色库参考（materialId）与来源节点
  *  已不在画布的参考保留原名称（取当前值 + 回落快照值，快照本身不被改写）。 */

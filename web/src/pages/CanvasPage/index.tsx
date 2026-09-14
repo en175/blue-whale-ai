@@ -27,6 +27,7 @@ import {
   readDraftMaterialRefs,
   freshVideoCanvasRefs,
   mergedVideoMediaRefsOf,
+  listVideoImageRefs,
   supportsVideoReferenceModel,
   videoRefConflict,
   videoRefSourceError,
@@ -2887,9 +2888,22 @@ export default function CanvasPage() {
     }
   };
 
-  const handleComplianceCheck = async (id: string) => {
+  const patchNodeCompliance = (id: string, patch: Record<string, unknown>) => {
+    setMediaNodes((prev) => {
+      const next = prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n));
+      mediaNodesRef.current = next;
+      return next;
+    });
+  };
+
+  /** 图片/视频合规入库；成功后节点展示 success.png 通过图标 */
+  const ensureMediaNodeCompliance = async (
+    id: string,
+    opts?: { toastSuccess?: boolean },
+  ): Promise<string | undefined> => {
+    const toastSuccess = opts?.toastSuccess !== false;
     const node = mediaNodesRef.current.find((n) => n.id === id);
-    if (!node) return;
+    if (!node) return undefined;
     const d = (node.data ?? {}) as Record<string, unknown>;
     const assetId = d.assetId != null ? String(d.assetId) : '';
     const url = typeof d.src === 'string' ? d.src : '';
@@ -2899,29 +2913,16 @@ export default function CanvasPage() {
       nodeMaterialId: d.materialId,
       assetId,
     });
-    if (d.compliancePassed === true || verifiedId) {
-      showToast('success', COMPLIANCE_SUCCESS_TOAST);
-      if (d.compliancePassed !== true || (verifiedId && d.materialId !== verifiedId)) {
-        setMediaNodes((prev) =>
-          prev.map((n) => (n.id === id ? {
-            ...n,
-            data: {
-              ...n.data,
-              compliancePassed: true,
-              ...(verifiedId ? { materialId: verifiedId } : {}),
-            },
-          } : n)),
-        );
-      }
-      return;
+    if (verifiedId) {
+      if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
+      patchNodeCompliance(id, { complianceBusy: false, compliancePassed: true, materialId: verifiedId });
+      return verifiedId;
     }
     if (!url || url.startsWith('blob:')) {
       showToast('warn', '素材尚未上传完成，请稍后重试');
-      return;
+      return undefined;
     }
-    setMediaNodes((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, complianceBusy: true } } : n)),
-    );
+    patchNodeCompliance(id, { complianceBusy: true });
     try {
       const result = await depositCanvasAssetToCharacterLibrary({
         sourceAssetId: assetId,
@@ -2929,26 +2930,97 @@ export default function CanvasPage() {
         name: typeof d.fileName === 'string' ? d.fileName : '素材',
         mediaType,
       });
-      showToast('success', COMPLIANCE_SUCCESS_TOAST);
-      setMediaNodes((prev) =>
-        prev.map((n) => (n.id === id ? {
-          ...n,
-          data: {
-            ...n.data,
-            complianceBusy: false,
-            compliancePassed: true,
-            ...(result.materialId ? { materialId: result.materialId } : {}),
-          },
-        } : n)),
-      );
+      if (!result.materialId) {
+        patchNodeCompliance(id, { complianceBusy: false });
+        showToast('error', '校验失败，请重试');
+        return undefined;
+      }
+      if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
+      patchNodeCompliance(id, {
+        complianceBusy: false,
+        compliancePassed: true,
+        materialId: result.materialId,
+      });
+      return result.materialId;
     } catch (err) {
-      setMediaNodes((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, complianceBusy: false } } : n)),
-      );
+      patchNodeCompliance(id, { complianceBusy: false });
       if (!isApiError(err)) {
         showToast('error', err instanceof Error ? err.message : '校验失败，请重试');
       }
+      return undefined;
     }
+  };
+
+  const handleComplianceCheck = async (id: string) => {
+    await ensureMediaNodeCompliance(id, { toastSuccess: true });
+  };
+
+  /** 视频生成前补齐参考图合规；通过后回写节点 materialId 与通过图标 */
+  const ensureVideoImageRefsCompliance = async (
+    refs: VideoMediaRefs,
+  ): Promise<VideoMediaRefs | null> => {
+    const images = listVideoImageRefs(refs);
+    if (images.length === 0) return refs;
+
+    const materialByKey = new Map<string, string>();
+    for (const item of images) {
+      if (materialByKey.has(item.nodeId)) continue;
+      if (item.materialId && isMaterialLibraryId(item.materialId)) {
+        materialByKey.set(item.nodeId, item.materialId);
+        const canvasNode = mediaNodesRef.current.find((n) => n.id === item.nodeId);
+        if (canvasNode) {
+          const d = (canvasNode.data ?? {}) as Record<string, unknown>;
+          if (d.compliancePassed !== true || d.materialId !== item.materialId) {
+            patchNodeCompliance(item.nodeId, {
+              compliancePassed: true,
+              materialId: item.materialId,
+            });
+          }
+        }
+        continue;
+      }
+      const node = mediaNodesRef.current.find((n) => n.id === item.nodeId);
+      if (node) {
+        const materialId = await ensureMediaNodeCompliance(item.nodeId, { toastSuccess: false });
+        if (!materialId) return null;
+        materialByKey.set(item.nodeId, materialId);
+        continue;
+      }
+      if (!item.url || item.url.startsWith('blob:')) {
+        showToast('warn', '素材尚未上传完成，请稍后重试');
+        return null;
+      }
+      try {
+        const result = await depositCanvasAssetToCharacterLibrary({
+          sourceAssetId: item.assetId,
+          url: item.url,
+          name: item.name,
+          mediaType: 'image',
+        });
+        if (!result.materialId) {
+          showToast('error', '校验失败，请重试');
+          return null;
+        }
+        materialByKey.set(item.nodeId, result.materialId);
+      } catch (err) {
+        if (!isApiError(err)) {
+          showToast('error', err instanceof Error ? err.message : '校验失败，请重试');
+        }
+        return null;
+      }
+    }
+
+    const withMaterial = (item: VideoMediaRef): VideoMediaRef => {
+      if (item.mediaType !== 'image') return item;
+      const materialId = materialByKey.get(item.nodeId);
+      return materialId ? { ...item, materialId } : item;
+    };
+    return {
+      ...refs,
+      first: refs.first ? withMaterial(refs.first) : undefined,
+      last: refs.last ? withMaterial(refs.last) : undefined,
+      reference: refs.reference.map(withMaterial),
+    };
   };
 
   const handleFillEmptyShell = (id: string, file: File) => {
@@ -3540,7 +3612,14 @@ export default function CanvasPage() {
     targetNodeId?: string,
     initialDraft?: {
       mode?: string;
-      references: Array<{ assetId: string; url: string; name: string; mediaType: 'image' | 'video'; role: VideoRefRole }>;
+      references: Array<{
+        assetId: string;
+        url: string;
+        name: string;
+        mediaType: 'image' | 'video';
+        role: VideoRefRole;
+        materialId?: string;
+      }>;
     },
     /** IKFA1M/IKFA1O：结构化正文（image/video 含素材标签时携带）；服务端编译并冻结 */
     promptDoc?: PromptDoc | null,
@@ -3585,9 +3664,19 @@ export default function CanvasPage() {
       if (!source) {
         source = attachCallbacks({
           id: newNodeId('media'), type: 'mediaNode', position: spawnPosition(),
-          data: { src: ref.url, fileName: ref.name, mediaType: ref.mediaType, assetId: ref.assetId },
+          data: {
+            src: ref.url,
+            fileName: ref.name,
+            mediaType: ref.mediaType,
+            assetId: ref.assetId,
+            ...(ref.materialId ? { materialId: ref.materialId, compliancePassed: true } : {}),
+          },
         });
         referenceNodes.push(source);
+      } else if (ref.materialId) {
+        patchMediaNode(source.id, { materialId: ref.materialId, compliancePassed: true });
+      } else if (ref.materialId) {
+        patchMediaNode(source.id, { materialId: ref.materialId, compliancePassed: true });
       }
       addCanvasEdge(source.id, nodeId, ref.role);
     }
@@ -4817,17 +4906,26 @@ export default function CanvasPage() {
         showToast('warn', '当前模型不支持视频或音频参考，请更换模型或调整引用');
         return;
       }
-      const jobRefs = buildVideoJobReferences(draftRefs);
-      startGenerationJob(
-        'video',
-        parameters,
-        undefined,
-        jobRefs.length > 0 ? { references: jobRefs } : undefined,
-        targetNodeId,
-        undefined,
-        promptDoc ?? undefined,
-      );
-      finishFreeMode();
+      applyingRef.current = true;
+      if (targetNodeId) setSubmittingNodeId(targetNodeId);
+      try {
+        const compliantRefs = await ensureVideoImageRefsCompliance(draftRefs);
+        if (!compliantRefs) return;
+        const jobRefs = buildVideoJobReferences(compliantRefs);
+        startGenerationJob(
+          'video',
+          parameters,
+          undefined,
+          jobRefs.length > 0 ? { references: jobRefs } : undefined,
+          targetNodeId,
+          undefined,
+          promptDoc ?? undefined,
+        );
+        finishFreeMode();
+      } finally {
+        applyingRef.current = false;
+        setSubmittingNodeId(null);
+      }
     }
   };
 
@@ -5670,10 +5768,24 @@ export default function CanvasPage() {
           startGenerationJob('image', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.ratio, size: handoff.size },
             references.map(r => r.assetId), undefined, undefined, { references });
         } else {
+          const videoRefs: typeof references = [];
+          for (const ref of references) {
+            if (ref.mediaType !== 'image') {
+              videoRefs.push(ref);
+              continue;
+            }
+            const result = await depositCanvasAssetToCharacterLibrary({
+              sourceAssetId: ref.assetId,
+              url: ref.url,
+              name: ref.name,
+              mediaType: 'image',
+            });
+            videoRefs.push({ ...ref, materialId: result.materialId });
+          }
           startGenerationJob('video', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.aspectRatio,
             resolution: handoff.resolution, duration: handoff.duration }, undefined,
-            { references: buildVideoJobReferencesFromList(references) },
-            undefined, { references, mode: handoff.mode });
+            { references: buildVideoJobReferencesFromList(videoRefs) },
+            undefined, { references: videoRefs, mode: handoff.mode });
         }
       } catch (error) {
         console.warn('首页生成参考准备失败:', error);
