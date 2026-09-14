@@ -28,8 +28,19 @@ import {
   validateVideoPromptDocRefs,
   type PromptDoc,
   type PromptDocRefFailure,
+  type TargetTextIndex,
+  type TextAttachmentMedia,
   type TextAttachmentSnapshot,
+  type TextIndexCanvasNode,
   previewSourceSchema,
+  IMAGE_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
+  TEXT_INDEX_INVALID_MESSAGE,
+  TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE,
+  textIndexOverflowMessage,
+  checkTextIndexSyncInput,
+  mergeTextProvidedReferences,
+  textIndexOfTarget,
+  textInputSignatureOf,
 } from "@lib/contracts";
 import {
   composeTextAttachmentPrompt,
@@ -834,6 +845,98 @@ function textAttachmentsFromCanvas(
   return attachments;
 }
 
+/** IKFM3S §2/§3：图片目标携带 target_node_id 时按最新画布派生文本带入参考——失效索引、
+ *  不支持的媒体类型、合并后超限在接纳当下 400（不静默丢素材）；后端权威并入：body 缺失项
+ *  按推导序追加尾部。非图片或无目标时零影响（返回原直接参考，不读画布）。 */
+async function resolveTextIndexReferences(args: {
+  type: GenerationType;
+  body: CreateGenerationJobBody;
+  projectId: string;
+  deps: Pick<GenerationDeps, "canvas">;
+  directReferenceAssetIds: Array<string | number>;
+  maxReferenceImages: number;
+}): Promise<
+  | {
+      ok: true;
+      value: {
+        merged: Array<string | number>;
+        index: TargetTextIndex;
+        canvas: Awaited<ReturnType<CanvasRepo["getByProject"]>> | null;
+      };
+    }
+  | { ok: false; value: { message: string; code: string; params?: Record<string, unknown> } }
+> {
+  const targetNodeId =
+    isStr(args.body.target_node_id) && args.body.target_node_id.trim() !== ""
+      ? args.body.target_node_id
+      : null;
+  if (args.type !== "image" || targetNodeId === null) {
+    return {
+      ok: true,
+      value: {
+        merged: args.directReferenceAssetIds,
+        index: { inputs: [], refs: [], invalid: [] },
+        canvas: null,
+      },
+    };
+  }
+  const canvas = await args.deps.canvas.getByProject(args.projectId);
+  const nodes = JSON.parse(canvas.nodes ?? "[]") as TextIndexCanvasNode[];
+  const edges = JSON.parse(canvas.edges ?? "[]");
+  const index = textIndexOfTarget(nodes, edges, targetNodeId);
+  const { merged } = mergeTextProvidedReferences(
+    args.directReferenceAssetIds,
+    index.refs,
+  );
+  const checkError = checkTextIndexSyncInput({
+    index,
+    acceptedMediaTypes: IMAGE_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
+    mergedReferenceCount: merged.length,
+    maxReferences: args.maxReferenceImages,
+  });
+  if (checkError) {
+    if (checkError.kind === "invalid_index") {
+      return {
+        ok: false,
+        value: { message: TEXT_INDEX_INVALID_MESSAGE, code: ERROR_INVALID_REFERENCE },
+      };
+    }
+    if (checkError.kind === "unsupported_media_type") {
+      return {
+        ok: false,
+        value: {
+          message: TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE,
+          code: ERROR_INVALID_REFERENCE_TYPE,
+        },
+      };
+    }
+    return {
+      ok: false,
+      value: {
+        message: textIndexOverflowMessage(checkError.max),
+        code: ERROR_UNSUPPORTED_INPUT,
+        params: { max_reference_count: checkError.max },
+      },
+    };
+  }
+  return { ok: true, value: { merged, index, canvas } };
+}
+
+/** 把文本带入参考按来源文本卡聚合为附件 media 冻结映射（IKFM3S §5）。 */
+function textAttachmentMediaOf(index: TargetTextIndex): Map<string, TextAttachmentMedia[]> {
+  const mediaByTextNode = new Map<string, TextAttachmentMedia[]>();
+  for (const item of index.refs) {
+    const list = mediaByTextNode.get(item.textNodeId) ?? [];
+    list.push({
+      node_id: item.sourceNodeId,
+      asset_id: item.assetId,
+      media_type: item.mediaType,
+    });
+    mediaByTextNode.set(item.textNodeId, list);
+  }
+  return mediaByTextNode;
+}
+
 /** IKDLQF/IKDLQG/IKDMQT/IKFCXE：携带 target_node_id 时，接纳当下读取最新 Canvas 校验目标节点；
  *  文本附件推导覆盖图片/视频/音频（IKFCXE 解除音频限制），空 prompt 由组合校验拒绝。
  *  IKFA1P：正文含文本标签时组合按编号清单格式（长度校验跟随实际组合结果）。 */
@@ -849,6 +952,8 @@ async function resolveTargetSnapshot(args: {
   maxPromptLength: number;
   /** IKFA1P：含 text_ref 时文本附件按编号清单格式组合（与最终冻结的供应商正文一致）。 */
   promptDoc: PromptDoc | null;
+  /** IKFM3S：图片目标的文本索引派生结果——附件冻结 media 映射用（缺省无媒体）。 */
+  textIndex?: TargetTextIndex;
 }): Promise<
   | { ok: true; value: TargetSnapshot }
   | { ok: false; value: { message: string; code: string } }
@@ -891,6 +996,14 @@ async function resolveTargetSnapshot(args: {
       JSON.parse(canvas.edges ?? "[]"),
       targetNodeId,
     );
+    // IKFM3S §5：文本带入参考按来源文本卡冻结进附件（有效身份映射，worker 不消费）。
+    if (args.textIndex && args.textIndex.refs.length > 0) {
+      const mediaByTextNode = textAttachmentMediaOf(args.textIndex);
+      textAttachments = textAttachments.map((attachment) => {
+        const media = mediaByTextNode.get(attachment.node_id);
+        return media && media.length > 0 ? { ...attachment, media } : attachment;
+      });
+    }
     // IKFCXE：主提示词为空时保持既有音频校验（不引入"仅附件生成"），
     // 附件正文不得单独充当音频输入；图片/视频仍允许非空白附件驱动。
     if (type === "audio" && promptText.trim() === "") {
@@ -1102,13 +1215,32 @@ export async function handleCreateGenerationJob(
       params: refs.value.params,
     });
   }
+  // IKFM3S §2/§3：图片目标文本带入参考——按最新画布派生、能力校验并权威并入
+  // （body 缺失项追加尾部）；后续存在性/类型复核、prompt_doc 编号与冻结统一用合并结果。
+  const textIndexRefs = await resolveTextIndexReferences({
+    type,
+    body,
+    projectId,
+    deps,
+    directReferenceAssetIds: refs.value.referenceAssetIds,
+    maxReferenceImages,
+  });
+  if (!textIndexRefs.ok) {
+    return fail(400, textIndexRefs.value.message, {
+      code: textIndexRefs.value.code,
+      ...(textIndexRefs.value.params
+        ? { params: textIndexRefs.value.params }
+        : {}),
+    });
+  }
+  const referenceAssetIds = textIndexRefs.value.merged;
   // IKE7JP：提交时前置查参考素材存在性/类型——复用 worker resolveInputAssets（归属逻辑单份：
   // 项目直属 ∪ 全局 ∪ project_asset 关联）。缺失/无权访问在接纳当下 400，不拖到 worker 执行期。
   // 仅本地 Asset 引用需要查存在性；素材库引用（asset:// 载体）由上游强校验，格式已在前置校验。
   // code 与 worker 侧 resolveInputAssets 失败同源（review：参考不可用归 invalid_reference，
   // 类型不符归 invalid_reference_type，避免提交 gate 与 worker 兜底码漂移）。
-  if (type !== "audio" && refs.value.referenceAssetIds.length > 0) {
-    const ids = refs.value.referenceAssetIds.map(String);
+  if (type !== "audio" && referenceAssetIds.length > 0) {
+    const ids = referenceAssetIds.map(String);
     const resolved = await deps.assets.resolveInputAssets(ids, userId, projectId);
     if (resolved.length !== ids.length) {
       return fail(400, "参考素材不存在或无权访问", {
@@ -1197,7 +1329,8 @@ export async function handleCreateGenerationJob(
           code: ERROR_INVALID_REFERENCE,
         });
       }
-      promptCanvas = await deps.canvas.getByProject(projectId);
+      promptCanvas =
+        textIndexRefs.value.canvas ?? (await deps.canvas.getByProject(projectId));
       orderedTextNodeIds = textAttachmentsFromCanvas(
         JSON.parse(promptCanvas.nodes ?? "[]") as Array<{
           id?: unknown;
@@ -1214,7 +1347,7 @@ export async function handleCreateGenerationJob(
       promptText = compileVideoPromptDoc(promptDoc, videoRefItems, orderedTextNodeIds.length > 0 ? orderedTextNodeIds : undefined);
     } else {
       const refErr = failPromptDocRefs(
-        validatePromptDocRefs(promptDoc, refs.value.referenceAssetIds.map(String), orderedTextNodeIds),
+        validatePromptDocRefs(promptDoc, referenceAssetIds.map(String), orderedTextNodeIds),
       );
       if (refErr) return refErr;
       promptText = compilePromptDoc(promptDoc, refs.value.referenceAssetIds.map(String), orderedTextNodeIds.length > 0 ? orderedTextNodeIds : undefined);
@@ -1228,9 +1361,12 @@ export async function handleCreateGenerationJob(
       return fail(400, compiledError.message, { code: compiledError.code });
     }
   }
-  // 5. 画布目标快照（仅携带 target_node_id 时读画布）
+  // 5. 画布目标快照（仅携带 target_node_id 时读画布；IKFM3S 复用文本索引派生的同次读取）
   const target = await resolveTargetSnapshot({
     ...(promptCanvas ? { canvas: promptCanvas } : {}),
+    ...(textIndexRefs.value.canvas && !promptCanvas
+      ? { canvas: textIndexRefs.value.canvas }
+      : {}),
     type,
     body,
     promptText,
@@ -1238,6 +1374,9 @@ export async function handleCreateGenerationJob(
     deps,
     maxPromptLength,
     promptDoc,
+    ...(textIndexRefs.value.index.refs.length > 0 || textIndexRefs.value.index.inputs.length > 0
+      ? { textIndex: textIndexRefs.value.index }
+      : {}),
   });
   if (!target.ok) {
     return fail(400, target.value.message, { code: target.value.code });
@@ -1259,7 +1398,7 @@ export async function handleCreateGenerationJob(
     promptText,
     targetNodeId: target.value.targetNodeId,
     textAttachments: target.value.textAttachments,
-    referenceAssetIds: refs.value.referenceAssetIds,
+    referenceAssetIds,
     promptDoc,
   });
   // 图片与视频一致：sk token 明文写进 job.input.provider_credential（修正四：凭证去密），处理时由 worker 直接取用。
@@ -1268,6 +1407,11 @@ export async function handleCreateGenerationJob(
     input.provider_credential = internal.providerCredential;
   }
   input.expected_output_count = expectedOutputCount;
+  // IKFM3S §4：文本输入签名冻结进快照——任务成功后前端轮询回写目标 usedInputSignature，
+  // 重试随 input 原样复用；无文本输入（inputs 为空）不写，目标无文本边时提示本就不显示。
+  if (textIndexRefs.value.index.inputs.length > 0) {
+    input.text_input_signature = textInputSignatureOf(textIndexRefs.value.index.inputs);
+  }
   if (planSnapshot) input.prompt_plan_snapshot = planSnapshot;
   // IKFA1P：正文含文本标签且无方案快照时，把编号清单组合的最终供应商正文冻结进快照——
   // 编号清单格式只在接纳处实现一次，worker 按优先级直接消费（有方案快照时 providerPrompt 已含）。
