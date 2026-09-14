@@ -769,8 +769,9 @@ class VideoJobProcessorTest {
             doReturn(Map.of("11", videoFrame))
                     .when(assetSource).resolveInputAssets(anyList(), anyString(), anyString());
 
-            org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
-                    () -> processor.buildSubmitRequest(claim));
+            VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
+                    VideoInputError.class, () -> processor.buildSubmitRequest(claim));
+            assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_UNSUPPORTED_INPUT);
         }
 
         @Test
@@ -804,8 +805,51 @@ class VideoJobProcessorTest {
             input.put("references", refs);
             ClaimedVideoJobDto claim = videoClaim("210", false, null, 0, 0, null, input);
 
-            org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
-                    () -> processor.buildSubmitRequest(claim));
+            VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
+                    VideoInputError.class, () -> processor.buildSubmitRequest(claim));
+            assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_REFERENCE_LIMIT_EXCEEDED);
+        }
+
+        @Test
+        @DisplayName("素材库与本地混用计数并集：8 本地 + 2 素材库图 → reference_limit_exceeded")
+        void mixedLocalAndMaterial_countAsUnion() {
+            List<String> assetIds = new java.util.ArrayList<>();
+            Map<String, AssetEntity> assets = new HashMap<>();
+            for (int i = 0; i < 8; i++) {
+                String id = String.valueOf(300 + i);
+                assetIds.add(id);
+                assets.put(id, imageAsset(id, "https://tos.test/" + id + ".png"));
+            }
+            List<Map<String, String>> refs = new java.util.ArrayList<>();
+            for (String id : assetIds) {
+                refs.add(Map.of("role", "reference", "type", "image", "asset_id", id));
+            }
+            refs.add(Map.of("role", "reference", "type", "image", "material_id", "asset-m1"));
+            refs.add(Map.of("role", "reference", "type", "image", "material_id", "asset-m2"));
+
+            Map<String, Object> input = baseInput();
+            input.put("references", refs);
+            ClaimedVideoJobDto claim = videoClaim("212", false, null, 0, 0, null, input);
+            doReturn(assets).when(assetSource)
+                    .resolveInputAssets(anyList(), anyString(), anyString());
+
+            VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
+                    VideoInputError.class, () -> processor.buildSubmitRequest(claim));
+            assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_REFERENCE_LIMIT_EXCEEDED);
+        }
+
+        @Test
+        @DisplayName("素材库参考音频 → type 透传为 audio（asset:// 载体 + audio 计数）")
+        void materialAudioRef_passesType() {
+            Map<String, Object> input = baseInput();
+            input.put("references", java.util.List.of(Map.of(
+                    "role", "reference", "type", "audio", "material_id", "asset-audio-1")));
+            ClaimedVideoJobDto claim = videoClaim("213", false, null, 0, 0, null, input);
+
+            VideoSubmitInput request = processor.buildSubmitRequest(claim);
+
+            assertThat(request.references()).containsExactly(
+                    new VideoReference("audio", "asset://asset-audio-1", null));
         }
 
         @Test
@@ -816,8 +860,73 @@ class VideoJobProcessorTest {
                     "role", "reference", "type", "image", "material_id", "not-a-material")));
             ClaimedVideoJobDto claim = videoClaim("211", false, null, 0, 0, null, input);
 
-            org.junit.jupiter.api.Assertions.assertThrows(VideoInputError.class,
-                    () -> processor.buildSubmitRequest(claim));
+            VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
+                    VideoInputError.class, () -> processor.buildSubmitRequest(claim));
+            assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_REFERENCE);
+        }
+
+        // ===== 快照结构校验（worker 侧不信任冻结快照，对齐 TS readReferences）=====
+
+        @Test
+        @DisplayName("references 非数组 → invalid_reference（不得静默退化成无参考提交）")
+        void referencesNotArray_rejected() {
+            Map<String, Object> input = baseInput();
+            input.put("references", "not-an-array");
+            ClaimedVideoJobDto claim = videoClaim("214", false, null, 0, 0, null, input);
+
+            VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
+                    VideoInputError.class, () -> processor.buildSubmitRequest(claim));
+            assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_REFERENCE);
+        }
+
+        @Test
+        @DisplayName("references 元素非对象 → invalid_reference")
+        void referenceElementNotObject_rejected() {
+            Map<String, Object> input = baseInput();
+            input.put("references", List.of("nope"));
+            ClaimedVideoJobDto claim = videoClaim("215", false, null, 0, 0, null, input);
+
+            VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
+                    VideoInputError.class, () -> processor.buildSubmitRequest(claim));
+            assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_REFERENCE);
+        }
+
+        @Test
+        @DisplayName("role 非法或缺失 → invalid_reference（不得当作普通参考）")
+        void invalidRole_rejected() {
+            Map<String, Object> input = baseInput();
+            input.put("references", List.of(Map.of("type", "image", "asset_id", "11")));
+            ClaimedVideoJobDto claim = videoClaim("216", false, null, 0, 0, null, input);
+
+            VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
+                    VideoInputError.class, () -> processor.buildSubmitRequest(claim));
+            assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_REFERENCE);
+        }
+
+        @Test
+        @DisplayName("type 缺失或非法 → invalid_reference_type（避免 null type 穿透成 audio/上游 NPE）")
+        void invalidType_rejected() {
+            Map<String, Object> input = baseInput();
+            input.put("references", List.of(Map.of("role", "reference", "asset_id", "11")));
+            ClaimedVideoJobDto claim = videoClaim("217", false, null, 0, 0, null, input);
+
+            VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
+                    VideoInputError.class, () -> processor.buildSubmitRequest(claim));
+            assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_REFERENCE_TYPE);
+        }
+
+        @Test
+        @DisplayName("同帧位 asset 与 material 双来源 → invalid_reference")
+        void duplicateFrameSource_rejected() {
+            Map<String, Object> input = baseInput();
+            input.put("references", List.of(
+                    Map.of("role", "first_frame", "type", "image", "asset_id", "11"),
+                    Map.of("role", "first_frame", "type", "image", "material_id", "asset-face-1")));
+            ClaimedVideoJobDto claim = videoClaim("218", false, null, 0, 0, null, input);
+
+            VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
+                    VideoInputError.class, () -> processor.buildSubmitRequest(claim));
+            assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_REFERENCE);
         }
     }
 
