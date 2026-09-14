@@ -317,6 +317,10 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
    *  文生视频保留参考添加入口（媒体实际成为参考时由 enabledModes 自动切全能参考，IKFC1T）。 */
   const currentMode = modeOptions.find((m) => m.key === selectedMode);
   const isKeyframe = selectedMode === 'keyframe';
+  /** IKFQ5S：首尾帧强制 adaptive 仅对**支持该档的模型**生效（Seedance 2.5）。
+   *  2.0 系列上游不接受 adaptive（实测 400 unsupported ratio），仍走用户可选的固定比例。 */
+  const supportsAdaptiveRatio = !!currentModel?.supported_aspect_ratios?.includes('adaptive');
+  const forceAdaptive = isKeyframe && supportsAdaptiveRatio;
   const isText2Video = selectedMode === 'text2video';
   /** 已连入的视频参考数（切换到首尾帧/图生视频时不兼容，需先移除） */
   const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image').length;
@@ -416,8 +420,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       }
     }
     setSelectedMode(key);
-    // ADR-0086：首尾帧任务官方强制 adaptive（输出跟随首帧图比例），切模式即内置默认，不让用户感知比例。
-    if (key === 'keyframe') {
+    // IKFQ5S：仅支持 adaptive 的模型（2.5）才内置该档；2.0 保持用户可选的固定比例。
+    if (key === 'keyframe' && supportsAdaptiveRatio) {
       setSelectedRatio('adaptive');
       syncDraftParams({ mode: key, ratio: 'adaptive' });
       return;
@@ -439,7 +443,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     : !currentModel ? '原生成模型不可用，请重新选择模型'
     : !sizeOptions.some(option => option.key === selectedSize) ? '原分辨率不可用，请重新选择分辨率'
     // ADR-0086：首尾帧比例内置 adaptive（不暴露给用户），跳过比例合法性校验，避免误报「原比例不兼容」。
-    : !isKeyframe && !ratioOptions.includes(selectedRatio) ? '原比例不兼容，请重新选择比例'
+    : !forceAdaptive && !ratioOptions.includes(selectedRatio) ? '原比例不兼容，请重新选择比例'
     : durationRange && (duration < durationRange.min || duration > durationRange.max
       || (duration - durationRange.min) % durationRange.step !== 0)
       ? '原时长不兼容，请重新选择时长'
@@ -455,12 +459,11 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   }
 
   /** 选中模型后应用其默认清晰度/宽高比/时长，返回实际应用值（供草稿参数同步）。
-   *  ADR-0086：首尾帧任务官方强制 adaptive（输出跟随首帧图比例），比例内置不暴露给用户——代码直接固定，
-   *  不依赖模型能力行是否列了 adaptive（2.0/2.5 首尾帧均强制）。 */
+   *  IKFQ5S：首尾帧仅在模型支持 adaptive 时内置固定该档（2.5）；2.0 走其固定比例档。 */
   const applyModelDefaults = (m: GenerationModel) => {
     setSelectedModel(m.model_id);
     let nextRatio = selectedRatio;
-    if (isKeyframe) {
+    if (isKeyframe && m.supported_aspect_ratios.includes('adaptive')) {
       nextRatio = 'adaptive';
       setSelectedRatio(nextRatio);
     } else if (m.supported_aspect_ratios.length) {
@@ -506,8 +509,13 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
           const model = list.find(m => m.model_id === initialParams?.modelId);
           const size = model?.supported_sizes.find(s => s.id === initialParams?.resolution || s.api_value === initialParams?.resolution);
           setSelectedSize(size?.id ?? initialParams?.resolution ?? '');
-          // ADR-0086：首尾帧比例内置 adaptive，恢复时不吃历史固定比例（旧草稿可能存 16:9/空）。
-          setSelectedRatio(restoredMode === 'keyframe' ? 'adaptive' : (initialParams?.aspectRatio ?? ''));
+          // IKFQ5S：仅模型支持 adaptive 时才内置该档（恢复时模型可能未就绪，按 list 查）。
+          const restoredSupportsAdaptive = !!model?.supported_aspect_ratios?.includes('adaptive');
+          setSelectedRatio(
+            restoredMode === 'keyframe' && restoredSupportsAdaptive
+              ? 'adaptive'
+              : (initialParams?.aspectRatio ?? ''),
+          );
           setDuration(initialParams?.duration ?? 0);
           setSelectedMode(restoredMode);
           return;
@@ -545,8 +553,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
           }
           if (initialParams.mode && modeOptions.some((o) => o.key === initialParams.mode)) {
             setSelectedMode(initialParams.mode);
-            // ADR-0086：首尾帧比例内置 adaptive，覆盖首页带入的固定比例。
-            if (initialParams.mode === 'keyframe') {
+            // IKFQ5S：首尾帧且模型支持 adaptive 时才内置该档，覆盖首页带入的固定比例。
+            if (initialParams.mode === 'keyframe' && target.supported_aspect_ratios.includes('adaptive')) {
               setSelectedRatio('adaptive');
               patch.ratio = 'adaptive';
             }
@@ -919,8 +927,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
             </>
           )}
 
-          {/* 宽高比（ADR-0086：首尾帧任务官方强制 adaptive、输出跟随首帧图，比例内置不渲染，用户不可见不可改） */}
-          {!isKeyframe && (
+          {/* 宽高比（IKFQ5S：仅首尾帧 + 模型支持 adaptive 时内置不渲染；2.0 首尾帧仍需用户选固定比例） */}
+          {!forceAdaptive && (
             <>
               <span className={styles.configLabel}>宽高比</span>
               <div className={styles.ratioGroup}>
@@ -1075,11 +1083,11 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
             )}
           </div>
 
-          {/* 配置信息（点击展开配置面板）。ADR-0086：首尾帧比例内置 adaptive，不在状态栏暴露这项。 */}
+          {/* 配置信息（点击展开配置面板）。IKFQ5S：仅首尾帧 + 模型支持 adaptive 时才在状态栏隐去比例。 */}
           <button className={styles.configBtn} onClick={() => setShowConfig(!showConfig)}>
             <SlidersHorizontal size={14} strokeWidth={2} />
             <span>{currentModel?.model_label ?? '选择模型'}</span>
-            {!isKeyframe && (
+            {!forceAdaptive && (
               <>
                 <span className={styles.barDivider}>|</span>
                 <span>{selectedRatio}</span>

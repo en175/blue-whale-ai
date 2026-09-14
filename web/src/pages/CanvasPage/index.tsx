@@ -104,6 +104,7 @@ import {
   type SharedAssetView,
 } from '@/api/sharedAssets';
 import { uploadAssetFile } from '@/utils/upload';
+import ConfirmModal from '@/components/ConfirmModal';
 import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
 import { COMPLIANCE_SUCCESS_TOAST, depositCanvasAssetToCharacterLibrary, resolveCharacterLibraryMaterialId } from './characterLibraryDeposit';
@@ -137,13 +138,14 @@ import {
   nodePressesGroupEdge,
   parseGroupsFromNodes,
   selectionHasUngroupableCards,
+  selectionHasUngroupableGenNodes,
   MIN_GROUP_MEMBERS,
   GROUP_FRAME_PADDING,
   type CanvasGroup,
   type GroupFrameDragResult,
 } from './canvasGroups';
 import { collectMediaBlocks, type CanvasGalleryRef } from './collectMediaBlocks';
-import { blobToUint8Array, buildStoreZip, uniqueDownloadName } from './groupDownloadZip';
+import { blobToUint8Array, buildStoreZip, sniffMediaMime, uniqueDownloadName } from './groupDownloadZip';
 import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from './quoteConversation';
 import {
   canvasLocationSearch,
@@ -249,6 +251,8 @@ export default function CanvasPage() {
   const [groups, setGroups] = useState<CanvasGroup[]>([]);
   const groupsRef = useRef<CanvasGroup[]>([]);
   groupsRef.current = groups;
+  /** 待确认删除的组（列明组内节点数量后再执行删除） */
+  const [pendingDeleteGroup, setPendingDeleteGroup] = useState<{ id: string; count: number } | null>(null);
   const [submittingNodeId, setSubmittingNodeId] = useState<string | null>(null);
   /** 生成中节点判定（IKDMQQ）：执行期间目标参数与输入连线只读 */
   const isGeneratingNode = (id: string) =>
@@ -4038,6 +4042,10 @@ export default function CanvasPage() {
       showToast('warn', '风格卡、角色卡、物体卡、环境卡、商品卡无法成组');
       return;
     }
+    if (selectionHasUngroupableGenNodes(members)) {
+      showToast('warn', '待生成草稿、生成中节点无法成组');
+      return;
+    }
     const box = groupFrameBBox(members);
     if (!box) return;
     const memberIds = new Set(members.map((n) => n.id));
@@ -4104,7 +4112,7 @@ export default function CanvasPage() {
     historyRef.current?.pushUngroup(group);
   };
 
-  /** 删除组 = 删除当前落在组矩形内的全部节点（走统一删除入口：撤销/悬空边清理/生成中取消全复用） */
+  /** 删除组：先弹出合并确认（列明数量），确认后再删组内节点 */
   const handleDeleteGroup = (groupId: string) => {
     const group = groupsRef.current.find((g) => g.id === groupId);
     if (!group) return;
@@ -4114,9 +4122,26 @@ export default function CanvasPage() {
       ...productNodesRef.current,
       ...assetNodesRef.current,
     ];
+    const count = exclusiveMembersInGroup(all, group, groupsRef.current).length;
+    setPendingDeleteGroup({ id: groupId, count });
+  };
+
+  /** 确认删除组 = 删除当前落在组矩形内的全部节点（走统一删除入口：撤销/悬空边清理/生成中取消全复用） */
+  const confirmDeleteGroup = () => {
+    const pending = pendingDeleteGroup;
+    setPendingDeleteGroup(null);
+    if (!pending) return;
+    const group = groupsRef.current.find((g) => g.id === pending.id);
+    if (!group) return;
+    const all = [
+      ...textNodesRef.current,
+      ...mediaNodesRef.current,
+      ...productNodesRef.current,
+      ...assetNodesRef.current,
+    ];
     const inside = exclusiveMembersInGroup(all, group, groupsRef.current).map((n) => n.id);
     if (inside.length > 0) removeCanvasNodes(inside);
-    setGroups((prev) => prev.filter((g) => g.id !== groupId));
+    setGroups((prev) => prev.filter((g) => g.id !== pending.id));
     historyRef.current?.pushDeleteGroup(group, all.filter((n) => inside.includes(n.id)), []);
   };
 
@@ -4737,8 +4762,12 @@ export default function CanvasPage() {
       if (media && !media.data?.assetMissing && src) {
         const blob = await fetchAssetBlob(src);
         if (blob) {
+          const sniffed = await sniffMediaMime(blob);
+          const nodeMime = media.data?.mime as string | undefined;
+          const mime = sniffed || blob.type || nodeMime;
+          const cardName = (media.data?.fileName as string) || id;
           items.push({
-            filename: uniqueDownloadName((media.data?.fileName as string) || id, usedNames),
+            filename: uniqueDownloadName(downloadFileNameOf(cardName, mime, src), usedNames),
             blob,
           });
         }
@@ -5971,6 +6000,15 @@ export default function CanvasPage() {
         asset={assetDetailTarget}
         loading={assetDetailLoading}
         onClose={handleCloseAssetDetail}
+      />
+
+      <ConfirmModal
+        open={pendingDeleteGroup !== null}
+        title="删除组"
+        message={`确定要删除该组及组内 ${pendingDeleteGroup?.count ?? 0} 个节点吗？确认后组内全部内容将被删除。`}
+        confirmText="确认删除"
+        onCancel={() => setPendingDeleteGroup(null)}
+        onConfirm={confirmDeleteGroup}
       />
 
       {/* 画布区域 */}
