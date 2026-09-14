@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { checkReferenceLimits } from '@/lib/model-reference-limits';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { MediaGenStatus } from '../MediaNode';
@@ -326,11 +327,12 @@ export default function AudioDialog({
   const invalidDraftRefs = (draftRefInvalid ?? []).length > 0;
   /** IKFM41 §11：文本索引错误（失效/不支持类型）与连线失效同为发送防线，面板持续显示 */
   const textIndexBlocked = Boolean(textIndexError);
-  /** 发送防线（IKFDFZ）：正常路径添加侧已拦超限；异常预置/迁移数据超上限时明确阻止，
-   *  不静默截断（与服务端 ≤3 契约同口径） */
-  const overflowRefs = currentRefs.length > maxAudioRefs;
+  /** 按最终参考的实际类型校验分类上限与混用，随模型和来源变化重算。 */
+  const referenceLimitError = checkReferenceLimits(
+    currentModel?.features, currentRefs.map((ref) => ({ type: ref.mediaType ?? 'audio' })), 'audio',
+  );
   const handleSend = () => {
-    if (!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || textIndexBlocked || overflowRefs || draftBinding?.saveFailed) return;
+    if (!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || textIndexBlocked || referenceLimitError || draftBinding?.saveFailed) return;
     const promptDocToSend = promptDoc && docHasAnyRef(promptDoc) ? promptDoc : null;
     if (composeImageSendPrompt(attachments, text.trim(), promptDocToSend).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
       onToast?.('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
@@ -376,6 +378,7 @@ export default function AudioDialog({
             key={`${r.source}-${r.id}`}
             data-testid="audio-ref-thumb"
             kind={r.mediaType ?? 'audio'}
+            url={r.src}
             name={r.name}
             number={currentRefs.findIndex(ref => ref.id === r.id && ref.source === r.source) + 1}
             audioDuration={durations.get(`${r.source}-${r.id}`)}
@@ -469,9 +472,9 @@ export default function AudioDialog({
           onChange={(doc, value) => { setPromptDoc(doc); setText(value); draftBinding?.onParamsChange({ prompt: value, promptDoc: doc }); }} />
       </div>
       {invalidPrompt && <div role="alert">正文有已失效的素材标签或超过字数上限，请调整后发送</div>}
-      {overflowRefs && (
+      {referenceLimitError && (
         <div role="alert" data-testid="audio-ref-overflow">
-          {`参考音频最多 ${maxAudioRefs} 段，请移除多余参考后发送`}
+          {referenceLimitError}
         </div>
       )}
       {invalidDraftRefs && (
@@ -533,7 +536,7 @@ export default function AudioDialog({
           <button
             className={`${styles.sendBtn} ${text.trim() && modelId ? styles.sendBtnActive : ''}`}
             data-testid="audio-send"
-            disabled={!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || textIndexBlocked || overflowRefs || draftBinding?.saveFailed}
+            disabled={!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || textIndexBlocked || Boolean(referenceLimitError) || draftBinding?.saveFailed}
             onClick={handleSend}
             title="发送"
           >
