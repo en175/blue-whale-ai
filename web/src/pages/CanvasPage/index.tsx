@@ -5259,7 +5259,9 @@ export default function CanvasPage() {
     await savePromiseRef.current;
     if (activeProjectRef.current !== projectId) return false;
     if (blockInvalidDraft(textNodesRef.current.map(n => n.id))) return false;
-    const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
+    const contentNodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
+    // 组伪节点随 nodes 持久化（IKD0JT A3）：与防抖自动保存同口径，否则切换项目/应用预览时组关系丢失
+    const nodes = [...contentNodes, ...groupsRef.current.map((g) => groupToNode(g))];
     const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
     if (signature !== lastSavedRef.current) {
       try {
