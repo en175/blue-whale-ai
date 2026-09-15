@@ -1,10 +1,11 @@
 import { readJobFailText } from '@/api/jobs';
+import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 
 /** 提取音频占位节点 id 前缀：`media-extract-{jobId}`。 */
 export const MEDIA_EXTRACT_NODE_PREFIX = 'media-extract-';
 
-/** 占位音频节点相对源视频节点的横向偏移（节点宽约 280 + 间距）。 */
-export const MEDIA_EXTRACT_NODE_OFFSET = 340;
+/** 音频节点与源视频节点右边缘的间距（沿用既有「节点宽 + 60」口径里的 60）。 */
+export const MEDIA_EXTRACT_NODE_GAP = 60;
 
 const ERROR_CODE_TEXT: Record<string, string> = {
   video_has_no_audio_track: '视频没有音轨',
@@ -33,7 +34,8 @@ export function audioDisplayName(videoFileName: unknown): string {
 }
 
 /** 提取音频占位节点（IKFS5W）：建任务前本地插入源视频节点右侧，genStatus=generating + jobId，
- *  后续由轮询终态补丁收敛、自动保存落库——画布只由前端写，服务端与 worker 不再回写。 */
+ *  后续由轮询终态补丁收敛、自动保存落库——画布只由前端写，服务端与 worker 不再回写。
+ *  横向位置按**源节点实际内容宽**（视频 280×比例，16:9 约 498）让开一格，不再固定 340 压住源节点。 */
 export function buildMediaExtractPlaceholderNode(input: {
   jobId: string | number;
   source?: { position?: { x?: number; y?: number }; data?: Record<string, unknown> } | null;
@@ -45,16 +47,25 @@ export function buildMediaExtractPlaceholderNode(input: {
 } {
   const x = Number(input.source?.position?.x ?? 0);
   const y = Number(input.source?.position?.y ?? 0);
+  const data = input.source?.data ?? {};
+  const box = mediaContentBox({
+    mediaType: data.mediaType as 'image' | 'video' | 'audio' | undefined,
+    width: typeof data.width === 'number' ? data.width : undefined,
+    height: typeof data.height === 'number' ? data.height : undefined,
+    ratio: typeof data.targetRatio === 'string' ? data.targetRatio : undefined,
+  });
+  const left = Number.isFinite(x) ? x : 0;
+  const top = Number.isFinite(y) ? y : 0;
   return {
     id: mediaExtractNodeId(input.jobId),
     type: 'mediaNode',
     position: {
-      x: Math.round(Number.isFinite(x) ? x + MEDIA_EXTRACT_NODE_OFFSET : MEDIA_EXTRACT_NODE_OFFSET),
-      y: Math.round(Number.isFinite(y) ? y : 0),
+      x: Math.round(left + box.width + MEDIA_EXTRACT_NODE_GAP),
+      y: Math.round(top),
     },
     data: {
       src: '',
-      fileName: audioDisplayName(input.source?.data?.fileName),
+      fileName: audioDisplayName(data.fileName),
       mediaType: 'audio',
       genStatus: 'generating',
       progress: 0,

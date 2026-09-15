@@ -5047,12 +5047,13 @@ export default function CanvasPage() {
       const placeholder = attachCallbacks(
         buildMediaExtractPlaceholderNode({ jobId: created.job_id, source: node }) as Node,
       );
-      // 同步写 ref：flushCanvasSave 读的是 ref，不同步会拿到旧签名而跳过持久化
-      setMediaNodes((prev) => {
-        const next = prev.some((item) => item.id === nodeId) ? prev : [...prev, placeholder];
-        mediaNodesRef.current = next;
-        return next;
-      });
+      // 先同步写 ref 再 setState：本轮 flush 落库要用它，且下方连线端点必须已在本次保存的节点里
+      const current = mediaNodesRef.current;
+      const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
+      mediaNodesRef.current = next;
+      setMediaNodes(next);
+      // 连一条视频 → 音频的参考边：说明音频是从这段视频提取来的（与服务端「素材→产物」连线语义一致）
+      addCanvasEdge(id, nodeId);
       pollJob(nodeId, created.job_id);
       // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢节点
       await flushCanvasSave(currentId).catch(() => {});

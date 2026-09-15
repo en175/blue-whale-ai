@@ -42,13 +42,17 @@ describe('buildMediaExtractPlaceholderNode', () => {
     expect(isMediaExtractNodeId(node.id)).toBe(true);
   });
 
-  it('插在源视频节点右侧，展示名沿用源视频文件名', () => {
+  it('按源节点实际内容宽让开一格（16:9 视频约 498 宽 → x + 498 + 60）', () => {
     const node = buildMediaExtractPlaceholderNode({
       jobId: 400,
-      source: { position: { x: 100, y: 220 }, data: { fileName: '测试视频.mp4' } },
+      source: {
+        position: { x: 100, y: 220 },
+        data: { fileName: '测试视频.mp4', mediaType: 'video', width: 1920, height: 1080 },
+      },
     });
     expect(node.type).toBe('mediaNode');
-    expect(node.position).toEqual({ x: 440, y: 220 });
+    // 16:9 → 内容宽 280×16/9 = 497.78 → + 60 间距
+    expect(node.position).toEqual({ x: 658, y: 220 });
     expect(node.data).toMatchObject({
       src: '',
       fileName: '测试视频(audio).mp3',
@@ -59,8 +63,16 @@ describe('buildMediaExtractPlaceholderNode', () => {
     });
   });
 
+  it('源节点无尺寸信息时按 280 方形让开（280 + 60）', () => {
+    const node = buildMediaExtractPlaceholderNode({
+      jobId: '401',
+      source: { position: { x: 0, y: 0 }, data: { fileName: 'a.mp4' } },
+    });
+    expect(node.position).toEqual({ x: 340, y: 0 });
+  });
+
   it('源节点信息缺失时回落默认展示名与偏移', () => {
-    const node = buildMediaExtractPlaceholderNode({ jobId: '401', source: null });
+    const node = buildMediaExtractPlaceholderNode({ jobId: '402', source: null });
     expect(node.position).toEqual({ x: 340, y: 0 });
     expect(node.data.fileName).toBe('提取音频(audio).mp3');
   });
