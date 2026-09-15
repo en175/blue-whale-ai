@@ -403,8 +403,8 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
     expect((payload.parameters as Record<string, unknown>).prompt).toBe('自由模式输入');
     // seed 4 节点 + 入口建的 1 张草稿卡；生成发生在原卡，不新增节点
     expect(flowProps.current.mediaNodes).toHaveLength(5);
-    // 绑定草稿卡发送在原卡生成，面板保持打开供继续调整
-    expect(container.querySelector('textarea')).toBeTruthy();
+    // IKFXZD：创建请求发出即隐藏面板（提交前校验/落盘/上传失败则保持打开）
+    expect(container.querySelector('textarea')).toBeNull();
   });
 
   it('连续点击侧栏入口：每次新建草稿卡，面板保持打开', async () => {
@@ -468,6 +468,61 @@ describe('IKDMQS 视频参考连线与显式角色', () => {
   });
 });
 
+describe('IKFXZD 发送成功后面板自动隐藏', () => {
+  it('画布落盘失败中止提交：提示保存失败、不创建任务，面板保持打开', async () => {
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await typePrompt('落盘失败场景');
+
+    apiMocks.saveCanvasDoc.mockImplementation(() => Promise.reject(new Error('boom')));
+    try {
+      await act(async () => { sendButton().click(); });
+      await vi.waitFor(() => expect(container.textContent).toContain('保存失败，请重试'));
+      expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+      // 失败分支：面板保持打开（成功才关）
+      expect(container.querySelector('textarea')).toBeTruthy();
+    } finally {
+      // clearAllMocks 不重置实现，手动恢复成功落盘
+      apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
+    }
+  });
+
+  it('发送成功后画布选中事件不回弹重开面板；手动点卡照常重开只读', async () => {
+    apiMocks.fetchJobStatus.mockImplementation(async (): Promise<any> => ({
+      job_id: 'j1', status: 'processing', progress: 10, asset: null,
+    }));
+    try {
+      await renderPage();
+      await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+      await waitModelReady();
+      await typePrompt('选中回弹场景');
+
+      await act(async () => { sendButton().click(); });
+      await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+      // 发送成功面板已关
+      expect(container.querySelector('textarea')).toBeNull();
+
+      // 模拟发送后 patch 触发的画布选中事件（单选生成中的草稿卡）：不得回弹重开
+      const draft = () => flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1')!;
+      await act(async () => {
+        flowProps.current.onSelectionChange({ nodes: [draft()] });
+      });
+      expect(container.querySelector('textarea')).toBeNull();
+
+      // 手动点卡：照常重开只读面板（口径 3 不受影响）
+      await clickNode(draft());
+      await vi.waitFor(() => expect(container.querySelector('textarea')).toBeTruthy());
+    } finally {
+      // 恢复秒回 succeeded 的默认 mock（clearAllMocks 不重置实现，避免泄漏给后续回填用例）
+      apiMocks.fetchJobStatus.mockImplementation(async (): Promise<any> => ({
+        job_id: 'j1', status: 'succeeded', progress: 100,
+        asset: { id: 'a2', url: 'http://vid/out.mp4', type: 'video' },
+      }));
+    }
+  });
+});
+
 describe('IKDMQS 提交推导与组合约束', () => {
   it('仅普通参考连线：提交 references + target_node_id，先落盘后建任务', async () => {
     await renderPage();
@@ -497,6 +552,8 @@ describe('IKDMQS 提交推导与组合约束', () => {
       expect(data.genStatus).toBeUndefined();
     });
     expect(flowProps.current.mediaNodes).toHaveLength(4);
+    // IKFXZD：创建请求发出即隐藏面板
+    expect(container.querySelector('textarea')).toBeNull();
   });
 
   // 1f2f498d 起跟随模式按已连素材门控：空素材仅「文生视频」，首尾帧需 ≥2 图，
@@ -541,6 +598,8 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(sendButton().disabled).toBe(true);
     await act(async () => { sendButton().click(); });
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+    // IKFXZD：提交被拦（校验失败）面板保持打开
+    expect(container.querySelector('textarea')).toBeTruthy();
   });
 
   it('已有 2 张普通参考图片时切换首尾帧模式：自动转为首帧/尾帧槽（IKFJJT）', async () => {

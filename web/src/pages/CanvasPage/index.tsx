@@ -4026,7 +4026,9 @@ export default function CanvasPage() {
    *  videoRefs 仅 video：首尾帧（图片）或普通参考素材（图/视频）assetId/materialId，与 input_asset_ids 互斥。
    *  素材库引用（Asset- 前缀）走 *_material_id / reference_materials；同一帧位 asset 与 material 互斥。
    *  targetNodeId 仅图片/视频（IKDLQF/IKDLQG）：从对应媒体节点面板发起时携带，服务端按最新画布推导连线文本附件。
-   *  目标是草稿身份节点时（IKDMQQ）：不再新建占位卡，草稿原地转生成中，结果回填同一张卡 */
+   *  目标是草稿身份节点时（IKDMQQ）：不再新建占位卡，草稿原地转生成中，结果回填同一张卡。
+   *  返回 true 表示创建请求已发出（IKFXZD：面板据此判定发送成功并自动隐藏）；
+   *  false = 未发出（无项目/无效草稿/配额不足/同步异常）。HTTP 层异步失败不回滚面板，由卡片失败态呈现 */
   const startGenerationJob = (
     type: 'image' | 'video' | 'audio',
     parameters: ImageJobParameters | VideoJobParameters | AudioJobParameters,
@@ -4054,13 +4056,13 @@ export default function CanvasPage() {
     },
     /** IKFA1M/IKFA1O：结构化正文（image/video 含素材标签时携带）；服务端编译并冻结 */
     promptDoc?: PromptDoc | null,
-  ) => {
+  ): boolean => {
     if (!currentId) {
       console.warn('未选中项目，无法创建生成任务');
-      return;
+      return false;
     }
-    if (targetNodeId && blockInvalidDraft(edgesRef.current.filter(e => e.target === targetNodeId).map(e => e.source))) return;
-    if (blockIfQuotaInsufficient()) return;
+    if (targetNodeId && blockInvalidDraft(edgesRef.current.filter(e => e.target === targetNodeId).map(e => e.source))) return false;
+    if (blockIfQuotaInsufficient()) return false;
     // 原位模式（IKDMQQ 草稿 + IKDMQU 成品卡原卡重新生成）：目标节点原地承接任务，身份/位置/连线保持不变
     const inPlaceNode = targetNodeId
       ? mediaNodesRef.current.find((n) => n.id === targetNodeId && isInPlaceRegenTarget(n))
@@ -4235,12 +4237,14 @@ export default function CanvasPage() {
             errorText: isApiError(e) ? e.message : '创建任务失败',
           });
         });
+      return true; // 创建请求已发出（IKFXZD 面板关闭判定点）；HTTP 层异步失败由上方 catch 收敛到卡片
     } catch (e: unknown) {
       // 同步异常兜底（如 crypto.randomUUID 在 HTTP 下不可用）
       patchMediaNode(nodeId, {
         genStatus: 'failed',
         errorText: isApiError(e) ? e.message : '创建任务失败',
       });
+      return false;
     }
   };
 
@@ -5491,11 +5495,13 @@ export default function CanvasPage() {
       ...sourceDraftRefs,
       reference: orderRefStripItems(sourceDraftRefs.reference, videoRefStripKey, Array.isArray(savedStripOrder) ? savedStripOrder : []),
     };
-    // 自由模式发送后任务落生成卡：面板无绑定目标，关闭并清空本地参考（关闭即丢弃语义）
-    const finishFreeMode = () => {
-      if (!freeMode) return;
+    // 发送成功后关闭面板（IKFXZD 统一口径）；自由模式无草稿卡承载，关闭即丢弃本地暂存参考。
+    // 同步置 hidden 标记：否则紧随的画布选中事件会被 handleSelectionChange 当作「命中绑定目标」回弹重开
+    const finishSend = (submitted: boolean) => {
+      if (!submitted) return;
+      videoPanelHiddenRef.current = true;
       setShowBottomDialog(false);
-      setVideoFreeRefs({ reference: [] });
+      if (freeMode) setVideoFreeRefs({ reference: [] });
     };
     {
       // IKFM3W §10：文本索引发送校验（失效/帧互斥与业务 API 同口径，不能仅靠按钮禁用）——
@@ -5536,7 +5542,7 @@ export default function CanvasPage() {
         const compliantRefs = await ensureVideoImageRefsCompliance(draftRefs);
         if (!compliantRefs) return;
         const jobRefs = buildVideoJobReferences(compliantRefs);
-        startGenerationJob(
+        const submitted = startGenerationJob(
           'video',
           parameters,
           undefined,
@@ -5545,7 +5551,7 @@ export default function CanvasPage() {
           undefined,
           promptDoc ?? undefined,
         );
-        finishFreeMode();
+        finishSend(submitted);
       } finally {
         applyingRef.current = false;
         setSubmittingNodeId(null);
@@ -6220,9 +6226,12 @@ export default function CanvasPage() {
         if (!(await flushCanvasSave(projectId))) return;
       }
       // IKFM41 §11：references 类型按实际媒体类型提交（文本带入可为 image；直接/本地上传恒 audio）
-      startGenerationJob('audio', { prompt: text, model_id: modelId }, undefined,
+      const submitted = startGenerationJob('audio', { prompt: text, model_id: modelId }, undefined,
         resolved.length ? { references: resolved.map(ref => ({ role: 'reference' as const, type: ref.mediaType ?? 'audio', asset_id: String(ref.assetId) })) } : undefined,
         targetNodeId, undefined, promptDoc);
+      // IKFXZD：创建请求发出即隐藏面板（绑定与自由同口径；失败分支保持打开）。
+      // 置 hidden 标记避免紧随的画布选中事件回弹重开
+      if (submitted) { audioPanelHiddenRef.current = true; setShowAudioDialog(false); }
     } catch (e) {
       showToast('error', '保存失败，请重试');
       console.warn('音频生成前准备失败:', e);
@@ -6372,12 +6381,15 @@ export default function CanvasPage() {
       );
       if (targetNodeId && !(await flushCanvasSave(projectId))) return;
       if (activeProjectRef.current !== projectId) return;
-      startGenerationJob('image', {
+      const submitted = startGenerationJob('image', {
         prompt: text,
         model_id: modelId,
         aspect_ratio: ratio,
         size,
       }, inputAssetIds.length > 0 ? inputAssetIds : undefined, undefined, targetNodeId, undefined, promptDoc);
+      // IKFXZD：创建请求发出即隐藏面板（绑定与自由同口径；失败分支保持打开）。
+      // 置 hidden 标记避免紧随的画布选中事件回弹重开
+      if (submitted) { imagePanelHiddenRef.current = true; setShowImageDialog(false); }
     } catch (e) {
       showToast('error', '保存或提交失败，请重试');
       console.warn('图片生成前准备失败:', e);

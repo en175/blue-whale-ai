@@ -20,6 +20,9 @@ import { setGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
 vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./characterLibraryDeposit')>()),
   depositCanvasAssetToCharacterLibrary: vi.fn(async () => ({ materialId: 'asset-compliance-test' })),
+  // IKFVMQ 合规改轮询 GetAsset：恢复后的节点带 materialId 会走真实 waitAssetReady
+  // （getAsset 未 mock 致视频重编辑发送中止），测试环境跳过轮询等待
+  waitComplianceAssetReady: vi.fn(async () => ({})),
 }));
 
 vi.mock('./components/AgentPanel', () => ({
