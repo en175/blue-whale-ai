@@ -22,6 +22,7 @@ import { markdownToSanitizedHtml } from '@lib/contracts/text-node-markdown';
 import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { renderPromptMentions, readPromptMentions, applyMediaMentionState, createMediaMentionChip } from './promptMentions';
 import { applyMarkdownInputRule } from './markdownInputRules';
+import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 
 /** 文字节点最大字数（按纯文本计，含粘贴） */
 const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
@@ -109,6 +110,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   useEffect(() => { draftMaterialsRef.current = data.promptMaterials; }, [data.promptMaterials]);
 
   const [selectedMention, setSelectedMention] = useState<number | null>(null);
+  const showSoloToolbar = useSoloNodeSelected(selected);
   const canvasNodes = useStore(state => state.nodes);
   const materialChoices = [...new Map(canvasNodes.filter(node => node.type === 'mediaNode' && node.data.assetId && !node.data.assetMissing && node.data.genStatus !== 'generating'
     && ['image', 'video', 'audio'].includes(String(node.data.mediaType))).map(node => [String(node.data.assetId), {
@@ -612,7 +614,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           </button>
         </div>
       ) : (
-        <div className={`${styles.nodeBar} ${selected ? styles.nodeBarVisible : ''} nodrag nopan`}>
+        <div className={`${styles.nodeBar} ${showSoloToolbar ? styles.nodeBarVisible : ''} nodrag nopan`}>
           {hasPromptBindings && <>
             <select aria-label={selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}
               className={styles.materialSelect} value="" onPointerDown={event => event.stopPropagation()}

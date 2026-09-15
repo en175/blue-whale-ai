@@ -4,6 +4,7 @@
  * ============================================ */
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 import { AtSign, Upload, X, Box, MousePointerClick, ImageOff, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { uploadAssetFile } from '@/utils/upload';
@@ -70,6 +71,7 @@ const MAX_IMAGES = 8;
 const MAX_DETAIL_LENGTH = 2000;
 
 export default function ProductNode({ id, data, selected }: NodeProps & { data: ProductNodeData }) {
+  const showSoloToolbar = useSoloNodeSelected(selected);
   const [images, setImages] = useState<ProductImage[]>(data.images ?? []);
   const [detail, setDetail] = useState(data.detail ?? '');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -249,7 +251,7 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
       )}
 
       {/* 悬停/选中时顶部操作条 */}
-      <div className={`${styles.topBar} ${selected ? styles.topBarVisible : ''}`}>
+      <div className={`${styles.topBar} ${showSoloToolbar ? styles.topBarVisible : ''}`}>
         <span className={styles.topLabel}>
           <Box size={14} strokeWidth={2} />
           <span>商品</span>

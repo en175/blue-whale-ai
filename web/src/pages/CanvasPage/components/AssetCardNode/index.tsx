@@ -4,6 +4,7 @@
  * ============================================ */
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 import { AtSign, Upload, WandSparkles, Info, Music, X, MousePointerClick, ImageOff, Plus } from 'lucide-react';
 import type { GenerationCardBlock } from '@/api/agentSessions';
 import { toast } from 'sonner';
@@ -92,6 +93,7 @@ const MAX_VOICE_FILES = 3;
 const MAX_VOICE_DURATION = 15; // 秒
 
 export default function AssetCardNode({ id, data, selected }: NodeProps & { data: AssetCardNodeData; selected?: boolean }) {
+  const showSoloToolbar = useSoloNodeSelected(selected);
   // 水合容错：持久化的 kind 可能不在五种枚举内（旧数据/脏数据），降级为 custom 避免 KIND_META 落空
   const kind: AssetCardKind = data.kind && data.kind in KIND_META ? data.kind : 'custom';
   const meta = KIND_META[kind];
@@ -342,7 +344,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
       {/* 悬停/选中时顶部操作条：添加到对话（与商品节点一致）
           资产卡临时隐藏（HIDE_ASSET_TOP_BAR，会后恢复），生成卡不受影响 */}
       {(isGeneration || !HIDE_ASSET_TOP_BAR) && (
-        <div className={`${styles.topBar} ${selected ? styles.topBarVisible : ''}`}>
+        <div className={`${styles.topBar} ${showSoloToolbar ? styles.topBarVisible : ''}`}>
           <span className={styles.topLabel}>
             <AtSign size={14} strokeWidth={2} />
             <span>{meta.title}</span>
