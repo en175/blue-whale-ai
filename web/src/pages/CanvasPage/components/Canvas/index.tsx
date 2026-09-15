@@ -381,8 +381,9 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   onDeleteNodeRef.current = onDeleteNode;
   const onDuplicateSelectedRef = useRef(onDuplicateSelected);
   onDuplicateSelectedRef.current = onDuplicateSelected;
-  const groupsRef = useRef(groups);
-  groupsRef.current = groups;
+  // groups 是可选 prop：统一落成空数组，避免 408/410/574 处的 groupsRef.current.find 在省略时崩
+  const groupsRef = useRef<CanvasGroup[]>(groups ?? []);
+  groupsRef.current = groups ?? [];
   const onCreateGroupRef = useRef(onCreateGroup);
   onCreateGroupRef.current = onCreateGroup;
   const onNodeDragStopRef = useRef(onNodeDragStop);
