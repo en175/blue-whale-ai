@@ -319,7 +319,8 @@
  * ============================================ */
 .editor {
   height: 100%;
-  overflow-y: auto;
+  overflow-y: hidden;
+  overscroll-behavior: none;
   color: #e8e8e8;
   font-size: 14px;
   line-height: 1.7;
@@ -328,6 +329,10 @@
   cursor: text;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.editorScrolling {
+  overflow-y: auto;
 }
 
 /* 占位符 */

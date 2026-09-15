@@ -753,6 +753,20 @@ export default function CanvasPage() {
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+  /** 输入 dock 等覆盖层不在 .react-flow 内：Ctrl/Cmd+滚轮会走浏览器整页缩放，
+   *  表现为 dock 跟着放大、缩小却不回（画布缩放与页面缩放脱节）。捕获阶段拦截。 */
+  useEffect(() => {
+    const el = canvasWrapperRef.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest('.react-flow')) return;
+      event.preventDefault();
+    };
+    el.addEventListener('wheel', onWheel, { capture: true, passive: false });
+    return () => el.removeEventListener('wheel', onWheel, true);
+  }, []);
   /** FlowCanvas 注册的屏幕点→flow 坐标转换（无参默认取视口中心），注册前回退原点附近 */
   const spawnPosRef = useRef<(screenPt?: { x: number; y: number }) => { x: number; y: number }>(
     () => ({ x: 300, y: 200 }),
