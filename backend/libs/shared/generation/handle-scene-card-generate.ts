@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   ASSET_UNAVAILABLE_CODE,
+  ERROR_INVALID_REFERENCE,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
   PLAN_APPLICATION_CAPABILITY_DRIFT_CODE,
@@ -15,6 +16,7 @@ import type { CostReservationSnapshot } from "@lib/core";
 
 import { wireInteger } from "@lib/shared/wire-integer.js";
 import type { GenerationCostEstimator } from "./cost-estimator.js";
+import type { MaterialGate } from "./handle-create-generation-job.js";
 
 function isDecimalId(value: string): boolean {
   return /^[1-9][0-9]*$/.test(value);
@@ -48,6 +50,9 @@ export async function handleSceneCardGenerate(
     providerCredential?: string;
     /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额。 */
     costEstimator?: GenerationCostEstimator;
+    /** IKF YHJ（ADR-0087）：素材校验门。场景卡再生成是第三条视频创建路径，
+     *  与创建期/重试期共用同一个门实现；缺省不接（未接线时行为与改造前一致）。 */
+    materialGate?: MaterialGate;
   },
 ) {
   if (!idempotencyKey || idempotencyKey.trim().length === 0) {
@@ -96,8 +101,21 @@ export async function handleSceneCardGenerate(
       ? { provider_credential: options.providerCredential }
       : {}),
     ...(costReservation ? { costReservation } : {}),
+    ...(options?.materialGate
+      ? {
+          guardInput: (jobInput: Record<string, unknown>) =>
+            options.materialGate!.assertInputUsable({
+              userId,
+              jobInput,
+              jobType: "video", // 本入口只建视频 job（见 repo 的 createJobWithinTx 调用点）
+            }),
+        }
+      : {}),
   });
   switch (result.kind) {
+    case "material_blocked":
+      // 与创建期/重试期同款口径：400 + invalid_reference，原因原文外显。
+      return fail(400, result.reason, { code: ERROR_INVALID_REFERENCE });
     case "applied":
       return ok({
         scene_card_id: wireInteger(result.scene_card_id),

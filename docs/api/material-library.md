@@ -280,10 +280,13 @@
 
 ### 5.1 素材校验门（v2 新增，必读）
 
-**只有 `Status:"Active"` 的素材能用作视频生成参考。** 创建期与重试期都会校验，不通过直接 400 拒绝、零写入（不建任务）。
+**只有 `Status:"Active"` 的素材能用作视频生成参考。** 三条视频创建路径都会校验，不通过直接 400 拒绝、零写入（不建任务）：
 
-> ⚠️ **已知未覆盖：场景卡再生成**（`POST /api/scene-cards/:id/generate`）。它是第三条视频创建路径，走 `createJobWithinTx` 直建、**不过这道门**。后果：某张素材在预设保存之后变成 `Failed`，用它再生成场景卡仍能建出任务（执行时 worker 才转 `asset://`，届时由上游拒）。
-> 本仓已知此缺口，**未在本期修复**（改动要跨事务、涉及预设引用解析），单独跟进。给前端的建议：**不要**依赖这条路径上的拦截，画布侧照常按 §5.2 拦。
+| 入口 | 说明 |
+|---|---|
+| `POST /api/projects/:id/generation-jobs` | 创建期 |
+| `POST /api/projects/:id/generation-jobs/:jobId/retry` | 重试期 |
+| `POST /api/projects/:id/scene-cards/:sceneCardId/generate` | **场景卡再生成**（第三条路径） |
 
 **校验范围**——以下两批素材 id 都会被查：
 
