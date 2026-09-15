@@ -37,6 +37,30 @@ export const MATERIAL_NOT_APPROVED_MESSAGE = "该素材未审核通过，不能�
 /** 上游不可达时 fail-closed：放行等于赌它可用，与 ADR-0087 的取舍相反。 */
 export const MATERIAL_STATUS_UNAVAILABLE_MESSAGE = "素材状态校验失败，请稍后重试";
 
+/**
+ * 上游错误码里表示「**这个素材本身**用不了」的那些——终局拒绝，不是暂时故障。
+ *
+ * 为什么必须分开（2026-09-15 真网关实测）：
+ *   - `DeleteAsset` 后 `GetAsset` → `NotFound.asset_id`（"The specified asset ... is not found."）
+ *   - 格式非法的 id → `InvalidParameter.AssetID`（"Id is Invalid"）
+ *   两者都是「重试一万次也不会变可用」。统一按「查不到」处理会让用户拿到
+ *   「请稍后重试」而陷入永远失败的重试循环——这正是真实联调暴露出来的问题。
+ *
+ * 为什么这么窄：只认素材级的码。
+ *   - 鉴权失败走的是**另一套信封**（`{"error":{...}}` new_api_error，无 `ResponseError`），
+ *     落不进这个正则；
+ *   - 租户未开通（`FeatureNotEnabled`）、限流（429）、5xx、网络失败都不是素材的错，
+ *     必须保持「本轮未知」，否则一次账号级故障会把所有素材误标成 Failed。
+ */
+const MATERIAL_LEVEL_REJECTION_CODE = /^(?:NotFound|InvalidParameter)\.asset/i;
+
+/** 该错误码是否指认「这个素材不可用」（见 {@link MATERIAL_LEVEL_REJECTION_CODE}）。 */
+export function isMaterialLevelRejection(
+  code: string | null | undefined,
+): boolean {
+  return typeof code === "string" && MATERIAL_LEVEL_REJECTION_CODE.test(code);
+}
+
 /** 上游状态白名单收敛——认不出的值一律当未就绪（继续按不可用处理，不误判为可用）。 */
 function normalizeStatus(raw: string): "Active" | "Failed" | "Processing" {
   return raw === "Active" || raw === "Failed" ? raw : "Processing";

@@ -17,7 +17,7 @@ import {
   enqueueVideoGenerationJob,
 } from "@lib/shared/generation/video-queue.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
-import { createMaterialGate } from "@lib/shared/generation/material-compliance-gate.js";
+import { createMaterialGate, isMaterialLevelRejection } from "@lib/shared/generation/material-compliance-gate.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";
@@ -26,6 +26,28 @@ import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 function bodyString(body: unknown): string {
   return typeof body === "string" ? body : JSON.stringify(body ?? "");
+}
+
+/** 上游错误信封 `ResponseError.Code`（不存在返回 null）。 */
+function readResponseErrorCode(body: unknown): string | null {
+  const error = readResponseError(body);
+  const code = error?.Code;
+  return typeof code === "string" ? code : null;
+}
+
+/** 上游错误信封 `ResponseError.Message`（不存在返回 null）。内部归因用，不展示给用户。 */
+function readResponseErrorMessage(body: unknown): string | null {
+  const error = readResponseError(body);
+  const message = error?.Message;
+  return typeof message === "string" ? message : null;
+}
+
+function readResponseError(body: unknown): Record<string, unknown> | null {
+  if (typeof body !== "object" || body === null) return null;
+  const error = (body as Record<string, unknown>).ResponseError;
+  return typeof error === "object" && error !== null
+    ? (error as Record<string, unknown>)
+    : null;
 }
 
 @Controller("projects/:projectId/generation-jobs")
@@ -53,8 +75,21 @@ export class GenerationJobsController {
           const upstream = await this.material.callAction(authorization, "GetAsset", {
             Id: materialId,
           });
-          if (upstream.status < 200 || upstream.status >= 300) return null;
           const body: unknown = upstream.body;
+          if (upstream.status < 200 || upstream.status >= 300) {
+            // 上游明确指认「这个素材用不了」（已删除 / id 非法）→ 终局拒绝。
+            // 按「查不到」处理会让用户拿到「请稍后重试」而永远重试不成功。
+            const code = readResponseErrorCode(body);
+            if (isMaterialLevelRejection(code)) {
+              return {
+                status: "Failed",
+                errorCode: code,
+                errorMessage: readResponseErrorMessage(body),
+              };
+            }
+            // 其余非 2xx（鉴权 / 限流 / 5xx）不是素材的错 → 本轮未知，可重试。
+            return null;
+          }
           if (typeof body !== "object" || body === null) return null;
           const result = (body as Record<string, unknown>).Result;
           if (typeof result !== "object" || result === null) return null;

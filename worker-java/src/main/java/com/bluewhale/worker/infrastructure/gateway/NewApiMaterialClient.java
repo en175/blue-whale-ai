@@ -60,12 +60,29 @@ public class NewApiMaterialClient {
     }
 
     /**
+     * 上游错误码里表示「**这个素材本身**用不了」的那些——终局拒绝。
+     * <p>
+     * 2026-09-15 真网关实测：`DeleteAsset` 后 `GetAsset` 返回 `NotFound.asset_id`；
+     * 格式非法的 id 返回 `InvalidParameter.AssetID`。两者重试一万次也不会变可用，
+     * 所以按终态收敛，别让跟进器白追满 10 分钟窗口。
+     * <p>
+     * 保持窄：只认素材级的码。鉴权失败走的是另一套信封（`{"error":{...}}`，无 `ResponseError`），
+     * 落不进这个正则；租户未开通 / 限流 / 5xx 都不是素材的错，必须保持「本轮未知」——
+     * 否则一次账号级故障会把该用户所有在途素材误标成 Failed。
+     */
+    private static final java.util.regex.Pattern MATERIAL_LEVEL_REJECTION_CODE =
+            java.util.regex.Pattern.compile("^(?:NotFound|InvalidParameter)\\.asset",
+                    java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /**
      * 查单条素材的上游状态。
      *
      * @param token      该用户的 sk-（从 user_info 取回）
      * @param materialId 素材库素材 id（asset-...）
-     * @return 解析出的状态；<b>任何查不到的情形（未配置 / 网络失败 / 非 2xx / 信封不合预期）
-     *         一律返回 null</b>——调用方按「本轮未知，保持 Processing」处理，不误判为可用也不误判为失败
+     * @return 解析出的状态；查不到的情形**一律返回 null**（网络失败 / 非 2xx / 信封不合预期）——
+     *         调用方按「本轮未知，保持 Processing」处理，不误判为可用也不误判为失败。
+     *         唯一例外是上游明确指认素材不可用（见 {@link #MATERIAL_LEVEL_REJECTION_CODE}），
+     *         那种情况按 `Failed` 返回，让状态收敛到终态。
      * @throws IllegalArgumentException token 或 materialId 为空（调用方 bug，不该静默）
      */
     public MaterialStatusResult getAsset(String token, String materialId) {
@@ -102,20 +119,49 @@ public class NewApiMaterialClient {
         NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, traceId);
 
         String rawText;
+        int httpStatus;
         try (Response response = httpClient.newCall(requestBuilder.build()).execute()) {
             ResponseBody body = response.body();
             rawText = body != null ? body.string() : "";
-            if (!response.isSuccessful()) {
-                log.warn("GetAsset 非 2xx materialId={} HTTP {}", materialId, response.code());
-                return null;
-            }
+            httpStatus = response.code();
         } catch (Exception e) {
             // 网络/超时：本轮未知。下一轮（5s 后）再试，窗口内共 10 分钟。
             log.warn("GetAsset 请求失败 materialId={}: {}", materialId, e.getMessage());
             return null;
         }
 
+        if (httpStatus < 200 || httpStatus >= 300) {
+            MaterialStatusResult rejected = asMaterialRejection(rawText, materialId);
+            if (rejected != null) return rejected;
+            log.warn("GetAsset 非 2xx materialId={} HTTP {}", materialId, httpStatus);
+            return null;
+        }
+
         return parseResult(rawText, materialId);
+    }
+
+    /**
+     * 非 2xx 时判断上游是不是在指认「这个素材不可用」。
+     * 是 → 合成一条 `Failed` 让调用方收敛到终态；否 → null（本轮未知）。
+     */
+    private MaterialStatusResult asMaterialRejection(String rawText, String materialId) {
+        JsonNode parsed;
+        try {
+            parsed = JSON.readTree(rawText);
+        } catch (Exception e) {
+            return null; // 非 JSON（可能是网关自己的错误页）→ 本轮未知
+        }
+        JsonNode error = parsed.get("ResponseError");
+        if (error == null || !error.isObject()) return null;
+        JsonNode codeNode = error.get("Code");
+        if (codeNode == null || !codeNode.isTextual()) return null;
+        String code = codeNode.asText();
+        if (!MATERIAL_LEVEL_REJECTION_CODE.matcher(code).find()) return null;
+
+        JsonNode messageNode = error.get("Message");
+        log.info("GetAsset 上游指认素材不可用 materialId={} code={}", materialId, code);
+        return new MaterialStatusResult("Failed", code,
+                messageNode != null && messageNode.isTextual() ? messageNode.asText() : null);
     }
 
     /**

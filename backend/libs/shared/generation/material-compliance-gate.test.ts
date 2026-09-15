@@ -6,6 +6,7 @@ import {
   collectLocalAssetIds,
   collectMaterialIds,
   createMaterialGate,
+  isMaterialLevelRejection,
   type MaterialComplianceDeps,
 } from "./material-compliance-gate.js";
 
@@ -250,4 +251,35 @@ describe("createMaterialGate（IKFYHJ 接线层）", () => {
       expect(deps.fetchUpstreamStatus).not.toHaveBeenCalled();
     },
   );
+});
+
+// IKF YHJ：上游「这个素材用不了」与「我们没问出来」必须分开——前者终局，后者可重试。
+// 判据来自 2026-09-15 真网关实测：删掉素材后 GetAsset 回 NotFound.asset_id；
+// 格式非法的 id 回 InvalidParameter.AssetID；坏凭证走另一套信封（无 ResponseError）。
+describe("isMaterialLevelRejection（上游错误码分类）", () => {
+  it.each([
+    "NotFound.asset_id",
+    "InvalidParameter.AssetID",
+    "notfound.asset_id",
+  ])("%s → 终局拒绝", (code) => {
+    expect(isMaterialLevelRejection(code)).toBe(true);
+  });
+
+  it.each([
+    // 鉴权/租户/限流/服务端——都不是素材的错，必须保持「本轮未知」可重试
+    "FeatureNotEnabled",
+    "LimitExceeded",
+    "InternalError",
+    "Unauthorized",
+    "Forbidden",
+    "NotFound", // 不带 .asset 段的通用 404：可能是链路问题，不认作素材级
+    "",
+  ])("%s → 不认作素材级，按本轮未知", (code) => {
+    expect(isMaterialLevelRejection(code)).toBe(false);
+  });
+
+  it("null / undefined → 不认作素材级", () => {
+    expect(isMaterialLevelRejection(null)).toBe(false);
+    expect(isMaterialLevelRejection(undefined)).toBe(false);
+  });
 });

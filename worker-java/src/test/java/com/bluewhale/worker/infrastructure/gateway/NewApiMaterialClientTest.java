@@ -149,4 +149,41 @@ class NewApiMaterialClientTest {
         assertThatThrownBy(() -> client.getAsset("sk-user9", " "))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+    // 2026-09-15 真网关实测：素材被删 / id 非法时上游在非 2xx 上回 ResponseError，
+    // 这类「指认素材本身不可用」必须收敛成 Failed（否则跟进器白追满 10 分钟窗口）；
+    // 而鉴权失败走的是另一套 new_api_error 信封、限流/5xx 更不是素材的错，都必须保持「本轮未知」。
+    @Test
+    @DisplayName("上游指认素材不可用（NotFound.asset_id / InvalidParameter.AssetID）→ 收敛为 Failed")
+    void materialLevelRejectionBecomesFailed() {
+        responseCode.set(404);
+        responseBody.set("""
+                {"ResponseError":{"Code":"NotFound.asset_id",
+                 "Message":"The specified asset asset-x is not found."}}""");
+
+        MaterialStatusResult result = new NewApiMaterialClient(baseUrl)
+                .getAsset("sk-user9", "asset-x");
+
+        assertThat(result).isNotNull();
+        assertThat(result.status()).isEqualTo("Failed");
+        assertThat(result.errorCode()).isEqualTo("NotFound.asset_id");
+        assertThat(result.errorMessage()).contains("not found");
+    }
+
+    @Test
+    @DisplayName("其余非 2xx（鉴权/限流/5xx）→ 仍是 null，不把账号级故障误标成素材失败")
+    void otherNon2xxStaysUnknown() {
+        for (String body : new String[] {
+                "{\"error\":{\"code\":\"\",\"message\":\"Invalid token\"}}",
+                "{\"ResponseError\":{\"Code\":\"FeatureNotEnabled\"}}",
+                "{\"ResponseError\":{\"Code\":\"LimitExceeded\"}}",
+                "{\"ResponseError\":{\"Code\":\"InternalError\"}}",
+                "{\"ResponseError\":{\"Code\":\"NotFound\"}}",
+        }) {
+            responseCode.set(401);
+            responseBody.set(body);
+            assertThat(new NewApiMaterialClient(baseUrl).getAsset("sk-user9", "asset-x"))
+                    .as("body=%s", body)
+                    .isNull();
+        }
+    }
 }
