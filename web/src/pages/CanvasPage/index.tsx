@@ -110,7 +110,7 @@ import { uploadAssetFile } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
 import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
-import { COMPLIANCE_SUCCESS_TOAST, depositCanvasAssetToCharacterLibrary, resolveCharacterLibraryMaterialId } from './characterLibraryDeposit';
+import { COMPLIANCE_SUCCESS_TOAST, COMPLIANCE_FAILED_TOAST, depositCanvasAssetToCharacterLibrary, isComplianceFailedError, resolveCharacterLibraryMaterialId, waitComplianceAssetReady } from './characterLibraryDeposit';
 import { buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
 import {
   availableGenKinds,
@@ -3274,6 +3274,35 @@ export default function CanvasPage() {
     });
   };
 
+  const startNodeCompliance = (id: string) => {
+    patchNodeCompliance(id, {
+      complianceBusy: true,
+      compliancePassed: false,
+      complianceFailed: false,
+    });
+  };
+
+  const toastComplianceError = (err: unknown) => {
+    if (isApiError(err)) return;
+    showToast(
+      'error',
+      isComplianceFailedError(err)
+        ? COMPLIANCE_FAILED_TOAST
+        : err instanceof Error
+          ? err.message
+          : '校验失败，请重试',
+    );
+  };
+
+  const failNodeCompliance = (id: string, err: unknown) => {
+    patchNodeCompliance(id, {
+      complianceBusy: false,
+      compliancePassed: false,
+      complianceFailed: isComplianceFailedError(err),
+    });
+    toastComplianceError(err);
+  };
+
   /** 图片/视频合规入库；成功后节点展示 success.png 通过图标 */
   const ensureMediaNodeCompliance = async (
     id: string,
@@ -3292,15 +3321,27 @@ export default function CanvasPage() {
       assetId,
     });
     if (verifiedId) {
-      if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
-      patchNodeCompliance(id, { complianceBusy: false, compliancePassed: true, materialId: verifiedId });
-      return verifiedId;
+      startNodeCompliance(id);
+      try {
+        await waitComplianceAssetReady(verifiedId);
+        if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
+        patchNodeCompliance(id, {
+          complianceBusy: false,
+          compliancePassed: true,
+          complianceFailed: false,
+          materialId: verifiedId,
+        });
+        return verifiedId;
+      } catch (err) {
+        failNodeCompliance(id, err);
+        return undefined;
+      }
     }
     if (!url || url.startsWith('blob:')) {
       showToast('warn', '素材尚未上传完成，请稍后重试');
       return undefined;
     }
-    patchNodeCompliance(id, { complianceBusy: true });
+    startNodeCompliance(id);
     try {
       const result = await depositCanvasAssetToCharacterLibrary({
         sourceAssetId: assetId,
@@ -3309,7 +3350,7 @@ export default function CanvasPage() {
         mediaType,
       });
       if (!result.materialId) {
-        patchNodeCompliance(id, { complianceBusy: false });
+        patchNodeCompliance(id, { complianceBusy: false, compliancePassed: false, complianceFailed: false });
         showToast('error', '校验失败，请重试');
         return undefined;
       }
@@ -3317,14 +3358,12 @@ export default function CanvasPage() {
       patchNodeCompliance(id, {
         complianceBusy: false,
         compliancePassed: true,
+        complianceFailed: false,
         materialId: result.materialId,
       });
       return result.materialId;
     } catch (err) {
-      patchNodeCompliance(id, { complianceBusy: false });
-      if (!isApiError(err)) {
-        showToast('error', err instanceof Error ? err.message : '校验失败，请重试');
-      }
+      failNodeCompliance(id, err);
       return undefined;
     }
   };
@@ -3344,25 +3383,21 @@ export default function CanvasPage() {
     const materialByKey = new Map<string, string>();
     for (const item of images) {
       if (materialByKey.has(item.nodeId)) continue;
-      if (item.materialId && isMaterialLibraryId(item.materialId)) {
-        materialByKey.set(item.nodeId, item.materialId);
-        const canvasNode = mediaNodesRef.current.find((n) => n.id === item.nodeId);
-        if (canvasNode) {
-          const d = (canvasNode.data ?? {}) as Record<string, unknown>;
-          if (d.compliancePassed !== true || d.materialId !== item.materialId) {
-            patchNodeCompliance(item.nodeId, {
-              compliancePassed: true,
-              materialId: item.materialId,
-            });
-          }
-        }
-        continue;
-      }
       const node = mediaNodesRef.current.find((n) => n.id === item.nodeId);
       if (node) {
         const materialId = await ensureMediaNodeCompliance(item.nodeId, { toastSuccess: false });
         if (!materialId) return null;
         materialByKey.set(item.nodeId, materialId);
+        continue;
+      }
+      if (item.materialId && isMaterialLibraryId(item.materialId)) {
+        try {
+          await waitComplianceAssetReady(item.materialId);
+          materialByKey.set(item.nodeId, item.materialId);
+        } catch (err) {
+          toastComplianceError(err);
+          return null;
+        }
         continue;
       }
       if (!item.url || item.url.startsWith('blob:')) {
@@ -3382,9 +3417,7 @@ export default function CanvasPage() {
         }
         materialByKey.set(item.nodeId, result.materialId);
       } catch (err) {
-        if (!isApiError(err)) {
-          showToast('error', err instanceof Error ? err.message : '校验失败，请重试');
-        }
+        toastComplianceError(err);
         return null;
       }
     }

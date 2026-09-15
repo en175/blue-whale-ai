@@ -1,8 +1,18 @@
 /* 画布节点合规校验：视为上传虚拟素材（CreateAsset 不传分组，由后端归组） */
-import { createAsset, type MaterialAssetType } from '@/api/material';
+import { createAsset, waitAssetReady, MaterialAssetFailedError, type MaterialAssetType } from '@/api/material';
 import { isMaterialLibraryId } from './mediaRefs';
 
 export const COMPLIANCE_SUCCESS_TOAST = '校验通过，可用于seedance2.0视频生成';
+export const COMPLIANCE_FAILED_TOAST = 'seedance2.0合规校验失败，不可用于视频生成';
+
+export function isComplianceFailedError(err: unknown): boolean {
+  return err instanceof MaterialAssetFailedError;
+}
+
+/** 轮询单条素材 GetAsset，直到 Active（通过）或 Failed（未通过） */
+export function waitComplianceAssetReady(materialId: string) {
+  return waitAssetReady(materialId);
+}
 
 function readNonEmptyId(raw: unknown): string | undefined {
   if (raw == null || raw === '') return undefined;
@@ -37,7 +47,7 @@ function numericSourceAssetId(assetId: string): string | undefined {
   return /^\d+$/.test(assetId) ? assetId : undefined;
 }
 
-/** 右键合规校验：按虚拟人像入库，不走 uploads/dedup */
+/** 右键合规校验：按虚拟人像入库，再轮询 GetAsset 直到 Active/Failed */
 export async function depositCanvasAssetToCharacterLibrary(input: {
   sourceAssetId: string;
   url: string;
@@ -53,5 +63,7 @@ export async function depositCanvasAssetToCharacterLibrary(input: {
     AssetType: toMaterialType(input.mediaType),
     ...(sourceAssetId ? { SourceAssetId: sourceAssetId } : {}),
   });
+  if (!created.Id) return {};
+  await waitAssetReady(created.Id);
   return { materialId: created.Id };
 }
