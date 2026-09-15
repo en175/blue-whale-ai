@@ -66,7 +66,8 @@ public class TosMediaStorage {
         this.endpoint = endpointEnv.replaceFirst("^https?://", "").replaceFirst("/$", "");
         this.bucket = bucketEnv;
 
-        this.client = new TOSV2ClientBuilder().build(region, this.endpoint, accessKeyId, secretAccessKey);
+        this.client = new TOSV2ClientBuilder().build(
+                region, this.endpoint, accessKeyId, secretAccessKey, TosTransportConfig.fromEnv());
     }
 
     /** 测试用构造器：注入 mock client。 */

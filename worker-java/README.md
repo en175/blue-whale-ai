@@ -46,6 +46,9 @@ curl localhost:4002/ready
 | `VOLC_TOS_BUCKET` | 是（media_extract 启用时） | TOS 桶 | — |
 | `VOLC_TOS_REGION` | 是（media_extract 启用时） | TOS 区域 | — |
 | `FFMPEG_PATH` | 否 | ffmpeg 二进制路径（Dockerfile 须 ship 一个） | `ffmpeg`（PATH 查找） |
+| `TOS_CONNECT_TIMEOUT_MS` | 否 | TOS SDK 建链超时（毫秒） | `30000` |
+| `TOS_READ_TIMEOUT_MS` | 否 | TOS SDK 读超时（毫秒）——下载源视频中途超时会判 `video_download_failed` | `300000` |
+| `TOS_WRITE_TIMEOUT_MS` | 否 | TOS SDK 写超时（毫秒） | `300000` |
 | `MEDIA_EXTRACT_CONCURRENCY` | 否 | 提取并发度（1-16） | `2` |
 | `GENERATION_WORKER_PORT` | 否 | HTTP 端口 | `4002` |
 | `NEW_API_BASE_URL` | 是（audio 启用时） | new-api 网关地址 | — |
