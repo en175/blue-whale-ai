@@ -178,6 +178,9 @@ export interface AssetRepo {
   clearMaterialLink(userId: string, materialId: string): Promise<void>;
   /** IKDJNZ：素材库组被删除后，按组 ID 批量清除本地 assets 行的 material 关联（两列）。 */
   clearMaterialGroupLink(userId: string, materialGroupId: string): Promise<void>;
+  /** IKF YHJ：查这批本地 Asset 里「已绑素材库素材」的那些，返回其 material_id。
+   *  生成创建期的素材校验门用它覆盖 worker 会自动转 asset:// 的那条绕过路径（ADR-0087 背景缺口 3）。 */
+  findBoundMaterialIds(userId: string, assetIds: readonly string[]): Promise<string[]>;
 }
 
 const uploadAssetSelect = {
@@ -760,6 +763,21 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           gmt_modified: new Date(),
         },
       });
+    },
+    async findBoundMaterialIds(userId, assetIds) {
+      if (assetIds.length === 0) return [];
+      const rows = await prisma.assets.findMany({
+        where: {
+          id: { in: assetIds.map((id) => BigInt(id)) },
+          user_id: BigInt(userId),
+          is_delete: false,
+          material_id: { not: null },
+        },
+        select: { material_id: true },
+      });
+      return rows
+        .map((row) => row.material_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0);
     },
   };
 }

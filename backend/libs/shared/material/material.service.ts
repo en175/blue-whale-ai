@@ -218,9 +218,16 @@ export class MaterialService {
     await this.groupRepo.softDelete(userId, materialGroupId);
   }
 
+  /** IKF YHJ：给生成创建期的素材门用的最小仓库面（避免把 Prisma 透到 API 层）。 */
+  get materialStatusRepo(): Pick<
+    MaterialAssetRepo,
+    "findByMaterialId" | "mirrorStatus"
+  > {
+    return this.materialAssetRepo;
+  }
+
   /** IKF YHJ：CreateAsset 2xx 后落 Processing 行——上游异步注册，此刻必然尚未 Active。 */
-  async trackMaterialProcessing(
-    userId: string,
+  async trackMaterialProcessing(    userId: string,
     materialId: string,
     materialGroupId: string,
   ): Promise<void> {

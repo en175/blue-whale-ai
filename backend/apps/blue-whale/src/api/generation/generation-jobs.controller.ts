@@ -17,6 +17,9 @@ import {
   enqueueVideoGenerationJob,
 } from "@lib/shared/generation/video-queue.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
+import { createMaterialGate } from "@lib/shared/generation/material-compliance-gate.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
+import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
@@ -33,7 +36,41 @@ export class GenerationJobsController {
     private readonly models: ModelCapabilityReadService,
     private readonly cost: GenerationCostEstimatorService,
     private readonly canvas: CanvasService,
+    private readonly material: MaterialService,
+    private readonly assets: AssetService,
   ) {}
+
+  /** IKF YHJ：造素材校验状态门（ADR-0087）。实时查询走网关 GetAsset，凭据用本次请求的用户 sk-；
+   *  上游不可达/查不到一律当不可用（fail-closed），不赌它没问题。 */
+  private buildMaterialGate(authorization: string | undefined) {
+    return createMaterialGate({
+      repo: this.material.materialStatusRepo,
+      fetchUpstreamStatus: async (materialId) => {
+        const upstream = await this.material.callAction(authorization, "GetAsset", {
+          Id: materialId,
+        });
+        if (upstream.status < 200 || upstream.status >= 300) return null;
+        const body: unknown = upstream.body;
+        if (typeof body !== "object" || body === null) return null;
+        const result = (body as Record<string, unknown>).Result;
+        if (typeof result !== "object" || result === null) return null;
+        const rec = result as Record<string, unknown>;
+        if (typeof rec.Status !== "string") return null;
+        const rawError = rec.Error;
+        const err =
+          typeof rawError === "object" && rawError !== null
+            ? (rawError as Record<string, unknown>)
+            : undefined;
+        return {
+          status: rec.Status,
+          errorCode: typeof err?.Code === "string" ? err.Code : null,
+          errorMessage: typeof err?.Message === "string" ? err.Message : null,
+        };
+      },
+      resolveLocalAssetMaterialIds: (userId, assetIds) =>
+        this.assets.findBoundMaterialIds(userId, assetIds),
+    });
+  }
 
   @Post()
   async create(
@@ -55,6 +92,7 @@ export class GenerationJobsController {
         models: this.models,
         canvas: this.canvas,
         assets: this.command.assets,
+        materialGate: this.buildMaterialGate(authorization),
         ...(this.cost.estimator ? { costEstimator: this.cost.estimator } : {}),
       },
       internal,
