@@ -491,6 +491,8 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
       { material_id: 'asset-compliance-test', type: 'image', role: 'first_frame' },
       { material_id: 'asset-compliance-test', type: 'image', role: 'last_frame' },
     ]);
+    // IKFXZD：发送成功即隐藏面板
+    expect(container.querySelector('[data-testid="video-send"]')).toBeNull();
   });
 
   it('普通参考生成请求角色校验：references 按连线顺序提交 reference 角色', async () => {
@@ -513,6 +515,8 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
       { material_id: 'asset-compliance-test', type: 'image', role: 'reference' },
       { asset_id: 'a3', type: 'video', role: 'reference' },
     ]);
+    // IKFXZD：发送成功即隐藏面板
+    expect(container.querySelector('[data-testid="video-send"]')).toBeNull();
   });
 
   it('首尾帧草稿关闭重开：角色连线、徽标、提示词与配置完整恢复', async () => {

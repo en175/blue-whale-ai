@@ -381,6 +381,8 @@ describe('IKDMQT 音频草稿创建与编辑', () => {
     expect(payload.parameters.model_id).toBe('a-test');
     // seed m1 + 入口建的 1 张草稿卡；生成发生在原卡，不新增节点
     expect(flowProps.current.mediaNodes).toHaveLength(2);
+    // IKFXZD：创建请求发出即隐藏面板（提交前校验/落盘/上传失败则保持打开）
+    expect(container.querySelector('[data-testid="audio-input"]')).toBeNull();
   });
 
   it('连续点击侧栏入口：每次新建草稿卡，面板保持打开', async () => {
@@ -529,7 +531,11 @@ describe('IKDMQT 原位提交与首次生成', () => {
       expect(node.data.genStatus).toBe('generating');
     });
 
-    // 面板只读：描述输入与发送禁用，提示可见
+    // IKFXZD：发送成功即隐藏面板
+    expect(container.querySelector('[data-testid="audio-input"]')).toBeNull();
+
+    // 生成中点卡片重开只读面板（IKFXZD 口径：自动关闭不动只读入口）：描述输入与发送禁用，提示可见
+    await openDraftPanel();
     expect(promptRefReadOnly(container)).toBe(true);
     expect(sendButton().disabled).toBe(true);
     expect(container.textContent).toContain('生成中，参数只读');
@@ -653,6 +659,8 @@ describe('IKDMQT 保存失败暂停生成', () => {
     expect(draft.data.draft).toBe(true);
     expect(draft.data.genStatus).toBe('draft');
     expect(draft.data.prompt).toBe('轻快的海浪声');
+    // IKFXZD：失败分支面板保持打开（成功才关）
+    expect(promptTextarea()).toBeTruthy();
   });
 });
 
