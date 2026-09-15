@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import { checkReferenceLimits } from '@/lib/model-reference-limits';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { MediaGenStatus } from '../MediaNode';
@@ -35,6 +36,10 @@ export interface AudioRefItem {
   assetId?: string | number;
   /** 本地上传保留原始 File（发送时走三步上传换取 assetId） */
   file?: File;
+  /** IKFM41 §11：文本带入参考标记——携带即为锁定条目（不渲染移除入口），提交 type 按实际类型 */
+  textNodeId?: string;
+  /** IKFM41 §11：实际媒体类型（文本带入可为 image；直接/本地上传恒 audio 缺省） */
+  mediaType?: 'audio' | 'image';
 }
 
 /** 画布可选媒体节点（保留给 MusicDialog 共享类型） */
@@ -84,6 +89,10 @@ export interface AudioDialogProps extends RefStripOrderProps {
   draftRefs?: AudioRefItem[];
   /** 连线推导中失效来源（IKFDFZ）：保留原因提示并阻止发送，用户恢复素材或断开连线后解除 */
   draftRefInvalid?: Array<{ nodeId: string; name: string; reason: string }>;
+  /** IKFM41 §11：文本索引发送校验错误（失效/不支持类型），面板持续显示并阻止发送 */
+  textIndexError?: string;
+  /** IKFM41 §11：文本索引提供的锁定参考定位来源文本卡（平移居中 + 短暂高亮） */
+  onLocateTextSource?: (textNodeId: string) => void;
   /** 移除画布参考（IKFDFZ）：断开对应连线（保留来源素材与其他目标关系） */
   onRemoveDraftRef?: (nodeId: string) => void;
   /** 面板「从画布选择」列表添加参考（IKFDFZ）：草稿模式经父级校验后建连线；自由模式缺省走本地注入 */
@@ -122,6 +131,8 @@ export default function AudioDialog({
   pickMode,
   draftRefs,
   draftRefInvalid,
+  textIndexError,
+  onLocateTextSource,
   onRemoveDraftRef,
   onAddCanvasRef,
   mentionItems,
@@ -317,11 +328,14 @@ export default function AudioDialog({
 
   /** 连线来源失效（IKFDFZ）：保留参考与原因提示并阻止发送，恢复素材或断开连线后解除 */
   const invalidDraftRefs = (draftRefInvalid ?? []).length > 0;
-  /** 发送防线（IKFDFZ）：正常路径添加侧已拦超限；异常预置/迁移数据超上限时明确阻止，
-   *  不静默截断（与服务端 ≤3 契约同口径） */
-  const overflowRefs = currentRefs.length > maxAudioRefs;
+  /** IKFM41 §11：文本索引错误（失效/不支持类型）与连线失效同为发送防线，面板持续显示 */
+  const textIndexBlocked = Boolean(textIndexError);
+  /** 按最终参考的实际类型校验分类上限与混用，随模型和来源变化重算。 */
+  const referenceLimitError = checkReferenceLimits(
+    currentModel?.features, currentRefs.map((ref) => ({ type: ref.mediaType ?? 'audio' })), 'audio',
+  );
   const handleSend = () => {
-    if (!text.trim() || !currentModel || readOnly || pickLocked || invalidPrompt || invalidDraftRefs || overflowRefs || draftBinding?.saveFailed) return;
+    if (!text.trim() || !currentModel || readOnly || pickLocked || invalidPrompt || invalidDraftRefs || textIndexBlocked || referenceLimitError || draftBinding?.saveFailed) return;
     const promptDocToSend = promptDoc && docHasAnyRef(promptDoc) ? promptDoc : null;
     if (composeImageSendPrompt(attachments, text.trim(), promptDocToSend).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
       onToast?.('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
@@ -359,17 +373,21 @@ export default function AudioDialog({
       {/* 顶部参考缩略图条（IKFCKS）：音频参考 + 文本附件统一走共享参考缩略图，
           三态交互（编号圆钮 / 悬停 ×/@ / 200ms 放大预览）；播放 chip 随替换下线 */}
       <div className={styles.topRow}>
-        {/* 参考音频缩略图：编号按参考顺序派生；× 移除面板参考（本地上传回收 blob URL）；
-            @ 与手动 @ 使用共享正文编辑器；已选项只插入标签，未落库项不提供身份。 */}
+        {/* 参考音频缩略图：编号按参考顺序派生；× 移除面板参考（本地上传回收 blob URL；
+            @ 与手动 @ 使用共享正文编辑器；已选项只插入标签，未落库项不提供身份。
+            IKFM41 §11：文本带入条目锁定（不渲染 ×、渲染定位来源入口），kind 按实际类型（image 仅经文本带入）。 */}
         {mixedStrip.render(allRefs.map((r, i) => (
           <RefThumbnail
             key={`${r.source}-${r.id}`}
             data-testid="audio-ref-thumb"
-            kind="audio"
+            kind={r.mediaType ?? 'audio'}
+            url={r.src}
             name={r.name}
             number={currentRefs.findIndex(ref => ref.id === r.id && ref.source === r.source) + 1}
             audioDuration={durations.get(`${r.source}-${r.id}`)}
-            onRemove={!readOnly ? () => handleRemoveRef(r.id) : undefined}
+            locked={r.textNodeId != null}
+            onLocate={r.textNodeId != null && onLocateTextSource ? () => onLocateTextSource(r.textNodeId!) : undefined}
+            onRemove={!readOnly && r.textNodeId == null ? () => handleRemoveRef(r.id) : undefined}
             onInsertRef={
               !readOnly && r.assetId
                 ? () => editorRef.current?.insert({ kind: 'asset_ref', id: String(r.assetId) })
@@ -457,14 +475,19 @@ export default function AudioDialog({
           onChange={(doc, value) => { setPromptDoc(doc); setText(value); draftBinding?.onParamsChange({ prompt: value, promptDoc: doc }); }} />
       </div>
       {invalidPrompt && <div role="alert">正文有已失效的素材标签或超过字数上限，请调整后发送</div>}
-      {overflowRefs && (
+      {referenceLimitError && (
         <div role="alert" data-testid="audio-ref-overflow">
-          {`参考音频最多 ${maxAudioRefs} 段，请移除多余参考后发送`}
+          {referenceLimitError}
         </div>
       )}
       {invalidDraftRefs && (
         <div role="alert" data-testid="audio-ref-invalid">
           {draftRefInvalid!.map((item) => `${item.name}：${item.reason}，请恢复素材或移除后发送`).join('；')}
+        </div>
+      )}
+      {textIndexError && (
+        <div role="alert" data-testid="audio-text-index-error">
+          {textIndexError}
         </div>
       )}
 
@@ -521,7 +544,7 @@ export default function AudioDialog({
           <button
             className={`${styles.sendBtn} ${text.trim() && modelId ? styles.sendBtnActive : ''}`}
             data-testid="audio-send"
-            disabled={!text.trim() || !currentModel || readOnly || pickLocked || invalidPrompt || invalidDraftRefs || overflowRefs || draftBinding?.saveFailed}
+            disabled={!text.trim() || !currentModel || readOnly || pickLocked || invalidPrompt || invalidDraftRefs || textIndexBlocked || Boolean(referenceLimitError) || draftBinding?.saveFailed}
             onClick={handleSend}
             title="发送"
           >

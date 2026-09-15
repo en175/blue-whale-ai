@@ -10,12 +10,16 @@ import { baseSourceError, cardNameOfNode, readAssetId } from './mediaRefs';
  *  前端音频面板不提供图片入口——后端图片能力不等于新增入口） */
 export const MAX_AUDIO_MEDIA_REFS = 3;
 
-/** 音频媒体参考项：nodeId 用于面板移除时断开对应连线；assetId 进入 references[].asset_id */
+/** 音频媒体参考项：nodeId 用于面板移除时断开对应连线；assetId 进入 references[].asset_id。
+ *  mediaType：直接参考恒 audio；IKFM41 §11 文本带入参考可为 image（文本带入是图片素材进入
+ *  音频参考的唯一通道）。textNodeId 标记锁定来源文本卡（锁定条目不渲染移除入口）。 */
 export interface AudioMediaRef {
   nodeId: string;
   url: string;
   name: string;
   assetId: string;
+  mediaType: 'audio' | 'image';
+  textNodeId?: string;
 }
 
 /** 音频草稿身份判定（IKDMQQ 约定延伸）：draft 标记 + 音频媒体类型 */
@@ -64,6 +68,7 @@ export function audioMediaRefsOf(
       url: data.src as string,
       name: cardNameOfNode(source)!,
       assetId,
+      mediaType: 'audio',
     });
   }
   return { refs, invalid };

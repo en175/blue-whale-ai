@@ -4,12 +4,15 @@
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
 
-/** 图片参考来源项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入 input_asset_ids */
+/** 图片参考来源项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入 input_asset_ids。
+ *  textNodeId（IKFM3S）：该参考由文本卡正文索引提供（锁定，不可在目标直接移除），值为来源文本卡 id。 */
 export interface ImageMediaRef {
   nodeId: string;
   url: string;
   name: string;
   assetId: string;
+  textNodeId?: string;
+  mediaType?: 'image' | 'video' | 'audio';
 }
 
 /** 图片草稿身份判定（IKDMQQ 约定）：draft 标记 + 图片媒体类型；成功转成品卡后 draft 清除 */

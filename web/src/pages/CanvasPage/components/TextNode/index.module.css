@@ -250,6 +250,10 @@
 .handle {
   opacity: 0;
   transition: opacity 0.15s ease;
+  /* 覆盖 react-flow__handle-left/right 的 translate(-50%, -50%)：
+     水平定位交给 inline left/right（锚定正文左右中点），仅保留垂直居中 */
+  top: 50%;
+  transform: translate(0, -50%);
 }
 
 .wrapper:hover .handle,
@@ -412,4 +416,112 @@
   background: #2a2a2a;
   color: #eee;
   font-size: 12px;
+}
+
+/* ============================================
+ * IKFM3Q media 标签：操作层 / 悬停预览 / 定位高亮
+ * ============================================ */
+.chipMenu {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 132px;
+  padding: 6px;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 10001;
+}
+
+.chipMenuBtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  color: #ddd;
+  font-size: 13px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.12s ease;
+}
+
+.chipMenuBtn:hover {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.chipMenuDanger {
+  color: #e5484d;
+}
+
+.chipMenuDanger:hover {
+  color: #ff6b6b;
+  background-color: rgba(229, 72, 77, 0.12);
+}
+
+.chipPreview {
+  position: fixed;
+  transform: translateY(calc(-100% - 8px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 280px;
+  padding: 8px;
+  background-color: #242424;
+  border: 1px solid #3a3a3a;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 10001;
+  pointer-events: none;
+}
+
+/* IKFR6A：标签贴近屏幕顶部时预览翻到标签下方，不再向上位移 */
+.chipPreviewBelow {
+  transform: none;
+}
+
+.chipPreview img,
+.chipPreview video {
+  max-width: 264px;
+  max-height: 200px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.chipPreviewAudio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 12px;
+  color: #bbb;
+  font-size: 13px;
+}
+
+.chipPreviewName {
+  max-width: 264px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #aaa;
+  font-size: 12px;
+}
+
+/* 点击定位来源：目标节点短暂高亮（1.2s 后由 JS 移除） */
+.locateFlash {
+  animation: locate-flash 1.2s ease-out;
+}
+
+@keyframes locate-flash {
+  0%, 60% {
+    filter: drop-shadow(0 0 10px rgba(120, 180, 255, 0.9));
+  }
+  100% {
+    filter: none;
+  }
 }

@@ -103,6 +103,8 @@ export class JobsService {
       status: job.status,
       progress: job.progress,
       asset: job.asset,
+      // IKFM3S §4：签名投影随详情返回（仅成功路径消费；input 其余字段不下发）。
+      text_input_signature: job.text_input_signature,
     });
   }
 }

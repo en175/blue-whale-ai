@@ -41,8 +41,8 @@ export const sharedAssetGoodsSnapshotSchema = z
   .strict();
 export type SharedAssetGoodsSnapshot = z.infer<typeof sharedAssetGoodsSnapshotSchema>;
 
-/** 文本快照：富文本内容。 */
-export const sharedAssetTextSnapshotSchema = z.object({ html: z.string().min(1) }).strict();
+/** 文本快照：统一正文契约 v1（IKFM3L）后 text 为 Markdown 源权威；html 仅存量资产兼容读。 */
+export const sharedAssetTextSnapshotSchema = z.object({ text: z.string().min(1), html: z.string().min(1).optional() }).strict();
 export type SharedAssetTextSnapshot = z.infer<typeof sharedAssetTextSnapshotSchema>;
 
 /** 媒体快照（保存时从 assets 源行抓取，自包含不依赖源表）。

@@ -1,0 +1,335 @@
+import {
+  TEXT_INDEX_EDGE_MARKER,
+  mediaMentionSchema,
+  mediaRefSchema,
+  type MediaMention,
+  type MediaMentionType,
+  type MediaRef,
+} from "./text-node-media.js";
+
+/* 文本索引下游同步契约 v1（IKFM3S）：docs/specs/2026-09-14-ikfm3s-text-index-sync-contract.md
+   引用来源 = 直接参考 ∪ 文本带入参考（纯派生，不建自动连线、不存来源集合）；
+   并入规则、发送校验与输入签名前后端同源，本文件是唯一实现。 */
+
+/** 画布节点的宽松形态（JSON.parse 结果直读，未知节点字段忽略） */
+export interface TextIndexCanvasNode {
+  id?: unknown;
+  type?: unknown;
+  data?: Record<string, unknown>;
+}
+
+/** 文本带入参考项：身份解析后的展示与提交数据（name/url 取 mediaRefs 快照） */
+export interface TextProvidedRef {
+  /** 提供该素材的文本卡 id */
+  textNodeId: string;
+  /** 素材来源画布节点 id（索引契约身份的 nodeId） */
+  sourceNodeId: string;
+  assetId: string;
+  mediaType: MediaMentionType;
+  name: string;
+  url: string;
+}
+
+/** 目标的单条文本输入（签名与冻结的最小单元） */
+export interface TargetTextInputEntry {
+  /** 文本卡 id */
+  nodeId: string;
+  /** 正文 Markdown 源（data.text） */
+  text: string;
+  /** 有效身份按正文首现序 */
+  identities: Array<{ sourceNodeId: string; assetId: string; mediaType: MediaMentionType }>;
+}
+
+/** 目标文本索引派生结果：输入、带入参考与失效身份 */
+export interface TargetTextIndex {
+  /** 按文本入边边序 */
+  inputs: TargetTextInputEntry[];
+  /** 文本带入参考（文本边序 × 正文首现序展开，未跨来源去重——去重在合并函数做） */
+  refs: TextProvidedRef[];
+  /** 失效身份（任一存在即阻止发送；含素材不可及） */
+  invalid: Array<{ textNodeId: string; sourceNodeId: string; name: string }>;
+}
+
+function readMediaIndex(data: Record<string, unknown> | undefined): {
+  mentions: MediaMention[];
+  refs: MediaRef[];
+} {
+  const mentions: MediaMention[] = [];
+  for (const raw of Array.isArray(data?.mediaMentions) ? data.mediaMentions : []) {
+    const parsed = mediaMentionSchema.safeParse(raw);
+    if (parsed.success) mentions.push(parsed.data);
+  }
+  const refs: MediaRef[] = [];
+  for (const raw of Array.isArray(data?.mediaRefs) ? data.mediaRefs : []) {
+    const parsed = mediaRefSchema.safeParse(raw);
+    if (parsed.success) refs.push(parsed.data);
+  }
+  return { mentions, refs };
+}
+
+/** 按目标推导文本索引（契约 §1）：文本入边逐卡解析 mediaMentions/mediaRefs；
+ *  身份有效 ⟺ 来源节点在画布 + textIndex 关系线存在 + 素材可及（非 assetMissing）+ 快照 ref 存在。
+ *  与索引契约 §3 的标签有效性同源，另把素材不可及一并归入失效（IKFM3S §3：失效即阻止发送）。 */
+export function textIndexOfTarget(
+  nodes: TextIndexCanvasNode[],
+  edgesRaw: unknown,
+  targetNodeId: string,
+): TargetTextIndex {
+  const nodeById = new Map(
+    nodes.filter((node) => typeof node.id === "string").map((node) => [node.id as string, node]),
+  );
+  const edgeList = Array.isArray(edgesRaw) ? (edgesRaw as Array<Record<string, unknown>>) : [];
+  const textIndexPairs = new Set<string>();
+  for (const edge of edgeList) {
+    const edgeData = (edge?.data ?? null) as Record<string, unknown> | null;
+    if (!edge || edgeData?.[TEXT_INDEX_EDGE_MARKER] !== true) continue;
+    if (typeof edge.source === "string" && typeof edge.target === "string") {
+      textIndexPairs.add(`${edge.source} ${edge.target}`);
+    }
+  }
+  const inputs: TargetTextInputEntry[] = [];
+  const refs: TextProvidedRef[] = [];
+  const invalid: TargetTextIndex["invalid"] = [];
+  for (const edge of edgeList) {
+    if (!edge || edge.target !== targetNodeId || typeof edge.source !== "string") continue;
+    const textNode = nodeById.get(edge.source);
+    if (!textNode || textNode.type !== "textNode") continue;
+    const data = textNode.data ?? {};
+    const { mentions, refs: mediaRefs } = readMediaIndex(data);
+    const refByNode = new Map(mediaRefs.map((ref) => [ref.nodeId, ref]));
+    const entry: TargetTextInputEntry = {
+      nodeId: edge.source,
+      text: typeof data.text === "string" ? data.text : "",
+      identities: [],
+    };
+    const seenIdentities = new Set<string>();
+    for (const mention of [...mentions].sort((a, b) => a.start - b.start)) {
+      if (seenIdentities.has(mention.nodeId)) continue;
+      seenIdentities.add(mention.nodeId);
+      const sourceNode = nodeById.get(mention.nodeId);
+      const ref = refByNode.get(mention.nodeId);
+      const linked =
+        sourceNode !== undefined && textIndexPairs.has(`${mention.nodeId} ${edge.source}`);
+      const assetMissing = (sourceNode?.data ?? {}).assetMissing === true;
+      if (!linked || assetMissing || !ref) {
+        invalid.push({
+          textNodeId: edge.source,
+          sourceNodeId: mention.nodeId,
+          name: ref?.name ?? "未知素材",
+        });
+        continue;
+      }
+      entry.identities.push({
+        sourceNodeId: mention.nodeId,
+        assetId: mention.assetId,
+        mediaType: ref.mediaType,
+      });
+      refs.push({
+        textNodeId: edge.source,
+        sourceNodeId: mention.nodeId,
+        assetId: mention.assetId,
+        mediaType: ref.mediaType,
+        name: ref.name,
+        url: ref.url,
+      });
+    }
+    inputs.push(entry);
+  }
+  return { inputs, refs, invalid };
+}
+
+/** 参考并入（契约 §2，前后端同源）：直接参考序在前，文本带入按派生序追加；
+ *  同 assetId 去重保首见。返回合并最终序与本次追加项（后端差集追加、前端同源预演共用）。 */
+export function mergeTextProvidedReferences(
+  directAssetIds: ReadonlyArray<string | number>,
+  refs: ReadonlyArray<TextProvidedRef>,
+): { merged: Array<string | number>; addedAssetIds: string[] } {
+  const merged = [...directAssetIds];
+  const seen = new Set(directAssetIds.map(String));
+  const addedAssetIds: string[] = [];
+  for (const ref of refs) {
+    if (seen.has(ref.assetId)) continue;
+    seen.add(ref.assetId);
+    merged.push(ref.assetId);
+    addedAssetIds.push(ref.assetId);
+  }
+  return { merged, addedAssetIds };
+}
+
+/** 图片目标接受的文本带入媒体类型（任务 3 固定图片；任务 4/5 扩展时不改本常量语义） */
+export const IMAGE_TEXT_INDEX_ACCEPTED_MEDIA_TYPES: readonly MediaMentionType[] = ["image"];
+
+export const TEXT_INDEX_INVALID_MESSAGE = "文本索引存在失效素材，请修复来源文本后提交";
+export const TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE = "文本索引包含目标不支持的媒体类型，请修改来源文本";
+/** 容量超限文案（前后端共用同一模板，与既有 resolveReferenceAssets 口径一致） */
+export const textIndexOverflowMessage = (max: number) => `参考图最多 ${max} 张`;
+
+/** 发送前能力校验错误（契约 §3；判定顺序：失效 → 类型 → 超限） */
+export type TextIndexSyncError =
+  | { kind: "invalid_index" }
+  | { kind: "unsupported_media_type"; mediaTypes: MediaMentionType[] }
+  | { kind: "reference_overflow"; max: number };
+
+/** 文本带入素材中不被目标接受的媒体类型（去重；§3/§10/§11 类型校验共用） */
+function unsupportedMediaTypesOf(
+  index: Pick<TargetTextIndex, "refs">,
+  acceptedMediaTypes: readonly MediaMentionType[],
+): MediaMentionType[] {
+  return [
+    ...new Set(
+      index.refs
+        .filter((ref) => !acceptedMediaTypes.includes(ref.mediaType))
+        .map((ref) => ref.mediaType),
+    ),
+  ];
+}
+
+/** 能力校验（契约 §3）：失效索引、不支持的媒体类型、容量超限均阻止发送，不静默丢素材。 */
+export function checkTextIndexSyncInput(args: {
+  index: Pick<TargetTextIndex, "refs" | "invalid">;
+  acceptedMediaTypes: readonly MediaMentionType[];
+  /** 合并去重后的参考总数 */
+  mergedReferenceCount: number;
+  maxReferences: number;
+}): TextIndexSyncError | null {
+  if (args.index.invalid.length > 0) return { kind: "invalid_index" };
+  const unsupported = unsupportedMediaTypesOf(args.index, args.acceptedMediaTypes);
+  if (unsupported.length > 0) return { kind: "unsupported_media_type", mediaTypes: unsupported };
+  if (args.mergedReferenceCount > args.maxReferences) {
+    return { kind: "reference_overflow", max: args.maxReferences };
+  }
+  return null;
+}
+
+function fnv1a32Hex(payload: string, seed: number): string {
+  let hash = seed >>> 0;
+  for (let index = 0; index < payload.length; index += 1) {
+    hash ^= payload.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+/** 文本输入签名（契约 §4）：对目标全部文本入边（边序）的规范化数据做 FNV-1a 双段哈希
+ *  （Node/浏览器同构，非加密用途）；直接参考变化不入签名。 */
+export function textInputSignatureOf(inputs: ReadonlyArray<TargetTextInputEntry>): string {
+  const normalized = JSON.stringify(
+    inputs.map((entry) => [
+      entry.nodeId,
+      entry.text,
+      entry.identities.map((identity) => [
+        identity.sourceNodeId,
+        identity.assetId,
+        identity.mediaType,
+      ]),
+    ]),
+  );
+  return fnv1a32Hex(normalized, 0x811c9dc5) + fnv1a32Hex(normalized, 0x97c29b3d);
+}
+
+/* ---- 视频目标扩展（契约 §10，IKFM3W v1.1）：来源模型/签名/冻结与 §1/§4/§5 同一实现，
+   仅新增普通参考角色语义与首尾帧互斥；容量上限沿用既有 checkReferenceLimits，不在本包重复。 ---- */
+
+/** 视频单数组直接参考项的宽松形状（后端 ReferenceItemInput / 前端 GenerationRefItem 兼容） */
+export interface VideoReferenceLikeItem {
+  asset_id?: unknown;
+}
+
+/** 文本带入追加进视频单数组的项（契约 §10：恒为普通参考，不推断帧角色） */
+export interface TextProvidedVideoReference {
+  role: "reference";
+  asset_id: string;
+  type: MediaMentionType;
+}
+
+/** 文本带入追加项的通用实现（§10/§11 共用）：按派生序转为普通参考项，与直接参考
+ *  同 assetId 去重保首见（material_id 空间不参与——文本带入只有本地画布素材）。 */
+function appendTextProvidedReferences(
+  directItems: ReadonlyArray<VideoReferenceLikeItem>,
+  refs: ReadonlyArray<TextProvidedRef>,
+): TextProvidedVideoReference[] {
+  const seen = new Set(
+    directItems
+      .map((item) => (typeof item.asset_id === "string" || typeof item.asset_id === "number" ? String(item.asset_id) : null))
+      .filter((id): id is string => id !== null),
+  );
+  const added: TextProvidedVideoReference[] = [];
+  for (const ref of refs) {
+    if (seen.has(ref.assetId)) continue;
+    seen.add(ref.assetId);
+    added.push({ role: "reference", asset_id: ref.assetId, type: ref.mediaType });
+  }
+  return added;
+}
+
+/** 视频参考并入（契约 §10）：返回本次追加项，调用方拼接 `[...directItems, ...added]`
+ *  得到合并最终序（后端权威并入、前端预演共用）。 */
+export function textProvidedVideoReferences(
+  directItems: ReadonlyArray<VideoReferenceLikeItem>,
+  refs: ReadonlyArray<TextProvidedRef>,
+): TextProvidedVideoReference[] {
+  return appendTextProvidedReferences(directItems, refs);
+}
+
+export const VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE =
+  "首尾帧模式不能与文本带入参考混用，请调整参考或修改来源文本";
+
+/** 视频目标发送前校验错误（契约 §10；判定顺序：失效 → 帧互斥 → 类型；容量由既有
+ *  checkReferenceLimits 在合并后接管） */
+export type VideoTextIndexSyncError =
+  | { kind: "invalid_index" }
+  | { kind: "frame_conflict" }
+  | { kind: "unsupported_media_type"; mediaTypes: MediaMentionType[] };
+
+/** 视频目标能力校验（契约 §10）：失效索引、首尾帧互斥、不支持的媒体类型均阻止发送。
+ *  acceptedMediaTypes 由调用方按目标模型能力位构造（image 恒接受；video 需
+ *  features.video_reference；audio 需 features.audio_reference）。 */
+export function checkVideoTextIndexSyncInput(args: {
+  index: Pick<TargetTextIndex, "refs" | "invalid">;
+  acceptedMediaTypes: readonly MediaMentionType[];
+  /** 目标已有帧角色（references 含 first_frame/last_frame 或携带旧帧字段） */
+  hasFrameRole: boolean;
+}): VideoTextIndexSyncError | null {
+  if (args.index.invalid.length > 0) return { kind: "invalid_index" };
+  if (args.hasFrameRole && args.index.refs.length > 0) return { kind: "frame_conflict" };
+  const unsupported = unsupportedMediaTypesOf(args.index, args.acceptedMediaTypes);
+  if (unsupported.length > 0) return { kind: "unsupported_media_type", mediaTypes: unsupported };
+  return null;
+}
+
+/* ---- 音频目标扩展（契约 §11，IKFM41 v1.2）：来源模型/签名/冻结与 §1/§4/§5 同一实现，
+   仅新增目标类型语义；音频参考无角色槽（恒 reference），容量与 audio/image 混用
+   沿既有 checkReferenceLimits(…, "audio")，不在本包重复。 ---- */
+
+/** 音频目标接受的文本带入媒体类型（契约 §11：audio|image 与 validateAudioReferences 一致；
+ *  前端音频面板不提供图片添加入口的边界不变，文本带入是图片素材进入音频参考的唯一通道） */
+export const AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES: readonly MediaMentionType[] = ["audio", "image"];
+
+/** 文本带入追加进音频单数组的项（契约 §11：与视频 §10 同构，恒 role=reference） */
+export type TextProvidedAudioReference = TextProvidedVideoReference;
+
+/** 音频参考并入（契约 §11）：直接参考保序在前、文本带入按派生序追加尾部（同 assetId
+ *  去重保首见），与视频同一实现。返回本次追加项，调用方拼接得到合并最终序。 */
+export function textProvidedAudioReferences(
+  directItems: ReadonlyArray<VideoReferenceLikeItem>,
+  refs: ReadonlyArray<TextProvidedRef>,
+): TextProvidedAudioReference[] {
+  return appendTextProvidedReferences(directItems, refs);
+}
+
+/** 音频目标发送前校验错误（契约 §11；判定顺序：失效 → 类型；容量与 audio/image 混用
+ *  由既有 checkReferenceLimits(…, "audio") 在合并后接管） */
+export type AudioTextIndexSyncError =
+  | { kind: "invalid_index" }
+  | { kind: "unsupported_media_type"; mediaTypes: MediaMentionType[] };
+
+/** 音频目标能力校验（契约 §11）：失效索引、不支持的媒体类型均阻止发送。 */
+export function checkAudioTextIndexSyncInput(args: {
+  index: Pick<TargetTextIndex, "refs" | "invalid">;
+  acceptedMediaTypes: readonly MediaMentionType[];
+}): AudioTextIndexSyncError | null {
+  if (args.index.invalid.length > 0) return { kind: "invalid_index" };
+  const unsupported = unsupportedMediaTypesOf(args.index, args.acceptedMediaTypes);
+  if (unsupported.length > 0) return { kind: "unsupported_media_type", mediaTypes: unsupported };
+  return null;
+}

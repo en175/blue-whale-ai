@@ -26,6 +26,7 @@ import { useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import ZoomControl from '../ZoomControl';
 import TextNode from '../TextNode';
 import MediaNode from '../MediaNode';
+import { mediaInputStale, firstTextSourceOf } from '../../textIndexSync';
 import ProductNode from '../ProductNode';
 import AssetCardNode from '../AssetCardNode';
 import CustomEdge from '../CustomEdge';
@@ -416,14 +417,23 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         }
         const stack = memberStackById.get(n.id);
         const zIndex = stack == null ? 0 : groupMemberZ(stack);
-        // IKFR4X 勾选标识派生注入（已并入当前选取目标的来源节点）：纯渲染期派生不持久化
+        // IKFM3S §4 / IKFM3W §10 / IKFM41 §11：「输入已更新」徽标派生注入（图片/视频/音频
+        // 目标 + 文本入边 + 签名不一致），纯渲染期派生不持久化；来源文本卡 id 一并注入供定位入口。
+        const staleMediaType = n.type === 'mediaNode'
+          ? (n.data as Record<string, unknown> | undefined)?.mediaType
+          : undefined;
+        const stale = n.type === 'mediaNode'
+          && (staleMediaType === 'image' || staleMediaType === 'video' || staleMediaType === 'audio')
+          && mediaInputStale(n.id, edges, nodes, staleMediaType);
+        // IKFR4X 勾选标识派生注入（已并入当前选取目标的来源节点）：纯渲染期派生不持久化，可与「输入已更新」并存
         const marked = pickMarked.size > 0 && pickMarked.has(n.id);
-        if (!marked) return { ...n, zIndex };
+        if (!stale && !marked) return { ...n, zIndex };
         return {
           ...n,
           zIndex,
           data: {
             ...n.data,
+            ...(stale ? { inputStale: true, inputSourceNodeId: firstTextSourceOf(n.id, edges, nodes) } : {}),
             ...(marked ? { pickMarked: true } : {}),
           },
         };
@@ -450,7 +460,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       };
     });
     return [...frames, ...content];
-  }, [nodes, groups, memberStackById, frameDragMemberIds, frameDragOffset, refPickMarkedIds]);
+  }, [nodes, groups, memberStackById, frameDragMemberIds, frameDragOffset, edges, refPickMarkedIds]);
 
   /** 节点拖拽起：仅标记拖拽中（隐藏框选悬浮条）。组内节点可自由拖出组，拖出后按
    *  坐标动态脱离组；不再整组选中——整组拖动改由组框把手承担。 */

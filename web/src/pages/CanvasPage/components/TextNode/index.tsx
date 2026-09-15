@@ -1,21 +1,33 @@
 /* ============================================
  * TextNode 文本节点：外置常驻标题 + 固定 360×270 正文容器（内部滚动）
- * 富文本编辑与格式工具栏沿用既有实现
+ * IKFM3L 统一正文契约 v1：普通新增、Agent 应用与历史卡共用 Markdown 编辑
+ * 与格式工具栏；正文以受限 Markdown 源（data.text）为唯一权威，html 仅存量兼容。
+ * IKFM3Q 正文媒体索引契约 v1：正文 @ 索引画布图片/音频/视频，标签编号与
+ * 有效/失效状态由（节点, 带 textIndex 标记的关系线）派生，不持久化。
  * ============================================ */
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Palette, Plus } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Handle, Position, useStore, useReactFlow, type NodeProps } from '@xyflow/react';
+import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Plus, Crosshair, RefreshCw, Trash2, AudioLines } from 'lucide-react';
 import { sanitizeHtml } from '@/utils/sanitize';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import { commitCardName } from '../cardName';
 import CanvasContextMenu from '../CanvasContextMenu';
+import AtMentionMenu from '../AtMentionMenu';
+import type { AtMentionItem } from '../../atMention';
 import styles from './index.module.css';
 import { PROMPT_TEXT_LIMITS } from '@lib/contracts/prompt-text-limits';
 import { promptMentionSchema, validPromptMentions, type PromptMention, type PromptMaterial } from '@lib/contracts/prompt-preview';
-import { renderPromptMentions, readPromptMentions } from './promptMentions';
+import { markdownToSanitizedHtml } from '@lib/contracts/text-node-markdown';
+import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
+import { renderPromptMentions, readPromptMentions, applyMediaMentionState, createMediaMentionChip } from './promptMentions';
+import { applyMarkdownInputRule } from './markdownInputRules';
 
 /** 文字节点最大字数（按纯文本计，含粘贴） */
 const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
+
+/** 悬停预览估算高度：与 .chipPreview 的缩略图 max-height 200 + 名称行/内边距联动，CSS 改尺寸须同步 */
+const CHIP_PREVIEW_EST_HEIGHT = 250;
 
 /** 连接点统一样式：透明背景（加号图标由 children 渲染） */
 const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;
@@ -45,16 +57,22 @@ interface TextNodeData {
   promptMentions?: PromptMention[];
   promptMaterials?: Array<PromptMaterial & { url: string }>;
   onPromptChange?: (id: string, text: string, mentions: PromptMention[], materials?: Array<PromptMaterial & { url: string }>) => void;
+  /** IKFM3Q 正文媒体索引：标签区间与身份展示快照（契约 §1）；有效性/编号派生不存储 */
+  mediaMentions?: MediaMention[];
+  mediaRefs?: MediaRef[];
+  /** 索引变更回调：delta.added 仅来自显式插入/重绑定（建线），delta.removed 为消失的身份（删线）；
+   *  序列化 diff 不自动补线（契约 §4 事件驱动） */
+  onMediaIndexChange?: (id: string, mediaMentions: MediaMention[], mediaRefs: MediaRef[], delta: { added: string[]; removed: string[] }) => void;
   title?: string;
   onTitleChange?: (id: string, title: string) => void;
   onDraftError?: (id: string, error: string) => void;
   onTextChange?: (id: string, text: string) => void;
+  /** 存量兼容：升级前的 HTML 正文，统一后不再写入（契约 §1） */
   html?: string;
   text?: string;
   toolMode?: 'drag' | 'select';
   isFirst?: boolean;
   onDelete?: (id: string) => void;
-  onChange?: (id: string, html: string) => void;
   onDuplicate?: (id: string) => void;
   onAddToChat?: (id: string) => void;
   onSaveToAssets?: (id: string) => void;
@@ -68,7 +86,6 @@ interface TextNodeData {
 }
 
 export default function TextNode({ id, data, selected }: NodeProps & { data: TextNodeData; selected?: boolean }) {
-  const plainText = typeof data.text === 'string';
   const hasPromptBindings = Boolean(data.promptSource) || data.promptMentions !== undefined;
   const [contentError, setContentError] = useState('');
   const [titleError, setTitleError] = useState('');
@@ -85,8 +102,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     || (typeof data.html === 'string' && data.html.replace(/<[^>]+>/g, '').trim()),
   );
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [showColorPicker, setShowColorPicker] = useState(false);
-  const [currentColor, setCurrentColor] = useState('#ffffff');
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
   const initializedRef = useRef(false);
@@ -100,10 +115,39 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       assetId: String(node.data.assetId), mediaType: node.data.mediaType as PromptMaterial['mediaType'], url: String(node.data.src ?? ''), name: String(node.data.fileName || node.data.assetId),
     }])).values()];
 
-  const zoom = useStore((state) => state.transform[2]);
+  /* IKFM3Q 正文媒体索引（契约 §3/§5）：有效性由（来源节点存在 + textIndex 关系线存在）派生 */
+  const canvasEdges = useStore(state => state.edges);
+  const rf = useReactFlow();
+  const mediaValidity = useCallback((nodeId: string) => {
+    if (!canvasNodes.some(node => node.id === nodeId)) return false;
+    return canvasEdges.some(edge => edge.source === nodeId && edge.target === id
+      && (edge.data as Record<string, unknown> | undefined)?.textIndex === true);
+  }, [canvasNodes, canvasEdges, id]);
 
-  /** 预设颜色 */
-  const COLORS = ['#ffffff', '#e8e8e8', '#ff4d4f', '#ff7a45', '#ffa940', '#ffec3d', '#73d13d', '#36cfc9', '#40a9ff', '#597ef7', '#9254de', '#ff85c0'];
+  /** @ 菜单可选素材：画布图片/音频/视频媒体节点（不含文本——不支持文本互引） */
+  const mediaMentionItems: AtMentionItem[] = canvasNodes.filter(node => node.type === 'mediaNode' && node.data.assetId && !node.data.assetMissing && node.data.genStatus !== 'generating'
+    && ['image', 'video', 'audio'].includes(String(node.data.mediaType)) && typeof node.data.src === 'string')
+    .map(node => ({
+      id: node.id,
+      kind: String(node.data.mediaType) as AtMentionItem['kind'],
+      name: String(node.data.fileName || node.data.assetId),
+      thumbUrl: String(node.data.src),
+      assetId: String(node.data.assetId),
+    }));
+
+  /** @ 菜单：insert=光标处插入新标签；rebind=重绑定失效身份（契约 §3 修复路径） */
+  const [mentionMenu, setMentionMenu] = useState<{ mode: 'insert' | 'rebind'; rebindNodeId?: string; x: number; y: number } | null>(null);
+  const mentionAnchorRef = useRef<HTMLSpanElement>(null);
+  /** 标签操作弹层：点击 media 标签弹出（定位/替换来源/删除标签） */
+  const [chipMenu, setChipMenu] = useState<{ chip: HTMLElement; x: number; y: number } | null>(null);
+  /** 悬停预览：有效标签的素材预览（约 150ms 延迟，契约 §5）；below=标签贴近屏幕顶部时翻到下方 */
+  const [chipPreview, setChipPreview] = useState<{ chip: HTMLElement; x: number; y: number; below: boolean } | null>(null);
+  const previewTimerRef = useRef<number | null>(null);
+  /** 最近一次已同步的 media 索引（序列化 diff 的基线）：diff 只删线不补线（契约 §4） */
+  const mediaIndexRef = useRef<{ mediaMentions: MediaMention[]; mediaRefs: MediaRef[] }>({ mediaMentions: data.mediaMentions ?? [], mediaRefs: data.mediaRefs ?? [] });
+  useEffect(() => { mediaIndexRef.current = { mediaMentions: data.mediaMentions ?? [], mediaRefs: data.mediaRefs ?? [] }; }, [data.mediaMentions, data.mediaRefs]);
+
+  const zoom = useStore((state) => state.transform[2]);
 
   const isSelect = data.toolMode === 'select';
 
@@ -124,19 +168,24 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   // Keep the complete source, including legacy over-limit content. Never truncate on load.
   useEffect(() => {
     if (!initializedRef.current && editorRef.current) {
-      if (hasPromptBindings) renderPromptMentions(editorRef.current, data.text ?? '', data.promptMentions ?? [], data.promptMaterials ?? []);
-      else if (plainText) editorRef.current.textContent = data.text ?? '';
+      if (typeof data.text === 'string') renderPromptMentions(editorRef.current, data.text, data.promptMentions ?? [], data.promptMaterials ?? [], data.mediaMentions ?? [], data.mediaRefs ?? [], mediaValidity);
       else editorRef.current.innerHTML = sanitizeHtml(data.html || '');
       initializedRef.current = true;
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 非编辑态：权威正文变化时按 Markdown 渲染重放（编辑中的 DOM 是权威，不覆盖）；
+  // mediaValidity 随节点/连线变化，失效态与编号随派生翻转（契约 §3）
   useEffect(() => {
-    if (plainText && !editing && !contentError && editorRef.current) {
-      if (hasPromptBindings) renderPromptMentions(editorRef.current, data.text ?? '', data.promptMentions ?? [], data.promptMaterials ?? []);
-      else editorRef.current.textContent = data.text ?? '';
+    if (!editing && !contentError && editorRef.current && typeof data.text === 'string') {
+      renderPromptMentions(editorRef.current, data.text, data.promptMentions ?? [], data.promptMaterials ?? [], data.mediaMentions ?? [], data.mediaRefs ?? [], mediaValidity);
     }
-  }, [plainText, editing, contentError, data.text, hasPromptBindings, data.promptMentions, data.promptMaterials]);
+  }, [editing, contentError, data.text, data.promptMentions, data.promptMaterials, data.mediaMentions, data.mediaRefs, mediaValidity]);
+
+  // 编辑中连线/来源变化：就地翻转 chip 失效态与编号（不重建 DOM，保住光标）
+  useEffect(() => {
+    if (editing && editorRef.current) applyMediaMentionState(editorRef.current, mediaValidity);
+  }, [editing, mediaValidity]);
 
   // 点击其他区域关闭右键菜单（捕获阶段监听，确保右键其他节点时先关闭本菜单）
   useEffect(() => {
@@ -149,17 +198,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       document.removeEventListener('contextmenu', close, true);
     };
   }, [contextMenu]);
-
-  // 点击其他区域关闭颜色选择器
-  useEffect(() => {
-    if (!showColorPicker) return;
-    const close = () => setShowColorPicker(false);
-    const timer = setTimeout(() => document.addEventListener('click', close), 100);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('click', close);
-    };
-  }, [showColorPicker]);
 
   /** 保存当前选区 */
   const saveSelection = useCallback(() => {
@@ -202,11 +240,24 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     setTitleEditing(false);
   }, [data.title, isTextGen]);
 
-  /** 同步内容到父组件（净化后保存，防止 XSS 持久化） */
+  /** 同步 media 索引到父组件：序列化 diff 只删线不补线；建线 delta 仅来自显式插入/重绑定（契约 §4） */
+  const notifyMediaIndex = useCallback((next: { mediaMentions: MediaMention[]; mediaRefs: MediaRef[] }, delta: { added: string[]; removed: string[] }) => {
+    const prevIds = new Set(mediaIndexRef.current.mediaMentions.map(mention => mention.nodeId));
+    const nextIds = new Set(next.mediaMentions.map(mention => mention.nodeId));
+    const removed = [...new Set([...delta.removed, ...[...prevIds].filter(nodeId => !nextIds.has(nodeId))])];
+    const added = delta.added.filter(nodeId => nextIds.has(nodeId) && !prevIds.has(nodeId));
+    const changed = JSON.stringify(mediaIndexRef.current.mediaMentions) !== JSON.stringify(next.mediaMentions)
+      || JSON.stringify(mediaIndexRef.current.mediaRefs) !== JSON.stringify(next.mediaRefs);
+    mediaIndexRef.current = { mediaMentions: next.mediaMentions, mediaRefs: next.mediaRefs };
+    if (!changed && added.length === 0 && removed.length === 0) return;
+    data.onMediaIndexChange?.(id, next.mediaMentions, next.mediaRefs, { added, removed });
+  }, [data, id]);
+
+  /** 同步内容到父组件：编辑器 DOM 序列化为 Markdown 源（契约 §1 权威正文） */
   const syncContent = useCallback(() => {
-    const prompt = hasPromptBindings && editorRef.current ? readPromptMentions(editorRef.current) : undefined;
-    const text = prompt?.text ?? editorRef.current?.innerText ?? '';
-    if (text.length > MAX_TEXT_LENGTH) {
+    if (!editorRef.current) return;
+    const content = readPromptMentions(editorRef.current, mediaValidity);
+    if (content.text.length > MAX_TEXT_LENGTH) {
       const error = `正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`;
       setContentError(error);
       data.onDraftError?.(id, error);
@@ -214,10 +265,148 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
     setContentError('');
     data.onDraftError?.(id, '');
-    if (prompt) data.onPromptChange?.(id, text, prompt.mentions, draftMaterialsRef.current);
-    else if (plainText) data.onTextChange?.(id, text);
-    else data.onChange?.(id, sanitizeHtml(editorRef.current?.innerHTML || ''));
-  }, [data, id, plainText, hasPromptBindings]);
+    if (hasPromptBindings) data.onPromptChange?.(id, content.text, content.mentions, draftMaterialsRef.current);
+    else data.onTextChange?.(id, content.text);
+    notifyMediaIndex(content, { added: [], removed: [] });
+  }, [data, id, hasPromptBindings, mediaValidity, notifyMediaIndex]);
+
+  /** media 标签 DOM 变更（插入/重绑定/删除）→ 序列化 → 全量重放 → 同步父级与关系线 */
+  const commitMediaEdit = useCallback((delta: { added: string[]; removed: string[] }) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    // 新插入/重绑定身份的连线在本轮 delta 才建立：序列化与重放按「已建立」派生，避免把新标签写成已失效
+    const validity = (nodeId: string) => delta.added.includes(nodeId) || mediaValidity(nodeId);
+    const content = readPromptMentions(editor, validity);
+    renderPromptMentions(editor, content.text, content.mentions, draftMaterialsRef.current ?? [], content.mediaMentions, content.mediaRefs, validity);
+    savedRangeRef.current = null;
+    setChipMenu(null);
+    if (content.text.length > MAX_TEXT_LENGTH) {
+      // 草稿超限仅就地提示：正文与索引都不同步（与 editMaterial 口径一致）
+      const error = `正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`;
+      setContentError(error);
+      data.onDraftError?.(id, error);
+      return;
+    }
+    setContentError('');
+    data.onDraftError?.(id, '');
+    if (hasPromptBindings) data.onPromptChange?.(id, content.text, content.mentions, draftMaterialsRef.current);
+    else data.onTextChange?.(id, content.text);
+    notifyMediaIndex(content, delta);
+  }, [data, id, hasPromptBindings, mediaValidity, notifyMediaIndex]);
+
+  /** 输入 @ 且在词边界时打开素材菜单（契约 §5；与对话框 @ 口径一致） */
+  const openMentionMenuAtCaret = useCallback(() => {
+    const editor = editorRef.current;
+    const sel = window.getSelection();
+    if (!editor || !sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed || !editor.contains(range.startContainer)) return;
+    const container = range.startContainer;
+    if (container.nodeType === Node.TEXT_NODE) {
+      const text = container.textContent ?? '';
+      // 光标紧跟刚输入的 '@'；词边界看 '@' 的前一个字符（与对话框 @ 口径一致：空白/行首）
+      if (text[range.startOffset - 1] !== '@') return;
+      const before = text[range.startOffset - 2];
+      if (before && !/\s/.test(before)) return;
+    } else if (range.startOffset > 0) {
+      const prev = container.childNodes[range.startOffset - 1];
+      if (prev && prev.nodeName !== 'BR') return;
+    }
+    saveSelection();
+    const rect = range.getBoundingClientRect();
+    setMentionMenu({ mode: 'insert', x: rect.left, y: rect.bottom });
+  }, [saveSelection]);
+
+  /** @ 菜单选中：插入新标签（吞掉触发的 '@'），或对失效身份整体重绑定（契约 §3） */
+  const handleMediaSelect = useCallback((item: AtMentionItem) => {
+    const editor = editorRef.current;
+    if (!editor || !item.assetId || (item.kind !== 'image' && item.kind !== 'video' && item.kind !== 'audio')) return;
+    const identity = { nodeId: item.id, assetId: item.assetId, mediaType: item.kind, name: item.name, url: item.thumbUrl ?? '' };
+    const menu = mentionMenu;
+    setMentionMenu(null);
+    editor.focus();
+    if (menu?.mode === 'rebind' && menu.rebindNodeId) {
+      const oldNodeId = menu.rebindNodeId;
+      if (oldNodeId === identity.nodeId) { setChipMenu(null); return; }
+      // 重绑定以身份为单位：该身份全部失效标签一并指向新来源（契约 §3）
+      for (const chip of editor.querySelectorAll<HTMLElement>(`[data-media-node="${CSS.escape(oldNodeId)}"]`)) {
+        chip.replaceWith(createMediaMentionChip(identity, identity.name, false));
+      }
+      const alreadyKnown = mediaIndexRef.current.mediaMentions.some(mention => mention.nodeId === identity.nodeId);
+      commitMediaEdit({ added: alreadyKnown ? [] : [identity.nodeId], removed: [oldNodeId] });
+      return;
+    }
+    restoreSelection();
+    const base = savedRangeRef.current?.cloneRange();
+    const range = base && editor.contains(base.startContainer)
+      ? base
+      : (() => { const r = document.createRange(); r.selectNodeContents(editor); r.collapse(false); return r; })();
+    // 吞掉触发菜单的 '@'
+    if (range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset > 0
+      && (range.startContainer.textContent ?? '')[range.startOffset - 1] === '@') {
+      range.setStart(range.startContainer, range.startOffset - 1);
+      range.deleteContents();
+    }
+    const known = mediaIndexRef.current.mediaMentions.some(mention => mention.nodeId === identity.nodeId);
+    // 临时以素材名占位：最终编号由 commitMediaEdit 全量重放按序派生（契约 §2）
+    const chip = createMediaMentionChip(identity, identity.name, false);
+    range.insertNode(chip);
+    range.setStartAfter(chip);
+    range.collapse(true);
+    savedRangeRef.current = range;
+    commitMediaEdit({ added: known ? [] : [identity.nodeId], removed: [] });
+  }, [mentionMenu, restoreSelection, commitMediaEdit]);
+
+  /** 点击有效标签（非编辑态）定位来源节点：平移居中 + 短暂高亮（契约 §5） */
+  const locateSource = useCallback((nodeId: string) => {
+    const target = canvasNodes.find(node => node.id === nodeId);
+    if (!target) return;
+    const width = target.measured?.width ?? 360;
+    const height = target.measured?.height ?? 270;
+    void rf.setCenter(target.position.x + width / 2, target.position.y + height / 2, { zoom, duration: 300 });
+    const el = document.querySelector(`.react-flow__node[data-id="${CSS.escape(nodeId)}"]`);
+    if (el) {
+      el.classList.add(styles.locateFlash);
+      window.setTimeout(() => el.classList.remove(styles.locateFlash), 1200);
+    }
+  }, [canvasNodes, rf, zoom]);
+
+  /** 点击 media 标签弹出操作层 */
+  const openChipMenu = useCallback((chip: HTMLElement) => {
+    const rect = chip.getBoundingClientRect();
+    setChipMenu({ chip, x: rect.left, y: rect.bottom + 6 });
+  }, []);
+
+  /** 悬停 media 标签：有效标签 150ms 后出素材预览；失效标签不预览（契约 §5）。
+   *  预览默认在标签上方，标签贴近屏幕顶部放不下时翻到下方（IKFR6A）。 */
+  const handleEditorMouseOver = useCallback((event: React.MouseEvent) => {
+    const chip = (event.target as HTMLElement).closest?.('[data-media-node]') as HTMLElement | null;
+    if (previewTimerRef.current) { window.clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
+    if (!chip || chip.dataset.mediaInvalid === '1') { setChipPreview(null); return; }
+    previewTimerRef.current = window.setTimeout(() => {
+      const rect = chip.getBoundingClientRect();
+      const below = rect.top < CHIP_PREVIEW_EST_HEIGHT + 8;
+      setChipPreview({ chip, x: rect.left, y: below ? rect.bottom + 8 : rect.top, below });
+    }, 150);
+  }, []);
+
+  const handleEditorMouseOut = useCallback((event: React.MouseEvent) => {
+    const chip = (event.target as HTMLElement).closest?.('[data-media-node]') as HTMLElement | null;
+    if (!chip || chip.contains(event.relatedTarget as Node)) return;
+    if (previewTimerRef.current) { window.clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
+    setChipPreview(null);
+  }, []);
+
+  // 点击其他区域关闭标签操作层（菜单内部点击除外）
+  useEffect(() => {
+    if (!chipMenu) return;
+    const close = (event: Event) => {
+      if ((event.target as HTMLElement | null)?.closest?.(`.${styles.chipMenu}`)) return;
+      setChipMenu(null);
+    };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [chipMenu]);
 
   const editMaterial = (assetId: string, replaceIndex: number | null) => {
     const editor = editorRef.current;
@@ -267,66 +456,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     saveSelection();
     syncContent();
   }, [restoreSelection, saveSelection, syncContent]);
-
-  /** 设置文字颜色（手动包裹 span，替代 execCommand foreColor 的不稳定行为） */
-  const setColor = useCallback((color: string) => {
-    setCurrentColor(color);
-    setShowColorPicker(false);
-
-    // 聚焦编辑器并恢复选区
-    editorRef.current?.focus();
-    restoreSelection();
-
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) {
-      console.warn('[TextNode] setColor: no selection');
-      return;
-    }
-    const range = sel.getRangeAt(0);
-    if (!editorRef.current?.contains(range.commonAncestorContainer)) {
-      console.warn('[TextNode] setColor: selection outside editor');
-      return;
-    }
-
-    // 确保选区非空
-    if (range.collapsed) {
-      console.warn('[TextNode] setColor: collapsed selection');
-      return;
-    }
-
-    console.log('[TextNode] setColor: applying', color, 'to', range.toString());
-
-    // 创建带颜色的 span 包裹选中内容
-    const span = document.createElement('span');
-    span.style.color = color;
-
-    try {
-      span.appendChild(range.extractContents());
-      range.insertNode(span);
-      // 重新选中包裹后的内容
-      const newRange = document.createRange();
-      newRange.selectNodeContents(span);
-      sel.removeAllRanges();
-      sel.addRange(newRange);
-      console.log('[TextNode] setColor: success');
-    } catch (err) {
-      console.warn('[TextNode] setColor: DOM approach failed, fallback', err);
-      // 备选方案：尝试 execCommand
-      document.execCommand('styleWithCSS', false, 'true');
-      document.execCommand('foreColor', false, color);
-    }
-
-    saveSelection();
-    syncContent();
-  }, [restoreSelection, saveSelection, syncContent]);
-
-  /** 切换颜色选择器 */
-  const toggleColorPicker = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    saveSelection();
-    setShowColorPicker(prev => !prev);
-  }, [saveSelection]);
 
   /** 设置标题 */
   const setHeading = useCallback((level: string) => {
@@ -382,14 +511,14 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     if (!editorRef.current.contains(range.commonAncestorContainer)) return;
     const fragment = document.createElement('div');
     fragment.append(range.cloneContents());
-    const content = readPromptMentions(fragment);
+    const content = readPromptMentions(fragment, mediaValidity);
     e.preventDefault();
     e.clipboardData.setData('text/plain', content.text);
     e.clipboardData.setData('application/x-blue-whale-prompt', JSON.stringify({ nodeId: id, ...content }));
     if (cut) { document.execCommand('delete'); syncContent(); }
-  }, [hasPromptBindings, id, syncContent]);
+  }, [hasPromptBindings, id, syncContent, mediaValidity]);
 
-  /** Paste the entire actual text; over-limit drafts remain visible and are not persisted. */
+  /** Paste Markdown or internal chip content; over-limit drafts remain visible and are not persisted. */
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     e.preventDefault();
     let inserted = false;
@@ -405,12 +534,22 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           document.execCommand('insertHTML', false, fragment.innerHTML);
           inserted = true;
         }
-      } catch { /* External clipboard content is pasted as plain text. */ }
+      } catch { /* External clipboard content is pasted as Markdown. */ }
     }
-    if (!inserted) document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
+    if (!inserted) document.execCommand('insertHTML', false, markdownToSanitizedHtml(e.clipboardData.getData('text/plain')));
     saveSelection();
     syncContent();
   }, [saveSelection, syncContent, hasPromptBindings, id, data.promptMaterials]);
+
+  /** 输入后应用 Markdown 语法规则（契约 §2 输入路径），@ 在词边界时打开素材菜单，再同步内容 */
+  const handleEditorInput = useCallback((e: React.FormEvent<HTMLDivElement>) => {
+    const native = e.nativeEvent as InputEvent;
+    if (native.inputType === 'insertText' && editorRef.current && native.data) {
+      applyMarkdownInputRule(editorRef.current, native.data);
+      if (native.data === '@') openMentionMenuAtCaret();
+    }
+    syncContent();
+  }, [syncContent, openMentionMenuAtCaret]);
 
   /** 编辑器键盘操作后保存选区并同步 */
   const handleEditorKeyUp = useCallback(() => {
@@ -425,37 +564,12 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       style={nodeTitleSizing(zoom)}
     >
       {/* 同一层操作位置：编辑时是格式工具栏，其余是节点操作条，两者不叠成多行 */}
-      {isFocused && !plainText ? (
+      {isFocused ? (
         <div
           className={`${styles.toolbar} nodrag nopan`}
           onMouseDown={(e) => e.preventDefault()}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {/* 文字颜色选择（放在第一位） */}
-          <div className={styles.colorWrap}>
-            <button className={`${styles.toolBtn} ${styles.colorBtn}`} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onClick={toggleColorPicker} title="文字颜色">
-              <Palette size={12} strokeWidth={2} />
-              <span className={styles.colorIndicator} style={{ backgroundColor: currentColor }} />
-            </button>
-            {showColorPicker && (
-              <div className={styles.colorPicker} onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}>
-                <div className={styles.colorGrid}>
-                  {COLORS.map(color => (
-                    <button
-                      key={color}
-                      className={`${styles.colorSwatch} ${color === currentColor ? styles.colorSwatchActive : ''}`}
-                      style={{ backgroundColor: color }}
-                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                      onClick={() => setColor(color)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className={styles.divider} />
-
           <button className={styles.toolBtn} onClick={() => setHeading('h1')} title="标题1">
             <Heading1 size={14} strokeWidth={2} />
           </button>
@@ -539,19 +653,20 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
               {data.title || (isTextGen ? '文本生成' : '文本节点')}
             </span>}
         </div>
-      {plainText && <button className={`${styles.toolBtn} nodrag nopan`} onClick={() => setExpanded(value => !value)}>
+      <button className={`${styles.toolBtn} nodrag nopan`} onClick={() => setExpanded(value => !value)}>
         {expanded ? '收起全文' : '展开全文'}
-      </button>}
+      </button>
       </div>
 
       {(contentError || titleError) && <div role="alert" className="nodrag nopan">{contentError || titleError}</div>}
       {/* 固定正文容器：360×270（含内边距）。仅编辑态拦截滚轮做正文滚动，非编辑态交给画布平移（IKFMQO TC_CX_001/015） */}
       <div className={`${styles.contentCard}${editing ? ' nowheel' : ''}`} data-testid="text-content" style={expanded ? { height: 540, maxHeight: '70vh' } : undefined}>
-        {!data.isFirst && (
-          <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
+        {/* IKFM3Q 契约 §4：每张文本卡都可能承接媒体索引关系线，target 连接点常驻
+           （isFirst 首卡与其余卡一致；连接点默认透明，悬停/连接中才可见，无视觉成本；
+           媒体→文本卡手工拖线仍被 connectPair 拒绝，既有规则面不变） */}
+        <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
           <HandlePlus />
         </Handle>
-        )}
 
         {isTextGen && !writingSelf && (
           <button
@@ -570,7 +685,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         <div
           ref={editorRef}
           className={`${styles.editor} ${editing ? 'nodrag nopan' : ''}`}
-          contentEditable={editing ? (plainText && !hasPromptBindings ? 'plaintext-only' : true) : false}
+          contentEditable={editing ? true : false}
           suppressContentEditableWarning
           style={{
             pointerEvents: isSelect && (!isTextGen || writingSelf) ? 'auto' : 'none',
@@ -578,15 +693,25 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           }}
           onFocus={() => setIsFocused(true)}
           onBlur={(e) => {
-            // 如果焦点转移到工具栏/颜色面板，保持编辑状态
+            // 如果焦点转移到工具栏/操作条/@菜单/标签操作层/素材预览，保持编辑状态
             const related = e.relatedTarget as HTMLElement | null;
-            if (related && related.closest(`.${styles.toolbar}, .${styles.nodeBar}`)) return;
+            if (related && related.closest(`.${styles.toolbar}, .${styles.nodeBar}, .${styles.chipMenu}, .${styles.chipPreview}, [data-testid="mention-menu"]`)) return;
             setIsFocused(false);
             setEditing(false);
             setWritingSelf(false);
           }}
-          onInput={syncContent}
+          onInput={handleEditorInput}
           onClick={event => {
+            const mediaChip = (event.target as HTMLElement).closest<HTMLElement>('[data-media-node]');
+            if (mediaChip) {
+              const nodeId = mediaChip.dataset.mediaNode ?? '';
+              const invalid = mediaChip.dataset.mediaInvalid === '1';
+              setSelectedMention(null);
+              // 非编辑态点击有效标签直接定位来源；其余（编辑态/失效）弹出操作层（契约 §5）
+              if (!editing && !invalid) { locateSource(nodeId); return; }
+              openChipMenu(mediaChip);
+              return;
+            }
             if (!hasPromptBindings) return;
             const chip = (event.target as HTMLElement).closest<HTMLElement>('[data-prompt-index]');
             setSelectedMention(chip ? Number(chip.dataset.promptIndex) : null);
@@ -598,6 +723,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
             setEditing(true);
           }}
           onMouseUp={handleEditorMouseUp}
+          onMouseOver={handleEditorMouseOver}
+          onMouseOut={handleEditorMouseOut}
           onKeyUp={handleEditorKeyUp}
           onPaste={handlePaste}
           onCopy={e => handleCopy(e)}
@@ -609,6 +736,63 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         <HandlePlus />
       </Handle>
       </div>
+
+      {/* IKFM3Q：@ 素材菜单（光标处插入 / 失效身份重绑定；不含文本互引）。
+          IKFR6A：锚点 portal 到 body——渲染在画布变换层内时 fixed 被劫持、锚点飞移 */}
+      {mentionMenu && createPortal(
+        <span ref={mentionAnchorRef} style={{ position: 'fixed', left: mentionMenu.x, top: mentionMenu.y, width: 0, height: 0 }} />,
+        document.body,
+      )}
+      {mentionMenu && (
+        <AtMentionMenu
+          anchorRef={mentionAnchorRef}
+          items={mediaMentionItems}
+          editorQuery=""
+          disabledKinds={['text']}
+          onSelect={handleMediaSelect}
+          onClose={() => { setMentionMenu(null); editorRef.current?.focus(); }}
+        />
+      )}
+
+      {/* media 标签操作层：定位来源 / 替换来源（失效=重新绑定）/ 删除标签（契约 §3/§5）；IKFR6A portal 到 body 钉在屏幕上 */}
+      {chipMenu && createPortal(
+        <div className={`${styles.chipMenu} nodrag nopan`} style={{ left: chipMenu.x, top: chipMenu.y }} data-testid="media-chip-menu">
+          {chipMenu.chip.dataset.mediaInvalid !== '1' && (
+            <button type="button" className={styles.chipMenuBtn} onClick={() => { locateSource(chipMenu.chip.dataset.mediaNode ?? ''); setChipMenu(null); }}>
+              <Crosshair size={13} strokeWidth={2} /><span>定位来源</span>
+            </button>
+          )}
+          <button type="button" className={styles.chipMenuBtn} onClick={() => {
+            const nodeId = chipMenu.chip.dataset.mediaNode ?? '';
+            const rect = chipMenu.chip.getBoundingClientRect();
+            setChipMenu(null);
+            setMentionMenu({ mode: 'rebind', rebindNodeId: nodeId, x: rect.left, y: rect.bottom });
+          }}>
+            <RefreshCw size={13} strokeWidth={2} /><span>{chipMenu.chip.dataset.mediaInvalid === '1' ? '重新绑定' : '替换来源'}</span>
+          </button>
+          <button type="button" className={`${styles.chipMenuBtn} ${styles.chipMenuDanger}`} onClick={() => {
+            const chip = chipMenu.chip;
+            setChipMenu(null);
+            chip.remove();
+            commitMediaEdit({ added: [], removed: [] });
+          }}>
+            <Trash2 size={13} strokeWidth={2} /><span>删除标签</span>
+          </button>
+        </div>,
+        document.body,
+      )}
+
+      {/* media 标签悬停预览（契约 §5：图片/视频缩略预览，音频出类型标识与名称）；
+          IKFR6A portal 到 body 钉在屏幕上，默认标签上方、顶部放不下翻到下方 */}
+      {chipPreview && createPortal(
+        <div className={`${styles.chipPreview} ${chipPreview.below ? styles.chipPreviewBelow : ''} nodrag nopan`} style={{ left: chipPreview.x, top: chipPreview.y }} data-testid="media-chip-preview">
+          {chipPreview.chip.dataset.mediaType === 'image' && <img src={chipPreview.chip.dataset.mediaUrl} alt="" />}
+          {chipPreview.chip.dataset.mediaType === 'video' && <video src={chipPreview.chip.dataset.mediaUrl} muted autoPlay loop playsInline />}
+          {chipPreview.chip.dataset.mediaType === 'audio' && <div className={styles.chipPreviewAudio}><AudioLines size={28} strokeWidth={1.5} /><span>音频</span></div>}
+          <div className={styles.chipPreviewName}>{chipPreview.chip.dataset.mediaName}</div>
+        </div>,
+        document.body,
+      )}
 
       {contextMenu && (
         <CanvasContextMenu

@@ -23,7 +23,9 @@ export const hasAnyMediaRef = (refs: VideoMediaRefs): boolean =>
 
 /** 视频媒体参考项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入提交字段；
  *  materialId 非空表示角色库素材（asset- 前缀素材库 ID，提交走 *_material_id/referenceMaterials）；
- *  duration 为来源节点回填的媒体时长（秒，IKFCKQ 音频缩略图预览卡片显示用，缺失不携带） */
+ *  duration 为来源节点回填的媒体时长（秒，IKFCKQ 音频缩略图预览卡片显示用，缺失不携带）；
+ *  textNodeId（IKFM3W 契约 §10）：该参考由文本卡正文索引提供（锁定，不可在目标直接移除），
+ *  值为来源文本卡 id。 */
 export interface VideoMediaRef {
   nodeId: string;
   url: string;
@@ -32,6 +34,7 @@ export interface VideoMediaRef {
   mediaType: 'image' | 'video' | 'audio';
   materialId?: string;
   duration?: number;
+  textNodeId?: string;
 }
 
 /** 目标视频草稿的分组参考：首帧/尾帧各至多一项（连线时校验，推导时防御性取首条） */
