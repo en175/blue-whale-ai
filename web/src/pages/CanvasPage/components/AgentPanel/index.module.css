@@ -1439,10 +1439,85 @@
 
 /* 按哪套写法编的（F32）。压低到和时间同一层——它是核对用的注脚，不是标题的一部分。 */
 .shotTargetModel {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   flex-shrink: 0;
-  margin-left: 6px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.shotTitleIcon {
+  color: var(--color-accent-agent);
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
+.shotRefsLabel {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  align-self: center;
+}
+
+/* 提示词正文：默认收成三行，「展开全文」再看。正文走 Markdown，素材名是胶囊。 */
+.shotPrompt {
+  position: relative;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.7;
+}
+
+.shotPromptClamp {
+  max-height: calc(1.7em * 3);
+  overflow: hidden;
+}
+
+.shotPromptClamp::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.4em;
+  background: linear-gradient(to bottom, rgba(36, 36, 37, 0), #242425);
+}
+
+.shotPromptMd {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.shotPromptMd p {
+  margin: 0;
+}
+
+.shotMore {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.shotMore:hover {
+  color: var(--color-text-primary);
+}
+
+.shotActions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.shotActions .cardBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  font-size: var(--font-size-sm);
 }
 
 .shotField {
@@ -2210,16 +2285,121 @@
 
 /* ---- 方案卡（IKF3KE）：用户在任何一张生成卡被写出来之前，唯一要表态的东西 ---- */
 .solutionCard {
-  border: 1px solid var(--color-accent-primary);
+  border: 1px solid var(--color-border-secondary);
   background-color: #242425;
   border-radius: 12px;
-  padding: 12px;
+  padding: 0 0 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   width: 100%;
   font-size: 12px;
   line-height: 1.6;
+  overflow: hidden;
+}
+
+/* 卡头色带（IKFLB9 定稿）：左边「方案卡 · 等你拍板 · ▤ .md」，右边媒介 / 模型 / 参数。 */
+.solutionBand {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: linear-gradient(90deg, var(--color-accent-agent-soft), transparent);
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.solutionState {
+  color: var(--color-text-tertiary);
+  font-weight: 400;
+}
+
+.solutionDocBtn {
+  padding: 0 5px;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.solutionDocBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-tertiary);
+}
+
+.solutionBandCells {
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.solutionBandCell b {
+  display: block;
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+}
+
+.solutionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 12px;
+}
+
+.solutionGoal {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+.solutionDirection {
+  margin: 0;
+  padding: 4px 10px;
+  border-left: 2px solid var(--color-border-secondary);
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+}
+
+.solutionGroup {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.solutionHint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.solutionLinkBtn {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.solutionLinkBtn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
+/* 「接下来怎么做」在卡外：它是模型接着要说的话。 */
+.solutionNextSteps {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  line-height: 22px;
+  white-space: pre-wrap;
 }
 
 /* 已确认或已作废的那几版留在原处但变灰、按钮消失：历史要读得懂，
@@ -2233,7 +2413,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--color-accent-primary);
+  color: var(--color-accent-agent);
   font-size: var(--font-size-sm);
   font-weight: 600;
 }
@@ -2275,14 +2455,15 @@
   align-items: center;
   gap: 8px;
   margin-top: 2px;
+  padding: 0 12px;
 }
 
 .solutionPrimaryBtn {
   padding: 6px 14px;
   border-radius: 10px;
-  border: 1px solid var(--color-accent-primary);
-  background-color: rgba(80, 140, 255, 0.2);
-  color: var(--color-accent-primary);
+  border: 1px solid var(--color-accent-agent);
+  background-color: var(--color-accent-agent);
+  color: var(--color-accent-agent-ink);
   font-size: var(--font-size-md);
   font-weight: 600;
   font-family: inherit;
@@ -2290,7 +2471,7 @@
 }
 
 .solutionPrimaryBtn:hover:not(:disabled) {
-  background-color: rgba(80, 140, 255, 0.32);
+  background-color: var(--color-accent-agent-hover);
 }
 
 .solutionGhostBtn {
@@ -2315,7 +2496,8 @@
 }
 
 .solutionNote {
-  width: 100%;
+  width: calc(100% - 24px);
+  margin: 0 12px;
   min-height: 64px;
   padding: 8px;
   border-radius: 8px;
@@ -2328,6 +2510,62 @@
 }
 
 .solutionSettledNote {
+  padding: 0 12px;
   color: var(--color-text-secondary);
   font-size: 11px;
+}
+
+.solutionCardSettled .solutionBand {
+  background: none;
+}
+
+/* 方案卡 / 提示词卡渲染成文档的那一层（CardDocModal）。 */
+.cardDocBody {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.cardDocBar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.cardDocMd {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: var(--font-size-md);
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+}
+
+.cardDocMd h1 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--color-text-primary);
+}
+
+.cardDocMd h2 {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+
+.cardDocMd p,
+.cardDocMd ul,
+.cardDocMd ol {
+  margin: 0;
+}
+
+.cardDocMd table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.cardDocMd td,
+.cardDocMd th {
+  border: 1px solid var(--color-border-secondary);
+  padding: 4px 8px;
+  text-align: left;
 }
