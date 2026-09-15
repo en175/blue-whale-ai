@@ -22,7 +22,7 @@ function QuestionBlock({ q, assets }: { q: Extract<ReplySegment, { kind: 'questi
         <div className={styles.questionOptions}>
           {q.options.map((o, i) => (
             <div key={i} className={styles.questionOption}>
-              <span className={`${styles.questionKey} ${o.key ? '' : styles.questionKeyDot}`}>{o.key || '•'}</span>
+              <span className={styles.questionKey}>{o.key}</span>
               <span className={styles.questionOptionText}>
                 <span className={styles.questionLabel}>{o.label}</span>
                 {o.desc && <span className={styles.questionDesc}>：{o.desc}</span>}

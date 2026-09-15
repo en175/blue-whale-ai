@@ -1138,11 +1138,6 @@
   color: var(--color-text-secondary);
 }
 
-.questionKeyDot {
-  border-color: transparent;
-  color: var(--color-text-tertiary);
-}
-
 .questionOptionText {
   min-width: 0;
 }

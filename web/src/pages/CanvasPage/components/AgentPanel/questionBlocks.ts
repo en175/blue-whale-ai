@@ -11,7 +11,7 @@
  */
 
 export interface QuestionOption {
-  /** `A`；模型没编字母时是空串，界面画一个点。 */
+  /** `A`；模型没编字母时按顺序补。 */
   key: string;
   label: string;
   desc: string;
@@ -35,7 +35,8 @@ export type ReplySegment =
 
 const QUESTION_LINE = /^\s*(?:\*\*)?\s*❓\s*(.*)$/;
 const OPTION_LINE = /^\s*(?:[-*•]\s*)?(?:\*\*)?\s*([A-Ha-h])\s*[.．、)）]\s*(.*)$/;
-/** 模型有时不编字母，只是一条条列出来（项目 607：「- 通用桌面壁纸（横版 16:9）」）。题里 ➡️ 之前的列表项一样是选项。 */
+/** 模型有时不编字母，只是一条条列出来（项目 607：「- 通用桌面壁纸（横版 16:9）」）。题里 ➡️ 之前的列表项一样是选项，
+ *  按顺序补上 A、B、C——用户回「选 B」时模型按第几条对得上（李述拍板，2026-09-15）。 */
 const PLAIN_OPTION_LINE = /^\s*[-*•]\s+(.+)$/;
 /** 模型有时把箭头一起包进粗体：「**➡️ 推荐：…**。」——箭头前的 `**` 剥掉，正文里配对的那个也一起剥。 */
 const RECOMMEND_LINE = /^\s*(\*\*)?\s*➡️\s*(.*)$/;
@@ -113,7 +114,7 @@ export function splitReplySegments(text: string): ReplySegment[] {
       }
       const plain = PLAIN_OPTION_LINE.exec(line);
       if (plain) {
-        options.push({ key: '', ...splitLabel(plain[1]) });
+        options.push({ key: String.fromCharCode(65 + options.length), ...splitLabel(plain[1]) });
         continue;
       }
       body.push(line);
