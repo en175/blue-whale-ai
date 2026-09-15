@@ -1,7 +1,8 @@
 # 素材库 API 对接文档（前端）
 
 > 需求：IKB79K 虚拟人像库接入（火山）。后端任务：IKB8PR「素材库网关对接与视频生成素材引用」。
-> 版本：v1（2026-08-26）。后端 `material` 模块（透传镜像）+ `generation` 素材引用。
+> 版本：**v2（2026-09-15）**。v2 新增：**素材校验状态与生成拦截**（IKFYHJ / ADR-0087）——见 §5.1、§6.3、§7。
+> v1（2026-08-26）：后端 `material` 模块（透传镜像）+ `generation` 素材引用。
 > ⚠️ **透传镜像，勿套用常规信封**：本接口响应**不是**产品统一的 `{ code, msg, data }`，返回**上游信封**/直接格式 + **上游状态码**。前端不能走 `apiRequest` 解包 `data` 的那套逻辑，需单独处理（见 §1）。
 
 ---
@@ -11,9 +12,11 @@
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | POST | `/api/material/{Action}` | 素材库增删改查 + 真人活体认证会话（**透传镜像**，共 12 个 Action） |
-| POST | `/api/projects/:projectId/generation-jobs` | 视频生成任务，**新增**素材库引用字段 |
+| POST | `/api/projects/:projectId/generation-jobs` | 视频生成任务，**新增**素材库引用字段；**带素材校验门**（§5.1） |
+| POST | `/api/projects/:projectId/generation-jobs/:jobId/retry` | 重试同样**带素材校验门**（§5.1） |
 
-> 素材库是**账号维度**外部目录（非项目维度 Asset）。素材归属/状态以上游为权威，本地不镜像、无本地表。
+> 素材库是**账号维度**外部目录（非项目维度 Asset）。素材归属/状态以上游为权威。
+> **v2 变更**：后端现在会把素材状态镜像到本地表，并在视频生成采纳素材时校验——**上传达标 ≠ 校验通过，只有 `Active` 才能用**（见 §5.1）。
 
 ---
 
@@ -117,8 +120,9 @@
 ```json
 { "GroupId": "group-xxx", "URL": "https://....jpg", "Name": "素材1", "AssetType": "Image" }
 ```
-`Result`：`{ "Id": "asset-..." }`。素材创建后**异步注册**，状态见 `GetAsset`/`ListAssets`。
+`Result`：`{ "Id": "asset-..." }`。素材创建后**异步注册**，**此刻状态必然是 `Processing`，校验结果尚不存在**。
 
+> ⚠️ **拿到 `Id` ≠ 校验通过**（v2 起后端会强制这一点）。必须轮询 `GetAsset` 到 `Status:"Active"` 才能拿去生成视频；`Processing` 期间发起生成会被后端拒绝（§5.1）。
 > **前端上传分离两段**：先走既有 Asset 上传管道拿到公网 URL，再 `CreateAsset` 传该 URL；**不要**把本地文件直接发这里。
 
 ### 3.2 列出素材 `ListAssets`
@@ -142,7 +146,29 @@
 ```json
 { "Id": "asset-xxx" }
 ```
-`Result`：素材完整信息（含 `Status`、`URL`、`Error.Code` / `Error.Message`）。
+
+`Result`（**这是前端判断「校验通过」的唯一依据**）：
+
+```json
+{
+  "Result": {
+    "Id": "asset-xxx",
+    "Name": "素材1",
+    "URL": "https://....jpg",
+    "GroupId": "group-xxx",
+    "AssetType": "Image",
+    "Status": "Active",
+    "CreateTime": "2026-09-15T10:00:00Z",
+    "UpdateTime": "2026-09-15T10:00:30Z",
+    "Error": { "Code": "InvalidParameter", "Message": "人脸不清晰" }
+  }
+}
+```
+
+- `Status` 三值：`Active`（**可用**）/ `Processing`（处理中）/ `Failed`（**不可用**）。
+- `Error` **仅在失败时有值**；成功时不返回该字段。
+- **不要向用户展示 `Error.Code` / `Error.Message`**：火山官方未公开素材库错误码枚举，原文无从解读，只作内部归因。用户侧统一说「素材未审核通过」。
+- 建议轮询节奏：1~2 秒一次，封顶 2 分钟；超时后提示「校验耗时较长，可稍后刷新查看」。后端也在每 5 秒跟进状态（仅素材创建后 10 分钟内），但**前端不能依赖它**——自己轮询到终态才算数。
 
 ### 3.4 编辑素材 `UpdateAsset`
 
@@ -246,13 +272,59 @@
 
 > **`asset://` 双义隔离**：素材库引用在生成时由 Worker 转成 `asset://<素材ID>` 载体交给火山，与画布内部 mention 协议的 `asset://<mention_id>` **互不串用**。前端只需传素材库 id（`asset-` 前缀），无需关心 `asset://` 组装。
 
+### 5.1 素材校验门（v2 新增，必读）
+
+**只有 `Status:"Active"` 的素材能用作视频生成参考。** 创建期与重试期都会校验，不通过直接 400 拒绝、零写入（不建任务）。
+
+**校验范围**——以下两批素材 id 都会被查：
+
+1. **直接声明的素材库引用**：`first_frame_material_id`、`last_frame_material_id`、`reference_materials[].id`。
+2. **本地 Asset 引用中已绑素材库的那些**：`references[].asset_id`、`first_frame_asset_id`、`last_frame_asset_id`、`reference_asset_ids`。
+   ⚠️ 这条容易被忽略：**如果某个本地 Asset 被用户「入库」过（合规校验 = 上传素材库），那它身上就带了素材库绑定**。此后再拿它做视频参考，走的是同一个门——**前端传的是 `asset_id`，但后端会追到它背后的素材状态**。用户以为「这是我自己上传的本地图」，实际会被素材库状态拦住。
+
+> **存量素材不会被漏放**：早于本次改造入库、本地无状态记录的素材，后端会**实时查一次上游**再判定，行为等价于「以此刻真实状态为准」。
+
+**拒绝时的响应**（产品信封，**不是**上游信封）：
+
+```json
+{ "code": 400, "msg": "该素材未审核通过，不能用于视频生成", "data": { "code": "invalid_reference" } }
+```
+
+| 场景 | code | msg |
+|---|---|---|
+| 素材 `Failed` / `Processing` 未就绪 | 400 | `该素材未审核通过，不能用于视频生成` |
+| 上游查不到（网络失败、超时、网关不可达） | 400 | `素材状态校验失败，请稍后重试` |
+
+- 两种情况 `data.code` 都是 `invalid_reference`，**前端请按 `msg` 区分**：后者是暂时性故障，值得让用户重试；前者要引导用户重新走一遍合规校验。
+- 文案只说「未通过」，**后端不提供失败原因**（火山无公开错误码枚举）。
+
+**不校验的情形**（前端可放心）：
+
+- **非视频任务**：图片、音频生成不受影响。音频的 `references` 虽然也带 `asset_id`，但音频执行链路根本不消费素材库绑定，后端按类型短路，**不会**拿视频文案误伤音频。
+- **完全没进过素材库的本地 Asset**：没有素材库绑定，不进门。
+- **重试**：重试沿用原任务的参数快照，但会**重过一遍同一个门**——原任务创建后素材若变成 `Failed`，重试会被拒。
+
+### 5.2 前端必须做的配合（否则用户会莫名被拒）
+
+现状「拿到 `CreateAsset` 的 `Id` 就宣布校验通过」在 v2 下会变成**「刚说通过、转头不让用」**。
+
+**正确姿势**：
+
+1. `CreateAsset` 拿到 `Id` → **状态标为「校验中」，不要标通过**。
+2. 轮询 `GetAsset` 到 `Status` 为 `Active` 或 `Failed`（见 §3.3）。
+3. `Active` → 才把 `compliancePassed` 置真、才允许拖进视频生成。
+4. `Failed` → 提示「素材未审核通过」，给重试上传入口。
+5. 用户中途刷新页面 → 重新 `ListAssets` / `GetAsset` 拿真实状态恢复，**不要**依赖本地缓存的「通过」。
+
 ---
 
 ## 6. 状态与错误码
 
 ### 素材状态枚举
 
-`Active`（就绪）、`Processing`（处理中）、`Failed`（失败）。**状态以上游为准，本地不镜像**，前端按 `GetAsset`/`ListAssets` 的 `Status` 展示即可。
+`Active`（就绪）、`Processing`（处理中）、`Failed`（失败）。
+
+**状态以上游为权威**（v2 修正：后端现在会把状态镜像到本地表用于生成拦截，但**对外展示仍以 `GetAsset`/`ListAssets` 的 `Status` 为准**——本地镜像存在分钟级延迟，且只跟进创建后 10 分钟内的素材）。前端展示与判定一律用素材库接口返回的状态，不要读任何后端派生的「校验状态」字段（没有这个字段）。
 
 ### 上游错误码（透传镜像，配合上游状态码）
 
@@ -272,11 +344,14 @@
 
 ### 产品侧错误（前端可依赖中文 `msg`）
 
-| code | 含义 | 场景 |
-|---|---|---|
-| 400 | 不支持的素材操作 / 素材库引用仅支持视频 / 首尾帧只能指定一个来源… | 非法 Action、生成参数非法 |
-| 401 | 缺少登录凭证 | 未登录/会话失效 |
-| 503 | 素材库服务未配置 / 网关不可达 | 后端缺 env、上游无响应 |
+| code | `data.code` | msg | 场景 |
+|---|---|---|---|
+| 400 | `invalid_reference` | 该素材未审核通过，不能用于视频生成 | 素材 `Failed`/`Processing` 未就绪（v2） |
+| 400 | `invalid_reference` | 素材状态校验失败，请稍后重试 | 上游查不到 / 网关不可达（v2，**可重试**） |
+| 400 | — | 不支持的素材操作 / 素材库引用仅支持视频 / 首尾帧只能指定一个来源… | 非法 Action、生成参数非法 |
+| 401 | — | 缺少登录凭证 | 未登录/会话失效 |
+| 100409 | — | 幂等键冲突：同键异载荷 | 重试/创建同 Key 不同 body（沿用既有口径，非本次新增） |
+| 503 | — | 素材库服务未配置 | 后端缺 env（生成路径不走这条，会被上面第二条兜住） |
 
 ---
 
@@ -286,6 +361,13 @@
 2. **素材库管理**（虚拟人像库功能依赖）：`ListAssetGroups(GroupType:"AIGC")` / `CreateAssetGroup` / `ListAssets` / `GetAsset(轮询状态)` / `CreateAsset`（两段式上传）。
 3. **真人认证闭环**：`CreateVisualValidateSession` → 分发 `H5Link` → 轮询 `GetVisualValidateResult`。
 4. **视频生成用素材库**：建任务时带 `first_frame_material_id` / `last_frame_material_id` / `reference_materials`。
+
+**v2 新增（IKFYHJ，必须做，否则用户会莫名被拒）**：
+
+5. **上传后轮询到 `Active` 才算校验通过**：`CreateAsset` 返回 `Id` 后状态先置「校验中」，轮询 `GetAsset`（§3.3）到 `Active`/`Failed` 再定论。**不要**在拿到 `Id` 的那一刻 toast「校验通过」——现状代码正是这么做的（`CanvasPage/index.tsx` 的 `ensureMediaNodeCompliance`）。
+6. **刷新页面后用状态接口恢复**：重新 `GetAsset`/`ListAssets` 拿真实 `Status`，不要依赖本地缓存的 `compliancePassed`。
+7. **生成失败的 400 要按 `msg` 分流**（§5.1）：`该素材未审核通过…` → 引导重新走合规校验；`素材状态校验失败，请稍后重试` → 给「重试」按钮。
+8. **本地 Asset 拖进视频生成时也可能被拒**：只要该 Asset 入库过就带素材库绑定（§5.1 第 2 条）。前端在本地 Asset 列表里也应该能看出「已入库」的状态，并在被拒时给出可理解的提示，而不是当成后端 bug。
 
 ---
 
@@ -298,7 +380,9 @@
 5. **两段式上传**：先 Asset 管道拿公网 URL，再 `CreateAsset`。
 6. **CallbackURL 勿传**：真人会话 `CallbackURL` 由后端剥离，前端不接收回调。
 7. **账号维度隔离**：素材库按登录账号隔离；`asset-` id 仅在**同一账号**下对生成任务有效。
-8. **零本地表**：素材库无本地镜像，前端列表/详情状态全部以素材库接口为准。
+8. **状态以上游为准**（v2 修正）：素材库对外仍是「无本地业务表」，前端列表/详情状态全部以素材库接口为准。后端确实新增了一张状态镜像表，但**它只服务于生成拦截，不作为接口返回给前端**——不要去找后端要「素材校验状态」字段（没有）。
+9. **`CreateAsset` 成功 ≠ 校验通过**：返回的 `Id` 只代表「已提交注册」。拿它去生成视频，在状态到 `Active` 之前会被 400 拒绝（§5.1）。
+10. **生成被拒的 400 不是 bug**：`data.code === "invalid_reference"` 且 msg 为「该素材未审核通过」，说明素材没过审。这是设计行为（Active-only），不要当异常上报。
 
 ---
 
@@ -306,12 +390,15 @@
 
 **虚拟人像 → 生成**：
 1. `ListAssetGroups(GroupType:"AIGC")` 找到/`CreateAssetGroup` 建虚拟素材组 → 得 `group-...`
-2. 已有公网图 URL → `CreateAsset(GroupId, URL, Name, AssetType:"Image")` → 得 `asset-...`
-3. `ListAssets/GetAsset` 轮询该 `asset-...` 到 `Status:"Active"`
-4. `POST /api/projects/:projectId/generation-jobs`（视频）带 `reference_materials:[{id:"asset-...", type:"image"}]` 或首帧 `first_frame_material_id`
+2. 已有公网图 URL → `CreateAsset(GroupId, URL, Name, AssetType:"Image")` → 得 `asset-...`（此刻状态是 `Processing`，**不是**校验通过）
+3. `GetAsset` 轮询该 `asset-...` 到 `Status:"Active"` —— **到这一步才算校验通过**，前端才置 `compliancePassed`
+4. `Status:"Failed"` → 提示「素材未审核通过」并给重传入口；轮询超时 → 提示稍后刷新
+5. `POST /api/projects/:projectId/generation-jobs`（视频）带 `reference_materials:[{id:"asset-...", type:"image"}]` 或首帧 `first_frame_material_id`
+   - 若素材此时已不是 `Active`（被删/状态漂移）→ 400 `invalid_reference`，按 §5.1 分流提示
 
 **真人素材 → 生成**：
 1. `CreateVisualValidateSession` → `H5Link` + `BytedToken`
 2. 真人刷脸 → 轮询 `GetVisualValidateResult(BytedToken)` 到 `GroupId` 非空
 3. `CreateAsset(GroupId, URL, ..., AssetType:"Image")`
-4. （同虚拟人像）视频生成任务引用该 `asset-...`
+4. 轮询 `GetAsset` 到 `Active`（同虚拟人像第 3 步）
+5. 视频生成任务引用该 `asset-...`
