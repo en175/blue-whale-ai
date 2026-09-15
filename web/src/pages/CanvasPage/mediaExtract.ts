@@ -91,7 +91,9 @@ export function mediaExtractErrorText(
   return '音频提取失败';
 }
 
-/** 提取任务终态的本地节点补丁；进行中返回 null，调用方继续轮询。 */
+/** 提取任务终态的本地节点补丁；进行中返回 null，调用方继续轮询。
+ *  只写展示与播放必需字段：mime/size 是下载文件名与详情面板的兜底（blob.type / 资产详情优先），
+ *  duration 由浏览器实测补齐（handleMediaDims），故不再像旧的 worker 回写那样写入——改动前先确认消费方。 */
 export function mediaExtractTerminalPatch(
   detail: {
     status: string;

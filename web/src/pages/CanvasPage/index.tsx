@@ -5069,6 +5069,7 @@ export default function CanvasPage() {
         buildMediaExtractPlaceholderNode({ jobId: created.job_id, source: node }) as Node,
       );
       // 先同步写 ref 再 setState：本轮 flush 落库要用它，且下方连线端点必须已在本次保存的节点里
+      // （不登记 pendingNodeIdsRef：占位节点身份以任务为准，失败由终态补丁收敛，不需要添加失败回滚）
       const current = mediaNodesRef.current;
       const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
       mediaNodesRef.current = next;

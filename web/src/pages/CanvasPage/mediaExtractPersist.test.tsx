@@ -156,6 +156,19 @@ function seedDoc() {
   };
 }
 
+/** 追加一个就绪视频节点（含资产快照） */
+function pushVideoNode(id: string, assetId: string) {
+  (canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> }).nodes.push({
+    id,
+    type: 'mediaNode',
+    position: { x: 400, y: 300 },
+    data: { src: `http://vid/${id}.mp4`, mediaType: 'video', fileName: id, assetId, width: 1920, height: 1080 },
+  });
+  (canvasDocMock.current.assets as Record<string, unknown>)[assetId] = {
+    asset_id: assetId, type: 'video', access_url: `http://vid/${id}.mp4`, width: 1920, height: 1080,
+  };
+}
+
 let root: Root;
 let container: HTMLDivElement;
 
@@ -249,5 +262,37 @@ describe('IKFS5W 提取音频落盘', () => {
     });
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
     expect(apiMocks.saveCanvasDoc.mock.calls[0][2]).toBe(3);
+  }, 20000);
+
+  it('并发提取两个视频：两次落盘串行、版本递增，两个节点与两条来源边都在', async () => {
+    let version = 3;
+    let job = 0;
+    apiMocks.saveCanvasDoc.mockImplementation(async (_projectId, _payload, _v) => {
+      version += 1;
+      return { id: 11, project_id: 1, version, viewport: '{}', nodes: '[]' };
+    });
+    apiMocks.createMediaExtraction.mockImplementation(async () => ({ job_id: `j${++job}`, status: 'queued' }));
+    pushVideoNode('v2', 'a10');
+
+    await renderPage();
+    const nodes = flowProps.current.mediaNodes;
+    await act(async () => {
+      void nodes.find((n: Node) => n.id === 'v1').data.onExtractAudio('v1');
+      void nodes.find((n: Node) => n.id === 'v2').data.onExtractAudio('v2');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+
+    const calls = apiMocks.saveCanvasDoc.mock.calls;
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    // 串行落盘：每次 If-Match 都是上一次返回的版本，不会两次共用同一个（否则后者 412）
+    const versions = calls.map((c) => c[2]);
+    expect(new Set(versions).size).toBe(versions.length);
+    const last = calls[calls.length - 1][1];
+    expect(last.nodes.map((n) => n.id)).toEqual(
+      expect.arrayContaining(['media-extract-j1', 'media-extract-j2']),
+    );
+    expect(last.edges.map((e) => e.target)).toEqual(
+      expect.arrayContaining(['media-extract-j1', 'media-extract-j2']),
+    );
   }, 20000);
 });
