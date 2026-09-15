@@ -1,8 +1,9 @@
 // 素材库对接服务：产品登录会话 → AuthGuard 回注的 sk- key → 网关 /api/material/{Action}。
-// 归属与状态以网关/上游为权威；本地仅两处持久化：
+// 归属与状态以网关/上游为权威；本地仅三处持久化：
 //   - 素材关联镜像 assets.material_id/material_group_id（IKDJNZ）；
 //   - 素材库组 material_groups（IKDE6X/IKEXX8 契约 v2：只维护虚拟组镜像，
-//     ListAssetGroups(AIGC)/GetAssetGroup 命中时读本地，真人组查询仍透传上游）。
+//     ListAssetGroups(AIGC)/GetAssetGroup 命中时读本地，真人组查询仍透传上游）；
+//   - 素材校验状态 material_assets（IKFYHJ，ADR-0087：镜像上游 Status，供生成采纳处判定）。
 // 其余（素材列表等）仍纯过境透传。
 import { randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
@@ -13,7 +14,10 @@ import {
   type MaterialLibraryResponse,
 } from "@lib/core";
 import {
+  createMaterialAssetRepo,
   createMaterialGroupRepo,
+  type MaterialAssetRepo,
+  type MaterialAssetStatus,
   type MaterialGroupRepo,
   type MaterialGroupView,
 } from "@lib/shared/persistence/index.js";
@@ -53,6 +57,7 @@ export type MaterialAction = (typeof MATERIAL_ACTIONS)[number];
 export class MaterialService {
   private clientInstance?: MaterialLibraryClient;
   private groupRepoInstance?: MaterialGroupRepo;
+  private materialAssetRepoInstance?: MaterialAssetRepo;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -76,6 +81,13 @@ export class MaterialService {
       this.groupRepoInstance = createMaterialGroupRepo(this.prisma.client);
     }
     return this.groupRepoInstance;
+  }
+
+  private get materialAssetRepo(): MaterialAssetRepo {
+    if (!this.materialAssetRepoInstance) {
+      this.materialAssetRepoInstance = createMaterialAssetRepo(this.prisma.client);
+    }
+    return this.materialAssetRepoInstance;
   }
 
   /** 透传调用：鉴权取 AuthGuard 回注的 Bearer sk-；上游状态码与信封原样返回。 */
@@ -205,10 +217,66 @@ export class MaterialService {
   ): Promise<void> {
     await this.groupRepo.softDelete(userId, materialGroupId);
   }
+
+  /** IKF YHJ：CreateAsset 2xx 后落 Processing 行——上游异步注册，此刻必然尚未 Active。 */
+  async trackMaterialProcessing(
+    userId: string,
+    materialId: string,
+    materialGroupId: string,
+  ): Promise<void> {
+    await this.materialAssetRepo.upsertProcessing({
+      userId,
+      materialId,
+      materialGroupId,
+    });
+  }
+
+  /** IKF YHJ：把上游返回的素材状态镜像回本地（GetAsset 单条或 ListAssets 列表）。
+   *  只更新已存在的行——无行意味着没走过 CreateAsset，语义是「未校验」，不得凭空造行。 */
+  async mirrorMaterialStatuses(
+    userId: string,
+    entries: ReadonlyArray<{
+      materialId: string;
+      status: string;
+      errorCode?: string | null;
+      errorMessage?: string | null;
+    }>,
+  ): Promise<void> {
+    for (const entry of entries) {
+      await this.materialAssetRepo.mirrorStatus({
+        userId,
+        materialId: entry.materialId,
+        status: normalizeMaterialStatus(entry.status),
+        errorCode: entry.errorCode ?? null,
+        errorMessage: entry.errorMessage ?? null,
+      });
+    }
+  }
+
+  /** IKF YHJ：上游 DeleteAsset 成功后清状态行（硬删，ADR-0087 决策 5）。 */
+  async clearMaterialStatus(
+    userId: string,
+    materialId: string,
+  ): Promise<void> {
+    await this.materialAssetRepo.deleteByMaterialId(userId, materialId);
+  }
+
+  /** IKF YHJ：上游 DeleteAssetGroup 成功后按组批量清状态行（硬删）。 */
+  async clearMaterialStatusByGroup(
+    userId: string,
+    materialGroupId: string,
+  ): Promise<void> {
+    await this.materialAssetRepo.deleteByGroupId(userId, materialGroupId);
+  }
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** IKF YHJ：上游 Status 白名单收敛——认不出的值一律当 Processing（继续跟进，不误判为可用）。 */
+function normalizeMaterialStatus(raw: string): MaterialAssetStatus {
+  return raw === "Active" || raw === "Failed" ? raw : "Processing";
 }
 
 /** PageNumber/PageSize 宽松解析（缺省走 1/10；非正非数走缺省）。 */

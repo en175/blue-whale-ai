@@ -5,8 +5,9 @@ import {
   type NewApiLoginResult,
 } from "@lib/core";
 import { ACCOUNT_LOCKED, FAILURE_CODE, ok } from "@lib/contracts";
-import { createAuthRepo } from "@lib/shared/persistence/index.js";
+import { createAuthRepo, createUserInfoRepo } from "@lib/shared/persistence/index.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { handleSendCode } from "@lib/shared/auth/handle-send-code.js";
 import { resolveSmsProvider, type SmsProvider } from "@lib/shared/auth/sms.js";
@@ -99,7 +100,7 @@ export class AuthController {
       throw new NewApiError("账户服务响应异常", 502, "invalid_identity");
     }
     try {
-      return await this.sessions.createSession({
+      const token = await this.sessions.createSession({
         userId: result.userId,
         username: result.username,
         role: result.role,
@@ -107,6 +108,22 @@ export class AuthController {
         email: result.email ?? null,
         sk: result.token,
       });
+      // IKF YHJ：登录成功即刷新网关侧执行凭证，供 worker-java 的素材状态定时兜底按 userId 取用
+      // （网关无服务级查询入口，素材接口只能以用户身份调用，见 ADR-0087）。
+      // 失败只告警不阻断登录：缺行/旧行只会让该用户的素材状态停止跟进，登录与生成都不受影响。
+      try {
+        await createUserInfoRepo(this.prisma.client).upsertCredential(
+          String(result.userId),
+          result.token,
+        );
+      } catch (error) {
+        logger.error(
+          `auth establishSession: upsert user_info failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      return token;
     } catch (error) {
       // 修正四：createSession 不再 seal sk（明文存 Redis），无 GenerationCredentialConfigurationError。
       throw error;
