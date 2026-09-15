@@ -5406,9 +5406,11 @@ export default function CanvasPage() {
       ...sourceDraftRefs,
       reference: orderRefStripItems(sourceDraftRefs.reference, videoRefStripKey, Array.isArray(savedStripOrder) ? savedStripOrder : []),
     };
-    // 发送成功后关闭面板（IKFXZD 统一口径）；自由模式无草稿卡承载，关闭即丢弃本地暂存参考
+    // 发送成功后关闭面板（IKFXZD 统一口径）；自由模式无草稿卡承载，关闭即丢弃本地暂存参考。
+    // 同步置 hidden 标记：否则紧随的画布选中事件会被 handleSelectionChange 当作「命中绑定目标」回弹重开
     const finishSend = (submitted: boolean) => {
       if (!submitted) return;
+      videoPanelHiddenRef.current = true;
       setShowBottomDialog(false);
       if (freeMode) setVideoFreeRefs({ reference: [] });
     };
@@ -6138,8 +6140,9 @@ export default function CanvasPage() {
       const submitted = startGenerationJob('audio', { prompt: text, model_id: modelId }, undefined,
         resolved.length ? { references: resolved.map(ref => ({ role: 'reference' as const, type: ref.mediaType ?? 'audio', asset_id: String(ref.assetId) })) } : undefined,
         targetNodeId, undefined, promptDoc);
-      // IKFXZD：创建请求发出即隐藏面板（绑定与自由同口径；失败分支保持打开）
-      if (submitted) setShowAudioDialog(false);
+      // IKFXZD：创建请求发出即隐藏面板（绑定与自由同口径；失败分支保持打开）。
+      // 置 hidden 标记避免紧随的画布选中事件回弹重开
+      if (submitted) { audioPanelHiddenRef.current = true; setShowAudioDialog(false); }
     } catch (e) {
       showToast('error', '保存失败，请重试');
       console.warn('音频生成前准备失败:', e);
@@ -6295,8 +6298,9 @@ export default function CanvasPage() {
         aspect_ratio: ratio,
         size,
       }, inputAssetIds.length > 0 ? inputAssetIds : undefined, undefined, targetNodeId, undefined, promptDoc);
-      // IKFXZD：创建请求发出即隐藏面板（绑定与自由同口径；失败分支保持打开）
-      if (submitted) setShowImageDialog(false);
+      // IKFXZD：创建请求发出即隐藏面板（绑定与自由同口径；失败分支保持打开）。
+      // 置 hidden 标记避免紧随的画布选中事件回弹重开
+      if (submitted) { imagePanelHiddenRef.current = true; setShowImageDialog(false); }
     } catch (e) {
       showToast('error', '保存或提交失败，请重试');
       console.warn('图片生成前准备失败:', e);
