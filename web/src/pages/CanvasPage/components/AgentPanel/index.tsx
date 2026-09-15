@@ -18,8 +18,6 @@ import {
   RotateCcw,
   Package,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { fetchMySkills } from '@/api/skills';
@@ -61,64 +59,15 @@ import {
   readPersistedPanelWidth,
 } from './drawerWidth';
 import { isProcessItem, itemsFromBlocks, itemsFromLive, type TimelineItem, type Turn } from '../../hooks/sessionTimeline';
-import { ASSET_MENTION_ATTR, collectKnownAssets, rehypeAssetMentions, type KnownAsset } from './assetMentions';
-import { AssetMentionChip } from './AssetMentionChip';
+import { collectKnownAssets, type KnownAsset } from './assetMentions';
+import { ReplyText } from './ReplyText';
 import { LastTurnLine, ProcessGroup, TurnFooter } from './TurnTimeline';
 
 /** 父组件没传已应用集合时的空集。提到模块级是为了保持引用稳定，避免每次渲染都造一个新 Set。 */
 const EMPTY_APPLIED_IDS: ReadonlySet<string> = new Set<string>();
 
-/**
- * Agent 回复的 Markdown 渲染。
- *
- * 原来是手写的逐行解析器，只认标题、无序列表和引用：模型输出的表格原样显示成一堆竖线，
- * 有序列表退化成普通段落，围栏代码块的 ``` 直接印在正文里（IKA2VC-4）。这些都不是能靠
- * 补几条正则收住的，换成 react-markdown + GFM 一次解决，也顺带把嵌套、链接、删除线补上。
- *
- * 表格自带横向滚动容器：面板本来就窄，宽表格必须自己滚，不能把整个消息流撑出横向滚动条。
- */
-export function Markdown({ text, assets = [] }: { text: string; assets?: readonly KnownAsset[] }) {
-  // 本会话已知的素材名在正文里换成胶囊（IKDLW3）。插件按 assets 记忆：每次渲染造一个新插件会让
-  // react-markdown 重建整条处理链。
-  const rehypePlugins = useMemo(() => (assets.length ? [rehypeAssetMentions(assets)] : []), [assets]);
-  return (
-    <div className={styles.md}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={rehypePlugins}
-        components={{
-          // 插件把命中的名字标成带 data 属性的 span；其余 span 原样。
-          span: ({ node: _node, children, ...props }) => {
-            const attrs = props as Record<string, unknown>;
-            const assetId = attrs[ASSET_MENTION_ATTR];
-            if (typeof assetId !== 'string') return <span {...props}>{children}</span>;
-            return (
-              <AssetMentionChip
-                assetId={assetId}
-                label={String(attrs['data-asset-label'] ?? '')}
-                mediaType={attrs['data-asset-media'] === 'video' ? 'video' : 'image'}
-                url={typeof attrs['data-asset-url'] === 'string' ? attrs['data-asset-url'] : undefined}
-              />
-            );
-          },
-          table: ({ children }) => (
-            <div className={styles.mdTableWrap}>
-              <table>{children}</table>
-            </div>
-          ),
-          // 模型偶尔会输出链接。新标签页打开，并断开与本页的 opener 引用。
-          a: ({ children, href }) => (
-            <a href={href} target="_blank" rel="noreferrer noopener">
-              {children}
-            </a>
-          ),
-        }}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
-  );
-}
+/** Markdown 搬到了自己的文件（IKFLB9）；这里再导出一次，测试和别处的引用不用改。 */
+export { Markdown } from './Markdown';
 
 /**
  * 每个阶段的符号与样式。
@@ -579,7 +528,7 @@ function AssistantTurnBody({
         const key = keyOf(item);
         switch (item.kind) {
           case 'text':
-            return <Markdown key={key} text={item.text} assets={knownAssets} />;
+            return <ReplyText key={key} text={item.text} assets={knownAssets} />;
           case 'card': {
             const cardId = item.card.cardId ?? item.card.shotTitle;
             return (

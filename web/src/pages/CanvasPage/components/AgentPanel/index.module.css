@@ -1060,6 +1060,110 @@
   text-underline-offset: 2px;
 }
 
+/* ---- 追问的排版（IKFLB9 定稿「排版一」）：题头 + 选项列表 + 推荐框。字不动，只是长得像一道题。 ---- */
+.question {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 92%;
+  padding: 4px 0 2px;
+  font-size: var(--font-size-md);
+  line-height: 22px;
+}
+
+.questionHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--color-text-primary);
+}
+
+.questionNo {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-accent-agent);
+}
+
+.questionTitle {
+  font-weight: 600;
+}
+
+.questionAsk {
+  color: var(--color-text-secondary);
+}
+
+.questionBody,
+.questionRecBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.questionBody p,
+.questionRecBody p {
+  margin: 0;
+}
+
+.questionBody ul,
+.questionRecBody ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.questionOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.questionOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.questionKey {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 5px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.questionOptionText {
+  min-width: 0;
+}
+
+.questionLabel {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.questionDesc {
+  color: var(--color-text-secondary);
+}
+
+.questionRec {
+  margin-top: 2px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--color-accent-agent);
+  border-radius: 0 8px 8px 0;
+  background: var(--color-accent-agent-soft);
+  color: var(--color-text-secondary);
+}
+
+.questionRec strong {
+  color: var(--color-text-primary);
+}
+
 /* 表格自己横向滚动：面板窄，宽表格不能把整个消息流撑出横向滚动条 */
 .mdTableWrap {
   overflow-x: auto;
