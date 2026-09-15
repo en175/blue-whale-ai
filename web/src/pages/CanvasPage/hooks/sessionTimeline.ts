@@ -584,10 +584,31 @@ export function itemsFromLive(live: LiveRun, revealedText: string): TimelineItem
 
 /* ============ 过程组（IKFLB9 定稿） ============ */
 
-/** 条目里属于「过程」的那几种：思考、工具、等待，以及老记录整块的思考。正文与卡不在其中。 */
-export type ProcessItem = Extract<TimelineItem, { kind: 'reasoning' | 'thought' | 'tool' | 'waiting' }>;
+/**
+ * 条目里属于「过程」的那几种：思考、工具、等待，以及老记录整块的思考。正文与卡不在其中——但**写正文的那段时间**
+ * 在（`writing`）：一轮 27s 里模型把回复一个字一个字打出来花了 7s，这 7s 不在任何思考、工具、等待段里，
+ * 不记上头上「已处理 27s」就和里面各段加不起来（项目 607 第一轮）。落库的正文部件不带时刻，所以它是用
+ * 这一轮的总时长减去其余各段算出来的，只在落库之后有。
+ */
+export type TimelineProcessItem = Extract<TimelineItem, { kind: 'reasoning' | 'thought' | 'tool' | 'waiting' }>;
+export type ProcessItem = TimelineProcessItem | { kind: 'writing'; elapsedMs: number };
 
-export function isProcessItem(item: TimelineItem): item is ProcessItem {
+/** 短于它的差额不单独成一段：那是几百毫秒的调度间隔，不是在写回复。 */
+export const MIN_WRITING_MS = 500;
+
+/**
+ * 头上的总时长减去各段之和，剩下的就是写回复的时间（加上零星几百毫秒的调度缝）。
+ * 没有总时长（还在跑）或差额太小就不补。
+ */
+export function withWriting(items: readonly ProcessItem[], totalMs: number | null): ProcessItem[] {
+  if (totalMs === null) return [...items];
+  const summed = items.reduce((acc, item) => acc + processItemElapsedMs(item, 0), 0);
+  const rest = totalMs - summed;
+  if (rest < MIN_WRITING_MS) return [...items];
+  return [...items, { kind: 'writing', elapsedMs: rest }];
+}
+
+export function isProcessItem(item: TimelineItem): item is TimelineProcessItem {
   return item.kind === 'reasoning' || item.kind === 'thought' || item.kind === 'tool' || item.kind === 'waiting';
 }
 
@@ -615,6 +636,11 @@ export function phasesOf(items: readonly ProcessItem[]): ProcessPhase[] {
       open = null;
       continue;
     }
+    if (item.kind === 'writing') {
+      phases.push({ name: '写回复', items: [item] });
+      open = null;
+      continue;
+    }
     if (!open) {
       open = { name: nonToolCount === 0 ? '理解需求' : '整理回复', items: [] };
       nonToolCount += 1;
@@ -630,6 +656,7 @@ export function phasesOf(items: readonly ProcessItem[]): ProcessPhase[] {
 
 /** 一条过程条目还在跑吗。 */
 export function processItemRunning(item: ProcessItem): boolean {
+  if (item.kind === 'writing') return false;
   if (item.kind === 'thought') return item.running;
   if (item.kind === 'tool') return item.status === 'running';
   if (item.kind === 'reasoning') return item.live;
@@ -642,7 +669,7 @@ export function processItemRunning(item: ProcessItem): boolean {
  */
 export function processItemElapsedMs(item: ProcessItem, now: number): number {
   if (item.kind === 'reasoning') return 0;
-  if (item.kind === 'waiting') return item.elapsedMs;
+  if (item.kind === 'waiting' || item.kind === 'writing') return item.elapsedMs;
   if (item.elapsedMs !== null) return item.elapsedMs;
   if (item.startedAt !== null && processItemRunning(item)) return Math.max(0, now - item.startedAt);
   return 0;

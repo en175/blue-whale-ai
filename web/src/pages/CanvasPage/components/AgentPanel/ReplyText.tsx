@@ -20,9 +20,9 @@ function QuestionBlock({ q, assets }: { q: Extract<ReplySegment, { kind: 'questi
       {q.body && <Markdown text={q.body} assets={assets} className={styles.questionBody} />}
       {q.options.length > 0 && (
         <div className={styles.questionOptions}>
-          {q.options.map((o) => (
-            <div key={o.key} className={styles.questionOption}>
-              <span className={styles.questionKey}>{o.key}</span>
+          {q.options.map((o, i) => (
+            <div key={i} className={styles.questionOption}>
+              <span className={`${styles.questionKey} ${o.key ? '' : styles.questionKeyDot}`}>{o.key || '•'}</span>
               <span className={styles.questionOptionText}>
                 <span className={styles.questionLabel}>{o.label}</span>
                 {o.desc && <span className={styles.questionDesc}>：{o.desc}</span>}

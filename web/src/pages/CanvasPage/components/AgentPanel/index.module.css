@@ -1138,6 +1138,11 @@
   color: var(--color-text-secondary);
 }
 
+.questionKeyDot {
+  border-color: transparent;
+  color: var(--color-text-tertiary);
+}
+
 .questionOptionText {
   min-width: 0;
 }
@@ -2208,8 +2213,16 @@
   border-radius: var(--radius-sm);
 }
 
-.processPhaseHead:hover .toolCallLabel {
+.processPhaseHead:disabled {
+  cursor: default;
+}
+
+.processPhaseHead:not(:disabled):hover .toolCallLabel {
   color: var(--color-text-primary);
+}
+
+.processChevron:empty {
+  width: 12px;
 }
 
 .processPhaseHead .toolCallLabel {

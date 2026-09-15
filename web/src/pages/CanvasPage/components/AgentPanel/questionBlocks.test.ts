@@ -96,6 +96,27 @@ describe('splitReplySegments', () => {
     });
   });
 
+  it('模型不编字母、只是一条条列出来的选项也认成选项，字母留空（项目 607）', () => {
+    const segs = splitReplySegments(`**❓ Q1 — 用途与尺寸**：这张图你打算用在哪？
+
+- 通用桌面壁纸（横版 16:9，细节丰富）
+- 手机壁纸 / 锁屏（竖版 9:16，纵向构图）
+- 还没定，先做一张好看的
+
+➡️ 推荐：通用桌面壁纸，16:9 横版。`);
+    expect(segs[0]).toMatchObject({
+      kind: 'question',
+      no: 'Q1',
+      title: '用途与尺寸',
+      options: [
+        { key: '', label: '通用桌面壁纸（横版 16:9，细节丰富）', desc: '' },
+        { key: '', label: '手机壁纸 / 锁屏（竖版 9:16，纵向构图）', desc: '' },
+        { key: '', label: '还没定，先做一张好看的', desc: '' },
+      ],
+      recommendation: '推荐：通用桌面壁纸，16:9 横版。',
+    });
+  });
+
   it('没有题的正文原样一段 markdown', () => {
     expect(splitReplySegments('卡写好了。\n\n- 一\n- 二')).toEqual([{ kind: 'markdown', text: '卡写好了。\n\n- 一\n- 二' }]);
   });

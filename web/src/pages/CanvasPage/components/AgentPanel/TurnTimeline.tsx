@@ -16,6 +16,7 @@ import {
   processItemRunning,
   settledStepLabel,
   toolLabel,
+  withWriting,
   type ProcessItem,
   type ProcessPhase,
   type TimelineItem,
@@ -280,12 +281,14 @@ export function ToolCallRow({ item }: { item: Extract<TimelineItem, { kind: 'too
  *
  * 运行中是「✶ 处理中」并展开，正在跑的那个阶段也展开——那段等待正是它要填的；结束就收。用户点过以用户为准。
  * `totalMs` 是这一轮的总耗时（落库后取轮的账，和输入框上方那一行同一个数）；没有就把各段加起来。
+ * 总数减各段剩下的是写回复的时间，补成最后一段「写回复」，头上的数和里面的加得起来（withWriting）。
  */
-export function ProcessGroup({ items, live, totalMs = null }: { items: readonly ProcessItem[]; live: boolean; totalMs?: number | null }) {
+export function ProcessGroup({ items: given, live, totalMs = null }: { items: readonly ProcessItem[]; live: boolean; totalMs?: number | null }) {
   const [override, setOverride] = useState<boolean | null>(null);
   const open = override ?? live;
   const now = useNow(live);
-  if (items.length === 0) return null;
+  if (given.length === 0) return null;
+  const items = live ? given : withWriting(given, totalMs);
   const phases = phasesOf(items);
   const summed = items.reduce((acc, item) => acc + processItemElapsedMs(item, now), 0);
   const total = totalMs ?? summed;
@@ -319,13 +322,21 @@ export function ProcessGroup({ items, live, totalMs = null }: { items: readonly 
 function PhaseRow({ phase, now }: { phase: ProcessPhase; now: number }) {
   const running = phase.items.some(processItemRunning);
   const [override, setOverride] = useState<boolean | null>(null);
-  const open = override ?? running;
+  // 写回复那一段没有可展开的内容：回复就在下面。
+  const expandable = phase.items.some((item) => item.kind !== 'writing');
+  const open = expandable && (override ?? running);
   const elapsed = phase.items.reduce((acc, item) => acc + processItemElapsedMs(item, now), 0);
   return (
     <div className={styles.processPhase}>
-      <button type="button" className={styles.processPhaseHead} onClick={() => setOverride(!open)} aria-expanded={open}>
+      <button
+        type="button"
+        className={styles.processPhaseHead}
+        onClick={expandable ? () => setOverride(!open) : undefined}
+        disabled={!expandable}
+        aria-expanded={expandable ? open : undefined}
+      >
         <span className={styles.processChevron} aria-hidden="true">
-          {open ? <ChevronDown size={12} strokeWidth={2.5} /> : <ChevronRight size={12} strokeWidth={2.5} />}
+          {!expandable ? null : open ? <ChevronDown size={12} strokeWidth={2.5} /> : <ChevronRight size={12} strokeWidth={2.5} />}
         </span>
         <span className={`${styles.toolCallMark} ${running ? styles.processPhaseMarkRunning : styles.processPhaseMarkDone}`} aria-hidden="true">
           {running ? <Loader2 size={12} strokeWidth={2.5} className={styles.spin} /> : <Check size={12} strokeWidth={2.5} />}
@@ -345,6 +356,8 @@ function PhaseRow({ phase, now }: { phase: ProcessPhase; now: number }) {
                 return <ToolCallRow key={i} item={item} />;
               case 'waiting':
                 return <WaitingRow key={i} item={item} />;
+              case 'writing':
+                return null;
             }
           })}
         </div>

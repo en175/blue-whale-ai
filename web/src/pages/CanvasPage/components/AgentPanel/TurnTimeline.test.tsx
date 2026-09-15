@@ -118,7 +118,7 @@ describe('ProcessGroup（IKFLB9 定稿）', () => {
     { kind: 'thought', text: '还没定的：视角、时刻。', running: false, startedAt: null, elapsedMs: 2_500 },
   ];
 
-  it('结束：一行「已处理 · 思考 N 段 · 工具 N 次」默认折起；点开是阶段，阶段再点开才是思考原文', async () => {
+  it('结束：一行「已处理 · 思考 N 段 · 工具 N 次」默认折起；点开是阶段，阶段再点开才是思考原文；总数减各段是「写回复」', async () => {
     await render(createElement(ProcessGroup, { items, live: false, totalMs: 31_000 }));
     const head = mountNode.querySelector('button')!;
     expect(head.textContent).toBe('✻已处理 31s · 思考 2 段 · 工具 1 次');
@@ -129,6 +129,11 @@ describe('ProcessGroup（IKFLB9 定稿）', () => {
     expect(mountNode.textContent).toContain('15s');
     expect(mountNode.textContent).toContain('查阅对应的创作方法');
     expect(mountNode.textContent).toContain('整理回复');
+    // 31 − (9.8 + 5.2 + 0.03 + 2.5) = 13.47s 是把回复打出来的时间，不补上头上的数和里面的加不起来。
+    expect(mountNode.textContent).toContain('写回复');
+    expect(mountNode.textContent).toContain('13s');
+    const writing = [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.includes('写回复'))!;
+    expect(writing.hasAttribute('disabled')).toBe(true);
     expect(mountNode.textContent).not.toContain('先按创作方法');
     const phase = [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.includes('理解需求'))!;
     await act(async () => phase.click());

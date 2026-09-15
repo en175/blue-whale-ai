@@ -11,6 +11,7 @@
  */
 
 export interface QuestionOption {
+  /** `A`；模型没编字母时是空串，界面画一个点。 */
   key: string;
   label: string;
   desc: string;
@@ -34,6 +35,8 @@ export type ReplySegment =
 
 const QUESTION_LINE = /^\s*(?:\*\*)?\s*❓\s*(.*)$/;
 const OPTION_LINE = /^\s*(?:[-*•]\s*)?(?:\*\*)?\s*([A-Ha-h])\s*[.．、)）]\s*(.*)$/;
+/** 模型有时不编字母，只是一条条列出来（项目 607：「- 通用桌面壁纸（横版 16:9）」）。题里 ➡️ 之前的列表项一样是选项。 */
+const PLAIN_OPTION_LINE = /^\s*[-*•]\s+(.+)$/;
 const RECOMMEND_LINE = /^\s*➡️\s*(.*)$/;
 const HR_LINE = /^\s*-{3,}\s*$/;
 
@@ -41,10 +44,13 @@ function stripBold(text: string): string {
   return text.replace(/\*\*/g, '').trim();
 }
 
+/** 名字和说明之间的冒号：全角的一律算；半角的两边都不是数字才算，「16:9」「9:16」里的不是。 */
+const LABEL_COLON = /^(.+?)\s*(?:：|(?<!\d):(?!\d))\s*(.*)$/s;
+
 /** 「A. 港口平视：从海面方向看小镇」→ 名字 + 说明；没有冒号就整句当名字。 */
 function splitLabel(text: string): { label: string; desc: string } {
   const plain = stripBold(text);
-  const m = /^(.+?)\s*[：:]\s*(.*)$/s.exec(plain);
+  const m = LABEL_COLON.exec(plain);
   if (!m) return { label: plain.replace(/[。.]$/, ''), desc: '' };
   return { label: m[1].trim(), desc: m[2].trim() };
 }
@@ -52,7 +58,7 @@ function splitLabel(text: string): { label: string; desc: string } {
 /** 题头「**Q1 — 视角与构图**：从什么角度看这个镇？」→ 编号、标题、问句。 */
 function parseHead(text: string): { no: string | null; title: string; ask: string } {
   const plain = stripBold(text);
-  const colon = /^(.+?)\s*[：:]\s*(.*)$/s.exec(plain);
+  const colon = LABEL_COLON.exec(plain);
   const titlePart = (colon ? colon[1] : plain).trim();
   const ask = colon ? colon[2].trim() : '';
   const numbered = /^(Q\d+)\s*[—–\-:：]?\s*(.*)$/i.exec(titlePart);
@@ -102,6 +108,11 @@ export function splitReplySegments(text: string): ReplySegment[] {
       const o = OPTION_LINE.exec(line);
       if (o) {
         options.push({ key: o[1].toUpperCase(), ...splitLabel(o[2]) });
+        continue;
+      }
+      const plain = PLAIN_OPTION_LINE.exec(line);
+      if (plain) {
+        options.push({ key: '', ...splitLabel(plain[1]) });
         continue;
       }
       body.push(line);
