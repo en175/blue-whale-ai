@@ -92,7 +92,7 @@ worker/
 - [x] 工程骨架 / 配置绑定 / `/ready` / 消息契约测试（IKEL4L）
 - [x] **Job 状态机 extract 子集**（IKENZZZ）：
   - [x] `DataSourceConfig`：DATABASE_URL 解析（mysql:// → jdbc:mysql://，含特殊字符）+ HikariCP 保守池（max 10）
-  - [x] persistence 包：`GenerationJob` / `Asset` / `GenerationJobLog` / `ProjectEvent` / `Canvas` + 对应 Mapper
+  - [x] persistence 包：`GenerationJob` / `Asset` / `GenerationJobLog` / `ProjectEvent` + 对应 Mapper
     - SQL 逐字移植自 TS Prisma 调用，注释标注 TS 源码行号
     - CAS updates 返回 int，service 层映射 0→false
   - [x] service `JobStateMachineService`（@Service，单例权威）：
@@ -100,8 +100,7 @@ worker/
     - `updateMediaExtractProgress` → boolean：钳制 0-99 + 续租（lease≈now+120s）
     - `publishMediaExtractResult` → boolean（@Transactional）
     - `failMediaExtractJob` → boolean（@Transactional）
-  - [x] service `CanvasNodeService`：画布节点 CAS 更新（版本守卫 + 冲突重试 MAX_RETRY=3）
-    - `updateMediaExtractNodeToAudio` / `failMediaExtractNode`
+  - [x] ~~service `CanvasNodeService`~~ 已删除（IKFS5W）：画布改由前端写，worker 不再回写 canvas
 - [x] **media_extract 执行路径**（IKEL4N 刀①）：
   - [x] mq `AbstractGenerationConsumer`：TEMPLATE METHOD（start/stop lifecycle, receive loop, poison ack, Semaphore 并发）
   - [x] mq `MediaExtractConsumer`：tag=media_extract, digitGuard=false

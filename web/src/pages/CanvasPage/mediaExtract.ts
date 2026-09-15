@@ -1,7 +1,10 @@
 import { readJobFailText } from '@/api/jobs';
 
-/** 后端注入的提取音频占位节点 id 前缀：`media-extract-{jobId}`。 */
+/** 提取音频占位节点 id 前缀：`media-extract-{jobId}`。 */
 export const MEDIA_EXTRACT_NODE_PREFIX = 'media-extract-';
+
+/** 占位音频节点相对源视频节点的横向偏移（节点宽约 280 + 间距）。 */
+export const MEDIA_EXTRACT_NODE_OFFSET = 340;
 
 const ERROR_CODE_TEXT: Record<string, string> = {
   video_has_no_audio_track: '视频没有音轨',
@@ -22,12 +25,43 @@ export function isMediaExtractNodeId(id: string): boolean {
   return id.startsWith(MEDIA_EXTRACT_NODE_PREFIX);
 }
 
-export function snapshotHasMediaExtractNode(
-  nodes: Array<{ id?: string } | null | undefined>,
-  jobId: string | number,
-): boolean {
-  const nodeId = mediaExtractNodeId(jobId);
-  return nodes.some((node) => node?.id === nodeId);
+/** 音频展示名：视频文件名去扩展名 + "(audio)"（如 测试视频.mp4 → 测试视频(audio).mp3）。 */
+export function audioDisplayName(videoFileName: unknown): string {
+  const name = typeof videoFileName === 'string' ? videoFileName.trim() : '';
+  if (!name) return '提取音频(audio).mp3';
+  return `${name.replace(/\.[^./]+$/, '')}(audio).mp3`;
+}
+
+/** 提取音频占位节点（IKFS5W）：建任务前本地插入源视频节点右侧，genStatus=generating + jobId，
+ *  后续由轮询终态补丁收敛、自动保存落库——画布只由前端写，服务端与 worker 不再回写。 */
+export function buildMediaExtractPlaceholderNode(input: {
+  jobId: string | number;
+  source?: { position?: { x?: number; y?: number }; data?: Record<string, unknown> } | null;
+}): {
+  id: string;
+  type: 'mediaNode';
+  position: { x: number; y: number };
+  data: Record<string, unknown>;
+} {
+  const x = Number(input.source?.position?.x ?? 0);
+  const y = Number(input.source?.position?.y ?? 0);
+  return {
+    id: mediaExtractNodeId(input.jobId),
+    type: 'mediaNode',
+    position: {
+      x: Math.round(Number.isFinite(x) ? x + MEDIA_EXTRACT_NODE_OFFSET : MEDIA_EXTRACT_NODE_OFFSET),
+      y: Math.round(Number.isFinite(y) ? y : 0),
+    },
+    data: {
+      src: '',
+      fileName: audioDisplayName(input.source?.data?.fileName),
+      mediaType: 'audio',
+      genStatus: 'generating',
+      progress: 0,
+      jobId: input.jobId,
+      toolMode: 'select',
+    },
+  };
 }
 
 export function mediaExtractErrorText(

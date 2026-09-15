@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { mediaExtractErrorText, mediaExtractTerminalPatch } from './mediaExtract';
+import {
+  buildMediaExtractPlaceholderNode,
+  isMediaExtractNodeId,
+  mediaExtractErrorText,
+  mediaExtractTerminalPatch,
+  mediaExtractNodeId,
+} from './mediaExtract';
 
 describe('mediaExtractErrorText', () => {
   it('优先 msg，其次 message，最后才按旧 code 映射', () => {
@@ -23,5 +29,39 @@ describe('mediaExtractTerminalPatch', () => {
       genStatus: 'failed',
       errorText: '视频没有音轨',
     });
+  });
+});
+
+describe('buildMediaExtractPlaceholderNode', () => {
+  it('占位节点 id 与轮询/终态补丁共用同一约定', () => {
+    const node = buildMediaExtractPlaceholderNode({
+      jobId: '400',
+      source: { position: { x: 100, y: 220 }, data: { fileName: '测试视频.mp4' } },
+    });
+    expect(node.id).toBe(mediaExtractNodeId('400'));
+    expect(isMediaExtractNodeId(node.id)).toBe(true);
+  });
+
+  it('插在源视频节点右侧，展示名沿用源视频文件名', () => {
+    const node = buildMediaExtractPlaceholderNode({
+      jobId: 400,
+      source: { position: { x: 100, y: 220 }, data: { fileName: '测试视频.mp4' } },
+    });
+    expect(node.type).toBe('mediaNode');
+    expect(node.position).toEqual({ x: 440, y: 220 });
+    expect(node.data).toMatchObject({
+      src: '',
+      fileName: '测试视频(audio).mp3',
+      mediaType: 'audio',
+      genStatus: 'generating',
+      progress: 0,
+      jobId: 400,
+    });
+  });
+
+  it('源节点信息缺失时回落默认展示名与偏移', () => {
+    const node = buildMediaExtractPlaceholderNode({ jobId: '401', source: null });
+    expect(node.position).toEqual({ x: 340, y: 0 });
+    expect(node.data.fileName).toBe('提取音频(audio).mp3');
   });
 });

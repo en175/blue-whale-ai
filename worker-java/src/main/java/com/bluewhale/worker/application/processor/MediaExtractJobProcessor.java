@@ -5,7 +5,6 @@ import com.bluewhale.worker.domain.error.MediaExtractError;
 import com.bluewhale.worker.infrastructure.media.FfmpegExtractor;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.application.service.AssetSourceService;
-import com.bluewhale.worker.application.service.CanvasNodeService;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.application.service.JobStateMachineService;
@@ -27,7 +26,9 @@ import java.util.UUID;
 /**
  * media_extract 作业处理器（media-extract-runner.ts:176-325 逐字移植）。
  * <p>
- * 编排流程：claim → 解析源资产 → 下载 → ffmpeg 抽音轨 → 上传 TOS → 发布资产 → 画布节点更新。
+ * 编排流程：claim → 解析源资产 → 下载 → ffmpeg 抽音轨 → 上传 TOS → 发布资产。
+ * <p>
+ * 画布不写：产物经任务状态（GET /api/jobs/:id 的 asset）交给前端，画布节点由前端落库（IKFS5W）。
  * <p>
  * 错误码映射（media-extract-runner.ts:304-315 + error-codes.ts:20-70）：
  * <ul>
@@ -62,21 +63,18 @@ public class MediaExtractJobProcessor implements JobProcessor {
     private final AssetSourceService assetSource;
     private final TosMediaStorage tosService;
     private final FfmpegExtractor ffmpeg;
-    private final CanvasNodeService canvasNodeService;
     private final String workerId;
 
     public MediaExtractJobProcessor(
             JobStateMachineService stateMachine,
             AssetSourceService assetSource,
             TosMediaStorage tosService,
-            FfmpegExtractor ffmpeg,
-            CanvasNodeService canvasNodeService
+            FfmpegExtractor ffmpeg
     ) {
         this.stateMachine = stateMachine;
         this.assetSource = assetSource;
         this.tosService = tosService;
         this.ffmpeg = ffmpeg;
-        this.canvasNodeService = canvasNodeService;
         // workerId = extract-{hostname}-{pid}（media-extract-worker.service.ts:18）
         this.workerId = "extract-" + hostname() + "-" + ProcessHandle.current().pid();
     }
@@ -179,17 +177,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
                 log.warn("[media_extract] 终态失败(发布守卫未命中) jobId={}（stale worker 或已终态）", claim.id());
             } else {
                 log.info("[media_extract] 发布成功 jobId={}", claim.id());
-                // 7. 画布节点更新（best-effort，失败不阻断：media-extract-runner.ts:284-301）
-                try {
-                    canvasNodeService.updateMediaExtractNodeToAudio(
-                            claim.id(), claim.projectId(),
-                            stored.url(), stored.mime(), stored.size(),
-                            extractResult.duration()
-                    );
-                } catch (Exception e) {
-                    log.warn("[media_extract] 画布节点更新失败(非阻断) jobId={}: {}",
-                            claim.id(), e.getMessage(), e);
-                }
             }
         } catch (Exception error) {
             // 错误映射（media-extract-runner.ts:303-315）
@@ -209,7 +196,8 @@ public class MediaExtractJobProcessor implements JobProcessor {
         }
     }
 
-    /** 失败处理（media-extract-runner.ts:136-160 failMediaExtract）。 */
+    /** 失败处理（media-extract-runner.ts:136-160 failMediaExtract）。
+     *  只落任务终态：画布失败态由前端按任务状态收敛（IKFS5W）。 */
     private void failMediaExtract(ClaimedMediaExtractJobDto claim, String code, String message) {
         stateMachine.failMediaExtractJob(new FailMediaExtractDto(
                 claim.id(),
@@ -219,14 +207,6 @@ public class MediaExtractJobProcessor implements JobProcessor {
                 message,
                 Map.of("raw", message)
         ));
-        // 画布占位节点置 failed（best-effort，失败不阻断）
-        try {
-            canvasNodeService.failMediaExtractNode(
-                    claim.id(), claim.projectId(), code, message);
-        } catch (Exception ignored) {
-            // 与 TS .catch(() => {}) 一致；best-effort 不阻断
-            log.debug("[media_extract] failMediaExtractNode best-effort 失败 jobId={}", claim.id());
-        }
     }
 
     /** 进度更新（media-extract-runner.ts:162-173 updateProgress）。 */

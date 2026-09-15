@@ -45,10 +45,10 @@ import { downloadFileNameOf } from './components/cardName';
 import type { MediaGenStatus } from './components/MediaNode';
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
 import {
+  buildMediaExtractPlaceholderNode,
   isMediaExtractNodeId,
   mediaExtractNodeId,
   mediaExtractTerminalPatch,
-  snapshotHasMediaExtractNode,
 } from './mediaExtract';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
@@ -5020,7 +5020,8 @@ export default function CanvasPage() {
     setShowMusicDialog(false);
   };
 
-  /** 视频整段提取音频：后端创建任务并注入音频节点；前端用返回的 job_id 轮询，终态本地收敛。 */
+  /** 视频整段提取音频（IKFS5W）：建任务后本地插入音频占位节点（画布只由前端写），
+   *  立刻落库避免刚建任务就关页丢节点，再用返回的 job_id 轮询，终态本地补丁收敛。 */
   const handleNodeExtractAudio = async (id: string) => {
     const node = mediaNodesRef.current.find((item) => item.id === id);
     const assetId = node?.data?.assetId as string | number | undefined;
@@ -5042,12 +5043,19 @@ export default function CanvasPage() {
         source_asset_id: assetId,
         output_format: 'mp3',
       });
-      const nodes = await refetch();
-      if (!snapshotHasMediaExtractNode(nodes, created.job_id)) {
-        showToast('warn', '提取任务已创建，但画布节点尚未出现，请刷新画布');
-        return;
-      }
-      pollJob(mediaExtractNodeId(created.job_id), created.job_id);
+      const nodeId = mediaExtractNodeId(created.job_id);
+      const placeholder = attachCallbacks(
+        buildMediaExtractPlaceholderNode({ jobId: created.job_id, source: node }) as Node,
+      );
+      // 同步写 ref：flushCanvasSave 读的是 ref，不同步会拿到旧签名而跳过持久化
+      setMediaNodes((prev) => {
+        const next = prev.some((item) => item.id === nodeId) ? prev : [...prev, placeholder];
+        mediaNodesRef.current = next;
+        return next;
+      });
+      pollJob(nodeId, created.job_id);
+      // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢节点
+      await flushCanvasSave(currentId).catch(() => {});
     } catch (error) {
       if (!isApiError(error)) showToast('error', '音频提取任务创建失败');
     }
