@@ -21,7 +21,8 @@ export class AssetsController {
     return ok(await this.assets.listByUser(user.userId, filter));
   }
 
-  /** 单个资产详情（画布/资产库弹窗用）：命中返回完整 AssetView，不归属/不存在 → 100301。 */
+  /** 单个资产详情（画布/资产库弹窗用）：命中返回 AssetDetailView（列表字段 + 生成提示词，
+   *  IKFSSO），不归属/不存在 → 100301。 */
   @Get(":assetId")
   async getOne(
     @CurrentUser() user: AuthenticatedUser,
