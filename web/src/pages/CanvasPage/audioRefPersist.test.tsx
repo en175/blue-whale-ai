@@ -378,13 +378,13 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     await clickNode('u2');
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声']), { timeout: 3000 });
 
-    // IKFR4Z 会话中空白点击不退出、不隐藏面板（AC-03/06：空白点击、平移缩放保持原目标和 Dock）
+    // IKFYH6 拍板 4：会话中空白点击只退选取、面板保留（已选参考保留）
     await act(async () => {
       flowProps.current.onPaneClick();
     });
     expect(refNames()).toEqual(['海浪声', '风声']);
-    // 完成会话后空白点击恢复 Q9 普通语义：隐藏面板（隐藏不丢弃，绑定保留供重开原目标）
-    await pressEscape();
+    expect(finishButton()).toBeUndefined();
+    // 再点空白恢复 Q9 普通语义：隐藏面板（隐藏不丢弃，绑定保留供重开原目标）
     await act(async () => {
       flowProps.current.onPaneClick();
     });
@@ -766,23 +766,27 @@ describe('IKFR4Z 音频参考持续选取与保存恢复闭环', () => {
     expect(pickMarks()).toEqual(['u1']);
   });
 
-  it('模式内空白点击不退出：面板与模式保持，继续选取有效', async () => {
+  it('模式内空白点击只退选取：面板保留；再点空白关面板（IKFYH6 拍板 4）', async () => {
     await renderPage();
     await clickNode('d1');
     await waitModelReady();
 
     await startCanvasPick();
     await clickNode('u1');
+    // 第一次空白点击：退出持续选取会话，面板与已选参考保留
     await act(async () => {
       flowProps.current.onPaneClick();
     });
-    expect(pickLock()).toBe(true);
+    expect(pickLock()).toBe(false);
     expect(panelOpen()).toBe(true);
     expect(edgePairs()).toEqual(['u1->d1']);
 
-    // 空白点击后继续选取仍有效
-    await clickNode('u2');
-    expect(edgePairs()).toEqual(['u1->d1', 'u2->d1']);
+    // 第二次空白点击：关闭面板（隐藏不丢内容，连线保留）
+    await act(async () => {
+      flowProps.current.onPaneClick();
+    });
+    expect(panelOpen()).toBe(false);
+    expect(edgePairs()).toEqual(['u1->d1']);
   });
 
   it('完成按钮退出：保留参考与原目标 Dock，恢复普通编辑与普通切换', async () => {

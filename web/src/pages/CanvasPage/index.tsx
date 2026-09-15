@@ -721,6 +721,8 @@ export default function CanvasPage() {
         files: [],
         params: { modelId: handoff.modelId, ratio: handoff.ratio, size: handoff.size },
       });
+      // IKFYH6：自由面板打开路径同样重置隐藏标记，否则选中变化关闭对该面板失效
+      imagePanelHiddenRef.current = false;
       setShowImageDialog(true);
       setShowBottomDialog(false);
       setShowAudioDialog(false);
@@ -2195,24 +2197,60 @@ export default function CanvasPage() {
     setPickAssetId(null);
   };
 
-  /** 画布空白处单击：取消节点选取模式；
-   *  IKFR4X 图片 / IKFR4Y 视频 / IKFR4Z 音频持续选取会话中不退出、不隐藏原目标面板（平移缩放照常，规格 AC-06） */
-  const handleCanvasPaneClick = () => {
-    cancelAgentCandidate();
-    if (imagePickSessionActive || videoPickSessionActive || audioPickSessionActive) return;
-    imagePanelHiddenRef.current = true;
-    videoPanelHiddenRef.current = true;
-    audioPanelHiddenRef.current = true;
+  /** IKFYH6 五面板统一关闭路径：与各面板右上角 X 完全等价（关闭=隐藏不丢内容，重开恢复）。
+   *  X 按钮 onClose 同样改调这一组函数，保证空白点击/画布外 UI/Esc 与 X 语义一致。 */
+  const resetPickState = () => {
     setPickMode(null);
     setPickTarget(null);
     setPickProductId(null);
     setPickAssetId(null);
-    // Q9：点击空白隐藏图片/音频生成面板（面板编辑已实时写回节点 data，隐藏不丢弃内容）。
-    // 视频底部对话框无论由工具栏还是节点唤起，点击画布其他位置均不自动关闭。
-    // 空白点击在 React Flow 是 PaneClick；onSelectionChange 的空选中可能是
-    // 「取消旧选中→选中新卡」的过渡事件，不能作为关闭依据（IKDMQV）。
-    if (imageDraftId) setShowImageDialog(false);
-    if (audioDraftId) setShowAudioDialog(false);
+  };
+  const closeVideoDialog = () => {
+    videoPanelHiddenRef.current = true;
+    setShowBottomDialog(false);
+    setVideoFreeRefs({ reference: [] });
+    setPickMode(null);
+    setPickTarget(null);
+    setPickRefRole(null);
+    setVideoPickSession(undefined);
+    setVideoAssetPickRole('reference');
+    setVideoAssetPickKind('video');
+  };
+  const closeImageDialog = () => {
+    imagePanelHiddenRef.current = true;
+    setShowImageDialog(false);
+    endImagePickSession();
+    setImagePickResult(null);
+  };
+  const closeAudioDialog = () => {
+    audioPanelHiddenRef.current = true;
+    setShowAudioDialog(false);
+    endAudioPickSession();
+  };
+  const closeTextGenDialog = () => setShowTextGenDialog(false);
+  const closeMusicDialog = () => setShowMusicDialog(false);
+  const dismissAllGenPanels = () => {
+    closeVideoDialog();
+    closeImageDialog();
+    closeAudioDialog();
+    closeTextGenDialog();
+    closeMusicDialog();
+  };
+
+  /** 画布空白处单击（React Flow PaneClick，拖拽平移后天然不触发——任何拖拽平移都不会误关）：
+   *  IKFYH6 拍板 4——持续选取会话/单次选取进行中点空白只退选取，面板保留（再点一次空白才关）；
+   *  否则五面板统一关闭（推翻视频面板「点空白不关」旧设计；面板编辑实时写回节点 data，隐藏不丢内容）。
+   *  onSelectionChange 的空选中可能是「取消旧选中→选中新卡」的过渡事件，不能作为关闭依据（IKDMQV）。 */
+  const handleCanvasPaneClick = () => {
+    cancelAgentCandidate();
+    if (imagePickSessionActive) { endImagePickSession(); return; }
+    if (videoPickSessionActive) { endVideoPickSession(); return; }
+    if (audioPickSessionActive) { endAudioPickSession(); return; }
+    if (pickMode || pickTarget) {
+      resetPickState();
+      return;
+    }
+    dismissAllGenPanels();
   };
 
   /** 选中变化（IKDMQU P1/Q9，IKDMQV 修订）：多选或单选切换到非绑定目标时隐藏面板；
@@ -2248,7 +2286,82 @@ export default function CanvasPage() {
     if (!imagePanelHiddenRef.current) syncPanelVisible(imageDraftId, setShowImageDialog);
     if (!videoPanelHiddenRef.current) syncPanelVisible(videoDraftId, setShowBottomDialog);
     if (!audioPanelHiddenRef.current) syncPanelVisible(audioDraftId, setShowAudioDialog);
+    // IKFYH6：自由面板（无绑定草稿）与文本/音乐面板纳入同一关闭口径——单选其他卡或多选即关（只关不开，
+    // 不做「命中恢复」）。hiddenRef 豁免沿用：到节点选择命中、@ 菜单选中素材后紧随的 selection 变化不误关
+    //（openVideoDraftDialog 文本选取、视频自由/绑定选取、handleImageAtMention 等既有保护分支）。
+    const hideFreePanel = (
+      hiddenRef: { current: boolean },
+      shown: boolean,
+      setShow: (visible: boolean) => void,
+    ) => {
+      if (hiddenRef.current || !shown) return;
+      if (soloId || candidates.length > 1) setShow(false);
+    };
+    if (!imageDraftId) hideFreePanel(imagePanelHiddenRef, showImageDialog, setShowImageDialog);
+    if (!videoDraftId) hideFreePanel(videoPanelHiddenRef, showBottomDialog, setShowBottomDialog);
+    if (!audioDraftId) hideFreePanel(audioPanelHiddenRef, showAudioDialog, setShowAudioDialog);
+    // 文本生成面板恒绑定文生文卡：命中绑定卡保持，其余单选/多选关闭（无 hiddenRef 语义，重开只经点卡）
+    if (showTextGenDialog && textGenDraftId && ((soloId && soloId !== textGenDraftId) || candidates.length > 1)) {
+      setShowTextGenDialog(false);
+    }
+    // 音乐面板无绑定目标：任何单选/多选即关
+    if (showMusicDialog && (soloId || candidates.length > 1)) setShowMusicDialog(false);
   };
+
+  /** IKFYH6 画布外 UI 点击关闭：document 捕获阶段 click——捕获先于 React 事件处理器执行，
+   *  同一次点击先到此（面板尚未因该点击打开），「刚打开的面板」不会被误关。
+   *  豁免：「面板领土」（五面板根 + @菜单/资产弹窗等 portal 浮层，data-gen-panel-territory 标记）、
+   *  画布区域（.react-flow，空白归 PaneClick、节点归 selection sync）；右键/中键不关（button!==0）。
+   *  用 click 不用 mousedown，并校验按下与抬起位移：拖拽平移/框选拖出画布边缘产生的 click 不算原地点击。 */
+  const anyGenPanelOpen =
+    showBottomDialog || showImageDialog || showAudioDialog || showTextGenDialog || showMusicDialog;
+  useEffect(() => {
+    if (!anyGenPanelOpen) return;
+    /** 原地点击与拖拽的分界：按下与抬起的像素位移超过该值即视为拖拽（平移/框选拖出画布边缘） */
+    const CLICK_DRAG_SLOP_PX = 4;
+    let downAt: { x: number; y: number } | null = null;
+    const onMouseDown = (event: MouseEvent) => {
+      downAt = { x: event.clientX, y: event.clientY };
+    };
+    const onClick = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('[data-gen-panel-territory]')) return;
+      if (target.closest('.react-flow')) return;
+      if (downAt && Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > CLICK_DRAG_SLOP_PX) return;
+      dismissAllGenPanels();
+    };
+    document.addEventListener('mousedown', onMouseDown, true);
+    document.addEventListener('click', onClick, true);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown, true);
+      document.removeEventListener('click', onClick, true);
+    };
+    // dismissAllGenPanels 仅引用稳定的 setState/useCallback，不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyGenPanelOpen]);
+
+  /** IKFYH6 Esc 优先级链：@ 菜单开着先关菜单（菜单自行处理，IKFXOR）→ 持续选取会话先退选取
+   * （既有 session handler，与本监听同级）→ 单次选取取消选取 → 光标在输入框内不动
+   * （复用 isEditableKeyboardTarget）→ 其余情况关闭五面板。 */
+  useEffect(() => {
+    if (!anyGenPanelOpen) return;
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (document.querySelector('[data-canvas-keyboard-scope="mention"]')) return;
+      if (isEditableKeyboardTarget(event.target)) return;
+      if (imagePickSessionActive || videoPickSessionActive || audioPickSessionActive) return;
+      if (pickMode || pickTarget) {
+        resetPickState();
+        return;
+      }
+      dismissAllGenPanels();
+    };
+    window.addEventListener('keydown', onKeydown);
+    return () => window.removeEventListener('keydown', onKeydown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyGenPanelOpen, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
 
   /** 节点拖拽结束：同步本次全部拖动节点的新坐标到父组件 state，触发自动保存。
    *  多选整组拖拽时 React Flow 第三参含同组全部节点；只回写被抓取节点会让父层坐标过期，
@@ -5018,6 +5131,8 @@ export default function CanvasPage() {
     const ref = nodeRefOf(id);
     if (!ref) return;
     setAudioSeed({ ts: Date.now() });
+    // IKFYH6：自由音频面板打开路径同样重置隐藏标记，否则选中变化关闭对该面板失效
+    audioPanelHiddenRef.current = false;
     setShowAudioDialog(true);
     setShowBottomDialog(false);
     setShowImageDialog(false);
@@ -6627,7 +6742,9 @@ export default function CanvasPage() {
             {showEdges ? <Link size={14} strokeWidth={2} /> : <Link2Off size={14} strokeWidth={2} />}
           </button>
           {saveStatus !== 'idle' && (
+            // IKFYH6：保存状态与重试是面板编辑落盘链路的自有 UI，归「面板领土」——点重试保存不关面板
             <span
+              data-gen-panel-territory
               className={`${styles.saveStatus} ${saveStatus === 'error' ? styles.saveStatusError : ''}`}
             >
               {saveStatus === 'saving' && '保存中…'}
@@ -6662,17 +6779,7 @@ export default function CanvasPage() {
                 ? (ids) => handleReorderAttachments(videoSeed.targetNodeId!, ids)
                 : undefined
             }
-            onClose={() => {
-              videoPanelHiddenRef.current = true;
-              setShowBottomDialog(false);
-              setVideoFreeRefs({ reference: [] });
-              setPickMode(null);
-              setPickTarget(null);
-              setPickRefRole(null);
-              setVideoPickSession(undefined);
-              setVideoAssetPickRole('reference');
-              setVideoAssetPickKind('video');
-            }}
+            onClose={closeVideoDialog}
             onSend={handleDialogSend}
             onPickFromCanvas={(kind, role) => { endImagePickSession(); setPickMode(kind); setPickTarget('video'); setPickRefRole(role ?? null); setVideoPickSession(videoDraftId ?? null); }}
             onPickFromAssets={(kind, role) => {
@@ -6753,7 +6860,7 @@ export default function CanvasPage() {
                   }
                 : undefined
             }
-            onClose={() => { imagePanelHiddenRef.current = true; setShowImageDialog(false); endImagePickSession(); setImagePickResult(null); }}
+            onClose={closeImageDialog}
             onSend={handleImageDialogSend}
             onPickFromCanvas={() => { setPickMode('image'); setPickTarget('image'); setImagePickSession(imageDraftId); }}
             onPickFromAssets={() => openAssetsPicker('imageDialog')}
@@ -6776,7 +6883,7 @@ export default function CanvasPage() {
               : ''}
             attachments={textAttachmentsOf(textGenDraftId)}
             followAnchor={followAnchor}
-            onClose={() => setShowTextGenDialog(false)}
+            onClose={closeTextGenDialog}
             onSend={handleTextGenSend}
             onParamsChange={(patch) => {
               setTextNodes((prev) =>
@@ -6802,24 +6909,24 @@ export default function CanvasPage() {
             IKFR4Y 视频持续会话同款退出入口，首尾帧入口为槽位连续替换语义） */}
         {pickMode && pickTarget && (showImageDialog || showBottomDialog || showAudioDialog || pickMode === 'product' || pickMode === 'asset') && (
           imagePickSessionActive ? (
-            <div className={`${styles.pickHint} ${styles.pickHintSession}`}>
-              <span>从节点添加素材：连续点击画布中的图片节点带入参考；空白点击不退出，完成后点「完成选取」或按 Esc</span>
+            <div className={`${styles.pickHint} ${styles.pickHintSession}`} data-gen-panel-territory>
+              <span>从节点添加素材：连续点击画布中的图片节点带入参考；点击空白、按 Esc 或点「完成选取」结束选取</span>
               <button type="button" className={styles.pickHintFinish} onClick={endImagePickSession}>完成选取</button>
             </div>
           ) : videoPickSessionActive ? (
-            <div className={`${styles.pickHint} ${styles.pickHintSession}`}>
+            <div className={`${styles.pickHint} ${styles.pickHintSession}`} data-gen-panel-territory>
               <span>{(pickRefRole === 'first' || pickRefRole === 'last')
-                ? '从节点添加素材：连续点击画布中的图片节点替换当前首帧/尾帧槽位；空白点击不退出，完成后点「完成选取」或按 Esc'
-                : '从节点添加素材：连续点击画布中的图片、视频或音频节点带入参考；空白点击不退出，完成后点「完成选取」或按 Esc'}</span>
+                ? '从节点添加素材：连续点击画布中的图片节点替换当前首帧/尾帧槽位；点击空白、按 Esc 或点「完成选取」结束选取'
+                : '从节点添加素材：连续点击画布中的图片、视频或音频节点带入参考；点击空白、按 Esc 或点「完成选取」结束选取'}</span>
               <button type="button" className={styles.pickHintFinish} onClick={endVideoPickSession}>完成选取</button>
             </div>
           ) : audioPickSessionActive ? (
-            <div className={`${styles.pickHint} ${styles.pickHintSession}`}>
-              <span>从节点添加素材：连续点击画布中的音频节点或文本卡带入参考；空白点击不退出，完成后点「完成选取」或按 Esc</span>
+            <div className={`${styles.pickHint} ${styles.pickHintSession}`} data-gen-panel-territory>
+              <span>从节点添加素材：连续点击画布中的音频节点或文本卡带入参考；点击空白、按 Esc 或点「完成选取」结束选取</span>
               <button type="button" className={styles.pickHintFinish} onClick={endAudioPickSession}>完成选取</button>
             </div>
           ) : (
-          <div className={styles.pickHint}>
+          <div className={styles.pickHint} data-gen-panel-territory>
             {pickMode === 'image' && ((pickRefRole === 'first' || pickRefRole === 'last')
               ? '从节点添加素材：点击画布中的图片节点带入首帧/尾帧，点击空白处取消'
               : '从节点添加素材：点击画布中的图片节点或方案节点，带入完整参考，点击空白处取消')}
@@ -6853,7 +6960,7 @@ export default function CanvasPage() {
                   }
                 : undefined
             }
-            onClose={() => { audioPanelHiddenRef.current = true; setShowAudioDialog(false); endAudioPickSession(); }}
+            onClose={closeAudioDialog}
             onSend={handleAudioDialogSend}
             onToast={(type, msg) => showToast(type, msg)}
             canvasMedia={canvasMedia}
@@ -6895,7 +7002,7 @@ export default function CanvasPage() {
         {/* 底部 AI 音乐对话框 */}
         {showMusicDialog && (
           <MusicDialog
-            onClose={() => setShowMusicDialog(false)}
+            onClose={closeMusicDialog}
             onSend={handleMusicDialogSend}
             canvasMedia={canvasMedia}
             mentionItems={atMentionItems}

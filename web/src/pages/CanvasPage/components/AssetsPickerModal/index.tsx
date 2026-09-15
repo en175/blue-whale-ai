@@ -264,7 +264,7 @@ export default function AssetsPickerModal({
   }, [activeTab]);
 
   return createPortal(
-    <div className={styles.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className={styles.overlay} data-gen-panel-territory onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className={styles.panel} role="dialog" aria-label="从资产库选择素材">
         <div className={styles.header}>
           <h2 className={styles.title}>资产库</h2>
