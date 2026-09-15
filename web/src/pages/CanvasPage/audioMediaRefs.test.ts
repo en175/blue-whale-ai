@@ -122,7 +122,7 @@ describe('audioMediaRefsOf 连线推导音频参考', () => {
     const result = audioMediaRefsOf('extracted', sourceEdges, [...nodes, video]);
     expect(result.invalid).toEqual([]);
     expect(result.refs).toEqual([
-      { nodeId: 'u2', url: 'http://aud/u2.mp3', name: '音u2', assetId: 'a2' },
+      { nodeId: 'u2', url: 'http://aud/u2.mp3', name: '音u2', assetId: 'a2', mediaType: 'audio' },
     ]);
   });
 });
