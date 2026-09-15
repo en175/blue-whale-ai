@@ -354,6 +354,7 @@ export default function AudioDialog({
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
       style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      data-gen-panel-territory
     >
       <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
       {/* 右上角操作：放大/收起 + 关闭 */}

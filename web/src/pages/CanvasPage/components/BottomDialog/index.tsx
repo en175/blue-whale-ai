@@ -777,6 +777,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
       style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      data-gen-panel-territory
     >
       {/* @ 菜单（IKFA1O）：挂 .dialogWrap 层向上弹出（.dialog 滚动框会裁剪浮层）；
           顶部统一搜索与已引用，下方保留原有四类画布素材入口 */}

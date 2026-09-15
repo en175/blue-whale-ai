@@ -158,6 +158,7 @@ export default function AtMentionMenu({
       className={`${styles.portal} ${renderInline ? styles.inline : ''}`}
       data-testid="mention-menu"
       data-canvas-keyboard-scope="mention"
+      data-gen-panel-territory
       onFocus={(e) => {
         const target = e.target as HTMLElement;
         // 焦点回到一级素材或搜索框时，结束上一个分类的展开状态。
