@@ -87,6 +87,9 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
         // IKEXX8：素材库关联两列成对携带（mock 行未含列值 → null）。
         material_id: null,
         material_group_id: null,
+        // IKFYHJ：未关联素材库 → 不带校验状态。
+        material_status: null,
+        material_status_checked_at: null,
       },
       {
         id: "201",
@@ -95,8 +98,85 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
         url: "tos://project/55/201.png",
         material_id: null,
         material_group_id: null,
+        material_status: null,
+        material_status_checked_at: null,
       },
     ]);
+  });
+
+  // IKFYHJ（ADR-0087）：snapshot 是打开画布的读路径，按素材扇出上游 GetAsset 会把一次开页
+  // 变成 N 次往返。所以状态只从本地镜像表批量取一次，且必须带 user_id 谓词。
+  it("已关联素材库的 asset 带上本地镜像的校验状态（单次批量查，不打上游）", async () => {
+    const checkedAt = new Date("2026-09-15T10:00:00.000Z");
+    const findMaterialAssets = vi.fn().mockResolvedValue([
+      { material_id: "asset-a", status: "Active", status_checked_at: checkedAt },
+      { material_id: "asset-b", status: "Failed", status_checked_at: null },
+    ]);
+    const prisma = {
+      generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
+      assets: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 200n, project_id: 55n, type: "image", url: "u-200", material_id: "asset-a" },
+          { id: 201n, project_id: 55n, type: "image", url: "u-201", material_id: "asset-b" },
+          // 关联了素材库但本地无镜像行（早于本功能入库的存量素材）→ 保持 null，不瞎猜。
+          { id: 202n, project_id: 55n, type: "image", url: "u-202", material_id: "asset-c" },
+          // 未关联素材库 → 不进查询、也不带状态。
+          { id: 203n, project_id: 55n, type: "image", url: "u-203", material_id: null },
+        ]),
+      },
+      project_asset: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
+      material_assets: { findMany: findMaterialAssets },
+    } as unknown as PrismaClient;
+
+    const result = await createSnapshotRepo(prisma).loadJobsAndAssets("55", "100");
+
+    // 只查一次，且只查真正有 material_id 的那三个；带 user_id 谓词。
+    expect(findMaterialAssets).toHaveBeenCalledTimes(1);
+    expect(findMaterialAssets).toHaveBeenCalledWith({
+      where: {
+        user_id: 100n,
+        material_id: { in: ["asset-a", "asset-b", "asset-c"] },
+      },
+      select: { material_id: true, status: true, status_checked_at: true },
+    });
+
+    const byId = new Map(result.assets.map((a) => [a.id, a]));
+    expect(byId.get("200")).toMatchObject({
+      material_status: "Active",
+      material_status_checked_at: "2026-09-15T10:00:00.000Z",
+    });
+    expect(byId.get("201")).toMatchObject({
+      material_status: "Failed",
+      material_status_checked_at: null,
+    });
+    expect(byId.get("202")).toMatchObject({
+      material_status: null,
+      material_status_checked_at: null,
+    });
+    expect(byId.get("203")).toMatchObject({
+      material_status: null,
+      material_status_checked_at: null,
+    });
+  });
+
+  it("没有任何 asset 关联素材库时不发 material_assets 查询", async () => {
+    const findMaterialAssets = vi.fn();
+    const prisma = {
+      generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
+      assets: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 200n, project_id: 55n, type: "image", url: "u", material_id: null },
+        ]),
+      },
+      project_asset: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
+      material_assets: { findMany: findMaterialAssets },
+    } as unknown as PrismaClient;
+
+    await createSnapshotRepo(prisma).loadJobsAndAssets("55", "100");
+
+    expect(findMaterialAssets).not.toHaveBeenCalled();
   });
 
   it("保留被本项目关联的跨项目素材，丢弃未关联的跨项目素材（IKCNLP bug 回归）", async () => {

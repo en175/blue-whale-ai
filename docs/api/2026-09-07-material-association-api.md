@@ -246,3 +246,38 @@ const refs: RefItem[] = resolvedRefs.map((r, i) => {
 ### 6.3 虚拟组自动建组（前端不感知组的存在，复习 + 补参数说明）
 
 向虚拟人像库 `CreateAsset` **不传 `GroupId`** 时：后端自动确保当前用户的虚拟默认组（无则上游建组，`GroupType:"AIGC"` 由后端显式携带），并强制替换 `GroupId` 后透传。前端角色库上传路径继续不传组即可；真人组上传照常显式传 `GroupId`。
+
+---
+
+## 7. IKFYHJ 增补（2026-09-15）：snapshot 带上素材校验状态
+
+### 7.1 `GET /api/projects/:id/snapshot` 的 asset 记录新增两个字段
+
+在 §6.1 的 `material_id` / `material_group_id` 之后**并列**再加两个（同一位置：`assets[asset_id]` map 每项）：
+
+```ts
+{
+  // ...既有字段（asset_id / access_url / type / material_id / material_group_id）
+  material_status: 'Active' | 'Processing' | 'Failed' | null;
+  material_status_checked_at: string | null;  // ISO8601，最后一次向上游确认的时刻
+}
+```
+
+| 取值 | 含义 |
+|---|---|
+| `'Active'` | 校验通过，可用于视频生成 |
+| `'Processing'` | 上游仍在注册中 |
+| `'Failed'` | 校验未通过 |
+| `null` | **未关联素材库**，**或**关联了但后端没有该素材的状态记录（早于本功能入库的存量素材） |
+
+**请求侧零改动**，字段名与 §6.1 同风格（snake_case）。
+
+### 7.2 三条必须知道的口径
+
+1. **这是本地镜像，可能陈旧 —— 不是判定依据。** 后端只跟进素材创建后 10 分钟内的状态；之后上游再变化（比如 `Active` 被撤销）就追不上。**「此刻能不能用」以生成接口为准**（创建/重试时会实时查上游，不通过直接 400）。
+2. **`material_status_checked_at` 是给你判断有多旧的**：离现在越远越不可信。为 `null` 表示这条状态从没被上游确认过。
+3. **不要用它替代生成失败的处理**：用户点生成仍可能因为素材已失效而拿到 400 `invalid_reference`，那条路径必须照常接（见 `material-library.md` §5.1）。
+
+### 7.3 前端用途
+
+开画布首屏即可点亮「校验中 / 校验通过 / 审核失败」角标，**不必为每个素材发一次 `GetAsset`**。需要更准的状态时再按单条素材实时查（`GetAsset`），或等生成接口的判定结果。
