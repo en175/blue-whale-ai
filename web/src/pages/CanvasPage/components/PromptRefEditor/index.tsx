@@ -56,8 +56,9 @@ export interface PromptRefEditorHandle {
   consumeMentionForPendingInsert: () => void;
   /** 在记住的插入点插入标签；音频缩略图可显式选择当前光标，均无有效位置时追加到末尾。 */
   insertRefAtPending: (key: PromptRefKey, atCurrentSelection?: boolean) => void;
-  /** 放弃本次 @ 查询（保留已输入的 @ 文本） */
-  dismissMention: () => void;
+  /** 放弃本次 @ 查询（保留已输入的 @ 文本）；restoreFocus=true（Esc 取消）时光标落回
+   *  「@query」之后并重新聚焦编辑器，点外关闭不传以维持不抢焦现状（IKFXOR） */
+  dismissMention: (restoreFocus?: boolean) => void;
   /** 替换失效提及（IKFA1N B5）：把指定节点换绑为其他已引用素材，仅该处提及变化 */
   replaceRefAt: (nodeKey: string, key: PromptRefKey) => void;
   /** 清空全部内容（发送后调用） */
@@ -359,6 +360,9 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
         $restoreMentionSelection(anchor)?.insertNodes([
           $createAssetRefNode(key.id, label, undefined, key.kind === 'text_ref' ? 'text' : 'asset'),
         ]);
+      }, {
+        // 插入后编辑器聚焦、光标落在标签后（IKFXOR：菜单搜索框曾抢走焦点，选中后还回不打断输入）
+        onUpdate: () => editor.focus(),
       });
       mentionAnchorRef.current = null;
       onMentionChange?.({ open: false, query: '' });
@@ -428,9 +432,16 @@ const PromptRefEditor = forwardRef<PromptRefEditorHandle, PromptRefEditorProps>(
         onUpdate: () => editor.focus(),
       });
     },
-    dismissMention: () => {
+    dismissMention: (restoreFocus = false) => {
+      const editor = editorRef.current;
       mentionAnchorRef.current = null;
       pendingInsertRef.current = null;
+      if (restoreFocus && editor) {
+        // 只还焦点：菜单搜索框 autoFocus 抢焦不清模型选区（保留在 typing 位置，即 @query 之后），
+        // focus() 提交后由 Lexical 的 dirty 选区恢复机制把光标写回并聚焦 root。实测手动按锚点
+        // 重建选区会与该恢复机制竞争，反被延迟 reconciliation 覆盖回开头，故不重建。
+        editor.focus();
+      }
       onMentionChange?.({ open: false, query: '' });
     },
     replaceRefAt: (nodeKey: string, key: PromptRefKey) => {

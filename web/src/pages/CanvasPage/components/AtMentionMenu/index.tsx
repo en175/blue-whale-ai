@@ -54,6 +54,9 @@ interface AtMentionMenuProps {
   disabledKinds?: AtMentionKind[];
   onSelect: (item: AtMentionItem) => void;
   onClose: () => void;
+  /** Esc 取消的单独回调（IKFXOR）：调用方借此把焦点还回编辑器（光标落 @ 后）；
+   *  点外关闭仍走 onClose 不抢焦。不传时 Esc 与点外同走 onClose（文本节点/音频面板现状）。 */
+  onEscapeClose?: () => void;
 }
 
 export default function AtMentionMenu({
@@ -66,6 +69,7 @@ export default function AtMentionMenu({
   disabledKinds,
   onSelect,
   onClose,
+  onEscapeClose,
 }: AtMentionMenuProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const flyoutWrapRef = useRef<HTMLDivElement>(null);
@@ -107,7 +111,10 @@ export default function AtMentionMenu({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      // IKFXOR：Esc 取消需还焦编辑器、点外关闭不抢焦，两条路径分开回调
+      if (onEscapeClose) onEscapeClose();
+      else onClose();
     };
     const onPointer = (e: PointerEvent) => {
       const target = e.target as Node | null;
@@ -120,7 +127,7 @@ export default function AtMentionMenu({
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('pointerdown', onPointer, true);
     };
-  }, [onClose]);
+  }, [onClose, onEscapeClose]);
 
   const flyoutItems = hovered ? items.filter((item) => item.kind === hovered) : [];
 
