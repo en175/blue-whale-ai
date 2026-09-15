@@ -155,6 +155,7 @@ export class GenerationJobsController {
     @Param("jobId") jobId: string,
     @Body() body: unknown,
     @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("authorization") authorization?: string,
   ) {
     const result = await handleRetryGenerationJob(
       user.userId,
@@ -162,7 +163,11 @@ export class GenerationJobsController {
       jobId,
       idempotencyKey ?? "",
       bodyString(body),
-      { projects: this.project, command: this.command.repo },
+      {
+        projects: this.project,
+        command: this.command.repo,
+        materialGate: this.buildMaterialGate(authorization),
+      },
     );
     if (result.code === 200 && result.data) {
       const newJobId = String(result.data.generation_job_id);

@@ -560,4 +560,174 @@ describe("generation command repo retry", () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     expect(secondTx.command_idempotency.findUnique).toHaveBeenCalledOnce();
   });
+
+  // IKF YHJ（ADR-0087 决策 7）：重试复用原 job 的参数快照，但素材校验状态可能在那之后变了。
+  describe("retryJob 素材状态门（IKF YHJ）", () => {
+    /** 能走到 create 的最小事务形状：无输出槽 → retryCount 取 expected_output_count。 */
+    function retryTx(original: Record<string, unknown>) {
+      const createJob = vi.fn().mockResolvedValue({
+        id: 302n,
+        type: "video",
+        source: "scene_card",
+        status: "queued",
+        progress: 0,
+        version: 1,
+      });
+      const tx = {
+        generation_jobs: {
+          findFirst: vi.fn().mockResolvedValue(original),
+          create: createJob,
+        },
+        generation_output_slots: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn().mockResolvedValue({}),
+        },
+        cost_reservations: {
+          findFirst: vi.fn().mockResolvedValue({
+            reserved_amount_fen: 1234n,
+            price_catalog_version: "v-pricing",
+            exchange_rate_version: "usd-7.3",
+            model_policy_version: "v-policy",
+            cost_rule_version: "v1",
+          }),
+          create: vi.fn().mockResolvedValue({}),
+        },
+        command_idempotency: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({}),
+        },
+        project_events: {
+          create: vi.fn(
+            async ({ data }: { data: Record<string, unknown> }) => data,
+          ),
+        },
+        generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
+      };
+      const prisma = {
+        $transaction: vi.fn(
+          async (callback: (client: typeof tx) => Promise<unknown>) =>
+            callback(tx),
+        ),
+      };
+      return { tx, prisma, createJob };
+    }
+
+    const failedOriginal = {
+      id: 300n,
+      project_id: 55n,
+      user_id: 9n,
+      type: "video",
+      source: "scene_card",
+      status: "failed",
+      input: { references: [{ material_id: "asset-abc" }] },
+      expected_output_count: 1,
+      strategy_version: "seedance-2.0-v1",
+    };
+
+    it("门拒绝时不建重试 Job，并把原因带出来", async () => {
+      const { prisma, createJob } = retryTx(failedOriginal);
+      const repo = createGenerationCommandRepo(prisma as never);
+      const guardInput = vi.fn().mockResolvedValue("该素材未审核通过，不能用于视频生成");
+
+      const result = await repo.retryJob(
+        "300",
+        "55",
+        "9",
+        "retry-400",
+        "hash-400",
+        guardInput,
+      );
+
+      expect(result).toEqual({
+        kind: "material_blocked",
+        reason: "该素材未审核通过，不能用于视频生成",
+      });
+      expect(guardInput).toHaveBeenCalledWith(failedOriginal.input);
+      expect(createJob).not.toHaveBeenCalled();
+    });
+
+    it("门放行时照常建重试 Job", async () => {
+      const { prisma, createJob } = retryTx(failedOriginal);
+      const repo = createGenerationCommandRepo(prisma as never);
+      const guardInput = vi.fn().mockResolvedValue(null);
+
+      const result = await repo.retryJob(
+        "300",
+        "55",
+        "9",
+        "retry-401",
+        "hash-401",
+        guardInput,
+      );
+
+      expect(guardInput).toHaveBeenCalledOnce();
+      expect(createJob).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({ generation_job_id: "302", type: "video" });
+    });
+
+    it("幂等重放命中既有回执时不跑门——不该被此刻的素材状态改写既有结果", async () => {
+      const replayTx = {
+        generation_jobs: {
+          findFirst: vi.fn().mockResolvedValue(failedOriginal),
+          create: vi.fn(),
+        },
+        cost_reservations: {
+          findFirst: vi.fn().mockResolvedValue({
+            reserved_amount_fen: 1234n,
+            price_catalog_version: "v-pricing",
+            exchange_rate_version: "usd-7.3",
+            model_policy_version: "v-policy",
+            cost_rule_version: "v1",
+          }),
+        },
+        command_idempotency: {
+          findUnique: vi.fn().mockResolvedValue({
+            request_hash: "hash-402",
+            generation_job_id: 999n,
+            accepted_cursor: 7n,
+          }),
+        },
+      };
+      const prisma = {
+        $transaction: vi.fn(
+          async (callback: (client: typeof replayTx) => Promise<unknown>) =>
+            callback(replayTx),
+        ),
+      };
+      const repo = createGenerationCommandRepo(prisma as never);
+      const guardInput = vi.fn().mockResolvedValue(null);
+
+      const result = await repo.retryJob(
+        "300",
+        "55",
+        "9",
+        "retry-402",
+        "hash-402",
+        guardInput,
+      );
+
+      expect(result).toEqual({
+        generation_job_id: "999",
+        cursor: 7,
+        type: "video",
+      });
+      expect(guardInput).not.toHaveBeenCalled();
+    });
+
+    it("未接线时不跑门（缺省行为与改造前一致）", async () => {
+      const { prisma, createJob } = retryTx(failedOriginal);
+      const repo = createGenerationCommandRepo(prisma as never);
+
+      const result = await repo.retryJob(
+        "300",
+        "55",
+        "9",
+        "retry-403",
+        "hash-403",
+      );
+
+      expect(createJob).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({ generation_job_id: "302" });
+    });
+  });
 });
