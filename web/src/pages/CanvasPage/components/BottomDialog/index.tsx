@@ -106,6 +106,8 @@ export interface VideoDraftParamsPatch {
   ratio?: string;
   duration?: number;
   mode?: string;
+  /** IKG0LP：是否带音频（随草稿持久化，重开面板恢复） */
+  generateAudio?: boolean;
 }
 
 interface BottomDialogProps extends RefStripOrderProps {
@@ -550,6 +552,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
         const applied = applyModelDefaults(target);
         // 首页带入参数覆盖默认值（逐项经模型能力校验，不合法项保持该模型默认值）
         const patch: VideoDraftParamsPatch = { ...applied };
+        // IKG0LP：音频选择随草稿落值（首次打开即持久化当前生效值）
+        patch.generateAudio = generateAudio;
         if (initialParams) {
           if (initialParams.aspectRatio && target.supported_aspect_ratios.includes(initialParams.aspectRatio)) {
             setSelectedRatio(initialParams.aspectRatio);
@@ -988,7 +992,12 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
                   aria-checked={generateAudio}
                   aria-label="生成的视频带音频"
                   disabled={readOnly}
-                  onClick={() => setGenerateAudio((v) => !v)}
+                  onClick={() => {
+                    const next = !generateAudio;
+                    setGenerateAudio(next);
+                    // IKG0LP：写回草稿节点，重开面板时恢复
+                    syncDraftParams({ generateAudio: next });
+                  }}
                 >
                   <span className={styles.audioSwitchKnob} />
                 </button>

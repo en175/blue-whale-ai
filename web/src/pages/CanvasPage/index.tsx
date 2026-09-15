@@ -2590,6 +2590,8 @@ export default function CanvasPage() {
         resolution: preset?.resolution ?? (typeof d.draftSize === 'string' ? d.draftSize : undefined),
         duration: preset?.duration ?? (typeof d.draftDuration === 'number' ? d.draftDuration : undefined),
         mode: preset?.mode ?? (typeof d.draftMode === 'string' ? d.draftMode : undefined),
+        // IKG0LP：音频选择持久化在草稿 data，重开时恢复
+        generateAudio: preset?.generateAudio ?? (typeof d.draftGenerateAudio === 'boolean' ? d.draftGenerateAudio : undefined),
       },
       targetNodeId: nodeId,
       attachments: textAttachmentsOf(nodeId),
@@ -2610,6 +2612,8 @@ export default function CanvasPage() {
     size?: string;
     duration?: number;
     mode?: string;
+    /** IKG0LP：是否带音频（随草稿 data 持久化） */
+    generateAudio?: boolean;
   }, position?: { x: number; y: number }): string => {
     const nodeId = newNodeId('media-draft');
     const node: Node = {
@@ -2630,6 +2634,7 @@ export default function CanvasPage() {
         ...(seed?.size != null ? { draftSize: seed.size } : {}),
         ...(seed?.duration != null ? { draftDuration: seed.duration } : {}),
         ...(seed?.mode != null ? { draftMode: seed.mode } : {}),
+        ...(seed?.generateAudio != null ? { draftGenerateAudio: seed.generateAudio } : {}),
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
@@ -2926,7 +2931,7 @@ export default function CanvasPage() {
   /** 面板编辑实时写回视频草稿节点（IKDMQS）：参数随节点 data 进入自动保存，刷新后恢复 */
   const handleVideoDraftParamsChange = (
     nodeId: string,
-    patch: { prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string; duration?: number; mode?: string },
+    patch: { prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string; duration?: number; mode?: string; generateAudio?: boolean },
   ) => {
     const data: Record<string, unknown> = {};
     if (patch.prompt !== undefined) data.prompt = patch.prompt;
@@ -2935,6 +2940,8 @@ export default function CanvasPage() {
     if (patch.size !== undefined) data.draftSize = patch.size;
     if (patch.duration !== undefined) data.draftDuration = patch.duration;
     if (patch.mode !== undefined) data.draftMode = patch.mode;
+    // IKG0LP：是否带音频随草稿持久化，重开面板时恢复用户上次的选择
+    if (patch.generateAudio !== undefined) data.draftGenerateAudio = patch.generateAudio;
     if (patch.ratio !== undefined) {
       data.draftRatio = patch.ratio;
       data.targetRatio = patch.ratio;
