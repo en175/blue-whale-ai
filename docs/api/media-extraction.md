@@ -56,7 +56,10 @@ POST /api/projects/:projectId/media-extractions
 ```
 - 位置 = 源视频节点**右边缘 + 60px**（同 y）：源节点内容宽按 `mediaContentBox` 算（视频 280×比例，16:9 约 498），不再固定 340 —— 固定值会压住宽视频节点。
 - 节点 id 前缀 `media-extract-` 是**轮询与终态补丁的约定**（`mediaExtractNodeId` / `isMediaExtractNodeId`），不可改。
-- 同时补一条 **视频 → 音频** 的参考连线（与服务端「素材→产物」连线语义一致，说明音频来自这段视频）；源视频删除时连线随节点级联清理。
+- 同时补一条 **视频 → 音频的来源边**（`edge.data.origin = "media-extract"`）：表达「这段音频取自那段视频」。
+  它是来源记录、不是生成参考输入——参考推导（`audioMediaRefsOf`）会跳过带该标记的边，否则音频卡重新编辑时
+  会把这个视频判成非法音频参考、禁用发送。服务端本来就只消费「文本节点 → 目标」的边（契约 IKDLQF），
+  媒体→媒体边不参与输入推导；源视频删除时连线随节点级联清理。
 - 落库：插入后前端立即 `flushCanvasSave` 一次（不等 800ms 防抖），避免刚建任务就关页丢节点。
 - 终态由前端打本地补丁：成功写 `src`（音频 URL）、`assetId`、`mediaType:"audio"`、`progress:100`、清 `genStatus`；失败置 `genStatus:"failed"` + `errorText`。
 - 中途刷新/重开：快照里的节点自带 `jobId` + `genStatus:"generating"`，水合按既有逻辑自动恢复轮询，无需额外代码。

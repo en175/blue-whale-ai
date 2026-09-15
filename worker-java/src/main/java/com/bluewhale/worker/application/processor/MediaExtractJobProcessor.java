@@ -56,6 +56,8 @@ public class MediaExtractJobProcessor implements JobProcessor {
 
     /** 前端阶段映射基准（media-extract-runner.ts:131-134）。 */
     private static final int DOWNLOAD_DONE_PROGRESS = 20;
+    /** 下载期间心跳上报的进度（1-20 为下载带）：只为续租，不追求精确。 */
+    private static final int DOWNLOAD_HEARTBEAT_PROGRESS = 5;
     private static final int EXTRACT_PROGRESS_RANGE = 70;
     private static final int UPLOAD_START_PROGRESS = 91;
 
@@ -133,7 +135,10 @@ public class MediaExtractJobProcessor implements JobProcessor {
             }
 
             // 3. 下载视频（media-extract-runner.ts:229-244）
-            tosService.download(source.getUrl(), source.getStorageKey(), inputPath, MAX_VIDEO_BYTES);
+            // IKFS5W：下载期间按心跳续租——读超时放宽到 5min 后单次下载可能超过 120s 租约，
+            // 不续租会被判定过期、任务被另一个 worker 抢走重跑。
+            tosService.download(source.getUrl(), source.getStorageKey(), inputPath, MAX_VIDEO_BYTES,
+                    () -> updateProgress(claim, DOWNLOAD_HEARTBEAT_PROGRESS));
             updateProgress(claim, DOWNLOAD_DONE_PROGRESS);
 
             // 4. ffmpeg 抽音轨（media-extract-runner.ts:247-259）

@@ -4,6 +4,7 @@
  * 音频参考无角色槽（服务端契约 role 恒 reference），随连线顺序持久化（服务端零改动）。
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
+import { MEDIA_EXTRACT_EDGE_ORIGIN } from './mediaExtract';
 import { baseSourceError, cardNameOfNode, readAssetId } from './mediaRefs';
 
 /** 参考音频上限（与服务端 seed-audio 契约一致：音频 ≤3、图片 ≤1、不可混用；
@@ -52,6 +53,9 @@ export function audioMediaRefsOf(
   const seenAssetIds = new Set<string>();
   for (const edge of edges) {
     if (edge.target !== targetNodeId) continue;
+    // IKFS5W：提取产物卡上的「来源边」（这段音频取自哪段视频）不是参考输入，跳过——
+    // 否则该视频会被判成非法音频参考，卡住音频面板的发送。
+    if ((edge.data as { origin?: string } | undefined)?.origin === MEDIA_EXTRACT_EDGE_ORIGIN) continue;
     const source = byId.get(edge.source);
     if (!source || source.type !== 'mediaNode') continue;
     const reason = audioRefSourceError(source);

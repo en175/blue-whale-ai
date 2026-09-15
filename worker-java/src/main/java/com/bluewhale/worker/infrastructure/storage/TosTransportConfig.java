@@ -7,10 +7,13 @@ import java.util.function.Function;
 /**
  * TOS SDK 传输层超时配置（IKFS5W）。
  * <p>
- * SDK 默认 read/write 超时 30s，公网抖动时下载会在中途抛 {@code timeout} 判失败
- * （实例：media_extract job 1848，源视频仅 586KB 但下载被截断 → video_download_failed）。
- * 提取源视频上限 200MiB，按 100KB/s 也要 30 分钟，30s 的读超时明显偏紧，
- * 这里放宽默认值并支持 env 覆盖。
+ * SDK 默认 read/write 超时 30s。该值是**单次读空闲**上限（OkHttp 语义：多久没有新字节算超时，
+ * 不是整段传输的总时长），所以慢速但持续推进的下载不会触发；真正会触发的是网络抖动导致的
+ * 停顿——30s 太短，任务直接判 {@code video_download_failed}（实例：media_extract job 1848，
+ * 586KB 源视频下载中途报 timeout）。这里放宽默认值并支持 env 覆盖。
+ * <p>
+ * ⚠️ 读超时大于任务租约（120s）时，下载必须持续续租：{@link TosMediaStorage#download} 会按
+ * 心跳回调续租，调用方（MediaExtractJobProcessor）把心跳接到进度上报上。
  * <p>
  * env：{@code TOS_CONNECT_TIMEOUT_MS} / {@code TOS_READ_TIMEOUT_MS} / {@code TOS_WRITE_TIMEOUT_MS}（毫秒，正整数）。
  */
@@ -19,7 +22,7 @@ public final class TosTransportConfig {
     /** 建链超时：30s（SDK 默认 10s，跨境/弱网建链偏紧）。 */
     static final int DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 
-    /** 读超时：5min（SDK 默认 30s；大文件下载的唯一瓶颈）。 */
+    /** 读空闲超时：5min（SDK 默认 30s，网络抖动即判失败）。 */
     static final int DEFAULT_READ_TIMEOUT_MS = 300_000;
 
     /** 写超时：5min（上传音频/图片产物，SDK 默认 30s）。 */

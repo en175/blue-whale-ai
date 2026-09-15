@@ -7,6 +7,7 @@ import {
   isAudioDraftNode,
   MAX_AUDIO_MEDIA_REFS,
 } from './audioMediaRefs';
+import { MEDIA_EXTRACT_EDGE_ORIGIN } from './mediaExtract';
 
 /* IKFDFZ 音频参考连线：来源有效性校验、「连线 → 媒体参考」推导与统一添加校验。
    面板展示与提交输入共用同一推导，保证所见即实际输入。 */
@@ -89,8 +90,7 @@ describe('audioMediaRefsOf 连线推导音频参考', () => {
   });
 
   it('同一素材（相同 assetId）多条连线推导时去重，首条连线位置保留', () => {
-    const dup = [
-      readyAudio('u1', 'a1'),
+    const dup = [      readyAudio('u1', 'a1'),
       readyAudio('u1-copy', 'a1'),
     ];
     const dupEdges = [
@@ -111,6 +111,19 @@ describe('audioMediaRefsOf 连线推导音频参考', () => {
     expect(audioMediaRefsOf('d1', [{ id: 'e1', source: 'x', target: 'd1' }] as Edge[], dangling).refs).toEqual([]);
     expect(audioMediaRefsOf('d1', [{ id: 'e1', source: 'x', target: 'd1' }] as Edge[], dangling).invalid)
       .toEqual([{ nodeId: 'x', name: 'x', reason: '音频参考仅支持音频素材' }]);
+  });
+
+  it('提取来源边（origin 标记）既不算参考、也不进 invalid（IKFS5W）', () => {
+    const video = mediaNode('v1', { src: 'http://vid/v1.mp4', mediaType: 'video', fileName: '视频', assetId: 'a9' });
+    const sourceEdges = [
+      { id: 'src', source: 'v1', target: 'extracted', data: { origin: MEDIA_EXTRACT_EDGE_ORIGIN } },
+      { id: 'e2', source: 'u2', target: 'extracted' },
+    ] as Edge[];
+    const result = audioMediaRefsOf('extracted', sourceEdges, [...nodes, video]);
+    expect(result.invalid).toEqual([]);
+    expect(result.refs).toEqual([
+      { nodeId: 'u2', url: 'http://aud/u2.mp3', name: '音u2', assetId: 'a2' },
+    ]);
   });
 });
 

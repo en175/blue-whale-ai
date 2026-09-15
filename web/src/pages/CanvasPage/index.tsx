@@ -47,6 +47,7 @@ import type { MediaDims } from './components/MediaNode/mediaContentSize';
 import {
   buildMediaExtractPlaceholderNode,
   isMediaExtractNodeId,
+  MEDIA_EXTRACT_EDGE_ORIGIN,
   mediaExtractNodeId,
   mediaExtractTerminalPatch,
 } from './mediaExtract';
@@ -302,7 +303,9 @@ export default function CanvasPage() {
   /** 建立连线（受控去重 + custom 流光渲染形态；与服务端保存校验同口径拒绝重复 (source,target)）。
    *  refRole（IKDMQS）写入 edge.data.refRole 随连线持久化：first 首帧 / last 尾帧，缺省普通参考。
    *  连线进撤销栈（IKD0JT）：id 由 (source,target) 确定性生成，撤销/重做往返保持稳定 */
-  const addCanvasEdge = (source: string, target: string, refRole?: VideoRefRole) => {
+  /** 新增画布连线。`marker` 用于给连线打语义标记（如提取产物的来源边，IKFS5W）——
+   *  参考推导会跳过带标记的来源边，避免把「来源」误当「参考输入」。 */
+  const addCanvasEdge = (source: string, target: string, refRole?: VideoRefRole, marker?: Record<string, unknown>) => {
     const existing = edgesRef.current.find(e => e.target === target && (e.source === source || (
       e.data?.inputSources && readAssetId((findCanvasNode(e.source)?.data ?? {}) as Record<string, unknown>) === readAssetId((findCanvasNode(source)?.data ?? {}) as Record<string, unknown>)
     )));
@@ -316,6 +319,10 @@ export default function CanvasPage() {
       }
       return;
     }
+    const edgeData: Record<string, unknown> = {
+      ...(refRole && refRole !== 'reference' ? { refRole } : {}),
+      ...(marker ?? {}),
+    };
     const edge: Edge = {
       id: `e-${source}-${target}`,
       source,
@@ -324,7 +331,7 @@ export default function CanvasPage() {
       targetHandle: null,
       type: 'custom',
       style: { stroke: '#444' },
-      ...(refRole && refRole !== 'reference' ? { data: { refRole } } : {}),
+      ...(Object.keys(edgeData).length > 0 ? { data: edgeData } : {}),
     };
     historyRef.current?.pushAddEdges([edge]);
     // 同步写入 ref，发送前落盘才能读到本轮新建的连线
@@ -5066,8 +5073,9 @@ export default function CanvasPage() {
       const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
       mediaNodesRef.current = next;
       setMediaNodes(next);
-      // 连一条视频 → 音频的参考边：说明音频是从这段视频提取来的（与服务端「素材→产物」连线语义一致）
-      addCanvasEdge(id, nodeId);
+      // 连一条视频 → 音频的**来源边**（带 origin 标记）：说明音频是从这段视频提取来的；
+      // 参考推导会跳过它，避免把这个视频当成音频生成参考而卡住发送
+      addCanvasEdge(id, nodeId, undefined, { origin: MEDIA_EXTRACT_EDGE_ORIGIN });
       pollJob(nodeId, created.job_id);
       // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢节点
       await flushCanvasSave(currentId).catch(() => {});

@@ -10,6 +10,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { MEDIA_EXTRACT_EDGE_ORIGIN } from './mediaExtract';
 import type { GenerationModel } from '@/api/generation';
 
 vi.mock('./components/AgentPanel', () => ({
@@ -41,7 +42,7 @@ type SaveResult = { id: number; project_id: number; version: number; viewport: s
 type SavePayload = {
   viewport: unknown;
   nodes: Node[];
-  edges: Array<{ id: string; source: string; target: string }>;
+  edges: Array<{ id: string; source: string; target: string; data?: Record<string, unknown> }>;
 };
 
 const apiMocks = vi.hoisted(() => ({
@@ -217,6 +218,9 @@ describe('IKFS5W 提取音频落盘', () => {
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
     expect(savedNodeIds(0)).toContain('media-extract-j1');
     expect(savedEdgePairs(0)).toContain('v1->media-extract-j1');
+    // 来源边必须带标记：否则音频卡重新编辑时该视频会被判成非法参考、卡住发送
+    const edge = apiMocks.saveCanvasDoc.mock.calls[0][1].edges.find((e) => e.target === 'media-extract-j1')!;
+    expect(edge.data).toEqual({ origin: MEDIA_EXTRACT_EDGE_ORIGIN });
     // 16:9 源视频内容宽 280×16/9≈497.78 → x = 400 + 498 + 60
     const audio = apiMocks.saveCanvasDoc.mock.calls[0][1].nodes.find((n) => n.id === 'media-extract-j1')!;
     expect(audio.position).toEqual({ x: 958, y: 0 });

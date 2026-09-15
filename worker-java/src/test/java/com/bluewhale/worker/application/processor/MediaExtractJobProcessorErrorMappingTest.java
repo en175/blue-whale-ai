@@ -115,7 +115,7 @@ class MediaExtractJobProcessorErrorMappingTest {
         source.setMime("video/mp4");
         when(assetMapper.resolveSourceAssetWithLinked(eq(555L), eq(9L), eq(42L), anyList())).thenReturn(source);
         doThrow(new MediaExtractError(MediaExtractError.VIDEO_DOWNLOAD_FAILED, "TOS 视频下载失败: 404"))
-                .when(tosService).download(anyString(), anyString(), any(), anyLong());
+                .when(tosService).download(anyString(), anyString(), any(), anyLong(), any());
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
 
         processor.handle("100");
@@ -135,7 +135,7 @@ class MediaExtractJobProcessorErrorMappingTest {
         source.setUrl("https://example.com/test.mp4");
         when(assetMapper.resolveSourceAssetWithLinked(eq(555L), eq(9L), eq(42L), anyList())).thenReturn(source);
         doThrow(new MediaExtractError(MediaExtractError.VIDEO_TOO_LARGE, "视频超过大小上限"))
-                .when(tosService).download(anyString(), anyString(), any(), anyLong());
+                .when(tosService).download(anyString(), anyString(), any(), anyLong(), any());
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
 
         processor.handle("100");
@@ -217,7 +217,7 @@ class MediaExtractJobProcessorErrorMappingTest {
         source.setUrl("https://example.com/test.mp4");
         when(assetMapper.resolveSourceAssetWithLinked(eq(555L), eq(9L), eq(42L), anyList())).thenReturn(source);
         doThrow(new RuntimeException("unexpected system error"))
-                .when(tosService).download(anyString(), anyString(), any(), anyLong());
+                .when(tosService).download(anyString(), anyString(), any(), anyLong(), any());
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
 
         processor.handle("100");

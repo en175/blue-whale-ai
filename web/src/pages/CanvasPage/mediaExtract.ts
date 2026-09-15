@@ -7,6 +7,11 @@ export const MEDIA_EXTRACT_NODE_PREFIX = 'media-extract-';
 /** 音频节点与源视频节点右边缘的间距（沿用既有「节点宽 + 60」口径里的 60）。 */
 export const MEDIA_EXTRACT_NODE_GAP = 60;
 
+/** 提取来源边标记（写在 edge.data.origin）：这条边表达「该音频取自那段视频」，
+ *  是来源记录而非生成参考输入——参考推导（audioMediaRefsOf）会跳过带此标记的边，
+ *  否则音频卡重新编辑时会把这个视频当成非法音频参考，卡住发送。 */
+export const MEDIA_EXTRACT_EDGE_ORIGIN = 'media-extract';
+
 const ERROR_CODE_TEXT: Record<string, string> = {
   video_has_no_audio_track: '视频没有音轨',
   video_download_failed: '视频下载失败',
