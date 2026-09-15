@@ -13,7 +13,6 @@ import {
   SKIP_DOM_SELECTION_TAG,
   type LexicalEditor,
 } from 'lexical';
-
 type EditorHost = HTMLElement & { __promptRefEditor?: LexicalEditor };
 
 // jsdom 垫片：Range/Text 缺 getBoundingClientRect（Lexical 选区同步的滚动计算需要）
@@ -64,4 +63,15 @@ export async function typePromptRefRaw(container: ParentNode, text: string): Pro
       if ($isRangeSelection(selection)) selection.insertRawText(text);
     }, { tag: SKIP_DOM_SELECTION_TAG });
   });
+}
+
+/** 折叠选区的锚点偏移（IKFXOR 光标落点断言用）；无折叠选区时返回 -1 */
+export function promptRefCaretOffset(container: ParentNode): number {
+  const editor = promptRefEditorInstance(container);
+  let offset = -1;
+  editor.read(() => {
+    const selection = $getSelection();
+    if ($isRangeSelection(selection) && selection.isCollapsed()) offset = selection.anchor.offset;
+  });
+  return offset;
 }

@@ -648,8 +648,9 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     }
     return out;
   }, [videoMediaRefs, attachments, reconcileKey]);
-  const closeMention = () => {
-    editorRef.current?.dismissMention();
+  /** IKFXOR：Esc 取消（restoreFocus=true）把光标落回 @ 后并还焦编辑器；点外关闭维持现状不抢焦 */
+  const closeMention = (restoreFocus = false) => {
+    editorRef.current?.dismissMention(restoreFocus);
     setMention({ open: false, query: '' });
   };
   const pickMentionRef = (assetId: string) => {
@@ -809,6 +810,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
               }
             }}
             onClose={closeMention}
+            onEscapeClose={() => closeMention(true)}
           />
         </div>
       )}

@@ -9,7 +9,7 @@ import type { ImageMediaRef } from '../../mediaRefs';
 import type { AtMentionItem } from '../../atMention';
 import type { PromptDoc } from '@/lib/prompt-doc';
 import { AssetRefNode } from '../PromptRefEditor/AssetRefNode';
-import { promptRefEditorInstance, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
+import { promptRefEditorInstance, promptRefCaretOffset, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -681,5 +681,38 @@ describe('IKFCKK 附件条三态集成', () => {
     expect(container.querySelector('[data-testid="dock-media-ref"] img')).toBeTruthy();
     expect(container.querySelector('[data-testid="dock-media-ref"] button[title="移除"]')).toBeNull();
     expect(container.querySelector('[data-testid="dock-media-ref"] button[title="插入引用"]')).toBeNull();
+  });
+
+  it('IKFXOR Esc 取消 @ 菜单：菜单关闭、焦点回编辑器、光标落 @ 后可继续打字', async () => {
+    await renderDialog({ mediaRefs: [REF_A] });
+    await typePromptRefRaw(container, '让@猫');
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
+    const editor = promptRefEditorInstance(container);
+    const focusSpy = vi.spyOn(editor, 'focus');
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull());
+    expect(focusSpy).toHaveBeenCalledTimes(1);
+    // 光标落在「@猫」之后（@ 保留）：Lexical 选区恢复随 focus 提交异步写回
+    await vi.waitFor(() => expect(promptRefCaretOffset(container)).toBe(3));
+    await act(async () => {
+      editor.update(() => {
+        const sel = $getSelection();
+        if ($isRangeSelection(sel)) sel.insertRawText('!');
+      });
+    });
+    expect(readPromptRefText(container)).toBe('让@猫!');
+  });
+
+  it('IKFXOR 点菜单外关闭：维持现状不抢编辑器焦点', async () => {
+    await renderDialog({ mediaRefs: [REF_A] });
+    await typePromptRefRaw(container, '让@猫');
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeTruthy());
+    const editor = promptRefEditorInstance(container);
+    const focusSpy = vi.spyOn(editor, 'focus');
+    await act(async () => document.body.dispatchEvent(new Event('pointerdown')));
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="mention-menu"]')).toBeNull());
+    expect(focusSpy).not.toHaveBeenCalled();
+    // @ 查询保留为普通文本
+    expect(readPromptRefText(container)).toBe('让@猫');
   });
 });
