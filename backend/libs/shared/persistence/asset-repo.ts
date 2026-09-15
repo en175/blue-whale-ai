@@ -811,10 +811,13 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       return true;
     },
     async clearMaterialLink(userId, materialId) {
+      // 两列一起清：素材没了之后只清 material_id 会留下悬空的 material_group_id，
+      // 前端仍能据此渲染「已入库」角标、生成链路也仍会把它当素材库引用转 asset://。
       await prisma.assets.updateMany({
         where: { material_id: materialId, user_id: BigInt(userId) },
         data: {
           material_id: null,
+          material_group_id: null,
           version: { increment: 1 },
           gmt_modified: new Date(),
         },

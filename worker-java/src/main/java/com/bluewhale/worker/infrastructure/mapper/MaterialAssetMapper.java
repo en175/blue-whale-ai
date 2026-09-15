@@ -66,4 +66,27 @@ public interface MaterialAssetMapper extends BaseMapper<MaterialAssetEntity> {
             @Param("errorCode") String errorCode,
             @Param("errorMessage") String errorMessage
     );
+
+    /**
+     * 素材被判失败时清空本地资产表的素材关联（IKFYHJ）。
+     * <p>
+     * 两列一起清：只清 material_id 会留下悬空的 material_group_id，前端仍能据此渲染
+     * 「已入库」角标、生成链路也仍会把它当素材库引用转 {@code asset://}。
+     * 与 TS 侧 {@code asset-repo.ts clearMaterialLink} 同一口径。
+     *
+     * @return 受影响行数（0 = 该用户没有资产绑过这张素材，正常）
+     */
+    @Update("""
+            UPDATE assets
+            SET material_id = NULL,
+                material_group_id = NULL,
+                gmt_modified = NOW(),
+                version = version + 1
+            WHERE material_id = #{materialId}
+              AND user_id = #{userId}
+            """)
+    int clearMaterialLink(
+            @Param("userId") long userId,
+            @Param("materialId") String materialId
+    );
 }

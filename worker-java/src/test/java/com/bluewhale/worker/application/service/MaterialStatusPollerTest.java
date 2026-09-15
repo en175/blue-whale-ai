@@ -88,6 +88,55 @@ class MaterialStatusPollerTest {
     }
 
     @Test
+    @DisplayName("上游判 Failed：清本地资产关联 + 删上游素材（与 backend 同一口径）")
+    void failedTriggersCleanup() {
+        when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
+                .thenReturn(List.of(row(9L, "asset-bad")));
+        when(userInfoMapper.findCredential(9L)).thenReturn("sk-user9");
+        when(client.getAsset("sk-user9", "asset-bad"))
+                .thenReturn(new MaterialStatusResult("Failed", "Sensitive", "命中审核"));
+
+        poller.poll();
+
+        verify(assetMapper).mirrorStatus(9L, "asset-bad", "Failed", "Sensitive", "命中审核");
+        verify(assetMapper).clearMaterialLink(9L, "asset-bad");
+        verify(client).deleteAsset("sk-user9", "asset-bad");
+    }
+
+    @Test
+    @DisplayName("上游 Active：不触发任何清理（别把正常素材删了）")
+    void activeTriggersNoCleanup() {
+        when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
+                .thenReturn(List.of(row(9L, "asset-ok")));
+        when(userInfoMapper.findCredential(9L)).thenReturn("sk-user9");
+        when(client.getAsset("sk-user9", "asset-ok"))
+                .thenReturn(new MaterialStatusResult("Active", null, null));
+
+        poller.poll();
+
+        verify(assetMapper, never()).clearMaterialLink(anyLong(), anyString());
+        verify(client, never()).deleteAsset(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("清理抛错不中断本轮跟进（单条素材的清理失败不该拖垮整轮）")
+    void cleanupFailureDoesNotAbortRound() {
+        when(assetMapper.listProcessingWithin(anyInt(), anyInt()))
+                .thenReturn(List.of(row(9L, "asset-bad"), row(9L, "asset-ok2")));
+        when(userInfoMapper.findCredential(9L)).thenReturn("sk-user9");
+        when(client.getAsset("sk-user9", "asset-bad"))
+                .thenReturn(new MaterialStatusResult("Failed", null, null));
+        when(assetMapper.clearMaterialLink(9L, "asset-bad"))
+                .thenThrow(new RuntimeException("db down"));
+        when(client.getAsset("sk-user9", "asset-ok2"))
+                .thenReturn(new MaterialStatusResult("Active", null, null));
+
+        poller.poll(); // 不抛
+
+        verify(assetMapper).mirrorStatus(9L, "asset-ok2", "Active", null, null);
+    }
+
+    @Test
     @DisplayName("认不出的上游状态收敛成 Processing（不误判为可用，也不误杀）")
     void normalizesUnknownStatusToProcessing() {
         when(assetMapper.listProcessingWithin(anyInt(), anyInt()))

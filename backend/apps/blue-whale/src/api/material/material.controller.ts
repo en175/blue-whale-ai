@@ -86,6 +86,17 @@ export class MaterialController {
         res.status(local.status).json(local.body);
         return;
       }
+      // IKF YHJ：GetAsset 的本地优先——已判 Failed 的素材直接回本地结论。
+      // 那张素材已被删除上游，再透传只会拿到 NotFound，前端会看到「不存在」而非「未通过」。
+      const failed = await this.material.tryServeLocalFailedAsset(
+        user.userId,
+        action,
+        payload,
+      );
+      if (failed) {
+        res.status(failed.status).json(failed.body);
+        return;
+      }
     }
 
     const upstream = await this.material.callAction(authorization, action, payload);
@@ -101,6 +112,7 @@ export class MaterialController {
           isRecord(body) && isRecord(payload) ? { ...body, ...payload } : payload,
           upstream.body,
           user.userId,
+          authorization,
         );
       } catch (error) {
         logger.error(
@@ -117,6 +129,7 @@ export class MaterialController {
     body: unknown,
     upstreamBody: unknown,
     userId: string,
+    authorization: string | undefined,
   ): Promise<void> {
     if (action === "CreateAsset") {
       const sourceAssetId = isRecord(body)
@@ -178,6 +191,18 @@ export class MaterialController {
       const entries = readAssetStatusEntries(upstreamBody);
       if (entries.length > 0) {
         await this.material.mirrorMaterialStatuses(userId, entries);
+        // IKF YHJ：任何一个条目被判 Failed 都触发统一处置（删上游 + 留 Failed + 清关联）。
+        // 放在这里而不是 mirrorMaterialStatuses 里：镜像是纯回写，处置带副作用，分开好读也好测。
+        for (const entry of entries) {
+          if (entry.status !== "Failed") continue;
+          await this.material.handleUpstreamMaterialFailure({
+            userId,
+            materialId: entry.materialId,
+            authorization,
+            errorCode: entry.errorCode ?? null,
+            errorMessage: entry.errorMessage ?? null,
+          });
+        }
       }
       return;
     }

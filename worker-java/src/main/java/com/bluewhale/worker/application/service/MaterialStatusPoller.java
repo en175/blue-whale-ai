@@ -127,9 +127,39 @@ public class MaterialStatusPoller {
                 log.info("素材状态跟进收敛 materialId={} {}: {}",
                         materialId, row.getUserId(), status);
             }
+
+            // IKF YHJ：上游判失败 → 统一处置，与 backend 透传镜像 / 生成拦截点同一口径。
+            // 顺序与 TS 侧一致：先留 Failed（已在上面的 mirrorStatus 完成）再清关联，最后删上游。
+            if (STATUS_FAILED.equals(status)) {
+                handleFailure(row.getUserId(), materialId, token);
+            }
         } catch (Exception e) {
             // 单条失败只记错：本轮后续继续、下轮扫描再试。
             log.error("素材状态跟进单条失败 materialId={}: {}", materialId, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 素材被判失败时的统一处置（IKFYHJ）。
+     * <p>
+     * 状态行已在 {@link #followUp} 里留成 {@code Failed}（刻意不删——留痕，且拦截点据此
+     * 直接拒绝、不必再问上游）；这里补两件：清 {@code assets} 的素材关联、删上游素材。
+     * <p>
+     * 与 backend 的差异：TS 侧把「删上游」做成不等待的清理副作用（它跑在请求路径上），
+     * 这里是后台循环、没有请求要拖慢，同步做完更好排障。
+     * 两件事都只记日志不外抛——单条素材的清理失败不该中断整轮跟进。
+     */
+    private void handleFailure(long userId, String materialId, String token) {
+        try {
+            int cleared = assetMapper.clearMaterialLink(userId, materialId);
+            log.info("素材失败：已清 {} 条本地资产关联 materialId={}", cleared, materialId);
+        } catch (Exception e) {
+            log.error("素材失败：清本地资产关联失败 materialId={}: {}", materialId, e.getMessage(), e);
+        }
+        try {
+            client.deleteAsset(token, materialId);
+        } catch (Exception e) {
+            log.error("素材失败：清理上游失败 materialId={}: {}", materialId, e.getMessage(), e);
         }
     }
 

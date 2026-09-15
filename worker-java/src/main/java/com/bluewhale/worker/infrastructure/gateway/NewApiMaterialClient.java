@@ -165,6 +165,60 @@ public class NewApiMaterialClient {
     }
 
     /**
+     * 删除上游素材（IKFYHJ：上游判定失败时的清理动作）。
+     * <p>
+     * 与 {@link #getAsset} 同样的「缺配置不抛」口径——本类不是 tag 消费，没有 {@code @Conditional}
+     * 兜着。区别是这里把失败**当返回值**（false）而不是 null：调用方要决定是否记日志，
+     * 但都不能因此中断跟进循环。
+     *
+     * @return true = 上游确认删除成功（2xx）
+     */
+    public boolean deleteAsset(String token, String materialId) {
+        if (baseUrl == null) {
+            if (!missingBaseUrlLogged) {
+                missingBaseUrlLogged = true;
+                log.warn("素材清理跳过：NEW_API_BASE_URL 未配置");
+            }
+            return false;
+        }
+        if (token == null || token.isBlank()) {
+            throw new IllegalArgumentException("token 不能为空");
+        }
+        if (materialId == null || materialId.isBlank()) {
+            throw new IllegalArgumentException("materialId 不能为空");
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("Id", materialId);
+
+        String bodyJson;
+        try {
+            bodyJson = JSON.writeValueAsString(payload);
+        } catch (Exception e) {
+            log.error("DeleteAsset 请求序列化失败 materialId={}: {}", materialId, e.getMessage());
+            return false;
+        }
+
+        Request.Builder requestBuilder = new Request.Builder()
+                .url(baseUrl + "/api/material/DeleteAsset")
+                .post(RequestBody.create(bodyJson, JSON_TYPE))
+                .header("Content-Type", "application/json");
+        NewApiHttpSupport.applyStandardHeaders(requestBuilder, token, UUID.randomUUID().toString());
+
+        try (Response response = httpClient.newCall(requestBuilder.build()).execute()) {
+            if (response.isSuccessful()) {
+                log.info("已清理上游失败素材 materialId={}", materialId);
+                return true;
+            }
+            log.warn("清理上游失败素材未成功 materialId={} HTTP {}", materialId, response.code());
+            return false;
+        } catch (Exception e) {
+            log.warn("清理上游失败素材异常 materialId={}: {}", materialId, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * 解析上游信封。任何不合预期的形状都返回 null（含上游只回 ResponseError 的情形）——
      * 状态未知就不写库，避免把一次坏响应固化成终态。
      */

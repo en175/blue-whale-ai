@@ -20,6 +20,10 @@ function makeController(assetMock: {
     mirrorMaterialStatuses: vi.fn().mockResolvedValue(undefined),
     clearMaterialStatus: vi.fn().mockResolvedValue(undefined),
     clearMaterialStatusByGroup: vi.fn().mockResolvedValue(undefined),
+    // IKF YHJ：GetAsset 本地优先——默认未命中（null）走透传，不破坏既有用例；专项用例覆盖命中分支。
+    tryServeLocalFailedAsset: vi.fn().mockResolvedValue(null),
+    // IKF YHJ：素材失败的统一处置（删上游 + 留 Failed + 清关联）。
+    handleUpstreamMaterialFailure: vi.fn().mockResolvedValue(undefined),
   } as unknown as MaterialService;
   const assets = {
     linkAssetToMaterial: assetMock.linkAssetToMaterial ?? vi.fn(),
@@ -571,5 +575,100 @@ describe("MaterialController IKF YHJ 素材校验状态镜像", () => {
     expect(material.mirrorMaterialStatuses).toHaveBeenCalledWith("9", [
       { materialId: "asset-good", status: "Processing", errorCode: null, errorMessage: null },
     ]);
+  });
+});
+
+// IKF YHJ：上游判失败时的统一处置 + GetAsset 本地优先。
+// 这两条是配套的：处置会删掉上游素材，删完之后再透传只会拿到 NotFound，
+// 所以 GetAsset 必须先在本地短接，否则前端看到「不存在」而不是「未通过」。
+describe("MaterialController —— 素材失败处置与本地优先（IKFYHJ）", () => {
+  const USER = { userId: "9", status: "enabled", isAdmin: false, username: "u", email: null };
+  const okRes = () =>
+    ({ status: vi.fn().mockReturnThis(), json: vi.fn() }) as unknown as Response;
+
+  it("ListAssets 里有 Failed 条目：只对失败的那条触发统一处置（带原文）", async () => {
+    const { controller, material } = makeController({});
+    material.callAction.mockResolvedValue({
+      status: 200,
+      body: {
+        ResponseMetadata: {},
+        Result: {
+          TotalCount: 2,
+          Items: [
+            { Id: "asset-ok", Status: "Active" },
+            { Id: "asset-bad", Status: "Failed", Error: { Code: "Sensitive", Message: "命中审核" } },
+          ],
+        },
+      },
+    });
+
+    await controller.callAction(
+      "ListAssets",
+      "Bearer sk-test",
+      { Filter: { GroupIds: ["group-9"], GroupType: "AIGC" }, PageNumber: 1, PageSize: 10 },
+      okRes(),
+      USER,
+    );
+
+    expect(material.handleUpstreamMaterialFailure).toHaveBeenCalledTimes(1);
+    expect(material.handleUpstreamMaterialFailure).toHaveBeenCalledWith({
+      userId: "9",
+      materialId: "asset-bad",
+      authorization: "Bearer sk-test",
+      errorCode: "Sensitive",
+      errorMessage: "命中审核",
+    });
+  });
+
+  it("上游全 Active：不触发处置（别把正常素材删了）", async () => {
+    const { controller, material } = makeController({});
+    material.callAction.mockResolvedValue({
+      status: 200,
+      body: { Result: { Items: [{ Id: "asset-ok", Status: "Active" }] } },
+    });
+
+    await controller.callAction(
+      "ListAssets",
+      "Bearer sk-test",
+      { Filter: { GroupIds: ["group-9"], GroupType: "AIGC" }, PageNumber: 1, PageSize: 10 },
+      okRes(),
+      USER,
+    );
+
+    expect(material.handleUpstreamMaterialFailure).not.toHaveBeenCalled();
+  });
+
+  it("GetAsset 本地已 Failed：直接回本地结论，不透传上游", async () => {
+    const { controller, material } = makeController({});
+    material.tryServeLocalFailedAsset.mockResolvedValue({
+      status: 200,
+      body: { ResponseMetadata: {}, Result: { Id: "asset-bad", Status: "Failed" } },
+    });
+
+    const res = okRes();
+    await controller.callAction(
+      "GetAsset",
+      "Bearer sk-test",
+      { Id: "asset-bad" },
+      res,
+      USER,
+    );
+
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ Result: expect.objectContaining({ Status: "Failed" }) }),
+    );
+    expect(material.callAction).not.toHaveBeenCalled();
+  });
+
+  it("GetAsset 本地非 Failed：照常透传（Active/Processing 以上游为准）", async () => {
+    const { controller, material } = makeController({});
+    material.callAction.mockResolvedValue({
+      status: 200,
+      body: { Result: { Id: "asset-ok", Status: "Processing" } },
+    });
+
+    await controller.callAction("GetAsset", "Bearer sk-test", { Id: "asset-ok" }, okRes(), USER);
+
+    expect(material.callAction).toHaveBeenCalledTimes(1);
   });
 });

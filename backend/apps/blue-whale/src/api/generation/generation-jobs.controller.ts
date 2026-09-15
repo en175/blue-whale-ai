@@ -67,7 +67,7 @@ export class GenerationJobsController {
    *  注意：`callAction` 在网络失败时是**抛** `NewApiError`（不是返回错误码），缺凭证也抛 401。
    *  这里必须自己咽掉转成 null——否则「上游不可达」会绕过 MATERIAL_STATUS_UNAVAILABLE_MESSAGE，
    *  在 create 期冒成 503、在 retry 期直接炸掉 `retryJob` 的交互事务（那个事务只 catch P2002）。 */
-  private buildMaterialGate(authorization: string | undefined) {
+  private buildMaterialGate(userId: string, authorization: string | undefined) {
     return createMaterialGate({
       repo: this.material.materialStatusRepo,
       fetchUpstreamStatus: async (materialId) => {
@@ -81,11 +81,15 @@ export class GenerationJobsController {
             // 按「查不到」处理会让用户拿到「请稍后重试」而永远重试不成功。
             const code = readResponseErrorCode(body);
             if (isMaterialLevelRejection(code)) {
-              return {
-                status: "Failed",
+              const errorMessage = readResponseErrorMessage(body);
+              // 顺带统一处置：本地留 Failed、清 assets 关联；上游本来就没有，跳过删除。
+              await this.handleMaterialFailure(userId, materialId, {
+                authorization,
                 errorCode: code,
-                errorMessage: readResponseErrorMessage(body),
-              };
+                errorMessage,
+                deleteUpstream: false,
+              });
+              return { status: "Failed", errorCode: code, errorMessage };
             }
             // 其余非 2xx（鉴权 / 限流 / 5xx）不是素材的错 → 本轮未知，可重试。
             return null;
@@ -100,11 +104,18 @@ export class GenerationJobsController {
             typeof rawError === "object" && rawError !== null
               ? (rawError as Record<string, unknown>)
               : undefined;
-          return {
-            status: rec.Status,
-            errorCode: typeof err?.Code === "string" ? err.Code : null,
-            errorMessage: typeof err?.Message === "string" ? err.Message : null,
-          };
+          const errorCode = typeof err?.Code === "string" ? err.Code : null;
+          const errorMessage = typeof err?.Message === "string" ? err.Message : null;
+          // IKF YHJ：上游判失败 → 统一处置（删上游素材 + 本地留 Failed + 清 assets 关联）。
+          // 走的是与透传镜像、worker 跟进器同一个口子，不因发现路径不同而行为分叉。
+          if (rec.Status === "Failed") {
+            await this.handleMaterialFailure(userId, materialId, {
+              authorization,
+              errorCode,
+              errorMessage,
+            });
+          }
+          return { status: rec.Status, errorCode, errorMessage };
         } catch (error) {
           logger.warn(
             `[generation] 素材状态实时查询失败 materialId=${materialId}，按不可用处理: ${
@@ -117,6 +128,37 @@ export class GenerationJobsController {
       resolveLocalAssetMaterialIds: (userId, assetIds) =>
         this.assets.findBoundMaterialIds(userId, assetIds),
     });
+  }
+
+  /** IKF YHJ：素材被判失败时的统一处置（见 `MaterialService.handleUpstreamMaterialFailure`）。
+   *  **永不抛**——它跑在 `fetchUpstreamStatus` 的 try 里，抛了会被咽成「本轮未知」，
+   *  把本该是终局拒绝的结果降级成「请稍后重试」，正好把这次的修复抵消掉。 */
+  private async handleMaterialFailure(
+    userId: string,
+    materialId: string,
+    opts: {
+      authorization: string | undefined;
+      errorCode?: string | null;
+      errorMessage?: string | null;
+      deleteUpstream?: boolean;
+    },
+  ): Promise<void> {
+    try {
+      await this.material.handleUpstreamMaterialFailure({
+        userId,
+        materialId,
+        authorization: opts.authorization,
+        errorCode: opts.errorCode ?? null,
+        errorMessage: opts.errorMessage ?? null,
+        ...(opts.deleteUpstream === false ? { deleteUpstream: false } : {}),
+      });
+    } catch (error) {
+      logger.warn(
+        `[generation] 素材失败处置异常 materialId=${materialId}: ${
+          error instanceof Error ? error.message : "unknown"
+        }`,
+      );
+    }
   }
 
   @Post()
@@ -139,7 +181,7 @@ export class GenerationJobsController {
         models: this.models,
         canvas: this.canvas,
         assets: this.command.assets,
-        materialGate: this.buildMaterialGate(authorization),
+        materialGate: this.buildMaterialGate(user.userId, authorization),
         ...(this.cost.estimator ? { costEstimator: this.cost.estimator } : {}),
       },
       internal,
@@ -213,7 +255,7 @@ export class GenerationJobsController {
       {
         projects: this.project,
         command: this.command.repo,
-        materialGate: this.buildMaterialGate(authorization),
+        materialGate: this.buildMaterialGate(user.userId, authorization),
       },
     );
     if (result.code === 200 && result.data) {
