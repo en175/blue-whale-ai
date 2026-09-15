@@ -408,8 +408,9 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     ...orderedImageRefs.map((r) => ({ assetId: r.assetId, url: r.url, name: r.name, badge: `图片${r.number}`, mediaType: 'image' as const })),
     ...(attachments ?? []).map((a, i) => ({ assetId: a.nodeId, url: '', name: a.title, badge: `文本${i + 1}`, mediaType: 'text' as const })),
   ];
-  const closeMention = () => {
-    editorRef.current?.dismissMention();
+  /** IKFXOR：Esc 取消（restoreFocus=true）把光标落回 @ 后并还焦编辑器；点外关闭维持现状不抢焦 */
+  const closeMention = (restoreFocus = false) => {
+    editorRef.current?.dismissMention(restoreFocus);
     setMention({ open: false, query: '' });
   };
 
@@ -599,6 +600,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
               }
             }}
             onClose={closeMention}
+            onEscapeClose={() => closeMention(true)}
           />
         </div>
       )}

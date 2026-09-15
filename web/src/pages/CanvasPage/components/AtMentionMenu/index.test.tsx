@@ -7,7 +7,7 @@ import AtMentionMenu from './index';
 let root: Root;
 let host: HTMLDivElement;
 const image = { id: 'node-1', assetId: '101', kind: 'image' as const, name: '图片节点 1' };
-async function render() {
+async function render(overrides: { onClose?: () => void; onEscapeClose?: () => void } = {}) {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   host = document.createElement('div');
   document.body.append(host);
@@ -15,7 +15,8 @@ async function render() {
   const onSelect = vi.fn();
   const onSelectReferenced = vi.fn();
   await act(async () => root.render(createElement(AtMentionMenu, {
-    anchorRef: { current: host }, editorQuery: '', onClose: vi.fn(), onSelect,
+    anchorRef: { current: host }, editorQuery: '', onClose: overrides.onClose ?? vi.fn(), onSelect,
+    onEscapeClose: overrides.onEscapeClose,
     items: [image, { id: 'v1', kind: 'video', name: '视频节点 1' }, { id: 't1', kind: 'text', name: '文本节点 1' }],
     referencedItems: [{ ...image, badge: '图片1' }], onSelectReferenced,
     disabledKinds: ['video'],
@@ -216,4 +217,26 @@ it('鼠标从分类行移到子菜单后子菜单仍在且位置不变', async (
     expect(document.querySelector('[data-mention-flyout]')).toBeTruthy();
     expect(flyoutWrapEl().style.marginTop).toBe('186px');
   } finally { spy.mockRestore(); }
+});
+
+/** IKFXOR：区分关闭来源——Esc 走 onEscapeClose（调用方借此还焦编辑器），点外仍走 onClose 不抢焦 */
+it('Esc 走 onEscapeClose、点外仍走 onClose（区分关闭来源）', async () => {
+  const onClose = vi.fn();
+  const onEscapeClose = vi.fn();
+  await render({ onClose, onEscapeClose });
+  await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+  expect(onEscapeClose).toHaveBeenCalledTimes(1);
+  expect(onClose).not.toHaveBeenCalled();
+  await act(async () => document.body.dispatchEvent(new Event('pointerdown')));
+  expect(onClose).toHaveBeenCalledTimes(1);
+  expect(onEscapeClose).toHaveBeenCalledTimes(1);
+});
+
+it('未传 onEscapeClose 时 Esc 与点外同走 onClose（文本节点/音频面板现状不回归）', async () => {
+  const onClose = vi.fn();
+  await render({ onClose });
+  await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+  expect(onClose).toHaveBeenCalledTimes(1);
+  await act(async () => document.body.dispatchEvent(new Event('pointerdown')));
+  expect(onClose).toHaveBeenCalledTimes(2);
 });
