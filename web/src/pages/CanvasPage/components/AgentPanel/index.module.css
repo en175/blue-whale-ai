@@ -2442,12 +2442,21 @@
 
 .solutionList {
   margin: 0;
-  padding-left: 16px;
+  padding-left: 18px;
   display: flex;
   flex-direction: column;
   gap: 2px;
   max-height: 200px;
   overflow-y: auto;
+  color: var(--color-text-primary);
+}
+
+ul.solutionList {
+  list-style: disc;
+}
+
+ol.solutionList {
+  list-style: decimal;
 }
 
 .solutionActions {
