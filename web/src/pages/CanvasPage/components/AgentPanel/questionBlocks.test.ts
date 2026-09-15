@@ -103,7 +103,7 @@ describe('splitReplySegments', () => {
 - 手机壁纸 / 锁屏（竖版 9:16，纵向构图）
 - 还没定，先做一张好看的
 
-➡️ 推荐：通用桌面壁纸，16:9 横版。`);
+**➡️ 推荐：通用桌面壁纸，16:9 横版**。夏日小镇横向展开最舒服。`);
     expect(segs[0]).toMatchObject({
       kind: 'question',
       no: 'Q1',
@@ -113,7 +113,8 @@ describe('splitReplySegments', () => {
         { key: '', label: '手机壁纸 / 锁屏（竖版 9:16，纵向构图）', desc: '' },
         { key: '', label: '还没定，先做一张好看的', desc: '' },
       ],
-      recommendation: '推荐：通用桌面壁纸，16:9 横版。',
+      // 箭头前的 ** 剥掉，配对的那个也剥掉，剩下的正文不再有落单的星号。
+      recommendation: '推荐：通用桌面壁纸，16:9 横版。夏日小镇横向展开最舒服。',
     });
   });
 

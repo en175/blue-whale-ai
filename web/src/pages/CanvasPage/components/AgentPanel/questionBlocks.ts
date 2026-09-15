@@ -37,7 +37,8 @@ const QUESTION_LINE = /^\s*(?:\*\*)?\s*❓\s*(.*)$/;
 const OPTION_LINE = /^\s*(?:[-*•]\s*)?(?:\*\*)?\s*([A-Ha-h])\s*[.．、)）]\s*(.*)$/;
 /** 模型有时不编字母，只是一条条列出来（项目 607：「- 通用桌面壁纸（横版 16:9）」）。题里 ➡️ 之前的列表项一样是选项。 */
 const PLAIN_OPTION_LINE = /^\s*[-*•]\s+(.+)$/;
-const RECOMMEND_LINE = /^\s*➡️\s*(.*)$/;
+/** 模型有时把箭头一起包进粗体：「**➡️ 推荐：…**。」——箭头前的 `**` 剥掉，正文里配对的那个也一起剥。 */
+const RECOMMEND_LINE = /^\s*(\*\*)?\s*➡️\s*(.*)$/;
 const HR_LINE = /^\s*-{3,}\s*$/;
 
 function stripBold(text: string): string {
@@ -102,7 +103,7 @@ export function splitReplySegments(text: string): ReplySegment[] {
       const r = RECOMMEND_LINE.exec(line);
       if (r) {
         inRec = true;
-        rec.push(r[1]);
+        rec.push(r[1] ? r[2].replace('**', '') : r[2]);
         continue;
       }
       const o = OPTION_LINE.exec(line);
