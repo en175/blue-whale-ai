@@ -12,8 +12,8 @@
 
 现状有三处缺口，且都不是疏漏而是文档化的设计意图：
 
-1. **后端对状态零感知**。`backend/libs/shared/material/**`、`generation/**`、`packages/core/src` 全仓 grep `Active|Processing|Failed` 零命中。`handle-create-generation-job.ts:872` 原文：「仅本地 Asset 引用需要查存在性；素材库引用（asset:// 载体）由上游强校验，格式已在前置校验。」
-2. **两条绕过路径**：重试路径 `generation-command-repo.ts:509` 逐字拷贝原 `input`，无任何重校验；本地 `Asset` 已绑 `material_id` 时由 worker 自动转 `asset://<id>`（`video-job-runner.ts:687-752`），前端物理上无从拦截。
+1. **后端对状态零感知**。`backend/libs/shared/material/**`、`generation/**`、`packages/core/src` 全仓 grep `Active|Processing|Failed` 零命中。`handle-create-generation-job.ts:1494` 原文：「仅本地 Asset 引用需要查存在性；素材库引用（asset:// 载体）由上游强校验，格式已在前置校验。」
+2. **两条绕过路径**：重试路径 `generation-command-repo.ts` 的 `retryJob` 逐字拷贝原 `input`，无任何重校验；本地 `Asset` 已绑 `material_id` 时由 worker 自动转 `asset://<id>`（`worker-java/.../VideoJobProcessor.java:586-600`「本地 Asset 命中素材库关联 → 生成时改走素材库 id」，TS 侧原实现 `video-job-runner.ts:687-752` 已随 ADR-0084 退役），前端物理上无从拦截。
 
 > **勘误（2026-09-15）**：本 ADR 初稿列的缺口 2「前端拿『上传成功』当『校验通过』、没有轮询」**对 0915 树不成立**，已删除。前端同期已由 `03b107d2`（IKFVMQ，mwq，2026-09-15 16:17，「画布合规校验改为轮询 GetAsset」）补齐：`characterLibraryDeposit.ts:67` 在 `CreateAsset` 后 `await waitAssetReady(Id)` 轮询到 `Active`，`CanvasPage/index.tsx:3323` 复用既有 `materialId` 时同样 `await waitComplianceAssetReady`，两者都是**通过后才**置 `compliancePassed: true`，失败走 `failNodeCompliance`。该提交在本 ADR 的基点之前，属初稿读漏，非后续变化。**本 ADR 的动机因此收窄为「后端侧零感知」这一条**——前端已经做到「等到 `Active` 才放行」，缺的一直是后端那道闸；不补后端，用户 A 上传通过的素材被用户 B、或同一用户在重试/本地 Asset 转换路径上绕开校验，前端轮询管不着。
 
