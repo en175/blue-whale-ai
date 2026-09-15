@@ -1438,6 +1438,18 @@ export default function CanvasPage() {
     });
   }, [textNodes, mediaNodes, productNodes, assetNodes, uploadedNodes, setEdges]);
 
+  /** 登记在途保存：期间自动保存的 800ms 防抖会因在途守卫跳过，flush 也会排在它后面——
+   *  同一时刻只有一个 PUT，不会两次请求共用同一个 If-Match（IKFS5W）。
+   *  只有仍是「最新那个」时才清空，避免先完成的一方把后登记的那次抹掉。 */
+  const trackCanvasSave = <T,>(promise: Promise<T>): Promise<T> => {
+    savePromiseRef.current = promise;
+    const release = () => {
+      if (savePromiseRef.current === promise) savePromiseRef.current = null;
+    };
+    promise.then(release, release);
+    return promise;
+  };
+
   /** 画布变更后 800ms 防抖自动保存：PUT /api/canvases/:projectId（If-Match 乐观锁） */
   useEffect(() => {
     if (!currentId || !doc || applyingRef.current) return;
@@ -1456,33 +1468,35 @@ export default function CanvasPage() {
       setSaveStatus('saving');
       // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
       const pendingSnapshot = new Set(pendingNodeIdsRef.current);
-      savePromiseRef.current = saveCanvasDoc(currentId, { viewport, nodes, edges }, versionRef.current)
-        .then((saved) => {
-          versionRef.current = saved.version;
-          setSaveBlocked(false);
-          pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
-          setSaveStatus(textNodesRef.current.some(node => draftErrorsRef.current.has(node.id)) ? 'error' : 'saved');
-          setSaveEpoch(value => value + 1);
-          setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
-        })
-        .catch((e) => {
-          setSaveBlocked(true);
-          // 释放签名，允许下次变更时重试
-          lastSavedRef.current = '';
-          // 本次请求里有未保存的新增节点 → 添加失败：回滚节点（画布上不保留添加失败的节点）
-          const hadPendingAdds = pendingSnapshot.size > 0;
-          if (isApiError(e) && e.status === 412) {
-            // 版本冲突：回滚未保存节点 + toast，然后重新加载最新画布数据
-            setSaveStatus('error');
-            showToast('warn', '画布版本冲突，当前编辑已保留，请先复制正文再刷新复核');
-          } else {
-            // 网络/服务端错误：新增节点回滚，已有节点的编辑保留、左下角提示保存失败
-            if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
-            setSaveStatus('error');
-            showToast('error', hadPendingAdds ? '添加失败，请重试' : '保存失败，请重试');
-            console.warn('画布自动保存失败:', e);
-          }
-        }).finally(() => { savePromiseRef.current = null; });
+      trackCanvasSave(
+        saveCanvasDoc(currentId, { viewport, nodes, edges }, versionRef.current)
+          .then((saved) => {
+            versionRef.current = saved.version;
+            setSaveBlocked(false);
+            pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
+            setSaveStatus(textNodesRef.current.some(node => draftErrorsRef.current.has(node.id)) ? 'error' : 'saved');
+            setSaveEpoch(value => value + 1);
+            setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
+          })
+          .catch((e) => {
+            setSaveBlocked(true);
+            // 释放签名，允许下次变更时重试
+            lastSavedRef.current = '';
+            // 本次请求里有未保存的新增节点 → 添加失败：回滚节点（画布上不保留添加失败的节点）
+            const hadPendingAdds = pendingSnapshot.size > 0;
+            if (isApiError(e) && e.status === 412) {
+              // 版本冲突：回滚未保存节点 + toast，然后重新加载最新画布数据
+              setSaveStatus('error');
+              showToast('warn', '画布版本冲突，当前编辑已保留，请先复制正文再刷新复核');
+            } else {
+              // 网络/服务端错误：新增节点回滚，已有节点的编辑保留、左下角提示保存失败
+              if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
+              setSaveStatus('error');
+              showToast('error', hadPendingAdds ? '添加失败，请重试' : '保存失败，请重试');
+              console.warn('画布自动保存失败:', e);
+            }
+          }),
+      );
     }, 800);
     return () => window.clearTimeout(timer);
   }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch]);
@@ -5263,31 +5277,39 @@ export default function CanvasPage() {
 
   /** 等待在途保存完成并立即落盘当前画布编辑（IKDLQE 应用预览的保存串行化模式；IKDLQF 目标生图提交复用）。
    *  返回 false 表示等待期间项目已切换，调用方应中止后续动作。
-   *  调用方须持有 applyingRef 闸口，阻断 800ms 防抖自动保存与本函数并发。 */
-  const flushCanvasSave = async (projectId: string): Promise<boolean> => {
-    await savePromiseRef.current;
-    if (activeProjectRef.current !== projectId) return false;
-    if (blockInvalidDraft(textNodesRef.current.map(n => n.id))) return false;
-    const contentNodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
-    // 组伪节点随 nodes 持久化（IKD0JT A3）：与防抖自动保存同口径，否则切换项目/应用预览时组关系丢失
-    const nodes = [...contentNodes, ...groupsRef.current.map((g) => groupToNode(g))];
-    const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
-    if (signature !== lastSavedRef.current) {
-      try {
-        const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current }, versionRef.current);
-        versionRef.current = saved.version;
-        lastSavedRef.current = signature;
-        pendingNodeIdsRef.current.clear();
-      } catch (error) {
-        setSaveBlocked(true);
-        setSaveStatus('error');
-        throw error;
+   *  IKFS5W：自身也登记进 savePromiseRef，与 800ms 防抖自动保存互斥——同一时刻只有一个 PUT、
+   *  不会两次请求共用同一个 If-Match（调用方持 applyingRef 仍是推荐做法，但不再是正确性前提）。 */
+  const flushCanvasSave = (projectId: string): Promise<boolean> => {
+    const runFlush = async (): Promise<boolean> => {
+      if (activeProjectRef.current !== projectId) return false;
+      if (blockInvalidDraft(textNodesRef.current.map(n => n.id))) return false;
+      const contentNodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
+      // 组伪节点随 nodes 持久化（IKD0JT A3）：与防抖自动保存同口径，否则切换项目/应用预览时组关系丢失
+      const nodes = [...contentNodes, ...groupsRef.current.map((g) => groupToNode(g))];
+      const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
+      if (signature !== lastSavedRef.current) {
+        try {
+          const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current }, versionRef.current);
+          versionRef.current = saved.version;
+          lastSavedRef.current = signature;
+          pendingNodeIdsRef.current.clear();
+        } catch (error) {
+          setSaveBlocked(true);
+          setSaveStatus('error');
+          throw error;
+        }
       }
-    }
-    setSaveBlocked(false);
-    setSaveStatus('saved');
-    setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
-    return true;
+      setSaveBlocked(false);
+      setSaveStatus('saved');
+      setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
+      setSaveEpoch(value => value + 1);
+      return true;
+    };
+    const previous = savePromiseRef.current;
+    const queued = previous ? previous.then(runFlush, runFlush) : runFlush();
+    // 登记「吞掉错误的 settled」供后来者安全 await；调用方拿到的 queued 照旧抛错
+    trackCanvasSave(queued.then(() => undefined, () => undefined));
+    return queued;
   };
 
   const handleRetryCanvasSave = async () => {
