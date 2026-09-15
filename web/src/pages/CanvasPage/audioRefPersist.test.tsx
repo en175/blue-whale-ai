@@ -622,6 +622,8 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     // 不携带旧参考字段
     expect(payload.input_asset_ids).toBeUndefined();
     expect(payload.reference_asset_ids).toBeUndefined();
+    // IKFXZD：发送成功即隐藏面板
+    expect(container.querySelector('[data-testid="audio-send"]')).toBeNull();
   });
 });
 
