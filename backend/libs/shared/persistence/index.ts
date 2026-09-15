@@ -7,6 +7,16 @@ export {
 export { getPrismaClient, type PrismaClient } from "./db.js";
 export { createAuthRepo, type AuthRepo } from "./auth-repo.js";
 export {
+  createMaterialAssetRepo,
+  type MaterialAssetRepo,
+  type MaterialAssetStatus,
+  type MaterialAssetView,
+} from "./material-asset-repo.js";
+export {
+  createUserInfoRepo,
+  type UserInfoRepo,
+} from "./user-info-repo.js";
+export {
   createProjectRepo,
   type ProjectPage,
   type ProjectRepo,
