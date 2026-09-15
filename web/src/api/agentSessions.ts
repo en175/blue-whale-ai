@@ -170,6 +170,10 @@ export interface GenerationCardAssetRef {
   /** 展示名（不带 @ 前缀，前缀是展示层的事） */
   label: string;
   mediaType: 'image' | 'video';
+  /** 记号的显示名「图1」「视频3」：卡上和正文里都用它，和画布 `#N` 同一个号。老卡没有，就显示 label。 */
+  marker?: string;
+  /** 这份素材在提示词正文里的记号原文（`@图1`，照包写的模型也会写 `@图片1`），正文按它换成胶囊。 */
+  markerTexts?: string[];
 }
 
 /** 生成卡：单镜头分镜提示词卡（S2 渲染，S3 手动应用） */
@@ -282,6 +286,11 @@ export interface PromptCardShot {
   frame_description?: string;
   prompt_text: string;
   asset_bindings: { asset_ref_id: string; role?: string; strength?: string; note?: string }[];
+  /**
+   * 正文里素材记号（`@图1`）的位置，服务端算（IKFLD1）。`index` 是本会话素材清单里的全局序号，
+   * 和画布上的 `#N` 同一个号。老卡没有。
+   */
+  prompt_mentions?: { start: number; end: number; index: number; asset_ref_id: string }[];
   generation_suggestions?: {
     target_media?: 'image' | 'video';
     aspect_ratio?: string;

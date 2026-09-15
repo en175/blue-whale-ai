@@ -449,10 +449,15 @@ function GenerationCard({ card, onApply, disabled, applied, assets }: {
   const [docOpen, setDocOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const refs = card.assetRefItems;
-  // 卡自己带的素材引用并进正文识别：历史消息里 knownAssets 可能没有它们。
+  // 卡自己带的素材引用并进正文识别：历史消息里 knownAssets 可能没有它们。正文里的 `@图1` 按服务端
+  // 算好的记号原文认，胶囊上写「图1」，和上面「参考」那一排、画布 `#N` 同一个号；悬停看全名。
   const cardAssets = useMemo<KnownAsset[]>(() => {
     const known = new Set(assets.map((a) => a.assetId));
-    return [...assets, ...(refs ?? []).filter((r) => !known.has(r.assetId)).map((r) => ({ assetId: r.assetId, label: r.label, mediaType: r.mediaType }))];
+    const markers = (refs ?? []).flatMap((r) =>
+      (r.markerTexts ?? []).map((text) => ({ assetId: r.assetId, label: text, display: r.marker, name: r.label, mediaType: r.mediaType })),
+    );
+    const named = (refs ?? []).filter((r) => !known.has(r.assetId)).map((r) => ({ assetId: r.assetId, label: r.label, mediaType: r.mediaType }));
+    return [...markers, ...assets, ...named].sort((a, b) => b.label.length - a.label.length);
   }, [assets, refs]);
   const meta = [
     card.targetMedia === 'video' ? '视频' : card.targetMedia === 'image' ? '图片' : null,
@@ -482,7 +487,7 @@ function GenerationCard({ card, onApply, disabled, applied, assets }: {
         <div className={styles.shotRefs}>
           <span className={styles.shotRefsLabel}>参考</span>
           {refs.map((r) => (
-            <AssetMentionChip key={r.assetId} assetId={r.assetId} label={r.label} mediaType={r.mediaType} />
+            <AssetMentionChip key={r.assetId} assetId={r.assetId} label={r.marker ?? r.label} name={r.label} mediaType={r.mediaType} />
           ))}
         </div>
       )}

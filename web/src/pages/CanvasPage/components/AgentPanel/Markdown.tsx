@@ -35,6 +35,7 @@ export function Markdown({ text, assets = [], className }: { text: string; asset
               <AssetMentionChip
                 assetId={assetId}
                 label={String(attrs['data-asset-label'] ?? '')}
+                name={typeof attrs['data-asset-name'] === 'string' ? attrs['data-asset-name'] : undefined}
                 mediaType={attrs['data-asset-media'] === 'video' ? 'video' : 'image'}
                 url={typeof attrs['data-asset-url'] === 'string' ? attrs['data-asset-url'] : undefined}
               />

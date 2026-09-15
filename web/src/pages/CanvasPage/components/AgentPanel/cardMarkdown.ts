@@ -50,7 +50,7 @@ export function generationCardMarkdown(card: GenerationCardBlock): string {
       ['时长', card.durationSeconds !== undefined ? `${card.durationSeconds} 秒` : card.timeRange],
     ]),
     `## 提示词\n\n${card.prompt}`,
-    card.assetRefItems?.length ? `## 参考素材\n\n${card.assetRefItems.map((r) => `- ${r.label}`).join('\n')}` : '',
+    card.assetRefItems?.length ? `## 参考素材\n\n${card.assetRefItems.map((r) => (r.marker ? `- ${r.marker}：${r.label}` : `- ${r.label}`)).join('\n')}` : '',
   ];
   return parts.filter(Boolean).join('\n\n');
 }
