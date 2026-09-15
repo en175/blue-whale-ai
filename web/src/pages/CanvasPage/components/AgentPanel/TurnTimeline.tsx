@@ -6,13 +6,18 @@
  * 生成卡与 Markdown。
  */
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, ChevronUp, Clock, Loader2, Minus, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ChevronUp, Clock, Loader2, Minus, X } from 'lucide-react';
 import styles from './index.module.css';
 import { formatElapsed, formatTokens } from '../../hooks/runStatusLine';
 import {
   formatDuration,
+  phasesOf,
+  processItemElapsedMs,
+  processItemRunning,
   settledStepLabel,
   toolLabel,
+  type ProcessItem,
+  type ProcessPhase,
   type TimelineItem,
   type ToolStatus,
   type TurnAccount,
@@ -266,6 +271,88 @@ export function ToolCallRow({ item }: { item: Extract<TimelineItem, { kind: 'too
   );
 }
 
+/**
+ * 过程组（IKFLB9 定稿）：一轮里模型做的事——思考、查阅、等待——收成一个整体，正文只放结论。
+ *
+ * 此前思考、工具行、等待行和正文一句一句交替着铺（「已等待 9.8s / ✶ 思考了 5.2s / 我先把方向对一下 / 已查阅…」），
+ * 用户读到的是十几行碎片。定稿后每轮只有一行「▶ ✻ 已处理 31s · 思考 2 段 · 工具 1 次」，默认折起；点开按阶段分组
+ * （理解需求 / 查阅对应的创作方法 / 整理回复），每个阶段一个合计时长，再点开才是里面的思考原文、读了哪些文件。
+ *
+ * 运行中是「✶ 处理中」并展开，正在跑的那个阶段也展开——那段等待正是它要填的；结束就收。用户点过以用户为准。
+ * `totalMs` 是这一轮的总耗时（落库后取轮的账，和输入框上方那一行同一个数）；没有就把各段加起来。
+ */
+export function ProcessGroup({ items, live, totalMs = null }: { items: readonly ProcessItem[]; live: boolean; totalMs?: number | null }) {
+  const [override, setOverride] = useState<boolean | null>(null);
+  const open = override ?? live;
+  const now = useNow(live);
+  if (items.length === 0) return null;
+  const phases = phasesOf(items);
+  const summed = items.reduce((acc, item) => acc + processItemElapsedMs(item, now), 0);
+  const total = totalMs ?? summed;
+  const thoughts = items.filter((item) => item.kind === 'thought' || item.kind === 'reasoning').length;
+  const tools = items.filter((item) => item.kind === 'tool').length;
+  const counts = [thoughts > 0 ? `思考 ${thoughts} 段` : null, tools > 0 ? `工具 ${tools} 次` : null].filter(Boolean);
+  return (
+    <div className={styles.processGroup}>
+      <button type="button" className={styles.processHead} onClick={() => setOverride(!open)} aria-expanded={open}>
+        <span className={styles.processChevron} aria-hidden="true">
+          {open ? <ChevronDown size={12} strokeWidth={2.5} /> : <ChevronRight size={12} strokeWidth={2.5} />}
+        </span>
+        <span className={`${styles.thinkingMark} ${live ? styles.thinkingMarkLive : ''}`} aria-hidden="true">
+          {live ? '✶' : '✻'}
+        </span>
+        <span className={styles.processLabel}>{live ? '处理中' : `已处理 ${formatDuration(total)}`}</span>
+        {counts.length > 0 && <span className={styles.processCounts}>{` · ${counts.join(' · ')}`}</span>}
+      </button>
+      {open && (
+        <div className={styles.processBody}>
+          {phases.map((phase, i) => (
+            <PhaseRow key={i} phase={phase} now={now} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 一个阶段：✓ / 转圈 + 名字 + 合计时长；点开是里面的思考段、工具行、等待行，各自沿用原来的叶子组件。 */
+function PhaseRow({ phase, now }: { phase: ProcessPhase; now: number }) {
+  const running = phase.items.some(processItemRunning);
+  const [override, setOverride] = useState<boolean | null>(null);
+  const open = override ?? running;
+  const elapsed = phase.items.reduce((acc, item) => acc + processItemElapsedMs(item, now), 0);
+  return (
+    <div className={styles.processPhase}>
+      <button type="button" className={styles.processPhaseHead} onClick={() => setOverride(!open)} aria-expanded={open}>
+        <span className={styles.processChevron} aria-hidden="true">
+          {open ? <ChevronDown size={12} strokeWidth={2.5} /> : <ChevronRight size={12} strokeWidth={2.5} />}
+        </span>
+        <span className={`${styles.toolCallMark} ${running ? styles.processPhaseMarkRunning : styles.processPhaseMarkDone}`} aria-hidden="true">
+          {running ? <Loader2 size={12} strokeWidth={2.5} className={styles.spin} /> : <Check size={12} strokeWidth={2.5} />}
+        </span>
+        <span className={styles.toolCallLabel}>{phase.name}</span>
+        <span className={styles.toolCallElapsed}>{running ? '进行中' : elapsed > 0 ? formatDuration(elapsed) : ''}</span>
+      </button>
+      {open && (
+        <div className={styles.processPhaseItems}>
+          {phase.items.map((item, i) => {
+            switch (item.kind) {
+              case 'reasoning':
+                return <ThinkingBlock key={i} steps={item.steps} reasoning={item.reasoning} live={item.live} autoOpen={item.live} />;
+              case 'thought':
+                return <ThoughtBlock key={i} item={item} />;
+              case 'tool':
+                return <ToolCallRow key={i} item={item} />;
+              case 'waiting':
+                return <WaitingRow key={i} item={item} />;
+            }
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const ACCOUNT_MARK: Record<TurnAccount['outcome'], string> = {
   completed: '✻',
   cancelled: '⊘',
@@ -279,23 +366,14 @@ const ACCOUNT_CLASS: Record<TurnAccount['outcome'], string> = {
 };
 
 /**
- * 轮尾的账（IKDK5L）：这一轮花了多久、多少输出 token、上下文占了多少。
+ * 轮尾的交代（IKDK5L / IKEV0V）：这一轮是怎么结束的——取消、失败、完成了但卡没写出来。
  *
- * 此前这笔账常驻输入框上方，滚动之后和任何一条消息都对不上。放到它所属的那一轮尾部，
- * 用户回看时才知道「这一轮是怎么结束的」。完成的轮不写「已完成」——回答就在上面，
- * 不必再说一遍；取消与失败要写，那是这一轮唯一的交代。
+ * 耗时、token、上下文那笔账不再挂在这里（IKFLB9 定稿）：它只在输入框上方一行（LastTurnLine），
+ * 每轮尾都写一遍是噪音。完成的轮什么都不写——回答就在上面。
  *
- * **完成了、但要写的生成卡没写出来**也要写（IKEV0V）：这只发生在聊天里改卡时，那一轮照常完成，
- * 侧边栏还挂着上一版。不交代的话，用户会把旧卡当成这次改出来的。`onRetryCard` 只给最后一轮：
- * 它把这一轮用户的原话重发一遍——重试接口只接失败的轮，这一轮是完成的，走不了那条。
+ * `onRetryCard` 只给最后一轮：它把这一轮用户的原话重发一遍——重试接口只接失败的轮，这一轮是完成的，走不了那条。
  */
 export function TurnFooter({ account, onRetryCard }: { account: TurnAccount; onRetryCard?: () => void }) {
-  const meta: string[] = [];
-  if (account.seconds !== null) meta.push(formatElapsed(account.seconds));
-  if (account.tokenUsage) meta.push(`↓ ${formatTokens(account.tokenUsage.output_tokens)}`);
-  const context = account.contextCapacity;
-  if (context) meta.push(`上下文 ${Math.round(Math.min(1, Math.max(0, context.ratio)) * 100)}%`);
-  if (context?.compaction_state === 'compacted') meta.push('已压缩历史');
   const cardFailed = account.outcome === 'completed' && Boolean(account.cardFailureText);
   const label =
     account.outcome === 'failed'
@@ -305,23 +383,57 @@ export function TurnFooter({ account, onRetryCard }: { account: TurnAccount; onR
         : cardFailed
           ? account.cardFailureText
           : null;
-  if (!label && meta.length === 0) return null;
+  if (!label) return null;
   return (
     <div className={`${styles.turnFooter} ${cardFailed ? styles.turnFooterCardFailed ?? '' : ACCOUNT_CLASS[account.outcome]}`}>
       <span className={styles.turnFooterMark} aria-hidden="true">
         {cardFailed ? '!' : ACCOUNT_MARK[account.outcome]}
       </span>
-      {label && <span>{label}</span>}
+      <span>{label}</span>
       {cardFailed && account.cardFailureRetryable && onRetryCard && (
         <button type="button" className={styles.turnFooterRetry} onClick={onRetryCard}>
           再试一次
         </button>
       )}
-      {meta.length > 0 && (
-        <span className={styles.turnFooterMeta} title="这一轮的耗时 · 输出 token · 上下文占用">
-          {meta.join(' · ')}
-        </span>
-      )}
+    </div>
+  );
+}
+
+const LAST_TURN_LABEL: Record<TurnAccount['outcome'], string> = {
+  completed: '上一轮',
+  cancelled: '上一轮已取消',
+  failed: '上一轮未完成',
+};
+
+/** `21:37`。本地时间，只到分钟——那一行是给人扫一眼的。 */
+function clockOf(ms: number): string {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * 输入框上方那一行账（IKFLB9 定稿）：「✻ 上一轮 57s · ↓ 14.7k · 上下文 9% · 21:37 完成」。
+ *
+ * 只有一行、只说最近一轮、钉在输入框上方不随消息滚走。运行中这一行让位给 RunStatusLine（读秒、在等什么）。
+ * 三个数各自可缺，一个都没有、也没时刻时不画。
+ */
+export function LastTurnLine({ account }: { account: TurnAccount }) {
+  const meta: string[] = [];
+  if (account.seconds !== null) meta.push(formatElapsed(account.seconds));
+  if (account.tokenUsage) meta.push(`↓ ${formatTokens(account.tokenUsage.output_tokens)}`);
+  const context = account.contextCapacity;
+  if (context) meta.push(`上下文 ${Math.round(Math.min(1, Math.max(0, context.ratio)) * 100)}%`);
+  if (context?.compaction_state === 'compacted') meta.push('已压缩历史');
+  if (account.finishedAt !== null) meta.push(`${clockOf(account.finishedAt)} ${account.outcome === 'completed' ? '完成' : '结束'}`);
+  if (meta.length === 0) return null;
+  return (
+    <div className={`${styles.runStatus} ${styles.runStatusDone ?? ''} ${ACCOUNT_CLASS[account.outcome]}`} role="status">
+      <span className={styles.runStatusMark} aria-hidden="true">
+        {ACCOUNT_MARK[account.outcome]}
+      </span>
+      <span className={styles.runStatusMeta} title="最近一轮的耗时 · 输出 token · 上下文占用 · 结束时刻">
+        {`${LAST_TURN_LABEL[account.outcome]} ${meta.join(' · ')}`}
+      </span>
     </div>
   );
 }

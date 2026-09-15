@@ -1959,6 +1959,96 @@
   }
 }
 
+/* ---- 过程组（IKFLB9 定稿）：一轮的思考、工具、等待收成一行，点开按阶段分组 ----
+   头一行和思考块同一档灰、同一个 ✶ / ✻；阶段缩进一档带竖线，阶段里的叶子再缩一档。 */
+.processGroup {
+  margin: 2px 0 6px;
+  font-size: var(--font-size-sm);
+  line-height: 20px;
+}
+
+.processHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 2px 4px;
+  margin-left: -4px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #9a9ea4;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.processHead:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.processChevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--color-text-tertiary);
+}
+
+.processLabel {
+  font-variant-numeric: tabular-nums;
+}
+
+.processCounts {
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.processBody {
+  margin: 2px 0 0 7px;
+  padding-left: 10px;
+  border-left: 1px solid #3a3d40;
+}
+
+.processPhase {
+  display: flex;
+  flex-direction: column;
+}
+
+.processPhaseHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 1px 0;
+  background: transparent;
+  border: none;
+  color: #92959a;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.processPhaseHead:hover .toolCallLabel {
+  color: var(--color-text-primary);
+}
+
+.processPhaseHead .toolCallLabel {
+  flex: 1;
+}
+
+.processPhaseMarkDone {
+  color: #7fb069;
+}
+
+.processPhaseMarkRunning {
+  color: var(--color-accent-agent);
+}
+
+.processPhaseItems {
+  margin: 1px 0 4px 20px;
+}
+
 /* ---- 轮（IKDK5I）：一批用户输入 + 回答 + 轮尾的账 ---- */
 .turn {
   display: flex;

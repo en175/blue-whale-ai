@@ -8,8 +8,8 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ThinkingBlock, ToolCallRow, TurnFooter } from './TurnTimeline';
-import type { TimelineItem, TurnAccount } from '../../hooks/sessionTimeline';
+import { LastTurnLine, ProcessGroup, ThinkingBlock, ToolCallRow, TurnFooter } from './TurnTimeline';
+import type { ProcessItem, TimelineItem, TurnAccount } from '../../hooks/sessionTimeline';
 
 let root: Root;
 let mountNode: HTMLDivElement;
@@ -110,6 +110,54 @@ describe('ToolCallRow', () => {
   });
 });
 
+describe('ProcessGroup（IKFLB9 定稿）', () => {
+  const items: ProcessItem[] = [
+    { kind: 'waiting', summary: '正在等待模型响应', elapsedMs: 9_800 },
+    { kind: 'thought', text: '先按创作方法把需求过一遍。', running: false, startedAt: null, elapsedMs: 5_200 },
+    readImage({ summary: '正在查阅对应的创作方法', elapsedMs: 30, substeps: [] }),
+    { kind: 'thought', text: '还没定的：视角、时刻。', running: false, startedAt: null, elapsedMs: 2_500 },
+  ];
+
+  it('结束：一行「已处理 · 思考 N 段 · 工具 N 次」默认折起；点开是阶段，阶段再点开才是思考原文', async () => {
+    await render(createElement(ProcessGroup, { items, live: false, totalMs: 31_000 }));
+    const head = mountNode.querySelector('button')!;
+    expect(head.textContent).toBe('✻已处理 31s · 思考 2 段 · 工具 1 次');
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(mountNode.textContent).not.toContain('理解需求');
+    await act(async () => head.click());
+    expect(mountNode.textContent).toContain('理解需求');
+    expect(mountNode.textContent).toContain('15s');
+    expect(mountNode.textContent).toContain('查阅对应的创作方法');
+    expect(mountNode.textContent).toContain('整理回复');
+    expect(mountNode.textContent).not.toContain('先按创作方法');
+    const phase = [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.includes('理解需求'))!;
+    await act(async () => phase.click());
+    expect(mountNode.textContent).toContain('思考了');
+    await act(async () => {
+      [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.includes('思考了'))!.click();
+    });
+    expect(mountNode.textContent).toContain('先按创作方法把需求过一遍。');
+  });
+
+  it('运行中：「处理中」并展开，正在跑的阶段也展开', async () => {
+    const live: ProcessItem[] = [
+      { kind: 'thought', text: '想完了。', running: false, startedAt: null, elapsedMs: 3_000 },
+      { kind: 'thought', text: '还在想。', running: true, startedAt: Date.now() - 2_000, elapsedMs: null },
+    ];
+    await render(createElement(ProcessGroup, { items: live, live: true }));
+    const head = mountNode.querySelector('button')!;
+    expect(head.textContent).toContain('处理中');
+    expect(head.getAttribute('aria-expanded')).toBe('true');
+    expect(mountNode.textContent).toContain('进行中');
+    expect(mountNode.textContent).toContain('还在想。');
+  });
+
+  it('什么过程都没有就不画', async () => {
+    await render(createElement(ProcessGroup, { items: [], live: false }));
+    expect(mountNode.textContent).toBe('');
+  });
+});
+
 describe('ThinkingBlock', () => {
   it('运行中展开，最后一步保留进行时，前面的翻成过去式', async () => {
     await render(
@@ -147,6 +195,7 @@ describe('TurnFooter', () => {
     batchId: 'A',
     outcome: 'completed',
     seconds: 17,
+    finishedAt: new Date(2026, 8, 15, 21, 37).getTime(),
     tokenUsage: { input_tokens: 12217, cached_input_tokens: 7799, output_tokens: 791, reasoning_tokens: 452 },
     contextCapacity: { used_input_tokens: 6536, configured_max_tokens: 200000, ratio: 0.033, compaction_state: 'none' },
     failureText: null,
@@ -154,18 +203,27 @@ describe('TurnFooter', () => {
     cardFailureRetryable: true,
   };
 
-  it('完成：只有符号和数字，不写「已完成」', async () => {
+  // IKFLB9 定稿：耗时、token、上下文只在输入框上方那一行，轮尾不再重复。
+  it('完成：轮尾什么都不写，账在 LastTurnLine', async () => {
     await render(createElement(TurnFooter, { account: base }));
-    expect(mountNode.textContent).toBe('✻17s · ↓ 791 · 上下文 3%');
+    expect(mountNode.textContent).toBe('');
+    await act(async () => {
+      root.render(createElement(LastTurnLine, { account: base }));
+    });
+    expect(mountNode.textContent).toBe('✻上一轮 17s · ↓ 791 · 上下文 3% · 21:37 完成');
   });
 
   it('失败：写后端那句人话；取消：写已取消', async () => {
     await render(createElement(TurnFooter, { account: { ...base, outcome: 'failed', failureText: '余额不足', tokenUsage: null, contextCapacity: null } }));
-    expect(mountNode.textContent).toBe('✕余额不足17s');
+    expect(mountNode.textContent).toBe('✕余额不足');
     await act(async () => {
       root.render(createElement(TurnFooter, { account: { ...base, outcome: 'cancelled', seconds: 5, tokenUsage: null, contextCapacity: null } }));
     });
-    expect(mountNode.textContent).toBe('⊘已取消5s');
+    expect(mountNode.textContent).toBe('⊘已取消');
+    await act(async () => {
+      root.render(createElement(LastTurnLine, { account: { ...base, outcome: 'cancelled', seconds: 5, tokenUsage: null, contextCapacity: null } }));
+    });
+    expect(mountNode.textContent).toBe('⊘上一轮已取消 5s · 21:37 结束');
   });
 
   // IKEV0V：聊天里改卡没改成，那一轮照常完成、侧边栏还挂着上一版。不交代的话，
@@ -173,7 +231,7 @@ describe('TurnFooter', () => {
   it('完成了但卡没写出来：写后端那句话；给了 onRetryCard 才有「再试一次」，点了就调它', async () => {
     const account = { ...base, cardFailureText: '这次没能写出生成卡，请重试。', tokenUsage: null, contextCapacity: null };
     await render(createElement(TurnFooter, { account }));
-    expect(mountNode.textContent).toBe('!这次没能写出生成卡，请重试。17s');
+    expect(mountNode.textContent).toBe('!这次没能写出生成卡，请重试。');
     expect(mountNode.querySelector('button')).toBeNull();
 
     const onRetryCard = vi.fn();
@@ -207,12 +265,12 @@ describe('TurnFooter', () => {
         onRetryCard: vi.fn(),
       }),
     );
-    expect(mountNode.textContent).toBe('✕余额不足17s');
+    expect(mountNode.textContent).toBe('✕余额不足');
     expect(mountNode.querySelector('button')).toBeNull();
   });
 
-  it('一个数都没有、也没话可说时不画', async () => {
-    await render(createElement(TurnFooter, { account: { ...base, seconds: null, tokenUsage: null, contextCapacity: null } }));
+  it('一个数都没有、也没时刻时 LastTurnLine 不画', async () => {
+    await render(createElement(LastTurnLine, { account: { ...base, seconds: null, finishedAt: null, tokenUsage: null, contextCapacity: null } }));
     expect(mountNode.textContent).toBe('');
   });
 });

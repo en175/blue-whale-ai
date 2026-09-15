@@ -582,6 +582,72 @@ export function itemsFromLive(live: LiveRun, revealedText: string): TimelineItem
   return items;
 }
 
+/* ============ 过程组（IKFLB9 定稿） ============ */
+
+/** 条目里属于「过程」的那几种：思考、工具、等待，以及老记录整块的思考。正文与卡不在其中。 */
+export type ProcessItem = Extract<TimelineItem, { kind: 'reasoning' | 'thought' | 'tool' | 'waiting' }>;
+
+export function isProcessItem(item: TimelineItem): item is ProcessItem {
+  return item.kind === 'reasoning' || item.kind === 'thought' || item.kind === 'tool' || item.kind === 'waiting';
+}
+
+/**
+ * 一轮的过程按「阶段」分组。用户读到的是「它做了几件事」，不是十几行碎片。
+ *
+ * 分法：每个工具行自成一个阶段，名字就是它做的事（「查阅对应的创作方法」）；工具行之间连续的思考、等待
+ * 合成一个阶段，名字取其中第一条有名字的等待（「取出这次要用的创作方法」「整理创作方案」——那是服务端在
+ * 那段时间打的标记）；一条都没有时，第一段叫「理解需求」，后面的叫「整理回复」。
+ */
+export interface ProcessPhase {
+  name: string;
+  items: ProcessItem[];
+}
+
+const DEFAULT_WAITING_SUMMARY = '正在等待模型响应';
+
+export function phasesOf(items: readonly ProcessItem[]): ProcessPhase[] {
+  const phases: ProcessPhase[] = [];
+  let open: ProcessPhase | null = null;
+  let nonToolCount = 0;
+  for (const item of items) {
+    if (item.kind === 'tool') {
+      phases.push({ name: stripProgressive(item.summary), items: [item] });
+      open = null;
+      continue;
+    }
+    if (!open) {
+      open = { name: nonToolCount === 0 ? '理解需求' : '整理回复', items: [] };
+      nonToolCount += 1;
+      phases.push(open);
+    }
+    if (item.kind === 'waiting' && item.summary !== DEFAULT_WAITING_SUMMARY && open.items.every((i) => i.kind !== 'waiting' || i.summary === DEFAULT_WAITING_SUMMARY)) {
+      open.name = stripProgressive(item.summary);
+    }
+    open.items.push(item);
+  }
+  return phases;
+}
+
+/** 一条过程条目还在跑吗。 */
+export function processItemRunning(item: ProcessItem): boolean {
+  if (item.kind === 'thought') return item.running;
+  if (item.kind === 'tool') return item.status === 'running';
+  if (item.kind === 'reasoning') return item.live;
+  return false;
+}
+
+/**
+ * 一条过程条目的耗时，进行中的按 `now` 现算。老记录整块的思考没有时长，算 0。
+ * 落库的段落首尾相接（服务端补过缝），所以把它们加起来就是这一段过程的总长。
+ */
+export function processItemElapsedMs(item: ProcessItem, now: number): number {
+  if (item.kind === 'reasoning') return 0;
+  if (item.kind === 'waiting') return item.elapsedMs;
+  if (item.elapsedMs !== null) return item.elapsedMs;
+  if (item.startedAt !== null && processItemRunning(item)) return Math.max(0, now - item.startedAt);
+  return 0;
+}
+
 /* ============ 文案 ============ */
 
 /** 「正在读取图片」→ 「读取图片」。模板句都以「正在」开头；不以它开头的原样返回。 */
@@ -641,6 +707,8 @@ export interface TurnAccount {
   outcome: RunOutcome;
   /** 从提交到结束的秒数；两端时间缺一就是 null——宁可不显示，也不显示一个算错的耗时。 */
   seconds: number | null;
+  /** 结束的时刻（毫秒时间戳）：输入框上方那一行要说「21:37 完成」。 */
+  finishedAt: number | null;
   tokenUsage: RunTokenUsage | null;
   contextCapacity: RunContextCapacity | null;
   /** 失败时后端的那句人话。 */
@@ -682,6 +750,7 @@ export function accountOfRun(run: SessionRun, fallbackFinishedAt: number | null 
     batchId: run.input_batch_id ?? null,
     outcome: terminalOutcomeOf(run.status),
     seconds: startedAt === null || finishedAt === null ? null : Math.max(0, Math.round((finishedAt - startedAt) / 1000)),
+    finishedAt,
     tokenUsage: parseRunTokenUsage(run.token_usage),
     contextCapacity: parseRunContextCapacity(run.context_capacity),
     failureText: run.failure?.message || null,

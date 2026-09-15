@@ -42,10 +42,13 @@
      此前这个绿散在 .cardBtnPrimary 里写死，状态点那边则误写成
      `var(--color-accent-primary, #d5f06a)`——主题色 token 是有定义的（蓝），
      兜底永远走不到，于是本该同一语义的两处一蓝一绿。 */
-  --color-accent-agent: #d5f06a;
-  --color-accent-agent-hover: #c7e05c;
-  /* 落在强调绿上的前景色。绿是亮色，必须配深色文字。 */
-  --color-accent-agent-ink: #111111;
+  --color-accent-agent: #f2b544;
+  --color-accent-agent-hover: #e6a838;
+  /* 落在强调色上的前景色。暖黄是亮色，必须配深色文字。 */
+  --color-accent-agent-ink: #1a1200;
+  /* 强调色的柔和底：选中态、方案卡卡头的色带用它，不再整块实心（IKFLB9 定稿：柠檬绿太亮，改暖黄且只用在
+     主按钮、进行中、选中描边）。 */
+  --color-accent-agent-soft: rgba(242, 181, 68, 0.16);
 
   /* ---- 尺寸系统 ---- */
   --sidebar-width: 80px;

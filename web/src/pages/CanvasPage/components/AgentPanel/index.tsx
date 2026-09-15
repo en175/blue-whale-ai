@@ -60,10 +60,10 @@ import {
   persistPanelWidth,
   readPersistedPanelWidth,
 } from './drawerWidth';
-import { itemsFromBlocks, itemsFromLive, type TimelineItem, type Turn } from '../../hooks/sessionTimeline';
+import { isProcessItem, itemsFromBlocks, itemsFromLive, type TimelineItem, type Turn } from '../../hooks/sessionTimeline';
 import { ASSET_MENTION_ATTR, collectKnownAssets, rehypeAssetMentions, type KnownAsset } from './assetMentions';
 import { AssetMentionChip } from './AssetMentionChip';
-import { ThinkingBlock, ThoughtBlock, ToolCallRow, TurnFooter, WaitingRow } from './TurnTimeline';
+import { LastTurnLine, ProcessGroup, TurnFooter } from './TurnTimeline';
 
 /** 父组件没传已应用集合时的空集。提到模块级是为了保持引用稳定，避免每次渲染都造一个新 Set。 */
 const EMPTY_APPLIED_IDS: ReadonlySet<string> = new Set<string>();
@@ -529,13 +529,13 @@ function GenerationCard({ card, onApply, disabled, applied }: {
 }
 
 /**
- * 一轮里助手那一半：按条目顺序渲染（IKDK5I / IKDK5K）。
+ * 一轮里助手那一半（IKDK5I / IKDK5K / IKFLB9 定稿）。
  *
  * 落库的回答与进行中的回答走同一个函数——前者从消息部件投影条目，后者从进行中的一轮投影，
- * 两者形状一致（sessionTimeline.ts）。「思考 → 短句 → 工具 → 短句」是数组顺序的自然结果。
+ * 两者形状一致（sessionTimeline.ts）。过程（思考、工具、等待）收成顶上一个折叠组，正文与卡按顺序铺在下面：
+ * 正文是主角，过程点开才看，不再一句正文一句思考交替。
  *
- * 条目的 React key 用**同类型内的序号**：进行中的回答被服务端消息替换时条目形状不变，
- * 工具行与思考块的开合状态因此得以保留，不会在那一瞬间跳一下。卡片按自己的身份做 key。
+ * 卡片按自己的身份做 key，正文按序号：进行中的回答被服务端消息替换时条目形状不变，开合状态得以保留。
  */
 function AssistantTurnBody({
   turn,
@@ -561,10 +561,8 @@ function AssistantTurnBody({
       : [];
   if (items.length === 0) return null;
   const live = turn.live !== null && !turn.live.ended;
-  // 正文还没出来时思考展开：那段等待正是它要填的；正文一出现就收起。
-  const hasBody = items.some(
-    (item) => item.kind === 'text' || item.kind === 'tool' || item.kind === 'card' || item.kind === 'thought',
-  );
+  const process = items.filter(isProcessItem);
+  const body = items.filter((item) => !isProcessItem(item));
   const ordinals: Record<string, number> = {};
   const keyOf = (item: TimelineItem): string => {
     if (item.kind === 'card') {
@@ -576,19 +574,10 @@ function AssistantTurnBody({
   };
   return (
     <>
-      {items.map((item) => {
+      <ProcessGroup items={process} live={live} totalMs={turn.account?.seconds != null ? turn.account.seconds * 1000 : null} />
+      {body.map((item) => {
         const key = keyOf(item);
         switch (item.kind) {
-          case 'reasoning':
-            return (
-              <ThinkingBlock key={key} steps={item.steps} reasoning={item.reasoning} live={item.live} autoOpen={live && !hasBody} />
-            );
-          case 'thought':
-            return <ThoughtBlock key={key} item={item} />;
-          case 'tool':
-            return <ToolCallRow key={key} item={item} />;
-          case 'waiting':
-            return <WaitingRow key={key} item={item} />;
           case 'text':
             return <Markdown key={key} text={item.text} assets={knownAssets} />;
           case 'card': {
@@ -605,9 +594,10 @@ function AssistantTurnBody({
           }
           case 'card_preview':
             return <CardPreview key={key} preview={item.preview} />;
+          default:
+            return null;
         }
       })}
-
     </>
   );
 }
@@ -822,6 +812,8 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
     dismissDeleteError,
     refreshSessions,
   } = useAgentSession(projectId ?? '', selectedModel);
+  /** 最近一轮的账，给输入框上方那一行；还在跑的轮没有账。 */
+  const lastAccount = turns.length > 0 ? turns[turns.length - 1].account : null;
   /** 本会话用户提过的素材（IKDLW3）：助手正文里出现它们的名字就画成胶囊。 */
   const knownAssets = useMemo(() => collectKnownAssets(turns), [turns]);
   /** 历史会话下拉展开态 */
@@ -1827,7 +1819,7 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
         {/* 运行中的状态行（IKA3GD）：钉在输入框正上方，不在滚动区里。
             它是"屏幕上什么都没有"的地板，用户往上翻历史时更不能让它跟着滚走。
             终态即收起（IKDK5L）：这一轮的账挂到了它所属那一轮的尾部，不再常驻在这里。 */}
-        {turnOutcome === null && (
+        {turnOutcome === null ? (
           <RunStatusLine
             startedAt={turnStartedAt}
             activity={liveActivity}
@@ -1835,6 +1827,10 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
             outcome={null}
             streamedText={streamingText}
           />
+        ) : (
+          /* 不在跑的时候这一行报最近一轮的账（IKFLB9 定稿）：耗时、token、上下文、几点结束。
+             只有这一行，不再每轮尾都写一遍。 */
+          lastAccount && <LastTurnLine account={lastAccount} />
         )}
         {chatError && <div className={styles.chatErrorHint}>{chatError}</div>}
         {sendError && <div className={styles.chatErrorHint}>{sendError}</div>}

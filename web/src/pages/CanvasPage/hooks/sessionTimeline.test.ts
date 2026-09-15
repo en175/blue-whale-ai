@@ -15,11 +15,14 @@ import {
   formatDuration,
   itemsFromBlocks,
   itemsFromLive,
+  phasesOf,
+  processItemElapsedMs,
   reduceSessionEvent,
   startLiveRun,
   toolLabel,
   type SessionState,
   type TimelineEvent,
+  type ProcessItem,
   type TimelineItem,
   type Turn,
 } from './sessionTimeline';
@@ -441,6 +444,43 @@ describe('思考段与等待行（IKFLB9）', () => {
       '好',
     );
     expect(items[0]).toMatchObject({ kind: 'reasoning', reasoning: '老的原话' });
+  });
+});
+
+describe('过程按阶段分组（IKFLB9 定稿）', () => {
+  const thought = (elapsedMs: number, text = '想'): ProcessItem => ({ kind: 'thought', text, running: false, startedAt: null, elapsedMs });
+  const waiting = (summary: string, elapsedMs: number): ProcessItem => ({ kind: 'waiting', summary, elapsedMs });
+  const tool = (summary: string, elapsedMs: number): ProcessItem => ({ kind: 'tool', tool: 't', summary, status: 'completed', startedAt: null, elapsedMs, substeps: [], calls: 1 });
+
+  it('工具行自成一段，名字是它做的事；两头连续的思考与等待各合成一段', () => {
+    const phases = phasesOf([
+      waiting('正在等待模型响应', 9_800),
+      thought(5_200),
+      waiting('正在等待模型响应', 4_100),
+      tool('正在查阅对应的创作方法', 30),
+      thought(2_500),
+    ]);
+    expect(phases.map((p) => p.name)).toEqual(['理解需求', '查阅对应的创作方法', '整理回复']);
+    expect(phases.map((p) => p.items.length)).toEqual([3, 1, 1]);
+    expect(phases.map((p) => p.items.reduce((acc, i) => acc + processItemElapsedMs(i, 0), 0))).toEqual([19_100, 30, 2_500]);
+  });
+
+  it('段里有带名字的等待就用它命名：那是服务端在那段时间打的标记', () => {
+    const phases = phasesOf([
+      waiting('正在取出这次要用的创作方法', 2_900),
+      thought(8_400),
+      tool('正在查阅对应的创作方法', 300),
+      waiting('正在根据生成结果整理回复', 2_000),
+      thought(36_700),
+      tool('正在写分镜与提示词', 2_200),
+      waiting('正在根据生成结果整理回复', 2_300),
+    ]);
+    expect(phases.map((p) => p.name)).toEqual(['取出这次要用的创作方法', '查阅对应的创作方法', '根据生成结果整理回复', '写分镜与提示词', '根据生成结果整理回复']);
+  });
+
+  it('进行中的思考按现在现算', () => {
+    const running: ProcessItem = { kind: 'thought', text: '', running: true, startedAt: 1_000, elapsedMs: null };
+    expect(processItemElapsedMs(running, 4_500)).toBe(3_500);
   });
 });
 
