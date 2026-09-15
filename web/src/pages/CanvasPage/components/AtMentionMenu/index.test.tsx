@@ -121,3 +121,33 @@ it('从末尾分类循环回已引用时清除分类高亮并关闭子菜单', a
   expect(document.activeElement).toBe(category);
   expect(document.querySelector('[data-mention-flyout]')).toBeTruthy();
 });
+
+/** IKFR6A：菜单定位优先锚点上方，上方放不下才翻到下方（全产品统一） */
+function rectOf(top: number, bottom: number, left = 100): DOMRect {
+  return { top, bottom, left, right: left + 20, width: 20, height: bottom - top, x: left, y: top, toJSON: () => '' } as DOMRect;
+}
+
+async function renderWithAnchorRect(rect: DOMRect) {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  host = document.createElement('div');
+  host.getBoundingClientRect = () => rect;
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root.render(createElement(AtMentionMenu, {
+    anchorRef: { current: host }, editorQuery: '', onClose: vi.fn(), onSelect: vi.fn(),
+    items: [image],
+  })));
+}
+
+it('锚点在屏幕中下部时菜单优先出现在锚点上方', async () => {
+  await renderWithAnchorRect(rectOf(400, 410));
+  const menu = document.querySelector('[data-testid="mention-menu"]') as HTMLElement;
+  // estHeight=300（jsdom offsetHeight=0 回退），top = 400 - 300 - 6
+  expect(menu.style.top).toBe('94px');
+});
+
+it('锚点贴近屏幕顶部放不下时菜单翻到锚点下方', async () => {
+  await renderWithAnchorRect(rectOf(100, 110));
+  const menu = document.querySelector('[data-testid="mention-menu"]') as HTMLElement;
+  expect(menu.style.top).toBe('116px');
+});

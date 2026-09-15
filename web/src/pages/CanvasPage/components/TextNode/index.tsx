@@ -6,6 +6,7 @@
  * 有效/失效状态由（节点, 带 textIndex 标记的关系线）派生，不持久化。
  * ============================================ */
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Handle, Position, useStore, useReactFlow, type NodeProps } from '@xyflow/react';
 import { Bold, Italic, List, ListOrdered, Minus, Heading1, Heading2, Heading3, FileText, AtSign, Plus, Crosshair, RefreshCw, Trash2, AudioLines } from 'lucide-react';
 import { sanitizeHtml } from '@/utils/sanitize';
@@ -24,6 +25,9 @@ import { applyMarkdownInputRule } from './markdownInputRules';
 
 /** 文字节点最大字数（按纯文本计，含粘贴） */
 const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
+
+/** 悬停预览估算高度：与 .chipPreview 的缩略图 max-height 200 + 名称行/内边距联动，CSS 改尺寸须同步 */
+const CHIP_PREVIEW_EST_HEIGHT = 250;
 
 /** 连接点统一样式：透明背景（加号图标由 children 渲染） */
 const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;
@@ -136,8 +140,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const mentionAnchorRef = useRef<HTMLSpanElement>(null);
   /** 标签操作弹层：点击 media 标签弹出（定位/替换来源/删除标签） */
   const [chipMenu, setChipMenu] = useState<{ chip: HTMLElement; x: number; y: number } | null>(null);
-  /** 悬停预览：有效标签的素材预览（约 150ms 延迟，契约 §5） */
-  const [chipPreview, setChipPreview] = useState<{ chip: HTMLElement; x: number; y: number } | null>(null);
+  /** 悬停预览：有效标签的素材预览（约 150ms 延迟，契约 §5）；below=标签贴近屏幕顶部时翻到下方 */
+  const [chipPreview, setChipPreview] = useState<{ chip: HTMLElement; x: number; y: number; below: boolean } | null>(null);
   const previewTimerRef = useRef<number | null>(null);
   /** 最近一次已同步的 media 索引（序列化 diff 的基线）：diff 只删线不补线（契约 §4） */
   const mediaIndexRef = useRef<{ mediaMentions: MediaMention[]; mediaRefs: MediaRef[] }>({ mediaMentions: data.mediaMentions ?? [], mediaRefs: data.mediaRefs ?? [] });
@@ -373,14 +377,16 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     setChipMenu({ chip, x: rect.left, y: rect.bottom + 6 });
   }, []);
 
-  /** 悬停 media 标签：有效标签 150ms 后出素材预览；失效标签不预览（契约 §5） */
+  /** 悬停 media 标签：有效标签 150ms 后出素材预览；失效标签不预览（契约 §5）。
+   *  预览默认在标签上方，标签贴近屏幕顶部放不下时翻到下方（IKFR6A）。 */
   const handleEditorMouseOver = useCallback((event: React.MouseEvent) => {
     const chip = (event.target as HTMLElement).closest?.('[data-media-node]') as HTMLElement | null;
     if (previewTimerRef.current) { window.clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
     if (!chip || chip.dataset.mediaInvalid === '1') { setChipPreview(null); return; }
     previewTimerRef.current = window.setTimeout(() => {
       const rect = chip.getBoundingClientRect();
-      setChipPreview({ chip, x: rect.left, y: rect.top });
+      const below = rect.top < CHIP_PREVIEW_EST_HEIGHT + 8;
+      setChipPreview({ chip, x: rect.left, y: below ? rect.bottom + 8 : rect.top, below });
     }, 150);
   }, []);
 
@@ -731,23 +737,25 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       </Handle>
       </div>
 
-      {/* IKFM3Q：@ 素材菜单（光标处插入 / 失效身份重绑定；不含文本互引） */}
+      {/* IKFM3Q：@ 素材菜单（光标处插入 / 失效身份重绑定；不含文本互引）。
+          IKFR6A：锚点 portal 到 body——渲染在画布变换层内时 fixed 被劫持、锚点飞移 */}
+      {mentionMenu && createPortal(
+        <span ref={mentionAnchorRef} style={{ position: 'fixed', left: mentionMenu.x, top: mentionMenu.y, width: 0, height: 0 }} />,
+        document.body,
+      )}
       {mentionMenu && (
-        <>
-          <span ref={mentionAnchorRef} style={{ position: 'fixed', left: mentionMenu.x, top: mentionMenu.y, width: 0, height: 0 }} />
-          <AtMentionMenu
-            anchorRef={mentionAnchorRef}
-            items={mediaMentionItems}
-            editorQuery=""
-            disabledKinds={['text']}
-            onSelect={handleMediaSelect}
-            onClose={() => { setMentionMenu(null); editorRef.current?.focus(); }}
-          />
-        </>
+        <AtMentionMenu
+          anchorRef={mentionAnchorRef}
+          items={mediaMentionItems}
+          editorQuery=""
+          disabledKinds={['text']}
+          onSelect={handleMediaSelect}
+          onClose={() => { setMentionMenu(null); editorRef.current?.focus(); }}
+        />
       )}
 
-      {/* media 标签操作层：定位来源 / 替换来源（失效=重新绑定）/ 删除标签（契约 §3/§5） */}
-      {chipMenu && (
+      {/* media 标签操作层：定位来源 / 替换来源（失效=重新绑定）/ 删除标签（契约 §3/§5）；IKFR6A portal 到 body 钉在屏幕上 */}
+      {chipMenu && createPortal(
         <div className={`${styles.chipMenu} nodrag nopan`} style={{ left: chipMenu.x, top: chipMenu.y }} data-testid="media-chip-menu">
           {chipMenu.chip.dataset.mediaInvalid !== '1' && (
             <button type="button" className={styles.chipMenuBtn} onClick={() => { locateSource(chipMenu.chip.dataset.mediaNode ?? ''); setChipMenu(null); }}>
@@ -770,17 +778,20 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           }}>
             <Trash2 size={13} strokeWidth={2} /><span>删除标签</span>
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
 
-      {/* media 标签悬停预览（契约 §5：图片/视频缩略预览，音频出类型标识与名称） */}
-      {chipPreview && (
-        <div className={`${styles.chipPreview} nodrag nopan`} style={{ left: chipPreview.x, top: chipPreview.y }} data-testid="media-chip-preview">
+      {/* media 标签悬停预览（契约 §5：图片/视频缩略预览，音频出类型标识与名称）；
+          IKFR6A portal 到 body 钉在屏幕上，默认标签上方、顶部放不下翻到下方 */}
+      {chipPreview && createPortal(
+        <div className={`${styles.chipPreview} ${chipPreview.below ? styles.chipPreviewBelow : ''} nodrag nopan`} style={{ left: chipPreview.x, top: chipPreview.y }} data-testid="media-chip-preview">
           {chipPreview.chip.dataset.mediaType === 'image' && <img src={chipPreview.chip.dataset.mediaUrl} alt="" />}
           {chipPreview.chip.dataset.mediaType === 'video' && <video src={chipPreview.chip.dataset.mediaUrl} muted autoPlay loop playsInline />}
           {chipPreview.chip.dataset.mediaType === 'audio' && <div className={styles.chipPreviewAudio}><AudioLines size={28} strokeWidth={1.5} /><span>音频</span></div>}
           <div className={styles.chipPreviewName}>{chipPreview.chip.dataset.mediaName}</div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {contextMenu && (

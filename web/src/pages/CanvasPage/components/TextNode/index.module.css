@@ -481,6 +481,11 @@
   pointer-events: none;
 }
 
+/* IKFR6A：标签贴近屏幕顶部时预览翻到标签下方，不再向上位移 */
+.chipPreviewBelow {
+  transform: none;
+}
+
 .chipPreview img,
 .chipPreview video {
   max-width: 264px;
