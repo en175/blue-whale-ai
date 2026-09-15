@@ -5,6 +5,11 @@
 /* IKFV91：取消关闭（Esc / 点菜单外）后光标恢复口径（契约 §5）：焦点回正文编辑器，
    光标恢复到打开菜单时的位置——insert 模式为 @ 后、重绑定菜单为打开前光标位；
    @ 保留为普通文本可退格。选中素材路径不回归。 */
+/* IKFXDB：选中/替换/删除标签后的光标落点口径（契约 §5）：选中插入→光标落新标签后
+   （插完继续写）；替换来源/重绑定→光标落替换后新标签后；删除标签→光标落被删标签
+   原位置（相邻标签锚定接缝，唯一标签删除后正文无标签可锚、落编辑器末尾）。
+   commitMediaEdit 全量重放销毁旧 DOM，恢复按（身份 nodeId + 同身份第几张 + 前/后）
+   锚点在新 DOM 定位 chip。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, expect, it, vi } from 'vitest';
@@ -29,6 +34,7 @@ const storeState = vi.hoisted(() => ({
   nodes: [
     { id: 't1', type: 'textNode', position: { x: 0, y: 0 }, data: {} },
     { id: 'm1', type: 'mediaNode', position: { x: 200, y: 0 }, data: { assetId: 'a1', mediaType: 'image', src: 'http://img/m1.png', fileName: '素材图一' } },
+    { id: 'm2', type: 'mediaNode', position: { x: 400, y: 0 }, data: { assetId: 'a2', mediaType: 'image', src: 'http://img/m2.png', fileName: '素材图二' } },
   ],
   edges: [{ id: 'e1', source: 'm1', target: 't1', data: { textIndex: true } }],
   transform: [0, 0, 1],
@@ -50,7 +56,7 @@ let container: HTMLDivElement;
 /** 最近一次 renderNode 注入的 onMediaIndexChange（选中路径断言用） */
 let onMediaIndexChange: ReturnType<typeof vi.fn> | null = null;
 
-async function renderNode() {
+async function renderNode(dataOverride: Record<string, unknown> = {}) {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   container = document.createElement('div');
   document.body.append(container);
@@ -77,13 +83,19 @@ async function renderNode() {
       onTextChange: vi.fn(),
       onMediaIndexChange,
       onToast: vi.fn(),
+      ...dataOverride,
     },
   } as never)));
   return { editor: container.querySelector<HTMLElement>('[data-placeholder="输入内容..."]')! };
 }
 
+/** 双击进入编辑：带上双击自带的 mouseup（真实序列——mouseUp 处理在编辑态才保存选区，
+    否则会清掉编辑器外操作留下的光标锚点） */
 async function enterEditing(editor: HTMLElement) {
-  await act(async () => editor.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+  await act(async () => {
+    editor.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    editor.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  });
 }
 
 /** 把正文设为 fullText、光标落在末尾，再派发一次逐键输入 '@' */
@@ -298,4 +310,318 @@ it('选中素材插入路径不回归：菜单关闭且索引同步', async () =
   await act(async () => item.dispatchEvent(new MouseEvent('click', { bubbles: true })));
   expect(menuOpen()).toBe(false);
   expect(onMediaIndexChange).toHaveBeenCalled();
+});
+
+/* ---------- IKFXDB：选中/替换/删除标签后的光标落点 ---------- */
+
+/** 同身份第 occurrence 张 chip（1-based；不足返回 null） */
+function chipByNode(editor: HTMLElement, nodeId: string, occurrence: number): HTMLElement | null {
+  const chips = [...editor.querySelectorAll<HTMLElement>(`[data-media-node="${CSS.escape(nodeId)}"]`)];
+  return chips[occurrence - 1] ?? null;
+}
+
+/** 光标是否折叠落在 chip 紧前/紧后（startContainer 为 chip 父节点、offset 为 chip 下标或下标+1） */
+function caretAtChip(chip: HTMLElement, placement: 'before' | 'after'): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return false;
+  const range = selection.getRangeAt(0);
+  if (!range.collapsed || range.startContainer !== chip.parentNode) return false;
+  const index = Array.prototype.indexOf.call(chip.parentNode!.childNodes, chip);
+  return range.startOffset === (placement === 'after' ? index + 1 : index);
+}
+
+/** 光标是否折叠在编辑器内容末尾（无可锚落点的兜底位） */
+function caretAtEnd(editor: HTMLElement): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return false;
+  const range = selection.getRangeAt(0);
+  if (!range.collapsed || !editor.contains(range.startContainer)) return false;
+  if (range.startContainer === editor) return range.startOffset === editor.childNodes.length;
+  return range.startContainer === editor.lastChild
+    && range.startOffset === (editor.lastChild!.textContent?.length ?? 0);
+}
+
+/** 光标折叠位换算为编辑器 DOM 文本流偏移（与 domTextOffsetOfChipStart 同口径）。
+ *  支持文本节点与元素容器（元素 offset 按子节点累计文本长度换算）。 */
+function caretTextOffset(editor: HTMLElement): number | null {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (!range.collapsed || !editor.contains(range.startContainer)) return null;
+  if (range.startContainer.nodeType === Node.TEXT_NODE) {
+    let offset = 0;
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node === range.startContainer) return offset + range.startOffset;
+      offset += node.textContent?.length ?? 0;
+    }
+  }
+  if (range.startContainer.nodeType === Node.ELEMENT_NODE) {
+    let offset = 0;
+    const childNodes = Array.from(range.startContainer.childNodes).slice(0, range.startOffset);
+    for (const child of childNodes) {
+      offset += child.textContent?.length ?? 0;
+    }
+    return offset;
+  }
+  return null;
+}
+
+/** 在 @ 菜单里选中指定名称的画布素材（展开图片分类后按名称点条目） */
+async function selectMenuItem(name: string) {
+  const kindRow = document.querySelector<HTMLButtonElement>('[data-mention-kind="image"]')!;
+  await act(async () => kindRow.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  const item = [...document.querySelectorAll<HTMLButtonElement>('[data-testid="at-mention-canvas-item"]')]
+    .find(button => button.textContent?.includes(name))!;
+  await act(async () => item.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+}
+
+it('选中素材插入后光标落新标签后', async () => {
+  const { editor } = await renderNode();
+  await enterEditing(editor);
+  await typeAt(editor, '生成一张图片@');
+  await selectMenuItem('素材图一');
+  expect(menuOpen()).toBe(false);
+  const chip = chipByNode(editor, 'm1', 1);
+  expect(chip).toBeTruthy();
+  expect(caretAtChip(chip!, 'after')).toBe(true);
+});
+
+it('同身份插入第二张标签后光标落第二张后', async () => {
+  const { editor } = await renderNode();
+  await enterEditing(editor);
+  // 第一张 chip 后逐键输入 @：插入 '@' 文本节点并把光标落在其后（元素容器光标不触发菜单）
+  const first = chipByNode(editor, 'm1', 1)!;
+  const at = document.createTextNode('@');
+  first.after(at);
+  const range = document.createRange();
+  range.setStart(at, 1);
+  range.collapse(true);
+  const selection = window.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+  await dispatchInput(editor, 'insertText', '@');
+  expect(menuOpen()).toBe(true);
+  await selectMenuItem('素材图一');
+  expect(editor.querySelectorAll('[data-media-node="m1"]').length).toBe(2);
+  expect(caretAtChip(chipByNode(editor, 'm1', 2)!, 'after')).toBe(true);
+});
+
+it('替换来源后光标落替换后新标签后', async () => {
+  const { editor } = await renderNode();
+  await enterEditing(editor);
+  const chip = chipByNode(editor, 'm1', 1)!;
+  await act(async () => chip.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  const chipMenu = document.querySelector<HTMLElement>('[data-testid="media-chip-menu"]')!;
+  const replace = [...chipMenu.querySelectorAll('button')].find(button => button.textContent?.includes('替换来源'))!;
+  await act(async () => replace.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  expect(menuOpen()).toBe(true);
+  await selectMenuItem('素材图二');
+  expect(menuOpen()).toBe(false);
+  expect(editor.querySelectorAll('[data-media-node="m1"]').length).toBe(0);
+  const next = chipByNode(editor, 'm2', 1);
+  expect(next).toBeTruthy();
+  expect(caretAtChip(next!, 'after')).toBe(true);
+});
+
+it('删除标签后光标落被删标签原位置（精确文本偏移，非邻居处）', async () => {
+  const { editor } = await renderNode({
+    text: '看这张图片1再看这张图片1',
+    mediaMentions: [
+      { start: 3, end: 6, nodeId: 'm1', assetId: 'a1' },
+      { start: 11, end: 14, nodeId: 'm1', assetId: 'a1' },
+    ],
+  });
+  await enterEditing(editor);
+  const chips = [...editor.querySelectorAll<HTMLElement>('[data-media-node="m1"]')];
+  expect(chips.length).toBe(2);
+  await act(async () => chips[1].dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  const chipMenu = document.querySelector<HTMLElement>('[data-testid="media-chip-menu"]')!;
+  const remove = [...chipMenu.querySelectorAll('button')].find(button => button.textContent?.includes('删除标签'))!;
+  await act(async () => remove.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  const rest = [...editor.querySelectorAll<HTMLElement>('[data-media-node="m1"]')];
+  expect(rest.length).toBe(1);
+  // 被删标签原位置：重放后 chip 展示 #N 在 DOM 文本流占 1 字符，
+  // offset = 「看这张」(3) + chip(1) + 「再看这张」(4) + chip(1) + 「再」前两字(2) = 11
+  expect(caretTextOffset(editor)).toBe(11);
+});
+
+it('删除同身份第一张标签后光标落被删位置（非剩余标签前）', async () => {
+  const { editor } = await renderNode({
+    text: '看这张图片1再看这张图片1',
+    mediaMentions: [
+      { start: 3, end: 6, nodeId: 'm1', assetId: 'a1' },
+      { start: 11, end: 14, nodeId: 'm1', assetId: 'a1' },
+    ],
+  });
+  await enterEditing(editor);
+  const chips = [...editor.querySelectorAll<HTMLElement>('[data-media-node="m1"]')];
+  await act(async () => chips[0].dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  const chipMenu = document.querySelector<HTMLElement>('[data-testid="media-chip-menu"]')!;
+  const remove = [...chipMenu.querySelectorAll('button')].find(button => button.textContent?.includes('删除标签'))!;
+  await act(async () => remove.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  const rest = [...editor.querySelectorAll<HTMLElement>('[data-media-node="m1"]')];
+  expect(rest.length).toBe(1);
+  // 被删标签原位置 = 「看这张」之后（offset 3），不是剩余标签前（offset 7）
+  expect(caretTextOffset(editor)).toBe(3);
+});
+
+it('失效多张标签重新绑定后光标落触发那张替换后的新标签后', async () => {
+  storeState.edges = [];
+  try {
+    const { editor } = await renderNode({
+      text: '看这张图片1再看这张图片1',
+      mediaMentions: [
+        { start: 3, end: 6, nodeId: 'm1', assetId: 'a1' },
+        { start: 11, end: 14, nodeId: 'm1', assetId: 'a1' },
+      ],
+    });
+    await enterEditing(editor);
+    const chips = [...editor.querySelectorAll<HTMLElement>('[data-media-node="m1"]')];
+    await act(async () => chips[0].dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    const chipMenu = document.querySelector<HTMLElement>('[data-testid="media-chip-menu"]')!;
+    const rebind = [...chipMenu.querySelectorAll('button')].find(button => button.textContent?.includes('重新绑定'))!;
+    await act(async () => rebind.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(menuOpen()).toBe(true);
+    await selectMenuItem('素材图二');
+    expect(editor.querySelectorAll('[data-media-node="m1"]').length).toBe(0);
+    expect(editor.querySelectorAll('[data-media-node="m2"]').length).toBe(2);
+    expect(caretAtChip(chipByNode(editor, 'm2', 1)!, 'after')).toBe(true);
+  } finally {
+    storeState.edges = [{ id: 'e1', source: 'm1', target: 't1', data: { textIndex: true } }];
+  }
+});
+
+it('唯一标签删除后光标落被删位置（正文中间，不落编辑器末尾）', async () => {
+  const { editor } = await renderNode({
+    text: '看这张图片1好吗',
+    mediaMentions: [{ start: 3, end: 6, nodeId: 'm1', assetId: 'a1' }],
+  });
+  await enterEditing(editor);
+  const chip = chipByNode(editor, 'm1', 1)!;
+  await act(async () => chip.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  const chipMenu = document.querySelector<HTMLElement>('[data-testid="media-chip-menu"]')!;
+  const remove = [...chipMenu.querySelectorAll('button')].find(button => button.textContent?.includes('删除标签'))!;
+  await act(async () => remove.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  expect(editor.querySelectorAll('[data-media-node]').length).toBe(0);
+  expect(caretTextOffset(editor)).toBe(3);
+  expect(caretAtEnd(editor)).toBe(false);
+});
+
+/* ---------- IKFXDB 追加：素材标签（prompt #N）新增/替换/删除后的光标落点 ---------- */
+
+/** 素材标签场景：prompt 绑定文本卡，正文两张 chip（素材#1 / 素材#2） */
+async function renderPromptNode() {
+  return renderNode({
+    promptSource: 'chat',
+    text: '看这张素材#1中间素材#2结尾',
+    promptMentions: [
+      { start: 3, end: 7, assetId: 'a1', index: 1 },
+      { start: 9, end: 13, assetId: 'a2', index: 2 },
+    ],
+    promptMaterials: [
+      { assetId: 'a1', mediaType: 'image' as const, url: 'http://img/m1.png' },
+      { assetId: 'a2', mediaType: 'image' as const, url: 'http://img/m2.png' },
+    ],
+    mediaMentions: [],
+    mediaRefs: [],
+    onPromptChange: vi.fn(),
+  });
+}
+
+/** 点选指定素材标签后，在节点操作条点对应按钮（非编辑态入口） */
+async function clickNodeBarButton(label: string) {
+  const button = [...container.querySelectorAll('button')].find(b => b.textContent?.includes(label))!;
+  await act(async () => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+}
+
+it('非编辑态删除素材标签后，进入编辑光标落被删标签原位置', async () => {
+  const { editor } = await renderPromptNode();
+  const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
+  await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await clickNodeBarButton('删除标签 #1');
+  expect(editor.querySelector('[data-prompt-index="1"]')).toBeNull();
+  await enterEditing(editor);
+  // 被删标签原位置 = 「看这张」之后（DOM 流：chip 文本为 #N，offset 3）
+  expect(caretTextOffset(editor)).toBe(3);
+});
+
+it('非编辑态替换素材标签后，进入编辑光标落替换后标签后', async () => {
+  const { editor } = await renderPromptNode();
+  const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
+  await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  const select = container.querySelector<HTMLSelectElement>('select[aria-label="替换素材 #1"]')!;
+  await act(async () => {
+    select.value = 'a2';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await enterEditing(editor);
+  const replaced = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
+  expect(replaced.dataset.promptAsset).toBe('a2');
+  expect(caretAtChip(replaced, 'after')).toBe(true);
+});
+
+it('非编辑态新增素材标签后，进入编辑光标落新标签后', async () => {
+  const { editor } = await renderPromptNode();
+  const select = container.querySelector<HTMLSelectElement>('select[aria-label="新增素材标签"]')!;
+  await act(async () => {
+    select.value = 'a1';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await enterEditing(editor);
+  const added = editor.querySelector<HTMLElement>('[data-prompt-index="3"]')!;
+  expect(added).toBeTruthy();
+  expect(caretAtChip(added, 'after')).toBe(true);
+});
+
+it('同编号多张素材标签删除，锚点取点击的那张原位置', async () => {
+  const { editor } = await renderNode({
+    promptSource: 'chat',
+    text: '素材#1素材#2素材#1',
+    promptMentions: [
+      { start: 0, end: 4, assetId: 'a1', index: 1 },
+      { start: 4, end: 8, assetId: 'a2', index: 2 },
+      { start: 8, end: 12, assetId: 'a1', index: 1 },
+    ],
+    promptMaterials: [
+      { assetId: 'a1', mediaType: 'image' as const, url: 'http://img/m1.png' },
+      { assetId: 'a2', mediaType: 'image' as const, url: 'http://img/m2.png' },
+    ],
+    mediaMentions: [],
+    mediaRefs: [],
+    onPromptChange: vi.fn(),
+  });
+  // 点第二张 #1（#2 之后）：删除全部 #1 后幸存 #2 在点击位置之前，光标应落 #2 后
+  const ones = () => [...editor.querySelectorAll<HTMLElement>('[data-prompt-index="1"]')];
+  await act(async () => ones()[1].dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await clickNodeBarButton('删除标签 #1');
+  expect(editor.querySelectorAll('[data-prompt-index="1"]').length).toBe(0);
+  await enterEditing(editor);
+  // 重放后正文只剩 #2：其文本「#2」在 DOM 流占 1 字符，被删位置 = 原第二张 #1 处 = offset 2（chip#1+chip#2）
+  expect(caretTextOffset(editor)).toBe(2);
+});
+
+it('同编号多张素材标签删除，点第一张时锚点取第一张原位置（不取第二张）', async () => {
+  const { editor } = await renderNode({
+    promptSource: 'chat',
+    text: '素材#1素材#2素材#1',
+    promptMentions: [
+      { start: 0, end: 4, assetId: 'a1', index: 1 },
+      { start: 4, end: 8, assetId: 'a2', index: 2 },
+      { start: 8, end: 12, assetId: 'a1', index: 1 },
+    ],
+    promptMaterials: [
+      { assetId: 'a1', mediaType: 'image' as const, url: 'http://img/m1.png' },
+      { assetId: 'a2', mediaType: 'image' as const, url: 'http://img/m2.png' },
+    ],
+    mediaMentions: [],
+    mediaRefs: [],
+    onPromptChange: vi.fn(),
+  });
+  // 点第一张 #1（正文开头）：删除后光标应落正文开头，而非第二张 #1 的位置
+  const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
+  await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await clickNodeBarButton('删除标签 #1');
+  await enterEditing(editor);
+  expect(caretTextOffset(editor)).toBe(0);
 });
