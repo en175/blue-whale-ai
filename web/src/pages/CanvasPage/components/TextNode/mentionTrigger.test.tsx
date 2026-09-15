@@ -89,8 +89,13 @@ async function renderNode(dataOverride: Record<string, unknown> = {}) {
   return { editor: container.querySelector<HTMLElement>('[data-placeholder="输入内容..."]')! };
 }
 
+/** 双击进入编辑：带上双击自带的 mouseup（真实序列——mouseUp 处理在编辑态才保存选区，
+    否则会清掉编辑器外操作留下的光标锚点） */
 async function enterEditing(editor: HTMLElement) {
-  await act(async () => editor.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+  await act(async () => {
+    editor.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    editor.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  });
 }
 
 /** 把正文设为 fullText、光标落在末尾，再派发一次逐键输入 '@' */

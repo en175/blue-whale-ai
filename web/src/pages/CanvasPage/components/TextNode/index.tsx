@@ -592,10 +592,12 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   //   data.onSaveToAssets?.(id);
   // }, [data, id]);
 
-  /** 编辑器内鼠标抬起时保存选区 */
+  /** 编辑器内鼠标抬起时保存选区。仅编辑态：非编辑态无在位光标可存，且双击进入
+   *  编辑前的 mouseup 会清掉编辑器外操作（删除/替换素材标签）留下的光标锚点（契约 §5）。 */
   const handleEditorMouseUp = useCallback(() => {
+    if (!editing) return;
     saveSelection();
-  }, [saveSelection]);
+  }, [editing, saveSelection]);
 
   const handleCopy = useCallback((e: React.ClipboardEvent, cut = false) => {
     if (!hasPromptBindings || !editorRef.current) return;
