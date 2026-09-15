@@ -396,6 +396,47 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   /** 节点拖拽中标记：拖动节点（含拖组内成员出组）时隐藏框选悬浮条（成组/下载标签），
    *  这些标签只在静止框选状态出现，不应跟随被拖节点移动。 */
   const [isDraggingNode, setIsDraggingNode] = useState(false);
+  /** 组内编辑中的组 id（TC_CX_210）：双击组空白进入，成员可单选编辑；
+   *  成员仍算组（组框层级不变），仅改为按普通选中参与交互。 */
+  const [editGroupId, setEditGroupId] = useState<string | null>(null);
+  /** 双击组判定延迟：等待 350ms 内第二次点击，单击/拖拽立即按整组处理 */
+  const [pendingGroupPick, setPendingGroupPick] = useState<{ id: string; screen: { x: number; y: number } } | null>(null);
+  const pendingGroupPickTimerRef = useRef(0);
+  /** 进入组内编辑：选中该组全部成员（内部 setNodes——父层 selected 字段被合并保护忽略） */
+  const enterGroupEdit = useCallback((groupId: string) => {
+    const g = groupsRef.current.find((x) => x.id === groupId);
+    if (!g) return;
+    const memberIds = new Set(exclusiveMembersInGroup(nodesRef.current, g, groupsRef.current).map((n) => n.id));
+    if (memberIds.size === 0) return;
+    setNodes((prev) => prev.map((n) => ({ ...n, selected: memberIds.has(n.id) })));
+    setEditGroupId(groupId);
+  }, [setNodes]);
+  /** 连续快速点击同一组且全程无位移时视为双击（进入组内编辑） */
+  const onGroupClick = useCallback((groupId: string, screen: { x: number; y: number }) => {
+    if (pendingGroupPick?.id === groupId) {
+      window.clearTimeout(pendingGroupPickTimerRef.current);
+      pendingGroupPickTimerRef.current = 0;
+      setPendingGroupPick(null);
+      enterGroupEdit(groupId);
+      return;
+    }
+    setPendingGroupPick({ id: groupId, screen });
+    pendingGroupPickTimerRef.current = window.setTimeout(() => {
+      pendingGroupPickTimerRef.current = 0;
+      setPendingGroupPick(null);
+    }, 350);
+  }, [pendingGroupPick, enterGroupEdit]);
+  const onGroupClickSuppress = useCallback(() => {
+    if (pendingGroupPickTimerRef.current) {
+      window.clearTimeout(pendingGroupPickTimerRef.current);
+      pendingGroupPickTimerRef.current = 0;
+    }
+    setPendingGroupPick(null);
+  }, []);
+  /** 点组外空白退出组内编辑：组内成员取消选中，操作条收起 */
+  const exitGroupEdit = useCallback(() => {
+    setEditGroupId(null);
+  }, []);
   const memberStackById = useMemo(() => {
     const stack = new Map<string, number>();
     groups?.forEach((g, i) => {
@@ -512,6 +553,32 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     return () => document.removeEventListener('keydown', handler, true);
   }, [setNodes]);
 
+  /** 组内编辑中：点组外空白退出（成员已可单选编辑；组外落点不命中成员时清空编辑态）。
+   *  不拦截 pane 事件，退出交给 onPaneClick 统一处理（同步取消选中）。 */
+  useEffect(() => {
+    if (!editGroupId) return;
+    const onPaneDown = (e: PointerEvent) => {
+      const target = e.target instanceof Element ? e.target : null;
+      // 命中节点/连线/面板 → 仍在组内编辑
+      if (target && (target.closest('.react-flow__node') || target.closest('.react-flow__edge') || target.closest('.react-flow__panel'))) return;
+      const g = groupsRef.current.find((x) => x.id === editGroupId);
+      if (!g) {
+        exitGroupEdit();
+        return;
+      }
+      const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const inBox = p.x >= g.box.x && p.x <= g.box.x + g.box.w && p.y >= g.box.y && p.y <= g.box.y + g.box.h;
+      if (!inBox) exitGroupEdit();
+    };
+    window.addEventListener('pointerdown', onPaneDown, true);
+    return () => window.removeEventListener('pointerdown', onPaneDown, true);
+  }, [editGroupId, exitGroupEdit, screenToFlowPosition]);
+
+  /** 卸载或 groups 变化时清理双击待确认计时器 */
+  useEffect(() => () => {
+    if (pendingGroupPickTimerRef.current) window.clearTimeout(pendingGroupPickTimerRef.current);
+  }, []);
+
   return (
     <div
       className={`${styles.canvasContainer} ${isDrag ? styles.dragMode : ''}`}
@@ -619,6 +686,9 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             onFrameDragMembersChange={setFrameDragMemberIds}
             onFrameDragOffsetChange={setFrameDragOffset}
             onBringGroupToFront={onBringGroupToFront}
+            onGroupClick={onGroupClick}
+            onGroupClickSuppress={onGroupClickSuppress}
+            editGroupId={editGroupId}
             onConnectGroupToTarget={onConnectGroupToTarget ?? (() => {})}
             onConnectGroupDrop={onConnectGroupDrop}
             onConnectSourceToGroup={onConnectSourceToGroup ?? (() => {})}

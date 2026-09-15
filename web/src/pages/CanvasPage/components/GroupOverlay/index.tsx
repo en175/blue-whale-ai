@@ -46,6 +46,12 @@ interface GroupOverlayProps {
   onFrameDragOffsetChange?: (offset: { id: string; x: number; y: number } | null) => void;
   /** 拖组/点组置顶 */
   onBringGroupToFront?: (groupId: string) => void;
+  /** 组空白单击（无位移）：默认激活组（展开徽标）；双击由父级判定后进入组内编辑 */
+  onGroupClick?: (groupId: string, screen: { x: number; y: number }) => void;
+  /** 组发生拖拽（有位移）：取消父级双击待确认 */
+  onGroupClickSuppress?: () => void;
+  /** 组内编辑中的组 id（TC_CX_210）：编辑中不吞 click，点组外空白才能触发 pane 取消选中 */
+  editGroupId?: string | null;
   /** 组拖线松手：只弹可选菜单，不接到已有节点（targetId 仍上报，父级忽略） */
   onConnectGroupDrop?: (memberIds: string[], targetId: string | null, client: { x: number; y: number }) => void;
   /** 组→已有节点：兼容旧回调；组拖线现只走菜单，不再接到节点 */
@@ -82,6 +88,9 @@ export default function GroupOverlay({
   onFrameDragMembersChange,
   onFrameDragOffsetChange,
   onBringGroupToFront,
+  onGroupClick,
+  onGroupClickSuppress,
+  editGroupId,
   onConnectGroupToTarget,
   onConnectGroupDrop,
   isDraggingNode,
@@ -153,6 +162,9 @@ export default function GroupOverlay({
   /** 供 window 级命中测试读取最新组数据（避免监听器随 groups 变化反复重挂） */
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
+  /** 组内编辑态镜像（window 捕获监听器读取，避免随状态反复重挂） */
+  const editGroupIdRef = useRef(editGroupId);
+  editGroupIdRef.current = editGroupId ?? null;
   /** pane DOM（承载光标反馈）：组框在节点层之下无法自己显示 cursor，改由 pane 内联光标表达 */
   const paneRef = useRef<HTMLElement | null>(null);
   /** 拖组结束后需吞掉一次 click（避免冒泡到 pane 触发 onPaneClick 清空选中） */
@@ -248,7 +260,11 @@ export default function GroupOverlay({
     onFrameDragMembersChange?.(new Set());
     onFrameDragOffsetChange?.(null);
     if (isClick && s) {
+      // 组内编辑中：单击组空白仅激活徽标（不进入/不退出编辑），双击由父级 onGroupClick 判定
+      onGroupClick?.(s.groupId, { x: s.startScreen.x, y: s.startScreen.y });
       setOpenGroupId((prev) => (prev === s.groupId ? null : s.groupId));
+    } else if (s) {
+      onGroupClickSuppress?.();
     }
     // 吞掉本次按下抬起派发的 click：否则会冒泡到 pane 触发 onPaneClick 清空选中
     // （click 在 mouseup 后同轮派发，故用宏任务在本轮结束后复位标记）
@@ -256,7 +272,7 @@ export default function GroupOverlay({
     window.setTimeout(() => {
       clickSuppressRef.current = false;
     }, 0);
-  }, [onFrameMove, endFrameDrag, onFrameDragMembersChange, onFrameDragOffsetChange]);
+  }, [onFrameMove, endFrameDrag, onFrameDragMembersChange, onFrameDragOffsetChange, onGroupClick, onGroupClickSuppress]);
 
   /** 按下开始拖动整组：冻结本组独立成员作为本次拖动集合。
    *  其他组成员即使落在本矩形内也不带走；被排除节点不随组移动；成员可为空。
@@ -341,17 +357,26 @@ export default function GroupOverlay({
       e.stopPropagation();
       startFrameDrag(e.clientX, e.clientY, g);
     };
-    // 拖组结束后吞掉那一次 click（见 endDrag），避免 pane 的 onPaneClick 清空节点选中
+    // 拖组结束吞掉派发的 click；组内编辑中不吞——点组外空白的 click 需到达 pane 触发 onPaneClick 取消选中
     const onClick = (e: MouseEvent) => {
-      if (!clickSuppressRef.current) return;
+      if (!clickSuppressRef.current || editGroupIdRef.current) return;
       e.stopPropagation();
       e.preventDefault();
     };
+    // 双击组空白 = 进入组内编辑（TC_CX_210），拦截 d3-zoom 的双击缩放避免视口跳动
+    const onDblClick = (e: MouseEvent) => {
+      const g = hitGroupAt(e.clientX, e.clientY, e.target);
+      if (!g) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('click', onClick, true);
+    window.addEventListener('dblclick', onDblClick, true);
     return () => {
       window.removeEventListener('pointerdown', onDown, true);
       window.removeEventListener('click', onClick, true);
+      window.removeEventListener('dblclick', onDblClick, true);
     };
   }, [hitGroupAt, startFrameDrag]);
 
