@@ -7,6 +7,7 @@ import {
   type AtMentionItem,
   type AtMentionKind,
 } from '../../atMention';
+import { computeFlyoutOffset } from './flyoutAnchor';
 import styles from './index.module.css';
 
 const KIND_META: Array<{ kind: AtMentionKind; label: string }> = [
@@ -67,8 +68,10 @@ export default function AtMentionMenu({
   onClose,
 }: AtMentionMenuProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const flyoutWrapRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState(editorQuery);
   const [hovered, setHovered] = useState<AtMentionKind | null>(null);
+  const [flyoutOffset, setFlyoutOffset] = useState(0);
   const [availableHeight, setAvailableHeight] = useState(480);
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const disabled = new Set(disabledKinds ?? []);
@@ -120,6 +123,27 @@ export default function AtMentionMenu({
   }, [onClose]);
 
   const flyoutItems = hovered ? items.filter((item) => item.kind === hovered) : [];
+
+  // IKFO27：子菜单与触发它的分类行顶部对齐，鼠标从分类行水平移过去即可到达，
+  // 不再需要斜穿两者之间的空白区（那会让根容器的 onMouseLeave 提前关闭子菜单）。
+  useLayoutEffect(() => {
+    const wrap = flyoutWrapRef.current;
+    const panel = rootRef.current?.querySelector<HTMLElement>('[data-mention-main]');
+    const row = hovered
+      ? rootRef.current?.querySelector<HTMLElement>(`[data-mention-kind="${hovered}"]`)
+      : null;
+    if (!wrap || !panel || !row) {
+      setFlyoutOffset(0);
+      return;
+    }
+    const panelRect = panel.getBoundingClientRect();
+    setFlyoutOffset(computeFlyoutOffset({
+      rowTop: row.getBoundingClientRect().top,
+      panelTop: panelRect.top,
+      panelHeight: panelRect.height,
+      flyoutHeight: wrap.getBoundingClientRect().height,
+    }));
+  }, [hovered, flyoutItems.length]);
 
   const menu = (
     <div
@@ -266,7 +290,12 @@ export default function AtMentionMenu({
       </div>
 
       {!searching && hovered && (
-        <div className={styles.flyoutWrap} onMouseEnter={() => setHovered(hovered)}>
+        <div
+          ref={flyoutWrapRef}
+          className={styles.flyoutWrap}
+          style={{ marginTop: flyoutOffset }}
+          onMouseEnter={() => setHovered(hovered)}
+        >
         <div className={styles.flyout} data-mention-flyout>
           {flyoutItems.length === 0 ? (
             <div className={styles.empty}>画布暂无该类型素材</div>
