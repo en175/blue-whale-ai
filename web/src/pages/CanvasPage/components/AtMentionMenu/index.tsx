@@ -95,9 +95,10 @@ export default function AtMentionMenu({
     const width = 228;
     const estHeight = Math.min(rootRef.current?.offsetHeight || 300, window.innerHeight - 16);
     let left = rect.left;
-    let top = rect.bottom + 6;
+    // IKFR6A：菜单优先出现在锚点上方，上方放不下才翻到锚点下方（全产品统一）
+    let top = rect.top - estHeight - 6;
+    if (top < 8) top = rect.bottom + 6;
     if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
-    if (top + estHeight > window.innerHeight - 8) top = Math.max(8, rect.top - estHeight - 6);
     setPos({ top, left });
   }, [anchorRef, renderInline, searching, matched.length, matchedRefs.length]);
 
