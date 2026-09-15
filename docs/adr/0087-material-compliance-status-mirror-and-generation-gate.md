@@ -43,6 +43,7 @@ ADR-0077 当时明确否决过「创建生成任务时同步调 `GetAsset` 预�
      放 Java 侧的理由：`worker-java` 已是唯一的后台执行面（TS `generation-worker` 已退役，迁移契约 §7「recovery/asset-GC 留 TS 进程」随之失效），
      `worker-java/.../application/service/RecoveryService.java` 是同类 cron 的现成先例。
      上游调用用**逐行 `GetAsset`**：`ListAssets` 的按组批量需 `Filter.GroupType`，而本表无 `kind`、`material_groups` 的真人组镜像又尚未实现，批量路径走不通。
+     **跟进侧失败一律不写库**：网络失败、非 2xx、信封缺 `Result`/`Status` 都按「本轮未知」处理，状态保持 `Processing` 等下轮——不把一次坏响应固化成终态。认不出的 `Status` 值同样收敛成 `Processing`（既不误判为可用，也不误杀）。
    - **定时器按 `userId` 取用户 `sk-`**：素材接口是**用户凭证**的——网关 `blue-whale-api/router/api-router.go` 里
      `/api/material/*` 走 `TokenAuth`（用户 API key）、`/api/materials/*` 走 `UserAuth`（用户登录会话），**两条都要用户身份，网关不提供服务级查询入口**。
      定时器因此读**新表 `user_info`**（键 `user_id`）；该行在**登录成功时**写入
@@ -62,6 +63,14 @@ ADR-0077 当时明确否决过「创建生成任务时同步调 `GetAsset` 预�
 6. **只说明「未通过」，不解释原因。** `error_code` / `error_message` 落库供内部归因，但不对用户展示，用户侧文案只说「素材未审核通过」。理由：**火山官方没有公开素材库的错误码枚举**——只有状态三值与「失败时返回 `error.code`/`error.message`」的笼统说明（明细挂在 Files API 而非素材库 Asset 上），因此本仓无从判断 `Failed` 究竟源于内容审核、URL 不可达还是物理约束超限。**存原文透传不是退而求其次，就是终态做法**。
 
 7. **拦截点：创建期 + 重试期两处。** worker 提交期不重复校验——状态存在漂移窗口，上游届时本就会拒，在 worker 里加第二次查询只会增加复杂度且给不出更好的错误。
+
+   重试期的门**必须落在「幂等重放命中之后、建新行之前」**（实现上由 `retryJob` 接收 `guardInput` 回调，在事务内该位置调用）。三个位置的取舍：
+   - 提到事务外或调用方 → 拿不到「本次是不是重放」，会把**既有**的重试结果按此刻素材状态改写，破坏幂等；
+   - 放到 create 前 → 只有真建新 job 时才查上游，幂等重放零额外往返、零改写。
+
+   门拒绝时返回 `{ kind: "material_blocked", reason }`，handler 映射为 `400 + invalid_reference`（与创建期同款），**不建任何行**。
+
+   实现参数：定时跟进间隔 `MATERIAL_STATUS_POLL_INTERVAL_MS`（默认 5000）、跟进窗口 `MATERIAL_STATUS_POLL_MAX_AGE_MINUTES`（默认 10）、首轮延迟 `MATERIAL_STATUS_POLL_INITIAL_DELAY_MS`（默认 0）、每轮批大小 100。命名与取值对齐既有 `GENERATION_RECOVERY_*` 一族（同样只走 `@Scheduled` 占位符，不写 `application.yml`）。
 
 ## 被否方案
 
