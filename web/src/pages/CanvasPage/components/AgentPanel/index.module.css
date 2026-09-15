@@ -2470,9 +2470,14 @@ ol.solutionList {
 .solutionActions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 2px;
   padding: 0 12px;
+}
+
+.solutionActions button {
+  white-space: nowrap;
 }
 
 .solutionPrimaryBtn {
