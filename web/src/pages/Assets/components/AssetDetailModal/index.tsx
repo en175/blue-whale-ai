@@ -141,6 +141,16 @@ export default function AssetDetailModal({ asset, loading = false, onClose }: As
                 <dt>生成模型</dt>
                 <DetailValue loading={loading}>{asset.model || EMPTY_ASSET_DETAIL}</DetailValue>
               </div>
+              {/* IKFSSO/IKFTQW：无提示词的素材（上传的、视频提取出来的音频、生成时 prompt
+                  为空串的）整行不渲染——不占位，也不显示「暂无数据」，免得一排空字段。 */}
+              {asset.prompt && (
+                <div className={styles.detailItem}>
+                  <dt>提示词</dt>
+                  <DetailValue loading={loading}>
+                    <span className={styles.promptText}>{asset.prompt}</span>
+                  </DetailValue>
+                </div>
+              )}
             </dl>
           </aside>
         </div>

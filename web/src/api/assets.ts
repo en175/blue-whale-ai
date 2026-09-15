@@ -1,8 +1,8 @@
 /* ============================================
  * assets 接口：资产库列表（分页 + 筛选）
  * ============================================ */
-import { infiniteQueryOptions, type QueryClient } from '@tanstack/react-query';
-import { apiRequest } from './http';
+import { infiniteQueryOptions, queryOptions, skipToken, type QueryClient } from '@tanstack/react-query';
+import { apiRequest, type ApiRequestInit } from './http';
 
 /** 资产类型 */
 export type AssetType = 'image' | 'video' | 'audio' | 'character';
@@ -27,6 +27,14 @@ export interface AssetRecord {
   source: string | null;
   /** 生成资产使用的模型；上传资产为 null */
   model: string | null;
+  /**
+   * AI 生成素材的原始提示词（IKFSSO）。
+   *
+   * 上传素材、视频提取音频（media_extract）、以及生成时 prompt 为空串的素材都是 `null`。
+   * **只有 `GET /api/assets/:assetId` 返回这个字段**，列表接口不带——所以从列表分页拿到的
+   * 记录上恒为 `undefined`，要拿提示词必须走详情接口。
+   */
+  prompt?: string | null;
   /** 创建时间（ISO 8601） */
   created_at: string | null;
 }
@@ -50,7 +58,10 @@ export const assetKeys = {
     [...assetKeys.all, 'pages', type || 'all', size] as const,
 };
 
-/** 资产库离开时释放所有筛选条件下的分页缓存，供下次挂载重新测量和加载。 */
+/**
+ * 释放资产相关缓存：列表分页（下次挂载重新测量和加载）+ 单条详情
+ * （`assetDetailKeys` 挂在 `assetKeys.all` 前缀下，顺手一并清掉，不留陈旧提示词）。
+ */
 export function removeCachedAssetPages(queryClient: Pick<QueryClient, 'removeQueries'>) {
   queryClient.removeQueries({ queryKey: assetKeys.all });
 }
@@ -91,9 +102,39 @@ export function deleteAsset(id: AssetRecord['id']) {
   return apiRequest<null>(`/api/assets/${id}`, { method: 'DELETE' });
 }
 
-/** GET /api/assets/:assetId — 获取单个资产详情。 */
-export function fetchAssetDetail(id: AssetRecord['id']) {
-  return apiRequest<AssetRecord>(`/api/assets/${encodeURIComponent(String(id))}`);
+/** GET /api/assets/:assetId — 获取单个资产详情（比列表多 `prompt`，见 `AssetRecord`）。 */
+export function fetchAssetDetail(id: AssetRecord['id'], init?: ApiRequestInit) {
+  return apiRequest<AssetRecord>(`/api/assets/${encodeURIComponent(String(id))}`, init);
+}
+
+/**
+ * 单条资产详情的缓存键（IKFTQW）：`assetKeys.all` 前缀下与列表分页并列，
+ * 于是资产页离开时 `removeCachedAssetPages` 会连详情一起释放，不会留下陈旧提示词。
+ */
+export const assetDetailKeys = {
+  detail: (id: AssetRecord['id']) => [...assetKeys.all, 'detail', String(id)] as const,
+};
+
+/**
+ * 资产详情查询（IKFTQW）：点开详情弹窗时补拉列表没有的字段。
+ *
+ * 竞态由 Query 按 id 分键结构性保证——切换资产即换 key，旧响应落不进当前弹窗，
+ * 不需要手写 requestId 守卫。注意 `skipToken` / `enabled` 只挡「新请求」，挡不住
+ * 已经在途的那个；在途结果只会写进它自己 id 的缓存，不会串到当前弹窗。
+ *
+ * 失败不 toast（`silent`）：调用方退回列表记录继续渲染，不让一次补拉失败打断弹窗。
+ */
+export function assetDetailQueryOptions(id: AssetRecord['id'] | null) {
+  return queryOptions({
+    queryKey: assetDetailKeys.detail(id ?? ''),
+    // 弹窗没开（id 为 null）用 skipToken 关掉请求；闭包里也因此拿得到收窄后的 id，
+    // 不用写 `id as AssetRecord['id']` 断言。
+    queryFn:
+      id === null
+        ? skipToken
+        : ({ signal }) => fetchAssetDetail(id, { silent: true, signal }),
+    enabled: id !== null,
+  });
 }
 
 /** GET /api/assets/:assetId/references 返回（IKCZAT） */
