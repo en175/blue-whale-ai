@@ -227,7 +227,8 @@ export class MaterialService {
   }
 
   /** IKF YHJ：CreateAsset 2xx 后落 Processing 行——上游异步注册，此刻必然尚未 Active。 */
-  async trackMaterialProcessing(    userId: string,
+  async trackMaterialProcessing(
+    userId: string,
     materialId: string,
     materialGroupId: string,
   ): Promise<void> {

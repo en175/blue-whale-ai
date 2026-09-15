@@ -1302,6 +1302,8 @@ export interface MaterialGate {
     userId: string;
     /** 已冻结的任务 input——素材 id 与本地 Asset id 都在里面，由实现自行汇集。 */
     jobInput: Record<string, unknown>;
+    /** 任务类型。本门只对 video 生效（素材库绑定只有视频参考会消费），实现方按此短路。 */
+    jobType: string;
   }): Promise<string | null>;
 }
 
@@ -1718,6 +1720,7 @@ export async function handleCreateGenerationJob(
     const reason = await deps.materialGate.assertInputUsable({
       userId,
       jobInput: input as unknown as Record<string, unknown>,
+      jobType: type,
     });
     if (reason !== null) {
       return fail(400, reason, { code: ERROR_INVALID_REFERENCE });

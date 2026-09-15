@@ -80,6 +80,7 @@ export interface GenerationCommandRepo {
     requestHash: string,
     guardInput?: (
       input: Record<string, unknown>,
+      jobType: string,
     ) => Promise<string | null>,
   ): Promise<
     | (CreatedJob & { type: "image" | "video" | "audio" })
@@ -434,7 +435,9 @@ export function createGenerationCommandRepo(
       requestHash,
       guardInput,
     ) {
-      return transactionWithUniqueRetry(prisma, async (tx) => {
+      return transactionWithUniqueRetry(
+        prisma,
+        async (tx) => {
         const pid = BigInt(projectId);
         const original = await tx.generation_jobs.findFirst({
           where: {
@@ -537,6 +540,7 @@ export function createGenerationCommandRepo(
         if (guardInput) {
           const reason = await guardInput(
             (original.input ?? {}) as Record<string, unknown>,
+            original.type,
           );
           if (reason !== null) return { kind: "material_blocked", reason } as const;
         }
@@ -704,7 +708,11 @@ export function createGenerationCommandRepo(
           cursor: Number(event.cursor),
           type: original.type as "image" | "video" | "audio",
         };
-      });
+        },
+        // 素材门（guardInput）在事务内发 HTTP，默认 5s 的交互事务超时会把它掐成 P2028/500。
+        // 与 createJob 同口径放宽（那里也是同一理由：事务里含外部等待）。
+        { maxWait: 10_000, timeout: 30_000 },
+      );
     },
 
     async appendLog(jobId, event, status, message, payload) {

@@ -44,7 +44,8 @@ export async function handleRetryGenerationJob(
     idempotencyKey,
     requestHash,
     gate
-      ? (input) => gate.assertInputUsable({ userId, jobInput: input })
+      ? (input, jobType) =>
+          gate.assertInputUsable({ userId, jobInput: input, jobType })
       : undefined,
   );
   if (!retry) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");

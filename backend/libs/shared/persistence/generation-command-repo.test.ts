@@ -642,7 +642,7 @@ describe("generation command repo retry", () => {
         kind: "material_blocked",
         reason: "该素材未审核通过，不能用于视频生成",
       });
-      expect(guardInput).toHaveBeenCalledWith(failedOriginal.input);
+      expect(guardInput).toHaveBeenCalledWith(failedOriginal.input, "video");
       expect(createJob).not.toHaveBeenCalled();
     });
 

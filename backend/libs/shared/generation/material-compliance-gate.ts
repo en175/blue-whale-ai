@@ -149,7 +149,14 @@ export function createMaterialGate(deps: {
   ) => Promise<string[]>;
 }): MaterialGate {
   return {
-    async assertInputUsable({ userId, jobInput }): Promise<string | null> {
+    async assertInputUsable({ userId, jobInput, jobType }): Promise<string | null> {
+      // 只对 video 生效。素材库绑定是**视频**参考才消费的东西：worker 在视频提交时把已绑素材
+      // 转成 `asset://<material_id>`，而 AudioJobProcessor 压根不看 material 绑定。
+      // 但音频的 references 也带 asset_id（composeInput 原样冻结），不拦住类型就会拿
+      // 「不能用于视频生成」去拒一个音频任务——纯误伤。
+      // 图片不受影响（其参考落 input_asset_ids，collectLocalAssetIds 不读），但同样不属于本门范围。
+      if (jobType !== "video") return null;
+
       const localAssetIds = collectLocalAssetIds(jobInput);
       const materialIdsFromLocalAssets =
         deps.resolveLocalAssetMaterialIds && localAssetIds.length > 0

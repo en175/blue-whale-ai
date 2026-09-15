@@ -41,31 +41,43 @@ export class GenerationJobsController {
   ) {}
 
   /** IKF YHJ：造素材校验状态门（ADR-0087）。实时查询走网关 GetAsset，凭据用本次请求的用户 sk-；
-   *  上游不可达/查不到一律当不可用（fail-closed），不赌它没问题。 */
+   *  上游不可达/查不到一律当不可用（fail-closed），不赌它没问题。
+   *  注意：`callAction` 在网络失败时是**抛** `NewApiError`（不是返回错误码），缺凭证也抛 401。
+   *  这里必须自己咽掉转成 null——否则「上游不可达」会绕过 MATERIAL_STATUS_UNAVAILABLE_MESSAGE，
+   *  在 create 期冒成 503、在 retry 期直接炸掉 `retryJob` 的交互事务（那个事务只 catch P2002）。 */
   private buildMaterialGate(authorization: string | undefined) {
     return createMaterialGate({
       repo: this.material.materialStatusRepo,
       fetchUpstreamStatus: async (materialId) => {
-        const upstream = await this.material.callAction(authorization, "GetAsset", {
-          Id: materialId,
-        });
-        if (upstream.status < 200 || upstream.status >= 300) return null;
-        const body: unknown = upstream.body;
-        if (typeof body !== "object" || body === null) return null;
-        const result = (body as Record<string, unknown>).Result;
-        if (typeof result !== "object" || result === null) return null;
-        const rec = result as Record<string, unknown>;
-        if (typeof rec.Status !== "string") return null;
-        const rawError = rec.Error;
-        const err =
-          typeof rawError === "object" && rawError !== null
-            ? (rawError as Record<string, unknown>)
-            : undefined;
-        return {
-          status: rec.Status,
-          errorCode: typeof err?.Code === "string" ? err.Code : null,
-          errorMessage: typeof err?.Message === "string" ? err.Message : null,
-        };
+        try {
+          const upstream = await this.material.callAction(authorization, "GetAsset", {
+            Id: materialId,
+          });
+          if (upstream.status < 200 || upstream.status >= 300) return null;
+          const body: unknown = upstream.body;
+          if (typeof body !== "object" || body === null) return null;
+          const result = (body as Record<string, unknown>).Result;
+          if (typeof result !== "object" || result === null) return null;
+          const rec = result as Record<string, unknown>;
+          if (typeof rec.Status !== "string") return null;
+          const rawError = rec.Error;
+          const err =
+            typeof rawError === "object" && rawError !== null
+              ? (rawError as Record<string, unknown>)
+              : undefined;
+          return {
+            status: rec.Status,
+            errorCode: typeof err?.Code === "string" ? err.Code : null,
+            errorMessage: typeof err?.Message === "string" ? err.Message : null,
+          };
+        } catch (error) {
+          logger.warn(
+            `[generation] 素材状态实时查询失败 materialId=${materialId}，按不可用处理: ${
+              error instanceof Error ? error.message : "unknown"
+            }`,
+          );
+          return null;
+        }
       },
       resolveLocalAssetMaterialIds: (userId, assetIds) =>
         this.assets.findBoundMaterialIds(userId, assetIds),

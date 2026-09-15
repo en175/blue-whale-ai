@@ -188,7 +188,7 @@ describe("createMaterialGate（IKFYHJ 接线层）", () => {
   it("无任何素材引用：放行，且不查任何东西", async () => {
     const deps = baseDeps();
     const gate = createMaterialGate(deps as never);
-    await expect(gate.assertInputUsable({ userId: "9", jobInput: { prompt: "x" } })).resolves.toBeNull();
+    await expect(gate.assertInputUsable({ userId: "9", jobType: "video", jobInput: { prompt: "x" } })).resolves.toBeNull();
     expect(deps.repo.findByMaterialId).not.toHaveBeenCalled();
   });
 
@@ -196,7 +196,7 @@ describe("createMaterialGate（IKFYHJ 接线层）", () => {
     const deps = baseDeps();
     const gate = createMaterialGate(deps as never);
     await expect(
-      gate.assertInputUsable({ userId: "9", jobInput: { references: [{ material_id: "asset-a" }] } }),
+      gate.assertInputUsable({ userId: "9", jobType: "video", jobInput: { references: [{ material_id: "asset-a" }] } }),
     ).resolves.toBeNull();
     expect(deps.repo.findByMaterialId).toHaveBeenCalledWith("9", "asset-a");
   });
@@ -208,7 +208,7 @@ describe("createMaterialGate（IKFYHJ 接线层）", () => {
     const gate = createMaterialGate(deps as never);
 
     await expect(
-      gate.assertInputUsable({ userId: "9", jobInput: { first_frame_asset_id: "100" } }),
+      gate.assertInputUsable({ userId: "9", jobType: "video", jobInput: { first_frame_asset_id: "100" } }),
     ).resolves.toBe(MATERIAL_NOT_APPROVED_MESSAGE);
     expect(deps.resolveLocalAssetMaterialIds).toHaveBeenCalledWith("9", ["100"]);
     expect(deps.repo.findByMaterialId).toHaveBeenCalledWith("9", "asset-from-local");
@@ -218,8 +218,36 @@ describe("createMaterialGate（IKFYHJ 接线层）", () => {
     const deps = baseDeps();
     const gate = createMaterialGate({ repo: deps.repo, fetchUpstreamStatus: deps.fetchUpstreamStatus } as never);
     await expect(
-      gate.assertInputUsable({ userId: "9", jobInput: { first_frame_asset_id: "100" } }),
+      gate.assertInputUsable({ userId: "9", jobType: "video", jobInput: { first_frame_asset_id: "100" } }),
     ).resolves.toBeNull();
     expect(deps.repo.findByMaterialId).not.toHaveBeenCalled();
   });
+
+  // 素材库绑定只有**视频**参考会消费：worker 在视频提交时把已绑本地 Asset 转成
+  // `asset://<material_id>`，而 AudioJobProcessor 压根不看 material 绑定。
+  // 但音频的 references 也带 asset_id（composeInput 原样冻结）——不按类型短路就会拿
+  // 「不能用于视频生成」去拒一个音频任务，纯误伤。
+  it.each(["audio", "image"])(
+    "%s 任务直接短路：连本地 Asset 解析都不跑（不误伤非视频路径）",
+    async (jobType) => {
+      const deps = baseDeps();
+      deps.resolveLocalAssetMaterialIds.mockResolvedValue(["asset-from-local"]);
+      deps.repo.findByMaterialId.mockResolvedValue({ status: "Failed" });
+      const gate = createMaterialGate(deps as never);
+
+      await expect(
+        gate.assertInputUsable({
+          userId: "9",
+          jobType,
+          jobInput: {
+            references: [{ material_id: "asset-a", asset_id: "100" }],
+            first_frame_asset_id: "100",
+          },
+        }),
+      ).resolves.toBeNull();
+      expect(deps.resolveLocalAssetMaterialIds).not.toHaveBeenCalled();
+      expect(deps.repo.findByMaterialId).not.toHaveBeenCalled();
+      expect(deps.fetchUpstreamStatus).not.toHaveBeenCalled();
+    },
+  );
 });

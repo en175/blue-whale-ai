@@ -69,15 +69,16 @@ describe("handleRetryGenerationJob 素材状态门（IKF YHJ）", () => {
     );
 
     expect(result).toEqual({ code: 200, msg: null, data: CREATED });
-    // 第三参起是 guardInput：由 repo 决定何时调（幂等重放不调）。
+    // 第三参起是 guardInput：由 repo 决定何时调（幂等重放不调），并把原 job 的类型一并带过来。
     const guardInput = retryJob.mock.calls[0]![5];
     expect(guardInput).toBeTypeOf("function");
 
     const jobInput = { references: [{ material_id: "asset-abc" }] };
-    await expect(guardInput(jobInput)).resolves.toBeNull();
+    await expect(guardInput(jobInput, "video")).resolves.toBeNull();
     expect(assertInputUsable).toHaveBeenCalledWith({
       userId: "9",
       jobInput,
+      jobType: "video",
     });
   });
 

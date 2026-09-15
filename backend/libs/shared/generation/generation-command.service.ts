@@ -43,6 +43,7 @@ export class GenerationCommandService {
     requestHash: string,
     guardInput?: (
       input: Record<string, unknown>,
+      jobType: string,
     ) => Promise<string | null>,
   ) {
     return this.repo.retryJob(

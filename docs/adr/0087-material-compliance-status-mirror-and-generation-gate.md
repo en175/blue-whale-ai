@@ -64,6 +64,8 @@ ADR-0077 当时明确否决过「创建生成任务时同步调 `GetAsset` 预�
 
 7. **拦截点：创建期 + 重试期两处。** worker 提交期不重复校验——状态存在漂移窗口，上游届时本就会拒，在 worker 里加第二次查询只会增加复杂度且给不出更好的错误。
 
+   **门只对 `video` 生效**。素材库绑定只有视频参考会消费（worker 在视频提交时把已绑本地 Asset 转成 `asset://<material_id>`；`AudioJobProcessor` 根本不看 material 绑定）。但音频的 `references` 也带 `asset_id`（`composeInput` 原样冻结），不按类型短路就会拿「不能用于视频生成」去拒一个音频任务——纯误伤。实现上由调用方把任务类型带进 `assertInputUsable`，非 video 直接返回放行、连本地 Asset 解析都不跑。
+
    重试期的门**必须落在「幂等重放命中之后、建新行之前」**（实现上由 `retryJob` 接收 `guardInput` 回调，在事务内该位置调用）。三个位置的取舍：
    - 提到事务外或调用方 → 拿不到「本次是不是重放」，会把**既有**的重试结果按此刻素材状态改写，破坏幂等；
    - 放到 create 前 → 只有真建新 job 时才查上游，幂等重放零额外往返、零改写。
@@ -71,6 +73,10 @@ ADR-0077 当时明确否决过「创建生成任务时同步调 `GetAsset` 预�
    门拒绝时返回 `{ kind: "material_blocked", reason }`，handler 映射为 `400 + invalid_reference`（与创建期同款），**不建任何行**。
 
    实现参数：定时跟进间隔 `MATERIAL_STATUS_POLL_INTERVAL_MS`（默认 5000）、跟进窗口 `MATERIAL_STATUS_POLL_MAX_AGE_MINUTES`（默认 10）、首轮延迟 `MATERIAL_STATUS_POLL_INITIAL_DELAY_MS`（默认 0）、每轮批大小 100。命名与取值对齐既有 `GENERATION_RECOVERY_*` 一族（同样只走 `@Scheduled` 占位符，不写 `application.yml`）。
+
+   两处配套约束，改动时别丢：
+   - **`retryJob` 的交互事务须显式放宽超时**（`{ maxWait: 10_000, timeout: 30_000 }`，与 `createJob` 同口径）。门在事务内发 HTTP，Prisma 默认 5s 会把它掐成 P2028/500，而不是设计好的 400。
+   - **`worker-java` 的调度线程池须 > 1**（`spring.task.scheduling.pool.size`）。两条 `@Scheduled` 共享 Spring Boot 默认的单线程时，跟进器一轮最多 100 次串行 `GetAsset`（单次 connect 10s / read 15s）能把唯一的调度线程占住几十分钟，`fixedDelay` 紧接着排下一轮 → `RecoveryService` 被饿死，表现为「不相干用户的卡死任务再也不被重投」。一个素材状态功能不该能拖垮作业恢复。
 
 ## 被否方案
 
