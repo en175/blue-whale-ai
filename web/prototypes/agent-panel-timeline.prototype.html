@@ -50,7 +50,8 @@
   .panel { width: 440px; max-width: 100%; height: calc(100vh - 110px); min-height: 620px; background: var(--panel); border: 1px solid var(--line2); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; position: relative; }
   .panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line2); font-weight: 600; }
   .panel-head .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-  .panel-head .sub { margin-left: auto; font-weight: 400; color: var(--text3); font-size: var(--fs-xs); }
+  .panel-head .sub { margin-left: auto; font-weight: 400; color: var(--text3); font-size: var(--fs-xs); white-space: nowrap; }
+  .panel-head { white-space: nowrap; }
   .scroll { flex: 1; overflow-y: auto; padding: 14px 14px 8px; }
   .composer { border-top: 1px solid var(--line2); padding: 8px 12px 12px; }
   .composer .box { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--text3); background: var(--bg2); }
@@ -255,7 +256,7 @@ const F = {
   notes: {
     idea: '外层是 A 的链路：过程折成一行「▶ ✻ 已处理 31s · 思考 2 段 · 工具 1 次」，正文直接铺在对话里（像 libtv 那样，不套消息卡）；点开那一行，里面是 E 的阶段分组。方案卡换成 D 的简报式（卡底一条媒介 / 模型 / 参数色带），追问补上「其他」，并把选答案和输入框接成一条线。右上角「看到哪一步」切对话停在追问 / 方案卡 / 出卡。',
     chain: ['A 的外层：一行「已处理 31s · 思考 2 段 · 工具 1 次」，默认折起；正文是普通文字，不套卡', '点开是 E 的阶段：理解需求 19s / 查阅对应的创作方法 <0.1s / 整理下一步 2.5s，每阶段再点开看思考原文和读的文件', '正文不再和过程一句一句交替'],
-    q: ['所有题一张表单（E 的形式）：每题一行分段按钮，推荐项带小圆点默认选中，下方一行是选中项说明 + 推荐理由', '多选题标「多选」，按钮带小方框可多点；推荐组合默认全选', '每行末尾多一个「其他」，点了在题下展开输入框；多选时「其他」是追加', '选了什么，输入框上方就有一行草稿「视角 C · 时刻 B · …」，可以补一句再发；输入框的发送就是回答', '已经答过的轮次，选项锁住只显示当时的选择'],
+    q: ['产品拍板：追问保持文字、不点选，用户直接回话', '「原版」= 模型现在写的 markdown 原样', '「排版一」：题头 Qn + 标题加粗，选项字母做小方块、标题加粗说明变灰，推荐单独一条带左色条的框；字一个不动', '「排版二」：每题一个浅底块，推荐项在列表里直接点亮，理由收成一行小字', '两种都是前端认 ❓ / A. / ➡️ 这几种开头做的，模型不改'],
     gen: ['提示词卡：标题 + 张数/模型/画幅；「参考」一排是素材胶囊；正文里的 #1 #2 也是同一种胶囊，悬浮看大图（产品里已有的 AssetMentionChip，直接复用）；默认 3 行「展开全文」', '三个动作：应用到画布 / 复制提示词 / 打开查看；打开查看在面板里盖一层，把卡渲染成 md（表格、标题、列表）', '出图后缩略图回填到卡头（要卡 ↔ 画布节点的关联，见说明）'],
     card: ['媒介 / 模型 / 参数那条色带挪到卡头，和「方案卡 · 等你拍板」一行', '原来的胶囊是你一开始提的硬要求，现在写成「你要求的（不会改）」清单，和参数重复的（16:9）不再列', '下面是「我替你定的（不合适就说）」', '卡头「▤ .md」点开在面板里渲染成 md，右上角下载 .md（和提示词卡同一套）', '卡下三个动作：确认按这个写 / 换个思路（展开三种换法） / 我来改（展开输入框）', '确认后动作收成一行「已确认 · 21:37」'],
     foot: ['统计行固定在底部带完成时间；草稿行只在有待答题目时出现', '强调色定暖黄 #f2b544（替换产品里的 --color-accent-agent 柠檬绿），只用在主按钮、进行中、选中描边'],
@@ -306,6 +307,28 @@ const F = {
       .f-md h2{color:var(--text);font-size:16px;margin:0 0 10px}.f-md h3{color:var(--text);font-size:13px;margin:14px 0 6px}
       .f-md table{border-collapse:collapse;width:100%}.f-md td{border:1px solid var(--line);padding:4px 8px}
       .f-md p{margin:0;line-height:1.7}.f-md ul,.f-md ol{margin:0;padding-left:18px}
+      .f-q0{white-space:pre-wrap;line-height:1.75}
+      .f-qt{margin:10px 0}
+      .f-qt .tip{font-size:var(--fs-xs);color:var(--text3);margin-top:8px}
+      .f-qi{margin:0 0 14px}
+      .f-qi .h{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;margin-bottom:5px}
+      .f-qi .h .n{font-size:var(--fs-xs);color:var(--accent);font-weight:700;letter-spacing:.04em}
+      .f-qi .h .ask{color:var(--text2)}
+      .f-qi .h .multi{font-size:10px;color:var(--text3);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+      .f-qi .opt{display:flex;gap:8px;padding:3px 0;font-size:var(--fs-sm);line-height:1.6}
+      .f-qi .opt .k{flex:none;width:18px;height:18px;border-radius:5px;border:1px solid var(--line);color:var(--text2);font-size:11px;display:inline-flex;align-items:center;justify-content:center;margin-top:2px}
+      .f-qi .opt b{color:var(--text)}
+      .f-qi .opt .d{color:var(--text2)}
+      .f-qi .why{margin-top:6px;padding:6px 10px;border-left:2px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0;font-size:var(--fs-sm);color:var(--text2)}
+      .f-qi .why .lb{color:var(--text);font-weight:600;margin-right:6px}
+      /* 排版二：每题一个浅底块，推荐项在列表里直接点亮，理由收成一行小字 */
+      .f-qt.s2 .f-qi{background:var(--bg2);border:1px solid var(--line2);border-radius:10px;padding:10px 12px}
+      .f-qt.s2 .f-qi .h{margin-bottom:6px}
+      .f-qt.s2 .f-qi .opt{padding:2px 0}
+      .f-qt.s2 .f-qi .opt.rec .k{border-color:var(--accent);background:var(--accent);color:var(--accent-ink);font-weight:700}
+      .f-qt.s2 .f-qi .opt.rec b{color:var(--accent)}
+      .f-qt.s2 .f-qi .why{background:none;border:0;padding:4px 0 0;font-size:var(--fs-xs);color:var(--text3)}
+      .f-qt.s2 .f-qi .why .lb{color:var(--text2)}
       .f-form{border:1px solid var(--line);border-radius:10px;margin:8px 0;overflow:hidden}
       .f-frow{padding:8px 10px;border-bottom:1px solid var(--line2)}
       .f-frow .q{font-size:var(--fs-sm);margin-bottom:5px}
@@ -364,7 +387,8 @@ const F = {
     F.draftEl = $('div', { class: 'f-draft' });
     F.paintDraft();
     const stageSel = $('span', { class: 'f-stage' }, ['追问', '方案卡', '出卡'].map((n, i) => $('button', { class: F.stage === i + 1 && !state.running ? 'on' : '', onclick: () => { F.stage = i + 1; state.running = false; render(); } }, n)));
-    shell(body, turns, $('span', { style: 'display:flex;gap:6px;align-items:center' }, '看到哪一步', stageSel), F.draftEl, F.pending ? '还可以补一句说明，不补也行…' : '说说你想做什么…');
+    const qSel = $('span', { class: 'f-stage' }, ['原版', '排版一', '排版二'].map((n, i) => $('button', { class: F.qstyle === i ? 'on' : '', onclick: () => { F.qstyle = i; render(); } }, n)));
+    shell(body, turns, $('span', { style: 'display:flex;gap:6px;align-items:center' }, '追问', qSel, '看到', stageSel), F.draftEl, '说说你想做什么…');
   },
   msg(t, isLast) {
     const frag = $('div');
@@ -402,10 +426,7 @@ const F = {
     t.chain.filter(i => i.k === 'say').forEach(s => frag.append($('div', { class: 'say muted' }, s.text)));
     if (t.reply) {
       if (t.reply.intro) frag.append($('div', { class: 'say' }, t.reply.intro));
-      if (t.reply.questions) {
-        if (isLast) F.pending = t.reply.questions;
-        frag.append(F.form(t.reply.questions, !isLast));
-      }
+      if (t.reply.questions) frag.append(F.form(t.reply.questions));
       if (t.reply.card) frag.append(F.brief(!isLast));
       if (t.reply.gen) frag.append($('div', { class: 'say' }, t.reply.outro), F.promptCard(), $('div', { class: 'say muted' }, t.next));
     }
@@ -415,15 +436,14 @@ const F = {
     const P = {
       title: '晴日北欧海边小镇', meta: '1 张 · 图片 · Seedream 4.5 · 16:9',
       assets: [['#1', 'linear-gradient(135deg,#7fb2d9,#f3d59b)', '海边参考.jpg'], ['#2', 'linear-gradient(135deg,#e98f7b,#b197fc)', '北欧小镇.jpg']],
-      prompt: '16:9 横版水彩插画，半空俯瞰的北欧童话风海边小镇：红白横纹灯塔立在画面中心偏左，脚下是层层叠叠的彩色木屋（红、黄、芥末绿、烟粉屋顶，墙面留白或浅米色），港湾里停着 2–3 艘小船，远处 1–2 座小岛轮廓浮在钴蓝海面上。晴朗正午，顶光偏暖，阴影短。色调参考 #1 的天空与海面，屋顶配色参考 #2。水彩晕染、边缘留白、轻笔触，饱和明亮但不写实。无文字、无人物、无品牌。',
+      prompt: '16:9 横版水彩插画，半空俯瞰的北欧童话风海边小镇（参考 #1 海边参考.jpg）：红白横纹灯塔立在画面中心偏左，脚下是层层叠叠的彩色木屋（红、黄、芥末绿、烟粉屋顶，墙面留白或浅米色），港湾里停着 2–3 艘小船，远处 1–2 座小岛轮廓浮在钴蓝海面上。晴朗正午，顶光偏暖，阴影短。色调参考 #1 的天空与海面，屋顶配色参考 #2 北欧小镇.jpg。水彩晕染、边缘留白、轻笔触，饱和明亮但不写实。无文字、无人物、无品牌。',
       md: [['h2', '晴日北欧海边小镇'], ['table', [['媒介', '图片'], ['模型', 'Seedream 4.5'], ['画幅', '16:9'], ['张数', '1']]], ['h3', '提示词'], ['p', null], ['h3', '参考素材'], ['ul', ['#1 海边参考.jpg — 天空与海面色调', '#2 北欧小镇.jpg — 屋顶配色']], ['h3', '禁用项'], ['ul', ['文字', '人物', '品牌标识']]],
     };
     const box = $('div', { class: 'f-pc' });
     let full = false;
-    const badge = a => F.chip(a);
     const promptEl = () => {
       const el = $('div', { class: `f-pc-text ${full ? '' : 'clamp'}` });
-      P.prompt.split(/(#\d)/).forEach(part => el.append(/^#\d$/.test(part) ? badge(P.assets.find(a => a[0] === part)) : part));
+      el.append(F.rich(P.prompt, P.assets));
       return el;
     };
     const paint = () => box.replaceChildren(
@@ -436,6 +456,12 @@ const F = {
     return box;
   },
   /** 素材胶囊，照产品 ImageMentionChip：胶囊里 15px 小图 + 名字，悬浮 150px 预览。 */
+  /** 把一段文字里的 #1 / #1 海边参考.jpg 换成胶囊。 */
+  rich(text, assets) {
+    const el = document.createDocumentFragment();
+    text.split(/(#\d(?: [^\s（）()，。、]+\.(?:jpg|png|mp4))?)/).forEach(part => { const m = /^(#\d)/.exec(part); const a = m && assets.find(x => x[0] === m[1]); el.append(a ? F.chip(a, true) : part); });
+    return el;
+  },
   chip([n, bg, name], withName = false) {
     const prev = () => document.getElementById('f-prev') || document.body.appendChild($('div', { id: 'f-prev', class: 'f-prev' }, $('em', {})));
     const chip = $('span', { class: 'f-chip', title: name,
@@ -453,8 +479,8 @@ const F = {
     const body = $('div', { class: 'f-md' });
     for (const [tag, v] of P.md) {
       if (tag === 'table') body.append($('table', {}, ...v.map(([k, x]) => $('tr', {}, $('td', { class: 'dim' }, k), $('td', {}, x)))));
-      else if (tag === 'ul') body.append($('ul', {}, ...v.map(x => $('li', {}, x))));
-      else if (tag === 'p') { const el = $('p', {}); P.prompt.split(/(#\d)/).forEach(part => el.append(/^#\d$/.test(part) && P.assets ? F.chip(P.assets.find(a => a[0] === part)) : part)); body.append(el); }
+      else if (tag === 'ul') body.append($('ul', {}, ...v.map(x => $('li', {}, P.assets ? F.rich(x, P.assets) : x))));
+      else if (tag === 'p') body.append($('p', {}, P.assets ? F.rich(P.prompt, P.assets) : P.prompt));
       else if (tag === 'p2') body.append($('p', {}, v));
       else if (tag === 'ol') body.append($('ol', {}, ...v.map(x => $('li', {}, x))));
       else body.append($(tag, {}, v));
@@ -464,36 +490,21 @@ const F = {
       body);
     panel.append(ov);
   },
-  form(qs, locked) {
-    const box = $('div', { class: `f-form ${locked ? 'locked' : ''}` });
-    const recOf = q => q.multi ? q.rec : [q.rec];
-    const isRec = q => sameSet(picksOf(q), recOf(q));
-    const toggle = (q, key) => {
-      if (!q.multi) { state.picks[q.id] = key; return; }
-      const cur = picksOf(q);
-      if (key === '其他') { state.picks[q.id] = cur.includes('其他') ? cur.filter(k => k !== '其他') : [...cur, '其他']; return; }
-      state.picks[q.id] = cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key];
-    };
-    const paint = () => {
-      const changed = qs.filter(q => !isRec(q)).length;
-      box.replaceChildren(...qs.map(q => {
-        const picks = picksOf(q);
-        const chosen = picks.filter(k => k !== '其他').map(k => q.opts.find(o => o[0] === k));
-        const recLabel = recOf(q).map(k => labelOf(q, k)).join(' + ');
-        return $('div', { class: 'f-frow' },
-          $('div', { class: 'q' }, $('b', {}, q.title), $('span', { class: 'dim' }, ` ${q.ask}`), q.multi ? $('span', { class: 'multi' }, '多选') : null),
-          $('div', { class: 'f-seg' },
-            ...q.opts.map(([key, label]) => $('button', { class: picks.includes(key) ? 'sel' : '', onclick: locked ? null : () => { toggle(q, key); paint(); F.paintDraft(); } }, q.multi ? $('span', { class: `ck ${picks.includes(key) ? 'on' : ''}` }) : null, label, recOf(q).includes(key) ? $('span', { class: 'rd' }) : null)),
-            locked ? null : $('button', { class: `oth ${picks.includes('其他') ? 'sel' : ''}`, onclick: () => { toggle(q, '其他'); paint(); F.paintDraft(); } }, '其他')),
-          picks.includes('其他') ? $('div', { class: 'f-in' }, $('input', { placeholder: q.multi ? `还想加什么，写在这…` : `写一下你想要的${q.title}…`, value: state.other?.[q.id] || '', oninput: e => { (state.other ??= {})[q.id] = e.target.value; F.paintDraft(); } })) : null,
-          $('div', { class: 'd' },
-            q.multi ? (chosen.length ? chosen.map(o => `${o[1]}：${o[2]}`).join(' ') : '一个都不加。') : (chosen[0]?.[2] ?? ''), ' ',
-            $('span', { class: 'rec' }, isRec(q) ? `推荐：${q.why}` : `原本推荐「${recLabel}」，${q.why}`)));
-      }), $('div', { class: 'f-fbar' }, $('span', {}, locked ? '已回答' : ['● 为推荐项，默认已选', changed ? ` · 改了 ${changed} 题` : '']), locked ? null : $('span', { class: 'dim' }, '在下面输入框发送')));
-      box.querySelector('input')?.focus();
-    };
-    paint();
-    return box;
+  qstyle: 1,
+  /** 追问保持文字、不点选（产品拍板）。三种排版：原版就是模型写的 markdown 原样；一、二只动样式不动字。 */
+  form(qs) {
+    const st = F.qstyle;
+    const recOf = q => (q.multi ? q.rec : [q.rec]);
+    const recLabel = q => recOf(q).map(k => `${k}（${labelOf(q, k)}）`).join('、');
+    if (st === 0) {
+      const lines = qs.map((q, n) => [`❓ Q${n + 1} — ${q.title}：${q.ask}`, '', ...q.opts.map(([k, l, d]) => `${k}. ${l}：${d}`), `➡️ 推荐 ${recLabel(q)}：${q.why}`].join('\n'));
+      return $('div', { class: 'say f-q0' }, lines.join('\n\n'));
+    }
+    return $('div', { class: `f-qt s${st}` }, ...qs.map((q, n) => $('div', { class: 'f-qi' },
+      $('div', { class: 'h' }, $('span', { class: 'n' }, `Q${n + 1}`), $('b', {}, q.title), $('span', { class: 'ask' }, q.ask), q.multi ? $('span', { class: 'multi' }, '可多选') : null),
+      $('div', { class: 'opts' }, ...q.opts.map(([k, l, d]) => $('div', { class: `opt ${recOf(q).includes(k) ? 'rec' : ''}` }, $('span', { class: 'k' }, k), $('span', {}, $('b', {}, l), $('span', { class: 'd' }, `：${d}`))))),
+      $('div', { class: 'why' }, $('span', { class: 'lb' }, `推荐 ${recLabel(q)}`), q.why))),
+      $('div', { class: 'tip' }, '直接回我，比如「都按推荐」或「Q1 选 B，其他按推荐」'));
   },
   paintDraft() {
     const el = F.draftEl;
