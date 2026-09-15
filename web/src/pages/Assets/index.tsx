@@ -19,6 +19,7 @@ import CharacterLibrary from './components/CharacterLibrary';
 import AssetMasonry, { type AssetGridItem } from './components/AssetMasonry';
 import { appendUniqueAssets, typeLabel } from './assetGrid';
 import { getAssetFilter, setAssetFilter, type FilterKey } from './filterQuery';
+import { usePreviewAsset } from './previewAsset';
 import styles from './index.module.css';
 
 /** 筛选按钮定义 */
@@ -48,6 +49,8 @@ export default function Assets() {
   /** 引用项目数查询结果（带目标 ID，切换目标时不展示旧值）；count null = 查询失败 */
   const [refCount, setRefCount] = useState<{ id: string; count: number | null } | null>(null);
   const [previewTarget, setPreviewTarget] = useState<AssetRecord | null>(null);
+  /** 详情补拉（IKFTQW）：列表记录先渲染弹窗，详情回来后覆盖。见 usePreviewAsset。 */
+  const previewAsset = usePreviewAsset(previewTarget);
   const [deleting, setDeleting] = useState(false);
   const [uploading, setUploading] = useState(false);
   /** 素材库分组详情视图中当前分组 ID（null = 不在详情视图）；真人人像库用 */
@@ -363,7 +366,10 @@ export default function Assets() {
         </div>
       </div>
 
-      <AssetDetailModal asset={previewTarget} onClose={() => setPreviewTarget(null)} />
+      <AssetDetailModal
+        asset={previewAsset}
+        onClose={() => setPreviewTarget(null)}
+      />
 
       {/* 删除确认弹窗：引用数查询中显示加载提示，返回后展示关联项目数，失败兜底普通文案（IKCZAT） */}
       <ConfirmModal
