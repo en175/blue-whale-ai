@@ -151,3 +151,69 @@ it('锚点贴近屏幕顶部放不下时菜单翻到锚点下方', async () => {
   const menu = document.querySelector('[data-testid="mention-menu"]') as HTMLElement;
   expect(menu.style.top).toBe('116px');
 });
+
+/** IKFO27：子菜单与触发它的分类行顶部对齐。jsdom 没有布局，按元素角色注入几何。 */
+const KIND_ORDER = ['image', 'video', 'audio', 'text'];
+
+function stubMenuLayout(flyoutHeight: number) {
+  return vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this.hasAttribute('data-mention-main')) return rectOf(300, 542);
+    const kind = this.getAttribute('data-mention-kind');
+    // 面板顶部 300 + 内边距 10 + 搜索框 36 + 间距 8 + 小标题 18，每行 38
+    if (kind) return rectOf(372 + KIND_ORDER.indexOf(kind) * 38, 372 + KIND_ORDER.indexOf(kind) * 38 + 38);
+    if (this.firstElementChild?.hasAttribute('data-mention-flyout')) return rectOf(300, 300 + flyoutHeight);
+    return rectOf(0, 0);
+  });
+}
+
+function flyoutWrapEl(): HTMLElement {
+  return document.querySelector('[data-mention-flyout]')!.parentElement as HTMLElement;
+}
+
+it('子菜单跟随触发它的分类行下移', async () => {
+  const spy = stubMenuLayout(56);
+  try {
+    await render();
+    await key('ArrowUp');
+    expect(document.activeElement?.textContent).toBe('文本');
+    // 「文本」行顶部相对面板 72 + 3×38 = 186
+    expect(flyoutWrapEl().style.marginTop).toBe('186px');
+  } finally { spy.mockRestore(); }
+});
+
+it('切换分类行时子菜单跟着那一行走', async () => {
+  const spy = stubMenuLayout(56);
+  try {
+    await render();
+    await key('ArrowUp');
+    expect(flyoutWrapEl().style.marginTop).toBe('186px');
+    await key('ArrowUp');
+    expect(document.activeElement?.textContent).toBe('音频');
+    expect(flyoutWrapEl().style.marginTop).toBe('148px');
+  } finally { spy.mockRestore(); }
+});
+
+it('子菜单下方放不下时上移贴住面板底部', async () => {
+  const spy = stubMenuLayout(232);
+  try {
+    await render();
+    await key('ArrowUp');
+    expect(flyoutWrapEl().style.marginTop).toBe('10px');
+  } finally { spy.mockRestore(); }
+});
+
+it('鼠标从分类行移到子菜单后子菜单仍在且位置不变', async () => {
+  const spy = stubMenuLayout(56);
+  try {
+    await render();
+    await key('ArrowUp');
+    const row = document.activeElement as HTMLElement;
+    const wrap = flyoutWrapEl();
+    await act(async () => {
+      row.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: wrap }));
+      wrap.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: row }));
+    });
+    expect(document.querySelector('[data-mention-flyout]')).toBeTruthy();
+    expect(flyoutWrapEl().style.marginTop).toBe('186px');
+  } finally { spy.mockRestore(); }
+});
