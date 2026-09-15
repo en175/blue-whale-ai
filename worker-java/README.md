@@ -46,6 +46,9 @@ curl localhost:4002/ready
 | `VOLC_TOS_BUCKET` | 是（media_extract 启用时） | TOS 桶 | — |
 | `VOLC_TOS_REGION` | 是（media_extract 启用时） | TOS 区域 | — |
 | `FFMPEG_PATH` | 否 | ffmpeg 二进制路径（Dockerfile 须 ship 一个） | `ffmpeg`（PATH 查找） |
+| `TOS_CONNECT_TIMEOUT_MS` | 否 | TOS SDK 建链超时（毫秒） | `30000` |
+| `TOS_READ_TIMEOUT_MS` | 否 | TOS SDK 读超时（毫秒）——下载源视频中途超时会判 `video_download_failed` | `300000` |
+| `TOS_WRITE_TIMEOUT_MS` | 否 | TOS SDK 写超时（毫秒） | `300000` |
 | `MEDIA_EXTRACT_CONCURRENCY` | 否 | 提取并发度（1-16） | `2` |
 | `GENERATION_WORKER_PORT` | 否 | HTTP 端口 | `4002` |
 | `NEW_API_BASE_URL` | 是（audio 启用时） | new-api 网关地址 | — |
@@ -92,7 +95,7 @@ worker/
 - [x] 工程骨架 / 配置绑定 / `/ready` / 消息契约测试（IKEL4L）
 - [x] **Job 状态机 extract 子集**（IKENZZZ）：
   - [x] `DataSourceConfig`：DATABASE_URL 解析（mysql:// → jdbc:mysql://，含特殊字符）+ HikariCP 保守池（max 10）
-  - [x] persistence 包：`GenerationJob` / `Asset` / `GenerationJobLog` / `ProjectEvent` / `Canvas` + 对应 Mapper
+  - [x] persistence 包：`GenerationJob` / `Asset` / `GenerationJobLog` / `ProjectEvent` + 对应 Mapper
     - SQL 逐字移植自 TS Prisma 调用，注释标注 TS 源码行号
     - CAS updates 返回 int，service 层映射 0→false
   - [x] service `JobStateMachineService`（@Service，单例权威）：
@@ -100,8 +103,7 @@ worker/
     - `updateMediaExtractProgress` → boolean：钳制 0-99 + 续租（lease≈now+120s）
     - `publishMediaExtractResult` → boolean（@Transactional）
     - `failMediaExtractJob` → boolean（@Transactional）
-  - [x] service `CanvasNodeService`：画布节点 CAS 更新（版本守卫 + 冲突重试 MAX_RETRY=3）
-    - `updateMediaExtractNodeToAudio` / `failMediaExtractNode`
+  - [x] ~~service `CanvasNodeService`~~ 已删除（IKFS5W）：画布改由前端写，worker 不再回写 canvas
 - [x] **media_extract 执行路径**（IKEL4N 刀①）：
   - [x] mq `AbstractGenerationConsumer`：TEMPLATE METHOD（start/stop lifecycle, receive loop, poison ack, Semaphore 并发）
   - [x] mq `MediaExtractConsumer`：tag=media_extract, digitGuard=false

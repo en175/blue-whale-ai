@@ -26,7 +26,7 @@
 | 进度 | `generation_jobs.progress` 存 0-100 百分比；阶段文案由前端按百分比派生（A 方案，无新列） |
 | 用量 | 免费工具，不计入生成用量/实扣/成本对账；新 type 对恢复扫描天然隔离 |
 | MQ | 复用 video topic，新增 tag `media_extract`（BullMQ 回退 job name `media_extract`，与任务类型一致） |
-| 前端触发 | 视频节点工具栏「提取音频」按钮；占位音频节点放视频节点右侧固定偏移；复用 `pollJob` |
+| 前端触发 | 视频节点工具栏「提取音频」按钮；占位音频节点放视频节点右侧（IKFS5W 起按源节点内容宽让开）；复用 `pollJob` |
 
 ## 3. 架构与数据流
 
@@ -83,7 +83,8 @@
 ## 7. 前端
 
 - `MediaNode` 工具栏（视频节点）加「提取音频」按钮（与「生成音频」并排）。
-- `CanvasPage`：handler 创建占位音频节点（`position = videoNode.position + 偏移`，`mediaType='audio'`，`genStatus='generating'`）→ `POST media-extractions` → 复用 `pollJob` 轮询 `GET /jobs/:id` → 成功绑定（`src`/`assetId`/`mediaType='audio'`）。
+- `CanvasPage`：handler 创建占位音频节点（`position.x = 源节点内容宽 + 60`，`mediaType='audio'`，`genStatus='generating'`）→ 立刻保存画布 → 连一条带 `origin='media-extract'` 标记的来源边 → `POST media-extractions` → 复用 `pollJob` 轮询 `GET /jobs/:id` → 成功绑定（`src`/`assetId`/`mediaType='audio'`）。
+  IKFS5W 起画布只由前端写（后端建任务时不再插节点、worker 不再回写），本文档早期版本的「后端注入」实现已废止。
 - 失败/无音轨 → 节点 `genStatus='failed'` + `errorText`，可重试。
 
 ## 8. 边界与异常
