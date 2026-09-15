@@ -469,3 +469,96 @@ it('唯一标签删除后光标落编辑器末尾', async () => {
   expect(editor.querySelectorAll('[data-media-node]').length).toBe(0);
   expect(caretAtEnd(editor)).toBe(true);
 });
+
+/* ---------- IKFXDB 追加：素材标签（prompt #N）新增/替换/删除后的光标落点 ---------- */
+
+/** 素材标签场景：prompt 绑定文本卡，正文两张 chip（素材#1 / 素材#2） */
+async function renderPromptNode() {
+  return renderNode({
+    promptSource: 'chat',
+    text: '看这张素材#1中间素材#2结尾',
+    promptMentions: [
+      { start: 3, end: 7, assetId: 'a1', index: 1 },
+      { start: 9, end: 13, assetId: 'a2', index: 2 },
+    ],
+    promptMaterials: [
+      { assetId: 'a1', mediaType: 'image' as const, url: 'http://img/m1.png' },
+      { assetId: 'a2', mediaType: 'image' as const, url: 'http://img/m2.png' },
+    ],
+    mediaMentions: [],
+    mediaRefs: [],
+    onPromptChange: vi.fn(),
+  });
+}
+
+/** 点选指定素材标签后，在节点操作条点对应按钮（非编辑态入口） */
+async function clickNodeBarButton(label: string) {
+  const button = [...container.querySelectorAll('button')].find(b => b.textContent?.includes(label))!;
+  await act(async () => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+}
+
+it('非编辑态删除素材标签后，进入编辑光标落被删标签原位置', async () => {
+  const { editor } = await renderPromptNode();
+  const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
+  await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await clickNodeBarButton('删除标签 #1');
+  expect(editor.querySelector('[data-prompt-index="1"]')).toBeNull();
+  await enterEditing(editor);
+  const second = editor.querySelector<HTMLElement>('[data-prompt-index="2"]')!;
+  expect(caretAtChip(second, 'before')).toBe(true);
+});
+
+it('非编辑态替换素材标签后，进入编辑光标落替换后标签后', async () => {
+  const { editor } = await renderPromptNode();
+  const first = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
+  await act(async () => first.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  const select = container.querySelector<HTMLSelectElement>('select[aria-label="替换素材 #1"]')!;
+  await act(async () => {
+    select.value = 'a2';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await enterEditing(editor);
+  const replaced = editor.querySelector<HTMLElement>('[data-prompt-index="1"]')!;
+  expect(replaced.dataset.promptAsset).toBe('a2');
+  expect(caretAtChip(replaced, 'after')).toBe(true);
+});
+
+it('非编辑态新增素材标签后，进入编辑光标落新标签后', async () => {
+  const { editor } = await renderPromptNode();
+  const select = container.querySelector<HTMLSelectElement>('select[aria-label="新增素材标签"]')!;
+  await act(async () => {
+    select.value = 'a1';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await enterEditing(editor);
+  const added = editor.querySelector<HTMLElement>('[data-prompt-index="3"]')!;
+  expect(added).toBeTruthy();
+  expect(caretAtChip(added, 'after')).toBe(true);
+});
+
+it('同编号多张素材标签删除，锚点取点击的那张原位置', async () => {
+  const { editor } = await renderNode({
+    promptSource: 'chat',
+    text: '素材#1素材#2素材#1',
+    promptMentions: [
+      { start: 0, end: 4, assetId: 'a1', index: 1 },
+      { start: 4, end: 8, assetId: 'a2', index: 2 },
+      { start: 8, end: 12, assetId: 'a1', index: 1 },
+    ],
+    promptMaterials: [
+      { assetId: 'a1', mediaType: 'image' as const, url: 'http://img/m1.png' },
+      { assetId: 'a2', mediaType: 'image' as const, url: 'http://img/m2.png' },
+    ],
+    mediaMentions: [],
+    mediaRefs: [],
+    onPromptChange: vi.fn(),
+  });
+  // 点第二张 #1（#2 之后）：删除全部 #1 后幸存 #2 在点击位置之前，光标应落 #2 后
+  const secondOne = [...editor.querySelectorAll<HTMLElement>('[data-prompt-index="1"]')][1];
+  await act(async () => secondOne.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await clickNodeBarButton('删除标签 #1');
+  expect(editor.querySelectorAll('[data-prompt-index="1"]').length).toBe(0);
+  await enterEditing(editor);
+  const survivor = editor.querySelector<HTMLElement>('[data-prompt-index="2"]')!;
+  expect(caretAtChip(survivor, 'after')).toBe(true);
+});
