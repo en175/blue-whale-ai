@@ -1599,6 +1599,33 @@ describe("handleCreateGenerationJob 视频参数能力目录前置（IKE7JP）",
     expect(createJob).toHaveBeenCalled();
   });
 
+  // IKG0FR：上游档位命名不遵循 <N>p 时（火山 Seedance 2.0 的 4k），本地换算不出像素，
+  // 但值本身在能力行白名单里——合法性由白名单负责，像素只回写资产（列可空），不得拒单。
+  it("分辨率命中能力行但本地算不出像素（4k）→ 200 建任务，不误拦", async () => {
+    const { deps, createJob } = buildCapabilityDeps([
+      {
+        ...VIDEO_CAPABILITY_ROW,
+        supported_sizes: [
+          { id: "1k", api_value: "720p" },
+          { id: "2k", api_value: "1080p" },
+          { id: "4k", api_value: "4k" },
+        ],
+      },
+    ]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_PARAMS_OK,
+        parameters: { ...VIDEO_PARAMS_OK.parameters, resolution: "4k" },
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
   it("能力行未配置 supported_* 时不阻断（worker 兜底）", async () => {
     const { deps, createJob } = buildCapabilityDeps([
       { model_id: "doubao-seedance-2-0-260128" },

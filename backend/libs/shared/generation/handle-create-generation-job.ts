@@ -71,7 +71,6 @@ import {
 } from "@lib/shared/persistence/index.js";
 
 import type { GenerationCostEstimator } from "./cost-estimator.js";
-import { dimensionsFromSize, videoDimensions } from "@lib/shared/generation-runtime/index.js";
 import {
   mapImageChannelRequest,
   parseStoredImageRequestMapping,
@@ -1424,23 +1423,10 @@ export async function handleCreateGenerationJob(
       }
     }
   }
-  // IKE7JP：视频 resolution/aspect_ratio 组合必须能换算成像素（与 worker videoDimensions 同源），
-  // 否则 worker 会在执行期才失败——越界在接纳当下 400（invalid_input），不拖到执行期。
-  // 图片路径无此概念（走上方交叉格校验）。
-  // ADR-0086：adaptive 自适应比例无固定宽高（首帧/编辑/延长任务强制），放行不换算像素。
-  if (type === "video" && capability) {
-    const resolution = isStr(params.resolution) ? params.resolution : "";
-    const ratio = isStr(params.aspect_ratio) ? params.aspect_ratio : "";
-    if (resolution && ratio && ratio !== "adaptive") {
-      const dimensions =
-        videoDimensions(resolution, ratio) ?? dimensionsFromSize(resolution);
-      if (!dimensions) {
-        return fail(400, "视频分辨率与宽高比组合无效", {
-          code: ERROR_INVALID_INPUT,
-        });
-      }
-    }
-  }
+  // IKG0FR：视频分辨率不再前置换算像素。分辨率合法性已由上方 checkGenerationParamLimit 的
+  // 能力行白名单负责（按 supported_sizes 的 id / api_value 比对）。像素只用于回写
+  // assets.width/height（列可空），换算不出写 null 即可——不能把「本地算不出」当成「参数非法」，
+  // 否则上游档位命名不遵循 <N>p 时会被误伤（如火山 Seedance 2.0 的 4k 档）。
   const refs = resolveReferenceAssets(body, type, maxReferenceImages);
   if (!refs.ok) {
     return fail(400, refs.value.message, {

@@ -1038,6 +1038,19 @@ class VideoJobProcessorTest {
                     VideoInputError.class, () -> processor.buildSubmitRequest(claim));
             assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_INPUT);
         }
+
+        @Test
+        @DisplayName("IKG0FR：分辨率算不出像素（4k）不再拒单——像素只回写资产，缺省 null")
+        void unparseableResolutionNotRejected() {
+            Map<String, Object> input = baseInput();
+            input.put("resolution", "4k");
+            ClaimedVideoJobDto claim = videoClaim("302", false, null, 0, 0, null, input);
+
+            VideoSubmitInput request = processor.buildSubmitRequest(claim);
+
+            assertThat(request.resolution()).isEqualTo("4k");
+            assertThat(request.ratio()).isEqualTo("16:9");
+        }
     }
 
     // ========== 工具方法 ==========
