@@ -749,7 +749,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           editorQuery=""
           disabledKinds={['text']}
           onSelect={handleMediaSelect}
-          onClose={() => { setMentionMenu(null); editorRef.current?.focus(); }}
+          onClose={() => { setMentionMenu(null); editorRef.current?.focus(); restoreSelection(); }}
         />
       )}
 
@@ -764,6 +764,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           <button type="button" className={styles.chipMenuBtn} onClick={() => {
             const nodeId = chipMenu.chip.dataset.mediaNode ?? '';
             const rect = chipMenu.chip.getBoundingClientRect();
+            // 重绑定菜单打开前同样记录光标：取消关闭后恢复到打开时位置（契约 §5）
+            saveSelection();
             setChipMenu(null);
             setMentionMenu({ mode: 'rebind', rebindNodeId: nodeId, x: rect.left, y: rect.bottom });
           }}>
