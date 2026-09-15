@@ -45,8 +45,14 @@ public interface MaterialAssetMapper extends BaseMapper<MaterialAssetEntity> {
     /**
      * 镜像上游状态回写（幂等覆盖）。只更新已存在的行——无行意味着没走过 CreateAsset，
      * 语义是「未校验」，不得凭空造行（与 TS mirrorStatus 同款）。
+     * <p>
+     * <b>终局保护</b>：{@code Failed} 是**吸收态**，不允许被 {@code Active}/{@code Processing}
+     * 覆写。反例：一次陈旧的 ListAssets 镜像就能把已判失败的素材翻回 Active，而拦截点信任
+     * 本地 Active **不再查上游**——等于整条闸门被一次过期响应打开。
+     * 反方向仍放行：{@code Failed} 可以覆写任何状态（「通过之后被撤销」那条路）。
+     * 与 TS {@code material-asset-repo.ts mirrorStatus} 同一口径。
      *
-     * @return 受影响行数（0 = 跟进期间该行已被删除，属正常竞态）
+     * @return 受影响行数（0 = 行不存在，或该行已是 Failed 而本次想写非 Failed）
      */
     @Update("""
             UPDATE material_assets
@@ -58,6 +64,7 @@ public interface MaterialAssetMapper extends BaseMapper<MaterialAssetEntity> {
                 version = version + 1
             WHERE material_id = #{materialId}
               AND user_id = #{userId}
+              AND (#{status} = 'Failed' OR status <> 'Failed')
             """)
     int mirrorStatus(
             @Param("userId") long userId,

@@ -121,8 +121,10 @@ public class MaterialStatusPoller {
                     row.getUserId(), materialId, status,
                     upstream.errorCode(), upstream.errorMessage());
             if (updated == 0) {
-                // 跟进期间该行被 DeleteAsset 清掉——正常竞态，不是错误。
-                log.debug("素材状态跟进回写落空（行已删除）materialId={}", materialId);
+                // 0 有两种来源：该行已被 DeleteAsset 清掉（正常竞态），或该行已是 Failed
+                // 而本次想写非 Failed（吸收态保护拦下）。跟进器只扫 Processing 行，
+                // 所以实际只会是前者；这里不细分，避免误导排障。
+                log.debug("素材状态跟进回写落空（行已删除或已是终态）materialId={}", materialId);
             } else if (!STATUS_PROCESSING.equals(status)) {
                 log.info("素材状态跟进收敛 materialId={} {}: {}",
                         materialId, row.getUserId(), status);

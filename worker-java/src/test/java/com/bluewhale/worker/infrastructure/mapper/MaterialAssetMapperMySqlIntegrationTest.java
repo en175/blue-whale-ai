@@ -118,6 +118,7 @@ class MaterialAssetMapperMySqlIntegrationTest {
     @BeforeEach
     void cleanup() {
         jdbc.execute("DELETE FROM material_assets");
+        jdbc.execute("DELETE FROM assets WHERE id IN (880001, 880002)");
         jdbc.execute("DELETE FROM user_info");
     }
 
@@ -217,5 +218,73 @@ class MaterialAssetMapperMySqlIntegrationTest {
 
         assertThat(userInfoMapper.findCredential(9L)).isEqualTo("sk-user9");
         assertThat(userInfoMapper.findCredential(77L)).isNull();
+    }
+    // 评审补强：Failed 是吸收态。拦截点信任本地 Active 就不再查上游，所以一次陈旧的
+    // ListAssets 镜像若能把它翻回 Active，整条闸门就被过期响应打开了。真库验这条 SQL。
+    @Test
+    @DisplayName("mirrorStatus：Failed 是吸收态，不被 Active/Processing 覆写")
+    void failedIsAbsorbing() {
+        insert("asset-sticky", 9L, "Failed", 1);
+
+        assertThat(assetMapper.mirrorStatus(9L, "asset-sticky", "Active", null, null)).isZero();
+        assertThat(read("asset-sticky").get("status")).isEqualTo("Failed");
+        assertThat(assetMapper.mirrorStatus(9L, "asset-sticky", "Processing", null, null)).isZero();
+        assertThat(read("asset-sticky").get("status")).isEqualTo("Failed");
+    }
+
+    @Test
+    @DisplayName("mirrorStatus：反向放行——Failed 可以覆写 Active（通过之后被撤销那条路）")
+    void failedOverwritesActive() {
+        insert("asset-revoked", 9L, "Active", 1);
+
+        assertThat(assetMapper.mirrorStatus(9L, "asset-revoked", "Failed", "Sensitive", "命中审核"))
+                .isEqualTo(1);
+        Map<String, Object> row = read("asset-revoked");
+        assertThat(row.get("status")).isEqualTo("Failed");
+        assertThat(row.get("error_code")).isEqualTo("Sensitive");
+    }
+
+    @Test
+    @DisplayName("mirrorStatus：非 Failed 之间照常覆写（Active <-> Processing 不受影响）")
+    void nonFailedStillOverwrites() {
+        insert("asset-flip", 9L, "Active", 1);
+
+        assertThat(assetMapper.mirrorStatus(9L, "asset-flip", "Processing", null, null)).isEqualTo(1);
+        assertThat(read("asset-flip").get("status")).isEqualTo("Processing");
+    }
+
+    // 步骤②（清关联）的关键路径，跟进器会走它、且完全绕开 TS 侧，此前无真库覆盖。
+    @Test
+    @DisplayName("clearMaterialLink：两列一起清（只清 material_id 会留下悬空组关联）")
+    void clearMaterialLinkClearsBothColumns() {
+        jdbc.update("""
+                INSERT INTO assets (id, user_id, project_id, type, url, status,
+                                    material_id, material_group_id, is_delete, gmt_create, gmt_modified)
+                VALUES (880001, 9, 55, 'image', 'u', 'normal',
+                        'asset-linked', 'group-linked', 0, NOW(), NOW())
+                """);
+
+        assertThat(assetMapper.clearMaterialLink(9L, "asset-linked")).isEqualTo(1);
+
+        Map<String, Object> row = jdbc.queryForMap(
+                "SELECT material_id, material_group_id, version FROM assets WHERE id = 880001");
+        assertThat(row.get("material_id")).isNull();
+        assertThat(row.get("material_group_id")).isNull();
+        assertThat(((Number) row.get("version")).intValue()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("clearMaterialLink：带 user_id 谓词，别的账号清不动")
+    void clearMaterialLinkIsScopedByUserId() {
+        jdbc.update("""
+                INSERT INTO assets (id, user_id, project_id, type, url, status,
+                                    material_id, material_group_id, is_delete, gmt_create, gmt_modified)
+                VALUES (880002, 9, 55, 'image', 'u', 'normal',
+                        'asset-linked2', 'group-linked2', 0, NOW(), NOW())
+                """);
+
+        assertThat(assetMapper.clearMaterialLink(77L, "asset-linked2")).isZero();
+        assertThat(jdbc.queryForMap("SELECT material_id FROM assets WHERE id = 880002")
+                .get("material_id")).isEqualTo("asset-linked2");
     }
 }

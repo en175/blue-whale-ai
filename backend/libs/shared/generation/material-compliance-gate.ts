@@ -1,6 +1,10 @@
 import type { MaterialAssetRepo } from "@lib/shared/persistence/index.js";
 import type { MaterialGate } from "./handle-create-generation-job.js";
 
+/** 门的最小接口定义在 `handle-create-generation-job.ts`（GenerationDeps 旁边）；此处转出，
+ *  让接线层（material-gate-wiring.ts）与测试不必跨文件找类型。 */
+export type { MaterialGate };
+
 // IKF YHJ：素材校验状态门（ADR-0087）。视频生成「采纳素材参考」那一刻判定素材能否使用。
 // 规则（ADR-0087 决策 2）：
 //   表内 Active          → 放行

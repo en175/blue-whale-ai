@@ -120,7 +120,16 @@ export function createMaterialAssetRepo(
     }) {
       // 只更新已存在的行（镜像不得凭空造行：无行意味着没走过 CreateAsset，语义是「未校验」）。
       await prisma.material_assets.updateMany({
-        where: { material_id: materialId, user_id: BigInt(userId) },
+        where: {
+          material_id: materialId,
+          user_id: BigInt(userId),
+          // 终局保护：`Failed` 是**吸收态**，不允许被 `Active`/`Processing` 覆写。
+          // 反例：一次陈旧的 ListAssets 镜像（本表唯一的批量写入口，ADR 自己标注「纯收益、
+          // 不承担正确性」）就能把已判失败的素材翻回 Active，而拦截点信任本地 Active
+          // **不再查上游**——等于整条闸门被一次过期响应打开。
+          // 反方向仍放行：`Failed` 可以覆写任何状态（「通过之后被撤销」那条路）。
+          ...(status === "Failed" ? {} : { status: { not: "Failed" } }),
+        },
         data: {
           status,
           error_code: errorCode ?? null,

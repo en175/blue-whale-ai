@@ -17,7 +17,7 @@ import {
   enqueueVideoGenerationJob,
 } from "@lib/shared/generation/video-queue.js";
 import { sealProviderCredential } from "@lib/shared/generation/credential.js";
-import { createMaterialGate, isMaterialLevelRejection } from "@lib/shared/generation/material-compliance-gate.js";
+import { createRequestMaterialGate } from "@lib/shared/generation/material-gate-wiring.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";
@@ -26,28 +26,6 @@ import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 function bodyString(body: unknown): string {
   return typeof body === "string" ? body : JSON.stringify(body ?? "");
-}
-
-/** 上游错误信封 `ResponseError.Code`（不存在返回 null）。 */
-function readResponseErrorCode(body: unknown): string | null {
-  const error = readResponseError(body);
-  const code = error?.Code;
-  return typeof code === "string" ? code : null;
-}
-
-/** 上游错误信封 `ResponseError.Message`（不存在返回 null）。内部归因用，不展示给用户。 */
-function readResponseErrorMessage(body: unknown): string | null {
-  const error = readResponseError(body);
-  const message = error?.Message;
-  return typeof message === "string" ? message : null;
-}
-
-function readResponseError(body: unknown): Record<string, unknown> | null {
-  if (typeof body !== "object" || body === null) return null;
-  const error = (body as Record<string, unknown>).ResponseError;
-  return typeof error === "object" && error !== null
-    ? (error as Record<string, unknown>)
-    : null;
 }
 
 @Controller("projects/:projectId/generation-jobs")
@@ -62,71 +40,23 @@ export class GenerationJobsController {
     private readonly assets: AssetService,
   ) {}
 
-  /** IKF YHJ：造素材校验状态门（ADR-0087）。实时查询走网关 GetAsset，凭据用本次请求的用户 sk-；
-   *  上游不可达/查不到一律当不可用（fail-closed），不赌它没问题。
-   *  注意：`callAction` 在网络失败时是**抛** `NewApiError`（不是返回错误码），缺凭证也抛 401。
-   *  这里必须自己咽掉转成 null——否则「上游不可达」会绕过 MATERIAL_STATUS_UNAVAILABLE_MESSAGE，
-   *  在 create 期冒成 503、在 retry 期直接炸掉 `retryJob` 的交互事务（那个事务只 catch P2002）。 */
+  /** IKF YHJ：造素材校验状态门（ADR-0087）。生产判定逻辑在 `material-gate-wiring.ts`，
+   *  这里只把本请求的依赖（用户、凭证、仓库面、失败处置）接上去——抽出去是为了可测：
+   *  它曾是控制器里的私有方法，整条生产判定路径零测试覆盖。 */
   private buildMaterialGate(userId: string, authorization: string | undefined) {
-    return createMaterialGate({
+    return createRequestMaterialGate({
       repo: this.material.materialStatusRepo,
-      fetchUpstreamStatus: async (materialId) => {
-        try {
-          const upstream = await this.material.callAction(authorization, "GetAsset", {
-            Id: materialId,
-          });
-          const body: unknown = upstream.body;
-          if (upstream.status < 200 || upstream.status >= 300) {
-            // 上游明确指认「这个素材用不了」（已删除 / id 非法）→ 终局拒绝。
-            // 按「查不到」处理会让用户拿到「请稍后重试」而永远重试不成功。
-            const code = readResponseErrorCode(body);
-            if (isMaterialLevelRejection(code)) {
-              const errorMessage = readResponseErrorMessage(body);
-              // 顺带统一处置：本地留 Failed、清 assets 关联；上游本来就没有，跳过删除。
-              await this.handleMaterialFailure(userId, materialId, {
-                authorization,
-                errorCode: code,
-                errorMessage,
-                deleteUpstream: false,
-              });
-              return { status: "Failed", errorCode: code, errorMessage };
-            }
-            // 其余非 2xx（鉴权 / 限流 / 5xx）不是素材的错 → 本轮未知，可重试。
-            return null;
-          }
-          if (typeof body !== "object" || body === null) return null;
-          const result = (body as Record<string, unknown>).Result;
-          if (typeof result !== "object" || result === null) return null;
-          const rec = result as Record<string, unknown>;
-          if (typeof rec.Status !== "string") return null;
-          const rawError = rec.Error;
-          const err =
-            typeof rawError === "object" && rawError !== null
-              ? (rawError as Record<string, unknown>)
-              : undefined;
-          const errorCode = typeof err?.Code === "string" ? err.Code : null;
-          const errorMessage = typeof err?.Message === "string" ? err.Message : null;
-          // IKF YHJ：上游判失败 → 统一处置（删上游素材 + 本地留 Failed + 清 assets 关联）。
-          // 走的是与透传镜像、worker 跟进器同一个口子，不因发现路径不同而行为分叉。
-          if (rec.Status === "Failed") {
-            await this.handleMaterialFailure(userId, materialId, {
-              authorization,
-              errorCode,
-              errorMessage,
-            });
-          }
-          return { status: rec.Status, errorCode, errorMessage };
-        } catch (error) {
-          logger.warn(
-            `[generation] 素材状态实时查询失败 materialId=${materialId}，按不可用处理: ${
-              error instanceof Error ? error.message : "unknown"
-            }`,
-          );
-          return null;
-        }
-      },
+      callAction: (action, body) =>
+        this.material.callAction(authorization, action, body),
       resolveLocalAssetMaterialIds: (userId, assetIds) =>
         this.assets.findBoundMaterialIds(userId, assetIds),
+      onMaterialFailure: (input) =>
+        this.handleMaterialFailure(userId, input.materialId, {
+          authorization,
+          errorCode: input.errorCode,
+          errorMessage: input.errorMessage,
+          deleteUpstream: input.deleteUpstream,
+        }),
     });
   }
 

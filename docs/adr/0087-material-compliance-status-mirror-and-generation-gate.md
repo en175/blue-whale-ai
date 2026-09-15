@@ -104,6 +104,15 @@ ADR-0077 当时明确否决过「创建生成任务时同步调 `GetAsset` 预�
 
    实测证据（2026-09-15，本地栈 + 真/桩网关）：backend 生成门路径 → 本地行 `Failed`、`assets` 关联两列清空、桩收到 `DeleteAsset`；worker-java 跟进器路径 → 日志依次打出「收敛 Failed」「已清 1 条本地资产关联」「已清理上游失败素材」，DB 同步可见；`GetAsset` 对本地 `Failed` 素材 **零上游请求**（桩日志无记录）。
 
+## 已知缺口（本期不修，单独跟进）
+
+1. **场景卡再生成是第三条视频创建路径，未过门。** `POST /api/scene-cards/:id/generate` → `regenerateSceneCard` → `createJobWithinTx` 直建视频 job，其冻结 input 同样带 `first_frame_asset_id` / `reference_asset_ids`（worker 执行时照转 `asset://`）。**决策 7 写的「创建期」本意覆盖它，但实现只接了 `handleCreateGenerationJob` 与 `retryJob` 两个入口。** 后果：预设保存后素材变 `Failed`，用它再生成仍能建出任务，届时由上游拒——与决策 3 想避免的「点了生成再白跑一次」同形。
+   未在本期修的理由：素材 id 是在 `regenerateSceneCard` 的**事务内**由 `resolveReferenceAssetsToFlat` 从 slot 解析出来的，事务外拿不到；补门要么在外面复制一遍解析逻辑，要么在这个「单事务原子再生成」里再发一次网络往返。属独立设计取舍，值得单独一单。
+   **前端文档已如实标注这个缺口**（`material-library.md` §5.1），不假装覆盖。
+
+2. **步骤②（清关联）会让「被拒」变成「下次能过」——按设计如此，但值得写明白。** 清空 `assets.material_id` 后，同一张本地 Asset 再进生成时不再被识别为素材库引用（门的规则是「没有 `material_id` → 放行」），worker 也退回本地 url。也就是说：**判定失败的素材不会再被这道门拦，而是以「普通本地素材」的身份继续可用。**
+   这是「清关联」这个要求的直接推论，不是实现偏差；若要连本地 url 也拒，得给 `assets` 加一个独立的封禁标记（另一件事）。PRD 的成功指标口径（「未通过素材成为视频生成参考的次数 = 0」）在这一条上要按「素材库引用」而非「本地素材」解释。
+
 ## 被否方案
 
 - **不加表，拦截点每次实时并行查上游 `GetAsset`。** 可行性成立（≤14 个引用并行约 300ms），但每次生成都打上游，且 `Error.Code`/`Error.Message` 原文无处留存。
