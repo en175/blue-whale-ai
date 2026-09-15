@@ -286,9 +286,9 @@ export function listAssets(params: ListAssetsParams) {
   return materialRequest<ListAssetsResult>('ListAssets', params);
 }
 
-/** 获取素材详情 */
-export function getAsset(id: string) {
-  return materialRequest<MaterialAsset>('GetAsset', { Id: id });
+/** 获取素材详情（silent 供轮询使用，失败不打断页面） */
+export function getAsset(id: string, opts?: { silent?: boolean }) {
+  return materialRequest<MaterialAsset>('GetAsset', { Id: id }, opts);
 }
 
 /** 更新素材（仅支持修改 Name） */
@@ -323,6 +323,14 @@ export function getVisualValidateResult(bytedToken: string, opts?: { silent?: bo
   }, opts);
 }
 
+/** 上游素材 Status 为 Failed（合规未通过） */
+export class MaterialAssetFailedError extends Error {
+  constructor() {
+    super('seedance2.0合规校验失败，不可用于视频生成');
+    this.name = 'MaterialAssetFailedError';
+  }
+}
+
 /* ---------- 辅助：等待素材就绪 ---------- */
 
 /**
@@ -337,19 +345,15 @@ export async function waitAssetReady(
   intervalMs = 5000,
 ): Promise<MaterialAsset> {
   for (let i = 0; i < maxAttempts; i++) {
-    const asset = await getAsset(id);
+    const asset = await getAsset(id, { silent: true });
     if (asset.Status === 'Active') return asset;
     if (asset.Status === 'Failed') {
-      throw new ApiError(
-        500,
-        asset.Error?.Message ?? `素材处理失败(${asset.Error?.Code})`,
-        asset.Error?.Code ?? 'AssetFailed',
-      );
+      throw new MaterialAssetFailedError();
     }
     // Processing → 等待后继续
     if (i < maxAttempts - 1) {
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
   }
-  throw new ApiError(408, '素材处理超时', 'Timeout');
+  throw new Error('素材合规校验超时，请重试');
 }

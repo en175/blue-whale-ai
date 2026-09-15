@@ -79,6 +79,8 @@ interface MediaNodeData {
   complianceBusy?: boolean;
   /** 合规校验已通过（展示成功角标，随画布持久化） */
   compliancePassed?: boolean;
+  /** 合规校验未通过（展示失败角标，随画布持久化） */
+  complianceFailed?: boolean;
   /** 派生标记：资产在 snapshot 资产字典中查不到（素材已被删除），水合期计算 */
   assetMissing?: boolean;
   /** MIME 类型（上传完成后存储，如 "image/jpeg"） */
@@ -450,11 +452,19 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               {data.fileName || (isEmptyShell ? (data.mediaType === 'video' ? '视频节点' : data.mediaType === 'audio' ? '音频节点' : '图片节点') : '')}
             </span>
           )}
-          {data.compliancePassed && (
+          {data.complianceBusy ? (
+            <span className={`nodrag nopan ${styles.complianceBadge}`} title="校验中">
+              <span className={styles.complianceSpinner} />
+            </span>
+          ) : data.compliancePassed ? (
             <span className={`nodrag nopan ${styles.complianceBadge}`} title="校验通过，可用于seedance2.0视频生成">
               <img src="/success.png" alt="" />
             </span>
-          )}
+          ) : data.complianceFailed ? (
+            <span className={`nodrag nopan ${styles.complianceFailedText}`} title="seedance2.0合规校验失败，不可用于视频生成">
+              审核失败
+            </span>
+          ) : null}
         </div>
         <span className={styles.titleMeta} title={titleMeta || undefined}>{titleMeta}</span>
       </div>
