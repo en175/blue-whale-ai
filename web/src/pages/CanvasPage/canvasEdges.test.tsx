@@ -17,6 +17,9 @@ import { typePromptRefText } from './testing/promptRefEditor';
 vi.mock('./characterLibraryDeposit', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./characterLibraryDeposit')>()),
   depositCanvasAssetToCharacterLibrary: vi.fn(async () => ({ materialId: 'asset-compliance-test' })),
+  // IKFVMQ 合规改轮询 GetAsset：带 materialId 的参考会走真实 waitAssetReady
+  // （getAsset 未 mock 致视频提交中止），测试环境跳过轮询等待
+  waitComplianceAssetReady: vi.fn(async () => ({})),
 }));
 
 vi.mock('./components/AgentPanel', () => ({
