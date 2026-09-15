@@ -210,6 +210,9 @@ export default function AudioDialog({
   const maxAudioRefs = currentModel?.features?.audio_reference_max ?? 3;
   /** 草稿绑定生成中（IKDMQT）：描述/模型/发送只读，保留查看与画布上的取消入口 */
   const readOnly = draftBinding?.submitting || draftBinding?.status === 'generating';
+  /** IKFR4Z 持续选取会话锁定：模式中隔离提示词编辑、模型切换与生成（须先完成选取）；
+   *  参考移除、来源入口与关闭不受限（规格 AC-07） */
+  const pickLocked = pickMode === true;
 
   const handleModelSelect = (id: string) => {
     setModelId(id);
@@ -332,7 +335,7 @@ export default function AudioDialog({
     currentModel?.features, currentRefs.map((ref) => ({ type: ref.mediaType ?? 'audio' })), 'audio',
   );
   const handleSend = () => {
-    if (!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || textIndexBlocked || referenceLimitError || draftBinding?.saveFailed) return;
+    if (!text.trim() || !currentModel || readOnly || pickLocked || invalidPrompt || invalidDraftRefs || textIndexBlocked || referenceLimitError || draftBinding?.saveFailed) return;
     const promptDocToSend = promptDoc && docHasAnyRef(promptDoc) ? promptDoc : null;
     if (composeImageSendPrompt(attachments, text.trim(), promptDocToSend).length > IMAGE_COMPOSED_PROMPT_LIMIT) {
       onToast?.('warn', IMAGE_COMPOSED_PROMPT_OVER_LIMIT);
@@ -466,7 +469,7 @@ export default function AudioDialog({
       {/* 输入框 */}
       <div className={styles.mentionAnchor} data-testid="audio-input">
         <AudioPromptEditor ref={editorRef} refs={currentRefs} attachments={orderedAttachments}
-          initialText={initialText} initialDoc={initialDoc} readOnly={readOnly} className={styles.textarea}
+          initialText={initialText} initialDoc={initialDoc} readOnly={readOnly || pickLocked} className={styles.textarea}
           placeholder="描述想生成的音频：可生成音乐、音效、台词、多人对话等任意类型，最长 120 秒。使用 @ 引用画布素材。"
           mentionItems={mentionItems} onMentionCanvas={onMentionCanvas}
           onChange={(doc, value) => { setPromptDoc(doc); setText(value); draftBinding?.onParamsChange({ prompt: value, promptDoc: doc }); }} />
@@ -501,7 +504,12 @@ export default function AudioDialog({
 
           {/* 模型选择 */}
           <div className={styles.modeWrap} ref={modelWrapRef}>
-            <button className={styles.modeBtn} onClick={() => setModelOpen((v) => !v)} disabled={readOnly}>
+            <button
+              className={styles.modeBtn}
+              onClick={() => setModelOpen((v) => !v)}
+              disabled={readOnly || pickLocked}
+              title={pickLocked ? '选取进行中，完成选取后再调整模型配置' : undefined}
+            >
               <span>{currentModel?.model_label ?? '选择模型'}</span>
               <ChevronDown
                 size={10}
@@ -536,7 +544,7 @@ export default function AudioDialog({
           <button
             className={`${styles.sendBtn} ${text.trim() && modelId ? styles.sendBtnActive : ''}`}
             data-testid="audio-send"
-            disabled={!text.trim() || !currentModel || readOnly || invalidPrompt || invalidDraftRefs || textIndexBlocked || Boolean(referenceLimitError) || draftBinding?.saveFailed}
+            disabled={!text.trim() || !currentModel || readOnly || pickLocked || invalidPrompt || invalidDraftRefs || textIndexBlocked || Boolean(referenceLimitError) || draftBinding?.saveFailed}
             onClick={handleSend}
             title="发送"
           >

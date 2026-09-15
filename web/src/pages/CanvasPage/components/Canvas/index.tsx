@@ -119,9 +119,13 @@ interface FlowCanvasProps {
   onConnectSourceToGroup?: (sourceId: string, memberIds: string[]) => void;
   /** 选择模式下右键画布空白 */
   onPaneContextMenu?: (pt: { clientX: number; clientY: number }) => void;
+  /** IKFR4X 画布参考选取会话进行中：隔离节点拖动、框选与普通选中，左键拖空白转为平移 */
+  refPickActive?: boolean;
+  /** IKFR4X 会话勾选标识：已并入当前选取目标的来源节点 id（渲染期注入角标，不持久化） */
+  refPickMarkedIds?: string[];
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, refPickMarkedIds }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -403,6 +407,8 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   const nodesForFlow = useMemo(() => {
     const list = groups ?? [];
     const topStack = Math.max(0, list.length - 1);
+    // IKFR4X 会话勾选集合：仅会话活跃时标记（Set 查询 O(1)）
+    const pickMarked = new Set(refPickMarkedIds ?? []);
     const content = nodes
       .filter((n) => n.type !== 'groupFrame')
       .map((n) => {
@@ -416,22 +422,21 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         const staleMediaType = n.type === 'mediaNode'
           ? (n.data as Record<string, unknown> | undefined)?.mediaType
           : undefined;
-        if (
-          n.type === 'mediaNode' &&
-          (staleMediaType === 'image' || staleMediaType === 'video' || staleMediaType === 'audio') &&
-          mediaInputStale(n.id, edges, nodes, staleMediaType)
-        ) {
-          return {
-            ...n,
-            zIndex,
-            data: {
-              ...n.data,
-              inputStale: true,
-              inputSourceNodeId: firstTextSourceOf(n.id, edges, nodes),
-            },
-          };
-        }
-        return { ...n, zIndex };
+        const stale = n.type === 'mediaNode'
+          && (staleMediaType === 'image' || staleMediaType === 'video' || staleMediaType === 'audio')
+          && mediaInputStale(n.id, edges, nodes, staleMediaType);
+        // IKFR4X 勾选标识派生注入（已并入当前选取目标的来源节点）：纯渲染期派生不持久化，可与「输入已更新」并存
+        const marked = pickMarked.size > 0 && pickMarked.has(n.id);
+        if (!stale && !marked) return { ...n, zIndex };
+        return {
+          ...n,
+          zIndex,
+          data: {
+            ...n.data,
+            ...(stale ? { inputStale: true, inputSourceNodeId: firstTextSourceOf(n.id, edges, nodes) } : {}),
+            ...(marked ? { pickMarked: true } : {}),
+          },
+        };
       });
     const frames: Node[] = list.map((g, i) => {
       const box =
@@ -455,7 +460,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       };
     });
     return [...frames, ...content];
-  }, [nodes, groups, memberStackById, frameDragMemberIds, frameDragOffset, edges]);
+  }, [nodes, groups, memberStackById, frameDragMemberIds, frameDragOffset, edges, refPickMarkedIds]);
 
   /** 节点拖拽起：仅标记拖拽中（隐藏框选悬浮条）。组内节点可自由拖出组，拖出后按
    *  坐标动态脱离组；不再整组选中——整组拖动改由组框把手承担。 */
@@ -558,8 +563,9 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         }}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        // 中键（button 1）任意模式均可平移（IKD0JT A1 R2）；拖动模式左键也平移，选择模式左键留给框选
-        panOnDrag={isDrag ? [0, 1] : [1]}
+        // 中键（button 1）任意模式均可平移（IKD0JT A1 R2）；拖动模式左键也平移，选择模式左键留给框选；
+        // IKFR4X 参考选取会话中框选被隔离，左键空白拖拽转为平移（平移/缩放保持可用）
+        panOnDrag={refPickActive ? [0, 1] : isDrag ? [0, 1] : [1]}
         // 拖节点/连线/框选到边缘时不自动跟平移，画布只走手动平移规则
         autoPanOnNodeDrag={false}
         autoPanOnConnect={false}
@@ -568,11 +574,12 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         panOnScroll
         zoomOnScroll={false}
         panActivationKeyCode={null}
-        selectionOnDrag
+        // IKFR4X 参考选取会话：框选隔离（不响应空白拖拽框选），普通模式沿用框选
+        selectionOnDrag={!refPickActive}
         selectionMode={SelectionMode.Partial}
         zoomOnDoubleClick={!isDrag}
-        nodesDraggable={!isDrag}
-        elementsSelectable={!isDrag}
+        nodesDraggable={!isDrag && !refPickActive}
+        elementsSelectable={!isDrag && !refPickActive}
         nodesConnectable
         nodesFocusable={false}
         edgesFocusable={false}
@@ -634,7 +641,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, refPickMarkedIds }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -677,6 +684,8 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         onConnectGroupDrop={onConnectGroupDrop}
         onConnectSourceToGroup={onConnectSourceToGroup}
         onPaneContextMenu={onPaneContextMenu}
+        refPickActive={refPickActive}
+        refPickMarkedIds={refPickMarkedIds}
       />
     </ReactFlowProvider>
   );
