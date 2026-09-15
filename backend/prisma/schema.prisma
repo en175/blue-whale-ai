@@ -77,9 +77,9 @@ model material_groups {
 /// status = Processing | Active | Failed；素材真身在上游，本表只存状态与失败原文（error_* 仅供内部归因，不展示）。
 /// status_checked_at = 最后一次向上游确认状态的时间。
 /// 无 is_delete/deleted_at：本表行是素材的附属状态，没有独立价值，删除时硬删（ADR-0087 决策 5）。
-model material_asset_status {
+model material_assets {
   id                BigInt    @id @default(autoincrement())
-  material_id       String    @unique(map: "uk_material_asset_status_material") @db.VarChar(128) // 上游素材 id（asset-...）
+  material_id       String    @unique(map: "uk_material_assets_material") @db.VarChar(128) // 上游素材 id（asset-...）
   user_id           BigInt // 归属用户（new-api 用户 id）
   material_group_id String    @db.VarChar(128) // 上游组 id（group-...）
   status            String    @db.VarChar(16) // Processing | Active | Failed
@@ -90,8 +90,8 @@ model material_asset_status {
   gmt_modified      DateTime  @default(now()) @db.DateTime(0)
   version           Int       @default(0)
 
-  @@index([status, gmt_create], map: "idx_material_asset_status_poll")
-  @@index([material_group_id], map: "idx_material_asset_status_group")
+  @@index([status, gmt_create], map: "idx_material_assets_poll")
+  @@index([material_group_id], map: "idx_material_assets_group")
 }
 
 /// 网关侧执行凭证（IKFYHJ）：定时兜底需以「素材归属用户」身份代打网关（网关无服务级查询入口）。

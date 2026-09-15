@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// ADR-0087 / IKF YHJ：素材校验状态镜像（material_asset_status）+ 网关执行凭证（user_info）。
+// ADR-0087 / IKF YHJ：素材校验状态镜像（material_assets）+ 网关执行凭证（user_info）。
 // 镜像 ikckow/ikeefv-parity 的双轨核对结构：schema 基线片段、prisma migration、docs/sql 快照三处同源。
 
 const migrationSql = readFileSync(
@@ -30,7 +30,7 @@ const schemaPrisma = readFileSync(
   "utf8",
 );
 
-const NEW_TABLES = ["material_asset_status", "user_info"];
+const NEW_TABLES = ["material_assets", "user_info"];
 
 /** 表定义块（CREATE TABLE `<name>` ... 到分号）。 */
 function tableBlock(sql: string, table: string): string | undefined {
@@ -66,15 +66,15 @@ describe("IKFYHJ 双轨迁移（素材校验状态镜像 + 网关执行凭证）
     expect(columnsIn(snapshot!)).toEqual(expected);
   });
 
-  it("material_asset_status 无 is_delete/deleted_at（ADR-0087 决策 5：硬删，不做软删）", () => {
-    const block = tableBlock(migrationSql, "material_asset_status")!;
+  it("material_assets 无 is_delete/deleted_at（ADR-0087 决策 5：硬删，不做软删）", () => {
+    const block = tableBlock(migrationSql, "material_assets")!;
     expect(block).not.toContain("is_delete");
     expect(block).not.toContain("deleted_at");
   });
 
   it("定时兜底所需的轮询索引存在（status + gmt_create）", () => {
     expect(migrationSql).toContain(
-      "KEY `idx_material_asset_status_poll` (`status`, `gmt_create`)",
+      "KEY `idx_material_assets_poll` (`status`, `gmt_create`)",
     );
   });
 
@@ -82,7 +82,7 @@ describe("IKFYHJ 双轨迁移（素材校验状态镜像 + 网关执行凭证）
     for (const table of NEW_TABLES) {
       expect(schemaPrisma).toContain("model " + table + " ");
     }
-    expect(schemaPrisma).toContain('uk_material_asset_status_material');
+    expect(schemaPrisma).toContain('uk_material_assets_material');
     expect(schemaPrisma).toContain('uk_user_info_user');
   });
 

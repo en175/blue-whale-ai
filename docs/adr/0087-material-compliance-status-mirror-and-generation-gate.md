@@ -20,8 +20,9 @@ ADR-0077 当时明确否决过「创建生成任务时同步调 `GetAsset` 预�
 
 ## 决策
 
-1. **新建 `material_asset_status` 表镜像素材校验状态**（推翻 ADR-0077 决策 1）。
+1. **新建 `material_assets` 表镜像素材校验状态**（推翻 ADR-0077 决策 1）。
    表按 `material_id` 唯一，含 `user_id`、`material_group_id`、`status`、`error_code`、`error_message`、`status_checked_at` 与既有生命周期列。**不落 `asset_type`**——类型随请求携带（见 `CONTEXT.md` 素材引用），落库会造出第二个真相源。
+   **唯一键只用 `material_id`，不建 `(user_id, material_id)` 组合唯一索引；但所有读写查询都必须带 `user_id` 谓词。** 素材 id 名义全局唯一（本次拍板），实际隔离语义在账号维度（`docs/api/material-library.md:298`）——带 `user_id` 是防跨账号误读的纵深防御，不是唯一性约束。命名取 `material_assets` 而非 `material_asset_status`，是为后续扩展留余地。
 
 2. **该表是判据，不是缓存。** 生成任务创建期与重试期按它判定素材能否用作视频生成参考：
 
@@ -36,7 +37,7 @@ ADR-0077 当时明确否决过「创建生成任务时同步调 `GetAsset` 预�
 3. **只放行 `Active`**（Active-only）。这**与 PRD `IKDE6X` §11.2 OD-D1 的推荐项相反**（OD-D1 推荐「校验中不限制，未通过后拦截」），是技术侧的直接取舍，不另找产品确认：上游只在素材就绪后接受它，放行 `Processing` 的后果是「生成任务必然失败」而非「风险素材进了生成」，所以这是 UX 取舍而非安全取舍——让用户等几秒，好过点了生成再白跑一次。**本条是对 PRD 待评审开放决策的单方面落定，验收时若被按 OD-D1 质疑，以本 ADR 为准说明取舍。**
 
 4. **写入与更新四处**：
-   - **定时兜底（主机制）**：在 `worker-java` 每 5 秒扫描 `material_asset_status` 中 `Processing` 且**创建未满 10 分钟**的行，
+   - **定时兜底（主机制）**：在 `worker-java` 每 5 秒扫描 `material_assets` 中 `Processing` 且**创建未满 10 分钟**的行，
      逐行调 `GetAsset` 跟进到终态；超 10 分钟未收敛的**停止跟进，状态保持 `Processing` 不变**（不引入第四态，展示层本就以上游响应为准）。
      它不依赖任何外部流量——「用户点完校验就刷新页面、之后没有请求」是常态而非边角，状态的收敛不能建立在「之后会有人发请求」上。
      放 Java 侧的理由：`worker-java` 已是唯一的后台执行面（TS `generation-worker` 已退役，迁移契约 §7「recovery/asset-GC 留 TS 进程」随之失效），

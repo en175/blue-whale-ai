@@ -1,6 +1,6 @@
 -- IKFYHJ：素材校验状态镜像 + 网关执行凭证。见 docs/adr/0087-material-compliance-status-mirror-and-generation-gate.md。
 -- 快照日期：2026-09-15。历史快照，与 prisma/migrations/20260915170000_ikfyhj_material_compliance 同源。
-CREATE TABLE `material_asset_status` (
+CREATE TABLE `material_assets` (
   `id`                BIGINT NOT NULL AUTO_INCREMENT,
   `material_id`       VARCHAR(128) NOT NULL COMMENT '上游素材ID（asset-...）',
   `user_id`           BIGINT NOT NULL COMMENT '归属用户（new-api 用户 id）',
@@ -13,9 +13,9 @@ CREATE TABLE `material_asset_status` (
   `gmt_modified`      DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
   `version`           INT NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_material_asset_status_material` (`material_id`),
-  KEY `idx_material_asset_status_poll` (`status`, `gmt_create`),
-  KEY `idx_material_asset_status_group` (`material_group_id`)
+  UNIQUE KEY `uk_material_assets_material` (`material_id`),
+  KEY `idx_material_assets_poll` (`status`, `gmt_create`),
+  KEY `idx_material_assets_group` (`material_group_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE `user_info` (
