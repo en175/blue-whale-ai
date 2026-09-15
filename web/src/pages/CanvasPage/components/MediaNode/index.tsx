@@ -12,6 +12,7 @@ import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaNodeToolbarVisibility } from './toolbarVisibility';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
+import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 import AudioPlayer from './AudioPlayer';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import CanvasContextMenu from '../CanvasContextMenu';
@@ -148,6 +149,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   const zoom = useStore((state) => state.transform[2]);
   const isSelect = data.toolMode === 'select';
+  const showSoloToolbar = useSoloNodeSelected(selected);
 
   /** 提交名称：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName */
   const commitName = useCallback(() => {
@@ -367,7 +369,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       style={{ ...nodeTitleSizing(zoom), width: contentBox.width }}
     >
       {/* 选中态悬浮工具条：重新编辑/生成图片/生成视频/生成音频 + 详情/下载/@（位于外部标题上方） */}
-      {selected && !data.genStatus && !data.assetMissing && !isEmptyShell && (
+      {showSoloToolbar && !data.genStatus && !data.assetMissing && !isEmptyShell && (
         <div className={`nodrag nopan ${styles.toolbar}`} onMouseDown={stop}>
           <button className={styles.toolBtn} onClick={handleReEdit} title="带入原提示词与图片，打开图片对话框">
             <RefreshCcw size={14} strokeWidth={2} />
