@@ -294,7 +294,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     notifyMediaIndex(content, delta);
   }, [data, id, hasPromptBindings, mediaValidity, notifyMediaIndex]);
 
-  /** 输入 @ 且在词边界时打开素材菜单（契约 §5；与对话框 @ 口径一致） */
+  /** 逐键输入 @ 打开素材菜单（契约 §5：正文任意位置触发——@ 前是汉字/标点/字母/
+   *  数字均弹出，与底部面板编辑器同一口径；粘贴不触发，IKFUTI） */
   const openMentionMenuAtCaret = useCallback(() => {
     const editor = editorRef.current;
     const sel = window.getSelection();
@@ -304,10 +305,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     const container = range.startContainer;
     if (container.nodeType === Node.TEXT_NODE) {
       const text = container.textContent ?? '';
-      // 光标紧跟刚输入的 '@'；词边界看 '@' 的前一个字符（与对话框 @ 口径一致：空白/行首）
+      // 光标紧跟刚输入的 '@' 即触发，不看 '@' 的前一个字符
       if (text[range.startOffset - 1] !== '@') return;
-      const before = text[range.startOffset - 2];
-      if (before && !/\s/.test(before)) return;
     } else if (range.startOffset > 0) {
       const prev = container.childNodes[range.startOffset - 1];
       if (prev && prev.nodeName !== 'BR') return;
@@ -541,7 +540,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     syncContent();
   }, [saveSelection, syncContent, hasPromptBindings, id, data.promptMaterials]);
 
-  /** 输入后应用 Markdown 语法规则（契约 §2 输入路径），@ 在词边界时打开素材菜单，再同步内容 */
+  /** 输入后应用 Markdown 语法规则（契约 §2 输入路径），逐键输入 @ 时打开素材菜单，再同步内容 */
   const handleEditorInput = useCallback((e: React.FormEvent<HTMLDivElement>) => {
     const native = e.nativeEvent as InputEvent;
     if (native.inputType === 'insertText' && editorRef.current && native.data) {
