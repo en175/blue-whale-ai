@@ -52,31 +52,58 @@ function HandlePlus() {
   );
 }
 
-/** media/素材标签编辑后的光标锚点（IKFXDB，契约 §5）：全量重放销毁旧 DOM，
- *  恢复按（标签种类 + 同身份第几张 + 标签前/后）在新 DOM 定位 chip——
- *  media 标签身份是来源 nodeId，素材标签（prompt #N）身份是编号。 */
-interface ChipAnchor {
-  kind: 'media' | 'prompt';
-  /** media：来源 nodeId；prompt：标签编号 */
-  key: string;
-  /** 同身份第几张（1-based，按文档序） */
-  occurrence: number;
-  placement: 'before' | 'after';
-}
+/** media/素材标签编辑后的光标锚点（IKFXDB，契约 §5）：全量重放销毁旧 DOM。
+ *  chip 形态按（标签种类 + 身份 + 同身份第几张 + 前/后）在新 DOM 定位——插入/替换落「标签后」用；
+ *  caret 形态按 DOM 文本流偏移落位——删除落「被删标签原位置」用（不依赖相邻标签，唯一标签也精确）。 */
+type ChipAnchor =
+  | { kind: 'media' | 'prompt'; key: string; occurrence: number; placement: 'before' | 'after' }
+  | { kind: 'caret'; offset: number };
 
 /** 编辑器内某身份的全部 chip（按文档序） */
-function chipsOfKey(editor: HTMLElement, kind: ChipAnchor['kind'], key: string): HTMLElement[] {
+function chipsOfKey(editor: HTMLElement, kind: Exclude<ChipAnchor, { kind: 'caret' }>['kind'], key: string): HTMLElement[] {
   const selector = kind === 'media' ? `[data-media-node="${CSS.escape(key)}"]` : `[data-prompt-index="${CSS.escape(key)}"]`;
   return [...editor.querySelectorAll<HTMLElement>(selector)];
 }
 
 /** chip 在编辑器里的锚点（种类从 dataset 判；同身份序号按文档序计） */
-function chipAnchorOf(editor: HTMLElement, chip: HTMLElement, placement: ChipAnchor['placement']): ChipAnchor {
+function chipAnchorOf(editor: HTMLElement, chip: HTMLElement, placement: 'before' | 'after'): ChipAnchor {
   if (chip.dataset.mediaNode) {
     return { kind: 'media', key: chip.dataset.mediaNode, occurrence: chipsOfKey(editor, 'media', chip.dataset.mediaNode).indexOf(chip) + 1, placement };
   }
   const key = chip.dataset.promptIndex ?? '';
   return { kind: 'prompt', key, occurrence: chipsOfKey(editor, 'prompt', key).indexOf(chip) + 1, placement };
+}
+
+/** 被删 chip 在编辑器 DOM 文本流中的起点偏移（不计 chip 内部文本）。
+ *  删除重放只移除该 chip 自身，之前的文本流不变，故重放后按此偏移落光标即被删标签原位置。 */
+function domTextOffsetOfChipStart(editor: HTMLElement, chip: HTMLElement): number {
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  let offset = 0;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (chip.contains(node)) return offset;
+    offset += node.textContent?.length ?? 0;
+  }
+  return offset;
+}
+
+/** 按编辑器 DOM 文本流偏移折叠光标；超出文本流（正文无文本）返回 false。 */
+function placeCaretAtTextOffset(editor: HTMLElement, offset: number): boolean {
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  let remaining = offset;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const length = node.textContent?.length ?? 0;
+    if (remaining <= length) {
+      const range = document.createRange();
+      range.setStart(node, remaining);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return true;
+    }
+    remaining -= length;
+  }
+  return false;
 }
 
 interface TextNodeData {
@@ -300,28 +327,37 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     notifyMediaIndex(content, { added: [], removed: [] });
   }, [data, id, hasPromptBindings, mediaValidity, notifyMediaIndex]);
 
-  /** 重放后按锚点恢复光标（IKFXDB，契约 §5）：定位同身份第 occurrence 张 chip 落
-   *  锚点位置；无可锚 chip（唯一标签被删后正文无标签）落编辑器末尾。 */
+  /** 重放后按锚点恢复光标（IKFXDB，契约 §5）：chip 锚点定位同身份第 occurrence 张 chip；
+   *  caret 锚点按 DOM 文本流偏移落位（删除场景=被删标签原位置）。均落不中时兜底编辑器末尾。 */
   const restoreChipAnchor = useCallback((anchor?: ChipAnchor) => {
     const editor = editorRef.current;
     if (!editor) return;
     editor.focus();
-    const range = document.createRange();
     let placed = false;
-    if (anchor) {
+    if (anchor?.kind === 'caret') {
+      placed = placeCaretAtTextOffset(editor, anchor.offset);
+    } else if (anchor) {
       const chip = chipsOfKey(editor, anchor.kind, anchor.key)[anchor.occurrence - 1];
       if (chip) {
+        const range = document.createRange();
         if (anchor.placement === 'after') range.setStartAfter(chip);
         else range.setStartBefore(chip);
+        range.collapse(true);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
         placed = true;
       }
     }
-    if (!placed) { range.selectNodeContents(editor); range.collapse(false); }
-    range.collapse(true);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    savedRangeRef.current = range.cloneRange();
+    if (!placed) {
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
+    savedRangeRef.current = window.getSelection()?.getRangeAt(0).cloneRange() ?? null;
   }, []);
 
   // 进入编辑后聚焦编辑器；编辑器外操作（操作条删除/替换等）留下的光标锚点在此落位（契约 §5）
@@ -492,18 +528,14 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     const chipOfIndex = () => [...editor.querySelectorAll<HTMLElement>(`[data-prompt-index="${replaceIndex}"]`)]
       .find(chip => chip === selectedMentionChip) ?? editor.querySelector<HTMLElement>(`[data-prompt-index="${replaceIndex}"]`);
     if (replaceIndex !== null && !material) {
-      // 删除：先记点击位置的全 chip 序，移除后按幸存邻居锚定（序号按删除后 DOM 计）
-      const before = [...editor.querySelectorAll<HTMLElement>('[data-media-node], [data-prompt-index]')];
-      const clickedIdx = before.indexOf(chipOfIndex() ?? before[0]);
+      // 删除：光标落被删标签原位置（契约 §5）——按删除前 DOM 文本流中被删 chip 的起点偏移落位
+      const clicked = chipOfIndex();
+      const offset = clicked ? domTextOffsetOfChipStart(editor, clicked) : undefined;
       for (const chip of editor.querySelectorAll<HTMLElement>('[data-prompt-index]')) {
         if (Number(chip.dataset.promptIndex) !== replaceIndex) continue;
         chip.remove();
       }
-      let neighbour: HTMLElement | undefined;
-      let placement: ChipAnchor['placement'] = 'after';
-      for (let i = clickedIdx - 1; i >= 0 && !neighbour; i -= 1) if (before[i].isConnected) neighbour = before[i];
-      for (let i = clickedIdx + 1; i < before.length && !neighbour; i += 1) if (before[i].isConnected) { neighbour = before[i]; placement = 'before'; }
-      if (neighbour) anchor = chipAnchorOf(editor, neighbour, placement);
+      anchor = offset === undefined ? undefined : { kind: 'caret', offset };
     } else if (replaceIndex !== null && material) {
       for (const chip of editor.querySelectorAll<HTMLElement>('[data-prompt-index]')) {
         if (Number(chip.dataset.promptIndex) !== replaceIndex) continue;
@@ -873,18 +905,11 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
             const chip = chipMenu.chip;
             const editor = editorRef.current;
             setChipMenu(null);
-            // 光标落被删标签原位置（契约 §5 删除落点）：优先锚前一张标签后，其次后一张标签前；
-            // 序号按删除后的 DOM 计（先移除再取），同身份后一张重放后才能对上；邻居含素材标签
-            const index = editor ? [...editor.querySelectorAll<HTMLElement>('[data-media-node], [data-prompt-index]')].indexOf(chip) : -1;
+            // 光标落被删标签原位置（契约 §5 删除落点）：重放只移除该 chip，被删起点前的
+            // 文本流不变，按删除前的 DOM 文本偏移落位——不依赖相邻标签，唯一标签同样精确
+            const offset = editor && chip.isConnected ? domTextOffsetOfChipStart(editor, chip) : undefined;
             chip.remove();
-            let anchor: ChipAnchor | undefined;
-            if (editor) {
-              const rest = [...editor.querySelectorAll<HTMLElement>('[data-media-node], [data-prompt-index]')];
-              const prev = index > 0 ? rest[index - 1] : undefined;
-              const next = index === 0 ? rest[0] : undefined;
-              if (prev) anchor = chipAnchorOf(editor, prev, 'after');
-              else if (next) anchor = chipAnchorOf(editor, next, 'before');
-            }
+            const anchor: ChipAnchor | undefined = offset === undefined ? undefined : { kind: 'caret', offset };
             commitMediaEdit({ added: [], removed: [] }, anchor);
           }}>
             <Trash2 size={13} strokeWidth={2} /><span>删除标签</span>
