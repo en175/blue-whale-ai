@@ -249,11 +249,17 @@ const refs: RefItem[] = resolvedRefs.map((r, i) => {
 
 ---
 
-## 7. IKFYHJ 增补（2026-09-15）：snapshot 带上素材校验状态
+## 7. IKFYHJ 增补（2026-09-15）：素材读路径带上校验状态
 
-### 7.1 `GET /api/projects/:id/snapshot` 的 asset 记录新增两个字段
+### 7.1 三条读路径每条素材记录新增两个字段
 
-在 §6.1 的 `material_id` / `material_group_id` 之后**并列**再加两个（同一位置：`assets[asset_id]` map 每项）：
+在 §6.1 的 `material_id` / `material_group_id` 之后**并列**再加两个：
+
+| 接口 | 位置 |
+|---|---|
+| `GET /api/assets`（列表） | 每条 record |
+| `GET /api/assets/:assetId`（详情） | 同投影（与 `prompt` 并列） |
+| `GET /api/projects/:id/snapshot` | `assets[asset_id]` map 每项 |
 
 ```ts
 {
@@ -280,4 +286,6 @@ const refs: RefItem[] = resolvedRefs.map((r, i) => {
 
 ### 7.3 前端用途
 
-开画布首屏即可点亮「校验中 / 校验通过 / 审核失败」角标，**不必为每个素材发一次 `GetAsset`**。需要更准的状态时再按单条素材实时查（`GetAsset`），或等生成接口的判定结果。
+开画布首屏、资产库列表即可点亮「校验中 / 校验通过 / 审核失败」角标，**不必为每个素材发一次 `GetAsset`**。需要更准的状态时再按单条素材实时查（`GetAsset`），或等生成接口的判定结果。
+
+> **后端实现口径（供排障，前端不必关心）**：状态走**一次批量 `IN` 查本地镜像表**，不做 N+1、不在读路径打上游；整页一个素材都没关联素材库时不发查询。控制器对 `?size=` 没有上限、前端 `fetchAllAssets` 又是并发翻页全量拉取，所以 `IN` 列表按 500 分批。实测 1200 条/页（800 条有绑定）约 50–70ms。
