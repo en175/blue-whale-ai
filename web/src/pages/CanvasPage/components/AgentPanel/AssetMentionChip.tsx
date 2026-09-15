@@ -15,11 +15,14 @@ import styles from './index.module.css';
 export function AssetMentionChip({
   assetId,
   label,
+  name,
   mediaType,
   url,
 }: {
   assetId: string;
   label: string;
+  /** 胶囊上写的是「图1」这种号时，悬停看到的素材全名。 */
+  name?: string | undefined;
   mediaType: 'image' | 'video';
   url?: string | undefined;
 }) {
@@ -30,14 +33,14 @@ export function AssetMentionChip({
   }, [resolved, assetId]);
   if (!resolved) {
     return (
-      <span className={`${styles.assetMention} ${styles.assetMentionPending}`} title={label}>
+      <span className={`${styles.assetMention} ${styles.assetMentionPending}`} title={name ?? label}>
         {label}
       </span>
     );
   }
   return (
     <span className={styles.assetMention}>
-      {mediaType === 'video' ? <VideoMentionChip url={resolved} label={label} /> : <ImageMentionChip url={resolved} label={label} />}
+      {mediaType === 'video' ? <VideoMentionChip url={resolved} label={label} title={name} /> : <ImageMentionChip url={resolved} label={label} title={name} />}
     </span>
   );
 }
