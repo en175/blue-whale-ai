@@ -1,4 +1,5 @@
 import type { MaterialAssetRepo } from "@lib/shared/persistence/index.js";
+import type { MaterialGate } from "./handle-create-generation-job.js";
 
 // IKF YHJ：素材校验状态门（ADR-0087）。视频生成「采纳素材参考」那一刻判定素材能否使用。
 // 规则（ADR-0087 决策 2）：
@@ -107,4 +108,67 @@ export function collectMaterialIds(input: {
   for (const item of input.referenceMaterials ?? []) push(item?.id);
   for (const id of input.materialIdsFromLocalAssets ?? []) push(id);
   return [...new Set(out)];
+}
+
+/** 从生成任务输入里取出本地 Asset 引用的 id（新旧两套字段都算）。
+ *  这些 id 本身不是素材库素材，但其中「已绑素材库素材」的那些在 worker 提交时会被转成
+ *  `asset://<material_id>`——前端物理上拦不住，只能在这里等价解析后一并过门。 */
+export function collectLocalAssetIds(input: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const push = (raw: unknown) => {
+    if (typeof raw === "string" && /^\d+$/.test(raw)) out.push(raw);
+  };
+  if (Array.isArray(input.references)) {
+    for (const item of input.references) {
+      if (item !== null && typeof item === "object") {
+        push((item as Record<string, unknown>).asset_id);
+      }
+    }
+  }
+  push(input.first_frame_asset_id);
+  push(input.last_frame_asset_id);
+  if (Array.isArray(input.reference_asset_ids)) {
+    for (const id of input.reference_asset_ids) push(id);
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * 造一个接到 `GenerationDeps.materialGate` 的门（接线层用）。
+ * `resolveLocalAssetMaterialIds` 由接线方提供（需要查 assets.material_id 镜像）；缺省则
+ * 本地 Asset 那条路径不过门——调用方必须显式知道这个取舍。
+ */
+export function createMaterialGate(deps: {
+  repo: Pick<MaterialAssetRepo, "findByMaterialId" | "mirrorStatus">;
+  fetchUpstreamStatus: (
+    materialId: string,
+  ) => Promise<UpstreamMaterialStatus | null>;
+  resolveLocalAssetMaterialIds?: (
+    userId: string,
+    assetIds: readonly string[],
+  ) => Promise<string[]>;
+}): MaterialGate {
+  return {
+    async assertInputUsable({ userId, jobInput }): Promise<string | null> {
+      const localAssetIds = collectLocalAssetIds(jobInput);
+      const materialIdsFromLocalAssets =
+        deps.resolveLocalAssetMaterialIds && localAssetIds.length > 0
+          ? await deps.resolveLocalAssetMaterialIds(userId, localAssetIds)
+          : [];
+      const materialIds = collectMaterialIds({
+        references: Array.isArray(jobInput.references)
+          ? (jobInput.references as readonly { material_id?: unknown }[])
+          : undefined,
+        firstFrameMaterialId: jobInput.first_frame_material_id,
+        lastFrameMaterialId: jobInput.last_frame_material_id,
+        referenceMaterials: Array.isArray(jobInput.reference_materials)
+          ? (jobInput.reference_materials as readonly { id?: unknown }[])
+          : undefined,
+        materialIdsFromLocalAssets,
+      });
+      if (materialIds.length === 0) return null;
+      const result = await assertMaterialsUsable(deps, userId, materialIds);
+      return result.ok ? null : result.message;
+    },
+  };
 }

@@ -3,7 +3,9 @@ import {
   MATERIAL_NOT_APPROVED_MESSAGE,
   MATERIAL_STATUS_UNAVAILABLE_MESSAGE,
   assertMaterialsUsable,
+  collectLocalAssetIds,
   collectMaterialIds,
+  createMaterialGate,
   type MaterialComplianceDeps,
 } from "./material-compliance-gate.js";
 
@@ -152,5 +154,72 @@ describe("collectMaterialIds（IKFYHJ）", () => {
 
   it("无任何来源时返回空数组", () => {
     expect(collectMaterialIds({})).toEqual([]);
+  });
+});
+
+describe("collectLocalAssetIds（IKFYHJ：本地 Asset 那条绕过路径）", () => {
+  it("合并 references.asset_id / 旧首尾帧字段 / reference_asset_ids", () => {
+    expect(
+      collectLocalAssetIds({
+        references: [{ asset_id: "100" }, { material_id: "asset-x" }, { asset_id: "101" }],
+        first_frame_asset_id: "102",
+        reference_asset_ids: ["100", "103"],
+      }),
+    ).toEqual(["100", "101", "102", "103"]);
+  });
+
+  it("素材库 id 与非法值不算本地 Asset", () => {
+    expect(
+      collectLocalAssetIds({ references: [{ asset_id: "asset-x" }, { asset_id: "" }, { asset_id: 5 }] }),
+    ).toEqual([]);
+  });
+});
+
+describe("createMaterialGate（IKFYHJ 接线层）", () => {
+  const baseDeps = () => ({
+    repo: {
+      findByMaterialId: vi.fn().mockResolvedValue({ status: "Active" }),
+      mirrorStatus: vi.fn().mockResolvedValue(undefined),
+    },
+    fetchUpstreamStatus: vi.fn().mockResolvedValue(null),
+    resolveLocalAssetMaterialIds: vi.fn().mockResolvedValue([]),
+  });
+
+  it("无任何素材引用：放行，且不查任何东西", async () => {
+    const deps = baseDeps();
+    const gate = createMaterialGate(deps as never);
+    await expect(gate.assertInputUsable({ userId: "9", jobInput: { prompt: "x" } })).resolves.toBeNull();
+    expect(deps.repo.findByMaterialId).not.toHaveBeenCalled();
+  });
+
+  it("直接声明的素材引用可用：放行", async () => {
+    const deps = baseDeps();
+    const gate = createMaterialGate(deps as never);
+    await expect(
+      gate.assertInputUsable({ userId: "9", jobInput: { references: [{ material_id: "asset-a" }] } }),
+    ).resolves.toBeNull();
+    expect(deps.repo.findByMaterialId).toHaveBeenCalledWith("9", "asset-a");
+  });
+
+  it("本地 Asset 已绑素材库素材：解析后一并过门（前端拦不住的那条）", async () => {
+    const deps = baseDeps();
+    deps.resolveLocalAssetMaterialIds.mockResolvedValue(["asset-from-local"]);
+    deps.repo.findByMaterialId.mockResolvedValue({ status: "Failed" });
+    const gate = createMaterialGate(deps as never);
+
+    await expect(
+      gate.assertInputUsable({ userId: "9", jobInput: { first_frame_asset_id: "100" } }),
+    ).resolves.toBe(MATERIAL_NOT_APPROVED_MESSAGE);
+    expect(deps.resolveLocalAssetMaterialIds).toHaveBeenCalledWith("9", ["100"]);
+    expect(deps.repo.findByMaterialId).toHaveBeenCalledWith("9", "asset-from-local");
+  });
+
+  it("缺 resolveLocalAssetMaterialIds：本地 Asset 那条不过门（接线方显式取舍）", async () => {
+    const deps = baseDeps();
+    const gate = createMaterialGate({ repo: deps.repo, fetchUpstreamStatus: deps.fetchUpstreamStatus } as never);
+    await expect(
+      gate.assertInputUsable({ userId: "9", jobInput: { first_frame_asset_id: "100" } }),
+    ).resolves.toBeNull();
+    expect(deps.repo.findByMaterialId).not.toHaveBeenCalled();
   });
 });
