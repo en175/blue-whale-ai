@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, Param, Post, Put, Query } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
@@ -15,6 +15,11 @@ export class CanvasesController {
     @Body() body: unknown,
   ) {
     return this.canvas.applyPreview(user.userId, projectId, body);
+  }
+
+  @Post(":projectId/prompt-references")
+  referencePrompt(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string, @Body() body: unknown) {
+    return this.canvas.referencePrompt(user.userId, projectId, body);
   }
 
   @Post(":projectId/conversation-quotes")

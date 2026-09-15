@@ -3,6 +3,13 @@
  * ============================================ */
 
 .panel {
+  /* 字号档位面板级提档（IKETRR）：正文 md 13→14、辅助 sm 12→13、超小 xs 10→12。
+     只在面板根覆盖、不碰全局 variables.css——那套档位被全站 41 个 CSS 文件共用，
+     admin / BottomDialog 等密度型 UI 仍按原档。面板内所有 var() 引用（含 ChipTextEditor）
+     经 CSS 继承自动吃到新档。 */
+  --font-size-md: 14px;
+  --font-size-sm: 13px;
+  --font-size-xs: 12px;
   position: absolute;
   /* 基准宽度 468 = 边框 1×2 + 输入区左右各 4px + 输入框 458（IKAGZC 对齐参照物的实测值）。
      停靠抽屉的实际宽度由内联 style 接管（IKDLD4 可调宽，规则见 drawerWidth.ts），这里是首帧兜底。 */
@@ -505,8 +512,8 @@
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-sm);
   background-color: #1e1e1e;
-  font-size: 12px;
-  line-height: 18px;
+  font-size: var(--font-size-sm);
+  line-height: 20px;
   color: var(--color-text-secondary);
 }
 
@@ -923,7 +930,7 @@
   background: transparent;
   border: none;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
   white-space: nowrap;
   max-width: 200px;
@@ -941,7 +948,7 @@
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--color-border);
   color: var(--color-text-primary);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   white-space: nowrap;
   max-width: 200px;
   overflow: hidden;
@@ -958,7 +965,7 @@
 /* chip 内的 @ 符号 */
 .userMediaChipAt {
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 /* 用户气泡中的文字内容 */
@@ -974,7 +981,7 @@
   max-width: 100%;
   color: #d6d6d6;
   font-size: var(--font-size-md);
-  line-height: 21px;
+  line-height: 22px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -990,7 +997,7 @@
   padding: 8px 10px;
   border-radius: 12px 12px 12px 2px;
   font-size: var(--font-size-md);
-  line-height: 21px;
+  line-height: 22px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1213,7 +1220,7 @@
 
 .thinkingMark {
   color: #6f7378;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .thinkingMarkLive {
@@ -1295,7 +1302,7 @@
   gap: 8px;
   /* 撑满消息流宽度（430）。原来是 94% + 居中，叠上父层的 95% 后只剩 385。 */
   width: 100%;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
 }
 
@@ -1338,7 +1345,7 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   color: var(--color-text-secondary);
   word-break: break-word;
@@ -1426,8 +1433,8 @@
 
 /* 形态徽标：大写字母 + 字距，和右边的参数徽标区分开——它是这批卡「是什么」，不是参数。 */
 .shotKind {
-  /* 10px 是跟同排的 ~15s / 16:9 对齐推的，参照物这一枚走的是 class，dump 里读不到实测值。 */
-  font-size: 10px;
+  /* 走 xs 档（IKETRR 面板提档前是硬编码 10px，按同排 ~15s / 16:9 徽标对齐推的）。 */
+  font-size: var(--font-size-xs);
   font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--color-text-tertiary);
@@ -1437,7 +1444,7 @@
   padding: 1px 6px;
   border-radius: var(--radius-sm);
   background-color: var(--color-bg-tertiary);
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: 500;
   letter-spacing: 0.2px;
   line-height: 1.4;
@@ -1796,8 +1803,8 @@
   padding: 2px 8px;
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-sm);
-  font-size: 12px;
-  line-height: 18px;
+  font-size: var(--font-size-sm);
+  line-height: 20px;
   opacity: 0.8;
 }
 
@@ -1811,7 +1818,7 @@
   border: 1px solid var(--color-border);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   vertical-align: middle;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1957,7 +1964,7 @@
   gap: 6px;
   margin: -2px 0 0 2px;
   font-size: var(--font-size-xs);
-  line-height: 16px;
+  line-height: 18px;
   color: var(--color-text-tertiary);
   font-variant-numeric: tabular-nums;
 }

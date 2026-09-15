@@ -19,7 +19,7 @@ import {
   RESOURCE_NOT_FOUND_CODE,
   fail,
   ok,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { createProductEventRepo } from "@lib/shared/persistence/index.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";

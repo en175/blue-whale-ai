@@ -80,18 +80,8 @@ scripts/start-task-worktree.sh --type docs --no-issue --summary 补全工作树�
 
 ## Codebase Memory MCP
 
-创建 task worktree 后、做代码检索或代码修改前，Agent 必须为当前 task worktree 建立 Codebase Memory MCP 索引：
-
-```text
-index_repository(repo_path="<task-worktree-path>", mode="fast|moderate|full")
-index_status(project="<task-worktree-project>") == ready
-```
-
-规则：
-
-- 不得用主 checkout 的 Codebase Memory 索引替代 task worktree 索引。
-- MCP 不可用或索引失败时，必须停止并报告。
-- 小改动默认 `fast`；需要语义检索用 `moderate`；大型架构分析用 `full`。
+首次只读探索即执行 [仓库代码探索协议](../../agent-rules/code-discovery.md)，无需等待创建分支。
+创建 task worktree 后重新确认当前目录对应的独立索引；建索引不替代查询。失败、覆盖不足及子代理交接均按同一协议处理。
 
 ## Graphify
 
@@ -156,7 +146,7 @@ scripts/merge-task-to-local-master.sh --user-authorized --abort <任务分支>
 
 ZCode / Claude Code / Codex Hook 放行任务分支的普通 `git commit` 与 `git merge`；仍硬拦任务分支用 merge/pull 同步 `origin/master`，以及缺少 `--user-authorized` 的合入本地 master 入口。提交入口是推荐的 review 检查点，合入入口带授权参数无交互放行。master 写入 Gate 仅额外放行已忽略的根 `CLAUDE.local.md` 与 `.codex/config.toml`。Codex 写入仍由 `Edit|Write` matcher 接入，但实际 `tool_name=apply_patch`、补丁位于 `tool_input.command`；薄 wrapper 只提取目标路径，分支与工作树判定继续复用 `block-master-edit.sh` 权威 Gate。
 
-三端阻断等价只比较阻断型 `PreToolUse` / `PostToolUse`。提醒型 `Grep|Glob` 只注入代码发现 context、不阻断，且 Codex 无对应 CBM MCP；`SessionStart` 只在会话启动/恢复时注入 context，不是工具调用 Gate，各平台生命周期挂载也不同，因此两类事件显式排除。
+三端阻断等价只比较阻断型 `PreToolUse` / `PostToolUse`。提醒型 `Grep|Glob` 只注入代码发现 context、不阻断，按客户端实际事件与能力适配；`SessionStart` 只在会话启动/恢复时注入 context，不是工具调用 Gate，各平台生命周期挂载也不同，因此两类事件显式排除。
 
 ## 发布包装 Work Tree
 

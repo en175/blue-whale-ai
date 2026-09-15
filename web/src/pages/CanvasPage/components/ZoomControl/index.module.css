@@ -37,6 +37,13 @@
   background-color: var(--color-bg-hover);
 }
 
+.zoomDivider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--color-border-primary);
+  margin: 0 2px;
+}
+
 .zoomValue {
   min-width: 44px;
   text-align: center;

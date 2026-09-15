@@ -416,3 +416,8 @@ Done!
 
 **Alternative workflow:**
 - **superpowers:executing-plans** - Use for parallel session instead of same-session execution
+
+
+## Repository code discovery
+
+Before code exploration or delegation, read `agent-rules/code-discovery.md`. Apply it before creating a worktree, pass its graph evidence to subagents, and include query-backed conclusions or evidenced fallback in the handoff/review. Index creation alone is not query evidence.

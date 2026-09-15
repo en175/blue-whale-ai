@@ -5,6 +5,7 @@
  * ============================================ */
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { markdownToSanitizedHtml, unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
 import {
   X,
   Search,
@@ -38,7 +39,6 @@ import {
   type SharedAssetSceneSnapshot,
 } from '@/api/sharedAssets';
 import { isApiError } from '@/api/http';
-import { sanitizeHtml } from '@/utils/sanitize';
 import styles from './index.module.css';
 
 /** Tab 定义（对齐现有画布卡片类型） */
@@ -672,8 +672,9 @@ function PreviewContent({ item }: { item: SharedAssetView }) {
       return (
         <div
           className={styles.previewText}
+          // 统一正文契约 v1：统一入口取正文（存量 html 快照升级），渲染白名单 HTML
           // eslint-disable-next-line react/no-danger
-          dangerouslySetInnerHTML={{ __html: sanitizeHtml(snap.html) }}
+          dangerouslySetInnerHTML={{ __html: markdownToSanitizedHtml(unifiedTextNodeText(snap)) }}
         />
       );
     }

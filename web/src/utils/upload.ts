@@ -15,7 +15,7 @@ import { FileRejectedError, checkFileBeforeUpload } from './fileSignature';
 
 /** 流式计算文件 MD5（32 位小写 hex）：4MB 分块增量计算，避免大文件一次性读入内存。
  *  SubtleCrypto 不支持 MD5 算法，这里使用 spark-md5 实现。 */
-async function computeFileMd5(file: File): Promise<string> {
+export async function computeFileMd5(file: File): Promise<string> {
   const CHUNK_SIZE = 4 * 1024 * 1024;
   const spark = new SparkMD5.ArrayBuffer();
   for (let offset = 0; offset < file.size; offset += CHUNK_SIZE) {

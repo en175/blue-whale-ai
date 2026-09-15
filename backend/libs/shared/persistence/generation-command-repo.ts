@@ -1,10 +1,12 @@
+import { NewApiError } from "@lib/core";
+import { promptPlanSnapshotSchema } from "@lib/contracts";
 import {
   findPlacement,
   SCENE_CARD_FALLBACK_HEIGHT,
   SCENE_CARD_WIDTH,
   type CostReservationSnapshot,
   type Rect,
-} from "@blue-whale/core";
+} from "@lib/core";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
@@ -271,6 +273,22 @@ export async function createJobWithinTx(
   tx: Prisma.TransactionClient,
   input: CreateJobInput,
 ): Promise<CreatedJob> {
+  if (input.input.prompt_plan_snapshot !== undefined) {
+    const snapshot = promptPlanSnapshotSchema.parse(input.input.prompt_plan_snapshot);
+    const rows = await tx.$queryRaw<Array<{ version: number }>>`SELECT version FROM canvas WHERE project_id = ${BigInt(input.projectId)} FOR UPDATE`;
+    if (rows[0]?.version !== snapshot.canvasVersion) throw new NewApiError("Canvas 版本冲突，请保存后重新提交", 412);
+    for (const image of [...snapshot.images.map(i => ({ ...i, type: "image", providerUrl: i.url })), ...(snapshot.videoReferences ?? [])].filter((ref): ref is typeof ref & { assetId: string } => Boolean(ref.assetId)).sort((a, b) => a.assetId.localeCompare(b.assetId))) {
+      const assets = await tx.$queryRaw<Array<{ id: bigint; project_id: bigint; material_id: string | null }>>`SELECT id, project_id, material_id FROM assets WHERE id = ${BigInt(image.assetId)} AND user_id = ${BigInt(input.userId)} AND is_delete = false AND status = 'normal' AND type = ${image.type} AND url = ${image.url} FOR UPDATE`;
+      const asset = assets[0];
+      const links = asset && asset.project_id !== 0n && asset.project_id !== BigInt(input.projectId)
+        ? await tx.$queryRaw<Array<{ asset_id: bigint }>>`SELECT asset_id FROM project_asset WHERE asset_id = ${BigInt(image.assetId)} AND project_id = ${BigInt(input.projectId)} AND user_id = ${BigInt(input.userId)} AND is_delete = 0 FOR UPDATE`
+        : undefined;
+      if (!asset || (links && links.length === 0) || (snapshot.videoReferences && (asset.material_id ? `asset://${asset.material_id}` : image.url) !== image.providerUrl)) {
+        const indices = snapshot.plans.flatMap(p => p.mentions.filter(m => m.assetId === image.assetId).map(m => `#${m.index}`));
+        throw new NewApiError(`素材索引 ${indices.join("、")} 已变化或不可用，请重新提交`, 400);
+      }
+    }
+  }
   const now = new Date();
   const deadline = new Date(now.getTime() + 30 * 60 * 1000); // 30min 超时
   const frozenInput = await freezePlacementAnchor(tx, input);

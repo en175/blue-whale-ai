@@ -3,6 +3,7 @@
  * 创建与重试需 Idempotency-Key（UUID）幂等头
  * ============================================ */
 import { apiRequest, isApiError, type ApiError } from './http';
+import type { PromptDoc } from '@/lib/prompt-doc';
 
 /** 可由普通生成端点创建的任务类型 */
 export type GenerationJobType = 'image' | 'video' | 'audio';
@@ -106,8 +107,23 @@ export interface CreateJobPayload {
   last_frame_material_id?: string;
   /** 素材库参考素材（仅 video）：[{ id: "Asset-xxx", type: "image" | "video" }]；与首尾帧模式互斥 */
   reference_materials?: Array<{ id: string; type: 'image' | 'video' }>;
+  /**
+   * 视频生成参考单数组（保序，与旧参考字段互斥）。
+   * 每项 asset_id（本地）与 material_id（素材库 asset- 前缀）二选一。
+   */
+  references?: GenerationRefItem[];
   /** 生成目标画布节点 id（仅 image/video，IKDLQF/IKDLQG）：携带时服务端按最新画布推导连线文本附件并冻结进任务快照 */
   target_node_id?: string;
+  /** 正文素材标签结构（IKFA1M，仅 image）：服务端按真实输入顺序编译并冻结原始结构；纯文本不携带 */
+  prompt_doc?: PromptDoc;
+}
+
+/** 生成任务参考项（视频 references 契约） */
+export interface GenerationRefItem {
+  role: 'first_frame' | 'last_frame' | 'reference';
+  type: 'image' | 'video' | 'audio';
+  asset_id?: string;
+  material_id?: string;
 }
 
 /** 创建/重试任务返回 */
@@ -138,6 +154,8 @@ export interface JobDetail {
   progress: number;
   /** 产物信息，succeeded 时有值 */
   asset: JobAsset | null;
+  /** 文本输入签名投影（IKFM3S）：succeeded 时前端回写目标节点 usedInputSignature；无则 null */
+  text_input_signature?: string | null;
   error?: JobError | null;
 }
 

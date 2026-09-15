@@ -3,7 +3,7 @@
 // 用户端（web 前端 + 用户可调 /api/**）不存在任何"退款/补偿/调余额"入口（边界 grep 验证）。
 import { createHash, timingSafeEqual } from "node:crypto";
 import { Body, Controller, Headers, Post } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import {

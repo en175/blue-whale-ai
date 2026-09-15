@@ -2,7 +2,7 @@ import type {
   NewApiAdminTopUpRow,
   NewApiAdminUserRow,
   NewApiLogRow,
-} from "@blue-whale/core";
+} from "@lib/core";
 import { quotaToCredits } from "@lib/shared/credits/credits.js";
 
 export type AdminOrderStatus = "success" | "failed" | "pending";

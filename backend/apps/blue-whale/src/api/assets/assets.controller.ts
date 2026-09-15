@@ -1,5 +1,5 @@
 import { Controller, Delete, Get, Param, Query } from "@nestjs/common";
-import { fail, ok } from "@blue-whale/contracts";
+import { fail, ok } from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";

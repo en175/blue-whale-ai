@@ -85,3 +85,8 @@ A change can pass one axis and fail the other:
 - Code that does exactly what the issue asked but breaks the project's conventions → **Spec pass, Standards fail.**
 
 Reporting them separately stops one axis from masking the other.
+
+
+## Repository code discovery
+
+Before code exploration or delegation, read `agent-rules/code-discovery.md`. Apply it before creating a worktree, pass its graph evidence to subagents, and include query-backed conclusions or evidenced fallback in the handoff/review. Index creation alone is not query evidence.

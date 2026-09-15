@@ -8,7 +8,7 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Response } from "express";
-import { fail, ok, RESOURCE_NOT_FOUND_CODE } from "@blue-whale/contracts";
+import { fail, ok, RESOURCE_NOT_FOUND_CODE } from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { wireInteger } from "@lib/shared/wire-integer.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
@@ -116,7 +116,7 @@ export class SceneCardGenerateController {
 
   /** POST /api/projects/:projectId/scene-cards/:sceneCardId/storyboard-preview
    *  User 从 SceneCard 显式触发分镜预览（CONTEXT L43-47，可选旁路）：建 type=image 的 GenerationJob，
-   *  其 N 个 output_slot 即有序画格。与 Dock 图片链路一致：Bearer <sk-token> 做额度预检与凭证密封。 */
+   *  其 N 个 output_slot 即有序画格。与 Dock 图片链路一致：Bearer <sk-token> 做额度预检，凭证明文透传（修正四：去密）。 */
   @Post("storyboard-preview")
   async storyboardPreview(
     @CurrentUser() user: AuthenticatedUser,
@@ -157,7 +157,7 @@ export class SceneCardGenerateController {
     );
 
     // 成功后即时调度首图 job（IKBGKA：走 RocketMQ 图片 consumer，消费端 Semaphore 控并发；
-    // 孤儿由 image-recovery 恢复扫描兜底）。
+    // 孤儿由 worker-java RecoveryService 重投 MQ 兜底）。
     if (result.code === 200 && result.data?.generation_job_id != null) {
       void enqueueImageGenerationJob(
         String(result.data.generation_job_id),

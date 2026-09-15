@@ -2,11 +2,13 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import ImageDialog, { type ImageTextAttachment } from './index';
-import styles from './index.module.css';
+import ImageDialog, { type ImageTextAttachment, type UploadedFile } from './index';
+import { REF_SOURCE_ENTRY_TITLE } from '../RefSourceMenu';
+import thumbStyles from '../RefThumbnail/index.module.css';
 
-/* IKDLQF：ImageDialog 文本附件只读展示（标题 + 正文预览，长文折叠），
-   以及契约限长规则在面板侧的落点——附件正文有效时允许空提示词提交。 */
+/* IKDLQF/IKFCKN：ImageDialog 文本附件——以 FileText 图标缩略图进入参考栏统一序列，
+   参与「文本N」独立编号（角标仅数字），× 断开当前连线、悬停 200ms 正文预览；
+   契约限长规则在面板侧的落点——附件正文有效时允许空提示词提交。 */
 
 const fetchGenerationModels = vi.hoisted(() =>
   vi.fn(async () => [
@@ -35,7 +37,12 @@ vi.mock('@/api/generation', () => ({ fetchGenerationModels }));
 let root: Root;
 let container: HTMLDivElement;
 
-async function renderDialog(props: { attachments?: ImageTextAttachment[]; onSend?: ReturnType<typeof vi.fn>; onReorderAttachments?: ReturnType<typeof vi.fn> } = {}) {
+async function renderDialog(props: {
+  attachments?: ImageTextAttachment[];
+  initialFiles?: UploadedFile[];
+  onSend?: ReturnType<typeof vi.fn>;
+  onRemoveAttachment?: ReturnType<typeof vi.fn>;
+} = {}) {
   const onSend = props.onSend ?? vi.fn();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -45,8 +52,9 @@ async function renderDialog(props: { attachments?: ImageTextAttachment[]; onSend
       createElement(ImageDialog, {
         onClose: vi.fn(),
         onSend,
+        initialFiles: props.initialFiles,
         attachments: props.attachments,
-        onReorderAttachments: props.onReorderAttachments,
+        onRemoveAttachment: props.onRemoveAttachment,
       }),
     );
   });
@@ -54,6 +62,34 @@ async function renderDialog(props: { attachments?: ImageTextAttachment[]; onSend
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
   return { onSend };
 }
+
+/** 参考栏内文本缩略图（dock-text-ref）与媒体缩略图（本地模式默认 ref-thumb） */
+const textThumbs = () => [...container.querySelectorAll('[data-testid="dock-text-ref"]')];
+const mediaThumbs = () => [...container.querySelectorAll('[data-testid="ref-thumb"]:not([data-testid="dock-text-ref"])')];
+/** 参考栏子节点的 testid 序列（校验媒体在前、文本在后、末尾「+」占位） */
+const rowTestids = () =>
+  [...(container.querySelector('[class*="previewRow"]')?.children ?? [])].map((el) =>
+    el.getAttribute('data-testid') ?? (el.querySelector(`button[title="${REF_SOURCE_ENTRY_TITLE}"]`) ? '+' : '?'),
+  );
+
+// React 的 onMouseEnter/Leave 由根委托的 mouseover/mouseout 合成派发（与 RefThumbnail 组件测试同法）
+function hover(el: Element) {
+  act(() => {
+    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+  });
+}
+
+function unhover(el: Element) {
+  act(() => {
+    el.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+  });
+}
+
+function preview(): Element | null {
+  return document.querySelector('[data-testid="ref-thumb-preview"]');
+}
+
+const wait = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
 
 function sendButton(): HTMLButtonElement {
   return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
@@ -71,49 +107,123 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-describe('ImageDialog 文本附件', () => {
-  it('展示附件来源标题与正文预览', async () => {
+describe('IKFCKN 文本附件进参考栏', () => {
+  const two: ImageTextAttachment[] = [
+    { nodeId: 't1', title: '故事文案', text: '一只蓝鲸在海里' },
+    { nodeId: 't2', title: '配色参考', text: '深蓝与银白' },
+  ];
+
+  it('文本附件以 FileText 图标缩略图进参考栏：与媒体同排（媒体在前）、编号圆钮仅数字', async () => {
+    await renderDialog({
+      initialFiles: [{ id: 'f1', url: 'https://x/a.png', type: 'image', name: '角色图' }],
+      attachments: two,
+    });
+
+    expect(mediaThumbs()).toHaveLength(1);
+    const thumbs = textThumbs();
+    expect(thumbs).toHaveLength(2);
+    // FileText 图标形态：无媒体节点（img/video），以 kindIcon 图标承载
+    for (const el of thumbs) {
+      expect(el.querySelector('img')).toBeNull();
+      expect(el.querySelector('video')).toBeNull();
+      expect(el.querySelector(`.${thumbStyles.kindIcon}`)).toBeTruthy();
+    }
+    // 编号圆钮仅显示数字：与附件顺序同源（文本1/文本2 → 1/2）
+    expect(thumbs[0].querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('1');
+    expect(thumbs[1].querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('2');
+    // 同排顺序：媒体在前、文本在后、末尾「+」占位
+    expect(rowTestids()).toEqual(['ref-thumb', 'dock-text-ref', 'dock-text-ref', '+']);
+  });
+
+  it('独立「文本附件（N）」区块不再出现：无区块标题、无折叠正文、无上移/下移', async () => {
+    await renderDialog({ attachments: two });
+
+    expect(container.textContent).not.toContain('文本附件（');
+    expect(container.textContent).not.toContain('故事文案');
+    expect(
+      [...container.querySelectorAll('button')].some((b) =>
+        ['上移', '下移'].includes(b.getAttribute('title') ?? ''),
+      ),
+    ).toBe(false);
+  });
+
+  it('点击 × 立即删除：仅调 onRemoveAttachment 断开当前连线（携带来源 nodeId），无确认弹窗', async () => {
+    const onRemoveAttachment = vi.fn();
+    await renderDialog({ attachments: two, onRemoveAttachment });
+
+    const removeBtns = textThumbs().map((el) =>
+      el.querySelector<HTMLButtonElement>('button[title="移除"]')!,
+    );
+    expect(removeBtns).toHaveLength(2);
+    await act(async () => {
+      removeBtns[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onRemoveAttachment).toHaveBeenCalledTimes(1);
+    expect(onRemoveAttachment).toHaveBeenCalledWith('t2');
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('悬停满 200ms 浮出正文内容预览；移出图标后延迟窗口内保持、超时关闭（IKFCX4）', async () => {
+    await renderDialog({ attachments: [{ nodeId: 't1', title: '故事文案', text: '一只蓝鲸在海里' }] });
+
+    const el = textThumbs()[0]!;
+    await act(async () => {
+      hover(el);
+      await wait(80);
+    });
+    expect(preview()).toBeNull();
+    await act(async () => {
+      await wait(250);
+    });
+    expect(preview()).toBeTruthy();
+    expect(preview()!.textContent).toContain('一只蓝鲸在海里');
+    // 预览无标题：来源名称不进浮层（图标本体的 title 提示不属于浮层内容）
+    expect(preview()!.textContent).not.toContain('故事文案');
+    await act(async () => {
+      unhover(el);
+    });
+    expect(preview(), '移出图标后短窗内不关闭（给移入浮层留时间）').toBeTruthy();
+    await act(async () => {
+      await wait(300);
+    });
+    expect(preview(), '未移入浮层则延迟后关闭').toBeNull();
+  });
+
+  it('同名文本卡不串用内容：多附件各自悬浮显示各自正文（IKFCX4）', async () => {
     await renderDialog({
       attachments: [
-        { nodeId: 't1', title: '故事文案', text: '一只蓝鲸在海里' },
-        { nodeId: 't2', title: '配色参考', text: '深蓝与银白' },
+        { nodeId: 't1', title: '雨夜', text: '赛博朋克，霓虹灯' },
+        { nodeId: 't2', title: '雨夜', text: '青石板路，油纸伞' },
       ],
     });
-
-    const region = container.querySelector(`.${styles.attachments}`);
-    expect(region).not.toBeNull();
-    expect(region!.textContent).toContain('故事文案');
-    expect(region!.textContent).toContain('一只蓝鲸在海里');
-    expect(region!.textContent).toContain('配色参考');
-    expect(region!.textContent).toContain('深蓝与银白');
-  });
-
-  it('长文默认折叠，点击展开后可见全文', async () => {
-    const longText = `开头。${'中段很长。'.repeat(40)}结尾。`;
-    await renderDialog({ attachments: [{ nodeId: 't1', title: '长文', text: longText }] });
-
-    const collapsed = () => container.querySelector(`.${styles.attachmentTextCollapsed}`);
-    const toggle = () =>
-      [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
-        ['展开', '收起'].includes(b.textContent ?? ''),
-      )!;
-
-    expect(collapsed()).not.toBeNull();
-    expect(toggle().textContent).toBe('展开');
+    const thumbs = textThumbs();
+    expect(thumbs).toHaveLength(2);
 
     await act(async () => {
-      toggle().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      hover(thumbs[0]!);
+      await wait(250);
     });
-    expect(collapsed()).toBeNull();
-    expect(toggle().textContent).toBe('收起');
-    expect(container.textContent).toContain('结尾。');
+    expect(preview()!.textContent).toContain('赛博朋克，霓虹灯');
+    await act(async () => {
+      unhover(thumbs[0]!);
+      await wait(300);
+    });
+    expect(preview()).toBeNull();
+
+    await act(async () => {
+      hover(thumbs[1]!);
+      await wait(250);
+    });
+    expect(preview()!.textContent).toContain('青石板路，油纸伞');
   });
 
-  it('无附件时不渲染附件区', async () => {
+  it('无文本附件时参考栏不出现文本缩略图', async () => {
     await renderDialog();
-    expect(container.querySelector(`.${styles.attachments}`)).toBeNull();
+    expect(textThumbs()).toHaveLength(0);
   });
+});
 
+describe('IKDLQF 文本附件发送门槛', () => {
   it('附件正文有效时允许空提示词提交', async () => {
     const { onSend } = await renderDialog({
       attachments: [{ nodeId: 't1', title: '故事文案', text: '一只蓝鲸在海里' }],
@@ -123,7 +233,7 @@ describe('ImageDialog 文本附件', () => {
     await act(async () => {
       sendButton().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
-    expect(onSend).toHaveBeenCalledWith('', 'm-test', '2k', '1:1', []);
+    expect(onSend).toHaveBeenCalledWith('', 'm-test', '2k', '1:1', [], null);
   });
 
   it('附件正文仅含空白时沿用提示词必填（发送禁用）', async () => {
@@ -136,80 +246,5 @@ describe('ImageDialog 文本附件', () => {
   it('无附件且提示词为空时保持提示词必填（发送禁用）', async () => {
     await renderDialog();
     expect(sendButton().disabled).toBe(true);
-  });
-});
-
-/* IKDLQH：多附件排序——上移/下移控件按 props 顺序渲染，点击经 onReorderAttachments 交出新序列 */
-describe('ImageDialog 文本附件排序（IKDLQH）', () => {
-  const three = [
-    { nodeId: 't1', title: '甲', text: '正文甲' },
-    { nodeId: 't2', title: '乙', text: '正文乙' },
-    { nodeId: 't3', title: '丙', text: '正文丙' },
-  ];
-
-  /** 附件项按 DOM 顺序取标题 */
-  const renderedTitles = () =>
-    [...container.querySelectorAll(`.${styles.attachmentItem}`)].map(
-      (el) => el.querySelector(`.${styles.attachmentTitle}`)!.textContent,
-    );
-  /** 第 index 个附件项的上移/下移按钮 */
-  const moveButton = (index: number, direction: '上移' | '下移') =>
-    [
-      ...container
-        .querySelectorAll(`.${styles.attachmentItem}`)
-        [index]!.querySelectorAll<HTMLButtonElement>('button'),
-    ].find((b) => b.getAttribute('title') === direction)!;
-
-  it('多附件按 props 顺序渲染并展示排序控件，首项禁用上移、末项禁用下移', async () => {
-    await renderDialog({ attachments: three, onReorderAttachments: vi.fn() });
-
-    expect(renderedTitles()).toEqual(['甲', '乙', '丙']);
-    expect(moveButton(0, '上移').disabled).toBe(true);
-    expect(moveButton(0, '下移').disabled).toBe(false);
-    expect(moveButton(1, '上移').disabled).toBe(false);
-    expect(moveButton(1, '下移').disabled).toBe(false);
-    expect(moveButton(2, '上移').disabled).toBe(false);
-    expect(moveButton(2, '下移').disabled).toBe(true);
-  });
-
-  it('点击首项下移：与下一项交换，回调交出新 nodeId 序列', async () => {
-    const onReorderAttachments = vi.fn();
-    await renderDialog({ attachments: three, onReorderAttachments });
-
-    await act(async () => {
-      moveButton(0, '下移').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-    expect(onReorderAttachments).toHaveBeenCalledWith(['t2', 't1', 't3']);
-  });
-
-  it('点击末项上移：与上一项交换，回调交出新 nodeId 序列', async () => {
-    const onReorderAttachments = vi.fn();
-    await renderDialog({ attachments: three, onReorderAttachments });
-
-    await act(async () => {
-      moveButton(2, '上移').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-    expect(onReorderAttachments).toHaveBeenCalledWith(['t1', 't3', 't2']);
-  });
-
-  it('单附件或无回调时不渲染排序控件', async () => {
-    await renderDialog({
-      attachments: [{ nodeId: 't1', title: '甲', text: '正文甲' }],
-      onReorderAttachments: vi.fn(),
-    });
-    expect(
-      [...container.querySelectorAll('button')].some((b) =>
-        ['上移', '下移'].includes(b.getAttribute('title') ?? ''),
-      ),
-    ).toBe(false);
-
-    await act(async () => root.unmount());
-    container.remove();
-    await renderDialog({ attachments: three });
-    expect(
-      [...container.querySelectorAll('button')].some((b) =>
-        ['上移', '下移'].includes(b.getAttribute('title') ?? ''),
-      ),
-    ).toBe(false);
   });
 });

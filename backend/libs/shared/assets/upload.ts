@@ -4,7 +4,7 @@ import {
   RESOURCE_NOT_FOUND_CODE,
   assetError,
   ok,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import {
   FILE_SIGNATURE_HEAD_BYTES,
   sniffFileSignature,

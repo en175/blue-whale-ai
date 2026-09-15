@@ -17,7 +17,8 @@ let props: ComponentProps<typeof FlowCanvas>;
 
 interface TextCallbacks {
   onDraftError: ReturnType<typeof vi.fn>;
-  onChange: ReturnType<typeof vi.fn>;
+  onTextChange: ReturnType<typeof vi.fn>;
+  onTitleChange: ReturnType<typeof vi.fn>;
   onAddToChat: ReturnType<typeof vi.fn>;
   onDelete: ReturnType<typeof vi.fn>;
   onDuplicate: ReturnType<typeof vi.fn>;
@@ -69,11 +70,12 @@ async function finishGesture() {
  * 每个用例只挂载一次：画布对同 id 文本节点只同步新增与移除，重复渲染不会替换已注入的回调。
  */
 async function renderText(
-  overrides: { html?: string; toolMode?: 'drag' | 'select'; selected?: boolean; zoom?: number } = {},
+  overrides: { text?: string; html?: string; title?: string; toolMode?: 'drag' | 'select'; selected?: boolean; zoom?: number } = {},
 ): Promise<TextCallbacks> {
   const callbacks: TextCallbacks = {
     onDraftError: vi.fn(),
-    onChange: vi.fn(),
+    onTextChange: vi.fn(),
+    onTitleChange: vi.fn(),
     onAddToChat: vi.fn(),
     onDelete: vi.fn(),
     onDuplicate: vi.fn(),
@@ -89,7 +91,8 @@ async function renderText(
       type: 'textNode',
       position: { x: 50, y: 60 },
       selected: overrides.selected ?? false,
-      data: { html: overrides.html ?? '', toolMode, ...callbacks },
+      // IKFM3L：正文统一为 Markdown 源（text 权威），html 仅存量兼容兜底
+      data: { ...(overrides.text !== undefined ? { text: overrides.text } : { html: overrides.html ?? '' }), ...(overrides.title !== undefined ? { title: overrides.title } : {}), toolMode, ...callbacks },
     }],
   };
   await act(async () => { root.render(createElement(FlowCanvas, next)); });
@@ -177,14 +180,14 @@ describe('Canvas 文本节点卡片', () => {
     expect(callbacks.onAddToChat).toHaveBeenCalledWith(TEXT_ID);
   });
 
-  it('双击进入编辑，输入内容经原有通路保存', async () => {
-    const callbacks = await renderText({ html: '<p>原内容</p>' });
+  it('双击进入编辑，输入内容经统一通路保存为 Markdown 源', async () => {
+    const callbacks = await renderText({ text: '原内容' });
     await startEditing();
     await act(async () => {
       editor().innerHTML = '<p>原内容</p><p>补充的一段</p>';
       editor().dispatchEvent(new Event('input', { bubbles: true }));
     });
-    expect(callbacks.onChange).toHaveBeenCalledWith(TEXT_ID, expect.stringContaining('补充的一段'));
+    expect(callbacks.onTextChange).toHaveBeenCalledWith(TEXT_ID, '原内容\n\n补充的一段');
   });
 
   it('编辑时格式工具栏与节点操作同处一层，不叠成多行', async () => {
@@ -207,8 +210,20 @@ describe('Canvas 文本节点卡片', () => {
 
   // IKDLQE: truncation was retired; complete paste and over-limit drafts are covered by real-browser integration.
 
-  it('滚轮在正文内遵循内部阅读语义，不缩放画布', async () => {
+  it('非编辑态滚轮在正文上平移画布', async () => {
     await renderText({ html: '<p>需要滚动才能读完的正文</p>' });
+    const viewportTransform = () =>
+      container.querySelector<HTMLElement>('.react-flow__viewport')!.style.transform;
+    expect(viewportTransform()).toBe('translate(0px,0px) scale(1)');
+    await act(async () => {
+      editor().dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
+    });
+    expect(viewportTransform()).toBe('translate(0px,-60px) scale(1)');
+  });
+
+  it('编辑态滚轮留在正文内，不平移画布', async () => {
+    await renderText({ html: '<p>需要滚动才能读完的正文</p>' });
+    await startEditing();
     const viewportTransform = () =>
       container.querySelector<HTMLElement>('.react-flow__viewport')!.style.transform;
     expect(viewportTransform()).toBe('translate(0px,0px) scale(1)');
@@ -244,11 +259,159 @@ describe('Canvas 文本节点卡片', () => {
     await act(async () => {
       content().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 90 }));
     });
+    // 标题行操作条「添加到对话」按钮 + 右键菜单四项（添加到聊天/创建副本/粘贴/删除）
+    // （c220ade0 画布交互优化：「复制」改为「创建副本」，新增「粘贴」；标题行常驻「添加到对话」） */
     const menuItems = [...document.body.querySelectorAll('button')].map((b) => b.textContent?.trim());
-    expect(menuItems).toEqual(expect.arrayContaining(['添加到聊天', '复制', '删除']));
+    expect(menuItems).toEqual(expect.arrayContaining(['添加到聊天', '创建副本', '粘贴', '删除']));
     const remove = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === '删除')!;
     await act(async () => { remove.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
     expect(callbacks.onDelete).toHaveBeenCalledWith(TEXT_ID);
+  });
+});
+
+describe('Canvas 文本节点标题改名（IKFA8X）', () => {
+  function titleInput(): HTMLInputElement | null {
+    return title().querySelector('input');
+  }
+
+  /** React 受控输入框填值：绕过 value tracker 后派发 input 事件 */
+  async function typeTitle(value: string) {
+    const input = titleInput()!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  async function keyOnTitle(key: string, init: KeyboardEventInit = {}) {
+    await act(async () => {
+      titleInput()!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
+    });
+  }
+
+  async function blurTitle() {
+    await act(async () => {
+      titleInput()!.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+  }
+
+  async function startRename() {
+    await act(async () => {
+      title().querySelector('span')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+    });
+  }
+
+  it('双击名称原位编辑并带出当前名称', async () => {
+    await renderText({ title: '分镜大纲' });
+    expect(titleInput()).toBeNull();
+    await startRename();
+    expect(titleInput()?.value).toBe('分镜大纲');
+  });
+
+  it('回车保存去首尾空格后的名称并退出编辑', async () => {
+    const callbacks = await renderText({ title: '分镜大纲' });
+    await startRename();
+    await typeTitle('  终极版大纲  ');
+    await keyOnTitle('Enter');
+    expect(callbacks.onTitleChange).toHaveBeenCalledWith(TEXT_ID, '终极版大纲');
+    expect(titleInput()).toBeNull();
+  });
+
+  it('失焦保存名称', async () => {
+    const callbacks = await renderText({ title: '分镜大纲' });
+    await startRename();
+    await typeTitle('新名字');
+    await blurTitle();
+    expect(callbacks.onTitleChange).toHaveBeenCalledWith(TEXT_ID, '新名字');
+    expect(titleInput()).toBeNull();
+  });
+
+  it('回车保存后失焦不重复提交', async () => {
+    const callbacks = await renderText({ title: '分镜大纲' });
+    await startRename();
+    await typeTitle('新名字');
+    await keyOnTitle('Enter');
+    expect(callbacks.onTitleChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('Esc 恢复编辑前名称，随后失焦不再保存取消内容', async () => {
+    const callbacks = await renderText({ title: '分镜大纲' });
+    await startRename();
+    await typeTitle('被放弃的名字');
+    await keyOnTitle('Escape');
+    expect(callbacks.onTitleChange).not.toHaveBeenCalled();
+    expect(titleInput()).toBeNull();
+    expect(title().textContent).toContain('分镜大纲');
+  });
+
+  it('空白或全空格提交保留原名', async () => {
+    const callbacks = await renderText({ title: '分镜大纲' });
+    await startRename();
+    await typeTitle('   ');
+    await keyOnTitle('Enter');
+    expect(callbacks.onTitleChange).not.toHaveBeenCalled();
+    expect(title().textContent).toContain('分镜大纲');
+  });
+
+  it('名称未变化时提交不触发回调', async () => {
+    const callbacks = await renderText({ title: '分镜大纲' });
+    await startRename();
+    await keyOnTitle('Enter');
+    expect(callbacks.onTitleChange).not.toHaveBeenCalled();
+    expect(titleInput()).toBeNull();
+  });
+
+  it('100 个字符可保存', async () => {
+    const callbacks = await renderText({ title: '分镜大纲' });
+    const name = '鲸'.repeat(100);
+    await startRename();
+    await typeTitle(name);
+    await keyOnTitle('Enter');
+    expect(callbacks.onTitleChange).toHaveBeenCalledWith(TEXT_ID, name);
+  });
+
+  it('101 个字符提示超长：保留编辑内容、不保存、不截断', async () => {
+    const callbacks = await renderText({ title: '分镜大纲' });
+    const name = '鲸'.repeat(101);
+    await startRename();
+    await typeTitle(name);
+    await keyOnTitle('Enter');
+    expect(callbacks.onTitleChange).not.toHaveBeenCalled();
+    expect(node().querySelector('[role="alert"]')?.textContent).toContain('100');
+    expect(titleInput()?.value).toBe(name);
+  });
+
+  it('超长报错后失焦不写入，修正后正常保存', async () => {
+    const callbacks = await renderText({ title: '分镜大纲' });
+    await startRename();
+    await typeTitle('鲸'.repeat(101));
+    await blurTitle();
+    expect(callbacks.onTitleChange).not.toHaveBeenCalled();
+    await typeTitle('修正后的名字');
+    await keyOnTitle('Enter');
+    expect(callbacks.onTitleChange).toHaveBeenCalledWith(TEXT_ID, '修正后的名字');
+    expect(node().querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('中文输入法组合期间的回车不提交', async () => {
+    const callbacks = await renderText({ title: '分镜大纲' });
+    await startRename();
+    await typeTitle('拼音');
+    await keyOnTitle('Enter', { isComposing: true });
+    expect(callbacks.onTitleChange).not.toHaveBeenCalled();
+    expect(titleInput()).not.toBeNull();
+    await keyOnTitle('Enter');
+    expect(callbacks.onTitleChange).toHaveBeenCalledWith(TEXT_ID, '拼音');
+  });
+
+  it('超长标题草稿仅提示，不作为草稿错误阻断画布', async () => {
+    const callbacks = await renderText({ title: '分镜大纲' });
+    await startRename();
+    await typeTitle('鲸'.repeat(101));
+    await keyOnTitle('Enter');
+    // 名称超长是产品层提示，不进 onDraftError（不阻断画布自动保存）
+    expect(callbacks.onDraftError).not.toHaveBeenCalledWith(TEXT_ID, expect.stringContaining('100'));
   });
 });
 
@@ -266,8 +429,8 @@ describe('Canvas 文本节点标题分段缩放', () => {
     await renderText({ zoom, html: '<p>一段正文</p>' });
     expect(titleVar('--node-title-name') * zoom).toBeCloseTo(nameScreen, 2);
     expect(titleVar('--node-title-icon') * zoom).toBeCloseTo(iconScreen, 2);
-    // 名称与正文大小策略独立：正文编辑区不随标题变量缩放
-    expect(title().textContent).toBe('文本节点');
+    // 名称与正文大小策略独立：正文编辑区不随标题变量缩放；统一后标题行含「展开全文」入口
+    expect(title().textContent).toContain('文本节点');
   });
 
   it('缩放与选中、拖动组合时位置与标题稳定，操作条仍可达', async () => {
@@ -285,7 +448,7 @@ describe('Canvas 文本节点标题分段缩放', () => {
 
     await renderText({ selected: true, zoom: 1.5, html: '<p>组合操作正文</p>' });
     expect(node().style.transform).toBe(draggedPosition);
-    expect(title().textContent).toBe('文本节点');
+    expect(title().textContent).toContain('文本节点');
     expect(node().textContent).toContain('组合操作正文');
     expect(actions()).toContain('添加到对话');
   });
@@ -296,17 +459,16 @@ it('reports invalid text to the canvas and clears the error after correction', a
   const callbacks = await renderText();
   await startEditing();
   await act(async () => {
-    Object.defineProperty(editor(), 'innerText', { configurable: true, value: '长'.repeat(100001) });
+    editor().textContent = '长'.repeat(100001);
     editor().dispatchEvent(new Event('input', { bubbles: true }));
   });
-  expect(callbacks.onChange).not.toHaveBeenCalled();
+  expect(callbacks.onTextChange).not.toHaveBeenCalled();
   expect(callbacks.onDraftError).toHaveBeenLastCalledWith(TEXT_ID, expect.stringContaining('100000'));
   expect(node().textContent).toContain('草稿已保留');
   await act(async () => {
-    Object.defineProperty(editor(), 'innerText', { configurable: true, value: '修正正文' });
-    editor().innerHTML = '修正正文';
+    editor().textContent = '修正正文';
     editor().dispatchEvent(new Event('input', { bubbles: true }));
   });
   expect(callbacks.onDraftError).toHaveBeenLastCalledWith(TEXT_ID, '');
-  expect(callbacks.onChange).toHaveBeenLastCalledWith(TEXT_ID, '修正正文');
+  expect(callbacks.onTextChange).toHaveBeenLastCalledWith(TEXT_ID, '修正正文');
 });

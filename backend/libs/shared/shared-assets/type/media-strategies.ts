@@ -1,8 +1,8 @@
-import { ASSET_UNAVAILABLE_CODE } from "@blue-whale/contracts";
+import { ASSET_UNAVAILABLE_CODE } from "@lib/contracts";
 import type {
   SaveSharedAssetRequest,
   SharedAssetKind,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { SharedAssetError } from "../shared-asset-error.js";
 import type { SharedAssetSourcePort } from "../shared-asset-source.port.js";
 import {

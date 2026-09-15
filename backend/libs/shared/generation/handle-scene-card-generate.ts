@@ -9,9 +9,9 @@ import {
   fail,
   ok,
   sceneCardRegenerationRequestSchema,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import type { SceneCardGenerationRepo } from "@lib/shared/persistence/index.js";
-import type { CostReservationSnapshot } from "@blue-whale/core";
+import type { CostReservationSnapshot } from "@lib/core";
 
 import { wireInteger } from "@lib/shared/wire-integer.js";
 import type { GenerationCostEstimator } from "./cost-estimator.js";

@@ -2,6 +2,8 @@
 
 本目录是项目文档**唯一权威区**。新增文档必须按分区归位——**禁止在仓库根目录或代码目录随意新建文件夹**（历史教训：`blue-whale-agent-workspace/` 杂烩目录）。
 
+本仓代码探索规则例外：根 `agent-rules/code-discovery.md` 按规则归位协议承载详细规则；`docs/agents/code-intelligence.md` 仅作工具导航，不重复维护行为规则。
+
 ## 文档分区总览
 
 | 分区 | 内容 | 主要作者 |

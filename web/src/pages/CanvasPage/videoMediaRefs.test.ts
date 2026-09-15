@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canAddRefRole,
   isVideoDraftNode,
+  readDraftMaterialRefs,
   readRefRole,
   videoMediaRefsOf,
   videoRefConflict,
@@ -124,6 +125,48 @@ describe('videoMediaRefsOf 连线推导分组参考', () => {
       first: { nodeId: 'm1', url: 'http://img/m1.png', name: '图m1', assetId: 'a1', mediaType: 'image' },
     });
   });
+
+  it('来源节点回填的正数时长随参考携带（IKFCKQ 音频缩略图预览）；缺失或非法不携带', () => {
+    const withDuration = [
+      readyImage('m1', 'a1', { duration: 95 }),
+      readyImage('bad1', 'a6', { duration: 0 }),
+      readyImage('bad2', 'a7', { duration: 'x' }),
+    ];
+    const edges = [edge('e1', 'm1', 'd1'), edge('e2', 'bad1', 'd1'), edge('e3', 'bad2', 'd1')];
+    const refs = videoMediaRefsOf('d1', edges, withDuration);
+    expect(refs.reference[0]).toMatchObject({ nodeId: 'm1', duration: 95 });
+    expect(refs.reference[1]).toMatchObject({ nodeId: 'bad1' });
+    expect(refs.reference[1]!.duration).toBeUndefined();
+    expect(refs.reference[2]!.duration).toBeUndefined();
+  });
+});
+
+describe('readDraftMaterialRefs 角色库草稿参考解析（IKFC1T 修复防回归）', () => {
+  it('合法项完整解析；断言写法回归（raw 取到 data 整体）会在此暴露', () => {
+    const node = mediaNode('d1', {
+      draftMaterialRefs: [
+        { materialId: 'asset-1', url: 'http://img/1.png', name: '角色立绘', mediaType: 'image', role: 'reference' },
+        { materialId: 'asset-2', url: 'http://img/2.png', mediaType: 'video', role: 'first' },
+      ],
+    });
+    expect(readDraftMaterialRefs(node)).toEqual([
+      { materialId: 'asset-1', url: 'http://img/1.png', name: '角色立绘', mediaType: 'image', role: 'reference' },
+      { materialId: 'asset-2', url: 'http://img/2.png', name: 'asset-2', mediaType: 'video', role: 'first' },
+    ]);
+  });
+
+  it('字段缺失/形态非法逐项跳过；无字段返回空数组', () => {
+    expect(readDraftMaterialRefs(undefined)).toEqual([]);
+    expect(readDraftMaterialRefs(mediaNode('d1', {}))).toEqual([]);
+    expect(readDraftMaterialRefs(mediaNode('d1', { draftMaterialRefs: 'not-array' }))).toEqual([]);
+    expect(readDraftMaterialRefs(mediaNode('d1', {
+      draftMaterialRefs: [
+        { url: 'http://img/x.png', mediaType: 'image', role: 'reference' }, // 缺 materialId
+        { materialId: 'asset-3', mediaType: 'audio', role: 'reference' },   // 非法类型
+        { materialId: 'asset-4', url: 'http://img/4.png', mediaType: 'image', role: 'hero' }, // 非法角色
+      ],
+    }))).toEqual([]);
+  });
 });
 
 describe('videoRefConflict 组合校验（与服务端 400 同口径 + 能力位）', () => {
@@ -131,28 +174,22 @@ describe('videoRefConflict 组合校验（与服务端 400 同口径 + 能力位
     nodeId: id, url: `http://img/${id}.png`, name: id, assetId, mediaType: 'image',
   });
 
-  it('空输入与合法组合（纯参考 / 首尾帧齐全）不阻止', () => {
+  it('空输入与合法组合（纯参考 / 完整首尾帧）不阻止', () => {
     expect(videoRefConflict({ reference: [] }, allCaps)).toBeNull();
     expect(videoRefConflict({ reference: [ref('m1')] }, allCaps)).toBeNull();
     expect(videoRefConflict({ reference: [], first: ref('f1'), last: ref('f2') }, allCaps)).toBeNull();
   });
 
-  // 2026-09-09「首尾帧提示规范调整」（9d0ec91e）改了发送口径：**添加**阶段可以先只放其中一个，
-  // **发送**阶段两个都得有，缺哪个提示补哪个。测试当时没跟着改，这三条从那天起就红着。
-  it('首尾帧只有一个：按缺项提示补全', () => {
-    expect(videoRefConflict({ reference: [], first: ref('f1') }, allCaps)).toBe('请补充尾帧');
+  it('首尾帧缺项或与普通参考混用时被阻止并给出原因', () => {
     expect(videoRefConflict({ reference: [], last: ref('f2') }, allCaps)).toBe('请补充首帧');
-  });
-
-  it('首尾帧与普通参考混用被阻止并给出原因', () => {
+    expect(videoRefConflict({ reference: [], first: ref('f1') }, allCaps)).toBe('请补充尾帧');
     expect(videoRefConflict({ reference: [ref('m1')], first: ref('f1') }, allCaps)).toBe('首尾帧与普通参考不能混用，请移除其中一类输入');
     expect(videoRefConflict({ reference: [ref('m1')], first: ref('f1'), last: ref('f2') }, allCaps)).toBe('首尾帧与普通参考不能混用，请移除其中一类输入');
   });
 
-  // 首帧/尾帧**不看**模型能力位（同上那次改动的另一半）：服务端的 first_last_frame /
-  // last_frame 标记不可靠，实际能不能用以后端返回为准，所以前端不拦。普通参考照旧拦。
-  it('首尾帧不做能力位门控；普通参考仍按能力位拦', () => {
+  it('首尾帧不按不可靠能力位拦截，普通参考仍校验能力', () => {
     expect(videoRefConflict({ reference: [], first: ref('f1'), last: ref('f2') }, { ...allCaps, firstLastFrame: false })).toBeNull();
+    expect(videoRefConflict({ reference: [], first: ref('f1'), last: ref('f2') }, { ...allCaps, firstFrame: false })).toBeNull();
     expect(videoRefConflict({ reference: [], first: ref('f1'), last: ref('f2') }, { ...allCaps, lastFrame: false })).toBeNull();
     expect(videoRefConflict({ reference: [ref('m1')] }, { ...allCaps, referenceImage: false })).toBe('当前模型不支持图片参考，请移除普通参考');
   });
@@ -169,12 +206,13 @@ describe('canAddRefRole 角色槽可用性', () => {
     expect(canAddRefRole('first', { reference: [] }, { ...allCaps, firstFrame: false })).toBe(false);
   });
 
-  // 添加阶段首帧与尾帧互相独立：先放哪个都行，缺的那个到发送时才提示（9d0ec91e）。
-  it('尾帧槽：能力支持且空闲就可加，不要求先有首帧', () => {
+  it('尾帧槽：能力支持且空闲即可添加，不要求先添加首帧', () => {
     expect(canAddRefRole('last', { reference: [] }, allCaps)).toBe(true);
     expect(canAddRefRole('last', { reference: [], first: ref('f1') }, allCaps)).toBe(true);
     expect(canAddRefRole('last', { reference: [], first: ref('f1'), last: ref('f2') }, allCaps)).toBe(false);
-    expect(canAddRefRole('last', { reference: [] }, { ...allCaps, lastFrame: false })).toBe(false);
+    // 添加阶段独立占槽；提交时再要求首尾帧齐全。
+    expect(canAddRefRole('last', { reference: [], first: ref('f1') }, { ...allCaps, firstLastFrame: false })).toBe(true);
+    expect(canAddRefRole('last', { reference: [], first: ref('f1') }, { ...allCaps, lastFrame: false })).toBe(false);
   });
 
   it('普通参考槽：仅取决于参考图能力位', () => {
