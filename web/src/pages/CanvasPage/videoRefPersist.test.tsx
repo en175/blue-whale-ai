@@ -542,7 +542,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     expect(container.textContent).toContain('720p');
   });
 
-  it('点击画布空白：视频面板保持打开（既有行为），参考与提示词保留', async () => {
+  it('点击空白隐藏面板后重开：参考与提示词保留，选取模式不恢复', async () => {
     await renderPage();
     await clickNode('d1');
     await waitModelReady();
@@ -553,17 +553,14 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await typePrompt('空白点击保留');
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图']));
 
-    // 视频底部对话框点击画布空白不自动关闭（CanvasPage 既有语义），编辑与连线保留；
-    // IKFR4Y 会话中空白点击同样不退出（模式保持），编辑在会话中只读、退出后可用
+    // 普通模式点击画布空白：面板隐藏，连线与写回内容保留
     await act(async () => {
       flowProps.current.onPaneClick();
     });
-    expect(panelVisible()).toBe(true);
+    expect(panelVisible()).toBe(false);
     expect(edgePairs()).toEqual(['m1->d1']);
-    expect(readPromptRefText(container)).toBe('空白点击保留');
 
     // 重开草稿卡：恢复；不恢复选取模式（无选取提示条）
-    await closePanel();
     await clickNode('d1');
     await vi.waitFor(() => expect(panelVisible()).toBe(true));
     await vi.waitFor(() => expect(dockRefNames()).toEqual(['首图']));

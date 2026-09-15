@@ -2228,12 +2228,12 @@ export default function CanvasPage() {
     setPickTarget(null);
     setPickProductId(null);
     setPickAssetId(null);
-    // Q9：点击空白隐藏图片/音频生成面板（面板编辑已实时写回节点 data，隐藏不丢弃内容）。
-    // 视频底部对话框无论由工具栏还是节点唤起，点击画布其他位置均不自动关闭。
+    // 点击空白隐藏图片/视频/音频生成面板（编辑已实时写回节点，隐藏不丢弃内容）。
     // 空白点击在 React Flow 是 PaneClick；onSelectionChange 的空选中可能是
     // 「取消旧选中→选中新卡」的过渡事件，不能作为关闭依据（IKDMQV）。
     if (imageDraftId) setShowImageDialog(false);
     if (audioDraftId) setShowAudioDialog(false);
+    if (videoDraftId) setShowBottomDialog(false);
   };
 
   /** 选中变化（IKDMQU P1/Q9，IKDMQV 修订）：多选或单选切换到非绑定目标时隐藏面板；

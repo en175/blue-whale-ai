@@ -180,8 +180,9 @@ export default function AudioPlayer({ src }: AudioPlayerProps) {
 
   const progressPct = duration ? (currentTime / duration) * 100 : 0;
 
+  // 不拦截点击：主体点击需冒泡到节点，才能打开音频对话框（与标题区域一致）
   return (
-    <div className={styles.audioPlayer} onClick={(e) => e.stopPropagation()}>
+    <div className={styles.audioPlayer}>
       <audio
         ref={audioRef}
         src={src}
