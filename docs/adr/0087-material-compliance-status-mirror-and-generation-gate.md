@@ -13,8 +13,9 @@
 现状有三处缺口，且都不是疏漏而是文档化的设计意图：
 
 1. **后端对状态零感知**。`backend/libs/shared/material/**`、`generation/**`、`packages/core/src` 全仓 grep `Active|Processing|Failed` 零命中。`handle-create-generation-job.ts:872` 原文：「仅本地 Asset 引用需要查存在性；素材库引用（asset:// 载体）由上游强校验，格式已在前置校验。」
-2. **前端拿「上传成功」当「校验通过」**。`web/src/pages/CanvasPage/characterLibraryDeposit.ts` 只调一次 `CreateAsset` 并取其 `Id` 作为 `materialId`；`CanvasPage/index.tsx:3280-3330` 在拿到 `Id` 的同一刻 toast「校验通过，可用于seedance2.0视频生成」并置 `compliancePassed: true`。**没有轮询、没有等 `Active`**——而 `CreateAsset` 返回时素材还是 `Processing`，校验结果尚不存在。
-3. **两条绕过路径**：重试路径 `generation-command-repo.ts:509` 逐字拷贝原 `input`，无任何重校验；本地 `Asset` 已绑 `material_id` 时由 worker 自动转 `asset://<id>`（`video-job-runner.ts:687-752`），前端物理上无从拦截。
+2. **两条绕过路径**：重试路径 `generation-command-repo.ts:509` 逐字拷贝原 `input`，无任何重校验；本地 `Asset` 已绑 `material_id` 时由 worker 自动转 `asset://<id>`（`video-job-runner.ts:687-752`），前端物理上无从拦截。
+
+> **勘误（2026-09-15）**：本 ADR 初稿列的缺口 2「前端拿『上传成功』当『校验通过』、没有轮询」**对 0915 树不成立**，已删除。前端同期已由 `03b107d2`（IKFVMQ，mwq，2026-09-15 16:17，「画布合规校验改为轮询 GetAsset」）补齐：`characterLibraryDeposit.ts:67` 在 `CreateAsset` 后 `await waitAssetReady(Id)` 轮询到 `Active`，`CanvasPage/index.tsx:3323` 复用既有 `materialId` 时同样 `await waitComplianceAssetReady`，两者都是**通过后才**置 `compliancePassed: true`，失败走 `failNodeCompliance`。该提交在本 ADR 的基点之前，属初稿读漏，非后续变化。**本 ADR 的动机因此收窄为「后端侧零感知」这一条**——前端已经做到「等到 `Active` 才放行」，缺的一直是后端那道闸；不补后端，用户 A 上传通过的素材被用户 B、或同一用户在重试/本地 Asset 转换路径上绕开校验，前端轮询管不着。
 
 ADR-0077 当时明确否决过「创建生成任务时同步调 `GetAsset` 预检」（理由：预检通过≠执行时仍有效）。本次决策**不与之矛盾**：那条否决的是「用预检**替代**上游强校验」，本次要的是「用前置校验**拒绝**已知不可用的输入」——拦截非法输入与信任上游是两件事。
 
@@ -94,7 +95,7 @@ ADR-0077 当时明确否决过「创建生成任务时同步调 `GetAsset` 预�
 
 - `CONTEXT.md` 的「素材状态」「素材库」「素材引用」三条修订：**「本地不镜像状态」正式作废**。「合规校验」「素材校验状态」两条新增为术语。
 - **显式假设（未验证）：`Active` 是终态，上游判定后不会再漂回 `Failed`。** 本次设计的三分支规则依赖它。本仓与网关仓均无证据支持或反对。本 ADR 落定后据此设计，将来若出现 `Active` 漂移，第一处该复查的就是本条。
-- **前端需配合改动**：现状「拿到 `Id` 即宣布校验通过」在 Active-only 下会变成「刚说通过、转头不让用」。**需独立前端工单**（**开发完成后再提，不阻塞后端开工**）：拿到 `Id` 后轮询到 `Active` 才置 `compliancePassed`。对接细节已写进 `docs/api/material-library.md` **v2**（§3.1 / §3.3 / §5.1 / §5.2 / §7 / §8 / §9），前端工单直接引用该文档即可，不必再翻本 ADR。
+- **前端需配合改动（远小于初稿判断）**：前端**已经**做到「轮询到 `Active` 才置 `compliancePassed`」（IKFVMQ，见上文勘误），不需要再加轮询。真正剩下的是**处理生成侧新出现的 400**：用户在素材通过后又把它用在一张已 `Failed` 的原卡上重试、或素材状态漂移时，创建/重试会返回 `400 + invalid_reference`，需按 `msg` 分流提示（「未审核通过」引导重走校验 / 「校验失败请稍后重试」给重试按钮）。对接细节见 `docs/api/material-library.md` **v2**（§3.1 / §3.3 / §5.1 / §5.2 / §7 / §8 / §9）。
 - **`assets.material_id` 的唯一索引 `uq_asset_material_id` 维持不动。** 经核查它在当前全部流程下都是正确的：右键合规校验命中已有 `materialId` 时跳过上传（`CanvasPage/index.tsx:3291`），同类文件走本地 Asset 的 md5 去重落到同一 asset 行，重复上传素材库得到的是不同 `material_id` 且关联为覆盖写。素材↔本地 Asset 确为 1:1，不是缺陷。将来若要「跨项目复用同一素材」才需要动它。
 - **存量数据不回填**：已写 `assets.material_id` 但本表无记录的素材，按「无记录 → 实时查上游」处理，行为等价于放行且更准确。
 - **定时器依赖用户 `sk-`，且 `sk-` 会轮换。** 网关不提供服务级素材查询入口，定时器只能按 `userId` 取用户凭证。ADR-0062 item 10 保留轮换语义（「凭证泄露后的轮换属于独立管理员安全操作」）；轮换后列内旧值失效 → 定时器对该用户吃 401 → 停止跟进，直到该用户下次登录刷新。**这与 ADR-0062 item 11 既有的退化口径一致**（「管理员轮换导致旧任务凭证失效时任务明确失败并由 User 重新提交」），不是新增故障模式。
