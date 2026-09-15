@@ -661,7 +661,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       </div>
 
       {(contentError || titleError) && <div role="alert" className="nodrag nopan">{contentError || titleError}</div>}
-      {/* 固定正文容器：360×270（含内边距）。仅编辑态拦截滚轮做正文滚动，非编辑态交给画布平移（IKFMQO TC_CX_001/015） */}
+      {/* 固定正文容器：360×270（含内边距）。仅编辑态加 nowheel 拦截滚轮做正文滚动；
+          非编辑态不得成为滚动容器，否则 Ctrl+滚轮/捏合到不了画布（IKFN9H） */}
       <div className={`${styles.contentCard}${editing ? ' nowheel' : ''}`} data-testid="text-content" style={expanded ? { height: 540, maxHeight: '70vh' } : undefined}>
         {/* IKFM3Q 契约 §4：每张文本卡都可能承接媒体索引关系线，target 连接点常驻
            （isFirst 首卡与其余卡一致；连接点默认透明，悬停/连接中才可见，无视觉成本；
@@ -686,12 +687,11 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         )}
         <div
           ref={editorRef}
-          className={`${styles.editor} ${editing ? 'nodrag nopan' : ''}`}
+          className={`${styles.editor} ${editing ? `${styles.editorScrolling} nodrag nopan` : ''}`}
           contentEditable={editing ? true : false}
           suppressContentEditableWarning
           style={{
             pointerEvents: isSelect && (!isTextGen || writingSelf) ? 'auto' : 'none',
-            overflowY: editing ? 'auto' : 'hidden',
           }}
           onFocus={() => setIsFocused(true)}
           onBlur={(e) => {
