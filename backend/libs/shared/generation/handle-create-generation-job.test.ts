@@ -1624,6 +1624,9 @@ describe("handleCreateGenerationJob 视频参数能力目录前置（IKE7JP）",
     );
     expect(result.code).toBe(200);
     expect(createJob).toHaveBeenCalled();
+    // IKG0FR 的保证是「值原样到达 worker」，不只是「没被拒」——冻结进快照的必须是 4k 本身
+    const frozen = (createJob.mock.calls[0][0] as { input: Record<string, unknown> }).input;
+    expect(frozen.resolution).toBe("4k");
   });
 
   // IKG0LP：视频带音频——能力位 features.audio 允许时冻结用户选择（缺省 true）；

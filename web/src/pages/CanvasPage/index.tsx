@@ -6501,6 +6501,8 @@ export default function CanvasPage() {
       size: seed.resolution,
       duration: seed.duration,
       mode: seed.mode,
+      // IKG0LP：首页带的音频选择必须落进草稿卡，否则关掉面板重开就丢了
+      generateAudio: seed.generateAudio,
     });
     openVideoDraftDialog(nodeId, seed);
   };

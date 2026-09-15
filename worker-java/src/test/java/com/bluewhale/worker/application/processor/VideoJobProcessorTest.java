@@ -1040,6 +1040,27 @@ class VideoJobProcessorTest {
         }
 
         @Test
+        @DisplayName("IKG0LP：快照里的 generate_audio 透传到提交请求；缺失时为 null（不下发）")
+        void generateAudioFromSnapshot() {
+            Map<String, Object> withFalse = baseInput();
+            withFalse.put("generate_audio", Boolean.FALSE);
+            assertThat(processor.buildSubmitRequest(
+                    videoClaim("303", false, null, 0, 0, null, withFalse)).generateAudio())
+                    .isFalse();
+
+            Map<String, Object> withTrue = baseInput();
+            withTrue.put("generate_audio", Boolean.TRUE);
+            assertThat(processor.buildSubmitRequest(
+                    videoClaim("304", false, null, 0, 0, null, withTrue)).generateAudio())
+                    .isTrue();
+
+            // 能力位不允许 / 旧快照：字段缺失 → null → 出站不下发，维持上游默认
+            assertThat(processor.buildSubmitRequest(
+                    videoClaim("305", false, null, 0, 0, null, baseInput())).generateAudio())
+                    .isNull();
+        }
+
+        @Test
         @DisplayName("IKG0FR：分辨率算不出像素（4k）不再拒单——像素只回写资产，缺省 null")
         void unparseableResolutionNotRejected() {
             Map<String, Object> input = baseInput();

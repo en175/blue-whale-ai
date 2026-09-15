@@ -11,7 +11,7 @@ const BACKEND_SOURCE = /^backend\/(?:apps|libs)\/.*\.ts$/;
 // 改它会在 PR 阶段落进「未归类」兜底升为 full，看似安全，但构建出的计划里一条 Java 命令都没有——
 // TS 侧的改动有 typecheck/测试兜底，Java 侧的改动静默裸奔。这与 backend / web/scripts 那两个洞同形：
 // 有验证手段，只是选择器够不着。pom.xml 一并归类：改构建配置同样要跑一遍。
-const JAVA_SOURCE = /^worker-java\/(?:src\/.*\.java|pom\.xml)$/;
+const JAVA_SOURCE = /^worker-java\/(?:src\/|pom\.xml|Dockerfile|docker-settings\.xml)/;
 // web 自己的工具脚本（契约核对、构建辅助等）。归 web 而不是 operations：它们的题材是 web 的契约，
 // 对应的定向验证就是 web 那套（typecheck + lint + vitest）——`check-agent-routes.mjs` 要守的
 // `web/src/api/agent-rest-routes.v1.json`，正是 `web/src/api/agentRoutes.test.ts` 在断言的东西。

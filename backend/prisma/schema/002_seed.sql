@@ -55,8 +55,12 @@ INSERT INTO generation_model_capability (
     'video',
     '豆包 Seedance 2.0',
     JSON_ARRAY(
+      JSON_OBJECT('id', '480p', 'label', '480P', 'api_value', '480p', 'width', 854, 'height', 480),
       JSON_OBJECT('id', '720p', 'label', '720P', 'api_value', '720p', 'width', 1280, 'height', 720),
-      JSON_OBJECT('id', '1080p', 'label', '1080P', 'api_value', '1080p', 'width', 1920, 'height', 1080)
+      JSON_OBJECT('id', '1080p', 'label', '1080P', 'api_value', '1080p', 'width', 1920, 'height', 1080),
+      -- IKG0FR：官方 4K 档的 resolution 取值就是 '4k'（不是 2160p）。此前本地换算像素的
+      -- 正则只认 <N>p，把这个合法档位误判为非法参数而 400 拒单；校验移除后该值直达上游。
+      JSON_OBJECT('id', '4k', 'label', '4K', 'api_value', '4k')
     ),
     JSON_ARRAY('16:9', '9:16', '1:1'),
     JSON_ARRAY(5, 10),
@@ -75,7 +79,8 @@ INSERT INTO generation_model_capability (
       'first_frame', TRUE,
       'last_frame', TRUE,
       'first_last_frame', TRUE,
-      'audio', FALSE,
+      -- IKG0LP 契约 §五：2.0 系列支持有声视频，接入开关后必须为 true，否则用户看不到该选择
+      'audio', TRUE,
       'video_reference', FALSE,
       'video_reference_max', 3,
       'audio_reference', FALSE,
