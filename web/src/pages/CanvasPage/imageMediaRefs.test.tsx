@@ -617,8 +617,12 @@ describe('IKDMQR 生成中输入只读', () => {
       expect(node.data.genStatus).toBe('generating');
     });
 
-    // Dock 参考仍可见，移除入口隐藏
-    expect(dockRefImages()).toEqual(['素材图一']);
+    // IKFXZD：发送成功即隐藏面板
+    expect(dockRefImages()).toEqual([]);
+
+    // 生成中点卡片重开只读面板（IKFXZD 口径：自动关闭不动只读入口）：Dock 参考仍可见，移除入口隐藏
+    await createDraft();
+    await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
     expect(container.querySelector('[data-testid="dock-media-ref"] button[title="移除"]')).toBeNull();
     expect(container.textContent).toContain('生成中，参数与连线只读');
 
