@@ -14,6 +14,7 @@
  * 录下的事件逐条喂进来，断言 `buildTurns` 的形状。
  */
 import type {
+  AskedQuestion,
   GenerationCardBlock,
   RequirementUnderstanding,
   SessionContentBlock,
@@ -449,7 +450,7 @@ export type TimelineItem =
       summary: string;
       elapsedMs: number;
     }
-  | { kind: 'text'; text: string }
+  | { kind: 'text'; text: string; questions?: AskedQuestion[] }
   | { kind: 'card'; card: GenerationCardBlock }
   | { kind: 'card_preview'; preview: PartialCardPreview };
 
@@ -527,7 +528,7 @@ export function itemsFromBlocks(blocks: readonly SessionContentBlock[], fallback
       items.push({ kind: 'card', card: b.card });
       continue;
     }
-    if (b.type === 'text' && b.text) items.push({ kind: 'text', text: b.text });
+    if (b.type === 'text' && b.text) items.push({ kind: 'text', text: b.text, ...(b.questions?.length ? { questions: b.questions } : {}) });
     // run_actions 不再渲染（IKCPQ1）：它是同一次调用的另一份落库视图，工具行已经画过了。
   }
   if (items.length === 0 && fallbackText) items.push({ kind: 'text', text: fallbackText });

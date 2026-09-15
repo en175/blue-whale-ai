@@ -33,7 +33,15 @@ export type ReplySegment =
       recommendation: string;
     };
 
-const QUESTION_LINE = /^\s*(?:\*\*)?\s*❓\s*(.*)$/;
+/**
+ * 题头两种写法都认：带 ❓ 的（技能规定的格式），和模型丢了 ❓ 只剩加粗编号的「**Q1 — 画幅与用途**：…」
+ * （项目 608，MiniMax 三轮写了三种样子）。编号必须在行首的粗体里，正文里顺带提到的「Q1」不算。
+ */
+const QUESTION_LINE = /^\s*(?:(?:\*\*)?\s*❓\s*(.*)|\*\*\s*(Q\d+\b.*))$/;
+const questionHead = (line: string): string | null => {
+  const m = QUESTION_LINE.exec(line);
+  return m ? (m[1] ?? m[2]) : null;
+};
 const OPTION_LINE = /^\s*(?:[-*•]\s*)?(?:\*\*)?\s*([A-Ha-h])\s*[.．、)）]\s*(.*)$/;
 /** 模型有时不编字母，只是一条条列出来（项目 607：「- 通用桌面壁纸（横版 16:9）」）。题里 ➡️ 之前的列表项一样是选项，
  *  按顺序补上 A、B、C——用户回「选 B」时模型按第几条对得上（李述拍板，2026-09-15）。 */
@@ -79,8 +87,8 @@ export function splitReplySegments(text: string): ReplySegment[] {
   };
   let i = 0;
   while (i < lines.length) {
-    const head = QUESTION_LINE.exec(lines[i]);
-    if (!head) {
+    const head = questionHead(lines[i]);
+    if (head === null) {
       md.push(lines[i]);
       i += 1;
       continue;
@@ -88,13 +96,13 @@ export function splitReplySegments(text: string): ReplySegment[] {
     // 第一题前面那条 `---` 也是题的分隔线，跟着题走，不留在开场白里。
     while (md.length > 0 && (HR_LINE.test(md[md.length - 1]) || md[md.length - 1].trim() === '')) md.pop();
     flushMd();
-    const { no, title, ask } = parseHead(head[1]);
+    const { no, title, ask } = parseHead(head);
     const options: QuestionOption[] = [];
     const body: string[] = [];
     const rec: string[] = [];
     let inRec = false;
     i += 1;
-    while (i < lines.length && !QUESTION_LINE.test(lines[i]) && !HR_LINE.test(lines[i])) {
+    while (i < lines.length && questionHead(lines[i]) === null && !HR_LINE.test(lines[i])) {
       const line = lines[i];
       i += 1;
       if (inRec) {

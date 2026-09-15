@@ -557,7 +557,7 @@ function AssistantTurnBody({
         const key = keyOf(item);
         switch (item.kind) {
           case 'text':
-            return <ReplyText key={key} text={item.text} assets={knownAssets} />;
+            return <ReplyText key={key} text={item.text} assets={knownAssets} questions={item.questions} />;
           case 'card': {
             const cardId = item.card.cardId ?? item.card.shotTitle;
             return (

@@ -118,6 +118,34 @@ describe('splitReplySegments', () => {
     });
   });
 
+  it('模型把 ❓ 丢了、只剩加粗编号的题头也认（项目 608）；正文里顺带提到的 Q1 不算题', () => {
+    const segs = splitReplySegments(`主题我收到了。
+
+---
+
+**Q1 — 画幅与用途**：这张画最后用在哪里？
+- 桌面壁纸（横版 16:9）
+- 手机壁纸（竖版 9:16）
+
+➡️ 我推荐 **16:9 横版**，最像一张风景画。
+
+---
+
+先回 Q1 的答案给我。`);
+    expect(segs.map((s) => s.kind)).toEqual(['markdown', 'question', 'markdown']);
+    expect(segs[1]).toMatchObject({
+      no: 'Q1',
+      title: '画幅与用途',
+      ask: '这张画最后用在哪里？',
+      options: [
+        { key: 'A', label: '桌面壁纸（横版 16:9）' },
+        { key: 'B', label: '手机壁纸（竖版 9:16）' },
+      ],
+      recommendation: '我推荐 **16:9 横版**，最像一张风景画。',
+    });
+    expect(segs[2]).toMatchObject({ kind: 'markdown', text: '先回 Q1 的答案给我。' });
+  });
+
   it('没有题的正文原样一段 markdown', () => {
     expect(splitReplySegments('卡写好了。\n\n- 一\n- 二')).toEqual([{ kind: 'markdown', text: '卡写好了。\n\n- 一\n- 二' }]);
   });

@@ -36,9 +36,25 @@ export interface RunActionsRecord {
   outstanding_count: number | null;
 }
 
+/** 服务端替模型出的一道题（2026-09-15，`ask_questions`）：题号、字母都是服务端编的，前端按它画。 */
+export interface AskedQuestion {
+  no: string;
+  title: string;
+  ask: string;
+  options: { key: string; label: string; note?: string }[];
+  recommended: string[];
+  multiple: boolean;
+  why: string;
+}
+
 export interface SessionContentBlock {
   type: string;
   text?: string;
+  /**
+   * 这段正文是服务端替模型出的题（2026-09-15）：`text` 是它的 markdown（兜底），有 `questions` 就按数据画。
+   * 老记录的题只有文字，前端认开头排版。
+   */
+  questions?: AskedQuestion[];
   /** 本轮动作台账块（IKB93G 的动作行由它渲染；服务端消息部件 `run_actions` 原样透传）。 */
   run_actions?: RunActionsRecord;
   /**

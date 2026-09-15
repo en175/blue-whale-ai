@@ -53,6 +53,23 @@ describe('ReplyText', () => {
     expect(mountNode.textContent).toContain('都同意就回「都按推荐」。');
   });
 
+  it('服务端出的题按数据画：题号字母来自数据，推荐一行照服务端措辞（2026-09-15）', async () => {
+    await render(
+      createElement(ReplyText, {
+        assets: [],
+        text: '❓ **Q1 — 视角**：从哪看？',
+        questions: [
+          { no: 'Q1', title: '视角', ask: '从哪看？', options: [{ key: 'A', label: '平视', note: '从海面看。' }, { key: 'B', label: '俯瞰' }], recommended: ['B'], multiple: false, why: '最好看。' },
+        ],
+      }),
+    );
+    const q = mountNode.querySelector(`.${styles.question}`)!;
+    expect(q.querySelector(`.${styles.questionNo}`)?.textContent).toBe('Q1');
+    expect([...q.querySelectorAll(`.${styles.questionKey}`)].map((k) => k.textContent)).toEqual(['A', 'B']);
+    expect(q.querySelector(`.${styles.questionDesc}`)?.textContent).toBe('：从海面看。');
+    expect(q.querySelector(`.${styles.questionRec}`)?.textContent).toBe('推荐 B（俯瞰）：最好看。');
+  });
+
   it('没有题就是普通 Markdown', async () => {
     await render(createElement(ReplyText, { assets: [], text: '卡写好了，**看一下**。' }));
     expect(mountNode.querySelector(`.${styles.question}`)).toBeNull();
