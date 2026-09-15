@@ -57,4 +57,22 @@ describe('cardsOfRevision', () => {
     expect(card!.cardId).toBe('rev_1#1');
     expect(card!.source).toEqual({ sessionId: 's', revisionId: 'rev_1', shotNo: 1 });
   });
+
+  it('正文里的素材记号：按服务端算好的位置取号和原文，卡上显示「图1」（IKFLB9）', () => {
+    const withAsset = revision(4, {
+      prompt_text: '参考 @图1 的油画笔触。',
+      asset_bindings: [{ asset_ref_id: 'ref_a' }],
+      prompt_mentions: [{ start: 3, end: 6, index: 1, asset_ref_id: 'ref_a' }],
+    });
+    withAsset.payload.assets = [{ asset_ref_id: 'ref_a', asset_id: '6412', media_type: 'image', display_label: '参考.png' }] as never;
+    expect(cardsOfRevision('s', withAsset)[0]!.assetRefItems).toEqual([
+      { assetId: '6412', label: '参考.png', mediaType: 'image', marker: '图1', markerTexts: ['@图1'] },
+    ]);
+  });
+
+  it('老卡没有记号位置：不带号，照旧显示名字', () => {
+    const old = revision(4, { asset_bindings: [{ asset_ref_id: 'ref_a' }] });
+    old.payload.assets = [{ asset_ref_id: 'ref_a', asset_id: '6412', media_type: 'image', display_label: '参考.png' }] as never;
+    expect(cardsOfRevision('s', old)[0]!.assetRefItems).toEqual([{ assetId: '6412', label: '参考.png', mediaType: 'image' }]);
+  });
 });

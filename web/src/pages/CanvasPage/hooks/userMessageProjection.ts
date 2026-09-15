@@ -1,10 +1,10 @@
 import type { SessionContentBlock, SessionMessage } from '@/api/agentSessions';
 import type { ChatMessage } from './useAgentSession';
 
-/** content 块数组拼为纯文本 */
+/** content 块数组拼为纯文本。思考段（IKFLB9）也带 `text`，但那是模型的草稿，不是正文。 */
 export const textOf = (blocks: SessionMessage['content'] | undefined): string =>
   (blocks ?? [])
-    .map((b) => (typeof b?.text === 'string' ? b.text : ''))
+    .map((b) => (b?.type !== 'reasoning' && typeof b?.text === 'string' ? b.text : ''))
     .join('');
 
 function visualLabel(block: SessionContentBlock): string {

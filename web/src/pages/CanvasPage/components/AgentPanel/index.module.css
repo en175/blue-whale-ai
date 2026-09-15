@@ -1060,6 +1060,110 @@
   text-underline-offset: 2px;
 }
 
+/* ---- 追问的排版（IKFLB9 定稿「排版一」）：题头 + 选项列表 + 推荐框。字不动，只是长得像一道题。 ---- */
+.question {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 92%;
+  padding: 4px 0 2px;
+  font-size: var(--font-size-md);
+  line-height: 22px;
+}
+
+.questionHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--color-text-primary);
+}
+
+.questionNo {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-accent-agent);
+}
+
+.questionTitle {
+  font-weight: 600;
+}
+
+.questionAsk {
+  color: var(--color-text-secondary);
+}
+
+.questionBody,
+.questionRecBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.questionBody p,
+.questionRecBody p {
+  margin: 0;
+}
+
+.questionBody ul,
+.questionRecBody ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.questionOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.questionOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.questionKey {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 5px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.questionOptionText {
+  min-width: 0;
+}
+
+.questionLabel {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.questionDesc {
+  color: var(--color-text-secondary);
+}
+
+.questionRec {
+  margin-top: 2px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--color-accent-agent);
+  border-radius: 0 8px 8px 0;
+  background: var(--color-accent-agent-soft);
+  color: var(--color-text-secondary);
+}
+
+.questionRec strong {
+  color: var(--color-text-primary);
+}
+
 /* 表格自己横向滚动：面板窄，宽表格不能把整个消息流撑出横向滚动条 */
 .mdTableWrap {
   overflow-x: auto;
@@ -1335,10 +1439,85 @@
 
 /* 按哪套写法编的（F32）。压低到和时间同一层——它是核对用的注脚，不是标题的一部分。 */
 .shotTargetModel {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   flex-shrink: 0;
-  margin-left: 6px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.shotTitleIcon {
+  color: var(--color-accent-agent);
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
+.shotRefsLabel {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  align-self: center;
+}
+
+/* 提示词正文：默认收成三行，「展开全文」再看。正文走 Markdown，素材名是胶囊。 */
+.shotPrompt {
+  position: relative;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.7;
+}
+
+.shotPromptClamp {
+  max-height: calc(1.7em * 3);
+  overflow: hidden;
+}
+
+.shotPromptClamp::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.4em;
+  background: linear-gradient(to bottom, rgba(36, 36, 37, 0), #242425);
+}
+
+.shotPromptMd {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.shotPromptMd p {
+  margin: 0;
+}
+
+.shotMore {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.shotMore:hover {
+  color: var(--color-text-primary);
+}
+
+.shotActions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.shotActions .cardBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  font-size: var(--font-size-sm);
 }
 
 .shotField {
@@ -1914,6 +2093,15 @@
   color: var(--color-text-tertiary);
 }
 
+/* 等待行（IKFLB9）：不是做了一件事，是在等一件事，比工具行再淡一档。 */
+.toolCallWaiting {
+  color: var(--color-text-tertiary);
+}
+
+.thinkingToggle:disabled {
+  cursor: default;
+}
+
 .toolCallSubsteps {
   display: flex;
   flex-direction: column;
@@ -1948,6 +2136,104 @@
   .thinkingMarkLive {
     animation: none;
   }
+}
+
+/* ---- 过程组（IKFLB9 定稿）：一轮的思考、工具、等待收成一行，点开按阶段分组 ----
+   头一行和思考块同一档灰、同一个 ✶ / ✻；阶段缩进一档带竖线，阶段里的叶子再缩一档。 */
+.processGroup {
+  margin: 2px 0 6px;
+  font-size: var(--font-size-sm);
+  line-height: 20px;
+}
+
+.processHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 2px 4px;
+  margin-left: -4px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #9a9ea4;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.processHead:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.processChevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--color-text-tertiary);
+}
+
+.processLabel {
+  font-variant-numeric: tabular-nums;
+}
+
+.processCounts {
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.processBody {
+  margin: 2px 0 0 7px;
+  padding-left: 10px;
+  border-left: 1px solid #3a3d40;
+}
+
+.processPhase {
+  display: flex;
+  flex-direction: column;
+}
+
+.processPhaseHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 1px 0;
+  background: transparent;
+  border: none;
+  color: #92959a;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.processPhaseHead:disabled {
+  cursor: default;
+}
+
+.processPhaseHead:not(:disabled):hover .toolCallLabel {
+  color: var(--color-text-primary);
+}
+
+.processChevron:empty {
+  width: 12px;
+}
+
+.processPhaseHead .toolCallLabel {
+  flex: 1;
+}
+
+.processPhaseMarkDone {
+  color: #7fb069;
+}
+
+.processPhaseMarkRunning {
+  color: var(--color-accent-agent);
+}
+
+.processPhaseItems {
+  margin: 1px 0 4px 20px;
 }
 
 /* ---- 轮（IKDK5I）：一批用户输入 + 回答 + 轮尾的账 ---- */
@@ -2007,16 +2293,141 @@
 
 /* ---- 方案卡（IKF3KE）：用户在任何一张生成卡被写出来之前，唯一要表态的东西 ---- */
 .solutionCard {
-  border: 1px solid var(--color-accent-primary);
+  border: 1px solid var(--color-border-secondary);
   background-color: #242425;
   border-radius: 12px;
-  padding: 12px;
+  padding: 0 0 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   width: 100%;
   font-size: 12px;
   line-height: 1.6;
+  overflow: hidden;
+}
+
+/* 卡头色带（IKFLB9 定稿）：左边两行「方案卡 ▤ .md / 等你拍板」，右边媒介 / 模型 / 参数（/ 范围），
+   各自也是「标签 / 值」两行。全部不折行：面板窄时值省略，而不是把卡头挤得一字一折、整条忽高忽低。 */
+.solutionBand {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 8px 12px;
+  background: linear-gradient(90deg, var(--color-accent-agent-soft), transparent);
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.solutionCardTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.solutionState {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  font-weight: 400;
+}
+
+.solutionDocBtn {
+  padding: 0 5px;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.solutionDocBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-tertiary);
+}
+
+.solutionBandCells {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.solutionBandCell {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.solutionBandCell b {
+  display: block;
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+}
+
+.solutionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 12px;
+}
+
+.solutionGoal {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+.solutionDirection {
+  margin: 0;
+  padding: 4px 10px;
+  border-left: 2px solid var(--color-border-secondary);
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+}
+
+.solutionGroup {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+/* 和「我替你定的（不合适就说）」同一种小字，放在按钮行上面：挤在按钮行里会把「作废」挤到下一行。 */
+.solutionHint {
+  margin-top: 2px;
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.solutionLinkBtn {
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.solutionLinkBtn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
+/* 「接下来怎么做」在卡外：它是模型接着要说的话。 */
+.solutionNextSteps {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  line-height: 22px;
+  white-space: pre-wrap;
 }
 
 /* 已确认或已作废的那几版留在原处但变灰、按钮消失：历史要读得懂，
@@ -2028,9 +2439,10 @@
 
 .solutionCardHead {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--color-accent-primary);
+  flex-direction: column;
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--color-accent-agent);
   font-size: var(--font-size-sm);
   font-weight: 600;
 }
@@ -2059,27 +2471,40 @@
 
 .solutionList {
   margin: 0;
-  padding-left: 16px;
+  padding-left: 18px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 200px;
-  overflow-y: auto;
+  color: var(--color-text-primary);
+}
+
+ul.solutionList {
+  list-style: disc;
+}
+
+ol.solutionList {
+  list-style: decimal;
 }
 
 .solutionActions {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
   margin-top: 2px;
+  padding: 0 12px;
+}
+
+.solutionActions button {
+  white-space: nowrap;
 }
 
 .solutionPrimaryBtn {
   padding: 6px 14px;
   border-radius: 10px;
-  border: 1px solid var(--color-accent-primary);
-  background-color: rgba(80, 140, 255, 0.2);
-  color: var(--color-accent-primary);
+  border: 1px solid var(--color-accent-agent);
+  background-color: var(--color-accent-agent);
+  color: var(--color-accent-agent-ink);
   font-size: var(--font-size-md);
   font-weight: 600;
   font-family: inherit;
@@ -2087,7 +2512,7 @@
 }
 
 .solutionPrimaryBtn:hover:not(:disabled) {
-  background-color: rgba(80, 140, 255, 0.32);
+  background-color: var(--color-accent-agent-hover);
 }
 
 .solutionGhostBtn {
@@ -2112,7 +2537,8 @@
 }
 
 .solutionNote {
-  width: 100%;
+  width: calc(100% - 24px);
+  margin: 0 12px;
   min-height: 64px;
   padding: 8px;
   border-radius: 8px;
@@ -2125,6 +2551,62 @@
 }
 
 .solutionSettledNote {
+  padding: 0 12px;
   color: var(--color-text-secondary);
   font-size: 11px;
+}
+
+.solutionCardSettled .solutionBand {
+  background: none;
+}
+
+/* 方案卡 / 提示词卡渲染成文档的那一层（CardDocModal）。 */
+.cardDocBody {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.cardDocBar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.cardDocMd {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: var(--font-size-md);
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+}
+
+.cardDocMd h1 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--color-text-primary);
+}
+
+.cardDocMd h2 {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+
+.cardDocMd p,
+.cardDocMd ul,
+.cardDocMd ol {
+  margin: 0;
+}
+
+.cardDocMd table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.cardDocMd td,
+.cardDocMd th {
+  border: 1px solid var(--color-border-secondary);
+  padding: 4px 8px;
+  text-align: left;
 }
