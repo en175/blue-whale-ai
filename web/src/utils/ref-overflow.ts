@@ -28,32 +28,24 @@ export function classifyRefOverflows(params: {
   return out;
 }
 
-/** 画布底部各生成对话框的参考素材上限（图片/视频取模型能力接口，音频为产品约定） */
-export const REF_LIMITS = {
-  image: 9,
-  video: 3,
-  audio: 3,
-} as const;
-
 /**
- * 上传数量超限 toast 文案：
+ * 上传数量超限 toast 文案（ADR-0086：上限由调用方传能力行值，不再依赖固定常量）：
  *  - 单种超出：「图片最多 9 张已超出」
  *  - 图片+视频同时超出：「图片最多 9 张，视频3条已超出」
  *  - 首尾帧图片超 2：由调用方传 limit
  */
 export function refOverflowToast(
   kinds: ('image' | 'video' | 'audio')[],
-  limits?: Partial<Record<'image' | 'video' | 'audio', number>>,
+  limits: Partial<Record<'image' | 'video' | 'audio', number>> = {},
 ): string {
   const parts: string[] = [];
-  const defaults = limits ?? {};
   for (const k of kinds) {
     if (k === 'image') {
-      parts.push(`图片最多 ${defaults.image ?? REF_LIMITS.image} 张`);
+      parts.push(`图片最多 ${limits.image ?? 9} 张`);
     } else if (k === 'video') {
-      parts.push(`视频${defaults.video ?? REF_LIMITS.video}条`);
+      parts.push(`视频${limits.video ?? 3}条`);
     } else {
-      parts.push(`参考音频最多 ${defaults.audio ?? REF_LIMITS.audio} 段`);
+      parts.push(`参考音频最多 ${limits.audio ?? 3} 段`);
     }
   }
   if (parts.length <= 1) return `${parts.join('')}已超出`;

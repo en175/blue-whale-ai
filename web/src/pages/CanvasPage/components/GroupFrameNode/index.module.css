@@ -1,0 +1,22 @@
+/* 组框节点：淡色底 + 虚线边。pointer-events 由节点 style 关闭，点击穿透到 pane 再做组命中。 */
+
+:global(.react-flow__node-groupFrame) {
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none !important;
+}
+
+.frame {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.22);
+  background-color: rgba(255, 255, 255, 0.07);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 8px 24px rgba(0, 0, 0, 0.32);
+  pointer-events: none;
+}

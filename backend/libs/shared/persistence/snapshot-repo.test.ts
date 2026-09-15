@@ -84,12 +84,17 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
         project_id: "55",
         type: "image",
         url: "tos://project/55/200.png",
+        // IKEXX8：素材库关联两列成对携带（mock 行未含列值 → null）。
+        material_id: null,
+        material_group_id: null,
       },
       {
         id: "201",
         project_id: "55",
         type: "image",
         url: "tos://project/55/201.png",
+        material_id: null,
+        material_group_id: null,
       },
     ]);
   });

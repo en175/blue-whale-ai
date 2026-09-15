@@ -10,6 +10,14 @@ import { capabilityDigestFromModelCapability } from "./capability-digest.js";
  *  共用此常量兜底；模型能力行显式配置 features.max_reference_images 时以其为准。 */
 export const DEFAULT_MAX_REFERENCE_IMAGES = 10;
 
+/** 参考素材分类上限缺省（ADR-0086）：与旧前端/服务端硬编码对齐，模型能力行未配置时兜底。
+ *  - 视频生成普通参考中视频素材上限 3（旧 MAX_VIDEO_REFS）
+ *  - 音频生成中音频参考上限 3 / 图片参考上限 1（旧 validateAudioReferences 硬编码）
+ *  能力行显式配置 features.video_reference_max / audio_reference_max / image_reference_max 时以其为准。 */
+export const DEFAULT_VIDEO_REFERENCE_MAX = 3;
+export const DEFAULT_AUDIO_REFERENCE_MAX = 3;
+export const DEFAULT_IMAGE_REFERENCE_MAX = 1;
+
 export interface ModelSizeOption {
   id: string;
   label: string;
@@ -41,6 +49,25 @@ export interface ModelFeatures {
   first_last_frame: boolean;
   /** 视频带音频（video features.audio）。图片恒 false。 */
   audio: boolean;
+  /** 图生图上游模型名别名（ADR-0085）：有参考图时 worker 出站改用它；null=不分流。 */
+  i2i_model_name: string | null;
+  /** 该档 raw prompt 上限（ADR-0085）；null=回落按类型的硬缺省。 */
+  max_prompt_length: number | null;
+  /** 视频生成是否接受视频素材作普通参考（ADR-0086）。替代旧 supportsVideoReferenceModel seedance 前缀特判。 */
+  video_reference: boolean;
+  /** 普通参考中视频素材上限（ADR-0086）；缺省 DEFAULT_VIDEO_REFERENCE_MAX。 */
+  video_reference_max: number;
+  /** 视频生成是否接受音频素材作参考（ADR-0086；Seedance 2.0 关 / 2.5 开）。 */
+  audio_reference: boolean;
+  /** 音频生成中音频参考上限（ADR-0086）；缺省 DEFAULT_AUDIO_REFERENCE_MAX。 */
+  audio_reference_max: number;
+  /** 音频生成中图片参考上限（ADR-0086）；缺省 DEFAULT_IMAGE_REFERENCE_MAX。 */
+  image_reference_max: number;
+  /** 输入参考素材总时长上限（秒，ADR-0086；视频/音频参考。2.0=15 / 2.5=30；null=不限）。 */
+  max_reference_duration_sec: number | null;
+  /** 按任务类型的比例/时长约束（ADR-0086）：default / first_frame / first_last_frame / edit / prolong，
+   *  各自 { allowed_ratios?: string[]; allowed_durations?: [min,max,step] }。本轮结构就位。 */
+  task_types: Record<string, unknown> | null;
 }
 
 export interface ModelCapabilityView {
@@ -105,6 +132,24 @@ type FeaturesJson = {
   firstLastFrame?: boolean;
   first_last_frame?: boolean;
   audio?: boolean;
+  i2iModelName?: unknown;
+  i2i_model_name?: unknown;
+  maxPromptLength?: unknown;
+  max_prompt_length?: unknown;
+  videoReference?: boolean;
+  video_reference?: boolean;
+  videoReferenceMax?: number;
+  video_reference_max?: number;
+  audioReference?: boolean;
+  audio_reference?: boolean;
+  audioReferenceMax?: number;
+  audio_reference_max?: number;
+  imageReferenceMax?: number;
+  image_reference_max?: number;
+  maxReferenceDurationSec?: unknown;
+  max_reference_duration_sec?: unknown;
+  taskTypes?: unknown;
+  task_types?: unknown;
 };
 
 type DurationRangeJson = {
@@ -122,6 +167,33 @@ function toSizes(json: unknown): ModelSizeOption[] {
     width: o.width ?? null,
     height: o.height ?? null,
   }));
+}
+
+/** ADR-0085 读侧宽容：脏值（非非空串 / 非正整数）一律降级 null = 未配置，
+ *  写侧闸门在 constants.ts featuresFieldErr 拒绝。 */
+function pickAlias(v: unknown): string | null {
+  return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+}
+
+function pickPositiveInt(v: unknown): number | null {
+  return typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : null;
+}
+
+/** ADR-0086 读侧：非负整数（含 0）——参考上限允许显式 0（禁用该类型素材）。 */
+function pickNonNegativeInt(v: unknown): number | null {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : null;
+}
+
+/** ADR-0086 读侧：正数（秒）——参考素材总时长上限。 */
+function pickPositiveNumber(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+}
+
+/** ADR-0086 读侧：task_types 为 JSON 对象（宽容降级空对象）；写侧由闸门校验。 */
+function pickTaskTypes(v: unknown): Record<string, unknown> | null {
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null;
 }
 
 function toFeatures(json: unknown): ModelFeatures {
@@ -144,6 +216,23 @@ function toFeatures(json: unknown): ModelFeatures {
     last_frame: f.lastFrame === true || f.last_frame === true,
     first_last_frame: f.firstLastFrame === true || f.first_last_frame === true,
     audio: f.audio === true,
+    i2i_model_name: pickAlias(f.i2iModelName ?? f.i2i_model_name),
+    max_prompt_length: pickPositiveInt(f.maxPromptLength ?? f.max_prompt_length),
+    video_reference: f.videoReference === true || f.video_reference === true,
+    video_reference_max:
+      pickNonNegativeInt(f.videoReferenceMax ?? f.video_reference_max) ??
+      DEFAULT_VIDEO_REFERENCE_MAX,
+    audio_reference: f.audioReference === true || f.audio_reference === true,
+    audio_reference_max:
+      pickNonNegativeInt(f.audioReferenceMax ?? f.audio_reference_max) ??
+      DEFAULT_AUDIO_REFERENCE_MAX,
+    image_reference_max:
+      pickNonNegativeInt(f.imageReferenceMax ?? f.image_reference_max) ??
+      DEFAULT_IMAGE_REFERENCE_MAX,
+    max_reference_duration_sec: pickPositiveNumber(
+      f.maxReferenceDurationSec ?? f.max_reference_duration_sec,
+    ),
+    task_types: pickTaskTypes(f.taskTypes ?? f.task_types),
   };
 }
 

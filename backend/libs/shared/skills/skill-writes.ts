@@ -1,5 +1,5 @@
-import { ok, skillError } from "@blue-whale/contracts";
-import { parseSkillMd, serializeSkillMd } from "@blue-whale/core";
+import { ok, skillError } from "@lib/contracts";
+import { parseSkillMd, serializeSkillMd } from "@lib/core";
 import {
   SkillAddConflictError,
   SkillInUseError,

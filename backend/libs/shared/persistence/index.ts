@@ -69,6 +69,9 @@ export {
 export {
   createModelCapabilityRepo,
   DEFAULT_MAX_REFERENCE_IMAGES,
+  DEFAULT_VIDEO_REFERENCE_MAX,
+  DEFAULT_AUDIO_REFERENCE_MAX,
+  DEFAULT_IMAGE_REFERENCE_MAX,
   type ModelCapabilityRepo,
   type ModelCapabilityView,
   type ModelSizeOption,
@@ -207,15 +210,8 @@ export {
   type StoryboardPreviewView,
   type ListStoryboardPreviewsResult,
 } from "./storyboard-preview-repo.js";
-export {
-  createWorkerRepo,
-  createWorkerAssetOps,
-  type WorkerRepo,
-  type ClaimedJob,
-  type ClaimedVideoJob,
-  type ImageCapabilitySnapshot,
-  type WorkerInputAsset,
-} from "./generation-worker-repo.js";
+export { createAssetOwnershipOps } from "./asset-ownership-repo.js";
+export type { AssetOwnershipOps, WorkerInputAsset } from "./asset-ownership-types.js";
 export {
   createTopupTierRepo,
   type TopupTierRepo,

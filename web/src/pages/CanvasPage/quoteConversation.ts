@@ -1,7 +1,7 @@
 import type { SessionContentBlock } from '@/api/agentSessions';
 import type { ConversationQuote } from '@/api/canvas';
-import { PROMPT_TEXT_LIMITS } from '../../../../packages/contracts/src/prompt-text-limits';
-import { previewSourceSchema, type PromptPreviewSource } from '../../../../packages/contracts/src/prompt-preview';
+import { PROMPT_TEXT_LIMITS } from '@lib/contracts/prompt-text-limits';
+import { previewSourceSchema, type PromptPreviewSource } from '@lib/contracts/prompt-preview';
 
 /**
  * 添加到对话的文本引用快照（IKDLQJ，契约 docs/specs/2026-09-07-ikdlqj-conversation-quote-contract.md）。
@@ -30,7 +30,7 @@ export function readPromptSource(value: unknown): PromptPreviewSource | null {
 }
 
 /** 文本节点正文提取：`data.text` 是纯文本权威正文；旧 HTML 节点提取时把换行边界还原为 \n，不吞换行、不压缩连续空行。 */
-import { extractTextNodeText as readText } from '../../../../packages/core/src/text-node-content';
+import { extractTextNodeText as readText } from '@lib/core/text-node-content';
 export function extractTextNodeText(data: Record<string, unknown> | undefined): string {
   const text = readText(data);
   return text.trim() ? text : '';

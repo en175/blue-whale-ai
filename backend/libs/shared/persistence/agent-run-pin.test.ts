@@ -4,7 +4,7 @@ import {
   agentRunPinSchema,
   canonicalAgentRunPinDigestInput,
   type AgentRunPin,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { createHash } from "node:crypto";
 
 import { scrubCreativeSkillFromRunPin } from "./agent-run-pin.js";

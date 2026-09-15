@@ -67,6 +67,7 @@
 { "Filter": { "GroupType": "AIGC" }, "PageNumber": 1, "PageSize": 10 }
 ```
 > `Result` 为分页素材组列表（`TotalCount` / `Items: [groupId, name, groupType, ...]` / `PageNumber` / `PageSize`），组内字段透传不改写，以网关《素材模块-对外API接口文档》为准。
+> **产品侧行为（IKEXX8）**：`Filter.GroupType === "AIGC"` 时本 Action **不打上游**，改读产品本地 `material_groups`（虚拟组镜像）返回同款信封（`Items[] = {Id, Name, GroupType, CreateTime, UpdateTime}`，`RequestId` 为后端合成 `req_<uuid>`）；无 Filter / `LivenessFace` / 其他值仍透传。前端请求与响应形状不变，见 [素材关联对接文档 §6.2](./2026-09-07-material-association-api.md)。
 
 ### 2.3 获取素材组详情 `GetAssetGroup`
 
@@ -74,6 +75,7 @@
 { "Id": "group-xxx" }
 ```
 `Result`：素材组完整信息（同列表项字段）。
+> **产品侧行为（IKEXX8）**：`Id` 命中本地虚拟组 → 本地返回；未命中（真人组等）→ 透传上游。形状同上。
 
 ### 2.4 编辑素材组 `UpdateAssetGroup`
 

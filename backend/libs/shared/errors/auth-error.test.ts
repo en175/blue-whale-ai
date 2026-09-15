@@ -2,7 +2,7 @@
 // login(401)/register(400) 共用，避免 toAuthError 的 status 映射吞掉业务文案。
 import { describe, expect, it } from "vitest";
 
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 import { projectAccountBusinessFailure } from "./auth-error.js";
 
 describe("projectAccountBusinessFailure", () => {

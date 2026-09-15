@@ -1,4 +1,4 @@
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 
 /** 管理端失败异常：过滤器映射为 { success: false, error }（契约第 2 节）。 */
 export class AdminException extends Error {

@@ -3,7 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import {
   canonicalizeJsonValue,
   type ProviderPromptAsset,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { vi } from "vitest";
 
 import { createSceneCardGenerationRepo } from "./scene-card-generation-repo.js";

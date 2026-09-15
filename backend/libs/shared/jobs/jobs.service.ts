@@ -4,7 +4,7 @@ import {
   errorCodeToNumeric,
   fail,
   ok,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { createJobRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -103,6 +103,8 @@ export class JobsService {
       status: job.status,
       progress: job.progress,
       asset: job.asset,
+      // IKFM3S §4：签名投影随详情返回（仅成功路径消费；input 其余字段不下发）。
+      text_input_signature: job.text_input_signature,
     });
   }
 }

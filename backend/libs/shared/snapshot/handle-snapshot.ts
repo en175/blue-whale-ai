@@ -5,7 +5,7 @@ import {
   type LegacyMigrationReport,
   type PublicGenerationError,
   type ResultEnvelope,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { projectPublicError } from "@lib/shared/jobs/generation-job-error-projection.js";
 import { wireInteger, type WireInteger } from "@lib/shared/wire-integer.js";
 import type { ProjectService } from "@lib/shared/project/project.service.js";
@@ -36,6 +36,9 @@ export interface SnapshotAssetSummary {
   asset_id: string;
   access_url: string;
   type: string;
+  /** IKEXX8：素材库关联两列成对吐出（未关联为 null），前端据此以 asset:// 引用直发素材库链路。 */
+  material_id: string | null;
+  material_group_id: string | null;
 }
 
 export interface SnapshotData {
@@ -114,6 +117,8 @@ export async function handleGetSnapshot(
       asset_id: asset.id,
       access_url: asset.url,
       type: asset.type,
+      material_id: asset.material_id ?? null,
+      material_group_id: asset.material_group_id ?? null,
     };
   }
 

@@ -5,7 +5,7 @@ import {
   agentRunPinSchema,
   canonicalAgentRunPinDigestInput,
   type AgentRunPin,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { createHash } from "node:crypto";
 
 function sha256(value: string): string {

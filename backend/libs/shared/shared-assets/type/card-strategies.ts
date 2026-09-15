@@ -1,9 +1,9 @@
-import { SHARED_ASSET_EMPTY_CARD_CODE } from "@blue-whale/contracts";
+import { SHARED_ASSET_EMPTY_CARD_CODE } from "@lib/contracts";
 import type {
   SaveSharedAssetRequest,
   SharedAssetCardSnapshot,
   SharedAssetKind,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { SharedAssetError } from "../shared-asset-error.js";
 import {
   sha256,

@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
-import { DomainError, assetError } from "@blue-whale/contracts";
+import { NewApiError } from "@lib/core";
+import { DomainError, assetError } from "@lib/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import { AllExceptionsFilter } from "./all-exceptions.filter.js";

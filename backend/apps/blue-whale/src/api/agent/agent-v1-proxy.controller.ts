@@ -10,7 +10,7 @@ import {
   TRACE_ID_HEADER,
   generateTraceId,
   getCurrentTraceId,
-} from "@blue-whale/core/logging";
+} from "@lib/core/logging";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";

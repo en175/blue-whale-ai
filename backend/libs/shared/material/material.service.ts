@@ -1,16 +1,22 @@
 // 素材库对接服务：产品登录会话 → AuthGuard 回注的 sk- key → 网关 /api/material/{Action}。
 // 归属与状态以网关/上游为权威；本地仅两处持久化：
 //   - 素材关联镜像 assets.material_id/material_group_id（IKDJNZ）；
-//   - 素材库组 material_groups（IKDE6X，本地为组主、上游备份、双向维护）。
+//   - 素材库组 material_groups（IKDE6X/IKEXX8 契约 v2：只维护虚拟组镜像，
+//     ListAssetGroups(AIGC)/GetAssetGroup 命中时读本地，真人组查询仍透传上游）。
 // 其余（素材列表等）仍纯过境透传。
+import { randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import {
   NewApiError,
   createMaterialLibraryClient,
   type MaterialLibraryClient,
   type MaterialLibraryResponse,
-} from "@blue-whale/core";
-import { createMaterialGroupRepo, type MaterialGroupRepo } from "@lib/shared/persistence/index.js";
+} from "@lib/core";
+import {
+  createMaterialGroupRepo,
+  type MaterialGroupRepo,
+  type MaterialGroupView,
+} from "@lib/shared/persistence/index.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
@@ -103,9 +109,10 @@ export class MaterialService {
     const existing = await this.groupRepo.findVirtualDefault(userId);
     if (existing) return existing.materialGroupId;
 
-    // 2. 上游建虚拟组（组名：默认分组：<userId>）。
+    // 2. 上游建虚拟组（组名：默认分组：<userId>；GroupType=AIGC 网关必填，显式携带不赌默认值）。
     const upstream = await this.callAction(authorization, "CreateAssetGroup", {
       Name: `默认分组：${userId}`,
+      GroupType: "AIGC",
     });
     // 上游 4xx：透传错误状态与消息（如账号未开通素材组能力），不包装成 502。
     if (upstream.status < 200 || upstream.status >= 300) {
@@ -153,13 +160,92 @@ export class MaterialService {
     return materialGroupId;
   }
 
-  /** IKDE6X：组查询走本地表（前端不经 newapi 透传组）。按 kind 过滤可选。 */
-  async listLocalGroups(
+  /** IKEXX8（契约 v2 §5）：组查询分流——命中本地读规则时返回上游同款信封，否则 null（控制器透传）。
+   *  - ListAssetGroups 且 Filter.GroupType==="AIGC" → 本地虚拟组分页（其余参数形状一律透传）；
+   *  - GetAssetGroup 且 Id 命中本地虚拟组（未删）→ 本地详情；未命中（真人组等）→ 透传上游。 */
+  async tryServeLocalGroupAction(
     userId: string,
-    kind?: "virtual" | "real",
-  ) {
-    return this.groupRepo.listByUser(userId, kind);
+    action: string,
+    body: unknown,
+  ): Promise<MaterialLibraryResponse | null> {
+    if (!isRecord(body)) return null;
+    if (action === "ListAssetGroups") {
+      const filter = body.Filter;
+      const groupType = isRecord(filter) ? filter.GroupType : undefined;
+      if (groupType !== "AIGC") return null;
+      const page = readPositiveInt(body.PageNumber) ?? 1;
+      const size = readPositiveInt(body.PageSize) ?? 10;
+      const { total, rows } = await this.groupRepo.pageByUser(
+        userId,
+        "virtual",
+        page,
+        size,
+      );
+      return localEnvelope("ListAssetGroups", {
+        TotalCount: total,
+        Items: rows.map(toUpstreamGroupItem),
+        PageNumber: page,
+        PageSize: size,
+      });
+    }
+    if (action === "GetAssetGroup") {
+      const id = body.Id;
+      if (typeof id !== "string") return null;
+      const hit = await this.groupRepo.findByUserAndUpstream(userId, id);
+      if (!hit) return null;
+      return localEnvelope("GetAssetGroup", toUpstreamGroupItem(hit));
+    }
+    return null;
   }
+
+  /** IKEXX8：上游 DeleteAssetGroup 成功后软删本地虚拟组行（真人组无本地行，updateMany 空操作）。 */
+  async softDeleteLocalGroup(
+    userId: string,
+    materialGroupId: string,
+  ): Promise<void> {
+    await this.groupRepo.softDelete(userId, materialGroupId);
+  }
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** PageNumber/PageSize 宽松解析（缺省走 1/10；非正非数走缺省）。 */
+function readPositiveInt(v: unknown): number | undefined {
+  const n = typeof v === "string" ? Number(v) : v;
+  return typeof n === "number" && Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+/** 本地组 → 上游列表项形状（2026-09-11 实测样例：Id/Name/GroupType/CreateTime/UpdateTime）。 */
+function toUpstreamGroupItem(
+  view: MaterialGroupView,
+): Record<string, unknown> {
+  return {
+    Id: view.materialGroupId,
+    Name: view.name,
+    GroupType: "AIGC",
+    CreateTime: toIsoSeconds(view.createdAt),
+    UpdateTime: toIsoSeconds(view.updatedAt),
+  };
+}
+
+/** DateTime(0) 秒精度 → 上游同款 ISO8601 Z（无毫秒段）。 */
+function toIsoSeconds(d: Date | null): string | null {
+  return d ? d.toISOString().replace(/\.\d{3}Z$/, "Z") : null;
+}
+
+function localEnvelope(
+  action: string,
+  result: unknown,
+): MaterialLibraryResponse {
+  return {
+    status: 200,
+    body: {
+      ResponseMetadata: { RequestId: `req_${randomUUID()}`, Action: action },
+      Result: result,
+    },
+  };
 }
 
 /** 上游 CreateAssetGroup 成功信封 Result 里的组 id 字段。 */

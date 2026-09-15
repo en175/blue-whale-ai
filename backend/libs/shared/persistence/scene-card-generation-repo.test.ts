@@ -3,7 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import {
   canonicalizeJsonValue,
   type ProviderPromptAsset,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createSceneCardGenerationRepo } from "./scene-card-generation-repo.js";
@@ -403,6 +403,89 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(result.kind).toBe("capability_limit");
     expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
     expect(tx.scene_card_generation_records.create).not.toHaveBeenCalled();
+  });
+
+  it("IKFPYX：首尾帧模式按 task_types 约束校验——基础比例含 16:9，但 first_last_frame 仅允许 adaptive", async () => {
+    const frames = [referenceAsset("first_frame", "101"), referenceAsset("last_frame", "102")];
+    const capFields = {
+      ...CAP_FIELDS,
+      supported_aspect_ratios: ["16:9", "adaptive"],
+      features: {
+        first_last_frame: true,
+        task_types: { first_last_frame: { allowed_ratios: ["adaptive"] } },
+      },
+    };
+    // digest 有意不含 features（capabilityDigestFromModelCapability 固定 8 字段）
+    const { features: _features, ...digestFields } = capFields;
+    const tx = buildTx({
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({ id: 6001n, version: 1, reference_assets: frames }),
+      },
+      generation_model_capability: {
+        findUnique: vi.fn().mockResolvedValue({
+          version: 3,
+          enabled: true,
+          is_delete: false,
+          ...capFields,
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_mode: "first_and_last_frame",
+      reference_assets: frames,
+      capability_snapshot_version: {
+        ...CAPABILITY_SNAPSHOT,
+        digest: capabilityDigest(digestFields),
+      },
+    });
+
+    // 16:9 在基础比例列表内，但首尾帧任务的 task_types 只允许 adaptive → 拒
+    expect(result.kind).toBe("capability_limit");
+    expect(tx.scene_card_generation_records.create).not.toHaveBeenCalled();
+  });
+
+  it("IKFPYX：首尾帧 + adaptive 通过 task_types 校验（进入后续校验）", async () => {
+    const frames = [referenceAsset("first_frame", "101"), referenceAsset("last_frame", "102")];
+    const capFields = {
+      ...CAP_FIELDS,
+      supported_aspect_ratios: ["16:9", "adaptive"],
+      features: {
+        first_last_frame: true,
+        task_types: { first_last_frame: { allowed_ratios: ["adaptive"] } },
+      },
+    };
+    // digest 有意不含 features（capabilityDigestFromModelCapability 固定 8 字段）
+    const { features: _features, ...digestFields } = capFields;
+    const tx = buildTx({
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({ id: 6001n, version: 1, reference_assets: frames }),
+      },
+      generation_model_capability: {
+        findUnique: vi.fn().mockResolvedValue({
+          version: 3,
+          enabled: true,
+          is_delete: false,
+          ...capFields,
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      parameters: { ...VIDEO_PARAMETERS, aspect_ratio: "adaptive" },
+      reference_mode: "first_and_last_frame",
+      reference_assets: frames,
+      capability_snapshot_version: {
+        ...CAPABILITY_SNAPSHOT,
+        digest: capabilityDigest(digestFields),
+      },
+    });
+
+    expect(result.kind).not.toBe("capability_limit");
   });
 
   it("参数越界（duration 不在档位数组）返回 capability_limit 零写入（AC#1）", async () => {

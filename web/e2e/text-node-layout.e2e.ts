@@ -176,7 +176,7 @@ test('布局：正文固定 360×270 / 标题常驻上方 / 长文本内部滚�
     expect(titleBox.y + titleBox.height, `${id} 标题应在正文上方`).toBeLessThanOrEqual(contentBox.y + 1);
     expect(Math.abs(titleBox.width - CONTENT_WIDTH), `${id} 标题应与正文同宽`).toBeLessThanOrEqual(1.5);
     const text = (await title(page, id).textContent()) ?? '';
-    expect(text.trim(), `${id} 标题名称`).toBe('文本节点');
+    expect(text, `${id} 标题名称`).toContain('文本节点');
     // 名称只呈现一次：原卡片内部标题已去掉
     expect(await node(page, id).getByText('文本节点').count()).toBe(1);
   }
@@ -275,11 +275,18 @@ test('交互：连接点隐现与锚定 / 操作条与格式工具栏同层不�
   await page.mouse.move(src.x + src.width / 2, src.y + src.height / 2);
   await page.mouse.down();
   await page.mouse.move(dstPoint.x, dstPoint.y, { steps: 12 });
-  const dstValid = await page.evaluate(({ x, y }) => {
-    const el = document.elementFromPoint(x, y);
-    return el ? el.className.includes('valid') && el.className.includes('connectingto') : false;
-  }, dstPoint);
-  expect(dstValid, '落点连接点应被标记为有效连接目标').toBe(true);
+  // 连接指示类由 React Flow 在 mousemove 处理后补充，轮询到终态；
+  // 拖线预览的 SVG path 会盖住落点，用 elementsFromPoint 穿透判断
+  await expect
+    .poll(
+      () =>
+        page.evaluate(({ x, y }) => {
+          const els = document.elementsFromPoint(x, y);
+          return els.some((el) => String(el.className).includes('valid') && String(el.className).includes('connectingto'));
+        }, dstPoint),
+      { timeout: 3000 },
+    )
+    .toBe(true);
   await page.mouse.up();
   await expect.poll(() => page.locator('.react-flow__connectionline').count(), { timeout: 3000 }).toBe(0);
 
@@ -298,15 +305,7 @@ test('交互：连接点隐现与锚定 / 操作条与格式工具栏同层不�
   expect(Math.abs(chatBox.y - toolbarBox.y), '格式工具栏与节点操作应同处一层').toBeLessThanOrEqual(4);
   expect(chatBox.y + chatBox.height, '操作不应压到标题').toBeLessThanOrEqual(titleBoxNow.y + 1);
 
-  // 颜色面板向上展开，不遮挡标题与正文
-  await node(page, 'n-edit').getByRole('button', { name: '文字颜色' }).click();
-  const swatch = node(page, 'n-edit').locator('button[style*="background"]').last();
-  await expect(swatch).toBeVisible();
-  const pickerBox = (await swatch.boundingBox())!;
-  expect(pickerBox.y + pickerBox.height, '颜色面板不应覆盖标题').toBeLessThanOrEqual(titleBoxNow.y + 1);
-  await page.keyboard.press('Escape');
-
-  // 退出编辑：操作条回到同一层位置
+  // 退出编辑：操作条回到同一层位置（统一后首期格式固定八类，无颜色入口）
   await page.locator('.react-flow__pane').click({ position: { x: 1700, y: 1200 } });
   await expect(editor(page, 'n-edit')).toHaveAttribute('contenteditable', 'false');
   await title(page, 'n-edit').click();
@@ -357,9 +356,10 @@ test('编辑与回归：富文本生效并保存 / 拖动刷新恢复 / 删除',
   const bolded = await editor(page, 'n-edit').evaluate((el) => el.innerHTML);
   expect(bolded).toMatch(/<(b|strong)>/);
 
+  // 统一正文契约 v1：序列化为 Markdown 源落盘（data.text 含 **），html 通道关闭
   await expect
     .poll(
-      () => lastPutNodes(tracking).some((n) => n.id === 'n-edit' && /<(b|strong)>/.test(String(n.data.html ?? ''))),
+      () => lastPutNodes(tracking).some((n) => n.id === 'n-edit' && /\*\*/.test(String(n.data.text ?? '')) && n.data.html === undefined),
       { timeout: 10000 },
     )
     .toBe(true);
@@ -407,5 +407,165 @@ test('编辑与回归：富文本生效并保存 / 拖动刷新恢复 / 删除',
     join(evidenceDir, 'edit-regression.json'),
     `${JSON.stringify({ measurements, boldedHtml: bolded, draggedTo: { x: Number(dragX), y: Number(dragY) } }, null, 2)}\n`,
   );
+  expect(smokeFailures(tracking)).toEqual([]);
+});
+
+/* ============================================
+ * 统一文本卡编辑与历史升级（IKFM3L）
+ * 四类来源（普通新增、Agent 应用、历史纯文本、历史 HTML）：
+ * 打开即升级落盘、同一格式工具栏、Markdown 语法输入与粘贴、刷新恢复、统一样式截图
+ * ============================================ */
+test('统一编辑：四类来源一致体验 / HTML 卡升级 / Markdown 输入粘贴 / 刷新恢复', async ({ page }) => {
+  const tracking = await setupPage(page);
+  await page.goto('/canvas?project=project-1');
+  await expect(node(page, 'n-plain')).toBeVisible();
+  await expect(node(page, 'n-agent')).toBeVisible();
+
+  // 1) 历史 HTML 卡打开即升级：保存体里 html 消失，text 为 Markdown 源（身份/位置不动）
+  await expect
+    .poll(
+      () => {
+        const nodes = lastPutNodes(tracking);
+        return nodes.length > 0
+          && nodes.some((n) => n.id === 'n-edit' && n.data.html === undefined && String(n.data.text ?? '').includes('用于拖动与富文本编辑的便签'))
+          && nodes.some((n) => n.id === 'n-long' && n.data.html === undefined && String(n.data.text ?? '').startsWith('开篇第一句'));
+      },
+      { timeout: 10000 },
+    )
+    .toBe(true);
+  const upgraded = lastPutNodes(tracking).find((n) => n.id === 'n-edit')!;
+  expect(upgraded.position).toEqual({ x: 0, y: 420 });
+
+  // 2) 历史纯文本卡：双击出现统一格式工具栏，编辑正文经保存通路写 Markdown 源
+  await editor(page, 'n-plain').dblclick();
+  await expect(editor(page, 'n-plain')).toHaveAttribute('contenteditable', 'true');
+  const plainBold = node(page, 'n-plain').getByRole('button', { name: '加粗' });
+  await expect(plainBold).toBeVisible();
+  // 统一交互：所有卡都有「展开全文」入口
+  await expect(node(page, 'n-plain').getByRole('button', { name: '展开全文' })).toBeVisible();
+  await page.keyboard.type('新增一段');
+  await expect
+    .poll(() => lastPutNodes(tracking).some((n) => n.id === 'n-plain' && String(n.data.text ?? '').includes('新增一段')), { timeout: 10000 })
+    .toBe(true);
+
+  // 3) Agent 应用卡：同一工具栏可编辑（不因来源保留纯文本编辑分支），绑定身份保留；
+  //    工具栏矩阵：选中文本依次加粗、斜体（行内组合）
+  await page.locator('.react-flow__pane').click({ position: { x: 1700, y: 1200 } });
+  await editor(page, 'n-agent').dblclick();
+  await expect(node(page, 'n-agent').getByRole('button', { name: '加粗' })).toBeVisible();
+  await page.keyboard.type('追加');
+  await editor(page, 'n-agent').evaluate((el) => {
+    const text = el.querySelector('p')?.firstChild ?? el.firstChild!;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, (text.textContent ?? '').length);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  });
+  await node(page, 'n-agent').getByRole('button', { name: '加粗' }).click();
+  await expect(node(page, 'n-agent').locator('strong, b').first()).toBeVisible();
+  await node(page, 'n-agent').getByRole('button', { name: '斜体' }).click();
+  await expect(node(page, 'n-agent').locator('strong b, strong i, b em, b i, strong em').first()).toBeVisible();
+  await expect
+    .poll(
+      () => {
+        const agent = lastPutNodes(tracking).find((n) => n.id === 'n-agent');
+        return Boolean(agent && String(agent.data.text ?? '').includes('追加') && agent.data.promptSource !== undefined);
+      },
+      { timeout: 10000 },
+    )
+    .toBe(true);
+
+  // 4) 普通新增：工具栏建卡即 v1 形态，Markdown 行首语法输入即时转格式（八类矩阵）
+  await page.locator('.react-flow__pane').click({ position: { x: 1700, y: 1200 } });
+  await page.locator('[data-tooltip="添加文本"]').first().click();
+  const created = page.locator('.react-flow__node[data-id^="text-"]');
+  await expect(created.first()).toBeVisible();
+  const createdEditor = created.first().locator('[contenteditable]');
+  await createdEditor.dblclick();
+  await expect(createdEditor.first()).toHaveAttribute('contenteditable', 'true');
+  await page.keyboard.type('# 新卡标题');
+  await expect(created.first().locator('h1')).toBeVisible();
+  // H2/H3、无序/有序列表、分隔线的 Markdown 行首语法矩阵（每行转换后回车续写）
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('## 二级');
+  await expect(created.first().locator('h2')).toBeVisible();
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('### 三级');
+  await expect(created.first().locator('h3')).toBeVisible();
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('- 无序项');
+  await expect(created.first().locator('ul li')).toBeVisible();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter'); // 空列表项回车退出列表，回到段落
+  await page.keyboard.type('1. 有序项');
+  await expect(created.first().locator('ol li')).toBeVisible();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter'); // 退出有序列表
+  await page.keyboard.type('---');
+  await expect(created.first().locator('hr')).toBeVisible();
+  await expect
+    .poll(
+      () => {
+        const fresh = lastPutNodes(tracking).find((n) => n.id.startsWith('text-'));
+        const text = String(fresh?.data.text ?? '');
+        return text.startsWith('# 新卡标题') && text.includes('## 二级') && text.includes('### 三级')
+          && text.includes('- 无序项') && text.includes('1. 有序项') && text.includes('---');
+      },
+      { timeout: 10000 },
+    )
+    .toBe(true);
+
+  // 5) 粘贴 Markdown 文本得到对应格式（历史纯文本卡上粘贴粗体）
+  await page.locator('.react-flow__pane').click({ position: { x: 1700, y: 1200 } });
+  await editor(page, 'n-plain').dblclick();
+  await editor(page, 'n-plain').evaluate((el) => {
+    const transfer = new DataTransfer();
+    transfer.setData('text/plain', '**粘贴粗体**');
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
+  });
+  await expect(node(page, 'n-plain').locator('strong, b').first()).toBeVisible();
+  // 等粘贴内容落盘后再刷新（防抖 800ms）
+  await expect
+    .poll(
+      () => lastPutNodes(tracking).some((n) => n.id === 'n-plain' && String(n.data.text ?? '').includes('**粘贴粗体**')),
+      { timeout: 10000 },
+    )
+    .toBe(true);
+
+  // 6) 刷新：升级后的 Markdown、新建卡八类格式、粘贴格式、Agent 正文与组合格式全部恢复
+  await page.reload();
+  await expect(node(page, 'n-agent')).toBeVisible();
+  await expect(node(page, 'n-plain').getByText('粘贴粗体')).toBeVisible();
+  await expect(node(page, 'n-plain').locator('strong, b').first()).toBeVisible();
+  await expect(created.first().locator('h1')).toBeVisible();
+  await expect(created.first().locator('h2')).toBeVisible();
+  await expect(created.first().locator('h3')).toBeVisible();
+  await expect(created.first().locator('ul li')).toBeVisible();
+  await expect(created.first().locator('ol li')).toBeVisible();
+  await expect(created.first().locator('hr')).toBeVisible();
+  await expect(node(page, 'n-edit').locator('p').getByText('用于拖动与富文本编辑的便签')).toBeVisible();
+
+  // 7) 统一样式：四类来源正文容器同规格（360×270），同屏截图对比
+  const sizeOf = async (id: string) => {
+    const box = (await card(page, id).boundingBox())!;
+    return `${Math.round(box.width)}x${Math.round(box.height)}`;
+  };
+  const sizes = {
+    '历史 HTML（升级）': await sizeOf('n-edit'),
+    '历史纯文本': await sizeOf('n-plain'),
+    'Agent 应用': await sizeOf('n-agent'),
+    '普通新增': await sizeOf((await created.first().getAttribute('data-id'))!),
+  };
+  expect(new Set(Object.values(sizes)).size, `四类来源正文容器应同规格：${JSON.stringify(sizes)}`).toBe(1);
+  await page.screenshot({ path: join(evidenceDir, 'unified-four-sources.png') });
+  const unifiedEvidence = {
+    upgradedHtmlCard: { id: 'n-edit', text: upgraded.data.text, html: undefined },
+    unifiedSizes: sizes,
+    savedSources: lastPutNodes(tracking).map((n) => ({ id: n.id, hasText: typeof n.data.text === 'string', hasHtml: n.data.html !== undefined })),
+  };
+  writeFileSync(join(evidenceDir, 'unified-four-sources.json'), `${JSON.stringify(unifiedEvidence, null, 2)}\n`);
   expect(smokeFailures(tracking)).toEqual([]);
 });

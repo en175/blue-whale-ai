@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ConversationQuoteCreate } from "@blue-whale/contracts";
+import type { ConversationQuoteCreate } from "@lib/contracts";
 import type { PrismaClient } from "@prisma/client";
 
 /** 对话引用快照行（IKDLQJ）：只增不改；来源节点编辑/删除不影响已冻结内容。 */
