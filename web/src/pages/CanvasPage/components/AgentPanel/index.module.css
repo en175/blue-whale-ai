@@ -2306,18 +2306,25 @@
   overflow: hidden;
 }
 
-/* 卡头色带（IKFLB9 定稿）：左边「方案卡 · 等你拍板 · ▤ .md」，右边媒介 / 模型 / 参数。 */
+/* 卡头色带（IKFLB9 定稿）：左边两行「方案卡 ▤ .md / 等你拍板」，右边媒介 / 模型 / 参数（/ 范围），
+   各自也是「标签 / 值」两行。全部不折行：面板窄时值省略，而不是把卡头挤得一字一折、整条忽高忽低。 */
 .solutionBand {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
   background: linear-gradient(90deg, var(--color-accent-agent-soft), transparent);
   border-bottom: 1px solid var(--color-border-secondary);
 }
 
+.solutionCardTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .solutionState {
+  font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   font-weight: 400;
 }
@@ -2340,10 +2347,20 @@
 
 .solutionBandCells {
   display: flex;
+  justify-content: flex-end;
   gap: 12px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   color: var(--color-text-primary);
   font-size: var(--font-size-sm);
+}
+
+.solutionBandCell {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .solutionBandCell b {
@@ -2381,13 +2398,16 @@
   color: var(--color-text-tertiary);
 }
 
+/* 和「我替你定的（不合适就说）」同一种小字，放在按钮行上面：挤在按钮行里会把「作废」挤到下一行。 */
 .solutionHint {
-  margin-left: auto;
+  margin-top: 2px;
+  padding: 0 12px;
   font-size: 11px;
   color: var(--color-text-tertiary);
 }
 
 .solutionLinkBtn {
+  margin-left: auto;
   padding: 0;
   border: none;
   background: none;
@@ -2419,8 +2439,9 @@
 
 .solutionCardHead {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  flex-shrink: 0;
+  white-space: nowrap;
   color: var(--color-accent-agent);
   font-size: var(--font-size-sm);
   font-weight: 600;
@@ -2454,8 +2475,6 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 200px;
-  overflow-y: auto;
   color: var(--color-text-primary);
 }
 
@@ -2470,7 +2489,7 @@ ol.solutionList {
 .solutionActions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   margin-top: 2px;
   padding: 0 12px;

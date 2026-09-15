@@ -291,13 +291,16 @@ function SolutionCardBlock({
     <>
       <div className={`${styles.solutionCard} ${pending ? '' : styles.solutionCardSettled}`}>
         <div className={styles.solutionBand}>
+          {/* 两行，和右边格子的「标签 / 值」对齐：挤成一行时面板一窄就一字一折。 */}
           <div className={styles.solutionCardHead}>
-            <BookText size={12} strokeWidth={2} />
-            <span>方案卡</span>
+            <div className={styles.solutionCardTitle}>
+              <BookText size={12} strokeWidth={2} />
+              <span>方案卡</span>
+              <button type="button" className={styles.solutionDocBtn} title="点开查看，可下载 .md" onClick={() => setDocOpen(true)}>
+                ▤ .md
+              </button>
+            </div>
             <span className={styles.solutionState}>{solutionStatusLabel(understanding.status)}</span>
-            <button type="button" className={styles.solutionDocBtn} title="点开查看，可下载 .md" onClick={() => setDocOpen(true)}>
-              ▤ .md
-            </button>
           </div>
           {card && (
             <div className={styles.solutionBandCells}>
@@ -321,7 +324,7 @@ function SolutionCardBlock({
               )}
               {/* 续写的卡（决策十六）：只管接下来追加的那一段，用户得知道这张卡不是整条。整条是默认，不占位。 */}
               {card.scope?.kind === 'continuation' && (
-                <span className={styles.solutionBandCell}>
+                <span className={styles.solutionBandCell} title={card.scope.label}>
                   <b>范围</b>
                   {card.scope.label}
                 </span>
@@ -358,6 +361,9 @@ function SolutionCardBlock({
         )}
 
         {pending && !noteOpen && (
+          <div className={styles.solutionHint}>不确认不会写卡</div>
+        )}
+        {pending && !noteOpen && (
           <div className={styles.solutionActions}>
             <button
               type="button"
@@ -383,7 +389,6 @@ function SolutionCardBlock({
             >
               我来改
             </button>
-            <span className={styles.solutionHint}>不确认不会写卡</span>
             <button type="button" className={styles.solutionLinkBtn} disabled={disabled || busy} onClick={() => act(() => onVoid())}>
               作废
             </button>
