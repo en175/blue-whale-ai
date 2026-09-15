@@ -79,6 +79,10 @@ export interface VideoJobParameters {
   resolution: string;
   /** 时长（秒） */
   duration: number;
+  /** IKG0LP：是否生成带音频的视频（用户选择，缺省 true）。
+   *  仅当模型能力位 features.audio 为 true 时前端才提供该选择；
+   *  契约：docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md */
+  generate_audio?: boolean;
 }
 
 /** 音频生成参数 */

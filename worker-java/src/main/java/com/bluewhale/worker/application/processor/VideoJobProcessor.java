@@ -447,6 +447,10 @@ public class VideoJobProcessor implements JobProcessor {
         // duration（:593）
         double duration = resolveDuration(input);
 
+        // IKG0LP：视频是否带音频。接纳侧仅在能力位 features.audio 允许时冻结该字段；
+        // 缺失或非布尔 → null → 出站不下发，维持上游默认。
+        Boolean generateAudio = input.get("generate_audio") instanceof Boolean b ? b : null;
+
         // 校验（:598-606）。IKFPYX：duration=-1（模型自动选时长）**仅 edit/prolong 任务合法**，
         // 其余任务须 duration>0。
         // 判定用**主提示词**（basePrompt）而非组合后 prompt：官方口径是「提示词中需包含关键词」，
@@ -479,7 +483,8 @@ public class VideoJobProcessor implements JobProcessor {
                 else references.add(new VideoReference(type, url));
             }
             return new VideoSubmitInput(model, prompt, duration,
-                    strOrEmpty(input, "resolution"), strOrEmpty(input, "aspect_ratio"), first, last, references);
+                    strOrEmpty(input, "resolution"), strOrEmpty(input, "aspect_ratio"), first, last, references,
+                    generateAudio);
         }
 
         // 参考素材解析（video-job-runner.ts:608-650）
@@ -640,12 +645,12 @@ public class VideoJobProcessor implements JobProcessor {
             }
             merged.addAll(references);
             return new VideoSubmitInput(model, prompt, duration, resolution, ratio,
-                    null, null, merged);
+                    null, null, merged, generateAudio);
         }
 
         return new VideoSubmitInput(
                 model, prompt, duration, resolution, ratio,
-                firstFrameImage, lastFrameImage, references
+                firstFrameImage, lastFrameImage, references, generateAudio
         );
     }
 

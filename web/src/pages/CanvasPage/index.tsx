@@ -720,6 +720,8 @@ export default function CanvasPage() {
         resolution: handoff.resolution,
         duration: handoff.duration,
         mode: handoff.mode,
+        // IKG0LP：音频选择随种子带入面板
+        generateAudio: handoff.generateAudio,
       };
     } else {
       setImageSeed({
@@ -5484,6 +5486,8 @@ export default function CanvasPage() {
       aspect_ratio: opts.aspectRatio,
       resolution: opts.resolution,
       duration: opts.duration,
+      // IKG0LP：用户选的「是否带音频」。能力位不允许时后端会忽略，不下发给上游。
+      generate_audio: opts.generateAudio,
     };
     // 草稿绑定模式按连线+material+文本带入合并推导（IKFM3W §10）；自由模式（工具栏入口无草稿卡）读本地暂存参考
     const freeMode = !videoDraftId;
@@ -6458,7 +6462,9 @@ export default function CanvasPage() {
             videoRefs.push({ ...ref, materialId: result.materialId });
           }
           startGenerationJob('video', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.aspectRatio,
-            resolution: handoff.resolution, duration: handoff.duration }, undefined,
+            resolution: handoff.resolution, duration: handoff.duration,
+            // IKG0LP：首页选的「是否带音频」随交接带过来，不能在这里丢
+            generate_audio: handoff.generateAudio }, undefined,
             { references: buildVideoJobReferencesFromList(videoRefs) },
             undefined, { references: videoRefs, mode: handoff.mode });
         }

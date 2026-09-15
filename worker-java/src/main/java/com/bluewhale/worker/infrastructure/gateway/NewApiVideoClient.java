@@ -130,6 +130,9 @@ public class NewApiVideoClient {
         metadata.put("duration", input.duration());
         if (input.resolution() != null) metadata.put("resolution", input.resolution());
         if (input.ratio() != null) metadata.put("ratio", input.ratio());
+        // IKG0LP：用户选的「是否带音频」，缺省 true；仅能力位允许时接纳侧才会冻结进快照。
+        // 契约：docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md
+        if (input.generateAudio() != null) metadata.put("generate_audio", input.generateAudio());
         metadata.set("content", content);
 
         ObjectNode body = JSON.createObjectNode();
@@ -419,7 +422,9 @@ public class NewApiVideoClient {
             String ratio,
             String firstFrameImage,
             String lastFrameImage,
-            List<VideoReference> references
+            List<VideoReference> references,
+            /** IKG0LP：视频是否带音频。null = 不下发该字段（能力位不允许或旧快照），维持上游默认。 */
+            Boolean generateAudio
     ) {}
 
     /**

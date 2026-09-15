@@ -89,6 +89,8 @@ export interface GenerationParameters {
   sequential_image_generation?: unknown;
   resolution?: unknown;
   duration?: unknown;
+  /** IKG0LP：视频是否带音频（用户选择，缺省 true）。能力位 features.audio 允许时才冻结进快照。 */
+  generate_audio?: unknown;
 }
 
 export interface CreateGenerationJobBody {
@@ -619,6 +621,8 @@ interface ComposeInputContext {
   referenceAssetIds: Array<string | number>;
   /** IKFA1M：已通过结构与引用复核的正文素材标签（仅 image 携带）。 */
   promptDoc: PromptDoc | null;
+  /** IKG0LP：白名单解析后的能力行——视频用它判断 features.audio 是否允许带音频。 */
+  capability?: ModelCapabilityView;
 }
 
 interface GenerationTypeStrategy {
@@ -680,6 +684,7 @@ const videoStrategy: GenerationTypeStrategy = {
     textAttachments,
     referenceAssetIds,
     promptDoc,
+    capability,
   }) {
     const input: Record<string, unknown> = {
       prompt: promptText,
@@ -692,6 +697,12 @@ const videoStrategy: GenerationTypeStrategy = {
     }
     if (isStr(params.resolution)) input.resolution = params.resolution;
     if (params.duration !== undefined) input.duration = params.duration;
+    // IKG0LP：视频带音频——能力位允许时冻结用户选择（缺省 true，不支持则恒 false）；
+    // 能力位不允许（false/未配）时不写该字段，worker 不下发，维持上游默认。
+    // 契约：docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md
+    if (capability?.features?.audio === true) {
+      input.generate_audio = params.generate_audio !== false;
+    }
     // IKDJNZ：单数组 references 冻结进 input 快照（保序），Worker 执行时按 role 拆帧/参考并做关联转换。
     const parsed = parseReferences(body.references);
     if (parsed.kind === "ok") {
@@ -1650,6 +1661,8 @@ export async function handleCreateGenerationJob(
     textAttachments: target.value.textAttachments,
     referenceAssetIds,
     promptDoc,
+    // IKG0LP：exactOptionalPropertyTypes 下不能显式传 undefined，按本仓惯例条件展开
+    ...(capability ? { capability } : {}),
   });
   // 图片与视频一致：sk token 明文写进 job.input.provider_credential（修正四：凭证去密），处理时由 worker 直接取用。
   // 这样进程内即时调度与重启后的恢复扫描共用同一套凭据来源。

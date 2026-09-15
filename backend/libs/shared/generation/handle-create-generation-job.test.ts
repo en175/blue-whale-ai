@@ -1626,6 +1626,48 @@ describe("handleCreateGenerationJob 视频参数能力目录前置（IKE7JP）",
     expect(createJob).toHaveBeenCalled();
   });
 
+  // IKG0LP：视频带音频——能力位 features.audio 允许时冻结用户选择（缺省 true）；
+  // 不允许（false/未配）时快照不写该字段，worker 不下发，维持上游默认。
+  it("能力位 features.audio=true → 冻结用户选择，缺省 true", async () => {
+    const row = { ...VIDEO_CAPABILITY_ROW, features: { audio: true } };
+
+    const depsA = buildCapabilityDeps([row]);
+    expect(
+      (await handleCreateGenerationJob("u1", "p1", VIDEO_PARAMS_OK, null, depsA.deps)).code,
+    ).toBe(200);
+    const inputA = (depsA.createJob.mock.calls[0][0] as { input: Record<string, unknown> })
+      .input;
+    expect(inputA.generate_audio).toBe(true);
+
+    const depsB = buildCapabilityDeps([row]);
+    expect(
+      (
+        await handleCreateGenerationJob(
+          "u1",
+          "p1",
+          {
+            ...VIDEO_PARAMS_OK,
+            parameters: { ...VIDEO_PARAMS_OK.parameters, generate_audio: false },
+          },
+          null,
+          depsB.deps,
+        )
+      ).code,
+    ).toBe(200);
+    const inputB = (depsB.createJob.mock.calls[0][0] as { input: Record<string, unknown> })
+      .input;
+    expect(inputB.generate_audio).toBe(false);
+  });
+
+  it("能力位未配 features.audio → 快照不写 generate_audio（出站维持上游默认）", async () => {
+    const { deps, createJob } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
+    expect(
+      (await handleCreateGenerationJob("u1", "p1", VIDEO_PARAMS_OK, null, deps)).code,
+    ).toBe(200);
+    const input = (createJob.mock.calls[0][0] as { input: Record<string, unknown> }).input;
+    expect(Object.hasOwn(input, "generate_audio")).toBe(false);
+  });
+
   it("能力行未配置 supported_* 时不阻断（worker 兜底）", async () => {
     const { deps, createJob } = buildCapabilityDeps([
       { model_id: "doubao-seedance-2-0-260128" },
