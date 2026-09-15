@@ -52,6 +52,33 @@ function HandlePlus() {
   );
 }
 
+/** media/素材标签编辑后的光标锚点（IKFXDB，契约 §5）：全量重放销毁旧 DOM，
+ *  恢复按（标签种类 + 同身份第几张 + 标签前/后）在新 DOM 定位 chip——
+ *  media 标签身份是来源 nodeId，素材标签（prompt #N）身份是编号。 */
+interface ChipAnchor {
+  kind: 'media' | 'prompt';
+  /** media：来源 nodeId；prompt：标签编号 */
+  key: string;
+  /** 同身份第几张（1-based，按文档序） */
+  occurrence: number;
+  placement: 'before' | 'after';
+}
+
+/** 编辑器内某身份的全部 chip（按文档序） */
+function chipsOfKey(editor: HTMLElement, kind: ChipAnchor['kind'], key: string): HTMLElement[] {
+  const selector = kind === 'media' ? `[data-media-node="${CSS.escape(key)}"]` : `[data-prompt-index="${CSS.escape(key)}"]`;
+  return [...editor.querySelectorAll<HTMLElement>(selector)];
+}
+
+/** chip 在编辑器里的锚点（种类从 dataset 判；同身份序号按文档序计） */
+function chipAnchorOf(editor: HTMLElement, chip: HTMLElement, placement: ChipAnchor['placement']): ChipAnchor {
+  if (chip.dataset.mediaNode) {
+    return { kind: 'media', key: chip.dataset.mediaNode, occurrence: chipsOfKey(editor, 'media', chip.dataset.mediaNode).indexOf(chip) + 1, placement };
+  }
+  const key = chip.dataset.promptIndex ?? '';
+  return { kind: 'prompt', key, occurrence: chipsOfKey(editor, 'prompt', key).indexOf(chip) + 1, placement };
+}
+
 interface TextNodeData {
   promptSource?: unknown;
   promptMentions?: PromptMention[];
@@ -104,11 +131,16 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
+  /** 编辑器外操作（@菜单/chipMenu/操作条的新增·替换·删除）后的光标锚点：
+   *  非编辑态操作无在位光标，进入编辑时按它落位（契约 §5）；编辑器内操作作废它 */
+  const savedAnchorRef = useRef<ChipAnchor | null>(null);
   const initializedRef = useRef(false);
   const draftMaterialsRef = useRef(data.promptMaterials);
   useEffect(() => { draftMaterialsRef.current = data.promptMaterials; }, [data.promptMaterials]);
 
   const [selectedMention, setSelectedMention] = useState<number | null>(null);
+  /** 点击选中的那张素材标签（替换/删除的光标锚点定位用；编号相同的多张取点击的那张） */
+  const [selectedMentionChip, setSelectedMentionChip] = useState<HTMLElement | null>(null);
   const canvasNodes = useStore(state => state.nodes);
   const materialChoices = [...new Map(canvasNodes.filter(node => node.type === 'mediaNode' && node.data.assetId && !node.data.assetMissing && node.data.genStatus !== 'generating'
     && ['image', 'video', 'audio'].includes(String(node.data.mediaType))).map(node => [String(node.data.assetId), {
@@ -135,8 +167,9 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       assetId: String(node.data.assetId),
     }));
 
-  /** @ 菜单：insert=光标处插入新标签；rebind=重绑定失效身份（契约 §3 修复路径） */
-  const [mentionMenu, setMentionMenu] = useState<{ mode: 'insert' | 'rebind'; rebindNodeId?: string; x: number; y: number } | null>(null);
+  /** @ 菜单：insert=光标处插入新标签；rebind=重绑定失效身份（契约 §3 修复路径）；
+   *  rebindChip=触发重绑定的那张 chip（选中后光标落它替换后的新标签后，契约 §5） */
+  const [mentionMenu, setMentionMenu] = useState<{ mode: 'insert' | 'rebind'; rebindNodeId?: string; rebindChip?: HTMLElement; x: number; y: number } | null>(null);
   const mentionAnchorRef = useRef<HTMLSpanElement>(null);
   /** 标签操作弹层：点击 media 标签弹出（定位/替换来源/删除标签） */
   const [chipMenu, setChipMenu] = useState<{ chip: HTMLElement; x: number; y: number } | null>(null);
@@ -159,11 +192,6 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       editorRef.current?.blur();
     }
   }, [isSelect]);
-
-  // 进入编辑后聚焦编辑器
-  useEffect(() => {
-    if (editing) editorRef.current?.focus();
-  }, [editing]);
 
   // Keep the complete source, including legacy over-limit content. Never truncate on load.
   useEffect(() => {
@@ -201,6 +229,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
 
   /** 保存当前选区 */
   const saveSelection = useCallback(() => {
+    savedAnchorRef.current = null;
     const sel = window.getSelection();
     if (sel && sel.rangeCount > 0) {
       const range = sel.getRangeAt(0);
@@ -210,12 +239,13 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     }
   }, []);
 
-  /** 恢复选区 */
+  /** 恢复选区（仅当保存的 range 仍存活于编辑器——重放销毁后不恢复，避免漂移） */
   const restoreSelection = useCallback(() => {
     const sel = window.getSelection();
-    if (sel && savedRangeRef.current) {
+    const range = savedRangeRef.current;
+    if (sel && range && editorRef.current?.contains(range.startContainer)) {
       sel.removeAllRanges();
-      sel.addRange(savedRangeRef.current);
+      sel.addRange(range);
     }
   }, []);
 
@@ -270,15 +300,50 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     notifyMediaIndex(content, { added: [], removed: [] });
   }, [data, id, hasPromptBindings, mediaValidity, notifyMediaIndex]);
 
-  /** media 标签 DOM 变更（插入/重绑定/删除）→ 序列化 → 全量重放 → 同步父级与关系线 */
-  const commitMediaEdit = useCallback((delta: { added: string[]; removed: string[] }) => {
+  /** 重放后按锚点恢复光标（IKFXDB，契约 §5）：定位同身份第 occurrence 张 chip 落
+   *  锚点位置；无可锚 chip（唯一标签被删后正文无标签）落编辑器末尾。 */
+  const restoreChipAnchor = useCallback((anchor?: ChipAnchor) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.focus();
+    const range = document.createRange();
+    let placed = false;
+    if (anchor) {
+      const chip = chipsOfKey(editor, anchor.kind, anchor.key)[anchor.occurrence - 1];
+      if (chip) {
+        if (anchor.placement === 'after') range.setStartAfter(chip);
+        else range.setStartBefore(chip);
+        placed = true;
+      }
+    }
+    if (!placed) { range.selectNodeContents(editor); range.collapse(false); }
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    savedRangeRef.current = range.cloneRange();
+  }, []);
+
+  // 进入编辑后聚焦编辑器；编辑器外操作（操作条删除/替换等）留下的光标锚点在此落位（契约 §5）
+  useEffect(() => {
+    if (!editing) return;
+    editorRef.current?.focus();
+    const anchor = savedAnchorRef.current;
+    if (anchor) { savedAnchorRef.current = null; restoreChipAnchor(anchor); }
+    else restoreSelection();
+  }, [editing, restoreChipAnchor, restoreSelection]);
+
+  /** media 标签 DOM 变更（插入/重绑定/删除）→ 序列化 → 全量重放 → 同步父级与关系线。
+   *  重放销毁旧 DOM、旧选区随之失效：anchor 记录变更前锚点，重放后按它在新 DOM 恢复光标（契约 §5）。 */
+  const commitMediaEdit = useCallback((delta: { added: string[]; removed: string[] }, anchor?: ChipAnchor) => {
     const editor = editorRef.current;
     if (!editor) return;
     // 新插入/重绑定身份的连线在本轮 delta 才建立：序列化与重放按「已建立」派生，避免把新标签写成已失效
     const validity = (nodeId: string) => delta.added.includes(nodeId) || mediaValidity(nodeId);
     const content = readPromptMentions(editor, validity);
     renderPromptMentions(editor, content.text, content.mentions, draftMaterialsRef.current ?? [], content.mediaMentions, content.mediaRefs, validity);
-    savedRangeRef.current = null;
+    restoreChipAnchor(anchor);
+    savedAnchorRef.current = anchor ?? null;
     setChipMenu(null);
     if (content.text.length > MAX_TEXT_LENGTH) {
       // 草稿超限仅就地提示：正文与索引都不同步（与 editMaterial 口径一致）
@@ -292,7 +357,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     if (hasPromptBindings) data.onPromptChange?.(id, content.text, content.mentions, draftMaterialsRef.current);
     else data.onTextChange?.(id, content.text);
     notifyMediaIndex(content, delta);
-  }, [data, id, hasPromptBindings, mediaValidity, notifyMediaIndex]);
+  }, [data, id, hasPromptBindings, mediaValidity, notifyMediaIndex, restoreChipAnchor]);
 
   /** 逐键输入 @ 打开素材菜单（契约 §5：正文任意位置触发——@ 前是汉字/标点/字母/
    *  数字均弹出，与底部面板编辑器同一口径；粘贴不触发，IKFUTI） */
@@ -328,11 +393,16 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       const oldNodeId = menu.rebindNodeId;
       if (oldNodeId === identity.nodeId) { setChipMenu(null); return; }
       // 重绑定以身份为单位：该身份全部失效标签一并指向新来源（契约 §3）
+      let clickedNext: HTMLElement | null = null;
       for (const chip of editor.querySelectorAll<HTMLElement>(`[data-media-node="${CSS.escape(oldNodeId)}"]`)) {
-        chip.replaceWith(createMediaMentionChip(identity, identity.name, false));
+        const next = createMediaMentionChip(identity, identity.name, false);
+        chip.replaceWith(next);
+        if (chip === menu.rebindChip) clickedNext = next;
       }
       const alreadyKnown = mediaIndexRef.current.mediaMentions.some(mention => mention.nodeId === identity.nodeId);
-      commitMediaEdit({ added: alreadyKnown ? [] : [identity.nodeId], removed: [oldNodeId] });
+      // 光标落触发重绑定的那张替换后的新标签后（契约 §5 替换落点）
+      commitMediaEdit({ added: alreadyKnown ? [] : [identity.nodeId], removed: [oldNodeId] },
+        clickedNext ? chipAnchorOf(editor, clickedNext, 'after') : undefined);
       return;
     }
     restoreSelection();
@@ -353,7 +423,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     range.setStartAfter(chip);
     range.collapse(true);
     savedRangeRef.current = range;
-    commitMediaEdit({ added: known ? [] : [identity.nodeId], removed: [] });
+    // 光标落新标签后（契约 §5 插入落点）：锚点按插入后同身份序号计
+    commitMediaEdit({ added: known ? [] : [identity.nodeId], removed: [] }, chipAnchorOf(editor, chip, 'after'));
   }, [mentionMenu, restoreSelection, commitMediaEdit]);
 
   /** 点击有效标签（非编辑态）定位来源节点：平移居中 + 短暂高亮（契约 §5） */
@@ -407,18 +478,39 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     return () => document.removeEventListener('click', close);
   }, [chipMenu]);
 
+  /** 素材标签 DOM 变更（新增/替换/删除）→ 全量重放 → 同步父级。
+   *  与 media 标签同病同修（IKFXDB，契约 §5）：重放销毁旧 DOM，按锚点在新 DOM 恢复光标——
+   *  新增/替换落标签后，删除落被删标签原位置（相邻锚定，序号按删除后 DOM 计）。 */
   const editMaterial = (assetId: string, replaceIndex: number | null) => {
     const editor = editorRef.current;
     const material = materialChoices.find(item => item.assetId === assetId);
     if (!editor || (assetId && !material)) return;
     const materials = [...(draftMaterialsRef.current ?? [])];
     if (material && !materials.some(item => item.assetId === material.assetId)) materials.push({ assetId: material.assetId, mediaType: material.mediaType, url: material.url });
-    if (replaceIndex !== null) {
+    let anchor: ChipAnchor | undefined;
+    // 点击选中的那张同编号 chip（未选中/失配回退第一张）
+    const chipOfIndex = () => [...editor.querySelectorAll<HTMLElement>(`[data-prompt-index="${replaceIndex}"]`)]
+      .find(chip => chip === selectedMentionChip) ?? editor.querySelector<HTMLElement>(`[data-prompt-index="${replaceIndex}"]`);
+    if (replaceIndex !== null && !material) {
+      // 删除：先记点击位置的全 chip 序，移除后按幸存邻居锚定（序号按删除后 DOM 计）
+      const before = [...editor.querySelectorAll<HTMLElement>('[data-media-node], [data-prompt-index]')];
+      const clickedIdx = before.indexOf(chipOfIndex() ?? before[0]);
       for (const chip of editor.querySelectorAll<HTMLElement>('[data-prompt-index]')) {
         if (Number(chip.dataset.promptIndex) !== replaceIndex) continue;
-        if (!material) chip.remove();
-        else chip.dataset.promptAsset = material.assetId;
+        chip.remove();
       }
+      let neighbour: HTMLElement | undefined;
+      let placement: ChipAnchor['placement'] = 'after';
+      for (let i = clickedIdx - 1; i >= 0 && !neighbour; i -= 1) if (before[i].isConnected) neighbour = before[i];
+      for (let i = clickedIdx + 1; i < before.length && !neighbour; i += 1) if (before[i].isConnected) { neighbour = before[i]; placement = 'before'; }
+      if (neighbour) anchor = chipAnchorOf(editor, neighbour, placement);
+    } else if (replaceIndex !== null && material) {
+      for (const chip of editor.querySelectorAll<HTMLElement>('[data-prompt-index]')) {
+        if (Number(chip.dataset.promptIndex) !== replaceIndex) continue;
+        chip.dataset.promptAsset = material.assetId;
+      }
+      const clicked = chipOfIndex();
+      if (clicked) anchor = chipAnchorOf(editor, clicked, 'after');
     } else if (material) {
       editor.focus();
       const range = savedRangeRef.current?.cloneRange() ?? document.createRange();
@@ -433,12 +525,15 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       range.insertNode(chip);
       range.setStartAfter(chip); range.collapse(true);
       savedRangeRef.current = range;
+      anchor = chipAnchorOf(editor, chip, 'after');
     }
     draftMaterialsRef.current = materials;
     const prompt = readPromptMentions(editor);
     renderPromptMentions(editor, prompt.text, prompt.mentions, materials);
-    savedRangeRef.current = null;
+    restoreChipAnchor(anchor);
+    savedAnchorRef.current = anchor ?? null;
     setSelectedMention(null);
+    setSelectedMentionChip(null);
     if (prompt.text.length > MAX_TEXT_LENGTH) {
       const error = `正文最多 ${MAX_TEXT_LENGTH} 字，当前草稿已保留，请缩短后保存`;
       setContentError(error); data.onDraftError?.(id, error); return;
@@ -714,6 +809,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
             if (!hasPromptBindings) return;
             const chip = (event.target as HTMLElement).closest<HTMLElement>('[data-prompt-index]');
             setSelectedMention(chip ? Number(chip.dataset.promptIndex) : null);
+            setSelectedMentionChip(chip);
           }}
           onDoubleClick={(e) => {
             if (!isSelect) return;
@@ -767,15 +863,27 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
             // 重绑定菜单打开前同样记录光标：取消关闭后恢复到打开时位置（契约 §5）
             saveSelection();
             setChipMenu(null);
-            setMentionMenu({ mode: 'rebind', rebindNodeId: nodeId, x: rect.left, y: rect.bottom });
+            setMentionMenu({ mode: 'rebind', rebindNodeId: nodeId, rebindChip: chipMenu.chip, x: rect.left, y: rect.bottom });
           }}>
             <RefreshCw size={13} strokeWidth={2} /><span>{chipMenu.chip.dataset.mediaInvalid === '1' ? '重新绑定' : '替换来源'}</span>
           </button>
           <button type="button" className={`${styles.chipMenuBtn} ${styles.chipMenuDanger}`} onClick={() => {
             const chip = chipMenu.chip;
+            const editor = editorRef.current;
             setChipMenu(null);
+            // 光标落被删标签原位置（契约 §5 删除落点）：优先锚前一张标签后，其次后一张标签前；
+            // 序号按删除后的 DOM 计（先移除再取），同身份后一张重放后才能对上；邻居含素材标签
+            const index = editor ? [...editor.querySelectorAll<HTMLElement>('[data-media-node], [data-prompt-index]')].indexOf(chip) : -1;
             chip.remove();
-            commitMediaEdit({ added: [], removed: [] });
+            let anchor: ChipAnchor | undefined;
+            if (editor) {
+              const rest = [...editor.querySelectorAll<HTMLElement>('[data-media-node], [data-prompt-index]')];
+              const prev = index > 0 ? rest[index - 1] : undefined;
+              const next = index === 0 ? rest[0] : undefined;
+              if (prev) anchor = chipAnchorOf(editor, prev, 'after');
+              else if (next) anchor = chipAnchorOf(editor, next, 'before');
+            }
+            commitMediaEdit({ added: [], removed: [] }, anchor);
           }}>
             <Trash2 size={13} strokeWidth={2} /><span>删除标签</span>
           </button>
