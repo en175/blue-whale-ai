@@ -85,6 +85,7 @@ export {
   assetDurationSeconds,
   type AssetRepo,
   type AssetView,
+  type AssetDetailView,
   type AssetPage,
   type AssetListFilter,
   type AssetInternal,
