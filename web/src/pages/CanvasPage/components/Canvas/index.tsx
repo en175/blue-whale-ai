@@ -34,6 +34,7 @@ import CustomEdge from '../CustomEdge';
 import GroupOverlay from '../GroupOverlay';
 import GroupFrameNode from '../GroupFrameNode';
 import { canvasDeleteKeyAction, deleteSelectedCanvasNodes, isEditableKeyboardTarget } from './keyboardDelete';
+import { canvasClipboardKeyAction, copyableSelectedCanvasNodes } from './keyboardClipboard';
 import { useCanvasPan } from './useCanvasPan';
 import ConnectionPreview from './ConnectionPreview';
 import {
@@ -101,6 +102,12 @@ interface FlowCanvasProps {
   assetPickResult?: { ts: number; assetId: string; ref: { id: string; src: string; type?: 'image' | 'video'; assetId?: string } } | null;
   /** 快捷键复制选中节点（Ctrl/Cmd+D，IKD0JT REQ-A-109）：内部选中态由 Canvas 持有，回调上抛 */
   onDuplicateSelected?: (ids: string[]) => void;
+  /** 快捷键复制选中卡快照（IKGBPA，Ctrl/Cmd+C）：ids 已过滤为文本/媒体卡（商品/资产静默排除） */
+  onCopySelected?: (ids: string[]) => void;
+  /** 快捷键粘贴（IKGBPA，Ctrl/Cmd+V）：画布内部剪贴板入口（系统剪贴板兜底由父级处理） */
+  onPasteClipboard?: () => void;
+  /** 父层显式多选请求（IKGBPA 粘贴自动选中）：机制同 selectRequest，经内部 setNodes 应用 */
+  selectManyRequest?: { ids: string[]; ts: number } | null;
   /** 成组名单（IKD0JT A3）：底框/徽标渲染与整组拖拽依据 */
   groups?: CanvasGroup[];
   /** 成组（IKD0JT A4）：成组按钮 / Ctrl/Cmd+G 上抛选中节点对象（含 measured 实际尺寸，父级按真实包围盒定格组矩形） */
@@ -130,7 +137,7 @@ interface FlowCanvasProps {
   refPickBlockedIds?: string[];
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, refPickMarkedIds, refPickBlockedIds }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, refPickMarkedIds, refPickBlockedIds }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -149,6 +156,15 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     selectReqTsRef.current = selectRequest.ts;
     setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === selectRequest.id })));
   }, [selectRequest, setNodes]);
+
+  /** 父层显式多选请求（IKGBPA 粘贴自动选中）：机制同 selectRequest，一次选中多个目标并取消其余。 */
+  const selectManyReqTsRef = useRef(0);
+  useEffect(() => {
+    if (!selectManyRequest || selectManyRequest.ts === selectManyReqTsRef.current) return;
+    selectManyReqTsRef.current = selectManyRequest.ts;
+    const ids = new Set(selectManyRequest.ids);
+    setNodes((prev) => prev.map((n) => ({ ...n, selected: ids.has(n.id) })));
+  }, [selectManyRequest, setNodes]);
 
   const nodeTypes: NodeTypes = useMemo(
     () => ({
@@ -386,6 +402,10 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   onDeleteNodeRef.current = onDeleteNode;
   const onDuplicateSelectedRef = useRef(onDuplicateSelected);
   onDuplicateSelectedRef.current = onDuplicateSelected;
+  const onCopySelectedRef = useRef(onCopySelected);
+  onCopySelectedRef.current = onCopySelected;
+  const onPasteClipboardRef = useRef(onPasteClipboard);
+  onPasteClipboardRef.current = onPasteClipboard;
   // groups 是可选 prop：统一落成空数组，避免 408/410/574 处的 groupsRef.current.find 在省略时崩
   const groupsRef = useRef<CanvasGroup[]>(groups ?? []);
   groupsRef.current = groups ?? [];
@@ -551,11 +571,33 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
    *  统一由父级各列表状态驱动，各合并 effect 的 removed 分支同步内部 nodes。
    *  快捷键（IKD0JT）：Ctrl/Cmd+D 复制选中节点（偏移落位由父级 duplicate 处理）；
    *  Ctrl/Cmd+A 全选画布节点（拖动模式不响应，保持既有手势语义）；
-   *  Ctrl/Cmd+G 选中 ≥2 节点成组。 */
+   *  Ctrl/Cmd+G 选中 ≥2 节点成组。
+   *  快捷键（IKGBPA）：Ctrl/Cmd+C 快照选中卡 / Ctrl/Cmd+V 粘贴——决策走 keyboardClipboard
+   *  纯函数，可编辑目标与 @ 引用菜单打开时让位浏览器原生行为（不 preventDefault）。 */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey) {
         const key = e.key.toLowerCase();
+        if (key === 'c' || key === 'v') {
+          const clipboardAction = canvasClipboardKeyAction({
+            key: e.key,
+            metaKey: e.metaKey,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+            target: e.target,
+            mentionMenuOpen: Boolean(document.querySelector('[data-canvas-keyboard-scope="mention"]')),
+          });
+          if (clipboardAction === 'ignore') return;
+          e.preventDefault();
+          e.stopPropagation();
+          if (clipboardAction === 'copy') {
+            const ids = copyableSelectedCanvasNodes(nodesRef.current);
+            if (ids.length > 0) onCopySelectedRef.current?.(ids);
+            return;
+          }
+          onPasteClipboardRef.current?.();
+          return;
+        }
         if (key === 'd' && !isEditableKeyboardTarget(e.target)) {
           e.preventDefault();
           e.stopPropagation();
@@ -739,7 +781,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, onDuplicateSelected, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, refPickMarkedIds, refPickBlockedIds }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, refPickMarkedIds, refPickBlockedIds }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -770,7 +812,10 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         productPickResult={productPickResult}
         assetPickResult={assetPickResult}
         selectRequest={selectRequest}
+        selectManyRequest={selectManyRequest}
         onDuplicateSelected={onDuplicateSelected}
+        onCopySelected={onCopySelected}
+        onPasteClipboard={onPasteClipboard}
         groups={groups}
         onCreateGroup={onCreateGroup}
         onUngroupGroup={onUngroupGroup}
