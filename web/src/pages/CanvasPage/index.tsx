@@ -732,6 +732,8 @@ export default function CanvasPage() {
    *  经 Canvas 内部 setNodes 应用——直接经 nodes selected 字段传播会因 React Flow
    *  selection store 的时序差报双选中，把自动打开的绑定面板当多选误关 */
   const [selectRequest, setSelectRequest] = useState<{ id: string; ts: number } | null>(null);
+  /** 粘贴自动多选请求（IKGBPA）：机制同 selectRequest，一次选中整组新副本 */
+  const [selectManyRequest, setSelectManyRequest] = useState<{ ids: string[]; ts: number } | null>(null);
   /** 首页 AI视频/AI图片 生成交接：消费后置入此 ref，待项目就绪触发创建任务 */
   const pendingGenRef = useRef<GenHandoff | null>(null);
   /** 首页 AI视频 带入的草稿参数种子：待项目与文档就绪后新建视频草稿卡并打开绑定面板 */
@@ -1006,6 +1008,16 @@ export default function CanvasPage() {
    *  覆盖点选 / 新建 / 删除后自动切换 / 地址栏前进后退等全部 currentId 迁移路径。
    *  空串 → 首项目 是初始水合（含首页交接降级路径），不是用户切换，不关面板。 */
   const prevProjectIdRef = useRef(currentId);
+  /** 画布内部剪贴板快照节点（IKGBPA）：kind + 定格坐标 + JSON 深拷贝 data（无函数回调，粘贴时重注入） */
+  interface CanvasClipboardSnapshot {
+    kind: 'text' | 'media';
+    position: { x: number; y: number };
+    data: Record<string, unknown>;
+  }
+  /** 画布内部剪贴板（IKGBPA）：不持久化、不写系统剪贴板；切换项目清空（对齐撤销栈不跨项目） */
+  const clipboardSnapshotRef = useRef<CanvasClipboardSnapshot[]>([]);
+  /** 连续粘贴偏移计数：每次成功 V 整组右下错开一档，每次成功 C 归零 */
+  const clipboardPasteOffsetRef = useRef(0);
   useEffect(() => {
     const prev = prevProjectIdRef.current;
     prevProjectIdRef.current = currentId;
@@ -1018,6 +1030,9 @@ export default function CanvasPage() {
     setFocusViewport(undefined);
     // 撤销/重做栈不跨项目（PRD §7.2 X1：不跨会话）
     historyRef.current?.clear();
+    // 画布剪贴板不跨项目（IKGBPA）
+    clipboardSnapshotRef.current = [];
+    clipboardPasteOffsetRef.current = 0;
   }, [currentId]);
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
@@ -1622,6 +1637,79 @@ export default function CanvasPage() {
       historyRef.current?.pushAddNodes([copy.id]);
       setMediaNodes((prev) => [...prev, copy]);
     }
+  };
+
+  /* ============ 画布内部剪贴板（IKGBPA）：Ctrl/Cmd+C 快照 / Ctrl/Cmd+V 粘贴 ============ */
+
+  /** 连续粘贴整组错开步长（右下逐档，对齐立即复制 +40/+40 偏移惯例） */
+  const CLIPBOARD_PASTE_STAIR_PX = 40;
+
+  /** C 快照定格（IKGBPA）：深拷贝选中卡（JSON 克隆剥掉回调，粘贴时经 attachCallbacks 重注入）；
+   *  原卡后续删除/改名/编辑/生成完成均不影响快照。ids 已由 Canvas 入口过滤为文本/媒体卡。 */
+  const handleCopySelectedNodes = (ids: string[]) => {
+    const idSet = new Set(ids);
+    const picked: Node[] = [
+      ...textNodesRef.current.filter((n) => idSet.has(n.id)),
+      ...mediaNodesRef.current.filter((n) => idSet.has(n.id)),
+    ];
+    if (picked.length === 0) return;
+    clipboardSnapshotRef.current = picked.map((n) => ({
+      kind: n.type === 'mediaNode' ? ('media' as const) : ('text' as const),
+      position: { ...n.position },
+      data: JSON.parse(JSON.stringify(n.data ?? {})) as Record<string, unknown>,
+    }));
+    // 每次成功复制重置连续粘贴偏移
+    clipboardPasteOffsetRef.current = 0;
+  };
+
+  /** V 粘贴（IKGBPA）：视口中心落位 + 多卡按快照原相对位置整体落位 + 连续粘贴整组右下递增错开；
+   *  手拉连线不随贴（只产散卡）；文本卡副本按 IKFM3Q 契约 §4 重建正文 @ 引用派生索引线；
+   *  按「新增节点」登记撤销（一次粘贴一条，撤销一次移除整组副本，悬空派生线由 IKDLQF 级联清理）。 */
+  const handlePasteClipboard = () => {
+    // 内部剪贴板为空时本片静默；IKGBPB 系统剪贴板兜底在此分支点接入（不与内部剪贴板读取耦死）
+    if (clipboardSnapshotRef.current.length === 0) return;
+    const snapshot = clipboardSnapshotRef.current;
+    const stair = CLIPBOARD_PASTE_STAIR_PX * clipboardPasteOffsetRef.current;
+    clipboardPasteOffsetRef.current += 1;
+    const anchor = spawnPosRef.current();
+    const minX = Math.min(...snapshot.map((s) => s.position.x));
+    const minY = Math.min(...snapshot.map((s) => s.position.y));
+    const textCopies: Node[] = [];
+    const mediaCopies: Node[] = [];
+    const newIds: string[] = [];
+    snapshot.forEach((s) => {
+      const position = {
+        x: Math.round(anchor.x + (s.position.x - minX) + stair),
+        y: Math.round(anchor.y + (s.position.y - minY) + stair),
+      };
+      const data = JSON.parse(JSON.stringify(s.data)) as Record<string, unknown>;
+      if (s.kind === 'text') {
+        // 会话性提示词来源字段不随副本（对齐 handleDuplicateNode 的字段清理）
+        delete data.promptSource;
+        delete data.promptMaterials;
+        delete data.promptMentions;
+        delete data.promptOriginalTitle;
+        const copy = attachCallbacks({ id: newNodeId('text'), type: 'textNode', position, data });
+        textCopies.push(copy);
+        newIds.push(copy.id);
+      } else {
+        const copy = attachCallbacks({ id: newNodeId('media'), type: 'mediaNode', position, data });
+        mediaCopies.push(copy);
+        newIds.push(copy.id);
+      }
+    });
+    newIds.forEach((id) => pendingNodeIdsRef.current.add(id));
+    historyRef.current?.pushAddNodes(newIds);
+    if (textCopies.length > 0) setTextNodes((prev) => [...prev, ...textCopies]);
+    if (mediaCopies.length > 0) setMediaNodes((prev) => [...prev, ...mediaCopies]);
+    // IKFM3Q 契约 §4：副本随正文复制 media 索引；来源节点仍在画布的关系线同步复制（副本获得有效索引）
+    textCopies.forEach((copy) => {
+      const mentionedSources = [...new Set(((copy.data.mediaMentions ?? []) as MediaMention[]).map(mention => mention.nodeId))]
+        .filter(source => findCanvasNode(source));
+      if (mentionedSources.length > 0) syncTextIndexEdges(copy.id, { added: mentionedSources, removed: [] });
+    });
+    // 新卡自动选中（整组副本）
+    setSelectManyRequest({ ids: newIds, ts: Date.now() });
   };
 
   /**
@@ -6826,6 +6914,7 @@ export default function CanvasPage() {
           }
           refPickBlockedIds={videoPickSessionActive ? videoPickBlockedIds : undefined}
           selectRequest={selectRequest}
+          selectManyRequest={selectManyRequest}
           productPickResult={productPickResult}
           assetPickResult={assetPickResult}
           onDeleteNode={(ids) => {
@@ -6834,6 +6923,8 @@ export default function CanvasPage() {
             removeCanvasNodes(ids);
           }}
           onDuplicateSelected={(ids) => ids.forEach((id) => actionsRef.current.duplicate(id))}
+          onCopySelected={handleCopySelectedNodes}
+          onPasteClipboard={handlePasteClipboard}
           groups={groups}
           onCreateGroup={handleCreateGroup}
           onUngroupGroup={handleUngroup}
