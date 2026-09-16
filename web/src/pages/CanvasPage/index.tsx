@@ -2831,7 +2831,9 @@ export default function CanvasPage() {
     setTextNodes(deselect);
     setProductNodes(deselect);
     setAssetNodes(deselect);
-    setMediaNodes((prev) => [...deselect(prev), node]);
+    const nextMedia = [...deselect(mediaNodesRef.current), node];
+    mediaNodesRef.current = nextMedia;
+    setMediaNodes(nextMedia);
     setSelectRequest({ id: nodeId, ts: Date.now() });
     return nodeId;
   };
@@ -2874,7 +2876,9 @@ export default function CanvasPage() {
     setTextNodes(deselect);
     setProductNodes(deselect);
     setAssetNodes(deselect);
-    setMediaNodes((prev) => [...deselect(prev), node]);
+    const nextMedia = [...deselect(mediaNodesRef.current), node];
+    mediaNodesRef.current = nextMedia;
+    setMediaNodes(nextMedia);
     setSelectRequest({ id: nodeId, ts: Date.now() });
     return nodeId;
   };
@@ -2917,7 +2921,9 @@ export default function CanvasPage() {
     setTextNodes(deselect);
     setProductNodes(deselect);
     setAssetNodes(deselect);
-    setMediaNodes((prev) => [...deselect(prev), node]);
+    const nextMedia = [...deselect(mediaNodesRef.current), node];
+    mediaNodesRef.current = nextMedia;
+    setMediaNodes(nextMedia);
     setSelectRequest({ id: nodeId, ts: Date.now() });
     return nodeId;
   };
@@ -3000,6 +3006,23 @@ export default function CanvasPage() {
     setConnectMenu({ sourceIds: sources.map((n) => n.id), x: clientX, y: clientY });
   };
 
+  /** 类型菜单建草稿后自动连上游：媒体来源按各生成类型做参考校验；
+   *  文本卡是创作上下文，不能走媒体参考校验，否则视频生成会被误拦、连不上线。 */
+  const connectMenuSourcesToDraft = (sourceIds: string[], targetId: string, kind: ConnectGenKind) => {
+    sourceIds.forEach((id) => {
+      const source = findCanvasNode(id);
+      if (!source || !isConnectableSource(source)) return;
+      if (source.type === 'mediaNode') {
+        if (kind === 'video' && videoRefSourceError(source, 'reference')) return;
+        if (kind === 'image' && imageRefSourceError(source)) return;
+        if (kind === 'audio' && audioRefSourceError(source)) return;
+        addCanvasEdge(id, targetId, kind === 'video' ? 'reference' : undefined);
+        return;
+      }
+      addCanvasEdge(id, targetId);
+    });
+  };
+
   const applyConnectType = (kind: ConnectGenKind) => {
     if (!connectMenu) return;
     const sourceIds = connectMenu.sourceIds;
@@ -3008,22 +3031,19 @@ export default function CanvasPage() {
     let targetId = '';
     if (kind === 'video') {
       targetId = createVideoDraftCard(undefined, position);
-      sourceIds.forEach((id) => {
-        if (videoRefSourceError(findCanvasNode(id), 'reference')) return;
-        addCanvasEdge(id, targetId, 'reference');
-      });
+      connectMenuSourcesToDraft(sourceIds, targetId, 'video');
       openVideoDraftDialog(targetId);
       return;
     }
     if (kind === 'image') {
       targetId = createImageDraftCard(position);
-      sourceIds.forEach((id) => addCanvasEdge(id, targetId));
+      connectMenuSourcesToDraft(sourceIds, targetId, 'image');
       openImageDraftDialog(targetId);
       return;
     }
     if (kind === 'audio') {
       targetId = createAudioDraftCard(position);
-      sourceIds.forEach((id) => addCanvasEdge(id, targetId));
+      connectMenuSourcesToDraft(sourceIds, targetId, 'audio');
       openAudioDraftDialog(targetId);
       return;
     }
