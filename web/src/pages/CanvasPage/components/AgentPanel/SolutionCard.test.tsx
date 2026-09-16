@@ -140,14 +140,15 @@ describe('方案卡在对话里', () => {
     mount();
 
     const text = solutionCard()!.textContent ?? '';
-    expect(text).toContain('这次要做什么');
     expect(text).toContain('给新品耳机做一条 15 秒短视频');
-    expect(text).toContain('我替你定的几项');
+    expect(text).toContain('我替你定的');
     expect(text).toContain('你没说时长，我按 15 秒');
+    expect(text).toContain('你要求的');
+    expect(text).toContain('竖屏 9:16');
     expect(text).toContain('Seedance 2.0');
     // 没写的项连小标题都不出现——空壳标题比没有更糟。
-    expect(text).not.toContain('创意方向');
-    expect(text).not.toContain('你给的素材各起什么作用');
+    expect(solutionCard()!.querySelector('blockquote')).toBeNull();
+    expect(text).not.toContain('素材：');
   });
 
   /**
@@ -167,7 +168,7 @@ describe('方案卡在对话里', () => {
     mount();
 
     const text = solutionCard()!.textContent ?? '';
-    expect(text).toContain('出片参数');
+    expect(text).toContain('参数');
     expect(text).toContain('9:16 · 25 秒');
   });
 
@@ -178,20 +179,36 @@ describe('方案卡在对话里', () => {
     );
     mount();
     const text = solutionCard()!.textContent ?? '';
-    expect(text).toContain('这张卡管的范围');
+    expect(text).toContain('范围');
     expect(text).toContain('第 2 段');
+  });
+
+  /** 另开一件事的卡（IKG793 / IKG78Y）：用户得看见这张是另一张、接的是哪张。 */
+  it('另开一件事的卡显示范围与承接', () => {
+    sessionMock.turns = turnWith(
+      understanding({
+        target_media: 'video',
+        solution_card: { ...card!, scope: { kind: 'new_task', label: '视频版', derived_from: '咖啡产地信息图' } },
+      }),
+    );
+    mount();
+    const text = solutionCard()!.textContent ?? '';
+    expect(text).toContain('范围');
+    expect(text).toContain('视频版');
+    expect(text).toContain('承接');
+    expect(text).toContain('上一张〈咖啡产地信息图〉');
   });
 
   it('没写范围（整条）时不显示那一行', () => {
     sessionMock.turns = turnWith(understanding());
     mount();
-    expect(solutionCard()!.textContent ?? '').not.toContain('这张卡管的范围');
+    expect(solutionCard()!.textContent ?? '').not.toContain('范围');
   });
 
   it('没有出片参数时整项不显示', () => {
     sessionMock.turns = turnWith(understanding());
     mount();
-    expect(solutionCard()!.textContent ?? '').not.toContain('出片参数');
+    expect(solutionCard()!.textContent ?? '').not.toContain('参数');
   });
 
   /** 推荐理由不上卡：它在对话正文里说更清楚，卡上只留用户能核对的那一层（拍板一）。 */
@@ -215,34 +232,48 @@ describe('方案卡在对话里', () => {
 
     const text = solutionCard()!.textContent ?? '';
     expect(text).toContain('给新品耳机做一条 15 秒短视频');
-    expect(text).not.toContain('用哪个模型出片');
+    expect(text).not.toContain('模型');
     expect(text).not.toContain('Seedance');
   });
 
-  it('待确认时三个按钮都在', () => {
+  it('待确认时动作都在：确认 / 换个思路 / 我来改 / 作废，卡头还有 .md', () => {
     sessionMock.turns = turnWith(understanding());
     mount();
-    expect(buttons()).toEqual(['确认', '取消', '补充']);
+    expect(buttons()).toEqual(['▤ .md', '确认，按这个写', '换个思路', '我来改', '作废']);
   });
 
   it('点「确认」就是这次改动的全部意义：开门的从此是用户的这一下', () => {
     sessionMock.turns = turnWith(understanding());
     mount();
-    clickButton('确认');
+    clickButton('确认，按这个写');
     expect(sessionMock.confirmSolution).toHaveBeenCalledWith('und_1', 1);
   });
 
-  it('点「取消」作废这一版，不带话', () => {
+  it('点「作废」作废这一版，不带话', () => {
     sessionMock.turns = turnWith(understanding());
     mount();
-    clickButton('取消');
+    clickButton('作废');
     expect(sessionMock.voidSolution).toHaveBeenCalledWith('und_1', 1, undefined);
   });
 
-  it('点「补充」先写话再发：那段话当下一轮的输入', () => {
+  it('点「换个思路」作废这一版，带一句「换个思路重提」当下一轮输入', () => {
     sessionMock.turns = turnWith(understanding());
     mount();
-    clickButton('补充');
+    clickButton('换个思路');
+    expect(sessionMock.voidSolution).toHaveBeenCalledWith('und_1', 1, '这版方案不太对，换个思路重新提一版。');
+  });
+
+  it('「接下来怎么做」在卡外面，不在卡里', () => {
+    sessionMock.turns = turnWith(understanding({ solution_card: { ...card!, next_steps: '确认后我写卡。' } }));
+    mount();
+    expect(solutionCard()!.textContent).not.toContain('确认后我写卡。');
+    expect(container.textContent).toContain('确认后我写卡。');
+  });
+
+  it('点「我来改」先写话再发：那段话当下一轮的输入', () => {
+    sessionMock.turns = turnWith(understanding());
+    mount();
+    clickButton('我来改');
 
     const box = container.querySelector<HTMLTextAreaElement>(`.${styles.solutionNote}`)!;
     expect(box).not.toBeNull();
@@ -251,7 +282,7 @@ describe('方案卡在对话里', () => {
       setter.call(box, '结尾要露产品正面');
       box.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    clickButton('发给它');
+    clickButton('发送');
 
     expect(sessionMock.voidSolution).toHaveBeenCalledWith('und_1', 1, '结尾要露产品正面');
   });
@@ -261,7 +292,7 @@ describe('方案卡在对话里', () => {
     mount();
 
     expect(solutionCard()!.className).toContain(styles.solutionCardSettled);
-    expect(buttons()).toEqual([]);
+    expect(buttons()).toEqual(['▤ .md']);
     expect(solutionCard()!.textContent).toContain('已确认');
   });
 
@@ -275,7 +306,7 @@ describe('方案卡在对话里', () => {
     sessionMock.turns = turnWith(understanding());
     sessionMock.runningRunId = 'run-9';
     mount();
-    const confirm = [...container.querySelectorAll<HTMLButtonElement>(`.${styles.solutionCard} button`)][0]!;
+    const confirm = [...container.querySelectorAll<HTMLButtonElement>(`.${styles.solutionCard} button`)].find((b) => b.textContent?.trim() === '确认，按这个写')!;
     expect(confirm.disabled).toBe(true);
   });
 });

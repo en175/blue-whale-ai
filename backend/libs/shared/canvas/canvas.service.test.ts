@@ -1,7 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 
-import { CANVAS_EDGE_LIMITS } from "@blue-whale/contracts";
+import { CANVAS_EDGE_LIMITS } from "@lib/contracts";
 
 import { CanvasService } from "./canvas.service.js";
 
@@ -135,12 +135,31 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
     expect(client.$transaction).not.toHaveBeenCalled();
   });
 
-  it("自环（source === target）→ 400，零读零写", async () => {
+  it.each([
+    ["媒体成品卡（mediaNode）", { id: "e1", source: "media-1", target: "media-1" }],
+    ["文本节点（textNode）", { id: "e1", source: "text-1", target: "text-1" }],
+  ])("自环（%s source === target）→ 合法保存（素材原卡重新编辑引用自身）", async (_label, edge) => {
+    const { service, tx } = buildService();
+    const edges = [edge];
+
+    const result = await service.save("u1", "1", saveBody(edges));
+
+    expect(result.code).toBe(200);
+    expect(tx.canvas.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ project_id: 1n, edges_json: edges }),
+    });
+    expect(result.data?.edges).toBe(JSON.stringify(edges));
+  });
+
+  it("重复自环（同一 (source, target) 两条）→ 400，零读零写", async () => {
     const { service, client } = buildService();
 
     await expect(
-      service.save("u1", "1", saveBody([{ id: "e1", source: "text-1", target: "text-1" }])),
-    ).rejects.toThrow(new BadRequestException("连线不能指向同一节点，原内容未改动"));
+      service.save("u1", "1", saveBody([
+        { id: "e1", source: "media-1", target: "media-1" },
+        { id: "e2", source: "media-1", target: "media-1" },
+      ])),
+    ).rejects.toThrow(new BadRequestException("同一对节点之间只允许一条连线，原内容未改动"));
     expect(client.$transaction).not.toHaveBeenCalled();
   });
 
@@ -170,13 +189,13 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
 
   it(`超过 ${CANVAS_EDGE_LIMITS.maxEdges} 条 → 400，零读零写`, async () => {
     const { service, client } = buildService();
-    // 24 个节点的有向无环点对共 552 个，取 501 条保证除总数外全部合法。
+    // 24 个节点的全部有序点对共 576 个（自环亦合法，见契约修订），取前 501 条保证除总数外全部合法。
     const nodeIds = Array.from({ length: 24 }, (_, i) => `n${i}`);
     const nodes = JSON.stringify(nodeIds.map((id) => ({ id, type: "textNode", data: {} })));
     const edges: Array<{ id: string; source: string; target: string }> = [];
     for (const source of nodeIds) {
       for (const target of nodeIds) {
-        if (source !== target && edges.length < CANVAS_EDGE_LIMITS.maxEdges + 1) {
+        if (edges.length < CANVAS_EDGE_LIMITS.maxEdges + 1) {
           edges.push({ id: `e${edges.length}`, source, target });
         }
       }

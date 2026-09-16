@@ -6,6 +6,6 @@
  * （见 packages/core/src/logger.ts 的 setLogServiceName），不再由这里或环境变量决定。
  * 日志同时写 stdout（JSON 行）和火山 TLS（配置不全时自动 noop）。
  */
-import { createLogger } from "@blue-whale/core/logging";
+import { createLogger } from "@lib/core/logging";
 
 export const logger = createLogger("blue-whale");

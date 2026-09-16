@@ -9,9 +9,9 @@ import {
   fail,
   ok,
   storyboardPreviewCreateRequestSchema,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import type { StoryboardPreviewRepo } from "@lib/shared/persistence/index.js";
-import type { CostReservationSnapshot } from "@blue-whale/core";
+import type { CostReservationSnapshot } from "@lib/core";
 
 import { wireInteger } from "@lib/shared/wire-integer.js";
 import type { GenerationCostEstimator } from "./cost-estimator.js";
@@ -70,7 +70,7 @@ export async function handleStoryboardPreviewCreate(
   // URL 路径资源身份为权威，body 的 scene_card_id 必须与之相符。
   if (parsed.data.scene_card_id !== sceneCardId)
     return fail(400, "场景卡不一致");
-  // 图片 worker 必须持有密封凭证；缺失时在任何事务写入前拒绝，避免创建必然失败的预览与 Job。
+  // 图片 worker 必须持有明文凭证（修正四：去密）；缺失时在任何事务写入前拒绝，避免创建必然失败的预览与 Job。
   if (!options?.providerCredential) {
     return fail(PARAM_MISSING_CODE, "缺少生成凭证");
   }

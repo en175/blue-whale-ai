@@ -46,6 +46,8 @@ function imageView(
       last_frame: false,
       first_last_frame: false,
       audio: false,
+      i2i_model_name: null,
+      max_prompt_length: null,
     },
     version: 1,
     digest: "sha256:abc",
@@ -92,6 +94,39 @@ describe("handleListModels 消费端剥调用值", () => {
     ]);
     expect(gpt.request_mapping).toBeUndefined();
     expect(gpt.channel_parser).toBeUndefined();
+  });
+
+  // IKESD6 / ADR-0085：消费端透出 max_prompt_length（前端动态上限用），
+  // i2i_model_name 属出站调用值，与像素/request_mapping 同哲学剥除。
+  it("features：max_prompt_length 透出，i2i_model_name 剥除", async () => {
+    const result = await handleListModels("image", {
+      models: {
+        listEnabledByType: vi.fn().mockResolvedValue([
+          imageView({
+            features: {
+              reference_image: true,
+              max_reference_images: 10,
+              watermark: false,
+              quantity_max: 1,
+              sequential_image_generation: false,
+              stream: false,
+              tools: false,
+              first_frame: false,
+              last_frame: false,
+              first_last_frame: false,
+              audio: false,
+              i2i_model_name: "gpt-image-2-edit",
+              max_prompt_length: 32000,
+            },
+          }),
+        ]),
+      },
+    });
+
+    expect(JSON.stringify(result)).not.toContain("gpt-image-2-edit");
+    const models = (result as { data: Array<{ features: Record<string, unknown> }> }).data;
+    expect(models[0]!.features.max_prompt_length).toBe(32000);
+    expect(models[0]!.features.i2i_model_name).toBeUndefined();
   });
 
   it("banana 不把 1k / 1x1 调用值透给消费端", async () => {

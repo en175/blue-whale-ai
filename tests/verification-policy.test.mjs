@@ -105,6 +105,38 @@ test("classifies backend BFF sources as scoped/backend", async () => {
   );
 });
 
+test("classifies the Java worker as its own area and actually runs Maven", async () => {
+  // 整棵 worker-java/ 树此前没有任何归类规则：改它会落进「未归类」兜底升为 full，
+  // 看似安全，但计划里一条 Java 命令都没有——TS 侧有门禁、Java 侧静默裸奔。
+  // 与 backend / web/scripts 那两个洞同形：有验证手段，只是选择器够不着。
+  const { classifyChanges, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+
+  const classification = classifyChanges([
+    "worker-java/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java",
+    "worker-java/pom.xml",
+  ]);
+  assert.equal(classification.tier, "scoped");
+  assert.deepEqual(classification.areas, ["worker-java"]);
+
+  const flattened = buildVerificationPlan(classification, { base: "BASE" }).map((command) =>
+    command.join(" "),
+  );
+  assert.ok(
+    flattened.some(
+      (command) => command.startsWith("mvn ") && command.includes("worker-java/pom.xml"),
+    ),
+    "worker-java 是独立 Maven 工程，必须真的跑它的测试",
+  );
+
+  // worker-java 是产品生成运行时：PR 阶段按产品影响路径升 full。
+  // 补归类前它靠「未归类」兜底才升 full——归类后必须仍升 full，不能被这次修复顺带降级。
+  const prClassification = classifyChanges(
+    ["worker-java/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java"],
+    { stage: "pr" },
+  );
+  assert.equal(prClassification.tier, "full");
+});
+
 test("classifies the agent route manifest copy as web, not unclassified", async () => {
   // web/src/api/agent-rest-routes.v1.json 是 agent 路由清单的副本，agentRoutes.test.ts 正在断言它。
   // WEB_SOURCE 原来只认 ts|tsx|css，改了副本却不跑 web 测试，等于没有守卫。
@@ -127,7 +159,7 @@ test("no path in a mixed real-world change set falls through unclassified", asyn
     "web/.env.test",
     "web/src/api/agent-rest-routes.v1.json",
     "web/scripts/check-agent-routes.mjs",
-    "packages/core/src/new-api-billing-ops.ts",
+    "backend/libs/core/new-api-billing-ops.ts",
   ];
   for (const file of files) {
     const reasons = classifyChanges([file]).reasons ?? [];
@@ -151,7 +183,7 @@ test("classifies ordinary README files as documentation verification", async () 
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.deepEqual(
-    classifyChanges(["README.md", "packages/core/README.md"]),
+    classifyChanges(["README.md", "docs/adr/example.md"]),
     {
       tier: "docs",
       reasons: ["only documentation files changed"],
@@ -214,13 +246,13 @@ test("classifies skill Markdown as documentation (docs) at completion and PR sta
 test("classifies known Node source changes as scoped verification", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
   const files = [
-    "apps/agent-worker/src/worker-loop.ts",
-    "packages/core/src/result.ts",
+    "backend/libs/core/result.ts",
+    "backend/apps/blue-whale/src/main.ts",
   ];
   const expected =
     {
       tier: "scoped",
-      areas: ["node"],
+      areas: ["backend"],
       reasons: ["known source paths changed"],
     };
 
@@ -232,10 +264,10 @@ test("keeps node coverage tests scoped at PR stage", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.deepEqual(
-    classifyChanges(["packages/core/src/result.test.ts"], { stage: "pr" }),
+    classifyChanges(["backend/libs/core/result.test.ts"], { stage: "pr" }),
     {
       tier: "scoped",
-      areas: ["node"],
+      areas: ["backend"],
       reasons: ["known source paths changed"],
     },
   );
@@ -245,10 +277,10 @@ test("allows an explicit high-risk escalation to full verification", async () =>
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.deepEqual(
-    classifyChanges(["packages/core/src/result.ts"], { risk: "high" }),
+    classifyChanges(["backend/libs/core/result.ts"], { risk: "high" }),
     {
       tier: "full",
-      areas: ["node"],
+      areas: ["backend"],
       reasons: ["risk explicitly escalated to high"],
     },
   );
@@ -274,7 +306,7 @@ test("keeps high-impact infrastructure scoped at completion but full at PR stage
 
 test("treats comment-only Dockerfile edits as documentation without weakening real edits", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
-  const file = "backend/Dockerfile.worker";
+  const file = "backend/Dockerfile";
 
   assert.deepEqual(
     classifyChanges([file], { stage: "pr", documentationOnlyFiles: [file] }),
@@ -643,18 +675,18 @@ test("keeps ordinary source changes scoped at PR stage", async () => {
   const { buildVerificationPlan, classifyChanges } = await import(
     "../scripts/verification-policy.mjs"
   );
-  const files = ["packages/core/src/result.ts"];
+  const files = ["backend/libs/core/result.ts"];
 
   const classification = classifyChanges(files, { stage: "pr" });
   assert.deepEqual(classification, {
     tier: "scoped",
-    areas: ["node"],
+    areas: ["backend"],
     reasons: ["known source paths changed"],
   });
   assert.deepEqual(buildVerificationPlan(classification, { base: "origin/master" }), [
     ["git", "diff", "--check", "origin/master...HEAD"],
-    ["pnpm", "exec", "tsc", "-b", "--pretty", "false"],
-    ["pnpm", "exec", "vitest", "run", "packages", "apps", "--changed", "origin/master"],
+    ["pnpm", "exec", "tsc", "-p", "backend/tsconfig.json", "--noEmit", "--pretty", "false"],
+    ["pnpm", "exec", "vitest", "run", "backend", "--changed", "origin/master"],
   ]);
 });
 
@@ -710,7 +742,7 @@ test("rejects unknown verification stages", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.throws(
-    () => classifyChanges(["packages/core/src/result.ts"], { stage: "merge" }),
+    () => classifyChanges(["backend/libs/core/result.ts"], { stage: "merge" }),
     /stage must be completion or pr/,
   );
 });
@@ -917,7 +949,7 @@ test("rejects attempts to downgrade the computed risk", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.throws(
-    () => classifyChanges(["packages/core/src/result.ts"], { risk: "low" }),
+    () => classifyChanges(["backend/libs/core/result.ts"], { risk: "low" }),
     /risk must be auto or high/,
   );
 });
@@ -1330,9 +1362,9 @@ test("publishing reuses a scoped completion receipt for ordinary code changes", 
   const remote = mkdtempSync(join(tmpdir(), "blue-whale-verification-remote-"));
   const fakeBin = mkdtempSync(join(tmpdir(), "blue-whale-publish-stage-"));
   try {
-    mkdirSync(join(repository, "packages", "core", "src"), { recursive: true });
-    writeFileSync(join(repository, "packages", "core", "src", "result.ts"), "export {};\n");
-    git(repository, "add", "packages/core/src/result.ts");
+    mkdirSync(join(repository, "backend", "libs", "core"), { recursive: true });
+    writeFileSync(join(repository, "backend", "libs", "core", "result.ts"), "export {};\n");
+    git(repository, "add", "backend/libs/core/result.ts");
     git(repository, "commit", "-m", "feat: add source change");
     git(remote, "init", "--bare");
     git(repository, "remote", "add", "origin", remote);
@@ -1443,7 +1475,7 @@ test("skill assets do not allow unknown siblings or downgrade product impact", a
     ]) assert.throws(() => classifyChanges([file], { stage }), /UNCLASSIFIED_PATH/);
   }
   const classification = classifyChanges([
-    ".zcode/skills/wizard/template.sh", "backend/Dockerfile.worker",
+    ".zcode/skills/wizard/template.sh", "backend/Dockerfile",
   ], { stage: "pr" });
   assert.equal(classification.tier, "full");
   assert.ok(classification.areas.includes("skill-assets"));

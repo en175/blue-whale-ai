@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, OnModuleInit, Param, Post } from "@nestjs/common";
-import { NewApiError } from "@blue-whale/core";
-import { ok } from "@blue-whale/contracts";
+import { NewApiError } from "@lib/core";
+import { ok } from "@lib/contracts";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { quotaToCredits } from "@lib/shared/credits/credits.js";

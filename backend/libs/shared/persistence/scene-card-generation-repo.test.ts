@@ -3,7 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import {
   canonicalizeJsonValue,
   type ProviderPromptAsset,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createSceneCardGenerationRepo } from "./scene-card-generation-repo.js";
@@ -405,6 +405,89 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(tx.scene_card_generation_records.create).not.toHaveBeenCalled();
   });
 
+  it("IKFPYX：首尾帧模式按 task_types 约束校验——基础比例含 16:9，但 first_last_frame 仅允许 adaptive", async () => {
+    const frames = [referenceAsset("first_frame", "101"), referenceAsset("last_frame", "102")];
+    const capFields = {
+      ...CAP_FIELDS,
+      supported_aspect_ratios: ["16:9", "adaptive"],
+      features: {
+        first_last_frame: true,
+        task_types: { first_last_frame: { allowed_ratios: ["adaptive"] } },
+      },
+    };
+    // digest 有意不含 features（capabilityDigestFromModelCapability 固定 8 字段）
+    const { features: _features, ...digestFields } = capFields;
+    const tx = buildTx({
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({ id: 6001n, version: 1, reference_assets: frames }),
+      },
+      generation_model_capability: {
+        findUnique: vi.fn().mockResolvedValue({
+          version: 3,
+          enabled: true,
+          is_delete: false,
+          ...capFields,
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_mode: "first_and_last_frame",
+      reference_assets: frames,
+      capability_snapshot_version: {
+        ...CAPABILITY_SNAPSHOT,
+        digest: capabilityDigest(digestFields),
+      },
+    });
+
+    // 16:9 在基础比例列表内，但首尾帧任务的 task_types 只允许 adaptive → 拒
+    expect(result.kind).toBe("capability_limit");
+    expect(tx.scene_card_generation_records.create).not.toHaveBeenCalled();
+  });
+
+  it("IKFPYX：首尾帧 + adaptive 通过 task_types 校验（进入后续校验）", async () => {
+    const frames = [referenceAsset("first_frame", "101"), referenceAsset("last_frame", "102")];
+    const capFields = {
+      ...CAP_FIELDS,
+      supported_aspect_ratios: ["16:9", "adaptive"],
+      features: {
+        first_last_frame: true,
+        task_types: { first_last_frame: { allowed_ratios: ["adaptive"] } },
+      },
+    };
+    // digest 有意不含 features（capabilityDigestFromModelCapability 固定 8 字段）
+    const { features: _features, ...digestFields } = capFields;
+    const tx = buildTx({
+      scene_card_generation_presets: {
+        findFirst: vi.fn().mockResolvedValue({ id: 6001n, version: 1, reference_assets: frames }),
+      },
+      generation_model_capability: {
+        findUnique: vi.fn().mockResolvedValue({
+          version: 3,
+          enabled: true,
+          is_delete: false,
+          ...capFields,
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      parameters: { ...VIDEO_PARAMETERS, aspect_ratio: "adaptive" },
+      reference_mode: "first_and_last_frame",
+      reference_assets: frames,
+      capability_snapshot_version: {
+        ...CAPABILITY_SNAPSHOT,
+        digest: capabilityDigest(digestFields),
+      },
+    });
+
+    expect(result.kind).not.toBe("capability_limit");
+  });
+
   it("参数越界（duration 不在档位数组）返回 capability_limit 零写入（AC#1）", async () => {
     const limitCapFields = { ...CAP_FIELDS, supported_durations: [3, 5, 10] };
     const tx = buildTx({
@@ -760,4 +843,55 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(result.kind).toBe("forbidden");
   });
 
+});
+
+// IKF YHJ（ADR-0087）：场景卡再生成是第三条视频创建路径，与创建期/重试期共用同一个素材门。
+// 门必须在事务内、建 job 之前——那几个扁平引用字段是事务内从 slot 解析出来的。
+describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("门拒绝：返回 material_blocked，且**零写入**（不建 job / 不更新 preset / 不建 record）", async () => {
+    const tx = buildTx({});
+    const { repo } = repoWith(tx);
+    const guardInput = vi.fn().mockResolvedValue("该素材未审核通过，不能用于视频生成");
+
+    const result = await repo.regenerateSceneCard({ ...baseInput, guardInput });
+
+    expect(result).toEqual({
+      kind: "material_blocked",
+      reason: "该素材未审核通过，不能用于视频生成",
+    });
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
+    expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
+    expect(tx.scene_card_generation_records.create).not.toHaveBeenCalled();
+  });
+
+  it("门拿到的是事务内解析出的扁平引用（worker 会转 asset:// 的那批字段）", async () => {
+    const tx = buildTx({});
+    const { repo } = repoWith(tx);
+    const guardInput = vi.fn().mockResolvedValue(null);
+
+    const result = await repo.regenerateSceneCard({ ...baseInput, guardInput });
+
+    expect(result.kind).toBe("applied");
+    expect(guardInput).toHaveBeenCalledOnce();
+    // 建 job 用的 input 与喂给门的对象必须同源，否则门可能在查一批、执行时用另一批。
+    const jobInput = tx.generation_jobs.create.mock.calls[0][0].data.input;
+    const guarded = guardInput.mock.calls[0][0] as Record<string, unknown>;
+    for (const key of ["first_frame_asset_id", "last_frame_asset_id", "reference_asset_ids"]) {
+      expect(guarded[key]).toEqual(jobInput[key]);
+    }
+  });
+
+  it("未接线时不跑门（缺省行为与改造前一致）", async () => {
+    const tx = buildTx({});
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard(baseInput);
+
+    expect(result.kind).toBe("applied");
+    expect(tx.generation_jobs.create).toHaveBeenCalledOnce();
+  });
 });

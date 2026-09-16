@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Reflector } from "@nestjs/core";
-import { RATE_LIMITED } from "@blue-whale/contracts";
+import { RATE_LIMITED } from "@lib/contracts";
 import { RateLimitGuard } from "@lib/shared/rate-limit/rate-limit.guard.js";
 import {
   RATE_LIMIT_KEY,
@@ -21,7 +21,9 @@ function readBuckets(handler: Handler): RateLimitOptions | undefined {
 
 /** 用真实 Reflector 读取控制器上的 @RateLimit 元数据跑 RateLimitGuard，RateLimiter 打桩。 */
 function runGuard(handler: Handler, take: ReturnType<typeof vi.fn>, userId = "user-1") {
-  const guard = new RateLimitGuard(reflector, { take } as never);
+  const guard = new RateLimitGuard(reflector, { take } as never, {
+    isAllowed: () => false,
+  } as never);
   return guard.canActivate({
     getHandler: () => handler,
     getClass: () => AgentAssetsController,

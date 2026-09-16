@@ -1,5 +1,6 @@
-import type { PromptPreviewSource } from '../../../packages/contracts/src/prompt-preview';
-import type { LegacyCardHistoryItem, LegacyMigrationReport } from '../../../packages/contracts/src/legacy-card-migration';
+import type { PromptBinding } from '@lib/contracts/prompt-target';
+import type { PromptPreviewSource } from '@lib/contracts/prompt-preview';
+import type { LegacyCardHistoryItem, LegacyMigrationReport } from '@lib/contracts/legacy-card-migration';
 /* ============================================
  * canvas 接口：画布加载 GET /api/canvases + 保存 PUT /api/canvases/:projectId
  * nodes/viewport 均为 JSON 字符串；保存支持 If-Match 乐观锁（412 版本冲突）
@@ -33,6 +34,13 @@ export function applyPromptPreview(input: { projectId: string; source: PromptPre
       body: JSON.stringify({ source: input.source, position: input.position }),
     },
   );
+}
+
+export function referencePromptPlan(input: { projectId: string; planNodeId: string; targetNodeId: string; expectedVersion: number; syncBindings?: PromptBinding[] }) {
+  const { projectId, ...body } = input;
+  return apiRequest<CanvasRecord>(`/api/canvases/${encodeURIComponent(projectId)}/prompt-references`, {
+    method: 'POST', silent: true, body: JSON.stringify(body),
+  });
 }
 
 /** 对话引用快照（IKDLQJ）：点击「添加到对话」当刻冻结的正文与来源，服务端不可变保存。 */

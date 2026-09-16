@@ -31,11 +31,33 @@ const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelType[] }
   last_frame: { label: '尾帧 last_frame', types: ['video'] },
   first_last_frame: { label: '首尾帧 first_last_frame', types: ['video'] },
   audio: { label: '音频 audio', types: ['video'] },
+  /** ADR-0086：视频生成是否接受视频素材作普通参考（替代 seedance-2 前缀特判）。 */
+  video_reference: { label: '视频素材参考 video_reference', types: ['video'] },
+  /** ADR-0086：视频生成是否接受音频素材作参考（2.0 关 / 2.5 开）。 */
+  audio_reference: { label: '音频素材参考 audio_reference', types: ['video'] },
 };
 
 const FEATURE_NUMBER_LABELS: Record<string, { label: string; types?: ModelType[]; placeholder: string }> = {
   max_reference_images: { label: '参考图上限 max_reference_images', types: ['image', 'video'], placeholder: '如 10' },
   quantity_max: { label: '单次生成数量 quantity_max', types: ['image'], placeholder: '如 1' },
+  max_prompt_length: { label: '提示词上限 max_prompt_length', types: ['image', 'video'], placeholder: '如 32000' },
+  /** ADR-0086：普通参考中视频素材上限。 */
+  video_reference_max: { label: '视频参考上限 video_reference_max', types: ['video'], placeholder: '如 3' },
+  /** ADR-0086：音频生成中音频参考上限。 */
+  audio_reference_max: { label: '音频参考上限 audio_reference_max', types: ['audio', 'video'], placeholder: '如 3' },
+  /** ADR-0086：音频生成中图片参考上限。 */
+  image_reference_max: { label: '音频图参考上限 image_reference_max', types: ['audio'], placeholder: '如 1' },
+  /** ADR-0086：输入参考素材总时长上限（秒；2.0=15 / 2.5=30；空=不限）。 */
+  max_reference_duration_sec: { label: '参考素材总时长上限秒 max_reference_duration_sec', types: ['video', 'audio'], placeholder: '如 15（留空 = 不限）' },
+};
+
+/** ADR-0085（IKESD9）：字符串型能力键——i2i_model_name 存的是上游模型名，非行 id。 */
+const FEATURE_STRING_LABELS: Record<string, { label: string; types?: ModelType[]; placeholder: string }> = {
+  i2i_model_name: {
+    label: '图生图上游模型名 i2i_model_name',
+    types: ['image'],
+    placeholder: '如 gpt-image-2-edit（留空 = 不分流）',
+  },
 };
 
 const pretty = (raw: unknown) => {
@@ -61,11 +83,28 @@ const pickFeatureNumbers = (features: Record<string, unknown> = {}): Record<stri
   return out;
 };
 
+const pickFeatureStrings = (features: Record<string, unknown> = {}): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const key of Object.keys(FEATURE_STRING_LABELS)) {
+    const v = features[key];
+    out[key] = typeof v === 'string' ? v : '';
+  }
+  return out;
+};
+
 const dropKnownFeatures = (features: Record<string, unknown> = {}): Record<string, unknown> => {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(features)) {
-    if (k in FEATURE_BOOL_LABELS || k in FEATURE_NUMBER_LABELS) continue;
+    if (k in FEATURE_BOOL_LABELS || k in FEATURE_NUMBER_LABELS || k in FEATURE_STRING_LABELS) continue;
     out[k] = v;
+  }
+  return out;
+};
+
+const omitEmptyStrings = (strs: Record<string, string>): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(strs)) {
+    if (v.trim() !== '') out[k] = v.trim();
   }
   return out;
 };
@@ -111,6 +150,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   const [formats, setFormats] = useState<string[]>(initial?.supported_formats ?? []);
   const [featureFlags, setFeatureFlags] = useState(initial ? pickFeatureBooleans(initial.features) : {});
   const [featureNumbers, setFeatureNumbers] = useState(initial ? pickFeatureNumbers(initial.features) : {});
+  const [featureStrings, setFeatureStrings] = useState(initial ? pickFeatureStrings(initial.features) : {});
   const [extraFeatures, setExtraFeatures] = useState(
     initial ? pretty(dropKnownFeatures(initial.features)) : '{}',
   );
@@ -133,7 +173,9 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
 
   const copyOptions = models.filter((m) => m.capability_type === type);
   const showSizeRatio = type === 'image' || type === 'video';
-  const showDuration = type === 'video' || type === 'audio';
+  // IKG4UR：时长只对视频可配。音频上游是 TTS 式接口（请求无 duration），
+  // 库里音频行的 supported_durations 已置 NULL——放开表单只会让运营把死配置加回来。
+  const showDuration = type === 'video';
   const showFormat = type === 'audio' || type === 'video';
   const showExtraJson = type === 'image' || type === 'video';
 
@@ -153,6 +195,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     setFormats(src.supported_formats ?? []);
     setFeatureFlags(pickFeatureBooleans(src.features));
     setFeatureNumbers(pickFeatureNumbers(src.features));
+    setFeatureStrings(pickFeatureStrings(src.features));
     setExtraFeatures(pretty(dropKnownFeatures(src.features)));
     setDefaultSize(src.default_size ?? '');
     setDefaultRatio(src.default_aspect_ratio ?? '');
@@ -236,6 +279,9 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
       durationMin,
       durationMax,
       durationStep,
+      // IKG4UR：按该行原本的形态写回。数组与对象在读侧语义不同（档位列表 vs 区间），
+      // 保存时改形态会把时长约束悄悄改掉；新建行用对象（区间语义无歧义）。
+      durationShape: Array.isArray(initial?.supported_durations) ? 'array' : 'object',
       formats,
       defaultSize,
       defaultRatio,
@@ -245,6 +291,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
       features: {
         ...extra,
         ...omitEmpty(featureNumbers),
+        ...omitEmptyStrings(featureStrings),
         ...Object.fromEntries(
           Object.entries(featureFlags).filter(([k, v]) => v || (initial?.features != null && k in initial.features)),
         ),
@@ -650,6 +697,23 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
                         placeholder={meta.placeholder}
                         value={featureNumbers[key] ?? ''}
                         onChange={(e) => setFeatureNumbers((p) => ({ ...p, [key]: e.target.value }))}
+                      />
+                    </div>
+                  ))}
+              </div>
+              <div className={styles.grid2}>
+                {Object.entries(FEATURE_STRING_LABELS)
+                  .filter(([, meta]) => !meta.types || meta.types.includes(type))
+                  .map(([key, meta]) => (
+                    <div key={key}>
+                      <div className={styles.label}>
+                        {meta.label} <span className={styles.labelSub}>（留空不写入）</span>
+                      </div>
+                      <input
+                        className={styles.input}
+                        placeholder={meta.placeholder}
+                        value={featureStrings[key] ?? ''}
+                        onChange={(e) => setFeatureStrings((p) => ({ ...p, [key]: e.target.value }))}
                       />
                     </div>
                   ))}

@@ -1,4 +1,4 @@
-import type { PromptPreviewSource } from '../../../packages/contracts/src/prompt-preview';
+import type { PromptPreviewSource } from '@lib/contracts/prompt-preview';
 /* ============================================
  * agentSessions 接口：Agent 会话（session 维度，唯一有 worker 执行 Run 的对话服务）
  * 基址 /api/agent/v1/projects/:id/sessions
@@ -36,9 +36,25 @@ export interface RunActionsRecord {
   outstanding_count: number | null;
 }
 
+/** 服务端替模型出的一道题（2026-09-15，`ask_questions`）：题号、字母都是服务端编的，前端按它画。 */
+export interface AskedQuestion {
+  no: string;
+  title: string;
+  ask: string;
+  options: { key: string; label: string; note?: string }[];
+  recommended: string[];
+  multiple: boolean;
+  why: string;
+}
+
 export interface SessionContentBlock {
   type: string;
   text?: string;
+  /**
+   * 这段正文是服务端替模型出的题（2026-09-15）：`text` 是它的 markdown（兜底），有 `questions` 就按数据画。
+   * 老记录的题只有文字，前端认开头排版。
+   */
+  questions?: AskedQuestion[];
   /** 本轮动作台账块（IKB93G 的动作行由它渲染；服务端消息部件 `run_actions` 原样透传）。 */
   run_actions?: RunActionsRecord;
   /**
@@ -57,6 +73,15 @@ export interface SessionContentBlock {
   started_ms?: number;
   ended_ms?: number | null;
   substeps?: { id: string; summary: string; started_ms: number; ended_ms: number | null }[];
+  /** 模型一步里并发调了几次同一个工具，合成这一行（IKFLB9）。 */
+  calls?: number;
+  /*
+   * `type: 'reasoning'`（IKFLB9）：模型的一段思考，按发生顺序夹在正文与工具行之间，原话在 `text`，
+   * 起止在 `started_ms` / `ended_ms`。有了它，`thinking` 块里就不再带 `reasoning`。
+   *
+   * `type: 'waiting'`（IKFLB9）：两段之间没有任何输出的时间（例如工具返回之后模型读结果），
+   * 名字在 `summary`。有了它，一轮里各段的时长加起来等于总时长。
+   */
   /**
    * 思考过程块（可折叠展示）。
    *
@@ -145,6 +170,10 @@ export interface GenerationCardAssetRef {
   /** 展示名（不带 @ 前缀，前缀是展示层的事） */
   label: string;
   mediaType: 'image' | 'video';
+  /** 记号的显示名「图1」「视频3」：卡上和正文里都用它，和画布 `#N` 同一个号。老卡没有，就显示 label。 */
+  marker?: string;
+  /** 这份素材在提示词正文里的记号原文（`@图1`，照包写的模型也会写 `@图片1`），正文按它换成胶囊。 */
+  markerTexts?: string[];
 }
 
 /** 生成卡：单镜头分镜提示词卡（S2 渲染，S3 手动应用） */
@@ -174,6 +203,11 @@ export interface GenerationCardBlock {
   targetModel?: string;
   /** 单镜时长秒数原值（`duration_seconds`）。与 timeRange 并存：那个是累加出的区间，这个是本镜自己的长度。 */
   durationSeconds?: number;
+  /**
+   * 这张卡属于会话里另开的一件事时的标签（IKG793），如「视频版 · 承接上一张〈咖啡产地信息图〉」。
+   * 第一件事的卡没有。由需求理解上的 scope 算出，见 `taskLabelsOf`。
+   */
+  taskLabel?: string;
 }
 
 /** 会话记录（列表/创建返回） */
@@ -191,6 +225,8 @@ export interface SessionRecord {
    * 每一轮都注入，直到显式取消。只有 id——名称在技能目录里，前端本来就有那一份。
    */
   active_creative_skill_ids?: string[];
+  /** 会话当前在做的那件事（IKG78T）；老 agent 不给。 */
+  active_task_id?: string;
   /**
    * 本会话选定的 Agent 模型（IKE0II）。`null` 表示用户从没选过，这条会话跟着服务端默认走。
    *
@@ -257,6 +293,11 @@ export interface PromptCardShot {
   frame_description?: string;
   prompt_text: string;
   asset_bindings: { asset_ref_id: string; role?: string; strength?: string; note?: string }[];
+  /**
+   * 正文里素材记号（`@图1`）的位置，服务端算（IKFLD1）。`index` 是本会话素材清单里的全局序号，
+   * 和画布上的 `#N` 同一个号。老卡没有。
+   */
+  prompt_mentions?: { start: number; end: number; index: number; asset_ref_id: string }[];
   generation_suggestions?: {
     target_media?: 'image' | 'video';
     aspect_ratio?: string;
@@ -311,9 +352,11 @@ export interface PromptCardRevisionSummary {
   created_at: string;
 }
 
-/** 快照里的生成卡组：一个 Session 一组，active_revision 是当前生效版本 */
+/** 快照里的生成卡组：一件事一组（IKG78T 起一个 Session 可以有多组），active_revision 是当前生效版本 */
 export interface PromptCardRecord {
   card_id: string;
+  /** 属于会话里哪件事（IKG78T）；老 agent 不给。 */
+  task_id?: string;
   session_id?: string;
   active_revision_id?: string;
   revision_count?: number;
@@ -375,15 +418,20 @@ export interface SolutionCard {
   delivery_spec?: SolutionDeliverySpec;
   next_steps?: string;
   /**
-   * 这张卡管的范围（决策十六）。没写就是整条；会话已经交付过卡之后再提的每一张都是续写，
-   * 只管接下来要追加的那一段或那几镜，`label` 是用户读到的「第 2 段」「补 1 镜」。
+   * 这张卡管的范围（决策十六；IKG78Y 加了另开一件事）。没写就是整条；有卡之后再提的每一张要么是续写
+   * （`continuation`，只管接下来追加的那一段，`label` 是「第 2 段」「补 1 镜」），要么是另开一件事
+   * （`new_task`，换媒介或另做一张，`label` 是「视频版」「海报版」）。`derived_from` 由服务端填：承接的是上一张哪张卡。
    */
-  scope?: { kind: 'whole' | 'continuation'; label: string };
+  scope?: { kind: 'whole' | 'continuation' | 'new_task'; label: string; derived_from?: string };
 }
 
 /** 方案卡所在的版本记录。一个会话一条血脉，一版一次提出或修改，同时最多一版 accepted。 */
 export interface RequirementUnderstanding {
   understanding_id: string;
+  /** 这条血统就是会话里的一件事（IKG78T）：任务号 = 血统号。老 agent 不给，按 understanding_id 用。 */
+  task_id?: string;
+  /** 另开的一件事派生自哪件事；第一件事为空（IKG78Y）。 */
+  derived_from_task_id?: string | null;
   version: number;
   session_id: string;
   proposed_by_run_id: string;

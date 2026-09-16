@@ -33,6 +33,23 @@ export interface ModelFeatures {
   last_frame: boolean;
   first_last_frame: boolean;
   audio: boolean;
+  /** 每模型 prompt 上限（ADR-0085）；null/缺省 = 未配置，前端回落默认。
+   *  i2i_model_name 属出站调用值，后端已从消费端剥除，不在此类型。 */
+  max_prompt_length?: number | null;
+  /** ADR-0086：视频生成是否接受视频素材作普通参考（替代旧 seedance-2 前缀特判）。 */
+  video_reference?: boolean;
+  /** ADR-0086：普通参考中视频素材上限；缺省 3。 */
+  video_reference_max?: number;
+  /** ADR-0086：视频生成是否接受音频素材作参考（2.0 关 / 2.5 开）。 */
+  audio_reference?: boolean;
+  /** ADR-0086：音频生成中音频参考上限；缺省 3。 */
+  audio_reference_max?: number;
+  /** ADR-0086：音频生成中图片参考上限；缺省 1。 */
+  image_reference_max?: number;
+  /** ADR-0086：输入参考素材总时长上限（秒，视频/音频；2.0=15 / 2.5=30；null=不限）。 */
+  max_reference_duration_sec?: number | null;
+  /** ADR-0086：按任务类型的比例/时长约束（default/first_frame/first_last_frame/edit/prolong）。 */
+  task_types?: Record<string, unknown> | null;
 }
 
 /** GET /api/generation/models 返回项 */

@@ -1,4 +1,4 @@
-import { createNewApiClient } from "@blue-whale/core";
+import { createNewApiClient } from "@lib/core";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 /** 折扣表 option 键（Go 点分子键）。 */

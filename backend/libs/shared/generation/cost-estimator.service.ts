@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { createNewApiClient } from "@blue-whale/core";
+import { createNewApiClient } from "@lib/core";
 import {
   createGenerationCostEstimator,
   type GenerationCostEstimator,

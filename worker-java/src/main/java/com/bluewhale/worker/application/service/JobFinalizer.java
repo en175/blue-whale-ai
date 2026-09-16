@@ -1,0 +1,551 @@
+package com.bluewhale.worker.application.service;
+
+import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.entity.GenerationJobEntity;
+import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
+import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
+import com.bluewhale.worker.domain.entity.JobStatus;
+import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobLogMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
+import com.bluewhale.worker.infrastructure.mapper.GenerationOutputSlotMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 作业终态收口（刀④ 拆分自 JobStateMachineService 的 complete/fail/publish/createAsset 族）。
+ * <p>
+ * 契约 §3.3 单事务原子：guard CAS → 结果写入 → 日志 → 事件 → 摘要同步。全部
+ * guard fail 一律静默返回 false（不抛，stale worker 交给租约 + recovery）。
+ * <p>
+ * 媒体差异 = payload 组装（asset 类型、单槽 vs 多槽、事件槽位语义）。第 5 类扩展触点：
+ * 新增 publish/fail payload 组装策略（契约附录 C），不复制方法三元组。
+ */
+@Service
+public class JobFinalizer {
+
+    private static final Logger log = LoggerFactory.getLogger(JobFinalizer.class);
+
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+
+    private final GenerationJobMapper jobMapper;
+    private final AssetMapper assetMapper;
+    private final GenerationJobLogMapper jobLogMapper;
+    private final GenerationOutputSlotMapper slotMapper;
+    private final SceneCardGenerationRecordSync recordSync;
+    private final StoryboardPreviewSync previewSync;
+    private final ProjectEventPublisher eventPublisher;
+
+    public JobFinalizer(
+            GenerationJobMapper jobMapper,
+            AssetMapper assetMapper,
+            GenerationJobLogMapper jobLogMapper,
+            GenerationOutputSlotMapper slotMapper,
+            SceneCardGenerationRecordSync recordSync,
+            StoryboardPreviewSync previewSync,
+            ProjectEventPublisher eventPublisher
+    ) {
+        this.jobMapper = jobMapper;
+        this.assetMapper = assetMapper;
+        this.jobLogMapper = jobLogMapper;
+        this.slotMapper = slotMapper;
+        this.recordSync = recordSync;
+        this.previewSync = previewSync;
+        this.eventPublisher = eventPublisher;
+    }
+
+    /**
+     * 发布 media_extract 结果（media-extract-ops.ts:45-135）。
+     */
+    @Transactional
+    public boolean publishMediaExtractResult(
+            String jobId, String projectId, String userId, String workerId, long fencingToken,
+            String url, String storageKey, String mime, Long size, Double duration
+    ) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        int guardAffected = jobMapper.publishMediaExtractGuard(jobIdLong, workerId, fencingToken);
+        if (guardAffected != 1) {
+            log.warn("[media_extract] publishMediaExtractResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    jobId, workerId, fencingToken);
+            return false;
+        }
+
+        AssetEntity asset = buildAsset(jobIdLong, projectId, userId, "audio",
+                url, storageKey, mime, size, null, null,
+                duration != null ? (int) Math.round(duration * 1000) : null);
+        assetMapper.insert(asset);
+
+        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
+
+        insertLog(jobIdLong, JobStatus.SUCCEEDED, "音频已提取",
+                Map.of("asset_ids", List.of(asset.getId().toString())));
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        // 两个事件都在 job.project_id 守卫内（media-extract-ops.ts:102 逐字：asset.created 与
+        // status_changed 同处 `if (job.project_id != null)`；与通用 createAsset 的恒发不同）。
+        if (job != null && job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
+                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
+                    Map.of("asset_id", asset.getId().toString(),
+                            "generation_job_id", job.getId().toString(),
+                            "type", asset.getType(),
+                            "access_url", asset.getUrl()));
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "output_asset_ids", List.of(asset.getId().toString())));
+        }
+        return true;
+    }
+
+    /**
+     * 完成作业（settle-ops.ts:53-206 completeJob + completeJobInTx）。
+     * 音频/图片共用（generation-worker.ts:445/684 finishJob）。
+     */
+    @Transactional
+    public boolean completeJob(String jobId, List<String> assetIds,
+                               String workerId, long fencingToken) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        String outputAssetIdsJson = toJson(assetIds.stream().map(Long::parseLong).toList());
+        int guardAffected = jobMapper.completeJobGuard(
+                jobIdLong, workerId, fencingToken, outputAssetIdsJson);
+        if (guardAffected != 1) {
+            log.warn("completeJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    jobId, workerId, fencingToken);
+            return false;
+        }
+
+        List<GenerationOutputSlotEntity> slots = slotMapper.findByJobId(jobIdLong);
+        String finalStatus = JobStatus.SUCCEEDED.value();
+        if (!slots.isEmpty()) {
+            for (int i = 0; i < assetIds.size(); i++) {
+                if (i < slots.size()) {
+                    slotMapper.updateSlot(slots.get(i).getId(), JobStatus.SUCCEEDED.value(),
+                            Long.parseLong(assetIds.get(i)));
+                }
+            }
+            for (int i = assetIds.size(); i < slots.size(); i++) {
+                slotMapper.updateSlotStatus(slots.get(i).getId(), JobStatus.FAILED.value());
+            }
+            boolean allSucceeded = assetIds.size() >= slots.size();
+            boolean anySucceeded = !assetIds.isEmpty();
+            if (allSucceeded) {
+                finalStatus = JobStatus.SUCCEEDED.value();
+            } else if (anySucceeded) {
+                finalStatus = JobStatus.PARTIALLY_SUCCEEDED.value();
+            } else {
+                finalStatus = JobStatus.FAILED.value();
+            }
+            if (!JobStatus.SUCCEEDED.value().equals(finalStatus)) {
+                jobMapper.updateJobStatus(jobIdLong, finalStatus);
+            }
+        }
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        if (job == null) {
+            throw new IllegalStateException(
+                    "completeJob 守卫通过后任务 " + jobId + " 不存在，数据损坏");
+        }
+
+        // 无 project_id → 提前返回（不写事件、不写摘要；settle-ops.ts:130 逐字：
+        // project_id === null 早退发生在两个 sync 之前，非「无条件调用」）。
+        if (job.getProjectId() == null) {
+            return true;
+        }
+
+        eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                Map.of("job_id", job.getId().toString(),
+                        "type", job.getType(),
+                        "source", job.getSource(),
+                        "status", job.getStatus(),
+                        "progress", job.getProgress(),
+                        "output_asset_ids", assetIds));
+
+        for (int i = 0; i < assetIds.size(); i++) {
+            GenerationOutputSlotEntity slot = i < slots.size() ? slots.get(i) : null;
+            int slotIndex = slot != null ? slot.getSlotIndex() : i;
+            eventPublisher.publish(job.getProjectId(), "generation_job.output_attached",
+                    "generation_job_output",
+                    job.getId().toString() + ":" + slotIndex, 0, "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "slot_id", slot != null ? slot.getId().toString() : "",
+                            "slot_index", slotIndex,
+                            "status", JobStatus.SUCCEEDED.value(),
+                            "asset_id", assetIds.get(i),
+                            "retry_of_slot_id", slot != null && slot.getRetryOfSlotId() != null
+                                    ? slot.getRetryOfSlotId().toString() : "",
+                            "initial_placement_status", "pending"));
+        }
+        for (int i = assetIds.size(); i < slots.size(); i++) {
+            GenerationOutputSlotEntity slot = slots.get(i);
+            eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
+                    "generation_job_output",
+                    job.getId().toString() + ":" + slot.getSlotIndex(), 0, "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "slot_id", slot.getId().toString(),
+                            "slot_index", slot.getSlotIndex(),
+                            "status", JobStatus.FAILED.value(),
+                            "asset_id", "",
+                            "retry_of_slot_id", slot.getRetryOfSlotId() != null
+                                    ? slot.getRetryOfSlotId().toString() : "",
+                            "initial_placement_status", "pending"));
+        }
+
+        // 摘要同步（settle-ops.ts:196-204：firstSlot 关联 record 时回写；storyboard 无条件调用）
+        GenerationOutputSlotEntity firstSlot = slots.isEmpty() ? null : slots.get(0);
+        if (firstSlot != null && firstSlot.getSceneCardGenerationRecordId() != null) {
+            recordSync.sync(firstSlot.getSceneCardGenerationRecordId());
+        }
+        previewSync.sync(jobIdLong);
+
+        return true;
+    }
+
+    /**
+     * 失败作业（settle-ops.ts:206-333 failJob）。
+     */
+    @Transactional
+    public boolean failJob(String jobId, String errorCode, String errorMessage,
+                           Map<String, Object> details,
+                           String workerId, long fencingToken) {
+        Long jobIdLong = Long.parseLong(jobId);
+        Map<String, Object> errorObj = new java.util.HashMap<>();
+        errorObj.put("code", errorCode);
+        errorObj.put("message", errorMessage);
+        if (details != null) {
+            errorObj.put("details", details);
+        }
+        int guardAffected = jobMapper.failJobGuard(jobIdLong, workerId, fencingToken, toJson(errorObj));
+        if (guardAffected != 1) {
+            log.warn("failJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={} errorCode={}",
+                    jobId, workerId, fencingToken, errorCode);
+            return false;
+        }
+
+        List<GenerationOutputSlotEntity> slots = slotMapper.findPendingByJobId(jobIdLong);
+        for (GenerationOutputSlotEntity slot : slots) {
+            slotMapper.updateSlotStatus(slot.getId(), JobStatus.FAILED.value());
+        }
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        if (job == null) {
+            throw new IllegalStateException(
+                    "failJob 守卫通过后任务 " + jobId + " 不存在，数据损坏");
+        }
+
+        // 摘要同步（settle-ops.ts:322-327 firstSlot record 回写；329-330 storyboard 无条件）
+        GenerationOutputSlotEntity firstFailSlot = slots.isEmpty() ? null : slots.get(0);
+        if (firstFailSlot != null && firstFailSlot.getSceneCardGenerationRecordId() != null) {
+            recordSync.sync(firstFailSlot.getSceneCardGenerationRecordId());
+        }
+        previewSync.sync(jobIdLong);
+
+        insertLog(jobIdLong, JobStatus.FAILED, errorCode + ": " + errorMessage,
+                Map.of("code", errorCode, "message", errorMessage,
+                        "details", details != null ? details : Map.of()));
+
+        if (job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "error", Map.of("code", errorCode, "message", errorMessage)));
+            for (GenerationOutputSlotEntity slot : slots) {
+                eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
+                        "generation_job_output",
+                        job.getId().toString() + ":" + slot.getSlotIndex(), 0, "job_" + job.getId(),
+                        Map.of("job_id", job.getId().toString(),
+                                "slot_id", slot.getId().toString(),
+                                "slot_index", slot.getSlotIndex(),
+                                "status", JobStatus.FAILED.value(),
+                                "asset_id", "",
+                                "retry_of_slot_id", slot.getRetryOfSlotId() != null
+                                        ? slot.getRetryOfSlotId().toString() : "",
+                                "initial_placement_status", "pending",
+                                "error", Map.of("code", errorCode, "message", errorMessage)));
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 建资产行（asset-ops.ts:156-202 createAsset）。
+     */
+    @Transactional
+    public String createAsset(String userId, String projectId, String generationJobId, String type,
+                              String url, String storageKey, String mime, Long size,
+                              Integer width, Integer height, Integer durationMs,
+                              String workerId, long fencingToken) {
+        Long jobIdLong = Long.parseLong(generationJobId);
+
+        int guardAffected = jobMapper.createAssetGuard(jobIdLong, workerId, fencingToken);
+        if (guardAffected != 1) {
+            log.warn("createAsset 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    generationJobId, workerId, fencingToken);
+            return null;
+        }
+
+        AssetEntity asset = buildAsset(jobIdLong, projectId, userId, type,
+                url, storageKey, mime, size, width, height, durationMs);
+        assetMapper.insert(asset);
+
+        // asset.created（asset-ops.ts:186-199，恒发）
+        eventPublisher.publish(Long.parseLong(projectId), "asset.created", "asset",
+                asset.getId().toString(), asset.getVersion(), "job_" + generationJobId,
+                Map.of("asset_id", asset.getId().toString(),
+                        "generation_job_id", generationJobId,
+                        "type", asset.getType(),
+                        "access_url", asset.getUrl()));
+        return asset.getId().toString();
+    }
+
+    /**
+     * 发布视频结果（video-ops.ts:60-198 publishVideoResult）。
+     * 单槽语义（评审 I2）：findFirst slot_index=0；只回写 record summary，不调 storyboard。
+     */
+    @Transactional
+    public boolean publishVideoResult(String jobId, String projectId, String userId,
+                                      String workerId, long fencingToken,
+                                      String url, String storageKey, String mime, Long size,
+                                      Integer width, Integer height, double duration) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        int guardAffected = jobMapper.publishVideoGuard(jobIdLong, workerId, fencingToken);
+        if (guardAffected != 1) {
+            log.warn("[video] publishVideoResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    jobId, workerId, fencingToken);
+            return false;
+        }
+
+        AssetEntity asset = buildAsset(jobIdLong, projectId, userId, "video",
+                url, storageKey, mime, size, width, height, duration > 0 ? (int) Math.round(duration * 1000) : null);
+        assetMapper.insert(asset);
+
+        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
+
+        insertLog(jobIdLong, JobStatus.SUCCEEDED, "视频生成完成",
+                Map.of("asset_ids", List.of(asset.getId().toString())));
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        if (job != null && job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
+                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
+                    Map.of("asset_id", asset.getId().toString(),
+                            "generation_job_id", job.getId().toString(),
+                            "type", asset.getType(),
+                            "access_url", asset.getUrl()));
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "output_asset_ids", List.of(asset.getId().toString())));
+        }
+
+        GenerationOutputSlotEntity videoSlot = slotMapper.findByJobId(jobIdLong).stream()
+                .filter(s -> s.getSlotIndex() != null && s.getSlotIndex() == 0)
+                .findFirst().orElse(null);
+        if (videoSlot != null) {
+            slotMapper.updateSlot(videoSlot.getId(), JobStatus.SUCCEEDED.value(), asset.getId());
+            if (videoSlot.getSceneCardGenerationRecordId() != null) {
+                recordSync.sync(videoSlot.getSceneCardGenerationRecordId());
+            }
+        }
+
+        if (job != null && job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "generation_job.output_attached",
+                    "generation_job_output",
+                    job.getId().toString() + ":" + (videoSlot != null ? videoSlot.getSlotIndex() : 0),
+                    0, "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "slot_id", videoSlot != null ? videoSlot.getId().toString() : "",
+                            "slot_index", videoSlot != null ? videoSlot.getSlotIndex() : 0,
+                            "status", JobStatus.SUCCEEDED.value(),
+                            "asset_id", asset.getId().toString(),
+                            "retry_of_slot_id", videoSlot != null && videoSlot.getRetryOfSlotId() != null
+                                    ? videoSlot.getRetryOfSlotId().toString() : "",
+                            "initial_placement_status", "pending"));
+        }
+        return true;
+    }
+
+    /**
+     * 失败视频作业（video-ops.ts:200-303 failVideoJob 独立实现）。
+     * 与通用 failJob 的逐字差异：守卫多清 next_poll_at；pending 槽逐个带 record FK 回写 summary；
+     * 不调 storyboard 同步。
+     */
+    @Transactional
+    public boolean failVideoJob(String jobId, String errorCode, String errorMessage,
+                                Map<String, Object> details,
+                                String workerId, long fencingToken) {
+        Long jobIdLong = Long.parseLong(jobId);
+        Map<String, Object> errorObj = new java.util.HashMap<>();
+        errorObj.put("code", errorCode);
+        errorObj.put("message", errorMessage);
+        if (details != null) {
+            errorObj.put("details", details);
+        }
+        int affected = jobMapper.failVideoGuard(jobIdLong, workerId, fencingToken, toJson(errorObj));
+        if (affected != 1) {
+            log.warn("[video] failVideoJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={} errorCode={}",
+                    jobId, workerId, fencingToken, errorCode);
+            return false;
+        }
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        List<GenerationOutputSlotEntity> pendingSlots = slotMapper.findPendingByJobId(jobIdLong);
+        for (GenerationOutputSlotEntity slot : pendingSlots) {
+            slotMapper.updateSlotStatus(slot.getId(), JobStatus.FAILED.value());
+            if (slot.getSceneCardGenerationRecordId() != null) {
+                recordSync.sync(slot.getSceneCardGenerationRecordId());
+            }
+        }
+        insertLog(jobIdLong, JobStatus.FAILED, errorCode + ": " + errorMessage,
+                Map.of("code", errorCode, "message", errorMessage,
+                        "details", details != null ? details : Map.of()));
+        if (job != null && job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "error", Map.of("code", errorCode, "message", errorMessage)));
+            for (GenerationOutputSlotEntity slot : pendingSlots) {
+                eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
+                        "generation_job_output",
+                        job.getId().toString() + ":" + slot.getSlotIndex(), 0, "job_" + job.getId(),
+                        Map.of("job_id", job.getId().toString(),
+                                "slot_id", slot.getId().toString(),
+                                "slot_index", slot.getSlotIndex(),
+                                "status", JobStatus.FAILED.value(),
+                                "asset_id", "",
+                                "retry_of_slot_id", slot.getRetryOfSlotId() != null
+                                        ? slot.getRetryOfSlotId().toString() : "",
+                                "initial_placement_status", "pending",
+                                "error", Map.of("code", errorCode, "message", errorMessage)));
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 失败 media_extract 作业（media-extract-ops.ts:138-192 failMediaExtractJob）。
+     */
+    @Transactional
+    public boolean failMediaExtractJob(String jobId, String errorCode, String errorMessage,
+                                       Map<String, Object> details,
+                                       String workerId, long fencingToken) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        Map<String, Object> errorObj = new java.util.HashMap<>();
+        errorObj.put("code", errorCode);
+        errorObj.put("message", errorMessage);
+        if (details != null) {
+            errorObj.put("details", details);
+        }
+        String errorJson = toJson(errorObj);
+
+        int guardAffected = jobMapper.failMediaExtractGuard(
+                jobIdLong, workerId, fencingToken, errorJson);
+        if (guardAffected != 1) {
+            log.warn("[media_extract] failMediaExtractJob 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    jobId, workerId, fencingToken);
+            return false;
+        }
+
+        insertLog(jobIdLong, JobStatus.FAILED, errorCode + ": " + errorMessage,
+                Map.of("code", errorCode, "message", errorMessage,
+                        "details", details != null ? details : Map.of()));
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        if (job != null && job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "error", Map.of("code", errorCode, "message", errorMessage)));
+        }
+        return true;
+    }
+
+    // ========== 内部工具 ==========
+
+    private AssetEntity buildAsset(Long jobIdLong, String projectId, String userId, String type,
+                                   String url, String storageKey, String mime, Long size,
+                                   Integer width, Integer height, Integer durationMs) {
+        AssetEntity asset = new AssetEntity();
+        asset.setUserId(Long.parseLong(userId));
+        asset.setProjectId(Long.parseLong(projectId));
+        asset.setGenerationJobId(jobIdLong);
+        asset.setType(type);
+        asset.setUrl(url);
+        asset.setStorageKey(storageKey);
+        asset.setMime(mime);
+        asset.setSize(size);
+        asset.setWidth(width);
+        asset.setHeight(height);
+        if (durationMs != null) {
+            asset.setDurationMs(durationMs);
+        }
+        asset.setSource("generated");
+        asset.setStatus("normal");
+        LocalDateTime now = nowUtc();
+        asset.setGmtCreate(now);
+        asset.setGmtModified(now);
+        asset.setVersion(0);
+        asset.setIsDelete(false);
+        return asset;
+    }
+
+    private void insertLog(Long jobIdLong, JobStatus status, String message,
+                           Map<String, Object> payload) {
+        GenerationJobLogEntity logEntry = new GenerationJobLogEntity();
+        logEntry.setGenerationJobId(jobIdLong);
+        logEntry.setEvent(status.value());
+        logEntry.setStatus(status.value());
+        logEntry.setMessage(message);
+        if (payload != null) {
+            logEntry.setPayload(toJson(payload));
+        }
+        logEntry.setOccurredAt(nowUtc());
+        jobLogMapper.insert(logEntry);
+    }
+
+    private static LocalDateTime nowUtc() {
+        return LocalDateTime.now(ZoneOffset.UTC);
+    }
+
+    private String toJson(Object obj) {
+        try {
+            return JSON_MAPPER.writeValueAsString(obj);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize to JSON", e);
+        }
+    }
+}

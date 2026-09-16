@@ -1,13 +1,13 @@
 import { Body, Controller, Get, Headers, Put, Res } from "@nestjs/common";
 import type { Response } from "express";
-import { NewApiError } from "@blue-whale/core";
-import { createLogger } from "@blue-whale/core/logging";
+import { NewApiError } from "@lib/core";
+import { createLogger } from "@lib/core/logging";
 import {
   ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE,
   changePasswordRequestSchema,
   fail,
   ok,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { projectAccountError } from "@lib/shared/account/change-password-error.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";

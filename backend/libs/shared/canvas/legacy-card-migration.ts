@@ -3,7 +3,7 @@ import {
   PROMPT_TEXT_LIMITS as limits,
   type LegacyMigrationFailure,
   type PromptPreviewSource,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import type { LegacyCardHistoryDraft, LegacyCardHistoryRow } from "@lib/shared/persistence/index.js";
 import { sourceKey } from "./prompt-preview.js";
 

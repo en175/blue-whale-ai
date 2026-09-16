@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { promptRefReadOnly, readPromptRefText, typePromptRefText } from './testing/promptRefEditor';
 
 /* IKDMQQ 图片生成草稿：侧栏建卡 / 重复创建 / 参数同步与水合恢复 / 原位提交回填 /
    生成中只读（面板 + 连线）/ 保存失败阻断生成与项目切换 / 失败保留卡片与原因。
@@ -283,18 +284,15 @@ function sendButton(): HTMLButtonElement {
   )!;
 }
 
-function promptTextarea(): HTMLTextAreaElement {
-  return container.querySelector('textarea')!;
+function promptTextarea(): HTMLElement {
+  const el = container.querySelector('[contenteditable]');
+  if (!el) throw new Error('PromptRefEditor 未挂载');
+  return el as HTMLElement;
 }
 
-/** React 受控 textarea 赋值 */
+/** PromptRefEditor（IKFA1M）整体替换文本 */
 async function typePrompt(text: string) {
-  const textarea = promptTextarea();
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setter.call(textarea, text);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  await typePromptRefText(container, text);
 }
 
 /** 点击侧栏图片入口后，画布上最新加入的草稿节点 */
@@ -331,15 +329,15 @@ afterEach(async () => {
 });
 
 describe('IKDMQQ 图片草稿创建与编辑', () => {
-  it('侧栏图片入口仅打开面板：不建卡、不创建任务（自由模式）', async () => {
+  it('侧栏图片入口先建草稿卡再开绑定面板：不创建任务（1f2f498d 起入口统一建卡）', async () => {
     await renderPage();
     const before = flowProps.current.mediaNodes.length;
 
     await clickSidebarImage();
 
-    // 点击入口不新建任何节点、不建草稿
-    expect(flowProps.current.mediaNodes).toHaveLength(before);
-    expect(draftNodes()).toHaveLength(0);
+    // 工具栏入口先建图片草稿卡再打开跟随输入框
+    expect(flowProps.current.mediaNodes).toHaveLength(before + 1);
+    expect(draftNodes()).toHaveLength(1);
     // 仅点击入口不创建任务
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     // 面板打开（模型能力加载后空提示词、无附件时发送禁用）
@@ -348,7 +346,7 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
     expect(sendButton().disabled).toBe(true);
   });
 
-  it('侧栏自由模式发送：直接落生成卡（无 target_node_id）', async () => {
+  it('侧栏入口发送：绑定新建草稿卡生成（带 target_node_id），不另落生成卡', async () => {
     await renderPage();
     await clickSidebarImage();
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
@@ -361,21 +359,24 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
 
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.type).toBe('image');
-    expect(payload.target_node_id).toBeUndefined();
+    // 发送绑定入口新建的草稿卡，在原卡生成
+    expect(typeof payload.target_node_id).toBe('string');
     expect(payload.parameters.prompt).toBe('自由模式画图');
     expect(payload.parameters.model_id).toBe('m-test');
-    // 生成卡落画布（seed m1 + 新生成卡）
+    // seed m1 + 入口建的 1 张草稿卡；生成发生在原卡，不新增节点
     expect(flowProps.current.mediaNodes).toHaveLength(2);
+    // IKFXZD：创建请求发出即隐藏面板（提交前校验/落盘/上传失败则保持打开）
+    expect(container.querySelector('[contenteditable]')).toBeNull();
   });
 
-  it('连续点击侧栏入口：不建卡，面板保持打开', async () => {
+  it('连续点击侧栏入口：每次新建草稿卡，面板保持打开', async () => {
     await renderPage();
 
     await clickSidebarImage();
     await clickSidebarImage();
 
-    expect(flowProps.current.mediaNodes).toHaveLength(1);
-    expect(draftNodes()).toHaveLength(0);
+    expect(flowProps.current.mediaNodes).toHaveLength(3); // seed m1 + 两次点击各建一张
+    expect(draftNodes()).toHaveLength(2);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(promptTextarea()).toBeTruthy();
   });
@@ -420,10 +421,9 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
       flowProps.current.onNodeClick(draft);
     });
 
-    expect(promptTextarea().value).toBe('恢复的提示词');
-    // 连线文本附件按当前画布实时展示
-    await vi.waitFor(() => expect(container.textContent).toContain('文本附件（1）'));
-    expect(container.textContent).toContain('故事文案');
+    expect(readPromptRefText(container)).toBe('恢复的提示词');
+    // 连线文本附件按当前画布实时展示（IKFCKN：FileText 缩略图进参考栏）
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1));
     // 模型/比例/分辨率按草稿参数恢复
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     expect(container.textContent).toContain('1:1');
@@ -503,8 +503,12 @@ describe('IKDMQQ 原位提交与首次生成', () => {
       expect(node.data.genStatus).toBe('generating');
     });
 
-    // 面板只读：输入框与发送禁用
-    expect(promptTextarea().disabled).toBe(true);
+    // IKFXZD：发送成功即隐藏面板
+    expect(container.querySelector('[contenteditable]')).toBeNull();
+
+    // 生成中点卡片重开只读面板（IKFXZD 口径：自动关闭不动只读入口）：输入与发送禁用
+    await openDraftPanel();
+    expect(promptRefReadOnly(container)).toBe(true);
     expect(sendButton().disabled).toBe(true);
 
     // 向生成中节点新建连线被拦截
@@ -577,7 +581,7 @@ describe('IKDMQQ 原位提交与首次生成', () => {
     await act(async () => {
       flowProps.current.onNodeClick(failed);
     });
-    expect(promptTextarea().disabled).toBe(false);
+    expect(promptRefReadOnly(container)).toBe(false);
   });
 });
 
@@ -598,6 +602,8 @@ describe('IKDMQQ 保存失败暂停生成与项目切换', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('保存失败，请重试'));
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(flowProps.current.mediaNodes.some((n: Node) => n.id === draftId)).toBe(true);
+    // IKFXZD：失败分支面板保持打开（成功才关）
+    expect(promptTextarea()).toBeTruthy();
 
     // 项目切换被阻断
     await act(async () => {

@@ -1,6 +1,6 @@
 import { Inject } from "@nestjs/common";
-import { RESOURCE_NOT_FOUND_CODE } from "@blue-whale/contracts";
-import type { SaveSharedAssetRequest } from "@blue-whale/contracts";
+import { RESOURCE_NOT_FOUND_CODE } from "@lib/contracts";
+import type { SaveSharedAssetRequest } from "@lib/contracts";
 import { SharedAssetError } from "../shared-asset-error.js";
 import type { SharedAssetSourcePort } from "../shared-asset-source.port.js";
 import {

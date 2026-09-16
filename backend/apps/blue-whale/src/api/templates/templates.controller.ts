@@ -1,5 +1,5 @@
 import { Controller, Get, Query } from "@nestjs/common";
-import { DomainError, FAILURE_CODE, ok } from "@blue-whale/contracts";
+import { DomainError, FAILURE_CODE, ok } from "@lib/contracts";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { TemplateService } from "@lib/shared/template/template.service.js";
 import {

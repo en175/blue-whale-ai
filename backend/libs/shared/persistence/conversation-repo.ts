@@ -16,11 +16,12 @@ function isUniqueConstraintError(error: unknown): boolean {
 export async function transactionWithUniqueRetry<T>(
   prisma: PrismaClient,
   operation: (tx: Prisma.TransactionClient) => Promise<T>,
+  options?: { maxWait?: number; timeout?: number },
 ): Promise<T> {
   try {
-    return await prisma.$transaction(operation);
+    return await prisma.$transaction(operation, options);
   } catch (error) {
     if (!isUniqueConstraintError(error)) throw error;
-    return prisma.$transaction(operation);
+    return prisma.$transaction(operation, options);
   }
 }

@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { typePromptRefText, readPromptRefText, promptRefReadOnly } from './testing/promptRefEditor';
 
 /* IKDMQT 音频生成草稿：侧栏建卡 / 重复创建 / 参数写回与水合恢复 / 原位提交回填 /
    生成中只读（面板 + 连线）/ 保存失败阻断生成 / 401 回退与失败保留。
@@ -61,6 +62,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchQuota: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
+  referencePromptPlan: vi.fn(async () => ({ id: 11, version: 5, viewport: '{}', nodes: '[]', edges: '[]' })),
   saveCanvasDoc: vi.fn(async (
     _projectId: string,
     _payload: { viewport: unknown; nodes: Node[]; edges: Array<{ id: string; source: string; target: string }> },
@@ -141,6 +143,7 @@ vi.mock('@/api/assets', () => ({
 /* 序列化保持与真实实现同构（JSON 可序列化字段参与签名），否则签名断言失真 */
 vi.mock('@/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
+  referencePromptPlan: apiMocks.referencePromptPlan,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
   legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
@@ -299,14 +302,7 @@ function promptTextarea(): HTMLTextAreaElement {
 }
 
 /** React 受控 textarea 赋值 */
-async function typePrompt(text: string) {
-  const textarea = promptTextarea();
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setter.call(textarea, text);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-}
+async function typePrompt(text: string) { await typePromptRefText(container, text); }
 
 /** 点击侧栏音频入口后，画布上最新加入的音频草稿节点 */
 function draftNodes(): Node[] {
@@ -349,15 +345,15 @@ afterEach(async () => {
 });
 
 describe('IKDMQT 音频草稿创建与编辑', () => {
-  it('侧栏音频入口仅打开面板：不建卡、不创建任务（自由模式）', async () => {
+  it('侧栏音频入口先建草稿卡再开绑定面板：不创建任务（1f2f498d 起入口统一建卡）', async () => {
     await renderPage();
     const before = flowProps.current.mediaNodes.length;
 
     await clickSidebarAudio();
 
-    // 点击入口不新建任何节点、不建草稿
-    expect(flowProps.current.mediaNodes).toHaveLength(before);
-    expect(draftNodes()).toHaveLength(0);
+    // 工具栏入口先建音频草稿卡再打开跟随输入框
+    expect(flowProps.current.mediaNodes).toHaveLength(before + 1);
+    expect(draftNodes()).toHaveLength(1);
     // 仅点击入口不创建任务
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     // 面板打开（模型能力加载后空描述时发送禁用）
@@ -366,7 +362,7 @@ describe('IKDMQT 音频草稿创建与编辑', () => {
     expect(sendButton().disabled).toBe(true);
   });
 
-  it('侧栏自由模式发送：直接落生成卡（无 target_node_id）', async () => {
+  it('侧栏入口发送：绑定新建草稿卡生成（带 target_node_id），不另落生成卡', async () => {
     await renderPage();
     await clickSidebarAudio();
     await waitModelReady();
@@ -379,21 +375,24 @@ describe('IKDMQT 音频草稿创建与编辑', () => {
 
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
     expect(payload.type).toBe('audio');
-    expect(payload.target_node_id).toBeUndefined();
+    // 发送绑定入口新建的草稿卡，在原卡生成
+    expect(typeof payload.target_node_id).toBe('string');
     expect(payload.parameters.prompt).toBe('自由模式音效');
     expect(payload.parameters.model_id).toBe('a-test');
-    // 生成卡落画布（seed m1 + 新生成卡）
+    // seed m1 + 入口建的 1 张草稿卡；生成发生在原卡，不新增节点
     expect(flowProps.current.mediaNodes).toHaveLength(2);
+    // IKFXZD：创建请求发出即隐藏面板（提交前校验/落盘/上传失败则保持打开）
+    expect(container.querySelector('[data-testid="audio-input"]')).toBeNull();
   });
 
-  it('连续点击侧栏入口：不建卡，面板保持打开', async () => {
+  it('连续点击侧栏入口：每次新建草稿卡，面板保持打开', async () => {
     await renderPage();
 
     await clickSidebarAudio();
     await clickSidebarAudio();
 
-    expect(flowProps.current.mediaNodes).toHaveLength(1);
-    expect(draftNodes()).toHaveLength(0);
+    expect(flowProps.current.mediaNodes).toHaveLength(3); // seed m1 + 两次点击各建一张
+    expect(draftNodes()).toHaveLength(2);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(promptTextarea()).toBeTruthy();
   });
@@ -450,7 +449,7 @@ describe('IKDMQT 音频草稿创建与编辑', () => {
     });
 
     // 描述与模型按草稿参数恢复（草稿带入的 a-test 优先于列表默认）
-    await vi.waitFor(() => expect(promptTextarea().value).toBe('恢复的描述'));
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('恢复的描述'));
     await vi.waitFor(() => expect(container.textContent).toContain('测试音频模型'));
     // 音频面板无文本附件区（音频草稿不消费文本连线）
     expect(container.textContent).not.toContain('文本附件');
@@ -511,13 +510,14 @@ describe('IKDMQT 原位提交与首次生成', () => {
       asset: null,
     }));
     seedEmptyDraftDoc();
+    // 预置连线：connectPair 要求 genKindOf 非空且 ABILITY 匹配（单源 text/image 均无法连入 audio 草稿），
+    // 因此直接在文档中预置连线，测试重点在于生成中删除被拦截。
+    (canvasDocMock.current.doc as { edges: Array<{ id: string; source: string; target: string }> }).edges = [
+      { id: 'e-seed', source: 't1', target: 'd1' },
+    ];
     await renderPage();
     const draftId = await openDraftPanel();
 
-    // 草稿态可连线（音频草稿不校验来源，画布连线保持现状）
-    await act(async () => {
-      flowProps.current.onConnect({ source: 't1', target: draftId, sourceHandle: null, targetHandle: null });
-    });
     expect(flowProps.current.edges.some((e: { source: string; target: string }) => e.source === 't1' && e.target === draftId)).toBe(true);
     const draftEdgeId = flowProps.current.edges.find((e: { source: string; target: string }) => e.target === draftId)!.id;
 
@@ -531,8 +531,12 @@ describe('IKDMQT 原位提交与首次生成', () => {
       expect(node.data.genStatus).toBe('generating');
     });
 
-    // 面板只读：描述输入与发送禁用，提示可见
-    expect(promptTextarea().disabled).toBe(true);
+    // IKFXZD：发送成功即隐藏面板
+    expect(container.querySelector('[data-testid="audio-input"]')).toBeNull();
+
+    // 生成中点卡片重开只读面板（IKFXZD 口径：自动关闭不动只读入口）：描述输入与发送禁用，提示可见
+    await openDraftPanel();
+    expect(promptRefReadOnly(container)).toBe(true);
     expect(sendButton().disabled).toBe(true);
     expect(container.textContent).toContain('生成中，参数只读');
 
@@ -630,7 +634,7 @@ describe('IKDMQT 原位提交与首次生成', () => {
     await act(async () => {
       flowProps.current.onNodeClick(failed);
     });
-    expect(promptTextarea().disabled).toBe(false);
+    expect(promptRefReadOnly(container)).toBe(false);
   });
 });
 
@@ -655,5 +659,130 @@ describe('IKDMQT 保存失败暂停生成', () => {
     expect(draft.data.draft).toBe(true);
     expect(draft.data.genStatus).toBe('draft');
     expect(draft.data.prompt).toBe('轻快的海浪声');
+    // IKFXZD：失败分支面板保持打开（成功才关）
+    expect(promptTextarea()).toBeTruthy();
+  });
+});
+
+describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => {
+  /** 经音频面板真实入口进入画布选择模式：添加参考按钮 → 来源菜单 → 从节点添加素材 */
+  async function enterCanvasPick() {
+    await vi.waitFor(() => {
+      const btn = [...container.querySelectorAll('button')].find((b) => (b.title ?? '').startsWith('从资产中选择 / 从节点添加素材'));
+      expect(btn).toBeTruthy();
+    });
+    await act(async () => {
+      [...container.querySelectorAll('button')].find((b) => (b.title ?? '').startsWith('从资产中选择 / 从节点添加素材'))!.click();
+    });
+    await vi.waitFor(() => {
+      const item = [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材');
+      expect(item).toBeTruthy();
+    });
+    await act(async () => {
+      [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材')!.click();
+    });
+  }
+
+  it('pickMode 音频下点击文本卡 → 建立来源→草稿连线（与画布拖线同一本地建边；普通卡与方案卡均可）', async () => {
+    // 前序用例可能将 saveCanvasDoc 改为 reject（clearAllMocks 不重置实现），恢复成功落盘
+    apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
+    seedEmptyDraftDoc();
+    await renderPage();
+    await openDraftPanel();
+
+    await enterCanvasPick();
+
+    // 点击普通文本卡（无 promptSource；音频建线准入与拖线一致，不限方案卡）
+    const textNode = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find((n) => n.id === 't1')!;
+    await act(async () => {
+      flowProps.current.onNodeClick(textNode);
+    });
+
+    // 与画布拖线同款本地建边（addCanvasEdge，自动保存持久）；不走 referencePromptPlan
+    //（该服务端链路仅放行图片/视频目标）
+    await vi.waitFor(() => {
+      expect(flowProps.current.edges.some((e: { id: string; source: string; target: string }) =>
+        e.id === 'e-t1-d1' && e.source === 't1' && e.target === 'd1')).toBe(true);
+    });
+    expect(apiMocks.referencePromptPlan).not.toHaveBeenCalled();
+  });
+
+  it('重复选择同一文本卡只保留一条连线（去重）', async () => {
+    apiMocks.saveCanvasDoc.mockImplementation(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' }));
+    seedEmptyDraftDoc();
+    await renderPage();
+    await openDraftPanel();
+
+    await enterCanvasPick();
+    const textNode = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find((n) => n.id === 't1')!;
+    await act(async () => {
+      flowProps.current.onNodeClick(textNode);
+    });
+    await vi.waitFor(() => {
+      expect(flowProps.current.edges.filter((e: { source: string; target: string }) => e.source === 't1' && e.target === 'd1')).toHaveLength(1);
+    });
+
+    // 重新进入选择模式再选同一文本卡：addCanvasEdge 同源去重，连线数量不变
+    await enterCanvasPick();
+    await act(async () => {
+      flowProps.current.onNodeClick(textNode);
+    });
+    expect(flowProps.current.edges.filter((e: { source: string; target: string }) => e.source === 't1' && e.target === 'd1')).toHaveLength(1);
+  });
+});
+
+ describe('IKFCJG 音频草稿结构', () => {
+  it('正文结构与拍平镜像随草稿一起保存', async () => {
+    seedDraftDoc();
+    await renderPage();
+    await openDraftPanel();
+    await waitModelReady();
+    await typePrompt('生成声音');
+    expect(flowProps.current.mediaNodes.find((n: Node) => n.id === 'd1').data.promptDoc).toMatchObject({ version: 1, flat: '生成声音' });
+  });
+});
+
+ describe('IKFCJG 恢复音频引用请求', () => {
+  it('结构与音频参考恢复后携带真实 references 和 prompt_doc（IKFDFZ：存量 audioRefs 打开时迁移为连线）', async () => {
+    seedDraftDoc();
+    // 存量 audioRefs 的画布项须有对应画布来源节点（迁移按节点 id 找回来源建线）
+    (canvasDocMock.current.doc as { nodes: Node[] }).nodes.push({
+      id: 'r1', type: 'mediaNode', position: { x: 100, y: 0 },
+      data: { src: 'https://x/a.mp3', mediaType: 'audio', fileName: '雨声', assetId: '601' },
+    });
+    canvasDocMock.current.assets = { '601': { asset_id: 601, type: 'audio', access_url: 'https://x/a.mp3' } };
+    const draft = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find((n: Node) => n.id === 'd1')!;
+    Object.assign(draft.data, {
+      prompt: '音频1',
+      audioRefs: [{ id: 'r1', source: 'canvas', assetId: '601', kind: 'audio', name: '雨声', src: 'https://x/a.mp3' }],
+      promptDoc: { version: 1, flat: '音频1', segments: [{ kind: 'asset_ref', asset_id: '601', label: '音频1' }] },
+    });
+    await renderPage(); await openDraftPanel(); await waitModelReady();
+    expect(readPromptRefText(container)).toBe('音频1');
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="audio-ref-thumb"]')!.getAttribute('title')).toBe('雨声'));
+    await act(async () => sendButton().click());
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    expect(apiMocks.createGenerationJob.mock.calls[0][1]).toMatchObject({
+      references: [{ role: 'reference', asset_id: '601', type: 'audio' }],
+      prompt_doc: { version: 1, segments: [{ kind: 'asset_ref', asset_id: '601', label: '音频1' }] },
+    });
+  });
+});
+
+ describe('IKFCJG 音频引用删除恢复', () => {
+  it('删除刚选中的音频再重开面板，不回放旧 externalPick', async () => {
+    seedEmptyDraftDoc();
+    const node = (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find(n => n.id === 'm1')!;
+    Object.assign(node.data, { mediaType: 'audio', src: 'http://audio/a.mp3', assetId: '601', fileName: '雨声' });
+    canvasDocMock.current.assets = { '601': { asset_id: 601, type: 'audio', access_url: 'http://audio/a.mp3' } };
+    await renderPage(); await openDraftPanel(); await waitModelReady();
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.title.startsWith('从资产中选择 / 从节点添加素材'))!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '从节点添加素材')!.click());
+    await act(async () => flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')));
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="audio-ref-thumb"]')).not.toBeNull());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="移除 雨声"]')!.click());
+    expect(container.querySelector('[data-testid="audio-ref-thumb"]')).toBeNull();
+    await openDraftPanel();
+    expect(container.querySelector('[data-testid="audio-ref-thumb"]')).toBeNull();
   });
 });

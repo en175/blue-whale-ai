@@ -19,6 +19,7 @@
 | `docs` | 根规则/上下文、普通 README 及 `docs/**/*.md` | `git diff --check` + Agent 规则结构测试 |
 | `scoped/node` | `apps/*/src`、`packages/*/src|test` | 增量 TypeScript build + Vitest `--changed` |
 | `scoped/backend` | `backend/apps/*`、`backend/libs/*` 下的 TypeScript（NestJS BFF） | backend typecheck（自带 tsconfig 与 `@lib/*` 别名）+ 根 Vitest 过滤 `backend` `--changed` |
+| `scoped/worker-java` | `worker-java/` 下的 Java 源码与构建配置（独立 Maven 工程，不在 pnpm workspace） | `mvn -f worker-java/pom.xml -q test` |
 | `scoped/web` | Web app/components/hooks/lib/workers、`web/src` 下的契约副本 JSON、`web/scripts` 工具脚本 | Web typecheck + Web lint + Web Vitest `--changed` |
 | `scoped/governance` | 本策略、选择器、发布门禁及关联技能 | 规则、选择器和发布门禁定向测试 |
 | `scoped/control-plane` | Hook、Git、worktree、PR、授权、审计和技能同步 | Hook 黑盒测试 + Git/PR/worktree 脚本单测 |

@@ -1,5 +1,5 @@
 import { Controller, Delete, Get, Param, Query } from "@nestjs/common";
-import { fail, ok } from "@blue-whale/contracts";
+import { fail, ok } from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
@@ -21,7 +21,8 @@ export class AssetsController {
     return ok(await this.assets.listByUser(user.userId, filter));
   }
 
-  /** 单个资产详情（画布/资产库弹窗用）：命中返回完整 AssetView，不归属/不存在 → 100301。 */
+  /** 单个资产详情（画布/资产库弹窗用）：命中返回 AssetDetailView（列表字段 + 生成提示词，
+   *  IKFSSO），不归属/不存在 → 100301。 */
   @Get(":assetId")
   async getOne(
     @CurrentUser() user: AuthenticatedUser,

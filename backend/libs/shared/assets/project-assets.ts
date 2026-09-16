@@ -4,7 +4,7 @@ import {
   RESOURCE_NOT_FOUND_CODE,
   DomainError,
   ok,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import type { ProjectService } from "@lib/shared/project/project.service.js";
 import type { AssetService } from "./assets.service.js";
 import type { AssetReader, AssetSigner } from "./ports.js";

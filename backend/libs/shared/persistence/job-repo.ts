@@ -36,6 +36,8 @@ export interface JobStatusView {
   asset: { id: string; url: string; type: string } | null;
   /** 失败时 DB 存的原始 error map；无则 null。投影成公开信封是 handler 层职责。 */
   stored_error: Record<string, unknown> | null;
+  /** IKFM3S §4：快照里的文本输入签名投影（前端轮询成功后回写目标 usedInputSignature）；无则 null。 */
+  text_input_signature: string | null;
 }
 
 export interface JobPage {
@@ -160,6 +162,13 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         stored_error:
           row.error && typeof row.error === "object" && !Array.isArray(row.error)
             ? (row.error as Record<string, unknown>)
+            : null,
+        text_input_signature:
+          row.input && typeof row.input === "object" && !Array.isArray(row.input)
+            ? (() => {
+                const signature = (row.input as Record<string, unknown>).text_input_signature;
+                return typeof signature === "string" ? signature : null;
+              })()
             : null,
       };
     },

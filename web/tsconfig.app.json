@@ -24,7 +24,8 @@
 
     /* Path aliases */
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@lib/*": ["../backend/libs/*"]
     }
   },
   "include": ["src"]

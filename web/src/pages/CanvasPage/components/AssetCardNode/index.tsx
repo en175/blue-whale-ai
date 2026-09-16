@@ -3,8 +3,8 @@
  * 从画布拖入/添加图片参考、生成图片唤起底部图片对话框、角色卡音色设置
  * ============================================ */
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 import { AtSign, Upload, WandSparkles, Info, Music, X, MousePointerClick, ImageOff, Plus } from 'lucide-react';
 import type { GenerationCardBlock } from '@/api/agentSessions';
 import { toast } from 'sonner';
@@ -93,6 +93,7 @@ const MAX_VOICE_FILES = 3;
 const MAX_VOICE_DURATION = 15; // 秒
 
 export default function AssetCardNode({ id, data, selected }: NodeProps & { data: AssetCardNodeData; selected?: boolean }) {
+  const showSoloToolbar = useSoloNodeSelected(selected);
   // 水合容错：持久化的 kind 可能不在五种枚举内（旧数据/脏数据），降级为 custom 避免 KIND_META 落空
   const kind: AssetCardKind = data.kind && data.kind in KIND_META ? data.kind : 'custom';
   const meta = KIND_META[kind];
@@ -179,13 +180,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
     if (data.toolMode !== 'select') return;
     e.preventDefault();
     e.stopPropagation();
-    setContextMenu({ x: e.clientX, y: e.clientY });
   }, [data.toolMode]);
-
-  const handleDelete = useCallback(() => {
-    setContextMenu(null);
-    data.onDelete?.(id);
-  }, [data, id]);
 
   /** 添加到 Agent 聊天 */
   const handleAddToChat = useCallback(() => {
@@ -349,7 +344,7 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
       {/* 悬停/选中时顶部操作条：添加到对话（与商品节点一致）
           资产卡临时隐藏（HIDE_ASSET_TOP_BAR，会后恢复），生成卡不受影响 */}
       {(isGeneration || !HIDE_ASSET_TOP_BAR) && (
-        <div className={`${styles.topBar} ${selected ? styles.topBarVisible : ''}`}>
+        <div className={`${styles.topBar} ${showSoloToolbar ? styles.topBarVisible : ''}`}>
           <span className={styles.topLabel}>
             <AtSign size={14} strokeWidth={2} />
             <span>{meta.title}</span>
@@ -624,27 +619,6 @@ export default function AssetCardNode({ id, data, selected }: NodeProps & { data
         <HandlePlus />
       </Handle>
 
-      {/* 右键菜单（portal 到 body，避免节点 transform 影响 fixed 定位） */}
-      {contextMenu &&
-        createPortal(
-          <div
-            className={styles.contextMenu}
-            style={{ top: contextMenu.y, left: contextMenu.x }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <button className={styles.contextItem} onClick={handleAddToChat}>
-              <span>添加到聊天</span>
-            </button>
-            {/* 共享资产概念下线，隐藏入口 */}
-            {/* <button className={styles.contextItem} onClick={handleSaveToAssets}>
-              <span>保存到共享资产</span>
-            </button> */}
-            <button className={`${styles.contextItem} ${styles.contextDanger}`} onClick={handleDelete}>
-              <span>删除</span>
-            </button>
-          </div>,
-          document.body,
-        )}
     </div>
   );
 }

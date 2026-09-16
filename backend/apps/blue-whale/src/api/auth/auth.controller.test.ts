@@ -55,8 +55,8 @@ vi.mock("ioredis", () => ({
 }));
 
 import { Reflector } from "@nestjs/core";
-import { NewApiError, type NewApiLoginResult } from "@blue-whale/core";
-import { ACCOUNT_LOCKED } from "@blue-whale/contracts";
+import { NewApiError, type NewApiLoginResult } from "@lib/core";
+import { ACCOUNT_LOCKED } from "@lib/contracts";
 import type { Response } from "express";
 import type { AccountService } from "@lib/shared/account/account.service.js";
 import type { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -90,7 +90,8 @@ function setup() {
   const tracker = new LoginFailureTracker(limiter);
   const account = { login: vi.fn(), register: vi.fn() };
   const sessions = { createSession: vi.fn(async () => "session-token") };
-  const prisma = { client: {} };
+  // IKF YHJ：登录成功后写 user_info（执行凭证）；缺 mock 时旁路抛错被吞，不影响登录。
+  const prisma = { client: { user_info: { upsert: vi.fn(async () => ({})) } } };
   const controller = new AuthController(
     account as unknown as AccountService,
     prisma as unknown as PrismaService,
@@ -99,7 +100,7 @@ function setup() {
     tracker,
   );
   const res = { cookie: vi.fn() } as unknown as Response;
-  return { controller, account, sessions, res, limiter, tracker };
+  return { controller, account, sessions, res, limiter, tracker, prisma };
 }
 
 const LOGIN_BODY = { username: "alice", password: "wrong-pass" };
@@ -214,5 +215,30 @@ describe("AuthController 限流声明（IKDR4J）", () => {
       limit: 5,
       windowMs: 60_000,
     });
+  });
+});
+
+describe("AuthController IKF YHJ 执行凭证落库", () => {
+  it("登录成功：把 sk- 按 new-api userId 写入 user_info", async () => {
+    const { controller, account, prisma, res } = setup();
+    account.login.mockResolvedValue(loginResult());
+
+    await controller.login(LOGIN_BODY, res);
+
+    expect(prisma.client.user_info.upsert).toHaveBeenCalledWith({
+      where: { user_id: BigInt(42) },
+      update: expect.objectContaining({ provider_credential: "sk-test" }),
+      create: { user_id: BigInt(42), provider_credential: "sk-test" },
+    });
+  });
+
+  it("落库失败：只告警，不阻断登录（会话 cookie 照发）", async () => {
+    const { controller, account, prisma, res } = setup();
+    account.login.mockResolvedValue(loginResult());
+    prisma.client.user_info.upsert.mockRejectedValue(new Error("db down"));
+
+    await controller.login(LOGIN_BODY, res);
+
+    expect(res.cookie).toHaveBeenCalled();
   });
 });

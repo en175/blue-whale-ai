@@ -14,4 +14,17 @@ describe('limitPromptInput', () => {
 
     expect(result.reachedLimit).toBe(false);
   });
+
+  it('显式 max（模型目录上限，ADR-0085）覆盖默认值', () => {
+    const result = limitPromptInput('a'.repeat(3001), 'a'.repeat(2999), 3000);
+
+    expect(result.value).toHaveLength(3000);
+    expect(result.reachedLimit).toBe(true);
+  });
+
+  it('缺省参数保持旧行为（1000 默认）', () => {
+    const result = limitPromptInput('a'.repeat(1001), 'a'.repeat(1000));
+
+    expect(result.value).toHaveLength(MAX_PROMPT_INPUT_LENGTH);
+  });
 });

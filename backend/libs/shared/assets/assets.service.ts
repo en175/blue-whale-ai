@@ -85,6 +85,11 @@ export class AssetService {
     return this.repo.clearMaterialGroupLink(userId, materialGroupId);
   }
 
+  /** IKF YHJ：查这批本地 Asset 里已绑素材库素材的 material_id（生成创建期素材门用）。 */
+  findBoundMaterialIds(userId: string, assetIds: readonly string[]) {
+    return this.repo.findBoundMaterialIds(userId, assetIds);
+  }
+
   findAccessible(assetId: string, userId: string) {
     return this.repo.findAccessible(assetId, userId);
   }

@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { readPromptRefText, typePromptRefText } from './testing/promptRefEditor';
 
 /* IKDMQV 失败重试与修改后重新生成：
    双路径严格区分——节点「重试」按钮走 retryGenerationJob（沿用失败任务冻结快照，
@@ -223,17 +224,9 @@ function sendButton(): HTMLButtonElement {
   )!;
 }
 
-function promptTextarea(): HTMLTextAreaElement {
-  return container.querySelector('textarea')!;
-}
-
+/** PromptRefEditor（IKFA1M）整体替换文本 */
 async function typePrompt(text: string) {
-  const textarea = promptTextarea();
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setter.call(textarea, text);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  await typePromptRefText(container, text);
 }
 
 function nodeOf(id: string): Node {
@@ -324,7 +317,7 @@ describe('IKDMQV 修改后新生成：新任务新快照，原失败卡承接', 
     await renderPage();
 
     await clickNode('f1');
-    await vi.waitFor(() => expect(promptTextarea().value).toBe('原提示词'));
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('原提示词'));
     await typePrompt('修改后的提示词');
     await act(async () => { sendButton().click(); });
 
@@ -349,7 +342,7 @@ describe('IKDMQV 修改后新生成：新任务新快照，原失败卡承接', 
     await renderPage();
 
     await clickNode('g1');
-    await vi.waitFor(() => expect(promptTextarea().value).toBe('成品提示词'));
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('成品提示词'));
     await typePrompt('成品改版');
     await act(async () => { sendButton().click(); });
 
@@ -373,7 +366,7 @@ describe('IKDMQV 修改后新生成：新任务新快照，原失败卡承接', 
     await renderPage();
 
     await clickNode('f1');
-    await vi.waitFor(() => expect(promptTextarea().value).toBe('原提示词'));
+    await vi.waitFor(() => expect(readPromptRefText(container)).toBe('原提示词'));
     await typePrompt('再试一次');
     await act(async () => { sendButton().click(); });
 

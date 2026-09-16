@@ -4,13 +4,13 @@ import type {
   FrozenGenerationParameters,
   ProviderPromptAsset,
   VideoReferenceMode,
-} from "@blue-whale/contracts";
+} from "@lib/contracts";
 import {
   canonicalizeJsonValue,
   referenceModeToRequiredFeature,
   validateVideoReferenceConfiguration,
-} from "@blue-whale/contracts";
-import type { CostReservationSnapshot } from "@blue-whale/core";
+} from "@lib/contracts";
+import type { CostReservationSnapshot } from "@lib/core";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
@@ -40,10 +40,26 @@ export interface RegenerateSceneCardInput {
   reference_mode: VideoReferenceMode;
   reference_assets: ProviderPromptAsset[];
   capability_snapshot_version: CapabilitySnapshotVersion;
-  /** 密封的供应商 sk token（与 Dock 生成链路一致）；worker 解密后调网关。 */
+  /** 明文供应商 sk token（修正四：去密，与 Dock 生成链路一致）；worker 直接取用调网关。 */
   provider_credential?: string;
   /** IK7G9X：建新 job 时的记账快照（真实预估金额 + 定价口径版本）。 */
   costReservation?: CostReservationSnapshot;
+  /**
+   * IKF YHJ（ADR-0087）：素材校验门。
+   * <p>
+   * 场景卡再生成是**第三条视频创建路径**（另两条是 `handleCreateGenerationJob` 与 `retryJob`），
+   * 它同样会产出一个 `source=scene_card` 的视频 job，其冻结 input 带 `first_frame_asset_id` /
+   * `last_frame_asset_id` / `reference_asset_ids`——正是 worker 执行时会转成
+   * `asset://<material_id>` 的那批字段。不过门的话，预设保存之后变成 `Failed` 的素材
+   * 仍能从这里进生成（届时由上游拒），与 ADR 决策 3 想避免的「点了生成再白跑一次」同形。
+   * <p>
+   * 只能放**事务内、建 job 之前**调用：那几个扁平字段是在事务内由
+   * `resolveReferenceAssetsToFlat` 从 slot 解析出来的，事务外拿不到。
+   * 返回非 null 字符串即拒绝，本方法返回 `{ kind: "material_blocked" }`，零写入。
+   */
+  guardInput?: (
+    jobInput: Record<string, unknown>,
+  ) => Promise<string | null>;
 }
 
 export type RegenerateSceneCardResult =
@@ -71,6 +87,7 @@ export type RegenerateSceneCardResult =
   | { kind: "capability_drift" }
   | { kind: "capability_limit"; reason: string }
   | { kind: "validation_failed"; reason: string }
+  | { kind: "material_blocked"; reason: string }
   | { kind: "forbidden" };
 
 /** SceneCard 生成预设只读视图（IK67HB，T13）：编辑器打开时按需 GET，完整 Preset 参数不进 Snapshot。 */
@@ -122,9 +139,34 @@ function checkCapabilityLimit(
     features: unknown;
   },
 ): string | null {
-  const ratios = Array.isArray(capability.supported_aspect_ratios)
-    ? capability.supported_aspect_ratios
-    : [];
+  const f = (capability.features ?? {}) as Record<string, unknown>;
+  // IKFPYX：任务类型约束（scene-card 与 Dock 提交同源口径）——首帧/首尾帧按 features.task_types
+  // 覆盖比例/时长；未配则回落基础能力行。VideoReferenceMode 无 edit/prolong，故不涉及 duration=-1。
+  const taskType =
+    referenceMode === "first_and_last_frame"
+      ? "first_last_frame"
+      : referenceMode === "first_frame" || referenceMode === "last_frame"
+        ? "first_frame"
+        : "default";
+  const taskMap = f.task_types ?? f.taskTypes;
+  const taskEntry =
+    taskMap && typeof taskMap === "object" && !Array.isArray(taskMap)
+      ? ((taskMap as Record<string, unknown>)[taskType] as
+          | Record<string, unknown>
+          | undefined)
+      : undefined;
+  const taskRatios = Array.isArray(taskEntry?.allowed_ratios)
+    ? (taskEntry.allowed_ratios as string[])
+    : null;
+  const taskDurations = Array.isArray(taskEntry?.allowed_durations)
+    ? (taskEntry.allowed_durations as number[])
+    : null;
+
+  const ratios =
+    taskRatios ??
+    (Array.isArray(capability.supported_aspect_ratios)
+      ? (capability.supported_aspect_ratios as string[])
+      : []);
   if (!ratios.includes(parameters.aspect_ratio))
     return `aspect_ratio ${parameters.aspect_ratio} 不在能力支持范围`;
   const sizes = Array.isArray(capability.supported_sizes)
@@ -140,7 +182,7 @@ function checkCapabilityLimit(
   )
     return `size ${parameters.size} 不在能力支持范围`;
   // DB 存在两种形态：档位数组 [3,5,10]（种子数据即此形态）与 {min,max} 范围对象。
-  const durations = capability.supported_durations;
+  const durations = taskDurations ?? capability.supported_durations;
   if (Array.isArray(durations)) {
     if (!durations.includes(parameters.duration))
       return `duration ${parameters.duration} 不在能力支持档位`;
@@ -155,7 +197,6 @@ function checkCapabilityLimit(
     )
       return `duration ${parameters.duration} 超出能力范围`;
   }
-  const f = (capability.features ?? {}) as Record<string, unknown>;
   const quantityMax = Number(f.quantity_max ?? f.quantityMax ?? 1);
   if (parameters.count > quantityMax)
     return `count ${parameters.count} 超过 quantity_max ${quantityMax}`;
@@ -489,6 +530,17 @@ async function regenerateSceneCardInTransaction(
     input.reference_assets,
   );
 
+  // IKF YHJ（ADR-0087）：素材校验门。**必须放在这一组前置检查里**——下面那行注释以下就有写入了
+  // （先 UPDATE preset 再建 job），而本事务在 return 时是正常提交的：门要是放到 preset 更新之后，
+  // 一次被拒的再生成会把 preset 版本推进、却不建任何 job，留下脏状态。
+  // 位置也只能在事务内——flatReferences 是上面从 slot 解出来的，事务外拿不到。
+  if (input.guardInput) {
+    const reason = await input.guardInput({ ...flatReferences });
+    if (reason !== null) {
+      return { kind: "material_blocked", reason } as const;
+    }
+  }
+
   // === 前置检查全部通过，开始原子更新（AC#4）===
 
   // 7. UPDATE preset（CAS：where version=base，increment；count===0 视为并发冲突）。
@@ -623,8 +675,12 @@ export function createSceneCardGenerationRepo(
 ): SceneCardGenerationRepo {
   return {
     regenerateSceneCard(input) {
-      return transactionWithUniqueRetry(prisma, (tx) =>
-        regenerateSceneCardInTransaction(tx, input),
+      return transactionWithUniqueRetry(
+        prisma,
+        (tx) => regenerateSceneCardInTransaction(tx, input),
+        // 素材门（guardInput）在事务内发 HTTP，Prisma 默认 5s 的交互事务超时会把它掐成
+        // P2028/500，而不是设计好的 400。与 retryJob / createJob 同口径放宽。
+        { maxWait: 10_000, timeout: 30_000 },
       );
     },
     async getSceneCardGenerationPreset(projectId, sceneCardId, userId) {

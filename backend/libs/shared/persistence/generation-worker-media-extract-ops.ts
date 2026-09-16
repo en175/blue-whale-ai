@@ -1,13 +1,10 @@
 // IKARDY：媒体提取（视频→音频）短步骤写操作——进度回写、结果发布（建 audio 资产）、失败。
 // 免费工具：无 cost_reservations / generation_output_slots 逻辑（对齐视频但精简）。
+// IKFS5W：不写画布（原 updateMediaExtractNodeToAudio / failMediaExtractNode 已删）。
 import type { PrismaClient } from "@prisma/client";
 
 import { appendProjectEvent } from "./product-event-repo.js";
 import { imageJobLeaseSeconds } from "./generation-worker-internals.js";
-import {
-  failMediaExtractNode as failMediaExtractNodeImpl,
-  updateMediaExtractNodeToAudio as updateMediaExtractNodeToAudioImpl,
-} from "./media-extract-canvas-ops.js";
 import type { WorkerRepo } from "./generation-worker-types.js";
 
 export function createWorkerMediaExtractOps(
@@ -17,8 +14,6 @@ export function createWorkerMediaExtractOps(
   | "updateMediaExtractProgress"
   | "publishMediaExtractResult"
   | "failMediaExtractJob"
-  | "updateMediaExtractNodeToAudio"
-  | "failMediaExtractNode"
 > {
   // 进度心跳续租用：与 claim 同一租约时长。
   const LEASE_SECONDS = imageJobLeaseSeconds();
@@ -190,14 +185,6 @@ export function createWorkerMediaExtractOps(
         }
         return true;
       });
-    },
-
-    async updateMediaExtractNodeToAudio(input) {
-      return updateMediaExtractNodeToAudioImpl(prisma, input);
-    },
-
-    async failMediaExtractNode(input) {
-      return failMediaExtractNodeImpl(prisma, input);
     },
   };
 }

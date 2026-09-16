@@ -17,6 +17,8 @@ import styles from './index.module.css';
 export interface ImageMentionChipProps {
   url: string;
   label: string;
+  /** 悬停提示，不给就是 label。胶囊上写「图1」时放素材全名。 */
+  title?: string | undefined;
   /** 输入框里的胶囊要移除按钮；历史消息里不要。 */
   onRemove?: (() => void) | undefined;
 }
@@ -25,7 +27,7 @@ export interface ImageMentionChipProps {
  * 图片提及胶囊：小图缩略图 + 文件名；悬浮出大图。
  * 输入框与对话历史共用，避免两套长得不一样。
  */
-export function ImageMentionChip({ url, label, onRemove }: ImageMentionChipProps) {
+export function ImageMentionChip({ url, label, title, onRemove }: ImageMentionChipProps) {
   const [open, setOpen] = useState(false);
   const { refs, floatingStyles, context } = useFloating({
     open,
@@ -44,11 +46,11 @@ export function ImageMentionChip({ url, label, onRemove }: ImageMentionChipProps
         ref={refs.setReference}
         className={styles.chip}
         contentEditable={false}
-        aria-label={`查看原图：${label}`}
+        aria-label={`查看原图：${title ?? label}`}
         {...getReferenceProps()}
       >
         <img className={styles.thumb} src={url} alt="" />
-        <span className={styles.label} title={label}>{label}</span>
+        <span className={styles.label} title={title ?? label}>{label}</span>
         {onRemove && (
           <button
             type="button"
@@ -71,7 +73,7 @@ export function ImageMentionChip({ url, label, onRemove }: ImageMentionChipProps
             role="tooltip"
             {...getFloatingProps()}
           >
-            <img src={url} alt={label} />
+            <img src={url} alt={title ?? label} />
           </span>
         </FloatingPortal>
       )}

@@ -66,6 +66,66 @@ export type ModelUpdatePayload = {
   sort_order?: number;
 };
 
+/** 上游模型名长度与 model_id 列宽对齐；prompt 上限取一个足够宽的工程硬顶。 */
+const I2I_MODEL_NAME_MAX = 128;
+const MAX_PROMPT_LENGTH_LIMIT = 65_535;
+
+/** ADR-0086：参考素材限制键的上限（防运营误配海量值污染前端/校验）。 */
+const MAX_REFERENCE_COUNT = 1_000;
+
+/** features 已知扩展键的写入闸门（IKESD6）：i2i_model_name / max_prompt_length；
+ *  ADR-0086 追加参考素材限制键 video_reference / video_reference_max / audio_reference /
+ *  audio_reference_max / image_reference_max / max_reference_duration_sec / task_types。
+ *  读侧（toFeatures）对脏值宽容降级默认，写侧必须拒绝——否则管理端下次整包提交
+ *  会把错误类型固化回库。兼容 snake_case / camelCase 两种键形。 */
+function featuresFieldErr(features: unknown): string | null {
+  if (!isPlainObject(features)) return null;
+  const alias = features.i2i_model_name ?? features.i2iModelName;
+  if (alias !== undefined && alias !== null) {
+    if (typeof alias !== "string" || alias.trim().length === 0)
+      return "图生图模型名(i2i_model_name)须为非空字符串或 null";
+    if (alias.length > I2I_MODEL_NAME_MAX)
+      return `图生图模型名(i2i_model_name)超长（≤${I2I_MODEL_NAME_MAX}字符）`;
+  }
+  const len = features.max_prompt_length ?? features.maxPromptLength;
+  if (len !== undefined && len !== null) {
+    if (
+      typeof len !== "number" ||
+      !Number.isInteger(len) ||
+      len < 1 ||
+      len > MAX_PROMPT_LENGTH_LIMIT
+    )
+      return `提示词上限(max_prompt_length)须为 1–${MAX_PROMPT_LENGTH_LIMIT} 的整数或 null`;
+  }
+  // ADR-0086 布尔能力位
+  for (const key of ["video_reference", "audio_reference"] as const) {
+    const v = features[key] ?? features[key === "video_reference" ? "videoReference" : "audioReference"];
+    if (v !== undefined && v !== null && typeof v !== "boolean")
+      return `${key}须为布尔值`;
+  }
+  // ADR-0086 数量上限（非负整数，可显式 0 禁用）
+  for (const key of ["video_reference_max", "audio_reference_max", "image_reference_max"] as const) {
+    const v = features[key] ?? features[key === "video_reference_max" ? "videoReferenceMax" : key === "audio_reference_max" ? "audioReferenceMax" : "imageReferenceMax"];
+    if (v !== undefined && v !== null) {
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > MAX_REFERENCE_COUNT)
+        return `${key}须为 0–${MAX_REFERENCE_COUNT} 的非负整数或 null`;
+    }
+  }
+  // ADR-0086 参考素材总时长上限（正数秒或 null）
+  const dur = features.max_reference_duration_sec ?? features.maxReferenceDurationSec;
+  if (dur !== undefined && dur !== null) {
+    if (typeof dur !== "number" || !Number.isFinite(dur) || dur <= 0 || dur > 86_400)
+      return `参考素材总时长上限(max_reference_duration_sec)须为正数秒（≤86400）或 null`;
+  }
+  // ADR-0086 task_types 对象
+  const taskTypes = features.task_types ?? features.taskTypes;
+  if (taskTypes !== undefined && taskTypes !== null) {
+    if (!isPlainObject(taskTypes))
+      return "任务类型约束(task_types)须为 JSON 对象";
+  }
+  return null;
+}
+
 type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -81,6 +141,34 @@ function isNumberArray(v: unknown): v is number[] {
     Array.isArray(v) &&
     v.every((x) => typeof x === "number" && Number.isFinite(x))
   );
+}
+
+/** IKG4UR：`supported_durations` 的合法形态——数字数组、时长范围对象 `{min,max,step?}` 或 null。
+ *  库中两种形态长期并存：数组在读侧按 `[min,max,step]` 解析（见 toDurationRange），对象是区间的显式写法。
+ *  写侧此前只收数组，后台把对象行读成空后写回 null，直接把该行清空。
+ *  放行对象才能做到「读什么写什么」——一次保存不改变该行原本的语义。 */
+function isDurationRange(v: unknown): boolean {
+  if (v === null) return true;
+  if (Array.isArray(v)) {
+    // 数组是历史形态，读侧仍在生效（toDurationRange 按 [min,max,step] 解析）。
+    // 但只有「能构成合法区间」的才放行——`[]` / `[5]` / `[30,4]` / 负值 / step<=0
+    // 都会造出「滑杆消失 + 该模型任何时长都被 400」的坏行，且后台因 min>max 也修不回。
+    // 形态唯一性由写入闸门兜底，不能只靠前端。
+    return (
+      v.length >= 2 &&
+      v.length <= 3 &&
+      v.every((x) => typeof x === "number" && Number.isFinite(x) && x >= 0) &&
+      (v[0] as number) <= (v[1] as number) &&
+      (v[2] === undefined || (v[2] as number) > 0)
+    );
+  }
+  if (!isPlainObject(v)) return false;
+  const { min, max, step } = v as Record<string, unknown>;
+  if (typeof min !== "number" || !Number.isFinite(min) || min < 0) return false;
+  if (typeof max !== "number" || !Number.isFinite(max) || max < 0) return false;
+  if (min > max) return false;
+  if (step === undefined || step === null) return true;
+  return typeof step === "number" && Number.isFinite(step) && step > 0;
 }
 
 function isSizeArray(v: unknown): boolean {
@@ -116,8 +204,8 @@ function jsonField(
     return `${label}须为字符串数组`;
   if (allowed === "numberArray" && !isNumberArray(v))
     return `${label}须为数字数组`;
-  if (allowed === "nullNumberArray" && v !== null && !isNumberArray(v))
-    return `${label}须为数字数组或 null`;
+  if (allowed === "nullNumberArray" && !isDurationRange(v))
+    return `${label}须为数字数组、{min,max,step} 对象或 null`;
   if (allowed === "features" && !isPlainObject(v))
     return `${label}须为 JSON 对象`;
   return null;
@@ -235,6 +323,8 @@ export function parseModelCreateBody(
     ) ??
     jsonField(body.features, "特性(features)", "features");
   if (jsonErr) return { ok: false, error: jsonErr };
+  const featuresErr = featuresFieldErr(body.features);
+  if (featuresErr) return { ok: false, error: featuresErr };
 
   if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
     return { ok: false, error: "启用(enabled)须为布尔值" };
@@ -402,6 +492,8 @@ export function parseModelUpdateBody(
     ) ??
     jsonField(body.features, "特性(features)", "features");
   if (jsonErr) return { ok: false, error: jsonErr };
+  const featuresErr = featuresFieldErr(body.features);
+  if (featuresErr) return { ok: false, error: featuresErr };
 
   const parsedMapping = parseParserAndMapping(body, "update");
   if (!parsedMapping.ok) return parsedMapping;

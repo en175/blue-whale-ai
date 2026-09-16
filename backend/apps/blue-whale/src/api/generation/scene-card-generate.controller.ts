@@ -8,12 +8,15 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Response } from "express";
-import { fail, ok, RESOURCE_NOT_FOUND_CODE } from "@blue-whale/contracts";
+import { fail, ok, RESOURCE_NOT_FOUND_CODE } from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { wireInteger } from "@lib/shared/wire-integer.js";
 import { AccountService } from "@lib/shared/account/account.service.js";
 import { SceneCardGenerationService } from "@lib/shared/generation/scene-card-generation.service.js";
 import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
+import { createRequestMaterialGate } from "@lib/shared/generation/material-gate-wiring.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
+import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { StoryboardPreviewService } from "@lib/shared/generation/storyboard-preview.service.js";
 import { handleSceneCardGenerate } from "@lib/shared/generation/handle-scene-card-generate.js";
 import { handleStoryboardPreviewCreate } from "@lib/shared/generation/handle-storyboard-preview-create.js";
@@ -36,6 +39,9 @@ export class SceneCardGenerateController {
     private readonly storyboard: StoryboardPreviewService,
     private readonly cost: GenerationCostEstimatorService,
     private readonly account: AccountService,
+    // IKF YHJ：素材校验门（场景卡再生成是第三条视频创建路径）。
+    private readonly material: MaterialService,
+    private readonly assets: AssetService,
   ) {}
 
   @Post("generate")
@@ -63,6 +69,35 @@ export class SceneCardGenerateController {
         ...(this.cost.estimator
           ? { costEstimator: this.cost.estimator }
           : {}),
+        // IKF YHJ（ADR-0087）：场景卡再生成是第三条视频创建路径，与创建期/重试期共用同一个门
+        // （同一工厂、同一判定、同一失败处置）。原先漏接，导致预设保存后才变成 Failed 的素材
+        // 仍能从这里进生成。
+        materialGate: createRequestMaterialGate({
+          repo: this.material.materialStatusRepo,
+          callAction: (action, body) =>
+            this.material.callAction(authorization, action, body),
+          resolveLocalAssetMaterialIds: (uid, assetIds) =>
+            this.assets.findBoundMaterialIds(uid, assetIds),
+          onMaterialFailure: (input) =>
+            this.material
+              .handleUpstreamMaterialFailure({
+                userId: user.userId,
+                materialId: input.materialId,
+                authorization,
+                errorCode: input.errorCode,
+                errorMessage: input.errorMessage,
+                ...(input.deleteUpstream === false ? { deleteUpstream: false } : {}),
+              })
+              .catch((error: unknown) => {
+                // 处置是清理副作用，绝不外抛——抛了会被门的 try 咽成「本轮未知」，
+                // 把本该终局拒绝的结果降级成「请稍后重试」。
+                logger.warn(
+                  `[scene-card-generate] 素材失败处置异常 materialId=${input.materialId}: ${
+                    error instanceof Error ? error.message : "unknown"
+                  }`,
+                );
+              }),
+        }),
       },
     );
     if (result.code === 200 && result.data?.generation_job_id != null) {
@@ -116,7 +151,7 @@ export class SceneCardGenerateController {
 
   /** POST /api/projects/:projectId/scene-cards/:sceneCardId/storyboard-preview
    *  User 从 SceneCard 显式触发分镜预览（CONTEXT L43-47，可选旁路）：建 type=image 的 GenerationJob，
-   *  其 N 个 output_slot 即有序画格。与 Dock 图片链路一致：Bearer <sk-token> 做额度预检与凭证密封。 */
+   *  其 N 个 output_slot 即有序画格。与 Dock 图片链路一致：Bearer <sk-token> 做额度预检，凭证明文透传（修正四：去密）。 */
   @Post("storyboard-preview")
   async storyboardPreview(
     @CurrentUser() user: AuthenticatedUser,
@@ -157,7 +192,7 @@ export class SceneCardGenerateController {
     );
 
     // 成功后即时调度首图 job（IKBGKA：走 RocketMQ 图片 consumer，消费端 Semaphore 控并发；
-    // 孤儿由 image-recovery 恢复扫描兜底）。
+    // 孤儿由 worker-java RecoveryService 重投 MQ 兜底）。
     if (result.code === 200 && result.data?.generation_job_id != null) {
       void enqueueImageGenerationJob(
         String(result.data.generation_job_id),

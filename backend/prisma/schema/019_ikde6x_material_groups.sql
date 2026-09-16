@@ -1,3 +1,6 @@
+-- 019_ikde6x_material_groups：schema 基线片段。
+SET NAMES utf8mb4;
+
 -- IKDE6X：素材库组落地。虚拟人像库组 + 真人像库组，本地为组主、上游备份、双向维护。
 -- kind：virtual=虚拟人像库组（每用户至多 1 个默认组），real=真人像库组（每用户可多个）。
 -- cover_url：封面图（真人组用，虚拟组可空）。material_group_id：上游组 id（group-...）。

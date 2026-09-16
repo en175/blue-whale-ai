@@ -4,7 +4,7 @@
 TypeScript `agent-worker`、`generation-worker` 组成；三者属于同一模块化单体代码库。
 独立 `product-api` 进程已退役，浏览器业务 API 折进 Next.js Route Handlers（ADR-0059）。
 `blue_whale_api`（new-api 二开，Go，承担 LLM 网关与计费）已迁出至独立仓库 `blue-whale-api`（`hangzhou-xuanfu_1/blue-whale-api`），保持独立且不在本仓改造。
-`blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写 入（不约束按 ADR-0084 新建的 `worker-java` 生成执行服务——薄执行器，非旧服务复活）；
+`blue_whale_server`（Java）与 `blue_whale_agent_worker`（Python）已退役，禁止写 入（不约束按 ADR-0084 新建的 `worker-java` 生成执行服务——直连 DB 执行器，非旧服务复活）；
 `blue_whale_pay_web` 与 `blue_whale_pay_server`（Java 支付）已迁出至独立仓库 `blue-whale-pay`（`hangzhou-xuanfu_1/blue-whale-pay`），其中 server 冻结、web 单独迭代。范围以
 [ADR-0055](docs/adr/0055-prelaunch-typescript-unification-scope.md) 为准。
 
@@ -28,6 +28,16 @@ _Avoid_: 再次编辑立即复制草稿、自动重新生成、提示词历史�
 用户为当前生成目标从画布连续添加参考节点的交互状态，适用于图片、视频与音频生成面板；每次有效选取立即成为该目标的参考。
 模式只在本次交互期间持续，退出、刷新或切换画布后不恢复模式，已添加参考仍保留。
 _Avoid_: 普通画布多选、暂选后批量确认、刷新后恢复选取模式、Agent 对话引用
+
+**参考缩略图**:
+生成面板参考栏中已选素材的统一展示单元，图片/视频/音频/文本四类形态（后两类为图标占位），三态交互：默认显示编号圆钮（仅数字）、悬停浮出 × 删除与 @ 插入、悬停满 200ms 浮出放大预览。
+编号是派生值（身份在保序引用列表中的下标 + 1，按类型独立），删除或换位后紧凑重派生，与正文提及编号同源；× 仅断开当前引用、保留画布来源卡片。
+_Avoid_: 常驻删除按钮、底部「图片N」文字标签、独立于正文提及的编号体系、删除来源素材
+
+**悬浮放大预览**:
+悬停参考缩略图满 200ms 在其上方居中浮出的纯展示浮层：图片按原始宽高比放大、视频静音循环播放、音频显示名称与时长、文本显示正文；鼠标穿透、移出立即消失。
+它是缩略图三态的第三态，不承载任何交互，不遮挡 × 与 @ 按钮。
+_Avoid_: 可交互编辑的预览、模态遮罩、阻断参考栏操作的浮层
 
 ### Prompt 创作（IKDL9U 已确认目标，待实现）
 
@@ -217,6 +227,12 @@ _Avoid_: 把工具包写成独立的 Provider Registry 运行时组件；把入�
 模型能力目录中一条能力的生成种类，仅四种：图片（image）、视频（video）、文生文（text）、
 音频（audio）。四种在管理目录中并列；一条能力的能力类型在创建后不可改。
 _Avoid_: 把音频生成当成视频特性；用 features.audio 表示音频模型（那是「视频带音轨」）；档位
+
+**运行模态（Generation Modality）**:
+图片能力档的两种工作方式：文生图（仅提示词）与图生图（提示词 + 参考图）。模态不是能力——
+同一档能力同时覆盖两种模态，任务创建时是否带参考图决定本次走哪种；一档能力若不支持参考图，
+就只有文生图一种模态。上游按模态拆分的模型名对用户不可见（详见 [ADR-0085](docs/adr/0085-catalog-input-modality-model-alias-and-per-model-prompt-length.md)）。
+_Avoid_: 把文生图 / 图生图各开一档能力；把模态当第五种能力类型；用开关决定模态（分流只由数据与输入驱动）
 
 **尺寸选项（Size Option）**:
 User 在图片或视频生成中选择的分辨率档，如 `1K` / `2K` 或 `720p`。它是目录提供的展示选择，
@@ -546,6 +562,18 @@ Agent 每次开始推进时，基于本轮 UserMessage 的有序引用事实、�
 _Avoid_: AgentRun 的可变上下文包；恢复时重新读取最新版；权限撤销后继续消费快照；浏览器生成的权限证明；
 把权限证据当永久授权
 
+**正文素材标签（prompt material chip）**:
+出现在两处的素材引用胶囊：生成面板输入框（PromptRefEditor）与画布文本卡正文（media 标签与
+prompt 绑定标签）。两处共用同一份视觉定义（mediaChip.module.css：8px 胶囊圆角、18px/4px 缩略图、
+12px 字号、悬停变亮、失效实线红框），改样式须两边同步，不允许再出现第二份视觉定义。能力口径同样
+两处对齐（IKGABW）：图片显缩略图、视频经 `<video preload="metadata">` 抓首帧、音频显 ♫ 图标占位、
+文本附件无缩略图；悬停有效标签约 150ms 出预览浮层（图片大图/视频静音自动播放/音频类型标识与名称，
+浮层样式 chipPreview 系列也共享一份），失效与文本附件不预览。交互语义各归各处：生成面板标签不可
+选中、失效可点击换绑（替换菜单视频行也显首帧）；文本卡标签可整块选中（服务整体删除/替换）、失效走
+重绑定菜单。
+_Avoid_: 只改一处样式；用内联样式字符串拼胶囊视觉；给预览浮层开交互（pointer-events 必须穿透，
+否则误触发生成面板点外关闭）
+
 ### 素材库（Material Library）
 
 > 素材库是上游网关（blue-whale-api，new-api 二开）对外提供的**共享、单租户**素材资源能力，
@@ -554,8 +582,10 @@ _Avoid_: AgentRun 的可变上下文包；恢复时重新读取最新版；权�
 
 **素材库（material library）**:
 网关对外暴露的素材资源能力集；凭证（AK/SK）配置在网关侧，下游客户端不持有。本仓产品经
-`POST /api/material/{Action}` 透传调用，归属与状态以网关/上游为权威，本地零落表。
-_Avoid_: 渠道（它不提供模型请求）、本仓落库镜像、把素材库素材当成 Product Fact
+`POST /api/material/{Action}` 透传调用，归属与状态以网关/上游为权威；本仓只持久化两处——
+素材库**组**（`material_groups`，本地为组主）与素材**校验状态**的镜像（`material_assets`，见下条），
+素材本身仍零落表。
+_Avoid_: 渠道（它不提供模型请求）、把素材库素材当成 Product Fact、本仓存素材本体
 
 **素材组（material group）**:
 按「真人主体/虚拟人像」划分的资源集合，上游称 seedance asset group；一个真人素材组只对应
@@ -578,14 +608,30 @@ _Avoid_: 虚拟组、真人素材组
 _Avoid_: 文件、附件、Asset（本仓的 Project 文件单元）
 
 **素材状态**:
-`Active`（就绪）、`Processing`（处理中）、`Failed`（失败）。状态以上游为准，本地不镜像。
-_Avoid_: 状态码、本仓持久化状态
+`Active`（就绪）、`Processing`（处理中）、`Failed`（失败）。上游为权威，本仓在
+`material_assets` 镜像一份供生成判定用；**展示层仍以上游响应为准**，镜像只在「生成采纳」处被读取。
+_Avoid_: 状态码、把镜像当成独立产品事实、用镜像驱动展示
+
+**素材校验状态（material compliance status）**:
+本仓镜像的上游**素材状态**，落在 `material_assets` 表，是**生成任务判定「该素材能否用作视频生成参考」的判据**：
+`Active` 放行，`Failed` 及其他报错，`Processing` 或无记录则实时回查上游并回写。只镜像状态与失败原文，
+不含素材正文信息（真身在上游）。它由生成任务消费，不由展示层消费。
+_Avoid_: 素材表（素材真身在上游）、把校验状态当 Asset 的属性、与「素材状态」混用
+
+**合规校验（compliance check）**:
+产品对素材「是否合规」的判定入口。实现上等于**把素材上传进素材库**（虚拟人像库）：`CreateAsset`
+成功触发上游异步注册，注册完成后的**素材状态**就是结果——`Active` 即通过，`Failed` 即未通过。
+右键「合规校验」是手动复验入口。本仓只说明「未通过」，**不解释失败原因**（不宣称版权、敏感等具体事由）。
+_Avoid_: 版权检测（不掌握失败原因）、智能校验接口（没有独立接口，它就是素材上传）、第二套校验状态
 
 **素材引用（MaterialReference）**:
-视频生成输入里对素材库素材的引用；创建生成任务时由调用方声明 `{ id, type: "image"|"video" }`
+视频生成输入里对素材库素材的引用；创建生成任务时由调用方声明 `{ id, type: "image"|"video"|"audio" }`
 （素材零落表，类型无处可查，只能随请求携带），Worker 转成 `asset://<素材ID>` 载体交给生成
-供应商。只做格式校验（`Asset-` 前缀），存在性/状态/物理约束由上游强校验。
+供应商。做格式校验（`Asset-` 前缀，大小写不敏感）与**素材校验状态校验**（见「素材校验状态」），物理约束由上游强校验。
 它是 `generation_jobs.input` 冻结的引用快照，不是独立生命周期资源。
+参考素材有**两个来源**：素材引用（直接声明的素材库素材）与本地 Asset（走本地存储 URL）。
+本地 Asset 若已**关联**素材库素材，生成时改走素材引用（`asset://`）、不再发本地 URL；两类来源的
+数量并集受同一上限约束，且素材引用不参与本地物理校验（媒体规格由上游强校验）。
 _Avoid_: PlanMessage 的 `asset://<mention_id>`（那是内部正文引用协议）、把素材引用当 AssetMention
 
 **`asset://` 双义隔离**:
@@ -595,7 +641,7 @@ _Avoid_: PlanMessage 的 `asset://<mention_id>`（那是内部正文引用协议
 _Avoid_: 把素材库素材引用写进 PlanMessage 正文、把 PlanMessage mention 协议原样发给供应商
 
 **GenerationJob（生成任务）**:
-一次持久化的图片、视频或音频后台任务。任务归属于 Project，页面刷新、浏览器关闭或服务重启后，
+一次持久化的图片、视频、音频或音频提取（media_extract）后台任务。任务归属于 Project，页面刷新、浏览器关闭或服务重启后，
 已接纳状态与结果仍可恢复；同一请求或供应商回调重放不得产生重复任务、结果或费用。
 GenerationJob 可以随业务事务原子创建，但只能在事务提交后进入执行队列；事务内禁止直接调用生成供应商。
 Worker 通过短租约领取任务；租约过期后可由新 Worker 重新领取，旧 Worker 的迟到写入由 fence 拒绝。
@@ -647,6 +693,20 @@ Product API 对单个 AgentAdvance 的唯一正式接纳边界；每次推进最
 AssistantMessage，或一组完整有序的 PlanMessage。同一 AgentRun 可随多次推进拥有多个 RunCommit，
 精确重放必须返回该推进首次接纳的相同结果。
 _Avoid_: 按 AgentRun 限制只能提交一次；跨 AgentAdvance 拼接结果；把临时交付文本当作正式提交。
+
+### 生成执行（worker-java）
+
+**ClaimedJob（已领取任务）**:
+Worker 依租约接管一个 GenerationJob 执行责任的独享视图，是**单一概念**：公共核心（任务身份、input、
+租约凭证、取消信号）+ 按媒体类型的 payload 扩展。新增生成类型 = 扩展一种 payload 并注册进生命周期，
+不是再造一个领取概念；投影差异随 MQ 契约演化，不代表概念分叉。
+_Avoid_: 按媒体类型把领取投影当独立概念各修一套；用 ClaimedJob 反转 GenerationJob 的状态权威；
+在领取视图上累积产品规则（规则权威在 GenerationJob / backend 侧）
+
+**Finalize（终态收口）**:
+GenerationJob 连同副作用（结果资产、slot 结果、执行日志、项目事件）写入终态的单一动作；收口后状态
+不可再翻转，迟到写入由 fence 拒绝。收口是一套生命周期动作的按类型变体，差异只在 payload 组装。
+_Avoid_: 按媒体类型分叉各自的 complete/fail 语义；把收口拆成多个非原子写；用 Finalize 复活终态任务
 
 ### Agent 运行配置
 
@@ -906,7 +966,7 @@ _Avoid_: 用户 JWT、root、能力券、把铸券令牌拿来下充值单
 ### 技术栈边界
 
 **产品实现**:
-直接向用户交付产品能力的代码，包括 Next.js Web、浏览器业务 Route Handlers、独立 Agent / Generation Workers，以及共享领域、契约与持久化 packages。实现语言统一为 TypeScript；浏览器代码在浏览器运行，服务端使用 Node.js LTS；generation-worker 生成执行按 ADR-0084 为独立 Java 薄执行器服务，领域规则权威仍在 TypeScript 侧。
+直接向用户交付产品能力的代码，包括 Next.js Web、浏览器业务 Route Handlers、独立 Agent / Generation Workers，以及共享领域、契约与持久化 packages。实现语言统一为 TypeScript；浏览器代码在浏览器运行，服务端使用 Node.js LTS；generation-worker 生成执行按 ADR-0084 为独立 `worker-java` 执行服务（契约 IKEL4A 修正二：TS 只发任务、Java 做任务，交互面 = 数据库 + MQ），领域规则权威仍在 TypeScript 侧。
 _Avoid_: TypeScript 运行时、把浏览器代码描述成运行在 Node.js、把仓库内所有可执行文件都算作产品实现
 
 **工程协作控制面**:

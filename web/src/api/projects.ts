@@ -3,7 +3,7 @@
  * ============================================ */
 import { infiniteQueryOptions } from '@tanstack/react-query';
 import { apiRequest, type ApiRequestInit } from './http';
-import type { LegacyMigrationReport } from '../../../packages/contracts/src/legacy-card-migration';
+import type { LegacyMigrationReport } from '@lib/contracts/legacy-card-migration';
 
 /** GET /api/projects 返回项 */
 export interface ProjectRecord {
@@ -142,6 +142,12 @@ export interface SnapshotAsset {
   access_url: string;
   width: number | null;
   height: number | null;
+  /** 已关联虚拟人像库则为素材库 id，未关联为 null */
+  material_id?: string | null;
+  material_group_id?: string | null;
+  /** 素材库校验镜像：Active 为已通过合规；Processing / Failed / null 均未通过 */
+  material_status?: 'Active' | 'Processing' | 'Failed' | null;
+  material_status_checked_at?: string | null;
 }
 
 /** GET /api/projects/:id/snapshot 返回：项目信息 + 画布 + 资产字典 + 任务摘要 */
