@@ -5,6 +5,14 @@ server:
 spring:
   application:
     name: worker-java
+  task:
+    scheduling:
+      pool:
+        # 默认池大小是 1——两个 @Scheduled（RecoveryService / MaterialStatusPoller）会抢同一个线程。
+        # 素材跟进一轮最多 100 次串行 GetAsset（单次 connect 10s / read 15s），网关一 hang 就能把
+        # 唯一的调度线程占住几十分钟，而 fixedDelay 紧接着排下一轮 → recovery 会被饿死，
+        # 表现为「不相干用户的卡死任务再也不被重投」。这里给每个任务留出独立线程。
+        size: 4
 
 worker:
   # 逗号分隔列表；留空 = 不消费任何 tag（安全拉起默认值）。

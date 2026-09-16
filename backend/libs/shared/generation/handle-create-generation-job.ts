@@ -71,7 +71,6 @@ import {
 } from "@lib/shared/persistence/index.js";
 
 import type { GenerationCostEstimator } from "./cost-estimator.js";
-import { dimensionsFromSize, videoDimensions } from "@lib/shared/generation-runtime/index.js";
 import {
   mapImageChannelRequest,
   parseStoredImageRequestMapping,
@@ -90,6 +89,8 @@ export interface GenerationParameters {
   sequential_image_generation?: unknown;
   resolution?: unknown;
   duration?: unknown;
+  /** IKG0LP：视频是否带音频（用户选择，缺省 true）。能力位 features.audio 允许时才冻结进快照。 */
+  generate_audio?: unknown;
 }
 
 export interface CreateGenerationJobBody {
@@ -620,6 +621,8 @@ interface ComposeInputContext {
   referenceAssetIds: Array<string | number>;
   /** IKFA1M：已通过结构与引用复核的正文素材标签（仅 image 携带）。 */
   promptDoc: PromptDoc | null;
+  /** IKG0LP：白名单解析后的能力行——视频用它判断 features.audio 是否允许带音频。 */
+  capability?: ModelCapabilityView;
 }
 
 interface GenerationTypeStrategy {
@@ -681,6 +684,7 @@ const videoStrategy: GenerationTypeStrategy = {
     textAttachments,
     referenceAssetIds,
     promptDoc,
+    capability,
   }) {
     const input: Record<string, unknown> = {
       prompt: promptText,
@@ -693,6 +697,12 @@ const videoStrategy: GenerationTypeStrategy = {
     }
     if (isStr(params.resolution)) input.resolution = params.resolution;
     if (params.duration !== undefined) input.duration = params.duration;
+    // IKG0LP：视频带音频——能力位允许时冻结用户选择（缺省 true，不支持则恒 false）；
+    // 能力位不允许（false/未配）时不写该字段，worker 不下发，维持上游默认。
+    // 契约：docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md
+    if (capability?.features?.audio === true) {
+      input.generate_audio = params.generate_audio !== false;
+    }
     // IKDJNZ：单数组 references 冻结进 input 快照（保序），Worker 执行时按 role 拆帧/参考并做关联转换。
     const parsed = parseReferences(body.references);
     if (parsed.kind === "ok") {
@@ -1290,6 +1300,21 @@ interface GenerationDeps {
   assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
   /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额；缺省沿用旧行为（0 + dev）。 */
   costEstimator?: GenerationCostEstimator;
+  /** IKF YHJ：素材校验状态门（ADR-0087）。提供时，视频生成采纳素材库引用前判定其可用性。
+   *  返回 null = 放行；返回字符串 = 面向用户的拒绝原因（400，零写入）。
+   *  缺省不接（未接线时行为与改造前一致），便于灰度与单测隔离。 */
+  materialGate?: MaterialGate;
+}
+
+/** IKF YHJ：素材校验状态门的最小接口（实现见 material-compliance-gate.ts + 控制器接线）。 */
+export interface MaterialGate {
+  assertInputUsable(input: {
+    userId: string;
+    /** 已冻结的任务 input——素材 id 与本地 Asset id 都在里面，由实现自行汇集。 */
+    jobInput: Record<string, unknown>;
+    /** 任务类型。本门只对 video 生效（素材库绑定只有视频参考会消费），实现方按此短路。 */
+    jobType: string;
+  }): Promise<string | null>;
 }
 
 /** POST /api/projects/{projectId}/generation-jobs：创建生成任务（queued）+ 预留点数 + 日志。
@@ -1424,23 +1449,10 @@ export async function handleCreateGenerationJob(
       }
     }
   }
-  // IKE7JP：视频 resolution/aspect_ratio 组合必须能换算成像素（与 worker videoDimensions 同源），
-  // 否则 worker 会在执行期才失败——越界在接纳当下 400（invalid_input），不拖到执行期。
-  // 图片路径无此概念（走上方交叉格校验）。
-  // ADR-0086：adaptive 自适应比例无固定宽高（首帧/编辑/延长任务强制），放行不换算像素。
-  if (type === "video" && capability) {
-    const resolution = isStr(params.resolution) ? params.resolution : "";
-    const ratio = isStr(params.aspect_ratio) ? params.aspect_ratio : "";
-    if (resolution && ratio && ratio !== "adaptive") {
-      const dimensions =
-        videoDimensions(resolution, ratio) ?? dimensionsFromSize(resolution);
-      if (!dimensions) {
-        return fail(400, "视频分辨率与宽高比组合无效", {
-          code: ERROR_INVALID_INPUT,
-        });
-      }
-    }
-  }
+  // IKG0FR：视频分辨率不再前置换算像素。分辨率合法性已由上方 checkGenerationParamLimit 的
+  // 能力行白名单负责（按 supported_sizes 的 id / api_value 比对）。像素只用于回写
+  // assets.width/height（列可空），换算不出写 null 即可——不能把「本地算不出」当成「参数非法」，
+  // 否则上游档位命名不遵循 <N>p 时会被误伤（如火山 Seedance 2.0 的 4k 档）。
   const refs = resolveReferenceAssets(body, type, maxReferenceImages);
   if (!refs.ok) {
     return fail(400, refs.value.message, {
@@ -1664,6 +1676,8 @@ export async function handleCreateGenerationJob(
     textAttachments: target.value.textAttachments,
     referenceAssetIds,
     promptDoc,
+    // IKG0LP：exactOptionalPropertyTypes 下不能显式传 undefined，按本仓惯例条件展开
+    ...(capability ? { capability } : {}),
   });
   // 图片与视频一致：sk token 明文写进 job.input.provider_credential（修正四：凭证去密），处理时由 worker 直接取用。
   // 这样进程内即时调度与重启后的恢复扫描共用同一套凭据来源。
@@ -1697,6 +1711,20 @@ export async function handleCreateGenerationJob(
       : type === "audio"
         ? "generate_audio"
         : "generate_image";
+
+  // IKF YHJ：素材校验状态门（ADR-0087）——视频生成采纳素材库引用前判定可用性。
+  // 放在这里而不是策略校验里：此处 input 已冻结，新旧两套引用字段（references / 旧首尾帧字段）
+  // 与本地 Asset 引用都在同一个对象上，一处覆盖全部路径；且尚未写入任何行，拒绝即零写入。
+  if (deps.materialGate) {
+    const reason = await deps.materialGate.assertInputUsable({
+      userId,
+      jobInput: input as unknown as Record<string, unknown>,
+      jobType: type,
+    });
+    if (reason !== null) {
+      return fail(400, reason, { code: ERROR_INVALID_REFERENCE });
+    }
+  }
 
   // 8. 建任务（含预留点数）
   const cmdInput: CreateJobInput = {

@@ -73,6 +73,39 @@ model material_groups {
   @@index([user_id, is_delete], map: "idx_material_group_user_alive")
 }
 
+/// 素材校验状态（IKFYHJ）：镜像上游素材状态，作为生成任务「该素材能否用作视频生成参考」的判据。
+/// status = Processing | Active | Failed；素材真身在上游，本表只存状态与失败原文（error_* 仅供内部归因，不展示）。
+/// status_checked_at = 最后一次向上游确认状态的时间。
+/// 无 is_delete/deleted_at：本表行是素材的附属状态，没有独立价值，删除时硬删（ADR-0087 决策 5）。
+model material_assets {
+  id                BigInt    @id @default(autoincrement())
+  material_id       String    @unique(map: "uk_material_assets_material") @db.VarChar(128) // 上游素材 id（asset-...）
+  user_id           BigInt // 归属用户（new-api 用户 id）
+  material_group_id String    @db.VarChar(128) // 上游组 id（group-...）
+  status            String    @db.VarChar(16) // Processing | Active | Failed
+  error_code        String?   @db.VarChar(128) // 上游 Error.Code 原文
+  error_message     String?   @db.VarChar(512) // 上游 Error.Message 原文
+  status_checked_at DateTime? @db.DateTime(0)
+  gmt_create        DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified      DateTime  @default(now()) @db.DateTime(0)
+  version           Int       @default(0)
+
+  @@index([status, gmt_create], map: "idx_material_assets_poll")
+  @@index([material_group_id], map: "idx_material_assets_group")
+}
+
+/// 网关侧执行凭证（IKFYHJ）：定时兜底需以「素材归属用户」身份代打网关（网关无服务级查询入口）。
+/// provider_credential 明文存储，对齐 generation/credential.ts「修正四：去密封」。
+/// 登录成功时写入；管理员轮换后旧值失效，下次登录自愈。
+model user_info {
+  id                  BigInt   @id @default(autoincrement())
+  user_id             BigInt   @unique(map: "uk_user_info_user") // new-api 用户 id（AuthenticatedUser.userId）
+  provider_credential String   @db.VarChar(128) // 上游执行凭证（sk-），明文
+  gmt_create          DateTime @default(now()) @db.DateTime(0)
+  gmt_modified        DateTime @default(now()) @db.DateTime(0)
+  version             Int      @default(0)
+}
+
 /// 画布共享资产（IK9QKP）：用户主动保存、跨项目可复用的自包含快照库。
 /// 两层类型对齐画布节点结构：asset_type = 节点大类（card/media/goods/scene/text），
 /// kind = 节点判别字段（card 的 data.kind / media 的 data.mediaType；goods/scene/text 为 NULL）。

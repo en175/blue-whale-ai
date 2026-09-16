@@ -1599,6 +1599,78 @@ describe("handleCreateGenerationJob 视频参数能力目录前置（IKE7JP）",
     expect(createJob).toHaveBeenCalled();
   });
 
+  // IKG0FR：上游档位命名不遵循 <N>p 时（火山 Seedance 2.0 的 4k），本地换算不出像素，
+  // 但值本身在能力行白名单里——合法性由白名单负责，像素只回写资产（列可空），不得拒单。
+  it("分辨率命中能力行但本地算不出像素（4k）→ 200 建任务，不误拦", async () => {
+    const { deps, createJob } = buildCapabilityDeps([
+      {
+        ...VIDEO_CAPABILITY_ROW,
+        supported_sizes: [
+          { id: "1k", api_value: "720p" },
+          { id: "2k", api_value: "1080p" },
+          { id: "4k", api_value: "4k" },
+        ],
+      },
+    ]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_PARAMS_OK,
+        parameters: { ...VIDEO_PARAMS_OK.parameters, resolution: "4k" },
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+    // IKG0FR 的保证是「值原样到达 worker」，不只是「没被拒」——冻结进快照的必须是 4k 本身
+    const frozen = (createJob.mock.calls[0][0] as { input: Record<string, unknown> }).input;
+    expect(frozen.resolution).toBe("4k");
+  });
+
+  // IKG0LP：视频带音频——能力位 features.audio 允许时冻结用户选择（缺省 true）；
+  // 不允许（false/未配）时快照不写该字段，worker 不下发，维持上游默认。
+  it("能力位 features.audio=true → 冻结用户选择，缺省 true", async () => {
+    const row = { ...VIDEO_CAPABILITY_ROW, features: { audio: true } };
+
+    const depsA = buildCapabilityDeps([row]);
+    expect(
+      (await handleCreateGenerationJob("u1", "p1", VIDEO_PARAMS_OK, null, depsA.deps)).code,
+    ).toBe(200);
+    const inputA = (depsA.createJob.mock.calls[0][0] as { input: Record<string, unknown> })
+      .input;
+    expect(inputA.generate_audio).toBe(true);
+
+    const depsB = buildCapabilityDeps([row]);
+    expect(
+      (
+        await handleCreateGenerationJob(
+          "u1",
+          "p1",
+          {
+            ...VIDEO_PARAMS_OK,
+            parameters: { ...VIDEO_PARAMS_OK.parameters, generate_audio: false },
+          },
+          null,
+          depsB.deps,
+        )
+      ).code,
+    ).toBe(200);
+    const inputB = (depsB.createJob.mock.calls[0][0] as { input: Record<string, unknown> })
+      .input;
+    expect(inputB.generate_audio).toBe(false);
+  });
+
+  it("能力位未配 features.audio → 快照不写 generate_audio（出站维持上游默认）", async () => {
+    const { deps, createJob } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
+    expect(
+      (await handleCreateGenerationJob("u1", "p1", VIDEO_PARAMS_OK, null, deps)).code,
+    ).toBe(200);
+    const input = (createJob.mock.calls[0][0] as { input: Record<string, unknown> }).input;
+    expect(Object.hasOwn(input, "generate_audio")).toBe(false);
+  });
+
   it("能力行未配置 supported_* 时不阻断（worker 兜底）", async () => {
     const { deps, createJob } = buildCapabilityDeps([
       { model_id: "doubao-seedance-2-0-260128" },

@@ -142,6 +142,8 @@ describe('BottomDialog 文本附件提交契约（IKDLQG）', () => {
       duration: 5,
       // IKFC1T：无媒体输入的附件驱动提交即文生视频模式（新建默认 prompt）
       mode: 'prompt',
+      // IKG0LP：是否带音频（缺省 true）
+      generateAudio: true,
     }, null);
   });
 

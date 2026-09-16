@@ -699,6 +699,77 @@ describe('IKFQ5S 首尾帧 adaptive 按模型门控', () => {
   });
 });
 
+describe('IKG0LP 视频是否带音频开关', () => {
+  /** 视频模型能力项：`audio` 为能力位 features.audio（是否允许生成带音频）。 */
+  const videoModelWith = (audio: boolean) => ({
+    model_id: 'seedance-2',
+    provider_id: 'prov',
+    model_label: '测试视频模型',
+    icon: null,
+    supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }],
+    supported_aspect_ratios: ['16:9'],
+    supported_formats: [],
+    supported_durations: { min: 4, max: 12, step: 1 },
+    default_size: '720p',
+    default_format: null,
+    default_aspect_ratio: '16:9',
+    default_duration: 5,
+    features: {
+      reference_image: true,
+      max_reference_images: 10,
+      watermark: false,
+      quantity_max: 1,
+      sequential_image_generation: false,
+      stream: false,
+      tools: false,
+      first_frame: true,
+      last_frame: true,
+      first_last_frame: true,
+      audio,
+    },
+    is_default: true,
+    version: 1,
+    digest: '',
+  });
+
+  /** 状态栏配置按钮（文案 = 模型名|比例|分辨率|时长）→ 打开参数浮层 */
+  async function openConfigPanel() {
+    const btn = [...container.querySelectorAll('button')].find((b) =>
+      (b.textContent ?? '').includes('测试视频模型|'),
+    )!;
+    await act(async () => { btn.click(); });
+  }
+
+  const audioSwitch = () =>
+    container.querySelector<HTMLButtonElement>('[aria-label="生成的视频带音频"]');
+
+  async function openDraftWith(audio: boolean) {
+    apiMocks.fetchGenerationModels.mockImplementation(async () => [videoModelWith(audio)]);
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await openConfigPanel();
+  }
+
+  it('能力位 features.audio=true → 渲染开关，默认开（与上游默认及改动前行为一致）', async () => {
+    await openDraftWith(true);
+    expect(audioSwitch()).toBeTruthy();
+    expect(audioSwitch()!.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('能力位 features.audio=false → 不渲染开关（用户无权选择）', async () => {
+    await openDraftWith(false);
+    expect(audioSwitch()).toBeNull();
+  });
+
+  it('点击开关 → 状态翻转并写回草稿 draftGenerateAudio=false（重开面板可恢复）', async () => {
+    await openDraftWith(true);
+    await act(async () => { audioSwitch()!.click(); });
+    expect(audioSwitch()!.getAttribute('aria-checked')).toBe('false');
+    expect(draftDataOf('d1').draftGenerateAudio).toBe(false);
+  });
+});
+
 describe('IKDMQS 生成中连线只读', () => {
   it('生成中的视频草稿：新建连线被拦截并提示', async () => {
     await renderPage();

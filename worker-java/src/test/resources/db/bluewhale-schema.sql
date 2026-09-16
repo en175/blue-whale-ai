@@ -4,6 +4,10 @@
 --   prisma/schema.prisma > /tmp/schema-diff.prisma && \
 --   DATABASE_URL=... npx prisma@6.5.0 migrate diff --from-empty --to-schema-datamodel /tmp/schema-diff.prisma --script
 -- 生成日期：2026-09-12
+-- 2026-09-15（IKFYHJ）手工追加 material_assets / user_info 两表——追加内容逐字取自
+--   backend/prisma/migrations/20260915170000_ikfyhj_material_compliance/migration.sql
+--   （该 DDL 已由 backend 侧 ikfyhj-parity.test.ts 与 schema.prisma 对账）。
+--   按上面命令全量再生成时，这两表会按 prisma 的模型顺序重新出现在文件中间，不冲突。
 -- CreateTable
 CREATE TABLE `assets` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
@@ -819,5 +823,38 @@ CREATE TABLE `legacy_card_history` (
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
     UNIQUE INDEX `uk_legacy_card_history`(`project_id`, `node_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `material_assets` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `material_id` VARCHAR(128) NOT NULL,
+    `user_id` BIGINT NOT NULL,
+    `material_group_id` VARCHAR(128) NOT NULL,
+    `status` VARCHAR(16) NOT NULL,
+    `error_code` VARCHAR(128) NULL,
+    `error_message` VARCHAR(512) NULL,
+    `status_checked_at` DATETIME(0) NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `version` INTEGER NOT NULL DEFAULT 0,
+
+    INDEX `idx_material_assets_poll`(`status`, `gmt_create`),
+    INDEX `idx_material_assets_group`(`material_group_id`),
+    UNIQUE INDEX `uk_material_assets_material`(`material_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `user_info` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `user_id` BIGINT NOT NULL,
+    `provider_credential` VARCHAR(128) NOT NULL,
+    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `version` INTEGER NOT NULL DEFAULT 0,
+
+    UNIQUE INDEX `uk_user_info_user`(`user_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
