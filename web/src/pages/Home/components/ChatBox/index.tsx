@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X, Upload, FolderOpen, User } from 'lucide-react';
 import SkillModal from '../SkillModal';
 import LoginModal from '@/components/LoginModal';
+import RatioIcon from '@/components/RatioIcon';
 import AssetsPickerModal from '@/pages/CanvasPage/components/AssetsPickerModal';
 import CharacterLibraryModal from '@/pages/CanvasPage/components/CharacterLibraryModal';
 import { type AssetRecord } from '@/api/assets';
@@ -60,35 +61,6 @@ async function navigateToNewProject(navigate: ReturnType<typeof useNavigate>, st
   } catch {
     navigate('/canvas', { state });
   }
-}
-
-/** 宽高比图标 - 根据比例渲染对应形状的 SVG 矩形 */
-const ratioDims: Record<string, [number, number]> = {
-  '21:9': [24, 10],
-  '16:9': [22, 12],
-  '4:3': [20, 15],
-  '3:2': [21, 14],
-  '1:1': [16, 16],
-  '2:3': [14, 21],
-  '3:4': [15, 20],
-  '9:16': [12, 22],
-};
-
-function RatioIcon({ ratio, size = 22 }: { ratio: string; size?: number }) {
-  const [w, h] = ratioDims[ratio] ?? [16, 16];
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${w} ${h}`}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      style={{ flexShrink: 0 }}
-    >
-      <rect x={0.75} y={0.75} width={w - 1.5} height={h - 1.5} rx={2} />
-    </svg>
-  );
 }
 
 export default function ChatBox({ draft }: { draft?: { text: string; ts: number; mediaType: 'video' | 'image' } | null }) {
@@ -1233,7 +1205,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                       className={styles.paramBtn}
                       onClick={() => setShowRatioDrop(!showRatioDrop)}
                     >
-                      <RatioIcon ratio={aspectRatio} />
+                      <RatioIcon ratio={aspectRatio} size={22} />
                       <span>{aspectRatio}</span>
                       <ChevronDown size={12} strokeWidth={2} />
                     </button>
@@ -1245,7 +1217,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                             className={`${styles.dropdownItem} ${aspectRatio === key ? styles.dropdownItemActive : ''}`}
                             onClick={() => { setAspectRatio(key); setShowRatioDrop(false); }}
                           >
-                            <RatioIcon ratio={key} />
+                            <RatioIcon ratio={key} size={22} />
                             <span>{key}</span>
                           </button>
                         ))}
@@ -1430,7 +1402,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                     className={styles.paramBtn}
                     onClick={() => setShowImgRatioDrop(!showImgRatioDrop)}
                   >
-                    <RatioIcon ratio={imageAspectRatio} />
+                    <RatioIcon ratio={imageAspectRatio} size={22} />
                     <span>{imageAspectRatio}</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
@@ -1442,7 +1414,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                           className={`${styles.dropdownItem} ${imageAspectRatio === key ? styles.dropdownItemActive : ''}`}
                           onClick={() => { setImageAspectRatio(key); setShowImgRatioDrop(false); }}
                         >
-                          <RatioIcon ratio={key} />
+                          <RatioIcon ratio={key} size={22} />
                           <span>{key}</span>
                         </button>
                       ))}

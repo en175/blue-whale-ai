@@ -740,12 +740,6 @@
   font-weight: 600;
 }
 
-.ratioIcon {
-  display: block;
-  border: 1.5px solid currentColor;
-  border-radius: 3px;
-}
-
 /* IKFE8U：来源菜单弹层（sourceWrap/menuOverlay/sourceMenu/sourceMenuItem）与
  * mediaBtnPicking/mediaBtnLabel 随旧来源菜单按钮退役，统一入口样式见 RefSourceMenu。 */
 

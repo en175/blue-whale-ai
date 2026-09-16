@@ -13,6 +13,7 @@ import {
   ArrowUp,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import RatioIcon from '@/components/RatioIcon';
 import {
   PROMPT_DOC_VERSION,
   docHasAnyRef,
@@ -166,15 +167,6 @@ export interface ImageGenSeedParams {
   ratio?: string;
   /** 分辨率档位 id（如 2k） */
   size?: string;
-}
-
-/** 宽高比图标：按比例绘制小矩形 */
-function RatioIcon({ ratio }: { ratio: string }) {
-  const [w, h] = ratio.split(':').map(Number);
-  const max = 16;
-  const width = w >= h ? max : Math.round((h / w) * max);
-  const height = h >= w ? max : Math.round((h / w) * max);
-  return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
 export default function ImageDialog({ onClose, onSend, initialText, initialDoc, initialFiles, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, onPickFromCanvas, onPickFromAssets, pickMode, externalPick, onExternalPickConsumed, onToast, draftBinding, mediaRefs, invalidMediaRefs, planReferenceError, onRemoveMediaRef, onLocateTextSource, textIndexError, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, mentionItems: canvasMentionItems, onMentionCanvas, currentNodes, followAnchor }: ImageDialogProps) {

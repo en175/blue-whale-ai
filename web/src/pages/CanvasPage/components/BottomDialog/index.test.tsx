@@ -24,7 +24,7 @@ const seedance: GenerationModel = {
   model_label: 'Seedance 2.0',
   icon: null,
   supported_sizes: [{ id: '720p', label: '720p', api_value: '720p', width: null, height: null }],
-  supported_aspect_ratios: ['16:9'],
+  supported_aspect_ratios: ['16:9', '9:16'],
   supported_formats: ['mp4'],
   supported_durations: { min: 4, max: 15, step: 1 },
   default_size: '720p',
@@ -164,5 +164,26 @@ describe('BottomDialog 配置面板裁剪（IKEOLP）', () => {
     expect(dialog).not.toBeNull();
     expect(dialog?.contains(panel)).toBe(false);
     expect(panel?.closest(`.${styles.dialogWrap}`)).not.toBeNull();
+  });
+});
+
+/* IKGBTV：宽高比示意图标接入共享 RatioIcon——竖屏比例必须渲染为竖向矩形（16px 上限） */
+describe('BottomDialog 宽高比图标（IKGBTV）', () => {
+  it('竖屏比例 9:16 的图标为 9×16 竖向矩形，横竖不反且不超 16px 上限', async () => {
+    await renderDialog();
+    const configBtn = [...mountNode.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('16:9'),
+    );
+    await act(async () => {
+      configBtn?.click();
+    });
+
+    const ratioBtn = [...mountNode.querySelectorAll(`.${styles.ratioGroup} button`)].find((button) =>
+      button.textContent?.includes('9:16'),
+    );
+    expect(ratioBtn).toBeTruthy();
+    const icon = ratioBtn?.querySelector('span') as HTMLElement;
+    expect(icon.style.width).toBe('9px');
+    expect(icon.style.height).toBe('16px');
   });
 });

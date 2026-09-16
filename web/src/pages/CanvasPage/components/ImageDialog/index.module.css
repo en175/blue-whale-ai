@@ -478,13 +478,6 @@
   font-weight: 700;
 }
 
-/* 宽高比小矩形图标 */
-.ratioIcon {
-  display: block;
-  border: 1.5px solid currentColor;
-  border-radius: 3px;
-}
-
 /* IKFA1M：正文编辑区（@ 菜单锚点）与参考编号角标 */
 .inputArea {
   position: relative;
