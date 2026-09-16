@@ -7480,6 +7480,7 @@ export default function CanvasPage() {
           }
           confirmText={assetsPickerTarget === 'toolbar' ? '插入画布' : '确定'}
           showLivenessTab={assetsPickerTarget === 'toolbar' || assetsPickerTarget === 'videoDraft'}
+          showCharacterTab={assetsPickerTarget === 'videoDraft'}
         />
       )}
 
