@@ -1823,6 +1823,119 @@ describe("handleCreateGenerationJob 参考素材前置（IKE7JP）", () => {
   });
 });
 
+// IKG57P：素材软删后提交未被方案级校验拦截——8453e04a 把 freezePromptPlans（planError：
+// 规格 7.2 文案 + #N 索引，抛 BadRequestException）挪到通用存在性检查之后，软删素材先命中
+// 通用检查的信封 fail 被短路。修复为合并语义：通用检查发现缺失且正文标签引用了缺失素材时，
+// 按 planError 同源形态抛规格文案与具体索引；纯参考清单维持通用文案信封（HTTP 投影在 controller）。
+describe("handleCreateGenerationJob 素材软删提交拦截（IKG57P）", () => {
+  const MISSING_REF_MSG = "提示词引用的素材缺失或不完整，请补充素材或移除对应引用后再生成";
+
+  it("正文标签引用的素材被软删 → 抛 BadRequestException：规格文案 + 索引 #N，不建任务", async () => {
+    const { deps, createJob, resolveInputAssets } = buildImageDeps();
+    resolveInputAssets.mockImplementation(async (ids: string[]) =>
+      ids.filter((id) => id !== "2").map((id) => ({
+        id,
+        type: "image",
+        url: `https://tos.test/${id}.png`,
+        mime: "image/png",
+        size: 100,
+        width: 1024,
+        height: 1024,
+        duration: null,
+        material_id: null,
+      })),
+    );
+    await expect(
+      handleCreateGenerationJob(
+        "u1",
+        "p1",
+        {
+          ...imageBody(2),
+          prompt_doc: {
+            version: 1,
+            segments: [
+              { kind: "text", text: "让" },
+              { kind: "asset_ref", asset_id: "2" },
+              { kind: "text", text: "微笑" },
+            ],
+          },
+        },
+        null,
+        deps,
+      ),
+    ).rejects.toMatchObject({ message: `索引 #2：${MISSING_REF_MSG}` });
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("多个引用素材缺失 → 索引按输入顺序逐一列出（#1、#2）", async () => {
+    const { deps, createJob, resolveInputAssets } = buildImageDeps();
+    resolveInputAssets.mockResolvedValue([]);
+    await expect(
+      handleCreateGenerationJob(
+        "u1",
+        "p1",
+        {
+          ...imageBody(2),
+          prompt_doc: {
+            version: 1,
+            segments: [
+              { kind: "asset_ref", asset_id: "1" },
+              { kind: "text", text: "和" },
+              { kind: "asset_ref", asset_id: "2" },
+            ],
+          },
+        },
+        null,
+        deps,
+      ),
+    ).rejects.toMatchObject({ message: `索引 #1、#2：${MISSING_REF_MSG}` });
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("纯参考清单（无正文标签）素材软删 → 维持通用文案信封 400 invalid_reference", async () => {
+    const { deps, createJob, resolveInputAssets } = buildImageDeps();
+    resolveInputAssets.mockResolvedValue([]);
+    const result = await handleCreateGenerationJob("u1", "p1", imageBody(1), null, deps);
+    expect(result.code).toBe(400);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(result.msg).toBe("参考素材不存在或无权访问");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("视频正文标签引用的素材被软删 → 同口径拦截（普通参考同类型编号）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    vi.mocked(deps.assets.resolveInputAssets).mockImplementation(
+      async (ids: string[]) => ids.filter((id) => id !== "2").map((id) => ({ id, type: "image" })),
+    );
+    await expect(
+      handleCreateGenerationJob(
+        "u1",
+        "p1",
+        {
+          ...VIDEO_BODY,
+          references: [
+            { role: "first_frame", asset_id: "101", type: "image" },
+            { role: "last_frame", asset_id: "102", type: "image" },
+            { role: "reference", asset_id: "1", type: "image" },
+            { role: "reference", asset_id: "2", type: "image" },
+          ],
+          prompt_doc: {
+            version: 1,
+            segments: [
+              { kind: "text", text: "让" },
+              { kind: "asset_ref", asset_id: "2" },
+              { kind: "text", text: "的人物微笑" },
+            ],
+          },
+        },
+        null,
+        deps,
+      ),
+    ).rejects.toMatchObject({ message: `索引 #2：${MISSING_REF_MSG}` });
+    expect(createJob).not.toHaveBeenCalled();
+  });
+});
+
 // IKESD6 / ADR-0085：raw prompt 上限跟随模型目录 features.max_prompt_length，
 // 缺省回落旧硬编码（image/video 4000 / audio 3000）；错误码与文案不变。
 describe("handleCreateGenerationJob 按模型提示词上限（IKESD6）", () => {
@@ -2086,6 +2199,8 @@ describe("handleCreateGenerationJob 正文素材标签 prompt_doc（IKFA1M）", 
     );
     expect(result.code).toBe(400);
     expect(result.data?.code).toBe("invalid_reference");
+    // IKG57P：正文索引引用缺失同样拦截（素材从参考清单移除不是绕过理由）——文案锚定
+    expect(result.msg).toBe("正文素材标签指向无效的参考素材");
     expect(createJob).not.toHaveBeenCalled();
   });
 
