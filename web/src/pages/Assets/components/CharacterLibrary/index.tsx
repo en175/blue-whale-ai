@@ -360,6 +360,76 @@ function isPickerSelectableAsset(
   return pickerMediaTypes.includes(materialMediaKind(asset.AssetType));
 }
 
+/** 素材卡片（真人分组详情与虚拟平铺视图共用）：图片 MeasuredThumb / 视频缩略 / 音频占位 / 资源不可用四分支，
+ *  picker 勾选/置灰/选中角标与角标浮层在此单点维护；角标浮层与勾选角标以同一份 JSX 供图片/视频两分支复用。
+ *  overlaysPickerMode 只控制 AssetCardOverlays 的删除按钮显隐口径（保持收敛前两视图差异）：
+ *  虚拟平铺传 pickerMode（picker 模式隐藏删除，管理归资产页）；真人分组详情不传（picker 模式删除按钮保留）。 */
+function AssetPickerCard({
+  asset,
+  pickerMode,
+  selected,
+  selectable,
+  onPreview,
+  onPickerToggle,
+  onDeleteAsset,
+  onClosePreview,
+  overlaysPickerMode = false,
+}: {
+  asset: MaterialAsset;
+  pickerMode: boolean;
+  selected: boolean;
+  selectable: boolean;
+  onPreview: (asset: MaterialAsset) => void;
+  onPickerToggle?: (asset: MaterialAsset) => void;
+  onDeleteAsset: (asset: MaterialAsset) => void;
+  onClosePreview: () => void;
+  overlaysPickerMode?: boolean;
+}) {
+  const overlays = (
+    <>
+      <AssetCardOverlays asset={asset} onDeleteAsset={onDeleteAsset} onClosePreview={onClosePreview} pickerMode={overlaysPickerMode} />
+      {pickerMode && selectable && (
+        <div className={`${styles.checkToggle} ${selected ? styles.checkToggleOn : ''}`}>
+          {selected && <Check size={14} strokeWidth={2.5} />}
+        </div>
+      )}
+    </>
+  );
+  return (
+    <div
+      className={`${styles.assetCard} ${pickerMode && !selectable ? styles.assetCardDisabled : ''} ${selected ? styles.assetCardSelected : ''}`}
+      onClick={() => {
+        if (pickerMode) {
+          if (selectable) onPickerToggle?.(asset);
+          return;
+        }
+        onPreview(asset);
+      }}
+    >
+      {asset.URL && asset.AssetType === 'Image' ? (
+        <MeasuredThumb src={asset.URL} alt={asset.Name}>
+          {overlays}
+        </MeasuredThumb>
+      ) : (
+        <div className={styles.assetThumb}>
+          {asset.URL ? (
+            asset.AssetType === 'Video' ? (
+              <video src={asset.URL} muted playsInline preload="metadata" />
+            ) : asset.AssetType === 'Audio' ? (
+              <div className={styles.audioPlaceholder}>
+                <Music size={28} strokeWidth={1.5} />
+              </div>
+            ) : null
+          ) : (
+            <div className={styles.empty}>资源不可用</div>
+          )}
+          {overlays}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GroupDetail({
   group,
   assets,
@@ -403,56 +473,19 @@ function GroupDetail({
             </div>
           </div>
         )}
-        {assets.map((asset) => {
-          const selectedFlag = pickerSelectedIds?.has(asset.Id) ?? false;
-          const selectable = !pickerMode || isPickerSelectableAsset(asset, pickerMediaTypes);
-          return (
-          <div
+        {assets.map((asset) => (
+          <AssetPickerCard
             key={asset.Id}
-            className={`${styles.assetCard} ${pickerMode && !selectable ? styles.assetCardDisabled : ''} ${selectedFlag ? styles.assetCardSelected : ''}`}
-            onClick={() => {
-              if (pickerMode) {
-                if (selectable) onPickerToggleAsset?.(asset);
-                return;
-              }
-              setPreviewAsset(asset);
-            }}
-          >
-            {asset.URL && asset.AssetType === 'Image' ? (
-              <MeasuredThumb src={asset.URL} alt={asset.Name}>
-                <AssetCardOverlays asset={asset} onDeleteAsset={onDeleteAsset} onClosePreview={closePreview} />
-                {pickerMode && selectable && (
-                  <div className={`${styles.checkToggle} ${selectedFlag ? styles.checkToggleOn : ''}`}>
-                    {selectedFlag && <Check size={14} strokeWidth={2.5} />}
-                  </div>
-                )}
-              </MeasuredThumb>
-            ) : (
-              <div className={styles.assetThumb}>
-                {asset.URL ? (
-                  asset.AssetType === 'Video' ? (
-                    <>
-                      <video src={asset.URL} muted playsInline preload="metadata" />
-                    </>
-                  ) : asset.AssetType === 'Audio' ? (
-                    <div className={styles.audioPlaceholder}>
-                      <Music size={28} strokeWidth={1.5} />
-                    </div>
-                  ) : null
-                ) : (
-                  <div className={styles.empty}>资源不可用</div>
-                )}
-                <AssetCardOverlays asset={asset} onDeleteAsset={onDeleteAsset} onClosePreview={closePreview} />
-                {pickerMode && selectable && (
-                  <div className={`${styles.checkToggle} ${selectedFlag ? styles.checkToggleOn : ''}`}>
-                    {selectedFlag && <Check size={14} strokeWidth={2.5} />}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          );
-        })}
+            asset={asset}
+            pickerMode={pickerMode}
+            selected={pickerSelectedIds?.has(asset.Id) ?? false}
+            selectable={!pickerMode || isPickerSelectableAsset(asset, pickerMediaTypes)}
+            onPreview={setPreviewAsset}
+            onPickerToggle={onPickerToggleAsset}
+            onDeleteAsset={onDeleteAsset}
+            onClosePreview={closePreview}
+          />
+        ))}
         {!onUpload && assets.length === 0 && (
           <div className={styles.empty}>该分组暂无素材</div>
         )}
@@ -570,54 +603,20 @@ function AigcFlatView({
             </div>
           </div>
         )}
-        {assets.map((asset) => {
-          const selectedFlag = pickerSelectedIds?.has(asset.Id) ?? false;
-          const selectable = !pickerMode || isPickerSelectableAsset(asset, pickerMediaTypes);
-          return (
-          <div
+        {assets.map((asset) => (
+          <AssetPickerCard
             key={asset.Id}
-            className={`${styles.assetCard} ${pickerMode && !selectable ? styles.assetCardDisabled : ''} ${selectedFlag ? styles.assetCardSelected : ''}`}
-            onClick={() => {
-              if (pickerMode) {
-                if (selectable) onPickerToggleAsset?.(asset);
-                return;
-              }
-              setPreviewAsset(asset);
-            }}
-          >
-            {asset.URL && asset.AssetType === 'Image' ? (
-              <MeasuredThumb src={asset.URL} alt={asset.Name}>
-                <AssetCardOverlays asset={asset} onDeleteAsset={handleDeleteAsset} onClosePreview={closePreview} pickerMode={pickerMode} />
-                {pickerMode && selectable && (
-                  <div className={`${styles.checkToggle} ${selectedFlag ? styles.checkToggleOn : ''}`}>
-                    {selectedFlag && <Check size={14} strokeWidth={2.5} />}
-                  </div>
-                )}
-              </MeasuredThumb>
-            ) : (
-              <div className={styles.assetThumb}>
-                {asset.URL ? (
-                  asset.AssetType === 'Video' ? (
-                    <video src={asset.URL} muted playsInline preload="metadata" />
-                  ) : asset.AssetType === 'Audio' ? (
-                    <div className={styles.audioPlaceholder}>
-                      <Music size={28} strokeWidth={1.5} />
-                    </div>
-                  ) : null
-                ) : (
-                  <div className={styles.empty}>资源不可用</div>
-                )}
-                <AssetCardOverlays asset={asset} onDeleteAsset={handleDeleteAsset} onClosePreview={closePreview} pickerMode={pickerMode} />
-                {pickerMode && selectable && (
-                  <div className={`${styles.checkToggle} ${selectedFlag ? styles.checkToggleOn : ''}`}>
-                    {selectedFlag && <Check size={14} strokeWidth={2.5} />}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          );
-        })}
+            asset={asset}
+            pickerMode={pickerMode}
+            selected={pickerSelectedIds?.has(asset.Id) ?? false}
+            selectable={!pickerMode || isPickerSelectableAsset(asset, pickerMediaTypes)}
+            onPreview={setPreviewAsset}
+            onPickerToggle={onPickerToggleAsset}
+            onDeleteAsset={handleDeleteAsset}
+            onClosePreview={closePreview}
+            overlaysPickerMode={pickerMode}
+          />
+        ))}
         {!onUpload && assets.length === 0 && !loading && !loadError && (
           <div className={styles.empty}>暂无素材，请上传</div>
         )}
