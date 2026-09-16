@@ -1250,27 +1250,33 @@ export default function CanvasPage() {
     };
   };
 
-  /** 图片/视频已入虚拟人像库时回填 materialId 并点亮合规角标（音频不参与） */
+  /** 图片/视频：快照 material_id 仍用于回填身份；合规角标只认 material_status === Active（音频不参与） */
   const characterLibraryVerifiedPatch = (
     data: Record<string, unknown>,
     snapshotMaterialId?: string | null,
     assetId?: string | number,
+    snapshotMaterialStatus?: string | null,
   ): Record<string, unknown> => {
+    if (data.mediaType === 'audio') return {};
     const verifiedId = resolveCharacterLibraryMaterialId({
       mediaType: data.mediaType,
       snapshotMaterialId,
       nodeMaterialId: data.materialId,
       assetId,
     });
-    if (!verifiedId) return {};
     const patch: Record<string, unknown> = {};
-    if (data.materialId !== verifiedId) patch.materialId = verifiedId;
-    if (data.compliancePassed !== true) patch.compliancePassed = true;
+    if (verifiedId && data.materialId !== verifiedId) patch.materialId = verifiedId;
+    if (snapshotMaterialStatus !== undefined) {
+      const passed = snapshotMaterialStatus === 'Active';
+      const failed = snapshotMaterialStatus === 'Failed';
+      if (data.compliancePassed !== passed) patch.compliancePassed = passed;
+      if (data.complianceFailed !== failed) patch.complianceFailed = failed;
+    }
     return patch;
   };
 
   /** 水合期素材解析：所有素材一律用 assetId 匹配 snapshot 资产字典取 access_url，不走节点内嵌 src。
-   *  - 命中 → src 替换为 access_url；同时读 material_id，非空视为已入虚拟人像库
+   *  - 命中 → src 替换为 access_url；material_status === Active 视为已通过合规校验
    *  - 无 assetId 或字典查不到 → 标缺失（媒体节点 assetMissing / 商品图与参考图 missing），渲染「素材已被删除」
    *  - 无旧素材的生成占位与 blob: 上传预览跳过；重新生成中的旧素材仍需刷新地址。 */
   const resolveNodeAssets = (node: Node): Node => {
@@ -1297,7 +1303,7 @@ export default function CanvasPage() {
         const fill: Record<string, number> = {};
         if (typeof data.width !== 'number' && typeof asset?.width === 'number') fill.width = asset.width;
         if (typeof data.height !== 'number' && typeof asset?.height === 'number') fill.height = asset.height;
-        const verified = characterLibraryVerifiedPatch(data, asset.material_id, aid);
+        const verified = characterLibraryVerifiedPatch(data, asset.material_id, aid, asset.material_status ?? null);
         return data.src === url && !data.assetMissing && Object.keys(fill).length === 0 && Object.keys(verified).length === 0
           ? node
           : { ...node, data: { ...data, ...fill, ...verified, src: url, assetMissing: undefined } };
