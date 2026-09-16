@@ -143,8 +143,10 @@ INSERT INTO generation_model_capability (
         'prolong', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive'))
       )
     ),
+    -- 视频目录 Seedance 2.5 置顶（迁移 20260916150000_48ae4438_video_model_25_first
+    -- 同口径）：排最前即视频面板默认选中；2.0 保持 20。
     TRUE,
-    21,
+    10,
     'seedream',
     NULL
   ),
