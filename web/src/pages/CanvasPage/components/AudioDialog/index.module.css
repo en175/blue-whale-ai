@@ -53,16 +53,7 @@
   height: 66.66vh;
 }
 
-/* ---- 右上角操作（放大/收起 + 关闭） ---- */
-.topActions {
-  position: absolute;
-  top: var(--spacing-sm);
-  right: var(--spacing-sm);
-  display: flex;
-  gap: var(--spacing-xs);
-  z-index: 1;
-}
-
+/* ---- 图标按钮（IKGB82：展开/关闭并入附件操作条 trailing，原绝对定位 .topActions 退役） ---- */
 .iconBtn {
   width: 28px;
   height: 28px;
@@ -82,12 +73,19 @@
   background-color: var(--color-bg-hover);
 }
 
-/* ---- 顶部参考按钮行 ---- */
+/* 操作条行包装（与 BottomDialog 同形同值）：操作条视觉定义单一来源在共享样式表
+ * （源唯一性锁见 AttachmentActionBar/actionBarVisualSource.test.ts），此处仅承载面板侧行间距；
+ * 图片面板无此包装——其 .inputBox flex gap 已给出同值（--spacing-md）行距。 */
+.actionBarRow {
+  margin-bottom: var(--spacing-md);
+  flex-shrink: 0;
+}
+
+/* ---- 顶部参考按钮行（IKGB82：空态整条不渲染；原 topActions 展开/关闭已并入操作条右侧） ---- */
 .topRow {
   display: flex;
   flex-wrap: wrap;
   flex-shrink: 0;
-  padding-right: 64px;
   align-items: flex-start;
   gap: var(--spacing-sm);
   margin-bottom: var(--spacing-lg);

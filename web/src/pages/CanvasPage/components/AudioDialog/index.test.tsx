@@ -276,8 +276,8 @@ describe('AudioDialog 参考缩略图条（IKFCKS）', () => {
   it('从面板画布列表选择已落库音频后能插入正文标签', async () => {
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
     await act(async () => root.render(createElement(AudioDialog, { onClose: vi.fn(), onSend: vi.fn(), canvasMedia: [{ id: 'n1', src: CANVAS_REF.src, name: '雨声', mediaType: 'audio', assetId: '601' }] } as Parameters<typeof AudioDialog>[0])));
-    await act(async () => container.querySelector<HTMLButtonElement>('[title="从资产中选择 / 从节点添加素材"]')!.click());
-    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '从节点添加素材')!.click());
+    // IKGB82：操作条「+ 参考」直达（等价旧菜单项「从节点添加素材」），面板内画布列表照常打开
+    await act(async () => container.querySelector<HTMLButtonElement>('[title="从节点添加素材"]')!.click());
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '雨声')!.click());
     expect(atButton('雨声')).not.toBeNull();
     await act(async () => atButton('雨声')!.click());

@@ -328,8 +328,19 @@ async function selectKeyframeMode() {
   await selectMode('首尾帧');
 }
 
-/** 经 Dock 槽位入口选取来源节点建立指定角色的连线（真实路径：+ 按钮弹来源菜单 →「从节点添加素材」→ 画布节点点击） */
+/** 经 Dock 槽位入口选取来源节点建立指定角色的连线（首尾帧真实路径：+ 按钮弹来源菜单 →「从节点添加素材」→ 画布节点点击）；
+ *  IKGB7W：slotTitle 为普通参考旧入口 title 时改走操作条「+ 参考」pill 直达（栏尾旧「+」退役，分派语义不变） */
 async function pickRefNode(slotTitle: string, nodeId: string) {
+  if (slotTitle === '从资产中选择 / 从节点添加素材') {
+    await vi.waitFor(() => {
+      expect([...container.querySelectorAll('button')].some((b) => b.textContent === '参考')).toBe(true);
+    });
+    await act(async () => {
+      [...container.querySelectorAll('button')].find((b) => b.textContent === '参考')!.click();
+    });
+    await clickNode(flowProps.current.mediaNodes.find((n: Node) => n.id === nodeId)!);
+    return;
+  }
   await vi.waitFor(() => {
     const btn = [...container.querySelectorAll('button')].find((b) => b.title === slotTitle);
     expect(btn).toBeTruthy();
@@ -381,7 +392,9 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     // 面板打开：绑定空草稿卡默认跟随模式「文生视频」（下拉收起仅显示当前模式名）
     expect(container.textContent).toContain('文生视频');
-    expect(container.querySelector('button[title="从资产中选择 / 从节点添加素材"]')).toBeTruthy();
+    // IKGB7W：添加入口 = 操作条「+ 参考」pill（栏尾旧「+」退役）
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent === '参考')).toBe(true);
+    expect(container.querySelector('button[title="从资产中选择 / 从节点添加素材"]')).toBeNull();
   });
 
   it('侧栏入口发送：绑定新建草稿卡生成（带 target_node_id），不另落生成卡', async () => {
@@ -425,7 +438,9 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
       data: { draft: true, mediaType: 'video', genStatus: 'draft' },
     });
     expect(container.textContent).toContain('文生视频');
-    expect(container.querySelector('button[title="从资产中选择 / 从节点添加素材"]')).toBeTruthy();
+    // IKGB7W：添加入口 = 操作条「+ 参考」pill（栏尾旧「+」退役）
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent === '参考')).toBe(true);
+    expect(container.querySelector('button[title="从资产中选择 / 从节点添加素材"]')).toBeNull();
   });
 });
 

@@ -196,21 +196,22 @@ describe('IKDMQS 草稿绑定模式渲染', () => {
     expect(menuItem('全能参考')).toBeTruthy();
   });
 
-  it('统一草稿绑定：普通参考区单「+」展开两项统一来源（无角色库项，无上传）', async () => {
+  it('统一草稿绑定：普通参考添加入口 = 附件操作条两 pill 直达（IKGB7W，栏尾旧「+」退役，无角色库项，无上传）', async () => {
     await renderDialog({ mode: 'all' });
     expect(menuItem('全能参考')).toBeTruthy();
-    // IKFE8U：单「+」（与图片面板同款 RefSourceMenu），不再有图片/视频两个专属按钮
-    const entryButtons = [...mountNode.querySelectorAll('button')].filter(
+    // IKGB7W：栏尾旧「+」（RefSourceMenu 普通变体）退役，添加入口 = 操作条「+ 参考」「资产库」
+    const legacyEntries = [...mountNode.querySelectorAll('button')].filter(
       (b) => b.title === REF_SOURCE_ENTRY_TITLE,
     );
-    expect(entryButtons).toHaveLength(1);
-    await act(async () => {
-      entryButtons[0].click();
-    });
-    const menuItems = [...mountNode.querySelectorAll('button')]
-      .filter((b) => b.textContent === '从资产中选择' || b.textContent === '从节点添加素材')
-      .map((b) => b.textContent);
-    expect(menuItems.sort()).toEqual(['从节点添加素材', '从资产中选择']);
+    expect(legacyEntries).toHaveLength(0);
+    const pickCanvas = [...mountNode.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '参考')!;
+    const pickAssets = [...mountNode.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '资产库')!;
+    expect(pickCanvas).toBeTruthy();
+    expect(pickAssets).toBeTruthy();
+    await act(async () => { pickCanvas.click(); });
+    expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('video', 'reference');
+    await act(async () => { pickAssets.click(); });
+    expect(handlers.onPickFromAssets).toHaveBeenCalledWith('video', 'reference');
     // 角色库菜单项随统一入口退役；上传入口不复活
     expect(mountNode.textContent).not.toContain('角色库');
     expect(mountNode.querySelector('input[type="file"]')).toBeNull();
@@ -235,21 +236,21 @@ describe('IKDMQS 角色槽能力约束', () => {
 });
 
 describe('IKDMQS 角色显式指定与移除', () => {
-  it('首帧槽「从节点添加素材」按首帧角色发起；普通参考按 reference 角色与模式类型边界', async () => {
+  it('首帧槽「从节点添加素材」按首帧角色发起；普通参考经操作条按 reference 角色与模式类型边界分派', async () => {
     await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [] } });
     await act(async () => { slotButton('添加首帧（从资产中选择 / 从节点添加素材）')!.click(); });
     await act(async () => { menuItem('从节点添加素材')!.click(); });
     expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('image', 'first');
+    // IKGB7W：普通参考入口 = 操作条「+ 参考」直达（栏尾旧「+」退役），kind/role 口径不变
+    const pickCanvas = () => [...mountNode.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '参考')!;
     await act(async () => { menuItem('首尾帧')!.click(); });
     await act(async () => { menuItem('全能参考')!.click(); });
-    await act(async () => { slotButton(REF_SOURCE_ENTRY_TITLE)!.click(); });
-    await act(async () => { menuItem('从节点添加素材')!.click(); });
+    await act(async () => { pickCanvas().click(); });
     expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('video', 'reference');
     // 全能 → 图生视频：先点收起按钮（显示当前模式名）展开下拉，再点选项
     await act(async () => { menuItem('全能参考')!.click(); });
     await act(async () => { menuItem('图生视频')!.click(); });
-    await act(async () => { slotButton(REF_SOURCE_ENTRY_TITLE)!.click(); });
-    await act(async () => { menuItem('从节点添加素材')!.click(); });
+    await act(async () => { pickCanvas().click(); });
     expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('image', 'reference');
   });
 
@@ -285,7 +286,11 @@ describe('IKDMQS 组合冲突与只读', () => {
     expect(mountNode.querySelector('[data-testid="dock-video-ref"]')).toBeTruthy();
     expect(mountNode.querySelector('button[title="移除"]')).toBeNull();
     expect(mountNode.querySelector('button[title="插入引用"]')).toBeNull();
+    // IKGB7W：添加入口常显但置灰（操作条 aria-disabled + 悬停原因），替代旧「+」隐藏
     expect(slotButton(REF_SOURCE_ENTRY_TITLE)).toBeUndefined();
+    const pickCanvas = [...mountNode.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '参考')!;
+    expect(pickCanvas.getAttribute('aria-disabled')).toBe('true');
+    expect(pickCanvas.getAttribute('title')).toContain('只读');
     expect(mountNode.textContent).toContain('生成中，参数与连线只读');
     expect(sendButton().disabled).toBe(true);
     expect(sendButton().getAttribute('title')).toBe('生成中，输入只读');

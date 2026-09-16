@@ -665,21 +665,14 @@ describe('IKDMQT 保存失败暂停生成', () => {
 });
 
 describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => {
-  /** 经音频面板真实入口进入画布选择模式：添加参考按钮 → 来源菜单 → 从节点添加素材 */
+  /** 经音频面板真实入口进入画布选择模式（IKGB82：操作条「+ 参考」pill 直达，旧「+」菜单两步已退役） */
   async function enterCanvasPick() {
     await vi.waitFor(() => {
-      const btn = [...container.querySelectorAll('button')].find((b) => (b.title ?? '').startsWith('从资产中选择 / 从节点添加素材'));
+      const btn = [...container.querySelectorAll('button')].find((b) => (b.title ?? '') === '从节点添加素材');
       expect(btn).toBeTruthy();
     });
     await act(async () => {
-      [...container.querySelectorAll('button')].find((b) => (b.title ?? '').startsWith('从资产中选择 / 从节点添加素材'))!.click();
-    });
-    await vi.waitFor(() => {
-      const item = [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材');
-      expect(item).toBeTruthy();
-    });
-    await act(async () => {
-      [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材')!.click();
+      [...container.querySelectorAll('button')].find((b) => (b.title ?? '') === '从节点添加素材')!.click();
     });
   }
 
@@ -776,8 +769,8 @@ describe('IKFCXE 音频文本附件：到节点选择文本卡建连线', () => 
     Object.assign(node.data, { mediaType: 'audio', src: 'http://audio/a.mp3', assetId: '601', fileName: '雨声' });
     canvasDocMock.current.assets = { '601': { asset_id: 601, type: 'audio', access_url: 'http://audio/a.mp3' } };
     await renderPage(); await openDraftPanel(); await waitModelReady();
-    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.title.startsWith('从资产中选择 / 从节点添加素材'))!.click());
-    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === '从节点添加素材')!.click());
+    // IKGB82：操作条「+ 参考」pill 直达（等价旧菜单项「从节点添加素材」）
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.title === '从节点添加素材')!.click());
     await act(async () => flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')));
     await vi.waitFor(() => expect(container.querySelector('[data-testid="audio-ref-thumb"]')).not.toBeNull());
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="移除 雨声"]')!.click());

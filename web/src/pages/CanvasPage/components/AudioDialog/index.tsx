@@ -2,6 +2,9 @@
  * AudioDialog 音频生成底部对话框：结构化正文引用 + 真实模型（fetchGenerationModels('audio')）
  * IKFCKS：参考音频 chip 替换为共享参考缩略图（三态交互，播放随 chip 下线）；
  *  画布文本卡连线作为文本附件以 FileText 缩略图进参考栏（× 仅断开连线）
+ * IKGB82：接入附件操作条（IKGB1X 契约）——输入框上方第一行「+ 参考」「资产库」pill
+ *  直达原菜单两项链路，展开/关闭并入操作条右侧；附件栏空态整条不渲染；
+ *  达上限与生成中只读时常显置灰并悬停说明原因；栏尾旧「+」菜单退役。
  * ============================================ */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2 } from 'lucide-react';
@@ -15,7 +18,7 @@ import type { AtMentionItem } from '../../atMention';
 import { docHasAnyRef, docHasInvalidRef, type PromptDoc } from '@/lib/prompt-doc';
 import AudioPromptEditor, { type AudioPromptEditorHandle } from './AudioPromptEditor';
 import RefThumbnail from '../RefThumbnail';
-import RefSourceMenu from '../RefSourceMenu';
+import AttachmentActionBar from '../AttachmentActionBar';
 import { orderRefStripItems, useMixedRefStrip, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
 import { composeImageSendPrompt, IMAGE_COMPOSED_PROMPT_LIMIT, IMAGE_COMPOSED_PROMPT_OVER_LIMIT, type ImageTextAttachment } from '../ImageDialog';
 import styles from './index.module.css';
@@ -222,6 +225,13 @@ export default function AudioDialog({
 
   /** 画布参考（连线推导）+ 本地上传/自由拾取的合计上限口径 */
   const totalRefCount = (draftRefs?.length ?? 0) + refs.length;
+  /** 生成中只读原因（操作条悬停原因与只读提示条同一文案来源） */
+  const readOnlyReason = '生成中，参数只读；可在画布卡片上取消生成';
+  /** 附件操作条禁用原因（IKGB82：常显置灰 + 悬停说明，替代旧「入口消失」口径）：
+   *  生成中只读优先，其次参考达数量上限（与旧栏尾「+」的隐藏门控一一对应） */
+  const actionBarDisabledReason = readOnly ? readOnlyReason
+    : totalRefCount >= maxAudioRefs ? `参考音频最多 ${maxAudioRefs} 段，已达上限`
+    : null;
 
   const startCanvasPick = () => {
     setPickerOpen(true);
@@ -283,6 +293,8 @@ export default function AudioDialog({
   /** 面板展示/提交的完整参考：画布参考（draftRefs，父级连线推导，名称随来源节点即时刷新）
    *  + 本地上传/自由拾取项；顺序统一由参考栏 stripOrder 决定 */
   const allRefs = [...(draftRefs ?? []), ...namedRefs];
+  /** 附件栏空态派生（IKGB82）：无任何附件项（音频参考 + 文本附件）时整条不渲染，不引入新的持久状态 */
+  const stripHasItems = allRefs.length > 0 || (attachments?.length ?? 0) > 0;
 
   /** 移除参考（IKFDFZ）：画布参考断开对应连线（保留来源素材与其他目标关系）；
    *  本地上传回收 blob URL 并仅移除面板本地项 */
@@ -357,22 +369,81 @@ export default function AudioDialog({
       data-gen-panel-territory
     >
       <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
-      {/* 右上角操作：放大/收起 + 关闭 */}
-      <div className={styles.topActions}>
-        <button
-          className={styles.iconBtn}
-          onClick={() => setExpanded((v) => !v)}
-          title={expanded ? '收起' : '展开'}
-        >
-          {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
-        </button>
-        <button className={styles.iconBtn} onClick={onClose} title="关闭">
-          <X size={16} strokeWidth={2} />
-        </button>
+      {/* 第一行：附件操作条（IKGB82，IKGB1X 契约共享组件）——左「+ 参考」「资产库」pill
+          直达退役菜单两项链路，右侧并入原 topActions 展开/关闭按钮；达上限与生成中
+          只读时常显置灰并悬停说明原因（替代旧「入口消失」口径）；
+          actionBarRow 包装仅承载行间距（与 BottomDialog 同形同值；图片面板经 .inputBox flex gap 得同值行距） */}
+      <div className={styles.actionBarRow}>
+        <AttachmentActionBar
+          kind="audio"
+          onPickFromCanvas={startCanvasPick}
+          onPickFromAssets={() => { setPickerOpen(false); onPickFromAssets?.(); }}
+          pickMode={pickMode}
+          disabledReason={actionBarDisabledReason}
+          trailing={(
+            <>
+              <button
+                className={styles.iconBtn}
+                onClick={() => setExpanded((v) => !v)}
+                title={expanded ? '收起' : '展开'}
+              >
+                {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
+              </button>
+              <button className={styles.iconBtn} onClick={onClose} title="关闭">
+                <X size={16} strokeWidth={2} />
+              </button>
+            </>
+          )}
+        />
       </div>
 
-      {/* 顶部参考缩略图条（IKFCKS）：音频参考 + 文本附件统一走共享参考缩略图，
-          三态交互（编号圆钮 / 悬停 ×/@ / 200ms 放大预览）；播放 chip 随替换下线 */}
+      {/* 画布选择面板锚点（startCanvasPick 既有行为保留）：独立于附件栏空态渲染，
+          面板从操作条下方弹出；达上限后不提供入口（与旧栏尾分支同口径） */}
+      <div className={styles.refWrap} ref={sourceWrapRef}>
+        {pickerOpen && totalRefCount < maxAudioRefs && (
+          <div className={styles.pickerPanel} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.pickerHead}>
+              <span>从画布选择音频</span>
+              <button className={styles.pickerClose} onClick={() => setPickerOpen(false)} title="关闭">
+                <X size={12} strokeWidth={2} />
+              </button>
+            </div>
+            {canvasAudios.length === 0 ? (
+              <div className={styles.pickerEmpty}>画布暂无可选音频</div>
+            ) : (
+              <div className={styles.pickerList}>
+                {canvasAudios.map((it) => (
+                  <button
+                    key={it.id}
+                    className={styles.pickerItem}
+                    onClick={() => {
+                      // 草稿模式经父级校验后建连线（IKFDFZ）；自由模式注入面板本地列表
+                      if (onAddCanvasRef) {
+                        onAddCanvasRef(it.id);
+                        setPickerOpen(false);
+                        return;
+                      }
+                      addRef({ id: it.id, kind: 'audio', name: it.name, src: it.src, source: 'canvas', assetId: it.assetId });
+                    }}
+                  >
+                    <div className={styles.pickerAudio}>
+                      <AudioLines size={14} strokeWidth={2} />
+                    </div>
+                    <span className={styles.pickerName}>{it.name || it.id}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 附件栏（IKGB82 空态整条不渲染）：有参考/文本附件时出现在操作条与输入框之间——
+          顶部参考缩略图条（IKFCKS）：音频参考 + 文本附件统一走共享参考缩略图，
+          三态交互（编号圆钮 / 悬停 ×/@ / 200ms 放大预览）；播放 chip 随替换下线。
+          栏尾旧「+」菜单（RefSourceMenu 普通变体）随操作条落地自音频面板退役；
+          达上限时「已达上限」文案保留在栏尾原位。 */}
+      {stripHasItems && (
       <div className={styles.topRow}>
         {/* 参考音频缩略图：编号按参考顺序派生；× 移除面板参考（本地上传回收 blob URL；
             @ 与手动 @ 使用共享正文编辑器；已选项只插入标签，未落库项不提供身份。
@@ -412,60 +483,15 @@ export default function AudioDialog({
             }
           />
         )))}
-        <div className={styles.refWrap} ref={sourceWrapRef}>
-          {totalRefCount < maxAudioRefs ? (
-            <>
-              {!readOnly && (
-                <RefSourceMenu
-                  pickMode={pickMode}
-                  onPickFromAssets={() => { setPickerOpen(false); onPickFromAssets?.(); }}
-                  onPickFromCanvas={startCanvasPick}
-                />
-              )}
-              {pickerOpen && (
-                <div className={styles.pickerPanel} onClick={(e) => e.stopPropagation()}>
-                  <div className={styles.pickerHead}>
-                    <span>从画布选择音频</span>
-                    <button className={styles.pickerClose} onClick={() => setPickerOpen(false)} title="关闭">
-                      <X size={12} strokeWidth={2} />
-                    </button>
-                  </div>
-                  {canvasAudios.length === 0 ? (
-                    <div className={styles.pickerEmpty}>画布暂无可选音频</div>
-                  ) : (
-                    <div className={styles.pickerList}>
-                      {canvasAudios.map((it) => (
-                        <button
-                          key={it.id}
-                          className={styles.pickerItem}
-                          onClick={() => {
-                            // 草稿模式经父级校验后建连线（IKFDFZ）；自由模式注入面板本地列表
-                            if (onAddCanvasRef) {
-                              onAddCanvasRef(it.id);
-                              setPickerOpen(false);
-                              return;
-                            }
-                            addRef({ id: it.id, kind: 'audio', name: it.name, src: it.src, source: 'canvas', assetId: it.assetId });
-                          }}
-                        >
-                          <div className={styles.pickerAudio}>
-                            <AudioLines size={14} strokeWidth={2} />
-                          </div>
-                          <span className={styles.pickerName}>{it.name || it.id}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          ) : (
+        <div className={styles.refWrap}>
+          {totalRefCount >= maxAudioRefs && (
             <span className={styles.refCount} title={`参考音频最多 ${maxAudioRefs} 段`}>
               已达上限
             </span>
           )}
         </div>
       </div>
+      )}
 
       {/* 输入框 */}
       <div className={styles.mentionAnchor} data-testid="audio-input">
@@ -536,7 +562,7 @@ export default function AudioDialog({
 
         <div className={styles.barRight}>
           {readOnly && (
-            <span className={styles.readOnlyHint}>生成中，参数只读；可在画布卡片上取消生成</span>
+            <span className={styles.readOnlyHint}>{readOnlyReason}</span>
           )}
           {/* 字数统计 */}
           <div className={`${styles.charCount} ${text.length >= MAX_INPUT ? styles.charCountWarn : ''}`}>

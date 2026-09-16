@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
-import { REF_SOURCE_ENTRY_TITLE } from './components/RefSourceMenu';
+import { ATTACHMENT_ACTION_PICK_ASSETS_TITLE } from './components/AttachmentActionBar';
 import type { GenerationModel, ModelFeatures } from '@/api/generation';
 import type { AssetRecord } from '@/api/assets';
 
@@ -334,19 +334,39 @@ function assetOf(id: number | string, type: 'image' | 'video' | 'audio', url: st
   } as AssetRecord;
 }
 
-/** 图片/视频面板「从资产中选择」：点媒体入口 → 菜单项「从资产中选择」 → 桩 onSelect 回调 */
-async function pickFromAssets(entryTitle: string, assets: AssetRecord[]) {
+/** 图片面板「资产库」（IKGB7U 附件操作条直达，旧「+」菜单已退役）：点 pill → 桩 onSelect 回调 */
+async function pickImagePanelAssets(assets: AssetRecord[]) {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => (b.getAttribute('title') ?? '').includes(entryTitle),
+    (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
   )!;
   await act(async () => {
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
-  const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent === '从资产中选择',
+  await act(async () => {
+    pickerProps.current.onSelect(assets);
+  });
+}
+
+/** 音频面板「资产库」（IKGB82 附件操作条直达，旧「+」菜单已退役）：点 pill → 桩 onSelect 回调 */
+async function pickAudioPanelAssets(assets: AssetRecord[]) {
+  const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
   )!;
   await act(async () => {
-    item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+  await act(async () => {
+    pickerProps.current.onSelect(assets);
+  });
+}
+
+/** 视频面板「资产库」（IKGB7W 附件操作条直达，栏尾旧「+」菜单退役）：点 pill → 桩 onSelect 回调 */
+async function pickVideoPanelAssets(assets: AssetRecord[]) {
+  const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
+  )!;
+  await act(async () => {
+    entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
   await act(async () => {
     pickerProps.current.onSelect(assets);
@@ -355,7 +375,7 @@ async function pickFromAssets(entryTitle: string, assets: AssetRecord[]) {
 
 /** 音频统一入口：从资产选择已有持久身份，接纳与画布保存沿用原链路。 */
 async function pickAudioAsset() {
-  await pickFromAssets('从资产中选择 / 从节点添加素材', [{ id: 'au9', type: 'audio', url: 'http://audio/au9.mp3', width: null, height: null, duration: 25, source: 'uploaded', model: null, created_at: null } as AssetRecord]);
+  await pickAudioPanelAssets([{ id: 'au9', type: 'audio', url: 'http://audio/au9.mp3', width: null, height: null, duration: 25, source: 'uploaded', model: null, created_at: null } as AssetRecord]);
 }
 
 /** 面板参考缩略图名称列表（audio-ref-thumb / dock-media-ref） */
@@ -391,7 +411,7 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
     const before = mediaNodeCount();
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a1', 'image', 'http://img/m1.png')]);
+    await pickImagePanelAssets([assetOf('a1', 'image', 'http://img/m1.png')]);
 
     // 复用已有 m1：不新建节点，直接建 m1->d1 连线
     expect(mediaNodeCount()).toBe(before);
@@ -408,7 +428,7 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
     const before = mediaNodeCount();
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf(5, 'image', 'http://img/m5.png')]);
+    await pickImagePanelAssets([assetOf(5, 'image', 'http://img/m5.png')]);
 
     expect(mediaNodeCount()).toBe(before + 1);
     const newNode = flowProps.current.mediaNodes.find(
@@ -430,7 +450,7 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
 
     const before = mediaNodeCount();
     // URL 与 m1 同路径（展示名相同）但 id 不同：身份不同，不复用 m1
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a99', 'image', 'http://img/m1.png')]);
+    await pickImagePanelAssets([assetOf('a99', 'image', 'http://img/m1.png')]);
 
     expect(mediaNodeCount()).toBe(before + 1);
     expect(edgePairs()).not.toContain('m1->d1');
@@ -451,8 +471,8 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await clickNode('d1');
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a1', 'image', 'http://img/m1.png')]);
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a5', 'image', 'http://img/m5.png')]);
+    await pickImagePanelAssets([assetOf('a1', 'image', 'http://img/m1.png')]);
+    await pickImagePanelAssets([assetOf('a5', 'image', 'http://img/m5.png')]);
     await vi.waitFor(() => expect(refNames('dock-media-ref').length).toBe(2), { timeout: 3000 });
 
     // 切到 B：B 面板打开但无 A 的参考（连线只属于 A）
@@ -474,13 +494,13 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型'));
 
     const before = mediaNodeCount();
-    // 复用：a1 已有画布节点 m1
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a1', 'image', 'http://img/m1.png')]);
+    // IKGB7W：入口形态平移到操作条「资产库」pill，落地行为不变——复用：a1 已有画布节点 m1
+    await pickVideoPanelAssets([assetOf('a1', 'image', 'http://img/m1.png')]);
     expect(mediaNodeCount()).toBe(before);
     expect(edgePairs()).toEqual(['m1->dv1']);
 
     // 新素材：建来源卡并连线
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a6', 'image', 'http://img/m6.png')]);
+    await pickVideoPanelAssets([assetOf('a6', 'image', 'http://img/m6.png')]);
     expect(mediaNodeCount()).toBe(before + 1);
     const newNode = flowProps.current.mediaNodes.find(
       (n: Node) => (n.data as Record<string, unknown>)?.assetId === 'a6',
@@ -502,7 +522,6 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('测试音频模型'));
 
     await pickAudioAsset();
-
     await vi.waitFor(() => expect(edgePairs().length).toBe(1), { timeout: 3000 });
     const newNode = flowProps.current.mediaNodes.find(
       (n: Node) => (n.data as Record<string, unknown>)?.assetId === 'au9',
@@ -523,10 +542,24 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
   it('音频统一入口取消资产选择：不建卡、不建线、不发起上传', async () => {
     await renderPage(); await clickNode('da1');
     const before = mediaNodeCount();
-    await pickFromAssets('从资产中选择 / 从节点添加素材', []);
+    await pickAudioPanelAssets([]);
     expect(mediaNodeCount()).toBe(before);
     expect(edgePairs()).toEqual([]);
     expect(uploadMocks.uploadAssetFile).not.toHaveBeenCalled();
+  });
+
+  it('IKGB82：音频面板点「资产库」直接打开同一资产库弹窗，按面板过滤仅音频', async () => {
+    await renderPage();
+    await clickNode('da1');
+    await vi.waitFor(() => expect(container.textContent).toContain('测试音频模型'));
+
+    const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
+    )!;
+    await act(async () => {
+      entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(pickerProps.current.mediaTypes).toEqual(['audio']);
   });
 
   it('音频资产选择成功后关闭重开原目标：参考经连线完整恢复，不恢复选取模式', async () => {
@@ -567,7 +600,7 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     expect(sameAssetNodes[0].id).toBe(firstNode.id);
   });
 
-  it('音频参考已满 3 段：添加入口不再渲染，无接纳发起（更严格的超限阻止）', async () => {
+  it('音频参考已满 3 段：添加入口常显置灰并悬停说明已达上限，点击无接纳发起（IKGB82 替代旧「入口消失」）', async () => {
     // 画布补齐 3 个音频成品并全部连到 da1
     const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
     for (const id of ['au2', 'au3']) {
@@ -589,11 +622,20 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await clickNode('da1');
     await vi.waitFor(() => expect(refNames('audio-ref-thumb').length).toBe(3));
 
-    // 满 3 段：添加参考入口整体隐藏（无按钮可发起资产/节点选择），无上传无新线
-    const addBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (b) => (b.getAttribute('title') ?? '').includes('从资产中选择 / 从节点添加素材'),
+    // 满 3 段：「已达上限」文案保留在附件栏原位；操作条两按钮常显但 aria-disabled 置灰，
+    // 悬停说明已达上限，点击不发起资产/节点选择（无上传无新线）
+    await vi.waitFor(() => expect(container.textContent).toContain('已达上限'));
+    const fullPills = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(
+      (b) => b.textContent === '参考' || b.textContent === '资产库',
     );
-    expect(addBtn).toBeUndefined();
+    expect(fullPills).toHaveLength(2);
+    for (const btn of fullPills) {
+      expect(btn.getAttribute('aria-disabled')).toBe('true');
+      expect(btn.getAttribute('title')).toBe('参考音频最多 3 段，已达上限');
+    }
+    await act(async () => {
+      fullPills[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
     expect(edgePairs().length).toBe(3);
     expect(uploadMocks.uploadAssetFile).not.toHaveBeenCalled();
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();

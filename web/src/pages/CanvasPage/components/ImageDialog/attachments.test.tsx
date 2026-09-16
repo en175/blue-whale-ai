@@ -3,7 +3,6 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment, type UploadedFile } from './index';
-import { REF_SOURCE_ENTRY_TITLE } from '../RefSourceMenu';
 import thumbStyles from '../RefThumbnail/index.module.css';
 
 /* IKDLQF/IKFCKN：ImageDialog 文本附件——以 FileText 图标缩略图进入参考栏统一序列，
@@ -66,10 +65,10 @@ async function renderDialog(props: {
 /** 参考栏内文本缩略图（dock-text-ref）与媒体缩略图（本地模式默认 ref-thumb） */
 const textThumbs = () => [...container.querySelectorAll('[data-testid="dock-text-ref"]')];
 const mediaThumbs = () => [...container.querySelectorAll('[data-testid="ref-thumb"]:not([data-testid="dock-text-ref"])')];
-/** 参考栏子节点的 testid 序列（校验媒体在前、文本在后、末尾「+」占位） */
+/** 参考栏子节点的 testid 序列（校验媒体在前、文本在后；栏尾旧「+」入口随 IKGB7U 操作条退役） */
 const rowTestids = () =>
   [...(container.querySelector('[class*="previewRow"]')?.children ?? [])].map((el) =>
-    el.getAttribute('data-testid') ?? (el.querySelector(`button[title="${REF_SOURCE_ENTRY_TITLE}"]`) ? '+' : '?'),
+    el.getAttribute('data-testid') ?? '?',
   );
 
 // React 的 onMouseEnter/Leave 由根委托的 mouseover/mouseout 合成派发（与 RefThumbnail 组件测试同法）
@@ -131,8 +130,8 @@ describe('IKFCKN 文本附件进参考栏', () => {
     // 编号圆钮仅显示数字：与附件顺序同源（文本1/文本2 → 1/2）
     expect(thumbs[0].querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('1');
     expect(thumbs[1].querySelector('[data-testid="ref-thumb-badge"]')?.textContent).toBe('2');
-    // 同排顺序：媒体在前、文本在后、末尾「+」占位
-    expect(rowTestids()).toEqual(['ref-thumb', 'dock-text-ref', 'dock-text-ref', '+']);
+    // 同排顺序：媒体在前、文本在后（栏尾旧「+」占位随 IKGB7U 操作条退役）
+    expect(rowTestids()).toEqual(['ref-thumb', 'dock-text-ref', 'dock-text-ref']);
   });
 
   it('独立「文本附件（N）」区块不再出现：无区块标题、无折叠正文、无上移/下移', async () => {

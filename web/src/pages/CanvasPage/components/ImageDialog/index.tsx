@@ -38,7 +38,7 @@ import { cardNameOfNode, localNodeIdOf } from '../../mediaRefs';
 import type { MediaGenStatus } from '../MediaNode';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import AtMentionMenu from '../AtMentionMenu';
-import RefSourceMenu from '../RefSourceMenu';
+import AttachmentActionBar from '../AttachmentActionBar';
 import { type AtMentionItem } from '../../atMention';
 import type { FollowDialogAnchor } from '../../followDialog';
 import styles from './index.module.css';
@@ -363,6 +363,17 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
   const hasAttachmentText = (attachments ?? []).some((a) => a.text.trim().length > 0);
   /** 生成中只读（IKDMQQ）：任务执行期间目标参数冻结，保留查看与画布上的取消入口 */
   const readOnly = uploading || draftBinding?.submitting === true || draftBinding?.status === 'generating';
+  /** 生成中只读原因（操作条悬停原因与只读提示条同一文案来源） */
+  const readOnlyReason = draftBinding?.status === 'generating'
+    ? '生成中，参数与连线只读；可在画布卡片上取消生成'
+    : '正在保存并提交，参数与连线只读';
+  /** 附件操作条禁用原因（IKGB1X：常显置灰 + 悬停说明，替代旧「入口消失」口径）：
+   *  生成中只读优先，其次附件达上限（与旧栏尾「+」的隐藏门控一一对应） */
+  const actionBarDisabledReason = readOnly ? readOnlyReason
+    : imagesFull ? `参考图片最多 ${maxImages} 张，已达上限`
+    : null;
+  /** 附件栏空态派生（IKGB1X）：无任何附件项（媒体参考 + 文本附件）时整条不渲染，不引入新的持久状态 */
+  const stripHasItems = (edgeRefs ? edgeRefs.length : files.length) > 0 || (attachments?.length ?? 0) > 0;
   /** IKFR4X 持续选取会话锁定：模式中隔离提示词编辑、模型切换与生成（须先完成选取）；
    *  Dock 参考移除、来源入口与关闭不受限（规格 AC-07） */
   const pickLocked = pickMode === true;
@@ -733,12 +744,37 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
       <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
       {/* 输入卡片 */}
       <div className={styles.inputBox}>
-        {/* 顶部：素材预览 + 右上角操作 */}
-        <div className={styles.topRow}>
+        {/* 第一行：附件操作条（IKGB1X，三面板共用共享组件）——左「+ 参考」「资产库」pill
+            直达原菜单两项链路，右侧并入原展开/关闭按钮；达上限与生成中只读时置灰并悬停说明原因 */}
+        <AttachmentActionBar
+          kind="image"
+          onPickFromCanvas={() => onPickFromCanvas?.()}
+          onPickFromAssets={() => onPickFromAssets?.()}
+          pickMode={pickMode}
+          disabledReason={actionBarDisabledReason}
+          trailing={(
+            <>
+              <button
+                className={styles.iconBtn}
+                onClick={() => setExpanded((v) => !v)}
+                title={expanded ? '收起' : '展开'}
+              >
+                {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
+              </button>
+              <button className={styles.iconBtn} onClick={onClose} title="关闭">
+                <X size={14} strokeWidth={2} />
+              </button>
+            </>
+          )}
+        />
+
+        {/* 附件栏（IKGB1X 空态整条隐藏）：有附件时出现在操作条与输入框之间——
+            IKFCKK：附件条替换为共享参考缩略图（三态交互），编号圆钮仅显示数字、
+            底部「图片N」文字标签随旧自绘实现下线；× 走既有断开引用链路、@ 复用记忆光标插入。
+            IKFCKT：媒体与文本按稳定身份序混排，dragProps 使用实际 DOM 对应的统一 index。
+            栏尾旧「+」菜单（RefSourceMenu 普通变体）随操作条落地自图片面板退役（IKGB7U）。 */}
+        {stripHasItems && (
           <div className={styles.previewRow}>
-            {/* IKFCKK：附件条替换为共享参考缩略图（三态交互），编号圆钮仅显示数字、
-                底部「图片N」文字标签随旧自绘实现下线；× 走既有断开引用链路、@ 复用记忆光标插入。
-                IKFCKT：媒体与文本按稳定身份序混排，dragProps 使用实际 DOM 对应的统一 index */}
             {mixedStrip.render(edgeRefs
               ? edgeRefs.map((r, i) => (
                   <RefThumbnail
@@ -784,36 +820,12 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
                 onInsertRef={!readOnly ? () => insertRefByKey(a.nodeId) : undefined}
               />
             )))}
-            {/* 附件队列末尾：统一附件来源入口（IKFE8T，上传入口已退役）——
-                「从资产中选择 / 从节点添加素材」两项菜单；图片达上限或生成中只读时隐藏 */}
-            {!imagesFull && !readOnly && (
-              <RefSourceMenu
-                onPickFromAssets={() => onPickFromAssets?.()}
-                onPickFromCanvas={() => onPickFromCanvas?.()}
-                pickMode={pickMode}
-              />
-            )}
           </div>
-
-          <div className={styles.topActions}>
-            <button
-              className={styles.iconBtn}
-              onClick={() => setExpanded((v) => !v)}
-              title={expanded ? '收起' : '展开'}
-            >
-              {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
-            </button>
-            <button className={styles.iconBtn} onClick={onClose} title="关闭">
-              <X size={14} strokeWidth={2} />
-            </button>
-          </div>
-        </div>
+        )}
 
         {/* 生成中只读提示（IKDMQQ）：任务执行期间参数冻结，取消入口在画布卡片上 */}
         {readOnly && (
-          <div className={styles.readOnlyHint}>{draftBinding?.status === 'generating'
-            ? '生成中，参数与连线只读；可在画布卡片上取消生成'
-            : '正在保存并提交，参数与连线只读'}</div>
+          <div className={styles.readOnlyHint}>{readOnlyReason}</div>
         )}
 
         {/* 输入框 */}
