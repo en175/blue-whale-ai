@@ -1,5 +1,11 @@
 # IKFJJT 生产模型能力数据更新清单
 
+> ⚠️ **2026-09-16（IKG4UR）起，本清单里 `allowed_durations`（按任务类型的时长约束）一栏作废——不要再按它配数据。**
+> 官方口径是**连续区间**（Seedance 2.0 系 4–15 整数秒、2.5 4–30），当初写成枚举导致滑杆给得出的
+> 6–9 / 7·9·11… 提交必被 400。时长唯一来源现为**基础行 `supported_durations`**（对象 `{min,max,step}`；
+> 非空 ⟺ 该模型时长可配，音频上游无 duration 参数故置 NULL）。见 ADR-0086 修订段。
+> `task_types[*].allowed_ratios`（比例）**不受影响，照本清单执行**。
+
 > 后台模型配置页 `https://web.master.xfai.cloud/admin/models`，逐行按下表补齐/核正。代码已配好读侧缺省（旧行不配置行为不变），但**生产要真正生效必须改后台数据**。种子 `002_seed.sql` 已同步（新建库自洽）。
 
 ## 通用说明（能力键，features JSON）

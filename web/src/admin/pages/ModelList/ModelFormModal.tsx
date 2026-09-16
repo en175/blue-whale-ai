@@ -173,7 +173,9 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
 
   const copyOptions = models.filter((m) => m.capability_type === type);
   const showSizeRatio = type === 'image' || type === 'video';
-  const showDuration = type === 'video' || type === 'audio';
+  // IKG4UR：时长只对视频可配。音频上游是 TTS 式接口（请求无 duration），
+  // 库里音频行的 supported_durations 已置 NULL——放开表单只会让运营把死配置加回来。
+  const showDuration = type === 'video';
   const showFormat = type === 'audio' || type === 'video';
   const showExtraJson = type === 'image' || type === 'video';
 
@@ -277,6 +279,9 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
       durationMin,
       durationMax,
       durationStep,
+      // IKG4UR：按该行原本的形态写回。数组与对象在读侧语义不同（档位列表 vs 区间），
+      // 保存时改形态会把时长约束悄悄改掉；新建行用对象（区间语义无歧义）。
+      durationShape: Array.isArray(initial?.supported_durations) ? 'array' : 'object',
       formats,
       defaultSize,
       defaultRatio,

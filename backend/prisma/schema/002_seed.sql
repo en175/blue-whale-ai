@@ -63,7 +63,10 @@ INSERT INTO generation_model_capability (
       JSON_OBJECT('id', '4k', 'label', '4K', 'api_value', '4k')
     ),
     JSON_ARRAY('16:9', '9:16', '1:1'),
-    JSON_ARRAY(5, 10),
+    -- IKG4UR：时长唯一的权威来源（对象形态，与 Seedance 2.5 一致）。
+    -- 数值按官方口径：2.0 系列支持 4–15 整数秒。此前后端另有一层 task_types[*].allowed_durations
+    -- 枚举（把连续区间错写成若干档），导致 6–9 秒被误拒——该枚举已移除，时长只此一处。
+    JSON_OBJECT('min', 4, 'max', 15, 'step', 1),
     JSON_ARRAY('mp4'),
     '720p',
     'mp4',
@@ -88,7 +91,7 @@ INSERT INTO generation_model_capability (
       'image_reference_max', 1,
       'max_reference_duration_sec', 15,
       'task_types', JSON_OBJECT(
-        'default', JSON_OBJECT('allowed_ratios', JSON_ARRAY('16:9', '9:16', '1:1'), 'allowed_durations', JSON_ARRAY(5, 10)),
+        'default', JSON_OBJECT('allowed_ratios', JSON_ARRAY('16:9', '9:16', '1:1')),
         'first_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('16:9', '9:16', '1:1')),
         'first_last_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('16:9', '9:16', '1:1'))
       )
@@ -133,11 +136,11 @@ INSERT INTO generation_model_capability (
       'image_reference_max', 30,
       'max_reference_duration_sec', 30,
       'task_types', JSON_OBJECT(
-        'default', JSON_OBJECT('allowed_ratios', JSON_ARRAY('21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'), 'allowed_durations', JSON_ARRAY(4, 5, 6, 8, 10, 12, 15, 20, 25, 30)),
+        'default', JSON_OBJECT('allowed_ratios', JSON_ARRAY('21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive')),
         'first_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive')),
         'first_last_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive')),
-        'edit', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive'), 'allowed_durations', JSON_ARRAY(-1)),
-        'prolong', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive'), 'allowed_durations', JSON_ARRAY(4, 5, 6, 8, 10, 12, 15, 20, 25, 30, -1))
+        'edit', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive')),
+        'prolong', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive'))
       )
     ),
     TRUE,
@@ -171,7 +174,11 @@ INSERT INTO generation_model_capability (
     '豆包 Seed Audio 1.0',
     JSON_ARRAY(),
     JSON_ARRAY(),
-    JSON_ARRAY(1, 120),
+    -- IKG4UR：音频**没有可配时长**——上游 Seed Audio 是 TTS 式接口（text_prompt + audio_config），
+    -- 时长由文案决定、请求里没有 duration 参数。原先这里放的 1–120 只是「区间提示」，
+    -- 既不被前端读、也不被后端校验，是死配置。置 NULL 以维持
+    -- 「supported_durations 非空 ⟺ 该模型时长可配」这条不变式（与图片/文生文行一致）。
+    NULL,
     JSON_ARRAY('mp3'),
     '',
     'mp3',

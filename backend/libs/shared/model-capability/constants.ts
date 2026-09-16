@@ -143,6 +143,34 @@ function isNumberArray(v: unknown): v is number[] {
   );
 }
 
+/** IKG4UR：`supported_durations` 的合法形态——数字数组、时长范围对象 `{min,max,step?}` 或 null。
+ *  库中两种形态长期并存：数组在读侧按 `[min,max,step]` 解析（见 toDurationRange），对象是区间的显式写法。
+ *  写侧此前只收数组，后台把对象行读成空后写回 null，直接把该行清空。
+ *  放行对象才能做到「读什么写什么」——一次保存不改变该行原本的语义。 */
+function isDurationRange(v: unknown): boolean {
+  if (v === null) return true;
+  if (Array.isArray(v)) {
+    // 数组是历史形态，读侧仍在生效（toDurationRange 按 [min,max,step] 解析）。
+    // 但只有「能构成合法区间」的才放行——`[]` / `[5]` / `[30,4]` / 负值 / step<=0
+    // 都会造出「滑杆消失 + 该模型任何时长都被 400」的坏行，且后台因 min>max 也修不回。
+    // 形态唯一性由写入闸门兜底，不能只靠前端。
+    return (
+      v.length >= 2 &&
+      v.length <= 3 &&
+      v.every((x) => typeof x === "number" && Number.isFinite(x) && x >= 0) &&
+      (v[0] as number) <= (v[1] as number) &&
+      (v[2] === undefined || (v[2] as number) > 0)
+    );
+  }
+  if (!isPlainObject(v)) return false;
+  const { min, max, step } = v as Record<string, unknown>;
+  if (typeof min !== "number" || !Number.isFinite(min) || min < 0) return false;
+  if (typeof max !== "number" || !Number.isFinite(max) || max < 0) return false;
+  if (min > max) return false;
+  if (step === undefined || step === null) return true;
+  return typeof step === "number" && Number.isFinite(step) && step > 0;
+}
+
 function isSizeArray(v: unknown): boolean {
   return (
     Array.isArray(v) &&
@@ -176,8 +204,8 @@ function jsonField(
     return `${label}须为字符串数组`;
   if (allowed === "numberArray" && !isNumberArray(v))
     return `${label}须为数字数组`;
-  if (allowed === "nullNumberArray" && v !== null && !isNumberArray(v))
-    return `${label}须为数字数组或 null`;
+  if (allowed === "nullNumberArray" && !isDurationRange(v))
+    return `${label}须为数字数组、{min,max,step} 对象或 null`;
   if (allowed === "features" && !isPlainObject(v))
     return `${label}须为 JSON 对象`;
   return null;

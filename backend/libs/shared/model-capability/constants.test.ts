@@ -56,6 +56,67 @@ describe("parseModelCreateBody", () => {
   });
 });
 
+describe("时长形态闸门（IKG4UR）", () => {
+  const base = {
+    model_id: "doubao-seedance-2-5-260628",
+    capability_type: "video",
+    model_label: "Seedance 2.5",
+    icon: null,
+  };
+
+  it("create/update：对象形态 {min,max,step} 放行——后台按原形态写回才不会被 400 顶回", () => {
+    expect(parseModelCreateBody({ ...base, supported_durations: { min: 4, max: 30, step: 1 } }))
+      .toMatchObject({ ok: true, value: { supported_durations: { min: 4, max: 30, step: 1 } } });
+    expect(parseModelUpdateBody({ supported_durations: { min: 4, max: 30 } }))
+      .toMatchObject({ ok: true, value: { supported_durations: { min: 4, max: 30 } } });
+  });
+
+  it("create：数组形态与 null 仍然放行（旧行为不变）", () => {
+    expect(parseModelCreateBody({ ...base, supported_durations: [5, 10] }))
+      .toMatchObject({ ok: true, value: { supported_durations: [5, 10] } });
+    expect(parseModelCreateBody({ ...base, supported_durations: null }))
+      .toMatchObject({ ok: true, value: { supported_durations: null } });
+  });
+
+  it("create：非法对象被拒——min/max 非数字、负值、min>max、step<=0、非对象", () => {
+    for (const bad of [
+      { min: "4", max: 30 },
+      { min: 4 },
+      { min: -1, max: 30 },
+      { min: 30, max: 4 },
+      { min: 4, max: 30, step: 0 },
+      "4-30",
+    ]) {
+      const parsed = parseModelCreateBody({ ...base, supported_durations: bad });
+      expect(parsed.ok).toBe(false);
+    }
+  });
+
+  it("create：非法数组被拒——这些形态会造出「滑杆消失 + 全时长 400」的坏行", () => {
+    for (const bad of [
+      [], // [].includes(d) 恒 false → 该模型任何时长都被拒
+      [5], // 滑杆消失，只有 5 能过
+      [30, 4], // max<min → toDurationRange 返回 null、durationInRange 恒 false
+      [-1, 30], // -1 是「智能时长」哨兵，不是区间端点
+      [5, 30, 0], // step 0 会把滑杆钉死在 min
+      [5, 30, -1],
+    ]) {
+      const parsed = parseModelCreateBody({ ...base, supported_durations: bad });
+      expect(parsed.ok).toBe(false);
+    }
+  });
+
+  it("create：合法数组仍放行（存量历史形态，读侧按 [min,max,step] 解析）", () => {
+    for (const good of [
+      [5, 10],
+      [4, 30, 1],
+    ]) {
+      const parsed = parseModelCreateBody({ ...base, supported_durations: good });
+      expect(parsed.ok).toBe(true);
+    }
+  });
+});
+
 describe("parseModelUpdateBody", () => {
   it("更新为 gpt 时必须带 request_mapping", () => {
     const parsed = parseModelUpdateBody({
