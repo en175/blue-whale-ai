@@ -70,6 +70,8 @@ import type { AssetCardKind } from './components/AssetCardNode';
 import type { CanvasProject } from './components/ProjectSelector';
 import FlowCanvas from './components/Canvas';
 import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
+import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
+import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
 import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchQuota, toSessionUser } from '@/api/auth';
@@ -731,6 +733,8 @@ export default function CanvasPage() {
    *  经 Canvas 内部 setNodes 应用——直接经 nodes selected 字段传播会因 React Flow
    *  selection store 的时序差报双选中，把自动打开的绑定面板当多选误关 */
   const [selectRequest, setSelectRequest] = useState<{ id: string; ts: number } | null>(null);
+  /** 粘贴自动多选请求（IKGBPA）：机制同 selectRequest，一次选中整组新副本 */
+  const [selectManyRequest, setSelectManyRequest] = useState<{ ids: string[]; ts: number } | null>(null);
   /** 首页 AI视频/AI图片 生成交接：消费后置入此 ref，待项目就绪触发创建任务 */
   const pendingGenRef = useRef<GenHandoff | null>(null);
   /** 首页 AI视频 带入的草稿参数种子：待项目与文档就绪后新建视频草稿卡并打开绑定面板 */
@@ -1005,6 +1009,16 @@ export default function CanvasPage() {
    *  覆盖点选 / 新建 / 删除后自动切换 / 地址栏前进后退等全部 currentId 迁移路径。
    *  空串 → 首项目 是初始水合（含首页交接降级路径），不是用户切换，不关面板。 */
   const prevProjectIdRef = useRef(currentId);
+  /** 画布内部剪贴板快照节点（IKGBPA）：kind + 定格坐标 + JSON 深拷贝 data（无函数回调，粘贴时重注入） */
+  interface CanvasClipboardSnapshot {
+    kind: 'text' | 'media';
+    position: { x: number; y: number };
+    data: Record<string, unknown>;
+  }
+  /** 画布内部剪贴板（IKGBPA）：不持久化、不写系统剪贴板；切换项目清空（对齐撤销栈不跨项目） */
+  const clipboardSnapshotRef = useRef<CanvasClipboardSnapshot[]>([]);
+  /** 连续粘贴偏移计数：每次成功 V 整组右下错开一档，每次成功 C 归零 */
+  const clipboardPasteOffsetRef = useRef(0);
   useEffect(() => {
     const prev = prevProjectIdRef.current;
     prevProjectIdRef.current = currentId;
@@ -1017,6 +1031,9 @@ export default function CanvasPage() {
     setFocusViewport(undefined);
     // 撤销/重做栈不跨项目（PRD §7.2 X1：不跨会话）
     historyRef.current?.clear();
+    // 画布剪贴板不跨项目（IKGBPA）
+    clipboardSnapshotRef.current = [];
+    clipboardPasteOffsetRef.current = 0;
   }, [currentId]);
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
@@ -1566,8 +1583,9 @@ export default function CanvasPage() {
     return () => window.clearTimeout(timer);
   }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch]);
 
-  /** 创建文本节点（正文为受限 Markdown 源，契约 §5 新建一律 v1 形态） */
-  const handleAddTextNode = (position?: { x: number; y: number }, text?: string) => {
+  /** 创建文本节点（正文为受限 Markdown 源，契约 §5 新建一律 v1 形态）；
+   *  返回新节点 id（供 IKGBPB 系统剪贴板兜底粘贴后选中） */
+  const handleAddTextNode = (position?: { x: number; y: number }, text?: string): string => {
     const newNode: Node = {
       id: newNodeId('text'),
       type: 'textNode',
@@ -1594,6 +1612,7 @@ export default function CanvasPage() {
     pendingNodeIdsRef.current.add(newNode.id);
     historyRef.current?.pushAddNodes([newNode.id]);
     setTextNodes((prev) => [...prev, newNode]);
+    return newNode.id;
   };
 
   /** 复制节点到旁边（副本进撤销栈，IKD0JT：撤销移除副本） */
@@ -1621,6 +1640,114 @@ export default function CanvasPage() {
       historyRef.current?.pushAddNodes([copy.id]);
       setMediaNodes((prev) => [...prev, copy]);
     }
+  };
+
+  /* ============ 画布内部剪贴板（IKGBPA）：Ctrl/Cmd+C 快照 / Ctrl/Cmd+V 粘贴 ============ */
+
+  /** 连续粘贴整组错开步长（右下逐档，对齐立即复制 +40/+40 偏移惯例） */
+  const CLIPBOARD_PASTE_STAIR_PX = 40;
+
+  /** 下一次粘贴的落位锚点（IKGBPA 快照粘贴与 IKGBPB 系统剪贴板兜底共用）：
+   *  视口中心锚点 + 当前档阶梯偏移，并自增档位；档位只在粘贴确定产出内容时消耗
+   *  （系统剪贴板读取失败/双空在调用前已静默返回，不进本函数）。 */
+  const nextPasteAnchor = (): { x: number; y: number } => {
+    const stair = CLIPBOARD_PASTE_STAIR_PX * clipboardPasteOffsetRef.current;
+    clipboardPasteOffsetRef.current += 1;
+    const anchor = spawnPosRef.current();
+    return { x: anchor.x + stair, y: anchor.y + stair };
+  };
+
+  /** C 快照定格（IKGBPA）：深拷贝选中卡（JSON 克隆剥掉回调，粘贴时经 attachCallbacks 重注入）；
+   *  原卡后续删除/改名/编辑/生成完成均不影响快照。ids 已由 Canvas 入口过滤为文本/媒体卡。 */
+  const handleCopySelectedNodes = (ids: string[]) => {
+    const idSet = new Set(ids);
+    const picked: Node[] = [
+      ...textNodesRef.current.filter((n) => idSet.has(n.id)),
+      ...mediaNodesRef.current.filter((n) => idSet.has(n.id)),
+    ];
+    if (picked.length === 0) return;
+    clipboardSnapshotRef.current = picked.map((n) => ({
+      kind: n.type === 'mediaNode' ? ('media' as const) : ('text' as const),
+      position: { ...n.position },
+      data: JSON.parse(JSON.stringify(n.data ?? {})) as Record<string, unknown>,
+    }));
+    // 每次成功复制重置连续粘贴偏移
+    clipboardPasteOffsetRef.current = 0;
+  };
+
+  /** V 粘贴（IKGBPA）：视口中心落位 + 多卡按快照原相对位置整体落位 + 连续粘贴整组右下递增错开；
+   *  手拉连线不随贴（只产散卡）；文本卡副本按 IKFM3Q 契约 §4 重建正文 @ 引用派生索引线；
+   *  撤销登记两条目（同既有立即复制 handleDuplicateNode 形态）：节点组「新增节点」一条、
+   *  派生索引线「新增连线」一条，连按 Z 整体回净；悬空派生线由 IKDLQF 级联清理。
+   *  IKGBPB：内部剪贴板为空时不再静默，改走系统剪贴板兜底（pasteFromSystemClipboard）。 */
+  const handlePasteClipboard = () => {
+    // 内部剪贴板优先：有快照完全不读系统剪贴板（连读取 API 都不触发）
+    if (clipboardSnapshotRef.current.length === 0) {
+      void pasteFromSystemClipboard();
+      return;
+    }
+    const snapshot = clipboardSnapshotRef.current;
+    const anchor = nextPasteAnchor();
+    const minX = Math.min(...snapshot.map((s) => s.position.x));
+    const minY = Math.min(...snapshot.map((s) => s.position.y));
+    const textCopies: Node[] = [];
+    const mediaCopies: Node[] = [];
+    const newIds: string[] = [];
+    snapshot.forEach((s) => {
+      const position = {
+        x: Math.round(anchor.x + (s.position.x - minX)),
+        y: Math.round(anchor.y + (s.position.y - minY)),
+      };
+      const data = JSON.parse(JSON.stringify(s.data)) as Record<string, unknown>;
+      if (s.kind === 'text') {
+        // 会话性提示词来源字段不随副本（对齐 handleDuplicateNode 的字段清理）
+        delete data.promptSource;
+        delete data.promptMaterials;
+        delete data.promptMentions;
+        delete data.promptOriginalTitle;
+        const copy = attachCallbacks({ id: newNodeId('text'), type: 'textNode', position, data });
+        textCopies.push(copy);
+        newIds.push(copy.id);
+      } else {
+        const copy = attachCallbacks({ id: newNodeId('media'), type: 'mediaNode', position, data });
+        mediaCopies.push(copy);
+        newIds.push(copy.id);
+      }
+    });
+    newIds.forEach((id) => pendingNodeIdsRef.current.add(id));
+    historyRef.current?.pushAddNodes(newIds);
+    if (textCopies.length > 0) setTextNodes((prev) => [...prev, ...textCopies]);
+    if (mediaCopies.length > 0) setMediaNodes((prev) => [...prev, ...mediaCopies]);
+    // IKFM3Q 契约 §4：副本随正文复制 media 索引；来源节点仍在画布的关系线同步复制（副本获得有效索引）
+    textCopies.forEach((copy) => {
+      const mentionedSources = [...new Set(((copy.data.mediaMentions ?? []) as MediaMention[]).map(mention => mention.nodeId))]
+        .filter(source => findCanvasNode(source));
+      if (mentionedSources.length > 0) syncTextIndexEdges(copy.id, { added: mentionedSources, removed: [] });
+    });
+    // 新卡自动选中（整组副本）
+    setSelectManyRequest({ ids: newIds, ts: Date.now() });
+  };
+
+  /** IKGBPB 系统剪贴板兜底（内部剪贴板为空时的 V 粘贴）：与卡片右键菜单「粘贴」项共用
+   *  readCanvasClipboard 读取底层（图片优先、纯文本兜底）；图片走 placeFileOnCanvas 文件
+   *  落卡链路（「新增节点」撤销登记、上传后补永久 URL 均为链路既有行为），文本走新建文本卡
+   *  路径；视口中心 + 连续粘贴阶梯 + 新卡自动选中复用 IKGBPA 基座机制——落位在读取返回后
+   *  同步结算，连续快速按 V 时各次粘贴拿到递增档位互不重叠，且双空不消耗档位；
+   *  系统剪贴板为空或读取失败安静返回（双空静默，无 toast）。 */
+  const pasteFromSystemClipboard = async () => {
+    const payload = await readCanvasClipboard();
+    if (!payload) return;
+    const anchor = nextPasteAnchor();
+    const position = { x: Math.round(anchor.x), y: Math.round(anchor.y) };
+    if (payload.kind === 'image') {
+      // 上传失败时节点自移除并由落卡链路内既有 toast 提示；这里只吞 rejection 不额外提示
+      await placeFileOnCanvas(payload.file, { position })
+        .then((done) => setSelectManyRequest({ ids: [done.nodeId], ts: Date.now() }))
+        .catch(() => undefined);
+      return;
+    }
+    const nodeId = handleAddTextNode(position, payload.text);
+    setSelectManyRequest({ ids: [nodeId], ts: Date.now() });
   };
 
   /**
@@ -4012,17 +4139,24 @@ export default function CanvasPage() {
   });
   historyRef.current = canvasHistory;
   /** 撤销/重做快捷键（IKD0JT A2）：Ctrl/Cmd+Z 撤销、Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做；
-   *  输入框/编辑器内不拦截（文字编辑不进画布撤销栈，PRD §7.2 R1） */
+   *  输入框/编辑器内不拦截（文字编辑不进画布撤销栈，PRD §7.2 R1）；
+   *  @ 菜单打开期间键盘归菜单处理（IKGBPC 补齐，Esc 链同款检测）。
+   *  按键判定收口在 canvasUndoKeyAction 纯函数，本监听只留副作用。 */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (applyingRef.current) return;
-      if (isEditableKeyboardTarget(e.target)) return;
-      if (!(e.metaKey || e.ctrlKey)) return;
-      const key = e.key.toLowerCase();
-      if (key !== 'z' && key !== 'y') return;
+      const action = canvasUndoKeyAction({
+        key: e.key,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        shiftKey: e.shiftKey,
+        target: e.target,
+        mentionMenuOpen: isMentionMenuOpen(),
+      });
+      if (action === 'ignore') return;
       e.preventDefault();
       e.stopPropagation();
-      if (key === 'y' || e.shiftKey) canvasHistory.redo();
+      if (action === 'redo') canvasHistory.redo();
       else canvasHistory.undo();
     };
     document.addEventListener('keydown', handler, true);
@@ -6818,6 +6952,7 @@ export default function CanvasPage() {
           }
           refPickBlockedIds={videoPickSessionActive ? videoPickBlockedIds : undefined}
           selectRequest={selectRequest}
+          selectManyRequest={selectManyRequest}
           productPickResult={productPickResult}
           assetPickResult={assetPickResult}
           onDeleteNode={(ids) => {
@@ -6826,6 +6961,8 @@ export default function CanvasPage() {
             removeCanvasNodes(ids);
           }}
           onDuplicateSelected={(ids) => ids.forEach((id) => actionsRef.current.duplicate(id))}
+          onCopySelected={handleCopySelectedNodes}
+          onPasteClipboard={handlePasteClipboard}
           groups={groups}
           onCreateGroup={handleCreateGroup}
           onUngroupGroup={handleUngroup}
