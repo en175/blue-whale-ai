@@ -78,7 +78,11 @@ ADR-0077 当时明确否决过「创建生成任务时同步调 `GetAsset` 预�
 
    这一条是**真实联调逼出来的**：原先非 2xx 一律按「查不到」处理，用户对一张已被删除的素材会拿到「请稍后重试」，然后永远重试不成功、也永远得不到解释。
 
-7. **拦截点：创建期 + 重试期两处。** worker 提交期不重复校验——状态存在漂移窗口，上游届时本就会拒，在 worker 里加第二次查询只会增加复杂度且给不出更好的错误。   **门只对 `video` 生效**。素材库绑定只有视频参考会消费（worker 在视频提交时把已绑本地 Asset 转成 `asset://<material_id>`；`AudioJobProcessor` 根本不看 material 绑定）。但音频的 `references` 也带 `asset_id`（`composeInput` 原样冻结），不按类型短路就会拿「不能用于视频生成」去拒一个音频任务——纯误伤。实现上由调用方把任务类型带进 `assertInputUsable`，非 video 直接返回放行、连本地 Asset 解析都不跑。
+7. **拦截点：三条视频创建路径——创建期 + 重试期 + 场景卡再生成。** worker 提交期不重复校验——状态存在漂移窗口，上游届时本就会拒，在 worker 里加第二次查询只会增加复杂度且给不出更好的错误。
+
+   **三条都必须接，缺一条就是洞。** 场景卡再生成（`POST /api/projects/:id/scene-cards/:sceneCardId/generate` → `regenerateSceneCard`）是初版漏掉的第三条：它同样产出 `source=scene_card` 的视频 job，冻结 input 同样带 `first_frame_asset_id` / `reference_asset_ids`，worker 执行时照转 `asset://`。漏掉它的后果与决策 3 想避免的完全同形——预设保存之后变成 `Failed` 的素材仍能从这里进生成。
+
+   接线方式与重试期一致：`regenerateSceneCard` 收 `guardInput` 回调，**但位置比重试期更靠前——必须放在该函数那一组「前置检查」里（`flatReferences` 解析之后、任何写入之前）**。原因：这个事务在 `return` 时是正常提交的，而它「先 UPDATE preset 再建 job」；门若放在 preset 更新之后，一次被拒的再生成会把 preset 版本推进却不建任何 job，留下脏状态。重试期没有这个约束（那里建 job 之前没有别的写）。   **门只对 `video` 生效**。素材库绑定只有视频参考会消费（worker 在视频提交时把已绑本地 Asset 转成 `asset://<material_id>`；`AudioJobProcessor` 根本不看 material 绑定）。但音频的 `references` 也带 `asset_id`（`composeInput` 原样冻结），不按类型短路就会拿「不能用于视频生成」去拒一个音频任务——纯误伤。实现上由调用方把任务类型带进 `assertInputUsable`，非 video 直接返回放行、连本地 Asset 解析都不跑。
 
    重试期的门**必须落在「幂等重放命中之后、建新行之前」**（实现上由 `retryJob` 接收 `guardInput` 回调，在事务内该位置调用）。三个位置的取舍：
    - 提到事务外或调用方 → 拿不到「本次是不是重放」，会把**既有**的重试结果按此刻素材状态改写，破坏幂等；
@@ -106,11 +110,7 @@ ADR-0077 当时明确否决过「创建生成任务时同步调 `GetAsset` 预�
 
 ## 已知缺口（本期不修，单独跟进）
 
-1. **场景卡再生成是第三条视频创建路径，未过门。** `POST /api/scene-cards/:id/generate` → `regenerateSceneCard` → `createJobWithinTx` 直建视频 job，其冻结 input 同样带 `first_frame_asset_id` / `reference_asset_ids`（worker 执行时照转 `asset://`）。**决策 7 写的「创建期」本意覆盖它，但实现只接了 `handleCreateGenerationJob` 与 `retryJob` 两个入口。** 后果：预设保存后素材变 `Failed`，用它再生成仍能建出任务，届时由上游拒——与决策 3 想避免的「点了生成再白跑一次」同形。
-   未在本期修的理由：素材 id 是在 `regenerateSceneCard` 的**事务内**由 `resolveReferenceAssetsToFlat` 从 slot 解析出来的，事务外拿不到；补门要么在外面复制一遍解析逻辑，要么在这个「单事务原子再生成」里再发一次网络往返。属独立设计取舍，值得单独一单。
-   **前端文档已如实标注这个缺口**（`material-library.md` §5.1），不假装覆盖。
-
-2. **步骤②（清关联）会让「被拒」变成「下次能过」——按设计如此，但值得写明白。** 清空 `assets.material_id` 后，同一张本地 Asset 再进生成时不再被识别为素材库引用（门的规则是「没有 `material_id` → 放行」），worker 也退回本地 url。也就是说：**判定失败的素材不会再被这道门拦，而是以「普通本地素材」的身份继续可用。**
+1. **步骤②（清关联）会让「被拒」变成「下次能过」——按设计如此，但值得写明白。** 清空 `assets.material_id` 后，同一张本地 Asset 再进生成时不再被识别为素材库引用（门的规则是「没有 `material_id` → 放行」），worker 也退回本地 url。也就是说：**判定失败的素材不会再被这道门拦，而是以「普通本地素材」的身份继续可用。**
    这是「清关联」这个要求的直接推论，不是实现偏差；若要连本地 url 也拒，得给 `assets` 加一个独立的封禁标记（另一件事）。PRD 的成功指标口径（「未通过素材成为视频生成参考的次数 = 0」）在这一条上要按「素材库引用」而非「本地素材」解释。
 
 ## 被否方案

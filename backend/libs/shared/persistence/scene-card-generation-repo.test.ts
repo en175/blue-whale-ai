@@ -844,3 +844,54 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
   });
 
 });
+
+// IKF YHJ（ADR-0087）：场景卡再生成是第三条视频创建路径，与创建期/重试期共用同一个素材门。
+// 门必须在事务内、建 job 之前——那几个扁平引用字段是事务内从 slot 解析出来的。
+describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("门拒绝：返回 material_blocked，且**零写入**（不建 job / 不更新 preset / 不建 record）", async () => {
+    const tx = buildTx({});
+    const { repo } = repoWith(tx);
+    const guardInput = vi.fn().mockResolvedValue("该素材未审核通过，不能用于视频生成");
+
+    const result = await repo.regenerateSceneCard({ ...baseInput, guardInput });
+
+    expect(result).toEqual({
+      kind: "material_blocked",
+      reason: "该素材未审核通过，不能用于视频生成",
+    });
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
+    expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
+    expect(tx.scene_card_generation_records.create).not.toHaveBeenCalled();
+  });
+
+  it("门拿到的是事务内解析出的扁平引用（worker 会转 asset:// 的那批字段）", async () => {
+    const tx = buildTx({});
+    const { repo } = repoWith(tx);
+    const guardInput = vi.fn().mockResolvedValue(null);
+
+    const result = await repo.regenerateSceneCard({ ...baseInput, guardInput });
+
+    expect(result.kind).toBe("applied");
+    expect(guardInput).toHaveBeenCalledOnce();
+    // 建 job 用的 input 与喂给门的对象必须同源，否则门可能在查一批、执行时用另一批。
+    const jobInput = tx.generation_jobs.create.mock.calls[0][0].data.input;
+    const guarded = guardInput.mock.calls[0][0] as Record<string, unknown>;
+    for (const key of ["first_frame_asset_id", "last_frame_asset_id", "reference_asset_ids"]) {
+      expect(guarded[key]).toEqual(jobInput[key]);
+    }
+  });
+
+  it("未接线时不跑门（缺省行为与改造前一致）", async () => {
+    const tx = buildTx({});
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard(baseInput);
+
+    expect(result.kind).toBe("applied");
+    expect(tx.generation_jobs.create).toHaveBeenCalledOnce();
+  });
+});
