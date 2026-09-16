@@ -3008,7 +3008,10 @@ export default function CanvasPage() {
     let targetId = '';
     if (kind === 'video') {
       targetId = createVideoDraftCard(undefined, position);
-      sourceIds.forEach((id) => addCanvasEdge(id, targetId, 'reference'));
+      sourceIds.forEach((id) => {
+        if (videoRefSourceError(findCanvasNode(id), 'reference')) return;
+        addCanvasEdge(id, targetId, 'reference');
+      });
       openVideoDraftDialog(targetId);
       return;
     }
@@ -3582,6 +3585,11 @@ export default function CanvasPage() {
       if (materialByKey.has(item.nodeId)) continue;
       const node = mediaNodesRef.current.find((n) => n.id === item.nodeId);
       if (node) {
+        const failed = ((node.data ?? {}) as Record<string, unknown>).complianceFailed === true;
+        if (failed) {
+          showToast('warn', '合规校验未通过，不可用于视频生成');
+          return null;
+        }
         const materialId = await ensureMediaNodeCompliance(item.nodeId, { toastSuccess: false });
         if (!materialId) return null;
         materialByKey.set(item.nodeId, materialId);
@@ -4992,6 +5000,12 @@ export default function CanvasPage() {
       .map((e) => e.source);
   }, [videoPickSessionActive, videoPickSession, pickRefRole, edges, textNodes]);
 
+  /** 视频选取会话：合规未通过的素材置灰不可选 */
+  const videoPickBlockedIds = useMemo(
+    () => mediaNodes.filter((n) => ((n.data ?? {}) as Record<string, unknown>).complianceFailed === true).map((n) => n.id),
+    [mediaNodes],
+  );
+
   /** IKFR4Z 会话勾选标识：音频持续选取会话进行中，已并入原目标的媒体来源节点集合（连线推导，
    *  与 Dock 参考同源；音频参考无角色槽，全部连线来源计入）。文本附件来源无素材勾选语义，不计入。
    *  仅会话活跃时计算——普通模式不标记，勾选只表达当前目标与选择上下文 */
@@ -6300,7 +6314,15 @@ export default function CanvasPage() {
       return;
     }
     if (item.kind !== 'image' && item.kind !== 'video') return;
+    if (item.disabled) return;
     if (!item.assetId) return;
+    const sourceNode = findCanvasNode(item.id);
+    const roleCheck = videoDraftId ? videoEdgeRoleFor(videoDraftId) : 'reference';
+    const blocked = videoRefSourceError(sourceNode, roleCheck);
+    if (blocked) {
+      showToast('warn', blocked);
+      return;
+    }
     const refItem: VideoMediaRef = {
       nodeId: item.id,
       url: item.thumbUrl ?? '',
@@ -6774,6 +6796,7 @@ export default function CanvasPage() {
               : videoPickSessionActive ? videoPickMarkedIds
                 : imagePickMarkedIds
           }
+          refPickBlockedIds={videoPickSessionActive ? videoPickBlockedIds : undefined}
           selectRequest={selectRequest}
           productPickResult={productPickResult}
           assetPickResult={assetPickResult}
@@ -6999,7 +7022,11 @@ export default function CanvasPage() {
             onRemoveMaterialRef={videoDraftId ? ((materialId) => removeDraftMaterialRef(videoDraftId, materialId)) : removeVideoFreeRef}
             onReorderMediaRefs={videoDraftId ? ((keys) => handleReorderVideoMediaRefs(videoDraftId, keys)) : reorderVideoFreeRefs}
             onToast={(type, msg) => showToast(type, msg)}
-            mentionItems={atMentionItems.filter((item) => item.id !== videoDraftId)}
+            mentionItems={atMentionItems.filter((item) => item.id !== videoDraftId).map((item) => {
+              const node = mediaNodes.find((n) => n.id === item.id);
+              const failed = ((node?.data ?? {}) as Record<string, unknown>).complianceFailed === true;
+              return failed ? { ...item, disabled: true } : item;
+            })}
             onMentionCanvas={handleVideoAtMention}
             followAnchor={videoDraftId ? followAnchor : null}
             enabledModes={videoFollowModes}

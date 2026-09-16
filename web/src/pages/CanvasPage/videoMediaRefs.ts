@@ -194,6 +194,7 @@ export function videoRefSourceError(node: Node | undefined, role: VideoRefRole):
   const data = (node.data ?? {}) as Record<string, unknown>;
   if (role !== 'reference' && data.mediaType !== 'image') return '首尾帧仅支持图片素材';
   if (data.mediaType !== 'image' && data.mediaType !== 'video' && data.mediaType !== 'audio') return '视频参考仅支持图片、视频或音频素材';
+  if (data.complianceFailed === true) return '合规校验未通过，不可用于视频生成';
   return baseSourceError(node);
 }
 

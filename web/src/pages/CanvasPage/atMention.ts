@@ -13,6 +13,8 @@ export interface AtMentionItem {
   thumbUrl?: string;
   /** 媒体节点资产 ID，写入参考时复用 */
   assetId?: string;
+  /** 能力失效（如合规未通过）时置灰不可选 */
+  disabled?: boolean;
 }
 
 /** 画布来源参考音频 → @ 菜单同形态素材项（IKFCKS：缩略图 @ 与手动 @ 选择走同一

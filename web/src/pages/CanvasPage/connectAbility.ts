@@ -48,17 +48,25 @@ export function sourceKindOf(node: Node | undefined): ConnectSourceKind | null {
   return null;
 }
 
-/** 目标是否为生成节点（待生成 / 生成中 / 文本生成宿主） */
+/** 媒体生成宿主：草稿、生成中/失败，以及带 jobId 的成品生成卡（上传素材卡不算） */
+function isMediaGenHost(d: Record<string, unknown>): boolean {
+  if (d.draft === true) return true;
+  const status = d.genStatus;
+  if (status === 'draft' || status === 'generating' || status === 'failed' || status === 'cancelled') return true;
+  const jobId = d.jobId;
+  return typeof jobId === 'string' || typeof jobId === 'number';
+}
+
+/** 目标是否为生成节点（待生成 / 生成中 / 成品生成卡 / 文本生成宿主） */
 export function genKindOf(node: Node | undefined): ConnectGenKind | null {
   if (!node) return null;
   const d = dataOf(node);
   if (node.type === 'textNode' && d.textGen === true) return 'text';
   if (node.type !== 'mediaNode') return null;
-  if (d.draft === true || d.genStatus === 'draft' || d.genStatus === 'generating') {
-    if (d.mediaType === 'video') return 'video';
-    if (d.mediaType === 'image') return 'image';
-    if (d.mediaType === 'audio') return 'audio';
-  }
+  if (!isMediaGenHost(d)) return null;
+  if (d.mediaType === 'video') return 'video';
+  if (d.mediaType === 'image') return 'image';
+  if (d.mediaType === 'audio') return 'audio';
   return null;
 }
 
@@ -99,6 +107,10 @@ export function availableGenKinds(sourceNodes: Node[]): Set<ConnectGenKind> {
   }
   const result = new Set<ConnectGenKind>(acc ?? []);
   if (isAudioGenEnabled(kinds)) result.add('audio');
+  // 组内任一素材合规未通过：视频生成参考能力失效（不可挂边、菜单置灰）
+  if (sourceNodes.some((node) => dataOf(node).complianceFailed === true)) {
+    result.delete('video');
+  }
   return result;
 }
 
