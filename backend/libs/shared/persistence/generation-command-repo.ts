@@ -65,16 +65,27 @@ export interface GenerationCommandRepo {
    *  返回值带 type，供路由按 image/video 重新入队。
    *  - 重放命中（同 Key 同摘要）→ 返回既有结果；
    *  - 冲突（同 Key 异摘要）→ 返回 { kind: "idempotency_conflict" }；
-   *  - 原 job 非终态 failed/partially_succeeded → null。 */
+   *  - 原 job 非终态 failed/partially_succeeded → null。
+   *
+   *  IKF YHJ（ADR-0087 决策 7）：`guardInput` 在「确实要建新 job」的那一刻（幂等重放之后、
+   *  create 之前）拿原 job 的 input 再过一次素材状态门。位置不能提前——重放是既有结果，
+   *  不该被此刻的素材状态改写；也不能由调用方在事务外做——那样拿不到「是否重放」。
+   *  返回非 null 字符串即拒绝，本方法返回 { kind: "material_blocked", reason }，
+   *  不建行。 */
   retryJob(
     originalJobId: string,
     projectId: string,
     userId: string,
     idempotencyKey: string,
     requestHash: string,
+    guardInput?: (
+      input: Record<string, unknown>,
+      jobType: string,
+    ) => Promise<string | null>,
   ): Promise<
     | (CreatedJob & { type: "image" | "video" | "audio" })
     | { kind: "idempotency_conflict" }
+    | { kind: "material_blocked"; reason: string }
     | null
   >;
   appendLog(
@@ -416,8 +427,17 @@ export function createGenerationCommandRepo(
       return true;
     },
 
-    retryJob(originalJobId, projectId, userId, idempotencyKey, requestHash) {
-      return transactionWithUniqueRetry(prisma, async (tx) => {
+    retryJob(
+      originalJobId,
+      projectId,
+      userId,
+      idempotencyKey,
+      requestHash,
+      guardInput,
+    ) {
+      return transactionWithUniqueRetry(
+        prisma,
+        async (tx) => {
         const pid = BigInt(projectId);
         const original = await tx.generation_jobs.findFirst({
           where: {
@@ -514,6 +534,17 @@ export function createGenerationCommandRepo(
           originalSlotIds.size > 0
             ? failedSlots.length
             : (original.expected_output_count ?? 1);
+
+        // IKF YHJ（ADR-0087 决策 7）：重试复用原 job 的参数快照，但那批素材的校验状态
+        // 可能在首次生成之后变了（撤销/删除/失败）。采纳之前重过一道门，拒绝就不建行。
+        if (guardInput) {
+          const reason = await guardInput(
+            (original.input ?? {}) as Record<string, unknown>,
+            original.type,
+          );
+          if (reason !== null) return { kind: "material_blocked", reason } as const;
+        }
+
         const now = new Date();
         const deadline = new Date(now.getTime() + 30 * 60 * 1000);
         const retry = await tx.generation_jobs.create({
@@ -677,7 +708,11 @@ export function createGenerationCommandRepo(
           cursor: Number(event.cursor),
           type: original.type as "image" | "video" | "audio",
         };
-      });
+        },
+        // 素材门（guardInput）在事务内发 HTTP，默认 5s 的交互事务超时会把它掐成 P2028/500。
+        // 与 createJob 同口径放宽（那里也是同一理由：事务里含外部等待）。
+        { maxWait: 10_000, timeout: 30_000 },
+      );
     },
 
     async appendLog(jobId, event, status, message, payload) {

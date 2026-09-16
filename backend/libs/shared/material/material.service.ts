@@ -1,8 +1,9 @@
 // 素材库对接服务：产品登录会话 → AuthGuard 回注的 sk- key → 网关 /api/material/{Action}。
-// 归属与状态以网关/上游为权威；本地仅两处持久化：
+// 归属与状态以网关/上游为权威；本地仅三处持久化：
 //   - 素材关联镜像 assets.material_id/material_group_id（IKDJNZ）；
 //   - 素材库组 material_groups（IKDE6X/IKEXX8 契约 v2：只维护虚拟组镜像，
-//     ListAssetGroups(AIGC)/GetAssetGroup 命中时读本地，真人组查询仍透传上游）。
+//     ListAssetGroups(AIGC)/GetAssetGroup 命中时读本地，真人组查询仍透传上游）；
+//   - 素材校验状态 material_assets（IKFYHJ，ADR-0087：镜像上游 Status，供生成采纳处判定）。
 // 其余（素材列表等）仍纯过境透传。
 import { randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
@@ -13,7 +14,12 @@ import {
   type MaterialLibraryResponse,
 } from "@lib/core";
 import {
+  createAssetRepo,
+  createMaterialAssetRepo,
   createMaterialGroupRepo,
+  type AssetRepo,
+  type MaterialAssetRepo,
+  type MaterialAssetStatus,
   type MaterialGroupRepo,
   type MaterialGroupView,
 } from "@lib/shared/persistence/index.js";
@@ -46,6 +52,9 @@ export const MATERIAL_ACTIONS = [
 
 export type MaterialAction = (typeof MATERIAL_ACTIONS)[number];
 
+/** 素材库素材 id 格式（对齐上游 asset-...；与 material.controller / 生成侧同源）。 */
+const MATERIAL_ID_PATTERN = /^asset-.{1,128}$/i;
+
 // 真人会话的 CallbackURL 由前端传入（指向刷脸完成后的落地提示页），
 // 本层纯透传不改动；未传时由上游按自身默认行为处理。
 
@@ -53,6 +62,8 @@ export type MaterialAction = (typeof MATERIAL_ACTIONS)[number];
 export class MaterialService {
   private clientInstance?: MaterialLibraryClient;
   private groupRepoInstance?: MaterialGroupRepo;
+  private materialAssetRepoInstance?: MaterialAssetRepo;
+  private assetClearRepoInstance?: AssetRepo;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -76,6 +87,21 @@ export class MaterialService {
       this.groupRepoInstance = createMaterialGroupRepo(this.prisma.client);
     }
     return this.groupRepoInstance;
+  }
+
+  private get materialAssetRepo(): MaterialAssetRepo {
+    if (!this.materialAssetRepoInstance) {
+      this.materialAssetRepoInstance = createMaterialAssetRepo(this.prisma.client);
+    }
+    return this.materialAssetRepoInstance;
+  }
+
+  /** IKF YHJ：失败处置要清 `assets` 的素材关联，这里自带一个最小仓库面。 */
+  private get assetRepo(): Pick<AssetRepo, "clearMaterialLink"> {
+    if (!this.assetClearRepoInstance) {
+      this.assetClearRepoInstance = createAssetRepo(this.prisma.client);
+    }
+    return this.assetClearRepoInstance;
   }
 
   /** 透传调用：鉴权取 AuthGuard 回注的 Bearer sk-；上游状态码与信封原样返回。 */
@@ -205,10 +231,164 @@ export class MaterialService {
   ): Promise<void> {
     await this.groupRepo.softDelete(userId, materialGroupId);
   }
+
+  /** IKF YHJ：给生成创建期的素材门用的最小仓库面（避免把 Prisma 透到 API 层）。 */
+  get materialStatusRepo(): Pick<
+    MaterialAssetRepo,
+    "findByMaterialId" | "mirrorStatus"
+  > {
+    return this.materialAssetRepo;
+  }
+
+  /** IKF YHJ：上游判定素材失败时的**统一处置**（无论哪条路径发现的，都走这一个口子）。
+   *
+   *  三件事，顺序有意：
+   *   ① 本地状态行留 `Failed`（**不删**——留痕，且拦截点据此直接拒绝、不必再问上游）；
+   *   ② 清空 `assets` 表的素材关联（用户侧不再显示「已入库」，需重新走合规校验）；
+   *   ③ 删掉上游素材（死素材不留在人家库里）。
+   *
+   *  ①② 同步完成——紧接着的请求必须立刻看到一致状态。
+   *  ③ 是清理副作用，**不等待、失败只告警**：它不该拖慢/拖挂一个正在被拒绝的请求，
+   *  也不该让上游抖动变成用户可见的错误。真删不掉也无妨（本地已 Failed，拦截点照样拒）。
+   *
+   *  为什么必须配套「本地 Failed 就不再问上游」（{@link tryServeLocalFailedAsset}）：
+   *  ③ 删完之后上游只会回 `NotFound`，前端会看到自相矛盾的「素材不存在」而不是「未通过」。 */
+  async handleUpstreamMaterialFailure(input: {
+    userId: string;
+    materialId: string;
+    /** 代打上游 DeleteAsset 用；缺失则跳过 ③（例如无会话的后台路径）。 */
+    authorization: string | undefined;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    /** 上游**已经**没有这个素材（NotFound / id 非法）时传 false，省一次注定 404 的往返。 */
+    deleteUpstream?: boolean;
+  }): Promise<void> {
+    await this.materialAssetRepo.mirrorStatus({
+      userId: input.userId,
+      materialId: input.materialId,
+      status: "Failed",
+      errorCode: input.errorCode ?? null,
+      errorMessage: input.errorMessage ?? null,
+    });
+    await this.assetRepo.clearMaterialLink(input.userId, input.materialId);
+
+    if (input.deleteUpstream === false) return;
+    // 刻意不 await：见方法头 ③。
+    void this.deleteUpstreamMaterial(input.authorization, input.materialId);
+  }
+
+  /** 删上游素材（best-effort）：任何失败只记日志，绝不外抛。 */
+  private async deleteUpstreamMaterial(
+    authorization: string | undefined,
+    materialId: string,
+  ): Promise<void> {
+    try {
+      const response = await this.callAction(authorization, "DeleteAsset", {
+        Id: materialId,
+      });
+      if (response.status < 200 || response.status >= 300) {
+        logger.warn(
+          `material 清理上游失败素材未成功 materialId=${materialId} HTTP ${response.status}`,
+        );
+      } else {
+        logger.info(`material 已清理上游失败素材 materialId=${materialId}`);
+      }
+    } catch (error) {
+      logger.warn(
+        `material 清理上游失败素材异常 materialId=${materialId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  /** IKF YHJ：本地已判 `Failed` 的素材，`GetAsset` 直接回本地结论，**不打上游**。
+   *
+   *  两个理由：
+   *   - 正确性：上游那张素材已被 {@link handleUpstreamMaterialFailure} 删掉，再问只会拿到
+   *     `NotFound`，前端看到的是「不存在」而非「未通过」——自相矛盾且无法引导用户重传。
+   *   - 性能：Failed 是终态，问一万次也是 Failed。
+   *
+   *  只短接 `Failed`。`Active` / `Processing` 仍透传上游——那两个状态以上游为准，
+   *  本地行可能陈旧（只跟进创建后 10 分钟），拿本地答会答错。 */
+  async tryServeLocalFailedAsset(
+    userId: string,
+    action: string,
+    body: unknown,
+  ): Promise<MaterialLibraryResponse | null> {
+    if (action !== "GetAsset" || !isRecord(body)) return null;
+    const id = body.Id;
+    if (typeof id !== "string" || !MATERIAL_ID_PATTERN.test(id)) return null;
+    const row = await this.materialAssetRepo.findByMaterialId(userId, id);
+    if (row === null || row.status !== "Failed") return null;
+    return localEnvelope("GetAsset", {
+      Id: id,
+      Status: "Failed",
+      ...(row.errorCode !== null || row.errorMessage !== null
+        ? { Error: { Code: row.errorCode, Message: row.errorMessage } }
+        : {}),
+    });
+  }
+
+  /** IKF YHJ：CreateAsset 2xx 后落 Processing 行——上游异步注册，此刻必然尚未 Active。 */
+  async trackMaterialProcessing(
+    userId: string,
+    materialId: string,
+    materialGroupId: string,
+  ): Promise<void> {
+    await this.materialAssetRepo.upsertProcessing({
+      userId,
+      materialId,
+      materialGroupId,
+    });
+  }
+
+  /** IKF YHJ：把上游返回的素材状态镜像回本地（GetAsset 单条或 ListAssets 列表）。
+   *  只更新已存在的行——无行意味着没走过 CreateAsset，语义是「未校验」，不得凭空造行。 */
+  async mirrorMaterialStatuses(
+    userId: string,
+    entries: ReadonlyArray<{
+      materialId: string;
+      status: string;
+      errorCode?: string | null;
+      errorMessage?: string | null;
+    }>,
+  ): Promise<void> {
+    for (const entry of entries) {
+      await this.materialAssetRepo.mirrorStatus({
+        userId,
+        materialId: entry.materialId,
+        status: normalizeMaterialStatus(entry.status),
+        errorCode: entry.errorCode ?? null,
+        errorMessage: entry.errorMessage ?? null,
+      });
+    }
+  }
+
+  /** IKF YHJ：上游 DeleteAsset 成功后清状态行（硬删，ADR-0087 决策 5）。 */
+  async clearMaterialStatus(
+    userId: string,
+    materialId: string,
+  ): Promise<void> {
+    await this.materialAssetRepo.deleteByMaterialId(userId, materialId);
+  }
+
+  /** IKF YHJ：上游 DeleteAssetGroup 成功后按组批量清状态行（硬删）。 */
+  async clearMaterialStatusByGroup(
+    userId: string,
+    materialGroupId: string,
+  ): Promise<void> {
+    await this.materialAssetRepo.deleteByGroupId(userId, materialGroupId);
+  }
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** IKF YHJ：上游 Status 白名单收敛——认不出的值一律当 Processing（继续跟进，不误判为可用）。 */
+function normalizeMaterialStatus(raw: string): MaterialAssetStatus {
+  return raw === "Active" || raw === "Failed" ? raw : "Processing";
 }
 
 /** PageNumber/PageSize 宽松解析（缺省走 1/10；非正非数走缺省）。 */

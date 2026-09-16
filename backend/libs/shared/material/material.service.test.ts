@@ -423,3 +423,146 @@ describe("MaterialService —— 组查询分流 tryServeLocalGroupAction（IKEX
     ).toBeNull();
   });
 });
+
+// IKF YHJ：上游判素材失败时的统一处置 + GetAsset 本地优先。
+// 两件事必须配套：处置会删掉上游素材，删完之后再打上游只会拿到 NotFound，
+// 所以 GetAsset 必须先在本地短接，否则前端看到的是「不存在」而不是「未通过」。
+describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（IKFYHJ）", () => {
+  const originalBaseUrl = process.env.NEW_API_BASE_URL;
+
+  beforeEach(() => {
+    process.env.NEW_API_BASE_URL = "http://gateway.test";
+  });
+  afterEach(() => {
+    if (originalBaseUrl === undefined) delete process.env.NEW_API_BASE_URL;
+    else process.env.NEW_API_BASE_URL = originalBaseUrl;
+    vi.unstubAllGlobals();
+  });
+
+  /** 造一个只提供素材状态行的 prisma 替身；返回可断言的 spy。 */
+  function makePrisma(row: { status: string; errorCode?: string | null; errorMessage?: string | null } | null) {
+    const mirrorStatus = vi.fn().mockResolvedValue(undefined);
+    const clearMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      // 服务内部走 `this.prisma.client`（PrismaService 的约定），mock 要照这个形状给。
+      client: {
+        material_assets: {
+          findFirst: vi.fn().mockResolvedValue(
+            row === null
+              ? null
+              : {
+                  id: 1n, material_id: "asset-a", user_id: 9n,
+                  material_group_id: "group-1", status: row.status,
+                  error_code: row.errorCode ?? null,
+                  error_message: row.errorMessage ?? null,
+                  status_checked_at: null,
+                },
+          ),
+          updateMany: mirrorStatus,
+        },
+        assets: { updateMany: clearMany },
+      },
+    };
+    return { prisma, mirrorStatus, clearMany };
+  }
+
+  it("handleUpstreamMaterialFailure：留 Failed + 清关联 + 删上游，三件都做", async () => {
+    const { prisma, mirrorStatus, clearMany } = makePrisma(null);
+    const calls = stubFetch(() => json({ Result: {} }));
+
+    await new MaterialService(prisma as never).handleUpstreamMaterialFailure({
+      userId: "9",
+      materialId: "asset-a",
+      authorization: AUTH,
+      errorCode: "Sensitive",
+      errorMessage: "命中审核",
+    });
+    // 删上游是刻意的 fire-and-forget，等一拍让它落地
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mirrorStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { material_id: "asset-a", user_id: 9n },
+        data: expect.objectContaining({ status: "Failed", error_code: "Sensitive" }),
+      }),
+    );
+    // 关联两列一起清（只清 material_id 会留下悬空的 group 关联）
+    expect(clearMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { material_id: "asset-a", user_id: 9n },
+        data: expect.objectContaining({ material_id: null, material_group_id: null }),
+      }),
+    );
+    expect(calls.map((c) => c.url)).toEqual(["http://gateway.test/api/material/DeleteAsset"]);
+  });
+
+  it("deleteUpstream=false（上游本来就没有）：不删上游，本地照常收敛", async () => {
+    const { prisma, mirrorStatus, clearMany } = makePrisma(null);
+    const calls = stubFetch(() => json({ Result: {} }));
+
+    await new MaterialService(prisma as never).handleUpstreamMaterialFailure({
+      userId: "9",
+      materialId: "asset-gone",
+      authorization: AUTH,
+      deleteUpstream: false,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mirrorStatus).toHaveBeenCalledOnce();
+    expect(clearMany).toHaveBeenCalledOnce();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("删上游失败不外抛（清理是副作用，不该拖挂正在被拒绝的请求）", async () => {
+    const { prisma } = makePrisma(null);
+    stubFetch(() => json({ ResponseError: { Code: "InternalError" } }, 500));
+
+    await expect(
+      new MaterialService(prisma as never).handleUpstreamMaterialFailure({
+        userId: "9",
+        materialId: "asset-a",
+        authorization: AUTH,
+      }),
+    ).resolves.toBeUndefined();
+    await new Promise((r) => setTimeout(r, 0));
+  });
+
+  it("tryServeLocalFailedAsset：本地 Failed → 回上游同款信封，且不打上游", async () => {
+    const { prisma } = makePrisma({ status: "Failed", errorCode: "Sensitive", errorMessage: "命中审核" });
+    const calls = stubFetch(() => json({}));
+
+    const served = await new MaterialService(prisma as never).tryServeLocalFailedAsset(
+      "9", "GetAsset", { Id: "asset-a" },
+    );
+
+    expect(calls).toHaveLength(0);
+    expect(served?.status).toBe(200);
+    expect(served?.body).toMatchObject({
+      Result: { Id: "asset-a", Status: "Failed", Error: { Code: "Sensitive", Message: "命中审核" } },
+    });
+  });
+
+  it.each(["Active", "Processing"])(
+    "tryServeLocalFailedAsset：本地 %s → 不短接（那两个状态以上游为准，本地行可能陈旧）",
+    async (status) => {
+      const { prisma } = makePrisma({ status });
+      await expect(
+        new MaterialService(prisma as never).tryServeLocalFailedAsset("9", "GetAsset", { Id: "asset-a" }),
+      ).resolves.toBeNull();
+    },
+  );
+
+  it("tryServeLocalFailedAsset：无本地行 / 非 GetAsset / id 非法 → 都放行走透传", async () => {
+    const none = makePrisma(null);
+    const svc = new MaterialService(none.prisma as never);
+    await expect(svc.tryServeLocalFailedAsset("9", "GetAsset", { Id: "asset-a" })).resolves.toBeNull();
+    await expect(
+      new MaterialService(makePrisma({ status: "Failed" }).prisma as never)
+        .tryServeLocalFailedAsset("9", "ListAssets", { Id: "asset-a" }),
+    ).resolves.toBeNull();
+    await expect(
+      new MaterialService(makePrisma({ status: "Failed" }).prisma as never)
+        .tryServeLocalFailedAsset("9", "GetAsset", { Id: "not-an-asset" }),
+    ).resolves.toBeNull();
+  });
+});

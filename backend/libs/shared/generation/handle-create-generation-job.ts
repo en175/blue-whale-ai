@@ -1300,6 +1300,21 @@ interface GenerationDeps {
   assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
   /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额；缺省沿用旧行为（0 + dev）。 */
   costEstimator?: GenerationCostEstimator;
+  /** IKF YHJ：素材校验状态门（ADR-0087）。提供时，视频生成采纳素材库引用前判定其可用性。
+   *  返回 null = 放行；返回字符串 = 面向用户的拒绝原因（400，零写入）。
+   *  缺省不接（未接线时行为与改造前一致），便于灰度与单测隔离。 */
+  materialGate?: MaterialGate;
+}
+
+/** IKF YHJ：素材校验状态门的最小接口（实现见 material-compliance-gate.ts + 控制器接线）。 */
+export interface MaterialGate {
+  assertInputUsable(input: {
+    userId: string;
+    /** 已冻结的任务 input——素材 id 与本地 Asset id 都在里面，由实现自行汇集。 */
+    jobInput: Record<string, unknown>;
+    /** 任务类型。本门只对 video 生效（素材库绑定只有视频参考会消费），实现方按此短路。 */
+    jobType: string;
+  }): Promise<string | null>;
 }
 
 /** POST /api/projects/{projectId}/generation-jobs：创建生成任务（queued）+ 预留点数 + 日志。
@@ -1696,6 +1711,20 @@ export async function handleCreateGenerationJob(
       : type === "audio"
         ? "generate_audio"
         : "generate_image";
+
+  // IKF YHJ：素材校验状态门（ADR-0087）——视频生成采纳素材库引用前判定可用性。
+  // 放在这里而不是策略校验里：此处 input 已冻结，新旧两套引用字段（references / 旧首尾帧字段）
+  // 与本地 Asset 引用都在同一个对象上，一处覆盖全部路径；且尚未写入任何行，拒绝即零写入。
+  if (deps.materialGate) {
+    const reason = await deps.materialGate.assertInputUsable({
+      userId,
+      jobInput: input as unknown as Record<string, unknown>,
+      jobType: type,
+    });
+    if (reason !== null) {
+      return fail(400, reason, { code: ERROR_INVALID_REFERENCE });
+    }
+  }
 
   // 8. 建任务（含预留点数）
   const cmdInput: CreateJobInput = {
