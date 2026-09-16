@@ -410,7 +410,7 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
   const detailAssets = detailGroupId ? (groupAssets.get(detailGroupId) ?? []) : [];
 
   return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
+    <div className={styles.overlay} data-gen-panel-territory onClick={onClose}>
       <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
         {/* 头部 */}
         <div className={styles.head}>

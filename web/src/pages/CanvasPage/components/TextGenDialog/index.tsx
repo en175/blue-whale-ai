@@ -61,6 +61,7 @@ export default function TextGenDialog({
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
       style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      data-gen-panel-territory
     >
       <div className={styles.dialog}>
         <div className={styles.inputBox}>

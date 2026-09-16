@@ -185,7 +185,7 @@ export default function MusicDialog({
   };
 
   return (
-    <div className={styles.dialog}>
+    <div className={styles.dialog} data-gen-panel-territory>
       {/* 关闭按钮 */}
       <button className={styles.closeBtn} onClick={onClose} title="关闭">
         <X size={16} strokeWidth={2} />
