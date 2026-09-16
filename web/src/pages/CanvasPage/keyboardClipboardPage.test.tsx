@@ -1,114 +1,43 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, useNavigate } from 'react-router-dom';
+import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Node } from '@xyflow/react';
-import CanvasPage from './index';
+import {
+  apiMocks,
+  canvasDocMock,
+  copySelected,
+  enableReactActEnvironment,
+  flowProps,
+  mediaCopies,
+  mediaNodes,
+  navigateRef,
+  pasteClipboard,
+  pressUndo,
+  renderPage,
+  textCopies,
+  textNodes,
+  unmountPage,
+} from './testing/canvasPageTestHarness';
 
 /* IKGBPA 画布内部剪贴板（页面级）：C 快照定格（删/改名/编辑原卡不影响副本）、
    V 视口中心落位 + 多卡原相对位置 + 连续粘贴阶梯、新卡自动选中、@ 派生索引线重建、
    手拉连线不复制、粘贴可撤销（真实 Ctrl+Z）、切项目清空、与 Ctrl/Cmd+D 立即复制并存。
-   FlowCanvas 打桩透出 props（cardRename 先例）；撤销监听在页面级 document，派发真实 KeyboardEvent。 */
+   共享夹具见 canvasPageTestHarness（FlowCanvas 打桩透出 props）；撤销监听在页面级
+   document，派发真实 KeyboardEvent。本文件特有：双项目列表（切项目用例）与
+   生成完成链路的 fetchJobStatus 手动闸门。 */
 
-vi.mock('./components/AgentPanel', () => ({
-  default: ({ initialCardLabel }: { initialCardLabel?: string }) =>
-    createElement('div', { 'data-testid': 'agent-panel-stub' }, initialCardLabel),
-}));
+beforeEach(() => {
+  enableReactActEnvironment();
+  localStorage.clear();
+  sessionStorage.clear();
+  // 切项目用例需要两个项目（harness 默认单项目）
+  apiMocks.fetchProjects.mockResolvedValue([{ id: 'p1', name: '项目一' }, { id: 'p2', name: '项目二' }]);
+  seedClipboardDoc();
+});
 
-/** FlowCanvas 打桩：透出 props 供测试读取节点/连线与触发画布回调 */
-const flowProps: { current: Record<string, any> } = { current: {} };
-vi.mock('./components/Canvas', () => ({
-  default: (props: Record<string, any>) => {
-    flowProps.current = props;
-    return createElement('div', { 'data-testid': 'flow-canvas' });
-  },
-}));
-
-vi.mock('./components/CanvasToolbar', () => ({
-  default: (props: Record<string, any>) => createElement('div', { 'data-testid': 'canvas-toolbar' }),
-}));
-vi.mock('./components/CanvasHeader', () => ({
-  default: () => createElement('div', { 'data-testid': 'canvas-header' }),
-}));
-vi.mock('./components/ProjectSelector', () => ({
-  default: () => createElement('div', { 'data-testid': 'project-selector' }),
-}));
-vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
-vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
-
-const apiMocks = vi.hoisted(() => ({
-  fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一' }, { id: 'p2', name: '项目二' }]),
-  createProject: vi.fn(),
-  renameProject: vi.fn(),
-  deleteProject: vi.fn(),
-  fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
-  toSessionUser: vi.fn(() => null),
-  applyPromptPreview: vi.fn(),
-  saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
-  fetchGenerationModels: vi.fn(async () => []),
-}));
-
-vi.mock('@/api/projects', () => ({
-  fetchProjects: apiMocks.fetchProjects,
-  createProject: apiMocks.createProject,
-  renameProject: apiMocks.renameProject,
-  deleteProject: apiMocks.deleteProject,
-}));
-vi.mock('@/api/auth', () => ({
-  fetchMe: apiMocks.fetchMe,
-  fetchQuota: apiMocks.fetchQuota,
-  toSessionUser: apiMocks.toSessionUser,
-}));
-vi.mock('@/api/assets', () => ({
-  UPLOAD_SIZE_LIMIT: 100 * 1024 * 1024,
-  fetchUploadPresign: vi.fn(),
-  putToPresignedUrl: vi.fn(),
-  completeUpload: vi.fn(),
-  fetchAllAssets: vi.fn(async () => []),
-  fetchAssetDetail: vi.fn(),
-  linkAssetToProject: vi.fn(),
-}));
-vi.mock('@/api/canvas', () => ({
-  applyPromptPreview: apiMocks.applyPromptPreview,
-  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
-  createConversationQuote: vi.fn(),
-  legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
-  saveCanvasDoc: apiMocks.saveCanvasDoc,
-  serializeNodes: vi.fn((nodes: Node[]) =>
-    JSON.stringify(nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data }))),
-  ),
-  serializeEdges: vi.fn((edges: Array<{ id: string; source: string; target: string }>) =>
-    JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target }))),
-  ),
-}));
-vi.mock('@/api/jobs', () => ({
-  createGenerationJob: vi.fn(),
-  cancelGenerationJob: vi.fn(),
-  retryGenerationJob: vi.fn(),
-  fetchJobStatus: vi.fn(),
-  createMediaExtraction: vi.fn(),
-  readJobFailText: vi.fn(() => ''),
-}));
-vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
-vi.mock('@/api/generation', () => ({
-  fetchGenerationModels: apiMocks.fetchGenerationModels,
-}));
-
-const canvasDocMock = vi.hoisted(() => ({
-  current: {
-    doc: null as unknown,
-    assets: {} as Record<string, unknown>,
-    refetch: () => Promise.resolve([]),
-    acceptDoc: vi.fn(),
-  },
-}));
-
-vi.mock('./hooks/useCanvasDoc', () => ({
-  useCanvasDoc: () => canvasDocMock.current,
-}));
+afterEach(async () => {
+  await unmountPage();
+  vi.clearAllMocks();
+});
 
 /**
  * 验收画布文档：
@@ -147,84 +76,27 @@ function seedClipboardDoc() {
   };
 }
 
-let root: Root;
-let container: HTMLDivElement;
-/** 暴露 navigate 供切项目用例改 URL query（currentId 随 location.search 迁移） */
-let navigateRef: ((to: string) => void) | null = null;
-function NavProbe() {
-  navigateRef = useNavigate();
-  return null;
+/** 本用例专属画布：一张生成中的媒体卡 m-gen（水合恢复任务 99 的轮询）。
+ *  fetchJobStatus 以手动闸门控制在「复制动作之后」才返回成功，驱动真实任务完成链路。 */
+function seedGeneratingDoc() {
+  canvasDocMock.current = {
+    doc: {
+      id: 11,
+      version: 3,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [
+        {
+          id: 'm-gen', type: 'mediaNode', position: { x: 200, y: 0 },
+          data: { genStatus: 'generating', progress: 10, jobId: 99, mediaType: 'image', fileName: '图片生成中', src: '' },
+        },
+      ],
+      edges: [],
+    },
+    assets: {},
+    refetch: () => Promise.resolve([]),
+    acceptDoc: vi.fn(),
+  };
 }
-
-async function renderPage() {
-  container = document.createElement('div');
-  document.body.appendChild(container);
-  root = createRoot(container);
-  await act(async () => {
-    root.render(
-      createElement(
-        QueryClientProvider,
-        { client: new QueryClient() },
-        createElement(MemoryRouter, { initialEntries: ['/canvas?project=p1'] }, createElement(NavProbe), createElement(CanvasPage)),
-      ),
-    );
-  });
-}
-
-function textNodes(): Node[] {
-  return flowProps.current.textNodes as Node[];
-}
-
-function mediaNodes(): Node[] {
-  return flowProps.current.mediaNodes as Node[];
-}
-
-/** 粘贴副本（newNodeId 生成 text- 前缀；seed 节点 t1 无该前缀，天然区分原卡） */
-function textCopies(): Node[] {
-  return textNodes().filter((n) => n.id.startsWith('text-'));
-}
-
-function mediaCopies(): Node[] {
-  return mediaNodes().filter((n) => n.id.startsWith('media-'));
-}
-
-/** C 快照上抛（Canvas 入口已过滤 text/media，页面收到的即最终名单） */
-async function copySelected(ids: string[]) {
-  await act(async () => {
-    flowProps.current.onCopySelected(ids);
-  });
-}
-
-/** V 粘贴上抛 */
-async function pasteClipboard() {
-  await act(async () => {
-    flowProps.current.onPasteClipboard();
-  });
-}
-
-/** 页面级撤销监听（document 捕获级）收真实 Ctrl+Z */
-async function pressUndo(modifier: 'ctrl' | 'meta' = 'ctrl') {
-  await act(async () => {
-    document.body.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'z', bubbles: true, cancelable: true,
-      ctrlKey: modifier === 'ctrl', metaKey: modifier === 'meta',
-    }));
-  });
-}
-
-beforeEach(() => {
-  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  localStorage.clear();
-  sessionStorage.clear();
-  seedClipboardDoc();
-});
-
-afterEach(async () => {
-  if (root) await act(async () => { root.unmount(); });
-  container?.remove();
-  navigateRef = null;
-  vi.clearAllMocks();
-});
 
 describe('IKGBPA 快照定格', () => {
   it('复制后原卡被删除/改名/编辑：粘贴出的副本仍是复制时刻的样子', async () => {
@@ -399,5 +271,42 @@ describe('IKGBPA 与 Ctrl/Cmd+D 立即复制并存', () => {
     expect(pasted).toHaveLength(1);
     expect(pasted[0].position).toEqual({ x: 300, y: 200 });
     expect(dup.position).toEqual({ x: 40, y: 40 });
+  });
+});
+
+describe('IKGBPA 快照定格（生成完成场景）', () => {
+  it('复制生成中的媒体卡后任务完成：粘贴副本仍是复制时刻的生成中形态', async () => {
+    // 手动闸门：复制完成后才放行任务成功响应（模拟任务在复制之后完成）
+    let resolveStatus!: (detail: unknown) => void;
+    apiMocks.fetchJobStatus.mockImplementation(
+      () => new Promise((resolve) => { resolveStatus = resolve; }),
+    );
+    seedGeneratingDoc();
+    await renderPage();
+
+    await copySelected(['m-gen']);
+    expect((mediaNodes().find((n) => n.id === 'm-gen')!.data as Record<string, unknown>).genStatus)
+      .toBe('generating');
+
+    // 任务完成链路（水合轮询 → applyJobTerminal succeeded）：原卡转成品
+    await act(async () => {
+      resolveStatus({
+        job_id: 99, status: 'succeeded', progress: 100,
+        asset: { id: 'a-done', url: 'http://img/done.png', type: 'image' },
+        text_input_signature: null,
+      });
+    });
+    await act(async () => {});
+    const finished = mediaNodes().find((n) => n.id === 'm-gen')!.data as Record<string, unknown>;
+    expect(finished.genStatus).toBeUndefined();
+    expect(finished.src).toBe('http://img/done.png');
+    expect(finished.fileName).toBe('生成-99');
+
+    // 粘贴：副本定格在复制时刻的生成中形态，不吃任务完成结果
+    await pasteClipboard();
+    const copy = mediaCopies()[0];
+    expect((copy.data as Record<string, unknown>).genStatus).toBe('generating');
+    expect((copy.data as Record<string, unknown>).fileName).toBe('图片生成中');
+    expect((copy.data as Record<string, unknown>).src).toBe('');
   });
 });

@@ -1,135 +1,21 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
-import CanvasPage from './index';
+import {
+  apiMocks,
+  canvasDocMock,
+  enableReactActEnvironment,
+  flowProps,
+  renderPage,
+  unmountPage,
+} from './testing/canvasPageTestHarness';
 
 /* IKGBPC 撤销快捷键页面级链路：Ctrl/Cmd+Z 回退删除（卡与悬空连线一并恢复）、
    栈走空静默、Shift+Z 走既有重做而非撤销、编辑器/@ 菜单内让位、右键菜单
-   撤销/重做项保留且灰态正确。FlowCanvas 等协作方打桩透出 props，
-   键盘事件为派发到真实 DOM 的 KeyboardEvent。 */
-
-vi.mock('./components/AgentPanel', () => ({
-  default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
-}));
-
-const flowProps: { current: Record<string, any> } = { current: {} };
-vi.mock('./components/Canvas', () => ({
-  default: (props: Record<string, any>) => {
-    flowProps.current = props;
-    return createElement('div', { 'data-testid': 'flow-canvas' });
-  },
-}));
-
-vi.mock('./components/CanvasToolbar', () => ({
-  default: () => createElement('div', { 'data-testid': 'canvas-toolbar' }),
-}));
-
-vi.mock('./components/CanvasHeader', () => ({
-  default: () => createElement('div', { 'data-testid': 'canvas-header' }),
-}));
-
-vi.mock('./components/ProjectSelector', () => ({
-  default: () => createElement('div', { 'data-testid': 'project-selector' }),
-}));
-
-vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
-vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
-
-const apiMocks = vi.hoisted(() => ({
-  fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一' }]),
-  fetchMe: vi.fn(async () => null),
-  fetchQuota: vi.fn(async () => ({})),
-  toSessionUser: vi.fn(() => null),
-  saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
-  fetchGenerationModels: vi.fn(async () => [
-    {
-      model_id: 'm-test',
-      provider_id: 'prov',
-      model_label: '测试生图模型',
-      icon: null,
-      supported_sizes: [{ id: '2k', label: '2K' }],
-      supported_aspect_ratios: ['1:1'],
-      supported_formats: [],
-      supported_durations: null,
-      default_size: '2k',
-      default_format: null,
-      default_aspect_ratio: '1:1',
-      default_duration: null,
-      features: {},
-      version: 1,
-      digest: '',
-    },
-  ]),
-}));
-
-vi.mock('@/api/projects', () => ({
-  fetchProjects: apiMocks.fetchProjects,
-  createProject: vi.fn(),
-  renameProject: vi.fn(),
-  deleteProject: vi.fn(),
-}));
-
-vi.mock('@/api/auth', () => ({
-  fetchMe: apiMocks.fetchMe,
-  fetchQuota: apiMocks.fetchQuota,
-  toSessionUser: apiMocks.toSessionUser,
-}));
-
-vi.mock('@/api/assets', () => ({
-  UPLOAD_SIZE_LIMIT: 100 * 1024 * 1024,
-  fetchUploadPresign: vi.fn(),
-  putToPresignedUrl: vi.fn(),
-  completeUpload: vi.fn(),
-  fetchAllAssets: vi.fn(async () => []),
-  fetchAssetDetail: vi.fn(),
-  linkAssetToProject: vi.fn(),
-}));
-
-vi.mock('@/api/canvas', () => ({
-  applyPromptPreview: vi.fn(),
-  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
-  createConversationQuote: vi.fn(),
-  legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
-  saveCanvasDoc: apiMocks.saveCanvasDoc,
-  serializeNodes: vi.fn((nodes: Node[]) =>
-    JSON.stringify(nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data }))),
-  ),
-  serializeEdges: vi.fn((edges: Array<{ id: string; source: string; target: string; data?: unknown }>) =>
-    JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target, data: e.data }))),
-  ),
-}));
-
-vi.mock('@/api/jobs', () => ({
-  createGenerationJob: vi.fn(),
-  cancelGenerationJob: vi.fn(),
-  retryGenerationJob: vi.fn(),
-  fetchJobStatus: vi.fn(),
-  createMediaExtraction: vi.fn(),
-  readJobFailText: vi.fn(() => ''),
-}));
-
-vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
-
-vi.mock('@/api/generation', () => ({
-  fetchGenerationModels: apiMocks.fetchGenerationModels,
-}));
-
-const canvasDocMock = vi.hoisted(() => ({
-  current: {
-    doc: null as unknown,
-    assets: {} as Record<string, unknown>,
-    refetch: () => Promise.resolve([]),
-    acceptDoc: vi.fn(),
-  },
-}));
-
-vi.mock('./hooks/useCanvasDoc', () => ({
-  useCanvasDoc: () => canvasDocMock.current,
-}));
+   撤销/重做项保留且灰态正确。共享夹具见 canvasPageTestHarness（FlowCanvas 等
+   协作方打桩透出 props），键盘事件为派发到真实 DOM 的 KeyboardEvent。
+   本文件特有：生图模型列表（生成链路初始化用）。 */
 
 /** 默认画布：文本卡 t1/t1b + 成品媒体卡 m1 + 连线 t1→m1、t1b→m1（全部非生成中，不触发轮询）。 */
 function seedCanvasDoc() {
@@ -157,24 +43,6 @@ function seedCanvasDoc() {
     refetch: () => Promise.resolve([]),
     acceptDoc: vi.fn(),
   };
-}
-
-let root: Root;
-let container: HTMLDivElement;
-
-async function renderPage() {
-  container = document.createElement('div');
-  document.body.appendChild(container);
-  root = createRoot(container);
-  await act(async () => {
-    root.render(
-      createElement(
-        QueryClientProvider,
-        { client: new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }) },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
-      ),
-    );
-  });
 }
 
 function allNodes(): Node[] {
@@ -208,15 +76,34 @@ async function deleteNodes(ids: string[]) {
 }
 
 beforeEach(() => {
-  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  enableReactActEnvironment();
   localStorage.clear();
   sessionStorage.clear();
   seedCanvasDoc();
+  // 生成链路初始化需要一个可用模型（harness 默认空列表）
+  apiMocks.fetchGenerationModels.mockResolvedValue([
+    {
+      model_id: 'm-test',
+      provider_id: 'prov',
+      model_label: '测试生图模型',
+      icon: null,
+      supported_sizes: [{ id: '2k', label: '2K' }],
+      supported_aspect_ratios: ['1:1'],
+      supported_formats: [],
+      supported_durations: null,
+      default_size: '2k',
+      default_format: null,
+      default_aspect_ratio: '1:1',
+      default_duration: null,
+      features: {},
+      version: 1,
+      digest: '',
+    },
+  ]);
 });
 
 afterEach(async () => {
-  if (root) await act(async () => root.unmount());
-  container?.remove();
+  await unmountPage();
   document.querySelectorAll('[data-canvas-keyboard-scope="mention"]').forEach((el) => el.remove());
   vi.clearAllMocks();
 });
