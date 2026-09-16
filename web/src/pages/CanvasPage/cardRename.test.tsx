@@ -637,11 +637,15 @@ describe('IKFA8Y 改名同步当前参考显示', () => {
 
   it('图片自由面板的文本附件随源卡改名更新，连线和正文保持不变', async () => {
     // 已完成的生成卡保留其原始文本输入连线。
-    (canvasDocMock.current.doc as { edges: unknown[] }).edges = [{ id: 'text-ref', source: 't1', target: 'img-a' }];
+    const doc = canvasDocMock.current.doc as { edges: unknown[]; nodes: Array<{ id: string; data: Record<string, unknown> }> };
+    doc.edges = [{ id: 'text-ref', source: 't1', target: 'img-a' }];
+    // IKFZ9W 起「图片节点生成图片」改为新建草稿卡，成品图不再是面板绑定目标；
+    // 验证带文本附件的图片面板须走草稿卡（与 canvasEdges 同口径）
+    doc.nodes.find((n) => n.id === 'img-a')!.data.draft = true;
     await renderPage();
     await renameVia('t1', 'text', '原附件标题');
     await act(async () => {
-      (mediaNode('img-a').data.onGenImage as (id: string) => void)('img-a');
+      flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'img-a'));
     });
     // IKFCKN：进栏后附件标题承载在文本缩略图 title（正文在悬停预览）
     const textThumb = () => container.querySelector('[data-testid="dock-text-ref"]') as HTMLElement | null;

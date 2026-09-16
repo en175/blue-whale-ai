@@ -309,11 +309,14 @@ describe('IKDLQF 连线受控化与目标生图接线', () => {
   });
 
   it('从图片节点打开面板展示文本附件；提交先落盘当前编辑再携带 target_node_id', async () => {
+    // IKFZ9W 起「图片节点生成图片」改为新建草稿卡并自动连原图为参考（与生成视频入口对齐），
+    // 成品图不再是面板绑定目标；本用例验证带文本附件的图片面板，故把 m1 置为草稿卡后点节点打开
+    const doc = canvasDocMock.current.doc as { nodes: Node[] };
+    doc.nodes.find((n) => n.id === 'm1')!.data.draft = true;
     await renderPage();
 
-    const media = flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1');
     await act(async () => {
-      media.data.onGenImage('m1');
+      flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1'));
     });
 
     // 面板打开即展示当前附件（IKFCKN：FileText 缩略图进参考栏，正文在悬停预览）
@@ -338,7 +341,9 @@ describe('IKDLQF 连线受控化与目标生图接线', () => {
     expect(projectId).toBe('p1');
     expect(payload.type).toBe('image');
     expect(payload.target_node_id).toBe('m1');
-    expect(payload.input_asset_ids).toEqual(['a1']);
+    // 草稿卡面板的参考只来自连线；本用例未挂媒体参考边，走「附件正文单独驱动生成」路径
+    // （图片参考 → input_asset_ids 的推导覆盖在 imageRefPersist 套件）
+    expect(payload.input_asset_ids).toBeUndefined();
     expect(payload.parameters.prompt).toBe('一只蓝鲸在海里游');
 
     // 保存串行化：先落盘（含未防抖编辑与连线）再创建任务
@@ -526,8 +531,12 @@ describe('IKDL9U review text input consistency', () => {
   it('shows a legacy HTML text attachment', async () => {
     const doc = canvasDocMock.current.doc as any;
     doc.nodes[0].data = { title: '旧文本', html: '<div>蓝鲸 &amp; 海</div><div>夜景</div>' };
+    // IKFZ9W 起成品图不再是面板绑定目标，验证带附件的图片面板须走草稿卡
+    doc.nodes.find((n: Node) => n.id === 'm1')!.data.draft = true;
     await renderPage();
-    await act(async () => flowProps.current.mediaNodes[0].data.onGenImage('m1'));
+    await act(async () => {
+      flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1'));
+    });
     // IKFCKN：进栏后正文经悬停 200ms 预览展示（legacy HTML 先提取纯文本）
     const thumb = container.querySelector('[data-testid="dock-text-ref"]')!;
     await act(async () => {
@@ -565,13 +574,19 @@ describe('IKDL9U review text input consistency', () => {
     expect(container.textContent).toContain('正文超限');
   });
   it('blocks generation while a connected text has an invalid draft', async () => {
+    // IKFZ9W 起成品图不再是面板绑定目标，验证带附件的图片面板须走草稿卡
+    (canvasDocMock.current.doc as { nodes: Node[] }).nodes.find((n) => n.id === 'm1')!.data.draft = true;
     await renderPage();
-    await act(async () => flowProps.current.mediaNodes[0].data.onGenImage('m1'));
+    await act(async () => {
+      flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1'));
+    });
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
     await act(async () => flowProps.current.textNodes[0].data.onDraftError?.('t1', '正文超限'));
     await act(async () => sendButton().click());
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('正文超限');
+    // 草稿卡绑定模式下，无效草稿经保存失败通道直接锁住发送（按钮不可用 + 面板「保存失败，请重试」），
+    // 与旧成品图入口「点击后再弹正文超限」的呈现不同；拦截本身两种入口一致
+    expect(sendButton().disabled).toBe(true);
   });
 });
 
@@ -627,10 +642,13 @@ describe('IKFCKT 参考栏拖拽换位', () => {
     // 追加第二条文本连线：附件顺序 = 连入边序 [t1, t2]
     const doc = canvasDocMock.current.doc as { nodes: Node[]; edges: Array<{ id: string; source: string; target: string }> };
     doc.edges.push({ id: 'e2', source: 't2', target: 'm1' });
+    // IKFZ9W 起成品图不再是面板绑定目标，验证带附件的图片面板须走草稿卡
+    doc.nodes.find((n) => n.id === 'm1')!.data.draft = true;
     await renderPage();
 
-    const media = flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1');
-    await act(async () => { media.data.onGenImage('m1'); });
+    await act(async () => {
+      flowProps.current.onNodeClick(flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1'));
+    });
 
     await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(2));
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
