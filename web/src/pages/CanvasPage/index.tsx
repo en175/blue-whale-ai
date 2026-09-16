@@ -6820,9 +6820,10 @@ export default function CanvasPage() {
           selectRequest={selectRequest}
           productPickResult={productPickResult}
           assetPickResult={assetPickResult}
-          onDeleteNode={(id) => {
-            // 画布删除统一入口（IKD0JT）：撤销登记 + 悬空边清理；生成中媒体卡片内部转取消流程
-            removeCanvasNodes([id]);
+          onDeleteNode={(ids) => {
+            // 画布删除统一入口（IKD0JT）：撤销登记 + 悬空边清理；生成中媒体卡片内部转取消流程。
+            // 多选删除一次传入全部 id，避免每个节点各入一栈（IKFO73）。
+            removeCanvasNodes(ids);
           }}
           onDuplicateSelected={(ids) => ids.forEach((id) => actionsRef.current.duplicate(id))}
           groups={groups}

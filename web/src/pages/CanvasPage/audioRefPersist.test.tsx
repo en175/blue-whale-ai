@@ -862,7 +862,7 @@ describe('IKFR4Z 音频参考持续选取与保存恢复闭环', () => {
 
     // 删除活动目标：模式与面板一并结束（旧会话不得写向其他目标）
     await act(async () => {
-      flowProps.current.onDeleteNode('d1');
+      flowProps.current.onDeleteNode(['d1']);
     });
     await vi.waitFor(() => expect(panelOpen()).toBe(false));
     expect(pickLock()).toBe(false);
