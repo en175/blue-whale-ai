@@ -2,6 +2,7 @@
  * AssetsPickerModal 画布「资产库选择」弹窗
  * 工具栏加号 → 资产库选择入口：GET /api/assets 分页拉取 + tab 筛选
  * 画布工具栏 / 视频对话「从资产中选择」额外展示「真人人像库」（分组+素材，与资产页一致）
+ * 视频对话「从资产中选择」还展示「虚拟人像库」（AIGC 平铺，与资产页一致；tab 顺序同资产页：虚拟在真人前）
  * 多选 + 确认：卡片点击勾选/取消，确认后批量回调落画布
  * ============================================ */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -32,7 +33,10 @@ import styles from './index.module.css';
 /** 媒体类型（与资产库 type 字段对齐） */
 export type PickerMediaType = 'image' | 'video' | 'audio';
 
-type PickerTabKey = 'all' | PickerMediaType | 'liveness';
+/** 素材库 tab 来源：真人人像库（LivenessFace 分组）/ 虚拟人像库（AIGC 平铺） */
+type MaterialSource = 'liveness' | 'character';
+
+type PickerTabKey = 'all' | PickerMediaType | 'character' | 'liveness';
 
 /** 全量 tab：全部 / 图片 / 视频 / 音频 */
 const pickerTabs: { key: 'all' | PickerMediaType; label: string }[] = [
@@ -59,6 +63,8 @@ export interface AssetsPickerModalProps {
   confirmText?: string;
   /** 是否展示「真人人像库」tab（仅画布工具栏、视频对话「从资产中选择」） */
   showLivenessTab?: boolean;
+  /** 是否展示「虚拟人像库」tab（仅视频对话「从资产中选择」；画布工具栏入口不展示） */
+  showCharacterTab?: boolean;
 }
 
 function materialTypeToAssetType(assetType: MaterialAssetType): AssetType {
@@ -67,8 +73,8 @@ function materialTypeToAssetType(assetType: MaterialAssetType): AssetType {
   return 'image';
 }
 
-/** 素材库条目转资产选择弹窗记录：id 保留 Asset- 前缀，提交走 material_id */
-function materialToPickerRecord(asset: MaterialAsset): AssetRecord {
+/** 素材库条目转资产选择弹窗记录：id 保留 Asset- 前缀，提交走 material_id；source 纯标记（真人/虚拟来源） */
+function materialToPickerRecord(asset: MaterialAsset, source: MaterialSource): AssetRecord {
   return {
     id: asset.Id,
     type: materialTypeToAssetType(asset.AssetType),
@@ -76,7 +82,7 @@ function materialToPickerRecord(asset: MaterialAsset): AssetRecord {
     width: null,
     height: null,
     duration: null,
-    source: 'liveness',
+    source,
     model: null,
     created_at: asset.CreateTime ?? null,
   };
@@ -88,8 +94,9 @@ export default function AssetsPickerModal({
   mediaTypes,
   confirmText = '插入画布',
   showLivenessTab = false,
+  showCharacterTab = false,
 }: AssetsPickerModalProps) {
-  /** 可展示的 tab：按入口可接受类型过滤；单类型时只剩一个 tab（渲染层隐藏 tab 栏，除非带真人库） */
+  /** 可展示的 tab：按入口可接受类型过滤；单类型时只剩一个 tab（渲染层隐藏 tab 栏，除非带人像库） */
   const visibleTabs = useMemo((): { key: PickerTabKey; label: string }[] => {
     let tabs: { key: PickerTabKey; label: string }[];
     if (!mediaTypes || mediaTypes.length === 0) {
@@ -102,24 +109,33 @@ export default function AssetsPickerModal({
         (tab) => tab.key === 'all' || mediaTypes.includes(tab.key),
       );
     }
+    // 人像库 tab 顺序与资产页一致：虚拟人像库在真人人像库之前
+    if (showCharacterTab) {
+      tabs = [...tabs, { key: 'character', label: '虚拟人像库' }];
+    }
     if (showLivenessTab) {
       tabs = [...tabs, { key: 'liveness', label: '真人人像库' }];
     }
     return tabs;
-  }, [mediaTypes, showLivenessTab]);
+  }, [mediaTypes, showCharacterTab, showLivenessTab]);
   const singleType = mediaTypes?.length === 1 ? mediaTypes[0] : null;
 
   const [activeTab, setActiveTab] = useState<PickerTabKey>(singleType ?? 'all');
   const isLivenessTab = activeTab === 'liveness';
+  const isCharacterTab = activeTab === 'character';
+  /** 素材库 tab（真人/虚拟人像库）：不走 /api/assets 分页查询 */
+  const isMaterialTab = isLivenessTab || isCharacterTab;
   /** 已勾选资产记录（id → record，跨 tab 保留：tab 仅是筛选视图，确认时统一提交） */
   const [selectedMap, setSelectedMap] = useState<ReadonlyMap<string, AssetRecord>>(() => new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const characterFileInputRef = useRef<HTMLInputElement>(null);
   const [livenessGroupId, setLivenessGroupId] = useState<string | null>(null);
   const [livenessRefreshTick, setLivenessRefreshTick] = useState(0);
+  const [characterRefreshTick, setCharacterRefreshTick] = useState(0);
   const [uploading, setUploading] = useState(false);
 
-  const assetType = isLivenessTab || activeTab === 'all' ? '' : activeTab;
+  const assetType = isMaterialTab || activeTab === 'all' ? '' : activeTab;
   const {
     data: assetData,
     fetchNextPage,
@@ -132,7 +148,7 @@ export default function AssetsPickerModal({
     // 弹窗与资产页共用查询缓存（key 含 size=30）：覆盖全局 staleTime，
     // 保证每次打开弹窗都重新请求当前 tab 的素材列表（默认 tab 为全部）
     staleTime: 0,
-    enabled: !isLivenessTab,
+    enabled: !isMaterialTab,
   });
 
   const assetPages = assetData?.pages;
@@ -151,13 +167,13 @@ export default function AssetsPickerModal({
   );
   const visibleAssets = localVisibleAssets;
   const assetTotal = assetPages?.at(-1)?.total ?? 0;
-  const loading = isLivenessTab ? false : isPending || (!assetPages && isError);
-  const listError = isLivenessTab ? false : isError;
+  const loading = isMaterialTab ? false : isPending || (!assetPages && isError);
+  const listError = isMaterialTab ? false : isError;
 
   const loadNextPage = useCallback(async () => {
-    if (isLivenessTab || !hasNextPage || isFetchingNextPage) return;
+    if (isMaterialTab || !hasNextPage || isFetchingNextPage) return;
     await fetchNextPage();
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage, isLivenessTab]);
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, isMaterialTab]);
 
   const gridItems = useMemo(
     () => visibleAssets.map((asset) => ({ kind: 'asset' as const, asset })),
@@ -188,19 +204,16 @@ export default function AssetsPickerModal({
     fileInputRef.current?.click();
   }, [livenessGroupId, uploading]);
 
-  const handleLivenessFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0 || uploading) return;
-    const list = Array.from(files);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (!livenessGroupId) {
-      toast.error('请先进入分组再上传');
-      return;
-    }
+  /** 虚拟库上传无分组前提，直接唤起文件选择 */
+  const handleCharacterUpload = useCallback(() => {
+    if (uploading) return;
+    characterFileInputRef.current?.click();
+  }, [uploading]);
 
-    setUploading(true);
+  /** 素材库上传核心：uploadAssetFile → createMaterialAsset（名称 30 字截断，仅图片/视频）；返回错误文案列表 */
+  const uploadMaterialFiles = useCallback(async (files: File[], groupId: string | null): Promise<string[]> => {
     const errors: string[] = [];
-    for (const file of list) {
+    for (const file of files) {
       let assetKind: 'Image' | 'Video' | 'Audio';
       if (file.type.startsWith('image/')) assetKind = 'Image';
       else if (file.type.startsWith('video/')) assetKind = 'Video';
@@ -214,7 +227,8 @@ export default function AssetsPickerModal({
         const finalName = rawName.length > 30 ? rawName.slice(0, 30) : rawName;
         if (rawName.length > 30) toast('当前上传素材名称过长，已截取', { style: { textAlign: 'center' } });
         await createMaterialAsset({
-          GroupId: livenessGroupId,
+          // 真人库落入当前详情分组；虚拟库不传分组，后端自动归组（资产页同款口径）
+          ...(groupId ? { GroupId: groupId } : {}),
           URL: uploadResult.url,
           Name: finalName,
           AssetType: assetKind,
@@ -225,9 +239,37 @@ export default function AssetsPickerModal({
         else if (!isApiError(err)) errors.push(`上传失败：${file.name}`);
       }
     }
+    return errors;
+  }, []);
+
+  /** 真人库上传：须先进分组（上传目标 = 当前详情分组） */
+  const handleLivenessFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || uploading) return;
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!livenessGroupId) {
+      toast.error('请先进入分组再上传');
+      return;
+    }
+
+    setUploading(true);
+    const errors = await uploadMaterialFiles(Array.from(files), livenessGroupId);
     if (errors.length) toast.error(errors.join('；'));
     setUploading(false);
     setLivenessRefreshTick((tick) => tick + 1);
+  };
+
+  /** 虚拟库上传：不传分组，后端自动归组 */
+  const handleCharacterFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || uploading) return;
+    if (characterFileInputRef.current) characterFileInputRef.current.value = '';
+
+    setUploading(true);
+    const errors = await uploadMaterialFiles(Array.from(files), null);
+    if (errors.length) toast.error(errors.join('；'));
+    setUploading(false);
+    setCharacterRefreshTick((tick) => tick + 1);
   };
 
   /** 卡片点击切换勾选（保存完整记录，跨 tab 提交时不丢） */
@@ -241,13 +283,24 @@ export default function AssetsPickerModal({
     });
   }, []);
 
-  const handleToggleLivenessAsset = useCallback((asset: MaterialAsset) => {
-    const record = materialToPickerRecord(asset);
+  /** 素材库条目勾选：转弹窗记录（保留来源标记），入口类型不符直接忽略 */
+  const handleToggleMaterialAsset = useCallback((asset: MaterialAsset, source: MaterialSource) => {
+    const record = materialToPickerRecord(asset, source);
     if (mediaTypes && mediaTypes.length > 0 && !mediaTypes.includes(record.type as PickerMediaType)) {
       return;
     }
     handleToggleSelect(record);
   }, [handleToggleSelect, mediaTypes]);
+
+  const handleToggleLivenessAsset = useCallback(
+    (asset: MaterialAsset) => handleToggleMaterialAsset(asset, 'liveness'),
+    [handleToggleMaterialAsset],
+  );
+
+  const handleToggleCharacterAsset = useCallback(
+    (asset: MaterialAsset) => handleToggleMaterialAsset(asset, 'character'),
+    [handleToggleMaterialAsset],
+  );
 
   /** Esc 关闭 */
   useEffect(() => {
@@ -308,20 +361,40 @@ export default function AssetsPickerModal({
               />
             </>
           )}
-          {!isLivenessTab && loading && (
+          {isCharacterTab && (
+            <>
+              <input
+                ref={characterFileInputRef}
+                type="file"
+                multiple
+                accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.webm"
+                className={styles.hiddenInput}
+                onChange={handleCharacterFileChange}
+              />
+              <CharacterLibrary
+                groupType="AIGC"
+                refreshTick={characterRefreshTick}
+                onUpload={handleCharacterUpload}
+                pickerSelectedIds={selectedIds}
+                onPickerToggleAsset={handleToggleCharacterAsset}
+                pickerMediaTypes={mediaTypes}
+              />
+            </>
+          )}
+          {!isMaterialTab && loading && (
             <div className={assetStyles.skeletonGrid}>
               {Array.from({ length: 10 }, (_, index) => (
                 <Skeleton key={index} className={assetStyles.cardSkeleton} />
               ))}
             </div>
           )}
-          {!isLivenessTab && !loading && listError && gridItems.length === 0 && (
+          {!isMaterialTab && !loading && listError && gridItems.length === 0 && (
             <div className={assetStyles.empty}>资产加载失败，请稍后重试</div>
           )}
-          {!isLivenessTab && !loading && !listError && gridItems.length === 0 && (
+          {!isMaterialTab && !loading && !listError && gridItems.length === 0 && (
             <div className={assetStyles.empty}>暂无素材</div>
           )}
-          {!isLivenessTab && !loading && gridItems.length > 0 && (
+          {!isMaterialTab && !loading && gridItems.length > 0 && (
             <>
               <AssetMasonry
                 key={activeTab}
