@@ -334,25 +334,6 @@ function assetOf(id: number | string, type: 'image' | 'video' | 'audio', url: st
   } as AssetRecord;
 }
 
-/** 视频/音频面板「从资产中选择」（旧「+」菜单仍在）：点媒体入口 → 菜单项「从资产中选择」 → 桩 onSelect 回调 */
-async function pickFromAssets(entryTitle: string, assets: AssetRecord[]) {
-  const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => (b.getAttribute('title') ?? '').includes(entryTitle),
-  )!;
-  await act(async () => {
-    entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  });
-  const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent === '从资产中选择',
-  )!;
-  await act(async () => {
-    item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  });
-  await act(async () => {
-    pickerProps.current.onSelect(assets);
-  });
-}
-
 /** 图片面板「资产库」（IKGB7U 附件操作条直达，旧「+」菜单已退役）：点 pill → 桩 onSelect 回调 */
 async function pickImagePanelAssets(assets: AssetRecord[]) {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
