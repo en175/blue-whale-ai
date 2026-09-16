@@ -1139,7 +1139,7 @@ describe('IKFR4Y 视频参考持续选取与首尾帧连续替换', () => {
 
     // 删除活动目标：会话与面板一并结束（旧会话不得写向其他目标）
     await act(async () => {
-      flowProps.current.onDeleteNode('d1');
+      flowProps.current.onDeleteNode(['d1']);
     });
     await vi.waitFor(() => expect(panelOpen()).toBe(false));
     expect(pickLock()).toBe(false);

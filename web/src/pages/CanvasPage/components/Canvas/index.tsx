@@ -78,7 +78,8 @@ interface FlowCanvasProps {
   onViewportLive?: (v: Viewport) => void;
   /** 节点拖拽结束回调（同步坐标到父组件，触发自动保存）。多选整组拖拽时 draggedNodes 含同组全部节点 */
   onNodeDragStop?: (node: Node, draggedNodes: Node[]) => void;
-  onDeleteNode: (id: string) => void;
+  /** 键盘删除选中节点（多选一次回调全部 id，保证撤销为原子操作） */
+  onDeleteNode: (ids: string[]) => void;
   /** 节点单击（画布选取模式等场景） */
   onNodeClick?: (node: Node) => void;
   /** 画布空白处单击 */

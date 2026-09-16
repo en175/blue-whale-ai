@@ -514,7 +514,7 @@ describe('IKDMQW 删除生成中卡片：先取消，确认后移除；竞态保
       return calls <= 1 ? { ...PROCESSING } : { ...CANCELLED };
     });
 
-    await act(async () => { flowProps.current.onDeleteNode('d1'); });
+    await act(async () => { flowProps.current.onDeleteNode(['d1']); });
 
     expect(apiMocks.cancelGenerationJob).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => expect(flowProps.current.mediaNodes.some((n: Node) => n.id === 'd1')).toBe(false));
