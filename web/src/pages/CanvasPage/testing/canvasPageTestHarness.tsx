@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { vi } from 'vitest';
 import type { Node } from '@xyflow/react';
+import type { GenerationModel } from '@/api/generation';
 
 vi.mock('../components/AgentPanel', () => ({
   default: ({ initialCardLabel }: { initialCardLabel?: string }) =>
@@ -51,7 +52,7 @@ export const apiMocks = {
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
   saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
-  fetchGenerationModels: vi.fn(async () => []),
+  fetchGenerationModels: vi.fn(async (): GenerationModel[] => []),
   fetchJobStatus: vi.fn(),
 };
 
@@ -136,9 +137,10 @@ export async function renderPage() {
   const { default: CanvasPage } = await import('../index');
   container = document.createElement('div');
   document.body.appendChild(container);
-  root = createRoot(container);
+  const createdRoot = createRoot(container);
+  root = createdRoot;
   await act(async () => {
-    root.render(
+    createdRoot.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }) },
@@ -150,7 +152,8 @@ export async function renderPage() {
 
 /** 卸载当前渲染的页面（afterEach 调用） */
 export async function unmountPage() {
-  if (root) await act(async () => { root.unmount(); });
+  const current = root;
+  if (current) await act(async () => { current.unmount(); });
   container?.remove();
   root = null;
   container = null;
