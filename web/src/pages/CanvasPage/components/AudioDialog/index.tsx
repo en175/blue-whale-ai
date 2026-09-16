@@ -371,28 +371,31 @@ export default function AudioDialog({
       <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
       {/* 第一行：附件操作条（IKGB82，IKGB1X 契约共享组件）——左「+ 参考」「资产库」pill
           直达退役菜单两项链路，右侧并入原 topActions 展开/关闭按钮；达上限与生成中
-          只读时常显置灰并悬停说明原因（替代旧「入口消失」口径） */}
-      <AttachmentActionBar
-        kind="audio"
-        onPickFromCanvas={startCanvasPick}
-        onPickFromAssets={() => { setPickerOpen(false); onPickFromAssets?.(); }}
-        pickMode={pickMode}
-        disabledReason={actionBarDisabledReason}
-        trailing={(
-          <>
-            <button
-              className={styles.iconBtn}
-              onClick={() => setExpanded((v) => !v)}
-              title={expanded ? '收起' : '展开'}
-            >
-              {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
-            </button>
-            <button className={styles.iconBtn} onClick={onClose} title="关闭">
-              <X size={16} strokeWidth={2} />
-            </button>
-          </>
-        )}
-      />
+          只读时常显置灰并悬停说明原因（替代旧「入口消失」口径）；
+          actionBarRow 包装仅承载行间距（与 BottomDialog 同形同值；图片面板经 .inputBox flex gap 得同值行距） */}
+      <div className={styles.actionBarRow}>
+        <AttachmentActionBar
+          kind="audio"
+          onPickFromCanvas={startCanvasPick}
+          onPickFromAssets={() => { setPickerOpen(false); onPickFromAssets?.(); }}
+          pickMode={pickMode}
+          disabledReason={actionBarDisabledReason}
+          trailing={(
+            <>
+              <button
+                className={styles.iconBtn}
+                onClick={() => setExpanded((v) => !v)}
+                title={expanded ? '收起' : '展开'}
+              >
+                {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
+              </button>
+              <button className={styles.iconBtn} onClick={onClose} title="关闭">
+                <X size={16} strokeWidth={2} />
+              </button>
+            </>
+          )}
+        />
+      </div>
 
       {/* 画布选择面板锚点（startCanvasPick 既有行为保留）：独立于附件栏空态渲染，
           面板从操作条下方弹出；达上限后不提供入口（与旧栏尾分支同口径） */}

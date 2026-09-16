@@ -73,6 +73,14 @@
   background-color: var(--color-bg-hover);
 }
 
+/* 操作条行包装（与 BottomDialog 同形同值）：操作条视觉定义单一来源在共享样式表
+ * （源唯一性锁见 AttachmentActionBar/actionBarVisualSource.test.ts），此处仅承载面板侧行间距；
+ * 图片面板无此包装——其 .inputBox flex gap 已给出同值（--spacing-md）行距。 */
+.actionBarRow {
+  margin-bottom: var(--spacing-md);
+  flex-shrink: 0;
+}
+
 /* ---- 顶部参考按钮行（IKGB82：空态整条不渲染；原 topActions 展开/关闭已并入操作条右侧） ---- */
 .topRow {
   display: flex;
