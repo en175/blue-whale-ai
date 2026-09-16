@@ -470,6 +470,31 @@ function GroupDetail({
  * 单层平铺展示全部 AIGC 素材，无分组卡片/新建分组/分组删除；
  * 底层分组数据保留，上传按文件类型归入对应类型分区组（见 characterLibraryDeposit）。
  * ============================================ */
+
+/** 平铺视图列表单页大小（与上游 ListAssetGroups/ListAssets 页大小一致） */
+const AIGC_PAGE_SIZE = 100;
+/** 素材聚合单次 ListAssets 携带的分组数上限（防 Filter.GroupIds 数组过长） */
+const AIGC_GROUP_BATCH_SIZE = 50;
+/** 分页拉全防御上限：TotalCount 异常偏大时截断，避免失控请求（50 页 = 5000 条） */
+const AIGC_MAX_PAGES = 50;
+
+/** IKGC0K 分页拉全：按首屏 TotalCount 计算总页数循环拉取聚合全部条目；
+ *  TotalCount 缺省/为 0 视为单页（与旧硬编码单页行为兼容）。 */
+async function fetchAllAigcPages<T>(
+  fetchPage: (pageNumber: number) => Promise<{ TotalCount?: number; Items?: T[] }>,
+): Promise<T[]> {
+  const first = await fetchPage(1);
+  const all = [...(first.Items ?? [])];
+  const totalPages = Math.min(Math.ceil((first.TotalCount ?? 0) / AIGC_PAGE_SIZE), AIGC_MAX_PAGES);
+  for (let page = 2; page <= totalPages; page += 1) {
+    const next = await fetchPage(page);
+    const items = next.Items ?? [];
+    if (items.length === 0) break;
+    all.push(...items);
+  }
+  return all;
+}
+
 function AigcFlatView({
   onUpload,
   refreshTick,
@@ -496,23 +521,33 @@ function AigcFlatView({
     setLoading(true);
     setLoadError(false);
     try {
-      // 先查分组；无组 id 时不调素材查询
-      const groups = await listAssetGroups({
-        Filter: { GroupType: 'AIGC' },
-        PageNumber: 1,
-        PageSize: 100,
-      });
-      const groupIds = (groups.Items ?? []).map((g) => g.Id).filter(Boolean);
+      // 先查分组（IKGC0K：按 TotalCount 分页拉全，超 100 组不再丢组）；无组 id 时不调素材查询
+      const groups = await fetchAllAigcPages((pageNumber) =>
+        listAssetGroups({
+          Filter: { GroupType: 'AIGC' },
+          PageNumber: pageNumber,
+          PageSize: AIGC_PAGE_SIZE,
+        }),
+      );
+      const groupIds = groups.map((g) => g.Id).filter(Boolean);
       if (groupIds.length === 0) {
         setAssets([]);
         return;
       }
-      const result = await listAssets({
-        Filter: { GroupIds: groupIds, GroupType: 'AIGC' },
-        PageNumber: 1,
-        PageSize: 100,
-      });
-      setAssets(result.Items);
+      // 素材聚合（IKGC0K）：分组分批防 Filter.GroupIds 过长，批内按 TotalCount 分页拉全，超 100 条不再截断
+      const collected: MaterialAsset[] = [];
+      for (let i = 0; i < groupIds.length; i += AIGC_GROUP_BATCH_SIZE) {
+        const batchGroupIds = groupIds.slice(i, i + AIGC_GROUP_BATCH_SIZE);
+        const batchAssets = await fetchAllAigcPages((pageNumber) =>
+          listAssets({
+            Filter: { GroupIds: batchGroupIds, GroupType: 'AIGC' },
+            PageNumber: pageNumber,
+            PageSize: AIGC_PAGE_SIZE,
+          }),
+        );
+        collected.push(...batchAssets);
+      }
+      setAssets(collected);
     } catch (err) {
       if (!isApiError(err)) toast.error('加载失败');
       setLoadError(true);
