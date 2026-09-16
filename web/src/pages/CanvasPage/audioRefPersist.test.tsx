@@ -7,10 +7,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { typePromptRefText } from './testing/promptRefEditor';
+import {
+  ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
+  ATTACHMENT_ACTION_PICK_CANVAS_TITLE,
+} from './components/AttachmentActionBar';
+import barStyles from './components/AttachmentActionBar/index.module.css';
+import dialogStyles from './components/AudioDialog/index.module.css';
 
 /* IKFDFZ 音频节点参考隔离、持久化与生成传递：画布选取/@ 即时建线并随自动保存落盘；
    关闭重开、A→B→A 按连线恢复且互不串入；存量 audioRefs 迁移为连线；移除断线重开不复活；
    重复/超限明确拒绝；失效来源提示原因并阻止发送；发送按顺序组装 references。
+   IKGB82：入口形态随操作条改写——旧「+」菜单（触发钮 → 菜单项）断言改写为操作条
+   「+ 参考」pill 直达断言；点选进行中 pill 高亮；附件栏空态隐藏、点选后出现。
    FlowCanvas/CanvasToolbar/CanvasHeader 打桩透出 props；AudioDialog 用真实实现。 */
 
 vi.mock('./components/AgentPanel', () => ({
@@ -258,17 +266,33 @@ function refNames(): string[] {
   return [...container.querySelectorAll<HTMLElement>('[data-testid="audio-ref-thumb"]')].map((el) => el.title);
 }
 
-/** 进入画布选取模式（面板列表与 pick 模式同时激活）；IKFR4Z 起为持续选取会话的发起入口 */
+/** 操作条「+ 参考」按钮（IKGB82：等价退役菜单项「从节点添加素材」的直达入口） */
+function pickReferenceButton(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_CANVAS_TITLE,
+  );
+}
+
+/** 操作条「资产库」按钮（等价退役菜单项「从资产中选择」的直达入口） */
+function assetsLibraryButton(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
+  );
+}
+
+/** 附件栏（IKGB82：空态整条不渲染） */
+function attachmentStrip(): Element | null {
+  return container.querySelector(`.${dialogStyles.topRow}`);
+}
+
+/** 进入画布选取模式（面板列表与 pick 模式同时激活）；IKFR4Z 起为持续选取会话的发起入口；
+ *  IKGB82：操作条「+ 参考」pill 直达（旧「+」触发钮 + 菜单项两步已退役） */
 async function startCanvasPick() {
   await vi.waitFor(() => {
-    const btn = [...container.querySelectorAll('button')].find((b) => b.title === '从资产中选择 / 从节点添加素材');
-    expect(btn).toBeTruthy();
+    expect(pickReferenceButton()).toBeTruthy();
   });
   await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.title === '从资产中选择 / 从节点添加素材')!.click();
-  });
-  await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材')!.click();
+    pickReferenceButton()!.click();
   });
 }
 
@@ -509,13 +533,21 @@ describe('IKFDFZ 音频参考即时建线与持久化', () => {
     expect(edgePairs()).toEqual(['u1->d1', 'u2->d1']);
     await vi.waitFor(() => expect(container.textContent).toContain('重复的素材已跳过'));
 
-    // 补满第 3 段后：入口收起并显示已达上限（不静默截断，无添加入口）
+    // 补满第 3 段后：「已达上限」文案保留在附件栏原位；操作条按钮常显但置灰（IKGB82：
+    // 禁用态 = 常显 + aria-disabled + 悬停原因，替代旧「入口消失」口径）
     await act(async () => {
       flowProps.current.onConnect({ source: 'u3', target: 'd1' });
     });
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声', '风声', '雨声']), { timeout: 3000 });
     await vi.waitFor(() => expect(container.textContent).toContain('已达上限'));
-    expect([...container.querySelectorAll('button')].some((b) => b.title === '从资产中选择 / 从节点添加素材')).toBe(false);
+    const fullPills = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(
+      (b) => b.textContent === '参考' || b.textContent === '资产库',
+    );
+    expect(fullPills).toHaveLength(2);
+    for (const btn of fullPills) {
+      expect(btn.getAttribute('aria-disabled')).toBe('true');
+      expect(btn.getAttribute('title')).toBe('参考音频最多 3 段，已达上限');
+    }
   });
 
   it('失效来源（生成中）保留连线并提示原因阻止发送；移除后恢复发送', async () => {
@@ -917,5 +949,46 @@ describe('IKFR4Z 音频参考持续选取与保存恢复闭环', () => {
     expect(edgePairs()).toEqual(['u1->d1']);
     await vi.waitFor(() => expect(refNames()).toEqual(['海浪声']), { timeout: 3000 });
     await vi.waitFor(() => expect(container.textContent).toContain('待生成的草稿不能作为参考'));
+  });
+});
+
+describe('IKGB82 音频面板附件操作条', () => {
+  it('操作条「+ 参考」「资产库」常显，栏尾旧「+」菜单入口退役；展开/关闭并入操作条右侧', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+
+    expect(pickReferenceButton()).toBeTruthy();
+    expect(assetsLibraryButton()).toBeTruthy();
+    // 旧「+」菜单触发钮不再出现
+    expect(
+      [...container.querySelectorAll<HTMLButtonElement>('button')].some(
+        (b) => b.getAttribute('title') === '从资产中选择 / 从节点添加素材',
+      ),
+    ).toBe(false);
+    // 展开/关闭在操作条右侧原位
+    const bar = pickReferenceButton()!.closest(`.${barStyles.actionBar}`)!;
+    expect(bar.querySelector(`button[title="${ATTACHMENT_ACTION_PICK_ASSETS_TITLE}"]`)).toBeTruthy();
+    expect(bar.querySelector('button[title="展开"]')).toBeTruthy();
+    expect(bar.querySelector('button[title="关闭"]')).toBeTruthy();
+  });
+
+  it('空态：无附件时附件栏不渲染；点「+ 参考」进选取且按钮高亮；点选节点后附件栏出现在操作条与输入框之间', async () => {
+    await renderPage();
+    await clickNode('d1');
+    await waitModelReady();
+    expect(attachmentStrip()).toBeNull();
+
+    await startCanvasPick();
+    expect(pickReferenceButton()!.classList.contains(barStyles.picking)).toBe(true);
+    expect(assetsLibraryButton()!.classList.contains(barStyles.picking)).toBe(false);
+
+    await clickNode('u1');
+    await vi.waitFor(() => expect(refNames()).toEqual(['海浪声']), { timeout: 3000 });
+    const bar = pickReferenceButton()!.closest(`.${barStyles.actionBar}`)!;
+    const strip = attachmentStrip()!;
+    const editor = container.querySelector('[contenteditable]')!;
+    expect(bar.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(strip.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
