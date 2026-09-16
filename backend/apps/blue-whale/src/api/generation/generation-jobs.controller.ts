@@ -1,5 +1,6 @@
 import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { DomainError } from "@lib/contracts";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
@@ -116,6 +117,15 @@ export class GenerationJobsController {
       },
       internal,
     );
+
+    // IKG57P：拒单信封与 HTTP 状态行一致。fail() 信封被 TransformInterceptor 透传时无人写
+    // 状态码，Nest 按 @Post 默认回 201，只看状态码的客户端会把拒绝当成受理成功（ADR-0083）。
+    // 抛 DomainError 走 AllExceptionsFilter 统一投影——code、msg、状态同出一张码表
+    // （httpStatusForCode：4xx/5xx 原样，业务码查表，查不到 400）。只修本 POST 端点，
+    // 全局信封→状态映射不在本单范围。
+    if (result.code !== 200) {
+      throw new DomainError(result.code, result.msg ?? undefined);
+    }
 
     if (result.code === 200 && result.data && body.type === "video") {
       try {

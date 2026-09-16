@@ -1,0 +1,256 @@
+import "reflect-metadata";
+import { Module } from "@nestjs/common";
+import { APP_FILTER } from "@nestjs/core";
+import { NestFactory } from "@nestjs/core";
+import { json } from "express";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { GenerationJobsController } from "./generation-jobs.controller.js";
+import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
+import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+import { ProjectService } from "@lib/shared/project/project.service.js";
+import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
+import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
+import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
+import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
+import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
+
+// IKG57P「素材软删后提交生成未拦截、HTTP 201 与信封 400 分裂」公开接口集成：
+// 真 NestFactory 挂载生产 GenerationJobsController + AllExceptionsFilter（与 app.module 的
+// APP_FILTER 同款，保证「code、msg、HTTP 状态同出一张码表」的生产投影被测到）+ 隔离 MySQL
+// （IKG57P_DATABASE_URL 门控）。断言口径 = IKE5G8 实现决定 7.1/7.2/7.4：提交被拒、不创建
+// 任务、规格文案指出具体失效索引 #N、状态行与信封一致。
+describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
+  "Generation job soft-deleted asset rejection (IKG57P)",
+  () => {
+    const prisma = new PrismaService();
+    const projects = new ProjectService(prisma);
+    const MODEL_ID = "ikg57p-image-model";
+    const MISSING_REF_MSG =
+      "提示词引用的素材缺失或不完整，请补充素材或移除对应引用后再生成";
+    let app: Awaited<ReturnType<typeof NestFactory.create>>;
+    let base = "";
+    const previousDatabase = process.env.DATABASE_URL;
+
+    beforeAll(async () => {
+      process.env.DATABASE_URL = process.env.IKG57P_DATABASE_URL;
+      const sizes = [{ id: "1024x1024", label: "1024x1024" }];
+      await prisma.client.generation_model_capability.upsert({
+        where: {
+          provider_id_model_id: {
+            provider_id: "ikg57p-test",
+            model_id: MODEL_ID,
+          },
+        },
+        create: {
+          provider_id: "ikg57p-test",
+          model_id: MODEL_ID,
+          capability_type: "image",
+          model_label: "IKG57P Test",
+          supported_sizes: sizes,
+          supported_aspect_ratios: ["1:1"],
+          supported_formats: ["png"],
+          default_size: "1024x1024",
+          default_aspect_ratio: "1:1",
+          features: { reference_image: true },
+        },
+        update: {
+          supported_sizes: sizes,
+          default_size: "1024x1024",
+          features: { reference_image: true },
+        },
+      });
+      class HarnessModule {}
+      // vitest（esbuild）不 emit design:paramtypes，Nest DI 需要手工补构造参数元数据
+      Reflect.defineMetadata(
+        "design:paramtypes",
+        [
+          ProjectService,
+          GenerationCommandService,
+          ModelCapabilityReadService,
+          GenerationCostEstimatorService,
+          CanvasService,
+          MaterialService,
+          AssetService,
+        ],
+        GenerationJobsController,
+      );
+      Module({
+        controllers: [GenerationJobsController],
+        providers: [
+          { provide: APP_FILTER, useClass: AllExceptionsFilter },
+          { provide: PrismaService, useValue: prisma },
+          { provide: ProjectService, useValue: projects },
+          {
+            provide: GenerationCommandService,
+            useValue: new GenerationCommandService(prisma),
+          },
+          {
+            provide: ModelCapabilityReadService,
+            useValue: new ModelCapabilityReadService(prisma),
+          },
+          {
+            provide: GenerationCostEstimatorService,
+            useValue: new GenerationCostEstimatorService(),
+          },
+          {
+            provide: CanvasService,
+            useValue: new CanvasService(prisma, projects),
+          },
+          { provide: MaterialService, useValue: new MaterialService(prisma) },
+          {
+            provide: AssetService,
+            useValue: new AssetService(prisma, new AssetStorageService()),
+          },
+        ],
+      })(HarnessModule);
+      app = await NestFactory.create(HarnessModule, {
+        logger: false,
+        bodyParser: false,
+      });
+      app.use(json({ limit: "16mb" }));
+      app.setGlobalPrefix("api");
+      app.use((req: { user: unknown }, _res: unknown, next: () => void) => {
+        req.user = { userId: "987654" };
+        next();
+      });
+      await app.listen(0, "127.0.0.1");
+      base = await app.getUrl();
+    }, 30_000);
+
+    afterAll(async () => {
+      await app?.close();
+      if (previousDatabase === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previousDatabase;
+      await prisma.client.$disconnect();
+    });
+
+    async function createAsset() {
+      const row = await prisma.client.assets.create({
+        data: {
+          user_id: BigInt(987654),
+          project_id: BigInt(0),
+          type: "image",
+          url: "https://example.com/ikg57p.png",
+          width: 1024,
+          height: 1024,
+          size: BigInt(2048),
+        },
+      });
+      return row.id.toString();
+    }
+
+    function submit(projectId: string, body: unknown) {
+      return fetch(`${base}/api/projects/${projectId}/generation-jobs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    }
+
+    async function jobCount(projectId: string) {
+      return prisma.client.generation_jobs.count({
+        where: { project_id: BigInt(projectId) },
+      });
+    }
+
+    it("正文标签引用的素材软删 → HTTP 400 与信封一致，规格 7.2 文案 + 索引 #N，不创建任务", async () => {
+      const projectId = (await projects.create("987654", "IKG57P soft-delete ref")).id;
+      const assetId = await createAsset();
+      await prisma.client.assets.update({
+        where: { id: BigInt(assetId) },
+        data: { is_delete: true },
+      });
+
+      const response = await submit(projectId, {
+        type: "image",
+        input_asset_ids: [assetId],
+        expected_output_count: 1,
+        parameters: { prompt: "海边日落", model_id: MODEL_ID, aspect_ratio: "1:1" },
+        prompt_doc: {
+          version: 1,
+          segments: [
+            { kind: "text", text: "参考" },
+            { kind: "asset_ref", asset_id: assetId },
+            { kind: "text", text: "的风格" },
+          ],
+        },
+      });
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as {
+        code: number;
+        msg: string;
+        data: unknown;
+      };
+      expect(body.code).toBe(400);
+      expect(body.msg).toBe(`索引 #1：${MISSING_REF_MSG}`);
+      expect(await jobCount(projectId)).toBe(0);
+    });
+
+    it("纯参考清单素材软删 → HTTP 400 与信封一致，通用文案拒单", async () => {
+      const projectId = (await projects.create("987654", "IKG57P soft-delete plain")).id;
+      const assetId = await createAsset();
+      await prisma.client.assets.update({
+        where: { id: BigInt(assetId) },
+        data: { is_delete: true },
+      });
+
+      const response = await submit(projectId, {
+        type: "image",
+        input_asset_ids: [assetId],
+        expected_output_count: 1,
+        parameters: { prompt: "海边日落", model_id: MODEL_ID, aspect_ratio: "1:1" },
+      });
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as {
+        code: number;
+        msg: string;
+        data: unknown;
+      };
+      expect(body.code).toBe(400);
+      expect(body.msg).toBe("参考素材不存在或无权访问");
+      expect(await jobCount(projectId)).toBe(0);
+    });
+
+    it("补齐素材后同一提交路径放行 → 201 创建任务", async () => {
+      const projectId = (await projects.create("987654", "IKG57P soft-delete restore")).id;
+      const assetId = await createAsset();
+      await prisma.client.assets.update({
+        where: { id: BigInt(assetId) },
+        data: { is_delete: true },
+      });
+      const body = {
+        type: "image",
+        input_asset_ids: [assetId],
+        expected_output_count: 1,
+        parameters: { prompt: "海边日落", model_id: MODEL_ID, aspect_ratio: "1:1" },
+        prompt_doc: {
+          version: 1,
+          segments: [
+            { kind: "text", text: "参考" },
+            { kind: "asset_ref", asset_id: assetId },
+            { kind: "text", text: "的风格" },
+          ],
+        },
+      };
+      const rejected = await submit(projectId, body);
+      expect(rejected.status).toBe(400);
+
+      // 补齐素材（恢复软删）后，同一提交路径重新校验放行
+      await prisma.client.assets.update({
+        where: { id: BigInt(assetId) },
+        data: { is_delete: false },
+      });
+      const accepted = await submit(projectId, body);
+      expect(accepted.status).toBe(201);
+      const created = (await accepted.json()) as {
+        code: number;
+        data: { generation_job_id: string };
+      };
+      expect(created.code).toBe(200);
+      expect(await jobCount(projectId)).toBe(1);
+    });
+  },
+  240_000,
+);
