@@ -388,6 +388,15 @@
   padding-left: 22px;
 }
 
+/* IKFZW7：global.css 的 ul/ol reset 会抹掉列表标记，编辑器作用域内恢复 */
+.editor ul {
+  list-style: disc;
+}
+
+.editor ol {
+  list-style: decimal;
+}
+
 .editor li {
   margin: 3px 0;
 }
