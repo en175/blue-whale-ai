@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { REF_SOURCE_ENTRY_TITLE } from './components/RefSourceMenu';
+import { ATTACHMENT_ACTION_PICK_ASSETS_TITLE } from './components/AttachmentActionBar';
 import type { GenerationModel, ModelFeatures } from '@/api/generation';
 import type { AssetRecord } from '@/api/assets';
 
@@ -334,7 +335,7 @@ function assetOf(id: number | string, type: 'image' | 'video' | 'audio', url: st
   } as AssetRecord;
 }
 
-/** 图片/视频面板「从资产中选择」：点媒体入口 → 菜单项「从资产中选择」 → 桩 onSelect 回调 */
+/** 视频/音频面板「从资产中选择」（旧「+」菜单仍在）：点媒体入口 → 菜单项「从资产中选择」 → 桩 onSelect 回调 */
 async function pickFromAssets(entryTitle: string, assets: AssetRecord[]) {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => (b.getAttribute('title') ?? '').includes(entryTitle),
@@ -347,6 +348,19 @@ async function pickFromAssets(entryTitle: string, assets: AssetRecord[]) {
   )!;
   await act(async () => {
     item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+  await act(async () => {
+    pickerProps.current.onSelect(assets);
+  });
+}
+
+/** 图片面板「资产库」（IKGB7U 附件操作条直达，旧「+」菜单已退役）：点 pill → 桩 onSelect 回调 */
+async function pickImagePanelAssets(assets: AssetRecord[]) {
+  const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
+  )!;
+  await act(async () => {
+    entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
   await act(async () => {
     pickerProps.current.onSelect(assets);
@@ -391,7 +405,7 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
     const before = mediaNodeCount();
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a1', 'image', 'http://img/m1.png')]);
+    await pickImagePanelAssets([assetOf('a1', 'image', 'http://img/m1.png')]);
 
     // 复用已有 m1：不新建节点，直接建 m1->d1 连线
     expect(mediaNodeCount()).toBe(before);
@@ -408,7 +422,7 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
     const before = mediaNodeCount();
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf(5, 'image', 'http://img/m5.png')]);
+    await pickImagePanelAssets([assetOf(5, 'image', 'http://img/m5.png')]);
 
     expect(mediaNodeCount()).toBe(before + 1);
     const newNode = flowProps.current.mediaNodes.find(
@@ -430,7 +444,7 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
 
     const before = mediaNodeCount();
     // URL 与 m1 同路径（展示名相同）但 id 不同：身份不同，不复用 m1
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a99', 'image', 'http://img/m1.png')]);
+    await pickImagePanelAssets([assetOf('a99', 'image', 'http://img/m1.png')]);
 
     expect(mediaNodeCount()).toBe(before + 1);
     expect(edgePairs()).not.toContain('m1->d1');
@@ -451,8 +465,8 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await clickNode('d1');
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a1', 'image', 'http://img/m1.png')]);
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a5', 'image', 'http://img/m5.png')]);
+    await pickImagePanelAssets([assetOf('a1', 'image', 'http://img/m1.png')]);
+    await pickImagePanelAssets([assetOf('a5', 'image', 'http://img/m5.png')]);
     await vi.waitFor(() => expect(refNames('dock-media-ref').length).toBe(2), { timeout: 3000 });
 
     // 切到 B：B 面板打开但无 A 的参考（连线只属于 A）

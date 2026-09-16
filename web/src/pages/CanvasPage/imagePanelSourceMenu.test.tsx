@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-/* IKFE8T 图片面板统一附件来源与类型筛选：
+/* IKGB7U 图片面板附件操作条（旧「+」菜单页面级断言随入口形态改写为操作条断言）：
    自由面板（首页 AI图片带入，imageSeed 无 targetNodeId）与节点/工具栏面板
-   （草稿绑定，imageDraftId 恒定）共用单「+」，菜单仅「从资产中选择 / 从节点添加素材」两项。
-   从节点添加素材按图片面板类型边界接纳——图片可入参考，视频/音频画布保留节点但
-   禁选并提示，不产生参考或附件；从资产中选择过滤仅图片（列表隐藏视频/音频）。
+   （草稿绑定，imageDraftId 恒定）第一行操作条同源——左「+ 参考」「资产库」pill 直达
+   旧菜单两项链路，右侧并入展开/关闭；附件栏空态整条隐藏、点选首个附件后出现。
+   「+ 参考」按图片面板类型边界接纳——图片可入参考，视频/音频画布保留节点但
+   禁选并提示，不产生参考或附件；「资产库」弹窗过滤仅图片（列表隐藏视频/音频）。
    FlowCanvas/CanvasToolbar/AssetsPickerModal 打桩透出 props；ImageDialog 用真实实现。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -13,6 +14,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { REF_SOURCE_ENTRY_TITLE } from './components/RefSourceMenu';
+import {
+  ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
+  ATTACHMENT_ACTION_PICK_CANVAS_TITLE,
+} from './components/AttachmentActionBar';
+import barStyles from './components/AttachmentActionBar/index.module.css';
 import dialogStyles from './components/ImageDialog/index.module.css';
 
 vi.mock('./components/AgentPanel', () => ({
@@ -224,35 +230,36 @@ async function renderPage(withHomeHandoff = false) {
   });
 }
 
-/** 来源「+」按钮：面板参考区尾部的统一附件入口 */
-function sourceEntryButton(): HTMLButtonElement | undefined {
+/** 操作条「+ 参考」按钮（IKGB7U：等价旧菜单项「从节点添加素材」的直达入口） */
+function pickReferenceButton(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
+    (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_CANVAS_TITLE,
   );
 }
 
-/** 展开来源菜单：返回菜单项文案列表 */
-async function openSourceMenu(): Promise<string[]> {
-  const entry = sourceEntryButton()!;
-  await act(async () => {
-    entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  });
-  return [...container.querySelectorAll('button')]
-    .filter((b) => b.textContent === '从资产中选择' || b.textContent === '从节点添加素材')
-    .map((b) => b.textContent!);
+/** 操作条「资产库」按钮（等价旧菜单项「从资产中选择」的直达入口） */
+function assetsLibraryButton(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
+  );
 }
 
-/** 菜单项点击（先展开再点指定文案） */
-async function clickMenuItem(label: '从资产中选择' | '从节点添加素材') {
-  const entry = sourceEntryButton()!;
+/** 附件栏（空态整条不渲染） */
+function attachmentStrip(): Element | null {
+  return container.querySelector(`.${dialogStyles.previewRow}`);
+}
+
+/** 点「+ 参考」：直接进入画布点选模式 */
+async function clickPickReference() {
   await act(async () => {
-    entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    pickReferenceButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
-  const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent === label,
-  )!;
+}
+
+/** 点「资产库」：直接打开资产库选择弹窗 */
+async function clickAssetsLibrary() {
   await act(async () => {
-    item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    assetsLibraryButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
 }
 
@@ -277,7 +284,7 @@ async function openBoundPanel() {
 async function openFreePanelFromHome() {
   genHandoffMock.current = { kind: 'image', text: '', modelId: 'm-test', size: '2k', ratio: '1:1', files: [] };
   await renderPage(true);
-  await vi.waitFor(() => expect(sourceEntryButton()).toBeTruthy());
+  await vi.waitFor(() => expect(pickReferenceButton()).toBeTruthy());
 }
 
 /** 面板参考区预览图 alt 列表（自由模式渲染面板本地 files；绑定模式渲染连线 mediaRefs） */
@@ -306,45 +313,73 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-describe('IKFE8T 图片面板统一附件来源入口', () => {
-  it('自由面板（首页带入）：单「+」入口，菜单仅含两项统一来源', async () => {
+describe('IKGB7U 图片面板附件操作条', () => {
+  it('自由面板（首页带入）：操作条「+ 参考」「资产库」常显，栏尾旧「+」入口不再出现', async () => {
     await openFreePanelFromHome();
 
-    const entries = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(
-      (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
-    );
-    expect(entries).toHaveLength(1);
+    expect(pickReferenceButton()).toBeTruthy();
+    expect(assetsLibraryButton()).toBeTruthy();
+    expect(
+      [...container.querySelectorAll<HTMLButtonElement>('button')].some(
+        (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
+      ),
+    ).toBe(false);
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '到节点选择')).toBe(false);
-
-    const items = await openSourceMenu();
-    expect(items.sort()).toEqual(['从节点添加素材', '从资产中选择']);
   });
 
-  it('工具栏面板（草稿绑定）：单「+」入口，菜单仅含两项统一来源', async () => {
+  it('工具栏面板（草稿绑定）：操作条两入口常显，旧「+」入口不再出现；展开/关闭并入操作条右侧', async () => {
     await renderPage();
     await openBoundPanel();
 
-    const entries = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(
-      (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
-    );
-    expect(entries).toHaveLength(1);
-
-    const items = await openSourceMenu();
-    expect(items.sort()).toEqual(['从节点添加素材', '从资产中选择']);
+    const bar = pickReferenceButton()!.closest(`.${barStyles.actionBar}`)!;
+    expect(bar).toBeTruthy();
+    expect(bar.querySelector(`button[title="${ATTACHMENT_ACTION_PICK_ASSETS_TITLE}"]`)).toBeTruthy();
+    expect(bar.querySelector(`button[title="展开"]`)).toBeTruthy();
+    expect(bar.querySelector(`button[title="关闭"]`)).toBeTruthy();
+    expect(
+      [...container.querySelectorAll<HTMLButtonElement>('button')].some(
+        (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
+      ),
+    ).toBe(false);
   });
 
-  it('从资产中选择：资产列表按面板类型过滤，仅图片（隐藏视频/音频）', async () => {
+  it('空态：无附件时附件栏不渲染；点选首个附件后附件栏出现在操作条与输入框之间', async () => {
+    await renderPage();
+    await openBoundPanel();
+    expect(attachmentStrip()).toBeNull();
+
+    await clickPickReference();
+    await clickNode('m1');
+
+    await vi.waitFor(() => expect(refImages()).toEqual(['素材图一']));
+    const bar = pickReferenceButton()!.closest(`.${barStyles.actionBar}`)!;
+    const strip = attachmentStrip()!;
+    const editor = container.querySelector('[contenteditable]')!;
+    expect(bar.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(strip.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('点「+ 参考」直接进入画布点选模式且按钮高亮', async () => {
+    await openFreePanelFromHome();
+
+    await clickPickReference();
+
+    expect(toastText()).toContain('从节点添加素材');
+    expect(pickReferenceButton()!.classList.contains(barStyles.picking)).toBe(true);
+  });
+
+  it('点「资产库」直接打开同一资产库弹窗，按面板类型过滤仅图片（隐藏视频/音频）', async () => {
     await renderPage();
     await openBoundPanel();
 
-    await clickMenuItem('从资产中选择');
+    await clickAssetsLibrary();
     expect(assetsPickerProps.current.mediaTypes).toEqual(['image']);
   });
 
-  it('自由面板从节点添加素材：视频节点禁选并提示，零新增；随后图片节点仍可接纳', async () => {
+  it('自由面板画布点选：视频节点禁选并提示，零新增；随后图片节点仍可接纳', async () => {
     await openFreePanelFromHome();
 
-    await clickMenuItem('从节点添加素材');
+    await clickPickReference();
     await clickNode('v1');
 
     expect(toastText()).toContain('图片参考仅支持图片素材');
@@ -354,36 +389,36 @@ describe('IKFE8T 图片面板统一附件来源入口', () => {
     await vi.waitFor(() => expect(refImages()).toEqual(['素材图一']));
   });
 
-  it('自由面板从节点添加素材：音频节点禁选并提示，零新增', async () => {
+  it('自由面板画布点选：音频节点禁选并提示，零新增', async () => {
     await openFreePanelFromHome();
 
-    await clickMenuItem('从节点添加素材');
+    await clickPickReference();
     await clickNode('s1');
 
     expect(toastText()).toContain('图片参考仅支持图片素材');
     expect(refImages()).toEqual([]);
   });
 
-  it('自由面板从节点添加素材：图片节点注入参考（既有链路回归）', async () => {
+  it('自由面板画布点选：图片节点注入参考（既有链路回归）', async () => {
     await openFreePanelFromHome();
 
-    await clickMenuItem('从节点添加素材');
+    await clickPickReference();
     await clickNode('m1');
 
     await vi.waitFor(() => expect(refImages()).toEqual(['素材图一']));
   });
 
-  it('绑定面板从节点添加素材：视频节点禁选并提示，不建参考连线；重新发起后图片节点可接纳', async () => {
+  it('绑定面板画布点选：视频节点禁选并提示，不建参考连线；重新发起后图片节点可接纳', async () => {
     await renderPage();
     await openBoundPanel();
 
-    await clickMenuItem('从节点添加素材');
+    await clickPickReference();
     await clickNode('v1');
 
     expect(toastText()).toContain('图片参考仅支持图片素材');
     expect(refImages()).toEqual([]);
-    // 既有规则：绑定面板禁选提示后退出选取模式；用户重新从菜单发起再选图片即可
-    await clickMenuItem('从节点添加素材');
+    // 既有规则：绑定面板禁选提示后退出选取模式；用户重新从操作条发起再选图片即可
+    await clickPickReference();
     await clickNode('m1');
     await vi.waitFor(() => expect(refImages()).toEqual(['素材图一']));
   });
@@ -395,10 +430,10 @@ it('IKFEWF 普通文本从图片入口建立附件且重复选取不重复连线
   doc.nodes.push({ id: 't1', type: 'textNode', position: { x: 0, y: 500 }, data: { text: '普通文本上下文' } });
   await renderPage();
   await openBoundPanel();
-  await clickMenuItem('从节点添加素材');
+  await clickPickReference();
   await clickNode('t1');
   expect(flowProps.current.edges.filter((e: { source: string }) => e.source === 't1')).toHaveLength(1);
-  await clickMenuItem('从节点添加素材');
+  await clickPickReference();
   await clickNode('t1');
   expect(flowProps.current.edges.filter((e: { source: string }) => e.source === 't1')).toHaveLength(1);
 });
