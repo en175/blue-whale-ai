@@ -81,12 +81,14 @@ function makeCanvas(
   edges: CanvasEdge[] = [],
   connected = false,
   targetData: Record<string, unknown> = {},
+  extraNodes: Array<{ id: string; type: string; data: Record<string, unknown> }> = [],
 ) {
   return {
     nodes: [
       { id: "target", type: "mediaNode", data: { mediaType, ...targetData } },
       // 连线齐全时的媒体来源卡：归属/能力边界用例用它把「连线」这一维排除掉
       ...(connected ? [{ id: "m1", type: "mediaNode", data: { mediaType: "image", assetId: "11" } }] : []),
+      ...extraNodes,
       {
         id: "plan",
         type: "textNode",
@@ -119,13 +121,14 @@ function callFreeze(overrides: {
   resolveImpl?: (ids: string[]) => WorkerInputAsset[];
   model?: ModelCapabilityView;
   draftMaterialRefs?: Array<{ materialId: string; mediaType: string; role: string; url: string }>;
+  extraNodes?: Array<{ id: string; type: string; data: Record<string, unknown> }>;
   references?: Array<{ asset_id?: string; material_id?: string; type: "image" | "video" | "audio"; role: "reference" | "first_frame" | "last_frame" }>;
 } = {}) {
   const mediaType = overrides.mediaType ?? "image";
   const connected = overrides.connected ?? false;
   const targetData = overrides.draftMaterialRefs ? { draftMaterialRefs: overrides.draftMaterialRefs } : {};
   return freezePromptPlans({
-    ...makeCanvas(mediaType, overrides.edges ?? (connected ? CONNECTED_EDGES : []), connected, targetData),
+    ...makeCanvas(mediaType, overrides.edges ?? (connected ? CONNECTED_EDGES : []), connected, targetData, overrides.extraNodes ?? []),
     version: 3,
     targetId: "target",
     type: mediaType,
@@ -327,5 +330,104 @@ describe("freezePromptPlans 素材库素材的身份映射（IKG79Z）", () => {
       references: MATERIAL_REFS,
       resolveImpl: (ids) => ids.map(id => ({ ...makeAsset(id), material_id: "mat-1" })),
     })).rejects.toThrow("提示词引用的素材缺失或不完整");
+  });
+});
+
+// IKG79Z：素材库素材有两种落点——纯素材库引用存 `draftMaterialRefs`；有本地 asset 行的会落成画布节点
+// （节点同时带 assetId 与 materialId）。视频分支只认前者时，后者恒 400（测试环境 project 492 实证）。
+describe("freezePromptPlans 素材库素材落成画布节点（IKG79Z）", () => {
+  const MATERIAL_REFS = [{ material_id: "mat-1", type: "image" as const, role: "reference" as const }];
+  const MATERIAL_NODE = {
+    id: "m-mat",
+    type: "mediaNode",
+    data: { mediaType: "image", materialId: "mat-1", assetId: "42", src: "https://cdn.test/mat-1.png" },
+  };
+
+  it("目标无 draftMaterialRefs、素材在画布上以节点形式存在 → 放行", async () => {
+    const snapshot = await callFreeze({
+      mediaType: "video",
+      model: makeModel({}, "seedance-2"),
+      references: MATERIAL_REFS,
+      extraNodes: [MATERIAL_NODE],
+    });
+
+    expect(snapshot).toBeDefined();
+    expect(snapshot!.videoReferences).toEqual([{
+      materialId: "mat-1",
+      type: "image",
+      role: "reference",
+      url: "https://cdn.test/mat-1.png",
+      providerUrl: "asset://mat-1",
+    }]);
+  });
+
+  it("既不在 draftMaterialRefs、画布上也没有对应节点 → 仍 400", async () => {
+    await expect(callFreeze({
+      mediaType: "video",
+      model: makeModel({}, "seedance-2"),
+      references: MATERIAL_REFS,
+      extraNodes: [],
+    })).rejects.toThrow("素材库参考与目标已保存输入不一致");
+  });
+
+  it("画布节点存在但媒体类型与请求不符 → 仍 400", async () => {
+    await expect(callFreeze({
+      mediaType: "video",
+      model: makeModel({}, "seedance-2"),
+      references: MATERIAL_REFS,
+      extraNodes: [{ ...MATERIAL_NODE, data: { ...MATERIAL_NODE.data, mediaType: "video" } }],
+    })).rejects.toThrow("素材库参考与目标已保存输入不一致");
+  });
+
+  it("生产形态：inputIds 为空 + 方案绑定走身份映射 + 素材落成画布节点 → 放行（project 492 全链路）", async () => {
+    const snapshot = await callFreeze({
+      mediaType: "video",
+      model: makeModel({}, "seedance-2"),
+      inputIds: [], // video + 素材库引用：请求里没有 asset_id
+      references: MATERIAL_REFS,
+      extraNodes: [MATERIAL_NODE],
+      // 方案绑定 assetId=11 关联到请求里的 material mat-1 → 走身份映射放行
+      resolveImpl: (ids) => ids.map(id => ({ ...makeAsset(id), material_id: "mat-1" })),
+    });
+
+    expect(snapshot).toBeDefined();
+    expect(snapshot!.videoReferences).toEqual([{
+      materialId: "mat-1",
+      type: "image",
+      role: "reference",
+      url: "https://cdn.test/mat-1.png",
+      providerUrl: "asset://mat-1",
+    }]);
+    expect(snapshot!.providerPrompt).toContain("参考图1");
+    expect(snapshot!.providerPrompt).not.toContain("参考图0");
+  });
+
+  it("同 materialId 另有类型不符的节点时取类型相符的那个，不按首个命中误拒", async () => {
+    const snapshot = await callFreeze({
+      mediaType: "video",
+      model: makeModel({}, "seedance-2"),
+      references: MATERIAL_REFS,
+      extraNodes: [
+        { id: "m-wrong", type: "mediaNode", data: { mediaType: "video", materialId: "mat-1", src: "https://cdn.test/wrong.mp4" } },
+        MATERIAL_NODE,
+      ],
+    });
+
+    expect(snapshot!.videoReferences).toEqual([{
+      materialId: "mat-1",
+      type: "image",
+      role: "reference",
+      url: "https://cdn.test/mat-1.png",
+      providerUrl: "asset://mat-1",
+    }]);
+  });
+
+  it("命中的节点已被判失效（assetMissing）→ 仍 400", async () => {
+    await expect(callFreeze({
+      mediaType: "video",
+      model: makeModel({}, "seedance-2"),
+      references: MATERIAL_REFS,
+      extraNodes: [{ ...MATERIAL_NODE, data: { ...MATERIAL_NODE.data, assetMissing: true } }],
+    })).rejects.toThrow("素材库参考与目标已保存输入不一致");
   });
 });

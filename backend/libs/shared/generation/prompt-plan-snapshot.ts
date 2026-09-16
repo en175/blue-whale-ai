@@ -70,12 +70,34 @@ export async function freezePromptPlans(args: {
       ? target.data.draftMaterialRefs as Array<{ materialId: string; mediaType: string; role: string; url: string }> : [];
     videoReferences = refs.map(ref => {
       if (ref.material_id) {
-        const material = materials.find(m => m.materialId === ref.material_id);
-        const role = material?.role === "first" ? "first_frame" : material?.role === "last" ? "last_frame" : "reference";
-        if (!material || material.mediaType !== ref.type || role !== ref.role || !/^https?:\/\//.test(material.url)) {
+        const materialId = ref.material_id;
+        // IKG79Z：素材库素材有两种落点——① 纯素材库引用（落不了画布节点）存目标节点的 draftMaterialRefs；
+        // ② 素材有本地 asset 行时它会落成画布节点（节点同时带 assetId 与 materialId），**不进** draftMaterialRefs。
+        // 只认 ① 会让 ② 这条路的生成恒 400「素材库参考与目标已保存输入不一致」（测试环境 project 492 实证）。
+        const saved = materials.find(m => m.materialId === materialId);
+        // 节点选择按「能完整表达这条引用」筛：排除目标自身（目标不能当自己的参考来源）、媒体类型须与请求一致、
+        // 素材未被判失效（对齐 prompt-target.ts 其余画布来源检查）。只按 materialId 取首个的话，
+        // 同一 materialId 的类型不符节点会先命中并被误拒。
+        const node = saved ? undefined : nodes.find(n =>
+          n.id !== targetId && n.type === "mediaNode"
+          && String(n.data?.materialId ?? "").toLowerCase() === materialId.toLowerCase()
+          && String(n.data?.mediaType ?? "") === ref.type
+          && !n.data?.assetMissing);
+        if (saved) {
+          const role = saved.role === "first" ? "first_frame" : saved.role === "last" ? "last_frame" : "reference";
+          if (saved.mediaType !== ref.type || role !== ref.role || !/^https?:\/\//.test(saved.url)) {
+            planError(plans[0]!.nodeId, plans.flatMap(p => p.bindings), "素材库参考与目标已保存输入不一致");
+          }
+          return { materialId, type: ref.type, role: ref.role, url: saved.url, providerUrl: `asset://${materialId}` };
+        }
+        // 走画布节点这条回退时角色以请求体为准（同 IKG4RV 口径；节点上没有存角色）。
+        const url = typeof node?.data?.src === "string" ? node.data.src : "";
+        if (!node || !/^https?:\/\//.test(url)) {
           planError(plans[0]!.nodeId, plans.flatMap(p => p.bindings), "素材库参考与目标已保存输入不一致");
         }
-        return { materialId: ref.material_id, type: ref.type, role: ref.role, url: material.url, providerUrl: `asset://${ref.material_id}` };
+        // 这里的 url 只进快照供审计：worker 出站只认 providerUrl（asset://<materialId>），
+        // 素材本身是否可用由生成接纳处的合规门按调用方身份向上游核验。
+        return { materialId, type: ref.type, role: ref.role, url, providerUrl: `asset://${materialId}` };
       }
       const asset = resolved.find(a => a.id === ref.asset_id);
       // IKG4RV：首帧/尾帧角色以请求体 references[].role 为准，不再从连线 refRole 反推比对。
