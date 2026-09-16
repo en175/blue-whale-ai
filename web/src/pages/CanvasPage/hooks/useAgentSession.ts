@@ -36,7 +36,7 @@ import {
   type PromptCardRevision,
   type GenerationCardBlock,
 } from '@/api/agentSessions';
-import { cardsFromRevision, cardsOfRevision } from '@/api/promptCardMapping';
+import { cardsFromRevision, cardsOfRevision, taskLabelsOf } from '@/api/promptCardMapping';
 import { isApiError } from '@/api/http';
 import { blockIfQuotaInsufficient, openRechargeForQuotaError } from '@/utils/quotaGate';
 import { estimateOutputTokens, parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
@@ -218,21 +218,25 @@ export function attachCards(
   records: PromptCardRecord[] | undefined,
   /** 已取回正文的修订版。只有测试会传；运行时用模块级那一份。 */
   cache: Map<string, PromptCardRevision> = revisionCache,
+  /** 会话里每件事的标签（IKG793）：另开的一件事的卡头上标「承接自上一张」。见 `taskLabelsOf`。 */
+  taskLabels: ReadonlyMap<string, string> = new Map(),
 ): ChatMessage[] {
   let next = messages;
+  // 一个会话可以有多组卡（IKG78T）：每组按自己的 authoring_run_id 挂到写它的那一轮，卡 id 里带修订号，互不覆盖。
   for (const record of records ?? []) {
     const sessionId = record.session_id ?? '';
+    const taskLabel = taskLabels.get(record.task_id ?? `und_${sessionId}`);
     for (const summary of record.revisions ?? []) {
       if (summary.revision_id === record.active_revision_id) continue;
       const revision = cache.get(summary.revision_id);
       if (!revision) continue;
-      next = placeCards(next, cardsOfRevision(sessionId, revision), revision.revision_id, summary.authoring_run_id, false);
+      next = placeCards(next, cardsOfRevision(sessionId, revision, taskLabel), revision.revision_id, summary.authoring_run_id, false);
     }
     const active = record.active_revision;
     if (!active?.payload?.shots?.length) continue;
     // 它下一次改卡后就成了历史版本，先缓存，到时候不必再取一遍。
     cache.set(active.revision_id, active);
-    next = placeCards(next, cardsFromRevision(record), active.revision_id, active.authoring_run_id, true);
+    next = placeCards(next, cardsFromRevision(record, taskLabel), active.revision_id, active.authoring_run_id, true);
   }
   return next;
 }
@@ -473,11 +477,12 @@ export function useAgentSession(projectId: string, agentModel?: string) {
         try {
           const snap = await api.fetchSessionSnapshot(projectId, sid);
           if (sessionIdRef.current !== sid) return; // 期间切走了会话，丢弃
-          commit((prev) => ({ ...prev, messages: attachCards(prev.messages, snap.prompt_cards) }));
+          const labels = taskLabelsOf(snap.requirement_understandings);
+          commit((prev) => ({ ...prev, messages: attachCards(prev.messages, snap.prompt_cards, undefined, labels) }));
           // 历史版本的正文另取，取回来再挂一次（IKEV0V）。当前这一版已经在上面挂好了，这一步失败不影响它。
           if (await loadRevisionHistory(projectId, sid, snap.prompt_cards)) {
             if (sessionIdRef.current !== sid) return;
-            commit((prev) => ({ ...prev, messages: attachCards(prev.messages, snap.prompt_cards) }));
+            commit((prev) => ({ ...prev, messages: attachCards(prev.messages, snap.prompt_cards, undefined, labels) }));
           }
         } catch (e) {
           console.warn('回查生成卡失败:', e);
@@ -665,7 +670,12 @@ export function useAgentSession(projectId: string, agentModel?: string) {
         if (account && run?.run_id) accounts[run.run_id] = account;
       }
       // 历史会话里已提交的生成卡同样要还原，否则刷新一次卡就没了
-      const restoredMessages = attachCards((snap.messages ?? []).map(projectMessage), snap.prompt_cards);
+      const restoredMessages = attachCards(
+        (snap.messages ?? []).map(projectMessage),
+        snap.prompt_cards,
+        undefined,
+        taskLabelsOf(snap.requirement_understandings),
+      );
       commit(() => ({
         ...EMPTY_SESSION_STATE,
         messages: restoredMessages,
@@ -706,7 +716,10 @@ export function useAgentSession(projectId: string, agentModel?: string) {
       loadRevisionHistory(projectId, session.session_id, snap.prompt_cards)
         .then((changed) => {
           if (!changed || connectionEpochRef.current !== epoch || sessionIdRef.current !== session.session_id) return;
-          commit((prev) => ({ ...prev, messages: attachCards(prev.messages, snap.prompt_cards) }));
+          commit((prev) => ({
+            ...prev,
+            messages: attachCards(prev.messages, snap.prompt_cards, undefined, taskLabelsOf(snap.requirement_understandings)),
+          }));
         })
         .catch((e) => console.warn('取回历史生成卡失败:', e));
       if (liveRun?.run_id) {

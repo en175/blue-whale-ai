@@ -96,6 +96,22 @@ describe('attachCards', () => {
     expect(cache.get(rev1.revision_id)).toBe(rev1);
   });
 
+  /** 一个会话多件事（IKG793）：第二件事另开一个批次，两张卡各挂到写它的那一轮，互不覆盖。 */
+  it('两个批次：各自挂到写它的那一轮，派生的那张带承接标', () => {
+    const first = record(rev1, [rev1]);
+    const second: PromptCardRecord = {
+      ...record({ ...rev2, card_id: 'card_s_2' }, [{ ...rev2, card_id: 'card_s_2' }]),
+      card_id: 'card_s_2',
+      task_id: 'und_s_2',
+    };
+    const labels = new Map([['und_s_2', '视频版 · 承接上一张〈第一版〉']]);
+    const out = attachCards(messages, [first, second], new Map(), labels);
+    expect(titlesByMessage(out)).toEqual({ m_a: ['第一版'], m_b: ['第二版'] });
+    const cardsOf = (id: string) => (out.find((m) => m.id === id)!.blocks ?? []).filter((b) => b.type === 'card').map((b) => b.card!);
+    expect(cardsOf('m_a')[0]!.taskLabel).toBeUndefined();
+    expect(cardsOf('m_b')[0]!.taskLabel).toBe('视频版 · 承接上一张〈第一版〉');
+  });
+
   it('不带 revisions 的老 agent：只挂当前那一版，行为与以前一样', () => {
     const legacy: PromptCardRecord = { ...record(rev2, []), revisions: undefined };
     const out = attachCards(messages, [legacy], new Map([[rev1.revision_id, rev1]]));

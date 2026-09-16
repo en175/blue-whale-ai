@@ -203,6 +203,11 @@ export interface GenerationCardBlock {
   targetModel?: string;
   /** 单镜时长秒数原值（`duration_seconds`）。与 timeRange 并存：那个是累加出的区间，这个是本镜自己的长度。 */
   durationSeconds?: number;
+  /**
+   * 这张卡属于会话里另开的一件事时的标签（IKG793），如「视频版 · 承接上一张〈咖啡产地信息图〉」。
+   * 第一件事的卡没有。由需求理解上的 scope 算出，见 `taskLabelsOf`。
+   */
+  taskLabel?: string;
 }
 
 /** 会话记录（列表/创建返回） */
@@ -220,6 +225,8 @@ export interface SessionRecord {
    * 每一轮都注入，直到显式取消。只有 id——名称在技能目录里，前端本来就有那一份。
    */
   active_creative_skill_ids?: string[];
+  /** 会话当前在做的那件事（IKG78T）；老 agent 不给。 */
+  active_task_id?: string;
   /**
    * 本会话选定的 Agent 模型（IKE0II）。`null` 表示用户从没选过，这条会话跟着服务端默认走。
    *
@@ -345,9 +352,11 @@ export interface PromptCardRevisionSummary {
   created_at: string;
 }
 
-/** 快照里的生成卡组：一个 Session 一组，active_revision 是当前生效版本 */
+/** 快照里的生成卡组：一件事一组（IKG78T 起一个 Session 可以有多组），active_revision 是当前生效版本 */
 export interface PromptCardRecord {
   card_id: string;
+  /** 属于会话里哪件事（IKG78T）；老 agent 不给。 */
+  task_id?: string;
   session_id?: string;
   active_revision_id?: string;
   revision_count?: number;
@@ -409,15 +418,20 @@ export interface SolutionCard {
   delivery_spec?: SolutionDeliverySpec;
   next_steps?: string;
   /**
-   * 这张卡管的范围（决策十六）。没写就是整条；会话已经交付过卡之后再提的每一张都是续写，
-   * 只管接下来要追加的那一段或那几镜，`label` 是用户读到的「第 2 段」「补 1 镜」。
+   * 这张卡管的范围（决策十六；IKG78Y 加了另开一件事）。没写就是整条；有卡之后再提的每一张要么是续写
+   * （`continuation`，只管接下来追加的那一段，`label` 是「第 2 段」「补 1 镜」），要么是另开一件事
+   * （`new_task`，换媒介或另做一张，`label` 是「视频版」「海报版」）。`derived_from` 由服务端填：承接的是上一张哪张卡。
    */
-  scope?: { kind: 'whole' | 'continuation'; label: string };
+  scope?: { kind: 'whole' | 'continuation' | 'new_task'; label: string; derived_from?: string };
 }
 
 /** 方案卡所在的版本记录。一个会话一条血脉，一版一次提出或修改，同时最多一版 accepted。 */
 export interface RequirementUnderstanding {
   understanding_id: string;
+  /** 这条血统就是会话里的一件事（IKG78T）：任务号 = 血统号。老 agent 不给，按 understanding_id 用。 */
+  task_id?: string;
+  /** 另开的一件事派生自哪件事；第一件事为空（IKG78Y）。 */
+  derived_from_task_id?: string | null;
   version: number;
   session_id: string;
   proposed_by_run_id: string;
