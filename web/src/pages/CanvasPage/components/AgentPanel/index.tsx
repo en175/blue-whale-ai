@@ -322,8 +322,8 @@ function SolutionCardBlock({
                   {specParts.join(' · ')}
                 </span>
               )}
-              {/* 续写的卡（决策十六）：只管接下来追加的那一段，用户得知道这张卡不是整条。整条是默认，不占位。 */}
-              {card.scope?.kind === 'continuation' && (
+              {/* 续写的卡（决策十六）只管接下来追加的那一段；另开一件事的卡（IKG78Y）是另一张。用户得知道这张卡不是整条。整条是默认，不占位。 */}
+              {(card.scope?.kind === 'continuation' || card.scope?.kind === 'new_task') && (
                 <span className={styles.solutionBandCell} title={card.scope.label}>
                   <b>范围</b>
                   {card.scope.label}
@@ -339,6 +339,8 @@ function SolutionCardBlock({
         {card && (
           <div className={styles.solutionBody}>
             <div className={styles.solutionGoal}>{card.goal}</div>
+            {/* 承接的是哪张（服务端填）：另开的一件事重提成整条时也带着，所以不看 kind。一句话，放不进色带的格子。 */}
+            {card.scope?.derived_from && <div className={styles.solutionDerived}>{`承接上一张〈${card.scope.derived_from}〉`}</div>}
             {card.direction && <blockquote className={styles.solutionDirection}>{card.direction}</blockquote>}
             {required.length > 0 && (
               <>
@@ -482,6 +484,8 @@ function GenerationCard({ card, onApply, disabled, applied, assets }: {
         </span>
         {/* 按哪套写法编的（F32）。只做展示与核对——它不下传生成面板，出片时模型由用户在那里选。 */}
         {meta.length > 0 && <span className={styles.shotTargetModel}>{meta.join(' · ')}</span>}
+        {/* 会话里另开的一件事的卡（IKG793）：标它接的是哪张，两组卡并存时用户分得清。 */}
+        {card.taskLabel && <span className={styles.shotTaskLabel} title={card.taskLabel}>{card.taskLabel}</span>}
       </div>
       {refs && refs.length > 0 && (
         <div className={styles.shotRefs}>

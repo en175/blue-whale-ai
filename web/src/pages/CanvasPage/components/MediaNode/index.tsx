@@ -104,6 +104,8 @@ interface MediaNodeData {
   onLocateInputSource?: (sourceNodeId: string) => void;
   /** IKFR4X 持续选取会话勾选标记（渲染期派生注入，不持久化）：已并入当前选取目标的来源 */
   pickMarked?: boolean;
+  /** 视频选取会话中能力失效（如合规未通过）置灰 */
+  pickBlocked?: boolean;
   /** 浏览器量得真实媒体尺寸后回填（缺失或不一致时才回调） */
   onMediaDims?: (id: string, dims: MediaDims) => void;
   onDelete?: (id: string) => void;
@@ -183,6 +185,15 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   }, [contextMenu]);
 
   const isEmptyShell = data.emptyShell === true;
+  const isGenHost =
+    data.draft === true
+    || data.genStatus === 'draft'
+    || data.genStatus === 'generating'
+    || data.genStatus === 'failed'
+    || data.genStatus === 'cancelled'
+    || data.jobId != null;
+  /** 上传素材只作出源，左侧不加号；生成节点才接收入边 */
+  const showTargetHandle = !isEmptyShell && isGenHost && !data.isFirst;
   const blockNodeMenu =
     isEmptyShell || data.genStatus === 'generating';
 
@@ -363,7 +374,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   return (
     <div
-      className={`${styles.wrapper} ${selected ? styles.selected : ''}`}
+      className={`${styles.wrapper} ${selected ? styles.selected : ''} ${data.pickBlocked ? styles.pickBlocked : ''}`}
       data-media-type={data.mediaType ?? 'image'}
       onContextMenu={handleContextMenu}
       style={{ ...nodeTitleSizing(zoom), width: contentBox.width }}
@@ -498,7 +509,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       )}
       {nameError && <div role="alert" className="nodrag nopan">{nameError}</div>}
       <div className={`${styles.contentCard} ${isAudio ? styles.audioCard : ''}`} data-testid="media-content" style={{ width: contentBox.width, height: contentBox.height }}>
-        {!data.isFirst && !isEmptyShell && (
+        {showTargetHandle && (
           <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
           <HandlePlus />
         </Handle>

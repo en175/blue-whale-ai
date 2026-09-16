@@ -1,0 +1,64 @@
+/* ============================================
+ * 正文素材标签共享视觉定义（IKG7NH）
+ *
+ * 生成面板输入框（PromptRefEditor/AssetRefNode）与画布文本卡正文
+ * （TextNode/promptMentions）的素材标签胶囊共用本模块一份视觉定义，
+ * 改一处两边同步。视觉值自 PromptRefEditor 原 .refChip 系列原样迁入
+ * （8px 胶囊、18px/4px 缩略图、12px 字号、20px 行高、悬停变亮、失效实线红框）。
+ *
+ * 文本卡侧仅有的两处差异（整块选中 user-select:all、音频音符图标占位）
+ * 落在 TextNode/index.module.css，不进本模块。
+ * ============================================ */
+
+/* 素材标签胶囊：深色 + 线框，删除走退格键 */
+.mediaChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 2px;
+  padding: 1px 6px 1px 5px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #e8e8ec;
+  font-size: 12px;
+  line-height: 20px;
+  vertical-align: middle;
+  user-select: none;
+}
+
+.mediaChip:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.mediaChipInvalid {
+  background: rgba(248, 113, 113, 0.14);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fca5a5;
+}
+
+/* 失效标签可点击换绑（IKFA1N B5）：携带 role=button 时展示可交互态 */
+.mediaChipInvalid[role='button'] {
+  cursor: pointer;
+}
+
+.mediaChipInvalid[role='button']:hover {
+  background: rgba(248, 113, 113, 0.24);
+}
+
+.mediaChipThumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: cover;
+  /* 文本卡正文缩略图须防拖拽/点击穿透（原内联迁入）；生成面板缩略图无事件绑定，零影响 */
+  pointer-events: none;
+}
+
+.mediaChipIcon {
+  flex: none;
+}
+
+.mediaChipLabel {
+  white-space: nowrap;
+}

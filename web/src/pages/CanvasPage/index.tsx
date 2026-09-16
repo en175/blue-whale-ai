@@ -311,12 +311,24 @@ export default function CanvasPage() {
     )));
     if (existing) {
       const sources = existing.data?.inputSources as { manual: boolean; planNodeIds: string[] } | undefined;
-      if (sources && !sources.manual) {
-        const next = edgesRef.current.map(e => e.id === existing.id ? { ...e, data: { ...e.data, inputSources: { ...sources, manual: true } } } : e);
-        historyRef.current?.pushReplaceEdges(edgesRef.current, next);
-        edgesRef.current = next;
-        setEdges(next);
-      }
+      const markManual = !!(sources && !sources.manual);
+      const currentRole = (existing.data as Record<string, unknown> | undefined)?.refRole;
+      const nextRole = refRole && refRole !== 'reference' ? refRole : undefined;
+      const roleChanged = refRole === 'reference'
+        ? currentRole === 'first' || currentRole === 'last'
+        : Boolean(nextRole) && currentRole !== nextRole;
+      if (!markManual && !roleChanged) return;
+      const next = edgesRef.current.map((e) => {
+        if (e.id !== existing.id) return e;
+        const data: Record<string, unknown> = { ...(e.data ?? {}) };
+        if (markManual && sources) data.inputSources = { ...sources, manual: true };
+        if (refRole === 'reference') delete data.refRole;
+        else if (nextRole) data.refRole = nextRole;
+        return { ...e, data };
+      });
+      historyRef.current?.pushReplaceEdges(edgesRef.current, next);
+      edgesRef.current = next;
+      setEdges(next);
       return;
     }
     const edgeData: Record<string, unknown> = {
@@ -424,6 +436,18 @@ export default function CanvasPage() {
     ?? productNodesRef.current.find((n) => n.id === id)
     ?? assetNodesRef.current.find((n) => n.id === id);
 
+  /** 视频草稿连线角色：Dock 显式槽位优先；首尾帧模式拖线/@ 按空槽自动占首帧再占尾帧。 */
+  const videoEdgeRoleFor = (targetId: string, requested?: VideoRefRole | null): VideoRefRole => {
+    if (requested === 'first' || requested === 'last') return requested;
+    const target = mediaNodesRef.current.find((n) => n.id === targetId);
+    const mode = (target?.data as Record<string, unknown> | undefined)?.draftMode;
+    if (mode !== 'keyframe') return 'reference';
+    const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
+    if (!refs.first) return 'first';
+    if (!refs.last) return 'last';
+    return 'reference';
+  };
+
   const connectPair = (source: string, target: string): boolean => {
     if (applyingRef.current || !source || !target || source === target) return false;
     if (isGeneratingNode(target)) {
@@ -443,6 +467,9 @@ export default function CanvasPage() {
       return false;
     }
     const targetKind = genKindOf(targetNode);
+    const videoRole = targetKind === 'video' && sourceNode?.type === 'mediaNode'
+      ? videoEdgeRoleFor(target)
+      : undefined;
     if (targetKind) {
       if (!canConnectSourcesToGen([sourceNode!], targetKind)) return false;
       if (sourceNode?.type === 'textNode' && sourceData?.promptSource && (targetKind === 'image' || targetKind === 'video')) {
@@ -450,10 +477,17 @@ export default function CanvasPage() {
         return true;
       }
       if (!validateImageRefConnect(source, target)) return false;
-      if (!validateVideoRefConnect(source, target)) return false;
+      if (targetKind === 'video' && videoRole === 'reference' && targetData?.draftMode === 'keyframe') {
+        const refs = mergedVideoMediaRefsOf(target, edgesRef.current, mediaNodesRef.current);
+        if (refs.first || refs.last) {
+          showToast('warn', '首帧和尾帧已指定，请先移除现有帧');
+          return false;
+        }
+      }
+      if (!validateVideoRefConnect(source, target, videoRole ?? 'reference')) return false;
       if (!validateAudioRefConnect(source, target)) return false;
     }
-    addCanvasEdge(source, target);
+    addCanvasEdge(source, target, videoRole);
     return true;
   };
   /** 建立连线：拒绝自环（生成中节点的输入连线只读 IKDMQQ：向目标新建连线被拦截）；
@@ -1875,8 +1909,11 @@ export default function CanvasPage() {
     }
     const current = role === 'first' ? refs.first : refs.last;
     if (current?.assetId === assetId) return null;
-    const slotCleared: VideoMediaRefs =
-      role === 'first' ? { ...refs, first: undefined } : { ...refs, last: undefined };
+    // 已作为普通参考连入的同一素材：选尾帧/首帧时应改角色，不按「素材重复」拒绝
+    const slotCleared: VideoMediaRefs = {
+      ...(role === 'first' ? { ...refs, first: undefined } : { ...refs, last: undefined }),
+      reference: refs.reference.filter((r) => r.assetId !== assetId),
+    };
     const msg = checkAddVideoRef(role, data.mediaType as 'image', assetId, slotCleared);
     if (msg) {
       showToast('warn', msg);
@@ -1899,6 +1936,16 @@ export default function CanvasPage() {
         removeRefEdges(targetId, check.current.nodeId);
       }
     }
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    const assetId = readAssetId(data);
+    const occupiedReference = refs.reference.find((r) => r.assetId === assetId);
+    if (occupiedReference && occupiedReference.nodeId !== node.id) {
+      if (isLibraryOnlyVideoRef(occupiedReference)) {
+        removeDraftMaterialRef(targetId, occupiedReference.materialId);
+      } else {
+        removeRefEdges(targetId, occupiedReference.nodeId);
+      }
+    }
     addCanvasEdge(node.id, targetId, role);
   };
 
@@ -1918,7 +1965,15 @@ export default function CanvasPage() {
   const replaceVideoFreeFrameRef = (node: Node, role: 'first' | 'last') => {
     if (!checkVideoFrameReplace(node, videoFreeRefs, role)) return;
     const item = videoFreeRefItemOf(node);
-    setVideoFreeRefs((prev) => (role === 'first' ? { ...prev, first: item } : { ...prev, last: item }));
+    setVideoFreeRefs((prev) => {
+      const next: VideoMediaRefs = {
+        ...prev,
+        reference: prev.reference.filter((r) => r.assetId !== item.assetId && r.nodeId !== item.nodeId),
+      };
+      if (role === 'first') next.first = item;
+      else next.last = item;
+      return next;
+    });
   };
 
   /** IKFR4Y 视频持续选取会话点击处理：会话绑定发起时的目标（快照），命中有效来源即时并入/替换并保持
@@ -2776,7 +2831,9 @@ export default function CanvasPage() {
     setTextNodes(deselect);
     setProductNodes(deselect);
     setAssetNodes(deselect);
-    setMediaNodes((prev) => [...deselect(prev), node]);
+    const nextMedia = [...deselect(mediaNodesRef.current), node];
+    mediaNodesRef.current = nextMedia;
+    setMediaNodes(nextMedia);
     setSelectRequest({ id: nodeId, ts: Date.now() });
     return nodeId;
   };
@@ -2819,7 +2876,9 @@ export default function CanvasPage() {
     setTextNodes(deselect);
     setProductNodes(deselect);
     setAssetNodes(deselect);
-    setMediaNodes((prev) => [...deselect(prev), node]);
+    const nextMedia = [...deselect(mediaNodesRef.current), node];
+    mediaNodesRef.current = nextMedia;
+    setMediaNodes(nextMedia);
     setSelectRequest({ id: nodeId, ts: Date.now() });
     return nodeId;
   };
@@ -2862,7 +2921,9 @@ export default function CanvasPage() {
     setTextNodes(deselect);
     setProductNodes(deselect);
     setAssetNodes(deselect);
-    setMediaNodes((prev) => [...deselect(prev), node]);
+    const nextMedia = [...deselect(mediaNodesRef.current), node];
+    mediaNodesRef.current = nextMedia;
+    setMediaNodes(nextMedia);
     setSelectRequest({ id: nodeId, ts: Date.now() });
     return nodeId;
   };
@@ -2945,6 +3006,23 @@ export default function CanvasPage() {
     setConnectMenu({ sourceIds: sources.map((n) => n.id), x: clientX, y: clientY });
   };
 
+  /** 类型菜单建草稿后自动连上游：媒体来源按各生成类型做参考校验；
+   *  文本卡是创作上下文，不能走媒体参考校验，否则视频生成会被误拦、连不上线。 */
+  const connectMenuSourcesToDraft = (sourceIds: string[], targetId: string, kind: ConnectGenKind) => {
+    sourceIds.forEach((id) => {
+      const source = findCanvasNode(id);
+      if (!source || !isConnectableSource(source)) return;
+      if (source.type === 'mediaNode') {
+        if (kind === 'video' && videoRefSourceError(source, 'reference')) return;
+        if (kind === 'image' && imageRefSourceError(source)) return;
+        if (kind === 'audio' && audioRefSourceError(source)) return;
+        addCanvasEdge(id, targetId, kind === 'video' ? 'reference' : undefined);
+        return;
+      }
+      addCanvasEdge(id, targetId);
+    });
+  };
+
   const applyConnectType = (kind: ConnectGenKind) => {
     if (!connectMenu) return;
     const sourceIds = connectMenu.sourceIds;
@@ -2953,19 +3031,19 @@ export default function CanvasPage() {
     let targetId = '';
     if (kind === 'video') {
       targetId = createVideoDraftCard(undefined, position);
-      sourceIds.forEach((id) => addCanvasEdge(id, targetId, 'reference'));
+      connectMenuSourcesToDraft(sourceIds, targetId, 'video');
       openVideoDraftDialog(targetId);
       return;
     }
     if (kind === 'image') {
       targetId = createImageDraftCard(position);
-      sourceIds.forEach((id) => addCanvasEdge(id, targetId));
+      connectMenuSourcesToDraft(sourceIds, targetId, 'image');
       openImageDraftDialog(targetId);
       return;
     }
     if (kind === 'audio') {
       targetId = createAudioDraftCard(position);
-      sourceIds.forEach((id) => addCanvasEdge(id, targetId));
+      connectMenuSourcesToDraft(sourceIds, targetId, 'audio');
       openAudioDraftDialog(targetId);
       return;
     }
@@ -3527,6 +3605,11 @@ export default function CanvasPage() {
       if (materialByKey.has(item.nodeId)) continue;
       const node = mediaNodesRef.current.find((n) => n.id === item.nodeId);
       if (node) {
+        const failed = ((node.data ?? {}) as Record<string, unknown>).complianceFailed === true;
+        if (failed) {
+          showToast('warn', '合规校验未通过，不可用于视频生成');
+          return null;
+        }
         const materialId = await ensureMediaNodeCompliance(item.nodeId, { toastSuccess: false });
         if (!materialId) return null;
         materialByKey.set(item.nodeId, materialId);
@@ -4937,6 +5020,12 @@ export default function CanvasPage() {
       .map((e) => e.source);
   }, [videoPickSessionActive, videoPickSession, pickRefRole, edges, textNodes]);
 
+  /** 视频选取会话：合规未通过的素材置灰不可选 */
+  const videoPickBlockedIds = useMemo(
+    () => mediaNodes.filter((n) => ((n.data ?? {}) as Record<string, unknown>).complianceFailed === true).map((n) => n.id),
+    [mediaNodes],
+  );
+
   /** IKFR4Z 会话勾选标识：音频持续选取会话进行中，已并入原目标的媒体来源节点集合（连线推导，
    *  与 Dock 参考同源；音频参考无角色槽，全部连线来源计入）。文本附件来源无素材勾选语义，不计入。
    *  仅会话活跃时计算——普通模式不标记，勾选只表达当前目标与选择上下文 */
@@ -6245,7 +6334,15 @@ export default function CanvasPage() {
       return;
     }
     if (item.kind !== 'image' && item.kind !== 'video') return;
+    if (item.disabled) return;
     if (!item.assetId) return;
+    const sourceNode = findCanvasNode(item.id);
+    const roleCheck = videoDraftId ? videoEdgeRoleFor(videoDraftId) : 'reference';
+    const blocked = videoRefSourceError(sourceNode, roleCheck);
+    if (blocked) {
+      showToast('warn', blocked);
+      return;
+    }
     const refItem: VideoMediaRef = {
       nodeId: item.id,
       url: item.thumbUrl ?? '',
@@ -6254,12 +6351,30 @@ export default function CanvasPage() {
       mediaType: item.kind,
     };
     if (videoDraftId) {
+      const role = videoEdgeRoleFor(videoDraftId);
+      const draft = mediaNodesRef.current.find((n) => n.id === videoDraftId);
+      const mode = (draft?.data as Record<string, unknown> | undefined)?.draftMode;
+      if (role === 'reference' && mode === 'keyframe') {
+        const refs = mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current);
+        if (refs.first || refs.last) {
+          showToast('warn', '首帧和尾帧已指定，请先移除现有帧');
+          return;
+        }
+      }
       // IKFDFW：@ 选取与画布选取同一语义——校验通过立即建连线并自动保存
-      if (!validateVideoRefConnect(item.id, videoDraftId, 'reference')) return;
-      addCanvasEdge(item.id, videoDraftId, 'reference');
+      if (!validateVideoRefConnect(item.id, videoDraftId, role)) return;
+      addCanvasEdge(item.id, videoDraftId, role);
       return;
     }
-    appendVideoFreeRef(refItem, 'reference');
+    const freeMode = videoSeed?.params?.mode;
+    const freeRole: VideoRefRole = freeMode === 'keyframe'
+      ? (!videoFreeRefs.first ? 'first' : !videoFreeRefs.last ? 'last' : 'reference')
+      : 'reference';
+    if (freeRole === 'reference' && freeMode === 'keyframe' && (videoFreeRefs.first || videoFreeRefs.last)) {
+      showToast('warn', '首帧和尾帧已指定，请先移除现有帧');
+      return;
+    }
+    appendVideoFreeRef(refItem, freeRole);
   };
 
   /** 音频面板 @ 选中：音频写入参考，文本连入当前目标。 */
@@ -6701,6 +6816,7 @@ export default function CanvasPage() {
               : videoPickSessionActive ? videoPickMarkedIds
                 : imagePickMarkedIds
           }
+          refPickBlockedIds={videoPickSessionActive ? videoPickBlockedIds : undefined}
           selectRequest={selectRequest}
           productPickResult={productPickResult}
           assetPickResult={assetPickResult}
@@ -6926,7 +7042,11 @@ export default function CanvasPage() {
             onRemoveMaterialRef={videoDraftId ? ((materialId) => removeDraftMaterialRef(videoDraftId, materialId)) : removeVideoFreeRef}
             onReorderMediaRefs={videoDraftId ? ((keys) => handleReorderVideoMediaRefs(videoDraftId, keys)) : reorderVideoFreeRefs}
             onToast={(type, msg) => showToast(type, msg)}
-            mentionItems={atMentionItems.filter((item) => item.id !== videoDraftId)}
+            mentionItems={atMentionItems.filter((item) => item.id !== videoDraftId).map((item) => {
+              const node = mediaNodes.find((n) => n.id === item.id);
+              const failed = ((node?.data ?? {}) as Record<string, unknown>).complianceFailed === true;
+              return failed ? { ...item, disabled: true } : item;
+            })}
             onMentionCanvas={handleVideoAtMention}
             followAnchor={videoDraftId ? followAnchor : null}
             enabledModes={videoFollowModes}

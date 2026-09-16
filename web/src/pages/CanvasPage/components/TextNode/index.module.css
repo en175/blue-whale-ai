@@ -539,3 +539,29 @@
     filter: none;
   }
 }
+
+/* ============================================
+ * IKG7NH 正文素材标签：文本卡侧差异类
+ * 胶囊视觉与生成面板共用 ../mediaChip.module.css，此处只放文本卡特有差异。
+ * ============================================ */
+
+/* 文本卡 chip 需整块选中（服务整体删除/替换），覆盖共享胶囊的 user-select:none（拍板 6）。
+   挂 .editor 后代组合把优先级抬到 0-2-0，稳定压过共享 .mediaChip 的 0-1-0，
+   不再依赖两份 CSS 的打包先后顺序 */
+.editor .mediaChipSelectable {
+  user-select: all;
+}
+
+/* 缩略图/音符图标的包裹 span（文本卡特有结构）：行内弹性保证图标与缩略图垂直居中，
+   flex:none 防被胶囊 flex 行压缩 */
+.mediaChipThumbWrap {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+/* 音频标签音符图标占位：音频无缩略图，图标宽度与共享缩略图同 18px */
+.mediaChipAudioIcon {
+  width: 18px;
+  text-align: center;
+}

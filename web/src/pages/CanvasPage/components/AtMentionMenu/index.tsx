@@ -253,9 +253,9 @@ export default function AtMentionMenu({
                         type="button"
                         className={styles.itemRow}
                         data-testid="at-mention-canvas-item"
-                        disabled={off}
+                        disabled={off || item.disabled}
                         onClick={() => {
-                          if (off) return;
+                          if (off || item.disabled) return;
                           onSelect(item);
                         }}
                       >
@@ -314,7 +314,11 @@ export default function AtMentionMenu({
                 type="button"
                 className={styles.itemRow}
                 data-testid="at-mention-canvas-item"
-                onClick={() => onSelect(item)}
+                disabled={item.disabled}
+                onClick={() => {
+                  if (item.disabled) return;
+                  onSelect(item);
+                }}
               >
                 <ItemThumb item={item} />
                 <span className={styles.itemName}>{item.name}</span>

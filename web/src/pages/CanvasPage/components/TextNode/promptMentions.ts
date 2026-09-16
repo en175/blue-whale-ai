@@ -1,6 +1,8 @@
 import type { PromptMention, PromptMaterial } from '@lib/contracts/prompt-preview';
 import { parseMarkdownBlocks, renderMarkdownInline } from '@lib/contracts/text-node-markdown';
 import { deriveMediaMentionLabels, deriveMediaMentionLabelsInOrder, type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
+import chipStyles from '../mediaChip.module.css';
+import textNodeStyles from './index.module.css';
 
 /* IKFM3L 统一文本卡正文契约 v1：正文是受限 Markdown 源（data.text），
    mention 区间 [start,end) 锚定 Markdown 源字符串下标（契约 §3）。
@@ -36,15 +38,17 @@ type ChipQueueItem =
   | { kind: 'prompt'; part: MentionChipPart }
   | { kind: 'media'; part: MediaChipIdentity };
 
-const MEDIA_CHIP_BASE_STYLE = 'display:inline-flex;align-items:center;gap:4px;padding:2px 5px;border:1px solid #555;border-radius:5px;background:#303030;vertical-align:middle;user-select:all';
-const MEDIA_CHIP_INVALID_STYLE = 'display:inline-flex;align-items:center;gap:4px;padding:2px 5px;border:1px dashed #a05555;border-radius:5px;background:#3a2a2a;color:#d9a0a0;vertical-align:middle;user-select:all';
+/** 正文素材标签 chip 类：胶囊视觉与生成面板共用 mediaChip.module.css（IKG7NH），
+ *  文本卡差异（整块选中）叠加 mediaChipSelectable，失效态叠加 mediaChipInvalid。 */
+const MEDIA_CHIP_CLASS = `${chipStyles.mediaChip} ${textNodeStyles.mediaChipSelectable}`;
+const MEDIA_CHIP_INVALID_CLASS = `${MEDIA_CHIP_CLASS} ${chipStyles.mediaChipInvalid}`;
 
-/** 写入 chip 的可变展示（编号/失效文本 + 样式）；thumb 与身份 dataset 在建 chip 时固定。 */
+/** 写入 chip 的可变展示（编号/失效文本 + 失效类）；thumb 与身份 dataset 在建 chip 时固定。 */
 function applyMediaChipVisual(chip: HTMLElement, label: string, invalid: boolean) {
   chip.dataset.mediaLabel = label;
   if (invalid) chip.dataset.mediaInvalid = '1';
   else delete chip.dataset.mediaInvalid;
-  chip.style.cssText = invalid ? MEDIA_CHIP_INVALID_STYLE : MEDIA_CHIP_BASE_STYLE;
+  chip.className = invalid ? MEDIA_CHIP_INVALID_CLASS : MEDIA_CHIP_CLASS;
   chip.title = invalid ? `已失效：${chip.dataset.mediaName ?? ''}` : `${chip.dataset.mediaName ?? ''}（${label}）`;
   chip.setAttribute('aria-label', chip.title);
   const thumb = chip.querySelector<HTMLElement>('[data-media-thumb]');
@@ -64,17 +68,17 @@ function buildMediaChip(identity: MediaChipIdentity, label: string, invalid: boo
   chip.dataset.mediaUrl = identity.url;
   const thumb = document.createElement('span');
   thumb.dataset.mediaThumb = '1';
-  thumb.style.cssText = 'display:inline-flex;align-items:center';
+  thumb.className = textNodeStyles.mediaChipThumbWrap;
   if (identity.mediaType === 'audio') {
     const icon = document.createElement('span');
     icon.textContent = '♫';
     icon.setAttribute('aria-hidden', 'true');
-    icon.style.cssText = 'width:24px;text-align:center';
+    icon.className = textNodeStyles.mediaChipAudioIcon;
     thumb.append(icon);
   } else if (/^https?:\/\//.test(identity.url)) {
     const media = document.createElement(identity.mediaType === 'image' ? 'img' : 'video');
     media.src = identity.url;
-    media.style.cssText = 'width:24px;height:24px;object-fit:cover;pointer-events:none';
+    media.className = chipStyles.mediaChipThumb;
     if (media instanceof HTMLImageElement) media.alt = '';
     else { media.preload = 'metadata'; media.muted = true; }
     thumb.append(media);
@@ -82,6 +86,7 @@ function buildMediaChip(identity: MediaChipIdentity, label: string, invalid: boo
   chip.append(thumb);
   const labelEl = document.createElement('span');
   labelEl.dataset.mediaLabelText = '1';
+  labelEl.className = chipStyles.mediaChipLabel;
   chip.append(labelEl);
   applyMediaChipVisual(chip, label, invalid);
   return chip;
@@ -96,23 +101,26 @@ function buildMentionChip(part: MentionChipPart, materials: Array<PromptMaterial
   chip.dataset.promptLabel = part.label;
   chip.title = `${part.label}（素材 #${part.index}）`;
   chip.setAttribute('aria-label', chip.title);
-  chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:2px 5px;border:1px solid #555;border-radius:5px;background:#303030;vertical-align:middle;user-select:all';
+  chip.className = MEDIA_CHIP_CLASS;
   const material = materials.find(item => item.assetId === part.assetId);
   if (material?.mediaType === 'audio') {
     const icon = document.createElement('span');
     icon.textContent = '♫';
     icon.setAttribute('aria-hidden', 'true');
-    icon.style.cssText = 'width:24px;text-align:center';
+    icon.className = textNodeStyles.mediaChipAudioIcon;
     chip.append(icon);
   } else if (material && /^https?:\/\//.test(material.url)) {
     const media = document.createElement(material.mediaType === 'image' ? 'img' : 'video');
     media.src = material.url;
-    media.style.cssText = 'width:24px;height:24px;object-fit:cover;pointer-events:none';
+    media.className = chipStyles.mediaChipThumb;
     if (media instanceof HTMLImageElement) media.alt = '';
     else { media.preload = 'metadata'; media.muted = true; }
     chip.append(media);
   }
-  chip.append(document.createTextNode(`#${part.index}`));
+  const labelEl = document.createElement('span');
+  labelEl.className = chipStyles.mediaChipLabel;
+  labelEl.textContent = `#${part.index}`;
+  chip.append(labelEl);
   return chip;
 }
 

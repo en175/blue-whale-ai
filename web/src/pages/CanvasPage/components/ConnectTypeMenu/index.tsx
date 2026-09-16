@@ -8,7 +8,6 @@ const ITEMS: Array<{ kind: ConnectGenKind; label: string }> = [
   { kind: 'image', label: '图片生成' },
   { kind: 'video', label: '视频生成' },
   { kind: 'audio', label: '音频生成' },
-  { kind: 'text', label: '文本生成' },
 ];
 
 interface ConnectTypeMenuProps {

@@ -2,6 +2,22 @@
 
 **状态**：accepted（2026-09-14，IKFJJT）
 
+> **修订 2026-09-16（IKG4UR）——「按任务类型的时长约束」退役。**
+>
+> 本 ADR 决策 1 引入的 `features.task_types[*].allowed_durations`（按任务类型的**时长**约束）
+> 已从数据中移除。原因：官方口径是**连续区间**（Seedance 2.0 系 4–15 整数秒、2.5 4–30 整数秒，
+> 上游报错形如 `duration 30 out of range [4, 15]`），而当时把它错写成了若干档**枚举**，
+> 导致滑杆给得出的 6–9（2.0）/ 7·9·11…（2.5）提交必被 400。
+>
+> **新的不变式**：时长唯一来源 = 基础行 `supported_durations`（**对象形态** `{min,max,step}`；
+> 非空 ⟺ 该模型时长可配。音频上游无 duration 参数，置 NULL）。
+>
+> `task_types[*].allowed_ratios`（比例约束）**不变**，仍按本 ADR 执行。
+>
+> 代码侧读取 `allowed_durations` 的分支（`capability-param-validation.ts`、
+> `scene-card-generation-repo.ts`）与相关测试**暂留未删**，待后续工单连同 `-1`（智能时长）一并处置
+> ——`-1` 需要「区间 + 额外允许值」的表达，当前数据形态给不了。
+
 后台模型能力配置（`generation_model_capability.features` JSON 列）补齐多类型素材限制并核正参数：参考素材的分类上限（图/视频/音频）、输入素材总时长上限、按任务类型的比例与时长约束、以及视频生成是否接受视频/音频素材作参考，全部落**能力目录**，生成面板与服务端校验同读目录，删除前端 `REF_LIMITS` / `MAX_VIDEO_REFS` 与服务端 `validateAudioReferences` / `validateVideo` 里的硬编码常量与 `seedance-2` 前缀特判。
 
 **动因**：工单核对官方接口差异发现——Seedance 2.0/2.5 视频、音频素材各自总时长上限（15s/30s）、2.0 禁单独输入音频、视频素材作普通参考目前靠 `supportsVideoReferenceModel` 硬编码 `seedance-2` 前缀，图片参考图上限前端 `ImageDialog` 写死 9 张与服务端能力行（缺省 10）不一致。这些规则按模型能力行表达后，新增模型不需要改代码。

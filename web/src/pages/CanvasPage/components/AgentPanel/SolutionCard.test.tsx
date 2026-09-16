@@ -183,6 +183,22 @@ describe('方案卡在对话里', () => {
     expect(text).toContain('第 2 段');
   });
 
+  /** 另开一件事的卡（IKG793 / IKG78Y）：用户得看见这张是另一张、接的是哪张。 */
+  it('另开一件事的卡显示范围与承接', () => {
+    sessionMock.turns = turnWith(
+      understanding({
+        target_media: 'video',
+        solution_card: { ...card!, scope: { kind: 'new_task', label: '视频版', derived_from: '咖啡产地信息图' } },
+      }),
+    );
+    mount();
+    const text = solutionCard()!.textContent ?? '';
+    expect(text).toContain('范围');
+    expect(text).toContain('视频版');
+    expect(text).toContain('承接');
+    expect(text).toContain('上一张〈咖啡产地信息图〉');
+  });
+
   it('没写范围（整条）时不显示那一行', () => {
     sessionMock.turns = turnWith(understanding());
     mount();

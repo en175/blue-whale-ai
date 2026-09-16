@@ -1520,6 +1520,17 @@
   font-size: var(--font-size-sm);
 }
 
+/* 另开的一件事的卡头标签（IKG793）：与目标模型同一档字号，长了截断、悬停看全。 */
+.shotTaskLabel {
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  margin-left: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .shotField {
   display: flex;
   align-items: flex-start;
@@ -2382,6 +2393,15 @@
   font-weight: 600;
   line-height: 1.5;
   color: var(--color-text-primary);
+}
+
+/* 另开的一件事承接的是哪张（IKG793）：次要信息，一行，长了截断、悬停不必——整句在 .md 里。 */
+.solutionDerived {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .solutionDirection {
