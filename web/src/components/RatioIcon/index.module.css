@@ -1,0 +1,6 @@
+.ratioIcon {
+  display: block;
+  flex-shrink: 0;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+}

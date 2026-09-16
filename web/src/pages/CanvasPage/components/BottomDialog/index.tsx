@@ -21,6 +21,7 @@ import {
   Minimize2,
 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
+import RatioIcon from '@/components/RatioIcon';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import {
   docHasAnyRef,
@@ -199,15 +200,6 @@ export interface VideoGenSeedParams {
   mode?: string;
   /** IKG0LP：是否带音频（首页带入，缺省 true） */
   generateAudio?: boolean;
-}
-
-/** 宽高比图标：按比例绘制小矩形 */
-function RatioIcon({ ratio }: { ratio: string }) {
-  const [w, h] = ratio.split(':').map(Number);
-  const max = 16;
-  const width = w >= h ? max : Math.round((w / h) * max);
-  const height = h >= w ? max : Math.round((h / w) * max);
-  return <span className={styles.ratioIcon} style={{ width, height }} />;
 }
 
 export default function BottomDialog({ onClose, onSend, initialText, initialDoc, initialParams, attachments, onRemoveAttachment, pendingPlanSyncs, onSyncPlan, syncingPlan, planReferenceError, planIndices, textIndexError, onLocateTextSource, onPickFromCanvas, onPickFromAssets, pickMode, pickLocked, videoDraftBinding, videoMediaRefs, onRemoveVideoRef, onAssignRefRoles, onRemoveMaterialRef, onReorderMediaRefs, onReorderAttachments, stripOrder, onStripOrderChange, onToast, mentionItems: canvasMentionItems, onMentionCanvas, followAnchor, enabledModes }: BottomDialogProps) {
