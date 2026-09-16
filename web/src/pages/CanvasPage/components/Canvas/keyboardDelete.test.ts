@@ -85,22 +85,22 @@ describe('selectedNodeIds', () => {
 
 describe('deleteSelectedCanvasNodes', () => {
   it('deletes every selected node and skips unselected ones', () => {
-    const deleted: string[] = [];
+    const batches: string[][] = [];
     const ids = deleteSelectedCanvasNodes(
       [
         { id: 'a', selected: true },
         { id: 'b', selected: false },
         { id: 'c', selected: true },
       ],
-      (id) => deleted.push(id),
+      (deletedIds) => batches.push(deletedIds),
     );
     expect(ids).toEqual(['a', 'c']);
-    expect(deleted).toEqual(['a', 'c']);
+    expect(batches).toEqual([['a', 'c']]);
   });
 
   it('does nothing when no node is selected', () => {
-    const deleted: string[] = [];
-    expect(deleteSelectedCanvasNodes([{ id: 'a' }], (id) => deleted.push(id))).toEqual([]);
-    expect(deleted).toEqual([]);
+    const batches: string[][] = [];
+    expect(deleteSelectedCanvasNodes([{ id: 'a' }], (deletedIds) => batches.push(deletedIds))).toEqual([]);
+    expect(batches).toEqual([]);
   });
 });

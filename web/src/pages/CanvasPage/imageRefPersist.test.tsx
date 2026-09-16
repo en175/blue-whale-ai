@@ -885,7 +885,7 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
 
     // 删除活动目标：模式与 Dock 一并结束（旧会话不得写向其他目标）
     await act(async () => {
-      flowProps.current.onDeleteNode('d1');
+      flowProps.current.onDeleteNode(['d1']);
     });
     await vi.waitFor(() => expect(panelOpen()).toBe(false));
     expect(pickLock()).toBe(false);

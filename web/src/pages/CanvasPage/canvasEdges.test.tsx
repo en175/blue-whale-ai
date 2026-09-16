@@ -295,7 +295,7 @@ describe('IKDLQF 连线受控化与目标生图接线', () => {
     expect(flowProps.current.edges).toHaveLength(1);
 
     await act(async () => {
-      flowProps.current.onDeleteNode('t1');
+      flowProps.current.onDeleteNode(['t1']);
     });
 
     expect(flowProps.current.edges).toEqual([]);
