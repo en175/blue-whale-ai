@@ -68,12 +68,12 @@ function buildMediaChip(identity: MediaChipIdentity, label: string, invalid: boo
   chip.dataset.mediaUrl = identity.url;
   const thumb = document.createElement('span');
   thumb.dataset.mediaThumb = '1';
-  thumb.className = textNodeStyles.mediaChipThumbWrap;
+  thumb.className = chipStyles.mediaChipThumbWrap;
   if (identity.mediaType === 'audio') {
     const icon = document.createElement('span');
     icon.textContent = '♫';
     icon.setAttribute('aria-hidden', 'true');
-    icon.className = textNodeStyles.mediaChipAudioIcon;
+    icon.className = chipStyles.mediaChipAudioIcon;
     thumb.append(icon);
   } else if (/^https?:\/\//.test(identity.url)) {
     const media = document.createElement(identity.mediaType === 'image' ? 'img' : 'video');
@@ -107,7 +107,7 @@ function buildMentionChip(part: MentionChipPart, materials: Array<PromptMaterial
     const icon = document.createElement('span');
     icon.textContent = '♫';
     icon.setAttribute('aria-hidden', 'true');
-    icon.className = textNodeStyles.mediaChipAudioIcon;
+    icon.className = chipStyles.mediaChipAudioIcon;
     chip.append(icon);
   } else if (material && /^https?:\/\//.test(material.url)) {
     const media = document.createElement(material.mediaType === 'image' ? 'img' : 'video');

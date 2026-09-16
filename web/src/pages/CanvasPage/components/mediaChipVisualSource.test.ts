@@ -60,18 +60,35 @@ describe('IKG7NH 共享视觉定义源断言', () => {
     expect(panelCss).not.toContain('refChip');
   });
 
-  it('文本卡差异类：整块选中与音频图标占位落在 TextNode 侧', () => {
+  it('文本卡差异类：整块选中留在 TextNode 侧；音频图标与缩略图包裹提升共享（IKGABW）', () => {
     const editorCss = readFileSync(fileURLToPath(new URL('./TextNode/index.module.css', import.meta.url)), 'utf-8');
     // 挂 .editor 后代组合抬优先级，稳定压过共享 .mediaChip 的 user-select:none
     const selectable = ruleBodiesOf(editorCss, '.editor .mediaChipSelectable');
     expect(selectable).toHaveLength(1);
     expect(selectable[0]).toContain('user-select: all');
-    const audioIcon = ruleBodiesOf(editorCss, '.mediaChipAudioIcon');
+    // IKGABW：生成面板补齐音频图标与视频首帧后，两处差异不再是差异，类迁入共享模块
+    const audioIcon = ruleBodiesOf(sharedCss, '.mediaChipAudioIcon');
     expect(audioIcon).toHaveLength(1);
     expect(audioIcon[0]).toContain('width: 18px');
-    const thumbWrap = ruleBodiesOf(editorCss, '.mediaChipThumbWrap');
+    const thumbWrap = ruleBodiesOf(sharedCss, '.mediaChipThumbWrap');
     expect(thumbWrap).toHaveLength(1);
     expect(thumbWrap[0]).toContain('display: inline-flex');
     expect(thumbWrap[0]).toContain('align-items: center');
+    expect(editorCss).not.toContain('.mediaChipAudioIcon');
+    expect(editorCss).not.toContain('.mediaChipThumbWrap');
+  });
+
+  it('悬停预览浮层形态共享（IKGABW）：文本卡与生成面板共用 chipPreview 系列，仅此一份定义', () => {
+    const preview = ruleBodiesOf(sharedCss, '.chipPreview');
+    expect(preview).toHaveLength(1);
+    expect(preview[0]).toContain('max-width: 280px');
+    expect(preview[0]).toContain('pointer-events: none');
+    const name = ruleBodiesOf(sharedCss, '.chipPreviewName');
+    expect(name).toHaveLength(1);
+    expect(name[0]).toContain('color: #aaa');
+    const editorCss = readFileSync(fileURLToPath(new URL('./TextNode/index.module.css', import.meta.url)), 'utf-8');
+    // 用规则匹配而非字面包含：迁移说明注释会提到旧类名，不构成第二份定义
+    expect(ruleBodiesOf(editorCss, '.chipPreview')).toHaveLength(0);
+    expect(ruleBodiesOf(editorCss, '.chipPreviewName')).toHaveLength(0);
   });
 });

@@ -16,6 +16,7 @@ import CanvasContextMenu from '../CanvasContextMenu';
 import AtMentionMenu from '../AtMentionMenu';
 import type { AtMentionItem } from '../../atMention';
 import styles from './index.module.css';
+import chipStyles from '../mediaChip.module.css';
 import { PROMPT_TEXT_LIMITS } from '@lib/contracts/prompt-text-limits';
 import { promptMentionSchema, validPromptMentions, type PromptMention, type PromptMaterial } from '@lib/contracts/prompt-preview';
 import { markdownToSanitizedHtml } from '@lib/contracts/text-node-markdown';
@@ -825,7 +826,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           onBlur={(e) => {
             // 如果焦点转移到工具栏/操作条/@菜单/标签操作层/素材预览，保持编辑状态
             const related = e.relatedTarget as HTMLElement | null;
-            if (related && related.closest(`.${styles.toolbar}, .${styles.nodeBar}, .${styles.chipMenu}, .${styles.chipPreview}, [data-testid="mention-menu"]`)) return;
+            if (related && related.closest(`.${styles.toolbar}, .${styles.nodeBar}, .${styles.chipMenu}, .${chipStyles.chipPreview}, [data-testid="mention-menu"]`)) return;
             setIsFocused(false);
             setEditing(false);
             setWritingSelf(false);
@@ -923,11 +924,11 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       {/* media 标签悬停预览（契约 §5：图片/视频缩略预览，音频出类型标识与名称）；
           IKFR6A portal 到 body 钉在屏幕上，默认标签上方、顶部放不下翻到下方 */}
       {chipPreview && createPortal(
-        <div className={`${styles.chipPreview} ${chipPreview.below ? styles.chipPreviewBelow : ''} nodrag nopan`} style={{ left: chipPreview.x, top: chipPreview.y }} data-testid="media-chip-preview">
+        <div className={`${chipStyles.chipPreview} ${chipPreview.below ? chipStyles.chipPreviewBelow : ''} nodrag nopan`} style={{ left: chipPreview.x, top: chipPreview.y }} data-testid="media-chip-preview">
           {chipPreview.chip.dataset.mediaType === 'image' && <img src={chipPreview.chip.dataset.mediaUrl} alt="" />}
           {chipPreview.chip.dataset.mediaType === 'video' && <video src={chipPreview.chip.dataset.mediaUrl} muted autoPlay loop playsInline />}
-          {chipPreview.chip.dataset.mediaType === 'audio' && <div className={styles.chipPreviewAudio}><AudioLines size={28} strokeWidth={1.5} /><span>音频</span></div>}
-          <div className={styles.chipPreviewName}>{chipPreview.chip.dataset.mediaName}</div>
+          {chipPreview.chip.dataset.mediaType === 'audio' && <div className={chipStyles.chipPreviewAudio}><AudioLines size={28} strokeWidth={1.5} /><span>音频</span></div>}
+          <div className={chipStyles.chipPreviewName}>{chipPreview.chip.dataset.mediaName}</div>
         </div>,
         document.body,
       )}

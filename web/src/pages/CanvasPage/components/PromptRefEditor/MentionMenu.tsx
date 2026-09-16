@@ -4,7 +4,7 @@
  * 下方保留素材分类入口（从资产中选择 / 到节点选择）——选择新素材添加成功后插入标签。
  * 纯展示组件：过滤由调用方完成，键盘导航下标扁平（refs + 添加入口）。
  * ============================================ */
-import { FileText, FolderOpen, Image as ImageIcon, MousePointerClick, Video as VideoIcon, AudioLines } from 'lucide-react';
+import { FileText, FolderOpen, Image as ImageIcon, MousePointerClick, AudioLines } from 'lucide-react';
 import styles from './index.module.css';
 
 export interface MentionRefItem {
@@ -13,11 +13,12 @@ export interface MentionRefItem {
   name: string;
   /** 标签徽标文案（图片N/视频N/音频N/首帧/尾帧/文本N；IKFA1O 前为图片N 的 N） */
   badge: string;
-  /** 素材媒体类型：缩略图渲染区分（图片显示缩略图，视频/音频/文本显示类型图标） */
+  /** 素材媒体类型：缩略图渲染区分（图片/视频显示缩略图——视频经 <video preload="metadata">
+   *  抓首帧，IKGABW 对齐 @ 菜单先例；音频/文本显示类型图标） */
   mediaType?: 'image' | 'video' | 'audio' | 'text';
 }
 
-/** 已引用项选项行（缩略图/名称/徽标）：@ 菜单与失效替换菜单共用（IKFA1N 去重） */
+/** 已引用项选项行（缩略图/名称/徽标）：失效替换菜单使用（IKFA1N 去重） */
 export function MentionRefRow({ item, active, onPick, onHover, testId }: {
   item: MentionRefItem;
   active?: boolean;
@@ -26,7 +27,7 @@ export function MentionRefRow({ item, active, onPick, onHover, testId }: {
   testId?: string;
 }) {
   const renderThumb = () => {
-    if (item.mediaType === 'video') return <VideoIcon size={20} strokeWidth={1.5} />;
+    if (item.mediaType === 'video') return <video className={styles.mentionThumb} src={item.url} muted preload="metadata" />;
     if (item.mediaType === 'audio') return <AudioLines size={20} strokeWidth={1.5} />;
     if (item.mediaType === 'text') return <FileText size={20} strokeWidth={1.5} />;
     if (item.url) return <img className={styles.mentionThumb} src={item.url} alt="" />;
