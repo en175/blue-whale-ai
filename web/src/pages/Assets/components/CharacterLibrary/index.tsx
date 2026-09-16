@@ -298,15 +298,17 @@ function MeasuredThumb({
   );
 }
 
-/** 素材卡片上的角标/名称浮层/状态角标/删除按钮（图片/视频卡片共用） */
+/** 素材卡片上的角标/名称浮层/状态角标/删除按钮（图片/视频卡片共用）；picker 模式隐藏删除按钮（管理归资产页） */
 function AssetCardOverlays({
   asset,
   onDeleteAsset,
   onClosePreview,
+  pickerMode = false,
 }: {
   asset: MaterialAsset;
   onDeleteAsset: (asset: MaterialAsset) => void;
   onClosePreview: () => void;
+  pickerMode?: boolean;
 }) {
   return (
     <>
@@ -325,17 +327,19 @@ function AssetCardOverlays({
       {asset.Status === 'Failed' && (
         <div className={`${styles.statusBadge} ${styles.statusFailed}`}>失败</div>
       )}
-      <button
-        className={styles.assetDeleteBtn}
-        title="删除素材"
-        onClick={(e) => {
-          e.stopPropagation();
-          onClosePreview(); // 关闭预览弹窗，避免层级冲突
-          onDeleteAsset(asset);
-        }}
-      >
-        <Trash2 size={14} strokeWidth={2} />
-      </button>
+      {!pickerMode && (
+        <button
+          className={styles.assetDeleteBtn}
+          title="删除素材"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClosePreview(); // 关闭预览弹窗，避免层级冲突
+            onDeleteAsset(asset);
+          }}
+        >
+          <Trash2 size={14} strokeWidth={2} />
+        </button>
+      )}
     </>
   );
 }
@@ -344,6 +348,16 @@ function materialMediaKind(assetType: MaterialAsset['AssetType']): 'image' | 'vi
   if (assetType === 'Video') return 'video';
   if (assetType === 'Audio') return 'audio';
   return 'image';
+}
+
+/** picker 模式可选判定：Active + 有 URL + 类型在入口允许范围内（无过滤则全放行）；真人分组详情与虚拟平铺视图共用 */
+function isPickerSelectableAsset(
+  asset: MaterialAsset,
+  pickerMediaTypes?: Array<'image' | 'video' | 'audio'>,
+): boolean {
+  if (asset.Status !== 'Active' || !asset.URL) return false;
+  if (!pickerMediaTypes || pickerMediaTypes.length === 0) return true;
+  return pickerMediaTypes.includes(materialMediaKind(asset.AssetType));
 }
 
 function GroupDetail({
@@ -369,12 +383,6 @@ function GroupDetail({
   const closePreview = () => setPreviewAsset(null);
   const pickerMode = Boolean(onPickerToggleAsset);
 
-  const isPickerSelectable = (asset: MaterialAsset) => {
-    if (asset.Status !== 'Active' || !asset.URL) return false;
-    if (!pickerMediaTypes || pickerMediaTypes.length === 0) return true;
-    return pickerMediaTypes.includes(materialMediaKind(asset.AssetType));
-  };
-
   return (
     <div className={styles.detailView}>
       <div className={styles.detailHeader}>
@@ -397,7 +405,7 @@ function GroupDetail({
         )}
         {assets.map((asset) => {
           const selectedFlag = pickerSelectedIds?.has(asset.Id) ?? false;
-          const selectable = !pickerMode || isPickerSelectable(asset);
+          const selectable = !pickerMode || isPickerSelectableAsset(asset, pickerMediaTypes);
           return (
           <div
             key={asset.Id}
@@ -465,9 +473,15 @@ function GroupDetail({
 function AigcFlatView({
   onUpload,
   refreshTick,
+  pickerSelectedIds,
+  onPickerToggleAsset,
+  pickerMediaTypes,
 }: {
   onUpload?: () => void;
   refreshTick?: number;
+  pickerSelectedIds?: ReadonlySet<string>;
+  onPickerToggleAsset?: (asset: MaterialAsset) => void;
+  pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
 }) {
   const [assets, setAssets] = useState<MaterialAsset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -475,6 +489,8 @@ function AigcFlatView({
   const [previewAsset, setPreviewAsset] = useState<MaterialAsset | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const closePreview = () => setPreviewAsset(null);
+  /** picker 模式（资产选择弹窗）：点卡=勾选、隐藏预览与删除，管理操作归资产页 */
+  const pickerMode = Boolean(onPickerToggleAsset);
 
   const loadAssets = useCallback(async () => {
     setLoading(true);
@@ -554,11 +570,29 @@ function AigcFlatView({
             </div>
           </div>
         )}
-        {assets.map((asset) => (
-          <div key={asset.Id} className={styles.assetCard} onClick={() => setPreviewAsset(asset)}>
+        {assets.map((asset) => {
+          const selectedFlag = pickerSelectedIds?.has(asset.Id) ?? false;
+          const selectable = !pickerMode || isPickerSelectableAsset(asset, pickerMediaTypes);
+          return (
+          <div
+            key={asset.Id}
+            className={`${styles.assetCard} ${pickerMode && !selectable ? styles.assetCardDisabled : ''} ${selectedFlag ? styles.assetCardSelected : ''}`}
+            onClick={() => {
+              if (pickerMode) {
+                if (selectable) onPickerToggleAsset?.(asset);
+                return;
+              }
+              setPreviewAsset(asset);
+            }}
+          >
             {asset.URL && asset.AssetType === 'Image' ? (
               <MeasuredThumb src={asset.URL} alt={asset.Name}>
-                <AssetCardOverlays asset={asset} onDeleteAsset={handleDeleteAsset} onClosePreview={closePreview} />
+                <AssetCardOverlays asset={asset} onDeleteAsset={handleDeleteAsset} onClosePreview={closePreview} pickerMode={pickerMode} />
+                {pickerMode && selectable && (
+                  <div className={`${styles.checkToggle} ${selectedFlag ? styles.checkToggleOn : ''}`}>
+                    {selectedFlag && <Check size={14} strokeWidth={2.5} />}
+                  </div>
+                )}
               </MeasuredThumb>
             ) : (
               <div className={styles.assetThumb}>
@@ -573,11 +607,17 @@ function AigcFlatView({
                 ) : (
                   <div className={styles.empty}>资源不可用</div>
                 )}
-                <AssetCardOverlays asset={asset} onDeleteAsset={handleDeleteAsset} onClosePreview={closePreview} />
+                <AssetCardOverlays asset={asset} onDeleteAsset={handleDeleteAsset} onClosePreview={closePreview} pickerMode={pickerMode} />
+                {pickerMode && selectable && (
+                  <div className={`${styles.checkToggle} ${selectedFlag ? styles.checkToggleOn : ''}`}>
+                    {selectedFlag && <Check size={14} strokeWidth={2.5} />}
+                  </div>
+                )}
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
         {!onUpload && assets.length === 0 && !loading && !loadError && (
           <div className={styles.empty}>暂无素材，请上传</div>
         )}
@@ -630,7 +670,7 @@ export default function CharacterLibrary({
   onDetailViewChange?: (inDetail: boolean, groupId: string | null) => void;
   onUpload?: () => void;
   refreshTick?: number;
-  /** 画布资产选择弹窗：勾选素材（仅真人人像库分组详情） */
+  /** 画布资产选择弹窗：勾选素材（真人分组详情与虚拟平铺视图） */
   pickerSelectedIds?: ReadonlySet<string>;
   onPickerToggleAsset?: (asset: MaterialAsset) => void;
   pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
@@ -644,7 +684,15 @@ export default function CharacterLibrary({
 
   // AIGC 虚拟人像库：平铺去分组
   if (!isLiveness) {
-    return <AigcFlatView onUpload={onUpload} refreshTick={refreshTick} />;
+    return (
+      <AigcFlatView
+        onUpload={onUpload}
+        refreshTick={refreshTick}
+        pickerSelectedIds={pickerSelectedIds}
+        onPickerToggleAsset={onPickerToggleAsset}
+        pickerMediaTypes={pickerMediaTypes}
+      />
+    );
   }
 
   // 真人人像库：保留分组管理与真人认证
