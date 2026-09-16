@@ -76,10 +76,15 @@ function makeAsset(id: string, type = "image"): WorkerInputAsset {
 }
 
 /** 目标 + 一个引用 assetId=11 的方案文本节点；edges 由用例决定（默认空 = 连线没落库）。 */
-function makeCanvas(mediaType: "image" | "video", edges: CanvasEdge[] = [], connected = false) {
+function makeCanvas(
+  mediaType: "image" | "video",
+  edges: CanvasEdge[] = [],
+  connected = false,
+  targetData: Record<string, unknown> = {},
+) {
   return {
     nodes: [
-      { id: "target", type: "mediaNode", data: { mediaType } },
+      { id: "target", type: "mediaNode", data: { mediaType, ...targetData } },
       // 连线齐全时的媒体来源卡：归属/能力边界用例用它把「连线」这一维排除掉
       ...(connected ? [{ id: "m1", type: "mediaNode", data: { mediaType: "image", assetId: "11" } }] : []),
       {
@@ -110,13 +115,17 @@ function callFreeze(overrides: {
   connected?: boolean;
   inputIds?: string[];
   resolved?: WorkerInputAsset[];
+  /** 按入参 id 造归属结果（默认对每个 id 返回同 id 的图片 asset，material_id 为 null）。 */
+  resolveImpl?: (ids: string[]) => WorkerInputAsset[];
   model?: ModelCapabilityView;
+  draftMaterialRefs?: Array<{ materialId: string; mediaType: string; role: string; url: string }>;
   references?: Array<{ asset_id?: string; material_id?: string; type: "image" | "video" | "audio"; role: "reference" | "first_frame" | "last_frame" }>;
 } = {}) {
   const mediaType = overrides.mediaType ?? "image";
   const connected = overrides.connected ?? false;
+  const targetData = overrides.draftMaterialRefs ? { draftMaterialRefs: overrides.draftMaterialRefs } : {};
   return freezePromptPlans({
-    ...makeCanvas(mediaType, overrides.edges ?? (connected ? CONNECTED_EDGES : []), connected),
+    ...makeCanvas(mediaType, overrides.edges ?? (connected ? CONNECTED_EDGES : []), connected, targetData),
     version: 3,
     targetId: "target",
     type: mediaType,
@@ -127,7 +136,10 @@ function callFreeze(overrides: {
     model: overrides.model ?? makeModel(),
     userId: "u1",
     projectId: "p1",
-    assets: { resolveInputAssets: vi.fn().mockResolvedValue(overrides.resolved ?? [makeAsset("11")]) },
+    assets: {
+      resolveInputAssets: vi.fn(async (ids: string[]) =>
+        overrides.resolveImpl ? overrides.resolveImpl(ids) : overrides.resolved ?? ids.map(id => makeAsset(id))),
+    },
   });
 }
 
@@ -238,5 +250,82 @@ describe("freezePromptPlans 保留的边界校验（IKG4RV 不放松）", () => 
       providerUrl: "https://cdn.test/11.png",
     }]);
     expect(snapshot!.providerPrompt).toContain("首帧");
+  });
+});
+
+// IKG79Z（测试环境 project 492 实证）：方案绑定以本地 assetId 表达，素材库引用在请求体里以 material_id 表达，
+// 是同一媒体的两种身份。视频分支的 inputIds 只收 asset_id，material 引用贡献 0 个 —— 只按 assetId 比对
+// 会把「方案卡 + 素材库素材」整条路径误判成素材缺失。
+describe("freezePromptPlans 素材库素材的身份映射（IKG79Z）", () => {
+  /** 目标节点上已保存的素材库参考（走 material_id 的路径要它存在）。 */
+  const DRAFT_MATERIAL_REFS = [{ materialId: "mat-1", mediaType: "image", role: "reference", url: "https://cdn.test/mat-1.png" }];
+  const MATERIAL_REFS = [{ material_id: "mat-1", type: "image" as const, role: "reference" as const }];
+
+  it("方案绑定是本地 assetId、请求只带同一素材的 material_id → 放行，且标签不是 参考图0", async () => {
+    const snapshot = await callFreeze({
+      mediaType: "video",
+      model: makeModel({}, "seedance-2"),
+      inputIds: [], // video + 素材库引用：请求里没有 asset_id
+      references: MATERIAL_REFS,
+      draftMaterialRefs: DRAFT_MATERIAL_REFS,
+      resolveImpl: (ids) => ids.map(id => ({ ...makeAsset(id), material_id: "mat-1" })),
+    });
+
+    expect(snapshot).toBeDefined();
+    expect(snapshot!.videoReferences).toEqual([{
+      materialId: "mat-1",
+      type: "image",
+      role: "reference",
+      url: "https://cdn.test/mat-1.png",
+      providerUrl: "asset://mat-1",
+    }]);
+    // 身份回查没做的话这里会是 index -1 → 「参考图0」静默送上游
+    expect(snapshot!.providerPrompt).toContain("参考图1");
+    expect(snapshot!.providerPrompt).not.toContain("参考图0");
+  });
+
+  it("该 asset 关联的 material 与请求里的不是同一个 → 仍 400", async () => {
+    await expect(callFreeze({
+      mediaType: "video",
+      model: makeModel({}, "seedance-2"),
+      inputIds: [],
+      references: MATERIAL_REFS,
+      draftMaterialRefs: DRAFT_MATERIAL_REFS,
+      resolveImpl: (ids) => ids.map(id => ({ ...makeAsset(id), material_id: "mat-other" })),
+    })).rejects.toThrow("提示词引用的素材缺失或不完整");
+  });
+
+  it("asset 没有关联 material_id、也不在请求体里 → 仍 400", async () => {
+    await expect(callFreeze({
+      mediaType: "video",
+      model: makeModel({}, "seedance-2"),
+      inputIds: [],
+      references: MATERIAL_REFS,
+      draftMaterialRefs: DRAFT_MATERIAL_REFS,
+      // 默认 makeAsset 的 material_id 为 null
+      resolveImpl: (ids) => ids.map(id => makeAsset(id)),
+    })).rejects.toThrow("提示词引用的素材缺失或不完整");
+  });
+
+  it("归属查询查不到该 asset（越权/已删）→ 不建立映射，仍 400", async () => {
+    await expect(callFreeze({
+      mediaType: "video",
+      model: makeModel({}, "seedance-2"),
+      inputIds: [],
+      references: MATERIAL_REFS,
+      draftMaterialRefs: DRAFT_MATERIAL_REFS,
+      resolveImpl: () => [],
+    })).rejects.toThrow("提示词引用的素材缺失或不完整");
+  });
+
+  it("image 目标不走身份放宽 → 仍 400，不放行成「参考图0 + 零参考」", async () => {
+    // image 的 inputIds 来自旧字段，references[].material_id 既不构成输入也没有 videoReferences 可回查；
+    // 放宽若不分类型，这里会放行并产出 `参考图0` 且 images 为空——正是保留那条校验要防的静默降级。
+    await expect(callFreeze({
+      mediaType: "image",
+      inputIds: [],
+      references: MATERIAL_REFS,
+      resolveImpl: (ids) => ids.map(id => ({ ...makeAsset(id), material_id: "mat-1" })),
+    })).rejects.toThrow("提示词引用的素材缺失或不完整");
   });
 });
