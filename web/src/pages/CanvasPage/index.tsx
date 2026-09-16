@@ -1582,8 +1582,9 @@ export default function CanvasPage() {
     return () => window.clearTimeout(timer);
   }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch]);
 
-  /** 创建文本节点（正文为受限 Markdown 源，契约 §5 新建一律 v1 形态） */
-  const handleAddTextNode = (position?: { x: number; y: number }, text?: string) => {
+  /** 创建文本节点（正文为受限 Markdown 源，契约 §5 新建一律 v1 形态）；
+   *  返回新节点 id（供 IKGBPB 系统剪贴板兜底粘贴后选中） */
+  const handleAddTextNode = (position?: { x: number; y: number }, text?: string): string => {
     const newNode: Node = {
       id: newNodeId('text'),
       type: 'textNode',
@@ -1610,6 +1611,7 @@ export default function CanvasPage() {
     pendingNodeIdsRef.current.add(newNode.id);
     historyRef.current?.pushAddNodes([newNode.id]);
     setTextNodes((prev) => [...prev, newNode]);
+    return newNode.id;
   };
 
   /** 复制节点到旁边（副本进撤销栈，IKD0JT：撤销移除副本） */
@@ -1664,10 +1666,14 @@ export default function CanvasPage() {
 
   /** V 粘贴（IKGBPA）：视口中心落位 + 多卡按快照原相对位置整体落位 + 连续粘贴整组右下递增错开；
    *  手拉连线不随贴（只产散卡）；文本卡副本按 IKFM3Q 契约 §4 重建正文 @ 引用派生索引线；
-   *  按「新增节点」登记撤销（一次粘贴一条，撤销一次移除整组副本，悬空派生线由 IKDLQF 级联清理）。 */
+   *  按「新增节点」登记撤销（一次粘贴一条，撤销一次移除整组副本，悬空派生线由 IKDLQF 级联清理）。
+   *  IKGBPB：内部剪贴板为空时不再静默，改走系统剪贴板兜底（pasteFromSystemClipboard）。 */
   const handlePasteClipboard = () => {
-    // 内部剪贴板为空时本片静默；IKGBPB 系统剪贴板兜底在此分支点接入（不与内部剪贴板读取耦死）
-    if (clipboardSnapshotRef.current.length === 0) return;
+    // 内部剪贴板优先：有快照完全不读系统剪贴板（连读取 API 都不触发）
+    if (clipboardSnapshotRef.current.length === 0) {
+      void pasteFromSystemClipboard();
+      return;
+    }
     const snapshot = clipboardSnapshotRef.current;
     const stair = CLIPBOARD_PASTE_STAIR_PX * clipboardPasteOffsetRef.current;
     clipboardPasteOffsetRef.current += 1;
@@ -1710,6 +1716,30 @@ export default function CanvasPage() {
     });
     // 新卡自动选中（整组副本）
     setSelectManyRequest({ ids: newIds, ts: Date.now() });
+  };
+
+  /** IKGBPB 系统剪贴板兜底（内部剪贴板为空时的 V 粘贴）：与卡片右键菜单「粘贴」项共用
+   *  readCanvasClipboard 读取底层（图片优先、纯文本兜底）；图片走 placeFileOnCanvas 文件
+   *  落卡链路（「新增节点」撤销登记、上传后补永久 URL 均为链路既有行为），文本走新建文本卡
+   *  路径；视口中心 + 连续粘贴阶梯 + 新卡自动选中复用 IKGBPA 基座机制——落位在读取返回后
+   *  同步结算，连续快速按 V 时各次粘贴拿到递增档位互不重叠，且双空不消耗档位；
+   *  系统剪贴板为空或读取失败安静返回（双空静默，无 toast）。 */
+  const pasteFromSystemClipboard = async () => {
+    const payload = await readCanvasClipboard();
+    if (!payload) return;
+    const stair = CLIPBOARD_PASTE_STAIR_PX * clipboardPasteOffsetRef.current;
+    clipboardPasteOffsetRef.current += 1;
+    const anchor = spawnPosRef.current();
+    const position = { x: Math.round(anchor.x + stair), y: Math.round(anchor.y + stair) };
+    if (payload.kind === 'image') {
+      // 上传失败时节点自移除并由落卡链路内既有 toast 提示；这里只吞 rejection 不额外提示
+      await placeFileOnCanvas(payload.file, { position })
+        .then((done) => setSelectManyRequest({ ids: [done.nodeId], ts: Date.now() }))
+        .catch(() => undefined);
+      return;
+    }
+    const nodeId = handleAddTextNode(position, payload.text);
+    setSelectManyRequest({ ids: [nodeId], ts: Date.now() });
   };
 
   /**
