@@ -2,9 +2,11 @@ import PromptSyncActions from '../PromptSyncActions';
 /* ============================================
  * BottomDialog 视频对话窗口：模型/时长/宽高比配置与发送
  * 统一草稿绑定模式：参考由「画布连线 + 草稿 material refs」合并推导（首帧/尾帧/普通参考）。
- * 统一附件来源入口（IKFE8U 复用 IKFE8T 基准）：普通参考区单「+」展开两项菜单
- * ——从资产中选择（落画布节点+连线）/ 从节点添加素材（建线）；角色库菜单项退役
- * （存量 material 参考仍随草稿 data 展示与移除），首尾帧为具名槽位（仅图片）。
+ * 附件添加入口（IKGB1X/IKGB7W）：输入框上方第一行附件操作条（共享组件 AttachmentActionBar）
+ * ——「+ 参考」画布点选 /「资产库」资产弹窗，等价退役的栏尾「+」菜单两项；附件栏空态整条隐藏；
+ * 能力位不支持 / 达上限 / 生成中只读时按钮常显置灰并悬停说明原因；
+ * 首尾帧为具名槽位（仅图片，RefSourceMenu label 变体保留），槽位入口与空槽判断不变。
+ * （角色库菜单项早已退役；存量 material 参考仍随草稿 data 展示与移除。）
  * IKFA1O：正文编辑接入 PromptRefEditor——图片/视频/音频以稳定身份插入正文标签，
  * 首尾帧按角色显示，普通参考按同类型编号；模式不兼容时标签失效并阻止发送。
  * ============================================ */
@@ -36,6 +38,7 @@ import PromptRefEditor, {
 import ReplaceRefMenu from '../PromptRefEditor/ReplaceRefMenu';
 import RefThumbnail from '../RefThumbnail';
 import RefSourceMenu from '../RefSourceMenu';
+import AttachmentActionBar from '../AttachmentActionBar';
 import { useMixedRefStrip, orderRefStripItems, videoRefStripKey, useRefStripDrag, type RefStripOrderProps, type StripDragItemProps } from '../RefThumbnail/strip-dnd';
 import { refIdOf, videoLabelMapOf } from '../../videoPromptRefs';
 import { composeImageSendPrompt, IMAGE_COMPOSED_PROMPT_LIMIT, IMAGE_COMPOSED_PROMPT_OVER_LIMIT, type ImageTextAttachment } from '../ImageDialog';
@@ -343,6 +346,29 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   const isText2Video = selectedMode === 'text2video';
   /** 已连入的视频参考数（切换到首尾帧/图生视频时不兼容，需先移除） */
   const videoRefCount = videoMediaRefs.reference.filter((r) => r.mediaType !== 'image').length;
+
+  /** 生成中只读原因（IKGB1X 操作条悬停原因与下方只读提示条同一文案来源） */
+  const readOnlyReason = sending || videoDraftBinding.submitting
+    ? '正在保存并提交，参数与连线只读'
+    : '生成中，参数与连线只读；可在画布卡片上取消生成';
+  /** 普通参考总数上限（与附件栏 n/N 计数分母同口径）：图上限 + 视频上限，模型未加载时按缺省 12 */
+  const referenceMaxTotal = caps ? (caps.imageMax ?? 9) + (caps.videoReferenceMax ?? 3) : 12;
+  /** 普通参考达上限（IKGB1X 操作条禁用原因之一；旧口径无此门控，仅计数展示） */
+  const referencesFull = videoMediaRefs.reference.length >= referenceMaxTotal;
+  /** 操作条分派的媒体边界（与栏尾旧「+」同口径）：图生视频仅图片，其余普通参考模式全能（图/视频/音频）；
+   *  首尾帧模式按钮置灰不分派，kind 按槽位边界传 'image'（契约 §4，顺序填充由 IKGB7Y 承接） */
+  const actionBarKind: 'image' | 'video' = isKeyframe || isText2Video ? 'image' : 'video';
+  /** 附件操作条禁用原因（IKGB1X：常显置灰 + 悬停说明，替代旧「+ 不出现」口径）：
+   *  生成中只读最优先；首尾帧模式本单仅布局接入——按钮置灰指向槽位自有入口；
+   *  普通参考模式按能力位不支持 / 达上限门控（与旧「+」的隐藏门控一一对应 + 上限补齐） */
+  const actionBarDisabledReason = readOnly ? readOnlyReason
+    : isKeyframe ? '首尾帧模式请从下方槽位入口添加首帧/尾帧'
+    : !canAddReference ? '当前模型不支持参考'
+    : referencesFull ? `普通参考最多 ${referenceMaxTotal} 条，已达上限`
+    : null;
+  /** 附件栏空态派生（IKGB1X）：普通参考模式下无普通参考且无文本附件时整条不渲染，不引入新的持久状态；
+   *  首尾帧模式槽位常显不吃空态规则（契约 §1/§4） */
+  const stripHasItems = videoMediaRefs.reference.length > 0 || (attachments?.length ?? 0) > 0;
 
   const mixedStrip = useMixedRefStrip(
     isKeyframe ? [] : videoMediaRefs.reference.map(r => videoRefStripKey(r).slice(6)),
@@ -718,10 +744,10 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
     { open: replaceTarget !== null, ref: replaceMenuRef, dismiss: () => setReplaceTarget(null) },
   ]);
 
-  /** 统一附件来源入口（IKFE8U，复用 IKFE8T 图片面板基准）：按 kind+role 对接目标槽位，
+  /** 首尾帧具名槽位来源入口（IKFE8U/IKGB7W）：普通参考变体已随附件操作条落地退役，
+   *  仅保留「+ 首帧」「+ 尾帧」label 变体——按 kind+role 对接目标槽位，
    *  单「+」展开「从资产中选择 / 从节点添加素材」两项菜单（角色库菜单项退役）；
-   *  kind 为槽位类型边界——'image' 仅图片（首尾帧槽 / 图生视频普通参考）、
-   *  'video' 全能参考（图/视频/音频）；pickMode 与发起槽位 kind 精确匹配时「+」高亮。 */
+   *  kind 为槽位类型边界——'image' 仅图片（首尾帧槽）；pickMode 与发起槽位 kind 精确匹配时「+」高亮。 */
   const renderSourceMenu = (kind: 'image' | 'video', role: VideoRefRole, label?: string) => (
     <RefSourceMenu
       onPickFromAssets={() => onPickFromAssets?.(kind, role)}
@@ -1009,23 +1035,43 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       )}
 
       <div className={`${styles.dialog} ${expanded ? styles.dialogExpanded : ''}`}>
-      {/* 右上角操作：放大/收起 + 关闭 */}
-      <div className={styles.topActions}>
-        <button
-          className={styles.iconBtn}
-          onClick={() => setExpanded((v) => !v)}
-          title={expanded ? '收起' : '展开'}
-        >
-          {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
-        </button>
-        <button className={styles.iconBtn} onClick={onClose} title="关闭">
-          <X size={16} strokeWidth={2} />
-        </button>
+      {/* 第一行：附件操作条（IKGB1X，三面板共用共享组件 AttachmentActionBar）——左「+ 参考」「资产库」
+          pill 直达退役菜单两项链路（kind/role 与旧「+」同口径透传），右侧并入原展开/关闭按钮；
+          能力位不支持 / 达上限 / 生成中只读时常显置灰并悬停说明原因（替代旧「+ 不出现」）；
+          首尾帧模式本单仅布局接入：操作条照常渲染但两按钮置灰指向槽位入口（顺序填充由 IKGB7Y 承接） */}
+      <div className={styles.actionBarRow}>
+        <AttachmentActionBar
+          kind={actionBarKind}
+          role={isKeyframe ? undefined : 'reference'}
+          /* 类型收窄守卫：共享组件 kind 含 'audio'，本面板回调仅收 'image'|'video'
+             （actionBarKind 已锁边界，'audio' 分支不会到达） */
+          onPickFromCanvas={(kind, role) => { if (kind !== 'audio') onPickFromCanvas?.(kind, role); }}
+          onPickFromAssets={(kind, role) => { if (kind !== 'audio') onPickFromAssets?.(kind, role); }}
+          pickMode={!isKeyframe && pickMode === actionBarKind}
+          disabledReason={actionBarDisabledReason}
+          trailing={(
+            <>
+              <button
+                className={styles.iconBtn}
+                onClick={() => setExpanded((v) => !v)}
+                title={expanded ? '收起' : '展开'}
+              >
+                {expanded ? <Minimize2 size={14} strokeWidth={2} /> : <Maximize2 size={14} strokeWidth={2} />}
+              </button>
+              <button className={styles.iconBtn} onClick={onClose} title="关闭">
+                <X size={16} strokeWidth={2} />
+              </button>
+            </>
+          )}
+        />
       </div>
 
       {/* 顶部媒体行（统一草稿绑定：按模式门控展示。「连线 + material」合并推导参考）
-          首尾帧模式：首帧 + 尾帧同一行；全能参考/图生视频：普通参考（图生视频不收视频参考）。
-          角色由「模式 + 目标槽」决定，不再提供跨模式角色切换（避免槽隐藏后参考丢失）。 */}
+          首尾帧模式：首帧 + 尾帧同一行（具名槽位常显，不吃空态隐藏）；全能参考/图生视频：普通参考
+          （图生视频不收视频参考），栏内无普通参考且无文本附件时整条不渲染（IKGB1X 空态）。
+          角色由「模式 + 目标槽」决定，不再提供跨模式角色切换（避免槽隐藏后参考丢失）。
+          栏尾旧「+」菜单（RefSourceMenu 普通变体）随操作条落地退役，仅保留首尾帧具名槽位变体（IKGB7W）。 */}
+      {(isKeyframe || stripHasItems || (videoMediaRefs.invalid?.length ?? 0) > 0 || !!conflict || readOnly) && (
       <div className={styles.refRoleArea}>
         {isKeyframe ? (
           <div className={styles.refSlot}>
@@ -1044,22 +1090,20 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
             {mixedStrip.render([], textThumbsAt(0))}
           </div>
         ) : (
-          <div className={styles.refSlot}>
-            {mixedStrip.render(
-              videoMediaRefs.reference.map((r, i) => renderRefThumb(r, r.materialId != null ? `material:${r.materialId}` : `node:${r.nodeId}`, undefined, stripDrag.itemProps(mixedStrip.index(i)))),
-              textThumbsAt(videoMediaRefs.reference.length),
-            )}
-            {/* 普通参考区单「+」（IKFE8U）：全能参考收图/视频/音频（类型边界在来源与画布校验），
-                图生视频仅图片；文生视频保留入口（媒体实际成为参考时自动切全能参考，IKFC1T） */}
-            {!readOnly && canAddReference && (
-              renderSourceMenu(isText2Video ? 'image' : 'video', 'reference')
-            )}
-            {videoMediaRefs.reference.length > 0 && (
-              <span className={styles.fileCount}>
-                {videoMediaRefs.reference.length}/{caps ? (caps.imageMax ?? 9) + (caps.videoReferenceMax ?? 3) : 12}
-              </span>
-            )}
-          </div>
+          stripHasItems && (
+            <div className={styles.refSlot}>
+              {mixedStrip.render(
+                videoMediaRefs.reference.map((r, i) => renderRefThumb(r, r.materialId != null ? `material:${r.materialId}` : `node:${r.nodeId}`, undefined, stripDrag.itemProps(mixedStrip.index(i)))),
+                textThumbsAt(videoMediaRefs.reference.length),
+              )}
+              {/* n/N 计数保留在附件栏原位（IKGB1X）：有普通参考时显示 */}
+              {videoMediaRefs.reference.length > 0 && (
+                <span className={styles.fileCount}>
+                  {videoMediaRefs.reference.length}/{caps ? (caps.imageMax ?? 9) + (caps.videoReferenceMax ?? 3) : 12}
+                </span>
+              )}
+            </div>
+          )
         )}
         {videoMediaRefs.invalid?.map((ref) => (
           <div key={ref.nodeId} className={styles.refConflictHint} role="alert">
@@ -1074,8 +1118,9 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
         ))}
         {/* 组合冲突提示（IKDMQS）：明确说明不可提交的原因，不静默丢弃 */}
         {conflict && <div className={styles.refConflictHint} role="alert">{conflict}</div>}
-        {readOnly && <div className={styles.readOnlyHint}>{sending || videoDraftBinding.submitting ? '正在保存并提交，参数与连线只读' : '生成中，参数与连线只读；可在画布卡片上取消生成'}</div>}
+        {readOnly && <div className={styles.readOnlyHint}>{readOnlyReason}</div>}
       </div>
+      )}
 
       <PromptSyncActions plans={pendingPlanSyncs} disabled={readOnly || syncingPlan} onSync={onSyncPlan} />
       {configurationError && <div className={styles.refConflictHint} role="alert">{configurationError}</div>}

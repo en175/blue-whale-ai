@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
-/* IKFE8U 视频面板统一附件入口与首尾帧选择：
-   自由面板（首页 AI视频带入，无草稿卡）与工具栏面板（绑定草稿卡）普通参考区共用单「+」，
-   菜单仅「从资产中选择 / 从节点添加素材」两项——不再有按媒体类型区分的添加图标与角色库菜单项。
-   类型边界按模式分流：全能参考普通参考收图/视频/音频（画布三类型节点均可接纳），
+/* IKGB7W 视频面板附件操作条（普通参考模式）与首尾帧槽位回归：
+   自由面板（首页 AI视频带入，无草稿卡）与工具栏面板（绑定草稿卡）普通参考添加入口
+   = 输入框上方第一行操作条「+ 参考」「资产库」两 pill（栏尾旧「+」菜单退役）——
+   「+ 参考」直达画布点选（按钮高亮），「资产库」直达资产库弹窗，两条链路与原菜单完全等价。
+   类型边界按模式分流不变：全能参考普通参考收图/视频/音频（画布三类型节点均可接纳），
    图生视频仅图片（列表隐藏与画布禁选提示同口径）；首尾帧为具名槽位（仅图片），
-   两种来源选图后角色不串位。FlowCanvas/CanvasToolbar/AssetsPickerModal 打桩透出 props；
-   BottomDialog/RefSourceMenu 用真实实现。 */
+   本单仅布局接入——操作条在首尾帧模式常显但按钮置灰指向槽位入口，槽位添加行为原样。
+   FlowCanvas/CanvasToolbar/AssetsPickerModal 打桩透出 props；
+   BottomDialog/AttachmentActionBar/RefSourceMenu（首尾帧槽位）用真实实现。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -14,6 +16,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { REF_SOURCE_ENTRY_TITLE } from './components/RefSourceMenu';
+import {
+  ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
+  ATTACHMENT_ACTION_PICK_CANVAS_TITLE,
+} from './components/AttachmentActionBar';
+import barStyles from './components/AttachmentActionBar/index.module.css';
+import dialogStyles from './components/BottomDialog/index.module.css';
 
 vi.mock('./components/AgentPanel', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
@@ -239,24 +247,43 @@ async function renderPage(withHomeHandoff = false) {
   });
 }
 
-/** 来源「+」按钮：面板参考区尾部的统一附件入口（具名槽位另有专属 title） */
+/** 栏尾旧「+」统一入口（IKGB7W 起普通参考区退役；首尾帧具名槽位另有专属 title 保留） */
 function sourceEntryButton(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
   );
 }
 
-/** 展开指定入口的来源菜单：返回菜单项文案列表 */
-async function openSourceMenu(entry: HTMLButtonElement): Promise<string[]> {
-  await act(async () => {
-    entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  });
-  return [...container.querySelectorAll('button')]
-    .filter((b) => b.textContent === '从资产中选择' || b.textContent === '从节点添加素材')
-    .map((b) => b.textContent!);
+/** 操作条「+ 参考」按钮（等价退役菜单项「从节点添加素材」的直达入口；按文本定位，禁用时 title 为原因） */
+function pickReferenceButton(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '参考');
 }
 
-/** 菜单项点击（entry 已展开后点指定文案） */
+/** 操作条「资产库」按钮（等价退役菜单项「从资产中选择」的直达入口） */
+function assetsLibraryButton(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '资产库');
+}
+
+/** 点操作条「+ 参考」：直接进入画布点选模式 */
+async function clickPickReference() {
+  await act(async () => {
+    pickReferenceButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+}
+
+/** 点操作条「资产库」：直接打开资产库选择弹窗 */
+async function clickAssetsLibrary() {
+  await act(async () => {
+    assetsLibraryButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+}
+
+/** 附件栏（普通参考模式空态整条不渲染；首尾帧槽位行常显） */
+function attachmentStrip(): Element | null {
+  return container.querySelector(`.${dialogStyles.refSlot}`);
+}
+
+/** 槽位菜单项点击（entry 已展开后点指定文案；首尾帧具名槽位保留旧菜单形态） */
 async function clickMenuItem(entry: HTMLButtonElement, label: '从资产中选择' | '从节点添加素材') {
   await act(async () => {
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -290,7 +317,7 @@ async function openBoundPanel() {
 async function openFreePanelFromHome(mode: 'all' | 'keyframe' | 'text2video' = 'all') {
   genHandoffMock.current = { kind: 'video', text: '', modelId: 'seedance-2', aspectRatio: '16:9', resolution: '720p', duration: 5, mode, refs: [] };
   await renderPage(true);
-  await vi.waitFor(() => expect(sourceEntryButton()).toBeTruthy());
+  await vi.waitFor(() => expect(pickReferenceButton()).toBeTruthy());
 }
 
 /** Dock 参考缩略图数量 */
@@ -360,58 +387,90 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-describe('IKFE8U 视频面板统一附件入口', () => {
-  it('首页带入面板（新建草稿卡绑定）：普通参考区单「+」，菜单仅两项统一来源，无角色库与媒体专属图标', async () => {
+describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
+  it('首页带入面板（新建草稿卡绑定）：操作条「+ 参考」「资产库」常显，栏尾旧「+」退役，无角色库与媒体专属图标', async () => {
     await openFreePanelFromHome('all');
 
-    expect(sourceEntryButton()).toBeTruthy();
-    const items = await openSourceMenu(sourceEntryButton()!);
-    expect(items.sort()).toEqual(['从节点添加素材', '从资产中选择']);
+    expect(pickReferenceButton()).toBeTruthy();
+    expect(assetsLibraryButton()).toBeTruthy();
+    expect(pickReferenceButton()!.getAttribute('title')).toBe(ATTACHMENT_ACTION_PICK_CANVAS_TITLE);
+    expect(assetsLibraryButton()!.getAttribute('title')).toBe(ATTACHMENT_ACTION_PICK_ASSETS_TITLE);
+    // 栏尾旧「+」入口退役：不再有统一来源菜单触发器
+    expect(sourceEntryButton()).toBeUndefined();
     // 旧入口退役：无按类型区分的添加按钮，菜单无角色库项
     expect([...container.querySelectorAll('button')].some((b) => (b.title ?? '').startsWith('添加图片参考'))).toBe(false);
     expect([...container.querySelectorAll('button')].some((b) => (b.title ?? '').startsWith('添加视频参考'))).toBe(false);
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '角色库')).toBe(false);
   });
 
-  it('工具栏面板（草稿绑定）：单「+」两项统一来源，菜单无角色库项', async () => {
+  it('工具栏面板（草稿绑定）：操作条两入口常显，旧「+」退役；展开/关闭并入操作条右侧', async () => {
     await renderPage();
     await openBoundPanel();
 
-    expect(sourceEntryButton()).toBeTruthy();
-    const items = await openSourceMenu(sourceEntryButton()!);
-    expect(items.sort()).toEqual(['从节点添加素材', '从资产中选择']);
+    const bar = pickReferenceButton()!.closest(`.${barStyles.actionBar}`)!;
+    expect(bar).toBeTruthy();
+    expect(bar.querySelector(`.${barStyles.trailing} button[title="展开"]`)).toBeTruthy();
+    expect(bar.querySelector(`.${barStyles.trailing} button[title="关闭"]`)).toBeTruthy();
+    expect(assetsLibraryButton()).toBeTruthy();
+    expect(sourceEntryButton()).toBeUndefined();
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '角色库')).toBe(false);
   });
 
-  it('全能参考从资产中选择：列表过滤含图片/视频/音频', async () => {
+  it('空态：无附件时附件栏不渲染；点选首个参考后附件栏出现在操作条与输入框之间', async () => {
+    await renderPage();
+    await openBoundPanel();
+    expect(attachmentStrip()).toBeNull();
+
+    await clickPickReference();
+    await clickNode('m1');
+
+    await vi.waitFor(() => expect(dockRefCount()).toBe(1));
+    const bar = pickReferenceButton()!.closest(`.${barStyles.actionBar}`)!;
+    const strip = attachmentStrip()!;
+    const editor = container.querySelector('[contenteditable]')!;
+    expect(bar.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(strip.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('点「+ 参考」直接进入画布点选模式且按钮高亮（picking 态）', async () => {
+    await openFreePanelFromHome('all');
+
+    await clickPickReference();
+
+    expect(container.textContent).toContain('连续点击画布中的图片、视频或音频节点带入参考');
+    expect(pickReferenceButton()!.classList.contains(barStyles.picking)).toBe(true);
+    expect(assetsLibraryButton()!.classList.contains(barStyles.picking)).toBe(false);
+  });
+
+  it('全能参考点「资产库」：直接打开同一资产库弹窗，列表过滤含图片/视频/音频', async () => {
     await renderPage();
     await openBoundPanel();
     await switchMode('全能参考');
 
-    await clickMenuItem(sourceEntryButton()!, '从资产中选择');
+    await clickAssetsLibrary();
     expect(assetsPickerProps.current.mediaTypes).toEqual(['image', 'video', 'audio']);
   });
 
-  it('图生视频从资产中选择：列表过滤仅图片（隐藏视频/音频）', async () => {
+  it('图生视频点「资产库」：列表过滤仅图片（隐藏视频/音频）', async () => {
     await renderPage();
     await openBoundPanel();
-    // 图生视频需 ≥1 图（enabledModes 门控）：先经统一入口加一张图（自动切全能参考）再切模式；
+    // 图生视频需 ≥1 图（enabledModes 门控）：先经操作条加一张图（自动切全能参考）再切模式；
     // IKFR4Y 选取后会话保持（模式入口锁定），先完成会话再切换
-    await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
+    await clickPickReference();
     await clickNode('m1');
     await pressEscape();
     await switchMode('图生视频');
 
-    await clickMenuItem(sourceEntryButton()!, '从资产中选择');
+    await clickAssetsLibrary();
     expect(assetsPickerProps.current.mediaTypes).toEqual(['image']);
   });
 
-  it('全能参考从节点添加素材：图片/视频/音频节点均接纳建线（IKFE8U 音频参考入口补齐）', async () => {
+  it('全能参考点「+ 参考」：图片/视频/音频节点均接纳建线（IKFE8U 音频参考入口补齐口径不变）', async () => {
     await renderPage();
     await openBoundPanel();
     await switchMode('全能参考');
 
-    await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
+    await clickPickReference();
     await clickNode('m1');
     expect(edgePairs()).toEqual(['m1->' + currentVideoDraftId()]);
     // IKFR4Y 持续会话：命中后模式保持，无需重新进入即可连续选取
@@ -422,16 +481,16 @@ describe('IKFE8U 视频面板统一附件入口', () => {
     await vi.waitFor(() => expect(dockRefCount()).toBe(3));
   });
 
-  it('图生视频从节点添加素材：视频节点禁选并提示且零新增；图片节点仍可接纳', async () => {
+  it('图生视频点「+ 参考」：视频节点禁选并提示且零新增；图片节点仍可接纳', async () => {
     await renderPage();
     await openBoundPanel();
-    await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
+    await clickPickReference();
     await clickNode('m1');
     // IKFR4Y 会话保持：先完成会话再切换模式
     await pressEscape();
     await switchMode('图生视频');
 
-    await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
+    await clickPickReference();
     await clickNode('v1');
 
     expect(toastText()).toContain('图生视频参考仅支持图片素材');
@@ -441,7 +500,7 @@ describe('IKFE8U 视频面板统一附件入口', () => {
     expect(edgePairs().sort()).toEqual(['m1->' + currentVideoDraftId(), 'm2->' + currentVideoDraftId()]);
   });
 
-  it('首尾帧具名槽位（seed 恢复满帧）：槽位保留、角色不串位；普通参考「+」不进首尾帧行', async () => {
+  it('首尾帧具名槽位（seed 恢复满帧）：槽位保留、角色不串位；操作条常显但置灰指向槽位入口', async () => {
     // 绑定面板从零进入首尾帧受 enabledModes 门控（空素材不可达，1f2f498d 产品现状，
     // 同 videoDraft.test skip 用例）；空槽两种来源的角色路由由 BottomDialog 组件级用例覆盖
     const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
@@ -457,13 +516,19 @@ describe('IKFE8U 视频面板统一附件入口', () => {
     // 角色不串位：m1 → 首帧、m2 → 尾帧
     await vi.waitFor(() => expect(dockRefCount()).toBe(2));
     expect(frameBadges()).toEqual(['首帧', '尾帧']);
-    // 首尾帧行不渲染普通参考「+」，也不出现媒体专属添加图标
+    // 首尾帧模式：操作条照常渲染（常显），但两按钮置灰、悬停指向槽位入口（顺序填充 IKGB7Y 承接）；
+    // 栏尾普通参考「+」不进首尾帧行，也不出现媒体专属添加图标
     expect(sourceEntryButton()).toBeUndefined();
     expect([...container.querySelectorAll('button')].some((b) => (b.title ?? '').startsWith('添加图片参考'))).toBe(false);
     expect([...container.querySelectorAll('button')].some((b) => (b.title ?? '').startsWith('添加视频参考'))).toBe(false);
+    expect(pickReferenceButton()).toBeTruthy();
+    for (const btn of [pickReferenceButton()!, assetsLibraryButton()!]) {
+      expect(btn.getAttribute('aria-disabled')).toBe('true');
+      expect(btn.getAttribute('title')).toBe('首尾帧模式请从下方槽位入口添加首帧/尾帧');
+    }
   });
 
-  it('全能参考从资产中选择确认：音频接纳落画布建线，音频满额跳过并提示（IKFE8U 音频联算）', async () => {
+  it('全能参考资产库确认：音频接纳落画布建线，音频满额跳过并提示（IKFE8U 音频联算口径不变）', async () => {
     await renderPage();
     await openBoundPanel();
     await switchMode('全能参考');
@@ -472,7 +537,7 @@ describe('IKFE8U 视频面板统一附件入口', () => {
     const audioAsset = (i: number) => ({
       id: 900 + i, type: 'audio' as const, url: `http://aud/pick${i}.mp3`, width: null, height: null, duration: 12,
     });
-    await clickMenuItem(sourceEntryButton()!, '从资产中选择');
+    await clickAssetsLibrary();
     await act(async () => {
       assetsPickerProps.current.onSelect([audioAsset(0), audioAsset(1)]);
     });
@@ -480,7 +545,7 @@ describe('IKFE8U 视频面板统一附件入口', () => {
     await vi.waitFor(() => expect(dockRefCount()).toBe(2));
 
     // 音频上限 3（能力行 audio_reference_max 缺省）：已 2，再选 2 只入 1 并提示超限
-    await clickMenuItem(sourceEntryButton()!, '从资产中选择');
+    await clickAssetsLibrary();
     await act(async () => {
       assetsPickerProps.current.onSelect([audioAsset(2), audioAsset(3)]);
     });
@@ -493,7 +558,7 @@ describe('IKFE8U 视频面板统一附件入口', () => {
     await openBoundPanel();
     await switchMode('全能参考');
 
-    await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
+    await clickPickReference();
     // 发起即持续语义：连续选取文案 + 完成选取按钮
     expect(container.textContent).toContain('连续点击画布中的图片、视频或音频节点带入参考');
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '完成选取')).toBe(true);
@@ -511,7 +576,7 @@ describe('IKFEWF 文本选取边界', () => {
     doc.nodes.push({ id: 't1', type: 'textNode', position: { x: 0, y: 500 }, data: { text: '普通文本上下文' } });
     await renderPage();
     await openBoundPanel();
-    await clickMenuItem(sourceEntryButton()!, '从节点添加素材');
+    await clickPickReference();
     await clickNode('t1');
     expect(edgePairs()).toEqual([`t1->${currentVideoDraftId()}`]);
     // IKFR4Y 会话保持：同一会话内重复选择同一文本卡幂等（不重复连线）

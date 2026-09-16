@@ -6,7 +6,6 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
-import { REF_SOURCE_ENTRY_TITLE } from './components/RefSourceMenu';
 import { ATTACHMENT_ACTION_PICK_ASSETS_TITLE } from './components/AttachmentActionBar';
 import type { GenerationModel, ModelFeatures } from '@/api/generation';
 import type { AssetRecord } from '@/api/assets';
@@ -380,6 +379,19 @@ async function pickAudioPanelAssets(assets: AssetRecord[]) {
   });
 }
 
+/** 视频面板「资产库」（IKGB7W 附件操作条直达，栏尾旧「+」菜单退役）：点 pill → 桩 onSelect 回调 */
+async function pickVideoPanelAssets(assets: AssetRecord[]) {
+  const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
+  )!;
+  await act(async () => {
+    entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+  await act(async () => {
+    pickerProps.current.onSelect(assets);
+  });
+}
+
 /** 音频统一入口：从资产选择已有持久身份，接纳与画布保存沿用原链路。 */
 async function pickAudioAsset() {
   await pickAudioPanelAssets([{ id: 'au9', type: 'audio', url: 'http://audio/au9.mp3', width: null, height: null, duration: 25, source: 'uploaded', model: null, created_at: null } as AssetRecord]);
@@ -501,13 +513,13 @@ describe('IKFDG2 画布外参考建来源卡片并持久关联', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型'));
 
     const before = mediaNodeCount();
-    // 复用：a1 已有画布节点 m1
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a1', 'image', 'http://img/m1.png')]);
+    // IKGB7W：入口形态平移到操作条「资产库」pill，落地行为不变——复用：a1 已有画布节点 m1
+    await pickVideoPanelAssets([assetOf('a1', 'image', 'http://img/m1.png')]);
     expect(mediaNodeCount()).toBe(before);
     expect(edgePairs()).toEqual(['m1->dv1']);
 
     // 新素材：建来源卡并连线
-    await pickFromAssets(REF_SOURCE_ENTRY_TITLE, [assetOf('a6', 'image', 'http://img/m6.png')]);
+    await pickVideoPanelAssets([assetOf('a6', 'image', 'http://img/m6.png')]);
     expect(mediaNodeCount()).toBe(before + 1);
     const newNode = flowProps.current.mediaNodes.find(
       (n: Node) => (n.data as Record<string, unknown>)?.assetId === 'a6',
