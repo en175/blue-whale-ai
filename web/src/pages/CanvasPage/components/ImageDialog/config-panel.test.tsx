@@ -16,7 +16,7 @@ const fetchGenerationModels = vi.hoisted(() =>
       model_label: '测试生图模型',
       icon: null,
       supported_sizes: [{ id: '2k', label: '2K' }],
-      supported_aspect_ratios: ['1:1'],
+      supported_aspect_ratios: ['1:1', '3:4'],
       supported_formats: [],
       supported_durations: null,
       default_size: '2k',
@@ -73,5 +73,26 @@ describe('ImageDialog 配置面板裁剪（IKEOLP）', () => {
     expect(dialog).not.toBeNull();
     expect(dialog?.contains(panel)).toBe(false);
     expect(panel?.closest(`.${styles.dialogWrap}`)).not.toBeNull();
+  });
+});
+
+/* IKGBTV：宽高比示意图标接入共享 RatioIcon——竖屏比例必须渲染为竖向矩形（16px 上限） */
+describe('ImageDialog 宽高比图标（IKGBTV）', () => {
+  it('竖屏比例 3:4 的图标为 12×16 竖向矩形，横竖不反且不超 16px 上限', async () => {
+    await renderDialog();
+    const configBtn = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('测试生图模型'),
+    );
+    await act(async () => {
+      configBtn?.click();
+    });
+
+    const ratioBtn = [...container.querySelectorAll(`.${styles.ratioGroup} button`)].find((button) =>
+      button.textContent?.includes('3:4'),
+    );
+    expect(ratioBtn).toBeTruthy();
+    const icon = ratioBtn?.querySelector('span') as HTMLElement;
+    expect(icon.style.width).toBe('12px');
+    expect(icon.style.height).toBe('16px');
   });
 });
