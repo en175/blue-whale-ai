@@ -153,3 +153,120 @@ describe('CharacterLibrary AIGC picker mode', () => {
     expect(mountNode.querySelector(`.${styles.assetDeleteBtn}`)).not.toBeNull();
   });
 });
+
+/* IKGC0K 平铺视图分页拉全：AigcFlatView.loadAssets 原两处 PageSize 100 硬编码
+   超出即静默截断（分组丢组、素材丢新条目）。修法：分组与素材均按返回
+   TotalCount 分页拉全；素材聚合时 GroupIds 分批防止 Filter 数组过长。 */
+describe('AigcFlatView 分页拉全（IKGC0K）', () => {
+  function pageOf<T>(items: T[], totalCount: number): { TotalCount: number; Items: T[] } {
+    return { TotalCount: totalCount, Items: items };
+  }
+
+  it('素材 TotalCount > PageSize 时按页拉全，第 2 页素材完整渲染', async () => {
+    listAssetGroups.mockResolvedValue(
+      pageOf([{ Id: 'group-1', Name: '虚拟人像', GroupType: 'AIGC' }], 1),
+    );
+    listAssets.mockImplementation(({ PageNumber }: { PageNumber: number }) =>
+      PageNumber === 1
+        ? pageOf([
+            { Id: 'image-1', Name: '人像图片', URL: 'https://example.test/image.jpg', GroupId: 'group-1', AssetType: 'Image', Status: 'Active' },
+            { Id: 'video-1', Name: '人像视频', URL: 'https://example.test/video.mp4', GroupId: 'group-1', AssetType: 'Video', Status: 'Active' },
+          ], 150)
+        : pageOf([
+            { Id: 'image-101', Name: '第二页图片', URL: 'https://example.test/page2.jpg', GroupId: 'group-1', AssetType: 'Image', Status: 'Active' },
+          ], 150),
+    );
+
+    await renderLibrary();
+
+    expect(listAssets).toHaveBeenCalledTimes(2);
+    expect(listAssets).toHaveBeenNthCalledWith(2, {
+      Filter: { GroupIds: ['group-1'], GroupType: 'AIGC' },
+      PageNumber: 2,
+      PageSize: 100,
+    });
+    expect(mountNode.querySelector('img[alt="第二页图片"]')).not.toBeNull();
+  });
+
+  it('分组 TotalCount > PageSize 时拉全第 2 页分组，素材聚合不丢组', async () => {
+    listAssetGroups.mockImplementation(({ PageNumber }: { PageNumber: number }) =>
+      PageNumber === 1
+        ? pageOf([{ Id: 'group-1', Name: '第一页组', GroupType: 'AIGC' }], 150)
+        : pageOf([{ Id: 'group-101', Name: '第二页组', GroupType: 'AIGC' }], 150),
+    );
+    listAssets.mockImplementation(({ Filter }: { Filter: { GroupIds: string[] } }) =>
+      pageOf(
+        [
+          { Id: 'image-1', Name: '第一页组图片', URL: 'https://example.test/a1.jpg', GroupId: 'group-1', AssetType: 'Image', Status: 'Active' },
+          { Id: 'image-101', Name: '第二页组图片', URL: 'https://example.test/a101.jpg', GroupId: 'group-101', AssetType: 'Image', Status: 'Active' },
+        ].filter((a) => Filter.GroupIds.includes(a.GroupId)),
+        2,
+      ),
+    );
+
+    await renderLibrary();
+
+    expect(listAssetGroups).toHaveBeenCalledTimes(2);
+    expect(listAssetGroups).toHaveBeenNthCalledWith(2, {
+      Filter: { GroupType: 'AIGC' },
+      PageNumber: 2,
+      PageSize: 100,
+    });
+    // 第 2 页拉到的组参与素材聚合（不丢组）
+    expect(listAssets).toHaveBeenCalledWith({
+      Filter: { GroupIds: ['group-1', 'group-101'], GroupType: 'AIGC' },
+      PageNumber: 1,
+      PageSize: 100,
+    });
+    expect(mountNode.querySelector('img[alt="第二页组图片"]')).not.toBeNull();
+  });
+
+  it('分组超过单批上限时 GroupIds 分批拉取素材', async () => {
+    const groupIds = Array.from({ length: 101 }, (_, i) => `group-${i + 1}`);
+    listAssetGroups.mockImplementation(({ PageNumber }: { PageNumber: number }) =>
+      pageOf(
+        (PageNumber === 1 ? groupIds.slice(0, 100) : groupIds.slice(100))
+          .map((Id) => ({ Id, Name: Id, GroupType: 'AIGC' as const })),
+        101,
+      ),
+    );
+    listAssets.mockResolvedValue(pageOf([], 0));
+
+    await renderLibrary();
+
+    expect(listAssets).toHaveBeenCalledTimes(3);
+    const calls = listAssets.mock.calls.map(([p]) => p as { Filter: { GroupIds: string[] } });
+    expect(calls[0].Filter.GroupIds).toHaveLength(50);
+    expect(calls[1].Filter.GroupIds).toHaveLength(50);
+    expect(calls[2].Filter.GroupIds).toEqual(['group-101']);
+  });
+
+  it('Processing 素材存在时 5s 轮询继续按页拉全（行为不变锁定）', async () => {
+    vi.useFakeTimers();
+    try {
+      listAssetGroups.mockResolvedValue(
+        pageOf([{ Id: 'group-1', Name: '虚拟人像', GroupType: 'AIGC' }], 1),
+      );
+      const pages: Record<number, ReturnType<typeof pageOf>> = {
+        1: pageOf([
+          { Id: 'image-1', Name: '处理中图片', URL: 'https://example.test/p1.jpg', GroupId: 'group-1', AssetType: 'Image', Status: 'Processing' },
+          { Id: 'image-2', Name: '第一页图片', URL: 'https://example.test/p2.jpg', GroupId: 'group-1', AssetType: 'Image', Status: 'Active' },
+        ], 150),
+        2: pageOf([
+          { Id: 'image-101', Name: '第二页图片', URL: 'https://example.test/p3.jpg', GroupId: 'group-1', AssetType: 'Image', Status: 'Active' },
+        ], 150),
+      };
+      listAssets.mockImplementation(({ PageNumber }: { PageNumber: number }) => pages[PageNumber]);
+
+      await renderLibrary();
+      expect(listAssets).toHaveBeenCalledTimes(2);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      // 5s 后轮询触发新一轮完整拉取（两页都拉）
+      expect(listAssets).toHaveBeenCalledTimes(4);
+      expect(mountNode.querySelector('img[alt="第二页图片"]')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
