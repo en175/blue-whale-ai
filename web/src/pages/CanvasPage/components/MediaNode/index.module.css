@@ -12,6 +12,10 @@
   padding-top: 22.5px;
 }
 
+.pickBlocked {
+  opacity: 0.4;
+}
+
 /* 外部常驻标题行（宽度随内容主体） */
 .titleRow {
   position: absolute;
