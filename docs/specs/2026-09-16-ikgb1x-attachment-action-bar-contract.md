@@ -35,7 +35,7 @@
 - 禁用经 `aria-disabled` + 点击守卫承载（非原生 `disabled`），保证禁用时悬停原因（title）仍可见；置灰样式由共享 CSS 的 `.pill[aria-disabled='true']` 提供。
 - 图片面板现状门控为「达上限 / 生成中只读」两项（无模型能力位入口门控），其达上限悬停文案为「参考图片最多 N 张，已达上限」，生成中只读悬停文案与只读提示条同一来源。
 
-## 4. 首尾帧顺序填充与溢出（视频面板，IKGB7W 落地）
+## 4. 首尾帧顺序填充与溢出（视频面板，IKGB7Y 落地）
 
 - 首尾帧模式下，「+ 首帧」「+ 尾帧」具名槽位与空槽判断原样保留、常显，不吃空态隐藏规则；精确指定槽位仍走槽位自有入口。
 - 操作条按钮以「首个空槽位」的角色发起添加：第一张进首帧、第二张进尾帧，仅图片（与槽位媒体口径一致）；两槽均满时按钮置灰。
@@ -59,4 +59,4 @@
 - 组件级（jsdom）：`web/src/pages/CanvasPage/components/ImageDialog/action-bar.test.tsx`——操作条渲染与位置、空态隐藏/出现、两类点击分派、禁用态与原因、kind/role 透传（视频接入预留）；附件栏既有行为由 `attachments.test.tsx` / `strip-reorder.test.tsx` / `prompt-ref.test.tsx` 保持绿色。
 - 页面级（Canvas 真实渲染）：`imagePanelSourceMenu.test.tsx`（操作条两入口常显与旧「+」退役、点选进选取 + 高亮、点选后附件栏出现、「资产库」弹窗按图片过滤；旧「+」菜单断言改写为操作条断言）、`imageRefPersist.test.tsx` / `imageExternalPick.test.tsx` / `imageMediaRefs.test.tsx`（点选与持久化链路经操作条入口回归）、`assetSourceAdopt.test.tsx`（资产库确认落地行为不变：绑定模式落画布连线、自由模式本地引用）。
 - 视觉像素值与过渡时长不进单测，留浏览器验收；CSS 源断言见 §5。
-- 切片：IKGB7U（共享组件 + 契约 + 图片面板，本切片）；IKGB7W（视频面板接入，含首尾帧顺序填充与溢出，§4）；IKGB82（音频面板接入）。父工单：IKGB1X。
+- 切片：IKGB7U（共享组件 + 契约 + 图片面板）；IKGB7W（视频面板接入，普通参考模式）；IKGB7Y（首尾帧顺序填充与溢出，§4）；IKGB82（音频面板接入）。父工单：IKGB1X。

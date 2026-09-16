@@ -2051,11 +2051,12 @@ export default function CanvasPage() {
 
   /** IKFR4Y 首尾帧槽位替换（绑定草稿会话）：以最后一次有效选择替换当前槽位，其他槽位与参考不动；
    *  旧占用者移除与 Dock 移除同口径分派（isLibraryOnlyVideoRef 才移 material 引用，画布来源断边，
-   *  含合规回写 materialId 的连线占用者仍走断边），替换结果随既有连线自动保存持久化 */
-  const replaceVideoFrameRefFromCanvas = (node: Node, targetId: string, role: 'first' | 'last') => {
+   *  含合规回写 materialId 的连线占用者仍走断边），替换结果随既有连线自动保存持久化。
+   *  返回是否实际落槽（IKGB7Y 自动退出判定用；拒绝/幂等返回 false） */
+  const replaceVideoFrameRefFromCanvas = (node: Node, targetId: string, role: 'first' | 'last'): boolean => {
     const refs = mergedVideoMediaRefsOf(targetId, edgesRef.current, mediaNodesRef.current);
     const check = checkVideoFrameReplace(node, refs, role);
-    if (!check) return;
+    if (!check) return false;
     if (check.current) {
       if (isLibraryOnlyVideoRef(check.current)) {
         removeDraftMaterialRef(targetId, check.current.materialId);
@@ -2074,6 +2075,7 @@ export default function CanvasPage() {
       }
     }
     addCanvasEdge(node.id, targetId, role);
+    return true;
   };
 
   /** IKFR4Y 自由面板参考项构造（画布节点 → 本地 VideoMediaRef，首尾帧替换与普通参考追加共用） */
@@ -2127,7 +2129,15 @@ export default function CanvasPage() {
       }
       if (node.type === 'mediaNode') {
         if (isFrameSession) {
-          replaceVideoFrameRefFromCanvas(node, videoPickSession, role);
+          // IKGB7Y：本次点击有效落槽后两槽均满 → 自动退出选取模式并提示「首尾帧已就绪」
+          // （拒绝/幂等未落槽不退出；edgesRef 同步口径保证此处读到本次连线结果）
+          if (replaceVideoFrameRefFromCanvas(node, videoPickSession, role)) {
+            const filledRefs = mergedVideoMediaRefsOf(videoPickSession, edgesRef.current, mediaNodesRef.current);
+            if (filledRefs.first && filledRefs.last) {
+              endVideoPickSession();
+              showToast('success', '首尾帧已就绪');
+            }
+          }
           return;
         }
         // 图生视频普通参考入口仅收图片（与既有单次选取同口径文案）
@@ -3945,7 +3955,8 @@ export default function CanvasPage() {
 
     if (target === 'videoDraft') {
       // 视频草稿面板「从资产中选择」（IKDMQS 来源补齐）：素材落画布节点并按槽位角色连线，
-      // 节点可复用可持久化；首/尾帧槽仅图片且多选只取首张，普通参考按图9/视频3/音频3联算上限并查重
+      // 节点可复用可持久化；首/尾帧槽仅图片，IKGB7Y 起多选按选择顺序填充空槽（目标槽优先、
+      // 其后另一空槽），超出剩余空槽只取前 N 张并提示；普通参考按图9/视频3/音频3联算上限并查重
       // （IKFE8U 全能参考扩展音频；列表过滤见 AssetsPickerModal mediaTypes，此处为接纳防线）。
       // 自由模式（工具栏入口无草稿卡）：资产存本地参考，不落画布不连线
       const role = videoAssetPickRole;
@@ -3960,40 +3971,74 @@ export default function CanvasPage() {
         }
         accepted = accepted.filter((a) => a.type === 'image');
         if (accepted.length === 0) return;
-        if (accepted.length > 1) showToast('warn', '首尾帧仅支持一张图片，已取首张');
-        accepted = accepted.slice(0, 1);
-      } else {
-        // 普通参考：图/视频/音频分类上限与连线+material 合并联算（ADR-0086：读能力行，
-        // 缺省回落旧 9/3/3）；assetId 查重跳过
-        const known = new Set(refs.reference.map((r) => r.assetId));
-        let imgSlots = 9 - refs.reference.filter((r) => r.mediaType === 'image').length;
-        let vidSlots = 3 - refs.reference.filter((r) => r.mediaType === 'video').length;
-        let audSlots = 3 - refs.reference.filter((r) => r.mediaType === 'audio').length;
-        const overflowKinds: Array<'image' | 'video' | 'audio'> = [];
-        let skippedDup = false;
-        const filtered: AssetRecord[] = [];
-        for (const a of accepted) {
-          if (known.has(String(a.id))) {
-            skippedDup = true;
-            continue;
-          }
-          const isImage = a.type === 'image';
-          const isVideo = a.type === 'video';
-          if ((isImage && imgSlots <= 0) || (isVideo && vidSlots <= 0) || (!isImage && !isVideo && audSlots <= 0)) {
-            overflowKinds.push(a.type as 'image' | 'video' | 'audio');
-            continue;
-          }
-          if (isImage) imgSlots -= 1;
-          else if (isVideo) vidSlots -= 1;
-          else audSlots -= 1;
-          known.add(String(a.id));
-          filtered.push(a);
+        // IKGB7Y 顺序填充与溢出截断：填充顺序 = 目标槽（操作条发起=首空槽，首帧优先、其后尾帧；
+        // 具名槽位入口=本槽精确指定）→ 另一空槽；N = 剩余空槽数，多选超出按选择顺序只取前 N 张
+        // 并 toast 提示，不静默丢失、不报错中断
+        const otherRole: VideoRefRole = role === 'first' ? 'last' : 'first';
+        const frameRoles: VideoRefRole[] = refs[otherRole] ? [role] : [role, otherRole];
+        if (accepted.length > frameRoles.length) {
+          showToast('warn', frameRoles.length > 1
+            ? '首尾帧最多两张图片，已按选择顺序取前两张'
+            : '首尾帧仅支持一张图片，已取首张');
         }
-        accepted = filtered;
-        if (skippedDup) showToast('warn', '重复的素材已跳过');
-        if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds, { image: 9, video: 3, audio: 3 }));
-        if (accepted.length === 0) return;
+        accepted = accepted.slice(0, frameRoles.length);
+        if (!videoDraftId) {
+          accepted.forEach((a, i) =>
+            appendVideoFreeRef(
+              {
+                nodeId: `asset-${a.id}`,
+                url: a.url,
+                name: assetDisplayName(a),
+                assetId: String(a.id),
+                mediaType: asVideoRefMediaType(a.type),
+                materialId: isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined,
+              },
+              frameRoles[i] ?? role,
+            ),
+          );
+          return;
+        }
+        // 逐条落画布保持选择顺序（批量放置混合「复用既有节点 + 新建」时返回序不按选择序）
+        for (let i = 0; i < accepted.length; i += 1) {
+          const nodeIds = placeAssetsOnCanvas([accepted[i]!], { reuseExisting: true });
+          if (!nodeIds) {
+            showToast('error', '项目未就绪，请稍后重试');
+            return;
+          }
+          addCanvasEdge(nodeIds[0]!, videoDraftId, frameRoles[i] ?? role);
+        }
+        return;
       }
+      // 普通参考：图/视频/音频分类上限与连线+material 合并联算（ADR-0086：读能力行，
+      // 缺省回落旧 9/3/3）；assetId 查重跳过
+      const known = new Set(refs.reference.map((r) => r.assetId));
+      let imgSlots = 9 - refs.reference.filter((r) => r.mediaType === 'image').length;
+      let vidSlots = 3 - refs.reference.filter((r) => r.mediaType === 'video').length;
+      let audSlots = 3 - refs.reference.filter((r) => r.mediaType === 'audio').length;
+      const overflowKinds: Array<'image' | 'video' | 'audio'> = [];
+      let skippedDup = false;
+      const filtered: AssetRecord[] = [];
+      for (const a of accepted) {
+        if (known.has(String(a.id))) {
+          skippedDup = true;
+          continue;
+        }
+        const isImage = a.type === 'image';
+        const isVideo = a.type === 'video';
+        if ((isImage && imgSlots <= 0) || (isVideo && vidSlots <= 0) || (!isImage && !isVideo && audSlots <= 0)) {
+          overflowKinds.push(a.type as 'image' | 'video' | 'audio');
+          continue;
+        }
+        if (isImage) imgSlots -= 1;
+        else if (isVideo) vidSlots -= 1;
+        else audSlots -= 1;
+        known.add(String(a.id));
+        filtered.push(a);
+      }
+      accepted = filtered;
+      if (skippedDup) showToast('warn', '重复的素材已跳过');
+      if (overflowKinds.length > 0) showToast('warn', refOverflowToast(overflowKinds, { image: 9, video: 3, audio: 3 }));
+      if (accepted.length === 0) return;
       if (!videoDraftId) {
         accepted.forEach((a) =>
           appendVideoFreeRef(

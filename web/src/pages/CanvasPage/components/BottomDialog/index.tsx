@@ -5,7 +5,8 @@ import PromptSyncActions from '../PromptSyncActions';
  * 附件添加入口（IKGB1X/IKGB7W）：输入框上方第一行附件操作条（共享组件 AttachmentActionBar）
  * ——「+ 参考」画布点选 /「资产库」资产弹窗，等价退役的栏尾「+」菜单两项；附件栏空态整条隐藏；
  * 能力位不支持 / 达上限 / 生成中只读时按钮常显置灰并悬停说明原因；
- * 首尾帧为具名槽位（仅图片，RefSourceMenu label 变体保留），槽位入口与空槽判断不变。
+ * 首尾帧为具名槽位（仅图片，RefSourceMenu label 变体保留），槽位入口与空槽判断不变；
+ * 首尾帧模式操作条按首空槽顺序填充（IKGB7Y：首帧优先、其后尾帧，两槽均满置灰）。
  * （角色库菜单项早已退役；存量 material 参考仍随草稿 data 展示与移除。）
  * IKFA1O：正文编辑接入 PromptRefEditor——图片/视频/音频以稳定身份插入正文标签，
  * 首尾帧按角色显示，普通参考按同类型编号；模式不兼容时标签失效并阻止发送。
@@ -356,16 +357,17 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   /** 普通参考达上限（IKGB1X 操作条禁用原因之一；旧口径无此门控，仅计数展示） */
   const referencesFull = videoMediaRefs.reference.length >= referenceMaxTotal;
   /** 操作条分派的媒体边界（与栏尾旧「+」同口径）：图生视频仅图片，其余普通参考模式全能（图/视频/音频）；
-   *  首尾帧模式按钮置灰不分派，kind 按槽位边界传 'image'（契约 §4，顺序填充由 IKGB7Y 承接） */
+   *  首尾帧模式按槽位边界传 'image'（契约 §4；IKGB7Y 顺序填充：role 按首空槽分派——首帧优先、其后尾帧） */
   const actionBarKind: 'image' | 'video' = isKeyframe || isText2Video ? 'image' : 'video';
   /** 附件操作条禁用原因（IKGB1X：常显置灰 + 悬停说明，替代旧「+ 不出现」口径）：
-   *  生成中只读最优先；首尾帧模式本单仅布局接入——按钮置灰指向槽位自有入口；
+   *  生成中只读最优先；首尾帧模式两槽均满才置灰（IKGB7Y，未满按首空槽正常分派）；
    *  普通参考模式按能力位不支持 / 达上限门控（与旧「+」的隐藏门控一一对应 + 上限补齐） */
   const actionBarDisabledReason = readOnly ? readOnlyReason
-    : isKeyframe ? '首尾帧模式请从下方槽位入口添加首帧/尾帧'
-    : !canAddReference ? '当前模型不支持参考'
-    : referencesFull ? `普通参考最多 ${referenceMaxTotal} 条，已达上限`
-    : null;
+    : isKeyframe
+      ? (videoMediaRefs.first && videoMediaRefs.last ? '首帧与尾帧均已指定，请先移除后再添加' : null)
+      : !canAddReference ? '当前模型不支持参考'
+      : referencesFull ? `普通参考最多 ${referenceMaxTotal} 条，已达上限`
+      : null;
   /** 附件栏空态派生（IKGB1X）：普通参考模式下无普通参考且无文本附件时整条不渲染，不引入新的持久状态；
    *  首尾帧模式槽位常显不吃空态规则（契约 §1/§4） */
   const stripHasItems = videoMediaRefs.reference.length > 0 || (attachments?.length ?? 0) > 0;
@@ -1038,16 +1040,17 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       {/* 第一行：附件操作条（IKGB1X，三面板共用共享组件 AttachmentActionBar）——左「+ 参考」「资产库」
           pill 直达退役菜单两项链路（kind/role 与旧「+」同口径透传），右侧并入原展开/关闭按钮；
           能力位不支持 / 达上限 / 生成中只读时常显置灰并悬停说明原因（替代旧「+ 不出现」）；
-          首尾帧模式本单仅布局接入：操作条照常渲染但两按钮置灰指向槽位入口（顺序填充由 IKGB7Y 承接） */}
+          首尾帧模式（IKGB7Y）：按首空槽角色顺序填充（首帧优先、其后尾帧，kind 为槽位边界 'image'），
+          两槽均满才置灰；点选进行中「+ 参考」随 pickMode 高亮（与槽位入口同口径） */}
       <div className={styles.actionBarRow}>
         <AttachmentActionBar
           kind={actionBarKind}
-          role={isKeyframe ? undefined : 'reference'}
+          role={isKeyframe ? (videoMediaRefs.first ? 'last' : 'first') : 'reference'}
           /* 类型收窄守卫：共享组件 kind 含 'audio'，本面板回调仅收 'image'|'video'
              （actionBarKind 已锁边界，'audio' 分支不会到达） */
           onPickFromCanvas={(kind, role) => { if (kind !== 'audio') onPickFromCanvas?.(kind, role); }}
           onPickFromAssets={(kind, role) => { if (kind !== 'audio') onPickFromAssets?.(kind, role); }}
-          pickMode={!isKeyframe && pickMode === actionBarKind}
+          pickMode={pickMode === actionBarKind}
           disabledReason={actionBarDisabledReason}
           trailing={(
             <>

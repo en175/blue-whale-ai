@@ -4,8 +4,10 @@
    = 输入框上方第一行操作条「+ 参考」「资产库」两 pill（栏尾旧「+」菜单退役）——
    「+ 参考」直达画布点选（按钮高亮），「资产库」直达资产库弹窗，两条链路与原菜单完全等价。
    类型边界按模式分流不变：全能参考普通参考收图/视频/音频（画布三类型节点均可接纳），
-   图生视频仅图片（列表隐藏与画布禁选提示同口径）；首尾帧为具名槽位（仅图片），
-   本单仅布局接入——操作条在首尾帧模式常显但按钮置灰指向槽位入口，槽位添加行为原样。
+   图生视频仅图片（列表隐藏与画布禁选提示同口径）；首尾帧为具名槽位（仅图片）。
+   IKGB7Y 首尾帧顺序填充与溢出：操作条按首空槽角色分派（首帧优先、其后尾帧），两槽均满置灰；
+   资产库多选超剩余空槽按选择顺序只取前 N 张并提示；画布点选两槽填满自动退出并提示「首尾帧已就绪」；
+   槽位占位/空槽判断/角色徽标/删除替换行为原样。
    FlowCanvas/CanvasToolbar/AssetsPickerModal 打桩透出 props；
    BottomDialog/AttachmentActionBar/RefSourceMenu（首尾帧槽位）用真实实现。 */
 import { act, createElement } from 'react';
@@ -500,7 +502,7 @@ describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
     expect(edgePairs().sort()).toEqual(['m1->' + currentVideoDraftId(), 'm2->' + currentVideoDraftId()]);
   });
 
-  it('首尾帧具名槽位（seed 恢复满帧）：槽位保留、角色不串位；操作条常显但置灰指向槽位入口', async () => {
+  it('首尾帧具名槽位（seed 恢复满帧）：槽位保留、角色不串位；操作条常显、两槽满置灰并说明原因', async () => {
     // 绑定面板从零进入首尾帧受 enabledModes 门控（空素材不可达，1f2f498d 产品现状，
     // 同 videoDraft.test skip 用例）；空槽两种来源的角色路由由 BottomDialog 组件级用例覆盖
     const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
@@ -516,7 +518,7 @@ describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
     // 角色不串位：m1 → 首帧、m2 → 尾帧
     await vi.waitFor(() => expect(dockRefCount()).toBe(2));
     expect(frameBadges()).toEqual(['首帧', '尾帧']);
-    // 首尾帧模式：操作条照常渲染（常显），但两按钮置灰、悬停指向槽位入口（顺序填充 IKGB7Y 承接）；
+    // 首尾帧模式：操作条照常渲染（常显）；IKGB7Y 起两槽均满才置灰并悬停说明（未满按首空槽分派）；
     // 栏尾普通参考「+」不进首尾帧行，也不出现媒体专属添加图标
     expect(sourceEntryButton()).toBeUndefined();
     expect([...container.querySelectorAll('button')].some((b) => (b.title ?? '').startsWith('添加图片参考'))).toBe(false);
@@ -524,7 +526,7 @@ describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
     expect(pickReferenceButton()).toBeTruthy();
     for (const btn of [pickReferenceButton()!, assetsLibraryButton()!]) {
       expect(btn.getAttribute('aria-disabled')).toBe('true');
-      expect(btn.getAttribute('title')).toBe('首尾帧模式请从下方槽位入口添加首帧/尾帧');
+      expect(btn.getAttribute('title')).toBe('首帧与尾帧均已指定，请先移除后再添加');
     }
   });
 
@@ -566,6 +568,148 @@ describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
     await clickNode('m1');
     expect(container.textContent).toContain('完成选取');
     expect(container.textContent).not.toContain('点击空白处取消');
+  });
+});
+
+
+describe('IKGB7Y 首尾帧操作条顺序填充与溢出处理', () => {
+  /** keyframe 草稿 seed（槽位全空）：2 张图片普通参考连线解锁首尾帧模式（IKFC1T 门控：≥2 图可选），槽位入口可发起 */
+  function seedKeyframeEmptySlots() {
+    const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
+    (doc.nodes.find((n) => n.id === 'd1')!.data as Record<string, unknown>).draftMode = 'keyframe';
+    doc.edges = [
+      { id: 'e-m1-d1', source: 'm1', target: 'd1' },
+      { id: 'e-m2-d1', source: 'm2', target: 'd1' },
+    ];
+  }
+
+  /** keyframe 草稿 seed（首帧已指定）：帧槽存在即解锁首尾帧模式（IKFJJT hasFrameSlot 恒可选） */
+  function seedKeyframeFirstFilled() {
+    const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
+    (doc.nodes.find((n) => n.id === 'd1')!.data as Record<string, unknown>).draftMode = 'keyframe';
+    doc.edges = [{ id: 'f1', source: 'm1', target: 'd1', data: { refRole: 'first' } }];
+  }
+
+  /** 追加图片节点（含资产映射，assets 在 useCanvasDoc 打桩顶层） */
+  function pushImageNode(id: string, assetId: string, name: string) {
+    const doc = canvasDocMock.current.doc as { nodes: Array<Record<string, unknown>> };
+    doc.nodes.push({
+      id, type: 'mediaNode', position: { x: 0, y: 700 },
+      data: { src: `http://img/${id}.png`, mediaType: 'image', fileName: name, assetId },
+    });
+    (canvasDocMock.current.assets as Record<string, unknown>)[assetId] =
+      { asset_id: Number(assetId.slice(1)), type: 'image', access_url: `http://img/${id}.png`, width: 100, height: 100 };
+  }
+
+  /** 打开 seed 草稿 d1 的绑定面板并等模型能力就绪 */
+  async function openSeededPanel() {
+    await renderPage();
+    await clickNode('d1');
+    await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型'));
+  }
+
+  const pickActive = () => flowProps.current.refPickActive === true;
+  const finishPickButton = () =>
+    [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '完成选取');
+  /** 指向 d1 的角色连线（首帧/尾帧） */
+  const frameEdges = () =>
+    (flowProps.current.edges as Array<{ source: string; target: string; data?: { refRole?: string } }>)
+      .filter((e) => e.target === 'd1' && (e.data?.refRole === 'first' || e.data?.refRole === 'last'));
+  const nodeAssetId = (id: string) =>
+    String(((flowProps.current.mediaNodes.find((n: Node) => n.id === id)?.data ?? {}) as Record<string, unknown>).assetId);
+  const canvasHasAsset = (assetId: string) =>
+    flowProps.current.mediaNodes.some((n: Node) => String((n.data as Record<string, unknown>).assetId) === assetId);
+
+  const imageAsset = (i: number) => ({
+    id: 900 + i, type: 'image' as const, url: `http://img/pick${i}.png`, width: 100, height: 100,
+  });
+
+  it('首帧已有、尾帧空：操作条「+ 参考」点选进尾帧；两槽填满自动退出选取并提示「首尾帧已就绪」', async () => {
+    seedKeyframeFirstFilled();
+    await openSeededPanel();
+    await vi.waitFor(() => expect(frameBadges()).toEqual(['首帧']));
+
+    // 未满两槽：操作条可用（IKGB7Y：仅两槽均满才置灰）
+    expect(pickReferenceButton()!.getAttribute('aria-disabled')).toBeNull();
+    expect(assetsLibraryButton()!.getAttribute('aria-disabled')).toBeNull();
+
+    await clickPickReference();
+    // 首尾帧模式进入画布点选且「+ 参考」高亮（pickMode 高亮放开首尾帧）
+    expect(pickActive()).toBe(true);
+    expect(finishPickButton()).toBeTruthy();
+    expect(pickReferenceButton()!.classList.contains(barStyles.picking)).toBe(true);
+
+    await clickNode('m2');
+    // m2 落尾帧槽（首空槽角色分派，效果与槽位入口一致）
+    expect(frameEdges().some((e) => e.source === 'm2' && e.data?.refRole === 'last')).toBe(true);
+    // 两槽填满：自动退出选取 + 提示「首尾帧已就绪」
+    expect(pickActive()).toBe(false);
+    expect(finishPickButton()).toBeUndefined();
+    expect(toastText()).toContain('首尾帧已就绪');
+    await vi.waitFor(() => expect(frameBadges()).toEqual(['首帧', '尾帧']));
+  });
+
+  it('两槽均空：第一张点选进首帧且会话保持（未填满不退出），再次发起第二张进尾帧后自动退出', async () => {
+    seedKeyframeEmptySlots();
+    pushImageNode('m3', 'a5', '候选图一');
+    pushImageNode('m4', 'a6', '候选图二');
+    await openSeededPanel();
+
+    // 两槽均空：操作条可用，按首空槽（首帧）角色发起
+    expect(pickReferenceButton()!.getAttribute('aria-disabled')).toBeNull();
+    await clickPickReference();
+    await clickNode('m3');
+    expect(frameEdges().some((e) => e.source === 'm3' && e.data?.refRole === 'first')).toBe(true);
+    // 仅首帧落槽（尾帧仍空）：会话保持，不退出不提示
+    expect(pickActive()).toBe(true);
+    expect(finishPickButton()).toBeTruthy();
+    expect(toastText()).not.toContain('首尾帧已就绪');
+
+    // 首帧已有：再次点「+ 参考」按新的首空槽（尾帧）发起，点选填满后自动退出
+    await pressEscape();
+    await clickPickReference();
+    await clickNode('m4');
+    expect(frameEdges().some((e) => e.source === 'm4' && e.data?.refRole === 'last')).toBe(true);
+    expect(pickActive()).toBe(false);
+    expect(toastText()).toContain('首尾帧已就绪');
+  });
+
+  it('资产库多选超剩余空槽（两槽均空选 3 张）：按选择顺序只取前两张填满首/尾帧并 toast 提示', async () => {
+    seedKeyframeEmptySlots();
+    await openSeededPanel();
+
+    await clickAssetsLibrary();
+    // 首尾帧槽仅图片过滤不变
+    expect(assetsPickerProps.current.mediaTypes).toEqual(['image']);
+    await act(async () => {
+      assetsPickerProps.current.onSelect([imageAsset(1), imageAsset(2), imageAsset(3)]);
+    });
+
+    // 只取前两张：选择序首张 → 首帧、次张 → 尾帧；第三张不落画布不连线（不静默丢失：toast 明确提示）
+    const first = frameEdges().find((e) => e.data?.refRole === 'first')!;
+    const last = frameEdges().find((e) => e.data?.refRole === 'last')!;
+    expect(nodeAssetId(first.source)).toBe('901');
+    expect(nodeAssetId(last.source)).toBe('902');
+    expect(canvasHasAsset('903')).toBe(false);
+    expect(toastText()).toContain('首尾帧最多两张图片，已按选择顺序取前两张');
+    await vi.waitFor(() => expect(frameBadges()).toEqual(['首帧', '尾帧']));
+  });
+
+  it('资产库多选仅剩一个空槽（首帧已有选 2 张）：只取第一张进尾帧并提示', async () => {
+    seedKeyframeFirstFilled();
+    await openSeededPanel();
+    await vi.waitFor(() => expect(frameBadges()).toEqual(['首帧']));
+
+    await clickAssetsLibrary();
+    await act(async () => {
+      assetsPickerProps.current.onSelect([imageAsset(1), imageAsset(2)]);
+    });
+
+    const last = frameEdges().find((e) => e.data?.refRole === 'last')!;
+    expect(nodeAssetId(last.source)).toBe('901');
+    expect(canvasHasAsset('902')).toBe(false);
+    expect(toastText()).toContain('首尾帧仅支持一张图片，已取首张');
+    await vi.waitFor(() => expect(frameBadges()).toEqual(['首帧', '尾帧']));
   });
 });
 

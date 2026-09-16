@@ -18,7 +18,8 @@ import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
    附件栏空态整条隐藏（无普通参考且无文本附件）、有内容时出现在操作条与输入框之间；
    「+ 参考」分派画布点选（kind/role 与旧「+」同口径，pickMode 高亮）、「资产库」分派资产库弹窗；
    能力位不支持 / 普通参考达上限 / 生成中只读三种禁用态常显置灰并悬停说明原因（替代旧「+ 不出现」）；
-   首尾帧模式仅布局接入：操作条常显但按钮置灰指向槽位入口，槽位行为原样（顺序填充 IKGB7Y 承接）。
+   IKGB7Y 首尾帧顺序填充：操作条按首空槽角色分派（首帧优先、其后尾帧，仅图片边界），
+   两槽均满置灰（生成中只读同口径置灰），pickMode 高亮放开首尾帧；槽位行为原样。
    PromptRefEditor 打桩为 textarea（与 videoRefArea 同款夹具）。 */
 
 const fetchGenerationModels = vi.hoisted(() => vi.fn());
@@ -327,19 +328,75 @@ describe('IKGB7W 三种禁用态：常显置灰 + 悬停原因（替代旧「+ �
   });
 });
 
-describe('IKGB7W 首尾帧模式仅布局接入（槽位行为原样，顺序填充 IKGB7Y 承接）', () => {
-  it('操作条照常渲染但两按钮置灰、悬停指向槽位入口，点击不分派', async () => {
+describe('IKGB7Y 首尾帧顺序填充（操作条按首空槽分派，两槽满置灰）', () => {
+  it('两槽均空：两按钮可用，「+ 参考」「资产库」均以首帧角色分派（仅图片边界），效果与槽位入口一致', async () => {
     const { onPickFromCanvas, onPickFromAssets } = await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [] } });
 
-    expect(actionBar()).toBeTruthy();
+    expect(pickCanvasBtn().getAttribute('aria-disabled')).toBeNull();
+    expect(pickAssetsBtn().getAttribute('aria-disabled')).toBeNull();
+    expect(pickCanvasBtn().getAttribute('title')).toBe(ATTACHMENT_ACTION_PICK_CANVAS_TITLE);
+    expect(pickAssetsBtn().getAttribute('title')).toBe(ATTACHMENT_ACTION_PICK_ASSETS_TITLE);
+
+    await click(pickCanvasBtn());
+    expect(onPickFromCanvas).toHaveBeenCalledWith('image', 'first');
+    await click(pickAssetsBtn());
+    expect(onPickFromAssets).toHaveBeenCalledWith('image', 'first');
+  });
+
+  it('首帧已有、尾帧为空：两按钮以尾帧角色分派（顺序填充第二槽）', async () => {
+    const { onPickFromCanvas, onPickFromAssets } = await renderDialog({
+      mode: 'keyframe',
+      mediaRefs: { reference: [], first: ref('f1') },
+    });
+
+    await click(pickCanvasBtn());
+    expect(onPickFromCanvas).toHaveBeenCalledWith('image', 'last');
+    await click(pickAssetsBtn());
+    expect(onPickFromAssets).toHaveBeenCalledWith('image', 'last');
+  });
+
+  it('两槽均满：两按钮置灰并悬停说明，点击不分派；槽位缩略图与角色徽标保持', async () => {
+    const { onPickFromCanvas, onPickFromAssets } = await renderDialog({
+      mode: 'keyframe',
+      mediaRefs: { reference: [], first: ref('f1'), last: ref('f2') },
+    });
+
     for (const btn of [pickCanvasBtn(), pickAssetsBtn()]) {
       expect(btn.getAttribute('aria-disabled')).toBe('true');
-      expect(btn.getAttribute('title')).toBe('首尾帧模式请从下方槽位入口添加首帧/尾帧');
+      expect(btn.getAttribute('title')).toBe('首帧与尾帧均已指定，请先移除后再添加');
     }
     await click(pickCanvasBtn());
     await click(pickAssetsBtn());
     expect(onPickFromCanvas).not.toHaveBeenCalled();
     expect(onPickFromAssets).not.toHaveBeenCalled();
+    // 槽位既有渲染不变：缩略图 + 角色徽标
+    const badges = [...container.querySelectorAll('[data-testid="dock-video-ref"] [data-testid="ref-thumb-badge"]')].map(
+      (n) => n.textContent,
+    );
+    expect(badges).toEqual(['首帧', '尾帧']);
+  });
+
+  it('首尾帧模式生成中只读：两按钮同样置灰（沿用 §3 只读口径），点击不分派', async () => {
+    const { onPickFromCanvas, onPickFromAssets } = await renderDialog({
+      mode: 'keyframe',
+      status: 'generating',
+      mediaRefs: { reference: [] },
+    });
+
+    for (const btn of [pickCanvasBtn(), pickAssetsBtn()]) {
+      expect(btn.getAttribute('aria-disabled')).toBe('true');
+      expect(btn.getAttribute('title')).toBe('生成中，参数与连线只读；可在画布卡片上取消生成');
+    }
+    await click(pickCanvasBtn());
+    await click(pickAssetsBtn());
+    expect(onPickFromCanvas).not.toHaveBeenCalled();
+    expect(onPickFromAssets).not.toHaveBeenCalled();
+  });
+
+  it('首尾帧画布点选进行中「+ 参考」高亮（picking 态，kind 边界 image 匹配），「资产库」不高亮', async () => {
+    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [] }, pickMode: 'image' });
+    expect(pickCanvasBtn().classList.contains(barStyles.picking)).toBe(true);
+    expect(pickAssetsBtn().classList.contains(barStyles.picking)).toBe(false);
   });
 
   it('「+ 首帧」「+ 尾帧」槽位入口原样保留：空槽常显、label 变体按角色分派', async () => {
@@ -364,15 +421,5 @@ describe('IKGB7W 首尾帧模式仅布局接入（槽位行为原样，顺序填
     await click(lastSlot);
     await click([...container.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '从资产中选择')!);
     expect(onPickFromAssets).toHaveBeenCalledWith('image', 'last');
-  });
-
-  it('首尾帧已有帧时槽位渲染缩略图，操作条仍置灰', async () => {
-    await renderDialog({ mode: 'keyframe', mediaRefs: { reference: [], first: ref('f1'), last: ref('f2') } });
-    const badges = [...container.querySelectorAll('[data-testid="dock-video-ref"] [data-testid="ref-thumb-badge"]')].map(
-      (n) => n.textContent,
-    );
-    expect(badges).toEqual(['首帧', '尾帧']);
-    expect(pickCanvasBtn().getAttribute('aria-disabled')).toBe('true');
-    expect(pickAssetsBtn().getAttribute('aria-disabled')).toBe('true');
   });
 });
