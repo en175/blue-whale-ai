@@ -52,7 +52,7 @@ export const apiMocks = {
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
   saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
-  fetchGenerationModels: vi.fn(async (): GenerationModel[] => []),
+  fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
   fetchJobStatus: vi.fn(),
 };
 
