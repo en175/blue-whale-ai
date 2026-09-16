@@ -8,6 +8,7 @@
     "rootDir": ".",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@lib/*": [
