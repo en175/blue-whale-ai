@@ -70,6 +70,7 @@ import type { AssetCardKind } from './components/AssetCardNode';
 import type { CanvasProject } from './components/ProjectSelector';
 import FlowCanvas from './components/Canvas';
 import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
+import { canvasUndoKeyAction, isMentionMenuOpen } from './components/Canvas/keyboardUndo';
 import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchQuota, toSessionUser } from '@/api/auth';
@@ -4012,17 +4013,24 @@ export default function CanvasPage() {
   });
   historyRef.current = canvasHistory;
   /** 撤销/重做快捷键（IKD0JT A2）：Ctrl/Cmd+Z 撤销、Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做；
-   *  输入框/编辑器内不拦截（文字编辑不进画布撤销栈，PRD §7.2 R1） */
+   *  输入框/编辑器内不拦截（文字编辑不进画布撤销栈，PRD §7.2 R1）；
+   *  @ 菜单打开期间键盘归菜单处理（IKGBPC 补齐，Esc 链同款检测）。
+   *  按键判定收口在 canvasUndoKeyAction 纯函数，本监听只留副作用。 */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (applyingRef.current) return;
-      if (isEditableKeyboardTarget(e.target)) return;
-      if (!(e.metaKey || e.ctrlKey)) return;
-      const key = e.key.toLowerCase();
-      if (key !== 'z' && key !== 'y') return;
+      const action = canvasUndoKeyAction({
+        key: e.key,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        shiftKey: e.shiftKey,
+        target: e.target,
+        mentionMenuOpen: isMentionMenuOpen(),
+      });
+      if (action === 'ignore') return;
       e.preventDefault();
       e.stopPropagation();
-      if (key === 'y' || e.shiftKey) canvasHistory.redo();
+      if (action === 'redo') canvasHistory.redo();
       else canvasHistory.undo();
     };
     document.addEventListener('keydown', handler, true);
