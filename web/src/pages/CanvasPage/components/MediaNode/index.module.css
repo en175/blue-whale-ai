@@ -196,6 +196,25 @@
   height: 14px;
 }
 
+.complianceSpinner {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #555;
+  border-top-color: #ddd;
+  border-radius: 50%;
+  animation: genSpin 0.9s linear infinite;
+}
+
+.complianceFailedText {
+  flex-shrink: 0;
+  color: #E53935;
+  font-size: var(--node-title-name);
+  line-height: var(--node-title-line);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 /* ============================================
  * 音频播放器（白色卡片 + 浅灰波形区，参考设计稿）
  * ============================================ */

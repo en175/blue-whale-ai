@@ -36,9 +36,25 @@ export interface RunActionsRecord {
   outstanding_count: number | null;
 }
 
+/** 服务端替模型出的一道题（2026-09-15，`ask_questions`）：题号、字母都是服务端编的，前端按它画。 */
+export interface AskedQuestion {
+  no: string;
+  title: string;
+  ask: string;
+  options: { key: string; label: string; note?: string }[];
+  recommended: string[];
+  multiple: boolean;
+  why: string;
+}
+
 export interface SessionContentBlock {
   type: string;
   text?: string;
+  /**
+   * 这段正文是服务端替模型出的题（2026-09-15）：`text` 是它的 markdown（兜底），有 `questions` 就按数据画。
+   * 老记录的题只有文字，前端认开头排版。
+   */
+  questions?: AskedQuestion[];
   /** 本轮动作台账块（IKB93G 的动作行由它渲染；服务端消息部件 `run_actions` 原样透传）。 */
   run_actions?: RunActionsRecord;
   /**
@@ -57,6 +73,15 @@ export interface SessionContentBlock {
   started_ms?: number;
   ended_ms?: number | null;
   substeps?: { id: string; summary: string; started_ms: number; ended_ms: number | null }[];
+  /** 模型一步里并发调了几次同一个工具，合成这一行（IKFLB9）。 */
+  calls?: number;
+  /*
+   * `type: 'reasoning'`（IKFLB9）：模型的一段思考，按发生顺序夹在正文与工具行之间，原话在 `text`，
+   * 起止在 `started_ms` / `ended_ms`。有了它，`thinking` 块里就不再带 `reasoning`。
+   *
+   * `type: 'waiting'`（IKFLB9）：两段之间没有任何输出的时间（例如工具返回之后模型读结果），
+   * 名字在 `summary`。有了它，一轮里各段的时长加起来等于总时长。
+   */
   /**
    * 思考过程块（可折叠展示）。
    *
@@ -145,6 +170,10 @@ export interface GenerationCardAssetRef {
   /** 展示名（不带 @ 前缀，前缀是展示层的事） */
   label: string;
   mediaType: 'image' | 'video';
+  /** 记号的显示名「图1」「视频3」：卡上和正文里都用它，和画布 `#N` 同一个号。老卡没有，就显示 label。 */
+  marker?: string;
+  /** 这份素材在提示词正文里的记号原文（`@图1`，照包写的模型也会写 `@图片1`），正文按它换成胶囊。 */
+  markerTexts?: string[];
 }
 
 /** 生成卡：单镜头分镜提示词卡（S2 渲染，S3 手动应用） */
@@ -257,6 +286,11 @@ export interface PromptCardShot {
   frame_description?: string;
   prompt_text: string;
   asset_bindings: { asset_ref_id: string; role?: string; strength?: string; note?: string }[];
+  /**
+   * 正文里素材记号（`@图1`）的位置，服务端算（IKFLD1）。`index` 是本会话素材清单里的全局序号，
+   * 和画布上的 `#N` 同一个号。老卡没有。
+   */
+  prompt_mentions?: { start: number; end: number; index: number; asset_ref_id: string }[];
   generation_suggestions?: {
     target_media?: 'image' | 'video';
     aspect_ratio?: string;

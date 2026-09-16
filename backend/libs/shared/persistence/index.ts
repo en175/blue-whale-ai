@@ -13,11 +13,6 @@ export {
   type ProjectView,
 } from "./project-repo.js";
 export {
-  placeMediaExtractPendingNode,
-  updateMediaExtractNodeToAudio,
-  failMediaExtractNode,
-} from "./media-extract-canvas-ops.js";
-export {
   createCanvasRepo,
   type CanvasRepo,
   type CanvasView,
@@ -90,6 +85,7 @@ export {
   assetDurationSeconds,
   type AssetRepo,
   type AssetView,
+  type AssetDetailView,
   type AssetPage,
   type AssetListFilter,
   type AssetInternal,

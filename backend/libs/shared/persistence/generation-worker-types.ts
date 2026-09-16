@@ -194,22 +194,6 @@ export interface WorkerRepo {
     /** IKBQEE / ADR-0078：调试详情（provider 原文/request_id 等），落 error.details，禁展示用户。 */
     details?: Record<string, unknown>;
   }): Promise<boolean>;
-  /** 提取成功：把画布占位节点更新为最终音频节点（IKARDY）。 */
-  updateMediaExtractNodeToAudio(input: {
-    jobId: string;
-    projectId: string;
-    url: string;
-    mime: string;
-    size: number;
-    duration: number | null;
-  }): Promise<boolean>;
-  /** 提取失败：把画布占位节点置 failed（IKARDY）。 */
-  failMediaExtractNode(input: {
-    jobId: string;
-    projectId: string;
-    code: string;
-    message: string;
-  }): Promise<boolean>;
   /** 按任务归属解析输入素材；返回顺序与 assetIds 一致。 */
   resolveInputAssets(
     assetIds: string[],

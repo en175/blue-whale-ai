@@ -5,7 +5,6 @@ import com.bluewhale.worker.domain.error.MediaExtractError;
 import com.bluewhale.worker.infrastructure.media.FfmpegExtractor;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
-import com.bluewhale.worker.application.service.CanvasNodeService;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
@@ -46,15 +45,12 @@ class MediaExtractJobProcessorErrorMappingTest {
     @Mock
     private FfmpegExtractor ffmpeg;
 
-    @Mock
-    private CanvasNodeService canvasNodeService;
-
     private MediaExtractJobProcessor processor;
 
     @BeforeEach
     void setUp() {
         processor = new MediaExtractJobProcessor(
-                stateMachine, new AssetSourceService(assetMapper), tosService, ffmpeg, canvasNodeService
+                stateMachine, new AssetSourceService(assetMapper), tosService, ffmpeg
         );
     }
 
@@ -119,7 +115,7 @@ class MediaExtractJobProcessorErrorMappingTest {
         source.setMime("video/mp4");
         when(assetMapper.resolveSourceAssetWithLinked(eq(555L), eq(9L), eq(42L), anyList())).thenReturn(source);
         doThrow(new MediaExtractError(MediaExtractError.VIDEO_DOWNLOAD_FAILED, "TOS 视频下载失败: 404"))
-                .when(tosService).download(anyString(), anyString(), any(), anyLong());
+                .when(tosService).download(anyString(), anyString(), any(), anyLong(), any());
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
 
         processor.handle("100");
@@ -139,7 +135,7 @@ class MediaExtractJobProcessorErrorMappingTest {
         source.setUrl("https://example.com/test.mp4");
         when(assetMapper.resolveSourceAssetWithLinked(eq(555L), eq(9L), eq(42L), anyList())).thenReturn(source);
         doThrow(new MediaExtractError(MediaExtractError.VIDEO_TOO_LARGE, "视频超过大小上限"))
-                .when(tosService).download(anyString(), anyString(), any(), anyLong());
+                .when(tosService).download(anyString(), anyString(), any(), anyLong(), any());
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
 
         processor.handle("100");
@@ -221,7 +217,7 @@ class MediaExtractJobProcessorErrorMappingTest {
         source.setUrl("https://example.com/test.mp4");
         when(assetMapper.resolveSourceAssetWithLinked(eq(555L), eq(9L), eq(42L), anyList())).thenReturn(source);
         doThrow(new RuntimeException("unexpected system error"))
-                .when(tosService).download(anyString(), anyString(), any(), anyLong());
+                .when(tosService).download(anyString(), anyString(), any(), anyLong(), any());
         when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
 
         processor.handle("100");
@@ -260,18 +256,23 @@ class MediaExtractJobProcessorErrorMappingTest {
     }
 
     @Test
-    @DisplayName("failMediaExtract 同时调用 canvasNodeService.failMediaExtractNode")
-    void failAlsoUpdatesCanvasNode() {
+    @DisplayName("成功路径只发布结果，不落失败终态（画布由前端写，IKFS5W）")
+    void successPath_publishesResultOnly() {
         when(stateMachine.claimMediaExtract(anyString(), anyString()))
-                .thenReturn(Optional.of(makeClaim("100", Map.of())));
-        when(stateMachine.failMediaExtractJob(any())).thenReturn(true);
+                .thenReturn(Optional.of(makeClaim("100", Map.of("source_asset_id", "555"))));
+        AssetEntity source = new AssetEntity();
+        source.setStorageKey("videos/test.mp4");
+        source.setUrl("https://example.com/test.mp4");
+        when(assetMapper.resolveSourceAssetWithLinked(eq(555L), eq(9L), eq(42L), anyList())).thenReturn(source);
+        when(ffmpeg.extract(anyString(), anyString(), any()))
+                .thenReturn(new FfmpegExtractor.ExtractResult(12.5));
+        when(tosService.upload(any(), anyString()))
+                .thenReturn(new TosMediaStorage.UploadResult("https://example.com/a.mp3", "audios/a.mp3", "audio/mpeg", 1024L));
+        when(stateMachine.publishMediaExtractResult(any())).thenReturn(true);
 
         processor.handle("100");
 
-        verify(canvasNodeService).failMediaExtractNode(
-                eq("100"), eq("42"),
-                eq(MediaExtractError.INVALID_INPUT),
-                anyString()
-        );
+        verify(stateMachine).publishMediaExtractResult(any());
+        verify(stateMachine, never()).failMediaExtractJob(any());
     }
 }

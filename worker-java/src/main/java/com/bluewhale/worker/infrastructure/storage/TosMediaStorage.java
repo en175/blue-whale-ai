@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -42,6 +43,12 @@ public class TosMediaStorage {
 
     private static final Logger log = LoggerFactory.getLogger(TosMediaStorage.class);
 
+    /** 下载心跳间隔：必须小于任务租约（120s），否则长下载期间任务会被判定过期而可被抢走。 */
+    static final long HEARTBEAT_INTERVAL_MS = 30_000;
+
+    /** 下载缓冲：边读边写盘，避免整段视频驻留堆内存（上限 200MiB）。 */
+    private static final int DOWNLOAD_BUFFER_BYTES = 64 * 1024;
+
     private final TOSV2 client;
     private final String bucket;
     private final String endpoint;
@@ -66,7 +73,8 @@ public class TosMediaStorage {
         this.endpoint = endpointEnv.replaceFirst("^https?://", "").replaceFirst("/$", "");
         this.bucket = bucketEnv;
 
-        this.client = new TOSV2ClientBuilder().build(region, this.endpoint, accessKeyId, secretAccessKey);
+        this.client = new TOSV2ClientBuilder().build(
+                region, this.endpoint, accessKeyId, secretAccessKey, TosTransportConfig.fromEnv());
     }
 
     /** 测试用构造器：注入 mock client。 */
@@ -81,6 +89,9 @@ public class TosMediaStorage {
      * <p>
      * DEVIATION：TS 走公网 HTTP fetch（资产 public-read，无需签名），
      * Java 走 SDK getObject（结果一致：得到视频字节流写入本地文件）。
+     * <p>
+     * IKFS5W：读超时放宽到 5min 后，单次下载可能超过任务租约（120s）→ 任务可被抢走重跑。
+     * 因此边写边按 {@link #HEARTBEAT_INTERVAL_MS} 触发心跳（调用方用它续租）。
      *
      * @param url        资产公网 URL（用于日志；实际走 SDK getObject）
      * @param storageKey 资产存储 key
@@ -89,6 +100,17 @@ public class TosMediaStorage {
      * @throws MediaExtractError video_download_failed / video_too_large
      */
     public void download(String url, String storageKey, Path outputPath, long maxBytes) {
+        download(url, storageKey, outputPath, maxBytes, null);
+    }
+
+    /** 带心跳的下载：{@code onHeartbeat} 每 {@link #HEARTBEAT_INTERVAL_MS} 至多触发一次（可空）。 */
+    public void download(String url, String storageKey, Path outputPath, long maxBytes, Runnable onHeartbeat) {
+        download(url, storageKey, outputPath, maxBytes, onHeartbeat, HEARTBEAT_INTERVAL_MS);
+    }
+
+    /** 测试注入口：心跳间隔可替换。 */
+    void download(String url, String storageKey, Path outputPath, long maxBytes,
+                  Runnable onHeartbeat, long heartbeatIntervalMs) {
         try {
             GetObjectV2Input input = new GetObjectV2Input()
                     .setBucket(bucket)
@@ -101,12 +123,24 @@ public class TosMediaStorage {
                 throw new MediaExtractError(MediaExtractError.VIDEO_TOO_LARGE, "视频超过大小上限");
             }
 
-            try (InputStream is = output.getContent()) {
-                byte[] bytes = is.readAllBytes();
-                if (bytes.length > maxBytes) {
-                    throw new MediaExtractError(MediaExtractError.VIDEO_TOO_LARGE, "视频超过大小上限");
+            try (InputStream is = output.getContent();
+                 OutputStream os = Files.newOutputStream(outputPath)) {
+                byte[] buffer = new byte[DOWNLOAD_BUFFER_BYTES];
+                long total = 0;
+                long lastHeartbeatAt = System.currentTimeMillis();
+                int read;
+                while ((read = is.read(buffer)) != -1) {
+                    os.write(buffer, 0, read);
+                    total += read;
+                    if (total > maxBytes) {
+                        throw new MediaExtractError(MediaExtractError.VIDEO_TOO_LARGE, "视频超过大小上限");
+                    }
+                    if (onHeartbeat != null
+                            && System.currentTimeMillis() - lastHeartbeatAt >= heartbeatIntervalMs) {
+                        lastHeartbeatAt = System.currentTimeMillis();
+                        onHeartbeat.run();
+                    }
                 }
-                Files.write(outputPath, bytes);
             }
         } catch (MediaExtractError e) {
             throw e;

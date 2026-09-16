@@ -6,7 +6,6 @@ import {
   X,
   Plus,
   ChevronDown,
-  ChevronUp,
   ArrowUp,
   Square,
   RotateCw,
@@ -18,8 +17,6 @@ import {
   RotateCcw,
   Package,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import styles from './index.module.css';
 import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
 import { fetchMySkills } from '@/api/skills';
@@ -60,65 +57,20 @@ import {
   persistPanelWidth,
   readPersistedPanelWidth,
 } from './drawerWidth';
-import { itemsFromBlocks, itemsFromLive, type TimelineItem, type Turn } from '../../hooks/sessionTimeline';
-import { ASSET_MENTION_ATTR, collectKnownAssets, rehypeAssetMentions, type KnownAsset } from './assetMentions';
+import { isProcessItem, itemsFromBlocks, itemsFromLive, type TimelineItem, type Turn } from '../../hooks/sessionTimeline';
+import { collectKnownAssets, type KnownAsset } from './assetMentions';
+import { ReplyText } from './ReplyText';
+import { Markdown } from './Markdown';
 import { AssetMentionChip } from './AssetMentionChip';
-import { ThinkingBlock, ToolCallRow, TurnFooter } from './TurnTimeline';
+import { CardDocModal } from './CardDocModal';
+import { generationCardMarkdown, solutionCardMarkdown, solutionStatusLabel } from './cardMarkdown';
+import { LastTurnLine, ProcessGroup, TurnFooter } from './TurnTimeline';
 
 /** 父组件没传已应用集合时的空集。提到模块级是为了保持引用稳定，避免每次渲染都造一个新 Set。 */
 const EMPTY_APPLIED_IDS: ReadonlySet<string> = new Set<string>();
 
-/**
- * Agent 回复的 Markdown 渲染。
- *
- * 原来是手写的逐行解析器，只认标题、无序列表和引用：模型输出的表格原样显示成一堆竖线，
- * 有序列表退化成普通段落，围栏代码块的 ``` 直接印在正文里（IKA2VC-4）。这些都不是能靠
- * 补几条正则收住的，换成 react-markdown + GFM 一次解决，也顺带把嵌套、链接、删除线补上。
- *
- * 表格自带横向滚动容器：面板本来就窄，宽表格必须自己滚，不能把整个消息流撑出横向滚动条。
- */
-export function Markdown({ text, assets = [] }: { text: string; assets?: readonly KnownAsset[] }) {
-  // 本会话已知的素材名在正文里换成胶囊（IKDLW3）。插件按 assets 记忆：每次渲染造一个新插件会让
-  // react-markdown 重建整条处理链。
-  const rehypePlugins = useMemo(() => (assets.length ? [rehypeAssetMentions(assets)] : []), [assets]);
-  return (
-    <div className={styles.md}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={rehypePlugins}
-        components={{
-          // 插件把命中的名字标成带 data 属性的 span；其余 span 原样。
-          span: ({ node: _node, children, ...props }) => {
-            const attrs = props as Record<string, unknown>;
-            const assetId = attrs[ASSET_MENTION_ATTR];
-            if (typeof assetId !== 'string') return <span {...props}>{children}</span>;
-            return (
-              <AssetMentionChip
-                assetId={assetId}
-                label={String(attrs['data-asset-label'] ?? '')}
-                mediaType={attrs['data-asset-media'] === 'video' ? 'video' : 'image'}
-                url={typeof attrs['data-asset-url'] === 'string' ? attrs['data-asset-url'] : undefined}
-              />
-            );
-          },
-          table: ({ children }) => (
-            <div className={styles.mdTableWrap}>
-              <table>{children}</table>
-            </div>
-          ),
-          // 模型偶尔会输出链接。新标签页打开，并断开与本页的 opener 引用。
-          a: ({ children, href }) => (
-            <a href={href} target="_blank" rel="noreferrer noopener">
-              {children}
-            </a>
-          ),
-        }}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
-  );
-}
+/** Markdown 搬到了自己的文件（IKFLB9）；这里再导出一次，测试和别处的引用不用改。 */
+export { Markdown };
 
 /**
  * 每个阶段的符号与样式。
@@ -288,42 +240,21 @@ function CardPreview({ preview }: { preview: PartialCardPreview | null }) {
   );
 }
 
-/** 方案卡上那八项的小标题。与服务端 `domain/solution-card.ts` 的那份一字不差：用户读到的措辞
- *  和服务端校验的是同一份东西，两边分头写就是两份真相。 */
-const SOLUTION_FIELD_LABELS = {
-  goal: '这次要做什么',
-  target_media: '做图还是视频',
-  direction: '创意方向',
-  constraints: '必须守住的',
-  asset_roles: '你给的素材各起什么作用',
-  assumptions: '我替你定的几项',
-  execution_route: '用哪个模型出片',
-  delivery_spec: '出片参数',
-  next_steps: '接下来怎么做',
-  scope: '这张卡管的范围',
-} as const;
-
-function SolutionField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className={styles.solutionField}>
-      <div className={styles.solutionFieldLabel}>{label}</div>
-      {children}
-    </div>
-  );
-}
-
 /**
- * 方案卡（IKF3KE）。
+ * 方案卡（IKF3KE；IKFLB9 定稿改版）。
  *
- * 产卡之前用户唯一读到、也唯一需要表态的东西。它在对话流里，和生成卡同一个位置——这里没有
- * 「侧边栏」这个概念，整个 Agent 面板才是相对画布的那一侧。
+ * 产卡之前用户唯一读到、也唯一需要表态的东西。它在对话流里，和生成卡同一个位置。
  *
- * 三个按钮各自的去向：确认 → 服务端接着把生成卡写出来；取消 → 这一版作废，回到对话；
- * 补充 → 这一版作废，用户写的话当下一轮的输入，模型据此重提一版。取消与补充都作废，是为了不
- * 留下「用户看过但没表态」的悬空版本。
+ * 改版后的形状：卡头一条色带放「方案卡 · 等你拍板 · ▤ .md」和媒介 / 模型 / 参数；目标做标题、方向做引文；
+ * 「你要求的（不会改）」是用户一开始提的硬约束（此前画成一排胶囊，客户看不出是什么）；「我替你定的（不合适就说）」
+ * 是模型替他定的、最该核的地方；「接下来怎么做」移出卡放到卡后正文。
  *
- * 已确认或已作废的版本留在原处、变灰、按钮消失：用户往回翻时要读得懂当时发生了什么。
+ * 动作各自的去向：确认 → 服务端接着把生成卡写出来；换个思路 → 这一版作废，带一句「换个思路重提」当下一轮输入；
+ * 我来改 → 这一版作废，用户写的话当下一轮输入；作废 → 这一版作废，回到对话。作废类都作废，是为了不留下
+ * 「用户看过但没表态」的悬空版本。已确认或已作废的版本留在原处、变灰、按钮消失：用户往回翻时要读得懂当时发生了什么。
  */
+const RETHINK_NOTE = '这版方案不太对，换个思路重新提一版。';
+
 function SolutionCardBlock({
   understanding,
   disabled,
@@ -338,6 +269,7 @@ function SolutionCardBlock({
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [docOpen, setDocOpen] = useState(false);
   const card = understanding.solution_card ?? null;
   const pending = understanding.status === 'awaiting_confirmation';
   const route = card?.execution_route;
@@ -347,6 +279,8 @@ function SolutionCardBlock({
     spec?.duration_seconds !== undefined ? `${spec.duration_seconds} 秒` : undefined,
     spec?.resolution,
   ].filter((one): one is string => Boolean(one));
+  const modelLabel = route ? `${route.model_family}${route.model_version ? ` ${route.model_version}` : ''}` : null;
+  const required = [...(card?.constraints ?? []), ...(card?.asset_roles ?? []).map((one) => `素材：${one.role}`)];
 
   const act = (run: () => void) => {
     setBusy(true);
@@ -354,188 +288,242 @@ function SolutionCardBlock({
   };
 
   return (
-    <div className={`${styles.solutionCard} ${pending ? '' : styles.solutionCardSettled}`}>
-      <div className={styles.solutionCardHead}>
-        <BookText size={12} strokeWidth={2} />
-        <span>方案卡</span>
-      </div>
+    <>
+      <div className={`${styles.solutionCard} ${pending ? '' : styles.solutionCardSettled}`}>
+        <div className={styles.solutionBand}>
+          {/* 两行，和右边格子的「标签 / 值」对齐：挤成一行时面板一窄就一字一折。 */}
+          <div className={styles.solutionCardHead}>
+            <div className={styles.solutionCardTitle}>
+              <BookText size={12} strokeWidth={2} />
+              <span>方案卡</span>
+              <button type="button" className={styles.solutionDocBtn} title="点开查看，可下载 .md" onClick={() => setDocOpen(true)}>
+                ▤ .md
+              </button>
+            </div>
+            <span className={styles.solutionState}>{solutionStatusLabel(understanding.status)}</span>
+          </div>
+          {card && (
+            <div className={styles.solutionBandCells}>
+              <span className={styles.solutionBandCell}>
+                <b>媒介</b>
+                {card.target_media === 'video' ? '视频' : '图片'}
+              </span>
+              {/* 服务端按平台模型目录核过的那一行。推荐理由与备选不上卡——那两样在对话正文里说更清楚。 */}
+              {modelLabel && (
+                <span className={styles.solutionBandCell}>
+                  <b>模型</b>
+                  {modelLabel}
+                </span>
+              )}
+              {/* 出片参数：用户真能判断对错的那几项，值域来自平台目录。没聊到的不占位。 */}
+              {specParts.length > 0 && (
+                <span className={styles.solutionBandCell}>
+                  <b>参数</b>
+                  {specParts.join(' · ')}
+                </span>
+              )}
+              {/* 续写的卡（决策十六）：只管接下来追加的那一段，用户得知道这张卡不是整条。整条是默认，不占位。 */}
+              {card.scope?.kind === 'continuation' && (
+                <span className={styles.solutionBandCell} title={card.scope.label}>
+                  <b>范围</b>
+                  {card.scope.label}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
 
-      {/* 老版本（产卡门顺手提的那种）没有结构化内容，退回只显示摘要——如实显示，好过什么都不显示。 */}
-      {!card && <div className={styles.solutionFieldValue}>{understanding.proposed_summary}</div>}
+        {/* 老版本（产卡门顺手提的那种）没有结构化内容，退回只显示摘要——如实显示，好过什么都不显示。 */}
+        {!card && <div className={styles.solutionFieldValue}>{understanding.proposed_summary}</div>}
 
-      {card && (
-        <>
-          <SolutionField label={SOLUTION_FIELD_LABELS.goal}>
-            <div className={styles.solutionFieldValue}>{card.goal}</div>
-          </SolutionField>
-          <SolutionField label={SOLUTION_FIELD_LABELS.target_media}>
-            <div className={styles.solutionFieldValue}>{card.target_media === 'video' ? '视频' : '图片'}</div>
-          </SolutionField>
-          {/* 续写的卡（决策十六）：只管接下来追加的那一段，用户得知道这张卡不是整条。整条是默认，不占位。 */}
-          {card.scope?.kind === 'continuation' && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.scope}>
-              <div className={styles.solutionFieldValue}>{card.scope.label}</div>
-            </SolutionField>
-          )}
-          {card.direction && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.direction}>
-              <div className={styles.solutionFieldValue}>{card.direction}</div>
-            </SolutionField>
-          )}
-          {card.constraints && card.constraints.length > 0 && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.constraints}>
-              <ul className={styles.solutionList}>
-                {card.constraints.map((one, i) => (
-                  <li key={i}>{one}</li>
-                ))}
-              </ul>
-            </SolutionField>
-          )}
-          {card.asset_roles && card.asset_roles.length > 0 && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.asset_roles}>
-              <ul className={styles.solutionList}>
-                {card.asset_roles.map((one) => (
-                  <li key={one.asset_ref_id}>{one.role}</li>
-                ))}
-              </ul>
-            </SolutionField>
-          )}
-          {/* 必填项：用户没说而模型替他定的，必须一眼看得见——这正是他最该核的地方。 */}
-          <SolutionField label={SOLUTION_FIELD_LABELS.assumptions}>
-            <ul className={styles.solutionList}>
+        {card && (
+          <div className={styles.solutionBody}>
+            <div className={styles.solutionGoal}>{card.goal}</div>
+            {card.direction && <blockquote className={styles.solutionDirection}>{card.direction}</blockquote>}
+            {required.length > 0 && (
+              <>
+                <div className={styles.solutionGroup}>你要求的（不会改）</div>
+                <ul className={styles.solutionList}>
+                  {required.map((one, i) => (
+                    <li key={i}>{one}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {/* 必填项：用户没说而模型替他定的，必须一眼看得见——这正是他最该核的地方。 */}
+            <div className={styles.solutionGroup}>我替你定的（不合适就说）</div>
+            <ol className={styles.solutionList}>
               {card.assumptions.map((one, i) => (
                 <li key={i}>{one}</li>
               ))}
-            </ul>
-          </SolutionField>
-          {/* 服务端按平台模型目录核过的那一行。推荐理由与备选不上卡——那两样在对话正文里说更清楚。 */}
-          {route && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.execution_route}>
-              <div className={styles.solutionFieldValue}>
-                {route.model_family}
-                {route.model_version ? ` ${route.model_version}` : ''}
-              </div>
-            </SolutionField>
-          )}
-          {/* 出片参数：用户真能判断对错的那几项，值域来自平台目录。没聊到的不占位。 */}
-          {specParts.length > 0 && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.delivery_spec}>
-              <div className={styles.solutionFieldValue}>{specParts.join(' · ')}</div>
-            </SolutionField>
-          )}
-          {card.next_steps && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.next_steps}>
-              <div className={styles.solutionFieldValue}>{card.next_steps}</div>
-            </SolutionField>
-          )}
-        </>
-      )}
+            </ol>
+          </div>
+        )}
 
-      {pending && !noteOpen && (
-        <div className={styles.solutionActions}>
-          <button
-            type="button"
-            className={styles.solutionPrimaryBtn}
-            disabled={disabled || busy}
-            onClick={() => act(onConfirm)}
-          >
-            确认
-          </button>
-          <button
-            type="button"
-            className={styles.solutionGhostBtn}
-            disabled={disabled || busy}
-            onClick={() => act(() => onVoid())}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            className={styles.solutionGhostBtn}
-            disabled={disabled || busy}
-            onClick={() => setNoteOpen(true)}
-          >
-            补充
-          </button>
-        </div>
-      )}
-
-      {pending && noteOpen && (
-        <>
-          <textarea
-            className={styles.solutionNote}
-            value={note}
-            autoFocus
-            placeholder="想补充或改哪里？写下来，我按这个重提一版。"
-            onChange={(e) => setNote(e.target.value)}
-          />
+        {pending && !noteOpen && (
+          <div className={styles.solutionHint}>不确认不会写卡</div>
+        )}
+        {pending && !noteOpen && (
           <div className={styles.solutionActions}>
             <button
               type="button"
               className={styles.solutionPrimaryBtn}
-              disabled={disabled || busy || !note.trim()}
-              onClick={() => act(() => onVoid(note.trim()))}
+              disabled={disabled || busy}
+              onClick={() => act(onConfirm)}
             >
-              发给它
+              确认，按这个写
             </button>
-            <button type="button" className={styles.solutionGhostBtn} disabled={busy} onClick={() => setNoteOpen(false)}>
-              返回
+            <button
+              type="button"
+              className={styles.solutionGhostBtn}
+              disabled={disabled || busy}
+              onClick={() => act(() => onVoid(RETHINK_NOTE))}
+            >
+              换个思路
+            </button>
+            <button
+              type="button"
+              className={styles.solutionGhostBtn}
+              disabled={disabled || busy}
+              onClick={() => setNoteOpen(true)}
+            >
+              我来改
+            </button>
+            <button type="button" className={styles.solutionLinkBtn} disabled={disabled || busy} onClick={() => act(() => onVoid())}>
+              作废
             </button>
           </div>
-        </>
-      )}
+        )}
 
-      {!pending && (
-        <div className={styles.solutionSettledNote}>
-          {understanding.status === 'accepted' ? '已确认，生成卡按这个方案写' : '这一版已作废'}
-        </div>
-      )}
-    </div>
+        {pending && noteOpen && (
+          <>
+            <textarea
+              className={styles.solutionNote}
+              value={note}
+              autoFocus
+              placeholder="告诉我改哪里，比如「灯塔放右边，去掉小船」。我按这个重提一版。"
+              onChange={(e) => setNote(e.target.value)}
+            />
+            <div className={styles.solutionActions}>
+              <button
+                type="button"
+                className={styles.solutionPrimaryBtn}
+                disabled={disabled || busy || !note.trim()}
+                onClick={() => act(() => onVoid(note.trim()))}
+              >
+                发送
+              </button>
+              <button type="button" className={styles.solutionGhostBtn} disabled={busy} onClick={() => setNoteOpen(false)}>
+                返回
+              </button>
+            </div>
+          </>
+        )}
+
+        {!pending && (
+          <div className={styles.solutionSettledNote}>
+            {understanding.status === 'accepted' ? '已确认，生成卡按这个方案写' : '这一版已作废'}
+          </div>
+        )}
+      </div>
+      {/* 「接下来怎么做」不在卡里：它是模型接着要说的话，不是方案的一部分。 */}
+      {card?.next_steps && <div className={styles.solutionNextSteps}>{card.next_steps}</div>}
+      {docOpen && <CardDocModal title="方案卡" markdown={solutionCardMarkdown(understanding)} onClose={() => setDocOpen(false)} />}
+    </>
   );
 }
 
-/** 一条已提交的 Prompt 预览：标题和单正文，逐条手动应用。 */
-function GenerationCard({ card, onApply, disabled, applied }: {
+/**
+ * 提示词卡（IKFLB9 定稿改版）：标题 + 张数 / 模型 / 画幅；「参考」一排素材胶囊；正文里提到的素材也是胶囊
+ * （和正文同一个 Markdown，所以 #1 / 文件名都能认）；默认收成三行，「展开全文」再看；三个动作：应用到画布 /
+ * 复制提示词 / 打开查看（渲染成 .md 可下载）。
+ */
+function GenerationCard({ card, onApply, disabled, applied, assets }: {
   card: NonNullable<SessionContentBlock['card']>;
   onApply: () => void;
   disabled: boolean;
   applied?: boolean;
+  assets: readonly KnownAsset[];
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [full, setFull] = useState(false);
+  const [docOpen, setDocOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const refs = card.assetRefItems;
+  // 卡自己带的素材引用并进正文识别：历史消息里 knownAssets 可能没有它们。正文里的 `@图1` 按服务端
+  // 算好的记号原文认，胶囊上写「图1」，和上面「参考」那一排、画布 `#N` 同一个号；悬停看全名。
+  const cardAssets = useMemo<KnownAsset[]>(() => {
+    const known = new Set(assets.map((a) => a.assetId));
+    const markers = (refs ?? []).flatMap((r) =>
+      (r.markerTexts ?? []).map((text) => ({ assetId: r.assetId, label: text, display: r.marker, name: r.label, mediaType: r.mediaType })),
+    );
+    const named = (refs ?? []).filter((r) => !known.has(r.assetId)).map((r) => ({ assetId: r.assetId, label: r.label, mediaType: r.mediaType }));
+    return [...markers, ...assets, ...named].sort((a, b) => b.label.length - a.label.length);
+  }, [assets, refs]);
+  const meta = [
+    card.targetMedia === 'video' ? '视频' : card.targetMedia === 'image' ? '图片' : null,
+    card.targetModel,
+    card.aspectRatio,
+    card.durationSeconds !== undefined ? `${card.durationSeconds} 秒` : card.timeRange,
+  ].filter((one): one is string => Boolean(one));
+  const prompt = card.prompt || '提示词正文缺失，请继续对话重新生成';
+  const long = prompt.length > 140 || prompt.includes('\n');
+  const copy = () => {
+    void navigator.clipboard?.writeText(card.prompt).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    });
+  };
   return (
     <div className={styles.generationCard}>
       <div className={styles.shotMeta}>
-        <span className={styles.shotTitle}>{card.shotTitle}</span>
+        <span className={styles.shotTitle}>
+          <BookText size={13} strokeWidth={2} className={styles.shotTitleIcon} />
+          {card.shotTitle}
+        </span>
         {/* 按哪套写法编的（F32）。只做展示与核对——它不下传生成面板，出片时模型由用户在那里选。 */}
-        {card.targetModel && <span className={styles.shotTargetModel}>{card.targetModel}</span>}
-        <div className={styles.shotMetaRight}>
-          <button type="button" className={styles.shotApplyBtn}
-            disabled={disabled || !card.source}
-            onClick={onApply}>
-            <Plus size={13} />{applied ? '定位文本节点' : '手动应用'}
-          </button>
-          <button type="button" className={styles.shotCollapse}
-            title={collapsed ? '展开' : '收起'} aria-expanded={!collapsed}
-            onClick={() => setCollapsed(value => !value)}>
-            {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-          </button>
-        </div>
+        {meta.length > 0 && <span className={styles.shotTargetModel}>{meta.join(' · ')}</span>}
       </div>
-      {!collapsed && <div className={styles.shotField}>
-        <span className={styles.shotFieldValue}>{card.prompt || '提示词正文缺失，请继续对话重新生成'}</span>
-      </div>}
+      {refs && refs.length > 0 && (
+        <div className={styles.shotRefs}>
+          <span className={styles.shotRefsLabel}>参考</span>
+          {refs.map((r) => (
+            <AssetMentionChip key={r.assetId} assetId={r.assetId} label={r.marker ?? r.label} name={r.label} mediaType={r.mediaType} />
+          ))}
+        </div>
+      )}
+      <div className={`${styles.shotPrompt} ${long && !full ? styles.shotPromptClamp : ''}`}>
+        <Markdown text={prompt} assets={cardAssets} className={styles.shotPromptMd} />
+      </div>
+      {long && (
+        <button type="button" className={styles.shotMore} onClick={() => setFull((v) => !v)} aria-expanded={full}>
+          {full ? '收起 ▴' : '展开全文 ▾'}
+        </button>
+      )}
+      <div className={styles.shotActions}>
+        <button type="button" className={`${styles.cardBtn} ${styles.cardBtnPrimary}`} disabled={disabled || !card.source} onClick={onApply}>
+          <Plus size={13} />
+          {applied ? '定位文本节点' : '应用到画布'}
+        </button>
+        <button type="button" className={styles.cardBtn} onClick={copy}>
+          {copied ? '已复制' : '复制提示词'}
+        </button>
+        <button type="button" className={styles.cardBtn} onClick={() => setDocOpen(true)}>
+          打开查看
+        </button>
+      </div>
+      {docOpen && <CardDocModal title={card.shotTitle} markdown={generationCardMarkdown(card)} assets={cardAssets} onClose={() => setDocOpen(false)} />}
     </div>
   );
 }
 
 /**
- * 一轮里助手那一半：按条目顺序渲染（IKDK5I / IKDK5K）。
+ * 一轮里助手那一半（IKDK5I / IKDK5K / IKFLB9 定稿）。
  *
  * 落库的回答与进行中的回答走同一个函数——前者从消息部件投影条目，后者从进行中的一轮投影，
- * 两者形状一致（sessionTimeline.ts）。「思考 → 短句 → 工具 → 短句」是数组顺序的自然结果。
+ * 两者形状一致（sessionTimeline.ts）。过程（思考、工具、等待）收成顶上一个折叠组，正文与卡按顺序铺在下面：
+ * 正文是主角，过程点开才看，不再一句正文一句思考交替。
  *
- * 条目的 React key 用**同类型内的序号**：进行中的回答被服务端消息替换时条目形状不变，
- * 工具行与思考块的开合状态因此得以保留，不会在那一瞬间跳一下。卡片按自己的身份做 key。
+ * 卡片按自己的身份做 key，正文按序号：进行中的回答被服务端消息替换时条目形状不变，开合状态得以保留。
  */
 function AssistantTurnBody({
   turn,
@@ -561,8 +549,8 @@ function AssistantTurnBody({
       : [];
   if (items.length === 0) return null;
   const live = turn.live !== null && !turn.live.ended;
-  // 正文还没出来时思考展开：那段等待正是它要填的；正文一出现就收起。
-  const hasBody = items.some((item) => item.kind === 'text' || item.kind === 'tool' || item.kind === 'card');
+  const process = items.filter(isProcessItem);
+  const body = items.filter((item) => !isProcessItem(item));
   const ordinals: Record<string, number> = {};
   const keyOf = (item: TimelineItem): string => {
     if (item.kind === 'card') {
@@ -574,17 +562,12 @@ function AssistantTurnBody({
   };
   return (
     <>
-      {items.map((item) => {
+      <ProcessGroup items={process} live={live} totalMs={turn.account?.seconds != null ? turn.account.seconds * 1000 : null} />
+      {body.map((item) => {
         const key = keyOf(item);
         switch (item.kind) {
-          case 'reasoning':
-            return (
-              <ThinkingBlock key={key} steps={item.steps} reasoning={item.reasoning} live={item.live} autoOpen={live && !hasBody} />
-            );
-          case 'tool':
-            return <ToolCallRow key={key} item={item} />;
           case 'text':
-            return <Markdown key={key} text={item.text} assets={knownAssets} />;
+            return <ReplyText key={key} text={item.text} assets={knownAssets} questions={item.questions} />;
           case 'card': {
             const cardId = item.card.cardId ?? item.card.shotTitle;
             return (
@@ -594,14 +577,16 @@ function AssistantTurnBody({
                 onApply={() => onCardApply(item.card)}
                 disabled={disabled}
                 applied={appliedCardIds.has(cardId)}
+                assets={knownAssets}
               />
             );
           }
           case 'card_preview':
             return <CardPreview key={key} preview={item.preview} />;
+          default:
+            return null;
         }
       })}
-
     </>
   );
 }
@@ -816,6 +801,8 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
     dismissDeleteError,
     refreshSessions,
   } = useAgentSession(projectId ?? '', selectedModel);
+  /** 最近一轮的账，给输入框上方那一行；还在跑的轮没有账。 */
+  const lastAccount = turns.length > 0 ? turns[turns.length - 1].account : null;
   /** 本会话用户提过的素材（IKDLW3）：助手正文里出现它们的名字就画成胶囊。 */
   const knownAssets = useMemo(() => collectKnownAssets(turns), [turns]);
   /** 历史会话下拉展开态 */
@@ -1821,7 +1808,7 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
         {/* 运行中的状态行（IKA3GD）：钉在输入框正上方，不在滚动区里。
             它是"屏幕上什么都没有"的地板，用户往上翻历史时更不能让它跟着滚走。
             终态即收起（IKDK5L）：这一轮的账挂到了它所属那一轮的尾部，不再常驻在这里。 */}
-        {turnOutcome === null && (
+        {turnOutcome === null ? (
           <RunStatusLine
             startedAt={turnStartedAt}
             activity={liveActivity}
@@ -1829,6 +1816,10 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
             outcome={null}
             streamedText={streamingText}
           />
+        ) : (
+          /* 不在跑的时候这一行报最近一轮的账（IKFLB9 定稿）：耗时、token、上下文、几点结束。
+             只有这一行，不再每轮尾都写一遍。 */
+          lastAccount && <LastTurnLine account={lastAccount} />
         )}
         {chatError && <div className={styles.chatErrorHint}>{chatError}</div>}
         {sendError && <div className={styles.chatErrorHint}>{sendError}</div>}

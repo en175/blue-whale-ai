@@ -22,6 +22,7 @@ import { markdownToSanitizedHtml } from '@lib/contracts/text-node-markdown';
 import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { renderPromptMentions, readPromptMentions, applyMediaMentionState, createMediaMentionChip } from './promptMentions';
 import { applyMarkdownInputRule } from './markdownInputRules';
+import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 
 /** 文字节点最大字数（按纯文本计，含粘贴） */
 const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
@@ -166,6 +167,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
   useEffect(() => { draftMaterialsRef.current = data.promptMaterials; }, [data.promptMaterials]);
 
   const [selectedMention, setSelectedMention] = useState<number | null>(null);
+  const showSoloToolbar = useSoloNodeSelected(selected);
   /** 点击选中的那张素材标签（替换/删除的光标锚点定位用；编号相同的多张取点击的那张） */
   const [selectedMentionChip, setSelectedMentionChip] = useState<HTMLElement | null>(null);
   const canvasNodes = useStore(state => state.nodes);
@@ -740,7 +742,7 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
           </button>
         </div>
       ) : (
-        <div className={`${styles.nodeBar} ${selected ? styles.nodeBarVisible : ''} nodrag nopan`}>
+        <div className={`${styles.nodeBar} ${showSoloToolbar ? styles.nodeBarVisible : ''} nodrag nopan`}>
           {hasPromptBindings && <>
             <select aria-label={selectedMention === null ? '新增素材标签' : `替换素材 #${selectedMention}`}
               className={styles.materialSelect} value="" onPointerDown={event => event.stopPropagation()}
@@ -787,7 +789,8 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       </div>
 
       {(contentError || titleError) && <div role="alert" className="nodrag nopan">{contentError || titleError}</div>}
-      {/* 固定正文容器：360×270（含内边距）。仅编辑态拦截滚轮做正文滚动，非编辑态交给画布平移（IKFMQO TC_CX_001/015） */}
+      {/* 固定正文容器：360×270（含内边距）。仅编辑态加 nowheel 拦截滚轮做正文滚动；
+          非编辑态不得成为滚动容器，否则 Ctrl+滚轮/捏合到不了画布（IKFN9H） */}
       <div className={`${styles.contentCard}${editing ? ' nowheel' : ''}`} data-testid="text-content" style={expanded ? { height: 540, maxHeight: '70vh' } : undefined}>
         {/* IKFM3Q 契约 §4：每张文本卡都可能承接媒体索引关系线，target 连接点常驻
            （isFirst 首卡与其余卡一致；连接点默认透明，悬停/连接中才可见，无视觉成本；
@@ -812,12 +815,11 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
         )}
         <div
           ref={editorRef}
-          className={`${styles.editor} ${editing ? 'nodrag nopan' : ''}`}
+          className={`${styles.editor} ${editing ? `${styles.editorScrolling} nodrag nopan` : ''}`}
           contentEditable={editing ? true : false}
           suppressContentEditableWarning
           style={{
             pointerEvents: isSelect && (!isTextGen || writingSelf) ? 'auto' : 'none',
-            overflowY: editing ? 'auto' : 'hidden',
           }}
           onFocus={() => setIsFocused(true)}
           onBlur={(e) => {

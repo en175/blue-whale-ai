@@ -12,6 +12,7 @@ import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaNodeToolbarVisibility } from './toolbarVisibility';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
+import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 import AudioPlayer from './AudioPlayer';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import CanvasContextMenu from '../CanvasContextMenu';
@@ -79,6 +80,8 @@ interface MediaNodeData {
   complianceBusy?: boolean;
   /** 合规校验已通过（展示成功角标，随画布持久化） */
   compliancePassed?: boolean;
+  /** 合规校验未通过（展示失败角标，随画布持久化） */
+  complianceFailed?: boolean;
   /** 派生标记：资产在 snapshot 资产字典中查不到（素材已被删除），水合期计算 */
   assetMissing?: boolean;
   /** MIME 类型（上传完成后存储，如 "image/jpeg"） */
@@ -146,6 +149,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
   const zoom = useStore((state) => state.transform[2]);
   const isSelect = data.toolMode === 'select';
+  const showSoloToolbar = useSoloNodeSelected(selected);
 
   /** 提交名称：去空格/空回退/超长拒绝/未变更跳过，细则见 cardName */
   const commitName = useCallback(() => {
@@ -365,7 +369,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       style={{ ...nodeTitleSizing(zoom), width: contentBox.width }}
     >
       {/* 选中态悬浮工具条：重新编辑/生成图片/生成视频/生成音频 + 详情/下载/@（位于外部标题上方） */}
-      {selected && !data.genStatus && !data.assetMissing && !isEmptyShell && (
+      {showSoloToolbar && !data.genStatus && !data.assetMissing && !isEmptyShell && (
         <div className={`nodrag nopan ${styles.toolbar}`} onMouseDown={stop}>
           <button className={styles.toolBtn} onClick={handleReEdit} title="带入原提示词与图片，打开图片对话框">
             <RefreshCcw size={14} strokeWidth={2} />
@@ -450,11 +454,19 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               {data.fileName || (isEmptyShell ? (data.mediaType === 'video' ? '视频节点' : data.mediaType === 'audio' ? '音频节点' : '图片节点') : '')}
             </span>
           )}
-          {data.compliancePassed && (
+          {data.complianceBusy ? (
+            <span className={`nodrag nopan ${styles.complianceBadge}`} title="校验中">
+              <span className={styles.complianceSpinner} />
+            </span>
+          ) : data.compliancePassed ? (
             <span className={`nodrag nopan ${styles.complianceBadge}`} title="校验通过，可用于seedance2.0视频生成">
               <img src="/success.png" alt="" />
             </span>
-          )}
+          ) : data.complianceFailed ? (
+            <span className={`nodrag nopan ${styles.complianceFailedText}`} title="seedance2.0合规校验失败，不可用于视频生成">
+              审核失败
+            </span>
+          ) : null}
         </div>
         <span className={styles.titleMeta} title={titleMeta || undefined}>{titleMeta}</span>
       </div>

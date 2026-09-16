@@ -46,15 +46,30 @@ export function cardsOfRevision(sessionId: string, revision: PromptCardRevision)
       elapsed += seconds;
     }
 
+    // 正文里的记号（`@图1`）按服务端算好的位置认，不按文字猜：同一份素材的号、原文都从这里来。
+    const mentionsOf = new Map<string, { index: number; texts: string[] }>();
+    for (const mention of shot.prompt_mentions ?? []) {
+      const text = shot.prompt_text.slice(mention.start, mention.end);
+      if (!text) continue;
+      const seen = mentionsOf.get(mention.asset_ref_id) ?? { index: mention.index, texts: [] };
+      if (!seen.texts.includes(text)) seen.texts.push(text);
+      mentionsOf.set(mention.asset_ref_id, seen);
+    }
     const assetRefItems = (shot.asset_bindings ?? [])
       .map((binding) => provenanceOf.get(binding.asset_ref_id))
       .filter((provenance): provenance is NonNullable<typeof provenance> => Boolean(provenance?.display_label))
-      .map((provenance) => ({
-        assetId: provenance.asset_id,
-        // 展示名不带 @：前缀是渲染层的修辞，塞进数据里会让「名字」和「怎么显示名字」纠缠。
-        label: provenance.display_label.replace(/^@/, ''),
-        mediaType: provenance.media_type,
-      }));
+      .map((provenance) => {
+        const mention = mentionsOf.get(provenance.asset_ref_id);
+        return {
+          assetId: provenance.asset_id,
+          // 展示名不带 @：前缀是渲染层的修辞，塞进数据里会让「名字」和「怎么显示名字」纠缠。
+          label: provenance.display_label.replace(/^@/, ''),
+          mediaType: provenance.media_type,
+          ...(mention
+            ? { marker: `${provenance.media_type === 'video' ? '视频' : '图'}${mention.index}`, markerTexts: mention.texts }
+            : {}),
+        };
+      });
     // 纯文本场景（复制、给 Agent 的引用文案）仍需要 @名称 形式，与胶囊并存。
     const assetRefs = assetRefItems.map((item) => `@${item.label}`);
 

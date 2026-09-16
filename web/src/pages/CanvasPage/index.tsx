@@ -45,10 +45,11 @@ import { downloadFileNameOf } from './components/cardName';
 import type { MediaGenStatus } from './components/MediaNode';
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
 import {
+  buildMediaExtractPlaceholderNode,
   isMediaExtractNodeId,
+  MEDIA_EXTRACT_EDGE_ORIGIN,
   mediaExtractNodeId,
   mediaExtractTerminalPatch,
-  snapshotHasMediaExtractNode,
 } from './mediaExtract';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
@@ -109,7 +110,7 @@ import { uploadAssetFile } from '@/utils/upload';
 import ConfirmModal from '@/components/ConfirmModal';
 import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
-import { COMPLIANCE_SUCCESS_TOAST, depositCanvasAssetToCharacterLibrary, resolveCharacterLibraryMaterialId } from './characterLibraryDeposit';
+import { COMPLIANCE_SUCCESS_TOAST, COMPLIANCE_FAILED_TOAST, depositCanvasAssetToCharacterLibrary, isComplianceFailedError, resolveCharacterLibraryMaterialId, waitComplianceAssetReady } from './characterLibraryDeposit';
 import { buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
 import {
   availableGenKinds,
@@ -302,7 +303,9 @@ export default function CanvasPage() {
   /** 建立连线（受控去重 + custom 流光渲染形态；与服务端保存校验同口径拒绝重复 (source,target)）。
    *  refRole（IKDMQS）写入 edge.data.refRole 随连线持久化：first 首帧 / last 尾帧，缺省普通参考。
    *  连线进撤销栈（IKD0JT）：id 由 (source,target) 确定性生成，撤销/重做往返保持稳定 */
-  const addCanvasEdge = (source: string, target: string, refRole?: VideoRefRole) => {
+  /** 新增画布连线。`marker` 用于给连线打语义标记（如提取产物的来源边，IKFS5W）——
+   *  参考推导会跳过带标记的来源边，避免把「来源」误当「参考输入」。 */
+  const addCanvasEdge = (source: string, target: string, refRole?: VideoRefRole, marker?: Record<string, unknown>) => {
     const existing = edgesRef.current.find(e => e.target === target && (e.source === source || (
       e.data?.inputSources && readAssetId((findCanvasNode(e.source)?.data ?? {}) as Record<string, unknown>) === readAssetId((findCanvasNode(source)?.data ?? {}) as Record<string, unknown>)
     )));
@@ -316,6 +319,10 @@ export default function CanvasPage() {
       }
       return;
     }
+    const edgeData: Record<string, unknown> = {
+      ...(refRole && refRole !== 'reference' ? { refRole } : {}),
+      ...(marker ?? {}),
+    };
     const edge: Edge = {
       id: `e-${source}-${target}`,
       source,
@@ -324,7 +331,7 @@ export default function CanvasPage() {
       targetHandle: null,
       type: 'custom',
       style: { stroke: '#444' },
-      ...(refRole && refRole !== 'reference' ? { data: { refRole } } : {}),
+      ...(Object.keys(edgeData).length > 0 ? { data: edgeData } : {}),
     };
     historyRef.current?.pushAddEdges([edge]);
     // 同步写入 ref，发送前落盘才能读到本轮新建的连线
@@ -747,6 +754,20 @@ export default function CanvasPage() {
     const observer = new ResizeObserver(update);
     observer.observe(el);
     return () => observer.disconnect();
+  }, []);
+  /** 输入 dock 等覆盖层不在 .react-flow 内：Ctrl/Cmd+滚轮会走浏览器整页缩放，
+   *  表现为 dock 跟着放大、缩小却不回（画布缩放与页面缩放脱节）。捕获阶段拦截。 */
+  useEffect(() => {
+    const el = canvasWrapperRef.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest('.react-flow')) return;
+      event.preventDefault();
+    };
+    el.addEventListener('wheel', onWheel, { capture: true, passive: false });
+    return () => el.removeEventListener('wheel', onWheel, true);
   }, []);
   /** FlowCanvas 注册的屏幕点→flow 坐标转换（无参默认取视口中心），注册前回退原点附近 */
   const spawnPosRef = useRef<(screenPt?: { x: number; y: number }) => { x: number; y: number }>(
@@ -1440,6 +1461,18 @@ export default function CanvasPage() {
     });
   }, [textNodes, mediaNodes, productNodes, assetNodes, uploadedNodes, setEdges]);
 
+  /** 登记在途保存：期间自动保存的 800ms 防抖会因在途守卫跳过，flush 也会排在它后面——
+   *  同一时刻只有一个 PUT，不会两次请求共用同一个 If-Match（IKFS5W）。
+   *  只有仍是「最新那个」时才清空，避免先完成的一方把后登记的那次抹掉。 */
+  const trackCanvasSave = <T,>(promise: Promise<T>): Promise<T> => {
+    savePromiseRef.current = promise;
+    const release = () => {
+      if (savePromiseRef.current === promise) savePromiseRef.current = null;
+    };
+    promise.then(release, release);
+    return promise;
+  };
+
   /** 画布变更后 800ms 防抖自动保存：PUT /api/canvases/:projectId（If-Match 乐观锁） */
   useEffect(() => {
     if (!currentId || !doc || applyingRef.current) return;
@@ -1458,33 +1491,35 @@ export default function CanvasPage() {
       setSaveStatus('saving');
       // 快照本次请求覆盖的未保存新增节点；飞行中再新增的留给下一轮保存
       const pendingSnapshot = new Set(pendingNodeIdsRef.current);
-      savePromiseRef.current = saveCanvasDoc(currentId, { viewport, nodes, edges }, versionRef.current)
-        .then((saved) => {
-          versionRef.current = saved.version;
-          setSaveBlocked(false);
-          pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
-          setSaveStatus(textNodesRef.current.some(node => draftErrorsRef.current.has(node.id)) ? 'error' : 'saved');
-          setSaveEpoch(value => value + 1);
-          setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
-        })
-        .catch((e) => {
-          setSaveBlocked(true);
-          // 释放签名，允许下次变更时重试
-          lastSavedRef.current = '';
-          // 本次请求里有未保存的新增节点 → 添加失败：回滚节点（画布上不保留添加失败的节点）
-          const hadPendingAdds = pendingSnapshot.size > 0;
-          if (isApiError(e) && e.status === 412) {
-            // 版本冲突：回滚未保存节点 + toast，然后重新加载最新画布数据
-            setSaveStatus('error');
-            showToast('warn', '画布版本冲突，当前编辑已保留，请先复制正文再刷新复核');
-          } else {
-            // 网络/服务端错误：新增节点回滚，已有节点的编辑保留、左下角提示保存失败
-            if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
-            setSaveStatus('error');
-            showToast('error', hadPendingAdds ? '添加失败，请重试' : '保存失败，请重试');
-            console.warn('画布自动保存失败:', e);
-          }
-        }).finally(() => { savePromiseRef.current = null; });
+      trackCanvasSave(
+        saveCanvasDoc(currentId, { viewport, nodes, edges }, versionRef.current)
+          .then((saved) => {
+            versionRef.current = saved.version;
+            setSaveBlocked(false);
+            pendingSnapshot.forEach((id) => pendingNodeIdsRef.current.delete(id));
+            setSaveStatus(textNodesRef.current.some(node => draftErrorsRef.current.has(node.id)) ? 'error' : 'saved');
+            setSaveEpoch(value => value + 1);
+            setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
+          })
+          .catch((e) => {
+            setSaveBlocked(true);
+            // 释放签名，允许下次变更时重试
+            lastSavedRef.current = '';
+            // 本次请求里有未保存的新增节点 → 添加失败：回滚节点（画布上不保留添加失败的节点）
+            const hadPendingAdds = pendingSnapshot.size > 0;
+            if (isApiError(e) && e.status === 412) {
+              // 版本冲突：回滚未保存节点 + toast，然后重新加载最新画布数据
+              setSaveStatus('error');
+              showToast('warn', '画布版本冲突，当前编辑已保留，请先复制正文再刷新复核');
+            } else {
+              // 网络/服务端错误：新增节点回滚，已有节点的编辑保留、左下角提示保存失败
+              if (hadPendingAdds) rollbackPendingNodes(pendingSnapshot);
+              setSaveStatus('error');
+              showToast('error', hadPendingAdds ? '添加失败，请重试' : '保存失败，请重试');
+              console.warn('画布自动保存失败:', e);
+            }
+          }),
+      );
     }, 800);
     return () => window.clearTimeout(timer);
   }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch]);
@@ -3366,6 +3401,35 @@ export default function CanvasPage() {
     });
   };
 
+  const startNodeCompliance = (id: string) => {
+    patchNodeCompliance(id, {
+      complianceBusy: true,
+      compliancePassed: false,
+      complianceFailed: false,
+    });
+  };
+
+  const toastComplianceError = (err: unknown) => {
+    if (isApiError(err)) return;
+    showToast(
+      'error',
+      isComplianceFailedError(err)
+        ? COMPLIANCE_FAILED_TOAST
+        : err instanceof Error
+          ? err.message
+          : '校验失败，请重试',
+    );
+  };
+
+  const failNodeCompliance = (id: string, err: unknown) => {
+    patchNodeCompliance(id, {
+      complianceBusy: false,
+      compliancePassed: false,
+      complianceFailed: isComplianceFailedError(err),
+    });
+    toastComplianceError(err);
+  };
+
   /** 图片/视频合规入库；成功后节点展示 success.png 通过图标 */
   const ensureMediaNodeCompliance = async (
     id: string,
@@ -3384,15 +3448,27 @@ export default function CanvasPage() {
       assetId,
     });
     if (verifiedId) {
-      if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
-      patchNodeCompliance(id, { complianceBusy: false, compliancePassed: true, materialId: verifiedId });
-      return verifiedId;
+      startNodeCompliance(id);
+      try {
+        await waitComplianceAssetReady(verifiedId);
+        if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
+        patchNodeCompliance(id, {
+          complianceBusy: false,
+          compliancePassed: true,
+          complianceFailed: false,
+          materialId: verifiedId,
+        });
+        return verifiedId;
+      } catch (err) {
+        failNodeCompliance(id, err);
+        return undefined;
+      }
     }
     if (!url || url.startsWith('blob:')) {
       showToast('warn', '素材尚未上传完成，请稍后重试');
       return undefined;
     }
-    patchNodeCompliance(id, { complianceBusy: true });
+    startNodeCompliance(id);
     try {
       const result = await depositCanvasAssetToCharacterLibrary({
         sourceAssetId: assetId,
@@ -3401,7 +3477,7 @@ export default function CanvasPage() {
         mediaType,
       });
       if (!result.materialId) {
-        patchNodeCompliance(id, { complianceBusy: false });
+        patchNodeCompliance(id, { complianceBusy: false, compliancePassed: false, complianceFailed: false });
         showToast('error', '校验失败，请重试');
         return undefined;
       }
@@ -3409,14 +3485,12 @@ export default function CanvasPage() {
       patchNodeCompliance(id, {
         complianceBusy: false,
         compliancePassed: true,
+        complianceFailed: false,
         materialId: result.materialId,
       });
       return result.materialId;
     } catch (err) {
-      patchNodeCompliance(id, { complianceBusy: false });
-      if (!isApiError(err)) {
-        showToast('error', err instanceof Error ? err.message : '校验失败，请重试');
-      }
+      failNodeCompliance(id, err);
       return undefined;
     }
   };
@@ -3436,25 +3510,21 @@ export default function CanvasPage() {
     const materialByKey = new Map<string, string>();
     for (const item of images) {
       if (materialByKey.has(item.nodeId)) continue;
-      if (item.materialId && isMaterialLibraryId(item.materialId)) {
-        materialByKey.set(item.nodeId, item.materialId);
-        const canvasNode = mediaNodesRef.current.find((n) => n.id === item.nodeId);
-        if (canvasNode) {
-          const d = (canvasNode.data ?? {}) as Record<string, unknown>;
-          if (d.compliancePassed !== true || d.materialId !== item.materialId) {
-            patchNodeCompliance(item.nodeId, {
-              compliancePassed: true,
-              materialId: item.materialId,
-            });
-          }
-        }
-        continue;
-      }
       const node = mediaNodesRef.current.find((n) => n.id === item.nodeId);
       if (node) {
         const materialId = await ensureMediaNodeCompliance(item.nodeId, { toastSuccess: false });
         if (!materialId) return null;
         materialByKey.set(item.nodeId, materialId);
+        continue;
+      }
+      if (item.materialId && isMaterialLibraryId(item.materialId)) {
+        try {
+          await waitComplianceAssetReady(item.materialId);
+          materialByKey.set(item.nodeId, item.materialId);
+        } catch (err) {
+          toastComplianceError(err);
+          return null;
+        }
         continue;
       }
       if (!item.url || item.url.startsWith('blob:')) {
@@ -3474,9 +3544,7 @@ export default function CanvasPage() {
         }
         materialByKey.set(item.nodeId, result.materialId);
       } catch (err) {
-        if (!isApiError(err)) {
-          showToast('error', err instanceof Error ? err.message : '校验失败，请重试');
-        }
+        toastComplianceError(err);
         return null;
       }
     }
@@ -5139,7 +5207,8 @@ export default function CanvasPage() {
     setShowMusicDialog(false);
   };
 
-  /** 视频整段提取音频：后端创建任务并注入音频节点；前端用返回的 job_id 轮询，终态本地收敛。 */
+  /** 视频整段提取音频（IKFS5W）：建任务后本地插入音频占位节点（画布只由前端写），
+   *  立刻落库避免刚建任务就关页丢节点，再用返回的 job_id 轮询，终态本地补丁收敛。 */
   const handleNodeExtractAudio = async (id: string) => {
     const node = mediaNodesRef.current.find((item) => item.id === id);
     const assetId = node?.data?.assetId as string | number | undefined;
@@ -5161,12 +5230,22 @@ export default function CanvasPage() {
         source_asset_id: assetId,
         output_format: 'mp3',
       });
-      const nodes = await refetch();
-      if (!snapshotHasMediaExtractNode(nodes, created.job_id)) {
-        showToast('warn', '提取任务已创建，但画布节点尚未出现，请刷新画布');
-        return;
-      }
-      pollJob(mediaExtractNodeId(created.job_id), created.job_id);
+      const nodeId = mediaExtractNodeId(created.job_id);
+      const placeholder = attachCallbacks(
+        buildMediaExtractPlaceholderNode({ jobId: created.job_id, source: node }) as Node,
+      );
+      // 先同步写 ref 再 setState：本轮 flush 落库要用它，且下方连线端点必须已在本次保存的节点里
+      // （不登记 pendingNodeIdsRef：占位节点身份以任务为准，失败由终态补丁收敛，不需要添加失败回滚）
+      const current = mediaNodesRef.current;
+      const next = current.some((item) => item.id === nodeId) ? current : [...current, placeholder];
+      mediaNodesRef.current = next;
+      setMediaNodes(next);
+      // 连一条视频 → 音频的**来源边**（带 origin 标记）：说明音频是从这段视频提取来的；
+      // 参考推导会跳过它，避免把这个视频当成音频生成参考而卡住发送
+      addCanvasEdge(id, nodeId, undefined, { origin: MEDIA_EXTRACT_EDGE_ORIGIN });
+      pollJob(nodeId, created.job_id);
+      // 立刻落库（best-effort）：不等 800ms 防抖，避免刚建任务就关页丢节点
+      await flushCanvasSave(currentId).catch(() => {});
     } catch (error) {
       if (!isApiError(error)) showToast('error', '音频提取任务创建失败');
     }
@@ -5373,29 +5452,39 @@ export default function CanvasPage() {
 
   /** 等待在途保存完成并立即落盘当前画布编辑（IKDLQE 应用预览的保存串行化模式；IKDLQF 目标生图提交复用）。
    *  返回 false 表示等待期间项目已切换，调用方应中止后续动作。
-   *  调用方须持有 applyingRef 闸口，阻断 800ms 防抖自动保存与本函数并发。 */
-  const flushCanvasSave = async (projectId: string): Promise<boolean> => {
-    await savePromiseRef.current;
-    if (activeProjectRef.current !== projectId) return false;
-    if (blockInvalidDraft(textNodesRef.current.map(n => n.id))) return false;
-    const nodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
-    const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
-    if (signature !== lastSavedRef.current) {
-      try {
-        const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current }, versionRef.current);
-        versionRef.current = saved.version;
-        lastSavedRef.current = signature;
-        pendingNodeIdsRef.current.clear();
-      } catch (error) {
-        setSaveBlocked(true);
-        setSaveStatus('error');
-        throw error;
+   *  IKFS5W：自身也登记进 savePromiseRef，与 800ms 防抖自动保存互斥——同一时刻只有一个 PUT、
+   *  不会两次请求共用同一个 If-Match（调用方持 applyingRef 仍是推荐做法，但不再是正确性前提）。 */
+  const flushCanvasSave = (projectId: string): Promise<boolean> => {
+    const runFlush = async (): Promise<boolean> => {
+      if (activeProjectRef.current !== projectId) return false;
+      if (blockInvalidDraft(textNodesRef.current.map(n => n.id))) return false;
+      const contentNodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
+      // 组伪节点随 nodes 持久化（IKD0JT A3）：与防抖自动保存同口径，否则切换项目/应用预览时组关系丢失
+      const nodes = [...contentNodes, ...groupsRef.current.map((g) => groupToNode(g))];
+      const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
+      if (signature !== lastSavedRef.current) {
+        try {
+          const saved = await saveCanvasDoc(projectId, { viewport, nodes, edges: edgesRef.current }, versionRef.current);
+          versionRef.current = saved.version;
+          lastSavedRef.current = signature;
+          pendingNodeIdsRef.current.clear();
+        } catch (error) {
+          setSaveBlocked(true);
+          setSaveStatus('error');
+          throw error;
+        }
       }
-    }
-    setSaveBlocked(false);
-    setSaveStatus('saved');
-    setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
-    return true;
+      setSaveBlocked(false);
+      setSaveStatus('saved');
+      setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
+      setSaveEpoch(value => value + 1);
+      return true;
+    };
+    const previous = savePromiseRef.current;
+    const queued = previous ? previous.then(runFlush, runFlush) : runFlush();
+    // 登记「吞掉错误的 settled」供后来者安全 await；调用方拿到的 queued 照旧抛错
+    trackCanvasSave(queued.then(() => undefined, () => undefined));
+    return queued;
   };
 
   const handleRetryCanvasSave = async () => {

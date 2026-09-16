@@ -287,6 +287,265 @@ describe("createAssetRepo.findOwnedById", () => {
 
     expect(asset).toMatchObject({ id: "3", model: "unknown-model" });
   });
+
+  it("IKFSSO：AI 生成素材返回原始提示词（与 model 同一批 input 解析）", async () => {
+    const row = {
+      id: 42n,
+      type: "image",
+      url: "https://tos.test/a.png",
+      width: 800,
+      height: 600,
+      duration_ms: null,
+      source: "generated",
+      gmt_create: new Date("2026-08-01T00:00:00.000Z"),
+      size: null,
+      generation_job_id: 7n,
+      project_id: 55n,
+      mime: "image/png",
+    };
+    const generationJobs = {
+      findMany: vi.fn().mockResolvedValue([
+        { id: 7n, input: { prompt: "一只白鲸穿过蓝色鲸落", model_id: "seedance-2.0" } },
+      ]),
+    };
+    const prisma = {
+      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      generation_jobs: generationJobs,
+      generation_model_capability: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ model_id: "seedance-2.0", model_label: "Seedance 2.0" }]),
+      },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const asset = await repo.findOwnedById("42", "9");
+
+    expect(asset).toMatchObject({ id: "42", prompt: "一只白鲸穿过蓝色鲸落" });
+    // 提示词与模型展示名共用一次 generation_jobs 查询，不额外回表。
+    expect(generationJobs.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("IKFSSO：提取音频（media_extract）input 只有 source_asset_id → prompt 为 null", async () => {
+    const row = {
+      id: 6019n,
+      type: "audio",
+      url: "https://tos.test/a.mp3",
+      width: null,
+      height: null,
+      duration_ms: 12000,
+      source: "generated",
+      gmt_create: new Date("2026-08-01T00:00:00.000Z"),
+      size: null,
+      generation_job_id: 1803n,
+      project_id: 0n,
+      mime: "audio/mpeg",
+    };
+    const prisma = {
+      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      generation_jobs: {
+        findMany: vi.fn().mockResolvedValue([{ id: 1803n, input: { source_asset_id: "6018" } }]),
+      },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const asset = await repo.findOwnedById("6019", "9");
+
+    // 提取音频同样是 source=generated，但没有提示词——不能靠 source 判定。
+    expect(asset).toMatchObject({ id: "6019", source: "generated", prompt: null });
+  });
+
+  it("IKFSSO：上传素材无 generation_job_id → prompt 为 null", async () => {
+    const row = {
+      id: 1n,
+      type: "image",
+      url: "https://tos.test/upload.png",
+      width: null,
+      height: null,
+      duration_ms: null,
+      source: "uploaded",
+      gmt_create: new Date("2026-08-01T00:00:00.000Z"),
+      size: null,
+      generation_job_id: null,
+      project_id: 0n,
+      mime: "image/png",
+    };
+    const prisma = {
+      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const asset = await repo.findOwnedById("1", "9");
+
+    expect(asset).toMatchObject({ id: "1", source: "uploaded", prompt: null });
+  });
+
+  it("IKFSSO：空串 prompt（IKDLQF 允许）按「无」处理，不返回空白提示词", async () => {
+    const row = {
+      id: 5n,
+      type: "image",
+      url: "https://tos.test/blank.png",
+      width: null,
+      height: null,
+      duration_ms: null,
+      source: "generated",
+      gmt_create: new Date("2026-08-01T00:00:00.000Z"),
+      size: null,
+      generation_job_id: 11n,
+      project_id: 0n,
+      mime: "image/png",
+    };
+    const prisma = {
+      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      generation_jobs: {
+        findMany: vi.fn().mockResolvedValue([{ id: 11n, input: { prompt: "   " } }]),
+      },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const asset = await repo.findOwnedById("5", "9");
+
+    expect(asset?.prompt).toBeNull();
+  });
+
+  it("场景卡视频重生成写 prompt_text（不是 prompt）→ 仍取得到提示词", async () => {
+    const row = {
+      id: 7n,
+      type: "video",
+      url: "https://tos.test/scene.mp4",
+      width: null,
+      height: null,
+      duration_ms: null,
+      source: "generated",
+      gmt_create: new Date("2026-08-01T00:00:00.000Z"),
+      size: null,
+      generation_job_id: 12n,
+      project_id: 0n,
+      mime: "video/mp4",
+    };
+    const prisma = {
+      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      generation_jobs: {
+        // scene-card-generation-repo 建 job 时的真实形状：只有 prompt_text。
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 12n,
+            input: {
+              scene_card_id: "88",
+              plan_message_id: "9",
+              prompt_text: "分镜：海面上升起一轮月亮",
+              parameters: { model_id: "doubao-seedance-2-0" },
+            },
+          },
+        ]),
+      },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const asset = await repo.findOwnedById("7", "9");
+
+    expect(asset).toMatchObject({
+      prompt: "分镜：海面上升起一轮月亮",
+      model: "doubao-seedance-2-0",
+    });
+  });
+
+  it("generation_job_id 悬空（任务行已不在）→ prompt 与 model 一起为 null，不报错", async () => {
+    const row = {
+      id: 6050n,
+      type: "video",
+      url: "https://tos.test/orphan.mp4",
+      width: null,
+      height: null,
+      duration_ms: 4000,
+      source: "generated",
+      gmt_create: new Date("2026-08-01T00:00:00.000Z"),
+      size: null,
+      generation_job_id: 1847n,
+      project_id: 443n,
+      mime: "video/mp4",
+    };
+    const prisma = {
+      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      // 查得到 0 行：本地库里这个 job 确实不存在（真实数据里踩到过）。
+      generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const asset = await repo.findOwnedById("6050", "9");
+
+    expect(asset).toMatchObject({ id: "6050", model: null, prompt: null });
+  });
+
+  it("input 不是对象（null / 字符串 / 数组）→ 不抛错，prompt 为 null", async () => {
+    const row = {
+      id: 8n,
+      type: "image",
+      url: "https://tos.test/weird.png",
+      width: null,
+      height: null,
+      duration_ms: null,
+      source: "generated",
+      gmt_create: new Date("2026-08-01T00:00:00.000Z"),
+      size: null,
+      generation_job_id: 13n,
+      project_id: 0n,
+      mime: "image/png",
+    };
+    const inputs: unknown[] = [null, "raw-string", ["array"]];
+    const prisma = {
+      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      generation_jobs: { findMany: vi.fn().mockResolvedValue([{ id: 13n, input: inputs[0] }]) },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    for (const input of inputs) {
+      prisma.generation_jobs.findMany.mockResolvedValue([{ id: 13n, input }]);
+      const asset = await repo.findOwnedById("8", "9");
+      expect(asset?.prompt).toBeNull();
+    }
+  });
+});
+
+describe("IKFSSO：提示词只进详情，不进列表", () => {
+  it("listByUser 的记录不含 prompt 字段（资产库全量拉取不背提示词体积）", async () => {
+    const row = {
+      id: 42n,
+      type: "image",
+      url: "https://tos.test/a.png",
+      width: 800,
+      height: 600,
+      duration_ms: null,
+      source: "generated",
+      gmt_create: new Date("2026-08-01T00:00:00.000Z"),
+      size: null,
+      generation_job_id: 7n,
+      project_id: 55n,
+      mime: "image/png",
+    };
+    const prisma = {
+      assets: {
+        count: vi.fn().mockResolvedValue(1),
+        findMany: vi.fn().mockResolvedValue([row]),
+      },
+      generation_jobs: {
+        findMany: vi.fn().mockResolvedValue([{ id: 7n, input: { prompt: "海浪" } }]),
+      },
+      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    const page = await repo.listByUser("9", { page: 1, size: 24 });
+
+    expect(page.records[0]).not.toHaveProperty("prompt");
+  });
 });
 
 describe("createAssetRepo 方案C（project_asset 关联）", () => {

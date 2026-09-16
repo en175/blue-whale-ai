@@ -23,6 +23,15 @@ export interface AssetView {
   material_group_id: string | null;
 }
 
+/** 详情路径视图（IKFSSO）：列表字段 + 生成提示词。
+ *  只在 `GET /api/assets/:assetId` 用。列表不带 `prompt`——单条上限 4000 字，
+ *  而资产库 `fetchAllAssets` 是全量拉取，逐条带提示词会把响应体撑大一个量级。 */
+export interface AssetDetailView extends AssetView {
+  /** AI 生成素材的原始提示词。上传素材、提取音频（`media_extract`）、
+   *  以及合法空串 prompt（IKDLQF：带 target_node_id 时允许空 prompt）均为 null。 */
+  prompt: string | null;
+}
+
 export interface AssetPage {
   records: AssetView[];
   total: number;
@@ -116,8 +125,9 @@ export interface AssetRepo {
     sourceAssetId: string,
     userId: string,
   ): Promise<AssetSourceFields | null>;
-  /** 取当前用户自己的单个资产详情（画布/资产库弹窗用）；不存在/不归属/已删 → null。 */
-  findOwnedById(assetId: string, userId: string): Promise<AssetView | null>;
+  /** 取当前用户自己的单个资产详情（画布/资产库弹窗用）；不存在/不归属/已删 → null。
+   *  比列表多带 `prompt`（IKFSSO），见 `AssetDetailView`。 */
+  findOwnedById(assetId: string, userId: string): Promise<AssetDetailView | null>;
   /** 在目标项目落下资产副本行（与源共享 storage_key 物理对象），返回新副本视图。 */
   insertCopy(
     projectId: string,
@@ -210,17 +220,49 @@ function toUploadAsset(row: {
   };
 }
 
-/** 按 assets 行批量解析生成模型展示名：jobId → model_label（无展示名回退 model_id）。
- *  model_id 取任务 input 的顶层 model_id 或 parameters.model_id（场景卡等路径）。 */
-async function resolveAssetModels(
+/** 从生成任务 input 里取提示词；非字符串或纯空白一律视为「无」。
+ *
+ *  **两种写入口径都认**：常规生成写 `prompt`；场景卡视频重生成写 `prompt_text`
+ *  （`scene-card-generation-repo.ts` 自己的读路径也认这个键）。漏掉后者的话，场景卡
+ *  产出的视频会显示模型名却没有提示词——`model_id` 走 `parameters.model_id` 的兜底
+ *  就是为了同一个场景卡路径，两个字段的兜底得对齐。
+ *
+ *  IKFSSO：提取音频（media_extract）的 input 只有 source_asset_id，本就没有 prompt；
+ *  空串 prompt 是合法输入（IKDLQF：带 target_node_id 时允许空 prompt），
+ *  一并按「无」处理，免得前端拿到一条空白提示词。 */
+function promptFromJobInput(input: unknown): string | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const { prompt, prompt_text: promptText } = input as {
+    prompt?: unknown;
+    prompt_text?: unknown;
+  };
+  for (const candidate of [prompt, promptText]) {
+    if (typeof candidate === "string" && candidate.trim() !== "") return candidate;
+  }
+  return null;
+}
+
+/** 按 assets 行批量解析生成任务元信息：jobId → 模型展示名 / 提示词。
+ *
+ *  列表与单查共用的**唯一一次** `generation_jobs` 查询：同一批 `input` 同时喂出两个映射。
+ *  `modelByJobId` 两条路径都用；`promptByJobId` 只有详情路径消费（`toAssetDetailView`），
+ *  列表刻意丢弃——见 `AssetDetailView` 的体积说明。
+ *
+ *  model_id 取任务 input 的顶层 model_id 或 parameters.model_id（场景卡等路径）；
+ *  展示名查不到时回退 model_id。 */
+async function resolveAssetJobMeta(
   prisma: PrismaClient,
   rows: { generation_job_id: bigint | null }[],
-): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
+): Promise<{
+  modelByJobId: Map<string, string>;
+  promptByJobId: Map<string, string>;
+}> {
+  const modelByJobId = new Map<string, string>();
+  const promptByJobId = new Map<string, string>();
   const jobIds = rows
     .map((a) => a.generation_job_id)
     .filter((id): id is bigint => id != null);
-  if (jobIds.length === 0) return result;
+  if (jobIds.length === 0) return { modelByJobId, promptByJobId };
 
   const jobs = await prisma.generation_jobs.findMany({
     where: { id: { in: jobIds } },
@@ -230,7 +272,7 @@ async function resolveAssetModels(
   const modelIds = new Set<string>();
   for (const job of jobs) {
     const input = job.input as
-      | { model_id?: string; parameters?: { model_id?: string } }
+      | { model_id?: string; parameters?: { model_id?: string }; prompt?: unknown }
       | null
       | undefined;
     const modelId = input?.model_id ?? input?.parameters?.model_id;
@@ -238,8 +280,11 @@ async function resolveAssetModels(
       modelIdByJob.set(job.id.toString(), modelId);
       modelIds.add(modelId);
     }
+    // IKFSSO：同一批 input 顺带取提示词，不额外回表。
+    const prompt = promptFromJobInput(input);
+    if (prompt !== null) promptByJobId.set(job.id.toString(), prompt);
   }
-  if (modelIds.size === 0) return result;
+  if (modelIds.size === 0) return { modelByJobId, promptByJobId };
 
   const caps = await prisma.generation_model_capability.findMany({
     where: { model_id: { in: [...modelIds] }, enabled: true, is_delete: false },
@@ -250,9 +295,9 @@ async function resolveAssetModels(
     if (!labelByModel.has(cap.model_id)) labelByModel.set(cap.model_id, cap.model_label);
   }
   for (const [jobId, modelId] of modelIdByJob) {
-    result.set(jobId, labelByModel.get(modelId) ?? modelId);
+    modelByJobId.set(jobId, labelByModel.get(modelId) ?? modelId);
   }
-  return result;
+  return { modelByJobId, promptByJobId };
 }
 
 /** assets 行 → 对外视图（AssetView）。列表与单查共用的字段映射，行为必须一致。 */
@@ -298,6 +343,23 @@ function toAssetView(
   };
 }
 
+/** assets 行 → 详情视图（IKFSSO）：复用列表那份字段映射，只追加 `prompt`。
+ *  入参类型走 `Parameters<typeof toAssetView>[0]` 而非重抄一遍，两个映射的行结构不会漂。
+ *  提示词按 assets 行取而非按 job 取，与 `model` 同源同兜底。 */
+function toAssetDetailView(
+  a: Parameters<typeof toAssetView>[0],
+  modelByJobId: Map<string, string>,
+  promptByJobId: Map<string, string>,
+): AssetDetailView {
+  return {
+    ...toAssetView(a, modelByJobId),
+    prompt:
+      a.generation_job_id == null
+        ? null
+        : (promptByJobId.get(a.generation_job_id.toString()) ?? null),
+  };
+}
+
 export function createAssetRepo(prisma: PrismaClient): AssetRepo {
   return {
     async findOwnedById(assetId, userId) {
@@ -309,8 +371,8 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         },
       });
       if (!row) return null;
-      const modelByJobId = await resolveAssetModels(prisma, [row]);
-      return toAssetView(row, modelByJobId);
+      const { modelByJobId, promptByJobId } = await resolveAssetJobMeta(prisma, [row]);
+      return toAssetDetailView(row, modelByJobId, promptByJobId);
     },
     async softDeleteOwned(assetId, userId) {
       // IKCNLP（方案C）：删除素材 = 软删 assets + 同步删 project_asset 关联，画布节点不动。
@@ -434,7 +496,8 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       ]);
       // 生成模型溯源：按 generation_job_id 批量回查任务 input 的 model_id，再查能力表展示名。
       // 兜底顺序：展示名 → model_id → null（上传资产/任务无模型/查询失败均落到 null 或回退）。
-      const modelByJobId = await resolveAssetModels(prisma, rows);
+      // IKFSSO：同一批查询顺带解析出的 promptByJobId 列表不用，刻意只取 modelByJobId。
+      const { modelByJobId } = await resolveAssetJobMeta(prisma, rows);
       return {
         records: rows.map((a) => toAssetView(a, modelByJobId)),
         total,
