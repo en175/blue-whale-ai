@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
-import { canvasUndoKeyAction, isMentionMenuOpen, type CanvasUndoKeyInput } from './keyboardUndo';
+import { canvasUndoKeyAction, type CanvasUndoKeyInput } from './keyboardUndo';
+import { isMentionMenuOpen } from './canvasKeyboard';
 
 function press(overrides: Partial<CanvasUndoKeyInput> = {}): CanvasUndoKeyInput {
   return {

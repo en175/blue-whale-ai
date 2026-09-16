@@ -2,23 +2,12 @@
  * 画布撤销/重做快捷键策略：Ctrl/Cmd+Z 撤销、Ctrl/Cmd+Shift+Z / Ctrl+Y 重做
  * ============================================ */
 import { isEditableKeyboardTarget } from './keyboardDelete';
+import type { CanvasKeyboardInput } from './canvasKeyboard';
 
 export type CanvasUndoKeyAction = 'undo' | 'redo' | 'ignore';
 
-export interface CanvasUndoKeyInput {
-  key: string;
-  metaKey: boolean;
-  ctrlKey: boolean;
-  shiftKey: boolean;
-  target: EventTarget | null;
-  /** @ 引用菜单打开期间键盘归菜单处理，Z/Y 不被画布截断 */
-  mentionMenuOpen: boolean;
-}
-
-/** @ 引用菜单是否打开（Esc 链同款检测约定：DOM 挂载即打开） */
-export function isMentionMenuOpen(): boolean {
-  return document.querySelector('[data-canvas-keyboard-scope="mention"]') !== null;
-}
+/** 共享键盘事件输入（canvasKeyboard.ts 收口，与剪贴板等快捷键同构） */
+export type CanvasUndoKeyInput = CanvasKeyboardInput;
 
 /**
  * 决定画布对撤销/重做按键的处理：

@@ -3,6 +3,7 @@
  * 输入框 / 编辑器 / @ 引用菜单让位浏览器原生行为
  * ============================================ */
 import { isEditableKeyboardTarget } from './keyboardDelete';
+import type { CanvasKeyboardInput } from './canvasKeyboard';
 
 /**
  * 决策枚举：后续快捷键（如 Z 撤销）按同名形态扩展，'ignore' 统一表示
@@ -10,15 +11,8 @@ import { isEditableKeyboardTarget } from './keyboardDelete';
  */
 export type CanvasClipboardKeyAction = 'copy' | 'paste' | 'ignore';
 
-export interface CanvasClipboardKeyInput {
-  key: string;
-  metaKey: boolean;
-  ctrlKey: boolean;
-  shiftKey: boolean;
-  target: EventTarget | null;
-  /** @ 引用菜单是否打开（菜单自行处理键盘，画布不得截断） */
-  mentionMenuOpen: boolean;
-}
+/** 共享键盘事件输入（canvasKeyboard.ts 收口，与撤销等快捷键同构） */
+export type CanvasClipboardKeyInput = CanvasKeyboardInput;
 
 /**
  * 决定画布对 C / V 按键的处理：

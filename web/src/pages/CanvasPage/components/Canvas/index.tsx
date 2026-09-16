@@ -35,6 +35,7 @@ import GroupOverlay from '../GroupOverlay';
 import GroupFrameNode from '../GroupFrameNode';
 import { canvasDeleteKeyAction, deleteSelectedCanvasNodes, isEditableKeyboardTarget } from './keyboardDelete';
 import { canvasClipboardKeyAction, copyableSelectedCanvasNodes } from './keyboardClipboard';
+import { isMentionMenuOpen } from './canvasKeyboard';
 import { useCanvasPan } from './useCanvasPan';
 import ConnectionPreview from './ConnectionPreview';
 import {
@@ -585,7 +586,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             ctrlKey: e.ctrlKey,
             shiftKey: e.shiftKey,
             target: e.target,
-            mentionMenuOpen: Boolean(document.querySelector('[data-canvas-keyboard-scope="mention"]')),
+            mentionMenuOpen: isMentionMenuOpen(),
           });
           if (clipboardAction === 'ignore') return;
           e.preventDefault();

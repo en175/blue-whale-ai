@@ -70,7 +70,8 @@ import type { AssetCardKind } from './components/AssetCardNode';
 import type { CanvasProject } from './components/ProjectSelector';
 import FlowCanvas from './components/Canvas';
 import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
-import { canvasUndoKeyAction, isMentionMenuOpen } from './components/Canvas/keyboardUndo';
+import { canvasUndoKeyAction } from './components/Canvas/keyboardUndo';
+import { isMentionMenuOpen } from './components/Canvas/canvasKeyboard';
 import { useEdgesState, type Connection, type Edge, type Node, type Viewport, type OnSelectionChangeParams } from '@xyflow/react';
 import { useAuthStore } from '@/stores/auth';
 import { fetchMe, fetchQuota, toSessionUser } from '@/api/auth';
@@ -1646,6 +1647,16 @@ export default function CanvasPage() {
   /** 连续粘贴整组错开步长（右下逐档，对齐立即复制 +40/+40 偏移惯例） */
   const CLIPBOARD_PASTE_STAIR_PX = 40;
 
+  /** 下一次粘贴的落位锚点（IKGBPA 快照粘贴与 IKGBPB 系统剪贴板兜底共用）：
+   *  视口中心锚点 + 当前档阶梯偏移，并自增档位；档位只在粘贴确定产出内容时消耗
+   *  （系统剪贴板读取失败/双空在调用前已静默返回，不进本函数）。 */
+  const nextPasteAnchor = (): { x: number; y: number } => {
+    const stair = CLIPBOARD_PASTE_STAIR_PX * clipboardPasteOffsetRef.current;
+    clipboardPasteOffsetRef.current += 1;
+    const anchor = spawnPosRef.current();
+    return { x: anchor.x + stair, y: anchor.y + stair };
+  };
+
   /** C 快照定格（IKGBPA）：深拷贝选中卡（JSON 克隆剥掉回调，粘贴时经 attachCallbacks 重注入）；
    *  原卡后续删除/改名/编辑/生成完成均不影响快照。ids 已由 Canvas 入口过滤为文本/媒体卡。 */
   const handleCopySelectedNodes = (ids: string[]) => {
@@ -1666,7 +1677,8 @@ export default function CanvasPage() {
 
   /** V 粘贴（IKGBPA）：视口中心落位 + 多卡按快照原相对位置整体落位 + 连续粘贴整组右下递增错开；
    *  手拉连线不随贴（只产散卡）；文本卡副本按 IKFM3Q 契约 §4 重建正文 @ 引用派生索引线；
-   *  按「新增节点」登记撤销（一次粘贴一条，撤销一次移除整组副本，悬空派生线由 IKDLQF 级联清理）。
+   *  撤销登记两条目（同既有立即复制 handleDuplicateNode 形态）：节点组「新增节点」一条、
+   *  派生索引线「新增连线」一条，连按 Z 整体回净；悬空派生线由 IKDLQF 级联清理。
    *  IKGBPB：内部剪贴板为空时不再静默，改走系统剪贴板兜底（pasteFromSystemClipboard）。 */
   const handlePasteClipboard = () => {
     // 内部剪贴板优先：有快照完全不读系统剪贴板（连读取 API 都不触发）
@@ -1675,9 +1687,7 @@ export default function CanvasPage() {
       return;
     }
     const snapshot = clipboardSnapshotRef.current;
-    const stair = CLIPBOARD_PASTE_STAIR_PX * clipboardPasteOffsetRef.current;
-    clipboardPasteOffsetRef.current += 1;
-    const anchor = spawnPosRef.current();
+    const anchor = nextPasteAnchor();
     const minX = Math.min(...snapshot.map((s) => s.position.x));
     const minY = Math.min(...snapshot.map((s) => s.position.y));
     const textCopies: Node[] = [];
@@ -1685,8 +1695,8 @@ export default function CanvasPage() {
     const newIds: string[] = [];
     snapshot.forEach((s) => {
       const position = {
-        x: Math.round(anchor.x + (s.position.x - minX) + stair),
-        y: Math.round(anchor.y + (s.position.y - minY) + stair),
+        x: Math.round(anchor.x + (s.position.x - minX)),
+        y: Math.round(anchor.y + (s.position.y - minY)),
       };
       const data = JSON.parse(JSON.stringify(s.data)) as Record<string, unknown>;
       if (s.kind === 'text') {
@@ -1727,10 +1737,8 @@ export default function CanvasPage() {
   const pasteFromSystemClipboard = async () => {
     const payload = await readCanvasClipboard();
     if (!payload) return;
-    const stair = CLIPBOARD_PASTE_STAIR_PX * clipboardPasteOffsetRef.current;
-    clipboardPasteOffsetRef.current += 1;
-    const anchor = spawnPosRef.current();
-    const position = { x: Math.round(anchor.x + stair), y: Math.round(anchor.y + stair) };
+    const anchor = nextPasteAnchor();
+    const position = { x: Math.round(anchor.x), y: Math.round(anchor.y) };
     if (payload.kind === 'image') {
       // 上传失败时节点自移除并由落卡链路内既有 toast 提示；这里只吞 rejection 不额外提示
       await placeFileOnCanvas(payload.file, { position })
