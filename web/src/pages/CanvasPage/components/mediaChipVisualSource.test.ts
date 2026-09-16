@@ -1,0 +1,77 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+/* IKG7NH 共享视觉定义源断言 + 源唯一性锁：文本卡正文 chip 与生成面板 chip
+   共用 mediaChip.module.css 一份定义，promptMentions.ts 不再内联视觉样式，
+   生成面板样式表不再保留第二份胶囊规则。源断言须在 node 环境跑
+   （jsdom 会改写 import.meta.url 的 scheme）。 */
+
+describe('IKG7NH 共享视觉定义源断言', () => {
+  const sharedCss = readFileSync(fileURLToPath(new URL('./mediaChip.module.css', import.meta.url)), 'utf-8');
+  const promptMentionsSrc = readFileSync(fileURLToPath(new URL('./TextNode/promptMentions.ts', import.meta.url)), 'utf-8');
+  const panelCss = readFileSync(fileURLToPath(new URL('./PromptRefEditor/index.module.css', import.meta.url)), 'utf-8');
+
+  /** 取指定选择器命中的规则体；选择器按精确匹配，避免误中更长选择器。 */
+  function ruleBodiesOf(css: string, selector: string): string[] {
+    const bodies: string[] = [];
+    const rulePattern = /([^{}]+)\{([^{}]*)\}/g;
+    const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    let match: RegExpExecArray | null;
+    while ((match = rulePattern.exec(stripped)) !== null) {
+      const selectors = match[1].split(',').map(s => s.trim().replace(/\s+/g, ' '));
+      if (selectors.includes(selector)) bodies.push(match[2]);
+    }
+    return bodies;
+  }
+
+  it('.mediaChip 胶囊保持生成面板原值：8px 圆角、12px 字号、20px 行高、白 8% 底', () => {
+    const bodies = ruleBodiesOf(sharedCss, '.mediaChip');
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toContain('border-radius: 8px');
+    expect(bodies[0]).toContain('font-size: 12px');
+    expect(bodies[0]).toContain('line-height: 20px');
+    expect(bodies[0]).toContain('background: rgba(255, 255, 255, 0.08)');
+  });
+
+  it('.mediaChipThumb 缩略图 18px、圆角 4px', () => {
+    const bodies = ruleBodiesOf(sharedCss, '.mediaChipThumb');
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toContain('width: 18px');
+    expect(bodies[0]).toContain('border-radius: 4px');
+  });
+
+  it('.mediaChipInvalid 失效态：淡红底 + 红实线框', () => {
+    const bodies = ruleBodiesOf(sharedCss, '.mediaChipInvalid');
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toContain('background: rgba(248, 113, 113, 0.14)');
+    expect(bodies[0]).toContain('border-color: rgba(248, 113, 113, 0.45)');
+    expect(bodies[0]).not.toContain('dashed');
+  });
+
+  it('源唯一性：文本卡 chip 不再内联视觉样式', () => {
+    expect(promptMentionsSrc).not.toContain('cssText');
+    expect(promptMentionsSrc).not.toContain('#303030');
+    expect(promptMentionsSrc).not.toContain('border-radius');
+    expect(promptMentionsSrc).not.toContain('#555');
+  });
+
+  it('源唯一性：生成面板样式表不再保留第二份胶囊定义', () => {
+    expect(panelCss).not.toContain('refChip');
+  });
+
+  it('文本卡差异类：整块选中与音频图标占位落在 TextNode 侧', () => {
+    const editorCss = readFileSync(fileURLToPath(new URL('./TextNode/index.module.css', import.meta.url)), 'utf-8');
+    // 挂 .editor 后代组合抬优先级，稳定压过共享 .mediaChip 的 user-select:none
+    const selectable = ruleBodiesOf(editorCss, '.editor .mediaChipSelectable');
+    expect(selectable).toHaveLength(1);
+    expect(selectable[0]).toContain('user-select: all');
+    const audioIcon = ruleBodiesOf(editorCss, '.mediaChipAudioIcon');
+    expect(audioIcon).toHaveLength(1);
+    expect(audioIcon[0]).toContain('width: 18px');
+    const thumbWrap = ruleBodiesOf(editorCss, '.mediaChipThumbWrap');
+    expect(thumbWrap).toHaveLength(1);
+    expect(thumbWrap[0]).toContain('display: inline-flex');
+    expect(thumbWrap[0]).toContain('align-items: center');
+  });
+});
