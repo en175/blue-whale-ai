@@ -479,52 +479,8 @@
   background-color: rgba(229, 72, 77, 0.12);
 }
 
-.chipPreview {
-  position: fixed;
-  transform: translateY(calc(-100% - 8px));
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-width: 280px;
-  padding: 8px;
-  background-color: #242424;
-  border: 1px solid #3a3a3a;
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  z-index: 10001;
-  pointer-events: none;
-}
-
-/* IKFR6A：标签贴近屏幕顶部时预览翻到标签下方，不再向上位移 */
-.chipPreviewBelow {
-  transform: none;
-}
-
-.chipPreview img,
-.chipPreview video {
-  max-width: 264px;
-  max-height: 200px;
-  border-radius: 6px;
-  object-fit: contain;
-}
-
-.chipPreviewAudio {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 18px 12px;
-  color: #bbb;
-  font-size: 13px;
-}
-
-.chipPreviewName {
-  max-width: 264px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #aaa;
-  font-size: 12px;
-}
+/* chipPreview 悬停预览浮层系列（.chipPreview/.chipPreviewBelow/.chipPreviewAudio/
+   .chipPreviewName 及 img/video 规则）已随 IKGABW 迁入 ../mediaChip.module.css 共享 */
 
 /* 点击定位来源：目标节点短暂高亮（1.2s 后由 JS 移除） */
 .locateFlash {
@@ -543,6 +499,7 @@
 /* ============================================
  * IKG7NH 正文素材标签：文本卡侧差异类
  * 胶囊视觉与生成面板共用 ../mediaChip.module.css，此处只放文本卡特有差异。
+ * IKGABW 后文本卡仅剩整块选中差异；音频图标占位与缩略图包裹已迁入共享模块。
  * ============================================ */
 
 /* 文本卡 chip 需整块选中（服务整体删除/替换），覆盖共享胶囊的 user-select:none（拍板 6）。
@@ -550,18 +507,4 @@
    不再依赖两份 CSS 的打包先后顺序 */
 .editor .mediaChipSelectable {
   user-select: all;
-}
-
-/* 缩略图/音符图标的包裹 span（文本卡特有结构）：行内弹性保证图标与缩略图垂直居中，
-   flex:none 防被胶囊 flex 行压缩 */
-.mediaChipThumbWrap {
-  display: inline-flex;
-  align-items: center;
-  flex: none;
-}
-
-/* 音频标签音符图标占位：音频无缩略图，图标宽度与共享缩略图同 18px */
-.mediaChipAudioIcon {
-  width: 18px;
-  text-align: center;
 }
