@@ -69,9 +69,10 @@ function AssetRefChipComponent({
     if (hoverTimerRef.current) window.clearTimeout(hoverTimerRef.current);
   }, []);
   const previewable = info !== undefined && info.mediaType !== 'text' && Boolean(info.url);
+  // mediaType 未指定按图片处理（与 IKFA1O 起旧渲染行为一致，防调用方缺省时缩略图消失）
+  const isImage = info?.mediaType === undefined || info.mediaType === 'image';
   const { refs, floatingStyles } = useFloating({
     open: previewOpen,
-    onOpenChange: setPreviewOpen,
     placement: 'top-start',
     whileElementsMounted: autoUpdate,
     middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 })],
@@ -121,7 +122,7 @@ function AssetRefChipComponent({
       }}
       onMouseLeave={closePreview}
     >
-      {info?.url && info.mediaType === 'image' && <img className={styles.mediaChipThumb} src={info.url} alt="" />}
+      {info?.url && isImage && <img className={styles.mediaChipThumb} src={info.url} alt="" />}
       {info?.url && info.mediaType === 'video' && <video className={styles.mediaChipThumb} src={info.url} muted playsInline preload="metadata" />}
       {info?.mediaType === 'audio' && <span className={styles.mediaChipAudioIcon} aria-hidden="true">♫</span>}
       <span className={styles.mediaChipLabel}>{label ?? '素材?'}</span>
@@ -135,7 +136,7 @@ function AssetRefChipComponent({
             contentEditable={false}
             data-testid="asset-ref-preview"
           >
-            {info.mediaType === 'image' && <img src={info.url} alt="" />}
+            {isImage && info.url && <img src={info.url} alt="" />}
             {info.mediaType === 'video' && <video src={info.url} muted autoPlay loop playsInline />}
             {info.mediaType === 'audio' && <div className={styles.chipPreviewAudio}><AudioLines size={28} strokeWidth={1.5} /><span>音频</span></div>}
             <div className={styles.chipPreviewName}>{info.name}</div>
