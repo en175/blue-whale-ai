@@ -1,6 +1,11 @@
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
 import type { CanvasEdge } from "@lib/contracts";
-import type { PromptTargetNode } from "../canvas/prompt-target.js";
+import {
+  MISSING_PROMPT_REF_REASON,
+  planIndicesMessage,
+  type PromptTargetNode,
+} from "../canvas/prompt-target.js";
+import { BadRequestException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 
 import {
@@ -31,6 +36,7 @@ import {
   validateVideoPromptDocRefs,
   type PromptDoc,
   type PromptDocRefFailure,
+  type VideoRefItem,
   type TargetTextIndex,
   type TextAttachmentMedia,
   type TextAttachmentSnapshot,
@@ -1317,6 +1323,49 @@ export interface MaterialGate {
   }): Promise<string | null>;
 }
 
+/** 视频正文标签编号基准：提交 references 单数组按提交结构编译（与 IKFA1O 复核同一投影）。 */
+function videoRefItemsOf(v: unknown): VideoRefItem[] {
+  const parsed = parseReferences(v);
+  return parsed.kind === "ok"
+    ? parsed.items.map((item) => ({
+        id: String(item.asset_id ?? item.material_id),
+        role: item.role,
+        type: item.type,
+      }))
+    : [];
+}
+
+/** 正文标签展示编号（图片N/视频N/音频N）→ 索引形式（#N）；帧角色名（首帧/尾帧）原样保留。 */
+function refIndexLabel(label: string | null): string | null {
+  if (label === null) return null;
+  const numbered = /^(?:图片|视频|音频)([0-9]+)$/.exec(label);
+  return numbered === null ? label : `#${numbered[1]}`;
+}
+
+/** IKG57P：通用存在性检查发现缺失素材时的正文标签复核——缺失项若被 prompt_doc 引用，
+ *  按 planError 同源形态（BadRequestException，经 AllExceptionsFilter 投影为 HTTP 400）抛
+ *  规格 7.2 文案与具体失效索引（多个缺失逐一列出）；正文未引用（纯参考清单）或无 prompt_doc
+ *  返回 null 回落通用文案信封。索引编号与正文标签展示编号同源（labelOf 给出 #N 或帧角色名）。 */
+function missingPromptRefException(
+  promptDoc: PromptDoc | null,
+  missingIds: readonly string[],
+  labelOf: (assetId: string) => string | null,
+): BadRequestException | null {
+  if (promptDoc === null || missingIds.length === 0) return null;
+  const referenced = new Set(
+    promptDoc.segments.flatMap((segment) =>
+      segment.kind === "asset_ref" ? [segment.asset_id] : [],
+    ),
+  );
+  const indices = missingIds
+    .filter((id) => referenced.has(id))
+    .map(labelOf)
+    .filter((label): label is string => label !== null);
+  return indices.length > 0
+    ? new BadRequestException(planIndicesMessage(indices, MISSING_PROMPT_REF_REASON))
+    : null;
+}
+
 /** POST /api/projects/{projectId}/generation-jobs：创建生成任务（queued）+ 预留点数 + 日志。
  *  简化模型：无幂等表、单输出语义；action_identity 用 Idempotency-Key 派生（仅用于追溯）。
  *  IKDZI1：流水线化——项目校验 → 类型校验（策略分派）→ 模型白名单 → 参考图语义统一 →
@@ -1495,6 +1544,16 @@ export async function handleCreateGenerationJob(
     const ids = referenceAssetIds.map(String);
     const resolved = await deps.assets.resolveInputAssets(ids, userId, projectId);
     if (resolved.length !== ids.length) {
+      // IKG57P：软删素材在方案冻结（freezePromptPlans 的 planError）之前先在此暴露——
+      // 若正文标签引用了缺失项，按 planError 同源形态抛规格 7.2 文案与具体索引（合并语义，
+      // 不回挪 8453e04a 的校验次序）；纯参考清单维持通用文案信封。
+      const missingIds = [...new Set(ids.filter((id) => !resolved.some((a) => a.id === id)))];
+      const labelOf =
+        type === "image"
+          ? (id: string) => refIndexLabel(imageRefLabel(id, ids))
+          : (id: string) => refIndexLabel(videoRefLabel(id, videoRefItemsOf(effectiveBody.references)));
+      const promptRefErr = missingPromptRefException(promptDoc, missingIds, labelOf);
+      if (promptRefErr) throw promptRefErr;
       return fail(400, "参考素材不存在或无权访问", {
         code: ERROR_INVALID_REFERENCE,
       });
@@ -1518,6 +1577,12 @@ export async function handleCreateGenerationJob(
     const ids = [...new Set(textProvided.map((item) => item.assetId))];
     const resolved = await deps.assets.resolveInputAssets(ids, userId, projectId);
     if (resolved.length !== ids.length) {
+      // IKG57P：同上——文本带入素材缺失且被正文标签引用时按方案级错误形态拦截
+      const missingIds = [...new Set(ids.filter((id) => !resolved.some((a) => a.id === id)))];
+      const promptRefErr = missingPromptRefException(promptDoc, missingIds, (id) =>
+        refIndexLabel(videoRefLabel(id, videoRefItemsOf(effectiveBody.references))),
+      );
+      if (promptRefErr) throw promptRefErr;
       return fail(400, "参考素材不存在或无权访问", {
         code: ERROR_INVALID_REFERENCE,
       });
@@ -1565,11 +1630,7 @@ export async function handleCreateGenerationJob(
         });
       }
       const items = parsed.kind === "ok" ? parsed.items : [];
-      videoRefItems = items.map((item) => ({
-        id: String(item.asset_id ?? item.material_id),
-        role: item.role,
-        type: item.type,
-      }));
+      videoRefItems = videoRefItemsOf(effectiveBody.references);
       // IKFA1O：references 单数组不走 reference_asset_ids 既有存在性复核——
       // 携带标签时补齐（与生图路径同一 deps）：本地 asset 必须存在/有权，且声明 type
       // 与素材实际类型一致（编号由 type 派生，谎报 type 会错编 图片N/视频N/音频N）。
@@ -1577,6 +1638,13 @@ export async function handleCreateGenerationJob(
       if (localIds.length > 0) {
         const resolvedRefs = await deps.assets.resolveInputAssets(localIds, userId, projectId);
         if (resolvedRefs.length !== localIds.length) {
+          // IKG57P：同上——references 本地素材缺失且被正文标签引用时按方案级错误形态拦截
+          const missingIds = [...new Set(localIds.filter((id) => !resolvedRefs.some((a) => a.id === id)))];
+          const promptRefErr = missingPromptRefException(promptDoc, missingIds, (id) =>
+            // 闭包内 TS 不收窄 let 联合类型；本分支上方已赋值非 null，?? [] 永不触发
+            refIndexLabel(videoRefLabel(id, videoRefItems ?? [])),
+          );
+          if (promptRefErr) throw promptRefErr;
           return fail(400, "参考素材不存在或无权访问", {
             code: ERROR_INVALID_REFERENCE,
           });
