@@ -570,6 +570,7 @@ export default function ImageDialog({ onClose, onSend, initialText, initialDoc, 
     <div
       className={`${styles.dialogWrap} ${followAnchor ? styles.dialogWrapFollow : ''}`}
       style={followAnchor ? { left: followAnchor.left, top: followAnchor.top } : undefined}
+      data-gen-panel-territory
     >
       {/* @ 菜单：挂在 .dialogWrap 层向上弹出（.dialog 是 200px 滚动框会裁剪浮层，IKFA1M） */}
       {mention.open && (
