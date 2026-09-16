@@ -6,7 +6,8 @@
  * PromptRefContext 按当前有效输入顺序实时派生——编号不是身份，不落节点状态。
  * ============================================ */
 import type { JSX } from 'react';
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { FloatingPortal, autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
 import {
   DecoratorNode,
   type LexicalNode,
@@ -15,7 +16,7 @@ import {
   type Spread,
 } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, AudioLines } from 'lucide-react';
 import styles from '../mediaChip.module.css';
 
 export type SerializedAssetRefNode = Spread<
@@ -26,8 +27,8 @@ export type SerializedAssetRefNode = Spread<
 export interface AssetRefMeta {
   url: string;
   name: string;
-  /** IKFA1O：素材媒体类型——仅图片显示缩略图（视频地址进 <img> 会裂图，音频无图）；
-   *  IKFA1P：文本附件（来源画布文本节点），无缩略图显示文本图标 */
+  /** IKFA1O：素材媒体类型——图片/视频显缩略图（视频经 <video preload="metadata"> 抓首帧，IKGABW 对齐
+   *  文本卡）、音频显 ♫ 图标占位、文本附件（来源画布文本节点）无缩略图 */
   mediaType?: 'image' | 'video' | 'audio' | 'text';
 }
 
@@ -41,6 +42,9 @@ export const PromptRefContext = createContext<{
   onInvalidTagClick?: (nodeKey: string) => void;
 }>({ labels: new Map(), meta: new Map(), readOnly: false });
 
+/** 悬停出预览的延迟（IKGABW）：与文本卡正文 chipPreview 同值（契约 §5 约 100–200ms） */
+const PREVIEW_OPEN_DELAY_MS = 150;
+
 function AssetRefChipComponent({
   nodeKey,
   assetId,
@@ -53,6 +57,25 @@ function AssetRefChipComponent({
   const { labels, meta, readOnly, onInvalidTagClick } = useContext(PromptRefContext);
   const [editor] = useLexicalComposerContext();
   const info = meta.get(assetId);
+  // 悬停预览（IKGABW）：对齐文本卡——150ms 延迟、上方优先贴边翻转、pointer-events 穿透纯展示；
+  // 浮层 portal 到 body 且不可交互，点击永不落在浮层上，不会误触发生成面板点外关闭（IKFYH6）
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const hoverTimerRef = useRef<number | null>(null);
+  const closePreview = () => {
+    if (hoverTimerRef.current) { window.clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
+    setPreviewOpen(false);
+  };
+  useEffect(() => () => {
+    if (hoverTimerRef.current) window.clearTimeout(hoverTimerRef.current);
+  }, []);
+  const previewable = info !== undefined && info.mediaType !== 'text' && Boolean(info.url);
+  const { refs, floatingStyles } = useFloating({
+    open: previewOpen,
+    onOpenChange: setPreviewOpen,
+    placement: 'top-start',
+    whileElementsMounted: autoUpdate,
+    middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 })],
+  });
   // 失效：显示原编号，身份保留不转向；有效：按当前输入派生编号
   if (invalidLabel !== undefined) {
     return (
@@ -86,13 +109,39 @@ function AssetRefChipComponent({
   const label = labels.get(assetId);
   return (
     <span
+      ref={refs.setReference}
       className={styles.mediaChip}
       contentEditable={false}
       title={info?.name ?? assetId}
       data-testid="asset-ref-valid"
+      onMouseEnter={() => {
+        if (!previewable) return;
+        if (hoverTimerRef.current) window.clearTimeout(hoverTimerRef.current);
+        hoverTimerRef.current = window.setTimeout(() => setPreviewOpen(true), PREVIEW_OPEN_DELAY_MS);
+      }}
+      onMouseLeave={closePreview}
     >
-      {info?.url && info.mediaType !== 'audio' && info.mediaType !== 'video' && info.mediaType !== 'text' ? <img className={styles.mediaChipThumb} src={info.url} alt="" /> : null}
+      {info?.url && info.mediaType === 'image' && <img className={styles.mediaChipThumb} src={info.url} alt="" />}
+      {info?.url && info.mediaType === 'video' && <video className={styles.mediaChipThumb} src={info.url} muted playsInline preload="metadata" />}
+      {info?.mediaType === 'audio' && <span className={styles.mediaChipAudioIcon} aria-hidden="true">♫</span>}
       <span className={styles.mediaChipLabel}>{label ?? '素材?'}</span>
+      {previewOpen && info && (
+        <FloatingPortal>
+          <div
+            ref={refs.setFloating}
+            className={styles.chipPreview}
+            style={floatingStyles}
+            role="tooltip"
+            contentEditable={false}
+            data-testid="asset-ref-preview"
+          >
+            {info.mediaType === 'image' && <img src={info.url} alt="" />}
+            {info.mediaType === 'video' && <video src={info.url} muted autoPlay loop playsInline />}
+            {info.mediaType === 'audio' && <div className={styles.chipPreviewAudio}><AudioLines size={28} strokeWidth={1.5} /><span>音频</span></div>}
+            <div className={styles.chipPreviewName}>{info.name}</div>
+          </div>
+        </FloatingPortal>
+      )}
     </span>
   );
 }

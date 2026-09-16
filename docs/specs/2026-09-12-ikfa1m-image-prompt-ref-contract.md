@@ -48,6 +48,7 @@
 - 正文出现顺序不改变媒体输入顺序：先提图片2 再提图片1，编译结果仍指向真实输入顺序（D1）。
 - 前端附件区、@ 菜单、正文标签三处的编号与服务端编译使用**同一规则同一顺序**（前端顺序 = 提交时 `input_asset_ids` 顺序，二者同源构造）。
 - 视觉规范同源（IKG7NH）：正文素材标签的胶囊视觉与画布文本卡正文标签共用同一份样式定义（`web/src/pages/CanvasPage/components/mediaChip.module.css`），改样式两边同步，不允许第二份视觉定义。
+- 缩略图与悬停预览与文本卡同源同形态（IKGABW）：正文标签的能力口径与文本卡正文（`docs/specs/2026-09-14-ikfm3q-text-node-media-index-contract.md` §5）一致——图片显缩略图；视频经 `<video preload="metadata" muted>` 抓首帧缩略图；音频显 ♫ 图标占位；文本附件（refKind=text）无缩略图维持文字标签。悬停有效标签约 150ms 出预览浮层（图片大图 / 视频静音自动播放循环 / 音频类型标识与名称、不可试听），浮层形态（约 280px、名称行、贴边翻转、pointer-events 穿透纯展示）用文本卡同款 chipPreview 共享样式，定位走 floating-ui、portal 到 body；浮层不可交互，点击穿透不触发生成面板点外关闭（IKFYH6）。失效标签与文本附件不出预览。失效标签「替换来源」菜单的视频行同样显首帧缩略图（@ 菜单 AtMentionMenu 既有能力，替换菜单补齐后全产品素材行无「仅图标」残留）。交互语义不变：标签不可选中、失效可点击换绑、编号/失效派生与序列化零变化。
 
 ## 3. API 接纳（POST /api/projects/:id/generation-jobs）
 
