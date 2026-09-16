@@ -61,6 +61,25 @@ async function renderEditor(invalidIds: string[] = []) {
   });
 }
 
+async function renderChipWithMeta(meta: AssetRefMeta, id = 'x1'): Promise<HTMLElement> {
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => {
+    root.render(createElement(PromptRefEditor, {
+      labelOf: () => '标签',
+      reconcileKey: 'k2',
+      labels: new Map([[id, '素材1']]),
+      refsMeta: new Map([[id, meta]]),
+      initialDoc: { version: 1, segments: [{ kind: 'asset_ref', asset_id: id, label: '素材1' }] },
+      onChange: vi.fn(),
+    }));
+  });
+  const chip = container.querySelector<HTMLElement>('[data-testid="asset-ref-valid"]');
+  expect(chip).toBeTruthy();
+  return chip!;
+}
+
 function chipOf(assetId: string): HTMLElement {
   const chips = [...container.querySelectorAll<HTMLElement>('[data-testid="asset-ref-valid"]')];
   const chip = chips.find(el => el.title === META[assetId].name || el.textContent?.includes(`${META[assetId].mediaType}1`));
@@ -120,6 +139,12 @@ describe('IKGABW 生成面板素材标签缩略图（有效标签）', () => {
     const chip = chipOf('t1');
     expect(chip.querySelector('img, video')).toBeNull();
     expect(chip.querySelector(`.${chipStyles.mediaChipAudioIcon}`)).toBeNull();
+  });
+
+  it('mediaType 未指定按图片渲染缩略图（旧数据零退化）', async () => {
+    const chip = await renderChipWithMeta({ url: 'https://x/legacy.png', name: '旧素材' });
+    expect(chip.querySelector('img')?.getAttribute('src')).toBe('https://x/legacy.png');
+    expect(chip.querySelector('video')).toBeNull();
   });
 });
 
