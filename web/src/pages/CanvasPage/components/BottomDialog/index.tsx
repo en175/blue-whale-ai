@@ -1046,8 +1046,9 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
         <AttachmentActionBar
           kind={actionBarKind}
           role={isKeyframe ? (videoMediaRefs.first ? 'last' : 'first') : 'reference'}
-          /* 类型收窄守卫：共享组件 kind 含 'audio'，本面板回调仅收 'image'|'video'
-             （actionBarKind 已锁边界，'audio' 分支不会到达） */
+          /* 类型收窄守卫（TypeScript 类型层必需，非运行期可达）：共享组件回调签名 kind 为
+             'image'|'video'|'audio' 联合，本面板回调仅收 'image'|'video'，不 narrowing 不能通过类型检查；
+             运行期 actionBarKind 已锁边界，'audio' 分支不会到达 */
           onPickFromCanvas={(kind, role) => { if (kind !== 'audio') onPickFromCanvas?.(kind, role); }}
           onPickFromAssets={(kind, role) => { if (kind !== 'audio') onPickFromAssets?.(kind, role); }}
           pickMode={pickMode === actionBarKind}

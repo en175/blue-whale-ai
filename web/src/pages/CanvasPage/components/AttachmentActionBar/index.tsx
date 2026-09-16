@@ -19,8 +19,9 @@ interface AttachmentActionBarProps {
   onPickFromCanvas?: (kind: AttachmentActionKind, role?: VideoRefRole) => void;
   /** 「资产库」：打开资产库选择弹窗（等价退役菜单项「从资产中选择」） */
   onPickFromAssets?: (kind: AttachmentActionKind, role?: VideoRefRole) => void;
-  /** 媒体类型边界：图片面板 'image'、音频面板 'audio'；视频面板按目标槽位边界传（首尾帧槽 'image'） */
-  kind?: AttachmentActionKind;
+  /** 媒体类型边界：图片面板 'image'、音频面板 'audio'；视频面板按目标槽位边界传（首尾帧槽 'image'）。
+   *  必传：三面板调用方均显式给值，不设缺省（避免隐含假灵活边界） */
+  kind: AttachmentActionKind;
   /** 视频草稿目标参考角色（首帧/尾帧）：IKGB7W 接入时由宿主按首个空槽计算；图片/音频面板不传 */
   role?: VideoRefRole;
   /** 画布点选模式进行中（「+ 参考」高亮提示） */
@@ -39,7 +40,7 @@ interface AttachmentActionBarProps {
 export default function AttachmentActionBar({
   onPickFromCanvas,
   onPickFromAssets,
-  kind = 'image',
+  kind,
   role,
   pickMode,
   disabledReason,
