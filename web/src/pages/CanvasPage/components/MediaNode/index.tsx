@@ -605,7 +605,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
                 { key: 'chat', label: '添加到聊天' },
                 ...(isAudio
                   ? []
-                  : [{ key: 'compliance', label: 'Seedance2.0合规校验', loading: data.complianceBusy }]),
+                  : [{ key: 'compliance', label: 'Seedance合规校验', loading: data.complianceBusy }]),
                 { key: 'duplicate', label: '创建副本' },
                 { key: 'delete', label: '删除', danger: true },
               ]}
