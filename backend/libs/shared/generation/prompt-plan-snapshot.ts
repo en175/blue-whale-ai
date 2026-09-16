@@ -1,8 +1,8 @@
 import { validateReferences } from "../generation-runtime/video-reference-validation.js";
 import { composeTextAttachmentPrompt, composeTextAttachmentPromptIndexed } from "@lib/core";
-import { COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, promptBindingsSchema, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@lib/contracts";
-import { docHasTextRef, textIndexOfTarget, type PromptDoc } from "@lib/contracts";
-import { nodeAssetId, planError, readPromptPlan, validatePlanModel, validateVideoPlan, type PromptTargetNode } from "../canvas/prompt-target.js";
+import { COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@lib/contracts";
+import { docHasTextRef, type PromptDoc } from "@lib/contracts";
+import { planError, readPromptPlan, validatePlanModel, validateVideoPlan, type PromptTargetNode } from "../canvas/prompt-target.js";
 import type { ModelCapabilityView } from "../persistence/model-capability-repo.js";
 import type { AssetOwnershipOps } from "../persistence/asset-ownership-types.js";
 
@@ -16,7 +16,9 @@ export async function freezePromptPlans(args: {
   model: ModelCapabilityView | undefined; userId: string; projectId: string;
   assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
 }): Promise<PromptPlanSnapshot | undefined> {
-  const { nodes, edges, targetId, inputIds, attachments } = args;
+  const { nodes, edges, targetId, attachments } = args;
+  // 重复素材会让组合正文的参考编号漂移，也不合 resolveInputAssets 的单份归属语义；入口先去重
+  const inputIds = [...new Set(args.inputIds)];
   const planNodes = attachments.flatMap(a => {
     const n = nodes.find(n => n.id === a.node_id);
     const edge = edges.find(e => e.source === a.node_id && e.target === targetId);
@@ -24,22 +26,15 @@ export async function freezePromptPlans(args: {
   });
   if (!planNodes.length) return undefined;
   const plans = planNodes.map(n => readPromptPlan(n, args.type));
-  const directIds = [...new Set(edges.filter(e => e.target === targetId).flatMap(e => {
-    const source = nodes.find(n => n.id === e.source && n.type === "mediaNode");
-    return source ? [nodeAssetId(source)] : [];
-  }))];
+  // IKG4RV：生成输入以提交请求为准——方案引用不再要求画布上有一条落到库的连线（连线降级为 UI 表达）。
+  // 但保留下半条「方案声明的素材必须真的在本次请求里」：少了它，正文仍写着 @图N 而素材不在请求里时，
+  // 标签会退化成「参考图0」静默送上游，违反 IKE5G8 §7.3「不静默裁剪后生成」与决策 D7「不静默丢弃素材」。
+  // 素材可用性另由下方 resolveInputAssets 归属校验与 validatePlanModel / validateVideoPlan 把关。
   for (const plan of plans) {
-    const edge = edges.find(e => e.source === plan.nodeId && e.target === targetId);
-    const confirmed = promptBindingsSchema.safeParse((edge?.data?.promptReference as { bindings?: unknown } | undefined)?.bindings ?? (plan.bindings.length === 0 ? [] : undefined));
-    if (!confirmed.success || JSON.stringify(confirmed.data) !== JSON.stringify(plan.bindings)) planError(plan.nodeId, confirmed.success ? confirmed.data : plan.bindings, "素材待同步，请先同步素材到目标");
     for (const binding of plan.bindings) {
-      if (!directIds.includes(binding.assetId) || !inputIds.includes(binding.assetId)) planError(plan.nodeId, [binding], "提示词引用的素材缺失或不完整，请补充素材或移除对应引用后再生成");
+      if (!inputIds.includes(binding.assetId)) planError(plan.nodeId, [binding], "提示词引用的素材缺失或不完整，请补充素材或移除对应引用后再生成");
     }
     if (args.type !== "video") validatePlanModel(plan.nodeId, plan.bindings, inputIds.length, args.model);
-  }
-  const expectedIds = [...new Set([...directIds, ...textIndexOfTarget(nodes, edges, targetId).refs.map(ref => ref.assetId)])];
-  if (expectedIds.length !== inputIds.length || expectedIds.some(id => !inputIds.includes(id)) || new Set(inputIds).size !== inputIds.length) {
-    planError(plans[0]!.nodeId, plans.flatMap(p => p.bindings), "参考清单与目标连线及文本索引不一致");
   }
   const resolved = await args.assets.resolveInputAssets(inputIds, args.userId, args.projectId);
   for (const id of inputIds) {
@@ -64,9 +59,8 @@ export async function freezePromptPlans(args: {
         return { materialId: ref.material_id, type: ref.type, role: ref.role, url: material.url, providerUrl: `asset://${ref.material_id}` };
       }
       const asset = resolved.find(a => a.id === ref.asset_id);
-      const edge = edges.find(e => e.target === targetId && nodeAssetId(nodes.find(n => n.id === e.source)) === ref.asset_id);
-      const role = edge?.data?.refRole === "first" ? "first_frame" : edge?.data?.refRole === "last" ? "last_frame" : "reference";
-      if (!asset || asset.type !== ref.type || ref.role !== role) planError(plans[0]!.nodeId, plans.flatMap(p => p.bindings), "素材类型、身份或角色与目标连线不一致");
+      // IKG4RV：首帧/尾帧角色以请求体 references[].role 为准，不再从连线 refRole 反推比对。
+      if (!asset || asset.type !== ref.type) planError(plans[0]!.nodeId, plans.flatMap(p => p.bindings), "素材类型与请求不一致");
       return { assetId: asset.id, type: ref.type, role: ref.role, url: asset.url, providerUrl: asset.material_id ? `asset://${asset.material_id}` : asset.url };
     });
     const identities = videoReferences.map(r => r.providerUrl);
