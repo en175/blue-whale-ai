@@ -7,6 +7,7 @@
  * - 动态成员：节点是否属于组 = 是否落在组矩形内且不属于其他组（组与组独立）。
  * - 整组拖动：拖起组顶部把手，实时移动「当前在框内的全部节点」+ 组矩形
  *   （矩形视觉经本地偏移跟随，结束时一次性上抛父级落盘 + 登记撤销）
+ * - 拖组途中徽标人数冻结为拖起时的独立成员数，选框扫过组外节点不改计数
  * 根层 pointer-events:none，仅徽标/按钮/操作条/把手可交互，不遮挡节点操作。
  * ============================================ */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -99,17 +100,34 @@ export default function GroupOverlay({
   const { zoom } = useViewport();
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState<DragOffset | null>(null);
+  /** 整组拖动期间冻结的成员名单：徽标计数只认拖起时的集合，不跟选框实时相交 */
+  const [frozenDragMembers, setFrozenDragMembers] = useState<{
+    groupId: string;
+    ids: Set<string>;
+  } | null>(null);
 
-  /** 组底框：直接用固定矩形渲染，count 为当前落在矩形内且未被排除的节点数（动态） */
+  /** 组底框：直接用固定矩形渲染。静止时 count 为矩形内独立成员数；拖组时用冻结名单。 */
   const frames = useMemo<FrameInfo[]>(
     () =>
-      groups.map((g) => ({
-        id: g.id,
-        box: g.box,
-        count: exclusiveMembersInGroup(nodes, g, groups).length,
-        excludedIds: g.excludedIds,
-      })),
-    [groups, nodes],
+      groups.map((g) => {
+        let count: number;
+        if (frozenDragMembers?.groupId === g.id) {
+          count = frozenDragMembers.ids.size;
+        } else if (frozenDragMembers) {
+          count = exclusiveMembersInGroup(nodes, g, groups).filter(
+            (n) => !frozenDragMembers.ids.has(n.id),
+          ).length;
+        } else {
+          count = exclusiveMembersInGroup(nodes, g, groups).length;
+        }
+        return {
+          id: g.id,
+          box: g.box,
+          count,
+          excludedIds: g.excludedIds,
+        };
+      }),
+    [groups, nodes, frozenDragMembers],
   );
 
   /** 成组入口：≥2 选中且未全部落在同一组矩形内（已同组时徽标即操作入口） */
@@ -257,6 +275,7 @@ export default function GroupOverlay({
     const isClick = !!s && s.dx === 0 && s.dy === 0;
     endFrameDrag();
     // 拖组结束：清空冻结成员集合，成员层级回归按落盘后的逻辑框判定
+    setFrozenDragMembers(null);
     onFrameDragMembersChange?.(new Set());
     onFrameDragOffsetChange?.(null);
     if (isClick && s) {
@@ -295,6 +314,7 @@ export default function GroupOverlay({
         nodeNew: new Map(nodeOld),
       };
       if (paneRef.current) paneRef.current.style.cursor = 'grabbing';
+      setFrozenDragMembers({ groupId: g.id, ids: new Set(nodeOld.keys()) });
       onBringGroupToFront?.(g.id);
       onFrameDragMembersChange?.(new Set(nodeOld.keys()));
       onFrameDragOffsetChange?.({ id: g.id, x: 0, y: 0 });

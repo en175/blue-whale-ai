@@ -20,6 +20,7 @@ import {
   type NodeMouseHandler,
   type Viewport,
   type OnSelectionChangeParams,
+  type NodeChange,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useCallback, useEffect, useRef, useMemo, useState } from 'react';
@@ -398,6 +399,24 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
    *  拖组途中逻辑框未落盘，成员用冻结集合维持所属层。 */
   const [frameDragMemberIds, setFrameDragMemberIds] = useState<Set<string>>(new Set());
   const [frameDragOffset, setFrameDragOffset] = useState<{ id: string; x: number; y: number } | null>(null);
+  /** 同步标记：拖组途中立刻挡住框选/选中变更，不等 state 提交 */
+  const frameDraggingRef = useRef(false);
+  const handleFrameDragMembersChange = useCallback((ids: Set<string>) => {
+    frameDraggingRef.current = ids.size > 0;
+    setFrameDragMemberIds(ids);
+  }, []);
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      if (frameDraggingRef.current) {
+        const next = changes.filter((c) => c.type !== 'select');
+        if (next.length === 0) return;
+        onNodesChange(next);
+        return;
+      }
+      onNodesChange(changes);
+    },
+    [onNodesChange],
+  );
   /** 节点拖拽中标记：拖动节点（含拖组内成员出组）时隐藏框选悬浮条（成组/下载标签），
    *  这些标签只在静止框选状态出现，不应跟随被拖节点移动。 */
   const [isDraggingNode, setIsDraggingNode] = useState(false);
@@ -606,7 +625,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       <ReactFlow
         nodes={nodesForFlow}
         edges={showEdges ? edges : []}
-        onNodesChange={onNodesChange}
+        onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onConnectStart={(_e, params) => onConnectStart?.(params.nodeId ?? null)}
@@ -624,7 +643,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             : undefined
         }
         onPaneClick={onPaneClick}
-        onSelectionChange={onSelectionChange}
+        onSelectionChange={frameDragMemberIds.size > 0 ? undefined : onSelectionChange}
         onMove={(_e, v) => onViewportLiveRef.current?.(v)}
         onMoveEnd={(_e, v) => onViewportChangeRef.current?.(v)}
         onNodeDragStart={onNodeDragStart}
@@ -649,8 +668,8 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         panOnScroll
         zoomOnScroll={false}
         panActivationKeyCode={null}
-        // IKFR4X 参考选取会话：框选隔离（不响应空白拖拽框选），普通模式沿用框选
-        selectionOnDrag={!refPickActive}
+        // IKFR4X 参考选取会话：框选隔离；整组拖动期间同样关掉框选，避免选框扫到组外节点
+        selectionOnDrag={!refPickActive && frameDragMemberIds.size === 0}
         selectionMode={SelectionMode.Partial}
         zoomOnDoubleClick={!isDrag}
         nodesDraggable={!isDrag && !refPickActive}
@@ -701,7 +720,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             onDownloadNodes={onDownloadGroup ?? (() => {})}
             setNodes={setNodes}
             onGroupFrameDragStop={onGroupFrameDragStopRef.current}
-            onFrameDragMembersChange={setFrameDragMemberIds}
+            onFrameDragMembersChange={handleFrameDragMembersChange}
             onFrameDragOffsetChange={setFrameDragOffset}
             onBringGroupToFront={onBringGroupToFront}
             onGroupClick={onGroupClick}
