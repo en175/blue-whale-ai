@@ -69,8 +69,11 @@ export interface ModelFeatures {
   image_reference_max: number;
   /** 输入参考素材总时长上限（秒，ADR-0086；视频/音频参考。2.0=15 / 2.5=30；null=不限）。 */
   max_reference_duration_sec: number | null;
-  /** 按任务类型的比例/时长约束（ADR-0086）：default / first_frame / first_last_frame / edit / prolong，
-   *  各自 { allowed_ratios?: string[]; allowed_durations?: [min,max,step] }。本轮结构就位。 */
+  /** 按任务类型的比例/时长约束（ADR-0086）：default / first_frame / first_last_frame / edit / prolong。
+   *  ⚠️ 修订（IKG4UR）：**`allowed_durations` 已退役**——官方时长口径是连续区间，写成枚举会让
+   *  滑杆给得出的值提交必被 400。时长唯一来源为基础行 `supported_durations`（对象 `{min,max,step}`）。
+   *  读侧分支暂留未删（待 `-1` 接入时一并处置），但**不要再往数据里配它**。见 ADR-0086 修订段。
+   *  当前只有 `allowed_ratios` 在用。 */
   task_types: Record<string, unknown> | null;
 }
 
