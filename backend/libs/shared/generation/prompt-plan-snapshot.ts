@@ -2,7 +2,7 @@ import { validateReferences } from "../generation-runtime/video-reference-valida
 import { composeTextAttachmentPrompt, composeTextAttachmentPromptIndexed } from "@lib/core";
 import { COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@lib/contracts";
 import { docHasTextRef, type PromptDoc } from "@lib/contracts";
-import { planError, readPromptPlan, validatePlanModel, validateVideoPlan, type PromptTargetNode } from "../canvas/prompt-target.js";
+import { MISSING_PROMPT_REF_REASON, planError, readPromptPlan, validatePlanModel, validateVideoPlan, type PromptTargetNode } from "../canvas/prompt-target.js";
 import type { ModelCapabilityView } from "../persistence/model-capability-repo.js";
 import type { AssetOwnershipOps } from "../persistence/asset-ownership-types.js";
 
@@ -32,7 +32,7 @@ export async function freezePromptPlans(args: {
   // 素材可用性另由下方 resolveInputAssets 归属校验与 validatePlanModel / validateVideoPlan 把关。
   for (const plan of plans) {
     for (const binding of plan.bindings) {
-      if (!inputIds.includes(binding.assetId)) planError(plan.nodeId, [binding], "提示词引用的素材缺失或不完整，请补充素材或移除对应引用后再生成");
+      if (!inputIds.includes(binding.assetId)) planError(plan.nodeId, [binding], MISSING_PROMPT_REF_REASON);
     }
     if (args.type !== "video") validatePlanModel(plan.nodeId, plan.bindings, inputIds.length, args.model);
   }
