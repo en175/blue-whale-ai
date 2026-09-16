@@ -59,6 +59,7 @@
 ## 6. 渲染与序列化
 
 - 渲染：Markdown 源 + promptMentions + mediaMentions 共用 v1 §3 的占位符遮罩模型；media chip 的缩略图、编号与失效样式全部由身份与有效性派生，不信任源切片文本。
+- 视觉规范同源（IKG7NH）：正文 media 标签的胶囊视觉与生成面板输入框素材标签共用同一份样式定义（`web/src/pages/CanvasPage/components/mediaChip.module.css`），禁止内联样式字符串或第二份定义回流；文本卡差异仅整块选中（user-select:all）与音频图标占位，落在 TextNode 侧。
 - 序列化：media 标签切片写回派生标签文本（有效 = `图片1` 类；失效 = `已失效：name`），区间锚定规范化后的 Markdown 源（同 v1 §3）。
 - 复制/粘贴：media 标签不参与富文本跨卡复制——text/plain 只携带标签字面文本，粘贴为普通文字；prompt 绑定的 `application/x-blue-whale-prompt` 通道不变。
 

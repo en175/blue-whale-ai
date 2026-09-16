@@ -16,7 +16,7 @@ import {
 } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { AlertTriangle } from 'lucide-react';
-import styles from './index.module.css';
+import styles from '../mediaChip.module.css';
 
 export type SerializedAssetRefNode = Spread<
   { assetId: string; label?: string; invalidLabel?: string; refKind?: 'asset' | 'text' },
@@ -57,7 +57,7 @@ function AssetRefChipComponent({
   if (invalidLabel !== undefined) {
     return (
       <span
-        className={`${styles.refChip} ${styles.refChipInvalid}`}
+        className={`${styles.mediaChip} ${styles.mediaChipInvalid}`}
         contentEditable={false}
         title={`${info?.name ?? assetId}：原参考已移除。点击可替换为其他已引用素材，退格键删除该提及`}
         data-testid="asset-ref-invalid"
@@ -78,21 +78,21 @@ function AssetRefChipComponent({
           }
         }}
       >
-        <AlertTriangle size={12} strokeWidth={2} className={styles.refChipIcon} />
-        <span className={styles.refChipLabel}>已失效：原{invalidLabel}</span>
+        <AlertTriangle size={12} strokeWidth={2} className={styles.mediaChipIcon} />
+        <span className={styles.mediaChipLabel}>已失效：原{invalidLabel}</span>
       </span>
     );
   }
   const label = labels.get(assetId);
   return (
     <span
-      className={styles.refChip}
+      className={styles.mediaChip}
       contentEditable={false}
       title={info?.name ?? assetId}
       data-testid="asset-ref-valid"
     >
-      {info?.url && info.mediaType !== 'audio' && info.mediaType !== 'video' && info.mediaType !== 'text' ? <img className={styles.refChipThumb} src={info.url} alt="" /> : null}
-      <span className={styles.refChipLabel}>{label ?? '素材?'}</span>
+      {info?.url && info.mediaType !== 'audio' && info.mediaType !== 'video' && info.mediaType !== 'text' ? <img className={styles.mediaChipThumb} src={info.url} alt="" /> : null}
+      <span className={styles.mediaChipLabel}>{label ?? '素材?'}</span>
     </span>
   );
 }

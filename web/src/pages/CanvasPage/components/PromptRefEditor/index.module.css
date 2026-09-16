@@ -35,56 +35,8 @@
   user-select: none;
 }
 
-/* 素材标签胶囊：深色 + 线框（与 AssetCardNode .gcRef 同规范），删除走退格键 */
-.refChip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0 2px;
-  padding: 1px 6px 1px 5px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #e8e8ec;
-  font-size: 12px;
-  line-height: 20px;
-  vertical-align: middle;
-  user-select: none;
-}
-
-.refChip:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.refChipInvalid {
-  background: rgba(248, 113, 113, 0.14);
-  border-color: rgba(248, 113, 113, 0.45);
-  color: #fca5a5;
-}
-
-/* 失效标签可点击换绑（IKFA1N B5）：携带 role=button 时展示可交互态 */
-.refChipInvalid[role='button'] {
-  cursor: pointer;
-}
-
-.refChipInvalid[role='button']:hover {
-  background: rgba(248, 113, 113, 0.24);
-}
-
-.refChipThumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  object-fit: cover;
-}
-
-.refChipIcon {
-  flex: none;
-}
-
-.refChipLabel {
-  white-space: nowrap;
-}
+/* 素材标签胶囊（.mediaChip 系列）已提为两处共享的视觉定义（IKG7NH）：
+   见 ../mediaChip.module.css，文本卡正文标签与生成面板标签同源。 */
 
 /* @ 菜单：已引用 + 添加新参考 */
 .mentionMenu {
