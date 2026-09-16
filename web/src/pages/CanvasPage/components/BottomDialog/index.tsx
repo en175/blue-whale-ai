@@ -91,6 +91,9 @@ export interface VideoGenOptions {
   duration: number;
   /** 参考模式：prompt 文生视频 / all 全能参考 / keyframe 首尾帧 / text2video 图生视频（IKFC1T） */
   mode: string;
+  /** IKG0LP：是否带音频（用户选择，缺省 true）。仅模型能力位 features.audio 为 true 时才提供该选择，
+   *  后端按能力位决定是否透传给上游。契约见 docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md */
+  generateAudio: boolean;
 }
 
 /** 视频草稿面板参数写回补丁（IKDMQS）：字段名对齐草稿节点 data 的持久化键 */
@@ -103,6 +106,8 @@ export interface VideoDraftParamsPatch {
   ratio?: string;
   duration?: number;
   mode?: string;
+  /** IKG0LP：是否带音频（随草稿持久化，重开面板恢复） */
+  generateAudio?: boolean;
 }
 
 interface BottomDialogProps extends RefStripOrderProps {
@@ -188,6 +193,8 @@ export interface VideoGenSeedParams {
   duration?: number;
   /** 参考模式：prompt 文生视频 / all 全能参考 / keyframe 首尾帧 / text2video 图生视频（IKFC1T） */
   mode?: string;
+  /** IKG0LP：是否带音频（首页带入，缺省 true） */
+  generateAudio?: boolean;
 }
 
 /** 宽高比图标：按比例绘制小矩形 */
@@ -238,6 +245,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   /** 比例/时长初始为空/0：接口加载完成后 applyModelDefaults 套用所选模型默认值 */
   const [selectedRatio, setSelectedRatio] = useState('');
   const [duration, setDuration] = useState(0);
+  /** IKG0LP：是否带音频（用户选择，缺省 true = 与上游默认及改动前行为一致） */
+  const [generateAudio, setGenerateAudio] = useState(initialParams?.generateAudio ?? true);
   const [modelOpen, setModelOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
   const modelWrapRef = useRef<HTMLDivElement>(null);
@@ -253,6 +262,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
   ]);
 
   const currentModel = modelList.find((m) => m.model_id === selectedModel) ?? null;
+  /** IKG0LP：该模型是否允许生成带音频（能力位 features.audio）。不允许则不提供用户选择。 */
+  const supportsAudio = currentModel?.features?.audio === true;
   const modelOptions = modelList.map((m) => ({ key: m.model_id, label: m.model_label }));
   /** 能力选项全部取自接口（无本地写死兜底）：模型列表未加载完时为空 */
   const sizeOptions = currentModel?.supported_sizes?.length
@@ -526,6 +537,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
           );
           setDuration(initialParams?.duration ?? 0);
           setSelectedMode(restoredMode);
+          // IKG0LP：首页带入的音频选择随交接恢复（缺省 true）
+          setGenerateAudio(initialParams?.generateAudio ?? true);
           return;
         }
         if (!list.length) return;
@@ -539,6 +552,8 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
         const applied = applyModelDefaults(target);
         // 首页带入参数覆盖默认值（逐项经模型能力校验，不合法项保持该模型默认值）
         const patch: VideoDraftParamsPatch = { ...applied };
+        // IKG0LP：音频选择随草稿落值（首次打开即持久化当前生效值）
+        patch.generateAudio = generateAudio;
         if (initialParams) {
           if (initialParams.aspectRatio && target.supported_aspect_ratios.includes(initialParams.aspectRatio)) {
             setSelectedRatio(initialParams.aspectRatio);
@@ -628,6 +643,7 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
       resolution: size.api_value ?? size.id,
       duration,
       mode: selectedMode,
+      generateAudio,
     }, docHasAnyRef(promptDoc) ? promptDoc : null);
   };
 
@@ -959,6 +975,32 @@ export default function BottomDialog({ onClose, onSend, initialText, initialDoc,
                     <span>{r}</span>
                   </button>
                 ))}
+              </div>
+            </>
+          )}
+
+          {/* IKG0LP：是否带音频——仅模型能力位 features.audio 允许时提供；缺省开，与上游默认及改动前行为一致 */}
+          {supportsAudio && (
+            <>
+              <span className={styles.configLabel}>音频</span>
+              <div className={styles.audioRow}>
+                <span className={styles.audioHint}>生成的视频是否带声音</span>
+                <button
+                  type="button"
+                  className={`${styles.audioSwitch} ${generateAudio ? styles.audioSwitchOn : ''}`}
+                  role="switch"
+                  aria-checked={generateAudio}
+                  aria-label="生成的视频带音频"
+                  disabled={readOnly}
+                  onClick={() => {
+                    const next = !generateAudio;
+                    setGenerateAudio(next);
+                    // IKG0LP：写回草稿节点，重开面板时恢复
+                    syncDraftParams({ generateAudio: next });
+                  }}
+                >
+                  <span className={styles.audioSwitchKnob} />
+                </button>
               </div>
             </>
           )}

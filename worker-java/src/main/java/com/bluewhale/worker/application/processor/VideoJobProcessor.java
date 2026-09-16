@@ -112,11 +112,11 @@ public class VideoJobProcessor implements JobProcessor {
      */
     record SingleRef(String role, String type, String assetId, String materialId) {}
 
-    /** resolution → height 解析（video-dimensions.ts:8）。 */
+    /** resolution → height 解析。 */
     private static final Pattern RESOLUTION_PATTERN = Pattern.compile("^([0-9]+)p$");
-    /** aspect_ratio → w:h 解析（video-dimensions.ts:9）。 */
+    /** aspect_ratio → w:h 解析。 */
     private static final Pattern RATIO_PATTERN = Pattern.compile("^([1-9][0-9]*):([1-9][0-9]*)$");
-    /** size → WxH 解析（video-dimensions.ts:18）。 */
+    /** size → WxH 解析。 */
     private static final Pattern SIZE_PATTERN = Pattern.compile("^([0-9]+)x([0-9]+)$", Pattern.CASE_INSENSITIVE);
 
     private final JobStateMachineService stateMachine;
@@ -416,7 +416,7 @@ public class VideoJobProcessor implements JobProcessor {
     /**
      * 构建视频提交请求（video-job-runner.ts:561-830 buildSubmitRequest 逐字移植）。
      * <p>
-     * 校验：prompt/model/duration/dimensions → invalid_input (:598-606)。
+     * 校验：prompt/model/duration → invalid_input (:598-606)。
      * 参考校验：单数组 references 优先 → 旧字段路径。
      */
     VideoSubmitInput buildSubmitRequest(ClaimedVideoJobDto claim) {
@@ -447,22 +447,21 @@ public class VideoJobProcessor implements JobProcessor {
         // duration（:593）
         double duration = resolveDuration(input);
 
-        // dimensions（:594-597）；ADR-0086：adaptive 比例无固定宽高，resolveDimensions 返回 null
-        // 但任务类型（首帧/编辑/延长）本就只接受 adaptive——此处 adaptive 放行，仅非 adaptive 需像素换算。
-        int[] dimensions = resolveDimensions(input);
-        String aspectRatio = strOrEmpty(input, "aspect_ratio");
-        boolean adaptive = "adaptive".equals(aspectRatio);
+        // IKG0LP：视频是否带音频。接纳侧仅在能力位 features.audio 允许时冻结该字段；
+        // 缺失或非布尔 → null → 出站不下发，维持上游默认。
+        Boolean generateAudio = input.get("generate_audio") instanceof Boolean b ? b : null;
 
-        // 校验（:598-606）。ADR-0086：adaptive 比例（首帧/编辑/延长）放行；IKFPYX：duration=-1
-        // （模型自动选时长）**仅 edit/prolong 任务合法**，其余任务须 duration>0 且非 adaptive 时尺寸可换算。
+        // 校验（:598-606）。IKFPYX：duration=-1（模型自动选时长）**仅 edit/prolong 任务合法**，
+        // 其余任务须 duration>0。
         // 判定用**主提示词**（basePrompt）而非组合后 prompt：官方口径是「提示词中需包含关键词」，
         // 文本附件属创作上下文不计入；与 backend handle-create-generation-job 用的 params.prompt 同源。
+        // IKG0FR：不再要求 resolution 能换算成像素——分辨率合法性由提交时的能力行白名单负责，
+        // 像素只用于回写 assets.width/height（列可空），换算不出写 null 即可，不拒单。
         String taskType = resolveVideoTaskType(input.get("references"), basePrompt);
         boolean autoDurationAllowed = "edit".equals(taskType) || "prolong".equals(taskType);
         boolean durationOk = Double.isFinite(duration)
                 && (duration > 0 || (duration == -1 && autoDurationAllowed));
-        if (prompt.isEmpty() || model.isEmpty() || !durationOk
-                || (!adaptive && dimensions == null)) {
+        if (prompt.isEmpty() || model.isEmpty() || !durationOk) {
             log.warn("[IKE7JP] 前置校验遗漏：job {} 视频参数无效仍进入 worker（taskType={} duration={}）",
                     claim.id(), taskType, duration);
             throw new VideoInputError(GenerationError.ERROR_INVALID_INPUT, "视频生成参数无效");
@@ -484,7 +483,8 @@ public class VideoJobProcessor implements JobProcessor {
                 else references.add(new VideoReference(type, url));
             }
             return new VideoSubmitInput(model, prompt, duration,
-                    strOrEmpty(input, "resolution"), strOrEmpty(input, "aspect_ratio"), first, last, references);
+                    strOrEmpty(input, "resolution"), strOrEmpty(input, "aspect_ratio"), first, last, references,
+                    generateAudio);
         }
 
         // 参考素材解析（video-job-runner.ts:608-650）
@@ -645,12 +645,12 @@ public class VideoJobProcessor implements JobProcessor {
             }
             merged.addAll(references);
             return new VideoSubmitInput(model, prompt, duration, resolution, ratio,
-                    null, null, merged);
+                    null, null, merged, generateAudio);
         }
 
         return new VideoSubmitInput(
                 model, prompt, duration, resolution, ratio,
-                firstFrameImage, lastFrameImage, references
+                firstFrameImage, lastFrameImage, references, generateAudio
         );
     }
 
@@ -834,10 +834,11 @@ public class VideoJobProcessor implements JobProcessor {
         return false;
     }
 
-    // ========== videoDimensions / dimensionsFromSize（video-dimensions.ts）==========
+    // ========== videoDimensions / dimensionsFromSize ==========
 
     /**
-     * 视频尺寸换算（video-dimensions.ts:3-25 逐字移植）。
+     * 视频尺寸换算。此处即该逻辑的**唯一实现**：原 TS 版随 node worker 退役、
+     * 且 IKG0FR 删掉提交期的那道校验后，TS 侧已无消费者，故一并删除。
      * <p>
      * resolution + aspect_ratio → width/height；或 size "WxH" → width/height。
      */
@@ -845,7 +846,7 @@ public class VideoJobProcessor implements JobProcessor {
         Map<String, Object> params = input.get("parameters") instanceof Map<?, ?> p
                 ? castMap(p) : null;
 
-        // videoDimensions（:3-13）
+        // videoDimensions
         Object resolutionObj = input.get("resolution");
         Object aspectRatioObj = input.get("aspect_ratio");
         if (resolutionObj instanceof String resolution && aspectRatioObj instanceof String aspectRatio) {
@@ -853,7 +854,7 @@ public class VideoJobProcessor implements JobProcessor {
             if (dims != null) return dims;
         }
 
-        // dimensionsFromSize（:16-25）
+        // dimensionsFromSize
         Object sizeObj = params != null ? params.get("size") : input.get("size");
         if (sizeObj instanceof String size) {
             return dimensionsFromSize(size);

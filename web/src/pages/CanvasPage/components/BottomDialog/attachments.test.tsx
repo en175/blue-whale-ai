@@ -141,6 +141,8 @@ describe('BottomDialog 文本附件提交契约（IKDLQG）', () => {
       resolution: '720p',
       duration: 5,
       mode: 'prompt',
+      // IKG0LP：是否带音频（缺省 true）
+      generateAudio: true,
     }, null);
   });
 

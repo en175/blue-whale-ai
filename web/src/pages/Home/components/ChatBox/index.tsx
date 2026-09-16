@@ -151,6 +151,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const [aspectRatio, setAspectRatio] = useState('');
   const [resolution, setResolution] = useState('');
   const [duration, setDuration] = useState(0);
+  /** IKG0LP：是否带音频（用户选择，缺省 true = 与上游默认及改动前行为一致） */
+  const [generateAudio, setGenerateAudio] = useState(true);
   const [showVideoModelDrop, setShowVideoModelDrop] = useState(false);
   const [showVideoModeDrop, setShowVideoModeDrop] = useState(false);
   const [showRatioDrop, setShowRatioDrop] = useState(false);
@@ -407,6 +409,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         duration,
         // 首页模式键映射画布模式：首尾帧→keyframe；其余保留原键（omni→all、text2video→text2video）
         mode: videoMode === 'firstlast' ? 'keyframe' : (videoMode === 'text2video' ? 'text2video' : 'all'),
+        // IKG0LP：音频选择必须进交接结构，否则跳到画布就丢了
+        generateAudio,
         refs: isKeyframe
           ? ([keyframeRefs.first, keyframeRefs.last].filter(Boolean) as (
               { file?: File; preview: string; type: 'image'; assetId?: string | number }
@@ -631,6 +635,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const videoSizeItems =
     selectedVideoModel?.supported_sizes.map((s) => ({ key: s.id, label: s.label })) ?? [];
   const videoDurationRange = selectedVideoModel?.supported_durations ?? null;
+  /** IKG0LP：该模型是否允许生成带音频（能力位 features.audio）。不允许则不提供用户选择。 */
+  const supportsVideoAudio = selectedVideoModel?.features?.audio === true;
 
   // 上传上限（与画布弹窗同规则）：图片/视频/音频均读能力行（ADR-0086），能力未加载完时图片为 0、视频/音频回落缺省
   /** 智能体 tab 附件分类型上限：随所选创作模型（video capability）读能力行
@@ -1293,6 +1299,19 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                     </div>
                   )}
                 </div>
+
+                {/* IKG0LP：是否带音频——仅模型能力位 features.audio 允许时提供；缺省开 */}
+                {supportsVideoAudio && (
+                  <button
+                    className={styles.paramBtn}
+                    onClick={() => setGenerateAudio((v) => !v)}
+                    title="生成的视频是否带声音"
+                    aria-label="生成的视频带音频"
+                    aria-pressed={generateAudio}
+                  >
+                    <span>{generateAudio ? '🔊 带音频' : '🔇 无声'}</span>
+                  </button>
+                )}
               </div>
 
               <div className={styles.videoParamsRight}>

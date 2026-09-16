@@ -720,6 +720,8 @@ export default function CanvasPage() {
         resolution: handoff.resolution,
         duration: handoff.duration,
         mode: handoff.mode,
+        // IKG0LP：音频选择随种子带入面板
+        generateAudio: handoff.generateAudio,
       };
     } else {
       setImageSeed({
@@ -2588,6 +2590,8 @@ export default function CanvasPage() {
         resolution: preset?.resolution ?? (typeof d.draftSize === 'string' ? d.draftSize : undefined),
         duration: preset?.duration ?? (typeof d.draftDuration === 'number' ? d.draftDuration : undefined),
         mode: preset?.mode ?? (typeof d.draftMode === 'string' ? d.draftMode : undefined),
+        // IKG0LP：音频选择持久化在草稿 data，重开时恢复
+        generateAudio: preset?.generateAudio ?? (typeof d.draftGenerateAudio === 'boolean' ? d.draftGenerateAudio : undefined),
       },
       targetNodeId: nodeId,
       attachments: textAttachmentsOf(nodeId),
@@ -2608,6 +2612,8 @@ export default function CanvasPage() {
     size?: string;
     duration?: number;
     mode?: string;
+    /** IKG0LP：是否带音频（随草稿 data 持久化） */
+    generateAudio?: boolean;
   }, position?: { x: number; y: number }): string => {
     const nodeId = newNodeId('media-draft');
     const node: Node = {
@@ -2628,6 +2634,7 @@ export default function CanvasPage() {
         ...(seed?.size != null ? { draftSize: seed.size } : {}),
         ...(seed?.duration != null ? { draftDuration: seed.duration } : {}),
         ...(seed?.mode != null ? { draftMode: seed.mode } : {}),
+        ...(seed?.generateAudio != null ? { draftGenerateAudio: seed.generateAudio } : {}),
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
@@ -2924,7 +2931,7 @@ export default function CanvasPage() {
   /** 面板编辑实时写回视频草稿节点（IKDMQS）：参数随节点 data 进入自动保存，刷新后恢复 */
   const handleVideoDraftParamsChange = (
     nodeId: string,
-    patch: { prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string; duration?: number; mode?: string },
+    patch: { prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string; duration?: number; mode?: string; generateAudio?: boolean },
   ) => {
     const data: Record<string, unknown> = {};
     if (patch.prompt !== undefined) data.prompt = patch.prompt;
@@ -2933,6 +2940,8 @@ export default function CanvasPage() {
     if (patch.size !== undefined) data.draftSize = patch.size;
     if (patch.duration !== undefined) data.draftDuration = patch.duration;
     if (patch.mode !== undefined) data.draftMode = patch.mode;
+    // IKG0LP：是否带音频随草稿持久化，重开面板时恢复用户上次的选择
+    if (patch.generateAudio !== undefined) data.draftGenerateAudio = patch.generateAudio;
     if (patch.ratio !== undefined) {
       data.draftRatio = patch.ratio;
       data.targetRatio = patch.ratio;
@@ -5484,6 +5493,8 @@ export default function CanvasPage() {
       aspect_ratio: opts.aspectRatio,
       resolution: opts.resolution,
       duration: opts.duration,
+      // IKG0LP：用户选的「是否带音频」。能力位不允许时后端会忽略，不下发给上游。
+      generate_audio: opts.generateAudio,
     };
     // 草稿绑定模式按连线+material+文本带入合并推导（IKFM3W §10）；自由模式（工具栏入口无草稿卡）读本地暂存参考
     const freeMode = !videoDraftId;
@@ -6458,7 +6469,9 @@ export default function CanvasPage() {
             videoRefs.push({ ...ref, materialId: result.materialId });
           }
           startGenerationJob('video', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.aspectRatio,
-            resolution: handoff.resolution, duration: handoff.duration }, undefined,
+            resolution: handoff.resolution, duration: handoff.duration,
+            // IKG0LP：首页选的「是否带音频」随交接带过来，不能在这里丢
+            generate_audio: handoff.generateAudio }, undefined,
             { references: buildVideoJobReferencesFromList(videoRefs) },
             undefined, { references: videoRefs, mode: handoff.mode });
         }
@@ -6488,6 +6501,8 @@ export default function CanvasPage() {
       size: seed.resolution,
       duration: seed.duration,
       mode: seed.mode,
+      // IKG0LP：首页带的音频选择必须落进草稿卡，否则关掉面板重开就丢了
+      generateAudio: seed.generateAudio,
     });
     openVideoDraftDialog(nodeId, seed);
   };

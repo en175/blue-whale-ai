@@ -47,7 +47,11 @@ export interface ModelFeatures {
   last_frame: boolean;
   /** 视频首尾帧引用（video features.first_last_frame）。图片恒 false。 */
   first_last_frame: boolean;
-  /** 视频带音频（video features.audio）。图片恒 false。 */
+  /** 该视频模型是否允许生成带音频（video features.audio）。图片恒 false。
+   *  IKG0LP：从「视频带音轨」事实描述升级为**许可位**——为 true 时前端显示「是否带音频」开关，
+   *  用户选择才冻结进 job 快照；false/未配则不出开关、出站不下发 generate_audio。
+   *  契约见 docs/specs/2026-09-15-ikg0lp-video-generate-audio-contract.md。
+   *  ⚠️ 新增模型必须确认真实支持情况：Seedance 1.0 系（Pro / Pro Fast / Lite）不支持该参数。 */
   audio: boolean;
   /** 图生图上游模型名别名（ADR-0085）：有参考图时 worker 出站改用它；null=不分流。 */
   i2i_model_name: string | null;

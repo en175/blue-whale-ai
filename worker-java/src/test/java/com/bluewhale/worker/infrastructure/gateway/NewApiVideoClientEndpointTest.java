@@ -76,7 +76,8 @@ class NewApiVideoClientEndpointTest {
                 List.of(
                         new VideoReference("image", "asset://asset-face-1", "first_frame"),
                         new VideoReference("image", "asset://asset-mat-1", null),
-                        new VideoReference("audio", "asset://asset-audio-1", null)));
+                        new VideoReference("audio", "asset://asset-audio-1", null)),
+                null);
 
         SubmitResult result = new NewApiVideoClient(baseUrl).submit("t", input);
 
@@ -103,12 +104,35 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
+    @DisplayName("IKG0LP：generateAudio true/false 下发 metadata.generate_audio；null 则完全不下发")
+    void generateAudioDispatchedOnlyWhenPresent() throws Exception {
+        new NewApiVideoClient(baseUrl).submit("t", new VideoSubmitInput(
+                "seedance-2", "一只猫在跑步", 5.0, "720p", "16:9",
+                null, null, List.of(), Boolean.TRUE));
+        assertThat(JSON.readTree(lastBody.get()).get("metadata").get("generate_audio").asBoolean())
+                .isTrue();
+
+        new NewApiVideoClient(baseUrl).submit("t", new VideoSubmitInput(
+                "seedance-2", "一只猫在跑步", 5.0, "720p", "16:9",
+                null, null, List.of(), Boolean.FALSE));
+        assertThat(JSON.readTree(lastBody.get()).get("metadata").get("generate_audio").asBoolean())
+                .isFalse();
+
+        // 能力位不允许（或旧快照）→ null → 字段缺席，维持上游默认
+        new NewApiVideoClient(baseUrl).submit("t", new VideoSubmitInput(
+                "seedance-2", "一只猫在跑步", 5.0, "720p", "16:9",
+                null, null, List.of(), null));
+        assertThat(JSON.readTree(lastBody.get()).get("metadata").has("generate_audio")).isFalse();
+    }
+
+    @Test
     @DisplayName("回归：旧字段路径的独立首尾帧仍转 first_frame/last_frame，本地参考 role 不变")
     void legacyFrameFieldsKeepRoles() throws Exception {
         VideoSubmitInput input = new VideoSubmitInput(
                 "seedance-2", "一只猫在跑步", 5.0, "720p", "16:9",
                 "https://tos.test/first.png", "https://tos.test/last.png",
-                List.of(new VideoReference("image", "https://tos.test/ref.png", null)));
+                List.of(new VideoReference("image", "https://tos.test/ref.png", null)),
+                null);
 
         new NewApiVideoClient(baseUrl).submit("t", input);
 
