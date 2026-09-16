@@ -5052,19 +5052,20 @@ export default function CanvasPage() {
     openMediaDraftDialog(id, ((node.data ?? {}) as Record<string, unknown>).mediaType);
   };
 
-  /** 生成图片：图片对话框 + 图片；IKDLQF 起携带目标节点与连线文本附件快照 */
+  /** 生成图片：与「生成视频」同口径——新建图片草稿卡，把当前节点自动连为参考（IKDMQR 关系即连线）。
+   *  不调 validateImageRefConnect（新草稿尚未进 ref，会跳过校验）；来源有效性预检后建卡建线。 */
   const handleNodeGenImage = (id: string) => {
     if (!canOpenEditor()) return;
-    const ref = nodeRefOf(id);
-    if (!ref) return;
-    setImageSeed({
-      ts: Date.now(),
-      text: '',
-      files: [{ id: `node-${id}`, url: ref.src, type: ref.type, name: ref.name, assetId: ref.assetId }],
-      targetNodeId: id,
-      attachments: textAttachmentsOf(id),
-    });
-    handleOpenImageDialog();
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    const err = imageRefSourceError(node);
+    if (err) {
+      showToast('warn', err);
+      return;
+    }
+    const draftId = createImageDraftCard();
+    addCanvasEdge(id, draftId);
+    openImageDraftDialog(draftId);
   };
 
   /** 生成视频（IKDMQS 统一草稿绑定）：有生成记录的视频节点 → 绑定原卡原位重新生成（与「重新编辑」一致）；
@@ -6305,7 +6306,7 @@ export default function CanvasPage() {
 
   /** 收集图片参考 assetId：绑定模式（IKDMQR 草稿 + IKDMQU 成品卡）按连线推导（与 Dock 显示同源；
    *  IKFM3S §2 含文本带入参考的合并推导，与后端权威并入同源）；
-   *  其余入口（生成图片带入原图/资产卡等）沿用面板 files——有 assetId 直用，否则上传取 ID */
+   *  其余入口（资产卡等自由面板）沿用面板 files——有 assetId 直用，否则上传取 ID */
   const collectImageInputAssetIds = async (
     targetNodeId: string | undefined,
     files: UploadedFile[],

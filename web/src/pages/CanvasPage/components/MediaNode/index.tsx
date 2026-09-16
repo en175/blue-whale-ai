@@ -376,7 +376,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <span>重新编辑</span>
           </button>
           {toolbar.genImage && (
-            <button className={styles.toolBtn} onClick={handleGenImage} title="带入图片，打开图片对话框">
+            <button className={styles.toolBtn} onClick={handleGenImage} title="新建图片草稿并以本图为参考">
               <Sparkles size={14} strokeWidth={2} />
               <span>生成图片</span>
             </button>
