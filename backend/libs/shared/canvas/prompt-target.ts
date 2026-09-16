@@ -9,8 +9,16 @@ export function nodeAssetId(node: PromptTargetNode | undefined): string {
   return String(node?.data?.assetId ?? node?.data?.asset_id ?? node?.data?.assetID ?? "");
 }
 
+/** IKE5G8 实现决定 7.2 的素材缺失文案（规格权威源；方案冻结与通用存在性检查共用，勿在调用点另写一份）。 */
+export const MISSING_PROMPT_REF_REASON = "提示词引用的素材缺失或不完整，请补充素材或移除对应引用后再生成";
+
+/** 方案索引消息拼接（「索引 #N、#M：reason」）——planError 与通用存在性检查的 IKG57P 分支共用同一份格式。 */
+export function planIndicesMessage(indices: readonly string[], reason: string): string {
+  return `索引 ${indices.join("、") || "（正文）"}：${reason}`;
+}
+
 export function planError(nodeId: string, bindings: PromptBinding[], reason: string): never {
-  throw new BadRequestException(`方案 ${nodeId} 索引 ${bindings.map(b => `#${b.index}`).join("、") || "（正文）"}：${reason}`);
+  throw new BadRequestException(`方案 ${nodeId} ${planIndicesMessage(bindings.map(b => `#${b.index}`), reason)}`);
 }
 
 export function readPromptPlan(node: PromptTargetNode, targetType: "image" | "video" = "image") {

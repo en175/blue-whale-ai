@@ -2,7 +2,7 @@ import { validateReferences } from "../generation-runtime/video-reference-valida
 import { composeTextAttachmentPrompt, composeTextAttachmentPromptIndexed } from "@lib/core";
 import { COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, promptBindingsSchema, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@lib/contracts";
 import { docHasTextRef, textIndexOfTarget, type PromptDoc } from "@lib/contracts";
-import { nodeAssetId, planError, readPromptPlan, validatePlanModel, validateVideoPlan, type PromptTargetNode } from "../canvas/prompt-target.js";
+import { MISSING_PROMPT_REF_REASON, nodeAssetId, planError, readPromptPlan, validatePlanModel, validateVideoPlan, type PromptTargetNode } from "../canvas/prompt-target.js";
 import type { ModelCapabilityView } from "../persistence/model-capability-repo.js";
 import type { AssetOwnershipOps } from "../persistence/asset-ownership-types.js";
 
@@ -33,7 +33,7 @@ export async function freezePromptPlans(args: {
     const confirmed = promptBindingsSchema.safeParse((edge?.data?.promptReference as { bindings?: unknown } | undefined)?.bindings ?? (plan.bindings.length === 0 ? [] : undefined));
     if (!confirmed.success || JSON.stringify(confirmed.data) !== JSON.stringify(plan.bindings)) planError(plan.nodeId, confirmed.success ? confirmed.data : plan.bindings, "素材待同步，请先同步素材到目标");
     for (const binding of plan.bindings) {
-      if (!directIds.includes(binding.assetId) || !inputIds.includes(binding.assetId)) planError(plan.nodeId, [binding], "提示词引用的素材缺失或不完整，请补充素材或移除对应引用后再生成");
+      if (!directIds.includes(binding.assetId) || !inputIds.includes(binding.assetId)) planError(plan.nodeId, [binding], MISSING_PROMPT_REF_REASON);
     }
     if (args.type !== "video") validatePlanModel(plan.nodeId, plan.bindings, inputIds.length, args.model);
   }
