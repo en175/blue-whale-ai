@@ -278,8 +278,25 @@ function frameBadges(): string[] {
   return [...container.querySelectorAll<HTMLElement>('[data-testid="ref-thumb-badge"]')].map((el) => el.textContent ?? '');
 }
 
-/** 经 Dock 槽位入口选取来源节点建立指定角色的连线（真实路径：槽位 + 按钮弹来源菜单 →「从节点添加素材」→ 画布节点点击） */
+/** 普通参考入口（IKGB7W）：栏尾旧「+」退役，操作条「+ 参考」pill 直达画布点选（等价旧菜单项「从节点添加素材」） */
+async function clickActionBarPickReference() {
+  await vi.waitFor(() => {
+    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === '参考');
+    expect(btn).toBeTruthy();
+  });
+  await act(async () => {
+    [...container.querySelectorAll('button')].find((b) => b.textContent === '参考')!.click();
+  });
+}
+
+/** 经 Dock 槽位入口选取来源节点建立指定角色的连线（首尾帧真实路径：槽位 + 按钮弹来源菜单 →「从节点添加素材」→ 画布节点点击）；
+ *  IKGB7W：slotTitle 为普通参考旧入口 title 时改走操作条「+ 参考」直达（入口形态平移，分派语义不变） */
 async function pickRefNode(slotTitle: string, nodeId: string) {
+  if (slotTitle === '从资产中选择 / 从节点添加素材') {
+    await clickActionBarPickReference();
+    await clickNode(nodeId);
+    return;
+  }
   await vi.waitFor(() => {
     const btn = [...container.querySelectorAll('button')].find((b) => b.title === slotTitle);
     expect(btn).toBeTruthy();
@@ -297,8 +314,13 @@ async function pickRefNode(slotTitle: string, nodeId: string) {
   await clickNode(nodeId);
 }
 
-/** IKFR4Y 仅发起持续选取会话（槽位 + 按钮弹来源菜单 →「从节点添加素材」），不点击画布节点 */
+/** IKFR4Y 仅发起持续选取会话（首尾帧：槽位 + 按钮弹来源菜单 →「从节点添加素材」），不点击画布节点；
+ *  IKGB7W：普通参考改走操作条「+ 参考」直达 */
 async function enterPick(slotTitle: string) {
+  if (slotTitle === '从资产中选择 / 从节点添加素材') {
+    await clickActionBarPickReference();
+    return;
+  }
   await vi.waitFor(() => {
     const btn = [...container.querySelectorAll('button')].find((b) => b.title === slotTitle);
     expect(btn).toBeTruthy();

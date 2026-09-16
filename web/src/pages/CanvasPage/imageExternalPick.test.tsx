@@ -8,7 +8,10 @@ import type { Node } from '@xyflow/react';
 import type { AssetRecord } from '@/api/assets';
 import CanvasPage from './index';
 import { typePromptRefText } from './testing/promptRefEditor';
-import { REF_SOURCE_ENTRY_TITLE } from './components/RefSourceMenu';
+import {
+  ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
+  ATTACHMENT_ACTION_PICK_CANVAS_TITLE,
+} from './components/AttachmentActionBar';
 import dialogStyles from './components/ImageDialog/index.module.css';
 
 /* IKF5KE 自由生图面板参考选取事件的一次消费语义：
@@ -222,19 +225,13 @@ async function openFreePanel() {
   await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 }
 
-/** 面板来源菜单：进入「从节点添加素材」选取模式 */
+/** IKGB7U 附件操作条：点「+ 参考」直达旧「从节点添加素材」链路——进入画布选取模式（旧「+」菜单已退役） */
 async function enterPickMode() {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
+    (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_CANVAS_TITLE,
   )!;
   await act(async () => {
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  });
-  const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent === '从节点添加素材',
-  )!;
-  await act(async () => {
-    item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
 }
 
@@ -246,19 +243,13 @@ async function pickNodeM1() {
   });
 }
 
-/** 面板来源菜单：「从资产中选择」确认回填 */
+/** IKGB7U 附件操作条：点「资产库」直达旧「从资产中选择」链路——打开资产库弹窗后确认回填 */
 async function pickFromAssets(assets: AssetRecord[]) {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
+    (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
   )!;
   await act(async () => {
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  });
-  const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent === '从资产中选择',
-  )!;
-  await act(async () => {
-    item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
   await act(async () => {
     assetsPickerProps.current.onSelect(assets);

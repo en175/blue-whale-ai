@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
-import { REF_SOURCE_ENTRY_TITLE } from './components/RefSourceMenu';
+import { ATTACHMENT_ACTION_PICK_CANVAS_TITLE } from './components/AttachmentActionBar';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from './testing/promptRefEditor';
 import type { GenerationModel, ModelFeatures } from '@/api/generation';
 
@@ -234,19 +234,13 @@ function dockRefImages(): string[] {
   );
 }
 
-/** Dock 媒体入口已改为来源菜单（画布资产改造融合）：先点入口按钮弹菜单，再点「从节点添加素材」项进入选取模式 */
+/** IKGB7U 附件操作条：点「+ 参考」直达旧「从节点添加素材」链路——进入画布选取模式（旧「+」菜单已退役） */
 const enterPickMode = async () => {
   const entry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.getAttribute('title') === REF_SOURCE_ENTRY_TITLE,
+    (b) => b.getAttribute('title') === ATTACHMENT_ACTION_PICK_CANVAS_TITLE,
   )!;
   await act(async () => {
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  });
-  const item = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent === '从节点添加素材',
-  )!;
-  await act(async () => {
-    item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
 };
 

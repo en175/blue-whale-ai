@@ -405,13 +405,11 @@ async function pressEscape(target: EventTarget = window) {
   });
 }
 
-/** 进入图片面板持续选取会话（会话提示条「完成选取」出现即活跃） */
+/** 进入图片面板持续选取会话（会话提示条「完成选取」出现即活跃）；
+ *  IKGB7U 起经附件操作条「+ 参考」直达（旧「+」菜单已退役） */
 async function startImagePickSession() {
   await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.title === '从资产中选择 / 从节点添加素材')!.click();
-  });
-  await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.textContent === '从节点添加素材')!.click();
+    [...container.querySelectorAll('button')].find((b) => b.title === '从节点添加素材')!.click();
   });
   await vi.waitFor(() => expect(finishPickButton()).toBeTruthy());
 }
@@ -605,11 +603,9 @@ describe('IKFYH6 画布外 UI 点击关闭（document click）', () => {
     await renderPage();
     await openFreeImagePanel();
 
+    // IKGB7U 起经附件操作条「资产库」pill 直达资产库弹窗（旧「+」菜单已退役）
     await act(async () => {
-      [...container.querySelectorAll('button')].find((b) => b.title === '从资产中选择 / 从节点添加素材')!.click();
-    });
-    await act(async () => {
-      [...container.querySelectorAll('button')].find((b) => b.textContent === '从资产中选择')!.click();
+      [...container.querySelectorAll('button')].find((b) => b.title === '从资产中选择')!.click();
     });
     const dialog = await vi.waitFor(() => {
       const el = document.body.querySelector('[role="dialog"]');
