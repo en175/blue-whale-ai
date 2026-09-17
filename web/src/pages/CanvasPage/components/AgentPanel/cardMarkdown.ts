@@ -1,43 +1,13 @@
 /**
- * 方案卡 / 提示词卡 → markdown（IKFLB9 定稿）：「▤ .md」「打开查看」把卡渲染成文档，也按这份下载。
+ * 提示词卡 → markdown（IKFLB9 定稿）：「打开查看」把卡渲染成文档，也按这份下载。（方案卡已退回原版，不再有 .md。）
  * 只是换个形状给人读，字段一个不加：卡上有的这里才有。
  */
-import type { GenerationCardBlock, RequirementUnderstanding } from '@/api/agentSessions';
+import type { GenerationCardBlock } from '@/api/agentSessions';
 
 function table(rows: [string, string | null | undefined][]): string {
   const kept = rows.filter((r): r is [string, string] => Boolean(r[1]));
   if (kept.length === 0) return '';
   return ['| 项 | 值 |', '| --- | --- |', ...kept.map(([k, v]) => `| ${k} | ${v} |`)].join('\n');
-}
-
-export function solutionStatusLabel(status: RequirementUnderstanding['status']): string {
-  return status === 'awaiting_confirmation' ? '等你拍板' : status === 'accepted' ? '已确认' : '已作废';
-}
-
-export function solutionCardMarkdown(u: RequirementUnderstanding): string {
-  const card = u.solution_card;
-  if (!card) return `# 方案卡\n\n${u.proposed_summary}`;
-  const route = card.execution_route;
-  const spec = card.delivery_spec;
-  const specParts = [spec?.aspect_ratio, spec?.duration_seconds !== undefined ? `${spec.duration_seconds} 秒` : undefined, spec?.resolution].filter(Boolean);
-  const parts = [
-    '# 方案卡',
-    table([
-      ['媒介', card.target_media === 'video' ? '视频' : '图片'],
-      ['模型', route ? `${route.model_family}${route.model_version ? ` ${route.model_version}` : ''}` : null],
-      ['参数', specParts.length ? specParts.join(' · ') : null],
-      ['范围', card.scope?.kind === 'continuation' ? card.scope.label : null],
-      ['状态', solutionStatusLabel(u.status)],
-    ]),
-    `## 目标\n\n${card.goal}`,
-    card.direction ? `## 方向\n\n${card.direction}` : '',
-    card.constraints?.length || card.asset_roles?.length
-      ? `## 你要求的\n\n${[...(card.constraints ?? []), ...(card.asset_roles ?? []).map((r) => `素材：${r.role}`)].map((x) => `- ${x}`).join('\n')}`
-      : '',
-    `## 我替你定的\n\n${card.assumptions.map((a, i) => `${i + 1}. ${a}`).join('\n')}`,
-    card.next_steps ? `## 接下来怎么做\n\n${card.next_steps}` : '',
-  ];
-  return parts.filter(Boolean).join('\n\n');
 }
 
 export function generationCardMarkdown(card: GenerationCardBlock): string {
