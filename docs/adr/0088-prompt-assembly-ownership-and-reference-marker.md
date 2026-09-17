@@ -4,7 +4,7 @@
 - **日期**：2026-09-17
 - **决策者**：lixq（经 `/grilling` 会话共同得出）
 - **取代**：`docs/specs/2026-09-06-ikdlqf-text-attachment-image-contract.md`「供应商请求组合（确定性）」条款，及 `docs/specs/2026-09-06-ikdlqg-text-attachment-video-contract.md` 同款条款中的「组合在 worker 侧」「附件与目标提示词分别表达，互不覆盖」「前端面板不重复实现该校验」三句；`IKFA1M` §3「`prompt_doc` 存在时以它为权威编译源：编译结果**替代** `parameters.prompt`」及 IKFA1O / IKFA1P / IKFCJG 的同款编译与身份复核条款；`docs/specs/2026-09-14-ikfm3s-text-index-sync-contract.md` 中「`prompt_doc` 标签编号按该序派生」「`prompt_doc` 冻结语义不变：正文仍进组合提示词」条款；`docs/specs/2026-09-13-ikfcxe-audio-text-context-contract.md` 中「双端优先消费非空白 `composed_prompt` 冻结正文」条款；并取代 `CONTEXT.md` 中 **ProviderPromptProjection** 词条「服务端从中派生」的表述（词条已同步修订）。
-- **关联**：[IKFA1M / IKFA1O / IKFA1P](2026-09-12-ikfa1m-image-prompt-ref-contract.md)（结构化引用标记，**随本决策退役**）、IKG79Z（素材库身份桥）、IKG4RV（生成输入以请求体为准）
+- **关联**：[IKFA1M / IKFA1O / IKFA1P](2026-09-12-ikfa1m-image-prompt-ref-contract.md)（结构化引用标记，**随本决策退役**）、IKG4RV（生成输入以请求体为准）
 - **工单**：IKG6EK（父缺陷）；执行子单 IKGJT2（后端）、IKGJT5（前端）
 
 ## 背景
@@ -21,8 +21,8 @@
 ## 决策
 
 1. **提交方给出全文，且一律权威。** 前端提交的 `prompt` 即最终正文——**带 `prompt_doc` 时也一样**。服务端不再由 doc 重编正文（原「编译结果替代 `parameters.prompt`」作废），附件正文与主提示词的拼装在前端完成。
-2. **前端只标身份，不标编号。** 正文中每一处素材引用写为 `&asset_id&`（本地 asset 纯数字 id）。编号不写进正文。
-3. **服务端只做标记转移。** `&asset_id&` → `@标签`，**找不到 id 就不转、标记原样保留**。标签按端派生（`backend/libs/contracts/prompt-doc.ts` 的 `videoRefLabel`——prompt_doc 退役后该文件只留这条派生）：
+2. **前端只标身份，不标编号。** 正文中每一处素材引用写为 `&<身份>&`，编号不写进正文。身份的**形态由提交方决定、服务端不解释**：本地 Asset 是纯数字 id，素材库 / 虚拟角色库是 `asset-` 前缀 id（与 `materialId()` 同口径，IKFA1M §1）。标记里写哪种，取决于本次 `references` 里该素材是以哪种身份提交的——**把 material_id 转成上游载体是 worker 的事，不在接纳层**。
+3. **服务端只做标记转移。** `&<身份>&` → `@标签`，**找不到身份就不转、标记原样保留**。标签按端派生（`backend/libs/contracts/prompt-doc.ts` 的 `videoRefLabel`——prompt_doc 退役后该文件只留这条派生）：
 
    | 端 | 本次素材数组（编号依据） | 出站标签 |
    | --- | --- | --- |
@@ -32,7 +32,9 @@
 
    ⚠️ 表里说的是**请求字段**；`input.input_asset_ids` 是冻结后的内部字段（图片 worker 读它），两者不是一回事。
 
-   编号一律由服务端按本次请求的素材顺序现算——客户端只给身份。**这张表是前端实现 `&asset_id&` 时唯一的编号依据**；前端展示编号也必须由同一有序数组派生（IKFA1M §2）。
+   编号一律由服务端按本次请求的素材顺序现算——客户端只给身份。**这张表是前端实现标记时唯一的编号依据**；前端展示编号也必须由同一有序数组派生（IKFA1M §2）。
+
+   转移是**按本次素材数组的位次直接查表**，不做任何身份解析：标记里的身份与数组元素的 `id` 同源（`asset_id ?? material_id`）。早期实现曾试图用 `resolveInputAssets` 把标记里的本地 asset id 桥到请求里的 material 位次（IKG79Z 的旧约束残留），已删除——**接纳层不解释身份**。
 4. **服务端对提示词不再有任何其他动作**：不拼装、不追加、不做兜底组合。执行侧（`worker-java`）三端统一只读 `input.prompt`。
 5. **请求契约三端统一用 `references` 承载素材数组**；`material` 仍**仅视频**可用（图片/音频上游不支持，`validateRejectMaterialReferences` 保留）。
 6. **删除**：`providerPrompt` 的生成与消费、`input.composed_prompt`、执行侧三端优先级链中的兜底组合。`prompt_plan_snapshot` 保留（方案绑定校验、审计、重试复用仍需要），但不再携带 `providerPrompt`。

@@ -81,4 +81,15 @@ describe("buildReferenceMarkerLabels（引用标记 → 标签，IKG6EK / ADR-00
   it("空集合返回空表（转移函数退化为原样返回）", () => {
     expect(buildReferenceMarkerLabels([]).size).toBe(0);
   });
+
+  it("身份形态无关：素材库 / 虚拟角色库的 asset- 前缀 id 一样出标签", () => {
+    const refs = [
+      ref("asset-active-1", "reference"),
+      ref("6047", "reference"),
+    ];
+    expect([...buildReferenceMarkerLabels(refs).entries()]).toEqual([
+      ["asset-active-1", "图片1"],
+      ["6047", "图片2"],
+    ]);
+  });
 });

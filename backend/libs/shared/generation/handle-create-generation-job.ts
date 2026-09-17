@@ -1,5 +1,4 @@
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
-import { transferPromptReferenceMarkers } from "./reference-marker-transfer.js";
 import type { CanvasEdge } from "@lib/contracts";
 import {
   type PromptTargetNode,
@@ -23,6 +22,7 @@ import {
   type VideoTaskType,
   imageRefLabel,
   videoRefLabel,
+  buildReferenceMarkerLabels,
   mediaMentionSchema,
   fail,
   ok,
@@ -52,6 +52,7 @@ import {
 import {
   composeTextAttachmentPrompt,
   extractTextNodeText,
+  transferReferenceMarkers,
 } from "@lib/core";
 import {
   DEFAULT_MAX_REFERENCE_IMAGES,
@@ -1594,25 +1595,19 @@ export async function handleCreateGenerationJob(
       return fail(400, compiledError.message, { code: compiledError.code });
     }
   }
-  // IKG6EK / ADR-0088：正文引用标记转移。提交方给的正文里素材引用写作 &asset_id&，
+  // IKG6EK / ADR-0088：正文引用标记转移。提交方给的正文里素材引用写作 &<身份>&，
   // 此处按本次请求的素材顺序换成 @标签（编号现算）；后端对提示词只做这一件事——不拼装、不追加。
+  // 身份形态由提交方决定、本层不解释：数字 = 本地 asset，asset- 前缀 = 素材库/虚拟角色库。
+  // 标记里写哪种，取决于本次 references 里该素材是以哪种身份提交的——转成 material_id 再调上游
+  // 是 worker 的事，不在接纳层。
   // 产出即最终正文，下游（方案快照、strategy.composeInput → input.prompt）一律消费它。
   // 注意：长度闸在转移之前量的是带 &id& 的原文，而转移可能**变长**（`&1&` 3 字 → `@图片1` 4 字），
   // 所以该闸不构成「最终正文不超限」的保证。实际不可达（面板输入上限 1000 + 组合预算 30,000）；
   // 若要该不变式成立，需在转移之后复量一次。
-  const parsedMarkerRefs = parseReferences(effectiveBody.references);
   const markerItems = type === "image"
     ? referenceAssetIds.map((id) => ({ id: String(id), role: "reference" as const, type: "image" as const }))
     : videoRefItemsOf(effectiveBody.references);
-  const markerMaterialOnlyIds = parsedMarkerRefs.kind === "ok"
-    ? parsedMarkerRefs.items.flatMap((item) => (item.asset_id === undefined ? [String(item.material_id)] : []))
-    : [];
-  promptText = await transferPromptReferenceMarkers({
-    prompt: promptText,
-    items: markerItems,
-    materialOnlyIds: markerMaterialOnlyIds,
-    resolveAssets: (ids) => deps.assets.resolveInputAssets(ids, userId, projectId),
-  });
+  promptText = transferReferenceMarkers(promptText, buildReferenceMarkerLabels(markerItems));
   // 5. 画布目标快照（仅携带 target_node_id 时读画布；IKFM3S 复用文本索引派生的同次读取）
   const target = await resolveTargetSnapshot({
     ...(textIndexRefs.value.canvas ? { canvas: textIndexRefs.value.canvas } : {}),
