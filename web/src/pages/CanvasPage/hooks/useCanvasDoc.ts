@@ -119,5 +119,15 @@ export function useCanvasDoc(projectId: string) {
 
   const refetch = useCallback(() => load(true), [load]);
 
-  return { doc, assets, loading, refetch, acceptDoc: setDoc, legacyMigration };
+  /** 回写快照资产上的 material_id / material_status，二次校验只读这份字典 */
+  const patchAsset = useCallback((assetId: string, patch: Partial<SnapshotAsset>) => {
+    if (!assetId) return;
+    setAssets((prev) => {
+      const current = prev[assetId];
+      if (!current) return prev;
+      return { ...prev, [assetId]: { ...current, ...patch } };
+    });
+  }, []);
+
+  return { doc, assets, loading, refetch, acceptDoc: setDoc, legacyMigration, patchAsset };
 }

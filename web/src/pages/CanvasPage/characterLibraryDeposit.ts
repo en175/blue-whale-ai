@@ -1,6 +1,5 @@
 /* 画布节点合规校验：视为上传虚拟素材（CreateAsset 不传分组，由后端归组） */
 import { createAsset, waitAssetReady, MaterialAssetFailedError, type MaterialAssetType } from '@/api/material';
-import { isMaterialLibraryId } from './mediaRefs';
 
 export const COMPLIANCE_SUCCESS_TOAST = '校验通过，可用于seedance2.0视频生成';
 export const COMPLIANCE_FAILED_TOAST = 'seedance2.0合规校验失败，不可用于视频生成';
@@ -20,20 +19,13 @@ function readNonEmptyId(raw: unknown): string | undefined {
   return id || undefined;
 }
 
-/** 图片/视频已入虚拟人像库的素材 id：快照 material_id > 节点已存 materialId > Asset- 前缀身份 */
+/** 图片/视频已入虚拟人像库的素材 id：只认快照 assets[assetId].material_id */
 export function resolveCharacterLibraryMaterialId(input: {
   mediaType?: unknown;
   snapshotMaterialId?: string | null;
-  nodeMaterialId?: unknown;
-  assetId?: unknown;
 }): string | undefined {
   if (input.mediaType === 'audio') return undefined;
-  const fromSnapshot = readNonEmptyId(input.snapshotMaterialId);
-  if (fromSnapshot) return fromSnapshot;
-  const fromNode = readNonEmptyId(input.nodeMaterialId);
-  if (fromNode) return fromNode;
-  const assetId = readNonEmptyId(input.assetId);
-  return assetId && isMaterialLibraryId(assetId) ? assetId : undefined;
+  return readNonEmptyId(input.snapshotMaterialId);
 }
 
 function toMaterialType(mediaType: 'image' | 'video' | 'audio'): MaterialAssetType {
