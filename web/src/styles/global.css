@@ -136,6 +136,14 @@ img {
   border-radius: var(--radius-md) !important;
 }
 
+/* 小地图全局内容等对比度展示；视口用白框标示，不靠压暗非视口区域 */
+.react-flow__minimap-mask {
+  fill: transparent !important;
+  stroke: #ffffff !important;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+
 .react-flow__controls {
   border: 1px solid var(--color-border-primary) !important;
   border-radius: var(--radius-md) !important;

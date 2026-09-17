@@ -142,21 +142,33 @@ export default function AccountRecordsModal({ onClose }: AccountRecordsModalProp
           ) : consumptions.length === 0 ? (
             <div className={styles.empty}>暂无消费记录</div>
           ) : (
-            consumptions.map((r) => (
-              <div className={styles.item} key={r.id}>
-                <ArrowUp size={18} strokeWidth={2} className={styles.iconUp} />
-                <div className={styles.main}>
-                  <div className={styles.itemTitle}>-{fmtCredits(r.credits)} 积分</div>
-                  <div className={styles.sub}>
-                    <span>
-                      {r.summary || '内容生成'}
-                      {r.model ? ` · ${r.model}` : ''}
-                    </span>
+            consumptions.map((r) => {
+              // IKGCWU：退款与消耗同列。后端给的一律是正的变动幅度，方向看 kind——
+              // 照抄扣费的 `-` 会把退回来的积分显示成又扣了一笔。
+              const isRefund = r.kind === 'refund';
+              return (
+                <div className={styles.item} key={r.id}>
+                  {isRefund ? (
+                    <ArrowDown size={18} strokeWidth={2} className={styles.iconDown} />
+                  ) : (
+                    <ArrowUp size={18} strokeWidth={2} className={styles.iconUp} />
+                  )}
+                  <div className={styles.main}>
+                    <div className={styles.itemTitle}>
+                      {isRefund ? '+' : '-'}
+                      {fmtCredits(r.credits)} 积分
+                    </div>
+                    <div className={styles.sub}>
+                      <span>
+                        {r.summary || '内容生成'}
+                        {r.model ? ` · ${r.model}` : ''}
+                      </span>
+                    </div>
                   </div>
+                  <span className={styles.time}>{fmtRelativeTime(r.created_at)}</span>
                 </div>
-                <span className={styles.time}>{fmtRelativeTime(r.created_at)}</span>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 

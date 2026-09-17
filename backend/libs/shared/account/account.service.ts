@@ -88,9 +88,15 @@ export class AccountService {
     return this.client.getTopUpByTradeNo(token, tradeNo);
   }
 
+  /** 分页拉消费流水；`type` 必传，可给数组取并集（IKGCWU：`[2, 6]` = 消耗 + 退款）。
+   *  不给缺省是刻意的——见 `packages/core` 同名的说明。 */
   listUserConsumeLogs(
     token: string,
-    options: { page?: number; pageSize?: number },
+    options: {
+      page?: number;
+      pageSize?: number;
+      type: number | readonly number[];
+    },
   ) {
     return this.client.listUserConsumeLogs(token, options);
   }

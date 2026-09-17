@@ -8,7 +8,7 @@ import { BadRequestException, ConflictException, Injectable } from "@nestjs/comm
 import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
 import { planLegacyCardMigration, type CanvasNodeLike } from "./legacy-card-migration.js";
-import { CANVAS_EDGE_LIMITS, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE, canvasEdgeSchema, fail, ok, applyPreviewSchema, conversationQuoteCreateSchema, previewSourceSchema, PROMPT_TEXT_LIMITS as limits, type LegacyCardHistoryItem, type LegacyMigrationReport } from "@lib/contracts";
+import { CANVAS_EDGE_LIMITS, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE, DomainError, canvasEdgeSchema, fail, ok, applyPreviewSchema, conversationQuoteCreateSchema, previewSourceSchema, PROMPT_TEXT_LIMITS as limits, type LegacyCardHistoryItem, type LegacyMigrationReport } from "@lib/contracts";
 import { createCanvasRepo, createConversationQuoteRepo, createLegacyCardHistoryRepo, type CanvasView, type ConversationQuoteRow, type LegacyCardHistoryRow } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -41,6 +41,17 @@ function toHistoryItem(row: LegacyCardHistoryRow): LegacyCardHistoryItem {
     cardJson: row.card_json ?? null,
     migratedAt: row.gmt_create.toISOString(),
   };
+}
+
+/** 版本冲突（412）信封：data 带回服务端当前 version，前端可据其直接刷新 If-Match。
+ *  与成功路径同址同字段（`data.version`），前端一套解析逻辑通吃。
+ *  不用 contracts 的 fail()：它命中 `ResultEnvelope<never>` 重载，data 被收窄成 null，
+ *  调用方就拿不到 `result.data.version` 了；这里要保住 payload 类型。
+ *  version 为 null 是可达的：画布行尚不存在（项目在、canvas 无行）时 getByProject 给 emptyView，
+ *  此时客户端若用数字 If-Match（如 "0"）就会走到冲突分支，回 `{ version: null }`，
+ *  语义等同「无版本」，客户端应按第一次保存（"missing"）处理。 */
+function canvasVersionConflict(version: number | null) {
+  return { code: 412, msg: "Canvas 版本冲突", data: { version } } as const;
 }
 
 @Injectable()
@@ -268,7 +279,12 @@ export class CanvasService {
     },
   ) {
     const owned = await this.project.findOwnedById(projectId, ownerId);
-    if (!owned) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
+    // 抛而不是 return 信封：信封走不到 AllExceptionsFilter，没人写 HTTP 状态码，
+    // 一次「项目不存在」会回 HTTP 200 + body code 100100（ADR-0083 禁的那类不一致）。
+    // 码与文案沿用原样；HTTP 404 来自码表——`httpStatusForCode` 先查 SPEC_CODE_HTTP_STATUS，
+    // 而 skill 域的 SKILL_NOT_FOUND 已把 100100 登记为 404，故此处不必（也不能）在
+    // GLOBAL_CODE_HTTP_STATUS 再补一条（补了也不会生效，那条分支轮不到）。
+    if (!owned) throw new DomainError(DATA_NOT_EXIST_CODE, "项目不存在");
     const viewport = typeof body.viewport === "string" ? body.viewport : null;
     const nodes = typeof body.nodes === "string" ? body.nodes : null;
     // IKDLQF：edges 省略时保留既有连线（旧客户端保存不得清边）；携带时按下文校验后覆盖。
@@ -379,7 +395,7 @@ export class CanvasService {
     }
     if ([...previous, ...incoming].some(node => node.data?.promptSource !== undefined)) {
       if (body.expectedVersion === undefined) throw new BadRequestException("保存预览节点必须携带 If-Match");
-      if (body.expectedVersion !== current.version) return { code: 412, msg: "Canvas 版本冲突", data: null } as const;
+      if (body.expectedVersion !== current.version) return canvasVersionConflict(current.version);
       const seen = new Set<string>();
       for (const node of incoming) {
         const old = previous.find(item => item.id === node.id);
@@ -437,7 +453,11 @@ export class CanvasService {
       edgesProvided ? JSON.stringify(releaseRemovedPromptSources(JSON.parse(current.edges ?? "[]") as CanvasEdge[], incomingEdges as CanvasEdge[])) : current.edges,
       editedMaterials.length ? { ownerId, items: editedMaterials } : undefined,
     );
-    if (!saved) return { code: 412, msg: "Canvas 版本冲突", data: null } as const;
+    if (!saved) {
+      // 条件写失败说明读与写之间被并发改动：重读一次拿服务端当前 version 回给前端。
+      const latest = await this.repo.getByProject(projectId);
+      return canvasVersionConflict(latest.version);
+    }
     return ok(saved);
   }
 }

@@ -52,6 +52,8 @@ export interface SnapshotAssetRow {
   id: string;
   type: string;
   url: string;
+  /** 素材内容 md5。渐入期老资产未落 md5，可空；写入侧不保证小写，比对需大小写不敏感。 */
+  md5: string | null;
   /** assets.project_id 在部署 schema 非空（默认 0）；理论可空时按全局 asset 处理。 */
   project_id: string | null;
   /** IKEXX8：素材库关联两列成对携带（未关联为 null）。 */
@@ -260,6 +262,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           id: idStr,
           type: a.type,
           url: a.url,
+          md5: a.md5 ?? null,
           project_id: rowProjectId,
           material_id: a.material_id ?? null,
           material_group_id: a.material_group_id ?? null,

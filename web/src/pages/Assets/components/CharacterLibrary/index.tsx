@@ -9,7 +9,7 @@ import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type Reac
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import QRCodeStyling from 'qr-code-styling';
-import { Plus, FolderOpen, Trash2, ArrowLeft, X, Loader2, Video, Music, RotateCw, Check } from 'lucide-react';
+import { Plus, FolderOpen, Trash2, ArrowLeft, X, Loader2, Video, Music, RotateCw, Check, ZoomIn } from 'lucide-react';
 import {
   createAssetGroup,
   listAssetGroups,
@@ -298,15 +298,20 @@ function MeasuredThumb({
   );
 }
 
-/** 素材卡片上的角标/名称浮层/状态角标/删除按钮（图片/视频卡片共用）；picker 模式隐藏删除按钮（管理归资产页） */
+/** 素材卡片上的角标/名称浮层/悬浮操作（图片/视频卡片共用）。
+ *  IKGHZ3：picker 模式同样显示删除按钮（ADR-0091，选择弹窗承载素材管理），
+ *  并新增放大预览按钮（仅 picker 模式：资产页点卡即预览，无需按钮）；
+ *  「处理中/失败」状态标并入底部名称条，不再单独占用左上角。 */
 function AssetCardOverlays({
   asset,
   onDeleteAsset,
+  onPreviewAsset,
   onClosePreview,
   pickerMode = false,
 }: {
   asset: MaterialAsset;
   onDeleteAsset: (asset: MaterialAsset) => void;
+  onPreviewAsset: (asset: MaterialAsset) => void;
   onClosePreview: () => void;
   pickerMode?: boolean;
 }) {
@@ -317,17 +322,18 @@ function AssetCardOverlays({
         {asset.AssetType === 'Audio' ? <Music size={14} /> : null}
         {asset.AssetType === 'Video' ? '视频' : asset.AssetType === 'Audio' ? '音频' : '图片'}
       </div>
-      {/* 底部名称浮层 */}
+      {/* 底部名称浮层：状态标并入（IKGHZ3） */}
       <div className={styles.assetNameOverlay}>
         <span className={styles.assetName} title={asset.Name}>{asset.Name}</span>
+        {asset.Status === 'Processing' && (
+          <span className={styles.assetNameStatus}>处理中</span>
+        )}
+        {asset.Status === 'Failed' && (
+          <span className={`${styles.assetNameStatus} ${styles.assetNameStatusFailed}`}>失败</span>
+        )}
       </div>
-      {asset.Status === 'Processing' && (
-        <div className={styles.statusBadge}>处理中</div>
-      )}
-      {asset.Status === 'Failed' && (
-        <div className={`${styles.statusBadge} ${styles.statusFailed}`}>失败</div>
-      )}
-      {!pickerMode && (
+      {/* 右下角悬浮操作组：删除在左、放大预览在右（picker 模式，IKGHZ3） */}
+      <div className={styles.assetHoverActions}>
         <button
           className={styles.assetDeleteBtn}
           title="删除素材"
@@ -339,7 +345,19 @@ function AssetCardOverlays({
         >
           <Trash2 size={14} strokeWidth={2} />
         </button>
-      )}
+        {pickerMode && (
+          <button
+            className={styles.assetPreviewBtn}
+            title="放大预览"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPreviewAsset(asset);
+            }}
+          >
+            <ZoomIn size={14} strokeWidth={2} />
+          </button>
+        )}
+      </div>
     </>
   );
 }
@@ -348,6 +366,28 @@ function materialMediaKind(assetType: MaterialAsset['AssetType']): 'image' | 'vi
   if (assetType === 'Video') return 'video';
   if (assetType === 'Audio') return 'audio';
   return 'image';
+}
+
+/** 素材预览弹窗生命周期桥接（GroupDetail 与 AigcFlatView 共用，IKGHZ3）：
+ *  预览开关上抛给选择弹窗（据此抑制自身 Esc 关闭）；预览打开期间 Esc 只关预览不外泄。 */
+function useMaterialPreviewBridge(
+  previewAsset: MaterialAsset | null,
+  closePreview: () => void,
+  active: boolean,
+  onPickerPreviewChange?: (open: boolean) => void,
+) {
+  useEffect(() => {
+    if (active) onPickerPreviewChange?.(previewAsset !== null);
+  }, [active, previewAsset, onPickerPreviewChange]);
+
+  useEffect(() => {
+    if (!previewAsset) return undefined;
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') closePreview();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewAsset, closePreview]);
 }
 
 /** picker 模式可选判定：Active + 有 URL + 类型在入口允许范围内（无过滤则全放行）；真人分组详情与虚拟平铺视图共用 */
@@ -362,8 +402,7 @@ function isPickerSelectableAsset(
 
 /** 素材卡片（真人分组详情与虚拟平铺视图共用）：图片 MeasuredThumb / 视频缩略 / 音频占位 / 资源不可用四分支，
  *  picker 勾选/置灰/选中角标与角标浮层在此单点维护；角标浮层与勾选角标以同一份 JSX 供图片/视频两分支复用。
- *  overlaysPickerMode 只控制 AssetCardOverlays 的删除按钮显隐口径（保持收敛前两视图差异）：
- *  虚拟平铺传 pickerMode（picker 模式隐藏删除，管理归资产页）；真人分组详情不传（picker 模式删除按钮保留）。 */
+ *  IKGHZ3：picker 模式透传给 AssetCardOverlays 渲染放大预览按钮（删除按钮两种模式都显示）。 */
 function AssetPickerCard({
   asset,
   pickerMode,
@@ -373,7 +412,6 @@ function AssetPickerCard({
   onPickerToggle,
   onDeleteAsset,
   onClosePreview,
-  overlaysPickerMode = false,
 }: {
   asset: MaterialAsset;
   pickerMode: boolean;
@@ -383,11 +421,16 @@ function AssetPickerCard({
   onPickerToggle?: (asset: MaterialAsset) => void;
   onDeleteAsset: (asset: MaterialAsset) => void;
   onClosePreview: () => void;
-  overlaysPickerMode?: boolean;
 }) {
   const overlays = (
     <>
-      <AssetCardOverlays asset={asset} onDeleteAsset={onDeleteAsset} onClosePreview={onClosePreview} pickerMode={overlaysPickerMode} />
+      <AssetCardOverlays
+        asset={asset}
+        onDeleteAsset={onDeleteAsset}
+        onPreviewAsset={onPreview}
+        onClosePreview={onClosePreview}
+        pickerMode={pickerMode}
+      />
       {pickerMode && selectable && (
         <div className={`${styles.checkToggle} ${selected ? styles.checkToggleOn : ''}`}>
           {selected && <Check size={14} strokeWidth={2.5} />}
@@ -439,6 +482,7 @@ function GroupDetail({
   pickerSelectedIds,
   onPickerToggleAsset,
   pickerMediaTypes,
+  onPickerPreviewChange,
 }: {
   group: MaterialGroup;
   assets: MaterialAsset[];
@@ -448,10 +492,14 @@ function GroupDetail({
   pickerSelectedIds?: ReadonlySet<string>;
   onPickerToggleAsset?: (asset: MaterialAsset) => void;
   pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
+  /** picker 预览弹窗开关上抛（IKGHZ3：选择弹窗据此抑制自身 Esc 关闭） */
+  onPickerPreviewChange?: (open: boolean) => void;
 }) {
   const [previewAsset, setPreviewAsset] = useState<MaterialAsset | null>(null);
   const closePreview = () => setPreviewAsset(null);
   const pickerMode = Boolean(onPickerToggleAsset);
+
+  useMaterialPreviewBridge(previewAsset, closePreview, pickerMode, onPickerPreviewChange);
 
   return (
     <div className={styles.detailView}>
@@ -534,12 +582,18 @@ function AigcFlatView({
   pickerSelectedIds,
   onPickerToggleAsset,
   pickerMediaTypes,
+  onPickerAssetRemoved,
+  onPickerPreviewChange,
 }: {
   onUpload?: () => void;
   refreshTick?: number;
   pickerSelectedIds?: ReadonlySet<string>;
   onPickerToggleAsset?: (asset: MaterialAsset) => void;
   pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
+  /** picker 删除成功后就地移除后上抛（IKGHZ3：选择弹窗联动已选集合） */
+  onPickerAssetRemoved?: (assetId: string) => void;
+  /** picker 预览弹窗开关上抛（IKGHZ3：选择弹窗据此抑制自身 Esc 关闭） */
+  onPickerPreviewChange?: (open: boolean) => void;
 }) {
   const [assets, setAssets] = useState<MaterialAsset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -547,8 +601,10 @@ function AigcFlatView({
   const [previewAsset, setPreviewAsset] = useState<MaterialAsset | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const closePreview = () => setPreviewAsset(null);
-  /** picker 模式（资产选择弹窗）：点卡=勾选、隐藏预览与删除，管理操作归资产页 */
+  /** picker 模式（资产选择弹窗）：点卡=勾选；悬浮操作补删除与放大预览（IKGHZ3） */
   const pickerMode = Boolean(onPickerToggleAsset);
+
+  useMaterialPreviewBridge(previewAsset, closePreview, pickerMode, onPickerPreviewChange);
 
   const loadAssets = useCallback(async () => {
     setLoading(true);
@@ -612,6 +668,7 @@ function AigcFlatView({
       setAssets((prev) => prev.filter((a) => a.Id !== deleteTarget.id));
       toast.success('已删除');
       setDeleteTarget(null);
+      if (pickerMode) onPickerAssetRemoved?.(deleteTarget.id);
     } catch (err) {
       if (!isApiError(err)) toast.error('删除失败');
       setDeleteTarget(null);
@@ -649,7 +706,6 @@ function AigcFlatView({
             onPickerToggle={onPickerToggleAsset}
             onDeleteAsset={handleDeleteAsset}
             onClosePreview={closePreview}
-            overlaysPickerMode={pickerMode}
           />
         ))}
         {!onUpload && assets.length === 0 && !loading && !loadError && (
@@ -699,6 +755,8 @@ export default function CharacterLibrary({
   pickerSelectedIds,
   onPickerToggleAsset,
   pickerMediaTypes,
+  onPickerAssetRemoved,
+  onPickerPreviewChange,
 }: {
   groupType?: GroupType;
   onDetailViewChange?: (inDetail: boolean, groupId: string | null) => void;
@@ -708,6 +766,10 @@ export default function CharacterLibrary({
   pickerSelectedIds?: ReadonlySet<string>;
   onPickerToggleAsset?: (asset: MaterialAsset) => void;
   pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
+  /** picker 删除成功后就地移除后上抛（IKGHZ3：选择弹窗联动已选集合） */
+  onPickerAssetRemoved?: (assetId: string) => void;
+  /** picker 预览弹窗开关上抛（IKGHZ3：选择弹窗据此抑制自身 Esc 关闭） */
+  onPickerPreviewChange?: (open: boolean) => void;
 }) {
   const isLiveness = groupType === 'LivenessFace';
 
@@ -725,6 +787,8 @@ export default function CharacterLibrary({
         pickerSelectedIds={pickerSelectedIds}
         onPickerToggleAsset={onPickerToggleAsset}
         pickerMediaTypes={pickerMediaTypes}
+        onPickerAssetRemoved={onPickerAssetRemoved}
+        onPickerPreviewChange={onPickerPreviewChange}
       />
     );
   }
@@ -739,6 +803,8 @@ export default function CharacterLibrary({
       pickerSelectedIds={pickerSelectedIds}
       onPickerToggleAsset={onPickerToggleAsset}
       pickerMediaTypes={pickerMediaTypes}
+      onPickerAssetRemoved={onPickerAssetRemoved}
+      onPickerPreviewChange={onPickerPreviewChange}
     />
   );
 }
@@ -751,6 +817,8 @@ function LivenessLibrary({
   pickerSelectedIds,
   onPickerToggleAsset,
   pickerMediaTypes,
+  onPickerAssetRemoved,
+  onPickerPreviewChange,
 }: {
   groupType?: GroupType;
   onDetailViewChange?: (inDetail: boolean, groupId: string | null) => void;
@@ -759,6 +827,10 @@ function LivenessLibrary({
   pickerSelectedIds?: ReadonlySet<string>;
   onPickerToggleAsset?: (asset: MaterialAsset) => void;
   pickerMediaTypes?: Array<'image' | 'video' | 'audio'>;
+  /** picker 删除成功后就地移除后上抛（IKGHZ3：选择弹窗联动已选集合） */
+  onPickerAssetRemoved?: (assetId: string) => void;
+  /** picker 预览弹窗开关上抛（IKGHZ3：选择弹窗据此抑制自身 Esc 关闭） */
+  onPickerPreviewChange?: (open: boolean) => void;
 }) {
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [groupAssets, setGroupAssets] = useState<Map<string, MaterialAsset[]>>(new Map());
@@ -996,6 +1068,7 @@ function LivenessLibrary({
             return next;
           });
         }
+        if (onPickerToggleAsset) onPickerAssetRemoved?.(deleteTarget.id);
       }
       toast.success('已删除');
       setDeleteTarget(null);
@@ -1029,6 +1102,7 @@ function LivenessLibrary({
           pickerSelectedIds={pickerSelectedIds}
           onPickerToggleAsset={onPickerToggleAsset}
           pickerMediaTypes={pickerMediaTypes}
+          onPickerPreviewChange={onPickerPreviewChange}
         />
 
         {/* 删除确认弹窗：详情视图内点击删除时立即弹出 */}

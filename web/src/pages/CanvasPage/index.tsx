@@ -9,7 +9,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle, Magnet } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition, type SpawnBox } from './draftSpawn';
 import {
@@ -30,7 +30,6 @@ import {
   readDraftMaterialRefs,
   freshVideoCanvasRefs,
   mergedVideoMediaRefsOf,
-  listVideoImageRefs,
   supportsVideoReferenceModel,
   videoRefConflict,
   videoRefSourceError,
@@ -51,6 +50,7 @@ import {
   mediaExtractNodeId,
   mediaExtractTerminalPatch,
 } from './mediaExtract';
+import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
@@ -280,6 +280,8 @@ export default function CanvasPage() {
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
   const [showEdges, setShowEdges] = useState(true);
+  /** 对齐吸附开关（IKGGCT T3）：全局持久化（不分画布文档），初始读 localStorage，默认开 */
+  const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
   /** 连线（受控持有：水合恢复、自动保存签名、目标节点附件推导共用，IKDLQF） */
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   /** 连线最新值（避免闭包陈旧：提交前落盘与附件推导用） */
@@ -458,22 +460,25 @@ export default function CanvasPage() {
     }
     const sourceNode = findCanvasNode(source);
     const targetNode = findCanvasNode(target);
-    if (!isConnectableSource(sourceNode) || !targetNode) return false;
-    const sourceData = sourceNode?.data as Record<string, unknown> | undefined;
+    if (!sourceNode || !targetNode) return false;
+    const sourceData = sourceNode.data as Record<string, unknown> | undefined;
     const targetData = targetNode.data as Record<string, unknown> | undefined;
     if (sourceData?.emptyShell || targetData?.emptyShell) return false;
+    const imageRefOk = genKindOf(targetNode) === 'image' && sourceNode.type === 'mediaNode'
+      && imageRefSourceError(sourceNode) === null;
+    if (!imageRefOk && !isConnectableSource(sourceNode)) return false;
     if (wouldCreateCycle(source, target, edgesRef.current)) return false;
     // IKFM3Q 契约 §4：媒体→文本卡的关系线只由正文 @ 索引建立；手工拖线拒绝，不出现无索引的线
-    if (sourceNode?.type === 'mediaNode' && targetNode.type === 'textNode') {
+    if (sourceNode.type === 'mediaNode' && targetNode.type === 'textNode') {
       showToast('warn', '媒体到文本卡的关系线由正文 @ 索引建立');
       return false;
     }
     const targetKind = genKindOf(targetNode);
-    const videoRole = targetKind === 'video' && sourceNode?.type === 'mediaNode'
+    const videoRole = targetKind === 'video' && sourceNode.type === 'mediaNode'
       ? videoEdgeRoleFor(target)
       : undefined;
     if (targetKind) {
-      if (!canConnectSourcesToGen([sourceNode!], targetKind)) return false;
+      if (!imageRefOk && !canConnectSourcesToGen([sourceNode], targetKind)) return false;
       if (sourceNode?.type === 'textNode' && sourceData?.promptSource && (targetKind === 'image' || targetKind === 'video')) {
         void referencePlanRef.current(source, target);
         return true;
@@ -1972,7 +1977,8 @@ export default function CanvasPage() {
         return;
       }
       if (node.type === 'mediaNode') {
-        // 拒绝（类型/失效/重复/超限）已在 validate 内 toast 明确原因；addCanvasEdge 幂等去重
+        // 与拖线同一建边路径；能力层静默拒绝时仍按参考校验建线（点选不得比拖线更弱）
+        if (connectPair(node.id, imagePickSession)) return;
         if (validateImageRefConnect(node.id, imagePickSession)) {
           addCanvasEdge(node.id, imagePickSession);
         }
@@ -3220,7 +3226,7 @@ export default function CanvasPage() {
     const fromId = state?.fromNode?.id ?? connectingSourceRef.current;
     connectingSourceRef.current = null;
     const from = fromId ? findCanvasNode(fromId) ?? state?.fromNode ?? undefined : undefined;
-    if (!from || !isConnectableSource(from)) return;
+    if (!from) return;
     const point = 'changedTouches' in event ? event.changedTouches[0] : event;
     const handleNodeId = state?.toHandle?.nodeId ?? null;
     const droppedId =
@@ -3232,6 +3238,7 @@ export default function CanvasPage() {
       connectPair(from.id, droppedId);
       return;
     }
+    if (!isConnectableSource(from)) return;
     // 库已建成有效连线但没命中检测时，也不弹菜单
     if (state?.isValid) return;
     // 未连到其他节点：松手展示可选菜单
@@ -3253,13 +3260,18 @@ export default function CanvasPage() {
     if (!connection.source || !connection.target || connection.source === connection.target) return false;
     const sourceNode = findCanvasNode(connection.source);
     const targetNode = findCanvasNode(connection.target);
-    if (!isConnectableSource(sourceNode) || !targetNode) return false;
-    const sourceData = sourceNode?.data as Record<string, unknown> | undefined;
+    if (!sourceNode || !targetNode) return false;
+    const sourceData = sourceNode.data as Record<string, unknown> | undefined;
     const targetData = targetNode.data as Record<string, unknown> | undefined;
     if (sourceData?.emptyShell || targetData?.emptyShell) return false;
     if (wouldCreateCycle(connection.source, connection.target, edgesRef.current)) return false;
     const kind = genKindOf(targetNode);
-    if (kind && !canConnectSourcesToGen([sourceNode!], kind)) return false;
+    // 图片草稿：以参考校验为准，避免能力集把合法图片素材预览成「无法连接」
+    if (kind === 'image' && sourceNode.type === 'mediaNode') {
+      return imageRefSourceError(sourceNode) === null;
+    }
+    if (!isConnectableSource(sourceNode)) return false;
+    if (kind && !canConnectSourcesToGen([sourceNode], kind)) return false;
     return true;
   };
 
@@ -3748,74 +3760,6 @@ export default function CanvasPage() {
 
   const handleComplianceCheck = async (id: string) => {
     await ensureMediaNodeCompliance(id, { toastSuccess: true });
-  };
-
-  /** 视频生成前补齐参考图合规；通过后回写节点 materialId 与通过图标 */
-  const ensureVideoImageRefsCompliance = async (
-    refs: VideoMediaRefs,
-  ): Promise<VideoMediaRefs | null> => {
-    // IKFM3W §10：文本带入参考按 asset_id 提交（与后端并入去重同空间），不参与 material 化
-    const images = listVideoImageRefs(refs).filter((item) => item.textNodeId == null);
-    if (images.length === 0) return refs;
-
-    const materialByKey = new Map<string, string>();
-    for (const item of images) {
-      if (materialByKey.has(item.nodeId)) continue;
-      const node = mediaNodesRef.current.find((n) => n.id === item.nodeId);
-      if (node) {
-        const failed = ((node.data ?? {}) as Record<string, unknown>).complianceFailed === true;
-        if (failed) {
-          showToast('warn', '合规校验未通过，不可用于视频生成');
-          return null;
-        }
-        const materialId = await ensureMediaNodeCompliance(item.nodeId, { toastSuccess: false });
-        if (!materialId) return null;
-        materialByKey.set(item.nodeId, materialId);
-        continue;
-      }
-      if (item.materialId && isMaterialLibraryId(item.materialId)) {
-        try {
-          await waitComplianceAssetReady(item.materialId);
-          materialByKey.set(item.nodeId, item.materialId);
-        } catch (err) {
-          toastComplianceError(err);
-          return null;
-        }
-        continue;
-      }
-      if (!item.url || item.url.startsWith('blob:')) {
-        showToast('warn', '素材尚未上传完成，请稍后重试');
-        return null;
-      }
-      try {
-        const result = await depositCanvasAssetToCharacterLibrary({
-          sourceAssetId: item.assetId,
-          url: item.url,
-          name: item.name,
-          mediaType: 'image',
-        });
-        if (!result.materialId) {
-          showToast('error', '校验失败，请重试');
-          return null;
-        }
-        materialByKey.set(item.nodeId, result.materialId);
-      } catch (err) {
-        toastComplianceError(err);
-        return null;
-      }
-    }
-
-    const withMaterial = (item: VideoMediaRef): VideoMediaRef => {
-      if (item.mediaType !== 'image') return item;
-      const materialId = materialByKey.get(item.nodeId);
-      return materialId ? { ...item, materialId } : item;
-    };
-    return {
-      ...refs,
-      first: refs.first ? withMaterial(refs.first) : undefined,
-      last: refs.last ? withMaterial(refs.last) : undefined,
-      reference: refs.reference.map(withMaterial),
-    };
   };
 
   const handleFillEmptyShell = (id: string, file: File) => {
@@ -5986,9 +5930,7 @@ export default function CanvasPage() {
       applyingRef.current = true;
       if (targetNodeId) setSubmittingNodeId(targetNodeId);
       try {
-        const compliantRefs = await ensureVideoImageRefsCompliance(draftRefs);
-        if (!compliantRefs) return;
-        const jobRefs = buildVideoJobReferences(compliantRefs);
+        const jobRefs = buildVideoJobReferences(draftRefs);
         const submitted = startGenerationJob(
           'video',
           parameters,
@@ -6916,26 +6858,12 @@ export default function CanvasPage() {
           startGenerationJob('image', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.ratio, size: handoff.size },
             references.map(r => r.assetId), undefined, undefined, { references });
         } else {
-          const videoRefs: typeof references = [];
-          for (const ref of references) {
-            if (ref.mediaType !== 'image') {
-              videoRefs.push(ref);
-              continue;
-            }
-            const result = await depositCanvasAssetToCharacterLibrary({
-              sourceAssetId: ref.assetId,
-              url: ref.url,
-              name: ref.name,
-              mediaType: 'image',
-            });
-            videoRefs.push({ ...ref, materialId: result.materialId });
-          }
           startGenerationJob('video', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.aspectRatio,
             resolution: handoff.resolution, duration: handoff.duration,
             // IKG0LP：首页选的「是否带音频」随交接带过来，不能在这里丢
             generate_audio: handoff.generateAudio }, undefined,
-            { references: buildVideoJobReferencesFromList(videoRefs) },
-            undefined, { references: videoRefs, mode: handoff.mode });
+            { references: buildVideoJobReferencesFromList(references) },
+            undefined, { references, mode: handoff.mode });
         }
       } catch (error) {
         console.warn('首页生成参考准备失败:', error);
@@ -7020,6 +6948,7 @@ export default function CanvasPage() {
           productNodes={productNodes}
           assetNodes={assetNodes}
           showEdges={showEdges}
+          snapAlignmentEnabled={snapAlignmentOn}
           edges={edges}
           onEdgesChange={guardEdgesChange}
           onConnect={handleConnect}
@@ -7200,6 +7129,18 @@ export default function CanvasPage() {
             title={showEdges ? '隐藏连线' : '显示连线'}
           >
             {showEdges ? <Link size={14} strokeWidth={2} /> : <Link2Off size={14} strokeWidth={2} />}
+          </button>
+          <button
+            className={`${styles.mapBtn} ${snapAlignmentOn ? styles.mapBtnActive : ''}`}
+            onClick={() => {
+              // IKGGCT T3：切换吸附开关并全局持久化（Alt 临时禁用是独立通道，不受此影响）
+              const next = !snapAlignmentOn;
+              setSnapAlignmentOn(next);
+              persistSnapAlignmentEnabled(next);
+            }}
+            title={snapAlignmentOn ? '关闭对齐吸附' : '开启对齐吸附'}
+          >
+            <Magnet size={14} strokeWidth={2} />
           </button>
           {saveStatus !== 'idle' && (
             // IKFYH6：保存状态与重试是面板编辑落盘链路的自有 UI，归「面板领土」——点重试保存不关面板
