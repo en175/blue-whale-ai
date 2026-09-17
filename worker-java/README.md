@@ -14,7 +14,7 @@ Blue-Whale 生成执行服务（Java 薄执行器）。决策：[ADR-0084](../do
 
 ## 灰度开关
 
-`WORKER_ENABLED_TAGS` 逗号列表（`step,image,audio,media_extract`），默认为空 = 不消费。
+`WORKER_ENABLED_TAGS` 逗号列表（`step,image,audio,media_extract,image_enhance`），默认为空 = 不消费。`image_enhance`（契约 §14 / IKGM8U）常量已冻结，消费者与处理器由 IKGM9D 注册。
 一刀切换 = TS 侧停该 tag + 此列表加该 tag；consumer group 后缀 `-java`（双组并存即回滚位）。
 
 ## 构建 / 运行
