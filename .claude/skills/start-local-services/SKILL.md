@@ -1,51 +1,88 @@
 ---
 name: start-local-services
-description: "启动 Blue-Whale 本地开发环境。前端已迁出本仓（前后端分离，见 ADR-0074），本仓本地运行 = 起 backend/ NestJS 服务。禁止连接测试环境数据库。触发词：启动服务/拉起服务/start services/local-mvp up。"
+description: "启动或接管 Blue-Whale 本地开发服务：web 前端 3000 + backend 3100 + 本地 Redis，后端分本地库与远程测试站库两种形态。接管既有服务前必须先跑技能内 scripts/check-local-services.sh 核对配置指向。触发词：启动服务/拉起服务/起环境/连数据库/start services/3000/3100。"
 ---
 
-# 启动 Blue-Whale 本地后端
+# 启动 Blue-Whale 本地服务
 
-**红线（ADR-0064）**：任何配置里不得出现测试站（115.190.244.91）数据库连接串；确需查测试数据走「应急通道」一节，用完即断。
+本仓本地联调 = `web/` 前端（vite，3000）+ `backend/` NestJS（3100）+ 本地 Redis 容器。数据库默认本地；需要用远程测试站账号与素材时走「后端形态 B」。
 
-## 标准启动（后端）
-
-前端 UI 已迁出本仓，由前端同事独立维护；本仓本地运行的是 NestJS 后端（`/api` 前缀，默认端口 3100）：
+## 第零步：接管前体检（强制）
 
 ```bash
-# 仓库根
-pnpm --dir backend build
-node backend/dist/apps/blue-whale/src/main.js   # PORT=3100
+bash .claude/skills/start-local-services/scripts/check-local-services.sh
 ```
 
-数据库 / Redis 由后端进程通过自身环境变量读取（连接串不入库）。迁移期间本地联调按需走隧道连开发库，见「应急通道」。
+输出 3000/3100 的 PID、代码所在目录、后端数据库与账户网关指向（本地/远程判定）、Redis 与探活结果。
+
+**端口活着 ≠ 配置正确**。别的会话可能用本地库默认配置重启过后端：本地库里没有团队账号，表现为「账号密码错误」。起任何服务前、用户报「登录不了」时，先跑体检再动手。
+
+## 前端 3000
+
+```bash
+cd <任务 worktree>/web
+nohup env VITE_API_BASE_URL=http://127.0.0.1:3100 \
+  npx vite --mode test --port 3000 --strictPort --host 127.0.0.1 \
+  > /tmp/bw-web-3000.log 2>&1 &
+```
+
+- API 请求经 vite proxy 转发到 `VITE_API_BASE_URL`；不设置时默认连远程测试站（`.env.test`）。
+- 起之前确认没有旧 3000 进程占着端口：旧进程可能跑的是别的 worktree 的旧代码（体检脚本显示代码目录），先 kill 再起。
+- 用 `nohup … &` 常驻；会话托管的后台进程在会话结束会被回收（SIGTERM 143）。
+
+## 后端 3100
+
+构建（必须完整跑完三段）：
+
+```bash
+cd <worktree>/backend && npm run build   # prisma generate && tsc -b && tsc-alias
+```
+
+构建中断会留下半成品 dist（`main.js` 里残留 `@lib/` 别名，启动报 `ERR_MODULE_NOT_FOUND`）。`npm start` 的 prestart 检查会拦截并提示重新 build。
+
+形态 A：本地库（默认）
+
+```bash
+cd backend && PORT=3100 nohup node dist/apps/blue-whale/src/main.js > /tmp/bw-backend-3100.log 2>&1 &
+```
+
+形态 B：远程测试站库（用测试站账号登录、读测试站素材）
+
+```bash
+cd backend
+set -a; source /tmp/bw-remote-agent.env; set +a   # Agent 服务三件套；缺失时见下
+nohup env \
+  DATABASE_URL='mysql://<凭据不落文件>@14.103.43.52:3306/blue_whale' \
+  NEW_API_BASE_URL='http://14.103.43.52:3006' \
+  REDIS_HOST=127.0.0.1 REDIS_PORT=6379 REDIS_DB=0 \
+  PORT=3100 node dist/apps/blue-whale/src/main.js > /tmp/bw-backend-3100.log 2>&1 &
+```
+
+- 完整连接串的获取：SSH 到测试站（密钥 `~/Downloads/api-gateway.pem`，root@14.103.43.52）从 backend 容器 `docker inspect` 提取。连接串只走进程环境变量注入，不落任何入库文件或日志（ADR-0064）。
+- Agent 三件套变量（`AGENT_SERVICE_BASE_URL=http://14.103.43.52:4112` + `AGENT_SERVICE_TOKEN` + `NEW_API_AGENT_BILLING_TOKEN`）同样从远程容器 inspect 提取，存 `/tmp/bw-remote-agent.env`（600 权限）。缺这三项：右侧边栏 Agent 会话 502、模型网关 503。
+- Redis 三个变量必须显式传。`REDIS_CONN_STRING` 不带 `/0` 库号会被解析成 db=NaN，启动即崩（`ReplyError: SELECT NaN`）。
+- 风险先告知用户：此形态下写操作真实落测试站库（同事可见），生成任务与 Agent 对话消耗测试站真实积分。
+
+## Redis（两形态共用）
+
+本地容器 `blue-whale-dev-redis`（依赖 Docker Desktop 开机）：
+
+```bash
+docker start blue-whale-dev-redis   # 已在跑则跳过
+```
+
+Redis 下线时后端会话接口全 503（页面弹「会话服务不可用」）；本地 mysql / new-api 容器不需要（形态 B 库与网关都在远程）。
 
 ## 验证
 
 ```bash
-# 后端健康（公开档位端点）
-curl -s http://localhost:3100/api/recharge/tiers | head -c 200
-
-# 产品登录
-curl -s -X POST http://localhost:3100/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"root","password":"rootroot"}'
-# 期望 data.access_token = sk-...
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3100/api/health        # 200
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3100/api/me            # 401（无登录态的干净响应=链路健康）
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3100/api/recharge/tiers # 200（库读取通）
 ```
 
-## 应急通道（仅调试测试站数据）
+形态 B 的最终确认是用户用测试站真实账号在 3000 登录成功。
 
-```bash
-# SSH 隧道转发测试站 MySQL 到本地 127.0.0.1:13306（可 --local-port N 改端口），
-# 前台运行，Ctrl+C 或 --timeout MINUTES 自动断开；仅供只读排查
-scripts/tunnel-testsite-db.sh [--local-port N] [--timeout MINUTES]
-```
+## 应急通道（只读排查测试库，见 ADR-0064）
 
-Redis 与 MySQL 同隧道，但 `tunnel-testsite-db.sh` 目前只映射 MySQL，Redis 需手写（本地 `16379` → 测试站 `6379`）：
-
-```bash
-ssh -i <测试站私钥> -N -o ExitOnForwardFailure=yes \
-  -L 16379:127.0.0.1:6379 root@115.190.244.91
-# 本地连：redis-cli -h 127.0.0.1 -p 16379 -a <requirepass>
-```
-
-集成验收只走测试站公开 HTTP API，永不接触测试库（IK50GB-C 红线）。
+`scripts/tunnel-testsite-db.sh [--local-port N]`：SSH 隧道转发测试站 MySQL 到本地，仅供只读排查，用完即断。集成验收只走测试站公开 HTTP API。

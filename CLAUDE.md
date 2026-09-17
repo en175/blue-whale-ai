@@ -4,7 +4,7 @@
 
 | 场景（碰这类操作前 Must Read） | 规则文件（加载方式） |
 | --- | --- |
-| 启动/调试本地服务（起环境、连数据库） | `.qoder/skills/start-local-services/SKILL.md`（`.claude`/`.zcode` 为同步副本）+ `docs/adr/0064-testsite-db-access-governance.md`（红线：本地配置禁现测试站连接串，应急只走 `scripts/tunnel-testsite-db.sh`） |
+| 启动/调试本地服务（起环境、连数据库） | `.claude/skills/start-local-services/SKILL.md`（`.zcode` 为同步副本）+ `docs/adr/0064-testsite-db-access-governance.md`（红线：测试站连接串不落任何入库文件，只走进程环境变量注入；接管 3000/3100 前先跑 `bash .claude/skills/start-local-services/scripts/check-local-services.sh` 核对端口背后的代码目录与数据库指向） |
 | 代码理解（查结构 / 调用链 / 架构） | `docs/agents/code-intelligence.md`（渐进式；结构查询先 CBM，不可用才降级 grep/glob） |
 | 判断产品实现技术栈 / Python 工具是否需要处置 | [ADR-0068](docs/adr/0068-node-typescript-product-runtime-and-specialized-compute-boundary.md) + [ADR-0070](docs/adr/0070-product-runtime-stack-does-not-govern-engineering-control-plane.md) + [ADR-0074](docs/adr/0074-frontend-backend-separation-nestjs-product-api.md)；逐项结论见 [Python 存量处置清单](docs/specs/2026-08-09-ik7fi6-python-inventory-disposition.md) |
 | Gitee 工作流（提交/分支/PR/发布/worktree） | `docs/agents/git-workflow.md`（渐进式） |
