@@ -51,6 +51,7 @@ import {
 } from '../ChipTextEditor/composed';
 import { shouldCancelOnKey } from './cancelShortcut';
 import { freePanelLayout, type PanelMetrics } from './layout';
+import { useStickToBottom } from './stickToBottom';
 import {
   DEFAULT_PANEL_WIDTH,
   clampPanelWidth,
@@ -1124,17 +1125,25 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
   }, [open, closing, cancellable, stopRun, pendingReference]);
 
   /**
-   * 轮次有任何变化（新消息、流式正文、思考、工具进度）/ 进入页面：滚动条拉到最底部。
+   * 进入页面、切换会话、用户发出新消息：回到底部并恢复跟随。
+   * 按用户消息条数认「发了新消息」——乐观气泡一上屏就算，被服务端消息替换时条数不变。
+   */
+  const { handlers: listScrollHandlers, follow: followListBottom, pin: pinListBottom } = useStickToBottom(listRef);
+  const userMessageCount = turns.reduce((n, turn) => n + turn.user.length, 0);
+  useEffect(() => {
+    pinListBottom();
+  }, [sessionId, userMessageCount, pinListBottom]);
+
+  /**
+   * 轮次有任何变化（流式正文、思考、工具进度）：用户贴着底就跟到底，往上翻了就不动（见 useStickToBottom）。
    * `turns` 是一份派生值，进行中的一轮每收一条增量就换引用，所以只依赖它和打字动画即可。
    *
    * 注意这里管不到思考原话的滚动：`.thinkingReasoning` 自带 `max-height` 与 `overflow-y`，
    * 是独立的滚动容器，外层滚到底对它无效。那一段由 ThinkingBlock 自己滚（见其中的注释）。
    */
   useEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [turns, streamingText, runningRunId]);
+    followListBottom();
+  }, [turns, streamingText, runningRunId, followListBottom]);
 
   /** 挂载即完成初始化：停靠抽屉全高贴右由纯 CSS 定位（IKDLD4），JS 坐标只有浮动模式需要。 */
   useEffect(() => {
@@ -1729,7 +1738,7 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
         /* 对话消息流：按轮渲染（IKDK5I）。一轮 = 这一批用户输入 + 回答它的那些条目 + 轮尾的账。
            进行中的回答就是「最后一轮还在长」，不再是挂在整个列表之后的全局区——运行中再发一句，
            回答仍然在自己的问题下面。 */
-        <div className={styles.messageList} ref={listRef}>
+        <div className={styles.messageList} ref={listRef} {...listScrollHandlers}>
           {turns.map((turn, turnIndex) => (
             <div key={turn.key} className={styles.turn}>
               {turn.user.map((m) => (
