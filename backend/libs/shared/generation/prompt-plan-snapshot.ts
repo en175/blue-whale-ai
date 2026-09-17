@@ -1,7 +1,6 @@
 import { validateReferences } from "../generation-runtime/video-reference-validation.js";
-import { composeTextAttachmentPrompt, composeTextAttachmentPromptIndexed } from "@lib/core";
 import { COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@lib/contracts";
-import { docHasTextRef, type PromptDoc } from "@lib/contracts";
+import { type PromptDoc } from "@lib/contracts";
 import { MISSING_PROMPT_REF_REASON, planError, readPromptPlan, validatePlanModel, validateVideoPlan, type PromptTargetNode } from "../canvas/prompt-target.js";
 import type { ModelCapabilityView } from "../persistence/model-capability-repo.js";
 import type { AssetOwnershipOps } from "../persistence/asset-ownership-types.js";
@@ -113,34 +112,15 @@ export async function freezePromptPlans(args: {
       planError(plans[0]!.nodeId, plans.flatMap(p => p.bindings), "目标已有素材库参考缺失，请恢复参考清单");
     }
   }
-  const compiled = attachments.map(attachment => {
-    const plan = plans.find(p => p.nodeId === attachment.node_id);
-    if (!plan) return attachment;
-    let text = plan.text;
-    for (const mention of [...plan.mentions].sort((a, b) => b.start - a.start)) {
-      const index = inputIds.indexOf(mention.assetId);
-      // IKG79Z：素材库引用在 videoReferences 里以 materialId 表达，按上面的身份映射回查，
-      // 否则这里取不到 ref 会退化成 `参考图0`（index 为 -1）——正是保留那条校验要防的静默降级。
-      const materialId = materialBackedIds.get(mention.assetId);
-      const ref = videoReferences?.find(r => r.assetId === mention.assetId || (materialId !== undefined && r.materialId === materialId));
-      const label = ref ? ref.role === "first_frame" ? "首帧" : ref.role === "last_frame" ? "尾帧"
-        : `${{ image: "参考图", video: "参考视频", audio: "参考音频" }[ref.type]}${videoReferences!.filter(r => r.type === ref.type && r.role === "reference").indexOf(ref) + 1}`
-        : `参考图${index + 1}`;
-      text = text.slice(0, mention.start) + label + text.slice(mention.end);
-    }
-    return { ...attachment, text };
-  });
-  // IKFA1P：正文含文本标签时按编号清单组合（正文 文本N 字样与附件清单行号对应）；
-  // 方案附件正文经上方标签替换后原样进入清单，保持既有方案绑定/同步约束。
-  const providerPrompt = args.promptDoc && docHasTextRef(args.promptDoc)
-    ? composeTextAttachmentPromptIndexed(compiled, args.prompt)
-    : composeTextAttachmentPrompt(compiled, args.prompt);
+  // IKG6EK / ADR-0088：正文由提交方给全，引用标记转移已在接纳管线完成
+  // （reference-marker-transfer.ts）——本函数不再组合 providerPrompt，附件正文也不再由
+  // 服务端拼进正文。方案快照退为方案绑定校验与审计事实。
   const maxLength = Math.max(
     args.type === "video" ? COMPOSED_VIDEO_PROMPT_MAX_LENGTH : COMPOSED_IMAGE_PROMPT_MAX_LENGTH,
     args.model?.features.max_prompt_length ?? 0,
   );
-  if (!providerPrompt.trim() || providerPrompt.length > maxLength) planError(plans[0]!.nodeId, plans[0]!.bindings, "标签转换后的提示词为空或超限");
+  if (!args.prompt.trim() || args.prompt.length > maxLength) planError(plans[0]!.nodeId, plans[0]!.bindings, "提示词为空或超限");
   return { canvasVersion: args.version, plans: plans.map(({ nodeId, text, mentions }) => ({ nodeId, text, mentions })),
     ...(videoReferences ? { videoReferences } : {}),
-    images: (videoReferences ? [] : inputIds).map(assetId => ({ assetId, url: resolved.find(a => a.id === assetId)!.url })), providerPrompt };
+    images: (videoReferences ? [] : inputIds).map(assetId => ({ assetId, url: resolved.find(a => a.id === assetId)!.url })) };
 }

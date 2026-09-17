@@ -212,6 +212,28 @@ export function videoRefLabel(
 }
 
 /**
+ * IKG6EK / ADR-0088：引用标记（`&asset_id&`）的身份 → 标签表。
+ *
+ * 与 videoRefLabel 同一套规则（首尾帧按角色、普通参考按同类型顺序编号），
+ * 供正文标记转移 `transferReferenceMarkers` 使用；返回的文案**不带 `@`**，
+ * 前缀由转移函数统一补。与 prompt_doc 编译（compilePromptDoc，也不带 `@`）
+ * 各自独立——两条输入通道并存期间互不影响。
+ *
+ * 入参 refs 的 id 必须是**本地 asset id**：素材库引用（material-only）由调用方
+ * 先用归属结果（`asset.material_id`）解析成本地 asset id 后填入，本函数不碰库。
+ */
+export function buildReferenceMarkerLabels(
+  refs: readonly VideoRefItem[],
+): Map<string, string> {
+  const labels = new Map<string, string>();
+  for (const ref of refs) {
+    const label = videoRefLabel(ref.id, refs);
+    if (label !== null) labels.set(ref.id, label);
+  }
+  return labels;
+}
+
+/**
  * 视频接纳前校验：存在失效标签或标签身份不在 references（asset_id ∪ material_id）时返回首个问题。
  * refs 必须已通过既有 references 结构与存在性/归属校验（与参考素材同一复核链路）。
  * IKFA1P：orderedTextNodeIds 为当前文本附件顺序（缺省 = 无文本附件上下文）。

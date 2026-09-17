@@ -153,8 +153,10 @@ describe("freezePromptPlans 生成输入以请求体为准：不再要求画布�
     expect(snapshot).toBeDefined();
     expect(snapshot!.plans).toEqual([{ nodeId: "plan", text: PLAN_TEXT, mentions: [{ start: 2, end: 4, index: 1, assetId: "11" }] }]);
     expect(snapshot!.images).toEqual([{ assetId: "11", url: "https://cdn.test/11.png" }]);
-    // 正文 @1 被替换成参考图编号标签，进入组合后的供应商正文
-    expect(snapshot!.providerPrompt).toContain("参考图1");
+    // IKG6EK / ADR-0088：providerPrompt 已退役——正文由提交方给全，引用标记转移在接纳管线完成
+    // （backend/libs/shared/generation/reference-marker-transfer.ts，用例见该文件）。
+    // 本文件只钉住快照不再携带它。
+    expect(snapshot).not.toHaveProperty("providerPrompt");
   });
 
   it("画布只剩方案→目标的边、媒体边缺失（project 499 形态）→ 放行", async () => {
@@ -252,7 +254,8 @@ describe("freezePromptPlans 保留的边界校验（IKG4RV 不放松）", () => 
       url: "https://cdn.test/11.png",
       providerUrl: "https://cdn.test/11.png",
     }]);
-    expect(snapshot!.providerPrompt).toContain("首帧");
+    // IKG6EK / ADR-0088：正文不再由快照携带（见上条注释）
+    expect(snapshot).not.toHaveProperty("providerPrompt");
   });
 });
 
@@ -282,9 +285,9 @@ describe("freezePromptPlans 素材库素材的身份映射（IKG79Z）", () => {
       url: "https://cdn.test/mat-1.png",
       providerUrl: "asset://mat-1",
     }]);
-    // 身份回查没做的话这里会是 index -1 → 「参考图0」静默送上游
-    expect(snapshot!.providerPrompt).toContain("参考图1");
-    expect(snapshot!.providerPrompt).not.toContain("参考图0");
+    // IKG6EK / ADR-0088：正文不再由快照携带；标签派生（含 material 身份回查）改由
+    // reference-marker-transfer.ts 承担，那边的用例覆盖「不因缺身份退化成 参考图0」。
+    expect(snapshot).not.toHaveProperty("providerPrompt");
   });
 
   it("该 asset 关联的 material 与请求里的不是同一个 → 仍 400", async () => {
@@ -398,8 +401,8 @@ describe("freezePromptPlans 素材库素材落成画布节点（IKG79Z）", () =
       url: "https://cdn.test/mat-1.png",
       providerUrl: "asset://mat-1",
     }]);
-    expect(snapshot!.providerPrompt).toContain("参考图1");
-    expect(snapshot!.providerPrompt).not.toContain("参考图0");
+    // IKG6EK / ADR-0088：正文不再由快照携带（见上条注释）
+    expect(snapshot).not.toHaveProperty("providerPrompt");
   });
 
   it("同 materialId 另有类型不符的节点时取类型相符的那个，不按首个命中误拒", async () => {

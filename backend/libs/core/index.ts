@@ -92,6 +92,7 @@ export {
   composeTextAttachmentPrompt,
   composeTextAttachmentPromptIndexed,
 } from "./compose-text-attachment-prompt.js";
+export { transferReferenceMarkers, markerAssetIdsOf } from "./transfer-reference-markers.js";
 export {
   issueAccessToken,
   verifyAccessToken,

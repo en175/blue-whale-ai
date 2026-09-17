@@ -43,6 +43,7 @@ export {
   validatePromptDocRefs,
   compilePromptDoc,
   videoRefLabel,
+  buildReferenceMarkerLabels,
   validateVideoPromptDocRefs,
   compileVideoPromptDoc,
   type PromptDoc,

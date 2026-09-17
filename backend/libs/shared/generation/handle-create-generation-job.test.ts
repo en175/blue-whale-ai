@@ -2367,7 +2367,7 @@ describe("handleCreateGenerationJob 文本附件正文标签 prompt_doc（IKFA1P
     ],
   } as const;
 
-  it("生图：文本+媒体混排合法 → 200，正文按附件顺序编译文本N，composed_prompt 冻结编号清单（D2/E4）", async () => {
+  it("生图：文本+媒体混排合法 → 200，正文按附件顺序编译文本N（D2/E4）", async () => {
     const { deps, createJob } = buildTargetDeps(TARGET_CANVAS);
     const result = await handleCreateGenerationJob("u1", "p1", {
       ...IMAGE_TARGET_BODY,
@@ -2378,10 +2378,9 @@ describe("handleCreateGenerationJob 文本附件正文标签 prompt_doc（IKFA1P
     // 编号跟附件顺序（text-b→文本1、text-a→文本2、text-blank→文本3），不跟正文出现顺序
     expect(cmdArg.input.prompt).toBe("按文本2修改，参考文本1与空白附件文本3");
     expect(cmdArg.input.prompt_doc).toEqual(TEXT_DOC);
-    // 编号清单：全部附件按序进入（含空白占位与未提及项），正文追加最后
-    expect(cmdArg.input.composed_prompt).toBe(
-      "文本1：雨夜\n\n文本2：赛博朋克\n\n文本3：   \n\n按文本2修改，参考文本1与空白附件文本3",
-    );
+    // IKG6EK / ADR-0088：编号清单组合（文本N：<正文> + 正文）已移交前端——后端不再冻结
+    // composed_prompt，也不再替前端拼装附件正文；worker 只读 input.prompt。
+    expect(cmdArg.input).not.toHaveProperty("composed_prompt");
   });
 
   it("生图：文本身份不在附件集合 → 400 invalid_reference，不建任务（D4）", async () => {
@@ -2459,7 +2458,8 @@ describe("handleCreateGenerationJob 文本附件正文标签 prompt_doc（IKFA1P
     expect(result.code).toBe(200);
     const input = createJob.mock.calls[0][0].input;
     expect(input.prompt).toBe("文本1");
-    expect(input.composed_prompt).toBe("文本1：手持跟拍\n\n文本2：胶片感\n\n文本1");
+    // IKG6EK / ADR-0088：编号清单组合移交前端，后端不再冻结 composed_prompt
+    expect(input).not.toHaveProperty("composed_prompt");
     expect(input).not.toHaveProperty("references");
   });
 
@@ -2507,12 +2507,11 @@ describe("handleCreateGenerationJob 文本附件正文标签 prompt_doc（IKFA1P
     expect(input.text_attachments[0]).toEqual(expect.objectContaining({
       node_id: mentioned, text: video ? "手持跟拍" : "雨夜",
     }));
-    expect(input.composed_prompt).toBe(video
-      ? "文本1：手持跟拍\n\n文本2：胶片感\n\n文本1"
-      : "文本1：雨夜\n\n文本2：赛博朋克\n\n文本3：   \n\n文本1");
+    // IKG6EK / ADR-0088：编号清单组合移交前端，后端不再冻结 composed_prompt
+    expect(input).not.toHaveProperty("composed_prompt");
   });
 
-  it("视频：references + 文本标签 → 200，帧/参考与文本N 混排编译，composed_prompt 冻结编号清单", async () => {
+  it("视频：references + 文本标签 → 200，帧/参考与文本N 混排编译", async () => {
     const { deps, createJob } = buildVideoTargetDeps();
     const result = await handleCreateGenerationJob("u1", "p1", {
       ...VIDEO_BODY,
@@ -2531,9 +2530,8 @@ describe("handleCreateGenerationJob 文本附件正文标签 prompt_doc（IKFA1P
     expect(result.code).toBe(200);
     const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
     expect(cmdArg.input.prompt).toBe("让图片1按文本2调整，再参考文本1");
-    expect(cmdArg.input.composed_prompt).toBe(
-      "文本1：手持跟拍\n\n文本2：胶片感\n\n让图片1按文本2调整，再参考文本1",
-    );
+    // IKG6EK / ADR-0088：编号清单组合移交前端，后端不再冻结 composed_prompt
+    expect(cmdArg.input).not.toHaveProperty("composed_prompt");
     expect(cmdArg.input.text_attachments).toEqual([
       { node_id: "text-x", title: "运镜", text: "手持跟拍" },
       { node_id: "text-y", title: "风格", text: "胶片感" },
@@ -2563,12 +2561,14 @@ describe("handleCreateGenerationJob 文本附件正文标签 prompt_doc（IKFA1P
     expect(result.code).toBe(200);
     expect(createJob.mock.calls[0][0].input).toMatchObject({ prompt: '音频1', prompt_doc: doc });
   });
-  it('音频 text_ref 冻结权威全文与编号清单', async () => {
+  it('音频 text_ref 冻结权威全文', async () => {
     const { deps, createJob } = buildAudioTargetDeps(TARGET_CANVAS);
     const doc = { version: 1, segments: [{ kind: 'text_ref', node_id: 'text-a' }] };
     const result = await handleCreateGenerationJob('u1', 'p1', { ...AUDIO_TARGET_BODY, prompt_doc: doc }, null, deps);
     expect(result.code).toBe(200);
-    expect(createJob.mock.calls[0][0].input).toMatchObject({ prompt: '文本1', prompt_doc: doc, composed_prompt: '文本1：赛博朋克\n\n文本1' });
+    // IKG6EK / ADR-0088：编号清单组合移交前端，后端不再冻结 composed_prompt
+    expect(createJob.mock.calls[0][0].input).toMatchObject({ prompt: '文本1', prompt_doc: doc });
+    expect(createJob.mock.calls[0][0].input).not.toHaveProperty('composed_prompt');
   });
 });
 

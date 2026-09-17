@@ -1,4 +1,5 @@
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
+import { transferPromptReferenceMarkers } from "./reference-marker-transfer.js";
 import type { CanvasEdge } from "@lib/contracts";
 import {
   MISSING_PROMPT_REF_REASON,
@@ -1704,6 +1705,23 @@ export async function handleCreateGenerationJob(
       return fail(400, compiledError.message, { code: compiledError.code });
     }
   }
+  // IKG6EK / ADR-0088：正文引用标记转移。提交方给的正文里素材引用写作 &asset_id&，
+  // 此处按本次请求的素材顺序换成 @标签（编号现算）；后端对提示词只做这一件事——不拼装、不追加。
+  // 产出即最终正文，下游（方案快照、strategy.composeInput → input.prompt）一律消费它。
+  // 注意：长度闸在转移之前量的是带 &id& 的原文，略保守，不会放过超限正文。
+  const parsedMarkerRefs = parseReferences(effectiveBody.references);
+  const markerItems = type === "image"
+    ? referenceAssetIds.map((id) => ({ id: String(id), role: "reference" as const, type: "image" as const }))
+    : videoRefItemsOf(effectiveBody.references);
+  const markerMaterialOnlyIds = parsedMarkerRefs.kind === "ok"
+    ? parsedMarkerRefs.items.flatMap((item) => (item.asset_id === undefined ? [String(item.material_id)] : []))
+    : [];
+  promptText = await transferPromptReferenceMarkers({
+    prompt: promptText,
+    items: markerItems,
+    materialOnlyIds: markerMaterialOnlyIds,
+    resolveAssets: (ids) => deps.assets.resolveInputAssets(ids, userId, projectId),
+  });
   // 5. 画布目标快照（仅携带 target_node_id 时读画布；IKFM3S 复用文本索引派生的同次读取）
   const target = await resolveTargetSnapshot({
     ...(promptCanvas ? { canvas: promptCanvas } : {}),
@@ -1759,14 +1777,6 @@ export async function handleCreateGenerationJob(
     input.text_input_signature = textInputSignatureOf(textIndexRefs.value.index.inputs);
   }
   if (planSnapshot) input.prompt_plan_snapshot = planSnapshot;
-  // IKFA1P：正文含文本标签且无方案快照时，把编号清单组合的最终供应商正文冻结进快照——
-  // 编号清单格式只在接纳处实现一次，worker 按优先级直接消费（有方案快照时 providerPrompt 已含）。
-  if (promptDoc && docHasTextRef(promptDoc) && !planSnapshot) {
-    input.composed_prompt = composeTextAttachmentPromptIndexed(
-      target.value.textAttachments,
-      promptText,
-    );
-  }
 
   // 7. 幂等派生 actionIdentity + 事件类型
   const actionSeed = `${projectId}\0${idempotencyKey ?? ""}\0${Date.now()}`;

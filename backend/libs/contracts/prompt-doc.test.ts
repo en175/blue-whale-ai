@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PROMPT_DOC_VERSION,
+  buildReferenceMarkerLabels,
   compilePromptDoc,
   compileVideoPromptDoc,
   docHasTextRef,
@@ -400,5 +401,33 @@ describe("validate/compile 文本扩展（IKFA1P）", () => {
       nodeId: TEXT_NODES[1],
     });
     expect(() => compileVideoPromptDoc(doc, VIDEO_REFS)).toThrow();
+  });
+});
+
+describe("buildReferenceMarkerLabels（引用标记 → 标签，IKG6EK / ADR-0088）", () => {
+  const REFS = [
+    { id: "7", role: "first_frame", type: "image" },
+    { id: "9", role: "reference", type: "image" },
+    { id: "11", role: "reference", type: "image" },
+    { id: "13", role: "reference", type: "video" },
+  ] as const;
+
+  it("首尾帧按角色，普通参考按同类型顺序编号", () => {
+    expect([...buildReferenceMarkerLabels(REFS).entries()]).toEqual([
+      ["7", "首帧"],
+      ["9", "图片1"],
+      ["11", "图片2"],
+      ["13", "视频1"],
+    ]);
+  });
+
+  it("标签不带 @ —— 前缀由转移函数统一补", () => {
+    for (const label of buildReferenceMarkerLabels(REFS).values()) {
+      expect(label.startsWith("@")).toBe(false);
+    }
+  });
+
+  it("空集合返回空表（转移函数退化为原样返回）", () => {
+    expect(buildReferenceMarkerLabels([]).size).toBe(0);
   });
 });
