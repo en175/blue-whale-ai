@@ -85,7 +85,7 @@ describe('MediaNode selected toolbar', () => {
 
   it('keeps @ and generate actions on an image node', async () => {
     await renderNode('image');
-    expect(labels()).toEqual(['重新编辑', '生成图片', '生成视频', '高清放大', '详情', '下载', '添加到 Agent 聊天']);
+    expect(labels()).toEqual(['重新编辑', '生成图片', '生成视频', '高清', '详情', '下载', '添加到 Agent 聊天']);
   });
 
   it('keeps @ and generate-video on a video node, still hides enhance-image', async () => {
@@ -93,38 +93,173 @@ describe('MediaNode selected toolbar', () => {
     expect(labels()).toEqual(['重新编辑', '生成视频', '提取音频', '详情', '下载', '添加到 Agent 聊天']);
   });
 
-  it('高清放大排在生成视频之后（IKGM9F）', async () => {
+  it('高清入口排在生成视频之后（IKGM9F，IKGOQX 改为下拉按钮）', async () => {
     await renderNode('image');
     const order = labels();
-    expect(order.indexOf('生成视频')).toBeLessThan(order.indexOf('高清放大'));
-    expect(order.indexOf('高清放大')).toBeLessThan(order.indexOf('详情'));
+    expect(order.indexOf('生成视频')).toBeLessThan(order.indexOf('高清'));
+    expect(order.indexOf('高清')).toBeLessThan(order.indexOf('详情'));
   });
 
-  it('点击高清放大派发 onEnhanceImage（携带节点 id）', async () => {
+  it('点击高清放大派发 onEnhanceImage（携带节点 id；IKGOQX 起经下拉菜单项触发）', async () => {
     const onEnhanceImage = vi.fn();
     await renderNode('image', { data: { onEnhanceImage } });
-    const button = [...mountNode.querySelectorAll('button')]
-      .find((b) => b.textContent?.trim() === '高清放大')!;
+    // 工具条按钮「高清 ▾」先展开菜单，再点菜单项「高清」触发既有行为
+    const dropdown = mountNode.querySelector<HTMLButtonElement>('[data-testid="enhance-menu-btn"]')!;
     await act(async () => {
-      button.click();
+      dropdown.click();
+    });
+    const item = mountNode.querySelector<HTMLButtonElement>('[data-testid="enhance-menu-enhance"]')!;
+    await act(async () => {
+      item.click();
     });
     expect(onEnhanceImage).toHaveBeenCalledWith('image-node');
   });
 
   it('生成中的图片卡不显示高清放大（工具条整体隐藏）', async () => {
     await renderNode('image', { genStatus: 'generating', progress: 0, selected: true, data: { src: 'http://img/old.png' } });
-    expect(labels()).not.toContain('高清放大');
+    expect(labels()).not.toContain('高清');
   });
 
   it('已失败的图片卡不显示高清放大（工具条整体隐藏）', async () => {
     await renderNode('image', { genStatus: 'failed', errorText: '配额不足', selected: true, data: { src: '', draft: true } });
-    expect(labels()).not.toContain('高清放大');
+    expect(labels()).not.toContain('高清');
   });
 
   it('素材缺失的图片卡不显示高清放大（工具条整体隐藏）', async () => {
     await renderNode('image', { selected: true, data: { assetMissing: true, src: '' } });
-    expect(labels()).not.toContain('高清放大');
+    expect(labels()).not.toContain('高清');
     expect(mountNode.textContent).toContain('素材已被删除');
+  });
+});
+
+describe('MediaNode enhance dropdown menu (IKGOQX)', () => {
+  const menuBtn = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="enhance-menu-btn"]')!;
+  const menu = () => mountNode.querySelector('[data-testid="enhance-menu"]');
+  const menuItem = (id: string) => mountNode.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!;
+
+  async function openMenu() {
+    await act(async () => {
+      menuBtn().click();
+    });
+    expect(menu()).toBeTruthy();
+  }
+
+  it('点「高清 ▾」展开菜单：只含「高清」「扩图」两项，不含未实现功能', async () => {
+    await renderNode('image');
+    expect(menu()).toBeNull();
+    await openMenu();
+    const items = [...menu()!.querySelectorAll('button')].map((b) => b.textContent?.trim());
+    expect(items).toEqual(['高清', '扩图']);
+  });
+
+  it('菜单项「高清」行为与改造前一致：派发 onEnhanceImage 并收起菜单', async () => {
+    const onEnhanceImage = vi.fn();
+    await renderNode('image', { data: { onEnhanceImage } });
+    await openMenu();
+    await act(async () => {
+      menuItem('enhance-menu-enhance').click();
+    });
+    expect(onEnhanceImage).toHaveBeenCalledWith('image-node');
+    expect(menu()).toBeNull();
+  });
+
+  it('菜单项「扩图」派发 onOutpaintImage 并收起菜单', async () => {
+    const onOutpaintImage = vi.fn();
+    await renderNode('image', { data: { onOutpaintImage, width: 1600, height: 900, size: 1000 } });
+    await openMenu();
+    await act(async () => {
+      menuItem('enhance-menu-outpaint').click();
+    });
+    expect(onOutpaintImage).toHaveBeenCalledWith('image-node');
+    expect(menu()).toBeNull();
+  });
+
+  it('再点一次按钮收起菜单', async () => {
+    await renderNode('image');
+    await openMenu();
+    await act(async () => {
+      menuBtn().click();
+    });
+    expect(menu()).toBeNull();
+  });
+
+  it('点菜单外区域收起菜单', async () => {
+    await renderNode('image');
+    await openMenu();
+    await act(async () => {
+      document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(menu()).toBeNull();
+  });
+
+  it('源图门槛达标时「扩图」可用（长边恰 4160、文件恰 10MB）', async () => {
+    const onOutpaintImage = vi.fn();
+    await renderNode('image', {
+      data: { onOutpaintImage, width: 4160, height: 2000, size: 10 * 1024 * 1024 },
+    });
+    await openMenu();
+    const item = menuItem('enhance-menu-outpaint');
+    expect(item.getAttribute('aria-disabled')).toBeNull();
+    await act(async () => {
+      item.click();
+    });
+    expect(onOutpaintImage).toHaveBeenCalledWith('image-node');
+  });
+
+  it('扩图置灰矩阵：长边超 4160 / 文件超 10MB / 真实宽高缺失，悬停说明原因且点击不派发', async () => {
+    // 长边超限
+    const overLong = { onOutpaintImage: vi.fn(), width: 4161, height: 2000, size: 1000 };
+    await renderNode('image', { data: overLong });
+    await openMenu();
+    const item1 = menuItem('enhance-menu-outpaint');
+    expect(item1.getAttribute('aria-disabled')).toBe('true');
+    expect(item1.getAttribute('title')).toContain('4160');
+    await act(async () => {
+      item1.click();
+    });
+    expect(overLong.onOutpaintImage).not.toHaveBeenCalled();
+    expect(menu()).toBeTruthy(); // 置灰点击不收菜单
+    await act(async () => {
+      menuBtn().click();
+    });
+
+    // 文件超限
+    const overSize = { onOutpaintImage: vi.fn(), width: 2000, height: 1000, size: 10 * 1024 * 1024 + 1 };
+    await renderNode('image', { data: overSize });
+    await openMenu();
+    const item2 = menuItem('enhance-menu-outpaint');
+    expect(item2.getAttribute('aria-disabled')).toBe('true');
+    expect(item2.getAttribute('title')).toContain('10MB');
+    await act(async () => {
+      item2.click();
+    });
+    expect(overSize.onOutpaintImage).not.toHaveBeenCalled();
+    await act(async () => {
+      menuBtn().click();
+    });
+
+    // 真实宽高缺失
+    const noDims = { onOutpaintImage: vi.fn(), size: 1000 };
+    await renderNode('image', { data: noDims });
+    await openMenu();
+    const item3 = menuItem('enhance-menu-outpaint');
+    expect(item3.getAttribute('aria-disabled')).toBe('true');
+    expect(item3.getAttribute('title')).toContain('尺寸未知');
+    await act(async () => {
+      item3.click();
+    });
+    expect(noDims.onOutpaintImage).not.toHaveBeenCalled();
+  });
+
+  it('扩图门槛不影响「高清」项：门槛超标时高清仍可点', async () => {
+    const onEnhanceImage = vi.fn();
+    await renderNode('image', { data: { onEnhanceImage, width: 5000, height: 4000, size: 20 * 1024 * 1024 } });
+    await openMenu();
+    expect(menuItem('enhance-menu-outpaint').getAttribute('aria-disabled')).toBe('true');
+    await act(async () => {
+      menuItem('enhance-menu-enhance').click();
+    });
+    expect(onEnhanceImage).toHaveBeenCalledWith('image-node');
   });
 });
 
