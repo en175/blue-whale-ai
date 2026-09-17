@@ -827,7 +827,9 @@ function resolveReferenceAssets(
   // material_id 已在 validateRejectMaterialReferences 拦下（仅视频可用）。
   // 与旧字段同时出现时以 references 为准——前端切过来之前旧路径原样可用。
   const singleRefs = type === "image" ? parseReferences(body.references) : { kind: "absent" as const };
-  if (singleRefs.kind === "ok") {
+  // 空数组视为「未提供」：与音频端 hasContent 同口径——前端可能发 references: []（旧字段仍带内容），
+  // 若把空数组当成"以 references 为准"，会把同请求里的 input_asset_ids 静默清空。
+  if (singleRefs.kind === "ok" && singleRefs.items.length > 0) {
     const ids = singleRefs.items.map((item) => String(item.asset_id));
     if (ids.length > maxReferenceImages) {
       return {
@@ -1743,7 +1745,9 @@ export async function handleCreateGenerationJob(
   // IKG6EK / ADR-0088：正文引用标记转移。提交方给的正文里素材引用写作 &asset_id&，
   // 此处按本次请求的素材顺序换成 @标签（编号现算）；后端对提示词只做这一件事——不拼装、不追加。
   // 产出即最终正文，下游（方案快照、strategy.composeInput → input.prompt）一律消费它。
-  // 注意：长度闸在转移之前量的是带 &id& 的原文，略保守，不会放过超限正文。
+  // 注意：长度闸在转移之前量的是带 &id& 的原文，而转移可能**变长**（`&1&` 3 字 → `@图片1` 4 字），
+  // 所以该闸不构成「最终正文不超限」的保证。实际不可达（面板输入上限 1000 + 组合预算 30,000）；
+  // 若要该不变式成立，需在转移之后复量一次。
   const parsedMarkerRefs = parseReferences(effectiveBody.references);
   const markerItems = type === "image"
     ? referenceAssetIds.map((id) => ({ id: String(id), role: "reference" as const, type: "image" as const }))

@@ -358,7 +358,8 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       const input = rows[0].input as Record<string, unknown>;
       expect(input.target_node_id).toBe("media-1");
       expect(input.prompt).toBe("生成环境音，参考文本1");
-      expect(input.composed_prompt).toBe("文本1：雨夜街道，两个人争吵\n\n生成环境音，参考文本1");
+      // IKG6EK / ADR-0088：composed_prompt 已退役——编号清单组合移交前端，后端不再冻结
+      expect(input).not.toHaveProperty("composed_prompt");
       expect(input.prompt_doc).toEqual(generationRequests[0].body.prompt_doc);
       expect((input.prompt_doc as { segments: unknown[] }).segments).toContainEqual({ kind: "text_ref", node_id: "text-1", label: "文本1" });
       expect(input.text_attachments).toEqual([
