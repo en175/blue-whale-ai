@@ -196,6 +196,17 @@ export interface SnapNodeLike {
   height?: number;
 }
 
+/** 解析节点尺寸：measured 优先，缺省回退节点自身 width / height 字段；
+ *  均缺失（尺寸未知无法对齐）或节点本身不存在时返回 null。 */
+export function resolveNodeSize(
+  node: SnapNodeLike | null | undefined,
+): { width: number; height: number } | null {
+  const width = node?.measured?.width ?? node?.width;
+  const height = node?.measured?.height ?? node?.height;
+  if (width == null || height == null) return null;
+  return { width, height };
+}
+
 /** 收集对齐参考块：排除被拖集合（一起拖动的多张卡互不为参考）；
  *  type 'groupFrame' 的组框伪节点按其整体矩形作为一个参考块；
  *  measured 与 width / height 均缺失的节点跳过（尺寸未知无法对齐）。 */
@@ -204,12 +215,11 @@ export function collectSnapTargets(nodes: SnapNodeLike[], draggingIds: Iterable<
   const targets: SnapTarget[] = [];
   for (const node of nodes) {
     if (dragging.has(node.id)) continue;
-    const width = node.measured?.width ?? node.width;
-    const height = node.measured?.height ?? node.height;
-    if (width == null || height == null) continue;
+    const size = resolveNodeSize(node);
+    if (size == null) continue;
     targets.push({
       id: node.id,
-      rect: { x: node.position.x, y: node.position.y, width, height },
+      rect: { x: node.position.x, y: node.position.y, width: size.width, height: size.height },
     });
   }
   return targets;

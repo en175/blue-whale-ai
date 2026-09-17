@@ -12,6 +12,7 @@ import type { NodeChange } from '@xyflow/react';
 import {
   collectSnapTargets,
   computeSnapAlignment,
+  resolveNodeSize,
   type SnapGuide,
   type SnapNodeLike,
   type SnapRect,
@@ -78,17 +79,15 @@ export function snapDragChanges(
     return { changes, guides: EMPTY_SNAP_GUIDES };
   }
   const primaryNode = nodes.find((n) => n.id === primaryDragId);
-  // 尺寸回退链与 collectSnapTargets 一致：measured → width/height → 无法对齐
-  const width = primaryNode?.measured?.width ?? primaryNode?.width;
-  const height = primaryNode?.measured?.height ?? primaryNode?.height;
-  if (width == null || height == null) {
+  const primarySize = resolveNodeSize(primaryNode);
+  if (primarySize == null) {
     return { changes, guides: EMPTY_SNAP_GUIDES };
   }
   const draggingRect: SnapRect = {
     x: primaryChange.position.x,
     y: primaryChange.position.y,
-    width,
-    height,
+    width: primarySize.width,
+    height: primarySize.height,
   };
 
   // 排除集合 = 拖拽开始冻结的被拖集合；并入本帧 position change 的 id 作防御
