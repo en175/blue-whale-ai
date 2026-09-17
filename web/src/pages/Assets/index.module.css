@@ -405,6 +405,26 @@
   background-color: var(--color-error);
 }
 
+/* 合规通过角标：缩略图右上角 */
+.complianceBadge {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.complianceBadge img {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
 /* 音频图标 */
 .audioIcon {
   font-size: 40px;
