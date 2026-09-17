@@ -17,6 +17,25 @@ describe("transferReferenceMarkers（IKG6EK / ADR-0088）", () => {
     expect(
       transferReferenceMarkers("角色参考&asset-active-1& 出场", labels(["asset-active-1", "图片1"])),
     ).toBe("角色参考@图片1 出场");
+    expect(
+      transferReferenceMarkers(
+        "角色参考&asset-20260916091331-r74gp& 出场",
+        labels(["asset-20260916091331-r74gp", "图片1"]),
+      ),
+    ).toBe("角色参考@图片1 出场");
+  });
+
+  it("素材库身份大小写不敏感（本仓 materialId() / MATERIAL_ID_PATTERN /i 同口径）", () => {
+    expect(
+      transferReferenceMarkers("参考&Asset-active-1&", labels(["asset-active-1", "图片1"])),
+    ).toBe("参考@图片1");
+    expect(
+      transferReferenceMarkers("参考&asset-active-1&", labels(["Asset-Active-1", "图片1"])),
+    ).toBe("参考@图片1");
+  });
+
+  it("数字身份不做小写回退（不存在大小写问题，也不该放宽匹配面）", () => {
+    expect(transferReferenceMarkers("&6047&", labels(["asset-6047", "图片1"]))).toBe("&6047&");
   });
 
   it("找不到身份就不转，标记原样保留（不猜测、不删除）", () => {

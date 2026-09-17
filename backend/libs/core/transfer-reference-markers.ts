@@ -31,8 +31,14 @@ export function transferReferenceMarkers(
   labels: ReadonlyMap<string, string>,
 ): string {
   if (labels.size === 0) return prompt;
+  // 素材库 id 在本仓按**大小写不敏感**处理（materialId() /^[Aa]sset-/、MATERIAL_ID_PATTERN /i、
+  // 方案快照比对用 toLowerCase）；本地 asset 数字 id 无大小写问题。
+  // 故 asset- 前缀的身份走小写回退，避免「references 写 Asset-X、正文写 &asset-x&」这类
+  // 同义不同形被判成「找不到身份」而静默不转。
+  const lower = new Map([...labels].map(([key, value]) => [key.toLowerCase(), value]));
   return prompt.replace(markerPattern(), (whole, identity: string) => {
-    const label = labels.get(identity);
+    const label = labels.get(identity)
+      ?? (identity.toLowerCase().startsWith("asset-") ? lower.get(identity.toLowerCase()) : undefined);
     return label === undefined ? whole : `@${label}`;
   });
 }
