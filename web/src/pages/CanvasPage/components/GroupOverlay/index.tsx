@@ -19,6 +19,7 @@ import {
   membersInGroupBox,
   MIN_GROUP_MEMBERS,
   nodeInsideGroupBox,
+  contentNodeAtFlowPoint,
   type CanvasGroup,
   type GroupBBox,
   type GroupFrameDragResult,
@@ -190,6 +191,8 @@ export default function GroupOverlay({
   const paneRef = useRef<HTMLElement | null>(null);
   /** 拖组结束后需吞掉一次 click（避免冒泡到 pane 触发 onPaneClick 清空选中） */
   const clickSuppressRef = useRef(false);
+  /** 内容卡上的按下时刻：选中重绘会拆掉 dblclick，用间隔识别双击进编辑 */
+  const lastContentPressRef = useRef({ id: '', at: 0 });
   const uiLayerRef = useCallback((el: HTMLDivElement | null) => {
     paneRef.current = el
       ? el.closest('.react-flow')?.querySelector<HTMLElement>('.react-flow__pane') ?? null
@@ -329,7 +332,9 @@ export default function GroupOverlay({
 
   /** 命中测试：屏幕点是否落在某组矩形的「空白区」。
    *  落在节点/边/面板/自有 UI（徽标、操作条、成组按钮）或任何画布外 portal
-   *  （如 body 挂载的右键菜单）上时返回 null，交回各自处理。 */
+   *  （如 body 挂载的右键菜单）上时返回 null，交回各自处理。
+   *  组框 pointer-events:none，点击会穿透到 pane：除 e.target 外还用
+   *  elementsFromPoint 穿透叠层，避免把内容卡误判成组空白（IKG7VR）。 */
   const hitGroupAt = useCallback(
     (clientX: number, clientY: number, target: EventTarget | null): CanvasGroup | null => {
       if (!(target instanceof Element)) return null;
@@ -345,7 +350,13 @@ export default function GroupOverlay({
       ) {
         return null;
       }
+      for (const el of document.elementsFromPoint(clientX, clientY)) {
+        if (!(el instanceof Element)) continue;
+        const nodeEl = el.closest('.react-flow__node');
+        if (nodeEl && !nodeEl.classList.contains('react-flow__node-groupFrame')) return null;
+      }
       const p = screenToFlowPosition({ x: clientX, y: clientY });
+      if (contentNodeAtFlowPoint(nodesRef.current, p)) return null;
       const list = groupsRef.current;
       // 后创建的组视觉上在上层：倒序取首个命中
       for (let i = list.length - 1; i >= 0; i--) {
@@ -374,9 +385,31 @@ export default function GroupOverlay({
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0 || !e.isPrimary || draggingRef.current) return;
+      const flowPoint = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const content = contentNodeAtFlowPoint(nodesRef.current, flowPoint);
+      if (content) {
+        const onContentNode = e.target instanceof Element
+          && Boolean(e.target.closest('.react-flow__node'))
+          && !e.target.closest('.react-flow__node-groupFrame');
+        const now = performance.now();
+        const last = lastContentPressRef.current;
+        const isDouble = last.id === content.id && now - last.at > 0 && now - last.at < 350;
+        lastContentPressRef.current = { id: content.id, at: now };
+        // 事件已打在卡片上：放行走原有单击/拖拽/双击（媒体改名、节点放大等）
+        if (onContentNode) return;
+        // 组框穿透到 pane：拦住框选；文本卡补一次进入编辑
+        e.stopPropagation();
+        if (isDouble && content.type === 'textNode') {
+          const editor = document.querySelector(
+            `.react-flow__node[data-id="${CSS.escape(content.id)}"] [data-placeholder="输入内容..."]`,
+          );
+          editor?.dispatchEvent(new Event('bw-enter-edit'));
+        }
+        return;
+      }
       const g = hitGroupAt(e.clientX, e.clientY, e.target);
       if (!g) return;
-      e.preventDefault();
+      // 只阻断冒泡到 pane（框选），不 preventDefault——否则正在编辑的文本卡无法失焦退出
       e.stopPropagation();
       startFrameDrag(e.clientX, e.clientY, g);
     };
@@ -388,6 +421,19 @@ export default function GroupOverlay({
     };
     // 双击组空白 = 进入组内编辑（TC_CX_210），拦截 d3-zoom 的双击缩放避免视口跳动
     const onDblClick = (e: MouseEvent) => {
+      const flowPoint = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const content = contentNodeAtFlowPoint(nodesRef.current, flowPoint);
+      if (content) {
+        const onContentNode = e.target instanceof Element
+          && Boolean(e.target.closest('.react-flow__node'))
+          && !e.target.closest('.react-flow__node-groupFrame');
+        // 已打在卡片上则放行（媒体改名、画布双击放大）；仅穿透到 pane 时拦住缩放
+        if (!onContentNode) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
       const g = hitGroupAt(e.clientX, e.clientY, e.target);
       if (!g) return;
       e.preventDefault();
@@ -401,7 +447,7 @@ export default function GroupOverlay({
       window.removeEventListener('click', onClick, true);
       window.removeEventListener('dblclick', onDblClick, true);
     };
-  }, [hitGroupAt, startFrameDrag]);
+  }, [hitGroupAt, startFrameDrag, screenToFlowPosition]);
 
   /** 悬停组内空白区 → pane 光标 grab（恢复组框下沉后丢失的可拖拽提示） */
   useEffect(() => {

@@ -329,10 +329,12 @@
   cursor: text;
   white-space: pre-wrap;
   word-break: break-word;
+  user-select: none;
 }
 
 .editorScrolling {
   overflow-y: auto;
+  user-select: text;
 }
 
 /* 占位符 */

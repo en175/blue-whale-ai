@@ -28,6 +28,10 @@ import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 /** 文字节点最大字数（按纯文本计，含粘贴） */
 const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
 
+/** 正文双击间隔（毫秒）。选中节点会抬 zIndex 并重绘，原生 dblclick 容易丢失，故按按下间隔识别。 */
+const TEXT_BODY_DOUBLE_PRESS_MS = 350;
+const lastTextBodyPressAt = new Map<string, number>();
+
 /** 悬停预览估算高度：与 .chipPreview 的缩略图 max-height 200 + 名称行/内边距联动，CSS 改尺寸须同步 */
 const CHIP_PREVIEW_EST_HEIGHT = 250;
 
@@ -372,6 +376,19 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     else restoreSelection();
   }, [editing, restoreChipAnchor, restoreSelection]);
 
+  // 组叠层把双击穿透到 pane 时，由 GroupOverlay 派发 bw-enter-edit 进入编辑
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const enterEdit = () => {
+      if (!isSelect) return;
+      if (isTextGen && !writingSelf) return;
+      setEditing(true);
+    };
+    editor.addEventListener('bw-enter-edit', enterEdit);
+    return () => editor.removeEventListener('bw-enter-edit', enterEdit);
+  }, [isSelect, isTextGen, writingSelf]);
+
   /** media 标签 DOM 变更（插入/重绑定/删除）→ 序列化 → 全量重放 → 同步父级与关系线。
    *  重放销毁旧 DOM、旧选区随之失效：anchor 记录变更前锚点，重放后按它在新 DOM 恢复光标（契约 §5）。 */
   const commitMediaEdit = useCallback((delta: { added: string[]; removed: string[] }, anchor?: ChipAnchor) => {
@@ -634,6 +651,20 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
     saveSelection();
   }, [editing, saveSelection]);
 
+  /** 两次短间隔按下进入编辑。多组时选中会重绘节点，原生 dblclick 常丢失（IKG7VR）。 */
+  const handleBodyDoublePress = useCallback((e: React.PointerEvent) => {
+    if (editing || !isSelect || e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('.react-flow__handle')) return;
+    if (isTextGen && !writingSelf) return;
+    const now = performance.now();
+    const prev = lastTextBodyPressAt.get(id) ?? 0;
+    lastTextBodyPressAt.set(id, now);
+    if (now - prev > 0 && now - prev < TEXT_BODY_DOUBLE_PRESS_MS) {
+      e.stopPropagation();
+      setEditing(true);
+    }
+  }, [editing, isSelect, isTextGen, writingSelf, id]);
+
   const handleCopy = useCallback((e: React.ClipboardEvent, cut = false) => {
     if (!hasPromptBindings || !editorRef.current) return;
     const selection = window.getSelection();
@@ -792,7 +823,12 @@ export default function TextNode({ id, data, selected }: NodeProps & { data: Tex
       {(contentError || titleError) && <div role="alert" className="nodrag nopan">{contentError || titleError}</div>}
       {/* 固定正文容器：360×270（含内边距）。仅编辑态加 nowheel 拦截滚轮做正文滚动；
           非编辑态不得成为滚动容器，否则 Ctrl+滚轮/捏合到不了画布（IKFN9H） */}
-      <div className={`${styles.contentCard}${editing ? ' nowheel' : ''}`} data-testid="text-content" style={expanded ? { height: 540, maxHeight: '70vh' } : undefined}>
+      <div
+        className={`${styles.contentCard}${editing ? ' nowheel' : ''}`}
+        data-testid="text-content"
+        style={expanded ? { height: 540, maxHeight: '70vh' } : undefined}
+        onPointerDown={handleBodyDoublePress}
+      >
         {/* IKFM3Q 契约 §4：每张文本卡都可能承接媒体索引关系线，target 连接点常驻
            （isFirst 首卡与其余卡一致；连接点默认透明，悬停/连接中才可见，无视觉成本；
            媒体→文本卡手工拖线仍被 connectPair 拒绝，既有规则面不变） */}
