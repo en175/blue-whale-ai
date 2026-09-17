@@ -15,18 +15,28 @@ const ALLOWED_CONSUME_LOG_TYPES = new Set([
 /** 消费记录方向：正常扣费 vs 退回。 */
 export type ConsumptionKind = "consume" | "refund";
 
+/** 消费记录缺省查的类型：消耗 + 退款。
+ *
+ *  退款也是用户账单的一部分——少退一笔他账户里的积分就少一笔，只在「消耗」里看是看不见的。
+ *  两者在上游是同一张 `logs` 表的两个 type，一次多值查询就能按 id 正常分页。 */
+const DEFAULT_CONSUME_LOG_TYPES: readonly number[] = [
+  LOG_TYPE_CONSUME,
+  LOG_TYPE_REFUND,
+];
+
 /**
- * 解析消费记录的 `type` 查询参数：缺省 `[2]`（消耗，保持改动前行为）。
+ * 解析消费记录的 `type` 查询参数：缺省查**消耗 + 退款**两类。
  *
  * 只放行 2 / 6 是**安全边界**而非参数洁癖：上游 `type=0` 是「不加过滤」哨兵，
  * 而 1 充值 / 3 管理 / 4 系统 / 5 错误 / 7 登录都会把账单之外的行混进消费记录。
  * 非法值一律 400，**绝不降级成「不过滤」**——那正是本单要堵的静默错答案。
  *
- * `?type=2&type=6` 取首个（与上游 `c.Query("type")` 同语义），多个类型用逗号表达。
+ * 显式传值可收窄：`type=2` 只看消耗、`type=6` 只看退款。多个类型用逗号表达；
+ * `?type=2&type=6` 取首个（与上游 `c.Query("type")` 同语义）。
  */
 export function parseConsumeLogTypes(searchParams: URLSearchParams): number[] {
   const raw = searchParams.get("type");
-  if (raw === null || raw.trim() === "") return [LOG_TYPE_CONSUME];
+  if (raw === null || raw.trim() === "") return [...DEFAULT_CONSUME_LOG_TYPES];
   const parts = raw.split(",").map((part) => part.trim());
   if (parts.some((part) => !ALLOWED_CONSUME_LOG_TYPES.has(part))) {
     throw new NewApiError("消费记录类型参数非法", 400, "invalid_log_type");

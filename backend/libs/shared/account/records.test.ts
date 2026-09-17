@@ -71,19 +71,23 @@ describe("toAccountConsumptionItem（IKGCWU 退款与消耗同列）", () => {
 });
 
 describe("parseConsumeLogTypes（IKGCWU type 白名单）", () => {
-  it("缺省 → 只查消耗（保持改动前行为）", () => {
-    expect(parseConsumeLogTypes(new URLSearchParams())).toEqual([2]);
+  it("缺省 → 消耗 + 退款两类都查", () => {
+    expect(parseConsumeLogTypes(new URLSearchParams())).toEqual([2, 6]);
   });
 
-  it("空串 → 只查消耗，绝不落进「不过滤」", () => {
-    expect(parseConsumeLogTypes(new URLSearchParams("type="))).toEqual([2]);
+  it("空串 → 同样查两类，绝不落进「不过滤」", () => {
+    expect(parseConsumeLogTypes(new URLSearchParams("type="))).toEqual([2, 6]);
+  });
+
+  it("单个消耗（显式收窄）", () => {
+    expect(parseConsumeLogTypes(new URLSearchParams("type=2"))).toEqual([2]);
   });
 
   it("单个退款", () => {
     expect(parseConsumeLogTypes(new URLSearchParams("type=6"))).toEqual([6]);
   });
 
-  it("消耗 + 退款", () => {
+  it("消耗 + 退款（显式）", () => {
     expect(parseConsumeLogTypes(new URLSearchParams("type=2,6"))).toEqual([2, 6]);
   });
 
