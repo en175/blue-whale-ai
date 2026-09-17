@@ -49,14 +49,6 @@ function buildDeps(assets: Array<Record<string, unknown>>) {
 }
 
 describe("handleGetSnapshot assets", () => {
-  // IKEXX8/IKFYHJ 的 material_* 由各自的用例覆盖；这里只钉 md5，其余字段按未提供归 null。
-  const untouchedMaterial = {
-    material_id: null,
-    material_group_id: null,
-    material_status: null,
-    material_status_checked_at: null,
-  };
-
   it("素材列表带出 md5；未落 md5 的老资产为 null", async () => {
     const deps = buildDeps([
       { id: "3994", type: "image", url: "tos://a.png", md5: MD5, project_id: "523" },
@@ -66,21 +58,21 @@ describe("handleGetSnapshot assets", () => {
     const result = await handleGetSnapshot("100", "523", deps);
 
     expect(result.code).toBe(200);
-    expect(result.data?.assets).toEqual({
-      "3994": {
-        asset_id: "3994",
-        access_url: "tos://a.png",
-        type: "image",
-        md5: MD5,
-        ...untouchedMaterial,
-      },
-      "3995": {
-        asset_id: "3995",
-        access_url: "tos://b.mp4",
-        type: "video",
-        md5: null,
-        ...untouchedMaterial,
-      },
+    // 只钉自己负责的字段：material_* 由 IKEXX8/IKFYHJ 的用例覆盖。
+    // 用 toMatchObject 而非 toEqual —— 精确形状会让每次无关字段新增都弄红这里（rebase 已踩过一次）。
+    // 「字段恒在」照样钉得住：toMatchObject 对**键缺失**同样失败（undefined ≠ null）。
+    expect(Object.keys(result.data?.assets ?? {})).toEqual(["3994", "3995"]);
+    expect(result.data?.assets["3994"]).toMatchObject({
+      asset_id: "3994",
+      access_url: "tos://a.png",
+      type: "image",
+      md5: MD5,
+    });
+    expect(result.data?.assets["3995"]).toMatchObject({
+      asset_id: "3995",
+      access_url: "tos://b.mp4",
+      type: "video",
+      md5: null,
     });
   });
 

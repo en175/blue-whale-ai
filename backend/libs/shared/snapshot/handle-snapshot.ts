@@ -132,7 +132,7 @@ export async function handleGetSnapshot(
       material_group_id: asset.material_group_id ?? null,
       material_status: asset.material_status ?? null,
       material_status_checked_at: asset.material_status_checked_at ?? null,
-      md5: asset.md5,
+      md5: asset.md5 ?? null,
     };
   }
 

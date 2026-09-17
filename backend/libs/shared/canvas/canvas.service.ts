@@ -281,7 +281,9 @@ export class CanvasService {
     const owned = await this.project.findOwnedById(projectId, ownerId);
     // 抛而不是 return 信封：信封走不到 AllExceptionsFilter，没人写 HTTP 状态码，
     // 一次「项目不存在」会回 HTTP 200 + body code 100100（ADR-0083 禁的那类不一致）。
-    // 文案沿用原样，本次只修状态码；同 skill 域 SKILL_NOT_FOUND 的处理。
+    // 码与文案沿用原样；HTTP 404 来自码表——`httpStatusForCode` 先查 SPEC_CODE_HTTP_STATUS，
+    // 而 skill 域的 SKILL_NOT_FOUND 已把 100100 登记为 404，故此处不必（也不能）在
+    // GLOBAL_CODE_HTTP_STATUS 再补一条（补了也不会生效，那条分支轮不到）。
     if (!owned) throw new DomainError(DATA_NOT_EXIST_CODE, "项目不存在");
     const viewport = typeof body.viewport === "string" ? body.viewport : null;
     const nodes = typeof body.nodes === "string" ? body.nodes : null;

@@ -503,11 +503,6 @@ export const SHARED_ASSET_TYPE_UNSUPPORTED_CODE = 100410;
  */
 const GLOBAL_CODE_HTTP_STATUS: Record<number, number> = {
   [PARAM_MISSING_CODE]: 400,
-  // CanvasService.save 已改成抛 DomainError(DATA_NOT_EXIST_CODE) 走统一投影
-  //（此前 return 信封，HTTP 200 + body code 100100）。同 skill 域 SKILL_NOT_FOUND 的先例：
-  // 只补状态码，不动码本身。其余仍在 return 信封的 not-found 位置不列进来——
-  // 按本表约定，没走投影的写在这里也不会生效。
-  [DATA_NOT_EXIST_CODE]: 404,
   [RESOURCE_NOT_FOUND_CODE]: 404,
   [ASSET_UNAVAILABLE_CODE]: 503,
 };
