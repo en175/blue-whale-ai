@@ -84,14 +84,14 @@
 - 新增生成任务类型 `image_enhance`（任务类型字段是自由字符串，无需数据库迁移）。
 - 创建路径仿 media_extract 的独立轻量入口：直接落任务，不写成本预留、不接成本估算、不走素材库合规门；冻结输入包含源素材身份、版本档、倍数、高级参数与目标节点身份。
 - 服务端复核全部参数合法性（版本档枚举、倍数 ∈ 2/4/6、高级参数与版本的生效关系、源素材归属与媒体类型、源图尺寸门槛），前端预检只是体验层，不作权威。
-- 平台级 MediaKit API Key 走环境变量配置，不入库、不下发浏览器、与 per-user sk- 透传体系无关；缺失时创建请求以配置错误拒绝。
+- 供应商调用经 blue-whale-api 网关的既有 MediaKit 渠道（同步路由，对客模型名 `mediakit-enhance-image`），不在本仓直连火山、不新增凭证配置项；渠道与上游 API Key 在网关侧配置（见 Further Notes）。
 
 执行（worker-java）：
 
 - 新增一个 MQ tag 与对应的消费者/处理器（以既有 mediaExtract/audio 接线为模板），含领取 SQL 与 CAS、租约、恢复扫描、终态收口 payload 组装；任务来源白名单登记新来源。
-- 新增 MediaKit 客户端：调用同步接口 `tools-sync/enhance-image`，入参映射为 image_url（源素材的公网对象存储地址，现有素材即公网可读，无需签名改造）、tool_version（Lite→standard、Pro→professional、Max→max）、multiple、generative_enhance_mode、enable_correct_color。
-- 响应成功即下载结果图（URL 仅 24 小时有效，须立即落对象存储并设公开读），随后建 Asset、终态收口、向前端投影进度，全链路与图片任务同构。
-- 调用失败、超时、供应商错误统一映射到任务失败与既有错误码投影，不提供自动重试，由用户在原卡手动重试。
+- 新增 MediaKit 客户端：调用网关同步路由 `POST {网关地址}/v1/mediakit/sync/enhance-image`，鉴权与图片生成同构（携带任务冻结的用户 sk-），请求体为 MediaKit 原生参数，网关原样透传。入参映射为 image_url（源素材的公网对象存储地址，现有素材即公网可读，无需签名改造）、tool_version（Lite→standard、Pro→professional、Max→max）、multiple、generative_enhance_mode、enable_correct_color。
+- 网关原样透传上游响应：响应成功即下载结果图（URL 仅 24 小时有效，须立即落对象存储并设公开读），随后建 Asset、终态收口、向前端投影进度，全链路与图片任务同构。
+- 调用失败、超时、供应商错误（网关对 success=false 返 400 且不扣费）统一映射到任务失败与既有错误码投影，不提供自动重试，由用户在原卡手动重试。
 - 参数快照随任务输入冻结，重试沿用首次提交参数。
 
 契约与数据：
@@ -105,7 +105,7 @@
 
 - 前端组件与画布链路（vitest + jsdom）：工具条按钮可见性矩阵（卡类型 × 卡状态）、点击后的建卡/连线/开面板链、面板的选项渲染与默认值、置灰与悬停原因、尺寸预检各档边界、提交 payload 冻结内容、发送后关闭与重新编辑分流。既有先例：图片面板组件测试、mediaExtract 建占位卡链路测试、宽高比共享组件的防漂移断言。
 - 后端创建入口：参数校验矩阵（枚举、倍数、版本与高级参数生效关系、尺寸门槛复核）、免费口径（无成本预留记录）、任务输入冻结、源素材归属拒绝。既有先例：media_extract 服务测试。
-- worker-java：MediaKit 客户端请求映射与错误分类、结果下载落库与 Asset 创建、终态收口事件；以接口级 mock 隔离真实火山调用。既有先例：图片/音频处理器单测。
+- worker-java：MediaKit 请求映射与错误分类（mock 网关端点）、结果下载落库与 Asset 创建、终态收口事件；以接口级 mock 隔离真实网关调用。既有先例：图片/音频处理器单测。
 - 契约层：任务类型与参数键名的双端一致性断言。
 
 ## Out of Scope
@@ -119,7 +119,8 @@
 
 ## Further Notes
 
-- 上线前置条件：在火山控制台 AI MediaKit 页面创建平台级 API Key，并配置到执行侧环境变量；缺少配置时功能以配置错误呈现。
+- 上线前置条件在网关（blue-whale-api）侧：先在火山控制台 AI MediaKit 页面创建 API Key，再在网关执行 mediakit-bootstrap.sql 建 MediaKit 渠道（渠道 key 字段填真 Key，模型清单与 abilities 由脚本配齐），本期 `mediakit-enhance-image` 的 model_price 配 0 即免费。注意网关同步工具未配价会被硬拦 400，免费形态是配零价而不是不配价；网关缺渠道或缺定价时，本侧任务以失败呈现。
+- 计费粒度已知限制：网关按模型名按次计费，不区分 tool_version，而三档官方成本差 40 倍（standard 6 元/千次、professional 36、max 240）。本期免费无影响；后续计费工单需先解决分档计价（拆模型名或网关侧增强），再恢复预估展示与扣费。
 - MediaKit 结果图 URL 有效期 24 小时，执行侧必须在响应后立即下载落库，这一约束已在 ADR-0092 记录。
-- 本期免费意味着平台自担调用成本（standard 6 元/千次、professional 36 元/千次、max 240 元/千次），放量前须补计费工单。
+- 本期免费期间火山账单由平台自担，放量前须补计费工单。
 - 供应商默认参数：增强策略默认生成度优先、色彩校正默认开，与火山官方默认一致。
