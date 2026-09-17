@@ -5,14 +5,16 @@
  * ============================================ */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand } from 'lucide-react';
+import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand, Eraser } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
+import { imageEraseGateReason } from '../../imageErase';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaNodeToolbarVisibility } from './toolbarVisibility';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
+import ImageQualityMenu, { type ImageQualityMenuItem } from './ImageQualityMenu';
 import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 import AudioPlayer from './AudioPlayer';
 import { nodeTitleSizing } from '../nodeTitleSizing';
@@ -127,8 +129,10 @@ interface MediaNodeData {
   onGenImage?: (id: string) => void;
   /** 生成视频：打开视频对话框并带入图片 */
   onGenVideo?: (id: string) => void;
-  /** 高清放大（IKGM9F）：在源卡右侧建「高清」草稿卡并连来源线 */
+  /** 高清放大（IKGM9F）：在源卡右侧建「高清」草稿卡并连来源线（「高清 ▾」下拉「高清」项派发） */
   onEnhanceImage?: (id: string) => void;
+  /** 擦除（IKGOT7）：把本卡置为擦除编辑态（「高清 ▾」下拉「擦除」项派发；门槛见 imageErase.ts） */
+  onEraseImage?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
   /** 视频整段提取音频；音频节点由后端注入画布。 */
@@ -247,6 +251,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
   const handleEnhanceImage = useCallback(() => data.onEnhanceImage?.(id), [data, id]);
+  const handleEraseImage = useCallback(() => data.onEraseImage?.(id), [data, id]);
   const handleExtractAudio = useCallback(async () => {
     if (isExtractSubmitting || data.assetId == null || !data.onExtractAudio) return;
     setIsExtractSubmitting(true);
@@ -282,6 +287,27 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const isAudio = data.mediaType === 'audio';
   const Icon = data.mediaType === 'video' ? Video : isAudio ? AudioLines : Image;
   const toolbar = mediaNodeToolbarVisibility(data.mediaType);
+  /** 「高清 ▾」下拉菜单项（IKGOT7，数组配置驱动）：「高清」行为与原「高清放大」单按钮完全一致；
+   *  「擦除」按 imageErase 门槛预检置灰（title 悬停原因，尺寸 null 不拦）；
+   *  扩图（IKGOQ0）后续在「高清」与「擦除」之间插入中间位——只改本数组 */
+  const qualityMenuItems: ImageQualityMenuItem[] = [
+    {
+      id: 'enhance',
+      label: '高清',
+      icon: Expand,
+      hint: '在右侧新建高清放大草稿卡',
+      disabledReason: null,
+      onSelect: handleEnhanceImage,
+    },
+    {
+      id: 'erase',
+      label: '擦除',
+      icon: Eraser,
+      hint: '涂抹或框选抹掉图中不要的内容',
+      disabledReason: imageEraseGateReason(data),
+      onSelect: handleEraseImage,
+    },
+  ];
   const isDraft = data.genStatus === 'draft';
   const isGenerating = data.genStatus === 'generating';
   const isGenDone = data.genStatus === 'failed' || data.genStatus === 'cancelled';
@@ -409,11 +435,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
               <span>生成视频</span>
             </button>
           )}
-          {toolbar.enhanceImage && (
-            <button className={styles.toolBtn} onClick={handleEnhanceImage} title="在右侧新建高清放大草稿卡">
-              <Expand size={14} strokeWidth={2} />
-              <span>高清放大</span>
-            </button>
+          {toolbar.imageQuality && (
+            <ImageQualityMenu items={qualityMenuItems} />
           )}
           {data.mediaType === 'video' && (
             <button
