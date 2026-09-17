@@ -480,6 +480,89 @@ describe("handleCreateGenerationJob 图片参考图上限（IKA72G）", () => {
   });
 });
 
+// IKG6EK / ADR-0088：图片端也认单数组 references（三端统一），旧字段 input_asset_ids 保留兼容。
+describe("handleCreateGenerationJob 图片参考素材单数组 references（IKG6EK）", () => {
+  const refsOf = (ids: string[]) =>
+    ids.map((id) => ({ role: "reference" as const, asset_id: id, type: "image" as const }));
+
+  it("references 提供参考 → input_asset_ids 按 references 顺序冻结", async () => {
+    const { deps, createJob } = buildImageDeps(10);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(0), references: refsOf(["3", "1"]) },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.input_asset_ids).toEqual(["3", "1"]);
+  });
+
+  it("references 含 material_id（合法素材库形态）→ 400 素材库引用仅支持视频生成", async () => {
+    const { deps, createJob } = buildImageDeps(10);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...imageBody(0),
+        references: [{ role: "reference", material_id: "asset-img-1", type: "image" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("素材库引用仅支持视频生成");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("references 形态非法 → 400 参考素材引用无效（不再静默当空处理）", async () => {
+    const { deps, createJob } = buildImageDeps(10);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(0), references: [{ role: "reference", type: "image" }] },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考素材引用无效");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("references 超能力上限 → 400，文案含真实上限", async () => {
+    const { deps, createJob } = buildImageDeps(2);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(0), references: refsOf(["1", "2", "3"]) },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(400);
+    expect(result.msg).toBe("参考图最多 2 张");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("旧字段 input_asset_ids 仍可用（回归）", async () => {
+    const { deps, createJob } = buildImageDeps(10);
+
+    const result = await handleCreateGenerationJob("u1", "p1", imageBody(2), null, deps);
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.input_asset_ids).toEqual([1, 2]);
+  });
+});
+
 // 素材库引用（MaterialReference）：仅视频生成；格式校验 + 与本地 Asset 引用按并集互斥/配对。
 function buildVideoDeps() {
   const findOwnedById = vi.fn().mockResolvedValue({

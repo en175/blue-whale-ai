@@ -432,14 +432,18 @@ function validateAudioReferences(
   return null;
 }
 
-/** 素材库引用（MaterialReference）仅视频生成可用；非 video 一律拒绝。 */
+/** 素材库引用（MaterialReference）仅视频生成可用；非 video 一律拒绝。
+ *  IKG6EK / ADR-0088：单数组 `references` 里的 material_id 同样拒——图片端从旧字段
+ *  `input_asset_ids` 切到 `references` 后，这道闸不能只管旧字段。 */
 function validateRejectMaterialReferences(
   body: CreateGenerationJobBody,
 ): { code: string; message: string } | null {
+  const singleRefs = parseReferences(body.references);
   if (
     body.first_frame_material_id !== undefined ||
     body.last_frame_material_id !== undefined ||
-    body.reference_materials !== undefined
+    body.reference_materials !== undefined ||
+    (singleRefs.kind === "ok" && singleRefs.items.some((item) => item.material_id !== undefined))
   ) {
     return {
       code: ERROR_UNSUPPORTED_INPUT,
@@ -447,6 +451,17 @@ function validateRejectMaterialReferences(
     };
   }
   return null;
+}
+
+/** IKG6EK / ADR-0088：图片端认单数组 `references` 之后，形态非法不能再被静默忽略——
+ *  以前图片只读旧字段，`references` 传什么都不影响结果；现在它决定参考清单，
+ *  非法形态（非数组 / 元素缺 id / 首尾帧非图片…）必须明确拒绝，不静默当空处理。 */
+function validateImageSingleRefs(
+  body: CreateGenerationJobBody,
+): { code: string; message: string } | null {
+  return parseReferences(body.references).kind === "invalid"
+    ? { code: ERROR_INVALID_REFERENCE, message: "参考素材引用无效" }
+    : null;
 }
 
 /** 视频特有校验：首尾帧 / 普通参考 asset 互斥 + 素材库引用（asset∨material 并集互斥/配对）。
@@ -642,7 +657,9 @@ interface GenerationTypeStrategy {
 const imageStrategy: GenerationTypeStrategy = {
   validate(body) {
     return (
-      validateCommon(body, "image") ?? validateRejectMaterialReferences(body)
+      validateCommon(body, "image") ??
+      validateRejectMaterialReferences(body) ??
+      validateImageSingleRefs(body)
     );
   },
   composeInput({
@@ -806,6 +823,24 @@ function resolveReferenceAssets(
   const inputAssetIds = (
     Array.isArray(body.input_asset_ids) ? body.input_asset_ids : []
   ) as number[];
+  // IKG6EK / ADR-0088：图片端也认单数组 references（三端统一），保序取其 asset_id；
+  // material_id 已在 validateRejectMaterialReferences 拦下（仅视频可用）。
+  // 与旧字段同时出现时以 references 为准——前端切过来之前旧路径原样可用。
+  const singleRefs = type === "image" ? parseReferences(body.references) : { kind: "absent" as const };
+  if (singleRefs.kind === "ok") {
+    const ids = singleRefs.items.map((item) => String(item.asset_id));
+    if (ids.length > maxReferenceImages) {
+      return {
+        ok: false,
+        value: {
+          message: `参考图最多 ${maxReferenceImages} 张`,
+          code: ERROR_UNSUPPORTED_INPUT,
+          params: { max_reference_count: maxReferenceImages },
+        },
+      };
+    }
+    return { ok: true, value: { referenceAssetIds: ids } };
+  }
   const explicitReferenceIds = assetIds(body.reference_asset_ids);
   const firstFrameAssetId = assetId(body.first_frame_asset_id);
   const lastFrameAssetId = assetId(body.last_frame_asset_id);
