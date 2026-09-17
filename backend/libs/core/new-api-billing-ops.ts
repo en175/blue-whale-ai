@@ -37,6 +37,22 @@ function isCollectCredentialFailure(reason: string): boolean {
   );
 }
 
+/** 消费流水缺省类型：2 = LogTypeConsume（6 = LogTypeRefund）。 */
+const DEFAULT_LOG_TYPE = 2;
+
+/**
+ * 把消费流水的 type 选项拼成上游查询串（IKGCWU）。
+ *
+ * 上游自 IKGCWR 起接受逗号分隔的多值（`type=2,6` → `logs.type IN (2,6)`）。
+ * 缺省与**空数组**都落到 2：空数组若不兜底就会漏掉 type 参数，而上游「无 type」=
+ * 不过滤 = 返回全部类型，那是个不报错的错答案——充值、登录、系统日志会混进消费流水。
+ */
+function formatLogTypes(type?: number | readonly number[]): string {
+  if (type === undefined) return String(DEFAULT_LOG_TYPE);
+  if (typeof type === "number") return String(type);
+  return type.length > 0 ? type.join(",") : String(DEFAULT_LOG_TYPE);
+}
+
 export function createNewApiBillingOps(request: NewApiRequest) {
   return {
     async getRechargeTiers(): Promise<NewApiRechargeTiersResult> {
@@ -265,17 +281,27 @@ export function createNewApiBillingOps(request: NewApiRequest) {
     },
 
     /** 分页拉当前用户消费流水：GET /api/log/self（Go 按 id desc，即时间倒序）。
-     *  type 缺省 2 = LogTypeConsume；信封同 topup/self 的 PageInfo。
+     *  `type` 可传数组取并集（IKGCWU；上游 IKGCWR 起支持逗号分隔，`[2, 6]` → `type=2,6`）；
+     *  信封同 topup/self 的 PageInfo。
+     *  **必传**，故意不给默认值：账户端点的契约是「消耗 + 退款」，这一层若自带一个
+     *  `2`（只看消耗）的缺省，漏传的调用方会静默拿到一份少了一半的账单——正是本单要治的
+     *  那类病。要什么类型由调用方明写。
+     *  ⚠️ `type=0` 在上游是「不加过滤」哨兵，会返回**全部**日志类型——误传 0 是个不报错的
+     *  错答案，调用方只应传 LogType 里确切的类型号。
      *  鉴权（IK6M2F）：log/self 已迁账户层 AccountTokenOrUserAuth，只凭 Bearer
      *  sk-xxx 证明账户身份；User ID 由 Go 从 Token 属主解析，客户端不得发送
      *  New-Api-User 头（对齐 topup/self）。 */
     async listUserConsumeLogs(
       token: string,
-      options: { page?: number; pageSize?: number; type?: number } = {},
+      options: {
+        page?: number;
+        pageSize?: number;
+        type: number | readonly number[];
+      },
     ): Promise<NewApiUserLogListResult> {
       const page = Math.max(1, Math.trunc(options.page ?? 1));
       const pageSize = Math.min(100, Math.max(1, Math.trunc(options.pageSize ?? 20)));
-      const type = options.type ?? 2;
+      const type = formatLogTypes(options.type);
       const response = await request<NewApiEnvelope>(
         `/api/log/self?p=${page}&page_size=${pageSize}&type=${type}`,
         { method: "GET" },
