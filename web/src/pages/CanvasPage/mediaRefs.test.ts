@@ -117,4 +117,19 @@ describe('imageMediaRefsOf 连线推导图片参考', () => {
     expect(imageRefSourceError(node)).toBe('素材已被删除');
     expect(imageMediaRefsOf('d1', [{ id: 'e1', source: 'm1', target: 'd1' }] as Edge[], [node])).toEqual([]);
   });
+
+  it('高清来源边（IKGM9F origin 标记）不作参考输入：不占参考位；普通连线不受影响', () => {
+    const nodes = [readyImage('m1', 'a1'), readyImage('m2', 'a2')];
+    const edges = [
+      // 高清卡 d1 的来源边：视觉表达「高清卡由该图放大而来」，推导必须跳过
+      { id: 'e1', source: 'm1', target: 'd1', data: { origin: 'image-enhance' } },
+      // 用户手动拖的普通参考连线仍正常推导
+      { id: 'e2', source: 'm2', target: 'd1' },
+    ] as Edge[];
+    expect(imageMediaRefsOf('d1', edges, nodes)).toEqual([
+      { nodeId: 'm2', url: 'http://img/m2.png', name: '图m2', assetId: 'a2' },
+    ]);
+    // 只有高清来源边时目标无任何参考
+    expect(imageMediaRefsOf('d1', [edges[0]!] as Edge[], nodes)).toEqual([]);
+  });
 });

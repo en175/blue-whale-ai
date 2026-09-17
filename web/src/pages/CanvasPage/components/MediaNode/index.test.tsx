@@ -78,19 +78,53 @@ afterEach(async () => {
 });
 
 describe('MediaNode selected toolbar', () => {
-  it('hides @, generate-image and generate-video on an audio node', async () => {
+  it('hides @, generate-image, enhance-image and generate-video on an audio node', async () => {
     await renderNode('audio');
     expect(labels(true)).toEqual(['重新编辑', '详情', '下载']);
   });
 
   it('keeps @ and generate actions on an image node', async () => {
     await renderNode('image');
-    expect(labels()).toEqual(['重新编辑', '生成图片', '生成视频', '详情', '下载', '添加到 Agent 聊天']);
+    expect(labels()).toEqual(['重新编辑', '生成图片', '生成视频', '高清放大', '详情', '下载', '添加到 Agent 聊天']);
   });
 
-  it('keeps @ and generate-video on a video node', async () => {
+  it('keeps @ and generate-video on a video node, still hides enhance-image', async () => {
     await renderNode('video');
     expect(labels()).toEqual(['重新编辑', '生成视频', '提取音频', '详情', '下载', '添加到 Agent 聊天']);
+  });
+
+  it('高清放大排在生成视频之后（IKGM9F）', async () => {
+    await renderNode('image');
+    const order = labels();
+    expect(order.indexOf('生成视频')).toBeLessThan(order.indexOf('高清放大'));
+    expect(order.indexOf('高清放大')).toBeLessThan(order.indexOf('详情'));
+  });
+
+  it('点击高清放大派发 onEnhanceImage（携带节点 id）', async () => {
+    const onEnhanceImage = vi.fn();
+    await renderNode('image', { data: { onEnhanceImage } });
+    const button = [...mountNode.querySelectorAll('button')]
+      .find((b) => b.textContent?.trim() === '高清放大')!;
+    await act(async () => {
+      button.click();
+    });
+    expect(onEnhanceImage).toHaveBeenCalledWith('image-node');
+  });
+
+  it('生成中的图片卡不显示高清放大（工具条整体隐藏）', async () => {
+    await renderNode('image', { genStatus: 'generating', progress: 0, selected: true, data: { src: 'http://img/old.png' } });
+    expect(labels()).not.toContain('高清放大');
+  });
+
+  it('已失败的图片卡不显示高清放大（工具条整体隐藏）', async () => {
+    await renderNode('image', { genStatus: 'failed', errorText: '配额不足', selected: true, data: { src: '', draft: true } });
+    expect(labels()).not.toContain('高清放大');
+  });
+
+  it('素材缺失的图片卡不显示高清放大（工具条整体隐藏）', async () => {
+    await renderNode('image', { selected: true, data: { assetMissing: true, src: '' } });
+    expect(labels()).not.toContain('高清放大');
+    expect(mountNode.textContent).toContain('素材已被删除');
   });
 });
 
@@ -106,6 +140,18 @@ describe('MediaNode draft overlay (IKDMQQ)', () => {
   it('待生成草稿：选中态不显示媒体工具条（无有效素材可操作）', async () => {
     await renderNode('image', { genStatus: 'draft', selected: true, data: { src: '', draft: true } });
     expect(labels()).toEqual([]);
+  });
+
+  it('高清草稿（IKGM9F）：占位文案为「配置参数生成高清图像」', async () => {
+    await renderNode('image', {
+      genStatus: 'draft',
+      selected: false,
+      data: { src: '', draft: true, fileName: '高清', imageEnhance: { sourceAssetId: 'a1' } },
+    });
+    expect(mountNode.textContent).toContain('配置参数生成高清图像');
+    expect(mountNode.textContent).not.toContain('图片生成');
+    // 标题可见且可双击改名（沿用既有改名链路）
+    expect(titleRow().textContent).toContain('高清');
   });
 });
 

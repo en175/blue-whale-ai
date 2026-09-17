@@ -50,6 +50,7 @@ import {
   mediaExtractNodeId,
   mediaExtractTerminalPatch,
 } from './mediaExtract';
+import { IMAGE_ENHANCE_EDGE_ORIGIN, imageEnhanceDraftPosition } from './imageEnhance';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
@@ -1120,6 +1121,7 @@ export default function CanvasPage() {
           onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+          onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -1925,6 +1927,7 @@ export default function CanvasPage() {
     genImage: (_id: string) => {},
     genVideo: (_id: string) => {},
     genAudio: (_id: string) => {},
+    enhanceImage: (_id: string) => {},
     extractAudio: async (_id: string) => {},
     download: (_id: string) => {},
     showDetails: (_id: string) => {},
@@ -3027,8 +3030,12 @@ export default function CanvasPage() {
     return nodeId;
   };
 
-  /** 图片生成草稿卡，落在指定点 */
-  const createImageDraftCard = (position?: { x: number; y: number }): string => {
+  /** 图片生成草稿卡，落在指定点。overrides（IKGM9F 高清放大复用同一骨架）：
+   *  fileName 覆盖初始标题，data 附加节点身份字段（如高清标记），回调不可覆盖 */
+  const createImageDraftCard = (
+    position?: { x: number; y: number },
+    overrides?: { fileName?: string; data?: Record<string, unknown> },
+  ): string => {
     const nodeId = newNodeId('media-draft');
     const node: Node = {
       id: nodeId,
@@ -3038,10 +3045,11 @@ export default function CanvasPage() {
       data: {
         src: '',
         mediaType: 'image',
-        fileName: '图片草稿',
+        fileName: overrides?.fileName ?? '图片草稿',
         genStatus: 'draft',
         draft: true,
         prompt: '',
+        ...(overrides?.data ?? {}),
         toolMode,
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
@@ -3054,6 +3062,7 @@ export default function CanvasPage() {
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+        onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -3505,6 +3514,7 @@ export default function CanvasPage() {
       onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
       onGenVideo: (id: string) => actionsRef.current.genVideo(id),
       onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+      onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
       onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
       onDownload: (id: string) => actionsRef.current.download(id),
       onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -3902,6 +3912,7 @@ export default function CanvasPage() {
           onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+          onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -5445,6 +5456,26 @@ export default function CanvasPage() {
     openImageDraftDialog(draftId);
   };
 
+  /** 高清放大（IKGM9F）：照搬「生成图片」建卡骨架——来源预检后在源卡右侧建「高清」草稿卡并自动选中；
+   *  连线带 origin 标记为纯视觉来源边（不占参考位、不参与 @ 编号与媒体索引）。
+   *  节点 data 写入高清身份标记（含源素材身份）供 IKGM9O 分流「重新编辑」与回填参数；
+   *  参数面板由 IKGM9O 接入，本票建卡链到「建卡 + 连线 + 选中」为止 */
+  const handleNodeEnhanceImage = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    const err = imageRefSourceError(node);
+    if (err) {
+      showToast('warn', err);
+      return;
+    }
+    const sourceData = (node.data ?? {}) as Record<string, unknown>;
+    const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
+      fileName: '高清',
+      data: { imageEnhance: { sourceAssetId: readAssetId(sourceData) } },
+    });
+    addCanvasEdge(id, draftId, undefined, { origin: IMAGE_ENHANCE_EDGE_ORIGIN });
+  };
+
   /** 生成视频（IKDMQS 统一草稿绑定）：有生成记录的视频节点 → 绑定原卡原位重新生成（与「重新编辑」一致）；
    *  其他节点（图片/上传视频等）→ 来源有效性预检后新建视频草稿卡 + 被点节点自动连线为普通参考。
    *  不调 validateVideoRefConnect（新草稿未进 ref 会使校验被跳过），canOpenEditor 闸口保留 */
@@ -5714,6 +5745,7 @@ export default function CanvasPage() {
   actionsRef.current.genImage = handleNodeGenImage;
   actionsRef.current.genVideo = handleNodeGenVideo;
   actionsRef.current.genAudio = handleNodeGenAudio;
+  actionsRef.current.enhanceImage = handleNodeEnhanceImage;
   actionsRef.current.extractAudio = handleNodeExtractAudio;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
@@ -6268,6 +6300,7 @@ export default function CanvasPage() {
               onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
               onGenVideo: (id: string) => actionsRef.current.genVideo(id),
               onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+              onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
               onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
