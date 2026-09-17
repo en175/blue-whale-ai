@@ -235,6 +235,50 @@ public class RocketMqConfig {
         );
     }
 
+    /**
+     * image_outpaint（智能扩图）consumer（条件：enabled-tags 含 image_outpaint；IKGOQW）。
+     * <p>
+     * consumer group = "generation-image-outpaint-worker" + groupSuffix。
+     * tag = "image_outpaint"（复用 topic generation-video）。
+     * digitGuard = true（generation_jobs.id 恒纯数字）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    @Conditional(ImageOutpaintEnabledCondition.class)
+    public com.bluewhale.worker.application.consumer.ImageOutpaintConsumer imageOutpaintConsumer(
+            com.bluewhale.worker.application.processor.ImageOutpaintJobProcessor processor,
+            WorkerProperties workerProps,
+            Environment env
+    ) {
+        RocketMqProperties mqProps = Binder.get(env)
+                .bind("rocketmq", RocketMqProperties.class)
+                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+
+        if (mqProps.endpoints().isBlank()) {
+            throw new IllegalStateException(
+                    "ROCKETMQ_ENDPOINTS 未配置：image_outpaint consumer 无法启动");
+        }
+
+        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
+                .setEndpoints(mqProps.endpoints())
+                .enableSsl(mqProps.sslEnabled());
+
+        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
+            configBuilder.setCredentialProvider(
+                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
+        }
+
+        String consumerGroup = "generation-image-outpaint-worker" + workerProps.groupSuffix();
+        int concurrency = workerProps.concurrency().imageOutpaint();
+
+        return new com.bluewhale.worker.application.consumer.ImageOutpaintConsumer(
+                processor,
+                mqProps.topic(),
+                configBuilder.build(),
+                consumerGroup,
+                concurrency
+        );
+    }
+
     // ========== 刀④ 视频路径（blade-④ IKEL9A） ==========
 
     /**
@@ -300,6 +344,13 @@ public class RocketMqConfig {
     @Conditional(ImageEnhanceEnabledCondition.class)
     public GenerationMessageProducer imageEnhanceRecoveryProducer(Environment env) {
         return createProducerForTag(env, "image_enhance");
+    }
+
+    /** recovery 重投 image_outpaint（条件：enabled-tags 含 image_outpaint；IKGOQW）。 */
+    @Bean(destroyMethod = "close")
+    @Conditional(ImageOutpaintEnabledCondition.class)
+    public GenerationMessageProducer imageOutpaintRecoveryProducer(Environment env) {
+        return createProducerForTag(env, "image_outpaint");
     }
 
     /** 按 tag 建 RocketMQ producer（校验与视频生产者同源语义）。 */

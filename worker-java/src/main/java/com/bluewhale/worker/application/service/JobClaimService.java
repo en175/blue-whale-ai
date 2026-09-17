@@ -2,6 +2,7 @@ package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageEnhanceJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedImageOutpaintJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
@@ -28,10 +29,10 @@ import java.util.Optional;
  * - 返回投影用**增后** fencing_token（candidate + 1）。
  * <p>
  * CAS 更新与媒体类型无关：audio/video/media_extract 各一专属方法（候选条件各异），
- * image 与 image_enhance 共用参数化候选查询 findCandidateByTypeAndSources + claimImageCas
- * （两路径仅 type / source 白名单差异，租约时长由本类按媒体类型传入）。第 5 类媒体扩展触点：
- * 条件与既有路径仅 type/source 差异时复用参数化查询，否则新增 find*Candidate + claim*Cas
- * + 投影 Dto（契约附录 C）。
+ * image 与 image_enhance / image_outpaint 共用参数化候选查询 findCandidateByTypeAndSources +
+ * claimImageCas（各路径仅 type / source 白名单差异，租约时长由本类按媒体类型传入）。
+ * 下一类媒体扩展触点：条件与既有路径仅 type/source 差异时复用参数化查询，
+ * 否则新增 find*Candidate + claim*Cas + 投影 Dto（契约附录 C）。
  */
 @Service
 public class JobClaimService {
@@ -51,6 +52,12 @@ public class JobClaimService {
      */
     private static final int IMAGE_ENHANCE_LEASE_SECONDS = 420;
 
+    /**
+     * image_outpaint 租约 420s（IKGOQW）：同步扩图调用（读超时默认 300s）+ 结果图下载 +
+     * TOS 转存需在同一租约窗口内完成（与 image_enhance 的 420s 语义同款）。
+     */
+    private static final int IMAGE_OUTPAINT_LEASE_SECONDS = 420;
+
     /** image claim 的 source 白名单（claim-ops.ts:339 CLAIMABLE_JOB_SOURCES）。 */
     private static final List<String> IMAGE_CLAIM_SOURCES =
             List.of("bottom_dock", "plan_apply", "storyboard_preview");
@@ -58,6 +65,10 @@ public class JobClaimService {
     /** image_enhance claim 的单源白名单（契约 §14.1：唯一创建入口 = 画布图片卡工具条）。 */
     private static final List<String> IMAGE_ENHANCE_CLAIM_SOURCES =
             List.of("image_enhance");
+
+    /** image_outpaint claim 的单源白名单（IKGOQW：唯一创建入口 = 画布图片卡「高清 ▾」菜单）。 */
+    private static final List<String> IMAGE_OUTPAINT_CLAIM_SOURCES =
+            List.of(com.bluewhale.worker.domain.entity.ImageOutpaintContract.SOURCE);
 
     /** image 租约可被 env 覆盖（对齐 TS IMAGE_JOB_LEASE_SECONDS）。 */
     private static int imageLeaseSeconds() {
@@ -258,6 +269,44 @@ public class JobClaimService {
         long postIncrementToken = candidate.getFencingToken() + 1;
         Map<String, Object> input = parseJson(candidate.getInput());
         return Optional.of(new ClaimedImageEnhanceJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                input != null ? input : Map.of(),
+                workerId,
+                postIncrementToken));
+    }
+
+    /**
+     * 领取 image_outpaint 作业（IKGOQW，附录 C 触点④）。
+     * <p>
+     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
+     * 租约用 image_outpaint 专用 420s（> MediaKit 读超时 + 转存余量）。
+     */
+    public Optional<ClaimedImageOutpaintJobDto> claimImageOutpaint(String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong,
+                com.bluewhale.worker.domain.entity.ImageOutpaintContract.TAG,
+                IMAGE_OUTPAINT_CLAIM_SOURCES);
+        if (candidate == null) {
+            return Optional.empty();
+        }
+
+        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(IMAGE_OUTPAINT_LEASE_SECONDS);
+        int affected = jobMapper.claimImageCas(
+                jobIdLong, workerId, leaseExpiresAt,
+                candidate.getFencingToken(), candidate.getStatus());
+        if (affected == 0) {
+            log.info("[image_outpaint] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
+                    jobId, candidate.getFencingToken());
+            return Optional.empty();
+        }
+
+        long postIncrementToken = candidate.getFencingToken() + 1;
+        Map<String, Object> input = parseJson(candidate.getInput());
+        return Optional.of(new ClaimedImageOutpaintJobDto(
                 candidate.getId().toString(),
                 candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
                 candidate.getUserId().toString(),
