@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { mediaNodeToolbarVisibility } from './toolbarVisibility';
 
 describe('mediaNodeToolbarVisibility', () => {
-  it('hides mention, generate-image and generate-video on audio nodes', () => {
+  it('hides mention, generate-image, enhance-image and generate-video on audio nodes', () => {
     expect(mediaNodeToolbarVisibility('audio')).toEqual({
       mention: false,
       genImage: false,
       genVideo: false,
+      enhanceImage: false,
     });
   });
 
@@ -15,14 +16,16 @@ describe('mediaNodeToolbarVisibility', () => {
       mention: true,
       genImage: true,
       genVideo: true,
+      enhanceImage: true,
     });
   });
 
-  it('keeps mention and generate-video on video nodes, still hides generate-image', () => {
+  it('keeps mention and generate-video on video nodes, still hides generate-image and enhance-image', () => {
     expect(mediaNodeToolbarVisibility('video')).toEqual({
       mention: true,
       genImage: false,
       genVideo: true,
+      enhanceImage: false,
     });
   });
 
@@ -31,6 +34,7 @@ describe('mediaNodeToolbarVisibility', () => {
       mention: true,
       genImage: true,
       genVideo: true,
+      enhanceImage: true,
     });
   });
 });

@@ -716,7 +716,8 @@ describe('IKFCJG 跨来源视频参考提交顺序', () => {
       await act(async () => sendButton().click());
       await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
       const payload = apiMocks.createGenerationJob.mock.calls[0]![1];
-      expect(payload.references).toEqual([{ material_id: 'asset-lib1', type: 'image', role: 'reference' }, { material_id: 'asset-compliance-test', type: 'image', role: 'reference' }]);
+      // !718：角色库来源保持 material_id；画布图片不再上传换 materialId，按本地 asset_id 提交（顺序与编号一致）
+      expect(payload.references).toEqual([{ material_id: 'asset-lib1', type: 'image', role: 'reference' }, { asset_id: '101', type: 'image', role: 'reference' }]);
       expect(payload.parameters.prompt).toBe('组合图片2和图片1');
       expect(payload.prompt_doc.segments.filter((s: { kind: string }) => s.kind === 'asset_ref')).toEqual([
         { kind: 'asset_ref', asset_id: '101', label: '图片2' }, { kind: 'asset_ref', asset_id: 'asset-lib1', label: '图片1' },

@@ -30,7 +30,6 @@ import {
   readDraftMaterialRefs,
   freshVideoCanvasRefs,
   mergedVideoMediaRefsOf,
-  listVideoImageRefs,
   supportsVideoReferenceModel,
   videoRefConflict,
   videoRefSourceError,
@@ -51,6 +50,15 @@ import {
   mediaExtractNodeId,
   mediaExtractTerminalPatch,
 } from './mediaExtract';
+import {
+  IMAGE_ENHANCE_EDGE_ORIGIN,
+  buildImageEnhanceInput,
+  imageEnhanceDraftPosition,
+  restoreImageEnhanceParams,
+  type ImageEnhanceIdentity,
+  type ImageEnhancePanelParams,
+} from './imageEnhance';
+import ImageEnhanceDialog from './components/ImageEnhanceDialog';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
@@ -97,6 +105,7 @@ import {
   retryGenerationJob,
   fetchJobStatus,
   createMediaExtraction,
+  createImageEnhancement,
   readJobFailText,
   type ImageJobParameters,
   type VideoJobParameters,
@@ -280,6 +289,13 @@ export default function CanvasPage() {
   const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'asset' | null>(null);
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
+  /** 高清放大面板（IKGM9O）：绑定高清卡（草稿或成品卡）的轻量参数面板 */
+  const [showEnhanceDialog, setShowEnhanceDialog] = useState(false);
+  const [enhanceDraftId, setEnhanceDraftId] = useState<string | null>(null);
+  /** 面板种子（打开时快照）：源图尺寸供预检、lastParams 供回填；ts 变化驱动面板重挂载重置 */
+  const [enhanceSeed, setEnhanceSeed] = useState<{ ts: number; sourceDims: { width?: number; height?: number }; initialParams: ImageEnhancePanelParams | null } | null>(null);
+  /** 高清面板隐藏豁免（口径同 imagePanelHiddenRef）：刚关闭面板后的选中变化不回弹重开 */
+  const enhancePanelHiddenRef = useRef(false);
   const [showEdges, setShowEdges] = useState(true);
   /** 对齐吸附开关（IKGGCT T3）：全局持久化（不分画布文档），初始读 localStorage，默认开 */
   const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
@@ -461,22 +477,25 @@ export default function CanvasPage() {
     }
     const sourceNode = findCanvasNode(source);
     const targetNode = findCanvasNode(target);
-    if (!isConnectableSource(sourceNode) || !targetNode) return false;
-    const sourceData = sourceNode?.data as Record<string, unknown> | undefined;
+    if (!sourceNode || !targetNode) return false;
+    const sourceData = sourceNode.data as Record<string, unknown> | undefined;
     const targetData = targetNode.data as Record<string, unknown> | undefined;
     if (sourceData?.emptyShell || targetData?.emptyShell) return false;
+    const imageRefOk = genKindOf(targetNode) === 'image' && sourceNode.type === 'mediaNode'
+      && imageRefSourceError(sourceNode) === null;
+    if (!imageRefOk && !isConnectableSource(sourceNode)) return false;
     if (wouldCreateCycle(source, target, edgesRef.current)) return false;
     // IKFM3Q 契约 §4：媒体→文本卡的关系线只由正文 @ 索引建立；手工拖线拒绝，不出现无索引的线
-    if (sourceNode?.type === 'mediaNode' && targetNode.type === 'textNode') {
+    if (sourceNode.type === 'mediaNode' && targetNode.type === 'textNode') {
       showToast('warn', '媒体到文本卡的关系线由正文 @ 索引建立');
       return false;
     }
     const targetKind = genKindOf(targetNode);
-    const videoRole = targetKind === 'video' && sourceNode?.type === 'mediaNode'
+    const videoRole = targetKind === 'video' && sourceNode.type === 'mediaNode'
       ? videoEdgeRoleFor(target)
       : undefined;
     if (targetKind) {
-      if (!canConnectSourcesToGen([sourceNode!], targetKind)) return false;
+      if (!imageRefOk && !canConnectSourcesToGen([sourceNode], targetKind)) return false;
       if (sourceNode?.type === 'textNode' && sourceData?.promptSource && (targetKind === 'image' || targetKind === 'video')) {
         void referencePlanRef.current(source, target);
         return true;
@@ -853,7 +872,9 @@ export default function CanvasPage() {
     }
     return { x: n.position.x, y: n.position.y, width: 320, height: 340 };
   };
-  const followTargetId = showImageDialog && imageDraftId
+  const followTargetId = showEnhanceDialog && enhanceDraftId
+    ? enhanceDraftId
+    : showImageDialog && imageDraftId
     ? imageDraftId
     : showBottomDialog && videoDraftId
       ? videoDraftId
@@ -874,6 +895,19 @@ export default function CanvasPage() {
         viewport: liveViewport,
         containerWidth: wrapperSize.width,
         containerHeight: wrapperSize.height,
+      })
+    : null;
+  /** 高清面板跟随锚（IKGM9O）：轻量面板宽 320，与 740 宽的通用锚分开计算 */
+  const enhanceFollowAnchor = followNode && showEnhanceDialog && enhanceDraftId && wrapperSize.width > 0
+    ? computeFollowAnchor({
+        nodeX: followNode.position.x,
+        nodeY: followNode.position.y,
+        nodeWidth: nodeBoxOf(followNode).width,
+        nodeHeight: nodeBoxOf(followNode).height,
+        viewport: liveViewport,
+        containerWidth: wrapperSize.width,
+        containerHeight: wrapperSize.height,
+        dialogWidth: 320,
       })
     : null;
   /** 草稿卡出生位（IKDMQQ）：视口中心附近空位，避开底部 Dock 预留区与既有节点 */
@@ -1118,6 +1152,7 @@ export default function CanvasPage() {
           onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+          onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -1923,6 +1958,7 @@ export default function CanvasPage() {
     genImage: (_id: string) => {},
     genVideo: (_id: string) => {},
     genAudio: (_id: string) => {},
+    enhanceImage: (_id: string) => {},
     extractAudio: async (_id: string) => {},
     download: (_id: string) => {},
     showDetails: (_id: string) => {},
@@ -1940,6 +1976,7 @@ export default function CanvasPage() {
     setShowBottomDialog(false);
     setShowAudioDialog(false);
     setShowMusicDialog(false);
+    setShowEnhanceDialog(false);
   };
 
   /** 节点选取时读取资产 ID：兼容 assetId/asset_id/assetID 三形态（后端写入节点为下划线形态） */
@@ -1975,7 +2012,8 @@ export default function CanvasPage() {
         return;
       }
       if (node.type === 'mediaNode') {
-        // 拒绝（类型/失效/重复/超限）已在 validate 内 toast 明确原因；addCanvasEdge 幂等去重
+        // 与拖线同一建边路径；能力层静默拒绝时仍按参考校验建线（点选不得比拖线更弱）
+        if (connectPair(node.id, imagePickSession)) return;
         if (validateImageRefConnect(node.id, imagePickSession)) {
           addCanvasEdge(node.id, imagePickSession);
         }
@@ -2292,7 +2330,9 @@ export default function CanvasPage() {
         return;
       }
       if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'image') {
-        openImageDraftDialog(node.id);
+        // 高清草稿卡（IKGM9O）：点卡开高清放大面板（不再落生成图片面板）
+        if (data.imageEnhance) openEnhanceDraftDialog(node.id);
+        else openImageDraftDialog(node.id);
       }
       if (node.type === 'mediaNode' && data.draft === true && data.mediaType === 'video') {
         openVideoDraftDialog(node.id);
@@ -2468,12 +2508,18 @@ export default function CanvasPage() {
   };
   const closeTextGenDialog = () => setShowTextGenDialog(false);
   const closeMusicDialog = () => setShowMusicDialog(false);
+  /** 高清面板关闭（IKGM9O）：置隐藏豁免标记，紧随的选中变化不回弹重开（口径同图片面板） */
+  const closeEnhanceDialog = () => {
+    enhancePanelHiddenRef.current = true;
+    setShowEnhanceDialog(false);
+  };
   const dismissAllGenPanels = () => {
     closeVideoDialog();
     closeImageDialog();
     closeAudioDialog();
     closeTextGenDialog();
     closeMusicDialog();
+    closeEnhanceDialog();
   };
 
   /** 画布空白处单击（React Flow PaneClick，拖拽平移后天然不触发——任何拖拽平移都不会误关）：
@@ -2525,6 +2571,8 @@ export default function CanvasPage() {
     if (!imagePanelHiddenRef.current) syncPanelVisible(imageDraftId, setShowImageDialog);
     if (!videoPanelHiddenRef.current) syncPanelVisible(videoDraftId, setShowBottomDialog);
     if (!audioPanelHiddenRef.current) syncPanelVisible(audioDraftId, setShowAudioDialog);
+    // 高清面板（IKGM9O）同口径：单选命中绑定高清卡保持/恢复，单选其他卡或多选隐藏
+    if (!enhancePanelHiddenRef.current) syncPanelVisible(enhanceDraftId, setShowEnhanceDialog);
     // IKFYH6：自由面板（无绑定草稿）与文本/音乐面板纳入同一关闭口径——单选其他卡或多选即关（只关不开，
     // 不做「命中恢复」）。hiddenRef 豁免沿用：到节点选择命中、@ 菜单选中素材后紧随的 selection 变化不误关
     //（openVideoDraftDialog 文本选取、视频自由/绑定选取、handleImageAtMention 等既有保护分支）。
@@ -2553,7 +2601,7 @@ export default function CanvasPage() {
    *  画布区域（.react-flow，空白归 PaneClick、节点归 selection sync）；右键/中键不关（button!==0）。
    *  用 click 不用 mousedown，并校验按下与抬起位移：拖拽平移/框选拖出画布边缘产生的 click 不算原地点击。 */
   const anyGenPanelOpen =
-    showBottomDialog || showImageDialog || showAudioDialog || showTextGenDialog || showMusicDialog;
+    showBottomDialog || showImageDialog || showAudioDialog || showTextGenDialog || showMusicDialog || showEnhanceDialog;
   useEffect(() => {
     if (!anyGenPanelOpen) return;
     /** 原地点击与拖拽的分界：按下与抬起的像素位移超过该值即视为拖拽（平移/框选拖出画布边缘） */
@@ -2745,11 +2793,50 @@ export default function CanvasPage() {
     if (stale) showToast('warn', '部分参考素材已失效，请恢复素材或移除引用后发送');
   };
 
-  /** 按媒体类型打开对应绑定面板（IKDMQU）：图片/视频/音频统一派发，编辑实时写回本卡 */
+  /** 按媒体类型打开对应绑定面板（IKDMQU）：图片/视频/音频统一派发，编辑实时写回本卡；
+   *  高清卡（imageEnhance 标记）分流到高清放大面板并回填 lastParams（IKGM9O，规格故事 32） */
   const openMediaDraftDialog = (nodeId: string, mediaType: unknown) => {
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const d = (node?.data ?? {}) as Record<string, unknown>;
+    if (mediaType !== 'video' && mediaType !== 'audio' && d.imageEnhance) {
+      openEnhanceDraftDialog(nodeId);
+      return;
+    }
     if (mediaType === 'video') openVideoDraftDialog(nodeId);
     else if (mediaType === 'audio') openAudioDraftDialog(nodeId);
     else openImageDraftDialog(nodeId);
+  };
+
+  /** 打开绑定高清卡的高清放大面板（IKGM9O）：源图尺寸预检快照 + lastParams 回填种子；
+   *  生成中重开为只读查看（generating 由挂载处按节点状态传入） */
+  const openEnhanceDraftDialog = (nodeId: string) => {
+    if (!canOpenEditor(nodeId)) return;
+    enhancePanelHiddenRef.current = false;
+    editingTargetRef.current = nodeId;
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const d = (node?.data ?? {}) as Record<string, unknown>;
+    const identity = d.imageEnhance as ImageEnhanceIdentity | undefined;
+    // 源图尺寸快照：按 sourceAssetId 在画布上找同素材卡读实测尺寸（无匹配/无尺寸都不拦，服务端同口径）
+    const sourceAssetId = identity?.sourceAssetId;
+    const source = sourceAssetId
+      ? mediaNodesRef.current.find((n) => readAssetId((n.data ?? {}) as Record<string, unknown>) === sourceAssetId)
+      : undefined;
+    const sd = (source?.data ?? {}) as Record<string, unknown>;
+    setEnhanceDraftId(nodeId);
+    setEnhanceSeed({
+      ts: Date.now(),
+      sourceDims: {
+        width: typeof sd.width === 'number' ? sd.width : undefined,
+        height: typeof sd.height === 'number' ? sd.height : undefined,
+      },
+      initialParams: identity?.lastParams ? restoreImageEnhanceParams(identity.lastParams) : null,
+    });
+    setShowBottomDialog(false);
+    setShowImageDialog(false);
+    setShowAudioDialog(false);
+    setShowMusicDialog(false);
+    setShowTextGenDialog(false);
+    setShowEnhanceDialog(true);
   };
 
   /** 打开绑定指定草稿的图片面板（IKDMQQ）：带入草稿已保存的参数与当前连线文本附件；
@@ -2820,6 +2907,18 @@ export default function CanvasPage() {
     if (imagePickSession === undefined) return;
     if (!showImageDialog) endImagePickSession();
   }, [showImageDialog, imagePickSession, endImagePickSession]);
+
+  /** 高清面板绑定清理（IKGM9O）：绑定目标被删除、或草稿身份结束且无生成记录（异常态）时结束绑定并关闭面板；
+   *  成品高清卡持续可绑定（重新编辑/重新生成，jobId 保留） */
+  useEffect(() => {
+    if (!enhanceDraftId) return;
+    const node = mediaNodes.find((n) => n.id === enhanceDraftId);
+    const d = (node?.data ?? {}) as Record<string, unknown>;
+    if (!node || (d.draft !== true && !hasGenerationRecord(node)) || !d.imageEnhance) {
+      setEnhanceDraftId(null);
+      setShowEnhanceDialog(false);
+    }
+  }, [enhanceDraftId, mediaNodes]);
 
   /** IKFR4X：Esc 结束图片持续选取会话（输入框/编辑器内的 Esc 保持原语义，如卡片名称编辑） */
   useEffect(() => {
@@ -2917,6 +3016,7 @@ export default function CanvasPage() {
     setShowAudioDialog(false);
     setShowMusicDialog(false);
     setShowTextGenDialog(false);
+    setShowEnhanceDialog(false);
   };
 
   /** 新建视频草稿卡（IKDMQS 统一入口共用）：seed 字段写入草稿 data 持久化键并自动选中，返回节点 id；
@@ -3024,8 +3124,12 @@ export default function CanvasPage() {
     return nodeId;
   };
 
-  /** 图片生成草稿卡，落在指定点 */
-  const createImageDraftCard = (position?: { x: number; y: number }): string => {
+  /** 图片生成草稿卡，落在指定点。overrides（IKGM9F 高清放大复用同一骨架）：
+   *  fileName 覆盖初始标题，data 附加节点身份字段（如高清标记），回调不可覆盖 */
+  const createImageDraftCard = (
+    position?: { x: number; y: number },
+    overrides?: { fileName?: string; data?: Record<string, unknown> },
+  ): string => {
     const nodeId = newNodeId('media-draft');
     const node: Node = {
       id: nodeId,
@@ -3035,10 +3139,11 @@ export default function CanvasPage() {
       data: {
         src: '',
         mediaType: 'image',
-        fileName: '图片草稿',
+        fileName: overrides?.fileName ?? '图片草稿',
         genStatus: 'draft',
         draft: true,
         prompt: '',
+        ...(overrides?.data ?? {}),
         toolMode,
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
@@ -3051,6 +3156,7 @@ export default function CanvasPage() {
         onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+        onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -3121,6 +3227,7 @@ export default function CanvasPage() {
     setShowBottomDialog(false);
     setShowAudioDialog(false);
     setShowMusicDialog(false);
+    setShowEnhanceDialog(false);
   };
 
   const handleTextGenSend = (text: string, modelId: string) => {
@@ -3223,7 +3330,7 @@ export default function CanvasPage() {
     const fromId = state?.fromNode?.id ?? connectingSourceRef.current;
     connectingSourceRef.current = null;
     const from = fromId ? findCanvasNode(fromId) ?? state?.fromNode ?? undefined : undefined;
-    if (!from || !isConnectableSource(from)) return;
+    if (!from) return;
     const point = 'changedTouches' in event ? event.changedTouches[0] : event;
     const handleNodeId = state?.toHandle?.nodeId ?? null;
     const droppedId =
@@ -3235,6 +3342,7 @@ export default function CanvasPage() {
       connectPair(from.id, droppedId);
       return;
     }
+    if (!isConnectableSource(from)) return;
     // 库已建成有效连线但没命中检测时，也不弹菜单
     if (state?.isValid) return;
     // 未连到其他节点：松手展示可选菜单
@@ -3256,13 +3364,18 @@ export default function CanvasPage() {
     if (!connection.source || !connection.target || connection.source === connection.target) return false;
     const sourceNode = findCanvasNode(connection.source);
     const targetNode = findCanvasNode(connection.target);
-    if (!isConnectableSource(sourceNode) || !targetNode) return false;
-    const sourceData = sourceNode?.data as Record<string, unknown> | undefined;
+    if (!sourceNode || !targetNode) return false;
+    const sourceData = sourceNode.data as Record<string, unknown> | undefined;
     const targetData = targetNode.data as Record<string, unknown> | undefined;
     if (sourceData?.emptyShell || targetData?.emptyShell) return false;
     if (wouldCreateCycle(connection.source, connection.target, edgesRef.current)) return false;
     const kind = genKindOf(targetNode);
-    if (kind && !canConnectSourcesToGen([sourceNode!], kind)) return false;
+    // 图片草稿：以参考校验为准，避免能力集把合法图片素材预览成「无法连接」
+    if (kind === 'image' && sourceNode.type === 'mediaNode') {
+      return imageRefSourceError(sourceNode) === null;
+    }
+    if (!isConnectableSource(sourceNode)) return false;
+    if (kind && !canConnectSourcesToGen([sourceNode], kind)) return false;
     return true;
   };
 
@@ -3339,6 +3452,7 @@ export default function CanvasPage() {
     setShowBottomDialog(false);
     setShowImageDialog(false);
     setShowMusicDialog(false);
+    setShowEnhanceDialog(false);
   };
 
   /** 面板编辑实时写回音频草稿节点（IKDMQT）：参数随节点 data 进入自动保存，刷新后恢复。
@@ -3496,6 +3610,7 @@ export default function CanvasPage() {
       onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
       onGenVideo: (id: string) => actionsRef.current.genVideo(id),
       onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+      onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
       onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
       onDownload: (id: string) => actionsRef.current.download(id),
       onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -3753,74 +3868,6 @@ export default function CanvasPage() {
     await ensureMediaNodeCompliance(id, { toastSuccess: true });
   };
 
-  /** 视频生成前补齐参考图合规；通过后回写节点 materialId 与通过图标 */
-  const ensureVideoImageRefsCompliance = async (
-    refs: VideoMediaRefs,
-  ): Promise<VideoMediaRefs | null> => {
-    // IKFM3W §10：文本带入参考按 asset_id 提交（与后端并入去重同空间），不参与 material 化
-    const images = listVideoImageRefs(refs).filter((item) => item.textNodeId == null);
-    if (images.length === 0) return refs;
-
-    const materialByKey = new Map<string, string>();
-    for (const item of images) {
-      if (materialByKey.has(item.nodeId)) continue;
-      const node = mediaNodesRef.current.find((n) => n.id === item.nodeId);
-      if (node) {
-        const failed = ((node.data ?? {}) as Record<string, unknown>).complianceFailed === true;
-        if (failed) {
-          showToast('warn', '合规校验未通过，不可用于视频生成');
-          return null;
-        }
-        const materialId = await ensureMediaNodeCompliance(item.nodeId, { toastSuccess: false });
-        if (!materialId) return null;
-        materialByKey.set(item.nodeId, materialId);
-        continue;
-      }
-      if (item.materialId && isMaterialLibraryId(item.materialId)) {
-        try {
-          await waitComplianceAssetReady(item.materialId);
-          materialByKey.set(item.nodeId, item.materialId);
-        } catch (err) {
-          toastComplianceError(err);
-          return null;
-        }
-        continue;
-      }
-      if (!item.url || item.url.startsWith('blob:')) {
-        showToast('warn', '素材尚未上传完成，请稍后重试');
-        return null;
-      }
-      try {
-        const result = await depositCanvasAssetToCharacterLibrary({
-          sourceAssetId: item.assetId,
-          url: item.url,
-          name: item.name,
-          mediaType: 'image',
-        });
-        if (!result.materialId) {
-          showToast('error', '校验失败，请重试');
-          return null;
-        }
-        materialByKey.set(item.nodeId, result.materialId);
-      } catch (err) {
-        toastComplianceError(err);
-        return null;
-      }
-    }
-
-    const withMaterial = (item: VideoMediaRef): VideoMediaRef => {
-      if (item.mediaType !== 'image') return item;
-      const materialId = materialByKey.get(item.nodeId);
-      return materialId ? { ...item, materialId } : item;
-    };
-    return {
-      ...refs,
-      first: refs.first ? withMaterial(refs.first) : undefined,
-      last: refs.last ? withMaterial(refs.last) : undefined,
-      reference: refs.reference.map(withMaterial),
-    };
-  };
-
   const handleFillEmptyShell = (id: string, file: File) => {
     void placeFileOnCanvas(file, { replaceNodeId: id }).catch((err) => {
       showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
@@ -3961,6 +4008,7 @@ export default function CanvasPage() {
           onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+          onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -4687,6 +4735,72 @@ export default function CanvasPage() {
     }
   };
 
+  /** 创建高清放大任务（IKGM9O）：高清卡原地承接（草稿转生成中 / 成品卡原卡重新生成，不新建卡）。
+   *  冻结六键经契约 zod schema 提交前校验；lastParams 随提交立即写入节点（重试/重新编辑回填同源）。
+   *  免费口径（规格）：不渲染积分预估、不走余额拦截门。返回 true 表示创建请求已发出（面板据此自动关闭）；
+   *  HTTP 层异步失败由 catch 收敛到卡片失败态（同 startGenerationJob 口径，面板不回滚）。 */
+  const startImageEnhanceJob = (
+    nodeId: string,
+    params: ImageEnhancePanelParams,
+  ): boolean => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法发起高清放大');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const identity = ((node?.data ?? {}) as Record<string, unknown>).imageEnhance as ImageEnhanceIdentity | undefined;
+    const sourceAssetId = identity?.sourceAssetId;
+    if (!sourceAssetId) {
+      showToast('warn', '源素材身份缺失，无法发起高清放大');
+      return false;
+    }
+    const input = buildImageEnhanceInput(sourceAssetId, nodeId, params);
+    if (!input) {
+      showToast('warn', '高清放大参数不合法，请调整后重试');
+      return false;
+    }
+    const isDraftTarget = ((node?.data ?? {}) as Record<string, unknown>).draft === true;
+    patchMediaNode(nodeId, {
+      genStatus: 'generating',
+      progress: 0,
+      errorText: undefined,
+      ...(isDraftTarget && !hasCustomName(node) ? { fileName: '高清生成中' } : {}),
+      // 提交即写 lastParams（契约六键形态）：失败重试原样重发、重新编辑回填共用
+      imageEnhance: { ...identity, lastParams: input },
+    });
+    // 提交立即接管节点，防止 create 返回前旧取消/轮询响应解除本次生成状态（同 startGenerationJob）
+    const activeAtCreate = newNodeId('pending-generation');
+    activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+    stopJobPolling(nodeId, jobTimersRef.current);
+    createImageEnhancement(currentId, input)
+      .then((created) => {
+        if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+        patchMediaNode(nodeId, { jobId: created.job_id });
+        pollJob(nodeId, created.job_id);
+      })
+      .catch((e: unknown) => {
+        if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+        patchMediaNode(nodeId, {
+          genStatus: 'failed',
+          errorText: isApiError(e) ? e.message : '创建任务失败',
+        });
+      });
+    return true;
+  };
+
+  /** 高清放大面板发送（IKGM9O）：面板只交付冻结四键，身份六键在此组装；
+   *  创建请求发出即关面板（置隐藏标记避免紧随的选中事件回弹重开，口径同图片面板 IKFXZD） */
+  const handleEnhanceDialogSend = (params: ImageEnhancePanelParams): boolean => {
+    const nodeId = enhanceDraftId;
+    if (!nodeId) return false;
+    const issued = startImageEnhanceJob(nodeId, params);
+    if (issued) {
+      enhancePanelHiddenRef.current = true;
+      setShowEnhanceDialog(false);
+    }
+    return issued;
+  };
+
   /** 取消接口仅登记意图；权威终态确认前保留生成中状态及轮询，避免编辑/删除绕过在途保护。 */
   const handleCancelJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
@@ -4985,10 +5099,20 @@ export default function CanvasPage() {
 
   /** 重试失败任务：retry 接口创建新任务（沿用失败任务冻结快照），节点回到生成中。
    *  与「修改后新生成」（面板发送 → createGenerationJob 新任务新快照）是两条独立路径：
-   *  重试不改输入也不落盘画布——历史失败任务输入保持不变（IKDMQV）。 */
+   *  重试不改输入也不落盘画布——历史失败任务输入保持不变（IKDMQV）。
+   *  高清放大卡分流（IKGM9O）：契约无 retry 端点，重试 = lastParams 原样重发创建接口。 */
   const handleRetryJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const jobId = node?.data?.jobId as number | string | undefined;
+    const enhanceIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageEnhance as
+      | ImageEnhanceIdentity
+      | undefined;
+    if (enhanceIdentity?.lastParams) {
+      // 防重入：生成中不重复发起（口径同通用重试）
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      startImageEnhanceJob(nodeId, restoreImageEnhanceParams(enhanceIdentity.lastParams));
+      return;
+    }
     if (!currentId || !jobId) return;
     // 防重入：首次点击已置 generating（重试按钮随失败占位消失，此处拦截双击与迟到回调交错）
     if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
@@ -5504,6 +5628,27 @@ export default function CanvasPage() {
     openImageDraftDialog(draftId);
   };
 
+  /** 高清放大（IKGM9F/IKGM9O）：照搬「生成图片」建卡骨架——来源预检后在源卡右侧建「高清」草稿卡并自动选中；
+   *  连线带 origin 标记为纯视觉来源边（不占参考位、不参与 @ 编号与媒体索引）。
+   *  节点 data 写入高清身份标记（含源素材身份）供「重新编辑」分流与参数回填；
+   *  建卡后自动弹出高清放大参数面板（规格故事 10），链式放大（高清卡上再点）同链新建卡 */
+  const handleNodeEnhanceImage = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    const err = imageRefSourceError(node);
+    if (err) {
+      showToast('warn', err);
+      return;
+    }
+    const sourceData = (node.data ?? {}) as Record<string, unknown>;
+    const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
+      fileName: '高清',
+      data: { imageEnhance: { sourceAssetId: readAssetId(sourceData) } },
+    });
+    addCanvasEdge(id, draftId, undefined, { origin: IMAGE_ENHANCE_EDGE_ORIGIN });
+    openEnhanceDraftDialog(draftId);
+  };
+
   /** 生成视频（IKDMQS 统一草稿绑定）：有生成记录的视频节点 → 绑定原卡原位重新生成（与「重新编辑」一致）；
    *  其他节点（图片/上传视频等）→ 来源有效性预检后新建视频草稿卡 + 被点节点自动连线为普通参考。
    *  不调 validateVideoRefConnect（新草稿未进 ref 会使校验被跳过），canOpenEditor 闸口保留 */
@@ -5538,6 +5683,7 @@ export default function CanvasPage() {
     setShowBottomDialog(false);
     setShowImageDialog(false);
     setShowMusicDialog(false);
+    setShowEnhanceDialog(false);
   };
 
   /** 视频整段提取音频（IKFS5W）：建任务后本地插入音频占位节点（画布只由前端写），
@@ -5773,6 +5919,7 @@ export default function CanvasPage() {
   actionsRef.current.genImage = handleNodeGenImage;
   actionsRef.current.genVideo = handleNodeGenVideo;
   actionsRef.current.genAudio = handleNodeGenAudio;
+  actionsRef.current.enhanceImage = handleNodeEnhanceImage;
   actionsRef.current.extractAudio = handleNodeExtractAudio;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
@@ -5989,9 +6136,7 @@ export default function CanvasPage() {
       applyingRef.current = true;
       if (targetNodeId) setSubmittingNodeId(targetNodeId);
       try {
-        const compliantRefs = await ensureVideoImageRefsCompliance(draftRefs);
-        if (!compliantRefs) return;
-        const jobRefs = buildVideoJobReferences(compliantRefs);
+        const jobRefs = buildVideoJobReferences(draftRefs);
         const submitted = startGenerationJob(
           'video',
           parameters,
@@ -6329,6 +6474,7 @@ export default function CanvasPage() {
               onImg2Img: (id: string, file: File) => actionsRef.current.img2img(id, file),
               onGenVideo: (id: string) => actionsRef.current.genVideo(id),
               onGenAudio: (id: string) => actionsRef.current.genAudio(id),
+              onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
               onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -6919,26 +7065,12 @@ export default function CanvasPage() {
           startGenerationJob('image', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.ratio, size: handoff.size },
             references.map(r => r.assetId), undefined, undefined, { references });
         } else {
-          const videoRefs: typeof references = [];
-          for (const ref of references) {
-            if (ref.mediaType !== 'image') {
-              videoRefs.push(ref);
-              continue;
-            }
-            const result = await depositCanvasAssetToCharacterLibrary({
-              sourceAssetId: ref.assetId,
-              url: ref.url,
-              name: ref.name,
-              mediaType: 'image',
-            });
-            videoRefs.push({ ...ref, materialId: result.materialId });
-          }
           startGenerationJob('video', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.aspectRatio,
             resolution: handoff.resolution, duration: handoff.duration,
             // IKG0LP：首页选的「是否带音频」随交接带过来，不能在这里丢
             generate_audio: handoff.generateAudio }, undefined,
-            { references: buildVideoJobReferencesFromList(videoRefs) },
-            undefined, { references: videoRefs, mode: handoff.mode });
+            { references: buildVideoJobReferencesFromList(references) },
+            undefined, { references, mode: handoff.mode });
         }
       } catch (error) {
         console.warn('首页生成参考准备失败:', error);
@@ -7353,6 +7485,22 @@ export default function CanvasPage() {
             onMentionCanvas={handleImageAtMention}
             currentNodes={mediaNodes}
             followAnchor={imageDraftId ? followAnchor : null}
+          />
+        )}
+        {/* 高清放大参数面板（IKGM9O）：绑定高清卡，发送后自动关闭，生成中只读冻结 */}
+        {showEnhanceDialog && (
+          <ImageEnhanceDialog
+            key={enhanceSeed?.ts ?? 0}
+            onClose={closeEnhanceDialog}
+            onSend={handleEnhanceDialogSend}
+            sourceDims={enhanceSeed?.sourceDims ?? null}
+            initialParams={enhanceSeed?.initialParams ?? null}
+            generating={
+              ((mediaNodes.find((n) => n.id === enhanceDraftId)?.data ?? {}) as Record<string, unknown>)
+                ?.genStatus === 'generating'
+            }
+            submitting={submittingNodeId === enhanceDraftId}
+            followAnchor={enhanceDraftId ? enhanceFollowAnchor : null}
           />
         )}
         {showTextGenDialog && textGenDraftId && (

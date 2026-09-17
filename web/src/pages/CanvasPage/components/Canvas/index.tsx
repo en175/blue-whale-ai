@@ -553,11 +553,17 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     // IKFR4X 会话勾选集合：仅会话活跃时标记（Set 查询 O(1)）
     const pickMarked = new Set(refPickMarkedIds ?? []);
     const pickBlocked = new Set(refPickBlockedIds ?? []);
+    // 选取参考时节点不可拖，库不会挂 nopan；左键平移会把点击吃掉，点选无法建线。
+    const withPickNoPan = (node: Node): Node => {
+      if (!refPickActive) return node;
+      const className = [node.className, 'nopan'].filter(Boolean).join(' ');
+      return { ...node, className };
+    };
     const content = nodes
       .filter((n) => n.type !== 'groupFrame')
       .map((n) => {
         if (frameDragMemberIds.has(n.id)) {
-          return { ...n, zIndex: groupMemberZ(topStack) + 20 };
+          return withPickNoPan({ ...n, zIndex: groupMemberZ(topStack) + 20 });
         }
         const stack = memberStackById.get(n.id);
         const zIndex = stack == null ? 0 : groupMemberZ(stack);
@@ -572,8 +578,8 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         // IKFR4X 勾选标识派生注入（已并入当前选取目标的来源节点）：纯渲染期派生不持久化，可与「输入已更新」并存
         const marked = pickMarked.size > 0 && pickMarked.has(n.id);
         const blocked = pickBlocked.size > 0 && pickBlocked.has(n.id);
-        if (!stale && !marked && !blocked) return { ...n, zIndex };
-        return {
+        if (!stale && !marked && !blocked) return withPickNoPan({ ...n, zIndex });
+        return withPickNoPan({
           ...n,
           zIndex,
           data: {
@@ -582,7 +588,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
             ...(marked ? { pickMarked: true } : {}),
             ...(blocked ? { pickBlocked: true } : {}),
           },
-        };
+        });
       });
     const frames: Node[] = list.map((g, i) => {
       const box =
@@ -606,7 +612,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       };
     });
     return [...frames, ...content];
-  }, [nodes, groups, memberStackById, frameDragMemberIds, frameDragOffset, edges, refPickMarkedIds, refPickBlockedIds]);
+  }, [nodes, groups, memberStackById, frameDragMemberIds, frameDragOffset, edges, refPickMarkedIds, refPickBlockedIds, refPickActive]);
 
   /** 节点拖拽起：仅标记拖拽中（隐藏框选悬浮条）。组内节点可自由拖出组，拖出后按
    *  坐标动态脱离组；不再整组选中——整组拖动改由组框把手承担。

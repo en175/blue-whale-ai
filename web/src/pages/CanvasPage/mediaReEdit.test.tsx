@@ -628,9 +628,10 @@ describe('IKDXHS：首页生成节点保留可编辑配置', () => {
     expect(repeated.parameters.model_id).toBe('m-test');
     if (kind === 'image') expect(repeated.input_asset_ids).toEqual(['a2']);
     // IKEXX8 视频参考改为 structured references 数组（首帧/尾帧角色随连线持久化）
+    // !718：首页交接参考不再上传虚拟人像库换 materialId，按本地 asset_id 直接提交
     else expect(repeated.references).toEqual([
-      { material_id: 'asset-compliance-test', role: 'first_frame', type: 'image' },
-      { material_id: 'asset-compliance-test', role: 'last_frame', type: 'image' },
+      { asset_id: 'a1', role: 'first_frame', type: 'image' },
+      { asset_id: 'a2', role: 'last_frame', type: 'image' },
     ]);
   });
 });

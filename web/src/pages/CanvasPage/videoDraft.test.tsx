@@ -554,7 +554,8 @@ describe('IKDMQS 提交推导与组合约束', () => {
     expect(projectId).toBe('p1');
     expect(payload.type).toBe('video');
     expect(payload.target_node_id).toBe('d1');
-    expect(payload.references).toEqual([{ material_id: 'asset-compliance-test', type: 'image', role: 'reference' }]);
+    // !718：画布连线图片按本地参考 asset_id 直接提交，不再上传虚拟人像库换 materialId
+    expect(payload.references).toEqual([{ asset_id: 'a1', type: 'image', role: 'reference' }]);
     expect(payload.first_frame_asset_id).toBeUndefined();
     // 原位承接 + 首次结果回填同一张卡（fetchJobStatus mock 秒回 succeeded）：
     // 节点数量与身份不变，草稿标记清除、结果 src/assetId 写入同节点
@@ -910,7 +911,8 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
-    expect(payload.references).toEqual([{ material_id: 'asset-compliance-test', type: 'image', role: 'reference' }]);
+    // !718：连线图片按本地参考 asset_id 提交（文本附件仍由提示词链路携带）
+    expect(payload.references).toEqual([{ asset_id: 'a1', type: 'image', role: 'reference' }]);
   });
 
   it('角色库 material 参考成为参考（草稿 data，无连线）：打开面板即自动切全能参考', async () => {
@@ -1070,7 +1072,8 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
     await act(async () => { sendButton().click(); });
     await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
     const [, payload] = apiMocks.createGenerationJob.mock.calls[0]! as unknown as [string, Record<string, unknown>];
-    expect(payload.references).toEqual([{ material_id: 'asset-compliance-test', type: 'image', role: 'reference' }]);
+    // !718：方案绑定引入的画布素材同样按本地参考 asset_id 提交
+    expect(payload.references).toEqual([{ asset_id: '101', type: 'image', role: 'reference' }]);
   });
 
   it('方案仅文本：服务端不切换，本地保持文生视频，重开面板恢复文生视频', async () => {

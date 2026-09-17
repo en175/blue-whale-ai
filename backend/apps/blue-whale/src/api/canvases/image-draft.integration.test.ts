@@ -362,9 +362,22 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
     expect((await saveCanvas(projectId, [draftNode("same-node", "A")], [], "missing")).status).toBe(200);
     const version = (await getCanvas(projectId)).version;
     expect((await saveCanvas(projectId, [draftNode("same-node", "B")], [], version)).status).toBe(200);
-    expect((await saveCanvas(projectId, [draftNode("same-node", "late A")], [], version)).status).toBe(412);
+    const stale = await saveCanvas(projectId, [draftNode("same-node", "late A")], [], version);
+    expect(stale.status).toBe(412);
+    // 冲突信封须带回服务端当前版本，前端据此刷新 If-Match 而无需再 GET 一次。
+    expect((await stale.json()).data).toEqual({ version: (await getCanvas(projectId)).version });
     expect(JSON.parse((await getCanvas(projectId)).nodes)[0].data.prompt).toBe("B");
     expect(await getJobs(projectId)).toEqual([]);
+  });
+
+  // 项目不属于调用方：走 AllExceptionsFilter 统一投影，状态码与信封一致（此前回 HTTP 200 + code 100100）。
+  it("IKDUHM API: 保存他人项目 → HTTP 404 且信封 code 100100", async () => {
+    const foreignProjectId = (await projects.create("987655", "IKDUHM foreign project")).id;
+
+    const response = await saveCanvas(foreignProjectId, [draftNode("same-node", "X")], [], "missing");
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ code: 100100, data: null });
   });
 
   // 浏览器段（契约「验证」节）：真实浏览器 + 真实业务 API + 隔离 MySQL。

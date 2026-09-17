@@ -1,6 +1,6 @@
 # worker-java 迁移契约（IKEL4A / ADR-0084）
 
-- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
+- **状态**：**已冻结 + 修正一 + 修正二 + 修正三 + 修正四 + 修正五**（修正一：cost_reservations 记账移出范围；修正二：架构改为 Java 直连 DB——**TS 只发任务，Java 做任务，交互面 = 数据库 + MQ**；修正三：ARK 直连整体下线（2026-09-10）；修正四：2026-09-12 代码整备批次成文编码规范 §13 与扩展契约附录 C，不改写 §0–§9 功能语义；修正五：2026-09-12 凭证去密——Redis 会话 sk 与 job.input.provider_credential 均改明文，删除 AES-GCM 密封/解封链路与 `GENERATION_CREDENTIAL_SECRET` 依赖；冻结增量 §14：2026-09-17 新增第 5 个生成类型 image_enhance 高清放大的跨进程字段冻结，IKGM8U）。本文件是 TS（NestJS backend）与 Java（worker-java）双端对账唯一基准；冻结后改动须双端同步评审。
 
 ## 0. 修正一（2026-09-10）：cost_reservations 记账移出迁移范围（工单 IKEF1K）
 - 决策：`cost_reservations` 预扣/结算/release 记账**整体下线**（IKEF1K），**Java 侧一概不实现**。本修正覆盖 §3.3、§4、§5、§6、§8 中所有结算/退款语义：`.../complete`、`.../fail`、`.../requeue` 端点实现必须封装**删除后**的逻辑，禁止先行按旧语义封装。
@@ -24,7 +24,7 @@
 | 项 | 值 | 出处 |
 |---|---|---|
 | topic | `generation-video`（env `ROCKETMQ_TOPIC` 可覆盖） | `queue.constants.ts` / `video-queue.ts:43` |
-| tags | `step`(video) / `image` / `audio` / `media_extract` | `queue.constants.ts:2,5,8,11` |
+| tags | `step`(video) / `image` / `audio` / `media_extract` / `image_enhance`（§14） | `queue.constants.ts` |
 | TS 消费者组 | `generation-video-worker` / `generation-image-worker` / `generation-audio-worker` / `generation-extract-worker`（各 env 可覆盖） | 4 个 consumer `:28-85` |
 | Java 消费者组 | 同名 + `-java` 后缀；同一 tag 同一时刻仅一侧在消费（停一开一 = 灰度/回滚开关） | ADR-0084 决策 4 |
 | 消息体 | **恒为 `{"jobId":"<字符串>"}`**，无其他字段、无类型判别、无重试计数 | `video-queue.ts:57-59` |
@@ -37,8 +37,8 @@
 ## 2. 生成负载字段与状态枚举
 
 - `generation_jobs.status` 合法值（VarChar(32)）：`queued` / `processing` / `succeeded` / `partially_succeeded` / `failed` / `cancelled`。**`partially_succeeded` 由 slot 聚合改写产生**（`settle-ops:104-121`），双端对账不可漏。
-- `generation_jobs.type`：`image` / `video` / `audio` / `media_extract`。`processClaimedJob` 仅收 image/video/audio，其余 `ERROR_UNSUPPORTED_TYPE`（`generation-worker.ts:287`）。
-- 领取 source 白名单：image/audio 共用 `CLAIMABLE_JOB_SOURCES = [bottom_dock, plan_apply, storyboard_preview]`（`-internals.ts:12-16`）；video 硬编码 `[bottom_dock, plan_apply, plan, scene_card]`（`claim-ops:139,261`）；**media_extract / audio claim-by-id 不过滤 source**。
+- `generation_jobs.type`：`image` / `video` / `audio` / `media_extract` / `image_enhance`（§14）。`processClaimedJob` 仅收 image/video/audio，其余 `ERROR_UNSUPPORTED_TYPE`（`generation-worker.ts:287`）。
+- 领取 source 白名单：image/audio 共用 `CLAIMABLE_JOB_SOURCES = [bottom_dock, plan_apply, storyboard_preview]`（`-internals.ts:12-16`）；video 硬编码 `[bottom_dock, plan_apply, plan, scene_card]`（`claim-ops:139,261`）；**media_extract / audio claim-by-id 不过滤 source**；image_enhance 白名单仅 `[image_enhance]`（§14.1，唯一入口 = 画布图片卡工具条）。
 - **死列（不迁移、不参与对账）**：`evidence_reconcile_until`、`execution_deadline_at`（全仓无读写）；`next_poll_at`（写但领取用 `next_action_at`，疑似遗留）；`assets.content_sha256`（schema 有、代码从不写）。
 
 ## 3. claim / 租约 / 终态写入（**移植规格**——修正二：Java 逐条实现 + 金标套件对账；刀切换前写入权威仍是 TS）
@@ -282,3 +282,57 @@ BIGINT 注意：投影内 `fencingToken: number`（JS 侧已 Number 化），DB 
 - **生命周期一套**：claim / complete / fail / publish（含 progress 心跳变体）按类型注册参数化实现；禁止按类型复制方法三元组。
 - 新类型的注册触点（**只许改这些位置**）：① MQ tag + 消费者组常量（§1 命名规则：同名 + `-java`）；② Consumer 配置子类（tag + 并发度，零 receive 逻辑）；③ Processor（实现 `JobProcessor`，只写媒体编排 + payload 组装）；④ `JobType` 枚举项 + payload Dto 字段；⑤ Finalizer 的 payload 组装策略注册；⑥ 附录 A 样式错误码赋值表 + 金标用例。**claim 两段式 CAS / fence / 终态事务核心代码禁止触碰。**
 - 新类型的 TS 侧字段与终态语义（§1/§3/§8）仍是对账权威：跨进程字段先在本附录契约定死后，TS、Java 双端才实现（红线：契约先行）。
+
+## 14. 冻结增量（2026-09-17，IKGM8U）：image_enhance（高清放大）跨进程字段冻结
+
+第 5 个生成类型（附录 C 预告位）。需求规格 = `docs/specs/2026-09-17-image-upscale-mediakit.md`，术语 = 根 `CONTEXT.md`「画布高清放大」，取舍 = `docs/adr/0092-image-upscale-mediakit-integration.md`。本节是 image_enhance 跨进程字段的**唯一事实源**：后续创建入口票（IKGM99）、worker 执行票（IKGM9D）、前端票一律照抄本节与常量落点，**不得另行发明字段名**。常量落点（双端各一处，防漂移断言对账）：
+
+- TS 侧：`backend/libs/contracts/image-enhance.ts`（含 zod schema）；MQ tag 复用 `queue.constants.ts` 的 `IMAGE_ENHANCE_TAG`
+- Java 侧：`worker-java/src/main/java/com/bluewhale/worker/domain/entity/ImageEnhanceContract.java` + `JobType.IMAGE_ENHANCE` 枚举项
+- 防漂移断言：`backend/libs/contracts/image-enhance.test.ts` 读 Java 源码文本与 TS 常量逐值对账（沿用 ikg4ur 同源断言模式），任一侧漂移即红
+
+### 14.1 任务类型 / MQ / 来源
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| `generation_jobs.type` | `image_enhance` | VARCHAR(32) 自由字符串，无 DB 迁移 |
+| RocketMQ tag | `image_enhance` | tag=type 口径同既有四类；复用 topic `generation-video` |
+| 任务来源 `source` | `image_enhance` | 唯一创建入口 = 画布图片卡工具条「高清放大」（media_extract 的 source=`dock` 同款专属来源值模式） |
+| claim source 白名单 | `source IN ('image_enhance')` | 单源白名单（image 是多入口才多值）；IKGM9D 落领取 SQL |
+| 消费者组 | `generation-image-enhance-worker` + groupSuffix | 附录 C 触点①命名规则 |
+| 免费口径 | 无成本预留 / 无 provider 行 / 无素材合规门 / 无余额拦截 | 同 media_extract（IKARDY 先例）；本期网关 model_price 配 0 |
+| 错误码兜底 | `image_enhance_failed` → 数值 `1039` | `error-codes.ts` `ERROR_IMAGE_ENHANCE_FAILED`；无 worker 级自动重试 |
+
+### 14.2 input 冻结键名（六键恒在、值恒为合法枚举，strict 无多余键）
+
+| 键名 | 类型 / 取值 | 语义 |
+|---|---|---|
+| `source_asset_id` | string（Asset id，非 `0` 开头数字串） | 源素材身份：被放大的图片 Asset（命名沿用 media_extract） |
+| `target_node_id` | string（非空） | 目标节点身份：画布高清卡 node id；前端回填结果定位用，worker 不消费画布拓扑 |
+| `version_tier` | `"lite" \| "pro" \| "max"` | 版本档冻结值；前端展示名 Lite/Pro/Max 只在 UI，不落库不进任务 |
+| `multiple` | `2 \| 4 \| 6` | 放大倍数（与火山 API 参数同名同值，出站原样透传） |
+| `generative_enhance_mode` | `"fidelity_first" \| "generative_first"` | 增强策略（与火山 API 参数同名同值） |
+| `enable_correct_color` | boolean | 色彩校正开关（与火山 API 参数同名同值） |
+
+**六键恒冻结全量值**：版本不支持的字段不缺省、不剥键（置灰时仍冻结默认值）；worker 出站时按 §14.3 能力矩阵裁剪不支持的键。参数快照随 input 冻结，重试沿用首次提交参数。
+
+### 14.3 版本档映射与能力矩阵（单处定义、双端同源）
+
+- `version_tier → tool_version`（火山 AI MediaKit）：**lite→standard、pro→professional、max→max**。
+- 能力矩阵（火山三版本差异，前端置灰 / 后端复核 / worker 出站裁剪三处同源）：增强策略仅 **pro/max** 可用；色彩校正仅 **max** 可用。
+- TS：`IMAGE_ENHANCE_TOOL_VERSION` + `IMAGE_ENHANCE_TIER_CAPABILITY`；Java：`TIER_TO_TOOL_VERSION` + `TIERS_WITH_ENHANCE_MODE` / `TIERS_WITH_CORRECT_COLOR`。
+
+### 14.4 默认值（面板初始态，与火山官方默认一致）
+
+默认档 `pro`、倍数 `2`、策略 `generative_first`（生成度优先）、色彩校正 `true`（开）。
+
+### 14.5 结果回填约定
+
+- **成功**：worker 调网关同步路由 `POST {NEW_API_BASE_URL}/v1/mediakit/sync/enhance-image`（对客模型名 `mediakit-enhance-image`，鉴权与图片生成同构：任务冻结的用户 sk- + `X-Client-System: bluewhale`）→ 网关原样透传上游响应 → **立即下载结果图（URL 仅 24h 有效）** → 落对象存储公开读 → 建 Asset（`type='image'` / `source='generated'` / `generation_job_id`，宽高按 §8 图像元数据等价标准）→ 终态 `succeeded`（`output_asset_ids`，免费工具无结算联动，同 extract 的 `publishMediaExtractResult` 形态）→ 前端经 `GET /api/jobs/:id` 拿 Asset，按 `target_node_id` 回填目标高清卡（源卡不动；重新生成替换本卡素材不新建卡）。
+- **失败**：调用失败 / 超时 / 供应商错误（网关对 success=false 返 400 且不扣费）统一终态 `failed` + `error={code,message}` 走既有错误码投影（兜底 `image_enhance_failed`；额度/内容政策信号识别沿用 §5）；**不提供自动重试**，用户在原卡手动重试，沿用冻结 input。
+
+### 14.6 注册触点与工单分工（附录 C 清单的 image_enhance 实例化）
+
+- **本票（IKGM8U）已落**：JobType 枚举项、ImageEnhanceContract 常量类、TS 契约常量与 zod schema、错误码 `image_enhance_failed`(1039)、queue.constants tag、README 灰度 tag 列表登记、本节冻结。
+- **IKGM99（创建入口）**：backend 轻量创建路径（仿 media-extractions.service.ts：直接 insert，source=`image_enhance`，next_action_at 回拨 60s 口径）+ 参数复核（版本档枚举、倍数 ∈ 2/4/6、能力矩阵、源素材归属与媒体类型、源图尺寸门槛）+ producer 入队函数（tag=`IMAGE_ENHANCE_TAG`）。
+- **IKGM9D（worker 执行）**：按附录 C 触点注册——① MQ tag + 消费者组常量；② Consumer 配置子类（`ImageEnhanceEnabledCondition`）；③ `ImageEnhanceJobProcessor`（MediaKit 客户端 + §14.5 编排）；④ claim 领取 SQL（type+source 白名单）与 payload Dto；⑤ Finalizer payload 组装；⑥ 错误码赋值 + 金标用例。`GenerationTagsCondition` / `MediaStorageTagsCondition` 需把 `image_enhance` 纳入启用判定（MediaKit 客户端与 TOS 转存均依赖）。

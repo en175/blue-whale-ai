@@ -46,13 +46,23 @@ beforeEach(() => {
     items: [
       {
         id: 7,
+        kind: 'consume',
         credits: 5,
         summary: '生成视频',
         model: 'doubao-seedance-2-0',
         created_at: 1_700_000_100,
       },
+      {
+        // IKGCWU：退款与消耗同列，方向只看 kind——backend 给的 credits 一律是正幅度。
+        id: 8,
+        kind: 'refund',
+        credits: 6,
+        summary: '退款（生成视频）',
+        model: 'doubao-seedance-2-0',
+        created_at: 1_700_000_200,
+      },
     ],
-    total: 1,
+    total: 2,
   });
 });
 
@@ -83,5 +93,21 @@ describe('AccountRecordsModal', () => {
 
     expect(accountApi.fetchConsumptions).toHaveBeenCalled();
     expect(document.body.textContent).toContain('生成视频 · doubao-seedance-2-0');
+  });
+
+  it('退款按 kind 出 + 号与退款摘要（IKGCWU）', async () => {
+    await renderModal();
+
+    await act(async () => {
+      [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent?.includes('消费记录'))
+        ?.click();
+      await Promise.resolve();
+    });
+
+    // 后端的两类都带正的 credits；符号只能来自 kind，不能来自数值正负。
+    expect(document.body.textContent).toContain('-5 积分');
+    expect(document.body.textContent).toContain('+6 积分');
+    expect(document.body.textContent).toContain('退款（生成视频）');
   });
 });

@@ -41,12 +41,15 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
 
   it("returns normal uploaded project assets even when no generation job produced them", async () => {
     const findJobs = vi.fn().mockResolvedValue([]);
+    // 200 有 md5、201 无（老资产未落 md5）→ 字段原样带出，缺失归 null。
+    const MD5_200 = "d41d8cd98f00b204e9800998ecf8427e";
     const findAssets = vi.fn().mockResolvedValue([
       {
         id: 200n,
         project_id: 55n,
         type: "image",
         url: "tos://project/55/200.png",
+        md5: MD5_200,
       },
       {
         id: 201n,
@@ -90,6 +93,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
         // IKFYHJ：未关联素材库 → 不带校验状态。
         material_status: null,
         material_status_checked_at: null,
+        md5: MD5_200,
       },
       {
         id: "201",
@@ -100,6 +104,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
         material_group_id: null,
         material_status: null,
         material_status_checked_at: null,
+        md5: null,
       },
     ]);
   });

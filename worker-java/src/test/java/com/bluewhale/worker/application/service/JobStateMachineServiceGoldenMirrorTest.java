@@ -596,7 +596,10 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setRetryCount(1);
         candidate.setSource("bottom_dock");
 
-        when(jobMapper.findImageCandidate(500L)).thenReturn(candidate);
+        when(jobMapper.findCandidateByTypeAndSources(
+                eq(500L), eq("image"),
+                eq(List.of("bottom_dock", "plan_apply", "storyboard_preview"))))
+                .thenReturn(candidate);
         when(jobMapper.claimImageCas(
                 eq(500L), eq("worker-1"), any(LocalDateTime.class),
                 eq(2L), eq("processing")
@@ -615,7 +618,10 @@ class JobStateMachineServiceGoldenMirrorTest {
     @Test
     @DisplayName("claimImageJobById: no candidate → empty")
     void claimImage_noCandidate() {
-        when(jobMapper.findImageCandidate(500L)).thenReturn(null);
+        when(jobMapper.findCandidateByTypeAndSources(
+                eq(500L), eq("image"),
+                eq(List.of("bottom_dock", "plan_apply", "storyboard_preview"))))
+                .thenReturn(null);
         Optional<ClaimedJobDto> result = service.claimImageJobById("500", "worker-1");
         assertThat(result).isEmpty();
     }
@@ -629,7 +635,10 @@ class JobStateMachineServiceGoldenMirrorTest {
         candidate.setStatus("queued");
         candidate.setType("image");
 
-        when(jobMapper.findImageCandidate(500L)).thenReturn(candidate);
+        when(jobMapper.findCandidateByTypeAndSources(
+                eq(500L), eq("image"),
+                eq(List.of("bottom_dock", "plan_apply", "storyboard_preview"))))
+                .thenReturn(candidate);
         when(jobMapper.claimImageCas(eq(500L), eq("worker-1"), any(LocalDateTime.class),
                 eq(2L), eq("queued"))).thenReturn(0);
 

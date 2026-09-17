@@ -5,8 +5,9 @@
  * ============================================ */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check } from 'lucide-react';
+import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
+import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
@@ -64,6 +65,8 @@ interface MediaNodeData {
   draftModelId?: string;
   draftSize?: string;
   draftRatio?: string;
+  /** 高清身份标记（IKGM9F）：本卡由「高清放大」入口创建；「重新编辑」据此分流高清面板（IKGM9O） */
+  imageEnhance?: ImageEnhanceIdentity;
   /** 生成进度 0-100 */
   progress?: number;
   /** 失败原因 */
@@ -124,6 +127,8 @@ interface MediaNodeData {
   onGenImage?: (id: string) => void;
   /** 生成视频：打开视频对话框并带入图片 */
   onGenVideo?: (id: string) => void;
+  /** 高清放大（IKGM9F）：在源卡右侧建「高清」草稿卡并连来源线 */
+  onEnhanceImage?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
   /** 视频整段提取音频；音频节点由后端注入画布。 */
@@ -192,8 +197,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     || data.genStatus === 'failed'
     || data.genStatus === 'cancelled'
     || data.jobId != null;
-  /** 上传素材只作出源，左侧不加号；生成节点才接收入边 */
-  const showTargetHandle = !isEmptyShell && isGenHost && !data.isFirst;
+  /** 上传素材只作出源，左侧不加号；生成节点（含图片草稿）一律接收入边。
+   *  不按 isFirst 隐藏——首卡与其余卡同口径，否则草稿当画布第一张时无法被图片素材连入。 */
+  const showTargetHandle = !isEmptyShell && isGenHost;
   const blockNodeMenu =
     isEmptyShell || data.genStatus === 'generating';
 
@@ -240,6 +246,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleReEdit = useCallback(() => data.onReEdit?.(id), [data, id]);
   const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
+  const handleEnhanceImage = useCallback(() => data.onEnhanceImage?.(id), [data, id]);
   const handleExtractAudio = useCallback(async () => {
     if (isExtractSubmitting || data.assetId == null || !data.onExtractAudio) return;
     setIsExtractSubmitting(true);
@@ -313,10 +320,14 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     if (isDraft) {
       const isImageDraft = data.mediaType === 'image';
       const isVideoDraft = data.mediaType === 'video';
+      // 高清草稿（IKGM9F）专属占位文案；参数面板由 IKGM9O 接入
+      const draftHint = isImageDraft && data.imageEnhance
+        ? '配置参数生成高清图像'
+        : isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成';
       return (
         <div className={styles.genBox}>
           {isVideoDraft ? <Video size={22} strokeWidth={1.8} color="#666" /> : <Image size={22} strokeWidth={1.8} color="#666" />}
-          <span className={styles.missingText}>{isVideoDraft ? '视频生成' : isImageDraft ? '图片生成' : '待生成'}</span>
+          <span className={styles.missingText}>{draftHint}</span>
         </div>
       );
     }
@@ -396,6 +407,12 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <button className={styles.toolBtn} onClick={handleGenVideo} title="带入图片，打开视频对话框">
               <Video size={14} strokeWidth={2} />
               <span>生成视频</span>
+            </button>
+          )}
+          {toolbar.enhanceImage && (
+            <button className={styles.toolBtn} onClick={handleEnhanceImage} title="在右侧新建高清放大草稿卡">
+              <Expand size={14} strokeWidth={2} />
+              <span>高清放大</span>
             </button>
           )}
           {data.mediaType === 'video' && (
