@@ -21,10 +21,13 @@
  */
 
 /** 引用标记语法：`&<正整数 asset_id>&` 或 `&<asset- 前缀素材库 id>&`——扫描与替换共用的唯一定义。
- *  `[^&]` 收口防止贪婪吞掉后续标记；`&0&` / `&01&` 这类非法形态不匹配，天然落回「原样保留」。 */
-const MARKER_SOURCE = "&([1-9][0-9]*|[Aa]sset-[^&]{1,128})&";
+ *  两处收口：`[^&]` 防吃掉后续标记、`[^&\s]` 再排除空白——素材库 id 不含空白，排除后
+ *  「未闭合的 `&asset-x`」不会一路吞到下一个标记的 `&`（否则同一段里后续所有合法标记连带失效）。
+ *  `i` 让语法层与校验层同宽：`MATERIAL_ID_PATTERN` 是 `/i`，`&ASSET-x&` 完全同名就该命中。
+ *  `&0&` / `&01&` 这类非法形态不匹配，天然落回「原样保留」。 */
+const MARKER_SOURCE = "&([1-9][0-9]*|asset-[^&\\s]{1,128})&";
 /** 每次现造正则：带 g 的正则是有状态的（lastIndex），共用实例会串味。 */
-const markerPattern = () => new RegExp(MARKER_SOURCE, "g");
+const markerPattern = () => new RegExp(MARKER_SOURCE, "gi");
 
 export function transferReferenceMarkers(
   prompt: string,
@@ -35,7 +38,10 @@ export function transferReferenceMarkers(
   // 方案快照比对用 toLowerCase）；本地 asset 数字 id 无大小写问题。
   // 故 asset- 前缀的身份走小写回退，避免「references 写 Asset-X、正文写 &asset-x&」这类
   // 同义不同形被判成「找不到身份」而静默不转。
-  const lower = new Map([...labels].map(([key, value]) => [key.toLowerCase(), value]));
+  const lower = new Map<string, string>();
+  for (const [key, value] of labels) {
+    if (!lower.has(key.toLowerCase())) lower.set(key.toLowerCase(), value);
+  }
   return prompt.replace(markerPattern(), (whole, identity: string) => {
     const label = labels.get(identity)
       ?? (identity.toLowerCase().startsWith("asset-") ? lower.get(identity.toLowerCase()) : undefined);

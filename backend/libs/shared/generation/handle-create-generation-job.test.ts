@@ -588,6 +588,74 @@ describe("handleCreateGenerationJob 图片参考素材单数组 references（IKG
   });
 });
 
+// IKG6EK / ADR-0088：引用标记转移的端到端接线——references 的身份 → 编号表 → input.prompt。
+// （删掉 reference-marker-transfer.ts 之后，这条链只剩这里能钉住；纯替换由 core 的用例覆盖。）
+describe("handleCreateGenerationJob 引用标记转移（IKG6EK / ADR-0088）", () => {
+  it("视频：素材库身份（material_id 提交）→ 正文 &asset-x& 出 @图片1", async () => {
+    const { deps, createJob } = buildVideoDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        parameters: { ...VIDEO_BODY.parameters, prompt: "角色参考&asset-active-1& 出场" },
+        references: [{ role: "reference", material_id: "asset-active-1", type: "image" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    // 标记里的身份与 references 元素身份同源（asset_id ?? material_id），直接查表，不做互认
+    expect(cmdArg.input.prompt).toBe("角色参考@图片1 出场");
+  });
+
+  it("视频：首帧按角色、普通参考按同类型编号", async () => {
+    const { deps, createJob } = buildVideoDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        parameters: { ...VIDEO_BODY.parameters, prompt: "&11&转场到&12&" },
+        references: [
+          { role: "first_frame", asset_id: "11", type: "image" },
+          { role: "reference", asset_id: "12", type: "image" },
+        ],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("@首帧转场到@图片1");
+  });
+
+  it("未提交的身份不转，原样保留（不猜、不删、不报错）", async () => {
+    const { deps, createJob } = buildVideoDeps();
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        parameters: { ...VIDEO_BODY.parameters, prompt: "参考&99999999& 和 &12&" },
+        references: [{ role: "reference", asset_id: "12", type: "image" }],
+      },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.prompt).toBe("参考&99999999& 和 @图片1");
+  });
+});
+
 // 素材库引用（MaterialReference）：仅视频生成；格式校验 + 与本地 Asset 引用按并集互斥/配对。
 function buildVideoDeps() {
   const findOwnedById = vi.fn().mockResolvedValue({
@@ -2138,7 +2206,7 @@ describe("handleCreateGenerationJob 组合上限跟随模型值（IKESD6）", ()
 });
 
 /* IKG6EK / ADR-0088：`prompt_doc` 已退役——提交方给正文全文（`parameters.prompt` 一律权威），
-   引用标记转移在接纳管线完成（用例见 reference-marker-transfer.test.ts）。
+   引用标记转移在接纳管线完成（用例见本文件「引用标记转移」组）。
    IKFA1M / IKFA1O / IKFA1P / IKFCJG 四套「doc 权威编译 + 身份复核」用例随契约一并退役。 */
 
 describe("handleCreateGenerationJob prompt_doc 已退役（IKG6EK / ADR-0088）", () => {

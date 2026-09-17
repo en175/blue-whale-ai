@@ -34,6 +34,21 @@ describe("transferReferenceMarkers（IKG6EK / ADR-0088）", () => {
     ).toBe("参考@图片1");
   });
 
+  it("全大写身份也命中——语法层不比校验层窄（MATERIAL_ID_PATTERN 是 /i）", () => {
+    expect(
+      transferReferenceMarkers("参考&ASSET-x&", labels(["ASSET-x", "图片1"])),
+    ).toBe("参考@图片1");
+    expect(
+      transferReferenceMarkers("参考&ASSET-x&", labels(["asset-x", "图片1"])),
+    ).toBe("参考@图片1");
+  });
+
+  it("未闭合的 &asset- 不会吞掉后续合法标记（空白处收口）", () => {
+    expect(
+      transferReferenceMarkers("参考 &Asset-x 和 &7&", labels(["7", "图片1"])),
+    ).toBe("参考 &Asset-x 和 @图片1");
+  });
+
   it("数字身份不做小写回退（不存在大小写问题，也不该放宽匹配面）", () => {
     expect(transferReferenceMarkers("&6047&", labels(["asset-6047", "图片1"]))).toBe("&6047&");
   });

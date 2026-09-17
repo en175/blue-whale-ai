@@ -2,7 +2,7 @@
 
 > ⚠️ **部分已由 [ADR-0088](../adr/0088-prompt-assembly-ownership-and-reference-marker.md) 取代**：
 > 本契约中一切以 `prompt_doc` 为权威编译源、以及 `composed_prompt` / `providerPrompt` 冻结的条款
-> 已作废——正文一律取提交方的 `parameters.prompt`，服务端只做引用标记转移（`&asset_id&` → `@标签`）。
+> 已作废——正文一律取提交方的 `parameters.prompt`，服务端只做引用标记转移（`&<身份>&` → `@标签`）。
 > 引用来源模型与文本索引派生部分继续有效。
 
 日期：2026-09-14

@@ -2,8 +2,8 @@
  * 引用标签派生（IKFA1M 展示编号规则的存续部分）
  *
  * IKG6EK / ADR-0088：`prompt_doc` 已退役——正文由提交方给全（`parameters.prompt` 一律权威），
- * 服务端对提示词只做一件事：把正文里的引用标记 `&asset_id&` 按本次请求的素材顺序换成 `@标签`
- * （见 backend/libs/core/transfer-reference-markers.ts 与 shared/generation/reference-marker-transfer.ts）。
+ * 服务端对提示词只做一件事：把正文里的引用标记 `&<身份>&` 按本次请求的素材顺序换成 `@标签`
+ * （见 backend/libs/core/transfer-reference-markers.ts）。
  *
  * 本文件因此只保留「身份 → 展示编号」的派生：编号跟真实媒体输入顺序，编号不是身份。
  * doc 的结构 schema、身份复核与正文编译（compilePromptDoc / compileVideoPromptDoc）随契约退役。
@@ -69,14 +69,16 @@ export function videoRefLabel(
 }
 
 /**
- * IKG6EK / ADR-0088：引用标记（`&asset_id&`）的身份 → 标签表。
+ * IKG6EK / ADR-0088：引用标记（`&<身份>&`）的身份 → 标签表。
  *
  * 与 videoRefLabel 同一套规则（首尾帧按角色、普通参考按同类型顺序编号），
  * 供正文标记转移 `transferReferenceMarkers` 使用；返回的文案**不带 `@`**，
  * 前缀由转移函数统一补。
  *
- * 入参 refs 的 id 必须是**本地 asset id**：素材库引用（material-only）由调用方
- * 先用归属结果（`asset.material_id`）解析成本地 asset id 后填入，本函数不碰库。
+ * 入参 refs 的 `id` = **本次 references 里该素材的身份原样**（`asset_id ?? material_id`）：
+ * 本地 Asset 是纯数字 id，素材库 / 虚拟角色库是 `asset-` 前缀 id。**本函数不碰库、不做身份解析**
+ * ——标记里写哪种身份，取决于提交方是以哪种身份提交的；把 material_id 转成上游载体是 worker 的事。
+ * （早期实现曾在此做「本地 asset id → material 位次」的回查桥，随 ADR-0088 删除。）
  */
 export function buildReferenceMarkerLabels(
   refs: readonly VideoRefItem[],

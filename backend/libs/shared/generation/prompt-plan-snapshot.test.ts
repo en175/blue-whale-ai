@@ -154,7 +154,7 @@ describe("freezePromptPlans 生成输入以请求体为准：不再要求画布�
     expect(snapshot!.plans).toEqual([{ nodeId: "plan", text: PLAN_TEXT, mentions: [{ start: 2, end: 4, index: 1, assetId: "11" }] }]);
     expect(snapshot!.images).toEqual([{ assetId: "11", url: "https://cdn.test/11.png" }]);
     // IKG6EK / ADR-0088：providerPrompt 已退役——正文由提交方给全，引用标记转移在接纳管线完成
-    // （backend/libs/shared/generation/reference-marker-transfer.ts，用例见该文件）。
+    // （backend/libs/core/transfer-reference-markers.ts，用例见该文件）。
     // 本文件只钉住快照不再携带它。
     expect(snapshot).not.toHaveProperty("providerPrompt");
   });
@@ -286,7 +286,7 @@ describe("freezePromptPlans 素材库素材的身份映射（IKG79Z）", () => {
       providerUrl: "asset://mat-1",
     }]);
     // IKG6EK / ADR-0088：正文不再由快照携带；标签派生（含 material 身份回查）改由
-    // reference-marker-transfer.ts 承担，那边的用例覆盖「不因缺身份退化成 参考图0」。
+    // transfer-reference-markers.ts 承担——身份不在集合里就不转、原样保留。
     expect(snapshot).not.toHaveProperty("providerPrompt");
   });
 

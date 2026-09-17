@@ -110,7 +110,7 @@ export async function freezePromptPlans(args: {
     }
   }
   // IKG6EK / ADR-0088：正文由提交方给全，引用标记转移已在接纳管线完成
-  // （reference-marker-transfer.ts）——本函数不再组合 providerPrompt，附件正文也不再由
+  // （transfer-reference-markers.ts）——本函数不再组合 providerPrompt，附件正文也不再由
   // 服务端拼进正文。方案快照退为方案绑定校验与审计事实。
   const maxLength = Math.max(
     args.type === "video" ? COMPOSED_VIDEO_PROMPT_MAX_LENGTH : COMPOSED_IMAGE_PROMPT_MAX_LENGTH,

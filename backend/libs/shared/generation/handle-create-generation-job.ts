@@ -1584,7 +1584,7 @@ export async function handleCreateGenerationJob(
   // IKG6EK / ADR-0088：`parameters.prompt` **一律权威**，doc 的正文编译与身份校验都不再需要。
   // 素材校验只保留一条——`references` 里的素材必须属于本用户（存在性/归属/类型复核见上方
   // IKE7JP 两段与 resolveTargetSnapshot），不越权即可。参考素材的标签派生统一由接纳管线的
-  // 引用标记转移负责（reference-marker-transfer.ts）：身份不在集合里就不转、原样保留。
+  // 引用标记转移负责（backend/libs/core/transfer-reference-markers.ts）：身份不在集合里就不转、原样保留。
   {
     // 复用既有正文约束；后续附件组合也必须使用实际冻结的正文。
     const compiledError = strategy.validate({ ...effectiveBody, parameters: { ...params, prompt: promptText } });
