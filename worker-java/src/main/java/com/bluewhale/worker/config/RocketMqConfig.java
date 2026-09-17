@@ -4,10 +4,12 @@ import com.bluewhale.worker.application.consumer.AbstractGenerationConsumer;
 import com.bluewhale.worker.application.consumer.AudioConsumer;
 import com.bluewhale.worker.application.consumer.ImageConsumer;
 import com.bluewhale.worker.application.consumer.ImageEnhanceConsumer;
+import com.bluewhale.worker.application.consumer.ImageEraseConsumer;
 import com.bluewhale.worker.application.consumer.MediaExtractConsumer;
 import com.bluewhale.worker.application.consumer.VideoConsumer;
 import com.bluewhale.worker.application.processor.AudioJobProcessor;
 import com.bluewhale.worker.application.processor.ImageEnhanceJobProcessor;
+import com.bluewhale.worker.application.processor.ImageEraseJobProcessor;
 import com.bluewhale.worker.application.processor.ImageJobProcessor;
 import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
 import com.bluewhale.worker.application.processor.VideoJobProcessor;
@@ -235,6 +237,50 @@ public class RocketMqConfig {
         );
     }
 
+    /**
+     * image_erase（图片擦除）consumer（条件：enabled-tags 含 image_erase；契约 §15 / IKGOT6）。
+     * <p>
+     * consumer group = "generation-image-erase-worker" + groupSuffix（契约 §15.1 冻结值）。
+     * tag = "image_erase"（复用 topic generation-video）。
+     * digitGuard = true（generation_jobs.id 恒纯数字）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    @Conditional(ImageEraseEnabledCondition.class)
+    public ImageEraseConsumer imageEraseConsumer(
+            ImageEraseJobProcessor processor,
+            WorkerProperties workerProps,
+            Environment env
+    ) {
+        RocketMqProperties mqProps = Binder.get(env)
+                .bind("rocketmq", RocketMqProperties.class)
+                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
+
+        if (mqProps.endpoints().isBlank()) {
+            throw new IllegalStateException(
+                    "ROCKETMQ_ENDPOINTS 未配置：image_erase consumer 无法启动");
+        }
+
+        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
+                .setEndpoints(mqProps.endpoints())
+                .enableSsl(mqProps.sslEnabled());
+
+        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
+            configBuilder.setCredentialProvider(
+                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
+        }
+
+        String consumerGroup = "generation-image-erase-worker" + workerProps.groupSuffix();
+        int concurrency = workerProps.concurrency().imageErase();
+
+        return new ImageEraseConsumer(
+                processor,
+                mqProps.topic(),
+                configBuilder.build(),
+                consumerGroup,
+                concurrency
+        );
+    }
+
     // ========== 刀④ 视频路径（blade-④ IKEL9A） ==========
 
     /**
@@ -300,6 +346,13 @@ public class RocketMqConfig {
     @Conditional(ImageEnhanceEnabledCondition.class)
     public GenerationMessageProducer imageEnhanceRecoveryProducer(Environment env) {
         return createProducerForTag(env, "image_enhance");
+    }
+
+    /** recovery 重投 image_erase（条件：enabled-tags 含 image_erase；契约 §15 / IKGOT6）。 */
+    @Bean(destroyMethod = "close")
+    @Conditional(ImageEraseEnabledCondition.class)
+    public GenerationMessageProducer imageEraseRecoveryProducer(Environment env) {
+        return createProducerForTag(env, "image_erase");
     }
 
     /** 按 tag 建 RocketMQ producer（校验与视频生产者同源语义）。 */
