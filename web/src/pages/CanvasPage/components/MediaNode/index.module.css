@@ -611,3 +611,55 @@
   box-shadow: 0 1px 4px rgba(34, 197, 94, 0.5);
   pointer-events: none;
 }
+
+/* ---- 「高清 ▾」下拉菜单（IKGOQX）：按钮下方弹出，仅含「高清」「扩图」两项 ---- */
+.menuWrap {
+  position: relative;
+  display: flex;
+}
+
+.menuPopup {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background-color: rgba(24, 24, 24, 0.98);
+  border: 1px solid #333;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 11;
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #ddd;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.menuItem:hover {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.menuItem[aria-disabled='true'] {
+  color: #666;
+  cursor: not-allowed;
+  background: transparent;
+}
+
+.menuItem[aria-disabled='true']:hover {
+  color: #666;
+}

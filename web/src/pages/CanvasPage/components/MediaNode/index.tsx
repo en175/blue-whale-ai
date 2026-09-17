@@ -5,8 +5,9 @@
  * ============================================ */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand } from 'lucide-react';
+import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand, ChevronDown } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
+import { outpaintGateReason } from '../../imageOutpaint';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
@@ -129,6 +130,8 @@ interface MediaNodeData {
   onGenVideo?: (id: string) => void;
   /** 高清放大（IKGM9F）：在源卡右侧建「高清」草稿卡并连来源线 */
   onEnhanceImage?: (id: string) => void;
+  /** 扩图（IKGOQX）：进入扩图模式（扩展框 + 参数面板，不建卡） */
+  onOutpaintImage?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
   /** 视频整段提取音频；音频节点由后端注入画布。 */
@@ -153,6 +156,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const [nameEditing, setNameEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [nameError, setNameError] = useState('');
+  /** 「高清 ▾」下拉菜单（IKGOQX）：含「高清」（既有行为）与「扩图」两项 */
+  const [enhanceMenuOpen, setEnhanceMenuOpen] = useState(false);
+  const enhanceMenuRef = useRef<HTMLDivElement>(null);
 
   const zoom = useStore((state) => state.transform[2]);
   const isSelect = data.toolMode === 'select';
@@ -188,6 +194,19 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       document.removeEventListener('contextmenu', close, true);
     };
   }, [contextMenu]);
+
+  /** 「高清 ▾」菜单点外关闭（IKGOQX，交互模式参考 CanvasToolbar 弹出菜单：
+   *  点空白/点菜单外区域收起；再点按钮收起由 toggle 承担） */
+  useEffect(() => {
+    if (!enhanceMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (enhanceMenuRef.current && !enhanceMenuRef.current.contains(e.target as Node)) {
+        setEnhanceMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [enhanceMenuOpen]);
 
   const isEmptyShell = data.emptyShell === true;
   const isGenHost =
@@ -246,7 +265,21 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleReEdit = useCallback(() => data.onReEdit?.(id), [data, id]);
   const handleGenImage = useCallback(() => data.onGenImage?.(id), [data, id]);
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
-  const handleEnhanceImage = useCallback(() => data.onEnhanceImage?.(id), [data, id]);
+  /** 「高清 ▾」菜单（IKGOQX）：点「高清」行为与改造前完全一致；「扩图」按门槛预检置灰 */
+  const handleEnhanceImage = useCallback(() => {
+    setEnhanceMenuOpen(false);
+    data.onEnhanceImage?.(id);
+  }, [data, id]);
+  const handleOutpaintImage = useCallback(() => {
+    setEnhanceMenuOpen(false);
+    data.onOutpaintImage?.(id);
+  }, [data, id]);
+  /** 扩图可用性预检（打开菜单时按当前源图快照判定）：置灰并悬停说明原因 */
+  const outpaintDisabledReason = outpaintGateReason(
+    typeof data.width === 'number' ? data.width : undefined,
+    typeof data.height === 'number' ? data.height : undefined,
+    typeof data.size === 'number' ? data.size : undefined,
+  );
   const handleExtractAudio = useCallback(async () => {
     if (isExtractSubmitting || data.assetId == null || !data.onExtractAudio) return;
     setIsExtractSubmitting(true);
@@ -410,10 +443,45 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             </button>
           )}
           {toolbar.enhanceImage && (
-            <button className={styles.toolBtn} onClick={handleEnhanceImage} title="在右侧新建高清放大草稿卡">
-              <Expand size={14} strokeWidth={2} />
-              <span>高清放大</span>
-            </button>
+            <div className={styles.menuWrap} ref={enhanceMenuRef}>
+              <button
+                className={styles.toolBtn}
+                onClick={() => setEnhanceMenuOpen((prev) => !prev)}
+                title="画面增强：高清放大 / 扩图"
+                data-testid="enhance-menu-btn"
+                aria-haspopup="menu"
+                aria-expanded={enhanceMenuOpen}
+              >
+                <Expand size={14} strokeWidth={2} />
+                <span>高清</span>
+                <ChevronDown size={12} strokeWidth={2} />
+              </button>
+              {enhanceMenuOpen && (
+                <div className={styles.menuPopup} role="menu" data-testid="enhance-menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={styles.menuItem}
+                    onClick={handleEnhanceImage}
+                    title="在右侧新建高清放大草稿卡"
+                    data-testid="enhance-menu-enhance"
+                  >
+                    <span>高清</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-disabled={!!outpaintDisabledReason || undefined}
+                    className={styles.menuItem}
+                    onClick={outpaintDisabledReason ? undefined : handleOutpaintImage}
+                    title={outpaintDisabledReason ?? '进入扩图模式，拖动边框向外扩展画面'}
+                    data-testid="enhance-menu-outpaint"
+                  >
+                    <span>扩图</span>
+                  </button>
+                </div>
+              )}
+            </div>
           )}
           {data.mediaType === 'video' && (
             <button

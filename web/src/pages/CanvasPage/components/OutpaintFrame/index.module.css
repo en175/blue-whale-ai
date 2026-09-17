@@ -1,0 +1,80 @@
+/* ============================================
+ * OutpaintFrame 扩图扩展框覆盖层样式（IKGOQX）
+ * 屏幕空间层：pointer-events 由各元素自行声明；手柄尺寸恒为屏幕像素。
+ * ============================================ */
+
+/* 覆盖层根：铺满画布不拦截交互，仅手柄可点（GroupOverlay uiLayer 同做法） */
+.frameLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6; /* 节点层(z4)之上、面板(z20)之下，不挡节点标题与工具条交互 */
+  overflow: visible;
+}
+
+/* 框本体：边线 + 扩展区微填充（纯视觉） */
+.frameBox {
+  position: absolute;
+  border: 1.5px solid rgba(90, 170, 255, 0.9);
+  border-radius: 4px;
+  background-color: rgba(90, 170, 255, 0.08);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+/* 边手柄：横条（上下边）/ 竖条（左右边），命中区比视觉条更大 */
+.edgeHandle {
+  position: absolute;
+  pointer-events: auto;
+  background-color: rgba(90, 170, 255, 0.85);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.edgeHandle:hover {
+  background-color: #7cb8ff;
+}
+
+.edgeTop,
+.edgeBottom {
+  width: 40px;
+  height: 6px;
+  transform: translate(-50%, -50%);
+  cursor: ns-resize;
+}
+
+.edgeLeft,
+.edgeRight {
+  width: 6px;
+  height: 40px;
+  transform: translate(-50%, -50%);
+  cursor: ew-resize;
+}
+
+/* 角手柄：方形点 */
+.cornerHandle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background-color: #fff;
+  border: 1.5px solid rgba(90, 170, 255, 0.95);
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: nwse-resize;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.cornerHandle:hover {
+  border-color: #7cb8ff;
+  background-color: #7cb8ff;
+}
+
+/* 对角方向：nw/se 与 ne/sw 光标相反 */
+.cornerNwse {
+  cursor: nwse-resize;
+}
+
+.cornerNesw {
+  cursor: nesw-resize;
+}

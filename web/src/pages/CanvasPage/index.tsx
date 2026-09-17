@@ -39,7 +39,7 @@ import {
   type VideoRefRole,
 } from './videoMediaRefs';
 import { refOverflowToast } from '@/utils/ref-overflow';
-import { mediaContentBox } from './components/MediaNode/mediaContentSize';
+import { mediaContentBox, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { downloadFileNameOf } from './components/cardName';
 import type { MediaGenStatus } from './components/MediaNode';
 import type { MediaDims } from './components/MediaNode/mediaContentSize';
@@ -58,7 +58,17 @@ import {
   type ImageEnhanceIdentity,
   type ImageEnhancePanelParams,
 } from './imageEnhance';
+import {
+  ZERO_EXPANDS,
+  maxExpandPerSide,
+  outpaintGateReason,
+  presetExpands,
+  type ExpandSides,
+  type OutpaintPresetKey,
+  type SourceRect,
+} from './imageOutpaint';
 import ImageEnhanceDialog from './components/ImageEnhanceDialog';
+import OutpaintDialog from './components/OutpaintDialog';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
@@ -296,6 +306,20 @@ export default function CanvasPage() {
   const [enhanceSeed, setEnhanceSeed] = useState<{ ts: number; sourceDims: { width?: number; height?: number }; initialParams: ImageEnhancePanelParams | null } | null>(null);
   /** 高清面板隐藏豁免（口径同 imagePanelHiddenRef）：刚关闭面板后的选中变化不回弹重开 */
   const enhancePanelHiddenRef = useRef(false);
+  /* ---------- 扩图模式会话（IKGOQX）：管理模式参考持续选取会话 ----------
+   * 会话 = 源图卡 id + 四方向扩展量；纯界面交互态不持久化（刷新即退出，无残留）。
+   * 四种退出（面板 X / Esc / 点其他卡 / 点画布空白）共用统一退出函数，均不留痕迹
+   * （不建卡、不连线、不产生任务）；再次进入从零开始（框与原图重合、默认原图比例）。 */
+  const [outpaintNodeId, setOutpaintNodeId] = useState<string | null>(null);
+  /** 四方向扩展量（画布 flow 单位）：扩图面板与扩展框共享的唯一状态源 */
+  const [outpaintExpands, setOutpaintExpands] = useState<ExpandSides>(ZERO_EXPANDS);
+  /** 扩图模式进行中（派生布尔，会话身份单点收敛） */
+  const outpaintSessionActive = outpaintNodeId != null;
+  /** 结束扩图模式：清会话与扩展量（不留痕迹；再次进入从零开始） */
+  const endOutpaintSession = useCallback(() => {
+    setOutpaintNodeId(null);
+    setOutpaintExpands(ZERO_EXPANDS);
+  }, []);
   const [showEdges, setShowEdges] = useState(true);
   /** 对齐吸附开关（IKGGCT T3）：全局持久化（不分画布文档），初始读 localStorage，默认开 */
   const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
@@ -910,6 +934,53 @@ export default function CanvasPage() {
         dialogWidth: 320,
       })
     : null;
+  /* ---------- 扩图模式派生量（IKGOQX） ---------- */
+  /** 源图卡与内容区矩形（扩展框与面板的锚定基准；内容区 = 节点左上角 + 标题偏移 + 内容盒） */
+  const outpaintSourceNode = outpaintSessionActive
+    ? mediaNodes.find((n) => n.id === outpaintNodeId) ?? null
+    : null;
+  const outpaintContentBox = outpaintSourceNode
+    ? mediaContentBox({
+        mediaType: ((outpaintSourceNode.data ?? {}) as Record<string, unknown>).mediaType as 'image' | undefined,
+        width: typeof ((outpaintSourceNode.data ?? {}) as Record<string, unknown>).width === 'number'
+          ? ((outpaintSourceNode.data ?? {}) as Record<string, unknown>).width as number
+          : undefined,
+        height: typeof ((outpaintSourceNode.data ?? {}) as Record<string, unknown>).height === 'number'
+          ? ((outpaintSourceNode.data ?? {}) as Record<string, unknown>).height as number
+          : undefined,
+      })
+    : null;
+  const outpaintRect: SourceRect | null = outpaintSourceNode && outpaintContentBox
+    ? {
+        x: outpaintSourceNode.position.x,
+        y: outpaintSourceNode.position.y + MEDIA_CONTENT_TOP_OFFSET,
+        width: outpaintContentBox.width,
+        height: outpaintContentBox.height,
+      }
+    : null;
+  /** 扩图面板跟随锚：跟随扩展框下方（外扩时向下让位），面板宽 320 同高清面板 */
+  const outpaintFollowAnchor = outpaintSourceNode && outpaintRect && wrapperSize.width > 0
+    ? computeFollowAnchor({
+        nodeX: outpaintRect.x - outpaintExpands.left,
+        nodeY: outpaintSourceNode.position.y,
+        nodeWidth: outpaintRect.width + outpaintExpands.left + outpaintExpands.right,
+        nodeHeight: outpaintRect.height + MEDIA_CONTENT_TOP_OFFSET + outpaintExpands.bottom,
+        viewport: liveViewport,
+        containerWidth: wrapperSize.width,
+        containerHeight: wrapperSize.height,
+        dialogWidth: 320,
+      })
+    : null;
+  /** 点比例预设：以原图中心为锚外扩到该比例最小包含框（不可达预设已在面板置灰，此处防御返回） */
+  const handleOutpaintPresetSelect = useCallback(
+    (key: OutpaintPresetKey) => {
+      if (!outpaintRect) return;
+      const next = presetExpands(outpaintRect, key, maxExpandPerSide(outpaintRect));
+      if (!next) return;
+      setOutpaintExpands(next);
+    },
+    [outpaintRect],
+  );
   /** 草稿卡出生位（IKDMQQ）：视口中心附近空位，避开底部 Dock 预留区与既有节点 */
   const spawnDraftPosition = () => {
     const center = spawnPosRef.current();
@@ -1153,6 +1224,7 @@ export default function CanvasPage() {
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
+          onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -1959,6 +2031,7 @@ export default function CanvasPage() {
     genVideo: (_id: string) => {},
     genAudio: (_id: string) => {},
     enhanceImage: (_id: string) => {},
+    outpaintImage: (_id: string) => {},
     extractAudio: async (_id: string) => {},
     download: (_id: string) => {},
     showDetails: (_id: string) => {},
@@ -2280,6 +2353,14 @@ export default function CanvasPage() {
   /** 画布节点单击：选取模式下点击对应类型节点带入对话框，其他节点取消选取；
    *  非选取模式点击草稿身份卡（IKDMQQ 图片 / IKDMQS 视频 / IKDMQT 音频）：打开绑定面板继续编辑（待生成/生成中查看/失败修改） */
   const handleCanvasNodeClick = (node: Node) => {
+    // IKGOQX 扩图模式优先拦截：点其他卡退出模式并选中那张卡；点源图卡本身保持模式
+    if (outpaintSessionActive) {
+      if (node.id !== outpaintNodeId) {
+        endOutpaintSession();
+        setSelectRequest({ id: node.id, ts: Date.now() });
+      }
+      return;
+    }
     if (showAgent && node.type === 'textNode') {
       const text = extractTextNodeText(node.data);
       if (text) setAgentCandidate([{
@@ -2528,6 +2609,11 @@ export default function CanvasPage() {
    *  onSelectionChange 的空选中可能是「取消旧选中→选中新卡」的过渡事件，不能作为关闭依据（IKDMQV）。 */
   const handleCanvasPaneClick = () => {
     cancelAgentCandidate();
+    // IKGOQX 扩图模式：点画布空白退出（不留痕迹）
+    if (outpaintSessionActive) {
+      endOutpaintSession();
+      return;
+    }
     if (imagePickSessionActive) { endImagePickSession(); return; }
     if (videoPickSessionActive) { endVideoPickSession(); return; }
     if (audioPickSessionActive) { endAudioPickSession(); return; }
@@ -2547,6 +2633,9 @@ export default function CanvasPage() {
    *  selection 变化先到达，此时 pickMode 仍活跃）。 */
   const handleSelectionChange = ({ nodes }: OnSelectionChangeParams) => {
     if (pickMode || pickTarget) return;
+    // IKGOQX 扩图模式期间冻结面板联动：模式内点其他卡的选中变化已由 onNodeClick 拦截处置，
+    // 程序化选中（selectRequest）触发的变化不应误关其他状态
+    if (outpaintSessionActive) return;
     // 事件参数在程序化改选中时会滞后误报（React Flow 内部 selection store 与受控 nodes
     // 的同步窗口：侧栏新建草稿 deselect 旧卡 + select 新卡，事件可能报旧卡+新卡双选中，
     // 把刚打开的面板当多选误关）——以受控 state 为准：state 明确 selected:false 的排除
@@ -2638,6 +2727,8 @@ export default function CanvasPage() {
       if (event.key !== 'Escape') return;
       if (document.querySelector('[data-canvas-keyboard-scope="mention"]')) return;
       if (isEditableKeyboardTarget(event.target)) return;
+      // IKGOQX 扩图模式有自己的 Esc handler（先于本链处置）
+      if (outpaintSessionActive) return;
       if (imagePickSessionActive || videoPickSessionActive || audioPickSessionActive) return;
       if (pickMode || pickTarget) {
         resetPickState();
@@ -2973,6 +3064,25 @@ export default function CanvasPage() {
     return () => window.removeEventListener('keydown', handler);
   }, [audioPickSession, endAudioPickSession]);
 
+  /** IKGOQX：Esc 退出扩图模式（输入框/编辑器内的 Esc 保持原语义；与其他面板关闭习惯一致） */
+  useEffect(() => {
+    if (!outpaintSessionActive) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (isEditableKeyboardTarget(e.target)) return;
+      e.preventDefault();
+      endOutpaintSession();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [outpaintSessionActive, endOutpaintSession]);
+
+  /** IKGOQX 扩图会话绑定清理：源图卡被删除时结束会话（其余退出路径见统一退出函数） */
+  useEffect(() => {
+    if (!outpaintNodeId) return;
+    if (!mediaNodes.some((n) => n.id === outpaintNodeId)) endOutpaintSession();
+  }, [outpaintNodeId, mediaNodes, endOutpaintSession]);
+
   useEffect(() => {
     if (!textGenDraftId) return;
     const node = textNodes.find((n) => n.id === textGenDraftId);
@@ -3157,6 +3267,7 @@ export default function CanvasPage() {
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
+        onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -3611,6 +3722,7 @@ export default function CanvasPage() {
       onGenVideo: (id: string) => actionsRef.current.genVideo(id),
       onGenAudio: (id: string) => actionsRef.current.genAudio(id),
       onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
+      onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
       onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
       onDownload: (id: string) => actionsRef.current.download(id),
       onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -4009,6 +4121,7 @@ export default function CanvasPage() {
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
+          onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -5649,6 +5762,36 @@ export default function CanvasPage() {
     openEnhanceDraftDialog(draftId);
   };
 
+  /** 进入扩图模式（IKGOQX）：「高清 ▾」菜单「扩图」项——门槛预检后建立会话（不建卡不连线），
+   *  扩展量从零开始；进入时关其他生成面板与残留选取态，模式期间禁用框选与他卡拖动（Canvas refPickActive） */
+  const handleNodeOutpaintImage = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    const d = (node.data ?? {}) as Record<string, unknown>;
+    const gate = outpaintGateReason(
+      typeof d.width === 'number' ? d.width : undefined,
+      typeof d.height === 'number' ? d.height : undefined,
+      typeof d.size === 'number' ? d.size : undefined,
+    );
+    if (gate) {
+      showToast('warn', gate);
+      return;
+    }
+    if (imagePickSessionActive) endImagePickSession();
+    if (videoPickSessionActive) endVideoPickSession();
+    if (audioPickSessionActive) endAudioPickSession();
+    if (pickMode || pickTarget) {
+      setPickMode(null);
+      setPickTarget(null);
+      setPickRefRole(null);
+      setPickProductId(null);
+      setPickAssetId(null);
+    }
+    dismissAllGenPanels();
+    setOutpaintExpands(ZERO_EXPANDS);
+    setOutpaintNodeId(id);
+  };
+
   /** 生成视频（IKDMQS 统一草稿绑定）：有生成记录的视频节点 → 绑定原卡原位重新生成（与「重新编辑」一致）；
    *  其他节点（图片/上传视频等）→ 来源有效性预检后新建视频草稿卡 + 被点节点自动连线为普通参考。
    *  不调 validateVideoRefConnect（新草稿未进 ref 会使校验被跳过），canOpenEditor 闸口保留 */
@@ -5920,6 +6063,7 @@ export default function CanvasPage() {
   actionsRef.current.genVideo = handleNodeGenVideo;
   actionsRef.current.genAudio = handleNodeGenAudio;
   actionsRef.current.enhanceImage = handleNodeEnhanceImage;
+  actionsRef.current.outpaintImage = handleNodeOutpaintImage;
   actionsRef.current.extractAudio = handleNodeExtractAudio;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
@@ -6475,6 +6619,7 @@ export default function CanvasPage() {
               onGenVideo: (id: string) => actionsRef.current.genVideo(id),
               onGenAudio: (id: string) => actionsRef.current.genAudio(id),
               onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
+              onOutpaintImage: (id: string) => actionsRef.current.outpaintImage(id),
               onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -7171,7 +7316,12 @@ export default function CanvasPage() {
           onNodeClick={handleCanvasNodeClick}
           onPaneClick={handleCanvasPaneClick}
           onSelectionChange={handleSelectionChange}
-          refPickActive={imagePickSessionActive || videoPickSessionActive || audioPickSessionActive}
+          refPickActive={imagePickSessionActive || videoPickSessionActive || audioPickSessionActive || outpaintSessionActive}
+          outpaintFrame={
+            outpaintSessionActive && outpaintRect
+              ? { rect: outpaintRect, expands: outpaintExpands, onExpandChange: setOutpaintExpands }
+              : null
+          }
           refPickMarkedIds={
             audioPickSessionActive ? audioPickMarkedIds
               : videoPickSessionActive ? videoPickMarkedIds
@@ -7501,6 +7651,16 @@ export default function CanvasPage() {
             }
             submitting={submittingNodeId === enhanceDraftId}
             followAnchor={enhanceDraftId ? enhanceFollowAnchor : null}
+          />
+        )}
+        {/* 扩图参数面板骨架（IKGOQX）：绑定源图卡，比例行 + 关闭 X；发送闭环由 IKGOR6 接入 */}
+        {outpaintSessionActive && outpaintRect && (
+          <OutpaintDialog
+            onClose={endOutpaintSession}
+            sourceSize={{ width: outpaintRect.width, height: outpaintRect.height }}
+            expands={outpaintExpands}
+            onPresetSelect={handleOutpaintPresetSelect}
+            followAnchor={outpaintFollowAnchor}
           />
         )}
         {showTextGenDialog && textGenDraftId && (
