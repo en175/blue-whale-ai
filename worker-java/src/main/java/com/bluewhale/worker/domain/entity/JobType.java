@@ -21,7 +21,10 @@ public enum JobType {
     MEDIA_EXTRACT("media_extract"),
 
     /** 高清放大（tag=image_enhance，契约 §14 / IKGM8U；消费者与处理器由 IKGM9D 按附录 C 触点注册）。 */
-    IMAGE_ENHANCE("image_enhance");
+    IMAGE_ENHANCE("image_enhance"),
+
+    /** 图片擦除（tag=image_erase，契约 §15 / IKGOT3；消费者与处理器由 IKGOT6 按附录 C 触点注册）。 */
+    IMAGE_ERASE("image_erase");
 
     private final String value;
 
