@@ -196,6 +196,14 @@ vi.mock('@/api/assets', () => ({
     queryFn: () => Promise.resolve({ records: [], total: 0, current: 1 }),
     getNextPageParam: () => undefined,
   })),
+  // IKGHZ3 弹窗内放大预览：详情补拉（usePreviewAsset）查询配置
+  assetDetailQueryOptions: vi.fn((id: unknown) => ({
+    queryKey: ['asset-detail', id],
+    queryFn: () => Promise.resolve(null),
+    enabled: id != null,
+  })),
+  deleteAsset: vi.fn(),
+  fetchAssetReferences: vi.fn(),
 }));
 
 vi.mock('@/api/canvas', () => ({

@@ -379,11 +379,24 @@
   pointer-events: none;
 }
 
-/* 卡片右上角删除按钮：悬停显现 */
-.deleteBtn {
+/* 卡片右下角悬浮操作组（IKGHZ3：删除在左、放大预览在右；资产页仅删除）：悬停显现 */
+.cardActions {
   position: absolute;
-  top: var(--spacing-sm);
+  bottom: var(--spacing-sm);
   right: var(--spacing-sm);
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  z-index: 2;
+}
+
+.card:hover .cardActions {
+  opacity: 1;
+}
+
+.deleteBtn,
+.previewBtn {
   width: 28px;
   height: 28px;
   border-radius: var(--radius-md);
@@ -392,17 +405,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0;
-  transition: opacity var(--transition-fast);
-  z-index: 2;
-}
-
-.card:hover .deleteBtn {
-  opacity: 1;
 }
 
 .deleteBtn:hover {
   background-color: var(--color-error);
+}
+
+.previewBtn:hover {
+  background-color: rgba(0, 0, 0, 0.7);
 }
 
 /* 合规通过角标：缩略图右上角 */
