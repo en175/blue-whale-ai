@@ -99,6 +99,7 @@ export function RefPreviewOverlay({ kind, url, name, audioDuration, textPreview,
           muted
           loop
           playsInline
+          disablePictureInPicture
         />
       ) : kind === 'audio' ? (
         <div className={styles.audioCard}>
@@ -210,7 +211,7 @@ export function RefThumbnail({
     >
       {/* draggable=false：图片/视频原生拖拽会劫持手势（拖出图片 ghost 而非缩略图项），统一由根节点承载 */}
       {kind === 'image' && url ? <img src={url} alt={name} draggable={false} /> : null}
-      {kind === 'video' && url ? <video src={url} muted playsInline preload="metadata" draggable={false} /> : null}
+      {kind === 'video' && url ? <video src={url} muted playsInline preload="metadata" draggable={false} disablePictureInPicture /> : null}
       {kind === 'audio' ? <AudioLines className={styles.kindIcon} aria-hidden="true" /> : null}
       {kind === 'text' ? <FileText className={styles.kindIcon} aria-hidden="true" /> : null}
       {(badgeText ?? number) != null && (

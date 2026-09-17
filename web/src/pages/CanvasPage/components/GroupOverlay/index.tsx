@@ -99,6 +99,8 @@ export default function GroupOverlay({
   const { flowToScreenPosition, screenToFlowPosition } = useReactFlow();
   const { zoom } = useViewport();
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
+  /** 组「+」拖线中：右键 / 点空白不得收起组，否则手柄会随组激活态一起卸掉 */
+  const connectDraggingRef = useRef(false);
   const [dragOffset, setDragOffset] = useState<DragOffset | null>(null);
   /** 整组拖动期间冻结的成员名单：徽标计数只认拖起时的集合，不跟选框实时相交 */
   const [frozenDragMembers, setFrozenDragMembers] = useState<{
@@ -157,6 +159,7 @@ export default function GroupOverlay({
   useEffect(() => {
     if (!openGroupId) return;
     const close = (e: MouseEvent) => {
+      if (e.button !== 0 || connectDraggingRef.current) return;
       if (!(e.target instanceof Element)) return;
       if (
         e.target.closest(`.${styles.groupTools}`) ||
@@ -444,10 +447,10 @@ export default function GroupOverlay({
   const [connectCursor, setConnectCursor] = useState<{ x: number; y: number } | null>(null);
   /** 正在从哪个组拉批量连线：拖拽期间隐藏该组右侧「+」把手，避免把手随线一起出现 */
   const [connectDraggingGroupId, setConnectDraggingGroupId] = useState<string | null>(null);
-
-  const onConnectMove = useCallback((e: PointerEvent) => {
-    setConnectCursor({ x: e.clientX, y: e.clientY });
-  }, []);
+  const onConnectGroupDropRef = useRef(onConnectGroupDrop);
+  onConnectGroupDropRef.current = onConnectGroupDrop;
+  const onConnectGroupToTargetRef = useRef(onConnectGroupToTarget);
+  onConnectGroupToTargetRef.current = onConnectGroupToTarget;
 
   /** 命中测试：屏幕点下的目标节点 id。排除组内成员（组内不允许单独连线）。
    *  仅认 ReactFlow 节点（.react-flow__node[data-id]），组框是 overlay 不在此列。 */
@@ -463,26 +466,64 @@ export default function GroupOverlay({
     },
     [],
   );
+  const targetNodeIdAtRef = useRef(targetNodeIdAt);
+  targetNodeIdAtRef.current = targetNodeIdAt;
 
-  const endConnectDrag = useCallback(
-    (e: PointerEvent) => {
-      window.removeEventListener('pointermove', onConnectMove);
-      window.removeEventListener('pointerup', endConnectDrag);
-      const s = connectStateRef.current;
-      connectStateRef.current = null;
-      setConnectCursor(null);
-      setConnectDraggingGroupId(null);
-      if (paneRef.current) paneRef.current.style.cursor = '';
-      if (!s) return;
-      const targetId = targetNodeIdAt(e.clientX, e.clientY, s.memberIds);
-      if (onConnectGroupDrop) {
-        onConnectGroupDrop(s.memberIds, targetId, { x: e.clientX, y: e.clientY });
-      } else if (targetId) {
-        onConnectGroupToTarget?.(s.memberIds, targetId);
-      }
-    },
-    [onConnectMove, targetNodeIdAt, onConnectGroupToTarget, onConnectGroupDrop],
-  );
+  /** 稳定监听器：父级 setState（如右键弹出画布菜单）不能拆掉 window 监听，否则拖线状态会卡死 */
+  const connectDragHandlersRef = useRef({
+    onMove: (_e: PointerEvent) => {},
+    onEnd: (_e: PointerEvent) => {},
+    onContextMenu: (_e: Event) => {},
+  });
+  const onConnectMoveStable = useCallback((e: PointerEvent) => {
+    connectDragHandlersRef.current.onMove(e);
+  }, []);
+  const onConnectEndStable = useCallback((e: PointerEvent) => {
+    connectDragHandlersRef.current.onEnd(e);
+  }, []);
+  const onConnectContextMenuStable = useCallback((e: Event) => {
+    connectDragHandlersRef.current.onContextMenu(e);
+  }, []);
+
+  const detachConnectDrag = useCallback(() => {
+    window.removeEventListener('pointermove', onConnectMoveStable);
+    window.removeEventListener('pointerup', onConnectEndStable);
+    window.removeEventListener('pointercancel', onConnectEndStable);
+    window.removeEventListener('contextmenu', onConnectContextMenuStable, true);
+  }, [onConnectMoveStable, onConnectEndStable, onConnectContextMenuStable]);
+
+  const resetConnectDrag = useCallback(() => {
+    detachConnectDrag();
+    connectStateRef.current = null;
+    connectDraggingRef.current = false;
+    setConnectCursor(null);
+    setConnectDraggingGroupId(null);
+    if (paneRef.current) paneRef.current.style.cursor = '';
+  }, [detachConnectDrag]);
+
+  connectDragHandlersRef.current.onMove = (e: PointerEvent) => {
+    setConnectCursor({ x: e.clientX, y: e.clientY });
+  };
+  connectDragHandlersRef.current.onEnd = (e: PointerEvent) => {
+    const s = connectStateRef.current;
+    // 仅左键抬起算松手落线；右键抬起 / pointercancel 只取消本次拖线
+    const commit = e.type === 'pointerup' && e.button === 0;
+    resetConnectDrag();
+    if (!commit || !s) return;
+    const targetId = targetNodeIdAtRef.current(e.clientX, e.clientY, s.memberIds);
+    const drop = onConnectGroupDropRef.current;
+    if (drop) {
+      drop(s.memberIds, targetId, { x: e.clientX, y: e.clientY });
+    } else if (targetId) {
+      onConnectGroupToTargetRef.current?.(s.memberIds, targetId);
+    }
+  };
+  connectDragHandlersRef.current.onContextMenu = (e: Event) => {
+    if (!connectStateRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    resetConnectDrag();
+  };
 
   /** 按下组右侧「+」开始批量连线：冻结当前组成员，记录各成员右中点为连线起点 */
   const startConnectDrag = useCallback(
@@ -501,24 +542,26 @@ export default function GroupOverlay({
         memberIds: members.map((n) => n.id),
         sources,
       };
+      connectDraggingRef.current = true;
       setConnectCursor({ x: clientX, y: clientY });
       setConnectDraggingGroupId(groupId);
       if (paneRef.current) paneRef.current.style.cursor = 'crosshair';
-      window.addEventListener('pointermove', onConnectMove);
-      window.addEventListener('pointerup', endConnectDrag);
+      window.addEventListener('pointermove', onConnectMoveStable);
+      window.addEventListener('pointerup', onConnectEndStable);
+      window.addEventListener('pointercancel', onConnectEndStable);
+      window.addEventListener('contextmenu', onConnectContextMenuStable, true);
     },
-    [onConnectMove, endConnectDrag],
+    [onConnectMoveStable, onConnectEndStable, onConnectContextMenuStable],
   );
 
   /** 卸载时若在连线拖拽中则清理监听（不触发结束回调，避免卸载期落库） */
   useEffect(
     () => () => {
-      if (!connectStateRef.current) return;
-      window.removeEventListener('pointermove', onConnectMove);
-      window.removeEventListener('pointerup', endConnectDrag);
+      detachConnectDrag();
       connectStateRef.current = null;
+      connectDraggingRef.current = false;
     },
-    [onConnectMove, endConnectDrag],
+    [detachConnectDrag],
   );
 
   return (
@@ -591,7 +634,7 @@ export default function GroupOverlay({
         })}
 
         {/* 组右侧「+」批量连线把手：选中组（徽标展开）时出现，按下拖动 = 同时从组内
-         *  每个成员右中点拉线到目标节点（见 startConnectDrag / endConnectDrag）。 */}
+         *  每个成员右中点拉线到目标节点（见 startConnectDrag）。 */}
         {frames.map((f) => {
           if (openGroupId !== f.id || connectDraggingGroupId === f.id) return null;
           const box = boxFor(f);
@@ -607,6 +650,10 @@ export default function GroupOverlay({
                 e.preventDefault();
                 e.stopPropagation();
                 startConnectDrag(f.id, f.box, f.excludedIds, e.clientX, e.clientY);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
               }}
             >
               <Plus size={14} strokeWidth={2} />
