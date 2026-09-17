@@ -5,15 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CharacterLibrary from './index';
 import styles from './index.module.css';
 
-const { listAssetGroups, listAssets } = vi.hoisted(() => ({
+const { listAssetGroups, listAssets, deleteMaterialAsset } = vi.hoisted(() => ({
   listAssetGroups: vi.fn(),
   listAssets: vi.fn(),
+  deleteMaterialAsset: vi.fn(),
 }));
 
 vi.mock('@/api/material', () => ({
   createAssetGroup: vi.fn(),
   createVisualValidateSession: vi.fn(),
-  deleteAsset: vi.fn(),
+  deleteAsset: deleteMaterialAsset,
   deleteAssetGroup: vi.fn(),
   getVisualValidateResult: vi.fn(),
   listAssetGroups,
@@ -51,6 +52,7 @@ beforeEach(() => {
     Items: [
       { Id: 'image-1', Name: '人像图片', URL: 'https://example.test/image.jpg', GroupId: 'group-1', AssetType: 'Image', Status: 'Active' },
       { Id: 'video-1', Name: '人像视频', URL: 'https://example.test/video.mp4', GroupId: 'group-1', AssetType: 'Video', Status: 'Active' },
+      { Id: 'audio-1', Name: '人像音频', URL: 'https://example.test/audio.mp3', GroupId: 'group-1', AssetType: 'Audio', Status: 'Active' },
     ],
   });
 });
@@ -96,18 +98,26 @@ describe('CharacterLibrary', () => {
 
 /* IKGC03 虚拟人像库 picker 模式：资产选择弹窗复用 AigcFlatView 勾选素材，
    与真人分组详情同款三 props（pickerSelectedIds / onPickerToggleAsset / pickerMediaTypes）。
-   口径：picker 模式点卡=勾选、隐藏预览与删除、保留上传卡；类型不符卡置灰。 */
+   IKGHZ3 修订口径：picker 模式点卡=勾选，同时渲染删除与放大预览按钮（选择弹窗承载素材管理）。 */
 describe('CharacterLibrary AIGC picker mode', () => {
-  it('picker 模式点卡片触发勾选回调而非打开预览，且不渲染删除按钮', async () => {
+  it('picker 模式点卡片触发勾选回调而非打开预览，且渲染删除与放大预览按钮（IKGHZ3）', async () => {
     const onPickerToggleAsset = vi.fn();
     await renderLibrary({ onPickerToggleAsset, onUpload: vi.fn() });
 
-    await act(async () => { assetCardOf('img[alt="人像图片"]').click(); });
+    const card = assetCardOf('img[alt="人像图片"]');
+    expect(card.querySelector('button[title="删除素材"]')).not.toBeNull();
+    expect(card.querySelector('button[title="放大预览"]')).not.toBeNull();
+
+    // 音频卡同样渲染两枚按钮（故事12；音频卡无缩略媒体，靠类型标定位）
+    const audioCard = [...mountNode.querySelectorAll(`.${styles.assetCard}`)]
+      .find((c) => c.textContent?.includes('人像音频'));
+    expect(audioCard?.querySelector('button[title="删除素材"]')).not.toBeNull();
+    expect(audioCard?.querySelector('button[title="放大预览"]')).not.toBeNull();
+
+    await act(async () => { card.click(); });
 
     expect(onPickerToggleAsset).toHaveBeenCalledTimes(1);
     expect(onPickerToggleAsset).toHaveBeenCalledWith(expect.objectContaining({ Id: 'image-1' }));
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
-    expect(mountNode.querySelector(`.${styles.assetDeleteBtn}`)).toBeNull();
   });
 
   it('picker 模式保留上传卡', async () => {
@@ -144,13 +154,129 @@ describe('CharacterLibrary AIGC picker mode', () => {
     expect(imageCard.querySelector(`.${styles.checkToggleOn}`)).not.toBeNull();
   });
 
-  it('无 picker props 时点卡片打开预览（非 picker 现状锁定）', async () => {
+  it('无 picker props 时点卡片打开预览，渲染删除按钮但不渲染放大按钮（非 picker 现状锁定）', async () => {
     await renderLibrary();
 
     await act(async () => { assetCardOf('img[alt="人像图片"]').click(); });
 
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
-    expect(mountNode.querySelector(`.${styles.assetDeleteBtn}`)).not.toBeNull();
+    const card = assetCardOf('img[alt="人像图片"]');
+    expect(card.querySelector(`.${styles.assetDeleteBtn}`)).not.toBeNull();
+    expect(card.querySelector('button[title="放大预览"]')).toBeNull();
+  });
+});
+
+/* IKGHZ3 选择弹窗悬浮操作：picker 模式补齐删除与放大预览（AigcFlatView 原隐藏删除的口径作废，
+   ADR-0091）、删除成功后就地移除并回调 onPickerAssetRemoved 联动已选集合、预览开关上抛。 */
+describe('CharacterLibrary picker 悬浮操作（IKGHZ3）', () => {
+  it('picker 模式点删除按钮弹出不可撤销确认弹窗，不触发勾选', async () => {
+    const onPickerToggleAsset = vi.fn();
+    await renderLibrary({ onPickerToggleAsset });
+
+    await act(async () => {
+      assetCardOf('img[alt="人像图片"]').querySelector<HTMLButtonElement>('button[title="删除素材"]')!.click();
+    });
+
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('确定要删除素材「人像图片」吗？此操作不可撤销。');
+    expect(onPickerToggleAsset).not.toHaveBeenCalled();
+  });
+
+  it('确认删除后素材就地消失并回调 onPickerAssetRemoved', async () => {
+    const onPickerAssetRemoved = vi.fn();
+    deleteMaterialAsset.mockResolvedValue(undefined);
+    await renderLibrary({ onPickerToggleAsset: vi.fn(), onPickerAssetRemoved });
+
+    await act(async () => {
+      assetCardOf('img[alt="人像图片"]').querySelector<HTMLButtonElement>('button[title="删除素材"]')!.click();
+    });
+    const confirmBtn = [...document.body.querySelectorAll('button')]
+      .find((b) => b.textContent === '确认删除');
+    if (!(confirmBtn instanceof HTMLButtonElement)) throw new Error('confirm button not found');
+    await act(async () => { confirmBtn.click(); });
+
+    expect(deleteMaterialAsset).toHaveBeenCalledWith('image-1');
+    expect(onPickerAssetRemoved).toHaveBeenCalledWith('image-1');
+    expect(mountNode.querySelector('img[alt="人像图片"]')).toBeNull();
+    expect(mountNode.querySelector('video[src="https://example.test/video.mp4"]')).not.toBeNull();
+  });
+
+  it('picker 模式点放大按钮打开详情弹窗且不触发勾选', async () => {
+    const onPickerToggleAsset = vi.fn();
+    await renderLibrary({ onPickerToggleAsset });
+
+    await act(async () => {
+      assetCardOf('img[alt="人像图片"]').querySelector<HTMLButtonElement>('button[title="放大预览"]')!.click();
+    });
+
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('人像图片');
+    expect(onPickerToggleAsset).not.toHaveBeenCalled();
+  });
+
+  it('Processing 置灰卡仍渲染删除与放大按钮，状态标并入底部名称条', async () => {
+    listAssets.mockResolvedValue({
+      Items: [
+        { Id: 'image-p', Name: '处理中图片', URL: 'https://example.test/p.jpg', GroupId: 'group-1', AssetType: 'Image', Status: 'Processing' },
+      ],
+    });
+    await renderLibrary({ onPickerToggleAsset: vi.fn() });
+
+    const card = assetCardOf('img[alt="处理中图片"]');
+    expect(card.classList.contains(styles.assetCardDisabled)).toBe(true);
+    expect(card.querySelector('button[title="删除素材"]')).not.toBeNull();
+    expect(card.querySelector('button[title="放大预览"]')).not.toBeNull();
+    // 状态标不再单独占用左上角浮层，并入底部名称条
+    expect(card.querySelector(`.${styles.statusBadge}`)).toBeNull();
+    expect(card.querySelector(`.${styles.assetNameOverlay}`)?.textContent).toContain('处理中');
+  });
+
+  it('预览弹窗开关通过 onPickerPreviewChange 上抛', async () => {
+    const onPickerPreviewChange = vi.fn();
+    await renderLibrary({ onPickerToggleAsset: vi.fn(), onPickerPreviewChange });
+
+    await act(async () => {
+      assetCardOf('img[alt="人像图片"]').querySelector<HTMLButtonElement>('button[title="放大预览"]')!.click();
+    });
+    expect(onPickerPreviewChange).toHaveBeenLastCalledWith(true);
+
+    const closeBtn = document.body.querySelector('button[aria-label="关闭"]');
+    if (!(closeBtn instanceof HTMLButtonElement)) throw new Error('close button not found');
+    await act(async () => { closeBtn.click(); });
+    expect(onPickerPreviewChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('真人库分组详情 picker 模式同样渲染两枚按钮，删除成功回调联动', async () => {
+    listAssetGroups.mockResolvedValue({
+      Items: [{ Id: 'lg-1', Name: '真人A', GroupType: 'LivenessFace' }],
+    });
+    listAssets.mockResolvedValue({
+      Items: [
+        { Id: 'live-1', Name: '真人图片', URL: 'https://example.test/live.jpg', GroupId: 'lg-1', AssetType: 'Image', Status: 'Active' },
+      ],
+    });
+    const onPickerAssetRemoved = vi.fn();
+    deleteMaterialAsset.mockResolvedValue(undefined);
+    await renderLibrary({
+      groupType: 'LivenessFace',
+      onPickerToggleAsset: vi.fn(),
+      onPickerAssetRemoved,
+    });
+
+    await act(async () => { mountNode.querySelector<HTMLElement>(`.${styles.groupCard}`)!.click(); });
+
+    const card = assetCardOf('img[alt="真人图片"]');
+    expect(card.querySelector('button[title="删除素材"]')).not.toBeNull();
+    expect(card.querySelector('button[title="放大预览"]')).not.toBeNull();
+
+    await act(async () => { card.querySelector<HTMLButtonElement>('button[title="删除素材"]')!.click(); });
+    const confirmBtn = [...document.body.querySelectorAll('button')]
+      .find((b) => b.textContent === '确认删除');
+    if (!(confirmBtn instanceof HTMLButtonElement)) throw new Error('confirm button not found');
+    await act(async () => { confirmBtn.click(); });
+
+    expect(onPickerAssetRemoved).toHaveBeenCalledWith('live-1');
+    expect(mountNode.querySelector('img[alt="真人图片"]')).toBeNull();
   });
 });
 

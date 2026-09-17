@@ -5,25 +5,75 @@
    character 来源与真人素材同身份提交）、仅图片入口视频素材置灰、上传卡保留。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import AssetsPickerModal, { type AssetsPickerModalProps } from './index';
 import pickerStyles from './index.module.css';
 import libStyles from '@/pages/Assets/components/CharacterLibrary/index.module.css';
 
-const { listAssetGroups, listAssets } = vi.hoisted(() => ({
+const { listAssetGroups, listAssets, assetPageFetch, deleteAssetApi, fetchAssetReferencesApi } = vi.hoisted(() => ({
   listAssetGroups: vi.fn(),
   listAssets: vi.fn(),
+  assetPageFetch: vi.fn(),
+  deleteAssetApi: vi.fn(),
+  fetchAssetReferencesApi: vi.fn(),
 }));
 
 vi.mock('@/api/assets', () => ({
-  assetPageQueryOptions: vi.fn((type: string, size: number) => ({
+  assetKeys: { all: ['assets'] as const },
+  assetPageQueryOptions: (type: string, size: number) => ({
     queryKey: ['asset-pages', type, size],
     initialPageParam: 1,
-    queryFn: () => Promise.resolve({ records: [], total: 0, current: 1 }),
+    queryFn: () => assetPageFetch(type),
     getNextPageParam: () => undefined,
-  })),
+  }),
+  deleteAsset: deleteAssetApi,
+  fetchAssetReferences: fetchAssetReferencesApi,
+  assetDetailQueryOptions: (id: unknown) => ({
+    queryKey: ['asset-detail', id],
+    queryFn: () => Promise.resolve(null),
+    enabled: id != null,
+  }),
 }));
+
+/* jsdom 无布局：masonic 视口恒为 {1,1} 不渲染卡片，stub 掉瀑布流承接
+   onDelete/onPreview/onToggleSelect 透传（行为级断言在 AssetCard/CharacterLibrary 套件）。 */
+vi.mock('@/pages/Assets/components/AssetMasonry', async () => {
+  const { createElement: h } = await import('react');
+  return {
+    default: (props: {
+      items: Array<{ kind: string; asset: { id: string | number } }>;
+      onDelete?: (asset: unknown) => void;
+      onPreview?: (asset: unknown) => void;
+      onToggleSelect?: (asset: unknown) => void;
+    }) => h('div', { 'data-testid': 'masonry-stub' },
+      props.items.map(({ asset }) => h(
+        'div',
+        { key: String(asset.id), 'data-asset-id': String(asset.id) },
+        props.onToggleSelect
+          ? h('button', { 'data-action': 'toggle', onClick: () => props.onToggleSelect!(asset) }, 'toggle')
+          : null,
+        props.onDelete
+          ? h('button', { 'data-action': 'delete', onClick: () => props.onDelete!(asset) }, 'delete')
+          : null,
+        props.onPreview
+          ? h('button', { 'data-action': 'preview', onClick: () => props.onPreview!(asset) }, 'preview')
+          : null,
+      )),
+    ),
+  };
+});
+
+vi.mock('@/pages/Assets/components/AssetDetailModal', async () => {
+  const { createElement: h } = await import('react');
+  return {
+    default: ({ asset }: { asset: { id: string | number } | null }) => (
+      asset
+        ? h('div', { 'data-testid': 'asset-detail-stub', 'data-asset-id': String(asset.id) })
+        : null
+    ),
+  };
+});
 
 vi.mock('@/api/material', () => ({
   createAsset: vi.fn(),
@@ -57,7 +107,8 @@ async function renderPicker(props: Partial<AssetsPickerModalProps> = {}) {
         createElement(AssetsPickerModal, { onClose: vi.fn(), onSelect: vi.fn(), ...props }),
       ),
     );
-    await Promise.resolve();
+    // 冲刷 useInfiniteQuery 首屏请求的微任务链，保证主瀑布流数据就位后再断言
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
 
@@ -90,6 +141,11 @@ beforeAll(() => {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  // react-query 通知改同步派发（同 Projects 套件模式），否则 act 内微任务冲不醒无限查询状态
+  notifyManager.setScheduler((callback) => callback());
+  assetPageFetch.mockResolvedValue({ records: [], total: 0, current: 1 });
+  fetchAssetReferencesApi.mockResolvedValue({ projectCount: 0 });
+  deleteAssetApi.mockResolvedValue(undefined);
   listAssetGroups.mockResolvedValue({
     Items: [{ Id: 'group-a1', Name: '虚拟人像', GroupType: 'AIGC' }],
   });
@@ -102,6 +158,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  notifyManager.setScheduler((callback) => { setTimeout(callback, 0); });
   if (root) await act(async () => root.unmount());
   mountNode?.remove();
   queryClient?.clear();
@@ -169,5 +226,125 @@ describe('AssetsPickerModal 虚拟人像库 tab', () => {
     await clickTab('图片');
 
     expect(hintText()).toContain('已选 1 项');
+  });
+});
+
+/* IKGHZ3 选择弹窗悬浮操作：主瀑布流删除走引用计数确认弹窗、确认后就地移除并联动已选计数；
+   放大预览打开资产详情弹窗且只读；预览打开期间 Esc 不关闭选择弹窗。 */
+describe('AssetsPickerModal 悬浮操作（IKGHZ3）', () => {
+  const imageAsset = {
+    id: 101,
+    type: 'image',
+    url: 'https://example.test/lib-a.jpg',
+    width: 100,
+    height: 80,
+    duration: null,
+    source: null,
+    model: null,
+    created_at: null,
+  };
+  const audioAsset = {
+    id: 102,
+    type: 'audio',
+    url: 'https://example.test/lib-b.mp3',
+    width: null,
+    height: null,
+    duration: 30,
+    source: null,
+    model: null,
+    created_at: null,
+  };
+
+  function stubCardOf(assetId: string): HTMLElement {
+    const card = document.body.querySelector(`[data-asset-id="${assetId}"]`);
+    if (!(card instanceof HTMLElement)) throw new Error(`stub card not found: ${assetId}`);
+    return card;
+  }
+
+  async function confirmDeletion() {
+    const confirmBtn = [...document.body.querySelectorAll('button')]
+      .find((b) => b.textContent === '确认删除');
+    if (!(confirmBtn instanceof HTMLButtonElement)) throw new Error('confirm button not found');
+    await act(async () => { confirmBtn.click(); });
+  }
+
+  it('删除主瀑布流素材：确认弹窗展示引用计数，确认后就地移除且已选计数联动', async () => {
+    assetPageFetch.mockResolvedValue({ records: [imageAsset, audioAsset], total: 2, current: 1 });
+    fetchAssetReferencesApi.mockResolvedValue({ projectCount: 2 });
+    await renderPicker();
+
+    await act(async () => { stubCardOf('101').querySelector<HTMLButtonElement>('[data-action="toggle"]')!.click(); });
+    expect(hintText()).toContain('已选 1 项');
+
+    await act(async () => { stubCardOf('101').querySelector<HTMLButtonElement>('[data-action="delete"]')!.click(); });
+
+    // 选择弹窗本身也是 role="dialog"（aria-label 被 title 顶掉）：按确认文案特征取删除确认弹窗
+    const dialog = [...document.body.querySelectorAll('[role="dialog"]')]
+      .find((d) => d.textContent?.includes('此操作不可撤销'));
+    expect(dialog?.textContent).toContain('正被 2 个项目引用');
+
+    await confirmDeletion();
+
+    expect(deleteAssetApi).toHaveBeenCalledWith(101);
+    expect(document.body.querySelector('[data-asset-id="101"]')).toBeNull();
+    expect(document.body.querySelector('[data-asset-id="102"]')).not.toBeNull();
+    expect(hintText()).not.toContain('已选');
+  });
+
+  it('引用数查询失败时确认弹窗降级为普通不可撤销文案', async () => {
+    assetPageFetch.mockResolvedValue({ records: [imageAsset], total: 1, current: 1 });
+    fetchAssetReferencesApi.mockRejectedValue(new Error('network'));
+    await renderPicker();
+
+    await act(async () => { stubCardOf('101').querySelector<HTMLButtonElement>('[data-action="delete"]')!.click(); });
+
+    const dialog = [...document.body.querySelectorAll('[role="dialog"]')]
+      .find((d) => d.textContent?.includes('此操作不可撤销'));
+    expect(dialog?.textContent).toContain('确定要删除该图片资产吗？此操作不可撤销。');
+    expect(dialog?.textContent).not.toContain('个项目引用');
+  });
+
+  it('放大预览打开资产详情弹窗，勾选状态不变，预览期间 Esc 不关闭选择弹窗', async () => {
+    const onClose = vi.fn();
+    assetPageFetch.mockResolvedValue({ records: [imageAsset], total: 1, current: 1 });
+    await renderPicker({ onClose });
+
+    await act(async () => { stubCardOf('101').querySelector<HTMLButtonElement>('[data-action="toggle"]')!.click(); });
+    await act(async () => { stubCardOf('101').querySelector<HTMLButtonElement>('[data-action="preview"]')!.click(); });
+
+    const detail = document.body.querySelector('[data-testid="asset-detail-stub"]');
+    expect(detail?.getAttribute('data-asset-id')).toBe('101');
+    expect(hintText()).toContain('已选 1 项');
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('未打开预览时 Esc 关闭选择弹窗（既有行为锁定）', async () => {
+    const onClose = vi.fn();
+    await renderPicker({ onClose });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('删除已勾选的虚拟人像库素材后底部已选计数同步减一（故事8 集成链）', async () => {
+    await renderPicker({ showCharacterTab: true });
+    await clickTab('虚拟人像库');
+
+    await act(async () => { assetCardOf('img[alt="人像图片"]').click(); });
+    expect(hintText()).toContain('已选 1 项');
+
+    await act(async () => {
+      assetCardOf('img[alt="人像图片"]').querySelector<HTMLButtonElement>('button[title="删除素材"]')!.click();
+    });
+    await confirmDeletion();
+
+    expect(hintText()).not.toContain('已选');
+    expect(assetCardOf('video[src="https://example.test/video.mp4"]')).toBeInstanceOf(HTMLElement);
   });
 });

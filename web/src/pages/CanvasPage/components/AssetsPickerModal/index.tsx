@@ -4,14 +4,19 @@
  * 画布工具栏 / 视频对话「从资产中选择」额外展示「真人人像库」（分组+素材，与资产页一致）
  * 视频对话「从资产中选择」还展示「虚拟人像库」（AIGC 平铺，与资产页一致；tab 顺序同资产页：虚拟在真人前）
  * 多选 + 确认：卡片点击勾选/取消，确认后批量回调落画布
+ * IKGHZ3：卡片悬浮删除与放大预览（主瀑布流走 deleteAsset + 引用计数确认；
+ *   人像库由 CharacterLibrary 内置删除/预览，删除后回调联动已选集合）
  * ============================================ */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
+  assetKeys,
   assetPageQueryOptions,
+  deleteAsset,
+  fetchAssetReferences,
   type AssetRecord,
   type AssetType,
 } from '@/api/assets';
@@ -25,9 +30,12 @@ import { isFileRejected } from '@/utils/fileSignature';
 import { uploadAssetFile } from '@/utils/upload';
 import AssetMasonry from '@/pages/Assets/components/AssetMasonry';
 import CharacterLibrary from '@/pages/Assets/components/CharacterLibrary';
-import { appendUniqueAssets } from '@/pages/Assets/assetGrid';
+import AssetDetailModal from '@/pages/Assets/components/AssetDetailModal';
+import { appendUniqueAssets, typeLabel } from '@/pages/Assets/assetGrid';
+import { usePreviewAsset } from '@/pages/Assets/previewAsset';
 import assetStyles from '@/pages/Assets/index.module.css';
 import Skeleton from '@/components/Skeleton';
+import ConfirmModal from '@/components/ConfirmModal';
 import styles from './index.module.css';
 
 /** 媒体类型（与资产库 type 字段对齐） */
@@ -127,6 +135,22 @@ export default function AssetsPickerModal({
   const isMaterialTab = isLivenessTab || isCharacterTab;
   /** 已勾选资产记录（id → record，跨 tab 保留：tab 仅是筛选视图，确认时统一提交） */
   const [selectedMap, setSelectedMap] = useState<ReadonlyMap<string, AssetRecord>>(() => new Map());
+  const queryClient = useQueryClient();
+  /** IKGHZ3 就地移除：本次会话已删除资产（id → type，渲染时按 id 过滤；
+   *  total 扣减按 tab 匹配类型，避免「全部」tab 的删除把图片/视频等类型 tab 的
+   *  服务端总数一并扣掉、无限加载器提前停止触底加载） */
+  const [removedAssets, setRemovedAssets] = useState<ReadonlyMap<string, AssetType>>(() => new Map());
+  /** 删除发生标记（ref）：弹窗卸载时据此失效共享查询缓存，防资产页短暂显示已删幽灵卡 */
+  const removedCountRef = useRef(0);
+  /** 主瀑布流删除确认目标 + 引用数查询结果（带目标 ID，切换目标时不展示旧值；count null = 查询失败） */
+  const [deleteTarget, setDeleteTarget] = useState<AssetRecord | null>(null);
+  const [refCount, setRefCount] = useState<{ id: string; count: number | null } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  /** 主瀑布流放大预览目标（详情补拉走 usePreviewAsset，与资产页同款详情弹窗） */
+  const [previewTarget, setPreviewTarget] = useState<AssetRecord | null>(null);
+  /** 人像库预览弹窗开关（CharacterLibrary 上抛；抑制弹窗自身 Esc） */
+  const [materialPreviewOpen, setMaterialPreviewOpen] = useState(false);
+  const previewAsset = usePreviewAsset(previewTarget);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const characterFileInputRef = useRef<HTMLInputElement>(null);
@@ -156,17 +180,25 @@ export default function AssetsPickerModal({
     () => appendUniqueAssets([], assetPages?.flatMap((page) => page.records) ?? []),
     [assetPages],
   );
-  /** 「全部」tab 会拉取全类型：按入口允许类型过滤（如仅图片入口不出现音频/视频卡片，避免勾选后被静默丢弃） */
+  /** 「全部」tab 会拉取全类型：按入口允许类型过滤（如仅图片入口不出现音频/视频卡片，避免勾选后被静默丢弃）；
+   *  已删除资产就地剔除（IKGHZ3：不整列重新拉取，滚动位置与其他卡片布局保持不动） */
   const localVisibleAssets = useMemo(
     () =>
-      mediaTypes && mediaTypes.length > 0
-        ? assets.filter((a): a is (typeof assets)[number] =>
-            (mediaTypes as string[]).includes(a.type))
-        : assets,
-    [assets, mediaTypes],
+      assets.filter((a): a is (typeof assets)[number] =>
+        !removedAssets.has(String(a.id))
+        && (!mediaTypes || mediaTypes.length === 0
+          || (mediaTypes as string[]).includes(a.type))),
+    [assets, mediaTypes, removedAssets],
   );
   const visibleAssets = localVisibleAssets;
-  const assetTotal = assetPages?.at(-1)?.total ?? 0;
+  /** 删除会缩短数组：总数同步扣减（「全部」tab 扣全部删除、类型 tab 只扣同类型），避免无限加载器按旧 total 反复触发 loadMore */
+  const assetTotal = useMemo(() => {
+    const pageTotal = assetPages?.at(-1)?.total ?? 0;
+    if (assetType === '') return Math.max(0, pageTotal - removedAssets.size);
+    let removedInTab = 0;
+    removedAssets.forEach((type) => { if (type === assetType) removedInTab += 1; });
+    return Math.max(0, pageTotal - removedInTab);
+  }, [assetPages, assetType, removedAssets]);
   const loading = isMaterialTab ? false : isPending || (!assetPages && isError);
   const listError = isMaterialTab ? false : isError;
 
@@ -302,14 +334,89 @@ export default function AssetsPickerModal({
     [handleToggleMaterialAsset],
   );
 
-  /** Esc 关闭 */
+  /** 打开删除确认弹窗时拉取该素材被多少项目引用（与资产页同款 IKCZAT 口径）；失败降级为普通文案。 */
+  useEffect(() => {
+    if (!deleteTarget) return undefined;
+    let cancelled = false;
+    const targetId = String(deleteTarget.id);
+    fetchAssetReferences(deleteTarget.id)
+      .then((data) => {
+        if (!cancelled) setRefCount({ id: targetId, count: data.projectCount });
+      })
+      .catch(() => {
+        // silent 请求失败不阻断删除流程，兜底为普通文案
+        if (!cancelled) setRefCount({ id: targetId, count: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [deleteTarget]);
+
+  /**
+   * 当前删除目标的引用数查询状态（渲染时派生 loading）：
+   * - 'loading'：弹窗已开、结果未回
+   * - 'done'：结果已回（count null 表示查询失败）
+   */
+  const currentRefCount: { loading: boolean; count: number | null } = deleteTarget
+    ? refCount?.id === String(deleteTarget.id)
+      ? { loading: false, count: refCount.count }
+      : { loading: true, count: null }
+    : { loading: false, count: null };
+
+  /** 确认删除主瀑布流资产：成功后就地剔除 + 已勾选同步移除（IKGHZ3，不整列刷新）。 */
+  const confirmDeleteAsset = useCallback(async () => {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    const targetId = String(deleteTarget.id);
+    try {
+      await deleteAsset(deleteTarget.id);
+      removedCountRef.current += 1;
+      setRemovedAssets((prev) => {
+        const next = new Map(prev);
+        next.set(targetId, deleteTarget.type);
+        return next;
+      });
+      setSelectedMap((prev) => {
+        if (!prev.has(targetId)) return prev;
+        const next = new Map(prev);
+        next.delete(targetId);
+        return next;
+      });
+      toast.success('已删除');
+      setDeleteTarget(null);
+    } catch (e) {
+      // API 错误已由请求层统一 toast；这里兜底非 API 错误（如网络中断）
+      if (!isApiError(e)) toast.error('删除失败，请稍后重试');
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleteTarget, deleting]);
+
+  /** 本次会话发生过删除：弹窗卸载（关闭）时失效与资产页共享的查询缓存，
+   *  防止资产页短暂显示已删幽灵卡；弹窗打开期间不失效，保住「就地移除不刷新」。 */
+  useEffect(() => () => {
+    if (removedCountRef.current > 0) queryClient.invalidateQueries({ queryKey: assetKeys.all });
+  }, [queryClient]);
+
+  /** 人像库素材删除成功（组件内已就地移除）：同步从已选集合剔除并更新计数（IKGHZ3 故事8）。 */
+  const handleMaterialAssetRemoved = useCallback((assetId: string) => {
+    setSelectedMap((prev) => {
+      if (!prev.has(assetId)) return prev;
+      const next = new Map(prev);
+      next.delete(assetId);
+      return next;
+    });
+  }, []);
+
+  /** Esc 关闭：任一预览弹窗打开期间不关闭选择弹窗（预览自身的 Esc/关闭先落，IKGHZ3 故事11） */
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !previewTarget && !materialPreviewOpen) onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [onClose, previewTarget, materialPreviewOpen]);
 
   /** 切换 tab 时回到顶部（勾选保留） */
   useEffect(() => {
@@ -358,6 +465,8 @@ export default function AssetsPickerModal({
                 pickerSelectedIds={selectedIds}
                 onPickerToggleAsset={handleToggleLivenessAsset}
                 pickerMediaTypes={mediaTypes}
+                onPickerAssetRemoved={handleMaterialAssetRemoved}
+                onPickerPreviewChange={setMaterialPreviewOpen}
               />
             </>
           )}
@@ -378,6 +487,8 @@ export default function AssetsPickerModal({
                 pickerSelectedIds={selectedIds}
                 onPickerToggleAsset={handleToggleCharacterAsset}
                 pickerMediaTypes={mediaTypes}
+                onPickerAssetRemoved={handleMaterialAssetRemoved}
+                onPickerPreviewChange={setMaterialPreviewOpen}
               />
             </>
           )}
@@ -404,6 +515,8 @@ export default function AssetsPickerModal({
                 scrollContainerRef={scrollRef}
                 selectedIds={selectedIds}
                 onToggleSelect={handleToggleSelect}
+                onDelete={setDeleteTarget}
+                onPreview={setPreviewTarget}
                 columnCount={4}
                 pageSize={PICKER_PAGE_SIZE}
                 libraryMode
@@ -439,6 +552,30 @@ export default function AssetsPickerModal({
           </div>
         </div>
       </div>
+
+      {/* 主瀑布流放大预览（IKGHZ3）：与资产页同款详情弹窗，只读查看，关闭后勾选状态不变 */}
+      <AssetDetailModal
+        asset={previewAsset}
+        onClose={() => setPreviewTarget(null)}
+      />
+
+      {/* 主瀑布流删除确认（IKGHZ3）：引用数查询中显示加载提示，返回后展示关联项目数，失败兜底普通文案（同资产页 IKCZAT） */}
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="删除资产"
+        message={
+          deleteTarget
+            ? currentRefCount.loading
+              ? '正在查询该素材的项目引用情况…'
+              : currentRefCount.count !== null && currentRefCount.count > 0
+                ? `该${typeLabel[deleteTarget.type]}素材正被 ${currentRefCount.count} 个项目引用，删除后这些项目的画布节点将显示占位图。确定要删除吗？此操作不可撤销。`
+                : `确定要删除该${typeLabel[deleteTarget.type]}资产吗？此操作不可撤销。`
+            : ''
+        }
+        confirmText="确认删除"
+        onConfirm={confirmDeleteAsset}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>,
     document.body,
   );
