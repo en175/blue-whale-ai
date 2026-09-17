@@ -549,6 +549,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             src={data.src}
             controls={isSelect}
             preload="metadata"
+            disablePictureInPicture
+            disableRemotePlayback
+            controlsList="nodownload noplaybackrate noremoteplayback nopictureinpicture"
             onLoadedMetadata={handleVideoMetadata}
             style={isSelect ? undefined : { pointerEvents: 'none' }}
           />

@@ -184,6 +184,11 @@
   background-color: #000;
 }
 
+/* 隐藏 Chromium/Edge 原生控件右下角三点溢出菜单 */
+.mediaVideo::-webkit-media-controls-overflow-button {
+  display: none;
+}
+
 /* 合规校验通过图标：跟在文件名后方，不遮挡图片 */
 .complianceBadge {
   flex-shrink: 0;
