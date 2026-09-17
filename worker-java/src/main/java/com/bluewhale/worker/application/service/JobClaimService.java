@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedImageEnhanceJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
@@ -39,6 +40,13 @@ public class JobClaimService {
 
     /** image 租约 420s（> NEW_API_IMAGE_TIMEOUT_MS 300s + 转存余量，防 recovery 孤儿重投双跑双扣）。 */
     private static final int IMAGE_LEASE_SECONDS = 420;
+
+    /**
+     * image_enhance 租约 420s（契约 §14 / IKGM9D）：同步 enhance 调用（读超时默认 300s）
+     * + 结果图下载 + TOS 转存需在同一租约窗口内完成，否则 recovery 会把在跑任务判孤儿重投双跑
+     * （image 的 420s 语义同款：租约必须 > 上游读超时 + 转存余量）。
+     */
+    private static final int IMAGE_ENHANCE_LEASE_SECONDS = 420;
 
     /** image 租约可被 env 覆盖（对齐 TS IMAGE_JOB_LEASE_SECONDS）。 */
     private static int imageLeaseSeconds() {
@@ -208,6 +216,40 @@ public class JobClaimService {
                 candidate.getPollCount() != null ? candidate.getPollCount() : 0,
                 candidate.getProgress() != null ? candidate.getProgress() : 0,
                 parentProviderTaskId));
+    }
+
+    /**
+     * 领取 image_enhance 作业（契约 §14 / IKGM9D，附录 C 触点④）。
+     * <p>
+     * 套单源 source 白名单（source='image_enhance'）；租约用 image_enhance 专用 420s。
+     */
+    public Optional<ClaimedImageEnhanceJobDto> claimImageEnhance(String jobId, String workerId) {
+        Long jobIdLong = Long.parseLong(jobId);
+
+        GenerationJobEntity candidate = jobMapper.findImageEnhanceCandidate(jobIdLong);
+        if (candidate == null) {
+            return Optional.empty();
+        }
+
+        LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(IMAGE_ENHANCE_LEASE_SECONDS);
+        int affected = jobMapper.claimImageEnhanceCas(
+                jobIdLong, workerId, leaseExpiresAt,
+                candidate.getFencingToken(), candidate.getStatus());
+        if (affected == 0) {
+            log.info("[image_enhance] CAS claim 未命中(并发竞争) jobId={} expectedToken={}",
+                    jobId, candidate.getFencingToken());
+            return Optional.empty();
+        }
+
+        long postIncrementToken = candidate.getFencingToken() + 1;
+        Map<String, Object> input = parseJson(candidate.getInput());
+        return Optional.of(new ClaimedImageEnhanceJobDto(
+                candidate.getId().toString(),
+                candidate.getProjectId() != null ? candidate.getProjectId().toString() : "0",
+                candidate.getUserId().toString(),
+                input != null ? input : Map.of(),
+                workerId,
+                postIncrementToken));
     }
 
     // ========== 内部工具 ==========

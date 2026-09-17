@@ -600,6 +600,59 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             """)
     String findProviderTaskId(@Param("jobId") Long jobId);
 
+    // ========== 高清放大路径（契约 §14 / IKGM9D） ==========
+
+    /**
+     * 领取 image_enhance 作业：候选查询（附录 C 触点④）。
+     * <p>
+     * source 白名单单源 {@code IN ('image_enhance')}（契约 §14.1：唯一创建入口 =
+     * 画布图片卡工具条，media_extract 的 source="dock" 同款专属来源值模式）。
+     */
+    @Select("""
+            SELECT * FROM generation_jobs
+            WHERE id = #{jobId}
+              AND type = 'image_enhance'
+              AND source IN ('image_enhance')
+              AND is_delete = false
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (
+                  status = 'processing'
+                  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+                )
+              )
+            ORDER BY id ASC
+            LIMIT 1
+            """)
+    GenerationJobEntity findImageEnhanceCandidate(@Param("jobId") Long jobId);
+
+    /**
+     * 领取 image_enhance 作业：CAS 更新（附录 C 触点④）。
+     * <p>
+     * 与 claimImageCas 逐字一致（同 CAS 模式）；租约时长由 JobClaimService 传入
+     * （image_enhance 专用 420s，> MediaKit 读超时 + 转存余量）。
+     */
+    @Update("""
+            UPDATE generation_jobs
+            SET status = 'processing',
+                lease_owner = #{workerId},
+                lease_expires_at = #{leaseExpiresAt},
+                last_polled_at = NOW(),
+                fencing_token = fencing_token + 1,
+                version = version + 1
+            WHERE id = #{jobId}
+              AND fencing_token = #{fencingToken}
+              AND status = #{candidateStatus}
+            """)
+    int claimImageEnhanceCas(
+            @Param("jobId") Long jobId,
+            @Param("workerId") String workerId,
+            @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt,
+            @Param("fencingToken") Long fencingToken,
+            @Param("candidateStatus") String candidateStatus
+    );
+
     // ========== recovery 到点/孤儿扫描（IKF3AT；claim-ops.ts:134-230 逐字移植） ==========
     // 共同条件：is_delete=false + gmt_create 在 RECOVERY_MAX_AGE 窗口内（避免卡死任务被 60s 循环无限重放）
     // + next_action_at<=now + （queued ∨ processing 且租约空/过期——孤儿由 claim-by-id 的过期租约接管语义接走）。
@@ -673,5 +726,23 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             LIMIT #{limit}
             """)
     List<Long> listDueMediaExtractJobIds(@Param("limit") int limit,
+                                         @Param("maxAgeMinutes") int maxAgeMinutes);
+
+    /** 高清放大到点/孤儿（契约 §14）：套 source 白名单（与 claim 同源，单源 image_enhance）。 */
+    @Select("""
+            SELECT id FROM generation_jobs
+            WHERE type = 'image_enhance'
+              AND source IN ('image_enhance')
+              AND is_delete = false
+              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
+              )
+            ORDER BY id ASC
+            LIMIT #{limit}
+            """)
+    List<Long> listDueImageEnhanceJobIds(@Param("limit") int limit,
                                          @Param("maxAgeMinutes") int maxAgeMinutes);
 }

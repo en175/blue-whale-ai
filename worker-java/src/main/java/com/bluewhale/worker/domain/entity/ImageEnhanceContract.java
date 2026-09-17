@@ -95,4 +95,9 @@ public final class ImageEnhanceContract {
 
     /** 默认色彩校正：开。 */
     public static final boolean DEFAULT_ENABLE_CORRECT_COLOR = true;
+
+    // ========== 错误码（契约 §14.1；数值 1039 见 error-codes.ts ERROR_IMAGE_ENHANCE_FAILED） ==========
+
+    /** 执行兜底失败码：调用失败 / 超时 / 供应商错误统一归并，无 worker 级自动重试（§14.5）。 */
+    public static final String ERROR_IMAGE_ENHANCE_FAILED = "image_enhance_failed";
 }

@@ -57,6 +57,8 @@ curl localhost:4002/ready
 | `AUDIO_CONCURRENCY` | 否 | 音频并发度（1-64） | `5` |
 | `IMAGE_CONCURRENCY` | 否 | 图片并发度（1-64） | `20` |
 | `NEW_API_IMAGE_TIMEOUT_MS` | 否 | 图片生成超时（毫秒） | `60000` |
+| `IMAGE_ENHANCE_CONCURRENCY` | 否 | 高清放大并发度（1-64，契约 §14 / IKGM9D） | `5` |
+| `NEW_API_IMAGE_ENHANCE_TIMEOUT_MS` | 否 | MediaKit 高清放大同步调用超时（毫秒）；claim 租约 420s 须大于它+转存余量 | `300000` |
 
 ### 启动行为
 
