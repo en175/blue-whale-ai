@@ -186,6 +186,35 @@ describe("new-api client —— 充值与流水", () => {
     expect(logReq?.headers.get("Authorization")).toBe("Bearer sk-user-token");
   });
 
+  it("IKGCWU: type 可传数组取并集（消耗 + 退款）", async () => {
+    const urls: string[] = [];
+    const client = createNewApiClient({
+      baseUrl: "http://new-api.test",
+      fetchImpl: async (input) => {
+        urls.push(String(input));
+        return jsonResponse({
+          success: true,
+          message: "",
+          data: { page: 1, page_size: 20, total: 0, items: [] },
+        });
+      },
+    });
+    const lastUrl = () => urls[urls.length - 1];
+
+    await client.listUserConsumeLogs("sk-user-token", { type: [2, 6] });
+    expect(lastUrl()).toContain("/api/log/self?p=1&page_size=20&type=2,6");
+
+    // 单值 / 缺省与改动前逐字一致
+    await client.listUserConsumeLogs("sk-user-token", { type: 6 });
+    expect(lastUrl()).toContain("type=6");
+    await client.listUserConsumeLogs("sk-user-token");
+    expect(lastUrl()).toContain("type=2");
+
+    // 空数组不能退化成「不带 type」——上游无 type = 不过滤 = 返回全部日志类型
+    await client.listUserConsumeLogs("sk-user-token", { type: [] });
+    expect(lastUrl()).toContain("type=2");
+  });
+
   it("IK7G9X: resolves a consume log by request_id", async () => {
     const client = createNewApiClient({
       baseUrl: "http://new-api.test",

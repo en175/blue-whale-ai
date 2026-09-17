@@ -5,6 +5,7 @@ import { AccountService } from "@lib/shared/account/account.service.js";
 import {
   mapPaymentMethodLabel,
   mapTopUpStatus,
+  parseConsumeLogTypes,
   parseRecordPaging,
   toAccountConsumptionItem,
   topUpCreditsGained,
@@ -23,11 +24,15 @@ export class AccountController {
   ) {
     const token = parseBearerToken(authorization);
     if (!token) throw new NewApiError("未提供有效令牌", 401, "unauthorized");
-    const { page, pageSize } = parseRecordPaging(new URLSearchParams(query));
+    const searchParams = new URLSearchParams(query);
+    const { page, pageSize } = parseRecordPaging(searchParams);
+    // 参数校验放在 try 之外：非法 type 是 400 的客户端错误，不该被 toUpstreamError 当成上游故障。
+    const type = parseConsumeLogTypes(searchParams);
     try {
       const result = await this.account.listUserConsumeLogs(token, {
         page,
         pageSize,
+        type,
       });
       return ok({
         items: result.items.map(toAccountConsumptionItem),
