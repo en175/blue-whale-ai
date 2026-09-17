@@ -706,4 +706,22 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             """)
     List<Long> listDueImageEnhanceJobIds(@Param("limit") int limit,
                                          @Param("maxAgeMinutes") int maxAgeMinutes);
+
+    /** 智能扩图到点/孤儿（IKGOQW）：套 source 白名单（与 claim 同源，单源 image_outpaint）。 */
+    @Select("""
+            SELECT id FROM generation_jobs
+            WHERE type = 'image_outpaint'
+              AND source IN ('image_outpaint')
+              AND is_delete = false
+              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
+              )
+            ORDER BY id ASC
+            LIMIT #{limit}
+            """)
+    List<Long> listDueImageOutpaintJobIds(@Param("limit") int limit,
+                                          @Param("maxAgeMinutes") int maxAgeMinutes);
 }
