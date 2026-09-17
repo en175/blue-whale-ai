@@ -7,7 +7,7 @@
  *
  * 表格自带横向滚动容器：面板本来就窄，宽表格必须自己滚，不能把整个消息流撑出横向滚动条。
  *
- * 从 index.tsx 搬出来（IKFLB9）：提示词卡和文档弹层也要用它。
+ * 从 index.tsx 搬出来（IKFLB9）：提示词卡也要用它。
  */
 import { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';

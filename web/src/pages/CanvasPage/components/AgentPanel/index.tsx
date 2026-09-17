@@ -62,8 +62,6 @@ import { isProcessItem, itemsFromBlocks, itemsFromLive, type TimelineItem, type 
 import { collectKnownAssets, type KnownAsset } from './assetMentions';
 import { Markdown } from './Markdown';
 import { AssetMentionChip } from './AssetMentionChip';
-import { CardDocModal } from './CardDocModal';
-import { generationCardMarkdown } from './cardMarkdown';
 import { LastTurnLine, ProcessGroup, TurnFooter } from './TurnTimeline';
 
 /** 父组件没传已应用集合时的空集。提到模块级是为了保持引用稳定，避免每次渲染都造一个新 Set。 */
@@ -455,8 +453,8 @@ function SolutionCardBlock({
 
 /**
  * 提示词卡（IKFLB9 定稿改版）：标题 + 张数 / 模型 / 画幅；「参考」一排素材胶囊；正文里提到的素材也是胶囊
- * （和正文同一个 Markdown，所以 #1 / 文件名都能认）；默认收成三行，「展开全文」再看；三个动作：应用到画布 /
- * 复制提示词 / 打开查看（渲染成 .md 可下载）。
+ * （和正文同一个 Markdown，所以 #1 / 文件名都能认）；默认收成三行，「展开全文」再看；只有一个动作：应用到画布
+ * （「复制提示词」「打开查看」按老板要求去掉，IKGH1Y）。
  */
 function GenerationCard({ card, onApply, disabled, applied, assets }: {
   card: NonNullable<SessionContentBlock['card']>;
@@ -466,8 +464,6 @@ function GenerationCard({ card, onApply, disabled, applied, assets }: {
   assets: readonly KnownAsset[];
 }) {
   const [full, setFull] = useState(false);
-  const [docOpen, setDocOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
   const refs = card.assetRefItems;
   // 卡自己带的素材引用并进正文识别：历史消息里 knownAssets 可能没有它们。正文里的 `@图1` 按服务端
   // 算好的记号原文认，胶囊上写「图1」，和上面「参考」那一排、画布 `#N` 同一个号；悬停看全名。
@@ -487,12 +483,6 @@ function GenerationCard({ card, onApply, disabled, applied, assets }: {
   ].filter((one): one is string => Boolean(one));
   const prompt = card.prompt || '提示词正文缺失，请继续对话重新生成';
   const long = prompt.length > 140 || prompt.includes('\n');
-  const copy = () => {
-    void navigator.clipboard?.writeText(card.prompt).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    });
-  };
   return (
     <div className={styles.generationCard}>
       <div className={styles.shotMeta}>
@@ -526,14 +516,7 @@ function GenerationCard({ card, onApply, disabled, applied, assets }: {
           <Plus size={13} />
           {applied ? '定位文本节点' : '应用到画布'}
         </button>
-        <button type="button" className={styles.cardBtn} onClick={copy}>
-          {copied ? '已复制' : '复制提示词'}
-        </button>
-        <button type="button" className={styles.cardBtn} onClick={() => setDocOpen(true)}>
-          打开查看
-        </button>
       </div>
-      {docOpen && <CardDocModal title={card.shotTitle} markdown={generationCardMarkdown(card)} assets={cardAssets} onClose={() => setDocOpen(false)} />}
     </div>
   );
 }
