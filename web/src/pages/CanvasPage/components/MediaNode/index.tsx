@@ -192,8 +192,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     || data.genStatus === 'failed'
     || data.genStatus === 'cancelled'
     || data.jobId != null;
-  /** 上传素材只作出源，左侧不加号；生成节点才接收入边 */
-  const showTargetHandle = !isEmptyShell && isGenHost && !data.isFirst;
+  /** 上传素材只作出源，左侧不加号；生成节点（含图片草稿）一律接收入边。
+   *  不按 isFirst 隐藏——首卡与其余卡同口径，否则草稿当画布第一张时无法被图片素材连入。 */
+  const showTargetHandle = !isEmptyShell && isGenHost;
   const blockNodeMenu =
     isEmptyShell || data.genStatus === 'generating';
 

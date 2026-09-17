@@ -461,22 +461,25 @@ export default function CanvasPage() {
     }
     const sourceNode = findCanvasNode(source);
     const targetNode = findCanvasNode(target);
-    if (!isConnectableSource(sourceNode) || !targetNode) return false;
-    const sourceData = sourceNode?.data as Record<string, unknown> | undefined;
+    if (!sourceNode || !targetNode) return false;
+    const sourceData = sourceNode.data as Record<string, unknown> | undefined;
     const targetData = targetNode.data as Record<string, unknown> | undefined;
     if (sourceData?.emptyShell || targetData?.emptyShell) return false;
+    const imageRefOk = genKindOf(targetNode) === 'image' && sourceNode.type === 'mediaNode'
+      && imageRefSourceError(sourceNode) === null;
+    if (!imageRefOk && !isConnectableSource(sourceNode)) return false;
     if (wouldCreateCycle(source, target, edgesRef.current)) return false;
     // IKFM3Q 契约 §4：媒体→文本卡的关系线只由正文 @ 索引建立；手工拖线拒绝，不出现无索引的线
-    if (sourceNode?.type === 'mediaNode' && targetNode.type === 'textNode') {
+    if (sourceNode.type === 'mediaNode' && targetNode.type === 'textNode') {
       showToast('warn', '媒体到文本卡的关系线由正文 @ 索引建立');
       return false;
     }
     const targetKind = genKindOf(targetNode);
-    const videoRole = targetKind === 'video' && sourceNode?.type === 'mediaNode'
+    const videoRole = targetKind === 'video' && sourceNode.type === 'mediaNode'
       ? videoEdgeRoleFor(target)
       : undefined;
     if (targetKind) {
-      if (!canConnectSourcesToGen([sourceNode!], targetKind)) return false;
+      if (!imageRefOk && !canConnectSourcesToGen([sourceNode], targetKind)) return false;
       if (sourceNode?.type === 'textNode' && sourceData?.promptSource && (targetKind === 'image' || targetKind === 'video')) {
         void referencePlanRef.current(source, target);
         return true;
@@ -1975,7 +1978,8 @@ export default function CanvasPage() {
         return;
       }
       if (node.type === 'mediaNode') {
-        // 拒绝（类型/失效/重复/超限）已在 validate 内 toast 明确原因；addCanvasEdge 幂等去重
+        // 与拖线同一建边路径；能力层静默拒绝时仍按参考校验建线（点选不得比拖线更弱）
+        if (connectPair(node.id, imagePickSession)) return;
         if (validateImageRefConnect(node.id, imagePickSession)) {
           addCanvasEdge(node.id, imagePickSession);
         }
@@ -3223,7 +3227,7 @@ export default function CanvasPage() {
     const fromId = state?.fromNode?.id ?? connectingSourceRef.current;
     connectingSourceRef.current = null;
     const from = fromId ? findCanvasNode(fromId) ?? state?.fromNode ?? undefined : undefined;
-    if (!from || !isConnectableSource(from)) return;
+    if (!from) return;
     const point = 'changedTouches' in event ? event.changedTouches[0] : event;
     const handleNodeId = state?.toHandle?.nodeId ?? null;
     const droppedId =
@@ -3235,6 +3239,7 @@ export default function CanvasPage() {
       connectPair(from.id, droppedId);
       return;
     }
+    if (!isConnectableSource(from)) return;
     // 库已建成有效连线但没命中检测时，也不弹菜单
     if (state?.isValid) return;
     // 未连到其他节点：松手展示可选菜单
@@ -3256,13 +3261,18 @@ export default function CanvasPage() {
     if (!connection.source || !connection.target || connection.source === connection.target) return false;
     const sourceNode = findCanvasNode(connection.source);
     const targetNode = findCanvasNode(connection.target);
-    if (!isConnectableSource(sourceNode) || !targetNode) return false;
-    const sourceData = sourceNode?.data as Record<string, unknown> | undefined;
+    if (!sourceNode || !targetNode) return false;
+    const sourceData = sourceNode.data as Record<string, unknown> | undefined;
     const targetData = targetNode.data as Record<string, unknown> | undefined;
     if (sourceData?.emptyShell || targetData?.emptyShell) return false;
     if (wouldCreateCycle(connection.source, connection.target, edgesRef.current)) return false;
     const kind = genKindOf(targetNode);
-    if (kind && !canConnectSourcesToGen([sourceNode!], kind)) return false;
+    // 图片草稿：以参考校验为准，避免能力集把合法图片素材预览成「无法连接」
+    if (kind === 'image' && sourceNode.type === 'mediaNode') {
+      return imageRefSourceError(sourceNode) === null;
+    }
+    if (!isConnectableSource(sourceNode)) return false;
+    if (kind && !canConnectSourcesToGen([sourceNode], kind)) return false;
     return true;
   };
 
