@@ -181,7 +181,14 @@ public class ImageJobProcessor implements JobProcessor {
     private void processClaimedImageJob(ClaimedJobDto job) {
         Map<String, Object> input = job.input();
         // IKG6EK / ADR-0088：正文唯一来源是冻结的 input.prompt——接纳侧已完成引用标记转移
-        // （&asset_id& → @图片N）；方案快照退为审计事实，worker 不再从中取 providerPrompt。
+        // （&asset_id& → @图片N）。方案快照仍然要用：下方按它的 images 解析参考素材，
+        // 只是不再提供正文（providerPrompt 已退役）。
+        Map<?, ?> planSnapshot = input.get("prompt_plan_snapshot") instanceof Map<?, ?> snapshot ? snapshot : null;
+        if (input.containsKey("prompt_plan_snapshot")
+                && (planSnapshot == null || !(planSnapshot.get("images") instanceof List<?>))) {
+            failClaimed(job, GenerationError.ERROR_INVALID_INPUT, "方案输入快照无效");
+            return;
+        }
         String prompt = strOrEmpty(input, "prompt");
         String modelId = strOrEmpty(input, "model_id");
 

@@ -127,8 +127,8 @@ class VideoJobProcessorTest {
     }
 
     @Test
-    @DisplayName("IKFA1P: composed_prompt 编号清单优先于 basePrompt（与 TS video-job-runner 同优先级链）")
-    void composedPromptTakesPriorityOverBasePrompt() {
+    @DisplayName("IKG6EK: composed_prompt 不再被消费 → 正文取 input.prompt")
+    void composedPromptIsIgnored() {
         Map<String, Object> input = new HashMap<>(baseInput());
         input.put("target_node_id", "media-1");
         input.put("composed_prompt", "文本1：赛博朋克\n\n按文本1生成");
@@ -148,14 +148,14 @@ class VideoJobProcessorTest {
         var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
         verify(videoClient).submit(eq("token"), captor.capture());
         org.junit.jupiter.api.Assertions.assertEquals(
-                "文本1：赛博朋克\n\n按文本1生成", captor.getValue().prompt());
+                baseInput().get("prompt"), captor.getValue().prompt());
     }
 
     // ========== IKFCXC：文本附件确定性组合（供应商边界，packages/core 契约移植）==========
 
     @Test
-    @DisplayName("IKFCXC: 纯附件驱动（prompt 空）→ 供应商收到组合正文，不再 invalid_input")
-    void textAttachmentsDrivePromptWhenBasePromptEmpty() {
+    @DisplayName("IKG6EK: prompt 为空不再由附件兜底 → invalid_input（拼装已移交前端）")
+    void emptyPromptIsNotBackfilledFromAttachments() {
         Map<String, Object> input = new HashMap<>(baseInput());
         input.put("prompt", "");
         input.put("target_node_id", "media-1");
@@ -165,23 +165,17 @@ class VideoJobProcessorTest {
         ClaimedVideoJobDto claim = videoClaim("111", false, null, 0, 0, null, input);
         doReturn(Optional.of(claim)).when(stateMachine)
                 .claimVideoJobById(eq("111"), anyString());
-        doReturn("token").when(credentialService).open(anyString());
-        doReturn(new SubmitResult("task-ikfcxc-1", "queued")).when(videoClient)
-                .submit(anyString(), any(VideoSubmitInput.class));
-        doReturn(true).when(stateMachine)
-                .markVideoSubmitted(eq("111"), anyString(), eq(1L), eq("task-ikfcxc-1"));
 
         processor.handle("111");
 
-        var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
-        verify(videoClient).submit(eq("token"), captor.capture());
-        org.junit.jupiter.api.Assertions.assertEquals(
-                "赛博朋克\n\n深蓝与银白", captor.getValue().prompt());
+        verify(stateMachine).failVideoJob(eq("111"), eq(GenerationError.ERROR_INVALID_INPUT),
+                anyString(), any(), anyString(), anyLong());
+        verify(videoClient, never()).submit(anyString(), any(VideoSubmitInput.class));
     }
 
     @Test
-    @DisplayName("IKFCXC: 附件 + 非空 prompt → 附件在前、prompt 追加末尾；空白附件文本过滤")
-    void textAttachmentsComposeWithBasePrompt() {
+    @DisplayName("IKG6EK: text_attachments 不再被拼进正文 → prompt 逐字透传")
+    void textAttachmentsAreNotComposedIntoPrompt() {
         Map<String, Object> input = new HashMap<>(baseInput());
         input.put("text_attachments", List.of(
                 Map.of("node_id", "text-1", "title", "雨夜", "text", "赛博朋克"),
@@ -200,7 +194,7 @@ class VideoJobProcessorTest {
         var captor = org.mockito.ArgumentCaptor.forClass(VideoSubmitInput.class);
         verify(videoClient).submit(eq("token"), captor.capture());
         org.junit.jupiter.api.Assertions.assertEquals(
-                "赛博朋克\n\n一只猫在跑步", captor.getValue().prompt());
+                baseInput().get("prompt"), captor.getValue().prompt());
     }
 
     @Test
