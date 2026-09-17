@@ -79,7 +79,7 @@ _Avoid_: 图片生成面板（ImageDialog）、逐任务积分预估展示、任
 高清放大面板「模型」下拉的三档展示名 Lite / Pro / Max，分别映射火山 AI MediaKit 的 standard / professional / max 三个 tool_version，默认选中 Pro；版本档决定效果、速度与源图尺寸门槛。供应商级下拉当前仅有 MediaKit 一项。
 _Avoid_: 在界面露出 standard/professional/max 原文、把版本档当独立模型行配置进能力目录
 
-### 画布图片扩图（已确认目标，待实现）
+### 画布图片扩图（IKGOQ0 已确认目标，待实现）
 
 **扩图（image outpaint）**:
 图片素材卡悬浮工具条「高清 ▾」下拉菜单中的动作入口（菜单另一项为「高清」，即高清放大）；点击进入扩图模式，发送后为源图创建一张扩图卡。输入图固定为源卡素材，不支持提示词与参考素材；仅图片卡有此入口。
