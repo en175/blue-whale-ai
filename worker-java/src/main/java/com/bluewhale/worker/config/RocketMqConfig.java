@@ -205,33 +205,13 @@ public class RocketMqConfig {
             WorkerProperties workerProps,
             Environment env
     ) {
-        RocketMqProperties mqProps = Binder.get(env)
-                .bind("rocketmq", RocketMqProperties.class)
-                .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
-
-        if (mqProps.endpoints().isBlank()) {
-            throw new IllegalStateException(
-                    "ROCKETMQ_ENDPOINTS 未配置：image_enhance consumer 无法启动");
-        }
-
-        ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
-                .setEndpoints(mqProps.endpoints())
-                .enableSsl(mqProps.sslEnabled());
-
-        if (!mqProps.accessKey().isBlank() && !mqProps.secretKey().isBlank()) {
-            configBuilder.setCredentialProvider(
-                    new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
-        }
-
-        String consumerGroup = "generation-image-enhance-worker" + workerProps.groupSuffix();
-        int concurrency = workerProps.concurrency().imageEnhance();
-
+        ConsumerClient mq = createConsumerClientForTag(env, "image_enhance");
         return new ImageEnhanceConsumer(
                 processor,
-                mqProps.topic(),
-                configBuilder.build(),
-                consumerGroup,
-                concurrency
+                mq.topic(),
+                mq.configuration(),
+                "generation-image-enhance-worker" + workerProps.groupSuffix(),
+                workerProps.concurrency().imageEnhance()
         );
     }
 
@@ -249,13 +229,32 @@ public class RocketMqConfig {
             WorkerProperties workerProps,
             Environment env
     ) {
+        ConsumerClient mq = createConsumerClientForTag(env, "image_outpaint");
+        return new com.bluewhale.worker.application.consumer.ImageOutpaintConsumer(
+                processor,
+                mq.topic(),
+                mq.configuration(),
+                "generation-image-outpaint-worker" + workerProps.groupSuffix(),
+                workerProps.concurrency().imageOutpaint()
+        );
+    }
+
+    /** consumer 侧共享的 MQ 客户端引导产物（topic + ClientConfiguration）。 */
+    private record ConsumerClient(String topic, ClientConfiguration configuration) {}
+
+    /**
+     * 按 tag 绑定 rocketmq.* 属性并构建 consumer 共享的 MQ 客户端
+     * （endpoints 缺失即抛，校验消息含 tag——与 producer 侧 createProducerForTag 同源语义，
+     * IKGOQ0 审查修复：收敛 imageEnhance / imageOutpaint 等同形 bean 的逐字重复构建）。
+     */
+    private ConsumerClient createConsumerClientForTag(Environment env, String tag) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
                 .orElse(new RocketMqProperties("", "", "", false, "generation-video"));
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
-                    "ROCKETMQ_ENDPOINTS 未配置：image_outpaint consumer 无法启动");
+                    "ROCKETMQ_ENDPOINTS 未配置：" + tag + " consumer 无法启动");
         }
 
         ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
@@ -267,16 +266,7 @@ public class RocketMqConfig {
                     new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
         }
 
-        String consumerGroup = "generation-image-outpaint-worker" + workerProps.groupSuffix();
-        int concurrency = workerProps.concurrency().imageOutpaint();
-
-        return new com.bluewhale.worker.application.consumer.ImageOutpaintConsumer(
-                processor,
-                mqProps.topic(),
-                configBuilder.build(),
-                consumerGroup,
-                concurrency
-        );
+        return new ConsumerClient(mqProps.topic(), configBuilder.build());
     }
 
     // ========== 刀④ 视频路径（blade-④ IKEL9A） ==========
