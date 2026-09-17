@@ -1,5 +1,5 @@
 /* ============================================
- * OutpaintDialog 扩图参数面板骨架样式（IKGOQX）
+ * OutpaintDialog 扩图参数面板样式（IKGOQX 骨架 / IKGOR6 补全字段）
  * 定位外壳与字段区沿用 ImageEnhanceDialog 同构；比例行是本面板的主体。
  * ============================================ */
 
@@ -157,7 +157,65 @@
   font-weight: 700;
 }
 
-/* ---- 占位容器（IKGOR6 接入张数 / 免费文案 / 发送钮） ---- */
-.bodyPlaceholder {
-  min-height: 8px;
+/* ---- 张数：固定「1张」禁用展示（多张生成未开放） ---- */
+.countGroup {
+  display: flex;
+  gap: 4px;
+  background-color: #262626;
+  border-radius: 12px;
+  padding: 4px;
+}
+
+.countBtn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+  border-radius: 10px;
+  font-size: var(--font-size-sm);
+  color: #666;
+  background: transparent;
+  border: none;
+  cursor: not-allowed;
+  opacity: 0.6;
+  user-select: none;
+}
+
+/* ---- 底部栏：免费提示 + 发送按钮（视觉同 ImageEnhanceDialog bottomBar） ---- */
+.bottomBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.freeHint {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  user-select: none;
+}
+
+.sendBtn {
+  width: 28.8px;
+  height: 28.8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #2a2a2a;
+  color: #777;
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+}
+
+.sendBtnActive {
+  background-color: #4a4a4a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.sendBtnActive:hover {
+  background-color: #555;
 }

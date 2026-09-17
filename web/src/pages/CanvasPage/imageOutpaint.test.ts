@@ -1,13 +1,26 @@
 // @vitest-environment jsdom
-/* IKGOQX 扩图纯函数测试：门槛预检、拖拽换算（拖边/拖角/Shift 锁比例/40% 钳制/只许外扩）、
-   比例预设联动（默认原图比例、最小包含框、不可达置灰、命中判定）、像素→比例换算。 */
+/* IKGOQX/IKGOR6 扩图纯函数测试：门槛预检、拖拽换算（拖边/拖角/Shift 锁比例/40% 钳制/只许外扩）、
+   比例预设联动（默认原图比例、最小包含框、不可达置灰、命中判定）、像素→比例换算、
+   提交 payload 组装与前后端同源防漂移断言（门槛数值/文案/键名/值域与契约单处同源）。 */
 import { describe, expect, it } from 'vitest';
 import {
+  IMAGE_OUTPAINT_EXPAND_RATIO_LIMITS,
+  IMAGE_OUTPAINT_INPUT_KEYS,
+  IMAGE_OUTPAINT_SOURCE,
+  IMAGE_OUTPAINT_SOURCE_LIMITS,
+  imageOutpaintInputSchema,
+} from '@lib/contracts/image-outpaint';
+import {
   ZERO_EXPANDS,
+  buildImageOutpaintInput,
   clampExpands,
   dragExpandCorner,
   dragExpandEdge,
   expandRatiosOf,
+  IMAGE_OUTPAINT_EDGE_ORIGIN,
+  IMAGE_OUTPAINT_FILE_SIZE_LIMIT,
+  IMAGE_OUTPAINT_LONG_SIDE_LIMIT,
+  IMAGE_OUTPAINT_MAX_EXPAND_RATIO,
   maxExpandPerSide,
   matchOutpaintPreset,
   outpaintGateReason,
@@ -20,10 +33,45 @@ import {
 const rect: SourceRect = { x: 1000, y: 500, width: 400, height: 300 };
 const max = maxExpandPerSide(rect); // 120
 
+describe('IKGOR6 前后端同源防漂移（契约单处定义，本模块只许引用不得本地重写）', () => {
+  it('门槛数值与预检文案与契约恒等：门槛判定委托 imageOutpaintSourceGate', () => {
+    expect(IMAGE_OUTPAINT_LONG_SIDE_LIMIT).toBe(IMAGE_OUTPAINT_SOURCE_LIMITS.maxLongSide);
+    expect(IMAGE_OUTPAINT_FILE_SIZE_LIMIT).toBe(IMAGE_OUTPAINT_SOURCE_LIMITS.maxFileSizeBytes);
+    expect(IMAGE_OUTPAINT_MAX_EXPAND_RATIO).toBe(IMAGE_OUTPAINT_EXPAND_RATIO_LIMITS.max);
+    // 预检返回的拒绝文案 = 契约单处定义文案（菜单置灰提示与服务端 fail msg 同源）
+    expect(outpaintGateReason(undefined, 300, 1000)).toBe(IMAGE_OUTPAINT_SOURCE_LIMITS.missingDimensionsText);
+    expect(outpaintGateReason(4161, 300, 1000)).toBe(IMAGE_OUTPAINT_SOURCE_LIMITS.longSideRejectionText);
+    expect(outpaintGateReason(400, 300, 10 * 1024 * 1024 + 1)).toBe(IMAGE_OUTPAINT_SOURCE_LIMITS.fileSizeRejectionText);
+  });
+
+  it('连线来源标记 = 契约来源值 image_outpaint（纯视觉来源边，不参与参考推导与 @ 编号）', () => {
+    expect(IMAGE_OUTPAINT_EDGE_ORIGIN).toBe(IMAGE_OUTPAINT_SOURCE);
+    expect(IMAGE_OUTPAINT_SOURCE).toBe('image_outpaint');
+  });
+
+  it('buildImageOutpaintInput 键名与契约六键恒等、产出过契约 zod 校验', () => {
+    const input = buildImageOutpaintInput('5', 'node-x', { top: 0.1, right: 0.2, bottom: 0, left: 0.4 })!;
+    expect(input).toEqual({
+      [IMAGE_OUTPAINT_INPUT_KEYS.sourceAssetId]: '5',
+      [IMAGE_OUTPAINT_INPUT_KEYS.targetNodeId]: 'node-x',
+      [IMAGE_OUTPAINT_INPUT_KEYS.expandTop]: 0.1,
+      [IMAGE_OUTPAINT_INPUT_KEYS.expandRight]: 0.2,
+      [IMAGE_OUTPAINT_INPUT_KEYS.expandBottom]: 0,
+      [IMAGE_OUTPAINT_INPUT_KEYS.expandLeft]: 0.4,
+    });
+    expect(imageOutpaintInputSchema.parse(input)).toEqual(input);
+  });
+
+  it('buildImageOutpaintInput 拒零扩展（契约 refine 同口径）与非法源素材 id', () => {
+    expect(buildImageOutpaintInput('5', 'node-x', { top: 0, right: 0, bottom: 0, left: 0 })).toBeNull();
+    expect(buildImageOutpaintInput('Asset-abc', 'node-x', { top: 0.1, right: 0, bottom: 0, left: 0 })).toBeNull();
+  });
+});
+
 describe('IKGOQX 门槛预检 outpaintGateReason', () => {
   it('尺寸缺失置灰：宽高任一未知即不可用', () => {
-    expect(outpaintGateReason(undefined, 300, 1000)).toContain('尺寸未知');
-    expect(outpaintGateReason(400, undefined, 1000)).toContain('尺寸未知');
+    expect(outpaintGateReason(undefined, 300, 1000)).toContain('尺寸');
+    expect(outpaintGateReason(400, undefined, 1000)).toContain('尺寸');
   });
   it('长边恰 4160 可用、4161 不可用（宽高谁长都算）', () => {
     expect(outpaintGateReason(4160, 300, 1000)).toBeNull();

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-/* IKGOQX 扩图面板骨架测试：比例行渲染与默认命中、预设点选回调、不可达置灰与悬停原因、
-   自定义被动状态、关闭 X。张数控件 / 免费文案 / 发送钮是 IKGOR6 范围，本票断言不渲染。 */
+/* IKGOQX/IKGOR6 扩图面板组件测试：比例行渲染与默认命中、预设点选回调、不可达置灰与悬停原因、
+   自定义被动状态、关闭 X；IKGOR6 补全字段矩阵（张数禁用展示、本期免费文案、
+   零扩展发送置灰、拖出扩展后发送可点且触发 onSend）。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +12,7 @@ let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 let presetMock: ReturnType<typeof vi.fn>;
 let closeMock: ReturnType<typeof vi.fn>;
+let sendMock: ReturnType<typeof vi.fn>;
 
 /** 400×300 源图：短边 300、单方向上限 120。16:9 需左右各扩 66.67 可达。 */
 const SOURCE = { width: 400, height: 300 };
@@ -26,6 +28,7 @@ function renderPanel(props: Partial<Parameters<typeof OutpaintDialog>[0]> = {}) 
         sourceSize: SOURCE,
         expands: { top: 0, right: 0, bottom: 0, left: 0 },
         onPresetSelect: presetMock,
+        onSend: sendMock,
         ...props,
       } as Parameters<typeof OutpaintDialog>[0]),
     );
@@ -46,6 +49,7 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   presetMock = vi.fn();
   closeMock = vi.fn();
+  sendMock = vi.fn(() => true);
 });
 
 afterEach(() => {
@@ -74,14 +78,45 @@ describe('IKGOQX 面板骨架渲染', () => {
     await click(btn('outpaint-close'));
     expect(closeMock).toHaveBeenCalledTimes(1);
   });
+});
 
-  it('不渲染张数控件 / 本期免费 / 发送钮（IKGOR6 范围）', () => {
+describe('IKGOR6 面板字段矩阵（张数 / 免费文案 / 发送钮）', () => {
+  it('张数控件固定「1张」禁用展示，悬停说明多张未开放', () => {
     renderPanel();
-    expect(container!.textContent).not.toContain('本期免费');
-    expect(container!.textContent).not.toContain('1张');
-    expect([...container!.querySelectorAll('button')].some((b) => b.getAttribute('title') === '发送')).toBe(false);
-    // 占位容器存在（后续接入点）
-    expect(container!.querySelector('[data-testid="outpaint-body-placeholder"]')).toBeTruthy();
+    const count = btn('outpaint-count');
+    expect(count.textContent).toBe('1张');
+    expect(count.disabled).toBe(true);
+    expect(count.getAttribute('title')).toContain('多张');
+    // 无多张选项：张数区只有这一个按钮
+    expect(container!.textContent).not.toContain('2张');
+    expect(container!.textContent).not.toContain('4张');
+  });
+
+  it('「本期免费」文案在底栏；不渲染积分预估 / 分辨率 / 画质档位 / 提示词 / 参考栏', () => {
+    renderPanel();
+    expect(container!.textContent).toContain('本期免费');
+    expect(container!.textContent).not.toContain('积分');
+    expect(container!.textContent).not.toContain('分辨率');
+    expect(container!.textContent).not.toContain('画质');
+    expect(container!.querySelector('textarea')).toBeNull();
+  });
+
+  it('零扩展（框与原图重合）发送钮置灰并悬停原因，点击不触发 onSend', async () => {
+    renderPanel({ expands: ZERO });
+    const send = btn('outpaint-send-btn');
+    expect(send.disabled).toBe(true);
+    expect(send.title).toContain('拖动扩展框');
+    await click(send);
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('拖出扩展后发送钮可点：触发 onSend（面板关闭与退出模式由父级承接）', async () => {
+    renderPanel({ expands: { top: 30, right: 60, bottom: 0, left: 0 } });
+    const send = btn('outpaint-send-btn');
+    expect(send.disabled).toBe(false);
+    expect(send.title).toBe('发送');
+    await click(send);
+    expect(sendMock).toHaveBeenCalledTimes(1);
   });
 });
 

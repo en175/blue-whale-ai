@@ -1,17 +1,31 @@
 /* ============================================
- * 图片扩图（IKGOQX）：前端本地的门槛预检与扩展框几何纯函数。
- * 契约票（IKGOQR）并行在建 backend/libs/contracts/image-outpaint.ts；
- * 本模块常量按已拍板字段写成易迁移形态，IKGOR6 接契约时单处替换出处。
+ * 图片扩图（IKGOQX/IKGOR6）：前端本地的扩展框几何纯函数与门槛预检、提交 payload 组装。
+ * 任务类型 / 来源 / 六键键名 / 比例值域 / 门槛 4160/10MB 与 zod schema 一律复用
+ * backend/libs/contracts/image-outpaint.ts（web 经 @lib alias 引入契约，
+ * 先例见 imageEnhance.ts 的 @lib/contracts/image-enhance）——前后端单处定义防漂移。
  * 像素扩展量均用画布 flow 单位（与原图显示盒同比例，换算出的比例
  * 与用原图像素计算完全一致——显示盒就是原图的等比缩放）。
  * ============================================ */
+import {
+  IMAGE_OUTPAINT_EXPAND_RATIO_LIMITS,
+  IMAGE_OUTPAINT_INPUT_KEYS,
+  IMAGE_OUTPAINT_SOURCE,
+  IMAGE_OUTPAINT_SOURCE_LIMITS,
+  imageOutpaintInputSchema,
+  imageOutpaintSourceGate,
+  type ImageOutpaintInput,
+} from '@lib/contracts/image-outpaint';
 
-/** 每方向最大扩展量（相对原图短边，已拍板 0.4） */
-export const IMAGE_OUTPAINT_MAX_EXPAND_RATIO = 0.4;
-/** 源图长边上限（像素） */
-export const IMAGE_OUTPAINT_LONG_SIDE_LIMIT = 4160;
-/** 源图文件大小上限（字节，10MB） */
-export const IMAGE_OUTPAINT_FILE_SIZE_LIMIT = 10 * 1024 * 1024;
+/** 每方向最大扩展比例（相对原图短边）：契约单处定义（[0, 0.4]） */
+export const IMAGE_OUTPAINT_MAX_EXPAND_RATIO = IMAGE_OUTPAINT_EXPAND_RATIO_LIMITS.max;
+/** 源图门槛数值（长边 4160px / 文件 10MB）：契约单处定义，重导出供预检文案与测试同源 */
+export const IMAGE_OUTPAINT_LONG_SIDE_LIMIT = IMAGE_OUTPAINT_SOURCE_LIMITS.maxLongSide;
+export const IMAGE_OUTPAINT_FILE_SIZE_LIMIT = IMAGE_OUTPAINT_SOURCE_LIMITS.maxFileSizeBytes;
+
+/** 纯视觉来源边标记（写在 edge.data.origin）：表达「扩图结果卡由该图扩展而来」，
+ *  不占参考位、不参与 @ 编号与媒体索引（口径同 IMAGE_ENHANCE_EDGE_ORIGIN；
+ *  标记值即契约连线来源标记 IMAGE_OUTPAINT_SOURCE，规格 Implementation Decisions 前端节）。 */
+export const IMAGE_OUTPAINT_EDGE_ORIGIN = IMAGE_OUTPAINT_SOURCE;
 
 /** 四方向扩展量（画布 flow 像素，均 ≥ 0） */
 export interface ExpandSides {
@@ -32,26 +46,18 @@ export interface SourceRect {
   height: number;
 }
 
-/* ============ 门槛预检（IKGOQX 菜单项置灰口径） ============ */
+/* ============ 门槛预检（菜单项/入口置灰口径） ============ */
 
 /** 源图可用性预检：返回不可用原因，null 为可用。
- *  与高清放大档门槛同口径的实现方式（imageEnhanceTierGateReason 先例），
- *  服务端复核为权威（契约票落 contracts 后双端同源）。 */
+ *  判定与文案在契约 imageOutpaintSourceGate 单处定义（backend 服务端复核同源引用）；
+ *  本函数只是参数形态适配（undefined → null 语义），前端预检只是体验层，服务端权威
+ *  （口径同 imageEnhanceTierGateReason 对 imageEnhanceTierSizeGate 的委托）。 */
 export function outpaintGateReason(
   width: number | undefined,
   height: number | undefined,
   size: number | undefined,
 ): string | null {
-  if (typeof width !== 'number' || typeof height !== 'number') {
-    return '图片真实尺寸未知，无法扩图';
-  }
-  if (Math.max(width, height) > IMAGE_OUTPAINT_LONG_SIDE_LIMIT) {
-    return `源图长边超过 ${IMAGE_OUTPAINT_LONG_SIDE_LIMIT}px，无法扩图`;
-  }
-  if (typeof size === 'number' && size > IMAGE_OUTPAINT_FILE_SIZE_LIMIT) {
-    return '源图文件超过 10MB，无法扩图';
-  }
-  return null;
+  return imageOutpaintSourceGate(width, height, size);
 }
 
 /* ============ 扩展几何（拖拽换算，全部纯函数） ============ */
@@ -241,4 +247,33 @@ export function outpaintPresetAvailability(
       : null;
   }
   return result;
+}
+
+/* ============ 提交身份与 payload 组装（IKGOR6 发送闭环） ============ */
+
+/** 扩图身份标记（node.data.imageOutpaint）：扩图结果卡的重试分流据此走
+ *  「lastParams 原样重发创建接口」（口径同 ImageEnhanceIdentity）。 */
+export interface ImageOutpaintIdentity {
+  /** 源素材身份（assetId 归一字符串）：提交冻结 source_asset_id 共用 */
+  sourceAssetId?: string;
+  /** 上次提交参数（契约六键形态）：失败重试原样重发的冻结快照 */
+  lastParams?: ImageOutpaintInput;
+}
+
+/** 组装契约六键 input 并按 zod schema 校验（提交前最后一道本地防线，同源契约）。
+ *  四个扩展比例来自扩展框换算 expandRatiosOf（相对原图短边，提交参数唯一来源）。 */
+export function buildImageOutpaintInput(
+  sourceAssetId: string,
+  targetNodeId: string,
+  ratios: { top: number; right: number; bottom: number; left: number },
+): ImageOutpaintInput | null {
+  const input = {
+    [IMAGE_OUTPAINT_INPUT_KEYS.sourceAssetId]: sourceAssetId,
+    [IMAGE_OUTPAINT_INPUT_KEYS.targetNodeId]: targetNodeId,
+    [IMAGE_OUTPAINT_INPUT_KEYS.expandTop]: ratios.top,
+    [IMAGE_OUTPAINT_INPUT_KEYS.expandBottom]: ratios.bottom,
+    [IMAGE_OUTPAINT_INPUT_KEYS.expandLeft]: ratios.left,
+    [IMAGE_OUTPAINT_INPUT_KEYS.expandRight]: ratios.right,
+  };
+  return imageOutpaintInputSchema.safeParse(input).success ? (input as ImageOutpaintInput) : null;
 }

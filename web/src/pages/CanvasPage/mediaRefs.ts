@@ -4,6 +4,7 @@
  * ============================================ */
 import type { Edge, Node } from '@xyflow/react';
 import { IMAGE_ENHANCE_EDGE_ORIGIN } from './imageEnhance';
+import { IMAGE_OUTPAINT_EDGE_ORIGIN } from './imageOutpaint';
 
 /** 图片参考来源项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入 input_asset_ids。
  *  textNodeId（IKFM3S）：该参考由文本卡正文索引提供（锁定，不可在目标直接移除），值为来源文本卡 id。 */
@@ -93,8 +94,9 @@ export function imageMediaRefsOf(
   const seenAssetIds = new Set<string>();
   for (const edge of edges) {
     if (edge.target !== targetNodeId) continue;
-    // 高清来源边（IKGM9F）是纯视觉来源表达，不作参考输入：源图不占参考位、不参与 @ 编号
-    if ((edge.data as { origin?: string } | undefined)?.origin === IMAGE_ENHANCE_EDGE_ORIGIN) continue;
+    // 高清/扩图来源边（IKGM9F / IKGOR6）是纯视觉来源表达，不作参考输入：源图不占参考位、不参与 @ 编号
+    const edgeOrigin = (edge.data as { origin?: string } | undefined)?.origin;
+    if (edgeOrigin === IMAGE_ENHANCE_EDGE_ORIGIN || edgeOrigin === IMAGE_OUTPAINT_EDGE_ORIGIN) continue;
     const source = byId.get(edge.source);
     if (!source || source.type !== 'mediaNode') continue;
     if (imageRefSourceError(source) !== null) continue;

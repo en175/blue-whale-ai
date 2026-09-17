@@ -60,6 +60,7 @@ const apiMocks = vi.hoisted(() => ({
   retryGenerationJob: vi.fn(),
   createMediaExtraction: vi.fn(),
   createImageEnhancement: vi.fn(),
+  createImageOutpaint: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
 }));
@@ -108,6 +109,7 @@ vi.mock('@/api/jobs', () => ({
   retryGenerationJob: apiMocks.retryGenerationJob,
   fetchJobStatus: apiMocks.fetchJobStatus,
   createMediaExtraction: apiMocks.createMediaExtraction,
+  createImageOutpaint: apiMocks.createImageOutpaint,
   readJobFailText: apiMocks.readJobFailText,
 }));
 vi.mock('@/api/image-enhancements', () => ({ createImageEnhancement: apiMocks.createImageEnhancement }));
@@ -192,7 +194,7 @@ const noResidue = () => {
   expect(nodeCount()).toBe(2); // 不建卡
   expect(flowProps.current.edges).toEqual([]); // 不连线
   expect(apiMocks.createGenerationJob).not.toHaveBeenCalled(); // 不产生任务
-  expect(apiMocks.createImageEnhancement).not.toHaveBeenCalled();
+  expect(apiMocks.createImageOutpaint).not.toHaveBeenCalled();
 };
 
 const dialogEl = () => document.body.querySelector('[data-testid="outpaint-dialog"]');

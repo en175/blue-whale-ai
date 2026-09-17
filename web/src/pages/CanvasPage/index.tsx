@@ -59,11 +59,15 @@ import {
   type ImageEnhancePanelParams,
 } from './imageEnhance';
 import {
+  IMAGE_OUTPAINT_EDGE_ORIGIN,
   ZERO_EXPANDS,
+  buildImageOutpaintInput,
+  expandRatiosOf,
   maxExpandPerSide,
   outpaintGateReason,
   presetExpands,
   type ExpandSides,
+  type ImageOutpaintIdentity,
   type OutpaintPresetKey,
   type SourceRect,
 } from './imageOutpaint';
@@ -85,6 +89,7 @@ import LegacyHistoryModal from './components/LegacyHistoryModal';
 import AssetsPickerModal from './components/AssetsPickerModal';
 import CharacterLibraryModal from './components/CharacterLibraryModal';
 import type { MaterialAsset } from '@/api/material';
+import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import type { AssetCardKind } from './components/AssetCardNode';
 import type { CanvasProject } from './components/ProjectSelector';
 import FlowCanvas from './components/Canvas';
@@ -116,6 +121,7 @@ import {
   fetchJobStatus,
   createMediaExtraction,
   createImageEnhancement,
+  createImageOutpaint,
   readJobFailText,
   type ImageJobParameters,
   type VideoJobParameters,
@@ -4914,6 +4920,85 @@ export default function CanvasPage() {
     return issued;
   };
 
+  /** 创建智能扩图任务（IKGOR6）：扩图结果卡原地承接（草稿转生成中 / 失败卡重试重新生成，不新建卡）。
+   *  六键 input 已由发送侧组好并过契约 zod 校验（buildImageOutpaintInput）；lastParams 随提交
+   *  立即写入节点（失败重试原样重发共用）。免费口径（规格）：不走余额拦截门。
+   *  返回 true 表示创建请求已发出；HTTP 层异步失败由 catch 收敛到卡片失败态（同 startImageEnhanceJob）。 */
+  const startImageOutpaintJob = (nodeId: string, input: ImageOutpaintInput): boolean => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法发起扩图');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const identity = ((node?.data ?? {}) as Record<string, unknown>).imageOutpaint as ImageOutpaintIdentity | undefined;
+    const isDraftTarget = ((node?.data ?? {}) as Record<string, unknown>).draft === true;
+    patchMediaNode(nodeId, {
+      genStatus: 'generating',
+      progress: 0,
+      errorText: undefined,
+      ...(isDraftTarget && !hasCustomName(node) ? { fileName: '扩图生成中' } : {}),
+      // 提交即写 lastParams（契约六键形态）：失败重试原样重发共用
+      imageOutpaint: { ...identity, lastParams: input },
+    });
+    // 提交立即接管节点，防止 create 返回前旧取消/轮询响应解除本次生成状态（同 startImageEnhanceJob）
+    const activeAtCreate = newNodeId('pending-generation');
+    activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+    stopJobPolling(nodeId, jobTimersRef.current);
+    createImageOutpaint(currentId, input)
+      .then((created) => {
+        if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+        patchMediaNode(nodeId, { jobId: created.job_id });
+        pollJob(nodeId, created.job_id);
+      })
+      .catch((e: unknown) => {
+        if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+        patchMediaNode(nodeId, {
+          genStatus: 'failed',
+          errorText: isApiError(e) ? e.message : '创建任务失败',
+        });
+      });
+    return true;
+  };
+
+  /** 扩图面板发送（IKGOR6 发送闭环）：点发送才建结果卡（进入模式不建卡不连线，规格故事 24）——
+   *  源卡右侧建「扩图」草稿卡 + 纯视觉来源线（origin 标记，不占参考位、不参与 @ 编号）；
+   *  四个扩展比例取自扩展框换算（相对原图短边，提交参数唯一来源），过契约 zod 校验后调创建入口；
+   *  创建请求发出即退出扩图模式（规格故事 39），源卡全程不动（规格故事 41）。
+   *  防御：契约校验不过撤卡撤线留在模式内提示（如源素材非数字资产 id）。 */
+  const handleOutpaintDialogSend = (): boolean => {
+    const sourceNode = outpaintSourceNode;
+    const rect = outpaintRect;
+    if (!sourceNode || !rect) return false;
+    // 零扩展（框与原图重合）不发送：发送钮已置灰，守卫兜底（契约 refine 同口径）
+    if (
+      outpaintExpands.top <= 0 && outpaintExpands.right <= 0 &&
+      outpaintExpands.bottom <= 0 && outpaintExpands.left <= 0
+    ) {
+      return false;
+    }
+    const sourceData = (sourceNode.data ?? {}) as Record<string, unknown>;
+    const sourceAssetId = readAssetId(sourceData);
+    if (!sourceAssetId) {
+      showToast('warn', '源素材身份缺失，无法发起扩图');
+      return false;
+    }
+    const ratios = expandRatiosOf(outpaintExpands, rect);
+    const draftId = createImageDraftCard(imageEnhanceDraftPosition(sourceNode), {
+      fileName: '扩图',
+      data: { imageOutpaint: { sourceAssetId } },
+    });
+    addCanvasEdge(sourceNode.id, draftId, undefined, { origin: IMAGE_OUTPAINT_EDGE_ORIGIN });
+    const input = buildImageOutpaintInput(sourceAssetId, draftId, ratios);
+    if (!input) {
+      removeCanvasNodes([draftId]);
+      showToast('warn', '扩图参数不合法，请调整后重试');
+      return false;
+    }
+    const issued = startImageOutpaintJob(draftId, input);
+    if (issued) endOutpaintSession();
+    return issued;
+  };
+
   /** 取消接口仅登记意图；权威终态确认前保留生成中状态及轮询，避免编辑/删除绕过在途保护。 */
   const handleCancelJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
@@ -5213,7 +5298,8 @@ export default function CanvasPage() {
   /** 重试失败任务：retry 接口创建新任务（沿用失败任务冻结快照），节点回到生成中。
    *  与「修改后新生成」（面板发送 → createGenerationJob 新任务新快照）是两条独立路径：
    *  重试不改输入也不落盘画布——历史失败任务输入保持不变（IKDMQV）。
-   *  高清放大卡分流（IKGM9O）：契约无 retry 端点，重试 = lastParams 原样重发创建接口。 */
+   *  高清放大卡分流（IKGM9O）：契约无 retry 端点，重试 = lastParams 原样重发创建接口。
+   *  扩图结果卡分流（IKGOR6）同款：lastParams 六键原样重发创建接口。 */
   const handleRetryJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
     const jobId = node?.data?.jobId as number | string | undefined;
@@ -5224,6 +5310,15 @@ export default function CanvasPage() {
       // 防重入：生成中不重复发起（口径同通用重试）
       if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
       startImageEnhanceJob(nodeId, restoreImageEnhanceParams(enhanceIdentity.lastParams));
+      return;
+    }
+    const outpaintIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageOutpaint as
+      | ImageOutpaintIdentity
+      | undefined;
+    if (outpaintIdentity?.lastParams) {
+      // 防重入：生成中不重复发起（口径同通用重试）
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      startImageOutpaintJob(nodeId, outpaintIdentity.lastParams);
       return;
     }
     if (!currentId || !jobId) return;
@@ -7653,13 +7748,14 @@ export default function CanvasPage() {
             followAnchor={enhanceDraftId ? enhanceFollowAnchor : null}
           />
         )}
-        {/* 扩图参数面板骨架（IKGOQX）：绑定源图卡，比例行 + 关闭 X；发送闭环由 IKGOR6 接入 */}
+        {/* 扩图参数面板（IKGOQX 骨架 / IKGOR6 发送闭环）：绑定源图卡，发送建结果卡后退出扩图模式 */}
         {outpaintSessionActive && outpaintRect && (
           <OutpaintDialog
             onClose={endOutpaintSession}
             sourceSize={{ width: outpaintRect.width, height: outpaintRect.height }}
             expands={outpaintExpands}
             onPresetSelect={handleOutpaintPresetSelect}
+            onSend={handleOutpaintDialogSend}
             followAnchor={outpaintFollowAnchor}
           />
         )}

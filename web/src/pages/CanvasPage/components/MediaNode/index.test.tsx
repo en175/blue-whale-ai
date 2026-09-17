@@ -244,7 +244,8 @@ describe('MediaNode enhance dropdown menu (IKGOQX)', () => {
     await openMenu();
     const item3 = menuItem('enhance-menu-outpaint');
     expect(item3.getAttribute('aria-disabled')).toBe('true');
-    expect(item3.getAttribute('title')).toContain('尺寸未知');
+    // 拒绝文案与契约单处定义同源（IKGOR6 切契约后不再是本地「尺寸未知」措辞）
+    expect(item3.getAttribute('title')).toContain('缺少真实尺寸信息');
     await act(async () => {
       item3.click();
     });
