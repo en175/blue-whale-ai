@@ -200,3 +200,122 @@ describe('AgentPanel 停靠抽屉（IKDLD4）', () => {
     }
   });
 });
+
+describe('AgentPanel 消息列表跟随到底', () => {
+  type MockSession = { turns: unknown[]; sessionId: string | null; streamingText: string; runningRunId: string | null };
+  const session = sessionMock as unknown as MockSession;
+
+  function userTurn(n: number) {
+    return {
+      key: `t${n}`,
+      batchId: null,
+      user: [{ id: `u${n}`, role: 'user', content: `第 ${n} 句`, sequence_no: n }],
+      assistant: null,
+      live: null,
+      runId: null,
+      account: null,
+      solutionCards: [],
+    };
+  }
+
+  /** jsdom 不做布局：给消息列表装上可控的滚动几何，内容高度随测试改。 */
+  function list(contentHeight = { value: 2000 }) {
+    const el = container.querySelector<HTMLElement>(`.${styles.messageList}`)!;
+    let top = 0;
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => 500 });
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => contentHeight.value });
+    Object.defineProperty(el, 'scrollTop', {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = Math.max(0, Math.min(v, contentHeight.value - 500));
+      },
+    });
+    return { el, contentHeight };
+  }
+
+  async function userScrollsTo(el: HTMLElement, top: number, deltaY: number) {
+    await act(async () => {
+      el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY }));
+      el.scrollTop = top;
+      el.dispatchEvent(new Event('scroll'));
+    });
+  }
+
+  async function rerender(patch: Partial<MockSession>) {
+    Object.assign(session, patch);
+    await act(async () => {
+      root.render(
+        createElement(AgentPanel, {
+          onClose,
+          projectId: 'p1',
+          onPlaceFileOnCanvas: vi.fn(async () => ({ asset_id: 'a1', url: 'blob:x' })),
+        }),
+      );
+    });
+  }
+
+  beforeEach(() => {
+    Object.assign(session, { turns: [userTurn(1)], sessionId: 's1', streamingText: '', runningRunId: 'r1' });
+  });
+
+  afterEach(() => {
+    Object.assign(session, { turns: [], sessionId: null, streamingText: '', runningRunId: null });
+  });
+
+  it('贴着底时，流式内容变长会跟到底', async () => {
+    await renderPanel();
+    const { el, contentHeight } = list();
+    await rerender({ streamingText: '一' });
+    expect(el.scrollTop).toBe(1500);
+
+    contentHeight.value = 2600;
+    await rerender({ streamingText: '一二', turns: [userTurn(1)] });
+    expect(el.scrollTop).toBe(2100);
+  });
+
+  it('运行中用户往上滑，哪怕只滑一小格，流式内容也不再把列表拉回底部', async () => {
+    await renderPanel();
+    const { el, contentHeight } = list();
+    await rerender({ streamingText: '一' });
+    await userScrollsTo(el, 1490, -10);
+
+    contentHeight.value = 2600;
+    await rerender({ streamingText: '一二', turns: [userTurn(1)] });
+    expect(el.scrollTop).toBe(1490);
+  });
+
+  it('用户自己滑回底部后恢复跟随', async () => {
+    await renderPanel();
+    const { el, contentHeight } = list();
+    await rerender({ streamingText: '一' });
+    await userScrollsTo(el, 800, -700);
+    await userScrollsTo(el, 1500, 700);
+
+    contentHeight.value = 2600;
+    await rerender({ streamingText: '一二', turns: [userTurn(1)] });
+    expect(el.scrollTop).toBe(2100);
+  });
+
+  it('用户发出新消息时回到底部并恢复跟随', async () => {
+    await renderPanel();
+    const { el, contentHeight } = list();
+    await rerender({ streamingText: '一' });
+    await userScrollsTo(el, 300, -1200);
+
+    contentHeight.value = 2600;
+    await rerender({ turns: [userTurn(1), userTurn(2)] });
+    expect(el.scrollTop).toBe(2100);
+  });
+
+  it('切换会话时回到底部并恢复跟随', async () => {
+    await renderPanel();
+    const { el, contentHeight } = list();
+    await rerender({ streamingText: '一' });
+    await userScrollsTo(el, 300, -1200);
+
+    contentHeight.value = 2600;
+    await rerender({ sessionId: 's2', turns: [userTurn(1)] });
+    expect(el.scrollTop).toBe(2100);
+  });
+});
