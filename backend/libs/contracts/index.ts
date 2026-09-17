@@ -160,6 +160,22 @@ export {
   type ImageEnhanceInput,
 } from "./image-enhance.js";
 export {
+  IMAGE_ERASE_JOB_TYPE,
+  IMAGE_ERASE_SOURCE,
+  IMAGE_ERASE_INPUT_KEYS,
+  IMAGE_ERASE_SCENES,
+  IMAGE_ERASE_TOOL_VERSION,
+  IMAGE_ERASE_OUTPUT_FORMAT,
+  IMAGE_ERASE_MAX_WIDTH_PX,
+  IMAGE_ERASE_MAX_HEIGHT_PX,
+  IMAGE_ERASE_MIN_SIDE_PX,
+  IMAGE_ERASE_MAX_FILE_BYTES,
+  IMAGE_ERASE_INPUT_FORMATS,
+  imageEraseInputSchema,
+  type ImageEraseScene,
+  type ImageEraseInput,
+} from "./image-erase.js";
+export {
   DomainError,
   assetError,
   skillError,
