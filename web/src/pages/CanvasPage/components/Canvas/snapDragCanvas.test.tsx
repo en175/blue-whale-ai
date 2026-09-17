@@ -86,6 +86,9 @@ beforeEach(async () => {
     unobserve() {}
     disconnect() {}
   });
+  // jsdom 无 document.elementsFromPoint（!713 起 GroupOverlay onDown 依赖其做
+  // 叠层命中检测）：stub 空栈 = 按下点无叠层节点阻挡，组空白命中路径照常
+  document.elementsFromPoint = () => [];
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(1000);
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(800);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
@@ -112,6 +115,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
+  Reflect.deleteProperty(document, 'elementsFromPoint');
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
