@@ -24,19 +24,15 @@ import {
   toGenerationParamCheckInput,
   resolveVideoTaskType,
   type VideoTaskType,
-  compilePromptDoc,
   imageRefLabel,
   videoRefLabel,
   mediaMentionSchema,
-  compileVideoPromptDoc,
   docHasTextRef,
   fail,
   ok,
   promptDocSchema,
-  validatePromptDocRefs,
   validateVideoPromptDocRefs,
   type PromptDoc,
-  type PromptDocRefFailure,
   type VideoRefItem,
   type TargetTextIndex,
   type TextAttachmentMedia,
@@ -641,8 +637,6 @@ interface ComposeInputContext {
   targetNodeId: string | null;
   textAttachments: TextAttachmentSnapshot[];
   referenceAssetIds: Array<string | number>;
-  /** IKFA1M：已通过结构与引用复核的正文素材标签（仅 image 携带）。 */
-  promptDoc: PromptDoc | null;
   /** IKG0LP：白名单解析后的能力行——视频用它判断 features.audio 是否允许带音频。 */
   capability?: ModelCapabilityView;
 }
@@ -669,17 +663,12 @@ const imageStrategy: GenerationTypeStrategy = {
     targetNodeId,
     textAttachments,
     referenceAssetIds,
-    promptDoc,
   }) {
     const input: Record<string, unknown> = {
       prompt: promptText,
       aspect_ratio: params.aspect_ratio,
       model_id: resolvedModelId,
     };
-    // 编译正文已通过接纳校验；同时冻结原始结构供审计与重试。
-    if (promptDoc) {
-      input.prompt_doc = promptDoc;
-    }
     if (isStr(params.size)) input.size = params.size;
     input.web_search = params.web_search === true;
     input.sequential_image_generation =
@@ -707,7 +696,6 @@ const videoStrategy: GenerationTypeStrategy = {
     targetNodeId,
     textAttachments,
     referenceAssetIds,
-    promptDoc,
     capability,
   }) {
     const input: Record<string, unknown> = {
@@ -715,10 +703,6 @@ const videoStrategy: GenerationTypeStrategy = {
       aspect_ratio: params.aspect_ratio,
       model_id: resolvedModelId,
     };
-    // IKFA1O：编译正文已通过接纳校验；同时冻结原始结构供审计与重试。
-    if (promptDoc) {
-      input.prompt_doc = promptDoc;
-    }
     if (isStr(params.resolution)) input.resolution = params.resolution;
     if (params.duration !== undefined) input.duration = params.duration;
     // IKG0LP：视频带音频——能力位允许时冻结用户选择（缺省 true，不支持则恒 false）；
@@ -766,12 +750,11 @@ const audioStrategy: GenerationTypeStrategy = {
     // ADR-0086：音频参考分类上限读能力行（白名单解析后以 capability.features 重跑，见 pipeline）。
     return validateCommon(body, "audio") ?? validateAudioReferences(body);
   },
-  composeInput({ body, resolvedModelId, promptText, targetNodeId, textAttachments, promptDoc }) {
+  composeInput({ body, resolvedModelId, promptText, targetNodeId, textAttachments }) {
     const input: Record<string, unknown> = {
       prompt: promptText,
       model_id: resolvedModelId,
     };
-    if (promptDoc) input.prompt_doc = promptDoc;
     // IKE4GC：音频参考素材冻结进 input 快照（保序）；Worker 执行时转 seed-audio references
     //   （audio→audio_url、image→image_url、已关联素材→asset://），不改 prompt。
     const parsed = parseReferences(body.references);
@@ -1216,8 +1199,6 @@ async function resolveTargetSnapshot(args: {
   canvas?: Awaited<ReturnType<CanvasRepo["getByProject"]>>;
   /** ADR-0085：所选模型的 raw prompt 上限；组合闸取 max(契约预算, 模型值)。 */
   maxPromptLength: number;
-  /** IKFA1P：含 text_ref 时文本附件按编号清单格式组合（与最终冻结的供应商正文一致）。 */
-  promptDoc: PromptDoc | null;
   /** IKFM3S：图片目标的文本索引派生结果——附件冻结 media 映射用（缺省无媒体）。 */
   textIndex?: TargetTextIndex;
   referenceAssetIds: readonly string[];
@@ -1225,7 +1206,7 @@ async function resolveTargetSnapshot(args: {
   | { ok: true; value: TargetSnapshot }
   | { ok: false; value: { message: string; code: string } }
 > {
-  const { type, body, promptText, projectId, deps, maxPromptLength, promptDoc } = args;
+  const { type, body, promptText, projectId, deps, maxPromptLength } = args;
   const targetNodeId =
     isStr(body.target_node_id) && body.target_node_id.trim() !== ""
       ? body.target_node_id
@@ -1299,10 +1280,8 @@ async function resolveTargetSnapshot(args: {
         value: { message: "prompt 无效", code: ERROR_INVALID_INPUT },
       };
     }
-    // IKFA1P：正文含文本标签时按编号清单组合（建立 文本N ↔ 内容 关系），长度闸跟随实际格式。
-    const composed = promptDoc && docHasTextRef(promptDoc)
-      ? composeTextAttachmentPromptIndexed(textAttachments, promptText)
-      : composeTextAttachmentPrompt(textAttachments, promptText);
+    // IKG6EK / ADR-0088：正文由提交方给全，附件不再由服务端组合——组合格式只剩一种。
+    const composed = composeTextAttachmentPrompt(textAttachments, promptText);
     if (composed.trim() === "") {
       return {
         ok: false,
@@ -1380,30 +1359,6 @@ function refIndexLabel(label: string | null): string | null {
   return numbered === null ? label : `#${numbered[1]}`;
 }
 
-/** IKG57P：通用存在性检查发现缺失素材时的正文标签复核——缺失项若被 prompt_doc 引用，
- *  按 planError 同源形态（BadRequestException，经 AllExceptionsFilter 投影为 HTTP 400）抛
- *  规格 7.2 文案与具体失效索引（多个缺失逐一列出）；正文未引用（纯参考清单）或无 prompt_doc
- *  返回 null 回落通用文案信封。索引编号与正文标签展示编号同源（labelOf 给出 #N 或帧角色名）。 */
-function missingPromptRefException(
-  promptDoc: PromptDoc | null,
-  missingIds: readonly string[],
-  labelOf: (assetId: string) => string | null,
-): BadRequestException | null {
-  if (promptDoc === null || missingIds.length === 0) return null;
-  const referenced = new Set(
-    promptDoc.segments.flatMap((segment) =>
-      segment.kind === "asset_ref" ? [segment.asset_id] : [],
-    ),
-  );
-  const indices = missingIds
-    .filter((id) => referenced.has(id))
-    .map(labelOf)
-    .filter((label): label is string => label !== null);
-  return indices.length > 0
-    ? new BadRequestException(planIndicesMessage(indices, MISSING_PROMPT_REF_REASON))
-    : null;
-}
-
 /** POST /api/projects/{projectId}/generation-jobs：创建生成任务（queued）+ 预留点数 + 日志。
  *  简化模型：无幂等表、单输出语义；action_identity 用 Idempotency-Key 派生（仅用于追溯）。
  *  IKDZI1：流水线化——项目校验 → 类型校验（策略分派）→ 模型白名单 → 参考图语义统一 →
@@ -1426,15 +1381,8 @@ export async function handleCreateGenerationJob(
   const strategy = strategies[type];
   if (!strategy)
     return fail(400, "暂不支持该生成类型", { code: ERROR_UNSUPPORTED_TYPE });
-  // IKFA1M：结构/版本契约校验（未知版本不猜造）；引用关系复核在参考图复核之后进行。
-  let promptDoc: PromptDoc | null = null;
-  if (body.prompt_doc !== undefined) {
-    const parsed = promptDocSchema.safeParse(body.prompt_doc);
-    if (!parsed.success) {
-      return fail(400, "prompt_doc 无效", { code: ERROR_INVALID_INPUT });
-    }
-    promptDoc = parsed.data;
-  }
+  // IKG6EK / ADR-0088：`prompt_doc` 已退役——提交方给正文全文，引用标记转移在接纳管线完成。
+  // 为兼容当前版本前端，**携带时不报错、直接不读**（发了也不生效）；前端票要求其停止发送。
   const validateErr = strategy.validate(body);
   if (validateErr) return fail(400, validateErr.message, { code: validateErr.code });
 
@@ -1578,20 +1526,12 @@ export async function handleCreateGenerationJob(
   // 仅本地 Asset 引用需要查存在性；素材库引用（asset:// 载体）由上游强校验，格式已在前置校验。
   // code 与 worker 侧 resolveInputAssets 失败同源（review：参考不可用归 invalid_reference，
   // 类型不符归 invalid_reference_type，避免提交 gate 与 worker 兜底码漂移）。
+  // 注：图片目标的全量参考已并入 referenceAssetIds（merged），故本段对图片即是全量复核。
   if (type !== "audio" && referenceAssetIds.length > 0) {
     const ids = referenceAssetIds.map(String);
     const resolved = await deps.assets.resolveInputAssets(ids, userId, projectId);
     if (resolved.length !== ids.length) {
-      // IKG57P：软删素材在方案冻结（freezePromptPlans 的 planError）之前先在此暴露——
-      // 若正文标签引用了缺失项，按 planError 同源形态抛规格 7.2 文案与具体索引（合并语义，
-      // 不回挪 8453e04a 的校验次序）；纯参考清单维持通用文案信封。
-      const missingIds = [...new Set(ids.filter((id) => !resolved.some((a) => a.id === id)))];
-      const labelOf =
-        type === "image"
-          ? (id: string) => refIndexLabel(imageRefLabel(id, ids))
-          : (id: string) => refIndexLabel(videoRefLabel(id, videoRefItemsOf(effectiveBody.references)));
-      const promptRefErr = missingPromptRefException(promptDoc, missingIds, labelOf);
-      if (promptRefErr) throw promptRefErr;
+      // IKG6EK / ADR-0088：doc 退役后不再按 doc 声明细化缺失索引文案，统一走通用信封。
       return fail(400, "参考素材不存在或无权访问", {
         code: ERROR_INVALID_REFERENCE,
       });
@@ -1615,12 +1555,7 @@ export async function handleCreateGenerationJob(
     const ids = [...new Set(textProvided.map((item) => item.assetId))];
     const resolved = await deps.assets.resolveInputAssets(ids, userId, projectId);
     if (resolved.length !== ids.length) {
-      // IKG57P：同上——文本带入素材缺失且被正文标签引用时按方案级错误形态拦截
-      const missingIds = [...new Set(ids.filter((id) => !resolved.some((a) => a.id === id)))];
-      const promptRefErr = missingPromptRefException(promptDoc, missingIds, (id) =>
-        refIndexLabel(videoRefLabel(id, videoRefItemsOf(effectiveBody.references))),
-      );
-      if (promptRefErr) throw promptRefErr;
+      // IKG6EK / ADR-0088：doc 退役后不再按 doc 声明细化缺失索引文案，统一走通用信封。
       return fail(400, "参考素材不存在或无权访问", {
         code: ERROR_INVALID_REFERENCE,
       });
@@ -1632,107 +1567,37 @@ export async function handleCreateGenerationJob(
       });
     }
   }
-  // IKFA1M/IKFA1O：正文素材标签服务端复核——失效标签阻止生成；标签身份必须在最终输入集合内
-  // （该集合已过存在性/归属/类型复核），保存与提交之间的变化不能绕过校验。
-  // 视频按提交的 references 实际结构编译（帧→角色名、普通参考→同类型编号），不信任客户端 label 缓存。
-  let promptCanvas: Awaited<ReturnType<CanvasRepo["getByProject"]>> | undefined;
-  if (promptDoc) {
-    /** 标签复核失败 → 统一 400 响应（invalid_tag / unknown_asset / unknown_text 分支共用文案与错误码） */
-    const failPromptDocRefs = (failure: PromptDocRefFailure | null) => {
-      if (failure?.kind === "invalid_tag") {
-        return fail(400, "存在已失效的素材标签，请删除后再提交", {
+  // IKG6EK / ADR-0088：视频/音频的 references 参考素材复核。原先这段只在携带 prompt_doc 时补齐，
+  // doc 退役后无条件执行——三端统一 references，越权/缺失/类型不符一律在接纳当下 400。
+  if (type === "video" || type === "audio") {
+    const parsedTextRefs = parseReferences(effectiveBody.references);
+    const textRefItems = parsedTextRefs.kind === "ok" ? parsedTextRefs.items : [];
+    // references 单数组不走 reference_asset_ids 既有存在性复核，在此补齐：本地 asset 必须存在/有权，
+    // 且声明 type 与素材实际类型一致（编号由 type 派生，谎报 type 会错编 图片N/视频N/音频N）。
+    const localIds = textRefItems.filter((item) => item.asset_id !== undefined).map((item) => String(item.asset_id));
+    if (localIds.length > 0) {
+      const resolvedRefs = await deps.assets.resolveInputAssets(localIds, userId, projectId);
+      if (resolvedRefs.length !== localIds.length) {
+        return fail(400, "参考素材不存在或无权访问", {
           code: ERROR_INVALID_REFERENCE,
         });
       }
-      if (failure?.kind === "unknown_asset") {
-        return fail(400, "正文素材标签指向无效的参考素材", {
-          code: ERROR_INVALID_REFERENCE,
-        });
-      }
-      if (failure?.kind === "unknown_text") {
-        return fail(400, "正文文本标签指向无效的文本附件", {
-          code: ERROR_INVALID_REFERENCE,
-        });
-      }
-      return null;
-    };
-    let videoRefItems: Parameters<typeof validateVideoPromptDocRefs>[1] | null = null;
-    if (type === "video" || type === "audio") {
-      // IKFM3W：视频用合并后的单数组（含文本带入追加项）——标签编号与最终冻结同集
-      const parsed = parseReferences(effectiveBody.references);
-      const textOnlyDoc = (type === "audio" || docHasTextRef(promptDoc))
-        && !promptDoc.segments.some((segment) => segment.kind === "asset_ref");
-      if (parsed.kind !== "ok" && !(parsed.kind === "absent" && textOnlyDoc)) {
-        return fail(400, `${type === "audio" ? "音频" : "视频"}正文素材标签请求必须携带单数组 references`, {
-          code: ERROR_UNSUPPORTED_INPUT,
-        });
-      }
-      const items = parsed.kind === "ok" ? parsed.items : [];
-      videoRefItems = videoRefItemsOf(effectiveBody.references);
-      // IKFA1O：references 单数组不走 reference_asset_ids 既有存在性复核——
-      // 携带标签时补齐（与生图路径同一 deps）：本地 asset 必须存在/有权，且声明 type
-      // 与素材实际类型一致（编号由 type 派生，谎报 type 会错编 图片N/视频N/音频N）。
-      const localIds = items.filter((item) => item.asset_id !== undefined).map((item) => String(item.asset_id));
-      if (localIds.length > 0) {
-        const resolvedRefs = await deps.assets.resolveInputAssets(localIds, userId, projectId);
-        if (resolvedRefs.length !== localIds.length) {
-          // IKG57P：同上——references 本地素材缺失且被正文标签引用时按方案级错误形态拦截
-          const missingIds = [...new Set(localIds.filter((id) => !resolvedRefs.some((a) => a.id === id)))];
-          const promptRefErr = missingPromptRefException(promptDoc, missingIds, (id) =>
-            // 闭包内 TS 不收窄 let 联合类型；本分支上方已赋值非 null，?? [] 永不触发
-            refIndexLabel(videoRefLabel(id, videoRefItems ?? [])),
-          );
-          if (promptRefErr) throw promptRefErr;
-          return fail(400, "参考素材不存在或无权访问", {
-            code: ERROR_INVALID_REFERENCE,
-          });
-        }
-        const resolvedTypes = new Map(localIds.map((id, i) => [id, resolvedRefs[i]!.type]));
-        const mismatch = items.some(
-          (item) => item.asset_id !== undefined && resolvedTypes.get(String(item.asset_id)) !== item.type,
-        );
-        if (mismatch) {
-          return fail(400, "参考素材类型与声明不符", {
-            code: ERROR_INVALID_REFERENCE_TYPE,
-          });
-        }
-      }
-    }
-    // 图/视频共用文本身份复核；保留媒体存在性复核在前，复用同次画布读取冻结全文。
-    let orderedTextNodeIds: string[] = [];
-    if (docHasTextRef(promptDoc)) {
-      const textTargetNodeId =
-        isStr(body.target_node_id) && body.target_node_id.trim() !== ""
-          ? body.target_node_id
-          : null;
-      if (textTargetNodeId === null) {
-        return fail(400, "正文文本标签指向无效的文本附件", {
-          code: ERROR_INVALID_REFERENCE,
-        });
-      }
-      promptCanvas =
-        textIndexRefs.value.canvas ?? (await deps.canvas.getByProject(projectId));
-      orderedTextNodeIds = textAttachmentsFromCanvas(
-        JSON.parse(promptCanvas.nodes ?? "[]") as Array<{
-          id?: unknown;
-          type?: unknown;
-          data?: Record<string, unknown>;
-        }>,
-        JSON.parse(promptCanvas.edges ?? "[]"),
-        textTargetNodeId,
-      ).map((attachment) => attachment.node_id);
-    }
-    if (videoRefItems !== null) {
-      const refErr = failPromptDocRefs(validateVideoPromptDocRefs(promptDoc, videoRefItems, orderedTextNodeIds));
-      if (refErr) return refErr;
-      promptText = compileVideoPromptDoc(promptDoc, videoRefItems, orderedTextNodeIds.length > 0 ? orderedTextNodeIds : undefined);
-    } else {
-      const refErr = failPromptDocRefs(
-        validatePromptDocRefs(promptDoc, referenceAssetIds.map(String), orderedTextNodeIds),
+      const resolvedTypes = new Map(localIds.map((id, i) => [id, resolvedRefs[i]!.type]));
+      const mismatch = textRefItems.some(
+        (item) => item.asset_id !== undefined && resolvedTypes.get(String(item.asset_id)) !== item.type,
       );
-      if (refErr) return refErr;
-      promptText = compilePromptDoc(promptDoc, referenceAssetIds.map(String), orderedTextNodeIds.length > 0 ? orderedTextNodeIds : undefined);
+      if (mismatch) {
+        return fail(400, "参考素材类型与声明不符", {
+          code: ERROR_INVALID_REFERENCE_TYPE,
+        });
+      }
     }
+  }
+  // IKG6EK / ADR-0088：`parameters.prompt` **一律权威**，doc 的正文编译与身份校验都不再需要。
+  // 素材校验只保留一条——`references` 里的素材必须属于本用户（存在性/归属/类型复核见上方
+  // IKE7JP 两段与 resolveTargetSnapshot），不越权即可。参考素材的标签派生统一由接纳管线的
+  // 引用标记转移负责（reference-marker-transfer.ts）：身份不在集合里就不转、原样保留。
+  {
     // 复用既有正文约束；后续附件组合也必须使用实际冻结的正文。
     const compiledError = strategy.validate({ ...effectiveBody, parameters: { ...params, prompt: promptText } });
     if (promptText.length > maxPromptLength) {
@@ -1763,10 +1628,7 @@ export async function handleCreateGenerationJob(
   });
   // 5. 画布目标快照（仅携带 target_node_id 时读画布；IKFM3S 复用文本索引派生的同次读取）
   const target = await resolveTargetSnapshot({
-    ...(promptCanvas ? { canvas: promptCanvas } : {}),
-    ...(textIndexRefs.value.canvas && !promptCanvas
-      ? { canvas: textIndexRefs.value.canvas }
-      : {}),
+    ...(textIndexRefs.value.canvas ? { canvas: textIndexRefs.value.canvas } : {}),
     type,
     body: effectiveBody,
     referenceAssetIds: referenceAssetIds.map(String),
@@ -1774,7 +1636,6 @@ export async function handleCreateGenerationJob(
     projectId,
     deps,
     maxPromptLength,
-    promptDoc,
     ...(textIndexRefs.value.index.refs.length > 0 || textIndexRefs.value.index.inputs.length > 0
       ? { textIndex: textIndexRefs.value.index }
       : {}),
@@ -1789,7 +1650,7 @@ export async function handleCreateGenerationJob(
     ? await freezePromptPlans({ ...target.value.canvas, targetId: target.value.targetNodeId,
         type, references: planRefs,
         inputIds: type === "video" ? planRefs.flatMap(r => r.asset_id ? [r.asset_id] : []) : referenceAssetIds.map(String), prompt: promptText, attachments: target.value.textAttachments,
-        promptDoc, model: capability, userId, projectId, assets: deps.assets }) : undefined;
+        model: capability, userId, projectId, assets: deps.assets }) : undefined;
 
   // 6. 组装 job.input（策略按类型分派；IKFM3W：视频用合并后的 references 冻结）
   const input = strategy.composeInput({
@@ -1800,7 +1661,6 @@ export async function handleCreateGenerationJob(
     targetNodeId: target.value.targetNodeId,
     textAttachments: target.value.textAttachments,
     referenceAssetIds,
-    promptDoc,
     // IKG0LP：exactOptionalPropertyTypes 下不能显式传 undefined，按本仓惯例条件展开
     ...(capability ? { capability } : {}),
   });
