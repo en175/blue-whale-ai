@@ -37,7 +37,7 @@ final class TextAttachmentPrompts {
     }
 
     /**
-     * 文本附件确定性组合：空白附件文本跳过、非空目标提示词追加末尾、"\n\n" 连接，不改写正文。
+     * 文本附件确定性组合：空白附件文本跳过、非空目标提示词追加末尾、直接拼接不加空行，不改写正文。
      * 已知差异：空白判定用 isBlank（Character.isWhitespace），JS trim() 额外移除 NBSP(\u00A0) 等
      * 不间断空白——纯 NBSP 正文 TS 过滤、此处保留；接纳侧冻结的正文不产生此类输入，行为不受影响。
      */
@@ -48,7 +48,7 @@ final class TextAttachmentPrompts {
             if (text != null && !text.isBlank()) parts.add(text);
         }
         if (prompt != null && !prompt.isBlank()) parts.add(prompt);
-        return String.join("\n\n", parts);
+        return String.join("", parts);
     }
 
     @SuppressWarnings("unchecked")

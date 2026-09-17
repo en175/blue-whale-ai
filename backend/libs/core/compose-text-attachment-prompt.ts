@@ -6,6 +6,7 @@
  *
  * attachments 仅需 text 字段（与 @lib/contracts 的 TextAttachmentSnapshot
  * 结构化同构）：core 不反向依赖 contracts，同 ark-image-client.ts 头注释先例。
+ * 参考文本与输入框正文直接拼接，中间不加空行。
  */
 export function composeTextAttachmentPrompt(
   attachments: readonly { text: string }[],
@@ -15,7 +16,7 @@ export function composeTextAttachmentPrompt(
   if (prompt.trim().length > 0) {
     parts.push(prompt);
   }
-  return parts.join("\n\n");
+  return parts.join("");
 }
 
 /**
@@ -33,5 +34,5 @@ export function composeTextAttachmentPromptIndexed(
   if (prompt.trim().length > 0) {
     parts.push(prompt);
   }
-  return parts.join("\n\n");
+  return parts.join("");
 }

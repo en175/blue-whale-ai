@@ -626,7 +626,7 @@ describe('IKDXHS：首页生成节点保留可编辑配置', () => {
     const repeated = apiMocks.createGenerationJob.mock.calls[1]![1];
     expect(repeated.target_node_id).toBe(generatedId);
     expect(repeated.parameters.model_id).toBe('m-test');
-    if (kind === 'image') expect(repeated.input_asset_ids).toEqual(['a2']);
+    if (kind === 'image') expect(repeated.references).toEqual([{ role: 'reference', type: 'image', asset_id: 'a2' }]);
     // IKEXX8 视频参考改为 structured references 数组（首帧/尾帧角色随连线持久化）
     else expect(repeated.references).toEqual([
       { material_id: 'asset-compliance-test', role: 'first_frame', type: 'image' },

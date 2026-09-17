@@ -27,6 +27,8 @@ import {
   imageRefLabel,
   videoRefLabel,
   mediaMentionSchema,
+  mediaRefSchema,
+  imageMentionSendToken,
   compileVideoPromptDoc,
   docHasTextRef,
   fail,
@@ -110,8 +112,8 @@ export interface CreateGenerationJobBody {
   last_frame_material_id?: unknown;
   /** 元素 { id: "Asset-xxx", type: "image" | "video" }；素材零落表，类型由调用方声明。 */
   reference_materials?: unknown;
-  /** IKDJNZ：视频参考素材单数组契约（保序）。元素 { role, asset_id?, material_id?, type }；
-   *  存在时优先于旧的 reference_asset_ids/reference_materials/首尾帧字段。 */
+  /** 图/视频/音频参考素材单数组契约（保序）。元素 { role, asset_id?, material_id?, type }；
+   *  存在时优先于旧的 input_asset_ids / reference_asset_ids / reference_materials / 首尾帧字段。 */
   references?: unknown;
   /** IKDLQF/IKDLQG/IKDMQT：生成目标画布节点 id（图片=image/视频=video/音频=audio 媒体节点），仅三类生成允许携带。 */
   target_node_id?: unknown;
@@ -431,6 +433,53 @@ function validateAudioReferences(
   return null;
 }
 
+/** 图片生成参考素材——单数组 references（type 仅 image，role 强制 reference）。
+ *  旧字段 input_asset_ids 仍接受（存量客户端）；与 references 互斥。 */
+function validateImageReferences(
+  body: CreateGenerationJobBody,
+  features?: ModelFeatures,
+): { code: string; message: string } | null {
+  const parsed = parseReferences(body.references);
+  if (parsed.kind === "invalid") {
+    return { code: ERROR_INVALID_REFERENCE, message: "参考素材引用无效" };
+  }
+  const hasLegacy =
+    hasContent(body.input_asset_ids) ||
+    hasContent(body.reference_asset_ids) ||
+    hasContent(body.reference_materials) ||
+    hasContent(body.first_frame_asset_id) ||
+    hasContent(body.last_frame_asset_id) ||
+    hasContent(body.first_frame_material_id) ||
+    hasContent(body.last_frame_material_id);
+  if (parsed.kind === "absent") return null;
+  if (hasLegacy) {
+    return { code: ERROR_INVALID_REFERENCE, message: "references 不能与旧参考字段混用" };
+  }
+  if (parsed.items.length === 0) {
+    return { code: ERROR_INVALID_REFERENCE, message: "参考素材不能为空" };
+  }
+  for (const item of parsed.items) {
+    if (item.role !== "reference" || item.type !== "image") {
+      return { code: ERROR_INVALID_REFERENCE, message: "参考素材引用无效" };
+    }
+    if (item.material_id !== undefined) {
+      return {
+        code: ERROR_UNSUPPORTED_INPUT,
+        message: "图片生成不支持素材库引用",
+      };
+    }
+  }
+  const limitErr = features
+    ? checkReferenceLimits(
+        features,
+        parsed.items.map((r) => ({ type: r.type, duration: r.duration })),
+        "image",
+      )
+    : null;
+  if (limitErr) return { code: ERROR_INVALID_REFERENCE, message: limitErr };
+  return null;
+}
+
 /** 素材库引用（MaterialReference）仅视频生成可用；非 video 一律拒绝。 */
 function validateRejectMaterialReferences(
   body: CreateGenerationJobBody,
@@ -641,10 +690,13 @@ interface GenerationTypeStrategy {
 const imageStrategy: GenerationTypeStrategy = {
   validate(body) {
     return (
-      validateCommon(body, "image") ?? validateRejectMaterialReferences(body)
+      validateCommon(body, "image") ??
+      validateRejectMaterialReferences(body) ??
+      validateImageReferences(body)
     );
   },
   composeInput({
+    body,
     params,
     resolvedModelId,
     promptText,
@@ -666,8 +718,17 @@ const imageStrategy: GenerationTypeStrategy = {
     input.web_search = params.web_search === true;
     input.sequential_image_generation =
       params.sequential_image_generation === true;
-    // IKA72G：image 参考图统一落 input_asset_ids（worker 读取同字段）。
-    if (referenceAssetIds.length > 0) input.input_asset_ids = referenceAssetIds;
+    // 单数组 references 冻结进快照；Worker 仍读 input_asset_ids，由 references 派生保序 ID。
+    const parsed = parseReferences(body.references);
+    if (parsed.kind === "ok") {
+      input.references = parsed.items;
+      const ids = parsed.items
+        .map((item) => item.asset_id)
+        .filter((id): id is string => typeof id === "string");
+      if (ids.length > 0) input.input_asset_ids = ids;
+    } else if (referenceAssetIds.length > 0) {
+      input.input_asset_ids = referenceAssetIds;
+    }
     if (targetNodeId !== null) {
       input.target_node_id = targetNodeId;
       input.text_attachments = textAttachments;
@@ -785,8 +846,8 @@ function resolveModelId(type: GenerationType, modelId: unknown): string {
     : String(modelId);
 }
 
-/** 参考图字段语义统一（IKA72G）：image 参考图 = input_asset_ids（与前端契约/worker 对齐），
- *  video 普通参考素材 = reference_asset_ids；首尾帧走独立字段 first/last_frame_asset_id 不受此限。
+/** 参考图字段语义统一：image 优先读单数组 references（与视频/音频对齐），
+ *  未传时回落 input_asset_ids；video 普通参考素材 = reference_asset_ids。
  *  image 超限返回错误（含模型真实上限，回退常量 10）。 */
 function resolveReferenceAssets(
   body: CreateGenerationJobBody,
@@ -802,6 +863,23 @@ function resolveReferenceAssets(
         params: { max_reference_count: number };
       };
     } {
+  const parsed = parseReferences(body.references);
+  if (type === "image" && parsed.kind === "ok") {
+    const referenceAssetIds = parsed.items
+      .map((item) => item.asset_id)
+      .filter((id): id is string => typeof id === "string");
+    if (referenceAssetIds.length > maxReferenceImages) {
+      return {
+        ok: false,
+        value: {
+          message: `参考图最多 ${maxReferenceImages} 张`,
+          code: ERROR_UNSUPPORTED_INPUT,
+          params: { max_reference_count: maxReferenceImages },
+        },
+      };
+    }
+    return { ok: true, value: { referenceAssetIds } };
+  }
   const inputAssetIds = (
     Array.isArray(body.input_asset_ids) ? body.input_asset_ids : []
   ) as number[];
@@ -893,7 +971,7 @@ async function resolveTextIndexReferences(args: {
         merged: Array<string | number>;
         index: TargetTextIndex;
         canvas: Awaited<ReturnType<CanvasRepo["getByProject"]>> | null;
-        /** 契约 §10/§11：视频/音频目标合并后的单数组 references（含文本带入追加项）；仅视频/音频返回 */
+        /** 合并后的单数组 references（含文本带入追加项）；图片/视频/音频在走 references 时返回 */
         videoReferences?: ReferenceItemInput[];
       };
     }
@@ -926,6 +1004,84 @@ async function resolveTextIndexReferences(args: {
   if (args.type === "audio") {
     return resolveAudioTextIndexReferences(args, index, canvas);
   }
+  return resolveImageTextIndexReferences(args, index, canvas);
+}
+
+/** 图片目标的文本带入参考校验与并入：失效索引 / 不支持类型 / 超限 400；
+ *  提交 references 时以单数组保序并入（直接参考在前、文本带入追加，同 assetId 去重）；
+ *  未传 references 时维持旧 input_asset_ids 差集追加。 */
+function resolveImageTextIndexReferences(
+  args: {
+    body: CreateGenerationJobBody;
+    directReferenceAssetIds: Array<string | number>;
+    maxReferenceImages: number;
+  },
+  index: TargetTextIndex,
+  canvas: Awaited<ReturnType<CanvasRepo["getByProject"]>>,
+):
+  | {
+      ok: true;
+      value: {
+        merged: Array<string | number>;
+        index: TargetTextIndex;
+        canvas: Awaited<ReturnType<CanvasRepo["getByProject"]>> | null;
+        videoReferences?: ReferenceItemInput[];
+      };
+    }
+  | { ok: false; value: { message: string; code: string; params?: Record<string, unknown> } } {
+  const failSync = (
+    checkError: NonNullable<ReturnType<typeof checkTextIndexSyncInput>>,
+  ) => {
+    if (checkError.kind === "invalid_index") {
+      return {
+        ok: false as const,
+        value: { message: TEXT_INDEX_INVALID_MESSAGE, code: ERROR_INVALID_REFERENCE },
+      };
+    }
+    if (checkError.kind === "unsupported_media_type") {
+      return {
+        ok: false as const,
+        value: {
+          message: TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE,
+          code: ERROR_INVALID_REFERENCE_TYPE,
+        },
+      };
+    }
+    return {
+      ok: false as const,
+      value: {
+        message: textIndexOverflowMessage(checkError.max),
+        code: ERROR_UNSUPPORTED_INPUT,
+        params: { max_reference_count: checkError.max },
+      },
+    };
+  };
+  const parsed = parseReferences(args.body.references);
+  if (parsed.kind === "ok") {
+    const imageReferences =
+      index.refs.length === 0
+        ? parsed.items
+        : [...parsed.items, ...textProvidedVideoReferences(parsed.items, index.refs)];
+    const merged = imageReferences
+      .map((item) => item.asset_id)
+      .filter((id): id is string => typeof id === "string");
+    const checkError = checkTextIndexSyncInput({
+      index,
+      acceptedMediaTypes: IMAGE_TEXT_INDEX_ACCEPTED_MEDIA_TYPES,
+      mergedReferenceCount: merged.length,
+      maxReferences: args.maxReferenceImages,
+    });
+    if (checkError) return failSync(checkError);
+    return {
+      ok: true,
+      value: {
+        merged,
+        index,
+        canvas,
+        ...(index.refs.length > 0 ? { videoReferences: imageReferences } : {}),
+      },
+    };
+  }
   const { merged } = mergeTextProvidedReferences(
     args.directReferenceAssetIds,
     index.refs,
@@ -936,31 +1092,7 @@ async function resolveTextIndexReferences(args: {
     mergedReferenceCount: merged.length,
     maxReferences: args.maxReferenceImages,
   });
-  if (checkError) {
-    if (checkError.kind === "invalid_index") {
-      return {
-        ok: false,
-        value: { message: TEXT_INDEX_INVALID_MESSAGE, code: ERROR_INVALID_REFERENCE },
-      };
-    }
-    if (checkError.kind === "unsupported_media_type") {
-      return {
-        ok: false,
-        value: {
-          message: TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE,
-          code: ERROR_INVALID_REFERENCE_TYPE,
-        },
-      };
-    }
-    return {
-      ok: false,
-      value: {
-        message: textIndexOverflowMessage(checkError.max),
-        code: ERROR_UNSUPPORTED_INPUT,
-        params: { max_reference_count: checkError.max },
-      },
-    };
-  }
+  if (checkError) return failSync(checkError);
   return { ok: true, value: { merged, index, canvas } };
 }
 
@@ -1225,32 +1357,49 @@ async function resolveTargetSnapshot(args: {
       JSON.parse(canvas.edges ?? "[]"),
       targetNodeId,
     );
-    // IKFM3S §5：以最终参考编号编译绑定区间；worker 直接消费冻结正文。
-    if (args.textIndex && args.textIndex.refs.length > 0) {
-      const mediaByTextNode = textAttachmentMediaOf(args.textIndex);
+    // 文本卡 @ 图片提交写成 &素材id&；视频/音频标签仍按生成参考编号编译。
+    {
+      const mediaByTextNode = args.textIndex && args.textIndex.refs.length > 0
+        ? textAttachmentMediaOf(args.textIndex)
+        : new Map<string, TextAttachmentMedia[]>();
       const parsed = parseReferences(body.references);
       const finalRefs = parsed.kind === "ok" ? parsed.items.map((item) => ({
         id: String(item.asset_id ?? item.material_id), role: item.role, type: item.type,
       })) : [];
       textAttachments = textAttachments.map((attachment) => {
-        const media = mediaByTextNode.get(attachment.node_id);
-        if (!media?.length) return attachment;
         const data = nodes.find((node) => node.id === attachment.node_id)?.data;
         const mentions = (Array.isArray(data?.mediaMentions) ? data.mediaMentions : [])
           .flatMap((raw) => {
             const parsedMention = mediaMentionSchema.safeParse(raw);
             return parsedMention.success ? [parsedMention.data] : [];
           }).sort((a, b) => b.start - a.start);
-        // 区间基于 Markdown 源；从后向前替换避免编号长度变化移动后续区间。
+        const refs = (Array.isArray(data?.mediaRefs) ? data.mediaRefs : [])
+          .flatMap((raw) => {
+            const parsedRef = mediaRefSchema.safeParse(raw);
+            return parsedRef.success ? [parsedRef.data] : [];
+          });
+        const media = mediaByTextNode.get(attachment.node_id);
+        if (mentions.length === 0) {
+          return media?.length ? { ...attachment, media } : attachment;
+        }
         let text = typeof data?.text === "string" ? data.text : attachment.text;
         for (const mention of mentions) {
-          if (!media.some((item) => item.node_id === mention.nodeId && item.asset_id === mention.assetId)) continue;
+          const ref = refs.find((item) => item.nodeId === mention.nodeId && item.assetId === mention.assetId);
+          if (ref?.mediaType === "image") {
+            text = text.slice(0, mention.start) + imageMentionSendToken(mention.assetId) + text.slice(mention.end);
+            continue;
+          }
+          if (!media?.some((item) => item.node_id === mention.nodeId && item.asset_id === mention.assetId)) continue;
           const label = type === "image"
             ? imageRefLabel(mention.assetId, args.referenceAssetIds)
             : videoRefLabel(mention.assetId, finalRefs);
           if (label !== null) text = text.slice(0, mention.start) + label + text.slice(mention.end);
         }
-        return { ...attachment, text, media };
+        return {
+          ...attachment,
+          text,
+          ...(media?.length ? { media } : {}),
+        };
       });
     }
     // IKFCXE：主提示词为空时保持既有音频校验（不引入"仅附件生成"），
@@ -1416,13 +1565,15 @@ export async function handleCreateGenerationJob(
   const capability = whitelist.find((m) => m.model_id === resolvedModelId);
   const maxReferenceImages =
     capability?.features?.max_reference_images ?? DEFAULT_MAX_REFERENCE_IMAGES;
-  // ADR-0086：视频/音频参考分类限制校验读能力行 features——strategy.validate 前以旧默认值兜底，
+  // ADR-0086：图/视频/音频参考分类限制校验读能力行 features——strategy.validate 前以旧默认值兜底，
   // 此处拿到白名单 capability 后以真实 features 重跑（超限在接纳当下 400，含模型真实上限文案）。
-  if (capability && (type === "video" || type === "audio")) {
+  if (capability && (type === "video" || type === "audio" || type === "image")) {
     const revalidated =
       type === "video"
         ? validateVideo(body, capability)
-        : validateAudioReferences(body, capability.features);
+        : type === "audio"
+          ? validateAudioReferences(body, capability.features)
+          : validateImageReferences(body, capability.features);
     if (revalidated)
       return fail(400, revalidated.message, { code: revalidated.code });
   }
@@ -1510,8 +1661,9 @@ export async function handleCreateGenerationJob(
     });
   }
   // IKFM3S §2/§3 + IKFM3W §10 + IKFM41 §11：图片/视频/音频目标文本带入参考——按最新画布
-  // 派生、能力校验并权威并入（图片：body 缺失项追加 input_asset_ids 尾部；视频/音频：以合并后
-  // 的单数组 references 替代）；后续存在性/类型复核、prompt_doc 编号与冻结统一用合并结果。
+  // 派生、能力校验并权威并入（图片/视频/音频：以合并后的单数组 references 替代；图片未传
+  // references 时仍把缺失项追加 input_asset_ids 尾部）；后续存在性/类型复核、prompt_doc
+  // 编号与冻结统一用合并结果。
   const textIndexRefs = await resolveTextIndexReferences({
     type,
     body,
@@ -1530,7 +1682,7 @@ export async function handleCreateGenerationJob(
     });
   }
   const referenceAssetIds = textIndexRefs.value.merged;
-  // IKFM3W §10 / IKFM41 §11：视频/音频目标以合并后的 references 供 composeInput 与正文标签
+  // 图/视频/音频目标以合并后的 references 供 composeInput 与正文标签
   // 复核统一消费（文本带入追加项已含；references 缺失且画布有文本带入时为新建的单数组）。
   const effectiveBody: CreateGenerationJobBody = textIndexRefs.value.videoReferences
     ? { ...body, references: textIndexRefs.value.videoReferences }

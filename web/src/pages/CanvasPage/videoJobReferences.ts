@@ -35,3 +35,12 @@ export function buildVideoJobReferencesFromList(
 ): GenerationRefItem[] {
   return list.map((item) => toJobRef(item, canvasRoleToJobRole(item.role)));
 }
+
+/** 图片参考：与视频/音频同一单数组 references（role 恒 reference、type 恒 image） */
+export function buildImageJobReferences(assetIds: readonly string[]): GenerationRefItem[] {
+  return assetIds.map((assetId) => ({
+    role: 'reference' as const,
+    type: 'image' as const,
+    asset_id: assetId,
+  }));
+}
