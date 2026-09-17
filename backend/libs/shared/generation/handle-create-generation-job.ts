@@ -1181,14 +1181,14 @@ function textAttachmentMediaOf(index: TargetTextIndex): Map<string, TextAttachme
 
 /** IKDLQF/IKDLQG/IKDMQT/IKFCXE：携带 target_node_id 时，接纳当下读取最新 Canvas 校验目标节点；
  *  文本附件推导覆盖图片/视频/音频（IKFCXE 解除音频限制），空 prompt 由组合校验拒绝。
- *  IKFA1P：正文含文本标签时组合按编号清单格式（长度校验跟随实际组合结果）。 */
+ *  IKG6EK / ADR-0088：正文一律取 parameters.prompt；prompt_doc 已退役，不再有编号清单组合。 */
 async function resolveTargetSnapshot(args: {
   type: GenerationType;
   body: CreateGenerationJobBody;
   promptText: string;
   projectId: string;
   deps: Pick<GenerationDeps, "canvas">;
-  /** 正文文本标签已复核的同次画布读取；编号与最终冻结不得读取不同版本。 */
+  /** 同次画布读取：文本附件与目标坐标系必须来自同一版本，不得二次读取。 */
   canvas?: Awaited<ReturnType<CanvasRepo["getByProject"]>>;
   /** ADR-0085：所选模型的 raw prompt 上限；组合闸取 max(契约预算, 模型值)。 */
   maxPromptLength: number;
@@ -1333,7 +1333,7 @@ export interface MaterialGate {
   }): Promise<string | null>;
 }
 
-/** 视频正文标签编号基准：提交 references 单数组按提交结构编译（与 IKFA1O 复核同一投影）。 */
+/** 视频参考投影：提交 references 单数组按提交结构编译——引用标记转移与标签派生共用同一投影。 */
 function videoRefItemsOf(v: unknown): VideoRefItem[] {
   const parsed = parseReferences(v);
   return parsed.kind === "ok"
@@ -1484,7 +1484,7 @@ export async function handleCreateGenerationJob(
   }
   // IKFM3S §2/§3 + IKFM3W §10 + IKFM41 §11：图片/视频/音频目标文本带入参考——按最新画布
   // 派生、能力校验并权威并入（图片：body 缺失项追加 input_asset_ids 尾部；视频/音频：以合并后
-  // 的单数组 references 替代）；后续存在性/类型复核、prompt_doc 编号与冻结统一用合并结果。
+  // 的单数组 references 替代）；后续存在性/类型复核与冻结统一用合并结果。
   const textIndexRefs = await resolveTextIndexReferences({
     type,
     body,

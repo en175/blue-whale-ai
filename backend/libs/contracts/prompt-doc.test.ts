@@ -35,6 +35,7 @@ describe("videoRefLabel（视频角色与同类型编号，IKFA1O）", () => {
     ref("9", "reference"),
     ref("11", "reference"),
     ref("13", "reference", "video"),
+    ref("15", "reference", "audio"),
   ];
 
   it("首尾帧按角色显示，不占同类型编号", () => {
@@ -42,10 +43,11 @@ describe("videoRefLabel（视频角色与同类型编号，IKFA1O）", () => {
     expect(videoRefLabel("8", REFS)).toBe("尾帧");
   });
 
-  it("普通参考按同类型连续编号（图片N / 视频N 各自计数）", () => {
+  it("普通参考按同类型连续编号（图片N / 视频N / 音频N 各自计数）", () => {
     expect(videoRefLabel("9", REFS)).toBe("图片1");
     expect(videoRefLabel("11", REFS)).toBe("图片2");
     expect(videoRefLabel("13", REFS)).toBe("视频1");
+    expect(videoRefLabel("15", REFS)).toBe("音频1");
   });
 
   it("身份不在集合 → null", () => {
