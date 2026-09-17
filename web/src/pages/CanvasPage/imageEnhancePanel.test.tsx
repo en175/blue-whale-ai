@@ -60,7 +60,10 @@ const apiMocks = vi.hoisted(() => ({
   cancelGenerationJob: vi.fn(),
   retryGenerationJob: vi.fn(),
   createMediaExtraction: vi.fn(),
-  createImageEnhancement: vi.fn(async () => ({ job_id: '88', status: 'queued' as const })),
+  createImageEnhancement: vi.fn(async (_projectId: string, _payload: Record<string, unknown>) => ({
+    job_id: '88',
+    status: 'queued' as const,
+  })),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
 }));
@@ -270,7 +273,7 @@ describe('IKGM9O 发送创建任务闭环', () => {
     // 创建请求已发出 → 面板自动关闭
     expect(panelSend()).toBeNull();
     expect(apiMocks.createImageEnhancement).toHaveBeenCalledTimes(1);
-    const [projectId, payload] = apiMocks.createImageEnhancement.mock.calls[0] as [string, Record<string, unknown>];
+    const [projectId, payload] = apiMocks.createImageEnhancement.mock.calls[0];
     expect(projectId).toBe('p1');
     // 六键冻结（默认档 Pro：色彩校正冻结 false）
     expect(payload).toEqual({
@@ -333,7 +336,7 @@ describe('IKGM9O 重新编辑分流与回填', () => {
     await renderPage();
 
     await act(async () => {
-      (mediaNode('h1').data as Record<string, unknown>).onReEdit('h1');
+      ((mediaNode('h1').data as Record<string, unknown>).onReEdit as (id: string) => void)('h1');
     });
     expect(panelSend()).toBeTruthy();
     // lastParams 回填：Max / 4x / 保真度优先 / 色彩校正开
@@ -354,7 +357,7 @@ describe('IKGM9O 重新编辑分流与回填', () => {
     await renderPage();
 
     await act(async () => {
-      (mediaNode('h1').data as Record<string, unknown>).onReEdit('h1');
+      ((mediaNode('h1').data as Record<string, unknown>).onReEdit as (id: string) => void)('h1');
     });
     await act(async () => {
       panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -419,7 +422,7 @@ describe('IKGM9O 链式放大', () => {
     await renderPage();
 
     await act(async () => {
-      (mediaNode('h1').data as Record<string, unknown>).onEnhanceImage('h1');
+      ((mediaNode('h1').data as Record<string, unknown>).onEnhanceImage as (id: string) => void)('h1');
     });
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(3);
     const chained = (flowProps.current.mediaNodes as Node[]).find((n) => n.id !== 'i1' && n.id !== 'h1')!;

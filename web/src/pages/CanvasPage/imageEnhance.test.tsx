@@ -243,7 +243,7 @@ describe('IKGM9F 高清放大建卡链', () => {
     const draft = (flowProps.current.mediaNodes as Node[]).find((n) => n.id !== 'i1')!;
 
     await act(async () => {
-      (draft.data as Record<string, unknown>).onEnhanceImage(draft.id);
+      ((draft.data as Record<string, unknown>).onEnhanceImage as (id: string) => void)(draft.id);
     });
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);
   });
