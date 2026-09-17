@@ -46,6 +46,10 @@ export interface SnapshotAssetSummary {
    *  `material_status_checked_at` 供前端判断这个镜像有多旧。 */
   material_status: string | null;
   material_status_checked_at: string | null;
+  /** 素材内容 md5；老资产未落 md5 时为 null。前端据此比对/去重同内容素材。
+   *  注意大小写：写入侧未归一化（upload 校验用 /^[a-f0-9]{32}$/i 但原样落库），
+   *  比对时按大小写不敏感处理，或先在前端 toLowerCase()。 */
+  md5: string | null;
 }
 
 export interface SnapshotData {
@@ -128,6 +132,7 @@ export async function handleGetSnapshot(
       material_group_id: asset.material_group_id ?? null,
       material_status: asset.material_status ?? null,
       material_status_checked_at: asset.material_status_checked_at ?? null,
+      md5: asset.md5,
     };
   }
 
