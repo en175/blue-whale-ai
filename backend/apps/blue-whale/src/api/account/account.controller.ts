@@ -26,7 +26,8 @@ export class AccountController {
     if (!token) throw new NewApiError("未提供有效令牌", 401, "unauthorized");
     const searchParams = new URLSearchParams(query);
     const { page, pageSize } = parseRecordPaging(searchParams);
-    // 参数校验放在 try 之外：非法 type 是 400 的客户端错误，不该被 toUpstreamError 当成上游故障。
+    // 参数校验放在 try 之外：这条错误里没有上游参与，不该过 toUpstreamError 的重包装
+    // （它把非 4xx 一律改写成 502），也别让 invalid_log_type 这个细分码被冲掉。
     const type = parseConsumeLogTypes(searchParams);
     try {
       const result = await this.account.listUserConsumeLogs(token, {

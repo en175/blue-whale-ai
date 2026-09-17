@@ -1,4 +1,4 @@
-import { NewApiError } from "@blue-whale/core";
+import { NewApiError } from "@lib/core";
 import { creditsToNumber, quotaToCredits } from "@lib/shared/credits/credits.js";
 import { QUOTA_PER_UNIT } from "@lib/shared/topup-tier/constants.js";
 
@@ -31,8 +31,9 @@ const DEFAULT_CONSUME_LOG_TYPES: readonly number[] = [
  * 而 1 充值 / 3 管理 / 4 系统 / 5 错误 / 7 登录都会把账单之外的行混进消费记录。
  * 非法值一律 400，**绝不降级成「不过滤」**——那正是本单要堵的静默错答案。
  *
- * 显式传值可收窄：`type=2` 只看消耗、`type=6` 只看退款。多个类型用逗号表达；
- * `?type=2&type=6` 取首个（与上游 `c.Query("type")` 同语义）。
+ * 显式传值可收窄：`type=2` 只看消耗、`type=6` 只看退款。多个类型用逗号表达。
+ * 重复键（`?type=2&type=6`）经 `URLSearchParams` 拼成 `"2,6"`，拿到的是**并集**而非首个
+ * ——与上游 gin 的 `c.Query("type")` 取首个不同；但每一段照样过白名单，边界没放宽。
  */
 export function parseConsumeLogTypes(searchParams: URLSearchParams): number[] {
   const raw = searchParams.get("type");

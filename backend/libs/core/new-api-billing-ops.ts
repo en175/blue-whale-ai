@@ -281,16 +281,23 @@ export function createNewApiBillingOps(request: NewApiRequest) {
     },
 
     /** 分页拉当前用户消费流水：GET /api/log/self（Go 按 id desc，即时间倒序）。
-     *  type 缺省 2 = LogTypeConsume，可传数组取并集（IKGCWU；上游 IKGCWR 起支持
-     *  逗号分隔，`[2, 6]` → `type=2,6`）；信封同 topup/self 的 PageInfo。
-     *  ⚠️ `type=0` 在上游是「不加过滤」哨兵，会返回**全部**日志类型——多值上线后
-     *  误传 0 是个不报错的错答案，调用方只应传 LogType 里确切的类型号。
+     *  `type` 可传数组取并集（IKGCWU；上游 IKGCWR 起支持逗号分隔，`[2, 6]` → `type=2,6`）；
+     *  信封同 topup/self 的 PageInfo。
+     *  **必传**，故意不给默认值：账户端点的契约是「消耗 + 退款」，这一层若自带一个
+     *  `2`（只看消耗）的缺省，漏传的调用方会静默拿到一份少了一半的账单——正是本单要治的
+     *  那类病。要什么类型由调用方明写。
+     *  ⚠️ `type=0` 在上游是「不加过滤」哨兵，会返回**全部**日志类型——误传 0 是个不报错的
+     *  错答案，调用方只应传 LogType 里确切的类型号。
      *  鉴权（IK6M2F）：log/self 已迁账户层 AccountTokenOrUserAuth，只凭 Bearer
      *  sk-xxx 证明账户身份；User ID 由 Go 从 Token 属主解析，客户端不得发送
      *  New-Api-User 头（对齐 topup/self）。 */
     async listUserConsumeLogs(
       token: string,
-      options: { page?: number; pageSize?: number; type?: number | readonly number[] } = {},
+      options: {
+        page?: number;
+        pageSize?: number;
+        type: number | readonly number[];
+      },
     ): Promise<NewApiUserLogListResult> {
       const page = Math.max(1, Math.trunc(options.page ?? 1));
       const pageSize = Math.min(100, Math.max(1, Math.trunc(options.pageSize ?? 20)));

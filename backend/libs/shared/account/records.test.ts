@@ -91,6 +91,11 @@ describe("parseConsumeLogTypes（IKGCWU type 白名单）", () => {
     expect(parseConsumeLogTypes(new URLSearchParams("type=2,6"))).toEqual([2, 6]);
   });
 
+  it("重复键取并集（Express 给数组，URLSearchParams 拼成 '2,6'）", () => {
+    // Nest 的 @Query() 遇到 ?type=2&type=6 给的是数组，不是首个值。
+    expect(parseConsumeLogTypes(new URLSearchParams({ type: ["2", "6"] }))).toEqual([2, 6]);
+  });
+
   it("容忍逗号两侧空白", () => {
     expect(parseConsumeLogTypes(new URLSearchParams("type=2, 6"))).toEqual([2, 6]);
   });

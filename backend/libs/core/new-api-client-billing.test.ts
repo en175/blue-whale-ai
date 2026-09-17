@@ -162,7 +162,7 @@ describe("new-api client —— 充值与流水", () => {
       payment_method: "",
     });
 
-    const logs = await client.listUserConsumeLogs("sk-user-token");
+    const logs = await client.listUserConsumeLogs("sk-user-token", { type: 2 });
     expect(logs.total).toBe(1);
     expect(logs.items[0]).toEqual({
       id: 7,
@@ -204,13 +204,14 @@ describe("new-api client —— 充值与流水", () => {
     await client.listUserConsumeLogs("sk-user-token", { type: [2, 6] });
     expect(lastUrl()).toContain("/api/log/self?p=1&page_size=20&type=2,6");
 
-    // 单值 / 缺省与改动前逐字一致
+    // 单值与改动前逐字一致
+    await client.listUserConsumeLogs("sk-user-token", { type: 2 });
+    expect(lastUrl()).toContain("type=2");
     await client.listUserConsumeLogs("sk-user-token", { type: 6 });
     expect(lastUrl()).toContain("type=6");
-    await client.listUserConsumeLogs("sk-user-token");
-    expect(lastUrl()).toContain("type=2");
 
-    // 空数组不能退化成「不带 type」——上游无 type = 不过滤 = 返回全部日志类型
+    // 空数组（JS 调用方仍能传出来）不能退化成「不带 type」——
+    // 上游无 type = 不过滤 = 返回全部日志类型。
     await client.listUserConsumeLogs("sk-user-token", { type: [] });
     expect(lastUrl()).toContain("type=2");
   });
