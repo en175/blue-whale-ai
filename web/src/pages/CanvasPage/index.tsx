@@ -1037,7 +1037,9 @@ export default function CanvasPage() {
   }, [currentId]);
 
   /** 加载当前项目快照（画布水合：节点 + 视口 + 版本号），失败静默降级为空画布 */
-  const { doc, assets: snapshotAssets, refetch, acceptDoc, legacyMigration } = useCanvasDoc(currentId);
+  const { doc, assets: snapshotAssets, refetch, acceptDoc, legacyMigration, patchAsset } = useCanvasDoc(currentId);
+  const snapshotAssetsRef = useRef(snapshotAssets);
+  snapshotAssetsRef.current = snapshotAssets;
 
   /** 旧生成卡迁移历史（IKDLQK）：水合后拉取，无历史或读取失败时入口隐藏 */
   const historyQuery = useQuery({ ...legacyCardHistoryOptions(currentId), enabled: Boolean(doc && currentId) });
@@ -1303,22 +1305,23 @@ export default function CanvasPage() {
     };
   };
 
-  /** 图片/视频：快照 material_id 仍用于回填身份；合规角标只认 material_status === Active（音频不参与） */
+  /** 图片/视频：身份只认快照 assets[assetId].material_id；合规角标只认 material_status === Active（音频不参与） */
   const characterLibraryVerifiedPatch = (
     data: Record<string, unknown>,
     snapshotMaterialId?: string | null,
-    assetId?: string | number,
     snapshotMaterialStatus?: string | null,
   ): Record<string, unknown> => {
     if (data.mediaType === 'audio') return {};
     const verifiedId = resolveCharacterLibraryMaterialId({
       mediaType: data.mediaType,
       snapshotMaterialId,
-      nodeMaterialId: data.materialId,
-      assetId,
     });
     const patch: Record<string, unknown> = {};
-    if (verifiedId && data.materialId !== verifiedId) patch.materialId = verifiedId;
+    if (verifiedId) {
+      if (data.materialId !== verifiedId) patch.materialId = verifiedId;
+    } else if (data.materialId) {
+      patch.materialId = undefined;
+    }
     if (snapshotMaterialStatus !== undefined) {
       const passed = snapshotMaterialStatus === 'Active';
       const failed = snapshotMaterialStatus === 'Failed';
@@ -1342,9 +1345,7 @@ export default function CanvasPage() {
       if (isMaterialLibraryId(aid == null ? undefined : String(aid))) {
         const src = typeof data.src === 'string' ? data.src : '';
         if (src && !src.startsWith('blob:')) {
-          const patch: Record<string, unknown> = {
-            ...characterLibraryVerifiedPatch(data, undefined, aid),
-          };
+          const patch: Record<string, unknown> = {};
           if (data.assetMissing) patch.assetMissing = undefined;
           return Object.keys(patch).length === 0 ? node : { ...node, data: { ...data, ...patch } };
         }
@@ -1356,7 +1357,7 @@ export default function CanvasPage() {
         const fill: Record<string, number> = {};
         if (typeof data.width !== 'number' && typeof asset?.width === 'number') fill.width = asset.width;
         if (typeof data.height !== 'number' && typeof asset?.height === 'number') fill.height = asset.height;
-        const verified = characterLibraryVerifiedPatch(data, asset.material_id, aid, asset.material_status ?? null);
+        const verified = characterLibraryVerifiedPatch(data, asset.material_id, asset.material_status ?? null);
         return data.src === url && !data.assetMissing && Object.keys(fill).length === 0 && Object.keys(verified).length === 0
           ? node
           : { ...node, data: { ...data, ...fill, ...verified, src: url, assetMissing: undefined } };
@@ -3669,19 +3670,29 @@ export default function CanvasPage() {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node) return undefined;
     const d = (node.data ?? {}) as Record<string, unknown>;
+    if (d.assetMissing === true) return undefined;
     const assetId = d.assetId != null ? String(d.assetId) : '';
     const url = typeof d.src === 'string' ? d.src : '';
     const mediaType = d.mediaType === 'video' || d.mediaType === 'audio' ? d.mediaType : 'image';
     const verifiedId = resolveCharacterLibraryMaterialId({
       mediaType,
-      nodeMaterialId: d.materialId,
-      assetId,
+      snapshotMaterialId: snapshotAssetsRef.current[assetId]?.material_id,
     });
     if (verifiedId) {
       startNodeCompliance(id);
       try {
         await waitComplianceAssetReady(verifiedId);
         if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
+        if (assetId) {
+          const current = snapshotAssetsRef.current[assetId];
+          if (current) {
+            snapshotAssetsRef.current = {
+              ...snapshotAssetsRef.current,
+              [assetId]: { ...current, material_id: verifiedId, material_status: 'Active' },
+            };
+          }
+          patchAsset?.(assetId, { material_id: verifiedId, material_status: 'Active' });
+        }
         patchNodeCompliance(id, {
           complianceBusy: false,
           compliancePassed: true,
@@ -3712,6 +3723,16 @@ export default function CanvasPage() {
         return undefined;
       }
       if (toastSuccess) showToast('success', COMPLIANCE_SUCCESS_TOAST);
+      if (assetId && result.materialId) {
+        const current = snapshotAssetsRef.current[assetId];
+        if (current) {
+          snapshotAssetsRef.current = {
+            ...snapshotAssetsRef.current,
+            [assetId]: { ...current, material_id: result.materialId, material_status: 'Active' },
+          };
+        }
+        patchAsset?.(assetId, { material_id: result.materialId, material_status: 'Active' });
+      }
       patchNodeCompliance(id, {
         complianceBusy: false,
         compliancePassed: true,
@@ -3870,6 +3891,22 @@ export default function CanvasPage() {
 
     const adoptedIds: string[] = [];
     const nodes: Node[] = [];
+    const reusedCompliance: Array<{ id: string; patch: Record<string, unknown> }> = [];
+    // 资产库 Active（成功角标）或素材库 Asset- 条目：落入画布即视为已通过合规
+    const complianceFromAsset = (asset: AssetRecord): Record<string, unknown> => {
+      if (asset.type === 'audio') return {};
+      const id = String(asset.id);
+      const fromLibrary = isMaterialLibraryId(id);
+      const materialId = fromLibrary
+        ? id
+        : (typeof asset.material_id === 'string' && asset.material_id ? asset.material_id : undefined);
+      if (asset.material_status !== 'Active' && !fromLibrary) return {};
+      return {
+        ...(materialId ? { materialId } : {}),
+        compliancePassed: true,
+        complianceFailed: false,
+      };
+    };
     for (const asset of selectedAssets) {
       const assetId = String(asset.id);
       const mediaType = asset.type === 'video' ? 'video' : asset.type === 'audio' ? 'audio' : 'image';
@@ -3882,13 +3919,14 @@ export default function CanvasPage() {
             baseSourceError(n) === null,
         );
         if (existing) {
+          const patch = complianceFromAsset(asset);
+          if (Object.keys(patch).length > 0) reusedCompliance.push({ id: existing.id, patch });
           adoptedIds.push(existing.id);
           continue;
         }
       }
       const fileNameFromUrl = assetDisplayName(asset);
       const nodeId = newNodeId('media');
-      const materialId = isMaterialLibraryId(assetId) ? assetId : undefined;
       nodes.push({
         id: nodeId,
         type: 'mediaNode' as const,
@@ -3899,7 +3937,7 @@ export default function CanvasPage() {
           fileName: fileNameFromUrl,
           mediaType,
           assetId,
-          ...(materialId ? { materialId, ...(asset.type !== 'audio' ? { compliancePassed: true } : {}) } : {}),
+          ...complianceFromAsset(asset),
           width: asset.width ?? undefined,
           height: asset.height ?? undefined,
           duration: asset.duration ?? undefined,
@@ -3930,7 +3968,15 @@ export default function CanvasPage() {
     }
 
     nodes.forEach((node) => pendingNodeIdsRef.current.add(node.id));
-    setMediaNodes((prev) => [...prev, ...nodes]);
+    setMediaNodes((prev) => {
+      const patched = reusedCompliance.length === 0
+        ? prev
+        : prev.map((node) => {
+            const hit = reusedCompliance.find((item) => item.id === node.id);
+            return hit ? { ...node, data: { ...node.data, ...hit.patch } } : node;
+          });
+      return [...patched, ...nodes];
+    });
 
     // 幂等补关联：素材已属当前项目也无副作用；失败仅提示，不影响节点展示。
     // 真实人像库条目是素材库 Asset- 前缀 ID，不能当本地 assets 表 id 去 link。

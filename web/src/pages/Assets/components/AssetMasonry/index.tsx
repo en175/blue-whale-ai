@@ -321,6 +321,11 @@ function AssetCard({
           </div>
         )}
         <span className={styles.typeBadge}>{typeLabel[asset.type]}</span>
+        {asset.material_status === 'Active' && (
+          <span className={styles.complianceBadge} title="校验通过">
+            <img src="/success.png" alt="" />
+          </span>
+        )}
         {/* 多选模式：左上角勾选角标，选中态高亮 */}
         {isSelectable && (
           <span
