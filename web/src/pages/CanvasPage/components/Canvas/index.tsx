@@ -741,8 +741,10 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
         {showMiniMap && (
           <MiniMap
             position="bottom-left"
-            nodeColor="#333"
-            maskColor="rgba(0, 0, 0, 0.7)"
+            nodeColor="#9a9a9a"
+            maskColor="transparent"
+            maskStrokeColor="#ffffff"
+            maskStrokeWidth={2}
             pannable
             zoomable
             style={{ bottom: 60 }}
