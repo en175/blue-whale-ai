@@ -63,6 +63,30 @@ export function groupMemberZ(stackIndex: number): number {
   return groupFrameZ(stackIndex) + 10;
 }
 
+/** 画布坐标是否落在某张内容卡（非组框）内。多卡重叠取列表中更靠后的一张。
+ *  未测量的非文本卡不猜测尺寸，避免小卡周围出现 360×292 幽灵命中区挡住拖组。 */
+export function contentNodeAtFlowPoint(nodes: Node[], point: { x: number; y: number }): Node | null {
+  let hit: Node | null = null;
+  for (const node of nodes) {
+    if (node.type === 'groupFrame') continue;
+    const width = node.measured?.width ?? (typeof node.width === 'number' ? node.width : null);
+    const height = node.measured?.height ?? (typeof node.height === 'number' ? node.height : null);
+    const fallback = node.type === 'textNode';
+    const w = width ?? (fallback ? 360 : null);
+    const h = height ?? (fallback ? 292 : null);
+    if (w == null || h == null) continue;
+    if (
+      point.x >= node.position.x
+      && point.x <= node.position.x + w
+      && point.y >= node.position.y
+      && point.y <= node.position.y + h
+    ) {
+      hit = node;
+    }
+  }
+  return hit;
+}
+
 /** 把指定组移到数组末尾（视觉与命中最上层） */
 export function bringGroupToFront(groups: CanvasGroup[], groupId: string): CanvasGroup[] {
   const index = groups.findIndex((g) => g.id === groupId);
