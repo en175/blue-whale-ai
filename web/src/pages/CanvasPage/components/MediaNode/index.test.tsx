@@ -150,7 +150,8 @@ describe('MediaNode image-quality menu（IKGOT7 高清 ▾）', () => {
 
   it('点「擦除」派发 onEraseImage（携带节点 id）', async () => {
     const onEraseImage = vi.fn();
-    await renderNode('image', { data: { onEraseImage } });
+    // mime 补 png：默认 fixture 文件名 .bin 在擦除格式白名单外（png/jpg/jpeg/heic）会被置灰
+    await renderNode('image', { data: { onEraseImage, mime: 'image/png' } });
     await openQualityMenu();
     await act(async () => {
       mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!.click();
@@ -167,9 +168,9 @@ describe('MediaNode image-quality menu（IKGOT7 高清 ▾）', () => {
     const enhance = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-enhance"]')!;
     expect(enhance.getAttribute('aria-disabled')).toBeNull();
 
-    // 高>1440 同样置灰
+    // 高>1440 同样置灰（mime 补 png，避免默认 .bin 文件名先命中格式门槛）
     const onEraseImage = vi.fn();
-    await renderNode('image', { id: 'tall-node', data: { width: 1000, height: 2000, onEraseImage } });
+    await renderNode('image', { id: 'tall-node', data: { width: 1000, height: 2000, mime: 'image/png', onEraseImage } });
     await openQualityMenu();
     expect(
       mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!.getAttribute('title'),

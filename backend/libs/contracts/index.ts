@@ -171,6 +171,7 @@ export {
   IMAGE_ERASE_MIN_SIDE_PX,
   IMAGE_ERASE_MAX_FILE_BYTES,
   IMAGE_ERASE_INPUT_FORMATS,
+  IMAGE_ERASE_MASK_ASSET_SOURCE,
   imageEraseInputSchema,
   type ImageEraseScene,
   type ImageEraseInput,

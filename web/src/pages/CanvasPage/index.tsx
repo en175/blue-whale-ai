@@ -58,7 +58,26 @@ import {
   type ImageEnhanceIdentity,
   type ImageEnhancePanelParams,
 } from './imageEnhance';
+import {
+  IMAGE_ERASE_EDGE_ORIGIN,
+  maskHasPaintArea,
+  type ImageEraseIdentity,
+  type ImageEraseInput,
+} from './imageErase';
+import {
+  applyMaskOp,
+  canRedoMaskEdit,
+  canUndoMaskEdit,
+  EMPTY_MASK_EDIT,
+  redoMaskEdit,
+  undoMaskEdit,
+  type MaskCoordinateSpace,
+  type MaskEditState,
+  type MaskOp,
+  type MaskPoint,
+} from './eraseMask';
 import ImageEnhanceDialog from './components/ImageEnhanceDialog';
+import ImageEraseDialog, { type EraseTool } from './components/ImageEraseDialog';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
@@ -106,6 +125,7 @@ import {
   fetchJobStatus,
   createMediaExtraction,
   createImageEnhancement,
+  createImageErase,
   readJobFailText,
   type ImageJobParameters,
   type VideoJobParameters,
@@ -296,10 +316,21 @@ export default function CanvasPage() {
   const [enhanceSeed, setEnhanceSeed] = useState<{ ts: number; sourceDims: { width?: number; height?: number }; initialParams: ImageEnhancePanelParams | null } | null>(null);
   /** 高清面板隐藏豁免（口径同 imagePanelHiddenRef）：刚关闭面板后的选中变化不回弹重开 */
   const enhancePanelHiddenRef = useRef(false);
-  /** 擦除编辑态（IKGOT7）：处于擦除编辑的源图卡 node id，null=未进入。
-   *  本票仅开关与占位呈现（点「擦除」置位）；擦除工具条/发送条/指针接管/四退出
-   *  （X/Esc/点其他卡/点空白，未发送退出丢弃遮罩）由 IKGOTB 交付。 */
+  /** 擦除编辑态（IKGOT7 开关 / IKGOTB 完整交互）：处于擦除编辑的源图卡 node id，null=未进入。
+   *  编辑态的其余状态（工具/笔刷/遮罩 ops/活笔/发送中）提升在本页——源图卡内的
+   *  EraseMaskLayer 与浮出的工具条/发送条共享同一份；未发送退出（X/Esc/点其他卡/点空白）全部丢弃。 */
   const [eraseTargetNodeId, setEraseTargetNodeId] = useState<string | null>(null);
+  const [eraseTool, setEraseTool] = useState<EraseTool>('brush');
+  const [eraseBrushRadius, setEraseBrushRadius] = useState(20);
+  const [eraseMaskState, setEraseMaskState] = useState<MaskEditState>(EMPTY_MASK_EDIT);
+  /** 拖拽进行中的活笔（显示坐标，pointerup 才经 applyMaskOp 固化；null=无拖拽） */
+  const [eraseLiveOp, setEraseLiveOp] = useState<MaskOp | null>(null);
+  /** 活笔最新值（pointerup 回调读，避免闭包陈旧） */
+  const eraseLiveOpRef = useRef<MaskOp | null>(null);
+  /** 拖拽收集的折线点（画笔/橡皮共用） */
+  const eraseStrokePointsRef = useRef<MaskPoint[]>([]);
+  /** 擦除发送中（遮罩上传+创建请求期间，工具条/发送条只读防重复提交） */
+  const [eraseSubmitting, setEraseSubmitting] = useState(false);
   const [showEdges, setShowEdges] = useState(true);
   /** 对齐吸附开关（IKGGCT T3）：全局持久化（不分画布文档），初始读 localStorage，默认开 */
   const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
@@ -914,6 +945,61 @@ export default function CanvasPage() {
         dialogWidth: 320,
       })
     : null;
+  /** 擦除编辑态跟随锚（IKGOTB）：源图卡上方工具条 / 下方发送条。发送条复用 computeFollowAnchor
+   *  （恒锚节点下方）；工具条在节点上方，手动换算（工具条高约 42 + 间距 10）。 */
+  const eraseSourceNode = eraseTargetNodeId
+    ? mediaNodes.find((n) => n.id === eraseTargetNodeId) ?? null
+    : null;
+  const eraseToolbarAnchor = (() => {
+    if (!eraseSourceNode || wrapperSize.width <= 0) return null;
+    const box = nodeBoxOf(eraseSourceNode);
+    const zoom = liveViewport.zoom || 1;
+    const screenLeft = eraseSourceNode.position.x * zoom + liveViewport.x;
+    const screenTop = eraseSourceNode.position.y * zoom + liveViewport.y;
+    const center = Math.round(screenLeft + (box.width * zoom) / 2);
+    return {
+      left: Math.max(60, Math.min(center, wrapperSize.width - 60)),
+      top: Math.round(Math.max(8, screenTop - 52)),
+    };
+  })();
+  const eraseSendBarAnchor = eraseSourceNode && wrapperSize.width > 0
+    ? computeFollowAnchor({
+        nodeX: eraseSourceNode.position.x,
+        nodeY: eraseSourceNode.position.y,
+        nodeWidth: nodeBoxOf(eraseSourceNode).width,
+        nodeHeight: nodeBoxOf(eraseSourceNode).height,
+        viewport: liveViewport,
+        containerWidth: wrapperSize.width,
+        containerHeight: wrapperSize.height,
+        dialogWidth: 240,
+      })
+    : null;
+  /** 擦除遮罩坐标空间（显示尺寸 × 源图自然分辨率）：显示尺寸与 MediaNode 内容区同源
+   *  （mediaContentBox 保持源图宽高比）；自然分辨率缺失（存量图未实测）时为 null，涂抹发送禁用。 */
+  const eraseDisplayBox = (() => {
+    if (!eraseSourceNode) return null;
+    const d = (eraseSourceNode.data ?? {}) as Record<string, unknown>;
+    return mediaContentBox({
+      mediaType: 'image',
+      width: typeof d.width === 'number' ? d.width : undefined,
+      height: typeof d.height === 'number' ? d.height : undefined,
+    });
+  })();
+  const eraseMaskSpace = (() => {
+    if (!eraseSourceNode || !eraseDisplayBox) return null;
+    const d = (eraseSourceNode.data ?? {}) as Record<string, unknown>;
+    if (typeof d.width !== 'number' || typeof d.height !== 'number') return null;
+    return {
+      displayWidth: eraseDisplayBox.width,
+      displayHeight: eraseDisplayBox.height,
+      naturalWidth: d.width,
+      naturalHeight: d.height,
+    } satisfies MaskCoordinateSpace;
+  })();
+  /** 存在有效涂区（最终并集非空：涂了又被橡皮全擦掉不算）：涂抹发送门 */
+  const eraseHasPaint = eraseDisplayBox
+    ? maskHasPaintArea(eraseMaskState.ops, eraseDisplayBox.width, eraseDisplayBox.height)
+    : eraseMaskState.ops.some((op) => !op.erase);
   /** 草稿卡出生位（IKDMQQ）：视口中心附近空位，避开底部 Dock 预留区与既有节点 */
   const spawnDraftPosition = () => {
     const center = spawnPosRef.current();
@@ -2534,6 +2620,11 @@ export default function CanvasPage() {
    *  onSelectionChange 的空选中可能是「取消旧选中→选中新卡」的过渡事件，不能作为关闭依据（IKDMQV）。 */
   const handleCanvasPaneClick = () => {
     cancelAgentCandidate();
+    // 擦除编辑态（IKGOTB 四退出之一）：点画布空白退出并丢弃未发送遮罩
+    if (eraseTargetNodeId) {
+      exitEraseEditing();
+      return;
+    }
     if (imagePickSessionActive) { endImagePickSession(); return; }
     if (videoPickSessionActive) { endVideoPickSession(); return; }
     if (audioPickSessionActive) { endAudioPickSession(); return; }
@@ -2561,6 +2652,11 @@ export default function CanvasPage() {
       return !m || m.selected !== false;
     });
     const soloId = candidates.length === 1 ? candidates[0]!.id : null;
+    // 擦除编辑态（IKGOTB 四退出之一）：单选其他卡或多选时退出并丢弃未发送遮罩
+    //（空选中不在此处理——真空白点击由 onPaneClick 承担）
+    if (eraseTargetNodeId && ((soloId && soloId !== eraseTargetNodeId) || candidates.length > 1)) {
+      exitEraseEditing();
+    }
     const syncPanelVisible = (
       boundId: string | null,
       setShow: (visible: boolean) => void,
@@ -2636,10 +2732,10 @@ export default function CanvasPage() {
   }, [anyGenPanelOpen]);
 
   /** IKFYH6 Esc 优先级链：@ 菜单开着先关菜单（菜单自行处理，IKFXOR）→ 持续选取会话先退选取
-   * （既有 session handler，与本监听同级）→ 单次选取取消选取 → 光标在输入框内不动
-   * （复用 isEditableKeyboardTarget）→ 其余情况关闭五面板。 */
+   *  （既有 session handler，与本监听同级）→ 单次选取取消选取 → 光标在输入框内不动
+   *  （复用 isEditableKeyboardTarget）→ 擦除编辑态退出（IKGOTB，未发送丢弃遮罩）→ 其余情况关闭五面板。 */
   useEffect(() => {
-    if (!anyGenPanelOpen) return;
+    if (!anyGenPanelOpen && !eraseTargetNodeId) return;
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (document.querySelector('[data-canvas-keyboard-scope="mention"]')) return;
@@ -2649,12 +2745,16 @@ export default function CanvasPage() {
         resetPickState();
         return;
       }
+      if (eraseTargetNodeId) {
+        exitEraseEditing();
+        return;
+      }
       dismissAllGenPanels();
     };
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyGenPanelOpen, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
+  }, [anyGenPanelOpen, eraseTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
 
   /** 节点拖拽结束：同步本次全部拖动节点的新坐标到父组件 state，触发自动保存。
    *  多选整组拖拽时 React Flow 第三参含同组全部节点；只回写被抓取节点会让父层坐标过期，
@@ -2926,11 +3026,12 @@ export default function CanvasPage() {
     }
   }, [enhanceDraftId, mediaNodes]);
 
-  /** 擦除编辑态绑定清理（IKGOT7）：目标源图卡被删除时退出编辑态，防占位悬挂；
-   *  其余退出途径（X/Esc/点其他卡/点空白）由 IKGOTB 交付 */
+  /** 擦除编辑态绑定清理（IKGOT7/IKGOTB）：目标源图卡被删除时退出编辑态并丢弃遮罩，防工具条悬挂 */
   useEffect(() => {
     if (!eraseTargetNodeId) return;
-    if (!mediaNodes.some((n) => n.id === eraseTargetNodeId)) setEraseTargetNodeId(null);
+    if (!mediaNodes.some((n) => n.id === eraseTargetNodeId)) exitEraseEditing();
+    // exitEraseEditing 仅引用稳定的 setState，不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eraseTargetNodeId, mediaNodes]);
 
   /** IKFR4X：Esc 结束图片持续选取会话（输入框/编辑器内的 Esc 保持原语义，如卡片名称编辑） */
@@ -3138,12 +3239,13 @@ export default function CanvasPage() {
   };
 
   /** 图片生成草稿卡，落在指定点。overrides（IKGM9F 高清放大复用同一骨架）：
-   *  fileName 覆盖初始标题，data 附加节点身份字段（如高清标记），回调不可覆盖 */
+   *  fileName 覆盖初始标题，data 附加节点身份字段（如高清标记），nodeId 指定节点 id
+   *  （IKGOTB 擦除结果卡：node id 即任务冻结的 target_node_id，发送前生成），回调不可覆盖 */
   const createImageDraftCard = (
     position?: { x: number; y: number },
-    overrides?: { fileName?: string; data?: Record<string, unknown> },
+    overrides?: { fileName?: string; data?: Record<string, unknown>; nodeId?: string },
   ): string => {
-    const nodeId = newNodeId('media-draft');
+    const nodeId = overrides?.nodeId ?? newNodeId('media-draft');
     const node: Node = {
       id: nodeId,
       type: 'mediaNode',
@@ -4817,6 +4919,110 @@ export default function CanvasPage() {
     return issued;
   };
 
+  /* ===== 擦除发送链路（IKGOTB）：发送时才建结果卡 + 纯视觉来源线 + 终态回填 ===== */
+
+  /** 擦除任务发送核心：组装好的契约 input 直接 POST image-erasures；创建成功后
+   *  在源卡右侧建擦除结果卡（node id = input.target_node_id，发送前已生成冻结进任务）、
+   *  拉纯视觉来源线（origin=image-erase，参考推导跳过）、启动轮询（applyJobTerminal 回填成品/失败）。
+   *  创建失败（门槛拒/网络）不建卡不退出编辑态；入队失败创建响应仍 200，任务经轮询呈现 enqueue_failed。
+   *  免费口径同 image_enhance：无幂等头、无积分预估、不走余额拦截门。 */
+  const startImageEraseJob = async (
+    sourceNodeId: string,
+    input: ImageEraseInput,
+  ): Promise<boolean> => {
+    if (!currentId) {
+      showToast('warn', '未选中项目，无法发起图片擦除');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === sourceNodeId);
+    if (!node) {
+      showToast('warn', '源图卡不存在，无法发起图片擦除');
+      return false;
+    }
+    const targetNodeId = input.target_node_id;
+    try {
+      const created = await createImageErase(currentId, input);
+      // 发送即退出编辑态（先退再建卡：建卡的程序化选中不触发编辑态的「点其他卡退出」误判）
+      exitEraseEditing();
+      const draftId = createImageDraftCard(imageEnhanceDraftPosition(node), {
+        fileName: '擦除',
+        nodeId: targetNodeId,
+        data: {
+          imageErase: { sourceAssetId: input.source_asset_id, lastInput: input },
+          genStatus: 'generating',
+          progress: 0,
+        },
+      });
+      addCanvasEdge(sourceNodeId, draftId, undefined, { origin: IMAGE_ERASE_EDGE_ORIGIN });
+      // 提交即接管节点（防创建返回前旧响应解除本次生成状态，口径同 startImageEnhanceJob）
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(draftId, activeAtCreate);
+      patchMediaNode(draftId, { jobId: created.job_id });
+      pollJob(draftId, created.job_id);
+      return true;
+    } catch (e: unknown) {
+      showToast('error', isApiError(e) ? e.message : '创建擦除任务失败，请重试');
+      return false;
+    }
+  };
+
+  /** 涂抹发送（工具条发送钮）：遮罩 PNG 已在组件内栅格化，此处上传（source=mask_erase，
+   *  中间素材不进用户资产列表可见内容）→ 组装 selected_area_erase 四键 → 发任务。 */
+  const handleEraseDialogSendMask = async (file: File | null): Promise<boolean> => {
+    const nodeId = eraseTargetNodeId;
+    if (!nodeId) return false;
+    if (!file) {
+      showToast('error', '遮罩生成失败，请重试');
+      return false;
+    }
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
+    if (!node || !sourceAssetId) {
+      showToast('warn', '源素材身份缺失，无法发起图片擦除');
+      return false;
+    }
+    setEraseSubmitting(true);
+    try {
+      const uploaded = await uploadAssetFile(file, {
+        projectId: currentId ?? undefined,
+        assetSource: 'mask_erase',
+      });
+      const input: ImageEraseInput = {
+        source_asset_id: sourceAssetId,
+        target_node_id: newNodeId('media-draft'),
+        erase_scene: 'selected_area_erase',
+        mask_asset_id: uploaded.asset_id,
+      };
+      return await startImageEraseJob(nodeId, input);
+    } catch (e: unknown) {
+      showToast('error', isApiError(e) ? e.message : '遮罩上传失败，请重试');
+      return false;
+    } finally {
+      setEraseSubmitting(false);
+    }
+  };
+
+  /** 清除文字一键直发（不经遮罩）：full_screen_text_erase 三键直接发任务，
+   *  与涂抹发送共用同一条结果链路（规格故事 20）；请求发出即返回 true（编辑态随之退出）。 */
+  const handleEraseDialogSendText = (): boolean => {
+    const nodeId = eraseTargetNodeId;
+    if (!nodeId) return false;
+    const node = mediaNodesRef.current.find((n) => n.id === nodeId);
+    const sourceAssetId = readAssetId((node?.data ?? {}) as Record<string, unknown>);
+    if (!node || !sourceAssetId) {
+      showToast('warn', '源素材身份缺失，无法发起图片擦除');
+      return false;
+    }
+    const input: ImageEraseInput = {
+      source_asset_id: sourceAssetId,
+      target_node_id: newNodeId('media-draft'),
+      erase_scene: 'full_screen_text_erase',
+    };
+    setEraseSubmitting(true);
+    void startImageEraseJob(nodeId, input).finally(() => setEraseSubmitting(false));
+    return true;
+  };
+
   /** 取消接口仅登记意图；权威终态确认前保留生成中状态及轮询，避免编辑/删除绕过在途保护。 */
   const handleCancelJob = (nodeId: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === nodeId);
@@ -5127,6 +5333,37 @@ export default function CanvasPage() {
       // 防重入：生成中不重复发起（口径同通用重试）
       if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
       startImageEnhanceJob(nodeId, restoreImageEnhanceParams(enhanceIdentity.lastParams));
+      return;
+    }
+    const eraseIdentity = ((node?.data ?? {}) as Record<string, unknown>).imageErase as
+      | ImageEraseIdentity
+      | undefined;
+    if (eraseIdentity?.lastInput) {
+      // 擦除卡分流（IKGOTB）：契约无 retry 端点，重试 = 冻结 input 原样重发创建接口
+      //（遮罩资产未删除，selected_area_erase 的 mask_asset_id 仍可被创建入口与 worker 解析）。
+      if (!currentId) {
+        showToast('warn', '未选中项目，无法发起图片擦除');
+        return;
+      }
+      // 防重入：生成中不重复发起（口径同高清分流）
+      if ((node?.data as Record<string, unknown> | undefined)?.genStatus === 'generating') return;
+      patchMediaNode(nodeId, { genStatus: 'generating', progress: 0, errorText: '' });
+      const activeAtCreate = newNodeId('pending-generation');
+      activeJobByNodeRef.current.set(nodeId, activeAtCreate);
+      stopJobPolling(nodeId, jobTimersRef.current);
+      createImageErase(currentId, eraseIdentity.lastInput)
+        .then((created) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, { jobId: created.job_id });
+          pollJob(nodeId, created.job_id);
+        })
+        .catch((e: unknown) => {
+          if (activeJobByNodeRef.current.get(nodeId) !== activeAtCreate) return;
+          patchMediaNode(nodeId, {
+            genStatus: 'failed',
+            errorText: isApiError(e) ? e.message : '重试失败',
+          });
+        });
       return;
     }
     if (!currentId || !jobId) return;
@@ -5665,14 +5902,79 @@ export default function CanvasPage() {
     openEnhanceDraftDialog(draftId);
   };
 
-  /** 擦除（IKGOT7）：「高清 ▾」下拉「擦除」项把目标图片卡置为擦除编辑态。
-   *  门槛预检（超尺寸/超大小/webp/gif）已在菜单项置灰层完成，此处只管开关；
-   *  本票仅置位 state + 占位呈现，擦除编辑态交互（工具条/发送条/指针/四退出）由 IKGOTB 交付。 */
+  /** 退出擦除编辑态（IKGOTB 四退出共用）：未发送的遮罩全部丢弃（无卡、无边、无任务），
+   *  工具/活笔/发送中标记一并复位。 */
+  const exitEraseEditing = () => {
+    setEraseTargetNodeId(null);
+    setEraseMaskState(EMPTY_MASK_EDIT);
+    setEraseLiveOp(null);
+    eraseLiveOpRef.current = null;
+    eraseStrokePointsRef.current = [];
+    setEraseTool('brush');
+    setEraseSubmitting(false);
+  };
+
+  /** 擦除（IKGOT7 入口 / IKGOTB 编辑态）：把目标图片卡置为擦除编辑态并重置遮罩编辑。
+   *  门槛预检（超尺寸/超大小/webp/gif）已在菜单项置灰层完成，此处只管进入；
+   *  进入时关闭五个生成面板（编辑态是独立模式，规格故事 7）。 */
   const handleNodeEraseImage = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
+    dismissAllGenPanels();
     setEraseTargetNodeId(id);
+    setEraseMaskState(EMPTY_MASK_EDIT);
+    setEraseLiveOp(null);
+    eraseLiveOpRef.current = null;
+    eraseStrokePointsRef.current = [];
+    setEraseTool('brush');
   };
+
+  /* ===== 擦除遮罩指针交互（IKGOTB）：EraseMaskLayer 上抛显示坐标点，此处按当前工具落 op ===== */
+
+  const handleEraseStrokeStart = (point: MaskPoint) => {
+    if (eraseTool === 'rect') {
+      const op: MaskOp = { kind: 'rect', erase: false, from: point, to: point };
+      eraseLiveOpRef.current = op;
+      setEraseLiveOp(op);
+      return;
+    }
+    eraseStrokePointsRef.current = [point];
+    const op: MaskOp = {
+      kind: 'stroke',
+      erase: eraseTool === 'eraser',
+      points: [point],
+      radius: eraseBrushRadius,
+    };
+    eraseLiveOpRef.current = op;
+    setEraseLiveOp(op);
+  };
+
+  const handleEraseStrokeMove = (point: MaskPoint) => {
+    const live = eraseLiveOpRef.current;
+    if (!live) return;
+    if (live.kind === 'rect') {
+      const next: MaskOp = { ...live, to: point };
+      eraseLiveOpRef.current = next;
+      setEraseLiveOp(next);
+      return;
+    }
+    eraseStrokePointsRef.current = [...eraseStrokePointsRef.current, point];
+    const next: MaskOp = { ...live, points: eraseStrokePointsRef.current };
+    eraseLiveOpRef.current = next;
+    setEraseLiveOp(next);
+  };
+
+  const handleEraseStrokeEnd = () => {
+    const live = eraseLiveOpRef.current;
+    eraseLiveOpRef.current = null;
+    setEraseLiveOp(null);
+    eraseStrokePointsRef.current = [];
+    if (!live) return;
+    setEraseMaskState((state) => applyMaskOp(state, live));
+  };
+
+  const handleEraseUndo = () => setEraseMaskState((state) => undoMaskEdit(state));
+  const handleEraseRedo = () => setEraseMaskState((state) => redoMaskEdit(state));
 
   /** 生成视频（IKDMQS 统一草稿绑定）：有生成记录的视频节点 → 绑定原卡原位重新生成（与「重新编辑」一致）；
    *  其他节点（图片/上传视频等）→ 来源有效性预检后新建视频草稿卡 + 被点节点自动连线为普通参考。
@@ -7178,7 +7480,29 @@ export default function CanvasPage() {
           toolMode={toolMode}
           extraNodes={uploadedNodes}
           textNodes={textNodes}
-          mediaNodes={mediaNodes}
+          mediaNodes={
+            // 擦除编辑态（IKGOTB）：目标源图卡渲染期注入遮罩层 props（不进 state、不持久化，
+            // 口径同 pickMarked 渲染期派生注入）——EraseMaskLayer 与工具条共享本页编辑状态
+            eraseTargetNodeId
+              ? mediaNodes.map((n) =>
+                  n.id === eraseTargetNodeId
+                    ? {
+                        ...n,
+                        data: {
+                          ...n.data,
+                          eraseEditing: {
+                            ops: eraseMaskState.ops,
+                            liveOp: eraseLiveOp,
+                            onStrokeStart: handleEraseStrokeStart,
+                            onStrokeMove: handleEraseStrokeMove,
+                            onStrokeEnd: handleEraseStrokeEnd,
+                          },
+                        },
+                      }
+                    : n,
+                )
+              : mediaNodes
+          }
           productNodes={productNodes}
           assetNodes={assetNodes}
           showEdges={showEdges}
@@ -7593,19 +7917,29 @@ export default function CanvasPage() {
           )
         )}
 
-        {/* 擦除编辑态占位条（IKGOT7）：仅开关与最小呈现——置位入口为「高清 ▾」下拉「擦除」项
-            （onEraseImage → handleNodeEraseImage → setEraseTargetNodeId）；
-            完整编辑态（擦除工具条/发送条/指针接管/四退出）由 IKGOTB 以本占位为接缝替换交付 */}
+        {/* 擦除编辑态工具条+发送条（IKGOTB，替换 IKGOT7 占位条）：工具/笔刷/撤销重做/清除文字/发送；
+            棋盘格遮罩层经 MediaNode 的 eraseEditing 注入渲染在源图卡上；四退出
+            （X/Esc/点其他卡/点空白）由本页承载，未发送退出丢弃遮罩不建卡不提交 */}
         {eraseTargetNodeId && (
-          <div
-            className={styles.pickHint}
-            data-gen-panel-territory
-            data-testid="erase-edit-placeholder"
-            data-target-node={eraseTargetNodeId}
-          >
-            <span>擦除编辑态开发中：目标图片卡已进入擦除模式（IKGOTB 交付完整编辑交互）</span>
-            <button type="button" className={styles.pickHintFinish} onClick={() => setEraseTargetNodeId(null)}>退出擦除</button>
-          </div>
+          <ImageEraseDialog
+            onClose={exitEraseEditing}
+            onSendTextErase={handleEraseDialogSendText}
+            onSendMask={handleEraseDialogSendMask}
+            tool={eraseTool}
+            onToolChange={setEraseTool}
+            brushRadius={eraseBrushRadius}
+            onBrushRadiusChange={setEraseBrushRadius}
+            canUndo={canUndoMaskEdit(eraseMaskState)}
+            canRedo={canRedoMaskEdit(eraseMaskState)}
+            onUndo={handleEraseUndo}
+            onRedo={handleEraseRedo}
+            hasPaint={eraseHasPaint}
+            maskSpace={eraseMaskSpace}
+            ops={eraseMaskState.ops}
+            submitting={eraseSubmitting}
+            toolbarAnchor={eraseToolbarAnchor}
+            sendBarAnchor={eraseSendBarAnchor}
+          />
         )}
 
         {/* 底部音频对话框 */}

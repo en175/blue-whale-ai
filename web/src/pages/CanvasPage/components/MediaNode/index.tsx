@@ -9,6 +9,8 @@ import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign,
 import { isMediaExtractNodeId } from '../../mediaExtract';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import { imageEraseGateReason } from '../../imageErase';
+import type { MaskOp, MaskPoint } from '../../eraseMask';
+import EraseMaskLayer from './EraseMaskLayer';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
 import { mediaNodeGenerationOverlay } from './generationOverlay';
@@ -111,6 +113,15 @@ interface MediaNodeData {
   pickMarked?: boolean;
   /** 视频选取会话中能力失效（如合规未通过）置灰 */
   pickBlocked?: boolean;
+  /** 擦除编辑态遮罩层（IKGOTB，渲染期派生注入，不持久化）：本卡为擦除目标源图卡时由
+   *  CanvasPage 注入——棋盘格渲染数据与指针回调；仅正常图片内容区渲染 */
+  eraseEditing?: {
+    ops: readonly MaskOp[];
+    liveOp: MaskOp | null;
+    onStrokeStart: (point: MaskPoint) => void;
+    onStrokeMove: (point: MaskPoint) => void;
+    onStrokeEnd: () => void;
+  };
   /** 浏览器量得真实媒体尺寸后回填（缺失或不一致时才回调） */
   onMediaDims?: (id: string, dims: MediaDims) => void;
   onDelete?: (id: string) => void;
@@ -596,14 +607,28 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             style={isSelect ? undefined : { pointerEvents: 'none' }}
           />
         ) : (
-          <img
-            className={styles.mediaImage}
-            src={data.src}
-            alt={data.fileName || 'image'}
-            draggable={false}
-            onLoad={handleImageLoad}
-            style={isSelect ? undefined : { pointerEvents: 'none' }}
-          />
+          <>
+            <img
+              className={styles.mediaImage}
+              src={data.src}
+              alt={data.fileName || 'image'}
+              draggable={false}
+              onLoad={handleImageLoad}
+              style={isSelect ? undefined : { pointerEvents: 'none' }}
+            />
+            {/* 擦除编辑态遮罩层（IKGOTB）：棋盘格渲染+指针接管，仅正常图片内容区叠加 */}
+            {data.eraseEditing && (
+              <EraseMaskLayer
+                ops={data.eraseEditing.ops}
+                liveOp={data.eraseEditing.liveOp}
+                displayWidth={contentBox.width}
+                displayHeight={contentBox.height}
+                onStrokeStart={data.eraseEditing.onStrokeStart}
+                onStrokeMove={data.eraseEditing.onStrokeMove}
+                onStrokeEnd={data.eraseEditing.onStrokeEnd}
+              />
+            )}
+          </>
         )}
         {isGenerating && hasMediaSrc && (
           <div className={`nodrag nopan ${styles.regenOverlay}`} data-testid="regen-overlay">

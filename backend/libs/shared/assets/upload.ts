@@ -1,6 +1,7 @@
 import {
   ASSET_ERROR_SPECS,
   DomainError,
+  IMAGE_ERASE_MASK_ASSET_SOURCE,
   RESOURCE_NOT_FOUND_CODE,
   assetError,
   ok,
@@ -28,6 +29,9 @@ export type CompleteAssetInput = PresignAssetInput & {
   duration?: number;
   /** IKCNLS：落库时写入 md5，供去重查询。 */
   md5?: string;
+  /** IKGOTB：资产来源标记。仅白名单值生效（uploaded 普通上传 / mask_erase 擦除遮罩中间素材，
+   *  后者在用户资产列表不可见），非白名单/缺省回落 uploaded（无鉴权语义，只是展示过滤维度）。 */
+  source?: string;
 };
 
 /** IKCNLS：上传 md5 去重输入（presign 前判断）。 */
@@ -305,6 +309,10 @@ export async function handleCompleteAsset(
   }
 
   await deps.storage.makePublic(input.storage_key);
+  // IKGOTB：来源标记白名单归一——uploaded（默认）/ mask_erase（擦除遮罩中间素材，资产列表不可见）。
+  // 非白名单值一律回落 uploaded：source 只是展示过滤维度，无鉴权语义，不值得为一个坏值拒掉整个上传。
+  const source =
+    input.source === IMAGE_ERASE_MASK_ASSET_SOURCE ? input.source : "uploaded";
   const asset = await deps.uploads.createUploadedAsset({
     userId,
     projectId,
@@ -317,6 +325,7 @@ export async function handleCompleteAsset(
     ...(input.height == null ? {} : { height: input.height }),
     ...(input.duration == null ? {} : { duration: input.duration }),
     ...(input.md5 ? { md5: input.md5 } : {}),
+    source,
   });
 
   return ok(toAssetResponse(asset));
