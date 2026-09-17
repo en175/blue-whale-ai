@@ -3891,6 +3891,22 @@ export default function CanvasPage() {
 
     const adoptedIds: string[] = [];
     const nodes: Node[] = [];
+    const reusedCompliance: Array<{ id: string; patch: Record<string, unknown> }> = [];
+    // 资产库 Active（成功角标）或素材库 Asset- 条目：落入画布即视为已通过合规
+    const complianceFromAsset = (asset: AssetRecord): Record<string, unknown> => {
+      if (asset.type === 'audio') return {};
+      const id = String(asset.id);
+      const fromLibrary = isMaterialLibraryId(id);
+      const materialId = fromLibrary
+        ? id
+        : (typeof asset.material_id === 'string' && asset.material_id ? asset.material_id : undefined);
+      if (asset.material_status !== 'Active' && !fromLibrary) return {};
+      return {
+        ...(materialId ? { materialId } : {}),
+        compliancePassed: true,
+        complianceFailed: false,
+      };
+    };
     for (const asset of selectedAssets) {
       const assetId = String(asset.id);
       const mediaType = asset.type === 'video' ? 'video' : asset.type === 'audio' ? 'audio' : 'image';
@@ -3903,13 +3919,14 @@ export default function CanvasPage() {
             baseSourceError(n) === null,
         );
         if (existing) {
+          const patch = complianceFromAsset(asset);
+          if (Object.keys(patch).length > 0) reusedCompliance.push({ id: existing.id, patch });
           adoptedIds.push(existing.id);
           continue;
         }
       }
       const fileNameFromUrl = assetDisplayName(asset);
       const nodeId = newNodeId('media');
-      const materialId = isMaterialLibraryId(assetId) ? assetId : undefined;
       nodes.push({
         id: nodeId,
         type: 'mediaNode' as const,
@@ -3920,7 +3937,7 @@ export default function CanvasPage() {
           fileName: fileNameFromUrl,
           mediaType,
           assetId,
-          ...(materialId ? { materialId, ...(asset.type !== 'audio' ? { compliancePassed: true } : {}) } : {}),
+          ...complianceFromAsset(asset),
           width: asset.width ?? undefined,
           height: asset.height ?? undefined,
           duration: asset.duration ?? undefined,
@@ -3951,7 +3968,15 @@ export default function CanvasPage() {
     }
 
     nodes.forEach((node) => pendingNodeIdsRef.current.add(node.id));
-    setMediaNodes((prev) => [...prev, ...nodes]);
+    setMediaNodes((prev) => {
+      const patched = reusedCompliance.length === 0
+        ? prev
+        : prev.map((node) => {
+            const hit = reusedCompliance.find((item) => item.id === node.id);
+            return hit ? { ...node, data: { ...node.data, ...hit.patch } } : node;
+          });
+      return [...patched, ...nodes];
+    });
 
     // 幂等补关联：素材已属当前项目也无副作用；失败仅提示，不影响节点展示。
     // 真实人像库条目是素材库 Asset- 前缀 ID，不能当本地 assets 表 id 去 link。

@@ -37,6 +37,10 @@ export interface AssetRecord {
   prompt?: string | null;
   /** 创建时间（ISO 8601） */
   created_at: string | null;
+  /** 关联素材库条目 id；未入过库为 null */
+  material_id?: string | null;
+  /** 素材库校验镜像：Active 为已通过合规 */
+  material_status?: 'Active' | 'Processing' | 'Failed' | null;
 }
 
 /** 分页包络 */
