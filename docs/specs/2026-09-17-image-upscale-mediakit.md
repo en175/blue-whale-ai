@@ -1,6 +1,6 @@
 # 图片高清放大（火山 AI MediaKit）规格
 
-> 需求共识来自 2026-09-17 两轮 grilling（12 项拍板），术语以根 CONTEXT.md「画布高清放大」节为准，关键取舍见 ADR-0092。本文档待 Kim 过目后再建工单。
+> 需求共识来自 2026-09-17 两轮 grilling（12 项拍板，Kim 已确认）。需求工单 IKGLZV（ready-for-agent）。术语以根 CONTEXT.md「画布高清放大」节为准，关键取舍见 ADR-0092。
 
 ## Problem Statement
 
