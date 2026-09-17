@@ -6,9 +6,9 @@
  * 的整体矩形；视口边缘不参与。双轴独立：x / y 各自取「屏幕距离 =
  * 画布距离 × zoom」最近者命中，可同时修正。对齐线仅在命中时给出：
  * 轴向（水平/垂直线）+ 画布坐标线段区间；区间 = 主拖卡与参考块在正交
- * 方向上的重叠区间，两端各外延 guideExtension（默认 16 画布像素，
- * 不横贯整个画布）；正交方向无重叠时退化为以间隙中点为中心、
- * 长 2 × 外延量的最短线段。零 React / React Flow 运行时依赖、零副作用。
+ * 方向投影的联合跨度——贯穿两块的长线（09-17 人工回归拍板：重叠区间
+ * ±外延的短线段不明显，改 Figma 式两端贴合两块外侧边缘的贯穿长线）。
+ * 零 React / React Flow 运行时依赖、零副作用。
  * ============================================ */
 
 /** 画布坐标系矩形（flow 坐标，左上角 + 宽高） */
@@ -62,15 +62,10 @@ export interface ComputeSnapAlignmentOptions {
   thresholdPx?: number;
   /** 当前缩放（画布坐标阈值 = thresholdPx / zoom），默认 1 */
   zoom?: number;
-  /** 对齐线两端外延量（画布像素），默认 SNAP_GUIDE_EXTENSION */
-  guideExtension?: number;
 }
 
 /** 默认触发阈值：8 屏幕像素 */
 export const SNAP_THRESHOLD_PX = 8;
-
-/** 对齐线默认两端外延量：16 画布像素——线段略长出两块，视觉可辨且不横贯画布 */
-export const SNAP_GUIDE_EXTENSION = 16;
 
 /** 单轴命中的候选：修正量（正 = 主拖卡向正方向被拉向参考块）+ 命中关系与参考块 */
 interface AxisHit {
@@ -95,25 +90,17 @@ function guidePosY(hit: AxisHit): number {
   return r.y + r.height;
 }
 
-/** 线段区间 = 两区间 [aMin,aMax] 与 [bMin,bMax] 的重叠部分两端各外延 extension；
- *  正交方向无重叠时退化为以间隙中点为中心、长 2 × extension 的最短线段——
- *  命中仍能看到一段线，且不横贯整个画布（端点恰好相触时重叠区间长度 0，
- *  走重叠分支同样得到长 2 × extension 的线段，与退化分支一致）。 */
+/** 线段区间 = 两区间 [aMin,aMax] 与 [bMin,bMax] 的联合跨度：从先出现者
+ *  起点贯穿到后结束者终点——两端贴合两块外侧边缘、跨越两块之间全部间隙
+ *  的长线；两块正交方向投影重叠或相离均自然成立（09-17 人工回归拍板：
+ *  短线段不明显，弃重叠区间±外延方案）。 */
 function guideRange(
   aMin: number,
   aMax: number,
   bMin: number,
   bMax: number,
-  extension: number,
 ): { from: number; to: number } {
-  const overlapMin = Math.max(aMin, bMin);
-  const overlapMax = Math.min(aMax, bMax);
-  if (overlapMax >= overlapMin) {
-    return { from: overlapMin - extension, to: overlapMax + extension };
-  }
-  // 无重叠：overlapMin 是右者的左端、overlapMax 是左者的右端，取间隙中点
-  const gapMid = (overlapMin + overlapMax) / 2;
-  return { from: gapMid - extension, to: gapMid + extension };
+  return { from: Math.min(aMin, bMin), to: Math.max(aMax, bMax) };
 }
 
 /** 对齐吸附核心计算。
@@ -129,7 +116,6 @@ export function computeSnapAlignment(
 ): SnapAlignmentResult {
   const thresholdPx = options.thresholdPx ?? SNAP_THRESHOLD_PX;
   const zoom = options.zoom ?? 1;
-  const guideExtension = options.guideExtension ?? SNAP_GUIDE_EXTENSION;
   // 屏幕阈值换算到画布坐标；zoom 为全体候选共享常量，比较 |delta| 即比较屏幕距离
   const canvasThreshold = thresholdPx / zoom;
 
@@ -161,24 +147,22 @@ export function computeSnapAlignment(
 
   const guides: SnapGuide[] = [];
   if (bestX != null) {
-    // x 向对齐产生垂直线：pos 为共享竖线的 x，线段沿 y 取两块 y 投影重叠区间
+    // x 向对齐产生垂直线：pos 为共享竖线的 x，线段沿 y 取两块 y 投影联合跨度
     const { from, to } = guideRange(
       dragging.y,
       dragging.y + dragging.height,
       bestX.target.rect.y,
       bestX.target.rect.y + bestX.target.rect.height,
-      guideExtension,
     );
     guides.push({ orientation: 'vertical', pos: guidePosX(bestX), from, to, targetId: bestX.target.id, relation: bestX.relation });
   }
   if (bestY != null) {
-    // y 向对齐产生水平线：pos 为共享横线的 y，线段沿 x 取两块 x 投影重叠区间
+    // y 向对齐产生水平线：pos 为共享横线的 y，线段沿 x 取两块 x 投影联合跨度
     const { from, to } = guideRange(
       dragging.x,
       dragging.x + dragging.width,
       bestY.target.rect.x,
       bestY.target.rect.x + bestY.target.rect.width,
-      guideExtension,
     );
     guides.push({ orientation: 'horizontal', pos: guidePosY(bestY), from, to, targetId: bestY.target.id, relation: bestY.relation });
   }

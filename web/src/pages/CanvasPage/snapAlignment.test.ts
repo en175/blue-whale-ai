@@ -1,11 +1,10 @@
 /* IKGGCT T1：画布拖拽对齐吸附纯函数——六种对齐关系、屏幕阈值与 zoom 换算、
  * 双轴独立、多目标取最近、参考块收集（排除被拖集合、组框整体、尺寸回退）、
- * 对齐线区间（重叠 + 外延；无重叠退化为间隙中点两侧各一倍外延量） */
+ * 对齐线区间（两块投影联合跨度的贯穿长线） */
 import { describe, expect, it } from 'vitest';
 import {
   collectSnapTargets,
   computeSnapAlignment,
-  SNAP_GUIDE_EXTENSION,
   SNAP_THRESHOLD_PX,
   type SnapNodeLike,
   type SnapRect,
@@ -161,31 +160,20 @@ describe('computeSnapAlignment：多目标命中', () => {
 });
 
 describe('computeSnapAlignment：对齐线区间', () => {
-  it('区间 = 正交方向重叠区间两端各外延（默认 16 画布像素）', () => {
-    expect(SNAP_GUIDE_EXTENSION).toBe(16);
-    // y 向命中（centerY）：线段沿 x，主拖卡 [0,100] 与参考块 [40,140] 重叠 [40,100]
+  it('区间 = 正交方向两块投影的联合跨度：贯穿两块的长线（09-17 人工回归拍板）', () => {
+    // y 向命中（centerY）：线段沿 x，主拖卡 [0,100] 与参考块 [40,140] 联合 [0,140]
     const res = computeSnapAlignment(MAIN, [target('ref', 40, -3, 100, 80)]);
     expect(res.guides).toEqual([
-      { orientation: 'horizontal', pos: 37, from: 24, to: 116, targetId: 'ref', relation: 'centerY' },
+      { orientation: 'horizontal', pos: 37, from: 0, to: 140, targetId: 'ref', relation: 'centerY' },
     ]);
   });
 
-  it('正交方向无重叠时退化为间隙中点两侧各外延量的最短线段', () => {
-    // x 投影 [0,100] 与 [150,250] 无重叠：间隙中点 125，区间 [109,141]
+  it('正交方向无重叠（两卡错开）时区间跨越两卡之间全部间隙，两端贴两卡外侧边缘', () => {
+    // x 投影 [0,100] 与 [150,250] 无重叠：区间 = 联合跨度 [0,250]
     const res = computeSnapAlignment(MAIN, [target('ref', 150, -3, 100, 80)]);
     expect(res.guides).toEqual([
-      { orientation: 'horizontal', pos: 37, from: 109, to: 141, targetId: 'ref', relation: 'centerY' },
+      { orientation: 'horizontal', pos: 37, from: 0, to: 250, targetId: 'ref', relation: 'centerY' },
     ]);
-  });
-
-  it('外延量可传入覆盖：0 时区间即重叠区间；退化时长度 = 2 × 外延量', () => {
-    const flat = computeSnapAlignment(MAIN, [target('ref', 40, -3, 100, 80)], { guideExtension: 0 });
-    expect(flat.guides[0].from).toBe(40);
-    expect(flat.guides[0].to).toBe(100);
-
-    const degenerate = computeSnapAlignment(MAIN, [target('ref', 150, -3, 100, 80)], { guideExtension: 10 });
-    expect(degenerate.guides[0].from).toBe(115);
-    expect(degenerate.guides[0].to).toBe(135);
   });
 });
 
