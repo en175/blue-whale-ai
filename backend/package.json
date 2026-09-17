@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "prisma generate && tsc -b && tsc-alias",
+    "prestart": "node -e 'const fs=require(\"fs\");const p=\"dist/apps/blue-whale/src/main.js\";if(!fs.existsSync(p)){console.error(\"dist 不存在：先 npm run build\");process.exit(1)}if(fs.readFileSync(p,\"utf8\").includes(\"@lib/\")){console.error(\"dist 残留 @lib/ 别名（tsc-alias 未跑完的半成品）：重新 npm run build\");process.exit(1)}'",
     "start": "node dist/apps/blue-whale/src/main.js",
     "typecheck": "tsc --noEmit"
   },
