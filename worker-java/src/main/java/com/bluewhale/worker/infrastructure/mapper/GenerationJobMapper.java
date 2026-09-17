@@ -237,12 +237,12 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
               AND source IN
               <foreach collection="sources" item="item" open="(" separator="," close=")">#{item}</foreach>
               AND is_delete = false
-              AND next_action_at <= NOW()
+              AND next_action_at &lt;= NOW()
               AND (
                 status = 'queued'
                 OR (
                   status = 'processing'
-                  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+                  AND (lease_expires_at IS NULL OR lease_expires_at &lt; NOW())
                 )
               )
             ORDER BY id ASC
