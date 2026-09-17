@@ -11,7 +11,9 @@ import {
   IMAGE_ENHANCE_TIER_CAPABILITY,
   IMAGE_ENHANCE_VERSION_TIERS,
   imageEnhanceInputSchema,
+  imageEnhanceTierSizeGate,
   type ImageEnhanceInput,
+  type ImageEnhanceMode,
   type ImageEnhanceVersionTier,
 } from '@lib/contracts/image-enhance';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
@@ -61,7 +63,7 @@ export function imageEnhanceDraftPosition(source: {
 export interface ImageEnhancePanelParams {
   version_tier: ImageEnhanceVersionTier;
   multiple: (typeof IMAGE_ENHANCE_MULTIPLES)[number];
-  generative_enhance_mode: 'fidelity_first' | 'generative_first';
+  generative_enhance_mode: ImageEnhanceMode;
   enable_correct_color: boolean;
 }
 
@@ -79,9 +81,9 @@ export const IMAGE_ENHANCE_MODE_LABELS: Record<ImageEnhancePanelParams['generati
 };
 
 /** 源图尺寸门槛预检（IKGM9O）：返回该档不可用原因，null 为可用。
- *  门槛全集与 backend image-enhancements 服务层 TIER_SIZE_LIMITS 同源对齐
- *  （规格 docs/specs/2026-09-17-image-upscale-mediakit.md「Implementation Decisions 前端」）；
- *  前端只是体验层，服务端按 asset 权威尺寸同口径复核。宽高比 ≤32 用整数乘法比较防浮点。 */
+ *  门槛数值与判定在契约 imageEnhanceTierSizeGate 单处定义（backend 服务端复核同源引用，
+ *  规格 docs/specs/2026-09-17-image-upscale-mediakit.md「Implementation Decisions 前端」）；
+ *  前端只是体验层，服务端按 asset 权威尺寸同口径复核。 */
 export function imageEnhanceTierGateReason(
   tier: ImageEnhanceVersionTier,
   width: number | undefined,
@@ -89,18 +91,7 @@ export function imageEnhanceTierGateReason(
 ): string | null {
   // 尺寸缺失（存量图宽高 null）不拦：与服务端同口径放行交供应商拒（IKGM99 契约）
   if (typeof width !== 'number' || typeof height !== 'number') return null;
-  const longSide = Math.max(width, height);
-  const shortSide = Math.min(width, height);
-  if (tier === 'lite' && !(longSide <= 2160 && shortSide >= 16)) {
-    return '源图尺寸不满足 Lite 版本门槛（要求长边不超过 2160px 且短边不低于 16px），请更换版本档或源图';
-  }
-  if (tier === 'pro' && !(shortSide >= 256 && longSide <= 2048)) {
-    return '源图尺寸不满足 Pro 版本门槛（要求短边不低于 256px 且长边不超过 2048px），请更换版本档或源图';
-  }
-  if (tier === 'max' && !(shortSide >= 64 && longSide <= 6240 && longSide <= 32 * shortSide)) {
-    return '源图尺寸不满足 Max 版本门槛（要求短边不低于 64px、长边不超过 6240px 且宽高比不超过 32），请更换版本档或源图';
-  }
-  return null;
+  return imageEnhanceTierSizeGate(tier, width, height);
 }
 
 /** 三档可用性（打开面板时对源图尺寸快照预检一次）。 */
@@ -121,9 +112,12 @@ export function pickImageEnhanceTier(
   width: number | undefined,
   height: number | undefined,
 ): ImageEnhanceVersionTier | null {
-  const order: ImageEnhanceVersionTier[] = ['lite', 'pro', 'max'];
   if (!imageEnhanceTierGateReason(preferred, width, height)) return preferred;
-  return order.find((tier) => !imageEnhanceTierGateReason(tier, width, height)) ?? null;
+  return (
+    IMAGE_ENHANCE_VERSION_TIERS.find(
+      (tier) => !imageEnhanceTierGateReason(tier, width, height),
+    ) ?? null
+  );
 }
 
 /** 置灰档冻结口径（服务端硬校验对齐，契约 §14.2）：非 Max 档提交 enable_correct_color=false；

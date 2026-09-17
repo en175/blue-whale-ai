@@ -75,6 +75,62 @@ export const IMAGE_ENHANCE_DEFAULTS = {
   enableCorrectColor: true,
 } as const;
 
+/** 源图尺寸门槛矩阵（单处定义，规格 docs/specs/2026-09-17-image-upscale-mediakit.md 内联口径，
+ *  火山官方 PDF 溯源）：短边 = min(width, height)、长边 = max(width, height)、宽高比 = 长边 / 短边。
+ *  消费方 = backend image-enhancements 服务端复核 + web 面板预检（两端判定与数值只此一份）；
+ *  worker-java 不消费——assets 宽高缺失的存量图放行，交供应商按官方门槛拒。 */
+export const IMAGE_ENHANCE_TIER_SIZE_LIMITS: Record<
+  ImageEnhanceVersionTier,
+  {
+    /** 短边下限（px）。 */
+    minShortSide: number;
+    /** 长边上限（px）。 */
+    maxLongSide: number;
+    /** 宽高比上限（仅 max 档 32；缺省不限。整数乘法比较防浮点）。 */
+    maxAspectRatio?: number;
+    /** 门槛不满足的拒绝文案（服务端 fail msg 与前端置灰提示同源）。 */
+    rejectionText: string;
+  }
+> = {
+  lite: {
+    minShortSide: 16,
+    maxLongSide: 2160,
+    rejectionText:
+      "源图尺寸不满足 Lite 版本门槛（要求长边不超过 2160px 且短边不低于 16px），请更换版本档或源图",
+  },
+  pro: {
+    minShortSide: 256,
+    maxLongSide: 2048,
+    rejectionText:
+      "源图尺寸不满足 Pro 版本门槛（要求短边不低于 256px 且长边不超过 2048px），请更换版本档或源图",
+  },
+  max: {
+    minShortSide: 64,
+    maxLongSide: 6240,
+    maxAspectRatio: 32,
+    rejectionText:
+      "源图尺寸不满足 Max 版本门槛（要求短边不低于 64px、长边不超过 6240px 且宽高比不超过 32），请更换版本档或源图",
+  },
+};
+
+/** 三档尺寸门槛判定（单处）：不满足返回拒绝文案，满足返回 null。
+ *  宽高比用整数乘法比较防浮点；调用方负责「宽高缺失放行」口径（前端预检与服务端复核一致）。 */
+export function imageEnhanceTierSizeGate(
+  tier: ImageEnhanceVersionTier,
+  width: number,
+  height: number,
+): string | null {
+  const limits = IMAGE_ENHANCE_TIER_SIZE_LIMITS[tier];
+  const longSide = Math.max(width, height);
+  const shortSide = Math.min(width, height);
+  const withinLimits =
+    shortSide >= limits.minShortSide &&
+    longSide <= limits.maxLongSide &&
+    (limits.maxAspectRatio == null ||
+      longSide <= limits.maxAspectRatio * shortSide);
+  return withinLimits ? null : limits.rejectionText;
+}
+
 /** input 冻结结构（IKGM99 创建入口复核与重试沿用都用本 schema；strict 防多余键）。 */
 export const imageEnhanceInputSchema = z
   .object({

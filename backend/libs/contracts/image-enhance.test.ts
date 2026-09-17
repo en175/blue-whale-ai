@@ -20,9 +20,11 @@ import {
   IMAGE_ENHANCE_MULTIPLES,
   IMAGE_ENHANCE_SOURCE,
   IMAGE_ENHANCE_TIER_CAPABILITY,
+  IMAGE_ENHANCE_TIER_SIZE_LIMITS,
   IMAGE_ENHANCE_TOOL_VERSION,
   IMAGE_ENHANCE_VERSION_TIERS,
   imageEnhanceInputSchema,
+  imageEnhanceTierSizeGate,
 } from "./image-enhance.js";
 
 // 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
@@ -77,6 +79,28 @@ describe("image_enhance 契约不变量（§14.1–14.4，TS 侧）", () => {
       generativeEnhanceMode: "generative_first",
       enableCorrectColor: true,
     });
+  });
+
+  it("尺寸门槛矩阵单处定义：lite 2160/16、pro 2048/256、max 6240/64/32，判定与文案同源", () => {
+    // 门槛数值（火山官方 PDF 溯源）与判定函数 imageEnhanceTierSizeGate 只此一份：
+    // backend image-enhancements 复核与 web 面板预检两端 import 引用（防漂移锚点）。
+    expect(IMAGE_ENHANCE_TIER_SIZE_LIMITS).toMatchObject({
+      lite: { minShortSide: 16, maxLongSide: 2160 },
+      pro: { minShortSide: 256, maxLongSide: 2048 },
+      max: { minShortSide: 64, maxLongSide: 6240, maxAspectRatio: 32 },
+    });
+    // 边界判定（等值放行、越界拒绝），拒绝文案含档位名供两端展示。
+    expect(imageEnhanceTierSizeGate("lite", 2160, 16)).toBeNull();
+    expect(imageEnhanceTierSizeGate("lite", 2161, 100)).toContain("Lite");
+    expect(imageEnhanceTierSizeGate("lite", 100, 15)).toContain("Lite");
+    expect(imageEnhanceTierSizeGate("pro", 2048, 256)).toBeNull();
+    expect(imageEnhanceTierSizeGate("pro", 2049, 300)).toContain("Pro");
+    expect(imageEnhanceTierSizeGate("pro", 1000, 255)).toContain("Pro");
+    // 竖图同口径（长边=高）：宽高比恰 32 放行、33 拒。
+    expect(imageEnhanceTierSizeGate("max", 100, 3200)).toBeNull();
+    expect(imageEnhanceTierSizeGate("max", 3201, 100)).toContain("Max");
+    expect(imageEnhanceTierSizeGate("max", 100, 63)).toContain("Max");
+    expect(imageEnhanceTierSizeGate("max", 6241, 1000)).toContain("Max");
   });
 
   it("input 六键冻结：合法样本过、缺键/多键/非法枚举拒", () => {

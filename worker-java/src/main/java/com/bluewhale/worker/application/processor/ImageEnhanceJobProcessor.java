@@ -9,6 +9,7 @@ import com.bluewhale.worker.domain.entity.ImageEnhanceContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageEnhanceError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
+import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitClient;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
 import org.slf4j.Logger;
@@ -210,14 +211,14 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
             throw new ImageEnhanceError(ImageEnhanceContract.ERROR_IMAGE_ENHANCE_FAILED,
                     "高清放大转存存储未配置");
         }
-        String mime = sniffImageMime(content);
+        String mime = NewApiImageClient.sniffImageMime(content, null);
         Integer width = null;
         Integer height = null;
         try {
             BufferedImage img = ImageIO.read(new ByteArrayInputStream(content));
             if (img != null) {
-                width = positiveDimension(img.getWidth());
-                height = positiveDimension(img.getHeight());
+                width = ImageJobProcessor.positiveDimension(img.getWidth());
+                height = ImageJobProcessor.positiveDimension(img.getHeight());
             }
         } catch (Exception ignored) {
             // 契约 §8：解析失败静默 null，资产照常落库（webp 等不支持格式）
@@ -308,32 +309,6 @@ public class ImageEnhanceJobProcessor implements JobProcessor {
             return iee.getCode();
         }
         return ImageEnhanceContract.ERROR_IMAGE_ENHANCE_FAILED;
-    }
-
-    /** MIME 按魔数嗅探（无 Content-Type 的兜底路径），与 NewApiImageClient.sniffImageMime 同构。 */
-    private static String sniffImageMime(byte[] data) {
-        if (startsWith(data, 0x89, 'P', 'N', 'G')) return "image/png";
-        if (startsWith(data, 0xFF, 0xD8, 0xFF)) return "image/jpeg";
-        if (data.length >= 12
-                && startsWith(data, 'R', 'I', 'F', 'F')
-                && data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P') {
-            return "image/webp";
-        }
-        return "image/png";
-    }
-
-    private static boolean startsWith(byte[] data, int... expected) {
-        if (data.length < expected.length) return false;
-        for (int i = 0; i < expected.length; i++) {
-            if ((data[i] & 0xFF) != (expected[i] & 0xFF)) return false;
-        }
-        return true;
-    }
-
-    /** 正有限数否则 null（generation-worker.ts:820-824 positiveDimension 同构）。 */
-    static Integer positiveDimension(Integer value) {
-        if (value == null) return null;
-        return value > 0 ? value : null;
     }
 
     /** 失败处理：与图片任务同构走通用 failJob（details.raw 透传原始原因）。 */

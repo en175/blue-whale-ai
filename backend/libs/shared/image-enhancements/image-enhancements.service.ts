@@ -14,40 +14,14 @@ import {
   RESOURCE_NOT_FOUND_CODE,
   fail,
   imageEnhanceInputSchema,
+  imageEnhanceTierSizeGate,
   ok,
   type ImageEnhanceInput,
-  type ImageEnhanceVersionTier,
 } from "@lib/contracts";
 import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
-
-/** 源图尺寸门槛（规格 docs/specs/2026-09-17-image-upscale-mediakit.md 内联口径，火山官方 PDF 溯源）：
- *  短边 = min(width, height)、长边 = max(width, height)；宽高比 = 长边 / 短边 ≤ 32（整数乘法比较防浮点）。 */
-const TIER_SIZE_LIMITS: Record<
-  ImageEnhanceVersionTier,
-  { check: (longSide: number, shortSide: number) => string | null }
-> = {
-  lite: {
-    check: (longSide, shortSide) =>
-      longSide <= 2160 && shortSide >= 16
-        ? null
-        : "源图尺寸不满足 Lite 版本门槛（要求长边不超过 2160px 且短边不低于 16px），请更换版本档或源图",
-  },
-  pro: {
-    check: (longSide, shortSide) =>
-      shortSide >= 256 && longSide <= 2048
-        ? null
-        : "源图尺寸不满足 Pro 版本门槛（要求短边不低于 256px 且长边不超过 2048px），请更换版本档或源图",
-  },
-  max: {
-    check: (longSide, shortSide) =>
-      shortSide >= 64 && longSide <= 6240 && longSide <= 32 * shortSide
-        ? null
-        : "源图尺寸不满足 Max 版本门槛（要求短边不低于 64px、长边不超过 6240px 且宽高比不超过 32），请更换版本档或源图",
-  },
-};
 
 /** zod 校验失败 → 人能读懂的原因（按首个出错键名映射；前端预检只是体验层，这里返回可读文案）。 */
 const PARSE_ERROR_MESSAGES: Record<string, string> = {
@@ -77,7 +51,13 @@ export class ImageEnhancementsService {
     private readonly assets: AssetService,
   ) {}
 
-  async create(userId: string, projectId: string, body: Record<string, unknown>) {
+  async create(
+    userId: string,
+    projectId: string,
+    body: Record<string, unknown>,
+    // 与图片生成同构（handle-create-generation-job.ts 的 internal 形参）：请求方 sk- 凭证冻结进 job。
+    internal: { providerCredential?: string } = {},
+  ) {
     // 契约 schema 复核（六键 strict）：版本档枚举、倍数 ∈ 2/4/6 等结构合法性在此拦截。
     const parsed = imageEnhanceInputSchema.safeParse(body ?? {});
     if (!parsed.success) {
@@ -113,12 +93,27 @@ export class ImageEnhancementsService {
 
     // 源图尺寸门槛复核。assets.width/height 由前端上报、后端原样存，存量图大量为 null（IKE53U 实测）；
     // 缺权威尺寸时不臆造、不拦存量图——放行交供应商按官方门槛拒（用户故事 30 预期的兜底路径）。
+    // 门槛数值与判定在契约 imageEnhanceTierSizeGate 单处定义（web 面板预检同源引用）。
     if (asset.width != null && asset.height != null) {
-      const longSide = Math.max(asset.width, asset.height);
-      const shortSide = Math.min(asset.width, asset.height);
-      const sizeError = TIER_SIZE_LIMITS[input.version_tier].check(longSide, shortSide);
+      const sizeError = imageEnhanceTierSizeGate(
+        input.version_tier,
+        asset.width,
+        asset.height,
+      );
       if (sizeError) return fail(FAILURE_CODE, sizeError);
     }
+
+    // 契约 schema parse 后原样冻结（六键恒在、重试原样沿用，§14.2）。
+    // provider_credential 是六键之上的基础设施键（不进契约 zod——它校验的是客户端 payload，
+    // 凭证由服务端注入）：与图片生成同构（handle-create-generation-job.ts 修正四，凭证去密），
+    // 请求方 sk- 明文冻结进 job input，worker（ImageEnhanceJobProcessor）处理时直接取用；
+    // 未携带/非 sk- 时不写键。契约 strict 六键口径不变。
+    const frozenInput: ImageEnhanceInput & { provider_credential?: string } = {
+      ...input,
+      ...(internal.providerCredential
+        ? { provider_credential: internal.providerCredential }
+        : {}),
+    };
 
     const job = await this.prisma.client.generation_jobs.create({
       data: {
@@ -129,8 +124,7 @@ export class ImageEnhancementsService {
         status: "queued",
         progress: 0,
         expected_output_count: 1,
-        // 契约 schema parse 后原样冻结（六键恒在、重试原样沿用，§14.2）。
-        input,
+        input: frozenInput,
         // 过去 60s：回拨口径同 media_extract——DATETIME(0) 秒精度进位会让同秒 claim 的 lte now 判 false。
         next_action_at: new Date(Date.now() - 60_000),
       },

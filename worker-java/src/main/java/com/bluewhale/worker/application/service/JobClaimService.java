@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -26,8 +27,10 @@ import java.util.Optional;
  * - by-id 路径无 .catch（DB 异常上抛，契约 §3.1 不对称）；
  * - 返回投影用**增后** fencing_token（candidate + 1）。
  * <p>
- * 四种媒体各一 CAS 方法（find*Candidate + claim*Cas 由 GenerationJobMapper 承载，
- * 差异 = 候选 SQL 白名单 + 租约时长）。第 5 类媒体扩展触点：新增 find*Candidate + claim*Cas
+ * CAS 更新与媒体类型无关：audio/video/media_extract 各一专属方法（候选条件各异），
+ * image 与 image_enhance 共用参数化候选查询 findCandidateByTypeAndSources + claimImageCas
+ * （两路径仅 type / source 白名单差异，租约时长由本类按媒体类型传入）。第 5 类媒体扩展触点：
+ * 条件与既有路径仅 type/source 差异时复用参数化查询，否则新增 find*Candidate + claim*Cas
  * + 投影 Dto（契约附录 C）。
  */
 @Service
@@ -47,6 +50,14 @@ public class JobClaimService {
      * （image 的 420s 语义同款：租约必须 > 上游读超时 + 转存余量）。
      */
     private static final int IMAGE_ENHANCE_LEASE_SECONDS = 420;
+
+    /** image claim 的 source 白名单（claim-ops.ts:339 CLAIMABLE_JOB_SOURCES）。 */
+    private static final List<String> IMAGE_CLAIM_SOURCES =
+            List.of("bottom_dock", "plan_apply", "storyboard_preview");
+
+    /** image_enhance claim 的单源白名单（契约 §14.1：唯一创建入口 = 画布图片卡工具条）。 */
+    private static final List<String> IMAGE_ENHANCE_CLAIM_SOURCES =
+            List.of("image_enhance");
 
     /** image 租约可被 env 覆盖（对齐 TS IMAGE_JOB_LEASE_SECONDS）。 */
     private static int imageLeaseSeconds() {
@@ -145,7 +156,8 @@ public class JobClaimService {
     public Optional<ClaimedJobDto> claimImageJobById(String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
 
-        GenerationJobEntity candidate = jobMapper.findImageCandidate(jobIdLong);
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong, "image", IMAGE_CLAIM_SOURCES);
         if (candidate == null) {
             return Optional.empty();
         }
@@ -221,18 +233,20 @@ public class JobClaimService {
     /**
      * 领取 image_enhance 作业（契约 §14 / IKGM9D，附录 C 触点④）。
      * <p>
-     * 套单源 source 白名单（source='image_enhance'）；租约用 image_enhance 专用 420s。
+     * 候选查询与 CAS 复用图片路径的参数化方法（仅 type / source 白名单差异）；
+     * 租约用 image_enhance 专用 420s（> MediaKit 读超时 + 转存余量）。
      */
     public Optional<ClaimedImageEnhanceJobDto> claimImageEnhance(String jobId, String workerId) {
         Long jobIdLong = Long.parseLong(jobId);
 
-        GenerationJobEntity candidate = jobMapper.findImageEnhanceCandidate(jobIdLong);
+        GenerationJobEntity candidate = jobMapper.findCandidateByTypeAndSources(
+                jobIdLong, "image_enhance", IMAGE_ENHANCE_CLAIM_SOURCES);
         if (candidate == null) {
             return Optional.empty();
         }
 
         LocalDateTime leaseExpiresAt = nowUtc().plusSeconds(IMAGE_ENHANCE_LEASE_SECONDS);
-        int affected = jobMapper.claimImageEnhanceCas(
+        int affected = jobMapper.claimImageCas(
                 jobIdLong, workerId, leaseExpiresAt,
                 candidate.getFencingToken(), candidate.getStatus());
         if (affected == 0) {
