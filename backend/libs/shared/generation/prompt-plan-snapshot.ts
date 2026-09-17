@@ -1,6 +1,5 @@
 import { validateReferences } from "../generation-runtime/video-reference-validation.js";
 import { COMPOSED_IMAGE_PROMPT_MAX_LENGTH, COMPOSED_VIDEO_PROMPT_MAX_LENGTH, type CanvasEdge, type PromptPlanSnapshot, type TextAttachmentSnapshot } from "@lib/contracts";
-import { type PromptDoc } from "@lib/contracts";
 import { MISSING_PROMPT_REF_REASON, planError, readPromptPlan, validatePlanModel, validateVideoPlan, type PromptTargetNode } from "../canvas/prompt-target.js";
 import type { ModelCapabilityView } from "../persistence/model-capability-repo.js";
 import type { AssetOwnershipOps } from "../persistence/asset-ownership-types.js";
@@ -10,8 +9,6 @@ export async function freezePromptPlans(args: {
   type?: "image" | "video";
   references?: Array<{ asset_id?: string; material_id?: string; type: "image" | "video" | "audio"; role: "reference" | "first_frame" | "last_frame" }>;
   inputIds: string[]; prompt: string; attachments: TextAttachmentSnapshot[];
-  /** IKFA1P：正文含文本标签时组合按编号清单格式（正文 文本N 与清单行号建立编号 ↔ 内容关系）。 */
-  promptDoc?: PromptDoc | null;
   model: ModelCapabilityView | undefined; userId: string; projectId: string;
   assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
 }): Promise<PromptPlanSnapshot | undefined> {
