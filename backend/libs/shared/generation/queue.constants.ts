@@ -13,3 +13,7 @@ export const AUDIO_GENERATION_TAG = "audio";
 /** 高清放大任务 tag（IKGM8U，契约 §14）：复用 VIDEO_GENERATION_QUEUE，用独立 tag 区分任务类型；
  *  与 generation_jobs.type / IMAGE_ENHANCE_JOB_TYPE（@lib/contracts）保持一致。 */
 export const IMAGE_ENHANCE_TAG = "image_enhance";
+
+/** 图片擦除任务 tag（IKGOT3，契约 §15）：复用 VIDEO_GENERATION_QUEUE，用独立 tag 区分任务类型；
+ *  与 generation_jobs.type / IMAGE_ERASE_JOB_TYPE（@lib/contracts）保持一致。 */
+export const IMAGE_ERASE_TAG = "image_erase";
