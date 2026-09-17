@@ -1,3 +1,6 @@
+-- 015_ikdjnz_asset_material_link：schema 基线片段。
+SET NAMES utf8mb4;
+
 -- IKDJNZ：assets 表新增素材库关联字段。
 -- 素材库（真人/虚拟人像库）本地零落表，仅存上游素材/组 ID 字符串。
 -- 历史数据不处理（两列默认 NULL）。
