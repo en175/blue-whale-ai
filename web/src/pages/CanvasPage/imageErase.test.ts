@@ -3,6 +3,7 @@ import {
   IMAGE_ERASE_MAX_HEIGHT,
   IMAGE_ERASE_MAX_SIZE_BYTES,
   IMAGE_ERASE_MAX_WIDTH,
+  IMAGE_ERASE_MIN_SIDE,
   imageEraseFormatOf,
   imageEraseGateReason,
   maskHasPaintArea,
@@ -44,6 +45,15 @@ describe('imageEraseGateReason（擦除门槛预检，IKGOT7）', () => {
   it('宽超 2560 或高超 1440 置灰并给出原因', () => {
     expect(imageEraseGateReason({ width: 2561, height: 1440 })).toContain('2560×1440');
     expect(imageEraseGateReason({ width: 2560, height: 1441 })).toContain('2560×1440');
+  });
+
+  it('宽或高小于 10px 置灰并给出原因（与后端复核同口径）', () => {
+    expect(imageEraseGateReason({ width: 9, height: 100 })).toContain('10×10');
+    expect(imageEraseGateReason({ width: 100, height: 9 })).toContain('10×10');
+  });
+
+  it('恰在最小边界（10×10）放行', () => {
+    expect(imageEraseGateReason({ width: IMAGE_ERASE_MIN_SIDE, height: IMAGE_ERASE_MIN_SIDE })).toBeNull();
   });
 
   it('超过 10MB 置灰并给出原因', () => {

@@ -24,10 +24,10 @@ export const ERASE_BRUSH_RADIUS_DEFAULT = 20;
 interface ImageEraseDialogProps {
   /** X 关闭（四退出之一，未发送丢弃遮罩由父级处理） */
   onClose: () => void;
-  /** 「清除文字」一键直发：返回 true 表示创建请求已发出（父级据此退出编辑态） */
+  /** 「清除文字」一键直发：返回 true 表示创建请求已发出；创建成功后父级自行退出编辑态（失败停留编辑态） */
   onSendTextErase: () => boolean;
   /** 涂抹发送：组件栅格化 ops 成黑白遮罩 PNG 后上抛（File 为 null 表示栅格化失败）；
-   *  resolve true 表示创建请求已发出（父级据此退出编辑态） */
+   *  resolve true 表示创建请求已发出，创建成功后父级自行退出编辑态（失败停留编辑态） */
   onSendMask: (file: File | null) => Promise<boolean>;
   tool: EraseTool;
   onToolChange: (tool: EraseTool) => void;

@@ -9,6 +9,7 @@ import {
   IMAGE_ERASE_MAX_FILE_BYTES,
   IMAGE_ERASE_MAX_HEIGHT_PX,
   IMAGE_ERASE_MAX_WIDTH_PX,
+  IMAGE_ERASE_MIN_SIDE_PX,
   type ImageEraseInput,
 } from '@lib/contracts/image-erase';
 
@@ -17,9 +18,12 @@ import { rasterizeMask, type MaskCoordinateSpace, type MaskOp, type MaskRasterSi
 
 /* ============ 门槛预检（IKGOT7，常量与契约同源） ============ */
 
-/** 输入尺寸上限（宽 ≤2560 且高 ≤1440）。常量单源在契约 image-erase.ts（后端复核同源引用）。 */
+/** 输入尺寸上限（宽 ≤2560 且高 ≤1440）与最小边下限（宽高 ≥10，供应商硬性要求；
+ *  与后端创建入口复核同源，避免前端放行、后端拒绝的口径不对称）。
+ *  常量单源在契约 image-erase.ts（后端复核同源引用）。 */
 export const IMAGE_ERASE_MAX_WIDTH = IMAGE_ERASE_MAX_WIDTH_PX;
 export const IMAGE_ERASE_MAX_HEIGHT = IMAGE_ERASE_MAX_HEIGHT_PX;
+export const IMAGE_ERASE_MIN_SIDE = IMAGE_ERASE_MIN_SIDE_PX;
 
 /** 输入大小上限（≤10MB）。常量单源在契约 image-erase.ts。 */
 export const IMAGE_ERASE_MAX_SIZE_BYTES = IMAGE_ERASE_MAX_FILE_BYTES;
@@ -73,6 +77,9 @@ export function imageEraseGateReason(source: ImageEraseGateSource): string | nul
   if (typeof width === 'number' && typeof height === 'number') {
     if (width > IMAGE_ERASE_MAX_WIDTH || height > IMAGE_ERASE_MAX_HEIGHT) {
       return `图片尺寸超过 ${IMAGE_ERASE_MAX_WIDTH}×${IMAGE_ERASE_MAX_HEIGHT}，无法擦除`;
+    }
+    if (width < IMAGE_ERASE_MIN_SIDE || height < IMAGE_ERASE_MIN_SIDE) {
+      return `图片尺寸小于 ${IMAGE_ERASE_MIN_SIDE}×${IMAGE_ERASE_MIN_SIDE} 像素，无法擦除`;
     }
   }
   if (typeof size === 'number' && size > IMAGE_ERASE_MAX_SIZE_BYTES) {
