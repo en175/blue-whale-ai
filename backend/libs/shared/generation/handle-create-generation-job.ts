@@ -2,11 +2,8 @@ import { freezePromptPlans } from "./prompt-plan-snapshot.js";
 import { transferPromptReferenceMarkers } from "./reference-marker-transfer.js";
 import type { CanvasEdge } from "@lib/contracts";
 import {
-  MISSING_PROMPT_REF_REASON,
-  planIndicesMessage,
   type PromptTargetNode,
 } from "../canvas/prompt-target.js";
-import { BadRequestException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 
 import {
@@ -54,7 +51,6 @@ import {
 } from "@lib/contracts";
 import {
   composeTextAttachmentPrompt,
-  composeTextAttachmentPromptIndexed,
   extractTextNodeText,
 } from "@lib/core";
 import {
@@ -108,8 +104,9 @@ export interface CreateGenerationJobBody {
   references?: unknown;
   /** IKDLQF/IKDLQG/IKDMQT：生成目标画布节点 id（图片=image/视频=video/音频=audio 媒体节点），仅三类生成允许携带。 */
   target_node_id?: unknown;
-  /** IKFA1M：正文素材标签结构（PromptDoc v1）。仅 type=image 允许携带；
-   *  存在时以其编译结果替代 parameters.prompt 冻结进 input.prompt，原始结构冻结进 input.prompt_doc。 */
+  /** IKG6EK / ADR-0088：**已退役**。原为正文素材标签结构（PromptDoc v1，IKFA1M）。
+   *  后端不再解析、校验、编译或冻结它——携带时不报错、直接不读、不影响结果。
+   *  保留字段声明只为兼容尚未升级的前端；前端停止发送（IKGJT5）后可一并删除。 */
   prompt_doc?: unknown;
   parameters?: unknown;
   expected_output_count?: unknown;
@@ -1348,12 +1345,6 @@ function videoRefItemsOf(v: unknown): VideoRefItem[] {
     : [];
 }
 
-/** 正文标签展示编号（图片N/视频N/音频N）→ 索引形式（#N）；帧角色名（首帧/尾帧）原样保留。 */
-function refIndexLabel(label: string | null): string | null {
-  if (label === null) return null;
-  const numbered = /^(?:图片|视频|音频)([0-9]+)$/.exec(label);
-  return numbered === null ? label : `#${numbered[1]}`;
-}
 
 /** POST /api/projects/{projectId}/generation-jobs：创建生成任务（queued）+ 预留点数 + 日志。
  *  简化模型：无幂等表、单输出语义；action_identity 用 Idempotency-Key 派生（仅用于追溯）。

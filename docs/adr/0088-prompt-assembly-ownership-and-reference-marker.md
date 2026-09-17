@@ -3,7 +3,7 @@
 - **状态**：Accepted
 - **日期**：2026-09-17
 - **决策者**：lixq（经 `/grilling` 会话共同得出）
-- **取代**：`docs/specs/2026-09-06-ikdlqf-text-attachment-image-contract.md`「供应商请求组合（确定性）」条款，及 `docs/specs/2026-09-06-ikdlqg-text-attachment-video-contract.md` 同款条款中的「组合在 worker 侧」「附件与目标提示词分别表达，互不覆盖」「前端面板不重复实现该校验」三句；`IKFA1M` §3「`prompt_doc` 存在时以它为权威编译源：编译结果**替代** `parameters.prompt`」及 IKFA1O / IKFA1P / IKFCJG 的同款编译与身份复核条款；并取代 `CONTEXT.md` 中 **ProviderPromptProjection** 词条「服务端从中派生」的表述（词条已同步修订）。
+- **取代**：`docs/specs/2026-09-06-ikdlqf-text-attachment-image-contract.md`「供应商请求组合（确定性）」条款，及 `docs/specs/2026-09-06-ikdlqg-text-attachment-video-contract.md` 同款条款中的「组合在 worker 侧」「附件与目标提示词分别表达，互不覆盖」「前端面板不重复实现该校验」三句；`IKFA1M` §3「`prompt_doc` 存在时以它为权威编译源：编译结果**替代** `parameters.prompt`」及 IKFA1O / IKFA1P / IKFCJG 的同款编译与身份复核条款；`docs/specs/2026-09-14-ikfm3s-text-index-sync-contract.md` 中「`prompt_doc` 标签编号按该序派生」「`prompt_doc` 冻结语义不变：正文仍进组合提示词」条款；`docs/specs/2026-09-13-ikfcxe-audio-text-context-contract.md` 中「双端优先消费非空白 `composed_prompt` 冻结正文」条款；并取代 `CONTEXT.md` 中 **ProviderPromptProjection** 词条「服务端从中派生」的表述（词条已同步修订）。
 - **关联**：[IKFA1M / IKFA1O / IKFA1P](2026-09-12-ikfa1m-image-prompt-ref-contract.md)（结构化引用标记，**随本决策退役**）、IKG79Z（素材库身份桥）、IKG4RV（生成输入以请求体为准）
 - **工单**：IKG6EK（父缺陷）；执行子单 IKGJT2（后端）、IKGJT5（前端）
 
@@ -54,4 +54,6 @@
 - **`input` 内部字段不随请求契约改名**：请求体统一 `references`，但图片 worker 读的仍是 `input.input_asset_ids`，由接纳侧做一次映射。改请求字段不等于改冻结字段。
 - **历史任务不做特殊处理**：重试整份复制原 `input`（`generation-command-repo.ts` 现状），不重算、不回填。**但这不等于行为不变**——`input` 里冻结的正文来源本身变了：经 `21856177` 之后提交的任务，前端已把附件正文拼进 `parameters.prompt`，重试照旧完整；而 `prompt_doc` 分支（IKFA1P）提交的任务，附件正文原先只存在于 `providerPrompt`，而 worker 现在不读它——**这批任务重试会发出更短的正文**。接受这个结果（快照即历史事实），但不当作「无变化」。
 - **发布窗口**：同批发布。未升级的前端发来的请求不含 `&asset_id&`（标记不会被转移，原样保留），且其 `prompt_doc` 不再生效——**带文本附件 / 方案附件的正文会缺内容**（附件正文原先由服务端组合送入，已随本决策删除），带方案附件的请求也不再有服务端编译的 `参考图N`。**窗口内行为与改造前不一致**，这是已知且接受的代价；不设兼容层，靠前端同批上线闭合。
+- **发布顺序是硬约束：前端先上，或同批。** 上一版后端（只删 `providerPrompt`、未动 doc）已经无条件做标记转移，新前端对它是对路；反过来后端先上，会让带文本附件 / 方案附件的正文静默缺内容（见上条）。
+- **第三条创建路径不在本决策范围**：`handle-scene-card-generate.ts` → `regenerateSceneCard` 直接建 video job（不经本接纳管线，不做标记转移）。该路径的正文若含 `&asset_id&` 会原样送上游——已知；由场景卡线另行决定是否纳入。
 - 本决策的收益是「同一信息只有一处表达」；代价是把编号规则留在服务端的同时，把**拼装顺序**的责任交给了前端，因此前端卡片/chip 上显示的编号必须与服务端编译同序（IKFA1M §2 已有该要求），否则会出现展示与出站不一致。

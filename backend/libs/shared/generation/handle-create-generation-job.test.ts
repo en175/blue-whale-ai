@@ -570,6 +570,22 @@ describe("handleCreateGenerationJob 图片参考素材单数组 references（IKG
     const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
     expect(cmdArg.input.input_asset_ids).toEqual([1, 2]);
   });
+
+  it("references: [] 视为未提供 → 回落旧字段 input_asset_ids，不被静默清空", async () => {
+    const { deps, createJob } = buildImageDeps(10);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(2), references: [] },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.input_asset_ids).toEqual([1, 2]);
+  });
 });
 
 // 素材库引用（MaterialReference）：仅视频生成；格式校验 + 与本地 Asset 引用按并集互斥/配对。
