@@ -10,18 +10,6 @@
  * 历史语义权威文档：docs/specs/2026-09-12-ikfa1m-image-prompt-ref-contract.md（已由 ADR-0088 取代）。
  * ============================================ */
 
-/**
- * 展示编号派生：图片N = asset_id 在最终有效输入顺序（保序）中的下标 + 1。
- * 编号跟真实媒体输入顺序，不跟正文出现顺序；身份不在集合中返回 null（失效）。
- */
-export function imageRefLabel(
-  assetId: string,
-  orderedAssetIds: readonly string[],
-): string | null {
-  const index = orderedAssetIds.indexOf(assetId);
-  return index < 0 ? null : `图片${index + 1}`;
-}
-
 /* ============================================
  * IKFA1O：视频多媒体标签与首尾帧角色
  *

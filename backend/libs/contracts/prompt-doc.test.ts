@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildReferenceMarkerLabels,
-  imageRefLabel,
   videoRefLabel,
   type VideoRefItem,
 } from "./prompt-doc.js";
@@ -15,18 +14,6 @@ const ref = (
   role: VideoRefItem["role"],
   type: VideoRefItem["type"] = "image",
 ): VideoRefItem => ({ id, role, type });
-
-describe("imageRefLabel（图片展示编号，IKFA1M）", () => {
-  it("编号 = asset_id 在有序输入集合中的下标 + 1，跟输入顺序不跟正文顺序", () => {
-    expect(imageRefLabel("101", ["101", "102"])).toBe("图片1");
-    expect(imageRefLabel("102", ["101", "102"])).toBe("图片2");
-    expect(imageRefLabel("102", ["102", "101"])).toBe("图片1");
-  });
-
-  it("身份不在集合 → null（失效）", () => {
-    expect(imageRefLabel("999", ["101", "102"])).toBeNull();
-  });
-});
 
 describe("videoRefLabel（视频角色与同类型编号，IKFA1O）", () => {
   const REFS = [

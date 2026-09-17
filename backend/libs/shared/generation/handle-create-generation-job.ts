@@ -20,7 +20,6 @@ import {
   toGenerationParamCheckInput,
   resolveVideoTaskType,
   type VideoTaskType,
-  imageRefLabel,
   videoRefLabel,
   buildReferenceMarkerLabels,
   mediaMentionSchema,
@@ -1248,6 +1247,11 @@ async function resolveTargetSnapshot(args: {
       const finalRefs = parsed.kind === "ok" ? parsed.items.map((item) => ({
         id: String(item.asset_id ?? item.material_id), role: item.role, type: item.type,
       })) : [];
+      // IKG6EK / ADR-0088：图片端的编号基准是**合并后的全量参考**（图片目标已由闸保证全是图片），
+      // 与其它端同投影——编号规则只此一套（videoRefLabel 的同类型计数）。
+      const imageRefItems = args.referenceAssetIds.map((id) => ({
+        id: String(id), role: "reference" as const, type: "image" as const,
+      }));
       textAttachments = textAttachments.map((attachment) => {
         const media = mediaByTextNode.get(attachment.node_id);
         if (!media?.length) return attachment;
@@ -1261,9 +1265,7 @@ async function resolveTargetSnapshot(args: {
         let text = typeof data?.text === "string" ? data.text : attachment.text;
         for (const mention of mentions) {
           if (!media.some((item) => item.node_id === mention.nodeId && item.asset_id === mention.assetId)) continue;
-          const label = type === "image"
-            ? imageRefLabel(mention.assetId, args.referenceAssetIds)
-            : videoRefLabel(mention.assetId, finalRefs);
+          const label = videoRefLabel(mention.assetId, type === "image" ? imageRefItems : finalRefs);
           if (label !== null) text = text.slice(0, mention.start) + label + text.slice(mention.end);
         }
         return { ...attachment, text, media };
