@@ -221,35 +221,44 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     // ========== 图片路径（blade-③ IKELJA） ==========
 
     /**
-     * 领取图片作业：候选查询（claim-ops.ts:335-354）。
+     * 按媒体类型 + source 白名单领取候选（claim-ops.ts:335-354 的参数化通用形态）。
      * <p>
-     * 与 audio 不同：图片套 source 白名单（:339 source IN CLAIMABLE_JOB_SOURCES）。
-     * CLAIMABLE_JOB_SOURCES = ['bottom_dock','plan_apply','storyboard_preview']
-     * （-internals.ts:12-16）。
+     * image 路径：type='image'，source 白名单 = CLAIMABLE_JOB_SOURCES
+     * ['bottom_dock','plan_apply','storyboard_preview']（-internals.ts:12-16）；
+     * image_enhance 路径（契约 §14）：type='image_enhance'，白名单单源 ['image_enhance']
+     * （唯一创建入口 = 画布图片卡工具条，media_extract 的 source="dock" 同款专属来源值模式）。
+     * 两路径仅 type / source 差异，其余条件逐字同 TS——故参数化共用，防逐字复制漂移。
      */
     @Select("""
+            <script>
             SELECT * FROM generation_jobs
             WHERE id = #{jobId}
-              AND type = 'image'
-              AND source IN ('bottom_dock', 'plan_apply', 'storyboard_preview')
+              AND type = #{type}
+              AND source IN
+              <foreach collection="sources" item="item" open="(" separator="," close=")">#{item}</foreach>
               AND is_delete = false
-              AND next_action_at <= NOW()
+              AND next_action_at &lt;= NOW()
               AND (
                 status = 'queued'
                 OR (
                   status = 'processing'
-                  AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+                  AND (lease_expires_at IS NULL OR lease_expires_at &lt; NOW())
                 )
               )
             ORDER BY id ASC
             LIMIT 1
+            </script>
             """)
-    GenerationJobEntity findImageCandidate(@Param("jobId") Long jobId);
+    GenerationJobEntity findCandidateByTypeAndSources(
+            @Param("jobId") Long jobId,
+            @Param("type") String type,
+            @Param("sources") List<String> sources);
 
     /**
-     * 领取图片作业：CAS 更新（claim-ops.ts:358-372）。
+     * 领取图片 / image_enhance 作业：CAS 更新（claim-ops.ts:358-372）。
      * <p>
-     * 与 claimAudioCas 逐字一致（同 CAS 模式）。
+     * CAS UPDATE 的 WHERE 只含 id / fencing_token / status，与媒体类型和 source 白名单无关，
+     * 故 image 与 image_enhance（契约 §14）共用本方法；租约时长由 JobClaimService 按媒体类型传入。
      */
     @Update("""
             UPDATE generation_jobs
@@ -600,6 +609,11 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             """)
     String findProviderTaskId(@Param("jobId") Long jobId);
 
+    // ========== 高清放大路径（契约 §14 / IKGM9D） ==========
+    // 候选查询与 CAS 均复用图片路径的参数化通用方法（findCandidateByTypeAndSources /
+    // claimImageCas，见上「图片路径」段注释）：两路径仅 type / source 白名单差异，
+    // CAS UPDATE 与媒体类型无关——不保留逐字复制的专属方法（审查修复 S2）。
+
     // ========== recovery 到点/孤儿扫描（IKF3AT；claim-ops.ts:134-230 逐字移植） ==========
     // 共同条件：is_delete=false + gmt_create 在 RECOVERY_MAX_AGE 窗口内（避免卡死任务被 60s 循环无限重放）
     // + next_action_at<=now + （queued ∨ processing 且租约空/过期——孤儿由 claim-by-id 的过期租约接管语义接走）。
@@ -673,5 +687,23 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             LIMIT #{limit}
             """)
     List<Long> listDueMediaExtractJobIds(@Param("limit") int limit,
+                                         @Param("maxAgeMinutes") int maxAgeMinutes);
+
+    /** 高清放大到点/孤儿（契约 §14）：套 source 白名单（与 claim 同源，单源 image_enhance）。 */
+    @Select("""
+            SELECT id FROM generation_jobs
+            WHERE type = 'image_enhance'
+              AND source IN ('image_enhance')
+              AND is_delete = false
+              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+              AND next_action_at <= NOW()
+              AND (
+                status = 'queued'
+                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
+              )
+            ORDER BY id ASC
+            LIMIT #{limit}
+            """)
+    List<Long> listDueImageEnhanceJobIds(@Param("limit") int limit,
                                          @Param("maxAgeMinutes") int maxAgeMinutes);
 }

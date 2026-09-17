@@ -48,6 +48,7 @@ public class RecoveryService {
     private final ObjectProvider<GenerationMessageProducer> imageProducer;
     private final ObjectProvider<GenerationMessageProducer> audioProducer;
     private final ObjectProvider<GenerationMessageProducer> mediaExtractProducer;
+    private final ObjectProvider<GenerationMessageProducer> imageEnhanceProducer;
     private final WorkerProperties workerProps;
     private final int maxAgeMinutes;
     /** 空 tags 提示只打一次（避免安全拉起形态下每 60s 刷屏）。 */
@@ -63,6 +64,8 @@ public class RecoveryService {
             ObjectProvider<GenerationMessageProducer> audioProducer,
             @Qualifier("mediaExtractRecoveryProducer")
             ObjectProvider<GenerationMessageProducer> mediaExtractProducer,
+            @Qualifier("imageEnhanceRecoveryProducer")
+            ObjectProvider<GenerationMessageProducer> imageEnhanceProducer,
             WorkerProperties workerProps,
             @Value("${RECOVERY_MAX_AGE_MINUTES:120}") int maxAgeMinutes
     ) {
@@ -71,6 +74,7 @@ public class RecoveryService {
         this.imageProducer = imageProducer;
         this.audioProducer = audioProducer;
         this.mediaExtractProducer = mediaExtractProducer;
+        this.imageEnhanceProducer = imageEnhanceProducer;
         this.workerProps = workerProps;
         this.maxAgeMinutes = maxAgeMinutes;
     }
@@ -105,6 +109,8 @@ public class RecoveryService {
                     jobMapper.listDueMediaExtractJobIds(SCAN_LIMIT, maxAgeMinutes));
             reenqueue("audio", audioProducer.getIfAvailable(),
                     jobMapper.listDueAudioJobIds(SCAN_LIMIT, maxAgeMinutes));
+            reenqueue("image_enhance", imageEnhanceProducer.getIfAvailable(),
+                    jobMapper.listDueImageEnhanceJobIds(SCAN_LIMIT, maxAgeMinutes));
         } catch (Exception e) {
             log.error("recovery scan failed: {}", e.getMessage(), e);
         }

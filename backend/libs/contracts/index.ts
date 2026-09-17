@@ -143,6 +143,23 @@ export {
   type ErrorCodeSpec,
 } from "./error-codes.js";
 export {
+  IMAGE_ENHANCE_JOB_TYPE,
+  IMAGE_ENHANCE_SOURCE,
+  IMAGE_ENHANCE_INPUT_KEYS,
+  IMAGE_ENHANCE_VERSION_TIERS,
+  IMAGE_ENHANCE_TOOL_VERSION,
+  IMAGE_ENHANCE_MULTIPLES,
+  IMAGE_ENHANCE_MODES,
+  IMAGE_ENHANCE_TIER_CAPABILITY,
+  IMAGE_ENHANCE_TIER_SIZE_LIMITS,
+  IMAGE_ENHANCE_DEFAULTS,
+  imageEnhanceInputSchema,
+  imageEnhanceTierSizeGate,
+  type ImageEnhanceVersionTier,
+  type ImageEnhanceMode,
+  type ImageEnhanceInput,
+} from "./image-enhance.js";
+export {
   DomainError,
   assetError,
   skillError,
