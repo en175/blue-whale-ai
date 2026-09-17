@@ -296,6 +296,10 @@ export default function CanvasPage() {
   const [enhanceSeed, setEnhanceSeed] = useState<{ ts: number; sourceDims: { width?: number; height?: number }; initialParams: ImageEnhancePanelParams | null } | null>(null);
   /** 高清面板隐藏豁免（口径同 imagePanelHiddenRef）：刚关闭面板后的选中变化不回弹重开 */
   const enhancePanelHiddenRef = useRef(false);
+  /** 擦除编辑态（IKGOT7）：处于擦除编辑的源图卡 node id，null=未进入。
+   *  本票仅开关与占位呈现（点「擦除」置位）；擦除工具条/发送条/指针接管/四退出
+   *  （X/Esc/点其他卡/点空白，未发送退出丢弃遮罩）由 IKGOTB 交付。 */
+  const [eraseTargetNodeId, setEraseTargetNodeId] = useState<string | null>(null);
   const [showEdges, setShowEdges] = useState(true);
   /** 对齐吸附开关（IKGGCT T3）：全局持久化（不分画布文档），初始读 localStorage，默认开 */
   const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
@@ -1153,6 +1157,7 @@ export default function CanvasPage() {
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
+          onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -1959,6 +1964,7 @@ export default function CanvasPage() {
     genVideo: (_id: string) => {},
     genAudio: (_id: string) => {},
     enhanceImage: (_id: string) => {},
+    eraseImage: (_id: string) => {},
     extractAudio: async (_id: string) => {},
     download: (_id: string) => {},
     showDetails: (_id: string) => {},
@@ -2920,6 +2926,13 @@ export default function CanvasPage() {
     }
   }, [enhanceDraftId, mediaNodes]);
 
+  /** 擦除编辑态绑定清理（IKGOT7）：目标源图卡被删除时退出编辑态，防占位悬挂；
+   *  其余退出途径（X/Esc/点其他卡/点空白）由 IKGOTB 交付 */
+  useEffect(() => {
+    if (!eraseTargetNodeId) return;
+    if (!mediaNodes.some((n) => n.id === eraseTargetNodeId)) setEraseTargetNodeId(null);
+  }, [eraseTargetNodeId, mediaNodes]);
+
   /** IKFR4X：Esc 结束图片持续选取会话（输入框/编辑器内的 Esc 保持原语义，如卡片名称编辑） */
   useEffect(() => {
     if (imagePickSession === undefined) return;
@@ -3157,6 +3170,7 @@ export default function CanvasPage() {
         onGenVideo: (id: string) => actionsRef.current.genVideo(id),
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
+        onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -3611,6 +3625,7 @@ export default function CanvasPage() {
       onGenVideo: (id: string) => actionsRef.current.genVideo(id),
       onGenAudio: (id: string) => actionsRef.current.genAudio(id),
       onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
+      onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
       onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
       onDownload: (id: string) => actionsRef.current.download(id),
       onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -4009,6 +4024,7 @@ export default function CanvasPage() {
           onGenVideo: (id: string) => actionsRef.current.genVideo(id),
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
+          onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -5649,6 +5665,15 @@ export default function CanvasPage() {
     openEnhanceDraftDialog(draftId);
   };
 
+  /** 擦除（IKGOT7）：「高清 ▾」下拉「擦除」项把目标图片卡置为擦除编辑态。
+   *  门槛预检（超尺寸/超大小/webp/gif）已在菜单项置灰层完成，此处只管开关；
+   *  本票仅置位 state + 占位呈现，擦除编辑态交互（工具条/发送条/指针/四退出）由 IKGOTB 交付。 */
+  const handleNodeEraseImage = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    setEraseTargetNodeId(id);
+  };
+
   /** 生成视频（IKDMQS 统一草稿绑定）：有生成记录的视频节点 → 绑定原卡原位重新生成（与「重新编辑」一致）；
    *  其他节点（图片/上传视频等）→ 来源有效性预检后新建视频草稿卡 + 被点节点自动连线为普通参考。
    *  不调 validateVideoRefConnect（新草稿未进 ref 会使校验被跳过），canOpenEditor 闸口保留 */
@@ -5920,6 +5945,7 @@ export default function CanvasPage() {
   actionsRef.current.genVideo = handleNodeGenVideo;
   actionsRef.current.genAudio = handleNodeGenAudio;
   actionsRef.current.enhanceImage = handleNodeEnhanceImage;
+  actionsRef.current.eraseImage = handleNodeEraseImage;
   actionsRef.current.extractAudio = handleNodeExtractAudio;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
@@ -6475,6 +6501,7 @@ export default function CanvasPage() {
               onGenVideo: (id: string) => actionsRef.current.genVideo(id),
               onGenAudio: (id: string) => actionsRef.current.genAudio(id),
               onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
+              onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
               onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -7564,6 +7591,21 @@ export default function CanvasPage() {
             {pickMode === 'asset' && '到节点选择：点击画布中的图片节点或方案节点，带入完整参考，点击空白处取消'}
           </div>
           )
+        )}
+
+        {/* 擦除编辑态占位条（IKGOT7）：仅开关与最小呈现——置位入口为「高清 ▾」下拉「擦除」项
+            （onEraseImage → handleNodeEraseImage → setEraseTargetNodeId）；
+            完整编辑态（擦除工具条/发送条/指针接管/四退出）由 IKGOTB 以本占位为接缝替换交付 */}
+        {eraseTargetNodeId && (
+          <div
+            className={styles.pickHint}
+            data-gen-panel-territory
+            data-testid="erase-edit-placeholder"
+            data-target-node={eraseTargetNodeId}
+          >
+            <span>擦除编辑态开发中：目标图片卡已进入擦除模式（IKGOTB 交付完整编辑交互）</span>
+            <button type="button" className={styles.pickHintFinish} onClick={() => setEraseTargetNodeId(null)}>退出擦除</button>
+          </div>
         )}
 
         {/* 底部音频对话框 */}
