@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { IMAGE_ERASE_MASK_ASSET_SOURCE } from "@lib/contracts";
 
 /** Asset 读路径 repo（Prisma-backed），复用部署的 assets 表。
  *  对齐 Java AssetService.listAssets：只读分页列表。
@@ -171,6 +172,9 @@ export interface AssetRepo {
     height?: number;
     duration?: number;
     md5?: string;
+    /** IKGOTB：资产来源（uploaded / mask_erase 擦除遮罩中间素材）。缺省 uploaded；
+     *  归一在上传链路（handleCompleteAsset 白名单），仓库层原样落库。 */
+    source?: string;
   }): Promise<PendingUploadAsset>;
   /** IKDJNZ：素材库素材创建成功后，把原始素材与素材库素材绑定（一对多覆盖写）。
    *  校验 asset 归属当前用户；material_id 唯一索引兜底一张素材只关联一个素材库素材。 */
@@ -548,6 +552,9 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         user_id: BigInt(userId),
         is_delete: false,
         ...(filter.type ? { type: filter.type } : {}),
+        // IKGOTB：擦除遮罩中间素材（source=mask_erase）不在用户资产列表可见——
+        // 常量单源在契约 image-erase.ts，web 涂抹遮罩上传与后端列表排除同源。
+        NOT: { source: IMAGE_ERASE_MASK_ASSET_SOURCE },
       };
       const [total, rows] = await Promise.all([
         prisma.assets.count({ where }),
@@ -735,6 +742,9 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           md5,
           status: "normal",
           is_delete: false,
+          // IKGOTB：遮罩中间素材不参与 md5 去重命中——用户手动上传与遮罩同字节的图时，
+          // 命中 mask_erase 资产会让「刚上传的图」在资产列表不可见（该来源被列表排除）。
+          NOT: { source: IMAGE_ERASE_MASK_ASSET_SOURCE },
         },
         orderBy: { id: "desc" },
         select: uploadAssetSelect,
@@ -759,7 +769,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
               ? {}
               : { duration_ms: Math.round(input.duration * 1000) }),
             ...(input.md5 ? { md5: input.md5 } : {}),
-            source: "uploaded",
+            source: input.source ?? "uploaded",
             status: "normal",
           },
           select: uploadAssetSelect,

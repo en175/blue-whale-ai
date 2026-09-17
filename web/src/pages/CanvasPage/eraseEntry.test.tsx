@@ -180,9 +180,9 @@ async function eraseImage() {
   });
 }
 
-/** 擦除编辑态占位条（挂在 document.body 下的 CanvasPage 根内） */
-function erasePlaceholder(): HTMLElement | null {
-  return document.body.querySelector('[data-testid="erase-edit-placeholder"]');
+/** 擦除编辑态工具条（挂在 document.body 下的 CanvasPage 根内，IKGOTB 替换 IKGOT7 占位条） */
+function eraseToolbar(): HTMLElement | null {
+  return document.body.querySelector('[data-testid="erase-toolbar"]');
 }
 
 beforeEach(() => {
@@ -199,38 +199,37 @@ afterEach(async () => {
 });
 
 describe('IKGOT7 点「擦除」进入擦除编辑态（开关与占位）', () => {
-  it('点「擦除」后目标图片卡置为擦除编辑态：占位条出现且标记目标节点', async () => {
+  it('点「擦除」后目标图片卡置为擦除编辑态：工具条与发送条出现', async () => {
     await renderPage();
-    expect(erasePlaceholder()).toBeNull();
+    expect(eraseToolbar()).toBeNull();
 
     await eraseImage();
-    const placeholder = erasePlaceholder();
-    expect(placeholder).toBeTruthy();
-    expect(placeholder!.getAttribute('data-target-node')).toBe('i1');
+    expect(eraseToolbar()).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="erase-send-bar"]')).toBeTruthy();
     // 源卡不动（无建卡、无连线）
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(1);
     expect(flowProps.current.edges).toEqual([]);
   });
 
-  it('占位条「退出擦除」清掉编辑态', async () => {
+  it('工具条 X 清掉编辑态', async () => {
     await renderPage();
     await eraseImage();
-    const exit = erasePlaceholder()!.querySelector<HTMLButtonElement>('button')!;
+    const close = eraseToolbar()!.querySelector<HTMLButtonElement>('[data-testid="erase-close"]')!;
     await act(async () => {
-      exit.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      close.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    expect(erasePlaceholder()).toBeNull();
+    expect(eraseToolbar()).toBeNull();
   });
 
-  it('目标源图卡被删除时编辑态自动清理（占位不悬挂）', async () => {
+  it('目标源图卡被删除时编辑态自动清理（工具条不悬挂）', async () => {
     await renderPage();
     await eraseImage();
-    expect(erasePlaceholder()).toBeTruthy();
+    expect(eraseToolbar()).toBeTruthy();
     // 走节点删除回调（MediaNode onDelete → removeMediaNode）
     const image = flowProps.current.mediaNodes.find((n: Node) => n.id === 'i1')!;
     await act(async () => {
       image.data.onDelete('i1');
     });
-    expect(erasePlaceholder()).toBeNull();
+    expect(eraseToolbar()).toBeNull();
   });
 });

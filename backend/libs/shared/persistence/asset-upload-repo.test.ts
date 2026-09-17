@@ -143,6 +143,60 @@ describe("AssetRepo upload persistence", () => {
     });
   });
 
+  it("IKGOTB：source 原样落库（mask_erase 遮罩中间素材），缺省 uploaded", async () => {
+    const committed = {
+      id: BigInt(44),
+      type: "image",
+      storage_key: "uploads/9/image/mask.png",
+      url: "https://bucket.tos.test/uploads/9/image/mask.png",
+      mime: "image/png",
+      size: BigInt(100),
+      width: 1600,
+      height: 900,
+      duration_ms: null,
+    };
+    const assets = { create: vi.fn().mockResolvedValue(committed) };
+    const project_asset = { upsert: vi.fn().mockResolvedValue({}) };
+    const prisma = {
+      $transaction: vi.fn(
+        async (cb: (tx: unknown) => Promise<unknown>) =>
+          cb({ assets, project_asset }),
+      ),
+    };
+    const repo = createAssetRepo(prisma as never);
+
+    await repo.createUploadedAsset({
+      userId: "9",
+      projectId: "55",
+      type: "image",
+      mime: "image/png",
+      size: 100,
+      storageKey: "uploads/9/image/mask.png",
+      url: "https://bucket.tos.test/uploads/9/image/mask.png",
+      width: 1600,
+      height: 900,
+      source: "mask_erase",
+    });
+    expect(assets.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ source: "mask_erase" }),
+      select: expect.any(Object),
+    });
+
+    await repo.createUploadedAsset({
+      userId: "9",
+      projectId: "0",
+      type: "image",
+      mime: "image/png",
+      size: 100,
+      storageKey: "uploads/9/image/plain.png",
+      url: "https://bucket.tos.test/uploads/9/image/plain.png",
+    });
+    expect(assets.create).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({ source: "uploaded" }),
+      select: expect.any(Object),
+    });
+  });
+
   it("creates, reads, and completes an owner-scoped pending upload", async () => {
     const assets = {
       create: vi.fn().mockResolvedValue({ id: BigInt(41) }),
@@ -234,7 +288,8 @@ describe("AssetRepo upload md5 去重（IKCNLS）", () => {
 
     const found = await repo.findOwnedByMd5("9", "abc123");
     expect(findFirst).toHaveBeenCalledWith({
-      where: { user_id: 9n, md5: "abc123", status: "normal", is_delete: false },
+      // IKGOTB：遮罩中间素材（source=mask_erase）不参与 md5 去重命中
+      where: { user_id: 9n, md5: "abc123", status: "normal", is_delete: false, NOT: { source: "mask_erase" } },
       orderBy: { id: "desc" },
       select: expect.any(Object),
     });

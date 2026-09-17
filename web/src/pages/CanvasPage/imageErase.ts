@@ -1,21 +1,32 @@
 /* ============================================
- * 图片擦除（IKGOSZ / IKGOT7）：「高清 ▾」下拉「擦除」入口的门槛预检。
- * 门槛口径与高清放大同源（节点 data.width/height + onLoad 实测回填，缺失不拦）；
- * 后端创建入口（IKGOT4）按 asset 权威数据复核是权威，此处仅展示层预检。
+ * 图片擦除（IKGOSZ / IKGOT7+IKGOTB）：擦除入口门槛预检、来源边常量、
+ * 结果卡身份标记与遮罩栅格化发送辅助。
+ * 门槛/场景/键名/遮罩来源标记直接复用 backend/libs/contracts/image-erase.ts
+ * （web 经 @lib alias 引入契约，先例见 imageEnhance.ts）。
  * ============================================ */
+import {
+  IMAGE_ERASE_INPUT_FORMATS,
+  IMAGE_ERASE_MAX_FILE_BYTES,
+  IMAGE_ERASE_MAX_HEIGHT_PX,
+  IMAGE_ERASE_MAX_WIDTH_PX,
+  type ImageEraseInput,
+} from '@lib/contracts/image-erase';
 
-/** 输入尺寸上限（宽 ≤2560 且高 ≤1440）。
- *  待与 image-erase 契约同源：契约文件 backend/libs/contracts/image-erase.ts 由 IKGOT3 创建，
- *  落地后本组常量改为从 @lib/contracts/image-erase import（父代理整合时统一，勿散落复制）。 */
-export const IMAGE_ERASE_MAX_WIDTH = 2560;
-export const IMAGE_ERASE_MAX_HEIGHT = 1440;
+export type { ImageEraseInput };
+import { rasterizeMask, type MaskCoordinateSpace, type MaskOp, type MaskRasterSink } from './eraseMask';
 
-/** 输入大小上限（≤10MB）。待与 image-erase 契约同源（同上）。 */
-export const IMAGE_ERASE_MAX_SIZE_BYTES = 10 * 1024 * 1024;
+/* ============ 门槛预检（IKGOT7，常量与契约同源） ============ */
 
-/** 不支持擦除的格式（接口仅支持 png/jpg/jpeg/heic；上传链可产生 webp/gif，画布确有存量）。
- *  待与 image-erase 契约同源（同上）。 */
-export const IMAGE_ERASE_UNSUPPORTED_FORMATS = ['webp', 'gif'] as const;
+/** 输入尺寸上限（宽 ≤2560 且高 ≤1440）。常量单源在契约 image-erase.ts（后端复核同源引用）。 */
+export const IMAGE_ERASE_MAX_WIDTH = IMAGE_ERASE_MAX_WIDTH_PX;
+export const IMAGE_ERASE_MAX_HEIGHT = IMAGE_ERASE_MAX_HEIGHT_PX;
+
+/** 输入大小上限（≤10MB）。常量单源在契约 image-erase.ts。 */
+export const IMAGE_ERASE_MAX_SIZE_BYTES = IMAGE_ERASE_MAX_FILE_BYTES;
+
+/** 支持的擦除输入格式（契约白名单 png/jpg/jpeg/heic）。门槛判定按白名单反转：
+ *  识别出格式且不在白名单（webp/gif/bmp 等）即置灰；识别不出（null）不拦，交后端按权威数据复核。 */
+const IMAGE_ERASE_SUPPORTED_FORMATS = IMAGE_ERASE_INPUT_FORMATS;
 
 /** 门槛判定输入：与 MediaNode data 字段同名（width/height/size/mime/fileName/src）。 */
 export interface ImageEraseGateSource {
@@ -47,13 +58,16 @@ export function imageEraseFormatOf(source: ImageEraseGateSource): string | null 
   return extOf(source.src) ?? extOf(source.fileName);
 }
 
+/** 支持格式提示文案（契约白名单渲染，悬停用）。 */
+const SUPPORTED_FORMATS_LABEL = IMAGE_ERASE_SUPPORTED_FORMATS.map((f) => f.toUpperCase()).join(' / ');
+
 /** 「擦除」入口门槛预检：返回不可用原因（悬停展示），null 为可用。
  *  尺寸/大小缺失不拦（存量图宽高 null，onLoad 实测回填后按实测重判）；
  *  判定顺序：格式 → 尺寸 → 大小。 */
 export function imageEraseGateReason(source: ImageEraseGateSource): string | null {
   const format = imageEraseFormatOf(source);
-  if ((IMAGE_ERASE_UNSUPPORTED_FORMATS as readonly string[]).includes(format ?? '')) {
-    return `${format} 格式不支持擦除（支持 PNG/JPG/JPEG/HEIC）`;
+  if (format !== null && !(IMAGE_ERASE_SUPPORTED_FORMATS as readonly string[]).includes(format)) {
+    return `${format} 格式不支持擦除（支持 ${SUPPORTED_FORMATS_LABEL}）`;
   }
   const { width, height, size } = source;
   if (typeof width === 'number' && typeof height === 'number') {
@@ -65,4 +79,106 @@ export function imageEraseGateReason(source: ImageEraseGateSource): string | nul
     return '图片超过 10MB，无法擦除';
   }
   return null;
+}
+
+/* ============ 结果卡身份与来源边（IKGOTB） ============ */
+
+/** 擦除来源边标记（写在 edge.data.origin，模式同 imageEnhance.ts 的 IMAGE_ENHANCE_EDGE_ORIGIN）：
+ *  这条边表达「擦除结果卡由该图擦除而来」，是来源记录而非生成参考输入——图片参考推导
+ *  （imageMediaRefsOf）会跳过带此标记的边，源图不占参考位、不参与 @ 编号与媒体索引。 */
+export const IMAGE_ERASE_EDGE_ORIGIN = 'image-erase';
+
+/** 擦除身份标记（node.data.imageErase，形态对齐 ImageEnhanceIdentity）：
+ *  「重新编辑」不分流专属面板（擦除无参数面板），lastInput 供失败重试原样重发创建接口。 */
+export interface ImageEraseIdentity {
+  /** 源素材身份（assetId 归一字符串）：提交冻结 source_asset_id */
+  sourceAssetId?: string;
+  /** 上次提交参数（契约三键/四键形态，target_node_id 指向本卡）；失败重试原样重发 */
+  lastInput?: ImageEraseInput;
+}
+
+/* ============ 遮罩栅格化发送辅助（IKGOTB） ============ */
+
+/** 涂区存在性探测（发送门用）：把图元按序标记到 64×36 粗网格（涂=1/橡皮=0，后写覆盖先写），
+ *  返回最终并集是否非空。语义对齐 rasterizeMask 的差集叠加——「涂了又全被橡皮擦掉」不可发送；
+ *  只做展示门，精确并集由发送时栅格化产出。零面积框（对角重合）按 1 格计（宽松门，无害）。 */
+export function maskHasPaintArea(
+  ops: readonly MaskOp[],
+  displayWidth: number,
+  displayHeight: number,
+): boolean {
+  const COLS = 64;
+  const ROWS = 36;
+  const grid = new Uint8Array(COLS * ROWS);
+  const sx = COLS / Math.max(1, displayWidth);
+  const sy = ROWS / Math.max(1, displayHeight);
+  const markRect = (x1: number, y1: number, x2: number, y2: number, value: number) => {
+    const left = Math.max(0, Math.round(Math.min(x1, x2)));
+    const right = Math.min(COLS - 1, Math.round(Math.max(x1, x2)));
+    const top = Math.max(0, Math.round(Math.min(y1, y2)));
+    const bottom = Math.min(ROWS - 1, Math.round(Math.max(y1, y2)));
+    for (let y = top; y <= bottom; y += 1) {
+      for (let x = left; x <= right; x += 1) grid[y * COLS + x] = value;
+    }
+  };
+  for (const op of ops) {
+    const value = op.erase ? 0 : 1;
+    if (op.kind === 'rect') {
+      markRect(op.from.x * sx, op.from.y * sy, op.to.x * sx, op.to.y * sy, value);
+    } else {
+      const r = Math.max(1, Math.round(op.radius * sx));
+      for (const p of op.points) {
+        markRect(p.x * sx - r, p.y * sy - r, p.x * sx + r, p.y * sy + r, value);
+      }
+    }
+  }
+  return grid.some((v) => v === 1);
+}
+
+/** 把图元序列栅格化成黑白遮罩 PNG File（发送链路用）：
+ *  eraseMask.rasterizeMask → 离屏 canvas（尺寸=源图自然分辨率）→ toBlob('image/png')。
+ *  返回 null 表示 canvas 不可用或编码失败（调用方按发送失败处理，不提交任务）。 */
+export function rasterizeMaskToPngFile(
+  ops: readonly MaskOp[],
+  space: MaskCoordinateSpace,
+): Promise<File | null> {
+  return new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = space.naturalWidth;
+    canvas.height = space.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      resolve(null);
+      return;
+    }
+    const sink: MaskRasterSink = {
+      fillRect(x, y, width, height, value) {
+        ctx.fillStyle = `rgb(${value},${value},${value})`;
+        ctx.fillRect(x, y, width, height);
+      },
+      strokePath(points, radius, value) {
+        if (points.length === 0) return;
+        ctx.fillStyle = `rgb(${value},${value},${value})`;
+        ctx.strokeStyle = `rgb(${value},${value},${value})`;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = Math.max(1, radius * 2);
+        ctx.beginPath();
+        ctx.moveTo(points[0]!.x, points[0]!.y);
+        for (let i = 1; i < points.length; i += 1) ctx.lineTo(points[i]!.x, points[i]!.y);
+        if (points.length === 1) ctx.lineTo(points[0]!.x, points[0]!.y);
+        ctx.stroke();
+        // 单点（或极短笔迹）在部分实现下 stroke 不落像素：补画圆点兜底
+        if (points.length === 1) {
+          ctx.beginPath();
+          ctx.arc(points[0]!.x, points[0]!.y, Math.max(1, radius), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      },
+    };
+    rasterizeMask(ops, space, sink);
+    canvas.toBlob((blob) => {
+      resolve(blob ? new File([blob], 'erase-mask.png', { type: 'image/png' }) : null);
+    }, 'image/png');
+  });
 }

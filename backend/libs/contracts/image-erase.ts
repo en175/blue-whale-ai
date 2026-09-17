@@ -68,6 +68,15 @@ export const IMAGE_ERASE_MAX_FILE_BYTES = 10 * 1024 * 1024;
 /** 支持格式白名单：.png / .jpg / .jpeg / .heic（不含 webp/gif，前端门槛置灰与后端复核同源）。 */
 export const IMAGE_ERASE_INPUT_FORMATS = ["png", "jpg", "jpeg", "heic"] as const;
 
+/** 遮罩中间素材的 assets.source 标记（IKGOTB）：涂抹遮罩经通用上传链路落库时以此来源值标记，
+ *  用户资产列表（GET /api/assets → listByUser）排除该来源——黑白遮罩不是用户创作内容，
+ *  不进资产列表可见内容（规格 Further Notes「遮罩中间素材不进入用户资产列表的可见内容」）。
+ *  资产行本身保留（不软删）：任务创建入口的归属校验、worker 的遮罩解析、失败重试
+ *  （沿用冻结 input 的 mask_asset_id）都要求遮罩资产一直可读；仅列表不可见。
+ *  上传链路（uploads/complete）对 source 做白名单校验（uploaded / mask_erase），
+ *  非白名单值回落 uploaded——source 只是展示过滤维度，无鉴权语义。 */
+export const IMAGE_ERASE_MASK_ASSET_SOURCE = "mask_erase";
+
 /** input 冻结结构（IKGOT4 创建入口复核与重试沿用都用本 schema；strict 防多余键）。
  *  按场景二选一（discriminatedUnion on erase_scene）：
  *  - full_screen_text_erase：三键，禁填 mask_asset_id（strict 分支无此键，传入即拒）；
