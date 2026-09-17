@@ -2,7 +2,7 @@
  * CustomEdge 自定义连线边：贝塞尔路径 + 虚线流动
  * ============================================ */
 import { useCallback, useRef, useState } from 'react';
-import { getBezierPath, useReactFlow, type EdgeProps } from '@xyflow/react';
+import { getBezierPath, useReactFlow, useStore, type EdgeProps } from '@xyflow/react';
 import { Scissors } from 'lucide-react';
 import styles from './index.module.css';
 
@@ -50,6 +50,8 @@ function closestPointOnPath(path: SVGPathElement, clientX: number, clientY: numb
 
 export default function CustomEdge({
   id,
+  source,
+  target,
   sourceX,
   sourceY,
   targetX,
@@ -60,6 +62,14 @@ export default function CustomEdge({
   const { deleteElements } = useReactFlow();
   const pathRef = useRef<SVGPathElement>(null);
   const [scissorsPos, setScissorsPos] = useState<{ x: number; y: number } | null>(null);
+
+  /* IKGGC0：source/target 任一端节点被选中时连线流动，与悬停共用同一份 CSS 定义；
+     纯渲染期从 store 派生，不写入连线数据、不参与自动保存 */
+  const connectedToSelected = useStore((state) => {
+    const sourceNode = state.nodeLookup.get(source);
+    const targetNode = state.nodeLookup.get(target);
+    return Boolean(sourceNode?.selected || targetNode?.selected);
+  });
 
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -93,7 +103,7 @@ export default function CustomEdge({
 
   return (
     <g
-      className={styles.edgeGroup}
+      className={connectedToSelected ? `${styles.edgeGroup} ${styles.selectedConnected}` : styles.edgeGroup}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
