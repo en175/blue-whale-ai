@@ -1,7 +1,19 @@
 /* ============================================
  * 高清放大（IKGM9F/IKGLZV）：图片卡「高清放大」入口的身份标记与来源边常量。
- * 本票只做入口建卡；参数面板与提交链路由 IKGM9O 接入。
+ * IKGM9F 做入口建卡；IKGM9O 在此补充面板参数域（尺寸预检/置灰档冻结/默认档回退）。
+ * 枚举、能力矩阵、默认值与提交校验 schema 直接复用 backend/libs/contracts/image-enhance.ts
+ * （web 经 @lib alias 引入契约，先例见 CanvasPage 的 @lib/contracts/prompt-target）。
  * ============================================ */
+import {
+  IMAGE_ENHANCE_DEFAULTS,
+  IMAGE_ENHANCE_INPUT_KEYS,
+  IMAGE_ENHANCE_MULTIPLES,
+  IMAGE_ENHANCE_TIER_CAPABILITY,
+  IMAGE_ENHANCE_VERSION_TIERS,
+  imageEnhanceInputSchema,
+  type ImageEnhanceInput,
+  type ImageEnhanceVersionTier,
+} from '@lib/contracts/image-enhance';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 
 /** 高清来源边标记（写在 edge.data.origin）：这条边表达「高清卡由该图放大而来」，
@@ -39,5 +51,132 @@ export function imageEnhanceDraftPosition(source: {
   return {
     x: Math.round(left + box.width + IMAGE_ENHANCE_NODE_GAP),
     y: Math.round(top),
+  };
+}
+
+/* ============ 面板参数域（IKGM9O） ============ */
+
+/** 面板参数（契约六键中的四个业务键；source_asset_id / target_node_id 由提交时补齐）。
+ *  键名与形态同 ImageEnhanceInput，lastParams 持久化与此同构。 */
+export interface ImageEnhancePanelParams {
+  version_tier: ImageEnhanceVersionTier;
+  multiple: (typeof IMAGE_ENHANCE_MULTIPLES)[number];
+  generative_enhance_mode: 'fidelity_first' | 'generative_first';
+  enable_correct_color: boolean;
+}
+
+/** 版本档展示名（仅 UI，不落库不进任务——口径同契约注释）。 */
+export const IMAGE_ENHANCE_TIER_LABELS: Record<ImageEnhanceVersionTier, string> = {
+  lite: 'Lite',
+  pro: 'Pro',
+  max: 'Max',
+};
+
+/** 增强策略展示名。 */
+export const IMAGE_ENHANCE_MODE_LABELS: Record<ImageEnhancePanelParams['generative_enhance_mode'], string> = {
+  generative_first: '生成度优先',
+  fidelity_first: '保真度优先',
+};
+
+/** 源图尺寸门槛预检（IKGM9O）：返回该档不可用原因，null 为可用。
+ *  门槛全集与 backend image-enhancements 服务层 TIER_SIZE_LIMITS 同源对齐
+ *  （规格 docs/specs/2026-09-17-image-upscale-mediakit.md「Implementation Decisions 前端」）；
+ *  前端只是体验层，服务端按 asset 权威尺寸同口径复核。宽高比 ≤32 用整数乘法比较防浮点。 */
+export function imageEnhanceTierGateReason(
+  tier: ImageEnhanceVersionTier,
+  width: number | undefined,
+  height: number | undefined,
+): string | null {
+  // 尺寸缺失（存量图宽高 null）不拦：与服务端同口径放行交供应商拒（IKGM99 契约）
+  if (typeof width !== 'number' || typeof height !== 'number') return null;
+  const longSide = Math.max(width, height);
+  const shortSide = Math.min(width, height);
+  if (tier === 'lite' && !(longSide <= 2160 && shortSide >= 16)) {
+    return '源图尺寸不满足 Lite 版本门槛（要求长边不超过 2160px 且短边不低于 16px），请更换版本档或源图';
+  }
+  if (tier === 'pro' && !(shortSide >= 256 && longSide <= 2048)) {
+    return '源图尺寸不满足 Pro 版本门槛（要求短边不低于 256px 且长边不超过 2048px），请更换版本档或源图';
+  }
+  if (tier === 'max' && !(shortSide >= 64 && longSide <= 6240 && longSide <= 32 * shortSide)) {
+    return '源图尺寸不满足 Max 版本门槛（要求短边不低于 64px、长边不超过 6240px 且宽高比不超过 32），请更换版本档或源图';
+  }
+  return null;
+}
+
+/** 三档可用性（打开面板时对源图尺寸快照预检一次）。 */
+export function imageEnhanceTierAvailability(
+  width: number | undefined,
+  height: number | undefined,
+): Array<{ tier: ImageEnhanceVersionTier; label: string; disabledReason: string | null }> {
+  return IMAGE_ENHANCE_VERSION_TIERS.map((tier) => ({
+    tier,
+    label: IMAGE_ENHANCE_TIER_LABELS[tier],
+    disabledReason: imageEnhanceTierGateReason(tier, width, height),
+  }));
+}
+
+/** 默认档不可用时自动落到第一个可用档（lite→pro→max 顺序）；三档全不可用返回 null（禁发）。 */
+export function pickImageEnhanceTier(
+  preferred: ImageEnhanceVersionTier,
+  width: number | undefined,
+  height: number | undefined,
+): ImageEnhanceVersionTier | null {
+  const order: ImageEnhanceVersionTier[] = ['lite', 'pro', 'max'];
+  if (!imageEnhanceTierGateReason(preferred, width, height)) return preferred;
+  return order.find((tier) => !imageEnhanceTierGateReason(tier, width, height)) ?? null;
+}
+
+/** 置灰档冻结口径（服务端硬校验对齐，契约 §14.2）：非 Max 档提交 enable_correct_color=false；
+ *  Lite 档提交 generative_enhance_mode='generative_first'（默认占位值，显式激活值会被服务端拒）。 */
+export function freezeImageEnhanceParams(params: ImageEnhancePanelParams): ImageEnhancePanelParams {
+  const capability = IMAGE_ENHANCE_TIER_CAPABILITY[params.version_tier];
+  return {
+    version_tier: params.version_tier,
+    multiple: params.multiple,
+    generative_enhance_mode: capability.enhanceMode
+      ? params.generative_enhance_mode
+      : IMAGE_ENHANCE_DEFAULTS.generativeEnhanceMode,
+    enable_correct_color: capability.correctColor ? params.enable_correct_color : false,
+  };
+}
+
+/** 组装契约六键 input 并按 zod schema 校验（提交前最后一道本地防线，同源契约）。 */
+export function buildImageEnhanceInput(
+  sourceAssetId: string,
+  targetNodeId: string,
+  params: ImageEnhancePanelParams,
+): ImageEnhanceInput | null {
+  const frozen = freezeImageEnhanceParams(params);
+  const input = {
+    [IMAGE_ENHANCE_INPUT_KEYS.sourceAssetId]: sourceAssetId,
+    [IMAGE_ENHANCE_INPUT_KEYS.targetNodeId]: targetNodeId,
+    [IMAGE_ENHANCE_INPUT_KEYS.versionTier]: frozen.version_tier,
+    [IMAGE_ENHANCE_INPUT_KEYS.multiple]: frozen.multiple,
+    [IMAGE_ENHANCE_INPUT_KEYS.generativeEnhanceMode]: frozen.generative_enhance_mode,
+    [IMAGE_ENHANCE_INPUT_KEYS.enableCorrectColor]: frozen.enable_correct_color,
+  };
+  return imageEnhanceInputSchema.safeParse(input).success ? (input as ImageEnhanceInput) : null;
+}
+
+/** 从 lastParams（契约六键形态）恢复面板参数；缺键/非法值回落契约默认值。 */
+export function restoreImageEnhanceParams(
+  lastParams: Record<string, unknown> | undefined,
+): ImageEnhancePanelParams {
+  const tier = lastParams?.[IMAGE_ENHANCE_INPUT_KEYS.versionTier];
+  const multiple = lastParams?.[IMAGE_ENHANCE_INPUT_KEYS.multiple];
+  const mode = lastParams?.[IMAGE_ENHANCE_INPUT_KEYS.generativeEnhanceMode];
+  const color = lastParams?.[IMAGE_ENHANCE_INPUT_KEYS.enableCorrectColor];
+  return {
+    version_tier: IMAGE_ENHANCE_VERSION_TIERS.includes(tier as ImageEnhanceVersionTier)
+      ? (tier as ImageEnhanceVersionTier)
+      : IMAGE_ENHANCE_DEFAULTS.versionTier,
+    multiple: (IMAGE_ENHANCE_MULTIPLES as readonly number[]).includes(multiple as number)
+      ? (multiple as ImageEnhancePanelParams['multiple'])
+      : IMAGE_ENHANCE_DEFAULTS.multiple,
+    generative_enhance_mode:
+      mode === 'fidelity_first' || mode === 'generative_first'
+        ? mode
+        : IMAGE_ENHANCE_DEFAULTS.generativeEnhanceMode,
+    enable_correct_color: typeof color === 'boolean' ? color : IMAGE_ENHANCE_DEFAULTS.enableCorrectColor,
   };
 }
