@@ -9,7 +9,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Map as MapIcon, Link, Link2Off, CheckCircle, XCircle, AlertTriangle, Magnet } from 'lucide-react';
 import { newNodeId } from './nodeId';
 import { nextDraftPosition, type SpawnBox } from './draftSpawn';
 import {
@@ -51,6 +51,7 @@ import {
   mediaExtractNodeId,
   mediaExtractTerminalPatch,
 } from './mediaExtract';
+import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from './snapPreference';
 import CanvasHeader from './components/CanvasHeader';
 import AgentPanel from './components/AgentPanel';
 import CanvasToolbar from './components/CanvasToolbar';
@@ -280,6 +281,8 @@ export default function CanvasPage() {
   const [showAudioDialog, setShowAudioDialog] = useState(false);
   const [showMusicDialog, setShowMusicDialog] = useState(false);
   const [showEdges, setShowEdges] = useState(true);
+  /** 对齐吸附开关（IKGGCT T3）：全局持久化（不分画布文档），初始读 localStorage，默认开 */
+  const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
   /** 连线（受控持有：水合恢复、自动保存签名、目标节点附件推导共用，IKDLQF） */
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   /** 连线最新值（避免闭包陈旧：提交前落盘与附件推导用） */
@@ -7020,6 +7023,7 @@ export default function CanvasPage() {
           productNodes={productNodes}
           assetNodes={assetNodes}
           showEdges={showEdges}
+          snapAlignmentEnabled={snapAlignmentOn}
           edges={edges}
           onEdgesChange={guardEdgesChange}
           onConnect={handleConnect}
@@ -7200,6 +7204,18 @@ export default function CanvasPage() {
             title={showEdges ? '隐藏连线' : '显示连线'}
           >
             {showEdges ? <Link size={14} strokeWidth={2} /> : <Link2Off size={14} strokeWidth={2} />}
+          </button>
+          <button
+            className={`${styles.mapBtn} ${snapAlignmentOn ? styles.mapBtnActive : ''}`}
+            onClick={() => {
+              // IKGGCT T3：切换吸附开关并全局持久化（Alt 临时禁用是独立通道，不受此影响）
+              const next = !snapAlignmentOn;
+              setSnapAlignmentOn(next);
+              persistSnapAlignmentEnabled(next);
+            }}
+            title={snapAlignmentOn ? '关闭对齐吸附' : '开启对齐吸附'}
+          >
+            <Magnet size={14} strokeWidth={2} />
           </button>
           {saveStatus !== 'idle' && (
             // IKFYH6：保存状态与重试是面板编辑落盘链路的自有 UI，归「面板领土」——点重试保存不关面板

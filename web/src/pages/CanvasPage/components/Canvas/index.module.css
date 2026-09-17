@@ -51,6 +51,24 @@
   pointer-events: none !important;
 }
 
+/* 对齐线层（IKGGCT T2）：屏幕空间铺满画布，线宽恒 1 屏幕像素（坐标已按
+ * zoom+平移换算，等效画布空间 strokeWidth = 1/zoom）。取全局主题强调色——
+ * 与画布交互强调（handle 等）同源。层级高于节点 renderer(z4) 与组框边线(z5)、
+ * 低于组徽标操作层(z10)：对齐线是拖拽反馈要盖住卡片，但不压操作入口。 */
+.snapGuides {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9;
+}
+
+.snapGuides line {
+  stroke: var(--color-accent-primary);
+  stroke-width: 1;
+}
+
 /* 拖动画布时仍可从节点「+」拉线到空白弹出类型菜单 */
 .dragMode :global(.react-flow__handle) {
   pointer-events: auto !important;
