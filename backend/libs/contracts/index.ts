@@ -160,6 +160,17 @@ export {
   type ImageEnhanceInput,
 } from "./image-enhance.js";
 export {
+  IMAGE_OUTPAINT_JOB_TYPE,
+  IMAGE_OUTPAINT_SOURCE,
+  IMAGE_OUTPAINT_INPUT_KEYS,
+  IMAGE_OUTPAINT_PROVIDER_CREDENTIAL_KEY,
+  IMAGE_OUTPAINT_EXPAND_RATIO_LIMITS,
+  IMAGE_OUTPAINT_SOURCE_LIMITS,
+  imageOutpaintInputSchema,
+  imageOutpaintSourceGate,
+  type ImageOutpaintInput,
+} from "./image-outpaint.js";
+export {
   DomainError,
   assetError,
   skillError,
