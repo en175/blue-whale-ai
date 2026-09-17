@@ -30,7 +30,6 @@ import {
   readDraftMaterialRefs,
   freshVideoCanvasRefs,
   mergedVideoMediaRefsOf,
-  listVideoImageRefs,
   supportsVideoReferenceModel,
   videoRefConflict,
   videoRefSourceError,
@@ -3753,74 +3752,6 @@ export default function CanvasPage() {
     await ensureMediaNodeCompliance(id, { toastSuccess: true });
   };
 
-  /** 视频生成前补齐参考图合规；通过后回写节点 materialId 与通过图标 */
-  const ensureVideoImageRefsCompliance = async (
-    refs: VideoMediaRefs,
-  ): Promise<VideoMediaRefs | null> => {
-    // IKFM3W §10：文本带入参考按 asset_id 提交（与后端并入去重同空间），不参与 material 化
-    const images = listVideoImageRefs(refs).filter((item) => item.textNodeId == null);
-    if (images.length === 0) return refs;
-
-    const materialByKey = new Map<string, string>();
-    for (const item of images) {
-      if (materialByKey.has(item.nodeId)) continue;
-      const node = mediaNodesRef.current.find((n) => n.id === item.nodeId);
-      if (node) {
-        const failed = ((node.data ?? {}) as Record<string, unknown>).complianceFailed === true;
-        if (failed) {
-          showToast('warn', '合规校验未通过，不可用于视频生成');
-          return null;
-        }
-        const materialId = await ensureMediaNodeCompliance(item.nodeId, { toastSuccess: false });
-        if (!materialId) return null;
-        materialByKey.set(item.nodeId, materialId);
-        continue;
-      }
-      if (item.materialId && isMaterialLibraryId(item.materialId)) {
-        try {
-          await waitComplianceAssetReady(item.materialId);
-          materialByKey.set(item.nodeId, item.materialId);
-        } catch (err) {
-          toastComplianceError(err);
-          return null;
-        }
-        continue;
-      }
-      if (!item.url || item.url.startsWith('blob:')) {
-        showToast('warn', '素材尚未上传完成，请稍后重试');
-        return null;
-      }
-      try {
-        const result = await depositCanvasAssetToCharacterLibrary({
-          sourceAssetId: item.assetId,
-          url: item.url,
-          name: item.name,
-          mediaType: 'image',
-        });
-        if (!result.materialId) {
-          showToast('error', '校验失败，请重试');
-          return null;
-        }
-        materialByKey.set(item.nodeId, result.materialId);
-      } catch (err) {
-        toastComplianceError(err);
-        return null;
-      }
-    }
-
-    const withMaterial = (item: VideoMediaRef): VideoMediaRef => {
-      if (item.mediaType !== 'image') return item;
-      const materialId = materialByKey.get(item.nodeId);
-      return materialId ? { ...item, materialId } : item;
-    };
-    return {
-      ...refs,
-      first: refs.first ? withMaterial(refs.first) : undefined,
-      last: refs.last ? withMaterial(refs.last) : undefined,
-      reference: refs.reference.map(withMaterial),
-    };
-  };
-
   const handleFillEmptyShell = (id: string, file: File) => {
     void placeFileOnCanvas(file, { replaceNodeId: id }).catch((err) => {
       showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
@@ -5989,9 +5920,7 @@ export default function CanvasPage() {
       applyingRef.current = true;
       if (targetNodeId) setSubmittingNodeId(targetNodeId);
       try {
-        const compliantRefs = await ensureVideoImageRefsCompliance(draftRefs);
-        if (!compliantRefs) return;
-        const jobRefs = buildVideoJobReferences(compliantRefs);
+        const jobRefs = buildVideoJobReferences(draftRefs);
         const submitted = startGenerationJob(
           'video',
           parameters,
@@ -6919,26 +6848,12 @@ export default function CanvasPage() {
           startGenerationJob('image', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.ratio, size: handoff.size },
             references.map(r => r.assetId), undefined, undefined, { references });
         } else {
-          const videoRefs: typeof references = [];
-          for (const ref of references) {
-            if (ref.mediaType !== 'image') {
-              videoRefs.push(ref);
-              continue;
-            }
-            const result = await depositCanvasAssetToCharacterLibrary({
-              sourceAssetId: ref.assetId,
-              url: ref.url,
-              name: ref.name,
-              mediaType: 'image',
-            });
-            videoRefs.push({ ...ref, materialId: result.materialId });
-          }
           startGenerationJob('video', { prompt: handoff.text, model_id: handoff.modelId, aspect_ratio: handoff.aspectRatio,
             resolution: handoff.resolution, duration: handoff.duration,
             // IKG0LP：首页选的「是否带音频」随交接带过来，不能在这里丢
             generate_audio: handoff.generateAudio }, undefined,
-            { references: buildVideoJobReferencesFromList(videoRefs) },
-            undefined, { references: videoRefs, mode: handoff.mode });
+            { references: buildVideoJobReferencesFromList(references) },
+            undefined, { references, mode: handoff.mode });
         }
       } catch (error) {
         console.warn('首页生成参考准备失败:', error);
