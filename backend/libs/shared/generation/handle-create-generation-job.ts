@@ -807,7 +807,10 @@ function resolveReferenceAssets(
   // 空数组视为「未提供」：与音频端 hasContent 同口径——前端可能发 references: []（旧字段仍带内容），
   // 若把空数组当成"以 references 为准"，会把同请求里的 input_asset_ids 静默清空。
   if (singleRefs.kind === "ok" && singleRefs.items.length > 0) {
-    const ids = singleRefs.items.map((item) => String(item.asset_id));
+    // 去重保首见，与旧字段分支的 uniqueAssetIds 同口径：图片端每条都是 role=reference，
+    // 重复没有语义（视频端的「同一素材双角色」由 providerUrl 查重另行为 400，不在此列）。
+    // mergeTextProvidedReferences 只对新追加项去重，直接项内部的重复会原样穿过，故在此收口。
+    const ids = [...new Set(singleRefs.items.map((item) => String(item.asset_id)))];
     if (ids.length > maxReferenceImages) {
       return {
         ok: false,

@@ -586,6 +586,36 @@ describe("handleCreateGenerationJob 图片参考素材单数组 references（IKG
     const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
     expect(cmdArg.input.input_asset_ids).toEqual([1, 2]);
   });
+
+  it("references 内重复素材 → 去重保首见（与旧字段 uniqueAssetIds 同口径）", async () => {
+    const { deps, createJob } = buildImageDeps(10);
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...imageBody(0), references: refsOf(["3", "1", "3"]) },
+      null,
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(cmdArg.input.input_asset_ids).toEqual(["3", "1"]);
+  });
+});
+
+// IKG6EK / ADR-0088：编号表与冻结的文本附件必须来自**同一次**画布读取——
+// 两次读会拿到不同版本，与「同次画布读取」的不变式冲突（原 IKFA1J 并发用例随 doc 退役删除，此处补回）。
+describe("handleCreateGenerationJob 同次画布读取（IKG6EK）", () => {
+  it("目标路径：文本索引派生与目标快照复用同一次读取，画布只读一次", async () => {
+    const { deps, createJob, getByProject } = buildTargetDeps(TARGET_CANVAS);
+
+    const result = await handleCreateGenerationJob("u1", "p1", IMAGE_TARGET_BODY, null, deps);
+
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalledTimes(1);
+    expect(getByProject).toHaveBeenCalledTimes(1);
+  });
 });
 
 // IKG6EK / ADR-0088：引用标记转移的端到端接线——references 的身份 → 编号表 → input.prompt。
