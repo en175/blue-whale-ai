@@ -38,6 +38,9 @@ import { canvasClipboardKeyAction, copyableSelectedCanvasNodes } from './keyboar
 import { isMentionMenuOpen } from './canvasKeyboard';
 import { useCanvasPan } from './useCanvasPan';
 import ConnectionPreview from './ConnectionPreview';
+import SnapGuides from './SnapGuides';
+import { EMPTY_SNAP_GUIDES, snapDragChanges } from '../../snapDragChanges';
+import type { SnapGuide, SnapNodeLike } from '../../snapAlignment';
 import {
   MIN_GROUP_MEMBERS,
   exclusiveMembersInGroup,
@@ -136,9 +139,12 @@ interface FlowCanvasProps {
   refPickMarkedIds?: string[];
   /** 视频选取会话中不可选节点（合规未通过等），渲染期置灰 */
   refPickBlockedIds?: string[];
+  /** 拖拽对齐吸附开关（IKGGCT T2）：吸附与对齐线整体受控，默认 true（undefined 视为开）。
+   *  Alt/Option 是按住期间的临时禁用，不经过此开关。UI 与持久化由 T3 接线。 */
+  snapAlignmentEnabled?: boolean;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, refPickMarkedIds, refPickBlockedIds }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const extraIdsRef = useRef<Set<string>>(new Set());
@@ -427,11 +433,62 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     frameDraggingRef.current = ids.size > 0;
     setFrameDragMemberIds(ids);
   }, []);
+  /* ---------- 拖拽对齐吸附（IKGGCT T2）：决策在 snapDragChanges 纯函数，此处只接线 ---------- */
+  /** 本次节点拖拽的吸附上下文：主拖卡 id + 拖起时冻结的被拖集合（onNodeDragStart 快照）。
+   *  组框把手拖整组不经 React Flow 节点拖拽（GroupOverlay 直接 setNodes），不会写入此 ref。 */
+  const snapDragRef = useRef<{ primaryId: string; draggingIds: Set<string> } | null>(null);
+  /** 对齐线（仅吸附命中的帧非空）；空态用共享常量引用，拖拽中未命中的帧不再触发渲染 */
+  const [snapGuides, setSnapGuides] = useState<SnapGuide[]>(EMPTY_SNAP_GUIDES);
+  /** Alt/Option 实时状态：拖拽中按下/松开逐帧生效（非 dragStart 一次性读取），不落开关 */
+  const altKeyRef = useRef(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // 修饰键自身的 keyup 在部分浏览器仍带 altKey=true（事件属于该修饰键），按事件类型判定
+      if (e.key === 'Alt') altKeyRef.current = e.type === 'keydown';
+      else altKeyRef.current = e.altKey;
+    };
+    const onBlur = () => { altKeyRef.current = false; };
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('keyup', onKey, true);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keyup', onKey, true);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+  /** 拖拽回调闭包要读最新 zoom/开关，避免随视口/prop 变化反复重建（同 onViewportChangeRef 先例） */
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const snapEnabledRef = useRef(snapAlignmentEnabled !== false);
+  snapEnabledRef.current = snapAlignmentEnabled !== false;
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       if (frameDraggingRef.current) {
         const next = changes.filter((c) => c.type !== 'select');
         if (next.length === 0) return;
+        onNodesChange(next);
+        return;
+      }
+      const drag = snapDragRef.current;
+      if (drag) {
+        // 组框尺寸在 groups[].box，转换成 collectSnapTargets 认的伪节点形状（不改 snapAlignment.ts）
+        const groupFrames: SnapNodeLike[] = groupsRef.current.map((g) => ({
+          id: g.id,
+          type: 'groupFrame',
+          position: { x: g.box.x, y: g.box.y },
+          width: g.box.w,
+          height: g.box.h,
+        }));
+        const { changes: next, guides } = snapDragChanges(
+          changes,
+          nodesRef.current,
+          groupFrames,
+          drag.primaryId,
+          drag.draggingIds,
+          { enabled: snapEnabledRef.current, altDisabled: altKeyRef.current, zoom: zoomRef.current },
+        );
+        setSnapGuides(guides);
         onNodesChange(next);
         return;
       }
@@ -552,15 +609,31 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   }, [nodes, groups, memberStackById, frameDragMemberIds, frameDragOffset, edges, refPickMarkedIds, refPickBlockedIds]);
 
   /** 节点拖拽起：仅标记拖拽中（隐藏框选悬浮条）。组内节点可自由拖出组，拖出后按
-   *  坐标动态脱离组；不再整组选中——整组拖动改由组框把手承担。 */
-  const onNodeDragStart = useCallback((_e: MouseEvent | TouchEvent, _node: Node) => {
+   *  坐标动态脱离组；不再整组选中——整组拖动改由组框把手承担。
+   *  吸附（IKGGCT）：draggedNodes 是 React Flow 冻结的本次被拖集合（多选 = 全部
+   *  选中卡），node 为鼠标抓取的主拖卡——多选拖拽的对齐基准。 */
+  const onNodeDragStart = useCallback((_e: MouseEvent | TouchEvent, node: Node, draggedNodes: Node[]) => {
     setIsDraggingNode(true);
+    snapDragRef.current = {
+      primaryId: node.id,
+      draggingIds: new Set(draggedNodes.map((n) => n.id)),
+    };
   }, []);
 
   const handleNodeDragStopInternal = useCallback(
     (_e: MouseEvent | TouchEvent, node: Node, draggedNodes: Node[]) => {
       setIsDraggingNode(false);
-      onNodeDragStopRef.current?.(node, draggedNodes);
+      snapDragRef.current = null;
+      setSnapGuides(EMPTY_SNAP_GUIDES);
+      // React Flow v12 的 dragStop 回调参数 position 取自内部 dragItems（每帧按鼠标位移
+      // 推算的原始位置，不含吸附修正），而画布 state 里已是吸附后位置：松手落库必须与
+      // 画布所见一致，用 nodesRef 的实时坐标覆盖回传参数（最后一帧已提交，二者同源）。
+      const finalById = new Map(nodesRef.current.map((n) => [n.id, n]));
+      const withSnappedPosition = (n: Node): Node => {
+        const current = finalById.get(n.id);
+        return current ? { ...n, position: current.position } : n;
+      };
+      onNodeDragStopRef.current?.(withSnappedPosition(node), draggedNodes.map(withSnappedPosition));
     },
     [],
   );
@@ -738,11 +811,15 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
           size={dotSize}
           color="#4d4d4d"
         />
+        {/* 对齐线（IKGGCT）：屏幕空间纯视觉层，仅吸附命中的拖拽帧有内容 */}
+        <SnapGuides guides={snapGuides} />
         {showMiniMap && (
           <MiniMap
             position="bottom-left"
-            nodeColor="#333"
-            maskColor="rgba(0, 0, 0, 0.7)"
+            nodeColor="#9a9a9a"
+            maskColor="transparent"
+            maskStrokeColor="#ffffff"
+            maskStrokeWidth={2}
             pannable
             zoomable
             style={{ bottom: 60 }}
@@ -782,7 +859,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, refPickMarkedIds, refPickBlockedIds }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -831,6 +908,7 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         refPickActive={refPickActive}
         refPickMarkedIds={refPickMarkedIds}
         refPickBlockedIds={refPickBlockedIds}
+        snapAlignmentEnabled={snapAlignmentEnabled}
       />
     </ReactFlowProvider>
   );

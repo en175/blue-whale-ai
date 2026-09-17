@@ -249,7 +249,6 @@ const SOLUTION_FIELD_LABELS = {
   assumptions: '我替你定的几项',
   execution_route: '用哪个模型出片',
   delivery_spec: '出片参数',
-  next_steps: '接下来怎么做',
   scope: '这张卡管的范围',
   derived_from: '承接上一张',
 } as const;
@@ -305,149 +304,148 @@ function SolutionCardBlock({
   };
 
   return (
-    <div className={`${styles.solutionCard} ${pending ? '' : styles.solutionCardSettled}`}>
-      <div className={styles.solutionCardHead}>
-        <BookText size={12} strokeWidth={2} />
-        <span>方案卡</span>
-      </div>
+    <>
+      <div className={`${styles.solutionCard} ${pending ? '' : styles.solutionCardSettled}`}>
+        <div className={styles.solutionCardHead}>
+          <BookText size={12} strokeWidth={2} />
+          <span>方案卡</span>
+        </div>
 
-      {/* 老版本（产卡门顺手提的那种）没有结构化内容，退回只显示摘要——如实显示，好过什么都不显示。 */}
-      {!card && <div className={styles.solutionFieldValue}>{understanding.proposed_summary}</div>}
+        {/* 老版本（产卡门顺手提的那种）没有结构化内容，退回只显示摘要——如实显示，好过什么都不显示。 */}
+        {!card && <div className={styles.solutionFieldValue}>{understanding.proposed_summary}</div>}
 
-      {card && (
-        <>
-          <SolutionField label={SOLUTION_FIELD_LABELS.goal}>
-            <div className={styles.solutionFieldValue}>{card.goal}</div>
-          </SolutionField>
-          <SolutionField label={SOLUTION_FIELD_LABELS.target_media}>
-            <div className={styles.solutionFieldValue}>{card.target_media === 'video' ? '视频' : '图片'}</div>
-          </SolutionField>
-          {/* 续写的卡（决策十六）只管接下来追加的那一段；另开一件事的卡（IKG78Y）是另一张。用户得知道这张卡不是整条。整条是默认，不占位。 */}
-          {(card.scope?.kind === 'continuation' || card.scope?.kind === 'new_task') && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.scope}>
-              <div className={styles.solutionFieldValue}>{card.scope.label}</div>
+        {card && (
+          <>
+            <SolutionField label={SOLUTION_FIELD_LABELS.goal}>
+              <div className={styles.solutionFieldValue}>{card.goal}</div>
             </SolutionField>
-          )}
-          {/* 承接的是哪张（服务端填，IKG793）：另开的一件事重提成整条时也带着，所以不看 kind。 */}
-          {card.scope?.derived_from && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.derived_from}>
-              <div className={styles.solutionFieldValue}>{`〈${card.scope.derived_from}〉`}</div>
+            <SolutionField label={SOLUTION_FIELD_LABELS.target_media}>
+              <div className={styles.solutionFieldValue}>{card.target_media === 'video' ? '视频' : '图片'}</div>
             </SolutionField>
-          )}
-          {card.direction && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.direction}>
-              <div className={styles.solutionFieldValue}>{card.direction}</div>
-            </SolutionField>
-          )}
-          {card.constraints && card.constraints.length > 0 && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.constraints}>
+            {/* 续写的卡（决策十六）只管接下来追加的那一段；另开一件事的卡（IKG78Y）是另一张。用户得知道这张卡不是整条。整条是默认，不占位。 */}
+            {(card.scope?.kind === 'continuation' || card.scope?.kind === 'new_task') && (
+              <SolutionField label={SOLUTION_FIELD_LABELS.scope}>
+                <div className={styles.solutionFieldValue}>{card.scope.label}</div>
+              </SolutionField>
+            )}
+            {/* 承接的是哪张（服务端填，IKG793）：另开的一件事重提成整条时也带着，所以不看 kind。 */}
+            {card.scope?.derived_from && (
+              <SolutionField label={SOLUTION_FIELD_LABELS.derived_from}>
+                <div className={styles.solutionFieldValue}>{`〈${card.scope.derived_from}〉`}</div>
+              </SolutionField>
+            )}
+            {card.direction && (
+              <SolutionField label={SOLUTION_FIELD_LABELS.direction}>
+                <div className={styles.solutionFieldValue}>{card.direction}</div>
+              </SolutionField>
+            )}
+            {card.constraints && card.constraints.length > 0 && (
+              <SolutionField label={SOLUTION_FIELD_LABELS.constraints}>
+                <ul className={styles.solutionList}>
+                  {card.constraints.map((one, i) => (
+                    <li key={i}>{one}</li>
+                  ))}
+                </ul>
+              </SolutionField>
+            )}
+            {card.asset_roles && card.asset_roles.length > 0 && (
+              <SolutionField label={SOLUTION_FIELD_LABELS.asset_roles}>
+                <ul className={styles.solutionList}>
+                  {card.asset_roles.map((one) => (
+                    <li key={one.asset_ref_id}>{one.role}</li>
+                  ))}
+                </ul>
+              </SolutionField>
+            )}
+            {/* 必填项：用户没说而模型替他定的，必须一眼看得见——这正是他最该核的地方。 */}
+            <SolutionField label={SOLUTION_FIELD_LABELS.assumptions}>
               <ul className={styles.solutionList}>
-                {card.constraints.map((one, i) => (
+                {card.assumptions.map((one, i) => (
                   <li key={i}>{one}</li>
                 ))}
               </ul>
             </SolutionField>
-          )}
-          {card.asset_roles && card.asset_roles.length > 0 && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.asset_roles}>
-              <ul className={styles.solutionList}>
-                {card.asset_roles.map((one) => (
-                  <li key={one.asset_ref_id}>{one.role}</li>
-                ))}
-              </ul>
-            </SolutionField>
-          )}
-          {/* 必填项：用户没说而模型替他定的，必须一眼看得见——这正是他最该核的地方。 */}
-          <SolutionField label={SOLUTION_FIELD_LABELS.assumptions}>
-            <ul className={styles.solutionList}>
-              {card.assumptions.map((one, i) => (
-                <li key={i}>{one}</li>
-              ))}
-            </ul>
-          </SolutionField>
-          {/* 服务端按平台模型目录核过的那一行。推荐理由与备选不上卡——那两样在对话正文里说更清楚。 */}
-          {route && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.execution_route}>
-              <div className={styles.solutionFieldValue}>
-                {route.model_family}
-                {route.model_version ? ` ${route.model_version}` : ''}
-              </div>
-            </SolutionField>
-          )}
-          {/* 出片参数：用户真能判断对错的那几项，值域来自平台目录。没聊到的不占位。 */}
-          {specParts.length > 0 && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.delivery_spec}>
-              <div className={styles.solutionFieldValue}>{specParts.join(' · ')}</div>
-            </SolutionField>
-          )}
-          {card.next_steps && (
-            <SolutionField label={SOLUTION_FIELD_LABELS.next_steps}>
-              <div className={styles.solutionFieldValue}>{card.next_steps}</div>
-            </SolutionField>
-          )}
-        </>
-      )}
+            {/* 服务端按平台模型目录核过的那一行。推荐理由与备选不上卡——那两样在对话正文里说更清楚。 */}
+            {route && (
+              <SolutionField label={SOLUTION_FIELD_LABELS.execution_route}>
+                <div className={styles.solutionFieldValue}>
+                  {route.model_family}
+                  {route.model_version ? ` ${route.model_version}` : ''}
+                </div>
+              </SolutionField>
+            )}
+            {/* 出片参数：用户真能判断对错的那几项，值域来自平台目录。没聊到的不占位。 */}
+            {specParts.length > 0 && (
+              <SolutionField label={SOLUTION_FIELD_LABELS.delivery_spec}>
+                <div className={styles.solutionFieldValue}>{specParts.join(' · ')}</div>
+              </SolutionField>
+            )}
+          </>
+        )}
 
-      {pending && !noteOpen && (
-        <div className={styles.solutionActions}>
-          <button
-            type="button"
-            className={styles.solutionPrimaryBtn}
-            disabled={disabled || busy}
-            onClick={() => act(onConfirm)}
-          >
-            确认
-          </button>
-          <button
-            type="button"
-            className={styles.solutionGhostBtn}
-            disabled={disabled || busy}
-            onClick={() => act(() => onVoid())}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            className={styles.solutionGhostBtn}
-            disabled={disabled || busy}
-            onClick={() => setNoteOpen(true)}
-          >
-            补充
-          </button>
-        </div>
-      )}
-
-      {pending && noteOpen && (
-        <>
-          <textarea
-            className={styles.solutionNote}
-            value={note}
-            autoFocus
-            placeholder="想补充或改哪里？写下来，我按这个重提一版。"
-            onChange={(e) => setNote(e.target.value)}
-          />
+        {pending && !noteOpen && (
           <div className={styles.solutionActions}>
             <button
               type="button"
               className={styles.solutionPrimaryBtn}
-              disabled={disabled || busy || !note.trim()}
-              onClick={() => act(() => onVoid(note.trim()))}
+              disabled={disabled || busy}
+              onClick={() => act(onConfirm)}
             >
-              发给它
+              确认
             </button>
-            <button type="button" className={styles.solutionGhostBtn} disabled={busy} onClick={() => setNoteOpen(false)}>
-              返回
+            <button
+              type="button"
+              className={styles.solutionGhostBtn}
+              disabled={disabled || busy}
+              onClick={() => act(() => onVoid())}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className={styles.solutionGhostBtn}
+              disabled={disabled || busy}
+              onClick={() => setNoteOpen(true)}
+            >
+              补充
             </button>
           </div>
-        </>
-      )}
+        )}
 
-      {!pending && (
-        <div className={styles.solutionSettledNote}>
-          {understanding.status === 'accepted' ? '已确认，生成卡按这个方案写' : '这一版已作废'}
-        </div>
-      )}
-    </div>
+        {pending && noteOpen && (
+          <>
+            <textarea
+              className={styles.solutionNote}
+              value={note}
+              autoFocus
+              placeholder="想补充或改哪里？写下来，我按这个重提一版。"
+              onChange={(e) => setNote(e.target.value)}
+            />
+            <div className={styles.solutionActions}>
+              <button
+                type="button"
+                className={styles.solutionPrimaryBtn}
+                disabled={disabled || busy || !note.trim()}
+                onClick={() => act(() => onVoid(note.trim()))}
+              >
+                发给它
+              </button>
+              <button type="button" className={styles.solutionGhostBtn} disabled={busy} onClick={() => setNoteOpen(false)}>
+                返回
+              </button>
+            </div>
+          </>
+        )}
+
+        {!pending && (
+          <div className={styles.solutionSettledNote}>
+            {understanding.status === 'accepted' ? '已确认，生成卡按这个方案写' : '这一版已作废'}
+          </div>
+        )}
+      </div>
+      {/* 「接下来怎么做」不在卡里：它是模型接着要说的话，不是方案的一部分，和正文一样读（IKGH1Y 追加）。 */}
+      {card?.next_steps && <Markdown text={card.next_steps} />}
+    </>
   );
 }
 

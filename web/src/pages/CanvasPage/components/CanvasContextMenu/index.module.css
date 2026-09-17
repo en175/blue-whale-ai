@@ -69,3 +69,20 @@
   width: 12px;
   height: 100%;
 }
+
+/* 子菜单右侧超出时向左翻 */
+.subMenuFlipX {
+  left: auto;
+  right: calc(100% - 2px);
+}
+
+.subMenuFlipX::before {
+  left: auto;
+  right: -10px;
+}
+
+/* 子菜单底部超出时向上翻 */
+.subMenuFlipY {
+  top: auto;
+  bottom: 0;
+}
