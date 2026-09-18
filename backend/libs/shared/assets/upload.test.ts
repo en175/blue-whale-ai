@@ -502,3 +502,70 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
     ).not.toHaveBeenCalled();
   });
 });
+
+describe("complete 的来源标记（IKGOTB 遮罩中间素材不进资产列表）", () => {
+  const pngHead = () => {
+    const buffer = new Uint8Array(32);
+    buffer.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    return buffer;
+  };
+
+  const sourceDeps = () => ({
+    projects: { findOwnedById: vi.fn().mockResolvedValue({ id: "0" }) } as never,
+    uploads: {
+      findCommittedUpload: vi.fn().mockResolvedValue(null),
+      createUploadedAsset: vi.fn().mockResolvedValue({ ...ASSET, type: "image", mime: "image/png" }),
+    } as never,
+    storage: {
+      readHead: vi.fn().mockResolvedValue(pngHead()),
+      inspectObject: vi.fn().mockResolvedValue({
+        size: 100,
+        mime: "image/png",
+        publicUrl: "https://bucket.tos.test/uploads/7/image/mask.png",
+      }),
+      makePublic: vi.fn(),
+      prepareUpload: vi.fn(),
+      deleteMultiObjects: vi.fn(),
+    } as never,
+  });
+
+  const completeWithSource = (deps: ReturnType<typeof sourceDeps>, source?: string) =>
+    handleCompleteAsset(
+      "7",
+      {
+        type: "image",
+        mime: "image/png",
+        size: 100,
+        storage_key: "uploads/7/image/mask.png",
+        ...(source === undefined ? {} : { source }),
+      },
+      deps,
+    );
+
+  it("source=mask_erase 透传落库（前端涂抹遮罩上传，资产列表按该来源排除）", async () => {
+    const deps = sourceDeps();
+    await expect(completeWithSource(deps, "mask_erase")).resolves.toMatchObject({ code: 200 });
+    expect(
+      (deps.uploads as unknown as { createUploadedAsset: ReturnType<typeof vi.fn> })
+        .createUploadedAsset,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "mask_erase", storageKey: "uploads/7/image/mask.png" }),
+    );
+  });
+
+  it("缺省与非白名单 source 一律回落 uploaded（无鉴权语义，只是展示过滤维度）", async () => {
+    const deps = sourceDeps();
+    await expect(completeWithSource(deps)).resolves.toMatchObject({ code: 200 });
+    expect(
+      (deps.uploads as unknown as { createUploadedAsset: ReturnType<typeof vi.fn> })
+        .createUploadedAsset,
+    ).toHaveBeenCalledWith(expect.objectContaining({ source: "uploaded" }));
+
+    const deps2 = sourceDeps();
+    await expect(completeWithSource(deps2, "admin")).resolves.toMatchObject({ code: 200 });
+    expect(
+      (deps2.uploads as unknown as { createUploadedAsset: ReturnType<typeof vi.fn> })
+        .createUploadedAsset,
+    ).toHaveBeenCalledWith(expect.objectContaining({ source: "uploaded" }));
+  });
+});

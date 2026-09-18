@@ -60,6 +60,44 @@ describe("createAssetRepo.listByUser", () => {
     });
   });
 
+  it("IKGOTB：listByUser 排除擦除遮罩中间素材（NOT source=mask_erase，资产列表不可见）", async () => {
+    const prisma = {
+      assets: {
+        count: vi.fn().mockResolvedValue(0),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    };
+    const repo = createAssetRepo(prisma as never);
+    await repo.listByUser("9", { page: 1, size: 24, type: "image" });
+    const expectedWhere = {
+      user_id: BigInt(9),
+      is_delete: false,
+      type: "image",
+      NOT: { source: "mask_erase" },
+    };
+    expect(prisma.assets.count).toHaveBeenCalledWith({ where: expectedWhere });
+    expect(prisma.assets.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expectedWhere }),
+    );
+  });
+
+  it("IKGOTB：findOwnedByMd5 排除遮罩中间素材（用户上传同内容图不得命中隐藏遮罩资产）", async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const repo = createAssetRepo({ assets: { findFirst } } as never);
+    await repo.findOwnedByMd5("9", "d41d8cd98f00b204e9800998ecf8427e");
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        user_id: BigInt(9),
+        md5: "d41d8cd98f00b204e9800998ecf8427e",
+        status: "normal",
+        is_delete: false,
+        NOT: { source: "mask_erase" },
+      },
+      orderBy: { id: "desc" },
+      select: expect.any(Object),
+    });
+  });
+
   it("模型解析兜底：无生成任务 / 任务无 model_id / 无展示名 → model 为 null 或回退 model_id", async () => {
     const rows = [
       {
