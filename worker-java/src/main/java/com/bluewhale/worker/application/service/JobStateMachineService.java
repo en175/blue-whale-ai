@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.service;
 
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
+import com.bluewhale.worker.domain.dto.ClaimedImageCutoutJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageEnhanceJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedImageEraseJobDto;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
@@ -124,6 +125,10 @@ public class JobStateMachineService {
         return claimService.claimImageErase(jobId, workerId);
     }
 
+    public Optional<ClaimedImageCutoutJobDto> claimImageCutout(String jobId, String workerId) {
+        return claimService.claimImageCutout(jobId, workerId);
+    }
+
     // ========== 终态收口（委托 JobFinalizer） ==========
 
     public boolean completeJob(String jobId, List<String> assetIds, String workerId, long fencingToken) {
@@ -208,6 +213,12 @@ public class JobStateMachineService {
 
     public boolean publishImageEraseResult(com.bluewhale.worker.domain.dto.PublishImageEraseDto input) {
         return finalizer.publishImageEraseResult(input);
+    }
+
+    // ========== image_cutout 直通（DTO 形态，ImageCutoutJobProcessor 专用；失败复用通用 failJob） ==========
+
+    public boolean publishImageCutoutResult(com.bluewhale.worker.domain.dto.PublishImageCutoutDto input) {
+        return finalizer.publishImageCutoutResult(input);
     }
 
     // ========== 心跳 / 重排（DB 紧耦合，保留本类） ==========

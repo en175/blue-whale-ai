@@ -24,7 +24,7 @@ import java.util.List;
  * {@code is_delete=false} + 创建在 {@code RECOVERY_MAX_AGE_MINUTES}（默认 120 分钟）内
  * + {@code next_action_at<=now} + （queued ∨ processing 且租约空/过期）。
  * <p>
- * 重投覆盖全部六类 tag：六个 recovery producer bean 无条件装配（ADR-0084 修正六），
+ * 重投覆盖全部七类 tag：七个 recovery producer bean 无条件装配（ADR-0084 修正六），
  * 因此正常情况下每类的 {@code getIfAvailable()} 都拿得到生产者；{@code reenqueue} 仍保留
  * 生产者缺失即跳过的判断，但那只作防御，不再对应任何开关语义。
  * TS 侧同时运行 recovery 时重复投递无害（契约 §7：claim-by-id CAS + null-claim ack 幂等）。
@@ -51,6 +51,7 @@ public class RecoveryService {
     private final ObjectProvider<GenerationMessageProducer> mediaExtractProducer;
     private final ObjectProvider<GenerationMessageProducer> imageEnhanceProducer;
     private final ObjectProvider<GenerationMessageProducer> imageEraseProducer;
+    private final ObjectProvider<GenerationMessageProducer> imageCutoutProducer;
     private final int maxAgeMinutes;
 
     public RecoveryService(
@@ -67,6 +68,8 @@ public class RecoveryService {
             ObjectProvider<GenerationMessageProducer> imageEnhanceProducer,
             @Qualifier("imageEraseRecoveryProducer")
             ObjectProvider<GenerationMessageProducer> imageEraseProducer,
+            @Qualifier("imageCutoutRecoveryProducer")
+            ObjectProvider<GenerationMessageProducer> imageCutoutProducer,
             @Value("${RECOVERY_MAX_AGE_MINUTES:120}") int maxAgeMinutes
     ) {
         this.jobMapper = jobMapper;
@@ -76,6 +79,7 @@ public class RecoveryService {
         this.mediaExtractProducer = mediaExtractProducer;
         this.imageEnhanceProducer = imageEnhanceProducer;
         this.imageEraseProducer = imageEraseProducer;
+        this.imageCutoutProducer = imageCutoutProducer;
         this.maxAgeMinutes = maxAgeMinutes;
     }
 
@@ -104,6 +108,8 @@ public class RecoveryService {
                     jobMapper.listDueImageEnhanceJobIds(SCAN_LIMIT, maxAgeMinutes));
             reenqueue(GenerationMqRoute.IMAGE_ERASE, imageEraseProducer.getIfAvailable(),
                     jobMapper.listDueImageEraseJobIds(SCAN_LIMIT, maxAgeMinutes));
+            reenqueue(GenerationMqRoute.IMAGE_CUTOUT, imageCutoutProducer.getIfAvailable(),
+                    jobMapper.listDueImageCutoutJobIds(SCAN_LIMIT, maxAgeMinutes));
         } catch (Exception e) {
             log.error("recovery scan failed: {}", e.getMessage(), e);
         }

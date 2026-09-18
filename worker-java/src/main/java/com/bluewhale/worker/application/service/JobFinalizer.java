@@ -5,6 +5,7 @@ import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
 import com.bluewhale.worker.domain.entity.JobStatus;
+import com.bluewhale.worker.domain.dto.PublishImageCutoutDto;
 import com.bluewhale.worker.domain.dto.PublishImageEnhanceDto;
 import com.bluewhale.worker.domain.dto.PublishImageEraseDto;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
@@ -198,6 +199,58 @@ public class JobFinalizer {
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
         // 双事件同 extract/enhance 的 project_id 守卫形态；前端按 input.target_node_id 回填擦除结果卡（源卡不动）。
+        if (job != null && job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
+                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
+                    Map.of("asset_id", asset.getId().toString(),
+                            "generation_job_id", job.getId().toString(),
+                            "type", asset.getType(),
+                            "access_url", asset.getUrl()));
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "output_asset_ids", List.of(asset.getId().toString())));
+        }
+        return true;
+    }
+
+    /**
+     * 发布 image_cutout 结果（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXM2）。
+     * <p>
+     * 免费工具无结算联动，同 publishImageEraseResult 形态（单槽单 asset、双事件），
+     * Asset type='image' / source='generated' 且带宽高（优先取官方响应 result.image_width/
+     * image_height，缺失时结果图 ImageIO 解析兜底，解析失败静默 null，契约 §8 等价标准）。
+     * 守卫复用 publishMediaExtractGuard / updateOutputAssetIds（两 SQL 均无 type 过滤，
+     * 语义 = 单槽免费工具终态收口）。
+     */
+    @Transactional
+    public boolean publishImageCutoutResult(PublishImageCutoutDto input) {
+        Long jobIdLong = Long.parseLong(input.jobId());
+
+        int guardAffected = jobMapper.publishMediaExtractGuard(
+                jobIdLong, input.workerId(), input.fencingToken());
+        if (guardAffected != 1) {
+            log.warn("[image_cutout] publishImageCutoutResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    input.jobId(), input.workerId(), input.fencingToken());
+            return false;
+        }
+
+        AssetEntity asset = buildAsset(jobIdLong, input.projectId(), input.userId(), "image",
+                input.url(), input.storageKey(), input.mime(), input.size(), input.md5(),
+                input.width(), input.height(), null);
+        assetMapper.insert(asset);
+
+        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
+
+        insertLog(jobIdLong, JobStatus.SUCCEEDED, "图片抠图完成",
+                Map.of("asset_ids", List.of(asset.getId().toString())));
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        // 双事件同 extract/enhance/erase 的 project_id 守卫形态；前端按 input.target_node_id 回填抠图结果卡（源卡不动）。
         if (job != null && job.getProjectId() != null) {
             eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
                     asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
