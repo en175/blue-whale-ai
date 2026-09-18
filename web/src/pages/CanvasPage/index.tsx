@@ -3384,6 +3384,14 @@ export default function CanvasPage() {
         addCanvasEdge(id, targetId, kind === 'video' ? 'reference' : undefined);
         return;
       }
+      // 生成卡（promptSource 文本节点）连入图片/视频草稿时走方案引用同步，
+      // 与 connectPair / @ 路径一致：由后端建素材边并写 promptReference，
+      // 避免 dock 弹出"同步素材到目标"手动确认按钮（IKG99G）
+      const sourceData = source.data as Record<string, unknown> | undefined;
+      if (source.type === 'textNode' && sourceData?.promptSource && (kind === 'image' || kind === 'video')) {
+        void referencePlanRef.current(id, targetId);
+        return;
+      }
       addCanvasEdge(id, targetId);
     });
   };

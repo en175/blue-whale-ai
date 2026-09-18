@@ -15,13 +15,17 @@ const PURE_VISUAL_EDGE_ORIGINS: ReadonlySet<string> = new Set([
 ]);
 
 /** 图片参考来源项：nodeId 用于 Dock 移除时断开对应连线；assetId 进入 references[].asset_id。
- *  textNodeId（IKFM3S）：该参考由文本卡正文索引提供（锁定，不可在目标直接移除），值为来源文本卡 id。 */
+ *  textNodeId（IKFM3S）：该参考由文本卡正文索引提供（锁定，不可在目标直接移除），值为来源文本卡 id。
+ *  planNodeId（IKG99G）：该参考由生成卡（promptSource）经后端方案同步建素材边带入，
+ *  值为来源生成卡 id（edge.data.inputSources.planNodeIds[0]，且 manual=false）。
+ *  展示层据此过滤——生成卡作为整体附件，内部素材不拆项进 Dock 参考栏；参数推导仍全量。 */
 export interface ImageMediaRef {
   nodeId: string;
   url: string;
   name: string;
   assetId: string;
   textNodeId?: string;
+  planNodeId?: string;
   mediaType?: 'image' | 'video' | 'audio';
 }
 
@@ -111,11 +115,17 @@ export function imageMediaRefsOf(
     const assetId = readAssetId(data)!;
     if (seenAssetIds.has(assetId)) continue;
     seenAssetIds.add(assetId);
+    // IKG99G：标记生成卡经后端方案同步建素材边带入的参考（manual=false 且 planNodeIds 非空）
+    const inputSources = (edge.data as { inputSources?: { manual?: boolean; planNodeIds?: string[] } } | undefined)?.inputSources;
+    const planNodeId = inputSources && inputSources.manual === false && Array.isArray(inputSources.planNodeIds) && inputSources.planNodeIds.length > 0
+      ? inputSources.planNodeIds[0]
+      : undefined;
     refs.push({
       nodeId: source.id,
       url: data.src as string,
       name: cardNameOfNode(source)!,
       assetId,
+      planNodeId,
     });
   }
   return refs;
