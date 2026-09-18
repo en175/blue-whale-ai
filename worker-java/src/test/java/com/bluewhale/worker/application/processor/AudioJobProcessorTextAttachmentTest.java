@@ -15,12 +15,15 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.Arguments;
 import java.util.stream.Stream;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -59,7 +62,7 @@ class AudioJobProcessorTextAttachmentTest {
                 .thenReturn(new NewApiAudioClient.AudioResult(
                         new byte[]{1, 2, 3}, null, "audio/mpeg", null, "req-1"));
         when(tosService.uploadBytes(any(), eq("audio/mpeg")))
-                .thenReturn(new TosMediaStorage.UploadResult("https://pub/a.mp3", "k", "audio/mpeg", 3L));
+                .thenReturn(new TosMediaStorage.UploadResult("https://pub/a.mp3", "k", "audio/mpeg", 3L, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.createAsset(any())).thenReturn("a1");
         when(stateMachine.completeJob(eq("100"), anyList(), anyString(), anyLong()))
                 .thenReturn(true);
@@ -97,6 +100,11 @@ class AudioJobProcessorTextAttachmentTest {
         verify(audioClient).generate(eq("sk-token"), eq("seed-audio-1.0"),
                 eq("生成环境音"), any());
         verify(stateMachine).completeJob(eq("100"), eq(List.of("a1")), anyString(), eq(5L));
+        // IKGS73：md5 必须从 TOS 上传出口穿透到建资产入参
+        ArgumentCaptor<JobStateMachineService.CreateAssetInput> assetCaptor =
+                ArgumentCaptor.forClass(JobStateMachineService.CreateAssetInput.class);
+        verify(stateMachine).createAsset(assetCaptor.capture());
+        assertThat(assetCaptor.getValue().md5()).isEqualTo("0123456789abcdef0123456789abcdef");
     }
 
     @Test

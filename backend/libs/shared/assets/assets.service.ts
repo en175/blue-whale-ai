@@ -108,14 +108,6 @@ export class AssetService {
     return this.repo.findAccessible(assetId, userId);
   }
 
-  insertCopy(
-    projectId: string,
-    userId: string,
-    source: Parameters<ReturnType<typeof createAssetRepo>["insertCopy"]>[2],
-  ) {
-    return this.repo.insertCopy(projectId, userId, source);
-  }
-
   /** IKBMDM 管理后台强删：对任意 id 集合做引用核对后物理回收 TOS 对象并删除行。 */
   async adminHardDelete(ids: string[]): Promise<{
     requested: number;

@@ -1,4 +1,4 @@
-const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|agent-rules\/.*\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg|js|css)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/.*\.md)$/i;
+const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|agent-rules\/.*\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg|js|css)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/.*\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/agents\/openai\.yaml)$/i;
 const NODE_SOURCE = /^(?:apps|packages)\/[^/]+\/(?:src|tests?)\/.*\.(?:ts|tsx)$/;
 // `.json` 也算 web 源码：`web/src/api/agent-rest-routes.v1.json` 是 agent 路由清单的副本，
 // `web/src/api/agentRoutes.test.ts` 正在断言它——改了副本却不跑 web 测试，等于没有守卫。
@@ -32,6 +32,8 @@ const SKILL_ASSET_FILES = new Set([
   ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
   ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
   ".zcode/skills/wizard/template.sh",
+  ".claude/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
+  ".claude/skills/wizard/template.sh",
   "tests/skill-assets.test.mjs",
 ]);
 
@@ -251,6 +253,8 @@ function appendAreaCommands(commands, areas, base) {
       ["bash", ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh"],
       ["bash", "-n", ".zcode/skills/wizard/template.sh"],
       ["node", "--check", ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs"],
+      ["bash", "-n", ".claude/skills/wizard/template.sh"],
+      ["node", "--check", ".claude/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs"],
       ["node", "--test", "tests/skill-assets.test.mjs"],
     );
   }

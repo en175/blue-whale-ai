@@ -305,6 +305,17 @@ test("keeps high-impact infrastructure scoped at completion but full at PR stage
   });
 });
 
+test("treats skill agents metadata as documentation at both stages", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+  for (const file of [
+    ".claude/skills/ask-matt/agents/openai.yaml",
+    ".zcode/skills/pr/agents/openai.yaml",
+  ]) {
+    assert.deepEqual(classifyChanges([file]), { tier: "docs", reasons: ["only documentation files changed"] });
+    assert.deepEqual(classifyChanges([file], { stage: "pr" }), { tier: "docs", reasons: ["only documentation files changed"] });
+  }
+});
+
 test("treats comment-only Dockerfile edits as documentation without weakening real edits", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
   const file = "backend/Dockerfile";
@@ -1451,6 +1462,8 @@ test("skill assets select their real checks at both stages", async () => {
     ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
     ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
     ".zcode/skills/wizard/template.sh",
+    ".claude/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
+    ".claude/skills/wizard/template.sh",
     "tests/skill-assets.test.mjs",
   ];
   for (const stage of ["completion", "pr"]) {
@@ -1463,7 +1476,9 @@ test("skill assets select their real checks at both stages", async () => {
         ["bash", files[0]],
         ["node", "--check", files[1]],
         ["bash", "-n", files[2]],
-        ["node", "--test", files[3]],
+        ["node", "--check", files[3]],
+        ["bash", "-n", files[4]],
+        ["node", "--test", files[5]],
       ]) assert.ok(commands.some(command => JSON.stringify(command) === JSON.stringify(expected)));
     }
   }
@@ -1476,6 +1491,8 @@ test("skill assets do not allow unknown siblings or downgrade product impact", a
       ".zcode/skills/wizard/unknown.sh",
       ".zcode/skills/deploy-blue-whale-api/tests/unknown.sh",
       ".zcode/skills/setup-ts-deep-modules/unknown.cjs",
+      ".claude/skills/wizard/unknown.sh",
+      ".claude/skills/setup-ts-deep-modules/unknown.cjs",
     ]) assert.throws(() => classifyChanges([file], { stage }), /UNCLASSIFIED_PATH/);
   }
   const classification = classifyChanges([

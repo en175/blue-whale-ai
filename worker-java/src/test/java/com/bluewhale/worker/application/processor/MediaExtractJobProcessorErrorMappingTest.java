@@ -7,6 +7,7 @@ import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.infrastructure.mapper.AssetMapper;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
+import com.bluewhale.worker.domain.dto.PublishMediaExtractDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.infrastructure.storage.TosMediaStorage;
@@ -267,12 +268,16 @@ class MediaExtractJobProcessorErrorMappingTest {
         when(ffmpeg.extract(anyString(), anyString(), any()))
                 .thenReturn(new FfmpegExtractor.ExtractResult(12.5));
         when(tosService.upload(any(), anyString()))
-                .thenReturn(new TosMediaStorage.UploadResult("https://example.com/a.mp3", "audios/a.mp3", "audio/mpeg", 1024L));
+                .thenReturn(new TosMediaStorage.UploadResult("https://example.com/a.mp3", "audios/a.mp3", "audio/mpeg", 1024L, "0123456789abcdef0123456789abcdef"));
         when(stateMachine.publishMediaExtractResult(any())).thenReturn(true);
 
         processor.handle("100");
 
-        verify(stateMachine).publishMediaExtractResult(any());
+        // IKGS73：md5 必须从 TOS 上传出口穿透到发布入参
+        ArgumentCaptor<PublishMediaExtractDto> captor =
+                ArgumentCaptor.forClass(PublishMediaExtractDto.class);
+        verify(stateMachine).publishMediaExtractResult(captor.capture());
+        assertThat(captor.getValue().md5()).isEqualTo("0123456789abcdef0123456789abcdef");
         verify(stateMachine, never()).failMediaExtractJob(any());
     }
 }

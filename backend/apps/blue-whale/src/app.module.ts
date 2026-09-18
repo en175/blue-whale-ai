@@ -33,6 +33,7 @@ import { GenerationApiModule } from "./api/generation/generation.module.js";
 import { HealthModule } from "./api/health/health.module.js";
 import { ImageEnhancementsApiModule } from "./api/image-enhancements/image-enhancements.module.js";
 import { ImageErasuresApiModule } from "./api/image-erasures/image-erasures.module.js";
+import { ImageOutpaintsApiModule } from "./api/image-outpaints/image-outpaints.module.js";
 import { JobsApiModule } from "./api/jobs/jobs.module.js";
 import { MaterialApiModule } from "./api/material/material.module.js";
 import { MediaExtractionsApiModule } from "./api/media-extractions/media-extractions.module.js";
@@ -84,6 +85,7 @@ import { CostSettlementModule } from "./api/internal/cost-settlement.module.js";
     MediaExtractionsApiModule,
     ImageEnhancementsApiModule,
     ImageErasuresApiModule,
+    ImageOutpaintsApiModule,
     ProjectsApiModule,
     ProjectAssetsModule,
     SkillsApiModule,

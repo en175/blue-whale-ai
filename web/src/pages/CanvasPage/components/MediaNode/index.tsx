@@ -5,8 +5,9 @@
  * ============================================ */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
-import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand, Eraser } from 'lucide-react';
+import { Image, Video, RefreshCcw, Sparkles, AudioLines, Info, Download, AtSign, ImageOff, Plus, Check, Expand, Eraser, Maximize2 } from 'lucide-react';
 import { isMediaExtractNodeId } from '../../mediaExtract';
+import { outpaintGateReason } from '../../imageOutpaint';
 import type { ImageEnhanceIdentity } from '../../imageEnhance';
 import { imageEraseGateReason } from '../../imageErase';
 import type { MaskOp, MaskPoint } from '../../eraseMask';
@@ -144,6 +145,8 @@ interface MediaNodeData {
   onEnhanceImage?: (id: string) => void;
   /** 擦除（IKGOT7）：把本卡置为擦除编辑态（「高清 ▾」下拉「擦除」项派发；门槛见 imageErase.ts） */
   onEraseImage?: (id: string) => void;
+  /** 扩图（IKGOQX）：进入扩图模式（扩展框 + 参数面板，不建卡） */
+  onOutpaintImage?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
   /** 视频整段提取音频；音频节点由后端注入画布。 */
@@ -263,6 +266,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const handleGenVideo = useCallback(() => data.onGenVideo?.(id), [data, id]);
   const handleEnhanceImage = useCallback(() => data.onEnhanceImage?.(id), [data, id]);
   const handleEraseImage = useCallback(() => data.onEraseImage?.(id), [data, id]);
+  const handleOutpaintImage = useCallback(() => data.onOutpaintImage?.(id), [data, id]);
+  /** 扩图可用性预检（打开菜单时按当前源图快照判定）：置灰并悬停说明原因 */
+  const outpaintDisabledReason = outpaintGateReason(
+    typeof data.width === 'number' ? data.width : undefined,
+    typeof data.height === 'number' ? data.height : undefined,
+    typeof data.size === 'number' ? data.size : undefined,
+  );
   const handleExtractAudio = useCallback(async () => {
     if (isExtractSubmitting || data.assetId == null || !data.onExtractAudio) return;
     setIsExtractSubmitting(true);
@@ -300,7 +310,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const toolbar = mediaNodeToolbarVisibility(data.mediaType);
   /** 「高清 ▾」下拉菜单项（IKGOT7，数组配置驱动）：「高清」行为与原「高清放大」单按钮完全一致；
    *  「擦除」按 imageErase 门槛预检置灰（title 悬停原因，尺寸 null 不拦）；
-   *  扩图（IKGOQ0）后续在「高清」与「擦除」之间插入中间位——只改本数组 */
+   *  「扩图」（IKGOQ0）按 outpaintGateReason 门槛预检置灰（插入高清与擦除之间的预留中间位） */
   const qualityMenuItems: ImageQualityMenuItem[] = [
     {
       id: 'enhance',
@@ -309,6 +319,14 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       hint: '在右侧新建高清放大草稿卡',
       disabledReason: null,
       onSelect: handleEnhanceImage,
+    },
+    {
+      id: 'outpaint',
+      label: '扩图',
+      icon: Maximize2,
+      hint: '进入扩图模式，拖动边框向外扩展画面',
+      disabledReason: outpaintDisabledReason,
+      onSelect: handleOutpaintImage,
     },
     {
       id: 'erase',

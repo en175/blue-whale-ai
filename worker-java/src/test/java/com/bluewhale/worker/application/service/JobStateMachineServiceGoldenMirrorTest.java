@@ -284,7 +284,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         PublishMediaExtractDto input = new PublishMediaExtractDto(
                 "300", "42", "9", "worker-1", 5L,
                 "https://example.com/audio.mp3", "media-extract/abc123.mp3",
-                "audio/mpeg", 1024L, 12.5
+                "audio/mpeg", 1024L, "0123456789abcdef0123456789abcdef", 12.5
         );
 
         // when
@@ -323,7 +323,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         PublishMediaExtractDto input = new PublishMediaExtractDto(
                 "300", "42", "9", "worker-1", 5L,
                 "https://example.com/audio.mp3", "media-extract/abc123.mp3",
-                "audio/mpeg", 1024L, 12.5
+                "audio/mpeg", 1024L, "0123456789abcdef0123456789abcdef", 12.5
         );
 
         boolean result = service.publishMediaExtractResult(input);
@@ -480,7 +480,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         String result = service.createAsset(new JobStateMachineService.CreateAssetInput(
                 "9", "42", "300", "audio",
                 "https://example.com/audio.mp3", "uploads/audio/abc.mp3",
-                "audio/mpeg", 1024L, null, null, 12500,
+                "audio/mpeg", 1024L, "0123456789abcdef0123456789abcdef", null, null, 12500,
                 "worker-1", 5L
         ));
 
@@ -495,6 +495,9 @@ class JobStateMachineServiceGoldenMirrorTest {
         assertThat(asset.getDurationMs()).isEqualTo(12500); // 12.5 * 1000
         assertThat(asset.getSource()).isEqualTo("generated");
         assertThat(asset.getStatus()).isEqualTo("normal");
+        // IKGS73：入参的 md5 必须原样落到 assets.md5。这条断言是「生成产物也能被 md5 去重」
+        // 这个需求的最小证据——没有它，md5 在某一层被吞掉时全部测试仍然全绿。
+        assertThat(asset.getMd5()).isEqualTo("0123456789abcdef0123456789abcdef");
     }
 
     @Test
@@ -505,7 +508,7 @@ class JobStateMachineServiceGoldenMirrorTest {
         String result = service.createAsset(new JobStateMachineService.CreateAssetInput(
                 "9", "42", "300", "audio",
                 "https://example.com/audio.mp3", "uploads/audio/abc.mp3",
-                "audio/mpeg", 1024L, null, null, null,
+                "audio/mpeg", 1024L, "0123456789abcdef0123456789abcdef", null, null, null,
                 "worker-1", 5L
         ));
 

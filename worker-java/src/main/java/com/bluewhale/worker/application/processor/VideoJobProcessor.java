@@ -4,6 +4,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoInputError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
@@ -19,7 +20,6 @@ import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay.StoredVideo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -65,7 +65,6 @@ import java.util.regex.Pattern;
  * 修正三：ARK provider 不移植——new-api 网关是唯一 provider。
  */
 @Component
-@Conditional(com.bluewhale.worker.config.VideoEnabledCondition.class)
 public class VideoJobProcessor implements JobProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(VideoJobProcessor.class);
@@ -147,7 +146,7 @@ public class VideoJobProcessor implements JobProcessor {
 
     @Override
     public String tag() {
-        return "step";
+        return GenerationMqRoute.VIDEO.tag();
     }
 
     /**
@@ -360,7 +359,11 @@ public class VideoJobProcessor implements JobProcessor {
             stored = mediaRelay.persist(observation.url(), claim.user_id());
         } else {
             // TOS 未配置 → 降级直存 URL（与 image 同构）
-            stored = new StoredVideo(observation.url(), null, null, null);
+            // IKGS73：这条路上我们**没有字节**（只有供应商 URL），所以 md5 传 null——
+            // 这是本单显式接受的边界（工单「明确不做」里的 B 类）。要补它得把整段视频
+            // 拉下来算哈希（上限 200MB），不在这单的取舍内。
+            log.warn("[video] TOS 未配置，降级直存供应商 URL：assets.md5 将为空（IKGS73 已知边界）");
+            stored = new StoredVideo(observation.url(), null, null, null, null);
         }
         log.info("[video] 转存完成 jobId={} storageKey={} size={}", claim.id(), stored.storageKey(), stored.size());
 
@@ -377,7 +380,7 @@ public class VideoJobProcessor implements JobProcessor {
         boolean published = stateMachine.publishVideoResult(
                 claim.id(), claim.project_id(), claim.user_id(),
                 claim.workerId(), claim.fencingToken(),
-                stored.url(), stored.storageKey(), stored.mime(), stored.size(),
+                stored.url(), stored.storageKey(), stored.mime(), stored.size(), stored.md5(),
                 width, height, duration);
         if (published) {
             log.info("[video] 发布成功 jobId={}", claim.id());

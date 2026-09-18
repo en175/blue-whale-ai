@@ -58,7 +58,7 @@ class PromptPlanVideoIntegrationTest {
             };
             var relay = new TosVideoMediaRelay(null, "", "") {
                 @Override public StoredVideo persist(String url, String userId) {
-                    return new StoredVideo(url, null, "video/mp4", 100L);
+                    return new StoredVideo(url, null, "video/mp4", 100L, "0123456789abcdef0123456789abcdef");
                 }
             };
             var processor = new VideoJobProcessor(context.getBean(JobStateMachineService.class),

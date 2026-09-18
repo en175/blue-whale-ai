@@ -1,6 +1,7 @@
 package com.bluewhale.worker.application.consumer;
 
 import com.bluewhale.worker.application.processor.JobProcessor;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 
 /**
@@ -13,13 +14,13 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
  * <p>
  * 不做 digitGuard（视频 TS :78-83 仅检查 typeof body.jobId === "string"）。
  * <p>
- * 每条 step 消息驱动一个 claim→submit/poll→scheduleNext 步骤；
+ * 每条视频消息驱动一个 claim→submit/poll→scheduleNext 步骤；
  * 下一个 5s 延迟消息由 processor 自投到同一 topic/tag。
  */
 public class VideoConsumer extends AbstractGenerationConsumer {
 
-    /** tag（queue.constants.ts:11 VIDEO_TAG = "step"）。 */
-    public static final String TAG = "step";
+    /** tag = {@link GenerationMqRoute#VIDEO}（与 {@code generation_jobs.type} 同名；修正六由 "step" 更名）。 */
+    public static final String TAG = GenerationMqRoute.VIDEO.tag();
 
     /** 视频顺序派发（并发度 1 ≈ TS for-await；契约 §1）。 */
     private static final int SEQUENTIAL_CONCURRENCY = 1;

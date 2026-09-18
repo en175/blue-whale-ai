@@ -1,32 +1,26 @@
 package com.bluewhale.worker.config;
 
-import java.util.Set;
-
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * worker 运行配置。环境变量名与 TS 版逐一对齐（契约 §5），
- * 灰度期一套部署 env 同时喂两个栈。
+ * worker 运行配置。环境变量名与 TS 版逐一对齐（契约 §5）。
+ * <p>
+ * 消费者与 processor 全部无条件装配（ADR-0084 修正六）：本类不再持有
+ * tag 开关或 consumer group 后缀，只剩各消费者的并发度上限。
  *
- * @param enabledTags  本实例接管消费的 tag 列表；为空 = 什么都不消费
- *                     （安全拉起默认值；按 tag 灰度开关，见契约 §1）
- * @param groupSuffix  consumer group 后缀（如 "-java"）；同一 tag 同一时刻
- *                     只允许一侧在消费（停一开一 = 灰度/回滚开关）
+ * @param concurrency 各消费者的在制品上限
  */
 @ConfigurationProperties(prefix = "worker")
 public record WorkerProperties(
-        Set<String> enabledTags,
-        String groupSuffix,
         Concurrency concurrency) {
 
     public WorkerProperties {
-        enabledTags = enabledTags == null ? Set.of() : enabledTags;
-        groupSuffix = groupSuffix == null ? "-java" : groupSuffix;
-        concurrency = concurrency == null ? new Concurrency(20, 5, 2, 5, 5) : concurrency;
+        concurrency = concurrency == null ? new Concurrency(20, 5, 2, 5, 5, 5) : concurrency;
     }
 
     /** 各消费者的在制品上限，等价 TS 侧 Semaphore；取值范围与 TS 校验一致。 */
-    public record Concurrency(int image, int audio, int mediaExtract, int imageEnhance, int imageErase) {
+    public record Concurrency(int image, int audio, int mediaExtract, int imageEnhance,
+                              int imageErase, int imageOutpaint) {
         public Concurrency {
             if (image < 1 || image > 64) {
                 throw new IllegalArgumentException("IMAGE_CONCURRENCY 超出 1-64 范围: " + image);
@@ -43,15 +37,9 @@ public record WorkerProperties(
             if (imageErase < 1 || imageErase > 64) {
                 throw new IllegalArgumentException("IMAGE_ERASE_CONCURRENCY 超出 1-64 范围: " + imageErase);
             }
+            if (imageOutpaint < 1 || imageOutpaint > 64) {
+                throw new IllegalArgumentException("IMAGE_OUTPAINT_CONCURRENCY 超出 1-64 范围: " + imageOutpaint);
+            }
         }
-    }
-
-    /**
-     * 视频无并发度配置（顺序消费，无 Semaphore）——
-     * TS rocketmq-video.consumer.ts:60-74 for-await each，Java 侧同构。
-     * 保留方法以兼容配置结构扩展。
-     */
-    public int videoConcurrency() {
-        return 1; // 视频恒为顺序消费
     }
 }

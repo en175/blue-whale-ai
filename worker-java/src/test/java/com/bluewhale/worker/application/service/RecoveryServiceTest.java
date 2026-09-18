@@ -22,7 +22,7 @@ import static org.mockito.Mockito.*;
 /**
  * recovery 扫描测试（IKF3AT；TS recovery.service.ts:38-106 行为对账）。
  * <p>
- * 覆盖：到点 job 逐条重投（id 字符串 + 1000ms 延迟）、tag 未启用（生产者缺失）跳过、
+ * 覆盖：到点 job 逐条重投（id 字符串 + 1000ms 延迟）、生产者缺失（防御分支）跳过该 tag、
  * 单条投递失败不中断本轮、扫描参数（limit=100 / 窗口分钟数透传）、整轮异常兜底。
  */
 @ExtendWith(MockitoExtension.class)
@@ -38,18 +38,16 @@ class RecoveryServiceTest {
     @Mock private ObjectProvider<GenerationMessageProducer> extractProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> imageEnhanceProvider;
     @Mock private ObjectProvider<GenerationMessageProducer> imageEraseProvider;
+    @Mock private ObjectProvider<GenerationMessageProducer> imageOutpaintProvider;
     @Mock private GenerationMessageProducer videoProducer;
     @Mock private GenerationMessageProducer imageProducer;
     @Mock private GenerationMessageProducer audioProducer;
     @Mock private GenerationMessageProducer extractProducer;
     @Mock private GenerationMessageProducer imageEnhanceProducer;
     @Mock private GenerationMessageProducer imageEraseProducer;
+    @Mock private GenerationMessageProducer imageOutpaintProducer;
 
     private RecoveryService service;
-
-    private static com.bluewhale.worker.config.WorkerProperties props(java.util.Set<String> tags) {
-        return new com.bluewhale.worker.config.WorkerProperties(tags, "-java", null);
-    }
 
     @BeforeEach
     void setUp() {
@@ -59,15 +57,17 @@ class RecoveryServiceTest {
         when(extractProvider.getIfAvailable()).thenReturn(extractProducer);
         when(imageEnhanceProvider.getIfAvailable()).thenReturn(imageEnhanceProducer);
         when(imageEraseProvider.getIfAvailable()).thenReturn(imageEraseProducer);
+        when(imageOutpaintProvider.getIfAvailable()).thenReturn(imageOutpaintProducer);
         when(jobMapper.listDueVideoJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueImageJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueAudioJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueMediaExtractJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueImageEnhanceJobIds(anyInt(), anyInt())).thenReturn(List.of());
         when(jobMapper.listDueImageEraseJobIds(anyInt(), anyInt())).thenReturn(List.of());
+        when(jobMapper.listDueImageOutpaintJobIds(anyInt(), anyInt())).thenReturn(List.of());
         service = new RecoveryService(jobMapper, videoProvider, imageProvider,
                 audioProvider, extractProvider, imageEnhanceProvider, imageEraseProvider,
-                props(java.util.Set.of("image")), MAX_AGE_MINUTES);
+                imageOutpaintProvider, MAX_AGE_MINUTES);
     }
 
     @Test
@@ -95,10 +95,11 @@ class RecoveryServiceTest {
         verify(jobMapper).listDueMediaExtractJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueImageEnhanceJobIds(100, MAX_AGE_MINUTES);
         verify(jobMapper).listDueImageEraseJobIds(100, MAX_AGE_MINUTES);
+        verify(jobMapper).listDueImageOutpaintJobIds(100, MAX_AGE_MINUTES);
     }
 
     @Test
-    @DisplayName("tag 未启用（生产者 bean 缺失）→ 该 tag 不投，其余照常")
+    @DisplayName("生产者缺失（防御分支）→ 该 tag 不投，其余照常")
     void skipsDisabledTag() {
         when(imageProvider.getIfAvailable()).thenReturn(null);
         when(jobMapper.listDueImageJobIds(anyInt(), anyInt())).thenReturn(List.of(1821L));
@@ -130,18 +131,5 @@ class RecoveryServiceTest {
         service.recover(); // 不抛
 
         verify(jobMapper, never()).listDueImageJobIds(anyInt(), anyInt());
-    }
-
-    @Test
-    @DisplayName("安全拉起（enabledTags 为空）→ 完全跳过扫库（stub DataSource 形态不刷错误日志）")
-    void skipsEntirelyWhenNoTagsEnabled() {
-        RecoveryService idle = new RecoveryService(jobMapper, videoProvider, imageProvider,
-                audioProvider, extractProvider, imageEnhanceProvider, imageEraseProvider,
-                props(java.util.Set.of()), MAX_AGE_MINUTES);
-
-        idle.recover();
-
-        verifyNoInteractions(jobMapper);
-        verifyNoInteractions(imageProducer);
     }
 }

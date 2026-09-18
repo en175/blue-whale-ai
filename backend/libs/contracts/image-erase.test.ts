@@ -42,6 +42,14 @@ const contractJava = readFileSync(
   ),
   "utf8",
 );
+// tag 字面量已上移到 GenerationMqRoute（ImageEraseContract.TAG 只做转发），故 tag 的对账基准改读该枚举。
+const mqRouteJava = readFileSync(
+  new URL(
+    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/entity/GenerationMqRoute.java",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 describe("image_erase 契约不变量（§15.1–15.4，TS 侧）", () => {
   it("任务类型 / MQ tag / 来源值三处同值 image_erase", () => {
@@ -142,7 +150,8 @@ describe("image_erase 双端一致性（读 worker-java 源码文本，防漂移
   });
 
   it("ImageEraseContract：tag / source 与 TS 同值", () => {
-    expect(contractJava).toContain('String TAG = "image_erase";');
+    expect(mqRouteJava).toContain(`IMAGE_ERASE("generation-task", "${IMAGE_ERASE_TAG}")`);
+    expect(contractJava).toContain("String TAG = GenerationMqRoute.IMAGE_ERASE.tag();");
     expect(contractJava).toContain('String SOURCE = "image_erase";');
   });
 

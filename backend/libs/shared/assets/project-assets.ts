@@ -1,6 +1,5 @@
 import {
   ASSET_UNAVAILABLE_CODE,
-  PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   DomainError,
   ok,
@@ -8,32 +7,6 @@ import {
 import type { ProjectService } from "@lib/shared/project/project.service.js";
 import type { AssetService } from "./assets.service.js";
 import type { AssetReader, AssetSigner } from "./ports.js";
-
-export async function handleCopyAsset(
-  userId: string,
-  projectId: string,
-  body: { source_asset_id?: unknown },
-  idempotencyKey: string | null | undefined,
-  deps: { project: ProjectService; assets: AssetService },
-) {
-  if (!idempotencyKey || idempotencyKey.trim() === "") {
-    throw new DomainError(PARAM_MISSING_CODE, "缺少 Idempotency-Key");
-  }
-  const sourceAssetId =
-    typeof body.source_asset_id === "number" ||
-    typeof body.source_asset_id === "string"
-      ? String(body.source_asset_id)
-      : "";
-  if (!sourceAssetId) {
-    throw new DomainError(PARAM_MISSING_CODE, "缺少 source_asset_id");
-  }
-  const project = await deps.project.findOwnedById(projectId, userId);
-  if (!project) throw new DomainError(RESOURCE_NOT_FOUND_CODE, "资源不存在");
-  const source = await deps.assets.findOwnedSource(sourceAssetId, userId);
-  if (!source) throw new DomainError(RESOURCE_NOT_FOUND_CODE, "资源不存在");
-  const copy = await deps.assets.insertCopy(projectId, userId, source);
-  return ok(copy);
-}
 
 export async function handleAccessAsset(
   userId: string,
