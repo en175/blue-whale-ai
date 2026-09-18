@@ -115,7 +115,7 @@ public final class ImageCutoutContract {
     /** human/product 档：短边不得超过 4320px。 */
     public static final int MAX_SUBJECT_INPUT_SHORT_SIDE_PX = 4320;
 
-    // ========== 错误码（数值 1041 见 error-codes.ts ERROR_IMAGE_CUTOUT_FAILED） ==========
+    // ========== 错误码（数值 1042 见 error-codes.ts ERROR_IMAGE_CUTOUT_FAILED；1041 已由扩图 !737 占用） ==========
 
     /** 执行兜底失败码：调用失败 / 超时 / 供应商错误统一归并，无 worker 级自动重试。 */
     public static final String ERROR_IMAGE_CUTOUT_FAILED = "image_cutout_failed";

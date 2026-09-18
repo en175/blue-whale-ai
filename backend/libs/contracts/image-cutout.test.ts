@@ -173,10 +173,10 @@ describe("image_cutout 契约不变量（官方 PDF 口径，TS 侧）", () => {
     }
   });
 
-  it("兜底错误码 image_cutout_failed → 1041，文案表同步", () => {
+  it("兜底错误码 image_cutout_failed → 1042（1041 已由扩图占用），文案表同步", () => {
     expect(ERROR_IMAGE_CUTOUT_FAILED).toBe("image_cutout_failed");
-    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_IMAGE_CUTOUT_FAILED]).toBe(1041);
-    expect(ERROR_CODES[1041]).toBeTruthy();
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_IMAGE_CUTOUT_FAILED]).toBe(1042);
+    expect(ERROR_CODES[1042]).toBeTruthy();
   });
 });
 

@@ -256,6 +256,31 @@ public class RocketMqConfig {
         );
     }
 
+    /**
+     * image_outpaint（智能扩图）consumer（IKGOQW；以 imageEnhance/imageErase 接线为模板）。
+     * <p>
+     * consumer group = "generation-image-outpaint-worker"（冻结值）。
+     * topic / tag = {@link GenerationMqRoute#IMAGE_OUTPAINT}。
+     * digitGuard = true（generation_jobs.id 恒纯数字）。
+     */
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public com.bluewhale.worker.application.consumer.ImageOutpaintConsumer imageOutpaintConsumer(
+            com.bluewhale.worker.application.processor.ImageOutpaintJobProcessor processor,
+            WorkerProperties workerProps,
+            ClientConfiguration clientConfig
+    ) {
+        String consumerGroup = "generation-image-outpaint-worker";
+        int concurrency = workerProps.concurrency().imageOutpaint();
+
+        return new com.bluewhale.worker.application.consumer.ImageOutpaintConsumer(
+                processor,
+                GenerationMqRoute.IMAGE_OUTPAINT.topic(),
+                clientConfig,
+                consumerGroup,
+                concurrency
+        );
+    }
+
     // ========== 刀④ 视频路径（blade-④ IKEL9A） ==========
 
     /**
@@ -272,7 +297,7 @@ public class RocketMqConfig {
                 GenerationMqRoute.VIDEO.tag());
     }
 
-    // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，七类全部无条件装配。
+    // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，八类全部无条件装配。
 
     /** recovery 重投 image。 */
     @Bean(destroyMethod = "close")
@@ -308,6 +333,12 @@ public class RocketMqConfig {
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer imageCutoutRecoveryProducer(ClientConfiguration clientConfig) {
         return createProducerForTag(clientConfig, GenerationMqRoute.IMAGE_CUTOUT);
+    }
+
+    /** recovery 重投 image_outpaint（IKGOQW）。 */
+    @Bean(destroyMethod = "close")
+    public GenerationMessageProducer imageOutpaintRecoveryProducer(ClientConfiguration clientConfig) {
+        return createProducerForTag(clientConfig, GenerationMqRoute.IMAGE_OUTPAINT);
     }
 
     /** 按路由建 RocketMQ producer（连接配置与其余 bean 同源同实例）。 */

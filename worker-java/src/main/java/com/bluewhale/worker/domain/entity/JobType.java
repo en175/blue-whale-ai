@@ -28,7 +28,11 @@ public enum JobType {
 
     /** 图片抠图（tag=image_cutout，契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXLS；
      *  消费者与处理器由 IKGXM2 按附录 C 触点注册）。 */
-    IMAGE_CUTOUT("image_cutout");
+    IMAGE_CUTOUT("image_cutout"),
+
+    /** 智能扩图（tag=image_outpaint，IKGOQR 契约 = backend/libs/contracts/image-outpaint.ts；
+     *  规格见 docs/specs/2026-09-18-image-outpaint-mediakit.md；消费者与处理器由后续票按附录 C 触点注册）。 */
+    IMAGE_OUTPAINT("image_outpaint");
 
     private final String value;
 

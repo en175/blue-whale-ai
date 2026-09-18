@@ -100,7 +100,7 @@ describe('MediaNode selected toolbar', () => {
     expect(order.indexOf('高清')).toBeLessThan(order.indexOf('详情'));
   });
 
-  it('点击高清放大派发 onEnhanceImage（携带节点 id）', async () => {
+  it('点击高清放大派发 onEnhanceImage（携带节点 id；经「高清 ▾」下拉菜单项触发）', async () => {
     const onEnhanceImage = vi.fn();
     await renderNode('image', { data: { onEnhanceImage } });
     const trigger = [...mountNode.querySelectorAll('button')]
@@ -141,11 +141,31 @@ describe('MediaNode image-quality menu（IKGOT7 高清 ▾）', () => {
     });
   }
 
-  it('图片卡展开菜单含「高清」「擦除」「抠图」三项（IKGXLT 追加尾项）', async () => {
+  it('图片卡展开菜单含「高清」「扩图」「裁切」「擦除」「抠图」五项（IKGW1H+IKGOQ0+IKGXLT 合并顺序）', async () => {
     await renderNode('image');
     await openQualityMenu();
     const rendered = [...mountNode.querySelectorAll('[data-testid^="image-quality-item-"]')];
-    expect(rendered.map((b) => b.textContent)).toEqual(['高清', '擦除', '抠图']);
+    expect(rendered.map((b) => b.textContent)).toEqual(['高清', '扩图', '裁切', '擦除', '抠图']);
+  });
+
+  it('点「裁切」派发 onCropImage（携带节点 id）', async () => {
+    const onCropImage = vi.fn();
+    await renderNode('image', { data: { onCropImage } });
+    await openQualityMenu();
+    await act(async () => {
+      mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-crop"]')!.click();
+    });
+    expect(onCropImage).toHaveBeenCalledWith('image-node');
+  });
+
+  it('裁切项无置灰门槛：超尺寸/超大小/webp 的图也不置灰（与擦除门槛对照）', async () => {
+    await renderNode('image', { data: { width: 3000, height: 1440, size: 10 * 1024 * 1024 + 1, mime: 'image/webp' } });
+    await openQualityMenu();
+    const crop = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-crop"]')!;
+    expect(crop.getAttribute('aria-disabled')).toBeNull();
+    // 擦除项按门槛置灰，裁切不受影响
+    const erase = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!;
+    expect(erase.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('点「擦除」派发 onEraseImage（携带节点 id）', async () => {
@@ -235,6 +255,103 @@ describe('MediaNode image-quality menu（IKGOT7 高清 ▾）', () => {
     expect(onMediaDims).toHaveBeenCalledWith('fill-node', { width: 4000, height: 2000 });
   });
 });
+
+
+describe('MediaNode enhance dropdown menu 扩图项（IKGOQX）', () => {
+  const menuBtn = () => mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-trigger"]')!;
+  const menu = () => mountNode.querySelector('[data-testid="image-quality-menu"]');
+  const menuItem = (id: string) => mountNode.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!;
+
+  async function openMenu() {
+    await act(async () => {
+      menuBtn().click();
+    });
+    expect(menu()).toBeTruthy();
+  }
+
+  it('菜单项「扩图」派发 onOutpaintImage 并收起菜单', async () => {
+    const onOutpaintImage = vi.fn();
+    await renderNode('image', { data: { onOutpaintImage, width: 1600, height: 900, size: 1000 } });
+    await openMenu();
+    await act(async () => {
+      menuItem('image-quality-item-outpaint').click();
+    });
+    expect(onOutpaintImage).toHaveBeenCalledWith('image-node');
+    expect(menu()).toBeNull();
+  });
+
+  it('源图门槛达标时「扩图」可用（长边恰 4160、文件恰 10MB）', async () => {
+    const onOutpaintImage = vi.fn();
+    await renderNode('image', {
+      data: { onOutpaintImage, width: 4160, height: 2000, size: 10 * 1024 * 1024 },
+    });
+    await openMenu();
+    const item = menuItem('image-quality-item-outpaint');
+    expect(item.getAttribute('aria-disabled')).toBeNull();
+    await act(async () => {
+      item.click();
+    });
+    expect(onOutpaintImage).toHaveBeenCalledWith('image-node');
+  });
+
+  it('扩图置灰矩阵：长边超 4160 / 文件超 10MB / 真实宽高缺失，悬停说明原因且点击不派发', async () => {
+    // 长边超限
+    const overLong = { onOutpaintImage: vi.fn(), width: 4161, height: 2000, size: 1000 };
+    await renderNode('image', { data: overLong });
+    await openMenu();
+    const item1 = menuItem('image-quality-item-outpaint');
+    expect(item1.getAttribute('aria-disabled')).toBe('true');
+    expect(item1.getAttribute('title')).toContain('4160');
+    await act(async () => {
+      item1.click();
+    });
+    expect(overLong.onOutpaintImage).not.toHaveBeenCalled();
+    expect(menu()).toBeTruthy(); // 置灰点击不收菜单
+    await act(async () => {
+      menuBtn().click();
+    });
+
+    // 文件超限
+    const overSize = { onOutpaintImage: vi.fn(), width: 2000, height: 1000, size: 10 * 1024 * 1024 + 1 };
+    await renderNode('image', { data: overSize });
+    await openMenu();
+    const item2 = menuItem('image-quality-item-outpaint');
+    expect(item2.getAttribute('aria-disabled')).toBe('true');
+    expect(item2.getAttribute('title')).toContain('10MB');
+    await act(async () => {
+      item2.click();
+    });
+    expect(overSize.onOutpaintImage).not.toHaveBeenCalled();
+    await act(async () => {
+      menuBtn().click();
+    });
+
+    // 真实宽高缺失
+    const noDims = { onOutpaintImage: vi.fn(), size: 1000 };
+    await renderNode('image', { data: noDims });
+    await openMenu();
+    const item3 = menuItem('image-quality-item-outpaint');
+    expect(item3.getAttribute('aria-disabled')).toBe('true');
+    // 拒绝文案与契约单处定义同源（IKGOR6 切契约后不再是本地「尺寸未知」措辞）
+    expect(item3.getAttribute('title')).toContain('缺少真实尺寸信息');
+    await act(async () => {
+      item3.click();
+    });
+    expect(noDims.onOutpaintImage).not.toHaveBeenCalled();
+  });
+
+  it('扩图门槛不影响「高清」项：门槛超标时高清仍可点', async () => {
+    const onEnhanceImage = vi.fn();
+    await renderNode('image', { data: { onEnhanceImage, width: 5000, height: 4000, size: 20 * 1024 * 1024 } });
+    await openMenu();
+    expect(menuItem('image-quality-item-outpaint').getAttribute('aria-disabled')).toBe('true');
+    await act(async () => {
+      menuItem('image-quality-item-enhance').click();
+    });
+    expect(onEnhanceImage).toHaveBeenCalledWith('image-node');
+  });
+});
+
 
 describe('MediaNode draft overlay (IKDMQQ)', () => {
   it('待生成草稿：渲染按类型占位文案而非素材已被删除，无取消/重试按钮', async () => {

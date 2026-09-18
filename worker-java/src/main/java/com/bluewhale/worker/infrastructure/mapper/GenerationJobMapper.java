@@ -618,129 +618,86 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
     // 共同条件：is_delete=false + gmt_create 在 RECOVERY_MAX_AGE 窗口内（避免卡死任务被 60s 循环无限重放）
     // + next_action_at<=now + （queued ∨ processing 且租约空/过期——孤儿由 claim-by-id 的过期租约接管语义接走）。
     // 注：TS 的 resetStalledImageJobs 无活调用方（死代码），不移植（edits 死代码教训）。
+    // 六路径仅 type / source 白名单差异（audio / media_extract 不套白名单），其余条件逐字同 TS——
+    // 仿 claim 侧 findCandidateByTypeAndSources 参数化共用一份 SQL，防逐字复制漂移（IKGOQ0 审查修复）。
+
+    /**
+     * 到点/孤儿 id 扫描：按媒体类型 + 可选 source 白名单的参数化通用形态
+     * （claim-ops.ts:134-230 六条同形 SQL 的收敛）。
+     * <p>
+     * sources 为空 → 不套 source 白名单（audio / media_extract 形态：专属来源值
+     * 不在白名单，套了漏真卡任务，IKC9EJ 教训）；非空 → source IN 白名单（与该媒体类型
+     * claim 候选查询同源）。
+     */
+    @Select("""
+            <script>
+            SELECT id FROM generation_jobs
+            WHERE type = #{type}
+            <if test="sources != null and !sources.isEmpty()">
+              AND source IN
+              <foreach collection="sources" item="item" open="(" separator="," close=")">#{item}</foreach>
+            </if>
+            AND is_delete = false
+            AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
+            AND next_action_at &lt;= NOW()
+            AND (
+              status = 'queued'
+              OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at &lt; NOW()))
+            )
+            ORDER BY id ASC
+            LIMIT #{limit}
+            </script>
+            """)
+    List<Long> listDueJobIdsByTypeAndSources(
+            @Param("type") String type,
+            @Param("sources") List<String> sources,
+            @Param("limit") int limit,
+            @Param("maxAgeMinutes") int maxAgeMinutes);
 
     /** 视频到点/孤儿（claim-ops.ts:134-160）：限 4 源白名单。 */
-    @Select("""
-            SELECT id FROM generation_jobs
-            WHERE type = 'video'
-              AND source IN ('bottom_dock', 'plan_apply', 'plan', 'scene_card')
-              AND is_delete = false
-              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
-              AND next_action_at <= NOW()
-              AND (
-                status = 'queued'
-                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
-              )
-            ORDER BY id ASC
-            LIMIT #{limit}
-            """)
-    List<Long> listDueVideoJobIds(@Param("limit") int limit,
-                                  @Param("maxAgeMinutes") int maxAgeMinutes);
+    default List<Long> listDueVideoJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("video",
+                List.of("bottom_dock", "plan_apply", "plan", "scene_card"), limit, maxAgeMinutes);
+    }
 
     /** 图片到点/孤儿（claim-ops.ts:163-195）：限 CLAIMABLE_JOB_SOURCES。 */
-    @Select("""
-            SELECT id FROM generation_jobs
-            WHERE type = 'image'
-              AND source IN ('bottom_dock', 'plan_apply', 'storyboard_preview')
-              AND is_delete = false
-              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
-              AND next_action_at <= NOW()
-              AND (
-                status = 'queued'
-                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
-              )
-            ORDER BY id ASC
-            LIMIT #{limit}
-            """)
-    List<Long> listDueImageJobIds(@Param("limit") int limit,
-                                  @Param("maxAgeMinutes") int maxAgeMinutes);
+    default List<Long> listDueImageJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("image",
+                List.of("bottom_dock", "plan_apply", "storyboard_preview"), limit, maxAgeMinutes);
+    }
 
     /** 音频到点/孤儿（claim-ops.ts:198-230）：**不套 source 白名单**（IKC9EJ 教训，防漏捞）。 */
-    @Select("""
-            SELECT id FROM generation_jobs
-            WHERE type = 'audio'
-              AND is_delete = false
-              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
-              AND next_action_at <= NOW()
-              AND (
-                status = 'queued'
-                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
-              )
-            ORDER BY id ASC
-            LIMIT #{limit}
-            """)
-    List<Long> listDueAudioJobIds(@Param("limit") int limit,
-                                  @Param("maxAgeMinutes") int maxAgeMinutes);
+    default List<Long> listDueAudioJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("audio", List.of(), limit, maxAgeMinutes);
+    }
 
     /** 媒体提取到点/孤儿：**不套 source 白名单**（source="dock" 不在白名单，套了漏真卡任务）。 */
-    @Select("""
-            SELECT id FROM generation_jobs
-            WHERE type = 'media_extract'
-              AND is_delete = false
-              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
-              AND next_action_at <= NOW()
-              AND (
-                status = 'queued'
-                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
-              )
-            ORDER BY id ASC
-            LIMIT #{limit}
-            """)
-    List<Long> listDueMediaExtractJobIds(@Param("limit") int limit,
-                                         @Param("maxAgeMinutes") int maxAgeMinutes);
+    default List<Long> listDueMediaExtractJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("media_extract", List.of(), limit, maxAgeMinutes);
+    }
 
     /** 高清放大到点/孤儿（契约 §14）：套 source 白名单（与 claim 同源，单源 image_enhance）。 */
-    @Select("""
-            SELECT id FROM generation_jobs
-            WHERE type = 'image_enhance'
-              AND source IN ('image_enhance')
-              AND is_delete = false
-              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
-              AND next_action_at <= NOW()
-              AND (
-                status = 'queued'
-                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
-              )
-            ORDER BY id ASC
-            LIMIT #{limit}
-            """)
-    List<Long> listDueImageEnhanceJobIds(@Param("limit") int limit,
-                                         @Param("maxAgeMinutes") int maxAgeMinutes);
+    default List<Long> listDueImageEnhanceJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("image_enhance",
+                List.of("image_enhance"), limit, maxAgeMinutes);
+    }
 
     /** 图片擦除到点/孤儿（契约 §15）：套 source 白名单（与 claim 同源，单源 image_erase）。 */
-    @Select("""
-            SELECT id FROM generation_jobs
-            WHERE type = 'image_erase'
-              AND source IN ('image_erase')
-              AND is_delete = false
-              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
-              AND next_action_at <= NOW()
-              AND (
-                status = 'queued'
-                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
-              )
-            ORDER BY id ASC
-            LIMIT #{limit}
-            """)
-    List<Long> listDueImageEraseJobIds(@Param("limit") int limit,
-                                       @Param("maxAgeMinutes") int maxAgeMinutes);
+    default List<Long> listDueImageEraseJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("image_erase",
+                List.of("image_erase"), limit, maxAgeMinutes);
+    }
+
+    /** 智能扩图到点/孤儿（IKGOQW）：套 source 白名单（与 claim 同源，单源 image_outpaint）。 */
+    default List<Long> listDueImageOutpaintJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("image_outpaint",
+                List.of("image_outpaint"), limit, maxAgeMinutes);
+    }
 
     /** 图片抠图到点/孤儿（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXM2）：
      *  套 source 白名单（与 claim 同源，单源 image_cutout）。 */
-    @Select("""
-            SELECT id FROM generation_jobs
-            WHERE type = 'image_cutout'
-              AND source IN ('image_cutout')
-              AND is_delete = false
-              AND gmt_create > (NOW() - INTERVAL #{maxAgeMinutes} MINUTE)
-              AND next_action_at <= NOW()
-              AND (
-                status = 'queued'
-                OR (status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
-              )
-            ORDER BY id ASC
-            LIMIT #{limit}
-            """)
-    List<Long> listDueImageCutoutJobIds(@Param("limit") int limit,
-                                        @Param("maxAgeMinutes") int maxAgeMinutes);
+    default List<Long> listDueImageCutoutJobIds(int limit, int maxAgeMinutes) {
+        return listDueJobIdsByTypeAndSources("image_cutout",
+                List.of("image_cutout"), limit, maxAgeMinutes);
+    }
 }

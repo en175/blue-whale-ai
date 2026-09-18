@@ -12,7 +12,7 @@ import { z } from "zod";
    仅 24h 有效）→ 落对象存储公开读 → 建 Asset（type=image / source='generated' /
    generation_job_id）→ 终态 succeeded，前端经 GET /api/jobs/:id 的 asset 按 target_node_id
    回填抠图结果卡（源卡不动，透明 png 垫棋盘格底纹）；失败时落 failed 与既有错误码投影
-   （兜底 image_cutout_failed，数值 1041），无自动重试，用户在结果卡手动重试并沿用冻结 input。
+   （兜底 image_cutout_failed，数值 1042——1041 已由扩图 !737 占用，同步远程基线时让位），无自动重试，用户在结果卡手动重试并沿用冻结 input。
    供应商响应形状（官方 PDF 响应节）：success/result/error/task_id/task_type/request_id/
    expires_at/queue_id，result 含 image_url（24h 有效）/image_size/image_format/image_width/
    image_height——worker 消费（下载转存建素材），不进本契约冻结结构。 */

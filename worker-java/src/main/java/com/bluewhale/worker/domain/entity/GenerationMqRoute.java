@@ -37,7 +37,10 @@ public enum GenerationMqRoute {
     IMAGE_ERASE("generation-task", "image_erase"),
 
     /** 图片抠图（契约章节 docs/specs/2026-09-18-image-cutout-mediakit.md / IKGXLS）。 */
-    IMAGE_CUTOUT("generation-task", "image_cutout");
+    IMAGE_CUTOUT("generation-task", "image_cutout"),
+
+    /** 智能扩图（IKGOQR 契约 = backend/libs/contracts/image-outpaint.ts）。 */
+    IMAGE_OUTPAINT("generation-task", "image_outpaint");
 
     private final String topic;
 

@@ -52,6 +52,7 @@ public class RecoveryService {
     private final ObjectProvider<GenerationMessageProducer> imageEnhanceProducer;
     private final ObjectProvider<GenerationMessageProducer> imageEraseProducer;
     private final ObjectProvider<GenerationMessageProducer> imageCutoutProducer;
+    private final ObjectProvider<GenerationMessageProducer> imageOutpaintProducer;
     private final int maxAgeMinutes;
 
     public RecoveryService(
@@ -70,6 +71,8 @@ public class RecoveryService {
             ObjectProvider<GenerationMessageProducer> imageEraseProducer,
             @Qualifier("imageCutoutRecoveryProducer")
             ObjectProvider<GenerationMessageProducer> imageCutoutProducer,
+            @Qualifier("imageOutpaintRecoveryProducer")
+            ObjectProvider<GenerationMessageProducer> imageOutpaintProducer,
             @Value("${RECOVERY_MAX_AGE_MINUTES:120}") int maxAgeMinutes
     ) {
         this.jobMapper = jobMapper;
@@ -80,6 +83,7 @@ public class RecoveryService {
         this.imageEnhanceProducer = imageEnhanceProducer;
         this.imageEraseProducer = imageEraseProducer;
         this.imageCutoutProducer = imageCutoutProducer;
+        this.imageOutpaintProducer = imageOutpaintProducer;
         this.maxAgeMinutes = maxAgeMinutes;
     }
 
@@ -110,6 +114,8 @@ public class RecoveryService {
                     jobMapper.listDueImageEraseJobIds(SCAN_LIMIT, maxAgeMinutes));
             reenqueue(GenerationMqRoute.IMAGE_CUTOUT, imageCutoutProducer.getIfAvailable(),
                     jobMapper.listDueImageCutoutJobIds(SCAN_LIMIT, maxAgeMinutes));
+            reenqueue(GenerationMqRoute.IMAGE_OUTPAINT, imageOutpaintProducer.getIfAvailable(),
+                    jobMapper.listDueImageOutpaintJobIds(SCAN_LIMIT, maxAgeMinutes));
         } catch (Exception e) {
             log.error("recovery scan failed: {}", e.getMessage(), e);
         }

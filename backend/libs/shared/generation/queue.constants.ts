@@ -22,6 +22,9 @@ export const IMAGE_ERASE_TAG = "image_erase";
  *  复用 GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；
  *  与 generation_jobs.type / IMAGE_CUTOUT_JOB_TYPE（@lib/contracts）保持一致。 */
 export const IMAGE_CUTOUT_TAG = "image_cutout";
+/** 智能扩图任务 tag（IKGOQR，契约见 @lib/contracts/image-outpaint）：复用 GENERATION_TASK_QUEUE，用独立 tag 区分任务类型；
+ *  与 generation_jobs.type / IMAGE_OUTPAINT_JOB_TYPE（@lib/contracts）保持一致。 */
+export const IMAGE_OUTPAINT_TAG = "image_outpaint";
 
 /** 视频生成任务 tag（IKEL9A 刀④；修正六由 "step" 更名为与任务类型同名）：复用 GENERATION_TASK_QUEUE，
  *  用独立 tag 区分任务类型；与 generation_jobs.type 保持一致。消费侧对应 worker-java 的 VideoConsumer.TAG。 */
@@ -36,4 +39,5 @@ export type GenerationTag =
   | typeof MEDIA_EXTRACT_TAG
   | typeof IMAGE_ENHANCE_TAG
   | typeof IMAGE_ERASE_TAG
-  | typeof IMAGE_CUTOUT_TAG;
+  | typeof IMAGE_CUTOUT_TAG
+  | typeof IMAGE_OUTPAINT_TAG;
