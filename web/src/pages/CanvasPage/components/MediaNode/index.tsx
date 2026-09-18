@@ -148,8 +148,7 @@ interface MediaNodeData {
   onEnhanceImage?: (id: string) => void;
   /** 擦除（IKGOT7）：把本卡置为擦除编辑态（「高清 ▾」下拉「擦除」项派发；门槛见 imageErase.ts） */
   onEraseImage?: (id: string) => void;
-  /** 抠图（IKGXLT）：进入抠图工具栏（「高清 ▾」下拉「抠图」项派发；门槛见 imageCutout.ts；
-   *  本票为占位通道，CanvasPage 侧 stub 空操作，工具栏接线归后续票） */
+  /** 抠图（IKGXLT/IKGXMT）：进入抠图工具栏（「高清 ▾」下拉「抠图」项派发；门槛见 imageCutout.ts） */
   onCutoutImage?: (id: string) => void;
   /** 生成音频：打开音频对话框并带入图片 */
   onGenAudio?: (id: string) => void;
@@ -308,8 +307,8 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const toolbar = mediaNodeToolbarVisibility(data.mediaType);
   /** 「高清 ▾」下拉菜单项（IKGOT7，数组配置驱动）：「高清」行为与原「高清放大」单按钮完全一致；
    *  「擦除」按 imageErase 门槛预检置灰（title 悬停原因，尺寸 null 不拦）；
-   *  「抠图」（IKGXLT）在「擦除」之后追加，按 imageCutout 门槛预检置灰（无最小边判定，
-   *  通用场景上限 10240/6000/40MP + 30MB；点击经 onCutoutImage 占位通道派发，接线归后续票）；
+   *  「抠图」（IKGXLT/IKGXMT）在「擦除」之后追加，按 imageCutout 门槛预检置灰（无最小边判定，
+   *  通用场景上限 10240/6000/40MP + 30MB；点击经 onCutoutImage 进入抠图工具栏）；
    *  扩图（IKGOQ0）后续在「高清」与「擦除」之间插入中间位——只改本数组 */
   const qualityMenuItems: ImageQualityMenuItem[] = [
     {

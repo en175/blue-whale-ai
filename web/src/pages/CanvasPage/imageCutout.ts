@@ -109,7 +109,7 @@ export function imageCutoutGateReason(source: ImageCutoutGateSource): string | n
 
 /** 按场景精校（发送钮置灰用，规格故事 15）：human/product 档按更严上限重判长边/短边；
  *  general 恒 null（菜单门槛已按通用档判过，不重复）；宽高缺失不拦（同门槛口径，
- *  交后端按权威数据复核）。本票交付函数与测试，发送钮接线归后续票。 */
+ *  交后端按权威数据复核）。由 CutoutToolbar 发送钮消费。 */
 export function imageCutoutSceneGateReason(
   source: ImageCutoutGateSource,
   scene: ImageCutoutScene,
@@ -128,7 +128,7 @@ export function imageCutoutSceneGateReason(
   return null;
 }
 
-/* ============ 发送参数组装（纯逻辑，接线归后续票 IKGXMT） ============ */
+/* ============ 发送参数组装（纯逻辑，startImageCutoutJob 消费） ============ */
 
 /** 参数组装输入（camelCase 入参，产出 snake_case 请求体）。 */
 export interface BuildImageCutoutRequestInput {
