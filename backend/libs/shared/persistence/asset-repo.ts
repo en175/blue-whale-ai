@@ -65,8 +65,14 @@ export interface AssetInternal {
   duration_seconds: number | null;
 }
 
-/** 跨项目复制时从源行拷贝的字段集合（对齐 Java AssetCopyService 逐字段 set）。
- *  部署表 assets 无 content_sha256 / source_asset_id / generation_job_id 列，故不携带。 */
+/**
+ * 「读源资产元数据」的窄投影：`findOwnedSource` 的返回形状。
+ *
+ * 消费方（IKGT70 时核实）：`image_enhance` / `image_erase` 查源图、`shared-assets` 的媒体校验
+ * （经 `shared-asset-source.port`）、`agent-assets` 的单资产查询。
+ *
+ * 部署表 assets 无 content_sha256 / source_asset_id / generation_job_id 列，故不携带。
+ */
 export interface AssetSourceFields {
   type: string;
   storage_key: string | null;
@@ -127,7 +133,8 @@ export interface AssetRepo {
     assetId: string,
     userId: string,
   ): Promise<AssetInternal | null>;
-  /** 取当前用户拥有的正常源资产（跨项目复制用）；不存在/不归属/非正常 → null。 */
+  /** 取当前用户拥有的正常源资产。消费方：`image_enhance` / `image_erase` 查源图、
+   *  `shared-assets` 媒体校验、`agent-assets` 单资产查询。不存在/不归属/非正常 → null。 */
   findOwnedSource(
     sourceAssetId: string,
     userId: string,
