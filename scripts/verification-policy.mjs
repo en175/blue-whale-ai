@@ -27,6 +27,8 @@ const SKILL_ASSET_FILES = new Set([
   ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
   ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
   ".zcode/skills/wizard/template.sh",
+  ".claude/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
+  ".claude/skills/wizard/template.sh",
   "tests/skill-assets.test.mjs",
 ]);
 
@@ -240,6 +242,8 @@ function appendAreaCommands(commands, areas, base) {
       ["bash", ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh"],
       ["bash", "-n", ".zcode/skills/wizard/template.sh"],
       ["node", "--check", ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs"],
+      ["bash", "-n", ".claude/skills/wizard/template.sh"],
+      ["node", "--check", ".claude/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs"],
       ["node", "--test", "tests/skill-assets.test.mjs"],
     );
   }
