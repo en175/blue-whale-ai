@@ -8,8 +8,8 @@ export interface FollowDialogAnchor {
 }
 
 export const FOLLOW_DIALOG_WIDTH = 740;
-const FOLLOW_GAP = 16;
-const FOLLOW_PAD = 12;
+export const FOLLOW_GAP = 16;
+export const FOLLOW_PAD = 12;
 
 /** 将节点 flow 坐标换算为画布容器内的对话框左上角，始终落在节点下方 */
 export function computeFollowAnchor(opts: {

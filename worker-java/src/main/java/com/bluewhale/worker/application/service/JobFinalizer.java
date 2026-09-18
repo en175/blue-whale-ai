@@ -598,6 +598,58 @@ public class JobFinalizer {
         return true;
     }
 
+    /**
+     * 发布 image_outpaint 结果（IKGOQW）。
+     * <p>
+     * 与 publishImageEnhanceResult 同构（免费工具无结算联动、单槽单 asset、双事件），
+     * Asset type='image' / source='generated'。守卫复用 publishMediaExtractGuard /
+     * updateOutputAssetIds（两 SQL 均无 type 过滤，语义 = 单槽免费工具终态收口）。
+     */
+    @Transactional
+    public boolean publishImageOutpaintResult(
+            com.bluewhale.worker.domain.dto.PublishImageOutpaintDto input) {
+        Long jobIdLong = Long.parseLong(input.jobId());
+
+        int guardAffected = jobMapper.publishMediaExtractGuard(
+                jobIdLong, input.workerId(), input.fencingToken());
+        if (guardAffected != 1) {
+            log.warn("[image_outpaint] publishImageOutpaintResult 守卫未命中(stale/租约失效) jobId={} workerId={} token={}",
+                    input.jobId(), input.workerId(), input.fencingToken());
+            return false;
+        }
+
+        AssetEntity asset = buildAsset(jobIdLong, input.projectId(), input.userId(), "image",
+                input.url(), input.storageKey(), input.mime(), input.size(),
+                input.md5(), input.width(), input.height(), null);
+        assetMapper.insert(asset);
+
+        jobMapper.updateOutputAssetIds(jobIdLong, "[" + asset.getId() + "]");
+
+        insertLog(jobIdLong, JobStatus.SUCCEEDED, "智能扩图完成",
+                Map.of("asset_ids", List.of(asset.getId().toString())));
+
+        GenerationJobEntity job = jobMapper.selectById(jobIdLong);
+        // 双事件同 extract / enhance 的 project_id 守卫形态；前端按 input.target_node_id
+        // 回填扩图结果卡（源卡不动）。
+        if (job != null && job.getProjectId() != null) {
+            eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
+                    asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
+                    Map.of("asset_id", asset.getId().toString(),
+                            "generation_job_id", job.getId().toString(),
+                            "type", asset.getType(),
+                            "access_url", asset.getUrl()));
+            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
+                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
+                    Map.of("job_id", job.getId().toString(),
+                            "type", job.getType(),
+                            "source", job.getSource(),
+                            "status", job.getStatus(),
+                            "progress", job.getProgress(),
+                            "output_asset_ids", List.of(asset.getId().toString())));
+        }
+        return true;
+    }
+
     // ========== 内部工具 ==========
 
     private AssetEntity buildAsset(Long jobIdLong, String projectId, String userId, String type,
