@@ -204,6 +204,9 @@ async function fileMd5(file: File): Promise<string> {
 > 背景：此前 `assets.md5` **只有上传路径**会写（`createUploadedAsset`）。所有**生成产物**
 > （`image` / `video` / `audio` / `media_extract` / `image_enhance`）落库时 `md5` 为空，
 > 于是 md5 去重对生成产物完全失效。IKGS73 把 md5 补到全部生成路径。
+>
+> **第六个类型 `image_erase`（画布图片擦除）** 是后续新增的，在 0915 批次上随一次编译修复
+> 一并接上——它走同一个 TOS 出口，md5 本来就已算出，只是接的时候漏了。
 
 ### 7.1 对本接口的影响：命中的来源变多了（行为，不是形状）
 
@@ -221,6 +224,14 @@ async function fileMd5(file: File): Promise<string> {
    这些产物不参与去重。worker 日志会打一行 warn 留痕。
    - 注意 `audio` 的 URL 回退路径**不依赖 TOS 配置**（上游只给 URL、没给字节），同样留空。
 2. **存量数据**：v3 之前落库的生成产物 `md5` 仍为空，不回填。
+3. **`image_erase` 没有降级路径**：TOS 对它**是硬依赖**（结果图 URL 24h 失效，不允许直存
+   供应商 URL），所以它恒有字节、`md5` **恒非空**——六个类型里唯一不会落空的那个。
+4. **`mask_erase` 遮罩中间素材**（IKGOTB）：`findOwnedByMd5` 显式排除 `source='mask_erase'`，
+   否则用户手动上传与遮罩同字节的图时会命中遮罩资产、而该来源被资产列表排除，表现成
+   「刚上传的图不见了」。**擦除产物本身不是遮罩**（它是 `source='generated'`），照常参与去重。
+5. **擦除产物可能与它的输入字节相同**（空操作 / 未改动的擦除），此时两张资产的 `assets.md5`
+   相同。今天无害——`findOwnedByMd5` 取 `orderBy id desc`（较新那条），前端也不把 md5 当
+   节点身份用。但**别把 `assets.md5` 当成「这张图是独立生成的」的凭据**。
 
 ### 7.3 口径（改 md5 相关代码前必读）
 

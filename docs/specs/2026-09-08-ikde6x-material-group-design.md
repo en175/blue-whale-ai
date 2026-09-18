@@ -163,6 +163,6 @@ model material_groups {
 | §5 组查询分流 | ✅ 已接：`MaterialService.tryServeLocalGroupAction` + controller 特判（AIGC 本地 / 其余透传；GetAssetGroup 命中分流）；`listLocalGroups` 被 `pageByUser` 分流取代删除 |
 | §3 真人组镜像 | ❌ 撤回（v2）：无可靠写入钩子，真人组保持透传 |
 | §4 建组补 GroupType / 删组本地软删 | ✅ 已接：`ensureVirtualDefaultGroup` 显式 `GroupType:"AIGC"`；`DeleteAssetGroup` 2xx 旁路 `softDeleteLocalGroup`（失败仅告警） |
-| 素材读路径 `material_id`/`material_group_id`（§5 末条） | ✅ 已接：`AssetView`（列表+单详情+insertCopy）与 snapshot `SnapshotAssetSummary` 成对吐出 |
+| 素材读路径 `material_id`/`material_group_id`（§5 末条） | ✅ 已接：`AssetView`（列表+单详情）与 snapshot `SnapshotAssetSummary` 成对吐出 |
 
 > 结论：契约 v2 全部范围已由 IKE0OH + IKEXX8 两单闭环；验收要点（§7）按 v2 口径逐条满足。

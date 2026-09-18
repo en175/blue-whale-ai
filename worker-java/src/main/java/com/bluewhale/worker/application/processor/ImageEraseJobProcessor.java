@@ -257,6 +257,8 @@ public class ImageEraseJobProcessor implements JobProcessor {
                 stored.storageKey(),
                 stored.mime(),
                 stored.size(),
+                // IKGS73：产物字节的 md5（与其余五个生成类型同源，来自 TOS 上传出口）
+                stored.md5(),
                 width,
                 height));
         if (!published) {
