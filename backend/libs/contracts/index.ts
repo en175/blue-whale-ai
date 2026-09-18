@@ -165,6 +165,24 @@ export {
   type ImageEraseInput,
 } from "./image-erase.js";
 export {
+  IMAGE_CUTOUT_JOB_TYPE,
+  IMAGE_CUTOUT_SOURCE,
+  IMAGE_CUTOUT_INPUT_KEYS,
+  IMAGE_CUTOUT_SCENES,
+  IMAGE_CUTOUT_OUTPUT_FORMAT,
+  IMAGE_CUTOUT_CONTOUR_COLOR,
+  IMAGE_CUTOUT_CONTOUR_SIZE_MIN,
+  IMAGE_CUTOUT_CONTOUR_SIZE_MAX,
+  IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT,
+  IMAGE_CUTOUT_MAX_FILE_BYTES,
+  IMAGE_CUTOUT_INPUT_FORMATS,
+  IMAGE_CUTOUT_SCENE_SIZE_LIMITS,
+  IMAGE_CUTOUT_EDGE_ORIGIN,
+  imageCutoutInputSchema,
+  type ImageCutoutScene,
+  type ImageCutoutInput,
+} from "./image-cutout.js";
+export {
   DomainError,
   assetError,
   skillError,
