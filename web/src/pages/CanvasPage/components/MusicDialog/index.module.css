@@ -9,12 +9,12 @@
   transform: translateX(-50%);
   width: 680px;
   max-width: calc(100% - 48px);
-  background-color: #1e1e1e;
-  border: 1px solid var(--color-border-primary);
-  border-radius: 16px;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-xl);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-overlay);
   padding: var(--spacing-lg);
   z-index: 10;
   animation: dialogFadeIn 0.2s ease;
