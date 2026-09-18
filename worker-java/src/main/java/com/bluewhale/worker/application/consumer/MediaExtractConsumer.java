@@ -19,7 +19,7 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
  */
 public class MediaExtractConsumer extends AbstractGenerationConsumer {
 
-    /** tag（{@link GenerationMqRoute#MEDIA_EXTRACT}；queue.constants.ts:8 MEDIA_EXTRACT_TAG）。 */
+    /** tag（{@link GenerationMqRoute#MEDIA_EXTRACT}；= TS {@code MEDIA_EXTRACT_TAG}）。 */
     private static final String TAG = GenerationMqRoute.MEDIA_EXTRACT.tag();
 
     /**

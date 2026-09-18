@@ -38,13 +38,4 @@ public record WorkerProperties(
             }
         }
     }
-
-    /**
-     * 视频无并发度配置（顺序消费，无 Semaphore）——
-     * TS rocketmq-video.consumer.ts:60-74 for-await each，Java 侧同构。
-     * 保留方法以兼容配置结构扩展。
-     */
-    public int videoConcurrency() {
-        return 1; // 视频恒为顺序消费
-    }
 }

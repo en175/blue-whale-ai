@@ -72,7 +72,7 @@ public class RocketMqConfig {
      * media_extract consumer。
      * <p>
      * consumer group = "generation-extract-worker"（契约 §1）。
-     * topic / tag = {@link GenerationMqRoute#MEDIA_EXTRACT}（queue.constants.ts:8）。
+     * topic / tag = {@link GenerationMqRoute#MEDIA_EXTRACT}（= TS `MEDIA_EXTRACT_TAG`）。
      * digitGuard = false（extract 不做纯数字守卫：与 TS rocketmq-extract.consumer.ts 一致）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
@@ -116,7 +116,7 @@ public class RocketMqConfig {
      * audio consumer。
      * <p>
      * consumer group = "generation-audio-worker"（契约 §1）。
-     * topic / tag = {@link GenerationMqRoute#AUDIO}（queue.constants.ts:2）。
+     * topic / tag = {@link GenerationMqRoute#AUDIO}（= TS `AUDIO_GENERATION_TAG`）。
      * digitGuard = true（音频/图片做纯数字守卫，与 TS rocketmq-audio.consumer.ts 一致）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
@@ -159,7 +159,7 @@ public class RocketMqConfig {
      * image consumer。
      * <p>
      * consumer group = "generation-image-worker"（契约 §1）。
-     * topic / tag = {@link GenerationMqRoute#IMAGE}（queue.constants.ts:5）。
+     * topic / tag = {@link GenerationMqRoute#IMAGE}（= TS `IMAGE_GENERATION_TAG`）。
      * digitGuard = true（图片/音频做纯数字守卫，与 TS rocketmq-image.consumer.ts 一致）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")

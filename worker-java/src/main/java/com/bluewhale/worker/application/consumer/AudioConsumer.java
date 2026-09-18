@@ -19,7 +19,7 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
  */
 public class AudioConsumer extends AbstractGenerationConsumer {
 
-    /** tag（{@link GenerationMqRoute#AUDIO}；queue.constants.ts:2 AUDIO_TAG）。 */
+    /** tag（{@link GenerationMqRoute#AUDIO}；= TS {@code AUDIO_GENERATION_TAG}）。 */
     private static final String TAG = GenerationMqRoute.AUDIO.tag();
 
     /**

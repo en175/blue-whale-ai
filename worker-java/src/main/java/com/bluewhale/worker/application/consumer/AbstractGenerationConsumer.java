@@ -198,6 +198,16 @@ public abstract class AbstractGenerationConsumer implements Closeable {
         }
     }
 
+    /** 订阅的 topic（package-private：供同包测试断言订阅值，其余用途请勿扩用）。 */
+    String topic() {
+        return topic;
+    }
+
+    /** 订阅的 tag（即 {@code start()} 里 FilterExpression 用的那个；package-private，同上）。 */
+    String tag() {
+        return consumerTag;
+    }
+
     /**
      * 处理消息体，返回是否应 ack（package-private：供测试使用）。
      * <p>

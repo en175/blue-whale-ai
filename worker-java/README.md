@@ -29,10 +29,11 @@ Blue-Whale 生成执行服务（Java）。**Java 直连 DB 全自主执行**：c
 
 topic `generation-video` → `generation-task`、tag `step` → `video`、group 去掉 `-java` 后缀是**原子切换**：旧名与新名都能启动成功，错配的唯一表现是消息无人消费——进程健康、`/ready` 绿、什么都不报。部署前必须确认：
 
+- [ ] **新 worker 启动打出六条订阅日志**（唯一的正面证据，其余各项都只能证明「没有旧名残留」）：每个消费者启动时由 `AbstractGenerationConsumer.start()` 打一行 `MQ 消费者已启动: topic=generation-task tag=<tag> group=<group> concurrency=<n>`——确认六条，`tag` 分别是 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`（日志里数 `MQ 消费者已启动:` 即可）。
 - [ ] **旧 TS worker 容器已停**：Java 与旧 TS worker 若落入同名 group，消息会被分流给旧进程。确认方式：部署机上 `docker ps` 无旧 generation-worker 容器（其历史形态是 `restart: unless-stopped` 的 compose 容器）。
-- [ ] **backend（生产侧）部署环境无遗留的旧名 `ROCKETMQ_TOPIC` / `ROCKETMQ_TAG`**：worker 侧这两个键已删除、残留会被忽略，但 `backend/libs/shared/generation/video-queue.ts` 仍读它们——遗留 `ROCKETMQ_TOPIC=generation-video` 会把**生产者**指回旧 topic，而消费者固定在 `generation-task`，消息照样没人消费。确认方式：这两个键不设，或显式设成新值。
+- [ ] **backend（生产侧）部署环境无遗留的旧名 `ROCKETMQ_TOPIC` / `ROCKETMQ_TAG`**：worker 侧这两个键已删除、残留会被忽略，但 `backend/libs/shared/generation/video-queue.ts` 的 `loadRocketMqConfig` 仍读它们，影响面按键区分——遗留 `ROCKETMQ_TOPIC` 把**六类**生产者全指回旧 topic；遗留 `ROCKETMQ_TAG` 只影响**视频**（`enqueueVideoGenerationJob` 是唯一透传 `config.tag` 的入队函数，其余五个入队函数直接用各自 tag 常量）。消费者固定在 `generation-task` + 六个枚举 tag，这些消息无人消费；但 job 会停在 `queued`，由 worker 的 recovery（60s 扫库、窗口 2h）按枚举重投到新 topic，**窗口内的工作可自愈**，超出 2h 窗口的才永久滞留。确认方式：这两个键不设，或显式设成新值。
 
-两项的共同后果都是**静默消息滞留**：worker 看起来完全正常，`/ready` 返回 `{"status":"ready"}`，但没有任何一条消息被消费。
+错配的共同后果都是**静默消息滞留**：worker 看起来完全正常，`/ready` 返回 `{"status":"ready"}`，但没有任何一条消息被消费——所以上面第一条（六条启动日志）才是正面的「订阅真的对了」证据。
 
 ## 构建 / 运行
 

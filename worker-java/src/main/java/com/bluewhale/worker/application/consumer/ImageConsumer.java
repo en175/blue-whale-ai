@@ -19,7 +19,7 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
  */
 public class ImageConsumer extends AbstractGenerationConsumer {
 
-    /** tag（{@link GenerationMqRoute#IMAGE}；queue.constants.ts:5 IMAGE_TAG）。 */
+    /** tag（{@link GenerationMqRoute#IMAGE}；= TS {@code IMAGE_GENERATION_TAG}）。 */
     private static final String TAG = GenerationMqRoute.IMAGE.tag();
 
     /**
