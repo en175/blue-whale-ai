@@ -123,6 +123,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import CanvasContextMenu from './components/CanvasContextMenu';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
 import { COMPLIANCE_SUCCESS_TOAST, COMPLIANCE_FAILED_TOAST, depositCanvasAssetToCharacterLibrary, isComplianceFailedError, resolveCharacterLibraryMaterialId, waitComplianceAssetReady } from './characterLibraryDeposit';
+import { importLivenessLibraryAssets, isPendingLivenessLibraryAsset } from './livenessLibraryImport';
 import { buildImageJobReferences, buildVideoJobReferences, buildVideoJobReferencesFromList } from './videoJobReferences';
 import {
   availableGenKinds,
@@ -3961,12 +3962,17 @@ export default function CanvasPage() {
       const assetId = String(asset.id);
       const mediaType = asset.type === 'video' ? 'video' : asset.type === 'audio' ? 'audio' : 'image';
       if (opts?.reuseExisting) {
+        const libraryId = typeof asset.material_id === 'string' && asset.material_id ? asset.material_id : undefined;
         const existing = mediaNodesRef.current.find(
-          (n) =>
-            n.type === 'mediaNode' &&
-            ((n.data ?? {}) as Record<string, unknown>).mediaType === mediaType &&
-            readAssetId((n.data ?? {}) as Record<string, unknown>) === assetId &&
-            baseSourceError(n) === null,
+          (n) => {
+            if (n.type !== 'mediaNode') return false;
+            const data = (n.data ?? {}) as Record<string, unknown>;
+            if (data.mediaType !== mediaType || baseSourceError(n) !== null) return false;
+            const nodeAssetId = readAssetId(data);
+            if (nodeAssetId === assetId) return true;
+            if (libraryId && (data.materialId === libraryId || nodeAssetId === libraryId)) return true;
+            return false;
+          },
         );
         if (existing) {
           const patch = complianceFromAsset(asset);
@@ -4045,10 +4051,21 @@ export default function CanvasPage() {
    *  按打开来源分发——画布工具栏/Agent 面板落画布节点（Agent 面板额外挂会话附件），
    *  dock 对话框注入参考素材（带 assetId，发送时免重复上传）。
    *  选择行为与该入口现有上传一致：数量上限/超限提示由各消费方既有链路兜底。 */
-  const handleAssetsPickerSelect = (selectedAssets: AssetRecord[]) => {
+  const handleAssetsPickerSelect = async (selectedAssets: AssetRecord[]) => {
     const target = assetsPickerTarget;
     setShowAssetsPicker(false);
     if (selectedAssets.length === 0) return;
+    if (!currentId) {
+      showToast('error', '项目未就绪，请稍后重试');
+      return;
+    }
+    if (selectedAssets.some(isPendingLivenessLibraryAsset)) {
+      showToast('warn', '正在导入真人人像库素材…');
+    }
+    const assets = await importLivenessLibraryAssets(selectedAssets, currentId, (name, message) => {
+      showToast('error', `「${name}」${message}`);
+    });
+    if (assets.length === 0) return;
 
     if (target === 'videoDraft') {
       // 视频草稿面板「从资产中选择」（IKDMQS 来源补齐）：素材落画布节点并按槽位角色连线，
@@ -4060,7 +4077,7 @@ export default function CanvasPage() {
       const refs = videoDraftId
         ? mergedVideoMediaRefsOf(videoDraftId, edgesRef.current, mediaNodesRef.current)
         : videoFreeRefs;
-      let accepted = selectedAssets.filter((a) => a.type === 'image' || a.type === 'video' || a.type === 'audio');
+      let accepted = assets.filter((a) => a.type === 'image' || a.type === 'video' || a.type === 'audio');
       if (role === 'first' || role === 'last') {
         if (refs[role]) {
           showToast('warn', role === 'first' ? '首帧已指定，请先移除现有首帧' : '尾帧已指定，请先移除现有尾帧');
@@ -4088,7 +4105,9 @@ export default function CanvasPage() {
                 name: assetDisplayName(a),
                 assetId: String(a.id),
                 mediaType: asVideoRefMediaType(a.type),
-                materialId: isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined,
+                materialId: typeof a.material_id === 'string' && a.material_id
+                  ? a.material_id
+                  : (isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined),
               },
               frameRoles[i] ?? role,
             ),
@@ -4145,7 +4164,9 @@ export default function CanvasPage() {
               name: assetDisplayName(a),
               assetId: String(a.id),
               mediaType: asVideoRefMediaType(a.type),
-              materialId: isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined,
+              materialId: typeof a.material_id === 'string' && a.material_id
+                ? a.material_id
+                : (isMaterialLibraryId(String(a.id)) ? String(a.id) : undefined),
             },
             role,
           ),
@@ -4164,7 +4185,7 @@ export default function CanvasPage() {
       // 弹窗确认只能接纳到打开时的面板，切换/关闭/生成中均不创建来源或连线。
       if (!showAudioDialog || !audioAssetPickTarget || audioAssetPickTarget.nodeId !== audioDraftId
         || audioAssetPickTarget.seed !== audioSeed?.ts || (audioDraftId && isGeneratingNode(audioDraftId))) return;
-      const audios = selectedAssets.filter(a => a.type === 'audio');
+      const audios = assets.filter(a => a.type === 'audio');
       if (!audioDraftId) {
         setAudioAssetPickResult({ ts: Date.now(), items: audios.map(a => ({
           id: `asset-${a.id}`, kind: 'audio', name: assetDisplayName(a), src: a.url,
@@ -4188,7 +4209,7 @@ export default function CanvasPage() {
       return;
     }
     if (target === 'imageDialog') {
-      const images = selectedAssets.filter((a) => a.type === 'image');
+      const images = assets.filter((a) => a.type === 'image');
       if (images.length === 0) return;
       // IKFA1M：草稿绑定模式下「从资产中选择」落画布节点并建立连线（与视频草稿同源；
       //  此前该入口在绑定模式经 externalPick 被忽略，@ 菜单「添加新参考」依赖本路径生效）。
@@ -4225,11 +4246,11 @@ export default function CanvasPage() {
     }
     if (target === 'agentPanel') {
       // Agent 面板：与上传一致落画布节点（IKBA6C），并挂 ready 会话附件
-      if (!placeAssetsOnCanvas(selectedAssets)) {
+      if (!placeAssetsOnCanvas(assets)) {
         showToast('error', '项目未就绪，请稍后重试');
         return;
       }
-      const blocks: SessionContentBlock[] = selectedAssets
+      const blocks: SessionContentBlock[] = assets
         .filter((a) => a.type === 'image' || a.type === 'video')
         .map((a) => ({
           type: 'asset_ref',
@@ -4243,7 +4264,7 @@ export default function CanvasPage() {
       return;
     }
     // 默认（画布工具栏）：全类型批量落画布
-    if (!placeAssetsOnCanvas(selectedAssets)) {
+    if (!placeAssetsOnCanvas(assets)) {
       showToast('error', '项目未就绪，请稍后重试');
     }
   };
