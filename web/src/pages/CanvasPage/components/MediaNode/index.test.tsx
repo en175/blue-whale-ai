@@ -141,11 +141,31 @@ describe('MediaNode image-quality menu（IKGOT7 高清 ▾）', () => {
     });
   }
 
-  it('图片卡展开菜单含「高清」「擦除」两项', async () => {
+  it('图片卡展开菜单含「高清」「裁切」「擦除」三项，裁切居中（IKGW1H，扩图发布时插「高清」后机械合并）', async () => {
     await renderNode('image');
     await openQualityMenu();
     const rendered = [...mountNode.querySelectorAll('[data-testid^="image-quality-item-"]')];
-    expect(rendered.map((b) => b.textContent)).toEqual(['高清', '擦除']);
+    expect(rendered.map((b) => b.textContent)).toEqual(['高清', '裁切', '擦除']);
+  });
+
+  it('点「裁切」派发 onCropImage（携带节点 id）', async () => {
+    const onCropImage = vi.fn();
+    await renderNode('image', { data: { onCropImage } });
+    await openQualityMenu();
+    await act(async () => {
+      mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-crop"]')!.click();
+    });
+    expect(onCropImage).toHaveBeenCalledWith('image-node');
+  });
+
+  it('裁切项无置灰门槛：超尺寸/超大小/webp 的图也不置灰（与擦除门槛对照）', async () => {
+    await renderNode('image', { data: { width: 3000, height: 1440, size: 10 * 1024 * 1024 + 1, mime: 'image/webp' } });
+    await openQualityMenu();
+    const crop = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-crop"]')!;
+    expect(crop.getAttribute('aria-disabled')).toBeNull();
+    // 擦除项按门槛置灰，裁切不受影响
+    const erase = mountNode.querySelector<HTMLButtonElement>('[data-testid="image-quality-item-erase"]')!;
+    expect(erase.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('点「擦除」派发 onEraseImage（携带节点 id）', async () => {
