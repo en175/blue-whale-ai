@@ -270,7 +270,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     );
   });
 
-  it("正文标签按最终并入列表编译并冻结", async () => {
+  it("正文原样冻结（prompt_doc 已退役，不再由它编译正文）", async () => {
     const { projectId, imageAssetId, directAssetId } = await seedIndexedCanvas("IKFR50 prompt doc");
     const created = await createJob(projectId, {
       ...imageJobBody("gen-1", "重绘", [directAssetId]),
@@ -281,7 +281,9 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     });
     expect(created.code).toBe(200);
     const job = await readJob(created.data.generation_job_id);
-    expect(job!.input.prompt).toBe("重绘图片2");
+    // IKG6EK / ADR-0088：正文一律取 parameters.prompt；doc 不读、不冻结
+    expect(job!.input.prompt).toBe("重绘");
+    expect(job!.input).not.toHaveProperty("prompt_doc");
     expect(job!.input.input_asset_ids).toEqual([directAssetId, imageAssetId]);
   });
 
@@ -332,9 +334,11 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const created = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId]));
     expect(created.code).toBe(200);
     const job = await readJob(created.data.generation_job_id);
-    const snapshot = job!.input.prompt_plan_snapshot as { images: Array<{ assetId: string }>; providerPrompt: string };
+    const snapshot = job!.input.prompt_plan_snapshot as { images: Array<{ assetId: string }> };
     expect(snapshot.images.map((item) => item.assetId)).toEqual([directAssetId, imageAssetId]);
-    expect(snapshot.providerPrompt).toContain("用图片2出图");
+    // IKG6EK / ADR-0088：providerPrompt 已退役——正文由提交方给全、引用标记转移在接纳管线完成，
+    // 方案快照退为方案绑定校验与审计事实。
+    expect(snapshot).not.toHaveProperty("providerPrompt");
   });
 
   it("重试复用原快照：合并参考、media 映射与签名原样复制，不重读画布", async () => {

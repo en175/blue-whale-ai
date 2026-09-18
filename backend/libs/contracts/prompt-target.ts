@@ -38,7 +38,8 @@ export const promptPlanSnapshotSchema = z.object({
   canvasVersion: z.number().int().nonnegative(),
   plans: z.array(z.object({ nodeId: z.string(), text: z.string(), mentions: z.array(promptMentionSchema) })),
   images: z.array(z.object({ assetId: z.string().regex(/^[1-9][0-9]*$/), url: z.string().url() })),
-  providerPrompt: z.string().min(1),
+  // IKG6EK / ADR-0088：providerPrompt 已退役——正文由提交方给全、引用标记转移在接纳管线完成，
+  // 快照退为方案绑定校验与审计事实。历史行仍带该字段：本 schema 非 strict，解析时按未知键丢弃。
   videoReferences: z.array(z.object({
     assetId: z.string().regex(/^[1-9][0-9]*$/).optional(),
     materialId: z.string().min(1).optional(),
