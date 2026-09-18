@@ -6,7 +6,9 @@
    IKGUVM：每条用户可见行为各一条独立用例——出现时机 / 移动重置 / 移出隐藏 / 出现位置偏移 /
    出现后定格 / 指针在按钮上保持可见 / 目标节点生成中不出现；断言只落在渲染结果
    （出现类、transform、圆心坐标）与删除链路的 mock 调用上，不读组件内部状态。
-   另加两条守卫：偏移上限的几何不变量、两条连线之间的剪刀互斥。 */
+   另加两条守卫：偏移上限的几何不变量、两条连线之间的剪刀互斥。
+   IKGUR7 审查修订：目标节点事后转入生成中时，已出现的剪刀立即收回、在途停稳计时一并清除；
+   指针进入连线（没有任何 mousemove）同样启动停稳计时。 */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -203,6 +205,19 @@ async function movePointer(clientX: number, clientY: number, scope: ParentNode =
   });
 }
 
+/** 指针进入连线（无任何 mousemove）：React 的 onMouseEnter 由冒泡的 mouseover 合成，
+    relatedTarget 落在 React 树外（document.body）才会派发进入事件。
+    对应「指针不动、连线因平移或缩放滑到指针下」这种进入方式（IKGUR7 审查修订） */
+async function enterEdge(clientX: number, clientY: number, scope: ParentNode = container) {
+  await act(async () => {
+    scope
+      .querySelector(`.${styles.hitPath}`)!
+      .dispatchEvent(
+        new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body, clientX, clientY }),
+      );
+  });
+}
+
 /** 指针离开连线到 relatedTarget（默认画布空白）：React 的 onMouseLeave 由 mouseout 合成 */
 async function leaveEdge(relatedTarget: Element = document.body, scope: ParentNode = container) {
   await act(async () => {
@@ -341,6 +356,22 @@ describe('IKGUVG 剪刀停稳 1 秒才出现', () => {
     expect(scissorsShown()).toBe(true);
   });
 
+  it('出现时机：指针进入连线即启动计时，不派发任何移动也停稳满 1 秒出现剪刀', async () => {
+    await renderEdge();
+
+    // 指针不动、连线因平移或缩放滑到指针下：浏览器只给进入事件，没有 mousemove
+    await enterEdge(120, 80);
+    expect(scissorsShown()).toBe(false);
+
+    await advance(DWELL_MS - 1);
+    expect(scissorsShown()).toBe(false);
+
+    await advance(1);
+    expect(scissorsShown()).toBe(true);
+    // 出现位置仍是进入那一刻的指针位置加固定偏移
+    expect(measuredOffset(120, 80)).toEqual(SCISSORS_OFFSET);
+  });
+
   it('移动重置：计时期间指针移动一次，原计时作废并从最后一次移动起重新计满 1 秒', async () => {
     await renderEdge();
 
@@ -419,6 +450,38 @@ describe('IKGUVG 剪刀停稳 1 秒才出现', () => {
     await movePointer(10, 10);
     await advance(DWELL_MS);
     expect(scissorsShown()).toBe(true);
+  });
+
+  it('目标节点事后转入生成中：已出现的剪刀立即收回，不必等用户点下去才被守卫拒绝', async () => {
+    await renderEdge();
+
+    await movePointer(120, 80);
+    await advance(DWELL_MS);
+    expect(scissorsShown()).toBe(true);
+
+    // mock 的 store 无订阅：改写节点 data 后必须重新 render，选择器才会重新求值
+    setNodeData('n-dst', { genStatus: 'generating' });
+    await rerenderEdge();
+
+    expect(scissorsShown()).toBe(false);
+
+    // 指针仍停在连线上：后续没有移动事件，剪刀也不得回来
+    await advance(DWELL_MS * 3);
+    expect(scissorsShown()).toBe(false);
+  });
+
+  it('目标节点事后转入生成中：停稳计时途中转入时，在途计时不得让剪刀迟到出现', async () => {
+    await renderEdge();
+
+    await movePointer(120, 80);
+    await advance(DWELL_MS - 100);
+    expect(scissorsShown()).toBe(false);
+
+    setNodeData('n-dst', { submitting: true });
+    await rerenderEdge();
+    await advance(DWELL_MS * 3);
+
+    expect(scissorsShown()).toBe(false);
   });
 
   it('删除链路：剪刀出现后单击一次即断开连线', async () => {

@@ -10,9 +10,9 @@ import styles from './index.module.css';
 const SCISSORS_CENTER = 10;
 /** 指针在连线上停稳满这么久剪刀才出现；期间任一次移动都重新计时（IKGUVG） */
 const DWELL_MS = 1000;
-/** 剪刀出现位置相对停稳指针的固定偏移：画布流坐标右上方约 17px（12√2），
- *  指针正下方不会出现按钮（IKGUVK）。偏移量小于「命中路径半宽 10 + 剪刀圆半径 11」，
- *  指针从连线移向剪刀的路上不会掉进既不在连线也不在剪刀上的空档；
+/** 剪刀出现位置相对停稳指针的固定偏移：画布流坐标右上方，指针正下方不会出现按钮（IKGUVK）。
+ *  偏移量须小于下方命中路径 strokeWidth 的一半加剪刀圆的 r，否则指针从连线移向剪刀的
+ *  路上会掉进两边都不命中的空档；
  *  偏移是流坐标定值，画布缩放只改视觉大小，不改变这层关系 */
 const SCISSORS_OFFSET = { x: 12, y: -12 } as const;
 
@@ -59,6 +59,25 @@ export default function CustomEdge({
   /* 卸载清理：不留残余计时任务 */
   useEffect(() => () => clearDwellTimer(), [clearDwellTimer]);
 
+  /* IKGUR7 审查修订：目标节点转入生成中时，已出现的剪刀立即收回，在途停稳计时一并清除。
+     只在移动里拦不够——剪刀出现之后、或计时途中目标才转入生成中时，用户仍会等满 1 秒
+     （或对着已经出现的剪刀）点下去，才被页面删除守卫以「生成中，输入连线只读」拒绝 */
+  useEffect(() => {
+    if (!targetGenerating) return;
+    clearDwellTimer();
+    setScissorsPos(null);
+  }, [clearDwellTimer, targetGenerating]);
+
+  /** 启动停稳计时：满 1 秒后在「停稳那一刻的指针位置 + 固定偏移」处出现剪刀 */
+  const startDwell = useCallback((clientX: number, clientY: number) => {
+    clearDwellTimer();
+    const pos = screenToFlowPosition({ x: clientX, y: clientY });
+    dwellTimerRef.current = setTimeout(() => {
+      dwellTimerRef.current = null;
+      setScissorsPos({ x: pos.x + SCISSORS_OFFSET.x, y: pos.y + SCISSORS_OFFSET.y });
+    }, DWELL_MS);
+  }, [clearDwellTimer, screenToFlowPosition]);
+
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -84,16 +103,18 @@ export default function CustomEdge({
     // 已出现且指针仍在连线上：位置就地定格，不跟随指针、也不重新计时（IKGUVK）
     if (!backFromScissors && scissorsPos !== null) return;
 
-    const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
     // 指针从剪刀移回连线：先收起剪刀，回到未出现状态，再按新位置重新计时（IKGUVK）
     if (backFromScissors) setScissorsPos(null);
     // 每次移动都按新位置重新计时，停稳满 1 秒才出现；出现位置与指针保持固定偏移
-    clearDwellTimer();
-    dwellTimerRef.current = setTimeout(() => {
-      dwellTimerRef.current = null;
-      setScissorsPos({ x: pos.x + SCISSORS_OFFSET.x, y: pos.y + SCISSORS_OFFSET.y });
-    }, DWELL_MS);
-  }, [clearDwellTimer, screenToFlowPosition, scissorsPos, targetGenerating]);
+    startDwell(e.clientX, e.clientY);
+  }, [clearDwellTimer, scissorsPos, startDwell, targetGenerating]);
+
+  /* IKGUR7 审查修订：指针进入连线时也启动计时，覆盖「指针不动、连线因平移或缩放滑到指针下」
+     这种没有 mousemove 的进入方式；与移动共用同一套启动逻辑 */
+  const handleMouseEnter = useCallback((e: React.MouseEvent) => {
+    if (targetGenerating) return;
+    startDwell(e.clientX, e.clientY);
+  }, [startDwell, targetGenerating]);
 
   const handleMouseLeave = useCallback((e: React.MouseEvent) => {
     // 指针从连线移到剪刀上（剪刀是连线组的子元素）：不算离开，剪刀保持可见可点（IKGUVK）
@@ -120,6 +141,7 @@ export default function CustomEdge({
     <g
       className={connectedToSelected ? `${styles.edgeGroup} ${styles.selectedConnected}` : styles.edgeGroup}
       onMouseMove={handleMouseMove}
+      onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
       {/* 连线 */}
