@@ -556,3 +556,129 @@ describe('IKGW1H 退出裁切：丢弃不留痕，源卡保留', () => {
     expect(cropEditing('m1')).toBe(false);
   });
 });
+
+/* ============ IKGW1N 裁切框与比例面板接线（状态提升在 CanvasPage） ============ */
+
+/** m1：1600×900 源图 → 内容盒 280×(280*16/9)，bounds 顶偏移 22.5（独立手算期望，不对拍组件侧函数） */
+const M1_DISPLAY_W = 280 * (16 / 9);
+const M1_BOUNDS = { x: 0, y: 22.5, width: M1_DISPLAY_W, height: 280 };
+
+/** 当前传给 FlowCanvas 的裁切框覆盖层 props 形态（Canvas 打桩透出） */
+interface CropFramePropShape {
+  bounds: { x: number; y: number; width: number; height: number };
+  rect: { x: number; y: number; width: number; height: number };
+  preset: string;
+  minSide: number;
+  onRectChange: (rect: { x: number; y: number; width: number; height: number }) => void;
+  onDarkAreaClick: () => void;
+}
+
+function cropFrameProp(): CropFramePropShape | null {
+  return (flowProps.current.cropFrame ?? null) as CropFramePropShape | null;
+}
+
+async function clickBody(testId: string) {
+  const btn = document.body.querySelector(`[data-testid="${testId}"]`) as HTMLElement;
+  if (!btn) throw new Error(`元素不存在: ${testId}`);
+  await act(async () => { btn.click(); });
+}
+
+describe('IKGW1N 裁切框挂载与默认态', () => {
+  it('未进入时无覆盖层；进入后默认自由比例、框为内容区全幅，minSide 为 64 自然像素显示换算', async () => {
+    await renderPage();
+    expect(cropFrameProp()).toBeNull();
+
+    await cropImage('m1');
+    const frame = cropFrameProp()!;
+    expect(frame.preset).toBe('free');
+    expect(frame.bounds.x).toBeCloseTo(M1_BOUNDS.x, 6);
+    expect(frame.bounds.y).toBeCloseTo(M1_BOUNDS.y, 6);
+    expect(frame.bounds.width).toBeCloseTo(M1_BOUNDS.width, 6);
+    expect(frame.bounds.height).toBeCloseTo(M1_BOUNDS.height, 6);
+    expect(frame.rect).toEqual(frame.bounds);
+    // 64 × (显示宽 497.78 / 自然宽 1600) ≈ 19.91 显示像素
+    expect(frame.minSide).toBeCloseTo(64 * (M1_DISPLAY_W / 1600), 6);
+  });
+
+  it('拖拽回写经状态提升生效：onRectChange 后覆盖层拿到新框', async () => {
+    await renderPage();
+    await cropImage('m1');
+    const next = { x: 50, y: 60, width: 200, height: 150 };
+    await act(async () => { cropFrameProp()!.onRectChange(next); });
+    expect(cropFrameProp()!.rect).toEqual(next);
+  });
+
+  it('点框外暗区（onDarkAreaClick）退出并丢弃不留痕', async () => {
+    await renderPage();
+    await cropImage('m1');
+    await act(async () => { cropFrameProp()!.onDarkAreaClick(); });
+    expectDiscardClean();
+    expect(cropFrameProp()).toBeNull();
+  });
+});
+
+describe('IKGW1N 比例面板接线（面板真实渲染）', () => {
+  it('进入裁切渲染面板：六比例选项 + 取消/确认齐备', async () => {
+    await renderPage();
+    await cropImage('m1');
+    for (const key of ['free', '1-1', '4-3', '3-4', '16-9', '9-16']) {
+      expect(document.body.querySelector(`[data-testid="crop-preset-${key}"]`), key).toBeTruthy();
+    }
+    expect(document.body.querySelector('[data-testid="crop-cancel"]')).toBeTruthy();
+    expect(document.body.querySelector('[data-testid="crop-confirm"]')).toBeTruthy();
+  });
+
+  it('选预设 4:3：框同步为内容区内最大内接该比例矩形并居中，比例锁定', async () => {
+    await renderPage();
+    await cropImage('m1');
+    await clickBody('crop-preset-4-3');
+
+    const frame = cropFrameProp()!;
+    expect(frame.preset).toBe('4:3');
+    // 最大内接：高取满 280，宽 = 280×4/3，水平居中
+    expect(frame.rect.width).toBeCloseTo(280 * (4 / 3), 6);
+    expect(frame.rect.height).toBeCloseTo(280, 6);
+    expect(frame.rect.x).toBeCloseTo((M1_DISPLAY_W - 280 * (4 / 3)) / 2, 6);
+    expect(frame.rect.y).toBeCloseTo(22.5, 6);
+  });
+
+  it('切回自由：比例解除锁定，框保持当前不变', async () => {
+    await renderPage();
+    await cropImage('m1');
+    await clickBody('crop-preset-1-1');
+    const locked = cropFrameProp()!.rect;
+    await clickBody('crop-preset-free');
+    const frame = cropFrameProp()!;
+    expect(frame.preset).toBe('free');
+    expect(frame.rect).toEqual(locked);
+  });
+
+  it('面板取消：退出裁切并丢弃不留痕（onClose → exitCropMode）', async () => {
+    await renderPage();
+    await cropImage('m1');
+    await clickBody('crop-cancel');
+    expectDiscardClean();
+  });
+
+  it('面板确认：渲染在位、点击派发回调（本票占位：不退出、不建卡、无连线）', async () => {
+    await renderPage();
+    await cropImage('m1');
+    await clickBody('crop-confirm');
+    // 占位实现：模式保持，无新卡无连线（裁切执行由 IKGW1S 实装）
+    expect(cropEditing('m1')).toBe(true);
+    expect((flowProps.current.mediaNodes as Node[]).length).toBe(5);
+    expect(flowProps.current.edges).toEqual([]);
+  });
+
+  it('退出后重进：框回到全幅、比例回到自由（不记忆上次状态）', async () => {
+    await renderPage();
+    await cropImage('m1');
+    await clickBody('crop-preset-4-3');
+    expect(cropFrameProp()!.preset).toBe('4:3');
+    await pressEscape();
+    await cropImage('m1');
+    const frame = cropFrameProp()!;
+    expect(frame.preset).toBe('free');
+    expect(frame.rect).toEqual(frame.bounds);
+  });
+});
