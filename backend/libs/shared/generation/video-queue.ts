@@ -3,6 +3,7 @@ import { Producer } from "rocketmq-client-nodejs";
 import {
   AUDIO_GENERATION_TAG,
   GENERATION_TASK_QUEUE,
+  IMAGE_CUTOUT_TAG,
   IMAGE_ENHANCE_TAG,
   IMAGE_ERASE_TAG,
   IMAGE_GENERATION_TAG,
@@ -17,6 +18,7 @@ import type { GenerationTag } from "./queue.constants.js";
  *  producer 侧 enqueueVideoGenerationJob / enqueueMediaExtractJob / enqueueImageGenerationJob
  *  / enqueueAudioGenerationJob / enqueueImageEnhanceJob（tag=image_enhance，IKGM99）
  *  / enqueueImageEraseJob（tag=image_erase，IKGOT4）
+ *  / enqueueImageCutoutJob（tag=image_cutout，IKGXM1）
  *  同走 RocketMQ（IKDZJK：收敛为 rocketmq 唯一驱动）。 */
 
 /** IKBBXH：RocketMQ producer 延时下限（ms）。topic 只收 DELAY 消息，delay≤0 也落到该值，保证消息判为 DELAY。 */
@@ -185,6 +187,19 @@ export async function enqueueImageEraseJob(
   await createRocketMqVideoProducer(
     producer,
     IMAGE_ERASE_TAG,
+  ).enqueue(jobId, options);
+}
+
+/** 图片抠图 job 入队（IKGXM1，契约 image-cutout 章节）：复用生成任务 topic/queue，用独立 tag「image_cutout」区分任务类型。 */
+export async function enqueueImageCutoutJob(
+  jobId: string,
+  options?: { delayMs?: number },
+): Promise<void> {
+  const config = loadRocketMqConfig();
+  const producer = await getStartedRocketMqProducer(config);
+  await createRocketMqVideoProducer(
+    producer,
+    IMAGE_CUTOUT_TAG,
   ).enqueue(jobId, options);
 }
 
