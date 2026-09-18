@@ -119,12 +119,9 @@
   opacity: 1;
 }
 
-/* 选中态悬浮工具条（节点上方居中） */
+/* 选中态悬浮工具条（卡片上方居中）：IKGYYD 迁出节点卡后由 NodeFollowToolbar 钉屏幕容器
+   定位（中心点居中 + 顶边锚，屏幕尺寸恒定），此处只保留工具条本体视觉 */
 .toolbar {
-  position: absolute;
-  bottom: calc(100% - 22.5px + var(--node-title-line) + var(--node-title-gap) + 10px);
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 2px;
@@ -134,7 +131,6 @@
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   white-space: nowrap;
-  z-index: 10;
 }
 
 .toolBtn {
