@@ -332,6 +332,10 @@ export default function CanvasPage() {
   const eraseStrokePointsRef = useRef<MaskPoint[]>([]);
   /** 擦除发送中（遮罩上传+创建请求期间，工具条/发送条只读防重复提交） */
   const [eraseSubmitting, setEraseSubmitting] = useState(false);
+  /** 裁切编辑态（IKGW1H 模式进出骨架）：处于裁切编辑的源图卡 node id，null=未进入。
+   *  单值 state 即单目标约束（同一时刻仅一张卡处于裁切模式）；本票仅状态骨架与进出链路，
+   *  裁切框/比例面板（IKGW1N）与确认建卡（IKGW1S）后续经 exitCropMode/onCropConfirm 接入。 */
+  const [cropTargetNodeId, setCropTargetNodeId] = useState<string | null>(null);
   const [showEdges, setShowEdges] = useState(true);
   /** 对齐吸附开关（IKGGCT T3）：全局持久化（不分画布文档），初始读 localStorage，默认开 */
   const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
@@ -1245,6 +1249,7 @@ export default function CanvasPage() {
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
+          onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -2052,6 +2057,7 @@ export default function CanvasPage() {
     genAudio: (_id: string) => {},
     enhanceImage: (_id: string) => {},
     eraseImage: (_id: string) => {},
+    cropImage: (_id: string) => {},
     extractAudio: async (_id: string) => {},
     download: (_id: string) => {},
     showDetails: (_id: string) => {},
@@ -2626,6 +2632,11 @@ export default function CanvasPage() {
       exitEraseEditing();
       return;
     }
+    // 裁切编辑态（IKGW1H 四退出之一）：点画布空白/框外暗区退出并丢弃
+    if (cropTargetNodeId) {
+      exitCropMode();
+      return;
+    }
     if (imagePickSessionActive) { endImagePickSession(); return; }
     if (videoPickSessionActive) { endVideoPickSession(); return; }
     if (audioPickSessionActive) { endAudioPickSession(); return; }
@@ -2657,6 +2668,11 @@ export default function CanvasPage() {
     //（空选中不在此处理——真空白点击由 onPaneClick 承担）
     if (eraseTargetNodeId && ((soloId && soloId !== eraseTargetNodeId) || candidates.length > 1)) {
       exitEraseEditing();
+    }
+    // 裁切编辑态（IKGW1H 四退出之一）：点其他卡等同点外退出——单选非目标或多选时丢弃
+    //（空选中不在此处理——真空白点击由 onPaneClick 承担）
+    if (cropTargetNodeId && ((soloId && soloId !== cropTargetNodeId) || candidates.length > 1)) {
+      exitCropMode();
     }
     const syncPanelVisible = (
       boundId: string | null,
@@ -2736,7 +2752,7 @@ export default function CanvasPage() {
    *  （既有 session handler，与本监听同级）→ 单次选取取消选取 → 光标在输入框内不动
    *  （复用 isEditableKeyboardTarget）→ 擦除编辑态退出（IKGOTB，未发送丢弃遮罩）→ 其余情况关闭五面板。 */
   useEffect(() => {
-    if (!anyGenPanelOpen && !eraseTargetNodeId) return;
+    if (!anyGenPanelOpen && !eraseTargetNodeId && !cropTargetNodeId) return;
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (document.querySelector('[data-canvas-keyboard-scope="mention"]')) return;
@@ -2750,12 +2766,16 @@ export default function CanvasPage() {
         exitEraseEditing();
         return;
       }
+      if (cropTargetNodeId) {
+        exitCropMode();
+        return;
+      }
       dismissAllGenPanels();
     };
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyGenPanelOpen, eraseTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
+  }, [anyGenPanelOpen, eraseTargetNodeId, cropTargetNodeId, imagePickSessionActive, videoPickSessionActive, audioPickSessionActive, pickMode, pickTarget]);
 
   /** 节点拖拽结束：同步本次全部拖动节点的新坐标到父组件 state，触发自动保存。
    *  多选整组拖拽时 React Flow 第三参含同组全部节点；只回写被抓取节点会让父层坐标过期，
@@ -3035,6 +3055,14 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eraseTargetNodeId, mediaNodes]);
 
+  /** 裁切编辑态绑定清理（IKGW1H）：目标源图卡被删除时退出裁切模式，防状态悬挂 */
+  useEffect(() => {
+    if (!cropTargetNodeId) return;
+    if (!mediaNodes.some((n) => n.id === cropTargetNodeId)) exitCropMode();
+    // exitCropMode 仅引用稳定的 setState，不随渲染变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cropTargetNodeId, mediaNodes]);
+
   /** IKFR4X：Esc 结束图片持续选取会话（输入框/编辑器内的 Esc 保持原语义，如卡片名称编辑） */
   useEffect(() => {
     if (imagePickSession === undefined) return;
@@ -3274,6 +3302,7 @@ export default function CanvasPage() {
         onGenAudio: (id: string) => actionsRef.current.genAudio(id),
         onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
         onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
+        onCropImage: (id: string) => actionsRef.current.cropImage(id),
         onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
         onDownload: (id: string) => actionsRef.current.download(id),
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -3729,6 +3758,7 @@ export default function CanvasPage() {
       onGenAudio: (id: string) => actionsRef.current.genAudio(id),
       onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
       onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
+      onCropImage: (id: string) => actionsRef.current.cropImage(id),
       onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
       onDownload: (id: string) => actionsRef.current.download(id),
       onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -4133,6 +4163,7 @@ export default function CanvasPage() {
           onGenAudio: (id: string) => actionsRef.current.genAudio(id),
           onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
           onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
+          onCropImage: (id: string) => actionsRef.current.cropImage(id),
           onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -5954,19 +5985,37 @@ export default function CanvasPage() {
     setEraseSubmitting(false);
   };
 
+  /** 退出裁切模式（IKGW1H 四退出共用：面板取消/Esc/点画布空白或框外暗区/点其他卡）：
+   *  丢弃不留痕——无卡、无边、无状态残留，源图卡原样保留。裁切面板（IKGW1N）的取消即调本函数。 */
+  const exitCropMode = () => {
+    setCropTargetNodeId(null);
+  };
+
   /** 擦除（IKGOT7 入口 / IKGOTB 编辑态）：把目标图片卡置为擦除编辑态并重置遮罩编辑。
    *  门槛预检（超尺寸/超大小/webp/gif）已在菜单项置灰层完成，此处只管进入；
-   *  进入时关闭五个生成面板（编辑态是独立模式，规格故事 7）。 */
+   *  进入时关闭五个生成面板（编辑态是独立模式，规格故事 7）并退出裁切模式（编辑模式互斥）。 */
   const handleNodeEraseImage = (id: string) => {
     const node = mediaNodesRef.current.find((n) => n.id === id);
     if (!node || node.type !== 'mediaNode') return;
     dismissAllGenPanels();
+    exitCropMode();
     setEraseTargetNodeId(id);
     setEraseMaskState(EMPTY_MASK_EDIT);
     setEraseLiveOp(null);
     eraseLiveOpRef.current = null;
     eraseStrokePointsRef.current = [];
     setEraseTool('brush');
+  };
+
+  /** 裁切（IKGW1H 入口）：把目标图片卡置为裁切编辑态。无门槛预检（菜单项恒可用）；
+   *  进入时关闭五个生成面板（同擦除口径）并退出擦除编辑态（编辑模式互斥）；
+   *  单值 cropTargetNodeId 即单目标——换目标卡自然替换。裁切框与比例面板由 IKGW1N 接入。 */
+  const handleNodeCropImage = (id: string) => {
+    const node = mediaNodesRef.current.find((n) => n.id === id);
+    if (!node || node.type !== 'mediaNode') return;
+    dismissAllGenPanels();
+    exitEraseEditing();
+    setCropTargetNodeId(id);
   };
 
   /* ===== 擦除遮罩指针交互（IKGOTB）：EraseMaskLayer 上抛显示坐标点，此处按当前工具落 op ===== */
@@ -6288,6 +6337,7 @@ export default function CanvasPage() {
   actionsRef.current.genAudio = handleNodeGenAudio;
   actionsRef.current.enhanceImage = handleNodeEnhanceImage;
   actionsRef.current.eraseImage = handleNodeEraseImage;
+  actionsRef.current.cropImage = handleNodeCropImage;
   actionsRef.current.extractAudio = handleNodeExtractAudio;
   actionsRef.current.download = handleNodeDownload;
   actionsRef.current.showDetails = handleNodeShowDetails;
@@ -6844,6 +6894,7 @@ export default function CanvasPage() {
               onGenAudio: (id: string) => actionsRef.current.genAudio(id),
               onEnhanceImage: (id: string) => actionsRef.current.enhanceImage(id),
               onEraseImage: (id: string) => actionsRef.current.eraseImage(id),
+              onCropImage: (id: string) => actionsRef.current.cropImage(id),
               onExtractAudio: (id: string) => actionsRef.current.extractAudio(id),
               onDownload: (id: string) => actionsRef.current.download(id),
               onShowDetails: (id: string) => actionsRef.current.showDetails(id),
@@ -7524,6 +7575,8 @@ export default function CanvasPage() {
           mediaNodes={
             // 擦除编辑态（IKGOTB）：目标源图卡渲染期注入遮罩层 props（不进 state、不持久化，
             // 口径同 pickMarked 渲染期派生注入）——EraseMaskLayer 与工具条共享本页编辑状态
+            // 裁切编辑态（IKGW1H）：目标源图卡渲染期注入裁切标记（口径同上，不持久化）；
+            //  两编辑态互斥（进入时互相退出），裁切框/面板（IKGW1N）据此识别编辑目标
             eraseTargetNodeId
               ? mediaNodes.map((n) =>
                   n.id === eraseTargetNodeId
@@ -7542,7 +7595,13 @@ export default function CanvasPage() {
                       }
                     : n,
                 )
-              : mediaNodes
+              : cropTargetNodeId
+                ? mediaNodes.map((n) =>
+                    n.id === cropTargetNodeId
+                      ? { ...n, data: { ...n.data, cropEditing: true } }
+                      : n,
+                  )
+                : mediaNodes
           }
           productNodes={productNodes}
           assetNodes={assetNodes}
