@@ -1,47 +1,50 @@
 /* ============================================
  * 图片抠图（IKGXLT）：「抠图」入口门槛预检、按场景两档精校与发送参数组装（纯逻辑，
  * 无 React 依赖，形状与判定口径对齐 imageErase.ts）。
- * 常量本地集中单处定义：须与 backend/libs/contracts/image-cutout.ts 契约常量同源对齐
- * （契约票 IKGXLS 并行进行中，契约合入后切换为 @lib/contracts/image-cutout 引用并统一对账；
- * 数值出处 = 官方 PDF remove-image-background「图像输入分辨率 / 文件大小 / 支持格式」节）。
+ * 门槛常量经 @lib/contracts/image-cutout 与契约同源引用（对齐 imageErase.ts 先例）；
+ * 数值出处 = 官方 PDF remove-image-background「图像输入分辨率 / 文件大小 / 支持格式」节。
  * ============================================ */
 
-/* ============ 常量（集中单处定义，对齐注释见上） ============ */
+import {
+  IMAGE_CUTOUT_CONTOUR_COLOR,
+  IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT,
+  IMAGE_CUTOUT_CONTOUR_SIZE_MIN,
+  IMAGE_CUTOUT_INPUT_FORMATS,
+  IMAGE_CUTOUT_MAX_FILE_BYTES,
+  IMAGE_CUTOUT_OUTPUT_FORMAT,
+  IMAGE_CUTOUT_SCENE_SIZE_LIMITS,
+  IMAGE_CUTOUT_SCENES,
+} from '@lib/contracts/image-cutout';
+import type { ImageCutoutScene } from '@lib/contracts/image-cutout';
 
-/** 支持的抠图输入格式（白名单 png/jpg/jpeg/heic，不含 webp/gif；门槛判定按白名单反转：
- *  识别出格式且不在白名单即置灰，识别不出（null）不拦，交后端按权威数据复核）。 */
-export const IMAGE_CUTOUT_INPUT_FORMATS = ['png', 'jpg', 'jpeg', 'heic'] as const;
+/* ============ 常量（契约同源引用 + 本地派生，出处见头注释） ============ */
 
-/** 输入大小上限：单张 ≤30MB。 */
-export const IMAGE_CUTOUT_MAX_FILE_BYTES = 30 * 1024 * 1024;
+// 契约常量再导出供外部消费（对齐 imageErase.ts 再导出先例）。
+export {
+  IMAGE_CUTOUT_CONTOUR_COLOR,
+  IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT,
+  IMAGE_CUTOUT_CONTOUR_SIZE_MIN,
+  IMAGE_CUTOUT_INPUT_FORMATS,
+  IMAGE_CUTOUT_MAX_FILE_BYTES,
+  IMAGE_CUTOUT_OUTPUT_FORMAT,
+  IMAGE_CUTOUT_SCENES,
+};
+export type { ImageCutoutScene };
 
-/** 通用场景（general）分辨率上限：长边 ≤10240px、短边 ≤6000px、总像素 ≤40MP。
+/** 通用档（general）上限别名（契约两档表派生，菜单预检与文案插值用）。
  *  与擦除的差异：官方抠图接口无最小边下限，不做 MIN_SIDE 判定。 */
-export const IMAGE_CUTOUT_GENERAL_MAX_LONG_SIDE_PX = 10240;
-export const IMAGE_CUTOUT_GENERAL_MAX_SHORT_SIDE_PX = 6000;
-export const IMAGE_CUTOUT_GENERAL_MAX_PIXELS = 40_000_000;
+export const IMAGE_CUTOUT_GENERAL_MAX_LONG_SIDE_PX = IMAGE_CUTOUT_SCENE_SIZE_LIMITS.general.maxLongSide;
+export const IMAGE_CUTOUT_GENERAL_MAX_SHORT_SIDE_PX = IMAGE_CUTOUT_SCENE_SIZE_LIMITS.general.maxShortSide;
+export const IMAGE_CUTOUT_GENERAL_MAX_PIXELS = IMAGE_CUTOUT_SCENE_SIZE_LIMITS.general.maxTotalPixels ?? Number.POSITIVE_INFINITY;
 
-/** 人像/商品场景（human/product）更严上限：长边 ≤7680px、短边 ≤4320px（两档口径，
- *  规格 Implementation Decisions「参数映射」；总像素无独立上限——该档边长上限乘积
- *  7680×4320≈33.2MP 已被通用档 40MP 覆盖）。 */
-export const IMAGE_CUTOUT_SUBJECT_MAX_LONG_SIDE_PX = 7680;
-export const IMAGE_CUTOUT_SUBJECT_MAX_SHORT_SIDE_PX = 4320;
+/** 人像/商品档（human/product）上限别名（契约表两场景等值；精校文案用。该档总像素
+ *  无独立上限——边长上限乘积 7680×4320≈33.2MP 已被通用档 40MP 覆盖）。 */
+export const IMAGE_CUTOUT_SUBJECT_MAX_LONG_SIDE_PX = IMAGE_CUTOUT_SCENE_SIZE_LIMITS.human.maxLongSide;
+export const IMAGE_CUTOUT_SUBJECT_MAX_SHORT_SIDE_PX = IMAGE_CUTOUT_SCENE_SIZE_LIMITS.human.maxShortSide;
 
-/** 描边宽度区间与默认（规格故事 11：滑杆 1~50px 默认 10px；官方 PDF contour_size
- *  取值 [1,100] 默认 10，本仓按规格收严到 1~50）。 */
-export const IMAGE_CUTOUT_CONTOUR_SIZE_MIN = 1;
-export const IMAGE_CUTOUT_CONTOUR_SIZE_MAX = 50;
-export const IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT = 10;
-
-/** 描边颜色固定白色（规格 Out of Scope：不做取色器）。 */
-export const IMAGE_CUTOUT_CONTOUR_COLOR = '#FFFFFF';
-
-/** 输出格式固定 png（规格：透明背景需要，jpeg 透明填黑与 webp 下游不兼容被否决）。 */
-export const IMAGE_CUTOUT_OUTPUT_FORMAT = 'png';
-
-/** 抠图场景三值（官方 PDF scene 必选三值，直传）。 */
-export const IMAGE_CUTOUT_SCENES = ['general', 'human', 'product'] as const;
-export type ImageCutoutScene = (typeof IMAGE_CUTOUT_SCENES)[number];
+/** 产品滑杆钳制（规格故事 11：滑杆 1~50px 默认 10px）。与契约官方区间常量刻意异名
+ *  （契约 IMAGE_CUTOUT_CONTOUR_SIZE_MAX=100 为官方 [1,100]），本地 SLIDER_MAX=50 按规格收严。 */
+export const IMAGE_CUTOUT_CONTOUR_SLIDER_MAX = 50;
 
 /* ============ 门槛预检（形状对齐 imageErase.ts） ============ */
 
@@ -190,7 +193,7 @@ export function buildImageCutoutRequest(input: BuildImageCutoutRequestInput): Im
   const raw = typeof input.contourSize === 'number' && Number.isFinite(input.contourSize)
     ? input.contourSize
     : IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT;
-  const contourSize = Math.min(IMAGE_CUTOUT_CONTOUR_SIZE_MAX, Math.max(IMAGE_CUTOUT_CONTOUR_SIZE_MIN, raw));
+  const contourSize = Math.min(IMAGE_CUTOUT_CONTOUR_SLIDER_MAX, Math.max(IMAGE_CUTOUT_CONTOUR_SIZE_MIN, raw));
   return {
     source_asset_id: sourceAssetId,
     target_node_id: targetNodeId,

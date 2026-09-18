@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT,
-  IMAGE_CUTOUT_CONTOUR_SIZE_MAX,
+  IMAGE_CUTOUT_CONTOUR_SLIDER_MAX,
   IMAGE_CUTOUT_CONTOUR_SIZE_MIN,
   IMAGE_CUTOUT_GENERAL_MAX_LONG_SIDE_PX,
   IMAGE_CUTOUT_GENERAL_MAX_PIXELS,
@@ -204,7 +204,7 @@ describe('buildImageCutoutRequest（发送参数组装，规格故事 29）', ()
     ).toBe(IMAGE_CUTOUT_CONTOUR_SIZE_MIN);
     expect(
       buildImageCutoutRequest({ sourceAssetId: '1', targetNodeId: 'n', scene: 'human', contourSize: 51 }).contour_size,
-    ).toBe(IMAGE_CUTOUT_CONTOUR_SIZE_MAX);
+    ).toBe(IMAGE_CUTOUT_CONTOUR_SLIDER_MAX);
     expect(
       buildImageCutoutRequest({ sourceAssetId: '1', targetNodeId: 'n', scene: 'product' }).contour_size,
     ).toBe(IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT);
@@ -215,7 +215,7 @@ describe('buildImageCutoutRequest（发送参数组装，规格故事 29）', ()
       buildImageCutoutRequest({ sourceAssetId: '1', targetNodeId: 'n', scene: 'human', contourSize: 50 }).contour_size,
     ).toBe(50);
     expect(IMAGE_CUTOUT_CONTOUR_SIZE_MIN).toBe(1);
-    expect(IMAGE_CUTOUT_CONTOUR_SIZE_MAX).toBe(50);
+    expect(IMAGE_CUTOUT_CONTOUR_SLIDER_MAX).toBe(50);
     expect(IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT).toBe(10);
   });
 
