@@ -272,6 +272,17 @@ test("keeps high-impact infrastructure scoped at completion but full at PR stage
   });
 });
 
+test("treats skill agents metadata as documentation at both stages", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+  for (const file of [
+    ".claude/skills/ask-matt/agents/openai.yaml",
+    ".zcode/skills/pr/agents/openai.yaml",
+  ]) {
+    assert.deepEqual(classifyChanges([file]), { tier: "docs", reasons: ["only documentation files changed"] });
+    assert.deepEqual(classifyChanges([file], { stage: "pr" }), { tier: "docs", reasons: ["only documentation files changed"] });
+  }
+});
+
 test("treats comment-only Dockerfile edits as documentation without weakening real edits", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
   const file = "backend/Dockerfile.worker";
