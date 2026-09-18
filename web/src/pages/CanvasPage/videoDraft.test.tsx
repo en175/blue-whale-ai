@@ -1054,7 +1054,7 @@ describe('IKFC26 方案绑定媒体同步视频模式', () => {
 
     // 只建一根 plan1→d1 方案边，绑定写在边上（promptReference.bindings）
     await vi.waitFor(() => expect(flowProps.current.edges).toHaveLength(1));
-    const planEdge = flowProps.current.edges.find(e => e.source === 'plan1' && e.target === 'd1');
+    const planEdge = flowProps.current.edges.find((e: { source: string; target: string; data?: { promptReference?: { bindings?: unknown } } }) => e.source === 'plan1' && e.target === 'd1');
     expect(planEdge?.data?.promptReference).toEqual({ bindings: [{ index: 1, assetId: '101' }] });
 
     // 不再调后端方案同步；目标模式保持文生视频（素材图不经此路径直连草稿）
