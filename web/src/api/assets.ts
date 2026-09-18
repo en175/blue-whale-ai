@@ -231,6 +231,8 @@ export interface UploadCompleteParams {
   duration?: number;
   /** 文件 MD5（32 位小写 hex），落库供下次上传 md5 查重复用 */
   md5?: string;
+  /** 真人人像库导入：绑定素材库 id（Asset- 前缀） */
+  materialId?: string;
 }
 
 /** POST /api/agent/assets/uploads/complete 返回 */
@@ -277,6 +279,7 @@ export function dedupUpload(params: {
   size: number;
   md5: string;
   project_id?: string;
+  materialId?: string;
 }) {
   return apiRequest<DedupData>('/api/agent/assets/uploads/dedup', {
     method: 'POST',

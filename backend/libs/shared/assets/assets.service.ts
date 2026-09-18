@@ -47,6 +47,14 @@ export class AssetService {
     return this.repo.findOwnedByMd5(userId, md5);
   }
 
+  findOwnedByMaterialId(userId: string, materialId: string) {
+    return this.repo.findOwnedByMaterialId(userId, materialId);
+  }
+
+  bindMaterialId(input: { userId: string; assetId: string; materialId: string }) {
+    return this.repo.bindMaterialId(input);
+  }
+
   findOwnedSource(sourceAssetId: string, userId: string) {
     return this.repo.findOwnedSource(sourceAssetId, userId);
   }

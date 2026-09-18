@@ -28,6 +28,8 @@ export type CompleteAssetInput = PresignAssetInput & {
   duration?: number;
   /** IKCNLS：落库时写入 md5，供去重查询。 */
   md5?: string;
+  /** 真人人像库素材导入：写入本地资产的素材库 id（Asset- 前缀）。 */
+  materialId?: string;
 };
 
 /** IKCNLS：上传 md5 去重输入（presign 前判断）。 */
@@ -37,6 +39,8 @@ export type DedupAssetInput = {
   size: number;
   md5: string;
   project_id?: string;
+  /** 真人人像库导入：命中已有本地资产时补绑素材库 id。 */
+  materialId?: string;
 };
 
 export interface AssetUploadStorage {
@@ -138,6 +142,14 @@ export async function handlePresignAsset(
   });
 }
 
+/** 素材库 id（Asset- 前缀）；非法值忽略，不阻断普通上传。 */
+const MATERIAL_ID_PATTERN = /^asset-.{1,128}$/i;
+
+function readOptionalMaterialId(value: unknown): string | undefined {
+  if (typeof value !== "string" || !MATERIAL_ID_PATTERN.test(value.trim())) return undefined;
+  return value.trim();
+}
+
 /**
  * IKCNLS：上传 md5 去重（presign 前判断）。
  * 命中：返回该用户未删同 md5 的最优资产（toAssetResponse），并建 project_asset 关联，前端跳过 presign→PUT→complete 3 步。
@@ -176,6 +188,14 @@ export async function handleDedupAsset(
       userId,
       assetId: existing.id,
       projectId,
+    });
+  }
+  const materialId = readOptionalMaterialId(input.materialId);
+  if (materialId) {
+    await deps.uploads.bindMaterialId({
+      userId,
+      assetId: existing.id,
+      materialId,
     });
   }
   return ok({ dedup: true, asset: toAssetResponse(existing) });
@@ -250,6 +270,20 @@ export async function handleCompleteAsset(
   ) {
     throw new DomainError(RESOURCE_NOT_FOUND_CODE, "资源不存在");
   }
+  const materialId = readOptionalMaterialId(input.materialId);
+  if (materialId) {
+    const bound = await deps.uploads.findOwnedByMaterialId(userId, materialId);
+    if (bound) {
+      if (projectId !== "0") {
+        await deps.uploads.linkAssetToProject({
+          userId,
+          assetId: bound.id,
+          projectId,
+        });
+      }
+      return ok(toAssetResponse(bound));
+    }
+  }
   if (!input.storage_key.startsWith(`uploads/${userId}/${input.type}/`)) {
     throw assetError("ASSET_STORAGE_KEY_FOREIGN");
   }
@@ -261,6 +295,13 @@ export async function handleCompleteAsset(
   );
   if (existing) {
     await deps.storage.makePublic(input.storage_key);
+    if (materialId) {
+      await deps.uploads.bindMaterialId({
+        userId,
+        assetId: existing.id,
+        materialId,
+      });
+    }
     return ok(toAssetResponse(existing));
   }
   const object = await deps.storage.inspectObject(input.storage_key);
@@ -317,6 +358,7 @@ export async function handleCompleteAsset(
     ...(input.height == null ? {} : { height: input.height }),
     ...(input.duration == null ? {} : { duration: input.duration }),
     ...(input.md5 ? { md5: input.md5 } : {}),
+    ...(materialId ? { materialId } : {}),
   });
 
   return ok(toAssetResponse(asset));

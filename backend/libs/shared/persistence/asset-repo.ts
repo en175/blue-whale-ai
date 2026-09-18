@@ -159,6 +159,14 @@ export interface AssetRepo {
   ): Promise<PendingUploadAsset | null>;
   /** IKCNLS：上传 md5 去重——查该用户未删 normal 资产里 md5 相同的最新一条。命中返回资产；无则 null。 */
   findOwnedByMd5(userId: string, md5: string): Promise<PendingUploadAsset | null>;
+  /** 按素材库 id 查该用户未删 normal 本地资产（真人人像库导入复用）。 */
+  findOwnedByMaterialId(userId: string, materialId: string): Promise<PendingUploadAsset | null>;
+  /** 本地资产尚未绑素材库 id 时写入；已绑定则保持原值。唯一冲突视为已有代表行。 */
+  bindMaterialId(input: {
+    userId: string;
+    assetId: string;
+    materialId: string;
+  }): Promise<boolean>;
   createUploadedAsset(input: {
     userId: string;
     projectId: string;
@@ -171,6 +179,7 @@ export interface AssetRepo {
     height?: number;
     duration?: number;
     md5?: string;
+    materialId?: string;
   }): Promise<PendingUploadAsset>;
   /** IKDJNZ：素材库素材创建成功后，把原始素材与素材库素材绑定（一对多覆盖写）。
    *  校验 asset 归属当前用户；material_id 唯一索引兜底一张素材只关联一个素材库素材。 */
@@ -741,6 +750,44 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       });
       return row ? toUploadAsset(row) : null;
     },
+    async findOwnedByMaterialId(userId, materialId) {
+      const row = await prisma.assets.findFirst({
+        where: {
+          user_id: BigInt(userId),
+          material_id: materialId,
+          status: "normal",
+          is_delete: false,
+        },
+        select: uploadAssetSelect,
+      });
+      return row ? toUploadAsset(row) : null;
+    },
+    async bindMaterialId({ userId, assetId, materialId }) {
+      const owned = await prisma.assets.findFirst({
+        where: {
+          id: BigInt(assetId),
+          user_id: BigInt(userId),
+          is_delete: false,
+        },
+        select: { id: true, material_id: true },
+      });
+      if (!owned) return false;
+      if (owned.material_id) return true;
+      try {
+        await prisma.assets.update({
+          where: { id: owned.id },
+          data: {
+            material_id: materialId,
+            version: { increment: 1 },
+            gmt_modified: new Date(),
+          },
+        });
+      } catch (error) {
+        if ((error as { code?: string }).code === "P2002") return true;
+        throw error;
+      }
+      return true;
+    },
     async createUploadedAsset(input) {
       // IKCNLP（方案C）：上传落库时若归属具体项目（project_id != 0）则自动建 project_asset 关联。
       const row = await prisma.$transaction(async (tx) => {
@@ -759,6 +806,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
               ? {}
               : { duration_ms: Math.round(input.duration * 1000) }),
             ...(input.md5 ? { md5: input.md5 } : {}),
+            ...(input.materialId ? { material_id: input.materialId } : {}),
             source: "uploaded",
             status: "normal",
           },
@@ -783,7 +831,24 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           });
         }
         return created;
+      }).catch(async (error: unknown) => {
+        // 同一素材库 id 已被其它本地行占用：回读那条代表行，避免导入失败
+        if ((error as { code?: string }).code === "P2002" && input.materialId) {
+          const existing = await prisma.assets.findFirst({
+            where: {
+              user_id: BigInt(input.userId),
+              material_id: input.materialId,
+              status: "normal",
+              is_delete: false,
+            },
+            select: uploadAssetSelect,
+          });
+          const reused = existing ? toUploadAsset(existing) : null;
+          if (reused) return reused;
+        }
+        throw error;
       });
+      if ("id" in row && typeof row.id === "string") return row;
       const asset = toUploadAsset(row);
       if (!asset) throw new Error("Committed upload is missing storage_key");
       return asset;
