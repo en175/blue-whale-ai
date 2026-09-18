@@ -5,6 +5,7 @@ import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.GenerationModelCapabilityEntity;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageProviderError;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
@@ -101,7 +102,7 @@ public class ImageJobProcessor implements JobProcessor {
 
     @Override
     public String tag() {
-        return "image";
+        return GenerationMqRoute.IMAGE.tag();
     }
 
     /**

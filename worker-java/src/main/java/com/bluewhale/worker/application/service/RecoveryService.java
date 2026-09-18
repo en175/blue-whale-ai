@@ -1,5 +1,6 @@
 package com.bluewhale.worker.application.service;
 
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import com.bluewhale.worker.infrastructure.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import org.slf4j.Logger;
@@ -91,17 +92,17 @@ public class RecoveryService {
     )
     public void recover() {
         try {
-            reenqueue("video", videoProducer.getIfAvailable(),
+            reenqueue(GenerationMqRoute.VIDEO, videoProducer.getIfAvailable(),
                     jobMapper.listDueVideoJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue("image", imageProducer.getIfAvailable(),
+            reenqueue(GenerationMqRoute.IMAGE, imageProducer.getIfAvailable(),
                     jobMapper.listDueImageJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue("media_extract", mediaExtractProducer.getIfAvailable(),
+            reenqueue(GenerationMqRoute.MEDIA_EXTRACT, mediaExtractProducer.getIfAvailable(),
                     jobMapper.listDueMediaExtractJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue("audio", audioProducer.getIfAvailable(),
+            reenqueue(GenerationMqRoute.AUDIO, audioProducer.getIfAvailable(),
                     jobMapper.listDueAudioJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue("image_enhance", imageEnhanceProducer.getIfAvailable(),
+            reenqueue(GenerationMqRoute.IMAGE_ENHANCE, imageEnhanceProducer.getIfAvailable(),
                     jobMapper.listDueImageEnhanceJobIds(SCAN_LIMIT, maxAgeMinutes));
-            reenqueue("image_erase", imageEraseProducer.getIfAvailable(),
+            reenqueue(GenerationMqRoute.IMAGE_ERASE, imageEraseProducer.getIfAvailable(),
                     jobMapper.listDueImageEraseJobIds(SCAN_LIMIT, maxAgeMinutes));
         } catch (Exception e) {
             log.error("recovery scan failed: {}", e.getMessage(), e);
@@ -109,17 +110,17 @@ public class RecoveryService {
     }
 
     /** 单 tag 重投：生产者缺失即跳过（防御性判断，正常装配下六类生产者恒在）。 */
-    private void reenqueue(String tag, GenerationMessageProducer producer, List<Long> jobIds) {
+    private void reenqueue(GenerationMqRoute route, GenerationMessageProducer producer, List<Long> jobIds) {
         if (producer == null) {
             return;
         }
         for (Long jobId : jobIds) {
             try {
-                log.info("recovery re-enqueue stuck {} job {}", tag, jobId);
+                log.info("recovery re-enqueue stuck {} job {}", route.tag(), jobId);
                 producer.enqueue(String.valueOf(jobId), REENQUEUE_DELAY_MS);
             } catch (Exception e) {
                 // 与 TS 同款：单条失败只记错，本轮后续继续、下轮扫描再试。
-                log.error("recovery enqueue {} job {} failed: {}", tag, jobId, e.getMessage(), e);
+                log.error("recovery enqueue {} job {} failed: {}", route.tag(), jobId, e.getMessage(), e);
             }
         }
     }

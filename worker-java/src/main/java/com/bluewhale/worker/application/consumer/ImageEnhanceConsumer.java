@@ -7,7 +7,7 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
 /**
  * image_enhance（高清放大）消费者（契约 §14 / IKGM9D；以 mediaExtract/audio 接线为模板）。
  * <p>
- * tag = "image_enhance"（复用 topic generation-task，契约 §14.1）。
+ * tag = {@link ImageEnhanceContract#TAG}（转发 {@code GenerationMqRoute.IMAGE_ENHANCE}，契约 §14.1）。
  * consumer group = "generation-image-enhance-worker"（契约 §14.1 冻结值）。
  * digitGuard = true（generation_jobs.id 恒纯数字，与 image/audio 守卫一致）。
  * <p>

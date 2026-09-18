@@ -13,6 +13,7 @@ import com.bluewhale.worker.application.processor.ImageEraseJobProcessor;
 import com.bluewhale.worker.application.processor.ImageJobProcessor;
 import com.bluewhale.worker.application.processor.MediaExtractJobProcessor;
 import com.bluewhale.worker.application.processor.VideoJobProcessor;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import com.bluewhale.worker.infrastructure.credential.GenerationCredentialService;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
@@ -41,34 +42,29 @@ public class RocketMqConfig {
 
     private static final Logger log = LoggerFactory.getLogger(RocketMqConfig.class);
 
-    /** 「全部留空」的兜底绑定值：topic / tag 由 {@link RocketMqProperties} 的紧凑构造器补默认值。 */
+    /** 「全部留空」的兜底绑定值：只想让缺 {@code ROCKETMQ_ENDPOINTS} 的校验路径先跑起来。 */
     private static final RocketMqProperties DEFAULT_MQ_PROPS =
-            new RocketMqProperties("", "", "", false, "", "");
+            new RocketMqProperties("", "", "", false);
 
     /**
      * RocketMQ 配置属性（绑定 rocketmq.* YAML 前缀）。
-     * 环境变量名与 TS worker 逐一对齐（契约 §5 / §1）。
+     * 环境变量名与 TS worker 逐一对齐（契约 §5）。
      * <p>
-     * topic 与 tag 的默认值都在本记录里归一，且**空串与 null 同等视为未配置**：
-     * 只对 null 兜底不够——{@code ROCKETMQ_TAG=""} 会绑定成空串，生产者把消息投到空 tag，
-     * 订阅 {@code "video"} 的消费者永远收不到，而进程与 {@code /ready} 全程无异常（静默滞留）。
-     * 显式给非空值仍然生效（覆盖能力不变）。
+     * 只留连接参数：topic / tag **不再是配置项**——它们是契约 §1 的冻结值，单处定义在
+     * {@link GenerationMqRoute}。所以部署环境里残留的 {@code ROCKETMQ_TOPIC} /
+     * {@code ROCKETMQ_TAG} 不会报错也不会生效（宽松绑定对未知属性无目标可绑，直接忽略）：
+     * 这是退役这两个覆盖值的预期后果，不是遗漏。
      */
     public record RocketMqProperties(
             String endpoints,
             String accessKey,
             String secretKey,
-            boolean sslEnabled,
-            String topic,
-            String tag
+            boolean sslEnabled
     ) {
         public RocketMqProperties {
             endpoints = endpoints == null ? "" : endpoints;
             accessKey = accessKey == null ? "" : accessKey;
             secretKey = secretKey == null ? "" : secretKey;
-            topic = topic == null || topic.isBlank() ? "generation-task" : topic;
-            // 修正六：视频 tag 由 "step" 更名，与 generation_jobs.type 同名。
-            tag = tag == null || tag.isBlank() ? "video" : tag;
         }
     }
 
@@ -76,7 +72,7 @@ public class RocketMqConfig {
      * media_extract consumer。
      * <p>
      * consumer group = "generation-extract-worker"（契约 §1）。
-     * tag = "media_extract"（queue.constants.ts:8）。
+     * topic / tag = {@link GenerationMqRoute#MEDIA_EXTRACT}（queue.constants.ts:8）。
      * digitGuard = false（extract 不做纯数字守卫：与 TS rocketmq-extract.consumer.ts 一致）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
@@ -109,7 +105,7 @@ public class RocketMqConfig {
 
         return new MediaExtractConsumer(
                 processor,
-                mqProps.topic(),
+                GenerationMqRoute.MEDIA_EXTRACT.topic(),
                 configBuilder.build(),
                 consumerGroup,
                 concurrency
@@ -120,7 +116,7 @@ public class RocketMqConfig {
      * audio consumer。
      * <p>
      * consumer group = "generation-audio-worker"（契约 §1）。
-     * tag = "audio"（queue.constants.ts:2）。
+     * topic / tag = {@link GenerationMqRoute#AUDIO}（queue.constants.ts:2）。
      * digitGuard = true（音频/图片做纯数字守卫，与 TS rocketmq-audio.consumer.ts 一致）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
@@ -152,7 +148,7 @@ public class RocketMqConfig {
 
         return new AudioConsumer(
                 processor,
-                mqProps.topic(),
+                GenerationMqRoute.AUDIO.topic(),
                 configBuilder.build(),
                 consumerGroup,
                 concurrency
@@ -163,7 +159,7 @@ public class RocketMqConfig {
      * image consumer。
      * <p>
      * consumer group = "generation-image-worker"（契约 §1）。
-     * tag = "image"（queue.constants.ts:5）。
+     * topic / tag = {@link GenerationMqRoute#IMAGE}（queue.constants.ts:5）。
      * digitGuard = true（图片/音频做纯数字守卫，与 TS rocketmq-image.consumer.ts 一致）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
@@ -195,7 +191,7 @@ public class RocketMqConfig {
 
         return new ImageConsumer(
                 processor,
-                mqProps.topic(),
+                GenerationMqRoute.IMAGE.topic(),
                 configBuilder.build(),
                 consumerGroup,
                 concurrency
@@ -206,7 +202,7 @@ public class RocketMqConfig {
      * image_enhance（高清放大）consumer（契约 §14 / IKGM9D）。
      * <p>
      * consumer group = "generation-image-enhance-worker"（契约 §14.1 冻结值）。
-     * tag = "image_enhance"（复用 topic generation-task）。
+     * topic / tag = {@link GenerationMqRoute#IMAGE_ENHANCE}（契约 §14 / IKGM9D）。
      * digitGuard = true（generation_jobs.id 恒纯数字）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
@@ -238,7 +234,7 @@ public class RocketMqConfig {
 
         return new ImageEnhanceConsumer(
                 processor,
-                mqProps.topic(),
+                GenerationMqRoute.IMAGE_ENHANCE.topic(),
                 configBuilder.build(),
                 consumerGroup,
                 concurrency
@@ -249,7 +245,7 @@ public class RocketMqConfig {
      * image_erase（图片擦除）consumer（契约 §15 / IKGOT6）。
      * <p>
      * consumer group = "generation-image-erase-worker"（契约 §15.1 冻结值）。
-     * tag = "image_erase"（复用 topic generation-task）。
+     * topic / tag = {@link GenerationMqRoute#IMAGE_ERASE}（契约 §15 / IKGOT6）。
      * digitGuard = true（generation_jobs.id 恒纯数字）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
@@ -281,7 +277,7 @@ public class RocketMqConfig {
 
         return new ImageEraseConsumer(
                 processor,
-                mqProps.topic(),
+                GenerationMqRoute.IMAGE_ERASE.topic(),
                 configBuilder.build(),
                 consumerGroup,
                 concurrency
@@ -316,8 +312,10 @@ public class RocketMqConfig {
                     new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
         }
 
-        String tag = mqProps.tag();
-        return RocketMqGenerationMessageProducer.create(configBuilder.build(), mqProps.topic(), tag);
+        return RocketMqGenerationMessageProducer.create(
+                configBuilder.build(),
+                GenerationMqRoute.VIDEO.topic(),
+                GenerationMqRoute.VIDEO.tag());
     }
 
     // ========== recovery 生产者（IKF3AT）：每类 tag 一个 producer，六类全部无条件装配。
@@ -325,42 +323,42 @@ public class RocketMqConfig {
     /** recovery 重投 image。 */
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer imageRecoveryProducer(Environment env) {
-        return createProducerForTag(env, "image");
+        return createProducerForTag(env, GenerationMqRoute.IMAGE);
     }
 
     /** recovery 重投 audio。 */
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer audioRecoveryProducer(Environment env) {
-        return createProducerForTag(env, "audio");
+        return createProducerForTag(env, GenerationMqRoute.AUDIO);
     }
 
     /** recovery 重投 media_extract。 */
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer mediaExtractRecoveryProducer(Environment env) {
-        return createProducerForTag(env, "media_extract");
+        return createProducerForTag(env, GenerationMqRoute.MEDIA_EXTRACT);
     }
 
     /** recovery 重投 image_enhance（契约 §14 / IKGM9D）。 */
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer imageEnhanceRecoveryProducer(Environment env) {
-        return createProducerForTag(env, "image_enhance");
+        return createProducerForTag(env, GenerationMqRoute.IMAGE_ENHANCE);
     }
 
     /** recovery 重投 image_erase（契约 §15 / IKGOT6）。 */
     @Bean(destroyMethod = "close")
     public GenerationMessageProducer imageEraseRecoveryProducer(Environment env) {
-        return createProducerForTag(env, "image_erase");
+        return createProducerForTag(env, GenerationMqRoute.IMAGE_ERASE);
     }
 
-    /** 按 tag 建 RocketMQ producer（校验与视频生产者同源语义）。 */
-    private GenerationMessageProducer createProducerForTag(Environment env, String tag) {
+    /** 按路由建 RocketMQ producer（校验与视频生产者同源语义）。 */
+    private GenerationMessageProducer createProducerForTag(Environment env, GenerationMqRoute route) {
         RocketMqProperties mqProps = Binder.get(env)
                 .bind("rocketmq", RocketMqProperties.class)
                 .orElse(DEFAULT_MQ_PROPS);
 
         if (mqProps.endpoints().isBlank()) {
             throw new IllegalStateException(
-                    "ROCKETMQ_ENDPOINTS 未配置：recovery(" + tag + ") producer 无法启动");
+                    "ROCKETMQ_ENDPOINTS 未配置：recovery(" + route.tag() + ") producer 无法启动");
         }
 
         ClientConfigurationBuilder configBuilder = ClientConfiguration.newBuilder()
@@ -372,7 +370,8 @@ public class RocketMqConfig {
                     new StaticSessionCredentialsProvider(mqProps.accessKey(), mqProps.secretKey()));
         }
 
-        return RocketMqGenerationMessageProducer.create(configBuilder.build(), mqProps.topic(), tag);
+        return RocketMqGenerationMessageProducer.create(
+                configBuilder.build(), route.topic(), route.tag());
     }
 
     /**
@@ -398,7 +397,8 @@ public class RocketMqConfig {
      * 视频消费者。
      * <p>
      * consumer group = "generation-video-worker"（契约 §1）。
-     * tag = {@code "video"}，与 {@code generation_jobs.type} 同名（修正六由 "step" 更名）。
+     * topic / tag = {@link GenerationMqRoute#VIDEO}（tag 与 {@code generation_jobs.type} 同名，
+     * 修正六由 "step" 更名）。
      * 顺序消费（无 Semaphore，rocketmq-video.consumer.ts:60-74 for-await each）。
      */
     @Bean(initMethod = "start", destroyMethod = "stop")
@@ -428,7 +428,7 @@ public class RocketMqConfig {
 
         return new VideoConsumer(
                 processor,
-                mqProps.topic(),
+                GenerationMqRoute.VIDEO.topic(),
                 configBuilder.build(),
                 consumerGroup
         );

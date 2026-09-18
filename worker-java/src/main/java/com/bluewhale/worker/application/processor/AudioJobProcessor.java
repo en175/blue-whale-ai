@@ -4,6 +4,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import com.bluewhale.worker.domain.error.AudioProviderError;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.infrastructure.audio.NewApiAudioClient;
@@ -67,7 +68,7 @@ public class AudioJobProcessor implements JobProcessor {
 
     @Override
     public String tag() {
-        return "audio";
+        return GenerationMqRoute.AUDIO.tag();
     }
 
     /**

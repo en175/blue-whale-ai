@@ -1,12 +1,13 @@
 package com.bluewhale.worker.application.consumer;
 
 import com.bluewhale.worker.application.processor.JobProcessor;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 
 /**
  * 图片消费者（rocketmq-image.consumer.ts 移植）。
  * <p>
- * tag = "image"，digitGuard = true（图片/音频做纯数字守卫，与 TS :147-169 一致）。
+ * tag = {@link GenerationMqRoute#IMAGE}，digitGuard = true（图片/音频做纯数字守卫，与 TS :147-169 一致）。
  * consumer group = "generation-image-worker"。
  * <p>
  * 与 TS 行为完全一致：
@@ -18,8 +19,8 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
  */
 public class ImageConsumer extends AbstractGenerationConsumer {
 
-    /** tag（queue.constants.ts:5 IMAGE_TAG）。 */
-    private static final String TAG = "image";
+    /** tag（{@link GenerationMqRoute#IMAGE}；queue.constants.ts:5 IMAGE_TAG）。 */
+    private static final String TAG = GenerationMqRoute.IMAGE.tag();
 
     /**
      * 图片做 digitGuard（rocketmq-image.consumer.ts:147-148）：

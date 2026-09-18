@@ -4,6 +4,7 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobStateMachineService;
 import com.bluewhale.worker.domain.dto.ClaimedVideoJobDto;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoInputError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
@@ -145,7 +146,7 @@ public class VideoJobProcessor implements JobProcessor {
 
     @Override
     public String tag() {
-        return "video";
+        return GenerationMqRoute.VIDEO.tag();
     }
 
     /**

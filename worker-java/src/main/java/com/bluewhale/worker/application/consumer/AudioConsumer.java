@@ -1,12 +1,13 @@
 package com.bluewhale.worker.application.consumer;
 
 import com.bluewhale.worker.application.processor.JobProcessor;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
 
 /**
  * 音频消费者（rocketmq-audio.consumer.ts 移植）。
  * <p>
- * tag = "audio"，digitGuard = true（音频/图片做纯数字守卫）。
+ * tag = {@link GenerationMqRoute#AUDIO}，digitGuard = true（音频/图片做纯数字守卫）。
  * consumer group = "generation-audio-worker"。
  * <p>
  * 与 TS 行为完全一致：
@@ -18,8 +19,8 @@ import org.apache.rocketmq.client.apis.ClientConfiguration;
  */
 public class AudioConsumer extends AbstractGenerationConsumer {
 
-    /** tag（queue.constants.ts:2 AUDIO_TAG）。 */
-    private static final String TAG = "audio";
+    /** tag（{@link GenerationMqRoute#AUDIO}；queue.constants.ts:2 AUDIO_TAG）。 */
+    private static final String TAG = GenerationMqRoute.AUDIO.tag();
 
     /**
      * 音频做 digitGuard（rocketmq-audio.consumer.ts:143-144）：

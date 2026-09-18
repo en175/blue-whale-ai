@@ -4,6 +4,7 @@ import com.bluewhale.worker.domain.error.MediaExtractError;
 
 import com.bluewhale.worker.infrastructure.media.FfmpegExtractor;
 import com.bluewhale.worker.domain.entity.AssetEntity;
+import com.bluewhale.worker.domain.entity.GenerationMqRoute;
 import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.domain.dto.ClaimedMediaExtractJobDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
@@ -81,7 +82,7 @@ public class MediaExtractJobProcessor implements JobProcessor {
 
     @Override
     public String tag() {
-        return "media_extract";
+        return GenerationMqRoute.MEDIA_EXTRACT.tag();
     }
 
     /**

@@ -1,5 +1,7 @@
-# 环境变量名与 TS worker 逐一对齐（ADR-0084 / 契约 §5）：同一个生成任务 topic（generation-task）按 tag 区分任务类型，
+# 环境变量名与 TS worker 逐一对齐（ADR-0084 / 契约 §5）：同一个生成任务 topic 按 tag 区分任务类型，
 # 消费侧 = worker-java 单栈（TS worker 已随刀④收口退役，不再有双栈共用 env 的灰度期）。
+# topic / tag 不在此配置：它们是契约 §1 的冻结值，单处定义在 domain/entity/GenerationMqRoute.java，
+# 故部署环境里残留的 ROCKETMQ_TOPIC / ROCKETMQ_TAG 不再有绑定目标（宽松绑定忽略未知属性，不报错也不生效）。
 server:
   port: ${GENERATION_WORKER_PORT:4002}
 
@@ -29,9 +31,6 @@ rocketmq:
   access-key: ${ROCKETMQ_ACCESS_KEY:}
   secret-key: ${ROCKETMQ_SECRET_KEY:}
   ssl-enabled: ${ROCKETMQ_SSL_ENABLED:false}
-  topic: ${ROCKETMQ_TOPIC:generation-task}
-  # 视频 tag；空串与未设置等价（RocketMqProperties 紧凑构造器归一为 "video"，修正六由 "step" 更名）
-  tag: ${ROCKETMQ_TAG:video}
 
 logging:
   level:
