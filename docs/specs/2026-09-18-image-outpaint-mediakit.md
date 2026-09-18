@@ -1,6 +1,6 @@
 # 图片扩图（火山 AI MediaKit 智能扩图）规格
 
-> 需求共识来自 2026-09-17 两轮 grilling（15 项拍板，Kim 已确认）。需求工单 IKGOQ0（ready-for-agent）。术语以根 CONTEXT.md「画布图片扩图」节为准，关键取舍见 ADR-0093。
+> 需求共识来自 2026-09-17 两轮 grilling（15 项拍板，Kim 已确认）。需求工单 IKGOQ0（ready-for-agent）。术语以根 CONTEXT.md「画布图片扩图」节为准，关键取舍见 ADR-0095。
 
 ## Problem Statement
 
@@ -127,7 +127,7 @@
 ## Further Notes
 
 - 上线前置条件在网关（blue-whale-api）侧：网关新增 expand-image-canvas 同步工具（对客模型名 mediakit-expand-image-canvas），本期 model_price 配 0 即免费，复用高清放大已配置的 MediaKit 渠道与平台级 API Key。注意网关同步工具未配价会被硬拦 400，免费形态是配零价而不是不配价；网关缺工具或缺定价时，本侧任务以失败呈现。配置动作建议照高清放大网关单（IKGOKL）同流程办理。
-- MediaKit 结果图 URL 有效期 24 小时，执行侧必须在响应后立即下载落库，这一约束已在 ADR-0092 / ADR-0093 记录。
+- MediaKit 结果图 URL 有效期 24 小时，执行侧必须在响应后立即下载落库，这一约束已在 ADR-0092 / ADR-0095 记录。
 - 计费粒度已知限制同高清放大：网关按模型名按次计费；本期免费无影响，放量前须补计费工单。
 - 本期免费期间火山账单由平台自担。
 - 接口四个扩展参数官方默认各 0.1，但本产品总是显式传值（初始框零扩展即传 0），不依赖官方默认。
