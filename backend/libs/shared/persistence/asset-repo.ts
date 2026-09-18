@@ -76,9 +76,6 @@ export interface AssetSourceFields {
   height: number | null;
   duration_ms?: number | null;
   source: string;
-  /** IKGS73：内容 md5（md5 去重键）。复制时**原样带过去**，不重算——副本与源指向同一份字节。
-   *  不带的话，生成产物（或上传产物）一复制就丢掉 md5，去重收益被复制抹掉。 */
-  md5?: string | null;
 }
 
 export interface PendingUploadAsset {
@@ -660,8 +657,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         height: row.height,
         duration_ms: row.duration_ms,
         source: row.source,
-        // IKGS73：带上源行 md5，否则复制一次丢一次。
-        md5: row.md5,
       };
     },
     async insertCopy(projectId, userId, source) {
@@ -678,8 +673,6 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
           height: source.height,
           duration_ms: source.duration_ms ?? null,
           source: source.source,
-          // IKGS73：md5 原样带过去（副本与源是同一份字节，不重算）。
-          md5: source.md5 ?? null,
           status: "normal",
         },
       });
