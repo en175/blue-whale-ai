@@ -130,6 +130,12 @@ describe('MediaNode selected toolbar', () => {
     expect(labels()).not.toContain('高清');
     expect(mountNode.textContent).toContain('素材已被删除');
   });
+
+  it('soloToolbarHidden（IKGZ5O 会话期模态）不渲染悬浮工具条，内容主体不受影响', async () => {
+    await renderNode('image', { selected: true, data: { soloToolbarHidden: true } });
+    expect(labels()).toEqual([]);
+    expect(contentCard()).toBeTruthy();
+  });
 });
 
 describe('MediaNode image-quality menu（IKGOT7 高清 ▾）', () => {

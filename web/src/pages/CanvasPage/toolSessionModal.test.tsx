@@ -1,0 +1,413 @@
+// @vitest-environment jsdom
+/* IKGZ5O 工具会话期模态（画布链路）：进入抠图/扩图/裁切/擦除会话后界面进入「工具状态」——
+   生成 Dock 六面板不可见不可开（进入时维持现状全量 dismiss），源图卡悬浮工具条隐藏
+   （MediaNode 渲染期注入 soloToolbarHidden，组件渲染门断言在 MediaNode/index.test.tsx）；
+   会话期请求打开生成面板（左工具栏/点草稿卡等）先按四路退出口径退出会话（参数丢弃）再放行；
+   选中联动不回弹面板；未发送草稿在隐藏期间保留、退出后原样回来；高清面板打开期间
+   悬浮工具条同样隐藏；四方互斥无回归。渲染模式沿用 genPanelDismiss.test.tsx
+   （FlowCanvas/CanvasToolbar 打桩透出 props，面板真实渲染）。 */
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Node } from '@xyflow/react';
+import CanvasPage from './index';
+
+vi.mock('./components/AgentPanel', () => ({
+  default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
+}));
+
+const flowProps: { current: Record<string, any> } = { current: {} };
+vi.mock('./components/Canvas', () => ({
+  default: (props: Record<string, any>) => {
+    flowProps.current = props;
+    return createElement('div', { 'data-testid': 'flow-canvas' });
+  },
+}));
+
+const toolbarProps: { current: Record<string, any> } = { current: {} };
+vi.mock('./components/CanvasToolbar', () => ({
+  default: (props: Record<string, any>) => {
+    toolbarProps.current = props;
+    return createElement('div', { 'data-testid': 'canvas-toolbar' });
+  },
+}));
+
+vi.mock('./components/CanvasHeader', () => ({
+  default: () => createElement('div', { 'data-testid': 'canvas-header' }),
+}));
+
+vi.mock('./components/ProjectSelector', () => ({
+  default: () => createElement('div', { 'data-testid': 'project-selector' }),
+}));
+
+vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
+vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
+
+/** PromptRefEditor 打桩（面板真实渲染所需，genPanelDismiss 同款） */
+vi.mock('./components/PromptRefEditor', async () => {
+  const { forwardRef, useImperativeHandle } = await import('react');
+  return {
+    default: forwardRef(function StubPromptRefEditor(_props: unknown, ref: React.Ref<unknown>) {
+      useImperativeHandle(ref, () => ({
+        insertRefAtMention: () => {},
+        consumeMentionForPendingInsert: () => {},
+        insertRefAtPending: () => {},
+        dismissMention: () => {},
+        replaceRefAt: () => {},
+        clear: () => {},
+      }));
+      return createElement('textarea', { 'data-testid': 'chip-editor' });
+    }),
+  };
+});
+
+const imageModel = {
+  model_id: 'm-test',
+  provider_id: 'prov',
+  model_label: '测试生图模型',
+  icon: null,
+  supported_sizes: [{ id: '2k', label: '2K' }],
+  supported_aspect_ratios: ['1:1'],
+  supported_formats: [],
+  supported_durations: null,
+  default_size: '2k',
+  default_format: null,
+  default_aspect_ratio: '1:1',
+  default_duration: null,
+  features: {},
+  version: 1,
+  digest: '',
+};
+
+const apiMocks = vi.hoisted(() => ({
+  fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一' }]),
+  createProject: vi.fn(),
+  renameProject: vi.fn(),
+  deleteProject: vi.fn(),
+  fetchMe: vi.fn(async () => null),
+  fetchQuota: vi.fn(async () => ({})),
+  toSessionUser: vi.fn(() => null),
+  applyPromptPreview: vi.fn(),
+  referencePromptPlan: vi.fn(),
+  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
+  createConversationQuote: vi.fn(),
+  legacyCardHistoryOptions: (projectId: string) => ({
+    queryKey: ['canvas', projectId, 'legacy-history'],
+    queryFn: () => Promise.resolve({ items: [] }),
+    retry: false,
+  }),
+  saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
+  createGenerationJob: vi.fn(),
+  fetchJobStatus: vi.fn(),
+  cancelGenerationJob: vi.fn(),
+  retryGenerationJob: vi.fn(),
+  createMediaExtraction: vi.fn(),
+  createImageErase: vi.fn(),
+  createImageCutout: vi.fn(),
+  readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
+  fetchGenerationModels: vi.fn(),
+  uploadAssetFile: vi.fn(),
+}));
+
+vi.mock('@/api/projects', () => ({
+  fetchProjects: apiMocks.fetchProjects,
+  createProject: apiMocks.createProject,
+  renameProject: apiMocks.renameProject,
+  deleteProject: apiMocks.deleteProject,
+}));
+vi.mock('@/api/auth', () => ({
+  fetchMe: apiMocks.fetchMe,
+  fetchQuota: apiMocks.fetchQuota,
+  toSessionUser: apiMocks.toSessionUser,
+}));
+vi.mock('@/api/assets', () => ({
+  UPLOAD_SIZE_LIMIT: 100 * 1024 * 1024,
+  fetchUploadPresign: vi.fn(),
+  putToPresignedUrl: vi.fn(),
+  completeUpload: vi.fn(),
+  fetchAllAssets: vi.fn(async () => []),
+  fetchAssetDetail: vi.fn(),
+  linkAssetToProject: vi.fn(),
+}));
+vi.mock('@/api/canvas', () => ({
+  applyPromptPreview: apiMocks.applyPromptPreview,
+  referencePromptPlan: apiMocks.referencePromptPlan,
+  listLegacyCardHistory: apiMocks.listLegacyCardHistory,
+  createConversationQuote: apiMocks.createConversationQuote,
+  legacyCardHistoryOptions: apiMocks.legacyCardHistoryOptions,
+  saveCanvasDoc: apiMocks.saveCanvasDoc,
+  serializeNodes: vi.fn((nodes: Node[]) =>
+    JSON.stringify(nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data }))),
+  ),
+  serializeEdges: vi.fn((edges: Array<{ id: string; source: string; target: string }>) =>
+    JSON.stringify(edges.map((e) => JSON.parse(JSON.stringify(e)))),
+  ),
+}));
+vi.mock('@/api/jobs', () => ({
+  createGenerationJob: apiMocks.createGenerationJob,
+  cancelGenerationJob: apiMocks.cancelGenerationJob,
+  retryGenerationJob: apiMocks.retryGenerationJob,
+  fetchJobStatus: apiMocks.fetchJobStatus,
+  createMediaExtraction: apiMocks.createMediaExtraction,
+  createImageErase: apiMocks.createImageErase,
+  createImageCutout: apiMocks.createImageCutout,
+  readJobFailText: apiMocks.readJobFailText,
+}));
+vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
+vi.mock('@/api/generation', () => ({ fetchGenerationModels: apiMocks.fetchGenerationModels }));
+vi.mock('@/utils/upload', () => ({ uploadAssetFile: apiMocks.uploadAssetFile }));
+
+const canvasDocMock = vi.hoisted(() => ({
+  current: {
+    doc: null as unknown,
+    assets: {} as Record<string, unknown>,
+    refetch: () => Promise.resolve([]),
+    acceptDoc: vi.fn(),
+  },
+}));
+vi.mock('./hooks/useCanvasDoc', () => ({ useCanvasDoc: () => canvasDocMock.current }));
+
+/** 画布：就绪图片卡 i1（1600×900 png，四会话源卡）+ 图片草稿 d1（prompt 预置，草稿保留断言用）
+ *  + 文生文卡 tg1（面板开合断言用） */
+function seedDoc() {
+  canvasDocMock.current = {
+    doc: {
+      id: 11,
+      version: 3,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [
+        {
+          id: 'i1',
+          type: 'mediaNode',
+          position: { x: 0, y: 0 },
+          data: {
+            src: 'http://img/i1.png',
+            mediaType: 'image',
+            fileName: '素材图',
+            assetId: '5',
+            width: 1600,
+            height: 900,
+            mime: 'image/png',
+          },
+        },
+        {
+          id: 'd1',
+          type: 'mediaNode',
+          position: { x: 200, y: 0 },
+          data: { src: '', mediaType: 'image', fileName: '图片草稿', genStatus: 'draft', draft: true, prompt: '未发送草稿' },
+        },
+        {
+          id: 'tg1',
+          type: 'textNode',
+          position: { x: 400, y: 0 },
+          data: { title: '文生文卡', text: '初始文案', textGen: true, prompt: '' },
+        },
+      ],
+      edges: [],
+    },
+    assets: {
+      5: { asset_id: 5, type: 'image', access_url: 'http://img/i1.png', width: 1600, height: 900 },
+    },
+    refetch: () => Promise.resolve([]),
+    acceptDoc: vi.fn(),
+  };
+}
+
+let root: Root;
+let container: HTMLDivElement;
+
+async function renderPage() {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  await act(async () => {
+    root.render(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(MemoryRouter, null, createElement(CanvasPage)),
+      ),
+    );
+  });
+}
+
+function fullNode(id: string): Node {
+  const pools: Node[][] = [
+    flowProps.current.mediaNodes ?? [],
+    flowProps.current.textNodes ?? [],
+    flowProps.current.assetNodes ?? [],
+    flowProps.current.productNodes ?? [],
+  ];
+  const found = pools.flat().find((n) => n.id === id);
+  if (!found) throw new Error(`节点不存在: ${id}`);
+  return found;
+}
+
+async function clickNode(id: string) {
+  await act(async () => {
+    flowProps.current.onNodeClick(fullNode(id));
+  });
+}
+
+/** 进入编辑会话（「高清 ▾」下拉对应项派发的回调，四会话同构） */
+async function enterSession(kind: 'cutout' | 'erase' | 'crop' | 'outpaint', id = 'i1') {
+  const data = fullNode(id).data as Record<string, (nodeId: string) => void>;
+  const handler = {
+    cutout: data.onCutoutImage,
+    erase: data.onEraseImage,
+    crop: data.onCropImage,
+    outpaint: data.onOutpaintImage,
+  }[kind]!;
+  await act(async () => {
+    handler(id);
+  });
+}
+
+/** 源卡悬浮工具条隐藏标记（CanvasPage 渲染期注入 MediaNode data 的模态条件） */
+function soloToolbarHidden(id: string): boolean {
+  return (fullNode(id).data as Record<string, unknown>).soloToolbarHidden === true;
+}
+
+/** 面板开关标记（模型选择器文案仅在该面板打开时渲染，genPanelDismiss 同款） */
+const imageOpen = () => container.textContent!.includes('测试生图模型');
+const textGenOpen = () => container.textContent!.includes('文本生成 · 文生文');
+
+const cutoutToolbar = () => document.body.querySelector('[data-testid="cutout-toolbar"]');
+const eraseSendBar = () => document.body.querySelector('[data-testid="erase-send-bar"]');
+const cropConfirm = () => document.body.querySelector('[data-testid="crop-confirm"]');
+const enhanceSend = () => document.body.querySelector('[data-testid="enhance-send-btn"]');
+
+async function pressEscape() {
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  });
+}
+
+beforeEach(() => {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  localStorage.clear();
+  sessionStorage.clear();
+  seedDoc();
+  apiMocks.fetchGenerationModels.mockResolvedValue([imageModel]);
+});
+
+afterEach(async () => {
+  if (root) await act(async () => root.unmount());
+  container?.remove();
+  document.querySelectorAll('[role="dialog"]').forEach((el) => el.remove());
+  vi.clearAllMocks();
+});
+
+describe('IKGZ5O 进入会话：Dock 关闭 + 源卡悬浮工具条隐藏', () => {
+  it('进入抠图会话：源卡悬浮工具条隐藏，Esc 退出后恢复', async () => {
+    await renderPage();
+    expect(soloToolbarHidden('i1')).toBe(false);
+    await enterSession('cutout');
+    expect(cutoutToolbar()).toBeTruthy();
+    expect(soloToolbarHidden('i1')).toBe(true);
+    await pressEscape();
+    expect(cutoutToolbar()).toBeNull();
+    expect(soloToolbarHidden('i1')).toBe(false);
+  });
+
+  it('进入会话关闭打开中的面板（维持现状全量 dismiss），未发送草稿原样保留', async () => {
+    await renderPage();
+    await clickNode('tg1');
+    await vi.waitFor(() => expect(textGenOpen()).toBe(true));
+    await enterSession('cutout');
+    expect(textGenOpen()).toBe(false);
+    // 草稿静默保留：面板隐藏不触碰草稿卡输入（重新打开面板即回填）
+    expect((fullNode('d1').data as Record<string, unknown>).prompt).toBe('未发送草稿');
+  });
+
+  it('退出会话后 Dock 可正常打开、草稿面板带回原提示词（未发送草稿不丢）', async () => {
+    await renderPage();
+    await enterSession('erase');
+    expect(eraseSendBar()).toBeTruthy();
+    await pressEscape();
+    // 退出后 Dock 恢复：点草稿卡重新打开图片面板，提示词原样回来
+    await clickNode('d1');
+    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    expect((fullNode('d1').data as Record<string, unknown>).prompt).toBe('未发送草稿');
+  });
+});
+
+describe('IKGZ5O 会话期打开生成面板：先退会话（参数丢弃）再放行', () => {
+  it('左工具栏开图片面板：抠图会话退出后面板才出现', async () => {
+    await renderPage();
+    await enterSession('cutout');
+    expect(cutoutToolbar()).toBeTruthy();
+    await act(async () => {
+      toolbarProps.current.onToggleImageDialog();
+    });
+    expect(cutoutToolbar()).toBeNull();
+    expect(soloToolbarHidden('i1')).toBe(false);
+    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+  });
+
+  it('点草稿卡开图片面板：裁切会话退出后面板才出现', async () => {
+    await renderPage();
+    await enterSession('crop');
+    expect(cropConfirm()).toBeTruthy();
+    await clickNode('d1');
+    expect(cropConfirm()).toBeNull();
+    expect(soloToolbarHidden('i1')).toBe(false);
+    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+  });
+
+  it('会话期选中联动不回弹面板（擦除会话源卡即面板绑定卡）', async () => {
+    await renderPage();
+    // 先经草稿卡 d1 打开图片面板（imageDraftId 绑定 d1），再以 d1 为源卡进入擦除会话
+    // （进入时全量 dismiss 关面板），随后程序化单选 d1（源卡本身，不触发退出路径）
+    await clickNode('d1');
+    await vi.waitFor(() => expect(imageOpen()).toBe(true));
+    await enterSession('erase', 'd1');
+    expect(imageOpen()).toBe(false);
+    expect(eraseSendBar()).toBeTruthy();
+    await act(async () => {
+      flowProps.current.onSelectionChange({ nodes: [fullNode('d1')], edges: [] });
+    });
+    // 会话仍在（源卡本身选中不退出），面板不得回弹
+    expect(eraseSendBar()).toBeTruthy();
+    expect(imageOpen()).toBe(false);
+  });
+});
+
+describe('IKGZ5O 高清面板打开期间悬浮工具条隐藏', () => {
+  it('高清会话（面板打开态）隐藏全部卡悬浮工具条，关闭后恢复', async () => {
+    await renderPage();
+    await act(async () => {
+      (fullNode('i1').data as Record<string, (id: string) => void>).onEnhanceImage('i1');
+    });
+    await vi.waitFor(() => expect(enhanceSend()).toBeTruthy());
+    const nodes = () => (flowProps.current.mediaNodes as Node[]).filter((n) => n.type === 'mediaNode');
+    // 源卡、既有草稿卡与新建高清草稿卡的悬浮工具条一律隐藏
+    expect(nodes().length).toBe(3);
+    for (const n of nodes()) {
+      expect((n.data as Record<string, unknown>).soloToolbarHidden).toBe(true);
+    }
+    // 关闭高清面板：悬浮工具条恢复
+    const closeBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.title === '关闭')!;
+    await act(async () => {
+      closeBtn.click();
+    });
+    expect(enhanceSend()).toBeNull();
+    for (const n of nodes()) {
+      expect((n.data as Record<string, unknown>).soloToolbarHidden).toBeUndefined();
+    }
+  });
+});
+
+describe('IKGZ5O 四方互斥回归', () => {
+  it('抠图会话中进入擦除：会话切换无间隙，源卡悬浮工具条保持隐藏', async () => {
+    await renderPage();
+    await enterSession('cutout');
+    expect(cutoutToolbar()).toBeTruthy();
+    await enterSession('erase');
+    expect(cutoutToolbar()).toBeNull();
+    expect(eraseSendBar()).toBeTruthy();
+    expect(soloToolbarHidden('i1')).toBe(true);
+  });
+});

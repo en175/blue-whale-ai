@@ -116,6 +116,10 @@ interface MediaNodeData {
   onLocateInputSource?: (sourceNodeId: string) => void;
   /** IKFR4X 持续选取会话勾选标记（渲染期派生注入，不持久化）：已并入当前选取目标的来源 */
   pickMarked?: boolean;
+  /** 会话期隐藏悬浮工具条（IKGZ5O，渲染期派生注入，不持久化）：本卡为编辑会话
+   *  （擦除/裁切/抠图/扩图）源卡，或高清面板打开期间由 CanvasPage 注入——工具状态
+   *  模态下悬浮工具条不渲染；其余显隐逻辑（单选选中态、媒体类型门）不变 */
+  soloToolbarHidden?: boolean;
   /** 视频选取会话中能力失效（如合规未通过）置灰 */
   pickBlocked?: boolean;
   /** 擦除编辑态遮罩层（IKGOTB，渲染期派生注入，不持久化）：本卡为擦除目标源图卡时由
@@ -478,8 +482,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       onContextMenu={handleContextMenu}
       style={{ ...nodeTitleSizing(zoom), width: contentBox.width }}
     >
-      {/* 选中态悬浮工具条：重新编辑/生成图片/生成视频/生成音频 + 详情/下载/@（位于外部标题上方） */}
-      {showSoloToolbar && !data.genStatus && !data.assetMissing && !isEmptyShell && (
+      {/* 选中态悬浮工具条：重新编辑/生成图片/生成视频/生成音频 + 详情/下载/@（位于外部标题上方）；
+          IKGZ5O 工具状态模态（编辑会话源卡 / 高清面板打开期间）整条不渲染 */}
+      {showSoloToolbar && !data.soloToolbarHidden && !data.genStatus && !data.assetMissing && !isEmptyShell && (
         <div className={`nodrag nopan ${styles.toolbar}`} onMouseDown={stop}>
           <button className={styles.toolBtn} onClick={handleReEdit} title="带入原提示词与图片，打开图片对话框">
             <RefreshCcw size={14} strokeWidth={2} />
